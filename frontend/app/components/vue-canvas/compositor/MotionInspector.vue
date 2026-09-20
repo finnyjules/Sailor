@@ -1,16 +1,27 @@
 <script setup lang="ts">
 /** Contextual motion inspector (Slice 2 — right column, decision A). Edits the current band
  *  selection: a property band → its timing (start/duration) + easing + add-point; a control
- *  point → its typed value (number field / colour picker / full GradientEditor) + ease-to-next.
- *  Emits the next motionx Track[] upstream; CompositorModal persists via setMotion. */
+ *  point → its typed value (number row / colour row / full GradientEditor) + ease-to-next.
+ *  Emits the next motionx Track[] upstream; CompositorModal persists via setMotion.
+ *
+ *  Every control here is a shared Studio control — the 28px row that IS the slider, the
+ *  segmented strip, the labelled select, the switch, the button — so this panel reads like
+ *  the Cloner / Feather / Fill panels it sits beside instead of like a form. */
 import type { Track, Ease, PropertyValue, StoredBehaviour, Timing } from '~/lib/motionx'
 
 export type BehaviourPatch = { params?: Record<string, unknown>; timing?: Partial<Timing>; kind?: string }
 import { trackSpan, behaviourLabel } from '~/lib/motionx/bands'
 import { retimeTrack, addPoint, setPointValue, setPointEase, removePoint, setBandTrack, bandTrackAt } from '~/lib/motionx/bandEdit'
 import { DEFAULT_TEXT_EASE, isTextBehaviour, pieceRanks, pieceTiming, textBehaviourUsesEase, type Order } from '~/lib/motionx/text'
+import { NO_RUN, openRun, closeRun, takeRecord, type UndoRun } from '~/lib/motionx/undoCoalesce'
 import GradientEditor from '~/components/vue-canvas/compositor/GradientEditor.vue'
 import MotionEasingCurve from '~/components/vue-canvas/compositor/MotionEasingCurve.vue'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
+import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
+import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
+import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
+import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
+import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vue'
 import type { Gradient } from '~/lib/compositor/paint'
 
 export interface MotionSelection { kind: 'band' | 'point' | 'behaviour' | 'legacy'; path: string; index?: number }
@@ -39,17 +50,62 @@ const emit = defineEmits<{
   'legacy-remove': [layerId: string]
 }>()
 
+// ── One drag = one undo step ─────────────────────────────────────────────────
+// A Studio row emits a value per pixel of a drag and per repeat of a held arrow key, and
+// every edit below records an undo step. The row does not announce a gesture, but its DOM
+// does — pointerdown/keydown open one, pointerup/pointercancel/keyup close it — and those
+// reach this component as plain native listeners on the control (attrs fall through to the
+// row's root). `undoCoalesce` is the state machine between the two; it is LAZY, so a press
+// that turns out to be a click leaves no empty undo step behind.
+//
+// Not a ref: nothing renders from it, and making it reactive would re-render every row of
+// the panel on every pixel of a drag.
+let undoRun: UndoRun = NO_RUN
+function recordFor(key: string): boolean {
+  const r = takeRecord(undoRun, key)
+  undoRun = r.run
+  return r.record
+}
+/**
+ * Native listeners for one control, so a slider reads `v-bind="gesture('slot-steps')"`.
+ *
+ * `data-owns-keys` rides along because a Studio row's track IS arrow-keyable, and the
+ * modal's editor shortcuts nudge the SELECTED LAYER on the same keys unless the focused
+ * control claims them (CompositorModal's `onKeydown`). The number fields this replaces were
+ * `<input>`s, which that handler already skipped as "typing"; without the marker, arrowing
+ * Stagger would also walk the layer across the frame.
+ */
+function gesture(key: string) {
+  return {
+    'data-owns-keys': '',
+    onPointerdown: () => { undoRun = openRun(undoRun, key) },
+    onKeydown: () => { undoRun = openRun(undoRun, key) },
+    onPointerup: () => { undoRun = closeRun() },
+    onPointercancel: () => { undoRun = closeRun() },
+    onLostpointercapture: () => { undoRun = closeRun() },
+    onKeyup: () => { undoRun = closeRun() },
+  }
+}
+
 // ── Behaviour selection (Slice 3) ────────────────────────────────────────────
 const behaviour = computed<StoredBehaviour | null>(() =>
   props.selection?.kind === 'behaviour'
     ? (props.behaviours ?? []).find((b) => b.id === props.selection!.path) ?? null
     : null)
 const behParam = (k: string) => behaviour.value?.params?.[k]
+/** A discrete edit — an option, a switch, a shuffle. Always its own undo step. */
 function setBehParams(patch: Record<string, unknown>) {
+  undoRun = closeRun()
   if (behaviour.value) emit('behaviour-change', behaviour.value.id, { params: patch })
 }
-function setBehTiming(patch: { start?: number; duration?: number; loop?: boolean }) {
-  if (behaviour.value) emit('behaviour-change', behaviour.value.id, { timing: patch })
+/** A row-slider edit: the first value of a gesture records, the rest ride along. */
+function setBehNum(key: string, patch: Record<string, unknown>) {
+  if (behaviour.value) emit('behaviour-change', behaviour.value.id, { params: patch }, recordFor(key))
+}
+function setBehTiming(patch: { start?: number; duration?: number; loop?: boolean }, key?: string) {
+  if (!behaviour.value) return
+  if (!key) undoRun = closeRun()
+  emit('behaviour-change', behaviour.value.id, { timing: patch }, key ? recordFor(key) : true)
 }
 // The curve shown for a behaviour: its own override, else what its kind compiled to. A
 // LETTER bar compiles to no track at all — it moves glyphs, not properties — so there is no
@@ -65,73 +121,76 @@ const behEase = computed<Ease>(() => {
 function setBehEaseLive(e: Ease) {
   if (behaviour.value) emit('behaviour-change', behaviour.value.id, { params: { ease: e } }, false)
 }
-const SLIDE_DIRS: Array<{ v: string; l: string }> = [
-  { v: 'up', l: 'Up' }, { v: 'down', l: 'Down' }, { v: 'left', l: 'Left' }, { v: 'right', l: 'Right' },
-]
+
+// ── Option lists ─────────────────────────────────────────────────────────────
+// Values are the evaluator's own enum strings (the `oneOf` lists in text/behaviours.ts);
+// labels are what the user reads, paired by index the way every Studio picker pairs them.
+const IN_OUT = ['in', 'out']
+const IN_OUT_LABELS = ['In', 'Out']
+const SLIDE_DIRS = ['up', 'down', 'left', 'right']
+const SLIDE_DIR_LABELS = ['Up', 'Down', 'Left', 'Right']
+const MORPH_MODES = ['crossfade', 'travel']
+const MORPH_MODE_LABELS = ['Crossfade', 'Travel']
+const MORPH_SPACES = ['oklab', 'hybrid']
+const MORPH_SPACE_LABELS = ['OKLab', 'Hybrid']
 
 // ── Letter behaviours (Task 5) ───────────────────────────────────────────────
 const isTextBeh = computed(() => behaviour.value != null && isTextBehaviour(behaviour.value))
-const BY_OPTIONS: Array<{ v: string; l: string }> = [
-  { v: 'letters', l: 'Letters' }, { v: 'words', l: 'Words' }, { v: 'lines', l: 'Lines' },
-]
-const ORDER_OPTIONS: Array<{ v: string; l: string }> = [
-  { v: 'ltr', l: 'Left to right' }, { v: 'rtl', l: 'Right to left' },
-  { v: 'center', l: 'From the centre' }, { v: 'edges', l: 'From the edges' }, { v: 'random', l: 'Random' },
-]
-const CASCADE_STYLE_OPTIONS: Array<{ v: string; l: string }> = [
-  { v: 'fade', l: 'Fade' }, { v: 'rise', l: 'Rise' }, { v: 'drop', l: 'Drop' }, { v: 'grow', l: 'Grow' }, { v: 'spin', l: 'Spin' },
-]
-const MASK_FROM_OPTIONS: Array<{ v: string; l: string }> = [
-  { v: 'up', l: 'Slides up' }, { v: 'down', l: 'Slides down' }, { v: 'left', l: 'Slides left' }, { v: 'right', l: 'Slides right' },
-]
-const SCRAMBLE_MODE_OPTIONS: Array<{ v: string; l: string }> = [
-  { v: 'settle', l: 'Settle' }, { v: 'scatter', l: 'Scatter' }, { v: 'loop', l: 'Keep going' },
-]
-const DECODE_DIR_OPTIONS: Array<{ v: string; l: string }> = [
-  { v: 'resolve', l: 'Resolve' }, { v: 'dissolve', l: 'Dissolve' },
-]
-const SLOT_DIR_OPTIONS: Array<{ v: string; l: string }> = [
-  { v: 'in', l: 'In' }, { v: 'out', l: 'Out' },
-]
-const SLOT_ROLL_OPTIONS: Array<{ v: string; l: string }> = [
-  { v: 'up', l: 'Rolls up' }, { v: 'down', l: 'Rolls down' },
-]
+const BY_OPTIONS = ['letters', 'words', 'lines']
+const BY_LABELS = ['Letters', 'Words', 'Lines']
+const ORDER_OPTIONS = ['ltr', 'rtl', 'center', 'edges', 'random']
+const ORDER_LABELS = ['Left to right', 'Right to left', 'From the centre', 'From the edges', 'Random']
+const CASCADE_STYLE_OPTIONS = ['fade', 'rise', 'drop', 'grow', 'spin']
+const CASCADE_STYLE_LABELS = ['Fade', 'Rise', 'Drop', 'Grow', 'Spin']
+const TYPE_DIR_OPTIONS = ['type', 'delete']
+const TYPE_DIR_LABELS = ['Type', 'Delete']
+const CURSOR_OPTIONS = ['none', 'bar', 'underscore']
+const CURSOR_LABELS = ['None', 'Bar', 'Underscore']
+const MASK_DIR_OPTIONS = ['reveal', 'hide']
+const MASK_DIR_LABELS = ['Reveal', 'Hide']
+const MASK_FROM_OPTIONS = ['up', 'down', 'left', 'right']
+const MASK_FROM_LABELS = ['Slides up', 'Slides down', 'Slides left', 'Slides right']
+const SCRAMBLE_MODE_OPTIONS = ['settle', 'scatter', 'loop']
+const SCRAMBLE_MODE_LABELS = ['Settle', 'Scatter', 'Keep going']
+const SCRAMBLE_MOVE_OPTIONS = ['snap', 'glide']
+const SCRAMBLE_MOVE_LABELS = ['Snap', 'Glide']
+const DECODE_DIR_OPTIONS = ['resolve', 'dissolve']
+const DECODE_DIR_LABELS = ['Resolve', 'Dissolve']
+const SLOT_ROLL_OPTIONS = ['up', 'down']
+const SLOT_ROLL_LABELS = ['Rolls up', 'Rolls down']
 // Shared by Decode's Characters and Slot slide's Filler — the same five character pools.
-const CHARSET_OPTIONS: Array<{ v: string; l: string }> = [
-  { v: 'text', l: 'Same as the text' }, { v: 'letters', l: 'Letters' },
-  { v: 'numbers', l: 'Numbers' }, { v: 'symbols', l: 'Symbols' }, { v: 'mixed', l: 'Mixed' },
-]
-// A number field must never send NaN — an emptied input sends the behaviour's own default.
-// EMPTY IS NOT ZERO: `Number('')` is 0, and every caller clamps what comes back to its own
-// range, so a cleared field used to land on that range's MINIMUM (Steps on 1 instead of 8,
-// Cascade's distance on 0 instead of 0.6). Blank and unparseable both mean "use the default".
-function numOrDefault(raw: string, d: number): number {
-  const text = typeof raw === 'string' ? raw.trim() : ''
-  if (text === '') return d
-  const n = Number(text)
-  return Number.isFinite(n) ? n : d
-}
-// Reads a numeric param straight from storage (not an input string) with its own default.
+const CHARSET_OPTIONS = ['text', 'letters', 'numbers', 'symbols', 'mixed']
+const CHARSET_LABELS = ['Same as the text', 'Letters', 'Numbers', 'Symbols', 'Mixed']
+
+/** Reads an enum param with the evaluator's own fallback. */
+const enumParam = (k: string, d: string) => ((behParam(k) as string | undefined) ?? d)
+/** Reads a numeric param straight from storage with its own default. */
 function numParam(k: string, d: number): number {
   const v = behParam(k)
   return typeof v === 'number' && Number.isFinite(v) ? v : d
 }
-const clampPct = (n: number) => Math.max(0, Math.min(100, n))
 const cascadeAmountDefault = computed(() => {
-  const style = (behParam('style') as string) ?? 'rise'
+  const style = enumParam('style', 'rise')
   return style === 'grow' ? 0 : style === 'spin' ? 90 : 0.6
 })
 const cascadeAmountLabel = computed(() => {
-  const style = (behParam('style') as string) ?? 'rise'
+  const style = enumParam('style', 'rise')
   if (style === 'grow') return 'Start size'
   if (style === 'spin') return 'Degrees'
   return 'Distance (letter heights)'
+})
+// Three different quantities behind one param: letter heights, a scale factor, degrees.
+const cascadeAmountRange = computed(() => {
+  const style = enumParam('style', 'rise')
+  if (style === 'grow') return { min: 0, max: 1, step: 0.05 }
+  if (style === 'spin') return { min: 0, max: 360, step: 1 }
+  return { min: 0, max: 3, step: 0.05 }
 })
 const showShuffle = computed(() => {
   const beh = behaviour.value
   if (!beh) return false
   const HASHED_KINDS = ['text.scramble', 'text.decode', 'text.slot', 'text.jitter']
-  return ((behParam('order') as string) ?? 'ltr') === 'random' || HASHED_KINDS.includes(beh.kind)
+  return enumParam('order', 'ltr') === 'random' || HASHED_KINDS.includes(beh.kind)
 })
 // Loops (wave/bounce/jitter): span the whole bar with no per-piece stagger, so Stagger and
 // "each piece runs for" say nothing — they show Amount/Speed(/Offset) instead.
@@ -161,14 +220,14 @@ function shuffleSeed() {
 const piecesForBy = computed<number | null>(() => {
   const counts = props.pieceCounts
   if (!counts) return null
-  const by = (behParam('by') as string) ?? 'letters'
+  const by = enumParam('by', 'letters')
   return by === 'words' ? counts.words : by === 'lines' ? counts.lines : counts.letters
 })
 const pieceTimingInfo = computed(() => {
   const beh = behaviour.value
   const count = piecesForBy.value
   if (!beh || count == null) return null
-  const order = ((behParam('order') as string) ?? 'ltr') as Order
+  const order = enumParam('order', 'ltr') as Order
   const seed = numParam('seed', 1)
   const stagger = numParam('stagger', 0.04)
   const ranks = pieceRanks(count, order, seed)
@@ -176,7 +235,7 @@ const pieceTimingInfo = computed(() => {
 })
 const pieceLine = computed(() => {
   if (!pieceTimingInfo.value) return null
-  const by = (behParam('by') as string) ?? 'letters'
+  const by = enumParam('by', 'letters')
   const prefix = by === 'lines' ? 'About each' : 'Each'
   return `${prefix} piece runs for ${pieceTimingInfo.value.pieceDur.toFixed(2)}s.`
 })
@@ -194,20 +253,25 @@ const point = computed(() => {
   return props.selection?.kind === 'point' && track.value && i != null ? track.value.keyframes[i] ?? null : null
 })
 
-function apply(next: Track | null) {
+/** The timeline's own length, as the ceiling every timing row drags against. */
+const timeMax = computed(() => Math.max(0.1, props.duration || 0))
+
+function apply(next: Track | null, key?: string) {
   if (!track.value) return
-  emit('before-change')
+  // `before-change` IS the undo step here (the modal records on it), so a coalesced
+  // gesture emits it once and the rest of the drag rides along.
+  if (!key || recordFor(key)) emit('before-change')
   emit('update:motionx', setBandTrack(props.motionx, track.value.path, next))
   emit('commit')
 }
 // ── Band timing ──────────────────────────────────────────────────────────────
 function setStart(v: number) {
   if (!track.value) return
-  apply(retimeTrack(track.value, Math.max(0, v), Math.max(v + 0.05, span.value.end)))
+  apply(retimeTrack(track.value, Math.max(0, v), Math.max(v + 0.05, span.value.end)), 'inspector-start')
 }
 function setDuration(v: number) {
   if (!track.value) return
-  apply(retimeTrack(track.value, span.value.start, span.value.start + Math.max(0.05, v)))
+  apply(retimeTrack(track.value, span.value.start, span.value.start + Math.max(0.05, v)), 'inspector-duration')
 }
 function addAtPlayhead() {
   if (!track.value) return
@@ -234,11 +298,30 @@ function setEaseLive(e: Ease) {
   if (track.value && i != null) applyLive(setPointEase(track.value, i, e))
 }
 // ── Point value / ease ───────────────────────────────────────────────────────
-function setValue(v: PropertyValue) {
+function setValue(v: PropertyValue, key?: string) {
   const i = props.selection?.index
   if (!track.value || i == null) return
-  apply(setPointValue(track.value, i, v))
+  apply(setPointValue(track.value, i, v), key)
 }
+/**
+ * The range a control point's number drags against. The five Transform properties (and the
+ * gradient's scroll phase) declare theirs in the Frame adapter's `animatableProperties`;
+ * this panel never sees the layer, so they are listed here, and anything else — an effect
+ * dial — falls back to a range wide enough not to fence a value in.
+ */
+const PROPERTY_RANGE: Record<string, { min: number; max: number }> = {
+  x: { min: 0, max: 1 },
+  y: { min: 0, max: 1 },
+  scale: { min: 0, max: 4 },
+  rotation: { min: -360, max: 360 },
+  opacity: { min: 0, max: 1 },
+  'fill.phase': { min: 0, max: 1 },
+}
+const pointRange = computed(() => {
+  // `layers.<id>.<property…>` — the property is everything after the id.
+  const prop = (track.value?.path ?? '').split('.').slice(2).join('.')
+  return PROPERTY_RANGE[prop] ?? { min: -1000, max: 1000 }
+})
 function deleteBand() {
   if (!track.value) return
   emit('before-change')
@@ -273,13 +356,11 @@ function onGradient(g: Gradient) {
     class="rounded-lg border border-white/10 bg-[#0e0e10]/80 px-3 py-2.5 text-[11px] text-white/70">
     <div class="mb-2 flex items-center justify-between border-b border-white/10 pb-2">
       <span class="font-medium text-white/85">Older animation</span>
-      <button class="cursor-pointer text-white/40 hover:text-white/80" @click="emit('clear')">Done</button>
+      <StudioButton variant="subtle" @click="emit('clear')">Done</StudioButton>
     </div>
     <p class="mb-1 text-white/85">{{ legacyLabel }}</p>
     <p class="mb-3 leading-snug text-white/50">This was made with the older animation tools. It still plays exactly as before, but it can't be edited on this timeline. Remove it to animate this layer with behaviours instead.</p>
-    <button type="button" data-testid="legacy-remove"
-      class="rounded border border-white/15 px-2 py-0.5 text-white/70 hover:border-rose-400/60 hover:text-rose-300 hover:bg-rose-500/10 cursor-pointer"
-      @click="emit('legacy-remove', selection.path)">Remove animation</button>
+    <StudioButton data-testid="legacy-remove" @click="emit('legacy-remove', selection.path)">Remove animation</StudioButton>
   </div>
 
   <!-- Behaviour band selected: kind params + timing + Open into keyframes -->
@@ -291,269 +372,209 @@ function onGradient(g: Gradient) {
         <span class="font-medium text-white/85">{{ behaviourLabel(behaviour) }}</span>
         <span class="text-white/35">behaviour</span>
       </div>
-      <button class="cursor-pointer text-white/40 hover:text-white/80" @click="emit('clear')">Done</button>
+      <StudioButton variant="subtle" @click="emit('clear')">Done</StudioButton>
     </div>
 
     <!-- kind-specific params -->
-    <template v-if="behaviour.kind === 'fade'">
-      <div class="mb-2 flex items-center justify-between">Direction
-        <span class="inline-flex overflow-hidden rounded border border-white/15">
-          <button v-for="d in [{v:'in',l:'In'},{v:'out',l:'Out'}]" :key="d.v" type="button" class="px-2 py-0.5 cursor-pointer"
-            :class="(behParam('dir') ?? 'in') === d.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
-            @click="setBehParams({ dir: d.v })">{{ d.l }}</button>
-        </span>
-      </div>
-    </template>
-    <template v-else-if="behaviour.kind === 'slide'">
-      <div class="mb-2 flex items-center justify-between">Direction
-        <span class="inline-flex overflow-hidden rounded border border-white/15">
-          <button v-for="d in SLIDE_DIRS" :key="d.v" type="button" class="px-2 py-0.5 cursor-pointer"
-            :class="(behParam('dir') ?? 'up') === d.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
-            @click="setBehParams({ dir: d.v })">{{ d.l }}</button>
-        </span>
-      </div>
-      <div class="mb-2 flex items-center justify-between">Distance
-        <input v-scrubnum type="number" step="0.01" min="0" max="1" :value="(behParam('distance') as number) ?? 0.15" title="Fraction of the frame (0–1)"
-          class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
-          @change="setBehParams({ distance: Number(($event.target as HTMLInputElement).value) || 0 })"></div>
-    </template>
-    <template v-else-if="behaviour.kind === 'gradientMorph'">
-      <div class="mb-2 flex items-center justify-between">Mode
-        <span class="inline-flex overflow-hidden rounded border border-white/15">
-          <button v-for="m in [{v:'crossfade',l:'Crossfade'},{v:'travel',l:'Travel'}]" :key="m.v" type="button" class="px-2 py-0.5 cursor-pointer"
-            :class="(behParam('mode') ?? 'crossfade') === m.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
-            @click="setBehParams({ mode: m.v })">{{ m.l }}</button>
-        </span>
-      </div>
-      <div class="mb-2 flex items-center justify-between">Colour
-        <span class="inline-flex overflow-hidden rounded border border-white/15">
-          <button v-for="s in [{v:'oklab',l:'OKLab'},{v:'hybrid',l:'Hybrid'}]" :key="s.v" type="button" class="px-2 py-0.5 cursor-pointer"
-            :class="(behParam('space') ?? 'oklab') === s.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
-            @click="setBehParams({ space: s.v })">{{ s.l }}</button>
-        </span>
-      </div>
-    </template>
-    <template v-else-if="isTextBeh">
-      <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">Text</div>
-      <div class="mb-2 flex items-center justify-between">Animate by
-        <span data-testid="letters-by" class="inline-flex overflow-hidden rounded border border-white/15">
-          <button v-for="o in BY_OPTIONS" :key="o.v" type="button" :data-value="o.v" class="px-2 py-0.5 cursor-pointer"
-            :class="(behParam('by') ?? 'letters') === o.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
-            @click="setBehParams({ by: o.v })">{{ o.l }}</button>
-        </span>
-      </div>
-      <div v-if="!isLoopBeh" class="mb-2 flex items-center justify-between">Stagger
-        <input v-scrubnum type="number" step="0.01" min="0" data-testid="letters-stagger" title="Seconds between one piece starting and the next"
-          :value="numParam('stagger', 0.04)"
-          class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
-          @change="setBehParams({ stagger: Math.max(0, numOrDefault(($event.target as HTMLInputElement).value, 0.04)) })"></div>
-      <div class="mb-2 flex items-center justify-between">Order
-        <select data-testid="letters-order" :value="(behParam('order') as string) ?? 'ltr'"
-          class="bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none cursor-pointer"
-          @change="setBehParams({ order: ($event.target as HTMLSelectElement).value })">
-          <option v-for="o in ORDER_OPTIONS" :key="o.v" :value="o.v">{{ o.l }}</option>
-        </select>
-      </div>
-      <div v-if="showShuffle" class="mb-2 flex items-center justify-end">
-        <button type="button" data-testid="letters-shuffle"
-          class="rounded border border-white/15 px-2 py-0.5 text-white/70 hover:bg-white/10 cursor-pointer"
-          title="Pick a new random order" @click="shuffleSeed">Shuffle</button>
-      </div>
-      <div v-if="pieceLine && !isLoopBeh" data-testid="letters-piece-time" class="mb-2 leading-snug text-white/50">
-        {{ pieceLine }}<span v-if="staggerShortened"> Stagger shortened to fit the bar.</span>
-      </div>
+    <div class="space-y-2">
+      <template v-if="behaviour.kind === 'fade'">
+        <div>
+          <div class="panel-sublabel mb-1">Direction</div>
+          <StudioSegmented :model-value="enumParam('dir', 'in')" :options="IN_OUT" :option-labels="IN_OUT_LABELS"
+            @update:model-value="(v) => setBehParams({ dir: v })" />
+        </div>
+      </template>
+      <template v-else-if="behaviour.kind === 'slide'">
+        <div>
+          <div class="panel-sublabel mb-1">Direction</div>
+          <StudioSegmented :model-value="enumParam('dir', 'up')" :options="SLIDE_DIRS" :option-labels="SLIDE_DIR_LABELS"
+            @update:model-value="(v) => setBehParams({ dir: v })" />
+        </div>
+        <StudioSlider data-testid="slide-distance" v-bind="gesture('slide-distance')"
+          label="Distance" hint="Fraction of the frame (0–1)"
+          :model-value="numParam('distance', 0.15)" :min="0" :max="1" :step="0.01" :default="0.15"
+          @update:model-value="(v) => setBehNum('slide-distance', { distance: v })" />
+      </template>
+      <template v-else-if="behaviour.kind === 'gradientMorph'">
+        <div>
+          <div class="panel-sublabel mb-1">Mode</div>
+          <StudioSegmented :model-value="enumParam('mode', 'crossfade')" :options="MORPH_MODES" :option-labels="MORPH_MODE_LABELS"
+            @update:model-value="(v) => setBehParams({ mode: v })" />
+        </div>
+        <div>
+          <div class="panel-sublabel mb-1">Colour</div>
+          <StudioSegmented :model-value="enumParam('space', 'oklab')" :options="MORPH_SPACES" :option-labels="MORPH_SPACE_LABELS"
+            @update:model-value="(v) => setBehParams({ space: v })" />
+        </div>
+      </template>
+      <template v-else-if="isTextBeh">
+        <div class="text-[10px] uppercase tracking-wide text-white/35">Text</div>
+        <div data-testid="letters-by">
+          <div class="panel-sublabel mb-1">Animate by</div>
+          <StudioSegmented :model-value="enumParam('by', 'letters')" :options="BY_OPTIONS" :option-labels="BY_LABELS"
+            @update:model-value="(v) => setBehParams({ by: v })" />
+        </div>
+        <StudioSlider v-if="!isLoopBeh" data-testid="letters-stagger" v-bind="gesture('letters-stagger')"
+          label="Stagger" hint="Seconds between one piece starting and the next"
+          :model-value="numParam('stagger', 0.04)" :min="0" :max="0.5" :step="0.01" :default="0.04"
+          @update:model-value="(v) => setBehNum('letters-stagger', { stagger: v })" />
+        <StudioSelect data-testid="letters-order" label="Order"
+          :model-value="enumParam('order', 'ltr')" :options="ORDER_OPTIONS" :option-labels="ORDER_LABELS"
+          @update:model-value="(v) => setBehParams({ order: v })" />
+        <div v-if="showShuffle" class="flex items-center justify-end">
+          <StudioButton data-testid="letters-shuffle" title="Pick a new random order" @click="shuffleSeed">Shuffle</StudioButton>
+        </div>
+        <div v-if="pieceLine && !isLoopBeh" data-testid="letters-piece-time" class="leading-snug text-white/50">
+          {{ pieceLine }}<span v-if="staggerShortened"> Stagger shortened to fit the bar.</span>
+        </div>
 
-      <template v-if="isLoopBeh">
-        <div class="mb-2 flex items-center justify-between">Amount (letter heights)
-          <input v-scrubnum type="number" step="0.01" min="0" data-testid="loop-amount"
-            :value="numParam('amount', loopAmountDefault)"
-            class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
-            @change="setBehParams({ amount: Math.max(0, numOrDefault(($event.target as HTMLInputElement).value, loopAmountDefault)) })"></div>
-        <div class="mb-2 flex items-center justify-between">Speed (per second)
-          <input v-scrubnum type="number" step="0.1" min="0.1" data-testid="loop-speed"
-            :value="numParam('speed', loopSpeedDefault)"
-            class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
-            @change="setBehParams({ speed: Math.max(0.1, numOrDefault(($event.target as HTMLInputElement).value, loopSpeedDefault)) })"></div>
-        <div v-if="behaviour.kind === 'text.wave' || behaviour.kind === 'text.bounce'" class="mb-2 flex items-center justify-between">Offset between pieces (cycles)
-          <input v-scrubnum type="number" step="0.01" min="0" data-testid="loop-offset"
-            :value="numParam('offset', 0.12)"
-            class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
-            @change="setBehParams({ offset: Math.max(0, numOrDefault(($event.target as HTMLInputElement).value, 0.12)) })"></div>
-      </template>
+        <template v-if="isLoopBeh">
+          <StudioSlider data-testid="loop-amount" v-bind="gesture('loop-amount')"
+            label="Amount (letter heights)"
+            :model-value="numParam('amount', loopAmountDefault)" :min="0" :max="1.5" :step="0.01" :default="loopAmountDefault"
+            @update:model-value="(v) => setBehNum('loop-amount', { amount: v })" />
+          <StudioSlider data-testid="loop-speed" v-bind="gesture('loop-speed')"
+            label="Speed (per second)"
+            :model-value="numParam('speed', loopSpeedDefault)" :min="0.1" :max="20" :step="0.1" :default="loopSpeedDefault"
+            @update:model-value="(v) => setBehNum('loop-speed', { speed: v })" />
+          <StudioSlider v-if="behaviour.kind === 'text.wave' || behaviour.kind === 'text.bounce'"
+            data-testid="loop-offset" v-bind="gesture('loop-offset')"
+            label="Offset between pieces (cycles)"
+            :model-value="numParam('offset', 0.12)" :min="0" :max="1" :step="0.01" :default="0.12"
+            @update:model-value="(v) => setBehNum('loop-offset', { offset: v })" />
+        </template>
 
-      <template v-if="behaviour.kind === 'text.cascade'">
-        <div class="mb-2 flex items-center justify-between">Direction
-          <span data-testid="cascade-dir" class="inline-flex overflow-hidden rounded border border-white/15">
-            <button v-for="d in [{v:'in',l:'In'},{v:'out',l:'Out'}]" :key="d.v" type="button" :data-value="d.v" class="px-2 py-0.5 cursor-pointer"
-              :class="(behParam('dir') ?? 'in') === d.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
-              @click="setBehParams({ dir: d.v })">{{ d.l }}</button>
-          </span>
-        </div>
-        <div class="mb-2 flex items-center justify-between">Style
-          <span data-testid="cascade-style" class="inline-flex overflow-hidden rounded border border-white/15">
-            <button v-for="s in CASCADE_STYLE_OPTIONS" :key="s.v" type="button" :data-value="s.v" class="px-2 py-0.5 cursor-pointer"
-              :class="(behParam('style') ?? 'rise') === s.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
-              @click="setBehParams({ style: s.v })">{{ s.l }}</button>
-          </span>
-        </div>
-        <div v-if="((behParam('style') as string) ?? 'rise') !== 'fade'" class="mb-2 flex items-center justify-between">{{ cascadeAmountLabel }}
-          <input v-scrubnum type="number" step="0.01" data-testid="cascade-amount"
-            :value="numParam('amount', cascadeAmountDefault)"
-            class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
-            @change="setBehParams({ amount: numOrDefault(($event.target as HTMLInputElement).value, cascadeAmountDefault) })"></div>
+        <template v-if="behaviour.kind === 'text.cascade'">
+          <div data-testid="cascade-dir">
+            <div class="panel-sublabel mb-1">Direction</div>
+            <StudioSegmented :model-value="enumParam('dir', 'in')" :options="IN_OUT" :option-labels="IN_OUT_LABELS"
+              @update:model-value="(v) => setBehParams({ dir: v })" />
+          </div>
+          <StudioSelect data-testid="cascade-style" label="Style"
+            :model-value="enumParam('style', 'rise')" :options="CASCADE_STYLE_OPTIONS" :option-labels="CASCADE_STYLE_LABELS"
+            @update:model-value="(v) => setBehParams({ style: v })" />
+          <StudioSlider v-if="enumParam('style', 'rise') !== 'fade'"
+            data-testid="cascade-amount" v-bind="gesture('cascade-amount')"
+            :label="cascadeAmountLabel"
+            :model-value="numParam('amount', cascadeAmountDefault)"
+            :min="cascadeAmountRange.min" :max="cascadeAmountRange.max" :step="cascadeAmountRange.step"
+            :default="cascadeAmountDefault"
+            @update:model-value="(v) => setBehNum('cascade-amount', { amount: v })" />
+        </template>
+        <template v-else-if="behaviour.kind === 'text.typewriter'">
+          <div data-testid="typewriter-dir">
+            <div class="panel-sublabel mb-1">Direction</div>
+            <StudioSegmented :model-value="enumParam('dir', 'type')" :options="TYPE_DIR_OPTIONS" :option-labels="TYPE_DIR_LABELS"
+              @update:model-value="(v) => setBehParams({ dir: v })" />
+          </div>
+          <StudioSelect data-testid="typewriter-cursor" label="Cursor"
+            :model-value="enumParam('cursor', 'bar')" :options="CURSOR_OPTIONS" :option-labels="CURSOR_LABELS"
+            @update:model-value="(v) => setBehParams({ cursor: v })" />
+          <StudioSlider data-testid="typewriter-blink" v-bind="gesture('typewriter-blink')"
+            label="Blink (per second)"
+            :model-value="numParam('blink', 0)" :min="0" :max="8" :step="0.5" :default="0"
+            @update:model-value="(v) => setBehNum('typewriter-blink', { blink: v })" />
+        </template>
+        <template v-else-if="behaviour.kind === 'text.maskSlide'">
+          <div data-testid="mask-dir">
+            <div class="panel-sublabel mb-1">Direction</div>
+            <StudioSegmented :model-value="enumParam('dir', 'reveal')" :options="MASK_DIR_OPTIONS" :option-labels="MASK_DIR_LABELS"
+              @update:model-value="(v) => setBehParams({ dir: v })" />
+          </div>
+          <StudioSelect data-testid="mask-from" label="Travel"
+            :model-value="enumParam('from', 'up')" :options="MASK_FROM_OPTIONS" :option-labels="MASK_FROM_LABELS"
+            @update:model-value="(v) => setBehParams({ from: v })" />
+        </template>
+        <template v-else-if="behaviour.kind === 'text.scramble'">
+          <div data-testid="scramble-mode">
+            <div class="panel-sublabel mb-1">Mode</div>
+            <StudioSegmented :model-value="enumParam('mode', 'settle')" :options="SCRAMBLE_MODE_OPTIONS" :option-labels="SCRAMBLE_MODE_LABELS"
+              @update:model-value="(v) => setBehParams({ mode: v })" />
+          </div>
+          <!-- Stored 0–1; shown as a percentage of the frame, exactly as before. -->
+          <StudioSlider data-testid="scramble-area-w" v-bind="gesture('scramble-area-w')"
+            label="Area width %" hint="Percent of the frame width"
+            :model-value="Math.round(numParam('areaW', 0.6) * 100)" :min="0" :max="100" :step="1" :default="60"
+            @update:model-value="(v) => setBehNum('scramble-area-w', { areaW: v / 100 })" />
+          <StudioSlider data-testid="scramble-area-h" v-bind="gesture('scramble-area-h')"
+            label="Area height %" hint="Percent of the frame height"
+            :model-value="Math.round(numParam('areaH', 0.6) * 100)" :min="0" :max="100" :step="1" :default="60"
+            @update:model-value="(v) => setBehNum('scramble-area-h', { areaH: v / 100 })" />
+          <StudioSlider data-testid="scramble-interval" v-bind="gesture('scramble-interval')"
+            label="Time per jump" hint="Seconds between jumps"
+            :model-value="numParam('interval', 0.18)" :min="0.03" :max="1" :step="0.01" :default="0.18"
+            @update:model-value="(v) => setBehNum('scramble-interval', { interval: v })" />
+          <div data-testid="scramble-move">
+            <div class="panel-sublabel mb-1">Move</div>
+            <StudioSegmented :model-value="enumParam('move', 'snap')" :options="SCRAMBLE_MOVE_OPTIONS" :option-labels="SCRAMBLE_MOVE_LABELS"
+              @update:model-value="(v) => setBehParams({ move: v })" />
+          </div>
+          <StudioSlider data-testid="scramble-spin" v-bind="gesture('scramble-spin')"
+            label="Spin (degrees)"
+            :model-value="numParam('spin', 0)" :min="0" :max="180" :step="1" :default="0"
+            @update:model-value="(v) => setBehNum('scramble-spin', { spin: v })" />
+        </template>
+        <template v-else-if="behaviour.kind === 'text.decode'">
+          <div data-testid="decode-dir">
+            <div class="panel-sublabel mb-1">Direction</div>
+            <StudioSegmented :model-value="enumParam('dir', 'resolve')" :options="DECODE_DIR_OPTIONS" :option-labels="DECODE_DIR_LABELS"
+              @update:model-value="(v) => setBehParams({ dir: v })" />
+          </div>
+          <StudioSelect data-testid="decode-charset" label="Characters"
+            :model-value="enumParam('charset', 'text')" :options="CHARSET_OPTIONS" :option-labels="CHARSET_LABELS"
+            @update:model-value="(v) => setBehParams({ charset: v })" />
+          <StudioSlider data-testid="decode-rate" v-bind="gesture('decode-rate')"
+            label="Flicker rate (per second)"
+            :model-value="numParam('rate', 14)" :min="1" :max="40" :step="1" :default="14"
+            @update:model-value="(v) => setBehNum('decode-rate', { rate: v })" />
+        </template>
+        <template v-else-if="behaviour.kind === 'text.slot'">
+          <div data-testid="slot-dir">
+            <div class="panel-sublabel mb-1">Direction</div>
+            <StudioSegmented :model-value="enumParam('dir', 'in')" :options="IN_OUT" :option-labels="IN_OUT_LABELS"
+              @update:model-value="(v) => setBehParams({ dir: v })" />
+          </div>
+          <div data-testid="slot-roll">
+            <div class="panel-sublabel mb-1">Roll</div>
+            <StudioSegmented :model-value="enumParam('roll', 'up')" :options="SLOT_ROLL_OPTIONS" :option-labels="SLOT_ROLL_LABELS"
+              @update:model-value="(v) => setBehParams({ roll: v })" />
+          </div>
+          <StudioSlider data-testid="slot-steps" v-bind="gesture('slot-steps')"
+            label="Steps" hint="How many characters roll past before it lands"
+            :model-value="numParam('steps', 8)" :min="1" :max="40" :step="1" :default="8"
+            @update:model-value="(v) => setBehNum('slot-steps', { steps: v })" />
+          <StudioSelect data-testid="slot-filler" label="Filler"
+            :model-value="enumParam('filler', 'letters')" :options="CHARSET_OPTIONS" :option-labels="CHARSET_LABELS"
+            @update:model-value="(v) => setBehParams({ filler: v })" />
+        </template>
       </template>
-      <template v-else-if="behaviour.kind === 'text.typewriter'">
-        <div class="mb-2 flex items-center justify-between">Direction
-          <span data-testid="typewriter-dir" class="inline-flex overflow-hidden rounded border border-white/15">
-            <button v-for="d in [{v:'type',l:'Type'},{v:'delete',l:'Delete'}]" :key="d.v" type="button" :data-value="d.v" class="px-2 py-0.5 cursor-pointer"
-              :class="(behParam('dir') ?? 'type') === d.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
-              @click="setBehParams({ dir: d.v })">{{ d.l }}</button>
-          </span>
-        </div>
-        <div class="mb-2 flex items-center justify-between">Cursor
-          <span data-testid="typewriter-cursor" class="inline-flex overflow-hidden rounded border border-white/15">
-            <button v-for="c in [{v:'none',l:'None'},{v:'bar',l:'Bar'},{v:'underscore',l:'Underscore'}]" :key="c.v" type="button" :data-value="c.v" class="px-2 py-0.5 cursor-pointer"
-              :class="(behParam('cursor') ?? 'bar') === c.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
-              @click="setBehParams({ cursor: c.v })">{{ c.l }}</button>
-          </span>
-        </div>
-        <div class="mb-2 flex items-center justify-between">Blink (per second)
-          <input v-scrubnum type="number" step="0.1" min="0" data-testid="typewriter-blink"
-            :value="numParam('blink', 0)"
-            class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
-            @change="setBehParams({ blink: Math.max(0, numOrDefault(($event.target as HTMLInputElement).value, 0)) })"></div>
-      </template>
-      <template v-else-if="behaviour.kind === 'text.maskSlide'">
-        <div class="mb-2 flex items-center justify-between">Direction
-          <span data-testid="mask-dir" class="inline-flex overflow-hidden rounded border border-white/15">
-            <button v-for="d in [{v:'reveal',l:'Reveal'},{v:'hide',l:'Hide'}]" :key="d.v" type="button" :data-value="d.v" class="px-2 py-0.5 cursor-pointer"
-              :class="(behParam('dir') ?? 'reveal') === d.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
-              @click="setBehParams({ dir: d.v })">{{ d.l }}</button>
-          </span>
-        </div>
-        <div class="mb-2 flex items-center justify-between">Travel
-          <span data-testid="mask-from" class="inline-flex overflow-hidden rounded border border-white/15">
-            <button v-for="f in MASK_FROM_OPTIONS" :key="f.v" type="button" :data-value="f.v" class="px-2 py-0.5 cursor-pointer"
-              :class="(behParam('from') ?? 'up') === f.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
-              @click="setBehParams({ from: f.v })">{{ f.l }}</button>
-          </span>
-        </div>
-      </template>
-      <template v-else-if="behaviour.kind === 'text.scramble'">
-        <div class="mb-2 flex items-center justify-between">Mode
-          <span data-testid="scramble-mode" class="inline-flex overflow-hidden rounded border border-white/15">
-            <button v-for="m in SCRAMBLE_MODE_OPTIONS" :key="m.v" type="button" :data-value="m.v" class="px-2 py-0.5 cursor-pointer"
-              :class="(behParam('mode') ?? 'settle') === m.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
-              @click="setBehParams({ mode: m.v })">{{ m.l }}</button>
-          </span>
-        </div>
-        <div class="mb-2 flex items-center justify-between">Area width %
-          <input v-scrubnum type="number" step="1" min="0" max="100" data-testid="scramble-area-w" title="Percent of the frame width"
-            :value="Math.round(numParam('areaW', 0.6) * 100)"
-            class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
-            @change="setBehParams({ areaW: clampPct(numOrDefault(($event.target as HTMLInputElement).value, 60)) / 100 })"></div>
-        <div class="mb-2 flex items-center justify-between">Area height %
-          <input v-scrubnum type="number" step="1" min="0" max="100" data-testid="scramble-area-h" title="Percent of the frame height"
-            :value="Math.round(numParam('areaH', 0.6) * 100)"
-            class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
-            @change="setBehParams({ areaH: clampPct(numOrDefault(($event.target as HTMLInputElement).value, 60)) / 100 })"></div>
-        <div class="mb-2 flex items-center justify-between">Time per jump
-          <input v-scrubnum type="number" step="0.01" min="0.03" data-testid="scramble-interval" title="Seconds between jumps"
-            :value="numParam('interval', 0.18)"
-            class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
-            @change="setBehParams({ interval: Math.max(0.03, numOrDefault(($event.target as HTMLInputElement).value, 0.18)) })"></div>
-        <div class="mb-2 flex items-center justify-between">Move
-          <span data-testid="scramble-move" class="inline-flex overflow-hidden rounded border border-white/15">
-            <button v-for="mv in [{v:'snap',l:'Snap'},{v:'glide',l:'Glide'}]" :key="mv.v" type="button" :data-value="mv.v" class="px-2 py-0.5 cursor-pointer"
-              :class="(behParam('move') ?? 'snap') === mv.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
-              @click="setBehParams({ move: mv.v })">{{ mv.l }}</button>
-          </span>
-        </div>
-        <div class="mb-2 flex items-center justify-between">Spin (degrees)
-          <input v-scrubnum type="number" step="1" min="0" max="180" data-testid="scramble-spin"
-            :value="numParam('spin', 0)"
-            class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
-            @change="setBehParams({ spin: Math.min(180, Math.max(0, numOrDefault(($event.target as HTMLInputElement).value, 0))) })"></div>
-      </template>
-      <template v-else-if="behaviour.kind === 'text.decode'">
-        <div class="mb-2 flex items-center justify-between">Direction
-          <span data-testid="decode-dir" class="inline-flex overflow-hidden rounded border border-white/15">
-            <button v-for="d in DECODE_DIR_OPTIONS" :key="d.v" type="button" :data-value="d.v" class="px-2 py-0.5 cursor-pointer"
-              :class="(behParam('dir') ?? 'resolve') === d.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
-              @click="setBehParams({ dir: d.v })">{{ d.l }}</button>
-          </span>
-        </div>
-        <div class="mb-2 flex items-center justify-between">Characters
-          <span data-testid="decode-charset" class="inline-flex overflow-hidden rounded border border-white/15">
-            <button v-for="c in CHARSET_OPTIONS" :key="c.v" type="button" :data-value="c.v" class="px-2 py-0.5 cursor-pointer"
-              :class="(behParam('charset') ?? 'text') === c.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
-              @click="setBehParams({ charset: c.v })">{{ c.l }}</button>
-          </span>
-        </div>
-        <div class="mb-2 flex items-center justify-between">Flicker rate (per second)
-          <input v-scrubnum type="number" step="1" min="1" data-testid="decode-rate"
-            :value="numParam('rate', 14)"
-            class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
-            @change="setBehParams({ rate: Math.max(1, numOrDefault(($event.target as HTMLInputElement).value, 14)) })"></div>
-      </template>
-      <template v-else-if="behaviour.kind === 'text.slot'">
-        <div class="mb-2 flex items-center justify-between">Direction
-          <span data-testid="slot-dir" class="inline-flex overflow-hidden rounded border border-white/15">
-            <button v-for="d in SLOT_DIR_OPTIONS" :key="d.v" type="button" :data-value="d.v" class="px-2 py-0.5 cursor-pointer"
-              :class="(behParam('dir') ?? 'in') === d.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
-              @click="setBehParams({ dir: d.v })">{{ d.l }}</button>
-          </span>
-        </div>
-        <div class="mb-2 flex items-center justify-between">Roll
-          <span data-testid="slot-roll" class="inline-flex overflow-hidden rounded border border-white/15">
-            <button v-for="r in SLOT_ROLL_OPTIONS" :key="r.v" type="button" :data-value="r.v" class="px-2 py-0.5 cursor-pointer"
-              :class="(behParam('roll') ?? 'up') === r.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
-              @click="setBehParams({ roll: r.v })">{{ r.l }}</button>
-          </span>
-        </div>
-        <div class="mb-2 flex items-center justify-between">Steps
-          <input v-scrubnum type="number" step="1" min="1" max="40" data-testid="slot-steps" title="How many characters roll past before it lands"
-            :value="numParam('steps', 8)"
-            class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
-            @change="setBehParams({ steps: Math.min(40, Math.max(1, Math.round(numOrDefault(($event.target as HTMLInputElement).value, 8)))) })"></div>
-        <div class="mb-2 flex items-center justify-between">Filler
-          <span data-testid="slot-filler" class="inline-flex overflow-hidden rounded border border-white/15">
-            <button v-for="c in CHARSET_OPTIONS" :key="c.v" type="button" :data-value="c.v" class="px-2 py-0.5 cursor-pointer"
-              :class="(behParam('filler') ?? 'letters') === c.v ? 'bg-[#7c9cff] text-black font-medium' : 'text-white/55 hover:text-white/85'"
-              @click="setBehParams({ filler: c.v })">{{ c.l }}</button>
-          </span>
-        </div>
-      </template>
-    </template>
+    </div>
 
     <template v-if="showEasing">
-      <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">Easing</div>
+      <div class="mb-1 mt-2 text-[10px] uppercase tracking-wide text-white/35">Easing</div>
       <MotionEasingCurve class="mb-2" :ease="behEase"
         @start="emit('before-change')" @change="setBehEaseLive" @end="emit('commit')" />
     </template>
 
-    <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">Timing</div>
-    <div class="mb-2 flex items-center gap-3">
-      <label class="flex items-center gap-1">Start
-        <input v-scrubnum type="number" step="0.1" min="0" :value="+behaviour.timing.start.toFixed(2)" data-testid="beh-start"
-          class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
-          @change="setBehTiming({ start: Number(($event.target as HTMLInputElement).value) || 0 })"></label>
-      <label class="flex items-center gap-1" :title="behaviour.timing.loop ? 'Length of one cycle — it repeats to the end of the timeline' : ''">{{ behaviour.timing.loop ? 'Cycle' : 'Duration' }}
-        <input v-scrubnum type="number" step="0.1" min="0.05" :value="+behaviour.timing.duration.toFixed(2)" data-testid="beh-duration"
-          class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
-          @change="setBehTiming({ duration: Math.max(0.05, Number(($event.target as HTMLInputElement).value) || 0.05) })"></label>
+    <div class="mb-1 mt-2 text-[10px] uppercase tracking-wide text-white/35">Timing</div>
+    <div class="space-y-2">
+      <StudioSlider data-testid="beh-start" v-bind="gesture('beh-start')"
+        label="Start" :model-value="+behaviour.timing.start.toFixed(2)" :min="0" :max="timeMax" :step="0.05" :default="0"
+        @update:model-value="(v) => setBehTiming({ start: v }, 'beh-start')" />
+      <StudioSlider data-testid="beh-duration" v-bind="gesture('beh-duration')"
+        :label="behaviour.timing.loop ? 'Cycle' : 'Duration'"
+        :hint="behaviour.timing.loop ? 'Length of one cycle — it repeats to the end of the timeline' : undefined"
+        :model-value="+behaviour.timing.duration.toFixed(2)" :min="0.05" :max="timeMax" :step="0.05" :default="1"
+        @update:model-value="(v) => setBehTiming({ duration: Math.max(0.05, v) }, 'beh-duration')" />
+      <StudioSwitch v-if="!isTextBeh" label="Loop" :model-value="behaviour.timing.loop ?? false"
+        @update:model-value="(v) => setBehTiming({ loop: v })" />
     </div>
-    <label v-if="!isTextBeh" class="mb-2 flex items-center justify-between">Loop
-      <input type="checkbox" class="accent-[#7c9cff]" :checked="behaviour.timing.loop ?? false"
-        @change="setBehTiming({ loop: ($event.target as HTMLInputElement).checked })"></label>
 
     <div class="mt-2 flex items-center justify-between border-t border-white/10 pt-2">
-      <button type="button" data-testid="beh-delete"
-        class="rounded border border-white/15 px-2 py-0.5 text-white/70 hover:border-rose-400/60 hover:text-rose-300 hover:bg-rose-500/10 cursor-pointer"
-        title="Remove this behaviour (Delete)" @click="emit('behaviour-delete', behaviour.id)">Delete</button>
-      <button v-if="!isTextBeh" type="button" data-testid="beh-open"
-        class="rounded border border-white/15 px-2 py-0.5 text-white/80 hover:bg-white/10 cursor-pointer"
-        title="Bake into editable control-point bands" @click="emit('behaviour-open', behaviour.id)">Open into keyframes</button>
+      <StudioButton data-testid="beh-delete" title="Remove this behaviour (Delete)"
+        @click="emit('behaviour-delete', behaviour.id)">Delete</StudioButton>
+      <StudioButton v-if="!isTextBeh" data-testid="beh-open" title="Bake into editable control-point bands"
+        @click="emit('behaviour-open', behaviour.id)">Open into keyframes</StudioButton>
     </div>
   </div>
 
@@ -567,24 +588,23 @@ function onGradient(g: Gradient) {
         <span class="font-medium text-white/85">{{ label || (track.path.split('.').pop()) }}</span>
         <span class="text-white/35">{{ point ? `point @ ${point.t.toFixed(2)}s` : 'band' }}</span>
       </div>
-      <button class="cursor-pointer text-white/40 hover:text-white/80" @click="emit('clear')">Done</button>
+      <StudioButton variant="subtle" @click="emit('clear')">Done</StudioButton>
     </div>
 
     <!-- Control-point selected: typed value editor + ease -->
     <template v-if="point">
-      <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">Value</div>
       <div v-if="typeof point.value === 'number'" class="mb-2">
-        <input v-scrubnum type="number" step="0.01" :value="+point.value.toFixed(3)" data-testid="inspector-number"
-          class="w-full bg-[#0d0d0d] border border-white/15 rounded px-2 py-1 text-white/90 outline-none"
-          @change="setValue(Number(($event.target as HTMLInputElement).value) || 0)">
+        <StudioSlider data-testid="inspector-number" v-bind="gesture('inspector-number')"
+          label="Value" :model-value="+point.value.toFixed(3)"
+          :min="pointRange.min" :max="pointRange.max" :step="0.01"
+          @update:model-value="(v) => setValue(v, 'inspector-number')" />
       </div>
-      <div v-else-if="typeof point.value === 'string'" class="mb-2 flex items-center gap-2">
-        <input type="color" :value="point.value" data-testid="inspector-color"
-          class="w-7 h-7 rounded cursor-pointer bg-transparent border border-white/15"
-          @input="setValue(($event.target as HTMLInputElement).value)">
-        <span class="tabular-nums uppercase text-white/70">{{ point.value }}</span>
+      <div v-else-if="typeof point.value === 'string'" class="mb-2">
+        <StudioColorField data-testid="inspector-color" label="Value" :model-value="point.value"
+          @update:model-value="(v) => setValue(v)" />
       </div>
       <div v-else class="mb-2">
+        <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">Value</div>
         <GradientEditor :model-value="pointGradient" @update:model-value="onGradient" />
       </div>
       <template v-if="!isLastPoint">
@@ -592,38 +612,33 @@ function onGradient(g: Gradient) {
         <MotionEasingCurve class="mb-2" :ease="point.ease"
           @start="emit('before-change')" @change="setEaseLive" @end="emit('commit')" />
       </template>
-      <button type="button" class="mt-1 rounded border border-white/15 px-2 py-0.5 text-white/70 hover:border-rose-400/60 hover:text-rose-300 hover:bg-rose-500/10 cursor-pointer"
-        title="Remove this control point (Delete)" @click="deletePoint">Delete point</button>
+      <StudioButton class="mt-1" title="Remove this control point (Delete)" @click="deletePoint">Delete point</StudioButton>
     </template>
 
     <!-- Property band selected: timing + easing + add point -->
     <template v-else>
       <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">Timing</div>
-      <div class="mb-2 flex items-center gap-3">
-        <label class="flex items-center gap-1">Start
-          <input v-scrubnum type="number" step="0.1" min="0" :value="+span.start.toFixed(2)" data-testid="inspector-start"
-            class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
-            @change="setStart(Number(($event.target as HTMLInputElement).value) || 0)"></label>
-        <label class="flex items-center gap-1">Duration
-          <input v-scrubnum type="number" step="0.1" min="0.05" :value="+(span.end - span.start).toFixed(2)" data-testid="inspector-duration"
-            class="w-16 bg-[#0d0d0d] border border-white/15 rounded px-1 py-0.5 text-white/90 outline-none"
-            @change="setDuration(Number(($event.target as HTMLInputElement).value) || 0.05)"></label>
+      <div class="mb-2 space-y-2">
+        <StudioSlider data-testid="inspector-start" v-bind="gesture('inspector-start')"
+          label="Start" :model-value="+span.start.toFixed(2)" :min="0" :max="timeMax" :step="0.05" :default="0"
+          @update:model-value="setStart" />
+        <StudioSlider data-testid="inspector-duration" v-bind="gesture('inspector-duration')"
+          label="Duration" :model-value="+(span.end - span.start).toFixed(2)" :min="0.05" :max="timeMax" :step="0.05" :default="1"
+          @update:model-value="setDuration" />
       </div>
       <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">{{ track.keyframes.length > 2 ? 'Easing (all points)' : 'Easing' }}</div>
       <MotionEasingCurve class="mb-2" :ease="track.keyframes[0]?.ease ?? 'linear'"
         @start="emit('before-change')" @change="setAllEaseLive" @end="emit('commit')" />
-      <label class="mb-2 flex items-center justify-between" title="Repeat this band to the end of the timeline — the bar is one cycle">Loop
-        <input type="checkbox" class="accent-[#7c9cff]" data-testid="band-loop" :checked="!!track.loop"
-          @change="apply({ ...track, loop: ($event.target as HTMLInputElement).checked })"></label>
+      <StudioSwitch class="mb-2" data-testid="band-loop" label="Loop"
+        hint="Repeat this band to the end of the timeline — the bar is one cycle"
+        :model-value="!!track.loop" @update:model-value="(v) => apply({ ...track!, loop: v })" />
       <div class="flex items-center justify-between">
         <span class="text-white/40">{{ track.keyframes.length }} control points</span>
-        <button type="button" class="rounded border border-white/15 px-2 py-0.5 text-white/70 hover:bg-white/10 cursor-pointer"
-          data-testid="inspector-add-point" @click="addAtPlayhead">＋ point</button>
+        <StudioButton data-testid="inspector-add-point" @click="addAtPlayhead">＋ point</StudioButton>
       </div>
       <div class="mt-2 flex items-center justify-between border-t border-white/10 pt-2">
-        <button type="button" data-testid="band-delete"
-          class="rounded border border-white/15 px-2 py-0.5 text-white/70 hover:border-rose-400/60 hover:text-rose-300 hover:bg-rose-500/10 cursor-pointer"
-          title="Remove this band and all its points (Delete)" @click="deleteBand">Delete band</button>
+        <StudioButton data-testid="band-delete" title="Remove this band and all its points (Delete)"
+          @click="deleteBand">Delete band</StudioButton>
       </div>
     </template>
   </div>

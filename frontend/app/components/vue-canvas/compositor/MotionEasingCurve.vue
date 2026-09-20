@@ -1,11 +1,11 @@
 <script setup lang="ts">
 /** Transition editor for one motionx ease — a port of DialKit's TransitionControl (MIT,
- *  joshpuckett/dialkit) in Sailor's skin: the graph on top, then labelled rows — a Type switch
- *  (Easing / Spring), and either the bézier "Ease" field or the spring's Bounce slider. Each
- *  mode remembers its last value, so switching back restores it. The bézier graph keeps
- *  DialKit's fitting + drag + keyboard maths; the spring graph draws exactly what plays.
- *  DialKit's third mode (Physics: stiffness/damping/mass) is left out on purpose — its length
- *  is emergent, which fights a band whose bar IS the duration.
+ *  joshpuckett/dialkit) in Sailor's skin: the graph on top, then the app's own Studio
+ *  controls — a Type switch (Easing / Spring), and either the bézier "Ease" field or the
+ *  spring's Bounce row. Each mode remembers its last value, so switching back restores it.
+ *  The bézier graph keeps DialKit's fitting + drag + keyboard maths; the spring graph draws
+ *  exactly what plays. DialKit's third mode (Physics: stiffness/damping/mass) is left out on
+ *  purpose — its length is emergent, which fights a band whose bar IS the duration.
  *  A gesture is ONE edit: `start` on grab, `change` while moving, `end` on release. */
 import type { Ease, BezierEase, SpringEase } from '~/lib/motionx'
 import { easeToBezier, easeEquals, isSpringEase, springProgress, springSettle } from '~/lib/motionx/ease'
@@ -13,12 +13,17 @@ import {
   fitEasingGraph, moveEasingHandle, easingGuideEnd, easingHandleFromKey, normalizeEase,
   parseEase, formatEase, type GraphPoint,
 } from '~/lib/motionx/easingGraph'
+import { NO_RUN, openRun, closeRun, takeRecord, type UndoRun } from '~/lib/motionx/undoCoalesce'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
+import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
+import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
 
 const props = defineProps<{ ease: Ease }>()
 const emit = defineEmits<{ start: []; change: [ease: Ease]; end: [] }>()
 
 type Mode = 'easing' | 'spring'
-const MODES: Array<{ v: Mode; l: string }> = [{ v: 'easing', l: 'Easing' }, { v: 'spring', l: 'Spring' }]
+const MODE_OPTIONS = ['easing', 'spring']
+const MODE_LABELS = ['Easing', 'Spring']
 const mode = computed<Mode>(() => (isSpringEase(props.ease) ? 'spring' : 'easing'))
 
 // Per-mode memory (DialKit caches each mode so switching back restores previous edits).
@@ -34,9 +39,15 @@ const PRESETS: Array<{ l: string; v: Ease }> = [
   { l: 'Smooth', v: 'easeInOut' }, { l: 'Overshoot', v: [0.34, 1.56, 0.64, 1] }, { l: 'Anticipate', v: [0.36, 0, 0.66, -0.56] },
 ]
 const presetIndex = computed(() => PRESETS.findIndex((p) => easeEquals(p.v, props.ease)))
-function onPreset(e: Event) {
-  const i = Number((e.target as HTMLSelectElement).value)
-  if (PRESETS[i]) commitOnce(PRESETS[i]!.v)
+// The row models the preset by NAME. A hand-dragged curve matches none of them, so the list
+// grows a "Custom" entry to have something true to show — it is never chosen, only shown.
+const CUSTOM = 'Custom'
+const presetOptions = computed(() =>
+  (presetIndex.value < 0 ? [CUSTOM] : []).concat(PRESETS.map((p) => p.l)))
+const presetValue = computed(() => (presetIndex.value < 0 ? CUSTOM : PRESETS[presetIndex.value]!.l))
+function onPreset(name: string) {
+  const p = PRESETS.find((x) => x.l === name)
+  if (p) commitOnce(p.v)
 }
 
 function commitOnce(next: Ease) {
@@ -144,35 +155,38 @@ const springView = computed(() => {
   }
 })
 
-// ── Row slider (DialKit's: the whole row is the track, a fill + a thin handle) ──
-const sliderEl = ref<HTMLElement | null>(null)
-const sliding = ref(false)
-const bounceAt = (clientX: number) => {
-  const r = sliderEl.value!.getBoundingClientRect()
-  const f = Math.min(1, Math.max(0, (clientX - r.left) / Math.max(1, r.width)))
-  return Math.round(f / 0.05) * 0.05
+// ── Bounce, on the shared Studio row ─────────────────────────────────────────
+// The row emits a value per pixel of a drag, and upstream `start` IS an undo step, so the
+// gesture has to be folded into one: pointerdown/keydown open a run, the FIRST change in it
+// emits `start`, and the release emits `end`. Lazy on purpose — a press that changes nothing
+// must not leave an empty step behind. Outside a gesture (typed value, double-click reset)
+// a change is complete on its own, which is exactly `commitOnce`.
+let run: UndoRun = NO_RUN
+const BOUNCE = 'bounce'
+// `data-owns-keys`: the row's track is arrow-keyable, and the modal nudges the selected
+// layer on the same keys unless the focused control claims them — as the hand-rolled
+// slider this replaces did.
+const bounceGesture = {
+  'data-owns-keys': '',
+  onPointerdown: () => { run = openRun(run, BOUNCE) },
+  onKeydown: () => { run = openRun(run, BOUNCE) },
+  onPointerup: () => endBounce(),
+  onPointercancel: () => endBounce(),
+  onLostpointercapture: () => endBounce(),
+  onKeyup: () => endBounce(),
 }
-function setBounceLive(b: number) {
+function endBounce() {
+  if (run.recorded) emit('end')
+  run = closeRun()
+}
+function setBounce(b: number) {
   const next: SpringEase = { type: 'spring', bounce: +Math.min(1, Math.max(0, b)).toFixed(2) }
-  if (!easeEquals(next, props.ease)) emit('change', next)
-}
-function onSliderDown(e: PointerEvent) {
-  if (e.button !== 0 || !sliderEl.value) return
-  e.preventDefault()
-  sliderEl.value.focus({ preventScroll: true })
-  sliderEl.value.setPointerCapture(e.pointerId)
-  sliding.value = true
-  emit('start')
-  setBounceLive(bounceAt(e.clientX))
-}
-function onSliderMove(e: PointerEvent) { if (sliding.value) setBounceLive(bounceAt(e.clientX)) }
-function onSliderUp() { if (!sliding.value) return; sliding.value = false; emit('end') }
-function onSliderKey(e: KeyboardEvent) {
-  const d = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 0.05 : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -0.05 : 0
-  if (!d) return
-  e.preventDefault()
-  e.stopPropagation()
-  commitOnce({ type: 'spring', bounce: +Math.min(1, Math.max(0, bounce.value + d)).toFixed(2) })
+  if (easeEquals(next, props.ease)) return
+  if (run.key === null) { commitOnce(next); return }
+  const t = takeRecord(run, BOUNCE)
+  run = t.run
+  if (t.record) emit('start')
+  emit('change', next)
 }
 </script>
 
@@ -211,101 +225,36 @@ function onSliderKey(e: KeyboardEvent) {
     </svg>
 
     <!-- Type -->
-    <div class="dk-row">
-      <span class="dk-label">Type</span>
-      <div class="relative -mr-1.5 flex p-0.5" role="radiogroup" aria-label="Transition type">
-        <span class="dk-pill" :style="{ transform: `translateX(${MODES.findIndex((m) => m.v === mode) * 100}%)`, width: `calc((100% - 4px) / ${MODES.length})` }" />
-        <button v-for="m in MODES" :key="m.v" type="button" role="radio" :aria-checked="mode === m.v" :data-testid="`ease-mode-${m.v}`"
-          class="relative z-[1] w-[58px] cursor-pointer py-1 text-center text-[11px] font-medium transition-colors"
-          :class="mode === m.v ? 'text-white/90' : 'text-white/45 hover:text-white/70'"
-          @click="setMode(m.v)">{{ m.l }}</button>
-      </div>
+    <div>
+      <div class="panel-sublabel mb-1">Type</div>
+      <StudioSegmented data-testid="ease-mode" :model-value="mode" :options="MODE_OPTIONS" :option-labels="MODE_LABELS"
+        @update:model-value="(v) => setMode(v as Mode)" />
     </div>
 
-    <!-- Easing: bézier coordinates -->
-    <div v-if="mode === 'easing'" class="dk-row">
-      <span class="dk-label">Ease</span>
+    <!-- Easing: bézier coordinates. The one control here that is NOT a Studio row — four
+         numbers typed as one string — so it borrows the row's geometry instead. -->
+    <div v-if="mode === 'easing'"
+      class="flex h-7 items-center justify-between gap-3 rounded-[6px] bg-white/[0.05] px-2.5">
+      <span class="shrink-0 text-[11px] text-white/72">Ease</span>
       <input type="text" spellcheck="false" aria-label="Bézier coordinates" data-testid="easing-text"
-        class="min-w-0 flex-1 bg-transparent text-right tabular-nums text-white/85 outline-none placeholder:text-white/30"
+        class="min-w-0 flex-1 bg-transparent text-right text-[11px] tabular-nums text-white/90 outline-none placeholder:text-white/30"
         :value="editing ? draft : shown(value)"
         @input="draft = ($event.target as HTMLInputElement).value"
         @focus="onTextFocus" @blur="onTextBlur"
         @keydown.enter.prevent="($event.target as HTMLInputElement).blur()">
     </div>
 
-    <div v-if="mode === 'easing'" class="dk-row">
-      <span class="dk-label">Preset</span>
-      <select class="cursor-pointer bg-transparent text-right text-white/85 outline-none" aria-label="Easing preset"
-        data-testid="easing-preset" :value="presetIndex" @change="onPreset">
-        <option v-if="presetIndex < 0" :value="-1" disabled>Custom</option>
-        <option v-for="(p, i) in PRESETS" :key="p.l" :value="i" class="bg-[#1a1a1a]">{{ p.l }}</option>
-      </select>
-    </div>
+    <StudioSelect v-if="mode === 'easing'" data-testid="easing-preset" label="Preset"
+      :model-value="presetValue" :options="presetOptions" @update:model-value="onPreset" />
 
     <!-- Spring: bounce -->
-    <div v-else ref="sliderEl" class="dk-slider" role="slider" tabindex="0" data-owns-keys data-testid="spring-bounce"
-      aria-label="Bounce" aria-valuemin="0" aria-valuemax="1" :aria-valuenow="bounce" :data-active="sliding ? 'true' : undefined"
-      @pointerdown="onSliderDown" @pointermove="onSliderMove" @pointerup="onSliderUp" @pointercancel="onSliderUp"
-      @lostpointercapture="onSliderUp" @keydown="onSliderKey">
-      <span class="dk-fill" :style="{ width: `${bounce * 100}%` }" />
-      <span class="dk-handle" :style="{ left: `clamp(4px, ${bounce * 100}%, calc(100% - 7px))` }" />
-      <span class="dk-label relative">Bounce</span>
-      <span class="relative tabular-nums text-white/70">{{ bounce.toFixed(2) }}</span>
-    </div>
+    <StudioSlider v-else data-testid="spring-bounce" v-bind="bounceGesture"
+      label="Bounce" :model-value="bounce" :min="0" :max="1" :step="0.05" :default="0.2"
+      @update:model-value="setBounce" />
   </div>
 </template>
 
 <style scoped>
-/* DialKit's labelled row + row-slider geometry, in the compositor's palette. */
-.dk-row, .dk-slider {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  height: 32px;
-  padding: 2px 10px 2px 12px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  font-size: 11px;
-}
-.dk-label { flex-shrink: 0; font-weight: 500; color: rgba(255, 255, 255, 0.5); }
-.dk-pill {
-  position: absolute;
-  top: 2px;
-  bottom: 2px;
-  left: 2px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.1);
-  transition: transform 0.2s cubic-bezier(0.25, 1, 0.5, 1);
-  pointer-events: none;
-}
-.dk-slider {
-  position: relative;
-  overflow: hidden;
-  cursor: pointer;
-  user-select: none;
-  -webkit-user-select: none;
-  touch-action: none;
-  outline: none;
-}
-.dk-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  background: rgba(255, 255, 255, 0.08);
-  transition: background 0.15s;
-  pointer-events: none;
-}
-.dk-slider:hover .dk-fill, .dk-slider[data-active] .dk-fill, .dk-slider:focus-visible .dk-fill { background: rgba(124, 156, 255, 0.22); }
-.dk-handle {
-  position: absolute;
-  top: 50%;
-  width: 3px;
-  height: 18px;
-  margin-top: -9px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.85);
-  pointer-events: none;
-}
 .ease-handle {
   position: absolute;
   display: grid;
@@ -339,5 +288,4 @@ function onSliderKey(e: KeyboardEvent) {
   background: #7c9cff;
 }
 .ease-handle[data-dragging] { cursor: grabbing; z-index: 1; }
-@media (prefers-reduced-motion: reduce) { .dk-pill { transition: none; } }
 </style>

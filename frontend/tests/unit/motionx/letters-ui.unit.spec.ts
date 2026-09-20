@@ -21,6 +21,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { DEFAULT_TEXT_EASE, canAnimateLetters, evaluateTextBehaviours } from '~/lib/motionx/text'
+import { resetValue } from '~/lib/studio/row'
 import type { TextCell } from '~/lib/motionx/text/units'
 
 const MODAL = fileURLToPath(new URL('../../../app/components/vue-canvas/CompositorModal.vue', import.meta.url))
@@ -179,29 +180,95 @@ describe('behEase', () => {
   })
 })
 
-// ── 4. an emptied number field falls back to its DEFAULT, not to its minimum ─
+// ── 4. every number row still knows its DEFAULT, and it is the evaluator's ──
 
-describe('numOrDefault', () => {
-  // Every letter number field goes through this one helper, and each caller clamps the result
-  // to its own range afterwards. `Number('')` is 0, so an emptied field used to land on the
-  // clamp's MINIMUM — Steps emptied to 1 instead of 8, Cascade's amount to 0 instead of 0.6 —
-  // which reads as a field that silently rewrites itself the moment it is cleared.
-  const numOrDefault = runStatement(INSPECTOR, 'numOrDefault', {}) as (raw: string, d: number) => number
+/**
+ * This replaces the `numOrDefault` suite. That helper existed because the inspector's number
+ * fields were `<input type="number">`: an emptied one sent `''`, `Number('')` is 0, and each
+ * caller clamped what came back to its own range — so clearing Steps landed on 1 instead of
+ * 8, and Cascade's amount on 0 instead of 0.6. The fields are `StudioSlider`s now. A row
+ * emits a NUMBER, never a string and never NaN, so there is no empty field left to parse and
+ * the helper is gone.
+ *
+ * What carries the guarantee instead is the row's declared `:default` — the value
+ * double-click resets to, via `resetValue`. The failure mode is the same one (landing on the
+ * range minimum), so the same numbers are pinned here, against the source that declares them.
+ */
+describe('every behaviour number row declares the evaluator\'s own default', () => {
+  const template = readFileSync(INSPECTOR, 'utf8').match(/<template>([\s\S]*)<\/template>/)?.[1] ?? ''
+  /** Each `<StudioSlider …/>` tag, by the test id it carries. */
+  const rows = new Map<string, string>()
+  for (const tag of template.match(/<StudioSlider\b[\s\S]*?\/>/g) ?? []) {
+    const id = tag.match(/data-testid="([^"]+)"/)?.[1]
+    if (id) rows.set(id, tag)
+  }
 
-  it('an emptied or blank field falls back to the default', () => {
-    expect(numOrDefault('', 8)).toBe(8)
-    expect(numOrDefault('   ', 8)).toBe(8)
-    expect(numOrDefault('\t', 0.6)).toBe(0.6)
+  // testid → the `:default` the row must declare. A literal for a fixed default, a name for
+  // the ones that depend on the kind (Cascade's amount is letter heights / a scale / degrees).
+  const DEFAULTS: Record<string, string> = {
+    'slide-distance': '0.15',
+    'letters-stagger': '0.04',
+    'loop-amount': 'loopAmountDefault',
+    'loop-speed': 'loopSpeedDefault',
+    'loop-offset': '0.12',
+    'cascade-amount': 'cascadeAmountDefault',
+    'typewriter-blink': '0',
+    'scramble-area-w': '60',
+    'scramble-area-h': '60',
+    'scramble-interval': '0.18',
+    'scramble-spin': '0',
+    'decode-rate': '14',
+    'slot-steps': '8',
+  }
+
+  it('every one of them is still there', () => {
+    expect([...rows.keys()].sort()).toEqual(expect.arrayContaining(Object.keys(DEFAULTS).sort()))
   })
-  it('so does anything that is not a number', () => {
-    expect(numOrDefault('abc', 8)).toBe(8)
-    expect(numOrDefault('1,5', 0.18)).toBe(0.18)
+
+  it.each(Object.entries(DEFAULTS))('%s resets to %s', (id, expected) => {
+    const tag = rows.get(id)
+    expect(tag, `no StudioSlider carries data-testid="${id}"`).toBeTruthy()
+    expect(tag!.match(/:default="([^"]+)"/)?.[1]).toBe(expected)
   })
-  it('a real zero is still a zero', () => {
-    expect(numOrDefault('0', 8)).toBe(0)
-    expect(numOrDefault('0.0', 8)).toBe(0)
-    expect(numOrDefault('-2.5', 8)).toBe(-2.5)
-    expect(numOrDefault('7', 8)).toBe(7)
+
+  it('and a declared default beats the range minimum, which is the whole point', () => {
+    // Steps: min 1, default 8. Cascade rise: min 0, default 0.6.
+    expect(resetValue({ default: 8, min: 1, max: 40 })).toBe(8)
+    expect(resetValue({ default: 0.6, min: 0, max: 3 })).toBe(0.6)
+    // A row with NO default would land on the minimum — the old bug, still reachable.
+    expect(resetValue({ min: 1, max: 40 })).toBe(1)
+  })
+})
+
+// ── 4b. one drag is one undo step ───────────────────────────────────────────
+
+/**
+ * A Studio row emits a value per pixel, and every inspector edit records an undo step. The
+ * coalescing itself is unit-tested in `undo-coalesce.unit.spec.ts`; what is pinned here is
+ * that the inspector actually USES it — a slider that forgets `v-bind="gesture(…)"`, or a
+ * write that goes through the discrete `setBehParams` instead of `setBehNum`, silently gets
+ * forty undo steps back.
+ */
+describe('every slider folds its drag into one undo step', () => {
+  const template = readFileSync(INSPECTOR, 'utf8').match(/<template>([\s\S]*)<\/template>/)?.[1] ?? ''
+  const tags = template.match(/<StudioSlider\b[\s\S]*?\/>/g) ?? []
+
+  it('there are sliders to check', () => {
+    expect(tags.length).toBeGreaterThanOrEqual(15)
+  })
+  it('each one binds the gesture, under the same key it writes with', () => {
+    for (const tag of tags) {
+      const bound = tag.match(/v-bind="gesture\('([^']+)'\)"/)?.[1]
+      expect(bound, `a StudioSlider with no gesture binding: ${tag.slice(0, 90)}`).toBeTruthy()
+      const written = tag.match(/(?:setBehNum|setValue)\([^)]*?'([\w-]+)'/)?.[1]
+        ?? tag.match(/@update:model-value="(setStart|setDuration)"/)?.[1]
+        ?? tag.match(/setBehTiming\(.*,\s*'([\w-]+)'\)/)?.[1]
+      expect(written, `a StudioSlider with no recognised writer: ${tag.slice(0, 90)}`).toBeTruthy()
+      // setStart / setDuration name their own key inside the function, not in the template.
+      if (written !== 'setStart' && written !== 'setDuration') {
+        expect(written, `gesture key and write key disagree on ${bound}`).toBe(bound)
+      }
+    }
   })
 })
 
