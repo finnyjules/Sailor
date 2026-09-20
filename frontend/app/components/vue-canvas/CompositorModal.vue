@@ -3906,14 +3906,17 @@ function addBehaviour(kind: string, params: Record<string, unknown> = {}, timing
 // Edit a live behaviour's params/timing → recompile its tracks against the current layer.
 // `record=false` for continuous edits (timeline drags) — the drag already emitted
 // before-change once, so per-move recompiles must not push a history entry each.
-function editBehaviour(id: string, patch: { params?: Record<string, unknown>; timing?: Partial<Timing>; kind?: string }, record = true) {
+// `replaceParams`: the patch's params ARE the new params (a move swapped for another — the old
+// move's own params must not leak into the new kind); otherwise they merge over the current.
+function editBehaviour(id: string, patch: { params?: Record<string, unknown>; timing?: Partial<Timing>; kind?: string; replaceParams?: boolean }, record = true) {
   const cur = motionBehaviours.value.find((b) => b.id === id)
   const l = cur ? localLayers.value.find((x) => x.id === cur.layerId) : null
   if (!cur || !l) return
+  const { replaceParams, ...fields } = patch
   const next: StoredBehaviour = {
-    ...cur, ...patch,
+    ...cur, ...fields,
     timing: { ...cur.timing, ...(patch.timing ?? {}) },
-    params: { ...cur.params, ...(patch.params ?? {}) },
+    params: replaceParams ? { ...(patch.params ?? {}) } : { ...cur.params, ...(patch.params ?? {}) },
   }
   // text.* behaviours have no compiled tracks — never recompile, just re-store the params.
   const tracks = isTextBehaviour(next) ? [] : compileBehaviourForLayer(l as LocalLayer, next as Behaviour)

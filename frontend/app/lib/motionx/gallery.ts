@@ -99,3 +99,29 @@ export function groupedMoves(moves: GalleryMove[]): Array<{ group: MoveGroup; mo
     .map((group) => ({ group, moves: moves.filter((m) => m.group === group) }))
     .filter((g) => g.moves.length > 0)
 }
+
+// ── Swapping a Letters bar for another move, in place ─────────────────────────
+/** The params EVERY Letters move reads (the inspector's Text block, the curve, the hide
+ *  switch). They survive a swap; everything else belonged to the old move and is dropped —
+ *  a Slot's `dir: 'in'` must not become a Mask slide's direction. */
+const SHARED_LETTER_PARAMS = ['by', 'stagger', 'order', 'seed', 'ease', 'hideBefore'] as const
+
+export function letterMoves(): GalleryMove[] {
+  return GALLERY_MOVES.filter((m) => m.group === 'Letters')
+}
+
+/** The gallery move a stored Letters bar reads as. Two moves can share a kind (Cascade in /
+ *  Cascade out), told apart by `dir`; with no match on `dir` the kind's first move stands. */
+export function letterMoveOf(b: { kind: string; params?: Record<string, unknown> }): GalleryMove | undefined {
+  const same = letterMoves().filter((m) => m.kind === b.kind)
+  return same.find((m) => m.params?.dir !== undefined && m.params.dir === b.params?.dir) ?? same[0]
+}
+
+/** The `kind` + the WHOLE new params for turning `b` into `move`. */
+export function swapLetterMove(
+  b: { kind: string; params?: Record<string, unknown> }, move: GalleryMove,
+): { kind: string; params: Record<string, unknown> } {
+  const params: Record<string, unknown> = { ...(move.params ?? {}) }
+  for (const k of SHARED_LETTER_PARAMS) if (b.params?.[k] !== undefined) params[k] = b.params[k]
+  return { kind: move.kind, params }
+}

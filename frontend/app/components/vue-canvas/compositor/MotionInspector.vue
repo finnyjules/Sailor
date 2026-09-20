@@ -9,8 +9,9 @@
  *  the Cloner / Feather / Fill panels it sits beside instead of like a form. */
 import type { Track, Ease, PropertyValue, StoredBehaviour, Timing } from '~/lib/motionx'
 
-export type BehaviourPatch = { params?: Record<string, unknown>; timing?: Partial<Timing>; kind?: string }
+export type BehaviourPatch = { params?: Record<string, unknown>; timing?: Partial<Timing>; kind?: string; replaceParams?: boolean }
 import { trackSpan, behaviourLabel } from '~/lib/motionx/bands'
+import { letterMoves, letterMoveOf, swapLetterMove } from '~/lib/motionx/gallery'
 import { retimeTrack, addPoint, setPointValue, setPointEase, removePoint, setBandTrack, bandTrackAt } from '~/lib/motionx/bandEdit'
 import { DEFAULT_TEXT_EASE, isTextBehaviour, pieceRanks, pieceTiming, textBehaviourHidesBefore, textBehaviourPhase, textBehaviourUsesEase, type Order } from '~/lib/motionx/text'
 import { NO_RUN, openRun, closeRun, takeRecord, type UndoRun } from '~/lib/motionx/undoCoalesce'
@@ -101,6 +102,19 @@ const behParam = (k: string) => behaviour.value?.params?.[k]
 function setBehParams(patch: Record<string, unknown>) {
   undoRun = closeRun()
   if (behaviour.value) emit('behaviour-change', behaviour.value.id, { params: patch })
+}
+// Swap a Letters bar for another move in place: same bar, same timing, same Text settings and
+// curve — only the move (and the params that belonged to it) changes. One undo step.
+const LETTER_MOVES = letterMoves()
+const LETTER_MOVE_IDS = LETTER_MOVES.map((m) => m.id)
+const LETTER_MOVE_LABELS = LETTER_MOVES.map((m) => m.label)
+const letterMoveId = computed(() => (behaviour.value ? letterMoveOf(behaviour.value)?.id : undefined) ?? '')
+function swapMove(id: string) {
+  const b = behaviour.value
+  const move = LETTER_MOVES.find((m) => m.id === id)
+  if (!b || !move || id === letterMoveId.value) return
+  undoRun = closeRun()
+  emit('behaviour-change', b.id, { ...swapLetterMove(b, move), replaceParams: true })
 }
 /** A row-slider edit: the first value of a gesture records, the rest ride along. */
 function setBehNum(key: string, patch: Record<string, unknown>) {
@@ -439,6 +453,10 @@ function onGradient(g: Gradient) {
         </div>
       </template>
       <template v-else-if="isTextBeh">
+        <StudioSelect data-testid="letters-move" label="Behaviour"
+          hint="Swap this bar for another letter move. Timing, stagger and easing are kept."
+          :model-value="letterMoveId" :options="LETTER_MOVE_IDS" :option-labels="LETTER_MOVE_LABELS"
+          @update:model-value="swapMove" />
         <div class="text-[10px] uppercase tracking-wide text-white/35">Text</div>
         <div data-testid="letters-by">
           <div class="panel-sublabel mb-1">Animate by</div>

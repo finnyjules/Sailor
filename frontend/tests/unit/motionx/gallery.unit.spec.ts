@@ -118,3 +118,31 @@ describe('loop moves default to ONE cycle (the bar is a cycle; ghosts repeat it)
     expect(defaultDurationForMove(GALLERY_MOVES.find((m) => m.id === 'spin')!)).toBe(2)
   })
 })
+
+// Swapping a Letters bar for another move in place (the inspector's Behaviour menu).
+describe('swapLetterMove', () => {
+  const slot = { kind: 'text.slot', params: { dir: 'in', roll: 'down', steps: 11, filler: 'mixed', by: 'words', stagger: 0.04, order: 'centre', seed: 7, ease: [0.2, 0, 0, 1], hideBefore: false } }
+  it('names the move a stored bar came from — cascade in and cascade out are different moves', async () => {
+    const { letterMoveOf } = await import('~/lib/motionx/gallery')
+    expect(letterMoveOf(slot)?.id).toBe('letters-slot')
+    expect(letterMoveOf({ kind: 'text.cascade', params: { dir: 'out' } })?.id).toBe('letters-cascade-out')
+    expect(letterMoveOf({ kind: 'text.cascade', params: {} })?.id).toBe('letters-cascade-in')
+    expect(letterMoveOf({ kind: 'fade', params: {} })).toBeUndefined()
+  })
+  it('keeps what every Letters move shares and drops what belonged to the old one', async () => {
+    const { swapLetterMove, GALLERY_MOVES } = await import('~/lib/motionx/gallery')
+    const out = swapLetterMove(slot, GALLERY_MOVES.find((m) => m.id === 'letters-cascade-out')!)
+    expect(out.kind).toBe('text.cascade')
+    expect(out.params).toEqual({ dir: 'out', style: 'rise', by: 'words', stagger: 0.04, order: 'centre', seed: 7, ease: [0.2, 0, 0, 1], hideBefore: false })
+  })
+  it('never invents a shared param the bar did not have', async () => {
+    const { swapLetterMove, GALLERY_MOVES } = await import('~/lib/motionx/gallery')
+    const out = swapLetterMove({ kind: 'text.slot', params: { steps: 3 } }, GALLERY_MOVES.find((m) => m.id === 'letters-wave')!)
+    expect(out).toEqual({ kind: 'text.wave', params: {} })
+  })
+  it('letterMoves lists exactly the Letters group', async () => {
+    const { letterMoves } = await import('~/lib/motionx/gallery')
+    expect(letterMoves().length).toBe(10)
+    expect(letterMoves().every((m) => m.group === 'Letters' && m.kind.startsWith('text.'))).toBe(true)
+  })
+})
