@@ -432,6 +432,19 @@ export const MODEL_COSTS: Record<string, ModelCost> = {
   'fal-ai/flux-general': { usd: 0.05, credits: 10, confidence: 'estimate', note: 'FLUX general (depth ControlNet + IP-adapter, one call) — assumed ~$0.05/MP for the heavier graph; re-verify against a live invoice (restyle-style Task 5)' },
   'fal-ai/flux-lora/inpainting': { usd: 0.04, credits: 8, confidence: 'estimate', note: 'FLUX Fill dev tier' },
   'fal-ai/nano-banana-2/edit': { usd: 0.10, credits: 20, confidence: 'estimate', note: 'pose transfer; verify against fal pricing' },
+  // — inpaint / whole-image edit routes, priced 2026-09-20 from fal's own model pages. Unpriced, every
+  //   one of these was REFUSED in hosted mode (the meter fails closed), FLUX.2 edit — the default edit
+  //   model — included. Per-megapixel rows are priced for a ~1 MP job, like their neighbours above.
+  'fal-ai/flux-2-pro/edit': { usd: 0.045, credits: 9, confidence: 'verified', note: '$0.03 first MP + $0.015 per extra MP of input AND output combined — one 1 MP reference + a 1 MP result' },
+  'fal-ai/qwen-image-edit/inpaint': { usd: 0.03, credits: 6, confidence: 'verified', note: '$0.03/MP' },
+  'fal-ai/flux-general/inpainting': { usd: 0.075, credits: 15, confidence: 'verified', note: '$0.075/MP, rounded up' },
+  'fal-ai/bytedance/seedream/v5/lite/edit': { usd: 0.035, credits: 7, confidence: 'verified', note: 'flat per image' },
+  'fal-ai/nano-banana-2': { usd: 0.08, credits: 16, confidence: 'verified', note: 'flat per image at 1K; 2K is 1.5x and 4K 2x' },
+  // GPT Image 1.5: fal defaults `quality` to "high" and our calls do not set it — $0.133 (1024x1024) to
+  // $0.200 (1024x1536) per image, plus input image tokens. Priced at the top of that range. Sending
+  // quality "medium" (~$0.05) would cut this by three quarters; that is a product call, not made here.
+  'fal-ai/gpt-image-1.5/edit': { usd: 0.20, credits: 30, confidence: 'estimate', note: 'default quality high: $0.133-$0.200/image + input image tokens; priced at the top' },
+  'fal-ai/gpt-image-1.5': { usd: 0.20, credits: 30, confidence: 'estimate', note: 'same tiers as /edit, without the input image' },
   'fal-ai/birefnet/v2': { usd: 0.005, credits: 1, confidence: 'estimate', note: 'background removal' },
   'fal-ai/recraft/v3/text-to-image': { usd: 0.08, credits: 16, confidence: 'verified', note: 'vector styles = 2× raster' },
   'fal-ai/recraft/vectorize': { usd: 0.01, credits: 2, confidence: 'estimate' },

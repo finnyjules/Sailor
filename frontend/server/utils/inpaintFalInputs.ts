@@ -147,7 +147,9 @@ export function fluxFillDevInput(
 // Whole-image reference editors that share the {prompt, image_urls} shape, keyed by
 // `variant`: nano2 → Nano Banana 2, seedream → Seedream 5 Lite, gptimage → GPT Image
 // 1.5; default → Nano Banana Pro. (Despite the name, this now serves more than nano.)
-const NANO_FAMILY: Record<string, string> = {
+// Exported for the price-book coverage spec: the app slug is assembled from these at call time
+// (`fal-ai/${family}/edit`), so a source scan for slug literals cannot see it.
+export const NANO_FAMILY: Record<string, string> = {
   nano2: 'nano-banana-2',
   seedream: 'bytedance/seedream/v5/lite',
   gptimage: 'gpt-image-1.5',

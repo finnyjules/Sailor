@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { NANO_FAMILY } from '../../server/utils/inpaintFalInputs'
 import { describe, expect, it } from 'vitest'
 import { MODEL_COSTS, PRICE_BOOK_VERSION, costForModel, priceGraph } from '../../server/utils/priceBook'
 
@@ -90,9 +91,12 @@ describe('price book: coverage of the codebase', () => {
   // an unpriced model is unmetered spend waiting for Stage 4.
   const serverRoot = fileURLToPath(new URL('../../server', import.meta.url))
   const SLUG = /'((?:black-forest-labs|fal-ai|meta|bytedance|recraft-ai|ostris|lucataco|minimax|krea|851-labs)\/[a-z0-9./-]+)'/g
-  // Non-inference references that legitimately appear in code without a price
-  // (none today; add slugs here with a reason if one appears):
-  const EXEMPT = new Set<string>([])
+  // Non-inference references that legitimately appear in code without a price:
+  const EXEMPT = new Set<string>([
+    // A model FAMILY fragment in inpaintFalInputs.ts's NANO_FAMILY, not a callable slug — the
+    // app is assembled as `fal-ai/${family}/edit`. The assembled slugs are checked below.
+    'bytedance/seedream/v5/lite',
+  ])
 
   function walk(dir: string, acc: string[] = []): string[] {
     for (const name of readdirSync(dir)) {
@@ -112,5 +116,13 @@ describe('price book: coverage of the codebase', () => {
     expect(found.size).toBeGreaterThan(10) // the scan itself must be alive
     const unpriced = [...found].filter(s => !MODEL_COSTS[s] && !EXEMPT.has(s))
     expect(unpriced, `unpriced model slugs: ${unpriced.join(', ')}`).toEqual([])
+  })
+
+  it('every slug ASSEMBLED at call time is priced too (the literal scan above cannot see these)', () => {
+    // nanoGenInput builds `fal-ai/${family}/edit` from a variant key. An unpriced one is refused
+    // outright in hosted mode, so a new family has to arrive with its price.
+    const assembled = ['nano-banana-pro', ...Object.values(NANO_FAMILY)].map(f => `fal-ai/${f}/edit`)
+    const unpriced = assembled.filter(s => !MODEL_COSTS[s])
+    expect(unpriced, `unpriced assembled slugs: ${unpriced.join(', ')}`).toEqual([])
   })
 })
