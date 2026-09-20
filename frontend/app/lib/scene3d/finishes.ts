@@ -31,6 +31,7 @@
 // at all in that case (not even to snapshot a cache key), so an object with no finish treatment
 // builds/compiles exactly as it did before this file existed.
 import * as THREE from 'three'
+import { stripAlpha } from '~/lib/color/convert'
 import { OPAL_DEFAULT_STOPS, MATCAP_IDS, MATCAP_SPECS } from './config'
 // `drawMatcap` is the ONE value this three-and-DOM-heavy module imports from materials.ts — a
 // two-way dependency (materials.ts already imports `applyFinish`/`updateFinishUniforms`/
@@ -54,7 +55,9 @@ const RAMP_WIDTH = 256
 
 function buildOpalRamp(): THREE.DataTexture {
   const stops = [...OPAL_DEFAULT_STOPS].sort((a, b) => a.pos - b.pos).map((s) => {
-    const hex = new THREE.Color(s.color).getHex(THREE.SRGBColorSpace)
+    // stripAlpha: three refuses an 8-digit hex and silently keeps WHITE. These stops are a
+    // constant today, but the day they become editable the picker will hand over alpha hex.
+    const hex = new THREE.Color(stripAlpha(s.color)).getHex(THREE.SRGBColorSpace)
     return { pos: s.pos, r: (hex >> 16) & 255, g: (hex >> 8) & 255, b: hex & 255 }
   })
   const data = new Uint8Array(RAMP_WIDTH * 4)
