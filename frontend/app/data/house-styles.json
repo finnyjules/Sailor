@@ -42,6 +42,26 @@
     ]
   },
   {
+    "id": "bold-pattern-cartoon",
+    "label": "Bold Pattern Cartoon",
+    "useCases": [
+      "illustration"
+    ],
+    "trigger": "bold_pattern_cartoon",
+    "tasteProfile": "Flat vector pop illustration, bold rounded blob character with oversized hands and simple dot-eye face, no outlines, shapes defined by flat color only. Saturated candy palette: hot pink, cobalt blue, kelly green, marigold yellow, coral red at full saturation. Clothing filled with dense doodle patterns and confetti shapes. Solid flat [pink/yellow/chartreuse] background, no depth, no gradients, no texture, no shading. Playful everyday objects with cute faces floating around the figure. Contemporary editorial character illustration, screen-flat, maximalist.",
+    "replicateModel": "finnyjules/jules-bold-pattern-cartoon",
+    "weightsUrl": "https://replicate.delivery/xezq/2gIXg9vQsQ5XOFukxOoeZGKwPgrcWYUqteYXf8mbN2qM1XwtA/trained_model.tar",
+    "examplePrompts": [
+      "bold_pattern_cartoon"
+    ],
+    "thumbnails": [
+      "/house-styles/bold-pattern-cartoon/thumb-1.webp",
+      "/house-styles/bold-pattern-cartoon/thumb-2.webp",
+      "/house-styles/bold-pattern-cartoon/thumb-3.webp",
+      "/house-styles/bold-pattern-cartoon/thumb-4.webp"
+    ]
+  },
+  {
     "id": "cinematic-amber-clairobscur",
     "label": "Cinematic Amber Clairobscur",
     "useCases": [
@@ -113,7 +133,7 @@
       "poster"
     ],
     "trigger": "cosmic_chrome_odyssey",
-    "tasteProfile": "This aesthetic converges 1970s and 1980s airbrush illustration techniques with high-gloss, liquid metallic textures, yielding a dreamlike, cosmic atmosphere defined by deep blue and neon gradients. Sharp starburst lens flares and vibrant chromatic aberrations punctuate the composition, rooted in a highly polished, nostalgic sci-fi sensibility that prioritizes specular highlights and saturated, high-contrast lighting.",
+    "tasteProfile": "Hyperreal 1980s airbrush illustration, liquid chrome rendering where every subject appears sculpted from polished mirrored metal, smooth molten reflective surfaces with flowing organic contours, crisp specular highlights and multi-point starburst lens flares scattered across curves, warped rainbow reflections pooling in the chrome showing hints of amber, teal, and magenta, soft-focus vignette edges with subtle film grain. Palette: silver chrome, cobalt blue, deep indigo black, electric red, sunset orange, seafoam green gradient glows. No brushstrokes, no flat color, no matte surfaces, no outlines, no photographic realism. Smooth vertical gradient background [midnight-black to blue/blue to green/pink to violet]. Retro-futurist poster art, Y2K chrome revival, glossy, dreamlike, maximalist shine.",
     "replicateModel": "finnyjules/jules-cosmic_chrome_odyssey",
     "weightsUrl": "https://replicate.delivery/xezq/g4GNSDxF6ho9Al4x5oAukKAw1uwJbQWIvun2ES2c7IjQ1vqF/trained_model.tar",
     "examplePrompts": [
@@ -124,6 +144,26 @@
       "/house-styles/cosmic-chrome-odyssey/thumb-2.webp",
       "/house-styles/cosmic-chrome-odyssey/thumb-3.webp",
       "/house-styles/cosmic-chrome-odyssey/thumb-4.webp"
+    ]
+  },
+  {
+    "id": "dotwork-monochrome",
+    "label": "Dotwork Monochrome",
+    "useCases": [
+      "illustration"
+    ],
+    "trigger": "dotwork_monochrome",
+    "tasteProfile": "Fine stippled dotwork illustration, meticulous pointillism ink technique, forms sculpted entirely from thousands of tiny hand-placed dots, tonal gradients built by dot density alone, dense clusters for shadow dissolving into sparse scatter for highlights, crisp contour edges emerging from stipple fields, smooth volumetric shading with soft realistic light, centered portrait-style composition with generous negative space. Strict monochrome palette: pure black ink dots on off-white or pale grey paper, subtle paper grain visible. No hatching lines, no solid fills, no color, no digital smoothness, no painterly strokes. Background [blank white paper/light stipple wash/dark dotted field]. Vintage scientific-engraving feel, tattoo-flash precision, meditative craft, monochrome pointillism, archival ink drawing.",
+    "replicateModel": "finnyjules/jules-dotwork-monochrome",
+    "weightsUrl": "https://replicate.delivery/xezq/oQYxKYBo2h6lOpA6QRXcEYi3FxIfKBM2a7kU0R2YUzyoybdLA/trained_model.tar",
+    "examplePrompts": [
+      "dotwork_monochrome"
+    ],
+    "thumbnails": [
+      "/house-styles/dotwork-monochrome/thumb-1.webp",
+      "/house-styles/dotwork-monochrome/thumb-2.webp",
+      "/house-styles/dotwork-monochrome/thumb-3.webp",
+      "/house-styles/dotwork-monochrome/thumb-4.webp"
     ]
   },
   {
@@ -172,11 +212,10 @@
     "id": "electric-realism-painting",
     "label": "Electric Realism Painting",
     "useCases": [
-      "illustration",
-      "editorial"
+      "illustration"
     ],
     "trigger": "electric_realism_painting",
-    "tasteProfile": "This aesthetic celebrates bold, emotive painterly work that fuses traditional roughness with modern digital dynamism. It features striking, non-naturalistic color combinations and dynamic, gestural brushwork amplifying emotional depth. Throughout, a consistent emphasis on expressive mark-making: fluid midnight-blue washes and vibrant neon-infused impasto. Bold impasto brushstrokes, high-contrast lighting, saturated neon palette, textured painterly finish, raw emotional intensity, graphic color blocking.",
+    "tasteProfile": "Expressive digital gouache painting, loose confident brushwork with visible directional strokes, forms carved from broad flat color planes rather than lines, edges left raw and painterly with dry-brush fringing, subjects rendered semi-realistically with sculptural planar shading, dramatic rim light and bold color-blocked shadows, tight cropped portrait or scene composition. Electric high-chroma palette: neon magenta, hot pink, cobalt and ultramarine blue, tangerine orange, cyan, acid yellow used as ambient light and shadow color. No fine detail, no blended airbrush gradients, no photorealism, no hard outlines, no texture overlays. Solid saturated [magenta/cyan/hot pink/yellow] backdrop with brushy edges. Concept-art speedpaint aesthetic, moody chromatic lighting, painterly, contemporary vivid realism.",
     "replicateModel": "finnyjules/jules-electric_realism_painting",
     "weightsUrl": "https://replicate.delivery/xezq/Lqo9mmJQeb2zXa5mDm1oNiSttYwNswZvGPyWO5ZCXlwGomVLA/trained_model.tar",
     "examplePrompts": [
@@ -218,7 +257,7 @@
       "branding"
     ],
     "trigger": "ethereal_radiance_fusion",
-    "tasteProfile": "This aesthetic combines the precision of digital minimalism with the fluidity of organic forms, featuring translucent, bulbous, and fluid shapes that emit a soft, internal glow. It pairs high-contrast, dark backgrounds with vibrant, light-reactive textures, showcasing iridescent glass-like effects and subsurface scattering. The result is a cohesive visual language defined by luminosity and depth, with a focus on the harmonious blend of digital and organic elements.",
+    "tasteProfile": "Soft-body 3D render, frosted translucent glass or gel sculpture aesthetic, subjects reduced to smooth blobby simplified forms with rounded edges and no hard detail, subsurface scattering glow from within, iridescent holographic color diffusing through the volume like light trapped in frosted resin, heavy gaussian softness, gentle rim glow, single centered subject floating in empty space. Prismatic pastel-neon palette: bubblegum pink, aqua cyan, lavender violet, lemon yellow, peach orange, mint green blending in seamless spectral gradients. No outlines, no hard shadows, no texture, no surface detail, no realistic materials, no busy backgrounds. Solid [black/pale ice-blue/soft grey] backdrop. Dreamy digital sculpture, blurry gradient render, luminous, minimalist, ethereal.",
     "replicateModel": "finnyjules/jules-ethereal_radiance_fusion",
     "weightsUrl": "https://replicate.delivery/xezq/mxqV2jlMs77BLJltAOfkGwAszYMbChswMeJiUKr16izWxArWA/trained_model.tar",
     "examplePrompts": [
@@ -239,7 +278,7 @@
       "poster"
     ],
     "trigger": "ethereal_thermic",
-    "tasteProfile": "This aesthetic explores the intersection of abstract human silhouettes and vibrant, atmospheric light phenomena. It balances high-contrast, ink-bleed minimalism with the glowing, heat-map intensity of thermal and Kirlian photography. Common threads include heavy, tactile film grain, soft-focus blur, and an otherworldly, monochromatic-to-neon color palette that emphasizes ethereal diffusion.",
+    "tasteProfile": "Soft-focus experimental photograph, subject rendered as a hazy diffused silhouette dissolving at the edges like a thermal or aura print, forms melt into surrounding fog with heavy Gaussian blur, no sharp detail, gradients bleed outward from a dark central mass into luminous colored halos, dreamlike lensless depth, centered single-subject composition with generous negative space. Palette: violet-purple, ultramarine and cobalt blue, misty lavender-grey, with occasional crimson red, gold-yellow and mint-green thermal bleeds against pale white or grey-blue grounds. No crisp edges, no texture detail, no hard shadows, no visible linework. Background of [pale white/misty grey-blue/lavender fog]. Ethereal aura photography, spectral, meditative, analog-diffusion feel.",
     "replicateModel": "finnyjules/jules-ethereal_thermic",
     "weightsUrl": "https://replicate.delivery/xezq/4Gdwz1E65K4QLhLVDmI56xVSkz2kSp6buDtSs7TrR1ErPsqF/trained_model.tar",
     "examplePrompts": [
@@ -323,7 +362,7 @@
       "poster"
     ],
     "trigger": "grand_theft_auto",
-    "tasteProfile": "A vibrant, cinematic illustration aesthetic in an ultra-detailed stylized game-art drawing style. Rich, warm palette with strong blues, greens, and reds; soft yet dramatic lighting mixing natural and artificial sources for depth. Sharp foreground focus against slightly blurred backgrounds; dynamic compositions spanning close-ups and wide shots. Bold outlines, saturated color, poster-like polish.",
+    "tasteProfile": "Video game key art illustration, realistic character proportions rendered in flat cel-shaded color planes with hard shadow edges, thin dark contour linework, like inked comic art with vector-flat digital paint. Highly detailed foreground figure, simplified flat vector silhouetted background. Golden hour California light, warm rim lighting, teal and orange palette [or: pink, lavender and mint sunset palette]. Character posed toward camera, low angle, poster composition. Crisp clean edges, no texture, no grain.",
     "replicateModel": "finnyjules/jules-grand_theft_auto",
     "weightsUrl": "https://replicate.delivery/xezq/nPDebB0YMd24caWB70anJ4doTwtrlPWrEgwgseVzl4q52NyWA/trained_model.tar",
     "examplePrompts": [
@@ -472,7 +511,7 @@
       "photography"
     ],
     "trigger": "midnight_electric_dreams",
-    "tasteProfile": "This aesthetic combines the dramatic contrasts of classical chiaroscuro with the bold, electric hues of modern minimalism. It showcases deep, absolute black shadows that are suddenly illuminated by intense, vibrant cobalt and cyan light, creating a hauntingly sculptural visual experience. The style seamlessly blends organic, textured subjects with sleek, luminous highlights, resulting in a retro-futuristic atmosphere that is both stark and mesmerizing. Cobalt blue lighting, stark chiaroscuro, pitch black background, spectral glow, high contrast noir, sculptural textures, heavy film grain",
+    "tasteProfile": "Cinematic dark-photography and painterly render hybrid, subjects emerging from pure black voids, lit by a single ethereal blue rim light and soft internal glow, forms modeled with smooth luminous gradients and hazy diffusion, edges bleeding into darkness with soft bloom, dramatic chiaroscuro with 80–90% of frame in deep shadow, monochromatic palette of electric cobalt, ultramarine, cyan-white highlights, and midnight navy against jet black, occasional [violet/red] accent glow, no ambient light, no visible environment, no warm tones, no flat lighting, no hard outlines. Vertical portrait composition, subject centered and partially swallowed by shadow. Moody, spectral, dreamlike, nocturne aesthetic, ethereal glow photography, mysterious and cinematic.",
     "replicateModel": "finnyjules/jules-midnight_electric_dreams",
     "weightsUrl": "https://replicate.delivery/xezq/Ls3oK6qNKVJFMl7rYUHlAXs6ERqfLKQXgIzfMFkFH9CVdCrWA/trained_model.tar",
     "examplePrompts": [
@@ -535,7 +574,7 @@
       "illustration"
     ],
     "trigger": "monochrome_seinen_manga",
-    "tasteProfile": "This aesthetic combines the technical precision of high-contrast manga techniques with the emotional intensity of expressive brushstrokes, creating a sophisticated visual language. It relies on dramatic chiaroscuro lighting and psychological tension, emphasizing deep blacks and intricate textures to craft a suspenseful atmosphere. Character-driven storytelling is elevated by bold line art, gritty cross-hatching, and a cinematic approach, evoking the gritty realism of a monochrome graphic novel.\n\nseinen aesthetic, sharp cross-hatching, chiaroscuro lighting, monochrome graphic novel, high-contrast manga ink, expressive brushwork, dramatic noir shadows",
+    "tasteProfile": "Black-and-white seinen manga illustration, aggressive inked linework with dry-brush strokes, cross-hatching and scratchy feathered edges, high-contrast chiaroscuro with heavy solid black spot fills against stark white paper, mid-tones from grey ink wash and occasional halftone screentone, dramatic close-up or low-angle cinematic framing, intense expressions with sharply rendered eyes, splatter and rough texture at panel edges, energetic speedline-like hatching in backgrounds. Strict grayscale palette only: pure black, paper white, silvery grey washes; no color, no smooth digital gradients, no soft airbrush shading, no clean vector lines. [extreme facial close-up/full-figure/moody landscape] composition. Gritty seinen manga panel, hand-inked, dramatic, hypertextured monochrome.",
     "replicateModel": "finnyjules/jules-monochrome-seinen-manga",
     "weightsUrl": "https://replicate.delivery/xezq/16Q9JLbqB3qrINQsIIa0a6IaxbFktoRWoxDeziCffhwGOfQbB/trained_model.tar",
     "examplePrompts": [
@@ -741,6 +780,26 @@
     ]
   },
   {
+    "id": "retrograde-radiance",
+    "label": "Retrograde Radiance",
+    "useCases": [
+      "illustration"
+    ],
+    "trigger": "retrograde_radiance",
+    "tasteProfile": "This aesthetic combines a passion for mid-century modernity with the tactile, nostalgic appeal of vintage printing methods. It fuses the warmth of idyllic photography with the dreamlike quality of surrealist illustration, emphasizing bold, vibrant color schemes and coarse film texture. Unifying elements include the distinctive use of halftone dots and airbrush gradients, which anchor each image in a nostalgic past.\n\nlo-fi airbrush texture, mid-century retro aesthetic, heavy film grain, saturated technicolor palette, pop surrealism, warm sun-drenched lighting, vintage halftone print",
+    "replicateModel": "finnyjules/jules-retrograde-radiance",
+    "weightsUrl": "https://replicate.delivery/xezq/7mUeyuXAFFSIZKL5RvD88VF5mOWz52LdFMXQsNSxGeUKuJ7WA/trained_model.tar",
+    "examplePrompts": [
+      "retrograde_radiance"
+    ],
+    "thumbnails": [
+      "/house-styles/retrograde-radiance/thumb-1.webp",
+      "/house-styles/retrograde-radiance/thumb-2.webp",
+      "/house-styles/retrograde-radiance/thumb-3.webp",
+      "/house-styles/retrograde-radiance/thumb-4.webp"
+    ]
+  },
+  {
     "id": "retrograde-stipple",
     "label": "Retrograde Stipple",
     "useCases": [
@@ -791,7 +850,7 @@
       "editorial"
     ],
     "trigger": "rouge_lumineuse",
-    "tasteProfile": "This aesthetic is rooted in a bold, dual-toned visual narrative, where rich, velvety crimson hues and radiant, electric cobalt blues converge in a striking interplay. Inspired by the dramatic lighting techniques of classic portraiture and modern graphic still life, it employs directional studio lighting to craft dramatic silhouettes from deep, enigmatic shadows. The overall atmosphere is theatrical and cinematic, characterized by a refined balance between vibrant color theory and stark, moody minimalism.",
+    "tasteProfile": "Cinematic dual-tone gel photography, moody low-key studio and night scenes lit exclusively by opposing colored light sources, red glow raking one side of the subject while deep blue floods the other, hard chiaroscuro split-lighting carving forms out of near-black shadow, smooth painterly falloff, subtle film grain, dramatic underexposed framing with subjects emerging from darkness. Strict two-color palette: crimson red, scarlet, cobalt blue, ultramarine, violet-magenta where the gels overlap; blacks crushed to pure shadow. No white light, no neutral tones, no daylight, no natural skin color, no bright highlights, no busy detail. Background is [saturated blue wall/red-blue split void/dim urban night]. Neo-noir editorial photography, synthwave-adjacent, sensual, atmospheric, high-contrast minimalist.",
     "replicateModel": "finnyjules/jules-rouge_lumineuse",
     "weightsUrl": "https://replicate.delivery/xezq/C7VFWIehYSVMKykPjS3kH1sJdmesqstCaf2Q9YGZTvLXX8VtA/trained_model.tar",
     "examplePrompts": [
@@ -813,7 +872,7 @@
       "branding"
     ],
     "trigger": "rough_cut_revival",
-    "tasteProfile": "This aesthetic converges raw, high-contrast linocut techniques with a bold, muted color scheme characterized by acidic to earthy greens. It combines the edgy, DIY spirit of punk-zine visuals with the tactile, artisanal quality of hand-carved textures. The emphasis is on striking graphic silhouettes and deliberate, handmade imperfections, evoking a sense of rough-hewn, organic printmaking.",
+    "tasteProfile": "Linocut block print illustration, hand-carved relief technique with bold black ink over gouged tool marks, chunky expressive carving strokes radiating around subjects, forms defined by heavy silhouette masses with scratchy white-line highlights cut from the block, visible ink texture, uneven registration, rough grainy edges and residual carving debris in negative space. Palette: dense black ink dominating over chartreuse green, lime, olive, and moss green tones, occasional single accent [red/deep green/pale cream]. No smooth gradients, no fine digital linework, no photorealism, no clean vector edges. Flat [chartreuse/lime green/cream] paper background showing through carved areas. Handmade printmaking aesthetic, raw, folk-art expressionist, tactile, high-contrast graphic.",
     "replicateModel": "finnyjules/jules-rough_cut_revival",
     "weightsUrl": "https://replicate.delivery/xezq/Kb7P6ZdtdOZzPVLODmhTMbe2Fe4eMIMWHQ3zYFqLkWkhk1VtA/trained_model.tar",
     "examplePrompts": [
@@ -869,6 +928,26 @@
     ]
   },
   {
+    "id": "ultra-pencil",
+    "label": "Ultra Pencil",
+    "useCases": [
+      "illustration"
+    ],
+    "trigger": "ultra_pencil",
+    "tasteProfile": "Editorial poster illustration, detailed pencil rendering with visible cross-hatching and as loose unfinished sketch lines. Flat screen-print color blocking in a limited 3-color palette. Silkscreen grain and ink speckle texture. Hard shadows as flat shapes, no gradients or realistic lighting. Figure floating on a solid flat background with generous negative space. Alternative movie poster style.",
+    "replicateModel": "finnyjules/jules-ultra-pencil",
+    "weightsUrl": "https://replicate.delivery/xezq/KWIC7ZRLP0o6GlSsDMx2dTm9gah8L6UXw88uJJhySM72cyuF/trained_model.tar",
+    "examplePrompts": [
+      "ultra_pencil"
+    ],
+    "thumbnails": [
+      "/house-styles/ultra-pencil/thumb-1.webp",
+      "/house-styles/ultra-pencil/thumb-2.webp",
+      "/house-styles/ultra-pencil/thumb-3.webp",
+      "/house-styles/ultra-pencil/thumb-4.webp"
+    ]
+  },
+  {
     "id": "vibrant-brushfire-fusion",
     "label": "Vibrant Brushfire Fusion",
     "useCases": [
@@ -876,7 +955,7 @@
       "poster"
     ],
     "trigger": "vibrant_brushfire_fusion",
-    "tasteProfile": "This aesthetic embodies the fusion of modernist brushwork and Fauvist fervor, characterized by thick, textured strokes that imbue ordinary scenes with a dreamlike, high-octane quality. It favors non-naturalistic, highly chromatic color schemes that boldly reconfigure the visual landscape, while bold lighting and stylized forms bridge the gap between classical oil painting traditions and contemporary, kinetic visual narratives. Vivid impasto brushstrokes, saturated color palette, fauvism inspired, dynamic light and shadow, expressive oil painting style, stylized non-naturalistic colors, bold color blocking",
+    "tasteProfile": "Painterly gouache-oil impressionist illustration, bold confident brushwork with visible flat strokes and palette-knife dabs, forms blocked in with chunky color planes rather than line, minimal detail resolved through shape and value contrast, colored shadows in violet and teal replacing neutral grays, strong directional sunlight with luminous warm highlights, simplified backgrounds broken into loose abstract strokes. Vivid fauvist palette: hot pink, magenta, ultramarine violet, cobalt blue, tangerine orange, chartreuse yellow, mint teal pushed past natural color. No outlines, no blending gradients, no photorealism, no fine detail, no muddy neutrals. Background sky in [pink-magenta sunset/clear cerulean/lavender dusk]. Contemporary alla prima painting, expressive, chromatic, gallery-bright.",
     "replicateModel": "finnyjules/jules-vibrant_brushfire_fusion",
     "weightsUrl": "https://replicate.delivery/xezq/B8HhWdbe85Q7DKPwATYBeBv0adTDgWrRZBMTCjvKywA8hfWtA/trained_model.tar",
     "examplePrompts": [
