@@ -863,8 +863,19 @@
       "generative": false,
       "params": [
         {
-          "uniform": "u_axis",
-          "label": "Axis",
+          "uniform": "u_slices",
+          "label": "Slices",
+          "type": "enum",
+          "default": 0,
+          "options": [
+            { "label": "Rows", "value": 0 },
+            { "label": "Columns", "value": 1 },
+            { "label": "Grid", "value": 2 }
+          ]
+        },
+        {
+          "uniform": "u_shift",
+          "label": "Shift",
           "type": "enum",
           "default": 0,
           "options": [
@@ -930,8 +941,11 @@
           "options": [
             { "label": "None", "value": 0 },
             { "label": "Top to bottom", "value": 1 },
-            { "label": "Edges to center", "value": 2 },
-            { "label": "Radial", "value": 3 }
+            { "label": "Bottom to top", "value": 4 },
+            { "label": "Left to right", "value": 5 },
+            { "label": "Right to left", "value": 6 },
+            { "label": "Radial", "value": 3 },
+            { "label": "Edges to center", "value": 2 }
           ]
         },
         {
