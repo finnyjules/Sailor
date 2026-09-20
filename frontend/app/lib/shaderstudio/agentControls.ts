@@ -299,7 +299,9 @@ function renderExamples(): string {
  *  back under it — the verbose "…by hand" recipe parentheticals and a run of
  *  redundant synonyms (the longest derived section), no look word a test relies on
  *  and no effect id removed. The next effect to run it out should compress again,
- *  not raise this. */
+ *  not raise this. (09-20: the effect index had grown it 16 over; paid for by tightening
+ *  the last HOW TO ANSWER rule, which only restated the head's "2-4 params, not one knob",
+ *  and one word off the bloom line.) */
 export const SHADER_GUIDANCE_CEILING = 8150
 
 /**
@@ -324,13 +326,13 @@ export function buildShaderGuidance(catalog: EffectDef[] | null | undefined): st
 - adjust.* — exposure/brightness/contrast/saturation/hue/temperature/tint ("warmer", "punchier").
 - post.blur.* — lens blur with a focus point ("shallow depth of field").
 - post.chromatic.* — RGB fringing, part of most glitch looks.
-- post.bloom.* — glow bleed off the brights ("glowy", "dreamy").
+- post.bloom.* — glow off the brights ("glowy", "dreamy").
 - effects.0.mask.* — confine the EFFECT (not post) to a region: radius | band | linear, plus centre/size/feather ("only in the middle").`
   const rules = `HOW TO ANSWER:
 - PICK THE EFFECT FIRST when the ask needs a look the current effect can't give ("effect": "<id>"). Switching resets that layer's params to the new effect's defaults; effects.0.params.* keys in the SAME patch then apply on top — send both together.
 - Only send effects.0.params.* uniforms of the effect you're picking; uniforms of the OLD effect are dropped.
 - When merely ADJUSTING the current look ("more contrast", "warmer"), do NOT set "effect" — tune the specific knobs.
-- Prefer 2-4 meaningful changes over one, and over twenty.`
+- 2-4 meaningful changes — not one, not twenty.`
   const parts = [head]
   if (catalog?.length) {
     parts.push(`EFFECTS (id · name, by family — set "effect" to an id):\n${shaderEffectIndex(catalog)}`)
