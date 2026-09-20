@@ -1345,6 +1345,37 @@ def _build_audio_filter_graph(in_stream, speed: float, reverse: bool):
     return graph
 
 
+# BT.709 limited-range color signaling for every exported video ----------------
+#
+# Our source pixels are full-range sRGB (the same array the PNG export writes).
+# Left alone, PyAV/libswscale converts RGB->YUV with the BT.601 matrix and
+# writes *no* color tags. Color-managed players (QuickTime, Finder, Photos)
+# then see an untagged HD stream, assume BT.709, and decode with a mismatched
+# matrix — which desaturates the picture, so the video looks washed out next to
+# the identical-pixel PNG. Tagging BT.709 makes the conversion matrix and the
+# container's signaling agree, so the video matches what's on screen.
+#
+# Integer values are FFmpeg's AVCOL_* enums: color_range 1 = MPEG/limited;
+# colorspace (matrix) / color_primaries / color_trc 1 = BT.709.
+_BT709_RANGE = 1
+_BT709 = 1
+
+
+def _apply_bt709(codec_context) -> None:
+    codec_context.color_range = _BT709_RANGE
+    codec_context.colorspace = _BT709
+    codec_context.color_primaries = _BT709
+    codec_context.color_trc = _BT709
+
+
+def _tag_frame_bt709(frame):
+    frame.color_range = _BT709_RANGE
+    frame.colorspace = _BT709
+    frame.color_primaries = _BT709
+    frame.color_trc = _BT709
+    return frame
+
+
 def render_timeline_to_file(state: dict, output_dir: str, progress=None) -> dict:
     """Render the edit `state` to a video file in `output_dir`. Returns metadata.
 
@@ -1395,6 +1426,7 @@ def render_timeline_to_file(state: dict, output_dir: str, progress=None) -> dict
     out_stream.pix_fmt = "yuv420p"
     # Reasonable defaults; user can re-encode externally if they want more control.
     out_stream.options = {"preset": "veryfast", "crf": "20"}
+    _apply_bt709(out_stream.codec_context)
 
     # Audio: if provided, copy/transcode from source while we render video.
     audio_in_container = None
@@ -1419,6 +1451,7 @@ def render_timeline_to_file(state: dict, output_dir: str, progress=None) -> dict
         # truncation here would put exported video ±1 off every other surface.
         out_frame_arr = (render_frame_np(state, clips, f) * 255.0).round().astype(np.uint8)
         av_frame = av.VideoFrame.from_ndarray(out_frame_arr, format="rgb24")
+        _tag_frame_bt709(av_frame)
         for packet in out_stream.encode(av_frame):
             out.mux(packet)
 
@@ -1543,6 +1576,7 @@ def encode_spacetype_video(frames_list, fps, width, height, out_path, alpha=Fals
             stream.options = {"preset": "veryfast", "crf": "20"}
         stream.width = width
         stream.height = height
+        _apply_bt709(stream.codec_context)
 
         for fn in frames_list:
             # Resolve filename: try annotated filepath first, then input_dir
@@ -1561,6 +1595,7 @@ def encode_spacetype_video(frames_list, fps, width, height, out_path, alpha=Fals
                 im = im.convert("RGBA")
                 arr = np.array(im, dtype=np.uint8)
                 av_frame = av.VideoFrame.from_ndarray(arr, format="rgba")
+                _tag_frame_bt709(av_frame)
             else:
                 # Flatten RGBA onto black — h264/yuv420p has no alpha channel
                 if im.mode == "RGBA":
@@ -1571,6 +1606,7 @@ def encode_spacetype_video(frames_list, fps, width, height, out_path, alpha=Fals
                     im = im.convert("RGB")
                 arr = np.array(im, dtype=np.uint8)
                 av_frame = av.VideoFrame.from_ndarray(arr, format="rgb24")
+                _tag_frame_bt709(av_frame)
 
             for packet in stream.encode(av_frame):
                 out.mux(packet)

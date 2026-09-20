@@ -121,3 +121,38 @@ def test_default_export_is_unchanged(tmp_path):
     # The opaque square must still be visible.
     inside_rgb = frame[32, 32, :3]
     assert inside_rgb[0] > 150, f"expected the red square to survive, got {inside_rgb}"
+
+
+def _probe_color_tags(path):
+    """Read the stream's signalled color metadata (FFmpeg AVCOL_* enums)."""
+    import av
+    c = av.open(path)
+    cc = c.streams.video[0].codec_context
+    tags = (cc.color_range, cc.colorspace, cc.color_primaries, cc.color_trc)
+    c.close()
+    return tags
+
+
+@pytest.mark.parametrize(
+    "alpha,ext",
+    [(False, "out.mp4"), (True, "out.webm")],
+)
+def test_export_signals_bt709_limited(tmp_path, alpha, ext):
+    """Both encoders must tag BT.709 limited range.
+
+    Without this, libswscale converts RGB->YUV with the BT.601 matrix and
+    writes no color tags, so color-managed players (QuickTime/Finder/Photos)
+    assume BT.709 and decode with a mismatched matrix — the exported video
+    looks washed out next to the identical-pixel PNG. Regression guard for
+    that fix: range=1 (MPEG/limited), matrix/primaries/trc=1 (BT.709).
+    """
+    frames = _make_frames(tmp_path)
+    out_path = str(tmp_path / ext)
+
+    nt.encode_spacetype_video(frames, FPS, W, H, out_path, alpha=alpha)
+
+    color_range, matrix, primaries, trc = _probe_color_tags(out_path)
+    assert color_range == 1, f"expected limited range (1), got {color_range}"
+    assert matrix == 1, f"expected BT.709 matrix (1), got {matrix}"
+    assert primaries == 1, f"expected BT.709 primaries (1), got {primaries}"
+    assert trc == 1, f"expected BT.709 transfer (1), got {trc}"
