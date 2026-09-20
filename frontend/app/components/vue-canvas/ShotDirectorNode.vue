@@ -71,7 +71,7 @@ function generate() {
 
 <template>
   <div
-    class="relative w-[220px] overflow-hidden rounded-xl border border-white/10 bg-neutral-900 text-white shadow-lg"
+    class="studio-node relative w-[220px] overflow-hidden rounded-xl border border-white/10 bg-neutral-900 text-white shadow-lg"
     @dblclick.stop="openEditor"
   >
     <!-- Output handle -->

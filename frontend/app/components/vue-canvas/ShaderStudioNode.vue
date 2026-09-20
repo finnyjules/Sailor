@@ -88,6 +88,15 @@ function effectDef(id: string): EffectDef | null {
   return catalog.value?.effects.find(e => e.id === resolveEffectId(id)) ?? null
 }
 
+/** The card header names the first effect the way the picker does — never the raw id.
+ *  Until the catalog arrives (or for an id it no longer lists) the id is spelled out. */
+const headerEffectName = computed(() => {
+  const id = config.value.effects[0]?.id
+  if (!id) return 'No effect'
+  const spaced = id.replace(/_/g, ' ')
+  return effectDef(id)?.name ?? spaced.charAt(0).toUpperCase() + spaced.slice(1)
+})
+
 async function renderFrame(t01: number) {
   const el = canvasEl.value
   if (!el) return
@@ -204,7 +213,7 @@ const varsInputIndex = computed(() =>
   <!-- Ports live outside the card: the card clips its own content
        (overflow-hidden), which would otherwise cut the dots and their hit
        areas in half. As siblings they also tuck in behind it. -->
-  <div ref="rootEl" class="relative w-fit">
+  <div ref="rootEl" class="studio-node relative w-fit">
     <!-- Input handle (image in) -->
     <VueCanvasNodePort
       id="input-0" type="target" side="left" :index="0"
@@ -232,7 +241,7 @@ const varsInputIndex = computed(() =>
     <div class="flex items-center gap-2 border-b border-white/10 px-3 py-2">
       <Sparkles class="h-3.5 w-3.5 text-white/70" />
       <span class="text-xs font-medium text-white/80">Shader Studio</span>
-      <span class="ml-auto truncate text-[10px] uppercase tracking-wide text-white/40">{{ config.effects[0]?.id || 'no effect' }}</span>
+      <span class="ml-auto truncate text-[10px] tracking-wide text-white/40">{{ headerEffectName }}</span>
     </div>
 
     <div class="flex items-center justify-center bg-neutral-950 aspect-video">

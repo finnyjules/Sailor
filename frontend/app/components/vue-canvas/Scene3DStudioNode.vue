@@ -282,7 +282,7 @@ onBeforeUnmount(() => {
        behind the node — the shared VueCanvasNodePort treatment every node uses.
        glb_url input on the left; beauty/depth/normal outputs stacked down the
        right from the vertical midpoint. -->
-  <div class="relative w-fit">
+  <div class="studio-node relative w-fit">
     <VueCanvasNodePort
       :id="`input-${glbInIdx}`" type="target" side="left" :index="0"
       :data-type="glbInType" label="glb_url"

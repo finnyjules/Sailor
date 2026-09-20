@@ -132,7 +132,7 @@ const varsInputIndex = computed(() =>
        this node's dots looked like they were sitting inside the body while every other
        node's tuck against the edge. As siblings they also share the shared NodePort
        treatment (hit area, hover label, type colour) instead of a bare vue-flow Handle. -->
-  <div class="relative w-fit">
+  <div class="studio-node relative w-fit">
     <!-- Variables input: a Collection's VARS output wires here. Rendering this port
          lets the VARS edge anchor so it survives reload (fixes edge-lost-on-restart). -->
     <VueCanvasNodePort

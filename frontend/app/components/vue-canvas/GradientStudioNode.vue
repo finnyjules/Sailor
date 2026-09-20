@@ -132,7 +132,7 @@ const varsInputIndex = computed(() =>
   <!-- Ports live outside the card: the card clips its own content
        (overflow-hidden), which would otherwise cut the dots and their hit
        areas in half. As siblings they also tuck in behind it. -->
-  <div ref="rootEl" class="relative w-fit">
+  <div ref="rootEl" class="studio-node relative w-fit">
     <!-- Variables input: a Collection's VARS output wires here. Rendering this
          port lets the VARS edge anchor so it survives reload. -->
     <VueCanvasNodePort

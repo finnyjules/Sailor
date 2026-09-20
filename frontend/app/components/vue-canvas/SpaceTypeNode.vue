@@ -360,7 +360,7 @@ function openEditor() {
        which would otherwise cut the port dots and their hit areas in half — the bug
        that stopped Type Studio connecting. As siblings they tuck in behind it.
        Mirrors GradientStudioNode / the shared port migration. -->
-  <div class="relative w-fit" @pointerenter="onNodeHoverEnter" @pointerleave="onNodeHoverLeave">
+  <div class="studio-node relative w-fit" @pointerenter="onNodeHoverEnter" @pointerleave="onNodeHoverLeave">
     <!-- Variables input: a Collection's VARS output wires here. Rendering this port
          lets the VARS edge anchor so it survives reload (fixes edge-lost-on-restart). -->
     <VueCanvasNodePort
