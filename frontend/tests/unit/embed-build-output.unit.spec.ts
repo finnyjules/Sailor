@@ -161,12 +161,19 @@ describe.each(builtFiles.map(f => [f] as const))('prebuilt %s embed bundle', (fi
   // where an identifier name would not be.
   it('contains no other effect\'s marker code (the split is by shape, not just size)', () => {
     const js = fs.readFileSync(OUT, 'utf8')
-    const markers: { marker: string, owner: string }[] = [
+    // 'vortexRings' is a control key declared only in layouts/vortex.ts. The Showcase card
+    // layouts are one effect each, all built by a factory CALL (effects/showcase.ts) — and an
+    // un-annotated top-level call is a side effect Rollup keeps, which once put the whole
+    // Showcase host and all 35 layouts into every bundle (Ball included) with this suite
+    // green, because neither marker above is a Showcase one. `ring` legitimately carries
+    // every layout: it still draws scenes saved while they all lived under its id.
+    const markers: { marker: string, owner: string, alsoIn?: string[] }[] = [
       { marker: 'ribbonStretch', owner: 'spacetype-ribbon.js' },
       { marker: 'Helvetiker', owner: 'spacetype-boost.js' },
+      { marker: 'vortexRings', owner: 'spacetype-showvortex.js', alsoIn: ['spacetype-ring.js'] },
     ]
-    for (const { marker, owner } of markers) {
-      if (fileName === owner) continue
+    for (const { marker, owner, alsoIn } of markers) {
+      if (fileName === owner || alsoIn?.includes(fileName)) continue
       expect(
         js.includes(marker),
         `${fileName} contains "${marker}", which belongs to ${owner} — the per-effect embed split has stopped splitting `
