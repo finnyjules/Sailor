@@ -4,6 +4,7 @@
 // this only renders, so the two never fight over the pointer.
 import { ref, watch, nextTick } from 'vue'
 import { formatValue } from '~/lib/studio/row'
+import RollingNumber from '~/components/RollingNumber.vue'
 
 import type { ControlSpec } from '~/lib/spacetype/effect'
 
@@ -60,5 +61,14 @@ watch(() => props.editing, async (on) => {
     @blur="commit"
     @pointerdown.stop
   />
-  <span v-else class="font-mono text-[11px] text-white/90">{{ formatValue(value, step) }}</span>
+  <RollingNumber
+    v-else
+    :text="formatValue(value, step)"
+    class="font-mono text-[11px] text-white/90"
+  />
+  <!-- Same odometer as the credits pill. It rolls off the stream of drag values
+       (no tween — the drag IS the stream) and does one clean click-over on an
+       arrow/type/reset. `:text` feeds it the row's own formatted string so
+       decimals and signs survive. -->
+
 </template>

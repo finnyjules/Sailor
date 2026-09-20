@@ -11,9 +11,17 @@
  */
 import { computed } from 'vue'
 
-const props = defineProps<{ value: number }>()
+// `value` drives the default integer odometer (the wallet pill: non-negative,
+// thousands-comma'd). `text` is an escape hatch for callers that have already
+// formatted the string themselves — a studio slider passes its own
+// `formatValue(value, step)` so decimals ("0.50"), signs ("-12") and its exact
+// precision roll faithfully. The char loop below already treats '.', '-' and ','
+// as static separator columns, so only the label source has to change.
+const props = defineProps<{ value?: number; text?: string }>()
 
-const label = computed(() => Math.max(0, Math.round(props.value)).toLocaleString('en-US'))
+const label = computed(() =>
+  props.text ?? Math.max(0, Math.round(props.value ?? 0)).toLocaleString('en-US'),
+)
 
 const chars = computed(() => {
   const s = label.value

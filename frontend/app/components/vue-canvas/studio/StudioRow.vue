@@ -135,6 +135,10 @@ function onPointerDown(e: PointerEvent) {
   if (!hit?.closest?.('button, input, select, textarea, a[href]')) {
     el.addEventListener('pointerup', focusTrack, { once: true })
   }
+  // Did the press land on the value readout? If so, a click there opens typed entry and a
+  // drag there scrubs — the readout is no longer a dead zone, which is what stopped the
+  // handle being draggable whenever it sat underneath the number.
+  const onValue = !!hit?.closest?.('[data-row-value]')
   if (props.bound) return
   el.setPointerCapture(e.pointerId)
   // Per-gesture, not per-component: a second pointer going down mid-drag used to
@@ -180,13 +184,19 @@ function onPointerDown(e: PointerEvent) {
   function up(ev: PointerEvent) {
     if (ev.pointerId !== e.pointerId) return
     teardown()
-    // A press with no movement is a click: jump to where they clicked.
-    if (!dragged) {
-      const r = el.getBoundingClientRect()
-      const f = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width))
-      const raw = min.value + f * (max.value - min.value)
-      emit('update:modelValue', parseTyped(String(raw), min.value, max.value, step.value) ?? num.value)
+    // A press that moved past the 2px threshold was a drag; it has already scrubbed.
+    if (dragged) return
+    // A press with no movement is a click. On the value readout it opens typed entry (the
+    // job onValuePointerDown used to do on pointerdown, moved here so the same gesture can
+    // instead become a drag); anywhere else on the track it jumps to where they clicked.
+    if (onValue) {
+      editing.value = true
+      return
     }
+    const r = el.getBoundingClientRect()
+    const f = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width))
+    const raw = min.value + f * (max.value - min.value)
+    emit('update:modelValue', parseTyped(String(raw), min.value, max.value, step.value) ?? num.value)
   }
   el.addEventListener('pointermove', move)
   el.addEventListener('pointerup', up)
@@ -291,17 +301,20 @@ function onCancel() {
  * would leave RowSelect's transparent select and RowColor's swatch dead on click.
  */
 function onValuePointerDown(e: PointerEvent) {
-  e.stopPropagation()
-  // Primary button only, for the same reason `onPointerDown` above carries this guard:
-  // a right-click fires `pointerdown` too, so without it right-clicking the readout
-  // opened the bind menu AND typed entry in one gesture, and the field then blur-commits
-  // a no-op write into the document and its undo stack — the very writes `onKeydown`
-  // refuses. `stopPropagation` stays unconditional (the row handler ignores non-primary
-  // anyway) so the numeric drag can never start from the number.
-  if (e.button !== 0) return
-  if (!numeric.value || props.bound) return
-  e.preventDefault()
-  editing.value = true
+  // Non-numeric rows (select, color) keep the press to themselves: the row is not a slider,
+  // and their renderers need the native pointerdown to open a <select> menu or focus a
+  // swatch, so the row's drag machinery must never start here.
+  if (!numeric.value) {
+    e.stopPropagation()
+    return
+  }
+  // Numeric rows deliberately let the press BUBBLE to the row's `onPointerDown`. That is the
+  // fix for "the handle is under the readout and won't drag": swallowing the press here (with
+  // stopPropagation + immediate typed entry) made the ~64px number a dead zone for scrubbing.
+  // A click with no movement past the row's 2px threshold still opens typed entry — resolved
+  // in `up()` via the `data-row-value` marker — so the drag and the type never fight, and the
+  // right-button / blur-commit hazards the old guard fended off cannot arise because the field
+  // now opens on release rather than on the compatibility-mousedown-bearing press.
 }
 </script>
 
@@ -420,7 +433,7 @@ function onValuePointerDown(e: PointerEvent) {
              other kind, and which would otherwise have to stay a two-line widget while
              every neighbour became a row. The slot sits INSIDE the min-width box so an
              overridden value keeps the same target size as a registry one. -->
-        <span v-else class="flex min-w-[64px] items-center justify-end gap-1" @pointerdown="onValuePointerDown">
+        <span v-else data-row-value class="flex min-w-[64px] items-center justify-end gap-1" @pointerdown="onValuePointerDown">
           <slot name="value">
             <component
               v-if="renderer"
