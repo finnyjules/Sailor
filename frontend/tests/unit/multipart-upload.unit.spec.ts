@@ -106,3 +106,18 @@ describe('readUploadedFile', () => {
     expect((await res.json()).filename).toBe('Inter.ttf')
   })
 })
+
+// The helper only protects the routes that use it. Three upload routes stayed on the
+// capped reader for seven weeks after it landed; this keeps a fourth from joining them.
+describe('no server route calls the capped reader', () => {
+  it('readMultipartFormData( appears nowhere under server/', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs')
+    const { join, resolve } = await import('node:path')
+    const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(e =>
+      e.isDirectory() ? walk(join(dir, e.name)) : e.name.endsWith('.ts') ? [join(dir, e.name)] : [])
+    const callers = walk(resolve(__dirname, '../../server'))
+      .filter(f => readFileSync(f, 'utf8').split('\n')
+        .some(line => !/^\s*(\*|\/\/|\/\*)/.test(line) && /\breadMultipartFormData\s*\(/.test(line)))
+    expect(callers).toEqual([])
+  })
+})

@@ -12,6 +12,8 @@
  * params, invalid file ext for voice clone". Same fix the /from-youtube route
  * and the lip-sync Kling path use. See server/utils/falStorage.ts.
  */
+import { readUploadedFile } from '~~/server/utils/multipart'
+
 const AUDIO_TYPES: Record<string, string> = {
   mp3: 'audio/mpeg',
   m4a: 'audio/mp4',
@@ -19,9 +21,8 @@ const AUDIO_TYPES: Record<string, string> = {
 }
 
 export default defineEventHandler(async (event) => {
-  const parts = await readMultipartFormData(event)
-  const filePart = parts?.find((p) => p.name === 'file')
-  if (!filePart || !filePart.data || filePart.data.byteLength === 0) {
+  const filePart = await readUploadedFile(event)
+  if (!filePart) {
     throw createError({ statusCode: 400, message: 'Missing or empty `file` field' })
   }
 

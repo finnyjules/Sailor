@@ -14,22 +14,20 @@ import { extname, join } from 'node:path'
 import { slugifyFamily, upsertManifest, validateUpload, type FontWeight } from '~~/server/templates/fonts'
 import { readManifest, writeManifest, USER_FONTS_DIR } from '~~/server/templates/fonts-store'
 import { claimNew, guardMutation } from '../../utils/ownedJsonStore'
+import { readUploadForm } from '~~/server/utils/multipart'
 
 const OPTS = { kind: 'template-font', dir: USER_FONTS_DIR }
 
 export default defineEventHandler(async (event) => {
-  const parts = await readMultipartFormData(event)
-  if (!parts) throw createError({ statusCode: 400, statusMessage: 'Expected multipart form data' })
+  const form = await readUploadForm(event)
+  const filePart = await form.file('font')
+  const family = form.text('family')
+  const weight: FontWeight = form.text('weight') === '700' ? '700' : '400'
 
-  const filePart = parts.find(p => p.name === 'font' && p.filename)
-  const family = String(parts.find(p => p.name === 'family')?.data?.toString('utf8') ?? '').trim()
-  const weightRaw = String(parts.find(p => p.name === 'weight')?.data?.toString('utf8') ?? '400').trim()
-  const weight: FontWeight = weightRaw === '700' ? '700' : '400'
-
-  if (!filePart?.data) throw createError({ statusCode: 400, statusMessage: 'Missing font file' })
+  if (!filePart?.filename) throw createError({ statusCode: 400, statusMessage: 'Missing font file' })
   if (!family) throw createError({ statusCode: 400, statusMessage: 'Missing family name' })
 
-  const ext = extname(filePart.filename ?? '').toLowerCase()
+  const ext = extname(filePart.filename).toLowerCase()
   const bytes = new Uint8Array(filePart.data.buffer, filePart.data.byteOffset, filePart.data.byteLength)
   const v = validateUpload({ ext, size: filePart.data.byteLength, bytes })
   if (!v.ok) throw createError({ statusCode: 400, statusMessage: v.reason })
