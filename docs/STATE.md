@@ -12,7 +12,7 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 
 | Surface | bake | motion | inspector | agent | engine LOC |
 |---|---|---|---|---|---|
-| Space Type | ✅ + clip bake | ✅ timeline clip | ✅ (mode-gated controls, + **separator shapes** on 20 effects incl. Cylinder) | ✅ descriptor (+ `shape` kind) | 11,202 |
+| Space Type (Kinetic Studio) | ✅ + clip bake | ✅ timeline clip | ✅ (mode-gated controls, + **separator shapes** on 20 effects incl. Cylinder, + **35 Showcase card layouts**, two-tab gallery) | ✅ descriptor (+ `shape` kind) | 11,202 |
 | Vector Type Studio | ✅ PNG + SVG export (9 fill types, 6 as real vector; multi-fill/stroke stack + extrude + skew/arc + **smart stretch: Stretch/Height dials, Fit** + **any font: Google cuts + library faces**) | ✅ full incl. stagger, preset gallery, **colour tracks**, and 4 per-glyph effects (blink · axis scatter · grade flicker · draw-on) | ✅ | ✅ descriptor (unverified live) | — |
 | Scene3D Studio | ✅ 3-pass + mp4 | ✅ own timeline (groups animate) | ✅ + object tree (**fully schema-drawn** incl. Transform/Geometry/Light/Decal; bespoke: tree, sculpt/merge, motion pickers, **shape library shelf**) | ✅ descriptor (object.* + id-addressed; library shapes not yet) | ~6,300 (+ SVG import) + ambientCG textures |
 | Compositor / Frame | ✅ | ✅ motion clips | ✅ (+ **shape library** insert/swap, **mask break-out**, **shapes pattern fill**) | ✅ commands (+ `addShape`, `setLayerMaskBreak`, `setFill{type:shapes}`) | 1,667 (+1,041 motion) |
@@ -30,6 +30,22 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Pose Mannequin | ✅ control img | ❌ | modal | ❌ (excluded) | — |
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
+
+### Kinetic Studio — Showcase: 35 card layouts, each its own effect; two-tab gallery — LANDED 2026-09-20 (`8c0ec71d4`..`d3d9ac7f1`, 5 commits)
+
+**What:** the animos.app adaptation started in August, finished. Showcase (photos, fill cards and words riding one arrangement) went from 4 layouts under one `ring` effect to **35 layouts, each a first-class effect** with its own gallery entry, dials, saved default and embed bundle. The effect gallery splits into **Layouts** (35, sectioned by family, thumbnails that play on hover) and **Text** (the type-first effects). A fresh Showcase opens on a dozen fill cards, not words.
+
+**How it holds.** One host, a factory: `effects/showcase.ts` → `makeShowcaseEffect({ id, layout })`. `ring` keeps its id (saved scenes); the other 34 are `show<layout>` because `tunnel`, `spiral`, `cascade` and `turntable` are also text effects. One five-line module per entry, because the embed build reads one effect id per module file — and **every factory call carries `/* @__PURE__ */`**: a bare top-level call is a side effect Rollup must keep, which put the whole host and all 35 layouts into *every* per-effect bundle (Ball's included) with the embed suite green. Two guards now: a source check on every entry module, and a `vortexRings` marker in the embed split test (`ring` alone may carry every layout — it still draws scenes saved as `ring` + `params.layout`, and the editor re-homes those on open).
+
+**A layout is pure placement** (`layouts/*.ts`: `place(i, n, params, t01)` → position, yaw/pitch/roll, scale, opacity) plus its own pose, bend radius and back-fade depth. **One function, `travel()`, shapes every layout's movement** — so Pacing (layout default / continuous / step per card), ten Easings and Hold (shown only under step per card: never a dead dial), fractional Speed (the engine plays as many loops as the travel needs to close) and Direction "There and back" (closes every loop) reach all 35 without per-layout code. Host-side: a soft shadow quad per card (no texture; hidden from behind; bends with the card), Pulse (timed so a ring peaks on the nearest card), and faded words that fade instead of vanishing.
+
+**The panel reads in decision order:** Layout (only that layout's own dials — shape, counts, spacing, angles) → Content (card list, Repeater) → Cards → Type (only while the content holds text, via a new `showIf.matches`) → Look → Motion tab (shared dials, then the layout's own; animation is only authored there). A unit test asserts no two dials on a panel share a name. Switching between two layouts keeps content, card look and motion (`carryKeys`), outranking the target's saved default scene.
+
+**Thumbnails are not captures:** `layouts/thumbnail.ts` projects each layout's own maths with the engine's camera onto a 2D canvas (unit-tested equal to three.js) — no WebGL contexts, no drift, free for a new layout.
+
+**Also fixed on the way:** a Showcase wired into another studio drew blank photo cards (only the studio surface preloaded images; the card and headless engines now do, per engine); the Space Type panel never passed `optionLabels` to its selects; "Reset to defaults" passed its click event as an argument.
+
+**Verified:** 900+ spacetype unit tests (every layout: finite, seamless, closes at fractional speeds and under six pacing/easing/direction variants); real-browser renders of all 35; both gallery tabs driven with Playwright; all 63 embed bundles rebuilt and the split confirmed by content. **Owed (live, in the studio):** the carry-over on a layout switch, the re-homing of an old scene, the wired-image fix with a photo card feeding a Frame, and the feel of the easing presets. Default sizes and poses are a first pass. Five animos templates (Zoom parallax and the four Reveal & wipe) are full-frame masked transitions and are not expressible as card placement.
 
 ### fal is the default provider — every inpaint and vector route moved off Replicate — LANDED 2026-09-11 (`9b0c8fbd9`..`731ffde79`, 6 commits, three implementers in parallel on disjoint files, a review each, one follow-up commit)
 
