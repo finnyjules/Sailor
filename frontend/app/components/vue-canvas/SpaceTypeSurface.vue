@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
 import { LIVE_FIELD_CEILING } from '~/lib/shaderfill/descriptor'
-import { getEffect } from '~/lib/spacetype/effects'
+import { getEffect, rehomeLegacyShowcase } from '~/lib/spacetype/effects'
 import { ensureBoostFont } from '~/lib/spacetype/effects/boost'
-import { defaultsFromControls, type Params, type ControlSpec } from '~/lib/spacetype/effect'
+import { defaultsFromControls, isShowcaseEffectId, type Params, type ControlSpec } from '~/lib/spacetype/effect'
 import { SPACE_TYPE_SECTIONS } from '~/lib/spacetype/sections'
 import { parseFills, serializeFills, FILL_TYPES, DEFAULT_FILL, type Fill, type FillType } from '~/lib/spacetype/fills'
 import { parseContent, type ContentItem, type CardFillKind } from '~/lib/spacetype/tile'
@@ -516,9 +516,18 @@ const DEFAULT_COLLAPSED = new Set([
 const openSections = reactive<Record<string, boolean>>(
   Object.fromEntries(SPACE_TYPE_SECTIONS.map(name => [name, !DEFAULT_COLLAPSED.has(name)])),
 )
-const sections = computed(() =>
-  SECTION_ORDER.map(name => ({ name, controls: effect.value.controls.filter(c => c.group === name) })),
-)
+// An effect can pull sections to the top (`leadSections` — Showcase leads with Layout);
+// the rest keep the shared order.
+const sections = computed(() => {
+  const lead = effect.value.leadSections ?? []
+  const order = [...lead, ...SECTION_ORDER.filter(name => !lead.includes(name))]
+  return order.map(name => ({ name, controls: effect.value.controls.filter(c => c.group === name) }))
+})
+// A lead section is the effect's headline choice, so it opens even when the shared default
+// would collapse it (Layout starts collapsed for every other effect).
+watch(() => effect.value.id, () => {
+  for (const name of effect.value.leadSections ?? []) openSections[name] = true
+}, { immediate: true })
 
 // Loft's Spine preset select stamps params.stops with the chosen preset's curve —
 // confirm before clobbering hand-edited stops. ProfileStopsEditor re-hydrates its
@@ -545,7 +554,10 @@ function sectionVisible(section: { name: string; controls: ControlSpec[] }): boo
   if (inspectorTab.value === 'motion') return section.name === 'Motion' && section.controls.length > 0
   if (section.name === 'Motion') return false
   if (section.name === 'Camera') return !frontLocked.value
-  return section.controls.length > 0 || section.name === 'Color' || section.name === 'Output'
+  if (section.name === 'Output') return true
+  // A section shows when it has something to show: one whose every control is gated off
+  // (Showcase's Type dials with no text in the content) must not leave an empty card.
+  return section.controls.some(controlIsVisible)
 }
 
 /** A control may declare `showIf` to appear only when another param matches (e.g. a second axis's
@@ -855,7 +867,7 @@ let loadedImageSrcKey = ''
 // engine's textures/key with a stale set once it finally resolves (finding 2).
 let imageTextureLoadSeq = 0
 async function ensureRingImageTextures() {
-  if (effectId.value !== 'ring') return
+  if (!isShowcaseEffectId(effectId.value)) return
   const k = contentKey()
   if (!k) return
   const items = parseContent(String((params as Record<string, unknown>)[k] ?? '[]'))
@@ -880,7 +892,7 @@ async function ensureRingImageTextures() {
 // the next edit). For a non-ring effect this is exactly a plain rebuild(): the branch below
 // bails out of ensureRingImageTextures synchronously before it can await anything.
 async function rebuildWithRing() {
-  if (effectId.value === 'ring') await ensureRingImageTextures()
+  if (isShowcaseEffectId(effectId.value)) await ensureRingImageTextures()
   rebuild()
 }
 function scheduleRebuild() {
@@ -971,8 +983,13 @@ function loadConfig() {
   // and the control panel (sections) reflects the saved effect's controls.
   // Normalize to the resolved effect's canonical id so a config saved under an old mixed-case id
   // (e.g. 'cornerPin') resolves AND the buttons (thumbnail/default save) send a backend-valid id.
-  if (typeof c.effectId === 'string') effectId.value = getEffect(c.effectId).id
+  // For a while every Showcase layout lived under the one `ring` id, chosen by a `layout`
+  // param. Re-home such a scene to the layout's own entry so the panel shows the right dials
+  // (it renders the same either way — see effects/ring.ts's legacyLayout).
+  const rehomed = typeof c.effectId === 'string' ? rehomeLegacyShowcase(getEffect(c.effectId).id, c.params) : null
+  if (typeof c.effectId === 'string') effectId.value = rehomed ?? getEffect(c.effectId).id
   if (c.params && typeof c.params === 'object') Object.assign(params, c.params)
+  if (rehomed) delete (params as any).layout
   if (Array.isArray(c.gradientStops)) {
     gradientStops.splice(0, gradientStops.length, ...c.gradientStops.map((s: any) => ({ ...s })))
   }
@@ -1265,17 +1282,22 @@ watch(structuralSignature, () => { scheduleRebuild() })
 // new one edge-on (Ribbon wants its −0.5 tilt; Coil sits at 0).
 const CARRY_ON_SWITCH = new Set(['text', 'font'])
 // Apply a saved default scene onto the live editor refs (used on fresh open / effect switch / reset).
-function applyDefaultScene(scene: Scene) {
+function applyDefaultScene(scene: Scene, alsoKeep: ReadonlySet<string> = new Set()) {
   // A scene captures the LOOK, not the content — keep the current text/font (so switching to a
   // defaulted effect doesn't replace the words you're working on).
   const keep: Record<string, any> = {}
   for (const k of SCENE_CONTENT_KEYS) if (k in params) keep[k] = (params as any)[k]
+  // Params carried across a layout→layout switch outrank the target's saved default scene
+  // too: the scene supplies the new layout's own dials, not a replacement for the work.
+  const carriedOver: Record<string, any> = {}
+  for (const k of alsoKeep) if (k in params) carriedOver[k] = (params as any)[k]
   for (const k of Object.keys(params)) delete (params as any)[k]
   Object.assign(params, scene.params)
   for (const k of SCENE_CONTENT_KEYS) {
     if (k in keep) (params as any)[k] = keep[k]
     else delete (params as any)[k]
   }
+  Object.assign(params, carriedOver)
   if (scene.post) Object.assign(post, DEFAULT_POST, scene.post)
   if (scene.projection) projection.value = scene.projection
   if (scene.panX !== undefined) panX.value = scene.panX
@@ -1287,9 +1309,14 @@ function applyDefaultScene(scene: Scene) {
 
 // Reset params to the current effect's defaults, carrying over the content keys
 // (text/font). Shared by the effect-switch reset and the manual "Reset to defaults".
-async function applyEffectDefaults() {
+// `fromId` is the effect being switched AWAY from (absent for a manual reset): two effects
+// that both declare a key in `carryKeys` keep it across the switch — every Showcase layout
+// shares its content, card, look and motion dials, so changing layout keeps the work.
+async function applyEffectDefaults(fromId?: string) {
   const next = defaultsFromControls(effect.value.controls)
-  for (const k of Object.keys(next)) if (CARRY_ON_SWITCH.has(k) && k in params) next[k] = (params as any)[k]
+  const fromKeys = new Set(fromId ? getEffect(fromId).carryKeys ?? [] : [])
+  const carried = new Set([...CARRY_ON_SWITCH, ...(effect.value.carryKeys ?? []).filter(k => fromKeys.has(k))])
+  for (const k of Object.keys(next)) if (carried.has(k) && k in params) next[k] = (params as any)[k]
   for (const k of Object.keys(params)) delete (params as any)[k]
   Object.assign(params, next)
   pullTextLines()
@@ -1297,18 +1324,18 @@ async function applyEffectDefaults() {
   pullContent()
   pullWordFill()
   const sc = spaceDefaultFor(effect.value.id)
-  if (sc) applyDefaultScene(sc)
+  if (sc) applyDefaultScene(sc, carried)
   await ensureEffectFonts()
   // Effect-switch build — same "preload before build" requirement as onMounted (finding 1):
   // switching INTO ring (or resetting an existing ring scene) must not paint blank tiles.
   await rebuildWithRing()
 }
-watch(effectId, async () => {
+watch(effectId, async (_id, prevId) => {
   // Restoring a saved scene — keep the hydrated params instead of resetting to
   // this effect's defaults. Self-clears so the next real user switch resets.
   if (hydrating) { hydrating = false; return }
   engine?.setEffect(effect.value)
-  await applyEffectDefaults()
+  await applyEffectDefaults(prevId)
   resetHistory()   // per-effect history: the new effect starts with a clean, single baseline
 })
 
@@ -1941,7 +1968,7 @@ async function exportWebEmbed() {
           <!-- One uniform button group, left-aligned and wrapping — not two rows split
                justify-between / justify-end. Filled, not bordered, to match the rows. -->
           <div class="flex flex-wrap gap-1.5">
-            <button type="button" @click="applyEffectDefaults"
+            <button type="button" @click="applyEffectDefaults()"
                     class="rounded-[6px] bg-white/[0.05] px-2.5 py-1 text-[11px] text-white/70 transition-colors hover:bg-white/10 hover:text-white/90">
               Reset to defaults
             </button>
@@ -2238,10 +2265,10 @@ async function exportWebEmbed() {
                                 @go-to-collection="goToCollection"
                                 @update:model-value="(val: string) => { params[c.key] = val; rebuild(); onEdit(c.key, val) }" />
               <StudioSegmented v-else-if="c.kind === 'select' && (c.options?.length ?? 0) <= 3"
-                               :options="c.options ?? []" :model-value="String(params[c.key] ?? c.default)"
+                               :options="c.options ?? []" :option-labels="c.optionLabels" :model-value="String(params[c.key] ?? c.default)"
                                @update:model-value="(v: string) => { params[c.key] = v; rebuild(); onEdit(c.key, v) }" />
               <StudioSelect v-else-if="c.kind === 'select'"
-                            :options="c.options ?? []" :model-value="String(params[c.key] ?? c.default)"
+                            :options="c.options ?? []" :option-labels="c.optionLabels" :option-groups="c.optionGroups" :model-value="String(params[c.key] ?? c.default)"
                             @update:model-value="(v: string) => { params[c.key] = v; rebuild(); onEdit(c.key, v) }" />
               <template v-else-if="c.kind === 'font'">
                 <FontPicker

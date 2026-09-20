@@ -16,7 +16,21 @@ import type { ControlSpec } from '~/lib/spacetype/effect'
 import StudioRow from './StudioRow.vue'
 
 const model = defineModel<string>({ required: true })
-const props = defineProps<{ options: string[]; optionLabels?: string[]; label?: string; hint?: string }>()
+const props = defineProps<{ options: string[]; optionLabels?: string[]; optionGroups?: string[]; label?: string; hint?: string }>()
+
+// `optionGroups` pairs with `options` by index: consecutive options sharing a heading
+// render under one <optgroup>. Only the plain (label-less) branch groups — it is the one
+// long pickers use.
+const grouped = computed(() => {
+  if (!props.optionGroups) return null
+  const out: { heading: string; items: { value: string; text: string }[] }[] = []
+  props.options.forEach((value, i) => {
+    const heading = props.optionGroups![i] ?? ''
+    if (!out.length || out[out.length - 1]!.heading !== heading) out.push({ heading, items: [] })
+    out[out.length - 1]!.items.push({ value, text: props.optionLabels?.[i] ?? value })
+  })
+  return out
+})
 
 const spec = computed(() => ({
   key: 'inline', label: props.label ?? '', kind: 'select',
@@ -32,7 +46,14 @@ const spec = computed(() => ({
     v-model="model"
     class="w-full rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1.5 text-xs text-white/85 outline-none focus-visible:ring-2 focus-visible:ring-white/20"
   >
-    <option v-for="(o, i) in options" :key="o" :value="o" class="bg-neutral-900" :class="{ capitalize: !optionLabels }">{{ optionLabels?.[i] ?? o }}</option>
+    <template v-if="grouped">
+      <optgroup v-for="g in grouped" :key="g.heading" :label="g.heading" class="bg-neutral-900">
+        <option v-for="o in g.items" :key="o.value" :value="o.value" class="bg-neutral-900">{{ o.text }}</option>
+      </optgroup>
+    </template>
+    <template v-else>
+      <option v-for="(o, i) in options" :key="o" :value="o" class="bg-neutral-900" :class="{ capitalize: !optionLabels }">{{ optionLabels?.[i] ?? o }}</option>
+    </template>
   </select>
   <!-- `:bindable="false"` on purpose. StudioRow shows the variable glyph by default
        and `select` is a bindable kind, so without this a labelled prop-driven select
