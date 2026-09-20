@@ -13,7 +13,7 @@ import { ChevronDown, Dices } from 'lucide-vue-next'
 import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vue'
 import GradientEditor from '~/components/vue-canvas/compositor/GradientEditor.vue'
 import ShaderFillEditor from '~/components/vue-canvas/widgets/ShaderFillEditor.vue'
-import { type Fill, type FillType, type ShaderSpec, FILL_TYPES, DEFAULT_FILL, DEFAULT_SHADER_SPEC, HOLOGRAPHIC_FILL_PRESET, fillPickerType, fillTileCanvas } from '~/lib/spacetype/fillTile'
+import { type Fill, type FillType, type ShaderSpec, type ShapeFit, SHAPE_FITS, FILL_TYPES, DEFAULT_FILL, DEFAULT_SHADER_SPEC, HOLOGRAPHIC_FILL_PRESET, fillPickerType, fillTileCanvas } from '~/lib/spacetype/fillTile'
 import { rollPaintItem, gradientFromPaint } from '~/lib/compositor/fillPalette'
 import { type Paint, type Gradient, type ImageFill, isFill, isGradient, isImageFill } from '~/composables/useCompositorLayers'
 import type { BrandKit } from '~~/shared/brand/types'
@@ -22,6 +22,8 @@ import FillImagePicker from '~/components/vue-canvas/compositor/FillImagePicker.
 import { getFillBitmap, ensureFillBitmaps } from '~/lib/paint/imageFillCache'
 import { imageFillRect } from '~/lib/compositor/paint'
 import ShapePicker from '~/components/vue-canvas/studio/ShapePicker.vue'
+import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
+import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
 import { shapeById } from '~/lib/shapes/catalog'
 import { anchorAbove } from '~/lib/shapes/pickerLayout'
 
@@ -167,6 +169,7 @@ function setType(t: FillType) {
   // fillTileCanvas / paintShapesTile.
   if (t === 'shapes') {
     if (!fill.shapeId) fill.shapeId = 'sparkle'
+    if (!fill.shapeFit) fill.shapeFit = 'tile'
     fill.shapeSize = 0.1
     fill.shapeGap = 0.03
   }
@@ -224,8 +227,10 @@ function applyBrandColor(hex: string) {
 const needsB = computed(() => fill.type !== 'solid' && fill.type !== 'gradient')
 const needsAngle = computed(() => fill.type === 'ombre' || fill.type === 'stripes' || fill.type === 'shapes' || fill.type === 'paper')
 const needsDensity = computed(() => fill.type === 'grid' || fill.type === 'checkerboard' || fill.type === 'stripes' || fill.type === 'noise' || fill.type === 'qr' || fill.type === 'paper')
-// Shapes steers count via Size + Spacing (tile fractions) instead of a raw Density.
-const needsShapeGrid = computed(() => fill.type === 'shapes')
+// Shapes steers count via Size + Spacing (tile fractions) instead of a raw Density — but only
+// when it is TILED. Both dials are grid dials, so in the single-shape fits ('fill'/'contain')
+// they would be controls that store a value nothing reads: hidden, not shown-and-inert.
+const needsShapeGrid = computed(() => fill.type === 'shapes' && (fill.shapeFit ?? 'tile') === 'tile')
 // Paper exposes a grain-amount slider (0..1) on top of the shared A/B + density + angle rows.
 const needsGrain = computed(() => fill.type === 'paper')
 
@@ -240,6 +245,10 @@ function openShapePicker() {
   shapePickerOpen.value = true
 }
 function setShape(id: string) { fill.shapeId = id; push() }
+/** Image-fill fits, in picker order — the same list the `ImageFill['fit']` union carries. */
+const IMAGE_FITS: string[] = ['cover', 'contain', 'tile', 'stretch']
+const shapeFit = computed<ShapeFit>(() => fill.shapeFit ?? 'tile')
+function setShapeFit(v: string) { fill.shapeFit = v as ShapeFit; push() }
 const bgTransparent = computed(() => fill.type === 'shapes' && (fill.b === 'none' || fill.b === ''))
 function setBgTransparent(on: boolean) { fill.b = on ? 'none' : '#000000'; push() }
 
@@ -331,29 +340,14 @@ watch(imageFill, drawPreview, { deep: true })
         <FillImagePicker v-else @pick="onPick" />
 
         <template v-if="imageFill?.src">
-          <div class="grid grid-cols-4 gap-1">
-            <button v-for="f in (['cover','contain','tile','stretch'] as const)" :key="f" type="button"
-              class="h-7 rounded border text-[10px] capitalize cursor-pointer"
-              :class="imageFill.fit === f ? 'border-white/60 bg-white/10 text-white' : 'border-white/10 bg-[#1a1a1a] text-white/60 hover:text-white'"
-              @click="pushImage({ fit: f })">{{ f }}</button>
-          </div>
-          <div>
-            <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
-              <span>Scale</span><span class="tabular-nums normal-case">{{ (imageFill.scale ?? 1).toFixed(2) }}×</span>
-            </div>
-            <input type="range" min="0.1" max="4" step="0.05" :value="imageFill.scale ?? 1" class="w-full accent-white cursor-pointer"
-              @input="pushImage({ scale: Number(($event.target as HTMLInputElement).value) })" />
-          </div>
-          <div class="grid grid-cols-2 gap-2">
-            <label class="text-[9px] uppercase tracking-[0.1em] text-white/35">Offset X
-              <input type="range" min="-0.5" max="0.5" step="0.01" :value="imageFill.offset?.x ?? 0" class="w-full accent-white cursor-pointer"
-                @input="pushImage({ offset: { x: Number(($event.target as HTMLInputElement).value), y: imageFill.offset?.y ?? 0 } })" />
-            </label>
-            <label class="text-[9px] uppercase tracking-[0.1em] text-white/35">Offset Y
-              <input type="range" min="-0.5" max="0.5" step="0.01" :value="imageFill.offset?.y ?? 0" class="w-full accent-white cursor-pointer"
-                @input="pushImage({ offset: { x: imageFill.offset?.x ?? 0, y: Number(($event.target as HTMLInputElement).value) } })" />
-            </label>
-          </div>
+          <StudioSegmented :model-value="imageFill.fit ?? 'cover'" :options="IMAGE_FITS"
+            @update:model-value="(f: string) => pushImage({ fit: f as ImageFill['fit'] })" />
+          <StudioSlider label="Scale" :model-value="imageFill.scale ?? 1" :min="0.1" :max="4" :step="0.05" :default="1"
+            @update:model-value="(v: number) => pushImage({ scale: v })" />
+          <StudioSlider label="Offset X" :model-value="imageFill.offset?.x ?? 0" :min="-0.5" :max="0.5" :step="0.01" :default="0"
+            @update:model-value="(v: number) => pushImage({ offset: { x: v, y: imageFill?.offset?.y ?? 0 } })" />
+          <StudioSlider label="Offset Y" :model-value="imageFill.offset?.y ?? 0" :min="-0.5" :max="0.5" :step="0.01" :default="0"
+            @update:model-value="(v: number) => pushImage({ offset: { x: imageFill?.offset?.x ?? 0, y: v } })" />
         </template>
       </template>
 
@@ -373,6 +367,8 @@ watch(imageFill, drawPreview, { deep: true })
           <ShapePicker v-if="shapePickerOpen" :model-value="fill.shapeId ?? 'sparkle'" :allow-none="false"
             :anchor="shapePickerAnchor" :ignore="shapeBtnRef"
             @update:model-value="(id: string) => setShape(id)" @close="shapePickerOpen = false" />
+          <div class="panel-sublabel mt-2 mb-1">Fit</div>
+          <StudioSegmented :model-value="shapeFit" :options="SHAPE_FITS" @update:model-value="setShapeFit" />
           <label class="mt-1.5 flex items-center gap-1.5 text-[11px] text-white/60 cursor-pointer select-none">
             <input type="checkbox" :checked="bgTransparent" @change="setBgTransparent((($event.target as HTMLInputElement).checked))" />
             Transparent background
@@ -387,45 +383,20 @@ watch(imageFill, drawPreview, { deep: true })
           @update:model-value="(v: string) => setColor('b', v)" />
       </div>
 
-      <div v-if="needsAngle">
-        <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
-          <span>Angle</span><span class="tabular-nums normal-case">{{ Math.round(fill.angle) }}°</span>
-        </div>
-        <input type="range" min="0" max="180" step="5" :value="fill.angle" class="w-full accent-white cursor-pointer"
-          @input="setNum('angle', Number(($event.target as HTMLInputElement).value))" />
-      </div>
+      <StudioSlider v-if="needsAngle" label="Angle" :model-value="fill.angle" :min="0" :max="180" :step="1" :default="45"
+        @update:model-value="(v: number) => setNum('angle', v)" />
 
-      <div v-if="needsDensity">
-        <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
-          <span>Density</span><span class="tabular-nums normal-case">{{ Math.round(fill.density) }}</span>
-        </div>
-        <input type="range" min="1" max="32" step="1" :value="fill.density" class="w-full accent-white cursor-pointer"
-          @input="setNum('density', Number(($event.target as HTMLInputElement).value))" />
-      </div>
+      <StudioSlider v-if="needsDensity" label="Density" :model-value="fill.density" :min="1" :max="32" :step="1" :default="8"
+        @update:model-value="(v: number) => setNum('density', v)" />
 
-      <div v-if="needsGrain">
-        <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
-          <span>Grain</span><span class="tabular-nums normal-case">{{ Math.round((fill.grain ?? 0.4) * 100) }}%</span>
-        </div>
-        <input type="range" min="0" max="1" step="0.02" :value="fill.grain ?? 0.4" class="w-full accent-white cursor-pointer"
-          @input="setNum('grain', Number(($event.target as HTMLInputElement).value))" />
-      </div>
+      <StudioSlider v-if="needsGrain" label="Grain" :model-value="fill.grain ?? 0.4" :min="0" :max="1" :step="0.01" :default="0.4"
+        @update:model-value="(v: number) => setNum('grain', v)" />
 
-      <div v-if="needsShapeGrid">
-        <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
-          <span>Size</span><span class="tabular-nums normal-case">{{ Math.round((fill.shapeSize ?? 0.1) * 100) }}%</span>
-        </div>
-        <input type="range" min="0.02" max="0.5" step="0.005" :value="fill.shapeSize ?? 0.1" class="w-full accent-white cursor-pointer"
-          @input="setNum('shapeSize', Number(($event.target as HTMLInputElement).value))" />
-      </div>
+      <StudioSlider v-if="needsShapeGrid" label="Size" :model-value="fill.shapeSize ?? 0.1" :min="0.02" :max="0.5" :step="0.01" :default="0.1"
+        @update:model-value="(v: number) => setNum('shapeSize', v)" />
 
-      <div v-if="needsShapeGrid">
-        <div class="flex items-center justify-between text-[9px] uppercase tracking-[0.1em] text-white/35 mb-1">
-          <span>Spacing</span><span class="tabular-nums normal-case">{{ Math.round((fill.shapeGap ?? 0.03) * 100) }}%</span>
-        </div>
-        <input type="range" min="0" max="0.4" step="0.005" :value="fill.shapeGap ?? 0.03" class="w-full accent-white cursor-pointer"
-          @input="setNum('shapeGap', Number(($event.target as HTMLInputElement).value))" />
-      </div>
+      <StudioSlider v-if="needsShapeGrid" label="Spacing" :model-value="fill.shapeGap ?? 0.03" :min="0" :max="0.4" :step="0.01" :default="0.03"
+        @update:model-value="(v: number) => setNum('shapeGap', v)" />
     </div>
   </div>
 </template>

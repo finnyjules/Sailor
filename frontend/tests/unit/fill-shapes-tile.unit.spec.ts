@@ -67,10 +67,60 @@ describe('shapes fill type', () => {
     fillTileCanvas(shapesFill({ shapeId: 'unicorn', shapeSize: 0.5, shapeGap: 0.4 }), 120)   // cellFrac 0.9 → d=1
     expect(created[0]!.ctx.ops.find((o: any) => o[0] === 'fill')![1]).toBe(shapeById('sparkle')!.d)
   })
-  it('fillTileBox draws the shapes too', () => {
+  it('fillTileBox draws the shapes too, on SQUARE cells', () => {
     created = []
-    fillTileBox(shapesFill({ shapeSize: 0.4, shapeGap: 0.1 }), 200, 100)   // d=2 → 4
-    expect(created[0]!.ctx.ops.filter((o: any) => o[0] === 'fill').length).toBe(4)
+    // cellFrac 0.5 → cols = 2 → cell edge 100px (from the WIDTH). The height is one
+    // such cell tall, so a 200×100 box is a 2×1 grid — not the 2×2 of oblong cells.
+    fillTileBox(shapesFill({ shapeSize: 0.4, shapeGap: 0.1 }), 200, 100)
+    expect(created[0]!.ctx.ops.filter((o: any) => o[0] === 'fill').length).toBe(2)
+  })
+
+  // The Spacing = 0 complaint: with one `d` on both axes the cell was as oblong as the
+  // box, and drawShape's uniform fit left air on the long axis that Spacing could not
+  // close. Square cells + gap 0 ⇒ each shape box IS its cell, so neighbours touch.
+  it('at spacing 0 the drawn shape box fills its whole cell', () => {
+    created = []
+    fillTileBox(shapesFill({ shapeId: 'badge', shapeSize: 0.5, shapeGap: 0 }), 300, 400)
+    const ops = created[0]!.ctx.ops
+    // cols = round(1/0.5) = 2 → cell 150px; rows = ceil(400/150) = 3 → 6 shapes.
+    expect(ops.filter((o: any) => o[0] === 'fill').length).toBe(6)
+    // badge's box is 88×88, so a cell-filling draw scales it by 150/88.
+    const scale = ops.find((o: any) => o[0] === 'scale')![1]
+    expect(scale).toBeCloseTo(150 / 88, 6)
+  })
+
+  describe('shapeFit', () => {
+    it('fill draws ONE shape scaled to cover the box', () => {
+      created = []
+      // badge box 88×88 in a 300×400 box → cover scale 400/88, one shape only.
+      fillTileBox(shapesFill({ shapeId: 'badge', shapeFit: 'fill' }), 300, 400)
+      const ops = created[0]!.ctx.ops
+      expect(ops.filter((o: any) => o[0] === 'fill').length).toBe(1)
+      expect(ops.find((o: any) => o[0] === 'scale')![1]).toBeCloseTo(400 / 88, 6)
+    })
+    it('contain draws ONE shape fitted inside the box', () => {
+      created = []
+      fillTileBox(shapesFill({ shapeId: 'badge', shapeFit: 'contain' }), 300, 400)
+      const ops = created[0]!.ctx.ops
+      expect(ops.filter((o: any) => o[0] === 'fill').length).toBe(1)
+      expect(ops.find((o: any) => o[0] === 'scale')![1]).toBeCloseTo(300 / 88, 6)
+    })
+    it('ignores Size and Spacing in the single-shape fits', () => {
+      created = []
+      fillTileBox(shapesFill({ shapeFit: 'contain', shapeSize: 0.05, shapeGap: 0.3 }), 300, 400)
+      expect(created[0]!.ctx.ops.filter((o: any) => o[0] === 'fill').length).toBe(1)
+    })
+    it('still paints the background colour', () => {
+      created = []
+      fillTileBox(shapesFill({ shapeFit: 'fill', b: '#000000' }), 300, 400)
+      expect(created[0]!.ctx.ops.find((o: any) => o[0] === 'fillRect')![5]).toBe('#000000')
+    })
+    it('normalizeFill defaults it to tile and refuses a bad value', () => {
+      expect(normalizeFill({ type: 'shapes' }).shapeFit).toBe('tile')
+      expect(normalizeFill({ type: 'shapes', shapeFit: 'cover' }).shapeFit).toBe('tile')
+      expect(normalizeFill({ type: 'shapes', shapeFit: 'contain' }).shapeFit).toBe('contain')
+      expect((normalizeFill({ type: 'solid', shapeFit: 'fill' }) as any).shapeFit).toBeUndefined()
+    })
   })
   it('rotates each shape by angle about the cell centre', () => {
     created = []

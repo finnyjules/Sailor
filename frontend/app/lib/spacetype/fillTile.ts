@@ -37,9 +37,20 @@ export type FillType = 'solid' | 'gradient' | 'ombre' | 'grid' | 'noise' | 'chec
 /** `a`/`b` drive the slot's fill (stripe); `textColor` is the solid colour for type on that row.
  *  `angle` (degrees) applies to `stripes`/`gradient`/`ombre`/`shapes` (per-shape rotation) and to
  *  `paper` (fibre direction); `density` controls cell/stripe count, and grain fineness for `paper`.
- *  `shapeId`, `shapeSize`, `shapeGap` are only meaningful for `type === 'shapes'`. `grain` (0..1)
- *  is only meaningful for `type === 'paper'`: the grain strength, set only by `normalizeFill`. */
-export interface Fill { type: FillType; a: string; b: string; textColor: string; angle: number; density: number; shader?: ShaderSpec; shapeId?: string; shapeSize?: number; shapeGap?: number; grain?: number }
+ *  `shapeId`, `shapeSize`, `shapeGap`, `shapeFit` are only meaningful for `type === 'shapes'`.
+ *  `grain` (0..1) is only meaningful for `type === 'paper'`: the grain strength, set only by
+ *  `normalizeFill`. */
+export interface Fill { type: FillType; a: string; b: string; textColor: string; angle: number; density: number; shader?: ShaderSpec; shapeId?: string; shapeSize?: number; shapeGap?: number; shapeFit?: ShapeFit; grain?: number }
+
+/** How a `shapes` fill occupies its box. `'tile'` repeats the shape on the Size/Spacing grid
+ *  (the historical — and still default — behaviour). `'fill'` and `'contain'` draw ONE shape:
+ *  `'fill'` scales it to cover the box (the overflow is clipped), `'contain'` scales it to sit
+ *  wholly inside. Size and Spacing are grid dials, so they are dead controls in the two
+ *  single-shape modes and the picker hides them there. */
+export type ShapeFit = 'tile' | 'fill' | 'contain'
+/** Picker order. `'tile'` is the DEFAULT (and the only pre-`shapeFit` behaviour) but sits last
+ *  because the two single-shape fits are the ones a user reaches for by name. */
+export const SHAPE_FITS: ShapeFit[] = ['fill', 'contain', 'tile']
 
 /** A shader fill runs `input` through a catalog effect against any `Paint` — a flat
  *  colour, a linear/radial gradient, or another (non-shader) `Fill`. `input` is NEVER
@@ -197,6 +208,9 @@ export function normalizeFill(f: unknown, depth = 0): Fill {
     const d = cl(typeof o.density === 'number' ? o.density : 8, 1, 64)
     base.shapeSize = typeof o.shapeSize === 'number' ? cl(o.shapeSize, 0.01, 0.6) : 0.76 / d
     base.shapeGap  = typeof o.shapeGap  === 'number' ? cl(o.shapeGap,  0,    0.6) : 0.24 / d
+    // `shapeFit` defaults to 'tile' — the only behaviour that existed before it, so every
+    // saved shapes fill migrates to exactly the look it had.
+    base.shapeFit = (SHAPE_FITS as string[]).includes(o.shapeFit as string) ? (o.shapeFit as ShapeFit) : 'tile'
   }
   // `grain` (0..1) is only meaningful for a `paper` fill — the grain strength. Default 0.4,
   // clamped, so every downstream consumer can assume a real number whenever `type === 'paper'`.
@@ -412,13 +426,55 @@ export function patternImageData(w: number, h: number, colA: [number, number, nu
   return img
 }
 
-/** Paint a grid of the fill's library shape onto a size-agnostic tile. The grid COUNT is
- *  derived from `shapeSize` + `shapeGap` (both tile fractions): each cell spans
- *  `size + gap`, so `d = round(1 / (size + gap))` whole cells fit across (keeping the
- *  pattern seamless), and the shape fills `size / (size + gap)` of its cell. Bigger size ⇒
- *  larger shapes / fewer of them; bigger gap ⇒ same shapes with more air around each. */
+/** Paint the fill's library shape onto a size-agnostic tile, in one of three fits.
+ *
+ *  `'fill'` / `'contain'` draw a SINGLE shape across the whole tile — cover (overflow
+ *  clipped by the tile) and letterboxed-inside respectively. Size and Spacing play no
+ *  part in either.
+ *
+ *  `'tile'` (the default) repeats the shape on a grid whose COUNT is derived from
+ *  `shapeSize` + `shapeGap` (both tile fractions): each cell spans `size + gap`, so
+ *  `cols = round(1 / (size + gap))` whole cells fit across (keeping the square tile
+ *  seamless), and the shape fills `size / (size + gap)` of its cell. Bigger size ⇒ larger
+ *  shapes / fewer of them; bigger gap ⇒ same shapes with more air around each.
+ *
+ *  Cells are SQUARE: the cell edge comes from the WIDTH, and the row count is however many
+ *  of those square cells the height needs (centred, so the overhang crops evenly top and
+ *  bottom rather than leaving a dead band). Rows used to be the same `d` as columns, which
+ *  made the cell as oblong as the box; drawShape fits its ink with a single uniform scale,
+ *  so on a non-square box that left a permanent strip of air along the long axis — air no
+ *  amount of Spacing = 0 could close. With square cells, `gap = 0` really does put adjacent
+ *  shape boxes edge to edge. */
 function paintShapesTile(ctx: CanvasRenderingContext2D, fill: Fill, W: number, H: number): void {
   const shape = shapeById(fill.shapeId ?? '') ?? shapeById('sparkle')!
+  const bg = fill.b
+  if (bg && bg !== 'none') { ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H) }
+  const rot = (fill.angle * Math.PI) / 180
+
+  // ── Single-shape fits ────────────────────────────────────────────────────────────
+  const fit: ShapeFit = fill.shapeFit ?? 'tile'
+  if (fit !== 'tile') {
+    const [, , sbw, sbh] = shape.box
+    // `contain` IS drawShape's own behaviour on the whole tile (it fits by `min` and
+    // centres). `fill` needs the covering rect computed here and handed in, because
+    // drawShape has no `max` mode — feeding it the cover-sized box makes its `min`
+    // land on exactly the cover scale.
+    let x = 0, y = 0, w = W, h = H
+    if (fit === 'fill' && sbw > 0 && sbh > 0) {
+      const s = Math.max(W / sbw, H / sbh)
+      w = sbw * s; h = sbh * s; x = (W - w) / 2; y = (H - h) / 2
+    }
+    if (rot) {
+      ctx.save(); ctx.translate(W / 2, H / 2); ctx.rotate(rot); ctx.translate(-W / 2, -H / 2)
+      drawShape(ctx, shape, { x, y, w, h, fill: fill.a })
+      ctx.restore()
+    } else {
+      drawShape(ctx, shape, { x, y, w, h, fill: fill.a })
+    }
+    return
+  }
+
+  // ── Tiled grid ───────────────────────────────────────────────────────────────────
   // Self-migrate: a fill that skipped normalizeFill (e.g. a compositor Paint fed straight to the
   // tile builder) may carry only the legacy `density`. Derive size/gap from it with the same
   // 0.76/0.24 split normalizeFill uses, so a density-only shapes fill renders at its saved count
@@ -427,14 +483,13 @@ function paintShapesTile(ctx: CanvasRenderingContext2D, fill: Fill, W: number, H
   const size = Math.max(0.01, Math.min(0.6, fill.shapeSize ?? 0.76 / dDen))
   const gap  = Math.max(0,    Math.min(0.6, fill.shapeGap  ?? 0.24 / dDen))
   const cellFrac = Math.max(0.02, size + gap)
-  const d = Math.max(1, Math.min(64, Math.round(1 / cellFrac)))
   const fillFrac = Math.max(0.02, Math.min(1, size / cellFrac))
-  const bg = fill.b
-  if (bg && bg !== 'none') { ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H) }
-  const cw = W / d, ch = H / d
-  const rot = (fill.angle * Math.PI) / 180
-  for (let iy = 0; iy < d; iy++) for (let ix = 0; ix < d; ix++) {
-    const cx = (ix + 0.5) * cw, cy = (iy + 0.5) * ch
+  const cols = Math.max(1, Math.min(64, Math.round(1 / cellFrac)))
+  const cw = W / cols, ch = cw                                  // square cells
+  const rows = Math.max(1, Math.min(64, Math.ceil(H / ch)))
+  const y0 = (H - rows * ch) / 2                                // centre the overhang
+  for (let iy = 0; iy < rows; iy++) for (let ix = 0; ix < cols; ix++) {
+    const cx = (ix + 0.5) * cw, cy = y0 + (iy + 0.5) * ch
     const bw = cw * fillFrac, bh = ch * fillFrac
     if (rot) {
       ctx.save(); ctx.translate(cx, cy); ctx.rotate(rot); ctx.translate(-cx, -cy)
@@ -531,7 +586,7 @@ export function paintPaperTile(ctx: CanvasRenderingContext2D, fill: Fill, W: num
  *  `:`-separated multi-fill format and intentionally does NOT use this.) */
 export function fillTileKey(fill: Fill): string {
   const extra = fill.type === 'shapes'
-    ? (fill.shapeId ?? 'sparkle') + ':' + fill.shapeSize + ':' + fill.shapeGap
+    ? (fill.shapeId ?? 'sparkle') + ':' + fill.shapeSize + ':' + fill.shapeGap + ':' + (fill.shapeFit ?? 'tile')
     : fill.type === 'paper'
     ? String(fill.grain ?? 0.4)
     : ''

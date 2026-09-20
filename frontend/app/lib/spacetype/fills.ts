@@ -398,7 +398,7 @@ const _atlasCache = new Map<string, THREE.Texture>()
 export function fillAtlasTexture(three: typeof THREE, fills: Fill[]): THREE.Texture {
   // shapeId only matters for `shapes`; fold it in so two shape patterns that differ only by shape
   // (same colours/density/angle) don't collide onto one cached atlas (mirrors fillTexture's key).
-  const key = fills.map(f => `${f.type}:${f.a}:${f.b}:${f.angle}:${f.density}${f.type === 'shapes' ? ':' + (f.shapeId ?? 'sparkle') + ':' + f.shapeSize + ':' + f.shapeGap : f.type === 'paper' ? ':' + String(f.grain ?? 0.4) : ''}`).join('|')
+  const key = fills.map(f => `${f.type}:${f.a}:${f.b}:${f.angle}:${f.density}${f.type === 'shapes' ? ':' + (f.shapeId ?? 'sparkle') + ':' + f.shapeSize + ':' + f.shapeGap + ':' + (f.shapeFit ?? 'tile') : f.type === 'paper' ? ':' + String(f.grain ?? 0.4) : ''}`).join('|')
   const hit = _atlasCache.get(key)
   if (hit) return hit
   const BAND = 256, W = 256, nb = Math.max(1, fills.length)
