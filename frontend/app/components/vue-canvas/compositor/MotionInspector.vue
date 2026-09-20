@@ -207,11 +207,18 @@ const cascadeAmountRange = computed(() => {
   if (style === 'spin') return { min: 0, max: 360, step: 1 }
   return { min: 0, max: 3, step: 0.05 }
 })
-const showShuffle = computed(() => {
+// Shuffle re-rolls the ONE seed behind everything random in a move, so it sits beside what it
+// visibly changes: at the end of the move's own rows when the move itself is random (a Slot's
+// fillers, a Scramble's spots), under Order when the random ORDER is the only random thing,
+// and nowhere when nothing is (a Slot rolling its own letter in reading order).
+const HASHED_KINDS = ['text.scramble', 'text.decode', 'text.slot', 'text.jitter']
+const shuffleAt = computed<'move' | 'order' | null>(() => {
   const beh = behaviour.value
-  if (!beh) return false
-  const HASHED_KINDS = ['text.scramble', 'text.decode', 'text.slot', 'text.jitter']
-  return enumParam('order', 'ltr') === 'random' || HASHED_KINDS.includes(beh.kind)
+  if (!beh) return null
+  const moveIsRandom = HASHED_KINDS.includes(beh.kind)
+    && !(beh.kind === 'text.slot' && enumParam('filler', 'letters') === 'same')
+  if (moveIsRandom) return 'move'
+  return !isLoopBeh.value && enumParam('order', 'ltr') === 'random' ? 'order' : null
 })
 // Loops (wave/bounce/jitter): span the whole bar with no per-piece stagger, so Stagger and
 // "each piece runs for" say nothing — they show Amount/Speed(/Offset) instead.
@@ -458,8 +465,11 @@ function onGradient(g: Gradient) {
         <StudioSelect data-testid="letters-order" label="Order"
           :model-value="enumParam('order', 'ltr')" :options="ORDER_OPTIONS" :option-labels="ORDER_LABELS"
           @update:model-value="(v) => setBehParams({ order: v })" />
-        <div v-if="showShuffle" class="flex items-center justify-end">
-          <StudioButton data-testid="letters-shuffle" title="Pick a new random order" @click="shuffleSeed">Shuffle</StudioButton>
+        <div v-if="shuffleAt === 'order'" data-testid="letters-shuffle-row"
+          class="flex h-7 select-none items-center justify-between gap-2 rounded-[6px] bg-white/[0.05] pl-2.5 pr-[3px]">
+          <span class="min-w-0 truncate text-[11px] text-white/72">Random order</span>
+          <StudioButton data-testid="letters-shuffle" title="Pick a new random order"
+            class="h-[22px] !rounded-[4px] !px-2.5 !py-0 !text-[11px] after:!inset-y-0" @click="shuffleSeed">Shuffle</StudioButton>
         </div>
         <StudioSwitch v-if="isTextEntrance" data-testid="letters-hide-before" label="Hide text before it starts"
           hint="On: the text only appears through this move. Off: the text is already there, and this move plays over it."
@@ -571,6 +581,12 @@ function onGradient(g: Gradient) {
             :model-value="enumParam('filler', 'letters')" :options="SLOT_FILLER_OPTIONS" :option-labels="SLOT_FILLER_LABELS"
             @update:model-value="(v) => setBehParams({ filler: v })" />
         </template>
+        <div v-if="shuffleAt === 'move'" data-testid="letters-shuffle-row"
+          class="flex h-7 select-none items-center justify-between gap-2 rounded-[6px] bg-white/[0.05] pl-2.5 pr-[3px]">
+          <span class="min-w-0 truncate text-[11px] text-white/72">Variation</span>
+          <StudioButton data-testid="letters-shuffle" title="Re-roll everything random in this move"
+            class="h-[22px] !rounded-[4px] !px-2.5 !py-0 !text-[11px] after:!inset-y-0" @click="shuffleSeed">Shuffle</StudioButton>
+        </div>
       </template>
     </div>
 
