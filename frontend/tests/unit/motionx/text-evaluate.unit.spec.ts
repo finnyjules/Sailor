@@ -401,9 +401,25 @@ describe('hide before the bar — only for bars that REVEAL the text', () => {
     const b = beh('text.cascade', { style: 'fade', hideBefore: false })
     expect(ev(b, 0.5).atRest).toBe(true)
     expect(ev(b, 1.5).cells[0]!.opacity).toBeCloseTo(0.5, 6)
-    // once the bar has started, a piece still waiting for its turn IS hidden (it has to appear)
+    // …and a piece still WAITING for its turn inside the bar stays at rest too: with a bar that
+    // starts at 0 there is no "before the bar", so hiding waiting pieces made the switch a no-op.
     const staggered = beh('text.cascade', { style: 'fade', hideBefore: false, stagger: 0.2 })
-    expect(ev(staggered, 1.05).cells[3]!.opacity).toBe(0)
+    expect(ev(staggered, 1.05).cells[3]!.opacity).toBe(1)
+    expect(ev(beh('text.cascade', { style: 'fade', stagger: 0.2 }), 1.05).cells[3]!.opacity).toBe(0)   // default still hides
+  })
+  it('hideBefore: false on a bar that starts at 0 shows the whole text on the first frame', () => {
+    for (const kind of ['text.cascade', 'text.slot', 'text.maskSlide', 'text.typewriter']) {
+      const b = beh(kind, { hideBefore: false, stagger: 0.1 }, 0, 2)
+      // (not `atRest`: a typewriter's cursor is already drawn at frame 0) — an empty cell list
+      // IS the at-rest frame, the painter draws the text as usual
+      expect(ev(b, 0).cells.every((c) => c.opacity === 1 && !c.clip && !c.reel), kind).toBe(true)
+      expect(ev(beh(kind, { stagger: 0.1 }, 0, 2), 0).cells.every((c) => c.opacity === 0), kind).toBe(true)
+    }
+  })
+  it('hideBefore: false keeps the typewriter cursor behind the letters it has typed, not at the end', () => {
+    const typed = ev(beh('text.typewriter', { stagger: 0.2 }, 0, 2), 0.3).cursor
+    const shown = ev(beh('text.typewriter', { stagger: 0.2, hideBefore: false }, 0, 2), 0.3).cursor
+    expect(shown).toEqual(typed)
   })
   it('textCanMove agrees: nothing to draw before a bar that does not hide', async () => {
     const { textCanMove } = await import('~/lib/motionx/text')

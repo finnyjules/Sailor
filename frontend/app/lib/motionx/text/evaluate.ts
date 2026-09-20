@@ -366,11 +366,17 @@ export function evaluateTextBehaviours(behaviours: StoredBehaviour[], t: number,
       let isRest = false
 
       if (phase === 'in') {
-        // Before the BAR: hidden only when this bar is what reveals the text (see `hidesBefore`).
-        // From the bar's start on, a piece still waiting for its turn is always hidden.
-        if (barElapsed < 0 && !hideBefore) { state = REST; isRest = true; visible[i] = true }
-        // `wholeBar` moves the near edge from this piece's own turn to the BAR's start.
-        else if (wholeBar ? !(barElapsed >= 0) : rawP <= 0) { state = HIDDEN; visible[i] = false }
+        // A piece still WAITING for its turn — before the bar, or inside it behind the stagger
+        // — is hidden only when this bar is what reveals the text (see `hidesBefore`). Otherwise
+        // it sits at rest until its own turn: a bar that starts at 0 has no "before", so hiding
+        // the waiting pieces regardless left the switch with nothing to switch. `visible` stays
+        // false either way — it means "this bar has brought the piece in", which is what a
+        // cursor follows. `wholeBar` moves the near edge from the piece's turn to the BAR's start.
+        if (wholeBar ? !(barElapsed >= 0) : rawP <= 0) {
+          visible[i] = false
+          if (hideBefore) state = HIDDEN
+          else { state = REST; isRest = true }
+        }
         else if (rawP >= 1 && !spring) { state = REST; isRest = true; visible[i] = true }
         else {
           const p = spring ? Math.max(0, rawP) : clamp01(rawP)
