@@ -268,12 +268,16 @@ const pieceTimingInfo = computed(() => {
   const ranks = pieceRanks(count, order, seed)
   return pieceTiming(ranks, stagger, beh.timing.duration)
 })
+// How long ONE piece plays for (the bar minus the total stagger). A consequence of Stagger and
+// Duration, so it lives in Stagger's own tooltip — not as a standing line in the panel.
 const pieceLine = computed(() => {
   if (!pieceTimingInfo.value) return null
   const by = enumParam('by', 'letters')
   const prefix = by === 'lines' ? 'About each' : 'Each'
   return `${prefix} piece runs for ${pieceTimingInfo.value.pieceDur.toFixed(2)}s.`
 })
+const staggerHint = computed(() =>
+  'Seconds between one piece starting and the next.' + (pieceLine.value ? ' ' + pieceLine.value : ''))
 const staggerShortened = computed(() => {
   if (!pieceTimingInfo.value) return false
   const stagger = numParam('stagger', 0.04)
@@ -459,9 +463,14 @@ function onGradient(g: Gradient) {
           :model-value="enumParam('by', 'letters')" :options="BY_OPTIONS" :option-labels="BY_LABELS"
           @update:model-value="(v) => setBehParams({ by: v })" />
         <StudioSlider v-if="!isLoopBeh" data-testid="letters-stagger" v-bind="gesture('letters-stagger')"
-          label="Stagger" hint="Seconds between one piece starting and the next"
+          label="Stagger" :hint="staggerHint"
           :model-value="numParam('stagger', 0.04)" :min="0" :max="0.5" :step="0.01" :default="0.04"
           @update:model-value="(v) => setBehNum('letters-stagger', { stagger: v })" />
+        <!-- Only when it bites: the pieces could not all start inside the bar at this stagger. -->
+        <div v-if="staggerShortened && !isLoopBeh" data-testid="letters-stagger-shortened"
+          class="px-2.5 text-[10px] leading-snug text-amber-300/80">
+          Playing at {{ pieceTimingInfo!.staggerUsed.toFixed(2) }}s so every piece fits in the bar. Lengthen the bar to use the full stagger.
+        </div>
         <StudioSelect data-testid="letters-order" label="Order"
           :model-value="enumParam('order', 'ltr')" :options="ORDER_OPTIONS" :option-labels="ORDER_LABELS"
           @update:model-value="(v) => setBehParams({ order: v })" />
@@ -474,9 +483,6 @@ function onGradient(g: Gradient) {
         <StudioSwitch v-if="isTextEntrance" data-testid="letters-hide-before" label="Hide text before it starts"
           hint="On: the text only appears through this move. Off: the text is already there, and this move plays over it."
           :model-value="hidesBefore" @update:model-value="(v) => setBehParams({ hideBefore: v })" />
-        <div v-if="pieceLine && !isLoopBeh" data-testid="letters-piece-time" class="leading-snug text-white/50">
-          {{ pieceLine }}<span v-if="staggerShortened"> Stagger shortened to fit the bar.</span>
-        </div>
 
         <template v-if="isLoopBeh">
           <StudioSlider data-testid="loop-amount" v-bind="gesture('loop-amount')"
