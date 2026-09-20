@@ -454,7 +454,7 @@ function onGradient(g: Gradient) {
           hint="Swap this bar for another letter move. Timing, stagger and easing are kept."
           :model-value="letterMoveId" :options="LETTER_MOVE_IDS" :option-labels="LETTER_MOVE_LABELS"
           @update:model-value="swapMove" />
-        <div class="text-[10px] uppercase tracking-wide text-white/35">Text</div>
+        <div class="mi-heading">Text</div>
         <StudioSegmentedRow data-testid="letters-by" label="Animate by"
           :model-value="enumParam('by', 'letters')" :options="BY_OPTIONS" :option-labels="BY_LABELS"
           @update:model-value="(v) => setBehParams({ by: v })" />
@@ -591,12 +591,12 @@ function onGradient(g: Gradient) {
     </div>
 
     <template v-if="showEasing">
-      <div class="mb-1 mt-2 text-[10px] uppercase tracking-wide text-white/35">Easing</div>
+      <div class="mi-heading">Easing</div>
       <MotionEasingCurve class="mb-2" :ease="behEase"
         @start="emit('before-change')" @change="setBehEaseLive" @end="emit('commit')" />
     </template>
 
-    <div class="mb-1 mt-2 text-[10px] uppercase tracking-wide text-white/35">Timing</div>
+    <div class="mi-heading">Timing</div>
     <div class="space-y-2">
       <StudioSlider data-testid="beh-start" v-bind="gesture('beh-start')"
         label="Start" :model-value="+behaviour.timing.start.toFixed(2)" :min="0" :max="timeMax" :step="0.05" :default="0"
@@ -644,11 +644,11 @@ function onGradient(g: Gradient) {
           @update:model-value="(v) => setValue(v)" />
       </div>
       <div v-else class="mb-2">
-        <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">Value</div>
+        <div class="mi-heading">Value</div>
         <GradientEditor :model-value="pointGradient" @update:model-value="onGradient" />
       </div>
       <template v-if="!isLastPoint">
-        <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">Ease to next point</div>
+        <div class="mi-heading">Ease to next point</div>
         <MotionEasingCurve class="mb-2" :ease="point.ease"
           @start="emit('before-change')" @change="setEaseLive" @end="emit('commit')" />
       </template>
@@ -657,7 +657,7 @@ function onGradient(g: Gradient) {
 
     <!-- Property band selected: timing + easing + add point -->
     <template v-else>
-      <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">Timing</div>
+      <div class="mi-heading">Timing</div>
       <div class="mb-2 space-y-2">
         <StudioSlider data-testid="inspector-start" v-bind="gesture('inspector-start')"
           label="Start" :model-value="+span.start.toFixed(2)" :min="0" :max="timeMax" :step="0.05" :default="0"
@@ -666,7 +666,7 @@ function onGradient(g: Gradient) {
           label="Duration" :model-value="+(span.end - span.start).toFixed(2)" :min="0.05" :max="timeMax" :step="0.05" :default="1"
           @update:model-value="setDuration" />
       </div>
-      <div class="mb-1 text-[10px] uppercase tracking-wide text-white/35">{{ track.keyframes.length > 2 ? 'Easing (all points)' : 'Easing' }}</div>
+      <div class="mi-heading">{{ track.keyframes.length > 2 ? 'Easing (all points)' : 'Easing' }}</div>
       <MotionEasingCurve class="mb-2" :ease="track.keyframes[0]?.ease ?? 'linear'"
         @start="emit('before-change')" @change="setAllEaseLive" @end="emit('commit')" />
       <StudioSwitch class="mb-2" data-testid="band-loop" label="Loop"
@@ -683,3 +683,18 @@ function onGradient(g: Gradient) {
     </template>
   </div>
 </template>
+
+<style scoped>
+/* A section title (Text, Easing, Timing…). The rows inside a section sit 8px apart, so a
+   title needs clearly MORE than that above it or the sections run together; the first title
+   in a card has the card's own header above it and needs none. Two classes, so it beats the
+   stack's own `space-y` margin wherever a title sits inside one. */
+.mi-heading.mi-heading {
+  margin: 20px 0 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+  color: rgb(255 255 255 / 0.35);
+}
+.mi-heading.mi-heading:first-child { margin-top: 0; }
+</style>
