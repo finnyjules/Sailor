@@ -187,8 +187,9 @@ describe('text.decode', () => {
   const flicker = (i: number, barElapsed: number, rate = 10, set: Charset = 'text') =>
     pickChar(set, CELLS[i]!.char, CELLS, hash01(5, i, Math.floor(barElapsed * rate)))
 
-  it('resolve: hidden before the bar, exactly at rest after it', () => {
-    expect(ev(D(), 0.5).cells.every((c) => c.opacity === 0)).toBe(true)
+  it('resolve: the text is simply at rest before the bar (every letter shows from the first frame, nothing is revealed), exactly at rest after it', () => {
+    expect(ev(D(), 0.5).atRest).toBe(true)
+    expect(ev(D({ hideBefore: true }), 0.5).cells.every((c) => c.opacity === 0)).toBe(true)
     expect(ev(D(), 2.5).atRest).toBe(true)
     expect(ev(D(), 2.5).cells.every((c) => c.char === undefined)).toBe(true)
   })
@@ -514,7 +515,10 @@ describe('textCanMove, for the new kinds', () => {
   })
 
   it('decode resolve goes inert after its bar; a dissolve never does', () => {
-    expect(textCanMove([beh('text.decode', {}, 1, 2)], 0.5)).toBe(true)
+    // A decode no longer hides the text before its bar (nothing is revealed through it), so
+    // there is nothing to draw until it starts — unless the bar opts back in.
+    expect(textCanMove([beh('text.decode', {}, 1, 2)], 0.5)).toBe(false)
+    expect(textCanMove([beh('text.decode', { hideBefore: true }, 1, 2)], 0.5)).toBe(true)
     expect(textCanMove([beh('text.decode', {}, 1, 2)], 3.5)).toBe(false)
     expect(textCanMove([beh('text.decode', { dir: 'dissolve' }, 1, 2)], 0.5)).toBe(false)
     expect(textCanMove([beh('text.decode', { dir: 'dissolve' }, 1, 2)], 3.5)).toBe(true)

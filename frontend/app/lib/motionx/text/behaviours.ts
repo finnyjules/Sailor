@@ -134,6 +134,8 @@ registerTextBehaviour('text.scramble', {
     const mode = oneOf(params.mode, SCRAMBLE_MODES, 'settle')
     return mode === 'scatter' ? 'out' : mode === 'loop' ? 'span' : 'in'
   },
+  // Every letter is on screen from the scramble's first frame: nothing is revealed through it.
+  hidesBefore: () => false,
   // A snap CUTS between hashed spots — only a glide interpolates, and only it reads the curve.
   usesEase: (params) => oneOf(params.move, SCRAMBLE_MOVES, 'snap') === 'glide',
   // Settling is LANDING, not arriving: the whole word jumps about from the bar's first frame
@@ -269,6 +271,7 @@ registerTextBehaviour('text.decode', {
   // The churn is the point: the whole word is already flickering on the bar's first frame, and
   // the stagger says only when each letter LOCKS (or, dissolving, when it starts to go).
   wholeBar: true,
+  hidesBefore: () => false,     // same reason as scramble: the whole word shows from frame one
   usesEase: () => false,        // a flicker ticks on a hashed clock; there is nothing to curve
   piece: () => REST,            // the letters do not move — only what they SAY changes
   cell: (c) => {

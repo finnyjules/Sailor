@@ -113,8 +113,12 @@ describe('text.maskSlide', () => {
 
 describe('text.scramble', () => {
   const S = (params: Record<string, unknown> = {}) => beh('text.scramble', { areaW: 0.5, areaH: 0.5, interval: 0.2, ...params }, 1, 2)
-  it('settle: hidden before, jumping inside the area during, EXACTLY at rest after', () => {
-    expect(ev(S(), 0.5).cells.every((c) => c.opacity === 0)).toBe(true)
+  it('settle: the text stays VISIBLE before the bar (nothing is revealed through a scramble), jumps inside the area during, EXACTLY at rest after', () => {
+    // Julien, 2026-09-19: a Grow in from 0s looked dead because a Scramble placed at 1.85s hid the
+    // text until it started. A scramble shows every letter from its first frame, so there is
+    // nothing to hide beforehand — the text is simply at rest.
+    expect(ev(S(), 0.5).atRest).toBe(true)
+    expect(ev(S({ hideBefore: true }), 0.5).cells.every((c) => c.opacity === 0)).toBe(true)   // opt back in
     const mid = ev(S(), 1.5)
     for (const c of mid.cells) { expect(Math.abs(c.x)).toBeLessThanOrEqual(250); expect(Math.abs(c.y)).toBeLessThanOrEqual(125); expect(c.opacity).toBe(1) }
     expect(mid.cells.some((c, i) => Math.abs(c.x - CELLS[i]!.x) > 1)).toBe(true)
@@ -186,8 +190,8 @@ describe('text.scramble settle hops from the bar\'s first frame, whatever the st
     expect(landed(rtl, 0)).toBe(false)
   })
 
-  it('hidden before the bar, exactly at rest after it', () => {
-    expect(ev(S(), 0.5).cells.every((c) => c.opacity === 0)).toBe(true)
+  it('at rest before the bar, exactly at rest after it', () => {
+    expect(ev(S(), 0.5).atRest).toBe(true)
     expect(ev(S(), 3.01).atRest).toBe(true)
     ev(S(), 3.01).cells.forEach((c, i) => expect(landed(ev(S(), 3.01), i)).toBe(true))
   })
@@ -383,5 +387,40 @@ describe('finite-number guards', () => {
     const a = ev(beh('text.scramble', { areaW: 0.5, areaH: 0.5, interval: 0.2, seed: NaN }, 1, 2), 1.5)
     const b = ev(beh('text.scramble', { areaW: 0.5, areaH: 0.5, interval: 0.2, seed: 1 }, 1, 2), 1.5)
     expect(a).toEqual(b)
+  })
+})
+
+
+describe('hide before the bar — only for bars that REVEAL the text', () => {
+  it('cascade in / typewriter / mask reveal hide the text until they start (default)', () => {
+    for (const b of [beh('text.cascade', { style: 'fade' }), beh('text.typewriter'), beh('text.maskSlide')]) {
+      expect(ev(b, 0.5).cells.every((c) => c.opacity === 0), b.kind).toBe(true)
+    }
+  })
+  it('hideBefore: false leaves the text at rest until the bar starts, then the entrance runs as usual', () => {
+    const b = beh('text.cascade', { style: 'fade', hideBefore: false })
+    expect(ev(b, 0.5).atRest).toBe(true)
+    expect(ev(b, 1.5).cells[0]!.opacity).toBeCloseTo(0.5, 6)
+    // once the bar has started, a piece still waiting for its turn IS hidden (it has to appear)
+    const staggered = beh('text.cascade', { style: 'fade', hideBefore: false, stagger: 0.2 })
+    expect(ev(staggered, 1.05).cells[3]!.opacity).toBe(0)
+  })
+  it('textCanMove agrees: nothing to draw before a bar that does not hide', async () => {
+    const { textCanMove } = await import('~/lib/motionx/text')
+    expect(textCanMove([beh('text.scramble')], 0.5)).toBe(false)
+    expect(textCanMove([beh('text.scramble', { hideBefore: true })], 0.5)).toBe(true)
+    expect(textCanMove([beh('text.cascade')], 0.5)).toBe(true)
+    expect(textCanMove([beh('text.cascade', { hideBefore: false })], 0.5)).toBe(false)
+    expect(textCanMove([beh('text.scramble')], 1.5)).toBe(true)
+  })
+  it('textBehaviourHidesBefore reports the default and the override, for the inspector', async () => {
+    const { textBehaviourHidesBefore } = await import('~/lib/motionx/text')
+    expect(textBehaviourHidesBefore('text.cascade', {})).toBe(true)
+    expect(textBehaviourHidesBefore('text.scramble', {})).toBe(false)
+    expect(textBehaviourHidesBefore('text.decode', {})).toBe(false)
+    expect(textBehaviourHidesBefore('text.slot', {})).toBe(true)
+    expect(textBehaviourHidesBefore('text.scramble', { hideBefore: true })).toBe(true)
+    expect(textBehaviourHidesBefore('text.cascade', { dir: 'out' })).toBe(false)   // exits never hide before
+    expect(textBehaviourHidesBefore('text.wave', {})).toBe(false)
   })
 })

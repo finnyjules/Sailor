@@ -78,6 +78,13 @@ export interface TextBehaviourDef {
    *  the piece's own `p >= 1` (before the bar: HIDDEN; at/after its own end: REST), and an
    *  exit mirrors it — from the piece's own start until the BAR's end, HIDDEN after. */
   wholeBar?: boolean
+  /** Does this ENTRANCE hide the text before its bar starts? Absent ⇒ true: a cascade, a
+   *  typewriter, a mask reveal, a slot make the text APPEAR, so there must be nothing there
+   *  beforehand. A scramble or a decode shows every letter from its first frame — nothing is
+   *  revealed through it — so the text simply rests until the bar begins (otherwise a bar placed
+   *  mid-timeline blanks everything before it, e.g. a Grow in that started at 0s). The shared
+   *  `hideBefore` param overrides the default either way. Exits and loops never hide before. */
+  hidesBefore?: (params: Record<string, unknown>) => boolean
   cursor?: (c: { pieces: Piece[]; visible: boolean[]; t: number; params: Record<string, unknown> }) => CursorDraw | undefined
   /** Delete-style behaviours (typewriter delete) run the chosen order BACKWARDS: whichever
    *  piece would start last under the normal order starts first. Applied to ranks before
@@ -93,6 +100,21 @@ export interface TextBehaviourDef {
   springTail?: boolean
 }
 const REGISTRY = new Map<string, TextBehaviourDef>()
+function hidesBefore(def: TextBehaviourDef, params: Record<string, unknown>): boolean {
+  if (def.phase(params) !== 'in') return false
+  if (typeof params.hideBefore === 'boolean') return params.hideBefore
+  return def.hidesBefore ? def.hidesBefore(params) : true
+}
+/** For the inspector: 'in' (an entrance), 'out' (an exit) or 'span' (a loop); null for an unknown kind. */
+export function textBehaviourPhase(kind: string, params: Record<string, unknown> = {}): 'in' | 'out' | 'span' | null {
+  const def = REGISTRY.get(kind)
+  return def ? def.phase(params) : null
+}
+/** For the inspector: is the text hidden before this bar starts (default or overridden)? */
+export function textBehaviourHidesBefore(kind: string, params: Record<string, unknown> = {}): boolean {
+  const def = REGISTRY.get(kind)
+  return def ? hidesBefore(def, params) : false
+}
 export function registerTextBehaviour(kind: string, def: TextBehaviourDef): void { REGISTRY.set(kind, def) }
 export const isTextBehaviour = (b: { kind: string }) => typeof b?.kind === 'string' && b.kind.startsWith('text.')
 
@@ -328,6 +350,7 @@ export function evaluateTextBehaviours(behaviours: StoredBehaviour[], t: number,
     // at REST or HIDDEN, which is what keeps `cell` off the glyphs that have nothing to say.
     const live: Array<PieceCtx | undefined> = new Array(pieces.length)
     const wholeBar = def.wholeBar === true
+    const hideBefore = hidesBefore(def, params)
 
     const makeCtx = (piece: Piece, delay: number, rawP: number, e: number, barElapsed: number): PieceCtx => ({
       piece, pieces, p: rawP, e, elapsed: t - start - delay, pieceDur, t,
@@ -343,8 +366,11 @@ export function evaluateTextBehaviours(behaviours: StoredBehaviour[], t: number,
       let isRest = false
 
       if (phase === 'in') {
+        // Before the BAR: hidden only when this bar is what reveals the text (see `hidesBefore`).
+        // From the bar's start on, a piece still waiting for its turn is always hidden.
+        if (barElapsed < 0 && !hideBefore) { state = REST; isRest = true; visible[i] = true }
         // `wholeBar` moves the near edge from this piece's own turn to the BAR's start.
-        if (wholeBar ? !(barElapsed >= 0) : rawP <= 0) { state = HIDDEN; visible[i] = false }
+        else if (wholeBar ? !(barElapsed >= 0) : rawP <= 0) { state = HIDDEN; visible[i] = false }
         else if (rawP >= 1 && !spring) { state = REST; isRest = true; visible[i] = true }
         else {
           const p = spring ? Math.max(0, rawP) : clamp01(rawP)
@@ -478,7 +504,8 @@ export function textCanMove(behaviours: StoredBehaviour[], t: number): boolean {
     const tail = phase === 'in' && def.springTail === true && isSpringEase(ease) ? springSettle(ease.bounce) : 1
     const end = start + D * tail
     // NaN timings compare false everywhere, which lands on "live" — the safe side.
-    if (phase === 'in' ? !(t > end) : !(t < start || t > end)) return true
+    // An entrance that does not hide the text beforehand has nothing to draw until it starts.
+    if (phase === 'in' ? !(t > end) && (hidesBefore(def, params) || !(t < start)) : !(t < start || t > end)) return true
   }
   return false
 }

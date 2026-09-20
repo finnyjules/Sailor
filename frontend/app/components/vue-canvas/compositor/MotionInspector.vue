@@ -12,7 +12,7 @@ import type { Track, Ease, PropertyValue, StoredBehaviour, Timing } from '~/lib/
 export type BehaviourPatch = { params?: Record<string, unknown>; timing?: Partial<Timing>; kind?: string }
 import { trackSpan, behaviourLabel } from '~/lib/motionx/bands'
 import { retimeTrack, addPoint, setPointValue, setPointEase, removePoint, setBandTrack, bandTrackAt } from '~/lib/motionx/bandEdit'
-import { DEFAULT_TEXT_EASE, isTextBehaviour, pieceRanks, pieceTiming, textBehaviourUsesEase, type Order } from '~/lib/motionx/text'
+import { DEFAULT_TEXT_EASE, isTextBehaviour, pieceRanks, pieceTiming, textBehaviourHidesBefore, textBehaviourPhase, textBehaviourUsesEase, type Order } from '~/lib/motionx/text'
 import { NO_RUN, openRun, closeRun, takeRecord, type UndoRun } from '~/lib/motionx/undoCoalesce'
 import GradientEditor from '~/components/vue-canvas/compositor/GradientEditor.vue'
 import MotionEasingCurve from '~/components/vue-canvas/compositor/MotionEasingCurve.vue'
@@ -212,6 +212,13 @@ const loopSpeedDefault = computed(() => {
 })
 // The Easing block is dead for a kind whose curve does nothing (a hard cut, a hashed flicker,
 // a loop riding its own sine) — read from the registry so this can never drift from evaluate.ts.
+// Entrances only: does the text stay hidden until this bar starts? The default depends on the
+// kind (a cascade reveals the text, a scramble does not) — read from the evaluator, never
+// duplicated here — and the switch overrides it either way.
+const isTextEntrance = computed(() =>
+  !!behaviour.value && isTextBeh.value && textBehaviourPhase(behaviour.value.kind, behaviour.value.params ?? {}) === 'in')
+const hidesBefore = computed(() =>
+  !!behaviour.value && textBehaviourHidesBefore(behaviour.value.kind, behaviour.value.params ?? {}))
 const showEasing = computed(() => {
   if (!behaviour.value) return false
   if (!isTextBeh.value) return true
@@ -428,6 +435,9 @@ function onGradient(g: Gradient) {
         <div v-if="showShuffle" class="flex items-center justify-end">
           <StudioButton data-testid="letters-shuffle" title="Pick a new random order" @click="shuffleSeed">Shuffle</StudioButton>
         </div>
+        <StudioSwitch v-if="isTextEntrance" data-testid="letters-hide-before" label="Hide text before it starts"
+          hint="On: the text only appears through this move. Off: the text is already there, and this move plays over it."
+          :model-value="hidesBefore" @update:model-value="(v) => setBehParams({ hideBefore: v })" />
         <div v-if="pieceLine && !isLoopBeh" data-testid="letters-piece-time" class="leading-snug text-white/50">
           {{ pieceLine }}<span v-if="staggerShortened"> Stagger shortened to fit the bar.</span>
         </div>
