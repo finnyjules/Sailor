@@ -21,6 +21,7 @@ import { computeTotalFrames } from '~~/shared/timeline/types'
 import { interpolateClipAt } from '~~/shared/timeline/interpolate'
 import { resolveClipSource } from '~~/shared/timeline/resolveClipSource'
 import { computeLeftTrim, clampLengthToSource } from '~~/shared/timeline/trim'
+import { snapGroupDelta, type Span } from '~~/shared/timeline/groupEdit'
 import { collectProjectMediaFilenames } from '~/lib/timeline/projectMedia'
 import type { SpaceTypeState } from '~/lib/spacetype/state'
 import MotionClipInspector from '~/components/vue-canvas/timeline/MotionClipInspector.vue'
@@ -575,11 +576,11 @@ const drag = ref<null | {
 // Active snap target visualised as a vertical guideline during drag.
 const snapGuideFrame = ref<number | null>(null)
 
-function buildSnapTargets(excludeClipId: string | null): number[] {
+function buildSnapTargets(exclude: ReadonlySet<string>): number[] {
   const targets: number[] = [0, store.playheadFrame.value]
   for (const track of store.state.value.tracks) {
     for (const clip of track.clips) {
-      if (clip.id === excludeClipId) continue
+      if (exclude.has(clip.id)) continue
       targets.push(clip.start_frame)
       targets.push(clip.start_frame + clip.length)
     }
@@ -592,10 +593,10 @@ function buildSnapTargets(excludeClipId: string | null): number[] {
   return targets
 }
 
-function snapFrame(rawFrame: number, excludeClipId: string | null): number {
+function snapFrame(rawFrame: number, exclude: ReadonlySet<string>): number {
   const active = snapEnabled.value !== altHeld.value   // XOR: Alt inverts
   if (!active) { snapGuideFrame.value = null; return rawFrame }
-  const targets = buildSnapTargets(excludeClipId)
+  const targets = buildSnapTargets(exclude)
   const thresholdFrames = SNAP_PX / pxPerFrame.value
   let best = rawFrame
   let bestDist = thresholdFrames
@@ -605,6 +606,12 @@ function snapFrame(rawFrame: number, excludeClipId: string | null): number {
   }
   snapGuideFrame.value = best !== rawFrame ? best : null
   return best
+}
+
+/** The clips that move or trim together in the current drag. */
+function draggingIds(): Set<string> {
+  if (dragGroupStarts && dragGroupStarts.size > 1) return new Set(dragGroupStarts.keys())
+  return new Set(drag.value ? [drag.value.clipId] : [])
 }
 
 // Snapshot of clip start-frames at drag-start for bulk-move support.
@@ -770,23 +777,22 @@ function onPointerMove(e: PointerEvent) {
   // Convert delta to frames using zoom only (no scroll offset for deltas).
   const dframes = Math.round(dx / pxPerFrame.value)
   if (drag.value.mode === 'move') {
-    const rawStart = Math.max(0, drag.value.startStart + dframes)
-    // Snap either edge (start or end), whichever is closer to a target.
-    const dur = drag.value.startLength
-    const startSnap = snapFrame(rawStart, drag.value.clipId)
-    const endSnap = snapFrame(rawStart + dur, drag.value.clipId)
-    const startDist = Math.abs(startSnap - rawStart)
-    const endDist = Math.abs(endSnap - (rawStart + dur))
-    const finalStart = startDist < endDist ? startSnap : (endSnap - dur)
-    snapGuideFrame.value = (startDist < endDist ? startSnap : endSnap)
-    if (startDist >= SNAP_PX / pxPerFrame.value && endDist >= SNAP_PX / pxPerFrame.value) snapGuideFrame.value = null
+    const moving = draggingIds()
+    const members: Span[] = []
+    for (const track of store.state.value.tracks) {
+      for (const c of track.clips) {
+        if (!moving.has(c.id)) continue
+        const s0 = dragGroupStarts?.get(c.id) ?? drag.value.startStart
+        members.push({ start: s0, end: s0 + c.length })
+      }
+    }
+    const snapOn = snapEnabled.value !== altHeld.value   // XOR: Alt inverts
+    const snapped = snapGroupDelta(members, dframes, snapOn ? buildSnapTargets(moving) : [], SNAP_PX / pxPerFrame.value)
+    snapGuideFrame.value = snapped.guideFrame
+    const finalStart = drag.value.startStart + snapped.delta
     // Apply: either single clip, or whole selection if bulk-move is active.
     if (dragGroupStarts && dragGroupStarts.size > 1) {
-      const realDelta = Math.max(0, finalStart) - drag.value.startStart
-      // Don't let any clip go below 0.
-      let minStart = Infinity
-      for (const [, s] of dragGroupStarts) minStart = Math.min(minStart, s)
-      const clampedDelta = Math.max(realDelta, -minStart)
+      const clampedDelta = snapped.delta   // already kept above frame 0 by snapGroupDelta
       store.mutate(s => {
         for (const track of s.tracks) {
           for (const c of track.clips) {
@@ -815,7 +821,7 @@ function onPointerMove(e: PointerEvent) {
   } else if (drag.value.mode === 'resize-right') {
     const clip = findClip(drag.value.clipId)
     const rawEnd = drag.value.startStart + Math.max(1, drag.value.startLength + dframes)
-    const snapped = snapFrame(rawEnd, drag.value.clipId)
+    const snapped = snapFrame(rawEnd, draggingIds())
     let newLen = Math.max(1, snapped - drag.value.startStart)
     if (clip) newLen = clampLengthToSource(newLen, clip.in_frame, clipSourceFrames(clip), clip.speed ?? 1)
     store.updateClip(drag.value.clipId, { length: newLen })
@@ -825,7 +831,7 @@ function onPointerMove(e: PointerEvent) {
     // Anchored kinds trim INTO the source: in_frame moves with the edge.
     const anchored = clip?.kind === 'video' || clip?.kind === 'audio'
     const rawStart = drag.value.startStart + dframes
-    const snapped = snapFrame(rawStart, drag.value.clipId)
+    const snapped = snapFrame(rawStart, draggingIds())
     const t = computeLeftTrim(
       { start_frame: drag.value.startStart, in_frame: drag.value.startIn, length: drag.value.startLength },
       snapped, anchored)
@@ -968,7 +974,7 @@ function onTrackDragOver(trackId: string, e: DragEvent) {
   const rect = stripRef.value!.getBoundingClientRect()
   const rawFrame = Math.max(0, Math.round(pxToFrames(e.clientX - rect.left)))
   // Snap to other clip edges + playhead while dragging in.
-  dragGhostFrame.value = snapFrame(rawFrame, null)
+  dragGhostFrame.value = snapFrame(rawFrame, new Set<string>())
   dragTargetTrackId.value = trackId
 }
 
@@ -1137,7 +1143,7 @@ async function renderViaFFmpeg() {
   // first-clip-only sound, and says so.
   let mixFile: string | null = null
   try {
-    mixFile = await ensureTimelineMix(es, clip => resolveAudioUrl(clip))
+    mixFile = await ensureTimelineMix(es, clip => resolveAudioUrl(clip), store.boundNodeId())
   } catch (err: any) {
     console.warn('[timeline] audio mix failed', err)
     renderNotice.value = `Audio could not be mixed (${err?.message ?? err}), so this export only has the first audio clip.`
