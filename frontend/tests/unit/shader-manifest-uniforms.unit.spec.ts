@@ -25,6 +25,9 @@ const BUILTIN = new Set([
   // A built-in mode switch set by the Frame compositor's dither transition, never a
   // Studio dial; reset to 0 for every draw by BUILTIN_PASS_DEFAULTS in renderer.ts.
   'u_matte',
+  // The Dither effect's SHIMMER build (same compositor transition family): whole-cell offsets
+  // of the threshold pattern. Declared only inside `#ifdef SAILOR_SHIMMER`.
+  'u_shimmerX', 'u_shimmerY',
 ])
 
 /**

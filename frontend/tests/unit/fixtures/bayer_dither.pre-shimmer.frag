@@ -12,16 +12,6 @@ uniform float u_levels;
 uniform float u_colored;
 uniform float u_pattern;
 uniform sampler2D u_blueNoise;
-#ifdef SAILOR_SHIMMER
-// SHIMMER build (`#define SAILOR_SHIMMER 1`, injected by the Frame compositor's Assemble
-// transition through renderFieldWithBase's `variant`; its own cached program). The threshold
-// pattern slides under the blocks by a whole number of cells, so the dithered tones shimmer
-// while the sampled picture stays put. NEVER a Shader Studio dial, never a manifest param:
-// with the macro undefined this file is, line for line, the shader it has always been
-// (pinned by bayer-dither-shimmer.unit.spec.ts against a checked-in copy).
-uniform float u_shimmerX;
-uniform float u_shimmerY;
-#endif
 
 const int BN = 64; // blue-noise tile size (matches bake_blue_noise.py SIZE)
 
@@ -75,11 +65,7 @@ void main() {
 
   int pat = int(u_pattern + 0.5);
   float L = max(u_levels, 2.0) - 1.0;
-#ifdef SAILOR_SHIMMER
-  float th = ditherThreshold(dc + ivec2(int(floor(u_shimmerX + 0.5)), int(floor(u_shimmerY + 0.5))), pat) - 0.5;
-#else
   float th = ditherThreshold(dc, pat) - 0.5;
-#endif
   if (u_colored > 0.5) {
     vec3 col = floor(src * L + th + 0.5) / L;
     fragColor0 = vec4(clamp(col, 0.0, 1.0), 1.0);
