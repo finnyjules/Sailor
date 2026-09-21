@@ -293,7 +293,7 @@ const stepsView = computed(() => {
 
     <!-- Steps: how many jumps the move makes -->
     <StudioSlider v-if="mode === 'steps'" data-testid="ease-steps" v-bind="stepsGesture"
-      label="Steps" :model-value="stepsCount" :min="2" :max="24" :step="1" :default="6"
+      label="Steps" :model-value="stepsCountClamped" :min="2" :max="24" :step="1" :default="6"
       hint="How many jumps the move makes. It holds still between them."
       @update:model-value="setSteps" />
   </div>

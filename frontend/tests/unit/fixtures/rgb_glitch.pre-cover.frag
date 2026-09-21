@@ -32,10 +32,6 @@ void main() {
     float g = texture(u_image0, clamp(uv, 0.0, 1.0)).g;
     float b = texture(u_image0, clamp(uv - vec2(cs, 0.0), 0.0, 1.0)).b;
     vec3 col = vec3(r, g, b);
-    // A settle transition renders this effect over a layer's COVERAGE too and divides the two
-    // pictures; its coverage build skips the darkening so it stays in the colour, not the alpha.
-#ifndef SAILOR_COVER
     col *= 1.0 - 0.25 * glitchOn * step(0.5, fract(v_texCoord.y * u_blocks * 0.5));
-#endif
     fragColor0 = vec4(col, 1.0);
 }

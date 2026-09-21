@@ -425,8 +425,7 @@ describe('drawRevealSettle — the combine pass (step 4)', () => {
     expect(SETTLE_COMBINE_FRAG).toMatch(/in vec2 v_texCoord;/)
     expect(SETTLE_COMBINE_FRAG).toMatch(/layout\(location = 0\) out vec4 fragColor0;/)
     expect(SETTLE_COMBINE_FRAG).toMatch(/float alpha = max\(kc\.r, max\(kc\.g, kc\.b\)\);/)
-    expect(SETTLE_COMBINE_FRAG).toMatch(/a \/ max\(kc, vec3\(1e-4\)\)/)
-    expect(SETTLE_COMBINE_FRAG).toMatch(/mix\(a, rgb, step\(vec3\(1e-4\), kc\)\)/)
+    expect(SETTLE_COMBINE_FRAG).toMatch(/vec3 rgb = a \/ max\(alpha, 1e-4\);/)
     expect(SETTLE_COMBINE_FRAG).toMatch(/fragColor0 = vec4\(clamp\(rgb, 0\.0, 1\.0\), alpha\);/)
   })
 
@@ -633,5 +632,35 @@ describe('ensureRevealShadersReady — settle bars are waited for too', () => {
   it('a settle bar whose effect never arrives is REPORTED, not thrown', async () => {
     setRevealPixelsDeps({ whenReadyFx: async () => false })
     await expect(ensureRevealShadersReady([{ kind: 'settle' }])).resolves.toBe(false)
+  })
+})
+
+// ── whole-slice review follow-ups ────────────────────────────────────────────────────────────
+describe('the combine shader recovers colour with ONE alpha, not per channel', () => {
+  it('divides by the pixel\'s alpha (the max channel coverage), so a weaker channel is not blown up to full strength', async () => {
+    const { SETTLE_COMBINE_FRAG } = await import('~/lib/motionx/reveal/paintSettle')
+    expect(SETTLE_COMBINE_FRAG).toContain('float alpha = max(kc.r, max(kc.g, kc.b));')
+    expect(SETTLE_COMBINE_FRAG).toContain('vec3 rgb = a / max(alpha, 1e-4);')
+    // the per-channel divide drew a colour split's fringes up to 5× too strong
+    expect(SETTLE_COMBINE_FRAG).not.toContain('a / max(kc')
+    expect(SETTLE_COMBINE_FRAG).not.toMatch(/mix\(a, rgb/)
+    expect(SETTLE_COMBINE_FRAG).toContain('fragColor0 = vec4(clamp(rgb, 0.0, 1.0), alpha);')
+  })
+})
+
+describe('the coverage render asks for the COVER build when the effect has one', () => {
+  it('Glitch: its band darkening must stay in the COLOUR (dividing would cancel it there and land it on ALPHA as flicker)', () => {
+    const { renderCalls, ctx } = harness()
+    setCurrentTransform(ctx)
+    expect(drawRevealSettle(ctx, settle({}, { effect: 'glitch' }), W, H, base(), () => {}, stamp)).toBe(true)
+    expect(renderCalls).toHaveLength(2)
+    expect(renderCalls[0]![7]).toBeUndefined()           // colour: the classic program
+    expect(renderCalls[1]![7]).toBe('COVER')             // coverage: no darkening
+  })
+  it('every other effect runs the SAME classic program for both renders', () => {
+    const { renderCalls, ctx } = harness()
+    setCurrentTransform(ctx)
+    expect(drawRevealSettle(ctx, settle({}, { effect: 'slice' }), W, H, base(), () => {}, stamp)).toBe(true)
+    expect(renderCalls.map((c) => c[7])).toEqual([undefined, undefined])
   })
 })

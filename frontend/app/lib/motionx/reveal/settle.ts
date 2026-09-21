@@ -15,6 +15,10 @@ export interface SettleEffect {
   label: string
   effectId: string
   dials: readonly { key: string; rest: number; full: number }[]
+  /** Build variant for the COVERAGE render only (`#define SAILOR_<V> 1`). Set when the effect
+   *  changes brightness by a FIXED amount: run over coverage as well, the divide would cancel
+   *  that out of the colour and land it on the alpha instead. */
+  coverVariant?: string
 }
 
 /** The ten rows of Addendum 3's table, in gallery order. Pinned against
@@ -24,6 +28,7 @@ export const SETTLE_EFFECTS: readonly SettleEffect[] = [
   { id: 'slice', label: 'Slice', effectId: 'slice_shift', dials: [{ key: 'amount', rest: 0, full: 0.35 }] },
   {
     id: 'glitch', label: 'Glitch', effectId: 'rgb_glitch',
+    coverVariant: 'COVER',
     dials: [{ key: 'amount', rest: 0, full: 0.2 }, { key: 'chroma', rest: 0, full: 0.03 }],
   },
   { id: 'split', label: 'Colour split', effectId: 'chromatic_aberration', dials: [{ key: 'amount', rest: 0, full: 0.06 }] },

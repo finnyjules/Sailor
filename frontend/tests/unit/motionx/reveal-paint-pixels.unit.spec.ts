@@ -562,6 +562,13 @@ describe('paintLayerStack wiring for Pixels (source-level guard)', () => {
     expect(captureIdx).toBeLessThan(readIdx)
   })
 
+  it('a settle bar that cannot run draws plainly — it never becomes a Dissolve mask', () => {
+    const fallback = SRC.indexOf("beginReveal(ctx, { ...rv, style: 'dissolve' }, W, H, pixelsBase)", fnStart)
+    expect(fallback).toBeGreaterThan(fnStart)
+    const lineStart = SRC.lastIndexOf('\n', fallback) + 1
+    expect(SRC.slice(lineStart, fallback).trim()).toBe("if (rv.style !== 'settle') revealOpen =")
+  })
+
   // The gate is per-BAR now (`revealShaderReady(rv)` asks for the effect THAT bar's style and
   // look need), and the capture happens for either shader style — but for nothing else: the
   // three mask styles must still go through `beginReveal`.

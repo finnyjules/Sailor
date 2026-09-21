@@ -54,10 +54,10 @@ layout(location = 0) out vec4 fragColor0;
 void main() {
   vec3 a = texture(u_image0, v_texCoord).rgb;          // colour × coverage
   vec3 kc = texture(u_cover, v_texCoord).rgb;          // coverage, per channel
+  // ONE alpha for the pixel, and the colour recovered against THAT. Dividing per channel drew
+  // a weakly covered channel (a colour split's fringe) back up to full strength.
   float alpha = max(kc.r, max(kc.g, kc.b));
-  vec3 rgb = alpha > 0.0 ? a / max(kc, vec3(1e-4)) : vec3(0.0);
-  // a channel with no coverage of its own (a colour split's fringe) keeps its own value
-  rgb = mix(a, rgb, step(vec3(1e-4), kc));
+  vec3 rgb = a / max(alpha, 1e-4);
   fragColor0 = vec4(clamp(rgb, 0.0, 1.0), alpha);
 }`
 
@@ -211,9 +211,11 @@ export function drawRevealSettle(
     } catch { return false }
     if (!colourOut) return false
 
+    // The coverage picture may need its own build of the effect (see `SettleEffect.coverVariant`).
+    const coverVariant = note.effect.coverVariant
     let coverOut: { canvas: Canvas } | null
     try {
-      coverOut = copyOf('settleCoverOut', fieldRender(spec, coverIn.canvas, fw, fh, undefined, elapsedSeconds, uniforms))
+      coverOut = copyOf('settleCoverOut', fieldRender(spec, coverIn.canvas, fw, fh, undefined, elapsedSeconds, uniforms, coverVariant))
     } catch { return false }
     if (!coverOut) return false
 

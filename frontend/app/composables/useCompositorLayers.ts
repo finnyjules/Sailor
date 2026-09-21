@@ -5715,7 +5715,8 @@ export function paintLayerStack(
       // Pixels / Assemble: the layer is drawn ALONE at full opacity, run through its shader,
       // and stamped with its own opacity and blend. Effects that read the backdrop and the
       // pre-timeline animation engine sit out the transition (spec addendum). If it cannot
-      // run after all, fall back to the Dissolve mask for this frame.
+      // run after all, fall back to the Dissolve mask for this frame — except a settle bar,
+      // which was never a mask: it just draws plainly.
       if (rv && pixelsBase) {
         const solo = { ...layer, opacity: 1, blend: 'normal' } as LocalLayer
         const drawSolo = (target: CanvasRenderingContext2D) => {
@@ -5723,7 +5724,7 @@ export function paintLayerStack(
           else drawLocalLayer(target, solo, W, H, maskItem?.type === 'local' ? maskItem.layer : null, 1)
         }
         if (drawRevealShaderStyle(ctx, rv, W, H, pixelsBase, drawSolo, { alpha: (layer.opacity ?? 1) * opacityMul, blend: localBlendOp(layer) })) continue
-        revealOpen = beginReveal(ctx, { ...rv, style: 'dissolve' }, W, H, pixelsBase)
+        if (rv.style !== 'settle') revealOpen = beginReveal(ctx, { ...rv, style: 'dissolve' }, W, H, pixelsBase)
       }
       const motionActive = t !== undefined && motion && _motionPainterImpl
         && (layer.animation || (maskItem?.type === 'local' && maskItem.layer.animation))
