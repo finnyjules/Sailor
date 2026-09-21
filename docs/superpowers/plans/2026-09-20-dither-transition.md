@@ -1297,3 +1297,83 @@ Commit subject: `feat(compositor): Assemble in / Assemble out, with Looks from t
 - [ ] Scatter 0 → two straight fronts `Band width` apart; Scatter > 0 → cells ahead of the front, none behind the second front in block form.
 - [ ] A contact sheet from the real canvas for Julien.
 - [ ] Pixels and Dissolve spot-checks unchanged; whole-slice review on the most capable model; one fix wave; ledger, memory.
+
+---
+
+# Part 4 — Settle transitions: ten shader effects, each its own gallery tile
+
+Spec: **Addendum 3** in `docs/superpowers/specs/2026-09-20-dither-transition-design.md` (read it first — it has the table of effects, dials, full-strength values and the three-pass recipe). Parts 1–3 are built and committed. Same Global Constraints (`.superpowers/sdd/dither-constraints.md`), plus:
+
+- Behaviour kind `settle`. Stored params (read ONLY through `settleParams`): `dir: 'in' | 'out'` (default `'in'`), `effect` = one of the ten ids in the table (default `'slice'`; unknown → default), `strength` 0–100 (default 70), `fade: boolean` (default `true`). Tile / menu ids (exact): `slice, glitch, split, blur, zoomblur, pixelate, wave, liquify, swirl, ripple`.
+- Strength curve (exact): `k = (1 − clamp01(amount))² × strength / 100`; each driven dial = `rest + (full − rest) × k`. Fade (exact): stamp alpha × `min(1, amount / 0.25)` when `fade`, else × 1.
+- The transient note stays the ONE field `motionReveal` (the painter, the outline-cache strip and the fold already know it): `style: 'settle'` plus `settle: { effect, strength, fade }`. Dither's `REVEAL_STYLES` (the inspector's Style menu) must NOT gain `'settle'`.
+- Only Task 17 touches `frontend/app/composables/useCompositorLayers.ts` — and only if generalising `isShaderRevealStyle` is not enough (it should be: the two hunks already route through `revealShaderReady(rv)` / `drawRevealShaderStyle(...)`). Nobody touches `shader_effects/`, `field.ts` or `renderer.ts`.
+- SAFETY while editing Vue files (a dev server runs on 127.0.0.1:3002; a template that fails to compile for ONE save kills its worker permanently): every template change in a single Edit that leaves the template valid; compile-check the SFC after each Vue edit; if `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3002/dev/frame-lab` stops returning 200 after a save, STOP and report.
+- Always read vitest's "Test Files" line as well as "Tests": a spec with a syntax error runs zero tests and still prints a passing count.
+
+### Task 16: Settle params, table, compiler and fold
+
+**Files:** create `frontend/app/lib/motionx/reveal/settle.ts`; modify `frontend/app/lib/motionx/reveal/{params.ts,index.ts}`, `frontend/app/lib/motionx/behaviour.ts`, `frontend/app/lib/motionx/adapter/frame.ts`, `frontend/app/lib/motionx/bands.ts`; tests: create `frontend/tests/unit/motionx/reveal-settle.unit.spec.ts`, extend `reveal-fold.unit.spec.ts` and `bands.unit.spec.ts`.
+
+**Produces:**
+- `SETTLE_EFFECTS: readonly SettleEffect[]` with `interface SettleEffect { id: string; label: string; effectId: string; dials: readonly { key: string; rest: number; full: number }[] }` — the ten rows of the spec table, `key` WITHOUT the `u_` prefix (`slice_shift.amount`, `rgb_glitch.amount` + `chroma`, `chromatic_aberration.amount`, `gaussian_blur.radius`, `zoom_blur.strength`, `pixelate.size`, `wave.amplitude`, `liquify.amount`, `swirl.strength`, `water_ripple.amplitude`). A test imports `shader_effects/manifest.json` (copy the import style of `reveal-pixels.unit.spec.ts`) and asserts every `effectId` exists and every dial `key` is a declared float param `u_<key>` of it.
+- `settleParams(params): { out: boolean; effect: SettleEffect; strength: number /* 0–1 */; fade: boolean }`; `settleStrength(amount, strength): number` (the `k` above); `settleFade(amount, fade): number`; `settleUniforms(effect, k): Record<string, number>` → `{ u_<key>: rest + (full − rest) × k }` for every dial (these ride as uniform OVERRIDES, so the manifest's minimums — `gaussian_blur.radius ≥ 0.002`, `pixelate.size ≥ 0.002` — cannot stop a dial reaching its rest value); `settleSpec(effect): { effectId, params: {}, speed: 1, seed: 42 }`.
+- `MotionReveal.style` widens to `RevealStyle | 'settle'` and gains `settle?: { effect: string; strength: number; fade: boolean }` (`effect` = the tile id); `isShaderRevealStyle('settle') === true`; `motionUsesShaderStyle` counts `settle` bars; `revealEffectIdsFor(behaviours): string[]` — every catalogue effect id the bars need (ASCII for Pixels / Assemble·Characters, `bayer_dither` for Assemble·Dither, the settle effect's `effectId`), de-duplicated — for the pre-warm and the export wait.
+- Compiler: `registerBehaviour('settle', …)` → ONE track on `reveal`, 0 → 1 (in) / 1 → 0 (out), default ease `'linear'` (exactly as `dither`).
+- Fold: `applyRevealBehaviours` accepts a winning bar of kind `dither` OR `settle`; for `settle` the note is `{ ...revealParams({}), style: 'settle', out, amount, elapsed, settle: { effect: id, strength, fade } }` (the dither fields are inert filler so the type stays one shape). Same rules: amount ≥ 1 → no note, layer by identity; ≤ 0 → amount 0.
+- `behaviourLabel`: a settle bar reads `<Label> in` / `<Label> out` from the table (`Slice in`, `Colour split out`, …), read through `settleParams`.
+
+**Tests:** table ↔ manifest parity; defaults / unknown effect / clamps / non-finite for `settleParams`; `settleStrength` is 1×strength at amount 0, 0 at 1, monotonic, `(1−a)²`; `settleFade`; `settleUniforms` reaches EXACTLY `rest` at k = 0 and `full` at k = 1 for all ten (incl. Glitch's two dials); compiler in/out + linear + `params.ease` override; fold: settle note shape, winning-bar rule between a dither bar and a later settle bar on the same layer, idle identity cases; label; `revealEffectIdsFor` for a mixed set of bars.
+
+Commit subject: `feat(motionx): settle bars — ten shader effects, one strength curve, the same reveal band`
+
+---
+
+### Task 17: Drawing a settle
+
+**Files:** create `frontend/app/lib/motionx/reveal/paintSettle.ts`; modify `frontend/app/lib/motionx/reveal/paintPixels.ts` (dispatcher + readiness + the generalised ensure), `frontend/app/lib/motion/bake.ts` and the pre-warm watch in `frontend/app/components/vue-canvas/CompositorModal.vue` ONLY if they must change to cover settle bars (prefer making the helpers they already call do it); tests: `frontend/tests/unit/motionx/reveal-paint-settle.unit.spec.ts` + dispatcher cases.
+
+**Recipe** (`drawRevealSettle(ctx, reveal, W, H, base, drawLayer, stamp): boolean`, same contract as `drawRevealPixels`: `false` leaves `ctx` untouched; stack pools; `try/finally` releases everything; every render result copied AT ONCE — the renderer's canvas is only valid until the next render):
+1. `soloPass(...)` (shared with Pixels / Assemble) → `solo`, `fw`, `fh`.
+2. `colourIn` = pooled `fw × fh`: fill opaque black, then `drawImage(solo)` `source-over` (= the layer premultiplied onto black). `coverIn` = pooled `fw × fh`: `drawImage(solo)`, then `source-in` fill white, then `destination-over` fill black (white where the layer is, on black).
+3. `k = settleStrength(amount, strength)`, `u = settleUniforms(effect, k)`, `spec = settleSpec(effect)`. `A = renderFieldWithBase(spec, colourIn, fw, fh, undefined, elapsed, u)` → copy to pooled `colourOut`; `K = renderFieldWithBase(spec, coverIn, fw, fh, undefined, elapsed, u)` → copy to pooled `coverOut`. SAME spec, clock and uniforms for both, or the two pictures will not line up. A throw (cold catalogue) → release → `false`.
+4. Combine on the GPU with the shared renderer directly: `shaderFx.render(expandPasses('sailor_settle_combine', COMBINE_FRAG, {}, { u_cover: coverOut }, 1), colourOut, fw, fh)` where `COMBINE_FRAG` (GLSL ES 3.00, the catalogue's conventions: `u_image0`, `v_texCoord`, `layout(location = 0) out vec4 fragColor0`) is:
+   ```glsl
+   vec3 a = texture(u_image0, v_texCoord).rgb;          // colour × coverage
+   vec3 kc = texture(u_cover, v_texCoord).rgb;          // coverage, per channel
+   float alpha = max(kc.r, max(kc.g, kc.b));
+   vec3 rgb = alpha > 0.0 ? a / max(kc, vec3(1e-4)) : vec3(0.0);
+   // a channel with no coverage of its own (a colour split's fringe) keeps its own value
+   rgb = mix(a, rgb, step(vec3(1e-4), kc));
+   fragColor0 = vec4(clamp(rgb, 0.0, 1.0), alpha);     // STRAIGHT alpha, as the renderer expects
+   ```
+   Copy the result to pooled `out`. (`u_cover` is a per-frame canvas: pass it through the `live` textures argument of `render`, the 5th parameter, NOT the identity-cached `textures` of the pass — read `renderer.ts` ~156–164 for the difference and do what is right for a texture that changes every frame.)
+5. Stamp `out` as Pixels does (`drawImage(out, base.e, base.f)`, blend), with `globalAlpha = clamp01(stamp.alpha × settleFade(amount, fade))`.
+While `fieldEffectReady(effect.effectId)` is false the dispatcher's readiness is false and the caller's existing fallback draws the Dissolve mask — for a settle bar the fallback must instead be a PLAIN FADE: make `revealShaderReady(rv)` return true for settle and let `drawRevealSettle`, when the effect is not ready, stamp `solo` un-processed with the fade alpha and return `true` (kick the load via `fieldEffectReady`). Dispatcher: `drawRevealShaderStyle` routes `'settle'`; `ensureRevealShadersReady` / the pre-warm use `revealEffectIdsFor`.
+
+**Tests** (recorder fakes as in `reveal-paint-assemble.unit.spec.ts`; inject `render`, `combine`, canvas factory, readiness): every numbered step incl. the two input canvases' composite ops, the SAME spec / t / uniforms on both renders, each copy happening before the next render, the combine's base and `u_cover`, the fade alpha in the stamp, the not-ready path (plain fade, `true`, no render call), `false` + untouched `ctx` on a throwing render, release on a throwing `drawLayer`; dispatcher routing. Suites: `motionx`, `compositor` (1059 unchanged), `bake` green.
+
+Commit subject: `feat(compositor): settle transitions draw the layer through a shader whose strength runs out, with real transparency`
+
+---
+
+### Task 18: Twenty gallery tiles, live previews, the inspector block
+
+**Files:** `frontend/app/lib/motionx/gallery.ts`, `frontend/app/components/vue-canvas/compositor/{MotionGallery.vue,MotionInspector.vue}`, create `frontend/app/components/vue-canvas/compositor/MotionSettlePreview.vue`; specs `gallery.unit.spec.ts`, `letters-ui.unit.spec.ts`.
+
+- Gallery: for every row of `SETTLE_EFFECTS`, `{ id: 'settle-<id>-in', kind: 'settle', label: '<Label> in', group: 'In', preview: 'settle', params: { dir: 'in', effect: '<id>' } }` and the `-out` twin in group `Out` — GENERATED from the table (no hand-written list to drift), placed after the Dither / Assemble tiles of each group. `PreviewKind` gains `'settle'`.
+- `MotionSettlePreview.vue`: props `effect: string`, `out: boolean`; one 48×30 canvas, one rAF loop started on mount and cancelled on unmount, a still frame (amount 0.4) under `prefers-reduced-motion`, `aria-hidden="true"`, no per-frame canvas creation. It draws a small card (the same synthetic card `MotionDitherPreview` builds — share it by exporting a helper from that component's script or a tiny `previewCard.ts`; say which) through a cheap 2D APPROXIMATION of each effect whose strength follows the library's `settleStrength(amount, 1)` and fade `settleFade`: slice = rows shifted by a hashed offset; glitch = a few shifted blocks + channel offset; split = three tinted copies offset horizontally, `lighter`; blur = `ctx.filter = blur()`; zoomblur = several scaled copies at low alpha; pixelate = down-then-up with smoothing off; wave = rows shifted by a sine; liquify = rows AND columns shifted by slow sines; swirl = concentric rings rotated by radius; ripple = radial sine displacement. Header comment: these are PREVIEWS of the idea, not the shaders.
+- Inspector: a `v-else-if="behaviour.kind === 'settle'"` block: labelled `StudioSelect` `settle-effect` (label `Effect`, the ten labels; swapping keeps timing, easing, direction, strength, fade), `StudioSegmentedRow` `settle-dir` (Direction, In / Out), `StudioSlider` `settle-strength` (label `Starting strength`, 0–100 step 1 default 70, hint `How broken the layer is when the transition starts. It settles to nothing by the end.`), `StudioSwitch` `settle-fade` (label `Fade while it settles`). Open into keyframes stays hidden (the `reveal` path already does that). One `settleParams` computed; the slider keeps the `gesture(key)` / `setBehNum(key, …)` pairing.
+- Tests: twenty tiles, generated order, params, groups; every tile's `effect` exists in `SETTLE_EFFECTS`; source-level inspector + preview guards (no raw `<input>` / `<select>` in the settle block; `aria-hidden`; `cancelAnimationFrame` in `onBeforeUnmount`).
+
+Commit subject: `feat(compositor): ten settle transitions in the gallery, each with its own tile and preview`
+
+---
+
+### Task 19: Live verification and Part-4 review (controller)
+
+- [ ] Shader path proven per effect (pixels differ from the plain layer mid-bar; identical after the bar); pixels OUTSIDE the layer's outline are drawn mid-bar for Slice / Wave / Glitch (the transparency recovery works) and are fully transparent where nothing landed; no dark fringe on a bright layer over a bright backdrop (Blur).
+- [ ] Colour split shows separate red / blue fringes with their own alpha.
+- [ ] Nothing at amount 0 with Fade on; the layer at full strength with Fade off; hand-off at the end has no pop.
+- [ ] Gallery shows twenty new tiles with moving previews; inspector swaps Effect in place; bar label follows.
+- [ ] A contact sheet for Julien; whole-slice review on the most capable model; one fix wave; ledger, memory.

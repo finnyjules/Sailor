@@ -114,10 +114,37 @@ A fifth Style, **Assemble**, listed second (Pixels · Assemble · Dissolve · Wi
 
 Falls back to the Dissolve mask while its shader is loading, and exports wait for it, exactly as Pixels.
 
+## Addendum 3 (2026-09-21): Settle transitions — the layer arrives broken by one of his shaders, and settles
+
+Approved from an interactive preview (slice shift, colour split, blur, pixelate, wave settling to the sharp element). Julien's one change: **"I would show them as separate effects in the transition gallery"** — so there is no single "Settle" tile with a menu: EACH effect is its own pair of tiles, **Slice in / Slice out**, **Blur in / Blur out**, … in the gallery's In and Out groups, each with its own live preview. The inspector still has an **Effect** menu so a bar can be swapped in place (as letter bars can).
+
+**First set (ten), each a Shader Studio effect run over the layer's own pixels with ONE strength dial driven to its rest value:**
+
+| Tile | Effect | Dial(s) driven → rest | Full strength (at Starting strength 100) |
+|---|---|---|---|
+| Slice | slice_shift | amount → 0 | 0.35 |
+| Glitch | rgb_glitch | amount → 0, chroma → 0 | 0.2, 0.03 |
+| Colour split | chromatic_aberration | amount → 0 | 0.06 |
+| Blur | gaussian_blur | radius → 0 | 0.06 |
+| Zoom blur | zoom_blur | strength → 0 | 0.5 |
+| Pixelate | pixelate | size → 0 | 0.08 |
+| Wave | wave | amplitude → 0 | 0.12 |
+| Liquify | liquify | amount → 0 | 0.3 |
+| Swirl | swirl | strength → 0 | 6 |
+| Ripple | water_ripple | amplitude → 0 | 0.06 |
+
+**Dials:** Effect · Direction (In / Out) · **Starting strength** 0–100 (default 70) · **Fade** switch ("Fade while it settles", default on: opacity ramps over the first quarter of the bar) · Easing (default Linear) · Timing. The strength follows `(1 − amount)²` — most of the settling happens early, the tail is gentle — scaled by Starting strength. Everything else about the effect stays at its Shader Studio default; effects with their own clock (glitch, wave, liquify, ripple, swirl) run on the bar's elapsed time, so preview, bake and export agree.
+
+**How.** A `settle` bar is the same kind of thing as a dither bar: ONE number band on the motion-only property `reveal` (so the two families share a timeline row, "Reveal", and overlapping bars are flagged as the clash they are), and the look rides on the bar. While the bar plays the layer is drawn alone onto the frame-sized side canvas (the Pixels / Assemble route, same accepted price: effects that read the backdrop pause for that layer). Then, because most of these shaders write fully OPAQUE pixels — clipped back to the layer's outline, a slice could never leave the letter it came from — the transparency is recovered exactly:
+1. the shader runs over the layer **premultiplied onto black** (colour × coverage, opaque);
+2. the SAME shader, same clock and seed, runs over the layer's **coverage** (white where the layer is, on black);
+3. a tiny combine pass divides one by the other: colour = (1) ÷ coverage, alpha = coverage (per channel, so a colour split's red fringe keeps its own coverage). Exact for every effect that moves or averages pixels, which is all ten.
+Three GPU passes per frame for that layer while its bar plays; nothing outside it. At amount 1 there is no note and the normal draw takes over; at strength ≈ 0 each of the ten is the identity, so there is no pop. While the shader is loading a settle bar draws as a plain fade; exports wait for it.
+
 ## Planned next (not in this build)
 
 - **Shader reveal** — a fourth Style, **Shader**, with a picker: any Shader Studio effect that generates a moving field (noise, clouds, heatmap, slice patterns…) is rendered through the existing shader runtime, and its brightness is compared with the amount using the luminance-mask maths that already exists. The layer condenses out of that shader's own motion. It is one more pattern source plus the picker; GPU cost applies only while the bar plays.
-- **Shader settle** — a separate transition family: the layer arrives *through* a shader running on its own pixels (slice shift, chromatic aberration, glass, pixelate) whose strength the bar drives to zero. Needs its own small spec: a curated list declaring each shader's strength dial and rest value, and a pass that exists only while the bar is live so no dead effect is left in the Design tab.
+- ~~**Shader settle**~~ (now Addendum 3) — a separate transition family: the layer arrives *through* a shader running on its own pixels (slice shift, chromatic aberration, glass, pixelate) whose strength the bar drives to zero. Needs its own small spec: a curated list declaring each shader's strength dial and rest value, and a pass that exists only while the bar is live so no dead effect is left in the Design tab.
 - More mask styles on this mechanism as wanted: iris, blinds, clean wipe, pixel blocks.
 
 ## Defaults and ranges
