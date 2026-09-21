@@ -9,7 +9,7 @@ import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { Track, StoredBehaviour } from '~/lib/motionx'
 import { isTextBehaviour } from '~/lib/motionx/text'
 import { bandsForLayer, behaviourBandsForLayer, legacyBandForLayer, numberBandCurve, colorBandCss, gradientBandCss, trackSpan, type Band } from '~/lib/motionx/bands'
-import { animatableProperties } from '~/lib/motionx/adapter/frame'
+import { animatableProperties, MOTION_ONLY_LABELS } from '~/lib/motionx/adapter/frame'
 import { shiftTrack, retimeTrack, movePoint, removePoint, setBandTrack, ripplePoint, segmentAt, bandTrackAt } from '~/lib/motionx/bandEdit'
 import { deriveView, timeToX, xToTime, zoomAboutPivot, clampViewStart, computeTicks, formatRulerSeconds, ghostCycles, type View } from '~/lib/motionx/timelineView'
 
@@ -135,7 +135,7 @@ function rowsFor(l: LocalLayer): PropertyRow[] {
   const byPath = new Map<string, PropertyRow>()
   const row = (path: string) => {
     let r = byPath.get(path)
-    if (!r) { r = { path, label: labels.get(path) ?? path.split('.').pop() ?? path, behaviours: [], property: null, conflicts: new Set() }; byPath.set(path, r) }
+    if (!r) { r = { path, label: labels.get(path) ?? MOTION_ONLY_LABELS[path.split('.').pop() ?? ''] ?? path.split('.').pop() ?? path, behaviours: [], property: null, conflicts: new Set() }; byPath.set(path, r) }
     return r
   }
   for (const b of behBandsFor(l.id)) {

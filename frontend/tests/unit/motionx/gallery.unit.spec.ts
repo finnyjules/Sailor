@@ -9,7 +9,7 @@ describe('GALLERY_MOVES catalog', () => {
       expect(ids.has(m.id)).toBe(false)   // ids unique
       ids.add(m.id)
       expect([
-        'fade', 'slide', 'scale', 'spin', 'pulse', 'sway', 'float', 'gradientScroll', 'gradientMorph',
+        'fade', 'slide', 'scale', 'spin', 'pulse', 'sway', 'float', 'gradientScroll', 'gradientMorph', 'dither',
         'text.cascade', 'text.typewriter', 'text.maskSlide', 'text.scramble',
         'text.decode', 'text.slot', 'text.wave', 'text.bounce', 'text.jitter',
       ]).toContain(m.kind)
@@ -22,6 +22,16 @@ describe('GALLERY_MOVES catalog', () => {
     expect(new Set(slides)).toEqual(new Set(['up', 'down', 'left', 'right']))
     expect(GALLERY_MOVES.some((m) => m.kind === 'fade' && m.params?.dir === 'in')).toBe(true)
     expect(GALLERY_MOVES.some((m) => m.kind === 'fade' && m.params?.dir === 'out')).toBe(true)
+  })
+})
+
+describe('dither moves', () => {
+  it('Dither in sits in the In group and Dither out in Out, for every layer', () => {
+    const moves = movesForLayer({ gradient: false, text: false })
+    const din = moves.find((m) => m.id === 'dither-in')!, dout = moves.find((m) => m.id === 'dither-out')!
+    expect([din.kind, din.group, din.label, din.params]).toEqual(['dither', 'In', 'Dither in', { dir: 'in' }])
+    expect([dout.kind, dout.group, dout.label, dout.params]).toEqual(['dither', 'Out', 'Dither out', { dir: 'out' }])
+    expect(din.preview).toBe('dither'); expect(din.recipe).toBeUndefined()
   })
 })
 

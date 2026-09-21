@@ -4,6 +4,7 @@
  *  preview of the move. Clicking a tile emits `add` with the catalog move, which the
  *  modal turns into a live behaviour via addBehaviour(kind, params). */
 import { movesForLayer, groupedMoves, type GalleryMove, type LayerCaps, type PreviewKind } from '~/lib/motionx/gallery'
+import MotionDitherPreview from '~/components/vue-canvas/compositor/MotionDitherPreview.vue'
 
 const props = defineProps<{ caps: LayerCaps }>()
 defineEmits<{ add: [move: GalleryMove]; close: [] }>()
@@ -53,6 +54,8 @@ const SLOT_FILLERS: Record<number, [string, string]> = { 0: ['K', 'Q'], 1: ['9',
                 <span v-else class="letter-inner">{{ ch }}</span>
               </span>
             </span>
+            <!-- dither preview: the real reveal maths on a tiny live canvas -->
+            <MotionDitherPreview v-else-if="m.preview === 'dither'" :out="m.params?.dir === 'out'" class="absolute inset-0 h-full w-full" />
             <!-- transform/opacity previews: a small mark that plays the move on loop -->
             <span v-else-if="m.preview !== 'scroll' && m.preview !== 'morph'"
               class="prev-mark absolute left-1/2 top-1/2 w-3 h-3 -ml-1.5 -mt-1.5 rounded-sm bg-[#7c9cff]"

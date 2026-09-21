@@ -27,6 +27,7 @@ import type { TextCell } from '~/lib/motionx/text/units'
 const MODAL = fileURLToPath(new URL('../../../app/components/vue-canvas/CompositorModal.vue', import.meta.url))
 const INSPECTOR = fileURLToPath(new URL('../../../app/components/vue-canvas/compositor/MotionInspector.vue', import.meta.url))
 const GALLERY = fileURLToPath(new URL('../../../app/components/vue-canvas/compositor/MotionGallery.vue', import.meta.url))
+const TIMELINE = fileURLToPath(new URL('../../../app/components/vue-canvas/compositor/MotionBandTimeline.vue', import.meta.url))
 
 const setupOf = (file: string) =>
   readFileSync(file, 'utf8').match(/<script setup[^>]*>([\s\S]*?)<\/script>/)?.[1] ?? ''
@@ -357,5 +358,46 @@ describe('the letter previews stop under prefers-reduced-motion', () => {
         expect(beaten, `\`${r.sel}\` keeps its own ${prop} under reduced motion`).toBe(true)
       }
     }
+  })
+})
+
+// ── 6. the Dither block (Task 4) ────────────────────────────────────────────
+
+describe('the Dither inspector block', () => {
+  const src = readFileSync(INSPECTOR, 'utf8')
+  const DITHER_TESTIDS = ['dither-style', 'dither-dir', 'dither-cell', 'dither-drift', 'dither-angle', 'dither-softness']
+
+  it('carries every dither test id', () => {
+    for (const id of DITHER_TESTIDS) expect(src).toContain(`data-testid="${id}"`)
+  })
+
+  it('the softness row is guarded by a v-if that mentions wipe', () => {
+    const tag = (src.match(/<StudioSlider\b[\s\S]*?\/>/g) ?? [])
+      .find((t) => t.includes('data-testid="dither-softness"'))
+    expect(tag, 'no StudioSlider carries data-testid="dither-softness"').toBeTruthy()
+    expect(tag!.match(/v-if="([^"]*)"/)?.[1]).toMatch(/wipe/)
+  })
+
+  it('the Open into keyframes button\'s v-if excludes dither', () => {
+    const tag = (src.match(/<StudioButton\b[\s\S]*?<\/StudioButton>/g) ?? [])
+      .find((t) => t.includes('data-testid="beh-open"'))
+    expect(tag, 'no StudioButton carries data-testid="beh-open"').toBeTruthy()
+    expect(tag).toMatch(/v-if="[^"]*behaviour\.kind !== 'dither'[^"]*"/)
+  })
+
+  it('uses only Studio controls inside the dither block — no raw input or select', () => {
+    const start = src.indexOf("kind === 'dither'")
+    expect(start, 'no dither branch found').toBeGreaterThan(-1)
+    const end = src.indexOf('</template>', start)
+    expect(end).toBeGreaterThan(start)
+    const block = src.slice(start, end)
+    expect(block).not.toMatch(/<input/i)
+    expect(block).not.toMatch(/<select/i)
+  })
+})
+
+describe('the Dither timeline row name', () => {
+  it('MotionBandTimeline imports MOTION_ONLY_LABELS for the reveal fallback label', () => {
+    expect(readFileSync(TIMELINE, 'utf8')).toContain('MOTION_ONLY_LABELS')
   })
 })

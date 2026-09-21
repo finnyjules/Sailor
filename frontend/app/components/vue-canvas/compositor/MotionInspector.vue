@@ -8,6 +8,7 @@
  *  segmented strip, the labelled select, the switch, the button — so this panel reads like
  *  the Cloner / Feather / Fill panels it sits beside instead of like a form. */
 import type { Track, Ease, PropertyValue, StoredBehaviour, Timing } from '~/lib/motionx'
+import { REVEAL_DEFAULTS, REVEAL_RANGES } from '~/lib/motionx/reveal'
 
 export type BehaviourPatch = { params?: Record<string, unknown>; timing?: Partial<Timing>; kind?: string; replaceParams?: boolean }
 import { trackSpan, behaviourLabel } from '~/lib/motionx/bands'
@@ -151,6 +152,8 @@ const MORPH_MODES = ['crossfade', 'travel']
 const MORPH_MODE_LABELS = ['Crossfade', 'Travel']
 const MORPH_SPACES = ['oklab', 'hybrid']
 const MORPH_SPACE_LABELS = ['OKLab', 'Hybrid']
+const DITHER_STYLES = ['dissolve', 'wipe', 'dots']
+const DITHER_STYLE_LABELS = ['Dissolve', 'Wipe', 'Dots']
 
 // ── Letter behaviours (Task 5) ───────────────────────────────────────────────
 const isTextBeh = computed(() => behaviour.value != null && isTextBehaviour(behaviour.value))
@@ -445,6 +448,31 @@ function onGradient(g: Gradient) {
           :model-value="numParam('distance', 0.15)" :min="0" :max="1" :step="0.01" :default="0.15"
           @update:model-value="(v) => setBehNum('slide-distance', { distance: v })" />
       </template>
+      <template v-else-if="behaviour.kind === 'dither'">
+        <StudioSegmentedRow data-testid="dither-style" label="Style"
+          :model-value="enumParam('style', REVEAL_DEFAULTS.style)" :options="DITHER_STYLES" :option-labels="DITHER_STYLE_LABELS"
+          @update:model-value="(v) => setBehParams({ style: v })" />
+        <StudioSegmentedRow data-testid="dither-dir" label="Direction"
+          :model-value="enumParam('dir', 'in')" :options="IN_OUT" :option-labels="IN_OUT_LABELS"
+          @update:model-value="(v) => setBehParams({ dir: v })" />
+        <StudioSlider data-testid="dither-cell" v-bind="gesture('dither-cell')"
+          :label="enumParam('style', 'dissolve') === 'dots' ? 'Dot spacing' : 'Cell size'"
+          hint="How chunky the pattern is, in thousandths of the frame's width"
+          :model-value="numParam('cell', REVEAL_DEFAULTS.cell)" :min="REVEAL_RANGES.cell[0]" :max="REVEAL_RANGES.cell[1]" :step="1" :default="REVEAL_DEFAULTS.cell"
+          @update:model-value="(v) => setBehNum('dither-cell', { cell: v })" />
+        <StudioSlider data-testid="dither-drift" v-bind="gesture('dither-drift')"
+          label="Drift speed" hint="How fast the pattern slides while the layer resolves, in cells per second. 0 is a still dither."
+          :model-value="numParam('drift', REVEAL_DEFAULTS.drift)" :min="REVEAL_RANGES.drift[0]" :max="REVEAL_RANGES.drift[1]" :step="0.5" :default="REVEAL_DEFAULTS.drift"
+          @update:model-value="(v) => setBehNum('dither-drift', { drift: v })" />
+        <StudioSlider data-testid="dither-angle" v-bind="gesture('dither-angle')"
+          label="Angle" hint="The way the pattern drifts and, for Wipe, the way the edge travels. 0 is towards the right, 90 is downwards."
+          :model-value="numParam('angle', REVEAL_DEFAULTS.angle)" :min="REVEAL_RANGES.angle[0]" :max="REVEAL_RANGES.angle[1]" :step="1" :default="REVEAL_DEFAULTS.angle"
+          @update:model-value="(v) => setBehNum('dither-angle', { angle: v })" />
+        <StudioSlider v-if="enumParam('style', 'dissolve') === 'wipe'" data-testid="dither-softness" v-bind="gesture('dither-softness')"
+          label="Edge softness" hint="How wide the dithered band on the travelling edge is. 0 is a hard line."
+          :model-value="numParam('softness', REVEAL_DEFAULTS.softness)" :min="0" :max="1" :step="0.01" :default="REVEAL_DEFAULTS.softness"
+          @update:model-value="(v) => setBehNum('dither-softness', { softness: v })" />
+      </template>
       <template v-else-if="behaviour.kind === 'gradientMorph'">
         <StudioSegmentedRow label="Mode"
           :model-value="enumParam('mode', 'crossfade')" :options="MORPH_MODES" :option-labels="MORPH_MODE_LABELS"
@@ -619,7 +647,7 @@ function onGradient(g: Gradient) {
     <div class="mt-2 flex items-center justify-between border-t border-white/10 pt-2">
       <StudioButton data-testid="beh-delete" title="Remove this behaviour (Delete)"
         @click="emit('behaviour-delete', behaviour.id)">Delete</StudioButton>
-      <StudioButton v-if="!isTextBeh" data-testid="beh-open" title="Bake into editable control-point bands"
+      <StudioButton v-if="!isTextBeh && behaviour.kind !== 'dither'" data-testid="beh-open" title="Bake into editable control-point bands"
         @click="emit('behaviour-open', behaviour.id)">Open into keyframes</StudioButton>
     </div>
   </div>
