@@ -19,8 +19,8 @@ frame with constraints does, plus text that re-wraps.
   overrides.
 - **What does not change.** Every Frame that exists today is a fixed Frame and
   stays exactly as it is: same pixels, same editor, nothing new on screen.
-- **What falls out of it.** The web export gets an "Adapt" option for
-  responsive Frames, next to today's "Fit".
+- **What falls out of it.** The web export can offer a third choice, "Adapt",
+  for responsive Frames, next to its "Fit" and "Fill".
 - **What is risky.** (1) Drawing each layer at its own scale without touching
   dozens of size fields — settled by a short spike at the start of the plan.
   (2) Editing layers while the artboard is at another size — the pin maths is
@@ -58,7 +58,7 @@ frame with constraints does, plus text that re-wraps.
 |---|---|---|
 | Figma | Five per-axis constraints; with a stretch layout grid, constraints become relative to the nearest column automatically | The exact pin set, the pin diagram, automatic section attachment |
 | Sketch | "Pin to edge" + "Fix size" | "Keep size" |
-| Rive | Runtime fit modes: Contain / Cover / **Layout** (adapts the artboard), plus one overall scale factor; Yoga inside | "Fit" vs "Adapt" as the export's choice; fit-scale-then-adapt |
+| Rive | Runtime fit modes: Contain / Cover / **Layout** (adapts the artboard), plus one overall scale factor; Yoga inside | "Adapt" as one more fit choice in the export, next to Fit and Fill; fit-scale-then-adapt |
 | Webflow | Canvas edge always draggable, width readout, editing never paused | The viewing-size UX |
 | Ad builders | Percent positions for small changes; separate variants for big shape jumps | Confirms the range decision; Smart Layout already covers distinct formats |
 
@@ -294,9 +294,8 @@ resolveLayout(frame, W, H, opts?) → {
   "Keep size" ones, so it is cheap but not identity.)
 - Runs in the editor (on viewing-size change, not per frame) and in the web
   export inside `setSize(w, h)` (once per size; each frame paints the cached
-  result). The export spec is not edited here; the suggestion for it is a fit
-  choice named like Rive's: **"Fit"** (today's fit-and-bleed) and **"Adapt"**
-  (responsive Frames only).
+  result). The export spec is not edited here; see "Fit with the web export
+  spec" below for what the two need from each other.
 
 ### Where it lives
 
@@ -358,6 +357,42 @@ Re-wrap and auto-height use the renderer's own line-breaking through
 `opts.measure` (the same injection the Layout tab's pattern engine uses), so
 the resolver and the painter cannot disagree about where lines break. With no
 measurer, text keeps its centre (documented degradation).
+
+## Fit with the web export spec
+
+Checked against `2026-09-21-frame-web-export-design.md` as landed on main
+(`6a01fe869`). That spec is not edited here; these are the points where the
+two meet.
+
+- **The choice.** The export stores `fit: 'fit' | 'fill'`. "Adapt" would be a
+  third value, offered only for responsive Frames. For a fixed Frame nothing
+  in the export changes.
+- **Same picture when nothing adapts.** The export paints the background once
+  across the whole box, then the layers under one scale-and-offset. With every
+  layer pinned Center/Middle, "Adapt" must give exactly that picture (pixel
+  test 11). At the design's own shape both are identical to the studio, so the
+  export's parity tests keep running there.
+- **What the snapshot needs.** A `FrameVariant` carries the design size,
+  layers, groups and motion already. For "Adapt" it also needs the grid
+  config (for section-held pins) and the Frame's `responsive` flag. Both are
+  optional additions; the format's version does not have to change.
+- **`setSize(w, h)`.** Calls `resolveLayout` once, caches the result, and
+  each `setTime` paints the cached layers and motion. The pixel size handed to
+  each nested child comes from the result's `boxes`.
+- **Text measuring.** The adapter has a canvas and has already registered and
+  awaited the fonts at mount, so it can supply `opts.measure`.
+- **Asset sizes.** The export downsizes images to at most 2× the size they are
+  drawn at. In a responsive Frame a stretched image can be drawn larger than
+  at the design size (up to the guard's limit), so the "drawn size" used for
+  that budget should be the largest the guard allows, not the design size.
+- **Nested live pieces.** A stretched wired layer is cover-and-crop in v1,
+  everywhere. In the export a nested live child could instead be given its
+  new box and re-render at that shape; that is a later improvement, not v1.
+- **Shared risk.** The export notes that painting layers under an *offset* is
+  untested for the backdrop-reading effects (glass, backdrop shader,
+  displacement lens) and gives it a test. The rendering spike here hits the
+  same question per layer, so it should reuse that test rather than write a
+  second one.
 
 ## Back-compat guarantee
 
