@@ -330,7 +330,17 @@ function ensureTextureImage(t: EffectTextureDef): HTMLImageElement | null {
     // A host with no per-frame loop (a static Frame card, a one-shot bake) has nothing
     // that would notice the atlas arriving — same problem, and the same fix, as the
     // catalog landing late. See `onFieldCatalogReady`.
-    img.addEventListener('load', () => { notifyFieldReady() })
+    img.addEventListener('load', () => {
+      // A field rendered BEFORE its atlas landed was rendered blank, and `fieldKey` knows
+      // nothing about load state — so without this the very hosts the notification is
+      // for (a static fill with no frame loop) would repaint straight out of the cache
+      // and show the blank forever. A texture landing is rare; dropping every cached
+      // field for it is cheap and cannot be wrong.
+      cache.clear()
+      tileCache.clear()
+      notifyFieldReady()
+    })
+    if (import.meta.dev) img.addEventListener('error', () => { console.warn(`[shaderfill] texture "${t.file}" failed to load — effects that sample it will draw without it`) })
     img.src = textureAssetUrl(t.file, t.v)
     _texImages.set(key, img)
   }

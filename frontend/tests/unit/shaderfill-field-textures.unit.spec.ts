@@ -26,12 +26,19 @@ vi.mock('~/lib/shaderfx/renderer', async (importOriginal) => {
   return { ...actual, shaderFx: { render: renderSpy } }
 })
 
+// resolveField paints its input tile through a real 2D context, which this environment
+// does not have; the cache behaviour under test does not depend on the tile's pixels.
+vi.mock('~/lib/compositor/paint', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('~/lib/compositor/paint')>()
+  return { ...actual, paintTileBox: () => {} }
+})
+
 vi.mock('~/lib/shaderfx/catalogStore', () => ({
   getEffectSync: (id: string) => EFFECTS[id] ?? null,
   refetchShaderFxCatalog: () => null,
 }))
 
-import { renderFieldWithBase, fieldEffectReady, onFieldCatalogReady } from '~/lib/shaderfill/field'
+import { renderFieldWithBase, fieldEffectReady, onFieldCatalogReady, resolveField, fieldStats, clearFieldCache } from '~/lib/shaderfill/field'
 
 // --- the fake Image ---------------------------------------------------------
 
@@ -215,5 +222,28 @@ describe('renderFieldWithBase — extraUniforms', () => {
     const without = JSON.stringify(renderSpy.mock.calls.at(-1)![0])
     render('extra_none', {})
     expect(JSON.stringify(renderSpy.mock.calls.at(-1)![0])).toBe(without)
+  })
+})
+
+describe('a cached field does not outlive the texture it was rendered without', () => {
+  it('resolveField re-renders after the atlas lands instead of serving the blank from cache', () => {
+    defWith('cache_atlas', [{ uniform: 'u_glyphs', file: 'cache_atlas.png', v: '9', extraUniforms: { u_glyphCount: 10 } }])
+    clearFieldCache()
+    // resolveField copies the render into its own cache canvas; give canvases a do-nothing
+    // 2D context for the length of this test (the environment has none).
+    const noop2d = new Proxy({}, { get: () => () => {}, set: () => true })
+    const proto = (document.createElement('canvas') as any).constructor.prototype
+    const realGetContext = proto.getContext
+    proto.getContext = () => noop2d
+    try {
+    const req = { spec: specFor('cache_atlas'), w: 32, h: 32, t: 0, fps: 30 }
+    resolveField(req)
+    resolveField(req)
+    const before = fieldStats().renders
+    expect(before).toBe(1)                          // second call was a cache hit
+    FakeImage.created.at(-1)!.land()
+    resolveField(req)
+    expect(fieldStats().renders).toBe(before + 1)   // the blank was dropped, not served
+    } finally { proto.getContext = realGetContext }
   })
 })
