@@ -8,7 +8,7 @@
  *  segmented strip, the labelled select, the switch, the button — so this panel reads like
  *  the Cloner / Feather / Fill panels it sits beside instead of like a form. */
 import type { Track, Ease, PropertyValue, StoredBehaviour, Timing } from '~/lib/motionx'
-import { REVEAL_DEFAULTS, REVEAL_RANGES } from '~/lib/motionx/reveal'
+import { REVEAL_DEFAULTS, REVEAL_RANGES, REVEAL_STYLES, revealParams, revealCellDefault, PIXEL_CHARS } from '~/lib/motionx/reveal'
 
 export type BehaviourPatch = { params?: Record<string, unknown>; timing?: Partial<Timing>; kind?: string; replaceParams?: boolean }
 import { trackSpan, behaviourLabel } from '~/lib/motionx/bands'
@@ -99,6 +99,24 @@ const behaviour = computed<StoredBehaviour | null>(() =>
     ? (props.behaviours ?? []).find((b) => b.id === props.selection!.path) ?? null
     : null)
 const behParam = (k: string) => behaviour.value?.params?.[k]
+// The dither bar's style, read the one way any dither param is ever read: through
+// `revealParams`, so an unknown or missing value falls back to the library's own default
+// (Pixels) rather than a second, locally-guessed one.
+const ditherStyle = computed(() => revealParams(behaviour.value?.params).style)
+const ditherCellLabel = computed(() => (
+  ditherStyle.value === 'pixels' ? 'Block size' : ditherStyle.value === 'dots' ? 'Dot spacing' : 'Cell size'
+))
+const ditherCellHint = computed(() => (
+  ditherStyle.value === 'pixels'
+    ? "How big the cells are when the transition starts, in thousandths of the frame's width. They halve until the layer is sharp."
+    : "How chunky the pattern is, in thousandths of the frame's width"
+))
+const ditherDriftLabel = computed(() => (ditherStyle.value === 'pixels' ? 'Shimmer speed' : 'Drift speed'))
+const ditherDriftHint = computed(() => (
+  ditherStyle.value === 'pixels'
+    ? 'How fast the characters re-roll while the layer sharpens. 0 is still.'
+    : 'How fast the pattern slides while the layer resolves, in cells per second. 0 is a still dither.'
+))
 /** A discrete edit — an option, a switch, a shuffle. Always its own undo step. */
 function setBehParams(patch: Record<string, unknown>) {
   undoRun = closeRun()
@@ -152,8 +170,14 @@ const MORPH_MODES = ['crossfade', 'travel']
 const MORPH_MODE_LABELS = ['Crossfade', 'Travel']
 const MORPH_SPACES = ['oklab', 'hybrid']
 const MORPH_SPACE_LABELS = ['OKLab', 'Hybrid']
-const DITHER_STYLES = ['dissolve', 'wipe', 'dots']
-const DITHER_STYLE_LABELS = ['Dissolve', 'Wipe', 'Dots']
+// `REVEAL_STYLES` is `readonly RevealStyle[]` (the library's own list, Pixels first); copied
+// into a plain mutable string[] so it can feed a Studio control's `options` prop.
+const DITHER_STYLES: string[] = [...REVEAL_STYLES]
+const DITHER_STYLE_LABELS = ['Pixels', 'Dissolve', 'Wipe', 'Dots']
+// `PIXEL_CHARS` values as strings for the Characters select (a Studio option list is always
+// strings); `revealParams` reads the stored number back with `Number(...)`.
+const PIXEL_CHAR_OPTIONS = PIXEL_CHARS.map((c) => String(c.value))
+const PIXEL_CHAR_LABELS = PIXEL_CHARS.map((c) => c.label)
 
 // ── Letter behaviours (Task 5) ───────────────────────────────────────────────
 const isTextBeh = computed(() => behaviour.value != null && isTextBehaviour(behaviour.value))
@@ -449,26 +473,29 @@ function onGradient(g: Gradient) {
           @update:model-value="(v) => setBehNum('slide-distance', { distance: v })" />
       </template>
       <template v-else-if="behaviour.kind === 'dither'">
-        <StudioSegmentedRow data-testid="dither-style" label="Style"
-          :model-value="enumParam('style', REVEAL_DEFAULTS.style)" :options="DITHER_STYLES" :option-labels="DITHER_STYLE_LABELS"
+        <StudioSelect data-testid="dither-style" label="Style"
+          :model-value="ditherStyle" :options="DITHER_STYLES" :option-labels="DITHER_STYLE_LABELS"
           @update:model-value="(v) => setBehParams({ style: v })" />
+        <StudioSelect v-if="ditherStyle === 'pixels'" data-testid="dither-chars" label="Characters"
+          hint="The same character sets as the ASCII effect in Shader Studio"
+          :model-value="String(revealParams(behaviour.params).chars)" :options="PIXEL_CHAR_OPTIONS" :option-labels="PIXEL_CHAR_LABELS"
+          @update:model-value="(v) => setBehParams({ chars: Number(v) })" />
         <StudioSegmentedRow data-testid="dither-dir" label="Direction"
           :model-value="enumParam('dir', 'in')" :options="IN_OUT" :option-labels="IN_OUT_LABELS"
           @update:model-value="(v) => setBehParams({ dir: v })" />
         <StudioSlider data-testid="dither-cell" v-bind="gesture('dither-cell')"
-          :label="enumParam('style', 'dissolve') === 'dots' ? 'Dot spacing' : 'Cell size'"
-          hint="How chunky the pattern is, in thousandths of the frame's width"
-          :model-value="numParam('cell', REVEAL_DEFAULTS.cell)" :min="REVEAL_RANGES.cell[0]" :max="REVEAL_RANGES.cell[1]" :step="1" :default="REVEAL_DEFAULTS.cell"
+          :label="ditherCellLabel" :hint="ditherCellHint"
+          :model-value="numParam('cell', revealCellDefault(ditherStyle))" :min="REVEAL_RANGES.cell[0]" :max="REVEAL_RANGES.cell[1]" :step="1" :default="revealCellDefault(ditherStyle)"
           @update:model-value="(v) => setBehNum('dither-cell', { cell: v })" />
         <StudioSlider data-testid="dither-drift" v-bind="gesture('dither-drift')"
-          label="Drift speed" hint="How fast the pattern slides while the layer resolves, in cells per second. 0 is a still dither."
+          :label="ditherDriftLabel" :hint="ditherDriftHint"
           :model-value="numParam('drift', REVEAL_DEFAULTS.drift)" :min="REVEAL_RANGES.drift[0]" :max="REVEAL_RANGES.drift[1]" :step="0.5" :default="REVEAL_DEFAULTS.drift"
           @update:model-value="(v) => setBehNum('dither-drift', { drift: v })" />
-        <StudioSlider data-testid="dither-angle" v-bind="gesture('dither-angle')"
+        <StudioSlider v-if="ditherStyle !== 'pixels'" data-testid="dither-angle" v-bind="gesture('dither-angle')"
           label="Angle" hint="The way the pattern drifts and, for Wipe, the way the edge travels. 0 is towards the right, 90 is downwards."
           :model-value="numParam('angle', REVEAL_DEFAULTS.angle)" :min="REVEAL_RANGES.angle[0]" :max="REVEAL_RANGES.angle[1]" :step="1" :default="REVEAL_DEFAULTS.angle"
           @update:model-value="(v) => setBehNum('dither-angle', { angle: v })" />
-        <StudioSlider v-if="enumParam('style', 'dissolve') === 'wipe'" data-testid="dither-softness" v-bind="gesture('dither-softness')"
+        <StudioSlider v-if="ditherStyle === 'wipe'" data-testid="dither-softness" v-bind="gesture('dither-softness')"
           label="Edge softness" hint="How wide the dithered band on the travelling edge is. 0 is a hard line."
           :model-value="numParam('softness', REVEAL_DEFAULTS.softness)" :min="REVEAL_RANGES.softness[0]" :max="REVEAL_RANGES.softness[1]" :step="0.01" :default="REVEAL_DEFAULTS.softness"
           @update:model-value="(v) => setBehNum('dither-softness', { softness: v })" />

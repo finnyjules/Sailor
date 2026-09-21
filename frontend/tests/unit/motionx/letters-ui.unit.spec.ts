@@ -365,16 +365,19 @@ describe('the letter previews stop under prefers-reduced-motion', () => {
 
 describe('the Dither inspector block', () => {
   const src = readFileSync(INSPECTOR, 'utf8')
-  const DITHER_TESTIDS = ['dither-style', 'dither-dir', 'dither-cell', 'dither-drift', 'dither-angle', 'dither-softness']
+  const DITHER_TESTIDS = ['dither-style', 'dither-chars', 'dither-dir', 'dither-cell', 'dither-drift', 'dither-angle', 'dither-softness']
+
+  /** The first self-closing tag (Studio control or otherwise) carrying this test id. */
+  const tagFor = (testid: string) =>
+    (src.match(/<\w+\b[\s\S]*?\/>/g) ?? []).find((t) => t.includes(`data-testid="${testid}"`))
 
   it('carries every dither test id', () => {
     for (const id of DITHER_TESTIDS) expect(src).toContain(`data-testid="${id}"`)
   })
 
   it('the softness row is guarded by a v-if that mentions wipe', () => {
-    const tag = (src.match(/<StudioSlider\b[\s\S]*?\/>/g) ?? [])
-      .find((t) => t.includes('data-testid="dither-softness"'))
-    expect(tag, 'no StudioSlider carries data-testid="dither-softness"').toBeTruthy()
+    const tag = tagFor('dither-softness')
+    expect(tag, 'no tag carries data-testid="dither-softness"').toBeTruthy()
     expect(tag!.match(/v-if="([^"]*)"/)?.[1]).toMatch(/wipe/)
   })
 
@@ -393,6 +396,46 @@ describe('the Dither inspector block', () => {
     const block = src.slice(start, end)
     expect(block).not.toMatch(/<input/i)
     expect(block).not.toMatch(/<select/i)
+  })
+
+  // ── Pixels style (Task 9) ───────────────────────────────────────────────
+  it('the Style select offers the four REVEAL_STYLES options, Pixels first', () => {
+    const tag = tagFor('dither-style')
+    expect(tag, 'no tag carries data-testid="dither-style"').toBeTruthy()
+    expect(tag).toMatch(/<StudioSelect\b/)
+    expect(tag).toMatch(/:options="DITHER_STYLES"/)
+    expect(tag).toMatch(/:option-labels="DITHER_STYLE_LABELS"/)
+    // DITHER_STYLES is the library's own REVEAL_STYLES (Pixels first); DITHER_STYLE_LABELS
+    // must pair with it by index.
+    expect(src).toMatch(/const DITHER_STYLES:\s*string\[\]\s*=\s*\[\.\.\.REVEAL_STYLES\]/)
+    expect(src).toContain("const DITHER_STYLE_LABELS = ['Pixels', 'Dissolve', 'Wipe', 'Dots']")
+  })
+
+  it('dither-chars appears only for Pixels and binds PIXEL_CHARS', () => {
+    const tag = tagFor('dither-chars')
+    expect(tag, 'no tag carries data-testid="dither-chars"').toBeTruthy()
+    expect(tag).toMatch(/<StudioSelect\b/)
+    expect(tag!.match(/v-if="([^"]*)"/)?.[1]).toMatch(/pixels/)
+    expect(src).toMatch(/PIXEL_CHARS/)
+    expect(src).toContain('PIXEL_CHAR_OPTIONS')
+    expect(src).toContain('PIXEL_CHAR_LABELS')
+  })
+
+  it('the cell and drift rows carry Pixels-specific copy', () => {
+    expect(src).toContain('Block size')
+    expect(src).toContain('Shimmer speed')
+  })
+
+  it('the Angle row\'s v-if excludes Pixels', () => {
+    const tag = tagFor('dither-angle')
+    expect(tag, 'no tag carries data-testid="dither-angle"').toBeTruthy()
+    expect(tag!.match(/v-if="([^"]*)"/)?.[1]).toMatch(/!==\s*'pixels'/)
+  })
+
+  it('the cell slider\'s default comes from revealCellDefault', () => {
+    const tag = tagFor('dither-cell')
+    expect(tag, 'no tag carries data-testid="dither-cell"').toBeTruthy()
+    expect(tag).toMatch(/revealCellDefault\(/)
   })
 })
 
