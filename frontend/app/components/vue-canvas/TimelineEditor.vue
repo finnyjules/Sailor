@@ -579,7 +579,6 @@ const drag = ref<null | {
   startMouseX: number
   startStart: number
   startLength: number
-  startIn: number
   /** Track the clip sat on when the drag began (trackId follows cross-track moves). */
   originTrackId: string
 }>(null)
@@ -712,7 +711,6 @@ function onClipPointerDown(clipId: string, trackId: string, mode: 'move' | 'resi
     startMouseX: e.clientX,
     startStart: clip.start_frame,
     startLength: clip.length,
-    startIn: clip.in_frame,
     originTrackId: trackId,
   }
   // Snapshot starts of all selected clips for bulk move.
@@ -732,7 +730,7 @@ function onClipPointerDown(clipId: string, trackId: string, mode: 'move' | 'resi
 
 function onPlayheadPointerDown(e: PointerEvent) {
   e.preventDefault()
-  drag.value = { clipId: '', trackId: '', mode: 'playhead', startMouseX: e.clientX, startStart: 0, startLength: 0, startIn: 0, originTrackId: '' }
+  drag.value = { clipId: '', trackId: '', mode: 'playhead', startMouseX: e.clientX, startStart: 0, startLength: 0, originTrackId: '' }
   const rect = stripRef.value!.getBoundingClientRect()
   const frame = Math.round(pxToFrames(e.clientX - rect.left))
   store.seekFrame(frame)
@@ -1504,7 +1502,8 @@ function deleteSelection() {
   const ids = selectedClipIds.value.size > 1
     ? new Set(selectedClipIds.value)
     : new Set(store.selectedClipId.value ? [store.selectedClipId.value] : [])
-  if (!ids.size) return
+  // Nothing of the selection is on the timeline any more: no edit, no undo step.
+  if (!store.state.value.tracks.some(t => t.clips.some(c => ids.has(c.id)))) { clearSelection(); return }
   store.mutate(s => {
     const before: EditState = JSON.parse(JSON.stringify(s))
     for (const track of s.tracks) track.clips = track.clips.filter(c => !ids.has(c.id))

@@ -16,7 +16,7 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Vector Type Studio | ✅ PNG + SVG export (9 fill types, 6 as real vector; multi-fill/stroke stack + extrude + skew/arc + **smart stretch: Stretch/Height dials, Fit** + **any font: Google cuts + library faces**) | ✅ full incl. stagger, preset gallery, **colour tracks**, and 4 per-glyph effects (blink · axis scatter · grade flicker · draw-on) | ✅ | ✅ descriptor (unverified live) | — |
 | Scene3D Studio | ✅ 3-pass + mp4 | ✅ own timeline (groups animate) | ✅ + object tree (**fully schema-drawn** incl. Transform/Geometry/Light/Decal; bespoke: tree, sculpt/merge, motion pickers, **shape library shelf**) | ✅ descriptor (object.* + id-addressed; library shapes not yet) | ~6,300 (+ SVG import) + ambientCG textures |
 | Compositor / Frame | ✅ | ✅ motion clips | ✅ (+ **shape library** insert/swap, **mask break-out**, **shapes pattern fill**) | ✅ commands (+ `addShape`, `setLayerMaskBreak`, `setFill{type:shapes}`) | 1,667 (+1,041 motion) |
-| Timeline (NLE) | ✅ webm/mp4 + server | ✅ native | ✅ | ❌ | shared/timeline |
+| Timeline (NLE) | ✅ webm/mp4 + server (**every audio clip mixed in the browser**: position, volume, fades, speed, reverse) | ✅ native | ✅ (+ **group snap, group trim, no accidental overlaps, ripple switch**) | ❌ | shared/timeline |
 | Gradient Studio | ✅ | ✅ 30 targets, path-based | ✅ (**schema-drawn** from GRADIENT_CONTROLS) | ✅ descriptor | 2,620 (+ 4 primitives + alpha + per-layer layout) |
 | Shader Studio | ✅ | ✅ path tracks (+ mask region) | ✅ (data-driven, + per-effect spatial mask, + mode-gated params, + **ink-ramp generatives**) | ✅ descriptor (+ mask, + **effect macro + ungated stages + derived guidance**, + chain look-words) | 806 + 71 effects |
 | Texture Studio | ✅ | ❌ | ✅ (data-driven, + **chips/Worley** mode) | ✅ commands (+ approximation honesty) | ~2,300 |
@@ -30,6 +30,21 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Pose Mannequin | ✅ control img | ❌ | modal | ❌ (excluded) | — |
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
+
+### Timeline — exports carry every audio clip; editing behaves like an editor — LANDED 2026-09-21 (`48f34d25c`..`8f8c3d45c`, 10 commits, subagent-driven, a review per task)
+
+Plan: `docs/superpowers/plans/2026-09-20-timeline-editing-upgrade.md` (its "Build notes" record where the build departed from it). Started as a survey of open-source editors (opencut-classic, WebAV, Omniclip, mediabunny); ideas were borrowed and re-derived with tests, no code copied.
+
+- **Export sound was broken and is fixed.** The server only ever added the FIRST audio clip, from 0 s, at full volume, no fades. The browser now mixes every audio clip (all tracks, position, volume, fades, speed, reverse) into one WAV with the same maths the preview plays, uploads it, and the unchanged exporter adds it. Measured on a real export: the second track was absent before (0.000) and present after (0.150); a 2-track mix rendered tone levels 0.300 / 0.075 / 0.150 exactly as predicted. One file per timeline (`timeline_mix_<node id>.wav`), overwritten each export.
+- **Preview audio honours speed and reverse** (it ignored both). Sped-up audio changes pitch, like a tape, in preview and export alike.
+- **Group snap**: a moving selection snaps on any edge of any member and never on itself. **Group trim**: trimming one selected clip trims them all by one shared amount, limited once by the tightest clip. **A trim stops at the neighbouring clip.**
+- **No accidental overlaps**: a clip dropped on another hops to the nearest free track of the same kind, or gets a new one — only when it really moved, so clicking a clip in an older, already-overlapping timeline leaves it alone.
+- **Ripple switch** (toolbar, off by default, remembered): when on, trimming or deleting slides the later clips on that track so no gap or overlap is left; applied on mouse release, one undo step. Also fixed: deleting a multi-selection left transitions pointing at deleted clips.
+- Two traps found and written into the code comments: Web Audio's DynamicsCompressor adds ~7% makeup gain to everything (so no limiter node — `fitPeak` turns a mix down only when it would clip); Sailor's `/view` route keeps a permanent copy of every file it serves, so "does this uploaded file still exist" cannot be asked through it.
+- New pure modules: `app/lib/engine/audio/mixdown.ts`, `shared/timeline/{groupEdit,placement,ripple}.ts`. 95 unit tests across 8 timeline specs, including one that runs the editor's own sequences on the real store.
+- **OWED:** the drag behaviours (group snap, group trim, track hop, ripple on release) have not been tried with a real mouse in the running app — the browser pane was not on screen during the build.
+- **Follow-ups from the whole-feature review (not done):** duplicate, paste, dropping an asset and slowing a clip down can still land a clip on top of its neighbour — "no accidental overlaps" is only true for moving and trimming so far, and ripple makes back-to-back clips the normal case, so Cmd+D is the most likely surprise; two timelines whose nodes share an id write the same mix filename (only matters if both export at the same moment); one audio clip with a missing file sends the whole export back to first-clip-only sound (with a notice) instead of leaving just that clip out; the export button shows no "mixing" phase; Cmd+Delete "ripple delete" now overlaps with the switch; moving a clip to another track by hand still leaves its transition pointing at the old track (older bug).
+- **Next, needs a decision:** export in the browser (mediabunny). Timeline export is switched off entirely in hosted mode; the feasibility read found the WebGL preview already has an awaitable, frame-exact `renderFrame` held pixel-close to the Python exporter by a golden test, and that today's export silently drops title and lower-third clips, which the preview draws.
 
 ### Kinetic Studio — Showcase: 35 card layouts, each its own effect; two-tab gallery — LANDED 2026-09-20 (`8c0ec71d4`..`d3d9ac7f1`, 5 commits)
 

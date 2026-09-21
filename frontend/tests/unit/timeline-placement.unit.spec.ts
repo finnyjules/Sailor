@@ -82,6 +82,20 @@ describe('settleOverlaps', () => {
     expect(s.tracks[0]!.clips.map(c => c.id)).toEqual(['a'])
   })
 
+  it('two groups hopping from two tracks never land on top of each other', () => {
+    // A selection spanning two lanes is dropped on occupied space in both.
+    const s = state([
+      track('v1', 'video', [img('a', 0, 100), img('m1', 50, 20)]),
+      track('v2', 'video', [img('b', 0, 100), img('m2', 50, 20)]),
+    ])
+    let n = 0
+    expect(settleOverlaps(s, new Set(['m1', 'm2']), () => `new${n++}`)).toBe(true)
+    const home = (id: string) => s.tracks.find(t => t.clips.some(c => c.id === id))!.id
+    expect(home('m1')).not.toBe(home('m2'))
+    expect(s.tracks.map(t => t.id)).toEqual(['v1', 'v2', 'new0', 'new1'])
+    expect(s.tracks.map(t => t.name)).toEqual(['v1', 'v2', 'Video 3', 'Video 4'])
+  })
+
   it('leaves a clean drop alone', () => {
     const s = state([track('v1', 'video', [img('a', 0, 50), img('m', 60, 20)])])
     expect(settleOverlaps(s, new Set(['m']), () => 'x')).toBe(false)

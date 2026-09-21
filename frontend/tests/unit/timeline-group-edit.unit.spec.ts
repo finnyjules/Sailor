@@ -116,7 +116,7 @@ describe('neighbourGaps', () => {
   it('measures to the nearest clip that is not being trimmed', () => {
     expect(neighbourGaps(clips, 'a', new Set(['a', 'b']))).toEqual({ gapBefore: 10, gapAfter: 50 })
   })
-  it('null when nothing is there', () => {
+  it('null on a side with no clip; the nearest clip otherwise', () => {
     // Nearest clip before y (150) is b, which ends at 120 → 30 frames of room.
     expect(neighbourGaps(clips, 'y', new Set(['y']))).toEqual({ gapBefore: 30, gapAfter: null })
     expect(neighbourGaps(clips, 'x', new Set(['x']))).toEqual({ gapBefore: null, gapAfter: 10 })

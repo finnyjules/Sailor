@@ -64,17 +64,27 @@ export function relocateClips(state: EditState, clipIds: ReadonlySet<string>, pl
 }
 
 /** After a move: for each track, if any moved clip on it now overlaps a clip
- *  that did not move, all the moved clips on that track go elsewhere together. */
+ *  that did not move, all the moved clips on that track go elsewhere together.
+ *  Clips that are still in flight are ignored when looking for room, but a
+ *  group that has ALREADY hopped counts as occupying its new track — otherwise
+ *  two groups from two tracks would both pick the same free track and overlap
+ *  each other there. */
 export function settleOverlaps(state: EditState, movedIds: ReadonlySet<string>, newId: () => string): boolean {
   let changed = false
+  const settled = new Set<string>()
   for (const track of [...state.tracks]) {
     if (track.locked) continue
-    const mine = track.clips.filter(c => movedIds.has(c.id))
+    const mine = track.clips.filter(c => movedIds.has(c.id) && !settled.has(c.id))
     if (!mine.length) continue
+    const ids = new Set(mine.map(c => c.id))
+    const ignore = new Set([...movedIds].filter(id => !settled.has(id)))
     const spans = mine.map(c => ({ start: c.start_frame, end: c.start_frame + c.length }))
-    if (trackHasRoom(track, spans, movedIds)) continue
-    const placement = resolvePlacement(state, track.id, spans, movedIds)
-    if (relocateClips(state, new Set(mine.map(c => c.id)), placement, newId())) changed = true
+    if (trackHasRoom(track, spans, ignore)) continue
+    const placement = resolvePlacement(state, track.id, spans, ignore)
+    if (relocateClips(state, ids, placement, newId())) {
+      changed = true
+      for (const id of ids) settled.add(id)
+    }
   }
   return changed
 }
