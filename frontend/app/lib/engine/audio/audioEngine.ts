@@ -1,4 +1,5 @@
 import type { EditState, Clip } from '~~/shared/timeline/types'
+import { voiceFor, voiceBufferWindow, reverseAudioBuffer } from './mixdown'
 
 // Web Audio playback for timeline audio clips. Pure scheduling math
 // (audioScheduleFor — unit-tested) + a thin graph: one AudioBufferSourceNode +
@@ -74,6 +75,7 @@ interface Voice { src: AudioBufferSourceNode; gain: GainNode }
 export class AudioEngine {
   private ctx: AudioContext | null = null
   private buffers = new Map<string, AudioBuffer>()  // clip id → decoded asset
+  private reversed = new Map<string, AudioBuffer>() // clip id → reversed copy, built on first use
   private voices: Voice[] = []
   private fps = 30
 
@@ -82,6 +84,7 @@ export class AudioEngine {
   async load(state: EditState, resolveClipUrl: (clip: Clip) => string | null): Promise<void> {
     this.disposeVoices()
     this.buffers.clear()
+    this.reversed.clear()
     this.fps = state.canvas.fps
     this.ctx ??= new AudioContext()
 
@@ -125,27 +128,36 @@ export class AudioEngine {
         if (clip.kind !== 'audio') continue
         const buf = this.buffers.get(clip.id)
         if (!buf) continue
-        const s = audioScheduleFor(clip, positionSec, this.fps)
-        if (!s) continue
+        const v = voiceFor(clip, positionSec, this.fps)
+        if (!v) continue
+        const w = voiceBufferWindow(v, buf.duration)
+        if (w.spanSec <= 0) continue
+
+        let playBuf = buf
+        if (v.reverse) {
+          playBuf = this.reversed.get(clip.id) ?? reverseAudioBuffer(this.ctx, buf)
+          this.reversed.set(clip.id, playBuf)
+        }
 
         const src = this.ctx.createBufferSource()
-        src.buffer = buf
+        src.buffer = playBuf
+        src.playbackRate.value = v.playbackRate
         const gain = this.ctx.createGain()
         src.connect(gain).connect(this.ctx.destination)
 
         // The clip's timeline start expressed in AudioContext time. When the
         // playhead is already inside the clip this lies in the past; only
         // anchors after the source start become ramps.
-        const startSec = clip.start_frame / this.fps
-        const clipStartAbs = t0 + startSec - positionSec
-        const sourceStartAbs = t0 + s.startInSec
-        gain.gain.setValueAtTime(gainAt(s.gainPoints, Math.max(0, positionSec - startSec)), sourceStartAbs)
-        for (const [t, g] of s.gainPoints) {
+        const clipStartAbs = t0 + v.clipStartSec - positionSec
+        const sourceStartAbs = t0 + (v.startSec - positionSec)
+        gain.gain.setValueAtTime(gainAt(v.gainPoints, Math.max(0, positionSec - v.clipStartSec)), sourceStartAbs)
+        for (const [t, g] of v.gainPoints) {
           const abs = clipStartAbs + t
           if (abs > sourceStartAbs) gain.gain.linearRampToValueAtTime(g, abs)
         }
 
-        src.start(sourceStartAbs, s.offsetSec, s.durationSec)
+        // offset and duration are in FILE seconds; playbackRate stretches them.
+        src.start(sourceStartAbs + w.delaySec, w.offsetSec, w.spanSec)
         this.voices.push({ src, gain })
       }
     }
@@ -167,6 +179,7 @@ export class AudioEngine {
   dispose(): void {
     this.disposeVoices()
     this.buffers.clear()
+    this.reversed.clear()
     this.ctx?.close()
     this.ctx = null
   }

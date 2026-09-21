@@ -122,3 +122,14 @@ export function encodeWav16(channels: Float32Array[], sampleRate: number): Array
   }
   return buf
 }
+
+/** A reversed copy of a decoded file. Browser-only (needs a real AudioBuffer). */
+export function reverseAudioBuffer(ctx: BaseAudioContext, buf: AudioBuffer): AudioBuffer {
+  const out = ctx.createBuffer(buf.numberOfChannels, buf.length, buf.sampleRate)
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const src = buf.getChannelData(c)
+    const dst = out.getChannelData(c)
+    for (let i = 0, n = src.length; i < n; i++) dst[i] = src[n - 1 - i]!
+  }
+  return out
+}
