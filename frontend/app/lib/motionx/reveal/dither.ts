@@ -30,15 +30,28 @@ export function driftCells(r: MotionReveal): { dx: number; dy: number } {
 }
 
 /**
- * Dissolve and Wipe: the test for ONE frame, with everything that is the same for every cell
- * worked out once — the drift, and for Wipe the direction of travel and the frame's extent
- * along it. `buildHiddenMask` asks it up to a million times a frame; doing the trigonometry
- * per cell made the mask 2–4× slower for no change in the answer.
+ * A cell's place along the travel, measured across the FRAME's grid: 0 at the side the edge
+ * starts from, 1 at the far side (flipped for `out`, which keeps sweeping the same way — the
+ * EMPTY side grows from the start side). Shared by Wipe (`cellTest`) and Assemble
+ * (`assembleCell` / `assembleTest`), which scatter two fronts along the same projection.
  *
- * Wipe measures a cell's place along the travel across the FRAME's grid: 0 at the side the
- * edge starts from, 1 at the far side. On the editor's pasteboard that leaves [0, 1], so the
- * part of a layer hanging past the far edge only fills in as the amount reaches 1 — right for
- * export (which is the frame), and the price of cells that are identical in preview and export.
+ * On the editor's pasteboard this leaves [0, 1], so the part of a layer hanging past the far
+ * edge only fills in as the amount reaches 1 — right for export (which is the frame), and the
+ * price of cells that are identical in preview and export.
+ */
+export function alongTravel(angle: number, out: boolean, cx: number, cy: number, grid: { cols: number; rows: number }): number {
+  const ux = Math.cos(angle), uy = Math.sin(angle)
+  const c1 = grid.cols * ux, c2 = grid.rows * uy
+  const lo = Math.min(0, c1, c2, c1 + c2), span = Math.max(0, c1, c2, c1 + c2) - lo
+  const s = span < 1e-9 ? 0 : ((cx + 0.5) * ux + (cy + 0.5) * uy - lo) / span
+  return out ? 1 - s : s
+}
+
+/**
+ * Dissolve and Wipe: the test for ONE frame, with everything that is the same for every cell
+ * worked out once — the drift, and for Wipe the direction of travel. `buildHiddenMask` asks it
+ * up to a million times a frame; doing the trigonometry per cell made the mask 2–4× slower for
+ * no change in the answer.
  */
 export function cellTest(r: MotionReveal, grid: { cols: number; rows: number }): (cx: number, cy: number) => boolean {
   if (!(r.amount > 0)) return () => false
@@ -46,15 +59,8 @@ export function cellTest(r: MotionReveal, grid: { cols: number; rows: number }):
   const { dx, dy } = driftCells(r)
   const amount = r.amount
   if (r.style !== 'wipe') return (cx, cy) => amount > bayer8(cx - dx, cy - dy)
-  const ux = Math.cos(r.angle), uy = Math.sin(r.angle)
-  const c1 = grid.cols * ux, c2 = grid.rows * uy
-  const lo = Math.min(0, c1, c2, c1 + c2), span = Math.max(0, c1, c2, c1 + c2) - lo
-  const out = r.out, soft = r.softness
-  // OUT keeps sweeping the same way: the EMPTY side grows from the start side.
-  const along = (cx: number, cy: number) => {
-    const s = span < 1e-9 ? 0 : ((cx + 0.5) * ux + (cy + 0.5) * uy - lo) / span
-    return out ? 1 - s : s
-  }
+  const angle = r.angle, out = r.out, soft = r.softness
+  const along = (cx: number, cy: number) => alongTravel(angle, out, cx, cy, grid)
   if (soft <= 1e-6) return (cx, cy) => along(cx, cy) < amount
   // The band of width `softness` sits just behind a front that runs 0 → 1 + softness, so the
   // frame is empty at amount 0 and full at amount 1 whatever the softness.

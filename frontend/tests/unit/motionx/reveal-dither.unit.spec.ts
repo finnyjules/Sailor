@@ -15,7 +15,10 @@ const shownCount = (r: MotionReveal) => {
 
 describe('revealParams', () => {
   it('defaults', () => {
-    expect(revealParams(undefined)).toEqual({ style: 'pixels', out: false, cell: 0.024, drift: 6, angle: 0, softness: 0.35, chars: 1 })
+    expect(revealParams(undefined)).toEqual({
+      style: 'pixels', out: false, cell: 0.024, drift: 6, angle: 0, softness: 0.35, chars: 1,
+      look: 'dither', pattern: 2, levels: 3, band: 0.3, scatter: 0.35,
+    })
   })
   it('converts stored units: thousandths → fraction, degrees → radians, dir → out', () => {
     const p = revealParams({ dir: 'out', style: 'wipe', cell: 20, drift: 0, angle: 90, softness: 0 })
