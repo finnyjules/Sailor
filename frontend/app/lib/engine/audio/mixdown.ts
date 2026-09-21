@@ -88,17 +88,6 @@ export function planMixdown(state: EditState): MixPlan {
   return { voices, totalSec, fps }
 }
 
-/** FNV-1a over everything that changes the mixed sound. */
-export function mixSourceKey(plan: MixPlan, urls: string[]): string {
-  const s = JSON.stringify({ plan, urls })
-  let h = 0x811c9dc5
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i)
-    h = Math.imul(h, 0x01000193)
-  }
-  return (h >>> 0).toString(36)
-}
-
 /** Loudest sample a mix may reach (just under full scale). */
 export const MIX_CEILING = 0.98
 
@@ -178,9 +167,15 @@ export async function renderMixdown(plan: MixPlan, buffers: Map<string, AudioBuf
   return channels
 }
 
+/** One mix file per timeline, overwritten on every export, so exports don't
+ *  pile sound files up in input/. `slot` is the timeline node's id. */
+export function mixFileName(slot: string | null): string {
+  return `timeline_mix_${(slot ?? '').replace(/[^a-zA-Z0-9_-]/g, '_') || 'default'}.wav`
+}
+
 /** Same upload route the frame bakes use; ComfyUI writes any file type to input/. */
-export async function uploadMix(wav: ArrayBuffer): Promise<string> {
-  const fname = `timeline_mix_${Date.now()}.wav`
+export async function uploadMix(wav: ArrayBuffer, slot: string | null): Promise<string> {
+  const fname = mixFileName(slot)
   const fd = new FormData()
   fd.append('image', new File([wav], fname, { type: 'audio/wav' }))
   fd.append('overwrite', 'true')
@@ -190,10 +185,14 @@ export async function uploadMix(wav: ArrayBuffer): Promise<string> {
   return data.subfolder ? `${data.subfolder}/${data.name}` : (data.name || fname)
 }
 
-const mixCache = new Map<string, string>()   // source key → uploaded filename (this session)
-
 /** Mix every audio clip into one uploaded WAV. null = nothing to mix. */
-export async function ensureTimelineMix(state: EditState, resolveClipUrl: (clip: Clip) => string | null): Promise<string | null> {
+// No cache of finished mixes on purpose: a 6 s mix + upload measured 33 ms, and
+// a remembered filename can't be re-checked — Sailor's /view route keeps its
+// own permanent copy of every file, so a deleted mix still looks present, and
+// the server skips a missing audio file without complaint (a silent export).
+export async function ensureTimelineMix(
+  state: EditState, resolveClipUrl: (clip: Clip) => string | null, slot: string | null = null,
+): Promise<string | null> {
   const plan = planMixdown(state)
   if (!plan.voices.length) return null
   if (plan.totalSec > MAX_MIX_SEC) throw new Error('timeline is longer than 30 minutes')
@@ -206,10 +205,6 @@ export async function ensureTimelineMix(state: EditState, resolveClipUrl: (clip:
     if (!url) throw new Error('an audio clip has no file')
     urlByClip.set(v.clipId, url)
   }
-
-  const key = mixSourceKey(plan, plan.voices.map(v => urlByClip.get(v.clipId)!))
-  const cached = mixCache.get(key)
-  if (cached) return cached
 
   const ctx = new OfflineAudioContext(2, Math.max(1, Math.ceil(plan.totalSec * MIX_SAMPLE_RATE)), MIX_SAMPLE_RATE)
   const byUrl = new Map<string, Promise<AudioBuffer>>()
@@ -225,7 +220,5 @@ export async function ensureTimelineMix(state: EditState, resolveClipUrl: (clip:
   }
 
   const channels = await renderMixdown(plan, buffers, ctx)
-  const filename = await uploadMix(encodeWav16(channels, MIX_SAMPLE_RATE))
-  mixCache.set(key, filename)
-  return filename
+  return uploadMix(encodeWav16(channels, MIX_SAMPLE_RATE), slot)
 }

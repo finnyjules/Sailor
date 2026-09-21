@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  voiceFor, voiceBufferWindow, planMixdown, mixSourceKey, encodeWav16, fitPeak,
+  voiceFor, voiceBufferWindow, planMixdown, mixFileName, encodeWav16, fitPeak,
 } from '../../app/lib/engine/audio/mixdown'
 import { createDefaultEditState } from '../../shared/timeline/types'
 import type { AudioClip, EditState } from '../../shared/timeline/types'
@@ -113,14 +113,14 @@ describe('planMixdown', () => {
   })
 })
 
-describe('mixSourceKey', () => {
-  it('changes when a volume changes, stable otherwise', () => {
-    const mk = (volume: number) => planMixdown(stateWith([
-      { id: 't1', kind: 'audio', name: 'Audio 1', muted: false, locked: false, clips: [audio('a', 0, 30, { volume })] },
-    ]))
-    expect(mixSourceKey(mk(1), ['u'])).toBe(mixSourceKey(mk(1), ['u']))
-    expect(mixSourceKey(mk(1), ['u'])).not.toBe(mixSourceKey(mk(0.5), ['u']))
-    expect(mixSourceKey(mk(1), ['u'])).not.toBe(mixSourceKey(mk(1), ['other']))
+describe('mixFileName', () => {
+  it('one fixed name per timeline, safe for a filename', () => {
+    expect(mixFileName('node-42')).toBe('timeline_mix_node-42.wav')
+    expect(mixFileName('a/b ..c')).toBe('timeline_mix_a_b___c.wav')
+  })
+  it('falls back when there is no timeline id', () => {
+    expect(mixFileName(null)).toBe('timeline_mix_default.wav')
+    expect(mixFileName('')).toBe('timeline_mix_default.wav')
   })
 })
 

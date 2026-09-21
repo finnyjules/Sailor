@@ -1811,3 +1811,9 @@ Message: `feat(timeline): ripple switch — trimming or deleting closes the gap 
 5. **Markers** on the ruler, as snap targets.
 6. **Export to Premiere / Resolve / Final Cut** through OpenTimelineIO (Python, server side).
 7. **Saved-format convention** from OpenCut, to adopt at the next `EditState` version bump: each version step is a pure function with its own test and a saved example from that era; steps re-declare old defaults locally; steps only add fields, never delete them.
+
+## Build notes — where the build departed from the text above
+
+- **No limiter node (Task 3).** Web Audio's `DynamicsCompressor` was measured adding ~7% makeup gain to every mix, so a lone clip would export louder than it previews. Replaced by the pure, unit-tested `fitPeak`: the whole mix is turned down only when it would clip.
+- **No cache of finished mixes, no `mixSourceKey` (Tasks 1 and 3).** A mix plus upload measured 33 ms, so the cache bought nothing — and it could not be made safe: Sailor's `/view` route keeps a permanent copy of every file it has served, so a deleted mix still looks present through it, and the server skips a missing audio file without complaint (a silent export). Instead each timeline writes ONE file, `timeline_mix_<node id>.wav`, overwritten on every export (`mixFileName`), so exports do not pile sound files up in `input/`.
+- **Task 2 review finding judged a false positive.** The gain envelope is scheduled in clip time (like the visual fades), so a reversed clip that starts late because its file is short correctly enters at the envelope's current level.
