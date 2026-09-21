@@ -18,9 +18,13 @@ export function bayer8(cx: number, cy: number): number {
   return (B8[wrap8(cy) * 8 + wrap8(cx)]! + 0.5) / 64
 }
 
+/** Seconds into the bar, never negative and never non-finite — a NaN here would turn every
+ *  threshold into NaN and hide the whole layer. */
+const secondsIn = (r: MotionReveal) => (Number.isFinite(r.elapsed) ? Math.max(0, r.elapsed) : 0)
+
 /** How far the pattern has slid, in WHOLE cells — the stepping shimmer of an ordered dither. */
 export function driftCells(r: MotionReveal): { dx: number; dy: number } {
-  const d = Math.max(0, r.elapsed) * r.drift
+  const d = secondsIn(r) * r.drift
   // `+ 0` turns a −0 into 0 so callers can compare with toEqual.
   return { dx: Math.floor(d * Math.cos(r.angle) + 1e-9) + 0, dy: Math.floor(d * Math.sin(r.angle) + 1e-9) + 0 }
 }
@@ -66,7 +70,7 @@ export function dotShown(r: MotionReveal, u: number, v: number): boolean {
   if (!(r.amount > 0)) return false
   if (r.amount >= 1) return true
   const pitch = r.cell * DOT_PITCH_CELLS
-  const slide = Math.max(0, r.elapsed) * r.drift * r.cell
+  const slide = secondsIn(r) * r.drift * r.cell
   const fx = ((((u - slide * Math.cos(r.angle)) / pitch) % 1) + 1) % 1 - 0.5
   const fy = ((((v - slide * Math.sin(r.angle)) / pitch) % 1) + 1) % 1 - 0.5
   return Math.hypot(fx, fy) < dotRadius(r.amount)

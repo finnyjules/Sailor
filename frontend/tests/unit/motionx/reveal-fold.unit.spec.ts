@@ -99,3 +99,35 @@ describe('applyRevealBehaviours', () => {
     expect((SILHOUETTE_KEY_STRIP as readonly string[]).includes('motionReveal')).toBe(true)
   })
 })
+
+// Review follow-ups: the edges the first pass left to inspection.
+describe('applyRevealBehaviours — edges', () => {
+  it('a bar with a delay: the amount and the seconds-in are both measured from when the bar really starts', () => {
+    const b = { ...beh({ ease: 'linear' }, 1, 2), timing: { start: 1, duration: 2, delay: 0.5 } } as StoredBehaviour
+    const tr = tracksOf(b)
+    expect(tr[0]!.keyframes.map((k) => k.t)).toEqual([1.5, 3.5])
+    expect(noteOf(applyRevealBehaviours([layer()], tr, [b], 1.2)[0]!)!.amount).toBe(0)       // still waiting
+    const n = noteOf(applyRevealBehaviours([layer()], tr, [b], 2.5)[0]!)!
+    expect(n.amount).toBeCloseTo(0.5, 9); expect(n.elapsed).toBeCloseTo(1, 9)
+  })
+  it('exactly at the bar\'s start the layer is hidden; exactly at its end it is fully shown (no note)', () => {
+    const b = beh({ ease: 'linear' }); const ls = [layer()]
+    expect(noteOf(applyRevealBehaviours(ls, tracksOf(b), [b], 1)[0]!)!.amount).toBe(0)
+    expect(applyRevealBehaviours(ls, tracksOf(b), [b], 3)).toBe(ls)
+  })
+  it('a tagged track whose bar was deleted has no look to draw: ignored, layer by identity', () => {
+    const b = beh(); const other = beh({}, 0, 1, 'someone-else', 'other-layer'); const ls = [layer()]
+    expect(applyRevealBehaviours(ls, tracksOf(b), [other], 2)).toBe(ls)
+  })
+  it('a tagged reveal track owned by a NON-dither bar is ignored', () => {
+    const b = beh(); const impostor = { ...b, kind: 'fade' } as StoredBehaviour; const ls = [layer()]
+    expect(applyRevealBehaviours(ls, tracksOf(b), [impostor], 2)).toBe(ls)
+  })
+  it('an Out bar under a spring never reports an amount below 0 or a note at/after full', () => {
+    const o = beh({ dir: 'out', ease: { type: 'spring', bounce: 0.7 } }); const tr = tracksOf(o)
+    for (let t = 0; t < 7; t += 0.05) {
+      const n = noteOf(applyRevealBehaviours([layer()], tr, [o], t)[0]!)
+      if (n) { expect(n.amount).toBeGreaterThanOrEqual(0); expect(n.amount).toBeLessThan(1); expect(Number.isFinite(n.elapsed)).toBe(true) }
+    }
+  })
+})

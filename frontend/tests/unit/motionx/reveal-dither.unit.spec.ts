@@ -174,3 +174,50 @@ describe('cellRange + buildHiddenMask', () => {
     expect(buildHiddenMask(R({ elapsed: 1.23 }), range, GRID)).toEqual(buildHiddenMask(R({ elapsed: 1.23 }), range, GRID))
   })
 })
+
+// Review follow-ups: the "every style" claims, checked for every style.
+describe('the ends and the clamps, for EVERY style', () => {
+  const pitch = revealParams({}).cell * DOT_PITCH_CELLS
+  const points = [[0, 0], [pitch / 2, pitch / 2], [pitch * 0.9, pitch * 0.1], [0.31, 0.17]] as const
+  it('dots: amount 0 shows nothing and amount 1 everything, including past the ends', () => {
+    for (const amount of [0, -0.4]) for (const [u, v] of points) expect(dotShown(R({ style: 'dots', amount }), u, v)).toBe(false)
+    for (const amount of [1, 1.3]) for (const [u, v] of points) expect(dotShown(R({ style: 'dots', amount }), u, v)).toBe(true)
+  })
+  it('wipe: amounts past the ends are clamped, in and out', () => {
+    for (const out of [false, true]) {
+      expect(shownCount(R({ style: 'wipe', amount: 1.25, out }))).toBe(GRID.cols * GRID.rows)
+      expect(shownCount(R({ style: 'wipe', amount: -0.2, out }))).toBe(0)
+    }
+  })
+  it('wipe OUT: a shown cell never turns off as the amount rises (no drift)', () => {
+    for (let x = 0; x < GRID.cols; x += 3) {
+      let on = false
+      for (let a = 0; a <= 1.0001; a += 0.02) {
+        const s = cellShown(R({ style: 'wipe', drift: 0, out: true, amount: a }), x, 11, GRID)
+        if (on) expect(s, `${x} @ ${a}`).toBe(true)
+        on = s
+      }
+    }
+  })
+  it('dots: a shown point never turns off as the amount rises (no drift)', () => {
+    for (const [u, v] of points) {
+      let on = false
+      for (let a = 0; a <= 1.0001; a += 0.02) {
+        const s = dotShown(R({ style: 'dots', drift: 0, amount: a }), u, v)
+        if (on) expect(s).toBe(true)
+        on = s
+      }
+    }
+  })
+  it('a non-finite amount or elapsed hides (dissolve, wipe) or holds still — it never throws or shows garbage', () => {
+    for (const style of ['dissolve', 'wipe'] as const) expect(shownCount(R({ style, amount: NaN }))).toBe(0)
+    expect(dotShown(R({ style: 'dots', amount: NaN }), 0.1, 0.1)).toBe(false)
+    expect(driftCells(R({ elapsed: NaN }))).toEqual({ dx: 0, dy: 0 })
+    expect(() => shownCount(R({ elapsed: NaN }))).not.toThrow()
+  })
+  it('cellRange falls back to the frame grid on a non-finite transform', () => {
+    const frame = { c0: 0, r0: 0, cols: 125, rows: 70 }
+    expect(cellRange({ a: NaN, b: 0, c: 0, d: 1, e: 0, f: 0 }, 1000, 560, 1000, 560, 0.008)).toEqual(frame)
+    expect(cellRange({ a: 1, b: 0, c: 0, d: 1, e: Infinity, f: 0 }, 1000, 560, 1000, 560, 0.008)).toEqual(frame)
+  })
+})
