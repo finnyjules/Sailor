@@ -20,6 +20,7 @@ import { assembleShaderParams } from './assemble'
 import { revealParams } from './params'
 import type { MotionReveal, RevealParams } from './params'
 import { drawRevealAssemble } from './paintAssemble'
+import { buildCustomAtlas } from '~/lib/shaderfx/customGlyphs'
 
 type Canvas = HTMLCanvasElement
 
@@ -33,6 +34,9 @@ let whenReady: (timeoutMs?: number) => Promise<boolean> = (timeoutMs) => whenFie
 let readyFx: (effectId: string) => boolean = (id) => fieldEffectReady(id)
 let whenReadyFx: (effectId: string, timeoutMs?: number) => Promise<boolean> = (id, ms) => whenFieldEffectReady(id, ms)
 let warn: (message: string) => void = (message) => { if (import.meta.dev) console.warn(message) }
+// The Custom ASCII shape's runtime glyph sheet (Task 15) — injectable so a spec never touches a
+// real `<canvas>` (the real `buildCustomAtlas` rasterizes text). Shared by both painters.
+let customAtlas: (chars: string) => TexImageSource = buildCustomAtlas
 
 /** Tests only: swap the canvas factory, the shader render call, the readiness checks and/or
  *  the dev warning sink so the spec never touches WebGL or the shaderfx catalog. Swapping
@@ -47,6 +51,7 @@ export function setRevealPixelsDeps(deps: {
   readyFx?: (effectId: string) => boolean
   whenReadyFx?: (effectId: string, timeoutMs?: number) => Promise<boolean>
   warn?: (message: string) => void
+  customAtlas?: (chars: string) => TexImageSource
 }): void {
   if (deps.makeCanvas) {
     makeCanvas = deps.makeCanvas
@@ -59,6 +64,16 @@ export function setRevealPixelsDeps(deps: {
   if (deps.readyFx) readyFx = deps.readyFx
   if (deps.whenReadyFx) whenReadyFx = deps.whenReadyFx
   if (deps.warn) { warn = deps.warn; warnedOversize = false }
+  if (deps.customAtlas) customAtlas = deps.customAtlas
+}
+
+/** The Custom ASCII shape's runtime glyph atlas, as the `textures` argument
+ *  `renderFieldWithBase` wants — built only when `reveal.chars` selects Custom (14); every
+ *  baked set needs no extra texture at all. Shared by both painters (Pixels always; Assemble
+ *  only for its Characters look, the one look that runs the ASCII effect) so the two can never
+ *  disagree about when the atlas is asked for. */
+export function customGlyphTextures(reveal: { chars: number; customChars?: string }): Record<string, TexImageSource> | undefined {
+  return reveal.chars === 14 ? { u_customGlyphs: customAtlas(reveal.customChars ?? '') } : undefined
 }
 
 /** The widest/tallest side the shader pass is rendered at. The old gate was on AREA
@@ -268,7 +283,7 @@ export function drawRevealPixels(
     // cached program) — `u_matte: 1` then switches it on inside that program. Both: the
     // define is what keeps the CLASSIC program's token stream identical to the pre-matte
     // shader's, the uniform is the belt-and-braces runtime gate the renderer resets.
-    result = render(spec, solo, fw, fh, undefined, elapsedSeconds, { u_matte: 1 }, 'MATTE')
+    result = render(spec, solo, fw, fh, undefined, elapsedSeconds, { u_matte: 1 }, 'MATTE', customGlyphTextures(reveal))
   } catch {
     soloPool.push(solo)
     return false

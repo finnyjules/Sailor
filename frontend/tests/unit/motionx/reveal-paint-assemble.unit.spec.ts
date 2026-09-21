@@ -344,6 +344,48 @@ describe('drawRevealAssemble — the look picture (step 3)', () => {
   })
 })
 
+// ── Custom characters (Task 15): the Characters look only ──────────────────────────────────
+
+describe('drawRevealAssemble — Custom characters (chars: 14)', () => {
+  it('Characters look: customAtlas is called with reveal.customChars, and its result becomes textures.u_customGlyphs', () => {
+    const { render, calls: renderCalls } = fakeRender({ __scratchId: 'result' })
+    const { ctx } = harness(render)
+    setCurrentTransform(ctx)
+    const atlas = { __scratchId: 'atlas' } as unknown as HTMLCanvasElement
+    const customAtlas = vi.fn(() => atlas)
+    setRevealPixelsDeps({ customAtlas })
+    const r = assemble({ look: 'characters', chars: 14, customChars: 'AB09' })
+    expect(drawRevealAssemble(ctx, r, W, H, base(), () => {}, stamp)).toBe(true)
+    expect(customAtlas).toHaveBeenCalledTimes(1)
+    expect(customAtlas).toHaveBeenCalledWith('AB09')
+    expect(renderCalls[0]![8]).toEqual({ u_customGlyphs: atlas })
+  })
+
+  it('Characters look with any other set: textures is undefined and customAtlas is never called', () => {
+    const { render, calls: renderCalls } = fakeRender({ __scratchId: 'result' })
+    const { ctx } = harness(render)
+    setCurrentTransform(ctx)
+    const customAtlas = vi.fn(() => ({}) as unknown as HTMLCanvasElement)
+    setRevealPixelsDeps({ customAtlas })
+    const r = assemble({ look: 'characters', chars: 7 })
+    expect(drawRevealAssemble(ctx, r, W, H, base(), () => {}, stamp)).toBe(true)
+    expect(customAtlas).not.toHaveBeenCalled()
+    expect(renderCalls[0]![8]).toBeUndefined()
+  })
+
+  it('Dither look never passes it, even when chars happens to be 14 — bayer_dither has no u_shape at all', () => {
+    const { render, calls: renderCalls } = fakeRender({ __scratchId: 'result' })
+    const { ctx } = harness(render)
+    setCurrentTransform(ctx)
+    const customAtlas = vi.fn(() => ({}) as unknown as HTMLCanvasElement)
+    setRevealPixelsDeps({ customAtlas })
+    const r = assemble({ look: 'dither', chars: 14, customChars: 'AB09' })
+    expect(drawRevealAssemble(ctx, r, W, H, base(), () => {}, stamp)).toBe(true)
+    expect(customAtlas).not.toHaveBeenCalled()
+    expect(renderCalls[0]![8]).toBeUndefined()
+  })
+})
+
 // ── step 4: the coverage read ──────────────────────────────────────────────────────────────
 
 describe('drawRevealAssemble — the coverage read (step 4)', () => {

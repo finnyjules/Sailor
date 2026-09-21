@@ -19,6 +19,7 @@ import BindableRow from '~/components/vue-canvas/studio/BindableRow.vue'
 import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
 import CanvasContextMenu from '~/components/vue-canvas/CanvasContextMenu.vue'
 import { assetUrl, fetchShaderFxCatalog, resolveEffectId } from '~/lib/shaderfx/catalog'
+import { buildCustomAtlas } from '~/lib/shaderfx/customGlyphs'
 import { resolveValues, resolveUniforms } from '~/lib/shaderfx/params'
 import { shaderFx } from '~/lib/shaderfx/renderer'
 import type { EffectDef, GradientStop, ParamValue, ShaderFxCatalog } from '~/lib/shaderfx/types'
@@ -161,39 +162,6 @@ const { wiredColumns, sweepPopover, applySweep, varMenu, openVarMenu } = useStud
 // ── effect textures (mirror ShaderEffectNode) ───────────────────────────────
 const textureImages = new Map<string, HTMLImageElement>()
 
-// ASCII "Custom" shape: rasterize the user's characters into a 1-row glyph atlas
-// (COLS glyphs at CW×CH, matching the shader consts), auto-sorted dark→bright by
-// ink coverage — same ramp logic as the baked sets. Cached by string so the same
-// canvas object is reused (the renderer keys its texture cache on object identity).
-const CUSTOM_CW = 192, CUSTOM_CH = 288, CUSTOM_COLS = 10
-const customAtlasCache = new Map<string, HTMLCanvasElement>()
-function buildCustomAtlas(raw: string): HTMLCanvasElement {
-  const chars = raw && raw.length ? raw : ' .:-=+*#%@'
-  const hit = customAtlasCache.get(chars)
-  if (hit) return hit
-  const px = Math.round(CUSTOM_CH * 0.9)
-  const scored = [...new Set([...chars])].map((ch) => {
-    const c = document.createElement('canvas'); c.width = CUSTOM_CW; c.height = CUSTOM_CH
-    const x = c.getContext('2d')!
-    x.fillStyle = '#000'; x.fillRect(0, 0, CUSTOM_CW, CUSTOM_CH)
-    x.fillStyle = '#fff'; x.font = `${px}px Menlo, Monaco, "Courier New", monospace`
-    x.textAlign = 'center'; x.textBaseline = 'middle'
-    x.fillText(ch, CUSTOM_CW / 2, CUSTOM_CH / 2)
-    const d = x.getImageData(0, 0, CUSTOM_CW, CUSTOM_CH).data
-    let ink = 0; for (let i = 0; i < d.length; i += 4) ink += d[i]
-    return { ink, canvas: c }
-  }).sort((a, b) => a.ink - b.ink)
-  const atlas = document.createElement('canvas'); atlas.width = CUSTOM_COLS * CUSTOM_CW; atlas.height = CUSTOM_CH
-  const ax = atlas.getContext('2d')!
-  ax.fillStyle = '#000'; ax.fillRect(0, 0, atlas.width, atlas.height)
-  for (let i = 0; i < CUSTOM_COLS; i++) {
-    const idx = scored.length > 1 ? Math.round(i * (scored.length - 1) / (CUSTOM_COLS - 1)) : 0
-    if (scored[idx]) ax.drawImage(scored[idx].canvas, i * CUSTOM_CW, 0)
-  }
-  customAtlasCache.set(chars, atlas)
-  if (customAtlasCache.size > 16) customAtlasCache.delete(customAtlasCache.keys().next().value!)
-  return atlas
-}
 // `layer` is the specific stacked effect being composited; omitted only by the
 // catalog thumbnail renderer, which previews a def with default params.
 function texBundle(def: EffectDef | null, layer?: StudioEffect): EffectTextureBundle {

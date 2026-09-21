@@ -393,13 +393,16 @@ describe('the Dither inspector block', () => {
     expect(tag).toMatch(/v-if="[^"]*behaviour\.kind !== 'dither'[^"]*"/)
   })
 
-  it('uses only Studio controls inside the dither block — no raw input or select', () => {
+  it('uses only Studio controls inside the dither block — no raw input or select, except the Custom characters free-text row (Task 15 — no Studio text control exists)', () => {
     const start = src.indexOf("kind === 'dither'")
     expect(start, 'no dither branch found').toBeGreaterThan(-1)
     const end = src.indexOf('</template>', start)
     expect(end).toBeGreaterThan(start)
     const block = src.slice(start, end)
-    expect(block).not.toMatch(/<input/i)
+    const inputs = block.match(/<input\b[^>]*>/gi) ?? []
+    const stray = inputs.filter((t) => !t.includes('data-testid="dither-custom-chars"'))
+    expect(stray).toEqual([])
+    expect(inputs.some((t) => t.includes('data-testid="dither-custom-chars"'))).toBe(true)
     expect(block).not.toMatch(/<select/i)
   })
 
@@ -461,6 +464,102 @@ describe('the Dither inspector block', () => {
     expect(tag).not.toMatch(/revealParams\(/)
     expect(tag).toMatch(/:model-value="ditherChars"/)
     expect(src).toMatch(/const ditherChars = computed\(/)
+  })
+})
+
+// ── The Custom characters row (Task 15) ─────────────────────────────────────
+describe('the Custom characters row', () => {
+  const src = readFileSync(INSPECTOR, 'utf8')
+
+  /** The nearest enclosing tag around a `data-testid` marker — works for a plain, non-self-
+   *  closing `<input>` (unlike the self-closing-only `tagFor` helpers above). */
+  function elementFor(testid: string): string {
+    const at = src.indexOf(`data-testid="${testid}"`)
+    expect(at, `no element carries data-testid="${testid}"`).toBeGreaterThan(-1)
+    const tagStart = src.lastIndexOf('<', at)
+    const tagEnd = src.indexOf('>', at)
+    return src.slice(tagStart, tagEnd + 1)
+  }
+
+  /** A top-level `function name(...) { ... }` declaration, its body found by BALANCING braces
+   *  from the first `{` after the signature — safe for a one-liner (`onCustomCharsFocus`) and a
+   *  multi-line body alike, unlike a naive search for the next `\n}`. */
+  function functionSrc(name: string): string {
+    const start = src.indexOf(`function ${name}(`)
+    expect(start, `no function ${name} found`).toBeGreaterThan(-1)
+    const braceStart = src.indexOf('{', start)
+    let depth = 0
+    for (let i = braceStart; i < src.length; i++) {
+      if (src[i] === '{') depth++
+      else if (src[i] === '}') { depth--; if (depth === 0) return src.slice(start, i + 1) }
+    }
+    throw new Error(`unterminated function ${name}`)
+  }
+
+  it('sits right under the Characters select, and is a plain <input> — there is no Studio text control', () => {
+    const charsIdx = src.indexOf('data-testid="dither-chars"')
+    const rowIdx = src.indexOf('data-testid="dither-custom-chars"')
+    const dirIdx = src.indexOf('data-testid="dither-dir"')
+    expect(charsIdx).toBeGreaterThan(-1)
+    expect(rowIdx).toBeGreaterThan(charsIdx)
+    expect(rowIdx).toBeLessThan(dirIdx)
+    expect(elementFor('dither-custom-chars')).toMatch(/^<input\b/)
+  })
+
+  it('shown only when the Characters menu is on Custom (value 14), for Pixels or Assemble\'s Characters look', () => {
+    const wrapStart = src.lastIndexOf('v-if="', src.indexOf('data-testid="dither-custom-chars"'))
+    const wrapEnd = src.indexOf('"', wrapStart + 'v-if="'.length)
+    const cond = src.slice(wrapStart + 'v-if="'.length, wrapEnd)
+    expect(cond).toMatch(/ditherChars === '14'/)
+    expect(cond).toMatch(/pixels/)
+    expect(cond).toMatch(/assemble/)
+    expect(cond).toMatch(/characters/)
+  })
+
+  it('carries the test id, a 64-char maxlength, spellcheck off, and data-owns-keys', () => {
+    const tag = elementFor('dither-custom-chars')
+    expect(tag).toMatch(/maxlength="64"/)
+    expect(tag).toMatch(/spellcheck="false"/)
+    expect(tag).toMatch(/data-owns-keys/)
+  })
+
+  it('labels itself "Your characters" and hints at the sort order', () => {
+    const at = src.indexOf('data-testid="dither-custom-chars"')
+    const before = src.slice(Math.max(0, at - 400), at)
+    expect(before).toContain('Your characters')
+    expect(src).toContain('Type the characters to build the picture from. They are sorted from light to dark for you.')
+  })
+
+  it('placeholder is the library\'s own default set, not a hand-typed copy', () => {
+    const tag = elementFor('dither-custom-chars')
+    expect(tag).toMatch(/:placeholder="DEFAULT_CUSTOM_CHARS"/)
+    expect(src).toMatch(/import\s*\{[^}]*\bDEFAULT_CUSTOM_CHARS\b[^}]*\}\s*from\s*'~\/lib\/motionx\/reveal'/)
+  })
+
+  it('reads the RAW stored value (not through revealParams), so an emptied field shows empty, not the default', () => {
+    const tag = elementFor('dither-custom-chars')
+    expect(tag).toMatch(/:value="behParam\('customChars'\)/)
+    expect(tag).not.toMatch(/revealParams\(/)
+  })
+
+  it('writes on every input with record = false — a live edit, not a discrete one', () => {
+    const body = functionSrc('onCustomCharsInput')
+    expect(body).toMatch(/params:\s*\{\s*customChars:/)
+    expect(body).toMatch(/\}\s*,\s*false\s*\)/)
+  })
+
+  it('emits before-change exactly once per edit session — on the first input after a focus, not on focus itself and not again while still typing', () => {
+    const focusBody = functionSrc('onCustomCharsFocus')
+    expect(focusBody).not.toMatch(/emit\(/)
+    const inputBody = functionSrc('onCustomCharsInput')
+    expect(inputBody).toMatch(/emit\('before-change'\)/)
+    // guarded by a session flag so it fires once, not on every keystroke
+    expect(inputBody).toMatch(/if\s*\(!customCharsSession\)/)
+  })
+
+  it('does nothing extra on blur beyond ending the session (no emit)', () => {
+    const body = functionSrc('onCustomCharsBlur')
+    expect(body).not.toMatch(/emit\(/)
   })
 })
 

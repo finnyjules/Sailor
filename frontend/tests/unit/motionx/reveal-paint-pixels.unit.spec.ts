@@ -408,6 +408,39 @@ describe('drawRevealPixels — the shader call and immediate copy', () => {
   })
 })
 
+// ── drawRevealPixels: Custom characters (Task 15) — binding the runtime glyph atlas ────
+
+describe('drawRevealPixels — Custom characters (chars: 14)', () => {
+  it('with chars 14, the injected customAtlas is called with reveal.customChars, and its result becomes textures.u_customGlyphs', () => {
+    const result = { __scratchId: 'result' }
+    const { render, calls: renderCalls } = fakeRender(result)
+    const { ctx } = harness(render)
+    setCurrentTransform(ctx)
+    const atlas = { __scratchId: 'atlas' } as unknown as HTMLCanvasElement
+    const customAtlas = vi.fn(() => atlas)
+    setRevealPixelsDeps({ customAtlas })
+    const reveal = pixels({ chars: 14, customChars: 'AB09' })
+    const ok = drawRevealPixels(ctx, reveal, W, H, base(), () => {}, stamp)
+    expect(ok).toBe(true)
+    expect(customAtlas).toHaveBeenCalledTimes(1)
+    expect(customAtlas).toHaveBeenCalledWith('AB09')
+    expect(renderCalls[0]![8]).toEqual({ u_customGlyphs: atlas })
+  })
+
+  it('with any other character set, textures is undefined and customAtlas is never called', () => {
+    const result = { __scratchId: 'result' }
+    const { render, calls: renderCalls } = fakeRender(result)
+    const { ctx } = harness(render)
+    setCurrentTransform(ctx)
+    const customAtlas = vi.fn(() => ({}) as unknown as HTMLCanvasElement)
+    setRevealPixelsDeps({ customAtlas })
+    const ok = drawRevealPixels(ctx, pixels({ chars: 8, customChars: 'unused' }), W, H, base(), () => {}, stamp)
+    expect(ok).toBe(true)
+    expect(customAtlas).not.toHaveBeenCalled()
+    expect(renderCalls[0]![8]).toBeUndefined()
+  })
+})
+
 // ── drawRevealPixels: sharp hand-off (step 4) ───────────────────────────────────────────
 
 describe('drawRevealPixels — sharp hand-off', () => {

@@ -15,6 +15,14 @@ export const REVEAL_STYLES: readonly RevealStyle[] = ['pixels', 'assemble', 'dis
 export type RevealLook = 'dither' | 'characters'
 export const REVEAL_LOOKS: readonly RevealLook[] = ['dither', 'characters']
 
+/** The Custom character set's fallback — the picture is built from these when `customChars`
+ *  is absent, not a string, or empty once cleaned. Duplicated from `~/lib/shaderfx/customGlyphs`'s
+ *  own `DEFAULT_CUSTOM_CHARS` rather than imported: that module rasterizes glyphs onto a real
+ *  `<canvas>`, and this barrel (`~/lib/motionx/reveal`) is deliberately DOM-free — every non-paint
+ *  file in this folder is safe to import from a server/bake context with no DOM at all. A unit
+ *  test (`reveal-pixels.unit.spec.ts`) asserts the two constants stay equal. */
+export const DEFAULT_CUSTOM_CHARS = ' .:-=+*#%@'
+
 /** The dials as the MATHS wants them: `cell` a fraction of the frame's width, `angle` radians,
  *  `band`/`scatter` 0..1 fractions of the travel (Assemble only). */
 export interface RevealParams {
@@ -25,6 +33,15 @@ export interface RevealParams {
   angle: number
   softness: number
   chars: number
+  /** The Custom shape's (value 14) own glyph string — read and cleaned regardless of which
+   *  `chars` value is stored, so switching TO Custom shows whatever was last typed rather than
+   *  the default reappearing. Never empty once read through `revealParams` (the ONE reader,
+   *  which always fills it in via `cleanCustomChars`): an emptied field is stored as `''`,
+   *  which reads back as `DEFAULT_CUSTOM_CHARS`. Optional on the TYPE only — not because a
+   *  reveal can lack it, but so the one existing hand-built `MotionReveal` literal outside this
+   *  folder (the Assemble gallery tile's preview maths, which never needs a glyph sheet) is not
+   *  forced to name a field it has no use for; every consumer that cares treats it as present. */
+  customChars?: string
   look: RevealLook
   pattern: number
   levels: number
@@ -57,12 +74,28 @@ export function revealCellDefault(style: RevealStyle): number {
 const num = (v: unknown, d: number, [lo, hi]: readonly [number, number]) =>
   (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d)
 
-/** A finite number whose rounded value names one of `PIXEL_CHARS`; anything else (missing,
- *  non-numeric, unknown, Custom) → 1 (Blocks). */
+/** A finite number whose rounded value names one of `PIXEL_CHARS` (Custom, value 14, included);
+ *  anything else (missing, non-numeric, unknown) → 1 (Blocks). */
 const charsOf = (v: unknown): number => {
   if (typeof v !== 'number' || !Number.isFinite(v)) return 1
   const rounded = Math.round(v)
   return PIXEL_CHARS.some((c) => c.value === rounded) ? rounded : 1
+}
+
+/** Control characters (Unicode category Cc — this covers every ASCII/C1 control, tabs and
+ *  \r\n included) and the two Unicode line/paragraph separators outside that category. */
+const CUSTOM_CHARS_STRIP = /[\p{Cc}\u2028\u2029]/gu
+
+/** `customChars` cleaning: a string, control characters and line breaks stripped, trimmed of
+ *  NOTHING else — a leading/trailing space is a real, lightest-tone glyph, not padding — capped
+ *  at 64 CODE POINTS (not UTF-16 units, so one emoji is one character). Non-string, or empty
+ *  once cleaned, → `DEFAULT_CUSTOM_CHARS`; an emptied field is stored as `''` and reads back as
+ *  the default rather than persisting it, so storage never gains a copy of the default string. */
+export function cleanCustomChars(v: unknown): string {
+  if (typeof v !== 'string') return DEFAULT_CUSTOM_CHARS
+  const stripped = v.replace(CUSTOM_CHARS_STRIP, '')
+  const capped = Array.from(stripped).slice(0, 64).join('')
+  return capped.length > 0 ? capped : DEFAULT_CUSTOM_CHARS
 }
 
 /** A finite number whose rounded value names one of `DITHER_PATTERNS`; anything else (missing,
@@ -118,6 +151,7 @@ export function revealParams(params: Record<string, unknown> | undefined): Revea
     angle: (num(p.angle, REVEAL_DEFAULTS.angle, REVEAL_RANGES.angle) * Math.PI) / 180,
     softness: num(p.softness, REVEAL_DEFAULTS.softness, REVEAL_RANGES.softness),
     chars: charsOf(p.chars),
+    customChars: cleanCustomChars(p.customChars),
     look,
     pattern: patternOf(p.pattern),
     levels: Math.round(num(p.levels, REVEAL_DEFAULTS.levels, REVEAL_RANGES.levels)),

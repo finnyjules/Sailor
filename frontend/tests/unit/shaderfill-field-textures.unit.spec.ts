@@ -226,6 +226,61 @@ describe('renderFieldWithBase — extraUniforms', () => {
 })
 
 /**
+ * Task 15 — `renderFieldWithBase` gains one more optional LAST argument, `textures`, so a
+ * caller (the Frame dither transition's Custom ASCII shape) can bind a texture the effect
+ * itself has no manifest declaration for at all (a user-typed glyph sheet). Merged into every
+ * pass's `textures` AFTER the effect's own declared ones — a same-named key overrides.
+ */
+describe('renderFieldWithBase — textures (the last argument)', () => {
+  it('reaches every pass, merged after the effect\'s own declared textures', () => {
+    defWith('tex_declared', [{ uniform: 'u_glyphs', file: 'declared.png', v: '20', extraUniforms: { u_glyphCount: 10 } }])
+    FakeImage.created.length = 0
+    render('tex_declared')
+    FakeImage.created[0]!.land()
+    const d = defWith('tex_multi', [{ uniform: 'u_glyphs', file: 'multi.png', v: '21' }])
+    d.passes = 2
+    FakeImage.created.length = 0
+    render('tex_multi')
+    FakeImage.created[0]!.land()
+
+    const extra = { u_customGlyphs: { tag: 'custom-atlas' } as unknown as HTMLCanvasElement }
+    const base = document.createElement('canvas'); base.width = 8; base.height = 8
+    renderFieldWithBase(specFor('tex_multi'), base, 8, 8, undefined, 0, undefined, undefined, extra)
+    const passes = renderSpy.mock.calls.at(-1)![0]
+    expect(passes).toHaveLength(2)
+    for (const p of passes) expect(p.textures?.u_customGlyphs).toBe(extra.u_customGlyphs)
+  })
+
+  it('a same-named key overrides the effect\'s own declared texture', () => {
+    defWith('tex_override', [{ uniform: 'u_glyphs', file: 'override.png', v: '22' }])
+    FakeImage.created.length = 0
+    render('tex_override')
+    FakeImage.created[0]!.land()
+
+    const override = { tag: 'override' } as unknown as HTMLCanvasElement
+    const base = document.createElement('canvas'); base.width = 8; base.height = 8
+    renderFieldWithBase(specFor('tex_override'), base, 8, 8, undefined, 0, undefined, undefined, { u_glyphs: override })
+    expect(lastPass().textures!.u_glyphs).toBe(override)
+  })
+
+  it('omitted, the passes are exactly what they were', () => {
+    defWith('tex_none', [])
+    render('tex_none')
+    const without = JSON.stringify(renderSpy.mock.calls.at(-1)![0])
+    render('tex_none')
+    expect(JSON.stringify(renderSpy.mock.calls.at(-1)![0])).toBe(without)
+  })
+
+  it('an effect with no declared textures at all still receives the extra one', () => {
+    defWith('tex_bare', [])
+    const extra = { u_customGlyphs: { tag: 'bare-atlas' } as unknown as HTMLCanvasElement }
+    const base = document.createElement('canvas'); base.width = 8; base.height = 8
+    renderFieldWithBase(specFor('tex_bare'), base, 8, 8, undefined, 0, undefined, undefined, extra)
+    expect(lastPass().textures).toEqual(extra)
+  })
+})
+
+/**
  * `fieldEffectReady` is the per-frame poll; this is the one-shot AWAIT a host with no frame
  * loop needs — an export, which must not start painting in one look and finish in another
  * because the glyph atlas landed half way through.

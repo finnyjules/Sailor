@@ -3,9 +3,12 @@
 // shader's dials. Pure: no Vue, no DOM, no shader compilation.
 import type { MotionReveal } from './params'
 
-/** The ASCII effect's `u_shape` options, in manifest order, minus Custom (value 14) — Custom
- *  needs a user-supplied glyph sheet a transition dial can't offer. Pinned against
- *  `shader_effects/manifest.json` by `reveal-pixels.unit.spec.ts` so the two can never drift. */
+/** The ASCII effect's `u_shape` options, in manifest order — including Custom (value 14),
+ *  where the user types the characters the picture is built from (Task 15; its glyph sheet
+ *  is built at paint time by `buildCustomAtlas` in `~/lib/shaderfx/customGlyphs`, from the
+ *  bar's own `customChars` param, and bound as `u_customGlyphs` — see `paintPixels.ts` /
+ *  `paintAssemble.ts`). Pinned EXACTLY against `shader_effects/manifest.json` by
+ *  `reveal-pixels.unit.spec.ts` so the two can never drift. */
 export const PIXEL_CHARS: readonly { value: number; label: string }[] = [
   { value: 0, label: 'Mixed' },
   { value: 1, label: 'Blocks' },
@@ -21,6 +24,7 @@ export const PIXEL_CHARS: readonly { value: number; label: string }[] = [
   { value: 11, label: 'Morse' },
   { value: 12, label: 'Dots' },
   { value: 13, label: 'Slashes' },
+  { value: 14, label: 'Custom' },
   { value: 15, label: 'Lego' },
   { value: 16, label: 'Cross-stitch' },
   { value: 17, label: 'Voxel' },

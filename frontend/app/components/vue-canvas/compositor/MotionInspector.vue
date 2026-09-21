@@ -8,7 +8,7 @@
  *  segmented strip, the labelled select, the switch, the button — so this panel reads like
  *  the Cloner / Feather / Fill panels it sits beside instead of like a form. */
 import type { Track, Ease, PropertyValue, StoredBehaviour, Timing } from '~/lib/motionx'
-import { REVEAL_DEFAULTS, REVEAL_RANGES, REVEAL_STYLES, REVEAL_LOOKS, revealParams, revealCellDefault, PIXEL_CHARS, DITHER_PATTERNS } from '~/lib/motionx/reveal'
+import { REVEAL_DEFAULTS, REVEAL_RANGES, REVEAL_STYLES, REVEAL_LOOKS, revealParams, revealCellDefault, PIXEL_CHARS, DITHER_PATTERNS, DEFAULT_CUSTOM_CHARS } from '~/lib/motionx/reveal'
 
 export type BehaviourPatch = { params?: Record<string, unknown>; timing?: Partial<Timing>; kind?: string; replaceParams?: boolean }
 import { trackSpan, behaviourLabel } from '~/lib/motionx/bands'
@@ -157,6 +157,20 @@ function swapMove(id: string) {
 /** A row-slider edit: the first value of a gesture records, the rest ride along. */
 function setBehNum(key: string, patch: Record<string, unknown>) {
   if (behaviour.value) emit('behaviour-change', behaviour.value.id, { params: patch }, recordFor(key))
+}
+// Custom characters (Task 15): there is no Studio text control, so the row below borrows the
+// easing editor's own row idiom (`MotionEasingCurve.vue`'s `easing-text` field) instead of a
+// StudioSlider/StudioSelect. Undo is ONE step per EDIT SESSION (focus → type → blur), the same
+// "first value records, the rest ride along" shape `gesture`/`setBehNum` give a slider drag:
+// `before-change` fires once, on the FIRST input after a focus; every value after that
+// (that first one included) writes live with `record = false`.
+let customCharsSession = false
+function onCustomCharsFocus() { customCharsSession = false }
+function onCustomCharsBlur() { customCharsSession = false }
+function onCustomCharsInput(value: string) {
+  if (!behaviour.value) return
+  if (!customCharsSession) { customCharsSession = true; emit('before-change') }
+  emit('behaviour-change', behaviour.value.id, { params: { customChars: value } }, false)
 }
 function setBehTiming(patch: { start?: number; duration?: number; loop?: boolean }, key?: string) {
   if (!behaviour.value) return
@@ -516,6 +530,19 @@ function onGradient(g: Gradient) {
           hint="The same character sets as the ASCII effect in Shader Studio"
           :model-value="ditherChars" :options="PIXEL_CHAR_OPTIONS" :option-labels="PIXEL_CHAR_LABELS"
           @update:model-value="(v) => setBehParams({ chars: Number(v) })" />
+        <!-- Custom characters (Task 15): the user types the picture's own glyphs. No Studio text
+             control exists, so this row borrows the easing editor's coordinates-field idiom —
+             same height/radius/background, label on the left in the slider-label style. -->
+        <div v-if="(ditherStyle === 'pixels' || (ditherStyle === 'assemble' && ditherLook === 'characters')) && ditherChars === '14'"
+          class="flex h-7 items-center justify-between gap-3 rounded-[6px] bg-white/[0.05] px-2.5">
+          <span class="shrink-0 text-[11px] text-white/72" title="Type the characters to build the picture from. They are sorted from light to dark for you.">Your characters</span>
+          <input type="text" data-testid="dither-custom-chars" data-owns-keys spellcheck="false" maxlength="64"
+            :placeholder="DEFAULT_CUSTOM_CHARS"
+            class="min-w-0 flex-1 bg-transparent text-right text-[11px] text-white/90 outline-none placeholder:text-white/30"
+            :value="behParam('customChars') ?? ''"
+            @focus="onCustomCharsFocus" @blur="onCustomCharsBlur"
+            @input="onCustomCharsInput(($event.target as HTMLInputElement).value)">
+        </div>
         <StudioSegmentedRow data-testid="dither-dir" label="Direction"
           :model-value="enumParam('dir', 'in')" :options="IN_OUT" :option-labels="IN_OUT_LABELS"
           @update:model-value="(v) => setBehParams({ dir: v })" />

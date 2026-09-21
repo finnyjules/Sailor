@@ -776,6 +776,15 @@ export function renderFieldWithBase(
    *  `tests/unit/ascii-dither-matte.unit.spec.ts`, say why that matters. Omitted, the passes
    *  are byte-for-byte what they were. */
   variant?: string,
+  /** Merged into every pass's `textures` AFTER the effect's own declared ones (a same-named
+   *  key wins) — this is how the Frame dither transition's Custom ASCII shape binds its
+   *  runtime glyph atlas (`u_customGlyphs`) through this entry point, which has no manifest-
+   *  declared texture of its own to carry it. Omitted, the passes are byte-for-byte what they
+   *  were. MUST be STABLE objects (the same object for the same content) — the renderer's
+   *  extra-texture cache is keyed on source identity (see `loadedEffectTextures`'s doc /
+   *  `extraTexCache` in ~/lib/shaderfx/renderer.ts); the atlas builder's own string-keyed
+   *  cache (`~/lib/shaderfx/customGlyphs.ts`) guarantees this. */
+  textures?: Record<string, TexImageSource>,
 ): HTMLCanvasElement {
   const { effect, spec: resolvedSpec } = resolve(spec)
   if (!effect) {
@@ -792,6 +801,7 @@ export function renderFieldWithBase(
   if (shape) passes = passes.map(p => ({ ...p, uniforms: { ...p.uniforms, ...shape.uniforms } }))
   if (extraUniforms) passes = passes.map(p => ({ ...p, uniforms: { ...p.uniforms, ...extraUniforms } }))
   if (variant) passes = passes.map(p => ({ ...p, id: `${effect.id}#${variant}`, source: withVariantDefine(p.source, variant) }))
+  if (textures) passes = passes.map(p => ({ ...p, textures: { ...p.textures, ...textures } }))
   // render() RETURNS the canvas, valid only until the next render call — same
   // ownership contract as resolveField's `rendered` below.
   return shaderFx.render(passes, base, w, h, shape ? { u_shape: shape.texture } : undefined)

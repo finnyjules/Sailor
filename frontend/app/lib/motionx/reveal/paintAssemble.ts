@@ -12,7 +12,7 @@
 // injectable shader call are `paintPixels.ts`'s — shared, so the two styles can never disagree
 // about what "the frame's own pixels" are, and so one `setRevealPixelsDeps` covers both.
 import type { ShaderSpec } from '~/lib/spacetype/fillTile'
-import { acquireScratch, fieldRender, releaseScratch, releaseSolo, soloPass } from './paintPixels'
+import { acquireScratch, customGlyphTextures, fieldRender, releaseScratch, releaseSolo, soloPass } from './paintPixels'
 import { assembleGrid, assembleShaderExtras, assembleShaderParams, buildAssembleMasks } from './assemble'
 import type { MotionReveal } from './params'
 
@@ -69,9 +69,13 @@ export function drawRevealAssemble(
   // Dither look → the SHIMMER build, whose threshold pattern slides under the blocks by the
   // same whole-cell drift that moves the scatter order; Characters → the ASCII MATTE build.
   const extras = assembleShaderExtras(reveal, W, H)
+  // Custom's runtime glyph atlas — the Characters look only (the one that runs the ASCII
+  // effect at all); the Dither look samples `bayer_dither`, which has no `u_shape` and must
+  // never even ask `customAtlas` for it.
+  const textures = reveal.look === 'characters' ? customGlyphTextures(reveal) : undefined
   let result: Canvas
   try {
-    result = fieldRender(spec, solo, fw, fh, undefined, elapsedSeconds, extras.uniforms, extras.variant)
+    result = fieldRender(spec, solo, fw, fh, undefined, elapsedSeconds, extras.uniforms, extras.variant, textures)
   } catch {
     releaseSolo(solo)
     return false

@@ -41,7 +41,7 @@ describe('revealParams — Pixels', () => {
 
   it('chars: default 1, only a PIXEL_CHARS value (rounded) survives, everything else → 1', () => {
     expect(revealParams({}).chars).toBe(1)
-    expect(revealParams({ chars: 14 }).chars).toBe(1)     // Custom — deliberately excluded
+    expect(revealParams({ chars: 14 }).chars).toBe(14)    // Custom — now a valid PIXEL_CHARS value
     expect(revealParams({ chars: 99 }).chars).toBe(1)
     expect(revealParams({ chars: NaN }).chars).toBe(1)
     expect(revealParams({ chars: '8' }).chars).toBe(1)    // numbers only
@@ -91,15 +91,14 @@ describe('motionUsesPixels', () => {
 })
 
 describe('PIXEL_CHARS — pinned against the shader manifest', () => {
-  it('equals the ascii_dither u_shape options, minus Custom (value 14)', () => {
+  it('equals the ascii_dither u_shape options EXACTLY, Custom (value 14) included', () => {
     const effects = (manifest as unknown as { effects: EffectDef[] }).effects
     const ascii = effects.find((e) => e.id === 'ascii_dither')
     if (!ascii) throw new Error('no ascii_dither effect in the manifest')
     const shape = (ascii.params as unknown as Array<{ uniform: string; options?: { label: string; value: number }[] }>)
       .find((p) => p.uniform === 'u_shape')
     if (!shape?.options) throw new Error('ascii_dither has no u_shape options')
-    const expected = shape.options.filter((o) => o.value !== 14)
-    expect(PIXEL_CHARS).toEqual(expected)
+    expect(PIXEL_CHARS).toEqual(shape.options)
   })
 })
 
