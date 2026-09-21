@@ -9,17 +9,20 @@
 // free): only `useCompositorLayers.ts`, the export/bake entries (`~/lib/motion/bake.ts`,
 // `CompositorModal.vue`), `./paintAssemble.ts` and this file's own spec may import it directly.
 //
-// It is also the SHADER-STYLE front door for the two of them: `drawRevealShaderStyle` routes a
-// bar to Pixels or to Assemble, `revealShaderReady` / `ensureRevealShadersReady` answer for the
-// effect THAT bar needs, and `soloPass` (steps 1–2) plus the scratch pools below are shared, so
-// the two styles can never disagree about what "the frame's own pixels" are.
+// It is also the SHADER-STYLE front door for all THREE of them: `drawRevealShaderStyle` routes a
+// bar to Pixels, to Assemble or to Settle, `revealShaderReady` / `ensureRevealShadersReady`
+// answer for the effect THAT bar needs, and `soloPass` (steps 1–2) plus the scratch pools below
+// are shared, so the styles can never disagree about what "the frame's own pixels" are.
 import { fieldEffectReady, whenFieldEffectReady, renderFieldWithBase } from '~/lib/shaderfill/field'
+import { shaderFx } from '~/lib/shaderfx/renderer'
+import type { ShaderPass } from '~/lib/shaderfx/renderer'
 import type { ShaderSpec } from '~/lib/spacetype/fillTile'
 import { pixelShaderParams, pixelSharp } from './pixels'
 import { assembleShaderParams } from './assemble'
-import { revealParams } from './params'
-import type { MotionReveal, RevealParams } from './params'
+import { revealEffectIdsFor } from './params'
+import type { MotionReveal } from './params'
 import { drawRevealAssemble } from './paintAssemble'
+import { drawRevealSettle } from './paintSettle'
 import { buildCustomAtlas } from '~/lib/shaderfx/customGlyphs'
 
 type Canvas = HTMLCanvasElement
@@ -33,6 +36,12 @@ let whenReady: (timeoutMs?: number) => Promise<boolean> = (timeoutMs) => whenFie
 // are the Pixels-only contract `revealPixelsReady` / `ensureRevealPixelsReady` still honour.
 let readyFx: (effectId: string) => boolean = (id) => fieldEffectReady(id)
 let whenReadyFx: (effectId: string, timeoutMs?: number) => Promise<boolean> = (id, ms) => whenFieldEffectReady(id, ms)
+// Settle's THIRD pass: the shared renderer driven directly, with a frag of our own rather than a
+// catalogue effect (there is no catalogue entry for "divide colour by coverage"). Injectable for
+// the same reason `render` is — a spec must never reach WebGL.
+let combine: (
+  passes: ShaderPass[], base: TexImageSource, width: number, height: number, live?: Record<string, TexImageSource>,
+) => Canvas = (passes, base, width, height, live) => shaderFx.render(passes, base, width, height, live)
 let warn: (message: string) => void = (message) => { if (import.meta.dev) console.warn(message) }
 // The Custom ASCII shape's runtime glyph sheet (Task 15) — injectable so a spec never touches a
 // real `<canvas>` (the real `buildCustomAtlas` rasterizes text). Shared by both painters.
@@ -50,6 +59,7 @@ export function setRevealPixelsDeps(deps: {
   whenReady?: (timeoutMs?: number) => Promise<boolean>
   readyFx?: (effectId: string) => boolean
   whenReadyFx?: (effectId: string, timeoutMs?: number) => Promise<boolean>
+  combine?: typeof combine
   warn?: (message: string) => void
   customAtlas?: (chars: string) => TexImageSource
 }): void {
@@ -63,6 +73,7 @@ export function setRevealPixelsDeps(deps: {
   if (deps.whenReady) whenReady = deps.whenReady
   if (deps.readyFx) readyFx = deps.readyFx
   if (deps.whenReadyFx) whenReadyFx = deps.whenReadyFx
+  if (deps.combine) combine = deps.combine
   if (deps.warn) { warn = deps.warn; warnedOversize = false }
   if (deps.customAtlas) customAtlas = deps.customAtlas
 }
@@ -122,10 +133,26 @@ export function releaseScratch(name: string, canvas: Canvas): void {
 export function releaseSolo(canvas: Canvas): void {
   soloPool.push(canvas)
 }
-/** `paintAssemble.ts` only: the injectable shader call, so one `setRevealPixelsDeps({ render })`
- *  covers both styles. Throws exactly as `renderFieldWithBase` does on a cold catalog. */
+/** `paintAssemble.ts` / `paintSettle.ts` only: the injectable shader call, so one
+ *  `setRevealPixelsDeps({ render })` covers every style. Throws exactly as `renderFieldWithBase`
+ *  does on a cold catalog. */
 export function fieldRender(...args: Parameters<typeof renderFieldWithBase>): Canvas {
   return render(...args) as Canvas
+}
+
+/** `paintSettle.ts` only: the injectable direct drive of the shared renderer, for the combine
+ *  pass — a frag of ours, not a catalogue effect. The canvas it returns is the renderer's own
+ *  and is valid only until the NEXT render call, exactly like `fieldRender`'s. */
+export function fieldCombine(
+  passes: ShaderPass[], base: TexImageSource, width: number, height: number, live?: Record<string, TexImageSource>,
+): Canvas {
+  return combine(passes, base, width, height, live)
+}
+
+/** `paintSettle.ts` only: the injectable per-effect readiness check — asking also KICKS the
+ *  catalogue load, which is how a settle bar's plain-fade frames heal themselves. */
+export function fieldReady(effectId: string): boolean {
+  return readyFx(effectId)
 }
 
 /** True once the ASCII effect can render everything Pixels needs (see `fieldEffectReady`).
@@ -200,9 +227,10 @@ export function soloPass(
   return { solo, fw, fh }
 }
 
-/** Which Shader Studio effect does a bar of this style and look need? `null` for the three
- *  MASK styles, which need none. */
-function revealShaderEffect(reveal: RevealParams): 'ascii_dither' | 'bayer_dither' | null {
+/** Which Shader Studio effect does a DITHER bar of this style and look need? `null` for the
+ *  three MASK styles, which need none — and for `settle`, whose effect is the bar's own choice
+ *  and whose readiness `revealShaderReady` answers before it ever asks here. */
+function revealShaderEffect(reveal: MotionReveal): 'ascii_dither' | 'bayer_dither' | null {
   if (reveal.style === 'pixels') return 'ascii_dither'
   // The frame size only scales the effect's dials, never picks the effect — 1×1 is enough.
   if (reveal.style === 'assemble') return assembleShaderParams({ ...reveal, amount: 0, elapsed: 0 }, 1, 1).effectId
@@ -211,18 +239,30 @@ function revealShaderEffect(reveal: RevealParams): 'ascii_dither' | 'bayer_dithe
 
 /** True once the effect THIS bar needs can render (see `fieldEffectReady`) — the Dither look's
  *  `bayer_dither`, or `ascii_dither` for Characters and for every Pixels bar. False both while
- *  the catalog is still loading and (self-healingly) kicks that load. */
+ *  the catalog is still loading and (self-healingly) kicks that load.
+ *
+ *  A SETTLE bar is the exception: always `true`. Its style has no mask look to fall back to —
+ *  the Dissolve mask would be a different transition, not a degraded one — so `drawRevealSettle`
+ *  owns the cold-catalogue frames itself and stamps the layer as a plain fade (kicking the load
+ *  as it goes). The compositor must therefore take the side-canvas route for it from the first
+ *  frame. */
 export function revealShaderReady(reveal: MotionReveal): boolean {
+  if (reveal.style === 'settle') return true
   const effectId = revealShaderEffect(reveal)
   return effectId ? readyFx(effectId) : false
 }
 
 /**
  * The same question as an AWAIT, for a host that paints once and keeps the result: an export.
- * Awaits every effect this frame's dither bars actually need — a motion with one Assemble bar
- * in the Dither look and one Pixels bar waits for BOTH — and answers `true` only if all of
- * them arrived. Never throws, so a timed-out export goes ahead in the Dissolve look rather
- * than failing, exactly as a cold live frame does.
+ * Awaits every effect this frame's reveal bars actually need — a motion with one Assemble bar
+ * in the Dither look, one Pixels bar and a Swirl settle bar waits for all THREE — and answers
+ * `true` only if all of them arrived. Never throws, so a timed-out export goes ahead in the
+ * fallback look (the Dissolve mask for a dither bar, a plain fade for a settle bar) rather than
+ * failing, exactly as a cold live frame does.
+ *
+ * Which effects those are is `revealEffectIdsFor`'s answer, not this file's — so a bake, the
+ * modal's pre-warm and this wait can never disagree about what a frame needs, and neither of
+ * those two callers had to learn about settle bars.
  *
  * Calling it also KICKS those loads, so it doubles as the pre-warm.
  */
@@ -230,14 +270,9 @@ export async function ensureRevealShadersReady(
   behaviours: { kind: string; params?: Record<string, unknown> }[] | undefined,
   timeoutMs?: number,
 ): Promise<boolean> {
-  const effects = new Set<string>()
-  for (const b of behaviours ?? []) {
-    if (b?.kind !== 'dither') continue
-    const effectId = revealShaderEffect(revealParams(b.params))
-    if (effectId) effects.add(effectId)
-  }
-  if (effects.size === 0) return true
-  const verdicts = await Promise.all([...effects].map((id) => whenReadyFx(id, timeoutMs)))
+  const effects = revealEffectIdsFor(behaviours)
+  if (effects.length === 0) return true
+  const verdicts = await Promise.all(effects.map((id) => whenReadyFx(id, timeoutMs)))
   return verdicts.every(Boolean)
 }
 
@@ -336,8 +371,9 @@ export function drawRevealPixels(
 
 /**
  * The ONE entry point the compositor calls for a shader-style bar: Assemble draws constant
- * blocks wiped in by two scattered fronts, Pixels the refining character ladder. Same contract
- * as either: `false` leaves `ctx` untouched, so the caller falls through to the Dissolve mask.
+ * blocks wiped in by two scattered fronts, Pixels the refining character ladder, Settle the
+ * layer broken by one of ten effects whose strength runs out. Same contract as any of them:
+ * `false` leaves `ctx` untouched, so the caller falls through to the Dissolve mask.
  */
 export function drawRevealShaderStyle(
   ctx: CanvasRenderingContext2D,
@@ -348,6 +384,7 @@ export function drawRevealShaderStyle(
   drawLayer: (target: CanvasRenderingContext2D) => void,
   stamp: { alpha: number; blend: GlobalCompositeOperation },
 ): boolean {
+  if (reveal.style === 'settle') return drawRevealSettle(ctx, reveal, W, H, base, drawLayer, stamp)
   return reveal.style === 'assemble'
     ? drawRevealAssemble(ctx, reveal, W, H, base, drawLayer, stamp)
     : drawRevealPixels(ctx, reveal, W, H, base, drawLayer, stamp)
