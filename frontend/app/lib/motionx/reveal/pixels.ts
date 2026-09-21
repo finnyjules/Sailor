@@ -47,9 +47,14 @@ export function pixelBlock(amount: number, cell: number): number {
   return cell / 2 ** Math.min(stages, Math.floor(clamp01(amount) * (stages + 1)))
 }
 
-/** The shader's Brightness across the bar: −1 (nothing drawn) → +1 (every covered cell full).
- *  Bright tones cross zero first, so they arrive first. */
-export function pixelBrightness(amount: number): number { return clamp01(amount) * 2 - 1 }
+/** The shader's Brightness across the bar. In matte mode the shader's tone runs 0.25–0.75 and
+ *  its jitter ±0.125, so −0.9 draws nothing at all and +0.9 fills every covered cell. The ramp
+ *  spends the FIRST HALF of the bar getting from one to the other — so the coarsest blocks
+ *  (stage one, the first fifth) are already visible and growing, bright tones first — and
+ *  the second half holds full density while the blocks refine: a mosaic resolving to the
+ *  picture. (Found live: a −1 → +1 ramp over the whole bar left stage one invisible and had
+ *  the element solid by mid-bar, so only two of the five stages were ever seen.) */
+export function pixelBrightness(amount: number): number { return Math.min(1, -0.9 + clamp01(amount) * 3.6) }
 
 /** How much of the real, sharp layer is laid over the characters: most sets never become a
  *  solid picture, so the last fifth of the bar cross-fades to the layer itself. */

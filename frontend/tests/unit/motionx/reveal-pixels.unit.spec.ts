@@ -94,10 +94,24 @@ describe('pixelStages / pixelBlock', () => {
 })
 
 describe('pixelBrightness', () => {
-  it('runs -1 → 0 → +1 across the bar', () => {
-    expect(pixelBrightness(0)).toBe(-1)
-    expect(pixelBrightness(0.5)).toBe(0)
-    expect(pixelBrightness(1)).toBe(1)
+  // The matte shader's tone runs 0.25–0.75 with ±0.125 of jitter (see ascii_dither.frag).
+  const density = (tone: number, jitter: number, amount: number) => Math.min(1, Math.max(0, tone + jitter + pixelBrightness(amount)))
+  it('draws nothing at all at amount 0, whatever the tone and the jitter', () => {
+    expect(pixelBrightness(0)).toBeCloseTo(-0.9, 9)
+    expect(density(0.75, 0.125, 0)).toBe(0)
+  })
+  it('the coarsest blocks are SEEN: by the end of stage one (amount 0.2) bright and mid tones already have density', () => {
+    expect(density(0.75, 0, 0.2)).toBeGreaterThan(0.4)
+    expect(density(0.5, 0, 0.2)).toBeGreaterThan(0.2)
+  })
+  it('every covered cell is full by mid-bar, darkest tone and worst jitter included, and stays full', () => {
+    for (const a of [0.5, 0.6, 0.8, 1]) expect(density(0.25, -0.125, a)).toBe(1)
+    expect(pixelBrightness(1)).toBe(1)                       // never above the shader's own range
+  })
+  it('never falls as the amount rises; bad amounts clamp', () => {
+    let prev = -Infinity
+    for (let a = 0; a <= 1.0001; a += 0.02) { const b = pixelBrightness(a); expect(b).toBeGreaterThanOrEqual(prev); prev = b }
+    expect(pixelBrightness(-3)).toBeCloseTo(-0.9, 9); expect(pixelBrightness(9)).toBe(1); expect(pixelBrightness(NaN)).toBeCloseTo(-0.9, 9)
   })
 })
 
@@ -123,7 +137,7 @@ describe('pixelShaderParams', () => {
     const params = pixelShaderParams(r, 1920, 1080)
     expect(params.shape).toBe(8)
     expect(params.cell).toBeCloseTo(pixelBlock(0, 0.024) * 1920 / 1080, 9)
-    expect(params.brightness).toBe(-1)
+    expect(params.brightness).toBe(pixelBrightness(0))   // whatever the ramp says at this amount
     expect(params.jitter).toBe(PIXEL_JITTER)
     expect(params.speed).toBeCloseTo(1, 9)   // drift 6 / 6
     expect(params.colored).toBe(1)
