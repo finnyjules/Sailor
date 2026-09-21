@@ -122,6 +122,11 @@ export function applyCommand(s: EditState, cmd: TimelineCommand): boolean {
       const hit = findClip(s, cmd.clip_id)
       const target = findTrack(s, cmd.to_track_id)
       if (!hit || !target) return false
+      // A transition joins two neighbours on one track; a clip that leaves the
+      // track leaves its transitions behind (same rule as remove_clip).
+      if (hit.track !== target) {
+        s.transitions = s.transitions.filter(t => t.from_clip_id !== cmd.clip_id && t.to_clip_id !== cmd.clip_id)
+      }
       hit.track.clips.splice(hit.index, 1)
       hit.clip.start_frame = Math.max(0, Math.round(cmd.start_frame))
       target.clips.push(hit.clip)

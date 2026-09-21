@@ -167,8 +167,24 @@ export async function renderMixdown(plan: MixPlan, buffers: Map<string, AudioBuf
   return channels
 }
 
-/** One mix file per timeline, overwritten on every export, so exports don't
- *  pile sound files up in input/. `slot` is the timeline node's id. */
+let fallbackTab: string | null = null
+/** A short id that is stable for this browser tab (survives reloads) and
+ *  differs between tabs, so two windows exporting timelines whose nodes share
+ *  an id never write the same file at the same moment. */
+export function mixTabToken(): string {
+  try {
+    let t = sessionStorage.getItem('sailor.mixTab')
+    if (!t) { t = Math.random().toString(36).slice(2, 8); sessionStorage.setItem('sailor.mixTab', t) }
+    return t
+  } catch {
+    return (fallbackTab ??= Math.random().toString(36).slice(2, 8))
+  }
+}
+
+/** One fixed name per slot, overwritten on every export, so repeated exports
+ *  don't pile sound files up in input/. The caller's slot is the browser tab's
+ *  token plus the timeline node's id — so at most one file per tab per timeline
+ *  is ever left behind (a new tab starts a new one). */
 export function mixFileName(slot: string | null): string {
   return `timeline_mix_${(slot ?? '').replace(/[^a-zA-Z0-9_-]/g, '_') || 'default'}.wav`
 }
@@ -185,26 +201,33 @@ export async function uploadMix(wav: ArrayBuffer, slot: string | null): Promise<
   return data.subfolder ? `${data.subfolder}/${data.name}` : (data.name || fname)
 }
 
-/** Mix every audio clip into one uploaded WAV. null = nothing to mix. */
+/** Mix every audio clip into one uploaded WAV. `file` is null when there was
+ *  nothing to mix, or nothing loaded. A clip with no file, or whose file fails
+ *  to fetch or decode, is left out of the mix (not fatal) and counted in
+ *  `skipped` — the caller shows that count instead of failing the export. */
 // No cache of finished mixes on purpose: a 6 s mix + upload measured 33 ms, and
 // a remembered filename can't be re-checked — Sailor's /view route keeps its
 // own permanent copy of every file, so a deleted mix still looks present, and
 // the server skips a missing audio file without complaint (a silent export).
 export async function ensureTimelineMix(
   state: EditState, resolveClipUrl: (clip: Clip) => string | null, slot: string | null = null,
-): Promise<string | null> {
+): Promise<{ file: string | null; skipped: number }> {
   const plan = planMixdown(state)
-  if (!plan.voices.length) return null
+  if (!plan.voices.length) return { file: null, skipped: 0 }
   if (plan.totalSec > MAX_MIX_SEC) throw new Error('timeline is longer than 30 minutes')
 
   const clips = new Map<string, Clip>()
   for (const track of state.tracks) for (const clip of track.clips) clips.set(clip.id, clip)
   const urlByClip = new Map<string, string>()
+  let skipped = 0
   for (const v of plan.voices) {
     const url = resolveClipUrl(clips.get(v.clipId)!)
-    if (!url) throw new Error('an audio clip has no file')
+    if (!url) { skipped++; console.warn('[timeline] audio clip left out of the mix', v.clipId, new Error('no file')); continue }
     urlByClip.set(v.clipId, url)
   }
+
+  // Nothing has a file: don't allocate a render buffer (large on a long timeline).
+  if (!urlByClip.size) return { file: null, skipped }
 
   const ctx = new OfflineAudioContext(2, Math.max(1, Math.ceil(plan.totalSec * MIX_SAMPLE_RATE)), MIX_SAMPLE_RATE)
   const byUrl = new Map<string, Promise<AudioBuffer>>()
@@ -216,9 +239,17 @@ export async function ensureTimelineMix(
         return r.arrayBuffer()
       }).then(b => ctx.decodeAudioData(b)))
     }
-    buffers.set(clipId, await byUrl.get(url)!)
+    try {
+      buffers.set(clipId, await byUrl.get(url)!)
+    } catch (err) {
+      skipped++
+      console.warn('[timeline] audio clip left out of the mix', clipId, err)
+    }
   }
 
-  const channels = await renderMixdown(plan, buffers, ctx)
-  return uploadMix(encodeWav16(channels, MIX_SAMPLE_RATE), slot)
+  if (!buffers.size) return { file: null, skipped }
+
+  const channels = await renderMixdown({ ...plan, voices: plan.voices.filter(v => buffers.has(v.clipId)) }, buffers, ctx)
+  const file = await uploadMix(encodeWav16(channels, MIX_SAMPLE_RATE), `${mixTabToken()}_${slot ?? ''}`)
+  return { file, skipped }
 }

@@ -67,6 +67,13 @@ describe('relocateClips', () => {
     const s = state([track('v1', 'video', [img('m', 10, 20)])])
     expect(relocateClips(s, new Set(['m']), { type: 'track', trackId: 'v1' }, 'NEW')).toBe(false)
   })
+
+  it('a transition whose two clips move together goes with them', () => {
+    const s = state([track('v1', 'video', [img('a', 0, 50), img('m1', 10, 20), img('m2', 30, 20)]), track('v2', 'video', [])])
+    s.transitions = [{ id: 't', track_id: 'v1', from_clip_id: 'm1', to_clip_id: 'm2', kind: 'crossfade', duration: 6 }]
+    expect(relocateClips(s, new Set(['m1', 'm2']), { type: 'track', trackId: 'v2' }, 'NEW')).toBe(true)
+    expect(s.transitions).toEqual([{ id: 't', track_id: 'v2', from_clip_id: 'm1', to_clip_id: 'm2', kind: 'crossfade', duration: 6 }])
+  })
 })
 
 describe('settleOverlaps', () => {

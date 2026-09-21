@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  voiceFor, voiceBufferWindow, planMixdown, mixFileName, encodeWav16, fitPeak,
+  voiceFor, voiceBufferWindow, planMixdown, mixFileName, encodeWav16, fitPeak, mixTabToken,
 } from '../../app/lib/engine/audio/mixdown'
 import { createDefaultEditState } from '../../shared/timeline/types'
 import type { AudioClip, EditState } from '../../shared/timeline/types'
@@ -148,6 +148,41 @@ describe('encodeWav16', () => {
     expect(dv.getInt16(46, true)).toBe(16384)     // R0 = round(0.5 * 32767)
     expect(dv.getInt16(48, true)).toBe(32767)     // L1 clamped
     expect(dv.getInt16(52, true)).toBe(-32768)    // L2 clamped
+  })
+})
+
+describe('mixTabToken', () => {
+  it('without sessionStorage (Node): stable across calls and safe in a filename', () => {
+    const a = mixTabToken()
+    expect(a).toBe(mixTabToken())
+    expect(a).toMatch(/^[a-z0-9]{1,8}$/)
+    expect(mixFileName(`${a}_node-1`)).toBe(`timeline_mix_${a}_node-1.wav`)
+  })
+
+  it('with sessionStorage: remembers the tab token there, and reuses one that is already stored', () => {
+    const mem = new Map<string, string>()
+    ;(globalThis as any).sessionStorage = {
+      getItem: (k: string) => mem.get(k) ?? null,
+      setItem: (k: string, v: string) => { mem.set(k, v) },
+    }
+    try {
+      const a = mixTabToken()
+      expect(mem.get('sailor.mixTab')).toBe(a)
+      expect(mixTabToken()).toBe(a)
+      mem.set('sailor.mixTab', 'abc123')          // what a reload of the same tab finds
+      expect(mixTabToken()).toBe('abc123')
+    } finally {
+      delete (globalThis as any).sessionStorage
+    }
+  })
+
+  it('a sessionStorage that throws (blocked site data) falls back without failing', () => {
+    ;(globalThis as any).sessionStorage = { getItem: () => { throw new Error('blocked') }, setItem: () => {} }
+    try {
+      expect(mixTabToken()).toMatch(/^[a-z0-9]{1,8}$/)
+    } finally {
+      delete (globalThis as any).sessionStorage
+    }
   })
 })
 

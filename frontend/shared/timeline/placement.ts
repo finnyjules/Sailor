@@ -37,8 +37,9 @@ export function resolvePlacement(state: EditState, fromTrackId: string, spans: S
 
 const KIND_LABEL: Record<Track['kind'], string> = { video: 'Video', audio: 'Audio', captions: 'Captions' }
 
-/** Move `clipIds` to the placement. Transitions touching a moved clip are
- *  dropped — a transition only makes sense between neighbours on one track. */
+/** Move `clipIds` to the placement. A transition joins two neighbours on one
+ *  track: if both went together it goes with them; if only one went, it no
+ *  longer joins anything and is dropped. */
 export function relocateClips(state: EditState, clipIds: ReadonlySet<string>, placement: Placement, newTrackId: string): boolean {
   const existing = placement.type === 'track' ? state.tracks.find(t => t.id === placement.trackId) : undefined
   if (placement.type === 'track' && !existing) return false
@@ -59,7 +60,14 @@ export function relocateClips(state: EditState, clipIds: ReadonlySet<string>, pl
   }
   target.clips.push(...moved)
   const ids = new Set(moved.map(c => c.id))
-  state.transitions = state.transitions.filter(t => !ids.has(t.from_clip_id) && !ids.has(t.to_clip_id))
+  // A transition joins two neighbours on one track. If both went together it
+  // goes with them; if only one went, it no longer joins anything.
+  state.transitions = state.transitions.filter(t => {
+    const from = ids.has(t.from_clip_id)
+    const to = ids.has(t.to_clip_id)
+    if (from && to) { t.track_id = target.id; return true }
+    return !from && !to
+  })
   return true
 }
 

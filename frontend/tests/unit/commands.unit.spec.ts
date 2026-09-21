@@ -36,6 +36,25 @@ describe('applyCommand', () => {
     expect(JSON.stringify(s)).toBe(before)
   })
 
+  it('move_clip to ANOTHER track drops the transitions that reference it', () => {
+    applyCommand(s, { type: 'add_clip', track_id: videoTrackId, clip: img('a', 0, 30) })
+    applyCommand(s, { type: 'add_clip', track_id: videoTrackId, clip: img('b', 30, 30) })
+    applyCommand(s, { type: 'add_transition', transition: tr('t1', videoTrackId, 'a', 'b') })
+    applyCommand(s, { type: 'add_track', track_id: 'v2', kind: 'video', name: 'Video 2' })
+    expect(applyCommand(s, { type: 'move_clip', clip_id: 'a', to_track_id: 'v2', start_frame: 0 })).toBe(true)
+    expect(s.transitions).toEqual([])
+  })
+
+  it('move_clip WITHIN its track keeps the transitions', () => {
+    applyCommand(s, { type: 'add_clip', track_id: videoTrackId, clip: img('a', 0, 30) })
+    applyCommand(s, { type: 'add_clip', track_id: videoTrackId, clip: img('b', 30, 30) })
+    applyCommand(s, { type: 'add_transition', transition: tr('t1', videoTrackId, 'a', 'b') })
+    expect(applyCommand(s, { type: 'move_clip', clip_id: 'a', to_track_id: videoTrackId, start_frame: 5 })).toBe(true)
+    expect(s.transitions).toHaveLength(1)
+    expect(s.transitions[0]!.from_clip_id).toBe('a')
+    expect(s.transitions[0]!.to_clip_id).toBe('b')
+  })
+
   it('split_clip splits length/in_frame and rebases keyframes onto the halves', () => {
     const clip = img('a', 10, 20)
     clip.keyframes = [

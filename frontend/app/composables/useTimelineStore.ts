@@ -4,6 +4,7 @@ import type { EditState, Track, Clip, Asset, Keyframe, MotionClip, SpaceTypeClip
 import { createDefaultEditState, computeTotalFrames, migrateEditState } from '~~/shared/timeline/types'
 import type { ClipTransform } from '~~/shared/timeline/interpolate'
 import { applyCommand, type TimelineCommand } from '~~/shared/timeline/commands'
+import { settleOverlaps } from '~~/shared/timeline/placement'
 import { createMotionClip } from '~/composables/timelineMotionClip'
 import { createSpaceTypeClip, spaceTypeStateKey } from '~/composables/timelineSpaceTypeClip'
 import type { SpaceTypeState } from '~/lib/spacetype/state'
@@ -196,6 +197,21 @@ export function useTimelineStore() {
     return gestureBase === null ? null : JSON.parse(gestureBase) as EditState
   }
 
+  /** Run several store edits as ONE undo step. Safe inside an open gesture
+   *  (it then just joins that gesture instead of closing it early). */
+  function asOneStep(fn: () => void) {
+    const own = gestureBase === null
+    if (own) beginGesture()
+    try { fn() } finally { if (own) endGesture() }
+  }
+
+  /** New or grown clips must not sit on top of others: hop them to a free track. */
+  function settle(ids: Iterable<string>) {
+    const set = new Set(ids)
+    if (!set.size) return
+    mutate(s => { settleOverlaps(s, set, () => crypto.randomUUID()) })
+  }
+
   function undo() {
     const prev = undoStack.value.pop()
     if (!prev) return
@@ -227,7 +243,10 @@ export function useTimelineStore() {
   }
 
   function addClip(trackId: string, clip: Clip) {
-    dispatch({ type: 'add_clip', track_id: trackId, clip })
+    asOneStep(() => {
+      dispatch({ type: 'add_clip', track_id: trackId, clip })
+      settle([clip.id])
+    })
   }
 
   function addMotionClip(trackId: string, startFrame: number, length = 90) {
@@ -350,6 +369,7 @@ export function useTimelineStore() {
         track.clips.push(clone)
         newIds.push(clone.id)
       }
+      settleOverlaps(s, new Set(newIds), () => crypto.randomUUID())
     })
     return newIds
   }
@@ -371,6 +391,7 @@ export function useTimelineStore() {
           newIds.push(clone.id)
         }
       }
+      settleOverlaps(s, new Set(newIds), () => crypto.randomUUID())
     })
     return newIds
   }
@@ -498,6 +519,7 @@ export function useTimelineStore() {
     beginGesture,
     endGesture,
     gestureBaseState,
+    asOneStep,
     undo,
     redo,
     canUndo: computed(() => undoStack.value.length > 0),

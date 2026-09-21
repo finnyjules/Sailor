@@ -23,6 +23,7 @@ import { resolveClipSource } from '~~/shared/timeline/resolveClipSource'
 import { snapGroupDelta, computeGroupResize, neighbourGaps, type Span, type ResizeMember } from '~~/shared/timeline/groupEdit'
 import { settleOverlaps } from '~~/shared/timeline/placement'
 import { computeRippleEdits, applyRippleEdits } from '~~/shared/timeline/ripple'
+import { deleteClipsFrom, restoreLostTransitions } from '~~/shared/timeline/edits'
 import { collectProjectMediaFilenames } from '~/lib/timeline/projectMedia'
 import type { SpaceTypeState } from '~/lib/spacetype/state'
 import MotionClipInspector from '~/components/vue-canvas/timeline/MotionClipInspector.vue'
@@ -706,6 +707,7 @@ function onClipPointerDown(clipId: string, trackId: string, mode: 'move' | 'resi
   const clip = findClip(clipId)
   if (!clip) return
   store.beginGesture()
+  trimHud.value = null
   drag.value = {
     clipId, trackId, mode,
     startMouseX: e.clientX,
@@ -859,6 +861,7 @@ function onPointerMove(e: PointerEvent) {
   } else if (drag.value.mode === 'resize-right' || drag.value.mode === 'resize-left') {
     const edge = drag.value.mode === 'resize-right' ? 'right' : 'left'
     const members = dragResizeMembers ?? []
+    if (!members.length) return
     // Snap the edge under the mouse, then let the group clamp it ONCE.
     const startEdge = edge === 'right' ? drag.value.startStart + drag.value.startLength : drag.value.startStart
     const snappedEdge = snapFrame(startEdge + dframes, draggingIds())
@@ -915,6 +918,15 @@ function onPointerUp() {
   if (drag.value?.mode === 'move') {
     const d = drag.value
     const clip = findClip(d.clipId)
+    // The clip crosses tracks live while dragging, and leaving a track drops its
+    // transitions. If it came back to where they belong, put them back.
+    const base = store.gestureBaseState()
+    if (clip && base && d.trackId === d.originTrackId) {
+      const lostSome = base.transitions.some(t =>
+        (t.from_clip_id === d.clipId || t.to_clip_id === d.clipId)
+        && !store.state.value.transitions.some(x => x.id === t.id))
+      if (lostSome) store.mutate(s => { restoreLostTransitions(s, base, d.clipId) })
+    }
     if (clip && (clip.start_frame !== d.startStart || d.trackId !== d.originTrackId)) {
       const moved = draggingIds()
       store.mutate(s => { settleOverlaps(s, moved, () => crypto.randomUUID()) })
@@ -1047,6 +1059,8 @@ async function onTrackDrop(trackId: string, e: DragEvent) {
   dragGhostFrame.value = null
   dragTargetTrackId.value = null
   snapGuideFrame.value = null
+  // A locked track takes nothing.
+  if (store.state.value.tracks.find(t => t.id === trackId)?.locked) return
 
   // Resolve to an asset record (importing if needed).
   let resolvedAsset: any = null
@@ -1128,7 +1142,7 @@ const renderProgress = ref<{ current: number; total: number } | null>(null)
  *  before the server renders, and that bake is slow enough to look like a hang
  *  — so the button must say which phase the bar is measuring, or it fills to
  *  100% twice with no explanation. */
-const renderPhase = ref<'baking' | 'rendering' | null>(null)
+const renderPhase = ref<'baking' | 'mixing' | 'rendering' | null>(null)
 
 async function renderViaFFmpeg() {
   if (isRendering.value) return
@@ -1196,8 +1210,14 @@ async function renderViaFFmpeg() {
   // the server that. If it fails the export still runs, with the old
   // first-clip-only sound, and says so.
   let mixFile: string | null = null
+  renderPhase.value = 'mixing'
+  renderProgress.value = null
   try {
-    mixFile = await ensureTimelineMix(es, clip => resolveAudioUrl(clip), store.boundNodeId())
+    const mix = await ensureTimelineMix(es, clip => resolveAudioUrl(clip), store.boundNodeId())
+    mixFile = mix.file
+    if (mix.skipped && !mix.file) renderNotice.value = 'None of the audio clips could be loaded, so this export only has the first audio clip.'
+    else if (mix.skipped === 1) renderNotice.value = 'One audio clip could not be loaded, so it was left out of this export.'
+    else if (mix.skipped > 1) renderNotice.value = `${mix.skipped} audio clips could not be loaded, so they were left out of this export.`
   } catch (err: any) {
     console.warn('[timeline] audio mix failed', err)
     renderNotice.value = `Audio could not be mixed (${err?.message ?? err}), so this export only has the first audio clip.`
@@ -1308,12 +1328,7 @@ function handleKeydown(e: KeyboardEvent) {
   }
   if (e.key === 'Delete' || e.key === 'Backspace') {
     e.preventDefault()
-    if (selectedClipIds.value.size <= 1 && store.selectedClipId.value && (e.metaKey || e.ctrlKey)) {
-      store.rippleDelete(store.selectedClipId.value)
-      clearSelection()
-    } else {
-      deleteSelection()
-    }
+    deleteSelection(e.metaKey || e.ctrlKey)
     return
   }
   if (e.key === 'Home') { e.preventDefault(); store.seek(0); return }
@@ -1490,28 +1505,37 @@ function setClipSpeed(clip: Clip, rawSpeed: number) {
   const next = Math.max(0.1, Math.min(5, rawSpeed || 1))
   const prev = clip.speed ?? 1
   if (next === prev) return
-  store.updateClip(clip.id, {
-    speed: next,
-    length: Math.max(1, Math.round(clip.length * (prev / next))),
+  // A speed change moves the clip's END. With ripple on, the later clips follow
+  // it; with ripple off, a clip that grew into its neighbour hops to a free track.
+  store.asOneStep(() => {
+    const before: EditState = JSON.parse(JSON.stringify(store.state.value))
+    store.updateClip(clip.id, {
+      speed: next,
+      length: Math.max(1, Math.round(clip.length * (prev / next))),
+    })
+    store.mutate(s => {
+      if (rippleEnabled.value) applyRippleEdits(s, computeRippleEdits(before, s))
+      else settleOverlaps(s, new Set([clip.id]), () => crypto.randomUUID())
+    })
   })
 }
 
-// Delete everything selected as ONE undo step. With ripple on, later clips
-// close the gaps.
-function deleteSelection() {
+// Delete clips as ONE undo step. `ripple` closes the gaps they leave.
+function deleteClips(ids: ReadonlySet<string>, ripple: boolean) {
+  // Only when something can really go (locked tracks are never touched):
+  // otherwise no edit and no undo step.
+  const deletable = store.state.value.tracks.some(t => !t.locked && t.clips.some(c => ids.has(c.id)))
+  if (deletable) store.mutate(s => { deleteClipsFrom(s, ids, ripple) })
+  if (store.selectedClipId.value && ids.has(store.selectedClipId.value)) store.selectedClipId.value = null
+  clearSelection()
+}
+
+// Delete follows the Ripple switch; Cmd+Delete always closes the gap.
+function deleteSelection(forceRipple = false) {
   const ids = selectedClipIds.value.size > 1
     ? new Set(selectedClipIds.value)
     : new Set(store.selectedClipId.value ? [store.selectedClipId.value] : [])
-  // Nothing of the selection is on the timeline any more: no edit, no undo step.
-  if (!store.state.value.tracks.some(t => t.clips.some(c => ids.has(c.id)))) { clearSelection(); return }
-  store.mutate(s => {
-    const before: EditState = JSON.parse(JSON.stringify(s))
-    for (const track of s.tracks) track.clips = track.clips.filter(c => !ids.has(c.id))
-    s.transitions = s.transitions.filter(t => !ids.has(t.from_clip_id) && !ids.has(t.to_clip_id))
-    if (rippleEnabled.value) applyRippleEdits(s, computeRippleEdits(before, s))
-  })
-  if (store.selectedClipId.value && ids.has(store.selectedClipId.value)) store.selectedClipId.value = null
-  clearSelection()
+  deleteClips(ids, forceRipple || rippleEnabled.value)
 }
 
 function pasteAndSelect(frame: number) {
@@ -1539,8 +1563,8 @@ function clipMenuItems(clipId: string): (MenuItem | 'sep')[] {
     { label: 'Copy', shortcut: '⌘C', action: () => store.copyClips(ids) },
     { label: 'Paste', shortcut: '⌘V', disabled: !store.hasClipboard.value, action: () => pasteAndSelect(store.playheadFrame.value) },
     'sep',
-    { label: 'Delete', shortcut: '⌫', danger: true, action: () => { const del = new Set(ids); store.mutate(s => { for (const t of s.tracks) t.clips = t.clips.filter(c => !del.has(c.id)) }); clearSelection() } },
-    { label: 'Ripple delete', shortcut: '⌘⌫', danger: true, action: () => { store.rippleDelete(clipId); clearSelection() } },
+    { label: 'Delete', shortcut: '⌫', danger: true, action: () => deleteClips(new Set(ids), rippleEnabled.value) },
+    { label: 'Ripple delete', shortcut: '⌘⌫', danger: true, action: () => deleteClips(new Set(selectedClipIds.value.has(clipId) ? selectedClipIds.value : [clipId]), true) },
   ]
 }
 
@@ -1908,6 +1932,7 @@ const assetTab = ref<'ports' | 'files' | 'library'>(portBindings.value.length > 
                 isRendering
                   ? (renderPhase === 'baking'
                       ? (renderProgress ? `Baking ${Math.round(renderProgress.current / Math.max(1, renderProgress.total) * 100)}%` : 'Baking…')
+                      : renderPhase === 'mixing' ? 'Mixing sound…'
                       : (renderProgress ? `${Math.round(renderProgress.current / Math.max(1, renderProgress.total) * 100)}%` : 'Rendering…'))
                   : (renderResult ? 'Re-render' : 'Export')
               }}

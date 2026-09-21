@@ -3,6 +3,7 @@ import { useTimelineStore } from '../../app/composables/useTimelineStore'
 import { computeGroupResize, neighbourGaps, snapGroupDelta, type ResizeMember } from '../../shared/timeline/groupEdit'
 import { settleOverlaps } from '../../shared/timeline/placement'
 import { computeRippleEdits, applyRippleEdits } from '../../shared/timeline/ripple'
+import { deleteClipsFrom } from '../../shared/timeline/edits'
 import type { EditState, ImageClip } from '../../shared/timeline/types'
 
 // The editor's pointer handlers are thin glue over these modules. These specs
@@ -115,14 +116,9 @@ describe('timeline editing flows', () => {
     expect(layout().c).toBe('Video 1@300+50')
   })
 
-  // deleteSelection's mutate body.
+  // deleteClips in the editor: one mutate around the shared deleteClipsFrom.
   function deleteIds(ids: Set<string>, ripple: boolean) {
-    store.mutate(s => {
-      const before: EditState = JSON.parse(JSON.stringify(s))
-      for (const t of s.tracks) t.clips = t.clips.filter(c => !ids.has(c.id))
-      s.transitions = s.transitions.filter(t => !ids.has(t.from_clip_id) && !ids.has(t.to_clip_id))
-      if (ripple) applyRippleEdits(s, computeRippleEdits(before, s))
-    })
+    store.mutate(s => { deleteClipsFrom(s, ids, ripple) })
   }
 
   it('delete with ripple closes every gap in one undo step; transitions on deleted clips go too', () => {
@@ -140,5 +136,44 @@ describe('timeline editing flows', () => {
   it('delete without ripple leaves the gap', () => {
     deleteIds(new Set(['b']), false)
     expect(layout()).toEqual({ a: 'Video 1@0+50', c: 'Video 1@100+50' })
+  })
+
+  it('duplicating a clip that has a neighbour right after it hops the copy to another track — one undo step', () => {
+    const [copyId] = store.duplicateClips(['a'])
+    expect(layout()[copyId!]).toMatch(/^Video \d+@50\+50$/)
+    expect(layout()[copyId!]).not.toBe('Video 1@50+50')
+    expect(layout().b).toBe('Video 1@50+50')                 // the neighbour did not move
+    store.undo()
+    expect(Object.keys(layout()).sort()).toEqual(['a', 'b', 'c'])
+    expect(store.state.value.tracks.every(t => t.clips.every(c => c.id !== copyId))).toBe(true)
+  })
+
+  it('duplicating the LAST clip stays on its track (there is room)', () => {
+    const [copyId] = store.duplicateClips(['c'])
+    expect(layout()[copyId!]).toBe('Video 1@150+50')
+  })
+
+  it('pasting onto occupied frames hops the pasted clips; pasting into free space does not', () => {
+    store.copyClips(['a'])
+    const [onTop] = store.pasteClips(60)
+    expect(layout()[onTop!]).not.toMatch(/^Video 1@/)
+    const [free] = store.pasteClips(400)
+    expect(layout()[free!]).toBe('Video 1@400+50')
+  })
+
+  it('adding a clip on top of another hops it, as ONE undo step', () => {
+    const before = JSON.stringify(layout())
+    store.addClip(v1().id, img('n', 20, 30))
+    expect(layout().n).not.toMatch(/^Video 1@/)
+    store.undo()
+    expect(JSON.stringify(layout())).toBe(before)
+    expect(store.state.value.tracks.some(t => t.name !== 'Video 1' && t.kind === 'video' && t.clips.length > 0)).toBe(false)
+  })
+
+  it('asOneStep inside an open gesture does not close that gesture', () => {
+    store.beginGesture()
+    store.asOneStep(() => { store.updateClip('a', { length: 10 }) })
+    expect(store.gestureBaseState()).not.toBeNull()
+    store.endGesture()
   })
 })
