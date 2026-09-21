@@ -60,6 +60,25 @@ Scratch canvases are pooled, not created per frame. The work happens only while 
 
 **5. Built for the next transitions.** The draw step does not know about dither. It takes "a pattern source" — something that can paint the hidden side of a mask for this frame. The three dither styles are the first three sources.
 
+## Addendum (2026-09-20, after Julien tried it): the dither must TRANSFORM the element
+
+Julien, on seeing the three styles: "it's like a mask instead of a transform. I was expecting the dither to transform the element it's transitioning, not just masking it." The three styles above cut holes in an element that stays perfectly sharp — on white text that reads as on/off. He keeps them, but **mainly wants the transform**. It becomes a fourth Style, **Pixels**, listed first and the default for a new Dither in / Dither out bar.
+
+**What the user sees.** The element is rebuilt out of coarse dithered blocks that refine until it is sharp. Its edges are blocky, its colours break into dithered tones, and the blocks halve in clean steps so every refinement subdivides the last. Dither out is the same in reverse. No new dials: for Pixels, **Cell size** reads **Block size** — the size of the blocks the element starts as (default 24, three times the mask default, so the blocks are clearly visible); Drift speed and Angle make the dither tones shimmer.
+
+**How.** While the bar plays, the layer is drawn on its own to a side canvas at full resolution, exactly as it is drawn today (so its own effects, fills, text and letter moves are all intact). That picture is sampled down to the block grid — each block gets the element's average colour and how much of the block it covers — and each block is then decided by pure maths:
+
+- **Block size** halves in steps from the dial's size down to 2 thousandths of the frame's width (24 → 12 → 6 → 3 → 1.5), the steps spread evenly over the bar.
+- **Colour** is cut to a few levels per channel with the same 8×8 ordered dither — 2 levels at the start, 16 by the end (where it reads as continuous).
+- **A block is on** when its coverage, scaled up over the first 60% of the bar, beats its dither threshold — so the element condenses out of nothing, and its edges stay dithered by coverage.
+- Drift slides the threshold table in whole blocks along the Angle.
+
+The blocks are stamped back through the frame's transform with smoothing off — aligned to the frame, square under rotation, a fraction of the frame's width so preview and export agree — using the layer's own opacity and blend mode AT THE STAMP (the side canvas is drawn at full opacity, so a half-transparent layer stays evenly half-transparent instead of turning into a 50% dither). At amount 1 there is no note and the real layer is drawn: a finished entrance still costs nothing.
+
+**The price, accepted:** while a Pixels transition plays, effects that read what is BEHIND the layer (background blur, glass, backdrop shaders, the backdrop luminance mask) pause for that layer, and a layer still on the old pre-timeline animation engine ignores that animation for the duration. Both return the instant the bar ends. The three mask styles keep those effects live, which is one reason to keep them.
+
+**Not parity-exact at the last step only:** blocks are never drawn finer than one device pixel, so on a small preview the final, nearly-sharp step can be slightly coarser than in a large export.
+
 ## Planned next (not in this build)
 
 - **Shader reveal** — a fourth Style, **Shader**, with a picker: any Shader Studio effect that generates a moving field (noise, clouds, heatmap, slice patterns…) is rendered through the existing shader runtime, and its brightness is compared with the amount using the luminance-mask maths that already exists. The layer condenses out of that shader's own motion. It is one more pattern source plus the picker; GPU cost applies only while the bar plays.
@@ -70,9 +89,9 @@ Scratch canvases are pooled, not created per frame. The work happens only while 
 
 | Dial | Range | Default | Notes |
 |---|---|---|---|
-| Style | Dissolve · Wipe · Dots | Dissolve | |
+| Style | Pixels · Dissolve · Wipe · Dots | Pixels | see the addendum; the three others are the mask styles |
 | Direction | In · Out | per gallery tile | |
-| Cell size | 1–40 | 8 | thousandths of the frame's width (8 ≈ 10px on a 1280 frame) |
+| Cell size | 1–40 | 8 (24 for Pixels, where it reads Block size) | thousandths of the frame's width (8 ≈ 10px on a 1280 frame) |
 | Drift speed | 0–30 | 6 | cells per second |
 | Angle | 0–360° | 0 | 0 = towards the right, 90 = downwards |
 | Edge softness | 0–1 | 0.35 | share of the travel the dithered band covers; shown for Wipe only |

@@ -1044,3 +1044,307 @@ Subject: `feat(compositor): Dither in / Dither out in the gallery, with Style, C
 - [ ] Before an In bar the layer is absent; after an Out bar it is absent; after an In bar the canvas call log has no reveal ops.
 - [ ] Inspector: six rows, Edge softness only for Wipe, one undo step per drag, Open into keyframes absent; timeline row reads "Reveal"; gallery tile animates.
 - [ ] Final whole-branch review on the most capable model over `review-package <base> HEAD`; ONE fix subagent for its findings; update the ledger, the spec status line, and memory.
+
+---
+
+# Part 2 — the Pixels style: the dither TRANSFORMS the element
+
+Spec: the **Addendum** in `docs/superpowers/specs/2026-09-20-dither-transition-design.md`. Part 1 (Tasks 1–5) is built and committed; Part 2 adds a fourth style, `pixels`, listed first and the default. Same Global Constraints (`.superpowers/sdd/dither-constraints.md`), plus:
+
+- Stored `style` is now `'pixels' | 'dissolve' | 'wipe' | 'dots'`, default `'pixels'`. Stored `cell` default depends on the style: 24 for `pixels`, 8 for the others (range 1–40 for all).
+- Pixels constants (exact): finest block `PIXEL_END = 0.002` of the frame's width; colour levels per channel run 2 → 16; a block's coverage gain reaches 1 at amount `0.6`.
+- ONLY Task 7 touches `frontend/app/composables/useCompositorLayers.ts`, with exactly the two hunks it names.
+- The three mask styles must draw exactly as they do now (their tests stay green untouched, except the two DEFAULT assertions Task 6 names).
+
+### Task 6: Pixels maths and the new defaults
+
+**Files:**
+- Modify: `frontend/app/lib/motionx/reveal/params.ts`, `frontend/app/lib/motionx/reveal/index.ts`
+- Create: `frontend/app/lib/motionx/reveal/pixels.ts`
+- Test: create `frontend/tests/unit/motionx/reveal-pixels.unit.spec.ts`; update the defaults assertions in `frontend/tests/unit/motionx/reveal-dither.unit.spec.ts`
+
+**Interfaces:**
+- Consumes: `bayer8`, `driftCells`, `MotionReveal` (Part 1).
+- Produces: `RevealStyle` now includes `'pixels'`; `REVEAL_STYLES = ['pixels', 'dissolve', 'wipe', 'dots']`; `revealCellDefault(style: RevealStyle): number` (stored units: 24 | 8); `PIXEL_END`, `pixelStages(cell): number`, `pixelBlock(amount, cell): number` (fraction of frame width), `pixelLevels(amount): number`, `pixelGain(amount): number`, `quantise(v: number, levels: number, th: number): number`, `buildPixelCells(r: MotionReveal, src: Uint8ClampedArray, range: { c0: number; r0: number; cols: number; rows: number }): Uint8ClampedArray<ArrayBuffer>`.
+
+- [ ] **Step 1: Failing tests**
+
+```ts
+// frontend/tests/unit/motionx/reveal-pixels.unit.spec.ts
+import { describe, it, expect } from 'vitest'
+import {
+  revealParams, revealCellDefault, REVEAL_STYLES, PIXEL_END, pixelStages, pixelBlock, pixelLevels, pixelGain,
+  quantise, buildPixelCells, bayer8, type MotionReveal,
+} from '~/lib/motionx/reveal'
+
+const R = (over: Partial<MotionReveal> = {}): MotionReveal => ({ ...revealParams({}), amount: 0.5, elapsed: 0, ...over })
+const solid = (cols: number, rows: number, rgba: [number, number, number, number]) => {
+  const px = new Uint8ClampedArray(cols * rows * 4)
+  for (let i = 0; i < cols * rows; i++) px.set(rgba, i * 4)
+  return px
+}
+const RANGE = { c0: 0, r0: 0, cols: 16, rows: 16 }
+const onCount = (out: Uint8ClampedArray) => { let n = 0; for (let i = 3; i < out.length; i += 4) if (out[i] === 255) n++; return n }
+
+describe('the new defaults', () => {
+  it('Pixels is listed first and is the default style; its blocks start three times bigger than a mask cell', () => {
+    expect(REVEAL_STYLES).toEqual(['pixels', 'dissolve', 'wipe', 'dots'])
+    expect(revealParams({}).style).toBe('pixels')
+    expect(revealParams({}).cell).toBeCloseTo(0.024, 9)
+    expect(revealParams({ style: 'dissolve' }).cell).toBeCloseTo(0.008, 9)
+    expect(revealParams({ style: 'dots' }).cell).toBeCloseTo(0.008, 9)
+    expect(revealParams({ style: 'pixels', cell: 10 }).cell).toBeCloseTo(0.01, 9)   // an explicit size always wins
+    expect([revealCellDefault('pixels'), revealCellDefault('wipe')]).toEqual([24, 8])
+    expect(revealParams({ style: 'plaid' }).style).toBe('pixels')
+  })
+})
+
+describe('block size', () => {
+  it('halves in even stages from the dial down to the finest block, never below it', () => {
+    const cell = 0.024
+    expect(pixelStages(cell)).toBe(4)                               // 24 → 12 → 6 → 3 → 1.5 ‰
+    const seen: number[] = []
+    for (let a = 0; a < 1; a += 0.01) { const b = pixelBlock(a, cell); if (seen[seen.length - 1] !== b) seen.push(b) }
+    expect(seen.map((v) => +(v * 1000).toFixed(3))).toEqual([24, 12, 6, 3, 1.5])
+    for (let a = 0; a <= 1; a += 0.05) expect(pixelBlock(a, cell)).toBeGreaterThanOrEqual(PIXEL_END * 0.75 - 1e-12)
+    expect(pixelBlock(0.19, cell)).toBe(cell); expect(pixelBlock(0.21, cell)).toBe(cell / 2)   // 5 even stages
+  })
+  it('a dial already at or below the finest block has one stage; bad amounts clamp', () => {
+    expect(pixelStages(0.002)).toBe(0); expect(pixelBlock(0.7, 0.002)).toBe(0.002)
+    expect(pixelStages(0.001)).toBe(0)
+    expect(pixelBlock(-1, 0.024)).toBe(0.024); expect(pixelBlock(5, 0.024)).toBeCloseTo(0.0015, 9)
+    expect(pixelBlock(NaN, 0.024)).toBe(0.024)
+  })
+})
+
+describe('colour levels, gain, quantise', () => {
+  it('levels run 2 → 16 and never go down; gain reaches 1 at amount 0.6', () => {
+    expect(pixelLevels(0)).toBe(2); expect(pixelLevels(1)).toBe(16)
+    let prev = 0
+    for (let a = 0; a <= 1.0001; a += 0.02) { const l = pixelLevels(a); expect(l).toBeGreaterThanOrEqual(prev); prev = l }
+    expect(pixelGain(0)).toBe(0); expect(pixelGain(0.3)).toBeCloseTo(0.5, 9); expect(pixelGain(0.6)).toBe(1); expect(pixelGain(0.9)).toBe(1)
+    expect(pixelLevels(NaN)).toBe(2); expect(pixelGain(NaN)).toBe(0)
+  })
+  it('quantise: 2 levels is 1-bit by threshold; the ends are fixed points; the average over all thresholds is the input', () => {
+    expect(quantise(100, 2, 0.2)).toBe(255); expect(quantise(100, 2, 0.6)).toBe(0)
+    for (const L of [2, 3, 7, 16]) for (const th of [0.01, 0.5, 0.99]) { expect(quantise(0, L, th)).toBe(0); expect(quantise(255, L, th)).toBe(255) }
+    let sum = 0
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) sum += quantise(100, 2, bayer8(x, y))
+    expect(sum / 64).toBeGreaterThan(90); expect(sum / 64).toBeLessThan(110)
+  })
+})
+
+describe('buildPixelCells', () => {
+  it('nothing at amount 0; every covered block on, in full colour order, from gain 1 upward', () => {
+    expect(onCount(buildPixelCells(R({ amount: 0 }), solid(16, 16, [255, 0, 0, 255]), RANGE))).toBe(0)
+    expect(onCount(buildPixelCells(R({ amount: 0.6 }), solid(16, 16, [255, 0, 0, 255]), RANGE))).toBe(256)
+    expect(onCount(buildPixelCells(R({ amount: 0.9 }), solid(16, 16, [9, 9, 9, 0]), RANGE))).toBe(0)     // empty stays empty
+  })
+  it('a block is ON when coverage × gain beats its threshold — so half coverage at full gain lights about half the blocks', () => {
+    const n = onCount(buildPixelCells(R({ amount: 0.8 }), solid(16, 16, [255, 255, 255, 128]), RANGE))
+    expect(n).toBeGreaterThan(256 * 0.45); expect(n).toBeLessThan(256 * 0.56)
+  })
+  it('an ON block is fully opaque and carries the quantised colour; an OFF block is fully transparent', () => {
+    const out = buildPixelCells(R({ amount: 0.7 }), solid(16, 16, [200, 100, 30, 255]), RANGE)
+    const L = pixelLevels(0.7), step = 255 / (L - 1)
+    for (let i = 0; i < out.length; i += 4) {
+      expect(out[i + 3] === 0 || out[i + 3] === 255).toBe(true)
+      if (out[i + 3] === 255) for (const ch of [0, 1, 2]) expect(Math.abs(out[i + ch]! / step - Math.round(out[i + ch]! / step))).toBeLessThan(0.02)
+    }
+  })
+  it('more of the element is on as the amount rises (no drift), and never less', () => {
+    const src = solid(16, 16, [255, 255, 255, 200])
+    let prev = -1
+    for (let a = 0; a <= 1.0001; a += 0.05) { const n = onCount(buildPixelCells(R({ amount: a, drift: 0 }), src, RANGE)); expect(n).toBeGreaterThanOrEqual(prev); prev = n }
+  })
+  it('drift slides the thresholds in whole blocks; drift 0 is still; the range origin addresses the threshold table', () => {
+    const src = solid(16, 16, [255, 255, 255, 128])
+    const a = buildPixelCells(R({ amount: 0.8, elapsed: 0 }), src, RANGE)
+    const b = buildPixelCells(R({ amount: 0.8, elapsed: 0.5 }), src, RANGE)      // 6 cells/s × 0.5 s = 3 blocks
+    expect(a).not.toEqual(b)
+    for (let x = 3; x < 16; x++) expect(b[(0 * 16 + x) * 4 + 3]).toBe(a[(0 * 16 + (x - 3)) * 4 + 3])
+    expect(buildPixelCells(R({ amount: 0.8, elapsed: 9, drift: 0 }), src, RANGE)).toEqual(a)
+    const shifted = buildPixelCells(R({ amount: 0.8 }), src, { c0: 3, r0: 0, cols: 13, rows: 16 })
+    for (let x = 0; x < 13; x++) expect(shifted[x * 4 + 3]).toBe(a[(x + 3) * 4 + 3])
+  })
+  it('identical inputs give identical bytes; a short source never throws', () => {
+    const src = solid(16, 16, [10, 200, 90, 180])
+    expect(buildPixelCells(R({ elapsed: 1.23 }), src, RANGE)).toEqual(buildPixelCells(R({ elapsed: 1.23 }), src, RANGE))
+    expect(() => buildPixelCells(R(), new Uint8ClampedArray(8), RANGE)).not.toThrow()
+  })
+})
+```
+
+In `reveal-dither.unit.spec.ts` the `revealParams` "defaults" case asserts the OLD default style and cell. The default changed by product decision (spec addendum), so update THAT assertion to `{ style: 'pixels', out: false, cell: 0.024, drift: 6, angle: 0, softness: 0.35 }`, and make that file's `R()` helper pin the mask style it was written for: `({ ...revealParams({ style: 'dissolve' }), amount: 0.5, elapsed: 0, ...over })`. Change nothing else there; every other assertion must pass as written.
+
+- [ ] **Step 2:** `cd frontend && npm run test:unit -- reveal-pixels reveal-dither` → FAIL (no `pixels` exports; old defaults).
+
+- [ ] **Step 3: `params.ts`**
+
+```ts
+export type RevealStyle = 'pixels' | 'dissolve' | 'wipe' | 'dots'
+/** `pixels` TRANSFORMS the element (it is rebuilt from dithered blocks); the other three MASK it. */
+export const REVEAL_STYLES: readonly RevealStyle[] = ['pixels', 'dissolve', 'wipe', 'dots']
+export const REVEAL_DEFAULTS = { style: 'pixels' as RevealStyle, cell: 8, drift: 6, angle: 0, softness: 0.35 }
+/** The Cell size default, in stored units. Pixels' blocks must read as blocks, so they start
+ *  three times a mask cell. */
+export function revealCellDefault(style: RevealStyle): number { return style === 'pixels' ? 24 : REVEAL_DEFAULTS.cell }
+```
+and in `revealParams` read the cell as `num(p.cell, revealCellDefault(style), REVEAL_RANGES.cell) / 1000`.
+
+- [ ] **Step 4: `pixels.ts`** (and add `export * from './pixels'` to the barrel)
+
+```ts
+// frontend/app/lib/motionx/reveal/pixels.ts
+// The PIXELS style: the element is rebuilt out of dithered blocks that refine until it is
+// sharp. The painter hands in the element ALREADY sampled down to the block grid (one RGBA
+// pixel per block: average colour, alpha = how much of the block the element covers); this
+// file decides, per block, whether it is on and what colour it is. Pure — preview, bake and
+// export agree.
+import { bayer8, driftCells } from './dither'
+import type { MotionReveal } from './params'
+
+/** The finest block, as a fraction of the frame's width. Below this a block is a pixel or two
+ *  and the next thing drawn is the real layer. */
+export const PIXEL_END = 0.002
+const clamp01 = (v: number) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0)
+
+/** How many times the dial's block size halves before it reaches the finest block. */
+export function pixelStages(cell: number): number {
+  return cell > PIXEL_END ? Math.max(0, Math.ceil(Math.log2(cell / PIXEL_END) - 1e-9)) : 0
+}
+/** The block size at `amount`: the dial's size, halved once per stage, the stages spread
+ *  evenly over the bar — so every refinement subdivides the blocks before it. */
+export function pixelBlock(amount: number, cell: number): number {
+  const stages = pixelStages(cell)
+  return cell / 2 ** Math.min(stages, Math.floor(clamp01(amount) * (stages + 1)))
+}
+/** Colour levels per channel: 1-bit at the start, 16 (reads as continuous) by the end. */
+export function pixelLevels(amount: number): number { return 2 + Math.floor(clamp01(amount) ** 2 * 14) }
+/** Coverage is scaled up over the first 60% of the bar, so the element condenses out of nothing. */
+export function pixelGain(amount: number): number { return Math.min(1, clamp01(amount) / 0.6) }
+/** Ordered-dither one 0–255 channel to `levels` levels against threshold `th` ∈ (0, 1). */
+export function quantise(v: number, levels: number, th: number): number {
+  const f = (Math.min(255, Math.max(0, v)) / 255) * (levels - 1)
+  const lo = Math.floor(f)
+  return Math.round(((f - lo > th ? lo + 1 : lo) / (levels - 1)) * 255)
+}
+
+/** `src`: one un-premultiplied RGBA pixel per block of `range`. Returns the same shape: alpha
+ *  255 + the quantised colour where the block is ON, all zero where it is off. */
+export function buildPixelCells(
+  r: MotionReveal, src: Uint8ClampedArray, range: { c0: number; r0: number; cols: number; rows: number },
+): Uint8ClampedArray<ArrayBuffer> {
+  const out = new Uint8ClampedArray(range.cols * range.rows * 4)
+  const gain = pixelGain(r.amount)
+  if (!(gain > 0)) return out
+  const levels = pixelLevels(r.amount)
+  const { dx, dy } = driftCells(r)
+  for (let j = 0; j < range.rows; j++) for (let i = 0; i < range.cols; i++) {
+    const k = (j * range.cols + i) * 4
+    const cover = (src[k + 3] ?? 0) / 255
+    if (!(cover > 0)) continue
+    const th = bayer8(range.c0 + i - dx, range.r0 + j - dy)
+    if (!(cover * gain > th)) continue
+    out[k] = quantise(src[k] ?? 0, levels, th)
+    out[k + 1] = quantise(src[k + 1] ?? 0, levels, th)
+    out[k + 2] = quantise(src[k + 2] ?? 0, levels, th)
+    out[k + 3] = 255
+  }
+  return out
+}
+```
+
+- [ ] **Step 5:** `npm run test:unit -- motionx` → all green (the fold spec's cases name their styles or compare notes; if one fails ONLY because it relied on the old default style, give that case an explicit `style` and say so in the report). Typecheck `grep -E "motionx/reveal"` → no output. Commit the four files. Subject: `feat(motionx): the Pixels style's maths — blocks that halve, colours that deepen, coverage that condenses; Pixels is the default`
+
+---
+
+### Task 7: Drawing the Pixels style
+
+**Files:**
+- Create: `frontend/app/lib/motionx/reveal/paintPixels.ts`
+- Modify: `frontend/app/composables/useCompositorLayers.ts` (two hunks in `paintLayerStack`'s per-item loop)
+- Test: create `frontend/tests/unit/motionx/reveal-paint-pixels.unit.spec.ts`
+
+**Interfaces:**
+- Consumes: `pixelBlock`, `buildPixelCells`, `cellRange`, `MotionReveal`.
+- Produces: `drawRevealPixels(ctx, reveal, W, H, base: DOMMatrix, drawLayer: (target: CanvasRenderingContext2D) => void, stamp: { alpha: number; blend: GlobalCompositeOperation }): boolean` and `setRevealPixelsCanvasFactory(fn)` (tests only), from `~/lib/motionx/reveal/paintPixels` (NOT via the barrel).
+
+**The recipe, exactly:**
+1. `full` = a pooled canvas sized to `ctx.canvas`. Clear it (identity transform, `clearRect`). Set its transform to `ctx.getTransform()` — the CURRENT transform, which already includes any draw-time scale — and call `drawLayer(fullCtx)`.
+2. `blockPx = pixelBlock(reveal.amount, reveal.cell) × W`, but never finer than one device pixel: `blockPx = Math.max(blockPx, 1 / Math.max(1e-6, Math.abs(base.a)))`. `range = cellRange(base.inverse(), canvas.width, canvas.height, W, H, blockPx / W)`.
+3. `small` = a pooled `range.cols × range.rows` canvas whose 2D context was created with `{ willReadFrequently: true }` (its own pool — context attributes are fixed at first `getContext`). `globalCompositeOperation = 'copy'`, `imageSmoothingEnabled = true`, `imageSmoothingQuality = 'high'`, then `drawImage(full, sx, sy, sw, sh, 0, 0, cols, rows)` where the source rectangle is the block range in DEVICE pixels: `sx = base.a × (c0 × blockPx) + base.e`, `sy = base.d × (r0 × blockPx) + base.f`, `sw = base.a × cols × blockPx`, `sh = base.d × rows × blockPx` (the frame transform is scale + translate; if `base.b` or `base.c` is not ~0, return `false`).
+4. `src = smallCtx.getImageData(0, 0, cols, rows).data`; `smallCtx.putImageData(new ImageData(buildPixelCells(reveal, src, range), cols, rows), 0, 0)`.
+5. Stamp: `ctx.save()`; `filter = 'none'`, `shadowColor = 'transparent'`; `setTransform(base)`; `imageSmoothingEnabled = false`; `globalAlpha = clamp01(stamp.alpha)`; `globalCompositeOperation = stamp.blend`; `drawImage(small, c0 × blockPx, r0 × blockPx, cols × blockPx, rows × blockPx)`; `ctx.restore()`.
+6. Release both canvases to their pools (stacks, as in `paint.ts`). Return `true`.
+Return `false` — having touched NOTHING on `ctx` — if any 2D context is unavailable; the caller then draws the layer normally. `drawLayer` throwing must still release `full` (`try/finally`).
+
+- [ ] **Step 1: Failing tests** — a recorder fake as in `reveal-paint.unit.spec.ts` (reuse its approach; stand-ins for `ImageData` / `DOMMatrix` in `beforeAll`). Pin, as real `expect`s: (1) `drawLayer` is called once with the FULL canvas's context, after that context was cleared and given `ctx`'s current transform; (2) the down-sample `drawImage` has 9 arguments with the device-space source rect computed as above for a non-identity `base` (scale 2, translate (10, 20)) and `imageSmoothingEnabled === true` at that moment; (3) `getImageData` is asked for exactly `cols × rows`, and `putImageData` receives exactly `buildPixelCells(reveal, thatData, range)`; (4) the stamp on `ctx` is `save → … → drawImage(small, c0·blockPx, r0·blockPx, cols·blockPx, rows·blockPx) → restore` with `imageSmoothingEnabled === false`, `globalAlpha === stamp.alpha` and `globalCompositeOperation === stamp.blend` set before the `drawImage`; (5) `blockPx` follows `pixelBlock` (two amounts in different stages give different `cols`) and is clamped to one device pixel when `base.a` is tiny; (6) no 2D context → returns `false` and `ctx` recorded no calls; (7) a throwing `drawLayer` propagates AND the next call reuses the same full-size canvas (it was released); (8) a rotated `base` (`b ≠ 0`) returns `false`; (9) the small canvas's context was requested with `willReadFrequently: true`.
+
+- [ ] **Step 2:** `npm run test:unit -- reveal-paint-pixels` → FAIL (module missing).
+
+- [ ] **Step 3: Implement `paintPixels.ts`** following the recipe; structure and pooling mirror `paint.ts` (read it first). Module doc comment: what Pixels is, why the layer is drawn at FULL resolution and then sampled down (every effect of the layer renders exactly as usual; drawing it small would re-rasterise text, blurs and shader fills at the wrong scale), and the price (effects that read the backdrop pause, because the layer is not drawn onto the backdrop).
+
+- [ ] **Step 4: The two hunks in `paintLayerStack`**
+
+Hunk A — the existing reveal block becomes:
+
+```ts
+      const rv = (layer as unknown as { motionReveal?: MotionReveal }).motionReveal
+      // Pixels TRANSFORMS the layer (drawn further down, once its mask is known); the other
+      // styles MASK it: keep the backdrop so the hidden cells can be put back afterwards.
+      let pixelsBase: DOMMatrix | null = null
+      if (rv) {
+        if (!(rv.amount > 0)) continue
+        if (rv.style === 'pixels') pixelsBase = ctx.getTransform()
+        else revealOpen = beginReveal(ctx, rv, W, H)
+      }
+```
+(`pixelsBase` is captured HERE, before the draw-time scale below it is applied — the block grid belongs to the frame.)
+
+Hunk B — immediately after the existing line `const maskItem = ref ? byKey.get(ref) ?? null : null` that follows the draw-time-scale block (and BEFORE `const motionActive`):
+
+```ts
+      // Pixels: the layer is drawn ALONE at full opacity and rebuilt from dithered blocks; its
+      // opacity and blend are applied when the blocks are stamped. Effects that read the
+      // backdrop (blur, glass, backdrop shaders) and the pre-timeline animation engine sit
+      // out the transition — see the spec addendum. `false` = could not run → draw normally.
+      if (rv && pixelsBase) {
+        const solo = { ...layer, opacity: 1, blend: 'normal' } as LocalLayer
+        const drawSolo = (target: CanvasRenderingContext2D) => {
+          if (maskItem && maskItem.type !== 'local') drawItemMasked(target, { ...item, layer: solo }, maskItem, W, H, 'source-over', 1)
+          else drawLocalLayer(target, solo, W, H, maskItem?.type === 'local' ? maskItem.layer : null, 1)
+        }
+        if (drawRevealPixels(ctx, rv, W, H, pixelsBase, drawSolo, { alpha: (layer.opacity ?? 1) * opacityMul, blend: localBlendOp(layer) })) continue
+      }
+```
+plus the import of `drawRevealPixels`. Check how `item` is typed (`StackItem`, the `'local'` arm) so `{ ...item, layer: solo }` typechecks; adjust the cast, not the logic. Nothing else in the file changes.
+
+- [ ] **Step 5:** extend the source-level wiring guard in the new spec: the file contains `rv.style === 'pixels'`, `drawRevealPixels(` appears exactly once and BEFORE `const motionActive`, and `pixelsBase = ctx.getTransform()` appears before the first `motionScale` read in `paintLayerStack`. Run `npm run test:unit -- motionx` and `npm run test:unit -- compositor` (counts unchanged; a suite that times out under load is re-run alone before it is called broken).
+
+- [ ] **Step 6:** typecheck (`reveal/paintPixels` clean; any `useCompositorLayers.ts` line reported must be outside your hunks), `git diff -- frontend/app/composables/useCompositorLayers.ts` shows exactly hunks A, B and the import, commit the three files. Subject: `feat(compositor): the Pixels dither rebuilds the layer from blocks that refine until it is sharp`
+
+---
+
+### Task 8: Pixels in the inspector and the gallery tile
+
+**Files:**
+- Modify: `frontend/app/components/vue-canvas/compositor/MotionInspector.vue`, `frontend/app/components/vue-canvas/compositor/MotionDitherPreview.vue`
+- Test: add to `frontend/tests/unit/motionx/letters-ui.unit.spec.ts`
+
+- [ ] **Step 1: Failing source-level tests:** the dither block's Style row offers four options in the order `pixels, dissolve, wipe, dots` with labels `Pixels, Dissolve, Wipe, Dots`; the cell slider's `:default` and fallback value come from `revealCellDefault(`; the file contains the label `Block size`; `MotionDitherPreview.vue` imports `buildPixelCells`.
+- [ ] **Step 2: Inspector.** `DITHER_STYLES = ['pixels', 'dissolve', 'wipe', 'dots']`, `DITHER_STYLE_LABELS = ['Pixels', 'Dissolve', 'Wipe', 'Dots']`. Add `const ditherStyle = computed(() => revealParams(behaviour.value?.params).style)` and use it everywhere the block currently calls `enumParam('style', …)` (one reader of the default, the library's). Cell slider: `:label="ditherStyle === 'pixels' ? 'Block size' : ditherStyle === 'dots' ? 'Dot spacing' : 'Cell size'"`, `:hint="ditherStyle === 'pixels' ? 'How big the blocks are when the transition starts, in thousandths of the frame\'s width. They halve until the layer is sharp.' : 'How chunky the pattern is, in thousandths of the frame\'s width'"`, `:model-value="numParam('cell', revealCellDefault(ditherStyle))"`, `:default="revealCellDefault(ditherStyle)"`. Drift's hint for Pixels: `'How fast the dither tones shimmer while the layer sharpens, in blocks per second. 0 is still.'` Four segments must fit the row: check `StudioSegmentedRow`'s button padding; if the four labels overflow a 228px row next to the label "Style", use a labelled `StudioSelect` for Style instead (and update the test id's element accordingly) — say which you chose in the report.
+- [ ] **Step 3: Preview tile.** The tile now shows the DEFAULT look, Pixels: build once a 48×30 RGBA source (a rounded card with a diagonal two-colour gradient `#7c9cff → #ff7ac3` and a white bar across it; transparent outside the card). Each frame: `block = [8, 4, 2, 1][min(3, floor(amount × 4))]` source pixels; sample the source at each block's centre into a `cols × rows` RGBA array; `buildPixelCells({ ...revealParams({}), out, amount, elapsed }, sampled, { c0: 0, r0: 0, cols, rows })`; paint each block as `block × block` pixels into the reused `ImageData`. Same loop lifetime, reduced-motion still frame (amount 0.45) and `aria-hidden` as now.
+- [ ] **Step 4:** `npm run test:unit -- motionx` green; typecheck clean for both files; commit. Subject: `feat(compositor): Pixels is the Dither bar's first Style; the gallery tile shows it`
+
+---
+
+### Task 9: Live verification and Part-2 review (controller)
+
+- [ ] Lab frame, an image-like layer (gradient fill) and a text layer: mid-bar the layer is made of axis-aligned square blocks whose size halves as the bar advances (measure run lengths on a scan line at three times); every pixel inside the layer's box is either backdrop or a colour on the quantised ladder for that time; nothing at amount 0, the exact normal draw after the bar.
+- [ ] A half-transparent layer: ON blocks all carry the same alpha-blended colour (no 50% dither).
+- [ ] Rotated 30° + multiply: blocks stay on the frame grid; ON colour == the un-transformed multiply colour of the quantised block.
+- [ ] Drift changes which blocks are on at a fixed time; drift 0 repeatable.
+- [ ] The three mask styles still pass the Part-1 live checks (spot-check Dissolve two-colour + coverage).
+- [ ] Inspector: Style shows four options, Block size label + default 24 on a new bar, switching to Dissolve shows Cell size default 8.
+- [ ] Review of Part 2 on the most capable model; one fix wave; ledger, spec status, memory.
