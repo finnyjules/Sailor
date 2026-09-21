@@ -470,7 +470,7 @@ function onGradient(g: Gradient) {
           @update:model-value="(v) => setBehNum('dither-angle', { angle: v })" />
         <StudioSlider v-if="enumParam('style', 'dissolve') === 'wipe'" data-testid="dither-softness" v-bind="gesture('dither-softness')"
           label="Edge softness" hint="How wide the dithered band on the travelling edge is. 0 is a hard line."
-          :model-value="numParam('softness', REVEAL_DEFAULTS.softness)" :min="0" :max="1" :step="0.01" :default="REVEAL_DEFAULTS.softness"
+          :model-value="numParam('softness', REVEAL_DEFAULTS.softness)" :min="REVEAL_RANGES.softness[0]" :max="REVEAL_RANGES.softness[1]" :step="0.01" :default="REVEAL_DEFAULTS.softness"
           @update:model-value="(v) => setBehNum('dither-softness', { softness: v })" />
       </template>
       <template v-else-if="behaviour.kind === 'gradientMorph'">

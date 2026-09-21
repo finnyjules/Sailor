@@ -131,3 +131,24 @@ describe('applyRevealBehaviours — edges', () => {
     }
   })
 })
+
+describe('a dither bar cannot be opened into keyframes — everywhere the app offers it', () => {
+  it('isMotionOnlyPath knows a reveal path from a layer property', async () => {
+    const { isMotionOnlyPath } = await import('~/lib/motionx/adapter/frame')
+    expect(isMotionOnlyPath('layers.L.reveal')).toBe(true)
+    expect(isMotionOnlyPath('layers.L.opacity')).toBe(false)
+    expect(isMotionOnlyPath('layers.L.effects.e1.radius')).toBe(false)
+  })
+  it('the timeline bar\'s Open chip, the inspector\'s button and the modal\'s handler all refuse it', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { resolve } = await import('node:path')
+    const src = (p: string) => readFileSync(resolve(__dirname, '../../../app/components/vue-canvas', p), 'utf8')
+    const chip = src('compositor/MotionBandTimeline.vue').split('\n').find((l) => l.includes('<button v-if="isBehSel(b)'))!
+    expect(chip).toContain('!isMotionOnlyPath(r.path)')
+    expect(src('compositor/MotionInspector.vue')).toMatch(/data-testid="beh-open"|v-if="!isTextBeh && behaviour\.kind !== 'dither'"/)
+    const modal = src('CompositorModal.vue')
+    const fn = modal.slice(modal.indexOf('function openBehaviour('), modal.indexOf('function openBehaviour(') + 600)
+    expect(fn.indexOf('isMotionOnlyPath(t.path)')).toBeGreaterThan(-1)
+    expect(fn.indexOf('isMotionOnlyPath(t.path)')).toBeLessThan(fn.indexOf('recordHistory()'))
+  })
+})

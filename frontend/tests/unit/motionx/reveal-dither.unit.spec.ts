@@ -221,3 +221,18 @@ describe('the ends and the clamps, for EVERY style', () => {
     expect(cellRange({ a: 1, b: 0, c: 0, d: 1, e: Infinity, f: 0 }, 1000, 560, 1000, 560, 0.008)).toEqual(frame)
   })
 })
+
+describe('cellTest — the per-frame form the mask builder uses', () => {
+  it('agrees with cellShown for every cell, every style, in and out, drifting, on and off the frame', async () => {
+    const { cellTest } = await import('~/lib/motionx/reveal')
+    for (const style of ['dissolve', 'wipe'] as const) for (const out of [false, true]) for (const angle of [0, 0.7, Math.PI, 4.1]) {
+      for (const softness of [0, 0.35]) for (const amount of [-0.1, 0, 0.17, 0.5, 0.93, 1, 1.2]) {
+        const r = R({ style, out, angle, softness, amount, elapsed: 0.83 })
+        const test = cellTest(r, GRID)
+        for (let y = -3; y < GRID.rows + 3; y += 5) for (let x = -3; x < GRID.cols + 3; x += 4) {
+          expect(test(x, y), `${style} ${out} ${angle} ${softness} ${amount} @${x},${y}`).toBe(cellShown(r, x, y, GRID))
+        }
+      }
+    }
+  })
+})

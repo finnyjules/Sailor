@@ -1,7 +1,8 @@
 import { evaluateTrack } from './track'
 import type { Track, PropertyValue } from './types'
 
-const startOf = (tr: Track) => (tr.keyframes.length ? Math.min(...tr.keyframes.map((k) => k.t)) : 0)
+/** When a track starts: its earliest keyframe. */
+export const startOf = (tr: Track) => (tr.keyframes.length ? Math.min(...tr.keyframes.map((k) => k.t)) : 0)
 
 /** Evaluate every track at time `t`, keyed by property path.
  *

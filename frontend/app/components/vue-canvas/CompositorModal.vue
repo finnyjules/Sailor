@@ -91,7 +91,7 @@ import { imageUrlForNode } from '~/lib/canvas/nodeImage'
 import { imageUrlToFile } from '~/lib/canvas/imageUrlToFile'
 import { DEFAULT_FRAME_MOTION, type FrameMotion } from '~/lib/motion/types'
 import { effectDialTargets, animatedDialKeysOf, type EffectDialTrack } from '~/lib/motion/effectTracks'
-import { compileBehaviourForLayer, animatableProperties } from '~/lib/motionx/adapter/frame'
+import { isMotionOnlyPath, compileBehaviourForLayer, animatableProperties } from '~/lib/motionx/adapter/frame'
 import { type Behaviour, type StoredBehaviour, type Timing, type Track as MotionxTrack } from '~/lib/motionx'
 import { setBehaviourTracks, bakeBehaviour, upsertBehaviour, removeBehaviour } from '~/lib/motionx/behaviourStore'
 import { seedHoldTrack, setBandTrack } from '~/lib/motionx/bandEdit'
@@ -3928,6 +3928,9 @@ function editBehaviour(id: string, patch: { params?: Record<string, unknown>; ti
 }
 // Open = bake: strip the behaviour tag (tracks become plain property bands) + drop the behaviour.
 function openBehaviour(id: string) {
+  // A bar on a motion-only property (a dither's `reveal`) keeps its look on the BAR: baked,
+  // the bare band would have nothing to draw with and the layer would just sit fully drawn.
+  if (motionxTracks.value.some((t) => t.behaviourId === id && isMotionOnlyPath(t.path))) return
   recordHistory()
   setMotion({
     behaviours: removeBehaviour(motionBehaviours.value, id),

@@ -9,7 +9,7 @@ import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { Track, StoredBehaviour } from '~/lib/motionx'
 import { isTextBehaviour } from '~/lib/motionx/text'
 import { bandsForLayer, behaviourBandsForLayer, legacyBandForLayer, numberBandCurve, colorBandCss, gradientBandCss, trackSpan, type Band } from '~/lib/motionx/bands'
-import { animatableProperties, MOTION_ONLY_LABELS } from '~/lib/motionx/adapter/frame'
+import { animatableProperties, MOTION_ONLY_LABELS, isMotionOnlyPath } from '~/lib/motionx/adapter/frame'
 import { shiftTrack, retimeTrack, movePoint, removePoint, setBandTrack, ripplePoint, segmentAt, bandTrackAt } from '~/lib/motionx/bandEdit'
 import { deriveView, timeToX, xToTime, zoomAboutPivot, clampViewStart, computeTicks, formatRulerSeconds, ghostCycles, type View } from '~/lib/motionx/timelineView'
 
@@ -557,7 +557,7 @@ function deletePoint(b: Band, i: number) {
                 :title="b.label + (b.loop ? ' · one cycle, repeats through the timeline' : '') + (r.conflicts.has(b.key) ? ' · overlaps another bar on ' + r.label : '') + ' · drag to move, drag edges to ' + (b.loop ? 'change the cycle length' : 'retime')"
                 @pointerdown.stop.prevent="(e: PointerEvent) => startBehDrag(e, b, 'move')">
                 <span class="truncate">{{ b.label }}</span>
-                <button v-if="isBehSel(b) && wOf(b.start, b.end) > 120" type="button"
+                <button v-if="isBehSel(b) && wOf(b.start, b.end) > 120 && !isMotionOnlyPath(r.path)" type="button"
                   class="shrink-0 px-1.5 rounded border border-white/25 text-[9px] text-white/85 hover:bg-white/15 cursor-pointer"
                   title="Bake into editable control-point bands"
                   @pointerdown.stop @click.stop="emit('behaviour-open', b.behaviourId!)">Open ▾</button>

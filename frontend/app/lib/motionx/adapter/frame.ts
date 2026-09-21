@@ -1,7 +1,7 @@
 // Frame adapter — the ONE intentionally compositor-coupled file in the motionx package.
 // Applies a resolved motionx property value onto a cloned Frame/Compositor layer. The
 // motionx core stays pure (no compositor imports); only this file bridges the two.
-import { compileBehaviour, evaluateTracks, pickTrack, evaluateTrack, type Behaviour, type BehaviourTarget, type PropertyValue, type StoredBehaviour, type Track } from '~/lib/motionx'
+import { compileBehaviour, evaluateTracks, pickTrack, startOf, evaluateTrack, type Behaviour, type BehaviourTarget, type PropertyValue, type StoredBehaviour, type Track } from '~/lib/motionx'
 // The index, not `./evaluate` — importing it is what REGISTERS the four letter behaviour
 // kinds, and this file is on the only path the painter reaches them by.
 import { isTextBehaviour, textCanMove } from '~/lib/motionx/text'
@@ -124,7 +124,9 @@ export function applyTextBehaviours(
  *  property, but they still get a timeline row, which needs a name. */
 export const MOTION_ONLY_LABELS: Record<string, string> = { reveal: 'Reveal' }
 
-const startOfBar = (tr: Track) => (tr.keyframes.length ? Math.min(...tr.keyframes.map((k) => k.t)) : 0)
+/** A bar on a motion-only property cannot be opened into keyframes: its look lives on the BAR,
+ *  so the bare band left behind would have nothing to draw with. */
+export const isMotionOnlyPath = (path: string): boolean => (path.split('.').pop() ?? '') in MOTION_ONLY_LABELS
 
 /**
  * Fold reveal transitions (dither) onto the layers for this frame.
@@ -162,7 +164,7 @@ export function applyRevealBehaviours(
     const amount = typeof v === 'number' && Number.isFinite(v) ? v : 1
     if (amount >= 1) return layer
     changed = true
-    const note: MotionReveal = { ...revealParams(bar.params), amount: Math.max(0, amount), elapsed: Math.max(0, t - startOfBar(pick)) }
+    const note: MotionReveal = { ...revealParams(bar.params), amount: Math.max(0, amount), elapsed: Math.max(0, t - startOf(pick)) }
     return { ...layer, motionReveal: note } as unknown as LocalLayer
   })
   return changed ? next : layers

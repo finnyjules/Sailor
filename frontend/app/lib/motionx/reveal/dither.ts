@@ -29,32 +29,45 @@ export function driftCells(r: MotionReveal): { dx: number; dy: number } {
   return { dx: Math.floor(d * Math.cos(r.angle) + 1e-9) + 0, dy: Math.floor(d * Math.sin(r.angle) + 1e-9) + 0 }
 }
 
-/** Where cell (cx, cy) sits along the wipe's direction of travel: 0 at the side the edge starts
- *  from, 1 at the far side, measured across the FRAME's grid (so it can leave [0, 1] on the
- *  pasteboard). */
-function along(r: MotionReveal, cx: number, cy: number, grid: { cols: number; rows: number }): number {
-  const ux = Math.cos(r.angle), uy = Math.sin(r.angle)
-  const proj = (x: number, y: number) => x * ux + y * uy
-  const corners = [proj(0, 0), proj(grid.cols, 0), proj(0, grid.rows), proj(grid.cols, grid.rows)]
-  const lo = Math.min(...corners), hi = Math.max(...corners)
-  const s = hi - lo < 1e-9 ? 0 : (proj(cx + 0.5, cy + 0.5) - lo) / (hi - lo)
-  // OUT keeps sweeping the same way: the EMPTY side grows from the start side.
-  return r.out ? 1 - s : s
-}
-
-/** Dissolve and Wipe: is this cell shown? */
-export function cellShown(r: MotionReveal, cx: number, cy: number, grid: { cols: number; rows: number }): boolean {
-  if (!(r.amount > 0)) return false
-  if (r.amount >= 1) return true
+/**
+ * Dissolve and Wipe: the test for ONE frame, with everything that is the same for every cell
+ * worked out once — the drift, and for Wipe the direction of travel and the frame's extent
+ * along it. `buildHiddenMask` asks it up to a million times a frame; doing the trigonometry
+ * per cell made the mask 2–4× slower for no change in the answer.
+ *
+ * Wipe measures a cell's place along the travel across the FRAME's grid: 0 at the side the
+ * edge starts from, 1 at the far side. On the editor's pasteboard that leaves [0, 1], so the
+ * part of a layer hanging past the far edge only fills in as the amount reaches 1 — right for
+ * export (which is the frame), and the price of cells that are identical in preview and export.
+ */
+export function cellTest(r: MotionReveal, grid: { cols: number; rows: number }): (cx: number, cy: number) => boolean {
+  if (!(r.amount > 0)) return () => false
+  if (r.amount >= 1) return () => true
   const { dx, dy } = driftCells(r)
-  const th = bayer8(cx - dx, cy - dy)
-  if (r.style !== 'wipe') return r.amount > th
-  const s = along(r, cx, cy, grid)
-  if (r.softness <= 1e-6) return s < r.amount
+  const amount = r.amount
+  if (r.style !== 'wipe') return (cx, cy) => amount > bayer8(cx - dx, cy - dy)
+  const ux = Math.cos(r.angle), uy = Math.sin(r.angle)
+  const c1 = grid.cols * ux, c2 = grid.rows * uy
+  const lo = Math.min(0, c1, c2, c1 + c2), span = Math.max(0, c1, c2, c1 + c2) - lo
+  const out = r.out, soft = r.softness
+  // OUT keeps sweeping the same way: the EMPTY side grows from the start side.
+  const along = (cx: number, cy: number) => {
+    const s = span < 1e-9 ? 0 : ((cx + 0.5) * ux + (cy + 0.5) * uy - lo) / span
+    return out ? 1 - s : s
+  }
+  if (soft <= 1e-6) return (cx, cy) => along(cx, cy) < amount
   // The band of width `softness` sits just behind a front that runs 0 → 1 + softness, so the
   // frame is empty at amount 0 and full at amount 1 whatever the softness.
-  const local = (r.amount * (1 + r.softness) - s) / r.softness
-  return local >= 1 || (local > 0 && local > th)
+  const front = amount * (1 + soft)
+  return (cx, cy) => {
+    const local = (front - along(cx, cy)) / soft
+    return local >= 1 || local > bayer8(cx - dx, cy - dy)
+  }
+}
+
+/** Dissolve and Wipe: is this cell shown? (One-off form of `cellTest`.) */
+export function cellShown(r: MotionReveal, cx: number, cy: number, grid: { cols: number; rows: number }): boolean {
+  return cellTest(r, grid)(cx, cy)
 }
 
 /** Dots sit on a square grid this many cells apart. */
@@ -105,8 +118,9 @@ export function buildHiddenMask(
   r: MotionReveal, range: { c0: number; r0: number; cols: number; rows: number }, grid: { cols: number; rows: number },
 ): Uint8ClampedArray<ArrayBuffer> {
   const px = new Uint8ClampedArray(range.cols * range.rows * 4)
+  const shown = cellTest(r, grid)
   for (let j = 0; j < range.rows; j++) for (let i = 0; i < range.cols; i++) {
-    if (!cellShown(r, range.c0 + i, range.r0 + j, grid)) px[(j * range.cols + i) * 4 + 3] = 255
+    if (!shown(range.c0 + i, range.r0 + j)) px[(j * range.cols + i) * 4 + 3] = 255
   }
   return px
 }

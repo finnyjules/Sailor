@@ -1,12 +1,12 @@
 <script setup lang="ts">
 /** The gallery tile's tiny live preview for Dither in / Dither out. Every other tile is a CSS
  *  animation, but a dither pattern isn't something CSS can fake — this runs the REAL reveal
- *  maths (`revealParams` + `cellShown`, Task 1) on a tiny 48×30 canvas, drawn with smoothing
+ *  maths (`revealParams` + `cellTest`) on a tiny 48×30 canvas, drawn with smoothing
  *  off and stretched up to the tile with `image-rendering: pixelated` so a maths cell reads as
  *  a screen pixel block. The gallery popover only exists while open, so the loop's lifetime is
  *  the popover's: started in onMounted, cancelled in onBeforeUnmount. */
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { revealParams, cellShown } from '~/lib/motionx/reveal'
+import { revealParams, cellTest } from '~/lib/motionx/reveal'
 
 const props = defineProps<{ out: boolean }>()
 
@@ -39,11 +39,11 @@ function paint(amount: number, elapsed: number) {
   if (!canvas || !ctx) return
   if (!imageData) imageData = ctx.createImageData(COLS, ROWS)
   const data = imageData.data
-  const reveal = { ...revealParams({ cell: 40 }), out: props.out, amount, elapsed }
+  const test = cellTest({ ...revealParams({ cell: 40 }), out: props.out, amount, elapsed }, { cols: COLS, rows: ROWS })
   for (let y = 0; y < ROWS; y++) {
     for (let x = 0; x < COLS; x++) {
       const i = (y * COLS + x) * 4
-      const shown = insideCard(x, y) && cellShown(reveal, x, y, { cols: COLS, rows: ROWS })
+      const shown = insideCard(x, y) && test(x, y)
       data[i] = 0x7c; data[i + 1] = 0x9c; data[i + 2] = 0xff
       data[i + 3] = shown ? 255 : 0
     }
@@ -77,7 +77,7 @@ onBeforeUnmount(() => { if (raf) cancelAnimationFrame(raf); raf = 0 })
 </script>
 
 <template>
-  <canvas ref="canvasEl" :width="COLS" :height="ROWS" class="dither-preview-canvas" />
+  <canvas ref="canvasEl" :width="COLS" :height="ROWS" class="dither-preview-canvas" aria-hidden="true" />
 </template>
 
 <style scoped>
