@@ -5,6 +5,7 @@
  *  modal turns into a live behaviour via addBehaviour(kind, params). */
 import { movesForLayer, groupedMoves, type GalleryMove, type LayerCaps, type PreviewKind } from '~/lib/motionx/gallery'
 import MotionDitherPreview from '~/components/vue-canvas/compositor/MotionDitherPreview.vue'
+import MotionSettlePreview from '~/components/vue-canvas/compositor/MotionSettlePreview.vue'
 
 const props = defineProps<{ caps: LayerCaps }>()
 defineEmits<{ add: [move: GalleryMove]; close: [] }>()
@@ -58,6 +59,8 @@ const SLOT_FILLERS: Record<number, [string, string]> = { 0: ['K', 'Q'], 1: ['9',
             <MotionDitherPreview v-else-if="m.preview === 'dither'" :out="m.params?.dir === 'out'" class="absolute inset-0 h-full w-full" />
             <!-- assemble preview: same tiny canvas, the Assemble front + block look -->
             <MotionDitherPreview v-else-if="m.preview === 'assemble'" :out="m.params?.dir === 'out'" mode="assemble" class="absolute inset-0 h-full w-full" />
+            <!-- settle preview: same tiny canvas, a cheap 2D stand-in for the tile's own shader effect -->
+            <MotionSettlePreview v-else-if="m.preview === 'settle'" :effect="(m.params?.effect as string) ?? 'slice'" :out="m.params?.dir === 'out'" class="absolute inset-0 h-full w-full" />
             <!-- transform/opacity previews: a small mark that plays the move on loop -->
             <span v-else-if="m.preview !== 'scroll' && m.preview !== 'morph'"
               class="prev-mark absolute left-1/2 top-1/2 w-3 h-3 -ml-1.5 -mt-1.5 rounded-sm bg-[#7c9cff]"

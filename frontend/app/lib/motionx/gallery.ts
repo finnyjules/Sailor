@@ -2,12 +2,13 @@
 // behaviour kind + params, a group, a small live-preview key, and an optional layer
 // capability it needs. The gallery component renders these; clicking one calls
 // addBehaviour(kind, params). Pure — zero Vue/compositor coupling.
+import { SETTLE_EFFECTS } from './reveal/settle'
 
 export type MoveGroup = 'Letters' | 'In' | 'Loop' | 'Out' | 'Gradient'
 export type PreviewKind =
   | 'fade' | 'slide-up' | 'slide-down' | 'slide-left' | 'slide-right'
   | 'grow' | 'shrink' | 'spin' | 'pulse' | 'sway' | 'float'
-  | 'scroll' | 'morph' | 'dither' | 'assemble'
+  | 'scroll' | 'morph' | 'dither' | 'assemble' | 'settle'
   | 'letters-cascade' | 'letters-typewriter' | 'letters-mask' | 'letters-scramble'
   | 'letters-decode' | 'letters-slot' | 'letters-wave' | 'letters-bounce' | 'letters-jitter'
 
@@ -44,6 +45,32 @@ export function behavioursForMove(m: GalleryMove): Array<{ kind: string; params?
 /** Layer capabilities the gallery filters against. */
 export interface LayerCaps { gradient: boolean; text: boolean }
 
+// ── Settle tiles (Addendum 3, Part 4): EACH of the ten `SETTLE_EFFECTS` rows is its OWN pair
+// of gallery tiles (In / Out) — Julien's explicit call, no single "Settle" tile with a menu.
+// GENERATED from the table so this list can never drift from it; the inspector still offers an
+// Effect menu to swap one in place (`settle-effect`, see MotionInspector.vue).
+/** Amendment (2026-09-21): a smooth curve defeats a staccato effect — Slice, Glitch and
+ *  Pixelate ship with a stepped default instead of the kind's usual Linear. UI-only data: it
+ *  belongs to the gallery tile, not to `SETTLE_EFFECTS` (another task owns that table), and the
+ *  inspector's Effect swap must never touch a bar's own `ease` once it exists. */
+const STEPPED_SETTLE_IDS = new Set(['slice', 'glitch', 'pixelate'])
+const STEPPED_SETTLE_EASE = { type: 'steps', count: 6 } as const
+
+function settleTile(effect: { id: string; label: string }, dir: 'in' | 'out'): GalleryMove {
+  const params: Record<string, unknown> = { dir, effect: effect.id }
+  if (STEPPED_SETTLE_IDS.has(effect.id)) params.ease = STEPPED_SETTLE_EASE
+  return {
+    id: `settle-${effect.id}-${dir}`,
+    kind: 'settle',
+    label: `${effect.label} ${dir}`,
+    group: dir === 'in' ? 'In' : 'Out',
+    preview: 'settle',
+    params,
+  }
+}
+const SETTLE_IN_TILES: GalleryMove[] = SETTLE_EFFECTS.map((e) => settleTile(e, 'in'))
+const SETTLE_OUT_TILES: GalleryMove[] = SETTLE_EFFECTS.map((e) => settleTile(e, 'out'))
+
 export const GALLERY_MOVES: GalleryMove[] = [
   // Letters — text-only, evaluated per-letter at draw time (no compiled tracks)
   { id: 'letters-cascade-in', kind: 'text.cascade', label: 'Cascade in', group: 'Letters', preview: 'letters-cascade', needs: 'text', params: { dir: 'in', style: 'rise' } },
@@ -70,6 +97,7 @@ export const GALLERY_MOVES: GalleryMove[] = [
     recipe: [{ kind: 'slide', params: { dir: 'right' } }, { kind: 'fade', params: { dir: 'in' } }] },
   { id: 'dither-in', kind: 'dither', label: 'Dither in', group: 'In', preview: 'dither', params: { dir: 'in' } },
   { id: 'assemble-in', kind: 'dither', label: 'Assemble in', group: 'In', preview: 'assemble', params: { dir: 'in', style: 'assemble' } },
+  ...SETTLE_IN_TILES,
   // Loop
   { id: 'spin', kind: 'spin', label: 'Spin', group: 'Loop', preview: 'spin', cycle: 2 },
   { id: 'pulse', kind: 'pulse', label: 'Pulse', group: 'Loop', preview: 'pulse', cycle: 1.2 },
@@ -81,6 +109,7 @@ export const GALLERY_MOVES: GalleryMove[] = [
     recipe: [{ kind: 'scale', params: { dir: 'out' } }, { kind: 'fade', params: { dir: 'out' } }] },
   { id: 'dither-out', kind: 'dither', label: 'Dither out', group: 'Out', preview: 'dither', params: { dir: 'out' } },
   { id: 'assemble-out', kind: 'dither', label: 'Assemble out', group: 'Out', preview: 'assemble', params: { dir: 'out', style: 'assemble' } },
+  ...SETTLE_OUT_TILES,
   // Gradient
   { id: 'gradient-scroll', kind: 'gradientScroll', label: 'Scroll', group: 'Gradient', preview: 'scroll', needs: 'gradient', cycle: 3 },
 ]

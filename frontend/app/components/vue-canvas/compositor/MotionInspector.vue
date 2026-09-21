@@ -8,7 +8,7 @@
  *  segmented strip, the labelled select, the switch, the button — so this panel reads like
  *  the Cloner / Feather / Fill panels it sits beside instead of like a form. */
 import type { Track, Ease, PropertyValue, StoredBehaviour, Timing } from '~/lib/motionx'
-import { REVEAL_DEFAULTS, REVEAL_RANGES, REVEAL_STYLES, REVEAL_LOOKS, revealParams, revealCellDefault, PIXEL_CHARS, DITHER_PATTERNS, DEFAULT_CUSTOM_CHARS } from '~/lib/motionx/reveal'
+import { REVEAL_DEFAULTS, REVEAL_RANGES, REVEAL_STYLES, REVEAL_LOOKS, revealParams, revealCellDefault, PIXEL_CHARS, DITHER_PATTERNS, DEFAULT_CUSTOM_CHARS, SETTLE_EFFECTS, settleParams } from '~/lib/motionx/reveal'
 
 export type BehaviourPatch = { params?: Record<string, unknown>; timing?: Partial<Timing>; kind?: string; replaceParams?: boolean }
 import { trackSpan, behaviourLabel } from '~/lib/motionx/bands'
@@ -136,6 +136,9 @@ const ditherDriftHint = computed(() => (
     ? 'How fast the scattered order re-rolls. 0 is still.'
     : 'How fast the pattern slides while the layer resolves, in cells per second. 0 is a still dither.'
 ))
+// Settle (Addendum 3, Part 4): the ONE reader of a settle bar's stored params, same idiom as
+// `reveal` above — every settle-only computed reads off this rather than re-guessing a default.
+const settle = computed(() => settleParams(behaviour.value?.params))
 /** A discrete edit — an option, a switch, a shuffle. Always its own undo step. */
 function setBehParams(patch: Record<string, unknown>) {
   undoRun = closeRun()
@@ -217,6 +220,9 @@ const DITHER_LOOKS: string[] = [...REVEAL_LOOKS]
 const DITHER_LOOK_LABELS = ['Dither', 'Characters']
 const DITHER_PATTERN_OPTIONS = DITHER_PATTERNS.map((p) => String(p.value))
 const DITHER_PATTERN_LABELS = DITHER_PATTERNS.map((p) => p.label)
+// Settle's Effect select — the ten `SETTLE_EFFECTS` rows, same id/label pairing idiom.
+const SETTLE_EFFECT_OPTIONS = SETTLE_EFFECTS.map((e) => e.id)
+const SETTLE_EFFECT_LABELS = SETTLE_EFFECTS.map((e) => e.label)
 
 // ── Letter behaviours (Task 5) ───────────────────────────────────────────────
 const isTextBeh = computed(() => behaviour.value != null && isTextBehaviour(behaviour.value))
@@ -571,6 +577,21 @@ function onGradient(g: Gradient) {
           :model-value="numParam('softness', REVEAL_DEFAULTS.softness)" :min="REVEAL_RANGES.softness[0]" :max="REVEAL_RANGES.softness[1]" :step="0.01" :default="REVEAL_DEFAULTS.softness"
           @update:model-value="(v) => setBehNum('dither-softness', { softness: v })" />
       </template>
+      <template v-else-if="behaviour.kind === 'settle'">
+        <StudioSelect data-testid="settle-effect" label="Effect"
+          hint="Swap this bar for another shader effect. Timing, easing, direction, strength and fade are kept."
+          :model-value="settle.effect.id" :options="SETTLE_EFFECT_OPTIONS" :option-labels="SETTLE_EFFECT_LABELS"
+          @update:model-value="(v) => setBehParams({ effect: v })" />
+        <StudioSegmentedRow data-testid="settle-dir" label="Direction"
+          :model-value="enumParam('dir', 'in')" :options="IN_OUT" :option-labels="IN_OUT_LABELS"
+          @update:model-value="(v) => setBehParams({ dir: v })" />
+        <StudioSlider data-testid="settle-strength" v-bind="gesture('settle-strength')"
+          label="Starting strength" hint="How broken the layer is when the transition starts. It settles to nothing by the end."
+          :model-value="numParam('strength', 70)" :min="0" :max="100" :step="1" :default="70"
+          @update:model-value="(v) => setBehNum('settle-strength', { strength: v })" />
+        <StudioSwitch data-testid="settle-fade" label="Fade while it settles"
+          :model-value="settle.fade" @update:model-value="(v) => setBehParams({ fade: v })" />
+      </template>
       <template v-else-if="behaviour.kind === 'gradientMorph'">
         <StudioSegmentedRow label="Mode"
           :model-value="enumParam('mode', 'crossfade')" :options="MORPH_MODES" :option-labels="MORPH_MODE_LABELS"
@@ -745,7 +766,7 @@ function onGradient(g: Gradient) {
     <div class="mt-2 flex items-center justify-between border-t border-white/10 pt-2">
       <StudioButton data-testid="beh-delete" title="Remove this behaviour (Delete)"
         @click="emit('behaviour-delete', behaviour.id)">Delete</StudioButton>
-      <StudioButton v-if="!isTextBeh && behaviour.kind !== 'dither'" data-testid="beh-open" title="Bake into editable control-point bands"
+      <StudioButton v-if="!isTextBeh && behaviour.kind !== 'dither' && behaviour.kind !== 'settle'" data-testid="beh-open" title="Bake into editable control-point bands"
         @click="emit('behaviour-open', behaviour.id)">Open into keyframes</StudioButton>
     </div>
   </div>

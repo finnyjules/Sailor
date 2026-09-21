@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { GALLERY_MOVES, movesForLayer, groupedMoves, type GalleryMove } from '~/lib/motionx/gallery'
+import { SETTLE_EFFECTS } from '~/lib/motionx/reveal'
 
 describe('GALLERY_MOVES catalog', () => {
   it('every move has a stable id, a registered-kind, a group and a preview', () => {
@@ -9,7 +10,7 @@ describe('GALLERY_MOVES catalog', () => {
       expect(ids.has(m.id)).toBe(false)   // ids unique
       ids.add(m.id)
       expect([
-        'fade', 'slide', 'scale', 'spin', 'pulse', 'sway', 'float', 'gradientScroll', 'gradientMorph', 'dither',
+        'fade', 'slide', 'scale', 'spin', 'pulse', 'sway', 'float', 'gradientScroll', 'gradientMorph', 'dither', 'settle',
         'text.cascade', 'text.typewriter', 'text.maskSlide', 'text.scramble',
         'text.decode', 'text.slot', 'text.wave', 'text.bounce', 'text.jitter',
       ]).toContain(m.kind)
@@ -43,6 +44,70 @@ describe('assemble moves', () => {
     expect([aout.kind, aout.group, aout.label, aout.params]).toEqual(['dither', 'Out', 'Assemble out', { dir: 'out', style: 'assemble' }])
     expect(ain.preview).toBe('assemble'); expect(ain.recipe).toBeUndefined()
     expect(aout.preview).toBe('assemble'); expect(aout.recipe).toBeUndefined()
+  })
+})
+
+describe('settle moves (Addendum 3, Part 4): each of the ten SETTLE_EFFECTS is its own pair of tiles', () => {
+  const moves = movesForLayer({ gradient: false, text: false })
+  const settleMoves = moves.filter((m) => m.kind === 'settle')
+
+  it('is twenty tiles — ten effects × In/Out', () => {
+    expect(settleMoves).toHaveLength(20)
+  })
+
+  it('is GENERATED from SETTLE_EFFECTS, in table order — every In tile before any Out tile', () => {
+    const inTiles = settleMoves.filter((m) => m.group === 'In')
+    const outTiles = settleMoves.filter((m) => m.group === 'Out')
+    SETTLE_EFFECTS.forEach((effect, i) => {
+      const tin = inTiles[i]!, tout = outTiles[i]!
+      expect([tin.id, tin.kind, tin.label, tin.group, tin.preview]).toEqual(
+        [`settle-${effect.id}-in`, 'settle', `${effect.label} in`, 'In', 'settle'])
+      expect(tin.params?.dir).toBe('in')
+      expect(tin.params?.effect).toBe(effect.id)
+      expect([tout.id, tout.kind, tout.label, tout.group, tout.preview]).toEqual(
+        [`settle-${effect.id}-out`, 'settle', `${effect.label} out`, 'Out', 'settle'])
+      expect(tout.params?.dir).toBe('out')
+      expect(tout.params?.effect).toBe(effect.id)
+    })
+  })
+
+  it('sits right after the Dither/Assemble tiles in each of the In and Out groups', () => {
+    const inIds = moves.filter((m) => m.group === 'In').map((m) => m.id)
+    const outIds = moves.filter((m) => m.group === 'Out').map((m) => m.id)
+    const assembleInAt = inIds.indexOf('assemble-in')
+    const assembleOutAt = outIds.indexOf('assemble-out')
+    expect(assembleInAt).toBeGreaterThan(-1)
+    expect(assembleOutAt).toBeGreaterThan(-1)
+    expect(inIds[assembleInAt + 1]).toBe(`settle-${SETTLE_EFFECTS[0]!.id}-in`)
+    expect(outIds[assembleOutAt + 1]).toBe(`settle-${SETTLE_EFFECTS[0]!.id}-out`)
+  })
+
+  it("every tile's effect exists in SETTLE_EFFECTS", () => {
+    const ids = new Set(SETTLE_EFFECTS.map((e) => e.id))
+    for (const m of settleMoves) expect(ids.has(m.params?.effect as string)).toBe(true)
+  })
+
+  it('every tile has a unique id and no recipe (a single behaviour, not a composite)', () => {
+    const ids = new Set(settleMoves.map((m) => m.id))
+    expect(ids.size).toBe(20)
+    expect(settleMoves.every((m) => m.recipe === undefined)).toBe(true)
+  })
+
+  it('are offered on every layer (no `needs` capability)', () => {
+    expect(settleMoves.every((m) => m.needs === undefined)).toBe(true)
+  })
+
+  it('Slice, Glitch and Pixelate carry a stepped ease (a smooth curve defeats a staccato effect); the other seven carry none', () => {
+    const STEPPED = new Set(['slice', 'glitch', 'pixelate'])
+    for (const m of settleMoves) {
+      const effect = m.params?.effect as string
+      if (STEPPED.has(effect)) expect(m.params?.ease).toEqual({ type: 'steps', count: 6 })
+      else expect(m.params?.ease).toBeUndefined()
+    }
+    // Sanity: both directions of a stepped effect carry it, not just one.
+    expect(settleMoves.find((m) => m.id === 'settle-slice-in')?.params?.ease).toEqual({ type: 'steps', count: 6 })
+    expect(settleMoves.find((m) => m.id === 'settle-slice-out')?.params?.ease).toEqual({ type: 'steps', count: 6 })
+    expect(settleMoves.find((m) => m.id === 'settle-blur-in')?.params?.ease).toBeUndefined()
   })
 })
 
