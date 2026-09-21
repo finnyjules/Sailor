@@ -125,6 +125,16 @@ describe('behaviour easing override (params.ease)', () => {
     const { compileBehaviour } = await import('~/lib/motionx')
     expect(compileBehaviour(beh({ dir: 'in', ease: [1, 2] }), target as never)[0]!.keyframes[0]!.ease).toBe('easeInOut')
   })
+  it('a steps params.ease replaces every segment ease', async () => {
+    const { compileBehaviour } = await import('~/lib/motionx')
+    const steps = { type: 'steps', count: 5 }
+    expect(compileBehaviour(beh({ dir: 'in', ease: steps }), target as never)[0]!.keyframes.map((k) => k.ease)).toEqual([steps, 'linear'])
+  })
+  it('an invalid steps object (non-finite count) falls back to the kind\'s default', async () => {
+    const { compileBehaviour } = await import('~/lib/motionx')
+    expect(compileBehaviour(beh({ dir: 'in', ease: { type: 'steps', count: 'nope' } }), target as never)[0]!.keyframes[0]!.ease).toBe('easeInOut')
+    expect(compileBehaviour(beh({ dir: 'in', ease: { type: 'steps' } }), target as never)[0]!.keyframes[0]!.ease).toBe('easeInOut')
+  })
 })
 
 describe('timing.loop is the one loop switch for every kind', () => {

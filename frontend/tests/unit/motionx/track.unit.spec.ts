@@ -42,6 +42,24 @@ describe('evaluateTrack with a bézier segment ease', () => {
   })
 })
 
+describe('evaluateTrack — steps ease', () => {
+  const n = 4
+  const tr: Track = { path: 'x', type: 'number', keyframes: [
+    { t: 0, value: 0, ease: { type: 'steps', count: n } as never }, { t: 1, value: 1, ease: 'linear' },
+  ] }
+  it('holds the previous step just before a jump, and lands exactly on it just after', () => {
+    const k = 2
+    const boundary = k / n
+    expect(evaluateTrack(tr, boundary - 0.001)).toBeCloseTo((k - 1) / n, 6)
+    expect(evaluateTrack(tr, boundary)).toBeCloseTo(k / n, 6)
+    expect(evaluateTrack(tr, boundary + 0.001)).toBeCloseTo(k / n, 6)
+  })
+  it('starts exactly at 0 and ends exactly at 1', () => {
+    expect(evaluateTrack(tr, 0)).toBe(0)
+    expect(evaluateTrack(tr, 1)).toBe(1)
+  })
+})
+
 describe('evaluateTrack — spring tail', () => {
   const spring = { type: 'spring' as const, bounce: 0.5 }
   const tr = { path: 'x', type: 'number' as const, keyframes: [

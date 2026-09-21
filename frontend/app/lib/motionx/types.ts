@@ -6,7 +6,10 @@ export type BezierEase = [number, number, number, number]
 /** A duration-relative spring (DialKit/Motion's "time" spring): the segment length is the
  *  visual duration; `bounce` 0..1. It may overshoot and keeps settling past the segment. */
 export interface SpringEase { type: 'spring'; bounce: number }
-export type Ease = NamedEase | BezierEase | SpringEase
+/** Progresses in stairs instead of along a curve: `count` even jumps, holding still between
+ *  them. Always within [0, 1] — no overshoot, so (unlike a spring) it never runs past its bar. */
+export interface StepsEase { type: 'steps'; count: number }
+export type Ease = NamedEase | BezierEase | SpringEase | StepsEase
 export type PropertyType = 'number' | 'color' | 'gradient'
 export type PropertyValue = number | string | GradientStop[]
 

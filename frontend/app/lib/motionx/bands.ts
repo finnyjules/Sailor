@@ -5,6 +5,7 @@ import type { Track, PropertyType, Keyframe, StoredBehaviour } from '~/lib/motio
 import { revealParams } from './reveal/params'
 import { settleParams } from './reveal/settle'
 import { evaluateTrack } from '~/lib/motionx'
+import { isStepsEase, stepsCount } from './ease'
 
 export type BandKind = 'number' | 'color' | 'gradient' | 'behaviour' | 'legacy'
 
@@ -161,7 +162,10 @@ export function legacyBandForLayer(
  *  x = fraction across span; y = value normalised to the track's [min,max]
  *  (flat track → 0.5). SVG y-flip is the component's job, not this. */
 export function numberBandCurve(track: Track, samples = 24): Array<{ x: number; y: number }> {
-  const n = Math.max(2, samples)
+  // A Steps ease needs enough samples to show every jump as its own point — the caller's
+  // (usually default) request is too coarse to draw up to 24 stairs without aliasing some away.
+  const maxSteps = track.keyframes.reduce((m, k) => (isStepsEase(k.ease) ? Math.max(m, stepsCount(k.ease.count)) : m), 0)
+  const n = Math.max(2, maxSteps > 0 ? Math.max(samples, Math.min(200, maxSteps * 6)) : samples)
   const { start, end } = trackSpan(track)
   const span = end - start
   const vals: number[] = []

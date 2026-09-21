@@ -55,6 +55,14 @@ describe('text.cascade', () => {
     expect(f.cells[0]!.y).toBeCloseTo(0, 6)
     expect(f.cells[0]!.rotation).toBeCloseTo(Math.PI / 2, 6)
   })
+  it('a steps ease holds each letter still between jumps — Cascade just runs it like any other curve', () => {
+    const b = beh('text.cascade', { style: 'fade', ease: { type: 'steps', count: 4 } })
+    // pieceDur here is 1 (one letter, one bar): opacity holds at the PREVIOUS jump right up to
+    // p = 0.5, lands exactly on the next jump there, and holds it past — never a smooth ramp.
+    expect(ev(b, 1.49).cells[0]!.opacity).toBeCloseTo(0.25, 6)
+    expect(ev(b, 1.5).cells[0]!.opacity).toBeCloseTo(0.5, 6)
+    expect(ev(b, 1.51).cells[0]!.opacity).toBeCloseTo(0.5, 6)
+  })
   it('a spring ease overshoots past its place on the way in', () => {
     const b = beh('text.cascade', { style: 'rise', amount: 1, ease: { type: 'spring', bounce: 0.6 } })
     const ys = [1.3, 1.4, 1.5, 1.6, 1.8].map((t) => ev(b, t).cells[0]!.y)

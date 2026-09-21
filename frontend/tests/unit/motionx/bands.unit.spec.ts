@@ -65,6 +65,18 @@ describe('numberBandCurve', () => {
     }
     expect(numberBandCurve(flat, 2).every((p) => p.y === 0.5)).toBe(true)
   })
+  it('a steps ease is oversampled past the default request, so the stairs actually show', () => {
+    const stepsTrack = {
+      path: 'layers.a.opacity', type: 'number' as const, keyframes: [
+        { t: 0, value: 0, ease: { type: 'steps', count: 24 } as never },
+        { t: 1, value: 1, ease: 'linear' as const },
+      ],
+    }
+    const pts = numberBandCurve(stepsTrack)   // default samples=24 — far too coarse for 24 jumps
+    expect(pts.length).toBeGreaterThan(24)
+    const distinctY = new Set(pts.map((p) => +p.y.toFixed(6)))
+    expect(distinctY.size).toBeGreaterThanOrEqual(20)   // most of the 24 plateaus show up
+  })
 })
 
 describe('colorBandCss', () => {

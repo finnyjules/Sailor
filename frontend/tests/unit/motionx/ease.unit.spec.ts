@@ -99,3 +99,75 @@ describe('applyEase — spring { type: "spring", bounce }', () => {
     expect(isSpringEase([0, 0, 1, 1])).toBe(false)
   })
 })
+
+describe('applyEase — steps { type: "steps", count }', () => {
+  const s = (count: number) => ({ type: 'steps' as const, count })
+
+  it('n = 4: exact values at the named sample points', () => {
+    const e = s(4)
+    expect(applyEase(0, e)).toBe(0)
+    expect(applyEase(0.1, e)).toBeCloseTo(0, 10)
+    expect(applyEase(0.25, e)).toBeCloseTo(0.25, 10)
+    expect(applyEase(0.26, e)).toBeCloseTo(0.25, 10)
+    expect(applyEase(0.5, e)).toBeCloseTo(0.5, 10)
+    expect(applyEase(0.99, e)).toBeCloseTo(0.75, 10)
+    expect(applyEase(1, e)).toBe(1)
+  })
+
+  it('exactly n jumps over a fine sweep, for n = 1, 6, 24', () => {
+    for (const n of [1, 6, 24]) {
+      const e = s(n)
+      const N = 20000
+      let jumps = 0
+      let prev = applyEase(0, e)
+      for (let i = 1; i <= N; i++) {
+        const v = applyEase(i / N, e)
+        if (Math.abs(v - prev) > 1e-9) jumps++
+        prev = v
+      }
+      expect(jumps, `n=${n}`).toBe(n)
+    }
+  })
+
+  it('is monotonic (never decreases) and stays within [0, 1] — no overshoot, so no spring tail', () => {
+    const e = s(6)
+    let prev = -Infinity
+    for (let i = -50; i <= 250; i++) {
+      const v = applyEase(i / 100, e)
+      expect(v).toBeGreaterThanOrEqual(0)
+      expect(v).toBeLessThanOrEqual(1)
+      if (i >= 0 && i <= 100) { expect(v).toBeGreaterThanOrEqual(prev); prev = v }
+    }
+  })
+
+  it('clamps a bad count: 0/-3 -> 1, 2.6 -> 3 (rounded), 999 -> 64, NaN -> 6', () => {
+    expect(applyEase(0.5, s(0))).toBeCloseTo(applyEase(0.5, s(1)), 10)
+    expect(applyEase(0.5, s(-3))).toBeCloseTo(applyEase(0.5, s(1)), 10)
+    expect(applyEase(0.5, s(2.6))).toBeCloseTo(applyEase(0.5, s(3)), 10)
+    expect(applyEase(0.999, s(999))).toBeCloseTo(applyEase(0.999, s(64)), 10)
+    expect(applyEase(0.3, s(NaN))).toBeCloseTo(applyEase(0.3, s(6)), 10)
+  })
+
+  it('isStepsEase', async () => {
+    const { isStepsEase } = await import('~/lib/motionx/ease')
+    expect(isStepsEase(s(6))).toBe(true)
+    expect(isStepsEase({ type: 'spring', bounce: 0.2 })).toBe(false)
+    expect(isStepsEase('linear')).toBe(false)
+    expect(isStepsEase([0, 0, 1, 1])).toBe(false)
+  })
+
+  it('easeEquals compares by normalised n', async () => {
+    const { easeEquals } = await import('~/lib/motionx/ease')
+    expect(easeEquals(s(6), s(6))).toBe(true)
+    expect(easeEquals(s(6), s(6.4))).toBe(true)     // both round to 6
+    expect(easeEquals(s(6), s(7))).toBe(false)
+    expect(easeEquals(s(6), 'linear')).toBe(false)
+    expect(easeEquals(s(6), [0, 0, 1, 1])).toBe(false)
+    expect(easeEquals(s(6), { type: 'spring', bounce: 0.2 } as never)).toBe(false)
+  })
+
+  it('easeToBezier(steps) is the linear bézier — only used to seed the curve editor', async () => {
+    const { easeToBezier } = await import('~/lib/motionx/ease')
+    expect(easeToBezier(s(6))).toEqual([0, 0, 1, 1])
+  })
+})

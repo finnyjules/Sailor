@@ -1,12 +1,27 @@
-import type { Ease, BezierEase, NamedEase, SpringEase } from './types'
+import type { Ease, BezierEase, NamedEase, SpringEase, StepsEase } from './types'
 
 export function isSpringEase(e: unknown): e is SpringEase {
   return !!e && typeof e === 'object' && !Array.isArray(e) && (e as SpringEase).type === 'spring'
+}
+export function isStepsEase(e: unknown): e is StepsEase {
+  return !!e && typeof e === 'object' && !Array.isArray(e) && (e as StepsEase).type === 'steps'
+}
+
+/** The number of jumps a Steps ease actually uses: rounded, clamped to 1..64, non-finite → 6. */
+export function stepsCount(count: number): number {
+  const c = Number.isFinite(count) ? Math.round(count) : 6
+  return Math.min(64, Math.max(1, c))
 }
 
 export function applyEase(p: number, e: Ease): number {
   // A spring is NOT clamped at p = 1: it keeps settling past the end of its segment.
   if (isSpringEase(e)) return springProgress(p, e.bounce)
+  if (isStepsEase(e)) {
+    if (p <= 0) return 0
+    if (p >= 1) return 1
+    const n = stepsCount(e.count)
+    return Math.floor(p * n + 1e-9) / n
+  }
   const t = p < 0 ? 0 : p > 1 ? 1 : p
   if (typeof e !== 'string') return Array.isArray(e) ? cubicBezier(t, e) : t
   switch (e) {
@@ -82,11 +97,14 @@ const NAMED_HANDLES: Record<NamedEase, BezierEase> = {
 }
 export function easeToBezier(e: Ease): BezierEase {
   if (isSpringEase(e)) return [...NAMED_HANDLES.easeInOut] as BezierEase
+  // Steps has no curve of its own — this only seeds the bézier editor when switching Type.
+  if (isStepsEase(e)) return [...NAMED_HANDLES.linear] as BezierEase
   return typeof e === 'string' ? [...(NAMED_HANDLES[e] ?? NAMED_HANDLES.linear)] as BezierEase : [...e] as BezierEase
 }
 
 export function easeEquals(a: Ease, b: Ease): boolean {
   if (typeof a === 'string' || typeof b === 'string') return a === b
   if (isSpringEase(a) || isSpringEase(b)) return isSpringEase(a) && isSpringEase(b) && a.bounce === b.bounce
+  if (isStepsEase(a) || isStepsEase(b)) return isStepsEase(a) && isStepsEase(b) && stepsCount(a.count) === stepsCount(b.count)
   return a.length === b.length && a.every((v, i) => v === b[i])
 }

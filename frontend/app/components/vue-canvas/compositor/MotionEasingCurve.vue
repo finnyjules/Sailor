@@ -7,8 +7,8 @@
  *  exactly what plays. DialKit's third mode (Physics: stiffness/damping/mass) is left out on
  *  purpose — its length is emergent, which fights a band whose bar IS the duration.
  *  A gesture is ONE edit: `start` on grab, `change` while moving, `end` on release. */
-import type { Ease, BezierEase, SpringEase } from '~/lib/motionx'
-import { easeToBezier, easeEquals, isSpringEase, springProgress, springSettle } from '~/lib/motionx/ease'
+import type { Ease, BezierEase, SpringEase, StepsEase } from '~/lib/motionx'
+import { easeToBezier, easeEquals, isSpringEase, isStepsEase, springProgress, springSettle } from '~/lib/motionx/ease'
 import {
   fitEasingGraph, moveEasingHandle, easingGuideEnd, easingHandleFromKey, normalizeEase,
   parseEase, formatEase, type GraphPoint,
@@ -21,17 +21,22 @@ import StudioSegmentedRow from '~/components/vue-canvas/studio/StudioSegmentedRo
 const props = defineProps<{ ease: Ease }>()
 const emit = defineEmits<{ start: []; change: [ease: Ease]; end: [] }>()
 
-type Mode = 'easing' | 'spring'
-const MODE_OPTIONS = ['easing', 'spring']
-const MODE_LABELS = ['Easing', 'Spring']
-const mode = computed<Mode>(() => (isSpringEase(props.ease) ? 'spring' : 'easing'))
+type Mode = 'easing' | 'spring' | 'steps'
+const MODE_OPTIONS = ['easing', 'spring', 'steps']
+const MODE_LABELS = ['Easing', 'Spring', 'Steps']
+const mode = computed<Mode>(() => (isSpringEase(props.ease) ? 'spring' : isStepsEase(props.ease) ? 'steps' : 'easing'))
 
 // Per-mode memory (DialKit caches each mode so switching back restores previous edits).
-const cache = reactive<{ easing: Ease; spring: SpringEase }>({
-  easing: isSpringEase(props.ease) ? 'easeInOut' : props.ease,
+const cache = reactive<{ easing: Ease; spring: SpringEase; steps: StepsEase }>({
+  easing: isSpringEase(props.ease) || isStepsEase(props.ease) ? 'easeInOut' : props.ease,
   spring: isSpringEase(props.ease) ? props.ease : { type: 'spring', bounce: 0.2 },
+  steps: isStepsEase(props.ease) ? props.ease : { type: 'steps', count: 6 },
 })
-watch(() => props.ease, (e) => { if (isSpringEase(e)) cache.spring = e; else cache.easing = e }, { immediate: true })
+watch(() => props.ease, (e) => {
+  if (isSpringEase(e)) cache.spring = e
+  else if (isStepsEase(e)) cache.steps = e
+  else cache.easing = e
+}, { immediate: true })
 
 // Quick picks, as one more labelled row (DialKit has none; the named eases are Sailor's).
 const PRESETS: Array<{ l: string; v: Ease }> = [
@@ -54,7 +59,10 @@ function commitOnce(next: Ease) {
   if (easeEquals(next, props.ease)) return
   emit('start'); emit('change', next); emit('end')
 }
-function setMode(m: Mode) { if (m !== mode.value) commitOnce(m === 'spring' ? cache.spring : cache.easing) }
+function setMode(m: Mode) {
+  if (m === mode.value) return
+  commitOnce(m === 'spring' ? cache.spring : m === 'steps' ? cache.steps : cache.easing)
+}
 
 // ── Bézier graph ─────────────────────────────────────────────────────────────
 const box = ref<HTMLElement | null>(null)
@@ -155,39 +163,64 @@ const springView = computed(() => {
   }
 })
 
-// ── Bounce, on the shared Studio row ─────────────────────────────────────────
+// ── Bounce / Steps, on the shared Studio row ─────────────────────────────────
 // The row emits a value per pixel of a drag, and upstream `start` IS an undo step, so the
 // gesture has to be folded into one: pointerdown/keydown open a run, the FIRST change in it
 // emits `start`, and the release emits `end`. Lazy on purpose — a press that changes nothing
 // must not leave an empty step behind. Outside a gesture (typed value, double-click reset)
-// a change is complete on its own, which is exactly `commitOnce`.
+// a change is complete on its own, which is exactly `commitOnce`. Bounce and Steps never show
+// at once (one mode at a time), so they share one run.
 let run: UndoRun = NO_RUN
 const BOUNCE = 'bounce'
-// `data-owns-keys`: the row's track is arrow-keyable, and the modal nudges the selected
-// layer on the same keys unless the focused control claims them — as the hand-rolled
-// slider this replaces did.
-const bounceGesture = {
-  'data-owns-keys': '',
-  onPointerdown: () => { run = openRun(run, BOUNCE) },
-  onKeydown: () => { run = openRun(run, BOUNCE) },
-  onPointerup: () => endBounce(),
-  onPointercancel: () => endBounce(),
-  onLostpointercapture: () => endBounce(),
-  onKeyup: () => endBounce(),
-}
-function endBounce() {
+const STEPS = 'steps'
+function endGesture() {
   if (run.recorded) emit('end')
   run = closeRun()
 }
-function setBounce(b: number) {
-  const next: SpringEase = { type: 'spring', bounce: +Math.min(1, Math.max(0, b)).toFixed(2) }
+function commitGesture(key: string, next: Ease) {
   if (easeEquals(next, props.ease)) return
   if (run.key === null) { commitOnce(next); return }
-  const t = takeRecord(run, BOUNCE)
+  const t = takeRecord(run, key)
   run = t.run
   if (t.record) emit('start')
   emit('change', next)
 }
+// `data-owns-keys`: the row's track is arrow-keyable, and the modal nudges the selected
+// layer on the same keys unless the focused control claims them — as the hand-rolled
+// slider this replaces did.
+const gestureHandlers = (key: string) => ({
+  'data-owns-keys': '',
+  onPointerdown: () => { run = openRun(run, key) },
+  onKeydown: () => { run = openRun(run, key) },
+  onPointerup: endGesture,
+  onPointercancel: endGesture,
+  onLostpointercapture: endGesture,
+  onKeyup: endGesture,
+})
+const bounceGesture = gestureHandlers(BOUNCE)
+const stepsGesture = gestureHandlers(STEPS)
+function setBounce(b: number) {
+  commitGesture(BOUNCE, { type: 'spring', bounce: +Math.min(1, Math.max(0, b)).toFixed(2) })
+}
+const stepsCount = computed(() => (isStepsEase(props.ease) ? props.ease.count : cache.steps.count))
+function setSteps(n: number) {
+  commitGesture(STEPS, { type: 'steps', count: Math.round(n) })
+}
+
+// ── Steps graph (shares the spring graph's SVG frame: same grid, no handles) ─────────────────
+const stepsCountClamped = computed(() => Math.min(64, Math.max(1, Math.round(
+  Number.isFinite(stepsCount.value) ? stepsCount.value : 6))))
+const stepsView = computed(() => {
+  const n = stepsCountClamped.value
+  const X = (p: number) => p * SW
+  const Y = (v: number) => SH - (v * SH * 0.6 + SH * 0.2)
+  const d: string[] = [`M ${X(0)} ${Y(0)}`]
+  for (let i = 0; i < n; i++) {
+    const from = i / n, to = (i + 1) / n
+    d.push(`L ${X(to)} ${Y(from)}`, `L ${X(to)} ${Y(to)}`)   // hold, then jump
+  }
+  return { d: d.join(' ') }
+})
 </script>
 
 <template>
@@ -212,7 +245,7 @@ function setBounce(b: number) {
         @pointerdown="onDown($event, h)" @pointermove="onMove" @pointerup="(e) => { onMove(e); endDrag(e) }"
         @pointercancel="cancelDrag" @lostpointercapture="endDrag" @keydown="onKey($event, h)" />
     </div>
-    <svg v-else :viewBox="`0 0 ${SW} ${SH}`" class="w-full rounded-lg bg-white/[0.04]" data-testid="spring-viz" aria-label="Spring curve">
+    <svg v-else-if="mode === 'spring'" :viewBox="`0 0 ${SW} ${SH}`" class="w-full rounded-lg bg-white/[0.04]" data-testid="spring-viz" aria-label="Spring curve">
       <template v-for="i in 3" :key="i">
         <line :x1="(SW / 4) * i" y1="0" :x2="(SW / 4) * i" :y2="SH" stroke="rgba(255,255,255,.07)" stroke-width="1" />
         <line x1="0" :y1="(SH / 4) * i" :x2="SW" :y2="(SH / 4) * i" stroke="rgba(255,255,255,.07)" stroke-width="1" />
@@ -223,6 +256,13 @@ function setBounce(b: number) {
       </line>
       <path :d="springView.d" fill="none" stroke="#7c9cff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-testid="spring-path" />
     </svg>
+    <svg v-else :viewBox="`0 0 ${SW} ${SH}`" class="w-full rounded-lg bg-white/[0.04]" data-testid="steps-viz" aria-label="Step curve">
+      <template v-for="i in 3" :key="i">
+        <line :x1="(SW / 4) * i" y1="0" :x2="(SW / 4) * i" :y2="SH" stroke="rgba(255,255,255,.07)" stroke-width="1" />
+        <line x1="0" :y1="(SH / 4) * i" :x2="SW" :y2="(SH / 4) * i" stroke="rgba(255,255,255,.07)" stroke-width="1" />
+      </template>
+      <path :d="stepsView.d" fill="none" stroke="#7c9cff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-testid="steps-path" />
+    </svg>
 
     <!-- Type -->
     <StudioSegmentedRow label="Type"
@@ -230,7 +270,8 @@ function setBounce(b: number) {
       @update:model-value="(v) => setMode(v as Mode)" />
 
     <!-- Easing: bézier coordinates. The one control here that is NOT a Studio row — four
-         numbers typed as one string — so it borrows the row's geometry instead. -->
+         numbers typed as one string — so it borrows the row's geometry instead. Steps has no
+         curve to describe this way, so both this field and the Preset menu below stay hidden. -->
     <div v-if="mode === 'easing'"
       class="flex h-7 items-center justify-between gap-3 rounded-[6px] bg-white/[0.05] px-2.5">
       <span class="shrink-0 text-[11px] text-white/72">Ease</span>
@@ -246,9 +287,15 @@ function setBounce(b: number) {
       :model-value="presetValue" :options="presetOptions" @update:model-value="onPreset" />
 
     <!-- Spring: bounce -->
-    <StudioSlider v-else data-testid="spring-bounce" v-bind="bounceGesture"
+    <StudioSlider v-if="mode === 'spring'" data-testid="spring-bounce" v-bind="bounceGesture"
       label="Bounce" :model-value="bounce" :min="0" :max="1" :step="0.05" :default="0.2"
       @update:model-value="setBounce" />
+
+    <!-- Steps: how many jumps the move makes -->
+    <StudioSlider v-if="mode === 'steps'" data-testid="ease-steps" v-bind="stepsGesture"
+      label="Steps" :model-value="stepsCount" :min="2" :max="24" :step="1" :default="6"
+      hint="How many jumps the move makes. It holds still between them."
+      @update:model-value="setSteps" />
   </div>
 </template>
 
