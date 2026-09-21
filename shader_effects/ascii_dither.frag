@@ -296,11 +296,12 @@ void main() {
 #ifdef SAILOR_MATTE
     // Density follows the element's alpha, so nothing appears where it is transparent.
     // Must come BEFORE the Invert flip, or a transparent cell inverts to full ink.
-    // …and on a COMPRESSED tone (0.25–0.75 rather than 0–1): the transition ramps Brightness
-    // from −0.9 to +1 over the FIRST HALF of the bar, and on the raw tone a black element
-    // would stay empty for all of that ramp while a white one was already full. Bright still
-    // leads, dark no longer waits. The classic line above is untouched.
-    if (matte) g = clamp(mix(0.5, lum, 0.5) + jitter + u_brightness, 0.0, 1.0) * src.a;
+    // …and on a NARROW tone (0.425–0.575 rather than 0–1): tone decides who leads, the
+    // transition's Brightness ramp decides WHEN. On the raw tone a black element stayed empty
+    // for half the ramp; even at 0.25–0.75 a dark one drew nothing for the first sixth of the
+    // bar. Mirrored by PIXEL_TONE_MIN / MAX in ~/lib/motionx/reveal/pixels.ts (a spec pins
+    // the two together). The classic line above is untouched.
+    if (matte) g = clamp(mix(0.5, lum, 0.15) + jitter + u_brightness, 0.0, 1.0) * src.a;
 #endif
     if (u_invert > 0.5) g = 1.0 - g;
 

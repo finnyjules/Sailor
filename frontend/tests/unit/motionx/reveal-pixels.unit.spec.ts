@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   revealParams, revealCellDefault, REVEAL_STYLES, REVEAL_DEFAULTS,
   PIXEL_CHARS, PIXEL_END, PIXEL_JITTER,
-  pixelStages, pixelBlock, pixelBrightness, pixelSharp, pixelShaderParams, pixelFinest,
+  pixelStages, pixelBlock, pixelBrightness, PIXEL_TONE_MIN, PIXEL_TONE_MAX, pixelSharp, pixelShaderParams, pixelFinest,
   motionUsesPixels,
   type MotionReveal,
 } from '~/lib/motionx/reveal'
@@ -134,24 +134,40 @@ describe('pixelStages / pixelBlock', () => {
 })
 
 describe('pixelBrightness', () => {
-  // The matte shader's tone runs 0.25–0.75 with ±0.125 of jitter (see ascii_dither.frag).
+  // The matte shader's tone is compressed to PIXEL_TONE_MIN–MAX and its jitter is ±PIXEL_JITTER/2
+  // (see ascii_dither.frag — a spec there pins the same numbers).
+  const J = PIXEL_JITTER / 2
   const density = (tone: number, jitter: number, amount: number) => Math.min(1, Math.max(0, tone + jitter + pixelBrightness(amount)))
   it('draws nothing at all at amount 0, whatever the tone and the jitter', () => {
-    expect(pixelBrightness(0)).toBeCloseTo(-0.9, 9)
-    expect(density(0.75, 0.125, 0)).toBe(0)
+    expect(density(PIXEL_TONE_MAX, J, 0)).toBe(0)
   })
-  it('the coarsest blocks are SEEN: by the end of stage one (amount 0.2) bright and mid tones already have density', () => {
-    expect(density(0.75, 0, 0.2)).toBeGreaterThan(0.4)
-    expect(density(0.5, 0, 0.2)).toBeGreaterThan(0.2)
+  it('a transition STARTS when its bar starts: no tone waits more than a twelfth of the bar for its first cells', () => {
+    // Julien, on a 4s bar: "the effects only seem to kick in at the 2s mark". Part of that was
+    // a dead zone here: mid and dark tones drew nothing until 14–17% of the way through.
+    expect(density(PIXEL_TONE_MAX, J, 0.02)).toBeGreaterThan(0)      // bright: its first cells at once
+    expect(density(PIXEL_TONE_MAX, 0, 0.05)).toBeGreaterThan(0)      // bright: the typical cell by 5%
+    expect(density(PIXEL_TONE_MIN, J, 0.05)).toBeGreaterThan(0)      // black: its luckiest cells by 5%
+    expect(density(PIXEL_TONE_MIN, 0, 1 / 12)).toBeGreaterThan(0)    // black: the typical cell by 8%
   })
-  it('every covered cell is full by mid-bar, darkest tone and worst jitter included, and stays full', () => {
-    for (const a of [0.5, 0.6, 0.8, 1]) expect(density(0.25, -0.125, a)).toBe(1)
+  it('the coarsest blocks are SEEN: by the end of stage one (amount 0.2) every tone has real density', () => {
+    expect(density(PIXEL_TONE_MAX, 0, 0.2)).toBeGreaterThan(0.5)
+    expect(density(PIXEL_TONE_MIN, 0, 0.2)).toBeGreaterThan(0.35)
+  })
+  it('every covered cell is full by 40% of the bar, darkest tone and worst jitter included, and stays full', () => {
+    for (const a of [0.4, 0.5, 0.6, 0.8, 1]) expect(density(PIXEL_TONE_MIN, -J, a)).toBe(1)
     expect(pixelBrightness(1)).toBe(1)                       // never above the shader's own range
   })
   it('never falls as the amount rises; bad amounts clamp', () => {
     let prev = -Infinity
     for (let a = 0; a <= 1.0001; a += 0.02) { const b = pixelBrightness(a); expect(b).toBeGreaterThanOrEqual(prev); prev = b }
-    expect(pixelBrightness(-3)).toBeCloseTo(-0.9, 9); expect(pixelBrightness(9)).toBe(1); expect(pixelBrightness(NaN)).toBeCloseTo(-0.9, 9)
+    expect(pixelBrightness(-3)).toBe(pixelBrightness(0)); expect(pixelBrightness(9)).toBe(1); expect(pixelBrightness(NaN)).toBe(pixelBrightness(0))
+  })
+  it('the tone constants are the ones the shader uses', async () => {
+    const { readFileSync } = await import('node:fs'); const { resolve } = await import('node:path')
+    const frag = readFileSync(resolve(__dirname, '../../../../shader_effects/ascii_dither.frag'), 'utf8')
+    const spread = +(PIXEL_TONE_MAX - PIXEL_TONE_MIN).toFixed(3)
+    expect(PIXEL_TONE_MIN + spread / 2).toBeCloseTo(0.5, 9)
+    expect(frag).toContain(`mix(0.5, lum, ${spread})`)
   })
 })
 

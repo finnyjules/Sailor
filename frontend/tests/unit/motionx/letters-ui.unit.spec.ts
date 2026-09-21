@@ -21,7 +21,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { DEFAULT_TEXT_EASE, canAnimateLetters, evaluateTextBehaviours } from '~/lib/motionx/text'
-import { pixelBrightness } from '~/lib/motionx/reveal'
+import { PIXEL_TONE_MAX, pixelBrightness } from '~/lib/motionx/reveal'
 import { resetValue } from '~/lib/studio/row'
 import type { TextCell } from '~/lib/motionx/text/units'
 
@@ -467,16 +467,16 @@ describe('the Dither gallery tile ramps like the shader', () => {
     'utf8',
   )
 
-  it('compresses tone to 0.25–0.75 and ramps with pixelBrightness', () => {
-    expect(PREVIEW).toContain('0.25 + 0.5 * luma')
+  it('compresses tone with the library\'s own constants (the ones the shader uses) and ramps with pixelBrightness', () => {
+    expect(PREVIEW).toContain('PIXEL_TONE_MIN + (PIXEL_TONE_MAX - PIXEL_TONE_MIN) * luma')
     expect(PREVIEW).toContain('pixelBrightness(amount)')
     // the raw-luma version is gone
     expect(PREVIEW).not.toMatch(/clamp01\(luma \+ brightness\)/)
   })
 
   it('draws nothing at amount 0, for the brightest cell there is', () => {
-    // The tile's own test of the same arithmetic: tone 0.75 (pure white) at amount 0.
-    const brightest = 0.25 + 0.5 * 1
+    // The tile's own test of the same arithmetic: the top of the tone range (pure white) at amount 0.
+    const brightest = PIXEL_TONE_MAX
     expect(Math.min(1, Math.max(0, brightest + pixelBrightness(0)))).toBe(0)
   })
 })

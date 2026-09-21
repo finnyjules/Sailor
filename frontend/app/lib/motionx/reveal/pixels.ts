@@ -64,14 +64,22 @@ export function pixelBlock(amount: number, cell: number, finest: number = PIXEL_
   return cell / 2 ** Math.min(stages, Math.floor(clamp01(amount) * (stages + 1)))
 }
 
-/** The shader's Brightness across the bar. In matte mode the shader's tone runs 0.25–0.75 and
- *  its jitter ±0.125, so −0.9 draws nothing at all and +0.9 fills every covered cell. The ramp
- *  spends the FIRST HALF of the bar getting from one to the other — so the coarsest blocks
- *  (stage one, the first fifth) are already visible and growing, bright tones first — and
- *  the second half holds full density while the blocks refine: a mosaic resolving to the
- *  picture. (Found live: a −1 → +1 ramp over the whole bar left stage one invisible and had
- *  the element solid by mid-bar, so only two of the five stages were ever seen.) */
-export function pixelBrightness(amount: number): number { return Math.min(1, -0.9 + clamp01(amount) * 3.6) }
+/** The tone range the matte shader compresses luminance into (`mix(0.5, lum, 0.15)` in
+ *  ascii_dither.frag — a spec pins the two together). Narrow on purpose: tone decides who
+ *  leads, the BAR decides when things happen. A wide range made a dark layer sit empty for
+ *  the first sixth of the bar. */
+export const PIXEL_TONE_MIN = 0.425
+export const PIXEL_TONE_MAX = 0.575
+
+/** The shader's Brightness across the bar. With the tone above and ±PIXEL_JITTER/2 of jitter,
+ *  −0.7 draws nothing at all and +0.7 fills every covered cell. The ramp covers that in the
+ *  first 40% of the bar — so a transition visibly STARTS when its bar starts (bright cells at
+ *  once, the darkest within a twelfth), the coarsest blocks are seen growing — and the rest
+ *  of the bar holds full density while the blocks refine: a mosaic resolving to the picture.
+ *  (Found live, twice: a −1 → +1 ramp over the whole bar left stage one invisible; then a
+ *  wider tone left mid and dark layers empty for the first 14–17% — Julien: "the effects
+ *  only seem to kick in at the 2s mark".) */
+export function pixelBrightness(amount: number): number { return Math.min(1, -0.7 + clamp01(amount) * 3.5) }
 
 /** How much of the real, sharp layer is laid over the characters: most sets never become a
  *  solid picture, so the last fifth of the bar cross-fades to the layer itself. */

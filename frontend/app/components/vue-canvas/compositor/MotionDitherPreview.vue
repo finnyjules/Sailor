@@ -12,7 +12,7 @@
  *  The gallery popover only exists while open, so the loop's lifetime is the popover's:
  *  started in onMounted, cancelled in onBeforeUnmount. */
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { bayer8, pixelBrightness, pixelSharp } from '~/lib/motionx/reveal'
+import { bayer8, pixelBrightness, pixelSharp, PIXEL_TONE_MIN, PIXEL_TONE_MAX } from '~/lib/motionx/reveal'
 
 const props = defineProps<{ out: boolean }>()
 
@@ -95,11 +95,11 @@ function paint(amount: number, elapsed: number) {
       const si = (sy * COLS + sx) * 4
       const r = src[si]!, g = src[si + 1]!, b = src[si + 2]!, a = src[si + 3]!
       const luma = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-      // The shader's matte mode compresses tone to 0.25–0.75 before the Brightness ramp
+      // The shader's matte mode compresses tone to PIXEL_TONE_MIN–MAX before the Brightness ramp
       // (see `ascii_dither.frag`), so the tile has to as well: on raw luma the white caption
       // bar still lit about a tenth of its cells at amount 0, where the real transition
       // draws nothing at all — the tile started every cycle with a speckle it never shows.
-      const on = (a / 255) * clamp01(0.25 + 0.5 * luma + brightness) > bayer8(bx - drift, by)
+      const on = (a / 255) * clamp01(PIXEL_TONE_MIN + (PIXEL_TONE_MAX - PIXEL_TONE_MIN) * luma + brightness) > bayer8(bx - drift, by)
       const i = (y * COLS + x) * 4
       let pr = on ? r : 0, pg = on ? g : 0, pb = on ? b : 0, pa = on ? 255 : 0
       if (sharp > 0) {

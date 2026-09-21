@@ -57,7 +57,10 @@ registerBehaviour('fade', (b, target) => {
 // painter reads it through the fold (adapter/frame.ts `applyRevealBehaviours`).
 registerBehaviour('dither', (b) => {
   const w = window(b.timing)
-  return [b.params?.dir === 'out' ? numTrack('reveal', 1, 0, w) : numTrack('reveal', 0, 1, w)]
+  // LINEAR by default, unlike the other whole-layer moves: a reveal refines in stages across
+  // the bar, and an ease-in-out spends the first quarter of it barely moving — which reads as
+  // "nothing happens, then it all happens". The curve editor still overrides it.
+  return [b.params?.dir === 'out' ? numTrack('reveal', 1, 0, w, 'linear') : numTrack('reveal', 0, 1, w, 'linear')]
 })
 
 registerBehaviour('slide', (b, target) => {

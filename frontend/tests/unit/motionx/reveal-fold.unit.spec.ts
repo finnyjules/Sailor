@@ -24,6 +24,12 @@ describe('the dither compiler', () => {
     const tr = compileBehaviour(beh({ dir: 'out' }) as unknown as Behaviour, TARGET)
     expect(tr[0]!.keyframes.map((k) => k.value)).toEqual([1, 0])
   })
+  it('defaults to a LINEAR curve: the cells refine in stages, and a slow start wastes the first — most visible — one', () => {
+    for (const dir of ['in', 'out']) {
+      const tr = compileBehaviour(beh({ dir }) as unknown as Behaviour, TARGET)
+      expect(tr[0]!.keyframes[0]!.ease, dir).toBe('linear')
+    }
+  })
   it('honours params.ease like every other bar', () => {
     const tr = compileBehaviour(beh({ ease: 'linear' }) as unknown as Behaviour, TARGET)
     expect(tr[0]!.keyframes[0]!.ease).toBe('linear')
