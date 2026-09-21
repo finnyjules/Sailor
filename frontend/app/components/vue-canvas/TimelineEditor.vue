@@ -21,6 +21,7 @@ import { computeTotalFrames } from '~~/shared/timeline/types'
 import { interpolateClipAt } from '~~/shared/timeline/interpolate'
 import { resolveClipSource } from '~~/shared/timeline/resolveClipSource'
 import { snapGroupDelta, computeGroupResize, neighbourGaps, type Span, type ResizeMember } from '~~/shared/timeline/groupEdit'
+import { settleOverlaps } from '~~/shared/timeline/placement'
 import { collectProjectMediaFilenames } from '~/lib/timeline/projectMedia'
 import type { SpaceTypeState } from '~/lib/spacetype/state'
 import MotionClipInspector from '~/components/vue-canvas/timeline/MotionClipInspector.vue'
@@ -570,6 +571,8 @@ const drag = ref<null | {
   startStart: number
   startLength: number
   startIn: number
+  /** Track the clip sat on when the drag began (trackId follows cross-track moves). */
+  originTrackId: string
 }>(null)
 
 // Active snap target visualised as a vertical guideline during drag.
@@ -697,6 +700,7 @@ function onClipPointerDown(clipId: string, trackId: string, mode: 'move' | 'resi
     startStart: clip.start_frame,
     startLength: clip.length,
     startIn: clip.in_frame,
+    originTrackId: trackId,
   }
   // Snapshot starts of all selected clips for bulk move.
   if (mode === 'move' && selectedClipIds.value.size > 1) {
@@ -715,7 +719,7 @@ function onClipPointerDown(clipId: string, trackId: string, mode: 'move' | 'resi
 
 function onPlayheadPointerDown(e: PointerEvent) {
   e.preventDefault()
-  drag.value = { clipId: '', trackId: '', mode: 'playhead', startMouseX: e.clientX, startStart: 0, startLength: 0, startIn: 0 }
+  drag.value = { clipId: '', trackId: '', mode: 'playhead', startMouseX: e.clientX, startStart: 0, startLength: 0, startIn: 0, originTrackId: '' }
   const rect = stripRef.value!.getBoundingClientRect()
   const frame = Math.round(pxToFrames(e.clientX - rect.left))
   store.seekFrame(frame)
@@ -887,6 +891,18 @@ function onPointerUp() {
     kfDrag.value = null
     store.endGesture()
     return
+  }
+  // A move that ended on top of another clip: hop to a free track (still inside
+  // the gesture, so it is part of the same single undo step).
+  // Only when the clip really moved: a plain click on a clip that ALREADY
+  // overlaps another (older timelines allowed that) must not make it jump.
+  if (drag.value?.mode === 'move') {
+    const d = drag.value
+    const clip = findClip(d.clipId)
+    if (clip && (clip.start_frame !== d.startStart || d.trackId !== d.originTrackId)) {
+      const moved = draggingIds()
+      store.mutate(s => { settleOverlaps(s, moved, () => crypto.randomUUID()) })
+    }
   }
   drag.value = null
   snapGuideFrame.value = null
