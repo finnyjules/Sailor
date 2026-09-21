@@ -18,7 +18,14 @@ const acquire = (from: Canvas[]) => from.pop() ?? makeCanvas()
 
 export interface RevealPass { snap: Canvas; base: DOMMatrix; reveal: MotionReveal; W: number; H: number }
 
-export function beginReveal(ctx: CanvasRenderingContext2D, reveal: MotionReveal, W: number, H: number): RevealPass | null {
+/**
+ * `base`, when given, is used as the pass's frame transform INSTEAD of reading
+ * `ctx.getTransform()` — for a caller (the Pixels fallback in useCompositorLayers.ts) that
+ * captured the frame's own transform earlier, before a draw-time scale was layered on top of
+ * `ctx`'s current one; without this, `beginReveal`'s own `getTransform()` would capture that
+ * scale too, and the mask would size itself to the scaled layer instead of the frame.
+ */
+export function beginReveal(ctx: CanvasRenderingContext2D, reveal: MotionReveal, W: number, H: number, base?: DOMMatrix): RevealPass | null {
   const snap = acquire(pool)
   const dev = ctx.canvas
   if (snap.width !== dev.width) snap.width = dev.width
@@ -28,7 +35,7 @@ export function beginReveal(ctx: CanvasRenderingContext2D, reveal: MotionReveal,
   sctx.setTransform(1, 0, 0, 1, 0, 0)
   sctx.globalCompositeOperation = 'copy'
   sctx.drawImage(dev, 0, 0)
-  return { snap, base: ctx.getTransform(), reveal, W, H }
+  return { snap, base: base ?? ctx.getTransform(), reveal, W, H }
 }
 
 const IDENTITY = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }

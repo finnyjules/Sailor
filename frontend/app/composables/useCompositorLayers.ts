@@ -28,6 +28,7 @@ import { applyEffectDialTracks, type EffectDialTrack } from '~/lib/motion/effect
 import { applyMotionxTracks, applyTextBehaviours, applyRevealBehaviours, type TextMotion } from '~/lib/motionx/adapter/frame'
 import type { StoredBehaviour, Track as MotionxTrack } from '~/lib/motionx'
 import { beginReveal, finishReveal, type RevealPass } from '~/lib/motionx/reveal/paint'
+import { drawRevealPixels, revealPixelsReady } from '~/lib/motionx/reveal/paintPixels'
 import type { MotionReveal } from '~/lib/motionx/reveal'
 // Letter behaviours (unified motion, text slice): the per-glyph draw seam. Pure — canvas
 // primitives and plain data only — so the branches it serves inside drawText /
@@ -5687,9 +5688,15 @@ export function paintLayerStack(
       // A dither (reveal) bar mid-transition: nothing at all when fully hidden; otherwise keep
       // the backdrop so the hidden cells can be put back once the layer has drawn normally.
       const rv = (layer as unknown as { motionReveal?: MotionReveal }).motionReveal
+      // Pixels TRANSFORMS the layer (drawn further down, once its mask is known); the other
+      // styles MASK it: keep the backdrop so the hidden cells can be put back afterwards.
+      // While the shader is still loading, a Pixels bar draws as the Dissolve mask rather
+      // than flashing the whole layer.
+      let pixelsBase: DOMMatrix | null = null
       if (rv) {
         if (!(rv.amount > 0)) continue
-        revealOpen = beginReveal(ctx, rv, W, H)
+        if (rv.style === 'pixels' && revealPixelsReady()) pixelsBase = ctx.getTransform()
+        else revealOpen = beginReveal(ctx, rv.style === 'pixels' ? { ...rv, style: 'dissolve' } : rv, W, H)
       }
 
       // motionx `scale` on a layer kind with no native scale: draw-time scale about the centre.
@@ -5704,6 +5711,19 @@ export function paintLayerStack(
 
       const ref = layerMaskRef(layer)
       const maskItem = ref ? byKey.get(ref) ?? null : null
+      // Pixels: the layer is drawn ALONE at full opacity, run through the ASCII shader, and
+      // stamped with its own opacity and blend. Effects that read the backdrop and the
+      // pre-timeline animation engine sit out the transition (spec addendum). If it cannot
+      // run after all, fall back to the Dissolve mask for this frame.
+      if (rv && pixelsBase) {
+        const solo = { ...layer, opacity: 1, blend: 'normal' } as LocalLayer
+        const drawSolo = (target: CanvasRenderingContext2D) => {
+          if (maskItem && maskItem.type !== 'local') drawItemMasked(target, { ...item, layer: solo }, maskItem, W, H, 'source-over', 1)
+          else drawLocalLayer(target, solo, W, H, maskItem?.type === 'local' ? maskItem.layer : null, 1)
+        }
+        if (drawRevealPixels(ctx, rv, W, H, pixelsBase, drawSolo, { alpha: (layer.opacity ?? 1) * opacityMul, blend: localBlendOp(layer) })) continue
+        revealOpen = beginReveal(ctx, { ...rv, style: 'dissolve' }, W, H, pixelsBase)
+      }
       const motionActive = t !== undefined && motion && _motionPainterImpl
         && (layer.animation || (maskItem?.type === 'local' && maskItem.layer.animation))
       if (motionActive) {

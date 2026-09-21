@@ -196,6 +196,14 @@ describe('beginReveal', () => {
     expect(beginReveal(ctx, dissolve(), W, H)).toBeNull()
     expect(factoryCanvases).toHaveLength(1)
   })
+
+  it('uses a given 5th `base` argument instead of reading ctx.getTransform() (the Pixels fallback, whose frame transform predates a draw-time scale already on ctx)', () => {
+    const { ctx } = harness()
+    ctx.setTransform(2, 0, 0, 1, 0, 5)   // whatever ctx's CURRENT transform happens to be…
+    const given = new FakeMatrix({ a: 9, b: 0, c: 0, d: 9, e: 100, f: 200 })
+    const pass = beginReveal(ctx, dissolve(), W, H, given as unknown as DOMMatrix)
+    expect(pass!.base).toBe(given)   // …is ignored in favour of the one passed in
+  })
 })
 
 // ── 2+3+5. finish — dissolve/wipe: op order, mask content, balanced ctx state ───────────────
