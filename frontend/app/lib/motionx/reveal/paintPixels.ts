@@ -17,19 +17,42 @@ type Canvas = HTMLCanvasElement
 let makeCanvas: () => Canvas = () => document.createElement('canvas')
 let render: typeof renderFieldWithBase = renderFieldWithBase
 let ready: () => boolean = () => fieldEffectReady('ascii_dither')
+let warn: (message: string) => void = (message) => { if (import.meta.dev) console.warn(message) }
 
-/** Tests only: swap the canvas factory, the shader render call, and/or the readiness check
- *  so the spec never touches WebGL or the shaderfx catalog. Swapping the canvas factory
- *  resets both scratch pools, so a fake canvas from a previous test can never leak into the
- *  next one. */
+/** Tests only: swap the canvas factory, the shader render call, the readiness check and/or
+ *  the dev warning sink so the spec never touches WebGL or the shaderfx catalog. Swapping
+ *  the canvas factory resets both scratch pools, so a fake canvas from a previous test can
+ *  never leak into the next one; swapping the warning sink resets its once-per-session
+ *  latch, for the same reason. */
 export function setRevealPixelsDeps(deps: {
   makeCanvas?: () => Canvas
   render?: typeof renderFieldWithBase
   ready?: () => boolean
+  warn?: (message: string) => void
 }): void {
   if (deps.makeCanvas) { makeCanvas = deps.makeCanvas; soloPool.length = 0; outPool.length = 0 }
   if (deps.render) render = deps.render
   if (deps.ready) ready = deps.ready
+  if (deps.warn) { warn = deps.warn; warnedOversize = false }
+}
+
+/** The widest/tallest side the shader pass is rendered at. The old gate was on AREA
+ *  (16,000,000 px), which is below an ordinary 4096×4096 artboard and below 16:9 at
+ *  5334×3000 — so a perfectly normal export silently came out in the Dissolve look
+ *  instead. A canvas SIDE is what browsers and GL actually limit, so that is what this
+ *  gates on. */
+const MAX_FRAME_SIDE = 8192
+let warnedOversize = false
+/** Says ONCE per session, in dev, that the character transition has been swapped for the
+ *  Dissolve mask — the one fallback here the user cannot otherwise tell apart from a
+ *  deliberate choice of style. */
+function warnOversize(fw: number, fh: number): void {
+  if (warnedOversize) return
+  warnedOversize = true
+  warn(
+    `[motionx] the Pixels dither transition needs a frame of at most ${MAX_FRAME_SIDE}px on a side; ` +
+    `this frame is ${fw}×${fh}px, which is too large, so the Dissolve mask is used instead.`,
+  )
 }
 
 // Two STACKS, not singletons — mirrors paint.ts's `pool`/`smallPool` split. `solo` holds the
@@ -74,7 +97,8 @@ export function drawRevealPixels(
   if (Math.abs(base.b) > 1e-6 || Math.abs(base.c) > 1e-6) return false
   const fw = Math.round(W * base.a)
   const fh = Math.round(H * base.d)
-  if (fw < 2 || fh < 2 || fw * fh > 16_000_000) return false
+  if (fw < 2 || fh < 2) return false
+  if (fw > MAX_FRAME_SIDE || fh > MAX_FRAME_SIDE) { warnOversize(fw, fh); return false }
 
   // 2. Draw the layer alone onto a frame-sized side canvas. Its transform is the CURRENT one
   // (base, plus whatever draw-time scale the caller already applied on top of it) moved so

@@ -12,7 +12,7 @@
  * `globalThis` for the duration of the suite only — never as an environment guard inside
  * `paintPixels.ts` itself.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
@@ -219,14 +219,40 @@ describe('drawRevealPixels — the frame-transform gate', () => {
     expect(calls).toHaveLength(0)
   })
 
-  it('a frame whose pixel area exceeds 16,000,000 returns false untouched', () => {
-    const { calls, ctx, factoryCanvases } = harness()
-    setCurrentTransform(ctx)
-    calls.length = 0
-    const huge = new FakeMatrix({ a: 100, b: 0, c: 0, d: 100, e: 0, f: 0 }) as unknown as DOMMatrix
-    expect(drawRevealPixels(ctx, pixels(), 5000, 5000, huge, () => { throw new Error('must not draw') }, stamp)).toBe(false)
-    expect(factoryCanvases).toHaveLength(0)
-    expect(calls).toHaveLength(0)
+  // The gate used to be on AREA (16,000,000 px), which flipped a perfectly ordinary
+  // 4096×4096 or 5334×3000 export to the Dissolve mask — a different look, silently. The
+  // real limit is the browser's canvas SIDE, so the gate is per-side and says so in dev.
+  const identity = () => new FakeMatrix({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }) as unknown as DOMMatrix
+
+  it('a 8192×4608 frame — 37.7 megapixels — still runs', () => {
+    const result = { __scratchId: 'result' }
+    const { render } = fakeRender(result)
+    const { ctx } = harness(render)
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    expect(drawRevealPixels(ctx, pixels(), 8192, 4608, identity(), () => {}, stamp)).toBe(true)
+  })
+
+  it('a side over 8192px returns false untouched, either way round', () => {
+    for (const [w, h] of [[8193, 100], [100, 8193]] as const) {
+      const { calls, ctx, factoryCanvases } = harness()
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      calls.length = 0
+      expect(drawRevealPixels(ctx, pixels(), w, h, identity(), () => { throw new Error('must not draw') }, stamp)).toBe(false)
+      expect(factoryCanvases).toHaveLength(0)
+      expect(calls).toHaveLength(0)
+    }
+  })
+
+  it('warns ONCE per session that the frame is too large and the Dissolve mask is used instead', () => {
+    const warn = vi.fn()
+    const { ctx } = harness()
+    setRevealPixelsDeps({ warn })
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    for (let i = 0; i < 5; i++) drawRevealPixels(ctx, pixels(), 9000, 9000, identity(), () => {}, stamp)
+    expect(warn).toHaveBeenCalledTimes(1)
+    const said = String(warn.mock.calls[0]![0])
+    expect(said).toMatch(/too large/i)
+    expect(said).toMatch(/dissolve/i)
   })
 })
 
