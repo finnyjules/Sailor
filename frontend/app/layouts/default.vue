@@ -15,7 +15,7 @@ import { tweenValue, shouldAnimateWalletChange } from '~/lib/countTween'
 import RollingNumber from '~/components/RollingNumber.vue'
 import { injectLoraStyleIntoPrompt } from '~/lib/graph/styleInject'
 import { applyPendingPromotes } from '~/lib/draft/promote'
-import { healDanglingLinks, stripVarsLinks, collectKeepSet, collectKeepSetDownstream } from '~/composables/useFilteredPrompt'
+import { stripVarsLinks, collectKeepSet, collectKeepSetDownstream } from '~/composables/useFilteredPrompt'
 import { stripFrontendOnlyNodes } from '~/utils/stripFrontendOnlyNodes'
 import { FRONTEND_ONLY_NODE_TYPES } from '~/lib/agent/capabilities'
 import { brandKitToKv, brandSwatches as kitSwatches } from '~~/shared/brand/resolve'
@@ -43,7 +43,7 @@ import { extractOutputFiles, type GenOutput, type GenerationRecord } from '~/lib
 import { extractCoverImages } from '~/lib/projectCover'
 import { filterToExistingImages } from '~/lib/coverBackfill'
 import {
-  BLANK_WORKFLOW, activeCanvasOf, docHasContent, isProjectDoc,
+  activeCanvasOf, docHasContent, isProjectDoc,
   makeBlankWorkflow, makeCanvasId, nextCanvasName, pickNewerDoc, stampDocForSave, toProjectDoc,
   type ProjectCanvas, type ProjectDoc,
 } from '~/lib/projectDoc'
@@ -113,18 +113,8 @@ function finishRenaming() {
 function cancelRenaming() {
   editingTabId.value = null
 }
-const { explainActive, activateExplain, deactivateExplain, highlightedNodeId } = useExplain()
+const { explainActive, activateExplain, deactivateExplain } = useExplain()
 const { openNodeSearch } = useNodeSearch()
-
-// Send highlight/clear to iframe when hovered node changes
-watch(highlightedNodeId, (nodeId, oldNodeId) => {
-  if (nodeId != null) {
-    sendToActiveProjectIframe('highlightNode', { nodeId })
-  }
-  else if (oldNodeId != null) {
-    sendToActiveProjectIframe('clearHighlight')
-  }
-})
 
 // Ordered roughly along a typical session:
 //   tools → sources → make/edit → power-user → help.
@@ -340,7 +330,6 @@ function onStartModalSkip() {
 const activeTool = ref<string>('select')
 
 const activeSidebarItem = ref<string | null>(null)
-const vueSidebarOpen = ref(false) // tracks whether ComfyUI left sidebar panel is visible in Vue mode
 const vueNodesSidebarOpen = ref(false) // tracks whether the native Nodes sidebar is open in Vue mode
 const vueRightPanelOpen = ref(false) // tracks whether Vue right panel (Workflow Overview) is visible
 // Node inspector right panel — edits the selected node's mechanical settings.
@@ -435,10 +424,7 @@ function runSidebarItem(item: any) {
     if (item.tool === 'explain') {
       activateExplain()
     }
-    else if (!vueNodesEnabled.value) {
-      sendToActiveProjectIframe('setCanvasTool', { tool: item.tool })
-    }
-    // In Vue mode, Select/Hand work natively via Vue Flow
+    // Select/Hand work natively via Vue Flow
   }
   else if (item?.panel === 'toolbox' || item?.panel === 'generators' || item?.panel === 'loras' || item?.panel === 'characters' || item?.panel === 'blocks' || item?.panel === 'assets' || item?.panel === 'templates') {
     // Left canvas panels are mutually exclusive — opening one closes the rest.
@@ -460,46 +446,19 @@ function runSidebarItem(item: any) {
     const wasActive = activeSidebarItem.value === item.label
     activeSidebarItem.value = wasActive ? null : item.label
 
-    if (vueNodesEnabled.value) {
-      // Vue mode: use native panels where available, iframe for the rest
-      if (item.tabId === 'node-library') {
-        vueNodesSidebarOpen.value = !wasActive
-        vueSidebarOpen.value = false
-      } else {
-        vueNodesSidebarOpen.value = false
-        sendToActiveProjectIframe('toggleSidebarTab', { tabId: item.tabId })
-        vueSidebarOpen.value = !wasActive
-      }
-    } else {
-      sendToActiveProjectIframe('toggleSidebarTab', { tabId: item.tabId })
-    }
+    // The Nodes library is the only tab-style sidebar item, and it is a native panel.
+    if (item.tabId === 'node-library') vueNodesSidebarOpen.value = !wasActive
+    else vueNodesSidebarOpen.value = false
   }
 }
 
 const minimapActive = ref(false)
 
-function zoomIn() {
-  if (vueNodesEnabled.value) { vueCanvasRef.value?.zoomIn?.() }
-  else { sendToActiveProjectIframe('canvasZoom', { direction: 'in' }) }
-}
-function zoomOut() {
-  if (vueNodesEnabled.value) { vueCanvasRef.value?.zoomOut?.() }
-  else { sendToActiveProjectIframe('canvasZoom', { direction: 'out' }) }
-}
-function zoomReset() {
-  if (vueNodesEnabled.value) { vueCanvasRef.value?.fitView?.() }
-  else { sendToActiveProjectIframe('canvasZoom', { direction: 'reset' }) }
-}
+function zoomIn() { vueCanvasRef.value?.zoomIn?.() }
+function zoomOut() { vueCanvasRef.value?.zoomOut?.() }
+function zoomReset() { vueCanvasRef.value?.fitView?.() }
 function toggleMinimap() {
   minimapActive.value = !minimapActive.value
-  if (!vueNodesEnabled.value) sendToActiveProjectIframe('toggleMinimap')
-}
-
-function sendToActiveProjectIframe(action: string, payload?: any) {
-  const iframe = getSharedIframe()
-  if (iframe?.contentWindow) {
-    iframe.contentWindow.postMessage({ type: 'sailor', action, ...payload }, '*')
-  }
 }
 
 // Surface a ComfyUI node_errors validation map the same way the bridge
@@ -538,7 +497,7 @@ function surfaceQueueError(nodeErrors: any, fallbackMessage?: string, opts?: { s
   currentRunSilent.value = false
 }
 
-// Run workflow from Vue canvas — loads into bridge iframe, then queues via bridge.
+// Run workflow from Vue canvas — builds the prompt and queues it directly on /prompt.
 // When `targetIds` is provided, runs only that subset (plus upstream deps).
 // Forgiving filtering happens via buildFilteredWorkflow which mutes everything
 // outside the keep set; LiteGraph already honors mode=2 at queue time.
@@ -861,8 +820,8 @@ async function runVueWorkflow(
   //
   // SCOPE: this lock covers ONLY assembly — producing firstTake + extraTakes
   // (plainWorkflow + directPrompt) plus the once-only cost-confirm gate. It
-  // does NOT cover dispatch. The DISPATCH (sendLoadWorkflow + bridge queuePrompt
-  // post, or direct queueSmart/queueParallel) operates on the already-assembled
+  // does NOT cover dispatch. The DISPATCH (direct queueSmart/queueParallel)
+  // operates on the already-assembled
   // artifacts and runs AFTER the lock releases. This matters because queueSmart's
   // spill path awaits an /api/pool/ensure probe (up to 35s on a wedged cold
   // boot) BEFORE the /prompt POST — holding the global lock across that probe
@@ -1633,9 +1592,6 @@ function onRestoreVersion(body: any) {
   markDocEdited(tab.id) // keep docEditedAt coherent with the explicit stamp
   savedWorkflows[tab.id] = doc
   persistWorkflows()
-  if (!vueNodesEnabled.value) {
-    sendLoadWorkflow(JSON.parse(JSON.stringify(activeCanvasOf(savedWorkflows[tab.id]).workflow)))
-  }
 }
 
 // ── Multi-canvas operations (project menu) ──────────────────────────────────
@@ -1699,9 +1655,9 @@ function handleMarkReady(e: Event) {
   toast[added ? 'success' : 'info'](added ? 'Marked ready' : 'Already in deliverables')
 }
 
-// Re-entrancy guard: a switch serializes the outgoing canvas, swaps the doc's
-// active id, and (in LiteGraph mode) pushes the target into the iframe. Block
-// further switches until that completes so two rapid clicks can't interleave.
+// Re-entrancy guard: a switch serializes the outgoing canvas and swaps the doc's
+// active id. Block further switches until that completes so two rapid clicks
+// can't interleave.
 const canvasSwitching = ref(false)
 
 // Project view mode: 'canvas' shows the node graph, 'deliverables' shows the
@@ -1725,21 +1681,11 @@ async function switchProjectCanvas(canvasId: string) {
   if (!target) return
   canvasSwitching.value = true
   try {
-    if (vueNodesEnabled.value) {
-      // Serialize the outgoing canvas first (guarded against mid-load/empty
-      // snapshots), then swap the active id — the activeTabWorkflow computed
-      // changes reference and the canvas prop watch rebuilds the graph.
-      snapshotActiveCanvasIntoDoc(tab.id)
-      doc.activeCanvasId = canvasId
-    }
-    else {
-      const workflow = await getWorkflowFromIframe()
-      if (workflow && (workflow.nodes?.length ?? 0) > 0) {
-        activeCanvasOf(doc).workflow = workflow
-      }
-      doc.activeCanvasId = canvasId
-      await sendLoadWorkflow(JSON.parse(JSON.stringify(target.workflow || BLANK_WORKFLOW)))
-    }
+    // Serialize the outgoing canvas first (guarded against mid-load/empty
+    // snapshots), then swap the active id — the activeTabWorkflow computed
+    // changes reference and the canvas prop watch rebuilds the graph.
+    snapshotActiveCanvasIntoDoc(tab.id)
+    doc.activeCanvasId = canvasId
     markDocEdited(tab.id) // the switch itself changes persisted doc content
     persistWorkflows()
     saveDurableVersion(tab, doc)
@@ -1826,22 +1772,12 @@ function renameActiveProject(name: string) {
 }
 
 // The full doc with the live canvas serialized in, deep-copied — what a named
-// version snapshot should contain. Async because the LiteGraph path has to
-// round-trip through the iframe.
+// version snapshot should contain. Async only because its callers await it.
 async function getProjectDocForVersionSave(): Promise<any | null> {
   const tab = activeTab.value
   if (tab.type !== 'project') return null
-  if (vueNodesEnabled.value) {
-    const doc = snapshotActiveCanvasIntoDoc(tab.id)
-    return doc ? JSON.parse(JSON.stringify(toRaw(doc))) : null
-  }
-  const doc = toProjectDoc(savedWorkflows[tab.id])
-  savedWorkflows[tab.id] = doc
-  const workflow = await getWorkflowFromIframe()
-  if (workflow && (workflow.nodes?.length ?? 0) > 0) {
-    activeCanvasOf(doc).workflow = workflow
-  }
-  return JSON.parse(JSON.stringify(toRaw(doc)))
+  const doc = snapshotActiveCanvasIntoDoc(tab.id)
+  return doc ? JSON.parse(JSON.stringify(toRaw(doc))) : null
 }
 
 // Autosave: snapshot current canvas and persist to sessionStorage.
@@ -2000,7 +1936,6 @@ onUnmounted(() => {
   window.removeEventListener('sailor:liveRun', handleLiveRun)
   if (autosaveDebounceTimer) { clearTimeout(autosaveDebounceTimer); autosaveDebounceTimer = null }
 })
-let sharedIframeReady = false
 // True while a workflow is being pushed into the canvas (incl. waiting for the
 // bridge to become ready on a cold start). Drives the loading overlay so the
 // wait reads as "initializing", not a dead/broken button.
@@ -2041,11 +1976,12 @@ function resetBridgeReady() {
 // the canvas straight at an ungated engine, and the old `|| 127.0.0.1:8188`
 // fallback did it even with the variable unset.
 const comfyOrigin = engineOrigin(useRuntimeConfig().public)
-const comfyIframeSrc = ref(`${comfyOrigin}/`)
+// Backend came back (or the console escape hatch fired). There is no engine
+// iframe to reload any more — the Vue canvas holds the graph itself — so this
+// only clears a loading overlay that a dead backend may have left up.
 function forceReloadCanvas() {
   resetBridgeReady()
   endWorkflowLoading()
-  comfyIframeSrc.value = `${comfyOrigin}/?_cb=${Date.now()}`
 }
 
 // Backend boot/ready loader. Polls the backend; on a genuine restart recovery,
@@ -2197,10 +2133,6 @@ const runningCanvasByWorker = reactive<Record<number, string | null>>({})
 // tab's animation) and re-apply the right running node when you switch tabs.
 const activeWorker = computed(() => workerForTab(activeTab.value?.id))
 
-function getWorkerIframe(idx: number): HTMLIFrameElement | null {
-  if (idx === 0) return getSharedIframe()
-  return document.querySelector(`iframe[data-worker="${idx}"]`) as HTMLIFrameElement | null
-}
 function workerIndexOfFrame(win: Window | null): number | null {
   if (!win) return null
   if (getSharedIframe()?.contentWindow === win) return 0
@@ -2220,19 +2152,6 @@ function markWorkerReady(idx: number) {
   ;(workerReadyResolvers[idx] || []).forEach(r => r())
   workerReadyResolvers[idx] = []
 }
-function waitForWorkerReady(idx: number, timeoutMs = 120000): Promise<void> {
-  if (idx === 0) return waitForBridgeReady(timeoutMs) // reuse existing global handshake
-  if (workerReady[idx]) return Promise.resolve()
-  return new Promise((resolve) => {
-    let done = false
-    const finish = () => { if (done) return; done = true; clearInterval(poll); clearTimeout(to); resolve() }
-    ;(workerReadyResolvers[idx] ||= []).push(finish)
-    const nudge = () => getWorkerIframe(idx)?.contentWindow?.postMessage({ type: 'sailor', action: 'requestStatus' }, '*')
-    nudge()
-    const poll = setInterval(() => { if (workerReady[idx]) finish(); else nudge() }, 500)
-    const to = setTimeout(finish, timeoutMs)
-  })
-}
 
 function markBridgeReady() {
   if (bridgeIsReady) return
@@ -2241,96 +2160,13 @@ function markBridgeReady() {
   bridgeReadyResolve?.()
 }
 
-// Resolve once the bridge signals ready. Nudges the bridge with requestStatus in
-// case our listener attached after it already broadcast (e.g. a frontend-only
-// reload while ComfyUI stays loaded). Falls back after timeoutMs so we never hang.
-function waitForBridgeReady(timeoutMs = 120000): Promise<void> {
-  if (bridgeIsReady) return Promise.resolve()
-  return new Promise((resolve) => {
-    let done = false
-    const finish = () => {
-      if (done) return
-      done = true
-      clearInterval(poll)
-      clearTimeout(to)
-      resolve()
-    }
-    bridgeReadyPromise.then(finish)
-    const nudge = () => {
-      getSharedIframe()?.contentWindow?.postMessage({ type: 'sailor', action: 'requestStatus' }, '*')
-    }
-    nudge()
-    const poll = setInterval(() => { if (bridgeIsReady) finish(); else nudge() }, 500)
-    const to = setTimeout(finish, timeoutMs)
-  })
-}
-
 function getSharedIframe(): HTMLIFrameElement | null {
   return document.querySelector('[data-tab-id="comfyui-shared"] iframe') as HTMLIFrameElement | null
-}
-
-function beginWorkflowLoading() {
-  workflowLoading.value = true
-  if (workflowLoadingTimer) clearTimeout(workflowLoadingTimer)
-  // Safety net: never let the overlay get stuck if the bridge never confirms.
-  workflowLoadingTimer = setTimeout(() => { workflowLoading.value = false }, 125000)
 }
 
 function endWorkflowLoading() {
   workflowLoading.value = false
   if (workflowLoadingTimer) { clearTimeout(workflowLoadingTimer); workflowLoadingTimer = null }
-}
-
-async function sendLoadWorkflow(workflow: any, workerIdx = 0) {
-  // Final-boundary invariant: null any input.link that doesn't resolve to a
-  // link in links[]. ComfyUI's graphToPrompt aborts the whole run on the first
-  // dangling ref ("No link found in parent graph for id [N] slot [S]"), so we
-  // heal here — the last place the workflow is ours before it crosses into the
-  // bridge iframe. The warn surfaces the exact node/link when it fires so a
-  // recurring source can be traced.
-  const healed = healDanglingLinks(workflow)
-  if (healed.length) {
-    console.warn('[Sailor] healed dangling input link(s) before load:', healed,
-      '| has definitions:', !!workflow?.definitions,
-      '| nodes:', workflow?.nodes?.length, '| links:', workflow?.links?.length)
-  }
-  beginWorkflowLoading()
-  await waitForWorkerReady(workerIdx)
-  const iframe = getWorkerIframe(workerIdx)
-  if (iframe?.contentWindow) {
-    iframe.contentWindow.postMessage({ type: 'sailor', action: 'loadWorkflow', workflow }, '*')
-  }
-  else {
-    endWorkflowLoading()
-  }
-  // Otherwise cleared when the bridge confirms via the 'workflow_loaded' event.
-}
-
-function getWorkflowFromIframe(): Promise<any> {
-  return new Promise((resolve) => {
-    const iframe = getSharedIframe()
-    if (!iframe?.contentWindow) { resolve(null); return }
-
-    let resolved = false
-    const handler = (event: MessageEvent) => {
-      if (resolved) return
-      if (event.data?.type === 'sailor-bridge' && event.data?.event === 'workflow_data') {
-        resolved = true
-        window.removeEventListener('message', handler)
-        resolve(event.data.workflow)
-      }
-    }
-    window.addEventListener('message', handler)
-    iframe.contentWindow.postMessage({ type: 'sailor', action: 'getWorkflow' }, '*')
-    // Timeout fallback
-    setTimeout(() => {
-      if (!resolved) {
-        resolved = true
-        window.removeEventListener('message', handler)
-        resolve(null)
-      }
-    }, 2000)
-  })
 }
 
 async function fetchWorkflowFromHistory(promptId: string): Promise<any> {
@@ -2414,19 +2250,6 @@ async function loadWorkflowForTab(tab: any) {
       }
     }
   }
-  else {
-    // LiteGraph mode: send the doc's active canvas to the iframe
-    if (saved) {
-      await sendLoadWorkflow(JSON.parse(JSON.stringify(activeCanvasOf(toProjectDoc(saved)).workflow)))
-    }
-    else if (tab.promptId) {
-      const workflow = await fetchWorkflowFromHistory(tab.promptId)
-      await sendLoadWorkflow(workflow || BLANK_WORKFLOW)
-    }
-    else {
-      await sendLoadWorkflow(BLANK_WORKFLOW)
-    }
-  }
   currentProjectTabId = tab.id
   persistWorkflows()
   // Claim editing leadership for this project (resolves to leader/follower in
@@ -2454,27 +2277,6 @@ function handleLoadTabWorkflow(e: Event) {
   }
 }
 
-async function onSharedIframeLoad(event: Event) {
-  const iframe = event.target as HTMLIFrameElement
-  if (!iframe?.contentWindow) return
-
-  // A fresh iframe load means the bridge will (re)announce readiness.
-  resetBridgeReady()
-  // Wait for the bridge to signal ComfyUI is actually usable (window.app + node
-  // defs loaded) instead of guessing with a fixed delay. Vue mode doesn't drive
-  // workflows through the iframe, so it doesn't need to block on this.
-  if (!vueNodesEnabled.value) {
-    await waitForBridgeReady()
-  }
-  sharedIframeReady = true
-
-  // Load the workflow for the currently active project tab
-  const tab = activeTab.value
-  if (tab.type === 'project') {
-    await loadWorkflowForTab(tab)
-  }
-}
-
 // Save/restore workflows when switching between tabs
 watch(activeTabId, async (newId, oldId) => {
   const oldTab = tabs.value.find((t) => t.id === oldId)
@@ -2484,20 +2286,7 @@ watch(activeTabId, async (newId, oldId) => {
   // canvas's slot of the tab's doc. snapshotActiveCanvasIntoDoc guards
   // against empty/mid-load snapshots clobbering a good saved canvas.
   if (oldTab?.type === 'project') {
-    if (vueNodesEnabled.value) {
-      snapshotActiveCanvasIntoDoc(oldTab.id)
-    }
-    else if (sharedIframeReady && currentProjectTabId === oldTab.id) {
-      // Same guard as the Vue path: if this tab's workflow never finished
-      // loading, the iframe still shows the PREVIOUS tab's graph — saving it
-      // here would duplicate that graph into this tab's doc.
-      const workflow = await getWorkflowFromIframe()
-      if (workflow && (workflow.nodes?.length ?? 0) > 0) {
-        const doc = toProjectDoc(savedWorkflows[oldTab.id])
-        savedWorkflows[oldTab.id] = doc
-        activeCanvasOf(doc).workflow = workflow
-      }
-    }
+    snapshotActiveCanvasIntoDoc(oldTab.id)
     persistWorkflows()
     saveDurableVersion(oldTab, savedWorkflows[oldTab.id])
   }
@@ -2508,28 +2297,6 @@ watch(activeTabId, async (newId, oldId) => {
   }
 })
 
-// When Vue mode is toggled, transfer the workflow between iframe ↔ Vue canvas
-watch(vueNodesEnabled, async (enabled) => {
-  const tab = activeTab.value
-  if (tab.type !== 'project') return
-
-  if (enabled) {
-    // ALWAYS fetch fresh — don't trust cache (may be BLANK_WORKFLOW from earlier failure)
-    if (tab.promptId) {
-      const wf = await fetchWorkflowFromHistory(tab.promptId)
-      if (wf) savedWorkflows[tab.id] = toProjectDoc(wf)
-    }
-    if (!savedWorkflows[tab.id]) {
-      savedWorkflows[tab.id] = toProjectDoc(makeBlankWorkflow())
-    }
-    currentProjectTabId = null
-    await loadWorkflowForTab(tab)
-  }
-})
-
-// ComfyUI sidebar width and tab bar height to crop via CSS
-const COMFY_SIDEBAR_W = 0
-const COMFY_TABBAR_H = 0
 
 // Status indicator colors
 const statusColor = (status?: string) => {
@@ -4333,41 +4100,6 @@ function dismissRunResult() {
 
         <!-- Toast notifications (anchored below Run bar) -->
         <Sonner />
-
-        <!-- LiteGraph iframe (worker 0 — loaded for execution; sidebar panels
-             reused in Vue mode). Never in hosted mode: this is the engine
-             origin, and it is the frame bridge.js posts from. -->
-        <div
-          v-if="!hostedShell && !directExecutionEnabled && tabs.some((t) => t.type === 'project')"
-          v-show="(!vueNodesEnabled && activeTab.type === 'project') || (vueNodesEnabled && vueSidebarOpen)"
-          data-tab-id="comfyui-shared"
-          class="absolute inset-0 overflow-hidden z-30"
-          :style="vueNodesEnabled && vueSidebarOpen ? { width: '320px', right: 'auto' } : {}"
-        >
-          <iframe
-            :src="comfyIframeSrc"
-            class="border-0 absolute"
-            @load="onSharedIframeLoad"
-            :style="{
-              left: `-${COMFY_SIDEBAR_W}px`,
-              top: `-${COMFY_TABBAR_H}px`,
-              width: `calc(100% + ${COMFY_SIDEBAR_W}px)`,
-              height: `calc(100% + ${COMFY_TABBAR_H}px)`,
-            }"
-          />
-          <!-- Explain drag overlay -->
-          <ExplainOverlay />
-          <!-- Loading cover -->
-          <Transition
-            leave-active-class="transition-opacity duration-500 ease-out"
-            leave-to-class="opacity-0"
-          >
-            <div
-              v-if="backendBusy"
-              class="absolute inset-0 z-30 bg-[#121212]"
-            />
-          </Transition>
-        </div>
 
         <!-- Backdrop closes any open submenu popup on outside click. Sits below
              the toolbar (z-40) but above the canvas, so clicks pass through to

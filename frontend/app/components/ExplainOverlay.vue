@@ -53,11 +53,7 @@ function onMouseUp(e: MouseEvent) {
   // Ignore tiny selections (accidental clicks)
   if (w < 20 || h < 20) return
 
-  if (props.vueCanvas) {
-    extractFromVueCanvas(x, y, w, h, e)
-  } else {
-    extractFromIframe(x, y, w, h, e)
-  }
+  if (props.vueCanvas) extractFromVueCanvas(x, y, w, h, e)
 
   deactivateExplain()
 }
@@ -131,57 +127,6 @@ function extractFromVueCanvas(x: number, y: number, w: number, h: number, e: Mou
   submitExplanation({ nodes, links })
 }
 
-function extractFromIframe(x: number, y: number, w: number, h: number, e: MouseEvent) {
-  // Send extractGraphRegion to ComfyUI iframe
-  const container = (e.currentTarget as HTMLElement).parentElement
-  const iframe = container?.querySelector('iframe') as HTMLIFrameElement | null
-  if (iframe?.contentWindow) {
-    iframe.contentWindow.postMessage(
-      {
-        type: 'sailor',
-        action: 'extractGraphRegion',
-        region: { x: Math.round(x), y: Math.round(y), width: Math.round(w), height: Math.round(h) },
-      },
-      '*',
-    )
-  }
-
-  // Listen for response with timeout
-  let resolved = false
-  const timeout = setTimeout(() => {
-    if (!resolved) {
-      resolved = true
-      window.removeEventListener('message', handler)
-      explainPanelOpen.value = true
-      explainError.value = 'Could not extract graph data. The ComfyUI bridge did not respond.'
-    }
-  }, 5000)
-
-  function handler(event: MessageEvent) {
-    if (event.data?.type !== 'sailor-bridge' || resolved) return
-    if (event.data.event === 'graph_region_extracted') {
-      resolved = true
-      clearTimeout(timeout)
-      window.removeEventListener('message', handler)
-      const { nodes, links } = event.data
-      if (!nodes || nodes.length === 0) {
-        explainPanelOpen.value = true
-        explainError.value = 'No nodes found in the selected region. Try selecting a larger area.'
-        return
-      }
-      submitExplanation({ nodes, links })
-    }
-    else if (event.data.event === 'graph_extract_failed') {
-      resolved = true
-      clearTimeout(timeout)
-      window.removeEventListener('message', handler)
-      explainPanelOpen.value = true
-      explainError.value = `Could not extract graph data: ${event.data.error || 'unknown error'}`
-    }
-  }
-
-  window.addEventListener('message', handler)
-}
 </script>
 
 <template>

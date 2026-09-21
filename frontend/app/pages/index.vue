@@ -44,7 +44,7 @@ const displayProjects = computed(() => {
 function openRecentProject(project: any) {
   const promptId = project.promptIds[0]
   openTab({ type: 'project', label: project.name, workflowId: project.workflowId, promptId, projectUuid: project.workflowId })
-  // onProjectIframeLoad in default.vue handles loading the workflow from history
+  // loadWorkflowForTab in default.vue loads it (durable project first, then history)
 }
 
 const projectTypes = [

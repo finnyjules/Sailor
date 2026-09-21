@@ -158,44 +158,21 @@ export function useNodeSearch() {
   ) {
     const synthetic = SYNTHETIC_NODE_ENTRIES.find(e => e.name === nodeType)
 
-    // Check if Vue nodes mode is active
-    const { vueNodesEnabled } = useVueNodesEnabled()
-    if (vueNodesEnabled.value) {
-      // Dispatch custom event for Vue canvas to handle. Synthetic presets resolve
-      // to their real nodeType + addAs overrides; caller-supplied opts win over
-      // the preset's defaults.
-      const resolvedType = synthetic ? synthetic.addAs.nodeType : nodeType
-      const widgetOverrides = { ...(synthetic?.addAs.widgetOverrides ?? {}), ...(opts.widgetOverrides ?? {}) }
-      const propertyOverrides = { ...(synthetic?.addAs.propertyOverrides ?? {}), ...(opts.propertyOverrides ?? {}) }
-      const dataOverrides = { ...(synthetic?.addAs.dataOverrides ?? {}), ...(opts.dataOverrides ?? {}) }
-      window.dispatchEvent(new CustomEvent('sailor:addNode', {
-        detail: {
-          nodeType: resolvedType,
-          widgetOverrides: Object.keys(widgetOverrides).length ? widgetOverrides : undefined,
-          propertyOverrides: Object.keys(propertyOverrides).length ? propertyOverrides : undefined,
-          dataOverrides: Object.keys(dataOverrides).length ? dataOverrides : undefined,
-        },
-      }))
-      closeNodeSearch()
-      return
-    }
-
-    // LiteGraph mode — existing iframe postMessage. Widget overrides aren't
-    // wired through the bridge yet; LiteGraph mode falls back to a plain add.
-    // Synthetic entries are Vue-canvas-only: in LiteGraph mode, resolve to the
-    // raw nodeType + widgetOverrides only (no property/data overrides support).
+    // Dispatch custom event for the Vue canvas to handle. Synthetic presets resolve
+    // to their real nodeType + addAs overrides; caller-supplied opts win over
+    // the preset's defaults.
     const resolvedType = synthetic ? synthetic.addAs.nodeType : nodeType
-    const widgetOverrides = synthetic
-      ? { ...synthetic.addAs.widgetOverrides, ...(opts.widgetOverrides ?? {}) }
-      : opts.widgetOverrides
-    const container = document.querySelector('[data-tab-id]')
-    const iframe = container?.querySelector('iframe') as HTMLIFrameElement | null
-    if (iframe?.contentWindow) {
-      iframe.contentWindow.postMessage(
-        { type: 'sailor', action: 'addNodeAtCenter', nodeType: resolvedType, widgetOverrides },
-        '*',
-      )
-    }
+    const widgetOverrides = { ...(synthetic?.addAs.widgetOverrides ?? {}), ...(opts.widgetOverrides ?? {}) }
+    const propertyOverrides = { ...(synthetic?.addAs.propertyOverrides ?? {}), ...(opts.propertyOverrides ?? {}) }
+    const dataOverrides = { ...(synthetic?.addAs.dataOverrides ?? {}), ...(opts.dataOverrides ?? {}) }
+    window.dispatchEvent(new CustomEvent('sailor:addNode', {
+      detail: {
+        nodeType: resolvedType,
+        widgetOverrides: Object.keys(widgetOverrides).length ? widgetOverrides : undefined,
+        propertyOverrides: Object.keys(propertyOverrides).length ? propertyOverrides : undefined,
+        dataOverrides: Object.keys(dataOverrides).length ? dataOverrides : undefined,
+      },
+    }))
     closeNodeSearch()
   }
 
