@@ -74,6 +74,14 @@ const patternOf = (v: unknown): number => {
   return DITHER_PATTERNS.some((p) => p.value === rounded) ? rounded : REVEAL_DEFAULTS.pattern
 }
 
+/** Does this style TRANSFORM the element (Pixels, Assemble — the side-canvas route, a shader
+ *  run over the layer's own pixels) rather than merely MASK it? The compositor asks before it
+ *  decides which route a bar takes, so this lives here, in the DOM-free half of the folder,
+ *  and not beside the canvas code it steers. */
+export function isShaderRevealStyle(style: RevealStyle): boolean {
+  return style === 'pixels' || style === 'assemble'
+}
+
 /**
  * Does this frame's motion use a SHADER style anywhere — Pixels or Assemble — i.e. will
  * painting it need the ASCII or Dither shader? Asked by every EXPORT before its first frame,
@@ -89,8 +97,7 @@ export function motionUsesShaderStyle(
   if (!behaviours) return false
   return behaviours.some((b) => {
     if (b?.kind !== 'dither') return false
-    const style = revealParams(b.params).style
-    return style === 'pixels' || style === 'assemble'
+    return isShaderRevealStyle(revealParams(b.params).style)
   })
 }
 /** Alias kept so existing callers (written before Assemble) still compile and behave the same

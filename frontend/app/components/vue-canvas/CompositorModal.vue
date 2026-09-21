@@ -100,8 +100,8 @@ import { mergeAgentBands } from '~/lib/motionx/adapter/agentBands'
 import { migrateLayerAnimations } from '~/lib/motionx/adapter/migrateLayerAnimation'
 import { legacyBandForLayer } from '~/lib/motionx/bands'
 import { isTextBehaviour, canAnimateLetters } from '~/lib/motionx/text'
-import { motionUsesPixels } from '~/lib/motionx/reveal'
-import { revealPixelsReady } from '~/lib/motionx/reveal/paintPixels'
+import { motionUsesShaderStyle } from '~/lib/motionx/reveal'
+import { ensureRevealShadersReady } from '~/lib/motionx/reveal/paintPixels'
 import type { AnimatableProperty } from '~/lib/motionx/adapter/frame'
 import MotionPropertyPicker from '~/components/vue-canvas/compositor/MotionPropertyPicker.vue'
 import { getByIdPath } from '~/lib/studio/idPath'
@@ -3767,12 +3767,13 @@ const behaviourPickerOpen = ref(false)
 // drives the contextual inspector in the Motion right column. Writes flow through setMotion.
 const motionSel = ref<{ kind: 'band' | 'point' | 'behaviour' | 'legacy'; path: string; index?: number } | null>(null)
 const motionBehaviours = computed<StoredBehaviour[]>(() => (motionDoc.value as any).behaviours ?? [])
-// Pre-warm the ASCII shader the moment a Pixels dither bar exists, not when one is already
-// mid-transition: nothing else kicks the glyph atlas's download, so the FIRST playthrough of
-// a fresh bar used to show the Dissolve fallback for its opening frames. (The bake has its
-// own await — see bakeMotionFrames.) Here rather than beside loadShaderFxCatalog because the
-// getter reads motionBehaviours, declared just above, and `immediate` runs it at once.
-watch(() => motionUsesPixels(motionBehaviours.value), (uses) => { if (uses) revealPixelsReady() }, { immediate: true })
+// Pre-warm the shader the moment a Pixels or Assemble dither bar exists, not when one is
+// already mid-transition: nothing else kicks the download, so the FIRST playthrough of a fresh
+// bar used to show the Dissolve fallback for its opening frames. The BARS are handed over, so
+// each one kicks the effect it actually needs (the Dither look's, or the ASCII one). (The bake
+// has its own await — see bakeMotionFrames.) Here rather than beside loadShaderFxCatalog
+// because the getter reads motionBehaviours, declared just above, and `immediate` runs it at once.
+watch(() => motionUsesShaderStyle(motionBehaviours.value), (uses) => { if (uses) void ensureRevealShadersReady(motionBehaviours.value) }, { immediate: true })
 function updateMotionx(tracks: MotionxTrack[]) {
   setMotion({ motionx: tracks } as Partial<FrameMotion>)
 }

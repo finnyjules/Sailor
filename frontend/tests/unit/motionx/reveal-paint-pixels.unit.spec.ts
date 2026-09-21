@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url'
 import {
   drawRevealPixels, revealPixelsReady, ensureRevealPixelsReady, setRevealPixelsDeps,
 } from '~/lib/motionx/reveal/paintPixels'
-import { pixelShaderParams, pixelSharp } from '~/lib/motionx/reveal'
+import { pixelShaderParams, pixelSharp, motionUsesShaderStyle } from '~/lib/motionx/reveal'
 import type { MotionReveal } from '~/lib/motionx/reveal'
 import type { renderFieldWithBase } from '~/lib/shaderfill/field'
 
@@ -503,10 +503,15 @@ describe('paintLayerStack wiring for Pixels (source-level guard)', () => {
     expect(fnStart).toBeGreaterThanOrEqual(0)
   })
 
-  it('drawRevealPixels( is called exactly once, and before const motionActive', () => {
-    const count = SRC.split('drawRevealPixels(').length - 1
+  // Part 3 generalised the two hunks to the DISPATCHER (`drawRevealShaderStyle`), which routes
+  // a Pixels bar here and an Assemble bar to `paintAssemble.ts`. There is still exactly ONE
+  // call site, in the same place: no third hunk was added for Assemble.
+  it('drawRevealShaderStyle( is called exactly once, and before const motionActive', () => {
+    const count = SRC.split('drawRevealShaderStyle(').length - 1
     expect(count).toBe(1)
-    const callIdx = SRC.indexOf('drawRevealPixels(', fnStart)
+    expect(SRC).not.toContain('drawRevealPixels(')
+    expect(SRC).not.toContain('drawRevealAssemble(')
+    const callIdx = SRC.indexOf('drawRevealShaderStyle(', fnStart)
     const motionActiveIdx = SRC.indexOf('const motionActive', fnStart)
     expect(callIdx).toBeGreaterThan(fnStart)
     expect(motionActiveIdx).toBeGreaterThan(callIdx)
@@ -520,8 +525,14 @@ describe('paintLayerStack wiring for Pixels (source-level guard)', () => {
     expect(captureIdx).toBeLessThan(readIdx)
   })
 
-  it('revealPixelsReady() gates the Pixels capture in the first hunk', () => {
-    expect(SRC.indexOf('revealPixelsReady()', fnStart)).toBeGreaterThan(fnStart)
+  // The gate is per-BAR now (`revealShaderReady(rv)` asks for the effect THAT bar's style and
+  // look need), and the capture happens for either shader style — but for nothing else: the
+  // three mask styles must still go through `beginReveal`.
+  it('revealShaderReady(rv) gates the shader-style capture in the first hunk', () => {
+    expect(SRC.indexOf('revealShaderReady(rv)', fnStart)).toBeGreaterThan(fnStart)
+    expect(SRC).not.toContain('revealPixelsReady()')
+    expect(SRC.indexOf('isShaderRevealStyle(rv.style)', fnStart)).toBeGreaterThan(fnStart)
+    expect(SRC).not.toContain("rv.style === 'pixels'")
   })
 })
 
@@ -535,14 +546,17 @@ describe('the bake waits for the shader before its first frame', () => {
   const BAKE = readFileSync(fileURLToPath(new URL('../../../app/lib/motion/bake.ts', import.meta.url)), 'utf8')
 
   it('imports the helper and the wait', () => {
-    expect(BAKE).toMatch(/import \{[^}]*motionUsesPixels[^}]*\} from '~\/lib\/motionx\/reveal'/)
-    expect(BAKE).toMatch(/import \{[^}]*ensureRevealPixelsReady[^}]*\} from '~\/lib\/motionx\/reveal\/paintPixels'/)
+    expect(BAKE).toMatch(/import \{[^}]*motionUsesShaderStyle[^}]*\} from '~\/lib\/motionx\/reveal'/)
+    expect(BAKE).toMatch(/import \{[^}]*ensureRevealShadersReady[^}]*\} from '~\/lib\/motionx\/reveal\/paintPixels'/)
   })
 
-  it('awaits it, only when the motion actually uses Pixels, and BEFORE the frame loop', () => {
-    const wait = BAKE.indexOf('await ensureRevealPixelsReady()')
+  it('awaits it, only when the motion actually uses a shader style, and BEFORE the frame loop', () => {
+    // Part 3: the wait is handed the BARS, not just a yes/no — an Assemble bar in the Dither
+    // look needs `bayer_dither`, one in the Characters look (and every Pixels bar) needs
+    // `ascii_dither`, and a bake with both must wait for both.
+    const wait = BAKE.indexOf('await ensureRevealShadersReady(motion.behaviours)')
     expect(wait).toBeGreaterThan(-1)
-    const guard = BAKE.indexOf('motionUsesPixels(motion.behaviours)')
+    const guard = BAKE.indexOf('motionUsesShaderStyle(motion.behaviours)')
     expect(guard).toBeGreaterThan(-1)
     expect(guard).toBeLessThan(wait)
     const loop = BAKE.indexOf('for (let i = 0; i < total; i++)')
@@ -551,20 +565,28 @@ describe('the bake waits for the shader before its first frame', () => {
     // …and after the other two awaits it already does, so one cold start pays once.
     expect(BAKE.indexOf('await ensureLayerImages(')).toBeLessThan(wait)
   })
+
+  it('the helper it guards on answers yes for an Assemble bar, in either look', () => {
+    expect(motionUsesShaderStyle([{ kind: 'dither', params: { style: 'assemble' } }])).toBe(true)
+    expect(motionUsesShaderStyle([{ kind: 'dither', params: { style: 'assemble', look: 'characters' } }])).toBe(true)
+    expect(motionUsesShaderStyle([{ kind: 'dither', params: { style: 'pixels' } }])).toBe(true)
+    expect(motionUsesShaderStyle([{ kind: 'dither', params: { style: 'wipe' } }])).toBe(false)
+  })
 })
 
 /** …and the FIRST live playthrough is right too: the modal kicks the load as soon as a
  *  Pixels bar exists, rather than when one is already mid-transition. */
-describe('the modal pre-warms the ASCII effect', () => {
+describe('the modal pre-warms the effect each bar needs', () => {
   const MODAL = readFileSync(fileURLToPath(new URL('../../../app/components/vue-canvas/CompositorModal.vue', import.meta.url)), 'utf8')
 
-  it('watches motionUsesPixels(motionBehaviours) immediately and kicks the load once', () => {
-    const at = MODAL.indexOf('motionUsesPixels(motionBehaviours.value)')
+  it('watches motionUsesShaderStyle(motionBehaviours) immediately and kicks the RIGHT effect', () => {
+    const at = MODAL.indexOf('motionUsesShaderStyle(motionBehaviours.value)')
     expect(at).toBeGreaterThan(-1)
     const block = MODAL.slice(Math.max(0, at - 400), at + 400)
     expect(block).toMatch(/watch\(/)
     expect(block).toMatch(/immediate:\s*true/)
-    expect(block).toMatch(/revealPixelsReady\(\)/)
-    expect(MODAL).toMatch(/import \{[^}]*revealPixelsReady[^}]*\} from '~\/lib\/motionx\/reveal\/paintPixels'/)
+    // the BARS are handed over, so an Assemble bar kicks bayer_dither and a Pixels one ascii_dither
+    expect(block).toMatch(/ensureRevealShadersReady\(motionBehaviours\.value\)/)
+    expect(MODAL).toMatch(/import \{[^}]*ensureRevealShadersReady[^}]*\} from '~\/lib\/motionx\/reveal\/paintPixels'/)
   })
 })
