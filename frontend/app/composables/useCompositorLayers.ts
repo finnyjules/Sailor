@@ -25,8 +25,10 @@ export type LocalLayerKind = 'text' | 'rect' | 'ellipse' | 'line' | 'path' | 'im
 import type { LayerMotionState } from '~/lib/motion/evaluate'
 import type { FrameMotion } from '~/lib/motion/types'
 import { applyEffectDialTracks, type EffectDialTrack } from '~/lib/motion/effectTracks'
-import { applyMotionxTracks, applyTextBehaviours, type TextMotion } from '~/lib/motionx/adapter/frame'
+import { applyMotionxTracks, applyTextBehaviours, applyRevealBehaviours, type TextMotion } from '~/lib/motionx/adapter/frame'
 import type { StoredBehaviour, Track as MotionxTrack } from '~/lib/motionx'
+import { beginReveal, finishReveal, type RevealPass } from '~/lib/motionx/reveal/paint'
+import type { MotionReveal } from '~/lib/motionx/reveal'
 // Letter behaviours (unified motion, text slice): the per-glyph draw seam. Pure — canvas
 // primitives and plain data only — so the branches it serves inside drawText /
 // drawTextOnPath below stay two lines each.
@@ -5548,7 +5550,9 @@ export function paintLayerStack(
   // Letter behaviours fold LAST: they are the only ones that hand the painter author state
   // (the behaviours themselves) rather than a resolved value, so they must see the layer the
   // rest of the fold already produced. Same-reference return when there are none.
-  const animatedLocals = applyTextBehaviours(applyMotionxTracks(
+  // Reveal transitions fold last of all: like letter behaviours they hand the painter author
+  // state (the bar's look), and they need nothing from the layer but its id.
+  const animatedLocals = applyRevealBehaviours(applyTextBehaviours(applyMotionxTracks(
     applyFillPhaseTracks(
       applyEffectDialTracks(localLayers, motion?.tracks, t),
       motion?.tracks,
@@ -5556,7 +5560,7 @@ export function paintLayerStack(
     ),
     motion?.motionx,
     t,
-  ), motion?.behaviours, t)
+  ), motion?.behaviours, t), motion?.motionx, motion?.behaviours, t)
   if (animatedLocals !== localLayers) {
     const byId = new Map(animatedLocals.map(l => [l.id, l]))
     items = items.map(it => (it.type === 'local' && byId.has(it.layer.id))
@@ -5648,8 +5652,12 @@ export function paintLayerStack(
     }
 
     let motionScaleOpen = false
+    // A reveal wraps ONE layer's whole draw (every `continue` below included), so — like the
+    // draw-time scale — it is closed at the top of the next turn and once more after the loop.
+    let revealOpen: RevealPass | null = null
     for (const item of items) {
       if (motionScaleOpen) { ctx.restore(); motionScaleOpen = false }
+      if (revealOpen) { finishReveal(ctx, revealOpen); revealOpen = null }
       if (maskSourceKeys.has(item.key) && !keepVisibleKeys.has(item.key)) continue
 
       if (item.type === 'wired') {
@@ -5675,6 +5683,14 @@ export function paintLayerStack(
       }
 
       const opacityMul = gc ? gc.opacity : 1
+
+      // A dither (reveal) bar mid-transition: nothing at all when fully hidden; otherwise keep
+      // the backdrop so the hidden cells can be put back once the layer has drawn normally.
+      const rv = (layer as unknown as { motionReveal?: MotionReveal }).motionReveal
+      if (rv) {
+        if (!(rv.amount > 0)) continue
+        revealOpen = beginReveal(ctx, rv, W, H)
+      }
 
       // motionx `scale` on a layer kind with no native scale: draw-time scale about the centre.
       const ms = (layer as unknown as { motionScale?: number }).motionScale
@@ -5780,6 +5796,7 @@ export function paintLayerStack(
       else drawOwn(ctx)
     }
     if (motionScaleOpen) ctx.restore()
+    if (revealOpen) finishReveal(ctx, revealOpen)
 
     if (post && chainActive(post)) applyStackPost(ctx, post, W)
     return { frozenCount }
