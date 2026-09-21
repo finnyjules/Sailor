@@ -1,10 +1,11 @@
 // Frame adapter — the ONE intentionally compositor-coupled file in the motionx package.
 // Applies a resolved motionx property value onto a cloned Frame/Compositor layer. The
 // motionx core stays pure (no compositor imports); only this file bridges the two.
-import { compileBehaviour, evaluateTracks, type Behaviour, type BehaviourTarget, type PropertyValue, type StoredBehaviour, type Track } from '~/lib/motionx'
+import { compileBehaviour, evaluateTracks, pickTrack, evaluateTrack, type Behaviour, type BehaviourTarget, type PropertyValue, type StoredBehaviour, type Track } from '~/lib/motionx'
 // The index, not `./evaluate` — importing it is what REGISTERS the four letter behaviour
 // kinds, and this file is on the only path the painter reaches them by.
 import { isTextBehaviour, textCanMove } from '~/lib/motionx/text'
+import { revealParams, type MotionReveal } from '~/lib/motionx/reveal'
 import type { GradientStop as ColorStop } from '~/lib/color/harmony'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import { isGradient, type Paint } from '~/lib/compositor/paint'
@@ -115,6 +116,54 @@ export function applyTextBehaviours(
     if (!own || !textCanMove(own, t)) return layer
     changed = true
     return { ...layer, textMotion: { behaviours: own, t } as TextMotion } as unknown as LocalLayer
+  })
+  return changed ? next : layers
+}
+
+/** Properties a behaviour can drive that are NOT layer properties — never offered in Add
+ *  property, but they still get a timeline row, which needs a name. */
+export const MOTION_ONLY_LABELS: Record<string, string> = { reveal: 'Reveal' }
+
+const startOfBar = (tr: Track) => (tr.keyframes.length ? Math.min(...tr.keyframes.map((k) => k.t)) : 0)
+
+/**
+ * Fold reveal transitions (dither) onto the layers for this frame.
+ *
+ * The bar's TRACK carries only the amount; the look lives on the bar. So for every layer with
+ * a tagged `reveal` track, find the track that WINS at `t` (the same rule `evaluateTracks`
+ * uses), read its bar's dials, and park `motionReveal` on a clone:
+ *   amount ≥ 1 → nothing at all (layer by identity — a finished entrance costs nothing);
+ *   amount ≤ 0 → a note with amount 0 (the painter skips the layer);
+ *   between    → the note the painter draws through.
+ * Same-reference return whenever nothing is attached. An UNTAGGED `reveal` band has no bar
+ * and therefore no look: ignored.
+ */
+export function applyRevealBehaviours(
+  layers: LocalLayer[], tracks: Track[] | undefined, behaviours: StoredBehaviour[] | undefined, t: number | undefined,
+): LocalLayer[] {
+  if (!tracks || tracks.length === 0 || !behaviours || behaviours.length === 0 || t == null) return layers
+  const byLayer = new Map<string, Track[]>()
+  for (const tr of tracks) {
+    if (!tr.behaviourId) continue
+    const m = tr.path.match(/^layers\.([^.]+)\.reveal$/)
+    if (!m) continue
+    const list = byLayer.get(m[1]!)
+    if (list) list.push(tr); else byLayer.set(m[1]!, [tr])
+  }
+  if (byLayer.size === 0) return layers
+  let changed = false
+  const next = layers.map((layer) => {
+    const list = byLayer.get(layer.id)
+    if (!list) return layer
+    const pick = pickTrack(list, t)
+    const bar = pick && behaviours.find((b) => b.id === pick.behaviourId && b.kind === 'dither')
+    if (!pick || !bar) return layer
+    const v = evaluateTrack(pick, t)
+    const amount = typeof v === 'number' && Number.isFinite(v) ? v : 1
+    if (amount >= 1) return layer
+    changed = true
+    const note: MotionReveal = { ...revealParams(bar.params), amount: Math.max(0, amount), elapsed: Math.max(0, t - startOfBar(pick)) }
+    return { ...layer, motionReveal: note } as unknown as LocalLayer
   })
   return changed ? next : layers
 }

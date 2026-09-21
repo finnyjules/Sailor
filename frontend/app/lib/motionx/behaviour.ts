@@ -52,6 +52,14 @@ registerBehaviour('fade', (b, target) => {
   return [dir === 'out' ? numTrack('opacity', cur, 0, w) : numTrack('opacity', 0, cur, w)]
 })
 
+// A REVEAL transition (dither today; more mask looks later): the bar drives ONE number, how
+// revealed the layer is. The LOOK is not a track — it stays on the bar's params and the
+// painter reads it through the fold (adapter/frame.ts `applyRevealBehaviours`).
+registerBehaviour('dither', (b) => {
+  const w = window(b.timing)
+  return [b.params?.dir === 'out' ? numTrack('reveal', 1, 0, w) : numTrack('reveal', 0, 1, w)]
+})
+
 registerBehaviour('slide', (b, target) => {
   // Relative to the layer's CURRENT position (x/y are normalized 0..1), so the layer
   // slides IN to where it already sits — not to an absolute 0. `distance` is a fraction

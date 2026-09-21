@@ -123,6 +123,10 @@ describe('behaviourLabel — letter behaviours', () => {
     expect(behaviourLabel({ kind: 'text.bounce', params: {} })).toBe('Bounce')
     expect(behaviourLabel({ kind: 'text.jitter', params: {} })).toBe('Jitter')
   })
+  it('labels a dither bar by its direction', () => {
+    expect(behaviourLabel({ kind: 'dither', params: {} })).toBe('Dither in')
+    expect(behaviourLabel({ kind: 'dither', params: { dir: 'out' } })).toBe('Dither out')
+  })
 })
 
 describe('bands carry the loop flag', () => {

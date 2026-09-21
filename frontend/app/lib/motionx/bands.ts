@@ -73,6 +73,7 @@ export const BEHAVIOUR_LABELS: Record<string, string> = {
   float: 'Float',
   gradientScroll: 'Scroll',
   gradientMorph: 'Morph',
+  dither: 'Dither',
   'text.cascade': 'Cascade',
   'text.typewriter': 'Typewriter',
   'text.maskSlide': 'Mask slide',
@@ -100,6 +101,7 @@ export function behaviourLabel(b: { kind: string; params?: Record<string, unknow
   }
   else if (b.kind === 'text.decode') withDir = dir === 'dissolve' ? 'Decode out' : 'Decode'
   else if (b.kind === 'text.slot') withDir = dir === 'out' ? 'Slot slide out' : 'Slot slide'
+  else if (b.kind === 'dither') withDir = dir === 'out' ? 'Dither out' : 'Dither in'
   return b.timing?.loop ? `${withDir} · loop` : withDir
 }
 
