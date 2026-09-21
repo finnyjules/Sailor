@@ -20,8 +20,7 @@ import type { Clip, Track, BlendMode, MotionClip, SpaceTypeClip, Transition, Tra
 import { computeTotalFrames } from '~~/shared/timeline/types'
 import { interpolateClipAt } from '~~/shared/timeline/interpolate'
 import { resolveClipSource } from '~~/shared/timeline/resolveClipSource'
-import { computeLeftTrim, clampLengthToSource } from '~~/shared/timeline/trim'
-import { snapGroupDelta, type Span } from '~~/shared/timeline/groupEdit'
+import { snapGroupDelta, computeGroupResize, neighbourGaps, type Span, type ResizeMember } from '~~/shared/timeline/groupEdit'
 import { collectProjectMediaFilenames } from '~/lib/timeline/projectMedia'
 import type { SpaceTypeState } from '~/lib/spacetype/state'
 import MotionClipInspector from '~/components/vue-canvas/timeline/MotionClipInspector.vue'
@@ -610,12 +609,35 @@ function snapFrame(rawFrame: number, exclude: ReadonlySet<string>): number {
 
 /** The clips that move or trim together in the current drag. */
 function draggingIds(): Set<string> {
+  if (dragResizeMembers) return new Set(dragResizeMembers.map(m => m.id))
   if (dragGroupStarts && dragGroupStarts.size > 1) return new Set(dragGroupStarts.keys())
   return new Set(drag.value ? [drag.value.clipId] : [])
 }
 
 // Snapshot of clip start-frames at drag-start for bulk-move support.
 let dragGroupStarts: Map<string, number> | null = null
+
+// Snapshot of every clip taking part in a trim, taken at drag-start.
+let dragResizeMembers: ResizeMember[] | null = null
+
+function snapshotResizeMembers(primaryId: string): ResizeMember[] {
+  const ids = selectedClipIds.value.size > 1 && selectedClipIds.value.has(primaryId)
+    ? new Set(selectedClipIds.value) : new Set([primaryId])
+  const out: ResizeMember[] = []
+  for (const track of store.state.value.tracks) {
+    if (track.locked) continue
+    for (const c of track.clips) {
+      if (!ids.has(c.id)) continue
+      out.push({
+        id: c.id, start_frame: c.start_frame, in_frame: c.in_frame ?? 0, length: c.length,
+        anchored: c.kind === 'video' || c.kind === 'audio',
+        sourceFrames: clipSourceFrames(c), speed: c.speed ?? 1,
+        ...neighbourGaps(track.clips, c.id, ids),
+      })
+    }
+  }
+  return out
+}
 
 // Which track lane is under this clientY? (null = ruler or below the lanes)
 function trackIndexAtY(clientY: number): number | null {
@@ -687,6 +709,7 @@ function onClipPointerDown(clipId: string, trackId: string, mode: 'move' | 'resi
   } else {
     dragGroupStarts = null
   }
+  dragResizeMembers = mode === 'move' ? null : snapshotResizeMembers(clipId)
   ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
 }
 
@@ -818,25 +841,23 @@ function onPointerMove(e: PointerEvent) {
       }
       if (!movedTrack) store.updateClip(drag.value.clipId, { start_frame: Math.max(0, finalStart) })
     }
-  } else if (drag.value.mode === 'resize-right') {
-    const clip = findClip(drag.value.clipId)
-    const rawEnd = drag.value.startStart + Math.max(1, drag.value.startLength + dframes)
-    const snapped = snapFrame(rawEnd, draggingIds())
-    let newLen = Math.max(1, snapped - drag.value.startStart)
-    if (clip) newLen = clampLengthToSource(newLen, clip.in_frame, clipSourceFrames(clip), clip.speed ?? 1)
-    store.updateClip(drag.value.clipId, { length: newLen })
-    showTrimHud(e, newLen, newLen - drag.value.startLength)
-  } else if (drag.value.mode === 'resize-left') {
-    const clip = findClip(drag.value.clipId)
-    // Anchored kinds trim INTO the source: in_frame moves with the edge.
-    const anchored = clip?.kind === 'video' || clip?.kind === 'audio'
-    const rawStart = drag.value.startStart + dframes
-    const snapped = snapFrame(rawStart, draggingIds())
-    const t = computeLeftTrim(
-      { start_frame: drag.value.startStart, in_frame: drag.value.startIn, length: drag.value.startLength },
-      snapped, anchored)
-    store.updateClip(drag.value.clipId, t)
-    showTrimHud(e, t.length, t.length - drag.value.startLength)
+  } else if (drag.value.mode === 'resize-right' || drag.value.mode === 'resize-left') {
+    const edge = drag.value.mode === 'resize-right' ? 'right' : 'left'
+    const members = dragResizeMembers ?? []
+    // Snap the edge under the mouse, then let the group clamp it ONCE.
+    const startEdge = edge === 'right' ? drag.value.startStart + drag.value.startLength : drag.value.startStart
+    const snappedEdge = snapFrame(startEdge + dframes, draggingIds())
+    const { patches } = computeGroupResize(members, edge, snappedEdge - startEdge)
+    store.mutate(s => {
+      for (const track of s.tracks) {
+        for (const c of track.clips) {
+          const p = patches.get(c.id)
+          if (p) { c.start_frame = p.start_frame; c.in_frame = p.in_frame; c.length = p.length }
+        }
+      }
+    })
+    const mine = patches.get(drag.value.clipId)
+    if (mine) showTrimHud(e, mine.length, mine.length - drag.value.startLength)
   } else if (drag.value.mode === 'playhead') {
     const rect = stripRef.value!.getBoundingClientRect()
     const frame = Math.round(pxToFrames(e.clientX - rect.left))
@@ -870,6 +891,7 @@ function onPointerUp() {
   drag.value = null
   snapGuideFrame.value = null
   dragGroupStarts = null
+  dragResizeMembers = null
   moveTargetTrackId.value = null
   trimHud.value = null
   store.endGesture()
