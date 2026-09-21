@@ -35,6 +35,21 @@ const charsOf = (v: unknown): number => {
   return PIXEL_CHARS.some((c) => c.value === rounded) ? rounded : 1
 }
 
+/**
+ * Does this frame's motion use the Pixels style anywhere? — i.e. will painting it need the
+ * ASCII shader? Asked by every EXPORT before its first frame, so the glyph atlas can be
+ * awaited rather than landing half way through a bake and changing the look mid-sequence.
+ *
+ * Pure, and read through `revealParams` like everything else: a bar with no style stored is
+ * a Pixels bar, because Pixels is the default.
+ */
+export function motionUsesPixels(
+  behaviours: { kind: string; params?: Record<string, unknown> }[] | undefined,
+): boolean {
+  if (!behaviours) return false
+  return behaviours.some((b) => b?.kind === 'dither' && revealParams(b.params).style === 'pixels')
+}
+
 /** The ONE reader of a dither bar's stored params. Unknown enum / non-finite number → default;
  *  out-of-range number → clamped. */
 export function revealParams(params: Record<string, unknown> | undefined): RevealParams {

@@ -3,6 +3,7 @@ import {
   revealParams, revealCellDefault, REVEAL_STYLES, REVEAL_DEFAULTS,
   PIXEL_CHARS, PIXEL_END, PIXEL_JITTER,
   pixelStages, pixelBlock, pixelBrightness, pixelSharp, pixelShaderParams, pixelFinest,
+  motionUsesPixels,
   type MotionReveal,
 } from '~/lib/motionx/reveal'
 import manifest from '../../../../shader_effects/manifest.json'
@@ -47,6 +48,45 @@ describe('revealParams — Pixels', () => {
     expect(revealParams({ chars: 8.2 }).chars).toBe(8)    // rounds to a valid value
     expect(revealParams({ chars: 0 }).chars).toBe(0)      // Mixed, value 0 — falsy but valid
     expect(revealParams({ chars: 19 }).chars).toBe(19)    // Gems, the last entry
+  })
+})
+
+/**
+ * An EXPORT has to know, before its first frame, whether it is going to need the ASCII
+ * shader — otherwise a glyph atlas landing mid-bake flips the video from the Dissolve
+ * fallback to characters part-way through. This is that question, asked of the stored
+ * behaviours and answered through `revealParams` like every other read.
+ */
+describe('motionUsesPixels', () => {
+  it('no behaviours at all', () => {
+    expect(motionUsesPixels(undefined)).toBe(false)
+    expect(motionUsesPixels([])).toBe(false)
+  })
+
+  it('a dither bar with no style set — Pixels is the default, so yes', () => {
+    expect(motionUsesPixels([{ kind: 'dither' }])).toBe(true)
+    expect(motionUsesPixels([{ kind: 'dither', params: { dir: 'out' } }])).toBe(true)
+    // …and an unknown style falls back to Pixels the same way revealParams does.
+    expect(motionUsesPixels([{ kind: 'dither', params: { style: 'plaid' } }])).toBe(true)
+  })
+
+  it('a dither bar in a MASK style — no shader needed', () => {
+    for (const style of ['dissolve', 'wipe', 'dots']) {
+      expect(motionUsesPixels([{ kind: 'dither', params: { style } }]), style).toBe(false)
+    }
+  })
+
+  it('a non-dither bar is not a dither bar, whatever its params say', () => {
+    expect(motionUsesPixels([{ kind: 'fade', params: { style: 'pixels' } }])).toBe(false)
+    expect(motionUsesPixels([{ kind: 'letters' }, { kind: 'slide' }])).toBe(false)
+  })
+
+  it('any ONE Pixels bar in the list is enough', () => {
+    expect(motionUsesPixels([
+      { kind: 'fade' },
+      { kind: 'dither', params: { style: 'wipe' } },
+      { kind: 'dither', params: { style: 'pixels' } },
+    ])).toBe(true)
   })
 })
 

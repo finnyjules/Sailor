@@ -38,7 +38,7 @@ vi.mock('~/lib/shaderfx/catalogStore', () => ({
   refetchShaderFxCatalog: () => null,
 }))
 
-import { renderFieldWithBase, fieldEffectReady, onFieldCatalogReady, resolveField, fieldStats, clearFieldCache } from '~/lib/shaderfill/field'
+import { renderFieldWithBase, fieldEffectReady, whenFieldEffectReady, onFieldCatalogReady, resolveField, fieldStats, clearFieldCache } from '~/lib/shaderfill/field'
 
 // --- the fake Image ---------------------------------------------------------
 
@@ -222,6 +222,69 @@ describe('renderFieldWithBase — extraUniforms', () => {
     const without = JSON.stringify(renderSpy.mock.calls.at(-1)![0])
     render('extra_none', {})
     expect(JSON.stringify(renderSpy.mock.calls.at(-1)![0])).toBe(without)
+  })
+})
+
+/**
+ * `fieldEffectReady` is the per-frame poll; this is the one-shot AWAIT a host with no frame
+ * loop needs — an export, which must not start painting in one look and finish in another
+ * because the glyph atlas landed half way through.
+ */
+describe('whenFieldEffectReady', () => {
+  it('resolves true immediately when the effect is already ready', async () => {
+    defWith('when_ready', [])
+    await expect(whenFieldEffectReady('when_ready', 1000)).resolves.toBe(true)
+  })
+
+  it('resolves true as soon as the texture lands, and leaves no timer behind', async () => {
+    vi.useFakeTimers()
+    try {
+      defWith('when_atlas', [{ uniform: 'u_glyphs', file: 'when_atlas.png', v: '11' }])
+      const p = whenFieldEffectReady('when_atlas', 5000)
+      expect(FakeImage.created).toHaveLength(1)   // the wait KICKED the load
+      expect(vi.getTimerCount()).toBe(1)
+      FakeImage.created[0]!.land()
+      await expect(p).resolves.toBe(true)
+      expect(vi.getTimerCount()).toBe(0)          // the timeout was cleared
+    } finally { vi.useRealTimers() }
+  })
+
+  it('resolves false on timeout — never rejects — and unsubscribes', async () => {
+    vi.useFakeTimers()
+    try {
+      defWith('when_never', [{ uniform: 'u_glyphs', file: 'when_never.png', v: '12' }])
+      const p = whenFieldEffectReady('when_never', 1000)
+      let settled: unknown = 'pending'
+      p.then((v) => { settled = v }, () => { settled = 'rejected' })
+      vi.advanceTimersByTime(999)
+      await Promise.resolve()
+      expect(settled).toBe('pending')
+      vi.advanceTimersByTime(1)
+      await expect(p).resolves.toBe(false)
+      expect(vi.getTimerCount()).toBe(0)
+      // The subscription is gone with it: a late landing neither throws nor re-resolves.
+      expect(() => FakeImage.created.at(-1)!.land()).not.toThrow()
+      expect(settled).toBe(false)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('one waiter landing does not disturb another still waiting', async () => {
+    vi.useFakeTimers()
+    try {
+      defWith('when_a', [{ uniform: 'u_glyphs', file: 'when_a.png', v: '13' }])
+      defWith('when_b', [{ uniform: 'u_glyphs', file: 'when_b.png', v: '14' }])
+      const a = whenFieldEffectReady('when_a', 5000)
+      const b = whenFieldEffectReady('when_b', 5000)
+      const imgA = FakeImage.created.find(i => i.src.includes('when_a.png'))!
+      imgA.land()
+      await expect(a).resolves.toBe(true)
+      let bSettled: unknown = 'pending'
+      b.then((v) => { bSettled = v })
+      await Promise.resolve()
+      expect(bSettled).toBe('pending')
+      FakeImage.created.find(i => i.src.includes('when_b.png'))!.land()
+      await expect(b).resolves.toBe(true)
+    } finally { vi.useRealTimers() }
   })
 })
 

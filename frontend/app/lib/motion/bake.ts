@@ -9,6 +9,8 @@ import {
   paintLayerStack, ensureLayerFonts, ensureLayerImages,
 } from '~/composables/useCompositorLayers'
 import './paint' // ensure the motion painter is registered
+import { motionUsesPixels } from '~/lib/motionx/reveal'
+import { ensureRevealPixelsReady } from '~/lib/motionx/reveal/paintPixels'
 import { uploadFrameBatch } from '~/lib/studio/frameUpload'
 import { useLibraryFonts } from '~/composables/useLibraryFonts'
 import type { FrameMotion } from './types'
@@ -56,6 +58,13 @@ export async function bakeMotionFrames(
   for (const l of localLayers) if (l.kind === 'text') useLibraryFonts().ensure((l as TextLayer).fontFamily)
   await ensureLayerFonts(localLayers, W)
   await ensureLayerImages(localLayers)
+  // …and the SHADER, when a Dither bar is set to Pixels. The loop below yields to the event
+  // loop every frame (toBlob), so a glyph atlas landing mid-bake would render the early
+  // frames as the Dissolve fallback and the later ones as characters — one video, two
+  // styles, with nothing anywhere reporting it. Resolves false rather than throwing if the
+  // shader never arrives: the bake then goes ahead in the fallback look, consistently, which
+  // is what a cold live frame already does.
+  if (motionUsesPixels(motion.behaviours)) await ensureRevealPixelsReady()
   // Snapshot the stack and layer list ONCE — buildItems() and localLayers
   // close over live reactive state, and the bake loop yields to the event
   // loop every frame (toBlob), so a user edit mid-bake would otherwise leak

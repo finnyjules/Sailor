@@ -16,7 +16,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vites
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
-  drawRevealPixels, revealPixelsReady, setRevealPixelsDeps,
+  drawRevealPixels, revealPixelsReady, ensureRevealPixelsReady, setRevealPixelsDeps,
 } from '~/lib/motionx/reveal/paintPixels'
 import { pixelShaderParams, pixelSharp } from '~/lib/motionx/reveal'
 import type { MotionReveal } from '~/lib/motionx/reveal'
@@ -182,6 +182,30 @@ describe('revealPixelsReady', () => {
     expect(revealPixelsReady()).toBe(true)
     setRevealPixelsDeps({ ready: () => false })
     expect(revealPixelsReady()).toBe(false)
+  })
+})
+
+// ── ensureRevealPixelsReady (the export's one-shot wait) ─────────────────────────────────
+
+describe('ensureRevealPixelsReady', () => {
+  it('delegates to the injected waiter, timeout and all, and answers its verdict', async () => {
+    const whenReady = vi.fn(async () => true)
+    setRevealPixelsDeps({ whenReady })
+    await expect(ensureRevealPixelsReady(1234)).resolves.toBe(true)
+    expect(whenReady).toHaveBeenCalledWith(1234)
+
+    const late = vi.fn(async () => false)
+    setRevealPixelsDeps({ whenReady: late })
+    // A timed-out wait is reported, not thrown: the export goes ahead in the fallback look
+    // rather than failing, exactly as a cold frame does today.
+    await expect(ensureRevealPixelsReady()).resolves.toBe(false)
+    expect(late).toHaveBeenCalledWith(undefined)
+  })
+
+  it('by default waits on the ASCII effect, through the shaderfill field module', () => {
+    const src = readFileSync(fileURLToPath(new URL('../../../app/lib/motionx/reveal/paintPixels.ts', import.meta.url)), 'utf8')
+    expect(src).toMatch(/whenFieldEffectReady\(\s*'ascii_dither'/)
+    expect(src).toMatch(/import \{[^}]*whenFieldEffectReady[^}]*\} from '~\/lib\/shaderfill\/field'/)
   })
 })
 
@@ -498,5 +522,49 @@ describe('paintLayerStack wiring for Pixels (source-level guard)', () => {
 
   it('revealPixelsReady() gates the Pixels capture in the first hunk', () => {
     expect(SRC.indexOf('revealPixelsReady()', fnStart)).toBeGreaterThan(fnStart)
+  })
+})
+
+/**
+ * An export must not START in one look and FINISH in another. `bakeMotionFrames` awaits
+ * fonts and images and yields to the event loop every frame (toBlob), so a glyph atlas
+ * landing mid-bake used to flip the sequence from the Dissolve fallback to characters
+ * part-way through — silently, since every rung of the fallback ladder is graceful.
+ */
+describe('the bake waits for the shader before its first frame', () => {
+  const BAKE = readFileSync(fileURLToPath(new URL('../../../app/lib/motion/bake.ts', import.meta.url)), 'utf8')
+
+  it('imports the helper and the wait', () => {
+    expect(BAKE).toMatch(/import \{[^}]*motionUsesPixels[^}]*\} from '~\/lib\/motionx\/reveal'/)
+    expect(BAKE).toMatch(/import \{[^}]*ensureRevealPixelsReady[^}]*\} from '~\/lib\/motionx\/reveal\/paintPixels'/)
+  })
+
+  it('awaits it, only when the motion actually uses Pixels, and BEFORE the frame loop', () => {
+    const wait = BAKE.indexOf('await ensureRevealPixelsReady()')
+    expect(wait).toBeGreaterThan(-1)
+    const guard = BAKE.indexOf('motionUsesPixels(motion.behaviours)')
+    expect(guard).toBeGreaterThan(-1)
+    expect(guard).toBeLessThan(wait)
+    const loop = BAKE.indexOf('for (let i = 0; i < total; i++)')
+    expect(loop).toBeGreaterThan(-1)
+    expect(wait).toBeLessThan(loop)
+    // …and after the other two awaits it already does, so one cold start pays once.
+    expect(BAKE.indexOf('await ensureLayerImages(')).toBeLessThan(wait)
+  })
+})
+
+/** …and the FIRST live playthrough is right too: the modal kicks the load as soon as a
+ *  Pixels bar exists, rather than when one is already mid-transition. */
+describe('the modal pre-warms the ASCII effect', () => {
+  const MODAL = readFileSync(fileURLToPath(new URL('../../../app/components/vue-canvas/CompositorModal.vue', import.meta.url)), 'utf8')
+
+  it('watches motionUsesPixels(motionBehaviours) immediately and kicks the load once', () => {
+    const at = MODAL.indexOf('motionUsesPixels(motionBehaviours.value)')
+    expect(at).toBeGreaterThan(-1)
+    const block = MODAL.slice(Math.max(0, at - 400), at + 400)
+    expect(block).toMatch(/watch\(/)
+    expect(block).toMatch(/immediate:\s*true/)
+    expect(block).toMatch(/revealPixelsReady\(\)/)
+    expect(MODAL).toMatch(/import \{[^}]*revealPixelsReady[^}]*\} from '~\/lib\/motionx\/reveal\/paintPixels'/)
   })
 })

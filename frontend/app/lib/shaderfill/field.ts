@@ -379,6 +379,42 @@ export function fieldEffectReady(effectId: string): boolean {
   return ready
 }
 
+/**
+ * The one-shot AWAIT behind `fieldEffectReady`'s per-frame poll: resolves `true` as soon as
+ * the effect can render everything it declares, `false` if that has not happened within
+ * `timeoutMs`. Never rejects, and never leaves a timer or a subscription behind.
+ *
+ * For a host that renders ONCE and keeps the result — an export, a bake: a live preview
+ * simply polls and repaints, but a bake that starts cold paints its first frames in the
+ * fallback look and its last frames in the real one, and the finished video shows the style
+ * changing part-way through with nothing anywhere saying so. The first call also KICKS
+ * whatever is missing (that is `fieldEffectReady`'s own contract), so this is both the wait
+ * and the pre-warm.
+ */
+export function whenFieldEffectReady(effectId: string, timeoutMs = 8000): Promise<boolean> {
+  if (fieldEffectReady(effectId)) return Promise.resolve(true)
+  return new Promise<boolean>((resolve) => {
+    let unsub: (() => void) | null = null
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let done = false
+    const finish = (ok: boolean) => {
+      if (done) return
+      done = true
+      if (timer !== null) { clearTimeout(timer); timer = null }
+      const off = unsub; unsub = null; off?.()
+      resolve(ok)
+    }
+    // `notifyFieldReady` fires for ANY landing (this atlas, another effect's, the catalog),
+    // so re-ask rather than assuming the notification was ours.
+    unsub = onFieldCatalogReady(() => { if (fieldEffectReady(effectId)) finish(true) })
+    timer = setTimeout(() => finish(false), Math.max(0, timeoutMs))
+    // Between the check above and the subscribe, a load could have landed (an `<img>` load
+    // is a macrotask, but a synchronous `getEffectSync` hit is not) — ask once more now
+    // that we are subscribed, so the wait cannot miss its own notification.
+    if (fieldEffectReady(effectId)) finish(true)
+  })
+}
+
 /** The LOADED subset of `effect`'s declared textures, plus the companion uniforms of
  *  exactly those textures — an atlas that hasn't arrived must not bring its
  *  `u_glyphCount` with it, or the shader picks a glyph index out of an unbound

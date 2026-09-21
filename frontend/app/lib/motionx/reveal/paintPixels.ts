@@ -6,8 +6,9 @@
 //
 // This is the one file in this folder that touches `~/lib/shaderfill/field` (a WebGL entry
 // point) — deliberately NOT re-exported from `./index` (the reveal barrel stays DOM/WebGL
-// free): only `useCompositorLayers.ts` and this file's own spec may import it directly.
-import { fieldEffectReady, renderFieldWithBase } from '~/lib/shaderfill/field'
+// free): only `useCompositorLayers.ts`, the export/bake entries (`~/lib/motion/bake.ts`,
+// `CompositorModal.vue`) and this file's own spec may import it directly.
+import { fieldEffectReady, whenFieldEffectReady, renderFieldWithBase } from '~/lib/shaderfill/field'
 import type { ShaderSpec } from '~/lib/spacetype/fillTile'
 import { pixelShaderParams, pixelSharp } from './pixels'
 import type { MotionReveal } from './params'
@@ -17,6 +18,7 @@ type Canvas = HTMLCanvasElement
 let makeCanvas: () => Canvas = () => document.createElement('canvas')
 let render: typeof renderFieldWithBase = renderFieldWithBase
 let ready: () => boolean = () => fieldEffectReady('ascii_dither')
+let whenReady: (timeoutMs?: number) => Promise<boolean> = (timeoutMs) => whenFieldEffectReady('ascii_dither', timeoutMs)
 let warn: (message: string) => void = (message) => { if (import.meta.dev) console.warn(message) }
 
 /** Tests only: swap the canvas factory, the shader render call, the readiness check and/or
@@ -28,11 +30,13 @@ export function setRevealPixelsDeps(deps: {
   makeCanvas?: () => Canvas
   render?: typeof renderFieldWithBase
   ready?: () => boolean
+  whenReady?: (timeoutMs?: number) => Promise<boolean>
   warn?: (message: string) => void
 }): void {
   if (deps.makeCanvas) { makeCanvas = deps.makeCanvas; soloPool.length = 0; outPool.length = 0 }
   if (deps.render) render = deps.render
   if (deps.ready) ready = deps.ready
+  if (deps.whenReady) whenReady = deps.whenReady
   if (deps.warn) { warn = deps.warn; warnedOversize = false }
 }
 
@@ -67,6 +71,18 @@ const acquire = (from: Canvas[]) => from.pop() ?? makeCanvas()
  *  False both while the catalog is still loading and (self-healingly) kicks that load. */
 export function revealPixelsReady(): boolean {
   return ready()
+}
+
+/**
+ * The same question as an AWAIT, for a host that paints once and keeps the result: an
+ * export. `true` once the shader can draw everything it needs, `false` if it still cannot
+ * after `timeoutMs` (the field module's own default) — never throws, so a timed-out export
+ * goes ahead in the Dissolve look rather than failing, exactly as a cold live frame does.
+ *
+ * Calling it also KICKS the load, so it doubles as the pre-warm.
+ */
+export function ensureRevealPixelsReady(timeoutMs?: number): Promise<boolean> {
+  return whenReady(timeoutMs)
 }
 
 const clamp01 = (v: number) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0)
