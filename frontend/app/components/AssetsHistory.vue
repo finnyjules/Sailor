@@ -7,6 +7,11 @@ interface HistoryItem {
   images: { filename: string; subfolder: string; type: string }[]
   executionTime: number | null
   timestamp: number
+  // The project this run belongs to, when known. /history is volatile (cleared
+  // on every Comfy restart), so this is what lets "Open Workflow" recover the
+  // graph from the durable projects store instead. Disk-listed files have none.
+  projectUuid?: string
+  projectName?: string
 }
 
 const items = ref<HistoryItem[]>([])
@@ -18,6 +23,8 @@ const commentCounts = ref(new Map<string, number>())
 const selectedImage = ref<{
   promptId: string
   image: { filename: string; subfolder: string; type: string }
+  projectUuid?: string
+  projectName?: string
 } | null>(null)
 
 // Bundle detail overlay (multi-image item from one prompt — e.g. SmartLayout
@@ -86,7 +93,9 @@ async function fetchHistory() {
       // The display layer keys bundle thumbnails on filename so dupes don't
       // visibly stack — but the older promptId still gets a card. This matches
       // the user's intuition: "every run is a thing I did."
-      byPrompt.set(promptId, { promptId, status, images: collected, executionTime, timestamp })
+      const projectUuid: string | undefined =
+        (entry as any).prompt?.[3]?.extra_pnginfo?.workflow?.extra?.projectUuid || undefined
+      byPrompt.set(promptId, { promptId, status, images: collected, executionTime, timestamp, projectUuid })
       for (const f of collected) {
         const key = `${f.type}:${f.subfolder}:${f.filename}`
         // Only track the newest prompt that produced this file for the disk-fallback skip.
@@ -141,6 +150,9 @@ async function fetchHistory() {
             images: [{ filename: g.filename, subfolder: g.subfolder || '', type: g.type }],
             executionTime: null,
             timestamp: g.timestamp,
+            // A group's workflowId IS its project uuid (see useProjectGenerations).
+            projectUuid: proj.workflowId,
+            projectName: proj.name,
           })
         }
       }
@@ -253,7 +265,7 @@ function openItem(item: HistoryItem) {
   if (item.images.length > 1) {
     selectedBundle.value = item
   } else {
-    selectedImage.value = { promptId: item.promptId, image: item.images[0] }
+    selectedImage.value = { promptId: item.promptId, image: item.images[0], projectUuid: item.projectUuid, projectName: item.projectName }
   }
 }
 
@@ -277,6 +289,8 @@ watch(() => activeTab.value.type, (type) => {
       <AssetDetailOverlay
         :prompt-id="selectedImage.promptId"
         :image="selectedImage.image"
+        :project-uuid="selectedImage.projectUuid"
+        :project-name="selectedImage.projectName"
         @close="selectedImage = null; loadAssetMeta()"
       />
     </template>
@@ -286,7 +300,7 @@ watch(() => activeTab.value.type, (type) => {
       <AssetBundleOverlay
         :item="selectedBundle"
         @close="selectedBundle = null"
-        @open-image="(img) => { selectedImage = { promptId: selectedBundle!.promptId, image: img }; selectedBundle = null }"
+        @open-image="(img) => { selectedImage = { promptId: selectedBundle!.promptId, image: img, projectUuid: selectedBundle!.projectUuid, projectName: selectedBundle!.projectName }; selectedBundle = null }"
       />
     </template>
 

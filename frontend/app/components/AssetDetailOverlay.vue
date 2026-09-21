@@ -8,17 +8,22 @@ import {
   Send,
   Loader2,
 } from 'lucide-vue-next'
+import { toast } from 'vue-sonner'
 
 const props = defineProps<{
   promptId: string
   image: { filename: string; subfolder: string; type: string }
+  // The owning project, when the gallery knows it. /history is wiped on every
+  // Comfy restart, so this is how "Open Workflow" still finds the graph.
+  projectUuid?: string
+  projectName?: string
 }>()
 
 const emit = defineEmits<{
   close: []
 }>()
 
-const { openTab } = useTabs()
+const { tabs, openTab, setActiveTab } = useTabs()
 
 // History data for this prompt
 const historyData = ref<any>(null)
@@ -211,36 +216,55 @@ function downloadImage() {
   document.body.removeChild(a)
 }
 
-function openWorkflow() {
-  if (!entry.value) return
+// Two places can hold this image's graph: the live /history entry (volatile —
+// gone after any Comfy restart) and the durable projects store. The old version
+// only looked at /history and returned silently when it was empty, which after
+// a restart is every image. Now: use whichever source still has the graph, and
+// say so plainly when neither does (a disk-listed file made outside a project).
+// The actual load is loadWorkflowForTab()'s job (default.vue) — it reads the
+// tab's projectUuid first, then promptId.
+const openingWorkflow = ref(false)
+async function openWorkflow() {
+  if (openingWorkflow.value) return
+  openingWorkflow.value = true
+  try {
+    const embedded = entry.value?.prompt?.[3]?.extra_pnginfo?.workflow
+    const projectUuid: string | undefined = props.projectUuid || embedded?.extra?.projectUuid || undefined
 
-  const extraData = entry.value.prompt?.[3]
-  const workflow = extraData?.extra_pnginfo?.workflow
-  if (!workflow) {
-    console.warn('No workflow found in history entry')
-    return
-  }
-
-  // Open a new project tab with promptId so loadWorkflowForTab() can fetch it
-  openTab({ type: 'project', label: props.image.filename, promptId: props.promptId })
-
-  // After a delay, send the workflow to the last ComfyUI iframe
-  setTimeout(() => {
-    const iframes = document.querySelectorAll('iframe')
-    const lastIframe = iframes[iframes.length - 1]
-    if (lastIframe?.contentWindow) {
-      lastIframe.contentWindow.postMessage(
-        {
-          type: 'sailor',
-          action: 'loadWorkflow',
-          workflow,
-        },
-        '*',
-      )
+    // Project already open in a tab → go to it rather than opening a twin.
+    if (projectUuid) {
+      const existing = tabs.value.find((t) => t.type === 'project' && t.projectUuid === projectUuid)
+      if (existing) {
+        setActiveTab(existing.id)
+        emit('close')
+        return
+      }
     }
-  }, 2000)
 
-  emit('close')
+    let recoverable = !!embedded
+    if (!recoverable && projectUuid) {
+      const loaded = await useProjects().loadProject(projectUuid)
+      recoverable = !!loaded?.currentVersion?.workflow
+    }
+    if (!recoverable) {
+      toast('No saved workflow for this image', {
+        description: 'It wasn’t made inside a project, so there’s no graph to reopen.',
+      })
+      return
+    }
+
+    openTab({
+      type: 'project',
+      label: props.projectName || props.image.filename,
+      workflowId: projectUuid,
+      // Only a live /history id is worth passing — synthetic gallery ids aren't.
+      promptId: embedded ? props.promptId : undefined,
+      projectUuid,
+    })
+    emit('close')
+  } finally {
+    openingWorkflow.value = false
+  }
 }
 
 // Comments
@@ -372,7 +396,8 @@ function removeComment(index: number) {
               Download
             </button>
             <button
-              class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-white/5 text-white/70 hover:bg-white/10 hover:text-white transition-colors cursor-pointer"
+              class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-white/5 text-white/70 hover:bg-white/10 hover:text-white transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default"
+              :disabled="loadingHistory || openingWorkflow"
               @click="openWorkflow"
             >
               <ExternalLink class="size-4 shrink-0" />
