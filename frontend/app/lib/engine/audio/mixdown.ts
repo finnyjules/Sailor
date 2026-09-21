@@ -1,4 +1,4 @@
-import type { EditState } from '~~/shared/timeline/types'
+import type { EditState, Clip } from '~~/shared/timeline/types'
 import { computeTotalFrames } from '~~/shared/timeline/types'
 import { audioScheduleFor, type AudioClipLike } from './audioEngine'
 
@@ -99,6 +99,27 @@ export function mixSourceKey(plan: MixPlan, urls: string[]): string {
   return (h >>> 0).toString(36)
 }
 
+/** Loudest sample a mix may reach (just under full scale). */
+export const MIX_CEILING = 0.98
+
+/** If overlapping clips add up past the ceiling, turn the WHOLE mix down so the
+ *  loudest sample just fits; a mix that already fits is left untouched. Returns
+ *  the gain applied. (Web Audio's DynamicsCompressor was tried and rejected
+ *  here: measured, it adds ~7% makeup gain to every mix — and by spec a 6 ms
+ *  look-ahead delay — so even a lone clip would export louder than it previews.) */
+export function fitPeak(channels: Float32Array[], ceiling = MIX_CEILING): number {
+  let peak = 0
+  for (const ch of channels) {
+    for (let i = 0; i < ch.length; i++) peak = Math.max(peak, Math.abs(ch[i]!))
+  }
+  if (peak <= ceiling) return 1
+  const g = ceiling / peak
+  for (const ch of channels) {
+    for (let i = 0; i < ch.length; i++) ch[i] = ch[i]! * g
+  }
+  return g
+}
+
 /** 16-bit PCM WAV, channels interleaved, samples clamped to [-1, 1]. */
 export function encodeWav16(channels: Float32Array[], sampleRate: number): ArrayBuffer {
   const nCh = channels.length
@@ -132,4 +153,79 @@ export function reverseAudioBuffer(ctx: BaseAudioContext, buf: AudioBuffer): Aud
     for (let i = 0, n = src.length; i < n; i++) dst[i] = src[n - 1 - i]!
   }
   return out
+}
+
+/** Render the plan offline. `buffers` maps clip id → decoded file. */
+export async function renderMixdown(plan: MixPlan, buffers: Map<string, AudioBuffer>, ctx: OfflineAudioContext): Promise<Float32Array[]> {
+  for (const v of plan.voices) {
+    const buf = buffers.get(v.clipId)
+    if (!buf) continue
+    const w = voiceBufferWindow(v, buf.duration)
+    if (w.spanSec <= 0) continue
+    const src = ctx.createBufferSource()
+    src.buffer = v.reverse ? reverseAudioBuffer(ctx, buf) : buf
+    src.playbackRate.value = v.playbackRate
+    const gain = ctx.createGain()
+    src.connect(gain).connect(ctx.destination)
+    const [first, ...rest] = v.gainPoints
+    gain.gain.setValueAtTime(first ? first[1] : 1, v.clipStartSec)
+    for (const [t, g] of rest) gain.gain.linearRampToValueAtTime(g, v.clipStartSec + t)
+    src.start(v.startSec + w.delaySec, w.offsetSec, w.spanSec)
+  }
+  const out = await ctx.startRendering()
+  const channels = [out.getChannelData(0), out.getChannelData(1)]
+  fitPeak(channels)
+  return channels
+}
+
+/** Same upload route the frame bakes use; ComfyUI writes any file type to input/. */
+export async function uploadMix(wav: ArrayBuffer): Promise<string> {
+  const fname = `timeline_mix_${Date.now()}.wav`
+  const fd = new FormData()
+  fd.append('image', new File([wav], fname, { type: 'audio/wav' }))
+  fd.append('overwrite', 'true')
+  const res = await fetch('/upload/image', { method: 'POST', body: fd })
+  if (!res.ok) throw new Error(`mix upload failed (${res.status})`)
+  const data = await res.json() as { name?: string; subfolder?: string }
+  return data.subfolder ? `${data.subfolder}/${data.name}` : (data.name || fname)
+}
+
+const mixCache = new Map<string, string>()   // source key → uploaded filename (this session)
+
+/** Mix every audio clip into one uploaded WAV. null = nothing to mix. */
+export async function ensureTimelineMix(state: EditState, resolveClipUrl: (clip: Clip) => string | null): Promise<string | null> {
+  const plan = planMixdown(state)
+  if (!plan.voices.length) return null
+  if (plan.totalSec > MAX_MIX_SEC) throw new Error('timeline is longer than 30 minutes')
+
+  const clips = new Map<string, Clip>()
+  for (const track of state.tracks) for (const clip of track.clips) clips.set(clip.id, clip)
+  const urlByClip = new Map<string, string>()
+  for (const v of plan.voices) {
+    const url = resolveClipUrl(clips.get(v.clipId)!)
+    if (!url) throw new Error('an audio clip has no file')
+    urlByClip.set(v.clipId, url)
+  }
+
+  const key = mixSourceKey(plan, plan.voices.map(v => urlByClip.get(v.clipId)!))
+  const cached = mixCache.get(key)
+  if (cached) return cached
+
+  const ctx = new OfflineAudioContext(2, Math.max(1, Math.ceil(plan.totalSec * MIX_SAMPLE_RATE)), MIX_SAMPLE_RATE)
+  const byUrl = new Map<string, Promise<AudioBuffer>>()
+  const buffers = new Map<string, AudioBuffer>()
+  for (const [clipId, url] of urlByClip) {
+    if (!byUrl.has(url)) {
+      byUrl.set(url, fetch(url).then(r => {
+        if (!r.ok) throw new Error(`audio fetch ${r.status}`)
+        return r.arrayBuffer()
+      }).then(b => ctx.decodeAudioData(b)))
+    }
+    buffers.set(clipId, await byUrl.get(url)!)
+  }
+
+  const channels = await renderMixdown(plan, buffers, ctx)
+  const filename = await uploadMix(encodeWav16(channels, MIX_SAMPLE_RATE))
+  mixCache.set(key, filename)
+  return filename
 }

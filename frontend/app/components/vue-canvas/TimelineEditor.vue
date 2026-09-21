@@ -15,6 +15,7 @@ import { ensureMotionBake } from '~/lib/engine/motionClipBake'
 import { ensureSpaceTypeClipBake } from '~/lib/engine/spaceTypeClipBake'
 import { spaceTypeEngineAvailable } from '~/lib/engine/spaceTypeEnginePool'
 import { ensureMotionFonts } from '~/composables/useTemplateFonts'
+import { ensureTimelineMix } from '~/lib/engine/audio/mixdown'
 import type { Clip, Track, BlendMode, MotionClip, SpaceTypeClip, Transition, TransitionKind } from '~~/shared/timeline/types'
 import { computeTotalFrames } from '~~/shared/timeline/types'
 import { interpolateClipAt } from '~~/shared/timeline/interpolate'
@@ -1060,6 +1061,8 @@ function findClip(id: string): Clip | undefined {
 const isRendering = ref(false)
 const renderResult = ref<null | { url: string; filename: string }>(null)
 const renderError = ref<string | null>(null)
+/** Something the export could not do, shown beside the result (not a failure). */
+const renderNotice = ref<string | null>(null)
 const renderProgress = ref<{ current: number; total: number } | null>(null)
 /** Which half of an export is running. Space Type clips bake in the browser
  *  before the server renders, and that bake is slow enough to look like a hang
@@ -1070,6 +1073,7 @@ const renderPhase = ref<'baking' | 'rendering' | null>(null)
 async function renderViaFFmpeg() {
   if (isRendering.value) return
   renderError.value = null
+  renderNotice.value = null
   renderResult.value = null
   renderProgress.value = null
   isRendering.value = true
@@ -1127,6 +1131,18 @@ async function renderViaFFmpeg() {
       return
     }
   }
+  // Mix every audio clip (all tracks, position, volume, fades, speed, reverse)
+  // into one file in the browser — the same voices the preview plays — and hand
+  // the server that. If it fails the export still runs, with the old
+  // first-clip-only sound, and says so.
+  let mixFile: string | null = null
+  try {
+    mixFile = await ensureTimelineMix(es, clip => resolveAudioUrl(clip))
+  } catch (err: any) {
+    console.warn('[timeline] audio mix failed', err)
+    renderNotice.value = `Audio could not be mixed (${err?.message ?? err}), so this export only has the first audio clip.`
+  }
+
   renderPhase.value = 'rendering'
   renderProgress.value = null
 
@@ -1158,6 +1174,7 @@ async function renderViaFFmpeg() {
       }
     }
   }
+  if (mixFile) payload.audio_path = mixFile
 
   try {
     const res = await fetch('/sailor/render_timeline_stream', {
@@ -1836,6 +1853,7 @@ const assetTab = ref<'ports' | 'files' | 'library'>(portBindings.value.length > 
             {{ renderResult.filename }}
           </a>
           <span v-if="renderError" class="text-xs text-amber-400 truncate max-w-[200px]">{{ renderError }}</span>
+          <span v-if="renderNotice" class="text-xs text-white/50 truncate max-w-[280px]" :title="renderNotice">{{ renderNotice }}</span>
           <button
             class="flex items-center justify-center size-7 rounded hover:bg-white/10 transition-colors"
             title="Close (Esc)"

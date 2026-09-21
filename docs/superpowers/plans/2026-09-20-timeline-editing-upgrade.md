@@ -535,16 +535,9 @@ How the server picks it up (no server change): `comfy_extras/nodes_timeline.py` 
 ```ts
 /** Render the plan offline. `buffers` maps clip id → decoded file. */
 export async function renderMixdown(plan: MixPlan, buffers: Map<string, AudioBuffer>, ctx: OfflineAudioContext): Promise<Float32Array[]> {
-  // Safety limiter: only touches peaks above -1 dB, so a single quiet clip is
-  // bit-for-bit what it was. Idea from opencut-classic (MIT): master limiter on the mix.
-  const limiter = ctx.createDynamicsCompressor()
-  limiter.threshold.value = -1
-  limiter.knee.value = 0
-  limiter.ratio.value = 20
-  limiter.attack.value = 0.003
-  limiter.release.value = 0.25
-  limiter.connect(ctx.destination)
-
+  // No limiter node: Web Audio's DynamicsCompressor was measured during the
+  // build and adds ~7% makeup gain to every mix. `fitPeak` (pure, unit-tested,
+  // in this file) turns the whole mix down only when it would clip.
   for (const v of plan.voices) {
     const buf = buffers.get(v.clipId)
     if (!buf) continue
@@ -554,14 +547,16 @@ export async function renderMixdown(plan: MixPlan, buffers: Map<string, AudioBuf
     src.buffer = v.reverse ? reverseAudioBuffer(ctx, buf) : buf
     src.playbackRate.value = v.playbackRate
     const gain = ctx.createGain()
-    src.connect(gain).connect(limiter)
+    src.connect(gain).connect(ctx.destination)
     const [first, ...rest] = v.gainPoints
     gain.gain.setValueAtTime(first ? first[1] : 1, v.clipStartSec)
     for (const [t, g] of rest) gain.gain.linearRampToValueAtTime(g, v.clipStartSec + t)
     src.start(v.startSec + w.delaySec, w.offsetSec, w.spanSec)
   }
   const out = await ctx.startRendering()
-  return [out.getChannelData(0), out.getChannelData(1)]
+  const channels = [out.getChannelData(0), out.getChannelData(1)]
+  fitPeak(channels)   // fitPeak(channels, ceiling = 0.98): scales in place, returns the gain applied
+  return channels
 }
 
 /** Same upload route the frame bakes use; ComfyUI writes any file type to input/. */

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  voiceFor, voiceBufferWindow, planMixdown, mixSourceKey, encodeWav16,
+  voiceFor, voiceBufferWindow, planMixdown, mixSourceKey, encodeWav16, fitPeak,
 } from '../../app/lib/engine/audio/mixdown'
 import { createDefaultEditState } from '../../shared/timeline/types'
 import type { AudioClip, EditState } from '../../shared/timeline/types'
@@ -148,5 +148,26 @@ describe('encodeWav16', () => {
     expect(dv.getInt16(46, true)).toBe(16384)     // R0 = round(0.5 * 32767)
     expect(dv.getInt16(48, true)).toBe(32767)     // L1 clamped
     expect(dv.getInt16(52, true)).toBe(-32768)    // L2 clamped
+  })
+})
+
+describe('fitPeak', () => {
+  it('leaves a mix that already fits untouched', () => {
+    const ch = [new Float32Array([0.5, -0.9]), new Float32Array([0.25, 0])]
+    expect(fitPeak(ch)).toBe(1)
+    expect(Array.from(ch[0]!)).toEqual([0.5, Math.fround(-0.9)])
+  })
+
+  it('turns the WHOLE mix down so the loudest sample sits at the ceiling', () => {
+    const ch = [new Float32Array([0.5, -2]), new Float32Array([1, 0])]
+    expect(fitPeak(ch)).toBeCloseTo(0.49, 6)
+    expect(ch[0]![1]).toBeCloseTo(-0.98, 5)
+    expect(ch[0]![0]).toBeCloseTo(0.245, 5)
+    expect(ch[1]![0]).toBeCloseTo(0.49, 5)   // other channel scaled by the same amount
+  })
+
+  it('silence and empty input are fine', () => {
+    expect(fitPeak([new Float32Array(4)])).toBe(1)
+    expect(fitPeak([])).toBe(1)
   })
 })
