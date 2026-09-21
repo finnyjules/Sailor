@@ -7,7 +7,7 @@
 // whichever look shader (Dither or Characters) draws the block picture underneath. Pure: no
 // Vue, no DOM, no shader compilation.
 import type { MotionReveal } from './params'
-import { alongTravel, bayer8, driftCells } from './dither'
+import { alongTravel, travelAlong, bayer8, driftCells } from './dither'
 import { PIXEL_JITTER } from './pixels'
 
 /** The Dither look's Pattern options — the `bayer_dither` effect's 12, in manifest order.
@@ -66,9 +66,9 @@ export function assembleTest(
   const band = r.band
   const lead = r.amount * (1 + band + 2 * soft)
   const { dx, dy } = driftCells(r)
-  const angle = r.angle, out = r.out
+  const along = travelAlong(r.angle, r.out, grid)   // trig + extent once per frame, not per cell
   return (cx, cy) => {
-    const s = alongTravel(angle, out, cx, cy, grid)
+    const s = along(cx, cy)
     const tp = (lead - soft - band - s) / soft
     if (tp >= 1 || (tp > 0 && tp > bayer8(cx + 3 - dx, cy + 5 - dy))) return 2
     const lp = (lead - s) / soft
@@ -156,4 +156,16 @@ export function assembleGrid(
     cellW = cellH * (shape >= 7 && shape <= 14 ? 2 / 3 : 1)
   }
   return { cols: Math.ceil(fw / cellW), rows: Math.ceil(fh / cellH), cellW, cellH }
+}
+
+/** What the painter hands `renderFieldWithBase` beyond the effect's own params: the BUILD
+ *  variant and its uniforms. Dither look → the SHIMMER build of bayer_dither, whose threshold
+ *  pattern slides under the blocks by the same whole-cell drift that moves the scatter order,
+ *  so the dithered tones shimmer while the sampled picture stays put (Julien: "I LOVE the
+ *  colour shimmer"). The shader counts rows from the BOTTOM, hence `+dy`; `−dx` so the pattern
+ *  travels the way `bayer8(cx − dx, …)` does here. Characters look → the ASCII MATTE build. */
+export function assembleShaderExtras(r: MotionReveal): { variant: 'SHIMMER' | 'MATTE'; uniforms: Record<string, number> } {
+  if (r.look === 'characters') return { variant: 'MATTE', uniforms: { u_matte: 1 } }
+  const { dx, dy } = driftCells(r)
+  return { variant: 'SHIMMER', uniforms: { u_shimmerX: -dx + 0, u_shimmerY: dy + 0 } }
 }

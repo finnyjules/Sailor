@@ -1233,7 +1233,7 @@ Commit subject: `feat(compositor): Pixels is the Dither bar's first Style, with 
 
 Spec: **Addendum 2** in `docs/superpowers/specs/2026-09-20-dither-transition-design.md` (read it first — it is the requirements, including the exact front maths). Parts 1–2 are built and committed. Same Global Constraints (`.superpowers/sdd/dither-constraints.md`), plus:
 
-- Stored `style` gains `'assemble'`; `REVEAL_STYLES = ['pixels', 'assemble', 'dissolve', 'wipe', 'dots']`; default stays `'pixels'`. New stored params (all read ONLY through `revealParams`): `look: 'dither' | 'chars'` (default `'dither'`), `pattern` = the Dither effect's `u_pattern` value (default `2`, Fine 8×8; allowed = every option value of `bayer_dither.u_pattern` in `shader_effects/manifest.json`), `levels` 2–8 integer (default 3), `band` 0–100 (default 30), `scatter` 0–100 (default 35). `cell` default for `assemble` is 16. `chars` as in Part 2.
+- Stored `style` gains `'assemble'`; `REVEAL_STYLES = ['pixels', 'assemble', 'dissolve', 'wipe', 'dots']`; default stays `'pixels'`. New stored params (all read ONLY through `revealParams`): `look: 'dither' | 'characters'` (default `'dither'`), `pattern` = the Dither effect's `u_pattern` value (default `2`, Fine 8×8; allowed = every option value of `bayer_dither.u_pattern` in `shader_effects/manifest.json`), `levels` 2–8 integer (default 3), `band` 0–100 (default 30), `scatter` 0–100 (default 35). `cell` default for `assemble` is 16. `chars` as in Part 2.
 - Only Task 12 touches `frontend/app/composables/useCompositorLayers.ts`, and only to GENERALISE the two existing Pixels hunks (no third hunk). Nobody touches `shader_effects/`, `field.ts` or `renderer.ts`.
 - Pixels and the three mask styles must draw exactly as they do now.
 

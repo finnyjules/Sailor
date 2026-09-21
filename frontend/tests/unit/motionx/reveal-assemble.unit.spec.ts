@@ -346,3 +346,35 @@ describe('assembleGrid', () => {
     expect(g.cellH).toBe(2)
   })
 })
+
+describe('assembleShaderExtras — what makes the colours shimmer', () => {
+  it('Dither look: the SHIMMER build, offset by the same whole-cell drift as the scatter order', async () => {
+    const { assembleShaderExtras, revealParams } = await import('~/lib/motionx/reveal')
+    const r = { ...revealParams({ style: 'assemble', drift: 6, angle: 0 }), amount: 0.5, elapsed: 0.5 }
+    expect(assembleShaderExtras(r)).toEqual({ variant: 'SHIMMER', uniforms: { u_shimmerX: -3, u_shimmerY: 0 } })
+    const down = { ...revealParams({ style: 'assemble', drift: 6, angle: 90 }), amount: 0.5, elapsed: 0.5 }
+    expect(assembleShaderExtras(down).uniforms).toEqual({ u_shimmerX: 0, u_shimmerY: 3 })
+  })
+  it('Shimmer speed 0 is perfectly still, and never a negative zero', async () => {
+    const { assembleShaderExtras, revealParams } = await import('~/lib/motionx/reveal')
+    const still = assembleShaderExtras({ ...revealParams({ style: 'assemble', drift: 0 }), amount: 0.5, elapsed: 9 })
+    expect(Object.is(still.uniforms.u_shimmerX, 0)).toBe(true); expect(Object.is(still.uniforms.u_shimmerY, 0)).toBe(true)
+  })
+  it('Characters look: the ASCII matte build', async () => {
+    const { assembleShaderExtras, revealParams } = await import('~/lib/motionx/reveal')
+    expect(assembleShaderExtras({ ...revealParams({ style: 'assemble', look: 'characters' }), amount: 0.5, elapsed: 1 }))
+      .toEqual({ variant: 'MATTE', uniforms: { u_matte: 1 } })
+  })
+})
+
+describe('travelAlong — the per-frame form of the travel projection', () => {
+  it('agrees with alongTravel everywhere, in and out, at odd angles, on and off the frame', async () => {
+    const { travelAlong, alongTravel } = await import('~/lib/motionx/reveal')
+    const grid = { cols: 40, rows: 23 }
+    for (const out of [false, true]) for (const angle of [0, 0.7, Math.PI / 2, 2.4, Math.PI, 5]) {
+      const f = travelAlong(angle, out, grid)
+      for (let y = -2; y < 26; y += 3) for (let x = -2; x < 43; x += 4) expect(f(x, y)).toBeCloseTo(alongTravel(angle, out, x, y, grid), 12)
+    }
+    expect(travelAlong(0, false, { cols: 0, rows: 0 })(3, 3)).toBe(0)
+  })
+})

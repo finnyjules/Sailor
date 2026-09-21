@@ -39,12 +39,20 @@ export function driftCells(r: MotionReveal): { dx: number; dy: number } {
  * edge only fills in as the amount reaches 1 — right for export (which is the frame), and the
  * price of cells that are identical in preview and export.
  */
-export function alongTravel(angle: number, out: boolean, cx: number, cy: number, grid: { cols: number; rows: number }): number {
+/** The per-FRAME form: the trigonometry and the frame's extent along the travel are worked
+ *  out once, and the returned function only projects a cell. The mask builders call this up
+ *  to a million times a frame — the one-off form below is for single lookups and tests. */
+export function travelAlong(angle: number, out: boolean, grid: { cols: number; rows: number }): (cx: number, cy: number) => number {
   const ux = Math.cos(angle), uy = Math.sin(angle)
   const c1 = grid.cols * ux, c2 = grid.rows * uy
   const lo = Math.min(0, c1, c2, c1 + c2), span = Math.max(0, c1, c2, c1 + c2) - lo
-  const s = span < 1e-9 ? 0 : ((cx + 0.5) * ux + (cy + 0.5) * uy - lo) / span
-  return out ? 1 - s : s
+  if (span < 1e-9) return () => (out ? 1 : 0)
+  return out
+    ? (cx, cy) => 1 - ((cx + 0.5) * ux + (cy + 0.5) * uy - lo) / span
+    : (cx, cy) => ((cx + 0.5) * ux + (cy + 0.5) * uy - lo) / span
+}
+export function alongTravel(angle: number, out: boolean, cx: number, cy: number, grid: { cols: number; rows: number }): number {
+  return travelAlong(angle, out, grid)(cx, cy)
 }
 
 /**
@@ -60,7 +68,7 @@ export function cellTest(r: MotionReveal, grid: { cols: number; rows: number }):
   const amount = r.amount
   if (r.style !== 'wipe') return (cx, cy) => amount > bayer8(cx - dx, cy - dy)
   const angle = r.angle, out = r.out, soft = r.softness
-  const along = (cx: number, cy: number) => alongTravel(angle, out, cx, cy, grid)
+  const along = travelAlong(angle, out, grid)
   if (soft <= 1e-6) return (cx, cy) => along(cx, cy) < amount
   // The band of width `softness` sits just behind a front that runs 0 → 1 + softness, so the
   // frame is empty at amount 0 and full at amount 1 whatever the softness.
