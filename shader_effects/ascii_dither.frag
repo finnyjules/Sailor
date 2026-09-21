@@ -28,6 +28,13 @@ uniform float u_spacing;
 uniform float u_invert;
 uniform float u_underlay;
 uniform float u_blur;
+// Matte mode: set by the Frame compositor's dither transition (the Pixels style, which
+// rebuilds a layer out of characters and stamps the result over the frame), NEVER a
+// Shader Studio dial and never a manifest param. The shared renderer writes 0 into it
+// before every draw (BUILTIN_PASS_DEFAULTS in ~/lib/shaderfx/renderer.ts), and the
+// server-side GL leaves an unset float at 0, so it is off everywhere else by
+// construction. At 0 this shader is byte-for-byte what it has always been.
+uniform float u_matte;
 
 // Anti-aliased "metric <= t" test: 1 inside, 0 outside, smooth ~1px band across
 // the edge (fwidth gives the screen-space derivative of the metric, so the AA band
@@ -260,11 +267,18 @@ void main() {
     if (shp >= 7 && shp <= 14) cellPx.x *= 2.0 / 3.0; // glyph cells are 2:3; geometric + material shapes (15+) use SQUARE cells
     vec2 cell = floor(v_texCoord * u_resolution / cellPx);
     vec2 cuv = (cell + 0.5) * cellPx / u_resolution;
-    vec3 col = texture(u_image0, clamp(cuv, 0.0, 1.0)).rgb;
+    // ONE sample of the cell: .rgb is the same read as before, .a is what matte mode
+    // needs (the element's own coverage at this cell).
+    vec4 src = texture(u_image0, clamp(cuv, 0.0, 1.0));
+    vec3 col = src.rgb;
+    bool matte = u_matte > 0.5;
     float lum = dot(col, vec3(0.299, 0.587, 0.114));
     float tick = floor(u_time * u_speed * 8.0);
     float jitter = u_jitter * (hash2(cell + tick * 101.0, u_seed) - 0.5);
     float g = clamp(lum + jitter + u_brightness, 0.0, 1.0);
+    // Density follows the element's alpha, so nothing appears where it is transparent.
+    // Must come BEFORE the Invert flip, or a transparent cell inverts to full ink.
+    if (matte) g *= src.a;
     if (u_invert > 0.5) g = 1.0 - g;
 
     // In-cell coordinate. At u_spacing == 0 this is byte-for-byte the original fract()
@@ -273,6 +287,9 @@ void main() {
     if (u_spacing > 0.0) inCell = (inCell - 0.5) / max(1.0 - u_spacing, 1e-3) + 0.5;
 
     vec3 fx;
+    // Hoisted out of the shp < 15 branch below (where it is still assigned on every
+    // path before use) so the matte output below can read it. Inert on the classic path.
+    float glyph = 0.0;
     if (shp >= 15) {
         // Material shapes: each returns a finished shaded RGB tile, not a coverage mask.
         // Use the RAW cell coord (Spacing is a no-op — each brick draws its own gaps).
@@ -285,7 +302,6 @@ void main() {
         else if (shp == 18) fx = beadTile(lc, tileCol);          // Beads
         else                fx = gemTile(lc, tileCol, cell);     // Gems (19)
     } else {
-        float glyph;
         if (shp < 7) {
             // Geometric shapes render in the SQUARE cell above ⇒ circles are round, crosses/blocks
             // symmetric. (Glyph shapes keep the 2:3 atlas cell.)
@@ -296,7 +312,21 @@ void main() {
                               : sampleGlyph(int(gi), shp - 7, inCell);
         }
         vec3 ink = mix(vec3(1.0), col / max(lum, 1e-3), step(0.5, u_colored));
+        // Matte: the ink is the element's TRUE colour, whatever Colored says — the
+        // classic ink divides out luminance because it paints onto black, which turns
+        // a dark element white. Applied as an override so the line above, which the
+        // golden-parity suite pins, is untouched.
+        if (matte) ink = col;
         fx = clamp(ink * glyph, 0.0, 1.0); // the ASCII layer, on black
+    }
+
+    // Matte mode writes STRAIGHT alpha (the renderer's context is
+    // premultipliedAlpha: false) and returns BEFORE the underlay: the compositor
+    // stamps this over the frame itself, so there is nothing to composite here.
+    if (matte) {
+        if (shp >= 15) fragColor0 = vec4(clamp(fx, 0.0, 1.0), src.a * step(0.001, g));
+        else           fragColor0 = vec4(clamp(col, 0.0, 1.0), clamp(glyph, 0.0, 1.0));
+        return;
     }
 
     // Underlay: composite the ASCII layer over the SHARP, full-res source so the

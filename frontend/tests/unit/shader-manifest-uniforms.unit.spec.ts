@@ -22,6 +22,9 @@ const BUILTIN = new Set([
   // Built by ShaderStudioSurface from the LAYER's `customChars`, not from a
   // manifest param — the only uniform in the catalog fed from layer state.
   'u_customGlyphs',
+  // A built-in mode switch set by the Frame compositor's dither transition, never a
+  // Studio dial; reset to 0 for every draw by BUILTIN_PASS_DEFAULTS in renderer.ts.
+  'u_matte',
 ])
 
 /**

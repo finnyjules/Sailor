@@ -17,7 +17,7 @@ import { shaderFx, expandPasses, type Uniforms, type ShaderPass } from '~/lib/sh
 // ever runs. See kickCatalogFetch's doc below for how the self-heal retry still
 // works without this module ever importing the fetcher.
 import { getEffectSync, refetchShaderFxCatalog } from '~/lib/shaderfx/catalogStore'
-import type { EffectDef, ParamValue } from '~/lib/shaderfx/types'
+import type { EffectDef, EffectTextureDef, ParamValue } from '~/lib/shaderfx/types'
 import { toUniforms } from '~/lib/shaderfx/params'
 import { fieldKey, quantizeTime, planFields, resolveEffectParams, inputKey, LIVE_FIELD_CEILING } from './descriptor'
 
@@ -238,7 +238,7 @@ function kickCatalogFetch(): void {
     .then(() => {
       _catalogLoaded = true
       _catalogRetryCount = 0
-      for (const cb of [..._catalogReadySubs]) cb()
+      notifyFieldReady()
     })
     .catch(() => { /* still failing — the NEXT miss retries with backoff, up to CATALOG_RETRY_MAX */ })
     .finally(() => { _catalogRetry = null })
@@ -264,6 +264,129 @@ export function retryFieldCatalog(): void {
 export function onFieldCatalogReady(cb: () => void): () => void {
   _catalogReadySubs.add(cb)
   return () => { _catalogReadySubs.delete(cb) }
+}
+
+/** Fire the "something this module was waiting on has landed" signal — a successful
+ *  catalog load, or a declared texture finishing its download (see `ensureTextureImage`).
+ *  Copied before iterating so a subscriber that unsubscribes itself inside the callback
+ *  (a host tearing down on the repaint it just asked for) can't mutate the live set. */
+function notifyFieldReady(): void {
+  for (const cb of [..._catalogReadySubs]) cb()
+}
+
+/**
+ * An effect can declare TEXTURES in its manifest (`EffectDef.textures`) — today only
+ * the ASCII effect's `glyph_atlas.png`, bound as `u_glyphs` and accompanied by the
+ * numbers that describe its layout (`u_glyphCount`, `u_glyphRows`).
+ *
+ * `buildPasses` used to pass `undefined` for textures and never emitted the companion
+ * numbers, so on EVERY path that goes through this module — a Frame layer effect, a
+ * Space Type fill, a Shape Studio or Scene3D material — the ASCII shapes that sample
+ * the atlas (Hash, Matrix, Binary, Braille, Morse, Dots, Slashes) sampled an unbound
+ * sampler with a glyph count of 0 and drew nothing at all. Only Shader Studio and the
+ * texturefx stylize path (~/lib/texturefx/stylize.ts `loadEffectTextures`, the
+ * precedent this follows) ever loaded them.
+ *
+ * The Images live here, at module scope, for two reasons: one download per atlas for
+ * the page, and — more importantly — ONE STABLE OBJECT per atlas. The renderer's
+ * extra-texture cache is keyed on the source object's identity and bounded at 32
+ * (see `extraTexCache` in ~/lib/shaderfx/renderer.ts), so handing it a fresh Image
+ * per frame would re-upload the atlas every frame and evict everything else.
+ */
+const _texImages = new Map<string, HTMLImageElement>()
+/** Fast path for `fieldEffectReady`, which is called every frame: the catalog hands
+ *  back the SAME `EffectTextureDef` objects until a refetch replaces the catalog, so
+ *  this skips rebuilding the `file + v` key string on the steady-state call. The Map
+ *  above stays the canonical store, keyed so two effects declaring the same atlas
+ *  share one Image (and therefore one GL texture). */
+const _texByDef = new WeakMap<EffectTextureDef, HTMLImageElement>()
+
+/** `/sailor/shader_effects/assets/<file>?v=<mtime>` — the same route and the same
+ *  cache-busting version `assetUrl` in ~/lib/shaderfx/catalog builds, deliberately
+ *  rebuilt here rather than imported: catalog.ts owns `$fetch('/sailor/shader_effects')`
+ *  and registers the refetcher at module scope, and this module must not pull it into
+ *  the Space Type embed bundle (see the catalogStore import note at the top of this
+ *  file). Keep the two in step if that route ever moves. */
+function textureAssetUrl(file: string, v?: string | number): string {
+  const base = `/sailor/shader_effects/assets/${encodeURIComponent(file)}`
+  return v != null ? `${base}?v=${encodeURIComponent(String(v))}` : base
+}
+
+/** The cached Image for one declared texture, starting its download the first time it
+ *  is asked for and never again (a failed load stays failed — `complete` goes true with
+ *  `naturalWidth` 0, so `textureLoaded` below keeps returning false rather than
+ *  retrying forever). Returns null where there is no DOM `Image` at all (a unit test,
+ *  an SSR pass): the caller then behaves exactly as this module did before textures
+ *  existed, never throws. */
+function ensureTextureImage(t: EffectTextureDef): HTMLImageElement | null {
+  const fast = _texByDef.get(t)
+  if (fast) return fast
+  if (typeof Image === 'undefined') return null
+  const key = `${t.file}@${t.v ?? ''}`
+  let img = _texImages.get(key)
+  if (!img) {
+    img = new Image()
+    img.crossOrigin = 'anonymous'
+    // A host with no per-frame loop (a static Frame card, a one-shot bake) has nothing
+    // that would notice the atlas arriving — same problem, and the same fix, as the
+    // catalog landing late. See `onFieldCatalogReady`.
+    img.addEventListener('load', () => { notifyFieldReady() })
+    img.src = textureAssetUrl(t.file, t.v)
+    _texImages.set(key, img)
+  }
+  _texByDef.set(t, img)
+  return img
+}
+
+function textureLoaded(img: HTMLImageElement): boolean {
+  return img.complete && img.naturalWidth > 0
+}
+
+/**
+ * True when `effectId` can render EVERYTHING it declares: it is in the loaded catalog
+ * AND every texture it declares has finished loading. An effect with no textures is
+ * ready as soon as the catalog is.
+ *
+ * A `false` is not just a report — it KICKS whatever is missing (the bounded catalog
+ * retry; one image download per missing texture, ever) and, when a texture lands,
+ * notifies the `onFieldCatalogReady` subscribers, so a host with no frame loop
+ * repaints. Callers that must not draw a half-built look (the Frame's dither
+ * transition falls back to its Dissolve mask until this is true) poll it every frame,
+ * which is why the ready path allocates nothing.
+ */
+export function fieldEffectReady(effectId: string): boolean {
+  const effect = getEffectSync(effectId)
+  if (!effect) { kickCatalogFetch(); return false }
+  const defs = effect.textures
+  if (!defs || defs.length === 0) return true
+  let ready = true
+  for (const t of defs) {
+    const img = ensureTextureImage(t)
+    // Keep going rather than returning early: every missing texture should have its
+    // one download started by this call, not one per subsequent frame.
+    if (!img || !textureLoaded(img)) ready = false
+  }
+  return ready
+}
+
+/** The LOADED subset of `effect`'s declared textures, plus the companion uniforms of
+ *  exactly those textures — an atlas that hasn't arrived must not bring its
+ *  `u_glyphCount` with it, or the shader picks a glyph index out of an unbound
+ *  sampler. Returns `undefined` textures when nothing is loaded, which is the literal
+ *  argument `buildPasses` passed before this existed: an effect whose textures are
+ *  still loading renders exactly as it does today. */
+function loadedEffectTextures(effect: EffectDef): { textures?: Record<string, TexImageSource>; uniforms?: Record<string, number> } {
+  const defs = effect.textures
+  if (!defs || defs.length === 0) return {}
+  let textures: Record<string, TexImageSource> | undefined
+  let uniforms: Record<string, number> | undefined
+  for (const t of defs) {
+    const img = ensureTextureImage(t)
+    if (!img || !textureLoaded(img)) continue
+    ;(textures ??= {})[t.uniform] = img
+    if (t.extraUniforms) Object.assign(uniforms ??= {}, t.extraUniforms)
+  }
+  return { textures, uniforms }
 }
 
 /**
@@ -520,7 +643,11 @@ function buildPasses(effect: EffectDef, spec: ShaderSpec, t: number): ShaderPass
   const byUniform: Record<string, ParamValue> = {}
   for (const [k, v] of Object.entries(spec.params)) byUniform[`u_${k}`] = v
   Object.assign(uniforms, toUniforms(effect, byUniform))
-  return expandPasses(effect.id, effect.source, uniforms, undefined, effect.passes ?? 1)
+  // The effect's own declared textures (an ASCII glyph atlas) and the numbers that
+  // describe them — only the ones that have actually loaded. See `loadedEffectTextures`.
+  const { textures, uniforms: texUniforms } = loadedEffectTextures(effect)
+  if (texUniforms) Object.assign(uniforms, texUniforms)
+  return expandPasses(effect.id, effect.source, uniforms, textures, effect.passes ?? 1)
 }
 
 /**
@@ -576,6 +703,13 @@ export function renderFieldWithBase(
   t = 0,   // elapsed/scrub time (PRE-speed) → scaled by the fill's Speed below, then u_time;
            // the glass paint path must pass it or an animated shape-following fill (Chrome,
            // Nebula, Liquid metal…) renders frozen at t = 0.
+  /** Merged into EVERY pass AFTER the effect's own uniforms (and after `shape`'s), so
+   *  a caller can set a uniform the effect itself also writes. This is how a built-in
+   *  MODE SWITCH that has no manifest param reaches the shader — `u_matte: 1` for the
+   *  Frame dither transition's ASCII matte. Omitted, the passes are byte-for-byte what
+   *  they were. A switch set here is reset to its default on every OTHER draw by the
+   *  renderer, not by this call (BUILTIN_PASS_DEFAULTS in ~/lib/shaderfx/renderer.ts). */
+  extraUniforms?: Record<string, number>,
 ): HTMLCanvasElement {
   const { effect, spec: resolvedSpec } = resolve(spec)
   if (!effect) {
@@ -590,6 +724,7 @@ export function renderFieldWithBase(
   const sp = typeof resolvedSpec.speed === 'number' ? resolvedSpec.speed : 1
   let passes = buildPasses(effect, resolvedSpec, sp === 0 ? 0 : t * sp)
   if (shape) passes = passes.map(p => ({ ...p, uniforms: { ...p.uniforms, ...shape.uniforms } }))
+  if (extraUniforms) passes = passes.map(p => ({ ...p, uniforms: { ...p.uniforms, ...extraUniforms } }))
   // render() RETURNS the canvas, valid only until the next render call — same
   // ownership contract as resolveField's `rendered` below.
   return shaderFx.render(passes, base, w, h, shape ? { u_shape: shape.texture } : undefined)

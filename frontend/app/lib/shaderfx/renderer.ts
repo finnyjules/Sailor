@@ -34,6 +34,29 @@ export interface ShaderPass {
   maskComposite?: Record<string, number>
 }
 
+/**
+ * Built-in MODE SWITCHES written into every pass before the pass's own uniforms.
+ *
+ * This renderer is a shared singleton and its PROGRAMS are cached, so a uniform one
+ * caller writes stays written: the next draw of the same effect, from a completely
+ * different surface, inherits it unless something rewrites it. That is fine for a
+ * value every caller sets, and a silent cross-surface bug for a switch only ONE
+ * caller sets — which is exactly what `u_matte` is. The Frame compositor's dither
+ * transition turns it on to get a transparent, true-colour ASCII matte; Shader Studio
+ * composes its own passes and would never write it back to 0, so without this reset
+ * the Studio's ASCII preview would flip to matte output the moment a dither
+ * transition had played, and stay there.
+ *
+ * `getUniformLocation` returns null for a program that doesn't declare the name, so
+ * every entry here is inert for every other effect — the `u_hasShape` precedent in
+ * `buildPasses` (~/lib/shaderfill/field.ts), moved down to the one place that can
+ * enforce it on EVERY path rather than just the field path.
+ *
+ * Add an entry here for any future built-in switch that is set by one host and must
+ * be off for the rest. Values are floats (`uniform1f`).
+ */
+export const BUILTIN_PASS_DEFAULTS: Record<string, number> = { u_matte: 0 }
+
 /** Expand one effect into N ping-pong passes (u_pass / u_passCount set per pass). */
 export function expandPasses(
   id: string,
@@ -449,6 +472,13 @@ export class ShaderFxRenderer {
 
       const resLoc = gl.getUniformLocation(prog, 'u_resolution')
       if (resLoc) gl.uniform2f(resLoc, width, height)
+      // Reset the built-in mode switches FIRST, so a pass that genuinely wants one
+      // on still wins below. See BUILTIN_PASS_DEFAULTS for why this is unconditional.
+      for (const [name, value] of Object.entries(BUILTIN_PASS_DEFAULTS)) {
+        const loc = gl.getUniformLocation(prog, name)
+        if (!loc) continue
+        gl.uniform1f(loc, value)
+      }
       for (const [name, value] of Object.entries(pass.uniforms)) {
         const loc = gl.getUniformLocation(prog, name)
         if (!loc) continue
