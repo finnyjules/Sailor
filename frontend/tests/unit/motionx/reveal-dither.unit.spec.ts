@@ -6,7 +6,7 @@ import {
 
 const GRID = { cols: 125, rows: 70 }   // a 16:9 frame at cell = 8‰
 const R = (over: Partial<MotionReveal> = {}): MotionReveal =>
-  ({ ...revealParams({}), amount: 0.5, elapsed: 0, ...over })
+  ({ ...revealParams({ style: 'dissolve' }), amount: 0.5, elapsed: 0, ...over })
 const shownCount = (r: MotionReveal) => {
   let n = 0
   for (let y = 0; y < GRID.rows; y++) for (let x = 0; x < GRID.cols; x++) if (cellShown(r, x, y, GRID)) n++
@@ -15,12 +15,13 @@ const shownCount = (r: MotionReveal) => {
 
 describe('revealParams', () => {
   it('defaults', () => {
-    expect(revealParams(undefined)).toEqual({ style: 'dissolve', out: false, cell: 0.008, drift: 6, angle: 0, softness: 0.35 })
+    expect(revealParams(undefined)).toEqual({ style: 'pixels', out: false, cell: 0.024, drift: 6, angle: 0, softness: 0.35, chars: 1 })
   })
   it('converts stored units: thousandths → fraction, degrees → radians, dir → out', () => {
     const p = revealParams({ dir: 'out', style: 'wipe', cell: 20, drift: 0, angle: 90, softness: 0 })
     expect(p.out).toBe(true); expect(p.style).toBe('wipe'); expect(p.cell).toBeCloseTo(0.02, 9)
     expect(p.drift).toBe(0); expect(p.angle).toBeCloseTo(Math.PI / 2, 9); expect(p.softness).toBe(0)
+    expect(p.chars).toBe(1)
   })
   it('bad values fall back to the default, out-of-range values clamp', () => {
     const p = revealParams({ style: 'plaid', cell: NaN, drift: 'fast', angle: Infinity, softness: null, dir: 7 })
@@ -129,16 +130,16 @@ describe('dots', () => {
     expect(dotRadius(0.5)).toBeGreaterThan(dotRadius(0.25))
   })
   it('a point at a dot centre shows first, the corner between four dots shows last', () => {
-    const pitch = revealParams({}).cell * DOT_PITCH_CELLS
+    const pitch = revealParams({ style: 'dissolve' }).cell * DOT_PITCH_CELLS
     const d = (a: number) => R({ style: 'dots', amount: a, drift: 0 })
     expect(dotShown(d(0.05), pitch / 2, pitch / 2)).toBe(true)
     expect(dotShown(d(0.05), 0, 0)).toBe(false)
     expect(dotShown(d(0.96), 0, 0)).toBe(true)
   })
   it('the grid drifts smoothly with elapsed time', () => {
-    const pitch = revealParams({}).cell * DOT_PITCH_CELLS
+    const pitch = revealParams({ style: 'dissolve' }).cell * DOT_PITCH_CELLS
     const moving = R({ style: 'dots', amount: 0.05, drift: 6, elapsed: 0.01 })
-    expect(dotShown(moving, pitch / 2 + 0.01 * 6 * revealParams({}).cell, pitch / 2)).toBe(true)
+    expect(dotShown(moving, pitch / 2 + 0.01 * 6 * revealParams({ style: 'dissolve' }).cell, pitch / 2)).toBe(true)
   })
 })
 
@@ -177,7 +178,7 @@ describe('cellRange + buildHiddenMask', () => {
 
 // Review follow-ups: the "every style" claims, checked for every style.
 describe('the ends and the clamps, for EVERY style', () => {
-  const pitch = revealParams({}).cell * DOT_PITCH_CELLS
+  const pitch = revealParams({ style: 'dissolve' }).cell * DOT_PITCH_CELLS
   const points = [[0, 0], [pitch / 2, pitch / 2], [pitch * 0.9, pitch * 0.1], [0.31, 0.17]] as const
   it('dots: amount 0 shows nothing and amount 1 everything, including past the ends', () => {
     for (const amount of [0, -0.4]) for (const [u, v] of points) expect(dotShown(R({ style: 'dots', amount }), u, v)).toBe(false)
