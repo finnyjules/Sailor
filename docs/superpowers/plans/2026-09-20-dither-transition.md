@@ -1255,6 +1255,9 @@ Commit subject: `feat(motionx): the Assemble style's dials and maths — two sca
 
 ---
 
+### Task 12 — amendment (2026-09-20, after Julien: "I LOVE the colour shimmer")
+The Dither look's colours must SHIMMER. `shader_effects/bayer_dither.frag` now has a SHIMMER build (commit 381ea1392): with `variant = 'SHIMMER'` it reads two extra uniforms, `u_shimmerX` / `u_shimmerY` — a whole-cell offset of the THRESHOLD pattern (the sampled picture does not move). For the Dither look, step 3 of the recipe below therefore calls `renderFieldWithBase(..., elapsed, { u_shimmerX: -dx, u_shimmerY: dy }, 'SHIMMER')` where `{ dx, dy } = driftCells(reveal)` (the SAME drift that moves the scatter order; the shader's rows count from the BOTTOM, hence `+dy`; `-dx` so the pattern travels the way the maths' `bayer8(cx − dx, …)` does). Add `assembleShaderExtras(r): { variant: 'SHIMMER' | 'MATTE'; uniforms: Record<string, number> }` to `assemble.ts` (Task 11's file — a small, tested addition: Dither look → the shimmer pair, `-0` normalised to `0`; Characters look → `{ u_matte: 1 }`, `'MATTE'`) and use it in step 3 instead of the `sp.matte ? … : undefined` pair. With Shimmer speed 0 both offsets are 0 and the picture is still. Test: drift 6 at elapsed 0.5s and angle 0 → `{ u_shimmerX: -3, u_shimmerY: 0 }`.
+
 ### Task 12: Drawing Assemble
 
 **Files:** create `frontend/app/lib/motionx/reveal/paintAssemble.ts`; modify `frontend/app/lib/motionx/reveal/paintPixels.ts` (export its shared pieces, add the dispatcher), `frontend/app/composables/useCompositorLayers.ts` (generalise the two Pixels hunks), `frontend/app/lib/motion/bake.ts` + the pre-warm watch in `CompositorModal.vue` only if they name Pixels-specific helpers that must now cover Assemble; tests: `frontend/tests/unit/motionx/reveal-paint-assemble.unit.spec.ts`, additions to `reveal-paint-pixels.unit.spec.ts`.
