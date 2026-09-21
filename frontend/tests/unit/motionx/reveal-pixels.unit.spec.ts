@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   revealParams, revealCellDefault, REVEAL_STYLES, REVEAL_DEFAULTS,
   PIXEL_CHARS, PIXEL_END, PIXEL_JITTER,
-  pixelStages, pixelBlock, pixelBrightness, pixelSharp, pixelShaderParams,
+  pixelStages, pixelBlock, pixelBrightness, pixelSharp, pixelShaderParams, pixelFinest,
   type MotionReveal,
 } from '~/lib/motionx/reveal'
 import manifest from '../../../../shader_effects/manifest.json'
@@ -128,6 +128,66 @@ describe('pixelSharp', () => {
       expect(v).toBeGreaterThanOrEqual(prev)
       prev = v
     }
+  })
+})
+
+describe('pixelFinest — the ladder ends where the SHADER stops honouring it', () => {
+  // The shader clamps `u_cell` (a fraction of the frame's HEIGHT) to the manifest range
+  // [0.004, 0.1], but the ladder is built in frame-WIDTH fractions. On a portrait frame the
+  // two disagree badly enough that the last three stages collapsed into one cell size.
+  it('is the width fraction the shader\'s own 0.004 height floor corresponds to, never finer than PIXEL_END', () => {
+    expect(pixelFinest(1920, 1080)).toBeCloseTo(0.004 * 1080 / 1920, 12)
+    expect(pixelFinest(1080, 1920)).toBeCloseTo(0.004 * 1920 / 1080, 12)
+    // A very wide frame would put the shader's floor below the maths' own end — PIXEL_END wins.
+    expect(pixelFinest(4000, 100)).toBe(PIXEL_END)
+  })
+
+  it('leaves the classic landscape ladder for 24‰ exactly as it was', () => {
+    const finest = pixelFinest(1920, 1080)
+    expect(pixelStages(0.024, finest)).toBe(pixelStages(0.024))
+    for (const a of [0, 0.2, 0.4, 0.6, 0.8, 1]) {
+      expect(pixelBlock(a, 0.024, finest)).toBeCloseTo(pixelBlock(a, 0.024), 12)
+    }
+  })
+
+  it('defaults to PIXEL_END, so a caller that passes no finest is unchanged', () => {
+    expect(pixelStages(0.024, PIXEL_END)).toBe(pixelStages(0.024))
+    expect(pixelBlock(0.5, 0.024, PIXEL_END)).toBeCloseTo(pixelBlock(0.5, 0.024), 12)
+  })
+})
+
+/** Every stage of the ladder, as the shader's own `cell` — sampled at the first amount of
+ *  each stage's bucket (`pixelBlock` spreads stages + 1 buckets evenly over the bar). */
+function stageCells(dial: number, W: number, H: number): number[] {
+  const start = Math.min(dial, 0.1 * H / W)
+  const n = pixelStages(start, pixelFinest(W, H))
+  return Array.from({ length: n + 1 }, (_, k) => pixelShaderParams(R({ amount: k / (n + 1), cell: dial }), W, H).cell)
+}
+
+describe('the halving ladder in the shader\'s own units', () => {
+  it('1080×1920, dial 24‰: every stage is a DISTINCT cell inside [0.004, 0.1]', () => {
+    const cells = stageCells(0.024, 1080, 1920)
+    expect(cells.length).toBeGreaterThan(1)
+    for (const c of cells) { expect(c).toBeGreaterThanOrEqual(0.004); expect(c).toBeLessThanOrEqual(0.1) }
+    for (let i = 1; i < cells.length; i++) expect(cells[i]).not.toBeCloseTo(cells[i - 1]!, 9)
+    // …and each one is finer than the last: this is a refinement, not a shuffle.
+    for (let i = 1; i < cells.length; i++) expect(cells[i]!).toBeLessThan(cells[i - 1]!)
+  })
+
+  it('1920×1080, dial 24‰: still five stages, all distinct', () => {
+    const cells = stageCells(0.024, 1920, 1080)
+    expect(cells).toHaveLength(5)
+    for (let i = 1; i < cells.length; i++) expect(cells[i]!).toBeLessThan(cells[i - 1]!)
+  })
+
+  it('the first stage is the dial\'s own size — or the cap, when the dial is coarser than the shader allows', () => {
+    expect(stageCells(0.024, 1920, 1080)[0]).toBeCloseTo(0.024 * 1920 / 1080, 9)
+    expect(stageCells(0.024, 1080, 1920)[0]).toBeCloseTo(0.024 * 1080 / 1920, 9)
+    // A dial coarser than 0.1 * H / W caps at the shader's own ceiling rather than being
+    // clamped flat (which would have made the first TWO stages the same cell).
+    const capped = stageCells(0.5, 1920, 1080)
+    expect(capped[0]).toBeCloseTo(0.1, 9)
+    expect(capped[1]!).toBeLessThan(capped[0]!)
   })
 })
 

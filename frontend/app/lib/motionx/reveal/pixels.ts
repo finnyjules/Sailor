@@ -33,17 +33,34 @@ export const PIXEL_CHARS: readonly { value: number; label: string }[] = [
 export const PIXEL_END = 0.002
 export const PIXEL_JITTER = 0.25
 
-const clamp01 = (v: number) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0)
+/** The shader's own `u_cell` range (manifest `ascii_dither`), a fraction of the frame's
+ *  HEIGHT. The ladder below is built in frame-WIDTH fractions, so the two only agree on a
+ *  square frame — hence `pixelFinest` / the start cap in `pixelShaderParams`. */
+const SHADER_CELL_MIN = 0.004
+const SHADER_CELL_MAX = 0.1
 
-/** How many times the dial's block halves before it reaches the finest block. */
-export function pixelStages(cell: number): number {
-  return cell > PIXEL_END ? Math.max(0, Math.ceil(Math.log2(cell / PIXEL_END) - 1e-9)) : 0
+const clamp01 = (v: number) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0)
+const pos = (v: number) => (Number.isFinite(v) && v > 0 ? v : 1)
+
+/** The finest block the SHADER will actually draw, as a fraction of the frame's width: its
+ *  `u_cell` floor is a fraction of the frame's HEIGHT, so on a portrait frame it is a much
+ *  coarser width fraction than `PIXEL_END`. Building the ladder down to `PIXEL_END` anyway
+ *  is what made the last three stages of a 1080×1920 bar the SAME cell size — 60 % of the
+ *  bar with no refinement at all, which is the whole promise of the style. */
+export function pixelFinest(frameW: number, frameH: number): number {
+  return Math.max(PIXEL_END, (SHADER_CELL_MIN * pos(frameH)) / pos(frameW))
+}
+
+/** How many times the dial's block halves before it reaches the finest block (`PIXEL_END`
+ *  unless the caller knows the frame, in which case `pixelFinest`). */
+export function pixelStages(cell: number, finest: number = PIXEL_END): number {
+  return cell > finest ? Math.max(0, Math.ceil(Math.log2(cell / finest) - 1e-9)) : 0
 }
 
 /** The block at `amount` (fraction of the frame's width): the dial's size halved once per
  *  stage, the stages spread evenly over the bar, so each refinement subdivides the last. */
-export function pixelBlock(amount: number, cell: number): number {
-  const stages = pixelStages(cell)
+export function pixelBlock(amount: number, cell: number, finest: number = PIXEL_END): number {
+  const stages = pixelStages(cell, finest)
   return cell / 2 ** Math.min(stages, Math.floor(clamp01(amount) * (stages + 1)))
 }
 
@@ -65,11 +82,20 @@ export function pixelSharp(amount: number): number {
 
 /** The ASCII effect's params, keyed WITHOUT the `u_` prefix (the `ShaderSpec.params`
  *  convention). `cell` is a fraction of the frame's HEIGHT in the shader, so the dial's
- *  frame-WIDTH fraction is rescaled by `frameW / frameH`; a non-positive frame height (not yet
- *  measured) falls back to 1 rather than dividing by zero. */
+ *  frame-WIDTH fraction is rescaled by `frameW / frameH`; a non-positive frame size (not yet
+ *  measured) falls back to 1 rather than dividing by zero.
+ *
+ *  The ladder is built BETWEEN the shader's own two limits, not clamped into them after the
+ *  fact: the first block is the dial or the coarsest cell the shader draws, whichever is
+ *  smaller, and the last is `pixelFinest`. Clamping a ladder built in the wrong units is what
+ *  collapsed several stages into one cell on a portrait frame (and made the coarse end of the
+ *  dial flat on a wide one). */
 export function pixelShaderParams(r: MotionReveal, frameW: number, frameH: number): Record<string, number> {
-  const h = frameH > 0 ? frameH : 1
-  const cell = Math.min(0.1, Math.max(0.004, (pixelBlock(r.amount, r.cell) * frameW) / h))
+  const w = pos(frameW)
+  const h = pos(frameH)
+  const start = Math.min(r.cell, (SHADER_CELL_MAX * h) / w)
+  const block = pixelBlock(r.amount, start, pixelFinest(w, h))
+  const cell = Math.min(SHADER_CELL_MAX, Math.max(SHADER_CELL_MIN, (block * w) / h))
   return {
     shape: r.chars,
     cell,

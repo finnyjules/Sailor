@@ -437,6 +437,23 @@ describe('the Dither inspector block', () => {
     expect(tag, 'no tag carries data-testid="dither-cell"').toBeTruthy()
     expect(tag).toMatch(/revealCellDefault\(/)
   })
+
+  // ── the fix wave ────────────────────────────────────────────────────────
+  it('the Block size slider bottoms out at 4 for Pixels — below that there is nothing to halve', () => {
+    const tag = tagFor('dither-cell')
+    expect(tag).toMatch(/:min="ditherCellMin"/)
+    // 4 for Pixels (the finest block is ~2–7‰ depending on aspect, so 1–3‰ has no ladder
+    // at all), the library's own floor for every mask style.
+    expect(src).toMatch(/const ditherCellMin = computed\(\(\) =>[^\n]*'pixels'[^\n]*\b4\b[^\n]*REVEAL_RANGES\.cell\[0\]/)
+  })
+
+  it('the Characters select binds a computed, not a revealParams call in the template', () => {
+    const tag = tagFor('dither-chars')
+    expect(tag, 'no tag carries data-testid="dither-chars"').toBeTruthy()
+    expect(tag).not.toMatch(/revealParams\(/)
+    expect(tag).toMatch(/:model-value="ditherChars"/)
+    expect(src).toMatch(/const ditherChars = computed\(/)
+  })
 })
 
 describe('the Dither timeline row name', () => {

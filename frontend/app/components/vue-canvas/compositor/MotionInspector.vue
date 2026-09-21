@@ -103,6 +103,11 @@ const behParam = (k: string) => behaviour.value?.params?.[k]
 // `revealParams`, so an unknown or missing value falls back to the library's own default
 // (Pixels) rather than a second, locally-guessed one.
 const ditherStyle = computed(() => revealParams(behaviour.value?.params).style)
+const ditherChars = computed(() => String(revealParams(behaviour.value?.params).chars))
+/** Pixels halves the block until the shader stops refining, so a dial finer than the first
+ *  halving has no ladder at all (see `pixelFinest`): 4‰ is the coarsest floor that always
+ *  leaves something to halve. The mask styles keep the library's own floor. */
+const ditherCellMin = computed(() => (ditherStyle.value === 'pixels' ? 4 : REVEAL_RANGES.cell[0]))
 const ditherCellLabel = computed(() => (
   ditherStyle.value === 'pixels' ? 'Block size' : ditherStyle.value === 'dots' ? 'Dot spacing' : 'Cell size'
 ))
@@ -478,14 +483,14 @@ function onGradient(g: Gradient) {
           @update:model-value="(v) => setBehParams({ style: v })" />
         <StudioSelect v-if="ditherStyle === 'pixels'" data-testid="dither-chars" label="Characters"
           hint="The same character sets as the ASCII effect in Shader Studio"
-          :model-value="String(revealParams(behaviour.params).chars)" :options="PIXEL_CHAR_OPTIONS" :option-labels="PIXEL_CHAR_LABELS"
+          :model-value="ditherChars" :options="PIXEL_CHAR_OPTIONS" :option-labels="PIXEL_CHAR_LABELS"
           @update:model-value="(v) => setBehParams({ chars: Number(v) })" />
         <StudioSegmentedRow data-testid="dither-dir" label="Direction"
           :model-value="enumParam('dir', 'in')" :options="IN_OUT" :option-labels="IN_OUT_LABELS"
           @update:model-value="(v) => setBehParams({ dir: v })" />
         <StudioSlider data-testid="dither-cell" v-bind="gesture('dither-cell')"
           :label="ditherCellLabel" :hint="ditherCellHint"
-          :model-value="numParam('cell', revealCellDefault(ditherStyle))" :min="REVEAL_RANGES.cell[0]" :max="REVEAL_RANGES.cell[1]" :step="1" :default="revealCellDefault(ditherStyle)"
+          :model-value="numParam('cell', revealCellDefault(ditherStyle))" :min="ditherCellMin" :max="REVEAL_RANGES.cell[1]" :step="1" :default="revealCellDefault(ditherStyle)"
           @update:model-value="(v) => setBehNum('dither-cell', { cell: v })" />
         <StudioSlider data-testid="dither-drift" v-bind="gesture('dither-drift')"
           :label="ditherDriftLabel" :hint="ditherDriftHint"
