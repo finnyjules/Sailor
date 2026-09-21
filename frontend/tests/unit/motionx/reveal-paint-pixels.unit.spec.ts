@@ -249,9 +249,20 @@ describe('drawRevealPixels — the solo pass', () => {
     expect(solo.height).toBe(100)  // fh = round(50 * 2)
 
     const soloSeq = seqOf(calls, solo.__scratchId)
-    expect(soloSeq[0]).toBe('setTransform(1,0,0,1,0,0)')
-    expect(soloSeq[1]).toBe(`clearRect(0,0,200,100)`)
-    expect(soloSeq[2]).toBe(`setTransform(matrix(${MOVED.a},${MOVED.b},${MOVED.c},${MOVED.d},${MOVED.e},${MOVED.f}))`)
+    // identity → the pooled context's leftover state is reset → clear → the moved transform.
+    // (Property sets are recorded too; keep only the method calls for the order check.)
+    const methods = soloSeq.filter((c) => !c.startsWith('set:'))
+    expect(methods[0]).toBe('setTransform(1,0,0,1,0,0)')
+    expect(methods[1]).toBe(`clearRect(0,0,200,100)`)
+    expect(methods[2]).toBe(`setTransform(matrix(${MOVED.a},${MOVED.b},${MOVED.c},${MOVED.d},${MOVED.e},${MOVED.f}))`)
+    const sets = calls.filter((c) => c.target === solo.__scratchId && c.name.startsWith('set:'))
+    const firstClear = calls.findIndex((c) => c.target === solo.__scratchId && c.name === 'clearRect')
+    for (const [prop, value] of [['globalAlpha', 1], ['globalCompositeOperation', 'source-over'], ['filter', 'none']] as const) {
+      const at = calls.findIndex((c) => c.target === solo.__scratchId && c.name === `set:${prop}` && c.args[0] === value)
+      expect(at, prop).toBeGreaterThan(-1)
+      expect(at, prop).toBeLessThan(firstClear)      // reset BEFORE anything is drawn
+    }
+    expect(sets.length).toBeGreaterThanOrEqual(3)
 
     expect(sawTransform).not.toBeNull()
     const m = sawTransform! as FakeMatrix

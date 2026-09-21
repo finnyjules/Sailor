@@ -86,7 +86,11 @@ export function drawRevealPixels(
   if (!sctx) { soloPool.push(solo); return false }
   let drawn = false
   try {
+    // Pooled: whatever the last layer drawn here left on the context must not tint this one.
     sctx.setTransform(1, 0, 0, 1, 0, 0)
+    sctx.globalAlpha = 1
+    sctx.globalCompositeOperation = 'source-over'
+    sctx.filter = 'none'
     sctx.clearRect(0, 0, fw, fh)
     sctx.setTransform(new DOMMatrix().translate(-base.e, -base.f).multiply(ctx.getTransform()))
     drawLayer(sctx)
@@ -123,6 +127,10 @@ export function drawRevealPixels(
   if (out.height !== fh) out.height = fh
   const octx = out.getContext('2d')
   if (!octx) { soloPool.push(solo); outPool.push(out); return false }
+  // Everything from here on only draws between canvases; if one of those draws ever throws,
+  // both scratch canvases still go back to their pools and `ctx` is left balanced.
+  let saved = false
+  try {
   octx.setTransform(1, 0, 0, 1, 0, 0)
   octx.globalAlpha = 1
   octx.globalCompositeOperation = 'copy'
@@ -138,6 +146,7 @@ export function drawRevealPixels(
 
   // 5. Stamp with the layer's own opacity and blend, at the frame's own position.
   ctx.save()
+  saved = true
   ctx.filter = 'none'
   ctx.shadowColor = 'transparent'
   ctx.setTransform(1, 0, 0, 1, 0, 0)
@@ -145,9 +154,12 @@ export function drawRevealPixels(
   ctx.globalCompositeOperation = stamp.blend
   ctx.drawImage(out, base.e, base.f)
   ctx.restore()
-
-  // 6. Release both scratch canvases.
-  soloPool.push(solo)
-  outPool.push(out)
+  saved = false
   return true
+  } finally {
+    // 6. Release both scratch canvases — on every path.
+    if (saved) ctx.restore()
+    soloPool.push(solo)
+    outPool.push(out)
+  }
 }
