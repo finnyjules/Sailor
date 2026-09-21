@@ -455,7 +455,7 @@ describe('drawRevealPixels — sharp hand-off', () => {
     expect(callsOf(calls, out.__scratchId, 'drawImage')).toHaveLength(1)   // just the initial copy
   })
 
-  it('amount 0.9: a second draw of the solo canvas over out, source-over, at globalAlpha === pixelSharp(0.9)', () => {
+  it('amount 0.9: a TRUE cross-fade to the solo canvas — out scaled down (destination-out), then the layer ADDED (lighter), both at pixelSharp(0.9)', () => {
     const result = { __scratchId: 'result' }
     const { render } = fakeRender(result)
     const { calls, ctx, factoryCanvases } = harness(render)
@@ -468,8 +468,12 @@ describe('drawRevealPixels — sharp hand-off', () => {
     expect(draws[1]!.args[0]).toBe(solo)
     const alphaSets = callsOf(calls, out.__scratchId, 'set:globalAlpha').map(c => c.args[0])
     expect(alphaSets).toContain(pixelSharp(0.9))
-    const blendSets = callsOf(calls, out.__scratchId, 'set:globalCompositeOperation').map(c => c.args[0])
-    expect(blendSets[blendSets.length - 1]).toBe('source-over')
+    // `source-over` would stack the two coverages on every anti-aliased edge (a(2 − a), not a):
+    // found live as 3–6k edge pixels off by up to 79/255 at the hand-off.
+    const seq = calls.filter(c => c.target === out.__scratchId && (c.name === 'set:globalCompositeOperation' || c.name === 'fillRect' || c.name === 'drawImage'))
+      .map(c => (c.name === 'set:globalCompositeOperation' ? String(c.args[0]) : c.name))
+    const tail = seq.slice(seq.lastIndexOf('destination-out'))
+    expect(tail.slice(0, 4)).toEqual(['destination-out', 'fillRect', 'lighter', 'drawImage'])
   })
 })
 

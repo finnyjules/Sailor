@@ -461,6 +461,37 @@ describe('drawRevealSettle — the combine pass (step 4)', () => {
 
 // ── step 5: the stamp ──────────────────────────────────────────────────────────────────────
 
+describe('drawRevealSettle — the hand-off to the real layer (step 4b)', () => {
+  it('lays the sharp layer over the effect near the end of the bar, at settleSharp(amount), before the stamp', async () => {
+    const { settleSharp } = await import('~/lib/motionx/reveal')
+    const { calls, ctx, factoryCanvases } = harness()
+    setCurrentTransform(ctx)
+    expect(drawRevealSettle(ctx, settle({ amount: 0.95 }), W, H, base(), () => {}, stamp)).toBe(true)
+    const solo = factoryCanvases[0]!, out = factoryCanvases[5]!
+    const draws = callsOf(calls, out.__scratchId, 'drawImage')
+    expect(draws).toHaveLength(2)                       // the combine result, then the sharp layer
+    expect(draws[1]!.args).toEqual([solo, 0, 0])
+    // A TRUE cross-fade, out × (1 − s) + solo × s: what is there is scaled DOWN first
+    // (destination-out at alpha s), then the sharp layer is ADDED (lighter at alpha s).
+    // `source-over` would stack the two coverages on every anti-aliased edge.
+    const fill = indexOfCall(calls, out.__scratchId, 'fillRect')
+    const at = indexOfCall(calls, out.__scratchId, 'drawImage', 1)
+    expect(fill).toBeGreaterThan(-1); expect(fill).toBeLessThan(at)
+    expect(propAt(calls, out.__scratchId, 'globalCompositeOperation', fill)).toBe('destination-out')
+    expect(propAt(calls, out.__scratchId, 'globalAlpha', fill)).toBeCloseTo(settleSharp(0.95), 9)
+    expect(callsOf(calls, out.__scratchId, 'fillRect')[0]!.args).toEqual([0, 0, FW, FH])
+    expect(propAt(calls, out.__scratchId, 'globalCompositeOperation', at)).toBe('lighter')
+    expect(propAt(calls, out.__scratchId, 'globalAlpha', at)).toBeCloseTo(settleSharp(0.95), 9)
+    expect(at).toBeLessThan(indexOfCall(calls, 'ctx', 'drawImage'))
+  })
+  it('does nothing of the kind for the first 85% of the bar', () => {
+    const { calls, ctx, factoryCanvases } = harness()
+    setCurrentTransform(ctx)
+    expect(drawRevealSettle(ctx, settle({ amount: 0.6 }), W, H, base(), () => {}, stamp)).toBe(true)
+    expect(callsOf(calls, factoryCanvases[5]!.__scratchId, 'drawImage')).toHaveLength(1)
+  })
+})
+
 describe('drawRevealSettle — the stamp (step 5)', () => {
   it('stamps the combined canvas at the frame origin with the layer\'s blend and the FADED alpha', () => {
     const { calls, ctx, factoryCanvases } = harness()

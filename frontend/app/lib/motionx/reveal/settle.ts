@@ -82,6 +82,16 @@ export function settleFade(amount: number, fade: boolean): number {
   return Math.min(1, a / 0.25)
 }
 
+/** How much of the real, sharp layer is laid over the effect: 0 until 85% of the way, then a
+ *  smoothstep to 1 at the end. Not every shader is the identity at zero strength (the Blur
+ *  effect has a one-pixel floor, the Glitch effect darkens its bands by a fixed amount), so
+ *  without this the last frame of the bar popped into the normal draw. */
+export function settleSharp(amount: number): number {
+  const a = Number.isFinite(amount) ? Math.min(1, Math.max(0, amount)) : 0
+  const x = Math.min(1, Math.max(0, (a - 0.85) / 0.15))
+  return x * x * (3 - 2 * x)
+}
+
 /** Every driven dial's uniform OVERRIDE at strength `k` (0 at the bar's end, `strength` at its
  *  start): `rest + (full − rest) × k`, keyed `u_<key>`. These ride as overrides layered on top
  *  of the effect's own params — never clamped to the manifest's range — so a dial whose rest

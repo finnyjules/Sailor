@@ -20,9 +20,10 @@
 import { expandPasses } from '~/lib/shaderfx/renderer'
 import type { ShaderSpec } from '~/lib/spacetype/fillTile'
 import {
+  crossFade,
   acquireScratch, fieldCombine, fieldReady, fieldRender, releaseScratch, releaseSolo, soloPass,
 } from './paintPixels'
-import { settleEffectOf, settleFade, settleParams, settleSpec, settleStrength, settleUniforms } from './settle'
+import { settleEffectOf, settleFade, settleParams, settleSharp, settleSpec, settleStrength, settleUniforms } from './settle'
 import type { SettleEffect } from './settle'
 import type { MotionReveal } from './params'
 
@@ -228,6 +229,14 @@ export function drawRevealSettle(
     } catch { return false }
     const out = copyOf('settleOut', combined)
     if (!out) return false
+
+    // 4b. The hand-off: over the last stretch of the bar the real layer fades in over the
+    // effect (see `settleSharp` — two of the ten shaders are not the identity at zero strength).
+    const sharp = settleSharp(reveal.amount)
+    if (sharp > 0) {
+      const sctx = out.canvas.getContext('2d')
+      if (sctx) crossFade(sctx, solo, sharp, fw, fh)     // a true lerp — see `crossFade`
+    }
 
     // 5. Stamp with the layer's own blend and the faded opacity, at the frame's own position.
     ctx.save()

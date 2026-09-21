@@ -288,6 +288,23 @@ export async function ensureRevealShadersReady(
  * Fail-safe: every early return happens before `ctx` is touched — a caller that gets `false`
  * back can fall through to the Dissolve mask exactly as if this was never called.
  */
+/** A TRUE cross-fade of `top` into whatever `g` holds: `g × (1 − s) + top × s`. Drawing `top`
+ *  over it with `source-over` at alpha `s` is NOT that — where both pictures are partly
+ *  transparent (every anti-aliased edge) the coverages stack, a(2 − a) instead of a, so edges
+ *  come out heavier than the real layer's and the end of the bar pops. Found live: 3–6k edge
+ *  pixels off by up to 79/255 at the hand-off. Scale what is there down, then ADD the rest. */
+export function crossFade(g: CanvasRenderingContext2D, top: CanvasImageSource, s: number, w: number, h: number): void {
+  g.setTransform(1, 0, 0, 1, 0, 0)
+  g.globalCompositeOperation = 'destination-out'
+  g.globalAlpha = s
+  g.fillStyle = '#000'
+  g.fillRect(0, 0, w, h)
+  g.globalCompositeOperation = 'lighter'
+  g.drawImage(top, 0, 0)
+  g.globalAlpha = 1
+  g.globalCompositeOperation = 'source-over'
+}
+
 export function drawRevealPixels(
   ctx: CanvasRenderingContext2D,
   reveal: MotionReveal,
@@ -343,11 +360,7 @@ export function drawRevealPixels(
 
   // 4. Sharp hand-off: the last fifth of the bar cross-fades to the real, sharp layer.
   const s = pixelSharp(reveal.amount)
-  if (s > 0) {
-    octx.globalCompositeOperation = 'source-over'
-    octx.globalAlpha = s
-    octx.drawImage(solo, 0, 0)
-  }
+  if (s > 0) crossFade(octx, solo, s, fw, fh)
 
   // 5. Stamp with the layer's own opacity and blend, at the frame's own position.
   ctx.save()

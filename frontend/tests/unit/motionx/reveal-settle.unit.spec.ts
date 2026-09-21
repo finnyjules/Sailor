@@ -219,3 +219,22 @@ describe('revealEffectIdsFor', () => {
     expect(ids).toEqual(['ascii_dither', 'bayer_dither', 'gaussian_blur'])
   })
 })
+
+// Found live: two of the ten shaders are NOT the identity at zero strength — the Blur effect
+// never blurs by less than one pixel, and the Glitch effect darkens its bands by a fixed 25%
+// whatever its Amount — so the end of the bar popped (7–11k pixels, up to 79/255). The real
+// layer therefore cross-fades in over the last stretch, as the Pixels style does.
+describe('settleSharp — the hand-off to the real layer', () => {
+  it('is 0 for most of the bar, 1 at its end, smooth and monotonic between', async () => {
+    const { settleSharp } = await import('~/lib/motionx/reveal')
+    for (const a of [0, 0.3, 0.6, 0.85]) expect(settleSharp(a)).toBe(0)
+    expect(settleSharp(0.925)).toBeCloseTo(0.5, 9)
+    expect(settleSharp(1)).toBe(1)
+    let prev = -1
+    for (let a = 0; a <= 1.0001; a += 0.01) { const v = settleSharp(a); expect(v).toBeGreaterThanOrEqual(prev); prev = v }
+  })
+  it('clamps and survives bad amounts', async () => {
+    const { settleSharp } = await import('~/lib/motionx/reveal')
+    expect(settleSharp(-2)).toBe(0); expect(settleSharp(7)).toBe(1); expect(settleSharp(NaN)).toBe(0)
+  })
+})
