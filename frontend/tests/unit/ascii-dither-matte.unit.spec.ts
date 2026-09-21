@@ -22,11 +22,16 @@ import { BUILTIN_PASS_DEFAULTS } from '~/lib/shaderfx/renderer'
  *
  * So this pins the SOURCE. It is a contract test on the frag text, deliberately
  * exact about ordering, in the same spirit as shader-manifest-uniforms.unit.spec.ts.
+ *
+ * Point 1 is now stronger than "the runtime branch is off": matte mode is a
+ * PREPROCESSOR variant, so the classic program's token stream is byte-identical to
+ * the pre-matte shader's rather than merely equivalent — which is what makes Mixed
+ * (whose `aaInside` calls `fwidth` inside per-cell divergent branches, undefined
+ * behaviour a compiler may evaluate differently after ANY edit near it) safe. The
+ * last describe block below proves that identity against a checked-in copy.
  */
-const FRAG = readFileSync(
-  resolve(dirname(fileURLToPath(import.meta.url)), '../../../shader_effects/ascii_dither.frag'),
-  'utf8',
-)
+const HERE = dirname(fileURLToPath(import.meta.url))
+const FRAG = readFileSync(resolve(HERE, '../../../shader_effects/ascii_dither.frag'), 'utf8')
 
 const lineOf = (needle: string): number => {
   const lines = FRAG.split('\n')
@@ -60,12 +65,24 @@ describe('ascii_dither.frag — matte mode', () => {
   it('writes straight alpha for both shape families', () => {
     // an empty cell (zero density) is fully transparent — the shapes' centre hairline must not become ink
     expect(FRAG).toContain('fragColor0 = vec4(clamp(col, 0.0, 1.0), g > 0.0 ? clamp(glyph, 0.0, 1.0) : 0.0);')
-    expect(FRAG).toContain('fragColor0 = vec4(clamp(fx, 0.0, 1.0), src.a * step(0.001, g));')
+    // Material shapes fade in on density rather than popping in at full alpha while the
+    // tile is still black (the old `src.a * step(0.001, g)`).
+    expect(FRAG).toContain('fragColor0 = vec4(clamp(fx, 0.0, 1.0), src.a * g);')
+    expect(FRAG).not.toContain('step(0.001, g)')
+  })
+
+  it('gives the MATERIAL shapes (Lego…Gems) the same true-colour rule as the glyph ink', () => {
+    // Without this the classic `col * (g / lum)` finishes a dark layer near-white for
+    // u_shape >= 15 — the five sets the live check never covered.
+    const classic = lineOf('vec3 tileCol = (u_colored > 0.5) ? col * (g / max(lum, 1e-3)) : vec3(g);')
+    const override = lineOf('if (matte) tileCol = col * g;')
+    expect(override).toBeGreaterThan(classic)
+    expect(override).toBeLessThan(lineOf('if (shp == 15)      fx = legoTile(lc, tileCol);'))
   })
 
   it('returns before the underlay block in matte mode', () => {
     expect(lineOf('int mode = int(u_underlay + 0.5);')).toBeGreaterThan(lineOf('bool matte = u_matte > 0.5;'))
-    expect(lineOf('fragColor0 = vec4(clamp(fx, 0.0, 1.0), src.a * step(0.001, g));'))
+    expect(lineOf('fragColor0 = vec4(clamp(fx, 0.0, 1.0), src.a * g);'))
       .toBeLessThan(lineOf('int mode = int(u_underlay + 0.5);'))
   })
 
@@ -79,6 +96,75 @@ describe('ascii_dither.frag — matte mode', () => {
   it('leaves the classic ink expression untouched', () => {
     expect(FRAG).toContain('col / max(lum, 1e-3)')
     expect(FRAG).toContain('vec3 ink = mix(vec3(1.0), col / max(lum, 1e-3), step(0.5, u_colored));')
+  })
+
+  it('the #define may not precede #version', () => {
+    // GLSL ES 3.00: #version must be the very first line. `renderFieldWithBase`'s variant
+    // injection puts the #define on the line AFTER it; this file must not fight that.
+    expect(FRAG.split('\n')[0]).toBe('#version 300 es')
+  })
+})
+
+/**
+ * THE identity: with SAILOR_MATTE undefined, what the compiler sees is the pre-matte
+ * shader, line for line. `frontend/tests/unit/fixtures/ascii_dither.pre-matte.frag` is a
+ * checked-in copy of `git show 6bdbc68f8:shader_effects/ascii_dither.frag`.
+ */
+const PRE_MATTE = readFileSync(resolve(HERE, 'fixtures/ascii_dither.pre-matte.frag'), 'utf8')
+
+/** The frag as the CLASSIC program's preprocessor sees it: `#ifdef SAILOR_MATTE` regions
+ *  dropped and their `#else` side kept, `#ifndef SAILOR_MATTE` regions kept and their
+ *  `#else` side dropped; then comments and blank lines removed (a comment cannot change a
+ *  token stream, and neither file has a `/* *\/` comment or a string literal to confuse
+ *  the `//` strip). */
+function classicLines(src: string): string[] {
+  const out: string[] = []
+  let mode: 'plain' | 'keep' | 'drop' = 'plain'
+  for (const raw of src.split('\n')) {
+    const t = raw.trim()
+    if (t === '#ifdef SAILOR_MATTE') { mode = 'drop'; continue }
+    if (t === '#ifndef SAILOR_MATTE') { mode = 'keep'; continue }
+    if (t === '#else' && mode !== 'plain') { mode = mode === 'drop' ? 'keep' : 'drop'; continue }
+    if (t === '#endif' && mode !== 'plain') { mode = 'plain'; continue }
+    if (mode === 'drop') continue
+    const line = raw.replace(/\/\/.*$/, '').trimEnd()
+    if (line.trim() === '') continue
+    out.push(line)
+  }
+  return out
+}
+
+describe('ascii_dither.frag — the classic program is byte-identical to the pre-matte shader', () => {
+  it('has no conditional compilation other than SAILOR_MATTE (so the strip above is exact)', () => {
+    const conditionals = FRAG.split('\n').map(l => l.trim())
+      .filter(l => /^#\s*(if|ifdef|ifndef|elif|else|endif)\b/.test(l))
+    for (const l of conditionals) expect(['#ifdef SAILOR_MATTE', '#ifndef SAILOR_MATTE', '#else', '#endif']).toContain(l)
+    // …and they balance.
+    const opens = conditionals.filter(l => l.startsWith('#ifdef') || l.startsWith('#ifndef')).length
+    expect(conditionals.filter(l => l === '#endif')).toHaveLength(opens)
+    expect(opens).toBeGreaterThan(3)
+  })
+
+  it('every matte-only statement is inside a SAILOR_MATTE region', () => {
+    const classic = classicLines(FRAG).join('\n')
+    expect(classic).not.toContain('u_matte')
+    expect(classic).not.toContain('matte')
+    expect(classic).not.toContain('src.a')
+    expect(classic).not.toContain('vec4 src =')
+  })
+
+  it('the stripped source equals the stripped pre-matte source, line for line', () => {
+    const now = classicLines(FRAG)
+    const before = classicLines(PRE_MATTE)
+    // A line-array comparison (not one big string) so a failure names the first line that drifted.
+    expect(now).toEqual(before)
+  })
+
+  it('the pre-matte fixture really is the pre-matte shader (a non-trivial GLSL file)', () => {
+    expect(PRE_MATTE.split('\n')[0]).toBe('#version 300 es')
+    expect(PRE_MATTE).not.toContain('SAILOR_MATTE')
+    expect(PRE_MATTE).not.toContain('u_matte')
+    expect(classicLines(PRE_MATTE).length).toBeGreaterThan(200)
   })
 })
 

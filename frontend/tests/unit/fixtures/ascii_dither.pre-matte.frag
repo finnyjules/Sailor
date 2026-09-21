@@ -28,26 +28,6 @@ uniform float u_spacing;
 uniform float u_invert;
 uniform float u_underlay;
 uniform float u_blur;
-// Matte mode: set by the Frame compositor's dither transition (the Pixels style, which
-// rebuilds a layer out of characters and stamps the result over the frame), NEVER a
-// Shader Studio dial and never a manifest param.
-//
-// It is a PREPROCESSOR VARIANT, not just a runtime branch: every matte line in this file
-// lives inside `#ifdef SAILOR_MATTE`, and only the compositor's own call compiles the
-// shader with that macro defined (`renderFieldWithBase`'s `variant` argument injects the
-// `#define` after the `#version` line and caches the program under its own id). So the
-// CLASSIC program — Shader Studio, the python server, every golden — sees a token stream
-// byte-identical to the pre-matte shader's: `aaInside`'s `fwidth` inside the per-cell
-// divergent branches of Mixed cannot be perturbed by anything below, because for that
-// program nothing below exists. `tests/unit/ascii-dither-matte.unit.spec.ts` pins that
-// identity against a checked-in copy of the pre-matte source.
-//
-// Belt and braces on top: the shared renderer writes 0 into this uniform before every draw
-// (BUILTIN_PASS_DEFAULTS in ~/lib/shaderfx/renderer.ts) and the server-side GL leaves an
-// unset float at 0, so even in the matte program the matte path is off unless asked for.
-#ifdef SAILOR_MATTE
-uniform float u_matte;
-#endif
 
 // Anti-aliased "metric <= t" test: 1 inside, 0 outside, smooth ~1px band across
 // the edge (fwidth gives the screen-space derivative of the metric, so the AA band
@@ -280,28 +260,11 @@ void main() {
     if (shp >= 7 && shp <= 14) cellPx.x *= 2.0 / 3.0; // glyph cells are 2:3; geometric + material shapes (15+) use SQUARE cells
     vec2 cell = floor(v_texCoord * u_resolution / cellPx);
     vec2 cuv = (cell + 0.5) * cellPx / u_resolution;
-#ifdef SAILOR_MATTE
-    // ONE sample of the cell: .rgb is the same read as the classic program's, .a is what
-    // matte mode needs (the element's own coverage at this cell).
-    vec4 src = texture(u_image0, clamp(cuv, 0.0, 1.0));
-    vec3 col = src.rgb;
-    bool matte = u_matte > 0.5;
-#else
     vec3 col = texture(u_image0, clamp(cuv, 0.0, 1.0)).rgb;
-#endif
     float lum = dot(col, vec3(0.299, 0.587, 0.114));
     float tick = floor(u_time * u_speed * 8.0);
     float jitter = u_jitter * (hash2(cell + tick * 101.0, u_seed) - 0.5);
     float g = clamp(lum + jitter + u_brightness, 0.0, 1.0);
-#ifdef SAILOR_MATTE
-    // Density follows the element's alpha, so nothing appears where it is transparent.
-    // Must come BEFORE the Invert flip, or a transparent cell inverts to full ink.
-    // …and on a COMPRESSED tone (0.25–0.75 rather than 0–1): the transition ramps Brightness
-    // from −0.9 to +1 over the FIRST HALF of the bar, and on the raw tone a black element
-    // would stay empty for all of that ramp while a white one was already full. Bright still
-    // leads, dark no longer waits. The classic line above is untouched.
-    if (matte) g = clamp(mix(0.5, lum, 0.5) + jitter + u_brightness, 0.0, 1.0) * src.a;
-#endif
     if (u_invert > 0.5) g = 1.0 - g;
 
     // In-cell coordinate. At u_spacing == 0 this is byte-for-byte the original fract()
@@ -310,34 +273,19 @@ void main() {
     if (u_spacing > 0.0) inCell = (inCell - 0.5) / max(1.0 - u_spacing, 1e-3) + 0.5;
 
     vec3 fx;
-#ifdef SAILOR_MATTE
-    // Hoisted out of the shp < 15 branch below (where it is still assigned on every
-    // path before use) so the matte output below can read it. The classic program keeps
-    // the declaration exactly where it has always been (the #ifndef further down).
-    float glyph = 0.0;
-#endif
     if (shp >= 15) {
         // Material shapes: each returns a finished shaded RGB tile, not a coverage mask.
         // Use the RAW cell coord (Spacing is a no-op — each brick draws its own gaps).
         // Brightness/Invert ride in via g; keep the hue when Colored, else value-g grey.
         vec2 lc = fract(v_texCoord * u_resolution / cellPx);
         vec3 tileCol = (u_colored > 0.5) ? col * (g / max(lum, 1e-3)) : vec3(g);
-#ifdef SAILOR_MATTE
-        // Matte: the element's TRUE colour, scaled by density — same rule as the glyph ink
-        // below. The classic tile divides luminance out because it paints onto black, which
-        // finishes a DARK layer near-white; and since the alpha below now carries `g` too,
-        // a material tile fades in rather than popping in at full opacity while still black.
-        if (matte) tileCol = col * g;
-#endif
         if (shp == 15)      fx = legoTile(lc, tileCol);          // Lego
         else if (shp == 16) fx = stitchTile(lc, tileCol, cell);  // Cross-stitch
         else if (shp == 17) fx = voxelTile(v_texCoord);          // Voxel (own hex tiling)
         else if (shp == 18) fx = beadTile(lc, tileCol);          // Beads
         else                fx = gemTile(lc, tileCol, cell);     // Gems (19)
     } else {
-#ifndef SAILOR_MATTE
         float glyph;
-#endif
         if (shp < 7) {
             // Geometric shapes render in the SQUARE cell above ⇒ circles are round, crosses/blocks
             // symmetric. (Glyph shapes keep the 2:3 atlas cell.)
@@ -348,34 +296,8 @@ void main() {
                               : sampleGlyph(int(gi), shp - 7, inCell);
         }
         vec3 ink = mix(vec3(1.0), col / max(lum, 1e-3), step(0.5, u_colored));
-#ifdef SAILOR_MATTE
-        // Matte: the ink is the element's TRUE colour, whatever Colored says — the
-        // classic ink divides out luminance because it paints onto black, which turns
-        // a dark element white. Applied as an override so the line above, which the
-        // golden-parity suite pins, is untouched.
-        if (matte) ink = col;
-#endif
         fx = clamp(ink * glyph, 0.0, 1.0); // the ASCII layer, on black
     }
-
-#ifdef SAILOR_MATTE
-    // Matte mode writes STRAIGHT alpha (the renderer's context is
-    // premultipliedAlpha: false) and returns BEFORE the underlay: the compositor
-    // stamps this over the frame itself, so there is nothing to composite here.
-    // (Invert is unreachable from the transition — it pins u_invert to 0 — so the
-    // matte path deliberately says nothing about it.)
-    if (matte) {
-        // Material tiles (Lego … Gems) carry their density in the colour AND here, so a
-        // tile rises out of nothing instead of appearing black at full opacity.
-        if (shp >= 15) fragColor0 = vec4(clamp(fx, 0.0, 1.0), src.a * g);
-        // An EMPTY cell must be fully transparent. The geometric shapes leave a hairline
-        // of coverage at the cell's centre even at zero density — invisible on the classic
-        // black background, but as alpha it speckled every empty cell of the frame with
-        // faint black dots. No density, no ink.
-        else           fragColor0 = vec4(clamp(col, 0.0, 1.0), g > 0.0 ? clamp(glyph, 0.0, 1.0) : 0.0);
-        return;
-    }
-#endif
 
     // Underlay: composite the ASCII layer over the SHARP, full-res source so the
     // original photo shows through and the glyphs light it up. Mode 0 = Replace is

@@ -699,6 +699,17 @@ export interface LensShape {
   uniforms: Record<string, number>
 }
 
+/** `#define SAILOR_<VARIANT> 1`, inserted on the line AFTER `#version` — which GLSL ES 3.00
+ *  requires to be the very first line of the shader, so the define cannot simply be
+ *  prepended. A source with no `#version` line at all (a test fixture) gets it first. */
+function withVariantDefine(source: string, variant: string): string {
+  const define = `#define SAILOR_${variant} 1`
+  const nl = source.indexOf('\n')
+  const first = nl === -1 ? source : source.slice(0, nl)
+  if (!/^\s*#version\b/.test(first)) return `${define}\n${source}`
+  return `${first}\n${define}${source.slice(nl)}`
+}
+
 /** True when `spec`'s effect can take a layer silhouette (manifest `followsShape`). */
 export function effectFollowsShape(spec: ShaderSpec): boolean {
   return resolve(spec).effect?.followsShape === true
@@ -720,6 +731,15 @@ export function renderFieldWithBase(
    *  they were. A switch set here is reset to its default on every OTHER draw by the
    *  renderer, not by this call (BUILTIN_PASS_DEFAULTS in ~/lib/shaderfx/renderer.ts). */
   extraUniforms?: Record<string, number>,
+  /** Compile a BUILD VARIANT of the effect: `#define SAILOR_<VARIANT> 1` is injected on the
+   *  line after `#version` (which must stay first in GLSL ES 3.00) and the passes are cached
+   *  under `<effect id>#<VARIANT>`, so the variant and the plain program are two separate
+   *  compiled programs rather than one recompiled in place. This is how the Frame dither
+   *  transition gets the ASCII shader's matte path without the CLASSIC program's token
+   *  stream changing at all — `ascii_dither.frag`'s own header, and
+   *  `tests/unit/ascii-dither-matte.unit.spec.ts`, say why that matters. Omitted, the passes
+   *  are byte-for-byte what they were. */
+  variant?: string,
 ): HTMLCanvasElement {
   const { effect, spec: resolvedSpec } = resolve(spec)
   if (!effect) {
@@ -735,6 +755,7 @@ export function renderFieldWithBase(
   let passes = buildPasses(effect, resolvedSpec, sp === 0 ? 0 : t * sp)
   if (shape) passes = passes.map(p => ({ ...p, uniforms: { ...p.uniforms, ...shape.uniforms } }))
   if (extraUniforms) passes = passes.map(p => ({ ...p, uniforms: { ...p.uniforms, ...extraUniforms } }))
+  if (variant) passes = passes.map(p => ({ ...p, id: `${effect.id}#${variant}`, source: withVariantDefine(p.source, variant) }))
   // render() RETURNS the canvas, valid only until the next render call — same
   // ownership contract as resolveField's `rendered` below.
   return shaderFx.render(passes, base, w, h, shape ? { u_shape: shape.texture } : undefined)

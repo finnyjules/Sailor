@@ -137,7 +137,11 @@ export function drawRevealPixels(
   } as unknown as ShaderSpec
   let result: Canvas
   try {
-    result = render(spec, solo, fw, fh, undefined, elapsedSeconds, { u_matte: 1 })
+    // 'MATTE' compiles the ASCII shader's matte path in (`#define SAILOR_MATTE 1`, its own
+    // cached program) — `u_matte: 1` then switches it on inside that program. Both: the
+    // define is what keeps the CLASSIC program's token stream identical to the pre-matte
+    // shader's, the uniform is the belt-and-braces runtime gate the renderer resets.
+    result = render(spec, solo, fw, fh, undefined, elapsedSeconds, { u_matte: 1 }, 'MATTE')
   } catch {
     soloPool.push(solo)
     return false

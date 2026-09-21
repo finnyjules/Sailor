@@ -93,10 +93,10 @@ function defWith(id: string, textures: EffectDef['textures']): EffectDef {
 
 const specFor = (id: string) => ({ effectId: id, params: {}, anchor: 'object', speed: 1, seed: 0, input: '#000000' } as any)
 
-function render(id: string, extra?: Record<string, number>) {
+function render(id: string, extra?: Record<string, number>, variant?: string) {
   const base = document.createElement('canvas')
   base.width = 8; base.height = 8
-  return renderFieldWithBase(specFor(id), base, 8, 8, undefined, 0, extra)
+  return renderFieldWithBase(specFor(id), base, 8, 8, undefined, 0, extra, variant)
 }
 
 const lastPass = () => renderSpy.mock.calls.at(-1)![0][0]
@@ -222,6 +222,52 @@ describe('renderFieldWithBase — extraUniforms', () => {
     const without = JSON.stringify(renderSpy.mock.calls.at(-1)![0])
     render('extra_none', {})
     expect(JSON.stringify(renderSpy.mock.calls.at(-1)![0])).toBe(without)
+  })
+})
+
+/**
+ * A build VARIANT: the same .frag compiled with a preprocessor macro defined, cached as its
+ * own program. This is what keeps the ASCII shader's classic program byte-identical to the
+ * pre-matte one (see ascii-dither-matte.unit.spec.ts) while the compositor's dither
+ * transition gets its matte path.
+ */
+describe('renderFieldWithBase — a build variant', () => {
+  it('injects the #define on the line AFTER #version and caches under its own pass id', () => {
+    defWith('variant_effect', [])
+    render('variant_effect', { u_matte: 1 }, 'MATTE')
+    const pass = lastPass()
+    // #version MUST stay the very first line of a GLSL ES 3.00 shader.
+    expect(pass.source.split('\n')[0]).toBe('#version 300 es')
+    expect(pass.source.split('\n')[1]).toBe('#define SAILOR_MATTE 1')
+    expect(pass.source).toContain('void main(){}')
+    expect(pass.id).toBe('variant_effect#MATTE')
+  })
+
+  it('every pass of a multi-pass effect carries it', () => {
+    const d = defWith('variant_multi', [])
+    d.passes = 3
+    render('variant_multi', undefined, 'MATTE')
+    const passes = renderSpy.mock.calls.at(-1)![0]
+    expect(passes).toHaveLength(3)
+    for (const p of passes) {
+      expect(p.id).toBe('variant_multi#MATTE')
+      expect(p.source).toContain('#define SAILOR_MATTE 1')
+    }
+  })
+
+  it('omitted, the passes are exactly what they were — same id, same source', () => {
+    defWith('variant_none', [])
+    render('variant_none')
+    const pass = lastPass()
+    expect(pass.id).toBe('variant_none')
+    expect(pass.source).toBe('#version 300 es\nvoid main(){}')
+  })
+
+  it('a source with no #version line gets the define first rather than losing it', () => {
+    const d = defWith('variant_noversion', [])
+    d.source = 'void main(){}'
+    render('variant_noversion', undefined, 'MATTE')
+    expect(lastPass().source).toBe('#define SAILOR_MATTE 1\nvoid main(){}')
   })
 })
 

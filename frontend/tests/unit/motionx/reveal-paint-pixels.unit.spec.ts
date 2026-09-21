@@ -330,7 +330,7 @@ describe('drawRevealPixels — the shader call and immediate copy', () => {
     expect(ok).toBe(true)
 
     expect(renderCalls).toHaveLength(1)
-    const [spec, soloArg, fw, fh, shape, t, extra] = renderCalls[0]!
+    const [spec, soloArg, fw, fh, shape, t, extra, variant] = renderCalls[0]!
     expect((spec as { effectId: string }).effectId).toBe('ascii_dither')
     expect((spec as { params: unknown }).params).toEqual(pixelShaderParams(reveal, W, H))
     expect((spec as { speed: number }).speed).toBe(1)
@@ -341,6 +341,9 @@ describe('drawRevealPixels — the shader call and immediate copy', () => {
     expect(shape).toBeUndefined()
     expect(t).toBe(2.5)
     expect(extra).toEqual({ u_matte: 1 })
+    // The MATTE build variant: the matte path is compiled in, and the classic program
+    // (Shader Studio, the server, the goldens) keeps its own, untouched token stream.
+    expect(variant).toBe('MATTE')
 
     const out = factoryCanvases[1]!
     expect(out.width).toBe(200)
