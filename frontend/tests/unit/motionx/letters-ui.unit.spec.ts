@@ -21,6 +21,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { DEFAULT_TEXT_EASE, canAnimateLetters, evaluateTextBehaviours } from '~/lib/motionx/text'
+import { pixelBrightness } from '~/lib/motionx/reveal'
 import { resetValue } from '~/lib/studio/row'
 import type { TextCell } from '~/lib/motionx/text/units'
 
@@ -453,6 +454,30 @@ describe('the Dither inspector block', () => {
     expect(tag).not.toMatch(/revealParams\(/)
     expect(tag).toMatch(/:model-value="ditherChars"/)
     expect(src).toMatch(/const ditherChars = computed\(/)
+  })
+})
+
+/** The gallery tile stands in for the real transition, so it must not show something the
+ *  transition never shows. It ramps with the library's own `pixelBrightness`, so it has to
+ *  use the shader's COMPRESSED tone too — on raw luma the white caption bar lit ~9 % of its
+ *  cells at amount 0, where the real transition draws nothing at all. */
+describe('the Dither gallery tile ramps like the shader', () => {
+  const PREVIEW = readFileSync(
+    fileURLToPath(new URL('../../../app/components/vue-canvas/compositor/MotionDitherPreview.vue', import.meta.url)),
+    'utf8',
+  )
+
+  it('compresses tone to 0.25–0.75 and ramps with pixelBrightness', () => {
+    expect(PREVIEW).toContain('0.25 + 0.5 * luma')
+    expect(PREVIEW).toContain('pixelBrightness(amount)')
+    // the raw-luma version is gone
+    expect(PREVIEW).not.toMatch(/clamp01\(luma \+ brightness\)/)
+  })
+
+  it('draws nothing at amount 0, for the brightest cell there is', () => {
+    // The tile's own test of the same arithmetic: tone 0.75 (pure white) at amount 0.
+    const brightest = 0.25 + 0.5 * 1
+    expect(Math.min(1, Math.max(0, brightest + pixelBrightness(0)))).toBe(0)
   })
 })
 
