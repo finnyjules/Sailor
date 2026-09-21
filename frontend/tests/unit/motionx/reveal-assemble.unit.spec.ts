@@ -120,12 +120,18 @@ describe('assembleCell', () => {
     }
   })
 
-  it('never look AND sharp at once (the function only ever returns one state)', () => {
-    for (const amount of [0, 0.1, 0.3, 0.5, 0.7, 0.9, 1]) {
-      for (let y = 0; y < GRID.rows; y += 3) for (let x = 0; x < GRID.cols; x += 3) {
-        const v = assembleCell(R({ amount, drift: 0 }), x, y, GRID)
-        expect([0, 1, 2]).toContain(v)
+  it('the look and sharp MASKS never claim the same cell, and together they are exactly the reached cells', () => {
+    // (The old form asserted the state was one of 0 | 1 | 2 — which no implementation could fail.)
+    for (const amount of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+      const r = R({ amount, drift: 0 })
+      const { look, sharp } = buildAssembleMasks(r, GRID)
+      let both = 0, mismatch = 0
+      for (let y = 0; y < GRID.rows; y++) for (let x = 0; x < GRID.cols; x++) {
+        const k = (y * GRID.cols + x) * 4 + 3, v = assembleCell(r, x, y, GRID)
+        if (look[k] && sharp[k]) both++
+        if ((look[k] ? 1 : 0) !== (v === 1 ? 1 : 0) || (sharp[k] ? 1 : 0) !== (v === 2 ? 1 : 0)) mismatch++
       }
+      expect(both, `amount ${amount}`).toBe(0); expect(mismatch, `amount ${amount}`).toBe(0)
     }
   })
 
@@ -153,13 +159,20 @@ describe('assembleCell', () => {
     }
   })
 
-  it('with band 0 and scatter 0, no cell is ever in state 1 at any of a representative set of amounts', () => {
-    for (const amount of [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]) {
-      const r = R({ amount, band: 0, scatter: 0, drift: 0 })
-      for (let y = 0; y < GRID.rows; y += 2) for (let x = 0; x < GRID.cols; x += 2) {
-        expect(assembleCell(r, x, y, GRID), `@${x},${y} a=${amount}`).not.toBe(1)
-      }
+  it('with band 0 and scatter 0 the block state is at most a HAIRLINE: never more than one column wide at angle 0', () => {
+    // NOT "never": the scatter floors at 0.001 so the two fronts are never exactly the same
+    // line, and a dense sweep does find block cells. (The first version of this test claimed
+    // "never" and passed only because it sampled 19 amounts on every other cell.) What must
+    // hold is that the band has no WIDTH — the user sees the sharp layer assembling directly.
+    let seen = 0
+    for (let amount = 0.002; amount < 1; amount += 0.002) {
+      const r = R({ amount, band: 0, scatter: 0, drift: 0, angle: 0 })
+      const cols = new Set<number>()
+      for (let y = 0; y < GRID.rows; y++) for (let x = 0; x < GRID.cols; x++) if (assembleCell(r, x, y, GRID) === 1) cols.add(x)
+      expect(cols.size, `amount ${amount.toFixed(3)}`).toBeLessThanOrEqual(1)
+      seen += cols.size
     }
+    expect(seen).toBeGreaterThan(0)      // the hairline really exists — this test looks hard enough to see it
   })
 
   it('Out flips the travel: at angle 0, the FAR side reaches sharp first — the start side is the one left "nothing" longest', () => {
@@ -234,7 +247,7 @@ describe('buildAssembleMasks', () => {
   it('covered removes cells from the LOOK mask only, never from sharp', () => {
     const r = R({ amount: 0.4, scatter: 0.5, band: 0.3, drift: 0 })
     const full = buildAssembleMasks(r, GRID)
-    const covered = new Uint8Array(GRID.cols * GRID.rows).fill(1)
+    const covered = new Uint8Array(GRID.cols * GRID.rows).fill(255)
     // Cover nothing on one specific cell that is currently "look".
     let idx = -1
     for (let i = 0; i < GRID.cols * GRID.rows; i++) if (full.look[i * 4 + 3] === 255) { idx = i; break }
@@ -376,5 +389,58 @@ describe('travelAlong — the per-frame form of the travel projection', () => {
       for (let y = -2; y < 26; y += 3) for (let x = -2; x < 43; x += 4) expect(f(x, y)).toBeCloseTo(alongTravel(angle, out, x, y, grid), 12)
     }
     expect(travelAlong(0, false, { cols: 0, rows: 0 })(3, 3)).toBe(0)
+  })
+})
+
+// ── Part-3 review follow-ups ────────────────────────────────────────────────────────────────
+describe('coverage is the block\'s alpha, not a yes/no', () => {
+  it('a half-covered cell gives a half-transparent block; a barely-covered one is left empty', async () => {
+    const { buildAssembleMasks, COVER_FLOOR } = await import('~/lib/motionx/reveal')
+    const r = R({ amount: 0.4, scatter: 0.5, band: 0.3, drift: 0 })
+    const open = buildAssembleMasks(r, GRID)
+    const looks: number[] = []
+    for (let i = 0; i < GRID.cols * GRID.rows && looks.length < 3; i++) if (open.look[i * 4 + 3] === 255) looks.push(i)
+    expect(looks).toHaveLength(3)
+    const cov = new Uint8Array(GRID.cols * GRID.rows).fill(255)
+    cov[looks[0]!] = 120; cov[looks[1]!] = COVER_FLOOR - 1; cov[looks[2]!] = COVER_FLOOR
+    const m = buildAssembleMasks(r, GRID, cov)
+    expect(m.look[looks[0]! * 4 + 3]).toBe(120)
+    expect(m.look[looks[1]! * 4 + 3]).toBe(0)
+    expect(m.look[looks[2]! * 4 + 3]).toBe(COVER_FLOOR)
+  })
+  it('a layer that is 40% opaque everywhere still assembles out of blocks (it used to lose the look entirely)', async () => {
+    const { buildAssembleMasks } = await import('~/lib/motionx/reveal')
+    const r = R({ amount: 0.4, scatter: 0.5, band: 0.3, drift: 0 })
+    const m = buildAssembleMasks(r, GRID, new Uint8Array(GRID.cols * GRID.rows).fill(102))
+    let n = 0
+    for (let i = 3; i < m.look.length; i += 4) if (m.look[i] === 102) n++
+    expect(n).toBeGreaterThan(20)
+  })
+})
+
+describe('Block size answers over its WHOLE range, on any frame', () => {
+  it('the exact cell size rides to the shader as a uniform, unclamped, and the grid follows it', async () => {
+    const { assembleShaderExtras, assembleGrid, assembleCellFraction, revealParams } = await import('~/lib/motionx/reveal')
+    const at = (cell: number, look: 'dither' | 'characters' = 'dither') => ({ ...revealParams({ style: 'assemble', cell, look }), amount: 0.5, elapsed: 0 })
+    // 16:9 — the manifest caps the Dither effect's Size at 5% of the height = 28‰ of the width
+    for (const [a, b] of [[30, 40], [2, 3]] as const) {
+      const ga = assembleGrid(at(a), 1920, 1080, 1920, 1080), gb = assembleGrid(at(b), 1920, 1080, 1920, 1080)
+      expect(gb.cellW).toBeGreaterThan(ga.cellW)          // the dial is never dead
+    }
+    expect(assembleGrid(at(40), 1920, 1080, 1920, 1080).cellW).toBeCloseTo(0.04 * 1920, 6)
+    expect(assembleShaderExtras(at(40), 1920, 1080).uniforms.u_scale).toBeCloseTo(assembleCellFraction(at(40), 1920, 1080), 12)
+    expect(assembleShaderExtras(at(40), 1920, 1080).uniforms.u_scale).toBeGreaterThan(0.05)
+    // 9:16 portrait — the floor used to swallow 2–5
+    const p2 = assembleGrid(at(2), 1080, 1920, 1080, 1920), p5 = assembleGrid(at(5), 1080, 1920, 1080, 1920)
+    expect(p5.cellW).toBeGreaterThan(p2.cellW)
+    expect(assembleShaderExtras(at(12, 'characters'), 1080, 1920).uniforms.u_cell).toBeCloseTo((0.012 * 1080) / 1920, 12)
+    // without a frame size the extras stay exactly what they were (no override)
+    expect(Object.keys(assembleShaderExtras(at(12)).uniforms).sort()).toEqual(['u_shimmerX', 'u_shimmerY'])
+  })
+  it('the shaders\' own pixel floors still hold: 1px for the Dither look, 2px for characters', async () => {
+    const { assembleGrid, revealParams } = await import('~/lib/motionx/reveal')
+    const tiny = (look: 'dither' | 'characters') => ({ ...revealParams({ style: 'assemble', cell: 1, look }), amount: 0.5, elapsed: 0 })
+    expect(assembleGrid(tiny('dither'), 1000, 1000, 200, 200).cellH).toBe(1)
+    expect(assembleGrid(tiny('characters'), 1000, 1000, 200, 200).cellH).toBe(2)
   })
 })

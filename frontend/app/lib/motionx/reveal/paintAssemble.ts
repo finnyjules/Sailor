@@ -68,7 +68,7 @@ export function drawRevealAssemble(
   } as unknown as ShaderSpec
   // Dither look → the SHIMMER build, whose threshold pattern slides under the blocks by the
   // same whole-cell drift that moves the scatter order; Characters → the ASCII MATTE build.
-  const extras = assembleShaderExtras(reveal)
+  const extras = assembleShaderExtras(reveal, W, H)
   let result: Canvas
   try {
     result = fieldRender(spec, solo, fw, fh, undefined, elapsedSeconds, extras.uniforms, extras.variant)
@@ -113,7 +113,7 @@ export function drawRevealAssemble(
       cover.g.drawImage(solo, 0, gy, gw, gh, 0, 0, cols, rows)
       const alpha = cover.g.getImageData(0, 0, cols, rows).data
       covered = new Uint8Array(cols * rows)
-      for (let k = 0; k < covered.length; k++) covered[k] = (alpha[k * 4 + 3] ?? 0) > 127 ? 1 : 0
+      for (let k = 0; k < covered.length; k++) covered[k] = alpha[k * 4 + 3] ?? 0   // the cell's coverage, 0–255
     }
 
     // 5. The two masks — one cell per pixel, cut into their pictures at the anchored rect with

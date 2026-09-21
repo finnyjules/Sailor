@@ -294,8 +294,10 @@ describe('drawRevealAssemble — the look picture (step 3)', () => {
     expect(t).toBe(0.5)
     // drift 6 at 0.5s, angle 0 → 3 whole cells: the threshold pattern slides, the picture does not.
     expect(driftCells(r)).toEqual({ dx: 3, dy: 0 })
-    expect(extra).toEqual({ u_shimmerX: -3, u_shimmerY: 0 })
-    expect(extra).toEqual(assembleShaderExtras(r).uniforms)
+    expect(extra).toMatchObject({ u_shimmerX: -3, u_shimmerY: 0 })
+    // …plus the EXACT cell size as a uniform override (the manifest's clamp must not reach this dial)
+    expect(extra).toEqual(assembleShaderExtras(r, W, H).uniforms)
+    expect((extra as Record<string, number>).u_scale).toBeCloseTo((r.cell * W) / H, 9)
     expect(variant).toBe('SHIMMER')
 
     // …and the result is copied AT ONCE (it is only valid until the next render call).
@@ -317,7 +319,7 @@ describe('drawRevealAssemble — the look picture (step 3)', () => {
     const [spec, , , , , , extra, variant] = renderCalls[0]!
     expect((spec as { effectId: string }).effectId).toBe('ascii_dither')
     expect((spec as { params: unknown }).params).toEqual(assembleShaderParams(r, W, H).params)
-    expect(extra).toEqual({ u_matte: 1 })
+    expect(extra).toEqual({ u_matte: 1, u_cell: (r.cell * W) / H })
     expect(variant).toBe('MATTE')
   })
 
@@ -385,9 +387,9 @@ describe('drawRevealAssemble — the coverage read (step 4)', () => {
 // ── step 5: the two masks ──────────────────────────────────────────────────────────────────
 
 describe('drawRevealAssemble — the two masks (step 5)', () => {
-  it('Dither look: the look mask is buildAssembleMasks fed the alpha>127 coverage array, drawn destination-in over the look picture at the anchored rect with smoothing OFF', () => {
+  it('Dither look: the look mask is buildAssembleMasks fed the COVERAGE of each cell (0–255), drawn destination-in over the look picture at the anchored rect with smoothing OFF', () => {
     // A sparse coverage pattern: every third cell is empty, plus one half-transparent cell
-    // that must read as EMPTY (alpha 127 is not > 127).
+    // whose block must come out HALF-transparent (not dropped, not made opaque).
     coverAlphaFor = (w, h) => {
       const d = new Uint8ClampedArray(w * h * 4)
       for (let k = 0; k < w * h; k++) d[k * 4 + 3] = k % 3 === 0 ? 0 : (k === 1 ? 127 : 255)
@@ -401,7 +403,7 @@ describe('drawRevealAssemble — the two masks (step 5)', () => {
 
     const g = gridOf(r)
     const covered = new Uint8Array(g.cols * g.rows)
-    for (let k = 0; k < covered.length; k++) covered[k] = (k % 3 === 0 || k === 1) ? 0 : 1
+    for (let k = 0; k < covered.length; k++) covered[k] = k % 3 === 0 ? 0 : (k === 1 ? 127 : 255)
     const expected = buildAssembleMasks(r, { cols: g.cols, rows: g.rows }, covered)
 
     const look = factoryCanvases[1]!

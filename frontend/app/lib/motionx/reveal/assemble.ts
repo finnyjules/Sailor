@@ -77,13 +77,15 @@ export function assembleTest(
   }
 }
 
-/** Two RGBA bitmaps of `grid.cols × grid.rows`, alpha 255 where that cell shows the look / the
- *  sharp layer — row 0 is the TOP row. `covered[j * cols + i] === 0` drops a cell from the LOOK
- *  mask only: the Dither look paints opaque colour everywhere it samples, so a cell the layer
+/** Two RGBA bitmaps of `grid.cols × grid.rows`, alpha set where that cell shows the look / the
+ *  sharp layer — row 0 is the TOP row. `covered[j * cols + i]` (0–255, how much of the cell the
+ *  layer covers) becomes the LOOK mask's alpha there, and under `COVER_FLOOR` drops the cell: the Dither look paints opaque colour everywhere it samples, so a cell the layer
  *  itself does not cover must stay empty; the sharp side canvas already carries its own alpha,
  *  so the sharp mask needs no such filter. */
+/** Below this much coverage a cell is left empty rather than drawn as a ghost of a block. */
+export const COVER_FLOOR = 8
 export function buildAssembleMasks(
-  r: MotionReveal, grid: { cols: number; rows: number }, covered?: Uint8Array,
+  r: MotionReveal, grid: { cols: number; rows: number }, covered?: Uint8Array | Uint8ClampedArray,
 ): { look: Uint8ClampedArray<ArrayBuffer>; sharp: Uint8ClampedArray<ArrayBuffer> } {
   const look = new Uint8ClampedArray(grid.cols * grid.rows * 4)
   const sharp = new Uint8ClampedArray(grid.cols * grid.rows * 4)
@@ -94,7 +96,11 @@ export function buildAssembleMasks(
       if (v === 0) continue
       const idx = j * grid.cols + i
       if (v === 1) {
-        if (!covered || covered[idx] !== 0) look[idx * 4 + 3] = 255
+        // The cell's own COVERAGE (0–255) becomes the block's alpha, so a half-transparent
+        // layer assembles out of half-transparent blocks. (A yes/no test at 50% emptied the
+        // look entirely for any layer under half alpha — it degraded to a bare wipe.)
+        const a = covered ? (covered[idx] ?? 0) : 255
+        if (a >= COVER_FLOOR) look[idx * 4 + 3] = a
       } else {
         sharp[idx * 4 + 3] = 255
       }
@@ -137,6 +143,14 @@ export function assembleShaderParams(
   }
 }
 
+/** The dial as the shader's Size: a fraction of the frame's HEIGHT, EXACT — not clamped to the
+ *  manifest's range, which exists for the Studio slider and would leave this dial dead over
+ *  part of its travel (29–40 on a 16:9 frame, 2–5 on a 9:16 one). The shaders' only real
+ *  limits are their own pixel floors (1px / 2px), which `assembleGrid` mirrors. */
+export function assembleCellFraction(r: MotionReveal, frameW: number, frameH: number): number {
+  return Math.max(1e-5, (r.cell * pos(frameW)) / pos(frameH))
+}
+
 /** The look shader's own cell grid in DEVICE pixels of the side canvas (`fw` × `fh`), mirroring
  *  its arithmetic exactly so a mask edge never cuts a cell it draws. `frameW`/`frameH` are the
  *  logical frame size `assembleShaderParams` scales `scale`/`cell` against — the aspect the
@@ -144,16 +158,14 @@ export function assembleShaderParams(
 export function assembleGrid(
   r: MotionReveal, frameW: number, frameH: number, fw: number, fh: number,
 ): { cols: number; rows: number; cellW: number; cellH: number } {
-  const shader = assembleShaderParams(r, frameW, frameH)
-  const at = (key: string): number => shader.params[key] ?? 0
+  const size = assembleCellFraction(r, frameW, frameH)     // what `assembleShaderExtras` hands the shader
   let cellW: number, cellH: number
-  if (shader.effectId === 'bayer_dither') {
-    cellH = Math.max(at('scale') * fh, 1)
+  if (r.look !== 'characters') {
+    cellH = Math.max(size * fh, 1)
     cellW = cellH
   } else {
-    cellH = Math.max(at('cell') * fh, 2)
-    const shape = at('shape')
-    cellW = cellH * (shape >= 7 && shape <= 14 ? 2 / 3 : 1)
+    cellH = Math.max(size * fh, 2)
+    cellW = cellH * (r.chars >= 7 && r.chars <= 14 ? 2 / 3 : 1)
   }
   return { cols: Math.ceil(fw / cellW), rows: Math.ceil(fh / cellH), cellW, cellH }
 }
@@ -164,8 +176,13 @@ export function assembleGrid(
  *  so the dithered tones shimmer while the sampled picture stays put (Julien: "I LOVE the
  *  colour shimmer"). The shader counts rows from the BOTTOM, hence `+dy`; `−dx` so the pattern
  *  travels the way `bayer8(cx − dx, …)` does here. Characters look → the ASCII MATTE build. */
-export function assembleShaderExtras(r: MotionReveal): { variant: 'SHIMMER' | 'MATTE'; uniforms: Record<string, number> } {
-  if (r.look === 'characters') return { variant: 'MATTE', uniforms: { u_matte: 1 } }
+export function assembleShaderExtras(
+  r: MotionReveal, frameW?: number, frameH?: number,
+): { variant: 'SHIMMER' | 'MATTE'; uniforms: Record<string, number> } {
+  // With the frame's size given, the EXACT cell size rides along as a uniform override: extra
+  // uniforms are merged after the effect's own and are not clamped to the manifest's range.
+  const exact = frameW != null && frameH != null ? assembleCellFraction(r, frameW, frameH) : null
+  if (r.look === 'characters') return { variant: 'MATTE', uniforms: { u_matte: 1, ...(exact != null ? { u_cell: exact } : {}) } }
   const { dx, dy } = driftCells(r)
-  return { variant: 'SHIMMER', uniforms: { u_shimmerX: -dx + 0, u_shimmerY: dy + 0 } }
+  return { variant: 'SHIMMER', uniforms: { u_shimmerX: -dx + 0, u_shimmerY: dy + 0, ...(exact != null ? { u_scale: exact } : {}) } }
 }

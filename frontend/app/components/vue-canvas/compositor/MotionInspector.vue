@@ -536,7 +536,7 @@ function onGradient(g: Gradient) {
           :model-value="numParam('drift', REVEAL_DEFAULTS.drift)" :min="REVEAL_RANGES.drift[0]" :max="REVEAL_RANGES.drift[1]" :step="0.5" :default="REVEAL_DEFAULTS.drift"
           @update:model-value="(v) => setBehNum('dither-drift', { drift: v })" />
         <StudioSlider v-if="ditherStyle !== 'pixels'" data-testid="dither-angle" v-bind="gesture('dither-angle')"
-          label="Angle" hint="The way the pattern drifts and, for Wipe, the way the edge travels. 0 is towards the right, 90 is downwards."
+          label="Angle" hint="The way the pattern drifts and, for Wipe and Assemble, the way the edge travels. 0 is towards the right, 90 is downwards."
           :model-value="numParam('angle', REVEAL_DEFAULTS.angle)" :min="REVEAL_RANGES.angle[0]" :max="REVEAL_RANGES.angle[1]" :step="1" :default="REVEAL_DEFAULTS.angle"
           @update:model-value="(v) => setBehNum('dither-angle', { angle: v })" />
         <StudioSlider v-if="ditherStyle === 'wipe'" data-testid="dither-softness" v-bind="gesture('dither-softness')"

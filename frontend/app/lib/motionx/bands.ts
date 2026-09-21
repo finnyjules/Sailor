@@ -2,6 +2,7 @@
 // Derives read-only display bands from stored motionx Track[]. Zero Vue /
 // compositor coupling — mirrors the purity of the rest of ~/lib/motionx.
 import type { Track, PropertyType, Keyframe, StoredBehaviour } from '~/lib/motionx'
+import { revealParams } from './reveal/params'
 import { evaluateTrack } from '~/lib/motionx'
 
 export type BandKind = 'number' | 'color' | 'gradient' | 'behaviour' | 'legacy'
@@ -102,7 +103,7 @@ export function behaviourLabel(b: { kind: string; params?: Record<string, unknow
   else if (b.kind === 'text.decode') withDir = dir === 'dissolve' ? 'Decode out' : 'Decode'
   else if (b.kind === 'text.slot') withDir = dir === 'out' ? 'Slot slide out' : 'Slot slide'
   else if (b.kind === 'dither') {
-    const name = b.params?.style === 'assemble' ? 'Assemble' : 'Dither'
+    const name = revealParams(b.params).style === 'assemble' ? 'Assemble' : 'Dither'   // the ONE reader of a bar's params
     withDir = dir === 'out' ? `${name} out` : `${name} in`
   }
   return b.timing?.loop ? `${withDir} · loop` : withDir
