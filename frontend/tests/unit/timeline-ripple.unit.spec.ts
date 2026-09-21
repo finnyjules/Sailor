@@ -64,6 +64,33 @@ describe('ripple', () => {
     expect(starts(after)).toEqual({ a: 0, b: 50, c: 105 })
   })
 
+  // Older timelines may hold overlapping clips: only the part of the deleted
+  // clip that nothing else covers is a gap.
+  it('delete when a LATER clip overlaps the deleted one: closes only the uncovered part', () => {
+    const b2 = state([v1([img('a', 0, 60), img('b', 50, 50), img('c', 100, 50)])])
+    const after = clone(b2)
+    after.tracks[0]!.clips = after.tracks[0]!.clips.filter(c => c.id !== 'a')
+    expect(computeRippleEdits(b2, after)).toEqual([{ trackId: 'v1', fromFrame: 50, delta: -50 }])
+    applyRippleEdits(after, computeRippleEdits(b2, after))
+    expect(starts(after)).toEqual({ b: 0, c: 50 })
+  })
+
+  it('delete when an EARLIER clip overlaps the deleted one: closes only the uncovered part', () => {
+    const b2 = state([v1([img('x', 0, 30), img('a', 20, 40), img('c', 60, 50)])])
+    const after = clone(b2)
+    after.tracks[0]!.clips = after.tracks[0]!.clips.filter(c => c.id !== 'a')
+    expect(computeRippleEdits(b2, after)).toEqual([{ trackId: 'v1', fromFrame: 60, delta: -30 }])
+    applyRippleEdits(after, computeRippleEdits(b2, after))
+    expect(starts(after)).toEqual({ x: 0, c: 30 })
+  })
+
+  it('delete a clip fully covered by another: nothing to close', () => {
+    const b2 = state([v1([img('big', 0, 100), img('a', 20, 40), img('c', 100, 50)])])
+    const after = clone(b2)
+    after.tracks[0]!.clips = after.tracks[0]!.clips.filter(c => c.id !== 'a')
+    expect(computeRippleEdits(b2, after)).toEqual([])
+  })
+
   it('a plain move produces no edits', () => {
     const after = clone(before)
     after.tracks[0]!.clips[1]!.start_frame = 300

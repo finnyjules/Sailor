@@ -12,13 +12,31 @@ export function computeRippleEdits(before: EditState, after: EditState): RippleE
   for (const t of after.tracks) {
     for (const c of t.clips) afterById.set(c.id, { trackId: t.id, start: c.start_frame, end: c.start_frame + c.length })
   }
+  const survivors = new Map<string, { start: number; end: number }[]>()
+  for (const [, c] of afterById) {
+    const list = survivors.get(c.trackId)
+    if (list) list.push(c)
+    else survivors.set(c.trackId, [c])
+  }
   const edits: RippleEdit[] = []
   for (const t of before.tracks) {
     for (const c of t.clips) {
       const oldStart = c.start_frame
       const oldEnd = c.start_frame + c.length
       const now = afterById.get(c.id)
-      if (!now) { edits.push({ trackId: t.id, fromFrame: oldEnd, delta: -c.length }); continue }
+      if (!now) {
+        // Deleted. Only the stretch that no surviving clip on this track covers
+        // is a gap (older timelines may hold overlapping clips). With no
+        // overlap this is the whole clip: fromFrame = its end, delta = -length.
+        let lo = oldStart
+        let hi = oldEnd
+        for (const o of survivors.get(t.id) ?? []) {
+          if (o.start < oldStart) lo = Math.max(lo, Math.min(o.end, oldEnd))
+          else if (o.start < oldEnd) hi = Math.min(hi, o.start)
+        }
+        if (hi > lo) edits.push({ trackId: t.id, fromFrame: hi, delta: -(hi - lo) })
+        continue
+      }
       if (now.trackId !== t.id) continue
       const dStart = now.start - oldStart
       const dEnd = now.end - oldEnd
