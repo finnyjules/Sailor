@@ -8,7 +8,7 @@ The Motion tab's entrances and exits are Fade, Grow / Shrink and Slide. Julien w
 
 ## What the user gets
 
-In Add behaviour, **Dither in** joins the In group and **Dither out** the Out group, each with a live preview tile. They work on **every layer type** — text, images, shapes, groups, wired layers — and stack with any other bar (a Slide, a letter move).
+In Add behaviour, **Dither in** joins the In group and **Dither out** the Out group, each with a live preview tile. They work on **every layer a bar can be added to** — text, images, shapes — and stack with any other bar (a Slide, a letter move). (Wired layers take no behaviour bars of any kind today; that does not change here.)
 
 One behaviour, one inspector:
 
@@ -29,7 +29,7 @@ Before a Dither in bar the layer is hidden; after a Dither out bar it is hidden 
 
 ## How it works
 
-**1. The bar drives one number.** A dither bar is an ordinary whole-layer behaviour. It compiles to ONE number band, "how revealed is this layer", 0 → 1 (or 1 → 0 for Out), on a new property of the layer called `reveal`. So everything the timeline already does applies with no new code: easing and springs, dragging and retiming, undo, the Behaviour inspector, "most recently started bar wins", bake to keyframes, export.
+**1. The bar drives one number.** A dither bar is an ordinary whole-layer behaviour. It compiles to ONE number band, "how revealed is this layer", 0 → 1 (or 1 → 0 for Out), on a new property of the layer called `reveal`. So everything the timeline already does applies with no new code: easing and springs, dragging and retiming, undo, the Behaviour inspector, "most recently started bar wins", export. The one exception is **Open into keyframes**, which is hidden for a dither bar: the look lives on the bar, so a bare `reveal` band with the bar removed would have no Style to draw.
 
 `reveal` is a motion-only property: it is not stored on the layer and is not offered in Add property (a bare 0–1 number with no look attached would mean nothing). It shows in the timeline as the dither bar's own row, labelled **Reveal**.
 
@@ -50,7 +50,7 @@ Because it is a pure function of (amount, elapsed, dials), preview, bake and exp
 **4. Drawing: "draw normally, then put the old picture back where the dither says hidden".** The painter handles a layer carrying the note like this:
 
 1. Copy what is on the canvas so far (the backdrop) to a scratch canvas.
-2. Draw the layer exactly as it is drawn today — so blend modes, shadows, and effects that read what is behind the layer (background blur, glass, backdrop shaders) all stay correct, and wired layers work too.
+2. Draw the layer exactly as it is drawn today — so blend modes, shadows, and effects that read what is behind the layer (background blur, glass, backdrop shaders) all stay correct.
 3. Erase the canvas wherever the mask says *hidden*.
 4. Put the saved backdrop back in exactly those places.
 
@@ -87,10 +87,9 @@ Scratch canvases are pooled, not created per frame. The work happens only while 
 - **Springs:** a spring can push the amount past 1; the mask treats anything ≥ 1 as fully shown and ≤ 0 as hidden.
 - **Non-finite or out-of-range dials** fall back to their defaults (the lesson of the letter-behaviour reviews).
 - **Reduced motion:** the gallery preview tile holds a still half-resolved frame.
-- **Groups:** the mask applies to the group as drawn, not to each child.
 - **The layer's cached outline** (used by edge effects) must ignore the new note, like the two existing notes.
 - **The Frame card on the canvas** plays no timeline motion today (known gap across the programme); this does not change it.
-- **Agent:** the behaviour kind and its dials are added to the agent's vocabulary so "dither the title in" works.
+- **Agent:** not in this build. The agent cannot add behaviour bars of any kind today (it writes property bands only); teaching it behaviours is its own piece of work.
 
 ## Testing
 
