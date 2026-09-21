@@ -127,6 +127,12 @@ describe('behaviourLabel — letter behaviours', () => {
     expect(behaviourLabel({ kind: 'dither', params: {} })).toBe('Dither in')
     expect(behaviourLabel({ kind: 'dither', params: { dir: 'out' } })).toBe('Dither out')
   })
+  it('labels an Assemble-style dither bar "Assemble in" / "Assemble out"', () => {
+    expect(behaviourLabel({ kind: 'dither', params: { style: 'assemble' } })).toBe('Assemble in')
+    expect(behaviourLabel({ kind: 'dither', params: { style: 'assemble', dir: 'out' } })).toBe('Assemble out')
+    // a non-assemble style keeps the plain Dither label
+    expect(behaviourLabel({ kind: 'dither', params: { style: 'wipe', dir: 'out' } })).toBe('Dither out')
+  })
 })
 
 describe('bands carry the loop flag', () => {

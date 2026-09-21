@@ -56,6 +56,8 @@ const SLOT_FILLERS: Record<number, [string, string]> = { 0: ['K', 'Q'], 1: ['9',
             </span>
             <!-- dither preview: the real reveal maths on a tiny live canvas -->
             <MotionDitherPreview v-else-if="m.preview === 'dither'" :out="m.params?.dir === 'out'" class="absolute inset-0 h-full w-full" />
+            <!-- assemble preview: same tiny canvas, the Assemble front + block look -->
+            <MotionDitherPreview v-else-if="m.preview === 'assemble'" :out="m.params?.dir === 'out'" mode="assemble" class="absolute inset-0 h-full w-full" />
             <!-- transform/opacity previews: a small mark that plays the move on loop -->
             <span v-else-if="m.preview !== 'scroll' && m.preview !== 'morph'"
               class="prev-mark absolute left-1/2 top-1/2 w-3 h-3 -ml-1.5 -mt-1.5 rounded-sm bg-[#7c9cff]"

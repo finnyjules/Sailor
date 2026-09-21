@@ -366,7 +366,11 @@ describe('the letter previews stop under prefers-reduced-motion', () => {
 
 describe('the Dither inspector block', () => {
   const src = readFileSync(INSPECTOR, 'utf8')
-  const DITHER_TESTIDS = ['dither-style', 'dither-chars', 'dither-dir', 'dither-cell', 'dither-drift', 'dither-angle', 'dither-softness']
+  const DITHER_TESTIDS = [
+    'dither-style', 'dither-chars', 'dither-dir', 'dither-cell', 'dither-drift', 'dither-angle', 'dither-softness',
+    // Assemble (Task 13)
+    'dither-look', 'dither-pattern', 'dither-levels', 'dither-band', 'dither-scatter',
+  ]
 
   /** The first self-closing tag (Studio control or otherwise) carrying this test id. */
   const tagFor = (testid: string) =>
@@ -400,7 +404,10 @@ describe('the Dither inspector block', () => {
   })
 
   // ── Pixels style (Task 9) ───────────────────────────────────────────────
-  it('the Style select offers the four REVEAL_STYLES options, Pixels first', () => {
+  // Task 13 note: REVEAL_STYLES grew a fifth member ('assemble', listed second) — this case
+  // originally pinned the Style select to exactly four options/labels, which Assemble
+  // legitimately invalidates. Updated to five, Pixels first, Assemble second.
+  it('the Style select offers the five REVEAL_STYLES options, Pixels first, Assemble second', () => {
     const tag = tagFor('dither-style')
     expect(tag, 'no tag carries data-testid="dither-style"').toBeTruthy()
     expect(tag).toMatch(/<StudioSelect\b/)
@@ -409,7 +416,7 @@ describe('the Dither inspector block', () => {
     // DITHER_STYLES is the library's own REVEAL_STYLES (Pixels first); DITHER_STYLE_LABELS
     // must pair with it by index.
     expect(src).toMatch(/const DITHER_STYLES:\s*string\[\]\s*=\s*\[\.\.\.REVEAL_STYLES\]/)
-    expect(src).toContain("const DITHER_STYLE_LABELS = ['Pixels', 'Dissolve', 'Wipe', 'Dots']")
+    expect(src).toContain("const DITHER_STYLE_LABELS = ['Pixels', 'Assemble', 'Dissolve', 'Wipe', 'Dots']")
   })
 
   it('dither-chars appears only for Pixels and binds PIXEL_CHARS', () => {
@@ -457,6 +464,122 @@ describe('the Dither inspector block', () => {
   })
 })
 
+// ── The Assemble style (Task 13) ─────────────────────────────────────────────
+describe('the Assemble inspector block', () => {
+  const src = readFileSync(INSPECTOR, 'utf8')
+  const tagFor = (testid: string) =>
+    (src.match(/<\w+\b[\s\S]*?\/>/g) ?? []).find((t) => t.includes(`data-testid="${testid}"`))
+
+  it('the Look row is a labelled StudioSegmentedRow, shown only for Assemble', () => {
+    const tag = tagFor('dither-look')
+    expect(tag, 'no tag carries data-testid="dither-look"').toBeTruthy()
+    expect(tag).toMatch(/<StudioSegmentedRow\b/)
+    expect(tag).toMatch(/label="Look"/)
+    expect(tag).toMatch(/:options="\['dither', 'characters'\]"|:options="DITHER_LOOKS"/)
+    expect(tag).toMatch(/:option-labels="\['Dither', 'Characters'\]"|:option-labels="DITHER_LOOK_LABELS"/)
+    expect(tag!.match(/v-if="([^"]*)"/)?.[1]).toMatch(/assemble/)
+  })
+
+  it('the Pattern select appears only for the Dither look and binds DITHER_PATTERNS', () => {
+    const tag = tagFor('dither-pattern')
+    expect(tag, 'no tag carries data-testid="dither-pattern"').toBeTruthy()
+    expect(tag).toMatch(/<StudioSelect\b/)
+    const cond = tag!.match(/v-if="([^"]*)"/)?.[1] ?? ''
+    expect(cond).toMatch(/assemble/)
+    expect(cond).toMatch(/dither/)
+    expect(tag).toMatch(/hint="The same patterns as the Dither effect in Shader Studio"/)
+    expect(src).toContain('DITHER_PATTERN_OPTIONS')
+    expect(src).toContain('DITHER_PATTERN_LABELS')
+    expect(src).toMatch(/DITHER_PATTERNS\.map/)
+  })
+
+  it('the Colour levels slider ranges 2–8, default 3', () => {
+    const tag = tagFor('dither-levels')
+    expect(tag, 'no tag carries data-testid="dither-levels"').toBeTruthy()
+    expect(tag).toMatch(/<StudioSlider\b/)
+    expect(tag).toMatch(/:min="2"/)
+    expect(tag).toMatch(/:max="8"/)
+    expect(tag).toMatch(/:step="1"/)
+    expect(tag).toMatch(/:default="3"|:default="REVEAL_DEFAULTS\.levels"/)
+    expect(tag).toMatch(/v-bind="gesture\('dither-levels'\)"/)
+    expect(tag).toMatch(/setBehNum\('dither-levels',\s*\{\s*levels:\s*v\s*\}\)/)
+  })
+
+  it('dither-chars also appears for Assemble with the Characters look', () => {
+    const tag = tagFor('dither-chars')
+    const cond = tag!.match(/v-if="([^"]*)"/)?.[1] ?? ''
+    expect(cond).toMatch(/pixels/)
+    expect(cond).toMatch(/assemble/)
+    expect(cond).toMatch(/characters/)
+  })
+
+  it('Band width and Scatter sliders are Assemble-only, 0–100 step 1, stored (not fraction) units', () => {
+    const band = tagFor('dither-band')
+    expect(band, 'no tag carries data-testid="dither-band"').toBeTruthy()
+    expect(band).toMatch(/<StudioSlider\b/)
+    expect(band).toMatch(/label="Band width"/)
+    expect(band).toMatch(/:min="0"/)
+    expect(band).toMatch(/:max="100"/)
+    expect(band).toMatch(/:step="1"/)
+    expect(band!.match(/v-if="([^"]*)"/)?.[1]).toMatch(/assemble/)
+    // reads the STORED 0–100 value via numParam, never via revealParams (which returns 0–1)
+    expect(band).toMatch(/numParam\('band'/)
+    expect(band).not.toMatch(/revealParams\(/)
+    expect(band).toMatch(/setBehNum\('dither-band',\s*\{\s*band:\s*v\s*\}\)/)
+
+    const scatter = tagFor('dither-scatter')
+    expect(scatter, 'no tag carries data-testid="dither-scatter"').toBeTruthy()
+    expect(scatter).toMatch(/label="Scatter"/)
+    expect(scatter).toMatch(/:min="0"/)
+    expect(scatter).toMatch(/:max="100"/)
+    expect(scatter).toMatch(/:step="1"/)
+    expect(scatter!.match(/v-if="([^"]*)"/)?.[1]).toMatch(/assemble/)
+    expect(scatter).toMatch(/numParam\('scatter'/)
+    expect(scatter).not.toMatch(/revealParams\(/)
+    expect(scatter).toMatch(/setBehNum\('dither-scatter',\s*\{\s*scatter:\s*v\s*\}\)/)
+  })
+
+  it('the Block size label and hint extend to Assemble', () => {
+    const start = src.indexOf('const ditherCellLabel = computed(')
+    expect(start, 'no ditherCellLabel computed found').toBeGreaterThan(-1)
+    const body = src.slice(start, src.indexOf('\n', start + 400) + 1)
+    expect(body).toContain("'assemble'")
+    expect(src).toContain('How big the cells are. They stay this size for the whole transition.')
+  })
+
+  it("Assemble's Block size floor is 2, distinct from Pixels' 4", () => {
+    expect(src).toMatch(/const ditherCellMin = computed\(\(\) =>[^\n]*'pixels'[^\n]*\b4\b[^\n]*'assemble'[^\n]*\b2\b[^\n]*REVEAL_RANGES\.cell\[0\]/)
+  })
+
+  it('the Drift row is labelled Shimmer speed for Assemble too, with its own hint', () => {
+    expect(src).toContain('How fast the scattered order re-rolls. 0 is still.')
+    const start = src.indexOf('const ditherDriftLabel = computed(')
+    expect(start, 'no ditherDriftLabel computed found').toBeGreaterThan(-1)
+    const body = src.slice(start, src.indexOf('\n', start + 400) + 1)
+    expect(body).toContain("'assemble'")
+    expect(body).toContain('Shimmer speed')
+  })
+
+  it('the Angle row stays visible for Assemble (its v-if only excludes Pixels)', () => {
+    const tag = tagFor('dither-angle')
+    expect(tag!.match(/v-if="([^"]*)"/)?.[1]).toMatch(/!==\s*'pixels'/)
+  })
+
+  it('Edge softness stays Wipe-only — Assemble does not show it', () => {
+    const tag = tagFor('dither-softness')
+    expect(tag!.match(/v-if="([^"]*)"/)?.[1]).toMatch(/wipe/)
+    expect(tag!.match(/v-if="([^"]*)"/)?.[1]).not.toMatch(/assemble/)
+  })
+
+  it('every new Assemble row keeps the gesture/setBehNum undo pairing (sliders only)', () => {
+    for (const id of ['dither-levels', 'dither-band', 'dither-scatter']) {
+      const tag = tagFor(id)
+      expect(tag, `no tag carries data-testid="${id}"`).toBeTruthy()
+      expect(tag).toMatch(new RegExp(`v-bind="gesture\\('${id}'\\)"`))
+    }
+  })
+})
+
 /** The gallery tile stands in for the real transition, so it must not show something the
  *  transition never shows. It ramps with the library's own `pixelBrightness`, so it has to
  *  use the shader's COMPRESSED tone too — on raw luma the white caption bar lit ~9 % of its
@@ -484,5 +607,46 @@ describe('the Dither gallery tile ramps like the shader', () => {
 describe('the Dither timeline row name', () => {
   it('MotionBandTimeline imports MOTION_ONLY_LABELS for the reveal fallback label', () => {
     expect(readFileSync(TIMELINE, 'utf8')).toContain('MOTION_ONLY_LABELS')
+  })
+})
+
+// ── The Assemble gallery tile (Task 13) ──────────────────────────────────────
+describe('the Assemble gallery tile', () => {
+  const PREVIEW = readFileSync(
+    fileURLToPath(new URL('../../../app/components/vue-canvas/compositor/MotionDitherPreview.vue', import.meta.url)),
+    'utf8',
+  )
+  const GALLERY_SRC = readFileSync(GALLERY, 'utf8')
+
+  it('MotionDitherPreview gains a mode prop distinguishing Pixels from Assemble', () => {
+    expect(PREVIEW).toMatch(/mode\?:\s*'pixels'\s*\|\s*'assemble'/)
+  })
+
+  it('the Assemble paint path uses the library\'s own assembleTest, not a hand-rolled front', () => {
+    expect(PREVIEW).toMatch(/import\s*\{[^}]*assembleTest[^}]*\}\s*from\s*'~\/lib\/motionx\/reveal'/)
+    expect(PREVIEW).toMatch(/assembleTest\(/)
+  })
+
+  it('blocks are 4px on the 48×30 tile', () => {
+    // A constant block size and a grid derived from it — not the Pixels halving ladder.
+    expect(PREVIEW).toMatch(/ASSEMBLE_BLOCK\s*=\s*4/)
+  })
+
+  it('colours are quantised to 3 levels against bayer8', () => {
+    expect(PREVIEW).toMatch(/ASSEMBLE_LEVELS\s*=\s*3/)
+    expect(PREVIEW).toMatch(/bayer8\(/)
+  })
+
+  it('MotionGallery passes mode="assemble" for the assemble preview kind', () => {
+    const tag = (GALLERY_SRC.match(/<MotionDitherPreview\b[\s\S]*?\/>/g) ?? [])
+      .find((t) => t.includes("m.preview === 'assemble'"))
+    expect(tag, 'no MotionDitherPreview tag branches on m.preview === \'assemble\'').toBeTruthy()
+    expect(tag).toMatch(/mode="assemble"/)
+  })
+
+  it('MotionGallery still renders the plain Dither preview for the dither preview kind', () => {
+    const tag = (GALLERY_SRC.match(/<MotionDitherPreview\b[\s\S]*?\/>/g) ?? [])
+      .find((t) => t.includes("m.preview === 'dither'"))
+    expect(tag, 'no MotionDitherPreview tag branches on m.preview === \'dither\'').toBeTruthy()
   })
 })

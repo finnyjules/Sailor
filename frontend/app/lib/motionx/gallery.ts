@@ -7,7 +7,7 @@ export type MoveGroup = 'Letters' | 'In' | 'Loop' | 'Out' | 'Gradient'
 export type PreviewKind =
   | 'fade' | 'slide-up' | 'slide-down' | 'slide-left' | 'slide-right'
   | 'grow' | 'shrink' | 'spin' | 'pulse' | 'sway' | 'float'
-  | 'scroll' | 'morph' | 'dither'
+  | 'scroll' | 'morph' | 'dither' | 'assemble'
   | 'letters-cascade' | 'letters-typewriter' | 'letters-mask' | 'letters-scramble'
   | 'letters-decode' | 'letters-slot' | 'letters-wave' | 'letters-bounce' | 'letters-jitter'
 
@@ -69,6 +69,7 @@ export const GALLERY_MOVES: GalleryMove[] = [
   { id: 'slide-right', kind: 'slide', label: 'Slide right', group: 'In', preview: 'slide-right', params: { dir: 'right' },
     recipe: [{ kind: 'slide', params: { dir: 'right' } }, { kind: 'fade', params: { dir: 'in' } }] },
   { id: 'dither-in', kind: 'dither', label: 'Dither in', group: 'In', preview: 'dither', params: { dir: 'in' } },
+  { id: 'assemble-in', kind: 'dither', label: 'Assemble in', group: 'In', preview: 'assemble', params: { dir: 'in', style: 'assemble' } },
   // Loop
   { id: 'spin', kind: 'spin', label: 'Spin', group: 'Loop', preview: 'spin', cycle: 2 },
   { id: 'pulse', kind: 'pulse', label: 'Pulse', group: 'Loop', preview: 'pulse', cycle: 1.2 },
@@ -79,6 +80,7 @@ export const GALLERY_MOVES: GalleryMove[] = [
   { id: 'scale-out', kind: 'scale', label: 'Shrink out', group: 'Out', preview: 'shrink', params: { dir: 'out' },
     recipe: [{ kind: 'scale', params: { dir: 'out' } }, { kind: 'fade', params: { dir: 'out' } }] },
   { id: 'dither-out', kind: 'dither', label: 'Dither out', group: 'Out', preview: 'dither', params: { dir: 'out' } },
+  { id: 'assemble-out', kind: 'dither', label: 'Assemble out', group: 'Out', preview: 'assemble', params: { dir: 'out', style: 'assemble' } },
   // Gradient
   { id: 'gradient-scroll', kind: 'gradientScroll', label: 'Scroll', group: 'Gradient', preview: 'scroll', needs: 'gradient', cycle: 3 },
 ]

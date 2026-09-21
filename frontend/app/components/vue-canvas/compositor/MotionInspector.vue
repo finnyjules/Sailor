@@ -8,7 +8,7 @@
  *  segmented strip, the labelled select, the switch, the button — so this panel reads like
  *  the Cloner / Feather / Fill panels it sits beside instead of like a form. */
 import type { Track, Ease, PropertyValue, StoredBehaviour, Timing } from '~/lib/motionx'
-import { REVEAL_DEFAULTS, REVEAL_RANGES, REVEAL_STYLES, revealParams, revealCellDefault, PIXEL_CHARS } from '~/lib/motionx/reveal'
+import { REVEAL_DEFAULTS, REVEAL_RANGES, REVEAL_STYLES, REVEAL_LOOKS, revealParams, revealCellDefault, PIXEL_CHARS, DITHER_PATTERNS } from '~/lib/motionx/reveal'
 
 export type BehaviourPatch = { params?: Record<string, unknown>; timing?: Partial<Timing>; kind?: string; replaceParams?: boolean }
 import { trackSpan, behaviourLabel } from '~/lib/motionx/bands'
@@ -99,27 +99,41 @@ const behaviour = computed<StoredBehaviour | null>(() =>
     ? (props.behaviours ?? []).find((b) => b.id === props.selection!.path) ?? null
     : null)
 const behParam = (k: string) => behaviour.value?.params?.[k]
-// The dither bar's style, read the one way any dither param is ever read: through
-// `revealParams`, so an unknown or missing value falls back to the library's own default
-// (Pixels) rather than a second, locally-guessed one.
-const ditherStyle = computed(() => revealParams(behaviour.value?.params).style)
-const ditherChars = computed(() => String(revealParams(behaviour.value?.params).chars))
+// The ONE reader of a dither bar's stored params — every enum computed below reads off this,
+// instead of calling `revealParams` again itself, so an unknown or missing value falls back to
+// the library's own default (Pixels / Dither) rather than a second, locally-guessed one.
+const reveal = computed(() => revealParams(behaviour.value?.params))
+const ditherStyle = computed(() => reveal.value.style)
+const ditherChars = computed(() => String(reveal.value.chars))
+// Assemble-only (Task 13): the block Look (Dither / Characters) and, for the Dither look, its
+// Pattern — both enums, so both are read off the shared `reveal` computed like `ditherStyle`.
+const ditherLook = computed(() => reveal.value.look)
+const ditherPattern = computed(() => String(reveal.value.pattern))
 /** Pixels halves the block until the shader stops refining, so a dial finer than the first
  *  halving has no ladder at all (see `pixelFinest`): 4‰ is the coarsest floor that always
- *  leaves something to halve. The mask styles keep the library's own floor. */
-const ditherCellMin = computed(() => (ditherStyle.value === 'pixels' ? 4 : REVEAL_RANGES.cell[0]))
+ *  leaves something to halve. Assemble's block never halves, but a floor below 2‰ is a
+ *  scatter smaller than the dither pattern it samples; the mask styles keep the library's
+ *  own floor. */
+const ditherCellMin = computed(() => (ditherStyle.value === 'pixels' ? 4 : ditherStyle.value === 'assemble' ? 2 : REVEAL_RANGES.cell[0]))
 const ditherCellLabel = computed(() => (
-  ditherStyle.value === 'pixels' ? 'Block size' : ditherStyle.value === 'dots' ? 'Dot spacing' : 'Cell size'
+  ditherStyle.value === 'pixels' || ditherStyle.value === 'assemble' ? 'Block size'
+    : ditherStyle.value === 'dots' ? 'Dot spacing' : 'Cell size'
 ))
 const ditherCellHint = computed(() => (
   ditherStyle.value === 'pixels'
     ? "How big the cells are when the transition starts, in thousandths of the frame's width. They halve until the layer is sharp."
+    : ditherStyle.value === 'assemble'
+    ? 'How big the cells are. They stay this size for the whole transition.'
     : "How chunky the pattern is, in thousandths of the frame's width"
 ))
-const ditherDriftLabel = computed(() => (ditherStyle.value === 'pixels' ? 'Shimmer speed' : 'Drift speed'))
+const ditherDriftLabel = computed(() => (
+  ditherStyle.value === 'pixels' || ditherStyle.value === 'assemble' ? 'Shimmer speed' : 'Drift speed'
+))
 const ditherDriftHint = computed(() => (
   ditherStyle.value === 'pixels'
     ? 'How fast the characters re-roll while the layer sharpens. 0 is still.'
+    : ditherStyle.value === 'assemble'
+    ? 'How fast the scattered order re-rolls. 0 is still.'
     : 'How fast the pattern slides while the layer resolves, in cells per second. 0 is a still dither.'
 ))
 /** A discrete edit — an option, a switch, a shuffle. Always its own undo step. */
@@ -175,14 +189,20 @@ const MORPH_MODES = ['crossfade', 'travel']
 const MORPH_MODE_LABELS = ['Crossfade', 'Travel']
 const MORPH_SPACES = ['oklab', 'hybrid']
 const MORPH_SPACE_LABELS = ['OKLab', 'Hybrid']
-// `REVEAL_STYLES` is `readonly RevealStyle[]` (the library's own list, Pixels first); copied
-// into a plain mutable string[] so it can feed a Studio control's `options` prop.
+// `REVEAL_STYLES` is `readonly RevealStyle[]` (the library's own list, Pixels first, Assemble
+// second); copied into a plain mutable string[] so it can feed a Studio control's `options` prop.
 const DITHER_STYLES: string[] = [...REVEAL_STYLES]
-const DITHER_STYLE_LABELS = ['Pixels', 'Dissolve', 'Wipe', 'Dots']
+const DITHER_STYLE_LABELS = ['Pixels', 'Assemble', 'Dissolve', 'Wipe', 'Dots']
 // `PIXEL_CHARS` values as strings for the Characters select (a Studio option list is always
 // strings); `revealParams` reads the stored number back with `Number(...)`.
 const PIXEL_CHAR_OPTIONS = PIXEL_CHARS.map((c) => String(c.value))
 const PIXEL_CHAR_LABELS = PIXEL_CHARS.map((c) => c.label)
+// Assemble's Look segmented row and, for the Dither look, its Pattern select — same pairing
+// idiom as DITHER_STYLES / PIXEL_CHAR_OPTIONS above.
+const DITHER_LOOKS: string[] = [...REVEAL_LOOKS]
+const DITHER_LOOK_LABELS = ['Dither', 'Characters']
+const DITHER_PATTERN_OPTIONS = DITHER_PATTERNS.map((p) => String(p.value))
+const DITHER_PATTERN_LABELS = DITHER_PATTERNS.map((p) => p.label)
 
 // ── Letter behaviours (Task 5) ───────────────────────────────────────────────
 const isTextBeh = computed(() => behaviour.value != null && isTextBehaviour(behaviour.value))
@@ -481,7 +501,18 @@ function onGradient(g: Gradient) {
         <StudioSelect data-testid="dither-style" label="Style"
           :model-value="ditherStyle" :options="DITHER_STYLES" :option-labels="DITHER_STYLE_LABELS"
           @update:model-value="(v) => setBehParams({ style: v })" />
-        <StudioSelect v-if="ditherStyle === 'pixels'" data-testid="dither-chars" label="Characters"
+        <StudioSegmentedRow v-if="ditherStyle === 'assemble'" data-testid="dither-look" label="Look"
+          :model-value="ditherLook" :options="DITHER_LOOKS" :option-labels="DITHER_LOOK_LABELS"
+          @update:model-value="(v) => setBehParams({ look: v })" />
+        <StudioSelect v-if="ditherStyle === 'assemble' && ditherLook === 'dither'" data-testid="dither-pattern" label="Pattern"
+          hint="The same patterns as the Dither effect in Shader Studio"
+          :model-value="ditherPattern" :options="DITHER_PATTERN_OPTIONS" :option-labels="DITHER_PATTERN_LABELS"
+          @update:model-value="(v) => setBehParams({ pattern: Number(v) })" />
+        <StudioSlider v-if="ditherStyle === 'assemble' && ditherLook === 'dither'" data-testid="dither-levels" v-bind="gesture('dither-levels')"
+          label="Colour levels" hint="How few colours each block can take. 2 is harsh, 8 is nearly smooth."
+          :model-value="numParam('levels', REVEAL_DEFAULTS.levels)" :min="2" :max="8" :step="1" :default="REVEAL_DEFAULTS.levels"
+          @update:model-value="(v) => setBehNum('dither-levels', { levels: v })" />
+        <StudioSelect v-if="ditherStyle === 'pixels' || (ditherStyle === 'assemble' && ditherLook === 'characters')" data-testid="dither-chars" label="Characters"
           hint="The same character sets as the ASCII effect in Shader Studio"
           :model-value="ditherChars" :options="PIXEL_CHAR_OPTIONS" :option-labels="PIXEL_CHAR_LABELS"
           @update:model-value="(v) => setBehParams({ chars: Number(v) })" />
@@ -492,6 +523,14 @@ function onGradient(g: Gradient) {
           :label="ditherCellLabel" :hint="ditherCellHint"
           :model-value="numParam('cell', revealCellDefault(ditherStyle))" :min="ditherCellMin" :max="REVEAL_RANGES.cell[1]" :step="1" :default="revealCellDefault(ditherStyle)"
           @update:model-value="(v) => setBehNum('dither-cell', { cell: v })" />
+        <StudioSlider v-if="ditherStyle === 'assemble'" data-testid="dither-band" v-bind="gesture('dither-band')"
+          label="Band width" hint="How much of the layer is in block form at once. At 100 the whole layer is blocks before it turns sharp."
+          :model-value="numParam('band', REVEAL_DEFAULTS.band)" :min="0" :max="100" :step="1" :default="REVEAL_DEFAULTS.band"
+          @update:model-value="(v) => setBehNum('dither-band', { band: v })" />
+        <StudioSlider v-if="ditherStyle === 'assemble'" data-testid="dither-scatter" v-bind="gesture('dither-scatter')"
+          label="Scatter" hint="How far ahead of the edge cells start appearing. 0 is a hard line."
+          :model-value="numParam('scatter', REVEAL_DEFAULTS.scatter)" :min="0" :max="100" :step="1" :default="REVEAL_DEFAULTS.scatter"
+          @update:model-value="(v) => setBehNum('dither-scatter', { scatter: v })" />
         <StudioSlider data-testid="dither-drift" v-bind="gesture('dither-drift')"
           :label="ditherDriftLabel" :hint="ditherDriftHint"
           :model-value="numParam('drift', REVEAL_DEFAULTS.drift)" :min="REVEAL_RANGES.drift[0]" :max="REVEAL_RANGES.drift[1]" :step="0.5" :default="REVEAL_DEFAULTS.drift"

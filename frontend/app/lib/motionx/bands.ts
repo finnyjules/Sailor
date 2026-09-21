@@ -101,7 +101,10 @@ export function behaviourLabel(b: { kind: string; params?: Record<string, unknow
   }
   else if (b.kind === 'text.decode') withDir = dir === 'dissolve' ? 'Decode out' : 'Decode'
   else if (b.kind === 'text.slot') withDir = dir === 'out' ? 'Slot slide out' : 'Slot slide'
-  else if (b.kind === 'dither') withDir = dir === 'out' ? 'Dither out' : 'Dither in'
+  else if (b.kind === 'dither') {
+    const name = b.params?.style === 'assemble' ? 'Assemble' : 'Dither'
+    withDir = dir === 'out' ? `${name} out` : `${name} in`
+  }
   return b.timing?.loop ? `${withDir} · loop` : withDir
 }
 

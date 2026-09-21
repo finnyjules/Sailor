@@ -35,6 +35,17 @@ describe('dither moves', () => {
   })
 })
 
+describe('assemble moves', () => {
+  it('Assemble in sits in the In group and Assemble out in Out, for every layer', () => {
+    const moves = movesForLayer({ gradient: false, text: false })
+    const ain = moves.find((m) => m.id === 'assemble-in')!, aout = moves.find((m) => m.id === 'assemble-out')!
+    expect([ain.kind, ain.group, ain.label, ain.params]).toEqual(['dither', 'In', 'Assemble in', { dir: 'in', style: 'assemble' }])
+    expect([aout.kind, aout.group, aout.label, aout.params]).toEqual(['dither', 'Out', 'Assemble out', { dir: 'out', style: 'assemble' }])
+    expect(ain.preview).toBe('assemble'); expect(ain.recipe).toBeUndefined()
+    expect(aout.preview).toBe('assemble'); expect(aout.recipe).toBeUndefined()
+  })
+})
+
 describe('movesForLayer', () => {
   it('hides gradient moves when the layer has no gradient fill', () => {
     const out = movesForLayer({ gradient: false, text: false })
