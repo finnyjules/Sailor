@@ -103,7 +103,7 @@ export function cellRange(
  *  it up with smoothing off, so a pixel is exactly a cell. */
 export function buildHiddenMask(
   r: MotionReveal, range: { c0: number; r0: number; cols: number; rows: number }, grid: { cols: number; rows: number },
-): Uint8ClampedArray {
+): Uint8ClampedArray<ArrayBuffer> {
   const px = new Uint8ClampedArray(range.cols * range.rows * 4)
   for (let j = 0; j < range.rows; j++) for (let i = 0; i < range.cols; i++) {
     if (!cellShown(r, range.c0 + i, range.r0 + j, grid)) px[(j * range.cols + i) * 4 + 3] = 255

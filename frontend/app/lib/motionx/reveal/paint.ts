@@ -33,9 +33,13 @@ export function beginReveal(ctx: CanvasRenderingContext2D, reveal: MotionReveal,
 
 const IDENTITY = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }
 
-/** Build the hidden side once; the returned painter draws it (under the caller's transform
- *  and composite mode) as many times as asked. `release` hands the scratch canvas back. */
-function hiddenSide(pass: RevealPass, canvasW: number, canvasH: number): { paint: (c: CanvasRenderingContext2D) => void; release: () => void } {
+type Painter = () => void
+/** Build the hidden side once. `painterFor(c)` readies it for one context and hands back the
+ *  draw (under the caller's transform and composite mode) — or NULL when that context cannot
+ *  draw it, which `finishReveal` must learn BEFORE it touches a pixel: the recipe is only
+ *  correct when the erase and BOTH halves of the put-back run with the same mask. `release`
+ *  hands the scratch canvas back. */
+function hiddenSide(pass: RevealPass, canvasW: number, canvasH: number): { painterFor: (c: CanvasRenderingContext2D) => Painter | null; release: () => void } {
   const { reveal, W, H, base } = pass
   const cellPx = reveal.cell * W
   const inv = base.inverse()
@@ -54,17 +58,19 @@ function hiddenSide(pass: RevealPass, canvasW: number, canvasH: number): { paint
     t.globalCompositeOperation = 'destination-out'
     t.beginPath(); t.arc(T / 2, T / 2, dotRadius(reveal.amount) * T, 0, Math.PI * 2); t.fill()
     const pitchPx = cellPx * DOT_PITCH_CELLS
-    const slide = Math.max(0, reveal.elapsed) * reveal.drift * cellPx
+    const slide = (Number.isFinite(reveal.elapsed) ? Math.max(0, reveal.elapsed) : 0) * reveal.drift * cellPx
     // The dot sits at the tile's CENTRE, so the tile origin is half a pitch before a dot centre.
     const ox = slide * Math.cos(reveal.angle), oy = slide * Math.sin(reveal.angle)
     return {
-      paint(c) {
+      painterFor(c) {
         const pattern = c.createPattern(small, 'repeat')
-        if (!pattern) return
+        if (!pattern) return null
         pattern.setTransform(new DOMMatrix().translate(ox, oy).scale(pitchPx / T))
-        c.imageSmoothingEnabled = true
-        c.fillStyle = pattern
-        c.fillRect(x, y, w, h)
+        return () => {
+          c.imageSmoothingEnabled = true
+          c.fillStyle = pattern
+          c.fillRect(x, y, w, h)
+        }
       },
       release: () => { smallPool.push(small) },
     }
@@ -73,13 +79,9 @@ function hiddenSide(pass: RevealPass, canvasW: number, canvasH: number): { paint
   if (small.height !== range.rows) small.height = range.rows
   const grid = cellRange(IDENTITY, W, H, W, H, reveal.cell)
   const m = small.getContext('2d')!
-  // `buildHiddenMask` returns a plain Uint8ClampedArray; lib.dom's `ImageDataArray` wants one
-  // typed over `ArrayBuffer` specifically (not the wider `ArrayBufferLike`) — a TS-only gap,
-  // same as the pre-existing `new ImageData(outArr, w, h)` call elsewhere in this file.
-  const bytes = buildHiddenMask(reveal, range, grid) as unknown as Uint8ClampedArray<ArrayBuffer>
-  m.putImageData(new ImageData(bytes, range.cols, range.rows), 0, 0)
+  m.putImageData(new ImageData(buildHiddenMask(reveal, range, grid), range.cols, range.rows), 0, 0)
   return {
-    paint(c) { c.imageSmoothingEnabled = false; c.drawImage(small, x, y, w, h) },
+    painterFor: (c) => () => { c.imageSmoothingEnabled = false; c.drawImage(small, x, y, w, h) },
     release: () => { smallPool.push(small) },
   }
 }
@@ -89,15 +91,19 @@ export function finishReveal(ctx: CanvasRenderingContext2D, pass: RevealPass): v
   const sctx = snap.getContext('2d')
   if (!sctx) { pool.push(snap); return }
   const hidden = hiddenSide(pass, ctx.canvas.width, ctx.canvas.height)
+  const onSnap = hidden.painterFor(sctx), onCtx = hidden.painterFor(ctx)
+  // Fail SAFE: if either side cannot draw the mask, leave the layer as it was drawn (no
+  // dither this frame). Running half the recipe would add the whole backdrop over the layer.
+  if (!onSnap || !onCtx) { hidden.release(); pool.push(snap); return }
   // the old picture, only where hidden
   sctx.setTransform(base)
   sctx.globalCompositeOperation = 'destination-in'
-  hidden.paint(sctx)
+  onSnap()
   ctx.save()
   ctx.filter = 'none'; ctx.shadowColor = 'transparent'; ctx.globalAlpha = 1
   ctx.setTransform(base)
   ctx.globalCompositeOperation = 'destination-out'
-  hidden.paint(ctx)                                   // erase layer + backdrop there…
+  onCtx()                                             // erase layer + backdrop there…
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.globalCompositeOperation = 'lighter'
   ctx.drawImage(snap, 0, 0)                           // …and add the backdrop back

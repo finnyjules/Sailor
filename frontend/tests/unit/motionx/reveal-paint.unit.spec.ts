@@ -363,3 +363,39 @@ describe('paintLayerStack wiring (source-level guard)', () => {
     expect(beginIdx).toBeLessThan(readIdx)
   })
 })
+
+// ── review follow-up: fail SAFE ──────────────────────────────────────────────────────────
+describe('finishReveal — when the mask cannot be drawn', () => {
+  it('dots with no pattern: not a pixel of the canvas is touched, and the scratch canvases go back to the pool', () => {
+    const { calls, ctx, factoryCanvases } = harness()
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    const pass = beginReveal(ctx, dots(), W, H)!
+    // The main context refuses the pattern (the snapshot's own context would have accepted it):
+    // running only the snapshot half would then ADD the whole backdrop over the drawn layer.
+    const noPattern = new Proxy(ctx, {
+      get: (t, k, r) => (k === 'createPattern' ? () => null : Reflect.get(t, k, r)),
+    }) as CanvasRenderingContext2D
+    calls.length = 0
+    finishReveal(noPattern, pass)
+
+    const onCtx = calls.filter((c) => c.target === 'ctx').map((c) => c.name)
+    for (const forbidden of ['drawImage', 'fillRect', 'save', 'set:globalCompositeOperation']) expect(onCtx).not.toContain(forbidden)
+    const snapId = pass.snap.__scratchId as unknown as string
+    expect(callsOf(calls, snapId, 'fillRect')).toHaveLength(0)
+    expect(calls.filter((c) => c.target === snapId && c.name === 'set:globalCompositeOperation')).toHaveLength(0)
+
+    const made = factoryCanvases.length
+    const again = beginReveal(ctx, dots(), W, H)!
+    finishReveal(ctx, again)
+    expect(factoryCanvases.length).toBe(made)       // both scratch canvases were reused, none leaked
+  })
+  it('a non-finite elapsed draws a still pattern rather than a NaN transform', () => {
+    const { calls, ctx } = harness()
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    const pass = beginReveal(ctx, dots({ elapsed: NaN, drift: 6 }), W, H)!
+    calls.length = 0
+    finishReveal(ctx, pass)
+    const m = callsOf(calls, 'ctx', 'pattern.setTransform')[0]!.args[0] as FakeMatrix
+    expect(Number.isFinite(m.e)).toBe(true); expect(Number.isFinite(m.f)).toBe(true)
+  })
+})
