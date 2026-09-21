@@ -473,8 +473,19 @@ function toggleMinimap() {
 // policy-link action here too, instead of the generic "Couldn't start run"
 // fallback (Stage 8 fix — direct execution is the ONLY path hosted mode
 // actually takes, per useDirectExecutionEnabled.ts).
+// Announce a refused /prompt POST on the same window pipe run events travel on
+// (see the direct.onEvent re-post in onMounted). Two listeners pick it up: this
+// layout's 'queue_error' branch → surfaceQueueError (toast + state cleanup), and
+// VueNodeCanvas → red rings on the offending nodes. Calling surfaceQueueError
+// directly instead would show the toast but never paint the rings.
+function postQueueError(res: { node_errors?: any; error?: string; refusal?: boolean; statusCode?: number }) {
+  window.postMessage({
+    type: 'sailor-bridge', v: 2, direct: true, event: 'queue_error',
+    node_errors: res.node_errors ?? null, message: res.error, refusal: res.refusal, statusCode: res.statusCode,
+  }, window.location.origin)
+}
+
 function surfaceQueueError(nodeErrors: any, fallbackMessage?: string, opts?: { silent?: boolean; refusal?: boolean; statusCode?: number }) {
-  clearQueueWatchdog()
   if (!opts?.silent) {
     const refusal = describeQueueRefusal({ refusal: opts?.refusal, statusCode: opts?.statusCode, message: fallbackMessage })
     if (refusal) {
@@ -893,7 +904,7 @@ async function runVueWorkflow(
         }))
         const results = await direct.queueParallel(items, { objectInfo: objectInfo.value })
         const failed = results.find((r) => (r.node_errors && Object.keys(r.node_errors).length) || r.error)
-        if (failed) surfaceQueueError(failed.node_errors, failed.error, { refusal: failed.refusal, statusCode: failed.statusCode })
+        if (failed) postQueueError(failed)
         for (const res of results) {
           if ((res.node_errors && Object.keys(res.node_errors).length) || res.error) continue
           registerResult(res)
@@ -906,10 +917,10 @@ async function runVueWorkflow(
         const hasNodeErrors = res.node_errors && Object.keys(res.node_errors).length
         if (hasNodeErrors || res.error) {
           // Any failure (structured node_errors OR a plain error message from a
-          // 400/5xx/network drop) surfaces immediately through the same path the
-          // bridge 'queue_error' takes — red-ring + toast — and clears run state,
-          // instead of resolving silently and only tripping the ~15s watchdog.
-          surfaceQueueError(res.node_errors, res.error, { refusal: res.refusal, statusCode: res.statusCode })
+          // 400/5xx/network drop) surfaces immediately — red rings + toast — and
+          // clears run state, instead of resolving silently and only tripping
+          // the stall watchdog.
+          postQueueError(res)
         } else {
           // Cold-boot spill fallback (audit R2): the run wanted a pool worker
           // but /api/pool/ensure rejected/timed out (wedged --cpu boot), so it
@@ -1832,20 +1843,6 @@ const pendingLiveRuns = ref(0)
 const currentRunSilent = ref(false)
 let pendingLiveRunsResetTimer: ReturnType<typeof setTimeout> | null = null
 
-// No-response watchdog for the queuePrompt handshake. We postMessage
-// `queuePrompt` to the bridge iframe and return immediately — but if the
-// iframe's LiteGraph registry is stale after a ComfyUI restart (it silently
-// drops nodes / no-ops the queue) or the message lands on a half-loaded frame,
-// the run fails with ZERO feedback: no /prompt POST, status stuck Idle, no
-// toast. The bridge posts a terminal event for every outcome it reaches
-// (`queued` on success, `queue_error` on any failure) — so silence past the
-// timeout means the handler never ran. Surface it instead of hanging.
-const QUEUE_WATCHDOG_MS = 8000
-let queueWatchdogTimer: ReturnType<typeof setTimeout> | null = null
-function clearQueueWatchdog() {
-  if (queueWatchdogTimer) { clearTimeout(queueWatchdogTimer); queueWatchdogTimer = null }
-}
-
 // Per-run STALL watchdogs for DIRECT-mode runs, keyed by prompt_id. In direct
 // mode the resolved /prompt POST IS the server's acknowledgment (queue()
 // awaits it), so there is no separate handshake to time out — a slow model is
@@ -1860,7 +1857,7 @@ function clearQueueWatchdog() {
 // terminal completion events as before. (This fixes the false "didn't start"
 // fires when Re-roll ×N queues prompts serially behind each other on a worker —
 // the 2nd prompt's first event legitimately arrives only after the 1st, which a
-// short per-run timer misread as a stall.) The bridge path keeps armQueueWatchdog.
+// short per-run timer misread as a stall.)
 // NB: `Map` here would resolve to the lucide-vue-next icon imported above,
 // not the global constructor — use globalThis.Map explicitly.
 const DIRECT_RUN_STALL_MS = 120_000
@@ -1897,18 +1894,6 @@ function rearmDirectRunWatchdog(promptId: string) {
   const tabId = directRunWatchdogTabs.get(promptId) ?? ''
   armDirectRunWatchdog(promptId, tabId)
 }
-function armQueueWatchdog(tabId: string) {
-  clearQueueWatchdog()
-  queueWatchdogTimer = setTimeout(() => {
-    queueWatchdogTimer = null
-    console.error('[Run] no bridge response after queuePrompt — stale canvas or dropped message')
-    toast.error('Run didn’t start', {
-      description: 'The ComfyUI canvas didn’t respond — it can go stale after a restart. Reload the page and try again.',
-    })
-    if (tabId) updateTabStatus(tabId, 'idle')
-  }, QUEUE_WATCHDOG_MS)
-}
-
 function handleLiveRun(e: Event) {
   // Live preview runs are SCOPED to the node that asked for them. targetIds
   // routes through getFilteredWorkflow (upstream keep-set; unchanged upstream
@@ -1936,36 +1921,9 @@ onUnmounted(() => {
   window.removeEventListener('sailor:liveRun', handleLiveRun)
   if (autosaveDebounceTimer) { clearTimeout(autosaveDebounceTimer); autosaveDebounceTimer = null }
 })
-// True while a workflow is being pushed into the canvas (incl. waiting for the
-// bridge to become ready on a cold start). Drives the loading overlay so the
-// wait reads as "initializing", not a dead/broken button.
-const workflowLoading = ref(false)
-let workflowLoadingTimer: ReturnType<typeof setTimeout> | null = null
 const vueCanvasRef = ref<any>(null)
 let currentProjectTabId: string | null = null // tracks which project tab's workflow is loaded
 
-// Bridge readiness handshake: the bridge posts { status: 'ready' } once ComfyUI's
-// app + node defs are fully initialized. We gate workflow loads on this instead of
-// a fixed delay, so "new workflow" works the instant the canvas is usable (cold
-// starts can take ~a minute) rather than silently dropping early messages.
-let bridgeIsReady = false
-const bridgeReady = ref(false) // reactive mirror of bridgeIsReady for the template
-let bridgeReadyResolve: (() => void) | null = null
-let bridgeReadyPromise: Promise<void> = new Promise((r) => { bridgeReadyResolve = r })
-
-function resetBridgeReady() {
-  bridgeIsReady = false
-  bridgeReady.value = false
-  bridgeReadyPromise = new Promise((r) => { bridgeReadyResolve = r })
-}
-
-// The embedded ComfyUI canvas (iframe) fetches its node schema ONCE at load.
-// After a backend node-schema change it goes stale — it maps widget values to
-// the OLD widget order (e.g. a taste_profile value landing in the prompt_strength
-// slot → "could not convert string to float" → 400). A plain page refresh in dev
-// (HMR) often doesn't remount the iframe, so we force it: reset the bridge-ready
-// handshake AND reload the iframe with a cache-bust. Exposed on window so it can
-// be triggered from the console; also wired to the "Reload canvas" control.
 // Public origin the ComfyUI canvas iframe loads from. In local mode this is the
 // operator's own ComfyUI on :8188 (or NUXT_PUBLIC_COMFY_ORIGIN if they moved it).
 //
@@ -1976,16 +1934,19 @@ function resetBridgeReady() {
 // the canvas straight at an ungated engine, and the old `|| 127.0.0.1:8188`
 // fallback did it even with the variable unset.
 const comfyOrigin = engineOrigin(useRuntimeConfig().public)
-// Backend came back (or the console escape hatch fired). There is no engine
-// iframe to reload any more — the Vue canvas holds the graph itself — so this
-// only clears a loading overlay that a dead backend may have left up.
+// The canvas caches the engine's node schema (/object_info). After a backend
+// restart with changed node definitions that cache is stale — widget values map
+// to the OLD widget order (e.g. a taste_profile value landing in the
+// prompt_strength slot → "could not convert string to float" → 400). This forces
+// one fresh fetch and re-heals live nodes against it. Runs when the backend
+// comes back; also on the `sailor:reloadCanvas` event and `__reloadCanvas()`
+// from the console.
 function forceReloadCanvas() {
-  resetBridgeReady()
-  endWorkflowLoading()
+  void vueCanvasRef.value?.refreshSchema?.(true)
 }
 
 // Backend boot/ready loader. Polls the backend; on a genuine restart recovery,
-// reload the (now-stale) iframe against the fresh backend.
+// refresh the (now possibly stale) node schema against the fresh backend.
 // Guard: while a generation is running, a heavy node can block ComfyUI's event
 // loop long enough that the probe times out — a *false* down→up that must NOT
 // reload the canvas (that mid-run reload was the cause of the flickering).
@@ -1998,23 +1959,16 @@ const { backendUp, start: startHealthPoll, stop: stopHealthPoll } =
     suppressRecovery: () => runningCount.value > 0,
   })
 
-// Truly ready = backend HTTP up AND ComfyUI ready inside the iframe. Hosted has
-// no bridge iframe to become ready, so backend-up is the whole condition.
-// Tier 1 (bridge retirement): with direct execution the only path, no bridge
-// iframe is mounted, so backend-up is the whole readiness condition (same as
-// hosted). `bridgeReady` only gates the legacy bridge path, kept for a revert.
-const canvasReady = computed(() => backendUp.value && (hostedShell || directExecutionEnabled.value || bridgeReady.value))
+// Ready = the engine answers over HTTP. There is no engine iframe to wait on.
+const canvasReady = computed(() => backendUp.value)
 const hasBeenReady = ref(false)
 watch(canvasReady, (v) => { if (v) hasBeenReady.value = true })
 
-// The status pill is "busy" while the backend/canvas isn't ready OR a workflow
-// is loading; the label reflects which.
-const backendBusy = computed(() => !canvasReady.value || workflowLoading.value)
-const backendLabel = computed(() => {
-  if (!backendUp.value) return hasBeenReady.value ? 'Reconnecting to engine…' : 'Starting engine…'
-  if (!bridgeReady.value) return 'Loading engine…'
-  return 'Loading workflow…'
-})
+// The status pill is "busy" while the engine isn't reachable.
+const backendBusy = computed(() => !canvasReady.value)
+const backendLabel = computed(() =>
+  hasBeenReady.value ? 'Reconnecting to engine…' : 'Starting engine…',
+)
 
 // First open of the heavy Vue canvas (VueNodeCanvas: Vue Flow + many node
 // components, plus Vite's first-compile in dev) mounts synchronously and blocks
@@ -2132,42 +2086,6 @@ const runningCanvasByWorker = reactive<Record<number, string | null>>({})
 // other workers' run events (so a background tab's run doesn't clear the active
 // tab's animation) and re-apply the right running node when you switch tabs.
 const activeWorker = computed(() => workerForTab(activeTab.value?.id))
-
-function workerIndexOfFrame(win: Window | null): number | null {
-  if (!win) return null
-  if (getSharedIframe()?.contentWindow === win) return 0
-  for (const f of document.querySelectorAll('iframe[data-worker]')) {
-    if ((f as HTMLIFrameElement).contentWindow === win) return Number((f as HTMLIFrameElement).dataset.worker)
-  }
-  return null
-}
-
-// Per-worker bridge-ready (the global bridgeIsReady stays for the worker-0 /
-// single-worker path; this tracks the extra pool workers).
-const workerReady = reactive<Record<number, boolean>>({})
-const workerReadyResolvers: Record<number, Array<() => void>> = {}
-function markWorkerReady(idx: number) {
-  if (workerReady[idx]) return
-  workerReady[idx] = true
-  ;(workerReadyResolvers[idx] || []).forEach(r => r())
-  workerReadyResolvers[idx] = []
-}
-
-function markBridgeReady() {
-  if (bridgeIsReady) return
-  bridgeIsReady = true
-  bridgeReady.value = true
-  bridgeReadyResolve?.()
-}
-
-function getSharedIframe(): HTMLIFrameElement | null {
-  return document.querySelector('[data-tab-id="comfyui-shared"] iframe') as HTMLIFrameElement | null
-}
-
-function endWorkflowLoading() {
-  workflowLoading.value = false
-  if (workflowLoadingTimer) { clearTimeout(workflowLoadingTimer); workflowLoadingTimer = null }
-}
 
 async function fetchWorkflowFromHistory(promptId: string): Promise<any> {
   try {
@@ -2730,20 +2648,34 @@ function adjustCreditsAmount(delta: number) {
 }
 
 function openAddCredits() {
+  // Hosted tops up through our own wallet page; the window below is the parked
+  // comfy.org top-up (see sendToBridgeIframe).
+  if (hostedShell) { navigateTo('/account'); return }
   creditsAmount.value = 50
   creditsModalOpen.value = true
 }
 
-function sendToBridgeIframe(action: string, payload?: any) {
-  const bridgeIframe = document.getElementById('sailor-bridge-iframe') as HTMLIFrameElement
-  if (bridgeIframe?.contentWindow) {
-    bridgeIframe.contentWindow.postMessage({ type: 'sailor', action, ...payload }, '*')
+// ── comfy.org account actions — PARKED ──────────────────────────────────────
+// purchaseCredits / openBillingPortal / signOut / refreshCredits used to be
+// relayed to ComfyUI's own frontend through the engine iframe (bridge.js), which
+// is gone. The credits window, UserPopup and the handleBridgeEvent account
+// branches are kept so this can be re-wired without rebuilding the UI — this
+// function is the ONE seam to reconnect. Until then there is no transport:
+// background refreshes are dropped quietly, and anything the user clicked says
+// so instead of leaving a spinner that nothing will ever clear.
+function sendToBridgeIframe(action: string, _payload?: any): boolean {
+  if (action !== 'refreshCredits') {
+    toast('Credits aren’t available in local mode', {
+      description: 'Sailor isn’t connected to a comfy.org account here — you pay your providers directly.',
+    })
   }
+  return false
 }
 
 async function handleContinueToPayment() {
-  creditsBuying.value = true
-  sendToBridgeIframe('purchaseCredits', { amount: creditsAmount.value })
+  // Only show the "buying" state if the request actually went somewhere.
+  creditsBuying.value = sendToBridgeIframe('purchaseCredits', { amount: creditsAmount.value })
+  if (!creditsBuying.value) creditsModalOpen.value = false
 }
 
 
@@ -2870,12 +2802,6 @@ onMounted(async () => {
     await loadWorkflowForTab(activeTab.value)
   }
 
-  // Debug: log ALL postMessages to find bridge issues
-  window.addEventListener('message', (e) => {
-    if (e.data?.type === 'sailor-bridge') {
-      console.log('[Sailor] Bridge message received:', e.data.event || e.data.status, e.data)
-    }
-  })
   window.addEventListener('message', handleBridgeMessage)
   window.addEventListener('keydown', handleGlobalKeydown)
   window.addEventListener('sailor:loadTabWorkflow', handleLoadTabWorkflow)
@@ -2957,8 +2883,10 @@ function handleSignOut() {
 }
 
 function handleOpenBilling() {
-  sendToBridgeIframe('openBillingPortal')
   userPopupOpen.value = false
+  // Hosted bills through our own wallet — same destination as the credits pill.
+  if (hostedShell) { navigateTo('/account'); return }
+  sendToBridgeIframe('openBillingPortal')
 }
 
 // Thin wrapper over the postMessage listener: unwrap the bridge envelope and
@@ -2967,7 +2895,11 @@ function handleOpenBilling() {
 // one code path — see the onEvent registration in onMounted.
 function handleBridgeMessage(event: MessageEvent) {
   if (!event.data || event.data.type !== 'sailor-bridge') return
-  handleBridgeEvent(event.data, event.source as Window | null)
+  // The only legitimate producer is this window re-posting direct-execution
+  // events (see onMounted). There is no engine iframe any more, so a message
+  // from any other window or origin is not ours — drop it.
+  if (event.source !== window || event.origin !== window.location.origin) return
+  handleBridgeEvent(event.data)
 }
 
 // Per-event silent determination (audit C4). A "silent" run (live-preview /
@@ -2988,24 +2920,14 @@ function isSilentEvent(prompt_id: string | undefined | null): boolean {
   return currentRunSilent.value // bridge/unregistered → single flag fallback
 }
 
-function handleBridgeEvent(data: any, source?: Window | null) {
+function handleBridgeEvent(data: any) {
   if (!data) return
 
-  // Bridge signals ComfyUI is fully initialized and ready for workflow loads
-  if (data.status === 'ready') {
-    markBridgeReady() // global (worker-0 / single-worker path)
-    if (poolEnabled.value) {
-      const w = workerIndexOfFrame(source as Window)
-      if (w != null) markWorkerReady(w)
-    }
-    return
-  }
-
-  // Bridge confirms a workflow finished loading into the canvas
-  if (data.event === 'workflow_loaded') {
-    endWorkflowLoading()
-    return
-  }
+  // ── comfy.org account events — PARKED ─────────────────────────────────────
+  // These five branches (credits_update → purchase_error) were fed by the
+  // engine iframe's bridge.js, which is gone. Nothing posts them today; they
+  // are kept, with the credits window and UserPopup, so comfy.org billing can
+  // be re-wired from a non-iframe source without rebuilding the UI.
 
   // Handle credit updates (not tab-specific)
   if (data.event === 'credits_update') {
@@ -3043,86 +2965,25 @@ function handleBridgeEvent(data: any, source?: Window | null) {
     return
   }
 
-  // Queue failed inside the canvas (validation / unknown node / serialization)
-  // before anything ran — surface it instead of failing silently. When the
-  // bridge forwards ComfyUI's structured node_errors map (prompt validation:
-  // type mismatches, missing inputs, bad combo values), show a per-node
-  // summary. The offending nodes get their red rings via VueNodeCanvas, which
-  // listens to the same bridge postMessage directly (the exact path
-  // execution_error events take — no re-dispatch needed).
+  // The /prompt POST was refused before anything ran (validation: type
+  // mismatches, missing inputs, bad combo values; or a metering refusal). The
+  // run flow posts this onto the pipe rather than calling surfaceQueueError
+  // itself so that VueNodeCanvas — which listens to the same pipe — paints the
+  // red rings on the offending nodes.
   if (data.event === 'queue_error') {
     // Metering refusals get their own specific toast in VueNodeCanvas's
-    // bridge handler (same postMessage, listened to directly) — suppress
-    // the generic fallback here so the user doesn't see two toasts, but
-    // still run the state cleanup (watchdog, tab status, silent flag).
+    // handler (same postMessage, listened to directly) — suppress the generic
+    // fallback here so the user doesn't see two toasts, but still run the
+    // state cleanup (tab status, silent flag).
     const refusal = describeQueueRefusal(data)
     surfaceQueueError(data.node_errors, data.message, { silent: !!refusal })
     return
   }
 
-  // Bridge acked a successful queue (POST /prompt returned a prompt_id) — the
-  // run is on its way, so cancel the no-response watchdog. (Bridges predating
-  // this event fall back to the execution_start clear below.)
-  if (data.event === 'queued') {
-    clearQueueWatchdog()
-    return
-  }
-
-  // Non-fatal bridge diagnostics that the user must act on — e.g. the iframe's
-  // LiteGraph node registry is stale after a ComfyUI restart (it dropped a
-  // Timeline's edit_state at configure) and only a page reload can fix it.
-  if (data.event === 'bridge_warning') {
-    const msg = String(data.message || 'The ComfyUI canvas reported a problem.')
-    toast.warning('ComfyUI needs a reload', { description: msg.slice(0, 160) })
-    return
-  }
-
-  // Space key forwarded from iframe → open Vue node search dialog
-  if (data.event === 'open_node_search') {
-    if (activeTab.value.type === 'project') {
-      openNodeSearch()
-    }
-    return
-  }
-
-  // Debug messages from bridge
-  if (data.event === 'debug') {
-    console.log('[Sailor Debug]', data.msg)
-    return
-  }
-
-  // Find which tab this iframe belongs to. Direct-execution WS events carry no
-  // source Window (source is undefined) — they fall through to the
-  // active-project-tab fallback below. Cast mirrors the original bridge path.
-  const sourceFrame = source as Window
+  // Default attribution: the active project tab. Events that carry a prompt_id
+  // the run registry knows are re-attributed to their originating tab below.
   const projectTabs = tabs.value.filter((t) => t.type === 'project')
-
-  let tabId: string | null = null
-
-  // Pool: route by the worker that sent the event → the tab running on it. This
-  // lets a background canvas (not the active one) keep updating while another
-  // runs. Only when the pool is enabled — single-worker keeps the logic below.
-  if (poolEnabled.value) {
-    const w = workerIndexOfFrame(sourceFrame)
-    if (w != null && workerRunningTab[w]) tabId = workerRunningTab[w]
-  }
-
-  // Find matching tab by checking iframes
-  if (!tabId) {
-    for (const tab of projectTabs) {
-      const iframe = document.querySelector(`[data-tab-id="${tab.id}"] iframe`) as HTMLIFrameElement
-      if (iframe?.contentWindow === sourceFrame) {
-        tabId = tab.id
-        break
-      }
-    }
-  }
-
-  // Fallback: use active project tab
-  if (!tabId) {
-    const activeProject = projectTabs.find((t) => t.id === activeTabId.value)
-    if (activeProject) tabId = activeProject.id
-  }
+  let tabId: string | null = projectTabs.find((t) => t.id === activeTabId.value)?.id ?? null
 
   const { event: evt, percent, prompt_id, node_id } = data
 
@@ -3144,7 +3005,6 @@ function handleBridgeEvent(data: any, source?: Window | null) {
   if (!tabId) return
 
   if (evt === 'execution_start') {
-    clearQueueWatchdog() // run reached the server — fallback clear for older bridges
     if (prompt_id) markRunning(prompt_id) // registry no-op for bridge-path runs
     // Silent-claim (audit C4). REGISTERED (direct) runs already carry their own
     // `live` flag on the entry, so isSilentEvent reads that per-run and we must

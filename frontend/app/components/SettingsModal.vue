@@ -7,7 +7,6 @@ import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 
 const { settingsOpen, closeSettings } = useSettingsModal()
 const { getLocalSetting, setLocalSetting } = useLocalSettings()
-const { reloadSetting: reloadVueNodesSetting } = useVueNodesEnabled()
 
 // Settings data
 const settings = ref<Record<string, any>>({})
@@ -39,11 +38,10 @@ interface SettingDef {
   max?: number
   step?: number
   description?: string
-  // Hosted mode forces this toggle ON in code (see the resolvers in
-  // useVueNodesEnabled / useDirectExecutionEnabled). Showing the stored
-  // localStorage state would then be a lie — and letting it be switched off
-  // would strand the user on a canvas that never mounts. Pinned + disabled
-  // hosted; completely untouched locally.
+  // For a toggle that hosted mode forces ON in code: showing the stored
+  // localStorage state would be a lie, so it renders pinned + disabled in
+  // hosted and untouched locally. (No setting uses this today — the two that
+  // did, the Vue canvas and direct execution, are no longer optional.)
   hostedForcedOn?: boolean
 }
 
@@ -90,7 +88,6 @@ const settingsByCategory: Record<string, SettingDef[]> = {
     { id: 'Comfy.EnableWorkflowViewRestore', label: 'Restore canvas position per workflow', type: 'toggle' },
   ],
   appearance: [
-    { id: 'Comfy.VueNodes.Enabled', label: 'Modern node design', type: 'toggle', description: 'Use the new Vue-based node rendering', local: true, hostedForcedOn: true },
     { id: 'Comfy.Node.Opacity', label: 'Node opacity', type: 'slider', min: 0.1, max: 1, step: 0.05 },
     { id: 'Comfy.Graph.CanvasInfo', label: 'Show canvas info (FPS)', type: 'toggle' },
     { id: 'Comfy.Graph.LinkMarkers', label: 'Link midpoint markers', type: 'select', options: [
@@ -111,7 +108,6 @@ const settingsByCategory: Record<string, SettingDef[]> = {
     { id: 'LiteGraph.Canvas.MaximumFps', label: 'Maximum FPS', type: 'number', min: 15, max: 144 },
   ],
   execution: [
-    { id: 'Comfy.DirectExecution.Enabled', label: 'Direct execution (beta)', type: 'toggle', local: true, hostedForcedOn: true, description: 'Queue runs directly from the app (bypasses the bridge iframe). Required for parallel runs and Re-roll ×4.' },
     { id: 'Comfy.Execution.PreviewMethod', label: 'Live preview method', type: 'select', options: [
       { label: 'Auto', value: 'auto' },
       { label: 'TAESD', value: 'taesd' },
@@ -186,7 +182,7 @@ watch(settingsOpen, (open) => {
     // Load local settings into cache
     const localDefs = Object.values(settingsByCategory).flat().filter((s) => s.local)
     for (const def of localDefs) {
-      localSettingsCache.value[def.id] = getLocalSetting(def.id) ?? (def.id === 'Comfy.VueNodes.Enabled' ? 'true' : '')
+      localSettingsCache.value[def.id] = getLocalSetting(def.id) ?? ''
     }
   }
 })
@@ -255,8 +251,6 @@ function handleToggle(setting: SettingDef) {
   else {
     saveSetting(setting.id, newVal)
   }
-  // Directly update the VueNodes composable ref (bypasses fragile event chain)
-  if (setting.id === 'Comfy.VueNodes.Enabled') reloadVueNodesSetting()
 }
 
 function handleSelectChange(setting: SettingDef, rawValue: string) {

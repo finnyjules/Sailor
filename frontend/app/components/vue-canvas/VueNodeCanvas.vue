@@ -2784,9 +2784,12 @@ function takeFromExecutedEvent(event: MessageEvent): any | null {
   return takeHasContent(take) ? take : null
 }
 
-// Listen for execution progress from bridge (via postMessage)
+// Listen for execution progress on the window pipe (the layout re-posts
+// direct-execution WS events here in the 'sailor-bridge' envelope).
 function handleBridgeMessage(event: MessageEvent) {
   if (event.data?.type !== 'sailor-bridge') return
+  // Only this window posts onto the pipe — there is no engine iframe any more.
+  if (event.source !== window || event.origin !== window.location.origin) return
 
   const { event: evt, node_id, node, percent, progress: prog } = event.data
   const nodeId = node_id || node // bridge sends node_id, normalize
