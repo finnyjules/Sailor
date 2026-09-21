@@ -1047,268 +1047,145 @@ Subject: `feat(compositor): Dither in / Dither out in the gallery, with Style, C
 
 ---
 
-# Part 2 — the Pixels style: the dither TRANSFORMS the element
 
-Spec: the **Addendum** in `docs/superpowers/specs/2026-09-20-dither-transition-design.md`. Part 1 (Tasks 1–5) is built and committed; Part 2 adds a fourth style, `pixels`, listed first and the default. Same Global Constraints (`.superpowers/sdd/dither-constraints.md`), plus:
+# Part 2 — the Pixels style: the dither TRANSFORMS the element, using the Shader Studio ASCII effect
 
-- Stored `style` is now `'pixels' | 'dissolve' | 'wipe' | 'dots'`, default `'pixels'`. Stored `cell` default depends on the style: 24 for `pixels`, 8 for the others (range 1–40 for all).
-- Pixels constants (exact): finest block `PIXEL_END = 0.002` of the frame's width; colour levels per channel run 2 → 16; a block's coverage gain reaches 1 at amount `0.6`.
-- ONLY Task 7 touches `frontend/app/composables/useCompositorLayers.ts`, with exactly the two hunks it names.
-- The three mask styles must draw exactly as they do now (their tests stay green untouched, except the two DEFAULT assertions Task 6 names).
+Spec: the **Addendum** in `docs/superpowers/specs/2026-09-20-dither-transition-design.md` (read it first — it is the requirements). Part 1 (Tasks 1–5) is built and committed. Same Global Constraints (`.superpowers/sdd/dither-constraints.md`), plus:
 
-### Task 6: Pixels maths and the new defaults
+- Stored `style` is `'pixels' | 'dissolve' | 'wipe' | 'dots'`, default `'pixels'`. Stored `cell` default depends on the style: 24 for `pixels`, 8 for the others (range 1–40). New stored param `chars`: the ASCII effect's `u_shape` value, default `1` (Blocks); allowed = every option value in `shader_effects/manifest.json` for `ascii_dither.u_shape` EXCEPT `14` (Custom).
+- Pixels constants (exact): finest block `PIXEL_END = 0.002` of the frame's width; brightness runs `−1 → +1` linearly over the whole bar; the sharp layer fades in with `smoothstep(0.8, 1, amount)`; jitter `0.25`; shader speed = `drift / 6`.
+- The ASCII shader's RGB output with matte mode OFF must be byte-identical to today (the golden-parity suite diffs RGB at defaults). Do NOT regenerate goldens. Do NOT add a manifest param.
+- ONLY Task 8 touches `frontend/app/composables/useCompositorLayers.ts`, with exactly the hunks it names. ONLY Task 6 touches `shader_effects/`, `frontend/app/lib/shaderfill/field.ts` and `frontend/app/lib/shaderfx/renderer.ts`.
+- The three mask styles must draw exactly as they do now.
+
+### Task 6: The shader runtime — glyph sheets on the field path, and matte mode
+
+**Files:**
+- Modify: `frontend/app/lib/shaderfill/field.ts`, `frontend/app/lib/shaderfx/renderer.ts`, `shader_effects/ascii_dither.frag`, `frontend/tests/unit/shader-manifest-uniforms.unit.spec.ts` (allowlist only)
+- Test: create `frontend/tests/unit/shaderfill-field-textures.unit.spec.ts`; add a matte-mode source-level spec `frontend/tests/unit/ascii-dither-matte.unit.spec.ts`
+
+**Interfaces — Produces:**
+- `fieldEffectReady(effectId: string): boolean` from `~/lib/shaderfill/field` — `true` when the effect is in the loaded catalogue AND every texture it declares has finished loading (an effect with no textures is ready as soon as the catalogue is). When `false` it KICKS whatever is missing (the existing catalogue retry; an image load per missing texture, once) and, when a texture lands, notifies the SAME subscribers `onFieldCatalogReady` serves — hosts with no frame loop repaint on that signal today.
+- `renderFieldWithBase(spec, base, w, h, shape?, t?, extraUniforms?: Record<string, number>)` — the new last argument is merged into every pass's uniforms AFTER the effect's own (like `shape.uniforms`).
+- Matte mode: a `uniform float u_matte` in `ascii_dither.frag`.
+
+**Requirements:**
+
+1. **Textures on the field path.** `buildPasses` passes `undefined` for textures today (`field.ts` ~line 523), and a texture's `extraUniforms` (`u_glyphCount`, `u_glyphRows` for `glyph_atlas.png`) are never emitted, so ASCII shapes 7–14 sample garbage and draw nothing on every `field.ts` path. Fix: a module-level cache of `HTMLImageElement` per `file + v` (STABLE objects — the renderer's texture cache is keyed by identity, see `renderer.ts` ~156–160; `crossOrigin = 'anonymous'`; URL via `assetUrl(t.file, t.v)` from `~/lib/shaderfx/catalog`, exactly as `frontend/app/lib/texturefx/stylize.ts` `loadEffectTextures` does). `buildPasses` binds every texture that is loaded (`img.complete && img.naturalWidth > 0`) under its `uniform`, and merges that texture's `extraUniforms` — ONLY for loaded textures. An effect whose textures are not loaded renders as it does today. No `Image` in a non-DOM environment: guard with `typeof Image === 'undefined'` → treat as "no textures available", never throw.
+2. **`fieldEffectReady`** as specified above. It must be cheap to call every frame (no allocation when ready).
+3. **`extraUniforms`** on `renderFieldWithBase`, as specified.
+4. **The renderer resets mode switches.** The renderer is a shared singleton whose per-program uniforms PERSIST across draws (read the `u_hasShape` comment in `buildPasses`). A switch set by one caller must never leak into another path (Shader Studio composes its own passes and never goes through `buildPasses`). In `renderer.ts`, where each pass's uniforms are uploaded, first write every entry of a new module constant `BUILTIN_PASS_DEFAULTS: Record<string, number> = { u_matte: 0 }` (skip silently when the program has no such uniform), THEN the pass's own dict. Document why on the constant.
+5. **Matte mode in `ascii_dither.frag`.** Declare `uniform float u_matte;` with a comment: set by the Frame compositor's dither transition, never a Studio dial, reset to 0 by the renderer before every draw. In `main()`:
+   - sample the cell ONCE as `vec4 src = texture(u_image0, clamp(cuv, 0.0, 1.0)); vec3 col = src.rgb;` (the RGB read must be the same expression as today).
+   - `bool matte = u_matte > 0.5;`
+   - density: today `float g = clamp(lum + jitter + u_brightness, 0.0, 1.0);` — in matte mode `g *= src.a;` immediately after that line and BEFORE the `u_invert` flip (so nothing appears where the element is transparent).
+   - ink: in matte mode the ink is the element's TRUE colour `col` (not `col / lum`), regardless of `u_colored`.
+   - output: when `matte`, write STRAIGHT alpha and return before the underlay block: shapes `< 15`: `fragColor0 = vec4(clamp(col, 0.0, 1.0), clamp(glyph, 0.0, 1.0));` — shapes `>= 15` (finished RGB tiles): `fragColor0 = vec4(clamp(fx, 0.0, 1.0), src.a * step(0.001, g));`. This needs `glyph` in scope at the output: hoist `float glyph = 0.0;` above the `if (shp >= 15)` branch.
+   - With `u_matte == 0` every RGB value written must be exactly what it is today. Re-read your diff for any expression whose evaluation order changed.
+6. **Allowlist.** `shader-manifest-uniforms.unit.spec.ts` fails any frag uniform not reachable from the manifest; add `'u_matte'` to its `BUILTIN` set with a one-line comment in the style of the `u_customGlyphs` entry. Change nothing else in that spec.
+
+**Tests** (look at the existing `frontend/tests/unit/shaderfill-*.unit.spec.ts` for how `field.ts` is exercised without GL — follow that; a fake `Image` on `globalThis` installed in `beforeAll` and removed in `afterAll` is the expected shape):
+- `buildPasses` behaviour through `renderFieldWithBase` with a stubbed `shaderFx.render` that captures the passes: before the image loads → pass has no `u_glyphs` texture and no `u_glyphCount`; after the fake image "loads" → `textures.u_glyphs` is THE SAME object on two consecutive calls, and `u_glyphCount` / `u_glyphRows` carry the manifest's numbers.
+- `fieldEffectReady`: false before the catalogue; false with catalogue but unloaded texture AND exactly one image load started across many calls; true after load; the ready-subscribers fire once when the texture lands; true immediately for an effect with no textures; no throw when `Image` is undefined.
+- `extraUniforms` reach every pass and override a same-named effect uniform; omitted → passes identical to today.
+- `renderer.ts`: `BUILTIN_PASS_DEFAULTS` is exported and contains `u_matte: 0`; if the file has a unit-testable seam for the upload order use it, otherwise pin it source-level (the defaults loop appears before the pass-dict loop inside `render`).
+- `ascii-dither-matte.unit.spec.ts` (read the frag as text): declares `uniform float u_matte`; `g *= src.a` sits between the `clamp(lum + jitter + u_brightness` line and the `u_invert` line; both matte outputs are present; the last statement of `main` is still `fragColor0 = vec4(clamp(outc, 0.0, 1.0), 1.0);`; the string `col / max(lum, 1e-3)` still occurs (classic ink unchanged).
+- Run `npm run test:unit -- shader` and `npm run test:unit -- shaderfill` — all green. (The browser golden-parity suite is Playwright: do NOT run it; the controller checks RGB identity live.)
+
+Commit subject: `fix(shaderfx): effects' textures load on the Frame's shader path (ASCII glyph shapes drew nothing); the ASCII shader gains a default-off matte mode`
+
+---
+
+### Task 7: Pixels params and maths; Pixels is the default
 
 **Files:**
 - Modify: `frontend/app/lib/motionx/reveal/params.ts`, `frontend/app/lib/motionx/reveal/index.ts`
 - Create: `frontend/app/lib/motionx/reveal/pixels.ts`
-- Test: create `frontend/tests/unit/motionx/reveal-pixels.unit.spec.ts`; update the defaults assertions in `frontend/tests/unit/motionx/reveal-dither.unit.spec.ts`
+- Test: create `frontend/tests/unit/motionx/reveal-pixels.unit.spec.ts`; update the DEFAULT assertions in `frontend/tests/unit/motionx/reveal-dither.unit.spec.ts`
 
-**Interfaces:**
-- Consumes: `bayer8`, `driftCells`, `MotionReveal` (Part 1).
-- Produces: `RevealStyle` now includes `'pixels'`; `REVEAL_STYLES = ['pixels', 'dissolve', 'wipe', 'dots']`; `revealCellDefault(style: RevealStyle): number` (stored units: 24 | 8); `PIXEL_END`, `pixelStages(cell): number`, `pixelBlock(amount, cell): number` (fraction of frame width), `pixelLevels(amount): number`, `pixelGain(amount): number`, `quantise(v: number, levels: number, th: number): number`, `buildPixelCells(r: MotionReveal, src: Uint8ClampedArray, range: { c0: number; r0: number; cols: number; rows: number }): Uint8ClampedArray<ArrayBuffer>`.
+**Interfaces — Produces:** `RevealStyle` includes `'pixels'`; `REVEAL_STYLES = ['pixels', 'dissolve', 'wipe', 'dots']`; `REVEAL_DEFAULTS.style === 'pixels'`; `revealCellDefault(style): number` (24 | 8, stored units); `RevealParams.chars: number`; `PIXEL_CHARS: readonly { value: number; label: string }[]`; `PIXEL_END`, `pixelStages(cell)`, `pixelBlock(amount, cell)`, `pixelBrightness(amount)`, `pixelSharp(amount)`, `PIXEL_JITTER = 0.25`, `pixelShaderParams(r: MotionReveal, frameW: number, frameH: number): Record<string, number>`.
 
-- [ ] **Step 1: Failing tests**
-
-```ts
-// frontend/tests/unit/motionx/reveal-pixels.unit.spec.ts
-import { describe, it, expect } from 'vitest'
-import {
-  revealParams, revealCellDefault, REVEAL_STYLES, PIXEL_END, pixelStages, pixelBlock, pixelLevels, pixelGain,
-  quantise, buildPixelCells, bayer8, type MotionReveal,
-} from '~/lib/motionx/reveal'
-
-const R = (over: Partial<MotionReveal> = {}): MotionReveal => ({ ...revealParams({}), amount: 0.5, elapsed: 0, ...over })
-const solid = (cols: number, rows: number, rgba: [number, number, number, number]) => {
-  const px = new Uint8ClampedArray(cols * rows * 4)
-  for (let i = 0; i < cols * rows; i++) px.set(rgba, i * 4)
-  return px
-}
-const RANGE = { c0: 0, r0: 0, cols: 16, rows: 16 }
-const onCount = (out: Uint8ClampedArray) => { let n = 0; for (let i = 3; i < out.length; i += 4) if (out[i] === 255) n++; return n }
-
-describe('the new defaults', () => {
-  it('Pixels is listed first and is the default style; its blocks start three times bigger than a mask cell', () => {
-    expect(REVEAL_STYLES).toEqual(['pixels', 'dissolve', 'wipe', 'dots'])
-    expect(revealParams({}).style).toBe('pixels')
-    expect(revealParams({}).cell).toBeCloseTo(0.024, 9)
-    expect(revealParams({ style: 'dissolve' }).cell).toBeCloseTo(0.008, 9)
-    expect(revealParams({ style: 'dots' }).cell).toBeCloseTo(0.008, 9)
-    expect(revealParams({ style: 'pixels', cell: 10 }).cell).toBeCloseTo(0.01, 9)   // an explicit size always wins
-    expect([revealCellDefault('pixels'), revealCellDefault('wipe')]).toEqual([24, 8])
-    expect(revealParams({ style: 'plaid' }).style).toBe('pixels')
-  })
-})
-
-describe('block size', () => {
-  it('halves in even stages from the dial down to the finest block, never below it', () => {
-    const cell = 0.024
-    expect(pixelStages(cell)).toBe(4)                               // 24 → 12 → 6 → 3 → 1.5 ‰
-    const seen: number[] = []
-    for (let a = 0; a < 1; a += 0.01) { const b = pixelBlock(a, cell); if (seen[seen.length - 1] !== b) seen.push(b) }
-    expect(seen.map((v) => +(v * 1000).toFixed(3))).toEqual([24, 12, 6, 3, 1.5])
-    for (let a = 0; a <= 1; a += 0.05) expect(pixelBlock(a, cell)).toBeGreaterThanOrEqual(PIXEL_END * 0.75 - 1e-12)
-    expect(pixelBlock(0.19, cell)).toBe(cell); expect(pixelBlock(0.21, cell)).toBe(cell / 2)   // 5 even stages
-  })
-  it('a dial already at or below the finest block has one stage; bad amounts clamp', () => {
-    expect(pixelStages(0.002)).toBe(0); expect(pixelBlock(0.7, 0.002)).toBe(0.002)
-    expect(pixelStages(0.001)).toBe(0)
-    expect(pixelBlock(-1, 0.024)).toBe(0.024); expect(pixelBlock(5, 0.024)).toBeCloseTo(0.0015, 9)
-    expect(pixelBlock(NaN, 0.024)).toBe(0.024)
-  })
-})
-
-describe('colour levels, gain, quantise', () => {
-  it('levels run 2 → 16 and never go down; gain reaches 1 at amount 0.6', () => {
-    expect(pixelLevels(0)).toBe(2); expect(pixelLevels(1)).toBe(16)
-    let prev = 0
-    for (let a = 0; a <= 1.0001; a += 0.02) { const l = pixelLevels(a); expect(l).toBeGreaterThanOrEqual(prev); prev = l }
-    expect(pixelGain(0)).toBe(0); expect(pixelGain(0.3)).toBeCloseTo(0.5, 9); expect(pixelGain(0.6)).toBe(1); expect(pixelGain(0.9)).toBe(1)
-    expect(pixelLevels(NaN)).toBe(2); expect(pixelGain(NaN)).toBe(0)
-  })
-  it('quantise: 2 levels is 1-bit by threshold; the ends are fixed points; the average over all thresholds is the input', () => {
-    expect(quantise(100, 2, 0.2)).toBe(255); expect(quantise(100, 2, 0.6)).toBe(0)
-    for (const L of [2, 3, 7, 16]) for (const th of [0.01, 0.5, 0.99]) { expect(quantise(0, L, th)).toBe(0); expect(quantise(255, L, th)).toBe(255) }
-    let sum = 0
-    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) sum += quantise(100, 2, bayer8(x, y))
-    expect(sum / 64).toBeGreaterThan(90); expect(sum / 64).toBeLessThan(110)
-  })
-})
-
-describe('buildPixelCells', () => {
-  it('nothing at amount 0; every covered block on, in full colour order, from gain 1 upward', () => {
-    expect(onCount(buildPixelCells(R({ amount: 0 }), solid(16, 16, [255, 0, 0, 255]), RANGE))).toBe(0)
-    expect(onCount(buildPixelCells(R({ amount: 0.6 }), solid(16, 16, [255, 0, 0, 255]), RANGE))).toBe(256)
-    expect(onCount(buildPixelCells(R({ amount: 0.9 }), solid(16, 16, [9, 9, 9, 0]), RANGE))).toBe(0)     // empty stays empty
-  })
-  it('a block is ON when coverage × gain beats its threshold — so half coverage at full gain lights about half the blocks', () => {
-    const n = onCount(buildPixelCells(R({ amount: 0.8 }), solid(16, 16, [255, 255, 255, 128]), RANGE))
-    expect(n).toBeGreaterThan(256 * 0.45); expect(n).toBeLessThan(256 * 0.56)
-  })
-  it('an ON block is fully opaque and carries the quantised colour; an OFF block is fully transparent', () => {
-    const out = buildPixelCells(R({ amount: 0.7 }), solid(16, 16, [200, 100, 30, 255]), RANGE)
-    const L = pixelLevels(0.7), step = 255 / (L - 1)
-    for (let i = 0; i < out.length; i += 4) {
-      expect(out[i + 3] === 0 || out[i + 3] === 255).toBe(true)
-      if (out[i + 3] === 255) for (const ch of [0, 1, 2]) expect(Math.abs(out[i + ch]! / step - Math.round(out[i + ch]! / step))).toBeLessThan(0.02)
-    }
-  })
-  it('more of the element is on as the amount rises (no drift), and never less', () => {
-    const src = solid(16, 16, [255, 255, 255, 200])
-    let prev = -1
-    for (let a = 0; a <= 1.0001; a += 0.05) { const n = onCount(buildPixelCells(R({ amount: a, drift: 0 }), src, RANGE)); expect(n).toBeGreaterThanOrEqual(prev); prev = n }
-  })
-  it('drift slides the thresholds in whole blocks; drift 0 is still; the range origin addresses the threshold table', () => {
-    const src = solid(16, 16, [255, 255, 255, 128])
-    const a = buildPixelCells(R({ amount: 0.8, elapsed: 0 }), src, RANGE)
-    const b = buildPixelCells(R({ amount: 0.8, elapsed: 0.5 }), src, RANGE)      // 6 cells/s × 0.5 s = 3 blocks
-    expect(a).not.toEqual(b)
-    for (let x = 3; x < 16; x++) expect(b[(0 * 16 + x) * 4 + 3]).toBe(a[(0 * 16 + (x - 3)) * 4 + 3])
-    expect(buildPixelCells(R({ amount: 0.8, elapsed: 9, drift: 0 }), src, RANGE)).toEqual(a)
-    const shifted = buildPixelCells(R({ amount: 0.8 }), src, { c0: 3, r0: 0, cols: 13, rows: 16 })
-    for (let x = 0; x < 13; x++) expect(shifted[x * 4 + 3]).toBe(a[(x + 3) * 4 + 3])
-  })
-  it('identical inputs give identical bytes; a short source never throws', () => {
-    const src = solid(16, 16, [10, 200, 90, 180])
-    expect(buildPixelCells(R({ elapsed: 1.23 }), src, RANGE)).toEqual(buildPixelCells(R({ elapsed: 1.23 }), src, RANGE))
-    expect(() => buildPixelCells(R(), new Uint8ClampedArray(8), RANGE)).not.toThrow()
-  })
-})
-```
-
-In `reveal-dither.unit.spec.ts` the `revealParams` "defaults" case asserts the OLD default style and cell. The default changed by product decision (spec addendum), so update THAT assertion to `{ style: 'pixels', out: false, cell: 0.024, drift: 6, angle: 0, softness: 0.35 }`, and make that file's `R()` helper pin the mask style it was written for: `({ ...revealParams({ style: 'dissolve' }), amount: 0.5, elapsed: 0, ...over })`. Change nothing else there; every other assertion must pass as written.
-
-- [ ] **Step 2:** `cd frontend && npm run test:unit -- reveal-pixels reveal-dither` → FAIL (no `pixels` exports; old defaults).
-
-- [ ] **Step 3: `params.ts`**
-
-```ts
-export type RevealStyle = 'pixels' | 'dissolve' | 'wipe' | 'dots'
-/** `pixels` TRANSFORMS the element (it is rebuilt from dithered blocks); the other three MASK it. */
-export const REVEAL_STYLES: readonly RevealStyle[] = ['pixels', 'dissolve', 'wipe', 'dots']
-export const REVEAL_DEFAULTS = { style: 'pixels' as RevealStyle, cell: 8, drift: 6, angle: 0, softness: 0.35 }
-/** The Cell size default, in stored units. Pixels' blocks must read as blocks, so they start
- *  three times a mask cell. */
-export function revealCellDefault(style: RevealStyle): number { return style === 'pixels' ? 24 : REVEAL_DEFAULTS.cell }
-```
-and in `revealParams` read the cell as `num(p.cell, revealCellDefault(style), REVEAL_RANGES.cell) / 1000`.
-
-- [ ] **Step 4: `pixels.ts`** (and add `export * from './pixels'` to the barrel)
-
-```ts
-// frontend/app/lib/motionx/reveal/pixels.ts
-// The PIXELS style: the element is rebuilt out of dithered blocks that refine until it is
-// sharp. The painter hands in the element ALREADY sampled down to the block grid (one RGBA
-// pixel per block: average colour, alpha = how much of the block the element covers); this
-// file decides, per block, whether it is on and what colour it is. Pure — preview, bake and
-// export agree.
-import { bayer8, driftCells } from './dither'
-import type { MotionReveal } from './params'
-
-/** The finest block, as a fraction of the frame's width. Below this a block is a pixel or two
- *  and the next thing drawn is the real layer. */
-export const PIXEL_END = 0.002
-const clamp01 = (v: number) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0)
-
-/** How many times the dial's block size halves before it reaches the finest block. */
-export function pixelStages(cell: number): number {
-  return cell > PIXEL_END ? Math.max(0, Math.ceil(Math.log2(cell / PIXEL_END) - 1e-9)) : 0
-}
-/** The block size at `amount`: the dial's size, halved once per stage, the stages spread
- *  evenly over the bar — so every refinement subdivides the blocks before it. */
-export function pixelBlock(amount: number, cell: number): number {
-  const stages = pixelStages(cell)
-  return cell / 2 ** Math.min(stages, Math.floor(clamp01(amount) * (stages + 1)))
-}
-/** Colour levels per channel: 1-bit at the start, 16 (reads as continuous) by the end. */
-export function pixelLevels(amount: number): number { return 2 + Math.floor(clamp01(amount) ** 2 * 14) }
-/** Coverage is scaled up over the first 60% of the bar, so the element condenses out of nothing. */
-export function pixelGain(amount: number): number { return Math.min(1, clamp01(amount) / 0.6) }
-/** Ordered-dither one 0–255 channel to `levels` levels against threshold `th` ∈ (0, 1). */
-export function quantise(v: number, levels: number, th: number): number {
-  const f = (Math.min(255, Math.max(0, v)) / 255) * (levels - 1)
-  const lo = Math.floor(f)
-  return Math.round(((f - lo > th ? lo + 1 : lo) / (levels - 1)) * 255)
-}
-
-/** `src`: one un-premultiplied RGBA pixel per block of `range`. Returns the same shape: alpha
- *  255 + the quantised colour where the block is ON, all zero where it is off. */
-export function buildPixelCells(
-  r: MotionReveal, src: Uint8ClampedArray, range: { c0: number; r0: number; cols: number; rows: number },
-): Uint8ClampedArray<ArrayBuffer> {
-  const out = new Uint8ClampedArray(range.cols * range.rows * 4)
-  const gain = pixelGain(r.amount)
-  if (!(gain > 0)) return out
-  const levels = pixelLevels(r.amount)
-  const { dx, dy } = driftCells(r)
-  for (let j = 0; j < range.rows; j++) for (let i = 0; i < range.cols; i++) {
-    const k = (j * range.cols + i) * 4
-    const cover = (src[k + 3] ?? 0) / 255
-    if (!(cover > 0)) continue
-    const th = bayer8(range.c0 + i - dx, range.r0 + j - dy)
-    if (!(cover * gain > th)) continue
-    out[k] = quantise(src[k] ?? 0, levels, th)
-    out[k + 1] = quantise(src[k + 1] ?? 0, levels, th)
-    out[k + 2] = quantise(src[k + 2] ?? 0, levels, th)
-    out[k + 3] = 255
+**Requirements:**
+- `params.ts`: as in the interfaces. `revealParams` reads `cell` as `num(p.cell, revealCellDefault(style), REVEAL_RANGES.cell) / 1000` and `chars` as: a finite number whose rounded value is one of `PIXEL_CHARS`' values, else `1`. Doc comment on `REVEAL_STYLES`: `pixels` TRANSFORMS the element; the other three MASK it.
+- `PIXEL_CHARS` (exact, in this order — it is the ASCII effect's `u_shape` option list minus Custom): `0 Mixed, 1 Blocks, 2 Circles, 3 Lines, 4 Diagonal, 5 Cross, 6 Diamond, 7 Hash, 8 Matrix, 9 Binary, 10 Braille, 11 Morse, 12 Dots, 13 Slashes, 15 Lego, 16 Cross-stitch, 17 Voxel, 18 Beads, 19 Gems`. A test imports `shader_effects/manifest.json` (other unit specs do — copy their import) and asserts `PIXEL_CHARS` equals the manifest's `ascii_dither` → `u_shape` options with value 14 removed (labels and values), so the two can never drift.
+- `pixels.ts`:
+  ```ts
+  export const PIXEL_END = 0.002
+  export const PIXEL_JITTER = 0.25
+  const clamp01 = (v: number) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0)
+  /** How many times the dial's block halves before it reaches the finest block. */
+  export function pixelStages(cell: number): number {
+    return cell > PIXEL_END ? Math.max(0, Math.ceil(Math.log2(cell / PIXEL_END) - 1e-9)) : 0
   }
-  return out
-}
-```
+  /** The block at `amount` (fraction of the frame's width): the dial's size halved once per
+   *  stage, the stages spread evenly over the bar, so each refinement subdivides the last. */
+  export function pixelBlock(amount: number, cell: number): number {
+    const stages = pixelStages(cell)
+    return cell / 2 ** Math.min(stages, Math.floor(clamp01(amount) * (stages + 1)))
+  }
+  /** The shader's Brightness across the bar: −1 (nothing drawn) → +1 (every covered cell full).
+   *  Bright tones cross zero first, so they arrive first. */
+  export function pixelBrightness(amount: number): number { return clamp01(amount) * 2 - 1 }
+  /** How much of the real, sharp layer is laid over the characters: most sets never become a
+   *  solid picture, so the last fifth of the bar cross-fades to the layer itself. */
+  export function pixelSharp(amount: number): number {
+    const x = clamp01((clamp01(amount) - 0.8) / 0.2)
+    return x * x * (3 - 2 * x)
+  }
+  ```
+  and `pixelShaderParams(r, frameW, frameH)` → the ASCII effect's params keyed WITHOUT the `u_` prefix (the `ShaderSpec.params` convention): `{ shape: r.chars, cell: pixelBlock(r.amount, r.cell) * frameW / frameH, brightness: pixelBrightness(r.amount), jitter: PIXEL_JITTER, speed: r.drift / 6, colored: 1, underlay: 0, spacing: 0, invert: 0, blur: 0 }`. (`cell` is a fraction of the frame's HEIGHT in the shader — hence `× frameW / frameH`; guard `frameH <= 0` → use 1.) Clamp `cell` into the manifest's range `[0.004, 0.1]`.
+- Tests: the defaults (Pixels first/default; per-style cell default; explicit cell wins; unknown style → pixels; `chars` default 1, `chars: 14` and `chars: 99` and `chars: NaN` → 1, `chars: '8'` → 1 (numbers only), `chars: 8.2` → 8); stages for 0.024 are `[24, 12, 6, 3, 1.5]` ‰ with boundaries at multiples of 0.2; one stage when the dial is already ≤ `PIXEL_END`; bad amounts clamp; brightness −1/0/+1 at 0/0.5/1; `pixelSharp` is 0 up to 0.8, 0.5 at 0.9, 1 at 1, monotonic; `pixelShaderParams` values for a 16:9 frame incl. the `× W/H` and the `[0.004, 0.1]` clamp and `speed 0` at drift 0; the manifest parity test.
+- In `reveal-dither.unit.spec.ts`: the `revealParams` "defaults" assertion becomes `{ style: 'pixels', out: false, cell: 0.024, drift: 6, angle: 0, softness: 0.35, chars: 1 }`; the "converts stored units" / "bad values" cases gain whatever `chars` key the new shape requires (`toEqual` on whole objects); and that file's `R()` helper pins the mask style it was written for: `revealParams({ style: 'dissolve' })`. Nothing else changes there. If a case in `reveal-fold.unit.spec.ts` or `reveal-paint.unit.spec.ts` fails ONLY because it relied on the old default style, give it an explicit `style` and say so in the report.
 
-- [ ] **Step 5:** `npm run test:unit -- motionx` → all green (the fold spec's cases name their styles or compare notes; if one fails ONLY because it relied on the old default style, give that case an explicit `style` and say so in the report). Typecheck `grep -E "motionx/reveal"` → no output. Commit the four files. Subject: `feat(motionx): the Pixels style's maths — blocks that halve, colours that deepen, coverage that condenses; Pixels is the default`
+Commit subject: `feat(motionx): the Pixels style's dials and maths — character sets, blocks that halve, brightness that condenses; Pixels is the default`
 
 ---
 
-### Task 7: Drawing the Pixels style
+### Task 8: Drawing the Pixels style
 
 **Files:**
 - Create: `frontend/app/lib/motionx/reveal/paintPixels.ts`
-- Modify: `frontend/app/composables/useCompositorLayers.ts` (two hunks in `paintLayerStack`'s per-item loop)
+- Modify: `frontend/app/composables/useCompositorLayers.ts` (two hunks in `paintLayerStack`'s per-item loop + one import line)
 - Test: create `frontend/tests/unit/motionx/reveal-paint-pixels.unit.spec.ts`
 
 **Interfaces:**
-- Consumes: `pixelBlock`, `buildPixelCells`, `cellRange`, `MotionReveal`.
-- Produces: `drawRevealPixels(ctx, reveal, W, H, base: DOMMatrix, drawLayer: (target: CanvasRenderingContext2D) => void, stamp: { alpha: number; blend: GlobalCompositeOperation }): boolean` and `setRevealPixelsCanvasFactory(fn)` (tests only), from `~/lib/motionx/reveal/paintPixels` (NOT via the barrel).
+- Consumes: `fieldEffectReady`, `renderFieldWithBase` (Task 6); `pixelShaderParams`, `pixelSharp`, `MotionReveal` (Task 7).
+- Produces, from `~/lib/motionx/reveal/paintPixels` (NOT via the barrel): `revealPixelsReady(): boolean` (= `fieldEffectReady('ascii_dither')`), `drawRevealPixels(ctx, reveal, W, H, base: DOMMatrix, drawLayer: (target: CanvasRenderingContext2D) => void, stamp: { alpha: number; blend: GlobalCompositeOperation }): boolean`, `setRevealPixelsDeps(deps)` (tests only: canvas factory + `render` function).
 
 **The recipe, exactly:**
-1. `full` = a pooled canvas sized to `ctx.canvas`. Clear it (identity transform, `clearRect`). Set its transform to `ctx.getTransform()` — the CURRENT transform, which already includes any draw-time scale — and call `drawLayer(fullCtx)`.
-2. `blockPx = pixelBlock(reveal.amount, reveal.cell) × W`, but never finer than one device pixel: `blockPx = Math.max(blockPx, 1 / Math.max(1e-6, Math.abs(base.a)))`. `range = cellRange(base.inverse(), canvas.width, canvas.height, W, H, blockPx / W)`.
-3. `small` = a pooled `range.cols × range.rows` canvas whose 2D context was created with `{ willReadFrequently: true }` (its own pool — context attributes are fixed at first `getContext`). `globalCompositeOperation = 'copy'`, `imageSmoothingEnabled = true`, `imageSmoothingQuality = 'high'`, then `drawImage(full, sx, sy, sw, sh, 0, 0, cols, rows)` where the source rectangle is the block range in DEVICE pixels: `sx = base.a × (c0 × blockPx) + base.e`, `sy = base.d × (r0 × blockPx) + base.f`, `sw = base.a × cols × blockPx`, `sh = base.d × rows × blockPx` (the frame transform is scale + translate; if `base.b` or `base.c` is not ~0, return `false`).
-4. `src = smallCtx.getImageData(0, 0, cols, rows).data`; `smallCtx.putImageData(new ImageData(buildPixelCells(reveal, src, range), cols, rows), 0, 0)`.
-5. Stamp: `ctx.save()`; `filter = 'none'`, `shadowColor = 'transparent'`; `setTransform(base)`; `imageSmoothingEnabled = false`; `globalAlpha = clamp01(stamp.alpha)`; `globalCompositeOperation = stamp.blend`; `drawImage(small, c0 × blockPx, r0 × blockPx, cols × blockPx, rows × blockPx)`; `ctx.restore()`.
-6. Release both canvases to their pools (stacks, as in `paint.ts`). Return `true`.
-Return `false` — having touched NOTHING on `ctx` — if any 2D context is unavailable; the caller then draws the layer normally. `drawLayer` throwing must still release `full` (`try/finally`).
+1. The frame transform must be scale + translate: if `|base.b| > 1e-6` or `|base.c| > 1e-6` → return `false`. `fw = Math.round(W × base.a)`, `fh = Math.round(H × base.d)`; if either `< 2` or `fw × fh > 16_000_000` → return `false`.
+2. `solo` = a pooled `fw × fh` canvas: identity transform, `clearRect`, then `setTransform(new DOMMatrix().translate(-base.e, -base.f).multiply(ctx.getTransform()))` — the CURRENT transform (which includes any draw-time scale) moved so the frame's top-left is the canvas origin — and `drawLayer(soloCtx)` inside `try/finally` (a throw still releases the canvas, then propagates).
+3. `result = renderFieldWithBase({ effectId: 'ascii_dither', params: pixelShaderParams(reveal, W, H), speed: 1, seed: 42 }, solo, fw, fh, undefined, elapsedSeconds, { u_matte: 1 })` with `elapsedSeconds` finite and ≥ 0. It THROWS when the catalogue is cold → catch → release → return `false`. Its canvas is only valid until the next render: copy it at once into a second pooled `fw × fh` canvas `out` (`globalCompositeOperation = 'copy'`, identity, `drawImage(result, 0, 0)`).
+4. Sharp hand-off: `s = pixelSharp(reveal.amount)`; when `s > 0`, draw `solo` over `out` with `globalAlpha = s`, `source-over`.
+5. Stamp: `ctx.save()`; `filter = 'none'`, `shadowColor = 'transparent'`; identity transform; `globalAlpha = clamp01(stamp.alpha)`; `globalCompositeOperation = stamp.blend`; `drawImage(out, base.e, base.f)`; `ctx.restore()`.
+6. Release both canvases (stack pools, as in `paint.ts`). Return `true`. Returning `false` must leave `ctx` UNTOUCHED.
 
-- [ ] **Step 1: Failing tests** — a recorder fake as in `reveal-paint.unit.spec.ts` (reuse its approach; stand-ins for `ImageData` / `DOMMatrix` in `beforeAll`). Pin, as real `expect`s: (1) `drawLayer` is called once with the FULL canvas's context, after that context was cleared and given `ctx`'s current transform; (2) the down-sample `drawImage` has 9 arguments with the device-space source rect computed as above for a non-identity `base` (scale 2, translate (10, 20)) and `imageSmoothingEnabled === true` at that moment; (3) `getImageData` is asked for exactly `cols × rows`, and `putImageData` receives exactly `buildPixelCells(reveal, thatData, range)`; (4) the stamp on `ctx` is `save → … → drawImage(small, c0·blockPx, r0·blockPx, cols·blockPx, rows·blockPx) → restore` with `imageSmoothingEnabled === false`, `globalAlpha === stamp.alpha` and `globalCompositeOperation === stamp.blend` set before the `drawImage`; (5) `blockPx` follows `pixelBlock` (two amounts in different stages give different `cols`) and is clamped to one device pixel when `base.a` is tiny; (6) no 2D context → returns `false` and `ctx` recorded no calls; (7) a throwing `drawLayer` propagates AND the next call reuses the same full-size canvas (it was released); (8) a rotated `base` (`b ≠ 0`) returns `false`; (9) the small canvas's context was requested with `willReadFrequently: true`.
+**Tests** (recorder fake as in `reveal-paint.unit.spec.ts`; inject the canvas factory and a fake `render` that records its arguments and returns a marker canvas): every numbered step above as real `expect`s — the moved transform (base scale 2, translate (10, 20), current transform = base × a draw-time scale); the spec passed to `render` (`effectId`, `params` deep-equal to `pixelShaderParams(reveal, W, H)`, `speed: 1`), `fw`/`fh`, `t`, and `{ u_matte: 1 }`; the immediate copy with `'copy'`; no sharp draw at amount 0.5 and a sharp draw with `globalAlpha === pixelSharp(0.9)` at amount 0.9; the stamp's alpha, blend and position `(base.e, base.f)` inside save/restore; `false` + untouched `ctx` for a rotated base, a tiny frame, a throwing `render`; a throwing `drawLayer` propagates and the canvas is reused next call; NaN elapsed → `t === 0`.
 
-- [ ] **Step 2:** `npm run test:unit -- reveal-paint-pixels` → FAIL (module missing).
-
-- [ ] **Step 3: Implement `paintPixels.ts`** following the recipe; structure and pooling mirror `paint.ts` (read it first). Module doc comment: what Pixels is, why the layer is drawn at FULL resolution and then sampled down (every effect of the layer renders exactly as usual; drawing it small would re-rasterise text, blurs and shader fills at the wrong scale), and the price (effects that read the backdrop pause, because the layer is not drawn onto the backdrop).
-
-- [ ] **Step 4: The two hunks in `paintLayerStack`**
+**The two hunks in `paintLayerStack`:**
 
 Hunk A — the existing reveal block becomes:
-
 ```ts
       const rv = (layer as unknown as { motionReveal?: MotionReveal }).motionReveal
       // Pixels TRANSFORMS the layer (drawn further down, once its mask is known); the other
       // styles MASK it: keep the backdrop so the hidden cells can be put back afterwards.
+      // While the shader is still loading, a Pixels bar draws as the Dissolve mask rather
+      // than flashing the whole layer.
       let pixelsBase: DOMMatrix | null = null
       if (rv) {
         if (!(rv.amount > 0)) continue
-        if (rv.style === 'pixels') pixelsBase = ctx.getTransform()
-        else revealOpen = beginReveal(ctx, rv, W, H)
+        if (rv.style === 'pixels' && revealPixelsReady()) pixelsBase = ctx.getTransform()
+        else revealOpen = beginReveal(ctx, rv.style === 'pixels' ? { ...rv, style: 'dissolve' } : rv, W, H)
       }
 ```
-(`pixelsBase` is captured HERE, before the draw-time scale below it is applied — the block grid belongs to the frame.)
+(`pixelsBase` is captured HERE, before the draw-time scale below it is applied — the grid belongs to the frame.)
 
-Hunk B — immediately after the existing line `const maskItem = ref ? byKey.get(ref) ?? null : null` that follows the draw-time-scale block (and BEFORE `const motionActive`):
-
+Hunk B — immediately after the existing line `const maskItem = ref ? byKey.get(ref) ?? null : null` that follows the draw-time-scale block, and BEFORE `const motionActive`:
 ```ts
-      // Pixels: the layer is drawn ALONE at full opacity and rebuilt from dithered blocks; its
-      // opacity and blend are applied when the blocks are stamped. Effects that read the
-      // backdrop (blur, glass, backdrop shaders) and the pre-timeline animation engine sit
-      // out the transition — see the spec addendum. `false` = could not run → draw normally.
+      // Pixels: the layer is drawn ALONE at full opacity, run through the ASCII shader, and
+      // stamped with its own opacity and blend. Effects that read the backdrop and the
+      // pre-timeline animation engine sit out the transition (spec addendum). If it cannot
+      // run after all, fall back to the Dissolve mask for this frame.
       if (rv && pixelsBase) {
         const solo = { ...layer, opacity: 1, blend: 'normal' } as LocalLayer
         const drawSolo = (target: CanvasRenderingContext2D) => {
@@ -1316,35 +1193,36 @@ Hunk B — immediately after the existing line `const maskItem = ref ? byKey.get
           else drawLocalLayer(target, solo, W, H, maskItem?.type === 'local' ? maskItem.layer : null, 1)
         }
         if (drawRevealPixels(ctx, rv, W, H, pixelsBase, drawSolo, { alpha: (layer.opacity ?? 1) * opacityMul, blend: localBlendOp(layer) })) continue
+        revealOpen = beginReveal(ctx, { ...rv, style: 'dissolve' }, W, H)
       }
 ```
-plus the import of `drawRevealPixels`. Check how `item` is typed (`StackItem`, the `'local'` arm) so `{ ...item, layer: solo }` typechecks; adjust the cast, not the logic. Nothing else in the file changes.
+Note on that last line: at this point the draw-time scale may already be on `ctx`, so `beginReveal`'s own `getTransform()` would capture it. Give `beginReveal` an optional 5th argument `base?: DOMMatrix` (used instead of `ctx.getTransform()` when given) in `paint.ts`, pass `pixelsBase` here, and add one test for it in `reveal-paint.unit.spec.ts`. Check how `item` is typed so `{ ...item, layer: solo }` typechecks; adjust the cast, not the logic. Nothing else in the file changes.
 
-- [ ] **Step 5:** extend the source-level wiring guard in the new spec: the file contains `rv.style === 'pixels'`, `drawRevealPixels(` appears exactly once and BEFORE `const motionActive`, and `pixelsBase = ctx.getTransform()` appears before the first `motionScale` read in `paintLayerStack`. Run `npm run test:unit -- motionx` and `npm run test:unit -- compositor` (counts unchanged; a suite that times out under load is re-run alone before it is called broken).
+Extend the source-level wiring guard (in the new spec): `drawRevealPixels(` appears exactly once and BEFORE `const motionActive`; `pixelsBase = ctx.getTransform()` appears before the first `motionScale` read in `paintLayerStack`; `revealPixelsReady()` appears in Hunk A. Run `npm run test:unit -- motionx` and `npm run test:unit -- compositor` (counts unchanged; a suite that times out under load is re-run alone before it is called broken). `git diff -- frontend/app/composables/useCompositorLayers.ts` shows exactly hunks A, B and the import.
 
-- [ ] **Step 6:** typecheck (`reveal/paintPixels` clean; any `useCompositorLayers.ts` line reported must be outside your hunks), `git diff -- frontend/app/composables/useCompositorLayers.ts` shows exactly hunks A, B and the import, commit the three files. Subject: `feat(compositor): the Pixels dither rebuilds the layer from blocks that refine until it is sharp`
-
----
-
-### Task 8: Pixels in the inspector and the gallery tile
-
-**Files:**
-- Modify: `frontend/app/components/vue-canvas/compositor/MotionInspector.vue`, `frontend/app/components/vue-canvas/compositor/MotionDitherPreview.vue`
-- Test: add to `frontend/tests/unit/motionx/letters-ui.unit.spec.ts`
-
-- [ ] **Step 1: Failing source-level tests:** the dither block's Style row offers four options in the order `pixels, dissolve, wipe, dots` with labels `Pixels, Dissolve, Wipe, Dots`; the cell slider's `:default` and fallback value come from `revealCellDefault(`; the file contains the label `Block size`; `MotionDitherPreview.vue` imports `buildPixelCells`.
-- [ ] **Step 2: Inspector.** `DITHER_STYLES = ['pixels', 'dissolve', 'wipe', 'dots']`, `DITHER_STYLE_LABELS = ['Pixels', 'Dissolve', 'Wipe', 'Dots']`. Add `const ditherStyle = computed(() => revealParams(behaviour.value?.params).style)` and use it everywhere the block currently calls `enumParam('style', …)` (one reader of the default, the library's). Cell slider: `:label="ditherStyle === 'pixels' ? 'Block size' : ditherStyle === 'dots' ? 'Dot spacing' : 'Cell size'"`, `:hint="ditherStyle === 'pixels' ? 'How big the blocks are when the transition starts, in thousandths of the frame\'s width. They halve until the layer is sharp.' : 'How chunky the pattern is, in thousandths of the frame\'s width'"`, `:model-value="numParam('cell', revealCellDefault(ditherStyle))"`, `:default="revealCellDefault(ditherStyle)"`. Drift's hint for Pixels: `'How fast the dither tones shimmer while the layer sharpens, in blocks per second. 0 is still.'` Four segments must fit the row: check `StudioSegmentedRow`'s button padding; if the four labels overflow a 228px row next to the label "Style", use a labelled `StudioSelect` for Style instead (and update the test id's element accordingly) — say which you chose in the report.
-- [ ] **Step 3: Preview tile.** The tile now shows the DEFAULT look, Pixels: build once a 48×30 RGBA source (a rounded card with a diagonal two-colour gradient `#7c9cff → #ff7ac3` and a white bar across it; transparent outside the card). Each frame: `block = [8, 4, 2, 1][min(3, floor(amount × 4))]` source pixels; sample the source at each block's centre into a `cols × rows` RGBA array; `buildPixelCells({ ...revealParams({}), out, amount, elapsed }, sampled, { c0: 0, r0: 0, cols, rows })`; paint each block as `block × block` pixels into the reused `ImageData`. Same loop lifetime, reduced-motion still frame (amount 0.45) and `aria-hidden` as now.
-- [ ] **Step 4:** `npm run test:unit -- motionx` green; typecheck clean for both files; commit. Subject: `feat(compositor): Pixels is the Dither bar's first Style; the gallery tile shows it`
+Commit subject: `feat(compositor): the Pixels dither runs the layer through the ASCII shader, cells halving until it is sharp`
 
 ---
 
-### Task 9: Live verification and Part-2 review (controller)
+### Task 9: Pixels in the inspector and the gallery tile
 
-- [ ] Lab frame, an image-like layer (gradient fill) and a text layer: mid-bar the layer is made of axis-aligned square blocks whose size halves as the bar advances (measure run lengths on a scan line at three times); every pixel inside the layer's box is either backdrop or a colour on the quantised ladder for that time; nothing at amount 0, the exact normal draw after the bar.
-- [ ] A half-transparent layer: ON blocks all carry the same alpha-blended colour (no 50% dither).
-- [ ] Rotated 30° + multiply: blocks stay on the frame grid; ON colour == the un-transformed multiply colour of the quantised block.
-- [ ] Drift changes which blocks are on at a fixed time; drift 0 repeatable.
-- [ ] The three mask styles still pass the Part-1 live checks (spot-check Dissolve two-colour + coverage).
-- [ ] Inspector: Style shows four options, Block size label + default 24 on a new bar, switching to Dissolve shows Cell size default 8.
+**Files:** Modify `frontend/app/components/vue-canvas/compositor/MotionInspector.vue`, `frontend/app/components/vue-canvas/compositor/MotionDitherPreview.vue`; add cases to `frontend/tests/unit/motionx/letters-ui.unit.spec.ts`.
+
+- Inspector, dither block: `const ditherStyle = computed(() => revealParams(behaviour.value?.params).style)` replaces every `enumParam('style', …)` read in the block (one reader of the default: the library's). Style is a labelled `StudioSelect` (`data-testid="dither-style"`, options `REVEAL_STYLES`, labels `Pixels, Dissolve, Wipe, Dots`) — four segments do not fit a 228px row beside the label. When `ditherStyle === 'pixels'`: a labelled `StudioSelect` `data-testid="dither-chars"`, label `Characters`, hint `The same character sets as the ASCII effect in Shader Studio`, options = `PIXEL_CHARS` values as STRINGS with `PIXEL_CHARS` labels, `:model-value="String(revealParams(behaviour.params).chars)"`, writing `setBehParams({ chars: Number(v) })`. Cell slider: label `Block size` (Pixels) / `Dot spacing` (Dots) / `Cell size`; Pixels hint `How big the cells are when the transition starts, in thousandths of the frame's width. They halve until the layer is sharp.`; value and `:default` from `revealCellDefault(ditherStyle)`. Drift slider: for Pixels label `Shimmer speed`, hint `How fast the characters re-roll while the layer sharpens. 0 is still.` Angle: hidden for Pixels (`v-if`). Edge softness: Wipe only (unchanged). Test ids otherwise unchanged.
+- Preview tile: show the default look. Build ONCE a 48×30 RGBA source (a rounded card, diagonal gradient `#7c9cff → #ff7ac3`, a white bar; transparent outside). Each frame: `n = [8, 4, 2, 1][min(3, floor(amount × 4))]` source pixels per block; for each block sample the source at its centre; the block is ON when `alpha/255 × clamp01(luma + (amount × 2 − 1)) > bayer8(bx − drift, by)` (import `bayer8`; `drift = floor(elapsed × 5)`), painted as an `n × n` square of the sampled colour; from `amount ≥ 0.8` blend towards the source pixel by `pixelSharp(amount)`. Same loop lifetime, reduced-motion still frame (amount 0.45), `aria-hidden`, one reused `ImageData`. It is a PREVIEW of the idea, not the shader — say so in the component's header comment.
+- Source-level tests: the Style select's four options in order; `dither-chars` exists under a `v-if` that mentions `pixels` and binds `PIXEL_CHARS`; `Block size` and `Shimmer speed` present; the Angle row's `v-if` excludes pixels; `revealCellDefault(` used for the cell slider's default; no raw `<input` / `<select` in the dither block.
+
+Commit subject: `feat(compositor): Pixels is the Dither bar's first Style, with the ASCII effect's character sets`
+
+---
+
+### Task 10: Live verification and Part-2 review (controller)
+
+- [ ] PROVE the shader path ran (a fallback would hide a failure): a Matrix/Binary bar mid-transition shows glyph-shaped ink (many distinct partial shapes per cell), not Dissolve's on/off squares; and a counter or console probe shows `renderFieldWithBase` called with `u_matte: 1`.
+- [ ] White text AND black text both appear during the bar (black later than white); nothing at amount 0; the exact normal draw after the bar; no pop at the hand-off (frame at amount 0.999 ≈ frame after the bar).
+- [ ] Cell size halves as the bar advances (measure on a scan line at three times); cells are frame-anchored squares with the layer rotated 30°; blend `multiply` and 50% opacity behave (even, not a 50% dither).
+- [ ] Shimmer: drift > 0 changes the characters over time; drift 0 is still.
+- [ ] Shader Studio's ASCII effect looks unchanged with matte off (open it, compare a default render before/after by pixel census — RGB identical), and its glyph shapes now ALSO render as a Frame layer effect.
+- [ ] The three mask styles still pass the Part-1 checks (spot-check Dissolve coverage).
+- [ ] Inspector: Style select, Characters select, Block size default 24 on a new bar, Dissolve shows Cell size 8, Angle hidden for Pixels.
 - [ ] Review of Part 2 on the most capable model; one fix wave; ledger, spec status, memory.

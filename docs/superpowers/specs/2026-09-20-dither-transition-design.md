@@ -62,22 +62,36 @@ Scratch canvases are pooled, not created per frame. The work happens only while 
 
 ## Addendum (2026-09-20, after Julien tried it): the dither must TRANSFORM the element
 
-Julien, on seeing the three styles: "it's like a mask instead of a transform. I was expecting the dither to transform the element it's transitioning, not just masking it." The three styles above cut holes in an element that stays perfectly sharp — on white text that reads as on/off. He keeps them, but **mainly wants the transform**. It becomes a fourth Style, **Pixels**, listed first and the default for a new Dither in / Dither out bar.
+Julien, on seeing the three styles: "it's like a mask instead of a transform. I was expecting the dither to transform the element it's transitioning, not just masking it." The three styles above cut holes in an element that stays perfectly sharp — on white text that reads as on/off. He keeps them, but **mainly wants the transform**, and wants to **choose the dither characters, "like on my shader in Shader Studio"**. So the transform does not reimplement a look: it RUNS his Shader Studio **ASCII** effect over the layer, and the bar drives that shader's dials.
 
-**What the user sees.** The element is rebuilt out of coarse dithered blocks that refine until it is sharp. Its edges are blocky, its colours break into dithered tones, and the blocks halve in clean steps so every refinement subdivides the last. Dither out is the same in reverse. No new dials: for Pixels, **Cell size** reads **Block size** — the size of the blocks the element starts as (default 24, three times the mask default, so the blocks are clearly visible); Drift speed and Angle make the dither tones shimmer.
+It is a fourth Style, **Pixels**, listed first and the default for a new Dither in / Dither out bar.
 
-**How.** While the bar plays, the layer is drawn on its own to a side canvas at full resolution, exactly as it is drawn today (so its own effects, fills, text and letter moves are all intact). That picture is sampled down to the block grid — each block gets the element's average colour and how much of the block it covers — and each block is then decided by pure maths:
+**What the user sees.** The element is rebuilt out of characters on a grid that refines until it is sharp. Its edges break into the same grid (it is not a crisp silhouette with a texture inside), bright parts arrive before dark parts, and the cells halve in clean steps so every refinement subdivides the last. Dither out is the same in reverse.
 
-- **Block size** halves in steps from the dial's size down to 2 thousandths of the frame's width (24 → 12 → 6 → 3 → 1.5), the steps spread evenly over the bar.
-- **Colour** is cut to a few levels per channel with the same 8×8 ordered dither — 2 levels at the start, 16 by the end (where it reads as continuous).
-- **A block is on** when its coverage, scaled up over the first 60% of the bar, beats its dither threshold — so the element condenses out of nothing, and its edges stay dithered by coverage.
-- Drift slides the threshold table in whole blocks along the Angle.
+**Dials for Pixels:**
+- **Characters** — the ASCII effect's shapes: Mixed · Blocks (default) · Circles · Lines · Diagonal · Cross · Diamond · Hash · Matrix · Binary · Braille · Morse · Dots · Slashes · Lego · Cross-stitch · Voxel · Beads · Gems. A set looks exactly as it does in Shader Studio, and a set added to the shader later appears here.
+- **Block size** (the Cell size dial, relabelled) — the size of the cells the element starts as. Default 24, three times a mask cell, so the grid reads clearly.
+- **Shimmer speed** (the Drift speed dial, relabelled) — how fast the characters re-roll while the element sharpens. 0 is still.
+- Angle and Edge softness do not apply and are hidden.
 
-The blocks are stamped back through the frame's transform with smoothing off — aligned to the frame, square under rotation, a fraction of the frame's width so preview and export agree — using the layer's own opacity and blend mode AT THE STAMP (the side canvas is drawn at full opacity, so a half-transparent layer stays evenly half-transparent instead of turning into a 50% dither). At amount 1 there is no note and the real layer is drawn: a finished entrance still costs nothing.
+**How.**
+1. While the bar plays, the layer is drawn on its own, at full opacity, to a side canvas exactly the size of the frame, exactly as it is drawn today (its own effects, fills, text, letter moves all intact).
+2. That canvas goes through the ASCII shader — the same code Shader Studio runs — in a new **matte mode** (below), with: Size = the current block size; Brightness ramped from −1 to +1 across the bar, which is what makes the element condense out of nothing, bright tones first; Jitter and Speed from Shimmer speed; Colored on.
+3. Block size halves in even stages from the dial down to 2 thousandths of the frame's width (24 → 12 → 6 → 3 → 1.5).
+4. Over the last fifth of the bar the real, sharp layer fades in over the characters — most character sets never become a solid picture on their own — so the hand-off to the normal draw at the end of the bar has no pop.
+5. The result is stamped back at the frame's position with the layer's own opacity and blend mode (the side canvas was drawn at full opacity, so a half-transparent layer stays evenly half-transparent).
 
-**The price, accepted:** while a Pixels transition plays, effects that read what is BEHIND the layer (background blur, glass, backdrop shaders, the backdrop luminance mask) pause for that layer, and a layer still on the old pre-timeline animation engine ignores that animation for the duration. Both return the instant the bar ends. The three mask styles keep those effects live, which is one reason to keep them.
+Because the side canvas IS the frame, the grid is anchored to the frame and sized as a fraction of it: square under rotation, identical in preview and export (except that the shader never draws a cell smaller than 2 device pixels, so the very last stage can be a little coarser on a small preview).
 
-**Not parity-exact at the last step only:** blocks are never drawn finer than one device pixel, so on a small preview the final, nearly-sharp step can be slightly coarser than in a large export.
+**Matte mode — a small, default-off addition to the ASCII shader.** Today the shader writes ink on opaque black and picks density from brightness alone, so it cannot be composited over a backdrop and a black text layer would vanish. In matte mode (a built-in switch the compositor sets; NOT a Shader Studio dial, and every existing use is byte-for-byte unchanged): density = the element's alpha at the cell × (brightness-adjusted tone); the ink is the element's true colour; and the output carries real transparency between the characters. The renderer resets the switch to off before every draw, on every path, so it can never leak into Shader Studio.
+
+**Found on the way, fixed here:** the ASCII effect's character shapes (Hash, Matrix, Binary, Braille, Morse, Dots, Slashes) draw NOTHING today when the effect is used as a layer effect in the Frame — that path never loads the shader's glyph sheet or its companion numbers. Loading them is a prerequisite for this work and repairs the existing layer effect too.
+
+**When the shader is not ready** (the catalogue or the glyph sheet still loading — typically the first frames after opening a frame), a Pixels bar draws as the Dissolve mask for those frames rather than flashing the whole layer; it switches to the real thing as soon as the load lands.
+
+**Not in this build:** the shader's **Custom** shape (type your own characters) — its glyph sheet is built inside the Shader Studio screen today and needs moving to a shared place first. The Dither effect's 12 **patterns** (Bayer sizes, clustered, scanline, blue noise…) as a second menu — same mechanism, next slice.
+
+**The price, accepted:** while a Pixels transition plays there is one GPU pass per frame for that layer (what a shader layer effect already costs; nothing outside the bar); effects that read what is BEHIND the layer (background blur, glass, backdrop shaders, the backdrop luminance mask) pause for that layer; a layer still on the old pre-timeline animation engine ignores that animation; and the part of a layer that hangs outside the frame is not drawn (it is not in an export either). All return the instant the bar ends. The three mask styles keep those effects live, which is one reason to keep them.
 
 ## Planned next (not in this build)
 
