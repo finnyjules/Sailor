@@ -47,7 +47,7 @@ describe('ascii_dither.frag — matte mode', () => {
 
   it('multiplies density by the source alpha between the brightness clamp and the Invert flip', () => {
     const brightness = lineOf('float g = clamp(lum + jitter + u_brightness, 0.0, 1.0);')
-    const alpha = lineOf('g *= src.a;')
+    const alpha = lineOf('if (matte) g = clamp(mix(0.5, lum, 0.5) + jitter + u_brightness, 0.0, 1.0) * src.a;')
     const invert = lineOf('if (u_invert > 0.5) g = 1.0 - g;')
     expect(alpha).toBeGreaterThan(brightness)
     expect(alpha).toBeLessThan(invert)
@@ -58,7 +58,8 @@ describe('ascii_dither.frag — matte mode', () => {
   })
 
   it('writes straight alpha for both shape families', () => {
-    expect(FRAG).toContain('fragColor0 = vec4(clamp(col, 0.0, 1.0), clamp(glyph, 0.0, 1.0));')
+    // an empty cell (zero density) is fully transparent — the shapes' centre hairline must not become ink
+    expect(FRAG).toContain('fragColor0 = vec4(clamp(col, 0.0, 1.0), g > 0.0 ? clamp(glyph, 0.0, 1.0) : 0.0);')
     expect(FRAG).toContain('fragColor0 = vec4(clamp(fx, 0.0, 1.0), src.a * step(0.001, g));')
   })
 

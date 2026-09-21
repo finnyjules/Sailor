@@ -278,7 +278,11 @@ void main() {
     float g = clamp(lum + jitter + u_brightness, 0.0, 1.0);
     // Density follows the element's alpha, so nothing appears where it is transparent.
     // Must come BEFORE the Invert flip, or a transparent cell inverts to full ink.
-    if (matte) g *= src.a;
+    // …and on a COMPRESSED tone (0.25–0.75 rather than 0–1): the transition ramps Brightness
+    // from −1 to +1, and on the raw tone a black element would stay empty for the whole
+    // first half of that ramp while a white one was already full. Bright still leads, dark
+    // no longer waits. The classic line above is untouched.
+    if (matte) g = clamp(mix(0.5, lum, 0.5) + jitter + u_brightness, 0.0, 1.0) * src.a;
     if (u_invert > 0.5) g = 1.0 - g;
 
     // In-cell coordinate. At u_spacing == 0 this is byte-for-byte the original fract()
@@ -325,7 +329,11 @@ void main() {
     // stamps this over the frame itself, so there is nothing to composite here.
     if (matte) {
         if (shp >= 15) fragColor0 = vec4(clamp(fx, 0.0, 1.0), src.a * step(0.001, g));
-        else           fragColor0 = vec4(clamp(col, 0.0, 1.0), clamp(glyph, 0.0, 1.0));
+        // An EMPTY cell must be fully transparent. The geometric shapes leave a hairline
+        // of coverage at the cell's centre even at zero density — invisible on the classic
+        // black background, but as alpha it speckled every empty cell of the frame with
+        // faint black dots. No density, no ink.
+        else           fragColor0 = vec4(clamp(col, 0.0, 1.0), g > 0.0 ? clamp(glyph, 0.0, 1.0) : 0.0);
         return;
     }
 
