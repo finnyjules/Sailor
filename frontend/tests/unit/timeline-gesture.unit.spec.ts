@@ -44,4 +44,19 @@ describe('gesture transactions', () => {
     store.undo()
     expect(store.state.value.tracks[0]!.clips[0]!.start_frame).toBe(0)
   })
+
+  it('gestureBaseState is the snapshot taken at beginGesture, and null outside a gesture', () => {
+    expect(store.gestureBaseState()).toBeNull()
+    const trackId = store.state.value.tracks[0]!.id
+    store.addClip(trackId, img('g1', 0, 30))
+    store.beginGesture()
+    store.updateClip('g1', { length: 10 })
+    const base = store.gestureBaseState()!
+    expect(base.tracks[0]!.clips.find(c => c.id === 'g1')!.length).toBe(30)
+    // It is a copy: editing it must not touch the live state.
+    base.tracks[0]!.clips = []
+    expect(store.state.value.tracks[0]!.clips.length).toBeGreaterThan(0)
+    store.endGesture()
+    expect(store.gestureBaseState()).toBeNull()
+  })
 })

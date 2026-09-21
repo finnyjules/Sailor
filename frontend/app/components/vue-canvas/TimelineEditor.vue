@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, inject, onMounted, onUnmounted, watch, nextTick, type Ref } from 'vue'
 import {
-  X, Play, Pause, SkipBack, SkipForward, ChevronsLeft, ChevronsRight,
+  X, Play, Pause, SkipBack, SkipForward, ChevronsLeft, ChevronsRight, FoldHorizontal,
   RotateCw, Undo2, Redo2, Plus, Trash2, Scissors, Volume2, VolumeX, Eye, EyeOff,
   Lock, Unlock, Film, Music, ImageIcon, Type, Cpu, Diamond, Magnet,
 } from 'lucide-vue-next'
@@ -16,12 +16,13 @@ import { ensureSpaceTypeClipBake } from '~/lib/engine/spaceTypeClipBake'
 import { spaceTypeEngineAvailable } from '~/lib/engine/spaceTypeEnginePool'
 import { ensureMotionFonts } from '~/composables/useTemplateFonts'
 import { ensureTimelineMix } from '~/lib/engine/audio/mixdown'
-import type { Clip, Track, BlendMode, MotionClip, SpaceTypeClip, Transition, TransitionKind } from '~~/shared/timeline/types'
+import type { Clip, Track, BlendMode, MotionClip, SpaceTypeClip, Transition, TransitionKind, EditState } from '~~/shared/timeline/types'
 import { computeTotalFrames } from '~~/shared/timeline/types'
 import { interpolateClipAt } from '~~/shared/timeline/interpolate'
 import { resolveClipSource } from '~~/shared/timeline/resolveClipSource'
 import { snapGroupDelta, computeGroupResize, neighbourGaps, type Span, type ResizeMember } from '~~/shared/timeline/groupEdit'
 import { settleOverlaps } from '~~/shared/timeline/placement'
+import { computeRippleEdits, applyRippleEdits } from '~~/shared/timeline/ripple'
 import { collectProjectMediaFilenames } from '~/lib/timeline/projectMedia'
 import type { SpaceTypeState } from '~/lib/spacetype/state'
 import MotionClipInspector from '~/components/vue-canvas/timeline/MotionClipInspector.vue'
@@ -560,6 +561,14 @@ function toggleSnap() {
   snapEnabled.value = !snapEnabled.value
   setLocalSetting('Timeline.Snap', String(snapEnabled.value))
 }
+
+// Ripple: when on, trimming or deleting slides the later clips on that track
+// so no gap or overlap is left. Off by default — it moves clips you didn't touch.
+const rippleEnabled = ref(getLocalSetting('Timeline.Ripple') === 'true')
+function toggleRipple() {
+  rippleEnabled.value = !rippleEnabled.value
+  setLocalSetting('Timeline.Ripple', String(rippleEnabled.value))
+}
 const altHeld = ref(false)
 function onKeyToggle(e: KeyboardEvent) { altHeld.value = e.altKey }
 
@@ -635,7 +644,11 @@ function snapshotResizeMembers(primaryId: string): ResizeMember[] {
         id: c.id, start_frame: c.start_frame, in_frame: c.in_frame ?? 0, length: c.length,
         anchored: c.kind === 'video' || c.kind === 'audio',
         sourceFrames: clipSourceFrames(c), speed: c.speed ?? 1,
-        ...neighbourGaps(track.clips, c.id, ids),
+        ...(() => {
+          const g = neighbourGaps(track.clips, c.id, ids)
+          // With ripple on, the neighbours get pushed, so they are not a limit.
+          return rippleEnabled.value ? { gapBefore: null, gapAfter: null } : g
+        })(),
       })
     }
   }
@@ -891,6 +904,11 @@ function onPointerUp() {
     kfDrag.value = null
     store.endGesture()
     return
+  }
+  // Ripple a finished trim: compare with the timeline as the drag began.
+  if (rippleEnabled.value && (drag.value?.mode === 'resize-right' || drag.value?.mode === 'resize-left')) {
+    const base = store.gestureBaseState()
+    if (base) store.mutate(s => { applyRippleEdits(s, computeRippleEdits(base, s)) })
   }
   // A move that ended on top of another clip: hop to a free track (still inside
   // the gesture, so it is part of the same single undo step).
@@ -1480,16 +1498,20 @@ function setClipSpeed(clip: Clip, rawSpeed: number) {
   })
 }
 
-// Delete everything selected as ONE undo step.
+// Delete everything selected as ONE undo step. With ripple on, later clips
+// close the gaps.
 function deleteSelection() {
-  if (selectedClipIds.value.size > 1) {
-    const ids = new Set(selectedClipIds.value)
-    store.mutate(s => {
-      for (const track of s.tracks) track.clips = track.clips.filter(c => !ids.has(c.id))
-    })
-  } else if (store.selectedClipId.value) {
-    store.removeClip(store.selectedClipId.value)
-  }
+  const ids = selectedClipIds.value.size > 1
+    ? new Set(selectedClipIds.value)
+    : new Set(store.selectedClipId.value ? [store.selectedClipId.value] : [])
+  if (!ids.size) return
+  store.mutate(s => {
+    const before: EditState = JSON.parse(JSON.stringify(s))
+    for (const track of s.tracks) track.clips = track.clips.filter(c => !ids.has(c.id))
+    s.transitions = s.transitions.filter(t => !ids.has(t.from_clip_id) && !ids.has(t.to_clip_id))
+    if (rippleEnabled.value) applyRippleEdits(s, computeRippleEdits(before, s))
+  })
+  if (store.selectedClipId.value && ids.has(store.selectedClipId.value)) store.selectedClipId.value = null
   clearSelection()
 }
 
@@ -2368,6 +2390,10 @@ const assetTab = ref<'ports' | 'files' | 'library'>(portBindings.value.length > 
               :class="snapEnabled ? 'bg-white/15 text-white' : 'hover:bg-white/10 text-white/40'"
               :title="snapEnabled ? 'Snapping on (Alt bypasses)' : 'Snapping off (Alt snaps)'"
               @click="toggleSnap"><Magnet class="size-3.5" /></button>
+            <button class="size-6 flex items-center justify-center rounded transition-colors"
+              :class="rippleEnabled ? 'bg-white/15 text-white' : 'hover:bg-white/10 text-white/40'"
+              :title="rippleEnabled ? 'Ripple on: trimming or deleting moves the later clips' : 'Ripple off: trimming or deleting leaves the later clips where they are'"
+              @click="toggleRipple"><FoldHorizontal class="size-3.5" /></button>
           </div>
 
           <!-- Edit actions -->

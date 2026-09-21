@@ -190,6 +190,12 @@ export function useTimelineStore() {
     redoStack.value = []
   }
 
+  /** The timeline as it was when the current drag began (a copy), or null when
+   *  no gesture is open. Ripple compares this with the live state on release. */
+  function gestureBaseState(): EditState | null {
+    return gestureBase === null ? null : JSON.parse(gestureBase) as EditState
+  }
+
   function undo() {
     const prev = undoStack.value.pop()
     if (!prev) return
@@ -491,6 +497,7 @@ export function useTimelineStore() {
     dispatch,
     beginGesture,
     endGesture,
+    gestureBaseState,
     undo,
     redo,
     canUndo: computed(() => undoStack.value.length > 0),
