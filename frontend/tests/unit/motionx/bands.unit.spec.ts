@@ -133,6 +133,15 @@ describe('behaviourLabel — letter behaviours', () => {
     // a non-assemble style keeps the plain Dither label
     expect(behaviourLabel({ kind: 'dither', params: { style: 'wipe', dir: 'out' } })).toBe('Dither out')
   })
+
+  it('labels a settle bar "<Label> in" / "<Label> out", read through settleParams', () => {
+    expect(behaviourLabel({ kind: 'settle', params: {} })).toBe('Slice in')   // default effect + dir
+    expect(behaviourLabel({ kind: 'settle', params: { effect: 'slice' } })).toBe('Slice in')
+    expect(behaviourLabel({ kind: 'settle', params: { effect: 'slice', dir: 'out' } })).toBe('Slice out')
+    expect(behaviourLabel({ kind: 'settle', params: { effect: 'split', dir: 'out' } })).toBe('Colour split out')
+    expect(behaviourLabel({ kind: 'settle', params: { effect: 'zoomblur' } })).toBe('Zoom blur in')
+    expect(behaviourLabel({ kind: 'settle', params: { effect: 'not-real', dir: 'out' } })).toBe('Slice out')   // unknown → default
+  })
 })
 
 describe('bands carry the loop flag', () => {

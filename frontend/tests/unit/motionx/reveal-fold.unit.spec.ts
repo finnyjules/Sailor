@@ -8,6 +8,8 @@ import type { MotionReveal } from '~/lib/motionx/reveal'
 const layer = (id = 'L') => ({ id, kind: 'rect', x: 0.5, y: 0.5, w: 0.3, h: 0.2, rotation: 0, opacity: 1, fill: '#fff' }) as unknown as LocalLayer
 const beh = (params: Record<string, unknown> = {}, start = 1, duration = 2, id = 'b1', layerId = 'L'): StoredBehaviour =>
   ({ id, layerId, kind: 'dither', params, timing: { start, duration } }) as StoredBehaviour
+const settleBeh = (params: Record<string, unknown> = {}, start = 1, duration = 2, id = 'b1', layerId = 'L'): StoredBehaviour =>
+  ({ id, layerId, kind: 'settle', params, timing: { start, duration } }) as StoredBehaviour
 const tracksOf = (b: StoredBehaviour, l = layer(b.layerId)): Track[] =>
   compileBehaviourForLayer(l, b as unknown as Behaviour).map((t) => ({ ...t, behaviourId: b.id }))
 const noteOf = (l: LocalLayer) => (l as unknown as { motionReveal?: MotionReveal }).motionReveal
@@ -135,6 +137,67 @@ describe('applyRevealBehaviours — edges', () => {
       const n = noteOf(applyRevealBehaviours([layer()], tr, [o], t)[0]!)
       if (n) { expect(n.amount).toBeGreaterThanOrEqual(0); expect(n.amount).toBeLessThan(1); expect(Number.isFinite(n.elapsed)).toBe(true) }
     }
+  })
+})
+
+describe('applyRevealBehaviours — settle bars', () => {
+  it('mid-bar: the note is style "settle" with a settle dial block, dither fields inert filler', () => {
+    const b = settleBeh({ effect: 'swirl', strength: 40, fade: false })
+    const ls = [layer()]
+    const out = applyRevealBehaviours(ls, tracksOf(b), [b], 2)
+    const n = noteOf(out[0]!)!
+    expect(n.style).toBe('settle')
+    expect(n.amount).toBeCloseTo(0.5, 9); expect(n.elapsed).toBeCloseTo(1, 9)
+    expect(n.out).toBe(false)
+    expect(n.settle).toEqual({ effect: 'swirl', strength: 0.4, fade: false })
+    // the dither fields are still present — the note stays ONE shape — just inert.
+    expect(typeof n.cell).toBe('number'); expect(typeof n.angle).toBe('number')
+  })
+
+  it('dir out flows through to both `out` and the settle strength read from the SAME params', () => {
+    const b = settleBeh({ dir: 'out', effect: 'blur', strength: 100 })
+    const n = noteOf(applyRevealBehaviours([layer()], tracksOf(b), [b], 2)[0]!)!
+    expect(n.out).toBe(true)
+    expect(n.settle).toEqual({ effect: 'blur', strength: 1, fade: true })
+  })
+
+  it('an unknown effect id falls back to slice, exactly as settleParams does', () => {
+    const b = settleBeh({ effect: 'not-a-real-one' })
+    const n = noteOf(applyRevealBehaviours([layer()], tracksOf(b), [b], 2)[0]!)!
+    expect(n.settle!.effect).toBe('slice')
+  })
+
+  it('amount >= 1 → no note, layer by identity; amount <= 0 → a note with amount 0', () => {
+    const b = settleBeh()
+    const ls = [layer()]
+    expect(applyRevealBehaviours(ls, tracksOf(b), [b], 3.5)).toBe(ls)
+    expect(noteOf(applyRevealBehaviours(ls, tracksOf(b), [b], 0.2)[0]!)!.amount).toBe(0)
+  })
+
+  it('winning-bar rule: a dither bar then a later settle bar on the same layer — the note follows whichever wins', () => {
+    const first = beh({ style: 'wipe' }, 0, 1, 'first')
+    const second = settleBeh({ effect: 'ripple', dir: 'out' }, 2, 1, 'second')
+    const tracks = [...tracksOf(first), ...tracksOf(second)]
+    const early = noteOf(applyRevealBehaviours([layer()], tracks, [first, second], 0.5)[0]!)!
+    expect(early.style).toBe('wipe')
+    const late = noteOf(applyRevealBehaviours([layer()], tracks, [first, second], 2.5)[0]!)!
+    expect(late.style).toBe('settle'); expect(late.out).toBe(true); expect(late.settle!.effect).toBe('ripple')
+    expect(late.elapsed).toBeCloseTo(0.5, 9)
+  })
+
+  it('winning-bar rule the other way round: settle first, dither second', () => {
+    const first = settleBeh({ effect: 'pixelate' }, 0, 1, 'first')
+    const second = beh({ style: 'dots', dir: 'out' }, 2, 1, 'second')
+    const tracks = [...tracksOf(first), ...tracksOf(second)]
+    const early = noteOf(applyRevealBehaviours([layer()], tracks, [first, second], 0.5)[0]!)!
+    expect(early.style).toBe('settle'); expect(early.settle!.effect).toBe('pixelate')
+    const late = noteOf(applyRevealBehaviours([layer()], tracks, [first, second], 2.5)[0]!)!
+    expect(late.style).toBe('dots')
+  })
+
+  it('a tagged reveal track owned by a settle bar with a different kind stored is ignored, same as dither', () => {
+    const b = settleBeh(); const impostor = { ...b, kind: 'fade' } as StoredBehaviour; const ls = [layer()]
+    expect(applyRevealBehaviours(ls, tracksOf(b), [impostor], 2)).toBe(ls)
   })
 })
 

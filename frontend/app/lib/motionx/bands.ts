@@ -3,6 +3,7 @@
 // compositor coupling — mirrors the purity of the rest of ~/lib/motionx.
 import type { Track, PropertyType, Keyframe, StoredBehaviour } from '~/lib/motionx'
 import { revealParams } from './reveal/params'
+import { settleParams } from './reveal/settle'
 import { evaluateTrack } from '~/lib/motionx'
 
 export type BandKind = 'number' | 'color' | 'gradient' | 'behaviour' | 'legacy'
@@ -105,6 +106,10 @@ export function behaviourLabel(b: { kind: string; params?: Record<string, unknow
   else if (b.kind === 'dither') {
     const name = revealParams(b.params).style === 'assemble' ? 'Assemble' : 'Dither'   // the ONE reader of a bar's params
     withDir = dir === 'out' ? `${name} out` : `${name} in`
+  }
+  else if (b.kind === 'settle') {
+    const sp = settleParams(b.params)   // the ONE reader of a settle bar's params
+    withDir = `${sp.effect.label} ${sp.out ? 'out' : 'in'}`
   }
   return b.timing?.loop ? `${withDir} · loop` : withDir
 }

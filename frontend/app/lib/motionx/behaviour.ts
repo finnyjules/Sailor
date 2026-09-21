@@ -63,6 +63,16 @@ registerBehaviour('dither', (b) => {
   return [b.params?.dir === 'out' ? numTrack('reveal', 1, 0, w, 'linear') : numTrack('reveal', 0, 1, w, 'linear')]
 })
 
+// A SETTLE transition (Addendum 3): the same `reveal` band as `dither` — the two families
+// share one timeline row — but the look is one of ten Shader Studio effects run over the
+// layer's own pixels, driven to rest as the bar plays. Same LINEAR default as `dither`, for the
+// same reason; the look itself lives on the bar's params, read through `settleParams` by the
+// fold (adapter/frame.ts `applyRevealBehaviours`) and the painter.
+registerBehaviour('settle', (b) => {
+  const w = window(b.timing)
+  return [b.params?.dir === 'out' ? numTrack('reveal', 1, 0, w, 'linear') : numTrack('reveal', 0, 1, w, 'linear')]
+})
+
 registerBehaviour('slide', (b, target) => {
   // Relative to the layer's CURRENT position (x/y are normalized 0..1), so the layer
   // slides IN to where it already sits — not to an absolute 0. `distance` is a fraction
