@@ -93,6 +93,27 @@ Because the side canvas IS the frame, the grid is anchored to the frame and size
 
 **The price, accepted:** while a Pixels transition plays there is one GPU pass per frame for that layer (what a shader layer effect already costs; nothing outside the bar); effects that read what is BEHIND the layer (background blur, glass, backdrop shaders, the backdrop luminance mask) pause for that layer; a layer still on the old pre-timeline animation engine ignores that animation; and the part of a layer that hangs outside the frame is not drawn (it is not in an export either). All return the instant the bar ends. The three mask styles keep those effects live, which is one reason to keep them.
 
+## Addendum 2 (2026-09-20): Assemble — the blocks never refine, they get wiped, and the wipe assembles
+
+Julien, after Pixels: "I'd love a mix of the pixels and the wipe effect, where the pixels effect never decreases, it just gets wiped"; then, on a first preview with straight wipe lines and flat block colours: "how do you add more colour variation here? can I have a wipe that feels like the dither is assembling instead of the basic wipe?" He approved the second preview ("I love this"): blocks pop in SCATTERED ahead of a travelling front, in DITHERED colours, and a second scattered front turns them into the sharp layer.
+
+A fifth Style, **Assemble**, listed second (Pixels · Assemble · Dissolve · Wipe · Dots). Pixels stays the default.
+
+**What the user sees.** The cells stay ONE size for the whole transition. A front travels across the frame along the Angle. Ahead of it: nothing. Around it, cells appear one by one in dither order — sparse far ahead, solid behind — so the element assembles. A **band** behind the front is the element in block form. A second front, scattered the same way, follows the band and turns each cell into the real, sharp layer. Dither out is the same pass continuing the same way (as Wipe does).
+
+**The block look comes from his shaders** — a **Look** choice:
+- **Dither** (default): his Shader Studio **Dither** effect — one colour sample per cell, cut to a few levels per channel against a dither pattern, so neighbouring blocks land on different nearby colours. Dials: **Pattern** (the effect's 12: Coarse 2×2 · Bayer 4×4 · Fine 8×8 · Clustered · Scanline · Diagonal · White noise · Noise 2× · Blue noise · Blue noise 2× · Blue noise 0.5× · R2 noise) and **Colour levels** 2–8 (default 3).
+- **Characters**: the ASCII effect at full density, with the same **Characters** menu as Pixels.
+
+**Other dials:** **Block size** (constant; default 16), **Band width** 0–100% of the travel (default 30; 0 ≈ the sharp layer assembling directly, 100 = the whole element is blocks before the second front starts), **Scatter** 0–100% (default 35; how far ahead of a front cells start appearing; 0 is a hard line), **Angle**, **Shimmer speed** (the scatter order drifts in whole cells; 0 is still). Edge softness does not apply.
+
+**How.** Same side-canvas route as Pixels (layer drawn alone at full opacity on a frame-sized canvas; stamped back with its own opacity and blend; same price: backdrop-reading effects pause for the layer during the bar). Then:
+1. The look picture: the Dither effect run directly over the side canvas (it already samples one colour per cell on a grid anchored to the frame), or the ASCII effect in matte mode at Brightness +1.
+2. Two per-cell masks from pure maths, ON THE SHADER'S OWN GRID (anchored at the frame's bottom-left; 2:3 cells for the ASCII glyph shapes) so a mask edge never cuts a cell: **look** = reached by the first front, not yet by the second, and (Dither look) the layer covers the cell's centre; **sharp** = reached by the second front. With position `s` along the travel (0 → 1, flipped for Out), `soft = max(0.001, scatter × 0.6)` and `lead = amount × (1 + band + 2·soft)`: a cell is reached by the first front when `(lead − s)/soft ≥ 1`, or is above its drifting Bayer threshold while between 0 and 1; by the second front likewise with `lead − soft − band`, against a differently-offset threshold. Nothing at amount 0; everything sharp at amount 1.
+3. Result = look picture × look mask + sharp side canvas × sharp mask, stamped.
+
+Falls back to the Dissolve mask while its shader is loading, and exports wait for it, exactly as Pixels.
+
 ## Planned next (not in this build)
 
 - **Shader reveal** — a fourth Style, **Shader**, with a picker: any Shader Studio effect that generates a moving field (noise, clouds, heatmap, slice patterns…) is rendered through the existing shader runtime, and its brightness is compared with the amount using the luminance-mask maths that already exists. The layer condenses out of that shader's own motion. It is one more pattern source plus the picker; GPU cost applies only while the bar plays.

@@ -1226,3 +1226,71 @@ Commit subject: `feat(compositor): Pixels is the Dither bar's first Style, with 
 - [ ] The three mask styles still pass the Part-1 checks (spot-check Dissolve coverage).
 - [ ] Inspector: Style select, Characters select, Block size default 24 on a new bar, Dissolve shows Cell size 8, Angle hidden for Pixels.
 - [ ] Review of Part 2 on the most capable model; one fix wave; ledger, spec status, memory.
+
+---
+
+# Part 3 — the Assemble style: constant blocks, wiped in and out by two scattered fronts
+
+Spec: **Addendum 2** in `docs/superpowers/specs/2026-09-20-dither-transition-design.md` (read it first — it is the requirements, including the exact front maths). Parts 1–2 are built and committed. Same Global Constraints (`.superpowers/sdd/dither-constraints.md`), plus:
+
+- Stored `style` gains `'assemble'`; `REVEAL_STYLES = ['pixels', 'assemble', 'dissolve', 'wipe', 'dots']`; default stays `'pixels'`. New stored params (all read ONLY through `revealParams`): `look: 'dither' | 'chars'` (default `'dither'`), `pattern` = the Dither effect's `u_pattern` value (default `2`, Fine 8×8; allowed = every option value of `bayer_dither.u_pattern` in `shader_effects/manifest.json`), `levels` 2–8 integer (default 3), `band` 0–100 (default 30), `scatter` 0–100 (default 35). `cell` default for `assemble` is 16. `chars` as in Part 2.
+- Only Task 12 touches `frontend/app/composables/useCompositorLayers.ts`, and only to GENERALISE the two existing Pixels hunks (no third hunk). Nobody touches `shader_effects/`, `field.ts` or `renderer.ts`.
+- Pixels and the three mask styles must draw exactly as they do now.
+
+### Task 11: Assemble params and maths
+
+**Files:** modify `frontend/app/lib/motionx/reveal/params.ts`, `index.ts`; create `frontend/app/lib/motionx/reveal/assemble.ts`; tests: create `frontend/tests/unit/motionx/reveal-assemble.unit.spec.ts`, update default/shape assertions in the existing reveal specs only where the new `RevealParams` keys require it.
+
+**Produces:** `RevealParams` gains `look`, `pattern`, `levels`, `band` (0–1 maths units = stored ÷ 100), `scatter` (0–1); `revealCellDefault('assemble') === 16`; `DITHER_PATTERNS: readonly { value: number; label: string }[]` (pinned by a test to the manifest's `bayer_dither.u_pattern` options, labels and values); `motionUsesShaderStyle(behaviours)` — true when any dither bar resolves to `pixels` OR `assemble` (keep `motionUsesPixels` exported as an alias so existing callers compile); and in `assemble.ts`:
+- `assembleSoft(r): number` = `Math.max(0.001, r.scatter * 0.6)`
+- `assembleCell(r: MotionReveal, cx: number, cy: number, grid: { cols: number; rows: number }): 0 | 1 | 2` — 0 nothing, 1 look, 2 sharp — exactly the spec's maths: `s` = the wipe's position along the travel (reuse the SAME projection Part 1's wipe uses — export a small `alongTravel(angle, out, cx, cy, grid)` from `dither.ts` and make `cellTest` use it, behaviour unchanged, its tests untouched), `lead = amount × (1 + band + 2·soft)`, first front `lp = (lead − s)/soft`, second front `tp = (lead − soft − band − s)/soft`, reached when `≥ 1` or (`> 0` and `> threshold`); first-front threshold `bayer8(cx − dx, cy − dy)` with `driftCells(r)`, second-front threshold `bayer8(cx + 3 − dx, cy + 5 − dy)`. Sharp wins over look. `amount ≤ 0` → 0 everywhere; `amount ≥ 1` → 2 everywhere; non-finite amount → 0.
+- `assembleTest(r, grid): (cx, cy) => 0 | 1 | 2` — the per-frame form with everything cell-independent hoisted (as `cellTest` does); `assembleCell` is its one-off form.
+- `buildAssembleMasks(r, grid, covered?: Uint8Array): { look: Uint8ClampedArray<ArrayBuffer>; sharp: Uint8ClampedArray<ArrayBuffer> }` — two RGBA bitmaps of `grid.cols × grid.rows`, alpha 255 where that cell shows the look / the sharp layer, row 0 = TOP row. `covered[j * cols + i] === 0` (optional) removes a cell from the LOOK mask only (the Dither look paints opaque colour everywhere; a cell the layer does not cover must stay empty).
+- `assembleShaderParams(r, frameW, frameH): { effectId: 'bayer_dither' | 'ascii_dither'; params: Record<string, number>; matte: boolean }` — Dither look: `{ pattern, scale: clamp(r.cell × frameW / frameH, 0.003, 0.05), levels, colored: 1 }`, `matte: false`; Characters look: the ASCII params of Part 2's `pixelShaderParams` but with `cell` = the CONSTANT block (`clamp(r.cell × W / H, 0.004, 0.1)`), `brightness: 1`, `matte: true`.
+- `assembleGrid(r, frameW, frameH, fw, fh): { cols, rows, cellW, cellH }` in DEVICE pixels of the side canvas, mirroring each shader's own arithmetic so masks land on its cells: Dither look `cellH = cellW = Math.max(scale × fh, 1)`; Characters look `cellH = Math.max(cell × fh, 2)`, `cellW = cellH × (2/3 when 7 ≤ chars ≤ 14, else 1)`; `cols = ceil(fw / cellW)`, `rows = ceil(fh / cellH)`.
+
+**Tests (real `expect`s):** defaults and clamps of the five new params (strings, NaN, out of range, `pattern: 99` → 2, `levels: 3.6` → 4); `REVEAL_STYLES` order; `DITHER_PATTERNS` manifest parity; `alongTravel` extraction leaves every existing wipe test green; `assembleCell`: nothing at 0, all sharp at 1, never look AND sharp, monotonic per cell with drift 0 (0 → 1 → 2, never backwards) for In and for Out, at angles 0/90/180/270; with `scatter: 0` both fronts are hard lines `band` apart (a column is entirely one state at angle 0); with `band: 0` no cell is ever in state 1 when `scatter` is 0; Out flips the travel (start side empties first); drift changes WHICH cells are scattered but not the fully-behind / fully-ahead regions; `assembleTest` ≡ `assembleCell` over a grid incl. negative indices; masks: sizes, alpha only 0/255, look ∩ sharp = ∅, `covered` removes look cells only; `assembleShaderParams` both looks incl. clamps on a portrait frame; `assembleGrid` both looks incl. the 2:3 case and the 1px / 2px floors.
+
+Commit subject: `feat(motionx): the Assemble style's dials and maths — two scattered fronts over constant cells, looks from the Dither and ASCII effects`
+
+---
+
+### Task 12: Drawing Assemble
+
+**Files:** create `frontend/app/lib/motionx/reveal/paintAssemble.ts`; modify `frontend/app/lib/motionx/reveal/paintPixels.ts` (export its shared pieces, add the dispatcher), `frontend/app/composables/useCompositorLayers.ts` (generalise the two Pixels hunks), `frontend/app/lib/motion/bake.ts` + the pre-warm watch in `CompositorModal.vue` only if they name Pixels-specific helpers that must now cover Assemble; tests: `frontend/tests/unit/motionx/reveal-paint-assemble.unit.spec.ts`, additions to `reveal-paint-pixels.unit.spec.ts`.
+
+**Recipe** (`drawRevealAssemble(ctx, reveal, W, H, base, drawLayer, stamp): boolean`, same contract as `drawRevealPixels`: `false` leaves `ctx` untouched; pools are stacks; `try/finally` releases everything):
+1. Gate and side canvas EXACTLY as `drawRevealPixels` steps 1–2 (share the code: extract `soloPass(ctx, W, H, base, drawLayer)` → `{ solo, fw, fh } | null` inside `paintPixels.ts`; Pixels keeps passing its existing tests unchanged).
+2. `sp = assembleShaderParams(reveal, W, H)`; `grid = assembleGrid(reveal, W, H, fw, fh)`.
+3. Look picture: `renderFieldWithBase({ effectId: sp.effectId, params: sp.params, speed: 1, seed: 42 }, solo, fw, fh, undefined, elapsed, sp.matte ? { u_matte: 1 } : undefined, sp.matte ? 'MATTE' : undefined)`; copy at once into a pooled `fw × fh` canvas `look` (`'copy'`). Throw → release → `false`.
+4. Coverage (Dither look only): draw `solo` into a pooled `cols × rows` canvas created with `{ willReadFrequently: true }`, mapping the shader's grid (anchored BOTTOM-left): source rect `(0, fh − rows × cellH, cols × cellW, rows × cellH)` → dest `(0, 0, cols, rows)`, smoothing on; `getImageData`; `covered[k] = alpha > 127 ? 1 : 0`.
+5. `masks = buildAssembleMasks(reveal, grid, covered)`; put each into a pooled `cols × rows` canvas; with `imageSmoothingEnabled = false` and `'destination-in'`, draw the look mask over `look` and the sharp mask over a pooled copy of `solo`, both to dest rect `(0, fh − rows × cellH, cols × cellW, rows × cellH)`.
+6. Compose `look` then the masked sharp copy (`source-over`) into `out`, stamp as Pixels step 5 (`drawImage(out, base.e, base.f)`, layer opacity × group, blend).
+
+**Dispatcher + wiring:** in `paintPixels.ts` export `revealShaderReady(reveal): boolean` (`pixels` → ASCII ready; `assemble` → `fieldEffectReady` of `assembleShaderParams(...).effectId`) and `drawRevealShaderStyle(ctx, reveal, …)` (→ `drawRevealPixels` | `drawRevealAssemble`), plus `ensureRevealShadersReady(behaviours, timeoutMs?)` awaiting every effect the bars need. In `useCompositorLayers.ts` the two existing hunks change ONLY: `rv.style === 'pixels'` → `isShaderRevealStyle(rv.style)` (`'pixels' | 'assemble'`, exported from the barrel), `revealPixelsReady()` → `revealShaderReady(rv)`, `drawRevealPixels(` → `drawRevealShaderStyle(`; the Dissolve fallbacks stay. Update the existing source-level wiring guards to the new names without loosening what they pin. `bake.ts` and the modal's pre-warm call the generalised `motionUsesShaderStyle` / `ensureRevealShadersReady` (the pre-warm must kick the RIGHT effect for each bar).
+
+**Tests:** recorder-fake specs for every numbered step (incl. the bottom-left anchored rects for a `fh` that is not a multiple of `cellH`, the `covered` array fed to `buildAssembleMasks`, matte/variant args for the Characters look and their absence for the Dither look, the immediate copy, `false` + untouched `ctx` on a throwing render, release on a throwing `drawLayer`); dispatcher routing; readiness per look. `npm run test:unit -- motionx`, `-- compositor`, `-- bake` green with compositor's count unchanged.
+
+Commit subject: `feat(compositor): Assemble draws the layer as constant blocks wiped in and out by two scattered fronts`
+
+---
+
+### Task 13: Assemble in the inspector and gallery
+
+**Files:** `MotionInspector.vue`, `MotionDitherPreview.vue`, `frontend/app/lib/motionx/gallery.ts` (+ its spec), `letters-ui.unit.spec.ts`.
+
+- Style select: five options, labels `Pixels, Assemble, Dissolve, Wipe, Dots`. For `assemble`: `StudioSegmentedRow` `dither-look` (label `Look`, `Dither` / `Characters`); Dither look → labelled `StudioSelect` `dither-pattern` (label `Pattern`, `DITHER_PATTERNS`, hint `The same patterns as the Dither effect in Shader Studio`) + `StudioSlider` `dither-levels` (label `Colour levels`, 2–8 step 1 default 3, hint `How few colours each block can take. 2 is harsh, 8 is nearly smooth.`); Characters look → the existing `dither-chars` select. `Block size` (default 16, min 2, hint `How big the cells are. They stay this size for the whole transition.`), `dither-band` (label `Band width`, 0–100 step 1 default 30, hint `How much of the layer is in block form at once. At 100 the whole layer is blocks before it turns sharp.`), `dither-scatter` (label `Scatter`, 0–100 step 1 default 35, hint `How far ahead of the edge cells start appearing. 0 is a hard line.`), Angle shown, Drift row labelled `Shimmer speed` (hint `How fast the scattered order re-rolls. 0 is still.`), Edge softness hidden. Every slider keeps the `gesture(key)` / `setBehNum(key, …)` pairing; all values read through one `revealParams` computed.
+- Gallery: add `assemble-in` (group In) and `assemble-out` (group Out), labels `Assemble in` / `Assemble out`, kind `dither`, params `{ dir, style: 'assemble' }`, preview `'assemble'`; `MotionDitherPreview` gains a `mode: 'pixels' | 'assemble'` prop and, for assemble, draws the approved preview's look with the LIBRARY's `assembleTest` (blocks 4px on the 48×30 tile, colours quantised to 3 levels against `bayer8`). `behaviourLabel` for a dither bar with `style: 'assemble'` reads `Assemble in` / `Assemble out` (add to `bands.ts` + its spec — name it in your report before editing).
+- Source-level + gallery tests for all of the above.
+
+Commit subject: `feat(compositor): Assemble in / Assemble out, with Looks from the Dither and ASCII effects`
+
+---
+
+### Task 14: Live verification and Part-3 review (controller)
+
+- [ ] Shader path proven (not the fallback): Dither look shows ≥ 3 distinct block colours inside a gradient layer mid-bar; Characters look shows glyph ink.
+- [ ] Cells are ONE size at three times in the bar; nothing at amount 0; exact normal draw after; Out continues the same way.
+- [ ] Scatter 0 → two straight fronts `Band width` apart; Scatter > 0 → cells ahead of the front, none behind the second front in block form.
+- [ ] A contact sheet from the real canvas for Julien.
+- [ ] Pixels and Dissolve spot-checks unchanged; whole-slice review on the most capable model; one fix wave; ledger, memory.
