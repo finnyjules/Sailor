@@ -18,18 +18,12 @@ export function copyRanks(n: number, order: CopyOrder, seed: number): number[] {
   if (order === 'last') return ks.map((k) => count - 1 - k)
 
   if (order === 'centre') {
-    // Spiral out from the (lower, for an even count) middle index, alternating
-    // the upper neighbour before the lower one at each ring — reproduces the
-    // pairwise "lower index first" tie-break at the anchor for an even count.
-    const mid = Math.floor((count - 1) / 2)
-    const order2: number[] = [mid]
-    let lo = mid - 1, hi = mid + 1
-    while (lo >= 0 || hi < count) {
-      if (hi < count) order2.push(hi++)
-      if (lo >= 0) order2.push(lo--)
-    }
+    // Nearest the middle first; a tie (the two neighbours of the middle, or the two
+    // middles of an even count) goes to the LOWER index — the spec's rule.
+    const mid = (count - 1) / 2
+    const sorted = [...ks].sort((a, b) => (Math.abs(a - mid) - Math.abs(b - mid)) || (a - b))
     const rank = new Array<number>(count)
-    order2.forEach((k, r) => { rank[k] = r })
+    sorted.forEach((k, r) => { rank[k] = r })
     return rank
   }
 

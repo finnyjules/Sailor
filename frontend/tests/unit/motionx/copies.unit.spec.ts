@@ -6,8 +6,11 @@ describe('copyRanks', () => {
   it('first to last: the original goes first', () => { expect(copyRanks(4, 'first', 1)).toEqual([0, 1, 2, 3]) })
   it('last to first', () => { expect(copyRanks(4, 'last', 1)).toEqual([3, 2, 1, 0]) })
   it('centre out, odd and even (ties: the lower index first)', () => {
-    expect(copyRanks(5, 'centre', 1)).toEqual([4, 2, 0, 1, 3])
+    // n = 5: k=2 first, then its neighbours 1 (lower) and 3, then 0 and 4.
+    expect(copyRanks(5, 'centre', 1)).toEqual([3, 1, 0, 2, 4])
+    // n = 4: the two middles 1 (lower) and 2, then 0 and 3.
     expect(copyRanks(4, 'centre', 1)).toEqual([2, 0, 1, 3])
+    expect(copyRanks(6, 'centre', 1)).toEqual([4, 2, 0, 1, 3, 5])
   })
   it('random is a repeatable permutation that changes with the seed', () => {
     const a = copyRanks(8, 'random', 7), b = copyRanks(8, 'random', 7), c = copyRanks(8, 'random', 8)
