@@ -402,13 +402,13 @@ resolveLayout(frame, W, H, opts?) → {
 ```
 
 - `frame` = design size, layers, stack order, groups, grid config, motion,
-  wired treatments. `opts.measure` = injected text measurer.
-- No Vue, no network, no DOM except through `opts.measure`. Never mutates or
+  wired treatments. `opts.measureCtx` = a scratch 2D context for text measuring
+  (the same shape `wrappedTextLines` takes).
+- No Vue, no network, no DOM except through `opts.measureCtx`. Never mutates or
   persists anything.
 - **Identity fast path:** fixed Frame, or box equal to the design size →
-  returns the same array and object references it was given. (A box of the
-  same shape but another size is a plain uniform scale for every layer except
-  "Keep size" ones, so it is cheap but not identity.)
+  returns the same array and object references it was given. (A box of the same
+  shape at another size is identity too, unless a layer keeps its size.)
 - Runs in the editor (on viewing-size change, not per frame) and in the web
   export inside `setSize(w, h)` (once per size; each frame paints the cached
   result). The export spec is not edited here; see "Fit with the web export
@@ -432,8 +432,10 @@ resolveLayout(frame, W, H, opts?) → {
 | `arrange/infer.ts` | read gap, padding, align and order off a free group when it is switched on |
 | `arrange/layout.ts` | lay an arranged group's members out in a given box (design size and other sizes alike) |
 
-It refers to `useCompositorLayers.ts` by `import type` only, so the export
-bundle does not pull the renderer in twice.
+Its export-bundled modules (`types`, `axis`, `infer`, `motion`, `resolve`) refer
+to `useCompositorLayers.ts` by `import type` only; `units` and `stretch` call its
+runtime helpers (`localLayerBox`, `wrappedTextLines`), which the export bundles
+anyway.
 
 ### Stored data
 
@@ -484,7 +486,7 @@ technique.**
 ### Text re-wrap
 
 Re-wrap and auto-height use the renderer's own line-breaking through
-`opts.measure` (the same injection the Layout tab's pattern engine uses), so
+`opts.measureCtx` (the same injection the Layout tab's pattern engine uses), so
 the resolver and the painter cannot disagree about where lines break. With no
 measurer, text keeps its centre (documented degradation).
 
@@ -510,7 +512,7 @@ two meet.
   each `setTime` paints the cached layers and motion. The pixel size handed to
   each nested child comes from the result's `boxes`.
 - **Text measuring.** The adapter has a canvas and has already registered and
-  awaited the fonts at mount, so it can supply `opts.measure`.
+  awaited the fonts at mount, so it can supply `opts.measureCtx`.
 - **Asset sizes.** The export downsizes images to at most 2× the size they are
   drawn at. In a responsive Frame a stretched image can be drawn larger than
   at the design size (up to the guard's limit), so the "drawn size" used for
@@ -543,8 +545,8 @@ two meet.
 
 Pure unit tests:
 1. Identity: fixed Frame, or box equal to the design size → same references
-   out. Same shape at another size → every layer uniformly scaled, except
-   "Keep size" layers.
+   out. Same shape at another size → identity as well, unless a layer keeps its
+   size (which is the one case that really rescales).
 2. Each pin's map, forwards and backwards (round trip), with and without the
    guard; Keep size.
 3. `inferPins` table: edges, centre, spans, backgrounds, non-stretch kinds.
