@@ -205,12 +205,18 @@ function applyGutter(regions: Rect[], gutterPx: number): Rect[] {
   }))
 }
 
-export function resolveGrid(grid: FrameGrid, w: number, h: number): { xs: number[]; ys: number[]; regions: Rect[] } {
+/**
+ * `unitW` (default `w`): the width every normalized grid dimension (margin, gutter,
+ * base module) is a fraction OF. Today's callers omit it, so it is `w` and the
+ * result is byte-identical. The responsive resolver passes the FITTED design width
+ * so margins and gutters follow the fit scale while the columns share the box.
+ */
+export function resolveGrid(grid: FrameGrid, w: number, h: number, unitW: number = w): { xs: number[]; ys: number[]; regions: Rect[] } {
   if (grid.mode === 'off') return { xs: [], ys: [], regions: [] }
   // Clamp so an extreme margin (agent-set or hand-typed) can't push the two
   // insets past each other and invert the grid (negative-width regions).
   const m = Math.min(Math.max(grid.margin, 0), 0.45)
-  const mx = m * w, my = m * w   // margin normalized to width on both axes (uniform inset)
+  const mx = m * unitW, my = m * unitW   // margin normalized to the UNIT width on both axes (uniform inset)
   let xs: number[]
   let ys: number[]
   let regions: Rect[]
@@ -223,7 +229,7 @@ export function resolveGrid(grid: FrameGrid, w: number, h: number): { xs: number
     const rng = mulberry32(grid.gen.seed)
     const cols = pickInt(rng, grid.gen.colRange[0], grid.gen.colRange[1])
     const rows = pickInt(rng, grid.gen.rowRange[0], grid.gen.rowRange[1])
-    const modulePx = grid.baseModule * w
+    const modulePx = grid.baseModule * unitW
     const mirror = grid.gen.symmetry === 'mirror'
     xs = makeAxisEdges(rng, mx, w - mx, cols, grid.gen.regularity, modulePx, mirror)
     ys = makeAxisEdges(rng, my, h - my, rows, grid.gen.regularity, modulePx, mirror)
@@ -231,6 +237,6 @@ export function resolveGrid(grid: FrameGrid, w: number, h: number): { xs: number
       ? mergeRegions(xs, ys, grid.gen.mergeMaxSpan, rng)
       : cellRegions(xs, ys)
   }
-  const gutterPx = grid.gutter * w
+  const gutterPx = grid.gutter * unitW
   return { xs, ys, regions: applyGutter(regions, gutterPx) }
 }
