@@ -31,7 +31,10 @@ export interface AxisMap {
   kind: AxisPin
   s: number      // fit scale
   u: number      // usable spare room on this axis (after the guard)
-  o: number      // outer offset (the guarded remainder, split evenly)
+  // Outer offset (the guarded remainder, split evenly). In BOX px and, for a section-held
+  // unit, already including the section's resolved start, so applyMap yields ABSOLUTE box
+  // coordinates rather than coordinates local to the reference rectangle.
+  o: number
   ref: number    // the reference extent in design px (frame or section)
   refStart: number // where the reference rectangle starts, in design px
 }

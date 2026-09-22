@@ -1,0 +1,116 @@
+import { describe, it, expect } from 'vitest'
+import { createRectLayer, createTextLayer } from '~/composables/useCompositorLayers'
+import { defaultGrid } from '~/lib/frame/grid'
+import { resolveLayout, layoutScaleOf } from '~/lib/frame/responsive'
+import type { FrameDoc } from '~/lib/frame/responsive/types'
+
+const doc = (layers: FrameDoc['layers'], extra: Partial<FrameDoc> = {}): FrameDoc => ({
+  responsive: true, designW: 1000, designH: 500, layers, stackOrder: layers.map(l => `l:${l.id}`),
+  groups: [], grid: null, motion: null, ...extra,
+})
+
+describe('resolveLayout identity', () => {
+  it('a fixed Frame comes back by reference', () => {
+    const l = [createRectLayer()]
+    const r = resolveLayout(doc(l, { responsive: false }), 3000, 500)
+    expect(r.identity).toBe(true); expect(r.layers).toBe(l)
+  })
+  it('the design size comes back by reference', () => {
+    const l = [createRectLayer(), createTextLayer()]
+    const r = resolveLayout(doc(l), 1000, 500)
+    expect(r.identity).toBe(true); expect(r.layers).toBe(l); expect(r.layers[0]).toBe(l[0])
+  })
+  it('the same shape at another size is identity too (k = 1) unless a layer keeps its size', () => {
+    const l = [createRectLayer()]
+    expect(resolveLayout(doc(l), 2000, 1000).identity).toBe(true)
+    const keep = [createRectLayer({ pins: { keepSize: true } })]
+    const r = resolveLayout(doc(keep), 2000, 1000)
+    expect(r.identity).toBe(false)
+    expect(layoutScaleOf(r.layers[0]!)).toBeCloseTo(0.5, 9)   // W0/W
+  })
+})
+
+describe('resolveLayout pins (wider box: 1000×500 design in 3000×500)', () => {
+  // s = 1, spare x = 2000, guard: u = 1000, o = 500
+  it('a left-hugging layer keeps its distance from the left edge (plus the guard offset)', () => {
+    const l = createRectLayer({ x: 0.1, y: 0.5, w: 0.1, h: 0.1 })   // centre 100, box 50..150
+    const r = resolveLayout(doc([l]), 3000, 500)
+    expect(r.layers[0]!.x * 3000).toBeCloseTo(500 + 100, 6)
+    expect(r.layers[0]!.y).toBeCloseTo(0.5, 9)
+    expect(layoutScaleOf(r.layers[0]!)).toBeCloseTo(1000 / 3000, 9)   // s·W0/W
+    // every size is a fraction of the frame WIDTH: h 0.1 ⇒ 100 design px, y 200..300
+    expect(r.boxes.get(l.id)).toEqual({ x: 550, y: 200, w: 100, h: 100 })
+  })
+  it('a right-hugging layer keeps its distance from the right edge', () => {
+    const l = createRectLayer({ x: 0.9, y: 0.5, w: 0.1, h: 0.1 })   // centre 900
+    const r = resolveLayout(doc([l]), 3000, 500)
+    expect(r.layers[0]!.x * 3000).toBeCloseTo(500 + 900 + 1000, 6)
+  })
+  it('a centred layer stays centred', () => {
+    const l = createRectLayer({ x: 0.5, y: 0.5, w: 0.1, h: 0.1 })
+    const r = resolveLayout(doc([l]), 3000, 500)
+    expect(r.layers[0]!.x).toBeCloseTo(0.5, 9)
+  })
+  it('a full-frame background stretches to the REAL box edges (bleed), ignoring the guard', () => {
+    const bg = createRectLayer({ x: 0.5, y: 0.5, w: 1, h: 0.5 })
+    const r = resolveLayout(doc([bg]), 3000, 500)
+    expect(r.boxes.get(bg.id)).toEqual({ x: 0, y: 0, w: 3000, h: 500 })
+  })
+  it('an explicit relative pin slides proportionally', () => {
+    const l = createRectLayer({ x: 0.25, y: 0.5, w: 0.1, h: 0.1, pins: { h: 'relative' } })
+    const r = resolveLayout(doc([l]), 3000, 500)
+    expect(r.layers[0]!.x * 3000).toBeCloseTo(500 + 250 + 1000 * 0.25, 6)
+  })
+  it('a wide boxed text stretches its box and, top-pinned, keeps its top edge', () => {
+    const t = createTextLayer({ x: 0.5, y: 0.1, boxW: 0.9, fontSize: 0.05, lineHeight: 1, text: 'x' })
+    const measure = { measureText: (s: string) => ({ width: s.length * 10 }), set font(_v: string) {}, letterSpacing: '0px' } as unknown as CanvasRenderingContext2D
+    const r = resolveLayout(doc([t]), 3000, 500, { measureCtx: measure })
+    const out = r.layers[0]! as typeof t
+    expect(out.boxW! * 3000 * layoutScaleOf(out)).toBeCloseTo(900 + 1000, 6)   // stretched by u
+  })
+})
+
+describe('resolveLayout narrower box (1000×500 design in 500×500)', () => {
+  // s = 0.5, spare y = 250, guard u = 250, o = 0
+  it('everything shrinks; a top layer keeps its top gap scaled, a bottom layer its bottom gap', () => {
+    const top = createRectLayer({ id: 'top', x: 0.5, y: 0.15, w: 0.1, h: 0.1 })   // design box y 25..125
+    const bot = createRectLayer({ id: 'bot', x: 0.5, y: 0.85, w: 0.1, h: 0.1 })   // design box y 375..475
+    const r = resolveLayout(doc([top, bot]), 500, 500)
+    expect(r.boxes.get('top')!.y).toBeCloseTo(12.5, 6)
+    expect(r.boxes.get('bot')!.y + r.boxes.get('bot')!.h).toBeCloseTo(500 - 12.5, 6)
+    expect(layoutScaleOf(r.layers[0]!)).toBeCloseTo(1, 9)   // s·W0/W = 0.5·1000/500
+  })
+})
+
+describe('resolveLayout units and sections', () => {
+  it('a group moves as one rigid unit by the group\'s pins', () => {
+    const a = createRectLayer({ id: 'a', x: 0.1, y: 0.5, w: 0.1, h: 0.1, groupId: 'g' })
+    const b = createRectLayer({ id: 'b', x: 0.3, y: 0.5, w: 0.1, h: 0.1, groupId: 'g' })
+    const r = resolveLayout(doc([a, b], { groups: [{ id: 'g', pins: { h: 'right' } }] }), 3000, 500)
+    const ax = r.layers[0]!.x * 3000, bx = r.layers[1]!.x * 3000
+    expect(bx - ax).toBeCloseTo(200, 6)                   // arrangement kept (s = 1)
+    expect(ax).toBeCloseTo(500 + 100 + 1000, 6)           // right pin
+  })
+  it('a layer inside a grid section holds to that section', () => {
+    const grid = { ...defaultGrid(), mode: 'explicit' as const, columns: 2, rows: 1, margin: 0, gutter: 0 }
+    // section 0 spans 0..500 at the design; layer near its right edge
+    const l = createRectLayer({ x: 0.45, y: 0.5, w: 0.05, h: 0.1 })   // box 425..475
+    const r = resolveLayout(doc([l], { grid }), 3000, 500)
+    // box grid: 2 columns of 1500 (s = 1, spare shared); section 0 = 0..1500, spare 1000 → u 500 o 250
+    // right pin inside section 0: 250 + 450 + 500 = 1200
+    expect(r.layers[0]!.x * 3000).toBeCloseTo(1200, 6)
+    expect(r.grid!.regions[0]).toEqual({ x: 0, y: 0, w: 1500, h: 500 })
+  })
+  it('holdTo: frame overrides the section', () => {
+    const grid = { ...defaultGrid(), mode: 'explicit' as const, columns: 2, rows: 1, margin: 0, gutter: 0 }
+    const l = createRectLayer({ x: 0.45, y: 0.5, w: 0.05, h: 0.1, pins: { holdTo: 'frame' } })
+    const r = resolveLayout(doc([l], { grid }), 3000, 500)
+    expect(r.layers[0]!.x * 3000).toBeCloseTo(500 + 450, 6)   // left of the frame centre → left pin
+  })
+  it('motion tracks are remapped and non-position tracks kept', () => {
+    const l = createRectLayer({ id: 'a', x: 0.1, y: 0.5, w: 0.1, h: 0.1 })
+    const motion = { fps: 30, duration: 1, motionx: [{ path: 'layers.a.x', type: 'number', keyframes: [{ t: 0, value: 0.1, ease: { type: 'linear' } }, { t: 1, value: 0.2, ease: { type: 'linear' } }] }] } as unknown as FrameDoc['motion']
+    const r = resolveLayout(doc([l], { motion }), 3000, 500)
+    expect(r.motion!.motionx![0]!.keyframes[0]!.value).toBeCloseTo((500 + 100) / 3000, 9)
+  })
+})
