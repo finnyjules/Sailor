@@ -40,6 +40,13 @@ describe('placeLayer', () => {
     expect(out.h).toBeCloseTo(0.6, 9)
     expect(out.w).toBeCloseTo(1.2, 9)
   })
+  it('a placed layer takes its crop mask with it: same delta, size by k', () => {
+    const r = createRectLayer({ x: 0.5, y: 0.5, w: 0.2, h: 0.1, mask: { kind: 'rect', x: 0.5, y: 0.5, w: 0.2, h: 0.1 } })
+    const out = placeLayer(r, { cx: 1500, cy: 250 }, W, H, k, null) as any
+    expect(out.x).toBe(0.75); expect(out.y).toBe(0.25)
+    // centre moved by +0.25 of W and −0.25 of H; sizes are canvas fractions, so × k
+    expect(out.mask).toEqual({ kind: 'rect', x: 0.75, y: 0.25, w: 0.1, h: 0.05 })
+  })
   it('a cloner\'s stamp offsets are layout-scaled (x/radius by k, y by kv); stagger untouched', () => {
     const kv = 0.25
     const cloner = { ...DEFAULT_CLONER, enabled: true, mode: 'linear' as const, countX: 3, countY: 2, spacingX: 0.2, spacingY: 0.3, nudgeX: 0.04, nudgeY: 0.08, staggerX: 0.5, staggerY: 0.25, radius: 0.3 }

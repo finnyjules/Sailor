@@ -23,7 +23,9 @@ export function placeLayer(layer: LocalLayer, t: Target, W: number, H: number, k
   const patch: Record<string, unknown> = {}
   if (!same(layer.x, x)) patch.x = x
   if (!same(layer.y, y)) patch.y = y
-  if (t.w != null || t.h != null) stretchInto(layer, t, unit, W, x, y, patch)
+  const stretching = t.w != null || t.h != null
+  if (stretching) stretchInto(layer, t, unit, W, x, y, patch)
+  else maskAlong(layer, x, y, k, patch)
   scaleCloner(layer, k, kv, patch)
   if (Object.keys(patch).length === 0) return layer
   return { ...layer, ...patch } as LocalLayer
@@ -50,6 +52,22 @@ function scaleCloner(layer: LocalLayer, k: number, kv: number, patch: Record<str
     spacingX: mul(c.spacingX, k), nudgeX: mul(c.nudgeX, k), radius: mul(c.radius, k),
     spacingY: mul(c.spacingY, kv), nudgeY: mul(c.nudgeY, kv),
   } as Cloner
+}
+
+/**
+ * A crop mask travels with the layer it crops. `LayerMask` is stored in CANVAS space
+ * (`x` a fraction of W, `y` of H, `w`/`h` of W) and applyMaskClip clips with it BEFORE
+ * paintLayer builds the per-layer transform, so it never passes under `k`: the centre
+ * moves by the same delta as the layer's, and the size is the design size scaled by
+ * the fit — drawn = mask.w·W, wanted = mask.w·W0·s = mask.w·W·k.
+ * Only for a PLACED layer: a stretched image's mask is the cover crop stretchInto just
+ * computed for the new target box, and that one is already right.
+ */
+function maskAlong(layer: LocalLayer, x: number, y: number, k: number, patch: Record<string, unknown>) {
+  const m = layer.mask
+  if (!m) return
+  const next: LayerMask = { kind: m.kind, x: m.x + (x - layer.x), y: m.y + (y - layer.y), w: m.w * k, h: m.h * k }
+  if (!sameMask(m, next)) patch.mask = next
 }
 
 // `cx`/`cy` = the layer's resolved centre in the box's normalized space: a crop mask
