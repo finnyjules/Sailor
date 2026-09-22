@@ -16,7 +16,10 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import MotionCopiesPanel from '~/components/vue-canvas/compositor/MotionCopiesPanel.vue'
+import MotionCopiesPreview from '~/components/vue-canvas/compositor/MotionCopiesPreview.vue'
+import MotionInspector from '~/components/vue-canvas/compositor/MotionInspector.vue'
 import { DEFAULT_CLONER, type Cloner } from '~/composables/useCloner'
+import type { StoredBehaviour } from '~/lib/motionx'
 
 function makeCloner(patch: Partial<Cloner> = {}): Cloner {
   return { ...DEFAULT_CLONER, enabled: true, ...patch }
@@ -99,6 +102,90 @@ describe('MotionCopiesPanel: Order', () => {
     const buttons = order.findAll('[role="radio"]')
     expect(buttons.map((b) => b.attributes('data-value'))).toEqual(['first', 'last', 'centre', 'random'])
     expect(buttons.map((b) => b.text())).toEqual(['First to last', 'Last to first', 'Centre out', 'Random'])
+  })
+})
+
+// ── The Copies gallery preview and the Copies inspector rows (Task 8) ────────
+// The preview is one component for all five tiles; the inspector shows ONE Direction row for
+// the four Copies kinds that run both ways, and none for `copies.spin`.
+
+function behaviour(kind: string, params: Record<string, unknown> = {}): StoredBehaviour {
+  return { id: 'b1', kind, params, timing: { start: 0, duration: 1 } } as StoredBehaviour
+}
+function mountInspector(kind: string, params: Record<string, unknown> = {}) {
+  return mount(MotionInspector, {
+    props: {
+      motionx: [], behaviours: [behaviour(kind, params)],
+      selection: { kind: 'behaviour', path: 'b1' }, duration: 5, t: 0,
+    },
+  })
+}
+
+describe('MotionCopiesPreview', () => {
+  const MODES = ['build', 'spread', 'spin', 'fan', 'fade']
+
+  it('mounts and unmounts for all five preview kinds, both directions, without throwing', () => {
+    for (const mode of MODES) {
+      for (const dir of [undefined, 'in', 'out']) {
+        const w = mount(MotionCopiesPreview, { props: { mode, dir } })
+        expect(w.find('canvas').exists()).toBe(true)
+        // The tiny shared canvas every gallery preview draws on.
+        expect(w.get('canvas').attributes('width')).toBe('48')
+        expect(w.get('canvas').attributes('height')).toBe('30')
+        w.unmount()
+      }
+    }
+  })
+
+  it('survives an unknown mode — a tile added before its branch exists must not crash the gallery', () => {
+    const w = mount(MotionCopiesPreview, { props: { mode: 'not-a-mode' } })
+    expect(w.find('canvas').exists()).toBe(true)
+    w.unmount()
+  })
+})
+
+describe('the Copies inspector rows', () => {
+  it('shows a Direction row for copies.build, In / Out, defaulting to In', () => {
+    const w = mountInspector('copies.build')
+    const row = w.findComponent('[data-testid="copies-dir"]')
+    expect(row.exists()).toBe(true)
+    expect(row.props('modelValue')).toBe('in')
+    expect(row.props('options')).toEqual(['in', 'out'])
+    expect(row.props('optionLabels')).toEqual(['In', 'Out'])
+    expect(row.props('label')).toBe('Direction')
+  })
+
+  it('shows NO Direction row for copies.spin — a ring turns one way', () => {
+    const w = mountInspector('copies.spin')
+    expect(w.find('[data-testid="copies-dir"]').exists()).toBe(false)
+    // The bar is still a normal behaviour card: it keeps its timing rows.
+    expect(w.find('[data-testid="beh-duration"]').exists()).toBe(true)
+  })
+
+  it('words the spread bar as the gallery tiles do, defaulting to Spread out', () => {
+    const w = mountInspector('copies.spread')
+    const row = w.findComponent('[data-testid="copies-dir"]')
+    expect(row.props('modelValue')).toBe('out')
+    expect(row.props('options')).toEqual(['out', 'in'])
+    expect(row.props('optionLabels')).toEqual(['Spread out', 'Gather in'])
+  })
+
+  it('shows In / Out for fan and fade too, and reads a stored dir back', () => {
+    for (const kind of ['copies.fan', 'copies.fade']) {
+      const w = mountInspector(kind, { dir: 'out' })
+      const row = w.findComponent('[data-testid="copies-dir"]')
+      expect(row.exists(), `${kind} has no Direction row`).toBe(true)
+      expect(row.props('modelValue')).toBe('out')
+      expect(row.props('optionLabels')).toEqual(['In', 'Out'])
+    }
+  })
+
+  it('every Copies bar keeps the Easing card and Open into keyframes', () => {
+    for (const kind of ['copies.build', 'copies.spread', 'copies.spin', 'copies.fan', 'copies.fade']) {
+      const w = mountInspector(kind)
+      expect(w.findComponent({ name: 'MotionEasingCurve' }).exists(), `${kind} lost its easing card`).toBe(true)
+      expect(w.find('[data-testid="beh-open"]').exists(), `${kind} lost Open into keyframes`).toBe(true)
+    }
   })
 })
 

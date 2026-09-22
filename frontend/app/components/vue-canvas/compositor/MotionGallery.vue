@@ -6,6 +6,7 @@
 import { movesForLayer, groupedMoves, type GalleryMove, type LayerCaps, type PreviewKind } from '~/lib/motionx/gallery'
 import MotionDitherPreview from '~/components/vue-canvas/compositor/MotionDitherPreview.vue'
 import MotionSettlePreview from '~/components/vue-canvas/compositor/MotionSettlePreview.vue'
+import MotionCopiesPreview from '~/components/vue-canvas/compositor/MotionCopiesPreview.vue'
 
 const props = defineProps<{ caps: LayerCaps }>()
 defineEmits<{ add: [move: GalleryMove]; close: [] }>()
@@ -15,6 +16,17 @@ const groups = computed(() => groupedMoves(movesForLayer(props.caps)))
 const isLettersPreview = (p: PreviewKind) =>
   p === 'letters-cascade' || p === 'letters-typewriter' || p === 'letters-mask' || p === 'letters-scramble' ||
   p === 'letters-decode' || p === 'letters-slot' || p === 'letters-wave' || p === 'letters-bounce' || p === 'letters-jitter'
+
+// Copies previews (cloner motion, Task 8): all five share ONE component, told apart by the
+// mode after the `copies-` prefix.
+const isCopiesPreview = (p: PreviewKind) =>
+  p === 'copies-build' || p === 'copies-spread' || p === 'copies-spin' || p === 'copies-fan' || p === 'copies-fade'
+const copiesMode = (p: PreviewKind) => p.slice('copies-'.length)
+/** Which way the tile plays. A RECIPE tile — the linear cloner's Spread out / Gather in pair,
+ *  which adds one behaviour per axis — carries its direction on its first part rather than on
+ *  `params`, so reading only `params.dir` would play both of them as a spread. */
+const previewDir = (m: GalleryMove): string | undefined =>
+  (m.params?.dir as string | undefined) ?? (m.recipe?.[0]?.params?.dir as string | undefined)
 
 // Decode/Slot previews swap the letter's GLYPH, so they need extra stacked spans the other
 // (pure-transform) previews don't — small fixed decoy sets, purely decorative.
@@ -61,6 +73,8 @@ const SLOT_FILLERS: Record<number, [string, string]> = { 0: ['K', 'Q'], 1: ['9',
             <MotionDitherPreview v-else-if="m.preview === 'assemble'" :out="m.params?.dir === 'out'" mode="assemble" class="absolute inset-0 h-full w-full" />
             <!-- settle preview: same tiny canvas, a cheap 2D stand-in for the tile's own shader effect -->
             <MotionSettlePreview v-else-if="m.preview === 'settle'" :effect="(m.params?.effect as string) ?? 'slice'" :out="m.params?.dir === 'out'" class="absolute inset-0 h-full w-full" />
+            <!-- copies previews: a ring of copies playing the one cloner dial this tile animates -->
+            <MotionCopiesPreview v-else-if="isCopiesPreview(m.preview)" :mode="copiesMode(m.preview)" :dir="previewDir(m)" class="absolute inset-0 h-full w-full" />
             <!-- transform/opacity previews: a small mark that plays the move on loop -->
             <span v-else-if="m.preview !== 'scroll' && m.preview !== 'morph'"
               class="prev-mark absolute left-1/2 top-1/2 w-3 h-3 -ml-1.5 -mt-1.5 rounded-sm bg-[#7c9cff]"

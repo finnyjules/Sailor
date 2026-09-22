@@ -22,6 +22,7 @@ import '@vue-flow/core/dist/theme-default.css'
 import CompositorModal from '~/components/vue-canvas/CompositorModal.vue'
 import ArtifactFrameNode from '~/components/vue-canvas/ArtifactFrameNode.vue'
 import { createTextLayer, createRectLayer, createImageLayer, createLineLayer } from '~/composables/useCompositorLayers'
+import { DEFAULT_CLONER } from '~/composables/useCloner'
 
 definePageMeta({ layout: false })
 
@@ -58,6 +59,28 @@ const roundShape = createTextLayer({ text: 'AROUND A CLOVER', x: 0.72, y: 0.72, 
 const drawnGuide = createTextLayer({ text: 'A DRAWN PATH', x: 0.25, y: 0.7, fontSize: 0.032, color: '#0e6bff' })
 ;(drawnGuide as any).align = 'center'
 ;(drawnGuide as any).path = { follow: 'custom', d: 'M-0.15 0 C -0.15 -0.18, 0.15 0.18, 0.15 0', size: 0.3 }
+
+// ── Cloner fixture (cloner motion, Task 8) ──────────────────────────────────
+// A text layer stamped SIX times round a ring — the layer the Motion tab's Copies card and
+// the Copies gallery tiles need: the cloner is `enabled`, so `layerCaps` reports
+// `cloner: 'radial'` and the whole Copies group is offered (the radial-only tiles included).
+// Six copies at radius 0.12 of the frame WIDTH, on a 1280×720 artboard, put the ring's
+// copies roughly 150px out — far enough apart to tell one copy's progress from the next's
+// when a stagger is scrubbed, small enough to stay inside the frame.
+//
+// To exercise the LINEAR tiles instead (Spread out / Gather in become a two-axis recipe, and
+// Build drives `countX` rather than `count`), swap the three lines marked below for:
+//   mode: 'linear', countX: 3, countY: 2, spacingX: 0.22, spacingY: 0.22,
+const clonedText = createTextLayer({
+  id: 'clonertext', text: 'COPY', x: 0.5, y: 0.5, fontSize: 0.045, color: '#ff2d2d',
+} as any)
+;(clonedText as any).cloner = {
+  ...DEFAULT_CLONER,
+  enabled: true,
+  mode: 'radial',   // ← linear grid: 'linear'
+  count: 6,         // ← linear grid: countX: 3, countY: 2
+  radius: 0.12,     // ← linear grid: spacingX: 0.22, spacingY: 0.22
+}
 
 // A local image layer — exercises the layer-list thumbnail (its own pixels) and
 // double-click rename. `filename` points at a real ComfyUI input image so the
@@ -154,7 +177,7 @@ const node = reactive({
     images: [] as string[],
     properties: {
       // NOTE: no `sailor_frameSchema` — this frame has never been migrated.
-      sailor_localLayers: [pic, plain, tracked, underlined, struck, upper, combo, a1, a2, b1, maskRect, caption,
+      sailor_localLayers: [pic, clonedText, plain, tracked, underlined, struck, upper, combo, a1, a2, b1, maskRect, caption,
         strokePlate, strokeCenter, strokeInside, strokeOutside, strokeDashedRect, strokeDashedLine,
         onRing, underRing, arched, waved, roundShape, drawnGuide],
       sailor_localGroups: [
@@ -231,7 +254,7 @@ const nodeTypes = { 'artifact-frame': markRaw(ArtifactFrameNode) } as any
 // back already schema 2, which is when "no re-migration, no duplicate layers"
 // becomes a real assertion. Bump the version suffix whenever the fixture above
 // changes, so an old blob can never masquerade as a saved edit.
-const SAVE_KEY = 'frameLab:save:v1'
+const SAVE_KEY = 'frameLab:save:v2'
 const persisted = ref(false)
 if (import.meta.client) {
   try {

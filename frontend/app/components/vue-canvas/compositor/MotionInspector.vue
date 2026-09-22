@@ -224,6 +224,21 @@ const DITHER_PATTERN_LABELS = DITHER_PATTERNS.map((p) => p.label)
 const SETTLE_EFFECT_OPTIONS = SETTLE_EFFECTS.map((e) => e.id)
 const SETTLE_EFFECT_LABELS = SETTLE_EFFECTS.map((e) => e.label)
 
+// ── Copies bars (cloner motion, Task 8) ──────────────────────────────────────
+// Four of the five Copies behaviours run either way round, so they show ONE Direction row —
+// the same segmented row a Fade bar shows. `copies.spin` is the fifth and has none: a ring
+// turns one way, and its compiler reads no `dir`. Spread words its two ways as the gallery
+// tiles do (Spread out / Gather in) rather than as In / Out, and its 'out' is the GROWING
+// one; every default below is the compiler's own, never a second guess at it.
+const SPREAD_DIRS = ['out', 'in']
+const SPREAD_DIR_LABELS = ['Spread out', 'Gather in']
+const COPIES_DIR_KINDS = ['copies.build', 'copies.spread', 'copies.fan', 'copies.fade']
+const isCopiesDirBeh = computed(() => COPIES_DIR_KINDS.includes(behaviour.value?.kind ?? ''))
+const isCopiesSpread = computed(() => behaviour.value?.kind === 'copies.spread')
+const copiesDirOptions = computed(() => (isCopiesSpread.value ? SPREAD_DIRS : IN_OUT))
+const copiesDirLabels = computed(() => (isCopiesSpread.value ? SPREAD_DIR_LABELS : IN_OUT_LABELS))
+const copiesDirDefault = computed(() => (isCopiesSpread.value ? 'out' : 'in'))
+
 // ── Letter behaviours (Task 5) ───────────────────────────────────────────────
 const isTextBeh = computed(() => behaviour.value != null && isTextBehaviour(behaviour.value))
 const BY_OPTIONS = ['letters', 'words', 'lines']
@@ -591,6 +606,11 @@ function onGradient(g: Gradient) {
           @update:model-value="(v) => setBehNum('settle-strength', { strength: v })" />
         <StudioSwitch data-testid="settle-fade" label="Fade while it settles"
           :model-value="settle.fade" @update:model-value="(v) => setBehParams({ fade: v })" />
+      </template>
+      <template v-else-if="isCopiesDirBeh">
+        <StudioSegmentedRow data-testid="copies-dir" label="Direction"
+          :model-value="enumParam('dir', copiesDirDefault)" :options="copiesDirOptions" :option-labels="copiesDirLabels"
+          @update:model-value="(v) => setBehParams({ dir: v })" />
       </template>
       <template v-else-if="behaviour.kind === 'gradientMorph'">
         <StudioSegmentedRow label="Mode"
