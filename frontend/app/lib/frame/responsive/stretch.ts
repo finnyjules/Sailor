@@ -1,4 +1,5 @@
 import { wrappedTextLines, type LayerMask, type LocalLayer, type TextLayer, type ImageLayer, type WiredLayer } from '~/composables/useCompositorLayers'
+import type { Cloner } from '~/composables/useCloner'
 import { wiredLayerHeight } from '~/lib/compositor/wiredLayer'
 
 const EPS = 1e-9
@@ -10,18 +11,45 @@ export interface Target { cx: number; cy: number; w?: number; h?: number }
 
 /**
  * Rewrite one layer for its resolved box (box px). `k` is the layoutScale the
- * painter will apply, so a size of T px is stored as T / (W·k). Position only
- * when `w`/`h` are absent. Returns the SAME reference when nothing changes.
+ * painter will apply, so a size of T px is stored as T / (W·k). `kv` is its
+ * vertical twin (s·H0/H) — only the cloner needs it, because its `dy` is a
+ * fraction of the frame HEIGHT while every size field is a fraction of the width.
+ * Position only when `w`/`h` are absent. Returns the SAME reference when nothing
+ * changes.
  */
-export function placeLayer(layer: LocalLayer, t: Target, W: number, H: number, k: number, ctx: CanvasRenderingContext2D | null): LocalLayer {
+export function placeLayer(layer: LocalLayer, t: Target, W: number, H: number, k: number, ctx: CanvasRenderingContext2D | null, kv: number = k): LocalLayer {
   const x = t.cx / W, y = t.cy / H
   const unit = W * k
   const patch: Record<string, unknown> = {}
   if (!same(layer.x, x)) patch.x = x
   if (!same(layer.y, y)) patch.y = y
   if (t.w != null || t.h != null) stretchInto(layer, t, unit, W, x, y, patch)
+  scaleCloner(layer, k, kv, patch)
   if (Object.keys(patch).length === 0) return layer
   return { ...layer, ...patch } as LocalLayer
+}
+
+/**
+ * A cloner's stamp offsets ride on the LAYER's own coordinates — the painter draws
+ * each stamp at `(layer.x + c.dx)·W`, `(layer.y + c.dy)·H`, neither of which passes
+ * under the painter's layout scale `k` (that folds into the stamp's own scale, about
+ * the stamp's centre). So the offsets have to be scaled here or the arrangement
+ * spreads out with the box: `spacingX`/`nudgeX`/`radius` are width fractions (× k),
+ * `spacingY`/`nudgeY` height fractions (× kv). `radius` needs no vertical twin — the
+ * painter passes `aspect = W/H` into expandClones, which makes the radial `dy` a
+ * width fraction in disguise (`radius·(W/H)·sin·H = radius·sin·W`). `staggerX`/`Y`
+ * are multipliers OF the spacings, so they scale with them and must stay put.
+ */
+function scaleCloner(layer: LocalLayer, k: number, kv: number, patch: Record<string, unknown>) {
+  const c = layer.cloner
+  if (!c?.enabled) return
+  if (same(k, 1) && same(kv, 1)) return
+  const mul = (v: number | undefined, f: number) => (typeof v === 'number' ? v * f : v)
+  patch.cloner = {
+    ...c,
+    spacingX: mul(c.spacingX, k), nudgeX: mul(c.nudgeX, k), radius: mul(c.radius, k),
+    spacingY: mul(c.spacingY, kv), nudgeY: mul(c.nudgeY, kv),
+  } as Cloner
 }
 
 // `cx`/`cy` = the layer's resolved centre in the box's normalized space: a crop mask

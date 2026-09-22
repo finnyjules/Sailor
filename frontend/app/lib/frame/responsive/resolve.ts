@@ -47,6 +47,10 @@ export function resolveLayout(frame: FrameDoc, W: number, H: number, opts: Resol
   const spare = spareRoom(W0, H0, W, H)
   const k = s * W0 / W                       // layoutScale for every non-keepSize layer
   const kKeep = W0 / W                        // layoutScale for a keepSize layer
+  // The same two scales on the vertical axis, for the one thing stored as a fraction of
+  // the frame HEIGHT rather than its width: a cloner's `dy` (see scaleCloner).
+  const kv = s * H0 / H
+  const kvKeep = H0 / H
   const ctx = opts.measureCtx ?? null
   const sections = sectionsAt(frame.grid, W0, H0, s, W, H)
   const gridOut: LayoutResult['grid'] = sections ? { xs: sections.box.xs, ys: sections.box.ys, regions: sections.box.regions } : null
@@ -72,6 +76,7 @@ export function resolveLayout(frame: FrameDoc, W: number, H: number, opts: Resol
     const keep = !!unit.pins?.keepSize
     const kSize = keep ? 1 : s
     const kLayer = keep ? kKeep : k
+    const kvLayer = keep ? kvKeep : kv
     // Keeping its size is the opposite of stretching: a keepSize unit is always PLACED, so a
     // 'both' pin — stored or inferred — reads as 'center' on both axes.
     const canStretch = unit.canStretch && !keep
@@ -111,7 +116,7 @@ export function resolveLayout(frame: FrameDoc, W: number, H: number, opts: Resol
         target = { cx: ucx2 + (lcx - ucx) * kSize, cy: ucy2 + (lcy - ucy) * kSize }
         boxes.set(id, unitBox)
       }
-      let out = placeLayer(layer, target, W, H, kLayer, ctx)
+      let out = placeLayer(layer, target, W, H, kLayer, ctx, kvLayer)
       if (Math.abs(kLayer - 1) > 1e-12) out = { ...out, layoutScale: kLayer } as unknown as LocalLayer
       placed.set(id, out)
     }

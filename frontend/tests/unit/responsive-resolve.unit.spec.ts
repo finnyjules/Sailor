@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { createRectLayer, createTextLayer } from '~/composables/useCompositorLayers'
+import { createRectLayer, createTextLayer, paintLayerStack, type LocalLayer } from '~/composables/useCompositorLayers'
+import { DEFAULT_CLONER } from '~/composables/useCloner'
 import { defaultGrid } from '~/lib/frame/grid'
 import { resolveLayout, layoutScaleOf } from '~/lib/frame/responsive'
 import type { FrameDoc } from '~/lib/frame/responsive/types'
@@ -8,6 +9,45 @@ const doc = (layers: FrameDoc['layers'], extra: Partial<FrameDoc> = {}): FrameDo
   responsive: true, designW: 1000, designH: 500, layers, stackOrder: layers.map(l => `l:${l.id}`),
   groups: [], grid: null, motion: null, ...extra,
 })
+
+type M = { a: number; b: number; c: number; d: number; e: number; f: number }
+type Rec = { x: number; y: number; w: number; h: number; m: M }
+
+/** A recording context that tracks the CTM and logs every roundRect with the CTM at that
+ *  moment. A PRIVATE copy of the equivalence spec's harness — the two specs must not share
+ *  mutable state. */
+function recorder(W: number, H: number) {
+  let m: M = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }
+  const stack: M[] = []
+  const rects: Rec[] = []
+  const ctx: any = {
+    canvas: { width: W, height: H },
+    globalAlpha: 1, globalCompositeOperation: 'source-over', filter: 'none',
+    fillStyle: '#000', strokeStyle: '#000', lineWidth: 1,
+    shadowColor: 'transparent', shadowBlur: 0, shadowOffsetX: 0, shadowOffsetY: 0,
+    save() { stack.push({ ...m }) }, restore() { m = stack.pop() ?? m },
+    translate(x: number, y: number) { m = { ...m, e: m.e + m.a * x + m.c * y, f: m.f + m.b * x + m.d * y } },
+    scale(sx: number, sy: number) { m = { ...m, a: m.a * sx, b: m.b * sx, c: m.c * sy, d: m.d * sy } },
+    rotate() {}, transform() {},
+    setTransform(a: any, b?: number, c?: number, d?: number, e?: number, f?: number) {
+      if (typeof a === 'object' && a !== null) m = { a: a.a, b: a.b, c: a.c, d: a.d, e: a.e, f: a.f }
+      else if (typeof a === 'number') m = { a, b: b!, c: c!, d: d!, e: e!, f: f! }
+    },
+    getTransform() { return { ...m } },
+    beginPath() {}, closePath() {}, moveTo() {}, lineTo() {}, rect() {}, ellipse() {},
+    clip() {}, fill() {}, stroke() {}, fillRect() {}, clearRect() {}, drawImage() {},
+    setLineDash() {}, getLineDash() { return [] },
+    roundRect(x: number, y: number, w: number, h: number) { rects.push({ x, y, w, h, m: { ...m } }) },
+  }
+  return { ctx: ctx as CanvasRenderingContext2D, rects }
+}
+
+/** Device-space centre X of each recorded rect, in paint order. */
+const paintedCentresX = (layers: LocalLayer[], W: number, H: number): number[] => {
+  const { ctx, rects } = recorder(W, H)
+  paintLayerStack(ctx, W, H, layers.map(l => ({ type: 'local' as const, key: `l:${l.id}`, layer: l })), layers)
+  return rects.map(r => r.m.e + r.m.a * (r.x + r.w / 2))
+}
 
 describe('resolveLayout identity', () => {
   it('a fixed Frame comes back by reference', () => {
@@ -121,6 +161,19 @@ describe('resolveLayout units and sections', () => {
     const l = createRectLayer({ x: 0.45, y: 0.5, w: 0.05, h: 0.1, pins: { holdTo: 'frame' } })
     const r = resolveLayout(doc([l], { grid }), 3000, 500)
     expect(r.layers[0]!.x * 3000).toBeCloseTo(500 + 450, 6)   // left of the frame centre → left pin
+  })
+  it('a cloner\'s stamps keep their design spacing in a wider box', () => {
+    const cloner = { ...DEFAULT_CLONER, enabled: true, mode: 'linear' as const, countX: 2, countY: 1, spacingX: 0.2, spacingY: 0 }
+    const l = createRectLayer({ id: 'r', x: 0.2, y: 0.5, w: 0.1, h: 0.1, cloner })
+    const r = resolveLayout(doc([l]), 3000, 500)
+    const out = r.layers[0]! as typeof l
+    expect(out.cloner!.spacingX).toBeCloseTo(0.2 * (1000 / 3000), 12)   // × k
+    // …and end to end: the second stamp lands 200 box px right of the first (s = 1), not 600.
+    // Sorted by x, not taken in paint order: expandClones deliberately stamps the ORIGINAL
+    // last so it sits on top, so the copies arrive right-to-left here.
+    const cx = paintedCentresX([out], 3000, 500).sort((a, b) => a - b)
+    expect(cx).toHaveLength(2)
+    expect(cx[1]! - cx[0]!).toBeCloseTo(200, 6)
   })
   it('motion tracks are remapped and non-position tracks kept', () => {
     const l = createRectLayer({ id: 'a', x: 0.1, y: 0.5, w: 0.1, h: 0.1 })

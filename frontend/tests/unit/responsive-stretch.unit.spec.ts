@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createRectLayer, createTextLayer, createImageLayer } from '~/composables/useCompositorLayers'
+import { DEFAULT_CLONER } from '~/composables/useCloner'
 import { placeLayer, textNaturalHeightPx } from '~/lib/frame/responsive/stretch'
 
 const W = 2000, H = 1000, k = 0.5   // e.g. design 1000 wide fitted ×1 into a 2000 box → k = 0.5
@@ -38,6 +39,26 @@ describe('placeLayer', () => {
     const out = placeLayer(img, { cx: 1000, cy: 500, w: 200, h: 600 }, W, H, k, null) as any
     expect(out.h).toBeCloseTo(0.6, 9)
     expect(out.w).toBeCloseTo(1.2, 9)
+  })
+  it('a cloner\'s stamp offsets are layout-scaled (x/radius by k, y by kv); stagger untouched', () => {
+    const kv = 0.25
+    const cloner = { ...DEFAULT_CLONER, enabled: true, mode: 'linear' as const, countX: 3, countY: 2, spacingX: 0.2, spacingY: 0.3, nudgeX: 0.04, nudgeY: 0.08, staggerX: 0.5, staggerY: 0.25, radius: 0.3 }
+    const out = placeLayer(createRectLayer({ cloner }), { cx: 1500, cy: 250 }, W, H, k, null, kv) as any
+    expect(out.cloner.spacingX).toBeCloseTo(0.1, 12)
+    expect(out.cloner.nudgeX).toBeCloseTo(0.02, 12)
+    expect(out.cloner.radius).toBeCloseTo(0.15, 12)
+    expect(out.cloner.spacingY).toBeCloseTo(0.075, 12)
+    expect(out.cloner.nudgeY).toBeCloseTo(0.02, 12)
+    expect(out.cloner.staggerX).toBe(0.5)      // a multiplier OF the spacing
+    expect(out.cloner.staggerY).toBe(0.25)
+    expect(out.cloner.countX).toBe(3)
+  })
+  it('k = kv = 1 leaves the cloner by reference', () => {
+    const cloner = { ...DEFAULT_CLONER, enabled: true, spacingX: 0.2 }
+    const r = createRectLayer({ x: 0.5, y: 0.5, cloner })
+    const out = placeLayer(r, { cx: 1000, cy: 500 }, W, H, 1, null, 1)
+    expect(out).toBe(r)
+    expect((placeLayer(r, { cx: 1500, cy: 500 }, W, H, 1, null, 1) as any).cloner).toBe(cloner)
   })
   it('a boxed text layer stretches its boxW; fontSize untouched', () => {
     const t = createTextLayer({ boxW: 0.3, fontSize: 0.05 })
