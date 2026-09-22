@@ -47,7 +47,7 @@ import LayoutTile from '~/components/vue-canvas/compositor/LayoutTile.vue'
 import { snapshotFrameAsTemplate, addSlot } from '~/lib/frametemplate/author'
 import { placeTemplate, setInstanceSlot, freezeInstance, staleInstances, updateInstance, applySlotToLayer } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance, SlotKind } from '~/lib/frametemplate/types'
-import { resolveLayout, frameDocFromProps, isResponsiveFrame, effectivePins, type LayoutResult, type Pins } from '~/lib/frame/responsive'
+import { resolveLayout, frameDocFromProps, isResponsiveFrame, effectivePins, guideLinesFor, type LayoutResult, type Pins } from '~/lib/frame/responsive'
 import ResponsivePinsCard from './ResponsivePinsCard.vue'
 import { atDesignSize as isAtDesignSize, clampViewSize, resizeViewFromEdge, shapePresets, readoutLabel as viewReadoutLabel } from '~/lib/frame/responsive/viewport'
 import { useTemplateLibrary } from '~/composables/useTemplateLibrary'
@@ -822,6 +822,17 @@ function cleanPins(p: Record<string, unknown>): Pins | undefined {
 function backToAutomatic(unitId: string) {
   setPins(unitId, { h: undefined, v: undefined, keepSize: undefined, holdTo: undefined } as any)
 }
+
+// Guide lines for the selected unit at the current viewing size. `resolved` is null
+// at the design size (identity), so guides only show off-design — that is intended.
+const selectionGuides = computed(() => {
+  const r = resolved.value, sp = selectedPins.value
+  if (!r || !sp) return null
+  const box = r.boxes.get(sp.unitId) ?? r.boxes.get(selectedLocalId.value ?? '')
+  const maps = r.maps.get(sp.unitId) ?? r.maps.get(selectedLocalId.value ?? '')
+  if (!box || !maps) return null
+  return guideLinesFor(box, maps, viewSize.w, viewSize.h)
+})
 
 // Layout tab — the poster engine's sheet over this frame's own elements.
 const layoutSheet = useLayoutSheet({
@@ -7746,6 +7757,23 @@ onUnmounted(() => {
             :x2="localHandlePositions.rot.x" :y2="localHandlePositions.rot.y"
             stroke="#ffffff" stroke-width="2" vector-effect="non-scaling-stroke"
           />
+        </svg>
+
+        <!-- Responsive guides: dashed amber lines to the edges the selected unit holds.
+             Only present off the design size (selectionGuides is null at identity / on a fixed frame). -->
+        <svg
+          v-if="selectionGuides"
+          class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"
+          :viewBox="`0 0 ${canvasDisplay.w} ${canvasDisplay.h}`"
+        >
+          <g stroke="#fbbf24" stroke-width="1" stroke-dasharray="3 3" opacity="0.9" vector-effect="non-scaling-stroke">
+            <line v-if="selectionGuides.left != null" :x1="selectionGuides.left * canvasDisplay.w" :y1="(selectionGuides.box.y + selectionGuides.box.h / 2) / viewSize.h * canvasDisplay.h" x2="0" :y2="(selectionGuides.box.y + selectionGuides.box.h / 2) / viewSize.h * canvasDisplay.h" />
+            <line v-if="selectionGuides.right != null" :x1="selectionGuides.right * canvasDisplay.w" :y1="(selectionGuides.box.y + selectionGuides.box.h / 2) / viewSize.h * canvasDisplay.h" :x2="canvasDisplay.w" :y2="(selectionGuides.box.y + selectionGuides.box.h / 2) / viewSize.h * canvasDisplay.h" />
+            <line v-if="selectionGuides.top != null" :x1="(selectionGuides.box.x + selectionGuides.box.w / 2) / viewSize.w * canvasDisplay.w" :y1="selectionGuides.top * canvasDisplay.h" :x2="(selectionGuides.box.x + selectionGuides.box.w / 2) / viewSize.w * canvasDisplay.w" y2="0" />
+            <line v-if="selectionGuides.bottom != null" :x1="(selectionGuides.box.x + selectionGuides.box.w / 2) / viewSize.w * canvasDisplay.w" :y1="selectionGuides.bottom * canvasDisplay.h" :x2="(selectionGuides.box.x + selectionGuides.box.w / 2) / viewSize.w * canvasDisplay.w" :y2="canvasDisplay.h" />
+            <line v-if="selectionGuides.centerX" :x1="canvasDisplay.w / 2" y1="0" :x2="canvasDisplay.w / 2" :y2="canvasDisplay.h" />
+            <line v-if="selectionGuides.centerY" x1="0" :y1="canvasDisplay.h / 2" :x2="canvasDisplay.w" :y2="canvasDisplay.h / 2" />
+          </g>
         </svg>
         <template v-if="localHandlePositions && selectedIds.size <= 1 && !editingId && !genActive && !brush.active.value">
           <div
