@@ -632,6 +632,14 @@ function pickViewShape(id: string) {
 }
 function backToDesignSize() { const d = designSize.value; viewSize.w = d.w; viewSize.h = d.h }
 
+// Slice 2 does not edit at a viewing size. Any editing gesture snaps back to the design size
+// first; the existing selection (and its pins card + guides) is what stays visible while looking.
+// Fixed frames (frameIsResponsive false) always fall through, so every gesture behaves as before.
+function viewOnlyGuard(): boolean {
+  if (frameIsResponsive.value && !atDesign.value) { backToDesignSize(); return true }
+  return false
+}
+
 function onStageWheel(e: WheelEvent) {
   e.preventDefault()
   markViewMoving()
@@ -1691,6 +1699,7 @@ const nodeEdit = useVectorNodeEdit()
 const editDims = () => ({ w: canvasDisplay.w, h: canvasDisplay.h })
 
 async function enterNodeEdit(id: string) {
+  if (viewOnlyGuard()) return false // view-only at a viewing size: snap back to design first
   const l = localLayers.value.find(x => x.id === id)
   if (!l || l.kind !== 'path') return false
   selectLocal(id)
@@ -1803,7 +1812,7 @@ function drawGuideForSelectedText() {
   penGuideTargetId.value = l.id
   if (!pen.active.value) togglePen()
 }
-function togglePen() { if (smartActive.value) { if (smartActionBusy.value) return; exitSmartMode() }; pen.setActive(!pen.active.value); if (pen.active.value) { selectLocal(null); exitNodeEdit(); brush.setActive(false) } else { penGuideTargetId.value = null } }
+function togglePen() { if (viewOnlyGuard()) return; if (smartActive.value) { if (smartActionBusy.value) return; exitSmartMode() }; pen.setActive(!pen.active.value); if (pen.active.value) { selectLocal(null); exitNodeEdit(); brush.setActive(false) } else { penGuideTargetId.value = null } }
 // Return to the default Select tool: leave pen/node-edit/generate modes.
 function selectTool() {
   if (pen.active.value) { pen.setActive(false); penGuideTargetId.value = null }
@@ -1818,12 +1827,14 @@ function hasTint(l: any): boolean { const t = l?.tint; return !!t && t !== 'none
 // ── Distort: slant (skew) + corner-pin / perspective ─────────────────────────
 const distortTool = ref(false)
 function toggleDistort() {
+  if (viewOnlyGuard()) return // view-only at a viewing size: snap back to design first
   if (smartActive.value) { if (smartActionBusy.value) return; exitSmartMode() }
   distortTool.value = !distortTool.value
   if (distortTool.value) { pen.setActive(false); exitNodeEdit(); if (genActive.value) exitGenMode(); brush.setActive(false) }
 }
 // ── Brush: freehand paint tool (mutually exclusive with pen/node/gen/distort) ─
 function toggleBrush() {
+  if (viewOnlyGuard()) return // view-only at a viewing size: snap back to design first
   if (smartActive.value) { if (smartActionBusy.value) return; exitSmartMode() }
   brush.setActive(!brush.active.value)
   if (brush.active.value) {
@@ -3129,6 +3140,7 @@ function hitTopStackKey(clientX: number, clientY: number): StackKey | null {
 }
 
 function onCanvasPointerDownCapture(e: PointerEvent) {
+  if (viewOnlyGuard()) return // view-only at a viewing size: snap back to design first
   // The generated-object mini toolbar lives inside the canvas — let its buttons
   // receive the click instead of starting a region draw / deselecting.
   if ((e.target as HTMLElement)?.closest?.('[data-gen-bar]')) return
@@ -3306,6 +3318,7 @@ async function runImageEdit() {
   } catch (err) { console.error('[compositor edit image]', err) /* inpaint.error is shown in the panel */ }
 }
 function editRegionStart(id: string) {
+  if (viewOnlyGuard()) return // view-only at a viewing size: snap back to design first
   exitOtherToolsFor('region')      // leave any other tool; reuse the mutual-exclusion reducer
   editImage.value = null           // peer takeover slot — only one of the two can be up
   editRegion.value = { layerId: id }
@@ -3373,6 +3386,7 @@ function onCanvasDblClickCapture(e: MouseEvent) {
 // shape we just selected on pointer-down.
 let lastDownHitLayer = false
 function onCanvasClick(e: MouseEvent) {
+  if (viewOnlyGuard()) return // view-only at a viewing size: snap back to design first
   if (brush.active.value) return // brush owns the canvas
   if (smartActive.value) return // smart select owns the canvas
   if (genActive.value && genTool.value !== 'shape') return // region-paint owns the canvas
@@ -5542,6 +5556,7 @@ const genShapeCandidate = computed(() => {
 })
 
 function enterGenMode() {
+  if (viewOnlyGuard()) return // view-only at a viewing size: snap back to design first
   // Lock the target to the selected image (if any) at the moment we enter;
   // nothing selected → new image.
   const sel = selectedLocal.value?.kind === 'image' ? selectedLocal.value.id : null
@@ -6293,6 +6308,7 @@ function smartInvalidateProjection(light = false) {
 }
 
 function enterSmartMode() {
+  if (viewOnlyGuard()) return // view-only at a viewing size: snap back to design first
   const sel = selectedLocal.value?.kind === 'image' ? selectedLocal.value.id : null
   const wired = !sel ? selectedWiredImage() : null
   if (!sel && !wired) return
