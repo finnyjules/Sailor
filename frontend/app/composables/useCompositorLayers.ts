@@ -75,6 +75,9 @@ import { DEFAULT_FLATTEN_TOLERANCE, longestSubpath } from '~/lib/compositor/path
 import { shapeById } from '~/lib/shapes/catalog'
 import { shapePath2D } from '~/lib/shapes/path2d'
 import { resolveGroupCascade, type LayerGroup } from '~/lib/compositor/layerGroups'
+// Responsive Frames: the ONE reader of a layer's transient draw-time scale. Dependency-free
+// on purpose (see its header), so the painter can import it at runtime with no cycle.
+import { layoutScaleOf } from '~/lib/frame/responsive/layoutScale'
 import { layoutExpressive, isAccentGlyph, type ExpressiveParams, type AccentRule } from '~~/shared/text-layout/expressive'
 import { type PaintStroke, stampStrokes, strokeBounds } from '~/lib/compositor/brushStamp'
 import {
@@ -366,6 +369,10 @@ interface LayerCommon {
    *  when the box changes shape. Absent ⇒ automatic (inferred from where it sits).
    *  Ignored while the Frame is fixed. See lib/frame/responsive. */
   pins?: import('~/lib/frame/responsive/types').Pins
+  /** TRANSIENT (never persisted): the draw-time scale a responsive layout asks for, applied
+   *  about the layer's own centre at every site that builds the layer's transform. Written
+   *  only on clones by lib/frame/responsive/resolve. Absent/1 ⇒ byte-identical draw. */
+  layoutScale?: number
 }
 
 /** True when a layer is hidden (visible === false; undefined means visible). */
@@ -2180,6 +2187,11 @@ function applyStrokeMask(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: nu
   mctx.setTransform(t)
   mctx.translate((layer.x ?? 0.5) * W, (layer.y ?? 0.5) * H)
   if (layer.rotation) mctx.rotate((layer.rotation * Math.PI) / 180)
+  // …including the responsive layout scale applyXform folds into its own `ls`, so a scaled
+  // layer's mask shrinks with it instead of clipping the shrunk pixels at full size.
+  // Absent/1 ⇒ no call emitted ⇒ byte-identical.
+  const kLayout = layoutScaleOf(layer)
+  if (kLayout !== 1) mctx.scale(kLayout, kLayout)
   if (visibleBase) {
     // A plain brush stroke carves a hole (hide) and an eraser stroke paints white
     // back (restore). Invert `erase` so stampStrokes' destination-out carve fires
@@ -2825,6 +2837,9 @@ function paintLayer(
   // `motionCopy` (transient, set only by paintLayerStack's copies-stagger expansion)
   // narrows the expansion to that ONE copy — the layer is being painted once per copy,
   // each at its own clock. Absent ⇒ undefined ⇒ the full array, exactly as before.
+  // Responsive Frames: the layout's draw-time scale for THIS layer — loop-invariant, so it is
+  // read once here and folded into each copy's own scale below.
+  const kLayout = layoutScaleOf(layer)
   try {
   for (const c of expandClones(layer.cloner, W / H, (layer as { motionCopy?: number }).motionCopy)) {
     _cloneSlot.k = c.k; _cloneSlot.n = c.n
@@ -2832,7 +2847,12 @@ function paintLayer(
     const ly = layer.y + c.dy
     const lrot = layer.rotation + c.drot
     const lop = baseOpacity * c.dopacity
-    const ls = c.dscale
+    // Responsive Frames: the layout's draw-time scale folds into the copy's own scale, so it
+    // multiplies about the LAYER's centre (applyXform's pivot) rather than the frame's — and
+    // so the crop mask, which applyMaskClip clips in CANVAS space before this runs, is left
+    // alone (the resolver stores it already resized). 1 ⇒ `ls` is `c.dscale` unchanged ⇒ the
+    // `ls2 !== 1` guard inside applyXform emits exactly the calls it emitted before.
+    const ls = kLayout === 1 ? c.dscale : c.dscale * kLayout
     // Cloner Vary colour. A strength of 0 is the identity wash, so it is treated
     // as "no tint" here rather than inside tintScratch — that keeps such a copy on
     // the untinted code path instead of paying for a scratch detour that paints
@@ -2854,6 +2874,11 @@ function paintLayer(
       // old logical-sized path.
       const t = ctx.getTransform()
       const s = t.a || 1
+      // Shadow blur/offsets are set in DEVICE px (on the stamp, and on the inner-shadow's own
+      // offscreen), i.e. OUTSIDE the CTM — so a responsive layout scale cannot reach them
+      // through the transform and has to be folded in here, or a shrunk layer would keep a
+      // full-size shadow. kLayout === 1 ⇒ `shs` IS `s` ⇒ the same arithmetic as before.
+      const shs = kLayout === 1 ? s : s * kLayout
       const dev = ctx.canvas
       const off = document.createElement('canvas')
       off.width = Math.max(1, dev.width)
@@ -2914,7 +2939,7 @@ function paintLayer(
           for (const e of bodyPasses) {
             switch (e.type) {
               case 'inner_shadow':
-                compositeInnerShadow(off, e as unknown as InnerShadowEffect, W, s); break
+                compositeInnerShadow(off, e as unknown as InnerShadowEffect, W, shs); break
               // Torn edge carves the offscreen's alpha + paints the lip, in device px, so
               // preview and export tear identically.
               case 'torn_edge':
@@ -2959,9 +2984,9 @@ function paintLayer(
         }
         if (shadow) {
           ctx.shadowColor = shadow.color
-          ctx.shadowBlur = Math.max(0, shadow.blur * W * s)
-          ctx.shadowOffsetX = shadow.x * W * s
-          ctx.shadowOffsetY = shadow.y * W * s
+          ctx.shadowBlur = Math.max(0, shadow.blur * W * shs)
+          ctx.shadowOffsetX = shadow.x * W * shs
+          ctx.shadowOffsetY = shadow.y * W * shs
         }
         ctx.drawImage(off, 0, 0)
         ctx.restore()
@@ -5992,6 +6017,9 @@ export const WIRED_BLEND_OP: Record<string, GlobalCompositeOperation> = {
 export interface WiredTransform {
   x: number; y: number; scale: number; rotation: number; opacity: number; blend: string
   cloner?: Cloner // linked cloner — stamp the layer N times (see useCloner)
+  /** TRANSIENT (never persisted): the responsive layout's draw-time scale, same meaning as
+   *  LayerCommon.layoutScale — folded into the stamp's own scale below. Absent/1 ⇒ unchanged. */
+  layoutScale?: number
 }
 
 /**
@@ -6096,6 +6124,8 @@ export function drawWiredImageLayer(
   // No cloner ⇒ a single identity transform ⇒ exactly one draw as before. `motionCopy`
   // narrows to one copy when the painter is drawing a staggered array copy by copy (see
   // paintLayerStack); a wired transform never carries it today, so this is inert here.
+  // Responsive Frames: the layout's draw-time scale is loop-invariant — read once here.
+  const kLayout = layoutScaleOf(layer)
   for (const c of expandClones(layer.cloner, W / H, (layer as { motionCopy?: number }).motionCopy)) {
     ctx.save()
     ctx.globalAlpha = Math.max(0, Math.min(1, layer.opacity * c.dopacity))
@@ -6103,7 +6133,11 @@ export function drawWiredImageLayer(
     ctx.translate(W / 2 + (layer.x + c.dx) * W, H / 2 + (layer.y + c.dy) * H)
     const rot = layer.rotation + c.drot
     if (rot) ctx.rotate((rot * Math.PI) / 180)
-    ctx.scale(layer.scale * c.dscale, layer.scale * c.dscale)
+    // Responsive Frames: the layout scale multiplies into this copy's own scale, about the
+    // layer centre this translate just established. kLayout === 1 ⇒ the same expression as
+    // before ⇒ byte-identical.
+    const sc = kLayout === 1 ? layer.scale * c.dscale : layer.scale * c.dscale * kLayout
+    ctx.scale(sc, sc)
     // Cloner Vary colour. The mask and the defocus above are shared by every copy and
     // already folded into `src`; the tint is per-COLOUR, so it needs its own surface —
     // and it MUST have one, because `source-atop` on `ctx` would wash the whole frame
