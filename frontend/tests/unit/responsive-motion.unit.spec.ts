@@ -37,6 +37,14 @@ describe('remapMotion', () => {
       expect(mapped).toBeCloseTo(applyMap(maps.get('a')!.h, raw * W0) / W, 9)
     }
   })
+  it('a stretched (both) axis moves a keyframed centre by the centre map, not the near edge', () => {
+    const stretched = new Map([['a', { h: axisMap('both', W0, 1, 1000, 0), v: axisMap('center', H0, 1, 0, 0) }]])
+    const m: FrameMotion = { fps: 30, duration: 1, motionx: [track('layers.a.x', 0.1, 0.5)] }
+    const out = remapMotion(m, stretched, W0, H0, W, H)!
+    const [tx] = out.motionx!
+    expect(tx!.keyframes[0]!.value).toBeCloseTo((100 + 500) / 2000, 9)   // o + s·p + u/2
+    expect(tx!.keyframes[1]!.value).toBeCloseTo((500 + 500) / 2000, 9)
+  })
   it('leaves scale, rotation, opacity and effect tracks untouched (same track reference)', () => {
     const s = track('layers.a.scale', 1, 2), r = track('layers.a.rotation', 0, 90)
     const m: FrameMotion = { fps: 30, duration: 1, motionx: [s, r, track('layers.a.x', 0, 1)] }

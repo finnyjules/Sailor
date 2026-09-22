@@ -5,6 +5,15 @@ import type { AxisMap } from './types'
 
 const POS = /^layers\.([^.]+)\.(x|y)$/
 
+/** A track value is a CENTRE, not an edge: a 'both' (stretched) map moves the two edges
+ *  differently, so the centre travels by their midpoint (o + s·p + u/2). Every other kind
+ *  ignores `edge`, so it maps straight through. */
+function mapCentre(map: AxisMap, p: number): number {
+  return map.kind === 'both'
+    ? (applyMap(map, p, 'near') + applyMap(map, p, 'far')) / 2
+    : applyMap(map, p)
+}
+
 /**
  * Map every `layers.<id>.x` / `.y` track through that layer's per-axis map so a
  * keyframed position adapts exactly like the resting position. Same reference
@@ -29,7 +38,7 @@ export function remapMotion(
     return {
       ...tr,
       keyframes: tr.keyframes.map(kf => typeof kf.value === 'number'
-        ? { ...kf, value: applyMap(map, kf.value * design) / box }
+        ? { ...kf, value: mapCentre(map, kf.value * design) / box }
         : kf),
     }
   })
