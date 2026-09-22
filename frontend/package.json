@@ -50,6 +50,7 @@
     "lucide-vue-next": "^0.576.0",
     "marked": "^17.0.5",
     "matter-js": "^0.20.0",
+    "mediabunny": "^1.59.0",
     "mp4box": "^2.3.0",
     "nanostores": "^1.2.0",
     "nuxt": "^4.3.1",
