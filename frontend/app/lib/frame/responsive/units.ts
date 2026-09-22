@@ -45,7 +45,6 @@ function rotatedExtent(w: number, h: number, deg: number): { w: number; h: numbe
  */
 export function layerDesignBox(layer: LocalLayer, ctx: CanvasRenderingContext2D | null, W0: number, H0: number): Box {
   const base = localLayerBox(ctx, layer, W0, H0)
-  const ext = rotatedExtent(base.w, base.h, layer.rotation || 0)
   let out: Box | null = null
   for (const c of expandClones(layer.cloner, W0 / H0)) {
     const cx = (layer.x + c.dx) * W0, cy = (layer.y + c.dy) * H0
@@ -53,7 +52,7 @@ export function layerDesignBox(layer: LocalLayer, ctx: CanvasRenderingContext2D 
     const b = { x: cx - e.w / 2, y: cy - e.h / 2, w: e.w, h: e.h }
     out = out ? unionBox(out, b) : b
   }
-  return out ?? { x: layer.x * W0 - ext.w / 2, y: layer.y * H0 - ext.h / 2, w: ext.w, h: ext.h }
+  return out!   // never null: expandClones yields the identity clone even with no cloner
 }
 
 /**
