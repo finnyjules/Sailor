@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
-import { applyResolvedValue, applyMotionxTracks, applyTextBehaviours, frameTarget, animatableProperties } from '~/lib/motionx/adapter/frame'
+import { applyResolvedValue, applyMotionxTracks, applyTextBehaviours, frameTarget, animatableProperties, CLONER_PROPERTIES } from '~/lib/motionx/adapter/frame'
+import { DEFAULT_CLONER, expandClones, type Cloner } from '~/composables/useCloner'
 import type { GradientStop } from '~/lib/color/harmony'
 import type { StoredBehaviour, Track } from '~/lib/motionx'
 
@@ -193,5 +194,102 @@ describe('applyTextBehaviours', () => {
     const own = (out[0] as any).textMotion.behaviours as StoredBehaviour[]
     expect(own.map(b => b.id)).toEqual(['b-L1', 's-L1'])       // no 'n-L1', no 'b-L2'
     expect((out[1] as any).textMotion.behaviours.map((b: StoredBehaviour) => b.id)).toEqual(['b-L2'])
+  })
+})
+
+// ── Cloner dials as motion properties: 'Copies' group ──
+//
+// A layer's `cloner` config isn't a Frame property in the usual sense — it never has
+// its own x/y/opacity — but each enabled dial (Count, Spacing, Radius…) is itself
+// animatable, at path `layers.<id>.cloner.<key>`. No cloner (or a disabled one) offers
+// nothing; a linear cloner offers the linear + 'both' keys, a radial one the radial +
+// 'both' keys — never the other mode's keys.
+
+describe('Cloner dials in animatableProperties (Copies group)', () => {
+  const cloner = (over: Partial<Cloner> = {}): Cloner => ({ ...DEFAULT_CLONER, enabled: true, ...over })
+
+  it('no Copies entries without an enabled cloner', () => {
+    expect(animatableProperties(layer()).some(p => p.group === 'Copies')).toBe(false)
+    const disabled = layer({ cloner: cloner({ enabled: false }) })
+    expect(animatableProperties(disabled).some(p => p.group === 'Copies')).toBe(false)
+  })
+
+  it('a linear cloner lists exactly the linear + both keys, group Copies, after Effects', () => {
+    const l = layer({
+      effects: [{ id: 'fx1', type: 'bloom', threshold: 0.5, radius: 0.1, intensity: 1 }],
+      cloner: cloner({ mode: 'linear' }),
+    })
+    const props = animatableProperties(l)
+    const copies = props.filter(p => p.group === 'Copies')
+    const expectedKeys = CLONER_PROPERTIES.filter(p => p.mode === 'linear' || p.mode === 'both').map(p => p.key)
+    expect(copies.map(p => p.path)).toEqual(expectedKeys.map(k => `layers.L1.cloner.${k}`))
+    for (const p of copies) {
+      const spec = CLONER_PROPERTIES.find(s => `layers.L1.cloner.${s.key}` === p.path)!
+      expect(p.label).toBe(spec.label)
+      expect(p.min).toBe(spec.min)
+      expect(p.max).toBe(spec.max)
+      expect(p.type).toBe('number')
+    }
+    // radial-only keys must not appear
+    expect(copies.some(p => p.path === 'layers.L1.cloner.count')).toBe(false)
+    expect(copies.some(p => p.path === 'layers.L1.cloner.radius')).toBe(false)
+    // after the Effects entries
+    const lastEffectsIdx = props.map(p => p.group).lastIndexOf('Effects')
+    const firstCopiesIdx = props.map(p => p.group).indexOf('Copies')
+    expect(firstCopiesIdx).toBeGreaterThan(lastEffectsIdx)
+  })
+
+  it('a radial cloner lists exactly the radial + both keys', () => {
+    const l = layer({ cloner: cloner({ mode: 'radial' }) })
+    const props = animatableProperties(l)
+    const copies = props.filter(p => p.group === 'Copies')
+    const expectedKeys = CLONER_PROPERTIES.filter(p => p.mode === 'radial' || p.mode === 'both').map(p => p.key)
+    expect(copies.map(p => p.path)).toEqual(expectedKeys.map(k => `layers.L1.cloner.${k}`))
+    expect(copies.some(p => p.path === 'layers.L1.cloner.countX')).toBe(false)
+    expect(copies.some(p => p.path === 'layers.L1.cloner.spacingX')).toBe(false)
+  })
+})
+
+describe('applyResolvedValue for cloner.<key>', () => {
+  it('returns a NEW layer with cloner.<key> set, original untouched', () => {
+    const l = layer({ cloner: { ...DEFAULT_CLONER, enabled: true, count: 6 } })
+    const out = applyResolvedValue(l, 'cloner.count', 4) as any
+    expect(out).not.toBe(l)
+    expect(out.cloner.count).toBe(4)
+    expect((l as any).cloner.count).toBe(6)
+  })
+
+  it('a layer without a cloner returns the same reference', () => {
+    const l = layer()
+    expect(applyResolvedValue(l, 'cloner.count', 4)).toBe(l)
+  })
+})
+
+describe('frameTarget for cloner.<key>', () => {
+  it('reads the value and reports has() true', () => {
+    const l = layer({ cloner: { ...DEFAULT_CLONER, enabled: true, radius: 0.42 } })
+    const tg = frameTarget(l)
+    expect(tg.get('cloner.radius')).toBe(0.42)
+    expect(tg.has('cloner.radius')).toBe(true)
+  })
+
+  it('without a cloner: undefined / false', () => {
+    const tg = frameTarget(layer())
+    expect(tg.get('cloner.radius')).toBeUndefined()
+    expect(tg.has('cloner.radius')).toBe(false)
+  })
+})
+
+describe('applyMotionxTracks folds a cloner.count band into expandClones', () => {
+  it('count ramps 1 → 6 over 0–1s: 3 copies at t=0.5 (floor(3.5)), 6 at t=1', () => {
+    const l = layer({ cloner: { ...DEFAULT_CLONER, enabled: true, mode: 'radial' as const, count: 1 } })
+    const track: Track = {
+      path: 'layers.L1.cloner.count', type: 'number',
+      keyframes: [{ t: 0, value: 1, ease: 'linear' }, { t: 1, value: 6, ease: 'linear' }],
+    }
+    const mid = applyMotionxTracks([l], [track], 0.5)[0] as any
+    expect(expandClones(mid.cloner, 1)).toHaveLength(3)
+    const end = applyMotionxTracks([l], [track], 1)[0] as any
+    expect(expandClones(end.cloner, 1)).toHaveLength(6)
   })
 })

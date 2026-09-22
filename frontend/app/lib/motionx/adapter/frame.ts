@@ -8,6 +8,7 @@ import { isTextBehaviour, textCanMove } from '~/lib/motionx/text'
 import { revealParams, settleParams, type MotionReveal } from '~/lib/motionx/reveal'
 import type { GradientStop as ColorStop } from '~/lib/color/harmony'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
+import type { Cloner } from '~/composables/useCloner'
 import { isGradient, type Paint } from '~/lib/compositor/paint'
 import { withScrolledStops, withGradientStops, paintStopsToColor } from '~/lib/compositor/gradientPaint'
 import { effectStackOf, writeStackToLayer, EFFECT_LABELS } from '~/lib/compositor/effectStack'
@@ -33,6 +34,12 @@ export function applyResolvedValue(layer: LocalLayer, prop: string, value: Prope
   }
   if (prop === 'fill' && Array.isArray(value) && isGradient(fill)) {
     return { ...layer, fill: withGradientStops(fill, value as ColorStop[]) } as LocalLayer
+  }
+  const cl = prop.match(/^cloner\.([^.]+)$/)
+  if (cl && typeof value === 'number') {
+    const c = (layer as { cloner?: Cloner }).cloner
+    if (!c) return layer
+    return { ...layer, cloner: { ...c, [cl[1]!]: value } } as LocalLayer
   }
   const eff = prop.match(/^effects\.([^.]+)\.(.+)$/)
   if (eff) {
@@ -193,13 +200,18 @@ export function frameTarget(layer: LocalLayer): BehaviourTarget {
       if (prop === 'scale' && typeof rec.scale !== 'number') return 1
       if (TRANSFORM.has(prop) && typeof rec[prop] === 'number') return rec[prop] as number
       if (prop === 'fill' && isGradient(fill)) return paintStopsToColor(fill)
+      if (prop.startsWith('cloner.')) {
+        const c = rec.cloner as Cloner | undefined
+        const v = c?.[prop.slice(7) as keyof Cloner]
+        return typeof v === 'number' ? v : undefined
+      }
       return undefined
     },
     has(prop) { return this.get(prop) !== undefined },
   }
 }
 
-export type PropertyGroup = 'Transform' | 'Fill' | 'Effects'
+export type PropertyGroup = 'Transform' | 'Fill' | 'Effects' | 'Copies'
 export interface AnimatableProperty {
   path: string
   type: 'number' | 'color' | 'gradient'
@@ -208,6 +220,25 @@ export interface AnimatableProperty {
   min?: number
   max?: number
 }
+
+/** Every Cloner dial that can be animated once the cloner is enabled, keyed by which
+ *  mode(s) it applies to — `'both'` dials (falloff) show for either mode. Ranges/labels
+ *  mirror the Design-tab cloner panel; `key` must be a real `Cloner` field. */
+export const CLONER_PROPERTIES: ReadonlyArray<{ key: keyof Cloner & string; label: string; mode: 'linear' | 'radial' | 'both'; min: number; max: number }> = [
+  { key: 'countX', label: 'Count X', mode: 'linear', min: 1, max: 50 },
+  { key: 'countY', label: 'Count Y', mode: 'linear', min: 1, max: 50 },
+  { key: 'spacingX', label: 'Spacing X', mode: 'linear', min: -1, max: 1 },
+  { key: 'spacingY', label: 'Spacing Y', mode: 'linear', min: -1, max: 1 },
+  { key: 'nudgeX', label: 'Nudge X', mode: 'linear', min: -0.5, max: 0.5 },
+  { key: 'nudgeY', label: 'Nudge Y', mode: 'linear', min: -0.5, max: 0.5 },
+  { key: 'count', label: 'Count', mode: 'radial', min: 1, max: 100 },
+  { key: 'radius', label: 'Radius', mode: 'radial', min: 0, max: 1 },
+  { key: 'startAngle', label: 'Start angle', mode: 'radial', min: -360, max: 360 },
+  { key: 'sweepAngle', label: 'Sweep', mode: 'radial', min: 0, max: 360 },
+  { key: 'stepRotation', label: 'Step rotation', mode: 'both', min: -180, max: 180 },
+  { key: 'stepScale', label: 'Step scale', mode: 'both', min: 0, max: 2 },
+  { key: 'stepOpacity', label: 'Step opacity', mode: 'both', min: 0, max: 1 },
+]
 
 /** Every property a layer can be animated on, grouped for the "Add property" picker:
  *  Transform (x/y/scale/rotation/opacity), Fill (gradient + scroll phase, when the fill
@@ -239,6 +270,13 @@ export function animatableProperties(layer: LocalLayer): AnimatableProperty[] {
         min: spec.min,
         max: spec.max,
       })
+    }
+  }
+  const cloner = (layer as unknown as { cloner?: Cloner }).cloner
+  if (cloner?.enabled) {
+    for (const p of CLONER_PROPERTIES) {
+      if (p.mode !== 'both' && p.mode !== cloner.mode) continue
+      out.push({ path: `layers.${id}.cloner.${p.key}`, type: 'number', label: p.label, group: 'Copies', min: p.min, max: p.max })
     }
   }
   return out

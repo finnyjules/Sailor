@@ -8,7 +8,7 @@ import type { AnimatableProperty, PropertyGroup } from '~/lib/motionx/adapter/fr
 const props = defineProps<{ properties: AnimatableProperty[]; animatedPaths: string[] }>()
 defineEmits<{ add: [prop: AnimatableProperty]; close: [] }>()
 
-const ORDER: PropertyGroup[] = ['Transform', 'Fill', 'Effects']
+const ORDER: PropertyGroup[] = ['Transform', 'Fill', 'Effects', 'Copies']
 const groups = computed(() =>
   ORDER.map((group) => ({ group, items: props.properties.filter((p) => p.group === group) }))
     .filter((g) => g.items.length > 0))
