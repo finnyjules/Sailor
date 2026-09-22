@@ -63,9 +63,14 @@ export interface Cloner {
   varyColorStrength: number
   /** Motion stagger: seconds between one copy's clock and the next. 0 = unison (today). */
   motionStagger?: number
-  /** Which copy goes first. */
-  motionOrder?: 'first' | 'last' | 'centre' | 'random'
+  /** Which copy goes first. Mirrors `CopyOrder` in `lib/motionx/copies.ts` (kept inline to
+   *  avoid a cycle — copies.ts imports this Cloner type). */
+  motionOrder?: 'first' | 'last' | 'centre' | 'edges' | 'random'
   motionSeed?: number
+  /** When true, a reveal transition (Assemble / Dither / Settle) also follows each copy's own
+   *  clock — the copies assemble in/out in turn, running past the bar for the later ones.
+   *  Default (false): reveals play in step for every copy, bounded by their bar. */
+  staggerReveals?: boolean
 }
 
 export interface CloneTransform {

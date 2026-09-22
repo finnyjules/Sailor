@@ -5670,8 +5670,11 @@ export function paintLayerStack(
       const source = storedById.get(it.layer.id) ?? it.layer
       for (const c of distinctCopies) {
         // Position / opacity / letters at the copy's own clock; the reveal transition at the
-        // FRAME clock, so it stays bounded by its bar for every copy (see revealClock above).
-        const [folded] = foldMotion([source], copyClock(t, c.k, distinctCopies.length, cloner), t)
+        // FRAME clock, so it stays bounded by its bar for every copy (see revealClock above) —
+        // unless the layer opts into `staggerReveals`, which lets the reveal follow each copy
+        // too (the copies assemble in/out in turn, running past the bar for the later ones).
+        const clk = copyClock(t, c.k, distinctCopies.length, cloner)
+        const [folded] = foldMotion([source], clk, cloner.staggerReveals ? clk : t)
         // The Cloner is pinned to the FRAME clock's value even though the rest of the
         // layer is folded at the copy's: the array's own dials (count, radius, spacing —
         // Task 5's Copies properties) describe one shared array, and letting copy k

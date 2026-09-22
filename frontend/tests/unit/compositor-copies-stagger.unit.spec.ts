@@ -231,4 +231,25 @@ describe('paintLayerStack — a cloned layer with a motion stagger', () => {
     // Mid-bar it still draws (sanity: the reveal IS active there, so the guard is not just always-skip).
     expect(paintReveal(0.5).length).toBeGreaterThan(0)
   })
+
+  it('staggerReveals lets a reveal follow each copy — the lagged copies keep running past the bar', () => {
+    const layer = createRectLayer({
+      id: ID, x: 0.5, y: 0.5, w: 0.3, h: 0.2, radius: 0, strokeWidth: 0,
+      cloner: { ...DEFAULT_CLONER, enabled: true, mode: 'radial', count: 4, motionStagger: 0.5, motionOrder: 'first', staggerReveals: true } as Cloner,
+    }) as LocalLayer
+    const revealTrack: Track = {
+      path: `layers.${ID}.reveal`, type: 'number', behaviourId: 'r',
+      keyframes: [{ t: 0, value: 1, ease: 'linear' }, { t: 1, value: 0, ease: 'linear' }],
+    }
+    const behaviours = [{ id: 'r', kind: 'dither', layerId: ID, timing: { start: 0, duration: 1 }, params: { style: 'dissolve', dir: 'out' } }] as never
+    const { ctx, alphas } = makeCtx()
+    paintLayerStack(
+      ctx, 100, 100,
+      [{ type: 'local', key: `l:${ID}`, layer } as never], [layer],
+      undefined, 1.5, { fps: 30, duration: 2, motionx: [revealTrack], behaviours },
+    )
+    // 0.5s past the bar, the lagged copies are still assembling out → something IS inked
+    // (the opposite of the bounded default above).
+    expect(alphas.length).toBeGreaterThan(0)
+  })
 })

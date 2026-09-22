@@ -17,6 +17,7 @@ import { COPY_ORDERS, COPY_ORDER_LABELS, type CopyOrder } from '~/lib/motionx/co
 import { NO_RUN, openRun, closeRun, takeRecord, type UndoRun } from '~/lib/motionx/undoCoalesce'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import StudioSegmentedRow from '~/components/vue-canvas/studio/StudioSegmentedRow.vue'
+import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
 
 const props = defineProps<{ cloner: Cloner }>()
@@ -71,6 +72,11 @@ function shuffle() {
   emit('before-change')
   up({ motionSeed: Math.floor(Math.random() * 9999) + 1 })
 }
+function setStaggerReveals(v: boolean) {
+  undoRun = closeRun()
+  emit('before-change')
+  up({ staggerReveals: v })
+}
 </script>
 
 <template>
@@ -88,6 +94,10 @@ function shuffle() {
         <Shuffle class="h-3.5 w-3.5" />
       </StudioButton>
     </div>
+    <StudioSwitch v-if="stagger > 0" data-testid="copies-stagger-reveals" class="mt-1.5"
+      label="Stagger transitions"
+      hint="An Assemble, Dither or Settle reveal follows each copy in turn — the later copies run past the bar. Off plays them in step, done when the bar ends."
+      :model-value="!!cloner.staggerReveals" @update:model-value="setStaggerReveals" />
   </div>
 </template>
 
