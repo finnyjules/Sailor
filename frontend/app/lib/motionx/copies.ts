@@ -3,10 +3,10 @@
 import type { Cloner } from '~/composables/useCloner'
 import { hash01 } from '~/lib/motionx/text/rng'
 
-export type CopyOrder = 'first' | 'last' | 'centre' | 'random'
-export const COPY_ORDERS: readonly CopyOrder[] = ['first', 'last', 'centre', 'random']
+export type CopyOrder = 'first' | 'last' | 'centre' | 'edges' | 'random'
+export const COPY_ORDERS: readonly CopyOrder[] = ['first', 'last', 'centre', 'edges', 'random']
 export const COPY_ORDER_LABELS: Record<CopyOrder, string> = {
-  first: 'First to last', last: 'Last to first', centre: 'Centre out', random: 'Random',
+  first: 'First to last', last: 'Last to first', centre: 'Centre out', edges: 'Edges in', random: 'Random',
 }
 
 /** rank per copy index k: rank 0 goes first. */
@@ -22,6 +22,16 @@ export function copyRanks(n: number, order: CopyOrder, seed: number): number[] {
     // middles of an even count) goes to the LOWER index — the spec's rule.
     const mid = (count - 1) / 2
     const sorted = [...ks].sort((a, b) => (Math.abs(a - mid) - Math.abs(b - mid)) || (a - b))
+    const rank = new Array<number>(count)
+    sorted.forEach((k, r) => { rank[k] = r })
+    return rank
+  }
+
+  if (order === 'edges') {
+    // The mirror of 'centre': the OUTERMOST copy goes first, the middle last. A tie (two copies
+    // the same distance from the middle) goes to the LOWER index, exactly as 'centre' does.
+    const mid = (count - 1) / 2
+    const sorted = [...ks].sort((a, b) => (Math.abs(b - mid) - Math.abs(a - mid)) || (a - b))
     const rank = new Array<number>(count)
     sorted.forEach((k, r) => { rank[k] = r })
     return rank

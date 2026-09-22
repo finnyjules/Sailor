@@ -244,7 +244,7 @@ const isTextBeh = computed(() => behaviour.value != null && isTextBehaviour(beha
 const BY_OPTIONS = ['letters', 'words', 'lines']
 const BY_LABELS = ['Letters', 'Words', 'Lines']
 const ORDER_OPTIONS = ['ltr', 'rtl', 'center', 'edges', 'random']
-const ORDER_LABELS = ['Left to right', 'Right to left', 'From the centre', 'From the edges', 'Random']
+const ORDER_LABELS = ['Left to right', 'Right to left', 'Centre out', 'Edges in', 'Random']
 const CASCADE_STYLE_OPTIONS = ['fade', 'rise', 'drop', 'grow', 'spin']
 const CASCADE_STYLE_LABELS = ['Fade', 'Rise', 'Drop', 'Grow', 'Spin']
 const TYPE_DIR_OPTIONS = ['type', 'delete']

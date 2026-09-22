@@ -22,7 +22,12 @@ describe('copyRanks', () => {
     expect(copyRanks(1, 'random', 1)).toEqual([0])
     expect(copyRanks(3, 'bogus' as any, 1)).toEqual([0, 1, 2])
   })
-  it('lists the four orders in gallery order', () => { expect(COPY_ORDERS).toEqual(['first', 'last', 'centre', 'random']) })
+  it('edges in: the outermost copy first, the middle last (the mirror of centre out)', () => {
+    expect(copyRanks(5, 'edges', 1)).toEqual([0, 2, 4, 3, 1])
+    expect(copyRanks(4, 'edges', 1)).toEqual([0, 2, 3, 1])
+    expect(copyRanks(6, 'edges', 1)).toEqual([0, 2, 4, 5, 3, 1])
+  })
+  it('lists the five orders in gallery order', () => { expect(COPY_ORDERS).toEqual(['first', 'last', 'centre', 'edges', 'random']) })
 })
 
 describe('copyClock', () => {

@@ -122,12 +122,12 @@ describe('MotionCopiesPanel: Order', () => {
     expect(w.find('[data-testid="copies-shuffle"]').exists()).toBe(true)
   })
 
-  it('offers all four orders, in COPY_ORDERS order, with their gallery labels', () => {
+  it('offers all five orders, in COPY_ORDERS order, with their gallery labels', () => {
     const w = mount(MotionCopiesPanel, { props: { cloner: makeCloner() } })
     const order = w.get('[data-testid="copies-order"]')
     const buttons = order.findAll('[role="radio"]')
-    expect(buttons.map((b) => b.attributes('data-value'))).toEqual(['first', 'last', 'centre', 'random'])
-    expect(buttons.map((b) => b.text())).toEqual(['First to last', 'Last to first', 'Centre out', 'Random'])
+    expect(buttons.map((b) => b.attributes('data-value'))).toEqual(['first', 'last', 'centre', 'edges', 'random'])
+    expect(buttons.map((b) => b.text())).toEqual(['First to last', 'Last to first', 'Centre out', 'Edges in', 'Random'])
   })
 })
 
@@ -217,7 +217,7 @@ describe('the Copies inspector rows', () => {
 
 describe('MotionCopiesPanel: Shuffle', () => {
   it('is hidden for every non-random order', () => {
-    for (const motionOrder of ['first', 'last', 'centre'] as const) {
+    for (const motionOrder of ['first', 'last', 'centre', 'edges'] as const) {
       const w = mount(MotionCopiesPanel, { props: { cloner: makeCloner({ motionOrder }) } })
       expect(w.find('[data-testid="copies-shuffle"]').exists()).toBe(false)
     }
