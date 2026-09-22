@@ -118,7 +118,7 @@ export function behaviourLabel(b: { kind: string; params?: Record<string, unknow
     withDir = `${sp.effect.label} ${sp.out ? 'out' : 'in'}`
   }
   else if (b.kind === 'copies.build') withDir = `${base} ${dir ?? 'in'}`
-  else if (b.kind === 'copies.spread') withDir = `${base} ${dir ?? 'out'}`
+  else if (b.kind === 'copies.spread') withDir = dir === 'in' ? 'Gather in' : 'Spread out'   // the tile's own words
   else if (b.kind === 'copies.fan') withDir = `${base} ${dir ?? 'in'}`
   else if (b.kind === 'copies.fade') withDir = `${base} ${dir ?? 'in'}`
   return b.timing?.loop ? `${withDir} · loop` : withDir

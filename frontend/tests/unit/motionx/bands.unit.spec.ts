@@ -164,7 +164,7 @@ describe('behaviourLabel — Copies (Cloner dials as motion, Task 7)', () => {
   })
   it('spread adds direction (default out)', () => {
     expect(behaviourLabel({ kind: 'copies.spread', params: { dir: 'out' } })).toBe('Spread out')
-    expect(behaviourLabel({ kind: 'copies.spread', params: { dir: 'in' } })).toBe('Spread in')
+    expect(behaviourLabel({ kind: 'copies.spread', params: { dir: 'in' } })).toBe('Gather in')
     expect(behaviourLabel({ kind: 'copies.spread', params: {} })).toBe('Spread out')
   })
   it('spin has no direction', () => {
