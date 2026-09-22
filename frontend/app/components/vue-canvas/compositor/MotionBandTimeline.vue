@@ -3,7 +3,7 @@
  *  timeline geometry + gestures (ruler with ticks, drag-seek playhead, alt-drag pivot zoom,
  *  shift-reset, wheel/scrollbar pan, DialKit row/clip dimensions, collapsible groups) —
  *  rendered in Sailor tokens (PP Neue Montreal + tabular-nums, compositor palette, #7c9cff
- *  accent, emerald behaviour bands, value-showing clip interiors). View math is the pure
+ *  accent, neutral behaviour bands, value-showing clip interiors). View math is the pure
  *  ~/lib/motionx/timelineView (ported from dialkit). motionx stays the source of truth. */
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { Track, StoredBehaviour } from '~/lib/motionx'
@@ -524,8 +524,8 @@ function deletePoint(b: Band, i: number) {
               <div v-if="playheadVisible" class="absolute inset-y-0 w-px bg-[#7c9cff]/50 pointer-events-none z-30" :style="{ left: px(playheadX) }" />
               <div :data-testid="'beh-band-' + b.behaviourId" :data-muted="b.muted ? '' : undefined"
                 class="absolute inset-y-0 flex items-center gap-1.5 rounded-md border px-2 text-[9.5px] cursor-grab active:cursor-grabbing overflow-hidden select-none"
-                :class="[isBehSel(b) ? 'ring-2 ring-[#7c9cff] text-white border-emerald-300' : 'text-white/80 border-emerald-400/40 hover:border-emerald-300/70', b.muted ? 'opacity-40 border-dashed' : '']"
-                :style="{ left: px(xOf(b.start)), width: px(wOf(b.start, b.end)), background: 'rgba(120,220,170,.16)' }"
+                :class="[isBehSel(b) ? 'ring-2 ring-[#7c9cff] text-white border-[#7c9cff]' : 'text-white/80 border-white/25 hover:border-white/45', b.muted ? 'opacity-40 border-dashed' : '']"
+                :style="{ left: px(xOf(b.start)), width: px(wOf(b.start, b.end)), background: 'rgba(255,255,255,.14)' }"
                 :title="b.label + (b.muted ? ' · OFF' : '') + ' · right-click to ' + (b.muted ? 'reactivate' : 'deactivate') + ' · drag to move, drag edges to retime'"
                 @pointerdown.stop.prevent="(e: PointerEvent) => startBehDrag(e, b, 'move')"
                 @contextmenu.stop.prevent="toggleMute(b)">
@@ -550,7 +550,7 @@ function deletePoint(b: Band, i: number) {
               <template v-for="b in [...r.behaviours, ...(r.property ? [r.property] : [])]" :key="'g-' + b.key">
                 <div v-for="g in ghostsOf(b)" :key="b.key + '-' + g.index" aria-hidden="true" data-testid="loop-ghost"
                   class="absolute top-1 bottom-1 rounded-[5px] opacity-[0.18] pointer-events-none select-none"
-                  :style="{ left: px(xOf(g.start) + 1), width: px(Math.max(1, g.duration * dv.pxPerSecond - 2)), background: b.kind === 'behaviour' ? '#78dcaa' : '#7c9cff' }" />
+                  :style="{ left: px(xOf(g.start) + 1), width: px(Math.max(1, g.duration * dv.pxPerSecond - 2)), background: '#7c9cff' }" />
               </template>
               <span v-if="[...r.behaviours, r.property].some((b) => b?.loop)" aria-hidden="true" data-testid="loop-infinity"
                 class="absolute right-[7px] top-1/2 z-20 -translate-y-1/2 text-[13px] font-semibold leading-none text-white/40 pointer-events-none select-none"
@@ -560,9 +560,9 @@ function deletePoint(b: Band, i: number) {
               <div v-for="b in r.behaviours" :key="b.key" :data-testid="'beh-band-' + b.behaviourId" :data-muted="b.muted ? '' : undefined"
                 class="absolute inset-y-0 flex items-center gap-1.5 rounded-md border px-2 text-[9.5px] cursor-grab active:cursor-grabbing overflow-hidden select-none"
                 :class="[isBehSel(b) ? 'ring-2 ring-[#7c9cff] text-white' : 'text-white/80',
-                         r.conflicts.has(b.key) ? 'border-amber-400/70' : (isBehSel(b) ? 'border-emerald-300' : 'border-emerald-400/40 hover:border-emerald-300/70'),
+                         r.conflicts.has(b.key) ? 'border-amber-400/70' : (isBehSel(b) ? 'border-[#7c9cff]' : 'border-white/25 hover:border-white/45'),
                          b.muted ? 'opacity-40 border-dashed' : '']"
-                :style="{ left: px(xOf(b.start)), width: px(wOf(b.start, b.end)), background: r.conflicts.has(b.key) ? 'rgba(251,191,36,.14)' : 'rgba(120,220,170,.16)' }"
+                :style="{ left: px(xOf(b.start)), width: px(wOf(b.start, b.end)), background: r.conflicts.has(b.key) ? 'rgba(251,191,36,.14)' : 'rgba(255,255,255,.14)' }"
                 :title="b.label + (b.muted ? ' · OFF' : '') + (b.loop ? ' · one cycle, repeats through the timeline' : '') + (r.conflicts.has(b.key) ? ' · overlaps another bar on ' + r.label : '') + ' · right-click to ' + (b.muted ? 'reactivate' : 'deactivate') + ' · drag to move, drag edges to ' + (b.loop ? 'change the cycle length' : 'retime')"
                 @pointerdown.stop.prevent="(e: PointerEvent) => startBehDrag(e, b, 'move')"
                 @contextmenu.stop.prevent="toggleMute(b)">

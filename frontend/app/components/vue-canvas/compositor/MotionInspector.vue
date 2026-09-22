@@ -495,7 +495,7 @@ function onGradient(g: Gradient) {
     class="rounded-lg border border-white/10 bg-[#0e0e10]/80 px-3 py-2.5 text-[11px] text-white/70">
     <div class="mb-2 flex items-center justify-between border-b border-white/10 pb-2">
       <div class="flex items-center gap-1.5">
-        <span class="inline-block w-2 h-2 rounded-sm" style="background:#78dcaa" />
+        <span class="inline-block w-2 h-2 rounded-sm" style="background:#7c9cff" />
         <span class="font-medium text-white/85">{{ behaviourLabel(behaviour) }}</span>
         <span class="text-white/35">behaviour</span>
       </div>
