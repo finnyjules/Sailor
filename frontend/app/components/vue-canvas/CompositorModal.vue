@@ -126,6 +126,7 @@ import { resolveGrid, type FrameGrid } from '~/lib/frame/grid'
 import MotionBandTimeline from '~/components/vue-canvas/compositor/MotionBandTimeline.vue'
 import MotionGallery from '~/components/vue-canvas/compositor/MotionGallery.vue'
 import MotionInspector from '~/components/vue-canvas/compositor/MotionInspector.vue'
+import MotionCopiesPanel from '~/components/vue-canvas/compositor/MotionCopiesPanel.vue'
 import { behavioursForMove, defaultDurationForMove, type GalleryMove } from '~/lib/motionx/gallery'
 import AddImageSourcePopover from '~/components/vue-canvas/compositor/AddImageSourcePopover.vue'
 import CompositorClonerPanel from '~/components/vue-canvas/compositor/CompositorClonerPanel.vue'
@@ -8380,6 +8381,14 @@ onUnmounted(() => {
             @select-point="selectMotionPoint" @clear="clearMotionSel"
             @behaviour-change="editBehaviour" @behaviour-open="openBehaviour" @behaviour-delete="deleteBehaviour"
             @legacy-remove="removeLegacyAnimation" />
+          <!-- Copies: a cloned layer's copies can stagger their motion. Motion tab only —
+               the Design tab's CompositorClonerPanel never gets these fields. -->
+          <MotionCopiesPanel v-if="selectedLocal?.cloner?.enabled"
+            class="mb-3"
+            :cloner="selectedLocal.cloner"
+            @before-change="recordHistory"
+            @update="(cl) => setLocal(selectedLocal!.id, { cloner: cl } as any)"
+          />
           <!-- Animate: make this still a looping, transparent clip. Lives in Motion (not
                Design) because it is how the layer moves — it composes with the keyframes below. -->
           <CompositorAnimatePanel v-if="selectedLocal?.kind === 'image'"
