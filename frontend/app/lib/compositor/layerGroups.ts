@@ -33,6 +33,9 @@ export interface LayerGroup {
   /** Snapshotted container box (top-left fractions: x/W, y/H, w/W, h/H) the
    *  scatter happens within — frozen on enable so rerolls don't drift. */
   expressiveBox?: { x: number; y: number; w: number; h: number }
+  /** Responsive Frames: the group's pins (a free group adapts as one rigid unit).
+   *  Absent ⇒ automatic. See lib/frame/responsive. */
+  pins?: import('~/lib/frame/responsive/types').Pins
 }
 
 /** The minimal layer shape these helpers need (a LocalLayer satisfies it). */

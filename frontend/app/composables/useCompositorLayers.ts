@@ -362,6 +362,10 @@ interface LayerCommon {
   /** Soft alpha falloff at the layer's edges (feather). Absent/inactive ⇒ crisp
    *  edge. amount is normalized to canvas width. See lib/compositor/feather. */
   feather?: import('~/lib/compositor/feather').FeatherSpec
+  /** Responsive Frames: how this layer holds to the frame (or its grid section)
+   *  when the box changes shape. Absent ⇒ automatic (inferred from where it sits).
+   *  Ignored while the Frame is fixed. See lib/frame/responsive. */
+  pins?: import('~/lib/frame/responsive/types').Pins
 }
 
 /** True when a layer is hidden (visible === false; undefined means visible). */
