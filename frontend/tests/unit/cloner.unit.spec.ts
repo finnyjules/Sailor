@@ -183,3 +183,17 @@ describe('clone index and count', () => {
     expect(DEFAULT_CLONER.phase).toBe(1)
   })
 })
+
+describe('expandClones only', () => {
+  it('returns just the k-th transform, identical to that entry of the full list', async () => {
+    const { expandClones, DEFAULT_CLONER } = await import('~/composables/useCloner')
+    const cl = { ...DEFAULT_CLONER, enabled: true, mode: 'radial' as const, count: 5, radius: 0.3, stepRotation: 10, stepOpacity: 0.8 }
+    const all = expandClones(cl, 1.5)
+    for (const c of all) expect(expandClones(cl, 1.5, c.k)).toEqual([c])
+    expect(expandClones(cl, 1.5, 99)).toEqual([])
+  })
+  it('DEFAULT_CLONER has no motion stagger', async () => {
+    const { DEFAULT_CLONER } = await import('~/composables/useCloner')
+    expect(DEFAULT_CLONER.motionStagger).toBeUndefined()
+  })
+})

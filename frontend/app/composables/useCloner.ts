@@ -61,6 +61,11 @@ export interface Cloner {
   varyPalette: string[]
   varyColorSpread: VarySpread
   varyColorStrength: number
+  /** Motion stagger: seconds between one copy's clock and the next. 0 = unison (today). */
+  motionStagger?: number
+  /** Which copy goes first. */
+  motionOrder?: 'first' | 'last' | 'centre' | 'random'
+  motionSeed?: number
 }
 
 export interface CloneTransform {
@@ -156,11 +161,16 @@ export function varyOf(cloner: Cloner): VarySettings {
  * @param cloner config (or undefined/disabled → a single identity transform)
  * @param aspect canvas W/H, used only by radial so the ring is circular on
  *               screen (x maps to W, y maps to H).
+ * @param only when given, narrow the result to just this one copy's `k` (used
+ *             by a staggered paint, which folds and paints one copy at a time).
  * @returns transforms in BACK-TO-FRONT draw order — the original (k=0, identity)
  *          is LAST so it lands on top and falloff reads as a trail behind it.
  */
-export function expandClones(cloner: Cloner | undefined | null, aspect: number): CloneTransform[] {
-  if (!cloner || !cloner.enabled) return [{ ...IDENTITY }]
+export function expandClones(cloner: Cloner | undefined | null, aspect: number, only?: number): CloneTransform[] {
+  if (!cloner || !cloner.enabled) {
+    const identity = [{ ...IDENTITY }]
+    return only === undefined ? identity : identity.filter((c) => c.k === only)
+  }
 
   const stepRot = cloner.stepRotation || 0
   const stepScl = cloner.stepScale ?? 1
@@ -227,7 +237,10 @@ export function expandClones(cloner: Cloner | undefined | null, aspect: number):
   // adds nothing to a count of 1), and radial with count 1. k is 0 for the sole copy,
   // so every step term is already at identity (`0 * stepRot`, `stepScl ** 0`) — only
   // its placement and a faceCenter rotation survive.
-  if (raw.length < 2) return raw.map((r) => ({ ...IDENTITY, dx: r.dx, dy: r.dy, drot: r.extraRot }))
+  if (raw.length < 2) {
+    const single = raw.map((r) => ({ ...IDENTITY, dx: r.dx, dy: r.dy, drot: r.extraRot }))
+    return only === undefined ? single : single.filter((c) => c.k === only)
+  }
 
   // Pass 2 — drivers. Sequence mode has varyStepFactor === 1, so the three step
   // expressions below reduce to exactly the pre-vary ones.
@@ -251,7 +264,7 @@ export function expandClones(cloner: Cloner | undefined | null, aspect: number):
 
   // Built k-ascending; reverse → original (k=0) ends last = drawn on top.
   out.reverse()
-  return out
+  return only === undefined ? out : out.filter((c) => c.k === only)
 }
 
 /**
