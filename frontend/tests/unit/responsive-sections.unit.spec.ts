@@ -73,4 +73,13 @@ describe('sectionsAt', () => {
     expect(r.box.regions).toHaveLength(4)
     expect(r.box.regions[1]).toEqual({ x: 1000, y: 0, w: 1000, h: 500 })
   })
+  it('the box grid follows the FIT scale, not the box width (s = 2)', () => {
+    const g = { ...defaultGrid(), mode: 'explicit' as const, columns: 2, rows: 1, margin: 0.1, gutter: 0 }
+    // 1000×500 design in a 2000×2000 box: s = min(2, 4) = 2, so the box grid's unit width is
+    // s·W0 = 2000 and the 0.1 margin is 200 px — the same 100 design px, doubled by the fit.
+    const r = sectionsAt(g, 1000, 500, 2, 2000, 2000)!
+    expect(r.box.xs[0]).toBe(200)
+    expect(r.box.xs[r.box.xs.length - 1]).toBe(1800)
+    expect(r.design.xs[0]).toBe(100)
+  })
 })
