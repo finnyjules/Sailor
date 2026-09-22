@@ -122,4 +122,37 @@ describe('serializeLayersForOS / parseLayersFromOS', () => {
     const text = serializeLayersForOS([WD('w1', 0)], [])
     expect(parseLayersFromOS(text)).toBeNull()
   })
+  it('round-trips the motion field across the OS clipboard', () => {
+    const motion: any = { motionx: [{ path: 'layers.a.opacity', type: 'number', keyframes: [] }], behaviours: [], tracks: [] }
+    const text = serializeLayersForOS([L('a', 0.2, 0.2)], [], motion)
+    const parsed = parseLayersFromOS(text)!
+    expect(parsed.motion?.motionx).toEqual(motion.motionx)
+  })
+  it('an old payload with no motion field parses with motion left undefined', () => {
+    const text = serializeLayersForOS([L('a', 0.2, 0.2)], [])
+    const parsed = parseLayersFromOS(text)!
+    expect(parsed.motion).toBeUndefined()
+  })
+})
+
+describe('clipboard motion', () => {
+  it('extractForCopy carries the motion aimed at the copied ids, un-remapped', () => {
+    const motion = { motionx: [{ path: 'layers.a.opacity', type: 'number', keyframes: [] }, { path: 'layers.b.opacity', type: 'number', keyframes: [] }],
+      behaviours: [{ id: 'bh', kind: 'fade', layerId: 'a', timing: { start: 0, duration: 1 } }], tracks: [] }
+    const p = extractForCopy([L('a', 0.2, 0.2), L('b', 0.5, 0.5)], [], new Set(['a']), motion as any)!
+    expect(p.motion?.motionx.map((t: any) => t.path)).toEqual(['layers.a.opacity'])
+    expect(p.motion?.behaviours.map((b: any) => b.id)).toEqual(['bh'])
+  })
+  it('materializePaste remaps the motion onto the pasted ids', () => {
+    const payload: any = { layers: [L('a', 0.2, 0.2)], groups: [],
+      motion: { motionx: [{ path: 'layers.a.opacity', type: 'number', keyframes: [], behaviourId: 'bh' }],
+        behaviours: [{ id: 'bh', kind: 'fade', layerId: 'a', timing: { start: 0, duration: 1 } }], tracks: [] } }
+    const r = materializePaste(payload, [], [], 0.02, ids(), gids(), () => 'nb1')
+    expect(r.motion.motionx[0]).toMatchObject({ path: 'layers.p1.opacity', behaviourId: 'nb1' })
+    expect(r.motion.behaviours[0]).toMatchObject({ id: 'nb1', layerId: 'p1' })
+  })
+  it('an old payload without motion pastes with empty motion', () => {
+    const r = materializePaste({ layers: [L('a', 0.2, 0.2)], groups: [] } as any, [], [], 0.02, ids(), gids(), () => 'nb1')
+    expect(r.motion).toEqual({ motionx: [], behaviours: [], tracks: [] })
+  })
 })

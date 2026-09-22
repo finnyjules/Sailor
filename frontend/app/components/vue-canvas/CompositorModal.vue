@@ -6790,7 +6790,7 @@ async function compositeSelectionBlob(payload: ClipboardPayload): Promise<Blob |
 async function writeLayersToOSClipboard(payload: ClipboardPayload): Promise<void> {
   const nav = typeof navigator !== 'undefined' ? navigator : null
   if (!nav?.clipboard) return
-  const json = serializeLayersForOS(payload.layers, payload.groups)
+  const json = serializeLayersForOS(payload.layers, payload.groups, payload.motion)
   // Preferred: one ClipboardItem carrying our JSON + a composited PNG.
   //
   // The ClipboardItem must be CONSTRUCTED and clipboard.write() must be CALLED

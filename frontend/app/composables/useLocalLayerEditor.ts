@@ -24,6 +24,7 @@ import {
 } from '~/lib/compositor/layerGroups'
 import { nudgeLayers, duplicateLayers, snapAngle, computeSnapAdjust, mapKeyToEdit, dragHud } from '~/lib/compositor/layerEdits'
 import { extractForCopy, materializePaste, setClipboard, getClipboard, hasClipboard, type ClipboardPayload } from '~/lib/compositor/layerClipboard'
+import { motionForCopies, type MotionDoc } from '~/lib/motionx/adapter/duplicateMotion'
 import { resizeBox, type Handle, type Box } from '~/lib/compositor/resizeBox'
 import { unionBox, cornerOf, anchorOf, groupScaleFactor, scaleLayerAbout, type Handle as GHandle, type Box as GBox } from '~/lib/compositor/groupResize'
 import { imageUrlToFile } from '~/lib/canvas/imageUrlToFile'
@@ -136,6 +137,12 @@ export function boxHandles(cx: number, cy: number, hw: number, hh: number, rotat
   }
 }
 
+// Fresh behaviour id for a duplicated/pasted Motion-tab behaviour — module-level
+// like `_dupSeq`'s role for layer ids, so ⌘D and paste never mint the same one
+// even across separate editor instances in the same session.
+let _behSeq = 0
+const mkBehaviourId = () => `bh-${Date.now().toString(36)}-${++_behSeq}`
+
 export function useLocalLayerEditor(opts: EditorOpts) {
   const { node, dims, getRect } = opts
 
@@ -244,6 +251,22 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     for (const k of MOTION_KEYS) { if (snap?.[k] !== undefined) next[k] = snap[k]; else delete next[k] }
     if (!n.data.properties) n.data.properties = {}
     ;(n.data.properties as any).sailor_motion = next
+  }
+  /** Append a duplicated/pasted layer's bands, behaviours and dial tracks (already
+   *  re-targeted by `motionForCopies`) onto the doc's existing ones. Per list:
+   *  creates it when either side is non-empty, leaves it absent when both the
+   *  existing list and the incoming one are empty — so ⌘D on a layer with no
+   *  motion is a true no-op on `sailor_motion` (identity default). */
+  function appendMotion(extra: { motionx?: unknown[]; behaviours?: unknown[]; tracks?: unknown[] } | undefined) {
+    if (!extra) return
+    const cur = readMotionSnap()
+    const next: MotionSnap = {}
+    for (const k of MOTION_KEYS) {
+      const curArr = (cur[k] as unknown[] | undefined) ?? []
+      const extraArr = (extra[k] as unknown[] | undefined) ?? []
+      if (curArr.length || extraArr.length) next[k] = [...curArr, ...extraArr]
+    }
+    writeMotionSnap(next)
   }
   type Snapshot = { layers: LocalLayer[]; order: string[]; bg: Paint | undefined; fx: PostEffect[]; groups: LayerGroup[]; frameTemplates: unknown[]; motion?: MotionSnap }
   const HISTORY_CAP = 120
@@ -589,6 +612,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       () => `g-${Date.now().toString(36)}-${++_groupSeq}`,
     )
     commitBoth(r.layers as LocalLayer[], r.groups)
+    appendMotion(motionForCopies(readMotionSnap() as MotionDoc, r.idMap, mkBehaviourId))
     selectedIds.value = new Set(r.newIds)
     selectedId.value = r.newIds[r.newIds.length - 1] ?? null
   }
@@ -612,7 +636,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       copyIds = new Set([...ids, ...baked])
     }
     if (!copyIds.size) return
-    const p = extractForCopy(localLayers.value, localGroups.value, copyIds)
+    const p = extractForCopy(localLayers.value, localGroups.value, copyIds, readMotionSnap() as MotionDoc)
     if (!p) return
     setClipboard(p)
     try { opts.onOSCopy?.(p) } catch { /* OS write is best-effort; in-session clipboard already set */ }
@@ -626,8 +650,10 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       p, localLayers.value, localGroups.value, inPlace ? 0 : 0.02,
       () => `ll-${Date.now().toString(36)}-${++_dupSeq}`,
       () => `g-${Date.now().toString(36)}-${++_groupSeq}`,
+      mkBehaviourId,
     )
     commitBoth(r.layers as LocalLayer[], r.groups)
+    appendMotion(r.motion)
     selectedIds.value = new Set(r.newIds)
     selectedId.value = r.newIds[r.newIds.length - 1] ?? null
   }
