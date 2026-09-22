@@ -48,7 +48,7 @@ import { snapshotFrameAsTemplate, addSlot } from '~/lib/frametemplate/author'
 import { placeTemplate, setInstanceSlot, freezeInstance, staleInstances, updateInstance, applySlotToLayer } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance, SlotKind } from '~/lib/frametemplate/types'
 import { resolveLayout, frameDocFromProps, isResponsiveFrame, type LayoutResult } from '~/lib/frame/responsive'
-import { atDesignSize as isAtDesignSize, clampViewSize, resizeViewFromEdge } from '~/lib/frame/responsive/viewport'
+import { atDesignSize as isAtDesignSize, clampViewSize, resizeViewFromEdge, shapePresets, readoutLabel as viewReadoutLabel } from '~/lib/frame/responsive/viewport'
 import { useTemplateLibrary } from '~/composables/useTemplateLibrary'
 import { serializeLayersForOS, parseLayersFromOS, setClipboard, type ClipboardPayload } from '~/lib/compositor/layerClipboard'
 import {
@@ -614,6 +614,22 @@ const zoomMenuItems = computed(() => [
   { id: '200', label: '200%', hint: '', disabled: false, run: () => zoomToScale(2) },
   { id: 'selection', label: 'Zoom to selection', hint: '⌘2', disabled: !hasSelectionToZoom.value, run: () => { zoomToSelection() } },
 ])
+
+// Responsive Frames: the viewing-size readout in the toolbar (editor-only, never
+// saved). Typing a dimension, picking a shape, or "Back to design size" all just
+// move viewSize; the layout re-flows off that.
+const viewShapes = computed(() => shapePresets(designSize.value))
+const viewReadout = computed(() => viewReadoutLabel(viewSize, designSize.value))
+function setViewDim(which: 'w' | 'h', raw: string) {
+  const n = Math.round(parseFloat(raw) || 0); if (n <= 0) return
+  const next = clampViewSize({ w: which === 'w' ? n : viewSize.w, h: which === 'h' ? n : viewSize.h }, designSize.value)
+  viewSize.w = next.w; viewSize.h = next.h
+}
+function pickViewShape(id: string) {
+  const p = viewShapes.value.find(x => x.id === id); if (!p) return
+  viewSize.w = p.w; viewSize.h = p.h
+}
+function backToDesignSize() { const d = designSize.value; viewSize.w = d.w; viewSize.h = d.h }
 
 function onStageWheel(e: WheelEvent) {
   e.preventDefault()
@@ -7952,6 +7968,32 @@ onUnmounted(() => {
                 data-testid="zoom-menu-hints"><span class="whitespace-nowrap">Space — pan</span> · <span class="whitespace-nowrap">Pinch/⌘ scroll — zoom</span> · <span class="whitespace-nowrap">⌘\ — hide panels</span></div>
             </div>
           </Transition>
+        </div>
+        <!-- Responsive Frames: the viewing-size readout. Fixed frames show nothing.
+             Grey at the design size, accent (#3b82f6) once you are viewing another
+             size; "Back to design size" only appears while off design. -->
+        <div v-if="frameIsResponsive"
+          class="flex items-center gap-1.5 pl-2 ml-1 border-l border-white/10 text-[11px]"
+          :class="atDesign ? 'text-white/60' : 'text-[#3b82f6]'"
+          @click.stop>
+          <span>{{ viewReadout }}</span>
+          <input type="number" min="1"
+            class="w-14 bg-transparent text-right tabular-nums outline-none"
+            :value="Math.round(viewSize.w)"
+            @change="setViewDim('w', ($event.target as HTMLInputElement).value)" />
+          <span class="text-white/30">×</span>
+          <input type="number" min="1"
+            class="w-14 bg-transparent tabular-nums outline-none"
+            :value="Math.round(viewSize.h)"
+            @change="setViewDim('h', ($event.target as HTMLInputElement).value)" />
+          <select class="bg-transparent outline-none cursor-pointer text-white/80"
+            @change="pickViewShape(($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).selectedIndex = 0">
+            <option value="">Shapes</option>
+            <option v-for="s in viewShapes" :key="s.id" :value="s.id">{{ s.label }}</option>
+          </select>
+          <button v-if="!atDesign"
+            class="underline decoration-dotted hover:text-white cursor-pointer"
+            @click="backToDesignSize">Back to design size</button>
         </div>
         <!-- Select tool — hidden once an image is selected. Collapses out with the
              same tb-expand transition as the canvas tools, concurrently with the
