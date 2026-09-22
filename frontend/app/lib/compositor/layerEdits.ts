@@ -49,14 +49,16 @@ export function duplicateLayers(
   offset: number,
   mkId: () => string,
   mkGid: () => string,
-): { layers: LocalLayer[]; groups: LayerGroup[]; newIds: string[] } {
+): { layers: LocalLayer[]; groups: LayerGroup[]; newIds: string[]; idMap: Map<string, string> } {
   const sel = layers.filter(l => selectedIds.has(l.id) && isClonableLayer(l))
-  if (!sel.length) return { layers, groups, newIds: [] }
+  if (!sel.length) return { layers, groups, newIds: [], idMap: new Map() }
   const groupMap = new Map<string, string>()
   const newIds: string[] = []
+  const idMap = new Map<string, string>()
   const clones = sel.map((l) => {
     const c = JSON.parse(JSON.stringify(l)) as any
     c.id = mkId(); newIds.push(c.id)
+    idMap.set(l.id, c.id)
     c.x = clamp(l.x + offset, -0.5, 1.5)
     c.y = clamp(l.y + offset, -0.5, 1.5)
     if (l.groupId) {
@@ -66,7 +68,7 @@ export function duplicateLayers(
     return c as LocalLayer
   })
   const newGroups: LayerGroup[] = [...groups, ...[...groupMap.values()].map(id => ({ id }))]
-  return { layers: [...layers, ...clones], groups: newGroups, newIds }
+  return { layers: [...layers, ...clones], groups: newGroups, newIds, idMap }
 }
 
 /** Round an angle (degrees) to the nearest `step`; pass through when step falsy. */

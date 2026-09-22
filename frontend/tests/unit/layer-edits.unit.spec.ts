@@ -186,3 +186,14 @@ describe('duplicateLayers with wired members', () => {
     expect((r.layers[4] as any).groupId).toBe('g1')
   })
 })
+
+describe('duplicateLayers idMap', () => {
+  it('maps every duplicated id to its copy', async () => {
+    const { duplicateLayers } = await import('~/lib/compositor/layerEdits')
+    const L = (id: string): any => ({ id, kind: 'rect', x: 0.2, y: 0.2, rotation: 0, opacity: 1, w: 0.1, h: 0.1 })
+    let n = 0
+    const r = duplicateLayers([L('a'), L('b'), L('c')], [], new Set(['a', 'c']), 0.02, () => `n${++n}`, () => 'g')
+    expect([...r.idMap.entries()]).toEqual([['a', 'n1'], ['c', 'n2']])
+    expect(r.newIds).toEqual(['n1', 'n2'])
+  })
+})
