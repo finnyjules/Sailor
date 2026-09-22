@@ -102,7 +102,20 @@ function rememberPreset(id: string) {
 }
 function onPresetChange(e: Event) {
   const v = (e.target as HTMLSelectElement).value
-  if (v === 'responsive') { setResponsive(true); return }   // keep current w/h as the design size
+  if (v === 'responsive') {
+    // A frame with no explicit size follows its bottom wired image; on becoming
+    // responsive, write its current effective size as a concrete design size so
+    // the design size is stable (never re-derived from the live canvas). Keep an
+    // already-explicit size untouched.
+    if (!(frameW.value > 0 && frameH.value > 0)) {
+      const L = 1024
+      const a = Number.isFinite(aspect.value) && aspect.value > 0 ? aspect.value : 1
+      const w = a >= 1 ? L : Math.round(L * a)
+      const h = a >= 1 ? Math.round(L / a) : L
+      setWidget('width', w); setWidget('height', h)
+    }
+    setResponsive(true); return
+  }
   if (v && v !== 'custom') { setResponsive(false); applyPreset(v) }
 }
 function setDim(which: 'width' | 'height', e: Event) { setWidget(which, Math.max(0, Math.round(parseFloat((e.target as HTMLInputElement).value) || 0))); rememberPreset('custom') }

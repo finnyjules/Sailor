@@ -457,7 +457,10 @@ watch([baseAspect, previewAspect], fitCanvasToStage)
 // the frame stops being responsive or the design size changes under us. This modal
 // is mounted fresh per open (v-if in VueNodeCanvas), so `{ immediate: true }` is the
 // "on open" reset — there is no `open` prop to watch.
-watch([frameIsResponsive, designSize], () => {
+// Watch the design-size PRIMITIVES (not the object): a same-valued recompute of
+// designSize — e.g. when canvasDisplay churns on a stage resize / panel toggle —
+// is then a no-op and no longer snaps the viewing size back.
+watch([frameIsResponsive, () => designSize.value.w, () => designSize.value.h], () => {
   const d = designSize.value
   viewSize.w = d.w; viewSize.h = d.h
 }, { immediate: true })
@@ -779,7 +782,7 @@ const {
   selectedId: selectedLocalId, selected: selectedLocal,
   editingId, editingLayer, beginEdit, endEdit,
   boxPx, handlePositions: localHandlePositions,
-  startScale: onLocalScalePointerDown, startRotate: onLocalRotatePointerDown, startResize: onLocalResizePointerDown,
+  startScale, startRotate, startResize,
   onCanvasPointerDown, onCanvasDblClick,
   addText, addRect, addEllipse, addLine, addPolygon, addStar, addImageFromFile, addImageFromName, addImageFromCanvasSrc,
   addPathLayers, addPathFromSvg, deleteLayers,
@@ -798,6 +801,14 @@ const {
   fillGridWithSections, resnapSelected,
   drawSectionActive, setDrawSectionActive, finishDrawSection,
 } = editor
+
+// The direct resize/scale/rotate handles are view-only at a viewing size: guard
+// each entry point so a gesture snaps back to the design size instead of editing
+// with no backward map. On a fixed frame viewOnlyGuard() is always false, so these
+// forward straight through — byte-identical behaviour.
+function onLocalScalePointerDown(ev: PointerEvent) { if (viewOnlyGuard()) return; startScale(ev) }
+function onLocalRotatePointerDown(ev: PointerEvent) { if (viewOnlyGuard()) return; startRotate(ev) }
+function onLocalResizePointerDown(handle: Parameters<typeof startResize>[0], ev: PointerEvent) { if (viewOnlyGuard()) return; startResize(handle, ev) }
 
 // ── Responsive Frames: the per-layer pins card ("When the frame resizes") ─────
 // The effective pins for the current single selection (or null). Only a
@@ -7725,15 +7736,15 @@ onUnmounted(() => {
              stops propagation so a drag never also pans the stage or clears selection. -->
         <template v-if="frameIsResponsive">
           <div class="absolute top-0 -right-1 w-2 h-full cursor-ew-resize group/redge" style="pointer-events:auto"
-            @pointerdown="onEdgeDown('e', $event)" @pointermove="onEdgeMove" @pointerup="onEdgeUp">
+            @pointerdown="onEdgeDown('e', $event)" @pointermove="onEdgeMove" @pointerup="onEdgeUp" @pointercancel="onEdgeUp">
             <div class="absolute inset-y-0 right-0 w-px bg-transparent group-hover/redge:bg-[#3b82f6]" />
           </div>
           <div class="absolute -bottom-1 left-0 h-2 w-full cursor-ns-resize group/bedge" style="pointer-events:auto"
-            @pointerdown="onEdgeDown('s', $event)" @pointermove="onEdgeMove" @pointerup="onEdgeUp">
+            @pointerdown="onEdgeDown('s', $event)" @pointermove="onEdgeMove" @pointerup="onEdgeUp" @pointercancel="onEdgeUp">
             <div class="absolute inset-x-0 bottom-0 h-px bg-transparent group-hover/bedge:bg-[#3b82f6]" />
           </div>
           <div class="absolute -bottom-1.5 -right-1.5 size-3 rounded-sm cursor-nwse-resize bg-[#3b82f6]/0 hover:bg-[#3b82f6] border border-[#3b82f6]/60"
-            style="pointer-events:auto" @pointerdown="onEdgeDown('se', $event)" @pointermove="onEdgeMove" @pointerup="onEdgeUp" />
+            style="pointer-events:auto" @pointerdown="onEdgeDown('se', $event)" @pointermove="onEdgeMove" @pointerup="onEdgeUp" @pointercancel="onEdgeUp" />
         </template>
 
         <!-- Unlinked wired layer: the box is still there (last known size), but
@@ -7747,7 +7758,7 @@ onUnmounted(() => {
 
         <!-- Local-layer selection / handles (single selection only — multi-select uses the group box below) -->
         <svg
-          v-if="localHandlePositions && selectedIds.size <= 1 && !editingId && !genActive && !brush.active.value"
+          v-if="localHandlePositions && selectedIds.size <= 1 && !editingId && !genActive && !brush.active.value && atDesign"
           class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"
           :viewBox="`0 0 ${canvasDisplay.w} ${canvasDisplay.h}`"
         >
@@ -7791,7 +7802,7 @@ onUnmounted(() => {
             <line v-if="selectionGuides.centerY" x1="0" :y1="canvasDisplay.h / 2" :x2="canvasDisplay.w" :y2="canvasDisplay.h / 2" />
           </g>
         </svg>
-        <template v-if="localHandlePositions && selectedIds.size <= 1 && !editingId && !genActive && !brush.active.value">
+        <template v-if="localHandlePositions && selectedIds.size <= 1 && !editingId && !genActive && !brush.active.value && atDesign">
           <div
             v-for="corner in (['tl', 'tr', 'br', 'bl'] as const)"
             :key="'l-' + corner"
