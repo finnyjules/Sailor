@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { copyRanks, copyClock, staggerOf, COPY_ORDERS } from '~/lib/motionx/copies'
+import { copyRanks, copyClock, staggerOf, COPY_ORDERS, echoOffsets } from '~/lib/motionx/copies'
 import { DEFAULT_CLONER } from '~/composables/useCloner'
 
 describe('copyRanks', () => {
@@ -42,4 +42,23 @@ describe('copyClock', () => {
     expect(copyClock(2, 1, 4, { ...cl, motionStagger: -1 })).toBe(2)
   })
   it('staggerOf', () => { expect(staggerOf(cl)).toBe(0.25); expect(staggerOf(DEFAULT_CLONER)).toBe(0); expect(staggerOf(undefined)).toBe(0) })
+})
+
+describe('echoOffsets — the timeline\'s stagger echoes', () => {
+  it('one offset per copy after the first, each a multiple of the stagger', () => {
+    expect(echoOffsets(0.25, 4, 0, 4)).toEqual([0.25, 0.5, 0.75])
+    expect(echoOffsets(0.25, 1, 0, 4)).toEqual([])   // one copy → nothing to echo
+  })
+  it('caps at `max` however many copies', () => {
+    expect(echoOffsets(0.1, 20, 0, 4, 6)).toHaveLength(6)
+  })
+  it('drops echoes that would start past the frame', () => {
+    // bar at 3.6s, stagger 0.25, duration 4: only +0.25 (3.85) fits; +0.5 (4.10) is past.
+    expect(echoOffsets(0.25, 5, 3.6, 4)).toEqual([0.25])
+  })
+  it('no stagger, a bad stagger, or zero copies → no echoes', () => {
+    expect(echoOffsets(0, 4, 0, 4)).toEqual([])
+    expect(echoOffsets(NaN, 4, 0, 4)).toEqual([])
+    expect(echoOffsets(0.25, 0, 0, 4)).toEqual([])
+  })
 })

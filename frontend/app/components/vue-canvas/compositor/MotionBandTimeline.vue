@@ -10,6 +10,8 @@ import type { Track, StoredBehaviour } from '~/lib/motionx'
 import { isTextBehaviour } from '~/lib/motionx/text'
 import { bandsForLayer, behaviourBandsForLayer, legacyBandForLayer, numberBandCurve, colorBandCss, gradientBandCss, trackSpan, type Band } from '~/lib/motionx/bands'
 import { animatableProperties, MOTION_ONLY_LABELS, isMotionOnlyPath } from '~/lib/motionx/adapter/frame'
+import { expandClones, type Cloner } from '~/composables/useCloner'
+import { staggerOf, echoOffsets } from '~/lib/motionx/copies'
 import { shiftTrack, retimeTrack, movePoint, removePoint, setBandTrack, ripplePoint, segmentAt, bandTrackAt } from '~/lib/motionx/bandEdit'
 import { deriveView, timeToX, xToTime, zoomAboutPivot, clampViewStart, computeTicks, formatRulerSeconds, ghostCycles, type View } from '~/lib/motionx/timelineView'
 
@@ -116,6 +118,25 @@ function legsOf(b: Band): Array<{ index: number; left: number; width: number; se
   })
 }
 const isLegSel = (b: Band, i: number) => props.selection?.kind === 'point' && props.selection.path === b.path && props.selection.index === i
+
+// ── Stagger echoes ───────────────────────────────────────────────────────────
+// A copy stagger spreads a bar in time: each copy plays it `rank × stagger` later. These are
+// the faint, dashed "echo" copies that show that spread on the bar — a read-only hint, never
+// draggable. A reveal (Assemble / Dither / Settle) bar echoes only when the layer opts into
+// staggering transitions; position / opacity / letters echo whenever a stagger is set. Capped
+// so a big copy count stays legible; the delays past the last are the ones dropped.
+const MAX_ECHOES = 6
+function echoDelaysFor(l: LocalLayer, b: Band, isReveal: boolean): number[] {
+  const cloner = (l as { cloner?: Cloner }).cloner
+  if (!cloner?.enabled) return []
+  const s = staggerOf(cloner)
+  if (s <= 0) return []
+  if (isReveal && !cloner.staggerReveals) return []
+  const distinct = new Set(expandClones(cloner, 1).map((c) => c.k)).size
+  return echoOffsets(s, distinct, b.start, props.duration, MAX_ECHOES)
+}
+// Fade the later echoes so a long trail reads as a tail, not N equal bars.
+const echoOpacity = (i: number) => Math.max(0.28, 1 - i * 0.13)
 // A looping bar is ONE cycle; these are its faint repeats out to the end of the timeline.
 const ghostsOf = (b: Band) => (b.loop ? ghostCycles(b.start, b.end - b.start, props.duration, dv.value.safeViewStart) : [])
 // A loop owns its property from its start to the END of the timeline, not just its bar.
@@ -522,6 +543,10 @@ function deletePoint(b: Band, i: number) {
             <span class="truncate text-left text-[10px] pl-5 self-center text-white/45" :title="b.label">{{ b.label }}</span>
             <div data-band-lane class="relative my-0.5 h-6">
               <div v-if="playheadVisible" class="absolute inset-y-0 w-px bg-[#7c9cff]/50 pointer-events-none z-30" :style="{ left: px(playheadX) }" />
+              <div v-for="(d, i) in echoDelaysFor(l, b, false)" :key="'echo-' + b.key + '-' + i" aria-hidden="true"
+                data-testid="stagger-echo"
+                class="absolute inset-y-0.5 rounded-md border border-dashed border-white/15 pointer-events-none select-none"
+                :style="{ left: px(xOf(b.start + d)), width: px(wOf(b.start, b.end)), background: 'rgba(255,255,255,.05)', opacity: echoOpacity(i) }" />
               <div :data-testid="'beh-band-' + b.behaviourId" :data-muted="b.muted ? '' : undefined"
                 class="absolute inset-y-0 flex items-center gap-1.5 rounded-md border px-2 text-[9.5px] cursor-grab active:cursor-grabbing overflow-hidden select-none"
                 :class="[isBehSel(b) ? 'ring-2 ring-[#7c9cff] text-white border-[#7c9cff]' : 'text-white/80 border-white/25 hover:border-white/45', b.muted ? 'opacity-40 border-dashed' : '']"
@@ -556,6 +581,14 @@ function deletePoint(b: Band, i: number) {
                 class="absolute right-[7px] top-1/2 z-20 -translate-y-1/2 text-[13px] font-semibold leading-none text-white/40 pointer-events-none select-none"
                 title="Repeats to the end of the timeline">∞</span>
 
+              <!-- stagger echoes: faint dashed copies showing the per-copy time spread (read-only) -->
+              <template v-for="b in r.behaviours" :key="'echo-' + b.key">
+                <div v-for="(d, i) in echoDelaysFor(l, b, isMotionOnlyPath(r.path))" :key="i" aria-hidden="true"
+                  data-testid="stagger-echo"
+                  class="absolute inset-y-0.5 rounded-md border border-dashed border-white/15 pointer-events-none select-none"
+                  :style="{ left: px(xOf(b.start + d)), width: px(wOf(b.start, b.end)), background: 'rgba(255,255,255,.05)', opacity: echoOpacity(i) }" />
+              </template>
+
               <!-- behaviour bars -->
               <div v-for="b in r.behaviours" :key="b.key" :data-testid="'beh-band-' + b.behaviourId" :data-muted="b.muted ? '' : undefined"
                 class="absolute inset-y-0 flex items-center gap-1.5 rounded-md border px-2 text-[9.5px] cursor-grab active:cursor-grabbing overflow-hidden select-none"
@@ -578,6 +611,12 @@ function deletePoint(b: Band, i: number) {
                 <div class="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize hover:bg-white/25"
                   @pointerdown.stop.prevent="(e: PointerEvent) => startBehDrag(e, b, 'end')" />
               </div>
+
+              <!-- stagger echoes for the property band (read-only) -->
+              <div v-for="(d, i) in (r.property ? echoDelaysFor(l, r.property, isMotionOnlyPath(r.path)) : [])" :key="'echo-prop-' + i" aria-hidden="true"
+                data-testid="stagger-echo"
+                class="absolute inset-y-0.5 rounded-md border border-dashed border-white/15 pointer-events-none select-none"
+                :style="{ left: px(xOf(r.property!.start + d)), width: px(wOf(r.property!.start, r.property!.end)), background: 'rgba(255,255,255,.05)', opacity: echoOpacity(i) }" />
 
               <!-- explicit property band (control points) -->
               <div v-if="r.property" :data-testid="'band-' + r.property.key" :data-muted="r.property.muted ? '' : undefined"

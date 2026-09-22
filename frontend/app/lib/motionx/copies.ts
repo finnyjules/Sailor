@@ -63,3 +63,17 @@ export function copyClock(t: number, k: number, n: number, cloner: Cloner): numb
   const ranks = copyRanks(n, (cloner.motionOrder ?? 'first') as CopyOrder, cloner.motionSeed ?? 1)
   return t - (ranks[k] ?? 0) * s
 }
+
+/** The time offsets of a bar's stagger "echoes" — the faint copies the timeline draws behind a
+ *  bar to show that a copy stagger spreads it in time. One per copy after the first
+ *  (`rank × stagger`, i.e. `stagger`, `2·stagger`, …), capped at `max`, and never past
+ *  `duration` (a copy that starts after the frame ends has nothing to show). Pure; the caller
+ *  supplies the distinct copy count and decides whether a bar echoes at all. */
+export function echoOffsets(stagger: number, copyCount: number, barStart: number, duration: number, max = 6): number[] {
+  const s = typeof stagger === 'number' && Number.isFinite(stagger) && stagger > 0 ? stagger : 0
+  if (s <= 0) return []
+  const n = Math.min(Math.max(0, Math.floor(max)), Math.max(0, Math.floor(copyCount) - 1))
+  const out: number[] = []
+  for (let i = 1; i <= n; i++) { if (barStart + i * s <= duration + 1e-6) out.push(i * s) }
+  return out
+}
