@@ -221,6 +221,17 @@ const props = defineProps<{
 
 const emit = defineEmits<{ close: [] }>()
 
+// Closing on a backdrop click must not fire when a DRAG ends over the backdrop. The layer
+// resize/scale/rotate handles track their drag with window pointer listeners (no pointer
+// capture), so releasing the cursor outside the modal produces a `click` whose target is the
+// full-screen backdrop — indistinguishable from a real backdrop click by `.self` alone. So we
+// only close when the pointer also went DOWN on the backdrop: a capture-phase pointerdown
+// disarms for every gesture (it runs before the target phase), and `@pointerdown.self` re-arms
+// only for a genuine backdrop press. A drag that starts on a handle never re-arms, so its
+// release-click over the backdrop is ignored.
+const backdropCloseArmed = ref(false)
+function onBackdropClick() { if (backdropCloseArmed.value) emit('close'); backdropCloseArmed.value = false }
+
 const { ensure: ensureGoogleFont } = useGoogleFontPreview()
 const { ensure: ensureLibraryFont } = useLibraryFonts()
 
@@ -7143,7 +7154,9 @@ onUnmounted(() => {
 <template>
   <div
     class="fixed inset-0 z-[100] bg-black/85 flex items-center justify-center p-6"
-    @click.self="emit('close')"
+    @pointerdown.capture="backdropCloseArmed = false"
+    @pointerdown.self="backdropCloseArmed = true"
+    @click.self="onBackdropClick"
     @dragover.prevent
     @drop.prevent
   >
