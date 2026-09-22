@@ -49,6 +49,7 @@ const emit = defineEmits<{
   'behaviour-change': [id: string, patch: BehaviourPatch, record?: boolean]
   'behaviour-open': [id: string]
   'behaviour-delete': [id: string]
+  'toggle-mute': [sel: { behaviourId?: string; path?: string }]
   'legacy-remove': [layerId: string]
 }>()
 
@@ -783,6 +784,9 @@ function onGradient(g: Gradient) {
         @update:model-value="(v) => setBehTiming({ loop: v })" />
     </div>
 
+    <StudioSwitch class="mt-2" data-testid="beh-active" label="Active"
+      hint="Off keeps the band on the timeline but leaves it out of the animation (right-click the bar too)"
+      :model-value="!behaviour.muted" @update:model-value="emit('toggle-mute', { behaviourId: behaviour.id })" />
     <div class="mt-2 flex items-center justify-between border-t border-white/10 pt-2">
       <StudioButton data-testid="beh-delete" title="Remove this behaviour (Delete)"
         @click="emit('behaviour-delete', behaviour.id)">Delete</StudioButton>
@@ -842,6 +846,9 @@ function onGradient(g: Gradient) {
       <div class="mi-heading">{{ track.keyframes.length > 2 ? 'Easing (all points)' : 'Easing' }}</div>
       <MotionEasingCurve class="mb-2" :ease="track.keyframes[0]?.ease ?? 'linear'"
         @start="emit('before-change')" @change="setAllEaseLive" @end="emit('commit')" />
+      <StudioSwitch class="mb-2" data-testid="band-active" label="Active"
+        hint="Off keeps the band on the timeline but leaves it out of the animation (right-click the bar too)"
+        :model-value="!track.muted" @update:model-value="emit('toggle-mute', { path: track!.path })" />
       <StudioSwitch class="mb-2" data-testid="band-loop" label="Loop"
         hint="Repeat this band to the end of the timeline — the bar is one cycle"
         :model-value="!!track.loop" @update:model-value="(v) => apply({ ...track!, loop: v })" />

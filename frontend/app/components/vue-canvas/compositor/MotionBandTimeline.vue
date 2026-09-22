@@ -53,7 +53,13 @@ const emit = defineEmits<{
   // Behaviour bars: drag to move / drag edges to retime (DialKit clip gestures) + Open on the bar.
   'behaviour-change': [id: string, patch: { timing: { start?: number; duration?: number } }]
   'behaviour-open': [id: string]
+  // Right-click a band to deactivate/reactivate it — kept on the timeline, skipped by the render.
+  'toggle-mute': [sel: { behaviourId?: string; path?: string }]
 }>()
+// A band's identity for muting: its behaviour (behaviour bands) or its property path (property bands).
+function toggleMute(b: Band): void {
+  emit('toggle-mute', b.behaviourId ? { behaviourId: b.behaviourId } : { path: b.path })
+}
 const clampN = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 
 // ── View state (component-local, DialKit idiom) ──────────────────────────────
@@ -148,7 +154,7 @@ function rowsFor(l: LocalLayer): PropertyRow[] {
     return (ia === -1 ? 1e9 : ia) - (ib === -1 ? 1e9 : ib)
   })
   for (const r of rows) {
-    const bars = [...r.behaviours, ...(r.property ? [r.property] : [])]
+    const bars = [...r.behaviours, ...(r.property ? [r.property] : [])].filter((b) => !b.muted)
     for (let i = 0; i < bars.length; i++) for (let j = i + 1; j < bars.length; j++) {
       const a = bars[i]!, b = bars[j]!
       if (Math.min(reachOf(a), reachOf(b)) - Math.max(a.start, b.start) > 1e-6) { r.conflicts.add(a.key); r.conflicts.add(b.key) }
@@ -516,12 +522,13 @@ function deletePoint(b: Band, i: number) {
             <span class="truncate text-left text-[10px] pl-5 self-center text-white/45" :title="b.label">{{ b.label }}</span>
             <div data-band-lane class="relative my-0.5 h-6">
               <div v-if="playheadVisible" class="absolute inset-y-0 w-px bg-[#7c9cff]/50 pointer-events-none z-30" :style="{ left: px(playheadX) }" />
-              <div :data-testid="'beh-band-' + b.behaviourId"
+              <div :data-testid="'beh-band-' + b.behaviourId" :data-muted="b.muted ? '' : undefined"
                 class="absolute inset-y-0 flex items-center gap-1.5 rounded-md border px-2 text-[9.5px] cursor-grab active:cursor-grabbing overflow-hidden select-none"
-                :class="isBehSel(b) ? 'ring-2 ring-[#7c9cff] text-white border-emerald-300' : 'text-white/80 border-emerald-400/40 hover:border-emerald-300/70'"
+                :class="[isBehSel(b) ? 'ring-2 ring-[#7c9cff] text-white border-emerald-300' : 'text-white/80 border-emerald-400/40 hover:border-emerald-300/70', b.muted ? 'opacity-40 border-dashed' : '']"
                 :style="{ left: px(xOf(b.start)), width: px(wOf(b.start, b.end)), background: 'rgba(120,220,170,.16)' }"
-                :title="b.label + ' · drag to move, drag edges to retime'"
-                @pointerdown.stop.prevent="(e: PointerEvent) => startBehDrag(e, b, 'move')">
+                :title="b.label + (b.muted ? ' · OFF' : '') + ' · right-click to ' + (b.muted ? 'reactivate' : 'deactivate') + ' · drag to move, drag edges to retime'"
+                @pointerdown.stop.prevent="(e: PointerEvent) => startBehDrag(e, b, 'move')"
+                @contextmenu.stop.prevent="toggleMute(b)">
                 <span v-if="wOf(b.start, b.end) > 40" class="ml-auto shrink-0 tabular-nums text-white/50">{{ (b.end - b.start).toFixed(2) }}s</span>
                 <div class="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize hover:bg-white/25"
                   @pointerdown.stop.prevent="(e: PointerEvent) => startBehDrag(e, b, 'start')" />
@@ -550,13 +557,15 @@ function deletePoint(b: Band, i: number) {
                 title="Repeats to the end of the timeline">∞</span>
 
               <!-- behaviour bars -->
-              <div v-for="b in r.behaviours" :key="b.key" :data-testid="'beh-band-' + b.behaviourId"
+              <div v-for="b in r.behaviours" :key="b.key" :data-testid="'beh-band-' + b.behaviourId" :data-muted="b.muted ? '' : undefined"
                 class="absolute inset-y-0 flex items-center gap-1.5 rounded-md border px-2 text-[9.5px] cursor-grab active:cursor-grabbing overflow-hidden select-none"
                 :class="[isBehSel(b) ? 'ring-2 ring-[#7c9cff] text-white' : 'text-white/80',
-                         r.conflicts.has(b.key) ? 'border-amber-400/70' : (isBehSel(b) ? 'border-emerald-300' : 'border-emerald-400/40 hover:border-emerald-300/70')]"
+                         r.conflicts.has(b.key) ? 'border-amber-400/70' : (isBehSel(b) ? 'border-emerald-300' : 'border-emerald-400/40 hover:border-emerald-300/70'),
+                         b.muted ? 'opacity-40 border-dashed' : '']"
                 :style="{ left: px(xOf(b.start)), width: px(wOf(b.start, b.end)), background: r.conflicts.has(b.key) ? 'rgba(251,191,36,.14)' : 'rgba(120,220,170,.16)' }"
-                :title="b.label + (b.loop ? ' · one cycle, repeats through the timeline' : '') + (r.conflicts.has(b.key) ? ' · overlaps another bar on ' + r.label : '') + ' · drag to move, drag edges to ' + (b.loop ? 'change the cycle length' : 'retime')"
-                @pointerdown.stop.prevent="(e: PointerEvent) => startBehDrag(e, b, 'move')">
+                :title="b.label + (b.muted ? ' · OFF' : '') + (b.loop ? ' · one cycle, repeats through the timeline' : '') + (r.conflicts.has(b.key) ? ' · overlaps another bar on ' + r.label : '') + ' · right-click to ' + (b.muted ? 'reactivate' : 'deactivate') + ' · drag to move, drag edges to ' + (b.loop ? 'change the cycle length' : 'retime')"
+                @pointerdown.stop.prevent="(e: PointerEvent) => startBehDrag(e, b, 'move')"
+                @contextmenu.stop.prevent="toggleMute(b)">
                 <span class="truncate">{{ b.label }}</span>
                 <button v-if="isBehSel(b) && wOf(b.start, b.end) > 120 && !isMotionOnlyPath(r.path)" type="button"
                   class="shrink-0 px-1.5 rounded border border-white/25 text-[9px] text-white/85 hover:bg-white/15 cursor-pointer"
@@ -571,11 +580,13 @@ function deletePoint(b: Band, i: number) {
               </div>
 
               <!-- explicit property band (control points) -->
-              <div v-if="r.property" :data-testid="'band-' + r.property.key"
+              <div v-if="r.property" :data-testid="'band-' + r.property.key" :data-muted="r.property.muted ? '' : undefined"
                 class="absolute inset-y-0 rounded-md border overflow-hidden cursor-grab active:cursor-grabbing"
-                :class="[isBandSel(r.property) ? 'ring-2 ring-[#7c9cff] border-[#7c9cff]' : (r.conflicts.has(r.property.key) ? 'border-amber-400/70' : 'border-white/15')]"
+                :class="[isBandSel(r.property) ? 'ring-2 ring-[#7c9cff] border-[#7c9cff]' : (r.conflicts.has(r.property.key) ? 'border-amber-400/70' : 'border-white/15'), r.property.muted ? 'opacity-40 border-dashed' : '']"
                 :style="{ left: px(xOf(r.property.start)), width: px(wOf(r.property.start, r.property.end)), background: r.property.kind === 'number' ? 'linear-gradient(180deg,#171a20,#12141a)' : bandCss(r.property) }"
-                @pointerdown.stop.prevent="(e: PointerEvent) => startShift(e, r.property!)">
+                :title="(r.property.muted ? 'OFF · ' : '') + 'right-click to ' + (r.property.muted ? 'reactivate' : 'deactivate')"
+                @pointerdown.stop.prevent="(e: PointerEvent) => startShift(e, r.property!)"
+                @contextmenu.stop.prevent="toggleMute(r.property!)">
                 <svg v-if="r.property.kind === 'number'" viewBox="0 0 100 100" preserveAspectRatio="none" class="w-full h-full block pointer-events-none">
                   <polyline :points="curvePoints(r.property)" fill="none" stroke="#7c9cff" stroke-width="2" vector-effect="non-scaling-stroke" />
                 </svg>

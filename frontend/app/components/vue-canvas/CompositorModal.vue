@@ -3968,6 +3968,30 @@ function deleteMotionSelection() {
   setMotion({ motionx: setBandTrack(motionxTracks.value, sel.path, null) } as Partial<FrameMotion>)
   motionSel.value = null
 }
+// Deactivate / reactivate a band without deleting it (right-click on the timeline). A behaviour
+// carries the flag on itself, and its tracks are recompiled so the mute rides onto them (the
+// folds skip a muted track); a plain property band carries the flag on its own track.
+function toggleBandMuted(sel: { behaviourId?: string; path?: string }) {
+  if (sel.behaviourId) {
+    const cur = motionBehaviours.value.find((b) => b.id === sel.behaviourId)
+    const l = cur ? localLayers.value.find((x) => x.id === cur.layerId) : null
+    if (!cur || !l) return
+    const next: StoredBehaviour = { ...cur, muted: !cur.muted }
+    const tracks = isTextBehaviour(next) ? [] : compileBehaviourForLayer(l as LocalLayer, next as Behaviour)
+    recordHistory()
+    setMotion({
+      behaviours: upsertBehaviour(motionBehaviours.value, next),
+      motionx: setBehaviourTracks(motionxTracks.value, next.id, tracks),
+    } as Partial<FrameMotion>)
+    return
+  }
+  if (!sel.path) return
+  const tk = motionxTracks.value.find((t) => t.path === sel.path && !t.behaviourId)
+  if (!tk) return
+  recordHistory()
+  setMotion({ motionx: setBandTrack(motionxTracks.value, sel.path, { ...tk, muted: !tk.muted }) } as Partial<FrameMotion>)
+}
+
 // Delete a behaviour entirely (band + its tracks).
 function deleteBehaviour(id: string) {
   recordHistory()
@@ -8123,7 +8147,7 @@ onUnmounted(() => {
           @toggle-gallery="behaviourPickerOpen = !behaviourPickerOpen; if (behaviourPickerOpen) propertyPickerOpen = false"
           @toggle-property-picker="propertyPickerOpen = !propertyPickerOpen; if (propertyPickerOpen) behaviourPickerOpen = false"
           @behaviour-change="(id: string, p: { timing: { start?: number; duration?: number } }) => editBehaviour(id, p, false)"
-          @behaviour-open="openBehaviour">
+          @behaviour-open="openBehaviour" @toggle-mute="toggleBandMuted">
           <template #gallery>
             <MotionGallery :caps="motionLayerCaps" @add="onGalleryAdd" @close="behaviourPickerOpen = false" />
           </template>
@@ -8382,7 +8406,7 @@ onUnmounted(() => {
             :label="motionSelLabel" :legacy-label="legacyMotionLabel" :piece-counts="motionPieceCounts"
             @update:motionx="updateMotionx" @before-change="recordHistory"
             @select-point="selectMotionPoint" @clear="clearMotionSel"
-            @behaviour-change="editBehaviour" @behaviour-open="openBehaviour" @behaviour-delete="deleteBehaviour"
+            @behaviour-change="editBehaviour" @behaviour-open="openBehaviour" @behaviour-delete="deleteBehaviour" @toggle-mute="toggleBandMuted"
             @legacy-remove="removeLegacyAnimation" />
           <!-- Copies: a cloned layer's copies can stagger their motion. Motion tab only —
                the Design tab's CompositorClonerPanel never gets these fields. -->

@@ -59,7 +59,9 @@ export function applyResolvedValue(layer: LocalLayer, prop: string, value: Prope
  *  or nothing resolves/changes); non-targeted layers are returned by identity. */
 export function applyMotionxTracks(layers: LocalLayer[], tracks: Track[] | undefined, t: number | undefined): LocalLayer[] {
   if (!tracks || tracks.length === 0 || t == null) return layers
-  const resolved = evaluateTracks(tracks, t)
+  const live = tracks.filter((tr) => !tr.muted)   // a deactivated band contributes nothing
+  if (live.length === 0) return layers
+  const resolved = evaluateTracks(live, t)
   if (resolved.size === 0) return layers
   const byLayer = new Map<string, Array<[string, PropertyValue]>>()
   for (const [path, value] of resolved) {
@@ -111,7 +113,7 @@ export function applyTextBehaviours(
   if (!behaviours || behaviours.length === 0 || t == null) return layers
   const byLayer = new Map<string, StoredBehaviour[]>()
   for (const b of behaviours) {
-    if (!isTextBehaviour(b)) continue
+    if (!isTextBehaviour(b) || b.muted) continue
     const list = byLayer.get(b.layerId)
     if (list) list.push(b); else byLayer.set(b.layerId, [b])
   }
@@ -156,7 +158,7 @@ export function applyRevealBehaviours(
   if (!tracks || tracks.length === 0 || !behaviours || behaviours.length === 0 || t == null) return layers
   const byLayer = new Map<string, Track[]>()
   for (const tr of tracks) {
-    if (!tr.behaviourId) continue
+    if (!tr.behaviourId || tr.muted) continue
     const m = tr.path.match(/^layers\.([^.]+)\.reveal$/)
     if (!m) continue
     const list = byLayer.get(m[1]!)
@@ -291,5 +293,7 @@ export function animatableProperties(layer: LocalLayer): AnimatableProperty[] {
  *  resulting tracks are ready for `applyMotionxTracks` / storage on the frame doc. */
 export function compileBehaviourForLayer(layer: LocalLayer, behaviour: Behaviour): Track[] {
   const target = frameTarget(layer)
-  return compileBehaviour(behaviour, target).map((tr) => ({ ...tr, path: `layers.${layer.id}.${tr.path}` }))
+  return compileBehaviour(behaviour, target).map((tr) => ({
+    ...tr, path: `layers.${layer.id}.${tr.path}`, ...(behaviour.muted ? { muted: true } : {}),
+  }))
 }

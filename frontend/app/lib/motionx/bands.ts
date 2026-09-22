@@ -21,6 +21,8 @@ export interface Band {
   behaviourId?: string   // set on behaviour bands (kind 'behaviour')
   /** The bar is ONE cycle that repeats to the end of the timeline. */
   loop?: boolean
+  /** Deactivated: shown on the timeline but excluded from every render fold. */
+  muted?: boolean
 }
 
 interface GradStop { pos: number; color: string }
@@ -60,6 +62,7 @@ export function bandsForLayer(
       end,
       keyframes: tk.keyframes,
       loop: !!tk.loop,
+      muted: !!tk.muted,
     })
   }
   return out
@@ -141,6 +144,7 @@ export function behaviourBandsForLayer(layerId: string, behaviours: StoredBehavi
         keyframes: [],
         behaviourId: b.id,
         loop: tracks.some((t) => t.behaviourId === b.id && !!t.loop),
+        muted: !!b.muted,
       }
     })
 }

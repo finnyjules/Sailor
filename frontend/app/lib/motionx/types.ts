@@ -27,9 +27,12 @@ export interface Track {
   behaviourId?: string             // set on tracks compiled from a live Behaviour; the
                                    // evaluator ignores it (byte-identity preserved). Property
                                    // bands are untagged; a tagged track belongs to its band.
+  muted?: boolean                  // a deactivated band: kept on the timeline, skipped by every
+                                   // render fold. On a property band the flag lives here; on a
+                                   // behaviour band it is mirrored from the behaviour at compile.
 }
 export interface Timing { start: number; duration: number; loop?: boolean; hold?: number; delay?: number }
-export interface Behaviour { id: string; kind: string; timing: Timing; params?: Record<string, unknown> }
+export interface Behaviour { id: string; kind: string; timing: Timing; params?: Record<string, unknown>; muted?: boolean }
 /** A Behaviour bound to a specific Frame layer, as persisted on the doc (author state). */
 export interface StoredBehaviour extends Behaviour { layerId: string }
 /** A behaviour compiles against a target that can read current property values. */
