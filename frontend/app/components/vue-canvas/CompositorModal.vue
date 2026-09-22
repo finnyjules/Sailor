@@ -48,7 +48,7 @@ import { snapshotFrameAsTemplate, addSlot } from '~/lib/frametemplate/author'
 import { placeTemplate, setInstanceSlot, freezeInstance, staleInstances, updateInstance, applySlotToLayer } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance, SlotKind } from '~/lib/frametemplate/types'
 import { resolveLayout, frameDocFromProps, isResponsiveFrame, type LayoutResult } from '~/lib/frame/responsive'
-import { atDesignSize as isAtDesignSize, clampViewSize } from '~/lib/frame/responsive/viewport'
+import { atDesignSize as isAtDesignSize, clampViewSize, resizeViewFromEdge } from '~/lib/frame/responsive/viewport'
 import { useTemplateLibrary } from '~/composables/useTemplateLibrary'
 import { serializeLayersForOS, parseLayersFromOS, setClipboard, type ClipboardPayload } from '~/lib/compositor/layerClipboard'
 import {
@@ -644,6 +644,25 @@ function onStagePointerMovePan(e: PointerEvent) {
   view.ty = panFrom.ty + (e.clientY - panFrom.y)
 }
 function onStagePointerUpPan() { panFrom = null; panning.value = false }
+
+// Responsive Frames: dragging an artboard edge changes the viewing size (editor-only).
+const edgeDrag = ref<{ edge: 'e' | 's' | 'se'; sx: number; sy: number; w0: number; h0: number } | null>(null)
+function onEdgeDown(edge: 'e' | 's' | 'se', ev: PointerEvent) {
+  ev.preventDefault(); ev.stopPropagation()
+  ;(ev.target as HTMLElement).setPointerCapture?.(ev.pointerId)
+  edgeDrag.value = { edge, sx: ev.clientX, sy: ev.clientY, w0: viewSize.w, h0: viewSize.h }
+}
+function onEdgeMove(ev: PointerEvent) {
+  const d = edgeDrag.value; if (!d) return
+  ev.stopPropagation()
+  // display scale = on-screen artboard px per output px, including the pan/zoom scale.
+  const displayScale = (canvasDisplay.w / Math.max(1, viewSize.w)) * (view.scale || 1)
+  const next = resizeViewFromEdge(designSize.value, { w: d.w0, h: d.h0 }, d.edge, ev.clientX - d.sx, ev.clientY - d.sy, displayScale)
+  viewSize.w = next.w; viewSize.h = next.h
+}
+function onEdgeUp(ev: PointerEvent) {
+  if (edgeDrag.value) { ev.stopPropagation(); (ev.target as HTMLElement).releasePointerCapture?.(ev.pointerId); edgeDrag.value = null }
+}
 
 const canvasRef = ref<HTMLDivElement | null>(null)
 function canvasRect(): DOMRect | null { return canvasRef.value?.getBoundingClientRect() ?? null }
@@ -7623,6 +7642,23 @@ onUnmounted(() => {
 
       </div>
       <!-- end artboard (clipped) — selection controls below live in the wrapper, unclipped -->
+
+        <!-- Responsive Frames: draggable artboard edges (editor-only). These live in
+             the wrapper's transformed space so they track the artboard under pan/zoom;
+             a fixed frame shows none, keeping its render byte-identical. Each grip
+             stops propagation so a drag never also pans the stage or clears selection. -->
+        <template v-if="frameIsResponsive">
+          <div class="absolute top-0 -right-1 w-2 h-full cursor-ew-resize group/redge" style="pointer-events:auto"
+            @pointerdown="onEdgeDown('e', $event)" @pointermove="onEdgeMove" @pointerup="onEdgeUp">
+            <div class="absolute inset-y-0 right-0 w-px bg-transparent group-hover/redge:bg-[#3b82f6]" />
+          </div>
+          <div class="absolute -bottom-1 left-0 h-2 w-full cursor-ns-resize group/bedge" style="pointer-events:auto"
+            @pointerdown="onEdgeDown('s', $event)" @pointermove="onEdgeMove" @pointerup="onEdgeUp">
+            <div class="absolute inset-x-0 bottom-0 h-px bg-transparent group-hover/bedge:bg-[#3b82f6]" />
+          </div>
+          <div class="absolute -bottom-1.5 -right-1.5 size-3 rounded-sm cursor-nwse-resize bg-[#3b82f6]/0 hover:bg-[#3b82f6] border border-[#3b82f6]/60"
+            style="pointer-events:auto" @pointerdown="onEdgeDown('se', $event)" @pointermove="onEdgeMove" @pointerup="onEdgeUp" />
+        </template>
 
         <!-- Unlinked wired layer: the box is still there (last known size), but
              nothing is feeding it. Badge it on the selection itself, not only in
