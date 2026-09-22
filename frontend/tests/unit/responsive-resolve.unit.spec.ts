@@ -28,6 +28,12 @@ describe('resolveLayout identity', () => {
     expect(r.identity).toBe(false)
     expect(layoutScaleOf(r.layers[0]!)).toBeCloseTo(0.5, 9)   // W0/W
   })
+  it('a keep-size unit is never stretched, even when it spans the frame', () => {
+    const bg = createRectLayer({ w: 1, pins: { keepSize: true } })   // design box 0..1000 — a 'both' span
+    const r = resolveLayout(doc([bg]), 2000, 1000)
+    expect(r.layers[0]!.w).toBe(1)                            // placed, not stretched
+    expect(layoutScaleOf(r.layers[0]!)).toBeCloseTo(0.5, 9)
+  })
 })
 
 describe('resolveLayout pins (wider box: 1000×500 design in 3000×500)', () => {
@@ -100,6 +106,15 @@ describe('resolveLayout units and sections', () => {
     // right pin inside section 0: 250 + 450 + 500 = 1200
     expect(r.layers[0]!.x * 3000).toBeCloseTo(1200, 6)
     expect(r.grid!.regions[0]).toEqual({ x: 0, y: 0, w: 1500, h: 500 })
+  })
+  it('a layer in a section that does not start at the origin holds to THAT section\'s edge', () => {
+    const grid = { ...defaultGrid(), mode: 'explicit' as const, columns: 2, rows: 1, margin: 0, gutter: 0 }
+    // section 1 = design 500..1000, box 1500..3000; layer box 900..950 sits inside it
+    const l = createRectLayer({ x: 0.925, y: 0.5, w: 0.05, h: 0.1 })
+    const r = resolveLayout(doc([l], { grid }), 3000, 500)
+    // o = 1500 (section box start) + 250 (guard) − 1·500 (fitted section design start) = 1250
+    // right pin: 1250 + 925 + 500 = 2675 — inside the frame, not 3175
+    expect(r.layers[0]!.x * 3000).toBeCloseTo(2675, 6)
   })
   it('holdTo: frame overrides the section', () => {
     const grid = { ...defaultGrid(), mode: 'explicit' as const, columns: 2, rows: 1, margin: 0, gutter: 0 }

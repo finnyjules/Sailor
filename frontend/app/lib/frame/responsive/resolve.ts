@@ -23,7 +23,10 @@ function resolveAxis(
   const spare = ref.bExtent - s * ref.dExtent
   const { u, o } = guardedRoom(Math.max(0, spare), s * ref.dExtent)
   const effective: AxisPin = kind === 'both' && !canStretch ? 'center' : kind
-  const map: AxisMap = { kind: effective, s, u, o: ref.bStart + o, ref: ref.dExtent, refStart: ref.dStart }
+  // `applyMap` reads the ABSOLUTE design coordinate (`o + s·p`; only 'relative' subtracts
+  // refStart), so the reference's own fitted start must be taken back out of `o` — otherwise a
+  // section that does not begin at the origin counts its start twice and pushes past the frame.
+  const map: AxisMap = { kind: effective, s, u, o: ref.bStart + o - s * ref.dStart, ref: ref.dExtent, refStart: ref.dStart }
   const size = uExtent * kSize
   if (effective === 'both') {
     // Bleed: a side whose design gap to the reference edge is ≤ 0 holds the REAL edge.
@@ -47,9 +50,11 @@ export function resolveLayout(frame: FrameDoc, W: number, H: number, opts: Resol
   const ctx = opts.measureCtx ?? null
   const sections = sectionsAt(frame.grid, W0, H0, s, W, H)
   const gridOut: LayoutResult['grid'] = sections ? { xs: sections.box.xs, ys: sections.box.ys, regions: sections.box.regions } : null
-  const units = buildUnits(frame.layers, frame.groups, ctx, W0, H0)
-  const hasKeep = units.some(u => u.pins?.keepSize)
+  // Read keepSize straight off the stored pins, BEFORE buildUnits: the fast path must not pay
+  // for a canvas text measurement per layer just to discover it had nothing to do.
+  const hasKeep = frame.layers.some(l => l.pins?.keepSize) || frame.groups.some(g => g.pins?.keepSize)
   if (spare.x === 0 && spare.y === 0 && Math.abs(k - 1) < 1e-12 && !hasKeep) return identityResult(frame, gridOut)
+  const units = buildUnits(frame.layers, frame.groups, ctx, W0, H0)
 
   const frameRef: Ref = { design: { x: 0, y: 0, w: W0, h: H0 }, box: { x: 0, y: 0, w: W, h: H } }
   const byId = new Map(frame.layers.map(l => [l.id, l]))
@@ -67,10 +72,13 @@ export function resolveLayout(frame: FrameDoc, W: number, H: number, opts: Resol
     const keep = !!unit.pins?.keepSize
     const kSize = keep ? 1 : s
     const kLayer = keep ? kKeep : k
-    const hPin: AxisPin = unit.pins?.h ?? inferAxisPin(unit.box.x, unit.box.w, ref.design.x, ref.design.w, unit.canStretch)
-    const vPin: AxisPin = unit.pins?.v ? axisOfV(unit.pins.v) : inferAxisPin(unit.box.y, unit.box.h, ref.design.y, ref.design.h, unit.canStretch)
-    const hx = resolveAxis(hPin, unit.canStretch, s, unit.box.x, unit.box.w, { dStart: ref.design.x, dExtent: ref.design.w, bStart: ref.box.x, bExtent: ref.box.w }, kSize)
-    const vy = resolveAxis(vPin, unit.canStretch, s, unit.box.y, unit.box.h, { dStart: ref.design.y, dExtent: ref.design.h, bStart: ref.box.y, bExtent: ref.box.h }, kSize)
+    // Keeping its size is the opposite of stretching: a keepSize unit is always PLACED, so a
+    // 'both' pin — stored or inferred — reads as 'center' on both axes.
+    const canStretch = unit.canStretch && !keep
+    const hPin: AxisPin = unit.pins?.h ?? inferAxisPin(unit.box.x, unit.box.w, ref.design.x, ref.design.w, canStretch)
+    const vPin: AxisPin = unit.pins?.v ? axisOfV(unit.pins.v) : inferAxisPin(unit.box.y, unit.box.h, ref.design.y, ref.design.h, canStretch)
+    const hx = resolveAxis(hPin, canStretch, s, unit.box.x, unit.box.w, { dStart: ref.design.x, dExtent: ref.design.w, bStart: ref.box.x, bExtent: ref.box.w }, kSize)
+    const vy = resolveAxis(vPin, canStretch, s, unit.box.y, unit.box.h, { dStart: ref.design.y, dExtent: ref.design.h, bStart: ref.box.y, bExtent: ref.box.h }, kSize)
     const unitBox: ResolvedBox = { x: hx.near, y: vy.near, w: hx.far - hx.near, h: vy.far - vy.near }
     const ucx = unit.box.x + unit.box.w / 2, ucy = unit.box.y + unit.box.h / 2
     const ucx2 = unitBox.x + unitBox.w / 2, ucy2 = unitBox.y + unitBox.h / 2
@@ -83,14 +91,19 @@ export function resolveLayout(frame: FrameDoc, W: number, H: number, opts: Resol
         target = { cx: ucx2, cy: ucy2 }
         if (hx.stretched) target.w = unitBox.w
         if (vy.stretched) target.h = unitBox.h
+        const boxW = target.w ?? unit.box.w * kSize
+        let boxH = target.h ?? unit.box.h * kSize
         // A boxed text with a stretched width: its height changes with the re-wrap, so a
-        // top/bottom pin keeps THAT edge instead of the centre.
-        if (layer.kind === 'text' && hx.stretched && !vy.stretched && ctx) {
-          const natural = textNaturalHeightPx(layer, unitBox.w / kSize, ctx, W0) * kSize
-          if (vPin === 'left') target.cy = vy.near + natural / 2
-          else if (vPin === 'right') target.cy = vy.far - natural / 2
+        // top/bottom pin keeps THAT edge instead of the centre — and the resolved box reports
+        // the re-wrapped height, not the design one. An explicit `boxH` fixes the box height
+        // (localLayerBox reads `boxH * W` whenever it is set), so such a text does not re-wrap
+        // its box at all and keeps the plain mapped centre.
+        if (layer.kind === 'text' && hx.stretched && !vy.stretched && (layer.boxH ?? 0) <= 0 && ctx) {
+          const natural = textNaturalHeightPx(layer, boxW / kSize, ctx, W0) * kSize
+          if (vPin === 'left') { target.cy = vy.near + natural / 2; boxH = natural }
+          else if (vPin === 'right') { target.cy = vy.far - natural / 2; boxH = natural }
         }
-        boxes.set(id, { x: target.cx - (target.w ?? unit.box.w * kSize) / 2, y: target.cy - (target.h ?? unit.box.h * kSize) / 2, w: target.w ?? unit.box.w * kSize, h: target.h ?? unit.box.h * kSize })
+        boxes.set(id, { x: target.cx - boxW / 2, y: target.cy - boxH / 2, w: boxW, h: boxH })
       } else {
         // Rigid unit: members keep their arrangement, scaled by kSize about the unit centre.
         // Selection and pins act on the UNIT, so every member reports the unit's box.
