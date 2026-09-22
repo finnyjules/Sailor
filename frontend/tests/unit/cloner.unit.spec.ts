@@ -196,4 +196,17 @@ describe('expandClones only', () => {
     const { DEFAULT_CLONER } = await import('~/composables/useCloner')
     expect(DEFAULT_CLONER.motionStagger).toBeUndefined()
   })
+
+  it('`only` selects by falloff STEP, not by index — a mirrored twin shares its k', () => {
+    // countX: 3, mirrorX: true → ix ∈ [0, 1, 2, -1, -2], k = |ix| ∈ [0, 1, 2, 1, 2].
+    // k=2 is claimed by TWO entries (ix=2 and ix=-2): `only: 2` must return both, not one —
+    // documenting the shape a stamp site relies on (it redraws every copy at that k) and
+    // that `paintLayerStack`'s copies-stagger expansion must dedupe on, not index into.
+    const cl = make({ mode: 'linear', countX: 3, countY: 1, spacingX: 0.2, mirrorX: true })
+    const twins = expandClones(cl, 1, 2)
+    expect(twins).toHaveLength(2)
+    expect(twins.map(c => c.k)).toEqual([2, 2])
+    const dxs = twins.map(c => +c.dx.toFixed(4)).sort((a, b) => a - b)
+    expect(dxs).toEqual([-0.4, 0.4])
+  })
 })

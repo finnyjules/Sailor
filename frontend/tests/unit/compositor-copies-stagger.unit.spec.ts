@@ -159,6 +159,44 @@ describe('paintLayerStack — a cloned layer with a motion stagger', () => {
     expect(paintAt(off, 0.75).alphas.map(x => Number(x.toFixed(6)))).toEqual([0.75])
   })
 
+  it('a mirrored linear cloner stamps once per COPY, twins sharing one rank and clock', () => {
+    // countX: 3, mirrorX: true → 5 copies at k = [0, 1, 2, 1, 2] (the ±1 and ±2 twins
+    // share a falloff step). The BUG: the old code emitted one painted item per raw
+    // entry, and each item's stamp site redraws EVERY copy at its k — so the two twins
+    // at k=1 each redrew both of themselves (2×2), same at k=2 (2×2), plus the lone
+    // original (1×1) = 9 stamps instead of 5, and ranks were handed out over 5 entries
+    // when k only spans 0..2, starting the whole array late under motionOrder: 'last'.
+    const layer = createRectLayer({
+      id: ID, x: 0.5, y: 0.5, w: 0.3, h: 0.2, radius: 0, strokeWidth: 0,
+      cloner: {
+        ...DEFAULT_CLONER, enabled: true, mode: 'linear', countX: 3, countY: 1,
+        spacingX: 0.2, mirrorX: true, motionStagger: 0.5, motionOrder: 'last',
+      } as Cloner,
+    }) as LocalLayer
+    const { alphas } = paintAt(layer, 0.9)
+
+    // Exactly 5 stamps — one per copy (3 distinct k values, two of them shared by a twin
+    // pair) — never 9.
+    expect(alphas).toHaveLength(5)
+    const rounded = alphas.map(a => Number(a.toFixed(6)))
+
+    // Draw order follows expandClones' own (k descending, original last): the k=2 twins
+    // paint first (together), then the k=1 twins, then the k=0 original alone.
+    // distinctCount = 3 (NOT the 5 raw entries): copyRanks(3, 'last') gives k=2 → rank 0
+    // (frame clock, no lag — "sees the frame clock"), k=1 → rank 1 (clock 0.9−0.5=0.4),
+    // k=0 → rank 2 (clock 0.9−1.0=−0.1 → clamped to 0, the LARGEST lag).
+    expect(rounded).toEqual([0.9, 0.9, 0.4, 0.4, 0])
+
+    // The two twins at each shared k share exactly one alpha (one clock, one fold).
+    expect(rounded[0]).toBe(rounded[1])
+    expect(rounded[2]).toBe(rounded[3])
+
+    // The ORIGINAL (k=0, last stamp) has the largest lag — the smallest alpha, since the
+    // band only rises with more advanced clocks.
+    expect(rounded[4]).toBeLessThan(rounded[2])
+    expect(rounded[4]).toBeLessThan(rounded[0])
+  })
+
   it('`motionCopy` is transient: stripped from the silhouette cache key, never on the stored layer', () => {
     expect((SILHOUETTE_KEY_STRIP as readonly string[]).includes('motionCopy')).toBe(true)
     const layer = clonedRect({ motionStagger: 0.5 })

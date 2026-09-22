@@ -37,7 +37,7 @@ import type { MotionReveal } from '~/lib/motionx/reveal'
 import { drawTextCells, lineAtRest, movingTextFrame, pathGlyphCells, textRunCells } from '~/lib/motionx/text/draw'
 import { applyFillPhaseTracks } from '~/lib/motion/fillTracks'
 import { axesToVariationSettings } from '~/lib/motion/axes'
-import { expandClones, type Cloner } from '~/composables/useCloner'
+import { expandClones, type Cloner, type CloneTransform } from '~/composables/useCloner'
 import { copyClock, staggerOf } from '~/lib/motionx/copies'
 import { clipFrameIndex, clipFrameUrl, clipPlayedSeconds, type ImageClip } from '~/lib/compositor/clip'
 import { fillIsShader, type ShaderSpec } from '~/lib/spacetype/fillTile'
@@ -5610,12 +5610,30 @@ export function paintLayerStack(
       if (!cloner?.enabled || staggerOf(cloner) === 0) { expanded.push(it); continue }
       const copies = expandClones(cloner, W / H)
       if (copies.length <= 1) { expanded.push(it); continue }
+      // `k` is the copy's FALLOFF STEP (|iy|·nx + |ix|), not its index — mirrorX/mirrorY
+      // put more than one copy at the same k (the ±ix twins share a falloff distance).
+      // The stamp site narrows by k too (`expandClones(..., only: c.k)` in drawLayerContent),
+      // so it always redraws EVERY copy at that k — one painted item per raw entry here would
+      // have each twin's item redraw both twins, doubling (or with both mirrors, quadrupling)
+      // the paint count. Emit one item per DISTINCT k instead, in the order `expandClones`
+      // first yields each, so twins stamp together, sharing a rank and a clock — which is
+      // right, since they share a falloff step. Rank/clock over the number of DISTINCT k
+      // values, never `c.n` (the raw entry count) or `copies.length`: `copyRanks` must not
+      // hand out ranks no k claims.
+      const seenKs = new Set<number>()
+      const distinctCopies: CloneTransform[] = []
+      for (const c of copies) {
+        if (seenKs.has(c.k)) continue
+        seenKs.add(c.k)
+        distinctCopies.push(c)
+      }
+      if (distinctCopies.length <= 1) { expanded.push(it); continue }
       // Fold from the STORED layer, never from the already-folded one in `items`: folding
       // a fold would apply every track twice. Falls back to the folded layer only if the
       // stack carries an item whose layer isn't in `localLayers` at all.
       const source = storedById.get(it.layer.id) ?? it.layer
-      for (const c of copies) {
-        const [folded] = foldMotion([source], copyClock(t, c.k, c.n, cloner))
+      for (const c of distinctCopies) {
+        const [folded] = foldMotion([source], copyClock(t, c.k, distinctCopies.length, cloner))
         // The Cloner is pinned to the FRAME clock's value even though the rest of the
         // layer is folded at the copy's: the array's own dials (count, radius, spacing —
         // Task 5's Copies properties) describe one shared array, and letting copy k
