@@ -79,6 +79,15 @@ describe('buildUnits', () => {
     const units = buildUnits([src, clipped], [], null, W0, H0)
     expect(units[0]!.pins).toEqual({ h: 'left' })
   })
+  it('a clipped layer joins the GROUP its mask source is in', () => {
+    const src = createRectLayer({ id: 's', x: 0.5, y: 0.5, w: 0.4, h: 0.4, groupId: 'g' })
+    const clipped = createImageLayer('p.png', 1, { id: 'c', x: 0.5, y: 0.5, w: 0.9, maskedByKey: 'l:s' })
+    const units = buildUnits([src, clipped], [{ id: 'g' }], null, W0, H0)
+    expect(units).toHaveLength(1)
+    expect(units[0]!.kind).toBe('group')
+    expect(units[0]!.memberIds.slice().sort()).toEqual(['c', 's'])
+    expect(units[0]!.canStretch).toBe(false)
+  })
   it('a cloner layer is a cloner unit that cannot stretch', () => {
     const r = createRectLayer({ id: 'r', cloner: { ...DEFAULT_CLONER, enabled: true, countX: 2, countY: 1, spacingX: 0.2 } })
     const units = buildUnits([r], [], null, W0, H0)

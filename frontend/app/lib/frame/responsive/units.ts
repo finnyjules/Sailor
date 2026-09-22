@@ -69,17 +69,7 @@ export function buildUnits(layers: LocalLayer[], groups: LayerGroup[], ctx: Canv
   const units: Unit[] = []
   const union = (ids: string[]): Box => ids.map(id => boxOf.get(id)!).reduce(unionBox)
 
-  // 1. Groups: every member of an outermost group, including nested groups' members.
-  const groupById = new Map(groups.map(g => [g.id, g]))
-  for (const l of layers) {
-    if (!l.groupId || claimed.has(l.id)) continue
-    const top = topGroupOf(l.groupId, groups)
-    const memberIds = layersInGroup(top, layers, groups).filter(id => byId.has(id))
-    if (memberIds.length === 0) continue
-    for (const id of memberIds) claimed.add(id)
-    units.push({ id: top, kind: 'group', memberIds, box: union(memberIds), pins: groupById.get(top)?.pins, canStretch: false })
-  }
-  // 2. Shape-mask pairs: a local mask source plus everything it clips.
+  // Who clips whom — read before the passes below, because the group pass needs it too.
   const clippedBySource = new Map<string, string[]>()
   for (const l of layers) {
     const ref = layerMaskRef(l)
@@ -89,6 +79,34 @@ export function buildUnits(layers: LocalLayer[], groups: LayerGroup[], ctx: Canv
     const list = clippedBySource.get(srcId)
     if (list) list.push(l.id); else clippedBySource.set(srcId, [l.id])
   }
+
+  // 1. Groups: every member of an outermost group, including nested groups' members.
+  const groupById = new Map(groups.map(g => [g.id, g]))
+  const groupUnitOf = new Map<string, Unit>()
+  for (const l of layers) {
+    if (!l.groupId || claimed.has(l.id)) continue
+    const top = topGroupOf(l.groupId, groups)
+    const memberIds = layersInGroup(top, layers, groups).filter(id => byId.has(id))
+    if (memberIds.length === 0) continue
+    const unit: Unit = { id: top, kind: 'group', memberIds, box: union(memberIds), pins: groupById.get(top)?.pins, canStretch: false }
+    for (const id of memberIds) { claimed.add(id); groupUnitOf.set(id, unit) }
+    units.push(unit)
+  }
+  // 1b. A clipped layer whose mask SOURCE is inside a group belongs to that group: the
+  // group pass claimed the source first, so pass 2 skips the pair and the clipped layer
+  // would otherwise fall through as a plain, stretchable unit and slide out of its crop.
+  for (const [srcId, clippedIds] of clippedBySource) {
+    const unit = groupUnitOf.get(srcId)
+    if (!unit) continue
+    for (const id of clippedIds) {
+      if (claimed.has(id)) continue
+      claimed.add(id)
+      groupUnitOf.set(id, unit)
+      unit.memberIds.push(id)
+      unit.box = unionBox(unit.box, boxOf.get(id)!)
+    }
+  }
+  // 2. Shape-mask pairs: a local mask source plus everything it clips.
   for (const [srcId, clippedIds] of clippedBySource) {
     if (claimed.has(srcId)) continue
     const memberIds = [srcId, ...clippedIds.filter(id => !claimed.has(id))]
