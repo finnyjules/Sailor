@@ -85,7 +85,13 @@ const PRESETS: Preset[] = [
 const frameW = computed(() => widgetVal('width'))
 const frameH = computed(() => widgetVal('height'))
 const hasExplicitSize = computed(() => frameW.value > 0 && frameH.value > 0)
+const isResponsive = computed(() => (props.data.properties as any)?.sailor_frame?.responsive === true)
+function setResponsive(on: boolean) {
+  if (!props.data.properties) (props.data as any).properties = {}
+  ;(props.data.properties as any).sailor_frame = { ...(props.data.properties as any).sailor_frame, responsive: on }
+}
 const activePresetId = computed<string>(() => {
+  if (isResponsive.value) return 'responsive'
   const match = PRESETS.find(p => p.w === frameW.value && p.h === frameH.value)
   return match ? match.id : (hasExplicitSize.value ? 'custom' : '')
 })
@@ -94,7 +100,11 @@ function rememberPreset(id: string) {
   if (!props.data.properties) (props.data as any).properties = {}
   ;(props.data.properties as any).sailor_frame = { ...(props.data.properties as any).sailor_frame, preset: id }
 }
-function onPresetChange(e: Event) { const v = (e.target as HTMLSelectElement).value; if (v && v !== 'custom') applyPreset(v) }
+function onPresetChange(e: Event) {
+  const v = (e.target as HTMLSelectElement).value
+  if (v === 'responsive') { setResponsive(true); return }   // keep current w/h as the design size
+  if (v && v !== 'custom') { setResponsive(false); applyPreset(v) }
+}
 function setDim(which: 'width' | 'height', e: Event) { setWidget(which, Math.max(0, Math.round(parseFloat((e.target as HTMLInputElement).value) || 0))); rememberPreset('custom') }
 
 // Aspect: explicit dims win; else the bottom wired image's aspect; else square.
@@ -1104,6 +1114,7 @@ onUnmounted(() => {
         >
           <option value="" disabled hidden>Size…</option>
           <option v-for="p in PRESETS" :key="p.id" :value="p.id">{{ p.label }}</option>
+          <option value="responsive">Responsive</option>
           <option value="custom" disabled hidden>Custom</option>
         </select>
         <span class="flex-1" />
@@ -1112,6 +1123,7 @@ onUnmounted(() => {
           class="flex items-center gap-0.5 text-[10px] text-white/40 tabular-nums whitespace-nowrap shrink-0"
           :title="`Loops every ${Math.round(masterClock.duration)}s${masterClock.capped ? ' (capped)' : ''}`"
         >⟲ {{ Math.round(masterClock.duration) }}s<span v-if="masterClock.capped" class="text-amber-400">!</span></span>
+        <span class="text-[10px] uppercase tracking-wide text-white/40 shrink-0">{{ isResponsive ? 'Designed at' : 'Size' }}</span>
         <div class="flex items-center gap-1 text-[10px] text-white/40 tabular-nums">
           <input type="number" min="0" :value="frameW || ''" placeholder="W"
             class="nopan nodrag w-14 bg-white/[0.04] rounded px-1.5 py-0.5 text-right text-white/70 outline-none focus:bg-white/[0.08] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
