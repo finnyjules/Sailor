@@ -4,7 +4,7 @@ import { planRecording, recordVideo, isAbortError, BT709 } from '../../app/lib/e
 // A fake mediabunny that records what the recorder asks of it. The real library
 // needs WebCodecs; this checks the ORCHESTRATION: order, timestamps, colour tag,
 // cleanup, cancel. The real encode is proven by tests/browser-video-export.spec.ts.
-function fakeLib() {
+function fakeLib(opts?: { failStart?: boolean }) {
   const log: any = { samples: [] as any[], closed: 0, started: false, finalized: false, cancelled: false, track: null, source: null, format: null }
   class BufferTarget { buffer: ArrayBuffer | null = null }
   class Mp4OutputFormat { kind = 'mp4'; constructor(public opts?: any) {} }
@@ -21,7 +21,7 @@ function fakeLib() {
   class Output {
     constructor(public opts: any) { log.format = opts.format }
     addVideoTrack(_src: any, meta: any) { log.track = meta }
-    async start() { log.started = true }
+    async start() { if (opts?.failStart) throw new Error('no encoder'); log.started = true }
     async finalize() { log.finalized = true; this.opts.target.buffer = new ArrayBuffer(16) }
     async cancel() { log.cancelled = true }
   }
@@ -56,7 +56,8 @@ describe('planRecording', () => {
 
   it('rounds odd sizes UP to even and fractional sizes to whole pixels', () => {
     const p = planRecording({ width: 641, height: 360.4, fps: 30, frameCount: 1 })
-    expect([p.width, p.height]).toEqual([642, 360])
+    expect([p.width, p.height]).toEqual([642, 362])
+    expect(planRecording({ width: 640.3, height: 2, fps: 30, frameCount: 1 }).width).toBe(642)
   })
 
   it('refuses nonsense', () => {
@@ -131,6 +132,18 @@ describe('recordVideo', () => {
     ).then(() => null, e => e)
     expect(err?.message).toBe('boom')
     expect(isAbortError(err)).toBe(false)
+    expect(log.cancelled).toBe(true)
+    expect(log.finalized).toBe(false)
+  })
+
+  it('start() failure cancels the output and passes the error on', async () => {
+    const { lib, log } = fakeLib({ failStart: true })
+    const c = fakeCanvas(2, 2)
+    const err = await recordVideo(
+      { width: 2, height: 2, fps: 30, frameCount: 5, drawFrame: () => {} },
+      { lib, createCanvas: () => ({ canvas: c.canvas, ctx: c.ctx }) },
+    ).then(() => null, e => e)
+    expect(err?.message).toBe('no encoder')
     expect(log.cancelled).toBe(true)
     expect(log.finalized).toBe(false)
   })

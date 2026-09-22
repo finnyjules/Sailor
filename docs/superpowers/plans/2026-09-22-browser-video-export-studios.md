@@ -152,7 +152,7 @@ describe('planRecording', () => {
 
   it('rounds odd sizes UP to even and fractional sizes to whole pixels', () => {
     const p = planRecording({ width: 641, height: 360.4, fps: 30, frameCount: 1 })
-    expect([p.width, p.height]).toEqual([642, 360])
+    expect([p.width, p.height]).toEqual([642, 362])
   })
 
   it('refuses nonsense', () => {
@@ -300,7 +300,8 @@ export interface RecorderDeps {
   createCanvas?: (w: number, h: number) => { canvas: CanvasImageSource; ctx: CanvasRenderingContext2D }
 }
 
-const even = (n: number) => { const r = Math.round(n); return r + (r % 2) }
+// Round up to a whole pixel, then up to even.
+const even = (n: number) => { const r = Math.ceil(n); return r + (r % 2) }
 
 export function planRecording(req: Pick<RecordRequest, 'width' | 'height' | 'fps' | 'frameCount' | 'alpha'>): RecordingPlan {
   if (!(req.width >= 1) || !(req.height >= 1)) throw new Error(`video recorder: bad size ${req.width}×${req.height}`)
@@ -487,7 +488,7 @@ describe('exportStudioVideo', () => {
 
   it('cancel is never turned into a fallback', async () => {
     const abort = new DOMException('Export cancelled', 'AbortError')
-    const fallback = vi.fn(server)
+    const fallback = vi.fn(async () => ({ filename: 'spacetype_1.mp4', ext: 'mp4' as const }))
     const err = await exportStudioVideo({ ...base, publish: true, serverFallback: fallback },
       { hosted: false, canRecord: async () => true, record: async () => { throw abort } }).then(() => null, e => e)
     expect(err).toBe(abort)
@@ -495,7 +496,7 @@ describe('exportStudioVideo', () => {
   })
 
   it('an upload failure after a good recording is an error, not a fallback', async () => {
-    const fallback = vi.fn(server)
+    const fallback = vi.fn(async () => ({ filename: 'spacetype_1.mp4', ext: 'mp4' as const }))
     const err = await exportStudioVideo({ ...base, publish: true, serverFallback: fallback },
       { hosted: false, canRecord: async () => true, record: async () => recorded, publish: async () => { throw new Error('video upload failed (500)') } })
       .then(() => null, e => e)

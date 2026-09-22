@@ -55,7 +55,8 @@ export interface RecorderDeps {
   createCanvas?: (w: number, h: number) => { canvas: CanvasImageSource; ctx: CanvasRenderingContext2D }
 }
 
-const even = (n: number) => { const r = Math.round(n); return r + (r % 2) }
+// Round up to a whole pixel, then up to even
+const even = (n: number) => { const r = Math.ceil(n); return r + (r % 2) }
 
 export function planRecording(req: Pick<RecordRequest, 'width' | 'height' | 'fps' | 'frameCount' | 'alpha'>): RecordingPlan {
   if (!(req.width >= 1) || !(req.height >= 1)) throw new Error(`video recorder: bad size ${req.width}×${req.height}`)
@@ -106,10 +107,10 @@ export async function recordVideo(req: RecordRequest, deps: RecorderDeps = {}): 
     alpha: plan.alpha ? 'keep' : 'discard',
   })
   output.addVideoTrack(source, { frameRate: plan.fps })
-  await output.start()
 
   const dt = 1 / plan.fps
   try {
+    await output.start()
     for (let i = 0; i < plan.frameCount; i++) {
       throwIfAborted(req.signal)
       ctx.setTransform(1, 0, 0, 1, 0, 0)
