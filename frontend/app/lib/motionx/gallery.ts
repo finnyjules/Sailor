@@ -4,13 +4,14 @@
 // addBehaviour(kind, params). Pure — zero Vue/compositor coupling.
 import { SETTLE_EFFECTS } from './reveal/settle'
 
-export type MoveGroup = 'Letters' | 'In' | 'Loop' | 'Out' | 'Gradient'
+export type MoveGroup = 'Letters' | 'In' | 'Loop' | 'Out' | 'Copies' | 'Gradient'
 export type PreviewKind =
   | 'fade' | 'slide-up' | 'slide-down' | 'slide-left' | 'slide-right'
   | 'grow' | 'shrink' | 'spin' | 'pulse' | 'sway' | 'float'
   | 'scroll' | 'morph' | 'dither' | 'assemble' | 'settle'
   | 'letters-cascade' | 'letters-typewriter' | 'letters-mask' | 'letters-scramble'
   | 'letters-decode' | 'letters-slot' | 'letters-wave' | 'letters-bounce' | 'letters-jitter'
+  | 'copies-build' | 'copies-spread' | 'copies-spin' | 'copies-fan' | 'copies-fade'
 
 export interface GalleryMove {
   id: string
@@ -19,7 +20,7 @@ export interface GalleryMove {
   group: MoveGroup
   preview: PreviewKind
   params?: Record<string, unknown>
-  needs?: 'gradient' | 'text'        // layer capability required to offer this move
+  needs?: 'gradient' | 'text' | 'cloner' | 'cloner-linear' | 'cloner-radial'   // layer capability required to offer this move
   /** A composite move: adds SEVERAL single-property behaviours at once (e.g. Slide up =
    *  position + fade). Each part lands in its own property row. Omit for a single kind. */
   recipe?: Array<{ kind: string; params?: Record<string, unknown> }>
@@ -31,6 +32,7 @@ export interface GalleryMove {
  *  In / out are short one-shots; a loop's bar is ONE cycle, which then repeats to the end. */
 export function defaultDurationFor(group: MoveGroup): number {
   if (group === 'Letters') return 1.2
+  if (group === 'Copies') return 1
   return group === 'Loop' || group === 'Gradient' ? 2 : 0.8
 }
 export function defaultDurationForMove(m: GalleryMove): number {
@@ -42,8 +44,10 @@ export function behavioursForMove(m: GalleryMove): Array<{ kind: string; params?
   return m.recipe ?? [{ kind: m.kind, params: m.params }]
 }
 
-/** Layer capabilities the gallery filters against. */
-export interface LayerCaps { gradient: boolean; text: boolean }
+/** Layer capabilities the gallery filters against. `cloner` is the enabled cloner's mode
+ *  (`null` when the layer has no enabled cloner) — it gates the whole Copies group and picks
+ *  between the radial-only / linear-only tile pairs. */
+export interface LayerCaps { gradient: boolean; text: boolean; cloner: 'linear' | 'radial' | null }
 
 // ── Settle tiles (Addendum 3, Part 4): EACH of the ten `SETTLE_EFFECTS` rows is its OWN pair
 // of gallery tiles (In / Out) — Julien's explicit call, no single "Settle" tile with a menu.
@@ -110,11 +114,30 @@ export const GALLERY_MOVES: GalleryMove[] = [
   { id: 'dither-out', kind: 'dither', label: 'Dither out', group: 'Out', preview: 'dither', params: { dir: 'out' } },
   { id: 'assemble-out', kind: 'dither', label: 'Assemble out', group: 'Out', preview: 'assemble', params: { dir: 'out', style: 'assemble' } },
   ...SETTLE_OUT_TILES,
+  // Copies — the Cloner's dials as motion (Task 7). `needs: 'cloner'` offers a tile on either
+  // mode (the compiler itself picks the radial/linear dial via `cloner.mode`); `cloner-radial` /
+  // `cloner-linear` offer a mode-specific tile — used where the two modes need DIFFERENT tiles,
+  // not just a different path: a radial cloner has one spread dial (`radius`), so Spread/Gather
+  // is a single behaviour; a linear cloner has two (`spacingX` + `spacingY`), so its Spread/
+  // Gather tile is a two-part RECIPE that moves both axes together.
+  { id: 'copies-build-in', kind: 'copies.build', label: 'Copies build in', group: 'Copies', preview: 'copies-build', needs: 'cloner', params: { dir: 'in' } },
+  { id: 'copies-build-out', kind: 'copies.build', label: 'Copies build out', group: 'Copies', preview: 'copies-build', needs: 'cloner', params: { dir: 'out' } },
+  { id: 'copies-spread-out', kind: 'copies.spread', label: 'Spread out', group: 'Copies', preview: 'copies-spread', needs: 'cloner-radial', params: { dir: 'out' } },
+  { id: 'copies-gather-in', kind: 'copies.spread', label: 'Gather in', group: 'Copies', preview: 'copies-spread', needs: 'cloner-radial', params: { dir: 'in' } },
+  { id: 'copies-spread-out-linear', kind: 'copies.spread', label: 'Spread out', group: 'Copies', preview: 'copies-spread', needs: 'cloner-linear',
+    recipe: [{ kind: 'copies.spread', params: { dir: 'out', axis: 'x' } }, { kind: 'copies.spread', params: { dir: 'out', axis: 'y' } }] },
+  { id: 'copies-gather-in-linear', kind: 'copies.spread', label: 'Gather in', group: 'Copies', preview: 'copies-spread', needs: 'cloner-linear',
+    recipe: [{ kind: 'copies.spread', params: { dir: 'in', axis: 'x' } }, { kind: 'copies.spread', params: { dir: 'in', axis: 'y' } }] },
+  { id: 'copies-spin', kind: 'copies.spin', label: 'Ring spins', group: 'Copies', preview: 'copies-spin', needs: 'cloner-radial', cycle: 4 },
+  { id: 'copies-fan-in', kind: 'copies.fan', label: 'Fan in', group: 'Copies', preview: 'copies-fan', needs: 'cloner', params: { dir: 'in' } },
+  { id: 'copies-fan-out', kind: 'copies.fan', label: 'Fan out', group: 'Copies', preview: 'copies-fan', needs: 'cloner', params: { dir: 'out' } },
+  { id: 'copies-fade-in', kind: 'copies.fade', label: 'Fade along in', group: 'Copies', preview: 'copies-fade', needs: 'cloner', params: { dir: 'in' } },
+  { id: 'copies-fade-out', kind: 'copies.fade', label: 'Fade along out', group: 'Copies', preview: 'copies-fade', needs: 'cloner', params: { dir: 'out' } },
   // Gradient
   { id: 'gradient-scroll', kind: 'gradientScroll', label: 'Scroll', group: 'Gradient', preview: 'scroll', needs: 'gradient', cycle: 3 },
 ]
 
-const GROUP_ORDER: MoveGroup[] = ['Letters', 'In', 'Loop', 'Out', 'Gradient']
+const GROUP_ORDER: MoveGroup[] = ['Letters', 'In', 'Loop', 'Out', 'Copies', 'Gradient']
 
 /** Filter the catalog to what a layer supports (gradient moves need a gradient fill;
  *  text-only moves need a text layer). Transform/opacity moves are always offered. */
@@ -122,6 +145,9 @@ export function movesForLayer(caps: LayerCaps): GalleryMove[] {
   return GALLERY_MOVES.filter((m) => {
     if (m.needs === 'gradient') return caps.gradient
     if (m.needs === 'text') return caps.text
+    if (m.needs === 'cloner') return caps.cloner != null
+    if (m.needs === 'cloner-linear') return caps.cloner === 'linear'
+    if (m.needs === 'cloner-radial') return caps.cloner === 'radial'
     return true
   })
 }

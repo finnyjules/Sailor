@@ -156,6 +156,33 @@ describe('behaviourLabel — letter behaviours', () => {
   })
 })
 
+describe('behaviourLabel — Copies (Cloner dials as motion, Task 7)', () => {
+  it('build adds direction like fade (default in)', () => {
+    expect(behaviourLabel({ kind: 'copies.build', params: { dir: 'in' } })).toBe('Copies build in')
+    expect(behaviourLabel({ kind: 'copies.build', params: { dir: 'out' } })).toBe('Copies build out')
+    expect(behaviourLabel({ kind: 'copies.build', params: {} })).toBe('Copies build in')
+  })
+  it('spread adds direction (default out)', () => {
+    expect(behaviourLabel({ kind: 'copies.spread', params: { dir: 'out' } })).toBe('Spread out')
+    expect(behaviourLabel({ kind: 'copies.spread', params: { dir: 'in' } })).toBe('Spread in')
+    expect(behaviourLabel({ kind: 'copies.spread', params: {} })).toBe('Spread out')
+  })
+  it('spin has no direction', () => {
+    expect(behaviourLabel({ kind: 'copies.spin', params: {} })).toBe('Ring spins')
+  })
+  it('fan adds direction (default in)', () => {
+    expect(behaviourLabel({ kind: 'copies.fan', params: { dir: 'in' } })).toBe('Fan in')
+    expect(behaviourLabel({ kind: 'copies.fan', params: { dir: 'out' } })).toBe('Fan out')
+  })
+  it('fade along adds direction (default in)', () => {
+    expect(behaviourLabel({ kind: 'copies.fade', params: { dir: 'in' } })).toBe('Fade along in')
+    expect(behaviourLabel({ kind: 'copies.fade', params: { dir: 'out' } })).toBe('Fade along out')
+  })
+  it('loops append the · loop suffix like every other kind', () => {
+    expect(behaviourLabel({ kind: 'copies.spin', params: {}, timing: { loop: true } })).toBe('Ring spins · loop')
+  })
+})
+
 describe('bands carry the loop flag', () => {
   it('property bands from track.loop; behaviour bands from their compiled track', async () => {
     const { bandsForLayer, behaviourBandsForLayer } = await import('~/lib/motionx/bands')

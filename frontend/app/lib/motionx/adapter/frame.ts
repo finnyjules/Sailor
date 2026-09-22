@@ -200,6 +200,10 @@ export function frameTarget(layer: LocalLayer): BehaviourTarget {
       if (prop === 'scale' && typeof rec.scale !== 'number') return 1
       if (TRANSFORM.has(prop) && typeof rec[prop] === 'number') return rec[prop] as number
       if (prop === 'fill' && isGradient(fill)) return paintStopsToColor(fill)
+      if (prop === 'cloner.mode') {
+        const c = rec.cloner as Cloner | undefined
+        return typeof c?.mode === 'string' ? c.mode : undefined
+      }
       if (prop.startsWith('cloner.')) {
         const c = rec.cloner as Cloner | undefined
         const v = c?.[prop.slice(7) as keyof Cloner]

@@ -280,6 +280,23 @@ describe('frameTarget for cloner.<key>', () => {
   })
 })
 
+// `cloner.mode` is the ONE signal a Copies behaviour compiler uses to tell a radial cloner
+// from a linear one — `count` exists on both, so it is never the signal (Task 7 controller
+// correction).
+describe('frameTarget for cloner.mode', () => {
+  it('reads the mode string for a radial cloner', () => {
+    const l = layer({ cloner: { ...DEFAULT_CLONER, enabled: true, mode: 'radial' as const } })
+    expect(frameTarget(l).get('cloner.mode')).toBe('radial')
+  })
+  it('reads the mode string for a linear cloner', () => {
+    const l = layer({ cloner: { ...DEFAULT_CLONER, enabled: true, mode: 'linear' as const } })
+    expect(frameTarget(l).get('cloner.mode')).toBe('linear')
+  })
+  it('without a cloner: undefined', () => {
+    expect(frameTarget(layer()).get('cloner.mode')).toBeUndefined()
+  })
+})
+
 describe('applyMotionxTracks folds a cloner.count band into expandClones', () => {
   it('count ramps 1 → 6 over 0–1s: 3 copies at t=0.5 (floor(3.5)), 6 at t=1', () => {
     const l = layer({ cloner: { ...DEFAULT_CLONER, enabled: true, mode: 'radial' as const, count: 1 } })

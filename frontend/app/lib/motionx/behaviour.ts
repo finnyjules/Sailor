@@ -138,6 +138,56 @@ registerBehaviour('gradientScroll', (b) => {
   return [{ ...track, loop: b.timing.loop ?? false }]
 })
 
+// Cloner "Copies" behaviours (Task 7): each drives exactly ONE cloner dial on a layer whose
+// cloner is enabled. `target.get('cloner.mode')` (frameTarget, adapter/frame.ts) answers the
+// cloner's own `'linear' | 'radial'` mode string — `count` is NOT the signal, it is a field of
+// every cloner regardless of mode, so a compiler that branched on "count is a number" would
+// treat a linear cloner as radial.
+const isRadialCloner = (target: BehaviourTarget) => target.get('cloner.mode') === 'radial'
+
+registerBehaviour('copies.build', (b, target) => {
+  const dir = (b.params?.dir as string) ?? 'in'
+  const path = isRadialCloner(target) ? 'cloner.count' : 'cloner.countX'
+  const w = window(b.timing)
+  const cur = numOr(target.get(path), 1)
+  return [dir === 'out' ? numTrack(path, cur, 1, w, 'linear') : numTrack(path, 1, cur, w, 'linear')]
+})
+
+registerBehaviour('copies.spread', (b, target) => {
+  const dir = (b.params?.dir as string) ?? 'out'
+  const axis = (b.params?.axis as string) ?? 'x'
+  const radial = isRadialCloner(target)
+  const path = radial ? 'cloner.radius' : (axis === 'y' ? 'cloner.spacingY' : 'cloner.spacingX')
+  const w = window(b.timing)
+  const cur = numOr(target.get(path), 0)
+  return [dir === 'in' ? numTrack(path, cur, 0, w) : numTrack(path, 0, cur, w)]
+})
+
+registerBehaviour('copies.spin', (b, target) => {
+  const w = window(b.timing)
+  const cur = numOr(target.get('cloner.startAngle'), 0)
+  return [{ ...numTrack('cloner.startAngle', cur, cur + 360, w, 'linear'), loop: b.timing.loop ?? true }]
+})
+
+registerBehaviour('copies.fan', (b, target) => {
+  const dir = (b.params?.dir as string) ?? 'in'
+  const radial = isRadialCloner(target)
+  const w = window(b.timing)
+  const cur = numOr(target.get('cloner.stepRotation'), 0)
+  const count = numOr(target.get('cloner.count'), 1)
+  // Absent (0) rotation has no "current fan" to animate toward/from, so fall back to a
+  // sensible full spread: a radial ring divides evenly around it, a linear row nudges 15°.
+  const full = cur !== 0 ? cur : (radial ? 360 / Math.max(1, count) : 15)
+  return [dir === 'out' ? numTrack('cloner.stepRotation', full, 0, w) : numTrack('cloner.stepRotation', 0, full, w)]
+})
+
+registerBehaviour('copies.fade', (b, target) => {
+  const dir = (b.params?.dir as string) ?? 'in'
+  const w = window(b.timing)
+  const cur = numOr(target.get('cloner.stepOpacity'), 1)
+  return [dir === 'out' ? numTrack('cloner.stepOpacity', cur, 0, w) : numTrack('cloner.stepOpacity', 0, cur, w)]
+})
+
 registerBehaviour('gradientMorph', (b, target) => {
   const from = (b.params?.from as GradientStop[]) ?? (target.get('fill') as GradientStop[] | undefined)
   const to = b.params?.to as GradientStop[] | undefined

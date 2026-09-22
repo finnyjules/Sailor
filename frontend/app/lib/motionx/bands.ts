@@ -86,6 +86,11 @@ export const BEHAVIOUR_LABELS: Record<string, string> = {
   'text.wave': 'Wave',
   'text.bounce': 'Bounce',
   'text.jitter': 'Jitter',
+  'copies.build': 'Copies build',
+  'copies.spread': 'Spread',
+  'copies.spin': 'Ring spins',
+  'copies.fan': 'Fan',
+  'copies.fade': 'Fade along',
 }
 export function behaviourLabel(b: { kind: string; params?: Record<string, unknown>; timing?: { loop?: boolean } }): string {
   const base = BEHAVIOUR_LABELS[b.kind] ?? b.kind
@@ -112,6 +117,10 @@ export function behaviourLabel(b: { kind: string; params?: Record<string, unknow
     const sp = settleParams(b.params)   // the ONE reader of a settle bar's params
     withDir = `${sp.effect.label} ${sp.out ? 'out' : 'in'}`
   }
+  else if (b.kind === 'copies.build') withDir = `${base} ${dir ?? 'in'}`
+  else if (b.kind === 'copies.spread') withDir = `${base} ${dir ?? 'out'}`
+  else if (b.kind === 'copies.fan') withDir = `${base} ${dir ?? 'in'}`
+  else if (b.kind === 'copies.fade') withDir = `${base} ${dir ?? 'in'}`
   return b.timing?.loop ? `${withDir} · loop` : withDir
 }
 

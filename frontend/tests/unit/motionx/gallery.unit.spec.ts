@@ -13,8 +13,9 @@ describe('GALLERY_MOVES catalog', () => {
         'fade', 'slide', 'scale', 'spin', 'pulse', 'sway', 'float', 'gradientScroll', 'gradientMorph', 'dither', 'settle',
         'text.cascade', 'text.typewriter', 'text.maskSlide', 'text.scramble',
         'text.decode', 'text.slot', 'text.wave', 'text.bounce', 'text.jitter',
+        'copies.build', 'copies.spread', 'copies.spin', 'copies.fan', 'copies.fade',
       ]).toContain(m.kind)
-      expect(['Letters', 'In', 'Loop', 'Out', 'Gradient']).toContain(m.group)
+      expect(['Letters', 'In', 'Loop', 'Out', 'Copies', 'Gradient']).toContain(m.group)
       expect(m.preview).toBeTruthy()
     }
   })
@@ -28,7 +29,7 @@ describe('GALLERY_MOVES catalog', () => {
 
 describe('dither moves', () => {
   it('Dither in sits in the In group and Dither out in Out, for every layer', () => {
-    const moves = movesForLayer({ gradient: false, text: false })
+    const moves = movesForLayer({ gradient: false, text: false, cloner: null })
     const din = moves.find((m) => m.id === 'dither-in')!, dout = moves.find((m) => m.id === 'dither-out')!
     expect([din.kind, din.group, din.label, din.params]).toEqual(['dither', 'In', 'Dither in', { dir: 'in' }])
     expect([dout.kind, dout.group, dout.label, dout.params]).toEqual(['dither', 'Out', 'Dither out', { dir: 'out' }])
@@ -38,7 +39,7 @@ describe('dither moves', () => {
 
 describe('assemble moves', () => {
   it('Assemble in sits in the In group and Assemble out in Out, for every layer', () => {
-    const moves = movesForLayer({ gradient: false, text: false })
+    const moves = movesForLayer({ gradient: false, text: false, cloner: null })
     const ain = moves.find((m) => m.id === 'assemble-in')!, aout = moves.find((m) => m.id === 'assemble-out')!
     expect([ain.kind, ain.group, ain.label, ain.params]).toEqual(['dither', 'In', 'Assemble in', { dir: 'in', style: 'assemble' }])
     expect([aout.kind, aout.group, aout.label, aout.params]).toEqual(['dither', 'Out', 'Assemble out', { dir: 'out', style: 'assemble' }])
@@ -48,7 +49,7 @@ describe('assemble moves', () => {
 })
 
 describe('settle moves (Addendum 3, Part 4): each of the ten SETTLE_EFFECTS is its own pair of tiles', () => {
-  const moves = movesForLayer({ gradient: false, text: false })
+  const moves = movesForLayer({ gradient: false, text: false, cloner: null })
   const settleMoves = moves.filter((m) => m.kind === 'settle')
 
   it('is twenty tiles — ten effects × In/Out', () => {
@@ -113,20 +114,20 @@ describe('settle moves (Addendum 3, Part 4): each of the ten SETTLE_EFFECTS is i
 
 describe('movesForLayer', () => {
   it('hides gradient moves when the layer has no gradient fill', () => {
-    const out = movesForLayer({ gradient: false, text: false })
+    const out = movesForLayer({ gradient: false, text: false, cloner: null })
     expect(out.some((m) => m.needs === 'gradient')).toBe(false)
     expect(out.some((m) => m.kind === 'fade')).toBe(true)   // transform/opacity always available
   })
   it('includes gradient moves when the fill is a gradient', () => {
-    const out = movesForLayer({ gradient: true, text: false })
+    const out = movesForLayer({ gradient: true, text: false, cloner: null })
     expect(out.some((m) => m.needs === 'gradient')).toBe(true)
   })
   it('hides text-only moves on a non-text layer', () => {
-    const out = movesForLayer({ gradient: true, text: false })
+    const out = movesForLayer({ gradient: true, text: false, cloner: null })
     expect(out.every((m) => m.needs !== 'text')).toBe(true)
   })
   it('offers the ten Letters moves on a text layer', () => {
-    const out = movesForLayer({ gradient: false, text: true })
+    const out = movesForLayer({ gradient: false, text: true, cloner: null })
     const letters = out.filter((m) => m.group === 'Letters')
     expect(letters).toHaveLength(10)
     expect(letters.every((m) => m.needs === 'text')).toBe(true)
@@ -230,5 +231,65 @@ describe('swapLetterMove', () => {
     const { letterMoves } = await import('~/lib/motionx/gallery')
     expect(letterMoves().length).toBe(10)
     expect(letterMoves().every((m) => m.group === 'Letters' && m.kind.startsWith('text.'))).toBe(true)
+  })
+})
+
+// ── Copies gallery tiles (Task 7): the Cloner's dials as five motion behaviours ──
+describe('Copies gallery tiles', () => {
+  it('no Copies group without an enabled cloner', () => {
+    const moves = movesForLayer({ gradient: false, text: false, cloner: null })
+    expect(moves.some((m) => m.group === 'Copies')).toBe(false)
+  })
+
+  it('a radial cloner offers 9 tiles: build x2, spread/gather (single kind, no recipe), spin, fan x2, fade x2', () => {
+    const moves = movesForLayer({ gradient: false, text: false, cloner: 'radial' })
+    const copies = moves.filter((m) => m.group === 'Copies')
+    expect(copies).toHaveLength(9)
+    expect(copies.filter((m) => m.kind === 'copies.build')).toHaveLength(2)
+    const spread = copies.filter((m) => m.kind === 'copies.spread')
+    expect(spread).toHaveLength(2)
+    expect(spread.every((m) => m.recipe === undefined)).toBe(true)
+    expect(copies.filter((m) => m.id === 'copies-spin')).toHaveLength(1)
+    expect(copies.filter((m) => m.kind === 'copies.fan')).toHaveLength(2)
+    expect(copies.filter((m) => m.kind === 'copies.fade')).toHaveLength(2)
+  })
+
+  it('a linear cloner offers 8 tiles (no spin); spread/gather is a two-part recipe', () => {
+    const moves = movesForLayer({ gradient: false, text: false, cloner: 'linear' })
+    const copies = moves.filter((m) => m.group === 'Copies')
+    expect(copies).toHaveLength(8)
+    expect(copies.some((m) => m.id === 'copies-spin')).toBe(false)
+    const spread = copies.filter((m) => m.kind === 'copies.spread')
+    expect(spread).toHaveLength(2)
+    for (const m of spread) {
+      expect(m.recipe).toHaveLength(2)
+      expect(m.recipe!.every((r) => r.kind === 'copies.spread')).toBe(true)
+    }
+  })
+
+  it('tile labels match the brief, sentence case', () => {
+    const byId = Object.fromEntries(GALLERY_MOVES.filter((m) => m.group === 'Copies').map((m) => [m.id, m.label]))
+    expect(byId['copies-build-in']).toBe('Copies build in')
+    expect(byId['copies-build-out']).toBe('Copies build out')
+    expect(byId['copies-spread-out']).toBe('Spread out')
+    expect(byId['copies-gather-in']).toBe('Gather in')
+    expect(byId['copies-spin']).toBe('Ring spins')
+    expect(byId['copies-fan-in']).toBe('Fan in')
+    expect(byId['copies-fan-out']).toBe('Fan out')
+    expect(byId['copies-fade-in']).toBe('Fade along in')
+    expect(byId['copies-fade-out']).toBe('Fade along out')
+  })
+
+  it('groupedMoves places Copies between Out and Gradient', () => {
+    const moves = movesForLayer({ gradient: true, text: false, cloner: 'radial' })
+    const g = groupedMoves(moves)
+    const order = g.map((x) => x.group)
+    expect(order.indexOf('Out')).toBeLessThan(order.indexOf('Copies'))
+    expect(order.indexOf('Copies')).toBeLessThan(order.indexOf('Gradient'))
+  })
+
+  it('defaultDurationFor Copies is 1s', async () => {
+    const { defaultDurationFor } = await import('~/lib/motionx/gallery')
+    expect(defaultDurationFor('Copies')).toBe(1)
   })
 })

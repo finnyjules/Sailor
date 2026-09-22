@@ -174,3 +174,115 @@ describe('scale — start and finish size as a percentage of the layer', () => {
     expect(await compile({ dir: 'in', from: -40, to: 100 })).toEqual([0, 2])
   })
 })
+
+// ── Copies (Cloner dials as motion, Task 7) ──
+//
+// Mode detection reads `cloner.mode` (a STRING the frame adapter now answers) — NOT whether
+// `cloner.count` happens to be a number, since `count` is a field of every cloner regardless
+// of mode. Each fake target below stands in for a radial and a linear cloner respectively.
+const radialCloner: BehaviourTarget = {
+  get: (p) => ({
+    'cloner.mode': 'radial', 'cloner.count': 6, 'cloner.radius': 0.3,
+    'cloner.startAngle': 0, 'cloner.stepRotation': 0, 'cloner.stepOpacity': 1,
+  } as Record<string, string | number>)[p],
+  has: () => true,
+}
+const linearCloner: BehaviourTarget = {
+  get: (p) => ({
+    'cloner.mode': 'linear', 'cloner.countX': 4, 'cloner.spacingX': 0.2, 'cloner.spacingY': 0.1,
+    'cloner.stepRotation': 0, 'cloner.stepOpacity': 1,
+  } as Record<string, string | number>)[p],
+  has: () => true,
+}
+
+describe('copies.build — count in/out, radial vs linear path', () => {
+  it('radial animates cloner.count 1 -> cur (in) / cur -> 1 (out), ease linear', () => {
+    const inT = compileBehaviour({ id: '1', kind: 'copies.build', timing: { start: 0, duration: 1 }, params: { dir: 'in' } }, radialCloner)[0]!
+    expect(inT.path).toBe('cloner.count')
+    expect(evaluateTrack(inT, 0)).toBe(1)
+    expect(evaluateTrack(inT, 1)).toBe(6)
+    expect(inT.keyframes[0]!.ease).toBe('linear')
+    const outT = compileBehaviour({ id: '2', kind: 'copies.build', timing: { start: 0, duration: 1 }, params: { dir: 'out' } }, radialCloner)[0]!
+    expect(evaluateTrack(outT, 0)).toBe(6)
+    expect(evaluateTrack(outT, 1)).toBe(1)
+  })
+  it('linear animates cloner.countX instead', () => {
+    const inT = compileBehaviour({ id: '1', kind: 'copies.build', timing: { start: 0, duration: 1 }, params: { dir: 'in' } }, linearCloner)[0]!
+    expect(inT.path).toBe('cloner.countX')
+    expect(evaluateTrack(inT, 0)).toBe(1)
+    expect(evaluateTrack(inT, 1)).toBe(4)
+  })
+  it('defaults to dir "in" with no params', () => {
+    const t = compileBehaviour({ id: '1', kind: 'copies.build', timing: { start: 0, duration: 1 } }, radialCloner)[0]!
+    expect(evaluateTrack(t, 0)).toBe(1)
+    expect(evaluateTrack(t, 1)).toBe(6)
+  })
+})
+
+describe('copies.spread — radius (radial) or spacingX/Y (linear), out/in', () => {
+  it('radial animates cloner.radius 0 -> cur (out) / cur -> 0 (in)', () => {
+    const outT = compileBehaviour({ id: '1', kind: 'copies.spread', timing: { start: 0, duration: 1 }, params: { dir: 'out' } }, radialCloner)[0]!
+    expect(outT.path).toBe('cloner.radius')
+    expect(evaluateTrack(outT, 0)).toBe(0)
+    expect(evaluateTrack(outT, 1)).toBeCloseTo(0.3, 6)
+    const inT = compileBehaviour({ id: '2', kind: 'copies.spread', timing: { start: 0, duration: 1 }, params: { dir: 'in' } }, radialCloner)[0]!
+    expect(evaluateTrack(inT, 0)).toBeCloseTo(0.3, 6)
+    expect(evaluateTrack(inT, 1)).toBe(0)
+  })
+  it('linear defaults to axis x (spacingX); axis y drives spacingY', () => {
+    const x = compileBehaviour({ id: '1', kind: 'copies.spread', timing: { start: 0, duration: 1 }, params: { dir: 'out' } }, linearCloner)[0]!
+    expect(x.path).toBe('cloner.spacingX')
+    expect(evaluateTrack(x, 1)).toBeCloseTo(0.2, 6)
+    const y = compileBehaviour({ id: '2', kind: 'copies.spread', timing: { start: 0, duration: 1 }, params: { dir: 'out', axis: 'y' } }, linearCloner)[0]!
+    expect(y.path).toBe('cloner.spacingY')
+    expect(evaluateTrack(y, 1)).toBeCloseTo(0.1, 6)
+  })
+})
+
+describe('copies.spin — startAngle ramps a full turn, loops by default, ease linear', () => {
+  it('cur -> cur + 360 over the window', () => {
+    const t = compileBehaviour({ id: '1', kind: 'copies.spin', timing: { start: 0, duration: 2 } }, radialCloner)[0]!
+    expect(t.path).toBe('cloner.startAngle')
+    expect(t.loop).toBe(true)
+    expect(evaluateTrack(t, 0)).toBe(0)
+    expect(evaluateTrack(t, 1)).toBeCloseTo(180, 6)
+    expect(t.keyframes[0]!.ease).toBe('linear')
+  })
+  it('timing.loop: false overrides the default (the shared loop switch)', () => {
+    const t = compileBehaviour({ id: '1', kind: 'copies.spin', timing: { start: 0, duration: 2, loop: false } }, radialCloner)[0]!
+    expect(t.loop).toBe(false)
+  })
+})
+
+describe('copies.fan — stepRotation in/out; fallback full angle when current is 0', () => {
+  it('radial fallback is 360 / count (60deg for a 6-copy ring)', () => {
+    const inT = compileBehaviour({ id: '1', kind: 'copies.fan', timing: { start: 0, duration: 1 }, params: { dir: 'in' } }, radialCloner)[0]!
+    expect(inT.path).toBe('cloner.stepRotation')
+    expect(evaluateTrack(inT, 0)).toBe(0)
+    expect(evaluateTrack(inT, 1)).toBeCloseTo(60, 6)
+    const outT = compileBehaviour({ id: '2', kind: 'copies.fan', timing: { start: 0, duration: 1 }, params: { dir: 'out' } }, radialCloner)[0]!
+    expect(evaluateTrack(outT, 0)).toBeCloseTo(60, 6)
+    expect(evaluateTrack(outT, 1)).toBe(0)
+  })
+  it('linear fallback is a flat 15deg', () => {
+    const inT = compileBehaviour({ id: '1', kind: 'copies.fan', timing: { start: 0, duration: 1 }, params: { dir: 'in' } }, linearCloner)[0]!
+    expect(evaluateTrack(inT, 1)).toBeCloseTo(15, 6)
+  })
+  it('a nonzero current stepRotation is used as-is (no fallback)', () => {
+    const at: BehaviourTarget = { get: (p) => ({ 'cloner.mode': 'radial', 'cloner.stepRotation': 40, 'cloner.count': 6 } as Record<string, string | number>)[p], has: () => true }
+    const t = compileBehaviour({ id: '1', kind: 'copies.fan', timing: { start: 0, duration: 1 }, params: { dir: 'in' } }, at)[0]!
+    expect(evaluateTrack(t, 1)).toBeCloseTo(40, 6)
+  })
+})
+
+describe('copies.fade — stepOpacity 0->cur (in) / cur->0 (out)', () => {
+  it('in / out', () => {
+    const inT = compileBehaviour({ id: '1', kind: 'copies.fade', timing: { start: 0, duration: 1 }, params: { dir: 'in' } }, radialCloner)[0]!
+    expect(inT.path).toBe('cloner.stepOpacity')
+    expect(evaluateTrack(inT, 0)).toBe(0)
+    expect(evaluateTrack(inT, 1)).toBeCloseTo(1, 6)
+    const outT = compileBehaviour({ id: '2', kind: 'copies.fade', timing: { start: 0, duration: 1 }, params: { dir: 'out' } }, radialCloner)[0]!
+    expect(evaluateTrack(outT, 0)).toBeCloseTo(1, 6)
+    expect(evaluateTrack(outT, 1)).toBe(0)
+  })
+})
