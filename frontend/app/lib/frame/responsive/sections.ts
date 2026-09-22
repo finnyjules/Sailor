@@ -10,7 +10,9 @@ export function sectionOf(box: Box, regions: Rect[], tol: number): number {
     const inside = box.x >= r.x - tol && box.y >= r.y - tol
       && box.x + box.w <= r.x + r.w + tol && box.y + box.h <= r.y + r.h + tol
     if (!inside) continue
-    if (found >= 0) return -1   // inside two overlapping regions: ambiguous → frame
+    // Inside two regions once tol is applied — adjacent sections near a shared
+    // edge, since tol inflates every region — ambiguous → frame.
+    if (found >= 0) return -1
     found = i
   }
   return found

@@ -14,6 +14,31 @@ describe('resolveGrid unitW', () => {
     expect(xs[0]).toBe(100)
     expect(xs[xs.length - 1]).toBe(2900)
   })
+  it('the gutter is a fraction of unitW, not of the box width', () => {
+    const g = { ...defaultGrid(), mode: 'explicit' as const, columns: 2, rows: 1, margin: 0, gutter: 0.02 }
+    // design 1000 wide in a 3000-wide box: gutter is 0.02 * 1000 = 20px, inset 10px a side
+    // (were it read off the box it would be 0.02 * 3000 = 60px, inset 30).
+    const { regions } = resolveGrid(g, 3000, 1000, 1000)
+    expect(regions[0]!.x).toBe(10)
+    expect(regions[0]!.w).toBe(1500 - 20)
+  })
+  it('the base module is a fraction of unitW, not of the box width', () => {
+    // regularity 0 = free widths, so the module snap in makeAxisEdges actually bites.
+    // Same box (2400) both times; only the module unit differs (1/12 of 1200 vs of 2400),
+    // so the snapped column widths — and therefore the edges — must come out different.
+    const g = {
+      ...defaultGrid(), mode: 'generated' as const, margin: 0, gutter: 0, baseModule: 1 / 12,
+      gen: { ...defaultGrid().gen, regularity: 0 },
+    }
+    const atDesignModule = resolveGrid(g, 2400, 800, 1200)
+    const atBoxModule = resolveGrid(g, 2400, 800)
+    expect(atDesignModule.xs).not.toEqual(atBoxModule.xs)
+    // Both still span the whole box: only the interior edges moved.
+    expect(atDesignModule.xs[0]).toBe(0)
+    expect(atBoxModule.xs[0]).toBe(0)
+    expect(atDesignModule.xs[atDesignModule.xs.length - 1]).toBe(2400)
+    expect(atBoxModule.xs[atBoxModule.xs.length - 1]).toBe(2400)
+  })
   it('a generated grid keeps its region ORDER across sizes', () => {
     const g = { ...defaultGrid(), mode: 'generated' as const }
     const a = resolveGrid(g, 1200, 800)
