@@ -3798,11 +3798,12 @@ watch([() => motionxTracks.value, () => motionBehaviours.value], () => {
 })
 function selectMotionBand(path: string) { motionSel.value = { kind: 'band', path } }
 function selectMotionBehaviour(id: string) { motionSel.value = { kind: 'behaviour', path: id } }
-// Slice 4: what behaviour groups the selected layer supports (gradient fill / text layer).
+// Slice 4: what behaviour groups the selected layer supports (gradient fill / text layer /
+// an enabled cloner, which gates the Copies group and picks its radial/linear tiles).
 const motionLayerCaps = computed(() => {
   const l = selectedLocal.value
   const fill = (l as unknown as { fill?: Paint })?.fill
-  return { gradient: !!l && isGradient(fill), text: canAnimateLetters(l) }
+  return { gradient: !!l && isGradient(fill), text: canAnimateLetters(l), cloner: l?.cloner?.enabled ? l.cloner.mode : null }
 })
 // A tile is a RECIPE: one or more single-property behaviours, all placed at the
 // playhead with the group's default length. The first lands selected.
