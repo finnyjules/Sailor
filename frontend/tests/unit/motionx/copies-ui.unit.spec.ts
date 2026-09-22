@@ -68,6 +68,26 @@ describe('MotionCopiesPanel: Stagger drag', () => {
     expect((updates[1]![0] as Cloner).mode).toBe('linear')
   })
 
+  // `emitted()` preserves arrival order only WITHIN one event name — it says nothing about
+  // before-change arriving before the updates it gates. A listener-order spy (recorded via
+  // `attrs`, the same mechanism a real parent's `@before-change`/`@update` wires up) proves the
+  // actual interleaving: before-change first, then every update from the drag.
+  it('before-change fires before any update, for the whole drag', async () => {
+    const log: string[] = []
+    const w = mount(MotionCopiesPanel, {
+      props: { cloner: makeCloner() },
+      attrs: { onBeforeChange: () => log.push('before'), onUpdate: () => log.push('update') },
+    })
+    const stagger = w.findComponent('[data-testid="copies-stagger"]')
+
+    await stagger.trigger('pointerdown')
+    await stagger.vm.$emit('update:modelValue', 0.2)
+    await stagger.vm.$emit('update:modelValue', 0.35)
+    await stagger.trigger('pointerup')
+
+    expect(log).toEqual(['before', 'update', 'update'])
+  })
+
   it('a second, separate drag records its own before-change', async () => {
     const w = mount(MotionCopiesPanel, { props: { cloner: makeCloner() } })
     const stagger = w.findComponent('[data-testid="copies-stagger"]')
@@ -85,12 +105,18 @@ describe('MotionCopiesPanel: Stagger drag', () => {
 
 describe('MotionCopiesPanel: Order', () => {
   it('picking Random is its own undo step, emits motionOrder, and reveals the shuffle button', async () => {
-    const w = mount(MotionCopiesPanel, { props: { cloner: makeCloner() } })
+    const log: string[] = []
+    const w = mount(MotionCopiesPanel, {
+      props: { cloner: makeCloner() },
+      attrs: { onBeforeChange: () => log.push('before'), onUpdate: () => log.push('update') },
+    })
     await w.get('[data-testid="copies-order"] [data-value="random"]').trigger('click')
 
     expect(w.emitted('before-change')?.length).toBe(1)
     const updates = w.emitted('update') as unknown[][]
     expect((updates.at(-1)![0] as Cloner).motionOrder).toBe('random')
+    // before-change gates the edit — it must land before the update it precedes.
+    expect(log).toEqual(['before', 'update'])
 
     await w.setProps({ cloner: makeCloner({ motionOrder: 'random' }) })
     expect(w.find('[data-testid="copies-shuffle"]').exists()).toBe(true)
@@ -198,7 +224,11 @@ describe('MotionCopiesPanel: Shuffle', () => {
   })
 
   it('re-rolls motionSeed to a new value and records its own undo step', async () => {
-    const w = mount(MotionCopiesPanel, { props: { cloner: makeCloner({ motionOrder: 'random', motionSeed: 1 }) } })
+    const log: string[] = []
+    const w = mount(MotionCopiesPanel, {
+      props: { cloner: makeCloner({ motionOrder: 'random', motionSeed: 1 }) },
+      attrs: { onBeforeChange: () => log.push('before'), onUpdate: () => log.push('update') },
+    })
     const shuffle = w.get('[data-testid="copies-shuffle"]')
     expect(shuffle.attributes('title')).toBe('New order')
 
@@ -209,5 +239,6 @@ describe('MotionCopiesPanel: Shuffle', () => {
     const cl = updates.at(-1)![0] as Cloner
     expect(cl.motionOrder).toBe('random')
     expect(cl.motionSeed).not.toBe(1)
+    expect(log).toEqual(['before', 'update'])
   })
 })

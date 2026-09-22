@@ -5433,13 +5433,13 @@ function clearWiredMask(slot: number) {
 // The frame then owns the image: it survives unplugging the wire and supports
 // every local-layer feature (Generate fill, destructive edits, …).
 const copyingSlot = ref<number | null>(null)
-async function copyWiredIntoFrame(slot: number) {
-  if (copyingSlot.value != null) return
+async function copyWiredIntoFrame(slot: number): Promise<string | null> {
+  if (copyingSlot.value != null) return null
   const layer = layers.value.find(l => l.slot === slot)
   const el = wiredImageEls.value[slot]
   const iw = el ? (('naturalWidth' in el ? el.naturalWidth : el.width) || 0) : 0
   const ih = el ? (('naturalHeight' in el ? el.naturalHeight : el.height) || 0) : 0
-  if (!layer || !el || !iw || !ih) { toast('That layer’s image isn’t ready yet'); return }
+  if (!layer || !el || !iw || !ih) { toast('That layer’s image isn’t ready yet'); return null }
   copyingSlot.value = slot
   try {
     // 1. Bake: native-resolution source with the slot's visibility mask applied
@@ -5461,7 +5461,7 @@ async function copyWiredIntoFrame(slot: number) {
     catch (err) {
       console.error('[Compositor] copy into frame: pixel read failed', err)
       toast('Can’t read this image’s pixels')
-      return
+      return null
     }
     const name = await inpaint.uploadDataUrl(dataUrl, 'framecopy')
     // 2. Place it exactly where the wired image sits. A full-image bbox makes
@@ -5501,9 +5501,11 @@ async function copyWiredIntoFrame(slot: number) {
     setWiredHidden(slot, true)
     if (layer.cloner?.enabled) toast('Copied the base image — cloner repeats aren’t carried over.')
     renderStack()
+    return added?.id ?? null
   } catch (err) {
     console.error('[Compositor] copy into frame failed:', err)
     toast('Could not copy that layer into the frame')
+    return null
   } finally {
     copyingSlot.value = null
   }

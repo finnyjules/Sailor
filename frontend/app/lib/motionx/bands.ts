@@ -87,7 +87,6 @@ export const BEHAVIOUR_LABELS: Record<string, string> = {
   'text.bounce': 'Bounce',
   'text.jitter': 'Jitter',
   'copies.build': 'Copies build',
-  'copies.spread': 'Spread',
   'copies.spin': 'Ring spins',
   'copies.fan': 'Fan',
   'copies.fade': 'Fade along',

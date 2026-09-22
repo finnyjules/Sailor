@@ -72,8 +72,13 @@ interface EditorOpts {
    * the next, so a multi-wired ⌘D materializes them one at a time instead of
    * racing several snapshots against the same host-side "one in flight" guard
    * (which used to make every wired member but the first vanish silently).
+   *
+   * May return the BAKED layer's id (or a Promise of it) so the wired layer's
+   * Motion-tab bands/behaviours can be re-targeted at the copy instead of being
+   * dropped — a host that returns nothing (or `null`) keeps today's behaviour
+   * (motion is simply not carried for that member).
    */
-  materializeWired?: (layer: WiredLayer) => void | Promise<void>
+  materializeWired?: (layer: WiredLayer) => string | null | void | Promise<string | null | void>
   /**
    * Called after a ⌘C fills the in-session clipboard, with the same payload, so
    * the host can ALSO push it to the OS clipboard (Sailor layer JSON + a
@@ -599,12 +604,25 @@ export function useLocalLayerEditor(opts: EditorOpts) {
    *  Wired members are materialized SEQUENTIALLY — awaiting each snapshot before
    *  starting the next — because the host's materializer (e.g. "copy into frame")
    *  guards against re-entrancy: firing all of them at once meant every wired
-   *  layer after the first silently no-op'd out from under the guard. */
+   *  layer after the first silently no-op'd out from under the guard.
+   *
+   *  A wired layer's Motion-tab bands/behaviours are keyed to ITS id, not the
+   *  baked copy's — a host materializer that returns the baked id lets us
+   *  re-target them, same as `motionForCopies` does for an ordinary duplicate,
+   *  so the baked copy arrives with the wired layer's motion instead of a blank
+   *  Motion tab. A host that returns nothing (old hosts) carries none, as today. */
   async function duplicateSelection() {
     if (!selectedIds.value.size) return
     const { ids, wired } = clonableSelection()
-    for (const w of wired) await opts.materializeWired?.(w)
-    if (!ids.size) return
+    const wiredMap = new Map<string, string>()
+    for (const w of wired) {
+      const bakedId = await opts.materializeWired?.(w)
+      if (bakedId) wiredMap.set(w.id, bakedId)
+    }
+    if (!ids.size) {
+      if (wiredMap.size) appendMotion(motionForCopies(readMotionSnap() as MotionDoc, wiredMap, mkBehaviourId))
+      return
+    }
     recordHistory()
     const r = duplicateLayers(
       localLayers.value, localGroups.value, ids, 0.02,
@@ -612,7 +630,8 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       () => `g-${Date.now().toString(36)}-${++_groupSeq}`,
     )
     commitBoth(r.layers as LocalLayer[], r.groups)
-    appendMotion(motionForCopies(readMotionSnap() as MotionDoc, r.idMap, mkBehaviourId))
+    const idMap = wiredMap.size ? new Map([...r.idMap, ...wiredMap]) : r.idMap
+    appendMotion(motionForCopies(readMotionSnap() as MotionDoc, idMap, mkBehaviourId))
     selectedIds.value = new Set(r.newIds)
     selectedId.value = r.newIds[r.newIds.length - 1] ?? null
   }
@@ -623,20 +642,40 @@ export function useLocalLayerEditor(opts: EditorOpts) {
    *  clipboard live (it would point at a different input in another frame); the
    *  fresh baked layers are what gets copied in its place. When the selection has
    *  no wired member this runs fully synchronously, keeping the OS-clipboard
-   *  write inside the ⌘C user gesture. */
+   *  write inside the ⌘C user gesture.
+   *
+   *  A wired layer's own motion stays on it (it's only hidden, not removed —
+   *  see `copyWiredIntoFrame`); a host that returns the baked id lets us fork a
+   *  copy of that motion onto the baked id BEFORE `extractForCopy` filters by
+   *  the copied ids, so the clipboard payload carries it under the id that
+   *  actually rides the clipboard. A host returning nothing carries none, as
+   *  today. */
   async function copySelection() {
     const { ids, wired } = clonableSelection()
     // Bake wired members into the frame (snapshot rule), then copy the resulting
     // real layers instead of the live wired ones.
     let copyIds = ids
+    const wiredMap = new Map<string, string>()
     if (wired.length) {
       const before = new Set(localLayers.value.map(l => l.id))
-      for (const w of wired) await opts.materializeWired?.(w)
+      for (const w of wired) {
+        const bakedId = await opts.materializeWired?.(w)
+        if (bakedId) wiredMap.set(w.id, bakedId)
+      }
       const baked = localLayers.value.filter(l => !before.has(l.id)).map(l => l.id)
       copyIds = new Set([...ids, ...baked])
     }
     if (!copyIds.size) return
-    const p = extractForCopy(localLayers.value, localGroups.value, copyIds, readMotionSnap() as MotionDoc)
+    let motionDoc = readMotionSnap() as MotionDoc
+    if (wiredMap.size) {
+      const forked = motionForCopies(motionDoc, wiredMap, mkBehaviourId)
+      motionDoc = {
+        motionx: [...(motionDoc.motionx ?? []), ...forked.motionx],
+        behaviours: [...(motionDoc.behaviours ?? []), ...forked.behaviours],
+        tracks: [...(motionDoc.tracks ?? []), ...forked.tracks],
+      }
+    }
+    const p = extractForCopy(localLayers.value, localGroups.value, copyIds, motionDoc)
     if (!p) return
     setClipboard(p)
     try { opts.onOSCopy?.(p) } catch { /* OS write is best-effort; in-session clipboard already set */ }
