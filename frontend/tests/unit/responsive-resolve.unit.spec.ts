@@ -108,11 +108,20 @@ describe('resolveLayout pins (wider box: 1000×500 design in 3000×500)', () => 
     expect(r.layers[0]!.x * 3000).toBeCloseTo(500 + 250 + 1000 * 0.25, 6)
   })
   it('a wide boxed text stretches its box and, top-pinned, keeps its top edge', () => {
-    const t = createTextLayer({ x: 0.5, y: 0.1, boxW: 0.9, fontSize: 0.05, lineHeight: 1, text: 'x' })
+    // 10 px per char, fontSize 50 px, lineHeight 1. The text is 910 px wide, so it wraps to
+    // TWO lines in the 900 px design box and to ONE in the 1900 px stretched box — which is
+    // the whole point: the box height changes, so only a real top-anchor keeps the top edge.
+    const t = createTextLayer({ x: 0.5, y: 0.1, boxW: 0.9, fontSize: 0.05, lineHeight: 1, text: 'a'.repeat(45) + ' ' + 'b'.repeat(45) })
     const measure = { measureText: (s: string) => ({ width: s.length * 10 }), set font(_v: string) {}, letterSpacing: '0px' } as unknown as CanvasRenderingContext2D
     const r = resolveLayout(doc([t]), 3000, 500, { measureCtx: measure })
     const out = r.layers[0]! as typeof t
     expect(out.boxW! * 3000 * layoutScaleOf(out)).toBeCloseTo(900 + 1000, 6)   // stretched by u
+    // design: 2 lines → box h 100, centre 50 ⇒ top edge 0. After: 1 line → h 50, so a kept
+    // top edge puts the centre at 25 (y = 0.05), NOT back at the mapped centre 50 (y = 0.1).
+    expect(out.y).toBeCloseTo(0.05, 9)
+    const box = r.boxes.get(t.id)!
+    expect(box.y).toBeCloseTo(0, 6)
+    expect(box.h).toBeCloseTo(50, 6)
   })
 })
 
