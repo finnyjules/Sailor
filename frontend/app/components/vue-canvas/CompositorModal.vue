@@ -47,7 +47,8 @@ import LayoutTile from '~/components/vue-canvas/compositor/LayoutTile.vue'
 import { snapshotFrameAsTemplate, addSlot } from '~/lib/frametemplate/author'
 import { placeTemplate, setInstanceSlot, freezeInstance, staleInstances, updateInstance, applySlotToLayer } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance, SlotKind } from '~/lib/frametemplate/types'
-import { resolveLayout, frameDocFromProps, isResponsiveFrame, type LayoutResult } from '~/lib/frame/responsive'
+import { resolveLayout, frameDocFromProps, isResponsiveFrame, effectivePins, type LayoutResult, type Pins } from '~/lib/frame/responsive'
+import ResponsivePinsCard from './ResponsivePinsCard.vue'
 import { atDesignSize as isAtDesignSize, clampViewSize, resizeViewFromEdge, shapePresets, readoutLabel as viewReadoutLabel } from '~/lib/frame/responsive/viewport'
 import { useTemplateLibrary } from '~/composables/useTemplateLibrary'
 import { serializeLayersForOS, parseLayersFromOS, setClipboard, type ClipboardPayload } from '~/lib/compositor/layerClipboard'
@@ -789,6 +790,38 @@ const {
   fillGridWithSections, resnapSelected,
   drawSectionActive, setDrawSectionActive, finishDrawSection,
 } = editor
+
+// ── Responsive Frames: the per-layer pins card ("When the frame resizes") ─────
+// The effective pins for the current single selection (or null). Only a
+// responsive frame with exactly one selected layer gets the card; a fixed frame
+// or a multi-selection returns null, so the render is byte-identical otherwise.
+const selectedPins = computed(() => {
+  const id = selectedLocalId.value
+  if (!frameIsResponsive.value || !id || selectedIds.value.size > 1) return null
+  const d = designSize.value
+  const doc = frameDocFromProps(compositor.value?.data?.properties as any, d.w, d.h)
+  return effectivePins(doc, id, measureCtx())
+})
+// Write a pins patch onto the unit — a group id writes the group's `pins`, a
+// layer id the layer's. cleanPins drops keys set back to automatic (absent).
+function setPins(unitId: string, patch: Partial<Pins>) {
+  const groups = localGroups.value
+  if (groups.some(g => g.id === unitId)) {
+    writeGroups(groups.map(g => g.id === unitId ? { ...g, pins: cleanPins({ ...(g as any).pins, ...patch }) } : g))
+  } else {
+    const layer = localLayers.value.find(l => l.id === unitId)
+    if (layer) setLocal(unitId, { pins: cleanPins({ ...(layer as any).pins, ...patch }) } as any)
+  }
+}
+// Drop keys set back to their automatic (absent) state so "Back to automatic" clears them.
+function cleanPins(p: Record<string, unknown>): Pins | undefined {
+  const out: any = {}
+  for (const k of ['h', 'v', 'keepSize', 'holdTo'] as const) if (p[k] != null) out[k] = p[k]
+  return Object.keys(out).length ? out : undefined
+}
+function backToAutomatic(unitId: string) {
+  setPins(unitId, { h: undefined, v: undefined, keepSize: undefined, holdTo: undefined } as any)
+}
 
 // Layout tab — the poster engine's sheet over this frame's own elements.
 const layoutSheet = useLayoutSheet({
@@ -10773,6 +10806,10 @@ onUnmounted(() => {
               </div>
             </div>
           </StudioSection>
+
+          <!-- Responsive: how this layer holds when the frame resizes (single selection only) -->
+          <ResponsivePinsCard v-if="selectedPins" :pins="selectedPins"
+            @patch="(p) => setPins(selectedPins!.unitId, p)" @auto="backToAutomatic(selectedPins!.unitId)" />
 
           <!-- Distort: slant (affine) + perspective + free corner-pin (Distort tool) -->
           <StudioSection title="Distort and blend">
