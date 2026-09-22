@@ -38,6 +38,7 @@ import { drawTextCells, lineAtRest, movingTextFrame, pathGlyphCells, textRunCell
 import { applyFillPhaseTracks } from '~/lib/motion/fillTracks'
 import { axesToVariationSettings } from '~/lib/motion/axes'
 import { expandClones, type Cloner } from '~/composables/useCloner'
+import { copyClock, staggerOf } from '~/lib/motionx/copies'
 import { clipFrameIndex, clipFrameUrl, clipPlayedSeconds, type ImageClip } from '~/lib/compositor/clip'
 import { fillIsShader, type ShaderSpec } from '~/lib/spacetype/fillTile'
 import { effectReadsInput, getEffectSync } from '~/lib/shaderfx/catalogStore'
@@ -2817,8 +2818,11 @@ function paintLayer(
   // inherit a stale clone index (which for a living image is a visibly wrong frame).
   // (The loop body below is deliberately left at its original indentation so this wrap
   // stays a two-line diff in a file several sessions edit at once.)
+  // `motionCopy` (transient, set only by paintLayerStack's copies-stagger expansion)
+  // narrows the expansion to that ONE copy — the layer is being painted once per copy,
+  // each at its own clock. Absent ⇒ undefined ⇒ the full array, exactly as before.
   try {
-  for (const c of expandClones(layer.cloner, W / H)) {
+  for (const c of expandClones(layer.cloner, W / H, (layer as { motionCopy?: number }).motionCopy)) {
     _cloneSlot.k = c.k; _cloneSlot.n = c.n
     const lx = layer.x + c.dx
     const ly = layer.y + c.dy
@@ -5554,20 +5558,76 @@ export function paintLayerStack(
   // rest of the fold already produced. Same-reference return when there are none.
   // Reveal transitions fold last of all: like letter behaviours they hand the painter author
   // state (the bar's look), and they need nothing from the layer but its id.
-  const animatedLocals = applyRevealBehaviours(applyTextBehaviours(applyMotionxTracks(
-    applyFillPhaseTracks(
-      applyEffectDialTracks(localLayers, motion?.tracks, t),
-      motion?.tracks,
-      t,
-    ),
-    motion?.motionx,
-    t,
-  ), motion?.behaviours, t), motion?.motionx, motion?.behaviours, t)
+  // ONE definition of the chain: the main fold below runs it at the frame clock, and the
+  // copies-stagger expansion under it re-runs the SAME chain per copy at that copy's own
+  // clock. Same calls in the same order either way, so the identity returns each stage
+  // makes (see their docs) still compose — a frame with no motion comes back by reference.
+  const foldMotion = (ls: LocalLayer[], clock: number | undefined): LocalLayer[] =>
+    applyRevealBehaviours(applyTextBehaviours(applyMotionxTracks(
+      applyFillPhaseTracks(
+        applyEffectDialTracks(ls, motion?.tracks, clock),
+        motion?.tracks,
+        clock,
+      ),
+      motion?.motionx,
+      clock,
+    ), motion?.behaviours, clock), motion?.motionx, motion?.behaviours, clock)
+
+  const storedLocals = localLayers      // pre-fold, for the per-copy folds below
+  const animatedLocals = foldMotion(localLayers, t)
   if (animatedLocals !== localLayers) {
     const byId = new Map(animatedLocals.map(l => [l.id, l]))
     items = items.map(it => (it.type === 'local' && byId.has(it.layer.id))
       ? { ...it, layer: byId.get(it.layer.id)! } : it)
     localLayers = animatedLocals
+  }
+
+  // Every StackKey reference (mask source, glass source) resolves against the stack as it
+  // stands HERE, one item per key — not against the copies expansion below, whose entries
+  // share their layer's key. A `new Map` over the expanded list would keep only the LAST
+  // copy per key, silently reducing "masked by that array" to "masked by its original
+  // copy". Same array reference whenever nothing expands, so this is a no-op for every
+  // existing frame.
+  const keyedItems = items
+
+  // Copies stagger (spec Part 2): a cloned local layer whose Cloner carries a motion
+  // stagger is painted ONCE PER COPY — each copy folded at its OWN clock and its Cloner
+  // narrowed to that one copy (`motionCopy` → `expandClones`' `only` argument, read at
+  // both stamp sites). Without this every copy would fold at the frame clock and the
+  // array would move in unison, which is exactly what it does today.
+  //
+  // The `some` guard is the identity contract: stagger 0, no cloner, a disabled cloner or
+  // no clock never enters the block, allocates nothing, and leaves `items` the array the
+  // single fold above produced — so every Frame saved before this paints byte-for-byte as
+  // it did. Nothing inside the per-layer draw loop changed either.
+  if (t !== undefined && items.some(it => it.type === 'local' && staggerOf(it.layer.cloner) > 0 && !!it.layer.cloner?.enabled)) {
+    const storedById = new Map(storedLocals.map(l => [l.id, l]))
+    const expanded: StackItem[] = []
+    let split = false
+    for (const it of items) {
+      if (it.type !== 'local') { expanded.push(it); continue }
+      const cloner = it.layer.cloner
+      if (!cloner?.enabled || staggerOf(cloner) === 0) { expanded.push(it); continue }
+      const copies = expandClones(cloner, W / H)
+      if (copies.length <= 1) { expanded.push(it); continue }
+      // Fold from the STORED layer, never from the already-folded one in `items`: folding
+      // a fold would apply every track twice. Falls back to the folded layer only if the
+      // stack carries an item whose layer isn't in `localLayers` at all.
+      const source = storedById.get(it.layer.id) ?? it.layer
+      for (const c of copies) {
+        const [folded] = foldMotion([source], copyClock(t, c.k, c.n, cloner))
+        // The Cloner is pinned to the FRAME clock's value even though the rest of the
+        // layer is folded at the copy's: the array's own dials (count, radius, spacing —
+        // Task 5's Copies properties) describe one shared array, and letting copy k
+        // resolve a different array would hand the stamp site a `k` its own expansion no
+        // longer contains, silently dropping that copy.
+        expanded.push({ ...it, layer: { ...(folded ?? source), cloner, motionCopy: c.k } as unknown as LocalLayer })
+      }
+      split = true
+    }
+    // Copies land where the layer was in the stack, in `expandClones`' own back-to-front
+    // order, so the array's z-order within the frame is the one it has without a stagger.
+    if (split) items = expanded
   }
   // Task 6 / Item 1 (final review): one `withFieldFrame` call per rendered frame, scoped
   // to exactly the shader fills THIS document's layers/background carry this pass — see
@@ -5634,7 +5694,7 @@ export function paintLayerStack(
       ctx.restore()
     }
 
-    const byKey = new Map(items.map(it => [it.key, it]))
+    const byKey = new Map(keyedItems.map(it => [it.key, it]))
     // Resolve every item's mask reference (local → layerMaskRef; wired → treatments).
     const maskRefOf = (it: StackItem): string | undefined =>
       it.type === 'local' ? layerMaskRef(it.layer) : wiredTreatments?.[it.key]?.maskedByKey
@@ -6011,8 +6071,10 @@ export function drawWiredImageLayer(
   }
 
   // Linked cloner: stamp the layer once per clone (back-to-front; original last).
-  // No cloner ⇒ a single identity transform ⇒ exactly one draw as before.
-  for (const c of expandClones(layer.cloner, W / H)) {
+  // No cloner ⇒ a single identity transform ⇒ exactly one draw as before. `motionCopy`
+  // narrows to one copy when the painter is drawing a staggered array copy by copy (see
+  // paintLayerStack); a wired transform never carries it today, so this is inert here.
+  for (const c of expandClones(layer.cloner, W / H, (layer as { motionCopy?: number }).motionCopy)) {
     ctx.save()
     ctx.globalAlpha = Math.max(0, Math.min(1, layer.opacity * c.dopacity))
     ctx.globalCompositeOperation = op

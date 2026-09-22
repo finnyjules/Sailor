@@ -38,8 +38,13 @@
  *  frame. It is stripped because a layer carrying it is disqualified from the cache
  *  outright (see `silhouetteCacheable`), so its key is never asked for; stripping it as
  *  well keeps a stringify of the whole behaviour list out of the key should that gate ever
- *  be loosened, and keeps every existing layer's key byte-identical. */
-export const SILHOUETTE_KEY_STRIP = ['id', 'x', 'y', 'rotation', 'opacity', 'blend', 'cloner', 'skewX', 'skewY', 'cornerPin', 'name', 'visible', 'locked', 'groupId', 'textMotion', 'motionReveal'] as const
+ *  be loosened, and keeps every existing layer's key byte-identical.
+ *
+ *  `motionCopy` belongs with `cloner` for the same reason: it only narrows that expansion
+ *  to one copy (the copies-stagger paint in `paintLayerStack`), which happens outside the
+ *  cached raster — the box's own pixels are the same for every copy. Leaving it in would
+ *  give each copy of a staggered array its own cache entry for identical pixels. */
+export const SILHOUETTE_KEY_STRIP = ['id', 'x', 'y', 'rotation', 'opacity', 'blend', 'cloner', 'skewX', 'skewY', 'cornerPin', 'name', 'visible', 'locked', 'groupId', 'textMotion', 'motionReveal', 'motionCopy'] as const
 
 /** Recursively sorts object keys (arrays keep their order) so the cache key is
  *  canonical regardless of property insertion order at ANY depth — a top-level-only
