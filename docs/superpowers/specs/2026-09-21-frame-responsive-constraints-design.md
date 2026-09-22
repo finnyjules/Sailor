@@ -17,6 +17,11 @@ frame with constraints does, plus text that re-wraps.
   one new inspector card, "When the frame resizes". Sailor picks every layer's
   behaviour automatically from where the layer sits; the card is only for
   overrides.
+- **Layers that push each other.** A group can be arranged as a Row or a
+  Column. Its members then make room for each other, so a headline that
+  re-wraps taller slides the paragraph and the button down. This uses Yoga,
+  the open-source layout engine Rive and React Native use, and it ships in an
+  export only when the Frame has such a group.
 - **What does not change.** Every Frame that exists today is a fixed Frame and
   stays exactly as it is: same pixels, same editor, nothing new on screen.
 - **What falls out of it.** The web export can offer a third choice, "Adapt",
@@ -48,9 +53,16 @@ frame with constraints does, plus text that re-wraps.
 8. **Jev (TypeSafe's decision model):** door left open only. The rule that
    picks default pins is replaceable, and pins can be set through the agent
    route. Nothing is built for Jev now.
-9. **No layout library in v1.** Pins are a few lines of arithmetic. If layers
-   ever need to push each other (stacks), adopt **Yoga** (the open-source
-   flexbox engine Rive and React Native use) rather than write one.
+9. **Arranged groups (added 2026-09-21, second round).** A group can be
+   arranged as a **Row** or a **Column**, so its members push each other: a
+   headline that re-wraps taller slides the paragraph down. One level only,
+   no wrapping onto new lines. Laid out by **Yoga** (the open-source flexbox
+   engine Rive and React Native use), never by an engine of our own. Yoga
+   ships in an export only when the Frame contains an arranged group. Pins
+   themselves stay a few lines of arithmetic.
+10. **Naming.** No new noun. The group card gets one setting, "Arrange: Free /
+    Row / Column". "Layout" is already taken twice in Sailor (the Layout tab,
+    Smart Layout) and "stack" already means z-order in the code.
 
 ## Prior art (so we do not reinvent)
 
@@ -184,8 +196,12 @@ Some layers adapt together as one rigid unit — placed by one set of pins,
 inferred from (and overridden on) the unit's overall box, members keeping
 their arrangement scaled by `s`:
 
-- **Groups** (outermost group). Pins are stored on the group record. No
-  stretch inside a group in v1, so a full-bleed background belongs outside.
+- **Free groups** (outermost group, Arrange = Free). Pins are stored on the
+  group record. No stretch inside a free group, so a full-bleed background
+  belongs outside.
+- **Arranged groups** (Arrange = Row or Column) are placed by pins like a free
+  group, but their members are laid out inside the box — see "Arranged
+  groups" below.
 - **Shape-mask pairs:** a mask source and every layer it clips. Pins come from
   the mask source's box. Break-out lines and painted mask strokes ride along.
 - **Cloners:** the whole stamped arrangement. Pins inferred from its full
@@ -195,13 +211,99 @@ A layer's own crop region follows the layer and stretches with it. For a
 stretched image that already has a crop region, the crop region is the box
 that stretches and the picture covers it.
 
+### Arranged groups
+
+Pins know about the frame's edges, not about neighbours. An arranged group
+is where layers push each other.
+
+**What it is.** A group whose "Arrange" is Row or Column. Its members sit
+side by side (Row) or one under the other (Column) and move to make room for
+each other. It has a **gap**, a **padding** on each side, and an **align**
+across the flow (start, centre, end, or stretch). Each member has one
+setting along the flow: **Hug** (its natural size, the default) or **Fill**
+(take a share of the spare room; several Fill members share it equally).
+One level only: a member cannot itself be an arranged group in v1, and
+members never wrap onto a new line.
+
+**Switching it on moves nothing.** When a group is set to Row or Column,
+Sailor reads the current arrangement: members are ordered by position along
+the flow; the gap is the average of the spaces between them; the align is the
+edge they share (or centre); the padding is the space between the members and
+the group's box. Two members that overlap, or one that is clearly out of
+line, are nudged into place — the only case where anything moves. Setting it
+back to Free keeps every member where it is.
+
+**Who owns the members' positions.** In a free group the members' `x`/`y`
+are the design. In an arranged group they are the **result** of the
+arrangement at the design size: every edit that can change the layout (text
+edited, a member resized, gap or padding changed, a member added, removed or
+reordered) re-runs the arrangement at the design size and writes the members'
+`x`/`y` (and a text box's width, when align is stretch) back into the
+document as one undo step. So at the design size the stored layers are
+already correct, the identity fast path still holds, and a fixed Frame never
+runs Yoga at all.
+
+**At another size.** `resolveLayout` places the group's box by its pins,
+then lays the members out inside it. A member's size is the fitted size
+(`× s`) unless it is Fill or stretched; text takes the width it is given and
+re-wraps, so its height changes and what follows moves. If the members need
+more room than the box has along the flow, the box grows along the flow to
+hold them (it hugs), anchored by the group's pin on that axis; it never clips
+and members never overlap. Across the flow the box is exactly what the pins
+gave it.
+
+**Sizes inside an arranged group.** The group's inner box and every member
+size are in fitted units, so "Keep size" applies to a member as anywhere
+else; a Keep-size member simply hugs at its design pixel size.
+
+**Automatic pins for the group** are inferred from its box like any group's.
+Typical: a Column of headline, paragraph and button near the left margin
+infers Left and Top; set its vertical pin to "Top and bottom" and the Fill
+member absorbs the tall box.
+
+**What members can be.** Text, images, wired layers, shapes, paths, brush
+strokes and free groups. A member's own rotation, skew and corner-pin are
+kept and its outer box is what the arrangement places. Cloners, deal and
+scatter layers can be members as one box each. A shape-mask pair inside an
+arranged group moves as one member (the mask source's box).
+
+**Motion inside an arranged group.** A position keyframe on a member is an
+**offset** from its arranged position (this is the one place where keyframes
+are offsets rather than positions). Scale, rotation, opacity and letter
+behaviours are untouched; a letter behaviour runs on the re-wrapped cells.
+Arrange, gap, padding, align, Hug and Fill are not animatable.
+
+**Editing.** Dragging a member along the flow reorders it (its slot follows
+the pointer); dragging it out of the group's box removes it from the group.
+Resizing a member sets its Hug size. All of this works at a viewing size
+through the same backwards mapping as elsewhere, with the reorder committed
+at the design size.
+
+**Yoga.** The arrangement is computed by Yoga (`yoga-layout`, WebAssembly,
+version pinned), driven through one small adapter that builds a two-level
+tree — the group as a flex container, each member as a leaf whose measure
+function is the same injected text measurer used for re-wrap — and reads the
+computed boxes back. Yoga is deterministic for the same inputs; the version
+is pinned so the export and the app agree. Rounding is ours, not Yoga's
+(point scale factor 1), so it matches the painter's. If Yoga has not loaded
+(the export's mount awaits it; the app loads it on first use), an arranged
+group renders as a free group at its stored positions — the design-size
+picture — rather than nothing.
+
+**Cost.** Yoga's WebAssembly file ships in an export only when the Frame
+contains at least one arranged group; the export sheet states the added
+size. The plan's first task measures it (older builds ranged from roughly
+100 KB to 300 KB; the current 3.x build is to be measured, not assumed).
+
 ### Motion
 
 - Position keyframes (`layers.<id>.x` / `.y`) go through the same map as the
   layer's resting position. Because the map is a straight line, mapping the
   keyframes and then interpolating equals interpolating and then mapping —
   easing and path shape are preserved exactly. Pinned layers: travel scales
-  with `s`. "Keep relative position": travel stretches with the box.
+  with `s`. "Keep relative position": travel stretches with the box. The one
+  exception is a member of an arranged group, whose position keyframes are
+  offsets from its arranged position (see "Arranged groups").
 - Scale, rotation, opacity and effect-dial tracks are untouched; keyframed
   scale multiplies on top of the layout scale.
 - Preset moves and letter behaviours ride inside the layer's scale. Letter
@@ -247,6 +349,21 @@ Responsive Frames only.
   "Back to automatic" link.
 - Works on multi-selection; for a group or a masked pair it shows the unit's
   pins. Built from the existing studio controls.
+- For a member of an arranged group the card shows, instead of pins, one
+  choice along the flow — "In this column: Hug its content / Fill the space"
+  (or "In this row") — plus "Keep size".
+
+### The group card: "Arrange"
+
+- One select on the group's existing card: "Arrange: Free / Row / Column".
+  Free is today and the default.
+- Row or Column reveals: "Gap", "Padding" (one value, with a disclosure for
+  four sides), and "Align: Start / Centre / End / Stretch". All are filled in
+  by Sailor from the current arrangement when switched on; the designer
+  rarely touches them.
+- Available on fixed Frames too: an arranged group is useful for tidy spacing
+  even when nothing ever resizes, and it costs a fixed Frame nothing at render
+  time (positions are written back into the document).
 
 ### Editing at a viewing size
 
@@ -311,6 +428,9 @@ resolveLayout(frame, W, H, opts?) → {
 | `motion.ts` | map position tracks |
 | `resolve.ts` | the orchestrator and the identity fast path |
 | `dropRule.ts` | the no-jump rule for edits at a viewing size |
+| `arrange/yoga.ts` | the Yoga adapter: two-level tree in, boxes out; lazy WebAssembly load |
+| `arrange/infer.ts` | read gap, padding, align and order off a free group when it is switched on |
+| `arrange/layout.ts` | lay an arranged group's members out in a given box (design size and other sizes alike) |
 
 It refers to `useCompositorLayers.ts` by `import type` only, so the export
 bundle does not pull the renderer in twice.
@@ -325,12 +445,22 @@ pins?: {
   keepSize?: boolean
   holdTo?: 'frame'          // absent = automatic (section when inside one)
 }
+// on LayerGroup — optional, absent = 'free'
+arrange?: {
+  direction: 'row' | 'column'
+  gap: number                        // normalized to design width
+  padding: number | [number, number, number, number]   // top, right, bottom, left
+  align: 'start' | 'center' | 'end' | 'stretch'
+}
+// on LayerCommon — only read while the layer is a member of an arranged group
+flow?: 'hug' | 'fill'                // absent = 'hug'
 // on sailor_frame
 responsive?: boolean
 ```
 
 Plain data: it rides along with copy, paste, duplicate, templates and undo.
-The agent's `setLayerProps` patch accepts `pins`.
+The agent's `setLayerProps` patch accepts `pins` and `flow`; its group edit
+accepts `arrange`.
 
 ### How a resolved layer reaches the renderer
 
@@ -388,6 +518,10 @@ two meet.
 - **Nested live pieces.** A stretched wired layer is cover-and-crop in v1,
   everywhere. In the export a nested live child could instead be given its
   new box and re-render at that shape; that is a later improvement, not v1.
+- **Yoga in the bundle.** When a variant contains an arranged group, the
+  bundle includes the Yoga WebAssembly file and `mount` awaits it before the
+  first paint. Without one, the bundle is exactly what the export spec
+  describes. The sheet's notices gain one sentence stating the added size.
 - **Shared risk.** The export notes that painting layers under an *offset* is
   untested for the backdrop-reading effects (glass, backdrop shader,
   displacement lens) and gives it a test. The rendering spike here hits the
@@ -417,6 +551,12 @@ Pure unit tests:
 4. Section attachment; region identity across sizes for explicit and
    generated grids (merge on, mirror on).
 5. Rigid units: group, mask pair, cloner boxes and placement.
+5a. Arranged groups: switching on reads gap/padding/align/order back exactly
+    for a tidy group and moves nothing; overlapping members get nudged;
+    Hug and Fill share room correctly; text pushes what follows; the box hugs
+    along the flow when members overflow; a member keyframe is an offset;
+    Yoga unavailable renders the stored design-size positions. Golden tests
+    pin the Yoga version: the same tree gives the same boxes.
 6. Motion: map-then-interpolate equals interpolate-then-map.
 7. Per-kind stretch; image cover-and-crop; text keeps its pinned edge.
 8. The drop rule: crossing the midline flips an automatic pin with no jump;
@@ -434,7 +574,7 @@ viewing size, and "Back to design size" (synthetic pointer events do not count).
 
 ## Build order
 
-This is one spec but four slices, each shippable on its own. The plan should
+This is one spec but five slices, each shippable on its own. The plan should
 follow this order:
 
 1. **The resolver.** The rendering spike, then `lib/frame/responsive/` with
@@ -444,15 +584,25 @@ follow this order:
    Editing tools return to the design size for now.
 3. **Editing at a viewing size.** Running the maps backwards, the drop rule,
    selection and hit-testing from resolved boxes.
-4. **"Adapt" in the web export.** Owned by the web export work; this spec
-   only provides `resolveLayout` for its `setSize`.
+4. **Arranged groups.** Measure Yoga's real size first (go/no-go on the
+   figure); the adapter and its golden tests; the group card's "Arrange";
+   switch-on inference and write-back at the design size; members' Hug/Fill;
+   reorder by drag. Works on fixed Frames as well as responsive ones, and
+   inside `resolveLayout` for other sizes.
+5. **"Adapt" in the web export.** Owned by the web export work; this spec
+   only provides `resolveLayout` for its `setSize`, and the Yoga file for
+   variants that need it.
 
 ## Not in v1
 
-- Layers pushing each other; stacking or re-ordering (later: Yoga).
+- Arranged groups inside arranged groups; members wrapping onto new lines;
+  space-between and other distributions; a member that ignores the
+  arrangement (absolute position); min/max sizes on members.
+- Layers pushing each other **without** an arranged group (no automatic
+  stacking of free layers).
 - Alternate layouts per shape / breakpoints (Smart Layout covers formats).
 - Stretch for paths, brush, deal, scatter, rotated or corner-pinned layers,
-  groups, cloners.
+  free groups, cloners.
 - Min/max sizes, a type-size floor, per-size overrides.
 - Animating pins.
 - A side-by-side sheet of sizes.
