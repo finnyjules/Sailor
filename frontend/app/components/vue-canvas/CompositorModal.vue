@@ -47,6 +47,8 @@ import LayoutTile from '~/components/vue-canvas/compositor/LayoutTile.vue'
 import { snapshotFrameAsTemplate, addSlot } from '~/lib/frametemplate/author'
 import { placeTemplate, setInstanceSlot, freezeInstance, staleInstances, updateInstance, applySlotToLayer } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance, SlotKind } from '~/lib/frametemplate/types'
+import { resolveLayout, frameDocFromProps, isResponsiveFrame, type LayoutResult } from '~/lib/frame/responsive'
+import { atDesignSize as isAtDesignSize, clampViewSize } from '~/lib/frame/responsive/viewport'
 import { useTemplateLibrary } from '~/composables/useTemplateLibrary'
 import { serializeLayersForOS, parseLayersFromOS, setClipboard, type ClipboardPayload } from '~/lib/compositor/layerClipboard'
 import {
@@ -348,6 +350,25 @@ const baseAspect = computed(() => {
   return d && d.h ? d.w / d.h : 1
 })
 const canvasDisplay = reactive({ w: 680, h: 680 })
+// ── Responsive Frames: view-at-a-size ────────────────────────────────────────
+// Is THIS frame responsive, its design (output) size, and the transient viewing
+// size (editor-only, never saved). A fixed frame keeps viewSize == designSize
+// forever, so every responsive branch below is a no-op and the render is
+// byte-identical to a non-responsive Frame.
+const frameIsResponsive = computed(() => isResponsiveFrame(compositor.value?.data?.properties as any))
+const designSize = computed(() => { const { W, H } = bakeSize(); return { w: W, h: H } })
+const viewSize = reactive({ w: 0, h: 0 })     // 0,0 until initialised by the reset watcher below
+const atDesign = computed(() => !frameIsResponsive.value || (viewSize.w <= 0) || isAtDesignSize(viewSize, designSize.value))
+// While looking at a viewing size, the artboard takes the viewing shape; otherwise the design shape.
+const previewAspect = computed(() => (frameIsResponsive.value && !atDesign.value && viewSize.h > 0)
+  ? viewSize.w / viewSize.h : baseAspect.value)
+// The resolved layout for the current viewing size, or null when we should paint the raw layers.
+const resolved = computed<LayoutResult | null>(() => {
+  if (!frameIsResponsive.value || atDesign.value) return null
+  const d = designSize.value
+  const doc = frameDocFromProps(compositor.value?.data?.properties as any, d.w, d.h)
+  return resolveLayout(doc, viewSize.w, viewSize.h, { measureCtx: measureCtx() })
+})
 // ── Grid overlay + inspector ─────────────────────────────────────────────────
 // `gridConfig` is display-only wiring: it feeds the overlay below (lines +
 // region rects drawn over the stage). It is never consumed by any
@@ -408,7 +429,7 @@ function togglePanels() { setPanelsVisible(!panelsVisible.value) }
 const stageBottomReserve = ref(0)
 const stagePadBottom = computed(() => STAGE_MATTE_BOTTOM + stageBottomReserve.value - STAGE_MATTE_TOP)
 function fitCanvasToStage() {
-  const a = baseAspect.value || 1
+  const a = previewAspect.value || 1
   const box = stageBoxRef.value
   // Fit must land the artboard in the PANEL GAP, not in the full-bleed stage,
   // or "Fit" would tuck content under the glass. The artboard is centred on the
@@ -430,7 +451,15 @@ function fitCanvasToStage() {
   canvasDisplay.h = Math.round(h)
 }
 watch(stageBottomReserve, () => fitCanvasToStage())
-watch(baseAspect, fitCanvasToStage)
+watch([baseAspect, previewAspect], fitCanvasToStage)
+// Responsive Frames: start every editor session at the design size; snap back when
+// the frame stops being responsive or the design size changes under us. This modal
+// is mounted fresh per open (v-if in VueNodeCanvas), so `{ immediate: true }` is the
+// "on open" reset — there is no `open` prop to watch.
+watch([frameIsResponsive, designSize], () => {
+  const d = designSize.value
+  viewSize.w = d.w; viewSize.h = d.h
+}, { immediate: true })
 let stageRO: ResizeObserver | null = null
 onMounted(() => {
   try { panelsVisible.value = sessionStorage.getItem(PANELS_KEY) !== '0' } catch { /* private mode */ }
@@ -4444,6 +4473,22 @@ function buildStackItems(): StackItem[] {
   }).filter((x): x is StackItem => x != null)
 }
 
+// Responsive Frames: the layers to paint — resolved for a viewing size, else the raw
+// editor layers. `resolved` is null (so this is a pure pass-through) for a fixed frame
+// or at the design size, keeping the render byte-identical.
+function paintLayers(): LocalLayer[] {
+  return (resolved.value?.layers ?? localLayers.value) as LocalLayer[]
+}
+// Items for the painter, swapping in the resolved layer (by id) wherever one exists.
+function paintItems(): StackItem[] {
+  const items = buildStackItems()
+  const r = resolved.value
+  if (!r) return items
+  const byId = new Map(r.layers.map(l => [l.id, l]))
+  return items.map(it => (it.type === 'local' && byId.has(it.layer.id))
+    ? { ...it, layer: byId.get(it.layer.id)! } : it)
+}
+
 const overlayCanvas = ref<HTMLCanvasElement | null>(null)
 // Task 6: beginFieldFrame's live-field ceiling is applied once per paintLayerStack
 // call (this frame's own shader fills, never pooled with an open Space Type/Shape
@@ -4479,7 +4524,7 @@ function renderStack(wallT?: number, live = false) {
   const ctx = cv.getContext('2d')!
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, W, H)
-  const items = buildStackItems()
+  const items = paintItems()
   // Live brush stroke preview (paint mode): fold the in-progress stroke into the
   // layer actually being drawn, so the preview MATCHES the committed result — an
   // eraser stroke subtracts in real time (destination-out within the layer), and a
@@ -4510,12 +4555,19 @@ function renderStack(wallT?: number, live = false) {
   // Frame node card.
   const clockT = previewT.value ?? wallT
   const motionArg = previewT.value != null ? motionDoc.value : undefined
+  // Responsive Frames: only the POSITION tracks (`.motionx`) are remapped by the
+  // resolver; every other live field (fps/duration/tracks/behaviours) stays as the
+  // editor authored it. So merge just `.motionx` in. Null resolved ⇒ motionArg
+  // untouched ⇒ byte-identical.
+  const paintMotion = (resolved.value && motionArg)
+    ? { ...motionArg, motionx: resolved.value.motion?.motionx ?? motionArg.motionx }
+    : motionArg
   // Scoped to THIS frame's slots — the wired resolver is a module global and the
   // Frame cards on the canvas number their own slots exactly the same way.
   const { frozenCount } = withWiredContent(wiredContentForSlot, () =>
-    paintLayerStack(ctx, W, H, items, localLayers.value as LocalLayer[], l =>
+    paintLayerStack(ctx, W, H, items, paintLayers(), l =>
       l.id === editingId.value || (nodeEdit.active.value && l.id === nodeEdit.layerId.value),
-      clockT, motionArg,
+      clockT, paintMotion,
       wiredTreatments.value, background.value, localGroups.value, postEffects.value))
   shaderFieldsFrozen.value = frozenCount
 }
