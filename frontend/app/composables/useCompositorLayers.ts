@@ -5591,7 +5591,14 @@ export function paintLayerStack(
   // copies-stagger expansion under it re-runs the SAME chain per copy at that copy's own
   // clock. Same calls in the same order either way, so the identity returns each stage
   // makes (see their docs) still compose — a frame with no motion comes back by reference.
-  const foldMotion = (ls: LocalLayer[], clock: number | undefined): LocalLayer[] =>
+  //
+  // `revealClock` is the ONE exception to "a copy plays on its own clock": a reveal in/out
+  // (dither / settle) is a whole-ELEMENT transition, bounded by its bar. Staggered per copy it
+  // leaked past the bar — the last copy was still assembling out well after the bar ended. So
+  // the copies-stagger expansion folds reveals at the FRAME clock (every copy reveals in step,
+  // done when the bar is done) while position, opacity and letters still stagger. The main fold
+  // leaves it defaulted to `clock`, so a frame without a stagger is byte-identical.
+  const foldMotion = (ls: LocalLayer[], clock: number | undefined, revealClock: number | undefined = clock): LocalLayer[] =>
     applyRevealBehaviours(applyTextBehaviours(applyMotionxTracks(
       applyFillPhaseTracks(
         applyEffectDialTracks(ls, motion?.tracks, clock),
@@ -5600,7 +5607,7 @@ export function paintLayerStack(
       ),
       motion?.motionx,
       clock,
-    ), motion?.behaviours, clock), motion?.motionx, motion?.behaviours, clock)
+    ), motion?.behaviours, clock), motion?.motionx, motion?.behaviours, revealClock)
 
   const storedLocals = localLayers      // pre-fold, for the per-copy folds below
   const animatedLocals = foldMotion(localLayers, t)
@@ -5662,7 +5669,9 @@ export function paintLayerStack(
       // stack carries an item whose layer isn't in `localLayers` at all.
       const source = storedById.get(it.layer.id) ?? it.layer
       for (const c of distinctCopies) {
-        const [folded] = foldMotion([source], copyClock(t, c.k, distinctCopies.length, cloner))
+        // Position / opacity / letters at the copy's own clock; the reveal transition at the
+        // FRAME clock, so it stays bounded by its bar for every copy (see revealClock above).
+        const [folded] = foldMotion([source], copyClock(t, c.k, distinctCopies.length, cloner), t)
         // The Cloner is pinned to the FRAME clock's value even though the rest of the
         // layer is folded at the copy's: the array's own dials (count, radius, spacing —
         // Task 5's Copies properties) describe one shared array, and letting copy k

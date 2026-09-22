@@ -203,4 +203,32 @@ describe('paintLayerStack — a cloned layer with a motion stagger', () => {
     paintAt(layer, 0.75)
     expect((layer as { motionCopy?: number }).motionCopy).toBeUndefined()
   })
+
+  it('a reveal transition is bounded by its bar for EVERY copy — a staggered out no longer leaks past it', () => {
+    // The reveal OUT runs 0..1s (amount 1 → 0). With a stagger, folding the reveal at each
+    // copy\'s own clock kept the lagged copies assembling out well past the bar; the fix folds
+    // reveals at the FRAME clock, so past the bar every copy is fully out and nothing is drawn.
+    const layer = createRectLayer({
+      id: ID, x: 0.5, y: 0.5, w: 0.3, h: 0.2, radius: 0, strokeWidth: 0,
+      cloner: { ...DEFAULT_CLONER, enabled: true, mode: 'radial', count: 4, motionStagger: 0.5, motionOrder: 'first' } as Cloner,
+    }) as LocalLayer
+    const revealTrack: Track = {
+      path: `layers.${ID}.reveal`, type: 'number', behaviourId: 'r',
+      keyframes: [{ t: 0, value: 1, ease: 'linear' }, { t: 1, value: 0, ease: 'linear' }],
+    }
+    const behaviours = [{ id: 'r', kind: 'dither', layerId: ID, timing: { start: 0, duration: 1 }, params: { style: 'dissolve', dir: 'out' } }] as never
+    const paintReveal = (t: number) => {
+      const { ctx, alphas } = makeCtx()
+      paintLayerStack(
+        ctx, 100, 100,
+        [{ type: 'local', key: `l:${ID}`, layer } as never], [layer],
+        undefined, t, { fps: 30, duration: 2, motionx: [revealTrack], behaviours },
+      )
+      return alphas
+    }
+    // 1.5s is 0.5s past the bar. Every copy is fully out → nothing inked.
+    expect(paintReveal(1.5)).toHaveLength(0)
+    // Mid-bar it still draws (sanity: the reveal IS active there, so the guard is not just always-skip).
+    expect(paintReveal(0.5).length).toBeGreaterThan(0)
+  })
 })
