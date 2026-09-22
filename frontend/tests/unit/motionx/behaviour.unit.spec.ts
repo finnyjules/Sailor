@@ -212,6 +212,22 @@ describe('copies.build — count in/out, radial vs linear path', () => {
     expect(evaluateTrack(inT, 0)).toBe(1)
     expect(evaluateTrack(inT, 1)).toBe(4)
   })
+  it('a COLUMN (count X 1, count Y 5) builds along Y — the axis that actually has copies', () => {
+    const column: BehaviourTarget = {
+      get: (p) => ({ 'cloner.mode': 'linear', 'cloner.countX': 1, 'cloner.countY': 5 } as Record<string, string | number>)[p],
+      has: () => true,
+    }
+    const inT = compileBehaviour({ id: '1', kind: 'copies.build', timing: { start: 0, duration: 1 }, params: { dir: 'in' } }, column)[0]!
+    expect(inT.path).toBe('cloner.countY')
+    expect(evaluateTrack(inT, 0)).toBe(1)
+    expect(evaluateTrack(inT, 1)).toBe(5)
+    // a grid keeps building along X (columns arrive; rows are all there)
+    const grid: BehaviourTarget = {
+      get: (p) => ({ 'cloner.mode': 'linear', 'cloner.countX': 3, 'cloner.countY': 2 } as Record<string, string | number>)[p],
+      has: () => true,
+    }
+    expect(compileBehaviour({ id: '2', kind: 'copies.build', timing: { start: 0, duration: 1 } }, grid)[0]!.path).toBe('cloner.countX')
+  })
   it('defaults to dir "in" with no params', () => {
     const t = compileBehaviour({ id: '1', kind: 'copies.build', timing: { start: 0, duration: 1 } }, radialCloner)[0]!
     expect(evaluateTrack(t, 0)).toBe(1)

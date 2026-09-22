@@ -147,7 +147,11 @@ const isRadialCloner = (target: BehaviourTarget) => target.get('cloner.mode') ==
 
 registerBehaviour('copies.build', (b, target) => {
   const dir = (b.params?.dir as string) ?? 'in'
-  const path = isRadialCloner(target) ? 'cloner.count' : 'cloner.countX'
+  // Linear: build along the axis that HAS copies — a column (count X 1) builds along Y;
+  // a row or a grid builds along X (columns arrive, rows are all there).
+  const path = isRadialCloner(target) ? 'cloner.count'
+    : numOr(target.get('cloner.countX'), 1) <= 1 && numOr(target.get('cloner.countY'), 1) > 1 ? 'cloner.countY'
+    : 'cloner.countX'
   const w = window(b.timing)
   const cur = numOr(target.get(path), 1)
   return [dir === 'out' ? numTrack(path, cur, 1, w, 'linear') : numTrack(path, 1, cur, w, 'linear')]
