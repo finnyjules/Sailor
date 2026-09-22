@@ -75,6 +75,63 @@ export function planRecording(req: Pick<RecordRequest, 'width' | 'height' | 'fps
   }
 }
 
+// BT.709 luma weights (ITU-R BT.709-6, table 3). Kg = 1 - Kr - Kb.
+const KR = 0.2126
+const KB = 0.0722
+const KG = 1 - KR - KB
+// Limited ("video") range: Y spans 16–235 (219 steps), Cb/Cr 16–240 (224 steps).
+const Y_SCALE = 219 / 255
+const C_SCALE = 224 / 255
+const CB_DIV = 2 * (1 - KB)
+const CR_DIV = 2 * (1 - KR)
+
+const clampByte = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : Math.round(v))
+
+/** Size in bytes of one I420A frame (Y, U, V, A planes, chroma halved both ways). */
+export function i420aSize(width: number, height: number): number {
+  return 2 * width * height + 2 * Math.ceil(width / 2) * Math.ceil(height / 2)
+}
+
+/** Straight (not premultiplied) RGBA, as getImageData returns it → planar
+ *  I420A: BT.709 matrix, limited range, 2×2 chroma from the mean of the block's
+ *  RGB (the same siting libyuv uses), alpha copied as its own full-size plane.
+ *  Planes are packed back to back with no row padding: Y, U, V, A. */
+export function rgbaToI420aBt709(rgba: ArrayLike<number>, width: number, height: number): Uint8Array {
+  const cw = Math.ceil(width / 2)
+  const ch = Math.ceil(height / 2)
+  const out = new Uint8Array(i420aSize(width, height))
+  const uOff = width * height
+  const vOff = uOff + cw * ch
+  const aOff = vOff + cw * ch
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const p = (y * width + x) * 4
+      out[y * width + x] = clampByte(16 + Y_SCALE * (KR * rgba[p]! + KG * rgba[p + 1]! + KB * rgba[p + 2]!))
+      out[aOff + y * width + x] = rgba[p + 3]!
+    }
+  }
+  for (let cy = 0; cy < ch; cy++) {
+    for (let cx = 0; cx < cw; cx++) {
+      let r = 0, g = 0, b = 0, n = 0
+      for (let dy = 0; dy < 2; dy++) {
+        const y = 2 * cy + dy
+        if (y >= height) continue
+        for (let dx = 0; dx < 2; dx++) {
+          const x = 2 * cx + dx
+          if (x >= width) continue
+          const p = (y * width + x) * 4
+          r += rgba[p]!; g += rgba[p + 1]!; b += rgba[p + 2]!; n++
+        }
+      }
+      r /= n; g /= n; b /= n
+      const luma = KR * r + KG * g + KB * b
+      out[uOff + cy * cw + cx] = clampByte(128 + C_SCALE * (b - luma) / CB_DIV)
+      out[vOff + cy * cw + cx] = clampByte(128 + C_SCALE * (r - luma) / CR_DIV)
+    }
+  }
+  return out
+}
+
 export function isAbortError(e: unknown): boolean {
   return !!e && typeof e === 'object' && (e as { name?: unknown }).name === 'AbortError'
 }
@@ -122,7 +179,22 @@ export async function recordVideo(req: RecordRequest, deps: RecorderDeps = {}): 
       }
       await req.drawFrame(i, ctx)
       throwIfAborted(req.signal)
-      const sample = new mb.VideoSample(canvas, { timestamp: i * dt, duration: dt, colorSpace: BT709 })
+      // VP9 + alpha: we convert to YUV ourselves. Handed the canvas, mediabunny
+      // 1.59 splits colour from alpha into a fresh RGBX VideoFrame that drops the
+      // BT.709 colour space; Chrome then converts it to I420 with BT.601 and
+      // tags the file smpte170m (pixels and tag agree, but not BT.709 like the
+      // server's files). Worse, mediabunny's own alpha DECODE rebuilds each
+      // frame as I420A without a colour space, which Chrome reads as BT.709, so
+      // that BT.601 file came back ~6 levels off (gate, 2026-09-22). An I420A
+      // sample made with the BT.709 matrix goes through the splitter untouched
+      // (colour planes as I420, which WebCodecs defaults to BT.709), so the
+      // encoder tags BT.709 and the pixels match the tag. H.264 keeps the canvas
+      // path: there the colour space is honoured.
+      const sample = plan.alpha
+        ? new mb.VideoSample(rgbaToI420aBt709(ctx.getImageData(0, 0, plan.width, plan.height).data, plan.width, plan.height), {
+          format: 'I420A', codedWidth: plan.width, codedHeight: plan.height, timestamp: i * dt, duration: dt, colorSpace: BT709,
+        })
+        : new mb.VideoSample(canvas, { timestamp: i * dt, duration: dt, colorSpace: BT709 })
       try {
         await source.add(sample)
       } finally {

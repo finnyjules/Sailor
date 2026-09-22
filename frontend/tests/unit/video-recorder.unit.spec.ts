@@ -1,17 +1,20 @@
 import { describe, it, expect } from 'vitest'
-import { planRecording, recordVideo, isAbortError, BT709 } from '../../app/lib/engine/videoRecorder'
+import { planRecording, recordVideo, isAbortError, BT709, rgbaToI420aBt709, i420aSize } from '../../app/lib/engine/videoRecorder'
 
 // A fake mediabunny that records what the recorder asks of it. The real library
 // needs WebCodecs; this checks the ORCHESTRATION: order, timestamps, colour tag,
 // cleanup, cancel. The real encode is proven by tests/browser-video-export.spec.ts.
 function fakeLib(opts?: { failStart?: boolean }) {
-  const log: any = { samples: [] as any[], closed: 0, started: false, finalized: false, cancelled: false, track: null, source: null, format: null }
+  const log: any = { samples: [] as any[], rawData: [] as (Uint8Array | null)[], closed: 0, started: false, finalized: false, cancelled: false, track: null, source: null, format: null }
   class BufferTarget { buffer: ArrayBuffer | null = null }
   class Mp4OutputFormat { kind = 'mp4'; constructor(public opts?: any) {} }
   class WebMOutputFormat { kind = 'webm'; constructor(public opts?: any) {} }
   class Quality { constructor(public level: any) {} }
   class VideoSample {
-    constructor(public data: any, public init: any) { log.samples.push({ init, snapshot: data.snapshot?.() }) }
+    constructor(public data: any, public init: any) {
+      log.samples.push({ init, snapshot: data.snapshot?.() })
+      log.rawData.push(data instanceof Uint8Array ? data : null)
+    }
     close() { log.closed++ }
   }
   class VideoSampleSource {
@@ -37,6 +40,12 @@ function fakeCanvas(w: number, h: number) {
     setTransform: () => {},
     fillRect: (x: number, y: number, fw: number, fh: number) => ops.push(`fill ${ctx.fillStyle} ${x},${y},${fw},${fh}`),
     clearRect: (x: number, y: number, fw: number, fh: number) => ops.push(`clear ${x},${y},${fw},${fh}`),
+    getImageData: (x: number, y: number, rw: number, rh: number) => {
+      ops.push(`read ${x},${y},${rw},${rh}`)
+      const data = new Uint8ClampedArray(rw * rh * 4)
+      for (let p = 0; p < data.length; p += 4) { data[p] = 255; data[p + 3] = 128 }   // half-transparent red
+      return { data, width: rw, height: rh }
+    },
   }
   const canvas: any = { width: w, height: h, snapshot: () => ops.slice() }
   return { canvas, ctx, ops }
@@ -95,14 +104,19 @@ describe('recordVideo', () => {
     expect(res.blob.size).toBe(16)
   })
 
-  it('transparent: clears instead of filling, and keeps alpha', async () => {
+  it('transparent: clears instead of filling, reads the pixels back, hands over BT.709 I420A', async () => {
     const { lib, log } = fakeLib()
     const c = fakeCanvas(2, 2)
     await recordVideo(
-      { width: 2, height: 2, fps: 30, frameCount: 1, alpha: true, drawFrame: () => { c.ops.push('draw') } },
+      { width: 2, height: 2, fps: 30, frameCount: 2, alpha: true, drawFrame: () => { c.ops.push('draw') } },
       { lib, createCanvas: () => ({ canvas: c.canvas, ctx: c.ctx }) },
     )
-    expect(log.samples[0].snapshot.slice(-2)).toEqual(['clear 0,0,2,2', 'draw'])
+    expect(c.ops.slice(-3)).toEqual(['clear 0,0,2,2', 'draw', 'read 0,0,2,2'])
+    const s = log.samples[1]
+    expect(s.init).toEqual({ format: 'I420A', codedWidth: 2, codedHeight: 2, timestamp: 1 / 30, duration: 1 / 30, colorSpace: BT709 })
+    // The sample's data is the converted frame, not the canvas: Y ×4, U, V, A ×4.
+    expect(Array.from(log.rawData[1])).toEqual([63, 63, 63, 63, 102, 240, 128, 128, 128, 128])
+    expect(log.closed).toBe(2)
     expect(log.source.codec).toBe('vp9')
     expect(log.source.alpha).toBe('keep')
     expect(log.format.kind).toBe('webm')
@@ -146,5 +160,55 @@ describe('recordVideo', () => {
     expect(err?.message).toBe('no encoder')
     expect(log.cancelled).toBe(true)
     expect(log.finalized).toBe(false)
+  })
+})
+
+describe('rgbaToI420aBt709', () => {
+  // One 2×2 block of a flat colour: Y ×4, U, V, A ×4.
+  const flat = (r: number, g: number, b: number, a = 255) => {
+    const px = new Uint8ClampedArray(16)
+    for (let p = 0; p < 16; p += 4) { px[p] = r; px[p + 1] = g; px[p + 2] = b; px[p + 3] = a }
+    const out = rgbaToI420aBt709(px, 2, 2)
+    return { y: out[0], u: out[4], v: out[5], a: out[6], all: Array.from(out) }
+  }
+
+  // Reference values: ITU-R BT.709, 8-bit limited range (the colour-bar codes).
+  it.each([
+    ['white', [255, 255, 255], [235, 128, 128]],
+    ['black', [0, 0, 0], [16, 128, 128]],
+    ['red', [255, 0, 0], [63, 102, 240]],
+    ['green', [0, 255, 0], [173, 42, 26]],
+    ['blue', [0, 0, 255], [32, 240, 118]],
+    // The gate's #c00000 bar, and what a BT.601 conversion would have given (65, 100, 212)
+    ['#c00000', [192, 0, 0], [51, 109, 212]],
+  ] as const)('%s → BT.709 limited-range Y/U/V', (_name, rgb, yuv) => {
+    const r = flat(rgb[0], rgb[1], rgb[2])
+    expect([r.y, r.u, r.v]).toEqual(yuv)
+  })
+
+  it('packs Y, U, V, A back to back and copies alpha untouched', () => {
+    const r = flat(0, 0, 0, 37)
+    expect(r.all).toEqual([16, 16, 16, 16, 128, 128, 37, 37, 37, 37])
+    expect(i420aSize(2, 2)).toBe(10)
+    expect(i420aSize(4, 2)).toBe(20)
+  })
+
+  it('chroma is the mean of the 2×2 block; luma is per pixel', () => {
+    // Left column white, right column black
+    const px = new Uint8ClampedArray([255, 255, 255, 255, 0, 0, 0, 255, 255, 255, 255, 255, 0, 0, 0, 255])
+    const out = rgbaToI420aBt709(px, 2, 2)
+    expect(Array.from(out.subarray(0, 4))).toEqual([235, 16, 235, 16])
+    expect([out[4], out[5]]).toEqual([128, 128])
+  })
+
+  it('handles an odd size by averaging only the pixels that exist', () => {
+    // 3×1: red, red, blue → chroma blocks (red,red) and (blue)
+    const px = new Uint8ClampedArray([255, 0, 0, 255, 255, 0, 0, 255, 0, 0, 255, 255])
+    const out = rgbaToI420aBt709(px, 3, 1)
+    expect(out.length).toBe(i420aSize(3, 1))
+    expect(Array.from(out.subarray(0, 3))).toEqual([63, 63, 32])
+    expect(Array.from(out.subarray(3, 5))).toEqual([102, 240])   // U: red block, blue block
+    expect(Array.from(out.subarray(5, 7))).toEqual([240, 118])   // V
+    expect(Array.from(out.subarray(7))).toEqual([255, 255, 255])
   })
 })
