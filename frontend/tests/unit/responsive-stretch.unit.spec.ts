@@ -29,7 +29,9 @@ describe('placeLayer', () => {
     // box in stored units: 1.8 × 0.3; image aspect 2 ⇒ cover ⇒ w = 1.8, h = 0.9 (too tall) → crop
     expect(out.w).toBeCloseTo(1.8, 9)
     expect(out.h).toBeCloseTo(0.9, 9)
-    expect(out.mask).toEqual({ kind: 'rect', x: 0.5, y: 0.5, w: 1.8, h: 0.3 })
+    // The crop mask is applied in CANVAS space (before the painter's layout scale k),
+    // so its w/h are plain canvas fractions: 1800/2000 and 300/2000.
+    expect(out.mask).toEqual({ kind: 'rect', x: 0.5, y: 0.5, w: 0.9, h: 0.15 })
   })
   it('an image whose box is taller than its aspect covers by height', () => {
     const img = createImageLayer('a.png', 2, { w: 0.4 })
