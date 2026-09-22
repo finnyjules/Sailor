@@ -50,6 +50,10 @@ import { downloadBlobAsFile } from '~/lib/studio/downloadBlob'
 import SweepPopover from '~/components/vue-canvas/studio/SweepPopover.vue'
 import { exportEmbedHtml, downloadEmbed } from '~/lib/embed/export'
 import type { ShaderEmbedConfig } from '~/lib/embed/surfaces/shader'
+import { exportStudioVideo, resultBlob, videoErrorText, type StudioVideoResult } from '~/lib/studio/studioVideoExport'
+import { prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
+import { isAbortError } from '~/lib/engine/videoRecorder'
+import { hostedModeEnabled } from '~/lib/hostedMode'
 
 const props = defineProps<{ nodeId: string; nodes: any[]; edges?: any[]; wiredUrl?: string | null }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -65,6 +69,15 @@ const canvas = ref<HTMLCanvasElement | null>(null)
 const glError = ref<string | null>(null)
 const baking = ref(false)
 const bakeMsg = ref('')
+// The running video export, so Cancel can stop it.
+let videoAbort: AbortController | null = null
+const exportingVideo = ref(false)
+function cancelVideoExport() { videoAbort?.abort() }
+function showVideoError(e: unknown) {
+  if (isAbortError(e)) { bakeMsg.value = 'Export cancelled.'; return }
+  console.error('[shader-studio] video failed', e)
+  bakeMsg.value = videoErrorText(e)
+}
 const embedMsg = ref('')
 const embedErr = ref(false)
 const embedding = ref(false)
@@ -522,7 +535,11 @@ function closeEditor() { try { saveConfig() } catch (e) { console.error('[shader
 const { saving: autoSaving, saved: autoSaved } = useStudioAutosave(() => config.value, saveConfig)
 
 // ── outputs (mirror Gradient Studio) ───────────────────────────────────────────
-async function renderBlob(t01: number): Promise<Blob> {
+/** Render frame `t01` into shaderFx's canvas and return that canvas. With
+ *  `into`, the frame is also copied onto that 2D context immediately after the
+ *  render — a WebGL canvas can be cleared once the browser presents, so the
+ *  copy must not wait for anything. */
+async function renderShaderFrame(t01: number, into?: CanvasRenderingContext2D): Promise<HTMLCanvasElement> {
   const src = resolved.value
   const { w, h } = src
     ? outputDims(src.width, src.height, config.value.resolution, { upscale: true })
@@ -533,6 +550,12 @@ async function renderBlob(t01: number): Promise<Blob> {
   const base = src ? await src.getFrame(t01, w, h) : GENERATIVE_BASE
   shaderFx.render(composePasses(cfg, defForId, t, (def, layer) => texBundle(def, layer)), base, w, h)
   const c = shaderFx.outputCanvas!
+  into?.drawImage(c, 0, 0, w, h)
+  return c
+}
+
+async function renderBlob(t01: number): Promise<Blob> {
+  const c = await renderShaderFrame(t01)
   return await new Promise<Blob>((res, rej) => c.toBlob(b => (b ? res(b) : rej(new Error('toBlob failed'))), 'image/png', 0.95))
 }
 
@@ -600,46 +623,48 @@ async function generateImage() {
   finally { baking.value = false; startPreview() }
 }
 
-/** Bake the current Shader Studio state to frames (at the upstream source's own
- *  clock, or our own Motion duration/fps when the source is still) and encode
- *  server-side to a video file under input/. Shared by generateVideo() (dispatches
- *  a Video node onto the canvas) and downloadVideoFile() (saves the file locally)
- *  so this frame-bake exists in exactly one place. Callers own baking.value/
- *  stopPreview/startPreview and the "Add a source first" guard. A bake-stage
- *  failure (ensureSpaceTypeBake) propagates to the caller; an encode-stage failure
- *  is caught here (mirrors the original generateVideo's nested try/catch) and
- *  reported via bakeMsg, returning null so callers treat it as "nothing to
- *  dispatch/download" without their own catch firing a second, more generic
- *  message. Mirrors Gradient Studio's bakeGradientVideo (Task 6). */
-async function bakeShaderVideo(): Promise<{ filename: string; ext: 'mp4' | 'webm' } | null> {
+/** Make the current Shader Studio state into a video: recorded in the browser,
+ *  or — local mode only, with a notice — by today's server route. `publish`
+ *  uploads the file (Assets / canvas Video node); a download does not need it.
+ *  Callers own baking.value/stopPreview/startPreview and the source guard. */
+async function bakeShaderVideo(publish: boolean): Promise<StudioVideoResult | null> {
   const src = resolved.value
-  // Whoever supplies the frames owns the clock: an animated upstream (e.g. a
-  // Gradient Studio loop) overrides our own duration/fps; a still source
-  // leaves our own Motion controls in charge. A generative effect with no
-  // source (null src) hits the same "still" branch — exportClock already
-  // treats a null resolved source as "no upstream clock" and falls back to
-  // ownDuration/ownFps, so it self-animates via u_time over our own Motion
-  // clock (renderBlob(i/total) below already varies t per frame). See
-  // resolve.ts's exportClock.
   const clock = exportClock(src, config.value.motion.duration, config.value.motion.fps)
   const { w, h } = src
     ? outputDims(src.width, src.height, config.value.resolution, { upscale: true })
     : { w: GENERATIVE_DIM, h: GENERATIVE_DIM }
   const total = Math.max(1, Math.round(clock.fps * clock.duration))
-  const bakeCfg = { fps: clock.fps, loopDuration: clock.duration, W: w, H: h, seed: 'shader', sig: JSON.stringify(config.value) }
-  const bake = await ensureSpaceTypeBake(bakeCfg as any, undefined, {
-    // Normalized (i / total), not i / fps: renderBlob now takes 0..1 so the
-    // last frame lands just before the loop point instead of duplicating
-    // frame 0 — this is what keeps a seamless upstream loop closing on itself.
-    renderFrame: async (i) => { bakeMsg.value = `Baking ${i + 1}/${total}`; return await renderBlob(i / total) },
-  })
-  bakeMsg.value = 'Encoding…'
+  videoAbort = new AbortController()
+  exportingVideo.value = true
   try {
-    return await encodeFrames({ frames: bake.frames, fps: clock.fps, width: w, height: h })
-  } catch (encErr) {
-    bakeMsg.value = 'Encode failed — restart ComfyUI to load the encoder.'
-    console.error('[shader-studio] encode failed', encErr)
-    return null
+    return await exportStudioVideo({
+      prefix: 'shader', publish,
+      width: w, height: h, fps: clock.fps, frameCount: total, alpha: false,
+      signal: videoAbort.signal,
+      // Normalized (i / total), not i / fps: the last frame lands just before
+      // the loop point instead of duplicating frame 0.
+      drawFrame: async (i, ctx) => {
+        bakeMsg.value = `Rendering ${i + 1}/${total}`
+        await renderShaderFrame(i / total, ctx)   // copies onto ctx right after the render
+      },
+      serverFallback: async () => {
+        const bakeCfg = { fps: clock.fps, loopDuration: clock.duration, W: w, H: h, seed: 'shader', sig: JSON.stringify(config.value) }
+        const bake = await ensureSpaceTypeBake(bakeCfg as any, undefined, {
+          renderFrame: async (i) => { bakeMsg.value = `Baking ${i + 1}/${total}`; return await renderBlob(i / total) },
+        })
+        bakeMsg.value = 'Encoding…'
+        try {
+          return await encodeFrames({ frames: bake.frames, fps: clock.fps, width: w, height: h })
+        } catch (encErr) {
+          bakeMsg.value = 'Encode failed — restart ComfyUI to load the encoder.'
+          console.error('[shader-studio] encode failed', encErr)
+          return null
+        }
+      },
+    }, { hosted: hostedModeEnabled(useRuntimeConfig().public), forceServer: prefersServerVideoExport() })
+  } finally {
+    exportingVideo.value = false
+    videoAbort = null
   }
 }
 
@@ -647,13 +672,14 @@ async function generateVideo() {
   if (!resolved.value && !isGenerative.value) { bakeMsg.value = 'Add a source first'; return }
   baking.value = true; stopPreview()
   try {
-    const encoded = await bakeShaderVideo()
-    if (!encoded) return
-    await recordAsset(activeTab.value?.projectUuid, 'video', encoded.filename)
-    window.dispatchEvent(new CustomEvent('sailor:shaderStudioOutput', { detail: { sourceNodeId: props.nodeId, nodeType: 'Video', widgetOverrides: { file: encoded.filename } } }))
-    bakeMsg.value = ''
-    closeEditor()
-  } catch (e) { console.error('[shader-studio] video failed', e); bakeMsg.value = 'Failed — see console.' }
+    const made = await bakeShaderVideo(true)
+    if (!made?.filename) return
+    await recordAsset(activeTab.value?.projectUuid, 'video', made.filename)
+    window.dispatchEvent(new CustomEvent('sailor:shaderStudioOutput', { detail: { sourceNodeId: props.nodeId, nodeType: 'Video', widgetOverrides: { file: made.filename } } }))
+    bakeMsg.value = made.notice ?? ''
+    // A fallback notice must be seen: keep the studio open when there is one.
+    if (!made.notice) closeEditor()
+  } catch (e) { showVideoError(e) }
   finally { baking.value = false; startPreview() }
 }
 
@@ -673,27 +699,17 @@ async function downloadPng() {
   finally { baking.value = false; startPreview() }
 }
 
-/** Same bake as generateVideo(), but saves the encoded file locally instead of
- *  dispatching a Video node onto the canvas. Unlike generateVideo/generateImage,
- *  this never calls closeEditor() — the modal stays open — so bakeMsg MUST be
- *  cleared on success here, or the footer's notice would show a stale
- *  "Encoding…" forever instead of returning to idle. */
+/** Same video as generateVideo(), saved locally instead of dispatched. The
+ *  modal stays open, so bakeMsg must end on the result, not "Rendering…". */
 async function downloadVideoFile() {
   if (!resolved.value && !isGenerative.value) { bakeMsg.value = 'Add a source first'; return }
   baking.value = true; stopPreview()
   try {
-    const encoded = await bakeShaderVideo()
-    if (!encoded) return
-    // NOT `/input/${filename}` — that path isn't in the Nuxt dev server's
-    // comfyui-proxy PROXY_PREFIXES (server/middleware/comfyui-proxy.ts only
-    // proxies /view, /upload, etc.) and 404s; verified live in Gradient Studio
-    // (Task 6). ComfyUI's own /view endpoint (proxied) serves the same input/
-    // file by filename+type.
-    const res = await fetch(`/view?${new URLSearchParams({ filename: encoded.filename, type: 'input' })}`)
-    if (!res.ok) throw new Error(`/view returned ${res.status}`)
-    downloadBlobAsFile(await res.blob(), `shader_${Date.now()}.${encoded.ext}`)
-    bakeMsg.value = ''
-  } catch (e) { console.error('[shader-studio] video download failed', e); bakeMsg.value = 'Failed — see console.' }
+    const made = await bakeShaderVideo(false)
+    if (!made) return
+    downloadBlobAsFile(await resultBlob(made), `shader_${Date.now()}.${made.ext}`)
+    bakeMsg.value = made.notice ?? ''
+  } catch (e) { showVideoError(e) }
   finally { baking.value = false; startPreview() }
 }
 
@@ -933,6 +949,7 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
           error: glError || (embedErr ? embedMsg : null),
           notice: (!embedErr && embedMsg) ? embedMsg : (bakeMsg || null),
         },
+        utilities: exportingVideo ? [{ label: 'Cancel', onClick: cancelVideoExport }] : [],
         downloads: [
           { label: 'Download PNG', onClick: downloadPng, disabled: !resolved && !isGenerative },
           { label: 'Download video', onClick: downloadVideoFile, busy: baking, disabled: !resolved && !isGenerative },
