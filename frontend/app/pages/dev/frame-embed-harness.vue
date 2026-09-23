@@ -221,12 +221,24 @@ onMounted(async () => {
       // sibling reference. `paintLayerStack` auto-wires the resolver from the FULL layers array it
       // is given (`buildSiblingResolver`, useCompositorLayers.ts), keyed `l:<id>` — so a second
       // plain rect sharing the stack is all the wiring this needs. `self` subtracts `sibling`
-      // (an L-shaped result), visibly distinct from either square alone — the parity test would
-      // pass by accident on an unclipped square if the op silently no-op'd.
+      // (an L-shaped result).
+      //
+      // Fix round 2 (R14d): stack order is [sibling, self] — SELF ON TOP, not the other way
+      // round. With self painted first (underneath) and the opaque sibling on top, the earlier
+      // ordering had NO TEETH: the subtracted region (the overlap) sits exactly where the opaque
+      // sibling paints over it regardless of whether the subtract ran, so a silently no-op'd
+      // boolean produced BYTE-IDENTICAL pixels to a correct one — 0 differing either way. With
+      // self on top, an unclipped self fully covers the overlap (hiding sibling's colour there);
+      // a correctly subtracted self leaves the overlap showing sibling's colour through the bite
+      // taken out of self — a real, visible difference a broken boolean would fail on. Verified by
+      // hand (not committed): a throwaway spec stripped the `boolean` effect from the EXPORTED
+      // snapshot only (via `mutate`-style JS, leaving `reference()`'s render correct) and diffed
+      // against the correct reference — 24,000 of 500,000 px differed (4.80%), comfortably over
+      // the 0-diff this fixture asserts on the real, un-broken effect. See the fix round 2 report.
       const sibling = createRectLayer({ x: 0.62, y: 0.5, w: 0.3, h: 0.3, radius: 0, fill: '#f25c54' })
       const self = createRectLayer({ x: 0.4, y: 0.5, w: 0.3, h: 0.3, radius: 0, fill: '#3fb68b' }) as any
       self.effects = [{ ...createEffect('boolean'), op: 'subtract', refLayerId: `l:${sibling.id}`, visible: true }]
-      return { hasMotion: false, variant: variantOf(1000, 500, [self, sibling], { background: '#1b4d3e' }) }
+      return { hasMotion: false, variant: variantOf(1000, 500, [sibling, self], { background: '#1b4d3e' }) }
     }
     if (name === 'bleed' || name === 'bleed-post') {
       // A rect half outside the artboard's right edge (artboard x 900..1100 of 1000): in a box

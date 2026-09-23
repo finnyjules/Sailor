@@ -24,15 +24,19 @@ const EMBED_URL = 'http://frame-embed.invalid/'
  * only ever inspected `requests` and the canvas/poster DOM state, so a page that threw on load but
  * still happened to leave a plausible canvas behind would pass silently.
  *
- * `opts.allowPageErrors`: the one legitimate exception — a test that DELIBERATELY makes the
- * painter reach for a missing asset (frame-embed-network.spec.ts's "a missing inlined asset IS
- * seen as a request") makes Chromium log its own `console.error: Failed to load resource:
+ * `opts.ignorePageErrorsMatching`: the one legitimate exception — a test that DELIBERATELY makes
+ * the painter reach for a missing asset (frame-embed-network.spec.ts's "a missing inlined asset
+ * IS seen as a request") makes Chromium log its own `console.error: Failed to load resource:
  * net::ERR_NAME_NOT_RESOLVED` for that request, which is proof the test's mechanism worked, not a
- * defect. Default false — every ordinary export must load with zero page errors.
+ * defect. A single opt-out RegExp, matched against each collected error's text — NOT a blanket
+ * boolean (fix round 2: the first version of this parameter, `allowPageErrors: true`, disabled
+ * BOTH checks entirely for that one test, so a genuine, unrelated page error there would have
+ * passed silently too). Undefined by default — every ordinary export must load with zero page
+ * errors, matched or not.
  */
 export async function renderExported(
   context: BrowserContext, html: string, t01: number, viewport: { width: number; height: number },
-  opts: { allowPageErrors?: boolean } = {},
+  opts: { ignorePageErrorsMatching?: RegExp } = {},
 ): Promise<{ png: string; requests: string[] }> {
   await context.addInitScript((t: number) => { (window as any).__SAILOR_FREEZE_T01__ = t }, t01)
   const p = await context.newPage()
@@ -58,9 +62,10 @@ export async function renderExported(
   // A beat after the frame, so a load the painter starts late (a lazily decoded image) is seen too.
   await p.waitForTimeout(300)
   await p.close()
-  if (!opts.allowPageErrors) {
-    expect(pageErrors, `the exported page reported error(s):\n${pageErrors.join('\n')}`).toEqual([])
-  }
+  const unexpected = opts.ignorePageErrorsMatching
+    ? pageErrors.filter(e => !opts.ignorePageErrorsMatching!.test(e))
+    : pageErrors
+  expect(unexpected, `the exported page reported error(s):\n${unexpected.join('\n')}`).toEqual([])
   return { png, requests }
 }
 

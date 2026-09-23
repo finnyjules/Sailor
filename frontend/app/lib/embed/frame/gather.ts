@@ -13,6 +13,7 @@ import { clipFrameUrl, clipFrameKey } from '~/lib/compositor/clip'
 import { shaderTextureUrl, shaderTextureKey } from '~/lib/shaderfill/field'
 import { compositorFontToken } from '~/lib/compositor/textOutline'
 import { effectStackOf, isGeometryKind } from '~/lib/compositor/effectStack'
+import { layersNeedPaper } from './needs'
 import type { DepthRef } from '~/lib/compositor/depthRegistry'
 import type { EffectDef } from '~/lib/shaderfx/types'
 import type { FontWeightSpec } from '../fontFace'
@@ -54,18 +55,18 @@ export function isBlocked(snapshot: FrameSnapshot): boolean {
   return snapshot.notices.some(n => n.group === 'blocked')
 }
 
-/** Task 10's brief for `needsOutlines`. `boolean` and `shatter` genuinely read paper.js
- *  (booleanGeometry.ts); `morph` (blendPath, in ~/lib/vector/morph.ts) is pure JS with NO paper
- *  dependency today, but ships in the same group here — it is the third sibling-reference (`ref
- *  LayerId`) F3 geometry kind alongside boolean, so a Frame using it keeps the full bundle rather
- *  than betting on morph never growing a paper dependency later. Trim/offset/round_corners/
- *  roughen/warp/long_shadow are all self-contained and never touch paper. */
-const PAPER_GEOMETRY_KINDS = new Set(['boolean', 'shatter', 'morph'])
-
 /**
  * Task 10: true when this Frame needs the full `frame.js` bundle (paper.js and/or fontkit) rather
  * than the lean one — `bundleNameFor('frame', snap)` (surfaces.ts) reads `FrameSnapshot.needsOutlines`,
  * this function's result, to choose between them. Pure and exported for the unit test.
+ *
+ * The paper.js half (`boolean`/`shatter`/`morph` anywhere in the Frame) is `layersNeedPaper`
+ * (./needs.ts) — a SEPARATE, bundle-safe module `surfaces/frame.ts`'s `mount()` also imports
+ * directly, as defence in depth (R14a, fix round 2): if this function's result ever disagreed with
+ * `layersNeedPaper`'s own read of the SAME layers (a bug here, not there), the adapter's
+ * independent re-check still catches it — `needsOutlines` alone is no longer the only thing
+ * standing between a wrong-bundle case and a silent wrong picture. See needs.ts's doc for why that
+ * matters and surfaces/frame.ts's `mount()` for the other half of the fix.
  *
  * R14f (fix round 1) — deliberately IGNORES each effect's `visible` flag, unlike the render path's
  * own gates (`applyGeometry`'s `e.visible !== false`, `layerGeometryEffects`'s `e.visible`). Traced
@@ -96,11 +97,10 @@ const PAPER_GEOMETRY_KINDS = new Set(['boolean', 'shatter', 'morph'])
  */
 export function computeNeedsOutlines(plan: Pick<FramePlan, 'fonts'>, variant: Pick<FrameVariant, 'layers'>): boolean {
   if (plan.fonts.some(f => f.outline)) return true
+  if (layersNeedPaper(variant.layers)) return true
   for (const l of variant.layers as ReadonlyArray<{ kind?: unknown }>) {
     for (const e of effectStackOf(l as Parameters<typeof effectStackOf>[0])) {
-      if (!isGeometryKind(e.type)) continue
-      if (PAPER_GEOMETRY_KINDS.has(e.type)) return true // needs paper.js — any layer, any visibility
-      if (l.kind === 'text') return true // needs fontkit's outline mode — any visibility
+      if (isGeometryKind(e.type) && l.kind === 'text') return true // needs fontkit's outline mode — any visibility
     }
   }
   return false

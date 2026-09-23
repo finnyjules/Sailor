@@ -5,6 +5,7 @@ import { assetKey, type FrameSnapshot, type FrameVariant } from '~/lib/embed/fra
 import { clipFrameKey } from '~/lib/compositor/clip'
 import { createImageLayer, createRectLayer } from '~/composables/useCompositorLayers'
 import * as booleanGeometry from '~/lib/compositor/booleanGeometry'
+import { createEffect } from '~/lib/compositor/effectStack'
 
 function snapshotOf(layers: any[], urls: Record<string, string>): FrameSnapshot {
   const v: FrameVariant = {
@@ -143,13 +144,50 @@ describe('frame adapter — paper.js required and unavailable (R14c)', () => {
     handle.destroy()
   })
 
-  it('never checks paper at all when needsOutlines is false (the common case)', async () => {
+  it('never checks paper at all when needsOutlines is false and no layer needs it (the common case)', async () => {
     const warmSpy = vi.spyOn(booleanGeometry, 'warmPaperBoolean')
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(permissiveCtx2D())
     const box = document.createElement('div')
     document.body.appendChild(box)
     const handle = await frameSurface.mount(box, snapshotOf([createRectLayer({})], {}))
     expect(warmSpy).not.toHaveBeenCalled()
+    handle.destroy()
+  })
+
+  // Fix round 2 (R14a, second half): the gate must not depend SOLELY on `snap.needsOutlines`. If
+  // `computeNeedsOutlines` (gather.ts) ever under-counted — the bug class this test simulates by
+  // hand-setting `needsOutlines: false` on a snapshot whose one layer plainly carries a `shatter`
+  // effect — the OLD gate (`if (snap.needsOutlines)`) would never even call `warmPaperBoolean`,
+  // and the first paint would silently ship the unclipped shape. `layersNeedPaper(v.layers)`
+  // (./needs.ts) re-derives the answer from the layers mount() is actually about to paint,
+  // independent of the snapshot's own precomputed flag, so this still catches it.
+  it('R14a (fix round 2): still warms and rejects when needsOutlines is FALSE but a layer carries a shatter effect', async () => {
+    const warmSpy = vi.spyOn(booleanGeometry, 'warmPaperBoolean').mockResolvedValue(undefined)
+    vi.spyOn(booleanGeometry, 'isPaperWarm').mockReturnValue(false)
+    const box = document.createElement('div')
+    document.body.appendChild(box)
+    const shattered = createRectLayer({}) as any
+    shattered.effects = [{ ...createEffect('shatter'), visible: true }]
+    const snap = snapshotOf([shattered], {})   // needsOutlines: false, from snapshotOf's default
+    await expect(frameSurface.mount(box, snap)).rejects.toThrow('embed: paper.js failed to load for a Frame that needs it')
+    expect(warmSpy).toHaveBeenCalled()
+    expect(box.querySelectorAll('canvas').length).toBe(0)
+  })
+
+  it('R14a (fix round 2): warms and mounts normally when needsOutlines is FALSE, a layer carries a shatter effect, and paper does warm', async () => {
+    vi.spyOn(booleanGeometry, 'warmPaperBoolean').mockResolvedValue(undefined)
+    vi.spyOn(booleanGeometry, 'isPaperWarm').mockReturnValue(true)
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(permissiveCtx2D())
+    // happy-dom has no Path2D — a layer carrying a geometry effect (shatter here) takes
+    // drawLayerContent's computed-outline branch, which builds one (`new Path2D(gd)`) before
+    // handing it to the (permissive, no-op) ctx.
+    vi.stubGlobal('Path2D', class { constructor(public d?: string) {} })
+    const box = document.createElement('div')
+    document.body.appendChild(box)
+    const shattered = createRectLayer({}) as any
+    shattered.effects = [{ ...createEffect('shatter'), visible: true }]
+    const handle = await frameSurface.mount(box, snapshotOf([shattered], {}))
+    expect(box.querySelectorAll('canvas').length).toBe(1)
     handle.destroy()
   })
 })

@@ -28,6 +28,7 @@ import { whenFieldEffectReady } from '~/lib/shaderfill/field'
 import { seedDepthImage } from '~/lib/compositor/depthRegistry'
 import { ensureRevealShadersReady } from '~/lib/motionx/reveal/paintPixels'
 import { warmPaperBoolean, isPaperWarm } from '~/lib/compositor/booleanGeometry'
+import { layersNeedPaper } from '../frame/needs'
 import {
   paintLayerStack, ensureLayerImages, withWiredContent, type LocalLayer, type StackItem,
 } from '~/composables/useCompositorLayers'
@@ -95,22 +96,34 @@ const frameSurface: EmbedSurface = {
     const cleanup = () => { unregister(); for (const s of styles) s.remove() }
 
     try {
-      // R14c: a Frame whose gathered snapshot needs paper.js (FrameSnapshot.needsOutlines —
-      // F3's `boolean`/`shatter`/`morph`) must have it WARM before the very first paint below, or
-      // that paint samples the geometry effect's cold pass-through (unclipped) frame — the F3 doc
-      // in booleanGeometry.ts's own "one-frame no-op, warm in background" design is fine for the
-      // LIVE editor (the compositor subscribes `renderStack` to `onPaperBooleanReady` and simply
-      // repaints once it lands), but an export has no such repaint: a still Frame's runtime calls
-      // `setTime` exactly ONCE (bundle.ts), and even an animated one's first tick would ship one
-      // visibly wrong frame. `warmPaperBoolean` never itself rejects (its own `.catch` swallows a
-      // failed `import('paper')` — see that module's doc) — check `isPaperWarm()` afterwards and
-      // THROW if it is still cold, so a paper failure (a real network hiccup on the full bundle,
-      // or `paperLean.embed.ts`'s throwing stand-in if a `needsOutlines` gate regression ever
-      // routed a Frame that truly needs paper to the lean bundle) rejects the mount instead of
-      // silently shipping the unclipped shape. bundle.ts's runtime keeps the poster — a correct
-      // still — on a rejected mount, and `export.ts`'s `bakePoster` runs this SAME `mount()`, so
-      // the poster inherits this fix for free.
-      if (snap.needsOutlines) {
+      // R14c (fix round 1) / R14a second half (fix round 2): a Frame that needs paper.js must
+      // have it WARM before the very first paint below, or that paint samples the geometry
+      // effect's cold pass-through (unclipped) frame — the F3 doc in booleanGeometry.ts's own
+      // "one-frame no-op, warm in background" design is fine for the LIVE editor (the compositor
+      // subscribes `renderStack` to `onPaperBooleanReady` and simply repaints once it lands), but
+      // an export has no such repaint: a still Frame's runtime calls `setTime` exactly ONCE
+      // (bundle.ts), and even an animated one's first tick would ship one visibly wrong frame.
+      //
+      // `layersNeedPaper(v.layers)` (./needs.ts), NOT `snap.needsOutlines` alone: the snapshot's
+      // own flag is a PRECOMPUTED, trusted-on-faith value — if `computeNeedsOutlines` (gather.ts)
+      // ever under-counted (a bug in ITS logic), `needsOutlines` would be `false`, the export
+      // would already have fetched `frame-lean.js`, and gating on that same wrong flag here would
+      // never even ask the question. `layersNeedPaper` re-derives the answer from the ACTUAL
+      // layers this mount is about to paint, independent of whatever the gatherer decided — so a
+      // wrong `needsOutlines` cannot suppress this check. (`snap.needsOutlines` is still checked
+      // too, `||`, purely so a `true` flag can't somehow skip the gate if `layersNeedPaper` were
+      // ever wrong in the OTHER direction — belt and suspenders, not a functional requirement
+      // today since `layersNeedPaper` is a superset check of what forces `needsOutlines: true`.)
+      //
+      // `warmPaperBoolean` never itself rejects (its own `.catch` swallows a failed
+      // `import('paper')`, logging it via `console.error` once — see paperLean.embed.ts's doc for
+      // why that specific channel matters for the lean bundle) — check `isPaperWarm()` afterwards
+      // and THROW if it is still cold, so a paper failure (a real network hiccup on the full
+      // bundle, or `paperLean.embed.ts`'s throwing stand-in on the lean one) rejects the mount
+      // instead of silently shipping the unclipped shape. bundle.ts's runtime keeps the poster —
+      // a correct still — on a rejected mount, and `export.ts`'s `bakePoster` runs this SAME
+      // `mount()`, so the poster inherits this fix for free.
+      if (snap.needsOutlines || layersNeedPaper(v.layers)) {
         await warmPaperBoolean()
         if (!isPaperWarm()) throw new Error('embed: paper.js failed to load for a Frame that needs it')
       }

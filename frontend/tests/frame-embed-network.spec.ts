@@ -35,10 +35,14 @@ test.describe('Frame embed — zero network', () => {
       delete snap.assets.urls[key]
       return await H.exportHtml(snap)
     })
-    // allowPageErrors: this test deliberately makes the painter reach for a missing asset —
-    // Chromium logs its own console.error for the resulting failed request (ERR_NAME_NOT_RESOLVED,
-    // since EMBED_URL's origin never resolves), which is proof the mechanism worked, not a defect.
-    const { requests } = await renderExported(context, html, 0.4, { width: 1000, height: 500 }, { allowPageErrors: true })
+    // ignorePageErrorsMatching, not a blanket allow (fix round 2): this test deliberately makes
+    // the painter reach for a missing asset — Chromium logs its own console.error for the
+    // resulting failed request (ERR_NAME_NOT_RESOLVED, since EMBED_URL's origin never resolves),
+    // which is proof the mechanism worked, not a defect — but any OTHER page error here would
+    // still be a real one, and must still fail this test.
+    const { requests } = await renderExported(
+      context, html, 0.4, { width: 1000, height: 500 }, { ignorePageErrorsMatching: /ERR_NAME_NOT_RESOLVED/ },
+    )
     expect(requests.some(u => u.includes('/view?'))).toBe(true)
   })
 })
