@@ -8,7 +8,7 @@ import type { ResolvedPalette } from '../palette'
 import type { FrameElements, LayerOp } from '../types'
 import { kindOf } from '../types'
 import { posterLayerViews } from '../frameContext'
-import { inferElements } from '../hierarchy'
+import { inferElements, isNumberish } from '../hierarchy'
 import { insertFromOps } from '../insert'
 import { applyPlacement } from '../apply'
 import { nextOrderFor } from '../order'
@@ -25,7 +25,7 @@ import type { RoleTargets } from './toOps'
 import { isOwned, mergeOwned } from './owned'
 import { enumerate, lineOptions } from './vary'
 import type { Candidate, Choice, LineOption } from './vary'
-import type { Content, Kind, LayoutDef, LayoutOut, Measure, PhotoEl, RoleKey } from './types'
+import type { Content, El, Kind, LayoutDef, LayoutOut, Measure, PhotoEl, RoleKey } from './types'
 
 // ═══════════════════════ the planner ═══════════════════════
 // Runs a kit layout on a real Frame: infer the user's elements, build the sheet from the
@@ -96,10 +96,9 @@ interface Prepared {
 
 const ROLES: RoleKey[] = ['title', 'details', 'date', 'caption']
 
-/** "Number-like": a price, a discount, a date or a time (the prototype's `isNumberish`). The one
- *  copy: `needs.number` is gated here and nowhere else. */
-export const isNumberish = (s: string | undefined) =>
-  !!s && (/[%€$£]/.test(s) || s.replace(/\D/g, '').length / Math.max(1, s.replace(/\s/g, '').length) >= 0.3)
+/** Re-exported so existing importers keep working; the one copy lives in `hierarchy.ts`
+ *  (which `inferElements` also needs it in, and can't import from here without a cycle). */
+export { isNumberish }
 
 function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
   const index = LAYOUTS.findIndex(l => l.id === a.layoutId)
@@ -390,15 +389,24 @@ export function candidatesForFrame(a: Omit<LayoutPlanArgs, 'choice'>): Candidate
   const p = prepare(a)
   if (!p || !fitsFrame(p)) return []
   const runs = new WeakMap<LayoutOut, Run>()
+  // Each choice runs on its own sheet (scale/flip can differ) — so an element's box needs the
+  // Sheet its own run built, not just any Sheet; keyed per element rather than per `LayoutOut`
+  // because `enumerate`'s cover check (`vary.ts`) only ever hands us elements, not their `out`.
+  const sheetOf = new WeakMap<El, Sheet>()
   const run = (choice: Choice) => {
     const ran = runChoice(p, a, choice)
     runs.set(ran.out, ran)
+    for (const e of ran.out.els) sheetOf.set(e, ran.S)
     return ran.out
   }
   const check = (out: LayoutOut) => checkRun(runs.get(out)!, p.def.premise)
   const format = formatSheetOpts(p.fmt)
   const infoSize = makeSheet({ frameW: a.frameW, frameH: a.frameH, grid: p.grid, measure: p.measure, ...(format ? { format } : {}) }).INFO.size
-  return enumerate(p.def, { kind: p.kind, title: p.content.title, hasImage: p.hasImage, run, check, infoSize })
+  const box = (e: El) => {
+    const S = sheetOf.get(e)
+    return S ? boxOf(e, S) : null
+  }
+  return enumerate(p.def, { kind: p.kind, title: p.content.title, hasImage: p.hasImage, run, check, infoSize, boxOf: box })
 }
 
 /** The ways this frame's title can break into lines for a layout (`lineOptions` on the frame's

@@ -1,4 +1,5 @@
-import type { Kind, LayoutDef, LayoutOut, TextEl } from './types'
+import type { Kind, LayoutDef, LayoutOut, TextEl, El } from './types'
+import type { Box } from './check'
 
 // ═══════════════════════ vary ═══════════════════════
 // Ported from the prototype (docs/superpowers/specs/assets/2026-09-23-frame-layout-system/
@@ -75,6 +76,33 @@ function sigOf(out: LayoutOut): string {
 
 /** Every combination → run → check → dedupe (by geometry signature) → rank → diversity order.
  *  `run(choice)` builds the sheet for that choice and calls the layout; `check(out)` returns reasons. */
+/** Area of a box's intersection with another (0 when they don't overlap). */
+function overlapArea(a: Box, b: Box): number {
+  const w = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)
+  const h = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0)
+  return w > 0 && h > 0 ? w * h : 0
+}
+
+/** How much of a candidate's image its own text sits on top of: the summed intersection area of
+ *  every text box with the image box, over the image's own area. 0 with no image or no `boxOf`
+ *  (the sheet the candidate's geometry was measured in — vary itself carries no sheet). */
+function coverOf(out: LayoutOut, boxOf?: (e: El) => Box | null): number {
+  if (!boxOf) return 0
+  const image = out.els.find((e): e is Extract<El, { k: 'p' }> | Extract<El, { k: 'c' }> =>
+    e.k === 'p' || (e.k === 'c' && !!e.photo))
+  if (!image) return 0
+  const imageBox = boxOf(image)
+  if (!imageBox) return 0
+  const area = (imageBox.x1 - imageBox.x0) * (imageBox.y1 - imageBox.y0)
+  if (area <= 0) return 0
+  const texts = out.els.filter((e): e is TextEl => e.k === 't')
+  const covered = texts.reduce((sum, t) => {
+    const box = boxOf(t)
+    return box ? sum + overlapArea(box, imageBox) : sum
+  }, 0)
+  return covered / area
+}
+
 export function enumerate(def: LayoutDef, opts: {
   kind: Kind
   title: string
@@ -82,8 +110,11 @@ export function enumerate(def: LayoutDef, opts: {
   run(c: Choice): LayoutOut
   check(out: LayoutOut): string[]
   infoSize: number
+  /** The candidate's own sheet, so vary can measure real ink boxes without depending on the
+   *  sheet type itself. Optional: omitted, the cover penalty is 0 and scores match Stage 1. */
+  boxOf?: (e: El) => Box | null
 }): Candidate[] {
-  const { run, check, infoSize, hasImage } = opts
+  const { run, check, infoSize, hasImage, boxOf } = opts
   const lineOpts = lineOptions(opts.kind, opts.title, def.oneLineFirst)
 
   const defSig = sigOf(run(DEFAULT_CHOICE))
@@ -118,8 +149,11 @@ export function enumerate(def: LayoutDef, opts: {
     ).size
     const isDefault = choice.lines === DEFAULT_CHOICE.lines && choice.arr === DEFAULT_CHOICE.arr
       && choice.scale === DEFAULT_CHOICE.scale && choice.side === DEFAULT_CHOICE.side
+    // Soft penalty, not rejection (spec §6): text sitting on top of more than a fifth of the
+    // image ranks down, but still gets ordered — never dropped by `check`.
+    const cover = coverOf(out, boxOf)
     const score = Math.log(maxTextSize / infoSize) - 0.12 * distinctLeftEdges
-      + (isDefault ? 1 : 0) - (choice.scale === 'quiet' ? 0.35 : 0)
+      + (isDefault ? 1 : 0) - (choice.scale === 'quiet' ? 0.35 : 0) - (cover > 0.2 ? 0.5 : 0)
     list.push({ choice, out, score, sig: s })
   }
 

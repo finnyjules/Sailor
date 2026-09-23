@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { DEFAULT_CHOICE, enumerate, lineOptions } from '~/lib/frame/patterns/kit/vary'
 import type { Choice } from '~/lib/frame/patterns/kit/vary'
 import type { El, LayoutDef, LayoutOut } from '~/lib/frame/patterns/kit/types'
+import type { Box } from '~/lib/frame/patterns/kit/check'
 
 // A fake layout: `fn` is never called by `enumerate` (the caller's own `run` builds the sheet
 // and calls the layout) — it only has to satisfy the LayoutDef shape.
@@ -100,6 +101,52 @@ describe('layout kit — vary', () => {
       kind: 'phrase', title: 'Two Words', hasImage: true, run, check: () => ['always fails'], infoSize: INFO_SIZE,
     })
     expect(result).toEqual([])
+  })
+
+  it('enumerate: cover penalty ranks a candidate whose text covers the image below an identical one that does not', () => {
+    // arr 0 (x=25, no cover) is excluded by `check` below, so it never competes for the default
+    // slot — leaving arr 1 (x=0, covers 40% of the image) and arr 2 (x=30, no cover) as the only
+    // survivors. Both are non-default, so the score gap between them is the cover penalty alone.
+    const image: El = { k: 'p', x: 0, y: 0, w: 20, h: 20, role: 'photo' } as El
+    const boxes = new Map<El, Box>()
+    const runCover = (choice: Choice): LayoutOut => {
+      const x = choice.arr === 0 ? 25 : choice.arr === 1 ? 0 : 30
+      const title: El = { k: 't', s: 'Solo', x, top: 0, w: 20, size: 20, wt: 600, ls: 0, lh: 1, role: 'title' } as El
+      boxes.set(title, { x0: x, y0: 0, x1: x + 20, y1: 8 })
+      boxes.set(image, { x0: 0, y0: 0, x1: 20, y1: 20 })
+      return { els: [title, image], did: `arr=${choice.arr}` }
+    }
+    const checkCover = (out: LayoutOut): string[] => (out.did === 'arr=0' ? ['excluded from the default slot'] : [])
+    const boxOfFn = (e: El) => boxes.get(e) ?? null
+
+    const result = enumerate(fakeDef({ keepScale: true }), {
+      kind: 'word', title: 'Solo', hasImage: true, run: runCover, check: checkCover, infoSize: INFO_SIZE, boxOf: boxOfFn,
+    })
+
+    expect(result.length).toBe(2)
+    const covering = result.find(c => c.choice.arr === 1)!
+    const clear = result.find(c => c.choice.arr === 2)!
+    expect(covering).toBeDefined()
+    expect(clear).toBeDefined()
+    expect(clear.score - covering.score).toBeCloseTo(0.5, 5)
+    expect(result[0]).toBe(clear)
+  })
+
+  it('enumerate: with no boxOf passed, scores equal the Stage 1 formula exactly (cover never penalised)', () => {
+    const image: El = { k: 'p', x: 0, y: 0, w: 20, h: 20, role: 'photo' } as El
+    const runCover = (choice: Choice): LayoutOut => {
+      const x = choice.arr === 0 ? 25 : choice.arr === 1 ? 0 : 30
+      const title: El = { k: 't', s: 'Solo', x, top: 0, w: 20, size: 20, wt: 600, ls: 0, lh: 1, role: 'title' } as El
+      return { els: [title, image], did: `arr=${choice.arr}` }
+    }
+    const result = enumerate(fakeDef({ keepScale: true }), {
+      kind: 'word', title: 'Solo', hasImage: true, run: runCover, check: () => [], infoSize: INFO_SIZE,
+    })
+    // arr 0 is the default (gets the +1 bonus); arr 1 and arr 2 are otherwise identical (same
+    // maxTextSize, same distinct-left-edge count) — with no `boxOf`, cover is always 0, so they tie.
+    const a1 = result.find(c => c.choice.arr === 1)!
+    const a2 = result.find(c => c.choice.arr === 2)!
+    expect(a1.score).toBe(a2.score)
   })
 
   it('enumerate: the default leads even when another variation outscores it', () => {

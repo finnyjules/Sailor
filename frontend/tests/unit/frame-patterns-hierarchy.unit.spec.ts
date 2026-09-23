@@ -40,4 +40,60 @@ describe('inferElements', () => {
     const e = inferElements([{ id: 't', kind: 'text', text: 'X', fontSize: 0.2 }], null, true)
     expect(e.imageMode).toBe(true)
   })
+
+  it('a discount percentage is the date, ahead of a plain sentence', () => {
+    const layers: PosterLayerView[] = [
+      { id: 't', kind: 'text', text: 'Summer sale', fontSize: 0.2 },
+      { id: 'pct', kind: 'text', text: '–30%', fontSize: 0.05 },
+      { id: 'd', kind: 'text', text: 'Only this week', fontSize: 0.05 },
+      { id: 'c', kind: 'text', text: 'Terms apply', fontSize: 0.018 },
+    ]
+    const e = inferElements(layers)
+    expect(e.date?.id).toBe('pct')
+    expect(e.details?.id).toBe('d')
+  })
+
+  it('a price is the date', () => {
+    const layers: PosterLayerView[] = [
+      { id: 't', kind: 'text', text: 'Big title', fontSize: 0.2 },
+      { id: 'price', kind: 'text', text: '€29', fontSize: 0.05 },
+      { id: 'd', kind: 'text', text: 'Free delivery', fontSize: 0.05 },
+      { id: 'c', kind: 'text', text: 'Small print', fontSize: 0.018 },
+    ]
+    const e = inferElements(layers)
+    expect(e.date?.id).toBe('price')
+  })
+
+  it('a time reads as number-like and wins the date role', () => {
+    const layers: PosterLayerView[] = [
+      { id: 't', kind: 'text', text: 'Title', fontSize: 0.2 },
+      { id: 'time', kind: 'text', text: 'Doors 19:30', fontSize: 0.05 },
+      { id: 'n', kind: 'text', text: 'Ines Vollmer', fontSize: 0.05 },
+      { id: 'c', kind: 'text', text: 'Kunstraum Lenz, 4056 Basel', fontSize: 0.018 },
+    ]
+    const e = inferElements(layers)
+    expect(e.date?.id).toBe('time')
+  })
+
+  it('the Stage 1 fixture (a digit-heavy date range) still resolves as the date', () => {
+    const layers: PosterLayerView[] = [
+      { id: 't', kind: 'text', text: 'Exhibition', fontSize: 0.2 },
+      { id: 'dt', kind: 'text', text: '19.09.–15.11.2026', fontSize: 0.05 },
+      { id: 'd', kind: 'text', text: 'Group show', fontSize: 0.05 },
+      { id: 'c', kind: 'text', text: 'Free entry', fontSize: 0.018 },
+    ]
+    const e = inferElements(layers)
+    expect(e.date?.id).toBe('dt')
+  })
+
+  it('falls back to the Stage 1 DATE_RE match when nothing is number-like (a month name, no digits)', () => {
+    const layers: PosterLayerView[] = [
+      { id: 't', kind: 'text', text: 'Exhibition', fontSize: 0.2 },
+      { id: 'dt', kind: 'text', text: 'Save the date: December', fontSize: 0.05 },
+      { id: 'd', kind: 'text', text: 'Group show', fontSize: 0.05 },
+      { id: 'c', kind: 'text', text: 'Free entry', fontSize: 0.018 },
+    ]
+    const e = inferElements(layers)
+    expect(e.date?.id).toBe('dt')
+  })
 })
