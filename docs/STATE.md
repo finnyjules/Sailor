@@ -31,6 +31,24 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
 
+### Frame layouts, stage 2 — layouts know the ad or social format a Frame is for — LANDED 2026-09-24 (`8d78f6865`..HEAD, non-contiguous — 11 commits across 9 tasks, subagent-driven, a review per task, a whole-stage review and its fix wave)
+
+Plan `docs/superpowers/plans/2026-09-24-frame-layout-system-stage2.md` (spec §6).
+
+**What shipped:** the Frame size menu gains 16 formats, grouped Sizes / Social / Display ads: Meta feed 4:5 and 1:1, Meta story / reel 9:16 (and HD), Pinterest pin 2:3 and idea pin 9:16, Link preview, Video thumbnail, Google display 1.91:1 and 1:1, and six display ads (300×250, 160×600, 728×90, 300×600, 320×50, 970×250). A Frame counts as a format only when you pick it (or its exact size belongs to no plain preset). An old 16:9 Frame is not a video thumbnail. On a format, every layout:
+- keeps text out of the areas the platform covers (Meta's story bars: top 14%, bottom 35%, sides 6%; Pinterest's asymmetric bars; Google's outer 10%), while full-bleed images, panels and bands still run to the real edges;
+- keeps every line at least 9 px at the width people actually see the format (e.g. a video thumbnail at about 170 px);
+- shows only the lines the format carries (video thumbnail and 320×50: the two most important; tall and wide display ads: three). The rest are hidden and come back when a layout or size that carries them is applied.
+Prices, discounts and times now count as "the number", like dates. Vary ranks down variations that cover more than a fifth of the image with text. The Layout tab names the format, its rules and the lines it leaves out, quoting them; the editor hatches the covered areas while the Layout tab is open ("Covered by the app", or "May be cropped" for Google).
+
+**Proof:** a format matrix runs all 16 formats × content kinds × with/without image × dates/numbers × 2-, 3- and 4-line Frames through the real planner (388 cases, ~20,000 variations): every variation passes the checker (including the new "text under the app's interface" rule), every line meets the format's minimum, the right lines are hidden, and each format offers at least its floor of layouts (6; banners 1–3). A Frame with no format plans exactly as in Stage 1, pinned by a geometry signature. Playwright: picking Meta story shows the covered areas and keeps the placed lines in the band; Video thumbnail hides two lines and says so (5/5). Full unit suite green (1,158 files).
+
+**Caught on the way:** the Layout tab planned at the on-screen canvas size, so no format could ever have been detected; switching between two formats of the same size (16:9 and video thumbnail) didn't re-plan; a format hid lines by slot, so a two-line Frame lost its second line; the size menu showed the wrong entry for shared sizes and could not switch between them; leaving a format left its hidden lines hidden.
+
+**Deferred with rulings:** the "Button: in the image / platform's own" choice (Stage 3, needs drawn buttons); Google responsive display export and its blank-space rule (Stage 5). **Known:** Pinterest with a long date range offers only 3–5 layouts (the date can't break at Pinterest's readable size); Run-off is never offered on story formats (its title would run under the app's bar); size changes made from the canvas card have no undo (never had); layers the layout doesn't place keep their spots.
+
+**Next:** Stage 3 — the Performance, Editorial and Street styles, with buttons, logos, bands, cards and tags.
+
 ### Frame layouts, stage 1 — the Layout tab is rebuilt on one Swiss system, with Vary — LANDED 2026-09-23 (`472d4c00e`..`65921fb89`, non-contiguous — 24 commits across 15 tasks, subagent-driven, a review per task, a whole-feature review and its fix wave)
 
 Spec `docs/superpowers/specs/2026-09-23-frame-layout-system-design.md`; plan `docs/superpowers/plans/2026-09-23-frame-layout-system-stage1.md`; prototypes `docs/superpowers/specs/assets/2026-09-23-frame-layout-system/`.
