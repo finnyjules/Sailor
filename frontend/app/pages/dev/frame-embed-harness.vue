@@ -22,6 +22,14 @@ import { createImageLayer, createRectLayer, createTextLayer } from '~/composable
 import { DEFAULT_FILL } from '~/lib/spacetype/fillTile'
 import { createEffect } from '~/lib/compositor/effectStack'
 import { defaultPostEffect } from '~/lib/compositor/postEffects'
+// R9 (paper-core): warms the SAME detached paper.js scope the F3 boolean/shatter geometry
+// effects use, so `reference()` can await it before painting the 'shatter' fixture — otherwise
+// the harness's own synchronous double-paint would sample the COLD pass-through frame (the
+// dynamic `import('paper')` inside `warmPaperBoolean` is always asynchronous, so the very first
+// paint after enabling a shatter/boolean effect is a guaranteed no-op by design; see
+// booleanGeometry.ts). Awaiting it here is a no-op for every other fixture — no geometry effect
+// they carry reads paper at all, so their painted bytes are unaffected.
+import { warmPaperBoolean } from '~/lib/compositor/booleanGeometry'
 // The reference render (the studio's paint, for the parity spec) — deliberately NOT through the
 // adapter: no surfaces/frame.ts, no stackItemsFor. It paints the way CompositorModal's
 // renderStack does, with the app's own loaders.
@@ -36,7 +44,7 @@ type Slot = 'a' | 'b'
 const handles: Partial<Record<Slot, EmbedHandle>> = {}
 /** The image fill's source, as the app stores one: a server URL the gatherer fetches. */
 const HARNESS_FILL_SRC = '/view?filename=harness-photo.png&type=input'
-const FIXTURES = ['vector', 'image', 'backdrop', 'still', 'fill', 'bleed', 'bleed-post', 'standin']
+const FIXTURES = ['vector', 'image', 'backdrop', 'still', 'fill', 'bleed', 'bleed-post', 'standin', 'shatter']
 /** The font the `font` mutation swaps in: another cut of the harness face (there is no
  *  ABCROM-BoldItalic in public/fonts — BlackItalic is the nearest italic). */
 const MUTANT_FONT_URL = '/fonts/ABCROM-BlackItalic.otf'
@@ -191,6 +199,21 @@ onMounted(async () => {
       const rect = createRectLayer({ x: 0.5, y: 0.85, w: 0.6, h: 0.08, radius: 0, fill: '#f25c54' })
       return { hasMotion: false, variant: variantOf(1000, 500, [bare, missing, photo, rect], { background: '#1b4d3e' }) }
     }
+    if (name === 'shatter') {
+      // R9: the one fixture that reaches paper.js — F3's `shatter` geometry effect (self-only,
+      // no sibling reference, unlike `boolean`), so this exercises the SAME paper-core CompoundPath
+      // / boolean-op code path `boolean` would without needing siblingRef wiring in the harness.
+      // Deterministically seeded, so both the reference and the export produce the exact same
+      // cells. `hasMotion: true` with NO motionx entry touching the rect: nothing about the
+      // painted pixels depends on the clock (still a single static square), but it keeps the
+      // exported bundle OFF the `still` path (plan.ts: `still = !hasMotion && …`) — a still export
+      // paints exactly once and never again, so paper (always cold on a mount's very first paint)
+      // would never get the later tick that repaints with its warmed, real clipped geometry; see
+      // `renderExportedLive` and this fixture's parity test.
+      const rect = createRectLayer({ x: 0.5, y: 0.5, w: 0.4, h: 0.4, radius: 0, fill: '#3fb68b' }) as any
+      rect.effects = [{ ...createEffect('shatter'), cells: 8, gap: 0.015, seed: 11, visible: true }]
+      return { hasMotion: true, variant: variantOf(1000, 500, [rect], { background: '#1b4d3e' }) }
+    }
     if (name === 'bleed' || name === 'bleed-post') {
       // A rect half outside the artboard's right edge (artboard x 900..1100 of 1000): in a box
       // wider than the artboard, the part past x = 1000 must NOT paint into the bleed.
@@ -247,6 +270,7 @@ onMounted(async () => {
       await document.fonts.load("700 16px 'Harness Font'")
       await document.fonts.ready
       await Promise.all([fillEffect.id, backdropEffect.id].map(id => whenFieldEffectReady(id)))
+      await warmPaperBoolean() // no-op for a fixture with no geometry effect that reads paper
 
       const dpr = Math.min(2, window.devicePixelRatio || 1)
       const [cv, ctx] = canvasOf(Math.max(1, Math.round(w * dpr)), Math.max(1, Math.round(h * dpr)))

@@ -74,20 +74,39 @@ const EMBED_DIR = path.join(ROOT, 'public', 'embed')
 //
 // frame.js is its own bucket because it ships the Frame editor's own painter (paintLayerStack and
 // the ~48k source lines of composables/compositor/motion code it reaches), not a slim renderer.
-// Measured 1,420,328 bytes (433.7 KB gzip) on 2026-09-22. What dominates it, from a sourcemap of
-// that build: app/data/library-fonts-lookup.ts (~314KB — the curated font-library table the
-// family resolver reads), paper's paper-full.js (~241KB) plus the acorn parser it bundles for
-// PaperScript (~116KB), fontkit (~232KB) plus its brotli decoder and WOFF2 dictionary (~91KB),
+// Measured 1,271,515 bytes (381,726 bytes gzip) on 2026-09-22, AFTER Task 10's R9: the bare
+// `paper` import is aliased to paper.js's own paper-core build (drops PaperScript — code that
+// scans the HOST page for <script type="text/paperscript"> tags and XHR-loads their src, a
+// network request an export must never make — plus the acorn parser PaperScript compiles with).
+// Before R9 this bucket measured 1,420,328 bytes (433.7 KB gzip); paper-core saved 148,813 bytes.
+// What still dominates it, from a sourcemap of that build: app/data/library-fonts-lookup.ts
+// (~314KB — the curated font-library table the family resolver reads), paper-core.js (~200KB
+// minified estimate), fontkit (~232KB) plus its brotli decoder and WOFF2 dictionary (~91KB),
 // app/lib/shapes/catalog.ts (~58KB) and useCompositorLayers.ts itself (~50KB minified).
 // FRAME_CEILING_BYTES is that measurement × 1.15, rounded up to the next 10,000 — room for the
 // painter to grow, but Vue's runtime (~100KB) or a second font engine arriving would trip it.
 // Same rule as above: re-derive from the bundle, never pad it to pass.
+//
+// frame-lean.js is Task 10's SPLIT of frame.js's remaining weight: measuring frame.js (already
+// on paper-core, above) against a trial build with fontkit AND paper both stubbed to nothing
+// showed a 581,966-byte saving (223,670 bytes gzip) — comfortably over the plan's 300,000-byte
+// split threshold — so bundleNameFor('frame', snap) (surfaces.ts) now ships frame-lean.js (no
+// paper.js, no fontkit — vite.embed.config.ts's isFrameLean aliases ~/lib/compositor/textOutline
+// to a stand-in and the bare `paper` import to a throwing stub) for every Frame whose gathered
+// snapshot needs neither: no outlined text (FrameSnapshot.needsOutlines, from gather.ts's
+// computeNeedsOutlines) and no `boolean`/`shatter`/`morph` geometry effect. Built for real (not
+// the crude fontkit/paper stub trial above — the actual textOutline.embed.ts/paperLean.embed.ts
+// aliases let Rollup tree-shake the whole font.ts/outline.ts subgraph away too), frame-lean.js
+// measured 366,652 bytes (126,953 bytes gzip) on 2026-09-22 — a 904,863-byte (71%) cut from
+// frame.js. FRAME_LEAN_CEILING_BYTES is that measurement × 1.15, rounded up to the next 10,000,
+// same rule as every other bucket here.
 const SHADER_CEILING_BYTES = 60_000
 const GRADIENT_CEILING_BYTES = 140_000
 const SPACETYPE_EFFECT_CEILING_BYTES = 1_750_000
-const FRAME_CEILING_BYTES = 1_640_000
+const FRAME_CEILING_BYTES = 1_470_000
+const FRAME_LEAN_CEILING_BYTES = 430_000
 
-/** Classifies a built bundle's filename into one of the four size buckets
+/** Classifies a built bundle's filename into one of the five size buckets
  *  documented above. Throws on anything unrecognised rather than silently
  *  skipping the size check — an embed bundle this suite has never heard of is
  *  exactly the kind of surprise the gate exists to catch. */
@@ -95,6 +114,7 @@ function ceilingFor(fileName: string): number {
   if (fileName === 'shader.js') return SHADER_CEILING_BYTES
   if (fileName === 'gradient.js') return GRADIENT_CEILING_BYTES
   if (fileName === 'frame.js') return FRAME_CEILING_BYTES
+  if (fileName === 'frame-lean.js') return FRAME_LEAN_CEILING_BYTES
   if (/^spacetype-[^/]+\.js$/.test(fileName)) return SPACETYPE_EFFECT_CEILING_BYTES
   throw new Error(`embed-build-output: no size ceiling defined for unexpected bundle "${fileName}" — add one above`)
 }

@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildFrameSnapshot, isBlocked, type FrameExportIO } from '~/lib/embed/frame/gather'
+import { buildFrameSnapshot, computeNeedsOutlines, isBlocked, type FrameExportIO } from '~/lib/embed/frame/gather'
 import { planFrameExport } from '~/lib/embed/frame/plan'
 import { assetKey, type FrameVariant } from '~/lib/embed/frame/types'
 import { makeFontSource } from '~/lib/embed/frame/appIO'
-import { createTextLayer, createImageLayer } from '~/composables/useCompositorLayers'
+import { createTextLayer, createImageLayer, createRectLayer } from '~/composables/useCompositorLayers'
 import { clipFrameKey } from '~/lib/compositor/clip'
 import { createEffect } from '~/lib/compositor/effectStack'
 
@@ -165,5 +165,53 @@ describe('makeFontSource', () => {
 
   it('anything else is a Google static cut at that weight', () => {
     expect(makeFontSource([])('Lobster', 400)).toEqual({ url: '/api/fonts/google-file?family=Lobster&weight=400', origin: 'google', weight: 400 })
+  })
+})
+
+// Task 10: FrameSnapshot.needsOutlines picks between frame.js (paper.js + fontkit) and
+// frame-lean.js (neither) — see bundleNameFor('frame', snap) in surfaces.ts. Most Frames — plain
+// text, no F3 boolean/shatter/morph — need neither, so false is the common case.
+describe('computeNeedsOutlines', () => {
+  it('is false for a plain Frame — no outlined text, no paper-backed geometry', () => {
+    const t = createTextLayer({ text: 'Hi', fontFamily: 'Inter', fontWeight: 400 })
+    const r = createRectLayer({})
+    expect(computeNeedsOutlines(plan([t, r]), v([t, r]))).toBe(false)
+  })
+
+  it('is true when a plan font needs outline bytes', () => {
+    const t = createTextLayer({ text: 'Out', fontFamily: 'Inter', fontWeight: 700 })
+    ;(t as any).renderAsOutline = true
+    expect(computeNeedsOutlines(plan([t]), v([t]))).toBe(true)
+  })
+
+  it('is true when a layer carries a visible boolean effect', () => {
+    const r = createRectLayer({})
+    ;(r as any).effects = [{ ...createEffect('boolean'), visible: true }]
+    expect(computeNeedsOutlines(plan([r]), v([r]))).toBe(true)
+  })
+
+  it('is true when a layer carries a visible shatter effect', () => {
+    const r = createRectLayer({})
+    ;(r as any).effects = [{ ...createEffect('shatter'), visible: true }]
+    expect(computeNeedsOutlines(plan([r]), v([r]))).toBe(true)
+  })
+
+  it('is true when a layer carries a visible morph effect', () => {
+    const r = createRectLayer({})
+    ;(r as any).effects = [{ ...createEffect('morph'), visible: true }]
+    expect(computeNeedsOutlines(plan([r]), v([r]))).toBe(true)
+  })
+
+  it('an invisible boolean effect alone does not force the full bundle', () => {
+    const r = createRectLayer({})
+    ;(r as any).effects = [{ ...createEffect('boolean'), visible: false }]
+    expect(computeNeedsOutlines(plan([r]), v([r]))).toBe(false)
+  })
+
+  it('buildFrameSnapshot carries needsOutlines through onto the snapshot', async () => {
+    const t = createTextLayer({ text: 'Out', fontFamily: 'Inter', fontWeight: 700 })
+    ;(t as any).renderAsOutline = true
+    const snap = await buildFrameSnapshot(plan([t]), v([t]), fakeIO())
+    expect(snap.needsOutlines).toBe(true)
   })
 })

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { openHarness, pixelDiff, renderExported } from './_frameEmbedHelpers'
+import { openHarness, pixelDiff, renderExported, renderExportedLive } from './_frameEmbedHelpers'
 
 /** Records the measured count on the test (visible in the JSON / HTML reports). */
 const note = (d: { differing: number; total: number }) =>
@@ -37,6 +37,32 @@ test.describe('Frame embed — parity with the editor', () => {
   // the subset draws exactly what the full font draws.
   test('vector: identical to the editor, subset font and all', async ({ page, context }) => {
     const d = await pixelDiff(page, await reference(page, 'vector'), await exported(page, context, 'vector'))
+    note(d)
+    expect(d.differing).toBe(0)
+  })
+
+  // Task 10: bundleNameFor('frame', snap) (surfaces.ts) ships frame-lean.js (no paper.js, no
+  // fontkit) for a Frame whose gathered snapshot needs neither — the 'vector' fixture (plain text,
+  // no boolean/shatter/morph) is exactly that common case, so its own export now routes here
+  // automatically. The two `toContain`/`not.toContain` checks prove the ROUTING actually happened
+  // (not just that SOME bundle drew the right pixels): 'paper is not in the lean Frame bundle' is
+  // frame-lean's own throwing paper stand-in (paperLean.embed.ts), and paper-core's own
+  // `xmlns` namespace-table literal (present in frame.js, confirmed absent from frame-lean.js by
+  // grep) never ships in the lean bundle at all.
+  test('vector routes to frame-lean, which draws it exactly like the editor', async ({ page, context }) => {
+    const needsOutlines = await page.evaluate(async () => {
+      const H = (window as any).__frameEmbedHarness
+      return (await H.snapshot('vector')).needsOutlines
+    })
+    expect(needsOutlines).toBe(false)
+    const html = await page.evaluate(async () => {
+      const H = (window as any).__frameEmbedHarness
+      return await H.exportHtml(await H.snapshot('vector'))
+    })
+    expect(html).toContain('paper is not in the lean Frame bundle')
+    expect(html).not.toContain('http://www.w3.org/2000/xmlns')
+    const exp = (await renderExported(context, html, T, VIEW)).png
+    const d = await pixelDiff(page, await reference(page, 'vector'), exp)
     note(d)
     expect(d.differing).toBe(0)
   })
@@ -94,6 +120,26 @@ test.describe('Frame embed — parity with the editor', () => {
   // Two times on different clip frames. The Frame's clock is 4 s (no Motion duration) and the clip
   // loops every 1 s (6 frames at 6 fps), so the frame is round(t01 × 4 × 6) mod 6: 0.1 → 2 and
   // 0.2 → 5. (0.1 and 0.6 would both land on frame 2 — 2.4 s is 0.4 s plus two whole loops.)
+  // R9: the Frame embed bundle aliases the bare `paper` import to paper-core (drops PaperScript
+  // + acorn, ~149 KB). The one paper.js-backed geometry effect the harness can exercise without
+  // sibling-reference wiring is `shatter` (F3, self-only): this proves paper-core's CompoundPath /
+  // boolean-ops draw the exact same clipped cells the app's own (full) `paper` package draws for
+  // the editor. `renderExportedLive`, not `renderExported`: the effect is COLD on a mount's very
+  // first paint (paper's dynamic import is always async), so a frozen single-shot render would
+  // only ever capture the pass-through, unclipped square — it would pass by accident, not prove
+  // anything about paper-core's geometry.
+  test('shatter (paper-core): the exported bundle clips the same cells as the editor', async ({ page, context }) => {
+    const ref = await reference(page, 'shatter')
+    const html = await page.evaluate(async () => {
+      const H = (window as any).__frameEmbedHarness
+      return await H.exportHtml(await H.snapshot('shatter'))
+    })
+    const { png: exp } = await renderExportedLive(context, html, VIEW)
+    const d = await pixelDiff(page, ref, exp)
+    note(d)
+    expect(d.differing).toBe(0)
+  })
+
   test('an image clip plays', async ({ page, context }) => {
     const html = await page.evaluate(async () => {
       const H = (window as any).__frameEmbedHarness

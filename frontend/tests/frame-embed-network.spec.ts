@@ -4,7 +4,10 @@ import { openHarness, renderExported } from './_frameEmbedHelpers'
 test.describe('Frame embed — zero network', () => {
   test.beforeEach(async ({ page }) => openHarness(page))
 
-  for (const name of ['vector', 'image', 'backdrop', 'still', 'fill', 'standin']) {
+  // 'shatter' (R9): even cold (this frozen single-paint render never gets past the pass-through
+  // frame), applyShatter still KICKS `warmPaperBoolean`'s dynamic `import('paper')` — proving
+  // that import resolves against the bundle's own inlined paper-core, not a network fetch.
+  for (const name of ['vector', 'image', 'backdrop', 'still', 'fill', 'standin', 'shatter']) {
     test(`the "${name}" export makes no request`, async ({ page, context }) => {
       const html = await page.evaluate(async (n) => {
         const H = (window as any).__frameEmbedHarness

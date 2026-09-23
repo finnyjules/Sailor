@@ -49,8 +49,17 @@ export async function loadEmbedSurface(kind: string): Promise<EmbedSurface | nul
  * — an effectId of "../../etc/passwd" simply isn't in the list, so it throws
  * for the same reason "banana" would. Case-insensitive, matching the
  * embed adapter's own effectId lookup in surfaces/spacetype.ts.
+ *
+ * Frame's `config` (a FrameSnapshot) is the OTHER branch that isn't 1:1 (Task 10): most Frames
+ * carry no outlined text and no `boolean`/`shatter`/`morph` geometry effect, so they take the
+ * smaller `frame-lean.js` (no paper.js, no fontkit) — see FrameSnapshot.needsOutlines's doc and
+ * gather.ts's computeNeedsOutlines for exactly what forces the full bundle.
  */
 export function bundleNameFor(kind: string, config: unknown): string {
+  if (kind === 'frame') {
+    const needsOutlines = (config as { needsOutlines?: boolean } | null | undefined)?.needsOutlines
+    return needsOutlines ? 'frame' : 'frame-lean'
+  }
   if (kind !== 'spacetype') return kind
 
   const effectId = (config as { effectId?: unknown } | null | undefined)?.effectId

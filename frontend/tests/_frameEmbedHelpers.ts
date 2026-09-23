@@ -41,6 +41,44 @@ export async function renderExported(
   return { png, requests }
 }
 
+/**
+ * Like `renderExported`, but does NOT freeze the clock — the export's own rAF loop keeps calling
+ * `setTime`, exactly as it would embedded in a real host page. R9's paper-core check needs this:
+ * a geometry effect that reads paper.js (`boolean`/`shatter`) is COLD on a mount's first paint by
+ * construction (`warmPaperBoolean`'s `import('paper')` is always async, kicked but not awaited —
+ * see booleanGeometry.ts), so a frozen single-shot `renderExported` would only ever capture the
+ * pass-through frame and could never prove paper-core computes the same clipped geometry the full
+ * `paper` package does. Waits `settleMs` past the canvas's first paint (several rAF ticks — long
+ * enough for the already-bundled dynamic import to resolve and the loop's next tick to repaint
+ * with the warmed result) before reading pixels. Only meaningful for a STILL fixture (no motion):
+ * with nothing animating, any post-warm tick paints the same pixels, so the exact tick sampled
+ * does not matter.
+ */
+export async function renderExportedLive(
+  context: BrowserContext, html: string, viewport: { width: number; height: number }, settleMs = 800,
+): Promise<{ png: string; requests: string[] }> {
+  const p = await context.newPage()
+  const requests: string[] = []
+  p.on('request', r => {
+    const u = r.url()
+    if (u === EMBED_URL) return
+    if (!u.startsWith('data:') && u !== 'about:blank') requests.push(u)
+  })
+  p.on('websocket', ws => requests.push(`ws:${ws.url()}`))
+  await p.route(EMBED_URL, r => r.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: html }))
+  await p.setViewportSize(viewport)
+  await p.goto(EMBED_URL)
+  await p.waitForFunction(() => {
+    const c = document.querySelector('#sailor-embed canvas') as HTMLCanvasElement | null
+    return !!c && c.width > 1
+  }, undefined, { timeout: 30_000 })
+  expect(await p.locator('#sailor-poster').isHidden()).toBe(true)
+  await p.waitForTimeout(settleMs)
+  const png = await p.evaluate(() => (document.querySelector('#sailor-embed canvas') as HTMLCanvasElement).toDataURL())
+  await p.close()
+  return { png, requests }
+}
+
 /** Pixels whose any channel differs by more than `threshold` levels (default 2). Sizes must match;
  *  a size mismatch returns differing = -1. */
 export async function pixelDiff(page: Page, a: string, b: string, threshold = 2): Promise<{ differing: number; total: number }> {

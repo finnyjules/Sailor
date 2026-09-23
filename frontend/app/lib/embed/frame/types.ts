@@ -67,6 +67,14 @@ export interface FrameSnapshot {
   assets: FrameAssets
   wired: Record<number, WiredEntry>
   notices: FrameNotice[]
+  /** Task 10: true when this Frame needs paper.js (F3's `boolean`/`shatter`/`morph` geometry
+   *  effects) or fontkit glyph outlines (any font the gatherer marked `outline: true`) to draw
+   *  correctly — set by `buildFrameSnapshot`. `bundleNameFor('frame', snap)` (surfaces.ts) reads
+   *  it to pick between the full `frame.js` (ships paper.js + fontkit) and the smaller
+   *  `frame-lean.js` (ships neither; every text layer draws with `fillText`, and a boolean/
+   *  shatter/morph effect — none present when this is false — would throw). Most Frames have no
+   *  outlined text and no F3 geometry effect, so most exports take the lean bundle. */
+  needsOutlines: boolean
 }
 
 export function assetKey(kind: FrameAssetKind, key: string): string {

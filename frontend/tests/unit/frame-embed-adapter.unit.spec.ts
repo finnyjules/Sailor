@@ -12,7 +12,7 @@ function snapshotOf(layers: any[], urls: Record<string, string>): FrameSnapshot 
   }
   return {
     version: 1, fit: 'fit', duration: 1, still: true, variants: [v],
-    assets: { urls, fonts: [], shaders: [], depth: [] }, wired: {}, notices: [],
+    assets: { urls, fonts: [], shaders: [], depth: [] }, wired: {}, notices: [], needsOutlines: false,
   }
 }
 

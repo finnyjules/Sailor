@@ -36,6 +36,12 @@ const rawSurface = process.env.SAILOR_EMBED_SURFACE || 'shader'
 const perEffectMatch = /^spacetype:(.+)$/.exec(rawSurface)
 const effectId = perEffectMatch ? perEffectMatch[1]! : null
 const outFileBase = effectId ? `spacetype-${effectId}` : rawSurface
+// Task 10: 'frame-lean' is not its own entry-<surface>.ts file — it is entry-frame.ts's SAME
+// module graph, built a second time with different aliases (below) so most Frames (no outlined
+// text, no boolean/shatter/morph geometry — see gather.ts's computeNeedsOutlines) can skip paper.js
+// and fontkit entirely. bundleNameFor('frame', snap) (surfaces.ts) picks which of the two built
+// files an export fetches.
+const isFrameLean = rawSurface === 'frame-lean'
 
 const VIRTUAL_ENTRY_ID = 'virtual:sailor-embed-spacetype-effect-entry'
 const RESOLVED_VIRTUAL_ENTRY_ID = '\0' + VIRTUAL_ENTRY_ID
@@ -178,6 +184,27 @@ const config: UserConfig = {
       // ~/lib/compositor/depthRequest is the one network call behind depth maps; depthRegistry.ts
       // imports it by exactly this id. An exported file gets the "not available" stand-in instead.
       { find: '~/lib/compositor/depthRequest', replacement: fileURLToPath(new URL('./app/lib/embed/frame/depthRequest.embed.ts', import.meta.url)) },
+      // Task 10: frame-lean drops fontkit (via textOutline.ts's font.ts import) and paper.js
+      // entirely — most Frames need neither (see gather.ts's computeNeedsOutlines). These two
+      // entries only apply to that one build; every other surface (including the regular 'frame'
+      // build, below) never sees them.
+      ...(isFrameLean ? [
+        { find: '~/lib/compositor/textOutline', replacement: fileURLToPath(new URL('./app/lib/embed/frame/textOutline.embed.ts', import.meta.url)) },
+        { find: /^paper$/, replacement: fileURLToPath(new URL('./app/lib/embed/frame/paperLean.embed.ts', import.meta.url)) },
+      ] : []),
+      // Bare `paper` resolves (via its package.json `main`) to dist/paper-full.js, which bundles
+      // PaperScript: code that scans the HOST page for <script type="text/paperscript"> tags on
+      // DOMContentLoaded and XHR-loads their `src` — a network request an export must never make
+      // — plus the acorn parser PaperScript compiles with. The embed cone's only paper.js callers
+      // (booleanGeometry.ts's F3 `boolean`/`shatter` geometry effects) use nothing but the core
+      // API: PaperScope/setup/Size, CompoundPath built from `pathData` strings, and the boolean
+      // ops (unite/subtract/intersect/exclude) — all present in paper-core, which has zero
+      // `getElementsByTagName` calls (confirmed by grep) and no PaperScript object at all. Alias
+      // the bare specifier straight to that build for embed builds only; the main Nuxt app's own
+      // `import('paper')` is untouched. Superseded by frame-lean's own paper entry above when
+      // isFrameLean (Vite/Rollup takes the FIRST matching alias entry) — kept here, not removed,
+      // so every OTHER build (frame included) still gets paper-core.
+      { find: /^paper$/, replacement: fileURLToPath(new URL('./node_modules/paper/dist/paper-core.js', import.meta.url)) },
       { find: '~~', replacement: fileURLToPath(new URL('.', import.meta.url)) },
       { find: '~', replacement: fileURLToPath(new URL('./app', import.meta.url)) },
     ],
@@ -201,11 +228,13 @@ const config: UserConfig = {
     copyPublicDir: false,
     lib: {
       // Per-effect builds point at the virtual module the plugin above
-      // generates; every other surface still reads its real entry-<surface>.ts
-      // file from disk exactly as before.
+      // generates; frame-lean has no entry-frame-lean.ts of its own — it is
+      // entry-frame.ts's SAME module graph, built again under different
+      // aliases (see isFrameLean above); every other surface still reads its
+      // real entry-<surface>.ts file from disk exactly as before.
       entry: effectId
         ? VIRTUAL_ENTRY_ID
-        : fileURLToPath(new URL(`./app/lib/embed/entry-${rawSurface}.ts`, import.meta.url)),
+        : fileURLToPath(new URL(`./app/lib/embed/entry-${isFrameLean ? 'frame' : rawSurface}.ts`, import.meta.url)),
       formats: ['iife'],
       // Required by Vite's lib-mode API when formats includes 'iife' (it's
       // the global Rollup would assign the entry's exports to), but unused

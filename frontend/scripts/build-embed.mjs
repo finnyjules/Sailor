@@ -48,7 +48,7 @@ function runBuild(surfaceEnvValue) {
 const started = Date.now()
 
 const effects = getSpaceTypeEffectEntries()
-const expectedOutputs = ['shader.js', 'gradient.js', 'frame.js', ...effects.map(({ id }) => `spacetype-${id}.js`)]
+const expectedOutputs = ['shader.js', 'gradient.js', 'frame.js', 'frame-lean.js', ...effects.map(({ id }) => `spacetype-${id}.js`)]
 
 // predev runs this on every `npm run dev`, almost always to reproduce
 // byte-identical output — skip when nothing that could affect a bundle's
@@ -79,6 +79,10 @@ if (existsSync(STALE_MONOLITH)) {
 runBuild('shader')
 runBuild('gradient')
 runBuild('frame')
+// Task 10: frame-lean is entry-frame.ts's SAME graph, built again under vite.embed.config.ts's
+// isFrameLean aliases (no paper.js, no fontkit) — see bundleNameFor('frame', snap) in surfaces.ts
+// for which one an export actually fetches.
+runBuild('frame-lean')
 
 for (const { id } of effects) {
   runBuild(`spacetype:${id}`)
@@ -90,4 +94,4 @@ for (const { id } of effects) {
 writeStamp(STAMP_PATH, currentHash)
 
 const seconds = ((Date.now() - started) / 1000).toFixed(1)
-console.log(`build:embed: built shader, gradient, frame, and ${effects.length} spacetype-<effect> bundles in ${seconds}s`)
+console.log(`build:embed: built shader, gradient, frame, frame-lean, and ${effects.length} spacetype-<effect> bundles in ${seconds}s`)

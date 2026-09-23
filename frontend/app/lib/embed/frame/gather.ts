@@ -12,6 +12,7 @@ import { imageLayerUrl } from '~/composables/useCompositorLayers'
 import { clipFrameUrl, clipFrameKey } from '~/lib/compositor/clip'
 import { shaderTextureUrl, shaderTextureKey } from '~/lib/shaderfill/field'
 import { compositorFontToken } from '~/lib/compositor/textOutline'
+import { effectStackOf } from '~/lib/compositor/effectStack'
 import type { DepthRef } from '~/lib/compositor/depthRegistry'
 import type { EffectDef } from '~/lib/shaderfx/types'
 import type { FontWeightSpec } from '../fontFace'
@@ -51,6 +52,31 @@ export function formatBytes(n: number): string {
 
 export function isBlocked(snapshot: FrameSnapshot): boolean {
   return snapshot.notices.some(n => n.group === 'blocked')
+}
+
+/** Task 10's brief for `needsOutlines`. `boolean` and `shatter` genuinely read paper.js
+ *  (booleanGeometry.ts); `morph` (blendPath, in ~/lib/vector/morph.ts) is pure JS with NO paper
+ *  dependency today, but ships in the same group here — it is the third sibling-reference (`ref
+ *  LayerId`) F3 geometry kind alongside boolean, so a Frame using it keeps the full bundle rather
+ *  than betting on morph never growing a paper dependency later. Trim/offset/round_corners/
+ *  roughen/warp/long_shadow are all self-contained and never touch paper. */
+const FULL_BUNDLE_GEOMETRY_KINDS = new Set(['boolean', 'shatter', 'morph'])
+
+/**
+ * Task 10: true when this Frame needs the full `frame.js` bundle (paper.js and/or fontkit) rather
+ * than the lean one — `bundleNameFor('frame', snap)` (surfaces.ts) reads `FrameSnapshot.needsOutlines`,
+ * this function's result, to choose between them. Pure and exported for the unit test.
+ *
+ * A geometry effect gates on VISIBILITY, same as `applyGeometry`'s own `e.visible !== false` filter
+ * (geometryEffects.ts) and plan.ts's `textNeedsOutline`/`textDrawsFromOutlines` for text: a
+ * disabled boolean/shatter/morph never actually runs, so it never calls `warmPaperBoolean` either
+ * — gating on presence alone would force the full bundle for Frames that will never touch paper.
+ */
+export function computeNeedsOutlines(plan: Pick<FramePlan, 'fonts'>, variant: Pick<FrameVariant, 'layers'>): boolean {
+  if (plan.fonts.some(f => f.outline)) return true
+  return variant.layers.some(l => effectStackOf(l as any).some(
+    e => FULL_BUNDLE_GEOMETRY_KINDS.has(e.type) && e.visible !== false,
+  ))
 }
 
 export async function buildFrameSnapshot(plan: FramePlan, variant: FrameVariant, io: FrameExportIO): Promise<FrameSnapshot> {
@@ -146,5 +172,6 @@ export async function buildFrameSnapshot(plan: FramePlan, variant: FrameVariant,
     version: 1, fit: plan.fit, duration: plan.duration, still: plan.still,
     variants: [variant], assets: { urls, fonts, shaders, depth }, wired,
     notices: [...notices.filter(n => n.group === 'fonts'), ...liveNotices, ...notices.filter(n => n.group !== 'fonts')],
+    needsOutlines: computeNeedsOutlines(plan, variant),
   }
 }
