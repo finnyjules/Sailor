@@ -3,21 +3,30 @@ import { applyFont, createTextLayer, transformCase, wrappedTextLinesMeta } from 
 import type { TextLayer } from '~/composables/useCompositorLayers'
 
 /** Deterministic measure for tests: 0.55 em per character, letter spacing added per gap,
- *  greedy word wrap, cap metrics 0.35 / 0.35. */
+ *  greedy word wrap, cap metrics 0.35 / 0.35. With `upper` the text is measured in capitals and a
+ *  capital letter is 0.7 em — so a test can tell a capitalised element from a plain one. Without
+ *  `upper` every character stays 0.55 em (capitals included), exactly as before. */
 export function makeStubMeasure(): Measure {
-  const w100 = (text: string, _role: RoleKey, ls: number) => {
-    const n = [...text].length
-    return n * 55 + (ls || 0) * 100 * Math.max(0, n - 1)
+  const w100 = (text: string, _role: RoleKey, ls: number, upper?: boolean) => {
+    if (!upper) {
+      const n = [...text].length
+      return n * 55 + (ls || 0) * 100 * Math.max(0, n - 1)
+    }
+    const chars = [...text.toUpperCase()]
+    const n = chars.length
+    const ink = chars.reduce((a, ch) => a + (ch !== ch.toLowerCase() ? 70 : 55), 0)
+    return ink + (ls || 0) * 100 * Math.max(0, n - 1)
   }
-  const lines = (text: string, role: RoleKey, size: number, ls: number, boxW: number) => {
+  const lines = (text: string, role: RoleKey, size: number, ls: number, boxW: number, upper?: boolean) => {
     const out: string[] = []
-    for (const para of text.split('\n')) {
+    // Like the renderer, the lines come back in the case they are drawn in.
+    for (const para of (upper ? text.toUpperCase() : text).split('\n')) {
       const words = para.split(/\s+/).filter(Boolean)
       if (!words.length) { out.push(''); continue }
       let cur = ''
       for (const w of words) {
         const t = cur ? cur + ' ' + w : w
-        if (cur && w100(t, role, ls) * size / 100 > boxW) { out.push(cur); cur = w } else cur = t
+        if (cur && w100(t, role, ls, upper) * size / 100 > boxW) { out.push(cur); cur = w } else cur = t
       }
       out.push(cur)
     }
@@ -48,29 +57,34 @@ export function makeCanvasMeasure(layers: Partial<Record<RoleKey, TextLayer>>): 
     layers[role] ?? layers.caption ?? layers.details ?? layers.date ?? layers.title
       ?? createTextLayer({ fontWeight: 400 })
   /** The role's layer re-sized for measuring: the user's face, weight, axes and case;
-   *  the kit's size, spacing and box. Wrap is always the default fit (no shrink/fill). */
-  const probe = (role: RoleKey, text: string, size: number, ls: number, boxW?: number): TextLayer => ({
-    ...base(role),
-    text, fontSize: size / 100, letterSpacing: ls, boxW, boxH: undefined, boxFit: undefined,
-    runs: undefined, path: undefined, expressive: undefined,
-  })
+   *  the kit's size, spacing and box. Wrap is always the default fit (no shrink/fill).
+   *  `upper`: the style sets capitals, whatever the layer's own case. */
+  const probe = (role: RoleKey, text: string, size: number, ls: number, boxW?: number, upper?: boolean): TextLayer => {
+    const l = base(role)
+    return {
+      ...l,
+      text, fontSize: size / 100, letterSpacing: ls, boxW, boxH: undefined, boxFit: undefined,
+      runs: undefined, path: undefined, expressive: undefined,
+      textTransform: upper ? 'uppercase' : l.textTransform,
+    }
+  }
 
   const wCache = new Map<string, number>()
-  const w100 = (text: string, role: RoleKey, ls: number): number => {
-    const k = role + '|' + ls + '|' + text
+  const w100 = (text: string, role: RoleKey, ls: number, upper?: boolean): number => {
+    const k = (upper ? 'U' : '') + role + '|' + ls + '|' + text
     const hit = wCache.get(k)
     if (hit !== undefined) return hit
     // Size 100 units = 1000 px on the virtual frame; measure at 100 px (size 10) and
     // the px width IS the width in units at size 100.
-    const layer = probe(role, text, 10, ls)
+    const layer = probe(role, text, 10, ls, undefined, upper)
     applyFont(c, layer, VW)
     const v = c.measureText(transformCase(text, layer.textTransform)).width
     if (v > 0) wCache.set(k, v)                     // never remember a zero (face not ready)
-    return v > 0 || !text ? v : stub.w100(text, role, ls)
+    return v > 0 || !text ? v : stub.w100(text, role, ls, upper)
   }
 
-  const lines = (text: string, role: RoleKey, size: number, ls: number, boxW: number): string[] =>
-    wrappedTextLinesMeta(c, probe(role, text, size, ls, boxW / 100), VW).lines
+  const lines = (text: string, role: RoleKey, size: number, ls: number, boxW: number, upper?: boolean): string[] =>
+    wrappedTextLinesMeta(c, probe(role, text, size, ls, boxW / 100, upper), VW).lines
 
   const capCache = new Map<RoleKey, [number, number]>()
   const cap = (role: RoleKey): [number, number] => {

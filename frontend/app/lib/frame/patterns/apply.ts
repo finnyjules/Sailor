@@ -108,6 +108,7 @@ export function applyPlacement(
       track('letterSpacing', op.letterSpacing)
       track('runs', op.runs?.length ? op.runs : undefined)
       track('path', op.path ?? undefined)
+      track('textTransform', op.textTransform)
       // Flow text is sized by the layout at the size the checker approved, measured with plain
       // wrapping: a shrink / fill / break box fit would redraw it at another size or break. While
       // the layout holds, the fit is 'wrap' (the renderer's default); the user's own fit comes

@@ -1,5 +1,7 @@
 import { faceOf } from './types'
 import type { Content, Measure, MissingEl, PhotoEl, RuleEl, Style, TextEl } from './types'
+import { STYLES } from './styles'
+import type { StyleId } from './styles'
 
 // ═══════════════════════ the kit ═══════════════════════
 // Ported from the prototype (docs/superpowers/specs/assets/2026-09-23-frame-layout-system/
@@ -24,6 +26,9 @@ export interface SheetOpts {
   /** Compose on a band this tall (kit units) instead of the full height — the part the platform
    *  leaves uncovered. `B` still comes from the FULL height. */
   composeH?: number
+  /** The style's type: DISPLAY and INFO weight, letter spacing, line height and letter case
+   *  (SECOND keeps its Swiss values in every style). Absent: `'swiss'` — Stages 1–2, unchanged. */
+  style?: StyleId
 }
 
 export interface Sheet {
@@ -94,12 +99,16 @@ export function makeSheet(o: SheetOpts): Sheet {
   const infoFloor = o.format?.view ? 900 / o.format.view : 0
   const infoSize = Math.max(1.95 * B, infoFloor)
   const secondSize = o.format?.view ? Math.max(4.4 * B, 1.6 * infoSize) : 4.4 * B
-  const DISPLAY: Style = { role: 'title', wt: 600, ls: -0.05, lh: 0.9 }
+  // The style's display and information type; `upper` only when the style sets capitals, so the
+  // Swiss styles are exactly the Stage 1 objects.
+  const sty = STYLES[o.style ?? 'swiss']
+  const upperOf = (u: boolean | undefined) => (u ? { upper: true } : {})
+  const DISPLAY: Style = { role: 'title', wt: sty.display.wt, ls: sty.display.ls, lh: sty.display.lh, ...upperOf(sty.display.upper) }
   const SECOND: Style & { size: number } = { role: 'details', size: secondSize, wt: 500, ls: -0.02, lh: 1.04 }
-  const INFO: Style & { size: number } = { role: 'caption', size: infoSize, wt: 400, ls: 0, lh: 1.3 }
+  const INFO: Style & { size: number } = { role: 'caption', size: infoSize, wt: sty.info.wt, ls: sty.info.ls, lh: sty.info.lh, ...upperOf(sty.info.upper) }
 
   // measurement: width at size 100, with the letter spacing the layout will set
-  const w100 = (s: string, st: Style = DISPLAY) => measure.w100(s, st.role ?? 'title', st.ls)
+  const w100 = (s: string, st: Style = DISPLAY) => measure.w100(s, st.role ?? 'title', st.ls, st.upper)
   const fitSize = (lines: string[], width: number, st: Style = DISPLAY) =>
     SCALE * Math.min(...lines.map(l => width * 100 / Math.max(1, w100(l, st))))
   const blockH = (n: number, size: number, lh: number) => ((n - 1) * lh + CAP) * size
@@ -116,7 +125,7 @@ export function makeSheet(o: SheetOpts): Sheet {
   }
   // The renderer's own wrap, paragraph by paragraph — so line counts match what the Frame draws.
   const countLines = (s: string, width: number, st: Style, size: number) =>
-    s.split('\n').reduce((a, p) => a + measure.lines(p, st.role ?? 'caption', size, st.ls, width).length, 0)
+    s.split('\n').reduce((a, p) => a + measure.lines(p, st.role ?? 'caption', size, st.ls, width, st.upper).length, 0)
   function balance(words: string[], n: number): string[] {
     const total = words.join(' ').length, target = total / n, out: string[] = []; let cur = ''
     for (const w of words) {
@@ -129,9 +138,9 @@ export function makeSheet(o: SheetOpts): Sheet {
 
   // element builders
   const text = (s: string, o: Partial<TextEl>): TextEl => ({ k: 't', s, ...o } as TextEl)
-  const disp = (s: string, o: Partial<TextEl>) => text(s, { wt: DISPLAY.wt, ls: DISPLAY.ls, lh: DISPLAY.lh, role: 'title', pre: true, ...o })
+  const disp = (s: string, o: Partial<TextEl>) => text(s, { wt: DISPLAY.wt, ls: DISPLAY.ls, lh: DISPLAY.lh, role: 'title', pre: true, ...upperOf(DISPLAY.upper), ...o })
   const sec = (s: string, o: Partial<TextEl>) => text(s, { size: SECOND.size, wt: SECOND.wt, ls: SECOND.ls, lh: SECOND.lh, role: 'details', ...o })
-  const info = (s: string, o: Partial<TextEl>) => text(s, { role: 'info', size: INFO.size, wt: INFO.wt, ls: INFO.ls, lh: INFO.lh, ...o })
+  const info = (s: string, o: Partial<TextEl>) => text(s, { role: 'info', size: INFO.size, wt: INFO.wt, ls: INFO.ls, lh: INFO.lh, ...upperOf(INFO.upper), ...o })
   const rule = (x: number, y: number, w: number): RuleEl => ({ k: 'l', x, y, w })
   /** INFO measured in the face of the element's own role. */
   const infoIn = (role: string | undefined): Style => ({ ...INFO, role: faceOf(role) })

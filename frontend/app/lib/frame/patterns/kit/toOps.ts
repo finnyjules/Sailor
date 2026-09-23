@@ -90,9 +90,9 @@ function displayOp(els: TextEl[], S: Sheet, target: string, z: number): LayerOp 
     const capAbove = S.measure.capAbove(face)
     const CAP = capAbove + S.measure.baseBelow(face)
     const texts = e.s.split('\n')
-    // One layer, one letter spacing: every run is measured with the first element's, which is
-    // what the renderer draws them all with.
-    const widths = texts.map(t => (S.measure.w100(t, face, first.ls) * e.size) / 100)
+    // One layer, one letter spacing and one case: every run is measured with the first
+    // element's, which is what the renderer draws them all with.
+    const widths = texts.map(t => (S.measure.w100(t, face, first.ls, first.upper) * e.size) / 100)
     const boxW = e.w ?? Math.max(...widths)
     const capTop0 = capTopOf(e, texts.length, CAP)
     const align = e.align ?? 'left'
@@ -123,6 +123,7 @@ function displayOp(els: TextEl[], S: Sheet, target: string, z: number): LayerOp 
     lineHeight: first.lh, letterSpacing: first.ls,
     runs, z, ...look(first),
   }
+  if (first.upper) op.textTransform = 'uppercase'
   op.colorRole = first.color ?? DEFAULT_TEXT_ROLE
   return op
 }
@@ -135,12 +136,12 @@ function flowOp(e: TextEl, S: Sheet, target: string, z: number): LayerOp {
   let n: number
   let boxW: number
   if (e.w != null) {
-    n = S.countLines(e.s, e.w, { role: face, ls: e.ls, lh: e.lh }, e.size)
+    n = S.countLines(e.s, e.w, { role: face, ls: e.ls, lh: e.lh, upper: e.upper }, e.size)
     boxW = e.w
   } else {
     const texts = e.s.split('\n')
     n = texts.length
-    boxW = Math.max(...texts.map(t => (S.measure.w100(t, face, e.ls) * e.size) / 100))
+    boxW = Math.max(...texts.map(t => (S.measure.w100(t, face, e.ls, e.upper) * e.size) / 100))
   }
   const capTop = capTopOf(e, n, CAP)
   // The renderer (valign 'top') puts line 0's middle half a line slot below the layer's y.
@@ -155,6 +156,7 @@ function flowOp(e: TextEl, S: Sheet, target: string, z: number): LayerOp {
     z, ...look(e),
   }
   if (e.w != null) op.w = e.w / 100
+  if (e.upper) op.textTransform = 'uppercase'
   op.colorRole = e.color ?? DEFAULT_TEXT_ROLE
   return op
 }

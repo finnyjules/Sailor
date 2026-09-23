@@ -109,6 +109,9 @@ export interface LayerOp {
   mask?: { kind: 'ellipse' | 'rect'; x: number; y: number; w: number; h: number }
   /** Text op: set the text along a path. */
   path?: import('~/composables/useCompositorLayers').TextLayer['path']
+  /** Text op: the style's letter case (a spacing-like field a layout may set). Tracked: the
+   *  user's own case comes back when a later op leaves it unset. */
+  textTransform?: 'uppercase'
 }
 
 export interface PatternPlacement {

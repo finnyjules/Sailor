@@ -1,13 +1,18 @@
 import type { Sheet } from './sheet'
+import type { StyleId } from './styles'
 
 // Layout kit types. Units: percent of frame width (W = 100, H = 100 × frameH / frameW).
 
 export type RoleKey = 'title' | 'details' | 'date' | 'caption'
 export type Colour = 'ink' | 'accent' | 'field'
 /** Text style. `role` picks whose face is measured (the user's real family/weight). */
-export interface Style { role?: RoleKey; size?: number; wt?: number; ls: number; lh: number }
+export interface Style { role?: RoleKey; size?: number; wt?: number; ls: number; lh: number
+  /** Measured (and drawn) in capitals — the style's letter case. */
+  upper?: boolean }
 interface Base { role?: string; over?: string[]; ok?: boolean; bleed?: boolean; opacity?: number; blend?: boolean }
-export interface TextEl extends Base { k: 't'; s: string; x: number; w?: number; top?: number; base?: number; size: number; wt?: number; ls: number; lh: number; align?: 'left' | 'center' | 'right'; color?: Colour; pre?: boolean; just?: boolean; rot?: number; origin?: string; inside?: string }
+export interface TextEl extends Base { k: 't'; s: string; x: number; w?: number; top?: number; base?: number; size: number; wt?: number; ls: number; lh: number; align?: 'left' | 'center' | 'right'; color?: Colour; pre?: boolean; just?: boolean; rot?: number; origin?: string; inside?: string
+  /** Set in capitals: measured upper-cased, and toOps writes `textTransform: 'uppercase'`. */
+  upper?: boolean }
 export interface PhotoEl extends Base { k: 'p'; x: number; y: number; w: number; h: number; stand?: boolean; filter?: string; radius?: number }
 export interface CircleEl extends Base { k: 'c'; cx: number; cy: number; r: number; color?: Colour; photo?: boolean }
 export interface RectEl extends Base { k: 'r'; x: number; y: number; w: number; h: number; color?: Colour; rot?: number; radius?: number }
@@ -21,6 +26,8 @@ export interface LayoutCtx { c: Content; kind: Kind; ph: boolean; r: () => numbe
 export interface LayoutOut { els: El[]; did: string }
 export interface LayoutDef {
   id: string; name: string; fits: Kind[]
+  /** The style the layout belongs to. Absent: `'swiss'`. */
+  style?: StyleId
   needs?: { image?: boolean; shape?: boolean; number?: boolean }
   oneLineFirst?: boolean; keepScale?: boolean; ownPhoto?: boolean
   /** Built around the smaller text (the prototype's list): does not fit a format that carries
@@ -33,9 +40,10 @@ export interface LayoutDef {
 /** Measurement in kit units (percent of frame width). */
 export interface Measure {
   /** width of `text` at size 100 units with letter spacing `ls` (em), in the face of `role` */
-  w100(text: string, role: RoleKey, ls: number): number
-  /** lines the RENDERER would draw for `text` in a box `boxW` units wide */
-  lines(text: string, role: RoleKey, size: number, ls: number, boxW: number): string[]
+  w100(text: string, role: RoleKey, ls: number, upper?: boolean): number
+  /** lines the RENDERER would draw for `text` in a box `boxW` units wide.
+   *  `upper`: measured in capitals (the style's letter case), whatever the role layer's own case. */
+  lines(text: string, role: RoleKey, size: number, ls: number, boxW: number, upper?: boolean): string[]
   /** em-box middle → cap top, and middle → baseline, as fractions of font size, for `role` */
   capAbove(role: RoleKey): number
   baseBelow(role: RoleKey): number

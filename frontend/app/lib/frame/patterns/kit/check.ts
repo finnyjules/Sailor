@@ -54,13 +54,13 @@ function textBox(e: TextEl, S: Sheet, overflow = false): Box {
   if (e.pre) {
     const lines = e.s.split('\n')
     n = lines.length
-    widestLine = Math.max(...lines.map(l => (S.measure.w100(l, face, e.ls) * e.size) / 100))
+    widestLine = Math.max(...lines.map(l => (S.measure.w100(l, face, e.ls, e.upper) * e.size) / 100))
   } else {
     const w = e.w ?? 0
-    const style: Style = { role: face, ls: e.ls, lh: e.lh }
+    const style: Style = { role: face, ls: e.ls, lh: e.lh, upper: e.upper }
     n = S.countLines(e.s, w, style, e.size)
-    const wrapped = e.s.split('\n').flatMap(p => S.measure.lines(p, face, e.size, e.ls, w))
-    widestLine = Math.max(...wrapped.map(l => (S.measure.w100(l, face, e.ls) * e.size) / 100))
+    const wrapped = e.s.split('\n').flatMap(p => S.measure.lines(p, face, e.size, e.ls, w, e.upper))
+    widestLine = Math.max(...wrapped.map(l => (S.measure.w100(l, face, e.ls, e.upper) * e.size) / 100))
   }
   const height = (n - 1) * e.lh * e.size + CAP * e.size
 
