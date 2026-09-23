@@ -167,6 +167,92 @@ function pausedChoices(run: RunRecord): Map<string, GateChoice[]> {
   return gates
 }
 
+/** Applies a Gate button to a copy of the run. Pure; throws a refusal the browser can show. */
+export function applyGateAction(
+  run: RunRecord,
+  gateId: string,
+  action: GateActionName,
+  picked: number[] | undefined,
+): { legAction: LegAction; legTakes: number[] } {
+  const paused = run.takes.filter(t => t.nodes[gateId]?.status === 'paused').map(t => t.index)
+  // Resetting a node also resets everything that read from it (an Image card
+  // showing the old picture), the way ComfyUI re-runs a changed node's dependents.
+  const reset = (take: TakeRecord, ids: Iterable<string>) => {
+    const all = new Set(ids)
+    let grew = true
+    while (grew) {
+      grew = false
+      for (const id of Object.keys(take.prompt)) {
+        if (!all.has(id) && dependenciesOf(take.prompt, id).some(d => all.has(d))) { all.add(id); grew = true }
+      }
+    }
+    for (const id of all) take.nodes[id] = emptyNodeRecord(take.prompt[id]!.class_type)
+  }
+  // Server.py's Redo rule, with the spec's one change: 0 means random and stays 0.
+  const bumpSeeds = (take: TakeRecord, ids: Iterable<string>) => {
+    for (const id of ids) {
+      const inputs = take.prompt[id]!.inputs
+      for (const k of ['seed', 'noise_seed']) {
+        const v = inputs[k]
+        if (typeof v === 'number' && Number.isInteger(v) && v > 0) inputs[k] = v + 1
+      }
+    }
+  }
+
+  if (action === 'continue') {
+    if (paused.length) {
+      const wanted = picked ?? (paused.length === 1 ? paused : [])
+      const chosen = [...new Set(wanted)].filter(i => paused.includes(i)).sort((a, b) => a - b)
+      if (!chosen.length) throw refuse('Tick at least one picture to continue with', 400)
+      for (const i of paused) {
+        const take = run.takes[i]!
+        if (chosen.includes(i)) {
+          if (!take.openGates.includes(gateId)) take.openGates.push(gateId)
+          take.droppedGates = take.droppedGates.filter(g => g !== gateId)
+          take.nodes[gateId]!.status = 'done'
+        }
+        else {
+          if (!take.droppedGates.includes(gateId)) take.droppedGates.push(gateId)
+          take.nodes[gateId]!.status = 'dropped'
+        }
+      }
+      return { legAction: 'continue', legTakes: chosen }
+    }
+    // Continue after the run finished: everything after the Gate again, from the kept picture.
+    const passed = run.takes
+      .filter(t => t.openGates.includes(gateId) && t.nodes[gateId]?.status === 'done')
+      .map(t => t.index)
+    const chosen = [...new Set(picked ?? passed)].filter(i => passed.includes(i)).sort((a, b) => a - b)
+    if (!chosen.length) throw refuse('There is nothing past this Gate to run again', 409)
+    for (const i of chosen) {
+      const take = run.takes[i]!
+      const down = downstreamNodes(take.prompt, gateId)
+      reset(take, down)
+      bumpSeeds(take, down)
+    }
+    return { legAction: 'again', legTakes: chosen }
+  }
+
+  if (action === 'redo') {
+    if (!paused.length) throw refuse('Redo works while the Gate is paused', 409)
+    for (const i of paused) {
+      const take = run.takes[i]!
+      const stage = upstreamStage(take.prompt, gateId)
+      reset(take, [...stage, gateId])
+      bumpSeeds(take, stage)
+    }
+    return { legAction: 'redo', legTakes: paused }
+  }
+
+  // restart
+  for (const take of run.takes) {
+    reset(take, Object.keys(take.prompt))
+    take.openGates = []
+    take.droppedGates = []
+  }
+  return { legAction: 'restart', legTakes: run.takes.map(t => t.index) }
+}
+
 export function createEngine(deps: EngineDeps) {
   const live = new Map<string, LiveRun>()
   const locks = new Map<string, Promise<unknown>>()
@@ -452,6 +538,8 @@ export function createEngine(deps: EngineDeps) {
       await limiter.acquire(userKey, signal)
       let result: unknown
       try {
+        // A Stop can land while the slot is being handed over; nothing may go out after it.
+        if (signal.aborted) throw new RunStopped()
         if (!rec.request) {
           const sub = await deps.fal.submit(plan.endpoint, plan.payload, { webhookUrl: deps.webhookUrl() })
           rec.request = {
@@ -486,7 +574,13 @@ export function createEngine(deps: EngineDeps) {
       if (ui) publish(run, ev.executed(stageKey, id, ui))
     }
     catch (e) {
-      if (e instanceof RunStopped || signal.aborted) { rec.status = 'stopped'; rec.error = null }
+      if (e instanceof RunStopped || signal.aborted) {
+        rec.status = 'stopped'
+        rec.error = null
+        // Stop may have landed while this request was being sent, before
+        // Stop could see its id: cancel it here so nothing is left at fal.
+        if (rec.request) await deps.fal.cancel(rec.request.cancelUrl).catch(() => {})
+      }
       else { rec.status = 'error'; rec.error = plainError(e) }
       rec.endedAt = deps.now()
       await persist(run).catch(() => {})
@@ -503,7 +597,9 @@ export function createEngine(deps: EngineDeps) {
     if (lastPos != null && lastPos > 0) publish(run, ev.queuePosition(stageKey, nodeId, lastPos))
     for (;;) {
       if (signal.aborted) throw new RunStopped()
-      if (deps.now() > deadline) {
+      // Ask fal at least once before giving up: after a restart the request
+      // may already have finished while the server was down.
+      if (attempt > 0 && deps.now() > deadline) {
         await deps.fal.cancel(req.cancelUrl).catch(() => {})
         throw new Error(media === 'video'
           ? 'The video took longer than 30 minutes, so it was cancelled'
@@ -603,8 +699,128 @@ export function createEngine(deps: EngineDeps) {
     }
   }
 
-  // Task 13 fills in gateAction, stop, reattach, pausedGates, snapshot and record.
-  return { startRun, nudge, settled, events: deps.events }
+  async function gateAction(i: GateActionInput): Promise<LegStarted> {
+    return withRunLock(i.runId, async () => {
+      const entry = await loadEntry(i.runId)
+      if (!entry || entry.run.userId !== i.userId) throw refuse('Run not found', 404)
+      const run = entry.run
+      if (run.legs.some(l => l.status === 'running')) throw refuse('This run is still going', 409)
+      if (run.takes[0]?.prompt[i.gateId]?.class_type !== GATE_CLASS) throw refuse('That is not a Gate in this run', 400)
+      if (!['continue', 'redo', 'restart'].includes(i.action)) throw refuse('Unknown Gate action', 400)
+
+      // Work on a copy: if the hold is refused, the run is exactly as it was.
+      const draft = JSON.parse(JSON.stringify(run)) as RunRecord
+      const { legAction, legTakes } = applyGateAction(draft, i.gateId, i.action, i.takes)
+      await deps.metering.spendGuard(i.userId)
+      await deps.metering.moderate(legTakes.map(t => draft.takes[t]!.prompt))
+      const leg = await openLeg(draft, legAction, i.gateId, legTakes)
+      entry.run = draft
+      await persist(draft)
+      launch(draft, leg)
+      return { runId: draft.id, legId: leg.id, promptIds: leg.takes.map(t => stageKeyOf(leg.id, t)) }
+    })
+  }
+
+  async function stop(userId: string | null, runIds?: string[]): Promise<{ stopped: string[] }> {
+    const targets = [...live.values()].filter(e =>
+      e.run.userId === userId
+      && e.run.legs.some(l => l.status === 'running')
+      && (!runIds || runIds.includes(e.run.id)))
+    for (const e of targets) {
+      e.run.stopRequested = true
+      e.ctl.abort()
+      const cancels: Promise<unknown>[] = []
+      for (const t of e.run.takes) {
+        for (const n of Object.values(t.nodes)) {
+          if (n.status === 'running' && n.request) cancels.push(deps.fal.cancel(n.request.cancelUrl).catch(() => {}))
+        }
+      }
+      await Promise.all(cancels)
+    }
+    await Promise.all(targets.map(e => e.legPromise))
+    return { stopped: targets.map(e => e.run.id) }
+  }
+
+  /** Server start: pick up every run that was mid-leg. Paused runs need nothing. */
+  async function reattach(): Promise<number> {
+    let n = 0
+    for (const run of await deps.store.listActive()) {
+      if (live.has(run.id)) continue
+      const leg = run.legs.find(l => l.status === 'running')
+      if (!leg) continue
+      entryFor(run)
+      launch(run, leg)
+      n++
+    }
+    return n
+  }
+
+  function gatesOf(run: RunRecord): PausedGate[] {
+    const legId = run.legs.at(-1)?.id ?? `${run.id}.0`
+    return [...pausedChoices(run)].map(([nodeId, choices]) => ({
+      runId: run.id, promptId: legId, nodeId, choices, picked: choices.length === 1 ? [choices[0]!.take] : [],
+    }))
+  }
+
+  async function pausedGates(userId: string | null, canvasId: string | null): Promise<PausedGate[]> {
+    if (!canvasId) return []
+    const stored = await deps.store.listForUser(userId, { canvasId, statuses: ['paused'] })
+    return stored.flatMap(r => gatesOf(live.get(r.id)?.run ?? r))
+  }
+
+  /** What a newly connected tab needs to catch up: runs in progress and paused Gates. */
+  function snapshot(userId: string | null): RunnerMessage[] {
+    const out: RunnerMessage[] = []
+    for (const { run } of live.values()) {
+      if (run.userId !== userId) continue
+      const leg = run.legs.find(l => l.status === 'running')
+      if (leg) {
+        for (const t of leg.takes) {
+          const stageKey = stageKeyOf(leg.id, t)
+          if (run.charges.find(c => c.stageKey === stageKey)?.finished) continue
+          out.push(ev.start(stageKey))
+          for (const [id, n] of Object.entries(run.takes[t]!.nodes)) {
+            if (n.status !== 'running') continue
+            out.push(ev.executing(stageKey, id))
+            if (n.request?.queuePosition) out.push(ev.queuePosition(stageKey, id, n.request.queuePosition))
+          }
+        }
+      }
+      else if (run.status === 'paused') {
+        for (const g of gatesOf(run)) out.push(ev.gatePaused(g.promptId, run.id, g.nodeId, g.choices, g.picked))
+      }
+    }
+    return out
+  }
+
+  async function record(userId: string | null, promptId: string): Promise<RunnerRecordView | null> {
+    const runId = runIdOf(promptId)
+    if (!runId) return null
+    const run = live.get(runId)?.run ?? await deps.store.get(runId)
+    if (!run || run.userId !== userId) return null
+    const charge = run.charges.find(c => c.stageKey === promptId) ?? null
+    const take = run.takes[charge?.take ?? 0]!
+    const legIndex = charge?.leg ?? 0
+    const ran = Object.entries(take.nodes).filter(([, n]) => n.leg === legIndex)
+    const texts = ran
+      .filter(([, n]) => GENERATORS.has(n.classType))
+      .map(([id]) => extractGraphPromptText({ [id]: take.prompt[id]! }))
+      .filter(Boolean)
+    return {
+      runId,
+      promptId,
+      workflow: run.workflow,
+      createdAt: run.legs[legIndex]?.startedAt ?? run.createdAt,
+      endedAt: run.legs[legIndex]?.endedAt ?? null,
+      credits: deps.hosted() ? (charge?.actual ?? null) : null,
+      prompt: texts[0] ?? null,
+      nodeTypes: [...new Set(ran.filter(([, n]) => n.status === 'done' || n.status === 'paused').map(([, n]) => n.classType))],
+      projectUuid: run.projectUuid,
+      projectName: run.projectName,
+    }
+  }
+
+  return { startRun, gateAction, stop, reattach, nudge, pausedGates, snapshot, record, settled, events: deps.events }
 }
 
 export type Engine = ReturnType<typeof createEngine>
