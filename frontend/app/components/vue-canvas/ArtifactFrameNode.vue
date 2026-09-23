@@ -33,7 +33,7 @@ import { portOffset } from '~/lib/canvas/portLayout'
 import { onFieldCatalogReady } from '~/lib/shaderfill/field'
 import { readGrid } from '~/lib/frame/gridConfig'
 import { resolveGrid } from '~/lib/frame/grid'
-import { FRAME_SIZE_PRESETS, applyFramePreset, framePresetId, setFrameDim, setFrameResponsive } from '~/lib/frame/frameSize'
+import { FRAME_SIZE_PRESET_GROUPS, FRAME_SIZE_PRESETS, applyFramePreset, framePresetId, setFrameDim, setFrameResponsive } from '~/lib/frame/frameSize'
 import { isResponsiveFrame } from '~/lib/frame/responsive/fromNode'
 import { toast } from 'vue-sonner'
 
@@ -82,6 +82,17 @@ function layerTf(slot: number, prop: string): number { const v = widgetVal(`laye
 // Presets and the size/Responsive writes live in lib/frame/frameSize, shared with the Frame
 // editor's "Frame" section, so both surfaces write the same fields the same way.
 const PRESETS = FRAME_SIZE_PRESETS
+// The header select is a native <optgroup>-grouped list: "Sizes" (the six plain presets), then
+// each format's own "Social" / "Display ads" group (FRAME_SIZE_PRESET_GROUPS, index-paired).
+const PRESET_GROUPS = computed(() => {
+  const out: { heading: string; items: typeof PRESETS[number][] }[] = []
+  PRESETS.forEach((p, i) => {
+    const heading = FRAME_SIZE_PRESET_GROUPS[i] ?? ''
+    if (!out.length || out[out.length - 1]!.heading !== heading) out.push({ heading, items: [] })
+    out[out.length - 1]!.items.push(p)
+  })
+  return out
+})
 const frameW = computed(() => widgetVal('width'))
 const frameH = computed(() => widgetVal('height'))
 const hasExplicitSize = computed(() => frameW.value > 0 && frameH.value > 0)
@@ -1178,7 +1189,9 @@ onUnmounted(() => {
           :value="activePresetId" @change="onPresetChange"
         >
           <option value="" disabled hidden>Size…</option>
-          <option v-for="p in PRESETS" :key="p.id" :value="p.id">{{ p.label }}</option>
+          <optgroup v-for="g in PRESET_GROUPS" :key="g.heading" :label="g.heading">
+            <option v-for="p in g.items" :key="p.id" :value="p.id">{{ p.label }}</option>
+          </optgroup>
           <option value="responsive">Responsive</option>
           <option value="custom" disabled hidden>Custom</option>
         </select>

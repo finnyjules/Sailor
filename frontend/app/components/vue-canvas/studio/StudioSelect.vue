@@ -19,8 +19,9 @@ const model = defineModel<string>({ required: true })
 const props = defineProps<{ options: string[]; optionLabels?: string[]; optionGroups?: string[]; label?: string; hint?: string }>()
 
 // `optionGroups` pairs with `options` by index: consecutive options sharing a heading
-// render under one <optgroup>. Only the plain (label-less) branch groups — it is the one
-// long pickers use.
+// render under one <optgroup>. The plain (label-less) branch below groups directly; the
+// labelled StudioRow branch forwards `optionGroups` through `spec` to RowSelect.vue, which
+// groups the same way.
 const grouped = computed(() => {
   if (!props.optionGroups) return null
   const out: { heading: string; items: { value: string; text: string }[] }[] = []
@@ -36,6 +37,7 @@ const spec = computed(() => ({
   key: 'inline', label: props.label ?? '', kind: 'select',
   options: props.options, default: props.options[0] ?? '', group: '',
   ...(props.optionLabels ? { optionLabels: props.optionLabels } : {}),
+  ...(props.optionGroups ? { optionGroups: props.optionGroups } : {}),
   ...(props.hint ? { hint: props.hint } : {}),
 } as ControlSpec))
 </script>

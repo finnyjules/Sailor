@@ -55,7 +55,7 @@ import { mapKeyToEdit, snapAngle } from '~/lib/compositor/layerEdits'
 import { resizeBox, type Handle } from '~/lib/compositor/resizeBox'
 import ResponsivePinsCard from './ResponsivePinsCard.vue'
 import { atDesignSize as isAtDesignSize, clampViewSize, designShapedArtboard, resizeViewFromEdge, shapePresets, readoutLabel as viewReadoutLabel } from '~/lib/frame/responsive/viewport'
-import { FRAME_SIZE_PRESETS, applyFramePreset, frameDimFor, framePresetId, readFrameSize, setFrameDim, setFrameResponsive } from '~/lib/frame/frameSize'
+import { FRAME_SIZE_PRESET_GROUPS, FRAME_SIZE_PRESETS, applyFramePreset, frameDimFor, framePresetId, readFrameSize, setFrameDim, setFrameResponsive } from '~/lib/frame/frameSize'
 import { useTemplateLibrary } from '~/composables/useTemplateLibrary'
 import { serializeLayersForOS, parseLayersFromOS, setClipboard, type ClipboardPayload } from '~/lib/compositor/layerClipboard'
 import {
@@ -419,8 +419,9 @@ const framePresetValue = computed(() => framePresetId(frameSizeNow.value.w, fram
 const framePresetChoices = computed(() => {
   const ids = FRAME_SIZE_PRESETS.map(p => p.id)
   const labels = FRAME_SIZE_PRESETS.map(p => p.label)
-  if (framePresetValue.value === 'custom') { ids.push('custom'); labels.push('Custom') }
-  return { ids, labels }
+  const groups = [...FRAME_SIZE_PRESET_GROUPS]
+  if (framePresetValue.value === 'custom') { ids.push('custom'); labels.push('Custom'); groups.push('Custom') }
+  return { ids, labels, groups }
 })
 function onFramePreset(id: string) {
   const n = compositor.value
@@ -11960,6 +11961,7 @@ onUnmounted(() => {
               :class="{ 'opacity-40 pointer-events-none': designOnlyToolActive }" :inert="designOnlyToolActive || undefined">
               <StudioSelect :label="frameIsResponsive ? 'Designed at' : 'Size'"
                 :options="framePresetChoices.ids" :option-labels="framePresetChoices.labels"
+                :option-groups="framePresetChoices.groups"
                 :model-value="framePresetValue" @update:model-value="onFramePreset" />
               <div class="flex items-center gap-2">
                 <label class="flex-1 flex items-center gap-2 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5">

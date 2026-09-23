@@ -5,10 +5,18 @@
  * format-detection rule: a stored preset whose aspect matches the Frame's, else an exact size
  * that no plain size preset shares, never aspect alone.
  *
- * `frameSize.ts` builds `FRAME_SIZE_PRESETS` from this table, so this module must not import
- * from `frameSize.ts` (that would be a cycle) — the six plain preset sizes below are a verbatim
- * copy of `FRAME_SIZE_PRESETS`'s first six entries, kept in sync by hand.
+ * `frameSize.ts` builds `FRAME_SIZE_PRESETS` from this table plus `plainPresets.ts`'s six, so
+ * this module must not import from `frameSize.ts` (that would be a cycle) — it imports the six
+ * plain preset sizes from the shared `plainPresets.ts` instead, which both modules import, so
+ * they can never drift apart.
+ *
+ * Three sizes are shared between two formats: 1200×628 (`link-preview`, `pmax-landscape`),
+ * 1200×1200 (`meta-feed-1x1`, `pmax-square`) and 1080×1920 (`meta-story`, `pinterest-9x16`).
+ * `formatFor`'s exact-size match picks the first in table order (the order below) when no
+ * preset is stored; a stored `sailor_frame.preset` naming either one always wins over table
+ * order, as long as its aspect matches the Frame's.
  */
+import { PLAIN_SIZE_PRESETS } from './plainPresets'
 
 /** Fractions of the Frame's width (left/right) and height (top/bottom) the platform covers with its own interface. */
 export interface KeepClear { top: number; bottom: number; left: number; right: number }
@@ -63,16 +71,6 @@ export const FRAME_FORMATS: readonly FrameFormat[] = [
   { id: 'ad-970x250', label: 'Display ad · 970×250', w: 970, h: 250, view: 970, carries: 3, nc: 24 },
 ]
 
-/** The six plain size presets' sizes (kept in sync by hand with `FRAME_SIZE_PRESETS`'s first six). */
-const PLAIN_PRESET_SIZES: readonly { w: number; h: number }[] = [
-  { w: 1024, h: 1024 }, // 1:1
-  { w: 1280, h: 720 },  // 16:9
-  { w: 720, h: 1280 },  // 9:16
-  { w: 1024, h: 1280 }, // 4:5
-  { w: 1024, h: 768 },  // 4:3
-  { w: 1240, h: 1754 }, // A4
-]
-
 /** The format a Frame is sized for (ruling P5), or null. */
 export function formatFor(props: Record<string, unknown> | undefined, frameW: number, frameH: number): FrameFormat | null {
   const sf = props?.sailor_frame as { preset?: string } | undefined
@@ -86,6 +84,18 @@ export function formatFor(props: Record<string, unknown> | undefined, frameW: nu
     }
   }
   const exact = FRAME_FORMATS.find(f => f.w === frameW && f.h === frameH)
-  if (exact && !PLAIN_PRESET_SIZES.some(p => p.w === frameW && p.h === frameH)) return exact
+  if (exact && !PLAIN_SIZE_PRESETS.some(p => p.w === frameW && p.h === frameH)) return exact
   return null
+}
+
+/** UI grouping for a long Size select: "Social" (Meta, Pinterest, link previews, video
+ *  thumbnails) vs. "Display ads" (Google Performance Max, the IAB banner sizes). The six
+ *  plain size presets are their own "Sizes" group, added by the caller. */
+export type FrameFormatGroup = 'Social' | 'Display ads'
+const SOCIAL_FORMAT_IDS = new Set<string>([
+  'meta-feed-4x5', 'meta-feed-1x1', 'meta-story', 'meta-story-hd',
+  'pinterest-2x3', 'pinterest-9x16', 'link-preview', 'video-thumb',
+])
+export function frameFormatGroup(id: string): FrameFormatGroup {
+  return SOCIAL_FORMAT_IDS.has(id) ? 'Social' : 'Display ads'
 }

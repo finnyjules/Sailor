@@ -49,6 +49,22 @@ const model = computed({
   get: () => props.value,
   set: (v: string) => emit('update:value', v),
 })
+
+// `optionGroups[i]` is the <optgroup> heading for `options[i]`, positionally paired like
+// `optionLabels` — consecutive options sharing a heading render under one group. Same rule
+// StudioSelect's own plain-select branch uses, so a picker reads identically whichever
+// branch renders it.
+const grouped = computed(() => {
+  const headings = (props.spec as { optionGroups?: string[] }).optionGroups
+  if (!headings) return null
+  const out: { heading: string; items: string[] }[] = []
+  options.value.forEach((o, i) => {
+    const heading = headings[i] ?? ''
+    if (!out.length || out[out.length - 1]!.heading !== heading) out.push({ heading, items: [] })
+    out[out.length - 1]!.items.push(o)
+  })
+  return out
+})
 </script>
 
 <template>
@@ -81,10 +97,20 @@ const model = computed({
       class="absolute inset-x-0 -inset-y-1.5 cursor-pointer opacity-0"
       @pointerdown.stop
     >
-      <option
-        v-for="o in options" :key="o" :value="o" class="bg-neutral-900"
-        :class="{ capitalize: !(spec as { optionLabels?: string[] }).optionLabels }"
-      >{{ labelFor(o) }}</option>
+      <template v-if="grouped">
+        <optgroup v-for="g in grouped" :key="g.heading" :label="g.heading" class="bg-neutral-900">
+          <option
+            v-for="o in g.items" :key="o" :value="o" class="bg-neutral-900"
+            :class="{ capitalize: !(spec as { optionLabels?: string[] }).optionLabels }"
+          >{{ labelFor(o) }}</option>
+        </optgroup>
+      </template>
+      <template v-else>
+        <option
+          v-for="o in options" :key="o" :value="o" class="bg-neutral-900"
+          :class="{ capitalize: !(spec as { optionLabels?: string[] }).optionLabels }"
+        >{{ labelFor(o) }}</option>
+      </template>
     </select>
   </span>
 </template>

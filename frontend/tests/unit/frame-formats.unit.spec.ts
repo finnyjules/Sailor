@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { FRAME_FORMATS, formatFor } from '~/lib/frame/formats'
 import { FRAME_SIZE_PRESETS, framePresetId, applyFramePreset, type FrameSizeNodeData } from '~/lib/frame/frameSize'
+import { PLAIN_SIZE_PRESETS } from '~/lib/frame/plainPresets'
 
 describe('frame formats — the table', () => {
   it('has 16 entries', () => {
@@ -34,6 +35,19 @@ describe('frame formats — the table', () => {
     const ad728 = FRAME_FORMATS.find(f => f.id === 'ad-728x90')!
     expect(ad728.nc).toBe(24)
     expect(ad728.carries).toBe(3)
+  })
+})
+
+describe('plainPresets — the one shared source of the six plain sizes', () => {
+  it('FRAME_SIZE_PRESETS builds its first six directly from PLAIN_SIZE_PRESETS', () => {
+    expect(FRAME_SIZE_PRESETS.slice(0, 6)).toEqual(PLAIN_SIZE_PRESETS)
+  })
+
+  it('formatFor\'s exclusion check reads the same six sizes: none of them exact-match a format', () => {
+    for (const p of PLAIN_SIZE_PRESETS) {
+      const byExactSize = FRAME_FORMATS.find(f => f.w === p.w && f.h === p.h)
+      if (byExactSize) expect(formatFor(undefined, p.w, p.h)).toBeNull()
+    }
   })
 })
 
