@@ -14,16 +14,23 @@
  * `data` is the node's reactive `data` object; writes mutate it in place.
  */
 import { isResponsiveFrame } from './responsive/fromNode'
+import { FRAME_FORMATS } from './formats'
 
 export interface FrameSizePreset { id: string; label: string; w: number; h: number }
 
-export const FRAME_SIZE_PRESETS: readonly FrameSizePreset[] = [
+const PLAIN_SIZE_PRESETS: readonly FrameSizePreset[] = [
   { id: '1:1', label: 'Square · 1:1', w: 1024, h: 1024 },
   { id: '16:9', label: 'Wide · 16:9', w: 1280, h: 720 },
   { id: '9:16', label: 'Tall · 9:16', w: 720, h: 1280 },
   { id: '4:5', label: 'Portrait · 4:5', w: 1024, h: 1280 },
   { id: '4:3', label: 'Classic · 4:3', w: 1024, h: 768 },
   { id: 'A4', label: 'A4 · print', w: 1240, h: 1754 },
+]
+
+/** The six plain size presets, then one preset per real ad/social format (table order). */
+export const FRAME_SIZE_PRESETS: readonly FrameSizePreset[] = [
+  ...PLAIN_SIZE_PRESETS,
+  ...FRAME_FORMATS.map(f => ({ id: f.id, label: f.label, w: f.w, h: f.h })),
 ]
 
 /** The parts of a Frame node's `data` this module reads and writes. */

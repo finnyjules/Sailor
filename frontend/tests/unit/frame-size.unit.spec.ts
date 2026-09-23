@@ -33,8 +33,8 @@ describe('framePresetId', () => {
     expect(framePresetId(0, 0)).toBe('')
     expect(framePresetId(1280, 0)).toBe('')
   })
-  it('keeps the node header presets', () => {
-    expect(FRAME_SIZE_PRESETS.map(p => p.id)).toEqual(['1:1', '16:9', '9:16', '4:5', '4:3', 'A4'])
+  it('keeps the node header presets first, unchanged (Stage 2 adds the ad/social formats after them)', () => {
+    expect(FRAME_SIZE_PRESETS.slice(0, 6).map(p => p.id)).toEqual(['1:1', '16:9', '9:16', '4:5', '4:3', 'A4'])
   })
 })
 

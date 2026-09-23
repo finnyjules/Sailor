@@ -18,6 +18,12 @@ export interface SheetOpts {
   flip?: boolean
   /** The real columns the design grid spans (a sub-sheet). Default `[1, NC]`. */
   colRange?: [number, number]
+  /** The format's rules for the sheet: the minimum text size from its viewing width, its column
+   *  count, and the platform's side margins. Absent: Stage 1 behaviour, unchanged. */
+  format?: { view?: number; nc?: number; keepSide?: number }
+  /** Compose on a band this tall (kit units) instead of the full height — the part the platform
+   *  leaves uncovered. `B` still comes from the FULL height. */
+  composeH?: number
 }
 
 export interface Sheet {
@@ -63,10 +69,12 @@ export function makeSheet(o: SheetOpts): Sheet {
   const gridOn = !!grid && grid.mode !== 'off'
 
   const W = 100
-  const H = 100 * o.frameH / o.frameW
-  const B = Math.sqrt(W * H) / Math.sqrt(100 * 100 * 1280 / 895)   // size unit: 1 on the portrait poster
-  const M = gridOn ? grid!.margin * 100 : Math.min(4, H * 0.06)
-  const NC = grid?.mode === 'explicit' ? grid.columns : (H / W >= 0.7 ? 12 : W / H >= 2.5 ? 20 : 16)
+  const H_full = 100 * o.frameH / o.frameW
+  const H = o.composeH ?? H_full
+  const B = Math.sqrt(W * H_full) / Math.sqrt(100 * 100 * 1280 / 895)   // size unit: 1 on the portrait poster — from the FULL height
+  let M = gridOn ? grid!.margin * 100 : Math.min(4, H * 0.06)
+  if (o.format?.keepSide != null) M = Math.max(M, o.format.keepSide * 100)
+  const NC = grid?.mode === 'explicit' ? grid.columns : (o.format?.nc ?? (H_full / W >= 0.7 ? 12 : W / H_full >= 2.5 ? 20 : 16))
   const G = gridOn ? grid!.gutter * 100 : 1.6 * B
   const CW = (W - 2 * M - (NC - 1) * G) / NC
   const RH = (H - 2 * M) / NR
@@ -82,10 +90,13 @@ export function makeSheet(o: SheetOpts): Sheet {
   const SPAN = (a: number, b: number) => XR(b) - X(a)
   const L = (r: number) => M + r * RH                                 // line under design row r; L(0) = top margin
 
-  // Swiss styles
+  // Swiss styles — minimum text size from the format's viewing width (Stage 2), Stage 1 sizes when absent.
+  const infoFloor = o.format?.view ? 900 / o.format.view : 0
+  const infoSize = Math.max(1.95 * B, infoFloor)
+  const secondSize = o.format?.view ? Math.max(4.4 * B, 1.6 * infoSize) : 4.4 * B
   const DISPLAY: Style = { role: 'title', wt: 600, ls: -0.05, lh: 0.9 }
-  const SECOND: Style & { size: number } = { role: 'details', size: 4.4 * B, wt: 500, ls: -0.02, lh: 1.04 }
-  const INFO: Style & { size: number } = { role: 'caption', size: 1.95 * B, wt: 400, ls: 0, lh: 1.3 }
+  const SECOND: Style & { size: number } = { role: 'details', size: secondSize, wt: 500, ls: -0.02, lh: 1.04 }
+  const INFO: Style & { size: number } = { role: 'caption', size: infoSize, wt: 400, ls: 0, lh: 1.3 }
 
   // measurement: width at size 100, with the letter spacing the layout will set
   const w100 = (s: string, st: Style = DISPLAY) => measure.w100(s, st.role ?? 'title', st.ls)

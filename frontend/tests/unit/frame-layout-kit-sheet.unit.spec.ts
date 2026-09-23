@@ -141,3 +141,50 @@ describe('layout kit — canvas measure', () => {
     expect(m.capAbove('title')).toBeCloseTo(0.35, 9)
   })
 })
+
+describe('layout kit — sheet takes a format (Stage 2)', () => {
+  const STAGE1_FRAMES: readonly [number, number][] = [[895, 1280], [1080, 1080], [1280, 720], [1280, 400]]
+  const NUMERIC_FIELDS = ['W', 'H', 'M', 'G', 'NC', 'CW', 'RH', 'GAP', 'CAP', 'B'] as const
+
+  it('no format, no composeH: every exported number is byte-identical to a Stage 1 sheet', () => {
+    for (const [w, h] of STAGE1_FRAMES) {
+      const stage1 = sheet(w, h)
+      const withEmptyOpts = makeSheet({ frameW: w, frameH: h, measure, format: undefined, composeH: undefined })
+      for (const f of NUMERIC_FIELDS) expect(withEmptyOpts[f]).toBe(stage1[f])
+      expect(withEmptyOpts.DISPLAY).toEqual(stage1.DISPLAY)
+      expect(withEmptyOpts.SECOND).toEqual(stage1.SECOND)
+      expect(withEmptyOpts.INFO).toEqual(stage1.INFO)
+    }
+  })
+
+  it('format.view raises the INFO/SECOND floor', () => {
+    const S = sheet(1280, 720, { format: { view: 170 } })
+    expect(S.INFO.size).toBeCloseTo(900 / 170, 3)
+    expect(S.SECOND.size).toBeCloseTo(1.6 * (900 / 170), 3)
+  })
+
+  it('without format.view, SECOND stays the exact Stage 1 value even with other format fields set', () => {
+    const stage1 = sheet(1280, 720)
+    const S = sheet(1280, 720, { format: { nc: 24 } })
+    expect(S.INFO.size).toBe(stage1.INFO.size)
+    expect(S.SECOND.size).toBe(stage1.SECOND.size)
+  })
+
+  it('format.nc overrides the column count', () => {
+    const S = sheet(728, 90, { format: { nc: 24 } })
+    expect(S.NC).toBe(24)
+  })
+
+  it('format.keepSide raises the margin', () => {
+    const S = sheet(1280, 720, { format: { keepSide: 0.06 } })
+    expect(S.M).toBe(6)
+  })
+
+  it('composeH composes on a band, but B still comes from the full height', () => {
+    const full = sheet(1080, 1920)
+    const S = sheet(1080, 1920, { composeH: 50 })
+    expect(S.H).toBe(50)
+    expect(S.B).toBeCloseTo(full.B, 9)
+    expect(S.L(16)).toBeCloseTo(50 - S.M, 9)
+  })
+})
