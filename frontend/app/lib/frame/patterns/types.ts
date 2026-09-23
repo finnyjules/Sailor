@@ -57,8 +57,12 @@ export interface LayerOp {
   /** Which element this moves: a role, or the literal element id for images/shapes. */
   target: Role | string
   kind: 'text' | 'image' | 'shape'
-  x: number
-  y: number
+  x?: number
+  y?: number
+  /** Hide this layer (the renderer treats `visible === false` as hidden). Tracked like the
+   *  other layout-set fields: restored when a later op omits it, unless the user changed
+   *  visibility since. A hidden op carries no geometry — it must not move the layer. */
+  hidden?: boolean
   w?: number
   h?: number
   fontSize?: number

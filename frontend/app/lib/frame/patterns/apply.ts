@@ -47,7 +47,9 @@ export function applyPlacement(
   return layers.map(layer => {
     const op = byId.get(layer.id)
     if (!op) return layer
-    const next: any = { ...layer, x: op.x, y: op.y }
+    const next: any = { ...layer }
+    if (op.x != null) next.x = op.x
+    if (op.y != null) next.y = op.y
     const blend = op.blendMode ?? op.blend
     const textOrImage = layer.kind === 'text' || layer.kind === 'image' || layer.kind === 'wired'
     // Layout-set fields (opacity, blend, spacing, crop, mask, path, runs) are re-authored on
@@ -66,6 +68,14 @@ export function applyPlacement(
         if (untouched) { if (entry.was == null) delete next[field]; else next[field] = entry.was }
         delete prev[field]
       }
+    }
+    // A hidden op carries no geometry or other fields — it only toggles visibility (tracked
+    // like every other layout-set field: restored when a later op leaves `hidden` unset, unless
+    // the user changed visibility since). Stop here: nothing else about the layer changes.
+    track('visible', op.hidden ? false : undefined)
+    if (op.hidden) {
+      if (Object.keys(prev).length) next.layoutPrev = prev; else delete next.layoutPrev
+      return next as LocalLayer
     }
     // Text ops always carry their rotation. An image or shape takes the layout's angle (the kit
     // writes 0 when the layout gives none), with the user's own angle remembered like the other

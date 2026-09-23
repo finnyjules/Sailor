@@ -6,6 +6,7 @@ import type { ResolvedPalette } from '../palette'
 import { roleToPaint } from '../palette'
 import { createEllipseLayer, createRectLayer } from '~/composables/useCompositorLayers'
 import type { LocalLayer, TextRun } from '~/composables/useCompositorLayers'
+import type { RoleKey } from './types'
 
 // ═══════════════════════ elements → layer ops ═══════════════════════
 // A layout's elements (kit units: percent of frame width, W = 100, H = S.H) become ops on the
@@ -167,6 +168,7 @@ function flowOp(e: TextEl, S: Sheet, target: string, z: number): LayerOp {
 export function elementsToOps(
   els: El[], S: Sheet, targets: RoleTargets, _frame: { w: number; h: number },
   palette: ResolvedPalette = FALLBACK_PALETTE,
+  opts?: { hide?: RoleKey[] },
 ): { ops: LayerOp[]; owned: LocalLayer[] } {
   const ops: LayerOp[] = []
   const owned: LocalLayer[] = []
@@ -307,5 +309,15 @@ export function elementsToOps(
       }
     }
   })
+  // Roles the layout's format does not carry: hide the layer in place (no geometry — apply.ts
+  // must not move it), stacked after every element so a later `hide` always wins for that id.
+  if (opts?.hide?.length) {
+    const z = els.length
+    for (const role of opts.hide) {
+      const target = targets[role]
+      if (!target) continue
+      ops.push({ target, kind: 'text', hidden: true, z })
+    }
+  }
   return { ops, owned }
 }

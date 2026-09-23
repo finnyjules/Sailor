@@ -207,6 +207,49 @@ describe('applyPlacement — box fit while a layout holds (I5)', () => {
   })
 })
 
+describe('applyPlacement — hidden (tracked visible)', () => {
+  const palette = { ink: '#111', accent: '#e33', field: '#eee' } as any
+  const elements = { title: { role: 'title', id: 't', text: 'NOISE', words: ['NOISE'] }, images: [], shapes: [], shapeMode: null } as any
+
+  it('an op with hidden:true hides the layer and remembers what it was', () => {
+    const layers: LocalLayer[] = [textLayer('t')]
+    const [out] = applyPlacement(layers, { did: 'x', ops: [{ target: 'title', kind: 'text', hidden: true }] }, elements, palette)
+    expect((out as any).visible).toBe(false)
+    expect((out as any).layoutPrev.visible).toEqual({ was: null, set: false })
+  })
+
+  it('a later op without hidden restores visibility (key absent again)', () => {
+    const layers: LocalLayer[] = [textLayer('t')]
+    const a = applyPlacement(layers, { did: 'x', ops: [{ target: 'title', kind: 'text', hidden: true }] }, elements, palette)
+    const [b] = applyPlacement(a, { did: 'x', ops: [{ target: 'title', kind: 'text', x: 0.5, y: 0.5, fontSize: 0.1 }] }, elements, palette)
+    expect('visible' in (b as any)).toBe(false)
+    expect('layoutPrev' in (b as any)).toBe(false)
+  })
+
+  it('a user edit to visible between two layouts is kept when the next op omits hidden', () => {
+    const layers: LocalLayer[] = [textLayer('t')]
+    const a = applyPlacement(layers, { did: 'x', ops: [{ target: 'title', kind: 'text', hidden: true }] }, elements, palette)
+    const edited = [{ ...(a[0] as any), visible: true }]
+    const [b] = applyPlacement(edited, { did: 'x', ops: [{ target: 'title', kind: 'text', x: 0.5, y: 0.5, fontSize: 0.1 }] }, elements, palette)
+    expect((b as any).visible).toBe(true)
+  })
+
+  it('a hidden op with no x/y leaves the layer\'s position untouched', () => {
+    const layers: LocalLayer[] = [textLayer('t', { x: 0.37, y: 0.61 })]
+    const [out] = applyPlacement(layers, { did: 'x', ops: [{ target: 'title', kind: 'text', hidden: true }] }, elements, palette)
+    expect((out as any).x).toBe(0.37)
+    expect((out as any).y).toBe(0.61)
+  })
+
+  it('a hidden op changes nothing on the layer except visibility', () => {
+    const layers: LocalLayer[] = [textLayer('t', { fontSize: 0.2, align: 'right', lineHeight: 1.4 })]
+    const [out] = applyPlacement(layers, { did: 'x', ops: [{ target: 'title', kind: 'text', hidden: true }] }, elements, palette)
+    expect((out as any).fontSize).toBe(0.2)
+    expect((out as any).align).toBe('right')
+    expect((out as any).lineHeight).toBe(1.4)
+  })
+})
+
 describe('applyPlacement — image and shape rotation (I6)', () => {
   const els = {
     title: { role: 'title', id: 't', text: 'NOISE', words: ['NOISE'] },

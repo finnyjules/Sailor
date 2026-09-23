@@ -253,6 +253,23 @@ describe('elementsToOps — pieces and photos', () => {
     expect(ops[0]!.path?.repeat).toBe(3)
   })
 
+  it('opts.hide emits one hidden op per role that has a target layer, with no geometry', () => {
+    const els: El[] = [disp('TITLE', { top: 10, size: 12 })]
+    const { ops } = elementsToOps(els, S, targets, frame, undefined, { hide: ['caption'] })
+    expect(ops).toHaveLength(2)
+    const hide = ops[1]!
+    expect(hide.target).toBe('c')
+    expect(hide.hidden).toBe(true)
+    expect(hide.x).toBeUndefined()
+    expect(hide.y).toBeUndefined()
+  })
+
+  it('opts.hide skips a role with no target layer', () => {
+    const els: El[] = [disp('TITLE', { top: 10, size: 12 })]
+    const { ops } = elementsToOps(els, S, { title: 't' }, frame, undefined, { hide: ['caption'] })
+    expect(ops).toHaveLength(1)
+  })
+
   it('z follows element order', () => {
     const { ops } = elementsToOps([
       { k: 'p', x: 0, y: 0, w: 10, h: 10, role: 'photo' },
