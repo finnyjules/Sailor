@@ -51,7 +51,7 @@ import { resolveLayout, frameDocFromProps, isResponsiveFrame, effectivePins, gui
 import { mapKeyToEdit, snapAngle } from '~/lib/compositor/layerEdits'
 import { resizeBox, type Handle } from '~/lib/compositor/resizeBox'
 import ResponsivePinsCard from './ResponsivePinsCard.vue'
-import { atDesignSize as isAtDesignSize, clampViewSize, resizeViewFromEdge, shapePresets, readoutLabel as viewReadoutLabel } from '~/lib/frame/responsive/viewport'
+import { atDesignSize as isAtDesignSize, clampViewSize, designShapedArtboard, resizeViewFromEdge, shapePresets, readoutLabel as viewReadoutLabel } from '~/lib/frame/responsive/viewport'
 import { useTemplateLibrary } from '~/composables/useTemplateLibrary'
 import { serializeLayersForOS, parseLayersFromOS, setClipboard, type ClipboardPayload } from '~/lib/compositor/layerClipboard'
 import {
@@ -756,11 +756,12 @@ function wiredDimsForSlot(slot: number): { w: number; h: number } | undefined {
 // view's shape, so the editor gets the design shape at the same width instead — otherwise every
 // commit re-syncs wired widgets, and every arrow nudge converts px, with the wrong shape. Anything
 // else that derives design geometry from the artboard's shape uses this too.
-// At the design size this is exactly canvasDisplay.
+// It goes by the artboard's SHAPE, not by atDesign: a snap back to the design size flips atDesign at
+// once but the artboard re-fits a tick later, and a commit in that tick (a view drag settled by B,
+// a template placed at a view) must still sync wired widgets with the design shape.
+// A fixed Frame, and a settled design size, get exactly canvasDisplay.
 function editorDims(): { w: number; h: number } {
-  return atDesign.value
-    ? { w: canvasDisplay.w, h: canvasDisplay.h }
-    : { w: canvasDisplay.w, h: canvasDisplay.w * designSize.value.h / Math.max(1, designSize.value.w) }
+  return designShapedArtboard(canvasDisplay, designSize.value, frameIsResponsive.value)
 }
 const editor = useLocalLayerEditor({
   node: () => compositor.value,
@@ -1748,7 +1749,9 @@ function applyPaletteToSelection(fam: PaletteFamily) {
   distributePaletteToSelection(fam.hexes)
 }
 // ── Recolour the whole frame from a palette family (Design tab, no selection) ──
-const frameColourSlots = computed(() => slotsOf(colourSites(localLayers.value as LocalLayer[], background.value, canvasDisplay.h / Math.max(1, canvasDisplay.w))))
+// Design shape (editorDims), the same aspect recolourWith / reassignSlot weigh with: at a viewing size
+// the artboard takes the view's shape, which would reorder the slots.
+const frameColourSlots = computed(() => { const d = editorDims(); return slotsOf(colourSites(localLayers.value as LocalLayer[], background.value, d.h / Math.max(1, d.w))) })
 type RecolourMemory = { hexes: string[]; applied: Record<string, string>; images?: boolean; imageEffects?: OwnedMaps }
 const recolourMemory = computed<RecolourMemory | null>(() => ((compositor.value?.data?.properties as any)?.sailor_recolour ?? null))
 const recolourSeed = computed(() => inkOf(frameColourSlots.value)?.hex ?? '#4f8ad9')
@@ -3406,15 +3409,19 @@ function onViewPointerMove(e: PointerEvent) {
   const d = viewDrag.value; if (!d || d.kind !== 'move' || e.pointerId !== d.pointerId) return
   // Snapped back to the design size mid-drag (a design-only tool's shortcut): settle and stop.
   if (!viewEditing.value) { onViewPointerUp(); return }
+  if (!d.recorded && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 3) return // a click, not a drag yet
+  const { dx, dy } = viewDelta(e, d)
+  const { w: W0, h: H0 } = designSize.value
+  const edits = d.units.map(u => moveUnitAtView(u, d.layers, W0, H0, dx, dy, 'drag'))
   if (!d.recorded) {
-    if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 3) return // a click, not a drag yet
+    // Nothing moves (a full-bleed unit welded on both axes, or a pull along its welded axis only):
+    // no empty undo step. The drag stays unrecorded until a frame actually writes something.
+    if (!edits.some(ed => ed.patches.length || ed.pins)) return
     recordHistory() // the whole drag is ONE undo step, recorded on the first real movement (Ruling B)
     d.recorded = true
   }
-  const { dx, dy } = viewDelta(e, d)
   d.dx = dx; d.dy = dy
-  const { w: W0, h: H0 } = designSize.value
-  applyViewEdits(d.units.map(u => moveUnitAtView(u, d.layers, W0, H0, dx, dy, 'drag')))
+  applyViewEdits(edits)
 }
 /** Pointer up (or cancel, Escape, lost capture, unmount): settle the drop rule at the LAST drag
  *  frame — the move's last delta, or a handle's last edit — for a move and a handle drag alike. */
@@ -3549,14 +3556,16 @@ function onViewHandleMove(e: PointerEvent) {
   const d = viewDrag.value; if (!d || d.kind === 'move' || e.pointerId !== d.pointerId) return
   // Snapped back to the design size mid-drag (a design-only tool's shortcut): settle and stop.
   if (!viewEditing.value) { onViewPointerUp(); return }
+  if (!d.recorded && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 3) return // a press, not a drag yet
+  const edit = viewHandleEditFor(e); if (!edit) return
+  const ve = edit('drag')
   if (!d.recorded) {
-    if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 3) return // a press, not a drag yet
+    if (!ve.patches.length && !ve.pins) return // nothing changes yet: no empty undo step
     recordHistory() // the whole handle drag is ONE undo step, recorded on the first real movement
     d.recorded = true
   }
-  const edit = viewHandleEditFor(e); if (!edit) return
   d.edit = edit
-  applyViewEdits([edit('drag')])
+  applyViewEdits([ve])
 }
 // Closing the modal mid-drag settles the drop too, so the saved doc never keeps a held pin.
 onBeforeUnmount(() => { onViewPointerUp() })
@@ -3902,8 +3911,11 @@ const editingStyle = computed(() => {
   // (canvasDisplay) has the view's shape, so they place straight onto it. Its size fields are in
   // units of the artboard width times its layout scale k (the painter scales by k about the
   // centre), so its local box at the artboard width, times k, is its drawn size in canvas px —
-  // including a re-wrapped text, whose resolved box keeps the DESIGN height when centred. A
-  // top/bottom text is drawn anchored at that edge (textVAlignCenterOffset, along the rotation).
+  // including a re-wrapped text. The textarea measures the layer rather than reading r.boxes because
+  // r.boxes is the UNIT's box, which for grouped text is the group's (for a lone text the resolver
+  // now reports the drawn height, a centre-pinned re-wrapped text included). A top/bottom text is
+  // drawn anchored at that edge (textVAlignCenterOffset, along the rotation); the resolver's boxes
+  // do not apply that yet.
   const rl = viewEditing.value ? resolved.value?.layers.find(x => x.id === l.id) : undefined
   if (rl?.kind === 'text') {
     const W = canvasDisplay.w, H = canvasDisplay.h, k = layoutScaleOf(rl)
@@ -6815,9 +6827,11 @@ const smartHasScribble = ref(false)
 
 // Tools that paint or edit straight onto the artboard work at the design size only. They snap back
 // when picked (viewOnlyGuard); while one is on, the size controls hide so the view cannot change under it.
+// An open image edit counts too: its result toolbar and silhouette sit on the design-size image.
 // (Declared after smartActive, the last of the tool flags it reads.)
 const designOnlyToolActive = computed(() => !!(brush.active.value || pen.active.value || nodeEdit.active.value
-  || genActive.value || smartActive.value || regionSelectActive.value || drawSectionActive.value || distortTool.value))
+  || genActive.value || smartActive.value || regionSelectActive.value || drawSectionActive.value || distortTool.value
+  || editImage.value))
 
 const smartTarget = computed<any | null>(() =>
   smartTargetId.value
@@ -8373,8 +8387,9 @@ onUnmounted(() => {
         <!-- Responsive Frames: draggable artboard edges (editor-only). These live in
              the wrapper's transformed space so they track the artboard under pan/zoom;
              a fixed frame shows none, keeping its render byte-identical. Each grip
-             stops propagation so a drag never also pans the stage or clears selection. -->
-        <template v-if="frameIsResponsive && !designOnlyToolActive">
+             stops propagation so a drag never also pans the stage or clears selection.
+             Hidden during a view drag, so a second pointer cannot change the view under it. -->
+        <template v-if="frameIsResponsive && !designOnlyToolActive && !viewDrag">
           <div class="absolute top-0 -right-1 w-2 h-full cursor-ew-resize group/redge" style="pointer-events:auto"
             @pointerdown="onEdgeDown('e', $event)" @pointermove="onEdgeMove" @pointerup="onEdgeUp" @pointercancel="onEdgeUp">
             <div class="absolute inset-y-0 right-0 w-px bg-transparent group-hover/redge:bg-[#3b82f6]" />
@@ -8774,8 +8789,8 @@ onUnmounted(() => {
         </div>
         <!-- Responsive Frames: the viewing-size readout. Fixed frames show nothing.
              Grey at the design size, accent (#3b82f6) once you are viewing another
-             size; "Back to design size" only appears while off design. -->
-        <div v-if="frameIsResponsive && !designOnlyToolActive"
+             size; "Back to design size" only appears while off design. Hidden during a view drag. -->
+        <div v-if="frameIsResponsive && !designOnlyToolActive && !viewDrag"
           class="flex items-center gap-1.5 pl-2 ml-1 border-l border-white/10 text-[11px]"
           :class="atDesign ? 'text-white/60' : 'text-[#3b82f6]'"
           @click.stop>
