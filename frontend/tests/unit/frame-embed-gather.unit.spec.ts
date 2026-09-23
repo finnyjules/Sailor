@@ -1,0 +1,156 @@
+import { describe, it, expect, vi } from 'vitest'
+import { buildFrameSnapshot, isBlocked, type FrameExportIO } from '~/lib/embed/frame/gather'
+import { planFrameExport } from '~/lib/embed/frame/plan'
+import { assetKey, type FrameVariant } from '~/lib/embed/frame/types'
+import { makeFontSource } from '~/lib/embed/frame/appIO'
+import { createTextLayer, createImageLayer } from '~/composables/useCompositorLayers'
+import { clipFrameKey } from '~/lib/compositor/clip'
+import { createEffect } from '~/lib/compositor/effectStack'
+
+const v = (layers: any[]): FrameVariant => ({
+  width: 1000, height: 500, layers, stackOrder: layers.map(l => `l:${l.id}`), groups: [],
+  background: null, post: [], motion: null, wiredTreatments: {},
+})
+
+function fakeIO(over: Partial<FrameExportIO> = {}): FrameExportIO {
+  return {
+    fetchBlob: vi.fn(async (url: string) => new Blob([url])),
+    blobToImage: vi.fn(async () => ({ width: 10, height: 10 } as any)),
+    imageToDataUrl: vi.fn(async (_i, maxPx, mime) => `data:${mime};base64,IMG${maxPx}`),
+    blobToDataUrl: vi.fn(async () => 'data:image/png;base64,RAW'),
+    blobToBase64: vi.fn(async () => 'RkFMTA=='),
+    subsetFont: vi.fn(async () => 'U1VC'),
+    fontSource: vi.fn((family: string, weight: number) => ({ url: `/f/${family}/${weight}`, origin: 'google' as const, weight })),
+    wiredStill: vi.fn(() => ({ width: 4, height: 4 } as any)),
+    depthImage: vi.fn(() => null),
+    shaderDefs: vi.fn(() => []),
+    ...over,
+  }
+}
+const plan = (layers: any[]) => planFrameExport({
+  variant: v(layers), fit: 'fit', wiredSlots: [], catalogIds: new Set(), hasMotion: false, animatedFill: false,
+})
+
+describe('buildFrameSnapshot', () => {
+  it('inlines each image under its asset key, re-encoded at the planned size', async () => {
+    const img = createImageLayer('photo.png', 1, { w: 0.4, h: 0.4 })
+    const snap = await buildFrameSnapshot(plan([img]), v([img]), fakeIO())
+    expect(snap.assets.urls[assetKey('image', 'photo.png')]).toBe('data:image/webp;base64,IMG800')
+    expect(isBlocked(snap)).toBe(false)
+  })
+
+  it('a failed image blocks the export and names the file', async () => {
+    const img = createImageLayer('gone.png', 1, {})
+    const io = fakeIO({ fetchBlob: vi.fn(async () => { throw new Error('404') }) })
+    const snap = await buildFrameSnapshot(plan([img]), v([img]), io)
+    expect(isBlocked(snap)).toBe(true)
+    expect(snap.notices.find(n => n.group === 'blocked')?.text).toBe('The image "gone.png" couldn\'t be loaded.')
+  })
+
+  it('every clip frame is inlined and the clip\'s weight is stated', async () => {
+    const img = createImageLayer('rose.png', 1, { w: 0.2, h: 0.2 })
+    const clip = { dir: 'c1', frames: 3, fps: 24, speed: 1, prompt: '', model: '' }
+    ;(img as any).clip = clip
+    const snap = await buildFrameSnapshot(plan([img]), v([img]), fakeIO())
+    for (let i = 0; i < 3; i++) expect(snap.assets.urls[assetKey('clipFrame', clipFrameKey(clip, i))]).toMatch(/^data:image\/webp/)
+    expect(snap.notices.find(n => n.group === 'live')?.text).toMatch(/^Image clip · adds \d+(\.\d)? (KB|MB)$/)
+  })
+
+  it('fonts are subsetted, inlined as faces, and listed by name', async () => {
+    const t = createTextLayer({ text: 'Hi', fontFamily: 'Inter', fontWeight: 700 })
+    const io = fakeIO()
+    const snap = await buildFrameSnapshot(plan([t]), v([t]), io)
+    expect(io.subsetFont).toHaveBeenCalledWith('RkFMTA==', 'Hi')
+    expect(snap.assets.fonts).toEqual([{ family: 'Inter', weight: 700, dataUrl: 'data:font/ttf;base64,U1VC', origin: 'google' }])
+    expect(snap.notices).toContainEqual({ group: 'fonts', text: 'Inter · Google' })
+  })
+
+  it('a failed subset falls back to the whole font', async () => {
+    const t = createTextLayer({ text: 'Hi', fontFamily: 'Inter', fontWeight: 700 })
+    const snap = await buildFrameSnapshot(plan([t]), v([t]), fakeIO({ subsetFont: vi.fn(async () => null) }))
+    expect(snap.assets.fonts[0]!.dataUrl).toBe('data:font/ttf;base64,RkFMTA==')
+  })
+
+  it('a system family needs nothing and says nothing', async () => {
+    const t = createTextLayer({ text: 'Hi', fontFamily: 'Helvetica', fontWeight: 400 })
+    const snap = await buildFrameSnapshot(plan([t]), v([t]), fakeIO({ fontSource: vi.fn(() => null) }))
+    expect(snap.assets.fonts).toEqual([])
+    expect(snap.notices.filter(n => n.group === 'fonts')).toEqual([])
+  })
+
+  it('a font that cannot be fetched blocks the export', async () => {
+    const t = createTextLayer({ text: 'Hi', fontFamily: 'Inter', fontWeight: 700 })
+    const io = fakeIO({ fetchBlob: vi.fn(async () => { throw new Error('offline') }) })
+    const snap = await buildFrameSnapshot(plan([t]), v([t]), io)
+    expect(snap.notices.find(n => n.group === 'blocked')?.text)
+      .toBe('The font "Inter" couldn\'t be loaded, so the export would draw the wrong typeface.')
+  })
+
+  it('one variable file serves every weight of its family once', async () => {
+    const a = createTextLayer({ text: 'A', fontFamily: 'Inter', fontWeight: 300 })
+    const b = createTextLayer({ text: 'B', fontFamily: 'Inter', fontWeight: 800 })
+    const io = fakeIO({ fontSource: vi.fn(() => ({ url: '/f/inter-var', origin: 'variable' as const, weight: [100, 900] as const })) })
+    const snap = await buildFrameSnapshot(plan([a, b]), v([a, b]), io)
+    expect(snap.assets.fonts).toHaveLength(1)
+    expect(snap.assets.fonts[0]!.weight).toEqual([100, 900])
+    expect(io.subsetFont).toHaveBeenCalledWith('RkFMTA==', 'AB')
+  })
+
+  it('outlined text also gets its outline bytes under the Vector Type token', async () => {
+    const t = createTextLayer({ text: 'Out', fontFamily: 'Inter', fontWeight: 700 })
+    ;(t as any).renderAsOutline = true
+    const snap = await buildFrameSnapshot(plan([t]), v([t]), fakeIO())
+    expect(Object.keys(snap.assets.urls).some(k => k.startsWith('outlineFont|'))).toBe(true)
+  })
+
+  it('wired stills are captured', async () => {
+    const w = { kind: 'wired', id: 'w1', slot: 2, w: 0.5, lastAspect: 1, x: 0.5, y: 0.5 } as any
+    const snap = await buildFrameSnapshot(plan([w]), v([w]), fakeIO())
+    expect(snap.wired[2]).toEqual({ kind: 'still', dataUrl: 'data:image/webp;base64,IMG1000' })
+  })
+
+  it('a depth map the editor has cached ships; a missing one is named as left out', async () => {
+    const img = createImageLayer('p.png', 1, {})
+    ;(img as any).effects = [{ ...createEffect('dof'), visible: true }]
+    const missing = await buildFrameSnapshot(plan([img]), v([img]), fakeIO())
+    expect(missing.notices).toContainEqual({ group: 'leftOut', text: 'Depth blur on Image · needs a depth map', layerId: img.id })
+    const cached = await buildFrameSnapshot(plan([img]), v([img]), fakeIO({ depthImage: vi.fn(() => ({ width: 2, height: 2 } as any)) }))
+    expect(cached.assets.depth).toEqual([{ ref: 'p.png', dataUrl: 'data:image/png;base64,IMG4096' }])
+  })
+
+  it('shader definitions and their textures are inlined', async () => {
+    const io = fakeIO({ shaderDefs: vi.fn(() => [{ id: 'fx', textures: [{ uniform: 'u_atlas', file: 'atlas.png', v: '3' }] } as any]) })
+    const p = plan([]); p.shaderIds = ['fx']
+    const snap = await buildFrameSnapshot(p, v([]), io)
+    expect(snap.assets.shaders.map(d => d.id)).toEqual(['fx'])
+    expect(snap.assets.urls[assetKey('shaderTexture', 'atlas.png@3')]).toBe('data:image/png;base64,RAW')
+  })
+
+  it('a planned shader the catalog lacks blocks the export', async () => {
+    const p = plan([]); p.shaderIds = ['nope']
+    const snap = await buildFrameSnapshot(p, v([]), fakeIO())
+    expect(isBlocked(snap)).toBe(true)
+  })
+})
+
+describe('makeFontSource', () => {
+  it('an uploaded family wins and uses its nearest stored weight', () => {
+    const src = makeFontSource([{ family: 'Brand', slug: 'brand', weights: { '400': 'b4.otf', '700': 'b7.otf' } }])
+    expect(src('Brand', 600)).toEqual({ url: '/api/template-fonts/file/b7.otf', origin: 'uploaded', weight: 700 })
+    expect(src('Brand', 400)).toEqual({ url: '/api/template-fonts/file/b4.otf', origin: 'uploaded', weight: 400 })
+  })
+
+  it('a system family has no source', () => {
+    expect(makeFontSource([])('Helvetica', 400)).toBeNull()
+  })
+
+  it('a curated variable family is one file across its weight axis', () => {
+    const s = makeFontSource([])('Inter', 700)!
+    expect(s.origin).toBe('variable')
+    expect(Array.isArray(s.weight)).toBe(true)
+  })
+
+  it('anything else is a Google static cut at that weight', () => {
+    expect(makeFontSource([])('Lobster', 400)).toEqual({ url: '/api/fonts/google-file?family=Lobster&weight=400', origin: 'google', weight: 400 })
+  })
+})

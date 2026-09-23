@@ -74,6 +74,7 @@ import { presetStops, serializeStops } from '~/lib/spacetype/loftStops'
 // same module's async fetch+parse and its sync cache peek — loft's word mode
 // (buildScene) reads the peek synchronously; this file does the async warming.
 import { fontSourceUrl, loadFont, fontCacheGet, parseLibraryFontValue } from '~/lib/scene3d/outlines'
+import { bufferToBase64, subsetFontBase64 } from '~/lib/embed/fontBytes'
 // outlineFontValue normalizes a bare family (carried over from another effect via
 // CARRY_ON_SWITCH, e.g. Ribbon's default 'Inter') into a `google:`-prefixed value so
 // fontSourceUrl treats it as fetchable rather than a bogus local path — MUST be applied
@@ -1739,18 +1740,6 @@ async function downloadVideoFile() {
 // POST, not a network fetch of an external font host.
 const fontBytesCache = new Map<string, ArrayBuffer | null>()
 
-/** Base64-encode an ArrayBuffer without blowing the call stack on a ~200KB font file
- *  (String.fromCharCode(...bytes) spread would stack-overflow on the full array). */
-function bufferToBase64(buf: ArrayBuffer): string {
-  const bytes = new Uint8Array(buf)
-  let binary = ''
-  const CHUNK = 0x8000
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
-  }
-  return btoa(binary)
-}
-
 /**
  * Fetch the actual font FILE for family+weight as raw bytes. Reuses fontSourceUrl
  * (~/lib/scene3d/outlines) — the SAME resolution path the 3D Studio's text-extrude
@@ -1781,52 +1770,6 @@ async function fetchFontBytes(family: string, weight: number): Promise<ArrayBuff
 }
 
 /**
- * POST a font (base64) + the piece's text to the ComfyUI-side `/sailor/font_subset`
- * route (comfy_extras/nodes_timeline.py's subset_font_bytes) and return the
- * subsetted font as base64. Subsets to `text`'s characters UNION the full basic-Latin
- * range — see that route's docstring and
- * docs/superpowers/plans/2026-08-04-embed-font-subsetting.md for why basic Latin is
- * kept even for text that doesn't use it (so the export doesn't foreclose rendering
- * text it wasn't built with, if it's ever wired to something dynamic).
- *
- * Returns null on ANY failure — network error, non-200, or a malformed body — and
- * NEVER throws: subsetting is a size optimization, not a correctness requirement, and
- * the caller falls back to the full font on null. Every failure path logs via
- * console.error first, though: a silent fallback here would leave someone staring at
- * a 296 KB export with no way to find out why it isn't ~40 KB.
- */
-async function subsetFontBase64(fontB64: string, text: string): Promise<string | null> {
-  let res: Response
-  try {
-    res = await fetch('/sailor/font_subset', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ font: fontB64, text }),
-    })
-  } catch (e) {
-    console.error('[space-type] embed export: font subset request failed, falling back to the full font', e)
-    return null
-  }
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    console.error(`[space-type] embed export: font subset returned HTTP ${res.status}, falling back to the full font`, body)
-    return null
-  }
-  let data: any
-  try {
-    data = await res.json()
-  } catch (e) {
-    console.error('[space-type] embed export: font subset response was not valid JSON, falling back to the full font', e)
-    return null
-  }
-  if (!data || typeof data.font !== 'string' || !data.font) {
-    console.error('[space-type] embed export: font subset response missing "font", falling back to the full font', data)
-    return null
-  }
-  return data.font
-}
-
-/**
  * Fetch family+weight as a data: URI for inlining into a web embed export, subsetted
  * to `text`'s characters plus basic Latin (via subsetFontBase64/`/sailor/font_subset`)
  * whenever that succeeds. Falls back to the full, un-subsetted font on ANY subsetting
@@ -1839,7 +1782,7 @@ async function fetchFontDataUrl(family: string, weight: number, text: string): P
   const buf = await fetchFontBytes(family, weight)
   if (!buf) return null
   const fullB64 = bufferToBase64(buf)
-  const subsetB64 = await subsetFontBase64(fullB64, text)
+  const subsetB64 = await subsetFontBase64(fullB64, text, '[space-type] embed export:')
   return `data:font/ttf;base64,${subsetB64 ?? fullB64}`
 }
 
