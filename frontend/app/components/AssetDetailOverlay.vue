@@ -9,6 +9,8 @@ import {
   Loader2,
 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
+import { fetchRunnerRecord, type RunnerRecordView } from '~/lib/runner/client'
+import { isRunnerPromptId } from '#shared/runner/messages'
 
 const props = defineProps<{
   promptId: string
@@ -35,6 +37,10 @@ const imageDimensions = ref<{ width: number; height: number } | null>(null)
 // Estimated run cost from the durable generation record (history doesn't carry it)
 const runUsd = ref<number | null>(null)
 
+// Runner results: how the result was made comes from the run itself, not /history.
+const runnerRecord = ref<RunnerRecordView | null>(null)
+const runCredits = computed(() => runnerRecord.value?.credits ?? null)
+
 // Comments
 const commentsKey = computed(() => `sailor-comments-${props.promptId}`)
 const comments = ref<string[]>([])
@@ -54,6 +60,12 @@ onMounted(async () => {
   // Load like/save state
   liked.value = localStorage.getItem(`sailor-liked-${props.image.filename}`) === '1'
   saved.value = localStorage.getItem(`sailor-saved-${props.promptId}`) === '1'
+
+  if (isRunnerPromptId(props.promptId)) {
+    runnerRecord.value = await fetchRunnerRecord(props.promptId)
+    loadingHistory.value = false
+    return
+  }
 
   // Fetch history for this prompt
   try {
@@ -95,6 +107,7 @@ const imageUrl = computed(() => {
 const entry = computed(() => historyData.value)
 
 const timestamp = computed(() => {
+  if (runnerRecord.value) return runnerRecord.value.createdAt
   if (!entry.value) return null
   const messages = entry.value.status?.messages ?? []
   const startMsg = messages.find((m: any) => m[0] === 'execution_start')
@@ -102,6 +115,7 @@ const timestamp = computed(() => {
 })
 
 const executionTime = computed(() => {
+  if (runnerRecord.value?.endedAt) return ((runnerRecord.value.endedAt - runnerRecord.value.createdAt) / 1000).toFixed(1)
   if (!entry.value) return null
   const messages = entry.value.status?.messages ?? []
   const startMsg = messages.find((m: any) => m[0] === 'execution_start')
@@ -121,6 +135,7 @@ const formattedDate = computed(() => {
 
 // Find the generation node (trace back from the save/preview node through the images input)
 const outputNodeType = computed(() => {
+  if (runnerRecord.value) return runnerRecord.value.nodeTypes.find(t => t.startsWith('Generate')) ?? null
   if (!entry.value) return null
   const promptDict = entry.value.prompt?.[2]
   const outputs = entry.value.outputs
@@ -152,6 +167,7 @@ const outputNodeType = computed(() => {
 
 // Extract prompt text
 const promptText = computed(() => {
+  if (runnerRecord.value) return runnerRecord.value.prompt
   if (!entry.value) return null
   const promptDict = entry.value.prompt?.[2]
   if (!promptDict) return null
@@ -228,6 +244,17 @@ async function openWorkflow() {
   if (openingWorkflow.value) return
   openingWorkflow.value = true
   try {
+    // A runner result reopens the exact graph it was made from, in its own tab.
+    if (runnerRecord.value?.workflow) {
+      openTab({
+        type: 'project',
+        label: `${runnerRecord.value.projectName || props.projectName || 'Untitled project'} (as it ran)`,
+        promptId: props.promptId,
+      })
+      emit('close')
+      return
+    }
+
     const embedded = entry.value?.prompt?.[3]?.extra_pnginfo?.workflow
     const projectUuid: string | undefined = props.projectUuid || embedded?.extra?.projectUuid || undefined
 
@@ -363,6 +390,9 @@ function removeComment(index: number) {
             </div>
             <div v-if="runUsd" class="text-xs text-white/40 tabular-nums">
               Cost ~${{ runUsd.toFixed(runUsd >= 1 ? 2 : 3) }}
+            </div>
+            <div v-if="runCredits != null && runCredits > 0" class="text-xs text-white/40 tabular-nums">
+              Cost {{ runCredits.toLocaleString() }} credits
             </div>
           </div>
 
