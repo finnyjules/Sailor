@@ -5,7 +5,9 @@ vi.mock('~/lib/frame/patterns/kit/plan', async (importOriginal) => {
   return { ...m, planLayout: vi.fn(m.planLayout), applyLayoutToFrame: vi.fn(m.applyLayoutToFrame) }
 })
 import { planLayout, applyLayoutToFrame, candidatesForFrame, hiddenLinesForFrame } from '~/lib/frame/patterns/kit/plan'
-import { useLayoutVary, CONTENT_SETTLE_MS, FONT_WAIT_MS, resolveBrandImage, __clearBrandImagesForTest } from '~/composables/useLayoutVary'
+import { useLayoutVary, CONTENT_SETTLE_MS, FONT_WAIT_MS, resolveBrandImage, __clearBrandImagesForTest, faceTargets } from '~/composables/useLayoutVary'
+import { inferElements } from '~/lib/frame/patterns/hierarchy'
+import { posterLayerViews } from '~/lib/frame/patterns/frameContext'
 import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
 import { DEFAULT_CHOICE } from '~/lib/frame/patterns/kit/vary'
 import { LAYOUTS, layoutsForStyle } from '~/lib/frame/patterns/layouts/catalog'
@@ -699,10 +701,10 @@ describe('useLayoutVary — styles (Stage 3)', () => {
     const vary = mk(kit)
     expect(vary.brandLogo.value).toBeUndefined()                  // plans without it until it resolves
     await new Promise(r => setTimeout(r, 0))
-    expect(vary.brandLogo.value).toEqual({ url: 'brand_main.png', aspect: 0.25, onDarkUrl: 'brand_dark.png' })
+    expect(vary.brandLogo.value).toEqual({ url: 'brand_main.png', aspect: 0.25, onDarkUrl: 'brand_dark.png', onDarkAspect: 0.25 })
     vary.setStyle('performance')
     await nextTick()
-    expect(vi.mocked(planLayout).mock.calls.at(-1)![0].brandLogo).toEqual({ url: 'brand_main.png', aspect: 0.25, onDarkUrl: 'brand_dark.png' })
+    expect(vi.mocked(planLayout).mock.calls.at(-1)![0].brandLogo).toEqual({ url: 'brand_main.png', aspect: 0.25, onDarkUrl: 'brand_dark.png', onDarkAspect: 0.25 })
     // a second tab on the same kit resolves nothing again
     const again = mk(kit)
     await new Promise(r => setTimeout(r, 0))
@@ -747,5 +749,51 @@ describe('resolveBrandImage — the brand image picker\'s route', () => {
   it('an image that does not load gives no logo', async () => {
     vi.stubGlobal('Image', class extends FakeImage { override set src(_v: string) { setTimeout(() => this.onerror?.(), 0) } })
     expect(await resolveBrandImage('/view?filename=brand_abc.png&type=input')).toBeNull()
+  })
+})
+
+describe('useLayoutVary — fix round 1', () => {
+  afterEach(() => { __clearBrandImagesForTest() })
+
+  it('the face pickers follow the planner\'s roles: after an overlap layout (details larger than the title) the Title face targets the real title and the Text face never touches it', () => {
+    // As Ghost leaves it: the details set far larger than the title; the stored roles say which is which.
+    const layers = frameLayers().map(l => (l.id === 'd' ? { ...l, fontSize: 0.3 } : l))
+    const roles = { title: 't', details: 'd', date: 'dt', caption: 'c' }
+    const props = { sailor_localLayers: layers, sailor_posterState: { patternId: 'ghost', seed: 1, roles } }
+    // plain inference (what the pickers read before) takes the details for the title
+    expect(inferElements(posterLayerViews(props)).title!.id).toBe('d')
+    const editor = { recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn(), writeGroups: vi.fn() }
+    const vary = useLayoutVary({ props: () => props, frameW: () => 895, frameH: () => 1280, connectedSlots: () => [], editor: () => editor, remember: vi.fn(), measure: makeStubMeasure() })
+    expect(vary.roleIds.value).toEqual(roles)
+    expect(vary.titleId.value).toBe('t')
+    const t = faceTargets(vary.roleIds.value)
+    expect(t.titleId).toBe('t')
+    expect(t.textIds).toEqual(['d', 'c', 'dt'])
+    expect(t.textIds).not.toContain('t')
+  })
+
+  it('faceTargets never puts the title\'s layer in the text faces, and lists each layer once', () => {
+    expect(faceTargets({ title: 'a', details: 'a', caption: 'b', date: 'b', action: 'c' })).toEqual({ titleId: 'a', textIds: ['b', 'c'] })
+    expect(faceTargets({})).toEqual({ titleId: undefined, textIds: [] })
+  })
+
+  it('a logo that fails to resolve is not kept: the next library rebuild tries again', async () => {
+    let fail = true
+    const resolveImage = vi.fn(async () => (fail ? null : { name: 'brand_main.png', aspect: 0.5 }))
+    const editor = { recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn(), writeGroups: vi.fn() }
+    const kit = { logos: { primary: '/view?filename=brand_main.png&type=input' } }
+    const vary = useLayoutVary({ props: () => ({ sailor_localLayers: frameLayers() }), frameW: () => 895, frameH: () => 1280, connectedSlots: () => [], editor: () => editor, remember: vi.fn(), measure: makeStubMeasure(), brandKit: () => kit as never, resolveImage })
+    await new Promise(r => setTimeout(r, 0))
+    expect(vary.brandLogo.value).toBeUndefined()
+    expect(resolveImage).toHaveBeenCalledTimes(1)
+    fail = false
+    vary.setStyle('performance')                                  // a rebuild
+    await nextTick()
+    await new Promise(r => setTimeout(r, 0))
+    expect(resolveImage).toHaveBeenCalledTimes(2)
+    expect(vary.brandLogo.value).toEqual({ url: 'brand_main.png', aspect: 0.5 })
+    // resolved now: further rebuilds resolve nothing again
+    vary.setStyle('street'); await nextTick(); await new Promise(r => setTimeout(r, 0))
+    expect(resolveImage).toHaveBeenCalledTimes(2)
   })
 })

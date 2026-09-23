@@ -1,6 +1,6 @@
 import { ref, computed, shallowRef, watch, toRaw, getCurrentScope, onScopeDispose } from 'vue'
 import type { Ref, ComputedRef } from 'vue'
-import { applyLayoutToFrame, candidatesForFrame, hiddenLinesForFrame, lineOptionsForFrame, planLayout, titleLayerIdForFrame } from '~/lib/frame/patterns/kit/plan'
+import { applyLayoutToFrame, candidatesForFrame, hiddenLinesForFrame, lineOptionsForFrame, planLayout, roleIdsForFrame } from '~/lib/frame/patterns/kit/plan'
 import type { LayoutEditor, LayoutPlan, LayoutPlanArgs, StoredRoles } from '~/lib/frame/patterns/kit/plan'
 import { DEFAULT_CHOICE } from '~/lib/frame/patterns/kit/vary'
 import type { Candidate, Choice } from '~/lib/frame/patterns/kit/vary'
@@ -194,15 +194,29 @@ export async function resolveBrandImage(url: string): Promise<ResolvedBrandImage
   }
 }
 
-/** Each brand image is resolved once per session (an external one is uploaded once). */
+/** Each brand image is resolved once per session (an external one is uploaded once). A failure is
+ *  not kept: the entry is dropped, so the next try (the next library rebuild) resolves it again. */
 const brandImages = new Map<string, Promise<ResolvedBrandImage | null>>()
 function cachedBrandImage(url: string, resolve: (url: string) => Promise<ResolvedBrandImage | null>): Promise<ResolvedBrandImage | null> {
   let p = brandImages.get(url)
   if (!p) {
-    p = resolve(url).catch(() => null)
+    const made: Promise<ResolvedBrandImage | null> = resolve(url).catch(() => null).then((r) => {
+      if (!r && brandImages.get(url) === made) brandImages.delete(url)
+      return r
+    })
+    p = made
     brandImages.set(url, p)
   }
   return p
+}
+
+/** The Layout tab's face pickers' targets from the planner's roles: the title for the Title face;
+ *  the other text lines for the Text face — never the title's layer. */
+export function faceTargets(roles: StoredRoles): { titleId: string | undefined; textIds: string[] } {
+  const titleId = roles.title
+  const textIds = [roles.details, roles.caption, roles.date, roles.action]
+    .filter((id): id is string => !!id && id !== titleId)
+  return { titleId, textIds: [...new Set(textIds)] }
 }
 /** Tests only: forget the resolved brand images. */
 export function __clearBrandImagesForTest() { brandImages.clear() }
@@ -234,6 +248,9 @@ export function useLayoutVary(src: LayoutVarySource): {
   libraryDone: Ref<boolean>
   /** Whether the Frame has a title (the planner's reading). Without one nothing is offered. */
   hasTitle: ComputedRef<boolean>
+  /** Which layer holds which role, as the planner reads the Frame ({} while the tab is hidden). */
+  roleIds: ComputedRef<StoredRoles>
+  titleId: ComputedRef<string | undefined>
   suggestedFace: ComputedRef<SuggestedFace | null>; applySuggestedFace(): boolean
   /** The brand kit's logo as the planner takes it, once resolved (undefined: none, or not yet). */
   brandLogo: Ref<BrandLogo | undefined>
@@ -328,6 +345,23 @@ export function useLayoutVary(src: LayoutVarySource): {
   const brandLogo = shallowRef<BrandLogo | undefined>(undefined)
   const resolveImage = src.resolveImage ?? resolveBrandImage
   let logoKey: string | null = null
+  let logoPending = false
+  function resolveLogo(key: string) {
+    const [primary, onDark] = JSON.parse(key) as [string, string]
+    if (!primary) { brandLogo.value = undefined; return }
+    logoPending = true
+    void Promise.all([cachedBrandImage(primary, resolveImage), onDark ? cachedBrandImage(onDark, resolveImage) : null]).then(([main, dark]) => {
+      if (logoKey !== key) return                              // the kit changed meanwhile
+      logoPending = false
+      brandLogo.value = main
+        ? { url: main.name, aspect: main.aspect, ...(dark ? { onDarkUrl: dark.name, onDarkAspect: dark.aspect } : {}) }
+        : undefined
+    })
+  }
+  /** A logo that failed to resolve is tried again when the library is next rebuilt. */
+  function retryLogo() {
+    if (logoKey && !brandLogo.value && !logoPending && (JSON.parse(logoKey) as string[])[0]) resolveLogo(logoKey)
+  }
   watch(() => {
     if (!isActive() || !src.brandKit) return null
     const kit = src.brandKit()
@@ -335,12 +369,8 @@ export function useLayoutVary(src: LayoutVarySource): {
   }, (key) => {
     if (key == null) return
     logoKey = key
-    const [primary, onDark] = JSON.parse(key) as [string, string]
-    if (!primary) { brandLogo.value = undefined; return }
-    void Promise.all([cachedBrandImage(primary, resolveImage), onDark ? cachedBrandImage(onDark, resolveImage) : null]).then(([main, dark]) => {
-      if (logoKey !== key) return                              // the kit changed meanwhile
-      brandLogo.value = main ? { url: main.name, aspect: main.aspect, ...(dark ? { onDarkUrl: dark.name } : {}) } : undefined
-    })
+    brandLogo.value = undefined
+    resolveLogo(key)
   }, { immediate: true })
 
   function baseArgs(): Omit<LayoutPlanArgs, 'choice' | 'layoutId'> {
@@ -472,6 +502,7 @@ export function useLayoutVary(src: LayoutVarySource): {
   }
   function buildLibrary() {
     cancelIdle?.(); cancelIdle = null
+    retryLogo()
     const a = baseArgs()
     const defs = layoutsForStyle(style.value)
     const out: LibraryItem[] = []
@@ -575,14 +606,15 @@ export function useLayoutVary(src: LayoutVarySource): {
 
   // ── the title, and the style's suggested face for it ──
   // Read like the format: raw layers, re-read on the settled content key and `rev` only.
-  const titleId = computed<string | undefined>(() => {
-    if (!isActive()) return undefined
+  const roleIds = computed<StoredRoles>(() => {
+    if (!isActive()) return {}
     void settledKey.value; void rev.value
-    return titleLayerIdForFrame({
+    return roleIdsForFrame({
       props: toRaw(src.props()), frameW: src.frameW(), frameH: src.frameH(),
       shapeMode: toRaw(shapeMode.value) ?? undefined, imageMode: imageMode.value, style: style.value,
     })
   })
+  const titleId = computed<string | undefined>(() => roleIds.value.title)
   const hasTitle = computed(() => !!titleId.value)
   const titleLayer = (): TextLayer | undefined => {
     const id = titleId.value
@@ -617,6 +649,6 @@ export function useLayoutVary(src: LayoutVarySource): {
   return {
     layoutId, index, applied, candidates, library, choices, select, vary, jump, setChoice,
     shapeMode, setShapeMode, imageMode, setImageMode, paletteMode, setPaletteMode, format,
-    style, setStyle, libraryDone, hasTitle, suggestedFace, applySuggestedFace, brandLogo,
+    style, setStyle, libraryDone, hasTitle, roleIds, titleId, suggestedFace, applySuggestedFace, brandLogo,
   }
 }

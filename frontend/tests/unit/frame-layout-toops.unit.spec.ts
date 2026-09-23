@@ -548,6 +548,25 @@ describe('elementsToOps — Stage 3 pieces: band, button, logo', () => {
     expect(elementsToOps([lg], P, targets, frame, palette)).toEqual({ ops: [], owned: [] })
   })
 
+  it('the on-dark logo keeps its own aspect, fitted inside the layout\'s box and centred on it', () => {
+    const lg = P.logo(10, 5, 6, { aspect: 0.3 })                // box 20 × 6 (kit units)
+    const logo = { url: 'brand/logo.png', aspect: 0.3, onDarkUrl: 'brand/logo-dark.png', onDarkAspect: 0.5 }
+    const dark = elementsToOps([lg], P, targets, frame, { ...palette, field: '#101010' }, { logo })
+    const l = dark.owned[0] as any
+    expect(l.filename).toBe('brand/logo-dark.png')
+    expect(l.h).toBeCloseTo(0.06, 9)                             // the box's height binds
+    expect(l.w).toBeCloseTo(0.12, 9)                             // h / 0.5
+    expect(l.x).toBeCloseTo(0.2, 9)                              // same centre as the box
+    expect(l.y).toBeCloseTo(8 / P.H, 9)
+    // A light page places the main file in the full box, as before.
+    const light = elementsToOps([lg], P, targets, frame, palette, { logo }).owned[0] as any
+    expect(light.w).toBeCloseTo(0.2, 9)
+    expect(light.h).toBeCloseTo(0.06, 9)
+    // No onDarkAspect: the on-dark file fills the box like the main one.
+    const same = elementsToOps([lg], P, targets, frame, { ...palette, field: '#101010' }, { logo: { ...logo, onDarkAspect: undefined } }).owned[0] as any
+    expect(same.w).toBeCloseTo(0.2, 9)
+  })
+
   it('the link underline is tracked: a later op without it gives the user’s own back', () => {
     const { btn, text } = E.button('Shop now', 10, 50)
     const { ops } = elementsToOps([btn, text], E, withAction, frame, palette)

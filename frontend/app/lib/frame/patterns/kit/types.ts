@@ -30,7 +30,9 @@ export interface ButtonEl extends Base { k: 'btn'; x: number; y: number; w: numb
 export interface LogoEl extends Base { k: 'logo'; x: number; y: number; w: number; h: number }
 export type El = TextEl | PhotoEl | CircleEl | RectEl | RuleEl | RingEl | BandEl | ButtonEl | LogoEl | MissingEl
 /** The brand kit's logo (ruling S2): `aspect` is h / w; `onDarkUrl` for a dark field. */
-export interface BrandLogo { url: string; aspect: number; onDarkUrl?: string }
+export interface BrandLogo { url: string; aspect: number; onDarkUrl?: string
+  /** The on-dark file's own h/w (it can differ from the main logo's). Absent: `aspect`. */
+  onDarkAspect?: number }
 export interface Content { title: string; details?: string; date?: string; caption?: string
   /** The action line's text ("Shop now") — ruling S3. No Swiss layout reads it. */
   action?: string

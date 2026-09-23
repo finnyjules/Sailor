@@ -324,12 +324,18 @@ export function elementsToOps(
         const kit = opts?.logo
         if (!kit) return
         // The on-dark version on a dark page (luminance < 0.4), when the kit has one.
-        const url = kit.onDarkUrl && luminance(palette.field) < 0.4 ? kit.onDarkUrl : kit.url
+        const dark = !!kit.onDarkUrl && luminance(palette.field) < 0.4
+        const url = dark ? kit.onDarkUrl! : kit.url
         const key = keyFor('logo')
-        // No crop: the logo keeps its own aspect (the layout sized the box so, h = w × aspect).
-        own(createImageLayer(url, l.w / l.h, {
+        // No crop: the logo keeps its own aspect (the layout sized the box so, h = w × aspect). The
+        // on-dark file may have another aspect: it is fitted inside that box, centred (so the box
+        // the checker cleared still holds it).
+        const a = dark && kit.onDarkAspect && kit.onDarkAspect > 0 ? kit.onDarkAspect : l.h / l.w
+        const w = l.w * a <= l.h ? l.w : l.h / a
+        const h = w * a
+        own(createImageLayer(url, w / h, {
           ...ownedBase(key, l),
-          x: (l.x + l.w / 2) / 100, y: (l.y + l.h / 2) / S.H, w: l.w / 100, h: l.h / 100, rotation: 0,
+          x: (l.x + l.w / 2) / 100, y: (l.y + l.h / 2) / S.H, w: w / 100, h: h / 100, rotation: 0,
         }), 'image', key, z)
         return
       }

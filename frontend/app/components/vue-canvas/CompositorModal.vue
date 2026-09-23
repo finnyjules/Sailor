@@ -42,7 +42,7 @@ import { createWiredMaskCache } from '~/lib/compositor/wiredMaskCache'
 import { readWiredTreatments, setWiredMask, setWiredMaskShowSource, setWiredMaskUrl, maskCandidateKeys } from '~/composables/useWiredTreatments'
 import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/compositor/maskBreak'
 import { useLocalLayerEditor, resizableKind, cornerResizableKind, aspectLockedResizeKind, textBoxResizable, boxHandles as editorBoxHandles } from '~/composables/useLocalLayerEditor'
-import { useLayoutVary } from '~/composables/useLayoutVary'
+import { useLayoutVary, faceTargets } from '~/composables/useLayoutVary'
 import LayoutVaryPanel from '~/components/vue-canvas/compositor/LayoutVaryPanel.vue'
 import KeepClearOverlay from '~/components/vue-canvas/compositor/KeepClearOverlay.vue'
 import { layoutById } from '~/lib/frame/patterns/layouts/catalog'
@@ -221,8 +221,6 @@ import CanvasContextMenu, { type MenuItem } from '~/components/vue-canvas/Canvas
 import type { TextPathSpec, TextPathFollow } from '~/lib/compositor/textPath'
 import { genGestureDefaults, genBoxIsValid, genBarPlacement } from '~/lib/compositor/genGesture'
 import { shapeById, SHAPE_NONE, SHAPE_FAMILIES } from '~/lib/shapes/catalog'
-import { inferElements } from '~/lib/frame/patterns/hierarchy'
-import { posterLayerViews } from '~/lib/frame/patterns/frameContext'
 import { suggestTextFace } from '~/lib/frame/patterns/pairings'
 import { createShapeLayer, swapShapeLayer } from '~/lib/shapes/pathLayer'
 import { SHAPE_PICKER_WIDTH, anchorAbove } from '~/lib/shapes/pickerLayout'
@@ -1082,9 +1080,12 @@ const layoutPaletteHexes = computed(() => layoutVary.paletteMode.value)
 // face → the inferred details/caption/date layers; Suggest pairs a text face
 // from the standalone table. These are USER picks (setLocal on your own layers),
 // like the shape/palette — the sheet never rolls a face.
+// The targets are the planner's own roles (stored roles, then inference — `layoutVary.roleIds`),
+// so after an overlap layout (details set larger than the title) the Title face still reaches the
+// real title, and the Text face never does.
 const posterFaceEls = computed(() => {
-  const els = inferElements(posterLayerViews(compositor.value?.data?.properties as Record<string, unknown> | undefined))
-  return { titleId: els.title?.id as string | undefined, textIds: [els.details?.id, els.caption?.id, els.date?.id] as (string | undefined)[] }
+  const t = faceTargets(layoutVary.roleIds.value)
+  return { titleId: t.titleId, textIds: t.textIds as (string | undefined)[] }
 })
 function faceKeyFor(fam: string): string {
   if (!fam) return 'goog:Inter'

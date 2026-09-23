@@ -211,10 +211,10 @@ export function hiddenLayerIdsForFrame(a: FrameArgs): string[] {
   return hiddenRoles(fmt, contentOf(elements), a.style).map(r => elements[r]!.id)
 }
 
-/** The id of the layer the planner reads as the title (the stored roles, then size inference) —
- *  the Layout tab's suggested face sets that layer's face. Undefined without a title. */
-export function titleLayerIdForFrame(a: FrameArgs): string | undefined {
-  return frameElements(a, (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? []).title?.id
+/** Which layer holds which role, as the planner reads the Frame (the stored roles, then size
+ *  inference) — the Layout tab's face pickers target these, so they agree with the plans. */
+export function roleIdsForFrame(a: FrameArgs): StoredRoles {
+  return rolesOf(frameElements(a, (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? []))
 }
 
 /** The roles the last apply stored win over size inference: an overlap layout (Ghost, Number
