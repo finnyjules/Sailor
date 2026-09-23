@@ -129,6 +129,12 @@ describe('style matrix — each style\'s layouts through the real planner', () =
       // a layout's candidates are never ALL `cta: 'native'`; at least one drawn one must pass on
       // its own for the layout to be offered at all.
       expect.soft(cands.some(cd => (cd.choice.cta ?? 'drawn') === 'drawn'), `${def.id}: every candidate is cta: 'native'`).toBe(true)
+      // Ruling R11b (fix round 2): the FIRST candidate — what applies when the user simply picks
+      // the layout — is always drawn (ruling R7's "Default: In the image"), on every
+      // platform-button format with an action line, logo or no logo.
+      if (format?.platformButton && c.action) {
+        expect.soft((cands[0]!.choice.cta ?? 'drawn') === 'drawn', `${def.id}: first candidate is cta: 'native'`).toBe(true)
+      }
       for (const cand of cands) {
         const label = `${def.id} ${JSON.stringify(cand.choice)}`
         const plan = planLayout({ ...a, choice: cand.choice })

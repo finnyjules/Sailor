@@ -189,6 +189,17 @@ export function enumerate(def: LayoutDef, opts: {
   const di = list.findIndex(c => (Object.keys(DEFAULT_CHOICE) as (keyof Choice)[]).every(k => c.choice[k] === DEFAULT_CHOICE[k])
     && (c.choice.cta ?? 'drawn') === 'drawn')
   if (di > 0) list.unshift(...list.splice(di, 1))
+  // Ruling R11b: the first candidate is always drawn — the platform's own button (ruling R7) is
+  // an alternative offered alongside the default, never the thing applied when the user simply
+  // picks the layout ("Default: In the image"). When the exact default choice fails (`di === -1`)
+  // the list is otherwise in plain score order, which can put a `cta: 'native'` candidate first;
+  // move the best-scoring DRAWN one to the front instead, leaving everything else in score order.
+  // A no-op when `cta` was never offered (every candidate already reads as drawn, so the first
+  // drawn one found is already at index 0) — every non-cta layout's order is untouched.
+  if (di === -1) {
+    const dri = list.findIndex(c => (c.choice.cta ?? 'drawn') === 'drawn')
+    if (dri > 0) list.unshift(...list.splice(dri, 1))
+  }
   const ordered: Candidate[] = list.length ? [list.shift()!] : []
   while (list.length) {
     let bestIdx = 0
