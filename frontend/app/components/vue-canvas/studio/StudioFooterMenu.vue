@@ -7,6 +7,10 @@ const props = defineProps<{
   label: string
   variant: 'primary' | 'secondary'
   actions: StudioFooterAction[]
+  /** Which edge of the trigger the menu lines up with. `end` (the default) opens it leftwards
+   *  from the trigger's right edge; `start` opens it rightwards, for a trigger that sits too
+   *  near the left of a narrow panel for the menu to fit the other way. */
+  align?: 'start' | 'end'
 }>()
 
 const open = ref(false)
@@ -32,8 +36,9 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocPointerDo
       <span class="ml-1 inline-block rotate-90 text-white/70">›</span>
     </StudioButton>
     <div v-if="open" @pointerdown.stop
-         class="absolute bottom-full right-0 z-20 mb-1.5 w-60 overflow-hidden rounded-lg border border-white/10 bg-[#1a1a1e] py-1 shadow-xl">
-      <button v-for="(a, i) in actions" :key="i" type="button" :disabled="a.disabled || a.busy"
+         class="absolute bottom-full z-20 mb-1.5 w-60 overflow-hidden rounded-lg border border-white/10 bg-[#1a1a1e] py-1 shadow-xl"
+         :class="align === 'start' ? 'left-0' : 'right-0'">
+      <button v-for="(a, i) in actions" :key="i" type="button" :disabled="a.disabled || a.busy" :data-testid="a.testId"
               class="block w-full px-3 py-1.5 text-left text-xs text-white/85 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
               @click="pick(a)">
         <span class="flex items-center gap-1.5">

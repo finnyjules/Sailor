@@ -78,6 +78,9 @@ import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import StudioSection from '~/components/vue-canvas/StudioSection.vue'
+import StudioActionsFooter from '~/components/vue-canvas/studio/StudioActionsFooter.vue'
+import type { StudioFooterSpec } from '~/lib/studio/footer'
+import { useElementSize } from '@vueuse/core'
 import { useVectorNodeEdit } from '~/composables/useVectorNodeEdit'
 import { imageLayerUrl } from '~/composables/useCompositorLayers'
 import { useInpaint, loadImage, capDims, imageToDataUrl, cleanCutoutAlpha } from '~/composables/useInpaint'
@@ -4923,7 +4926,7 @@ async function renderStaticComposite(W: number, H: number): Promise<Blob | null>
 // True when any local layer carries a motion window, a wired studio slot is
 // animated, or the motion doc holds any band or behaviour (letter bars included —
 // they animate glyphs, not properties, so they compile to no track) — gates
-// "Generate as video". hasAnimatedSlot is defined above
+// the footer's "As video". hasAnimatedSlot is defined above
 // (~line 1292), before this computed, so it can be referenced directly.
 const hasMotion = computed(() => localLayers.value.some((l: any) => l.animation) || hasAnimatedSlot.value || motionxTracks.value.length > 0 || motionBehaviours.value.length > 0)
 
@@ -5095,6 +5098,40 @@ async function generateVideo() {
     if (!unmounted) startLive()
   }
 }
+
+// ── The right panel's footer (StudioActionsFooter, as in every studio) ──────────
+// The status line puts the running job first — a finished web export's "Downloaded" must not
+// hide a video that is rendering now — then the web export's notice, then how the last video
+// went (a fallback notice or "Export cancelled."). These are the texts the old buttons wore.
+const frameFooterProgress = computed(() =>
+  exportingVideo.value ? (videoStatus.value || 'Rendering…')
+    : baking.value ? `Baking ${Math.round((bakeProgress.value ?? 0) * 100)}%`
+      : encoding.value ? 'Encoding…'
+        : rendering.value ? 'Rendering…' : '')
+const frameFooterSpec = computed<StudioFooterSpec>(() => {
+  const working = rendering.value || baking.value || encoding.value
+  return {
+    status: {
+      error: renderError.value || null,
+      notice: frameFooterProgress.value || webExportNotice.value || videoStatus.value || null,
+    },
+    utilities: exportingVideo.value ? [{ label: 'Cancel', onClick: cancelVideoExport }] : [],
+    // "Export embed": the name Gradient, Shader and Space Type give the same HTML download.
+    downloads: [{ label: 'Export embed', onClick: openWebExport, disabled: working, testId: 'frame-web-export' }],
+    canvas: [
+      { label: 'As image', onClick: generateImage, busy: rendering.value, disabled: working || exportingVideo.value },
+      {
+        label: 'As video', onClick: generateVideo,
+        busy: exportingVideo.value || baking.value || encoding.value,
+        disabled: working || exportingVideo.value || !hasMotion.value,
+        subtitle: hasMotion.value ? undefined : 'Add motion to a layer in the Motion tab, or wire in an animated studio.',
+      },
+    ],
+  }
+})
+// The web export sheet sits just above this footer, whose height changes with its status line.
+const frameFooterEl = ref<HTMLElement | null>(null)
+const { height: frameFooterH } = useElementSize(frameFooterEl, undefined, { box: 'border-box' })
 
 const wiredTreatments = computed(() => readWiredTreatments(compositor.value))
 
@@ -9135,9 +9172,12 @@ onUnmounted(() => {
     </div>
 
     <!-- Web export sheet: sits above the right panel's footer. Mounted outside the panel,
-         which clips its overflow and is too narrow for the sheet's two columns. -->
+         which clips its overflow and is too narrow for the sheet's two columns. Its bottom is
+         the panel's inset (bottom-4, 16px) + the footer's measured height + an 8px gap; the
+         footer grows a status line during work, so the offset is measured, not a constant. -->
     <FrameWebExportSheet
       v-if="webExport.open && panelsVisible"
+      :style="frameFooterH > 0 ? { bottom: `${16 + Math.round(frameFooterH) + 8}px` } : undefined"
       :state="webExport.state" :notices="webExport.notices" :bytes="webExport.bytes" :fit="webExport.fit"
       :transparent-allowed="background == null" :transparent="webExport.transparent" :still="webExport.still"
       :art-aspect="webExport.artAspect" :error-text="webExport.errorText"
@@ -11926,40 +11966,12 @@ onUnmounted(() => {
         </div>
       </template>
 
-      <!-- Sticky footer: Generate as image / Generate as video — renders & records
-           artifacts (mirrors the Gradient/Shader/Space Type studio idiom). Sits
-           outside every template branch so it stays pinned bottom-right in all
-           panel states. -->
-      <div class="mt-auto shrink-0 border-t border-white/10 p-3 flex flex-wrap items-center justify-end gap-2">
-        <span v-if="renderError" class="text-[11px] text-rose-400 min-w-0 flex-1 truncate" :title="renderError">{{ renderError }}</span>
-        <span v-if="webExportNotice && !renderError" class="text-[11px] text-white/55 min-w-0 flex-1 truncate" :title="webExportNotice">{{ webExportNotice }}</span>
-        <span v-if="videoStatus && !exportingVideo" class="text-xs text-white/55 truncate max-w-[280px]" :title="videoStatus">{{ videoStatus }}</span>
-        <button v-if="exportingVideo" type="button" class="px-3 py-1.5 text-xs rounded-md text-white/70 hover:text-white hover:bg-white/10" @click="cancelVideoExport">Cancel</button>
-        <button
-          class="h-8 px-3 rounded text-[12px] font-medium flex items-center gap-1.5 cursor-pointer disabled:opacity-50 bg-white/[0.06] hover:bg-white/12 text-white/85"
-          :disabled="rendering || baking || encoding"
-          title="Download a web file that plays this Frame live"
-          data-testid="frame-web-export"
-          @click="openWebExport">
-          Web export
-        </button>
-        <!-- Row break: three buttons do not fit the panel's width on one line. -->
-        <span class="basis-full h-0" aria-hidden="true" />
-        <button
-          class="h-8 px-3 rounded text-[12px] font-medium flex items-center gap-1.5 cursor-pointer disabled:opacity-50 bg-white/[0.06] hover:bg-white/12 text-white/85"
-          :disabled="rendering || baking || encoding || exportingVideo || !hasMotion"
-          :title="hasMotion ? 'Bake the motion timeline and generate a video artifact' : 'Add motion to a layer (Motion tab) or wire an animated studio'"
-          @click="generateVideo">
-          {{ exportingVideo ? (videoStatus || 'Rendering…') : baking ? `Baking ${Math.round((bakeProgress ?? 0) * 100)}%` : encoding ? 'Encoding…' : 'Generate as video' }}
-        </button>
-        <button
-          class="h-8 px-3 rounded text-[12px] font-medium flex items-center gap-1.5 cursor-pointer disabled:opacity-50 bg-white hover:bg-white/90 text-neutral-900"
-          :disabled="rendering || baking || encoding || exportingVideo"
-          title="Render the frame and generate an image artifact"
-          @click="generateImage">
-          <Play class="size-3" />
-          {{ rendering ? 'Rendering…' : 'Generate as image' }}
-        </button>
+      <!-- Sticky footer: the studios' StudioActionsFooter — status and Cancel, then Download ▾
+           (the web export) and Render on canvas ▾ (as image / as video). Sits outside every
+           template branch so it stays pinned to the bottom in all panel states. `stacked`:
+           the panel is too narrow for the status to share a line with the two menus. -->
+      <div ref="frameFooterEl" class="mt-auto shrink-0 border-t border-white/10 p-3">
+        <StudioActionsFooter stacked :spec="frameFooterSpec" />
       </div>
     </div>
     </div>

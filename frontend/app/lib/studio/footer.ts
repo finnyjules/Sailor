@@ -9,6 +9,7 @@ export interface StudioFooterAction {
   busy?: boolean            // shows a spinner / busy label on the trigger + row
   icon?: Component          // optional leading icon (e.g. Dices for Roll)
   subtitle?: string         // small dim second line, menu rows only (e.g. a caveat)
+  testId?: string           // data-testid on the row / button, for end-to-end specs
 }
 
 export interface StudioFooterStatus {

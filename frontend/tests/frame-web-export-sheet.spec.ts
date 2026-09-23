@@ -20,9 +20,13 @@ test('Web export: the sheet names the fonts, downloads a self-contained Frame fi
   await page.waitForSelector('[data-ready]', { timeout: 30_000 })
   await page.locator('[data-testid="compositor-stack-canvas"]').waitFor({ state: 'visible', timeout: 30_000 })
 
-  const openButton = page.locator('[data-testid="frame-web-export"]')
+  // The web export is the "Export embed" row of the right panel's Download menu.
+  const openWebExport = async () => {
+    await page.locator('[data-testid="compositor-right-panel"]').getByRole('button', { name: /^Download/ }).click()
+    await page.locator('[data-testid="frame-web-export"]').click()
+  }
   const sheet = page.locator('[data-testid="frame-web-export-sheet"]')
-  await openButton.click()
+  await openWebExport()
   await expect(sheet).toBeVisible()
   await expect(sheet.getByText('One file · plays anywhere')).toBeVisible({ timeout: 90_000 })
   await expect(sheet.getByText('Fonts going into the file')).toBeVisible()
@@ -54,7 +58,7 @@ test('Web export: the sheet names the fonts, downloads a self-contained Frame fi
   await expect(sheet).toBeHidden()
   await expect(page.getByText(/^Downloaded · /)).toBeVisible()
 
-  await openButton.click()
+  await openWebExport()
   await expect(sheet.getByText('Whole Frame stays visible. The background stretches to the edges of the box.')).toBeVisible()
   await sheet.getByRole('button', { name: 'Fill', exact: true }).click()
   await expect(sheet.getByText('Frame covers the whole box. The edges get cropped.')).toBeVisible()

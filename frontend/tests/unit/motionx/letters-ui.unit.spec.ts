@@ -1,7 +1,7 @@
 /**
  * LETTER BEHAVIOURS — THE DECISIONS THE UI MAKES ABOUT THEM.
  *
- *  1. "Generate as video" is enabled when the frame has motion. Letter bars (and every other
+ *  1. The footer's "As video" is enabled when the frame has motion. Letter bars (and every other
  *     motionx band) ARE motion, so a frame animated only by them must not be stuck on stills.
  *  2. The Letters group is offered only for a layer the letter engine can actually reach. A
  *     text layer that still carries a LEGACY `layer.animation` is drawn by the old engine,
