@@ -117,4 +117,23 @@ test.describe('Frame Layout tab', () => {
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z')
     expect((await frame(page)).layers).toEqual(beforeArrow.layers)
   })
+
+  test('a layout\'s own pieces go when another layout is applied', async ({ page }) => {
+    const owned = async () => (await frame(page)).layers.filter((l: any) => l.owner?.by === 'layout').map((l: any) => l.owner.key).sort()
+    const apply = async (id: string) => {
+      const tile = page.locator(`[data-testid="layout-sheet"] [data-testid="layout-tile"][data-pattern="${id}"]`).last()   // the library tile (variation tiles share the id)
+      await tile.scrollIntoViewIfNeeded()
+      await tile.click()
+      await expect.poll(async () => (await frame(page)).poster?.patternId).toBe(id)
+    }
+    // Run-off's own pieces, alone
+    await apply('runoff')
+    const runoffOnly = await owned()
+    // Index adds rules; applying Run-off afterwards leaves exactly Run-off's pieces
+    await apply('index')
+    const indexPieces = await owned()
+    expect(indexPieces.some((k: string) => k.startsWith('rule'))).toBe(true)
+    await apply('runoff')
+    expect(await owned()).toEqual(runoffOnly)
+  })
 })

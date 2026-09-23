@@ -88,9 +88,9 @@ export const tightStack: LayoutDef = {
   },
 }
 
-/** Behind the photo — the title passes behind the image and shows on either side of it. */
+/** Behind the image — the title passes behind the image and shows on either side of it. */
 export const behindPhoto: LayoutDef = {
-  id: 'behindPhoto', name: 'Behind the photo', fits: [...ALL],
+  id: 'behindPhoto', name: 'Behind the image', fits: [...ALL],
   needs: { image: true },
   premise: { overlap: [['title', 'photo']] },
   fn(S, { c, ph, kind, lines }) {

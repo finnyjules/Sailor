@@ -108,9 +108,9 @@ export const shapeCounter: LayoutDef = {
   },
 }
 
-/** Photo behind — the image sits under the title; the title crosses its top edge on purpose. */
+/** Image behind — the image sits under the title; the title crosses its top edge on purpose. */
 export const photoBehind: LayoutDef = {
-  id: 'photoBehind', name: 'Photo behind', fits: [...ALL],
+  id: 'photoBehind', name: 'Image behind', fits: [...ALL],
   needs: { image: true },
   fn(S, { c, ph, lines }) {
     const { X, XR, SPAN, L, RH, GAP, CAP, DISPLAY, fitSize, disp, sec, infoRow, FOOT2, PHOTO_ASPECT } = S

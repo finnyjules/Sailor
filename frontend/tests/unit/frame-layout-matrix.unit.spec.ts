@@ -66,7 +66,7 @@ const EXPECTED_EMPTY: (Partial<Combo> & { reason: string })[] = [
   // "Weather Report" is long enough on one line, so the phrase still has candidates here.
   { id: 'runoff', kind: 'word', image: false, w: 1280, h: 400, reason: 'banner, no image: the height-bound one-word title cannot reach the right edge (ink ends at 68/100)' },
   { id: 'runoff', kind: 'sentence', image: false, w: 1280, h: 400, reason: 'banner, no image: a 2–4-line title is height-bound far short of the right edge (ink ends at 39/100)' },
-  // Behind the photo's promise is a title that passes behind the image. On a 1280×400 banner the
+  // Behind the image's promise is a title that passes behind the image. On a 1280×400 banner the
   // image is a centred 15.8 × 19.8 block (x 42.1–57.9) and the title's size is capped by the
   // image's height (0.8 h / its cap height), so a one-word title ends at 35.6 and a 2–4-line
   // sentence at 13.4–38.4: none reaches the image, and the layout rightly refuses. The phrase

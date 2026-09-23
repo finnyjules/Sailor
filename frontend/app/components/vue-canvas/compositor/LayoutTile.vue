@@ -93,7 +93,7 @@ const tileTitle = () => (props.selected ? `${props.selectedLabel || 'Current'} â
       <canvas ref="canvas" class="block" :style="{ width: size.w + 'px', height: size.h + 'px' }" />
     </button>
     <div class="text-[11px] text-white/55 truncate" :style="{ maxWidth: maxPx + 'px' }" :title="label">
-      <span v-if="selected && selectedLabel" class="text-white/40">{{ selectedLabel }} </span>{{ label }}
+      <span v-if="selected && selectedLabel" class="text-white/40 mr-1">{{ selectedLabel }}</span>{{ label }}
     </div>
   </div>
 </template>
