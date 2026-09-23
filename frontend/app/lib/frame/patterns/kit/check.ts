@@ -131,9 +131,10 @@ export function checkPlan(els: El[], S: Sheet, premise?: LayoutDef['premise'], o
     .map(e => ({ e, box: e.k === 't' ? textBox(e, S, true) : boxOf(e, S) }))
     .filter((it): it is { e: Present; box: Box } => it.box != null)
 
-  // Rule 2: text below the minimum size.
+  // Rule 2: text below the minimum size. A ring (the title set on a path) is text too, as in
+  // rule 8 — without it, Ring on a 320×50 banner set its title at 1.89 against a floor of 2.81.
   for (const e of present) {
-    if (e.k === 't' && e.size < S.INFO.size - 0.01) issues.push(`${roleLabel(e)}: below minimum size`)
+    if ((e.k === 't' || e.k === 'ring') && e.size < S.INFO.size - 0.01) issues.push(`${roleLabel(e)}: below minimum size`)
   }
 
   // Rule 3: off the page.

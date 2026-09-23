@@ -6,8 +6,7 @@ import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
 import type { El, Kind, LayoutDef } from '~/lib/frame/patterns/kit/types'
 import { makeSheet } from '~/lib/frame/patterns/kit/sheet'
 import { boxOf } from '~/lib/frame/patterns/kit/check'
-import { createEllipseLayer, createImageLayer, createTextLayer } from '~/composables/useCompositorLayers'
-import type { LocalLayer } from '~/composables/useCompositorLayers'
+import { TEXTS, frameLayers, palette } from './helpers/frameLayoutFixtures'
 
 // ═══════════════════════ the layout matrix (spec §10) ═══════════════════════
 // Every layout in the catalog × every kind it fits × {image, no image} × four frame shapes.
@@ -18,34 +17,7 @@ import type { LocalLayer } from '~/composables/useCompositorLayers'
 // in EXPECTED_EMPTY with a concrete reason. Tasks 10–12 extend this file by adding layouts to
 // the catalog; the matrix picks them up by itself.
 
-const KIND_TITLES: Record<Kind, string> = {
-  word: 'Echoes',
-  phrase: 'Weather Report',
-  sentence: 'Everything slow is still moving',
-}
-const TEXTS = {
-  details: 'Ines Vollmer',
-  date: '19.09.–15.11.2026',
-  caption: 'Kunstraum Lenz\nLenzgasse 14, 4056 Basel',
-}
 const FRAMES: [number, number][] = [[895, 1280], [1080, 1080], [1280, 720], [1280, 400]]
-const palette = { field: '#f2f0ef', ink: '#121212', accent: '#dd2200' }
-
-/** A real Frame: four TextLayers (sizes make the inference unambiguous), plus an image layer
- *  when `image`, plus a shape layer when the layout needs one. */
-function frameLayers(kind: Kind, o: { image: boolean; shape: boolean }): LocalLayer[] {
-  const t = (id: string, text: string, fontSize: number) =>
-    createTextLayer({ id, text, fontSize, fontFamily: 'Inter', fontWeight: 600, color: '#111111' }) as LocalLayer
-  const out = [
-    t('t', KIND_TITLES[kind], 0.12),
-    t('d', TEXTS.details, 0.04),
-    t('dt', TEXTS.date, 0.03),
-    t('c', TEXTS.caption, 0.02),
-  ]
-  if (o.image) out.push(createImageLayer('x.png', 1.25, { id: 'img', w: 0.5, h: 0.625 }) as LocalLayer)
-  if (o.shape) out.push(createEllipseLayer({ id: 'shp', x: 0.5, y: 0.5, w: 0.3, h: 0.3 }) as LocalLayer)
-  return out
-}
 
 type Combo = { id: string; kind: Kind; image: boolean; w: number; h: number }
 
