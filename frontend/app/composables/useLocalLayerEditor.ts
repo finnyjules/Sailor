@@ -315,7 +315,16 @@ export function useLocalLayerEditor(opts: EditorOpts) {
 
   function setLocal(id: string, patch: Record<string, any>) {
     if (!drag.value) recordHistory() // drags record once at pointer-down
-    commit(localLayers.value.map(l => (l.id === id ? { ...l, ...patch } as LocalLayer : l)))
+    commit(localLayers.value.map(l => {
+      if (l.id !== id) return l
+      const next = { ...l, ...patch } as LocalLayer
+      // Placed lines (`runs`) were set for the old words: new words drop them, and the
+      // layer goes back to flowing its text. Any other edit (move, size, colour) keeps them.
+      if (next.kind === 'text' && l.kind === 'text' && l.runs && 'text' in patch && patch.text !== l.text) {
+        delete (next as { runs?: unknown }).runs
+      }
+      return next
+    }))
   }
   function addLocal(layer: LocalLayer) { recordHistory(); commit([...localLayers.value, layer]); selectLocal(layer.id) }
   /** Tell the host about any `wired` layers a delete is about to remove, so it

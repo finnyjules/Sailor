@@ -404,6 +404,23 @@ export function layerMaskRef(
   return undefined
 }
 
+/**
+ * One placed line of a text layer (see `TextLayer.runs`). Positions and size are in EM of
+ * the layer's font size (`fontPx = layer.fontSize × W`), relative to the layer origin, so
+ * resizing the layer scales the placement and the type together.
+ *
+ * - `x` — the run's LEFT edge (`textAlign = 'left'`), in em.
+ * - `y` — the middle of the run's em box (`textBaseline = 'middle'`), in em.
+ * - `s` — the run's size as a multiple of the layer's font size (absent ⇒ 1). Letter
+ *   spacing, being in em, scales with it.
+ *
+ * INVARIANT: the layout kit writes runs whose union box is CENTRED on the layer origin.
+ * `localLayerBox` relies on it — it returns a box centred on the origin just big enough to
+ * contain every run (twice the furthest extent each way), so a centred set of runs gets a
+ * box that hugs them, and an off-centre set still gets a box that contains them.
+ */
+export interface TextRun { text: string; x: number; y: number; s?: number }
+
 export interface TextLayer extends LayerCommon {
   kind: 'text'
   text: string
@@ -463,6 +480,14 @@ export interface TextLayer extends LayerCommon {
    *  a subset of glyphs render in. Absent ⇒ every glyph uses the base face. */
   accentFace?: string
   accentRule?: AccentRule
+  /** Placed lines (see {@link TextRun}): when present and non-empty, each run is drawn at
+   *  its own position and size in the layer's font, weight, letter spacing, colour and
+   *  on-edge strokes, and the flow layout — wrap, align, valign, boxW/boxH, boxFit,
+   *  expressive — is ignored for both drawing and the box. Underline/strikethrough,
+   *  distance (band) strokes, letter behaviours and outline rendering are not applied to
+   *  runs. Editing the text drops them (the placed lines were for the old words).
+   *  Absent ⇒ the layer renders exactly as before. */
+  runs?: TextRun[]
 }
 
 /**
@@ -1609,6 +1634,37 @@ export function cssFontStack(family: string): string {
  * For text this measures the rendered glyph block. A 2D context is required
  * for text measurement; pass any scratch context.
  */
+/** The layer as one of its runs is set: font size scaled by `s`. Scaled in PIXELS and
+ *  normalised back (`fontPx·s / W`) so the px `applyFont` writes is the clean product
+ *  (0.1 × 1000 × 1.5 = 150px, where 0.1 × 1.5 × 1000 would be 150.00000000000003px). */
+function runFontLayer(layer: TextLayer, s: number, W: number): TextLayer {
+  return s === 1 ? layer : { ...layer, fontSize: (layer.fontSize * W * s) / W }
+}
+
+/** The union of a text layer's placed runs as a box CENTRED on the origin (see the
+ *  centred-runs invariant on {@link TextRun}): twice the furthest horizontal and vertical
+ *  extent from the origin, so it always contains every run. Measured with each run's own
+ *  font applied; without a context, a rough 0.6 em-per-char estimate. */
+function textRunsBox(ctx: CanvasRenderingContext2D | null, layer: TextLayer, W: number): { w: number; h: number } {
+  const fontPx = layer.fontSize * W
+  let ex = 0, ey = 0
+  for (const run of layer.runs!) {
+    const s = run.s ?? 1
+    let w: number
+    if (ctx) {
+      applyFont(ctx, runFontLayer(layer, s, W), W)
+      w = ctx.measureText(run.text || ' ').width
+    } else {
+      w = (run.text.length || 1) * fontPx * s * 0.6
+    }
+    const left = run.x * fontPx
+    const mid = run.y * fontPx
+    ex = Math.max(ex, Math.abs(left), Math.abs(left + w))
+    ey = Math.max(ey, Math.abs(mid - 0.5 * s * fontPx), Math.abs(mid + 0.5 * s * fontPx))
+  }
+  return { w: Math.max(2 * ex, 4), h: Math.max(2 * ey, 4) }
+}
+
 export function localLayerBox(
   ctx: CanvasRenderingContext2D | null,
   layer: LocalLayer,
@@ -1624,6 +1680,9 @@ export function localLayerBox(
   wiredLive?: WiredLive | null,
 ): { w: number; h: number } {
   if (layer.kind === 'text') {
+    // Placed lines take over the layout, so the box is theirs (flow box fields ignored).
+    // Checked first: it must also win over a path, exactly as `drawText` does.
+    if (layer.runs?.length) return textRunsBox(ctx, layer, W)
     // Curved text's extent is the guide's, not a line block's. Without this the
     // selection box, drag hit-test, rotation pivot, mask fit and every effect's
     // offscreen would all size themselves to a line of text that isn't drawn.
@@ -1703,8 +1762,10 @@ export function localLayerBox(
  * from `localLayerBox`. Both the renderer and the editor's box geometry read this
  * so the drawn text and its selection box stay in lockstep.
  */
-export function textVAlignCenterOffset(layer: { kind: string; valign?: string }, boxHPx: number): number {
+export function textVAlignCenterOffset(layer: { kind: string; valign?: string; runs?: unknown[] }, boxHPx: number): number {
   if (layer.kind !== 'text') return 0
+  // Placed lines ignore valign: their box is centred on the origin by construction.
+  if (layer.runs?.length) return 0
   return layer.valign === 'top' ? boxHPx / 2 : layer.valign === 'bottom' ? -boxHPx / 2 : 0
 }
 
@@ -4340,7 +4401,7 @@ interface TextStrokePass {
 
 /** One run of text exactly as it gets drawn: the string, the anchor `fillText` is given,
  *  and — text on a path only — the rotation each glyph is turned by about that anchor. */
-interface TextRun { text: string; x: number; y: number; angle?: number }
+interface DrawnRun { text: string; x: number; y: number; angle?: number }
 
 /**
  * A stroke's distance in the units the current transform draws in, or 0 when it has none.
@@ -4435,7 +4496,7 @@ function strokeTextPasses(
  */
 function paintTextStrokeBands(
   ctx: CanvasRenderingContext2D, layer: TextLayer, W: number,
-  box: { w: number; h: number }, runs: TextRun[],
+  box: { w: number; h: number }, runs: DrawnRun[],
 ): void {
   if (!runs.length) return
   const stack = strokeStackOf(layer as unknown as Parameters<typeof strokeStackOf>[0])
@@ -4635,6 +4696,9 @@ function fillFontSize(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number
 }
 
 function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number, collect?: TextOutlineCollect) {
+  // Placed lines take over the whole layout (see TextLayer.runs). Outlining them is out
+  // of scope, so collect mode emits nothing and the caller falls back to fillText.
+  if (layer.runs?.length) { if (collect) return; drawTextRuns(ctx, layer, W); return }
   if (layer.boxFit && layer.boxFit !== 'wrap' && (layer.boxW ?? 0) > 0 && !layer.expressive && !layer.path) {
     const fit = fillFontSize(ctx, layer, W)
     layer = { ...layer, fontSize: layer.boxFit === 'shrink' ? Math.min(layer.fontSize, fit) : fit }
@@ -4706,7 +4770,7 @@ function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number, co
   // (`paintTextStrokeBands`), which needs all the runs in hand. Only `measureText` moved up
   // here, and it is pure — the draw loop below issues exactly the calls, in exactly the
   // order, that this loop used to issue inline.
-  const drawn: { runs: TextRun[]; deco: { left: number; y: number; w: number } | null }[] = []
+  const drawn: { runs: DrawnRun[]; deco: { left: number; y: number; w: number } | null }[] = []
   for (let i = 0; i < lines.length; i++) {
     const y = lineY(i)
     if (justifyH && !ragged[i]) {
@@ -4718,7 +4782,7 @@ function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number, co
       const total = widths.reduce((a, b) => a + b, 0)
       const gap = words.length > 1 ? Math.max(0, (blockW - total) / (words.length - 1)) : 0
       let cx = -blockW / 2
-      const runs: TextRun[] = []
+      const runs: DrawnRun[] = []
       for (let k = 0; k < words.length; k++) {
         runs.push({ text: words[k]!, x: cx, y })
         cx += widths[k]! + gap
@@ -4839,6 +4903,33 @@ function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number, co
   if (anyDash) ctx.setLineDash([])   // never leak the pattern to the next layer
 }
 
+/**
+ * Draw a text layer's placed runs (see {@link TextRun}). Each run goes through `applyFont`
+ * with the layer's font size scaled by its `s`, so weight, axes and letter spacing scale
+ * exactly as normal text does; it is then stroked (on-edge strokes) and filled the way
+ * `drawText` inks one line, with its paint resolved over the run's own box.
+ */
+function drawTextRuns(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number): void {
+  const fontPx = layer.fontSize * W
+  let anyDashUsed = false
+  for (const run of layer.runs!) {
+    const s = run.s ?? 1
+    applyFont(ctx, runFontLayer(layer, s, W), W)
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    const box = { w: Math.max(ctx.measureText(run.text || ' ').width, 1), h: Math.max(fontPx * s, 1) }
+    const passes = textStrokePasses(ctx, layer, W, box)
+    const anyDash = passes.some(p => p.dash)
+    anyDashUsed ||= anyDash
+    if (passes.length) ctx.lineJoin = 'round'
+    ctx.fillStyle = resolvePaint(ctx, layer.color, box, _fieldCtx)
+    const x = run.x * fontPx, y = run.y * fontPx
+    strokeTextPasses(ctx, passes, anyDash, run.text, x, y)
+    ctx.fillText(run.text, x, y)
+  }
+  if (anyDashUsed) ctx.setLineDash([])   // never leak the pattern to the next layer
+}
+
 /** TEST-ONLY seam. `drawText` is the innermost text emitter and has no other entry that
  *  inks (the outline collector runs it in collect mode), so specs that need its exact call
  *  sequence — letter behaviours, above all — reach it here rather than through `paintLayer`,
@@ -4924,7 +5015,7 @@ function drawExpressiveText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: 
   const passes = textStrokePasses(ctx, layer, W, textBox)
   const anyDash = passes.some(p => p.dash)
   // One run per placed word (`wd.y` is the line band's top, so + lineH/2 is its centre).
-  const runs: TextRun[] = lay.words.map(wd => ({ text: wd.text, x: originX + wd.x, y: originY + wd.y + lineH / 2 }))
+  const runs: DrawnRun[] = lay.words.map(wd => ({ text: wd.text, x: originX + wd.x, y: originY + wd.y + lineH / 2 }))
   paintTextStrokeBands(ctx, layer, W, textBox, runs)
   if (passes.length) ctx.lineJoin = 'round'
   ctx.fillStyle = resolvePaint(ctx, layer.color, textBox, _fieldCtx)
