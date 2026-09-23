@@ -136,4 +136,42 @@ test.describe('Frame Layout tab', () => {
     await apply('runoff')
     expect(await owned()).toEqual(runoffOnly)
   })
+
+  test('a format keeps text clear of the app and carries only its lines', async ({ page }) => {
+    // Pick a format in the Frame section of the Design tab (nothing selected).
+    await page.click('[data-testid="design-tab"], button:has-text("Design")')
+    const size = page.locator('select:has(option[value="meta-story"])').first()
+    await size.selectOption('meta-story')
+    await page.click('[data-testid="layout-tab"]')
+    await expect(page.locator('[data-testid="layout-format-label"]')).toHaveText('Format: Meta story / reel · 9:16')
+    await expect(page.locator('[data-testid="keep-clear-overlay"]')).toBeVisible()
+    await expect(page.locator('[data-testid="keep-clear-overlay"]')).toContainText('Covered by the app')
+    // Apply the first offered layout: every visible text layer sits inside the uncovered band.
+    await page.locator('[data-testid="layout-sheet"] [data-testid="layout-tile"]').first().click()
+    const band = await page.evaluate(() => {
+      const p = (window as any).__frameLab.node.data.properties
+      // Only the lines the layout places (its stored roles); other text layers keep their spots.
+      const ids = Object.values(p.sailor_posterState?.roles ?? {}) as string[]
+      const texts = p.sailor_localLayers.filter((l: any) => ids.includes(l.id) && l.visible !== false)
+      return texts.map((l: any) => l.y)
+    })
+    for (const y of band) { expect(y).toBeGreaterThan(0.14); expect(y).toBeLessThan(0.65) }
+
+    // A video thumbnail carries two lines: the others are hidden and named in the panel.
+    await page.click('[data-testid="design-tab"], button:has-text("Design")')
+    await size.selectOption('video-thumb')
+    await page.click('[data-testid="layout-tab"]')
+    await expect(page.locator('[data-testid="layout-format-hidden"]')).toContainText('Not shown in this format')
+    await expect(page.locator('[data-testid="keep-clear-overlay"]')).toHaveCount(0)
+    await page.locator('[data-testid="layout-sheet"] [data-testid="layout-tile"]').first().click()
+    const hidden = await page.evaluate(() => {
+      const p = (window as any).__frameLab.node.data.properties
+      const roles = p.sailor_posterState?.roles ?? {}
+      const vis = (id?: string) => p.sailor_localLayers.find((l: any) => l.id === id)?.visible
+      return { title: vis(roles.title), date: roles.date ? vis(roles.date) : false, caption: roles.caption ? vis(roles.caption) : false }
+    })
+    expect(hidden.title).not.toBe(false)
+    expect(hidden.date).toBe(false)
+    expect(hidden.caption).toBe(false)
+  })
 })
