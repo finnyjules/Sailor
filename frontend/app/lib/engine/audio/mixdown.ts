@@ -201,19 +201,14 @@ export async function uploadMix(wav: ArrayBuffer, slot: string | null): Promise<
   return data.subfolder ? `${data.subfolder}/${data.name}` : (data.name || fname)
 }
 
-/** Mix every audio clip into one uploaded WAV. `file` is null when there was
- *  nothing to mix, or nothing loaded. A clip with no file, or whose file fails
- *  to fetch or decode, is left out of the mix (not fatal) and counted in
- *  `skipped` — the caller shows that count instead of failing the export. */
-// No cache of finished mixes on purpose: a 6 s mix + upload measured 33 ms, and
-// a remembered filename can't be re-checked — Sailor's /view route keeps its
-// own permanent copy of every file, so a deleted mix still looks present, and
-// the server skips a missing audio file without complaint (a silent export).
-export async function ensureTimelineMix(
-  state: EditState, resolveClipUrl: (clip: Clip) => string | null, slot: string | null = null,
-): Promise<{ file: string | null; skipped: number }> {
+/** Mix every audio clip into one stereo AudioBuffer (48 kHz) — the same voices
+ *  the preview plays. `buffer` is null when there is nothing to mix or nothing
+ *  loaded; a clip whose file is missing / fails to load is left out and counted. */
+export async function mixTimelineAudio(
+  state: EditState, resolveClipUrl: (clip: Clip) => string | null,
+): Promise<{ buffer: AudioBuffer | null; skipped: number }> {
   const plan = planMixdown(state)
-  if (!plan.voices.length) return { file: null, skipped: 0 }
+  if (!plan.voices.length) return { buffer: null, skipped: 0 }
   if (plan.totalSec > MAX_MIX_SEC) throw new Error('timeline is longer than 30 minutes')
 
   const clips = new Map<string, Clip>()
@@ -227,7 +222,7 @@ export async function ensureTimelineMix(
   }
 
   // Nothing has a file: don't allocate a render buffer (large on a long timeline).
-  if (!urlByClip.size) return { file: null, skipped }
+  if (!urlByClip.size) return { buffer: null, skipped }
 
   const ctx = new OfflineAudioContext(2, Math.max(1, Math.ceil(plan.totalSec * MIX_SAMPLE_RATE)), MIX_SAMPLE_RATE)
   const byUrl = new Map<string, Promise<AudioBuffer>>()
@@ -247,9 +242,33 @@ export async function ensureTimelineMix(
     }
   }
 
-  if (!buffers.size) return { file: null, skipped }
+  if (!buffers.size) return { buffer: null, skipped }
 
   const channels = await renderMixdown({ ...plan, voices: plan.voices.filter(v => buffers.has(v.clipId)) }, buffers, ctx)
-  const file = await uploadMix(encodeWav16(channels, MIX_SAMPLE_RATE), `${mixTabToken()}_${slot ?? ''}`)
+  const buffer = new AudioBuffer({ length: channels[0]!.length, numberOfChannels: 2, sampleRate: MIX_SAMPLE_RATE })
+  // Cast rather than copy: copyToChannel's TS 5.7+ lib type narrows to
+  // Float32Array<ArrayBuffer>, which the AudioContext-returned channel data
+  // (typed Float32Array<ArrayBufferLike>) doesn't satisfy at the type level —
+  // the runtime accepts any Float32Array, and these buffers can span tens of
+  // minutes of stereo audio, so a defensive copy is not worth the memory.
+  buffer.copyToChannel(channels[0] as unknown as Float32Array<ArrayBuffer>, 0)
+  buffer.copyToChannel(channels[1] as unknown as Float32Array<ArrayBuffer>, 1)
+  return { buffer, skipped }
+}
+
+/** Mix every audio clip into one uploaded WAV. `file` is null when there was
+ *  nothing to mix, or nothing loaded. A clip with no file, or whose file fails
+ *  to fetch or decode, is left out of the mix (not fatal) and counted in
+ *  `skipped` — the caller shows that count instead of failing the export. */
+// No cache of finished mixes on purpose: a 6 s mix + upload measured 33 ms, and
+// a remembered filename can't be re-checked — Sailor's /view route keeps its
+// own permanent copy of every file, so a deleted mix still looks present, and
+// the server skips a missing audio file without complaint (a silent export).
+export async function ensureTimelineMix(
+  state: EditState, resolveClipUrl: (clip: Clip) => string | null, slot: string | null = null,
+): Promise<{ file: string | null; skipped: number }> {
+  const { buffer, skipped } = await mixTimelineAudio(state, resolveClipUrl)
+  if (!buffer) return { file: null, skipped }
+  const file = await uploadMix(encodeWav16([buffer.getChannelData(0), buffer.getChannelData(1)], MIX_SAMPLE_RATE), `${mixTabToken()}_${slot ?? ''}`)
   return { file, skipped }
 }
