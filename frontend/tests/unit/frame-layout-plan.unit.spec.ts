@@ -11,6 +11,7 @@ import type { LayoutDef } from '~/lib/frame/patterns/kit/types'
 import { createImageLayer, createTextLayer } from '~/composables/useCompositorLayers'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import { familyOf } from '~/lib/shapes/catalog'
+import { createHash } from 'node:crypto'
 
 // The Task 9 matrix content: phrase title, details, date, two-line caption.
 const TEXTS = {
@@ -447,6 +448,44 @@ describe('planLayout — a format (Stage 2)', () => {
     behindPhoto: [0, 2], collage: [0, 0], label: [0, 4], ghost: [2, 4],
   }
 
+  // The geometry of those candidates: per layout, [no image, image], the first 16 hex of a
+  // SHA-256 over each candidate's choice and elements with every number rounded to 0.01. Recorded
+  // from the no-format path, which a full hash of all 3136 Stage 1 matrix candidates (choice, out,
+  // layers, order, issues) showed byte-identical before and after Stage 2's planner change.
+  const STAGE1_GEOMETRY: Record<string, [string, string]> = {
+    runoff: ['ea2adfbe977c64bb', '06024f18c045574f'], statement: ['cd47c3ee0d14ae24', '52c67ad5b6bb379e'],
+    index: ['38069fc25f3acc35', 'c6fd60faa2c0b9bd'], shapeCounter: ['4f53cda18c2baa0c', '4f53cda18c2baa0c'],
+    photoBehind: ['4f53cda18c2baa0c', '8468b9ffe4836846'], fullBleed: ['4f53cda18c2baa0c', '1fb99797f6eb618d'],
+    tilt: ['2a9160af52204724', '24bf5cc248538a85'], bottomHeavy: ['1a327391db66db5a', '64684afd5671c1c3'],
+    fourCorners: ['3b499486d761a61d', '5772eccc98ff7ecb'], spacedLines: ['01f3889b4e8791ff', 'cf9dddc517bde26e'],
+    ragged: ['c3e467a7ef0e3531', 'c8e2df3a9c9d19cc'], edges: ['8feb3118c4333661', '42e2e7db939163f1'],
+    staircase: ['2a7f1b494d612c70', '4c371ef4bcceabe4'], block: ['cbdd34a49c6e6132', '3ebfaf98386c46e7'],
+    knockout: ['4f53cda18c2baa0c', '4f53cda18c2baa0c'], shapeBleed: ['4f53cda18c2baa0c', '4f53cda18c2baa0c'],
+    badge: ['4f53cda18c2baa0c', '4f53cda18c2baa0c'], split: ['4f53cda18c2baa0c', '03d49c3f28b7fa53'],
+    diagonal: ['5854c32e831d7aab', '29374ed513d119ad'], wall: ['ed5b5c76bec538f9', '28a27c714af3541d'],
+    scatter: ['9fd8bfa17a79c9c3', '0a3d3820a97767b2'], cascade: ['4f53cda18c2baa0c', '4f53cda18c2baa0c'],
+    ring: ['4f53cda18c2baa0c', '4f53cda18c2baa0c'], cells: ['52c87b25291005cc', 'a48fa4e68e0dfd30'],
+    kicker: ['0d328f47f00cc9a9', '5d9f8b15ded28521'], sidebar: ['90bc3aea41843df3', 'e111449a23e4afd5'],
+    footer: ['7d6c522496918a70', '915db102f251ea7d'], plate: ['4f53cda18c2baa0c', 'e9535b3b518baf7e'],
+    panel: ['4f53cda18c2baa0c', 'ce8d4a52c929ae32'], sideSplit: ['4f53cda18c2baa0c', '38ef11da765fc027'],
+    cross: ['4f53cda18c2baa0c', '2bbbc01f15ab840a'], overlap: ['4f53cda18c2baa0c', 'd0d1468d32474717'],
+    stamp: ['4f53cda18c2baa0c', 'a192833f32c57a0d'], column: ['4f53cda18c2baa0c', '2cf3f052c12d25ad'],
+    rising: ['4f53cda18c2baa0c', 'f86e449448f6f9ca'], overprint: ['b2b94833a86512dd', '31749b05fcf719f7'],
+    dateBehind: ['cd065765c23683a5', '71ebeac54e7ef22d'], tightStack: ['fba74f9d0963fd6e', 'e8102e680df084df'],
+    behindPhoto: ['4f53cda18c2baa0c', '5f73e0b50643b94b'], collage: ['4f53cda18c2baa0c', '4f53cda18c2baa0c'],
+    label: ['4f53cda18c2baa0c', '6127de94a2d1d00f'], ghost: ['0b68f5276f4ae89e', '48fb34b638c8e2a1'],
+  }
+  const r2 = (_k: string, v: unknown) => (typeof v === 'number' ? Math.round(v * 100) / 100 : v)
+  const geometrySig = (list: ReturnType<typeof candidatesForFrame>) =>
+    createHash('sha256').update(JSON.stringify(list.map(c => [c.choice, c.out.els]), r2)).digest('hex').slice(0, 16)
+
+  it('no format (895×1280, custom): every layout\'s candidates keep their Stage 1 geometry', () => {
+    expect(Object.keys(STAGE1_GEOMETRY)).toEqual(LAYOUTS.map(l => l.id))
+    const got: Record<string, [string, string]> = {}
+    for (const l of LAYOUTS) got[l.id] = [geometrySig(cands(l.id, fmtArgs(null, 895, 1280))), geometrySig(cands(l.id, fmtArgs(null, 895, 1280, { image: true })))]
+    expect(got).toEqual(STAGE1_GEOMETRY)
+  })
+
   it('no format (895×1280, custom): plan.format is null and every layout offers exactly its Stage 1 candidates', () => {
     expect(planLayout(args())!.format).toBeNull()
     expect(Object.keys(STAGE1_COUNTS)).toEqual(LAYOUTS.map(l => l.id))
@@ -485,6 +524,32 @@ describe('planLayout — a format (Stage 2)', () => {
       expect(cands('runoff', fmtArgs('meta-story', 1080, 1920))).toEqual([])
       const plan = planLayout({ ...fmtArgs('meta-story', 1080, 1920), layoutId: 'runoff', choice: { ...DEFAULT_CHOICE } })!
       expect(plan.issues).toContain('title: under the app\'s interface')
+    })
+
+    it('Panel: its panel touches the band\'s bottom edge and runs on to H_full; the checker still passes', () => {
+      const list = cands('panel', fmtArgs('meta-story', 1080, 1920, { image: true }))
+      expect(list.length).toBeGreaterThan(0)
+      for (const c of list) {
+        const pn = c.out.els.find(e => e.k === 'r' && e.role === 'panel')!
+        const b = boxOf(pn, Sfull)!
+        expect(b.y1).toBeCloseTo(H_full, 6)
+        expect(b.y0).toBeGreaterThan(H_full * keep.top)          // it touched only the bottom edge
+        const plan = planLayout({ ...fmtArgs('meta-story', 1080, 1920, { image: true }), layoutId: 'panel', choice: c.choice })!
+        expect(plan.issues).toEqual([])
+      }
+    })
+
+    it('Shape bleed: the bleeding circle moves back to the REAL top (by the inset), and the checker still passes', () => {
+      const a = { ...fmtArgs('meta-story', 1080, 1920), shapeMode: { id: 'circle' } as const }
+      const list = cands('shapeBleed', a)
+      expect(list.length).toBeGreaterThan(0)
+      for (const c of list) {
+        const circle = c.out.els.find(e => e.k === 'c' && e.bleed)!
+        // In the band its top sat in the band's top margin (just under the band's edge); moved up by
+        // the inset it sits as close to the real top: above the full sheet's margin line.
+        expect(boxOf(circle, Sfull)!.y0).toBeLessThan(Sfull.M)
+        expect(planLayout({ ...a, layoutId: 'shapeBleed', choice: c.choice })!.issues).toEqual([])
+      }
     })
 
     it('Full bleed with an image: the image runs on under the app\'s bars, 0..H_full', () => {

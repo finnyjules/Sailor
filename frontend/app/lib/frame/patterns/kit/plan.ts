@@ -254,7 +254,24 @@ function runChoice(p: Prepared, a: { frameW: number; frameH: number }, choice: C
     for (const k of ['y', 'top', 'base', 'cy'] as const) if (m[k] != null) m[k] = m[k]! + inset
   }
   for (const e of out.els) {
-    if (e.k === 'r' && e.role === 'panel' && e.y <= inset + 0.5 && e.y + e.h >= bandEnd - 0.5) { e.y = 0; e.h = H_full; continue }
+    // A panel, a band or a bleeding rect that touches an edge of the band runs on to that real
+    // edge (the prototype's scrim rule, applied to rects); one that spans the band fills 0..H_full.
+    if (e.k === 'r' && !e.rot && (e.role === 'panel' || e.role === 'band' || e.bleed)) {
+      const bottom = e.y + e.h
+      if (e.y <= inset + 0.5) e.y = 0
+      if (bottom >= bandEnd - 0.5) e.h = H_full - e.y
+      else e.h = bottom - e.y
+      continue
+    }
+    // A bleeding circle whose top reaches the band's top margin (above the first design line,
+    // where only edge-bound pieces go) belongs to the top edge: move it up by the inset so it sits
+    // at the REAL top again (Shape bleed). Not a circle that holds text (`inside`) — moving it
+    // would pull the circle away from its text.
+    if (e.k === 'c' && e.bleed && e.cy - e.r <= inset + S.M
+      && !out.els.some(t => t.k === 't' && t.inside != null && t.inside === e.role)) {
+      e.cy -= inset
+      continue
+    }
     if (e.k !== 'p' || !e.bleed || e.y > inset + 0.5 || e.y + e.h < bandEnd - 0.5) continue
     if (e === side) {
       // The wide band's side image runs on to the real top and bottom on ITS side (the

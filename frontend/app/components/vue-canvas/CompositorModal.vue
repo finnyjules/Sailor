@@ -1001,7 +1001,9 @@ const layoutTabShowing = ref(false)
 const layoutVary = useLayoutVary({
   props: () => compositor.value?.data?.properties as Record<string, unknown> | undefined,
   // The Frame's DESIGN size in pixels (not the on-screen artboard): a format is found by its
-  // exact size (Stage 2, ruling P5). Kit geometry depends only on the aspect.
+  // exact size (Stage 2, ruling P5). Kit geometry depends only on the aspect. A width-0 Frame
+  // (it follows its wired image) has no design width of its own: bakeSize falls back to the
+  // artboard, so it gets no exact-size detection — a stored preset still works (aspect match).
   frameW: () => designSize.value.w,
   frameH: () => designSize.value.h,
   connectedSlots: () => connectedSlots0.value,
@@ -9466,7 +9468,7 @@ onUnmounted(() => {
               :name="layoutName" :layout-id="layoutVary.layoutId.value" :applied="layoutVary.applied.value"
               :candidates="layoutVary.candidates.value" :index="layoutVary.index.value"
               :choices="layoutVary.choices.value" :library="layoutVary.library.value"
-              :frame-w="canvasDisplay.w" :frame-h="canvasDisplay.h"
+              :frame-w="editorDims().w" :frame-h="editorDims().h"
               :background="background" :groups="localGroups" :wired-content="wiredContentForSlot"
               @vary="onLayoutVary" @jump="onLayoutJump" @select="onLayoutSelect" @choice="onLayoutChoice"
             />
