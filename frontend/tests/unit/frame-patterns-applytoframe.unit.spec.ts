@@ -14,7 +14,7 @@ function frameProps(extra: Record<string, unknown> = {}) {
   ], ...extra }
 }
 const palette = { field: '#f2f0ef', ink: '#121212', accent: '#dd2200' }
-const mk = () => ({ recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn() })
+const mk = () => ({ recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn(), writeGroups: vi.fn() })
 
 describe('applyPatternToFrame', () => {
   it('records history once, commits once, writes order once — in that sequence', () => {

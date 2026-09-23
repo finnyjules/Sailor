@@ -7,7 +7,7 @@ const title = { id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2, x: 0.5, y: 
 const img = { id: 'img', kind: 'image', filename: 'x.png', x: 0.5, y: 0.5, w: 0.5, h: 0.5, rotation: 0, opacity: 1 }
 function harness(extra: Record<string, unknown> = {}) {
   const props: Record<string, unknown> = { sailor_localLayers: [title, img], ...extra }
-  const editor = { recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn() }
+  const editor = { recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn(), writeGroups: vi.fn() }
   const remember = vi.fn()
   const sheet = useLayoutSheet({ props: () => props, frameW: () => 800, frameH: () => 1000, connectedSlots: () => [], editor: () => editor, remember })
   return { props, editor, remember, sheet }

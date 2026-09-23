@@ -23,7 +23,7 @@ describe('planPattern', () => {
     expect(planPattern({ ...base, patternId: 'nope' })).toBeNull()
   })
   it('applyPatternToFrame commits exactly the plan', () => {
-    const editor = { recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn() }
+    const editor = { recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn(), writeGroups: vi.fn() }
     const plan = planPattern({ ...base, patternId: 'runoff' })!
     const out = applyPatternToFrame({ ...base, patternId: 'runoff', editor })
     expect(out.ok).toBe(true)

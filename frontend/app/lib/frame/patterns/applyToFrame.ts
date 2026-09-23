@@ -9,7 +9,7 @@ import { applyPlacement } from './apply'
 import { insertFromOps } from './insert'
 import { nextOrderFor } from './order'
 import { framePresentKeys } from '~/lib/compositor/frameStack'
-import { topGroupOf, type LayerGroup } from '~/lib/compositor/layerGroups'
+import { ancestorsOf, type LayerGroup } from '~/lib/compositor/layerGroups'
 
 export interface PosterState { patternId: string; seed: number; shapeMode?: FrameElements['shapeMode']; imageMode?: boolean }
 
@@ -34,7 +34,9 @@ export interface PlanArgs {
 }
 
 export interface ApplyArgs extends PlanArgs {
-  editor: { recordHistory(): void; commit(next: LocalLayer[]): void; writeOrder(order: string[]): void; writeGroups?(next: LayerGroup[]): void }
+  /** `writeGroups` is required: a pattern clears the pins of the groups it moves, and an editor
+   *  without it would silently keep them. */
+  editor: { recordHistory(): void; commit(next: LocalLayer[]): void; writeOrder(order: string[]): void; writeGroups(next: LayerGroup[]): void }
 }
 
 /** What an apply would commit: the next layers, the next draw order, and the state to remember. */
@@ -90,15 +92,19 @@ export function clearPinsOfMoved(before: LocalLayer[], after: LocalLayer[]): Loc
     return rest as LocalLayer
   })
 }
-/** The group side of `clearPinsOfMoved`: a group unit (its outermost group, where the resolver
- *  reads group pins) whose member the pattern moved loses its pins. Null when nothing changes. */
+/** The group side of `clearPinsOfMoved`: every group that encloses a layer the pattern moved (its
+ *  own group and each one above it, up to the outermost, where the resolver reads group pins) loses
+ *  its pins. An inner group's pins would come back into force if it were ever ungrouped out.
+ *  Null when nothing changes. */
 export function clearGroupPinsOfMoved(before: LocalLayer[], after: LocalLayer[], groups: LayerGroup[]): LayerGroup[] | null {
   if (!groups.some(g => g.pins)) return null
   const prev = new Map(before.map(l => [l.id, l as unknown as Record<string, unknown>]))
   const hit = new Set<string>()
   for (const l of after) {
     const p = prev.get(l.id)
-    if (p && l.groupId && placementChanged(p, l as unknown as Record<string, unknown>)) hit.add(topGroupOf(l.groupId, groups))
+    if (!p || !l.groupId || !placementChanged(p, l as unknown as Record<string, unknown>)) continue
+    hit.add(l.groupId)
+    for (const a of ancestorsOf(l.groupId, groups)) hit.add(a)
   }
   let changed = false
   const out = groups.map((g) => {
@@ -117,10 +123,10 @@ export function applyPatternToFrame(args: ApplyArgs): { ok: boolean; posterState
   // the plan was computed from the frame's stored layers (planPattern reads props.sailor_localLayers)
   const before = (args.props?.sailor_localLayers as LocalLayer[] | undefined) ?? []
   const groups = (args.props?.sailor_localGroups as LayerGroup[] | undefined) ?? []
-  const nextGroups = args.editor.writeGroups ? clearGroupPinsOfMoved(before, plan.layers, groups) : null
+  const nextGroups = clearGroupPinsOfMoved(before, plan.layers, groups)
   args.editor.recordHistory()
   args.editor.commit(clearPinsOfMoved(before, plan.layers))
-  if (nextGroups) args.editor.writeGroups!(nextGroups)
+  if (nextGroups) args.editor.writeGroups(nextGroups)
   args.editor.writeOrder(plan.order)
   return { ok: true, posterState: plan.posterState }
 }

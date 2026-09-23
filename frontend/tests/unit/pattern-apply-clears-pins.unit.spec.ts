@@ -40,6 +40,30 @@ describe('clearGroupPinsOfMoved', () => {
     expect(out.find(g => g.id === 'outer')!.id).toBe('outer')
     expect(out.find(g => g.id === 'other')).toBe(groups[2])
   })
+  it('drops the pins of EVERY group that encloses a moved member, not only the outermost', () => {
+    const m = createRectLayer({ id: 'm', x: 0.2, groupId: 'inner' })
+    const s = createRectLayer({ id: 's', x: 0.6, groupId: 'sibling' })
+    const groups = [
+      { id: 'outer', pins: { h: 'right' as const } },
+      { id: 'middle', parentId: 'outer', pins: { v: 'top' as const } },
+      { id: 'inner', parentId: 'middle', pins: { h: 'left' as const } },
+      { id: 'sibling', parentId: 'outer', pins: { v: 'bottom' as const } },   // encloses nothing that moved
+    ]
+    const out = clearGroupPinsOfMoved([m, s], [{ ...m, x: 0.5 }, s], groups)!
+    expect(out.find(g => g.id === 'outer')!.pins).toBeUndefined()
+    expect(out.find(g => g.id === 'middle')!.pins).toBeUndefined()
+    expect(out.find(g => g.id === 'middle')!.parentId).toBe('outer')
+    expect(out.find(g => g.id === 'inner')!.pins).toBeUndefined()
+    expect(out.find(g => g.id === 'sibling')).toBe(groups[3])
+  })
+  it('an inner group pin alone is cleared too (its outermost group has none)', () => {
+    const m = createRectLayer({ id: 'm', x: 0.2, groupId: 'inner' })
+    const groups = [{ id: 'outer' }, { id: 'inner', parentId: 'outer', pins: { h: 'left' as const } }]
+    const out = clearGroupPinsOfMoved([m], [{ ...m, x: 0.5 }], groups)!
+    expect(out).not.toBeNull()
+    expect(out.find(g => g.id === 'inner')!.pins).toBeUndefined()
+    expect(out.find(g => g.id === 'outer')).toBe(groups[0])
+  })
   it('returns null when no pinned group had a member moved', () => {
     const m = createRectLayer({ id: 'm', groupId: 'g' })
     expect(clearGroupPinsOfMoved([m], [{ ...m, x: 0.9 }], [{ id: 'g' }])).toBeNull()

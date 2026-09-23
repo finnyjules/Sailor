@@ -12,6 +12,7 @@ import { inferElements } from '~/lib/frame/patterns/hierarchy'
 import { makeFrameMeasure, titleMeasureFrom } from '~/lib/frame/patterns/frameMeasure'
 import type { TextLayer } from '~/composables/useCompositorLayers'
 import type { FrameElements } from '~/lib/frame/patterns/types'
+import type { LayerGroup } from '~/lib/compositor/layerGroups'
 
 export type SheetTile = Tile & { plan: PatternPlan }
 
@@ -20,7 +21,8 @@ export interface LayoutSheetSource {
   frameW: () => number
   frameH: () => number
   connectedSlots: () => number[]
-  editor: () => { recordHistory(): void; commit(next: any[]): void; writeOrder(order: string[]): void }
+  /** writeGroups is required: applying a pattern clears the pins of the groups it moves. */
+  editor: () => { recordHistory(): void; commit(next: any[]): void; writeOrder(order: string[]): void; writeGroups(next: LayerGroup[]): void }
   /** Persist the applied state (UI memory, outside the undo step). */
   remember: (s: PosterState) => void
 }
