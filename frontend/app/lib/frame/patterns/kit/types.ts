@@ -1,0 +1,47 @@
+import type { Sheet } from './sheet'
+
+// Layout kit types. Units: percent of frame width (W = 100, H = 100 × frameH / frameW).
+
+export type RoleKey = 'title' | 'details' | 'date' | 'caption'
+export type Colour = 'ink' | 'accent' | 'field'
+/** Text style. `role` picks whose face is measured (the user's real family/weight). */
+export interface Style { role?: RoleKey; size?: number; wt?: number; ls: number; lh: number }
+interface Base { role?: string; over?: string[]; ok?: boolean; bleed?: boolean; opacity?: number; blend?: boolean }
+export interface TextEl extends Base { k: 't'; s: string; x: number; w?: number; top?: number; base?: number; size: number; wt?: number; ls: number; lh: number; align?: 'left' | 'center' | 'right'; color?: Colour; pre?: boolean; just?: boolean; rot?: number; origin?: string; inside?: string }
+export interface PhotoEl extends Base { k: 'p'; x: number; y: number; w: number; h: number; stand?: boolean; filter?: string; radius?: number }
+export interface CircleEl extends Base { k: 'c'; cx: number; cy: number; r: number; color?: Colour; photo?: boolean }
+export interface RectEl extends Base { k: 'r'; x: number; y: number; w: number; h: number; color?: Colour; rot?: number; radius?: number }
+export interface RuleEl extends Base { k: 'l'; x: number; y: number; w: number }
+export interface RingEl extends Base { k: 'ring'; cx: number; cy: number; R: number; size: number; s: string }
+export interface MissingEl { k: 'missing'; why?: string }
+export type El = TextEl | PhotoEl | CircleEl | RectEl | RuleEl | RingEl | MissingEl
+export interface Content { title: string; details?: string; date?: string; caption?: string }
+export type Kind = 'word' | 'phrase' | 'sentence'
+export interface LayoutCtx { c: Content; kind: Kind; ph: boolean; r: () => number; words: string[]; lines: string[]; arr: number }
+export interface LayoutOut { els: El[]; did: string }
+export interface LayoutDef {
+  id: string; name: string; fits: Kind[]
+  needs?: { image?: boolean; shape?: boolean; number?: boolean }
+  oneLineFirst?: boolean; keepScale?: boolean; ownPhoto?: boolean
+  /** The layout's promise, asserted by the checker: roles that must overlap, must bleed, must be rotated. */
+  premise?: { overlap?: [string, string][]; bleed?: string[]; rotated?: string[] }
+  fn(S: Sheet, ctx: LayoutCtx): LayoutOut
+}
+/** Measurement in kit units (percent of frame width). */
+export interface Measure {
+  /** width of `text` at size 100 units with letter spacing `ls` (em), in the face of `role` */
+  w100(text: string, role: RoleKey, ls: number): number
+  /** lines the RENDERER would draw for `text` in a box `boxW` units wide */
+  lines(text: string, role: RoleKey, size: number, ls: number, boxW: number): string[]
+  /** em-box middle → cap top, and middle → baseline, as fractions of font size, for `role` */
+  capAbove(role: RoleKey): number
+  baseBelow(role: RoleKey): number
+}
+
+/** The face an element is measured in, from its `role`: `details`/`date`/`caption`/`title`
+ *  map to themselves; `info` and anything else map to `caption`. */
+export function faceOf(role: string | undefined): RoleKey {
+  return role === 'title' || role === 'details' || role === 'date' || role === 'caption' ? role : 'caption'
+}
+
+export type { Sheet } from './sheet'
