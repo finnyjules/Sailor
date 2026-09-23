@@ -2097,11 +2097,20 @@ async function onCanvasDrop(e: DragEvent) {
   }
 }
 
+/** Keys that edit the selection or the history (arrows, ⌘C/⌘V/⌘D, Delete, ⌘Z, ⌘G, ⌘X, ⌘A). */
+function isViewDragEditKey(e: KeyboardEvent): boolean {
+  if (mapKeyToEdit(e, 1, 10) || e.key === 'Delete' || e.key === 'Backspace') return true
+  return (e.metaKey || e.ctrlKey) && ['z', 'g', 'x', 'a'].includes(e.key.toLowerCase())
+}
 // Esc cancels an in-progress pen draft (before it bubbles to modal-close).
 function onKeydown(e: KeyboardEvent) {
   // Escape during a move drag at a viewing size settles the drop where the last frame drew it
   // (so no held pin is left stored) and ends the drag. It must not also close the modal.
   if (e.key === 'Escape' && viewDrag.value) { e.preventDefault(); e.stopPropagation(); onViewPointerUp(); return }
+  // While a view drag (move or handle) is live, the arrow keys and the edit keys do nothing: a nudge,
+  // duplicate, paste, delete, group or undo in the middle of a gesture would write its own undo
+  // step against a layer the drag is still holding pins on. The release settles the gesture.
+  if (viewDrag.value && isViewDragEditKey(e)) { e.preventDefault(); e.stopPropagation(); return }
   // Keyboard nudge/duplicate on the current selection — deferred first so it
   // doesn't fire while typing in a field or text-editing a layer.
   const t = e.target as HTMLElement | null
@@ -3368,6 +3377,9 @@ function onViewPointerDown(e: PointerEvent) {
   // and any button or field (the inline text editor keeps its caret). Capturing the pointer here
   // would retarget their pointer-up and click to the artboard.
   if (t?.closest?.('[data-view-handle],[data-handle],[data-gen-bar],[data-smart-bar],[data-edit-result-bar],button,input,textarea,select')) return
+  // A second pointer pressing during a live view drag is ignored: it must neither replace the drag
+  // (stranding its held pins) nor select. The first pointer's release settles the gesture.
+  if (viewDrag.value) { e.preventDefault(); e.stopPropagation(); return }
   const r = resolved.value; if (!r) return
   const id = viewHitAt(e)
   if (!id) { lastDownHitLayer = false; if (!e.shiftKey) selectLocal(null); return } // no marquee at a view (later work)
@@ -3390,7 +3402,7 @@ function viewDelta(e: PointerEvent, d: { sx: number; sy: number }): { dx: number
   return { dx: (e.clientX - d.sx) * viewSize.w / rect.width, dy: (e.clientY - d.sy) * viewSize.h / rect.height }
 }
 function onViewPointerMove(e: PointerEvent) {
-  const d = viewDrag.value; if (!d || d.kind !== 'move') return
+  const d = viewDrag.value; if (!d || d.kind !== 'move' || e.pointerId !== d.pointerId) return
   // Snapped back to the design size mid-drag (a design-only tool's shortcut): settle and stop.
   if (!viewEditing.value) { onViewPointerUp(); return }
   if (!d.recorded) {
@@ -3415,6 +3427,29 @@ function onViewPointerUp() {
   applyViewEdits(d.units.map(u => moveUnitAtView(u, d.layers, W0, H0, d.dx, d.dy, 'drop')))
 }
 
+/** A pointer-up / cancel / lost capture: settles only when it is the drag's OWN pointer, so a
+ *  second finger or pen lifting (or being cancelled) never ends someone else's gesture. */
+function onViewPointerEnd(e: PointerEvent) {
+  const d = viewDrag.value
+  if (d && e.pointerId === d.pointerId) onViewPointerUp()
+}
+/** True when a live view drag has lost what it acts on: the view snapped back to the design size
+ *  (a design-only tool's shortcut), or the selection went away (Delete). A handle drag also ends
+ *  when its handles unmount — the selection is no longer that single layer, or text editing,
+ *  generation or the brush took over. A removed captured handle gets no lostpointercapture of its
+ *  own, so without this the drag would be stranded, its held pins stored, and the canvas guards
+ *  would swallow the next gesture's pointer events. The watch evaluates this during setup, when
+ *  viewDrag is null, so it returns before reading anything declared further down (genActive). */
+function viewDragOrphaned(): boolean {
+  const d = viewDrag.value; if (!d) return false
+  const s = viewSel.value
+  if (!viewEditing.value || !s) return true
+  if (d.kind === 'move') return false
+  return !s.single || !s.layer || s.unit.kind !== 'layer' || s.layer.id !== d.layer.id
+    || !!editingId.value || genActive.value || brush.active.value
+}
+watch(viewDragOrphaned, (gone) => { if (gone) onViewPointerUp() }, { flush: 'sync' })
+
 // ── Resize, scale and rotate handles at a viewing size ─────────────────────────
 // A single selected LAYER gets the design-size handle set, drawn from its resolved box: resize on
 // the kinds that resize at the design size (unrotated), a uniform scale from the corners on the
@@ -3430,6 +3465,7 @@ function viewCentreClient(): { x: number; y: number } | null {
 }
 /** The single selected layer a view handle may act on (never a group's lead on its own). */
 function viewHandleTarget() {
+  if (viewDrag.value) return null // a second pointer on a handle during a live drag is ignored
   const s = viewSel.value
   return s && s.single && s.layer && s.unit.kind === 'layer' ? { s, layer: { ...s.layer } as LocalLayer } : null
 }
@@ -3443,7 +3479,7 @@ function beginViewHandle(e: PointerEvent): HTMLElement {
 }
 function onViewResizeDown(handle: Handle, e: PointerEvent) {
   const t = viewHandleTarget(); const p = clientToView(e)
-  if (!t || !p) return
+  if (!t || !p) { e.stopPropagation(); return }
   const el = beginViewHandle(e)
   const { s, layer: l } = t
   const vb = s.unit.viewBox
@@ -3459,7 +3495,7 @@ function onViewResizeDown(handle: Handle, e: PointerEvent) {
 }
 function onViewScaleDown(e: PointerEvent) {
   const t = viewHandleTarget(); const c = viewCentreClient()
-  if (!t || !c) return
+  if (!t || !c) { e.stopPropagation(); return }
   const el = beginViewHandle(e)
   const l = t.layer as LocalLayer & Record<string, unknown>
   // The fields the design-size corner scale multiplies (a wired layer's height is derived). A text
@@ -3476,7 +3512,7 @@ function onViewScaleDown(e: PointerEvent) {
 }
 function onViewRotateDown(e: PointerEvent) {
   const t = viewHandleTarget(); const c = viewCentreClient()
-  if (!t || !c) return
+  if (!t || !c) { e.stopPropagation(); return }
   const el = beginViewHandle(e)
   viewDrag.value = {
     kind: 'rotate', unit: t.s.unit, layer: t.layer, sx: e.clientX, sy: e.clientY, edit: null,
@@ -3774,7 +3810,7 @@ function onCanvasPointerMoveCapture(e: PointerEvent) {
   else if (marquee.value) { const p = clientToNorm(e); if (p) moveMarquee(p.nx, p.ny) }
 }
 function onCanvasPointerUpCapture(e: PointerEvent) {
-  if (viewDrag.value) { onViewPointerUp(); return } // only ever set at a viewing size
+  if (viewDrag.value) { onViewPointerEnd(e); return } // only ever set at a viewing size; its own pointer settles
   if (smartActive.value) { void onSmartPointerUp(e); return }
   if (regionSelectActive.value) { onRegionSelectPointerUp(e); return }
   if (genActive.value && genDraw.value) { onGenPointerUp(e); return }
@@ -7983,8 +8019,8 @@ onUnmounted(() => {
         @pointerdown.capture="onCanvasPointerDownCapture"
         @pointermove="onCanvasPointerMoveCapture"
         @pointerup="onCanvasPointerUpCapture"
-        @pointercancel="onViewPointerUp"
-        @lostpointercapture="onViewPointerUp"
+        @pointercancel="onViewPointerEnd"
+        @lostpointercapture="onViewPointerEnd"
         @pointerleave="genCursor.on = false; smartCursor.on = false; brush.cursor.value = null"
         @dblclick.capture="onCanvasDblClickCapture"
         @contextmenu="onCanvasContextMenu"
@@ -8385,9 +8421,9 @@ onUnmounted(() => {
             :style="{ left: viewSel.handles[corner].x + 'px', top: viewSel.handles[corner].y + 'px', transform: 'translate(-50%, -50%)' }"
             @pointerdown="(Math.abs(viewSel.layer.rotation ?? 0) < 1e-9 && (cornerResizableKind(viewSel.layer.kind) || textBoxResizable(viewSel.layer))) ? onViewResizeDown(corner, $event) : onViewScaleDown($event)"
             @pointermove="onViewHandleMove"
-            @pointerup="onViewPointerUp"
-            @pointercancel="onViewPointerUp"
-            @lostpointercapture="onViewPointerUp"
+            @pointerup="onViewPointerEnd"
+            @pointercancel="onViewPointerEnd"
+            @lostpointercapture="onViewPointerEnd"
           />
           <template v-if="Math.abs(viewSel.layer.rotation ?? 0) < 1e-9 && (resizableKind(viewSel.layer.kind) || textBoxResizable(viewSel.layer))">
             <div
@@ -8398,9 +8434,9 @@ onUnmounted(() => {
               :style="{ left: viewSel.handles[edge].x + 'px', top: viewSel.handles[edge].y + 'px', transform: 'translate(-50%, -50%)' }"
               @pointerdown="onViewResizeDown(edge, $event)"
               @pointermove="onViewHandleMove"
-              @pointerup="onViewPointerUp"
-              @pointercancel="onViewPointerUp"
-              @lostpointercapture="onViewPointerUp"
+              @pointerup="onViewPointerEnd"
+              @pointercancel="onViewPointerEnd"
+              @lostpointercapture="onViewPointerEnd"
             />
           </template>
           <div
@@ -8409,9 +8445,9 @@ onUnmounted(() => {
             :style="{ left: viewSel.handles.rot.x + 'px', top: viewSel.handles.rot.y + 'px', transform: 'translate(-50%, -50%)' }"
             @pointerdown="onViewRotateDown"
             @pointermove="onViewHandleMove"
-            @pointerup="onViewPointerUp"
-            @pointercancel="onViewPointerUp"
-            @lostpointercapture="onViewPointerUp"
+            @pointerup="onViewPointerEnd"
+            @pointercancel="onViewPointerEnd"
+            @lostpointercapture="onViewPointerEnd"
           />
         </template>
 
