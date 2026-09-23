@@ -95,7 +95,13 @@ function onPresetChange(e: Event) {
   if (v === 'responsive') { setFrameResponsive(props.data, true, aspect.value); return }
   if (v && v !== 'custom') { setFrameResponsive(props.data, false, aspect.value); applyFramePreset(props.data, v) }
 }
-function setDim(which: 'width' | 'height', e: Event) { setFrameDim(props.data, which, parseFloat((e.target as HTMLInputElement).value) || 0) }
+function setDim(which: 'width' | 'height', e: Event) {
+  const input = e.target as HTMLInputElement
+  setFrameDim(props.data, which, parseFloat(input.value) || 0)
+  // Show what was written: a refused clear (responsive frames keep a size) leaves the bound
+  // value unchanged, so Vue would not repaint the field on its own.
+  input.value = String((which === 'width' ? frameW.value : frameH.value) || '')
+}
 
 // Aspect: explicit dims win; else the bottom wired image's aspect; else square.
 // Matching the composite means the background image fills the artboard exactly,
