@@ -1,6 +1,7 @@
 // A "living image": an image layer's optional frame sequence. Pure maths only — no
 // DOM, no Vue — so the modal, the Frame card and the bake all pick the same frame
 // for the same clock. See docs/superpowers/specs/2026-09-10-frame-living-image-clip-design.md.
+import { resolveAssetUrl } from './assetScope'
 
 export interface ImageClip {
   /** Folder under ComfyUI input/, e.g. "sailor_clips/clip_1725970000_ab12". */
@@ -69,8 +70,16 @@ export function clipFrameIndex(clip: ImageClip, tSec: number, k = 0, n = 1, phas
   return ((f % frames) + frames) % frames
 }
 
-/** The /view URL of one frame, same shape `imageLayerUrl` uses for stills. */
+/** The key a web export stores clip frame `index` under (see ~/lib/compositor/assetScope). */
+export function clipFrameKey(clip: ImageClip, index: number): string {
+  return `${clip.dir}/${index}`
+}
+
+/** The /view URL of one frame, same shape `imageLayerUrl` uses for stills — or its inlined copy
+ *  while a web export's adapter is mounted. */
 export function clipFrameUrl(clip: ImageClip, index: number): string {
-  const filename = `${String(Math.max(0, Math.floor(index))).padStart(6, '0')}.png`
-  return `/view?${new URLSearchParams({ filename, subfolder: clip.dir, type: 'input' })}`
+  const i = Math.max(0, Math.floor(index))
+  const filename = `${String(i).padStart(6, '0')}.png`
+  return resolveAssetUrl('clipFrame', clipFrameKey(clip, i),
+    `/view?${new URLSearchParams({ filename, subfolder: clip.dir, type: 'input' })}`)
 }

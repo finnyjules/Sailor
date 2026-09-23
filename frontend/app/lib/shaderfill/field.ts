@@ -20,6 +20,7 @@ import { getEffectSync, refetchShaderFxCatalog } from '~/lib/shaderfx/catalogSto
 import type { EffectDef, EffectTextureDef, ParamValue } from '~/lib/shaderfx/types'
 import { toUniforms } from '~/lib/shaderfx/params'
 import { fieldKey, quantizeTime, planFields, resolveEffectParams, inputKey, LIVE_FIELD_CEILING } from './descriptor'
+import { resolveAssetUrl } from '~/lib/compositor/assetScope'
 
 export interface FieldRequest {
   spec: ShaderSpec; w: number; h: number; t: number; fps: number
@@ -307,9 +308,14 @@ const _texByDef = new WeakMap<EffectTextureDef, HTMLImageElement>()
  *  and registers the refetcher at module scope, and this module must not pull it into
  *  the Space Type embed bundle (see the catalogStore import note at the top of this
  *  file). Keep the two in step if that route ever moves. */
-function textureAssetUrl(file: string, v?: string | number): string {
+export function shaderTextureKey(file: string, v?: string | number): string {
+  return `${file}@${v ?? ''}`
+}
+
+export function shaderTextureUrl(file: string, v?: string | number): string {
   const base = `/sailor/shader_effects/assets/${encodeURIComponent(file)}`
-  return v != null ? `${base}?v=${encodeURIComponent(String(v))}` : base
+  const url = v != null ? `${base}?v=${encodeURIComponent(String(v))}` : base
+  return resolveAssetUrl('shaderTexture', shaderTextureKey(file, v), url)
 }
 
 /** The cached Image for one declared texture, starting its download the first time it
@@ -341,7 +347,7 @@ function ensureTextureImage(t: EffectTextureDef): HTMLImageElement | null {
       notifyFieldReady()
     })
     if (import.meta.dev) img.addEventListener('error', () => { console.warn(`[shaderfill] texture "${t.file}" failed to load — effects that sample it will draw without it`) })
-    img.src = textureAssetUrl(t.file, t.v)
+    img.src = shaderTextureUrl(t.file, t.v)
     _texImages.set(key, img)
   }
   _texByDef.set(t, img)

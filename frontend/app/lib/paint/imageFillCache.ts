@@ -6,6 +6,8 @@
  * preload-then-paint shape image LAYERS already use. DOM is touched only inside
  * function bodies, so this stays importable by the CPU-only `lib/` modules.
  */
+import { resolveAssetUrl } from '~/lib/compositor/assetScope'
+
 const cache = new Map<string, HTMLImageElement>()
 // A MAP, not a Set: a second `ensureFillBitmaps` for a src already decoding must
 // AWAIT the same pending load, not skip it and return an immediately-resolved
@@ -47,7 +49,7 @@ export function ensureFillBitmaps(srcs: string[], onReady?: () => void): Promise
         im.crossOrigin = 'anonymous'
         im.onload = () => { failed.delete(src); cache.set(src, im); inFlight.delete(src); res() }
         im.onerror = () => { failed.add(src); inFlight.delete(src); res() }
-        im.src = src
+        im.src = resolveAssetUrl('fillImage', src, src)
       })
       inFlight.set(src, job)
     }

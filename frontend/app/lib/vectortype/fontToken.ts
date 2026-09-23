@@ -14,6 +14,7 @@
  */
 import { VARIABLE_FONTS_BY_ID } from '~/data/variable-fonts'
 import { libraryFamily, libraryFontUrl, resolveLibraryFace } from '~/data/library-fonts-lookup'
+import { resolveAssetUrl } from '~/lib/compositor/assetScope'
 
 export const VT_GOOGLE_FILE_ROUTE = '/api/fonts/google-file'
 
@@ -66,10 +67,16 @@ export function isVtFontToken(token: unknown): boolean { return parseVtFontToken
 /** The file route for a ref. Never a raw upstream URL: every shape goes through
  *  a server route that resolves an id or validates a family against a catalog. */
 export function vtFontFileUrl(ref: VtFontRef): string | null {
-  if (ref.kind === 'catalog') return variableFontUrl(ref.id)
-  if (ref.kind === 'google') return `${VT_GOOGLE_FILE_ROUTE}?family=${encodeURIComponent(ref.family)}&weight=${ref.weight}`
-  const face = resolveLibraryFace(ref.family, ref.weight ?? 400, ref.italic)
-  return face ? libraryFontUrl(face.id) : null
+  let url: string | null
+  if (ref.kind === 'catalog') url = variableFontUrl(ref.id)
+  else if (ref.kind === 'google') url = `${VT_GOOGLE_FILE_ROUTE}?family=${encodeURIComponent(ref.family)}&weight=${ref.weight}`
+  else {
+    const face = resolveLibraryFace(ref.family, ref.weight ?? 400, ref.italic)
+    url = face ? libraryFontUrl(face.id) : null
+  }
+  // While a web export's adapter is mounted, an outline font resolves to its inlined bytes; fetch()
+  // of a data: URL is not a network request, so loadVectorFont needs no change.
+  return url === null ? null : resolveAssetUrl('outlineFont', formatVtFontToken(ref), url)
 }
 
 export function vtFontRefLabel(ref: VtFontRef): string {

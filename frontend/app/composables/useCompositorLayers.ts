@@ -40,6 +40,7 @@ import { axesToVariationSettings } from '~/lib/motion/axes'
 import { expandClones, type Cloner, type CloneTransform } from '~/composables/useCloner'
 import { copyClock, staggerOf } from '~/lib/motionx/copies'
 import { clipFrameIndex, clipFrameUrl, clipPlayedSeconds, type ImageClip } from '~/lib/compositor/clip'
+import { resolveAssetUrl } from '~/lib/compositor/assetScope'
 import { fillIsShader, type ShaderSpec } from '~/lib/spacetype/fillTile'
 import { effectReadsInput, getEffectSync } from '~/lib/shaderfx/catalogStore'
 import { dealShaderFill } from '~/lib/compositor/mosaic'
@@ -1144,9 +1145,10 @@ export function createBrushLayer(partial: Partial<BrushLayer> = {}): BrushLayer 
 // ── Image-layer asset loading ────────────────────────────────────────────────
 const _imageCache = new Map<string, HTMLImageElement>()
 
-/** Resolve an image layer's filename to a ComfyUI /view URL. */
+/** Resolve an image layer's filename to a ComfyUI /view URL — or, while a web export's adapter is
+ *  mounted, to its inlined copy (see ~/lib/compositor/assetScope). */
 export function imageLayerUrl(filename: string): string {
-  return `/view?${new URLSearchParams({ filename, type: 'input' })}`
+  return resolveAssetUrl('image', filename, `/view?${new URLSearchParams({ filename, type: 'input' })}`)
 }
 
 // ── Living-image clip frames ─────────────────────────────────────────────────
@@ -1307,10 +1309,18 @@ export function collectFillImageSrcs(layers: LocalLayer[]): string[] {
 /** Preload every image layer's bitmap into the module cache so the synchronous
  *  `drawLocalLayer` can paint it. Resolves once all are loaded (or errored). Also
  *  loads each image layer's clip frames (see above), when it has one. */
-export async function ensureLayerImages(layers: LocalLayer[]): Promise<void> {
+export async function ensureLayerImages(layers: LocalLayer[], opts?: { keep?: boolean }): Promise<void> {
   // Before anything else, and before the no-DOM bail: a layer list that no longer
   // names a clip is the signal that its frames can go (see sweepClipCache).
-  sweepClipCache(layers)
+  //
+  // `keep` is for a web export's adapter: it is one of possibly several Frames on a page, so it
+  // must never sweep a clip another one is showing, and its own clips must never be evicted by
+  // the cap (the page has no editor that would re-request them). It pins instead of sweeping.
+  if (opts?.keep) {
+    for (const l of layers) if (l.kind === 'image' && l.clip) _clipLive.add(clipKey(l.clip))
+  } else {
+    sweepClipCache(layers)
+  }
   if (typeof window === 'undefined') return
   const jobs: Promise<unknown>[] = []
   for (const layer of layers) {
