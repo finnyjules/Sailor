@@ -70,9 +70,12 @@ describe('planLayout — runoff on a real frame', () => {
     expect(title.fontFamily).toBe('Inter')                        // face untouched
     expect(title.fontWeight).toBe(600)
     expect(title.text).toBe(TEXTS.title)
+    expect(title.color).toBe('#111111')
     const details = plan!.layers.find(l => l.id === 'd') as any
     expect(details.text).toBe(TEXTS.details)
     expect(details.color).toBe('#111111')                         // no recolour by default
+    expect((plan!.layers.find(l => l.id === 'dt') as any).text).toBe(TEXTS.date)
+    expect((plan!.layers.find(l => l.id === 'c') as any).text).toBe(TEXTS.caption)
     // every role moved, every layer is in the order exactly once
     expect(new Set(plan!.order)).toEqual(new Set(plan!.layers.map(l => 'l:' + l.id)))
     expect(plan!.posterState).toMatchObject({ patternId: 'runoff', choice: DEFAULT_CHOICE })
@@ -122,6 +125,28 @@ describe('planLayout — runoff on a real frame', () => {
     }
   })
 
+  it('is deterministic: the same args plan to the same result', () => {
+    expect(planLayout(args())).toEqual(planLayout(args()))
+  })
+
+  it('a layout that draws from r() is reproducible per choice and varies with arr', () => {
+    unregister.push(__registerLayoutForTest({
+      id: 'seeded', name: 'seeded', fits: ['word', 'phrase', 'sentence'],
+      fn(S, { c, r }) {
+        const { X, L, SPAN, disp, sec } = S
+        const size = S.fitSize([c.title], SPAN(1, 8))
+        return { els: [
+          disp(c.title, { size, x: X(1) + r() * SPAN(1, 3), top: L(1) }),
+          sec(c.details!, { x: X(1), w: SPAN(1, 9), top: L(12) }),
+        ], did: 'seeded' }
+      },
+    }))
+    const titleX = (arr: number) => planLayout(args({ layoutId: 'seeded', choice: { ...DEFAULT_CHOICE, arr } }))!.layers.find(l => l.id === 't')!.x
+    expect(titleX(0)).toBe(titleX(0))
+    expect(titleX(1)).toBe(titleX(1))
+    expect(titleX(1)).not.toBe(titleX(0))
+  })
+
   it('returns null for an unknown layout or a frame with no text', () => {
     expect(planLayout(args({ layoutId: 'nope' }))).toBeNull()
     expect(planLayout(args({ props: props([]) }))).toBeNull()
@@ -164,7 +189,48 @@ describe('planLayout — owned pieces', () => {
   })
 })
 
+describe('planLayout — owned pieces are not the user\'s shapes', () => {
+  it('after a layout adds a band, a layout needing a shape has no candidates and no op aims at the band', () => {
+    unregister.push(__registerLayoutForTest(testLayout('band', 'band')))
+    const needsShape = { ...testLayout('needsShape', 'none'), needs: { shape: true } }
+    unregister.push(__registerLayoutForTest(needsShape))
+    // A layout whose circle is the user's shape when there is one, else its own dot.
+    unregister.push(__registerLayoutForTest({
+      id: 'dot', name: 'dot', fits: ['word', 'phrase', 'sentence'],
+      fn(S, ctx) {
+        const out = testLayout('x', 'none').fn(S, ctx)
+        out.els.push({ k: 'c', cx: S.X(10), cy: S.L(8), r: 4, role: 'shape' })
+        return out
+      },
+    }))
+    const a = planLayout(args({ layoutId: 'band' }))!
+    const band = a.layers.find(l => (l as any).owner?.key === 'band-0')!
+    expect(band).toBeTruthy()
+    const p2 = props(a.layers, { sailor_stackOrder: a.order })
+    const { choice: _c, ...rest } = args({ layoutId: 'needsShape', props: p2 })
+    expect(candidatesForFrame(rest)).toEqual([])
+    expect(planLayout(args({ layoutId: 'needsShape', props: p2 }))).toBeNull()
+    // The dot must become its own owned piece — not a move of the band (which mergeOwned drops).
+    const b = planLayout(args({ layoutId: 'dot', props: p2 }))!
+    expect(b.layers.find(l => l.id === band.id)).toBeUndefined()
+    const dot = b.layers.find(l => (l as any).owner?.key === 'shape-0')
+    expect(dot).toBeTruthy()
+    expect(b.layers.filter(l => (l as any).owner?.by === 'layout').length).toBe(1)
+  })
+})
+
 describe('applyLayoutToFrame', () => {
+  it('refuses (ok: false, no history) when the layout does not fit the frame', () => {
+    unregister.push(__registerLayoutForTest({ ...testLayout('imgOnly', 'none'), needs: { image: true } }))
+    expect(planLayout(args({ layoutId: 'imgOnly' }))).toBeNull()
+    const editor = mkEditor()
+    expect(applyLayoutToFrame({ ...args({ layoutId: 'imgOnly' }), editor }).ok).toBe(false)
+    expect(editor.recordHistory).not.toHaveBeenCalled()
+    expect(editor.commit).not.toHaveBeenCalled()
+    expect(editor.writeOrder).not.toHaveBeenCalled()
+  })
+
+
   it('records history, commits and writes the order once — in that sequence', () => {
     const editor = mkEditor(); const calls: string[] = []
     editor.recordHistory.mockImplementation(() => calls.push('history'))

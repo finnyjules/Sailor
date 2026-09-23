@@ -20,7 +20,7 @@ import { makeCanvasMeasure } from './measure'
 import { boxOf, checkPlan } from './check'
 import { elementsToOps } from './toOps'
 import type { RoleTargets } from './toOps'
-import { mergeOwned } from './owned'
+import { isOwned, mergeOwned } from './owned'
 import { enumerate, lineOptions } from './vary'
 import type { Candidate, Choice } from './vary'
 import type { Content, Kind, LayoutDef, LayoutOut, Measure, PhotoEl, RoleKey } from './types'
@@ -84,7 +84,9 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
   const def = LAYOUTS[index]
   if (!def) return null
   const layers = (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? []
-  const elements = inferElements(posterLayerViews(a.props), a.shapeMode ?? null, a.imageMode ?? false)
+  // A layout's own pieces (bands, rules, dots) are not the user's shapes: infer from the user's layers only.
+  const userLayers = layers.filter(l => !isOwned(l as { owner?: { by: string } }))
+  const elements = inferElements(posterLayerViews({ ...a.props, sailor_localLayers: userLayers }), a.shapeMode ?? null, a.imageMode ?? false)
   if (!elements.title) return null
   // The title's words, re-joined: the layout does its own line breaking.
   const content: Content = { title: elements.title.words.join(' ') }
@@ -173,16 +175,18 @@ function checkRun({ out, S, side }: Run, premise: LayoutDef['premise']): string[
     const e = out.els.find(x => x.k !== 'missing' && x.role === role)
     const b = e ? boxOf(e, S) : null
     const runsOff = b != null && (b.x0 < 0 || b.y0 < 0 || b.x1 > S.W || b.y1 > S.H)
-    const under = b != null && Math.min(b.x1, sb.x1) - Math.max(b.x0, sb.x0) > 0 && Math.min(b.y1, sb.y1) - Math.max(b.y0, sb.y0) > 0
+    // "Under" means a real overlap — the checker's collision threshold (0.25 units on both axes).
+    const under = b != null && Math.min(b.x1, sb.x1) - Math.max(b.x0, sb.x0) > 0.25 && Math.min(b.y1, sb.y1) - Math.max(b.y0, sb.y0) > 0.25
     if (!runsOff && !under) issues.push(`promise broken: ${role} should run off the page`)
   }
   return issues
 }
 
-/** Run a layout on a frame and return the plan. Pure: nothing is written. */
+/** Run a layout on a frame and return the plan. Pure: nothing is written. Null when the layout
+ *  is unknown, the frame has no title, or the layout does not fit the frame (`fitsFrame`). */
 export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
   const p = prepare(a)
-  if (!p) return null
+  if (!p || !fitsFrame(p)) return null
   const ran = runChoice(p, a, a.choice)
   const { out, S } = ran
   const issues = checkRun(ran, p.def.premise)
