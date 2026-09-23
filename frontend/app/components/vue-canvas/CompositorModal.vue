@@ -1006,6 +1006,7 @@ const layoutVary = useLayoutVary({
   // Merge, so the picker state kept alongside (shape, image, palette) survives an apply.
   remember: (s) => { const n = compositor.value; if (!n) return; const p = (n.data.properties ||= {}); (p as any).sailor_posterState = { ...(p as any).sailor_posterState, ...s } },
   active: () => layoutTabShowing.value,
+  editing: () => !!editingId.value,
 })
 
 // Shape picker for the Layout tab: choose a library shape the engine may use
@@ -8223,7 +8224,7 @@ onUnmounted(() => {
          panned content slides beneath them instead of cropping at their edge.
          Fit still respects the panel gap — see PANEL_GUTTER_* above. -->
     <div
-      ref="stageBoxRef"
+      ref="stageBoxRef" data-testid="compositor-stage"
       class="absolute inset-0 flex items-center justify-center overflow-hidden"
       :class="panning ? 'cursor-grabbing' : spaceDown ? 'cursor-grab' : ''"
       :style="{ paddingBottom: stagePadBottom + 'px' }"
@@ -9459,7 +9460,7 @@ onUnmounted(() => {
           <div class="px-4 pt-3">
             <p v-if="!layoutVary.library.value.length" class="text-xs text-white/40 italic">Add a text layer to get layout options. The largest text is read as the title.</p>
             <LayoutVaryPanel v-else
-              :name="layoutName" :layout-id="layoutVary.layoutId.value"
+              :name="layoutName" :layout-id="layoutVary.layoutId.value" :applied="layoutVary.applied.value"
               :candidates="layoutVary.candidates.value" :index="layoutVary.index.value"
               :choices="layoutVary.choices.value" :library="layoutVary.library.value"
               :frame-w="canvasDisplay.w" :frame-h="canvasDisplay.h"

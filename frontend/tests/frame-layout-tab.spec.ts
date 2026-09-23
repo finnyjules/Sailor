@@ -108,6 +108,9 @@ test.describe('Frame Layout tab', () => {
     await page.keyboard.press('v')
     await expect(count).toHaveText(total > 2 ? `3 of ${total}` : `1 of ${total}`)
     const beforeArrow = await frame(page)
+    // The arrows step variations only with nothing selected (with a selection they nudge): clear it
+    // the way a click on the empty stage does (dispatched on the stage itself, so no panel is hit).
+    await page.locator('[data-testid="compositor-stage"]').dispatchEvent('click')
     await page.keyboard.press('ArrowLeft')
     await expect(count).toHaveText(`2 of ${total}`)
     // each step is one undo step: one undo returns the layers from before the arrow

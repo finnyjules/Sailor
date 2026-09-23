@@ -19,9 +19,12 @@ import type { FrameElements } from '~/lib/frame/patterns/types'
 // Cost: the candidates run for the current layout only; the library plans its first 12 layouts
 // at once and the rest when the browser is idle. Enumerating follows a content key (the Frame's
 // text, faces and colours, and its size) — NOT the layout-set fields (position, size, spacing…),
-// so a drag on the canvas re-plans nothing. The PLANS (the library, and each variation's tile)
-// are also redone after every apply, undo, redo and reorder: all of them write a new draw order
-// (`sailor_stackOrder`), which a drag never does — so the thumbnails show the Frame as it is.
+// so a drag on the canvas re-plans nothing. The content key is only worked out ~200 ms after the
+// layers stop changing (a trailing debounce), and not at all while a text layer is being edited on
+// the canvas — typing never re-plans per keystroke; the edit's end settles it once. The PLANS (the
+// library, and each variation's tile) are redone at once after every apply, undo, redo and
+// reorder: all of them write a new draw order (`sailor_stackOrder`), which a drag never does — so
+// the thumbnails show the Frame as it is.
 
 export type VaryCandidate = Candidate & { plan: LayoutPlan }
 export interface LibraryItem { id: string; name: string; plan: LayoutPlan | null; reason?: string }
@@ -37,9 +40,14 @@ export interface LayoutVarySource {
   remember(s: { patternId: string; seed: number; choice: Choice; index: number }): void
   /** Whether the Layout tab is showing. The library plans only while it is. Default: always. */
   active?: () => boolean
+  /** A text layer is being edited on the canvas: content re-plans wait until the edit ends. */
+  editing?: () => boolean
   /** Injected in tests (the stub measure). Default: the renderer-exact canvas measure. */
   measure?: Measure
 }
+
+/** How long the layers must be still before a content change re-plans (ms). */
+export const CONTENT_SETTLE_MS = 200
 
 /** How many library layouts plan at once; the rest plan when the browser is idle. */
 const LIBRARY_FIRST = 12
@@ -92,7 +100,7 @@ function whenIdle(fn: () => void): () => void {
 }
 
 export function useLayoutVary(src: LayoutVarySource): {
-  layoutId: Ref<string>; index: Ref<number>
+  layoutId: Ref<string>; index: Ref<number>; applied: Ref<boolean>
   candidates: ComputedRef<VaryCandidate[]>
   library: ComputedRef<LibraryItem[]>
   choices: ComputedRef<ChoiceRow[]>
@@ -119,9 +127,39 @@ export function useLayoutVary(src: LayoutVarySource): {
   }
 
   // ── what the planners read: a snapshot of the Frame, untracked ──
-  // The content key is the ONLY tracked read; the planners read raw objects, so their deep reads
-  // of every layer never become reactive dependencies.
-  const frameKey = computed(() => contentKey(src.props(), src.frameW(), src.frameH(), src.connectedSlots()))
+  // Nothing here reads the layers reactively. The only reactive reads are identities (the layer
+  // array, the grid, the order), the Frame's size and the slots; the content key is stringified
+  // from raw objects, and only when it settles (see `settle`).
+  const isActive = () => src.active?.() ?? true
+  const settledKey = ref('')
+  function settle() {
+    clearTimeout(settleTimer); settleTimer = undefined
+    const k = contentKey(toRaw(src.props()), src.frameW(), src.frameH(), src.connectedSlots())
+    if (k !== settledKey.value) settledKey.value = k
+  }
+  let settleTimer: ReturnType<typeof setTimeout> | undefined
+  let heldByEdit = false
+  function settleSoon() {
+    clearTimeout(settleTimer)
+    settleTimer = setTimeout(() => {
+      settleTimer = undefined
+      if (src.editing?.()) { heldByEdit = true; return }   // the edit's end settles it
+      settle()
+    }, CONTENT_SETTLE_MS)
+  }
+  // The tab showing: settle at once (a first look must not wait for the debounce).
+  watch(isActive, (on) => { if (on) settle() }, { immediate: true })
+  // A content change (a new layer array, grid, size or slots): settle after the debounce.
+  watch(() => {
+    if (!isActive()) return null
+    const p = src.props()
+    return [p?.sailor_localLayers, p?.sailor_localGrid, src.frameW(), src.frameH(), src.connectedSlots().join(',')]
+  }, (v) => { if (v) settleSoon() })
+  // The end of a text edit settles what was held back while typing.
+  watch(() => !!src.editing?.(), (editing) => {
+    if (editing) { clearTimeout(settleTimer); settleTimer = undefined; heldByEdit = true; return }
+    if (heldByEdit && isActive()) { heldByEdit = false; settle() }
+  })
   function baseArgs(): Omit<LayoutPlanArgs, 'choice' | 'layoutId'> {
     const raw = toRaw(src.props())
     const props = raw ? { ...raw } : undefined
@@ -132,12 +170,14 @@ export function useLayoutVary(src: LayoutVarySource): {
       measure: src.measure,
     }
   }
-  const planKey = computed(() => JSON.stringify([frameKey.value, paletteMode.value, shapeMode.value ?? null, imageMode.value]))
+  const planKey = computed(() => JSON.stringify([settledKey.value, paletteMode.value, shapeMode.value ?? null, imageMode.value]))
   /** Bumped when the Frame was re-arranged as a whole: an apply from here (bumped directly, so a
    *  host with plain props still re-plans), or anything that writes a new draw order — apply,
    *  undo, redo, a layer reorder. Identity only, never deep: a drag writes no order. */
   const rev = ref(0)
-  watch(() => src.props()?.sailor_stackOrder, () => { rev.value++ })
+  // Re-arranged as a whole: the new content (a recolour, new line breaks) is settled at once too,
+  // so the rebuild that follows is the only one.
+  watch(() => src.props()?.sailor_stackOrder, () => { if (isActive()) settle(); rev.value++ })
 
   // ── the current layout and its variations ──
   const layoutId = ref<string>(stored && layoutById(stored.patternId) ? stored.patternId : '')
@@ -238,25 +278,31 @@ export function useLayoutVary(src: LayoutVarySource): {
     libBuilt = key
     buildLibrary()
   }, { immediate: true })
-  if (getCurrentScope()) onScopeDispose(() => cancelIdle?.())
+  if (getCurrentScope()) onScopeDispose(() => { cancelIdle?.(); clearTimeout(settleTimer) })
   const library = computed(() => libItems.value)
 
   // ── actions: each applies at once, as one undo step ──
-  function applyAt(i: number): boolean {
-    const c = candidates.value[i]
+  /** Apply variation `i` of layout `id` (from `list`). Nothing changes here unless it applies. */
+  function applyChoice(id: string, list: Candidate[], i: number): boolean {
+    const c = list[i]
     if (!c) return false
-    const out = applyLayoutToFrame({ ...baseArgs(), layoutId: layoutId.value, choice: c.choice, editor: src.editor() })
+    const out = applyLayoutToFrame({ ...baseArgs(), layoutId: id, choice: c.choice, editor: src.editor() })
     if (!out.ok || !out.posterState) return false
+    layoutId.value = id
     choice.value = { ...c.choice }
     applied.value = true
+    settle()
     rev.value++
     src.remember({ patternId: out.posterState.patternId, seed: out.posterState.seed, choice: { ...c.choice }, index: i })
     return true
   }
+  const applyAt = (i: number) => applyChoice(layoutId.value, candidates.value, i)
+  /** Switch to a layout by applying its first variation. The current layout (and `applied`) only
+   *  change when that apply succeeds. */
   function select(id: string) {
     if (!layoutById(id)) return
-    layoutId.value = id
-    applyAt(0)
+    const list = id === layoutId.value ? candidates.value : candidatesForFrame({ ...baseArgs(), layoutId: id })
+    applyChoice(id, list, 0)
   }
   function vary(step: 1 | -1) {
     const n = candidates.value.length
@@ -281,7 +327,7 @@ export function useLayoutVary(src: LayoutVarySource): {
   }
 
   return {
-    layoutId, index, candidates, library, choices, select, vary, jump, setChoice,
+    layoutId, index, applied, candidates, library, choices, select, vary, jump, setChoice,
     shapeMode, setShapeMode, imageMode, setImageMode, paletteMode, setPaletteMode,
   }
 }

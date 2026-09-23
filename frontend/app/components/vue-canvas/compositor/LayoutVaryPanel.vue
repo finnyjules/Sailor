@@ -23,6 +23,8 @@ const props = defineProps<{
   choices: ChoiceRow[]
   library: LibraryItem[]
   layoutId: string
+  /** The current layout has been applied (not merely shown first). */
+  applied: boolean
   frameW: number
   frameH: number
   background?: Paint
@@ -38,6 +40,9 @@ const emit = defineEmits<{
 
 const current = computed(() => props.candidates[props.index])
 const count = computed(() => props.candidates.length)
+/** Nothing to vary; or already applied with only one variation. Before the first apply, Vary
+ *  applies the variation on show, so one is enough. */
+const stuck = computed(() => count.value === 0 || (props.applied && count.value < 2))
 
 /** Up to 8 variations, the window following the current one (the prototype's strip). */
 const strip = computed(() => {
@@ -72,16 +77,16 @@ function pick(row: ChoiceRow, k: string) {
 
     <!-- 2. ‹ Vary › -->
     <div class="flex items-center gap-2">
-      <StudioButton variant="secondary" :disabled="count < 2" aria-label="Previous variation" title="Previous variation (←)" data-testid="layout-vary-prev" @click="emit('vary', -1)">
+      <StudioButton variant="secondary" :disabled="stuck" aria-label="Previous variation" title="Previous variation (←)" data-testid="layout-vary-prev" @click="emit('vary', -1)">
         <ChevronLeft class="size-3.5" />
       </StudioButton>
-      <StudioButton variant="primary" class="flex-1" :disabled="count < 2" title="Next variation (V)" data-testid="layout-vary-next" @click="emit('vary', 1)">
+      <StudioButton variant="primary" class="flex-1" :disabled="stuck" title="Next variation (V)" data-testid="layout-vary-next" @click="emit('vary', 1)">
         <span class="inline-flex items-center justify-center gap-2">
           Vary
           <kbd class="font-mono px-1 py-px rounded bg-white/[0.12] border border-white/20 text-[10px] leading-none text-white/80">V</kbd>
         </span>
       </StudioButton>
-      <StudioButton variant="secondary" :disabled="count < 2" aria-label="Next variation" title="Next variation (→)" data-testid="layout-vary-fwd" @click="emit('vary', 1)">
+      <StudioButton variant="secondary" :disabled="stuck" aria-label="Next variation" title="Next variation (→)" data-testid="layout-vary-fwd" @click="emit('vary', 1)">
         <ChevronRight class="size-3.5" />
       </StudioButton>
     </div>
@@ -107,7 +112,7 @@ function pick(row: ChoiceRow, k: string) {
           v-for="k in strip" :key="candidates[k]!.sig"
           :plan="candidates[k]!.plan" :frame-w="frameW" :frame-h="frameH"
           :background="background" :groups="groups" :wired-content="wiredContent"
-          :label="`Variation ${k + 1}`" :selected="k === index" selected-label="" :max-px="60"
+          :label="`Variation ${k + 1}`" :selected="applied && k === index" selected-label="" :max-px="60"
           @pick="emit('jump', k)"
         />
       </div>
@@ -121,7 +126,7 @@ function pick(row: ChoiceRow, k: string) {
           v-for="it in offered" :key="it.id"
           :plan="it.plan!" :frame-w="frameW" :frame-h="frameH"
           :background="background" :groups="groups" :wired-content="wiredContent"
-          :label="it.name" :selected="it.id === layoutId"
+          :label="it.name" :selected="applied && it.id === layoutId"
           @pick="emit('select', it.id)"
         />
       </div>

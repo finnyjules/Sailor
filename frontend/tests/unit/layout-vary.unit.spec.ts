@@ -2,10 +2,10 @@ import { describe, it, expect, vi } from 'vitest'
 import { reactive, nextTick } from 'vue'
 vi.mock('~/lib/frame/patterns/kit/plan', async (importOriginal) => {
   const m = await importOriginal<typeof import('~/lib/frame/patterns/kit/plan')>()
-  return { ...m, planLayout: vi.fn(m.planLayout) }
+  return { ...m, planLayout: vi.fn(m.planLayout), applyLayoutToFrame: vi.fn(m.applyLayoutToFrame) }
 })
-import { planLayout } from '~/lib/frame/patterns/kit/plan'
-import { useLayoutVary } from '~/composables/useLayoutVary'
+import { planLayout, applyLayoutToFrame } from '~/lib/frame/patterns/kit/plan'
+import { useLayoutVary, CONTENT_SETTLE_MS } from '~/composables/useLayoutVary'
 import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
 import { LAYOUTS } from '~/lib/frame/patterns/layouts/catalog'
 import { createImageLayer, createTextLayer } from '~/composables/useCompositorLayers'
@@ -161,16 +161,101 @@ describe('useLayoutVary', () => {
     expect(editor.recordHistory).not.toHaveBeenCalled()
   })
 
-  it('re-plans when the Frame\'s content changes, not when a layer only moves', () => {
-    const props = reactive<Record<string, unknown>>({ sailor_localLayers: frameLayers(), sailor_posterState: { patternId: 'statement', seed: 1 } })
-    const editor = { recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn(), writeGroups: vi.fn() }
-    const vary = useLayoutVary({ props: () => props, frameW: () => 895, frameH: () => 1280, connectedSlots: () => [], editor: () => editor, remember: vi.fn(), measure: makeStubMeasure() })
-    const first = vary.candidates.value
-    const layers = props.sailor_localLayers as LocalLayer[]
-    props.sailor_localLayers = layers.map(l => (l.id === 't' ? { ...l, x: 0.1, y: 0.9 } : l))   // a drag
-    expect(vary.candidates.value).toBe(first)
-    props.sailor_localLayers = layers.map(l => (l.id === 't' ? { ...l, text: 'Weather Report Now' } : l))  // new words
-    expect(vary.candidates.value).not.toBe(first)
+  it('re-plans when the Frame\'s content changes (after the debounce), not when a layer only moves', async () => {
+    vi.useFakeTimers()
+    try {
+      const props = reactive<Record<string, unknown>>({ sailor_localLayers: frameLayers(), sailor_posterState: { patternId: 'statement', seed: 1 } })
+      const editor = { recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn(), writeGroups: vi.fn() }
+      const vary = useLayoutVary({ props: () => props, frameW: () => 895, frameH: () => 1280, connectedSlots: () => [], editor: () => editor, remember: vi.fn(), measure: makeStubMeasure() })
+      const first = vary.candidates.value
+      const layers = props.sailor_localLayers as LocalLayer[]
+      props.sailor_localLayers = layers.map(l => (l.id === 't' ? { ...l, x: 0.1, y: 0.9 } : l))   // a drag
+      await nextTick(); vi.advanceTimersByTime(CONTENT_SETTLE_MS + 50); await nextTick()
+      expect(vary.candidates.value).toBe(first)
+      props.sailor_localLayers = layers.map(l => (l.id === 't' ? { ...l, text: 'Weather Report Now' } : l))  // new words
+      await nextTick()
+      expect(vary.candidates.value).toBe(first)                                  // not yet: debounced
+      vi.advanceTimersByTime(CONTENT_SETTLE_MS + 50); await nextTick()
+      expect(vary.candidates.value).not.toBe(first)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('typing: 5 text changes within 100 ms rebuild the library at most once, after the debounce', async () => {
+    vi.useFakeTimers()
+    try {
+      const props = reactive<Record<string, unknown>>({ sailor_localLayers: frameLayers() })
+      const editor = { recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn(), writeGroups: vi.fn() }
+      useLayoutVary({ props: () => props, frameW: () => 895, frameH: () => 1280, connectedSlots: () => [], editor: () => editor, remember: vi.fn(), measure: makeStubMeasure() })
+      vi.advanceTimersByTime(10)                                                 // the idle half of the first build
+      const spy = vi.mocked(planLayout)
+      spy.mockClear()
+      const rebuilds = () => spy.mock.calls.filter(([a]) => a.layoutId === 'runoff').length   // one per library build
+      const words = ['Weather Report A', 'Weather Report AB', 'Weather Report ABC', 'Weather Report ABCD', 'Weather Report ABCDE']
+      for (const w of words) {
+        props.sailor_localLayers = (props.sailor_localLayers as LocalLayer[]).map(l => (l.id === 't' ? { ...l, text: w } : l))
+        await nextTick()
+        vi.advanceTimersByTime(20)
+      }
+      await nextTick()
+      expect(rebuilds()).toBe(0)
+      vi.advanceTimersByTime(CONTENT_SETTLE_MS + 50); await nextTick()
+      expect(rebuilds()).toBe(1)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('while a text layer is edited on the canvas, content re-plans are held; the edit\'s end rebuilds once', async () => {
+    vi.useFakeTimers()
+    try {
+      const { ref } = await import('vue')
+      const editing = ref(false)
+      const props = reactive<Record<string, unknown>>({ sailor_localLayers: frameLayers() })
+      const editor = { recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn(), writeGroups: vi.fn() }
+      useLayoutVary({ props: () => props, frameW: () => 895, frameH: () => 1280, connectedSlots: () => [], editor: () => editor, remember: vi.fn(), editing: () => editing.value, measure: makeStubMeasure() })
+      vi.advanceTimersByTime(10)
+      const spy = vi.mocked(planLayout)
+      spy.mockClear()
+      const rebuilds = () => spy.mock.calls.filter(([a]) => a.layoutId === 'runoff').length
+      editing.value = true; await nextTick()
+      for (const w of ['Weather Report X', 'Weather Report XY']) {
+        props.sailor_localLayers = (props.sailor_localLayers as LocalLayer[]).map(l => (l.id === 't' ? { ...l, text: w } : l))
+        await nextTick()
+      }
+      vi.advanceTimersByTime(CONTENT_SETTLE_MS * 5); await nextTick()
+      expect(rebuilds()).toBe(0)
+      editing.value = false; await nextTick(); await nextTick()
+      expect(rebuilds()).toBe(1)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('an apply re-plans at once (no debounce)', async () => {
+    vi.useFakeTimers()
+    try {
+      const { vary } = harness({ sailor_posterState: { patternId: 'statement', seed: 1 } })
+      vi.advanceTimersByTime(10)
+      const spy = vi.mocked(planLayout)
+      spy.mockClear()
+      vary.vary(1)
+      await nextTick()
+      expect(spy.mock.calls.filter(([a]) => a.layoutId === 'runoff').length).toBe(1)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('select(id) only switches layout when its apply succeeds; a refusal leaves the layout and "applied" alone', () => {
+    const { vary, editor, remember } = harness()
+    const shown = vary.layoutId.value
+    expect(vary.applied.value).toBe(false)
+    vary.select('knockout')                                    // needs a shape: nothing to apply
+    expect(vary.layoutId.value).toBe(shown)
+    expect(vary.applied.value).toBe(false)
+    vi.mocked(applyLayoutToFrame).mockReturnValueOnce({ ok: false })   // the planner refuses
+    vary.select('statement')
+    expect(vary.layoutId.value).toBe(shown)
+    expect(vary.applied.value).toBe(false)
+    expect(editor.recordHistory).not.toHaveBeenCalled()
+    expect(remember).not.toHaveBeenCalled()
+    vary.select('statement')                                   // and now it applies
+    expect(vary.layoutId.value).toBe('statement')
+    expect(vary.applied.value).toBe(true)
   })
 
   it('plans nothing while the tab is not showing, and builds the library when it shows', async () => {
