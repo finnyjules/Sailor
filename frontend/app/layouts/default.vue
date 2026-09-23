@@ -55,6 +55,9 @@ import { CostConfirmQueue } from '~/lib/graph/costConfirmQueue'
 import { resolveCreditDelta, type CreditWatchCandidate } from '~/lib/graph/creditAttribution'
 import { resolveEventTab } from '~/lib/graph/resolveEventTab'
 import { withKeyedLock } from '~/lib/graph/keyedLock'
+import { shouldUseRunner, startRunnerRun, runnerGateAction, stopRunnerRuns, fetchRunnerRecord, runIdOfPrompt } from '~/lib/runner/client'
+import { useRunnerEvents } from '~/composables/useRunnerEvents'
+import { RUNNER_WORKER, isRunnerPromptId } from '#shared/runner/messages'
 import { useDirectExecution } from '~/composables/useDirectExecution'
 import { useDirectExecutionEnabled } from '~/composables/useDirectExecutionEnabled'
 import { useVueNodes } from '~/composables/useVueNodes'
@@ -74,6 +77,10 @@ const router = useRouter()
 // engine iframes in the template). A const declared mid-file would be in its
 // temporal dead zone for those.
 const hostedShell = hostedModeEnabled(useRuntimeConfig().public)
+// Sailor runner (docs/superpowers/specs/2026-09-22-sailor-runner-and-gate-design.md).
+// Off unless NUXT_PUBLIC_RUNNER_ENABLED=true; then eligible workflows go to /api/runs.
+const runnerEnabled = !!(useRuntimeConfig().public as { runnerEnabled?: boolean }).runnerEnabled
+const runnerEvents = useRunnerEvents()
 
 // Deep-link: /?train=1 opens (or focuses) the Train tab — used by /dev/style-publisher.
 onMounted(() => {
@@ -890,9 +897,21 @@ async function runVueWorkflow(
         perRun(res.prompt_id).estimateNodes = runEstimateNodes
         // Explicit (non-live) runs get a per-run no-response watchdog. Live-preview
         // runs fire continuously and silently by design, so they're exempt.
-        if (!opts.live) armDirectRunWatchdog(res.prompt_id, runTabId)
+        if (!opts.live && !isRunnerPromptId(res.prompt_id)) armDirectRunWatchdog(res.prompt_id, runTabId)
       }
-      if (takeCount > 1) {
+      const runnerPrompts = [firstTake, ...extraTakes].map(tk => tk.directPrompt)
+      if (shouldUseRunner(runnerEnabled, runnerPrompts)) {
+        // One run for all takes: with a Gate they pause once and you pick;
+        // without one they simply all finish.
+        const started = await startRunnerRun({
+          takes: runnerPrompts as import('~/lib/graph/graphToPrompt').ApiPrompt[],
+          workflow: plainWorkflow,
+          canvasId: runCanvasId,
+          projectUuid: activeTab.value?.projectUuid ?? null,
+          projectName: activeTab.value?.label ?? null,
+        })
+        for (const promptId of started.promptIds) registerResult({ prompt_id: promptId, worker: RUNNER_WORKER })
+      } else if (takeCount > 1) {
         // Parallel takes: fan N fresh-seeded prompts across the cloud pool.
         // queueParallel decides worker assignment internally (and falls back to
         // sequential-on-main when the pool is unavailable/ineligible). Register
@@ -1281,6 +1300,7 @@ onMounted(() => {
   window.addEventListener('sailor:createRef', onCreateRef)
   window.addEventListener('sailor:markReady', handleMarkReady)
   window.addEventListener('sailor:stopRun', handleStopRun)
+  window.addEventListener('sailor:runnerGateAction', handleRunnerGateAction)
   runEstimateTimer = setInterval(updateRunEstimate, 2000)
   // Escape hatch: force-reload the embedded ComfyUI canvas from the console
   // (`__reloadCanvas()`) when its node schema goes stale after a backend change.
@@ -1298,6 +1318,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('sailor:createRef', onCreateRef)
   window.removeEventListener('sailor:markReady', handleMarkReady)
   window.removeEventListener('sailor:stopRun', handleStopRun)
+  window.removeEventListener('sailor:runnerGateAction', handleRunnerGateAction)
   if (runEstimateTimer) clearInterval(runEstimateTimer)
   stopHealthPoll()
 })
@@ -1310,12 +1331,39 @@ function handleStopRun() {
   stopVueWorkflow()
 }
 
+// A Gate on a runner run: the Gate node asks, the layout calls the runner and
+// registers the new stage(s) so their events find this tab.
+async function handleRunnerGateAction(e: Event) {
+  const d = (e as CustomEvent).detail as { nodeId: string; promptId: string; action: 'continue' | 'redo' | 'restart'; takes?: number[] }
+  const runId = runIdOfPrompt(d?.promptId)
+  if (!runId) return
+  const runTabId = activeTab.value?.id || ''
+  const runDoc = savedWorkflows[runTabId]
+  const canvasId = isProjectDoc(runDoc) ? runDoc.activeCanvasId : null
+  try {
+    const res = await runnerGateAction({ runId, nodeId: d.nodeId, action: d.action, takes: d.takes })
+    for (const promptId of res.promptIds) {
+      registerRun({ promptId, tabId: runTabId, live: false, worker: RUNNER_WORKER, canvasId })
+    }
+  }
+  catch (err) {
+    const body = (err as any)?.data
+    const refusal = isH3RefusalBody(body)
+    const statusCode = refusal && typeof body.statusCode === 'number' ? body.statusCode : undefined
+    const message = refusal ? body.message : String((err as any)?.message || err)
+    surfaceQueueError(null, message, { refusal, statusCode })
+    window.dispatchEvent(new CustomEvent('sailor:runnerGateActionFailed', { detail: { nodeId: d.nodeId } }))
+  }
+}
+
 // Stop/interrupt the current ComfyUI execution and clear the queue
 async function stopVueWorkflow() {
   try {
     await Promise.all([
       fetch('/interrupt', { method: 'POST' }),
       fetch('/queue', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clear: true }) }),
+      // Runner runs: cancelled at fal; holds for unfinished stages dropped.
+      ...(runnerEnabled ? [stopRunnerRuns()] : []),
     ])
   }
   catch (err) {
@@ -2088,6 +2136,8 @@ const runningCanvasByWorker = reactive<Record<number, string | null>>({})
 const activeWorker = computed(() => workerForTab(activeTab.value?.id))
 
 async function fetchWorkflowFromHistory(promptId: string): Promise<any> {
+  // Runner results keep the exact workflow they were made from.
+  if (isRunnerPromptId(promptId)) return (await fetchRunnerRecord(promptId))?.workflow ?? null
   try {
     const res = await fetch(`/history/${promptId}`)
     const data = await res.json()
@@ -2824,6 +2874,7 @@ onMounted(async () => {
     })
   }
   if (directExecutionEnabled.value) direct.connect()
+  if (runnerEnabled) runnerEvents.connect()
   watch(directExecutionEnabled, (on) => {
     if (on) direct.connect()
     else direct.disconnect()
@@ -2846,6 +2897,7 @@ onUnmounted(() => {
   if (queuePollTimer) { clearInterval(queuePollTimer); queuePollTimer = null }
   if (trainingPollTimer) { clearInterval(trainingPollTimer); trainingPollTimer = null }
   direct.disconnect()
+  runnerEvents.disconnect()
 })
 
 const { settingsOpen, openSettings, closeSettings } = useSettingsModal()
@@ -3179,6 +3231,8 @@ function handleBridgeEvent(data: any) {
     // Durable generation record — silent/live runs count too (they spend real
     // money). Fire-and-forget; never blocks the UI path.
     const runProjectUuid = projectTabs.find((t) => t.id === tabId)?.projectUuid || null
+    // The runner already wrote this stage's generation record, with its exact charge.
+    const recordedByRunner = data.recorded === true
     const replicateEstimate = validatedRun
       ? tallyReplicateUsd(runExecutedNodeIds, runEstimateNodes)
       : null
@@ -3188,7 +3242,7 @@ function handleBridgeEvent(data: any) {
     // run holds it in pendingCredits until watch(credits) resolves the delta or
     // the 9s timer times out.
     let pendingRecord: DurableGenPayload | null = null
-    if (runProjectUuid && validatedRun && (runOutputs.length || replicateEstimate)) {
+    if (runProjectUuid && validatedRun && !recordedByRunner && (runOutputs.length || replicateEstimate)) {
       const runDoc = savedWorkflows[tabId]
       // Resolve executed-node ids against the run's OWN catalog (runEstimateNodes),
       // not the active tab's displayed nodes — same collision-avoidance as the tally.
@@ -3223,7 +3277,7 @@ function handleBridgeEvent(data: any) {
     // Arm the credit watch for a validated Comfy-native run (record or not — a
     // recordless validated run still needs the delta for the lastRunResult.cost
     // display). Replicate/silent-invalid runs stay unarmed (deadline 0).
-    const armCreditWatch = validatedRun && !isReplicate && lastRunResult.value?.kind !== 'error'
+    const armCreditWatch = validatedRun && !isReplicate && !recordedByRunner && lastRunResult.value?.kind !== 'error'
     const deadline = armCreditWatch ? Date.now() + 8000 : 0
 
     // Stash the credit resolution + durable record in pendingCredits, which
@@ -3275,13 +3329,14 @@ function handleBridgeEvent(data: any) {
     const tabStillRunning = tabId ? inFlight({ tabId }).length > 0 : false
     if (!wasSilent) {
       if (!tabStillRunning) updateTabStatus(tabId, 'done')
-      if (validatedRun && lastRunResult.value?.kind !== 'error') {
+      if (validatedRun && !data.stopped && lastRunResult.value?.kind !== 'error') {
         setRunResult({
           kind: 'success',
           durationMs,
           at: Date.now(),
           usd: replicateEstimate?.usd ?? null,
           usdApproximate: replicateEstimate?.approximate ?? false,
+          ...(recordedByRunner && typeof data.credits === 'number' && data.credits > 0 ? { cost: data.credits } : {}),
         })
       }
       // Reset to idle after a brief moment — but only if no other run reclaims
