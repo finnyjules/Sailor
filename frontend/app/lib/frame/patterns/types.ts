@@ -106,7 +106,7 @@ export interface LayerOp {
   /** Text op: placed lines (em of the layer's font size, union centred on the origin). */
   runs?: import('~/composables/useCompositorLayers').TextRun[]
   /** An owned piece the layout inserts (descriptive; kit/toOps returns owned layers directly). */
-  insert?: { kind: 'rect' | 'ellipse'; key: string; radius?: number }
+  insert?: { kind: 'rect' | 'ellipse' | 'image'; key: string; radius?: number }
   /** Clip to a region in frame-normalised coordinates (x/y centre by W/H, w/h by width). */
   mask?: { kind: 'ellipse' | 'rect'; x: number; y: number; w: number; h: number }
   /** Text op: set the text along a path. */
@@ -114,6 +114,9 @@ export interface LayerOp {
   /** Text op: the style's letter case (a spacing-like field a layout may set). Tracked: the
    *  user's own case comes back when a later op leaves it unset. */
   textTransform?: 'uppercase'
+  /** Text op: underline the text — the action line drawn as a link (ruling S1). Tracked like
+   *  `textTransform`: the user's own setting comes back when a later op leaves it unset. */
+  underline?: boolean
 }
 
 export interface PatternPlacement {

@@ -19,7 +19,16 @@ export interface RectEl extends Base { k: 'r'; x: number; y: number; w: number; 
 export interface RuleEl extends Base { k: 'l'; x: number; y: number; w: number }
 export interface RingEl extends Base { k: 'ring'; cx: number; cy: number; R: number; size: number; s: string }
 export interface MissingEl { k: 'missing'; why?: string }
-export type El = TextEl | PhotoEl | CircleEl | RectEl | RuleEl | RingEl | MissingEl
+/** A band of page colour rising from an edge (the prototype's `scrim`): solid (the `field` colour
+ *  at 94%) from the outer edge to `solid` (a fraction of `h`), then fading to transparent. */
+export interface BandEl extends Base { k: 'band'; side: 'top' | 'bottom'; y: number; h: number; solid: number }
+/** A button: a padded shape that grows with its label. The label is the user's own action text,
+ *  placed separately as a text element with role `'action'` and `over: ['btn']` (ruling S1).
+ *  `bg`: the fill role the prototype draws with recolour on. */
+export interface ButtonEl extends Base { k: 'btn'; x: number; y: number; w: number; h: number; size: number; shape: 'pill' | 'box' | 'link'; bg?: Colour }
+/** The brand kit's logo (ruling S2), `w × h` with the logo's own aspect. */
+export interface LogoEl extends Base { k: 'logo'; x: number; y: number; w: number; h: number }
+export type El = TextEl | PhotoEl | CircleEl | RectEl | RuleEl | RingEl | BandEl | ButtonEl | LogoEl | MissingEl
 /** The brand kit's logo (ruling S2): `aspect` is h / w; `onDarkUrl` for a dark field. */
 export interface BrandLogo { url: string; aspect: number; onDarkUrl?: string }
 export interface Content { title: string; details?: string; date?: string; caption?: string

@@ -1,10 +1,11 @@
 import { boxOf } from './check'
 import { faceOf } from './types'
-import type { CircleEl, Colour, El, PhotoEl, RectEl, RingEl, RuleEl, Sheet, TextEl } from './types'
+import type { BandEl, BrandLogo, ButtonEl, CircleEl, Colour, El, LogoEl, PhotoEl, RectEl, RingEl, RuleEl, Sheet, TextEl } from './types'
 import type { LayerOp } from '../types'
 import type { ResolvedPalette } from '../palette'
-import { roleToPaint } from '../palette'
-import { createEllipseLayer, createRectLayer } from '~/composables/useCompositorLayers'
+import { contrastRatio, roleToPaint } from '../palette'
+import { createEllipseLayer, createImageLayer, createRectLayer } from '~/composables/useCompositorLayers'
+import type { LinearGradient } from '~/lib/compositor/paint'
 import type { LocalLayer, TextRun } from '~/composables/useCompositorLayers'
 import type { RoleKey } from './types'
 
@@ -59,6 +60,54 @@ function rotatedOrigin(o: Pt, pivot: Pt, rot: number | undefined): Pt {
 function textPivot(e: TextEl, S: Sheet): Pt {
   const b = boxOf({ ...e, rot: undefined }, S)!
   return e.origin === 'center' ? { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 } : { x: b.x0, y: b.y0 }
+}
+
+/** A `#rgb` / `#rrggbb` / `#rrggbbaa` colour as `#rrggbb`; null for anything else. */
+function hex6(c: unknown): string | null {
+  if (typeof c !== 'string') return null
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(c.trim())
+  if (!m) return null
+  const h = m[1]!
+  return '#' + (h.length === 3 ? h.split('').map(x => x + x).join('') : h.slice(0, 6))
+}
+
+/** `colour` at `alpha` as `rgba(…)` (a hex colour), or the colour itself when it is not hex. */
+function withAlpha(colour: string, alpha: number): string {
+  const h = hex6(colour)
+  if (!h) return colour
+  const n = (i: number) => parseInt(h.slice(i, i + 2), 16)
+  return `rgba(${n(1)}, ${n(3)}, ${n(5)}, ${alpha})`
+}
+
+/** Relative luminance (0..1) through the WCAG contrast helper: ratio vs black = (L + 0.05) / 0.05. */
+function luminance(colour: string): number {
+  const h = hex6(colour)
+  return h ? contrastRatio(h, '#000000') * 0.05 - 0.05 : 1
+}
+
+/** A band's paint (the prototype's `scrim`): the `field` colour at 94% from the outer edge to
+ *  `solid`, then to fully transparent at the inner edge. Angle 90 runs top → bottom, 270 bottom → top. */
+function bandPaint(e: BandEl, field: string): LinearGradient {
+  const solid = withAlpha(field, 0.94)
+  return {
+    type: 'linear', angle: e.side === 'top' ? 90 : 270,
+    stops: [{ offset: 0, color: solid }, { offset: e.solid, color: solid }, { offset: 1, color: withAlpha(field, 0) }],
+  }
+}
+
+/** Ruling S1: the button's fill is the palette role with the highest contrast against the action
+ *  text's own colour, if it reaches 3:1; null (draw a link) when none does or the colour is unknown. */
+export function buttonFill(actionColour: unknown, palette: ResolvedPalette): Colour | null {
+  const text = hex6(actionColour)
+  if (!text) return null
+  let best: Colour | null = null, ratio = 0
+  for (const role of ['ink', 'accent', 'field'] as const) {
+    const bg = hex6(palette[role])
+    if (!bg) continue
+    const r = contrastRatio(text, bg)
+    if (r > ratio) { ratio = r; best = role }
+  }
+  return ratio >= 3 ? best : null
 }
 
 /** Opacity / blend an element carries (stage 1: `blend: true` ⇒ multiply). */
@@ -170,7 +219,15 @@ function flowOp(e: TextEl, S: Sheet, target: string, z: number): LayerOp {
 export function elementsToOps(
   els: El[], S: Sheet, targets: RoleTargets, _frame: { w: number; h: number },
   palette: ResolvedPalette = FALLBACK_PALETTE,
-  opts?: { hide?: RoleKey[] },
+  opts?: {
+    hide?: RoleKey[]
+    /** The action text layer's current colour (ruling S1: the button's fill adapts to it). */
+    actionColor?: unknown
+    /** Recolour is on: the button takes the prototype's colours (its `bg`; the text its `fg`). */
+    recolour?: boolean
+    /** The brand kit's logo, drawn where the layout puts a `logo` element (ruling S2). */
+    logo?: BrandLogo
+  },
 ): { ops: LayerOp[]; owned: LocalLayer[] } {
   const ops: LayerOp[] = []
   const owned: LocalLayer[] = []
@@ -194,11 +251,19 @@ export function elementsToOps(
   const doneDisplay = new Set<string>()
   /** Add an owned piece, plus an `insert` op that carries its stacking (`z` = element index) to
    *  order.ts; applyPlacement skips insert ops. The op targets the piece's id, `layout-<key>`. */
-  const own = (layer: LocalLayer, kind: 'rect' | 'ellipse', key: string, z: number, radius?: number) => {
+  const own = (layer: LocalLayer, kind: 'rect' | 'ellipse' | 'image', key: string, z: number, radius?: number) => {
     owned.push(layer)
     const insert: LayerOp['insert'] = radius ? { kind, key, radius } : { kind, key }
-    ops.push({ target: layer.id, kind: 'shape', x: layer.x, y: layer.y, z, insert })
+    ops.push({ target: layer.id, kind: kind === 'image' ? 'image' : 'shape', x: layer.x, y: layer.y, z, insert })
   }
+
+  // The button (ruling S1): its fill is decided once, from the action text's own colour — or,
+  // with recolour on, the prototype's `bg`. A link, or a fill no role can give, draws no shape and
+  // underlines the action text instead. No action layer: no button.
+  const btnEl = els.find((e): e is ButtonEl => e.k === 'btn')
+  const btnFill: Colour | null = !btnEl || btnEl.shape === 'link' || !targets.action ? null
+    : opts?.recolour ? (btnEl.bg ?? 'ink') : buttonFill(opts?.actionColor, palette)
+  const underlineAction = !!btnEl && !!targets.action && btnFill == null
 
   /** The picked library shape, fitted inside the layout's box (centred, its own aspect) as a
    *  sentinel op: `insertFromOps` turns it into a real path layer in the palette colour. */
@@ -226,8 +291,46 @@ export function elementsToOps(
           const group = els.filter((x): x is TextEl => x.k === 't' && !!x.pre && baseRole(x.role) === b)
           ops.push(displayOp(group, S, target, z))
         } else {
-          ops.push(flowOp(e, S, target, z))
+          const op = flowOp(e, S, target, z)
+          if (underlineAction && baseRole(e.role) === 'action') op.underline = true
+          ops.push(op)
         }
+        return
+      }
+      case 'band': {
+        const b = e as BandEl
+        const key = keyFor('band')
+        own(createRectLayer({
+          ...ownedBase(key, b),
+          x: 0.5, y: (b.y + b.h / 2) / S.H, w: 1, h: b.h / 100,
+          rotation: 0, radius: 0, fill: bandPaint(b, palette.field),
+        }), 'rect', key, z)
+        return
+      }
+      case 'btn': {
+        const b = e as ButtonEl
+        if (btnFill == null) return
+        const key = keyFor('button')
+        const radius = b.shape === 'pill' ? b.h / 2 / 100 : 0
+        own(createRectLayer({
+          ...ownedBase(key, b),
+          x: (b.x + b.w / 2) / 100, y: (b.y + b.h / 2) / S.H, w: b.w / 100, h: b.h / 100,
+          rotation: 0, radius, fill: paint(btnFill),
+        }), 'rect', key, z, radius || undefined)
+        return
+      }
+      case 'logo': {
+        const l = e as LogoEl
+        const kit = opts?.logo
+        if (!kit) return
+        // The on-dark version on a dark page (luminance < 0.4), when the kit has one.
+        const url = kit.onDarkUrl && luminance(palette.field) < 0.4 ? kit.onDarkUrl : kit.url
+        const key = keyFor('logo')
+        // No crop: the logo keeps its own aspect (the layout sized the box so, h = w × aspect).
+        own(createImageLayer(url, l.w / l.h, {
+          ...ownedBase(key, l),
+          x: (l.x + l.w / 2) / 100, y: (l.y + l.h / 2) / S.H, w: l.w / 100, h: l.h / 100, rotation: 0,
+        }), 'image', key, z)
         return
       }
       case 'p': {

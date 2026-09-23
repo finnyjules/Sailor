@@ -432,3 +432,129 @@ describe('elementsToOps — text colour roles', () => {
     expect(ops.find(o => o.target === 'd')!.colorRole).toBe('accent')
   })
 })
+
+describe('elementsToOps — Stage 3 pieces: band, button, logo', () => {
+  const palette = { field: '#f2f0ef', ink: '#121212', accent: '#dd2200' }
+  const P = makeSheet({ frameW: frame.w, frameH: frame.h, measure, style: 'performance' })
+  const E = makeSheet({ frameW: frame.w, frameH: frame.h, measure, style: 'editorial' })
+  const withAction = { ...targets, action: 'a' }
+
+  it('a band becomes one owned rect across the page with a 3-stop gradient of the page colour', () => {
+    const band = P.band('bottom', 80, P.H)
+    const { ops, owned } = elementsToOps([band], P, targets, frame, palette)
+    expect(owned).toHaveLength(1)
+    const r = owned[0] as any
+    expect(r.kind).toBe('rect')
+    expect(r.owner).toEqual({ by: 'layout', key: 'band-0' })
+    expect(r.id).toBe('layout-band-0')
+    expect(r.x).toBe(0.5)
+    expect(r.w).toBe(1)
+    expect(r.y).toBeCloseTo((band.y + band.h / 2) / P.H, 9)
+    expect(r.h).toBeCloseTo(band.h / 100, 9)
+    expect(r.radius).toBe(0)
+    expect(r.fill).toEqual({
+      type: 'linear', angle: 270,
+      stops: [
+        { offset: 0, color: 'rgba(242, 240, 239, 0.94)' },
+        { offset: band.solid, color: 'rgba(242, 240, 239, 0.94)' },
+        { offset: 1, color: 'rgba(242, 240, 239, 0)' },
+      ],
+    })
+    expect(ops).toEqual([{ target: 'layout-band-0', kind: 'shape', x: r.x, y: r.y, z: 0, insert: { kind: 'rect', key: 'band-0' } }])
+    // A top band runs top → bottom.
+    expect((elementsToOps([P.band('top', 0, 20)], P, targets, frame, palette).owned[0] as any).fill.angle).toBe(90)
+  })
+
+  it('a button on black action text takes the role with the most contrast (the page colour)', () => {
+    const { btn, text } = P.button('Shop now', 10, 50)
+    const { ops, owned } = elementsToOps([btn, text], P, withAction, frame, palette, { actionColor: '#000000' })
+    expect(owned).toHaveLength(1)
+    const r = owned[0] as any
+    expect(r.owner).toEqual({ by: 'layout', key: 'button-0' })
+    expect(r.fill).toBe(palette.field)
+    expect(r.radius).toBeCloseTo(btn.h / 2 / 100, 9)
+    expect(r.w).toBeCloseTo(btn.w / 100, 9)
+    expect(r.h).toBeCloseTo(btn.h / 100, 9)
+    expect(ops[0]!.insert).toEqual({ kind: 'rect', key: 'button-0', radius: r.radius })
+    const act = ops.find(o => o.target === 'a')!
+    expect(act.kind).toBe('text')
+    expect(act.underline).toBeUndefined()
+    // The label keeps its own colour unless recolour is on (colorRole is only a request).
+    expect(act.colorRole).toBe('field')
+  })
+
+  it('white action text takes the ink; a box has square corners', () => {
+    const St = makeSheet({ frameW: frame.w, frameH: frame.h, measure, style: 'street' })
+    const { btn, text } = St.button('Shop now', 10, 50)
+    const { owned } = elementsToOps([btn, text], St, withAction, frame, palette, { actionColor: '#ffffff' })
+    expect((owned[0] as any).fill).toBe(palette.ink)
+    expect((owned[0] as any).radius).toBe(0)
+  })
+
+  it('action text that contrasts with no role becomes an underlined link: no rect', () => {
+    const grey = { field: '#777777', ink: '#808080', accent: '#707070' }
+    const { btn, text } = P.button('Shop now', 10, 50)
+    const { ops, owned } = elementsToOps([btn, text], P, withAction, frame, grey, { actionColor: '#7a7a7a' })
+    expect(owned).toEqual([])
+    expect(ops).toHaveLength(1)
+    expect(ops[0]!.target).toBe('a')
+    expect(ops[0]!.underline).toBe(true)
+    // An unknown colour (a gradient) is a link too.
+    const g = elementsToOps([btn, text], P, withAction, frame, palette, { actionColor: { type: 'linear', angle: 0, stops: [] } })
+    expect(g.owned).toEqual([])
+    expect(g.ops[0]!.underline).toBe(true)
+  })
+
+  it('with recolour on the button takes the prototype’s colours (ink behind, page-colour text)', () => {
+    const { btn, text } = P.button('Shop now', 10, 50)
+    const { ops, owned } = elementsToOps([btn, text], P, withAction, frame, palette, { actionColor: '#777777', recolour: true })
+    expect((owned[0] as any).fill).toBe(palette.ink)
+    expect(ops.find(o => o.target === 'a')!.colorRole).toBe('field')
+  })
+
+  it('Editorial’s link style never draws a rect and underlines the action', () => {
+    const { btn, text } = E.button('Shop now', 10, 50)
+    const { ops, owned } = elementsToOps([btn, text], E, withAction, frame, palette, { actionColor: '#000000' })
+    expect(owned).toEqual([])
+    expect(ops[0]!.underline).toBe(true)
+    expect(ops[0]!.textTransform).toBe('uppercase')
+  })
+
+  it('no action layer: no button', () => {
+    const { btn, text } = P.button('Shop now', 10, 50)
+    expect(elementsToOps([btn, text], P, targets, frame, palette, { actionColor: '#000000' })).toEqual({ ops: [], owned: [] })
+  })
+
+  it('a logo becomes an owned image with the kit url, aspect-true and uncropped', () => {
+    const lg = P.logo(10, 5, 6, { aspect: 0.3 })
+    const logo = { url: 'brand/logo.png', aspect: 0.3, onDarkUrl: 'brand/logo-dark.png' }
+    const { ops, owned } = elementsToOps([lg], P, targets, frame, palette, { logo })
+    const l = owned[0] as any
+    expect(l.kind).toBe('image')
+    expect(l.filename).toBe('brand/logo.png')
+    expect(l.owner).toEqual({ by: 'layout', key: 'logo-0' })
+    expect(l.id).toBe('layout-logo-0')
+    expect(l.w).toBeCloseTo(0.2, 9)
+    expect(l.h).toBeCloseTo(l.w * 0.3, 9)
+    expect(l.crop).toBeUndefined()
+    expect(l.x).toBeCloseTo(0.2, 9)
+    expect(l.y).toBeCloseTo(8 / P.H, 9)
+    expect(ops[0]).toMatchObject({ target: 'layout-logo-0', kind: 'image', insert: { kind: 'image', key: 'logo-0' } })
+    // A dark page takes the on-dark version.
+    const dark = elementsToOps([lg], P, targets, frame, { ...palette, field: '#101010' }, { logo })
+    expect((dark.owned[0] as any).filename).toBe('brand/logo-dark.png')
+    // No kit logo: nothing drawn.
+    expect(elementsToOps([lg], P, targets, frame, palette)).toEqual({ ops: [], owned: [] })
+  })
+
+  it('the link underline is tracked: a later op without it gives the user’s own back', () => {
+    const { btn, text } = E.button('Shop now', 10, 50)
+    const { ops } = elementsToOps([btn, text], E, withAction, frame, palette)
+    const layer = { id: 'a', kind: 'text', text: 'Shop now', x: 0.5, y: 0.5, fontSize: 0.03, color: '#000000' } as any
+    const elements = { action: { role: 'action', id: 'a', text: 'Shop now', words: ['Shop', 'now'] }, images: [], shapes: [] } as unknown as FrameElements
+    const once = applyPlacement([layer], { ops, did: '' }, elements, palette, { recolour: false })
+    expect((once[0] as any).underline).toBe(true)
+    const again = applyPlacement(once, { ops: [{ ...ops[0]!, underline: undefined }], did: '' }, elements, palette, { recolour: false })
+    expect((again[0] as any).underline).toBeUndefined()
+  })
+})

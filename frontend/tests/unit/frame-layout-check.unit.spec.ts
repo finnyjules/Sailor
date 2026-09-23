@@ -269,3 +269,77 @@ describe('checker rule 8 — text under the app\'s interface (a format\'s keep-c
     expect(checkPlan(els, Sst, undefined, { keep, fullH })).toEqual([])
   })
 })
+
+describe('layout kit — checker, Stage 3 pieces (rules 9 and 10)', () => {
+  const info = (o: Partial<TextEl>): TextEl =>
+    ({ k: 't', s: 'Shop', x: 10, w: 30, top: 10, size: S.INFO.size, wt: 500, ls: 0, lh: 1.3, role: 'caption', ...o })
+  // The stub's info text is capH = 0.7 × size tall.
+  const capH = 0.7 * S.INFO.size
+
+  it('boxOf: a band spans the page width over its height; a button and a logo are their rects', () => {
+    expect(boxOf({ k: 'band', side: 'bottom', y: 60, h: 40, solid: 0.5 }, S)).toEqual({ x0: 0, y0: 60, x1: S.W, y1: 100 })
+    expect(boxOf({ k: 'btn', shape: 'pill', x: 5, y: 6, w: 20, h: 8, size: 3 }, S)).toEqual({ x0: 5, y0: 6, x1: 25, y1: 14 })
+    expect(boxOf({ k: 'logo', x: 5, y: 6, w: 20, h: 6 }, S)).toEqual({ x0: 5, y0: 6, x1: 25, y1: 12 })
+  })
+
+  // Rule 9 — with its negative control.
+  it('text closer to the logo than 0.35 × its height fails; just outside passes', () => {
+    const logo = { k: 'logo' as const, x: 10, y: 10, w: 20, h: 10, role: 'logo' }
+    const near = info({ top: 10 + 10 + 3 })          // 3 < 3.5 below the logo
+    const far = info({ top: 10 + 10 + 3.6 })         // 3.6 > 3.5
+    expect(checkPlan([logo, near], S)).toEqual(['logo: needs clear space'])
+    expect(checkPlan([logo, far], S)).toEqual([])
+    // Sideways too.
+    expect(checkPlan([logo, info({ x: 30 + 3, top: 12 })], S)).toEqual(['logo: needs clear space'])
+    expect(checkPlan([logo, info({ x: 30 + 3.6, top: 12 })], S)).toEqual([])
+    // A full-bleed image (`ok`) and a piece set over the logo on purpose are exempt.
+    expect(checkPlan([{ k: 'p', x: 0, y: 0, w: 100, h: 100, role: 'photo', ok: true, bleed: true }, logo], S)).toEqual([])
+    expect(checkPlan([logo, info({ top: 23, over: ['logo'] })], S)).toEqual([])
+  })
+
+  // Rule 10 — with its negative controls.
+  describe('rule 10: text never sits on a raw image (styles with textOffImage)', () => {
+    const photo: PhotoEl = { k: 'p', x: 0, y: 0, w: 100, h: 100, role: 'photo', ok: true, bleed: true }
+    const text = info({ top: 80, role: 'caption' })
+    const band = { k: 'band' as const, side: 'bottom' as const, y: 70, h: 30, solid: 0.6, role: 'band', ok: true, bleed: true }
+
+    it('text on the raw image fails in Performance and Street', () => {
+      expect(checkPlan([photo, text], S, undefined, { style: 'performance' })).toEqual(['caption: sits on the raw image'])
+      expect(checkPlan([photo, text], S, undefined, { style: 'street' })).toEqual(['caption: sits on the raw image'])
+    })
+
+    it('Swiss and Editorial (no textOffImage) and no style are unchanged', () => {
+      expect(checkPlan([photo, text], S)).toEqual([])
+      expect(checkPlan([photo, text], S, undefined, { style: 'swiss' })).toEqual([])
+      expect(checkPlan([photo, text], S, undefined, { style: 'editorial' })).toEqual([])
+    })
+
+    it('text inside a band above the image passes; the same band BELOW the image does not', () => {
+      expect(checkPlan([photo, band, text], S, undefined, { style: 'performance' })).toEqual([])
+      expect(checkPlan([band, photo, text], S, undefined, { style: 'performance' })).toEqual(['caption: sits on the raw image'])
+    })
+
+    it('text that runs past its card fails; inside the union of a card and a panel passes', () => {
+      const card = { k: 'r' as const, x: 5, y: 75, w: 20, h: 15, role: 'card', color: 'field' as const }
+      const t = info({ x: 15, w: 30, top: 80, s: 'Shop now today only', over: ['card', 'panel'] })   // runs past the card
+      // (Rule 6, the card's padding, is not this rule's business.)
+      const raw = (els: El[]) => checkPlan(els, S, undefined, { style: 'performance' }).filter(i => !i.includes('panel'))
+      expect(raw([photo, card, t])).toEqual(['caption: sits on the raw image'])
+      const panel = { k: 'r' as const, x: 25, y: 75, w: 30, h: 15, role: 'panel', color: 'field' as const }
+      expect(raw([photo, card, panel, t])).toEqual([])
+    })
+
+    it('text held by a sticker (a circle above the image) passes', () => {
+      const sticker = { k: 'c' as const, cx: 30, cy: 50, r: 15, role: 'sticker', color: 'accent' as const }
+      const t = info({ x: 22, w: 16, top: 50 - capH / 2, s: '–30%', role: 'date', over: ['sticker'] })
+      expect(checkPlan([photo, sticker, t], S, undefined, { style: 'performance' })).toEqual([])
+      expect(checkPlan([photo, t], S, undefined, { style: 'performance' })).toEqual(['date: sits on the raw image'])
+    })
+
+    it('text that only brushes the image (≤ 0.25) is not on it', () => {
+      const small: PhotoEl = { k: 'p', x: 50, y: 0, w: 50, h: 50, role: 'photo' }
+      const t = info({ x: 10, w: 40.2, top: 60 })
+      expect(checkPlan([small, t], S, undefined, { style: 'performance' })).toEqual([])
+    })
+  })
+})

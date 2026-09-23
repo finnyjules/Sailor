@@ -1,6 +1,8 @@
 import { faceOf } from './types'
 import type { KeepClear } from '~/lib/frame/formats'
 import type { El, LayoutDef, MissingEl, RectEl, Sheet, Style, TextEl } from './types'
+import { STYLES } from './styles'
+import type { StyleId } from './styles'
 
 // ═══════════════════════ the checker ═══════════════════════
 // Ported from the prototype (docs/superpowers/specs/assets/2026-09-23-frame-layout-system/
@@ -104,8 +106,38 @@ export function boxOf(e: El, S: Sheet): Box | null {
       const rad = e.R + e.size / 2
       return { x0: e.cx - rad, y0: e.cy - rad, x1: e.cx + rad, y1: e.cy + rad }
     }
+    case 'band':
+      // Full width, over its own height (fade included).
+      return { x0: 0, y0: e.y, x1: S.W, y1: e.y + e.h }
+    case 'btn':
+    case 'logo':
+      return { x0: e.x, y0: e.y, x1: e.x + e.w, y1: e.y + e.h }
   }
 }
+
+/** True when `box` lies inside the union of `covers` (rectangle subtraction; 0.05-unit slack). */
+function insideUnion(box: Box, covers: Box[]): boolean {
+  const eps = 0.05
+  let rest: Box[] = [box]
+  for (const c of covers) {
+    const next: Box[] = []
+    for (const r of rest) {
+      if (!(Math.min(r.x1, c.x1) - Math.max(r.x0, c.x0) > 0 && Math.min(r.y1, c.y1) - Math.max(r.y0, c.y0) > 0)) { next.push(r); continue }
+      // The parts of r outside c: above, below, then left and right in the middle strip.
+      if (r.y0 < c.y0) next.push({ ...r, y1: c.y0 })
+      if (r.y1 > c.y1) next.push({ ...r, y0: c.y1 })
+      const y0 = Math.max(r.y0, c.y0), y1 = Math.min(r.y1, c.y1)
+      if (r.x0 < c.x0) next.push({ x0: r.x0, y0, x1: c.x0, y1 })
+      if (r.x1 > c.x1) next.push({ x0: c.x1, y0, x1: r.x1, y1 })
+    }
+    rest = next.filter(r => r.x1 - r.x0 > eps && r.y1 - r.y0 > eps)
+    if (!rest.length) return true
+  }
+  return !rest.length
+}
+
+/** The pieces that carry text over an image in a `textOffImage` style (rule 10). */
+const COVER_ROLES = ['card', 'panel', 'sticker', 'tag']
 
 function intersects(a: Box, b: Box): boolean {
   return Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0) > 0 && Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0) > 0
@@ -113,7 +145,9 @@ function intersects(a: Box, b: Box): boolean {
 
 /** A format's keep-clear rule for the checker (Stage 2): the areas the platform covers, and the
  *  frame's full height in kit units (the band is measured from it). */
-export interface CheckOpts { keep?: KeepClear; fullH?: number }
+export interface CheckOpts { keep?: KeepClear; fullH?: number
+  /** The style (Stage 3): a style with `textOffImage` runs rule 10. Absent: `'swiss'`. */
+  style?: StyleId }
 
 /** Every rule; returns human-readable reasons (empty = passes). */
 export function checkPlan(els: El[], S: Sheet, premise?: LayoutDef['premise'], opts?: CheckOpts): string[] {
@@ -239,6 +273,52 @@ export function checkPlan(els: El[], S: Sheet, premise?: LayoutDef['premise'], o
         issues.push(`${roleLabel(e)}: under the app's interface`)
       }
     }
+  }
+
+  // Rule 9: space kept clear around the logo — nothing closer than 0.35 × its height (spec §7;
+  // the prototype's check). Pieces that may lie anywhere (`ok`) and pieces set over the logo on
+  // purpose (`over`) are exempt, as in the prototype.
+  for (const lg of boxed) {
+    if (lg.e.k !== 'logo') continue
+    const pad = 0.35 * (lg.box.y1 - lg.box.y0)
+    const zone: Box = { x0: lg.box.x0 - pad, y0: lg.box.y0 - pad, x1: lg.box.x1 + pad, y1: lg.box.y1 + pad }
+    for (const o of boxed) {
+      if (o === lg || o.e.ok) continue
+      if (o.e.over?.includes('logo') || lg.e.over?.includes(baseRole(roleLabel(o.e)))) continue
+      if (Math.min(zone.x1, o.box.x1) - Math.max(zone.x0, o.box.x0) > 0.01 && Math.min(zone.y1, o.box.y1) - Math.max(zone.y0, o.box.y0) > 0.01) {
+        issues.push('logo: needs clear space')
+        break
+      }
+    }
+  }
+
+  // Rule 10 (a style with `textOffImage`): text never sits on a raw image. Text that overlaps an
+  // image (more than 0.25 on both axes, the collision threshold) must lie inside the union of the
+  // bands, cards, panels, stickers and tags drawn ABOVE that image (later in element order).
+  if (opts?.style && STYLES[opts.style].textOffImage) {
+    const isImage = (e: Present) => e.k === 'p' || (e.k === 'c' && !!e.photo)
+    const images = boxed.map((it, i) => ({ ...it, i })).filter(it => isImage(it.e))
+    boxed.forEach(({ e, box }) => {
+      if (e.k !== 't') return
+      for (const img of images) {
+        const ix = Math.min(box.x1, img.box.x1) - Math.max(box.x0, img.box.x0)
+        const iy = Math.min(box.y1, img.box.y1) - Math.max(box.y0, img.box.y0)
+        if (!(ix > 0.25 && iy > 0.25)) continue
+        const above = boxed.slice(img.i + 1).filter(c => c.e.k === 'band'
+          || ((c.e.k === 'r' || (c.e.k === 'c' && !c.e.photo)) && COVER_ROLES.includes(baseRole(c.e.role ?? ''))))
+        // A circle (a sticker) holds the text when all four corners lie inside it.
+        const inCircle = above.some(c => {
+          if (c.e.k !== 'c') return false
+          const { cx, cy, r } = c.e
+          return ([[box.x0, box.y0], [box.x1, box.y0], [box.x0, box.y1], [box.x1, box.y1]] as const)
+            .every(([x, y]) => Math.hypot(x - cx, y - cy) <= r)
+        })
+        if (!inCircle && !insideUnion(box, above.filter(c => c.e.k !== 'c').map(c => c.box))) {
+          issues.push(`${roleLabel(e)}: sits on the raw image`)
+          return
+        }
+      }
+    })
   }
 
   return issues

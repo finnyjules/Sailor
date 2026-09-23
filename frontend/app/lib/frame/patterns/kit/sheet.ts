@@ -1,5 +1,5 @@
 import { faceOf } from './types'
-import type { Content, Measure, MissingEl, PhotoEl, RuleEl, Style, TextEl, TextKey } from './types'
+import type { BandEl, ButtonEl, Colour, Content, LogoEl, Measure, MissingEl, PhotoEl, RuleEl, Style, TextEl, TextKey } from './types'
 import { STYLES } from './styles'
 import type { StyleId } from './styles'
 
@@ -61,6 +61,25 @@ export interface Sheet {
   q(s: string | undefined, fallback?: string): string
   FOOT2: [TextKey, number, number][]; FOOT3: [TextKey, number, number][]
   PHOTO_ASPECT: number
+  // ── Stage 3 pieces (the prototype's `scrim`, `button`, `logo` and spacing, ~1140–1188) ──
+  /** A band of page colour rising from an edge: solid behind the text (`from`..`to`, plus a gap),
+   *  fading into the image over 1.6 rows. `side: 'top'` runs 0..`to`; `'bottom'` runs `from`..H. */
+  band(side: 'top' | 'bottom', from: number, to: number): BandEl
+  /** A button that grows with its label (the style's look: pill, box or link). `btn` is the
+   *  owned shape; `text` is the user's own action line placed on it (role `'action'`). */
+  button(label: string, x: number, top: number, o?: { align?: 'left' | 'center' | 'right'; bg?: Colour; fg?: Colour; color?: Colour }): { btn: ButtonEl; text: TextEl }
+  /** The brand logo `h` tall at its own `aspect` (h / w). */
+  logo(x: number, top: number, h: number, o: { aspect: number; align?: 'left' | 'center' | 'right' }): LogoEl
+  /** The logo's height. */
+  logoH(): number
+  /** Space to leave after a logo (at least its own clear space). */
+  clear(lg: { h: number }): number
+  /** After a line of size `s`, before the next item of its group. */
+  gapBelow(s: number): number
+  /** Between groups (message / offer / fine print). */
+  groupGap(): number
+  /** Inside panels and cards: at least the page margin. */
+  inset(): number
 }
 
 /** Design rows. */
@@ -211,6 +230,44 @@ export function makeSheet(o: SheetOpts): Sheet {
     return `“${l.length > 20 ? l.slice(0, 19) + '…' : l}”`
   }
 
+  // ── Stage 3 pieces: the prototype's builders (~1140–1188), maths verbatim ──
+  function band(side: 'top' | 'bottom', from: number, to: number): BandEl {
+    const fade = RH * 1.6, pad = GAP
+    if (side === 'top') { const h = Math.min(H, to + pad + fade); return { k: 'band', side, y: 0, h, solid: (to + pad) / h, role: 'band', ok: true, bleed: true } }
+    const y = Math.max(0, from - pad - fade), h = H - y
+    return { k: 'band', side, y, h, solid: (H - from + pad) / h, role: 'band', ok: true, bleed: true }
+  }
+  // A button: the user's action text in a padded shape that grows with it (a link in Editorial).
+  // Measured in the action's face (the info face) with the style's button spacing and case.
+  const BUTTON = sty.button ?? { shape: 'pill' as const, wt: 600, ls: 0 }
+  function button(label: string, x: number, top: number, o: { align?: 'left' | 'center' | 'right'; bg?: Colour; fg?: Colour; color?: Colour } = {}) {
+    const size = Math.max(INFO.size * 1.3, SECOND.size * 0.5)
+    const st: Style = { role: faceOf('action'), wt: BUTTON.wt, ls: BUTTON.ls, lh: 1, ...upperOf(INFO.upper) }
+    const tw = w100(label, st) / 100 * size
+    const place = (w: number) => o.align === 'center' ? x - w / 2 : o.align === 'right' ? x - w : x
+    const capH = (measure.capAbove(faceOf('action')) + measure.baseBelow(faceOf('action'))) * size
+    const label0 = { role: 'action', over: ['btn'], size, wt: st.wt, ls: st.ls, lh: 1, ...upperOf(INFO.upper) }
+    if (BUTTON.shape === 'link') {
+      const w = tw, h = size * 1.7
+      const btn: ButtonEl = { k: 'btn', shape: 'link', x: place(w), y: top, w, h, size, role: 'btn' }
+      // The box is a little wider than the measured text, so the renderer never wraps it.
+      return { btn, text: text(label, { ...label0, x: btn.x, w: tw + size, align: 'left', top: top + (h - capH) / 2, color: o.color ?? 'ink' }) }
+    }
+    const w = tw + size * 2.6, h = size * 2.8
+    const btn: ButtonEl = { k: 'btn', shape: BUTTON.shape, x: place(w), y: top, w, h, size, role: 'btn', bg: o.bg ?? 'ink' }
+    return { btn, text: text(label, { ...label0, x: btn.x, w, align: 'center', top: top + (h - capH) / 2, color: o.fg ?? 'field', inside: 'btn' }) }
+  }
+  const logoH = () => Math.max(INFO.size * 1.9, RH * 0.5)
+  const clear = (lg: { h: number }) => Math.max(GAP * 1.5, lg.h * 0.5)          // at least the logo's own clear space
+  function logo(x: number, top: number, h: number, o: { aspect: number; align?: 'left' | 'center' | 'right' }): LogoEl {
+    const w = h / o.aspect
+    return { k: 'logo', x: o.align === 'center' ? x - w / 2 : o.align === 'right' ? x - w : x, y: top, w, h, role: 'logo' }
+  }
+  // Spacing, from the type rather than per layout:
+  const gapBelow = (s: number) => Math.max(s * 0.4, INFO.size * 1.1)
+  const groupGap = () => Math.max(RH * 1.4, INFO.size * 3.4)
+  const inset = () => Math.max(M, INFO.size * 2.4)
+
   return {
     measure,
     W, H, M, G, NC, CW, RH, GAP, CAP, B,
@@ -220,5 +277,6 @@ export function makeSheet(o: SheetOpts): Sheet {
     text, disp, sec, info, rule,
     infoStack, infoRow, infoRowAt, stackBottom, photoIn, cover, pick, q,
     FOOT2, FOOT3, PHOTO_ASPECT,
+    band, button, logo, logoH, clear, gapBelow, groupGap, inset,
   }
 }

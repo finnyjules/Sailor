@@ -188,3 +188,78 @@ describe('layout kit — sheet takes a format (Stage 2)', () => {
     expect(S.L(16)).toBeCloseTo(50 - S.M, 9)
   })
 })
+
+describe('layout kit — Stage 3 pieces (the prototype’s builders, maths verbatim)', () => {
+  const S = sheet(895, 1280)
+  const P = sheet(895, 1280, { style: 'performance' })
+  const E = sheet(895, 1280, { style: 'editorial' })
+  const St = sheet(895, 1280, { style: 'street' })
+
+  it('spacing: gapBelow, groupGap, inset, logoH and clear', () => {
+    expect(S.gapBelow(10)).toBeCloseTo(Math.max(4, S.INFO.size * 1.1), 9)
+    expect(S.gapBelow(1)).toBeCloseTo(S.INFO.size * 1.1, 9)
+    expect(S.groupGap()).toBeCloseTo(Math.max(S.RH * 1.4, S.INFO.size * 3.4), 9)
+    expect(S.inset()).toBeCloseTo(Math.max(S.M, S.INFO.size * 2.4), 9)
+    expect(S.logoH()).toBeCloseTo(Math.max(S.INFO.size * 1.9, S.RH * 0.5), 9)
+    expect(S.clear({ h: 2 })).toBeCloseTo(Math.max(S.GAP * 1.5, 1), 9)
+    expect(S.clear({ h: 40 })).toBe(20)
+  })
+
+  it('band: a top band runs 0..to + gap + 1.6 rows, solid up to the text', () => {
+    const b = P.band('top', 0, 30)
+    const h = 30 + P.GAP + P.RH * 1.6
+    expect(b).toEqual({ k: 'band', side: 'top', y: 0, h, solid: (30 + P.GAP) / h, role: 'band', ok: true, bleed: true })
+    // Capped at the page height.
+    expect(P.band('top', 0, P.H).h).toBe(P.H)
+  })
+
+  it('band: a bottom band runs from above the text to the foot', () => {
+    const b = P.band('bottom', 100, P.H)
+    const y = 100 - P.GAP - P.RH * 1.6, h = P.H - y
+    expect(b).toEqual({ k: 'band', side: 'bottom', y, h, solid: (P.H - 100 + P.GAP) / h, role: 'band', ok: true, bleed: true })
+    expect(P.band('bottom', 1, P.H).y).toBe(0)
+  })
+
+  it('button: a pill that grows with its label; the label is the action text on it', () => {
+    const size = Math.max(P.INFO.size * 1.3, P.SECOND.size * 0.5)
+    const tw = measure.w100('Shop now', 'caption', 0) / 100 * size
+    const w = tw + size * 2.6, h = size * 2.8
+    const { btn, text } = P.button('Shop now', 10, 50)
+    expect(btn).toEqual({ k: 'btn', shape: 'pill', x: 10, y: 50, w, h, size, role: 'btn', bg: 'ink' })
+    expect(text).toMatchObject({ k: 't', s: 'Shop now', role: 'action', over: ['btn'], size, wt: 600, ls: 0, lh: 1, x: 10, w, align: 'center', color: 'field', inside: 'btn' })
+    // Cap-centred in the button.
+    expect(text.top! + 0.7 * size / 2).toBeCloseTo(50 + h / 2, 9)
+    // align centre / right place the box.
+    expect(P.button('Shop now', 50, 0, { align: 'center' }).btn.x).toBeCloseTo(50 - w / 2, 9)
+    expect(P.button('Shop now', 50, 0, { align: 'right' }).btn.x).toBeCloseTo(50 - w, 9)
+    expect(P.button('Shop now', 50, 0, { bg: 'accent', fg: 'ink' })).toMatchObject({ btn: { bg: 'accent' }, text: { color: 'ink' } })
+  })
+
+  it('button: Street draws a box in capitals with its own spacing', () => {
+    const size = Math.max(St.INFO.size * 1.3, St.SECOND.size * 0.5)
+    const tw = measure.w100('Shop now', 'caption', 0.06, true) / 100 * size
+    const { btn, text } = St.button('Shop now', 10, 50)
+    expect(btn.shape).toBe('box')
+    expect(btn.w).toBeCloseTo(tw + size * 2.6, 9)
+    expect(text).toMatchObject({ upper: true, ls: 0.06, wt: 700 })
+  })
+
+  it('button: Editorial draws an underlined link as wide as its text', () => {
+    const size = Math.max(E.INFO.size * 1.3, E.SECOND.size * 0.5)
+    const tw = measure.w100('Shop now', 'caption', 0.16, true) / 100 * size
+    const { btn, text } = E.button('Shop now', 10, 50)
+    expect(btn).toEqual({ k: 'btn', shape: 'link', x: 10, y: 50, w: tw, h: size * 1.7, size, role: 'btn' })
+    expect(text).toMatchObject({ role: 'action', over: ['btn'], align: 'left', x: 10, color: 'ink', upper: true })
+    expect(text.inside).toBeUndefined()
+  })
+
+  it('button: a sheet with no style draws the prototype’s default pill', () => {
+    expect(S.button('Go', 0, 0).btn.shape).toBe('pill')
+  })
+
+  it('logo: the kit logo at its own aspect (h = w × aspect)', () => {
+    expect(S.logo(10, 5, 6, { aspect: 0.3 })).toEqual({ k: 'logo', x: 10, y: 5, w: 20, h: 6, role: 'logo' })
+    expect(S.logo(50, 5, 6, { aspect: 0.3, align: 'center' }).x).toBeCloseTo(40, 9)
+    expect(S.logo(50, 5, 6, { aspect: 0.3, align: 'right' }).x).toBeCloseTo(30, 9)
+  })
+})

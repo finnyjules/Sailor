@@ -922,3 +922,73 @@ describe('planLayout — the action line and the brand logo (Stage 3)', () => {
   })
 })
 
+
+// ═══════════════ Stage 3 Task 3: band, button and logo through the planner ═══════════════
+describe('planLayout — band, button and logo (Stage 3)', () => {
+  const tl = (id: string, text: string, fontSize: number, color = '#111111') =>
+    createTextLayer({ id, text, fontSize, fontFamily: 'Inter', fontWeight: 600, color }) as LocalLayer
+  const layersWith = (actionColor = '#111111') => [...frameLayers({ image: true }), tl('a', 'Shop now', 0.015, actionColor)]
+  const brandLogo = { url: 'brand/logo.png', aspect: 0.3 }
+
+  // The caption on a bottom band, the action on a button above it, the logo at the top.
+  function piecesLayout(id: string, opts: { band?: boolean } = {}): LayoutDef {
+    return {
+      id, name: id, fits: ['word', 'phrase', 'sentence'], style: 'performance',
+      fn(S, { c }) {
+        const els: El[] = [S.cover(true)]
+        const lg = S.logo(S.X(1), S.M, S.logoH(), { aspect: c.logo!.aspect })
+        const title = S.disp(c.title, { size: S.fitSize([c.title], S.SPAN(1, 12)) * 0.5, x: S.X(1), top: lg.y + lg.h + S.clear(lg) })
+        const cap = S.info(c.caption!, { x: S.X(1), w: S.SPAN(1, 12), base: S.L(16), role: 'caption' })
+        const { btn, text } = S.button(c.action!, S.X(1), S.L(12))
+        if (opts.band !== false) els.push(S.band('bottom', S.L(11), S.H))
+        els.push(lg, title, btn, text, cap)
+        return { els, did: 'pieces' }
+      },
+    }
+  }
+
+  it('the button adapts to the action text’s own colour, the logo comes from the kit, the band paints the page colour', () => {
+    unregister.push(__registerLayoutForTest(piecesLayout('t-pieces')))
+    const plan = planLayout(args({ layoutId: 't-pieces', props: props(layersWith()), style: 'performance', brandLogo }))!
+    const owned = plan.layers.filter(l => (l as any).owner?.by === 'layout') as any[]
+    expect(owned.map(l => l.owner.key).sort()).toEqual(['band-0', 'button-0', 'logo-0'])
+    expect(owned.find(l => l.owner.key === 'button-0').fill).toBe(palette.field)   // dark text → the page colour
+    expect(owned.find(l => l.owner.key === 'logo-0').filename).toBe('brand/logo.png')
+    expect(owned.find(l => l.owner.key === 'band-0').fill.stops[1].color).toBe('rgba(242, 240, 239, 0.94)')
+    // The user's action text keeps its colour (recolour off).
+    expect((plan.layers.find(l => l.id === 'a') as any).color).toBe('#111111')
+    expect((plan.layers.find(l => l.id === 'a') as any).underline).toBeUndefined()
+    // The title sits on the raw image (Performance, rule 10); the caption and action are on the band.
+    expect(plan.issues).toEqual(['title: sits on the raw image'])
+  })
+
+  it('an action colour no role contrasts with draws a link instead', () => {
+    unregister.push(__registerLayoutForTest(piecesLayout('t-pieces-link')))
+    const grey = { field: '#777777', ink: '#808080', accent: '#707070' }
+    const plan = planLayout(args({ layoutId: 't-pieces-link', props: props(layersWith('#7a7a7a')), style: 'performance', brandLogo, palette: grey }))!
+    const keys = plan.layers.filter(l => (l as any).owner?.by === 'layout').map(l => (l as any).owner.key).sort()
+    expect(keys).toEqual(['band-0', 'logo-0'])
+    expect((plan.layers.find(l => l.id === 'a') as any).underline).toBe(true)
+  })
+
+  it('without the band the caption and the action sit on the raw image', () => {
+    unregister.push(__registerLayoutForTest(piecesLayout('t-pieces-raw', { band: false })))
+    const plan = planLayout(args({ layoutId: 't-pieces-raw', props: props(layersWith()), style: 'performance', brandLogo }))!
+    expect(plan.issues).toEqual(expect.arrayContaining(['caption: sits on the raw image', 'action: sits on the raw image']))
+    // Swiss (no style) never runs rule 10.
+    const swiss = planLayout(args({ layoutId: 't-pieces-raw', props: props(layersWith()), brandLogo }))!
+    expect(swiss.issues.filter(i => i.includes('raw image'))).toEqual([])
+  })
+
+  it('on a story, a bottom band that reaches the foot of the uncovered band runs on to the real foot', () => {
+    unregister.push(__registerLayoutForTest(piecesLayout('t-pieces-story')))
+    const plan = planLayout(args({
+      layoutId: 't-pieces-story', props: props(layersWith(), { sailor_frame: { preset: 'meta-story' } }),
+      frameW: 1080, frameH: 1920, style: 'performance', brandLogo,
+    }))!
+    const band = plan.layers.find(l => (l as any).owner?.key === 'band-0') as any
+    // Centre + half height (width-normalised) = the frame's foot (normalised by height).
+    const Hn = 1920 / 1080
+    expect(band.y * Hn + band.h / 2).toBeCloseTo(Hn, 6)
+  })
+})

@@ -309,7 +309,7 @@ function runChoice(p: Prepared, a: { frameW: number; frameH: number; style?: Sty
   const out = p.def.fn(S, { c, kind: p.kind, ph: p.hasImage && !side, r, words, lines, arr: choice.arr })
   // Run-off keeps its image OVER the title (the title runs under it); everything else puts it behind.
   if (side && p.def.id === 'runoff') { side.ok = true; out.els.push(side) } else if (side) out.els.unshift(side)
-  if (!keep) return { out, S, side }
+  if (!keep) return { out, S, side, ...(a.style ? { style: a.style } : {}) }
 
   // Compose-in-the-band → the real frame: move down by the top inset, then extend what fills the band.
   const { W, PHOTO_ASPECT } = S
@@ -319,6 +319,14 @@ function runChoice(p: Prepared, a: { frameW: number; frameH: number; style?: Sty
     for (const k of ['y', 'top', 'base', 'cy'] as const) if (m[k] != null) m[k] = m[k]! + inset
   }
   for (const e of out.els) {
+    // A band (Stage 3, the prototype's scrim rule) that starts at the band's top runs on to the
+    // real top, or that ends at its bottom runs on to the real bottom — its solid part keeps its
+    // length, so the fade stays where the layout put it.
+    if (e.k === 'band') {
+      if (e.side === 'top' && e.y <= inset + 0.5) { const sp = e.h * e.solid + e.y; e.h += e.y; e.y = 0; e.solid = sp / e.h }
+      else if (e.side === 'bottom' && e.y + e.h >= bandEnd - 0.5) { const sp = e.h * e.solid + (H_full - e.y - e.h); e.h = H_full - e.y; e.solid = sp / e.h }
+      continue
+    }
     // A panel, a band or a bleeding rect that touches an edge of the band runs on to that real
     // edge (the prototype's scrim rule, applied to rects); one that spans the band fills 0..H_full.
     if (e.k === 'r' && !e.rot && (e.role === 'panel' || e.role === 'band' || e.bleed)) {
@@ -350,18 +358,21 @@ function runChoice(p: Prepared, a: { frameW: number; frameH: number; style?: Sty
   }
   // The checker and the ops work on the real, full-height frame.
   const { composeH: _band, colRange: _cols, ...fullOpts } = opts
-  return { out, S: makeSheet(fullOpts), side, keep, fullH: H_full }
+  return { out, S: makeSheet(fullOpts), side, keep, fullH: H_full, ...(a.style ? { style: a.style } : {}) }
 }
 
-interface Run { out: LayoutOut; S: Sheet; side: PhotoEl | null; keep?: KeepClear; fullH?: number }
+interface Run { out: LayoutOut; S: Sheet; side: PhotoEl | null; keep?: KeepClear; fullH?: number; style?: StyleId }
 
 /** The checker, with one adaptation for the side image of a wide frame: there the side image's
  *  edge is the page's edge for the type, so a `bleed` premise holds when the role runs off the
  *  page OR runs under the side image (Run-off's title on a wide frame runs under the image, as
  *  in the prototype). Every other rule and premise is checked unchanged. */
-function checkRun({ out, S, side, keep, fullH }: Run, premise: LayoutDef['premise']): string[] {
+function checkRun({ out, S, side, keep, fullH, style }: Run, premise: LayoutDef['premise']): string[] {
   const bleed = premise?.bleed ?? []
-  const opts = keep ? { keep, fullH } : undefined
+  // Swiss (no style) checks exactly as in Stages 1–2; a style adds its own rules (rule 10).
+  const opts = keep || (style && style !== 'swiss')
+    ? { ...(keep ? { keep, fullH } : {}), ...(style && style !== 'swiss' ? { style } : {}) }
+    : undefined
   if (!side || !bleed.length) return checkPlan(out.els, S, premise, opts)
   const issues = checkPlan(out.els, S, { ...premise, bleed: [] }, opts)
   const sb = boxOf(side, S)!
@@ -408,7 +419,16 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
 
   const libraryShape = p.targets.shape ? undefined : pickLibraryShape(p.elements.shapeMode, seedFor(p.index, a.choice))
   const targets = libraryShape ? { ...p.targets, libraryShape } : p.targets
-  const el = elementsToOps(out.els, S, targets, { w: a.frameW, h: a.frameH }, a.palette, p.hidden.length ? { hide: p.hidden } : undefined)
+  // Stage 3 pieces: the button adapts to the action text's own colour (ruling S1), the logo comes
+  // from the brand kit (ruling S2). Only passed when a layout drew them, so Swiss calls are unchanged.
+  const pieces: Parameters<typeof elementsToOps>[5] = {}
+  if (out.els.some(e => e.k === 'btn') && p.targets.action) {
+    pieces.actionColor = (p.layers.find(l => l.id === p.targets.action) as TextLayer | undefined)?.color
+    if (a.recolour) pieces.recolour = true
+  }
+  if (out.els.some(e => e.k === 'logo') && p.content.logo) pieces.logo = p.content.logo
+  if (p.hidden.length) pieces.hide = p.hidden
+  const el = elementsToOps(out.els, S, targets, { w: a.frameW, h: a.frameH }, a.palette, Object.keys(pieces).length ? pieces : undefined)
   // Stand-in image / library shape sentinels become real layers first (existing path).
   const ins = insertFromOps(p.layers, el.ops, a.palette, `stand-${p.def.id}-${seedFor(p.index, a.choice)}`)
   // Ruling R7: merge the owned pieces FIRST, so `present` (and so the order) includes them.
