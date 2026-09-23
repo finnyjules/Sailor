@@ -21,6 +21,9 @@ export interface SheetOpts {
 }
 
 export interface Sheet {
+  /** The measure this sheet was built with — lets consumers (e.g. the checker) get
+   *  cap-above/base-below metrics per role without re-deriving them. */
+  measure: Measure
   W: number; H: number; M: number; G: number; NC: number; CW: number; RH: number; GAP: number; CAP: number; B: number
   DISPLAY: Style; SECOND: Style & { size: number }; INFO: Style & { size: number }
   X(c: number): number; XR(c: number): number; SPAN(a: number, b: number): number; L(r: number): number; Xr(c: number): number
@@ -181,6 +184,7 @@ export function makeSheet(o: SheetOpts): Sheet {
   const pick = <T>(r: () => number, arr: readonly T[]): T => arr[Math.floor(r() * arr.length)] as T
 
   return {
+    measure,
     W, H, M, G, NC, CW, RH, GAP, CAP, B,
     DISPLAY, SECOND, INFO,
     X, XR, SPAN, L, Xr,
