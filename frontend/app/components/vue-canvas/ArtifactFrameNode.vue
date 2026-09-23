@@ -2,7 +2,7 @@
 import { Handle, Position } from '@vue-flow/core'
 import {
   Download, Pencil, Frame as FrameIcon, ImagePlus,
-  MousePointer2, Check, Type, Square, Circle, Minus, Trash2,
+  MousePointer2, Check, Type, Square, Circle, Minus, Trash2, X,
 } from 'lucide-vue-next'
 import { getTypeColor } from '~/composables/useVueNodes'
 import { useLocalLayerEditor, aspectLockedResizeKind } from '~/composables/useLocalLayerEditor'
@@ -21,6 +21,11 @@ import AddImageSourcePopover from '~/components/vue-canvas/compositor/AddImageSo
 import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade'
 import { onCanvasOcclusion, createOcclusionRepaintGate } from '~/lib/studio/occlusion'
 import { encodeFrames } from '~/lib/engine/encodeVideo'
+import { exportStudioVideo, resultBlob, videoErrorText } from '~/lib/studio/studioVideoExport'
+import { prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
+import { isAbortError, throwIfAborted } from '~/lib/engine/videoRecorder'
+import { hostedModeEnabled } from '~/lib/hostedMode'
+import { downloadBlobAsFile } from '~/lib/studio/downloadBlob'
 import { resolveWiredSourceKind } from '~/lib/studio/frameResolve'
 import { frameSourceEpoch, type StudioFrameSource } from '~/lib/studio/frameSource'
 import { deriveMasterClock, slotPhase01, masterFrameIndex } from '~/lib/compositor/masterClock'
@@ -903,6 +908,7 @@ onMounted(() => {
   applyGate()
 })
 onBeforeUnmount(() => {
+  videoAbort?.abort()
   unregisterStudioBaker(props.id); stopAnim(); unsubFieldCatalog()
   gateIo?.disconnect(); gateIo = null
   if (onGateVisibility) document.removeEventListener('visibilitychange', onGateVisibility)
@@ -933,44 +939,73 @@ async function renderCompositeAtTime(t: number): Promise<HTMLCanvasElement | nul
   return exportCompositeCanvas()
 }
 
-// Export an animated Frame as an mp4 (reuses the studios' bake→encode pipeline). Renders
-// N frames over the master clock, encodes server-side, downloads the file, and records it
-// to Assets. The live preview loop is paused during the bake so it can't interleave pulls.
+// The running video download, so the button can stop it; and a short line
+// beside the button saying how it is going or how it was made.
+let videoAbort: AbortController | null = null
+const exportingVideo = ref(false)
+const videoStatus = ref('')
+function stopVideoExport() { videoAbort?.abort() }
+
+// Export an animated Frame as a video: recorded in the browser (the same
+// renderCompositeAtTime the old route baked PNGs from), or — local mode only,
+// with a visible notice — through the server route. Records to Assets and
+// downloads. The live preview loop is paused so it can't interleave pulls.
 async function downloadVideo() {
   const mc = masterClock.value
-  if (!mc || mc.duration <= 0) return
+  if (!mc || mc.duration <= 0 || exportingVideo.value) return
   stopAnim()
+  videoAbort = new AbortController()
+  exportingVideo.value = true
+  videoStatus.value = ''
   try {
     const first = await renderCompositeAtTime(0)
     if (!first) return
     const W = first.width, H = first.height
     const total = Math.max(1, Math.round(mc.fps * mc.duration))
-    const { ensureSpaceTypeBake } = await import('~/lib/spacetype/bake')
-    const bakeCfg = { fps: mc.fps, loopDuration: mc.duration, W, H, seed: 'frame', sig: JSON.stringify({ id: props.id, n: total, w: W, h: H }) }
-    const bake = await ensureSpaceTypeBake(bakeCfg as any, undefined, {
-      renderFrame: async (i) => {
+    const alpha = !hasPaint(editor.background.value)
+    const made = await exportStudioVideo({
+      prefix: 'frame', publish: true,
+      width: W, height: H, fps: mc.fps, frameCount: total, alpha,
+      signal: videoAbort.signal,
+      drawFrame: async (i, ctx) => {
+        videoStatus.value = `${i + 1}/${total}`
         const cv = await renderCompositeAtTime(i / mc.fps)
-        return await new Promise<Blob>((res, rej) => cv ? cv.toBlob(b => b ? res(b) : rej(new Error('toBlob failed')), 'image/png') : rej(new Error('no composite')))
+        if (!cv) throw new Error('no composite')
+        ctx.drawImage(cv, 0, 0, W, H)   // a fresh 2D canvas: no WebGL buffer to lose
       },
-    })
-    let encoded: Awaited<ReturnType<typeof encodeFrames>>
-    try {
-      encoded = await encodeFrames({ frames: bake.frames, fps: mc.fps, width: W, height: H, alpha: !hasPaint(editor.background.value) })
-    } catch (err) {
-      console.error('[Frame] video encode failed', err)
-      return
-    }
-    await recordAsset(activeTab.value?.projectUuid, 'video', encoded.filename)
-    const vres = await fetch(`/view?${new URLSearchParams({ filename: encoded.filename, type: 'input' })}`)
-    const blob = await vres.blob()
-    const obj = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = obj; a.download = `frame-${props.id}.${encoded.ext}`
-    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(obj)
-  } catch (err) { console.error('[Frame] video export failed:', err) }
-  finally { applyGate() }
+      onStatus: t => { videoStatus.value = t },
+      serverFallback: async (signal) => {
+        const { ensureSpaceTypeBake } = await import('~/lib/spacetype/bake')
+        const bakeCfg = { fps: mc.fps, loopDuration: mc.duration, W, H, seed: 'frame', sig: JSON.stringify({ id: props.id, n: total, w: W, h: H }) }
+        const bake = await ensureSpaceTypeBake(bakeCfg as any, undefined, {
+          renderFrame: async (i) => {
+            throwIfAborted(signal)
+            videoStatus.value = `${i + 1}/${total}`
+            const cv = await renderCompositeAtTime(i / mc.fps)
+            return await new Promise<Blob>((res, rej) => cv ? cv.toBlob(b => b ? res(b) : rej(new Error('toBlob failed')), 'image/png') : rej(new Error('no composite')))
+          },
+        })
+        throwIfAborted(signal)
+        return encodeFrames({ frames: bake.frames, fps: mc.fps, width: W, height: H, alpha })
+      },
+    }, { hosted: hostedModeEnabled(useRuntimeConfig().public), forceServer: prefersServerVideoExport() })
+    if (!made?.filename) { videoStatus.value = ''; return }
+    await recordAsset(activeTab.value?.projectUuid, 'video', made.filename)
+    downloadBlobAsFile(await resultBlob(made), `frame-${props.id}.${made.ext}`)
+    videoStatus.value = made.notice ?? ''
+  } catch (err) {
+    if (isAbortError(err)) { videoStatus.value = 'Cancelled'; return }
+    console.error('[Frame] video export failed', err)
+    videoStatus.value = videoErrorText(err)
+  } finally {
+    exportingVideo.value = false
+    videoAbort = null
+    applyGate()
+  }
 }
 
 async function downloadImage() {
+  videoStatus.value = ''
   // An animated Frame downloads as a video over its master clock.
   if (hasAnimatedSlot.value) { await downloadVideo(); return }
   const triggerDownload = (obj: string) => {
@@ -1146,7 +1181,9 @@ onUnmounted(() => {
             class="nopan nodrag w-14 bg-white/[0.04] rounded px-1.5 py-0.5 text-right text-white/70 outline-none focus:bg-white/[0.08] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
             @change="setDim('height', $event)" />
         </div>
-        <button class="nopan nodrag shrink-0 size-5 rounded flex items-center justify-center text-white/40 hover:text-white/85 hover:bg-white/[0.08] cursor-pointer disabled:opacity-40" :disabled="!hasAnyLayer && !compositeUrl" title="Download" @click.stop="downloadImage"><Download class="size-3" /></button>
+        <span v-if="videoStatus" class="shrink min-w-0 truncate text-[10px] text-white/45 tabular-nums" :title="videoStatus">{{ videoStatus }}</span>
+        <button v-if="exportingVideo" class="nopan nodrag shrink-0 size-5 rounded flex items-center justify-center text-white/60 hover:text-white hover:bg-white/[0.08] cursor-pointer" title="Stop" @click.stop="stopVideoExport"><X class="size-3" /></button>
+        <button v-else class="nopan nodrag shrink-0 size-5 rounded flex items-center justify-center text-white/40 hover:text-white/85 hover:bg-white/[0.08] cursor-pointer disabled:opacity-40" :disabled="!hasAnyLayer && !compositeUrl" title="Download" @click.stop="downloadImage"><Download class="size-3" /></button>
       </div>
 
       <!-- Artboard -->
