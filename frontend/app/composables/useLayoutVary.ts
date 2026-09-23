@@ -80,11 +80,15 @@ const LIBRARY_FIRST = 12
 const LAYOUT_FIELDS = new Set([
   'x', 'y', 'w', 'h', 'boxW', 'boxH', 'rotation', 'scale', 'fontSize', 'align', 'expressive', 'valign',
   'lineHeight', 'letterSpacing', 'runs', 'path', 'crop', 'mask', 'opacity', 'blend', 'layoutPrev', 'pins',
+  // A format hides the lines it does not carry (and a size change restores them): showing or
+  // hiding a line is not new content. Role inference never reads `visible`.
+  'visible',
 ])
 
 /** The Frame's content, as one string: every user layer minus the layout-set fields (the text
  *  with its line breaks folded, since a layout re-breaks it), the order of text sizes and the
- *  stored roles (they decide which text is the title), the grid and the Frame's size. Owned
+ *  stored roles (they decide which text is the title), the grid, the Frame's size and its format
+ *  (two formats can share one size — 1280×720 is plain 16:9 and a video thumbnail). Owned
  *  pieces are left out: a layout rebuilds its own. */
 function contentKey(props: Record<string, unknown> | undefined, w: number, h: number, slots: number[]): string {
   const layers = ((props?.sailor_localLayers as Record<string, unknown>[] | undefined) ?? [])
@@ -103,7 +107,7 @@ function contentKey(props: Record<string, unknown> | undefined, w: number, h: nu
   })
   // The roles the last apply stored decide which text is the title as much as the sizes do.
   const roles = (props?.sailor_posterState as { roles?: unknown } | undefined)?.roles ?? null
-  return JSON.stringify([w, h, slots, rank, rows, props?.sailor_localGrid ?? null, roles])
+  return JSON.stringify([w, h, formatFor(props, w, h)?.id ?? '', slots, rank, rows, props?.sailor_localGrid ?? null, roles])
 }
 
 const sameChoice = (a: Choice, b: Choice) =>
@@ -214,11 +218,12 @@ export function useLayoutVary(src: LayoutVarySource): {
   }
   // The tab showing: settle at once (a first look must not wait for the debounce).
   watch(isActive, (on) => { if (on) settle() }, { immediate: true })
-  // A content change (a new layer array, grid, size or slots): settle after the debounce.
+  // A content change (a new layer array, grid, size, format or slots): settle after the debounce.
   watch(() => {
     if (!isActive()) return null
     const p = src.props()
-    return [p?.sailor_localLayers, p?.sailor_localGrid, src.frameW(), src.frameH(), src.connectedSlots().join(',')]
+    const w = src.frameW(), h = src.frameH()
+    return [p?.sailor_localLayers, p?.sailor_localGrid, w, h, formatFor(p, w, h)?.id ?? '', src.connectedSlots().join(',')]
   }, (v) => { if (v) settleSoon() })
   // The end of a text edit settles what was held back while typing.
   watch(() => !!src.editing?.(), (editing) => {

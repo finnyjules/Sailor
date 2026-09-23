@@ -12,8 +12,9 @@ import type { FrameFormat } from '~/lib/frame/formats'
 import { frameLayers, palette } from './helpers/frameLayoutFixtures'
 
 // ═══════════════════════ the format matrix (Stage 2, Task 7) ═══════════════════════
-// Every ad and social format × {word, phrase, sentence} × {image, no image} × two contents (the
-// Stage 1 dates, and a number: date "–30%"), through the real planner. The Frame stores the
+// Every ad and social format × {word, phrase, sentence} × {image, no image} × four contents (the
+// Stage 1 dates, a number: date "–30%", two lines: title and details, and three lines: title,
+// details and caption), through the real planner. The Frame stores the
 // format's preset (`sailor_frame.preset`) and has the format's own size. For every layout the
 // planner offers there:
 //   1. every candidate, planned again with `planLayout`, has no issues (checker rule 8 included);
@@ -24,8 +25,16 @@ import { frameLayers, palette } from './helpers/frameLayoutFixtures'
 // And 3: the number of layouts offered meets the format's floor (ruling P6), unless the
 // combination is listed in EXPECTED_THIN with its measured count and reason.
 
-type Content = 'dates' | 'number'
-const CONTENTS: Record<Content, string | undefined> = { dates: undefined, number: '–30%' }
+type Content = 'dates' | 'number' | 'two' | 'three'
+/** Each content: the date's text (absent: the Stage 1 date) and which of the four text layers the
+ *  Frame has, most important first (their sizes make that the inferred order). */
+const CONTENTS: Record<Content, { date?: string; ids: readonly string[] }> = {
+  dates: { ids: ['t', 'd', 'dt', 'c'] },
+  number: { date: '–30%', ids: ['t', 'd', 'dt', 'c'] },
+  two: { ids: ['t', 'd'] },
+  three: { ids: ['t', 'd', 'c'] },
+}
+const TEXT_IDS = new Set(['t', 'd', 'dt', 'c'])
 const KINDS: Kind[] = ['word', 'phrase', 'sentence']
 
 /** Ruling P6: at least this many layouts offered. */
@@ -58,15 +67,16 @@ const expectedThin = (c: Combo) => EXPECTED_THIN.find(e => matches(e, c))
 
 const argsFor = (def: LayoutDef, f: FrameFormat, c: Combo): Omit<LayoutPlanArgs, 'choice'> => ({
   props: {
-    sailor_localLayers: frameLayers(c.kind, { image: c.image, shape: !!def.needs?.shape, date: CONTENTS[c.content] }),
+    sailor_localLayers: frameLayers(c.kind, { image: c.image, shape: !!def.needs?.shape, date: CONTENTS[c.content].date })
+      .filter(l => !TEXT_IDS.has(l.id) || CONTENTS[c.content].ids.includes(l.id)),
     sailor_frame: { preset: f.id },
   },
   frameW: f.w, frameH: f.h, layoutId: def.id, palette, connectedSlots: [], measure: makeStubMeasure(),
 })
 
-const LEVELS = ['title', 'details', 'date', 'caption'] as const
-const LAYER_OF = { title: 't', details: 'd', date: 'dt', caption: 'c' } as const
-const hiddenOf = (f: FrameFormat) => LEVELS.slice(f.carries ?? 4)
+/** The text layers a format hides: of the lines the Frame has, those past the levels it carries
+ *  (final fix C2 — "carries N" counts the Frame's own lines, not fixed slots). */
+const hiddenIdsOf = (f: FrameFormat, c: Combo) => CONTENTS[c.content].ids.slice(f.carries ?? 4)
 
 const combos: Combo[] = (Object.keys(CONTENTS) as Content[]).flatMap(content =>
   FRAME_FORMATS.flatMap(f => KINDS.flatMap(kind => [false, true].map(image => ({ format: f.id, kind, image, content })))))
@@ -80,7 +90,7 @@ describe('format matrix — every format × kind × image through the real plann
     const f = FRAME_FORMATS.find(x => x.id === c.format)!
     const H = 100 * f.h / f.w
     const floor = 900 / f.view! - 0.01
-    const hidden = hiddenOf(f)
+    const hiddenIds = hiddenIdsOf(f, c)
     const keep = f.keep
     const band = keep && { x0: keep.left * 100, y0: keep.top * H, x1: 100 - keep.right * 100, y1: H * (1 - keep.bottom) }
     const S = makeSheet({ frameW: f.w, frameH: f.h, measure: makeStubMeasure(), format: { view: f.view, nc: f.nc } })
@@ -96,21 +106,20 @@ describe('format matrix — every format × kind × image through the real plann
         expect.soft(plan, label).not.toBeNull()
         // 1. the checker, rule 8 included.
         expect.soft(plan!.issues, label).toEqual([])
-        // 4. the levels the format does not carry.
+        // 4. the levels the format does not carry (by layer; the roles are the planner's).
         expect.soft(plan!.format?.id, label).toBe(f.id)
+        const roleOf = Object.fromEntries(Object.entries(plan!.posterState.roles).map(([r, id]) => [id, r]))
+        const hidden = hiddenIds.map(id => roleOf[id])
         expect.soft([...plan!.format!.hidden].sort(), label).toEqual([...hidden].sort())
-        for (const r of hidden) {
-          const layer = plan!.layers.find(l => l.id === LAYER_OF[r]) as { visible?: boolean } | undefined
-          expect.soft(layer?.visible, `${r} not hidden · ${label}`).toBe(false)
-        }
-        for (const r of LEVELS.filter(x => !(hidden as readonly string[]).includes(x))) {
-          const layer = plan!.layers.find(l => l.id === LAYER_OF[r]) as { visible?: boolean } | undefined
-          expect.soft(layer?.visible, `${r} hidden though carried · ${label}`).not.toBe(false)
+        for (const id of CONTENTS[c.content].ids) {
+          const layer = plan!.layers.find(l => l.id === id) as { visible?: boolean } | undefined
+          if (hiddenIds.includes(id)) expect.soft(layer?.visible, `${id} not hidden · ${label}`).toBe(false)
+          else expect.soft(layer?.visible, `${id} hidden though carried · ${label}`).not.toBe(false)
         }
         for (const e of cand.out.els) {
           if (e.k !== 't' && e.k !== 'ring') continue
           const role = (e.role ?? '').replace(/\d+$/, '')
-          expect.soft((hidden as readonly string[]).includes(role), `${role} placed though hidden · ${label}`).toBe(false)
+          expect.soft((hidden as string[]).includes(role), `${role} placed though hidden · ${label}`).toBe(false)
           // 2. the minimum text size from the viewing width.
           expect.soft(e.size, `${e.role} size · ${label}`).toBeGreaterThanOrEqual(floor)
           // 5. text inside the band, measured directly.

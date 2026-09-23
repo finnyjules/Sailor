@@ -12,10 +12,16 @@
  *
  * Every write spreads the existing `sailor_frame`, so its other keys (e.g. `clock`) survive.
  * `data` is the node's reactive `data` object; writes mutate it in place.
+ *
+ * A size write that changes the Frame's format (Stage 2) also shows again the lines the old
+ * format hid and the new one carries (`restoreFormatHiddenLines`), in the same `data`, so the
+ * editor's one undo step (its snapshot holds the layers and the size) covers both.
  */
 import { isResponsiveFrame } from './responsive/fromNode'
-import { FRAME_FORMATS, frameFormatGroup } from './formats'
+import { FRAME_FORMATS, formatFor, frameFormatGroup } from './formats'
 import { PLAIN_SIZE_PRESETS } from './plainPresets'
+import { hiddenLayerIdsForFrame } from './patterns/kit/plan'
+import type { FrameElements } from './patterns/types'
 
 export interface FrameSizePreset { id: string; label: string; w: number; h: number }
 
@@ -63,20 +69,65 @@ export function readFrameSize(data: FrameSizeNodeData): { w: number; h: number }
   return { w: readDim(data, 'width'), h: readDim(data, 'height') }
 }
 
-/** The size select's value: the preset `w`×`h` matches exactly, 'custom' for any other
- *  explicit size, '' when the frame has no explicit size. */
-export function framePresetId(w: number, h: number): string {
-  const match = FRAME_SIZE_PRESETS.find(p => p.w === w && p.h === h)
+/** The size select's value: the preset `w`×`h` matches exactly — the `stored` one
+ *  (`sailor_frame.preset`) when it has that size, since two presets can share one (1280×720 is
+ *  plain 16:9 and a video thumbnail), else the first — 'custom' for any other explicit size, ''
+ *  when the frame has no explicit size. */
+export function framePresetId(w: number, h: number, stored?: string): string {
+  const own = stored ? FRAME_SIZE_PRESETS.find(p => p.id === stored && p.w === w && p.h === h) : undefined
+  const match = own ?? FRAME_SIZE_PRESETS.find(p => p.w === w && p.h === h)
   return match ? match.id : (w > 0 && h > 0 ? 'custom' : '')
+}
+
+/** The format the Frame's explicit size and stored preset name ('' for none). */
+function formatIdOf(data: FrameSizeNodeData): string {
+  const { w, h } = readFrameSize(data)
+  return formatFor(data.properties ?? undefined, w, h)?.id ?? ''
+}
+
+/** Run a size write; when it changed the Frame's format, show again the lines the old one hid. */
+function sizeWrite(data: FrameSizeNodeData, write: () => void) {
+  const before = formatIdOf(data)
+  write()
+  if (formatIdOf(data) !== before) restoreFormatHiddenLines(data)
+}
+
+type HideTracked = { id: string; visible?: boolean; layoutPrev?: Record<string, { was: unknown; set: unknown }> }
+
+/** Show again every line a layout hid for a format (`layoutPrev.visible` still `set: false`, the
+ *  layer still hidden) that the Frame's CURRENT format carries — every such line when it has no
+ *  format. `visible` goes back to what it was (removed when it had none) and the entry is
+ *  dropped. A line the user showed or hid again by hand since is theirs, and left alone. */
+export function restoreFormatHiddenLines(data: FrameSizeNodeData) {
+  const props = data.properties
+  const layers = props?.sailor_localLayers as HideTracked[] | undefined
+  if (!props || !Array.isArray(layers)) return
+  const { w, h } = readFrameSize(data)
+  const st = props.sailor_posterState as { shapeMode?: FrameElements['shapeMode']; imageMode?: boolean } | undefined
+  const still = new Set(hiddenLayerIdsForFrame({ props, frameW: w, frameH: h, shapeMode: st?.shapeMode ?? undefined, imageMode: st?.imageMode }))
+  let changed = false
+  const next = layers.map((l) => {
+    const e = l.layoutPrev?.visible
+    if (!e || e.set !== false || l.visible !== false || still.has(l.id)) return l
+    changed = true
+    const out: HideTracked = { ...l }
+    if (e.was == null) delete out.visible; else out.visible = e.was as boolean
+    const { visible: _v, ...prev } = l.layoutPrev!
+    if (Object.keys(prev).length) out.layoutPrev = prev; else delete out.layoutPrev
+    return out
+  })
+  if (changed) props.sailor_localLayers = next
 }
 
 /** Write a preset's size. Leaves Responsive as it is. False (and no write) for an unknown id. */
 export function applyFramePreset(data: FrameSizeNodeData, id: string): boolean {
   const p = FRAME_SIZE_PRESETS.find(x => x.id === id)
   if (!p) return false
-  writeDim(data, 'width', p.w)
-  writeDim(data, 'height', p.h)
-  patchFrameProps(data, { preset: id })
+  sizeWrite(data, () => {
+    writeDim(data, 'width', p.w)
+    writeDim(data, 'height', p.h)
+    patchFrameProps(data, { preset: id })
+  })
   return true
 }
 
@@ -92,8 +143,10 @@ export function frameDimFor(data: FrameSizeNodeData, value: number): number | nu
 export function setFrameDim(data: FrameSizeNodeData, which: Dim, value: number): boolean {
   const v = frameDimFor(data, value)
   if (v == null) return false
-  writeDim(data, which, v)
-  patchFrameProps(data, { preset: 'custom' })
+  sizeWrite(data, () => {
+    writeDim(data, which, v)
+    patchFrameProps(data, { preset: 'custom' })
+  })
   return true
 }
 
@@ -114,15 +167,17 @@ export function designSizeForAspect(aspect: number): { w: number; h: number } {
  * Turning off keeps whatever size the frame has.
  */
 export function setFrameResponsive(data: FrameSizeNodeData, on: boolean, aspect: number) {
-  if (on) {
-    const { w, h } = readFrameSize(data)
-    if (!(w > 0 && h > 0)) {
-      const d = designSizeForAspect(aspect)
-      writeDim(data, 'width', d.w)
-      writeDim(data, 'height', d.h)
+  sizeWrite(data, () => {
+    if (on) {
+      const { w, h } = readFrameSize(data)
+      if (!(w > 0 && h > 0)) {
+        const d = designSizeForAspect(aspect)
+        writeDim(data, 'width', d.w)
+        writeDim(data, 'height', d.h)
+      }
     }
-  }
-  patchFrameProps(data, { responsive: on })
+    patchFrameProps(data, { responsive: on })
+  })
 }
 
 /** Everything this module writes, as the editor's undo history keeps it. `responsive` and

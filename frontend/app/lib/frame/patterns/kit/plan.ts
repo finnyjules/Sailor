@@ -108,8 +108,9 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
   const elements = frameElements(a, layers)
   if (!elements.title) return null
   const content = contentOf(elements)
-  // Levels (Stage 2): a format that carries N levels keeps the first N of title → details →
-  // date → caption; the rest leave the content before the layout runs, and their layers are hidden.
+  // Levels (Stage 2): a format that carries N levels keeps the first N of the lines the Frame
+  // has, in title → details → date → caption order; the rest leave the content before the layout
+  // runs, and their layers are hidden.
   const fmt = formatFor(a.props, a.frameW, a.frameH)
   const hidden = hiddenRoles(fmt, content)
   for (const r of hidden) delete content[r]
@@ -155,11 +156,12 @@ function contentOf(elements: FrameElements): Content {
   return content
 }
 
-/** The roles on this Frame a format does not carry: past its `carries`, in title → details →
- *  date → caption order. None without a format. */
+/** The roles on this Frame a format does not carry: of the lines the Frame HAS, in title →
+ *  details → date → caption order, those past its `carries` (a two-line Frame on a two-level
+ *  format hides nothing). None without a format. */
 function hiddenRoles(fmt: FrameFormat | null, content: Content): RoleKey[] {
   if (!fmt) return []
-  return ROLES.slice(fmt.carries ?? 4).filter(r => content[r] != null)
+  return ROLES.filter(r => content[r] != null).slice(fmt.carries ?? 4)
 }
 
 /** The text of the lines this Frame's format leaves out (Stage 2), in role order — the same roles
@@ -172,6 +174,16 @@ export function hiddenLinesForFrame(a: FrameArgs): string[] {
   if (!elements.title) return []
   const content = contentOf(elements)
   return hiddenRoles(fmt, content).map(r => content[r]!)
+}
+
+/** The ids of the text layers this Frame's format leaves out — the layers of the roles
+ *  `hiddenLinesForFrame` quotes. Empty without a format, or without a title. */
+export function hiddenLayerIdsForFrame(a: FrameArgs): string[] {
+  const fmt = formatFor(a.props, a.frameW, a.frameH)
+  if (!fmt || (fmt.carries ?? 4) >= ROLES.length) return []
+  const elements = frameElements(a, (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? [])
+  if (!elements.title) return []
+  return hiddenRoles(fmt, contentOf(elements)).map(r => elements[r]!.id)
 }
 
 /** The roles the last apply stored win over size inference: an overlap layout (Ghost, Number

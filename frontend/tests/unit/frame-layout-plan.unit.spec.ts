@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { applyLayoutToFrame, candidatesForFrame, planLayout } from '~/lib/frame/patterns/kit/plan'
+import { applyLayoutToFrame, candidatesForFrame, hiddenLinesForFrame, planLayout } from '~/lib/frame/patterns/kit/plan'
 import { LAYOUTS } from '~/lib/frame/patterns/layouts/catalog'
 import { makeSheet } from '~/lib/frame/patterns/kit/sheet'
 import { boxOf } from '~/lib/frame/patterns/kit/check'
@@ -619,6 +619,49 @@ describe('planLayout — a format (Stage 2)', () => {
       }
       expect(n).toBeGreaterThan(0)
     })
+  })
+})
+
+// ═══════════════ final fix C2: "carries N" counts the lines the Frame HAS ═══════════════
+// A format that carries N levels keeps the first N of the lines present, in title → details →
+// date → caption order — not the first N fixed slots. A two-line Frame on a two-level format
+// hides nothing.
+describe('planLayout — a format carries the Frame\'s own first N lines (final fix C2)', () => {
+  const tl = (id: string, text: string, fontSize: number) =>
+    createTextLayer({ id, text, fontSize, fontFamily: 'Inter', fontWeight: 600, color: '#111111' }) as LocalLayer
+  const on = (layers: LocalLayer[], preset: string, w: number, h: number) => {
+    const base = { props: props(layers, { sailor_frame: { preset } }), frameW: w, frameH: h, palette, connectedSlots: [], measure: makeStubMeasure() }
+    const cs = candidatesForFrame({ ...base, layoutId: 'statement' })
+    const plan = planLayout({ ...base, layoutId: 'statement', choice: cs[0]?.choice ?? { ...DEFAULT_CHOICE } })!
+    const vis = (id: string) => (plan.layers.find(l => l.id === id) as { visible?: boolean }).visible
+    return { plan, vis, cands: cs, lines: hiddenLinesForFrame(base) }
+  }
+
+  it('two lines on video-thumb (carries 2): nothing hidden', () => {
+    const r = on([tl('t', 'Weather Report', 0.12), tl('d', 'Ines Vollmer', 0.04)], 'video-thumb', 1280, 720)
+    expect(r.plan.format?.id).toBe('video-thumb')
+    expect(r.plan.format?.hidden).toEqual([])
+    expect(r.lines).toEqual([])
+    expect(r.vis('t')).not.toBe(false)
+    expect(r.vis('d')).not.toBe(false)
+    expect(r.cands.length).toBeGreaterThan(0)
+  })
+
+  it('title, details and caption on 160×600 (carries 3): nothing hidden', () => {
+    const r = on([tl('t', 'Weather Report', 0.12), tl('d', 'Ines Vollmer', 0.04), tl('c', 'Kunstraum Lenz\nLenzgasse 14', 0.02)], 'ad-160x600', 160, 600)
+    expect(r.plan.format?.id).toBe('ad-160x600')
+    expect(r.plan.format?.hidden).toEqual([])
+    expect(r.lines).toEqual([])
+    for (const id of ['t', 'd', 'c']) expect(r.vis(id), id).not.toBe(false)
+  })
+
+  it('title, "50% off" and caption on video-thumb: only the caption is hidden', () => {
+    const r = on([tl('t', 'Weather Report', 0.12), tl('d', '50% off', 0.04), tl('c', 'Kunstraum Lenz\nLenzgasse 14', 0.02)], 'video-thumb', 1280, 720)
+    expect(r.plan.format?.hidden).toEqual(['caption'])
+    expect(r.lines).toEqual(['Kunstraum Lenz\nLenzgasse 14'])
+    expect(r.vis('t')).not.toBe(false)
+    expect(r.vis('d')).not.toBe(false)
+    expect(r.vis('c')).toBe(false)
   })
 })
 

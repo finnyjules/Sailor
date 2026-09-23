@@ -98,7 +98,8 @@ const frameH = computed(() => widgetVal('height'))
 const hasExplicitSize = computed(() => frameW.value > 0 && frameH.value > 0)
 const isResponsive = computed(() => isResponsiveFrame(props.data.properties))
 // One select here, so Responsive is one of its options; the editor has a separate switch.
-const activePresetId = computed<string>(() => isResponsive.value ? 'responsive' : framePresetId(frameW.value, frameH.value))
+// The stored preset picks between presets of one size (1280×720: plain 16:9 or video thumbnail).
+const activePresetId = computed<string>(() => isResponsive.value ? 'responsive' : framePresetId(frameW.value, frameH.value, (props.data.properties as { sailor_frame?: { preset?: string } } | undefined)?.sailor_frame?.preset))
 function onPresetChange(e: Event) {
   const v = (e.target as HTMLSelectElement).value
   // Becoming responsive writes the current effective size as a concrete design size when the

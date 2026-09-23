@@ -416,7 +416,8 @@ const viewEditing = computed(() => frameIsResponsive.value && !atDesign.value &&
 // every handler records only when the value actually changes.
 const frameSizeNow = computed(() => compositor.value ? readFrameSize(compositor.value.data) : { w: 0, h: 0 })
 // A frame with no explicit size (it follows its image) reads as Custom too, with empty fields.
-const framePresetValue = computed(() => framePresetId(frameSizeNow.value.w, frameSizeNow.value.h) || 'custom')
+// The stored preset picks between presets of one size (1280×720: plain 16:9 or video thumbnail).
+const framePresetValue = computed(() => framePresetId(frameSizeNow.value.w, frameSizeNow.value.h, (compositor.value?.data?.properties as { sailor_frame?: { preset?: string } } | undefined)?.sailor_frame?.preset) || 'custom')
 const framePresetChoices = computed(() => {
   const ids = FRAME_SIZE_PRESETS.map(p => p.id)
   const labels = FRAME_SIZE_PRESETS.map(p => p.label)

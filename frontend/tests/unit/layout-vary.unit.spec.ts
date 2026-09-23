@@ -4,7 +4,7 @@ vi.mock('~/lib/frame/patterns/kit/plan', async (importOriginal) => {
   const m = await importOriginal<typeof import('~/lib/frame/patterns/kit/plan')>()
   return { ...m, planLayout: vi.fn(m.planLayout), applyLayoutToFrame: vi.fn(m.applyLayoutToFrame) }
 })
-import { planLayout, applyLayoutToFrame, hiddenLinesForFrame } from '~/lib/frame/patterns/kit/plan'
+import { planLayout, applyLayoutToFrame, candidatesForFrame, hiddenLinesForFrame } from '~/lib/frame/patterns/kit/plan'
 import { useLayoutVary, CONTENT_SETTLE_MS, FONT_WAIT_MS } from '~/composables/useLayoutVary'
 import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
 import { DEFAULT_CHOICE } from '~/lib/frame/patterns/kit/vary'
@@ -495,5 +495,70 @@ describe('useLayoutVary — format', () => {
     const editor = { recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn(), writeGroups: vi.fn() }
     const v = useLayoutVary({ props: () => props, frameW: () => 1280, frameH: () => 720, connectedSlots: () => [], editor: () => editor, remember: vi.fn(), measure: makeStubMeasure(), active: () => false })
     expect(v.format.value).toBeNull()
+  })
+})
+
+// ── Final fix C1: a format change at the same pixel size re-plans; M1: `visible` is not content ──
+describe('useLayoutVary — the format is part of the content key (final fix C1, M1)', () => {
+  /** The first layout (catalog order) with checked variations on this Frame in both formats. */
+  const offeredInBoth = (w: number, h: number, a: string, b: string) => LAYOUTS.find(l => [a, b].every(preset =>
+    candidatesForFrame({ props: { sailor_localLayers: frameLayers(), sailor_frame: { preset } }, frameW: w, frameH: h, layoutId: l.id, palette: { field: '#f2f0ef', ink: '#121212', accent: '#dd2200' } as any, connectedSlots: [], measure: makeStubMeasure() }).length > 0))!.id
+  const run = async (w: number, h: number, from: string, to: string) => {
+    const props = reactive<Record<string, unknown>>({
+      sailor_localLayers: frameLayers(), sailor_frame: { preset: from }, sailor_posterState: { patternId: offeredInBoth(w, h, from, to), seed: 1 },
+    })
+    const editor = { recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn(), writeGroups: vi.fn() }
+    const vary = useLayoutVary({ props: () => props, frameW: () => w, frameH: () => h, connectedSlots: () => [], editor: () => editor, remember: vi.fn(), measure: makeStubMeasure() })
+    vi.advanceTimersByTime(10)                                                   // the idle half of the first build
+    const before = { cands: vary.candidates.value, lib: vary.library.value }
+    props.sailor_frame = { preset: to }                                          // same size, other format
+    await nextTick(); vi.advanceTimersByTime(CONTENT_SETTLE_MS + 50); await nextTick()
+    vi.advanceTimersByTime(10); await nextTick()                                 // the library's idle half
+    return { vary, before }
+  }
+  const fmtIds = (plans: ({ format: { id: string } | null } | null)[]) => [...new Set(plans.map(p => p?.format?.id ?? null))]
+
+  it('16:9 → video-thumb (1280×720): candidates and library re-plan with the new format', async () => {
+    vi.useFakeTimers()
+    try {
+      const { vary, before } = await run(1280, 720, '16:9', 'video-thumb')
+      expect(fmtIds(before.cands.map(c => c.plan))).toEqual([null])
+      expect(fmtIds(before.lib.filter(i => i.plan).map(i => i.plan))).toEqual([null])
+      expect(vary.candidates.value).not.toBe(before.cands)
+      expect(vary.candidates.value.length).toBeGreaterThan(0)
+      expect(fmtIds(vary.candidates.value.map(c => c.plan))).toEqual(['video-thumb'])
+      for (const c of vary.candidates.value) expect(c.plan.format!.hidden).toEqual(['date', 'caption'])
+      const lib = vary.library.value.filter(i => i.plan)
+      expect(lib.length).toBeGreaterThan(0)
+      expect(fmtIds(lib.map(i => i.plan))).toEqual(['video-thumb'])
+      // Index is built around the smaller text: offered on plain 16:9, not on a video thumbnail.
+      expect(before.lib.some(i => i.id === 'index')).toBe(true)
+      expect(vary.library.value.find(i => i.id === 'index')?.plan ?? null).toBeNull()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('meta-story → pinterest-9x16 (1080×1920): candidates and library re-plan with the new format', async () => {
+    vi.useFakeTimers()
+    try {
+      const { vary, before } = await run(1080, 1920, 'meta-story', 'pinterest-9x16')
+      expect(fmtIds(before.cands.map(c => c.plan))).toEqual(['meta-story'])
+      expect(vary.candidates.value).not.toBe(before.cands)
+      expect(fmtIds(vary.candidates.value.map(c => c.plan))).toEqual(['pinterest-9x16'])
+      expect(fmtIds(vary.library.value.filter(i => i.plan).map(i => i.plan))).toEqual(['pinterest-9x16'])
+      expect(vary.format.value!.label).toBe('Pinterest idea pin · 9:16')
+    } finally { vi.useRealTimers() }
+  })
+
+  it('hiding or showing a line does not re-enumerate (M1)', async () => {
+    vi.useFakeTimers()
+    try {
+      const props = reactive<Record<string, unknown>>({ sailor_localLayers: frameLayers(), sailor_posterState: { patternId: 'statement', seed: 1 } })
+      const editor = { recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn(), writeGroups: vi.fn() }
+      const vary = useLayoutVary({ props: () => props, frameW: () => 895, frameH: () => 1280, connectedSlots: () => [], editor: () => editor, remember: vi.fn(), measure: makeStubMeasure() })
+      const first = vary.candidates.value
+      props.sailor_localLayers = (props.sailor_localLayers as LocalLayer[]).map(l => (l.id === 'c' ? { ...l, visible: false } : l))
+      await nextTick(); vi.advanceTimersByTime(CONTENT_SETTLE_MS + 50); await nextTick()
+      expect(vary.candidates.value).toBe(first)
+    } finally { vi.useRealTimers() }
   })
 })
