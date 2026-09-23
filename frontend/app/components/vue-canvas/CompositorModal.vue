@@ -4316,7 +4316,7 @@ const motionStale = computed(() => {
   return stored.source_key !== motionSourceKey(localLayers.value as LocalLayer[], effectiveMotion.value, W, H)
 })
 
-async function bakeMotion(motionOverride?: FrameMotion) {
+async function bakeMotion(motionOverride?: FrameMotion, opts?: { signal?: AbortSignal; keepPaused?: boolean }) {
   if (baking.value) return
   const node = compositor.value
   if (!node) return
@@ -4339,6 +4339,7 @@ async function bakeMotion(motionOverride?: FrameMotion) {
       () => buildStackItems(), localLayers.value as LocalLayer[], W, H, motion,
       (done, total) => { bakeProgress.value = done / total },
       async (t) => {
+        throwIfAborted(opts?.signal)
         const animated = layers.value.filter(l => l.live && l.live.duration > 0)
         await Promise.all(animated.map(l => pullLiveFrameModal(l, slotPhase01(t, l.live!.duration))))
       },
@@ -4356,12 +4357,13 @@ async function bakeMotion(motionOverride?: FrameMotion) {
       }).catch(() => {})
     }
   } catch (err: any) {
+    if (isAbortError(err)) throw err
     console.error('[compositor motion bake]', err)
     bakeError.value = err?.message || 'Motion bake failed'
   } finally {
     _registerWiredContent(null)
     baking.value = false
-    startLive()
+    if (!opts?.keepPaused) startLive()
   }
 }
 
@@ -4473,8 +4475,7 @@ async function generateVideo() {
       },
       onStatus: t => { videoStatus.value = t },
       serverFallback: async (signal) => {
-        _registerWiredContent(null)   // bakeMotion registers and clears its own
-        await bakeMotion()
+        await bakeMotion(undefined, { signal, keepPaused: true })
         throwIfAborted(signal)
         if (bakeError.value) throw new Error(bakeError.value)
         videoStatus.value = 'Encoding…'
