@@ -25,3 +25,5 @@ A small bridge, `frontend/app/lib/engine/recordEmbed.ts`, so the video recorder 
 ---
 
 _Landed notes (append below):_
+
+- **2026-09-22 — video export plan 2 landed** (`5bc9bc57d`..`b1af3dbba`). `renderCompositeAtTime(t)` in `ArtifactFrameNode.vue` keeps its name and signature but now actually paints at `t` (it used to paint every frame at time 0, so living images and shader fills froze in card videos); nothing outside the card calls it. The editor's motion painter (`prepareMotionFramePainter` in `lib/motion/bake.ts`) gained an optional last argument, `doc: FrameDocPaint` (background, groups, wired treatments, post effects) — your Frame adapter calls `paintLayerStack` directly, so nothing changes for you. `app/lib/engine/recordEmbed.ts` records any embed surface; nothing under `lib/embed/` was changed.
