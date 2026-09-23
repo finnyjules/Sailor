@@ -1,0 +1,2009 @@
+<meta charset="utf-8">
+<title>Layout Pane</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Instrument+Serif&family=Anton&family=Caveat:wght@600&display=swap">
+<style>
+  /* A mock of Sailor's Frame editor, which is dark: this page commits to that one look. */
+  :root {
+    color-scheme: dark;
+    --bg: #0f0f11; --stage: #0a0a0b; --panel: #1a1a1d; --panel2: #222226; --line: #2f2f35;
+    --text: #ececef; --muted: #8e8e98; --faint: #5d5d66; --focus: #ffffff;
+    --sans: "Geist", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  html, body { height: 100%; }
+  body { background: var(--bg); color: var(--text); font: 13px/1.4 var(--sans); padding: 0 16px; padding-block: 16px; }
+  button { font: inherit; color: inherit; }
+  button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  .app { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; height: calc(100% - 0px); }
+  @media (max-width: 880px) { .app { grid-template-columns: 1fr; height: auto; } }
+
+  .left { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .trybar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; font-size: 11.5px; color: var(--muted); }
+  .trybar .lbl { font: 400 10.5px/1 var(--mono); color: var(--faint); text-transform: uppercase; letter-spacing: .06em; }
+  .grp { display: flex; align-items: center; gap: 6px; }
+  .seg { display: inline-flex; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 2px; gap: 2px; }
+  .seg button { background: transparent; border: 0; border-radius: 6px; padding: 5px 9px; font-size: 11.5px; color: var(--muted); cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--panel2); color: var(--text); }
+  .sw { width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--line); cursor: pointer; position: relative; padding: 0; }
+  .sw[aria-pressed="true"] { outline: 2px solid var(--text); outline-offset: 2px; }
+  .sw i { position: absolute; right: 3px; bottom: 3px; width: 7px; height: 7px; border-radius: 2px; }
+
+  .stage { flex: 1; min-height: 440px; background: var(--stage); border: 1px solid var(--line); border-radius: 14px;
+           display: grid; place-items: center; padding: 28px; position: relative; overflow: hidden; }
+  .stage .poster { width: min(100%, calc((100vh - 150px) * var(--arinv, .7))); }
+  .toast { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); background: var(--panel2);
+           border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; font-size: 12px; color: var(--text);
+           opacity: 0; transition: opacity .2s; pointer-events: none; white-space: nowrap; }
+  .toast.on { opacity: 1; }
+
+  .pane { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px;
+          display: flex; flex-direction: column; gap: 10px; overflow: auto; max-height: calc(100vh - 32px); }
+  .tabs { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--bg); border-radius: 9px; padding: 3px; }
+  .tabs span { text-align: center; padding: 6px 0; border-radius: 7px; font-size: 12px; color: var(--faint); }
+  .tabs span.on { background: var(--panel2); color: var(--text); }
+  .card { background: var(--panel2); border-radius: 11px; padding: 12px; display: grid; gap: 12px; }
+  .card h2 { font-size: 13px; font-weight: 600; margin: 0; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .card h2 small { font: 400 11px/1 var(--mono); color: var(--muted); }
+  .did { font-size: 12px; color: var(--muted); margin: -6px 0 0; line-height: 1.4; }
+
+  .vary { display: grid; grid-template-columns: 34px 1fr 34px; gap: 6px; }
+  .vary button { height: 36px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
+  .vary .main { background: #f1f0ec; color: #111; border-color: #f1f0ec; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px; }
+  .vary .main kbd { font: 500 10.5px/1 var(--mono); background: rgb(0 0 0 / .1); border-radius: 4px; padding: 3px 5px; }
+  .vary button:disabled { opacity: .4; cursor: default; }
+  .hint { font-size: 11px; color: var(--faint); margin: -4px 0 0; }
+
+  .choices { display: grid; gap: 10px; }
+  .choice { display: grid; gap: 5px; }
+  .choice .lab { font-size: 11px; color: var(--muted); }
+  .pills { display: flex; flex-wrap: wrap; gap: 4px; }
+  .pill { border: 1px solid var(--line); background: var(--panel); border-radius: 7px; padding: 5px 8px; font-size: 11.5px; color: var(--text);
+          cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pill[aria-pressed="true"] { background: #f1f0ec; color: #111; border-color: #f1f0ec; }
+  .pill:disabled { color: var(--faint); cursor: not-allowed; text-decoration: line-through; }
+
+  .strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .thumb { all: unset; cursor: pointer; border-radius: 4px; display: block; width: 100%; }
+  .thumb .poster { box-shadow: none; }
+  .thumb[aria-current="true"] { outline: 2px solid #f1f0ec; outline-offset: 2px; }
+  .thumb:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .sub { font-size: 11px; color: var(--muted); margin: 0; }
+
+  .lib { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 8px; }
+  .lib .tile { all: unset; cursor: pointer; display: grid; gap: 4px; min-width: 0; }
+  .lib .tile span { font-size: 10.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lib .tile[aria-current="true"] .poster { outline: 2px solid #f1f0ec; outline-offset: 2px; }
+  .lib .tile[aria-current="true"] span { color: var(--text); }
+  .lib .tile:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  /* poster */
+  .poster { container-type: inline-size; position: relative; width: 100%; overflow: hidden; background: var(--field); color: var(--ink); }
+  .poster .el { position: absolute; font-family: var(--sans); margin: 0; }
+  .poster .t { text-box: trim-both cap alphabetic; font-kerning: normal; }
+  @supports not (text-box: trim-both cap alphabetic) { .poster .t { line-height: 0.8 !important; } }
+  .poster .photo { background-size: cover; background-position: center; }
+  .poster .stand { background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--ink) 62%, var(--field)) 0 1.2cqw, color-mix(in srgb, var(--ink) 54%, var(--field)) 1.2cqw 2.4cqw); }
+  .poster .rulel { height: 0; border-top: 0.16cqw solid var(--ink); }
+  .sel select { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 28px 6px 9px; font: 12px var(--sans); }
+  .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .fmtnote { margin: 0; font: 400 11px/1.4 var(--mono); color: var(--muted); }
+  .keepzone { position: absolute; left: 0; right: 0; pointer-events: none; display: grid; place-items: center;
+              background: repeating-linear-gradient(135deg, rgb(0 0 0 / .32) 0 6px, rgb(0 0 0 / .18) 6px 12px);
+              color: #fff; font: 500 11px/1 var(--sans); letter-spacing: .02em; }
+  .lib .none { grid-column: 1 / -1; font-size: 11px; color: var(--faint); margin: 2px 0 0; }
+  .poster .btn { display: flex; align-items: center; justify-content: center; font-family: var(--sans); white-space: nowrap; line-height: 1; }
+  .poster .btn.link { justify-content: flex-start; text-decoration: underline; text-underline-offset: .32em; text-decoration-thickness: .07em; }
+  .poster .logo { display: flex; align-items: center; gap: .5em; font-family: var(--sans); font-weight: 700; letter-spacing: .14em; white-space: nowrap; line-height: 1; }
+  .poster .logo i { width: 1.6em; height: 1.6em; border-radius: 50%; border: .3em solid currentColor; flex: none; box-sizing: border-box; }
+  .facenote[hidden] { display: none; }
+  .poster .stars { display: flex; align-items: center; gap: .08em; line-height: 1; white-space: nowrap; font-family: var(--sans); }
+  .poster .stars span { -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .poster .stars b { font-size: .62em; font-weight: 600; margin-left: .5em; color: var(--ink); }
+  .facenote { font-size: 12px; color: var(--muted); margin: 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; line-height: 1.35; }
+  #probe { position: absolute; left: -10000px; top: 0; width: 320px; }
+  @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+</style>
+
+<div class="app">
+  <section class="left" aria-label="Frame">
+    <div class="trybar">
+      <span class="lbl">Try it with</span>
+      <div class="grp"><div class="seg" id="content">
+        <button type="button" data-v="gallery">Gallery</button>
+        <button type="button" data-v="ad" aria-pressed="true">Product ad</button>
+        <button type="button" data-v="event">Event</button>
+        <button type="button" data-v="quote">Quote</button>
+      </div></div>
+      <div class="grp"><label class="sel"><span class="vh">Format</span><select id="format"></select></label></div>
+      <div class="grp"><div class="seg" id="photo">
+        <button type="button" data-v="0">No image</button>
+        <button type="button" data-v="1" aria-pressed="true">Image</button>
+      </div></div>
+      <div class="grp" id="pal"></div>
+    </div>
+    <div class="stage" id="stage"><div class="toast" id="toast" role="status" aria-live="polite"></div></div>
+    <p class="fmtnote" id="fmtnote"></p>
+  </section>
+
+  <aside class="pane" aria-label="Layout pane">
+    <div class="tabs" aria-hidden="true"><span>Design</span><span>Motion</span><span class="on">Layout</span></div>
+
+    <div class="card">
+      <div class="choice"><span class="lab">Style</span>
+        <div class="pills" id="style" role="group" aria-label="Style">
+          <button type="button" class="pill" data-v="swiss">Swiss</button>
+          <button type="button" class="pill" data-v="performance" aria-pressed="true">Performance</button>
+          <button type="button" class="pill" data-v="editorial">Editorial</button>
+          <button type="button" class="pill" data-v="street">Street</button>
+        </div>
+      </div>
+      <p class="facenote" id="facenote" hidden></p>
+    </div>
+
+    <div class="card">
+      <h2><span id="lname">Layout</span><small id="count"></small></h2>
+      <p class="did" id="did"></p>
+      <div class="vary">
+        <button type="button" id="prev" aria-label="Previous variation">‹</button>
+        <button type="button" class="main" id="next">Vary <kbd>V</kbd></button>
+        <button type="button" id="fwd" aria-label="Next variation">›</button>
+      </div>
+      <p class="hint">Each change applies to the Frame and is one step to undo. ← → step through.</p>
+      <div class="choices" id="choices"></div>
+      <div>
+        <p class="sub" style="margin-bottom:6px">Best variations</p>
+        <div class="strip" id="strip"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2><span>All layouts</span><small id="libcount"></small></h2>
+      <div class="lib" id="lib"></div>
+    </div>
+  </aside>
+</div>
+<div id="probe" aria-hidden="true"></div>
+
+<script>
+(() => {
+  // ═══════════════════════ the kit ═══════════════════════
+  // The sheet comes from the Frame's shape. Layouts are written on a 12-column,
+  // 16-row design grid; X/XR map those columns onto the real column count
+  // (12, 16 or 20) and L maps rows proportionally onto the real height.
+  // Formats: size, the width people actually see it at (sets the minimum text size),
+  // and areas the platform covers with its own interface.
+  const SHAPES = {
+    poster: { label: 'Poster',          px: '895 × 1280',  ar: 1280 / 895,  nc: 12 },
+    post45: { label: 'Post 4:5',        px: '1080 × 1350', ar: 1350 / 1080, nc: 12, view: 390, nativeCTA: true },
+    post11: { label: 'Post 1:1',        px: '1080 × 1080', ar: 1,           nc: 12, view: 390, nativeCTA: true },
+    story:  { label: 'Story 9:16',      px: '1080 × 1920', ar: 1920 / 1080, nc: 12, view: 390, keep: { top: 0.14, bottom: 0.35, side: 0.06 }, nativeCTA: true },
+    thumb:  { label: 'Video thumbnail', px: '1280 × 720',  ar: 720 / 1280,  nc: 16, view: 170, carries: 2, noAction: true },
+    link:   { label: 'Link preview',    px: '1200 × 628',  ar: 628 / 1200,  nc: 16, view: 500, noAction: true },
+    mpu:    { label: 'Ad 300 × 250',    px: '300 × 250',   ar: 250 / 300,   nc: 12, view: 300 },
+    sky:    { label: 'Ad 160 × 600',    px: '160 × 600',   ar: 600 / 160,   nc: 12, view: 160, carries: 3 },
+    leader: { label: 'Ad 728 × 90',     px: '728 × 90',    ar: 90 / 728,    nc: 24, view: 728, carries: 3 },
+  };
+  const W = 100, NR = 16;
+  let H, M, G, NC, CW, RH, GAP, B;
+  const Xr = c => M + (c - 1) * (CW + G);
+  let colA = 1, colB = 12;                             // the real columns the design grid spans
+  const cs = c => colA + Math.round((c - 1) * (colB - colA + 1) / 12);   // design column → real start column
+  const ce = c => colA - 1 + Math.round(c * (colB - colA + 1) / 12);     // design column → real end column
+  const X = c => Xr(cs(c));                            // left edge of design column c
+  const XR = c => Xr(ce(c)) + CW;                      // right edge of design column c
+  const SPAN = (a, b) => XR(b) - X(a);
+  const L = r => M + r * RH;                           // line under design row r; L(0) = top margin
+  function setShape(k, composeH) {
+    const sh = SHAPES[k];
+    const Hfull = 100 * sh.ar;
+    H = composeH ?? Hfull; NC = sh.nc; colA = 1; colB = NC;
+    B = Math.sqrt(W * Hfull) / Math.sqrt(100 * 100 * 1280 / 895); // size unit: 1 on the portrait poster
+    M = Math.min(4, H * 0.06);
+    if (composeH && sh.keep?.side) M = Math.max(M, sh.keep.side * 100);    // the platform's side margins
+    G = 1.6 * B;
+    CW = (W - 2 * M - (NC - 1) * G) / NC;
+    RH = (H - 2 * M) / NR;
+    GAP = RH * 0.5;
+    const floor = sh.view ? 100 * 9 / sh.view : 0;         // at least 9px at the size people see it
+    INFO.size = Math.max(1.95 * B, floor); SECOND.size = Math.max(4.4 * B, INFO.size * 1.6);
+  }
+  const CAP = 0.705;                              // Geist cap height per em
+
+  const DISPLAY = { wt: 600, ls: -0.05, lh: 0.9 };
+  const SECOND  = { size: 4.4, wt: 500, ls: -0.02, lh: 1.04 };
+  const INFO    = { size: 1.95, wt: 400, ls: 0, lh: 1.3 };
+
+  // measurement: width at 100px, with the letter spacing the layout will set
+  const meas = document.createElement('span');
+  meas.style.cssText = 'position:absolute;left:-9999px;top:0;visibility:hidden;white-space:pre;font-size:100px;font-family:' + getComputedStyle(document.body).getPropertyValue('--sans');
+  document.body.appendChild(meas);
+  const cache = new Map();
+  // Measure with canvas text metrics: they work even when the page is not laid out yet
+  // (an embedded viewer can load it hidden, where every box measures zero).
+  const mctx = document.createElement('canvas').getContext('2d');
+  const measure100 = (s, st) => {
+    mctx.font = `${st.wt} 100px ${st.font || getComputedStyle(document.body).getPropertyValue('--sans')}`;
+    return mctx.measureText(s).width + (st.ls || 0) * 100 * Math.max(0, [...s].length - 1);
+  };
+  const SANS_STACK = getComputedStyle(document.body).getPropertyValue('--sans');
+  function w100(s, st) {
+    const k = s + '|' + st.wt + '|' + st.ls + '|' + (st.font || '');
+    if (cache.has(k)) return cache.get(k);
+    meas.style.fontFamily = st.font || SANS_STACK; meas.style.fontWeight = st.wt; meas.style.letterSpacing = (st.ls || 0) + 'em'; meas.textContent = s;
+    const v = measure100(s, st);
+    if (v > 0) cache.set(k, v);                    // never remember a zero
+    return v;
+  }
+  let SCALE = 1, FLIP = false;                        // set per variation by the pane
+  const fitSize = (lines, width, st = DISPLAY) => SCALE * Math.min(...lines.map(l => width * 100 / Math.max(1, w100(l, st))));
+  const blockH = (n, size, lh) => ((n - 1) * lh + CAP) * size;
+  const sizeFor = (lines, width, maxH, st = DISPLAY) => Math.min(fitSize(lines, width, st), SCALE * maxH / ((lines.length - 1) * st.lh + CAP));
+  function breakLines(words, width, size, st) {
+    const out = []; let cur = '';
+    for (const w of words) {
+      const t = cur ? cur + ' ' + w : w;
+      if (cur && w100(t, st) * size / 100 > width) { out.push(cur); cur = w } else cur = t;
+    }
+    if (cur) out.push(cur); return out;
+  }
+  const countLines = (s, width, st, size) => s.split('\n').reduce((a, p) => a + breakLines(p.split(' '), width, size, st).length, 0);
+  function balance(words, n) {
+    const total = words.join(' ').length, target = total / n, out = []; let cur = '';
+    for (const w of words) {
+      const t = cur ? cur + ' ' + w : w;
+      if (cur && out.length < n - 1 && t.length > target * 1.08) { out.push(cur); cur = w } else cur = t;
+    }
+    out.push(cur); return out;
+  }
+
+  // element builders
+  const text = (s, o) => ({ k: 't', s, ...o });
+  const disp = (s, o) => text(s, { wt: DISPLAY.wt, ls: DISPLAY.ls, lh: DISPLAY.lh, font: DISPLAY.font, role: 'title', pre: true, ...o });
+  const sec  = (s, o) => text(s, { size: SECOND.size, wt: SECOND.wt, ls: SECOND.ls, lh: SECOND.lh, role: 'details', ...o });
+  const info = (s, o) => text(s, { size: INFO.size, wt: INFO.wt, ls: INFO.ls || 0, lh: INFO.lh, role: 'info', ...o });
+  const rule = (x, y, w) => ({ k: 'l', x, y, w });
+  // Quote the Frame's own words instead of naming what they might be ("the dates", "the artist").
+  const q = (s, fallback = 'the smaller text') => { if (!s) return fallback; const l = s.split('\n')[0]; return `“${l.length > 20 ? l.slice(0, 19) + '…' : l}”` };
+
+  // information stacked in a column, top-anchored; returns the bottom
+  function infoStack(items, c1, c2, top) {
+    const els = []; let y = top; const w = SPAN(c1, c2);
+    items.forEach((it, i) => {
+      const n = countLines(it.s, w, INFO, INFO.size);
+      els.push(info(it.s, { x: X(c1), w, top: y, wt: it.wt || INFO.wt, role: it.role || 'info' }));
+      y += blockH(n, INFO.size, INFO.lh) + (i < items.length - 1 ? INFO.size * 1.25 : 0);
+    });
+    return { els, bottom: y };
+  }
+  // a row of information blocks sharing one baseline or one cap line
+  function infoRow(c, spec, where) {
+    const els = []; let extent = 0;
+    for (const [key, a, b] of spec) {
+      const s = c[key]; if (!s) continue;
+      const n = countLines(s, SPAN(a, b), INFO, INFO.size);
+      extent = Math.max(extent, blockH(n, INFO.size, INFO.lh));
+      const o = { x: X(a), w: SPAN(a, b), wt: key === 'details' ? 500 : INFO.wt, role: key };
+      if (where === 'foot') o.base = L(16); else o.top = M;
+      els.push(info(s, o));
+    }
+    return { els, top: where === 'foot' ? L(16) - extent : M, bottom: where === 'foot' ? L(16) : M + extent };
+  }
+  const FOOT3 = [['details', 1, 4], ['date', 5, 8], ['caption', 9, 12]];
+  const FOOT2 = [['date', 1, 4], ['caption', 5, 12]];
+
+  // the photo: whole columns, 4:5, the largest that fits the zone
+  const PHOTO_ASPECT = 1.25;
+  function photoIn(z, { ax = 'right', ay = 'top' } = {}) {
+    if (FLIP) ax = ax === 'right' ? 'left' : 'right';
+    const avail = z.bottom - z.top;
+    for (let n = z.c2 - z.c1 + 1; n >= 2; n--) {
+      const w = SPAN(1, n), h = w * PHOTO_ASPECT;
+      if (h <= avail) {
+        const c1 = ax === 'right' ? z.c2 - n + 1 : z.c1;
+        return { k: 'p', x: X(c1), y: ay === 'top' ? z.top : z.bottom - h, w, h, role: 'photo' };
+      }
+    }
+    return { k: 'missing' };
+  }
+
+  function rngFor(seed) {
+    let a = seed >>> 0;
+    return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296 };
+  }
+  const pick = (r, arr) => arr[Math.floor(r() * arr.length)];
+
+  // ═══════════════════════ the 27 layouts ═══════════════════════
+  const P = [];
+  const def = (id, name, fits, needs, fn) => P.push({ id, name, fits, needs, fn });
+  const ALL = ['word', 'phrase', 'sentence'];
+
+  def('runoff', 'Run-off', ALL, null, ({ c, ph, kind, lines, arr = 0 }) => {
+    const base = arr === 2 ? L(12) : L(10);                 // A: right edge · B: left edge · C: lower baseline
+    const ls = kind === 'word' ? [c.title] : lines;
+    const hh = (ls.length - 1) * DISPLAY.lh + CAP;
+    let size = fitSize(ls, (XR(12) + M) * 1.1 - M);
+    size = Math.min(size, (base - (ph ? L(5) : L(1))) / hh);
+    const capTop = base - hh * size;
+    const wpx = Math.max(...ls.map(l => w100(l, DISPLAY))) * size / 100;
+    const els = [disp(ls.join('\n'), arr === 1
+      ? { size, x: XR(12) - wpx + 0.03 * size, w: wpx, align: 'right', base, bleed: true }
+      : { size, x: M - 0.04 * size, base, bleed: true })];
+    els.push(sec(c.details, { x: X(1), w: SPAN(1, 9), top: base + GAP }));
+    els.push(...infoRow(c, FOOT2, 'foot').els);
+    if (ph) els.push(photoIn({ c1: 1, c2: 12, top: M, bottom: capTop - GAP }));
+    return { els, did: `Title fitted to run off the ${arr === 1 ? 'left' : 'right'} edge, baseline on row ${arr === 2 ? 12 : 10}.` };
+  });
+
+  def('statement', 'Statement', ALL, null, ({ c, ph, r, lines }) => {
+    const top = r() < 0.5;
+    const maxH = (ph ? L(8) : L(12)) - M;
+    const size = sizeFor(lines, SPAN(1, 12), maxH);
+    const h = blockH(lines.length, size, DISPLAY.lh);
+    const els = [];
+    if (top) {
+      els.push(disp(lines.join('\n'), { size, x: X(1), top: M }));
+      const f = infoRow(c, FOOT3, 'foot'); els.push(...f.els);
+      if (ph) els.push(photoIn({ c1: 1, c2: 12, top: M + h + GAP, bottom: f.top - GAP }, { ay: 'bottom' }));
+    } else {
+      els.push(disp(lines.join('\n'), { size, x: X(1), base: L(16) }));
+      const hd = infoRow(c, FOOT3, 'head'); els.push(...hd.els);
+      if (ph) els.push(photoIn({ c1: 1, c2: 12, top: hd.bottom + GAP, bottom: L(16) - h - GAP }));
+    }
+    return { els, did: `One word per line, fitted to the margins, ${top ? 'from the top' : 'on the foot'}.` };
+  });
+
+  def('index', 'Index', ALL, null, ({ c, ph, lines }) => {
+    const size = sizeFor(lines, SPAN(1, 8), RH * 5);
+    const tb = M + blockH(lines.length, size, DISPLAY.lh);
+    const els = [disp(lines.join('\n'), { size, x: X(1), top: M })];
+    let y = M;
+    for (const [key, wt] of [['details', 500], ['caption', 400]]) {
+      els.push(rule(X(9), y, SPAN(9, 12)));
+      const n = countLines(c[key], SPAN(9, 12), INFO, INFO.size);
+      els.push(info(c[key], { x: X(9), w: SPAN(9, 12), top: y + INFO.size * 0.9, wt, role: key }));
+      y += INFO.size * 0.9 + blockH(n, INFO.size, INFO.lh) + INFO.size * 1.4;
+    }
+    els.push(rule(X(9), y, SPAN(9, 12)));
+    const dSize = Math.min(fitSize([c.date], SPAN(1, 12)), RH * 2.4 / CAP);
+    els.push(disp(c.date, { size: dSize, x: X(1), base: L(16), color: 'accent', role: 'date' }));
+    if (ph) els.push(photoIn({ c1: 1, c2: 8, top: tb + GAP * 1.5, bottom: L(16) - CAP * dSize - GAP }, { ax: 'left' }));
+    return { els, did: `Title top-left, a ruled table on the right, ${q(c.date)} large at the foot in accent.` };
+  });
+
+  def('shapeCounter', 'Shape counter-form', ALL, { shape: true }, ({ c, ph, kind, lines }) => {
+    const rad = Math.min(SPAN(4, 12), L(10) - M) / 2, cx = XR(12) - rad, cy = M + rad;
+    const els = [{ k: 'c', cx, cy, r: rad, photo: ph, color: 'accent', role: 'shape', ok: true }];
+    const ls = kind === 'sentence' ? lines : [c.title];
+    const hh = (ls.length - 1) * DISPLAY.lh + CAP;
+    const size = Math.min(fitSize(ls, SPAN(1, 12)), RH * (ls.length > 1 ? 6 : 3.4) / hh, (L(14) - cy) / hh);
+    const base = cy + rad * 0.45 + (ls.length - 1) * DISPLAY.lh * size;
+    els.push(disp(ls.join('\n'), { size, x: X(1), base, ok: true, blend: !ph }));
+    els.push(sec(c.details, { x: X(1), w: SPAN(1, 8), top: Math.max(base, cy + rad) + GAP }));
+    els.push(...infoRow(c, FOOT2, 'foot').els);
+    return { els, did: `A circle in ${ph ? 'the photo' : 'accent'}; the title overprints it.` };
+  });
+
+  def('photoBehind', 'Photo behind', ALL, { image: true }, ({ c, ph, lines }) => {
+    const top = L(1.5), h = Math.min(SPAN(3, 12) * PHOTO_ASPECT, L(12) - top), w = h / PHOTO_ASPECT;
+    const els = [{ k: 'p', x: XR(12) - w, y: top, w, h, stand: !ph, role: 'photo', ok: true }];
+    const ls = lines.length > 2 ? lines : [c.title];
+    const size = Math.min(fitSize(ls, SPAN(1, 12)), RH * 3.2 / CAP);
+    const base = top + CAP * size * 0.5 + (ls.length - 1) * DISPLAY.lh * size;
+    els.push(disp(ls.join('\n'), { size, x: X(1), base, ok: true }));
+    els.push(sec(c.details, { x: XR(12) - w, w, top: top + h + GAP }));
+    els.push(...infoRow(c, FOOT2, 'foot').els);
+    return { els, did: 'The photo sits under the title; the title crosses its top edge on purpose.' };
+  });
+
+  def('fullBleed', 'Full bleed', ALL, { image: true }, ({ c, ph, lines }) => {
+    const w = Math.max(W, H / PHOTO_ASPECT), h = w * PHOTO_ASPECT;
+    const els = [{ k: 'p', x: (W - w) / 2, y: (H - h) / 2, w, h, stand: !ph, role: 'photo', ok: true, bleed: true }];
+    const size = sizeFor(lines, SPAN(1, 12), RH * 5);
+    els.push(disp(lines.join('\n'), { size, x: X(1), base: L(16), color: 'field' }));
+    const hd = infoRow(c, FOOT3, 'head');
+    hd.els.forEach(e => e.color = 'field'); els.push(...hd.els);
+    return { els, did: 'The photo covers the page; title and information overprint it in the field colour.' };
+  });
+
+  def('tilt', 'Tilt', ALL, null, ({ c, ph, kind, lines }) => {
+    const len = L(16) - M;
+    const ls = kind === 'sentence' ? lines : [c.title];
+    const hh = (ls.length - 1) * DISPLAY.lh + CAP;
+    const size = Math.min(fitSize(ls, len), SPAN(1, 7) / hh);
+    const cap = hh * size;
+    const k = Math.max(...ls.map(l => w100(l, DISPLAY))) / 100 * size;
+    const els = [disp(ls.join('\n'), { size, x: M, top: L(16), rot: -90, origin: 'top left', w: k })];
+    let sc = 1; while (sc < 12 && X(sc) < M + cap + G) sc++;
+    sc = Math.min(sc, 9);
+    els.push(sec(c.details, { x: X(sc), w: SPAN(sc, 12), top: M }));
+    const dn = countLines(c.details, SPAN(sc, 12), SECOND, SECOND.size);
+    const dBottom = M + blockH(dn, SECOND.size, SECOND.lh);
+    const st = infoStack([{ s: c.date, role: 'date' }, { s: c.caption, role: 'caption' }], sc, 12, 0);
+    const stH = st.bottom;
+    st.els.forEach(e => { e.top += L(16) - stH });
+    els.push(...st.els);
+    if (ph) els.push(photoIn({ c1: sc, c2: 12, top: dBottom + GAP, bottom: L(16) - stH - GAP }));
+    return { els, did: 'Title turned to run up the left edge; everything else hangs from the next free column.' };
+  });
+
+  def('bottomHeavy', 'Bottom-heavy', ALL, null, ({ c, ph, lines }) => {
+    const maxH = L(16) - (ph ? L(9) : L(5));
+    const size = sizeFor(lines, SPAN(1, 12), maxH);
+    const capTop = L(16) - blockH(lines.length, size, DISPLAY.lh);
+    const els = [disp(lines.join('\n'), { size, x: X(1), base: L(16) })];
+    els.push(sec(c.details, { x: X(1), w: SPAN(1, 8), top: M }));
+    const dn = countLines(c.details, SPAN(1, 8), SECOND, SECOND.size);
+    const st = infoStack([{ s: c.date, role: 'date' }, { s: c.caption, role: 'caption' }], 9, 12, M);
+    els.push(...st.els);
+    const headBottom = Math.max(M + blockH(dn, SECOND.size, SECOND.lh), st.bottom);
+    if (ph) els.push(photoIn({ c1: 1, c2: 12, top: headBottom + GAP, bottom: capTop - GAP }, { ax: 'left' }));
+    return { els, did: 'Title owns the lower half; the small texts wait at the top.' };
+  });
+
+  def('fourCorners', 'Four corners', ALL, null, ({ c, ph, lines }) => {
+    const maxH = ph ? L(12) - L(8) : L(12) - L(3);
+    const size = sizeFor(lines, SPAN(1, 10), maxH);
+    const base = L(12);
+    const capTop = base - blockH(lines.length, size, DISPLAY.lh);
+    const els = [disp(lines.join('\n'), { size, x: X(1), base })];
+    els.push(sec(c.details, { x: X(1), w: SPAN(1, 6), top: M }));
+    const dn = countLines(c.details, SPAN(1, 6), SECOND, SECOND.size);
+    els.push(info(c.date, { x: X(9), w: SPAN(9, 12), top: M, role: 'date' }));
+    els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: L(16), role: 'caption' }));
+    if (ph) els.push(photoIn({ c1: 1, c2: 12, top: M + blockH(dn, SECOND.size, SECOND.lh) + GAP, bottom: capTop - GAP }));
+    return { els, did: 'Title flush-left mid-page; the small texts pinned to three corners of the grid.' };
+  });
+
+  def('spacedLines', 'Spaced lines', ['phrase', 'sentence'], null, ({ c, ph, words }) => {
+    const n = words.length;
+    const total = L(16) - M;
+    const size = Math.min(fitSize(words, SPAN(1, 9)), total / (n * CAP * 1.35));
+    const cap = CAP * size;
+    const els = [];
+    words.forEach((w, i) => {
+      const base = n === 1 ? L(16) : M + cap + i * (total - cap) / (n - 1);
+      els.push(disp(w, { size, x: X(1), base, role: i ? 'title' + i : 'title' }));
+    });
+    const st = infoStack([{ s: c.details, wt: 500, role: 'details' }, { s: c.date, role: 'date' }, { s: c.caption, role: 'caption' }], 10, 12, M);
+    els.push(...st.els);
+    if (ph) els.push(photoIn({ c1: 10, c2: 12, top: st.bottom + GAP * 2, bottom: L(16) }, { ay: 'bottom' }));
+    return { els, did: 'Each word on its own line, the lines spread from the top margin to the foot.' };
+  });
+
+  def('ragged', 'Ragged', ['phrase', 'sentence'], null, ({ c, ph, r, words }) => {
+    const starts = words.map((_, i) => i === 0 ? 1 : pick(r, [1, 3, 4, 5, 7]));
+    const maxH = ph ? L(13) - L(7) : L(13) - M;
+    let size = Math.min(...words.map((w, i) => SPAN(starts[i], 12) * 100 / w100(w, DISPLAY)));
+    size = Math.min(size, maxH / ((words.length - 1) * DISPLAY.lh + CAP));
+    const lastBase = L(13);
+    const firstBase = lastBase - (words.length - 1) * DISPLAY.lh * size;
+    const els = words.map((w, i) => disp(w, { size, x: X(starts[i]), base: firstBase + i * DISPLAY.lh * size, role: i ? 'title' + i : 'title' }));
+    const f = infoRow(c, FOOT3, 'foot'); els.push(...f.els);
+    if (ph) els.push(photoIn({ c1: 1, c2: 12, top: M, bottom: firstBase - CAP * size - GAP }));
+    return { els, did: `Lines start on different columns (${starts.join(', ')}), set on one baseline rhythm.` };
+  });
+
+  def('edges', 'Edges', ['phrase', 'sentence'], null, ({ c, ph, words }) => {
+    const n = words.length;
+    const f = infoRow(c, FOOT3, 'foot');
+    const top = ph ? L(8) : M, bottom = f.top - GAP * 1.5;
+    const size = Math.min(fitSize(words, SPAN(1, 9)), (bottom - top) / (n * CAP * 1.3));
+    const cap = CAP * size;
+    const els = words.map((w, i) => {
+      const base = n === 1 ? bottom : top + cap + i * (bottom - top - cap) / (n - 1);
+      return disp(w, { size, x: X(1), w: SPAN(1, 12), align: i % 2 ? 'right' : 'left', base, role: i ? 'title' + i : 'title' });
+    });
+    els.push(...f.els);
+    if (ph) els.push(photoIn({ c1: 1, c2: 12, top: M, bottom: top - GAP }, { ax: 'right' }));
+    return { els, did: 'Words pushed to alternate margins and spread from top to foot.' };
+  });
+
+  def('staircase', 'Staircase', ['phrase', 'sentence'], null, ({ c, ph, words }) => {
+    const n = words.length;
+    const step = n > 1 ? Math.max(1, Math.min(4, Math.floor(8 / (n - 1)))) : 0;
+    const starts = words.map((_, i) => 1 + i * step);
+    const maxH = (ph ? L(11) : L(14)) - M;
+    let size = Math.min(...words.map((w, i) => SPAN(starts[i], 12) * 100 / w100(w, DISPLAY)));
+    size = Math.min(size, maxH / ((n - 1) * DISPLAY.lh + CAP));
+    const bases = words.map((_, i) => M + CAP * size + i * DISPLAY.lh * size);
+    const els = words.map((w, i) => disp(w, { size, x: X(starts[i]), base: bases[i], role: i ? 'title' + i : 'title' }));
+    const f = infoRow(c, FOOT3, 'foot'); els.push(...f.els);
+    if (ph) els.push(photoIn({ c1: 1, c2: 12, top: bases[n - 1] + GAP, bottom: f.top - GAP }, { ax: 'left', ay: 'bottom' }));
+    return { els, did: `Each word steps ${step} column${step > 1 ? 's' : ''} to the right.` };
+  });
+
+  def('block', 'Block', ['phrase', 'sentence'], null, ({ c, ph, words }) => {
+    const target = (ph ? L(8) : L(12)) - M;
+    let size = fitSize([words.reduce((a, b) => w100(a, DISPLAY) > w100(b, DISPLAY) ? a : b)], SPAN(1, 12));
+    let lines;
+    for (; size > 2; size *= 0.97) {
+      lines = breakLines(words, SPAN(1, 12), size, DISPLAY);
+      if (blockH(lines.length, size, DISPLAY.lh) <= target) break;
+    }
+    const els = lines.map((l, i) => disp(l, { size, x: X(1), w: SPAN(1, 12), base: M + CAP * size + i * DISPLAY.lh * size, just: lines.length > 1 && l.includes(' '), role: i ? 'title' + i : 'title' }));
+    const bottom = M + blockH(lines.length, size, DISPLAY.lh);
+    const f = infoRow(c, FOOT3, 'foot'); els.push(...f.els);
+    if (ph) els.push(photoIn({ c1: 1, c2: 12, top: bottom + GAP * 1.5, bottom: f.top - GAP }, { ay: 'bottom' }));
+    return { els, did: 'The title set as one justified block across all 12 columns.' };
+  });
+
+  def('knockout', 'Knockout', ALL, { shape: true }, ({ c, ph, lines }) => {
+    const bandTop = ph ? L(9) : L(5), bandBot = ph ? L(14) : L(11);
+    const pad = RH * 0.6;
+    const ls = lines.length > 2 ? lines : [c.title];
+    const size = sizeFor(ls, SPAN(1, 12), bandBot - bandTop - 2 * pad);
+    const els = [{ k: 'r', x: 0, y: bandTop, w: XR(12) + M, h: bandBot - bandTop, color: 'ink', role: 'shape', ok: true, bleed: true }];
+    els.push(disp(ls.join('\n'), { size, x: X(1), base: bandBot - pad, color: 'field', ok: true }));
+    els.push(sec(c.details, { x: X(1), w: SPAN(1, 8), top: M }));
+    const dn = countLines(c.details, SPAN(1, 8), SECOND, SECOND.size);
+    els.push(info(c.date, { x: X(9), w: SPAN(9, 12), top: M, role: 'date' }));
+    els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: L(16), role: 'caption' }));
+    if (ph) els.push(photoIn({ c1: 1, c2: 12, top: M + blockH(dn, SECOND.size, SECOND.lh) + GAP, bottom: bandTop - GAP }));
+    return { els, did: 'A full-width band in the ink colour; the title reversed out of it.' };
+  });
+
+  def('shapeBleed', 'Bleed', ALL, { shape: true }, ({ c, ph, lines }) => {
+    const cy = L(4), rad = Math.min(W * 0.5, L(9) - cy), cx = W - rad * 0.4;
+    const els = [{ k: 'c', cx, cy, r: rad, photo: ph, color: 'accent', role: 'shape', bleed: true }];
+    els.push(sec(c.details, { x: X(1), w: SPAN(1, 3), top: M }));
+    const base = L(14);
+    const size = sizeFor(lines, SPAN(1, 12), base - (cy + rad) - GAP * 1.5);
+    els.push(disp(lines.join('\n'), { size, x: X(1), base }));
+    els.push(...infoRow(c, FOOT2, 'foot').els);
+    return { els, did: `A circle ${ph ? 'of photo ' : ''}bleeds off the top and right; the title takes the lower third.` };
+  });
+
+  def('badge', 'Badge', ALL, { shape: true }, ({ c, ph, lines }) => {
+    const rad = Math.min(SPAN(9, 12), L(5) - M) / 2, cx = XR(12) - rad, cy = M + rad;
+    const els = [{ k: 'c', cx, cy, r: rad, color: 'ink', role: 'shape', ok: true }];
+    const dn = countLines(c.date, rad * 1.4, INFO, INFO.size);
+    const dh = blockH(dn, INFO.size, INFO.lh);
+    els.push(info(c.date, { x: cx - rad * 0.7, w: rad * 1.4, top: cy - dh / 2, align: 'center', color: 'field', role: 'date', ok: true, wt: 500, inside: 'shape' }));
+    els.push(sec(c.details, { x: X(1), w: SPAN(1, 7), top: M }));
+    const detB = M + blockH(countLines(c.details, SPAN(1, 7), SECOND, SECOND.size), SECOND.size, SECOND.lh);
+    const base = L(14);
+    const size = sizeFor(lines, SPAN(1, 12), base - (ph ? L(9) : cy + rad + GAP));
+    els.push(disp(lines.join('\n'), { size, x: X(1), base }));
+    els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: L(16), role: 'caption' }));
+    const capTop = base - blockH(lines.length, size, DISPLAY.lh);
+    if (ph) els.push(photoIn({ c1: 1, c2: 8, top: detB + GAP, bottom: capTop - GAP }, { ax: 'left' }));
+    return { els, did: `${q(c.date)} in a small round badge, top right; the title large below.` };
+  });
+
+  def('split', 'Split', ALL, { image: true }, ({ c, ph, lines }) => {
+    const w = W, h = W * PHOTO_ASPECT, bottom = L(8);
+    const els = [{ k: 'p', x: 0, y: bottom - h, w, h, stand: !ph, role: 'photo', bleed: true }];
+    els.push(sec(c.details, { x: X(1), w: SPAN(1, 8), top: bottom + GAP }));
+    const dB = bottom + GAP + blockH(countLines(c.details, SPAN(1, 8), SECOND, SECOND.size), SECOND.size, SECOND.lh);
+    const f = infoRow(c, FOOT2, 'foot'); els.push(...f.els);
+    const base = f.top - GAP * 1.5;
+    const size = sizeFor(lines, SPAN(1, 12), base - dB - GAP);
+    els.push(disp(lines.join('\n'), { size, x: X(1), base }));
+    return { els, did: 'The photo takes the upper half, cropped by the page edge; type the lower.' };
+  });
+
+  def('diagonal', 'Diagonal', ALL, null, ({ c, ph, r, lines }) => {
+    const deg = pick(r, [-18, -26, -36]), a = Math.abs(deg) * Math.PI / 180;
+    const hd = [sec(c.details, { x: X(1), w: SPAN(1, 8), top: M })];
+    hd.push(info(c.date, { x: X(9), w: SPAN(9, 12), top: M, role: 'date' }));
+    const headB = M + blockH(countLines(c.details, SPAN(1, 8), SECOND, SECOND.size), SECOND.size, SECOND.lh);
+    const foot = info(c.caption, { x: X(1), w: SPAN(1, 6), base: L(16), role: 'caption' });
+    const footTop = L(16) - blockH(countLines(c.caption, SPAN(1, 6), INFO, INFO.size), INFO.size, INFO.lh);
+    const els = [...hd, foot];
+    let zTop = headB + GAP;
+    if (ph) {
+      const p = photoIn({ c1: 1, c2: 12, top: headB + GAP, bottom: headB + GAP + (footTop - headB) * 0.42 }, { ax: 'left' });
+      els.push(p); if (p.k === 'p') zTop = p.y + p.h + GAP;
+    }
+    const zH = footTop - GAP - zTop;
+    const k = Math.max(...lines.map(l => w100(l, DISPLAY))) / 100;
+    const hh = (lines.length - 1) * DISPLAY.lh + CAP;
+    const size = Math.min(SPAN(1, 12) / (k * Math.cos(a) + hh * Math.sin(a)), zH / (k * Math.sin(a) + hh * Math.cos(a)));
+    const len = k * size, bh = hh * size;
+    const cx = (X(1) + XR(12)) / 2, cy = zTop + zH / 2;
+    els.push(disp(lines.join('\n'), { size, x: cx - len / 2, top: cy - bh / 2, w: len, rot: deg, origin: 'center' }));
+    return { els, did: `Title rotated ${Math.abs(deg)}° as one block, kept inside the free band.` };
+  });
+
+  def('wall', 'Wall', ['phrase', 'sentence'], null, ({ c, ph, words, kind }) => {
+    const lines = kind === 'phrase' ? words : balance(words, 4);
+    const f = infoRow(c, FOOT3, 'foot');
+    const avail = (ph ? L(9) : f.top - GAP) - M;
+    const gapL = RH * 0.28;
+    let sizes = lines.map(l => fitSize([l], SPAN(1, 12)));
+    const capSum = sizes.reduce((a, s) => a + CAP * s, 0);
+    const need = capSum + gapL * (lines.length - 1);
+    if (need > avail) { const fct = (avail - gapL * (lines.length - 1)) / capSum; sizes = sizes.map(s => s * fct) }
+    const els = []; let y = M;
+    lines.forEach((l, i) => { els.push(disp(l, { size: sizes[i], x: X(1), top: y, role: i ? 'title' + i : 'title' })); y += CAP * sizes[i] + gapL });
+    els.push(...f.els);
+    if (ph) els.push(photoIn({ c1: 1, c2: 12, top: y - gapL + GAP, bottom: f.top - GAP }, { ay: 'bottom' }));
+    return { els, did: 'Every line fitted to the full width at its own size, stacked into a wall.' };
+  });
+
+  def('scatter', 'Scatter', ['word', 'phrase'], null, ({ c, ph, r }) => {
+    const letters = [...c.title.replace(/\s+/g, '')];
+    const cells = [];
+    for (let j = 0; j < 7; j++) for (let i = 0; i < 4; i++) {
+      if (ph && i >= 2 && j < 4) continue;
+      cells.push({ i, j });
+    }
+    const chosen = cells.map(cc => ({ cc, v: r() })).sort((a, b) => a.v - b.v).slice(0, Math.min(letters.length, cells.length))
+      .map(o => o.cc).sort((a, b) => a.j - b.j || a.i - b.i);
+    const size = Math.min(fitSize(['W'], SPAN(1, 3) * 0.95), 2 * RH * 0.82 / CAP);
+    const els = chosen.map((cc, n) => disp(letters[n], { size, x: X(cc.i * 3 + 1), top: L(cc.j * 2), role: 'title' + n }));
+    els.push(...infoRow(c, FOOT3, 'foot').els);
+    if (ph) els.push(photoIn({ c1: 7, c2: 12, top: M, bottom: L(8) - GAP }));
+    return { els, did: 'Letters dealt into a 4 × 7 module grid, still in reading order.' };
+  });
+
+  def('cascade', 'Cascade', ['word'], null, ({ c, ph }) => {
+    const letters = [...c.title];
+    const n = letters.length;
+    const step = n > 1 ? Math.max(1, Math.min(3, Math.floor(10 / (n - 1)))) : 0;
+    const starts = letters.map((_, i) => Math.min(12, 1 + i * step));
+    const avail = (ph ? L(10) : L(15) - GAP) - M;
+    const size = Math.min(avail / ((n - 1) * DISPLAY.lh + CAP), fitSize(['W'], SPAN(starts[n - 1], 12)));
+    const bases = letters.map((_, i) => M + CAP * size + i * DISPLAY.lh * size);
+    const els = letters.map((l, i) => disp(l, { size, x: X(starts[i]), base: bases[i], role: 'title' + i }));
+    const f = infoRow(c, FOOT3, 'foot'); els.push(...f.els);
+    if (ph) els.push(photoIn({ c1: 1, c2: Math.max(2, starts[n - 1] - 1), top: bases[Math.max(0, n - 2)] + GAP, bottom: f.top - GAP }, { ax: 'left', ay: 'bottom' }));
+    return { els, did: `One letter per line, each ${step} column${step > 1 ? 's' : ''} further right.` };
+  });
+
+  def('ring', 'Ring', ['word'], null, ({ c, ph }) => {
+    const unit = c.title + ' — ';
+    const outer = Math.min(SPAN(1, 12), L(12) - M) / 2;
+    let size = 10;
+    for (let i = 0; i < 4; i++) { const R = outer - CAP * size; size = Math.min(2 * Math.PI * R / (3 * w100(unit, DISPLAY) / 100), R * 0.4 / CAP) }
+    const R = outer - CAP * size, cx = W / 2, cy = M + outer;
+    const els = [{ k: 'ring', cx, cy, R, size, s: unit.repeat(3), role: 'title' }];
+    if (ph) els.push({ k: 'c', cx, cy, r: R - GAP, photo: true, role: 'photo', ok: true });
+    else els.push(sec(c.details, { x: cx - R * 0.7, w: R * 1.4, top: cy - SECOND.size * CAP / 2, align: 'center', ok: true }));
+    const below = cy + outer + GAP;
+    if (ph) els.push(sec(c.details, { x: X(1), w: SPAN(1, 8), top: below }));
+    els.push(...infoRow(c, FOOT2, 'foot').els);
+    return { els, did: 'The word repeated three times around a ring that fills the width.' };
+  });
+
+  def('cells', 'Cells', ['word', 'phrase'], null, ({ c, ph }) => {
+    const letters = [...c.title.replace(/\s+/g, '')];
+    const n = letters.length;
+    const f = infoRow(c, FOOT3, 'foot');
+    const avail = (ph ? L(9) : f.top - GAP) - M;
+    let best = null;
+    for (const p of [2, 3, 4, 6]) {
+      const cellW = SPAN(1, 12 / p), rows = Math.ceil(n / p);
+      const cellH = Math.min(cellW * 1.15, avail / rows);
+      const size = Math.min(fitSize(['W'], cellW * 0.8), (cellH - RH * 0.5) / CAP);
+      if (!best || size > best.size) best = { p, cellW, cellH, rows, size };
+    }
+    const { p, cellH, size } = best;
+    const els = [];
+    letters.forEach((l, k) => {
+      const i = k % p, j = Math.floor(k / p);
+      const y = M + j * cellH;
+      if (i === 0) els.push(rule(X(1), y, SPAN(1, 12)));
+      els.push(disp(l, { size, x: X(i * (12 / p) + 1), top: y + RH * 0.35, role: 'title' + k }));
+    });
+    const gridB = M + best.rows * cellH;
+    els.push(rule(X(1), gridB, SPAN(1, 12)));
+    els.push(...f.els);
+    if (ph) els.push(photoIn({ c1: 1, c2: 12, top: gridB + GAP, bottom: f.top - GAP }, { ay: 'bottom' }));
+    return { els, did: `Letters in ruled cells, ${p} to a row.` };
+  });
+
+  def('kicker', 'Kicker', ['phrase'], null, ({ c, ph }) => {
+    const base = ph ? L(13) : L(9);
+    const size = Math.min(fitSize([c.title], SPAN(1, 12)), RH * 3 / CAP);
+    const capTop = base - CAP * size;
+    const eyeBase = capTop - RH * 0.6;
+    const els = [disp(c.title, { size, x: X(1), base })];
+    els.push(info(c.details, { x: X(1), w: SPAN(1, 8), base: eyeBase, wt: 500, role: 'details' }));
+    els.push(...infoRow(c, FOOT2, 'foot').els);
+    if (ph) els.push(photoIn({ c1: 1, c2: 12, top: M, bottom: eyeBase - INFO.size * CAP - GAP }));
+    return { els, did: 'A small eyebrow tight above a one-line title, both flush-left.' };
+  });
+
+  def('sidebar', 'Sidebar', ['phrase', 'sentence'], null, ({ c, ph, lines }) => {
+    const maxH = (ph ? L(8) : L(16)) - M;
+    const size = sizeFor(lines, SPAN(1, 8), maxH);
+    const els = [disp(lines.join('\n'), { size, x: X(1), top: M })];
+    const st = infoStack([{ s: c.details, wt: 500, role: 'details' }, { s: c.date, role: 'date' }, { s: c.caption, role: 'caption' }], 10, 12, M);
+    els.push(...st.els);
+    const tb = M + blockH(lines.length, size, DISPLAY.lh);
+    if (ph) els.push(photoIn({ c1: 1, c2: 8, top: tb + GAP, bottom: L(16) }, { ax: 'left', ay: 'bottom' }));
+    return { els, did: 'Title in eight columns; information in the last three, from the same cap line.' };
+  });
+
+  def('footer', 'Footer', ALL, null, ({ c, ph, lines }) => {
+    const maxH = (ph ? L(7) : L(14)) - M;
+    const size = sizeFor(lines, SPAN(1, 12), maxH);
+    const els = [disp(lines.join('\n'), { size, x: X(1), top: M })];
+    const f = infoRow(c, FOOT3, 'foot'); els.push(...f.els);
+    const tb = M + blockH(lines.length, size, DISPLAY.lh);
+    if (ph) els.push(photoIn({ c1: 1, c2: 12, top: tb + GAP, bottom: f.top - GAP }, { ay: 'bottom' }));
+    return { els, did: 'Title from the top margin; the smaller text in three columns on the foot line.' };
+  });
+
+  // ─────────── new photo-led layouts ───────────
+  const defNew = (id, name, fn) => { def(id, name, ALL, { image: true }, fn); P[P.length - 1].isNew = true };
+  const cover = ph => { const w = Math.max(W, H / PHOTO_ASPECT), h = w * PHOTO_ASPECT; return { k: 'p', x: (W - w) / 2, y: (H - h) / 2, w, h, stand: !ph, role: 'photo', ok: true, bleed: true } };
+  function infoRowAt(c, spec, base) {
+    const els = []; let extent = 0;
+    for (const [key, a, b] of spec) {
+      const s = c[key]; if (!s) continue;
+      extent = Math.max(extent, blockH(countLines(s, SPAN(a, b), INFO, INFO.size), INFO.size, INFO.lh));
+      els.push(info(s, { x: X(a), w: SPAN(a, b), base, wt: key === 'details' ? 500 : INFO.wt, role: key }));
+    }
+    return { els, top: base - extent };
+  }
+  function stackBottom(items, c1, c2, bottom) {
+    const st = infoStack(items, c1, c2, 0);
+    st.els.forEach(e => { e.top += bottom - st.bottom });
+    return { els: st.els, top: bottom - st.bottom };
+  }
+
+  defNew('plate', 'Plate', ({ c, ph, lines }) => {
+    const h = Math.min(SPAN(1, 9) * PHOTO_ASPECT, L(10) - M), w = h / PHOTO_ASPECT;
+    const els = [{ k: 'p', x: X(1), y: M, w, h, stand: !ph, role: 'photo' }];
+    els.push(...infoStack([{ s: c.details, wt: 500, role: 'details' }, { s: c.date, role: 'date' }, { s: c.caption, role: 'caption' }], 10, 12, M).els);
+    const top = M + h + GAP * 1.5;
+    const size = sizeFor(lines, SPAN(1, 12), L(16) - top);
+    els.push(disp(lines.join('\n'), { size, x: X(1), top }));
+    return { els, did: 'Like a museum plate: the image in nine columns, the smaller text in a column beside it, the title underneath.' };
+  });
+
+  defNew('panel', 'Panel', ({ c, ph, lines }) => {
+    const els = [cover(ph)];
+    const px = XR(8) + M, py = L(9);
+    els.push({ k: 'r', x: 0, y: py, w: px, h: H - py, color: 'field', role: 'panel', ok: true, bleed: true });
+    const f = infoRowAt(c, [['details', 1, 4], ['date', 5, 8]], L(16));
+    els.push(...f.els);
+    const top = py + M;
+    const size = sizeFor(lines, SPAN(1, 8), f.top - GAP * 1.5 - top);
+    els.push(disp(lines.join('\n'), { size, x: X(1), top }));
+    els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), top: M, color: 'field', role: 'caption' }));
+    return { els, did: 'The photo covers the page; a solid panel in the field colour holds the type in the lower left.' };
+  });
+
+  defNew('sideSplit', 'Side split', ({ c, ph, words, lines, kind }) => {
+    const els = [cover(ph)];
+    const px = XR(5) + G / 2;
+    els.push({ k: 'r', x: px, y: 0, w: W - px, h: H, color: 'field', role: 'panel', ok: true, bleed: true });
+    const st = stackBottom([{ s: c.details, wt: 500, role: 'details' }, { s: c.date, role: 'date' }, { s: c.caption, role: 'caption' }], 7, 12, L(16));
+    els.push(...st.els);
+    const ls = kind === 'word' ? lines : words;
+    const size = sizeFor(ls, SPAN(7, 12), st.top - GAP * 2 - M);
+    els.push(disp(ls.join('\n'), { size, x: X(7), top: M }));
+    return { els, did: 'The page split down the middle: photo on the left, type on a solid right half.' };
+  });
+
+  defNew('cross', 'Cross', ({ c, ph, kind, lines }) => {
+    const top = L(3), h = Math.min(SPAN(4, 9) * PHOTO_ASPECT, L(14) - top), w = h / PHOTO_ASPECT;
+    const els = [{ k: 'p', x: (X(4) + XR(9) - w) / 2, y: top, w, h, stand: !ph, role: 'photo', ok: true }];
+    const ls = kind === 'sentence' ? lines : [c.title];
+    const hh = (ls.length - 1) * DISPLAY.lh + CAP;
+    const size = Math.min(fitSize(ls, W * 1.1 - M), RH * 4.5 / hh, (top + h * 0.62 - L(1.5)) / hh);
+    const base = top + h * 0.62 + (ls.length - 1) * DISPLAY.lh * size * 0.5;
+    els.push(disp(ls.join('\n'), { size, x: M - 0.04 * size, base, bleed: true, ok: true }));
+    els.push(sec(c.details, { x: X(1), w: SPAN(1, 8), top: M }));
+    els.push(info(c.date, { x: X(9), w: SPAN(9, 12), top: M, role: 'date' }));
+    els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: L(16), role: 'caption' }));
+    return { els, did: 'A small centred photo; the title runs across it and off the right edge.' };
+  });
+
+  defNew('overlap', 'Overlap', ({ c, ph, lines }) => {
+    const top = L(2), h = Math.min((W - X(5)) * PHOTO_ASPECT, L(14) - top), w = h / PHOTO_ASPECT, x = W - w;
+    const els = [{ k: 'p', x, y: top, w, h, stand: !ph, role: 'photo', ok: true, bleed: true }];
+    const size = sizeFor(lines, SPAN(1, 8), RH * 6);
+    const base = top + h * 0.55;
+    els.push(disp(lines.join('\n'), { size, x: X(1), base, ok: true }));
+    els.push(sec(c.details, { x: X(1), w: SPAN(1, 4), top: M }));
+    els.push(info(c.date, { x: X(9), w: SPAN(9, 12), top: M, role: 'date' }));
+    els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: L(16), role: 'caption' }));
+    return { els, did: 'The photo bleeds off the right edge; the title steps onto its left side.' };
+  });
+
+  defNew('stamp', 'Stamp', ({ c, ph, lines }) => {
+    const h = Math.min(SPAN(10, 12) * PHOTO_ASPECT, L(5) - M), w = h / PHOTO_ASPECT;
+    const els = [{ k: 'p', x: XR(12) - w, y: M, w, h, stand: !ph, role: 'photo' }];
+    els.push(sec(c.details, { x: X(1), w: SPAN(1, 8), top: M }));
+    const f = infoRow(c, [['date', 1, 4], ['caption', 5, 12]], 'foot'); els.push(...f.els);
+    const base = f.top - GAP * 1.5;
+    const size = sizeFor(lines, SPAN(1, 12), base - (M + h + GAP * 1.5));
+    els.push(disp(lines.join('\n'), { size, x: X(1), base }));
+    return { els, did: 'The photo small, like a stamp in the top-right module; the title takes the page.' };
+  });
+
+  defNew('column', 'Column', ({ c, ph, kind, words, lines }) => {
+    const st0 = infoStack([{ s: c.details, wt: 500, role: 'details' }, { s: c.date, role: 'date' }, { s: c.caption, role: 'caption' }], 1, 4, 0);
+    const h = Math.min(SPAN(1, 4) * PHOTO_ASPECT, L(16) - M - st0.bottom - GAP), w = h / PHOTO_ASPECT;
+    const els = [{ k: 'p', x: X(1), y: M, w, h, stand: !ph, role: 'photo' }];
+    els.push(...infoStack([{ s: c.details, wt: 500, role: 'details' }, { s: c.date, role: 'date' }, { s: c.caption, role: 'caption' }], 1, 4, M + h + GAP).els);
+    const ls = kind === 'word' ? lines : words;
+    const size = sizeFor(ls, SPAN(6, 12), L(16) - M);
+    els.push(disp(ls.join('\n'), { size, x: X(6), top: M }));
+    return { els, did: 'Photo in the first four columns; the title hangs from the same top line beside it.' };
+  });
+
+  defNew('rising', 'Rising', ({ c, ph, lines }) => {
+    const top = L(9), w = W, h = W * PHOTO_ASPECT;
+    const els = [{ k: 'p', x: 0, y: top, w, h, stand: !ph, role: 'photo', bleed: true }];
+    const row = infoRowAt(c, FOOT3, top - GAP);
+    els.push(...row.els);
+    const size = sizeFor(lines, SPAN(1, 12), row.top - GAP * 1.5 - M);
+    els.push(disp(lines.join('\n'), { size, x: X(1), top: M }));
+    return { els, did: 'Type from the top margin; the photo rises from the bottom edge.' };
+  });
+
+  // ─────────── overlap family: the main elements cross on purpose ───────────
+  const defOver = (id, name, fits, needs, fn) => { def(id, name, fits, needs, fn); Object.assign(P[P.length - 1], { isNew: true, fam: 'overlap' }) };
+
+  defOver('overprint', 'Overprint', ALL, null, ({ c, ph, lines }) => {
+    const els = [];
+    const tTop = ph ? L(6) : L(2);
+    const size = sizeFor(lines, SPAN(1, 12), (ph ? L(10) : L(9)) - tTop);
+    const tH = blockH(lines.length, size, DISPLAY.lh);
+    const dLines = c.details.split(' ');
+    const dTop = tTop + tH * 0.55;
+    const dSize = Math.min(size, sizeFor(dLines, SPAN(1, 12), L(15) - GAP - dTop));
+    els.push(disp(lines.join('\n'), { size, x: X(1), top: tTop, over: ['details'] }));
+    els.push(disp(dLines.join('\n'), { size: dSize, x: X(1), top: dTop, color: 'accent', blend: true, role: 'details', over: ['title'] }));
+    if (ph) {
+      els.push(info(c.date, { x: X(1), w: SPAN(1, 6), top: M, role: 'date' }));
+      els.push(photoIn({ c1: 7, c2: 12, top: M, bottom: tTop - GAP }));
+      els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: L(16), role: 'caption' }));
+    } else els.push(...infoRow(c, FOOT2, 'foot').els);
+    return { els, did: `${q(c.details)}, set as large as the title, overprints its lower half in accent.` };
+  });
+
+  defOver('dateBehind', 'Date behind', ALL, null, ({ c, ph, lines }) => {
+    // short lines set bigger: "19.09.–15.11.2026" → 19.09. / –15.11. / 2026
+    let dl = c.date.replace('–', '\n–').split('\n');
+    const yr = dl[dl.length - 1].match(/^(.*\.)(\d{4})$/);
+    if (yr && !/\d{4}/.test(dl[0])) dl = [...dl.slice(0, -1), yr[1], yr[2]];
+    const f = infoRow(c, [['details', 1, 4], ['caption', 5, 12]], 'foot');
+    const dSize = sizeFor(dl, SPAN(1, 12), (ph ? L(7) : f.top - GAP) - M);
+    const els = [disp(dl.join('\n'), { size: dSize, x: X(1), top: M, color: 'accent', role: 'date', over: ['title'] })];
+    const dH = blockH(dl.length, dSize, DISPLAY.lh);
+    const size = sizeFor(lines, SPAN(1, 12), Math.min(RH * 6, dH * 0.8));
+    const tH = blockH(lines.length, size, DISPLAY.lh);
+    const base = M + dH / 2 + tH / 2;                    // the title sits on the middle of the date block
+    els.push(disp(lines.join('\n'), { size, x: X(1), base, blend: true, over: ['date'] }));
+    els.push(...f.els);
+    if (ph) els.push(photoIn({ c1: 1, c2: 12, top: Math.max(base, M + dH) + GAP, bottom: f.top - GAP }, { ay: 'bottom' }));
+    return { els, did: `${q(c.date)}, huge in accent, sits behind the title.` };
+  });
+
+  defOver('tightStack', 'Tight stack', ['phrase', 'sentence'], null, ({ c, ph, lines }) => {
+    const lh = 0.64;
+    const f = infoRow(c, FOOT3, 'foot');
+    const base = ph ? L(8) : f.top - GAP * 1.5;
+    const size = Math.min(fitSize(lines, SPAN(1, 12)), (base - M) / ((lines.length - 1) * lh + CAP));
+    const els = [disp(lines.join('\n'), { size, x: X(1), base, lh })];
+    els.push(...f.els);
+    if (ph) els.push(photoIn({ c1: 1, c2: 12, top: base + GAP, bottom: f.top - GAP }, { ay: 'bottom' }));
+    return { els, did: 'Lines pulled so close that the letters cut into each other.' };
+  });
+
+  defOver('behindPhoto', 'Behind the photo', ALL, { image: true }, ({ c, ph, kind, lines }) => {
+    const top = L(2.5), h = Math.min(SPAN(4, 9) * PHOTO_ASPECT, L(14) - top), w = h / PHOTO_ASPECT;
+    const photo = { k: 'p', x: (X(4) + XR(9) - w) / 2, y: top, w, h, stand: !ph, role: 'photo', over: ['title'] };
+    const ls = kind === 'sentence' ? lines : [c.title];
+    const hh = (ls.length - 1) * DISPLAY.lh + CAP;
+    const size = Math.min(fitSize(ls, SPAN(1, 12)), RH * 4.5 / hh, h * 0.8 / hh);
+    const base = top + h / 2 + hh * size / 2;
+    const els = [disp(ls.join('\n'), { size, x: X(1), w: SPAN(1, 12), base, over: ['photo'], just: ls.length === 1 && ls[0].includes(' ') }), photo];
+    els.push(sec(c.details, { x: X(1), w: SPAN(1, 8), top: M }));
+    els.push(info(c.date, { x: X(9), w: SPAN(9, 12), top: M, role: 'date' }));
+    els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: L(16), role: 'caption' }));
+    return { els, did: 'The title passes behind the photo and shows on either side of it.' };
+  });
+
+  defOver('collage', 'Collage', ALL, { image: true, shape: true }, ({ c, ph, lines }) => {
+    const top = L(1), h = Math.min(SPAN(1, 8) * PHOTO_ASPECT, L(10) - top), w = h / PHOTO_ASPECT;
+    const photo = { k: 'p', x: X(1), y: top, w, h, stand: !ph, role: 'photo', over: ['title', 'shape'] };
+    const rad = Math.min(SPAN(1, 4), h * 0.7) / 2;
+    const circle = { k: 'c', cx: X(1) + w, cy: top + rad * 0.9, r: rad, color: 'accent', role: 'shape', over: ['photo'] };
+    const size = sizeFor(lines, SPAN(1, 12), RH * 5);
+    const base = top + h + CAP * size * 0.45 + (lines.length - 1) * DISPLAY.lh * size;
+    const els = [photo, circle, disp(lines.join('\n'), { size, x: X(1), base, over: ['photo'] })];
+    els.push(sec(c.details, { x: X(1), w: SPAN(1, 8), top: base + GAP }));
+    els.push(...infoRow(c, FOOT2, 'foot').els);
+    return { els, did: 'Photo, a circle and the title layered: the circle bites the corner, the title crosses the foot.' };
+  });
+
+  defOver('label', 'Label', ALL, { image: true, shape: true }, ({ c, ph, lines }) => {
+    const h = Math.min(SPAN(1, 12) * PHOTO_ASPECT, L(10) - M), w = h / PHOTO_ASPECT;
+    const photo = { k: 'p', x: X(1), y: M, w, h, stand: !ph, role: 'photo', over: ['label', 'details', 'date', 'caption'] };
+    const pad = INFO.size * 1.1, lw = SPAN(1, 5) + 2 * pad;
+    const items = [{ s: c.details, wt: 500, role: 'details' }, { s: c.date, role: 'date' }, { s: c.caption, role: 'caption' }];
+    const probe = infoStack(items, 1, 5, 0);
+    const lh = probe.bottom + 2 * pad;
+    const ly = M + h - lh * 0.55;
+    const label = { k: 'r', x: X(1), y: ly, w: lw, h: lh, color: 'field', role: 'label', over: ['photo'], ok: false };
+    const st = infoStack(items, 1, 5, ly + pad);
+    st.els.forEach(e => { e.x = X(1) + pad; e.over = ['photo', 'label'] });
+    const top = ly + lh + GAP * 1.5;
+    const size = sizeFor(lines, SPAN(1, 12), L(16) - top);
+    return { els: [photo, label, ...st.els, disp(lines.join('\n'), { size, x: X(1), top })], did: 'A tag in the field colour holds the smaller text and sits over the image’s corner.' };
+  });
+
+  defOver('ghost', 'Ghost', ALL, null, ({ c, ph, lines }) => {
+    const size = sizeFor(lines, SPAN(1, 12), ph ? L(12) - L(8) : RH * 7);
+    const base = L(12);
+    const gSize = Math.min(fitSize([c.details], (W - M) * 1.3), (L(15) - GAP - base) / (CAP * 0.5));
+    const gBase = base + CAP * gSize * 0.5;               // the ghost crosses the title's lower half
+    const els = [disp(c.details, { size: gSize, x: M - 0.04 * gSize, base: gBase, bleed: true, opacity: 0.16, role: 'details', over: ['title', 'photo'] })];
+    els.push(disp(lines.join('\n'), { size, x: X(1), base, over: ['details'] }));
+    els.push(...infoRow(c, FOOT2, 'foot').els);
+    if (ph) els.push(photoIn({ c1: 1, c2: 12, top: M, bottom: base - blockH(lines.length, size, DISPLAY.lh) - GAP }));
+    return { els, did: `${q(c.details)}, enormous and faint, sits behind the title and runs off the page.` };
+  });
+
+  // ═══════════════════════ content, colours, photo ═══════════════════════
+  const VENUE = 'Kunstraum Lenz\nLenzgasse 14, 4056 Basel';
+  const CONTENT = {
+    word:     { title: 'Echoes', details: 'Yu Oda', date: '26.02.–10.05.2027', caption: VENUE },
+    phrase:   { title: 'Weather Report', details: 'Ines Vollmer', date: '19.09.–15.11.2026', caption: VENUE },
+    sentence: { title: 'Everything slow is still moving', details: 'Aurelio Bassanelli', date: '27.11.2026–14.02.2027', caption: VENUE },
+  };
+  const PALETTES = [
+    { name: 'Pink, black, cobalt', field: '#ff6eb4', ink: '#121212', accent: '#2233e6' },
+    { name: 'Stone, black, vermilion', field: '#dcd9d1', ink: '#1a1a1a', accent: '#e8391a' },
+    { name: 'Cobalt, paper, pink', field: '#2233e6', ink: '#f3f1ea', accent: '#ff6eb4' },
+    { name: 'Ivory, black, bronze', field: '#f0ebe1', ink: '#191613', accent: '#8a6440' },
+    { name: 'Black, paper, red', field: '#121212', ink: '#f3f1ec', accent: '#ff3b1f' },
+  ];
+
+  function makePhoto() {
+    const cv = document.createElement('canvas'); cv.width = 480; cv.height = 600;
+    const x = cv.getContext('2d');
+    const g = x.createLinearGradient(0, 0, 0, 600);
+    g.addColorStop(0, '#d6d1c6'); g.addColorStop(0.72, '#9d978b'); g.addColorStop(1, '#5d584f');
+    x.fillStyle = g; x.fillRect(0, 0, 480, 600);
+    x.fillStyle = 'rgba(40,36,30,.28)'; x.fillRect(0, 440, 480, 160);
+    try { x.filter = 'blur(10px)' } catch (e) {}
+    x.fillStyle = 'rgba(20,18,16,.55)'; x.beginPath(); x.ellipse(262, 452, 150, 26, 0, 0, 7); x.fill();
+    try { x.filter = 'none' } catch (e) {}
+    const body = x.createLinearGradient(170, 120, 330, 440);
+    body.addColorStop(0, '#3a3631'); body.addColorStop(0.55, '#1f1c19'); body.addColorStop(1, '#2d2925');
+    x.fillStyle = body;
+    x.beginPath(); x.moveTo(236, 96); x.bezierCurveTo(330, 110, 350, 250, 318, 330); x.bezierCurveTo(300, 380, 330, 430, 300, 452);
+    x.lineTo(214, 452); x.bezierCurveTo(186, 420, 214, 372, 192, 318); x.bezierCurveTo(160, 238, 170, 104, 236, 96); x.fill();
+    const hl = x.createLinearGradient(200, 120, 250, 320);
+    hl.addColorStop(0, 'rgba(255,248,236,.55)'); hl.addColorStop(1, 'rgba(255,248,236,0)');
+    x.fillStyle = hl; x.beginPath(); x.ellipse(222, 210, 16, 92, 0.12, 0, 7); x.fill();
+    const d = x.getImageData(0, 0, 480, 600); let s = 11;
+    for (let i = 0; i < d.data.length; i += 4) { s = (s * 16807) % 2147483647; const nz = (s / 2147483647 - 0.5) * 26; d.data[i] += nz; d.data[i + 1] += nz; d.data[i + 2] += nz }
+    x.putImageData(d, 0, 0);
+    return cv.toDataURL('image/jpeg', 0.86);
+  }
+  const PHOTO = makePhoto();
+
+  // ═══════════════════════ render + check ═══════════════════════
+  const f2 = v => (+v).toFixed(3);
+  const colorOf = k => k === 'field' ? 'var(--field)' : k === 'accent' ? 'var(--accent)' : 'var(--ink)';
+  function render(els, sheet) {
+    for (const e of els) {
+      if (e.k === 'missing') continue;
+      let d;
+      if (e.k === 't') {
+        d = document.createElement('div'); d.className = 'el t';
+        d.textContent = e.s;
+        const st = d.style;
+        st.left = f2(e.x) + 'cqw';
+        if (e.w != null) st.width = f2(e.w) + 'cqw';
+        st.fontSize = f2(e.size) + 'cqw'; if (e.font) st.fontFamily = e.font; st.fontWeight = e.wt; st.letterSpacing = (e.ls || 0) + 'em'; st.lineHeight = e.lh;
+        st.whiteSpace = e.pre || e.w == null ? 'pre' : 'pre-line';
+        st.textAlign = e.align || 'left'; st.color = e.hex || colorOf(e.color);
+        if (e.just) { st.textAlign = 'justify'; st.textAlignLast = 'justify' }
+        if (e.top != null) st.top = f2(e.top) + 'cqw'; else st.bottom = f2(H - e.base) + 'cqw';
+        if (e.rot) { st.transformOrigin = e.origin || 'top left'; st.transform = `rotate(${e.rot}deg)` }
+        if (e.blend) st.mixBlendMode = 'var(--blend)';
+        if (e.opacity != null) st.opacity = e.opacity;
+        d.dataset.size = e.size;
+      } else if (e.k === 'p') {
+        d = document.createElement('div'); d.className = 'el photo' + (e.stand ? ' stand' : '');
+        if (!e.stand) d.style.backgroundImage = `url(${PHOTO})`;
+        Object.assign(d.style, { left: f2(e.x) + 'cqw', top: f2(e.y) + 'cqw', width: f2(e.w) + 'cqw', height: f2(e.h) + 'cqw' });
+        if (e.filter) d.style.filter = e.filter;
+        if (e.radius) d.style.borderRadius = f2(e.radius) + 'cqw';
+      } else if (e.k === 'c') {
+        d = document.createElement('div'); d.className = 'el photo';
+        Object.assign(d.style, { left: f2(e.cx - e.r) + 'cqw', top: f2(e.cy - e.r) + 'cqw', width: f2(2 * e.r) + 'cqw', height: f2(2 * e.r) + 'cqw', borderRadius: '50%' });
+        if (e.photo) d.style.backgroundImage = `url(${PHOTO})`; else d.style.background = colorOf(e.color);
+      } else if (e.k === 'r') {
+        d = document.createElement('div'); d.className = 'el';
+        Object.assign(d.style, { left: f2(e.x) + 'cqw', top: f2(e.y) + 'cqw', width: f2(e.w) + 'cqw', height: f2(e.h) + 'cqw', background: e.hex || colorOf(e.color) });
+        if (e.rot) { d.style.transformOrigin = 'center'; d.style.transform = `rotate(${e.rot}deg)` }
+        if (e.shadow) d.style.boxShadow = '0 0.6cqw 1.6cqw rgb(0 0 0 / .22)';
+        if (e.radius) d.style.borderRadius = f2(e.radius) + 'cqw';
+      } else if (e.k === 'l') {
+        d = document.createElement('div'); d.className = 'el rulel';
+        Object.assign(d.style, { left: f2(e.x) + 'cqw', top: f2(e.y) + 'cqw', width: f2(e.w) + 'cqw' });
+      } else if (e.k === 'ring') {
+        const out = e.R + CAP * e.size, id = 'rp' + Math.random().toString(36).slice(2);
+        d = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        d.setAttribute('class', 'el'); d.setAttribute('viewBox', `0 0 ${2 * out} ${2 * out}`);
+        Object.assign(d.style, { left: f2(e.cx - out) + 'cqw', top: f2(e.cy - out) + 'cqw', width: f2(2 * out) + 'cqw', height: f2(2 * out) + 'cqw', overflow: 'visible' });
+        const C = 2 * Math.PI * e.R;
+        d.innerHTML = `<defs><path id="${id}" d="M ${out} ${out - e.R} a ${e.R} ${e.R} 0 1 1 0 ${2 * e.R} a ${e.R} ${e.R} 0 1 1 0 ${-2 * e.R}"/></defs>` +
+          `<text font-family="Geist, Helvetica, sans-serif" font-weight="${DISPLAY.wt}" font-size="${e.size}" letter-spacing="${DISPLAY.ls * e.size}" fill="currentColor"><textPath href="#${id}" textLength="${C * 0.995}" lengthAdjust="spacing">${e.s.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</textPath></text>`;
+        d.style.color = 'var(--ink)';
+      } else if (e.k === 'scrim') {
+        d = document.createElement('div'); d.className = 'el';
+        const solid = `color-mix(in srgb, var(--field) 94%, transparent)`;
+        Object.assign(d.style, { left: '0', width: '100cqw', top: f2(e.y) + 'cqw', height: f2(e.h) + 'cqw',
+          background: `linear-gradient(${e.side === 'top' ? 'to bottom' : 'to top'}, ${solid} 0%, ${solid} ${(e.solid * 100).toFixed(1)}%, transparent 100%)` });
+      } else if (e.k === 'btn') {
+        d = document.createElement('div'); d.className = 'el tx btn' + (e.link ? ' link' : '');
+        d.textContent = e.s;
+        Object.assign(d.style, { left: f2(e.x) + 'cqw', top: f2(e.y) + 'cqw', width: f2(e.w) + 'cqw', height: f2(e.h) + 'cqw', fontSize: f2(e.size) + 'cqw', fontWeight: e.wt, letterSpacing: (e.ls || 0) + 'em' });
+        if (e.link) d.style.color = colorOf(e.color);
+        else { d.style.background = colorOf(e.bg); d.style.color = colorOf(e.fg); d.style.borderRadius = e.radius }
+        d.dataset.size = e.size;
+      } else if (e.k === 'logo') {
+        d = document.createElement('div'); d.className = 'el tx logo';
+        d.innerHTML = '<i></i><span></span>'; d.querySelector('span').textContent = e.s;
+        Object.assign(d.style, { left: f2(e.x) + 'cqw', top: f2(e.y) + 'cqw', width: f2(e.w) + 'cqw', height: f2(e.h) + 'cqw', fontSize: f2(e.size) + 'cqw', color: colorOf(e.color) });
+        d.dataset.size = e.size;
+      } else if (e.k === 'stars') {              // five stars filled to the rating, then the number
+        d = document.createElement('div'); d.className = 'el tx stars';
+        for (let i = 0; i < 5; i++) {
+          const f = Math.max(0, Math.min(1, e.value - i)) * 100, sp = document.createElement('span');
+          sp.textContent = '★'; sp.style.backgroundImage = `linear-gradient(90deg, var(--accent) ${f}%, color-mix(in srgb, var(--ink) 22%, transparent) ${f}%)`;
+          d.appendChild(sp);
+        }
+        const b = document.createElement('b'); b.textContent = String(e.value); d.appendChild(b);
+        Object.assign(d.style, { left: f2(e.x) + 'cqw', top: f2(e.y) + 'cqw', fontSize: f2(e.size) + 'cqw' });
+        d.dataset.size = e.size;
+      } else if (e.k === 'ln') {                 // a leader line from a label to the product
+        d = document.createElement('div'); d.className = 'el';
+        const len = Math.hypot(e.x2 - e.x1, e.y2 - e.y1), ang = Math.atan2(e.y2 - e.y1, e.x2 - e.x1) * 180 / Math.PI;
+        Object.assign(d.style, { left: f2(e.x1) + 'cqw', top: f2(e.y1) + 'cqw', width: f2(len) + 'cqw', height: '0', borderTop: '0.2cqw solid var(--ink)', transformOrigin: '0 0', transform: `rotate(${ang}deg)` });
+      }
+      if (!d) continue;
+      if (e.role) d.dataset.role = e.role;
+      if (e.ok) d.dataset.ok = '1';
+      if (e.over) d.dataset.over = e.over.join(' ');
+      if (e.inside) d.dataset.inside = e.inside;
+      if (e.bleed) d.dataset.bleed = '1';
+      sheet.appendChild(d);
+    }
+  }
+
+  function check(poster, els) {
+    const pr = poster.getBoundingClientRect(); const u = 100 / pr.width;
+    const issues = [];
+    els.filter(e => e.k === 'missing').forEach(e => issues.push(e.why || 'no room for the photo'));
+    const items = [...poster.querySelectorAll('.sheet-inner > [data-role]')].map(el => {
+      let b = el.getBoundingClientRect();
+      if (el.classList.contains('t') && !el.style.transform && el.firstChild) {
+        const rg = document.createRange(); rg.selectNodeContents(el);
+        const rb = rg.getBoundingClientRect();
+        b = { left: rb.left, right: rb.right, top: b.top, bottom: b.bottom, width: rb.width, height: b.height };
+      }
+      return { el, role: el.dataset.role, over: (el.dataset.over || '').split(' ').filter(Boolean), ok: el.dataset.ok === '1', bleed: el.dataset.bleed === '1', isText: el.classList.contains('t') || el.classList.contains('tx'),
+        x0: (b.left - pr.left) * u, y0: (b.top - pr.top) * u, x1: (b.right - pr.left) * u, y1: (b.bottom - pr.top) * u, size: +el.dataset.size || 0 };
+    });
+    const bad = new Set();
+    for (const it of items) {
+      if (it.isText && it.size && it.size < INFO.size - 0.01) { issues.push(`${it.role}: below minimum size`); bad.add(it.el) }
+      if (!it.bleed && (it.x0 < -0.3 || it.y0 < -0.3 || it.x1 > W + 0.3 || it.y1 > H + 0.3)) { issues.push(`${it.role}: off the page`); bad.add(it.el) }
+    }
+    for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
+      const a = items[i], b = items[j];
+      if (a.ok || b.ok) continue;
+      const base = r => r.replace(/\d+$/, '');
+      if (a.over.includes(base(b.role)) || b.over.includes(base(a.role))) continue;
+      const ix = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0), iy = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+      if (ix > 0.25 && iy > 0.25) { issues.push(`${a.role} overlaps ${b.role}`); bad.add(a.el); bad.add(b.el) }
+    }
+    bad.forEach(el => el.classList.add('issue'));
+    return issues;
+  }
+
+
+  // ═══════════════════════ the pane ═══════════════════════
+  const OWN_PHOTO = new Set(['shapeCounter', 'shapeBleed', 'ring']);
+  const byId = id => P.find(p => p.id === id);
+  byId('runoff').oneLineFirst = true;
+  for (const id of ['runoff', 'cross', 'wall', 'block', 'ghost']) byId(id).keepScale = true;   // their idea IS their scale
+  Object.assign(byId('dateBehind'), { name: 'Number behind', needsNumber: true });
+  const isNumberishEarly = s => !!s && (/[%€$£]/.test(s) || s.replace(/\D/g, '').length / Math.max(1, s.replace(/\s/g, '').length) >= 0.3);
+
+  // ═══════════════════════ styles: rule sets on the same kit ═══════════════════════
+  const STYLES = {
+    swiss:       { label: 'Swiss', display: { wt: 600, ls: -0.05, lh: 0.9 }, info: { wt: 400, ls: 0, lh: 1.3 } },
+    performance: { label: 'Performance', display: { wt: 700, ls: -0.035, lh: 0.94 }, info: { wt: 500, ls: 0, lh: 1.3 },
+                   btn: { radius: '999px', wt: 600, ls: 0 }, tiers: ['title', 'date', 'details', 'caption'] },   // the offer outranks the product name
+    editorial:   { label: 'Editorial', display: { wt: 400, ls: -0.015, lh: 1.04 }, info: { wt: 500, ls: 0.16, lh: 1.6, upper: true },
+                   btn: { link: true, wt: 500, ls: 0.16 }, face: { family: 'Instrument Serif', stack: '"Instrument Serif", Georgia, serif', wt: 400, ls: -0.01, note: 'a serif for the title' } },
+    street:      { label: 'Street', display: { wt: 700, ls: -0.045, lh: 0.84, upper: true }, info: { wt: 600, ls: 0.04, lh: 1.25, upper: true },
+                   btn: { radius: '0', wt: 700, ls: 0.06 }, face: { family: 'Anton', stack: 'Anton, Impact, "Arial Narrow", sans-serif', wt: 400, ls: 0, note: 'a heavy condensed face for the title' } },
+  };
+  let STYLE = STYLES.swiss;
+  function setStyle(key, useFace) {
+    STYLE = STYLES[key];
+    const d = STYLE.display, f = useFace && STYLE.face;
+    Object.assign(DISPLAY, { wt: f ? f.wt : d.wt, ls: f ? f.ls : d.ls, lh: d.lh, font: f ? f.stack : undefined });
+    Object.assign(INFO, { wt: STYLE.info.wt, ls: STYLE.info.ls, lh: STYLE.info.lh });
+  }
+  const up = v => v == null ? v : v.toUpperCase();
+
+  // a button: text in a padded shape that grows with the text (a link in Editorial)
+  function button(s, x, top, o = {}) {
+    const b = STYLE.btn || { radius: '999px', wt: 600, ls: 0 };
+    const size = Math.max(INFO.size * 1.3, SECOND.size * 0.5);
+    const st = { wt: b.wt || 600, ls: b.ls || 0 };
+    const tw = w100(s, st) / 100 * size;
+    const place = w => o.align === 'center' ? x - w / 2 : o.align === 'right' ? x - w : x;
+    if (b.link) return { k: 'btn', link: true, s, x: place(tw), y: top, w: tw, h: size * 1.7, size, wt: st.wt, ls: st.ls, role: 'action', color: o.color || 'ink' };
+    const w = tw + size * 2.6, h = size * 2.8;
+    return { k: 'btn', s, x: place(w), y: top, w, h, size, wt: st.wt, ls: st.ls, radius: b.radius, role: 'action', bg: o.bg || 'ink', fg: o.fg || 'field' };
+  }
+  // a logo stand-in (mark + wordmark); the checker keeps clear space around it
+  const logoH = () => Math.max(INFO.size * 1.9, RH * 0.5);
+  const clear = lg => Math.max(GAP * 1.5, lg.h * 0.5);          // at least the logo's own clear space
+  function logo(s, x, top, h, o = {}) {
+    const size = h * 0.62;
+    const w = h + size * 0.5 + w100(s, { wt: 700, ls: 0.14 }) / 100 * size;
+    return { k: 'logo', s, x: o.align === 'center' ? x - w / 2 : o.align === 'right' ? x - w : x, y: top, w, h, size, role: 'logo', color: o.color || 'ink' };
+  }
+  // a rotated tag in accent (Street)
+  function tag(s, right, cy, deg, over = []) {
+    let ts = Math.max(SECOND.size * 1.15, INFO.size * 2);
+    const maxW = SPAN(4, 12), a = Math.abs(deg) * Math.PI / 180;
+    const widthAt = t => w100(s, DISPLAY) / 100 * t + t * 0.9;
+    if (widthAt(ts) > maxW) ts *= maxW / widthAt(ts);
+    const w = widthAt(ts), h = CAP * ts + ts * 0.8;
+    const cx = right - (w * Math.cos(a) + h * Math.sin(a)) / 2;       // the rotated box ends at the right edge
+    return [
+      { k: 'r', x: cx - w / 2, y: cy - h / 2, w, h, color: 'accent', rot: deg, role: 'tag', over },
+      disp(s, { size: ts, x: cx - w / 2, w, align: 'center', top: cy - CAP * ts / 2, rot: deg, origin: 'center', color: 'field', role: 'tagtext', over: ['tag', ...over] }),
+    ];
+  }
+  const defS = (style, id, name, needs, fn, extra = {}) => { def(id, name, ['word', 'phrase', 'sentence'], needs, fn); Object.assign(P[P.length - 1], { style, ...extra }) };
+  const PERF_ONE_LINE = true;
+  const numberOf = c => c.date && isNumberishEarly(c.date) ? c.date : null;
+  const centre = () => (X(1) + XR(12)) / 2;
+
+  // ─── Performance: the product fills the Frame; text only ever sits on the page colour ───
+  // A soft band rising from an edge: solid where the text is, fading into the photo.
+  function scrim(side, from, to) {
+    const fade = RH * 1.6, pad = GAP;
+    if (side === 'top') { const h = Math.min(H, to + pad + fade); return { k: 'scrim', side, y: 0, h, solid: (to + pad) / h, role: 'scrim', ok: true, bleed: true } }
+    const y = Math.max(0, from - pad - fade), h = H - y; return { k: 'scrim', side, y, h, solid: (H - from + pad) / h, role: 'scrim', ok: true, bleed: true };
+  }
+  // Spacing, from the type rather than per layout:
+  const gapBelow = s => Math.max(s * 0.4, INFO.size * 1.1);        // after a line of size s, before the next item of its group
+  const groupGap = () => Math.max(RH * 1.4, INFO.size * 3.4);      // between groups (message / offer / fine print)
+  const inset = () => Math.max(M, INFO.size * 2.4);                 // inside panels and cards: at least the page margin
+
+  // the offer, up from the bottom of a box: fine print; the number and the button on one line; the product name
+  function offerBox(c, bx, align = 'left') {
+    const els = [], { x, w } = bx, cx = x + w / 2, o = align === 'center' ? { x, w, align } : { x, w };
+    let y = bx.bottom;
+    if (c.caption) { const n = countLines(c.caption, w, INFO, INFO.size); els.push(info(c.caption, { ...o, base: y, role: 'caption' })); y -= blockH(n, INFO.size, INFO.lh) + groupGap() * 0.55 }
+    const num = numberOf(c), bt = c.action ? button(c.action, 0, 0) : null;
+    const placeBtn = () => { bt.x = align === 'center' ? cx - bt.w / 2 : x; bt.y = y - bt.h; els.push(bt); y = bt.y - gapBelow(bt.size) * 1.6 };
+    if (num) {
+      const ns = Math.min(fitSize([num], w > SPAN(1, 8) ? w * 0.42 : w * 0.72), RH * 1.6 / CAP);
+      const nw = w100(num, DISPLAY) / 100 * ns;
+      if (bt && align !== 'center' && nw + bt.w + GAP * 3 <= w) {   // number left, button right, on one centre line
+        const rowH = Math.max(CAP * ns, bt.h), mid = y - rowH / 2;
+        els.push(disp(num, { size: ns, x, base: mid + CAP * ns / 2, color: 'accent', role: 'date' }));
+        bt.x = x + w - bt.w; bt.y = mid - bt.h / 2; els.push(bt); y -= rowH + gapBelow(SECOND.size) * 1.5;
+      } else {
+        if (bt) placeBtn();
+        els.push(disp(num, { ...o, size: ns, base: y, color: 'accent', role: 'date' })); y -= CAP * ns + gapBelow(SECOND.size) * 1.5;
+      }
+    } else if (bt) placeBtn();
+    if (c.details) { els.push(sec(c.details, { ...o, base: y })); y -= CAP * SECOND.size }
+    return { els, top: y };
+  }
+  const offerStack = (c, a, b, align = 'left') => offerBox(c, { x: X(a), w: SPAN(a, b), bottom: L(16) }, align);
+  function headStack(c, lines, a, b, align = 'left', maxRows = 1.9) {
+    const els = []; let top = M;
+    if (c.logo) { const lg = logo(c.logo, align === 'center' ? centre() : X(a), M, logoH(), { align }); els.push(lg); top = M + lg.h + clear(lg) }
+    const size = sizeFor(lines, SPAN(a, b), RH * maxRows);
+    els.push(disp(lines.join('\n'), align === 'center' ? { size, x: X(a), w: SPAN(a, b), align, top } : { size, x: X(a), top }));
+    return { els, bottom: top + blockH(lines.length, size, DISPLAY.lh) };
+  }
+
+  defS('performance', 'perfOffer', 'Offer', { image: true }, ({ c, ph, lines, arr = 0 }) => {
+    const foot = offerStack(c, 1, 12);
+    if (arr === 1) {                                   // B: everything in one band at the foot
+      const size = sizeFor(lines, SPAN(1, 12), RH * 2.2);
+      const tb = foot.top - GAP * 1.2, t = disp(lines.join('\n'), { size, x: X(1), base: tb });
+      const top = tb - blockH(lines.length, size, DISPLAY.lh);
+      const els = [cover(ph), scrim('bottom', top, H), t, ...foot.els];
+      if (c.logo) { els.push(scrim('top', 0, M + logoH()), logo(c.logo, X(1), M, logoH())) }
+      return { els, did: 'The product fills the page; headline and offer sit together on a band rising from the foot.' };
+    }
+    const head = headStack(c, lines, 1, 12);
+    return { els: [cover(ph), scrim('top', 0, head.bottom), scrim('bottom', foot.top, H), ...head.els, ...foot.els],
+      did: 'The product fills the page; headline on a band at the top, the offer on a band at the foot.' };
+  });
+  defS('performance', 'perfSticker', 'Sticker', { image: true }, ({ c, ph, lines, arr = 0 }) => {
+    const head = headStack(c, lines, 1, 12, 'left', 2.8);
+    const cc = { ...c }; const num = numberOf(c); delete cc.date;           // the number goes on the sticker
+    const foot = offerStack(cc, 1, 12);
+    const els = [cover(ph), scrim('top', 0, head.bottom), scrim('bottom', foot.top, H), ...head.els, ...foot.els];
+    if (num) {
+      const r = Math.min(SPAN(1, 4), (foot.top - head.bottom) * 0.45) / 2;
+      const cx = arr === 1 ? X(1) + r : XR(12) - r, cy = head.bottom + GAP * 2.5 + r;
+      const ns = Math.min(fitSize([num], r * 1.4), r * 0.8 / CAP);
+      if (ns < INFO.size * 1.5 || r < RH) els.push({ k: 'missing', why: 'the number is unreadable on the sticker' });
+      else els.push({ k: 'c', cx, cy, r, color: 'accent', role: 'sticker', over: ['photo', 'scrim'] },
+        disp(num, { size: ns, x: cx - r * 0.7, w: r * 1.4, align: 'center', base: cy + CAP * ns / 2, color: 'field', role: 'date', over: ['sticker', 'photo'], inside: 'sticker' }));
+    }
+    return { els, did: 'The product fills the page with the number on a round sticker; headline and button on soft bands.' };
+  }, { needsNumber: true });
+  defS('performance', 'perfPriceTag', 'Price tag', { image: true }, ({ c, ph, lines, arr = 0 }) => {
+    const right = arr !== 1, split = XR(6) + G / 2;
+    const px = right ? split : 0, pw = right ? W - split : split, pad = inset();
+    const x0 = px + pad, cw = pw - 2 * pad;
+    const els = [cover(ph), { k: 'r', x: px, y: 0, w: pw, h: H, color: 'field', role: 'panel', ok: true, bleed: true }];
+    let top = Math.max(M, pad * 0.8);
+    if (c.logo) { const lg = logo(c.logo, x0, top, logoH()); els.push(lg); top += lg.h + clear(lg) }
+    const offer = offerBox(c, { x: x0, w: cw, bottom: H - Math.max(M, pad * 0.8) });
+    const hh = (lines.length - 1) * DISPLAY.lh + CAP;
+    const size = Math.min(fitSize(lines, cw), RH * 3.5 / hh, (offer.top - gapBelow(SECOND.size) - top - groupGap()) / hh);
+    els.push(disp(lines.join('\n'), { size, x: x0, base: offer.top - gapBelow(size) }));
+    els.push(...offer.els);
+    return { els, did: 'The product fills half the Frame edge to edge; on the other half, the logo at the top and the message and offer at the foot.' };
+  }, { needsNumber: true });
+  defS('performance', 'perfCard', 'Card', { image: true }, ({ c, ph, lines, arr = 0 }) => {
+    const head = headStack(c, lines, 1, 12);
+    const [a, b] = arr === 1 ? [6, 12] : [1, 7], pad = Math.max(M * 0.9, INFO.size * 2.2);
+    const offer = offerBox(c, { x: X(a) + pad, w: SPAN(a, b) - 2 * pad, bottom: L(16) - pad });
+    const cardTop = offer.top - pad;
+    return { els: [cover(ph), scrim('top', 0, head.bottom), ...head.els,
+      { k: 'r', x: X(a), y: cardTop, w: SPAN(a, b), h: L(16) - cardTop, color: 'field', radius: 1.4, role: 'card', ok: true }, ...offer.els],
+      did: 'The product fills the page; the offer sits on a solid card in a corner.' };
+  });
+  defS('performance', 'perfCentred', 'Centred', { image: true }, ({ c, ph, lines }) => {
+    const head = headStack(c, lines, 2, 11, 'center');
+    const foot = offerStack(c, 2, 11, 'center');
+    return { els: [cover(ph), scrim('top', 0, head.bottom), scrim('bottom', foot.top, H), ...head.els, ...foot.els],
+      did: 'The product fills the page; everything else on one centre line, on soft bands top and bottom.' };
+  });
+  defS('performance', 'perfStrip', 'Strip', null, ({ c, ph }) => {
+    const els = [], mid = H / 2; let x = X(1), right = XR(12);
+    if (ph) { const w = Math.max(H / PHOTO_ASPECT, W * 0.3), h = w * PHOTO_ASPECT; els.push({ k: 'p', x: 0, y: (H - h) / 2, w, h, role: 'photo', bleed: true }); x = w + GAP * 2 }
+    if (c.logo) { const lg = logo(c.logo, x, 0, logoH()); lg.y = mid - lg.h / 2; els.push(lg); x = lg.x + lg.w + clear(lg) }
+    if (c.action) { const b = button(c.action, XR(12), 0, { align: 'right' }); b.y = mid - b.h / 2; els.push(b); right = b.x - GAP * 2 }
+    const num = numberOf(c);
+    if (num) { const ns = Math.min(fitSize([num], SPAN(1, 3)), (H - 2 * M) * 0.7 / CAP); const nw = w100(num, DISPLAY) / 100 * ns; els.push(disp(num, { size: ns, x: right - nw, base: mid + CAP * ns / 2, color: 'accent', role: 'date' })); right -= nw + GAP * 2 }
+    const size = Math.min(fitSize([c.title], right - x), (H - 2 * M) * 0.8 / CAP);
+    els.push(disp(c.title, { size, x, base: mid + CAP * size / 2 }));
+    return { els, did: 'One row for wide formats: the product edge to edge on the left, then headline, the number, the button.' };
+  }, { wideOnly: true });
+
+  // ─── Ad layouts from the research: each needs the kind of content it is built around ───
+  const kinds = (...k) => ({ needsKind: k });
+  const topY = () => Math.max(M, inset() * 0.8);
+
+  defS('performance', 'perfOfferFirst', 'Offer first', { image: true }, ({ c, ph, lines }) => {
+    const num = numberOf(c), pad = inset(); let y = topY(); const blk = [];
+    if (c.logo) { const lg = logo(c.logo, X(1), y, logoH(), { color: 'field' }); blk.push(lg); y += lg.h + clear(lg) }
+    const ns = Math.min(fitSize([num], SPAN(1, 12) * 0.9), RH * 3.4 / CAP);
+    // inside a panel the padding wins over optical alignment
+    blk.push(disp(num, { size: ns, x: X(1), top: y, color: 'field', role: 'date' }));
+    y += CAP * ns + gapBelow(ns) * 0.6;
+    const size = sizeFor(lines, SPAN(1, 12), RH * 1.6);
+    blk.push(disp(lines.join('\n'), { size, x: X(1), top: y, color: 'field' })); y += blockH(lines.length, size, DISPLAY.lh);
+    if (c.caption) { y += gapBelow(size) * 0.8; const n = countLines(c.caption, SPAN(1, 9), INFO, INFO.size); blk.push(info(c.caption, { x: X(1), w: SPAN(1, 9), top: y, color: 'field', role: 'caption' })); y += blockH(n, INFO.size, INFO.lh) }
+    const blockB = y + pad;
+    const foot = offerBox({ ...c, date: undefined, caption: undefined }, { x: X(1), w: SPAN(1, 12), bottom: L(16) });
+    return { els: [{ k: 'p', x: 0, y: blockB, w: W, h: H - blockB, stand: !ph, role: 'photo', ok: true, bleed: true },
+      { k: 'r', x: 0, y: 0, w: W, h: blockB, color: 'accent', role: 'panel', ok: true, bleed: true }, ...blk,
+      scrim('bottom', foot.top, H), ...foot.els],
+      did: 'The number leads on a solid block of colour; the product fills the rest, with the button at the foot.' };
+  }, { needsNumber: true });
+
+  defS('performance', 'perfStat', 'Stat', { image: true }, ({ c, ph }) => {
+    let y = topY(); const els = [];
+    if (c.logo) { const lg = logo(c.logo, X(1), y, logoH()); els.push(lg); y += lg.h + clear(lg) }
+    const ss = Math.min(fitSize([c.stat], SPAN(1, 12) * 0.8), RH * 3.6 / CAP);
+    els.push(disp(c.stat, { size: ss, x: X(1) - 0.03 * ss, top: y, color: 'accent', role: 'stat' })); y += CAP * ss + gapBelow(ss) * 0.5;
+    const line = c.statLine || c.title, n = countLines(line, SPAN(1, 9), SECOND, SECOND.size);
+    els.push(sec(line, { x: X(1), w: SPAN(1, 9), top: y, role: 'statline' })); y += blockH(n, SECOND.size, SECOND.lh);
+    const top = y + groupGap();
+    const foot = offerBox({ ...c, date: undefined }, { x: X(1), w: SPAN(1, 12), bottom: L(16) });
+    const h = foot.top - groupGap() * 0.7 - top;
+    els.unshift(h > RH * 3 ? { k: 'p', x: 0, y: top, w: W, h, stand: !ph, role: 'photo', bleed: true } : { k: 'missing', why: 'no room for the product' });
+    return { els: [...els, ...foot.els], did: 'One giant figure and the line that explains it; the product runs edge to edge below.' };
+  }, kinds('stat'));
+
+  defS('performance', 'perfReview', 'Review', { image: true }, ({ c, ph }) => {
+    const rv = c.review, els = []; let y = topY();
+    const sSize = Math.max(INFO.size * 2.2, SECOND.size * 0.85);
+    els.push({ k: 'stars', x: X(1), y, size: sSize, value: rv.stars, role: 'stars' }); y += sSize + gapBelow(sSize) * 0.6;
+    const words = ('“' + rv.quote + '”').split(' '); let qs = Math.max(RH * 2, INFO.size * 1.6), ql = breakLines(words, SPAN(1, 12), qs, DISPLAY);
+    for (; qs > INFO.size * 1.5; qs *= 0.95) { ql = breakLines(words, SPAN(1, 12), qs, DISPLAY); if (ql.length <= 3 && blockH(ql.length, qs, DISPLAY.lh) <= RH * 4.2) break }
+    els.push(disp(ql.join('\n'), { size: qs, x: X(1), top: y })); y += blockH(ql.length, qs, DISPLAY.lh) + gapBelow(qs) * 0.9;
+    els.push(info('— ' + rv.by, { x: X(1), w: SPAN(1, 10), top: y, role: 'by', wt: 500 })); y += CAP * INFO.size;
+    const top = y + groupGap();
+    let footTop = L(16);
+    const bt = c.action ? button(c.action, XR(12), 0, { align: 'right' }) : null;
+    if (bt) { bt.y = L(16) - bt.h; els.push(bt); footTop = bt.y }
+    if (c.logo) { const lg = logo(c.logo, X(1), 0, logoH()); lg.y = bt ? bt.y + bt.h / 2 - lg.h / 2 : L(16) - lg.h; els.push(lg); footTop = Math.min(footTop, lg.y) }
+    const h = footTop - groupGap() * 0.8 - top;
+    els.unshift(h > RH * 3 ? { k: 'p', x: X(5), y: top, w: W - X(5), h, stand: !ph, role: 'photo', bleed: true } : { k: 'missing', why: 'no room for the product' });
+    return { els, did: 'A customer’s words lead: stars and a pull-quote, the product below, logo and button at the foot.' };
+  }, kinds('review'));
+
+  defS('performance', 'perfVersus', 'Us vs them', { image: true }, ({ c, ph, lines }) => {
+    const cmp = c.compare, els = []; let y = topY();
+    const size = sizeFor(lines, SPAN(1, 12), RH * 1.8);
+    els.push(disp(lines.join('\n'), { size, x: X(1), top: y })); y += blockH(lines.length, size, DISPLAY.lh) + groupGap();
+    const usX = X(7), usW = SPAN(7, 9), thX = X(10), thW = SPAN(10, 12);
+    const imgH = Math.min(usW * 1.1, RH * 3.2);
+    els.push({ k: 'p', x: usX, y, w: usW, h: imgH, stand: !ph, role: 'photo', radius: 1 }); y += imgH + gapBelow(INFO.size);
+    const hn = Math.max(countLines(c.details || 'Ours', usW, INFO, INFO.size), countLines(cmp.them, thW, INFO, INFO.size));
+    els.push(info(c.details || 'Ours', { x: usX, w: usW, top: y, wt: 600, role: 'us' }), info(cmp.them, { x: thX, w: thW, top: y, role: 'them', opacity: 0.55 }));
+    y += blockH(hn, INFO.size, INFO.lh) + gapBelow(INFO.size) * 1.2;
+    const ls = SECOND.size * 0.72, rowH = Math.max(ls * 2.4, INFO.size * 3);
+    cmp.rows.forEach(([label, us, them], i) => {
+      els.push(rule(X(1), y, SPAN(1, 12)));
+      const base = y + rowH / 2 + CAP * ls / 2;
+      els.push(text(label, { size: ls, wt: 500, ls: -0.01, lh: 1.1, x: X(1), w: SPAN(1, 6), base, role: 'row' + i }));
+      els.push(text(us ? '✓' : '✕', { size: ls * 1.15, wt: 700, ls: 0, lh: 1, x: usX, base, color: us ? 'accent' : 'ink', opacity: us ? 1 : 0.4, role: 'us' + i }));
+      els.push(text(them ? '✓' : '✕', { size: ls * 1.15, wt: 700, ls: 0, lh: 1, x: thX, base, opacity: 0.4, role: 'th' + i }));
+      y += rowH;
+    });
+    els.push(rule(X(1), y, SPAN(1, 12)));
+    const foot = offerBox({ ...c, details: undefined }, { x: X(1), w: SPAN(1, 12), bottom: L(16) });
+    if (foot.top < y + groupGap() * 0.8) els.push({ k: 'missing', why: 'the table leaves no room for the offer' });
+    return { els: [...els, ...foot.els], did: 'Headline, then a two-column table: yours ticked in accent, a typical alternative greyed out.' };
+  }, kinds('compare'));
+
+  defS('performance', 'perfBeforeAfter', 'Before / after', { image: true }, ({ c, ph, lines }) => {
+    const pad = inset(), foot = offerBox(c, { x: X(1), w: SPAN(1, 12), bottom: L(16) });
+    const size = sizeFor(lines, SPAN(1, 12), RH * 1.6), tb = foot.top - gapBelow(SECOND.size) * 1.5;
+    const bandTop = tb - blockH(lines.length, size, DISPLAY.lh) - pad, half = W / 2;
+    const tg = (s, x) => { const ts = INFO.size * 1.2, p = ts * 0.7, tw = w100(s, { wt: 600, ls: 0.06 }) / 100 * ts, y = topY();
+      return [{ k: 'r', x, y, w: tw + 2 * p, h: CAP * ts + 2 * p, color: 'field', role: 'label', ok: true }, text(s, { size: ts, wt: 600, ls: 0.06, lh: 1, x: x + p, top: y + p, role: 'tag' + s, over: ['photo', 'photo2'] })] };
+    return { els: [
+      { k: 'p', x: 0, y: 0, w: half, h: bandTop, stand: !ph, role: 'photo', filter: 'grayscale(1) brightness(.8) contrast(.9)', bleed: true },
+      { k: 'p', x: half, y: 0, w: W - half, h: bandTop, stand: !ph, role: 'photo2', bleed: true },
+      { k: 'r', x: half - 0.25, y: 0, w: 0.5, h: bandTop, color: 'field', role: 'divider', ok: true, bleed: true },
+      ...tg('Before', X(1)), ...tg('After', half + (X(1))),
+      disp(lines.join('\n'), { size, x: X(1), base: tb }), ...foot.els],
+      did: 'Two halves, before and after, over a band with the headline and the offer. Needs two images; Meta limits this for health products.' };
+  });
+
+  defS('performance', 'perfCallouts', 'Feature callouts', { image: true }, ({ c, ph, lines }) => {
+    const items = c.list.slice(0, 3), head = headStack(c, lines, 1, 12), els = [...head.els];
+    const y = head.bottom + groupGap();
+    const foot = offerBox({ ...c, details: undefined }, { x: X(1), w: SPAN(1, 12), bottom: L(16) });
+    const bottom = foot.top - groupGap();
+    const h = Math.min(bottom - y, SPAN(4, 9) * PHOTO_ASPECT), w = h / PHOTO_ASPECT, px = centre() - w / 2, py = y + (bottom - y - h) / 2;
+    if (h < RH * 4) return { els: [{ k: 'missing', why: 'no room for the product' }], did: '' };
+    els.push({ k: 'p', x: px, y: py, w, h, stand: !ph, role: 'photo', over: ['dot'] });
+    const ls = INFO.size * 1.25, lw = Math.max(SPAN(1, 3), px - X(1) - GAP * 2);
+    items.forEach((t, i) => {
+      const left = i % 2 === 0, cy = py + h * (0.2 + 0.3 * i);
+      const n = countLines(t, lw, { wt: 600, ls: 0 }, ls), bh = blockH(n, ls, 1.2), x = left ? X(1) : XR(12) - lw;
+      els.push(text(t, { size: ls, wt: 600, ls: 0, lh: 1.2, x, w: lw, top: cy - bh / 2, align: left ? 'left' : 'right', role: 'call' + i }));
+      const lx = left ? X(1) + lw + GAP * 0.6 : XR(12) - lw - GAP * 0.6, tx = left ? px + w * 0.22 : px + w * 0.78;
+      els.push({ k: 'ln', x1: lx, y1: cy, x2: tx, y2: cy }, { k: 'c', cx: tx, cy, r: 0.8, color: 'accent', role: 'dot', over: ['photo'] });
+    });
+    return { els: [...els, ...foot.els], did: 'The product in the centre with three features pointed out by thin lines.' };
+  }, kinds('list'));
+
+  defS('performance', 'perfListicle', 'Reasons why', { image: true }, ({ c, ph, lines }) => {
+    const items = c.list.slice(0, 4), head = headStack(c, lines, 1, 12), els = [...head.els];
+    const y = head.bottom + groupGap();
+    const foot = offerBox({ ...c, details: undefined }, { x: X(1), w: SPAN(1, 12), bottom: L(16) });
+    const bottom = foot.top - groupGap(), slot = (bottom - y) / items.length;
+    if (slot < INFO.size * 3) return { els: [{ k: 'missing', why: 'no room for the list' }], did: '' };
+    els.unshift({ k: 'p', x: X(8), y, w: W - X(8), h: bottom - y, stand: !ph, role: 'photo', bleed: true });
+    const ns = Math.min(SECOND.size * 1.5, slot * 0.55 / CAP), ts = Math.max(INFO.size * 1.2, SECOND.size * 0.7), tx = X(2) + G;
+    items.forEach((t, i) => {
+      const top = y + i * slot;
+      els.push(disp(String(i + 1), { size: ns, x: X(1), top, color: 'accent', role: 'n' + i }));
+      els.push(text(t, { size: ts, wt: 500, ls: -0.01, lh: 1.15, x: tx, w: XR(7) - tx, top, role: 'li' + i }));
+    });
+    return { els: [...els, ...foot.els], did: 'A numbered list of reasons beside the product, the offer at the foot.' };
+  }, kinds('list'));
+
+  defS('performance', 'perfNotes', 'Notes app', { image: true }, ({ c, ph }) => {
+    // Looks like a phone note, not an ad: it uses the notes app's own paper and amber on purpose.
+    const els = [{ k: 'r', x: 0, y: 0, w: W, h: H, hex: '#fbf8f1', role: 'paper', ok: true, bleed: true }];
+    let y = topY(); const ui = INFO.size * 1.3;
+    els.push(text('‹ Notes', { size: ui, wt: 500, ls: 0, lh: 1, x: X(1), top: y, hex: '#d49a1a', role: 'ui' }),
+      text('Done', { size: ui, wt: 600, ls: 0, lh: 1, x: X(9), w: SPAN(9, 12), align: 'right', top: y, hex: '#d49a1a', role: 'ui2' }));
+    y += CAP * ui + groupGap() * 0.8;
+    const ts = sizeFor([c.title], SPAN(1, 12), RH * 1.3, { wt: 700, ls: -0.02, lh: 1.05 });
+    els.push(text(c.title, { size: ts, wt: 700, ls: -0.02, lh: 1.05, x: X(1), top: y, hex: '#1d1b17', role: 'title' })); y += CAP * ts + gapBelow(ts);
+    const bs = Math.max(INFO.size * 1.25, SECOND.size * 0.7);
+    for (const [i, t] of c.list.entries()) { const n = countLines('•  ' + t, SPAN(1, 12), { wt: 400, ls: 0 }, bs); els.push(text('•  ' + t, { size: bs, wt: 400, ls: 0, lh: 1.3, x: X(1), w: SPAN(1, 12), top: y, hex: '#2a2722', role: 'li' + i })); y += blockH(n, bs, 1.3) + bs * 0.6 }
+    const top = y + groupGap(), h = Math.min(L(16) - top, SPAN(1, 7) * PHOTO_ASPECT), w = h / PHOTO_ASPECT;
+    els.push(h > RH * 3 ? { k: 'p', x: X(1), y: top, w, h, stand: !ph, role: 'photo', radius: 1.6 } : { k: 'missing', why: 'no room for the photo' });
+    return { els, did: 'Looks like a phone note, not an ad: a title, bullet points, a photo pasted in. No logo, no button.' };
+  }, kinds('list'));
+
+  defS('performance', 'perfPostit', 'Post-it', { image: true }, ({ c, ph, lines }) => {
+    const cc = { ...c }; delete cc.date; delete cc.details;
+    const foot = offerBox(cc, { x: X(1), w: SPAN(1, 12), bottom: L(16) });
+    const nw = SPAN(1, 7), nh = nw * 0.92, nx = X(1) + GAP, ny = topY() + GAP;
+    const hand = { wt: 600, ls: 0, lh: 1.02, font: 'Caveat, "Comic Sans MS", cursive' }, pad = nw * 0.1;
+    const num = numberOf(c), rows = num ? [...lines, num] : lines;
+    const size = sizeFor(rows, nw - 2 * pad, nh * 0.62, hand), bh = blockH(rows.length, size, hand.lh), top = ny + (nh - bh) / 2;
+    const origin = `${f2(nw / 2 - pad)}cqw ${f2(ny + nh / 2 - top)}cqw`;
+    return { els: [cover(ph), scrim('bottom', foot.top, H),
+      { k: 'r', x: nx, y: ny, w: nw, h: nh, hex: '#ffe45c', rot: -4, shadow: true, role: 'note', over: ['photo'] },
+      text(lines.join('\n'), { ...hand, size, x: nx + pad, w: nw - 2 * pad, top, rot: -4, origin, hex: '#1d1b17', pre: true, role: 'notetext', over: ['note', 'photo'] }),
+      ...(num ? [text(num, { ...hand, size, x: nx + pad, w: nw - 2 * pad, top: top + (lines.length) * size * hand.lh, rot: -4, origin: `${f2(nw / 2 - pad)}cqw ${f2(ny + nh / 2 - top - lines.length * size * hand.lh)}cqw`, hex: '#d7263d', role: 'notenum', over: ['note', 'photo'] })] : []),
+      ...foot.els],
+      did: 'The product fills the page with a handwritten note stuck on it; the button sits on a band at the foot.' };
+  });
+
+  // ─── Editorial: centred, small, quiet; the image and the empty space do the work ───
+  const cap2 = () => SECOND.size * 2.5;   // gentle scale: the title never shouts
+  defS('editorial', 'edCover', 'Cover', { image: true }, ({ c, ph, lines }) => {
+    const cx = centre(), els = [cover(ph)];
+    if (c.logo) els.push(logo(c.logo, cx, M, logoH(), { align: 'center', color: 'field' }));
+    let yb = L(16);
+    if (c.action) { const b = button(c.action, cx, 0, { align: 'center', color: 'field' }); b.y = yb - b.h; els.push(b); yb = b.y - GAP * 1.4 }
+    for (const k of ['caption', 'date']) if (c[k]) { const n = countLines(c[k], SPAN(3, 10), INFO, INFO.size); els.push(info(c[k], { x: X(3), w: SPAN(3, 10), align: 'center', base: yb, color: 'field', role: k })); yb -= blockH(n, INFO.size, INFO.lh) + GAP * 0.8 }
+    if (c.details) { els.push(info(c.details, { x: X(2), w: SPAN(2, 11), align: 'center', base: yb - GAP * 0.4, color: 'field', role: 'details' })); yb -= CAP * INFO.size + GAP * 1.6 }
+    const size = Math.min(sizeFor(lines, SPAN(3, 10), RH * 2.6), cap2());
+    els.push(disp(lines.join('\n'), { size, x: X(1), w: SPAN(1, 12), align: 'center', base: yb, color: 'field' }));
+    return { els, did: 'The image covers the page; a small centred title and the logo sit on it, with a lot of air.' };
+  });
+  defS('editorial', 'edFramed', 'Framed', { image: true }, ({ c, ph, lines, arr = 0 }) => {
+    const cx = centre(), els = []; let y = M;
+    if (c.logo) { const lg = logo(c.logo, cx, y, logoH(), { align: 'center' }); els.push(lg); y += lg.h + clear(lg) * 1.3 }
+    let yb = L(16);
+    if (c.action) { const b = button(c.action, cx, 0, { align: 'center' }); b.y = yb - b.h; els.push(b); yb = b.y - GAP * 1.4 }
+    for (const k of ['caption', 'date', 'details']) if (c[k]) { const n = countLines(c[k], SPAN(3, 10), INFO, INFO.size); els.push(info(c[k], { x: X(3), w: SPAN(3, 10), align: 'center', base: yb, role: k })); yb -= blockH(n, INFO.size, INFO.lh) + GAP * 0.7 }
+    const size = Math.min(sizeFor(lines, SPAN(3, 10), RH * 2.2), cap2());
+    const tb = yb - GAP * 0.6; els.push(disp(lines.join('\n'), { size, x: X(1), w: SPAN(1, 12), align: 'center', base: tb }));
+    const tTop = tb - blockH(lines.length, size, DISPLAY.lh), avail = tTop - GAP * 2 - y;
+    const h = Math.min(avail, SPAN(arr === 1 ? 4 : 3, arr === 1 ? 9 : 10) * PHOTO_ASPECT), w = h / PHOTO_ASPECT;
+    els.push(h > RH * 2 ? { k: 'p', x: cx - w / 2, y: y + (avail - h) / 2, w, h, stand: !ph, role: 'photo' } : { k: 'missing' });
+    return { els, did: 'The image framed on the centre line with generous margins; small centred type below it.' };
+  });
+  defS('editorial', 'edQuiet', 'Quiet', null, ({ c, ph, lines }) => {
+    const cx = centre(), els = [];
+    const size = Math.min(sizeFor(lines, SPAN(3, 10), RH * 3), cap2());
+    const tH = blockH(lines.length, size, DISPLAY.lh), tTop = (ph ? L(10) : L(7.5)) - tH / 2;
+    els.push(disp(lines.join('\n'), { size, x: X(1), w: SPAN(1, 12), align: 'center', top: tTop }));
+    const dTop = tTop - GAP * 1.4 - CAP * INFO.size;
+    if (c.details) els.push(info(c.details, { x: X(2), w: SPAN(2, 11), align: 'center', top: dTop, role: 'details' }));
+    let y = tTop + tH + GAP * 1.6;
+    for (const k of ['date', 'caption']) if (c[k]) { const n = countLines(c[k], SPAN(3, 10), INFO, INFO.size); els.push(info(c[k], { x: X(3), w: SPAN(3, 10), align: 'center', top: y, role: k })); y += blockH(n, INFO.size, INFO.lh) + GAP * 0.7 }
+    let yb = L(16);
+    if (c.logo) { const lg = logo(c.logo, cx, 0, logoH(), { align: 'center' }); lg.y = yb - lg.h; els.push(lg); yb = lg.y - clear(lg) }
+    if (c.action) { const b = button(c.action, cx, 0, { align: 'center' }); b.y = yb - b.h; els.push(b) }
+    if (ph) { const avail = dTop - GAP * 2 - M, h = Math.min(avail, SPAN(5, 8) * PHOTO_ASPECT), w = h / PHOTO_ASPECT; els.push(h > RH * 1.5 ? { k: 'p', x: cx - w / 2, y: M + (avail - h) / 2, w, h, role: 'photo' } : { k: 'missing' }) }
+    return { els, did: 'A small title on the centre of the page and almost nothing else.' };
+  });
+  defS('editorial', 'edDiptych', 'Diptych', { image: true }, ({ c, ph, lines, arr = 0 }) => {
+    const els = [cover(ph)], right = arr !== 1, pad = inset();
+    els.push({ k: 'r', x: right ? W / 2 : 0, y: 0, w: W / 2, h: H, color: 'field', role: 'panel', ok: true, bleed: true });
+    const x0 = (right ? W / 2 : 0) + pad, cw = W / 2 - 2 * pad, cx = x0 + cw / 2;
+    const col = { x: x0, w: cw, align: 'center' };
+    if (c.logo) els.push(logo(c.logo, cx, Math.max(M, pad * 0.8), logoH(), { align: 'center' }));
+    const size = Math.min(sizeFor(lines, cw, RH * 3), cap2());
+    const tH = blockH(lines.length, size, DISPLAY.lh), tTop = L(8) - tH / 2;
+    els.push(disp(lines.join('\n'), { size, ...col, top: tTop }));
+    if (c.details) els.push(info(c.details, { ...col, base: tTop - gapBelow(INFO.size) * 2, role: 'details' }));
+    let y = tTop + tH + gapBelow(size) * 1.4;
+    for (const k of ['date', 'caption']) if (c[k]) { const n = countLines(c[k], cw, INFO, INFO.size); els.push(info(c[k], { ...col, top: y, role: k })); y += blockH(n, INFO.size, INFO.lh) + gapBelow(INFO.size) }
+    if (c.action) { const bt = button(c.action, cx, 0, { align: 'center' }); bt.y = H - Math.max(M, pad * 0.8) - bt.h; els.push(bt) }
+    return { els, did: 'Half image, half calm: a centred column of small type, padded inside the other half.' };
+  });
+
+  // ─── Street: capitals that fill the Frame, overlap, a tag that breaks the angle ───
+  function fillLines(lines, top, bottom) {
+    const gapL = RH * 0.12;
+    let sizes = lines.map(l => fitSize([l], SPAN(1, 12)));
+    const capSum = sizes.reduce((a, s) => a + CAP * s, 0), need = capSum + gapL * (lines.length - 1), avail = bottom - top;
+    if (need > avail) { const f = (avail - gapL * (lines.length - 1)) / capSum; sizes = sizes.map(s => s * f) }
+    const els = []; let y = top;
+    lines.forEach((l, i) => { els.push(disp(l, { size: sizes[i], x: X(1), top: y, role: i ? 'title' + i : 'title', over: ['photo', 'tag', 'tagtext'] })); y += CAP * sizes[i] + gapL });
+    return { els, bottom: y - gapL };
+  }
+  function streetFoot(c, color = 'ink', bg = 'ink', fg = 'field') {
+    const els = []; let top = L(16);
+    if (c.action) { const b = button(c.action, X(1), 0, { bg, fg }); b.y = L(16) - b.h; els.push(b); top = b.y }
+    if (c.caption) { const n = countLines(c.caption, SPAN(7, 12), INFO, INFO.size); els.push(info(c.caption, { x: X(7), w: SPAN(7, 12), align: 'right', base: L(16), color, role: 'caption' })); top = Math.min(top, L(16) - blockH(n, INFO.size, INFO.lh)) }
+    return { els, top };
+  }
+  defS('street', 'stFill', 'Fill', null, ({ c, ph, lines, arr = 0 }) => {
+    const foot = streetFoot(c);
+    const f = fillLines(lines, M, ph ? L(6) : foot.top - GAP * 1.5);
+    const els = [...f.els, ...foot.els];
+    if (ph) { const top = f.bottom + GAP, h = Math.min(foot.top - GAP - top, SPAN(1, 12) * PHOTO_ASPECT), w = h / PHOTO_ASPECT; els.unshift(h > RH * 2 ? { k: 'p', x: arr === 1 ? X(1) : XR(12) - w, y: top, w, h, role: 'photo', over: ['tag', 'tagtext'] } : { k: 'missing' }) }   // type over a photo needs a contrast check first; until then only the tag bridges them
+    const t = numberOf(c) || c.details;
+    if (t) els.push(...tag(t, XR(12), f.bottom - GAP * 0.2, arr === 2 ? 6 : -7, ['title', 'photo']));
+    return { els, did: 'Every line in capitals fitted to the full width, a rotated tag across the last one.' };
+  });
+  defS('street', 'stTag', 'Tag', { image: true }, ({ c, ph, lines }) => {
+    const els = [cover(ph)];
+    if (c.logo) els.push(logo(c.logo, X(1), M, logoH(), { color: 'field' }));
+    const foot = streetFoot(c, 'field', 'field', 'ink');
+    const sizes = lines.map(l => fitSize([l], SPAN(1, 12)));
+    const total = sizes.reduce((a, s) => a + CAP * s, 0) + RH * 0.12 * (lines.length - 1);
+    const f = fillLines(lines, Math.max(L(4), foot.top - GAP * 1.5 - total), foot.top - GAP * 1.5);
+    f.els.forEach(e => e.color = 'field');
+    els.push(...f.els, ...foot.els);
+    const t = numberOf(c) || c.details;
+    const first = f.els[0];
+    if (t) els.push(...tag(t, XR(12), first.top - GAP * 0.2, -8, ['title', 'photo']));
+    return { els, did: 'The image full bleed, the title in capitals across the bottom, a tag knocked onto it.' };
+  });
+  defS('street', 'stDrop', 'Drop', null, ({ c, ph, lines }) => {
+    const els = [];
+    const side = numberOf(c) || c.details;
+    let nsz = 0;
+    if (side) {
+      nsz = Math.min(fitSize([side], L(16) - M), SPAN(11, 12) / CAP);
+      const cap = CAP * nsz, k = w100(side, DISPLAY) / 100 * nsz;
+      els.push(disp(side, { size: nsz, x: XR(12) - cap, top: L(16), rot: -90, origin: 'top left', w: k, color: 'accent', role: 'date' }));
+    }
+    const foot = streetFoot(c);
+    foot.els.forEach(e => { if (e.role === 'caption') { e.x = X(5); e.w = SPAN(5, 10) } });
+    const size = sizeFor(lines, SPAN(1, 10), (ph ? L(7) : foot.top - GAP * 2) - M);
+    els.push(disp(lines.join('\n'), { size, x: X(1), top: M }));
+    const tb = M + blockH(lines.length, size, DISPLAY.lh);
+    els.push(...foot.els);
+    if (ph) els.push(photoIn({ c1: 1, c2: 10, top: tb + GAP, bottom: foot.top - GAP }, { ax: 'left' }));
+    return { els, did: 'Stacked capitals from the top; the number runs up the right edge.' };
+  });
+  defS('street', 'stRepeat', 'Repeat', null, ({ c, ph, lines }) => {
+    const els = [];
+    const ts = fitSize([c.title], SPAN(1, 12)), rowH = CAP * ts * 1.18;
+    for (let i = 0, y = M; y + CAP * ts <= L(16) + 0.01; i++, y += rowH) els.push(disp(c.title, { size: ts, x: X(1), top: y, opacity: 0.13, role: 'texture' + i, ok: true }));
+    const foot = streetFoot(c);
+    const size = sizeFor(lines, SPAN(1, 12), RH * 6);
+    const tH = blockH(lines.length, size, DISPLAY.lh), tTop = L(8) - tH / 2;
+    if (ph) { const h = Math.min(RH * 8, SPAN(3, 10) * PHOTO_ASPECT), w = h / PHOTO_ASPECT; els.push({ k: 'p', x: centre() - w / 2, y: L(8) - h / 2, w, h, role: 'photo', over: ['title', 'tag', 'tagtext'] }) }
+    els.push(disp(lines.join('\n'), { size, x: X(1), top: tTop, over: ['photo', 'tag', 'tagtext'] }));
+    const t = numberOf(c) || c.details;
+    if (t) els.push(...tag(t, XR(12), tTop - GAP * 0.2, 7, ['title', 'photo']));
+    els.push(...foot.els);
+    return { els, did: 'The title repeated faintly as a texture, the real one solid on top, a tag across its corner.' };
+  });
+  defS('street', 'stStrip', 'Strip', null, ({ c, ph }) => {
+    const els = [], mid = H / 2; let x = X(1), right = XR(12);
+    if (ph) { const h = H, w = h / PHOTO_ASPECT; els.push({ k: 'p', x: 0, y: 0, w, h, role: 'photo', bleed: true }); x = w + GAP * 2 }
+    if (c.action) { const b = button(c.action, XR(12), 0, { align: 'right' }); b.y = mid - b.h / 2; els.push(b); right = b.x - GAP * 3 }
+    const t = numberOf(c) || c.details;
+    let tagW = 0;
+    if (t) { const tg = tag(t, right, mid, -6, ['title']); tagW = tg[0].w; els.push(...tg); right -= tagW + GAP * 3 }
+    const size = Math.min(fitSize([c.title], right - x), (H - 2 * M) * 0.9 / CAP);
+    els.push(disp(c.title, { size, x, base: mid + CAP * size / 2 }));
+    return { els, did: 'One row for wide formats: the title in capitals, a tag, a hard-edged button.' };
+  }, { wideOnly: true });
+
+  // Performance check: the product stays visible (solid bands, cards and panels cover at most half of it)
+  for (const p of P) if (p.style === 'performance') p.oneLineFirst = true;
+  STYLES.performance.check = out => {
+    const ph = out.els.find(e => e.k === 'p' && e.role === 'photo'); if (!ph) return [];
+    const keep = SHAPES[state.format].keep || { top: 0, bottom: 0 };   // only what people can see counts
+    const vis = { x0: Math.max(0, ph.x), y0: Math.max(H * keep.top, ph.y), x1: Math.min(W, ph.x + ph.w), y1: Math.min(H * (1 - keep.bottom), ph.y + ph.h) };
+    const area = (vis.x1 - vis.x0) * (vis.y1 - vis.y0); let covered = 0;
+    for (const e of out.els) {
+      if (e.k === 'scrim') {
+        const s0 = e.side === 'top' ? e.y : e.y + e.h * (1 - e.solid), s1 = e.side === 'top' ? e.y + e.h * e.solid : e.y + e.h;   // the solid part
+        const f0 = e.side === 'top' ? s1 : e.y, f1 = e.side === 'top' ? e.y + e.h : s0;                                             // the fade
+        const clip = (a, b) => Math.max(0, Math.min(vis.y1, b) - Math.max(vis.y0, a));
+        covered += W * (clip(s0, s1) + clip(f0, f1) * 0.35);          // a fade to transparent mostly shows the product through
+      }
+      else if (e.k === 'r' && (e.role === 'card' || e.role === 'panel')) covered += Math.max(0, Math.min(vis.x1, e.x + e.w) - Math.max(vis.x0, e.x)) * Math.max(0, Math.min(vis.y1, e.y + e.h) - Math.max(vis.y0, e.y));
+    }
+    return covered / area > 0.55 ? ['the product is mostly hidden'] : [];
+  };
+  // what "best" means differs by style (Vary ranks with it)
+  const textShare = poster => { const pr = poster.getBoundingClientRect(); let a = 0; poster.querySelectorAll('.sheet-inner > .t, .sheet-inner > .tx').forEach(el => { if (el.style.opacity) return; const b = el.getBoundingClientRect(); a += b.width * b.height }); return a / (pr.width * pr.height) };
+  STYLES.performance.rank = out => { const n = out.els.find(e => e.k === 't' && e.role === 'date'); return (n ? Math.log(n.size / INFO.size) * 0.8 : 0) + (out.els.some(e => e.k === 'btn') ? 0.5 : 0) };
+  STYLES.editorial.rank = (out, poster) => 3 * (1 - textShare(poster)) - Math.max(0, new Set(out.els.filter(e => e.k === 't').map(e => Math.round(e.size * 10))).size - 3) * 0.6;
+  STYLES.street.rank = out => { const t = out.els.filter(e => e.k === 't' && /^title/.test(e.role)); return 2 * Math.max(0, ...t.map(e => e.size)) / W + 0.3 * out.els.filter(e => e.over && e.over.length).length };
+
+  const lum = hex => { const n = parseInt(hex.slice(1), 16); return 0.2126 * (n >> 16 & 255) + 0.7152 * (n >> 8 & 255) + 0.0722 * (n & 255) };
+  // "number-like": a price, a discount, a date or a time
+  const isNumberish = s => !!s && (/[%€$£]/.test(s) || s.replace(/\D/g, '').length / Math.max(1, s.replace(/\s/g, '').length) >= 0.3);
+
+  // Content ranked by importance: hero → anchor → support → fine print.
+  // (Stored under the kit's four slots: title, details, date, caption.)
+  const CONTENT_SETS = {
+    gallery: { title: 'Weather Report', details: 'Ines Vollmer', date: '19.09.–15.11.2026', caption: 'Kunstraum Lenz\nLenzgasse 14, 4056 Basel', action: 'Book tickets' },
+    ad:      { title: 'Run lighter.', details: 'Halden Trail 2', date: '–30%', caption: 'Offer ends 12 October. While stocks last.', action: 'Shop now', logo: 'HALDEN',
+               stat: '198 g', statLine: 'Our lightest trail shoe yet.',
+               review: { stars: 4.7, quote: 'Lightest shoe I have ever raced in.', by: 'Maya R., verified buyer' },
+               list: ['Carbon plate for push-off', '198 g per shoe', 'Grips on wet rock', 'Free returns for 60 days'],
+               compare: { them: 'A typical trail shoe', rows: [['Carbon plate', true, false], ['Under 200 g', true, false], ['Recycled upper', true, false], ['Free returns', true, true]] } },
+    event:   { title: 'Open Studio', details: 'Mara Lind and guests', date: 'Sat 4.10., 18–23h', caption: 'Werkhof 3, Zürich\nFree entry', action: 'Get tickets', list: ['Live music from 19h', 'Twelve open studios', 'Drinks at the bar'] },
+    quote:   { title: 'Make the thing you wish existed.', details: 'Ada Moreau', date: 'Studio talk No. 12', caption: '@slowmade' },
+  };
+  const state = { content: 'ad', format: 'poster', kind: 'phrase', ph: true, pal: 0, layout: 'perfOffer', list: [], idx: 0, style: 'performance', useFace: false };
+  function applyContent() {
+    const s = CONTENT_SETS[state.content];
+    const n = s.title.trim().split(/\s+/).length;
+    state.kind = n <= 1 ? 'word' : n <= 4 ? 'phrase' : 'sentence';
+    CONTENT[state.kind] = { ...s };
+  }
+  const TIERS = ['title', 'details', 'date', 'caption'];   // hero, anchor, support, fine print
+  const shown = r => (STYLE.tiers || TIERS).indexOf(r) < (SHAPES[state.format].carries ?? 4);
+  const cur = () => { const c = { ...CONTENT[state.kind] }; for (const r of TIERS) if (!shown(r)) delete c[r]; return c };
+  const $ = id => document.getElementById(id);
+
+  function lineOptions(kind, c, p) {
+    const words = c.title.split(' ');
+    if (kind === 'word') return [{ v: 0, lines: [c.title], label: c.title }];
+    const opts = kind === 'phrase' ? (p?.oneLineFirst ? [[c.title], words] : [words, [c.title]]) : [balance(words, 3), balance(words, 2), balance(words, 4)];
+    const seen = new Set(), out = [];
+    for (const l of opts) { const k = l.join('|'); if (!seen.has(k)) { seen.add(k); out.push({ v: out.length, lines: l, label: l.join(' / ') }) } }
+    return out;
+  }
+  const TEXT_ROLES = ['title', 'details', 'date', 'caption'];
+  const accentValues = () => ['none', ...TEXT_ROLES.filter(r => cur()[r])];
+  const dropHidden = out => { out.els = out.els.filter(e => !(e.k === 't' && TIERS.includes(e.role) && !shown(e.role))); return out };
+  // a format that carries fewer levels also hides those levels from the layout's content
+  const carriedContent = c => { const o = { ...c }; for (const r of TIERS) if (!shown(r)) delete o[r]; if (SHAPES[state.format].noAction) delete o.action; return o };
+  const accentLabel = v => v === 'none' ? 'Default' : q(cur()[v]);
+  const AXES = [
+    { key: 'lines',  label: 'Line breaks' },
+    { key: 'arr',    label: 'Arrangement', values: [0, 1, 2], labels: ['A', 'B', 'C'] },
+    { key: 'scale',  label: 'Scale', values: ['full', 'quiet'], labels: ['Full', 'Quieter'] },
+    { key: 'accent', label: 'Accent colour' },
+    { key: 'photo',  label: 'Image side', values: ['right', 'left'], labels: ['Right', 'Left'] },
+    { key: 'cta',    label: 'Button', values: ['drawn', 'native'], labels: ['In the image', 'Platform’s own'] },
+  ];
+
+  function runCandidate(p, idx, axes, lineOpts) {
+    const raw = { ...CONTENT[state.kind] };
+    const dUp = !!STYLE.display.upper, iUp = !!STYLE.info.upper;
+    const c = { ...raw, title: dUp ? up(raw.title) : raw.title };
+    if (iUp) for (const k of ['details', 'date', 'caption', 'action']) c[k] = up(c[k]);
+    if (axes.cta === 'native') delete c.action;          // the platform draws its own button under the ad
+    const words = c.title.split(' ');
+    const lines = lineOpts[axes.lines].lines.map(l => dUp ? up(l) : l);
+    const sh = SHAPES[state.format], Hfull = 100 * sh.ar;
+    const inset = sh.keep ? Hfull * sh.keep.top : 0;
+    if (sh.keep) setShape(state.format, Hfull * (1 - sh.keep.top - sh.keep.bottom));   // compose inside the uncovered band
+    SCALE = axes.scale === 'quiet' ? 0.8 : 1;
+    FLIP = axes.photo === 'left';
+    const r = rngFor(7000 + idx * 97 + 13 + axes.arr * 7919);
+    const wide = H < 70;
+    let side = null;
+    if (wide && state.ph && !p.needs?.image && !OWN_PHOTO.has(p.id)) {
+      const n = Math.round(NC * 0.62);
+      if (FLIP) { colA = NC - n + 1; colB = NC; const x1 = Xr(colA) - G, w = Math.max(x1, H / PHOTO_ASPECT), h = w * PHOTO_ASPECT; side = { k: 'p', x: x1 - w, y: (H - h) / 2, w, h, role: 'photo', bleed: true } }
+      else { colB = n; const x0 = Xr(colB + 1), w = Math.max(W - x0, H / PHOTO_ASPECT), h = w * PHOTO_ASPECT; side = { k: 'p', x: x0, y: (H - h) / 2, w, h, role: 'photo', bleed: true } }
+    }
+    let out;
+    try { out = dropHidden(p.fn({ c: p.style ? carriedContent(c) : c, kind: state.kind, ph: state.ph && !side, r, words, lines, arr: axes.arr })) }
+    finally { colA = 1; colB = NC; SCALE = 1; FLIP = false; if (sh.keep) setShape(state.format) }
+    if (side && p.id === 'runoff') { side.ok = true; out.els.push(side) } else if (side) out.els.unshift(side);
+    if (inset) out.els.forEach(e => { for (const k of ['y', 'top', 'base', 'cy']) if (e[k] != null) e[k] += inset });
+    if (sh.keep) out.els.forEach(e => {         // images, panels and bands that fill the band run on under the app's bars; only text keeps clear
+      const bandEnd = Hfull * (1 - sh.keep.bottom);
+      if (e.k === 'r' && e.role === 'panel' && e.y <= inset + 0.5 && e.y + e.h >= bandEnd - 0.5) { e.y = 0; e.h = Hfull; return }
+      if (e.k === 'scrim' && e.side === 'top' && e.y <= inset + 0.5) { const sp = e.h * e.solid + e.y; e.h += e.y; e.y = 0; e.solid = sp / e.h; return }
+      if (e.k === 'scrim' && e.side === 'bottom' && e.y + e.h >= bandEnd - 0.5) { const sp = e.h * e.solid + (Hfull - e.y - e.h); e.h = Hfull - e.y; e.solid = sp / e.h; return }
+      if (e.k !== 'p' || !e.bleed || e.y > inset + 0.5 || e.y + e.h < bandEnd - 0.5) return;
+      const w = Math.max(W, Hfull / PHOTO_ASPECT, e.w), h = w * PHOTO_ASPECT;
+      Object.assign(e, { x: e.x + (e.w - w) / 2, y: (Hfull - h) / 2, w, h });
+    });
+    if (axes.accent !== 'none') {
+      const hit = axes.accent === 'title' ? (r => /^title\d*$/.test(r)) : (r => r === axes.accent);
+      out.els.forEach(e => { if ((e.k === 't' || e.k === 'ring') && hit(e.role)) e.color = 'accent' });
+    }
+    return out;
+  }
+
+  const sig = out => JSON.stringify(out.els.filter(e => e.k !== 'missing').map(e =>
+    [e.k, e.role, e.s, e.color, e.rot, ...['x', 'y', 'w', 'h', 'top', 'base', 'size', 'cx', 'cy', 'r'].map(k => e[k] == null ? null : Math.round(e[k] * 2))]));
+
+  function makePoster(out, pal, withKeep) {
+    const poster = document.createElement('div'); poster.className = 'poster';
+    poster.style.aspectRatio = `100 / ${H}`;
+    poster.style.setProperty('--field', pal.field); poster.style.setProperty('--ink', pal.ink); poster.style.setProperty('--accent', pal.accent);
+    poster.style.setProperty('--blend', lum(pal.ink) < lum(pal.field) ? 'multiply' : 'screen');
+    const inner = document.createElement('div'); inner.className = 'sheet-inner'; inner.style.cssText = 'position:absolute;inset:0';
+    poster.appendChild(inner); render(out.els, inner);
+    const keep = SHAPES[state.format].keep;
+    if (withKeep && keep) {
+      poster.insertAdjacentHTML('beforeend', `<div class="keepzone" style="top:0;height:${keep.top * 100}%">Covered by the app</div><div class="keepzone" style="bottom:0;height:${keep.bottom * 100}%">Covered by the app</div>` +
+        (keep.side ? `<div class="keepzone" style="top:0;bottom:0;right:auto;width:${keep.side * 100}%"></div><div class="keepzone" style="top:0;bottom:0;left:auto;width:${keep.side * 100}%"></div>` : ''));
+    }
+    return poster;
+  }
+
+  // the shared checker, plus: no text in areas the platform covers
+  function pageCheck(poster, els) {
+    const issues = check(poster, els);
+    if (STYLE.check) issues.push(...STYLE.check({ els }));
+    poster.querySelectorAll('.sheet-inner > [data-inside]').forEach(el => {     // text meant to sit inside a shape must fit inside it
+      const sh = poster.querySelector(`.sheet-inner > [data-role="${el.dataset.inside}"]`); if (!sh) return;
+      const a = sh.getBoundingClientRect(), rg = document.createRange(); rg.selectNodeContents(el);
+      const t = rg.getBoundingClientRect(), eb = el.getBoundingClientRect();
+      const box = { l: t.left, r: t.right, t: eb.top, b: eb.bottom };
+      const round = sh.style.borderRadius === '50%';
+      const cx = (a.left + a.right) / 2, cy = (a.top + a.bottom) / 2, rad = a.width / 2;
+      const inside = round
+        ? [[box.l, box.t], [box.r, box.t], [box.l, box.b], [box.r, box.b]].every(([x, y]) => Math.hypot(x - cx, y - cy) <= rad * 0.97)
+        : box.l >= a.left && box.r <= a.right && box.t >= a.top && box.b <= a.bottom;
+      if (!inside) issues.push(`${el.dataset.role} does not fit inside its ${el.dataset.inside}`);
+    });
+    {                                            // padding inside panels and cards
+      const pr = poster.getBoundingClientRect(), u = 100 / pr.width, minPad = M * 0.9;
+      const boxes = [...poster.querySelectorAll('.sheet-inner > [data-role="panel"], .sheet-inner > [data-role="card"]')].map(el => {
+        const b = el.getBoundingClientRect();
+        return { x0: Math.max(0, (b.left - pr.left) * u), y0: Math.max(0, (b.top - pr.top) * u), x1: Math.min(W, (b.right - pr.left) * u), y1: Math.min(H, (b.bottom - pr.top) * u) };
+      });
+      if (boxes.length) poster.querySelectorAll('.sheet-inner > .t, .sheet-inner > .tx').forEach(el => {
+        if (el.style.transform) return;
+        const b = el.getBoundingClientRect(), x0 = (b.left - pr.left) * u, y0 = (b.top - pr.top) * u, x1 = (b.right - pr.left) * u, y1 = (b.bottom - pr.top) * u;
+        const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+        for (const bx of boxes) if (cx > bx.x0 && cx < bx.x1 && cy > bx.y0 && cy < bx.y1 && Math.min(x0 - bx.x0, bx.x1 - x1, y0 - bx.y0, bx.y1 - y1) < minPad - 0.2) { issues.push('too close to the edge of its panel'); break }
+      });
+    }
+    const lg = poster.querySelector('.sheet-inner > [data-role="logo"]');
+    if (lg) {                                   // space kept clear around the logo
+      const b = lg.getBoundingClientRect(), pad = b.height * 0.35;
+      poster.querySelectorAll('.sheet-inner > [data-role]').forEach(el => {
+        if (el === lg || el.dataset.ok === '1' || (el.dataset.over || '').includes('logo')) return;
+        const r = el.getBoundingClientRect();
+        if (Math.min(b.right + pad, r.right) - Math.max(b.left - pad, r.left) > 1 && Math.min(b.bottom + pad, r.bottom) - Math.max(b.top - pad, r.top) > 1) issues.push('too close to the logo');
+      });
+    }
+    const keep = SHAPES[state.format].keep;
+    if (keep) {
+      const pr = poster.getBoundingClientRect(), u = 100 / pr.width;
+      poster.querySelectorAll('.sheet-inner > .t, .sheet-inner > svg').forEach(el => {
+        const b = el.getBoundingClientRect(), y0 = (b.top - pr.top) * u, y1 = (b.bottom - pr.top) * u;
+        const x0 = (b.left - pr.left) * u, x1 = (b.right - pr.left) * u, sd = (keep.side || 0) * W;
+        if (y0 < H * keep.top - 0.3 || y1 > H * (1 - keep.bottom) + 0.3 || x0 < sd - 0.3 || x1 > W - sd + 0.3) issues.push('text under the app’s interface');
+      });
+    }
+    return issues;
+  }
+
+  const DEF = { lines: 0, arr: 0, scale: 'full', accent: 'none', photo: 'right', cta: 'drawn' };
+  function candidatesFor(p, idx) {
+    const lineOpts = lineOptions(state.kind, cur(), p);
+    const probe = $('probe');
+    const defSig = sig(runCandidate(p, idx, DEF, lineOpts));
+    const arrVaries = [1, 2].some(a => sig(runCandidate(p, idx, { ...DEF, arr: a }, lineOpts)) !== defSig);
+    const photoMatters = state.ph && sig(runCandidate(p, idx, { ...DEF, photo: 'left' }, lineOpts)) !== defSig;
+    const vals = {
+      lines: lineOpts.map(o => o.v), arr: arrVaries ? [0, 1, 2] : [0], scale: p.keepScale ? ['full'] : ['full', 'quiet'],
+      accent: accentValues(), photo: photoMatters ? ['right', 'left'] : ['right'],
+      cta: SHAPES[state.format].nativeCTA && cur().action && p.style ? ['drawn', 'native'] : ['drawn'],
+    };
+    let combos = [{}];
+    for (const k of Object.keys(vals)) combos = combos.flatMap(cmb => vals[k].map(v => ({ ...cmb, [k]: v })));
+    const seen = new Set(), list = [], pal = PALETTES[state.pal];
+    for (const axes of combos) {
+      const out = runCandidate(p, idx, axes, lineOpts);
+      const s = sig(out); if (seen.has(s)) continue; seen.add(s);
+      probe.replaceChildren(makePoster(out, pal));
+      if (pageCheck(probe.firstChild, out.els).length) continue;
+      const texts = out.els.filter(e => e.k === 't');
+      const maxSize = Math.max(...texts.map(e => e.size || 0));
+      const edges = new Set(texts.filter(e => !e.rot && (e.align || 'left') === 'left').map(e => Math.round(e.x))).size;
+      const isDef = Object.keys(DEF).every(k => axes[k] === DEF[k]);
+      const styleScore = STYLE.rank ? STYLE.rank(out, probe.firstChild) : 0;
+      list.push({ axes, out, score: styleScore + Math.log(maxSize / INFO.size) - 0.12 * edges + (isDef ? 1 : 0) + (axes.accent === 'none' ? 0.15 : 0) - (axes.scale === 'quiet' ? 0.35 : 0) });
+    }
+    probe.replaceChildren();
+    const WT = { lines: 3, arr: 3, photo: 2, scale: 1.5, accent: 1, cta: 1.5 };
+    const dist = (a, b) => Object.keys(WT).reduce((d, k) => d + (a.axes[k] !== b.axes[k] ? WT[k] : 0), 0);
+    list.sort((a, b) => b.score - a.score);
+    const ordered = list.length ? [list.shift()] : [];
+    while (list.length) {
+      let bi = 0, bv = -Infinity;
+      list.forEach((c, i) => { const v = Math.min(...ordered.slice(-3).map(o => dist(o, c))) + c.score * 0.8; if (v > bv) { bv = v; bi = i } });
+      ordered.push(list.splice(bi, 1)[0]);
+    }
+    return { list: ordered, lineOpts };
+  }
+
+  const fits = p => (p.needsKind || []).every(k => cur()[k] != null) && (p.style || 'swiss') === state.style && (!p.wideOnly || H < 70) && p.fits.includes(state.kind) && (!p.needsNumber || isNumberish(cur().date))
+    && !(SHAPES[state.format].carries < 3 && ['index', 'badge', 'dateBehind', 'label', 'sidebar', 'fourCorners'].includes(p.id));   // built around the smaller text
+
+  // The library: which layouts work for this content in this format.
+  let lib = { key: '', items: [], dropped: [] };
+  function computeLib() {
+    const key = [state.content, state.format, state.ph, state.pal, state.style, state.useFace].join('|');
+    if (lib.key === key) return;
+    const pal = PALETTES[state.pal], probe = $('probe');
+    const items = [], dropped = [];
+    P.forEach((p, i) => {
+      if (!fits(p)) return;
+      const out = runCandidate(p, i, DEF, lineOptions(state.kind, cur(), p));
+      probe.replaceChildren(makePoster(out, pal));
+      if (!pageCheck(probe.firstChild, out.els).length) { items.push({ p, i, out }); return }
+      const { list } = candidatesFor(p, i);
+      if (list.length) items.push({ p, i, out: list[0].out }); else dropped.push(p.name);
+    });
+    probe.replaceChildren();
+    lib = { key, items, dropped };
+  }
+
+  let lineOptsCur = [];
+  function selectLayout(id, keepAxes) {
+    setShape(state.format);
+    computeLib();
+    if (!lib.items.some(it => it.p.id === id)) id = lib.items[0]?.p.id;
+    if (!id) {                                  // nothing in this style fits this format: say so
+      state.list = []; state.idx = 0;
+      $('stage').querySelector('.poster')?.remove();
+      $('lname').textContent = 'No layout fits';
+      $('did').textContent = `None of the ${STYLES[state.style].label} layouts pass the checks for this content at this format. Try another style or format.`;
+      $('count').textContent = ''; $('choices').replaceChildren(); $('strip').replaceChildren();
+      ['prev', 'next', 'fwd'].forEach(k => $(k).disabled = true);
+      renderLib(); return;
+    }
+    const idx = P.findIndex(p => p.id === id), p = P[idx];
+    const prev = keepAxes && state.list[state.idx]?.axes;
+    const { list, lineOpts } = candidatesFor(p, idx);
+    state.layout = id; state.list = list; lineOptsCur = lineOpts; state.idx = 0;
+    if (prev) { const j = list.findIndex(c => Object.keys(prev).every(k => c.axes[k] === prev[k])); if (j >= 0) state.idx = j }
+    show(); renderLib();
+  }
+
+  function show() {
+    const p = byId(state.layout), cand = state.list[state.idx], pal = PALETTES[state.pal], sh = SHAPES[state.format];
+    const stage = $('stage');
+    stage.querySelector('.poster')?.remove();
+    stage.style.setProperty('--arinv', String(100 / H));
+    if (cand) stage.prepend(makePoster(cand.out, pal, true));
+    $('fmtnote').textContent = `${sh.label} · ${sh.px}` + (sh.view ? ` · seen about ${sh.view}px wide, so text is at least ${INFO.size.toFixed(1)}% of the width` : '') + (sh.keep ? ' · hatched areas are covered by the app' : '') + (sh.carries ? ` · carries only the ${sh.carries === 2 ? 'two' : 'three'} most important lines` : '');
+    $('lname').textContent = p.name;
+    $('did').textContent = cand ? cand.out.did : '';
+    $('count').textContent = state.list.length ? `${state.idx + 1} of ${state.list.length}` : '';
+    ['prev', 'next', 'fwd'].forEach(id => $(id).disabled = state.list.length < 2);
+
+    const box = $('choices'); box.replaceChildren();
+    for (const ax of AXES) {
+      const order = ax.key === 'lines' ? lineOptsCur.map(o => o.v) : ax.key === 'accent' ? accentValues() : ax.values;
+      const present = new Set(state.list.map(c => c.axes[ax.key]));
+      const values = order.filter(v => present.has(v));
+      if (values.length < 2) continue;
+      const labels = values.map(v => ax.key === 'lines' ? lineOptsCur[v].label : ax.key === 'accent' ? accentLabel(v) : ax.labels[ax.values.indexOf(v)]);
+      const row = document.createElement('div'); row.className = 'choice';
+      row.innerHTML = `<span class="lab"></span><div class="pills" role="group"></div>`;
+      row.querySelector('.lab').textContent = ax.label;
+      row.querySelector('.pills').setAttribute('aria-label', ax.label);
+      values.forEach((v, i) => {
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'pill';
+        b.textContent = labels[i]; b.title = labels[i];
+        b.setAttribute('aria-pressed', String(cand && cand.axes[ax.key] === v));
+        b.addEventListener('click', () => setAxis(ax.key, v));
+        row.querySelector('.pills').appendChild(b);
+      });
+      box.appendChild(row);
+    }
+
+    const strip = $('strip'); strip.replaceChildren();
+    const n = Math.min(8, state.list.length), startAt = state.idx < 8 ? 0 : state.idx - 7;
+    strip.style.gridTemplateColumns = `repeat(${H < 40 ? 2 : 4}, 1fr)`;
+    for (let k = startAt; k < startAt + n; k++) {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'thumb';
+      b.setAttribute('aria-label', `Variation ${k + 1}`);
+      if (k === state.idx) b.setAttribute('aria-current', 'true');
+      b.appendChild(makePoster(state.list[k].out, pal));
+      b.addEventListener('click', () => { state.idx = k; show(); toast(`Variation ${k + 1} applied`) });
+      strip.appendChild(b);
+    }
+  }
+
+  function setAxis(key, v) {
+    const now = state.list[state.idx].axes;
+    let best = -1, bestScore = -1;
+    state.list.forEach((c, i) => {
+      if (c.axes[key] !== v) return;
+      const same = Object.keys(now).filter(k => k !== key && c.axes[k] === now[k]).length;
+      if (same > bestScore) { bestScore = same; best = i }
+    });
+    if (best >= 0) { state.idx = best; show(); toast('Applied') }
+  }
+  function vary(d) {
+    if (state.list.length < 2) return;
+    state.idx = (state.idx + d + state.list.length) % state.list.length;
+    show(); toast(`Variation ${state.idx + 1} of ${state.list.length}`);
+  }
+  let tt; function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 1100) }
+
+  function renderLib() {
+    const el = $('lib'); el.replaceChildren();
+    const pal = PALETTES[state.pal];
+    el.style.gridTemplateColumns = `repeat(${H < 40 ? 2 : 3}, 1fr)`;
+    $('libcount').textContent = `${lib.items.length} fit`;
+    for (const { p, out } of lib.items) {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'tile';
+      if (p.id === state.layout) b.setAttribute('aria-current', 'true');
+      b.appendChild(makePoster(out, pal));
+      const s = document.createElement('span'); s.textContent = p.name; b.appendChild(s);
+      b.addEventListener('click', () => { selectLayout(p.id); toast(`${p.name} applied`) });
+      el.appendChild(b);
+    }
+    if (lib.dropped.length) {
+      const n = document.createElement('p'); n.className = 'none';
+      n.textContent = `Not offered for this format: ${lib.dropped.join(', ')}. None of their variations pass the checks.`;
+      el.appendChild(n);
+    }
+  }
+
+  // try-it controls
+  function seg(id, key, parse) {
+    const root = $(id);
+    root.addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      root.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      state[key] = parse(b.dataset.v);
+      if (key === 'content') applyContent();
+      selectLayout(state.layout, true);
+    });
+  }
+  seg('content', 'content', v => v); seg('photo', 'ph', v => v === '1');
+  const fmt = $('format');
+  for (const [k, s] of Object.entries(SHAPES)) { const o = document.createElement('option'); o.value = k; o.textContent = `${s.label} · ${s.px}`; fmt.appendChild(o) }
+  fmt.addEventListener('change', () => { state.format = fmt.value; selectLayout(state.layout, true) });
+  PALETTES.forEach((pp, i) => {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'sw';
+    b.style.background = pp.field; b.setAttribute('aria-label', pp.name); b.setAttribute('aria-pressed', String(i === 0));
+    b.innerHTML = `<i style="background:${pp.ink}"></i>`;
+    b.addEventListener('click', () => { $('pal').querySelectorAll('.sw').forEach(x => x.setAttribute('aria-pressed', String(x === b))); state.pal = i; selectLayout(state.layout, true) });
+    $('pal').appendChild(b);
+  });
+  $('next').addEventListener('click', () => vary(1));
+  $('fwd').addEventListener('click', () => vary(1));
+  $('prev').addEventListener('click', () => vary(-1));
+  document.addEventListener('keydown', e => {
+    if (e.metaKey || e.ctrlKey || e.altKey || e.target.closest('select')) return;
+    if (e.key === 'v' || e.key === 'V') { e.preventDefault(); vary(1) }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); vary(1) }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); vary(-1) }
+  });
+  window.__pane = { state, select: selectLayout, lib: () => lib, count: () => state.list.length };
+
+  function renderFaceNote() {
+    const f = STYLES[state.style].face, el = $('facenote');
+    el.hidden = !f; if (!f) return;
+    el.replaceChildren();
+    const t = document.createElement('span');
+    t.textContent = state.useFace ? `Title set in ${f.family}.` : `This style suggests ${f.family}, ${f.note}.`;
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'pill';
+    b.textContent = state.useFace ? 'Use my font' : 'Use it';
+    b.addEventListener('click', () => { state.useFace = !state.useFace; setStyle(state.style, state.useFace); renderFaceNote(); selectLayout(state.layout, true); toast(state.useFace ? `${f.family} applied` : 'Your font is back') });
+    el.append(t, b);
+  }
+  $('style').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    $('style').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    state.style = b.dataset.v; state.useFace = false; setStyle(state.style, false); renderFaceNote();
+    selectLayout(state.layout, true); toast(`${STYLES[state.style].label} style`);
+  });
+  window.__pane.setStyle = k => { $('style').querySelector(`[data-v="${k}"]`).click() };
+  window.__pane.force = id => { setShape(state.format); const i = P.findIndex(p => p.id === id), p = P[i]; const o = runCandidate(p, i, DEF, lineOptions(state.kind, cur(), p)); const st = $('stage'); st.querySelector('.poster')?.remove(); st.prepend(makePoster(o, PALETTES[state.pal], true));
+    const poster = st.querySelector('.poster'), pr = poster.getBoundingClientRect(), u = 100 / pr.width;
+    return [...poster.querySelectorAll('.sheet-inner > [data-role]')].map(el => { const b = el.getBoundingClientRect(); return `${el.dataset.role}: y ${((b.top - pr.top) * u).toFixed(1)}–${((b.bottom - pr.top) * u).toFixed(1)} x ${((b.left - pr.left) * u).toFixed(1)}–${((b.right - pr.left) * u).toFixed(1)} fs ${el.style.fontSize}` }) };
+  window.__pane.w100 = t => w100(t, DISPLAY);
+  window.__pane.checkStage = () => [...new Set(pageCheck($('stage').querySelector('.poster'), state.list[state.idx].out.els))];
+  window.__pane.diag = () => { setShape(state.format); const out = {}; P.forEach((p, i) => { if (!fits(p)) return; const o = runCandidate(p, i, DEF, lineOptions(state.kind, cur(), p)); const pr = $('probe'); pr.replaceChildren(makePoster(o, PALETTES[state.pal])); out[p.name] = [...new Set(pageCheck(pr.firstChild, o.els))].join('; ') || 'ok' }); $('probe').replaceChildren(); return out };
+  setStyle(state.style, false); renderFaceNote();
+  applyContent();
+  const faceLoads = ['400 100px "Instrument Serif"', '400 100px Anton', '700 100px Geist', '600 100px Caveat'].map(f => document.fonts ? document.fonts.load(f).catch(() => {}) : null);
+  const whenSized = fn => {
+    if ($('stage').getBoundingClientRect().width > 0) return fn();
+    const ro = new ResizeObserver(() => { if ($('stage').getBoundingClientRect().width > 0) { ro.disconnect(); fn() } });
+    ro.observe($('stage'));
+  };
+  Promise.all([...faceLoads, document.fonts ? document.fonts.ready : null]).then(() => whenSized(() => { cache.clear(); lib.key = ''; selectLayout(state.layout) }));
+})();
+</script>
