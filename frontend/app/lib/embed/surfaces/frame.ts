@@ -8,11 +8,14 @@
  * the transitions' shaders. setTime is one synchronous paint. A font or shader that fails REJECTS
  * the mount — the runtime then keeps the poster, which is a correct still, never a wrong picture.
  *
- * Fit and bleed without touching the painter: the background is painted once across the whole
- * box (a paintLayerStack call with no layers, sized to the box in artboard units), then the layers
- * are painted under the fit transform with no background, clipped to the artboard (the editor
- * crops there too). The doc-level post chain runs after the clip is lifted, on the whole device
- * canvas (applyStackPost), so it covers the bleed as well.
+ * Fit and bleed without touching the painter: the Frame is painted into an ARTBOARD-SIZED
+ * offscreen canvas — its background, then its layers at the origin — so every effect that reads
+ * the canvas behind a layer (backdrop shader, glass and displacement lenses, background blur, long
+ * shadow) sees exactly the canvas the editor gives it, wherever Fit puts the Frame (R11). The
+ * offscreen's own bounds crop the layers at the artboard edge, as the editor does (R7). The
+ * visible canvas gets the background across the whole box (the bleed), the offscreen blitted at
+ * the Frame's whole-pixel position, then the doc-level post chain over everything, so it covers
+ * the bleed as well.
  */
 import type { EmbedHandle, EmbedSurface } from '../contract'
 import { assetKey, type FrameSnapshot, type FrameVariant } from '../frame/types'
@@ -56,8 +59,10 @@ export function stackItemsFor(v: FrameVariant): StackItem[] {
 function missingInlinedAsset(v: FrameVariant, urls: Record<string, string>): boolean {
   for (const l of v.layers) {
     if (l.kind !== 'image') continue
-    const img = l as LocalLayer & { filename?: string; standIn?: boolean; clip?: ImageClip }
-    if (img.filename && !img.standIn && !(assetKey('image', img.filename) in urls)) return true
+    // A stand-in that names a file is checked too: the gatherer always stores its key (the file,
+    // or an undecodable `data:,` when the file was not there — R12).
+    const img = l as LocalLayer & { filename?: string; clip?: ImageClip }
+    if (img.filename && !(assetKey('image', img.filename) in urls)) return true
     const clip = img.clip
     if (clip && clip.frames > 0) {
       for (let i = 0; i < clip.frames; i++) if (!(assetKey('clipFrame', clipFrameKey(clip, i)) in urls)) return true
@@ -129,35 +134,67 @@ const frameSurface: EmbedSurface = {
       const provider = (slot: number) => stills.get(slot) ?? null
       let lastT = 0
 
+      // The artboard-sized canvas the Frame is painted into (R11). One per handle, resized only
+      // when the Frame's device size changes.
+      const art = document.createElement('canvas')
+      const artCtx = art.getContext('2d')
+      if (!artCtx) throw new Error('embed: no 2D context')
+
+      /** The background alone (a paintLayerStack call with no layers) across the UNION of the box
+       *  and the Frame's rect, in device pixels [ux0, ux1] × [uy0, uy1], drawn on a canvas whose
+       *  own origin sits at (ox, oy) in those coordinates. Both canvases paint it with this same
+       *  geometry, so they meet without a seam. Under Fit the union is the box (the bleed, as
+       *  before); under Fill it is the artboard — the offscreen's margins outside the box are
+       *  never shown but ARE read by backdrop effects near the box edge, so they must hold the
+       *  background the editor has there, not transparency. */
+      const paintBackground = (g: CanvasRenderingContext2D, s: number, tSec: number,
+        u: { x0: number; y0: number; x1: number; y1: number }, ox: number, oy: number) => {
+        g.setTransform(s, 0, 0, s, u.x0 - ox, u.y0 - oy)
+        paintLayerStack(g, (u.x1 - u.x0) / s, (u.y1 - u.y0) / s, [], [],
+          undefined, tSec, undefined, undefined, v.background!, undefined, undefined, true)
+      }
+
       const paint = (t01: number) => {
         lastT = t01
         const tSec = t01 * snap.duration
         const r = fitRect({ w: canvas.width, h: canvas.height }, { w: v.width, h: v.height }, snap.fit)
+        const s = r.scale
+        // Whole device pixels, so the blit below never resamples the Frame.
+        const rx = Math.round(r.x), ry = Math.round(r.y)
+        const aw = Math.max(1, Math.round(r.w)), ah = Math.max(1, Math.round(r.h))
+        if (art.width !== aw) art.width = aw
+        if (art.height !== ah) art.height = ah
+        const u = {
+          x0: Math.min(0, rx), y0: Math.min(0, ry),
+          x1: Math.max(canvas.width, rx + aw), y1: Math.max(canvas.height, ry + ah),
+        }
+
+        // 1. The Frame on its own canvas, at the origin — what the editor paints. The background
+        //    goes under the layers (backdrop-reading effects read it), positioned as it is on the
+        //    visible canvas so the two meet without a seam; the canvas's bounds crop the layers.
+        artCtx.setTransform(1, 0, 0, 1, 0, 0)
+        artCtx.clearRect(0, 0, aw, ah)
+        if (v.background != null) paintBackground(artCtx, s, tSec, u, rx, ry)
+        artCtx.setTransform(s, 0, 0, s, 0, 0)
+        withWiredContent(provider, () => paintLayerStack(artCtx, v.width, v.height, items, layers,
+          undefined, tSec, v.motion ?? undefined, v.wiredTreatments, undefined, v.groups, undefined, true))
+
+        // 2. The visible canvas: the background across the whole box (the bleed), then the Frame.
+        //    Its rect is cleared first so a background with any transparency is not laid twice.
         ctx.setTransform(1, 0, 0, 1, 0, 0)
         ctx.clearRect(0, 0, canvas.width, canvas.height)
         if (v.background != null) {
-          ctx.setTransform(r.scale, 0, 0, r.scale, 0, 0)
-          paintLayerStack(ctx, canvas.width / r.scale, canvas.height / r.scale, [], [],
-            undefined, tSec, undefined, undefined, v.background, undefined, undefined, true)
+          paintBackground(ctx, s, tSec, u, 0, 0)
+          ctx.setTransform(1, 0, 0, 1, 0, 0)
+          ctx.clearRect(rx, ry, aw, ah)
         }
-        // The layers are cropped at the artboard edge, as the editor crops them: in a box wider
-        // (Fit) or taller than the artboard, the bleed shows background only, never a layer
-        // that overflows the artboard.
-        ctx.setTransform(r.scale, 0, 0, r.scale, r.x, r.y)
-        ctx.save()
-        ctx.beginPath()
-        ctx.rect(0, 0, v.width, v.height)
-        ctx.clip()
-        try {
-          withWiredContent(provider, () => paintLayerStack(ctx, v.width, v.height, items, layers,
-            undefined, tSec, v.motion ?? undefined, v.wiredTreatments, undefined, v.groups, undefined, true))
-        } finally {
-          ctx.restore()
-        }
-        // The doc-level post chain, outside the clip: it must cover the bleed as well, or an
-        // Invert or a Duotone would leave a seam at the artboard edge. The painter would run this
-        // same call last (paintLayerStack's final step), under this same transform — so when the
-        // box is the artboard, the pixels are the painter's own.
+        ctx.drawImage(art, rx, ry)
+
+        // 3. The doc-level post chain over the whole box: it must cover the bleed as well, or an
+        //    Invert or a Duotone would leave a seam at the artboard edge. The painter would run this
+        //    same call last (paintLayerStack's final step) under the Frame's transform — the same
+        //    `scale` (t.a = s) — so when the box is the artboard, the pixels are the painter's own.
+        ctx.setTransform(s, 0, 0, s, rx, ry)
         if (v.post && chainActive(v.post)) applyStackPost(ctx, v.post, v.width)
       }
 

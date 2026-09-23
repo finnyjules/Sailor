@@ -47,6 +47,19 @@ describe('buildFrameSnapshot', () => {
     expect(snap.notices.find(n => n.group === 'blocked')?.text).toBe('The image "gone.png" couldn\'t be loaded.')
   })
 
+  // R12: a stand-in's file is optional. Fetched, it is inlined like any image; unreachable, it is
+  // stored as an undecodable `data:,` (the painter then draws the grey stand-in box, as the editor
+  // does after a 404) and the export is NOT blocked. A plain image that fails still blocks (above).
+  it('a stand-in\'s file is inlined when it loads, and stored undecodable without blocking when it does not', async () => {
+    const ok = createImageLayer('here.png', 1, { standIn: true, w: 0.4, h: 0.4 } as any)
+    const gone = createImageLayer('gone.png', 1, { standIn: true, w: 0.4, h: 0.4 } as any)
+    const io = fakeIO({ fetchBlob: vi.fn(async (url: string) => { if (url.includes('gone.png')) throw new Error('404'); return new Blob([url]) }) })
+    const snap = await buildFrameSnapshot(plan([ok, gone]), v([ok, gone]), io)
+    expect(snap.assets.urls[assetKey('image', 'here.png')]).toBe('data:image/webp;base64,IMG800')
+    expect(snap.assets.urls[assetKey('image', 'gone.png')]).toBe('data:,')
+    expect(isBlocked(snap)).toBe(false)
+  })
+
   it('every clip frame is inlined and the clip\'s weight is stated', async () => {
     const img = createImageLayer('rose.png', 1, { w: 0.2, h: 0.2 })
     const clip = { dir: 'c1', frames: 3, fps: 24, speed: 1, prompt: '', model: '' }

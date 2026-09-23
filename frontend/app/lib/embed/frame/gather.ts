@@ -63,7 +63,13 @@ export async function buildFrameSnapshot(plan: FramePlan, variant: FrameVariant,
     try {
       const img = await io.blobToImage(await io.fetchBlob(imageLayerUrl(im.filename)))
       urls[assetKey('image', im.filename)] = await io.imageToDataUrl(img, im.maxPx, 'image/webp')
-    } catch { block(`The image "${im.filename}" couldn't be loaded.`) }
+    } catch {
+      // A stand-in's file that is not there: the editor's own load fails the same way and it
+      // draws the grey stand-in box. `data:,` never decodes, so the exported painter draws that
+      // same box — and the key is present, so nothing falls back to the server.
+      if (im.optional) urls[assetKey('image', im.filename)] = 'data:,'
+      else block(`The image "${im.filename}" couldn't be loaded.`)
+    }
   }
 
   for (const c of plan.clips) {

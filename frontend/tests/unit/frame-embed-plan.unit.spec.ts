@@ -38,9 +38,12 @@ describe('planFrameExport', () => {
     expect(p.images).toEqual([{ filename: 'photo.png', maxPx: 800 }])   // 2 × 0.4 × 1000
   })
 
-  it('a stand-in image needs no file', () => {
-    const img = createImageLayer('x.png', 1, { standIn: true } as any)
-    expect(planFrameExport(input(variant([img]))).images).toEqual([])
+  // R12: a stand-in that names a file is listed — the editor draws that file when it exists — but
+  // optionally, so a missing file draws the grey box instead of blocking. One with no file is not.
+  it('a stand-in image with a file is listed as optional; one with no file is not listed', () => {
+    const img = createImageLayer('x.png', 1, { standIn: true, w: 0.4, h: 0.4 } as any)
+    const bare = createImageLayer('', 1, { standIn: true } as any)
+    expect(planFrameExport(input(variant([img, bare]))).images).toEqual([{ filename: 'x.png', maxPx: 800, optional: true }])
   })
 
   it('an image clip keeps the Frame live and is listed', () => {

@@ -179,12 +179,17 @@ onMounted(async () => {
       return { hasMotion: false, variant: variantOf(1000, 500, [text], { background: '#1b4d3e' }) }
     }
     if (name === 'standin') {
-      // A pattern's "photo goes here" stand-in (standIn, no file yet — the shape
-      // lib/frame/patterns/insert.ts creates) beside a visible rect. The export must not ask
-      // for the file-less layer's image (R10): the network spec requires zero requests.
-      const standIn = createImageLayer('', 4 / 3, { x: 0.3, y: 0.5, w: 0.4, h: 0.3, standIn: true } as any)
-      const rect = createRectLayer({ x: 0.75, y: 0.5, w: 0.2, h: 0.3, radius: 0, fill: '#f25c54' })
-      return { hasMotion: false, variant: variantOf(1000, 500, [standIn, rect], { background: '#1b4d3e' }) }
+      // Three "photo goes here" stand-ins (standIn: true), one of each kind the export meets:
+      //  - no file yet (the shape lib/frame/patterns/insert.ts creates) — nothing to load (R10);
+      //  - a file that is not there (`harness-missing.png` 404s) — the editor draws the grey box,
+      //    and so must the export: the gatherer stores `data:,` and does not block (R12);
+      //  - a file that is there (lib/frame/looksSpike.ts's shape) — drawn as the photo (R12).
+      // The network spec requires zero requests; the parity spec compares it with the editor.
+      const bare = createImageLayer('', 4 / 3, { x: 0.18, y: 0.35, w: 0.28, h: 0.21, standIn: true } as any)
+      const missing = createImageLayer('harness-missing.png', 4 / 3, { x: 0.5, y: 0.35, w: 0.28, h: 0.21, standIn: true } as any)
+      const photo = createImageLayer('harness-photo.png', 4 / 3, { x: 0.82, y: 0.35, w: 0.28, h: 0.21, standIn: true } as any)
+      const rect = createRectLayer({ x: 0.5, y: 0.85, w: 0.6, h: 0.08, radius: 0, fill: '#f25c54' })
+      return { hasMotion: false, variant: variantOf(1000, 500, [bare, missing, photo, rect], { background: '#1b4d3e' }) }
     }
     if (name === 'bleed' || name === 'bleed-post') {
       // A rect half outside the artboard's right edge (artboard x 900..1100 of 1000): in a box

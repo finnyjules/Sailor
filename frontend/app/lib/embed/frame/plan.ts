@@ -30,7 +30,10 @@ export interface FramePlan {
   fit: FrameFit
   duration: number
   still: boolean
-  images: { filename: string; maxPx: number }[]
+  /** `optional`: a stand-in ("photo goes here") that names a file. The editor draws that file
+   *  when it exists and its grey box when it does not, so a file that cannot be fetched is not a
+   *  reason to block the export — the gatherer stores an undecodable copy instead (R12). */
+  images: { filename: string; maxPx: number; optional?: boolean }[]
   clips: { clip: ImageClip; maxPx: number; layerId: string }[]
   fillImages: string[]
   fonts: { family: string; weight: number; text: string; outline: boolean }[]
@@ -104,7 +107,7 @@ export function planFrameExport(input: FrameExportInput): FramePlan {
     if (l.kind === 'image') {
       const img = l as LocalLayer & { filename: string; standIn?: boolean; clip?: ImageClip; w: number; h: number }
       const maxPx = Math.ceil(2 * drawnLongSide(img, v.width))
-      if (img.filename && !img.standIn) images.push({ filename: img.filename, maxPx })
+      if (img.filename) images.push(img.standIn ? { filename: img.filename, maxPx, optional: true } : { filename: img.filename, maxPx })
       if (img.clip && img.clip.frames > 0) clips.push({ clip: img.clip, maxPx, layerId: l.id })
     }
     if (l.kind === 'text') {

@@ -44,9 +44,18 @@ describe('frame adapter — a snapshot missing an inlined asset', () => {
       .rejects.toThrow('embed: frame snapshot is missing an inlined asset')
   })
 
-  it('lets a stand-in image and an image layer with no file past the asset check', async () => {
+  // R12: a stand-in that names a file is checked like any image (the gatherer always stores its
+  // key), so a snapshot without it refuses; one with no file has nothing to check.
+  it('rejects a stand-in whose file has no inlined copy', async () => {
     const standIn = createImageLayer('x.png', 1, { standIn: true } as any)
+    await expect(frameSurface.mount(document.createElement('div'), snapshotOf([standIn], {})))
+      .rejects.toThrow('embed: frame snapshot is missing an inlined asset')
+  })
+
+  it('lets a file-less stand-in, an image layer with no file and a stand-in stored as data:, past the asset check', async () => {
+    const standIn = createImageLayer('', 1, { standIn: true } as any)
     const empty = createImageLayer('', 1)
+    const gone = createImageLayer('gone.png', 1, { standIn: true } as any)
     const box = document.createElement('div')
     // happy-dom never settles an <img> load; the painter's preload would wait forever. Any src
     // fails at once instead (the painter treats a failed load as "nothing to draw").
@@ -55,7 +64,8 @@ describe('frame adapter — a snapshot missing an inlined asset', () => {
     // Past the asset check, the first thing that can fail in happy-dom is the 2D context — proof
     // the check let these through.
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
-    await expect(frameSurface.mount(box, snapshotOf([standIn, empty], {}))).rejects.toThrow('embed: no 2D context')
+    await expect(frameSurface.mount(box, snapshotOf([standIn, empty, gone], { [assetKey('image', 'gone.png')]: 'data:,' })))
+      .rejects.toThrow('embed: no 2D context')
   })
 
   // R10: the painter's preload (ensureLayerImages) must not ask for an image layer that has no

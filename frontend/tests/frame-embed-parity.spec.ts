@@ -49,6 +49,38 @@ test.describe('Frame embed — parity with the editor', () => {
     expect(d.differing / d.total).toBeLessThan(0.01)
   })
 
+  // Stand-ins (R12). The 'standin' fixture holds a file-less stand-in, one whose file 404s and one
+  // whose file is there. The editor draws the photo for the last and its grey "photo goes here"
+  // box for the first two; the export must too. Whole frame at the lossy allowance (the photo is
+  // WebP in the file), and the unreachable stand-in's own box EXACTLY: artboard x 360..640,
+  // y 70..280 (x 0.5 ± 0.14, y 0.35 ± 0.105 of 1000), sampled 10 px inside its edge.
+  test('stand-ins: an unreachable file draws the same grey box as the editor', async ({ page, context }) => {
+    const ref = await reference(page, 'standin')
+    const exp = await exported(page, context, 'standin')
+    const whole = await pixelDiff(page, ref, exp, 6)
+    note(whole)
+    expect(whole.differing / whole.total).toBeLessThan(0.01)
+    const box = await page.evaluate(async ([a, b]) => {
+      const load = (u: string) => new Promise<HTMLImageElement>(res => { const i = new Image(); i.onload = () => res(i); i.src = u })
+      const read = (i: HTMLImageElement) => {
+        const c = document.createElement('canvas'); c.width = i.width; c.height = i.height
+        const g = c.getContext('2d')!; g.drawImage(i, 0, 0); return g.getImageData(370, 80, 260, 190).data
+      }
+      const [da, db] = (await Promise.all([load(a!), load(b!)])).map(read)
+      let differing = 0
+      for (let p = 0; p < da!.length; p += 4) {
+        if (Math.abs(da![p]! - db![p]!) > 2 || Math.abs(da![p + 1]! - db![p + 1]!) > 2 || Math.abs(da![p + 2]! - db![p + 2]!) > 2) differing++
+      }
+      // The box really is the grey stand-in (rgba(140,140,140,0.55) over #1b4d3e), not a photo.
+      const mid = ((95 * 260) + 130) * 4
+      return { differing, mid: [da![mid], da![mid + 1], da![mid + 2]] }
+    }, [ref, exp])
+    test.info().annotations.push({ type: 'grey box', description: `${box.differing} differing, centre ${box.mid}` })
+    expect(box.differing).toBe(0)
+    // rgba(140,140,140,0.55) over #1b4d3e (27,77,62) = (89, 112, 105): the grey box, not a photo.
+    for (const [c, want] of [[box.mid[0], 89], [box.mid[1], 112], [box.mid[2], 105]]) expect(Math.abs(c! - want!)).toBeLessThanOrEqual(3)
+  })
+
   // The comparison has teeth: one deliberate break in the snapshot — a rect's colour, the font's
   // bytes, a shader's source — must show up as a difference.
   for (const m of ['colour', 'font', 'shader']) {
