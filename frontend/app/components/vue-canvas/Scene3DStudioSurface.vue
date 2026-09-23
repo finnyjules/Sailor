@@ -567,6 +567,7 @@ async function bakeSceneVideo(publish: boolean): Promise<StudioVideoResult | nul
     engine.setSize(W, H)
     videoAbort = new AbortController()
     videoNotice.value = ''
+    bakeError.value = ''
     return await exportStudioVideo({
       prefix: 'scene3d', publish,
       width: W, height: H, fps, frameCount: total, alpha: false,
