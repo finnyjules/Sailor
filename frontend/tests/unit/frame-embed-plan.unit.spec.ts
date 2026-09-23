@@ -5,6 +5,7 @@ import { embedSnippet } from '~/lib/embed/snippet'
 import { createTextLayer, createRectLayer, createImageLayer } from '~/composables/useCompositorLayers'
 import { DEFAULT_FILL } from '~/lib/spacetype/fillTile'
 import { createEffect } from '~/lib/compositor/effectStack'
+import { computeNeedsOutlines } from '~/lib/embed/frame/gather'
 
 function variant(layers: any[], extra: Partial<FrameVariant> = {}): FrameVariant {
   return {
@@ -149,6 +150,89 @@ describe('planFrameExport', () => {
     ;(img as any).effects = [{ ...createEffect('dof'), visible: true }]
     const p = planFrameExport(input(variant([img])))
     expect(p.depth).toEqual([{ ref: 'photo.png', layerId: img.id, label: 'Image' }])
+  })
+
+  // I1: the painter outlines a boolean/morph PARTNER itself (the sibling resolver), even when that
+  // text draws with fillText — so its font needs outline bytes, whatever the effect's visibility.
+  it('a text layer used as a boolean partner asks for outline bytes', () => {
+    const t = createTextLayer({ text: 'BITE', fontFamily: 'Inter', fontWeight: 700 })
+    const r = createRectLayer({}) as any
+    r.effects = [{ ...createEffect('boolean'), op: 'subtract', refLayerId: `l:${t.id}`, visible: true }]
+    const v = variant([t, r])
+    const p = planFrameExport(input(v))
+    expect(p.fonts).toEqual([{ family: 'Inter', weight: 700, text: 'BITE', outline: true }])
+    expect(computeNeedsOutlines(p, v)).toBe(true)
+  })
+
+  it('a morph partner, and a hidden boolean\'s partner, ask for outline bytes too', () => {
+    const a = createTextLayer({ text: 'A', fontFamily: 'Inter', fontWeight: 400 })
+    const b = createTextLayer({ text: 'B', fontFamily: 'Fraunces', fontWeight: 400 })
+    const r = createRectLayer({}) as any
+    r.effects = [
+      { ...createEffect('morph'), refLayerId: `l:${a.id}`, visible: true },
+      { ...createEffect('boolean'), refLayerId: `l:${b.id}`, visible: false },
+    ]
+    expect(planFrameExport(input(variant([a, b, r]))).fonts.map(f => f.outline)).toEqual([true, true])
+  })
+
+  it('text no effect names as a partner stays fillText', () => {
+    const t = createTextLayer({ text: 'Plain', fontFamily: 'Inter', fontWeight: 700 })
+    const other = createRectLayer({})
+    const r = createRectLayer({}) as any
+    r.effects = [{ ...createEffect('boolean'), refLayerId: `l:${other.id}`, visible: true }]
+    expect(planFrameExport(input(variant([t, other, r]))).fonts[0]!.outline).toBe(false)
+  })
+
+  // I2: the painter draws transformCase(text, textTransform); the subset must hold those letters.
+  it('the subset text holds the letters as drawn, not only as typed', () => {
+    const t = createTextLayer({ text: 'café', fontFamily: 'Inter', fontWeight: 700, textTransform: 'uppercase' } as any)
+    const text = planFrameExport(input(variant([t]))).fonts[0]!.text
+    expect(text).toContain('café')
+    expect(text).toContain('CAFÉ')
+    const plain = createTextLayer({ text: 'Same', fontFamily: 'Inter', fontWeight: 400 })
+    expect(planFrameExport(input(variant([plain]))).fonts[0]!.text).toBe('Same')
+  })
+
+  // I3: loop length (spec, "Time") — the Frame's own motion when it has some; otherwise the
+  // nested loops' master clock; a clip that does not divide the loop says so in plain words.
+  const clipped = (frames: number, fps: number, name?: string) => {
+    const img = createImageLayer('rose.png', 1, { w: 0.3, h: 0.3 }) as any
+    img.clip = { dir: `sailor_clips/${frames}-${fps}`, frames, fps, speed: 1, prompt: '', model: '' }
+    if (name) img.name = name
+    return img
+  }
+
+  it('a Frame whose only movement is an image clip loops on the clip\'s own length', () => {
+    const p = planFrameExport(input(variant([clipped(36, 12)])))   // 3 s
+    expect(p.duration).toBe(3)
+    expect(p.notices.filter(n => n.group === 'live')).toEqual([])
+  })
+
+  it('several clips and no motion loop on the length they all complete whole cycles in', () => {
+    const p = planFrameExport(input(variant([clipped(24, 12), clipped(36, 12)])))   // 2 s and 3 s
+    expect(p.duration).toBe(6)
+    expect(p.notices.filter(n => n.group === 'live')).toEqual([])
+  })
+
+  it('a clip that does not divide the Frame\'s motion loop gets a seam notice', () => {
+    const v = variant([clipped(36, 12, 'Rose')], { motion: { fps: 30, duration: 4 } })
+    const p = planFrameExport(input(v, { hasMotion: true }))
+    expect(p.duration).toBe(4)
+    expect(p.notices).toContainEqual({
+      group: 'live', layerId: v.layers[0]!.id,
+      text: 'Rose loops every 3s, the Frame every 4s — it restarts at the seam',
+    })
+  })
+
+  it('a clip that divides the motion loop evenly gets no seam notice; an unnamed one is an image clip', () => {
+    const even = planFrameExport(input(variant([clipped(24, 12)], { motion: { fps: 30, duration: 4 } }), { hasMotion: true }))
+    expect(even.notices.some(n => n.text.includes('seam'))).toBe(false)
+    const odd = planFrameExport(input(variant([clipped(30, 12)], { motion: { fps: 30, duration: 4 } }), { hasMotion: true }))
+    expect(odd.notices.find(n => n.text.includes('seam'))?.text).toBe('Image clip loops every 2.5s, the Frame every 4s — it restarts at the seam')
+  })
+
+  it('a moving fill with no timeline of its own keeps the 4 s loop', () => {
+    expect(planFrameExport(input(variant([createRectLayer({})]), { animatedFill: true })).duration).toBe(4)
   })
 
   it('assetKey joins kind and key', () => {

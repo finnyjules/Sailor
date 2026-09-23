@@ -127,13 +127,36 @@ export function getCompositorFont(layer: CompositorFontLayerLike): VtFont | null
   const hit = cache.get(token)
   if (hit) return hit.font ?? null // in-flight or failed → nothing to draw (yet / ever)
 
+  startLoad(token)
+  return null
+}
+
+/** The first miss for a token: one background `loadVectorFont` into the cache, notifying
+ *  subscribers when it lands. Shared by `getCompositorFont` and `warmCompositorFont`, so both
+ *  fill the very same entry. */
+function startLoad(token: string): CacheEntry {
   const entry: CacheEntry = {}
   cache.set(token, entry)
   entry.promise = loadVectorFont(token).then(
     (font) => { entry.font = font; entry.promise = undefined; notifyReady() },
     () => { entry.failed = true; entry.promise = undefined }, // stays failed → steady null, no refetch, no log
   )
-  return null
+  return entry
+}
+
+/**
+ * Load a token's font into the SAME cache entry `getCompositorFont` reads, and resolve once it
+ * has settled: true when the font is in hand (so the next `getCompositorFont` for a layer with
+ * this token answers synchronously), false when it failed. Never rejects.
+ *
+ * For a host that cannot repaint when a font lands — a Frame web export paints a still once —
+ * and so must have every outline font warm before its first paint. The live editor never calls
+ * it; it keeps the draw-now, repaint-on-`onCompositorFontReady` pattern.
+ */
+export async function warmCompositorFont(token: string): Promise<boolean> {
+  const entry = cache.get(token) ?? startLoad(token)
+  if (entry.promise) await entry.promise
+  return !!entry.font
 }
 
 /** Test/HMR seam — forget every loaded font and every ready subscriber. */

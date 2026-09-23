@@ -10,7 +10,9 @@ test.describe('Frame embed — zero network', () => {
   // AWAITED import resolves against the full bundle's own inlined paper-core module and never
   // reaches the network, however this fixture's needsOutlines flag routes it (currently 'frame',
   // never 'frame-lean' — see gather.ts's computeNeedsOutlines).
-  for (const name of ['vector', 'image', 'backdrop', 'still', 'fill', 'standin', 'shatter', 'boolean']) {
+  // 'outline' / 'text-partner' (C1 / I1): outlined text and a text boolean partner — both reach
+  // the outline-font loader, which must answer from the file, never /api/fonts/….
+  for (const name of ['vector', 'image', 'backdrop', 'still', 'fill', 'standin', 'shatter', 'boolean', 'outline', 'text-partner']) {
     test(`the "${name}" export makes no request`, async ({ page, context }) => {
       const html = await page.evaluate(async (n) => {
         const H = (window as any).__frameEmbedHarness

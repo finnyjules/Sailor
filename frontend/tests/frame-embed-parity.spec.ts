@@ -144,13 +144,33 @@ test.describe('Frame embed — parity with the editor', () => {
     expect(d.differing).toBe(0)
   })
 
+  // C1: text drawn from its glyph outlines (a geometry effect forces fontkit's outline path). A
+  // STILL Frame paints once, so the outline font must be warm before that paint — otherwise the
+  // text falls back to fillText without its effect, and stays that way. The fixture's uppercase
+  // accented text also needs the subset to hold the TRANSFORMED letters (I2).
+  test('outlined text: a still draws the same glyph outlines as the editor', async ({ page, context }) => {
+    const d = await pixelDiff(page, await reference(page, 'outline'), await exported(page, context, 'outline'))
+    note(d)
+    expect(d.differing).toBe(0)
+  })
+
+  // I1: a shape subtracting a TEXT layer. The painter outlines the partner text itself, so the
+  // file must carry that text's outline font even though the text draws with fillText.
+  test('a boolean with a text partner subtracts the same glyphs as the editor', async ({ page, context }) => {
+    const d = await pixelDiff(page, await reference(page, 'text-partner'), await exported(page, context, 'text-partner'))
+    note(d)
+    expect(d.differing).toBe(0)
+  })
+
   test('an image clip plays', async ({ page, context }) => {
     const html = await page.evaluate(async () => {
       const H = (window as any).__frameEmbedHarness
       return await H.exportHtml(await H.snapshot('image'))
     })
+    // The 'image' fixture's loop is its clip's own played length (6 frames at 6 fps = 1 s — I3),
+    // so 0.1 and 0.5 land on frames 1 and 3 (0.1 and 0.2 would both round to frame 1).
     const a = (await renderExported(context, html, 0.1, VIEW)).png
-    const b = (await renderExported(context, html, 0.2, VIEW)).png
+    const b = (await renderExported(context, html, 0.5, VIEW)).png
     expect(a).not.toBe(b)
   })
 

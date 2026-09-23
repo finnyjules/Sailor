@@ -9,12 +9,15 @@
  * largest dependency after paper.js (Task 6's report: ~232KB + a ~91KB brotli/WOFF2 decoder). This
  * stand-in never imports font.ts, so nothing here can pull fontkit into the lean bundle.
  *
- * Safe by construction, not just by convention: `getCompositorFont` is called ONLY from
- * `collectTextOutline` (useCompositorLayers.ts), which is itself gated on
- * `textDrawsFromOutlines(layer)` — the SAME predicate plan.ts's `textNeedsOutline` asks to set
- * each font's `outline` flag. A snapshot with `needsOutlines: false` has no layer for which that
- * predicate is true, so in the FULL bundle too, `getCompositorFont`/`runToCommands` are never
- * actually invoked for it — every text layer already falls back to plain `ctx.fillText`. This
+ * Safe by construction, not just by convention: `getCompositorFont` is called only from
+ * `collectTextOutline` (useCompositorLayers.ts), which the painter reaches two ways — the text
+ * branch, gated on `textDrawsFromOutlines(layer)`, and the sibling resolver, which outlines a text
+ * layer a boolean/morph effect names as its partner (`outlinePathData` → `textLayerOutline`) even
+ * when that text itself draws with fillText. plan.ts sets a font's `outline` flag for BOTH
+ * (`textNeedsOutline(l) || geometryPartnerIds(layers).has(l.id)`), and any boolean/morph forces
+ * the full bundle anyway (`layersNeedPaper`). A snapshot with `needsOutlines: false` therefore has
+ * no layer the painter would outline, so in the FULL bundle too `getCompositorFont`/
+ * `runToCommands` are never invoked for it — every text layer draws with `ctx.fillText`. This
  * stand-in's always-null/always-empty answers are therefore not an approximation: they reproduce
  * the real module's observable behaviour for exactly the snapshots that select `frame-lean.js`.
  *
@@ -60,6 +63,15 @@ export function runToCommands(
   _axes?: Record<string, number>,
 ): unknown[] {
   return []
+}
+
+/** The lean bundle has no outline engine, so it can never warm one: false, which makes the
+ *  adapter's mount reject (the poster stays) — loud, never a silent fillText. The adapter only
+ *  asks for the snapshot's `outlineFont|…` keys, and a snapshot that selected this bundle
+ *  (`needsOutlines: false`) carries none, so reaching this is a gate regression. */
+export async function warmCompositorFont(_token: string): Promise<boolean> {
+  console.error('[sailor-embed] frame-lean.js: an outline font was requested, but this bundle ships no font outline engine (a needsOutlines gate regression).')
+  return false
 }
 
 /** onCompositorFontReady has no caller in the frame embed cone (it wires a Compositor redraw the

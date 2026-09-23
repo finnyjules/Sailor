@@ -38,6 +38,7 @@ import { warmPaperBoolean } from '~/lib/compositor/booleanGeometry'
 // renderStack does, with the app's own loaders.
 import { ensureLayerFonts, ensureLayerImages, paintLayerStack, withWiredContent, type LocalLayer, type StackItem } from '~/composables/useCompositorLayers'
 import { registerAssetResolver } from '~/lib/compositor/assetScope'
+import { warmCompositorFont } from '~/lib/compositor/textOutline'
 import { whenFieldEffectReady } from '~/lib/shaderfill/field'
 import '~/lib/motion/paint' // the per-layer animation painter paintLayerStack relies on (the modal has it loaded)
 
@@ -47,7 +48,10 @@ type Slot = 'a' | 'b'
 const handles: Partial<Record<Slot, EmbedHandle>> = {}
 /** The image fill's source, as the app stores one: a server URL the gatherer fetches. */
 const HARNESS_FILL_SRC = '/view?filename=harness-photo.png&type=input'
-const FIXTURES = ['vector', 'image', 'backdrop', 'still', 'fill', 'bleed', 'bleed-post', 'standin', 'shatter', 'boolean']
+const FIXTURES = ['vector', 'image', 'backdrop', 'still', 'fill', 'bleed', 'bleed-post', 'standin', 'shatter', 'boolean', 'outline', 'text-partner']
+/** The outline-font token the painter asks for when it draws 'Harness Font' from glyph outlines
+ *  (compositorFontToken: not a system, curated or library family, so a Google-style token). */
+const HARNESS_OUTLINE_TOKEN = 'google:Harness Font@700'
 /** The font the `font` mutation swaps in: another cut of the harness face (there is no
  *  ABCROM-BoldItalic in public/fonts — BlackItalic is the nearest italic). */
 const MUTANT_FONT_URL = '/fonts/ABCROM-BlackItalic.otf'
@@ -240,6 +244,25 @@ onMounted(async () => {
       self.effects = [{ ...createEffect('boolean'), op: 'subtract', refLayerId: `l:${sibling.id}`, visible: true }]
       return { hasMotion: false, variant: variantOf(1000, 500, [sibling, self], { background: '#1b4d3e' }) }
     }
+    if (name === 'outline') {
+      // Text drawn from its glyph OUTLINES (fontkit), not fillText: a geometry effect (roughen,
+      // seeded) forces the outline path. A STILL Frame, so the export paints exactly once — the
+      // outline font must be warm before that paint (C1). Uppercase on text with an accented
+      // letter: the painter draws "CAFÉ", so the subset must hold É, not only é (I2).
+      const text = createTextLayer({ text: 'Outlined café', textTransform: 'uppercase', fontFamily: 'Harness Font', fontWeight: 700, fontSize: 0.1 }) as any
+      text.effects = [{ ...createEffect('roughen'), amount: 0.004, detail: 8, seed: 3, visible: true }]
+      return { hasMotion: false, variant: variantOf(1000, 500, [text], { background: '#1b4d3e' }) }
+    }
+    if (name === 'text-partner') {
+      // A shape subtracting a TEXT layer (I1): the boolean's partner is outlined by the painter
+      // (sibling resolver → the partner's glyph outline), though the text itself draws with
+      // fillText. The rect sits on top, so a working subtract shows the text through the bite and
+      // a no-op hides it entirely.
+      const text = createTextLayer({ text: 'BITE', fontFamily: 'Harness Font', fontWeight: 700, fontSize: 0.16 })
+      const rect = createRectLayer({ x: 0.5, y: 0.5, w: 0.6, h: 0.4, radius: 0, fill: '#f25c54' }) as any
+      rect.effects = [{ ...createEffect('boolean'), op: 'subtract', refLayerId: `l:${text.id}`, visible: true }]
+      return { hasMotion: false, variant: variantOf(1000, 500, [text, rect], { background: '#1b4d3e' }) }
+    }
     if (name === 'bleed' || name === 'bleed-post') {
       // A rect half outside the artboard's right edge (artboard x 900..1100 of 1000): in a box
       // wider than the artboard, the part past x = 1000 must NOT paint into the bleed.
@@ -273,18 +296,21 @@ onMounted(async () => {
   // any adapter mount of the same fixture in this page (the parity spec does), or it would reuse
   // the adapter's (WebP) frames.
   async function reference(name: string, t01: number, w: number, h: number): Promise<string> {
-    const { variant: v } = fixture(name)
+    const { variant: v, hasMotion } = fixture(name)
     const layers = v.layers as LocalLayer[]
     const byId = new Map(layers.map(l => [l.id, l]))
     const items: StackItem[] = v.stackOrder
       .filter(k => k.startsWith('l:') && byId.has(k.slice(2)))
       .map(k => ({ type: 'local', key: k, layer: byId.get(k.slice(2))! }))
-    // The Frame's clock, as the planner states it: its Motion duration, else 4 s.
-    const duration = v.motion && v.motion.duration > 0 ? v.motion.duration : 4
+    // The Frame's clock, as the planner states it: its Motion duration, else the nested loops'
+    // master clock (an image clip's played length), else 4 s.
+    const duration = planFrameExport({ variant: v, fit: 'fit', wiredSlots: [], catalogIds, hasMotion, animatedFill: false }).duration
 
     const unregister = registerAssetResolver((kind, key) => {
       if (kind === 'image') return assets.get(key) ?? null
       if (kind === 'clipFrame' && key.startsWith('harness-clip/')) return assets.get(key) ?? null
+      // The editor's outline font for the harness face: the full, unsubsetted file.
+      if (kind === 'outlineFont' && key === HARNESS_OUTLINE_TOKEN) return '/fonts/ABCROM-Bold.otf'
       return null
     })
     const face = document.createElement('style')
@@ -297,6 +323,11 @@ onMounted(async () => {
       await document.fonts.ready
       await Promise.all([fillEffect.id, backdropEffect.id].map(id => whenFieldEffectReady(id)))
       await warmPaperBoolean() // no-op for a fixture with no geometry effect that reads paper
+      // The editor repaints when an outline font lands (onCompositorFontReady); a reference paints
+      // once, so it takes the settled state: the harness face's outline font warm.
+      if (layers.some(l => l.kind === 'text') && !(await warmCompositorFont(HARNESS_OUTLINE_TOKEN))) {
+        throw new Error('harness: the outline font did not load')
+      }
 
       const dpr = Math.min(2, window.devicePixelRatio || 1)
       const [cv, ctx] = canvasOf(Math.max(1, Math.round(w * dpr)), Math.max(1, Math.round(h * dpr)))

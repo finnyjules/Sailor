@@ -28,6 +28,7 @@ import { whenFieldEffectReady } from '~/lib/shaderfill/field'
 import { seedDepthImage } from '~/lib/compositor/depthRegistry'
 import { ensureRevealShadersReady } from '~/lib/motionx/reveal/paintPixels'
 import { warmPaperBoolean, isPaperWarm } from '~/lib/compositor/booleanGeometry'
+import { warmCompositorFont } from '~/lib/compositor/textOutline'
 import { layersNeedPaper } from '../frame/needs'
 import {
   paintLayerStack, ensureLayerImages, withWiredContent, type LocalLayer, type StackItem,
@@ -141,6 +142,18 @@ const frameSurface: EmbedSurface = {
         if (!faces.length) throw new Error(`embed: font "${f.family}" did not load`)
       }
       await document.fonts.ready
+
+      // Outline fonts (C1): text drawn from glyph outlines — an explicit outline, a geometry
+      // effect on text, or a text layer a boolean/morph uses as its partner — reads fontkit's font
+      // SYNCHRONOUSLY from the same cache `getCompositorFont` fills. The editor draws fillText on
+      // the first miss and repaints when the font lands; an export has no such repaint (a still
+      // paints once), so every outline font the snapshot carries is loaded before the first
+      // paint. A font that fails rejects the mount — the poster stays, never the wrong picture.
+      const OUTLINE_PREFIX = assetKey('outlineFont', '')
+      for (const key of Object.keys(urls)) {
+        if (!key.startsWith(OUTLINE_PREFIX)) continue
+        if (!(await warmCompositorFont(key.slice(OUTLINE_PREFIX.length)))) throw new Error('embed: an outline font did not load')
+      }
 
       addShaderFxEffects(snap.assets.shaders)
       const ready = await Promise.all(snap.assets.shaders.map(d => whenFieldEffectReady(d.id)))

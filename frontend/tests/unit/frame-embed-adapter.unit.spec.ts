@@ -5,6 +5,7 @@ import { assetKey, type FrameSnapshot, type FrameVariant } from '~/lib/embed/fra
 import { clipFrameKey } from '~/lib/compositor/clip'
 import { createImageLayer, createRectLayer } from '~/composables/useCompositorLayers'
 import * as booleanGeometry from '~/lib/compositor/booleanGeometry'
+import * as textOutline from '~/lib/compositor/textOutline'
 import { createEffect } from '~/lib/compositor/effectStack'
 
 function snapshotOf(layers: any[], urls: Record<string, string>): FrameSnapshot {
@@ -189,5 +190,38 @@ describe('frame adapter — paper.js required and unavailable (R14c)', () => {
     const handle = await frameSurface.mount(box, snapshotOf([shattered], {}))
     expect(box.querySelectorAll('canvas').length).toBe(1)
     handle.destroy()
+  })
+})
+
+// C1: a still export paints once, so every outline font the snapshot carries (`outlineFont|<token>`)
+// must be warm in getCompositorFont's cache before that paint — and one that fails must reject
+// the mount (the runtime keeps the poster) rather than draw fillText without the effect.
+describe('frame adapter — outline fonts (C1)', () => {
+  const OUTLINE = { [assetKey('outlineFont', 'google:Inter@700')]: 'data:font/ttf;base64,AA' }
+
+  it('warms every outline font in the snapshot before the first paint', async () => {
+    const order: string[] = []
+    vi.spyOn(textOutline, 'warmCompositorFont').mockImplementation(async (t) => { order.push(`warm ${t}`); return true })
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => { order.push('paint'); return null })
+    await expect(frameSurface.mount(document.createElement('div'), snapshotOf([createRectLayer({})], OUTLINE)))
+      .rejects.toThrow('embed: no 2D context')
+    expect(order).toEqual(['warm google:Inter@700', 'paint'])
+  })
+
+  it('rejects the mount when an outline font does not load, leaving nothing behind', async () => {
+    vi.spyOn(textOutline, 'warmCompositorFont').mockResolvedValue(false)
+    const box = document.createElement('div')
+    document.body.appendChild(box)
+    await expect(frameSurface.mount(box, snapshotOf([createRectLayer({})], OUTLINE)))
+      .rejects.toThrow('embed: an outline font did not load')
+    expect(box.querySelectorAll('canvas').length).toBe(0)
+  })
+
+  it('asks for no outline font when the snapshot carries none', async () => {
+    const warm = vi.spyOn(textOutline, 'warmCompositorFont')
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
+    await expect(frameSurface.mount(document.createElement('div'), snapshotOf([createRectLayer({})], {})))
+      .rejects.toThrow('embed: no 2D context')
+    expect(warm).not.toHaveBeenCalled()
   })
 })
