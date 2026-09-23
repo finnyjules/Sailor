@@ -52,6 +52,7 @@ import { mapKeyToEdit, snapAngle } from '~/lib/compositor/layerEdits'
 import { resizeBox, type Handle } from '~/lib/compositor/resizeBox'
 import ResponsivePinsCard from './ResponsivePinsCard.vue'
 import { atDesignSize as isAtDesignSize, clampViewSize, designShapedArtboard, resizeViewFromEdge, shapePresets, readoutLabel as viewReadoutLabel } from '~/lib/frame/responsive/viewport'
+import { FRAME_SIZE_PRESETS, applyFramePreset, framePresetId, readFrameSize, setFrameDim, setFrameResponsive } from '~/lib/frame/frameSize'
 import { useTemplateLibrary } from '~/composables/useTemplateLibrary'
 import { serializeLayersForOS, parseLayersFromOS, setClipboard, type ClipboardPayload } from '~/lib/compositor/layerClipboard'
 import {
@@ -400,6 +401,31 @@ const resolved = computed<LayoutResult | null>(() => {
 })
 // Editing at a viewing size (slice 3): responsive, off the design size, and resolved.
 const viewEditing = computed(() => frameIsResponsive.value && !atDesign.value && !!resolved.value)
+// ── The "Frame" section (right panel, nothing selected): size and Responsive ──────────
+// Written through lib/frame/frameSize, the same functions the Frame node's header uses, so the
+// two surfaces write the same fields: the width/height widgets + `sailor_frame.responsive`.
+// A size change moves baseAspect → the `watch([baseAspect, previewAspect], fitCanvasToStage)`
+// below re-fits the artboard; designSize (bakeSize reads the same widgets) resets the viewing
+// size. Responsive flips frameIsResponsive, which mounts/unmounts the edge grips and readout.
+// Not recorded in undo history: the editor's snapshot holds no size, so a step would restore
+// nothing (the Grid section's settings are left out of history for the same reason).
+const frameSizeNow = computed(() => compositor.value ? readFrameSize(compositor.value.data) : { w: 0, h: 0 })
+// A frame with no explicit size (it follows its image) reads as Custom too, with empty fields.
+const framePresetValue = computed(() => framePresetId(frameSizeNow.value.w, frameSizeNow.value.h) || 'custom')
+const framePresetChoices = computed(() => {
+  const ids = FRAME_SIZE_PRESETS.map(p => p.id)
+  const labels = FRAME_SIZE_PRESETS.map(p => p.label)
+  if (framePresetValue.value === 'custom') { ids.push('custom'); labels.push('Custom') }
+  return { ids, labels }
+})
+function onFramePreset(id: string) { const n = compositor.value; if (n && id !== 'custom') applyFramePreset(n.data, id) }
+function onFrameDim(which: 'width' | 'height', e: Event) {
+  const n = compositor.value
+  if (n) setFrameDim(n.data, which, parseFloat((e.target as HTMLInputElement).value) || 0)
+}
+// baseAspect = the node's own "effective aspect" (explicit size, else the bottom wired image,
+// else square) — what setFrameResponsive writes as the design size when there is none yet.
+function onFrameResponsive(on: boolean) { const n = compositor.value; if (n) setFrameResponsive(n.data, on, baseAspect.value) }
 // ── Grid overlay + inspector ─────────────────────────────────────────────────
 // `gridConfig` is display-only wiring: it feeds the overlay below (lines +
 // region rects drawn over the stage). It is never consumed by any
@@ -11824,6 +11850,36 @@ onUnmounted(() => {
              properties (Background → Post-processing → Grid → templates)
              overflow the window and the lower controls become unreachable. -->
         <div class="p-4 flex flex-col gap-2.5 flex-1 min-h-0 overflow-y-auto">
+          <!-- Frame: its size and the Responsive switch — the same controls as the Frame node's
+               header on the canvas, written through lib/frame/frameSize. -->
+          <StudioSection title="Frame">
+            <div data-testid="frame-size-section" class="flex flex-col gap-1.5">
+              <StudioSelect :label="frameIsResponsive ? 'Designed at' : 'Size'"
+                :options="framePresetChoices.ids" :option-labels="framePresetChoices.labels"
+                :model-value="framePresetValue" @update:model-value="onFramePreset" />
+              <div class="flex items-center gap-2">
+                <label class="flex-1 flex items-center gap-2 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5">
+                  <span class="text-xs text-white/40">W</span>
+                  <input type="number" min="0" :value="frameSizeNow.w || ''" placeholder="Auto" aria-label="Frame width"
+                    data-testid="frame-size-width"
+                    class="w-full bg-transparent text-xs text-white/90 outline-none placeholder:text-white/30"
+                    @change="onFrameDim('width', $event)" />
+                </label>
+                <span class="text-xs text-white/30">×</span>
+                <label class="flex-1 flex items-center gap-2 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5">
+                  <span class="text-xs text-white/40">H</span>
+                  <input type="number" min="0" :value="frameSizeNow.h || ''" placeholder="Auto" aria-label="Frame height"
+                    data-testid="frame-size-height"
+                    class="w-full bg-transparent text-xs text-white/90 outline-none placeholder:text-white/30"
+                    @change="onFrameDim('height', $event)" />
+                </label>
+              </div>
+              <div data-testid="frame-responsive">
+                <StudioSwitch label="Responsive" hint="Layers follow their pins when the frame changes shape"
+                  :model-value="frameIsResponsive" @update:model-value="onFrameResponsive" />
+              </div>
+            </div>
+          </StudioSection>
           <!-- Canvas background fill (bottom-most; baked into the frame) -->
           <StudioSection title="Background">
             <FillControl allow-none :model-value="background"

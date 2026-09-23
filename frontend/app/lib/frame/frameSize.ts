@@ -1,0 +1,107 @@
+/**
+ * A Frame's size and its Responsive switch — the ONE place they are written.
+ *
+ * Two surfaces edit them: the Frame node's header on the canvas (ArtifactFrameNode) and the
+ * "Frame" section of the Frame editor's right panel (CompositorModal). Both write through
+ * these functions, so they always touch the same fields the same way:
+ *
+ *   - the node's `width` / `height` INT widgets (0 = no explicit size: the frame follows its
+ *     bottom wired image, else the editor canvas);
+ *   - `properties.sailor_frame.responsive` (see `isResponsiveFrame`) and
+ *     `properties.sailor_frame.preset` (which preset, or 'custom', was last picked).
+ *
+ * Every write spreads the existing `sailor_frame`, so its other keys (e.g. `clock`) survive.
+ * `data` is the node's reactive `data` object; writes mutate it in place.
+ */
+
+export interface FrameSizePreset { id: string; label: string; w: number; h: number }
+
+export const FRAME_SIZE_PRESETS: readonly FrameSizePreset[] = [
+  { id: '1:1', label: 'Square · 1:1', w: 1024, h: 1024 },
+  { id: '16:9', label: 'Wide · 16:9', w: 1280, h: 720 },
+  { id: '9:16', label: 'Tall · 9:16', w: 720, h: 1280 },
+  { id: '4:5', label: 'Portrait · 4:5', w: 1024, h: 1280 },
+  { id: '4:3', label: 'Classic · 4:3', w: 1024, h: 768 },
+  { id: 'A4', label: 'A4 · print', w: 1240, h: 1754 },
+]
+
+/** The parts of a Frame node's `data` this module reads and writes. */
+export interface FrameSizeNodeData {
+  widgetDefs?: readonly { name?: string }[] | null
+  widgetsValues?: unknown[] | null
+  properties?: Record<string, any> | null
+}
+
+type Dim = 'width' | 'height'
+
+function widgetIdx(data: FrameSizeNodeData, name: Dim): number {
+  return data.widgetDefs?.findIndex(d => d?.name === name) ?? -1
+}
+function readDim(data: FrameSizeNodeData, name: Dim): number {
+  const i = widgetIdx(data, name)
+  return i >= 0 ? Number(data.widgetsValues?.[i] ?? 0) || 0 : 0
+}
+function writeDim(data: FrameSizeNodeData, name: Dim, value: number) {
+  const i = widgetIdx(data, name)
+  if (i >= 0 && data.widgetsValues) data.widgetsValues[i] = value
+}
+function patchFrameProps(data: FrameSizeNodeData, patch: Record<string, unknown>) {
+  if (!data.properties) data.properties = {}
+  data.properties.sailor_frame = { ...data.properties.sailor_frame, ...patch }
+}
+
+/** The frame's explicit size (0 for a side that is not set). */
+export function readFrameSize(data: FrameSizeNodeData): { w: number; h: number } {
+  return { w: readDim(data, 'width'), h: readDim(data, 'height') }
+}
+
+/** The size select's value: the preset `w`×`h` matches exactly, 'custom' for any other
+ *  explicit size, '' when the frame has no explicit size. */
+export function framePresetId(w: number, h: number): string {
+  const match = FRAME_SIZE_PRESETS.find(p => p.w === w && p.h === h)
+  return match ? match.id : (w > 0 && h > 0 ? 'custom' : '')
+}
+
+/** Write a preset's size. Leaves Responsive as it is. False (and no write) for an unknown id. */
+export function applyFramePreset(data: FrameSizeNodeData, id: string): boolean {
+  const p = FRAME_SIZE_PRESETS.find(x => x.id === id)
+  if (!p) return false
+  writeDim(data, 'width', p.w)
+  writeDim(data, 'height', p.h)
+  patchFrameProps(data, { preset: id })
+  return true
+}
+
+/** Write one side from a typed number: rounded, never negative, NaN → 0. */
+export function setFrameDim(data: FrameSizeNodeData, which: Dim, value: number) {
+  writeDim(data, which, Math.max(0, Math.round(Number.isFinite(value) ? value : 0)))
+  patchFrameProps(data, { preset: 'custom' })
+}
+
+/** A concrete size of `aspect` (w/h) with 1024 on its long side; square for a bad aspect. */
+export function designSizeForAspect(aspect: number): { w: number; h: number } {
+  const L = 1024
+  const a = Number.isFinite(aspect) && aspect > 0 ? aspect : 1
+  return a >= 1 ? { w: L, h: Math.round(L / a) } : { w: Math.round(L * a), h: L }
+}
+
+/**
+ * Turn Responsive on or off. `aspect` is the frame's CURRENT effective aspect (its explicit size,
+ * else its bottom wired image, else 1) — read only when turning on a frame with no explicit size.
+ *
+ * Slice 2's rule: a frame with no explicit size follows its bottom wired image, so on becoming
+ * responsive its current effective size is written as a concrete design size — the design size
+ * must be stable, never re-derived from the live canvas. An explicit size is kept untouched.
+ * Turning off keeps whatever size the frame has.
+ */
+export function setFrameResponsive(data: FrameSizeNodeData, on: boolean, aspect: number) {
+  if (on) {
+    const { w, h } = readFrameSize(data)
+    if (!(w > 0 && h > 0)) {
+      const d = designSizeForAspect(aspect)
+      writeDim(data, 'width', d.w)
+      writeDim(data, 'height', d.h)
+    }
+  }
+  patchFrameProps(data, { responsive: on })
+}

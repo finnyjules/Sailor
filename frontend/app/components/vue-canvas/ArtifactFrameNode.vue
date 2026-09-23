@@ -33,6 +33,8 @@ import { portOffset } from '~/lib/canvas/portLayout'
 import { onFieldCatalogReady } from '~/lib/shaderfill/field'
 import { readGrid } from '~/lib/frame/gridConfig'
 import { resolveGrid } from '~/lib/frame/grid'
+import { FRAME_SIZE_PRESETS, applyFramePreset, framePresetId, setFrameDim, setFrameResponsive } from '~/lib/frame/frameSize'
+import { isResponsiveFrame } from '~/lib/frame/responsive/fromNode'
 import { toast } from 'vue-sonner'
 
 // The "Frame" — the Compositor as a first-class artboard artifact. Shows its
@@ -72,58 +74,28 @@ function outputIdx(name: string): number {
 }
 function widgetIdx(name: string): number { return props.data.widgetDefs?.findIndex((w: any) => w.name === name) ?? -1 }
 function widgetVal(name: string): number { const i = widgetIdx(name); return i >= 0 ? Number(props.data.widgetsValues?.[i] ?? 0) : 0 }
-function setWidget(name: string, value: any) { const i = widgetIdx(name); if (i >= 0 && props.data.widgetsValues) props.data.widgetsValues[i] = value }
 const imageOutIdx = computed(() => outputIdx('image'))
 // Per-layer transform widgets — slot s (0-based input) maps to layer{s+1}_*.
 function layerTf(slot: number, prop: string): number { const v = widgetVal(`layer${slot + 1}_${prop}`); return prop === 'scale' ? (v || 1) : v }
 
 // ── Artboard dimensions ─────────────────────────────────────────────────────
-interface Preset { id: string; label: string; w: number; h: number }
-const PRESETS: Preset[] = [
-  { id: '1:1', label: 'Square · 1:1', w: 1024, h: 1024 },
-  { id: '16:9', label: 'Wide · 16:9', w: 1280, h: 720 },
-  { id: '9:16', label: 'Tall · 9:16', w: 720, h: 1280 },
-  { id: '4:5', label: 'Portrait · 4:5', w: 1024, h: 1280 },
-  { id: '4:3', label: 'Classic · 4:3', w: 1024, h: 768 },
-  { id: 'A4', label: 'A4 · print', w: 1240, h: 1754 },
-]
+// Presets and the size/Responsive writes live in lib/frame/frameSize, shared with the Frame
+// editor's "Frame" section, so both surfaces write the same fields the same way.
+const PRESETS = FRAME_SIZE_PRESETS
 const frameW = computed(() => widgetVal('width'))
 const frameH = computed(() => widgetVal('height'))
 const hasExplicitSize = computed(() => frameW.value > 0 && frameH.value > 0)
-const isResponsive = computed(() => (props.data.properties as any)?.sailor_frame?.responsive === true)
-function setResponsive(on: boolean) {
-  if (!props.data.properties) (props.data as any).properties = {}
-  ;(props.data.properties as any).sailor_frame = { ...(props.data.properties as any).sailor_frame, responsive: on }
-}
-const activePresetId = computed<string>(() => {
-  if (isResponsive.value) return 'responsive'
-  const match = PRESETS.find(p => p.w === frameW.value && p.h === frameH.value)
-  return match ? match.id : (hasExplicitSize.value ? 'custom' : '')
-})
-function applyPreset(id: string) { const p = PRESETS.find(x => x.id === id); if (!p) return; setWidget('width', p.w); setWidget('height', p.h); rememberPreset(id) }
-function rememberPreset(id: string) {
-  if (!props.data.properties) (props.data as any).properties = {}
-  ;(props.data.properties as any).sailor_frame = { ...(props.data.properties as any).sailor_frame, preset: id }
-}
+const isResponsive = computed(() => isResponsiveFrame(props.data.properties))
+// One select here, so Responsive is one of its options; the editor has a separate switch.
+const activePresetId = computed<string>(() => isResponsive.value ? 'responsive' : framePresetId(frameW.value, frameH.value))
 function onPresetChange(e: Event) {
   const v = (e.target as HTMLSelectElement).value
-  if (v === 'responsive') {
-    // A frame with no explicit size follows its bottom wired image; on becoming
-    // responsive, write its current effective size as a concrete design size so
-    // the design size is stable (never re-derived from the live canvas). Keep an
-    // already-explicit size untouched.
-    if (!(frameW.value > 0 && frameH.value > 0)) {
-      const L = 1024
-      const a = Number.isFinite(aspect.value) && aspect.value > 0 ? aspect.value : 1
-      const w = a >= 1 ? L : Math.round(L * a)
-      const h = a >= 1 ? Math.round(L / a) : L
-      setWidget('width', w); setWidget('height', h)
-    }
-    setResponsive(true); return
-  }
-  if (v && v !== 'custom') { setResponsive(false); applyPreset(v) }
+  // Becoming responsive writes the current effective size as a concrete design size when the
+  // frame has none (slice 2 — see setFrameResponsive); an explicit size is kept.
+  if (v === 'responsive') { setFrameResponsive(props.data, true, aspect.value); return }
+  if (v && v !== 'custom') { setFrameResponsive(props.data, false, aspect.value); applyFramePreset(props.data, v) }
 }
-function setDim(which: 'width' | 'height', e: Event) { setWidget(which, Math.max(0, Math.round(parseFloat((e.target as HTMLInputElement).value) || 0))); rememberPreset('custom') }
+function setDim(which: 'width' | 'height', e: Event) { setFrameDim(props.data, which, parseFloat((e.target as HTMLInputElement).value) || 0) }
 
 // Aspect: explicit dims win; else the bottom wired image's aspect; else square.
 // Matching the composite means the background image fills the artboard exactly,
