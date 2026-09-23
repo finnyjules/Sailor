@@ -110,6 +110,32 @@ describe('Continue after the run has finished', () => {
     const run = (await k.store.get(runId))!
     expect(run.legs.at(-1)).toMatchObject({ id: again.legId, action: 'again' })
   })
+
+  it('a later Gate closes again, so the new video is reviewed there too', async () => {
+    // image(1) → Gate A(2) → video(3) → Gate B(6) → Video card(4)
+    const flow = gatedFlow({ imageSeed: 7, videoSeed: 3 })
+    flow['6'] = { class_type: 'ComfyGateNode', inputs: { data_in: ['3', 0], bypass: false } }
+    flow['4']!.inputs.source = ['6', 0]
+    const k = makeKit()
+    const { runId } = await pausedRun(k, [flow])
+    await k.engine.gateAction({ userId: null, runId, gateId: '2', action: 'continue' })
+    await k.engine.settled(runId)
+    expect((await k.store.get(runId))!.takes[0]!.nodes['6']!.status).toBe('paused')
+    await k.engine.gateAction({ userId: null, runId, gateId: '6', action: 'continue' })
+    await k.engine.settled(runId)
+    expect((await k.store.get(runId))!.status).toBe('done')
+
+    await k.engine.gateAction({ userId: null, runId, gateId: '2', action: 'continue' })
+    await k.engine.settled(runId)
+    expect(k.fal.submitted().map(r => r.endpoint)).toEqual(['fal-ai/flux/schnell', 'minimax/h3/image-to-video', 'minimax/h3/image-to-video'])
+    const run = (await k.store.get(runId))!
+    expect(run.status).toBe('paused')
+    expect(run.takes[0]!.nodes['6']!.status).toBe('paused')
+    expect(run.takes[0]!.nodes['4']!.status).toBe('waiting')
+    expect(run.takes[0]!.openGates).toEqual(['2'])
+    const lastPause = ofType(k.seen, 'gate_paused').at(-1)!
+    expect(lastPause.data).toMatchObject({ node_id: '6' })
+  })
 })
 
 describe('Pick at the Gate', () => {
@@ -164,6 +190,30 @@ describe('Stop', () => {
     expect((await k.engine.stop('user_2')).stopped).toEqual([])
     k.fal.release()
     await k.engine.settled(runId)
+  })
+  it('a Stop between opening a leg and starting it sticks: nothing is sent and the hold is dropped', async () => {
+    const k = makeKit({ hosted: true })
+    const { runId } = await pausedRun(k)
+    // Hold the first save of the Continue leg: the leg is open (and held) but not started.
+    const realSave = k.store.save.bind(k.store)
+    let letSaveFinish!: () => void
+    const saveHeld = new Promise<void>((r) => { letSaveFinish = r })
+    let holding = false
+    k.store.save = async (run) => {
+      if (!holding && run.legs.length === 2) { holding = true; await saveHeld }
+      return realSave(run)
+    }
+    const continuing = k.engine.gateAction({ userId: 'user_1', runId, gateId: '2', action: 'continue' })
+    await until(() => holding)
+    expect((await k.engine.stop('user_1')).stopped).toEqual([runId])
+    letSaveFinish()
+    await continuing
+    await k.engine.settled(runId)
+    expect(k.fal.submitted().map(r => r.endpoint)).toEqual(['fal-ai/flux/schnell'])
+    expect([...k.ledger.holds.values()].map(h => [h.credits, h.state])).toEqual([[2, 'settled'], [45, 'released']])
+    const run = (await k.store.get(runId))!
+    expect(run.takes[0]!.nodes['3']!.status).toBe('stopped')
+    expect(run.status).toBe('stopped')
   })
   it('a request still being sent when Stop lands is cancelled once it has an id', async () => {
     const k = makeKit()

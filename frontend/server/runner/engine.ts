@@ -229,6 +229,10 @@ export function applyGateAction(
       const down = downstreamNodes(take.prompt, gateId)
       reset(take, down)
       bumpSeeds(take, down)
+      // Later Gates close again, so each of their reviews still happens.
+      const laterGates = new Set([...down].filter(id => take.prompt[id]?.class_type === GATE_CLASS))
+      take.openGates = take.openGates.filter(g => !laterGates.has(g))
+      take.droppedGates = take.droppedGates.filter(g => !laterGates.has(g))
     }
     return { legAction: 'again', legTakes: chosen }
   }
@@ -343,7 +347,9 @@ export function createEngine(deps: EngineDeps) {
   function launch(run: RunRecord, leg: LegRecord): void {
     const e = entryFor(run)
     e.run = run
-    if (e.ctl.signal.aborted) e.ctl = new AbortController()
+    // A Stop that landed after the leg was opened but before this point must
+    // stick: keep the aborted signal so the leg ends at once and drops its holds.
+    if (e.ctl.signal.aborted && !run.stopRequested) e.ctl = new AbortController()
     const signal = e.ctl.signal
     e.legPromise = runLeg(run, leg, signal).catch((err) => {
       deps.reportError(err, { site: 'runner.leg', runId: run.id, legId: leg.id })
