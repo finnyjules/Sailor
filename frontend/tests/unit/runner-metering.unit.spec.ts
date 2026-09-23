@@ -74,11 +74,26 @@ describe('hosted metering', () => {
     expect(d).toMatchObject({ state: 'released', actual: 0, finished: true })
     expect(graphRuns.resolve).toHaveBeenCalledWith('run_x.0.t1', 'voided')
   })
+  it('does not record a charge when the hold was already released — files still stay viewable', async () => {
+    const { ledger, graphRuns } = fakes()
+    ledger.settle = vi.fn(async () => ({ settled: false }))
+    const m = createMetering({ hosted: () => true, ledger: () => ledger, graphRuns, spendGuard: async () => {}, moderate: async () => ({ ok: true }) })
+    const c = charge()
+    await m.finish('u1', c, 9)
+    expect(c).toMatchObject({ state: 'released', actual: 0, finished: true })
+    expect(graphRuns.resolve).toHaveBeenCalledWith('run_x.0.t0', 'settled')
+  })
   it('records each saved file against the stage so /view lets its owner see it', async () => {
     const { ledger, graphRuns } = fakes()
     const m = createMetering({ hosted: () => true, ledger: () => ledger, graphRuns, spendGuard: async () => {}, moderate: async () => ({ ok: true }) })
     await m.addOutput('u1', 'k', { filename: 'generate_image_00001_.png', subfolder: 'u_abc', type: 'output' })
     expect(graphRuns.appendOutput).toHaveBeenCalledWith('k', 'output:u_abc:generate_image_00001_.png')
+  })
+  it('never throws when the output ownership row fails to write', async () => {
+    const { ledger, graphRuns } = fakes()
+    graphRuns.appendOutput = vi.fn(async () => { throw new Error('db down') })
+    const m = createMetering({ hosted: () => true, ledger: () => ledger, graphRuns, spendGuard: async () => {}, moderate: async () => ({ ok: true }) })
+    await expect(m.addOutput('u1', 'k', { filename: 'a.png', subfolder: '', type: 'output' })).resolves.toBeUndefined()
   })
   it('runs the spending check and the content check', async () => {
     const { ledger, graphRuns } = fakes()

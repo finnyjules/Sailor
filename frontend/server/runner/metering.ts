@@ -107,7 +107,12 @@ export function createMetering(d: {
     },
     async addOutput(userId, stageKey, file) {
       if (!d.hosted() || !userId) return
-      await d.graphRuns.appendOutput(stageKey, outputKey(file))
+      try {
+        await d.graphRuns.appendOutput(stageKey, outputKey(file))
+      }
+      catch (e) {
+        console.error('[runner] output ownership row failed — result may not be viewable', { stageKey, error: e })
+      }
     },
     async finish(userId, charge, actual) {
       charge.finished = true
@@ -117,9 +122,17 @@ export function createMetering(d: {
       }
       if (actual > 0 && charge.holdId != null) {
         const s = await d.ledger().settle(charge.holdId, actual, `runner:${charge.stageKey}`)
-        if (!s.settled) console.error('[runner] SETTLE ON RELEASED HOLD — stage shipped uncharged', { stageKey: charge.stageKey, actual })
-        charge.state = 'settled'
-        charge.actual = actual
+        if (!s.settled) {
+          // The hold was already released (e.g. a stale retry) — no money moved, so
+          // this must not read as a completed charge, even though the files were made.
+          console.error('[runner] SETTLE ON RELEASED HOLD — stage shipped uncharged', { stageKey: charge.stageKey, actual })
+          charge.state = 'released'
+          charge.actual = 0
+        }
+        else {
+          charge.state = 'settled'
+          charge.actual = actual
+        }
       }
       else {
         if (charge.holdId != null) await d.ledger().release(charge.holdId)
