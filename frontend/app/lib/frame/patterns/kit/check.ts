@@ -304,7 +304,11 @@ export function checkPlan(els: El[], S: Sheet, premise?: LayoutDef['premise'], o
         const ix = Math.min(box.x1, img.box.x1) - Math.max(box.x0, img.box.x0)
         const iy = Math.min(box.y1, img.box.y1) - Math.max(box.y0, img.box.y0)
         if (!(ix > 0.25 && iy > 0.25)) continue
-        const above = boxed.slice(img.i + 1).filter(c => c.e.k === 'band'
+        // A drawn button covers its own label (`over: ['btn']`). A link draws no shape, so it
+        // covers nothing. Residual risk: toOps may still fall back to a link when no palette role
+        // contrasts 3:1 with the action text's colour — the checker cannot know that colour here.
+        const ownBtn = (c: Present) => c.k === 'btn' && c.shape !== 'link' && !!e.over?.includes('btn')
+        const above = boxed.slice(img.i + 1).filter(c => c.e.k === 'band' || ownBtn(c.e)
           || ((c.e.k === 'r' || (c.e.k === 'c' && !c.e.photo)) && COVER_ROLES.includes(baseRole(c.e.role ?? ''))))
         // A circle (a sticker) holds the text when all four corners lie inside it.
         const inCircle = above.some(c => {

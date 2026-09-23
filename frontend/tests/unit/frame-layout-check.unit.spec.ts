@@ -336,6 +336,21 @@ describe('layout kit — checker, Stage 3 pieces (rules 9 and 10)', () => {
       expect(checkPlan([photo, t], S, undefined, { style: 'performance' })).toEqual(['date: sits on the raw image'])
     })
 
+    it('a drawn button covers its own label; a link-style action on the image does not', () => {
+      const P = makeSheet({ frameW: 1000, frameH: 1000, measure, style: 'performance' })
+      const E = makeSheet({ frameW: 1000, frameH: 1000, measure, style: 'editorial' })
+      const pill = P.button('Shop now', 10, 50)
+      expect(checkPlan([photo, pill.btn, pill.text], P, undefined, { style: 'performance' })).toEqual([])
+      // Rule 10 runs for Street (textOffImage); Editorial's look is a link: no shape, no cover.
+      const link = E.button('Shop now', 10, 50)
+      expect(checkPlan([photo, link.btn, link.text], E, undefined, { style: 'street' })).toEqual(['action: sits on the raw image'])
+      // A button below the image covers nothing.
+      expect(checkPlan([pill.btn, photo, pill.text], P, undefined, { style: 'performance' })).toEqual(['action: sits on the raw image'])
+      // A text not set over the button (no `over: ['btn']`) is not its label.
+      expect(checkPlan([photo, pill.btn, { ...pill.text, role: 'caption', over: [] }], P, undefined, { style: 'performance' }))
+        .toEqual(expect.arrayContaining(['caption: sits on the raw image']))
+    })
+
     it('text that only brushes the image (≤ 0.25) is not on it', () => {
       const small: PhotoEl = { k: 'p', x: 50, y: 0, w: 50, h: 50, role: 'photo' }
       const t = info({ x: 10, w: 40.2, top: 60 })

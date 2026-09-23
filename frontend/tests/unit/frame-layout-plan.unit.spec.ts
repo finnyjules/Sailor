@@ -971,10 +971,11 @@ describe('planLayout — band, button and logo (Stage 3)', () => {
     expect((plan.layers.find(l => l.id === 'a') as any).underline).toBe(true)
   })
 
-  it('without the band the caption and the action sit on the raw image', () => {
+  it('without the band the caption sits on the raw image (the action is on its own button)', () => {
     unregister.push(__registerLayoutForTest(piecesLayout('t-pieces-raw', { band: false })))
     const plan = planLayout(args({ layoutId: 't-pieces-raw', props: props(layersWith()), style: 'performance', brandLogo }))!
-    expect(plan.issues).toEqual(expect.arrayContaining(['caption: sits on the raw image', 'action: sits on the raw image']))
+    expect(plan.issues).toContain('caption: sits on the raw image')
+    expect(plan.issues).not.toContain('action: sits on the raw image')
     // Swiss (no style) never runs rule 10.
     const swiss = planLayout(args({ layoutId: 't-pieces-raw', props: props(layersWith()), brandLogo }))!
     expect(swiss.issues.filter(i => i.includes('raw image'))).toEqual([])

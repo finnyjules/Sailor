@@ -116,7 +116,15 @@ export interface VectorPaintOptions {
 function stopsOf(stops: Array<{ offset: number; color: string }>): VectorGradientStop[] {
   // Sorted and clamped through the SAME helper the canvas gradients use, so the
   // two cannot disagree about what an out-of-order or out-of-range stop means.
-  return sortedClampedStops(stops).map(s => ({ offset: s.offset, color: s.color }))
+  // An `rgba(r, g, b, a)` stop (a layout's fading band) is split into an opaque colour plus
+  // `stop-opacity`, which every SVG reader understands.
+  return sortedClampedStops(stops).map(s => {
+    const m = /^rgba\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*\)$/i.exec(s.color.trim())
+    if (!m) return { offset: s.offset, color: s.color }
+    const hex = [m[1], m[2], m[3]].map(v => Math.max(0, Math.min(255, Math.round(Number(v)))).toString(16).padStart(2, '0')).join('')
+    const a = Math.max(0, Math.min(1, Number(m[4])))
+    return a >= 1 ? { offset: s.offset, color: `#${hex}` } : { offset: s.offset, color: `#${hex}`, opacity: a }
+  })
 }
 
 /** A `Fill`'s gradient arm is the two-colour shorthand for the same thing: `a`

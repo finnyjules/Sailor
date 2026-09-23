@@ -414,6 +414,15 @@ export function elementsToOps(
       }
     }
   })
+  // A button's label always draws above its button, whatever order the layout pushed the two in:
+  // the action op's z goes just above the button's insert op when it is not already higher.
+  if (btnEl && btnFill != null) {
+    const btnZ = els.indexOf(btnEl)
+    for (const op of ops) {
+      if (op.kind !== 'text' || op.target !== targets.action || op.hidden) continue
+      if ((op.z ?? 0) <= btnZ) op.z = btnZ + 0.5
+    }
+  }
   // Roles the layout's format does not carry: hide the layer in place (no geometry — apply.ts
   // must not move it), stacked after every element so a later `hide` always wins for that id.
   if (opts?.hide?.length) {

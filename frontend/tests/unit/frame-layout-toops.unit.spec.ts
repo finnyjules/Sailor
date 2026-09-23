@@ -10,6 +10,7 @@ import type { FrameElements } from '~/lib/frame/patterns/types'
 import { mergeOwned } from '~/lib/frame/patterns/kit/owned'
 import { nextOrderFor } from '~/lib/frame/patterns/order'
 import { localStackKey } from '~/lib/compositor/frameStack'
+import { paintToVectorPaint } from '~/lib/paint/toVector'
 
 // Layout elements → layer ops. Kit units are percent of frame width; Sailor layers take x/100,
 // y/S.H and sizes/100. The stub measure: 0.55 em per character, cap metrics 0.35 / 0.35.
@@ -556,5 +557,37 @@ describe('elementsToOps — Stage 3 pieces: band, button, logo', () => {
     expect((once[0] as any).underline).toBe(true)
     const again = applyPlacement(once, { ops: [{ ...ops[0]!, underline: undefined }], did: '' }, elements, palette, { recolour: false })
     expect((again[0] as any).underline).toBeUndefined()
+  })
+})
+
+describe('elementsToOps — Stage 3 fix round 1', () => {
+  const palette = { field: '#f2f0ef', ink: '#121212', accent: '#dd2200' }
+  const P = makeSheet({ frameW: frame.w, frameH: frame.h, measure, style: 'performance' })
+
+  it('a label pushed before its button still draws above it', () => {
+    const { btn, text } = P.button('Shop now', 10, 50)
+    const withAction = { ...targets, action: 'a' }
+    const { ops, owned } = elementsToOps([text, btn], P, withAction, frame, palette, { actionColor: '#000000' })
+    const act = ops.find(o => o.target === 'a')!
+    const ins = ops.find(o => o.insert)!
+    expect(act.z!).toBeGreaterThan(ins.z!)
+    // Through the real order: the rect lands below the label.
+    const merged = mergeOwned([{ id: 'a', kind: 'text' } as any], owned)
+    const inserted = new Map<number, string>([[ops.indexOf(ins), owned[0]!.id]])
+    const elements = { images: [], shapes: [] } as unknown as FrameElements
+    const saved = [localStackKey('a'), localStackKey(owned[0]!.id)]   // the label saved BELOW the rect
+    const order = nextOrderFor(saved, merged.map(l => localStackKey(l.id)), ops, elements, inserted)
+    expect(order.indexOf(localStackKey('a'))).toBeGreaterThan(order.indexOf(localStackKey(owned[0]!.id)))
+    // Already above: left alone.
+    const inOrder = elementsToOps([btn, text], P, withAction, frame, palette, { actionColor: '#000000' })
+    expect(inOrder.ops.find(o => o.target === 'a')!.z).toBe(1)
+  })
+
+  it('a band’s rgba stops export to SVG as colour plus stop-opacity', () => {
+    const { owned } = elementsToOps([P.band('bottom', 80, P.H)], P, targets, frame, palette)
+    const v = paintToVectorPaint((owned[0] as any).fill, { units: 'objectBoundingBox' }) as any
+    expect(v.stops.map((s: any) => [s.color, s.opacity])).toEqual([
+      ['#f2f0ef', 0.94], ['#f2f0ef', 0.94], ['#f2f0ef', 0],
+    ])
   })
 })
