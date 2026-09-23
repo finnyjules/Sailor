@@ -1,16 +1,38 @@
 import { describe, it, expect } from 'vitest'
-import { createRectLayer, type LocalLayer } from '~/composables/useCompositorLayers'
+import { createRectLayer, createTextLayer, type LocalLayer } from '~/composables/useCompositorLayers'
 import { resolveLayout } from '~/lib/frame/responsive'
-import { resizeLayerAtView, scaleLayerAtView, rotateLayerAtView, hitTestView, viewSelectionGeometry } from '~/lib/frame/responsive/viewEdit'
+import { resizeLayerAtView, scaleLayerAtView, rotateLayerAtView, hitTestView, viewSelectionGeometry, type ViewEdit } from '~/lib/frame/responsive/viewEdit'
 import type { FrameDoc } from '~/lib/frame/responsive/types'
 
 const doc = (layers: LocalLayer[]): FrameDoc => ({
   responsive: true, designW: 1000, designH: 500, layers, stackOrder: layers.map(l => `l:${l.id}`),
   groups: [], grid: null, motion: null,
 })
-const unitAt = (layers: LocalLayer[], id: string) =>
-  resolveLayout(doc(layers), 3000, 500, { withBoxes: true }).units.get(id)!
+const unitAt = (layers: LocalLayer[], id: string, measureCtx?: CanvasRenderingContext2D) =>
+  resolveLayout(doc(layers), 3000, 500, { withBoxes: true, measureCtx }).units.get(id)!
 const WH = { w: 'w', h: 'h' }
+
+/** Apply a ViewEdit's patches and pins to the layers the way the editor will (an `undefined` pin
+ *  is removed), then re-resolve at the same 3000×500 view. Returns the new layers and the result. */
+function applyAndResolve(layers: LocalLayer[], e: ViewEdit, measureCtx?: CanvasRenderingContext2D) {
+  const next = layers.map((l) => {
+    const p = e.patches.find(x => x.id === l.id)?.patch
+    let out: LocalLayer = p ? ({ ...l, ...p } as LocalLayer) : l
+    if (e.pins && !e.pins.onGroup && e.pins.unitId === l.id) {
+      const pins: Record<string, unknown> = { ...(l.pins ?? {}), ...e.pins.patch }
+      for (const k of Object.keys(pins)) if (pins[k] === undefined) delete pins[k]
+      out = { ...out, pins: Object.keys(pins).length ? pins : undefined } as LocalLayer
+    }
+    return out
+  })
+  return { layers: next, result: resolveLayout(doc(next), 3000, 500, { withBoxes: true, measureCtx }) }
+}
+const drawnAfter = (layers: LocalLayer[], e: ViewEdit, id: string, measureCtx?: CanvasRenderingContext2D) =>
+  applyAndResolve(layers, e, measureCtx).result.boxes.get(id)!
+const expectBox = (got: { x: number; y: number; w: number; h: number }, want: { x: number; y: number; w: number; h: number }) => {
+  expect(got.x).toBeCloseTo(want.x, 6); expect(got.y).toBeCloseTo(want.y, 6)
+  expect(got.w).toBeCloseTo(want.w, 6); expect(got.h).toBeCloseTo(want.h, 6)
+}
 
 describe('resizeLayerAtView', () => {
   it('a left-held rect widened to the right stays left-held and stores the new width', () => {
@@ -27,10 +49,45 @@ describe('resizeLayerAtView', () => {
     expect(u.h.kind).toBe('both')
     const e = resizeLayerAtView(u, l, { x: 550, y: 200, w: 2000, h: 100 }, 1000, 500, 'drop', WH)
     // centred reading (1550 is within 4% of 1500) maps to −450..1550, which reads as stretched → rejected;
-    // stretched maps the edges back to 50..1050 → reads as stretched → accepted.
-    expect(e.patches[0]!.patch.w).toBeCloseTo(1.0, 9)
-    expect(e.patches[0]!.patch.x).toBeCloseTo(0.55, 9)
+    // stretched maps the edges back to 50..1050, but a stretched free edge stops EDGE_GAP (0.01) inside
+    // the frame (else it would bleed to the real edge): 50..999.99 → reads as stretched → accepted.
+    expect(e.patches[0]!.patch.w).toBeCloseTo(0.94999, 9)     // 949.99 / 1000
+    expect(e.patches[0]!.patch.x).toBeCloseTo(0.524995, 9)    // (50 + 999.99) / 2 / 1000
     expect(e.pins!.patch.h).toBeUndefined()
+    // Drawn where it was dropped — the far edge stopped at 1500 + 999.99, exactly where the drag held it.
+    const drop = drawnAfter([l], e, 'a')
+    expectBox(drop, { x: 550, y: 200, w: 1949.99, h: 100 })
+    const drag = resizeLayerAtView(u, l, { x: 550, y: 200, w: 2000, h: 100 }, 1000, 500, 'drag', WH)
+    expectBox(drawnAfter([l], drag, 'a'), drop)
+  })
+  it('a stretched rect narrowed below the spare room stops at a 1 px design width (never negative)', () => {
+    const l = createRectLayer({ id: 'a', x: 0.5, y: 0.5, w: 0.9, h: 0.1 })     // design 50..950, drawn 550..2450
+    const u = unitAt([l], 'a')
+    const box = { x: 550, y: 200, w: 900, h: 100 }                            // right edge to 1450 → far 1450 − 1500 = −50
+    const drag = resizeLayerAtView(u, l, box, 1000, 500, 'drag', WH)
+    const drop = resizeLayerAtView(u, l, box, 1000, 500, 'drop', WH)
+    for (const e of [drag, drop]) {
+      expect(e.patches[0]!.patch.w).toBeCloseTo(0.001, 9)                     // far stops at near + 1 = 51
+      expect(e.patches[0]!.patch.x).toBeCloseTo(0.0505, 9)
+      expect(e.pins!.patch.h).toBe('both')                                    // 50..51 reads left → the held pin is stored
+    }
+    const after = drawnAfter([l], drop, 'a')
+    expectBox(after, { x: 550, y: 200, w: 1001, h: 100 })                     // 550..1551: the edge stopped
+    expectBox(after, drawnAfter([l], drag, 'a'))
+  })
+  it('a stretched edge dragged past the frame edge stops inside it, and draws where the drag held it', () => {
+    const l = createRectLayer({ id: 'a', x: 0.5, y: 0.5, w: 0.9, h: 0.1 })
+    const u = unitAt([l], 'a')
+    const box = { x: 550, y: 200, w: 2650, h: 100 }                           // right edge to 3200, past the 3000 view
+    const drag = resizeLayerAtView(u, l, box, 1000, 500, 'drag', WH)
+    const drop = resizeLayerAtView(u, l, box, 1000, 500, 'drop', WH)
+    const { layers } = applyAndResolve([l], drop)
+    const a = layers[0]!
+    expect((a.x + a.w / 2) * 1000).toBeLessThan(1000)                         // design far < the frame's end
+    expect((a.x + a.w / 2) * 1000).toBeCloseTo(999.99, 6)
+    const after = drawnAfter([l], drop, 'a')
+    expectBox(after, { x: 550, y: 200, w: 1949.99, h: 100 })
+    expectBox(after, drawnAfter([l], drag, 'a'))
   })
   it('a bleeding side stays welded to the frame edge', () => {
     const l = createRectLayer({ id: 'bg', x: 0.5, y: 0.5, w: 1, h: 0.5 })
@@ -78,6 +135,53 @@ describe('rotateLayerAtView', () => {
     const e = rotateLayerAtView(unitAt([l], 'a'), l, 90, { w: 400, h: 100 }, 'drop')
     expect(e.patches[0]!.patch).toEqual({ rotation: 90 })
     expect(e.pins!.patch).toEqual({ h: undefined, v: undefined })
+  })
+  it('rotating back to 0° judges stretch from the NEW rotation, so the drop draws where the drag did', () => {
+    const l = createRectLayer({ id: 'a', x: 0.5, y: 0.5, w: 0.9, h: 0.05, rotation: 10 })   // cannot stretch while rotated: held centre
+    const u = unitAt([l], 'a')
+    expect(u.h.kind).toBe('center')
+    const drag = rotateLayerAtView(u, l, 0, { w: 900, h: 50 }, 'drag')
+    const drop = rotateLayerAtView(u, l, 0, { w: 900, h: 50 }, 'drop')
+    // At 0° the 900-wide box reads as stretched, not the held centre → the centre pin is stored.
+    expect(drop.pins!.patch.h).toBe('center')
+    const after = drawnAfter([l], drop, 'a')
+    expect(after.x).toBeCloseTo(1050, 6); expect(after.w).toBeCloseTo(900, 6)   // centre map: 1000 + 50 .. 1000 + 950
+    expectBox(after, drawnAfter([l], drag, 'a'))
+  })
+})
+
+describe('scaleLayerAtView at the frame edge', () => {
+  it('a stretched layer scaled past the frame edge stops EDGE_GAP inside it, keeping its centre', () => {
+    const l = createRectLayer({ id: 'a', x: 0.5, y: 0.5, w: 0.9, h: 0.1 })     // design 50..950, drawn 550..2450
+    const e = scaleLayerAtView(unitAt([l], 'a'), l, { w: 0.9, h: 0.1 }, 1.2, 'drop')
+    // ×1.2 would be −40..1040; the ratio stops at (500 − 0.01) / 450 so the edges land at 0.01..999.99.
+    const r = 499.99 / 450
+    expect(e.patches[0]!.patch.w).toBeCloseTo(0.9 * r, 9)
+    expect(e.patches[0]!.patch.h).toBeCloseTo(0.1 * r, 9)
+    expect(e.pins!.patch.h).toBeUndefined()
+    const after = drawnAfter([l], e, 'a')
+    expect(after.x).toBeCloseTo(500.01, 6); expect(after.x + after.w).toBeCloseTo(2499.99, 6)
+  })
+})
+
+describe('re-wrapped text', () => {
+  // 10 px per character, whatever the font.
+  const ctx = { font: '', letterSpacing: '0px', fontKerning: 'auto', measureText: (s: string) => ({ width: s.length * 10 }) } as unknown as CanvasRenderingContext2D
+  it('a width-only drag leaves the design-size y and box height alone, and draws its width where dropped', () => {
+    const word = 'a'.repeat(40)
+    const l = createTextLayer({ id: 't', text: `${word} ${word} ${word}`, x: 0.5, y: 0.2, boxW: 0.85, fontSize: 0.08, lineHeight: 1.2 })
+    const u = unitAt([l], 't', ctx)
+    expect(u.h.kind).toBe('both')
+    expect(u.viewBox.h).toBeLessThan(u.mappedBox.h)                           // fewer lines at the wide view
+    const vb = u.viewBox
+    const box = { x: vb.x, y: vb.y, w: vb.w - 125, h: vb.h }
+    const e = resizeLayerAtView(u, l, box, 1000, 500, 'drop', { w: 'boxW', h: 'boxH' })
+    const p = e.patches[0]!.patch
+    expect(p.y).toBeCloseTo(0.2, 9)
+    expect('boxH' in p).toBe(false)
+    expect(p.boxW as number).toBeLessThan(0.85)
+    const after = drawnAfter([l], e, 't', ctx)
+    expect(after.x).toBeCloseTo(box.x, 6); expect(after.w).toBeCloseTo(box.w, 6)
   })
 })
 

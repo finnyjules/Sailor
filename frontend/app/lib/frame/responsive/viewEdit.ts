@@ -1,11 +1,14 @@
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import { applyMap, invertMap } from './axis'
 import { inferAxisPin, V_NAME } from './infer'
+import { layerCanStretch } from './units'
 import type { AxisMap, AxisPin, ResolvedBox, UnitInfo } from './types'
 
 const EPS = 1e-6
 /** How far (design px) a moved stretched edge stays inside its reference, so it never reads as touching it and gets welded (bled) to the real box edge. */
 const EDGE_GAP = 0.01
+/** The smallest design extent (px) that an edit at a viewing size can leave. A stretched edge stops here instead of crossing over. */
+const MIN_EXTENT = 1
 
 export interface AxisSpan { start: number; extent: number }
 /** One axis of a unit as the resolver placed it at the viewing size. Design px / view px. */
@@ -47,18 +50,37 @@ export function bleeds(ax: AxisInfo): { near: boolean; far: boolean } {
 }
 
 /** The design extent [near, far] that draws at view extent [a, b] under `pin`.
- *  A stretching pin maps each edge back; any other pin maps the centre back and keeps `designSize`. */
+ *  A stretching pin maps each edge back; any other pin maps the centre back and keeps `designSize`.
+ *  Never returns an extent below MIN_EXTENT. A stretching pin's edges are also bounded:
+ *  - A welded (bleeding) edge keeps its design position.
+ *  - Every other edge stops EDGE_GAP inside the reference. An edge that reached the reference would
+ *    be drawn at the REAL box edge (bleed), so bleeding cannot be made by dragging at a view.
+ *  - When the extent would drop below MIN_EXTENT, the edge that moved further stops. */
 export function designExtentFor(ax: AxisInfo, pin: AxisPin, a: number, b: number, designSize: number): [number, number] {
   const kind: AxisPin = pin === 'both' && !ax.canStretch ? 'center' : pin
   const m: AxisMap = { ...ax.map, kind }
   if (kind === 'both') {
-    const viewEnd = ax.refView.start + ax.refView.extent
-    const near = Math.abs(a - ax.refView.start) < EPS ? ax.refDesign.start : invertMap(m, a, 'near')
-    const far = Math.abs(b - viewEnd) < EPS ? ax.refDesign.start + ax.refDesign.extent : invertMap(m, b, 'far')
+    const weld = bleeds(ax)
+    const dNear = ax.design.start, dFar = ax.design.start + ax.design.extent
+    const lo = ax.refDesign.start + EDGE_GAP, hi = ax.refDesign.start + ax.refDesign.extent - EDGE_GAP
+    let near = weld.near ? dNear : Math.max(lo, invertMap(m, a, 'near'))
+    let far = weld.far ? dFar : Math.min(hi, invertMap(m, b, 'far'))
+    if (far - near < MIN_EXTENT) {
+      const farMoves = weld.near || (!weld.far && Math.abs(far - dFar) >= Math.abs(near - dNear))
+      if (farMoves) far = near + MIN_EXTENT
+      else near = far - MIN_EXTENT
+    }
     return [near, far]
   }
+  const size = Math.max(designSize, MIN_EXTENT)
   const c = invertMap(m, (a + b) / 2)
-  return [c - designSize / 2, c + designSize / 2]
+  return [c - size / 2, c + size / 2]
+}
+
+/** Whether a stretching design extent draws exactly at [a, b]. Used to reject a clamped candidate. */
+function drawsAt(ax: AxisInfo, near: number, far: number, a: number, b: number): boolean {
+  const m: AxisMap = { ...ax.map, kind: 'both' }
+  return Math.abs(applyMap(m, near, 'near') - a) < EPS && Math.abs(applyMap(m, far, 'far') - b) < EPS
 }
 
 /** During a drag: map back with the held pin and hold it (write it on an automatic axis). */
@@ -80,6 +102,10 @@ export function settleAxis(ax: AxisInfo, a: number, b: number, designSize: numbe
   const viewPin = inferAxisPin(a, b - a, ax.refView.start, ax.refView.extent, ax.canStretch)
   for (const pin of viewPin === held ? [held] : [viewPin, held]) {
     const [near, far] = designExtentFor(ax, pin, a, b, designSize)
+    // A stretching candidate that is not the held pin must draw where it was dropped. If its edges
+    // were stopped inside the reference it would jump on release, so reject it. The held pin was
+    // already stopped the same way while dragging, so it draws where the drag left it.
+    if (pin !== held && pin === 'both' && ax.canStretch && !drawsAt(ax, near, far, a, b)) continue
     if (inferAxisPin(near, far - near, ax.refDesign.start, ax.refDesign.extent, ax.canStretch) === pin) {
       return { near, far, pin: { clear: true } }
     }
@@ -150,29 +176,66 @@ function holdPins(u: UnitInfo, nb: ResolvedBox, canStretch: boolean, phase: 'dra
   return pinsPatch(u, one('h'), one('v'))
 }
 
+/**
+ * Resize a single-layer unit to the drawn `box` (view px). Both edges map back, so the stored size
+ * changes; a bleeding side stays welded, and a stretched free edge stops EDGE_GAP inside the
+ * reference and never closer than MIN_EXTENT to the other edge (see designExtentFor).
+ *
+ * Each axis settles from the PLACED span (UnitInfo.mappedBox), not the drawn one: they differ for a
+ * re-wrapped text, whose drawn height follows the view's wrap. If the gesture left the drawn
+ * extent unchanged, the placed span, shifted by how far the drawn box moved, is settled, so the
+ * design position and size stay as they were. If the extent changed, the new box is settled as
+ * drawn: the height field is then written, and a text with its own box height draws its placed span.
+ * The height field (`fields.h`) is written only when the vertical extent changed, or when the layer
+ * already has one.
+ */
 export function resizeLayerAtView(u: UnitInfo, layer: LocalLayer, box: ResolvedBox, W0: number, H0: number, phase: 'drag' | 'drop', fields: { w: string; h: string | null }): ViewEdit {
-  const one = (axis: 'h' | 'v', a0: number, b0: number): Settled => {
+  const one = (axis: 'h' | 'v', a0: number, b0: number): Settled & { changed: boolean } => {
     const ax = axisInfo(u, axis)
+    const drawnStart = axis === 'h' ? u.viewBox.x : u.viewBox.y
+    const drawnExtent = axis === 'h' ? u.viewBox.w : u.viewBox.h
+    const changed = Math.abs((b0 - a0) - drawnExtent) > EPS
+    let a = changed ? a0 : a0 + (ax.view.start - drawnStart)
+    let b = changed ? b0 : a + ax.view.extent
     const bl = bleeds(ax)
-    const a = bl.near ? ax.view.start : a0
-    const b = bl.far ? ax.view.start + ax.view.extent : b0
+    if (bl.near) a = ax.view.start
+    if (bl.far) b = ax.view.start + ax.view.extent
     const size = (b - a) / u.kSize
-    return phase === 'drag' ? holdAxis(ax, a, b, size) : settleAxis(ax, a, b, size)
+    return { ...(phase === 'drag' ? holdAxis(ax, a, b, size) : settleAxis(ax, a, b, size)), changed }
   }
   const sh = one('h', box.x, box.x + box.w)
   const sv = one('v', box.y, box.y + box.h)
   const patch: Record<string, unknown> = { x: (sh.near + sh.far) / 2 / W0, y: (sv.near + sv.far) / 2 / H0 }
   patch[fields.w] = (sh.far - sh.near) / W0
-  if (fields.h) patch[fields.h] = (sv.far - sv.near) / W0
+  const hasH = fields.h != null && Number((layer as unknown as Record<string, unknown>)[fields.h]) > 0
+  if (fields.h && (sv.changed || hasH)) patch[fields.h] = (sv.far - sv.near) / W0
   return { patches: [{ id: layer.id, patch }], pins: pinsPatch(u, sh.pin, sv.pin) }
 }
 
+/**
+ * Scale uniformly about the design centre: each `start` field is multiplied by the ratio and
+ * clamped to 0.002..4. On a stretched axis the free edges stop EDGE_GAP inside the reference, the
+ * same way moves and resizes stop. A growing ratio is capped to keep that gap, so the scale stays
+ * uniform and the centre stays put.
+ */
 export function scaleLayerAtView(u: UnitInfo, layer: LocalLayer, start: Record<string, number>, ratio: number, phase: 'drag' | 'drop'): ViewEdit {
+  let r = ratio
+  if (ratio > 1) {
+    for (const axis of ['h', 'v'] as const) {
+      const ax = axisInfo(u, axis)
+      if (ax.map.kind !== 'both' || ax.design.extent <= 0) continue
+      const bl = bleeds(ax)
+      const half = ax.design.extent / 2, c = ax.design.start + half
+      const refEnd = ax.refDesign.start + ax.refDesign.extent
+      if (!bl.near) r = Math.min(r, Math.max(1, (c - ax.refDesign.start - EDGE_GAP) / half))
+      if (!bl.far) r = Math.min(r, Math.max(1, (refEnd - EDGE_GAP - c) / half))
+    }
+  }
   const patch: Record<string, unknown> = {}
-  for (const k of Object.keys(start)) patch[k] = Math.min(4, Math.max(0.002, start[k]! * ratio))
+  for (const k of Object.keys(start)) patch[k] = Math.min(4, Math.max(0.002, start[k]! * r))
   const b = u.designBox
   const cx = b.x + b.w / 2, cy = b.y + b.h / 2
-  const nb = { x: cx - (b.w * ratio) / 2, y: cy - (b.h * ratio) / 2, w: b.w * ratio, h: b.h * ratio }
+  const nb = { x: cx - (b.w * r) / 2, y: cy - (b.h * r) / 2, w: b.w * r, h: b.h * r }
   return { patches: [{ id: layer.id, patch }], pins: holdPins(u, nb, u.canStretch, phase) }
 }
 
@@ -182,7 +245,10 @@ export function rotateLayerAtView(u: UnitInfo, layer: LocalLayer, rotation: numb
   const r = (rotation * Math.PI) / 180, c = Math.abs(Math.cos(r)), s = Math.abs(Math.sin(r))
   const w = designLocal.w * c + designLocal.h * s, h = designLocal.w * s + designLocal.h * c
   const nb = { x: cx - w / 2, y: cy - h / 2, w, h }
-  const canStretch = u.canStretch && Math.abs(rotation) < EPS
+  // Judge stretch from the NEW rotation. `u.canStretch` already includes the start rotation, so a
+  // layer rotated back to 0° would wrongly read as unable to stretch. keepSize is read exactly as
+  // the resolver reads it: off the unit's pins, which for a single layer are the layer's own.
+  const canStretch = u.kind === 'layer' && layerCanStretch({ ...layer, rotation }) && !layer.pins?.keepSize
   return { patches: [{ id: layer.id, patch: { rotation } }], pins: holdPins(u, nb, canStretch, phase) }
 }
 
