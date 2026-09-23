@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   outputKey, createGraphRun, resolveGraphRun, ownsPrompt,
-  ownedPromptIds, ownedOutputKeys, pendingRuns, appendGraphRunOutput, __setGraphRunsDbForTests,
+  ownedPromptIds, ownedOutputKeys, pendingRuns, appendGraphRunOutput, setGraphRunState, __setGraphRunsDbForTests,
 } from '../../server/utils/graphRuns'
 
 const query = vi.fn()
@@ -98,5 +98,12 @@ describe('graphRuns', () => {
     query.mockResolvedValueOnce({ rows: [] })
     await pendingRuns('u1')
     expect(query.mock.calls[0][0]).toMatch(/target IS NULL OR target <> 'runner'/)
+  })
+
+  it('setGraphRunState leaves outputs alone', async () => {
+    query.mockResolvedValueOnce({ rows: [] })
+    await setGraphRunState('run_x.0.t0', 'settled')
+    expect(query.mock.calls[0][0]).toMatch(/^UPDATE graph_runs SET state = \$1 WHERE prompt_id = \$2$/)
+    expect(query.mock.calls[0][1]).toEqual(['settled', 'run_x.0.t0'])
   })
 })

@@ -49,6 +49,11 @@ export async function resolveGraphRun(promptId: string, state: 'settled' | 'void
     [state, JSON.stringify(outputs), promptId])
 }
 
+/** Mark a row finished without touching its outputs (the runner appends them as files are saved). */
+export async function setGraphRunState(promptId: string, state: 'settled' | 'voided'): Promise<void> {
+  await db().query(`UPDATE graph_runs SET state = $1 WHERE prompt_id = $2`, [state, promptId])
+}
+
 export async function ownsPrompt(userId: string, promptId: string): Promise<boolean> {
   const { rows } = await db().query(
     `SELECT 1 AS ok FROM graph_runs WHERE user_id = $1 AND prompt_id = $2`, [userId, promptId])
