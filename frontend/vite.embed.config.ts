@@ -152,14 +152,37 @@ function pruneShaderCatalogPlugin(): Plugin {
   }
 }
 
+// app/data/variable-fonts.ts carries a Google Fonts CSS URL per curated family (`cssUrl`), for
+// the app's font previews. Nothing on the render path reads it — the painter loads variable
+// files through its own proxy route, and an export inlines them — but the literal would fail
+// the export's network scan. Blank the field, at embed-build time only.
+function stripVariableFontCssUrlsPlugin(): Plugin {
+  return {
+    name: 'sailor-embed-strip-variable-font-css-urls',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!id.replace(/\\/g, '/').endsWith('app/data/variable-fonts.ts')) return undefined
+      let n = 0
+      const out = code.replace(/cssUrl:\s*'https:\/\/[^']*'/g, () => { n++; return "cssUrl: ''" })
+      if (n === 0) throw new Error('sailor-embed: found no cssUrl literals in variable-fonts.ts — update stripVariableFontCssUrlsPlugin')
+      return { code: out, map: null }
+    },
+  }
+}
+
 const config: UserConfig = {
   resolve: {
-    alias: {
-      '~~': fileURLToPath(new URL('.', import.meta.url)),
-      '~': fileURLToPath(new URL('./app', import.meta.url)),
-    },
+    // Array form so the order is explicit: Vite matches aliases in order, and the `~` entry would
+    // otherwise swallow the depth-request stand-in's more specific id.
+    alias: [
+      // ~/lib/compositor/depthRequest is the one network call behind depth maps; depthRegistry.ts
+      // imports it by exactly this id. An exported file gets the "not available" stand-in instead.
+      { find: '~/lib/compositor/depthRequest', replacement: fileURLToPath(new URL('./app/lib/embed/frame/depthRequest.embed.ts', import.meta.url)) },
+      { find: '~~', replacement: fileURLToPath(new URL('.', import.meta.url)) },
+      { find: '~', replacement: fileURLToPath(new URL('./app', import.meta.url)) },
+    ],
   },
-  plugins: [...(effectId ? [spacetypeEffectEntryPlugin(effectId)] : []), pruneShaderCatalogPlugin()],
+  plugins: [...(effectId ? [spacetypeEffectEntryPlugin(effectId)] : []), pruneShaderCatalogPlugin(), stripVariableFontCssUrlsPlugin()],
   build: {
     outDir: 'public/embed',
     // false, not true: each invocation of this config builds ONE surface's

@@ -71,17 +71,30 @@ const EMBED_DIR = path.join(ROOT, 'public', 'embed')
 // are both gone now, but neither carried much WEIGHT — the machinery they
 // dragged in was a handful of functions and a couple of URL string tables, not
 // meaningful code size, so removing them barely moves any of the numbers above.
+//
+// frame.js is its own bucket because it ships the Frame editor's own painter (paintLayerStack and
+// the ~48k source lines of composables/compositor/motion code it reaches), not a slim renderer.
+// Measured 1,420,328 bytes (433.7 KB gzip) on 2026-09-22. What dominates it, from a sourcemap of
+// that build: app/data/library-fonts-lookup.ts (~314KB — the curated font-library table the
+// family resolver reads), paper's paper-full.js (~241KB) plus the acorn parser it bundles for
+// PaperScript (~116KB), fontkit (~232KB) plus its brotli decoder and WOFF2 dictionary (~91KB),
+// app/lib/shapes/catalog.ts (~58KB) and useCompositorLayers.ts itself (~50KB minified).
+// FRAME_CEILING_BYTES is that measurement × 1.15, rounded up to the next 10,000 — room for the
+// painter to grow, but Vue's runtime (~100KB) or a second font engine arriving would trip it.
+// Same rule as above: re-derive from the bundle, never pad it to pass.
 const SHADER_CEILING_BYTES = 60_000
 const GRADIENT_CEILING_BYTES = 140_000
 const SPACETYPE_EFFECT_CEILING_BYTES = 1_750_000
+const FRAME_CEILING_BYTES = 1_640_000
 
-/** Classifies a built bundle's filename into one of the three size buckets
+/** Classifies a built bundle's filename into one of the four size buckets
  *  documented above. Throws on anything unrecognised rather than silently
  *  skipping the size check — an embed bundle this suite has never heard of is
  *  exactly the kind of surprise the gate exists to catch. */
 function ceilingFor(fileName: string): number {
   if (fileName === 'shader.js') return SHADER_CEILING_BYTES
   if (fileName === 'gradient.js') return GRADIENT_CEILING_BYTES
+  if (fileName === 'frame.js') return FRAME_CEILING_BYTES
   if (/^spacetype-[^/]+\.js$/.test(fileName)) return SPACETYPE_EFFECT_CEILING_BYTES
   throw new Error(`embed-build-output: no size ceiling defined for unexpected bundle "${fileName}" — add one above`)
 }

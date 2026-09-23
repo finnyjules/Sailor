@@ -53,6 +53,19 @@ const INERT_LITERALS: ReadonlySet<string> = new Set<string>([
   // field, same reason — the trailing `\\r` here is 2 literal characters
   // (backslash, "r"), matching what actually appears in the built bundle.
   'http://scripts.sil.org/OFL\\r',
+
+  // ~/lib/vector/svg.ts writes the SVG namespace into the `xmlns` attribute of SVG it serialises
+  // (the Frame painter's cone reaches this module for path-data helpers). A namespace identifier
+  // compared as a string, never fetched.
+  'http://www.w3.org/2000/svg',
+
+  // paper's dist/paper-full.js (0.12.18), `var SvgElement = new function() {…}` near line 14648,
+  // keeps the XML namespace table its SVG import/export hands to document.createElementNS /
+  // getAttributeNS / setAttributeNS (the Frame painter's cone reaches paper for path booleans).
+  // Namespace identifiers the DOM compares as strings, never fetched. (The same table also holds
+  // the SVG namespace above.)
+  'http://www.w3.org/2000/xmlns',                   // paper-full.js SvgElement `xmlns`
+  'http://www.w3.org/1999/xlink',                   // paper-full.js SvgElement `xlink`
 ])
 
 /**
