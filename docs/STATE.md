@@ -125,6 +125,7 @@ Spec `docs/superpowers/specs/2026-09-21-frame-web-export-design.md` (amended the
 - a browser pass with the switch on;
 - the paid runs (Flux Schnell ×4 through a Gate → Hailuo H3 for 2 picks, plus one moodboard-picture request on each of Nano Banana 2, Nano Banana Pro, Seedream 4, Seedream 5 Lite; about $1.30);
 - the polling time limit found by the last review is fixed (`8bbf99acd`): polling now always ends within 5 minutes past the limit, and only real network failures count as blips.
+- **Live pass done 2026-09-23 (~$0.97):** Re-roll ×4 through a Gate → pick 2 → two Hailuo H3 videos; Restart reused all four pictures for free; a paused Gate came back after a reload; the tab heads-up; moodboard pictures on all four edit endpoints (style carried); Stop. It found four gaps, all fixed and reviewed (`caed14d52`, `8c5eb4636`): Assets now finds a runner result's run (date, time, Open workflow opens the exact graph); a free reused result is no longer recorded twice; the live stream opens at once; a tab opened from a result no longer shows the blank-project picker.
 
 `schema.sql` gained `runner_runs` and `runner_results`; they must be applied to Neon by hand before hosted use. Spec: `docs/superpowers/specs/2026-09-22-sailor-runner-and-gate-design.md`; plan: `docs/superpowers/plans/2026-09-23-sailor-runner-and-gate.md`.
 
