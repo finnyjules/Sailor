@@ -78,9 +78,11 @@ export async function ownedOutputKeys(userId: string): Promise<Set<string>> {
  * index.
  */
 export async function pendingRuns(userId: string, limit = 20): Promise<{ promptId: string; holdId: number | null; credits: number; target: string | null }[]> {
+  // Runner rows (target 'runner') are settled by the runner itself; polling
+  // ComfyUI's /history for them would only ever miss.
   const { rows } = await db().query(
     `SELECT prompt_id, hold_id, credits, target FROM graph_runs
-     WHERE user_id = $1 AND state = 'pending'
+     WHERE user_id = $1 AND state = 'pending' AND (target IS NULL OR target <> 'runner')
      ORDER BY created_at DESC
      LIMIT $2`, [userId, limit])
   return rows.map(r => ({
@@ -89,4 +91,13 @@ export async function pendingRuns(userId: string, limit = 20): Promise<{ promptI
     credits: Number(r.credits),
     target: r.target == null ? null : String(r.target),
   }))
+}
+
+/** Record one more output file as belonging to this row — the runner calls it
+ *  the moment a file is saved, so the image viewer's ownership check passes
+ *  before the browser asks for the file. */
+export async function appendGraphRunOutput(promptId: string, key: string): Promise<void> {
+  await db().query(
+    `UPDATE graph_runs SET outputs = outputs || $1::jsonb WHERE prompt_id = $2`,
+    [JSON.stringify([key]), promptId])
 }

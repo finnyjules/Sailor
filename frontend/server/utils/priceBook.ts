@@ -15,7 +15,7 @@ import { VIDEO_MODEL_USD, LEGACY_VIDEO_MODEL_IDS } from '~~/app/data/video-price
 export { VIDEO_MODEL_USD }
 export const PRICE_BOOK_VERSION = 'spike-v4'
 
-const BASE_RENDER_CREDITS = 1
+export const BASE_RENDER_CREDITS = 1
 
 /**
  * Category prices for LoRA-family inference (pricing call 2026-08-13).

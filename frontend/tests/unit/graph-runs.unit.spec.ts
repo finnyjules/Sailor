@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   outputKey, createGraphRun, resolveGraphRun, ownsPrompt,
-  ownedPromptIds, ownedOutputKeys, pendingRuns, __setGraphRunsDbForTests,
+  ownedPromptIds, ownedOutputKeys, pendingRuns, appendGraphRunOutput, __setGraphRunsDbForTests,
 } from '../../server/utils/graphRuns'
 
 const query = vi.fn()
@@ -85,5 +85,18 @@ describe('graphRuns', () => {
     expect(sql).toMatch(/ORDER BY\s+created_at\s+DESC/i)
     expect(sql).toMatch(/LIMIT/i)
     expect(params).toEqual(['u1', 20])
+  })
+
+  it('appendGraphRunOutput adds one output key to the row', async () => {
+    query.mockResolvedValueOnce({ rows: [] })
+    await appendGraphRunOutput('run_x.0.t0', 'output::generate_image_00001_.png')
+    expect(query.mock.calls[0][0]).toMatch(/outputs = outputs \|\| \$1::jsonb/)
+    expect(query.mock.calls[0][1]).toEqual([JSON.stringify(['output::generate_image_00001_.png']), 'run_x.0.t0'])
+  })
+
+  it('pendingRuns leaves runner rows out of the ComfyUI harvest', async () => {
+    query.mockResolvedValueOnce({ rows: [] })
+    await pendingRuns('u1')
+    expect(query.mock.calls[0][0]).toMatch(/target IS NULL OR target <> 'runner'/)
   })
 })

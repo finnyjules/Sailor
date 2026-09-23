@@ -46,6 +46,9 @@ export default defineNuxtConfig({
       comfyOrigin: '',
       // Mirrors server deployMode at build/dev start: hosted iff Clerk keys present.
       hostedMode: !!process.env.NUXT_CLERK_SECRET_KEY,
+      // Sailor runner routing (docs/superpowers/specs/2026-09-22-sailor-runner-and-gate-design.md).
+      // Off by default; NUXT_PUBLIC_RUNNER_ENABLED=true turns it on at runtime.
+      runnerEnabled: false,
       // Client Sentry DSN — present ONLY when NUXT_PUBLIC_SENTRY_DSN is set
       // (hosted). Conditionally spread so local boot carries no sentry key and
       // stays byte-identical; sentry.client.config.ts reads it. See below.

@@ -145,3 +145,27 @@ CREATE TABLE IF NOT EXISTS disabled_users (
   user_id    text PRIMARY KEY REFERENCES users(id),
   created_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Sailor runner (docs/superpowers/specs/2026-09-22-sailor-runner-and-gate-design.md).
+-- One row per run; the whole run lives in `doc` (see server/runner/types.ts).
+-- No FK to users: a run row is written before any money moves, and the
+-- ledger rows it leads to carry their own FK.
+CREATE TABLE IF NOT EXISTS runner_runs (
+  run_id     text PRIMARY KEY,
+  user_id    text,
+  canvas_id  text,
+  status     text NOT NULL CHECK (status IN ('running', 'paused', 'done', 'error', 'stopped')),
+  doc        jsonb NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS runner_runs_active ON runner_runs (status) WHERE status IN ('running', 'paused');
+CREATE INDEX IF NOT EXISTS runner_runs_user_canvas ON runner_runs (user_id, canvas_id);
+
+-- Results that can be handed back for an identical request (explicit seed only).
+CREATE TABLE IF NOT EXISTS runner_results (
+  user_id     text NOT NULL,
+  fingerprint text NOT NULL,
+  files       jsonb NOT NULL,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, fingerprint)
+);

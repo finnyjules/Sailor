@@ -27,7 +27,7 @@ export const PROXY_PREFIXES = [
 ]
 
 /** API paths reachable without a session: signed webhooks only. */
-export const PUBLIC_API_PATHS = ['/api/webhooks/clerk', '/api/webhooks/stripe']
+export const PUBLIC_API_PATHS = ['/api/webhooks/clerk', '/api/webhooks/stripe', '/api/webhooks/fal']
 
 export type GuardDecision =
   | { kind: 'pass' }
