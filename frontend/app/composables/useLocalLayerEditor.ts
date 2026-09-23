@@ -125,9 +125,12 @@ export function cornerResizableKind(kind: string): boolean {
 
 /** A text layer WITH a box resizes the box (boxW/boxH) like a rectangle — corners
  *  and edges — instead of scaling the font. Boxless text keeps uniform corner
- *  scaling. Hosts OR this into their edge- and corner-handle gates. */
-export function textBoxResizable(l: { kind: string; boxW?: number; boxH?: number } | null | undefined): boolean {
-  return !!l && l.kind === 'text' && (((l.boxW ?? 0) > 0) || ((l.boxH ?? 0) > 0))
+ *  scaling. Hosts OR this into their edge- and corner-handle gates.
+ *  A layer with placed lines (`runs`) ignores its box, so it is never box-resizable:
+ *  it scales like boxless text (fontSize), which moves and sizes every run together. */
+export function textBoxResizable(l: { kind: string; boxW?: number; boxH?: number; runs?: unknown[] } | null | undefined): boolean {
+  if (!l || l.kind !== 'text' || l.runs?.length) return false
+  return ((l.boxW ?? 0) > 0) || ((l.boxH ?? 0) > 0)
 }
 
 /** Compute handle positions (corners, edges, rotation, center) from box geometry

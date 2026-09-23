@@ -49,6 +49,26 @@ describe('applyCompositorCommand', () => {
     expect((r.template.layers[0] as { text: string }).text).toBe('WORLD')
     expect(applyCompositorCommand(state(), { op: 'setText', target: 'r1', args: { text: 'x' } }).ok).toBe(false)
   })
+  it('setText drops placed lines (runs) when the words change; the inverse restores them', () => {
+    const runs = [{ text: 'HEL', x: -1, y: -0.5 }, { text: 'LO', x: -1, y: 0.5, s: 1.5 }]
+    const withRuns = (): CompositorState => {
+      const st = state()
+      ;(st.layers[0] as any).runs = runs
+      return st
+    }
+    // Same words: the placed lines still fit, keep them.
+    const same = applyCompositorCommand(withRuns(), { op: 'setText', target: 't1', args: { text: 'HELLO' } })
+    expect(same.ok).toBe(true); if (!same.ok) return
+    expect((same.template.layers[0] as any).runs).toEqual(runs)
+    // New words: the placed lines were for the old ones, so they go.
+    const r = applyCompositorCommand(withRuns(), { op: 'setText', target: 't1', args: { text: 'WORLD' } })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    expect((r.template.layers[0] as any).text).toBe('WORLD')
+    expect('runs' in r.template.layers[0]!).toBe(false)
+    const undo = applyCompositorCommand(r.template, r.inverse)
+    if (!undo.ok) throw new Error('fail')
+    expect((undo.template.layers[0] as any).runs).toEqual(runs)
+  })
   it('setFill sets text colour, shape fill, and accepts a gradient', () => {
     expect((applyCompositorCommand(state(), { op: 'setFill', target: 't1', args: { paint: '#00ff00' } }) as any).template.layers[0].color).toBe('#00ff00')
     expect((applyCompositorCommand(state(), { op: 'setFill', target: 'r1', args: { paint: '#0000ff' } }) as any).template.layers[1].fill).toBe('#0000ff')

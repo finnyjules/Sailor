@@ -1629,11 +1629,6 @@ export function cssFontStack(family: string): string {
   return `${quoted}, sans-serif`
 }
 
-/**
- * Bounding box of a layer in PIXELS (un-rotated), centered on origin.
- * For text this measures the rendered glyph block. A 2D context is required
- * for text measurement; pass any scratch context.
- */
 /** The layer as one of its runs is set: font size scaled by `s`. Scaled in PIXELS and
  *  normalised back (`fontPx·s / W`) so the px `applyFont` writes is the clean product
  *  (0.1 × 1000 × 1.5 = 150px, where 0.1 × 1.5 × 1000 would be 150.00000000000003px). */
@@ -1665,6 +1660,11 @@ function textRunsBox(ctx: CanvasRenderingContext2D | null, layer: TextLayer, W: 
   return { w: Math.max(2 * ex, 4), h: Math.max(2 * ey, 4) }
 }
 
+/**
+ * Bounding box of a layer in PIXELS (un-rotated), centered on origin.
+ * For text this measures the rendered glyph block. A 2D context is required
+ * for text measurement; pass any scratch context.
+ */
 export function localLayerBox(
   ctx: CanvasRenderingContext2D | null,
   layer: LocalLayer,

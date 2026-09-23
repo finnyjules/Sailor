@@ -970,6 +970,9 @@ export function applyCompositorCommand(input: CompositorState, cmd: Command): Co
       const layer = findLayer(state, cmd.target)
       if (!layer) return { ok: false, reason: 'invalid', detail: `no layer '${String(cmd.target)}'` }
       if (layer.kind !== 'text') return { ok: false, reason: 'invalid', detail: `layer '${String(cmd.target)}' is not text` }
+      // Placed lines (`runs`) were set for the old words — new words drop them, so the
+      // layer flows its text again (the same rule as the editor's setLocal).
+      if (layer.runs && text !== layer.text) delete layer.runs
       layer.text = text
       return { ok: true, template: state, inverse: snapshot() }
     }

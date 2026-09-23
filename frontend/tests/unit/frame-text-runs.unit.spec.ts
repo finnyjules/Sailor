@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { reactive } from 'vue'
 import { __drawTextForTest, localLayerBox } from '~/composables/useCompositorLayers'
-import { useLocalLayerEditor } from '~/composables/useLocalLayerEditor'
+import { useLocalLayerEditor, textBoxResizable } from '~/composables/useLocalLayerEditor'
 
 // Placed title lines (`runs`): each run is drawn at its own position and size, in em of
 // the layer's font size, relative to the layer origin — so a layout can set a title line
@@ -125,5 +125,47 @@ describe('text layer placed lines (runs)', () => {
     expect(layer().text).toBe('New')
     expect(layer().runs).toBeUndefined()
     expect('runs' in layer()).toBe(false)
+  })
+})
+
+// Fix round 1: a runs layer ignores boxW/boxH, so its handles must not resize a box
+// (that wrote dead boxW/boxH and recentred x/y — the layer drifted). It scales like
+// box-less text instead: fontSize, which scales every run's position and size together.
+describe('resizing a layer with placed lines', () => {
+  const listeners: Record<string, (e: any) => void> = {}
+  const realWindow = (globalThis as any).window
+  beforeAll(() => {
+    ;(globalThis as any).window = {
+      addEventListener: (type: string, fn: any) => { listeners[type] = fn },
+      removeEventListener: (type: string) => { delete listeners[type] },
+    }
+  })
+  afterAll(() => { (globalThis as any).window = realWindow })
+  const RECT = { left: 0, top: 0, width: 1000, height: 1000 } as DOMRect
+  const ptr = (x: number, y: number) => ({ clientX: x, clientY: y, preventDefault() {}, stopPropagation() {}, altKey: false, shiftKey: false }) as any
+
+  it('is not box-resizable, even with a stale text box', () => {
+    expect(textBoxResizable(base({ boxW: 0.6, boxH: 0.3 }))).toBe(true)          // control
+    expect(textBoxResizable(base({ boxW: 0.6, boxH: 0.3, runs: RUNS }))).toBe(false)
+    expect(textBoxResizable(base({ boxW: 0.6, boxH: 0.3, runs: [] }))).toBe(true) // empty ⇒ flow text
+  })
+
+  it('a corner drag scales fontSize and writes no box, and the origin stays put', () => {
+    const properties: Record<string, any> = { sailor_localLayers: [base({ boxW: 0.6, boxH: 0.3, runs: RUNS })] }
+    const node = reactive({ data: { properties } })
+    const ed = useLocalLayerEditor({ node: () => node, dims: () => ({ w: 1000, h: 1000 }), getRect: () => RECT })
+    const layer = () => (node.data.properties.sailor_localLayers as any[])[0]
+    ed.selectLocal('t1')
+    // The host routes a corner to startScale when textBoxResizable is false.
+    expect(textBoxResizable(ed.selected.value as any)).toBe(false)
+    ed.startScale(ptr(600, 600))
+    listeners.pointermove!(ptr(700, 700))       // twice as far from the centre
+    listeners.pointerup?.(ptr(700, 700))
+    expect(layer().fontSize).toBeCloseTo(0.2)
+    expect(layer().boxW).toBe(0.6)
+    expect(layer().boxH).toBe(0.3)
+    expect(layer().x).toBe(0.5)
+    expect(layer().y).toBe(0.5)
+    expect(layer().runs).toEqual(RUNS)
   })
 })
