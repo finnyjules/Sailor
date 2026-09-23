@@ -5,6 +5,7 @@
  */
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { GateChoice } from '#shared/runner/messages'
+import { isRunnerPromptId } from '#shared/runner/messages'
 import { isRunnerEligible } from '#shared/runner/eligibility'
 
 export interface PausedGateView { runId: string; promptId: string; nodeId: string; choices: GateChoice[]; picked: number[] }
@@ -27,8 +28,8 @@ export function shouldUseRunner(enabled: boolean, prompts: Array<ApiPrompt | nul
 }
 
 export function runIdOfPrompt(promptId: unknown): string | null {
-  if (typeof promptId !== 'string' || !promptId.startsWith('run_')) return null
-  return promptId.split('.')[0]!
+  if (!isRunnerPromptId(promptId)) return null
+  return (promptId as string).split('.')[0]!
 }
 
 export function startRunnerRun(body: { takes: ApiPrompt[]; workflow: unknown; canvasId: string | null; projectUuid: string | null; projectName: string | null }): Promise<LegStarted> {
