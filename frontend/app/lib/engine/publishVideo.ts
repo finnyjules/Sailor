@@ -10,13 +10,15 @@ type FetchLike = (url: string, init: RequestInit) => Promise<{ ok: boolean; stat
 export async function publishVideo(
   blob: Blob, ext: 'mp4' | 'webm', prefix: string,
   fetchImpl: FetchLike = fetch as unknown as FetchLike,
+  /** Cancel stops the upload itself, so no orphan file lands in input/. */
+  signal?: AbortSignal,
 ): Promise<string> {
   const name = `${prefix}_${Date.now()}.${ext}`
   const fd = new FormData()
   fd.append('image', new File([blob], name, { type: blob.type || (ext === 'webm' ? 'video/webm' : 'video/mp4') }))
   // No `overwrite`: the name is unique, and hosted mode refuses an overwrite of
   // a file this user does not own.
-  const res = await fetchImpl('/upload/image', { method: 'POST', body: fd })
+  const res = await fetchImpl('/upload/image', { method: 'POST', body: fd, signal })
   if (!res.ok) {
     throw new Error(res.status === 413 ? 'This video is larger than 100 MB, the upload limit.' : `video upload failed (${res.status})`)
   }

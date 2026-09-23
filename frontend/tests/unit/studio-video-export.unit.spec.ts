@@ -15,7 +15,19 @@ describe('exportStudioVideo', () => {
     const r = await exportStudioVideo({ ...base, publish: true, serverFallback: server },
       { hosted: false, canRecord: async () => true, record: async () => recorded, publish })
     expect(r).toEqual({ ext: 'mp4', blob: recorded.blob, filename: 'shader_9.mp4', via: 'browser', notice: null })
-    expect(publish).toHaveBeenCalledWith(recorded.blob, 'mp4', 'shader')
+    expect(publish).toHaveBeenCalledWith(recorded.blob, 'mp4', 'shader', undefined, undefined)
+  })
+
+  it('Cancel reaches the upload itself, so a cancelled upload leaves no file', async () => {
+    const ac = new AbortController()
+    const publish = vi.fn(async (_b: Blob, _e: string, _p: string, _f?: unknown, signal?: AbortSignal) => {
+      ac.abort()
+      if (signal?.aborted) throw new DOMException('aborted', 'AbortError')
+      return 'x.mp4'
+    })
+    await expect(exportStudioVideo({ ...base, publish: true, signal: ac.signal, serverFallback: server },
+      { hosted: false, canRecord: async () => true, record: async () => recorded, publish })).rejects.toThrow(/aborted/i)
+    expect(publish.mock.calls[0]![4]).toBe(ac.signal)
   })
 
   it('a download-only export never uploads', async () => {

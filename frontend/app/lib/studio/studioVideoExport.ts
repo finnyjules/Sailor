@@ -71,9 +71,9 @@ export async function exportStudioVideo(req: StudioVideoRequest, deps: StudioVid
         // An upload failure is NOT a reason to re-make the video on the server:
         // that route uploads far more, and would fail the same way.
         req.onStatus?.('Uploading…')
-        filename = await publish(rec.blob, rec.ext, req.prefix)
-        // Cancel pressed during the upload: the file is in input/, but no
-        // Video node may land and nothing may download.
+        // Cancel during the upload aborts the request itself (no file lands);
+        // the check after it covers an abort as the response arrives.
+        filename = await publish(rec.blob, rec.ext, req.prefix, undefined, req.signal)
         throwIfAborted(req.signal)
       }
       return { ext: rec.ext, blob: rec.blob, filename, via: 'browser', notice: null }
