@@ -123,7 +123,11 @@ import type { EffectDef, ParamValue, ShaderFxCatalog } from '~/lib/shaderfx/type
 import { cleanStops } from '~/lib/shaderfx/params'
 import { buildShaderParamRows, type ShaderParamRow } from '~/lib/shaderfill/controls'
 import '~/lib/motion/paint' // registers the motion painter for paintLayerStack(t)
-import { bakeAndUpload, motionSourceKey, type MotionParams } from '~/lib/motion/bake'
+import { bakeAndUpload, motionSourceKey, type MotionParams, prepareMotionFramePainter } from '~/lib/motion/bake'
+import { exportStudioVideo, videoErrorText } from '~/lib/studio/studioVideoExport'
+import { prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
+import { isAbortError, throwIfAborted } from '~/lib/engine/videoRecorder'
+import { hostedModeEnabled } from '~/lib/hostedMode'
 import { readGrid } from '~/lib/frame/gridConfig'
 import { resolveGrid, type FrameGrid } from '~/lib/frame/grid'
 import MotionBandTimeline from '~/components/vue-canvas/compositor/MotionBandTimeline.vue'
@@ -3605,7 +3609,7 @@ function startLive() { cancelAnimationFrame(liveRaf); liveStart = 0; liveInFligh
 function stopLive() { cancelAnimationFrame(liveRaf); liveRaf = 0 }
 watch(needsLiveLoop, startLive)
 onMounted(startLive)
-onBeforeUnmount(stopLive)
+onBeforeUnmount(() => { videoAbort?.abort(); stopLive() })
 /** Depth source for a wired slot, or null when there is no file behind it (a live
  *  studio slot). Kept here so the render path and the panel agree on one answer. */
 function wiredDepthSource(layer: Layer) {
@@ -4379,6 +4383,12 @@ const renderStale = computed(() => lastRenderKey.value !== staticSourceKey())
 const rendering = ref(false)
 const renderError = ref('')
 const encoding = ref(false)
+// The running video export, so Cancel can stop it; and the footer line saying
+// how it is going or how the last video was made (a fallback must be seen).
+let videoAbort: AbortController | null = null
+const exportingVideo = ref(false)
+const videoStatus = ref('')
+function cancelVideoExport() { videoAbort?.abort() }
 
 // Render the static unified stack to a PNG blob at W×H (no motion, no preview skip).
 async function renderStaticComposite(W: number, H: number): Promise<Blob | null> {
@@ -4433,40 +4443,64 @@ async function generateImage() {
 
 async function generateVideo() {
   const node = compositor.value
-  if (!node || rendering.value || baking.value || encoding.value || !hasMotion.value) return
-  encoding.value = true
+  if (!node || rendering.value || baking.value || encoding.value || exportingVideo.value || !hasMotion.value) return
   renderError.value = ''
+  videoStatus.value = ''
+  const { W, H } = bakeSize()
+  const motion = effectiveMotion.value
+  const alpha = !hasPaint(background.value)
+  videoAbort = new AbortController()
+  exportingVideo.value = true
+  pause()      // don't fight the rAF preview loop for the layer state
+  stopLive()   // don't let the live studio RAF race the per-frame pulls
+  // The export is async (one awaited frame at a time), so a scoped
+  // withWiredContent span can't hold across it — register globally for its
+  // duration, exactly as bakeMotion does, and clear it in finally.
+  _registerWiredContent(wiredContentForSlot)
   try {
-    // bakeMotion() with no override defaults to effectiveMotion — which already
-    // falls back to a wired studio's own master clock (duration/fps) when no
-    // local layer animates and the user hasn't set explicit frame timing, so
-    // the video loops on the studios' natural timing with zero configuration.
-    await bakeMotion()
-    if (bakeError.value) { renderError.value = bakeError.value; return }
-    const { W, H } = bakeSize()
-    // Use the fps actually baked (carried on storedMotionParams), not motionDoc,
-    // so the encode matches the effective motion used above.
-    const fps = storedMotionParams.value?.fps ?? motionDoc.value.fps
-    try {
-      const encoded = await encodeFrames({
-        frames: storedMotionParams.value!.rendered, fps, width: W, height: H,
-        // Transparent WebM when the frame has no background of its own; mp4 otherwise.
-        alpha: !hasPaint(background.value),
-      })
-      await recordAsset(activeTab.value?.projectUuid, 'video', encoded.filename)
-      window.dispatchEvent(new CustomEvent('sailor:compositorOutput', {
-        detail: { sourceNodeId: node.id, nodeType: 'Video', widgetOverrides: { file: encoded.filename } },
-      }))
-      emit('close')
-    } catch (encErr) {
-      renderError.value = 'Encode failed — restart ComfyUI to load the encoder.'
-      console.error('[compositor generate] encode failed', encErr)
+    const pull = async (t: number) => {
+      const animated = layers.value.filter(l => l.live && l.live.duration > 0)
+      await Promise.all(animated.map(l => pullLiveFrameModal(l, slotPhase01(t, l.live!.duration))))
     }
-  } catch (err: any) {
-    console.error('[compositor generate]', err)
-    renderError.value = err?.message || 'Video generate failed'
+    const painter = await prepareMotionFramePainter(() => buildStackItems(), localLayers.value as LocalLayer[], W, H, motion, pull)
+    const made = await exportStudioVideo({
+      prefix: 'frame', publish: true,
+      width: W, height: H, fps: motion.fps, frameCount: painter.total, alpha,
+      signal: videoAbort.signal,
+      drawFrame: async (i, ctx) => {
+        videoStatus.value = `Rendering ${i + 1}/${painter.total}`
+        await painter.paint(i, ctx)
+      },
+      onStatus: t => { videoStatus.value = t },
+      serverFallback: async (signal) => {
+        _registerWiredContent(null)   // bakeMotion registers and clears its own
+        await bakeMotion()
+        throwIfAborted(signal)
+        if (bakeError.value) throw new Error(bakeError.value)
+        videoStatus.value = 'Encoding…'
+        return await encodeFrames({
+          frames: storedMotionParams.value!.rendered, fps: motion.fps, width: W, height: H, alpha,
+        })
+      },
+    }, { hosted: hostedModeEnabled(useRuntimeConfig().public), forceServer: prefersServerVideoExport() })
+    if (!made?.filename) { videoStatus.value = ''; return }
+    await recordAsset(activeTab.value?.projectUuid, 'video', made.filename)
+    window.dispatchEvent(new CustomEvent('sailor:compositorOutput', {
+      detail: { sourceNodeId: node.id, nodeType: 'Video', widgetOverrides: { file: made.filename } },
+    }))
+    videoStatus.value = made.notice ?? ''
+    // A fallback notice must be seen: keep the editor open when there is one.
+    if (!made.notice) emit('close')
+  } catch (err) {
+    if (isAbortError(err)) { videoStatus.value = 'Export cancelled.'; return }
+    console.error('[frame] video export failed', err)
+    videoStatus.value = ''
+    renderError.value = videoErrorText(err)
   } finally {
-    encoding.value = false
+    _registerWiredContent(null)
+    exportingVideo.value = false
+    videoAbort = null
+    startLive()
   }
 }
 
@@ -11204,12 +11238,14 @@ onUnmounted(() => {
            panel states. -->
       <div class="mt-auto shrink-0 border-t border-white/10 p-3 flex items-center justify-end gap-2">
         <span v-if="renderError" class="text-[11px] text-rose-400 min-w-0 flex-1 truncate" :title="renderError">{{ renderError }}</span>
+        <span v-if="videoStatus && !exportingVideo" class="text-xs text-white/55 truncate max-w-[280px]" :title="videoStatus">{{ videoStatus }}</span>
+        <button v-if="exportingVideo" type="button" class="px-3 py-1.5 text-xs rounded-md text-white/70 hover:text-white hover:bg-white/10" @click="cancelVideoExport">Cancel</button>
         <button
           class="h-8 px-3 rounded text-[12px] font-medium flex items-center gap-1.5 cursor-pointer disabled:opacity-50 bg-white/[0.06] hover:bg-white/12 text-white/85"
-          :disabled="rendering || baking || encoding || !hasMotion"
+          :disabled="rendering || baking || encoding || exportingVideo || !hasMotion"
           :title="hasMotion ? 'Bake the motion timeline and generate a video artifact' : 'Add motion to a layer (Motion tab) or wire an animated studio'"
           @click="generateVideo">
-          {{ baking ? `Baking ${Math.round((bakeProgress ?? 0) * 100)}%` : encoding ? 'Encoding…' : 'Generate as video' }}
+          {{ exportingVideo ? (videoStatus || 'Rendering…') : baking ? `Baking ${Math.round((bakeProgress ?? 0) * 100)}%` : encoding ? 'Encoding…' : 'Generate as video' }}
         </button>
         <button
           class="h-8 px-3 rounded text-[12px] font-medium flex items-center gap-1.5 cursor-pointer disabled:opacity-50 bg-white hover:bg-white/90 text-neutral-900"
