@@ -46,6 +46,8 @@ export interface Sheet {
   photoIn(z: { c1: number; c2: number; top: number; bottom: number }, o?: { ax?: 'left' | 'right'; ay?: 'top' | 'bottom' }): PhotoEl | MissingEl
   cover(ph: boolean): PhotoEl
   pick<T>(r: () => number, arr: readonly T[]): T
+  /** UI copy: quote the Frame's own words (first line, max 20 chars) instead of naming a role. */
+  q(s: string | undefined, fallback?: string): string
   FOOT2: [keyof Content, number, number][]; FOOT3: [keyof Content, number, number][]
   PHOTO_ASPECT: number
 }
@@ -182,6 +184,12 @@ export function makeSheet(o: SheetOpts): Sheet {
     return { k: 'p', x: (W - w) / 2, y: (H - h) / 2, w, h, stand: !ph, role: 'photo', ok: true, bleed: true }
   }
   const pick = <T>(r: () => number, arr: readonly T[]): T => arr[Math.floor(r() * arr.length)] as T
+  // Quote the Frame's own words instead of naming what they might be ("the dates", "the artist").
+  const q = (s: string | undefined, fallback = 'the smaller text') => {
+    if (!s) return fallback
+    const l = s.split('\n')[0]!
+    return `“${l.length > 20 ? l.slice(0, 19) + '…' : l}”`
+  }
 
   return {
     measure,
@@ -190,7 +198,7 @@ export function makeSheet(o: SheetOpts): Sheet {
     X, XR, SPAN, L, Xr,
     w100, fitSize, sizeFor, blockH, countLines, breakLines, balance,
     text, disp, sec, info, rule,
-    infoStack, infoRow, infoRowAt, stackBottom, photoIn, cover, pick,
+    infoStack, infoRow, infoRowAt, stackBottom, photoIn, cover, pick, q,
     FOOT2, FOOT3, PHOTO_ASPECT,
   }
 }
