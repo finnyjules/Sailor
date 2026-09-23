@@ -149,6 +149,40 @@ describe('layout kit — vary', () => {
     expect(a1.score).toBe(a2.score)
   })
 
+  it('enumerate: a style\'s rank is added to the Stage 1 score', () => {
+    // Same fixture as the cover-penalty test, but ranked: arr 1 (x=0) is given a big reward by
+    // `rank`, so it should win the top slot even though it also carries the cover penalty.
+    const image: El = { k: 'p', x: 0, y: 0, w: 20, h: 20, role: 'photo' } as El
+    const boxes = new Map<El, Box>()
+    const runCover = (choice: Choice): LayoutOut => {
+      const x = choice.arr === 0 ? 25 : choice.arr === 1 ? 0 : 30
+      const title: El = { k: 't', s: 'Solo', x, top: 0, w: 20, size: 20, wt: 600, ls: 0, lh: 1, role: 'title' } as El
+      boxes.set(title, { x0: x, y0: 0, x1: x + 20, y1: 8 })
+      boxes.set(image, { x0: 0, y0: 0, x1: 20, y1: 20 })
+      return { els: [title, image], did: `arr=${choice.arr}` }
+    }
+    const checkCover = (out: LayoutOut): string[] => (out.did === 'arr=0' ? ['excluded from the default slot'] : [])
+    const boxOfFn = (e: El) => boxes.get(e) ?? null
+    const rank = (out: LayoutOut): number => (out.did === 'arr=1' ? 10 : 0)
+
+    const result = enumerate(fakeDef({ keepScale: true }), {
+      kind: 'word', title: 'Solo', hasImage: true, run: runCover, check: checkCover, infoSize: INFO_SIZE, boxOf: boxOfFn, rank,
+    })
+    expect(result[0]!.choice.arr).toBe(1)
+  })
+
+  it('enumerate: no `rank` opt (Swiss) — scores are exactly the Stage 1 formula, unchanged', () => {
+    // Pin: the same fixture and formula as the pre-Task-4 tests above, run again with every
+    // Task 4 addition (`rank`) simply omitted — the score must not move.
+    const result = enumerate(fakeDef(), {
+      kind: 'phrase', title: 'Two Words', hasImage: true, run, check, infoSize: INFO_SIZE,
+    })
+    const def = result.find(c => c.choice.lines === DEFAULT_CHOICE.lines && c.choice.arr === DEFAULT_CHOICE.arr
+      && c.choice.scale === DEFAULT_CHOICE.scale && c.choice.side === DEFAULT_CHOICE.side)!
+    // maxTextSize 10, distinctLeftEdges 1 (both lines at x=10), isDefault, full scale, no cover.
+    expect(def.score).toBeCloseTo(Math.log(10 / INFO_SIZE) - 0.12 * 1 + 1, 10)
+  })
+
   it('enumerate: the default leads even when another variation outscores it', () => {
     // one line (lines=1) is set far larger, so its score beats the default's +1 bonus
     const bigOneLine = (c: Choice): LayoutOut => {

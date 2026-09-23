@@ -32,6 +32,7 @@ describe('the style table', () => {
       button: { shape: 'pill', wt: 600, ls: 0 },
       levels: ['title', 'date', 'details', 'action', 'caption'],
       textOffImage: true,
+      check: expect.any(Function), rank: expect.any(Function),
     })
     expect(STYLES.editorial).toEqual({
       id: 'editorial', label: 'Editorial',
@@ -39,6 +40,7 @@ describe('the style table', () => {
       button: { shape: 'link', wt: 500, ls: 0.16 },
       levels: ['title', 'details', 'date', 'action', 'caption'],
       face: { family: 'Instrument Serif', wt: 400, ls: -0.01, note: 'A serif for the title' },
+      rank: expect.any(Function),
     })
     expect(STYLES.street).toEqual({
       id: 'street', label: 'Street',
@@ -47,7 +49,83 @@ describe('the style table', () => {
       levels: ['title', 'details', 'date', 'action', 'caption'],
       face: { family: 'Anton', wt: 400, ls: 0, note: 'A heavy condensed face for the title' },
       textOffImage: true,
+      rank: expect.any(Function),
     })
+  })
+})
+
+// Stage 3, Task 4: per-style checks and ranks.
+
+describe('performance visibility check', () => {
+  const size = { W: 100, H: 100 }
+  const photo = { k: 'p' as const, x: 0, y: 0, w: 100, h: 100, role: 'photo' }
+
+  it('passes at 50% solid cover (a card)', () => {
+    const card = { k: 'r' as const, x: 0, y: 0, w: 100, h: 50, role: 'card' }
+    expect(STYLES.performance.check!([photo, card], size)).toEqual([])
+  })
+
+  it('fails at 60% solid cover', () => {
+    const card = { k: 'r' as const, x: 0, y: 0, w: 100, h: 60, role: 'card' }
+    expect(STYLES.performance.check!([photo, card], size)).toEqual(['the image is mostly hidden'])
+  })
+
+  it('counts a band\'s fade at 0.35 — a fade over the whole photo alone does not fail', () => {
+    // A top band whose solid part is 0 and whose fade covers the entire photo: covered =
+    // 100 × (0 + 100 × 0.35) = 3500, area = 10000 → 0.35, well under the 0.55 floor.
+    const band = { k: 'band' as const, side: 'top' as const, y: 0, h: 100, solid: 0, role: 'band' }
+    expect(STYLES.performance.check!([photo, band], size)).toEqual([])
+    // A band that is ALSO 60% solid does fail (solid + 0.35× the rest exceeds 0.55).
+    const solidBand = { k: 'band' as const, side: 'top' as const, y: 0, h: 100, solid: 0.6, role: 'band' }
+    expect(STYLES.performance.check!([photo, solidBand], size)).toEqual(['the image is mostly hidden'])
+  })
+
+  it('only what people can see counts — clipped to the format\'s keep-clear band', () => {
+    // A card covering the top 60% of the page sits entirely inside a platform bar the format
+    // keeps clear (keep.top = 0.7): nothing visible is covered.
+    const card = { k: 'r' as const, x: 0, y: 0, w: 100, h: 60, role: 'card' }
+    expect(STYLES.performance.check!([photo, card], size, { top: 0.7, bottom: 0, left: 0, right: 0 })).toEqual([])
+  })
+
+  it('no photo: nothing to check', () => {
+    expect(STYLES.performance.check!([], size)).toEqual([])
+  })
+})
+
+describe('style ranks order candidates as the prototype would', () => {
+  const ctx = { infoSize: 5, W: 100, H: 100 }
+
+  it('performance: a bigger offer (date role) and a button both rank higher', () => {
+    const plain = { els: [{ k: 't' as const, s: '', x: 0, top: 0, size: 5, wt: 600, ls: 0, lh: 1, role: 'title' }], did: '' }
+    const bigOffer = { els: [{ k: 't' as const, s: '', x: 0, top: 0, size: 20, wt: 600, ls: 0, lh: 1, role: 'date' }], did: '' }
+    const withButton = { els: [{ k: 'btn' as const, x: 0, y: 0, w: 10, h: 10, size: 5, shape: 'pill' as const, role: 'action' }], did: '' }
+    expect(STYLES.performance.rank!(bigOffer, ctx)).toBeGreaterThan(STYLES.performance.rank!(plain, ctx))
+    expect(STYLES.performance.rank!(withButton, ctx)).toBeGreaterThan(STYLES.performance.rank!(plain, ctx))
+  })
+
+  it('editorial: less text share ranks higher; more than 3 distinct sizes ranks lower', () => {
+    const t = (size: number) => ({ k: 't' as const, s: '', x: 0, top: 0, size, wt: 400, ls: 0, lh: 1, role: 'title' })
+    const boxes = new Map<object, { x0: number; y0: number; x1: number; y1: number }>()
+    const small = { els: [t(10)], did: '' }
+    boxes.set(small.els[0]!, { x0: 0, y0: 0, x1: 10, y1: 10 })
+    const big = { els: [t(10)], did: '' }
+    boxes.set(big.els[0]!, { x0: 0, y0: 0, x1: 90, y1: 90 })
+    const boxOf = (e: object) => boxes.get(e) ?? null
+    expect(STYLES.editorial.rank!(small, { ...ctx, boxOf })).toBeGreaterThan(STYLES.editorial.rank!(big, { ...ctx, boxOf }))
+
+    const fewSizes = { els: [t(10), t(10), t(12)], did: '' }
+    const manySizes = { els: [t(10), t(12), t(14), t(16), t(18)], did: '' }
+    expect(STYLES.editorial.rank!(fewSizes, ctx)).toBeGreaterThan(STYLES.editorial.rank!(manySizes, ctx))
+  })
+
+  it('street: a bigger title and more elements set over something both rank higher', () => {
+    const small = { els: [{ k: 't' as const, s: '', x: 0, top: 0, size: 10, wt: 700, ls: 0, lh: 1, role: 'title' }], did: '' }
+    const big = { els: [{ k: 't' as const, s: '', x: 0, top: 0, size: 40, wt: 700, ls: 0, lh: 1, role: 'title' }], did: '' }
+    expect(STYLES.street.rank!(big, ctx)).toBeGreaterThan(STYLES.street.rank!(small, ctx))
+
+    const bare = { els: [{ k: 't' as const, s: '', x: 0, top: 0, size: 10, wt: 700, ls: 0, lh: 1, role: 'title' }], did: '' }
+    const layered = { els: [...bare.els, { k: 'p' as const, x: 0, y: 0, w: 10, h: 10, role: 'photo', over: ['title'] }], did: '' }
+    expect(STYLES.street.rank!(layered, ctx)).toBeGreaterThan(STYLES.street.rank!(bare, ctx))
   })
 })
 

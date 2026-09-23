@@ -373,17 +373,25 @@ function checkRun({ out, S, side, keep, fullH, style }: Run, premise: LayoutDef[
   const opts = keep || (style && style !== 'swiss')
     ? { ...(keep ? { keep, fullH } : {}), ...(style && style !== 'swiss' ? { style } : {}) }
     : undefined
-  if (!side || !bleed.length) return checkPlan(out.els, S, premise, opts)
-  const issues = checkPlan(out.els, S, { ...premise, bleed: [] }, opts)
-  const sb = boxOf(side, S)!
-  for (const role of bleed) {
-    const e = out.els.find(x => x.k !== 'missing' && x.role === role)
-    const b = e ? boxOf(e, S) : null
-    const runsOff = b != null && (b.x0 < 0 || b.y0 < 0 || b.x1 > S.W || b.y1 > S.H)
-    // "Under" means a real overlap — the checker's collision threshold (0.25 units on both axes).
-    const under = b != null && Math.min(b.x1, sb.x1) - Math.max(b.x0, sb.x0) > 0.25 && Math.min(b.y1, sb.y1) - Math.max(b.y0, sb.y0) > 0.25
-    if (!runsOff && !under) issues.push(`promise broken: ${role} should run off the page`)
-  }
+  const issues = !side || !bleed.length
+    ? checkPlan(out.els, S, premise, opts)
+    : (() => {
+        const withoutBleed = checkPlan(out.els, S, { ...premise, bleed: [] }, opts)
+        const sb = boxOf(side, S)!
+        for (const role of bleed) {
+          const e = out.els.find(x => x.k !== 'missing' && x.role === role)
+          const b = e ? boxOf(e, S) : null
+          const runsOff = b != null && (b.x0 < 0 || b.y0 < 0 || b.x1 > S.W || b.y1 > S.H)
+          // "Under" means a real overlap — the checker's collision threshold (0.25 units both axes).
+          const under = b != null && Math.min(b.x1, sb.x1) - Math.max(b.x0, sb.x0) > 0.25 && Math.min(b.y1, sb.y1) - Math.max(b.y0, sb.y0) > 0.25
+          if (!runsOff && !under) withoutBleed.push(`promise broken: ${role} should run off the page`)
+        }
+        return withoutBleed
+      })()
+  // Task 4: the style's own check (product visibility for Performance), in addition to the
+  // shared rules above.
+  const styleCheck = style && style !== 'swiss' ? STYLES[style].check : undefined
+  if (styleCheck) issues.push(...styleCheck(out.els, { W: S.W, H: S.H }, keep))
   return issues
 }
 
@@ -492,7 +500,12 @@ export function candidatesForFrame(a: Omit<LayoutPlanArgs, 'choice'>): Candidate
     const S = sheetOf.get(e)
     return S ? boxOf(e, S) : null
   }
-  return enumerate(p.def, { kind: p.kind, title: p.content.title, hasImage: p.hasImage, run, check, infoSize, boxOf: box })
+  // Task 4: the style's own reward, added to the Stage 1 score. Swiss (no style, or 'swiss')
+  // passes no `rank` — candidatesForFrame's scores stay exactly Stage 1's.
+  const styleRank = a.style && a.style !== 'swiss' ? STYLES[a.style].rank : undefined
+  const W = 100, H = 100 * a.frameH / a.frameW
+  const rank = styleRank ? (out: LayoutOut) => styleRank(out, { infoSize, W, H, boxOf: box }) : undefined
+  return enumerate(p.def, { kind: p.kind, title: p.content.title, hasImage: p.hasImage, run, check, infoSize, boxOf: box, rank })
 }
 
 /** The ways this frame's title can break into lines for a layout (`lineOptions` on the frame's

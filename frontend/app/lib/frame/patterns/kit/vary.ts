@@ -113,8 +113,11 @@ export function enumerate(def: LayoutDef, opts: {
   /** The candidate's own sheet, so vary can measure real ink boxes without depending on the
    *  sheet type itself. Optional: omitted, the cover penalty is 0 and scores match Stage 1. */
   boxOf?: (e: El) => Box | null
+  /** The style's own reward (Task 4), added to the Stage 1 score. Omitted (Swiss): scores are
+   *  exactly Stage 1's. */
+  rank?: (out: LayoutOut) => number
 }): Candidate[] {
-  const { run, check, infoSize, hasImage, boxOf } = opts
+  const { run, check, infoSize, hasImage, boxOf, rank } = opts
   const lineOpts = lineOptions(opts.kind, opts.title, def.oneLineFirst)
 
   const defSig = sigOf(run(DEFAULT_CHOICE))
@@ -154,6 +157,7 @@ export function enumerate(def: LayoutDef, opts: {
     const cover = coverOf(out, boxOf)
     const score = Math.log(maxTextSize / infoSize) - 0.12 * distinctLeftEdges
       + (isDefault ? 1 : 0) - (choice.scale === 'quiet' ? 0.35 : 0) - (cover > 0.2 ? 0.5 : 0)
+      + (rank ? rank(out) : 0)
     list.push({ choice, out, score, sig: s })
   }
 
