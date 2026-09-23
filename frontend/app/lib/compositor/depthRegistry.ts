@@ -6,6 +6,8 @@
  * it arrives. One in-flight request per filename; an error is retryable.
  */
 
+import { requestDepthEstimate } from '~/lib/compositor/depthRequest'
+
 type Status = 'idle' | 'loading' | 'ready' | 'error'
 
 /**
@@ -102,31 +104,22 @@ export function requestDepth(ref: DepthRef): void {
   notify()
 
   void (async () => {
-    let url = ''
-    try {
-      const res = await fetch('/api/depth/estimate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          filename: src.filename,
-          subfolder: src.subfolder,
-          type: src.type ?? 'input',
-        }),
-      })
-      if (!res.ok) return fail(key, `depth request failed (${res.status})`)
-      const data = await res.json()
-      if (!data?.depthFilename) return fail(key, 'depth request returned no file')
-      url = depthUrl(data.depthFilename, data.subfolder ?? '')
-    } catch (err) {
-      return fail(key, `depth request failed: ${(err as Error).message}`)
-    }
-
+    const est = await requestDepthEstimate(src)
+    if (!est.ok) return fail(key, est.message)
+    const url = depthUrl(est.depthFilename, est.subfolder)
     const img = new Image()
     img.crossOrigin = 'anonymous'
     img.onload = () => { entries.set(key, { status: 'ready', img }); notify() }
     img.onerror = () => fail(key, 'depth map could not be decoded')
     img.src = url
   })()
+}
+
+/** A depth map that is already in hand — a web export ships the maps the editor had cached and
+ *  seeds them here at mount, so a depth-of-field layer paints exactly as it did in the editor. */
+export function seedDepthImage(ref: DepthRef, img: HTMLImageElement): void {
+  entries.set(depthKey(ref), { status: 'ready', img })
+  notify()
 }
 
 /** Test seam — clears cached entries and subscribers. */

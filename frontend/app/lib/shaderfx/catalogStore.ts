@@ -23,6 +23,16 @@ export function setShaderFxCatalog(cat: ShaderFxCatalog | null): void {
   cached = cat
 }
 
+/** Add effect definitions the store does not have yet; never replace one it has. A web export
+ *  ships only the effects its Frame uses and merges them in at mount — merging, not replacing,
+ *  because two exported Frames can share one page (and, in the app, the full catalog is already
+ *  loaded and must stay intact while the poster is baked). */
+export function addShaderFxEffects(defs: EffectDef[]): void {
+  const byId = new Map((cached?.effects ?? []).map(e => [e.id, e]))
+  for (const d of defs) if (!byId.has(d.id)) byId.set(d.id, d)
+  cached = { version: cached?.version ?? 1, effects: [...byId.values()] }
+}
+
 /**
  * Synchronous read of whatever catalog has already resolved elsewhere (a page's
  * `onMounted`, a preload call, etc). Never triggers a fetch and never awaits —
