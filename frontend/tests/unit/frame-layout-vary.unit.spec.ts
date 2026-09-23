@@ -101,4 +101,18 @@ describe('layout kit — vary', () => {
     })
     expect(result).toEqual([])
   })
+
+  it('enumerate: the default leads even when another variation outscores it', () => {
+    // one line (lines=1) is set far larger, so its score beats the default's +1 bonus
+    const bigOneLine = (c: Choice): LayoutOut => {
+      const out = run(c)
+      if (c.lines === 1) for (const e of out.els) if (e.k === 't') e.size = 100
+      return out
+    }
+    const result = enumerate(fakeDef(), {
+      kind: 'phrase', title: 'Two Words', hasImage: true, run: bigOneLine, check, infoSize: INFO_SIZE,
+    })
+    expect(Math.max(...result.map(c => c.score))).toBeGreaterThan(result[0]!.score)
+    expect(result[0]!.choice).toEqual(DEFAULT_CHOICE)
+  })
 })

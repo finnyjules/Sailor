@@ -128,6 +128,9 @@ export function enumerate(def: LayoutDef, opts: {
     (Object.keys(WT) as (keyof Choice)[]).reduce((d, k) => d + (a.choice[k] !== b.choice[k] ? WT[k] : 0), 0)
 
   list.sort((a, b) => b.score - a.score)
+  // The default always leads when it passes — the score bonus alone could be outranked.
+  const di = list.findIndex(c => (Object.keys(DEFAULT_CHOICE) as (keyof Choice)[]).every(k => c.choice[k] === DEFAULT_CHOICE[k]))
+  if (di > 0) list.unshift(...list.splice(di, 1))
   const ordered: Candidate[] = list.length ? [list.shift()!] : []
   while (list.length) {
     let bestIdx = 0
