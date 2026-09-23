@@ -869,6 +869,7 @@ function setPins(unitId: string, patch: Partial<Pins>) {
     // upsertGroup, not map: an older Frame's group can be missing from the registry (a flat root)
     // while still being a unit, and its pins must still land.
     const cur = groups.find(g => g.id === unitId) as any
+    recordHistory() // one undo step per pins-card edit (the layer branch records through setLocal)
     writeGroups(upsertGroup(groups, unitId, { pins: cleanPins({ ...(cur?.pins ?? {}), ...patch }) }))
   } else {
     const layer = localLayers.value.find(l => l.id === unitId)
