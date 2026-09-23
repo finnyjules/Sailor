@@ -37,6 +37,7 @@ import { hostedModeEnabled, engineOrigin } from '~/lib/hostedMode'
 import { tallyReplicateUsd } from '~/lib/graph/runCost'
 import { summarizeNodeErrors } from '~/lib/validationErrors'
 import { describeQueueRefusal, isH3RefusalBody } from '~/lib/queueRefusal'
+import { useTabHeadsUp } from '~/composables/useTabHeadsUp'
 import { isBetaGateError } from '~/lib/betaGate'
 import { promoteTempImageInputs } from '~/lib/promoteTempImages'
 import { extractOutputFiles, type GenOutput, type GenerationRecord } from '~/lib/generations'
@@ -81,6 +82,7 @@ const hostedShell = hostedModeEnabled(useRuntimeConfig().public)
 // Off unless NUXT_PUBLIC_RUNNER_ENABLED=true; then eligible workflows go to /api/runs.
 const runnerEnabled = !!(useRuntimeConfig().public as { runnerEnabled?: boolean }).runnerEnabled
 const runnerEvents = useRunnerEvents()
+const headsUp = useTabHeadsUp()
 
 // Deep-link: /?train=1 opens (or focuses) the Train tab — used by /dev/style-publisher.
 onMounted(() => {
@@ -3154,6 +3156,8 @@ function handleBridgeEvent(data: any) {
       if (data.position > 0) promptQueuePos.value[prompt_id] = data.position
       else delete promptQueuePos.value[prompt_id]
     }
+  } else if (evt === 'gate_paused') {
+    headsUp.notify('paused')
   } else if (evt === 'executed') {
     if (data.output) perRun(prompt_id).outputs.push(...extractOutputFiles(data.output))
     // Track node completion for coarse progress — per-run (audit C5).
@@ -3337,6 +3341,7 @@ function handleBridgeEvent(data: any) {
     // tab's spinner (skip 'done'/'idle') but still record this run's result.
     const tabStillRunning = tabId ? inFlight({ tabId }).length > 0 : false
     if (!wasSilent) {
+      if (validatedRun && !data.stopped) headsUp.notify(runOutputs.some(o => o.kind === 'video') ? 'video' : 'image')
       if (!tabStillRunning) updateTabStatus(tabId, 'done')
       if (validatedRun && !data.stopped && lastRunResult.value?.kind !== 'error') {
         setRunResult({
@@ -3396,6 +3401,7 @@ function handleBridgeEvent(data: any) {
     const wasSilent = errWasSilent
     currentRunSilent.value = false
     if (!wasSilent) {
+      headsUp.notify('failed')
       const nodeName = data.node_type || data.node_id || 'Unknown node'
       const reason = data.exception_message || 'Unknown error'
       setRunResult({ kind: 'error', nodeName, message: reason, at: Date.now() })

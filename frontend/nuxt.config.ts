@@ -17,6 +17,13 @@ export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: true },
 
+  app: {
+    head: {
+      title: 'Sailor',
+      link: [{ rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
+    },
+  },
+
   runtimeConfig: {
     // Server-only. Set via NUXT_REPLICATE_TOKEN env var.
     // Used by /api/cloud-train/* routes; never exposed to the browser.
