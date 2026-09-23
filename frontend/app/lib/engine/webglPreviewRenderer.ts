@@ -81,7 +81,7 @@ export class WebGLPreviewRenderer implements PreviewRenderer {
       for (const clip of track.clips) {
         const plan = resolutionPlanFor(clip, resolve(clip))
         if (!plan) {
-          if (clip.kind === 'caption' || clip.kind === 'text') {
+          if (clip.kind === 'caption') {
             console.warn(`WebGLPreviewRenderer: clip kind '${clip.kind}' not renderable yet — skipped`)
           }
           continue

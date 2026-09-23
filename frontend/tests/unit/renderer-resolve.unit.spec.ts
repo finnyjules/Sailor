@@ -19,8 +19,14 @@ describe('resolutionPlanFor', () => {
   it('title clip needs no preview → text source', () => {
     expect(resolutionPlanFor({ ...base, kind: 'title', title: {} } as any, null)).toEqual({ kind: 'text' })
   })
+  // Task 2 (browser video export): plain 'text' clips are now drawn by
+  // TextCanvasSource too (like title), so this replaces the old "'text' is
+  // unsupported → null" assertion.
+  it('plain text clip needs no preview → text source', () => {
+    expect(resolutionPlanFor({ ...base, kind: 'text', text: {} } as any, null)).toEqual({ kind: 'text' })
+  })
   it('unsupported / unresolved → null', () => {
-    expect(resolutionPlanFor({ ...base, kind: 'text' } as any, null)).toBeNull()
+    expect(resolutionPlanFor({ ...base, kind: 'caption' } as any, null)).toBeNull()
     expect(resolutionPlanFor({ ...base, kind: 'video' } as any, null)).toBeNull()
   })
 })

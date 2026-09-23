@@ -168,6 +168,39 @@ describe('buildDrawList — title/lower_third admission', () => {
       canvas: { width: 640, height: 360, fps: 30, bg_color: '#000000' },
       total_frames: 20, transitions: [],
       tracks: [{ id: 't', kind: 'video', name: 'V', muted: false, locked: false, clips: [
+        { id: 'wf', kind: 'workflow', start_frame: 0, in_frame: 0, length: 20, port_index: 0 },
+      ] }],
+    })!
+    expect(buildDrawList(state, 5, new Map())).toEqual([])
+  })
+})
+
+describe('buildDrawList — plain text admission', () => {
+  // Task 2 (browser video export): the preview now draws plain 'text' clips
+  // (TextCanvasSource), so 'text' is a RENDERABLE_KIND like 'title' above —
+  // this replaces the old "text is Phase 2/3, always skipped" assertion.
+  it('admits text clips with registered dims as full-canvas entries', () => {
+    const state = migrateEditState({
+      version: 2,
+      canvas: { width: 640, height: 360, fps: 30, bg_color: '#000000' },
+      total_frames: 20, transitions: [],
+      tracks: [{ id: 't', kind: 'video', name: 'V', muted: false, locked: false, clips: [
+        { id: 'txt', kind: 'text', start_frame: 0, in_frame: 0, length: 20,
+          text: { text: 'x', font_size: 72, color: '#fff', bg_color: '#000', align: 'center', v_align: 'middle', padding: 0.06, line_spacing: 1.2 } },
+      ] }],
+    })!
+    // Renderer registers the CANVAS size as the text source's dims (same as title).
+    const dims = new Map([['txt', { w: 640, h: 360 }]])
+    const list = buildDrawList(state, 5, dims)
+    expect(list.map(e => e.clipId)).toEqual(['txt'])
+  })
+
+  it('still skips text clips with no registered dims', () => {
+    const state = migrateEditState({
+      version: 2,
+      canvas: { width: 640, height: 360, fps: 30, bg_color: '#000000' },
+      total_frames: 20, transitions: [],
+      tracks: [{ id: 't', kind: 'video', name: 'V', muted: false, locked: false, clips: [
         { id: 'txt', kind: 'text', start_frame: 0, in_frame: 0, length: 20,
           text: { text: 'x', font_size: 72, color: '#fff', bg_color: '#000', align: 'center', v_align: 'middle', padding: 0.06, line_spacing: 1.2 } },
       ] }],

@@ -14,7 +14,7 @@ import { isIdentityFilters } from '~~/shared/timeline/filters'
 // 0.5 px off a true center; PIL BILINEAR resampling ≠ GPU linear filtering on
 // rotated/scaled edges.
 
-const RENDERABLE_KINDS = new Set(['image', 'video', 'title', 'lower_third', 'motion', 'spacetype'])
+const RENDERABLE_KINDS = new Set(['image', 'video', 'title', 'lower_third', 'motion', 'spacetype', 'text'])
 
 export interface DrawEntry {
   clipId: string
@@ -91,7 +91,7 @@ function fittedSize(srcW: number, srcH: number, W: number, H: number, scale: num
  * Visible image layers at `frame`, in paint order (track order, clip order
  * within track — later entries on top), with all scalar math resolved.
  * `srcDims` maps clip id → natural source pixel size (known after load()).
- * Clips outside RENDERABLE_KINDS or without registered dims are skipped (plain 'text' is Phase 2/3).
+ * Clips outside RENDERABLE_KINDS or without registered dims are skipped.
  */
 export function buildDrawList(
   state: EditState,
@@ -107,7 +107,7 @@ export function buildDrawList(
   for (const track of state.tracks) {
     if (track.muted || track.kind === 'audio') continue // Audio TRACKS skipped wholesale (Python skips audio CLIPS; an image clip hand-edited onto an audio track would render there — unreachable via the editor, divergence accepted).
     for (const clip of track.clips as Clip[]) {
-      if (!RENDERABLE_KINDS.has(clip.kind)) continue // M3: media + animated text (plain 'text' is Phase 2/3)
+      if (!RENDERABLE_KINDS.has(clip.kind)) continue // M3: media + animated text + plain text
       const url = 'path' in clip ? clip.path ?? '' : ''   // canvas-rasterized sources have no URL
       const dims = srcDims.get(clip.id)
       if (!dims) continue
