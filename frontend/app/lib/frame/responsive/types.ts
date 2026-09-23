@@ -74,6 +74,7 @@ export interface UnitInfo {
   kSize: number                                    // view px per design px for the unit's size
   designBox: ResolvedBox                           // design px, top-left
   viewBox: ResolvedBox                             // view px, top-left (as drawn)
+  mappedBox: ResolvedBox                           // the span the pins place, view px — equals viewBox except for re-wrapped text
   refDesign: ResolvedBox                           // the section or frame, design px
   refView: ResolvedBox                             // the same, view px
   h: AxisMap; v: AxisMap                           // resolved maps; .kind is the held (effective) pin

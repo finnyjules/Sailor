@@ -1,6 +1,6 @@
 // frontend/tests/unit/responsive-view-edit.unit.spec.ts
 import { describe, it, expect } from 'vitest'
-import { createRectLayer, type LocalLayer } from '~/composables/useCompositorLayers'
+import { createRectLayer, createTextLayer, type LocalLayer } from '~/composables/useCompositorLayers'
 import { resolveLayout } from '~/lib/frame/responsive'
 import { settleAxis, axisInfo, moveUnitAtView } from '~/lib/frame/responsive/viewEdit'
 import type { FrameDoc } from '~/lib/frame/responsive/types'
@@ -51,7 +51,7 @@ describe('moveUnitAtView', () => {
     expect(e.patches).toHaveLength(1)
     expect(e.patches[0]!.patch.x).toBeCloseTo(0.2, 9)
     expect(e.patches[0]!.patch.y).toBeCloseTo(0.5, 9)
-    expect(e.pins).toEqual({ unitId: 'a', onGroup: false, patch: { h: undefined, v: undefined } })
+    expect(e.pins).toStrictEqual({ unitId: 'a', onGroup: false, patch: { h: undefined, v: undefined } })
   })
   it('drag holds the pin it had; drop then flips it to the automatic one — same place on screen', () => {
     const l = [leftRect()]
@@ -61,7 +61,7 @@ describe('moveUnitAtView', () => {
     expect(drag.pins!.patch).toEqual({ h: 'left', v: 'middle' })
     const drop = moveUnitAtView(u, l, 1000, 500, 1500, 0, 'drop')
     expect(drop.patches[0]!.patch.x).toBeCloseTo(0.6, 9)          // right: 2100 − 1500 = 600
-    expect(drop.pins!.patch).toEqual({ h: undefined, v: undefined })
+    expect(drop.pins!.patch).toStrictEqual({ h: undefined, v: undefined })
   })
   it('drop: keeps the held pin, stored, when nothing automatic fits', () => {
     const l = [leftRect()]
@@ -74,7 +74,7 @@ describe('moveUnitAtView', () => {
     const e = moveUnitAtView(unitAt(l, 'a'), l, 1000, 500, -100, 0, 'drop')
     expect(e.patches[0]!.patch.x).toBeCloseTo(0.8, 9)
     expect('h' in e.pins!.patch).toBe(false)
-    expect(e.pins!.patch).toEqual({ v: undefined })
+    expect(e.pins!.patch).toStrictEqual({ v: undefined })
   })
   it('a group moves every member by the same design delta; pins go on the group', () => {
     const a = createRectLayer({ id: 'a', x: 0.1, y: 0.5, w: 0.1, h: 0.1, groupId: 'g' })
@@ -88,8 +88,33 @@ describe('moveUnitAtView', () => {
   it('a full-bleed background does not move (its edges are welded to the frame)', () => {
     const l = [createRectLayer({ id: 'bg', x: 0.5, y: 0.5, w: 1, h: 0.5 })]
     const e = moveUnitAtView(unitAt(l, 'bg'), l, 1000, 500, 40, 30, 'drop')
-    expect(e.patches[0]!.patch.x).toBeCloseTo(0.5, 9)
-    expect(e.patches[0]!.patch.y).toBeCloseTo(0.5, 9)
+    expect(e.patches).toEqual([])
     expect(e.pins).toBeNull()
+  })
+  it('a stretched axis dragged past the frame edge stops just inside it (never welds)', () => {
+    // design 50..950, 'both'; drawn 550..2450. −600 would put the near edge at design −550.
+    const l = [createRectLayer({ id: 'a', x: 0.5, y: 0.5, w: 0.9, h: 0.1 })]
+    const e = moveUnitAtView(unitAt(l, 'a'), l, 1000, 500, -600, 0, 'drop')
+    const x = e.patches[0]!.patch.x as number
+    expect(x).toBeGreaterThan(0.45); expect(x).toBeLessThan(0.4501)   // 0.01..900.01: width unchanged
+  })
+})
+
+describe('re-wrapped text', () => {
+  // 10px per character: 45 + 1 + 45 chars = 910px > the 900px design box → 2 lines (100px);
+  // stretched to ~2900px at 3000 wide → 1 line (50px), held to its top edge.
+  const measureCtx = { measureText: (s: string) => ({ width: s.length * 10 }), set font(_v: string) {}, letterSpacing: '0px' } as unknown as CanvasRenderingContext2D
+  const text = () => createTextLayer({ id: 't', x: 0.5, y: 0.1, boxW: 0.9, fontSize: 0.05, lineHeight: 1, text: 'a'.repeat(45) + ' ' + 'b'.repeat(45) })
+  const unitT = (l: LocalLayer[]) => resolveLayout(doc(l), 3000, 500, { measureCtx, withBoxes: true }).units.get('t')!
+
+  it('reports the span the pins place (mappedBox) apart from the drawn, re-wrapped box (viewBox)', () => {
+    const u = unitT([text()])
+    expect(u.mappedBox.h).toBeCloseTo(100, 9)
+    expect(u.viewBox.h).toBeCloseTo(50, 9)
+  })
+  it('a horizontal move does not drift it vertically', () => {
+    const l = [text()]
+    const e = moveUnitAtView(unitT(l), l, 1000, 500, 10, 0, 'drop')
+    expect(e.patches[0]!.patch.y).toBeCloseTo(0.1, 9)
   })
 })

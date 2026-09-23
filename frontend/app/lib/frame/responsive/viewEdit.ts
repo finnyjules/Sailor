@@ -1,11 +1,11 @@
-// frontend/app/lib/frame/responsive/viewEdit.ts
 import type { LocalLayer } from '~/composables/useCompositorLayers'
-import { invertMap } from './axis'
-import { inferAxisPin } from './infer'
-import type { AxisMap, AxisPin, PinV, UnitInfo } from './types'
+import { applyMap, invertMap } from './axis'
+import { inferAxisPin, V_NAME } from './infer'
+import type { AxisMap, AxisPin, UnitInfo } from './types'
 
 const EPS = 1e-6
-const V_NAME: Record<AxisPin, PinV> = { left: 'top', right: 'bottom', both: 'both', center: 'middle', relative: 'relative' }
+/** How far (design px) a moved stretched edge stays inside its reference, so it never reads as touching it and gets welded (bled) to the real box edge. */
+const EDGE_GAP = 0.01
 
 export interface AxisSpan { start: number; extent: number }
 /** One axis of a unit as the resolver placed it at the viewing size. Design px / view px. */
@@ -14,7 +14,7 @@ export interface AxisInfo {
   canStretch: boolean
   explicit: boolean         // the pin on this axis is stored
   design: AxisSpan          // the unit's design extent
-  view: AxisSpan            // the unit's drawn extent
+  view: AxisSpan            // the span the pins place (UnitInfo.mappedBox), not the re-wrapped drawn box
   refDesign: AxisSpan       // the section or frame, design px
   refView: AxisSpan         // the same, view px
 }
@@ -32,7 +32,7 @@ export function axisInfo(u: UnitInfo, axis: 'h' | 'v'): AxisInfo {
     H ? { start: b.x, extent: b.w } : { start: b.y, extent: b.h }
   return {
     map: H ? u.h : u.v, canStretch: u.canStretch, explicit: H ? u.hExplicit : u.vExplicit,
-    design: span(u.designBox), view: span(u.viewBox), refDesign: span(u.refDesign), refView: span(u.refView),
+    design: span(u.designBox), view: span(u.mappedBox), refDesign: span(u.refDesign), refView: span(u.refView),
   }
 }
 
@@ -108,16 +108,26 @@ export function moveUnitAtView(u: UnitInfo, layers: LocalLayer[], W0: number, H0
     const ax = axisInfo(u, axis)
     const bl = bleeds(ax)
     if (bl.near || bl.far) return { near: ax.design.start, far: ax.design.start + ax.design.extent, pin: null }
-    const a = ax.view.start + d, b = ax.view.start + ax.view.extent + d
+    let a = ax.view.start + d, b = ax.view.start + ax.view.extent + d
+    if (ax.map.kind === 'both') {
+      // A stretched edge that reaches its reference would be drawn to the REAL box edge (bleed),
+      // not where it was dropped: stop it EDGE_GAP design px inside, keeping the width.
+      const lo = applyMap(ax.map, ax.refDesign.start + EDGE_GAP, 'near')
+      const hi = applyMap(ax.map, ax.refDesign.start + ax.refDesign.extent - EDGE_GAP, 'far')
+      if (a < lo) { b += lo - a; a = lo } else if (b > hi) { a += hi - b; b = hi }
+    }
     return phase === 'drag' ? holdAxis(ax, a, b, ax.design.extent) : settleAxis(ax, a, b, ax.design.extent)
   }
   const sh = one('h', dx), sv = one('v', dy)
   const dcx = (sh.near + sh.far) / 2 - (u.designBox.x + u.designBox.w / 2)
   const dcy = (sv.near + sv.far) / 2 - (u.designBox.y + u.designBox.h / 2)
+  const pins = pinsPatch(u, sh.pin, sv.pin)
+  // Nothing moved (e.g. a welded background): no layer writes.
+  if (Math.abs(dcx) < 1e-9 && Math.abs(dcy) < 1e-9) return { patches: [], pins }
   const byId = new Map(layers.map(l => [l.id, l]))
   const patches = u.memberIds.flatMap((id) => {
     const l = byId.get(id)
     return l ? [{ id, patch: { x: l.x + dcx / W0, y: l.y + dcy / H0 } as Record<string, unknown> }] : []
   })
-  return { patches, pins: pinsPatch(u, sh.pin, sv.pin) }
+  return { patches, pins }
 }

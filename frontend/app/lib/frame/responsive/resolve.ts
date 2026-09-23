@@ -93,7 +93,7 @@ export function resolveLayout(frame: FrameDoc, W: number, H: number, opts: Resol
     const info: Omit<UnitInfo, 'viewBox'> | null = withBoxes
       ? {
           unitId: unit.id, kind: unit.kind, memberIds: unit.memberIds, canStretch, kSize,
-          designBox: unit.box, refDesign: ref.design, refView: ref.box,
+          designBox: unit.box, mappedBox: unitBox, refDesign: ref.design, refView: ref.box,
           h: hx.map, v: vy.map, hExplicit: unit.pins?.h != null, vExplicit: unit.pins?.v != null,
         }
       : null

@@ -28,7 +28,8 @@ export function inferAxisPin(start: number, extent: number, refStart: number, re
   return c < refC ? 'left' : 'right'
 }
 
-const V_NAME: Record<AxisPin, PinV> = { left: 'top', right: 'bottom', both: 'both', center: 'middle', relative: 'relative' }
+/** Axis-neutral pin → its vertical spelling. */
+export const V_NAME: Record<AxisPin, PinV> = { left: 'top', right: 'bottom', both: 'both', center: 'middle', relative: 'relative' }
 
 /** Both axes at once, with the vertical axis spelled in its own names. */
 export function inferPins(box: Box, ref: Box, canStretch: boolean): { h: PinH; v: PinV } {
