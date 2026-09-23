@@ -2,14 +2,15 @@ import type { LayoutDef } from '../kit/types'
 import { bottomHeavy, footer, fourCorners, fullBleed, index, photoBehind, runoff, shapeCounter, statement, tilt } from './swissCore'
 import { block, diagonal, edges, kicker, ragged, sidebar, spacedLines, staircase, wall } from './swissLines'
 import { badge, cascade, cells, knockout, ring, scatter, shapeBleed, split } from './swissShapes'
+import { column, cross, overlap, panel, plate, rising, sideSplit, stamp } from './photo'
+import { behindPhoto, collage, dateBehind, ghost, label, overprint, tightStack } from './overlap'
 
 // ORDER RULE (Ruling R9): a layout's index in this list seeds its random choices
 // (`7000 + index·97 + 13 + arr·7919`, as in the prototype). The FINAL order of this list must
 // equal the prototype's `def(...)` order in docs/superpowers/specs/assets/
 // 2026-09-23-frame-layout-system/layout-sheet.html (def, then defNew, then defOver, top to
 // bottom), so the seeds reproduce what the user approved there. Insert each ported layout at
-// its prototype position — between its neighbours, not at the end. Until every layout is
-// ported, indices past a gap shift as later tasks fill it; only the final order is binding.
+// its prototype position — between its neighbours, not at the end. All 42 are ported.
 export const LAYOUTS: LayoutDef[] = [
   runoff,
   statement,
@@ -38,7 +39,23 @@ export const LAYOUTS: LayoutDef[] = [
   kicker,
   sidebar,
   footer,
-  // defNew (plate … rising) and defOver (overprint … ghost) follow footer.
+  // defNew: the image-led layouts.
+  plate,
+  panel,
+  sideSplit,
+  cross,
+  overlap,
+  stamp,
+  column,
+  rising,
+  // defOver: the overlap family.
+  overprint,
+  dateBehind,
+  tightStack,
+  behindPhoto,
+  collage,
+  label,
+  ghost,
 ]
 
 export function layoutById(id: string): LayoutDef | undefined {

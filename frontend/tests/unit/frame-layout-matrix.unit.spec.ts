@@ -3,7 +3,9 @@ import { candidatesForFrame, planLayout } from '~/lib/frame/patterns/kit/plan'
 import type { LayoutPlanArgs } from '~/lib/frame/patterns/kit/plan'
 import { LAYOUTS } from '~/lib/frame/patterns/layouts/catalog'
 import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
-import type { Kind, LayoutDef } from '~/lib/frame/patterns/kit/types'
+import type { El, Kind, LayoutDef } from '~/lib/frame/patterns/kit/types'
+import { makeSheet } from '~/lib/frame/patterns/kit/sheet'
+import { boxOf } from '~/lib/frame/patterns/kit/check'
 import { createEllipseLayer, createImageLayer, createTextLayer } from '~/composables/useCompositorLayers'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 
@@ -52,6 +54,10 @@ const EXPECTED_EMPTY: (Partial<Combo> & { reason: string })[] = [
   { id: 'photoBehind', image: false, reason: 'needs an image and the frame has none (the product shows it only in image mode, with a stand-in)' },
   { id: 'fullBleed', image: false, reason: 'needs an image and the frame has none (the product shows it only in image mode, with a stand-in)' },
   { id: 'split', image: false, reason: 'needs an image and the frame has none (the product shows it only in image mode, with a stand-in)' },
+  // Task 12: every image-led layout (the prototype's `defNew`) and three of the overlap family
+  // need an image, for the same reason.
+  ...(['plate', 'panel', 'sideSplit', 'cross', 'overlap', 'stamp', 'column', 'rising', 'behindPhoto', 'collage', 'label'] as const)
+    .map(id => ({ id, image: false, reason: 'needs an image and the frame has none (the product shows it only in image mode, with a stand-in)' })),
   // Run-off's promise is a title that runs off the page. On a 1280×400 banner with no image the
   // title is height-bound (baseline row 10/12, cap top no higher than row 1, details and foot
   // below): "Echoes" fits at size 22.1 and its ink ends at 68 of 100; the sentence needs 2–4
@@ -60,6 +66,13 @@ const EXPECTED_EMPTY: (Partial<Combo> & { reason: string })[] = [
   // "Weather Report" is long enough on one line, so the phrase still has candidates here.
   { id: 'runoff', kind: 'word', image: false, w: 1280, h: 400, reason: 'banner, no image: the height-bound one-word title cannot reach the right edge (ink ends at 68/100)' },
   { id: 'runoff', kind: 'sentence', image: false, w: 1280, h: 400, reason: 'banner, no image: a 2–4-line title is height-bound far short of the right edge (ink ends at 39/100)' },
+  // Behind the photo's promise is a title that passes behind the image. On a 1280×400 banner the
+  // image is a centred 15.8 × 19.8 block (x 42.1–57.9) and the title's size is capped by the
+  // image's height (0.8 h / its cap height), so a one-word title ends at 35.6 and a 2–4-line
+  // sentence at 13.4–38.4: none reaches the image, and the layout rightly refuses. The phrase
+  // ("Weather Report" on one line) is wide enough and still passes.
+  { id: 'behindPhoto', kind: 'word', image: true, w: 1280, h: 400, reason: 'banner: the height-capped one-word title ends at 35.6, short of the image at 42.1' },
+  { id: 'behindPhoto', kind: 'sentence', image: true, w: 1280, h: 400, reason: 'banner: every height-capped line break of the sentence ends at 38.4 or less, short of the image at 42.1' },
 ]
 const matches = (e: Partial<Combo>, c: Combo) =>
   (Object.keys(e) as (keyof Combo | 'reason')[]).every(k => k === 'reason' || e[k as keyof Combo] === c[k as keyof Combo])
@@ -116,8 +129,8 @@ describe('the catalog', () => {
       'plate', 'panel', 'sideSplit', 'cross', 'overlap', 'stamp', 'column', 'rising',
       'overprint', 'dateBehind', 'tightStack', 'behindPhoto', 'collage', 'label', 'ghost',
     ]
-    const ids = LAYOUTS.map(l => l.id)
-    expect(PROTOTYPE_ORDER.filter(id => ids.includes(id))).toEqual(ids)
+    // All 42 are ported: the catalog IS the prototype order, so every seed is final.
+    expect(LAYOUTS.map(l => l.id)).toEqual(PROTOTYPE_ORDER)
   })
 
   it('every EXPECTED_EMPTY entry names a layout in the catalog', () => {
@@ -194,5 +207,104 @@ describe('shape and letter layouts on a real frame', () => {
       { k: 't' as const, s: TEXTS.date, x: cx - rad * 0.7, w: rad * 1.4, top: cy - 0.35 * S.INFO.size, size: S.INFO.size, ls: 0, lh: 1.3, align: 'center' as const, role: 'date', ok: true, inside: 'shape' },
     ]
     expect(checkPlan(els, S)).toContain('date does not fit inside its shape')
+  })
+})
+
+describe('the overlap family: the premise sweep', () => {
+  // The crossing is the whole idea of these layouts, so it is asserted here directly with `boxOf`,
+  // not only through the checker's rule 7 — a premise asserted only through the checker could
+  // agree with a checker bug (this is the sweep that caught two prototype layouts passing while
+  // not overlapping). For every combination the matrix offers and every candidate in it, each
+  // premise pair must have SOME element of each role (base role: `title1` counts as `title`)
+  // whose measured boxes intersect with positive area.
+  const OVERLAP_FAMILY = ['overprint', 'dateBehind', 'tightStack', 'behindPhoto', 'collage', 'label', 'ghost']
+  const base = (r: string | undefined) => (r ?? '').replace(/\d+$/, '')
+
+  it('every layout of the family with a crossing declares it as a premise (Tight stack crosses inside one element)', () => {
+    const withPairs = LAYOUTS.filter(l => l.premise?.overlap?.length).map(l => l.id)
+    expect(withPairs).toEqual(OVERLAP_FAMILY.filter(id => id !== 'tightStack'))
+    expect(LAYOUTS.find(l => l.id === 'overprint')!.premise!.overlap).toEqual([['title', 'details']])
+    expect(LAYOUTS.find(l => l.id === 'dateBehind')!.premise!.overlap).toEqual([['title', 'date']])
+    expect(LAYOUTS.find(l => l.id === 'ghost')!.premise!.overlap).toEqual([['title', 'details']])
+    expect(LAYOUTS.find(l => l.id === 'behindPhoto')!.premise!.overlap).toEqual([['title', 'photo']])
+    expect(LAYOUTS.find(l => l.id === 'collage')!.premise!.overlap).toEqual([['title', 'photo'], ['shape', 'photo']])
+    expect(LAYOUTS.find(l => l.id === 'label')!.premise!.overlap).toEqual([['label', 'photo']])
+  })
+
+  const family = LAYOUTS.filter(l => l.premise?.overlap?.length)
+  it.each(family.map(l => [l.id, l] as const))('%s: its premise pairs really intersect in every candidate offered', (_id, def) => {
+    let offered = 0
+    for (const c of combos.filter(x => x.id === def.id)) {
+      const a = baseArgs(def, c)
+      const S = makeSheet({ frameW: c.w, frameH: c.h, measure: makeStubMeasure() })
+      for (const cand of candidatesForFrame(a)) {
+        offered++
+        const boxes = (role: string) => cand.out.els
+          .filter((e): e is Exclude<El, { k: 'missing' }> => e.k !== 'missing' && base(e.role) === role)
+          .map(e => boxOf(e, S)!)
+        for (const [ra, rb] of def.premise!.overlap!) {
+          const A = boxes(ra), B = boxes(rb)
+          const label = `${ra} × ${rb} · ${c.kind} · ${c.image ? 'image' : 'no image'} · ${c.w}×${c.h} · ${JSON.stringify(cand.choice)}`
+          expect(A.length, `no ${ra}: ${label}`).toBeGreaterThan(0)
+          expect(B.length, `no ${rb}: ${label}`).toBeGreaterThan(0)
+          const crosses = A.some(p => B.some(q =>
+            Math.min(p.x1, q.x1) - Math.max(p.x0, q.x0) > 0 && Math.min(p.y1, q.y1) - Math.max(p.y0, q.y0) > 0))
+          expect(crosses, `does not cross: ${label}`).toBe(true)
+        }
+      }
+    }
+    expect(offered, 'the sweep checked nothing').toBeGreaterThan(0)
+  })
+})
+
+describe('image and overlap layouts on a real frame', () => {
+  const layersOf = (id: string, kind: Kind, w: number, h: number, image = true) => {
+    const def = LAYOUTS.find(l => l.id === id)!
+    const a = baseArgs(def, { id, kind, image, w, h })
+    const cand = candidatesForFrame(a)[0]!
+    return { cand, plan: planLayout({ ...a, choice: cand.choice })! }
+  }
+  type Layer = { id: string; kind: string; opacity?: number; blend?: string; crop?: { fit: string }; mask?: { kind: string }; standIn?: boolean; x: number; y: number; w: number }
+
+  it.each(FRAMES)('blend and opacity reach the layers: Overprint, Number behind, Ghost (%i×%i)', (w, h) => {
+    const over = layersOf('overprint', 'phrase', w, h, false).plan.layers as unknown as Layer[]
+    expect(over.find(l => l.id === 'd')!.blend).toBe('multiply')          // the details overprint in accent, multiplied
+    const behind = layersOf('dateBehind', 'phrase', w, h, false).plan.layers as unknown as Layer[]
+    expect(behind.find(l => l.id === 't')!.blend).toBe('multiply')        // the title multiplies over the date
+    const ghost = layersOf('ghost', 'phrase', w, h, false).plan.layers as unknown as Layer[]
+    expect(ghost.find(l => l.id === 'd')!.opacity).toBeCloseTo(0.16, 9)   // the faint ghost
+    expect(ghost.find(l => l.id === 't')!.opacity ?? 1).toBe(1)             // the title itself stays solid
+  })
+
+  it.each(FRAMES)('the frame\'s image is placed with a cover crop by every image-led layout (%i×%i)', (w, h) => {
+    for (const id of ['plate', 'panel', 'sideSplit', 'cross', 'overlap', 'stamp', 'column', 'rising', 'behindPhoto', 'collage', 'label']) {
+      const { cand, plan } = layersOf(id, 'phrase', w, h)
+      const p = cand.out.els.find(e => e.k === 'p' && e.role === 'photo')
+      if (p?.k !== 'p') throw new Error(`${id} lost its image`)
+      const img = (plan.layers as unknown as Layer[]).find(l => l.id === 'img')!
+      expect(img.crop, id).toEqual({ fit: 'cover' })
+      expect(img.x, id).toBeCloseTo((p.x + p.w / 2) / 100, 9)
+      expect(img.w, id).toBeCloseTo(p.w / 100, 9)
+    }
+  })
+
+  it('with no image layer, image mode places a stand-in where the prototype drew one', () => {
+    for (const def of LAYOUTS.filter(l => l.needs?.image)) {
+      const a = { ...baseArgs(def, { id: def.id, kind: 'phrase', image: false, w: 895, h: 1280 }), imageMode: true }
+      const cands = candidatesForFrame(a)
+      expect(cands.length, def.id).toBeGreaterThan(0)
+      const plan = planLayout({ ...a, choice: cands[0]!.choice })!
+      expect(plan.issues, def.id).toEqual([])
+      expect((plan.layers as unknown as Layer[]).some(l => l.kind === 'image' && l.standIn), def.id).toBe(true)
+    }
+  })
+
+  it.each(FRAMES)('Collage: the circle moves the user\'s own shape layer (%i×%i)', (w, h) => {
+    const { cand, plan } = layersOf('collage', 'phrase', w, h)
+    const circle = cand.out.els.find(e => e.k === 'c' && e.role === 'shape')
+    if (circle?.k !== 'c') throw new Error('collage lost its circle')
+    const shp = (plan.layers as unknown as Layer[]).find(l => l.id === 'shp')!
+    expect(shp.x).toBeCloseTo(circle.cx / 100, 9)
+    expect(shp.w).toBeCloseTo(2 * circle.r / 100, 9)
   })
 })
