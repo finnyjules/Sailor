@@ -110,13 +110,16 @@ export function resolveLayout(frame: FrameDoc, W: number, H: number, opts: Resol
         let boxH = target.h ?? unit.box.h * kSize
         // A boxed text with a stretched width: its height changes with the re-wrap, so a
         // top/bottom pin keeps THAT edge instead of the centre — and the resolved box reports
-        // the re-wrapped height, not the design one. An explicit `boxH` fixes the box height
+        // the re-wrapped height, not the design one. Any other pin keeps the mapped centre (the
+        // painter centres the block on it) and still reports the re-wrapped height, so the box
+        // is what is drawn; `mappedBox` keeps the placed span. An explicit `boxH` fixes the box height
         // (localLayerBox reads `boxH * W` whenever it is set), so such a text does not re-wrap
         // its box at all and keeps the plain mapped centre.
         if (layer.kind === 'text' && hx.stretched && !vy.stretched && (layer.boxH ?? 0) <= 0 && ctx) {
           const natural = textNaturalHeightPx(layer, boxW / kSize, ctx, W0) * kSize
           if (vPin === 'left') { target.cy = vy.near + natural / 2; boxH = natural }
           else if (vPin === 'right') { target.cy = vy.far - natural / 2; boxH = natural }
+          else boxH = natural
         }
         boxes.set(id, { x: target.cx - boxW / 2, y: target.cy - boxH / 2, w: boxW, h: boxH })
         if (info) unitInfos.set(id, { ...info, viewBox: boxes.get(id)! })

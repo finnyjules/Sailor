@@ -210,6 +210,28 @@ describe('re-wrapped text', () => {
     const after = drawnAfter([l], e, 't', ctx)
     expect(after.x).toBeCloseTo(box.x, 6); expect(after.w).toBeCloseTo(box.w, 6)
   })
+  it('centred: a width-only drag keeps the design-size y and writes no box height', () => {
+    const word = 'a'.repeat(40)
+    const l = createTextLayer({ id: 't', text: `${word} ${word} ${word}`, x: 0.5, y: 0.5, boxW: 0.85, fontSize: 0.08, lineHeight: 1.2 })
+    const u = unitAt([l], 't', ctx)
+    expect(u.v.kind).toBe('center')
+    expect(u.viewBox.h).toBeLessThan(u.mappedBox.h)                           // drawn = re-wrapped
+    const vb = u.viewBox
+    const e = resizeLayerAtView(u, l, { x: vb.x, y: vb.y, w: vb.w - 125, h: vb.h }, 1000, 500, 'drop', { w: 'boxW', h: 'boxH' })
+    const p = e.patches[0]!.patch
+    expect(p.y).toBeCloseTo(0.5, 9)
+    expect('boxH' in p).toBe(false)
+  })
+  it('centred: a top-handle drag from the drawn box is drawn where it was dropped', () => {
+    const word = 'a'.repeat(40)
+    const l = createTextLayer({ id: 't', text: `${word} ${word} ${word}`, x: 0.5, y: 0.5, boxW: 0.85, fontSize: 0.08, lineHeight: 1.2 })
+    const u = unitAt([l], 't', ctx)
+    const vb = u.viewBox
+    const box = { x: vb.x, y: vb.y - 10, w: vb.w, h: vb.h + 10 }               // top edge up 10 view px
+    const e = resizeLayerAtView(u, l, box, 1000, 500, 'drop', { w: 'boxW', h: 'boxH' })
+    expect(e.patches[0]!.patch.boxH as number).toBeCloseTo(box.h / 1000, 9)   // from the DRAWN height
+    expectBox(drawnAfter([l], e, 't', ctx), box)
+  })
 })
 
 describe('hitTestView', () => {
