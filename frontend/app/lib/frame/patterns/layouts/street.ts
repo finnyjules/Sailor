@@ -47,21 +47,40 @@ function fillLines(S: Sheet, lines: string[], top: number, bottom: number, over:
   return { els, bottom: y - gapL }
 }
 
-/** The foot: a hard-edged button bottom-left, the fine print bottom-right (design columns `cap`). */
-function streetFoot(S: Sheet, c: Content, o: { color?: Colour; bg?: Colour; fg?: Colour; cap?: [number, number] } = {}): { els: El[]; top: number } {
-  const { X, SPAN, L, INFO, countLines, blockH, info, button } = S
+/** The details line, when the tag does not hold it (ruling R10): it goes in the foot. */
+const footDetails = (c: Content): string | undefined => (c.details && sideLine(c)?.role !== 'details' ? c.details : undefined)
+
+/** The foot: a hard-edged button bottom-left, the fine print bottom-right (design columns `cap`).
+ *  `details` (ruling R10): the details line above the fine print in the same column, where it fits
+ *  (two lines at most, clear of the button); else it is left out (the planner hides and quotes it). */
+function streetFoot(S: Sheet, c: Content, o: { color?: Colour; bg?: Colour; fg?: Colour; cap?: [number, number]; details?: string } = {}): { els: El[]; top: number } {
+  const { X, SPAN, L, GAP, INFO, countLines, blockH, info, button } = S
   const [a, b] = o.cap ?? [7, 12]
   const els: El[] = []; let top = L(16)
+  let btnBox: { x1: number; y0: number } | null = null
   if (c.action) {
     const bo = { bg: o.bg ?? 'ink', fg: o.fg ?? 'field' }
     const h = button(c.action, X(1), 0, bo).btn.h
     const bt = button(c.action, X(1), L(16) - h, bo)
     els.push(bt.btn, bt.text); top = bt.btn.y
+    btnBox = { x1: bt.btn.x + bt.btn.w, y0: bt.btn.y }
   }
+  let base = L(16)
   if (c.caption) {
     const n = countLines(c.caption, SPAN(a, b), INFO, INFO.size)
     els.push(info(c.caption, { x: X(a), w: SPAN(a, b), align: 'right', base: L(16), color: o.color ?? 'ink', role: 'caption' }))
-    top = Math.min(top, L(16) - blockH(n, INFO.size, INFO.lh))
+    const capTop = L(16) - blockH(n, INFO.size, INFO.lh)
+    top = Math.min(top, capTop)
+    base = capTop - INFO.size * 1.25
+  }
+  if (o.details) {
+    const n = countLines(o.details, SPAN(a, b), { ...INFO, role: 'details' }, INFO.size)
+    const dTop = base - blockH(n, INFO.size, INFO.lh)
+    const clearOfButton = !btnBox || btnBox.x1 + GAP <= X(a) || base + GAP <= btnBox.y0
+    if (n <= 2 && clearOfButton) {
+      els.push(info(o.details, { x: X(a), w: SPAN(a, b), align: 'right', base, color: o.color ?? 'ink', role: 'details' }))
+      top = Math.min(top, dTop)
+    }
   }
   return { els, top }
 }
@@ -72,7 +91,7 @@ export const stFill: LayoutDef = {
   fn(S, { c, ph, lines, arr = 0 }) {
     const { X, XR, SPAN, L, M, RH, GAP, PHOTO_ASPECT, tag } = S
     const side = sideLine(c)
-    const foot = streetFoot(S, c)
+    const foot = streetFoot(S, c, { details: footDetails(c) })
     const f = fillLines(S, lines, M, ph ? L(6) : foot.top - GAP * 1.5, ['photo', 'tag', ...(side ? [side.role] : [])])
     const els: El[] = [...f.els, ...foot.els]
     if (ph) {
@@ -96,7 +115,7 @@ export const stTag: LayoutDef = {
     const side = sideLine(c)
     const els: El[] = [cover(ph)]
     if (c.logo) els.push(logo(X(1), M, logoH(), { aspect: c.logo.aspect }))
-    const foot = streetFoot(S, c)
+    const foot = streetFoot(S, c, { details: footDetails(c) })
     const sizes = lines.map(l => fitSize([l], SPAN(1, 12)))
     const total = sizes.reduce((a, s) => a + CAP * s, 0) + RH * 0.12 * (lines.length - 1)
     const f = fillLines(S, lines, Math.max(L(4), foot.top - GAP * 1.5 - total), foot.top - GAP * 1.5, ['photo', 'tag', ...(side ? [side.role] : [])])
@@ -120,7 +139,7 @@ export const stDrop: LayoutDef = {
       const cap = CAP * nsz, k = w100(side.s, st) / 100 * nsz
       els.push(disp(side.s, { size: nsz, x: XR(12) - cap, top: L(16), rot: -90, origin: 'top left', w: k, color: 'accent', role: side.role }))
     }
-    const foot = streetFoot(S, c, { cap: [5, 10] })
+    const foot = streetFoot(S, c, { cap: [5, 10], details: footDetails(c) })
     const size = sizeFor(lines, SPAN(1, 10), (ph ? L(7) : foot.top - GAP * 2) - M)
     els.push(disp(lines.join('\n'), { size, x: X(1), top: M }))
     const tb = M + blockH(lines.length, size, DISPLAY.lh)
@@ -143,7 +162,7 @@ export const stRepeat: LayoutDef = {
     const { X, XR, SPAN, L, M, RH, GAP, CAP, DISPLAY, PHOTO_ASPECT, fitSize, sizeFor, blockH, disp, tag } = S
     const side = sideLine(c)
     const els: El[] = []
-    const foot = streetFoot(S, c)
+    const foot = streetFoot(S, c, { details: footDetails(c) })
     const size = sizeFor(lines, SPAN(1, 12), RH * 6)
     const tH = blockH(lines.length, size, DISPLAY.lh), tTop = L(8) - tH / 2
     const title = disp(lines.join('\n'), { size, x: X(1), top: tTop, over: ['photo', 'tag', ...(side ? [side.role] : [])] })

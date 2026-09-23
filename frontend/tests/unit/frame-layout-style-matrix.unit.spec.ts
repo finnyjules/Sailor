@@ -293,11 +293,12 @@ describe('lines a style layout does not place are hidden (fix round 1)', () => {
     expect(vis(sink.layers, 'c')).toBe(false)
     for (const id of ['t', 'dt', 'a']) expect(vis(sink.layers, id), id).not.toBe(false)
 
-    // Swiss places the details and the caption again: their layers come back.
+    // Swiss places the details and the caption again: their layers come back. It never places the
+    // action line: that one is hidden and quoted instead (ruling R9).
     const s = { ...wide, props: { sailor_localLayers: sink.layers }, layoutId: 'statement' }
     const swissCand = candidatesForFrame(s)[0]!
     const swiss = planLayout({ ...s, choice: swissCand.choice })!
-    expect(swiss.notPlaced).toEqual([])
+    expect(swiss.notPlaced).toEqual([{ role: 'action', text: 'Shop now' }])
     expect(applyLayoutToFrame({ ...s, choice: swissCand.choice, editor: editorInto(sink) }).ok).toBe(true)
     expect(vis(sink.layers, 'd')).not.toBe(false)
     expect(vis(sink.layers, 'c')).not.toBe(false)
@@ -312,11 +313,29 @@ describe('lines a style layout does not place are hidden (fix round 1)', () => {
     for (const id of ['t', 'd', 'dt', 'c', 'a']) expect(vis(plan.layers, id), id).not.toBe(false)
   })
 
-  it('Swiss hides nothing it does not place (the action line stays as it is)', () => {
-    const a = { ...wide, props: { sailor_localLayers: adFrameLayers('phrase', { image: false, action: true }) }, layoutId: 'statement' }
+  it('Swiss hides and quotes the action line only (ruling R9); a later Performance apply shows it again', () => {
+    const layers = adFrameLayers('phrase', { image: true, action: true })
+    const a = { ...wide, props: { sailor_localLayers: layers }, layoutId: 'statement' }
+    const cand = candidatesForFrame(a)[0]!
+    const plan = planLayout({ ...a, choice: cand.choice })!
+    expect(plan.notPlaced).toEqual([{ role: 'action', text: 'Shop now' }])
+    expect(vis(plan.layers, 'a')).toBe(false)
+    for (const id of ['t', 'd', 'dt', 'c']) expect(vis(plan.layers, id), id).not.toBe(false)
+    const sink = { layers }
+    expect(applyLayoutToFrame({ ...a, choice: cand.choice, editor: editorInto(sink) }).ok).toBe(true)
+    expect(vis(sink.layers, 'a')).toBe(false)
+    // Performance places the action on its button: the line comes back.
+    const p = { ...wide, frameW: 895, frameH: 1280, props: { sailor_localLayers: sink.layers }, layoutId: 'perfOffer', style: 'performance' as const }
+    const pc = candidatesForFrame(p)[0]!
+    expect(applyLayoutToFrame({ ...p, choice: pc.choice, editor: editorInto(sink) }).ok).toBe(true)
+    expect(vis(sink.layers, 'a')).not.toBe(false)
+  })
+
+  it('Swiss hides nothing on a Frame without an action line', () => {
+    const a = { ...wide, props: { sailor_localLayers: adFrameLayers('phrase', { image: false, action: false }) }, layoutId: 'statement' }
     const plan = planLayout({ ...a, choice: candidatesForFrame(a)[0]!.choice })!
     expect(plan.notPlaced).toEqual([])
-    expect(vis(plan.layers, 'a')).not.toBe(false)
+    for (const l of plan.layers) if (l.kind === 'text') expect((l as { visible?: boolean }).visible, l.id).not.toBe(false)
   })
 })
 
@@ -381,8 +400,22 @@ describe('the Editorial and Street findings, pinned', () => {
     expect(plan.issues).toEqual([])
     expect((plan.layers.find(l => l.id === 'dt') as { rotation: number }).rotation).toBe(-7)
     expect(plan.layers.some(l => (l as { owner?: { key: string } }).owner?.key === 'tag-0')).toBe(true)
-    // The details are not placed when the tag holds the number: hidden, quoted.
-    expect(plan.notPlaced).toEqual([{ role: 'details', text: 'Mara Lind and guests' }])
+    // The tag holds the number; the details go in the foot with the fine print (ruling R10),
+    // right-aligned in the same column, above it.
+    expect(plan.notPlaced).toEqual([])
+    const det = cand.out.els.find(e => e.k === 't' && e.role === 'details')!
+    const cap = cand.out.els.find(e => e.k === 't' && e.role === 'caption')!
+    expect(det).toMatchObject({ s: 'Mara Lind and guests', align: 'right', x: (cap as { x: number }).x, w: (cap as { w: number }).w })
+    const S = makeSheet({ frameW: 895, frameH: 1280, measure: makeStubMeasure(), style: 'street' })
+    expect(boxOf(det, S)!.y1).toBeLessThan(boxOf(cap, S)!.y0)
+    expect((plan.layers.find(l => l.id === 'd') as { visible?: boolean }).visible).not.toBe(false)
+  })
+
+  it('Street (ruling R10): the details stay out where the foot has no room — Strip has no foot', () => {
+    const a = { ...base, frameW: 1280, frameH: 720, style: 'street' as const, props: { sailor_localLayers: eventFrameLayers('phrase', { image: false, action: true }) }, layoutId: 'stStrip' }
+    const plan = planLayout({ ...a, choice: candidatesForFrame(a)[0]!.choice })!
+    expect(plan.issues).toEqual([])
+    expect(plan.notPlaced.map(n => n.role)).toContain('details')
   })
 
   it('Street Tag (ruling S5): the title and the fine print sit on a band — the prototype set them straight on the image', () => {

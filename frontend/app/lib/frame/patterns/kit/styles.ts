@@ -23,6 +23,9 @@ export interface RankCtx {
   W: number
   H: number
   boxOf?: (e: El) => { x0: number; y0: number; x1: number; y1: number } | null
+  /** Whether a piece is drawn (a button filled or outlined — not a link; ruling R8). Omitted:
+   *  every piece counts as drawn. */
+  drawn?: (e: El) => boolean
 }
 
 export interface StyleSpec {
@@ -91,7 +94,9 @@ export const STYLES: Record<StyleId, StyleSpec> = {
     },
     rank: (out, ctx) => {
       const n = out.els.find((e): e is Extract<El, { k: 't' }> => e.k === 't' && e.role === 'date')
-      return (n ? Math.log(n.size / ctx.infoSize) * 0.8 : 0) + (out.els.some(e => e.k === 'btn') ? 0.5 : 0)
+      // A button counts only when it is drawn and visible (filled or outlined — ruling R8).
+      const btn = out.els.some(e => e.k === 'btn' && (ctx.drawn?.(e) ?? true))
+      return (n ? Math.log(n.size / ctx.infoSize) * 0.8 : 0) + (btn ? 0.5 : 0)
     },
   },
   editorial: {

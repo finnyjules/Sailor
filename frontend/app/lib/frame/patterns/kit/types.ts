@@ -71,12 +71,13 @@ export interface Measure {
   baseBelow(role: RoleKey): number
 }
 
-/** The face an element is measured in, from its `role`: `details`/`date`/`caption`/`title`
- *  map to themselves; `action`, `info` and anything else map to `caption` (the info face). */
+/** The face an element is measured in, from its `role`: `details`/`date`/`caption`/`title`/
+ *  `action` map to themselves (a measure with no action layer measures it in the caption's face);
+ *  `info` and anything else map to `caption` (the info face). */
 export function faceOf(role: string | undefined): RoleKey {
   // `title1`, `title2` … are further lines of the same layer: measure them in its face.
   const base = role?.replace(/\d+$/, '')
-  return base === 'title' || base === 'details' || base === 'date' || base === 'caption' ? base : 'caption'
+  return base === 'title' || base === 'details' || base === 'date' || base === 'caption' || base === 'action' ? base : 'caption'
 }
 
 export type { Sheet } from './sheet'

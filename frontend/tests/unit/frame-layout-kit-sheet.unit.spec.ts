@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { makeSheet } from '~/lib/frame/patterns/kit/sheet'
 import { makeStubMeasure, makeCanvasMeasure } from '~/lib/frame/patterns/kit/measure'
 
@@ -142,6 +142,65 @@ describe('layout kit — canvas measure', () => {
   })
 })
 
+// A canvas that measures: a capital is 0.7 em, anything else 0.5 em, and a face named "Wide"
+// is twice as wide — enough to tell the case and the face a text was measured in.
+function fakeCanvasDocument() {
+  const ctx = {
+    font: '', textBaseline: 'alphabetic',
+    measureText(t: string) {
+      const px = parseFloat(/(\d+(?:\.\d+)?)px/.exec(this.font)?.[1] ?? '10')
+      const k = /Wide/.test(this.font) ? 2 : 1
+      const w = [...t].reduce((a, ch) => a + (ch !== ch.toLowerCase() ? 0.7 : 0.5), 0) * px * k
+      return { width: w, actualBoundingBoxAscent: 0.35 * px, actualBoundingBoxDescent: 0.35 * px } as TextMetrics
+    },
+  }
+  return { createElement: () => ({ getContext: () => ctx }) }
+}
+
+describe('layout kit — canvas measure, fix wave', () => {
+  afterEach(() => { vi.unstubAllGlobals() })
+  const layer = (o: Record<string, unknown>) => ({ id: 'c', kind: 'text', text: 'x', fontSize: 0.03, fontFamily: 'Inter', fontWeight: 400, x: 0.5, y: 0.5, rotation: 0, opacity: 1, color: '#111111', ...o }) as never
+
+  it('I5: a case a layout set (Street\'s capitals) is measured as the case the layer had before', () => {
+    vi.stubGlobal('document', fakeCanvasDocument())
+    const lower = makeCanvasMeasure({ caption: layer({}) }).w100('shop now', 'caption', 0)
+    // Street left the layer in capitals: measured in its own (no) case.
+    const afterStreet = makeCanvasMeasure({ caption: layer({ textTransform: 'uppercase', layoutPrev: { textTransform: { was: null, set: 'uppercase' } } }) })
+    expect(afterStreet.w100('shop now', 'caption', 0)).toBeCloseTo(lower, 9)
+    // …and a style that sets capitals still measures capitals.
+    expect(afterStreet.w100('shop now', 'caption', 0, true)).toBeGreaterThan(lower)
+    // The user's own capitals (no layout set them) are the user's case.
+    const own = makeCanvasMeasure({ caption: layer({ textTransform: 'uppercase' }) }).w100('shop now', 'caption', 0)
+    expect(own).toBeGreaterThan(lower)
+    // A case the user changed since the layout set it is the user's again.
+    const changed = makeCanvasMeasure({ caption: layer({ textTransform: 'capitalize', layoutPrev: { textTransform: { was: null, set: 'uppercase' } } }) })
+    expect(changed.w100('shop now', 'caption', 0)).toBeGreaterThan(lower)
+    // A remembered earlier case comes back.
+    const was = makeCanvasMeasure({ caption: layer({ textTransform: 'uppercase', layoutPrev: { textTransform: { was: 'capitalize', set: 'uppercase' } } }) })
+    expect(was.w100('shop now', 'caption', 0)).toBeCloseTo(changed.w100('shop now', 'caption', 0), 9)
+  })
+
+  it('the action is measured in its own layer\'s face; without one, in the caption\'s', () => {
+    vi.stubGlobal('document', fakeCanvasDocument())
+    const m = makeCanvasMeasure({ caption: layer({}), action: layer({ id: 'a', fontFamily: 'Wide' }) })
+    expect(m.w100('Shop now', 'action', 0)).toBeCloseTo(2 * m.w100('Shop now', 'caption', 0), 9)
+    const noAction = makeCanvasMeasure({ caption: layer({}) })
+    expect(noAction.w100('Shop now', 'action', 0)).toBeCloseTo(noAction.w100('Shop now', 'caption', 0), 9)
+  })
+
+  it('the planner measures the button in the action layer\'s face (it used to take the caption\'s)', async () => {
+    vi.stubGlobal('document', fakeCanvasDocument())
+    const { candidatesForFrame } = await import('~/lib/frame/patterns/kit/plan')
+    const { adFrameLayers } = await import('./helpers/frameLayoutFixtures')
+    const btnW = (family: string) => {
+      const layers = adFrameLayers('word', { image: true, action: true }).map(l => (l.id === 'a' ? { ...l, fontFamily: family } : l))
+      const cand = candidatesForFrame({ props: { sailor_localLayers: layers }, frameW: 895, frameH: 1280, layoutId: 'perfOffer', style: 'performance', palette: { field: '#f2f0ef', ink: '#121212', accent: '#dd2200' }, connectedSlots: [] })[0]!
+      return (cand.out.els.find(e => e.k === 'btn') as { w: number }).w
+    }
+    expect(btnW('Wide')).toBeGreaterThan(btnW('Inter') * 1.3)
+  })
+})
+
 describe('layout kit — sheet takes a format (Stage 2)', () => {
   const STAGE1_FRAMES: readonly [number, number][] = [[895, 1280], [1080, 1080], [1280, 720], [1280, 400]]
   const NUMERIC_FIELDS = ['W', 'H', 'M', 'G', 'NC', 'CW', 'RH', 'GAP', 'CAP', 'B'] as const
@@ -271,7 +330,8 @@ describe('faceOf', () => {
     expect(faceOf('title1')).toBe('title')
     expect(faceOf('title12')).toBe('title')
     expect(faceOf('details2')).toBe('details')
-    expect(faceOf('action')).toBe('caption')
+    // The action is measured in its own layer's face (a measure without one falls back to the caption's).
+    expect(faceOf('action')).toBe('action')
     expect(faceOf('tagtext')).toBe('caption')
     expect(faceOf(undefined)).toBe('caption')
   })

@@ -56,6 +56,14 @@ export function makeCanvasMeasure(layers: Partial<Record<RoleKey, TextLayer>>): 
   const base = (role: RoleKey): TextLayer =>
     layers[role] ?? layers.caption ?? layers.details ?? layers.date ?? layers.title
       ?? createTextLayer({ fontWeight: 400 })
+  /** The layer's OWN letter case: a case a layout set (Street's capitals, still on the layer after
+   *  it was applied) is not the user's — while the layer still holds what the layout wrote, it is
+   *  measured in the case it had before (`layoutPrev.textTransform.was`; null: none). */
+  const ownCase = (l: TextLayer): TextLayer['textTransform'] => {
+    const prev = (l as { layoutPrev?: Record<string, { was: unknown; set: unknown }> }).layoutPrev?.textTransform
+    if (prev && l.textTransform === prev.set) return (prev.was ?? undefined) as TextLayer['textTransform']
+    return l.textTransform
+  }
   /** The role's layer re-sized for measuring: the user's face, weight, axes and case;
    *  the kit's size, spacing and box. Wrap is always the default fit (no shrink/fill).
    *  `upper`: the style sets capitals, whatever the layer's own case. */
@@ -65,7 +73,7 @@ export function makeCanvasMeasure(layers: Partial<Record<RoleKey, TextLayer>>): 
       ...l,
       text, fontSize: size / 100, letterSpacing: ls, boxW, boxH: undefined, boxFit: undefined,
       runs: undefined, path: undefined, expressive: undefined,
-      textTransform: upper ? 'uppercase' : l.textTransform,
+      textTransform: upper ? 'uppercase' : ownCase(l),
     }
   }
 

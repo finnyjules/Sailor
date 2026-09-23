@@ -4,6 +4,8 @@ import type { BandEl, BrandLogo, ButtonEl, CircleEl, Colour, El, LogoEl, PhotoEl
 import type { LayerOp } from '../types'
 import type { ResolvedPalette } from '../palette'
 import { contrastRatio, roleToPaint } from '../palette'
+import { buttonFill, hex6 } from './contrast'
+import type { PieceFill } from './contrast'
 import { createEllipseLayer, createImageLayer, createRectLayer } from '~/composables/useCompositorLayers'
 import type { LinearGradient } from '~/lib/compositor/paint'
 import type { LocalLayer, TextRun } from '~/composables/useCompositorLayers'
@@ -62,15 +64,6 @@ function textPivot(e: TextEl, S: Sheet): Pt {
   return e.origin === 'center' ? { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 } : { x: b.x0, y: b.y0 }
 }
 
-/** A `#rgb` / `#rrggbb` / `#rrggbbaa` colour as `#rrggbb`; null for anything else. */
-function hex6(c: unknown): string | null {
-  if (typeof c !== 'string') return null
-  const m = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(c.trim())
-  if (!m) return null
-  const h = m[1]!
-  return '#' + (h.length === 3 ? h.split('').map(x => x + x).join('') : h.slice(0, 6))
-}
-
 /** `colour` at `alpha` as `rgba(…)` (a hex colour), or the colour itself when it is not hex. */
 function withAlpha(colour: string, alpha: number): string {
   const h = hex6(colour)
@@ -95,19 +88,13 @@ function bandPaint(e: BandEl, field: string): LinearGradient {
   }
 }
 
-/** Ruling S1: the button's fill is the palette role with the highest contrast against the action
- *  text's own colour, if it reaches 3:1; null (draw a link) when none does or the colour is unknown. */
-export function buttonFill(actionColour: unknown, palette: ResolvedPalette): Colour | null {
-  const text = hex6(actionColour)
-  if (!text) return null
-  let best: Colour | null = null, ratio = 0
-  for (const role of ['ink', 'accent', 'field'] as const) {
-    const bg = hex6(palette[role])
-    if (!bg) continue
-    const r = contrastRatio(text, bg)
-    if (r > ratio) { ratio = r; best = role }
-  }
-  return ratio >= 3 ? best : null
+/** Ruling S1 (with R6's stand-out rule and R8's outline): re-exported from the one picker. */
+export { buttonFill }
+
+/** The role the action text is painted in with recolour on (its element's colour, else ink). */
+function actionRole(els: El[]): Colour {
+  const t = els.find((e): e is TextEl => e.k === 't' && baseRole(e.role) === 'action')
+  return t?.color ?? DEFAULT_TEXT_ROLE
 }
 
 /** Opacity / blend an element carries (stage 1: `blend: true` ⇒ multiply). */
@@ -227,6 +214,10 @@ export function elementsToOps(
     recolour?: boolean
     /** The brand kit's logo, drawn where the layout puts a `logo` element (ruling S2). */
     logo?: BrandLogo
+    /** The fills the planner's contrast picker chose (ruling R6), the very ones its check read.
+     *  A piece absent from the map keeps its layout colour; a button absent from it takes
+     *  `buttonFill` of `actionColor`. */
+    fills?: Map<El, PieceFill>
   },
 ): { ops: LayerOp[]; owned: LocalLayer[] } {
   const ops: LayerOp[] = []
@@ -238,6 +229,11 @@ export function elementsToOps(
     return `${role}-${i}`
   }
   const paint = (c: Colour | undefined) => roleToPaint(c ?? 'ink', palette)
+  /** The role a piece is drawn in: the picker's choice, else the layout's own colour. */
+  const roleOf = (e: El, own: Colour | undefined): Colour | undefined => {
+    const f = opts?.fills?.get(e)
+    return typeof f === 'string' ? f : own
+  }
   const ownedBase = (key: string, e: { opacity?: number; blend?: boolean }) => ({
     id: `layout-${key}`, owner: { by: 'layout' as const, key },
     ...(e.opacity != null ? { opacity: e.opacity } : {}),
@@ -257,12 +253,15 @@ export function elementsToOps(
     ops.push({ target: layer.id, kind: kind === 'image' ? 'image' : 'shape', x: layer.x, y: layer.y, z, insert })
   }
 
-  // The button (ruling S1): its fill is decided once, from the action text's own colour — or,
-  // with recolour on, the prototype's `bg`. A link, or a fill no role can give, draws no shape and
-  // underlines the action text instead. No action layer: no button.
+  // The button (ruling S1): its fill is decided once, by the contrast picker (ruling R6) from the
+  // action text's own colour — or, with recolour on, the prototype's colours (`bg` first). A
+  // button that can't stand out is an outline in its label's colour (ruling R8). A link, or a
+  // label colour that is unknown, draws no shape and underlines the action text instead. No action
+  // layer: no button.
   const btnEl = els.find((e): e is ButtonEl => e.k === 'btn')
-  const btnFill: Colour | null = !btnEl || btnEl.shape === 'link' || !targets.action ? null
-    : opts?.recolour ? (btnEl.bg ?? 'ink') : buttonFill(opts?.actionColor, palette)
+  const btnFill: PieceFill = !btnEl || btnEl.shape === 'link' || !targets.action ? null
+    : opts?.fills?.has(btnEl) ? opts.fills.get(btnEl)!
+      : buttonFill(opts?.recolour ? roleToPaint(actionRole(els), palette) : opts?.actionColor, palette, opts?.recolour ? (btnEl.bg ?? 'ink') : undefined)
   const underlineAction = !!btnEl && !!targets.action && btnFill == null
 
   /** The picked library shape, fitted inside the layout's box (centred, its own aspect) as a
@@ -273,7 +272,7 @@ export function elementsToOps(
     const w = Math.min(bw, bh / aspect)
     return {
       target: 'shape', kind: 'shape', shapeId: id, x: cx, y: cy, w, h: w * aspect,
-      rotation: e.rot ?? 0, colorRole: e.color ?? 'accent', fill: 'solid', z, ...look(e),
+      rotation: e.rot ?? 0, colorRole: roleOf(e as El, e.color) ?? 'accent', fill: 'solid', z, ...look(e),
     }
   }
 
@@ -303,7 +302,7 @@ export function elementsToOps(
         own(createRectLayer({
           ...ownedBase(key, b),
           x: 0.5, y: (b.y + b.h / 2) / S.H, w: 1, h: b.h / 100,
-          rotation: 0, radius: 0, fill: bandPaint(b, palette.field),
+          rotation: 0, radius: 0, fill: bandPaint(b, palette[roleOf(b, 'field') ?? 'field']),
         }), 'rect', key, z)
         return
       }
@@ -312,10 +311,13 @@ export function elementsToOps(
         if (btnFill == null) return
         const key = keyFor('button')
         const radius = b.shape === 'pill' ? b.h / 2 / 100 : 0
+        // An outline (ruling R8): no fill, a stroke in the label's colour, 0.08 × the button's size.
+        const drawn = typeof btnFill === 'string' ? { fill: paint(btnFill) }
+          : { fill: 'none', stroke: btnFill.outline, strokeWidth: (0.08 * b.size) / 100 }
         own(createRectLayer({
           ...ownedBase(key, b),
           x: (b.x + b.w / 2) / 100, y: (b.y + b.h / 2) / S.H, w: b.w / 100, h: b.h / 100,
-          rotation: 0, radius, fill: paint(btnFill),
+          rotation: 0, radius, ...drawn,
         }), 'rect', key, z, radius || undefined)
         return
       }
@@ -358,13 +360,14 @@ export function elementsToOps(
           })
         } else if (targets.shape && c.role === 'shape') {
           const op: LayerOp = { target: targets.shape, kind: 'shape', x, y, w: d, h: d, rotation: 0, z, ...look(c) }
-          if (c.color) op.colorRole = c.color
+          const role = roleOf(c, c.color)
+          if (role) op.colorRole = role
           ops.push(op)
         } else if (c.role === 'shape' && targets.libraryShape) {
           ops.push(libraryOp(x, y, d, d, z, c))
         } else {
           const key = keyFor(c.role ?? 'circle')
-          own(createEllipseLayer({ ...ownedBase(key, c), x, y, w: d, h: d, fill: paint(c.color) }), 'ellipse', key, z)
+          own(createEllipseLayer({ ...ownedBase(key, c), x, y, w: d, h: d, fill: paint(roleOf(c, c.color)) }), 'ellipse', key, z)
         }
         return
       }
@@ -380,7 +383,8 @@ export function elementsToOps(
             x: (r.x + r.w / 2) / 100, y: (r.y + r.h / 2) / S.H, w: w / 100, h: h / 100, z, ...look(r),
           }
           op.rotation = r.rot ?? 0
-          if (r.color) op.colorRole = r.color
+          const role = roleOf(r, r.color)
+          if (role) op.colorRole = role
           ops.push(op)
           return
         }
@@ -392,7 +396,7 @@ export function elementsToOps(
         own(createRectLayer({
           ...ownedBase(key, r),
           x: (r.x + r.w / 2) / 100, y: (r.y + r.h / 2) / S.H, w: r.w / 100, h: r.h / 100,
-          rotation: r.rot ?? 0, radius: (r.radius ?? 0) / 100, fill: paint(r.color),
+          rotation: r.rot ?? 0, radius: (r.radius ?? 0) / 100, fill: paint(roleOf(r, r.color)),
         }), 'rect', key, z, r.radius ? r.radius / 100 : undefined)
         return
       }

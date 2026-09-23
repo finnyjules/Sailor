@@ -466,13 +466,15 @@ describe('elementsToOps — Stage 3 pieces: band, button, logo', () => {
     expect((elementsToOps([P.band('top', 0, 20)], P, targets, frame, palette).owned[0] as any).fill.angle).toBe(90)
   })
 
-  it('a button on black action text takes the role with the most contrast (the page colour)', () => {
+  it('a button on black action text takes the most-contrast role that stands out from the page (ruling R6)', () => {
     const { btn, text } = P.button('Shop now', 10, 50)
     const { ops, owned } = elementsToOps([btn, text], P, withAction, frame, palette, { actionColor: '#000000' })
     expect(owned).toHaveLength(1)
     const r = owned[0] as any
     expect(r.owner).toEqual({ by: 'layout', key: 'button-0' })
-    expect(r.fill).toBe(palette.field)
+    // The page colour has the most contrast (19.3:1) but is the page itself (1:1 against it): the
+    // accent is next (4.3:1 with the label, 4.3:1 against the page).
+    expect(r.fill).toBe(palette.accent)
     expect(r.radius).toBeCloseTo(btn.h / 2 / 100, 9)
     expect(r.w).toBeCloseTo(btn.w / 100, 9)
     expect(r.h).toBeCloseTo(btn.h / 100, 9)
@@ -492,14 +494,16 @@ describe('elementsToOps — Stage 3 pieces: band, button, logo', () => {
     expect((owned[0] as any).radius).toBe(0)
   })
 
-  it('action text that contrasts with no role becomes an underlined link: no rect', () => {
+  it('action text that contrasts with no role draws an outlined button (ruling R8); an unknown colour a link', () => {
     const grey = { field: '#777777', ink: '#808080', accent: '#707070' }
     const { btn, text } = P.button('Shop now', 10, 50)
     const { ops, owned } = elementsToOps([btn, text], P, withAction, frame, grey, { actionColor: '#7a7a7a' })
-    expect(owned).toEqual([])
-    expect(ops).toHaveLength(1)
-    expect(ops[0]!.target).toBe('a')
-    expect(ops[0]!.underline).toBe(true)
+    expect(owned).toHaveLength(1)
+    const r = owned[0] as any
+    expect(r.fill).toBe('none')
+    expect(r.stroke).toBe('#7a7a7a')
+    expect(r.strokeWidth).toBeCloseTo(0.08 * btn.size / 100, 9)
+    expect(ops.find(o => o.target === 'a')!.underline).toBeUndefined()
     // An unknown colour (a gradient) is a link too.
     const g = elementsToOps([btn, text], P, withAction, frame, palette, { actionColor: { type: 'linear', angle: 0, stops: [] } })
     expect(g.owned).toEqual([])

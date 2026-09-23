@@ -21,6 +21,8 @@ import type { Sheet, SheetOpts } from './sheet'
 import { makeCanvasMeasure } from './measure'
 import { boxOf, checkPlan } from './check'
 import { elementsToOps } from './toOps'
+import { pieceFills } from './contrast'
+import type { FillCtx, PieceFills } from './contrast'
 import type { RoleTargets } from './toOps'
 import { isOwned, mergeOwned } from './owned'
 import { enumerate, lineOptions } from './vary'
@@ -109,6 +111,8 @@ interface Prepared {
   style: StyleId
   /** The height (kit units) the layout composes on — for `wideOnly`. */
   composedH: number
+  /** What the contrast picker (ruling R6) reads: the palette, recolour, the user's own colours. */
+  fillCtx: FillCtx
 }
 
 /** Every text role a Frame can hold: the targets, the measure and the stored roles cover all of
@@ -148,13 +152,24 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
     const id = elements[r]?.id
     return layers.find(l => l.id === id && l.kind === 'text') as TextLayer | undefined
   }
+  // The action is measured in its own layer's face (a button grows with it).
   const measure = a.measure ?? makeCanvasMeasure({
     title: layerOf('title'), details: layerOf('details'), date: layerOf('date'), caption: layerOf('caption'),
+    action: layerOf('action'),
   })
   // The height the layout composes on: the band a format leaves uncovered, or the whole frame.
   const fullH = 100 * a.frameH / a.frameW
   const composedH = fmt?.keep ? fullH * (1 - fmt.keep.top - fmt.keep.bottom) : fullH
-  return { def, index, layers, elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props), fmt, hidden, style: a.style ?? 'swiss', composedH }
+  // Ruling R6: the colour each text is drawn in (the user's own, recolour off), and the user's own
+  // shape's fill (a layout's `shape` piece is drawn by that layer).
+  const colourOf = (id: string | undefined) => id ? (layers.find(l => l.id === id) as { color?: unknown } | undefined)?.color : undefined
+  const shapeLayer = targets.shape ? layers.find(l => l.id === targets.shape) as { fill?: unknown } | undefined : undefined
+  const fillCtx: FillCtx = {
+    palette: a.palette, recolour: a.recolour ?? false, hasAction: !!targets.action,
+    layerColour: role => (ROLES as string[]).includes(role) && targets[role as RoleKey] ? colourOf(targets[role as RoleKey]) ?? null : undefined,
+    ...(shapeLayer ? { shapeFill: shapeLayer.fill ?? null } : {}),
+  }
+  return { def, index, layers, elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props), fmt, hidden, style: a.style ?? 'swiss', composedH, fillCtx }
 }
 
 type FrameArgs = Pick<LayoutPlanArgs, 'props' | 'frameW' | 'frameH' | 'shapeMode' | 'imageMode' | 'style'>
@@ -389,11 +404,13 @@ interface Run { out: LayoutOut; S: Sheet; side: PhotoEl | null; keep?: KeepClear
  *  edge is the page's edge for the type, so a `bleed` premise holds when the role runs off the
  *  page OR runs under the side image (Run-off's title on a wide frame runs under the image, as
  *  in the prototype). Every other rule and premise is checked unchanged. */
-function checkRun({ out, S, side, keep, fullH, style }: Run, premise: LayoutDef['premise']): string[] {
+function checkRun({ out, S, side, keep, fullH, style }: Run, premise: LayoutDef['premise'], pf: PieceFills): string[] {
   const bleed = premise?.bleed ?? []
-  // Swiss (no style) checks exactly as in Stages 1–2; a style adds its own rules (rule 10).
-  const opts = keep || (style && style !== 'swiss')
-    ? { ...(keep ? { keep, fullH } : {}), ...(style && style !== 'swiss' ? { style } : {}) }
+  // Swiss (no style) checks exactly as in Stages 1–2; a style adds its own rules (rule 10). Rule 10
+  // reads the picker's buttons: only a filled one covers its label (an outline or a link does not).
+  const styled = style && style !== 'swiss'
+  const opts = keep || styled
+    ? { ...(keep ? { keep, fullH } : {}), ...(styled ? { style, btnFilled: (e: El) => typeof pf.fills.get(e) === 'string' } : {}) }
     : undefined
   const issues = !side || !bleed.length
     ? checkPlan(out.els, S, premise, opts)
@@ -414,8 +431,13 @@ function checkRun({ out, S, side, keep, fullH, style }: Run, premise: LayoutDef[
   // shared rules above.
   const styleCheck = style && style !== 'swiss' ? STYLES[style].check : undefined
   if (styleCheck) issues.push(...styleCheck(out.els, { W: S.W, H: S.H }, keep))
+  // Ruling R6: text must be readable on the piece it sits on.
+  issues.push(...pf.issues)
   return issues
 }
+
+/** The contrast picker over a run (ruling R6) — the one result the checker and toOps share. */
+const fillsOf = (p: Prepared, { out, S }: Run): PieceFills => pieceFills(out.els, S, p.fillCtx)
 
 const rolesOf = (el: FrameElements): StoredRoles => {
   const out: StoredRoles = {}
@@ -445,7 +467,8 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
   if (!p || !fitsFrame(p)) return null
   const ran = runChoice(p, a, a.choice)
   const { out, S } = ran
-  const issues = checkRun(ran, p.def.premise)
+  const pf = fillsOf(p, ran)
+  const issues = checkRun(ran, p.def.premise, pf)
 
   const libraryShape = p.targets.shape ? undefined : pickLibraryShape(p.elements.shapeMode, seedFor(p.index, a.choice))
   const targets = libraryShape ? { ...p.targets, libraryShape } : p.targets
@@ -457,6 +480,9 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
     if (a.recolour) pieces.recolour = true
   }
   if (out.els.some(e => e.k === 'logo') && p.content.logo) pieces.logo = p.content.logo
+  // The fills the check just read (ruling R6): only when a piece carries text, so a layout without
+  // one (every Swiss layout but Badge, Knockout and the panels) calls toOps exactly as before.
+  if (pf.fills.size) pieces.fills = pf.fills
   // A style layout may leave a line out (Strip: no details, no fine print). Its layer is hidden
   // like a level the format does not carry, rather than left where it was under the new layout.
   const notPlaced = notPlacedRoles(p, out.els, a.style)
@@ -491,11 +517,12 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
 
 /** The text roles in the (carried) content that no text element of the layout's output places
  *  (base role: `title2` counts as `title`; a ring is the title). Swiss (no style, or `'swiss'`):
- *  none — Stages 1–2 are untouched, and their layouts never place the action anyway. */
+ *  the action line only (ruling R9) — no Swiss layout places it, so it is hidden and quoted rather
+ *  than stranded where it was; every other Swiss line is as in Stages 1–2. */
 function notPlacedRoles(p: Prepared, els: El[], style: StyleId | undefined): RoleKey[] {
-  if (!style || style === 'swiss') return []
   const placed = new Set(els.filter(e => e.k === 't' || e.k === 'ring').map(e => (e.role ?? '').replace(/\d+$/, '')))
-  return ROLES.filter(r => p.content[r] != null && !placed.has(r))
+  const roles: RoleKey[] = !style || style === 'swiss' ? ['action'] : ROLES
+  return roles.filter(r => p.content[r] != null && !placed.has(r))
 }
 
 /** Apply a layout as ONE undo step: history → layers (pins of moved layers cleared) → groups →
@@ -518,18 +545,18 @@ export function applyLayoutToFrame(a: LayoutPlanArgs & { editor: LayoutEditor })
 export function candidatesForFrame(a: Omit<LayoutPlanArgs, 'choice'>): Candidate[] {
   const p = prepare(a)
   if (!p || !fitsFrame(p)) return []
-  const runs = new WeakMap<LayoutOut, Run>()
+  const runs = new WeakMap<LayoutOut, Run & { pf: PieceFills }>()
   // Each choice runs on its own sheet (scale/flip can differ) — so an element's box needs the
   // Sheet its own run built, not just any Sheet; keyed per element rather than per `LayoutOut`
   // because `enumerate`'s cover check (`vary.ts`) only ever hands us elements, not their `out`.
   const sheetOf = new WeakMap<El, Sheet>()
   const run = (choice: Choice) => {
     const ran = runChoice(p, a, choice)
-    runs.set(ran.out, ran)
+    runs.set(ran.out, { ...ran, pf: fillsOf(p, ran) })
     for (const e of ran.out.els) sheetOf.set(e, ran.S)
     return ran.out
   }
-  const check = (out: LayoutOut) => checkRun(runs.get(out)!, p.def.premise)
+  const check = (out: LayoutOut) => { const r = runs.get(out)!; return checkRun(r, p.def.premise, r.pf) }
   const format = formatSheetOpts(p.fmt)
   const infoSize = makeSheet({ frameW: a.frameW, frameH: a.frameH, grid: p.grid, measure: p.measure, ...(format ? { format } : {}), ...(a.style ? { style: a.style } : {}) }).INFO.size
   const box = (e: El) => {
@@ -540,7 +567,11 @@ export function candidatesForFrame(a: Omit<LayoutPlanArgs, 'choice'>): Candidate
   // passes no `rank` — candidatesForFrame's scores stay exactly Stage 1's.
   const styleRank = a.style && a.style !== 'swiss' ? STYLES[a.style].rank : undefined
   const W = 100, H = 100 * a.frameH / a.frameW
-  const rank = styleRank ? (out: LayoutOut) => styleRank(out, { infoSize, W, H, boxOf: box }) : undefined
+  // A button counts only when it is drawn (filled or outlined — ruling R8), not as a link.
+  const rank = styleRank ? (out: LayoutOut) => {
+    const fills = runs.get(out)?.pf.fills
+    return styleRank(out, { infoSize, W, H, boxOf: box, drawn: e => (fills ? fills.get(e) != null : true) })
+  } : undefined
   return enumerate(p.def, { kind: p.kind, title: p.content.title, hasImage: p.hasImage, run, check, infoSize, boxOf: box, rank })
 }
 

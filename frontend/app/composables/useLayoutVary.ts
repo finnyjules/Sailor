@@ -10,7 +10,7 @@ import { STYLES } from '~/lib/frame/patterns/kit/styles'
 import type { StyleId } from '~/lib/frame/patterns/kit/styles'
 import type { LocalLayer, TextLayer } from '~/composables/useCompositorLayers'
 import type { BrandKit } from '~~/shared/brand/types'
-import { brandLogoUrl } from '~~/shared/brand/resolve'
+import { brandLogoUrl, effectiveBrand } from '~~/shared/brand/resolve'
 import { inputNameFromViewUrl } from '~~/shared/brand/assets'
 import { uploadBrandImage } from '~/lib/brand/upload'
 import type { PosterState } from '~/lib/frame/patterns/applyToFrame'
@@ -373,10 +373,17 @@ export function useLayoutVary(src: LayoutVarySource): {
     resolveLogo(key)
   }, { immediate: true })
 
+  // The brand kit's accent (ruling R7): the accent of a Frame with no shape colour of its own, the
+  // way the kit's logo is offered. Read only while the tab is showing.
+  const brandAccent = computed<string | undefined>(() => {
+    if (!isActive() || !src.brandKit) return undefined
+    return effectiveBrand(undefined, src.brandKit())?.accent || undefined
+  })
+
   function baseArgs(): Omit<LayoutPlanArgs, 'choice' | 'layoutId'> {
     const raw = toRaw(src.props())
     const props = raw ? { ...raw } : undefined
-    const palette = paletteMode.value ? rolesFromFamily({ hexes: [...paletteMode.value] }) : paletteFromFrame(props)
+    const palette = paletteMode.value ? rolesFromFamily({ hexes: [...paletteMode.value] }) : paletteFromFrame(props, brandAccent.value)
     const logo = brandLogo.value
     return {
       props, frameW: src.frameW(), frameH: src.frameH(), palette, recolour: paletteMode.value != null,
@@ -385,7 +392,7 @@ export function useLayoutVary(src: LayoutVarySource): {
       ...(logo ? { brandLogo: { ...logo } } : {}),
     }
   }
-  const planKey = computed(() => JSON.stringify([settledKey.value, fontRev.value, paletteMode.value, shapeMode.value ?? null, imageMode.value, style.value, brandLogo.value ?? null]))
+  const planKey = computed(() => JSON.stringify([settledKey.value, fontRev.value, paletteMode.value, shapeMode.value ?? null, imageMode.value, style.value, brandLogo.value ?? null, brandAccent.value ?? null]))
   /** Bumped when the Frame was re-arranged as a whole: an apply from here (bumped directly, so a
    *  host with plain props still re-plans), or anything that writes a new draw order — apply,
    *  undo, redo, a layer reorder. Identity only, never deep: a drag writes no order. */

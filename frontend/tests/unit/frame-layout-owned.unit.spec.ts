@@ -112,6 +112,28 @@ describe('undo / redo restore the layout record (M1)', () => {
     expect(props.sailor_posterState).toMatchObject({ patternId: 'index', seed: 9, index: 3, roles: { title: 't' }, shapeMode: { id: 'circle' } })
   })
 
+  it('fix wave I7: an undo of a Performance apply puts back the stored style; a redo brings it back', () => {
+    const { node, ed } = makeEditor([createRectLayer({ id: 'r' })])
+    const props = node.data.properties as any
+    props.sailor_posterState = { patternId: 'runoff', seed: 1, choice: { lines: 0, arr: 0, scale: 'full', side: 'right' }, index: 0, style: 'swiss' }
+    ed.recordHistory()                                        // the apply's undo step
+    ed.commit([createRectLayer({ id: 'r', x: 0.2 })])
+    // …then the tab remembers what it applied (outside the undo step), the style with it.
+    props.sailor_posterState = { ...props.sailor_posterState, patternId: 'perfOffer', seed: 4209, index: 0, style: 'performance' }
+    ed.undo()
+    expect(props.sailor_posterState).toMatchObject({ patternId: 'runoff', style: 'swiss' })
+    ed.redo()
+    expect(props.sailor_posterState).toMatchObject({ patternId: 'perfOffer', style: 'performance' })
+    // A Frame whose first apply was Performance: undo leaves no style behind.
+    const fresh = makeEditor([createRectLayer({ id: 'r' })])
+    const fp = fresh.node.data.properties as any
+    fresh.ed.recordHistory()
+    fresh.ed.commit([createRectLayer({ id: 'r', x: 0.3 })])
+    fp.sailor_posterState = { patternId: 'perfOffer', seed: 4209, index: 0, style: 'performance' }
+    fresh.ed.undo()
+    expect(fp.sailor_posterState?.style).toBeUndefined()
+  })
+
   it('a Frame that never had a layout gets no posterState from an undo', () => {
     const { node, ed } = makeEditor([createRectLayer({ id: 'r' })])
     ed.recordHistory()

@@ -845,7 +845,8 @@ describe('planLayout — the action line and the brand logo (Stage 3)', () => {
 
   // The ONE intended Swiss change of Stage 3: an action line is no longer read as the caption (or
   // the details). No Swiss layout reads `action`, so the other four lines are placed exactly as on
-  // the same Frame without the action line, and the action layer is left as it was.
+  // the same Frame without the action line. Ruling R9: the action layer is hidden (tracked, so a
+  // later style layout that places it shows it again) and quoted as not placed.
   it('Swiss, every layout: a Frame with an action line places the other four exactly as without it', () => {
     let compared = 0
     for (const l of LAYOUTS) for (const image of [false, true]) {
@@ -859,7 +860,9 @@ describe('planLayout — the action line and the brand logo (Stage 3)', () => {
       expect(withA.did, tag).toBe(without.did)
       expect(withA.issues, tag).toEqual(without.issues)
       expect(withA.layers.filter(x => x.id !== 'a'), tag).toEqual(without.layers)
-      expect(withA.layers.find(x => x.id === 'a'), tag).toEqual(layersWith.find(x => x.id === 'a'))
+      expect(withA.layers.find(x => x.id === 'a'), tag).toEqual({ ...layersWith.find(x => x.id === 'a'), visible: false, layoutPrev: { visible: { was: null, set: false } } })
+      expect(withA.notPlaced, tag).toEqual([{ role: 'action', text: 'Shop now' }])
+      expect(without.notPlaced, tag).toEqual([])
       expect(withA.order.filter(k => k !== localStackKey('a')), tag).toEqual(without.order)
       expect(withA.posterState.roles, tag).toEqual({ ...without.posterState.roles, action: 'a' })
     }
@@ -952,7 +955,8 @@ describe('planLayout — band, button and logo (Stage 3)', () => {
     const plan = planLayout(args({ layoutId: 't-pieces', props: props(layersWith()), style: 'performance', brandLogo }))!
     const owned = plan.layers.filter(l => (l as any).owner?.by === 'layout') as any[]
     expect(owned.map(l => l.owner.key).sort()).toEqual(['band-0', 'button-0', 'logo-0'])
-    expect(owned.find(l => l.owner.key === 'button-0').fill).toBe(palette.field)   // dark text → the page colour
+    // Dark text: the page colour reads best but is the page itself — the accent stands out (R6).
+    expect(owned.find(l => l.owner.key === 'button-0').fill).toBe(palette.accent)
     expect(owned.find(l => l.owner.key === 'logo-0').filename).toBe('brand/logo.png')
     expect(owned.find(l => l.owner.key === 'band-0').fill.stops[1].color).toBe('rgba(242, 240, 239, 0.94)')
     // The user's action text keeps its colour (recolour off).
@@ -962,13 +966,15 @@ describe('planLayout — band, button and logo (Stage 3)', () => {
     expect(plan.issues).toEqual(['title: sits on the raw image'])
   })
 
-  it('an action colour no role contrasts with draws a link instead', () => {
+  it('an action colour no role contrasts with draws an outlined button (ruling R8)', () => {
     unregister.push(__registerLayoutForTest(piecesLayout('t-pieces-link')))
     const grey = { field: '#777777', ink: '#808080', accent: '#707070' }
     const plan = planLayout(args({ layoutId: 't-pieces-link', props: props(layersWith('#7a7a7a')), style: 'performance', brandLogo, palette: grey }))!
     const keys = plan.layers.filter(l => (l as any).owner?.by === 'layout').map(l => (l as any).owner.key).sort()
-    expect(keys).toEqual(['band-0', 'logo-0'])
-    expect((plan.layers.find(l => l.id === 'a') as any).underline).toBe(true)
+    expect(keys).toEqual(['band-0', 'button-0', 'logo-0'])
+    const b = plan.layers.find(l => (l as any).owner?.key === 'button-0') as any
+    expect([b.fill, b.stroke]).toEqual(['none', '#7a7a7a'])
+    expect((plan.layers.find(l => l.id === 'a') as any).underline).toBeUndefined()
   })
 
   it('without the band the caption sits on the raw image (the action is on its own button)', () => {

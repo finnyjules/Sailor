@@ -796,4 +796,18 @@ describe('useLayoutVary — fix round 1', () => {
     vary.setStyle('street'); await nextTick(); await new Promise(r => setTimeout(r, 0))
     expect(resolveImage).toHaveBeenCalledTimes(2)
   })
+
+  it('ruling R7: a Frame with no shape colour plans with the brand kit\'s accent; without a kit, the pool\'s', async () => {
+    const editor = { recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn(), writeGroups: vi.fn() }
+    const mk = (kit: object | undefined) => useLayoutVary({ props: () => ({ sailor_localLayers: frameLayers() }), frameW: () => 895, frameH: () => 1280, connectedSlots: () => [], editor: () => editor, remember: vi.fn(), measure: makeStubMeasure(), brandKit: () => kit as never, resolveImage: vi.fn(async () => null) })
+    vi.mocked(planLayout).mockClear()
+    const withKit = mk({ accent: '#2b59c3' })
+    withKit.setStyle('performance'); await nextTick()
+    expect(vi.mocked(planLayout).mock.calls.length).toBeGreaterThan(0)
+    expect(vi.mocked(planLayout).mock.calls.at(-1)![0].palette.accent).toBe('#2b59c3')
+    vi.mocked(planLayout).mockClear()
+    const noKit = mk(undefined)
+    noKit.setStyle('performance'); await nextTick()
+    expect(vi.mocked(planLayout).mock.calls.at(-1)![0].palette.accent).toBe('#e1251b')
+  })
 })

@@ -290,11 +290,11 @@ export function useLocalLayerEditor(opts: EditorOpts) {
   // `frameSize`: the Frame section's size + Responsive (lib/frame/frameSize) — output, so it undoes.
   // Absent for a node without size widgets, and restored only when present.
   // `layout`: the Layout tab's record of the layout applied (`sailor_posterState` — which layout,
-  // which variation, which layer holds which role), so an undo or redo of an apply leaves the tab
+  // which variation, which layer holds which role, which style), so an undo or redo of an apply leaves the tab
   // on the layout the Frame now shows. Its picker settings (shape, image, palette) are settings,
   // not edits, and are never rewound.
   type LayoutSnap = Record<string, unknown>
-  const LAYOUT_KEYS = ['patternId', 'seed', 'choice', 'index', 'roles'] as const
+  const LAYOUT_KEYS = ['patternId', 'seed', 'choice', 'index', 'roles', 'style'] as const
   function readLayoutSnap(): LayoutSnap {
     const st = (node()?.data?.properties as any)?.sailor_posterState as Record<string, unknown> | undefined
     const out: LayoutSnap = {}
