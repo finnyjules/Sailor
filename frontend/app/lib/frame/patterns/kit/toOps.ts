@@ -22,6 +22,10 @@ import type { RoleKey } from './types'
 
 export interface RoleTargets {
   title?: string; details?: string; date?: string; caption?: string; action?: string; image?: string; shape?: string
+  /** Stage 4 content roles (`kit/content.ts`): the layer holding each, when the Frame has it. */
+  quote?: string; by?: string; rating?: string; list?: string; stat?: string; statline?: string; them?: string
+  /** The second image layer (document order, or tagged). */
+  image2?: string
   /** The shape layer's kind. A `path` layer sizes from one uniform scale (apply writes
    *  `scale = w / bbox.w`), so it cannot take a non-square box; the others take `w` × `h`. */
   shapeKind?: string

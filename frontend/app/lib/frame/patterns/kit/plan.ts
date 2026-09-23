@@ -27,8 +27,10 @@ import type { RoleTargets } from './toOps'
 import { isOwned, mergeOwned } from './owned'
 import { enumerate, lineOptions } from './vary'
 import type { Candidate, Choice, LineOption } from './vary'
-import type { BrandLogo, Content, El, Kind, LayoutDef, LayoutOut, Measure, PhotoEl, RoleKey } from './types'
+import type { BrandLogo, Content, El, FaceKey, Kind, LayoutDef, LayoutOut, Measure, PhotoEl, RoleKey } from './types'
 import { STYLES } from './styles'
+import { BASE_ROLES, elementsOf, NEW_TEXT_ROLES, readContent } from './content'
+import type { ContentTags, ReadContent } from './content'
 import type { StyleId } from './styles'
 
 // ═══════════════════════ the planner ═══════════════════════
@@ -106,18 +108,25 @@ interface Prepared {
   /** The Frame's format (Stage 2), or null — then everything runs exactly as in Stage 1. */
   fmt: FrameFormat | null
   /** Roles on the Frame the format does not carry: removed from `content`, their layers hidden. */
-  hidden: RoleKey[]
+  hidden: FaceKey[]
   /** The style asked for (absent: `'swiss'`): only its own layouts fit. */
   style: StyleId
   /** The height (kit units) the layout composes on — for `wideOnly`. */
   composedH: number
   /** What the contrast picker (ruling R6) reads: the palette, recolour, the user's own colours. */
   fillCtx: FillCtx
+  /** The Frame's content (Stage 4, `kit/content.ts`) in the view the layout reads (ruling C2). */
+  read: ReadContent
+  /** The base view's elements (ruling C2): what `posterState.roles` stores, whatever the view, so
+   *  applying a Stage 4 layout never changes how the other layouts read the Frame. */
+  baseElements: FrameElements
 }
 
 /** Every text role a Frame can hold: the targets, the measure and the stored roles cover all of
  *  them. Level order (which a format keeps) is the style's `levels`, not this list. */
-const ROLES: RoleKey[] = ['title', 'details', 'date', 'caption', 'action']
+const ROLES: FaceKey[] = ['title', 'details', 'date', 'caption', 'action']
+/** Every role a text layer can hold (Stage 4 adds the content roles; they are not levels). */
+const TEXT_ROLES: RoleKey[] = [...ROLES, ...NEW_TEXT_ROLES]
 
 /** Re-exported so existing importers keep working; the one copy lives in `hierarchy.ts`
  *  (which `inferElements` also needs it in, and can't import from here without a cycle). */
@@ -128,10 +137,21 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
   if (!entry) return null
   const { def, index } = entry
   const layers = (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? []
-  const elements = frameElements(a, layers)
+  // Ruling C2: a Stage 4 layout (`needsContent`) reads the content view; every other layout reads
+  // the base view — the Stage 1–3 roles exactly as before, whatever the Frame's new content.
+  const views = readFrame(a, layers)
+  const contentView = def.needsContent != null
+  const { elements, read } = contentView ? views.content : views.base
   if (!elements.title) return null
   const content = contentOf(elements)
   if (a.brandLogo) content.logo = { ...a.brandLogo }
+  // Stage 4 content shapes (not levels: a format's `carries` never hides them).
+  if (contentView) {
+    if (read.review) content.review = read.review
+    if (read.list) content.list = read.list
+    if (read.compare) content.compare = read.compare
+    if (read.stat) content.stat = read.stat
+  }
   // Levels (Stage 2): a format that carries N levels keeps the first N of the lines the Frame
   // has, in the style's level order (Swiss: title → details → date → action → caption); the rest
   // leave the content before the layout runs, and their layers are hidden.
@@ -141,7 +161,13 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
   const kind = kindOf(elements.title.words.length) as Kind
   const targets: RoleTargets = {}
   for (const r of ROLES) if (elements[r]) targets[r] = elements[r]!.id
-  if (elements.images[0]) targets.image = elements.images[0].id
+  if (contentView) {
+    for (const r of NEW_TEXT_ROLES) if (read.roles[r]) targets[r] = read.roles[r]
+    // The first image is the one that is not the second (a tag can name any image the second).
+    const firstImage = elements.images.find(i => i.id !== read.roles.image2)
+    if (firstImage) targets.image = firstImage.id
+    if (read.roles.image2) targets.image2 = read.roles.image2
+  } else if (elements.images[0]) targets.image = elements.images[0].id
   if (elements.shapes[0]) {
     targets.shape = elements.shapes[0].id
     const kind = layers.find(l => l.id === targets.shape)?.kind
@@ -149,12 +175,15 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
   }
   const hasImage = elements.images.length > 0 || elements.imageMode
   const layerOf = (r: RoleKey) => {
-    const id = elements[r]?.id
-    return layers.find(l => l.id === id && l.kind === 'text') as TextLayer | undefined
+    const id = targets[r]
+    return id ? layers.find(l => l.id === id && l.kind === 'text') as TextLayer | undefined : undefined
   }
-  // The action is measured in its own layer's face (a button grows with it).
+  // The action is measured in its own layer's face (a button grows with it). Stage 4 roles are
+  // measured in the details face (quote, stat) or the caption face (the rest — `faceOf`): with no
+  // details or caption layer of its own, that face is the content line's layer.
   const measure = a.measure ?? makeCanvasMeasure({
-    title: layerOf('title'), details: layerOf('details'), date: layerOf('date'), caption: layerOf('caption'),
+    title: layerOf('title'), details: layerOf('details') ?? layerOf('quote') ?? layerOf('stat'), date: layerOf('date'),
+    caption: layerOf('caption') ?? layerOf('by') ?? layerOf('list') ?? layerOf('statline') ?? layerOf('rating') ?? layerOf('them'),
     action: layerOf('action'),
   })
   // The height the layout composes on: the band a format leaves uncovered, or the whole frame.
@@ -166,21 +195,60 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
   const shapeLayer = targets.shape ? layers.find(l => l.id === targets.shape) as { fill?: unknown } | undefined : undefined
   const fillCtx: FillCtx = {
     palette: a.palette, recolour: a.recolour ?? false, hasAction: !!targets.action,
-    layerColour: role => (ROLES as string[]).includes(role) && targets[role as RoleKey] ? colourOf(targets[role as RoleKey]) ?? null : undefined,
+    layerColour: role => (TEXT_ROLES as string[]).includes(role) && targets[role as RoleKey] ? colourOf(targets[role as RoleKey]) ?? null : undefined,
     ...(shapeLayer ? { shapeFill: shapeLayer.fill ?? null } : {}),
   }
-  return { def, index, layers, elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props), fmt, hidden, style: a.style ?? 'swiss', composedH, fillCtx }
+  return { def, index, layers, elements, baseElements: views.base.elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props), fmt, hidden, style: a.style ?? 'swiss', composedH, fillCtx, read }
 }
 
 type FrameArgs = Pick<LayoutPlanArgs, 'props' | 'frameW' | 'frameH' | 'shapeMode' | 'imageMode' | 'style'>
 
+interface View { elements: FrameElements; read: ReadContent }
+
 /** Which of the Frame's layers holds which role: size inference over the user's own layers, then
  *  the roles the last apply stored. A layout's own pieces (bands, rules, dots) are not the user's
- *  shapes: inference reads the user's layers only. */
-function frameElements(a: FrameArgs, layers: LocalLayer[]): FrameElements {
+ *  shapes: inference reads the user's layers only.
+ *
+ *  Stage 4 — two views (ruling C2), the user's tags (`sailor_posterState.tags`) winning in both:
+ *  - BASE: the Stage 1–3 roles exactly as before. Only base-role tags and `'unused'` apply (those
+ *    layers are left out of size inference and the stored roles); nothing is recognised. Every
+ *    layout without `needsContent` reads it.
+ *  - CONTENT: every tag applies, R2 recognition runs, and the lines claimed as new content leave
+ *    their base roles, which are re-inferred from the remaining lines. Stage 4 layouts read it.
+ *  With no tags the base view is exactly Stage 3's; with none of the new content either, the two
+ *  views agree. */
+function readFrame(a: FrameArgs, layers: LocalLayer[]): { base: View; content: View } {
   const userLayers = layers.filter(l => !isOwned(l as { owner?: { by: string } }))
-  const inferred = inferElements(posterLayerViews({ ...a.props, sailor_localLayers: userLayers }), a.shapeMode ?? null, a.imageMode ?? false)
-  return withStoredRoles(inferred, userLayers, (a.props?.sailor_posterState as { roles?: StoredRoles } | undefined)?.roles)
+  const st = a.props?.sailor_posterState as { roles?: StoredRoles; tags?: ContentTags } | undefined
+  const tags = st?.tags && Object.keys(st.tags).length ? st.tags : undefined
+  // Base-role tags and 'unused' settle a layer in both views; new-content tags only in the content view.
+  const baseSettled = new Set(Object.entries(tags ?? {})
+    .filter(([, t]) => t === 'unused' || (BASE_ROLES as readonly string[]).includes(t)).map(([id]) => id))
+  const inferWithout = (out: Set<string>): FrameElements => {
+    const kept = out.size ? userLayers.filter(l => !out.has(l.id)) : userLayers
+    return withStoredRoles(
+      inferElements(posterLayerViews({ ...a.props, sailor_localLayers: kept }), a.shapeMode ?? null, a.imageMode ?? false),
+      kept, st?.roles)
+  }
+  const inferred = inferWithout(baseSettled)
+  const baseRead = readContent(userLayers, inferred, tags, { view: 'base' })
+  const read = readContent(userLayers, inferred, tags, {
+    reinfer: claimed => inferWithout(new Set([...baseSettled, ...claimed])),
+  })
+  return {
+    base: { elements: elementsOf(baseRead, inferred, userLayers), read: baseRead },
+    content: { elements: elementsOf(read, inferred, userLayers), read },
+  }
+}
+
+/** The base view's elements (ruling C2) — what every Stage 1–3 reader of the Frame uses. */
+const frameElements = (a: FrameArgs, layers: LocalLayer[]): FrameElements => readFrame(a, layers).base.elements
+
+/** The Frame's content as the Stage 4 layouts read it (the content view, ruling C2): which layer
+ *  holds which role — the Stage 1–3 roles and the content roles — and the review / list /
+ *  comparison / stat it makes. */
+export function contentForFrame(a: FrameArgs): ReadContent {
+  return readFrame(a, (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? []).content.read
 }
 
 /** The text a layout places, by role. The title's words re-joined: the layout does its own line
@@ -199,8 +267,9 @@ function contentOf(elements: FrameElements): Content {
  *  action one more level after the date), those past its `carries` (a two-line Frame on a
  *  two-level format hides nothing). None without a format, or when the format carries every level
  *  (`carries` absent). */
-function hiddenRoles(fmt: FrameFormat | null, content: Content, style: StyleId = 'swiss'): RoleKey[] {
+function hiddenRoles(fmt: FrameFormat | null, content: Content, style: StyleId = 'swiss'): FaceKey[] {
   if (!fmt || fmt.carries == null) return []
+  // Levels are the Stage 1–3 text roles only (the Stage 4 content roles are never levels).
   return STYLES[style].levels.filter(r => content[r] != null).slice(fmt.carries)
 }
 
@@ -245,7 +314,7 @@ function withStoredRoles(inferred: FrameElements, userLayers: LocalLayer[], stor
     const t = l?.text ?? ''
     return t.trim() ? t : null
   }
-  const kept = new Map<RoleKey, string>()
+  const kept = new Map<FaceKey, string>()
   for (const r of ROLES) {
     const id = stored[r]
     if (!id || text(id) == null) continue
@@ -509,7 +578,7 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
   const order = nextOrderFor(saved, present, ops, p.elements, ins.inserted)
   return {
     layers: next, order, did: out.did, issues,
-    posterState: { patternId: p.def.id, seed: seedFor(p.index, a.choice), choice: { ...a.choice }, roles: rolesOf(p.elements) },
+    posterState: { patternId: p.def.id, seed: seedFor(p.index, a.choice), choice: { ...a.choice }, roles: rolesOf(p.baseElements) },
     format: p.fmt ? { id: p.fmt.id, label: p.fmt.label, hidden: [...p.hidden] } : null,
     notPlaced: notPlaced.map(role => ({ role, text: p.content[role] as string })),
   }
@@ -519,9 +588,9 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
  *  (base role: `title2` counts as `title`; a ring is the title). Swiss (no style, or `'swiss'`):
  *  the action line only (ruling R9) — no Swiss layout places it, so it is hidden and quoted rather
  *  than stranded where it was; every other Swiss line is as in Stages 1–2. */
-function notPlacedRoles(p: Prepared, els: El[], style: StyleId | undefined): RoleKey[] {
+function notPlacedRoles(p: Prepared, els: El[], style: StyleId | undefined): FaceKey[] {
   const placed = new Set(els.filter(e => e.k === 't' || e.k === 'ring').map(e => (e.role ?? '').replace(/\d+$/, '')))
-  const roles: RoleKey[] = !style || style === 'swiss' ? ['action'] : ROLES
+  const roles: FaceKey[] = !style || style === 'swiss' ? ['action'] : ROLES
   return roles.filter(r => p.content[r] != null && !placed.has(r))
 }
 

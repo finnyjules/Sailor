@@ -3,7 +3,13 @@ import type { StyleId } from './styles'
 
 // Layout kit types. Units: percent of frame width (W = 100, H = 100 × frameH / frameW).
 
+/** A text role: the four levels and the action (Stages 1–3), and the Stage 4 content roles (a
+ *  review's `quote`/`by`/`rating`, a `list`, a `stat` and its `statline`, a comparison's `them`).
+ *  Only the first five are measured faces and levels a format carries (`faceOf`, `styles.ts`). */
 export type RoleKey = 'title' | 'details' | 'date' | 'caption' | 'action'
+  | 'quote' | 'by' | 'rating' | 'list' | 'stat' | 'statline' | 'them'
+/** The roles that have a face of their own (the Stage 1–3 text roles). */
+export type FaceKey = 'title' | 'details' | 'date' | 'caption' | 'action'
 export type Colour = 'ink' | 'accent' | 'field'
 /** Text style. `role` picks whose face is measured (the user's real family/weight). */
 export interface Style { role?: RoleKey; size?: number; wt?: number; ls: number; lh: number
@@ -37,9 +43,15 @@ export interface Content { title: string; details?: string; date?: string; capti
   /** The action line's text ("Shop now") — ruling S3. No Swiss layout reads it. */
   action?: string
   /** The project's brand kit logo — ruling S2. No Swiss layout reads it. */
-  logo?: BrandLogo }
-/** The content keys that hold a line of text (every key but `logo`). */
-export type TextKey = Exclude<keyof Content, 'logo'>
+  logo?: BrandLogo
+  /** Stage 4 content shapes (`kit/content.ts`, ruling R2): present only when the Frame has them. */
+  review?: { stars?: number; quote: string; by?: string }
+  /** The list's items, markers stripped (the user's layer keeps them). */
+  list?: string[]
+  compare?: { them: string; rows: { label: string; us: boolean; them: boolean }[] }
+  stat?: { value: string; line?: string } }
+/** The content keys that hold a line of text (every key but the logo and the Stage 4 shapes). */
+export type TextKey = Exclude<keyof Content, 'logo' | 'review' | 'list' | 'compare' | 'stat'>
 export type Kind = 'word' | 'phrase' | 'sentence'
 export interface LayoutCtx { c: Content; kind: Kind; ph: boolean; r: () => number; words: string[]; lines: string[]; arr: number }
 export interface LayoutOut { els: El[]; did: string }
@@ -48,6 +60,10 @@ export interface LayoutDef {
   /** The style the layout belongs to. Absent: `'swiss'`. */
   style?: StyleId
   needs?: { image?: boolean; shape?: boolean; number?: boolean }
+  /** Stage 4 (ruling C2): the layout reads the Frame's CONTENT view (lines claimed as a quote, a
+   *  list, a stat… leave their base roles). Absent: the base view — the Stage 1–3 roles exactly.
+   *  The content kinds it needs gate it in `fitsFrame` (Task 4). */
+  needsContent?: ('number' | 'stat' | 'review' | 'compare' | 'list' | 'image2')[]
   oneLineFirst?: boolean; keepScale?: boolean; ownPhoto?: boolean
   /** Built around the smaller text (the prototype's list): does not fit a format that carries
    *  fewer than three levels. */
@@ -73,10 +89,12 @@ export interface Measure {
 
 /** The face an element is measured in, from its `role`: `details`/`date`/`caption`/`title`/
  *  `action` map to themselves (a measure with no action layer measures it in the caption's face);
+ *  Stage 4: `quote` and `stat` → `details`; `by`, `rating`, `list`, `statline`, `them` → `caption`;
  *  `info` and anything else map to `caption` (the info face). */
-export function faceOf(role: string | undefined): RoleKey {
+export function faceOf(role: string | undefined): FaceKey {
   // `title1`, `title2` … are further lines of the same layer: measure them in its face.
   const base = role?.replace(/\d+$/, '')
+  if (base === 'quote' || base === 'stat') return 'details'
   return base === 'title' || base === 'details' || base === 'date' || base === 'caption' || base === 'action' ? base : 'caption'
 }
 
