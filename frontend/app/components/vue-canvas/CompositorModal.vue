@@ -134,6 +134,13 @@ import MotionBandTimeline from '~/components/vue-canvas/compositor/MotionBandTim
 import MotionGallery from '~/components/vue-canvas/compositor/MotionGallery.vue'
 import MotionInspector from '~/components/vue-canvas/compositor/MotionInspector.vue'
 import MotionCopiesPanel from '~/components/vue-canvas/compositor/MotionCopiesPanel.vue'
+import FrameWebExportSheet from '~/components/vue-canvas/compositor/FrameWebExportSheet.vue'
+import { planFrameExport, layerLabel } from '~/lib/embed/frame/plan'
+import { buildFrameSnapshot, isBlocked, formatBytes } from '~/lib/embed/frame/gather'
+import { createAppFrameExportIO } from '~/lib/embed/frame/appIO'
+import type { FrameFit, FrameNotice, FrameVariant } from '~/lib/embed/frame/types'
+import { embedSnippet } from '~/lib/embed/snippet'
+import { exportEmbedHtml, downloadEmbed } from '~/lib/embed/export'
 import { behavioursForMove, defaultDurationForMove, type GalleryMove } from '~/lib/motionx/gallery'
 import AddImageSourcePopover from '~/components/vue-canvas/compositor/AddImageSourcePopover.vue'
 import CompositorClonerPanel from '~/components/vue-canvas/compositor/CompositorClonerPanel.vue'
@@ -238,6 +245,7 @@ function onBackdropClick() { if (backdropCloseArmed.value) emit('close'); backdr
 
 const { ensure: ensureGoogleFont } = useGoogleFontPreview()
 const { ensure: ensureLibraryFont } = useLibraryFonts()
+const uploadedFonts = useUploadedFonts().fonts
 
 // Record generated stills/videos as the current project's assets (Assets panel)
 // — mirrors GradientStudioSurface's "outputs" idiom exactly.
@@ -4466,6 +4474,83 @@ async function generateImage() {
   }
 }
 
+// ── Web export: one HTML file that plays this Frame live (FrameWebExportSheet) ──
+const webExport = reactive({
+  open: false, state: 'working' as 'working' | 'ready' | 'blocked' | 'error',
+  notices: [] as FrameNotice[], bytes: 0, fit: 'fit' as FrameFit, transparent: false, still: false,
+  html: '', errorText: '', artAspect: 1,
+})
+const webExportNotice = ref('')
+let webExportGen = 0
+
+function webExportVariant(): FrameVariant {
+  const { W, H } = bakeSize()
+  const motion = hasMotion.value ? effectiveMotion.value : null
+  // A deep copy through JSON: the snapshot must not alias reactive editor state.
+  return JSON.parse(JSON.stringify({
+    width: W, height: H, layers: localLayers.value, stackOrder: stackKeys.value, groups: localGroups.value,
+    background: background.value ?? null, post: postEffects.value ?? [], motion, wiredTreatments: wiredTreatments.value ?? {},
+  }))
+}
+
+async function buildWebExport() {
+  const gen = ++webExportGen
+  webExport.state = 'working'
+  try {
+    const cat = await fetchShaderFxCatalog()
+    const variant = webExportVariant()
+    webExport.artAspect = variant.width / variant.height
+    // A wired layer's `slot` is 0-based; the modal's per-slot records (`layers`) number from 1 —
+    // the same offset wiredContentForSlot applies. `live.duration > 0` is exactly hasAnimatedSlot's test.
+    const wiredSlots = variant.layers.filter(l => l.kind === 'wired').map((l) => {
+      const slot = (l as { slot: number }).slot
+      const live = layers.value.find(x => x.slot === slot + 1)?.live
+      return { slot, layerId: l.id, label: layerLabel(l), animated: !!live && live.duration > 0 }
+    })
+    const plan = planFrameExport({
+      variant, fit: webExport.fit, wiredSlots, catalogIds: new Set(cat.effects.map(e => e.id)),
+      hasMotion: hasMotion.value, animatedFill: hasAnimatedShaderFill(buildStackItems(), background.value),
+    })
+    const io = createAppFrameExportIO({ uploaded: uploadedFonts.value, wiredStill: wiredContentForSlot, catalog: cat.effects })
+    const snap = await buildFrameSnapshot(plan, variant, io)
+    if (gen !== webExportGen) return
+    webExport.notices = snap.notices
+    webExport.still = snap.still
+    if (isBlocked(snap)) { webExport.state = 'blocked'; webExport.html = ''; return }
+    const transparent = webExport.transparent && variant.background == null
+    const html = await exportEmbedHtml({
+      kind: 'frame', config: snap, duration: snap.duration, width: variant.width, height: variant.height,
+      transparent, framing: 'box', posterFit: webExport.fit === 'fill' ? 'cover' : 'contain', still: snap.still,
+      backdrop: typeof variant.background === 'string' ? variant.background : undefined,
+    })
+    if (gen !== webExportGen) return
+    webExport.html = html
+    webExport.bytes = new Blob([html]).size
+    webExport.state = 'ready'
+  } catch (err) {
+    if (gen !== webExportGen) return
+    console.error('[Frame] web export failed', err)
+    webExport.state = 'error'
+    webExport.errorText = 'The export couldn\'t be built. Try again, or reload the Frame editor.'
+  }
+}
+
+function openWebExport() { webExport.open = true; webExport.transparent = false; webExportNotice.value = ''; void buildWebExport() }
+function closeWebExport() { webExport.open = false; webExportGen++ }
+function setWebExportFit(f: FrameFit) { webExport.fit = f; void buildWebExport() }
+function setWebExportTransparent(on: boolean) { webExport.transparent = on; void buildWebExport() }
+function downloadWebExport() {
+  if (webExport.state !== 'ready') return
+  downloadEmbed('sailor-frame.html', webExport.html)
+  renderError.value = ''
+  webExport.open = false
+  webExportNotice.value = `Downloaded · ${formatBytes(webExport.bytes)}`
+}
+async function copyWebExportSnippet() {
+  const { W, H } = bakeSize()
+  await navigator.clipboard.writeText(embedSnippet('sailor-frame.html', W, H))
+}
+
 async function generateVideo() {
   const node = compositor.value
   if (!node || rendering.value || baking.value || encoding.value || exportingVideo.value || !hasMotion.value) return
@@ -8474,6 +8559,16 @@ onUnmounted(() => {
       <StudioButton variant="subtle" @click="dismissTemplateUpdates">Dismiss</StudioButton>
     </div>
 
+    <!-- Web export sheet: sits above the right panel's footer. Mounted outside the panel,
+         which clips its overflow and is too narrow for the sheet's two columns. -->
+    <FrameWebExportSheet
+      v-if="webExport.open && panelsVisible"
+      :state="webExport.state" :notices="webExport.notices" :bytes="webExport.bytes" :fit="webExport.fit"
+      :transparent-allowed="background == null" :transparent="webExport.transparent" :still="webExport.still"
+      :art-aspect="webExport.artAspect" :error-text="webExport.errorText"
+      @update:fit="setWebExportFit" @update:transparent="setWebExportTransparent"
+      @download="downloadWebExport" @copy="copyWebExportSnippet" @close="closeWebExport" />
+
     <!-- Right sidebar: floating glass properties panel -->
     <div
       data-testid="compositor-right-panel"
@@ -11260,10 +11355,21 @@ onUnmounted(() => {
            artifacts (mirrors the Gradient/Shader/Space Type studio idiom). Sits
            outside every template branch so it stays pinned bottom-right in all
            panel states. -->
-      <div class="mt-auto shrink-0 border-t border-white/10 p-3 flex items-center justify-end gap-2">
+      <div class="mt-auto shrink-0 border-t border-white/10 p-3 flex flex-wrap items-center justify-end gap-2">
         <span v-if="renderError" class="text-[11px] text-rose-400 min-w-0 flex-1 truncate" :title="renderError">{{ renderError }}</span>
+        <span v-if="webExportNotice && !renderError" class="text-[11px] text-white/55 min-w-0 flex-1 truncate" :title="webExportNotice">{{ webExportNotice }}</span>
         <span v-if="videoStatus && !exportingVideo" class="text-xs text-white/55 truncate max-w-[280px]" :title="videoStatus">{{ videoStatus }}</span>
         <button v-if="exportingVideo" type="button" class="px-3 py-1.5 text-xs rounded-md text-white/70 hover:text-white hover:bg-white/10" @click="cancelVideoExport">Cancel</button>
+        <button
+          class="h-8 px-3 rounded text-[12px] font-medium flex items-center gap-1.5 cursor-pointer disabled:opacity-50 bg-white/[0.06] hover:bg-white/12 text-white/85"
+          :disabled="rendering || baking || encoding"
+          title="Download a web file that plays this Frame live"
+          data-testid="frame-web-export"
+          @click="openWebExport">
+          Web export
+        </button>
+        <!-- Row break: three buttons do not fit the panel's width on one line. -->
+        <span class="basis-full h-0" aria-hidden="true" />
         <button
           class="h-8 px-3 rounded text-[12px] font-medium flex items-center gap-1.5 cursor-pointer disabled:opacity-50 bg-white/[0.06] hover:bg-white/12 text-white/85"
           :disabled="rendering || baking || encoding || exportingVideo || !hasMotion"
