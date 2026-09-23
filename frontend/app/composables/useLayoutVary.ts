@@ -1,11 +1,18 @@
 import { ref, computed, shallowRef, watch, toRaw, getCurrentScope, onScopeDispose } from 'vue'
 import type { Ref, ComputedRef } from 'vue'
-import { applyLayoutToFrame, candidatesForFrame, hiddenLinesForFrame, lineOptionsForFrame, planLayout } from '~/lib/frame/patterns/kit/plan'
+import { applyLayoutToFrame, candidatesForFrame, hiddenLinesForFrame, lineOptionsForFrame, planLayout, titleLayerIdForFrame } from '~/lib/frame/patterns/kit/plan'
 import type { LayoutEditor, LayoutPlan, LayoutPlanArgs, StoredRoles } from '~/lib/frame/patterns/kit/plan'
 import { DEFAULT_CHOICE } from '~/lib/frame/patterns/kit/vary'
 import type { Candidate, Choice } from '~/lib/frame/patterns/kit/vary'
-import type { Measure } from '~/lib/frame/patterns/kit/types'
-import { LAYOUTS, layoutById } from '~/lib/frame/patterns/layouts/catalog'
+import type { BrandLogo, Measure } from '~/lib/frame/patterns/kit/types'
+import { layoutById, layoutsForStyle } from '~/lib/frame/patterns/layouts/catalog'
+import { STYLES } from '~/lib/frame/patterns/kit/styles'
+import type { StyleId } from '~/lib/frame/patterns/kit/styles'
+import type { LocalLayer, TextLayer } from '~/composables/useCompositorLayers'
+import type { BrandKit } from '~~/shared/brand/types'
+import { brandLogoUrl } from '~~/shared/brand/resolve'
+import { inputNameFromViewUrl } from '~~/shared/brand/assets'
+import { uploadBrandImage } from '~/lib/brand/upload'
 import type { PosterState } from '~/lib/frame/patterns/applyToFrame'
 import { paletteFromFrame } from '~/lib/frame/patterns/framePalette'
 import { rolesFromFamily } from '~/lib/frame/patterns/palette'
@@ -28,6 +35,12 @@ import type { FrameFormat, KeepClear } from '~/lib/frame/formats'
 // library, and each variation's tile) are redone at once after every apply, undo, redo and
 // reorder: all of them write a new draw order (`sailor_stackOrder`), which a drag never does — so
 // the thumbnails show the Frame as it is.
+//
+// Stage 3: the tab shows one style at a time (`style`, ruling S4) — the library holds that style's
+// layouts only and every planner call is given it. Switching style applies and writes nothing; an
+// apply records the style it used on the Frame (`sailor_posterState.style`). The style's suggested
+// title face is offered as its own undo step, and the project's brand kit logo is resolved once to
+// an input filename and passed to the planner (ruling S2); until it resolves, plans run without it.
 
 export type VaryCandidate = Candidate & { plan: LayoutPlan }
 export interface LibraryItem { id: string; name: string; plan: LayoutPlan | null; reason?: string }
@@ -36,6 +49,11 @@ export interface LibraryItem { id: string; name: string; plan: LayoutPlan | null
  *  (the stage hatches it), and `keepKind` which of the two it is. */
 export interface LayoutFormatInfo { label: string; notes: string[]; hidden: string[]; keep?: KeepClear; keepKind?: 'app' | 'crop' }
 export interface ChoiceRow { key: keyof Choice; label: string; options: { value: unknown; label: string; on: boolean }[] }
+/** The style's suggested title face, offered while the title is in another face: the family, its
+ *  note, the weight it sets, and the title's own text (quoted by the button). */
+export interface SuggestedFace { family: string; wt: number; note: string; title: string }
+/** A brand image as a Frame image layer can use it: its input filename and h/w. */
+export interface ResolvedBrandImage { name: string; aspect: number }
 
 export interface LayoutVarySource {
   props: () => Record<string, unknown> | undefined
@@ -44,13 +62,20 @@ export interface LayoutVarySource {
   connectedSlots: () => number[]
   editor: () => LayoutEditor
   /** Persist the applied state (UI memory, outside the undo step). */
-  remember(s: { patternId: string; seed: number; choice: Choice; index: number; roles?: StoredRoles }): void
+  remember(s: { patternId: string; seed: number; choice: Choice; index: number; roles?: StoredRoles; style?: StyleId }): void
   /** Whether the Layout tab is showing. The library plans only while it is. Default: always. */
   active?: () => boolean
   /** A text layer is being edited on the canvas: content re-plans wait until the edit ends. */
   editing?: () => boolean
   /** Injected in tests (the stub measure). Default: the renderer-exact canvas measure. */
   measure?: Measure
+  /** The project's brand kit (`useBrandLibrary`'s active kit): its logo is offered to the layouts
+   *  (ruling S2). Read only while the tab is showing. Absent or undefined: no logo. */
+  brandKit?: () => BrandKit | undefined
+  /** Load a font family the way the Frame's Title face picker does (a suggested face). */
+  loadFace?: (family: string) => void
+  /** Injected in tests. Default: `resolveBrandImage` (the brand image picker's route). */
+  resolveImage?: (url: string) => Promise<ResolvedBrandImage | null>
 }
 
 /** How long the layers must be still before a content change re-plans (ms). */
@@ -138,6 +163,62 @@ function whenIdle(fn: () => void): () => void {
   return () => clearTimeout(t)
 }
 
+/** A brand image's natural width / height (null when it does not load, or there is no DOM). */
+function naturalAspect(url: string): Promise<number | null> {
+  if (typeof Image === 'undefined') return Promise.resolve(null)
+  return new Promise((resolve) => {
+    const im = new Image()
+    im.onload = () => resolve(im.naturalWidth && im.naturalHeight ? im.naturalWidth / im.naturalHeight : null)
+    im.onerror = () => resolve(null)
+    im.src = url
+  })
+}
+
+/** A brand kit image as an image layer can use it — the brand image picker's route
+ *  (`components/brand/ImagePicker.vue`): a `/view?…&type=input` URL gives its input filename; an
+ *  external URL is fetched and uploaded, and the upload's name read back. `aspect` is h/w (the
+ *  kit's `BrandLogo.aspect`), from the image's natural size. Null when any step fails. */
+export async function resolveBrandImage(url: string): Promise<ResolvedBrandImage | null> {
+  try {
+    let name = inputNameFromViewUrl(url)
+    if (!name) {
+      const blob = await (await fetch(url)).blob()
+      const file = new File([blob], 'logo.png', { type: blob.type || 'image/png' })
+      name = inputNameFromViewUrl(await uploadBrandImage(file))
+    }
+    if (!name) return null
+    const wh = await naturalAspect(`/view?${new URLSearchParams({ filename: name, type: 'input' })}`)
+    return wh ? { name, aspect: 1 / wh } : null
+  } catch {
+    return null
+  }
+}
+
+/** Each brand image is resolved once per session (an external one is uploaded once). */
+const brandImages = new Map<string, Promise<ResolvedBrandImage | null>>()
+function cachedBrandImage(url: string, resolve: (url: string) => Promise<ResolvedBrandImage | null>): Promise<ResolvedBrandImage | null> {
+  let p = brandImages.get(url)
+  if (!p) {
+    p = resolve(url).catch(() => null)
+    brandImages.set(url, p)
+  }
+  return p
+}
+/** Tests only: forget the resolved brand images. */
+export function __clearBrandImagesForTest() { brandImages.clear() }
+
+/** The style a layout belongs to (the 42 carry none: Swiss). */
+const styleOfLayout = (id: string | undefined): StyleId | undefined => {
+  const def = id ? layoutById(id) : undefined
+  return def ? (def.style ?? 'swiss') : undefined
+}
+
+/** The first 20 characters of a line, whitespace folded, cut with an ellipsis. */
+const quoteStart = (t: string) => {
+  const s = t.trim().split(/\s+/).join(' ')
+  return s.length > 20 ? `${s.slice(0, 20).trimEnd()}…` : s
+}
+
 export function useLayoutVary(src: LayoutVarySource): {
   layoutId: Ref<string>; index: Ref<number>; applied: Ref<boolean>
   candidates: ComputedRef<VaryCandidate[]>
@@ -148,6 +229,14 @@ export function useLayoutVary(src: LayoutVarySource): {
   imageMode: Ref<boolean>; setImageMode(on: boolean): void
   paletteMode: Ref<string[] | null>; setPaletteMode(hexes: string[] | null): void
   format: ComputedRef<LayoutFormatInfo | null>
+  style: Ref<StyleId>; setStyle(s: StyleId): void
+  /** Whether the library for the current style and content is complete (all its layouts planned). */
+  libraryDone: Ref<boolean>
+  /** Whether the Frame has a title (the planner's reading). Without one nothing is offered. */
+  hasTitle: ComputedRef<boolean>
+  suggestedFace: ComputedRef<SuggestedFace | null>; applySuggestedFace(): boolean
+  /** The brand kit's logo as the planner takes it, once resolved (undefined: none, or not yet). */
+  brandLogo: Ref<BrandLogo | undefined>
 } {
   const stored = src.props()?.sailor_posterState as PosterState | undefined
 
@@ -155,6 +244,9 @@ export function useLayoutVary(src: LayoutVarySource): {
   const shapeMode = ref<FrameElements['shapeMode'] | undefined>(stored?.shapeMode ?? undefined)
   const imageMode = ref<boolean>(stored?.imageMode ?? false)
   const paletteMode = ref<string[] | null>(stored?.palette?.length ? stored.palette : null)
+  /** The style whose layouts the tab shows (ruling S4): the one the Frame last applied, else Swiss.
+   *  Switching it only changes what is offered; it is written to the Frame with each apply. */
+  const style = ref<StyleId>(stored?.style && STYLES[stored.style] ? stored.style : (styleOfLayout(stored?.patternId) ?? 'swiss'))
   const writeState = (patch: Partial<PosterState>) => {
     const p = src.props(); if (!p) return
     p.sailor_posterState = { ...(p.sailor_posterState as object | undefined), ...patch }
@@ -230,17 +322,40 @@ export function useLayoutVary(src: LayoutVarySource): {
     if (editing) { clearTimeout(settleTimer); settleTimer = undefined; heldByEdit = true; return }
     if (heldByEdit && isActive()) { heldByEdit = false; settle() }
   })
+  // ── the brand kit's logo (ruling S2): resolved to an input filename once, never blocking ──
+  // Until it resolves the layouts plan without it; when it arrives the plans are redone (it is in
+  // the plan key). The kit is read only while the tab is showing.
+  const brandLogo = shallowRef<BrandLogo | undefined>(undefined)
+  const resolveImage = src.resolveImage ?? resolveBrandImage
+  let logoKey: string | null = null
+  watch(() => {
+    if (!isActive() || !src.brandKit) return null
+    const kit = src.brandKit()
+    return JSON.stringify([brandLogoUrl(kit, 'primary') ?? '', brandLogoUrl(kit, 'onDark') ?? ''])
+  }, (key) => {
+    if (key == null) return
+    logoKey = key
+    const [primary, onDark] = JSON.parse(key) as [string, string]
+    if (!primary) { brandLogo.value = undefined; return }
+    void Promise.all([cachedBrandImage(primary, resolveImage), onDark ? cachedBrandImage(onDark, resolveImage) : null]).then(([main, dark]) => {
+      if (logoKey !== key) return                              // the kit changed meanwhile
+      brandLogo.value = main ? { url: main.name, aspect: main.aspect, ...(dark ? { onDarkUrl: dark.name } : {}) } : undefined
+    })
+  }, { immediate: true })
+
   function baseArgs(): Omit<LayoutPlanArgs, 'choice' | 'layoutId'> {
     const raw = toRaw(src.props())
     const props = raw ? { ...raw } : undefined
     const palette = paletteMode.value ? rolesFromFamily({ hexes: [...paletteMode.value] }) : paletteFromFrame(props)
+    const logo = brandLogo.value
     return {
       props, frameW: src.frameW(), frameH: src.frameH(), palette, recolour: paletteMode.value != null,
       connectedSlots: [...src.connectedSlots()], shapeMode: toRaw(shapeMode.value) ?? undefined, imageMode: imageMode.value,
-      measure: src.measure,
+      measure: src.measure, style: style.value,
+      ...(logo ? { brandLogo: { ...logo } } : {}),
     }
   }
-  const planKey = computed(() => JSON.stringify([settledKey.value, fontRev.value, paletteMode.value, shapeMode.value ?? null, imageMode.value]))
+  const planKey = computed(() => JSON.stringify([settledKey.value, fontRev.value, paletteMode.value, shapeMode.value ?? null, imageMode.value, style.value, brandLogo.value ?? null]))
   /** Bumped when the Frame was re-arranged as a whole: an apply from here (bumped directly, so a
    *  host with plain props still re-plans), or anything that writes a new draw order — apply,
    *  undo, redo, a layer reorder. Identity only, never deep: a drag writes no order. */
@@ -262,9 +377,29 @@ export function useLayoutVary(src: LayoutVarySource): {
   function followFrame() {
     const st = src.props()?.sailor_posterState as PosterState | undefined
     if (!st?.patternId || !layoutById(st.patternId)) { applied.value = false; return }
+    // The Frame's layout belongs to another style than the one on show: keep showing this style
+    // (its first layout, not yet applied) — the style picker is only changed by the user.
+    if (styleOfLayout(st.patternId) !== style.value) {
+      applied.value = false
+      if (styleOfLayout(layoutId.value) !== style.value) { layoutId.value = ''; choice.value = { ...DEFAULT_CHOICE } }
+      return
+    }
     layoutId.value = st.patternId
     if (st.choice) choice.value = { ...DEFAULT_CHOICE, ...st.choice }
     applied.value = true
+  }
+
+  /** Show another style's layouts. Content, format and the Frame are left as they are; nothing is
+   *  applied or written. The current layout becomes the Frame's own when it is of that style,
+   *  else that style's first offered layout (not yet applied — the first Vary applies it). */
+  function setStyle(s: StyleId) {
+    if (!STYLES[s] || s === style.value) return
+    style.value = s
+    const st = src.props()?.sailor_posterState as PosterState | undefined
+    if (st?.patternId && styleOfLayout(st.patternId) === s) { followFrame(); return }
+    layoutId.value = ''
+    applied.value = false
+    choice.value = { ...DEFAULT_CHOICE }
   }
 
   /** A candidate whose plan is worked out on first read (only the tiles on screen are planned). */
@@ -324,6 +459,7 @@ export function useLayoutVary(src: LayoutVarySource): {
 
   // ── the library: one plan per fitting layout, built in two passes ──
   const libItems = shallowRef<LibraryItem[]>([])
+  const libraryDone = ref(false)
   let libBuilt = ''
   let cancelIdle: (() => void) | null = null
   function libraryItem(id: string, name: string, a: Omit<LayoutPlanArgs, 'choice' | 'layoutId'>): LibraryItem | null {
@@ -337,20 +473,23 @@ export function useLayoutVary(src: LayoutVarySource): {
   function buildLibrary() {
     cancelIdle?.(); cancelIdle = null
     const a = baseArgs()
+    const defs = layoutsForStyle(style.value)
     const out: LibraryItem[] = []
     let i = 0
+    libraryDone.value = false
     const step = (budget: number) => {
       let n = 0
-      while (i < LAYOUTS.length && n < budget) {
-        const def = LAYOUTS[i++]!
+      while (i < defs.length && n < budget) {
+        const def = defs[i++]!
         const item = libraryItem(def.id, def.name, a)
         if (item) { out.push(item); n++ }
       }
       libItems.value = [...out]
       if (!layoutId.value) layoutId.value = out.find(it => it.plan)?.id ?? ''
+      if (i >= defs.length) libraryDone.value = true
     }
     step(LIBRARY_FIRST)
-    if (i < LAYOUTS.length) cancelIdle = whenIdle(() => { cancelIdle = null; step(Infinity) })
+    if (i < defs.length) cancelIdle = whenIdle(() => { cancelIdle = null; step(Infinity) })
   }
   // The source reads the Frame only while the tab is showing: an inactive tab costs nothing, and
   // a host whose getters are not ready yet during its own setup is never called then.
@@ -375,7 +514,7 @@ export function useLayoutVary(src: LayoutVarySource): {
     void settledKey.value; void rev.value
     const hidden = hiddenLinesForFrame({
       props: toRaw(src.props()), frameW: src.frameW(), frameH: src.frameH(),
-      shapeMode: toRaw(shapeMode.value) ?? undefined, imageMode: imageMode.value,
+      shapeMode: toRaw(shapeMode.value) ?? undefined, imageMode: imageMode.value, style: style.value,
     }).map(t => t.trim().split(/\s+/).join(' ')).filter(Boolean)
     const kind = keepKind(fmt)
     return {
@@ -396,14 +535,14 @@ export function useLayoutVary(src: LayoutVarySource): {
     applied.value = true
     settle()
     rev.value++
-    src.remember({ patternId: out.posterState.patternId, seed: out.posterState.seed, choice: { ...c.choice }, index: i, roles: out.posterState.roles })
+    src.remember({ patternId: out.posterState.patternId, seed: out.posterState.seed, choice: { ...c.choice }, index: i, roles: out.posterState.roles, style: style.value })
     return true
   }
   const applyAt = (i: number) => applyChoice(layoutId.value, candidates.value, i)
   /** Switch to a layout by applying its first variation. The current layout (and `applied`) only
    *  change when that apply succeeds. */
   function select(id: string) {
-    if (!layoutById(id)) return
+    if (!layoutById(id) || styleOfLayout(id) !== style.value) return
     const list = id === layoutId.value ? candidates.value : candidatesForFrame({ ...baseArgs(), layoutId: id })
     applyChoice(id, list, 0)
   }
@@ -434,8 +573,50 @@ export function useLayoutVary(src: LayoutVarySource): {
     if (best >= 0) applyAt(best)
   }
 
+  // ── the title, and the style's suggested face for it ──
+  // Read like the format: raw layers, re-read on the settled content key and `rev` only.
+  const titleId = computed<string | undefined>(() => {
+    if (!isActive()) return undefined
+    void settledKey.value; void rev.value
+    return titleLayerIdForFrame({
+      props: toRaw(src.props()), frameW: src.frameW(), frameH: src.frameH(),
+      shapeMode: toRaw(shapeMode.value) ?? undefined, imageMode: imageMode.value, style: style.value,
+    })
+  })
+  const hasTitle = computed(() => !!titleId.value)
+  const titleLayer = (): TextLayer | undefined => {
+    const id = titleId.value
+    const layers = (toRaw(src.props())?.sailor_localLayers as LocalLayer[] | undefined) ?? []
+    return id ? layers.find(l => l.id === id && l.kind === 'text') as TextLayer | undefined : undefined
+  }
+  /** Editorial and Street suggest a title face; hidden once the title is in it. */
+  const suggestedFace = computed<SuggestedFace | null>(() => {
+    const face = STYLES[style.value].face
+    if (!face) return null
+    void settledKey.value; void rev.value
+    const t = titleLayer()
+    if (!t || (t.fontFamily ?? '').trim().toLowerCase() === face.family.toLowerCase()) return null
+    return { family: face.family, wt: face.wt, note: face.note, title: quoteStart(String(t.text ?? '')) }
+  })
+  /** Set the title's face to the suggestion (family and the face's weight) as ONE undo step, load
+   *  it the way the Title face picker does, and re-plan (after it loads — `settle` waits). */
+  function applySuggestedFace(): boolean {
+    const face = suggestedFace.value
+    const id = titleId.value
+    const layers = (src.props()?.sailor_localLayers as LocalLayer[] | undefined) ?? []
+    if (!face || !id || !layers.some(l => l.id === id)) return false
+    src.loadFace?.(face.family)
+    const ed = src.editor()
+    ed.recordHistory()
+    ed.commit(layers.map(l => (l.id === id ? { ...l, fontFamily: face.family, fontWeight: face.wt } as LocalLayer : l)))
+    settle()
+    rev.value++
+    return true
+  }
+
   return {
     layoutId, index, applied, candidates, library, choices, select, vary, jump, setChoice,
     shapeMode, setShapeMode, imageMode, setImageMode, paletteMode, setPaletteMode, format,
+    style, setStyle, libraryDone, hasTitle, suggestedFace, applySuggestedFace, brandLogo,
   }
 }

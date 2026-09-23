@@ -21,6 +21,7 @@ import { isResponsiveFrame } from './responsive/fromNode'
 import { FRAME_FORMATS, formatFor, frameFormatGroup } from './formats'
 import { PLAIN_SIZE_PRESETS } from './plainPresets'
 import { hiddenLayerIdsForFrame } from './patterns/kit/plan'
+import type { StyleId } from './patterns/kit/styles'
 import type { FrameElements } from './patterns/types'
 
 export interface FrameSizePreset { id: string; label: string; w: number; h: number }
@@ -103,8 +104,10 @@ export function restoreFormatHiddenLines(data: FrameSizeNodeData) {
   const layers = props?.sailor_localLayers as HideTracked[] | undefined
   if (!props || !Array.isArray(layers)) return
   const { w, h } = readFrameSize(data)
-  const st = props.sailor_posterState as { shapeMode?: FrameElements['shapeMode']; imageMode?: boolean } | undefined
-  const still = new Set(hiddenLayerIdsForFrame({ props, frameW: w, frameH: h, shapeMode: st?.shapeMode ?? undefined, imageMode: st?.imageMode }))
+  const st = props.sailor_posterState as { shapeMode?: FrameElements['shapeMode']; imageMode?: boolean; style?: StyleId } | undefined
+  // The levels a format keeps follow the style of the layout that hid them (Performance ranks the
+  // date above the details).
+  const still = new Set(hiddenLayerIdsForFrame({ props, frameW: w, frameH: h, shapeMode: st?.shapeMode ?? undefined, imageMode: st?.imageMode, style: st?.style ?? 'swiss' }))
   let changed = false
   const next = layers.map((l) => {
     const e = l.layoutPrev?.visible

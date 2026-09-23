@@ -211,6 +211,12 @@ export function hiddenLayerIdsForFrame(a: FrameArgs): string[] {
   return hiddenRoles(fmt, contentOf(elements), a.style).map(r => elements[r]!.id)
 }
 
+/** The id of the layer the planner reads as the title (the stored roles, then size inference) —
+ *  the Layout tab's suggested face sets that layer's face. Undefined without a title. */
+export function titleLayerIdForFrame(a: FrameArgs): string | undefined {
+  return frameElements(a, (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? []).title?.id
+}
+
 /** The roles the last apply stored win over size inference: an overlap layout (Ghost, Number
  *  behind, Overprint) sets the details or the date as large as the title or larger, and inferring
  *  from font size after it would pick the wrong title. A stored role holds while its layer still

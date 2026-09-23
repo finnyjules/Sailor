@@ -17,6 +17,7 @@ import { isResponsiveFrame } from '~/lib/frame/responsive'
 import { reactive } from 'vue'
 import { formatFor } from '~/lib/frame/formats'
 import { planLayout } from '~/lib/frame/patterns/kit/plan'
+import { layoutsForStyle } from '~/lib/frame/patterns/layouts/catalog'
 import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
 import { DEFAULT_CHOICE } from '~/lib/frame/patterns/kit/vary'
 import { createTextLayer } from '~/composables/useCompositorLayers'
@@ -267,5 +268,48 @@ describe('a size write that changes the format restores the lines the old one hi
     const same = d3.properties!.sailor_localLayers
     applyFramePreset(d3, 'video-thumb')
     expect(d3.properties!.sailor_localLayers).toBe(same)
+  })
+})
+
+describe('leaving a format restores the lines by the style that hid them (Stage 3, Task 8)', () => {
+  /** A Performance layout applied on a video thumbnail (carries 2): Performance ranks the date
+   *  above the details, so it keeps title + date and hides the details and the caption. */
+  function performanceThumbFrame() {
+    const t = (id: string, text: string, fontSize: number) =>
+      createTextLayer({ id, text, fontSize, fontFamily: 'Inter', fontWeight: 600, color: '#111111' }) as LocalLayer
+    const layers = [t('t', 'Run lighter.', 0.12), t('d', 'Halden Trail 2', 0.04), t('dt', '–30%', 0.03), t('c', 'Offer ends 12 October.', 0.02)]
+    const props: Record<string, any> = { sailor_localLayers: layers, sailor_frame: { preset: 'video-thumb' } }
+    // The first Performance layout that runs on this Frame (with the image stand-in: they all
+    // show the product).
+    const plan = layoutsForStyle('performance').map(l => planLayout({ props, frameW: 1280, frameH: 720, layoutId: l.id, choice: { ...DEFAULT_CHOICE }, palette: { field: '#f2f0ef', ink: '#121212', accent: '#dd2200' }, connectedSlots: [], measure: makeStubMeasure(), style: 'performance', imageMode: true })).find(Boolean)!
+    expect(plan.format!.hidden).toEqual(['details', 'caption'])
+    props.sailor_localLayers = plan.layers
+    props.sailor_posterState = { ...plan.posterState, style: 'performance' }
+    return props
+  }
+  const layer = (props: Record<string, any>, id: string) => (props.sailor_localLayers as any[]).find(l => l.id === id)
+
+  it('video-thumb → 320×50 (also carries 2): the details and caption stay hidden — the Swiss order would show the details', () => {
+    const d = frameData(1280, 720, performanceThumbFrame())
+    expect(layer(d.properties!, 'd').visible).toBe(false)
+    expect(layer(d.properties!, 'c').visible).toBe(false)
+    applyFramePreset(d, 'ad-320x50')
+    expect(layer(d.properties!, 'd').visible).toBe(false)
+    expect(layer(d.properties!, 'd').layoutPrev.visible).toEqual({ was: null, set: false })
+    expect(layer(d.properties!, 'c').visible).toBe(false)
+  })
+
+  it('video-thumb → 300×600 (carries 3): the details come back, the caption stays hidden', () => {
+    const d = frameData(1280, 720, performanceThumbFrame())
+    applyFramePreset(d, 'ad-300x600')
+    expect(layer(d.properties!, 'd')).not.toHaveProperty('visible')
+    expect(layer(d.properties!, 'c').visible).toBe(false)
+  })
+
+  it('video-thumb → 4:5 (no format): both come back', () => {
+    const d = frameData(1280, 720, performanceThumbFrame())
+    applyFramePreset(d, '4:5')
+    expect(layer(d.properties!, 'd')).not.toHaveProperty('visible')
+    expect(layer(d.properties!, 'c')).not.toHaveProperty('visible')
   })
 })

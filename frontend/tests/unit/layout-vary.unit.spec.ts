@@ -5,10 +5,10 @@ vi.mock('~/lib/frame/patterns/kit/plan', async (importOriginal) => {
   return { ...m, planLayout: vi.fn(m.planLayout), applyLayoutToFrame: vi.fn(m.applyLayoutToFrame) }
 })
 import { planLayout, applyLayoutToFrame, candidatesForFrame, hiddenLinesForFrame } from '~/lib/frame/patterns/kit/plan'
-import { useLayoutVary, CONTENT_SETTLE_MS, FONT_WAIT_MS } from '~/composables/useLayoutVary'
+import { useLayoutVary, CONTENT_SETTLE_MS, FONT_WAIT_MS, resolveBrandImage, __clearBrandImagesForTest } from '~/composables/useLayoutVary'
 import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
 import { DEFAULT_CHOICE } from '~/lib/frame/patterns/kit/vary'
-import { LAYOUTS } from '~/lib/frame/patterns/layouts/catalog'
+import { LAYOUTS, layoutsForStyle } from '~/lib/frame/patterns/layouts/catalog'
 import { createImageLayer, createTextLayer } from '~/composables/useCompositorLayers'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 
@@ -88,7 +88,7 @@ describe('useLayoutVary', () => {
     expect(editor.commit.mock.calls[0]![0]).toEqual(next.plan.layers)
     expect(editor.writeOrder.mock.calls[0]![0]).toEqual(next.plan.order)
     expect(vary.index.value).toBe(1)
-    expect(remember).toHaveBeenCalledWith({ patternId: 'statement', seed: next.plan.posterState.seed, choice: next.choice, index: 1, roles: { title: 't', details: 'd', date: 'dt', caption: 'c' } })
+    expect(remember).toHaveBeenCalledWith({ patternId: 'statement', seed: next.plan.posterState.seed, choice: next.choice, index: 1, roles: { title: 't', details: 'd', date: 'dt', caption: 'c' }, style: 'swiss' })
   })
 
   it('vary(-1) from the first variation wraps to the last', () => {
@@ -560,5 +560,192 @@ describe('useLayoutVary — the format is part of the content key (final fix C1,
       await nextTick(); vi.advanceTimersByTime(CONTENT_SETTLE_MS + 50); await nextTick()
       expect(vary.candidates.value).toBe(first)
     } finally { vi.useRealTimers() }
+  })
+})
+
+// ═══ Stage 3, Task 8: the Style picker, the suggested face, the brand logo ═══
+describe('useLayoutVary — styles (Stage 3)', () => {
+  afterEach(() => { __clearBrandImagesForTest(); vi.mocked(planLayout).mockClear() })
+
+  it('a stored Frame without a style is Swiss: the library is the 42 only', async () => {
+    const { vary } = harness({ sailor_posterState: { patternId: 'statement', seed: 1 } })
+    expect(vary.style.value).toBe('swiss')
+    await new Promise(r => setTimeout(r, 5))
+    const swiss = new Set(layoutsForStyle('swiss').map(l => l.id))
+    expect(vary.library.value.length).toBeGreaterThan(0)
+    for (const it of vary.library.value) expect(swiss.has(it.id)).toBe(true)
+  })
+
+  it('switching style shows only that style\'s layouts, keeps the content and format, and writes nothing', async () => {
+    const { vary, props, editor, remember } = harness()
+    const layersBefore = props.sailor_localLayers
+    vary.setStyle('editorial')
+    await nextTick()
+    const ids = new Set(layoutsForStyle('editorial').map(l => l.id))
+    expect(vary.style.value).toBe('editorial')
+    expect(vary.library.value.length).toBeGreaterThan(0)
+    for (const it of vary.library.value) expect(ids.has(it.id)).toBe(true)
+    expect(ids.has(vary.layoutId.value)).toBe(true)
+    expect(vary.applied.value).toBe(false)
+    for (const c of vary.candidates.value) expect(c.plan.posterState.patternId).toBe(vary.layoutId.value)
+    // every planner call of the rebuild carried the style
+    expect(vi.mocked(planLayout).mock.calls.at(-1)![0].style).toBe('editorial')
+    // nothing written: no undo step, no layer, no remembered state
+    expect(editor.recordHistory).not.toHaveBeenCalled()
+    expect(editor.commit).not.toHaveBeenCalled()
+    expect(remember).not.toHaveBeenCalled()
+    expect(props.sailor_posterState).toBeUndefined()
+    expect(props.sailor_localLayers).toBe(layersBefore)
+    // …and back to Swiss
+    vary.setStyle('swiss')
+    await nextTick()
+    const swiss = new Set(layoutsForStyle('swiss').map(l => l.id))
+    for (const it of vary.library.value) expect(swiss.has(it.id)).toBe(true)
+  })
+
+  it('an apply records the style it used; a Frame stored with it opens on that style (round trip)', async () => {
+    const { vary, remember, props } = harness()
+    vary.setStyle('performance')
+    await nextTick()
+    expect(vary.candidates.value.length).toBeGreaterThan(0)
+    vary.vary(1)
+    const saved = remember.mock.calls.at(-1)![0]
+    expect(saved.style).toBe('performance')
+    expect(layoutsForStyle('performance').some(l => l.id === saved.patternId)).toBe(true)
+    // the host merges it into sailor_posterState (CompositorModal's `remember`)
+    const reopened = harness({ sailor_posterState: { ...saved } }).vary
+    expect(reopened.style.value).toBe('performance')
+    expect(reopened.layoutId.value).toBe(saved.patternId)
+    expect(reopened.applied.value).toBe(true)
+    const perf = new Set(layoutsForStyle('performance').map(l => l.id))
+    for (const it of reopened.library.value) expect(perf.has(it.id)).toBe(true)
+    void props
+  })
+
+  it('the format\'s hidden lines follow the style\'s levels (Performance keeps the date over the details)', () => {
+    const props = { sailor_localLayers: frameLayers().filter(l => l.kind === 'text'), sailor_frame: { preset: 'video-thumb' } }
+    const mk = () => useLayoutVary({ props: () => props, frameW: () => 1280, frameH: () => 720, connectedSlots: () => [], editor: () => ({ recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn(), writeGroups: vi.fn() }), remember: vi.fn(), measure: makeStubMeasure() })
+    const v = mk()
+    expect(v.format.value!.hidden).toEqual(['19.09.–15.11.2026', 'Kunstraum Lenz'])
+    v.setStyle('performance')
+    expect(v.format.value!.hidden).toEqual(['Ines Vollmer', 'Kunstraum Lenz'])
+  })
+
+  it('Editorial suggests its face for the title; Swiss and Performance suggest none', async () => {
+    const { vary } = harness()
+    expect(vary.suggestedFace.value).toBeNull()
+    vary.setStyle('performance')
+    expect(vary.suggestedFace.value).toBeNull()
+    vary.setStyle('editorial')
+    expect(vary.suggestedFace.value).toEqual({ family: 'Instrument Serif', wt: 400, note: 'A serif for the title', title: 'Weather Report' })
+    vary.setStyle('street')
+    expect(vary.suggestedFace.value).toMatchObject({ family: 'Anton', wt: 400, note: 'A heavy condensed face for the title' })
+  })
+
+  it('the title is quoted by its first 20 characters; the suggestion hides once the title uses the face', () => {
+    const long = frameLayers().map(l => (l.id === 't' ? { ...l, text: 'Weather Report from the northern coast' } : l))
+    const a = harness({ sailor_localLayers: long }).vary
+    a.setStyle('street')
+    expect(a.suggestedFace.value!.title).toBe('Weather Report from…')
+    const anton = frameLayers().map(l => (l.id === 't' ? { ...l, fontFamily: 'Anton' } : l))
+    const b = harness({ sailor_localLayers: anton }).vary
+    b.setStyle('street')
+    expect(b.suggestedFace.value).toBeNull()
+  })
+
+  it('using the suggested face is ONE undo step that sets the title\'s family and weight, and loads the face', () => {
+    const props: Record<string, unknown> = { sailor_localLayers: frameLayers() }
+    const calls: string[] = []
+    const editor = {
+      recordHistory: vi.fn(() => { calls.push('history') }),
+      commit: vi.fn((next: LocalLayer[]) => { calls.push('commit'); props.sailor_localLayers = next }),
+      writeOrder: vi.fn(), writeGroups: vi.fn(),
+    }
+    const loadFace = vi.fn()
+    const vary = useLayoutVary({ props: () => props, frameW: () => 895, frameH: () => 1280, connectedSlots: () => [], editor: () => editor, remember: vi.fn(), measure: makeStubMeasure(), loadFace })
+    vary.setStyle('editorial')
+    const before = frameLayers()
+    expect(vary.applySuggestedFace()).toBe(true)
+    expect(calls).toEqual(['history', 'commit'])
+    expect(loadFace).toHaveBeenCalledWith('Instrument Serif')
+    const next = editor.commit.mock.calls[0]![0] as LocalLayer[]
+    const title = next.find(l => l.id === 't') as LocalLayer & { fontFamily: string; fontWeight: number }
+    expect(title.fontFamily).toBe('Instrument Serif')
+    expect(title.fontWeight).toBe(400)
+    // every other layer untouched
+    expect(next.filter(l => l.id !== 't')).toEqual(before.filter(l => l.id !== 't'))
+    expect(vary.suggestedFace.value).toBeNull()
+    expect(vary.applySuggestedFace()).toBe(false)                 // nothing more to do
+    expect(editor.recordHistory).toHaveBeenCalledTimes(1)
+  })
+
+  it('a missing brand kit gives no logo: every plan runs without one (content.logo undefined)', async () => {
+    const resolveImage = vi.fn()
+    const editor = { recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn(), writeGroups: vi.fn() }
+    const vary = useLayoutVary({ props: () => ({ sailor_localLayers: frameLayers() }), frameW: () => 895, frameH: () => 1280, connectedSlots: () => [], editor: () => editor, remember: vi.fn(), measure: makeStubMeasure(), brandKit: () => undefined, resolveImage })
+    vary.setStyle('performance')
+    await nextTick()
+    expect(vary.brandLogo.value).toBeUndefined()
+    expect(resolveImage).not.toHaveBeenCalled()
+    expect(vi.mocked(planLayout).mock.calls.length).toBeGreaterThan(0)
+    for (const [a] of vi.mocked(planLayout).mock.calls) expect(a.brandLogo).toBeUndefined()
+  })
+
+  it('the kit\'s logo (logos.primary, else the legacy logo; logos.onDark) resolves once, and the plans follow it', async () => {
+    const resolveImage = vi.fn(async (url: string) => ({ name: url.includes('dark') ? 'brand_dark.png' : new URLSearchParams(url.split('?')[1]).get('filename')!, aspect: 0.25 }))
+    const editor = { recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn(), writeGroups: vi.fn() }
+    const kit = { logos: { primary: '/view?filename=brand_main.png&type=input', onDark: 'https://example.com/dark.png' } }
+    const mk = (k: object) => useLayoutVary({ props: () => ({ sailor_localLayers: frameLayers() }), frameW: () => 895, frameH: () => 1280, connectedSlots: () => [], editor: () => editor, remember: vi.fn(), measure: makeStubMeasure(), brandKit: () => k as never, resolveImage })
+    const vary = mk(kit)
+    expect(vary.brandLogo.value).toBeUndefined()                  // plans without it until it resolves
+    await new Promise(r => setTimeout(r, 0))
+    expect(vary.brandLogo.value).toEqual({ url: 'brand_main.png', aspect: 0.25, onDarkUrl: 'brand_dark.png' })
+    vary.setStyle('performance')
+    await nextTick()
+    expect(vi.mocked(planLayout).mock.calls.at(-1)![0].brandLogo).toEqual({ url: 'brand_main.png', aspect: 0.25, onDarkUrl: 'brand_dark.png' })
+    // a second tab on the same kit resolves nothing again
+    const again = mk(kit)
+    await new Promise(r => setTimeout(r, 0))
+    expect(again.brandLogo.value).toEqual(vary.brandLogo.value)
+    expect(resolveImage).toHaveBeenCalledTimes(2)
+    // the legacy single logo
+    const legacy = mk({ logo: '/view?filename=brand_old.png&type=input' })
+    await new Promise(r => setTimeout(r, 0))
+    expect(legacy.brandLogo.value).toEqual({ url: 'brand_old.png', aspect: 0.25 })
+    expect(resolveImage).toHaveBeenLastCalledWith('/view?filename=brand_old.png&type=input')
+  })
+})
+
+describe('resolveBrandImage — the brand image picker\'s route', () => {
+  afterEach(() => { vi.unstubAllGlobals() })
+  class FakeImage {
+    onload: (() => void) | null = null; onerror: (() => void) | null = null
+    naturalWidth = 400; naturalHeight = 100
+    static last = ''
+    set src(v: string) { FakeImage.last = v; setTimeout(() => this.onload?.(), 0) }
+  }
+
+  it('a stored /view URL gives its input filename; aspect is h/w from the natural size', async () => {
+    vi.stubGlobal('Image', FakeImage)
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    expect(await resolveBrandImage('/view?filename=brand_abc.png&type=input')).toEqual({ name: 'brand_abc.png', aspect: 0.25 })
+    expect(FakeImage.last).toBe('/view?filename=brand_abc.png&type=input')
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('an external URL is fetched and uploaded, and the upload\'s name read back', async () => {
+    vi.stubGlobal('Image', FakeImage)
+    const fetchSpy = vi.fn(async (url: string) => (url === '/upload/image'
+      ? new Response(JSON.stringify({ name: 'brand_x_logo.png' }), { status: 200 })
+      : new Response(new Blob(['png'], { type: 'image/png' }), { status: 200 })))
+    vi.stubGlobal('fetch', fetchSpy)
+    expect(await resolveBrandImage('https://example.com/logo.png')).toEqual({ name: 'brand_x_logo.png', aspect: 0.25 })
+    expect(fetchSpy.mock.calls.map(c => c[0])).toEqual(['https://example.com/logo.png', '/upload/image'])
+  })
+
+  it('an image that does not load gives no logo', async () => {
+    vi.stubGlobal('Image', class extends FakeImage { override set src(_v: string) { setTimeout(() => this.onerror?.(), 0) } })
+    expect(await resolveBrandImage('/view?filename=brand_abc.png&type=input')).toBeNull()
   })
 })

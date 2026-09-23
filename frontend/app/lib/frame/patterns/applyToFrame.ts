@@ -5,6 +5,7 @@ import { planLayout, applyLayoutToFrame } from './kit/plan'
 import type { LayoutEditor, LayoutPlanArgs, StoredRoles } from './kit/plan'
 import { DEFAULT_CHOICE } from './kit/vary'
 import type { Choice } from './kit/vary'
+import type { StyleId } from './kit/styles'
 
 // Plan-and-apply by layout id over the layout kit (`kit/plan.ts`, `layouts/catalog.ts`), in the
 // long-standing `planPattern` / `applyPatternToFrame` shape. They run the kit with
@@ -21,6 +22,9 @@ export interface PosterState {
   /** Which layer holds which role, as the last apply saw it: the next plan keeps these rather
    *  than re-inferring from font size (an overlap layout can leave details larger than the title). */
   roles?: StoredRoles
+  /** The style of the layout last applied (Stage 3, ruling S4). Absent: `'swiss'`. A format's
+   *  hidden levels follow it (`frameSize.ts`), so it is written with each apply, never on its own. */
+  style?: StyleId
 }
 
 export interface PlanArgs {

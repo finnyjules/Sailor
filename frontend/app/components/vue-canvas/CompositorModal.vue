@@ -47,6 +47,7 @@ import LayoutVaryPanel from '~/components/vue-canvas/compositor/LayoutVaryPanel.
 import KeepClearOverlay from '~/components/vue-canvas/compositor/KeepClearOverlay.vue'
 import { layoutById } from '~/lib/frame/patterns/layouts/catalog'
 import type { Choice } from '~/lib/frame/patterns/kit/vary'
+import type { StyleId } from '~/lib/frame/patterns/kit/styles'
 import { layoutKeyAction } from '~/lib/frame/layoutKeys'
 import { snapshotFrameAsTemplate, addSlot } from '~/lib/frametemplate/author'
 import { placeTemplate, setInstanceSlot, freezeInstance, staleInstances, updateInstance, applySlotToLayer } from '~/lib/frametemplate/apply'
@@ -1000,6 +1001,10 @@ const selectionGuides = computed(() => {
 // library from planning while the tab is not showing. (`inspectorTab` is declared further down,
 // so the showing flag is a ref synced there — reading it here would hit its TDZ during setup.)
 const layoutTabShowing = ref(false)
+// The project's brand kit, for the Layout tab's logo (ruling S2). Injected here rather than
+// reusing `projectBrand` (declared much further down): the tab's getters must not reach a binding
+// that is still in its temporal dead zone during setup.
+const layoutBrand = inject<{ activeKit: ComputedRef<BrandKit | undefined> } | null>('sailor:brand', null)
 const layoutVary = useLayoutVary({
   props: () => compositor.value?.data?.properties as Record<string, unknown> | undefined,
   // The Frame's DESIGN size in pixels (not the on-screen artboard): a format is found by its
@@ -1014,6 +1019,9 @@ const layoutVary = useLayoutVary({
   remember: (s) => { const n = compositor.value; if (!n) return; const p = (n.data.properties ||= {}); (p as any).sailor_posterState = { ...(p as any).sailor_posterState, ...s } },
   active: () => layoutTabShowing.value,
   editing: () => !!editingId.value,
+  brandKit: () => layoutBrand?.activeKit.value,
+  // The suggested title face loads the way the Title face picker loads a Google family.
+  loadFace: (family) => { ensureGoogleFont(family) },
 })
 
 // Shape picker for the Layout tab: choose a library shape the engine may use
@@ -1054,6 +1062,10 @@ function onLayoutSelect(id: string) { if (!viewOnlyGuard()) layoutVary.select(id
 function onLayoutVary(step: 1 | -1) { if (!viewOnlyGuard()) layoutVary.vary(step) }
 function onLayoutJump(i: number) { if (!viewOnlyGuard()) layoutVary.jump(i) }
 function onLayoutChoice(key: keyof Choice, value: unknown) { if (!viewOnlyGuard()) layoutVary.setChoice(key, value) }
+// Picking a style only changes what is offered; the suggested face is a face change like the
+// Title face picker's (one undo step), so neither needs the design size.
+function onLayoutStyle(s: StyleId) { layoutVary.setStyle(s) }
+function onLayoutUseFace() { layoutVary.applySuggestedFace() }
 const layoutName = computed(() => layoutById(layoutVary.layoutId.value)?.name ?? '')
 /** The Layout tab's keys (`layoutKeyAction`): V → next variation; ← / → step only with nothing
  *  selected (with a selection they nudge). True when the Layout tab took the key. */
@@ -9476,7 +9488,7 @@ onUnmounted(() => {
         </div>
         <div data-testid="layout-sheet" class="flex-1 min-h-0 overflow-y-auto pb-4">
           <div class="px-4 pt-3">
-            <p v-if="!layoutVary.library.value.length" class="text-xs text-white/40 italic">Add a text layer to get layout options. The largest text is read as the title.</p>
+            <p v-if="!layoutVary.library.value.length && !layoutVary.hasTitle.value" class="text-xs text-white/40 italic">Add a text layer to get layout options. The largest text is read as the title.</p>
             <LayoutVaryPanel v-else
               :name="layoutName" :layout-id="layoutVary.layoutId.value" :applied="layoutVary.applied.value"
               :candidates="layoutVary.candidates.value" :index="layoutVary.index.value"
@@ -9484,7 +9496,9 @@ onUnmounted(() => {
               :frame-w="editorDims().w" :frame-h="editorDims().h"
               :background="background" :groups="localGroups" :wired-content="wiredContentForSlot"
               :format="layoutVary.format.value"
+              :style-id="layoutVary.style.value" :suggested-face="layoutVary.suggestedFace.value" :library-done="layoutVary.libraryDone.value"
               @vary="onLayoutVary" @jump="onLayoutJump" @select="onLayoutSelect" @choice="onLayoutChoice"
+              @style="onLayoutStyle" @use-face="onLayoutUseFace"
             />
           </div>
           <div v-if="posterFaceEls.titleId" class="px-4 pt-3 flex flex-col gap-2">
