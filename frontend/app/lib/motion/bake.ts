@@ -43,6 +43,67 @@ export interface MotionParams {
   source_key: string
 }
 
+/** What a motion export needs per frame, prepared once: fonts, images and any
+ *  reveal shaders loaded, the layer stack snapshotted (later edits must not leak
+ *  into later frames). `paint(i, ctx)` pulls wired sources to frame i's time
+ *  (via `prepareFrame`) and paints the stack onto `ctx` — used by both the PNG
+ *  bake below and the browser video recorder, so the two draw identically. */
+export interface MotionFramePainter {
+  total: number
+  time(i: number): number
+  paint(i: number, ctx: CanvasRenderingContext2D): Promise<void>
+}
+
+export async function prepareMotionFramePainter(
+  buildItems: () => StackItem[],
+  localLayers: LocalLayer[],
+  W: number,
+  H: number,
+  motion: FrameMotion,
+  prepareFrame?: (t: number) => Promise<void>,
+  deps: { paint?: typeof paintLayerStack; ensure?: () => Promise<void> } = {},
+): Promise<MotionFramePainter> {
+  if (deps.ensure) {
+    await deps.ensure()
+  } else {
+    for (const l of localLayers) if (l.kind === 'text') useLibraryFonts().ensure((l as TextLayer).fontFamily)
+    await ensureLayerFonts(localLayers, W)
+    await ensureLayerImages(localLayers)
+    // …and the SHADERS, when a Dither bar is set to Pixels or Assemble — the BARS are handed
+    // over, so a bake needing both the ASCII and the Dither effect waits for both. The loop
+    // below yields to the event loop every frame (toBlob), so a glyph atlas landing mid-bake
+    // would render the early frames as the Dissolve fallback and the later ones as characters —
+    // one video, two styles, with nothing anywhere reporting it. Resolves false rather than
+    // throwing if a shader never arrives: the bake then goes ahead in the fallback look,
+    // consistently, which is what a cold live frame already does.
+    if (motionUsesShaderStyle(motion.behaviours)) await ensureRevealShadersReady(motion.behaviours)
+  }
+  const paint = deps.paint ?? paintLayerStack
+  // Snapshot the stack and layer list ONCE — buildItems() and localLayers
+  // close over live reactive state, and the bake loop yields to the event
+  // loop every frame (toBlob), so a user edit mid-bake would otherwise leak
+  // into later frames and produce an inconsistent sequence.
+  const items = buildItems()
+  const frozenLayers = [...localLayers]
+  const total = Math.max(1, Math.round(motion.duration * motion.fps))
+  const time = (i: number) => i / motion.fps
+  return {
+    total,
+    time,
+    async paint(i, ctx) {
+      const t = time(i)
+      if (prepareFrame) await prepareFrame(t)
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height) // transparent background
+      // bake=true (Task 10): this IS the final motion export — shader-fill fields must
+      // render unclamped (full res) and stay live past LIVE_FIELD_CEILING, matching the
+      // bake/preview split every other export path now honours.
+      paint(ctx, ctx.canvas.width, ctx.canvas.height, items, frozenLayers, undefined, t, motion,
+        undefined, undefined, undefined, undefined, true)
+    },
+  }
+}
+
 export async function bakeMotionFrames(
   buildItems: () => StackItem[],
   localLayers: LocalLayer[],
@@ -55,43 +116,18 @@ export async function bakeMotionFrames(
   // before the stack is painted.
   prepareFrame?: (t: number) => Promise<void>,
 ): Promise<Blob[]> {
-  for (const l of localLayers) if (l.kind === 'text') useLibraryFonts().ensure((l as TextLayer).fontFamily)
-  await ensureLayerFonts(localLayers, W)
-  await ensureLayerImages(localLayers)
-  // …and the SHADERS, when a Dither bar is set to Pixels or Assemble — the BARS are handed
-  // over, so a bake needing both the ASCII and the Dither effect waits for both. The loop
-  // below yields to the event loop every frame (toBlob), so a glyph atlas landing mid-bake
-  // would render the early frames as the Dissolve fallback and the later ones as characters —
-  // one video, two styles, with nothing anywhere reporting it. Resolves false rather than
-  // throwing if a shader never arrives: the bake then goes ahead in the fallback look,
-  // consistently, which is what a cold live frame already does.
-  if (motionUsesShaderStyle(motion.behaviours)) await ensureRevealShadersReady(motion.behaviours)
-  // Snapshot the stack and layer list ONCE — buildItems() and localLayers
-  // close over live reactive state, and the bake loop yields to the event
-  // loop every frame (toBlob), so a user edit mid-bake would otherwise leak
-  // into later frames and produce an inconsistent sequence.
-  const items = buildItems()
-  const frozenLayers = [...localLayers]
-  const total = Math.max(1, Math.round(motion.duration * motion.fps))
+  const painter = await prepareMotionFramePainter(buildItems, localLayers, W, H, motion, prepareFrame)
   const canvas = document.createElement('canvas')
   canvas.width = Math.max(1, Math.round(W))
   canvas.height = Math.max(1, Math.round(H))
   const ctx = canvas.getContext('2d')!
   const blobs: Blob[] = []
-  for (let i = 0; i < total; i++) {
-    const t = i / motion.fps
-    if (prepareFrame) await prepareFrame(t)
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-    ctx.clearRect(0, 0, canvas.width, canvas.height) // transparent background
-    // bake=true (Task 10): this IS the final motion export — shader-fill fields must
-    // render unclamped (full res) and stay live past LIVE_FIELD_CEILING, matching the
-    // bake/preview split every other export path now honours.
-    paintLayerStack(ctx, canvas.width, canvas.height, items, frozenLayers, undefined, t, motion,
-      undefined, undefined, undefined, undefined, true)
+  for (let i = 0; i < painter.total; i++) {
+    await painter.paint(i, ctx)
     const blob = await new Promise<Blob | null>(r => canvas.toBlob(r, 'image/png'))
     if (!blob) throw new Error(`motion bake: frame ${i} produced no blob`)
     blobs.push(blob)
-    onProgress?.(i + 1, total)
+    onProgress?.(i + 1, painter.total)
   }
   return blobs
 }
