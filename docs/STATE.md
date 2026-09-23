@@ -124,7 +124,7 @@ Spec `docs/superpowers/specs/2026-09-21-frame-web-export-design.md` (amended the
 **Not yet proven, and must be before the switch goes on:**
 - a browser pass with the switch on;
 - the paid runs (Flux Schnell ×4 through a Gate → Hailuo H3 for 2 picks, plus one moodboard-picture request on each of Nano Banana 2, Nano Banana Pro, Seedream 4, Seedream 5 Lite; about $1.30);
-- **one open fix:** `waitForResult` has no outer time limit when fal never gives a real answer (the last review found the fix wave introduced it).
+- the polling time limit found by the last review is fixed (`8bbf99acd`): polling now always ends within 5 minutes past the limit, and only real network failures count as blips.
 
 `schema.sql` gained `runner_runs` and `runner_results`; they must be applied to Neon by hand before hosted use. Spec: `docs/superpowers/specs/2026-09-22-sailor-runner-and-gate-design.md`; plan: `docs/superpowers/plans/2026-09-23-sailor-runner-and-gate.md`.
 
