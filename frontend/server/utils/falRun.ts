@@ -9,25 +9,17 @@
  * The fal key is server-only: FAL_KEY (or NUXT_FAL_TOKEN), resolved by
  * getFalToken() from falStorage.ts.
  */
-import { getFalToken } from './falStorage'
 import { logSpend } from './spendLog'
 import { preflightMeter, currentMeterContext, MeterRefusalError } from './requestMeter'
 import { recordProviderUsage } from './providerUsage'
 import { costForModel } from './priceBook'
 import { moderatePrompt } from './moderation'
 import { extractProviderPromptText } from './graphPromptText'
-
-const FAL_QUEUE_BASE = 'https://queue.fal.run'
+import { falSubmit, falStatus, falResult } from '../runner/falQueue'
 
 export interface FalRunOptions {
   pollDeadlineMs?: number
   pollIntervalMs?: number
-}
-
-interface FalSubmit {
-  request_id: string
-  status_url?: string
-  response_url?: string
 }
 
 /**
@@ -67,49 +59,23 @@ async function dispatch<T>(
   opts: FalRunOptions,
   ticket: Awaited<ReturnType<typeof preflightMeter>>,
 ): Promise<T> {
-  const token = getFalToken()
-  if (!token) throw new Error('FAL_KEY is not set (add it to frontend/.env)')
-  const headers = { Authorization: `Key ${token}`, 'Content-Type': 'application/json' }
-  const appBase = `${FAL_QUEUE_BASE}/${app}`
-
-  const submitRes = await fetch(appBase, {
-    method: 'POST', headers, body: JSON.stringify(input),
-  })
-  if (!submitRes.ok) {
-    const t = await submitRes.text().catch(() => '')
-    throw new Error(`fal submit ${submitRes.status}: ${t || submitRes.statusText}`)
-  }
-  const submit = await submitRes.json() as FalSubmit
+  const submit = await falSubmit(app, input)
   const startedAt = Date.now()
-  const rid = submit.request_id
-  const statusUrl = submit.status_url || `${appBase}/requests/${rid}/status`
-  const resultUrl = submit.response_url || `${appBase}/requests/${rid}`
+  const rid = submit.requestId
 
   const deadline = Date.now() + (opts.pollDeadlineMs ?? 120_000)
   const interval = opts.pollIntervalMs ?? 1500
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, interval))
-    const sRes = await fetch(statusUrl, { headers })
-    if (sRes.status !== 200 && sRes.status !== 202) {
-      // 4xx = unrecoverable (bad rid / revoked key); 5xx = transient, retry.
-      if (sRes.status >= 400 && sRes.status < 500) {
-        const t = await sRes.text().catch(() => '')
-        throw new Error(`fal status ${sRes.status} (not retryable): ${t}`)
-      }
-      continue
-    }
-    const status = await sRes.json() as { status?: string }
+    // 4xx throws (unrecoverable: bad rid / revoked key); 5xx comes back transient.
+    const status = await falStatus(submit.statusUrl)
+    if (status.transient) continue
     if (status.status === 'IN_QUEUE' || status.status === 'IN_PROGRESS') continue
     if (status.status === 'COMPLETED') {
       logSpend({ provider: 'fal', model: app, ok: true, ms: Date.now() - startedAt })
-      const rRes = await fetch(resultUrl, { headers })
-      if (!rRes.ok) {
-        const t = await rRes.text().catch(() => '')
-        throw new Error(`fal result ${rRes.status}: ${t}`)
-      }
       // Settle only once the output is genuinely in hand — a body that fails
       // to parse means the caller gets nothing, so it must not be charged.
-      const body = await rRes.json() as T
+      const body = await falResult<T>(submit.responseUrl)
       if (ticket) {
         await ticket.settle('fal:' + rid)
         // job_id here is `settle:${holdId}` — see replicate.ts's dispatch()
@@ -127,7 +93,7 @@ async function dispatch<T>(
       return body
     }
     logSpend({ provider: 'fal', model: app, ok: false, ms: Date.now() - startedAt })
-    throw new Error(`fal request ${rid} ended in ${status.status}: ${JSON.stringify(status)}`)
+    throw new Error(`fal request ${rid} ended in ${status.status}: ${JSON.stringify(status.raw)}`)
   }
   throw new Error(`fal request timed out (id=${rid})`)
 }
