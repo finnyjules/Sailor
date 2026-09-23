@@ -533,6 +533,13 @@ export class GradientFxRenderer {
     return this.canvas!
   }
 
+  /** Render, then copy the frame onto `ctx` in the same turn (a WebGL canvas
+   *  can be cleared once the browser presents). Used by the video recorder. */
+  renderInto(ctx: CanvasRenderingContext2D, cfg: GradientConfig, width: number, height: number, time = 0): void {
+    this.render(cfg, width, height, time)
+    ctx.drawImage(this.canvas!, 0, 0, width, height)
+  }
+
   /** Render then export a PNG blob at the given size. */
   async renderToBlob(cfg: GradientConfig, width: number, height: number, time = 0, type = 'image/png'): Promise<Blob> {
     this.render(cfg, width, height, time)

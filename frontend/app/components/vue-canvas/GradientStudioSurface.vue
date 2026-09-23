@@ -42,6 +42,10 @@ import SweepPopover from '~/components/vue-canvas/studio/SweepPopover.vue'
 import { exportEmbedHtml, downloadEmbed } from '~/lib/embed/export'
 import type { GradientEmbedConfig } from '~/lib/embed/surfaces/gradient'
 import { clampExportDims } from '~/lib/gradientfx/exportDims'
+import { exportStudioVideo, resultBlob, videoErrorText, type StudioVideoResult } from '~/lib/studio/studioVideoExport'
+import { prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
+import { isAbortError } from '~/lib/engine/videoRecorder'
+import { hostedModeEnabled } from '~/lib/hostedMode'
 import {
   ASPECTS, CURVE_DEFAULTS, DEFAULT_CENTER, DEFAULT_FOCUS, DEFAULT_LIGHT, DIRECTIONS, GRADIENT_DIRS, LAYER_MAX, LAYOUTS, LAYOUT_LABELS, MAPPINGS, MIRROR_KINDS, RAMP_DEFAULTS, RING_SHAPES, SHAPE_KINDS,
   aspectRatio, cloneConfig, effectiveLayout, ensureConfigDefaults, type GradientConfig, type LayoutKind, type MeshConfig, type ShapeKind,
@@ -328,6 +332,15 @@ const ROLL_CAP = 48
 const canvas = ref<HTMLCanvasElement | null>(null)
 const baking = ref(false)
 const bakeMsg = ref('')
+// The running video export, so Cancel can stop it.
+let videoAbort: AbortController | null = null
+const exportingVideo = ref(false)
+function cancelVideoExport() { videoAbort?.abort() }
+function showVideoError(e: unknown) {
+  if (isAbortError(e)) { bakeMsg.value = 'Export cancelled.'; return }
+  console.error('[gradient] video failed', e)
+  bakeMsg.value = videoErrorText(e)
+}
 const embedMsg = ref('')
 const embedErr = ref(false)
 const embedding = ref(false)
@@ -728,33 +741,44 @@ async function renderBlobWithOverrides(overrides: Record<string, string | number
   }
 }
 
-/** Bake the current Gradient state to frames at `motion.fps`/`motion.duration`
- *  and encode server-side to a video file under input/. Shared by generateVideo()
- *  (dispatches a Video node onto the canvas) and downloadVideoFile() (saves the
- *  file locally) so this frame-bake exists in exactly one place. Callers own
- *  baking.value/stopPreview/startPreview. A bake-stage failure (ensureSpaceTypeBake)
- *  propagates to the caller; an encode-stage failure is caught here (mirrors the
- *  original generateVideo's nested try/catch) and reported via bakeMsg, returning
- *  null so callers treat it as "nothing to dispatch/download" without their own
- *  catch firing a second, more generic message. */
-async function bakeGradientVideo(): Promise<{ filename: string; ext: 'mp4' | 'webm' } | null> {
+/** Make the current Gradient Studio state into a video: recorded in the
+ *  browser, or — local mode only, with a notice — by today's server route. */
+async function bakeGradientVideo(publish: boolean): Promise<StudioVideoResult | null> {
   const m = config.value.motion
   const { w, h } = { w: m.size && aspectRatio(config.value.canvas.aspect) >= 1 ? Math.round(m.size * aspectRatio(config.value.canvas.aspect)) : m.size, h: m.size }
   const total = Math.max(1, Math.round(m.fps * m.duration))
-  const bakeCfg = { fps: m.fps, loopDuration: m.duration, W: w, H: h, seed: config.value.seed, sig: JSON.stringify(config.value) }
-  const bake = await ensureSpaceTypeBake(bakeCfg as any, undefined, {
-    renderFrame: async (i) => {
-      bakeMsg.value = `Baking ${i + 1}/${total}`
-      return gradientFx.renderToBlob(config.value, w, h, (i / m.fps))
-    },
-  })
-  bakeMsg.value = 'Encoding…'
+  videoAbort = new AbortController()
+  exportingVideo.value = true
   try {
-    return await encodeFrames({ frames: bake.frames, fps: m.fps, width: w, height: h })
-  } catch (encErr) {
-    bakeMsg.value = 'Encode failed — restart ComfyUI to load the encoder.'
-    console.error('[gradient] encode failed', encErr)
-    return null
+    return await exportStudioVideo({
+      prefix: 'gradient', publish,
+      width: w, height: h, fps: m.fps, frameCount: total, alpha: false,
+      signal: videoAbort.signal,
+      drawFrame: (i, ctx) => {
+        bakeMsg.value = `Rendering ${i + 1}/${total}`
+        gradientFx.renderInto(ctx, config.value, w, h, i / m.fps)
+      },
+      serverFallback: async () => {
+        const bakeCfg = { fps: m.fps, loopDuration: m.duration, W: w, H: h, seed: config.value.seed, sig: JSON.stringify(config.value) }
+        const bake = await ensureSpaceTypeBake(bakeCfg as any, undefined, {
+          renderFrame: async (i) => {
+            bakeMsg.value = `Baking ${i + 1}/${total}`
+            return gradientFx.renderToBlob(config.value, w, h, (i / m.fps))
+          },
+        })
+        bakeMsg.value = 'Encoding…'
+        try {
+          return await encodeFrames({ frames: bake.frames, fps: m.fps, width: w, height: h })
+        } catch (encErr) {
+          bakeMsg.value = 'Encode failed — restart ComfyUI to load the encoder.'
+          console.error('[gradient] encode failed', encErr)
+          return null
+        }
+      },
+    }, { hosted: hostedModeEnabled(useRuntimeConfig().public), forceServer: prefersServerVideoExport() })
+  } finally {
+    exportingVideo.value = false
+    videoAbort = null
   }
 }
 
@@ -762,15 +786,15 @@ async function generateVideo() {
   baking.value = true
   stopPreview()
   try {
-    const encoded = await bakeGradientVideo()
-    if (!encoded) return
-    await recordAsset(activeTab.value?.projectUuid, 'video', encoded.filename)
+    const made = await bakeGradientVideo(true)
+    if (!made?.filename) return
+    await recordAsset(activeTab.value?.projectUuid, 'video', made.filename)
     window.dispatchEvent(new CustomEvent('sailor:gradientStudioOutput', {
-      detail: { sourceNodeId: props.nodeId, nodeType: 'Video', widgetOverrides: { file: encoded.filename } },
+      detail: { sourceNodeId: props.nodeId, nodeType: 'Video', widgetOverrides: { file: made.filename } },
     }))
-    bakeMsg.value = ''
-    closeEditor()
-  } catch (e) { console.error('[gradient] video generate failed', e); bakeMsg.value = 'Failed — see console.' }
+    bakeMsg.value = made.notice ?? ''
+    if (!made.notice) closeEditor()
+  } catch (e) { showVideoError(e) }
   finally { baking.value = false; startPreview() }
 }
 
@@ -790,17 +814,11 @@ async function downloadVideoFile() {
   baking.value = true
   stopPreview()
   try {
-    const encoded = await bakeGradientVideo()
-    if (!encoded) return
-    // NOT `/input/${filename}` — that path isn't in the Nuxt dev server's
-    // comfyui-proxy PROXY_PREFIXES (server/middleware/comfyui-proxy.ts only
-    // proxies /view, /upload, etc.) and 404s; verified live. ComfyUI's own
-    // /view endpoint (proxied) serves the same input/ file by filename+type.
-    const res = await fetch(`/view?${new URLSearchParams({ filename: encoded.filename, type: 'input' })}`)
-    if (!res.ok) throw new Error(`/view returned ${res.status}`)
-    downloadBlobAsFile(await res.blob(), `gradient_${Date.now()}.${encoded.ext}`)
-    bakeMsg.value = ''
-  } catch (e) { console.error('[gradient] video download failed', e); bakeMsg.value = 'Failed — see console.' }
+    const made = await bakeGradientVideo(false)
+    if (!made) return
+    downloadBlobAsFile(await resultBlob(made), `gradient_${Date.now()}.${made.ext}`)
+    bakeMsg.value = made.notice ?? ''
+  } catch (e) { showVideoError(e) }
   finally { baking.value = false; startPreview() }
 }
 
@@ -997,7 +1015,7 @@ function onCurve(path: string, value: number | string) {
           error: glError || (embedErr ? embedMsg : null),
           notice: (!embedErr && embedMsg) ? embedMsg : (bakeMsg || null),
         },
-        utilities: [{ label: copied ? '✓ Copied' : 'Copy config', onClick: copyConfig }],
+        utilities: [{ label: copied ? '✓ Copied' : 'Copy config', onClick: copyConfig }, ...(exportingVideo ? [{ label: 'Cancel', onClick: cancelVideoExport }] : [])],
         downloads: [
           { label: 'Download PNG', onClick: downloadPng },
           { label: 'Download video', onClick: downloadVideoFile, busy: baking },
