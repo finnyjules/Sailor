@@ -87,6 +87,12 @@ export async function prepareMotionFramePainter(
   const frozenLayers = [...localLayers]
   const total = Math.max(1, Math.round(motion.duration * motion.fps))
   const time = (i: number) => i / motion.fps
+  // The Frame's own size, not the target canvas' — the browser recorder hands a
+  // canvas rounded UP to even dimensions (e.g. 1081px wide -> a 1082px canvas),
+  // so the layout must be painted at the Frame's true size or it stretches by a
+  // pixel. The clear below still covers the whole (possibly larger) ctx canvas.
+  const pw = Math.max(1, Math.round(W))
+  const ph = Math.max(1, Math.round(H))
   return {
     total,
     time,
@@ -98,7 +104,7 @@ export async function prepareMotionFramePainter(
       // bake=true (Task 10): this IS the final motion export — shader-fill fields must
       // render unclamped (full res) and stay live past LIVE_FIELD_CEILING, matching the
       // bake/preview split every other export path now honours.
-      paint(ctx, ctx.canvas.width, ctx.canvas.height, items, frozenLayers, undefined, t, motion,
+      paint(ctx, pw, ph, items, frozenLayers, undefined, t, motion,
         undefined, undefined, undefined, undefined, true)
     },
   }

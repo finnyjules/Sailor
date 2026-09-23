@@ -5,12 +5,14 @@ const motion = { fps: 25, duration: 0.2 } as any   // 5 frames
 
 function fakeCtx(w: number, h: number) {
   const calls: string[] = []
+  const clears: number[][] = []
   return {
     calls,
+    clears,
     ctx: {
       canvas: { width: w, height: h },
       setTransform: () => calls.push('reset'),
-      clearRect: () => calls.push('clear'),
+      clearRect: (x: number, y: number, cw: number, ch: number) => { calls.push('clear'); clears.push([x, y, cw, ch]) },
     } as any,
   }
 }
@@ -30,6 +32,17 @@ describe('prepareMotionFramePainter', () => {
     await p.paint(2, ctx)
     expect(order).toEqual(['pull 0.08', 'paint 0.08 100x50 bake=true'])
     expect(calls).toEqual(['reset', 'clear'])
+  })
+
+  it('paints at the Frame size, not the (possibly larger, rounded-up) canvas size, but clears the whole canvas', async () => {
+    const order: string[] = []
+    const paint = vi.fn((_ctx, w, h) => order.push(`paint ${w}x${h}`))
+    const p = await prepareMotionFramePainter(() => [], [], 101, 51, motion, undefined, { paint, ensure: async () => {} })
+    const { ctx, calls, clears } = fakeCtx(102, 52)
+    await p.paint(0, ctx)
+    expect(order).toEqual(['paint 101x51'])
+    expect(calls).toEqual(['reset', 'clear'])
+    expect(clears).toEqual([[0, 0, 102, 52]])
   })
 
   it('snapshots the stack ONCE: later edits do not leak into later frames', async () => {
