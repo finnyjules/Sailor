@@ -13,8 +13,8 @@ const toneClass: Record<string, string> = {
 
 <template>
   <div class="flex w-full items-center gap-2">
-    <!-- ① status + utilities (left, quiet) -->
-    <p v-if="status" class="truncate text-xs" :class="toneClass[status.tone]">{{ status.text }}</p>
+    <!-- ① utilities + status (left, quiet) — utilities first so a status text whose
+         width changes every frame (e.g. "Rendering 12/120") never shifts them sideways -->
     <StudioButton
       v-for="(u, i) in spec.utilities" :key="'u' + i"
       variant="subtle" :disabled="u.disabled || u.busy" @click="u.onClick">
@@ -23,6 +23,7 @@ const toneClass: Record<string, string> = {
         {{ u.busy ? 'Working…' : u.label }}
       </span>
     </StudioButton>
+    <p v-if="status" class="truncate text-xs tabular-nums" :class="toneClass[status.tone]">{{ status.text }}</p>
     <span class="flex-1" />
     <!-- ② download ▾ -->
     <StudioFooterMenu v-if="spec.downloads?.length" label="Download" variant="secondary" :actions="spec.downloads" />
