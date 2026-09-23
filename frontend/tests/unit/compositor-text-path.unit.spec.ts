@@ -659,3 +659,25 @@ describe('the module is pure', () => {
     expect(src).not.toMatch(/\bdocument\b|\bwindow\b|createElement/)
   })
 })
+
+// ── repeat (Ring sets its word three times round the circle) ────────────────
+
+describe('path repeat', () => {
+  it('repeats the run with the separator; absent or 1 is the run unchanged', () => {
+    expect(displayRun({ text: 'Noise', textTransform: undefined, path: { repeat: 3 } })).toBe('Noise — Noise — Noise — ')
+    expect(displayRun({ text: 'Noise', textTransform: 'uppercase', path: { repeat: 2 } })).toBe('NOISE — NOISE — ')
+    expect(displayRun({ text: 'Noise', textTransform: undefined, path: { repeat: 1 } })).toBe('Noise')
+    expect(displayRun({ text: 'Noise', textTransform: undefined, path: {} })).toBe('Noise')
+    expect(displayRun({ text: '', textTransform: undefined, path: { repeat: 3 } })).toBe('')
+  })
+
+  it('the measured run and the placed glyphs reflect the repeat', () => {
+    const spec = flat({ runLength: undefined, repeat: 3 })
+    const l = layer({ text: 'AB', path: spec })
+    const run = 'AB — AB — AB — '
+    expect(measureRunPx(stubCtx(), l)).toBe(Array.from(run).length * CH)
+    expect(measureRunPx(stubCtx(), layer({ text: 'AB', path: flat({ runLength: undefined }) }))).toBe(2 * CH)
+    const g = guideFromSpec(spec, W, measureRunPx(stubCtx(), l))!
+    expect(placeGlyphs(stubCtx(), l, g, W).map(p => p.ch).join('')).toBe(run.replace(/ /g, ''))   // spaces place no glyph
+  })
+})

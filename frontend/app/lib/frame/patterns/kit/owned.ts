@@ -32,10 +32,17 @@ export function mergeOwned(layers: LocalLayer[], wanted: LocalLayer[]): LocalLay
     out.push({ ...wantedLayer, id: l.id } as LocalLayer) // update in place, keep id
     return out
   }, [])
+  // A new piece's id (`layout-<key>`) can already be taken — by a piece the user edited (its
+  // owner is cleared, its id stays), or by any other layer. Ids must stay unique: take the next
+  // free `<id>-2`, `<id>-3`, … (the planner points the piece's op at whatever id it ends up with).
+  const taken = new Set(merged.map(l => l.id))
   for (const w of wanted) {
     const key = (w as { owner?: { key: string } }).owner?.key
     if (key === undefined || seen.has(key)) continue
-    merged.push(w)
+    let id = w.id
+    for (let n = 2; taken.has(id); n++) id = `${w.id}-${n}`
+    taken.add(id)
+    merged.push(id === w.id ? w : ({ ...w, id } as LocalLayer))
   }
   return merged
 }

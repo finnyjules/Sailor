@@ -702,3 +702,38 @@ describe('setLayerEffect writes through the effect stack', () => {
     expect(fx.seed).toBe(5)    // rounded to an integer
   })
 })
+
+describe('agent edits make a layout piece the user\'s own (M2)', () => {
+  const withOwned = (): CompositorState => {
+    const s = state()
+    ;(s.layers[1] as any).owner = { by: 'layout', key: 'band-0' }
+    ;(s.layers[0] as any).owner = { by: 'layout', key: 'x' }
+    return s
+  }
+  it.each([
+    ['setLayerProps', { patch: { x: 0.2 } }],
+    ['setFill', { paint: '#00ff00' }],
+    ['setSize', { w: 0.3 }],
+    ['setStroke', { paint: '#000000', width: 0.01 }],
+  ])('%s on an owned piece clears its owner', (op, args) => {
+    const r = applyCompositorCommand(withOwned(), { op, target: 'r1', args } as never)
+    expect(r.ok).toBe(true); if (!r.ok) return
+    expect((r.template.layers[1] as any).owner).toBeUndefined()
+    expect((r.template.layers[0] as any).owner).toEqual({ by: 'layout', key: 'x' })   // other layers keep theirs
+  })
+  it('setTextStyle on an owned text clears it; the input is not mutated; undo brings it back', () => {
+    const before = withOwned()
+    const r = applyCompositorCommand(before, { op: 'setTextStyle', target: 't1', args: { patch: { fontSize: 0.2 } } })
+    expect(r.ok).toBe(true); if (!r.ok) return
+    expect((r.template.layers[0] as any).owner).toBeUndefined()
+    expect((before.layers[0] as any).owner).toEqual({ by: 'layout', key: 'x' })
+    const undo = applyCompositorCommand(r.template, r.inverse)
+    if (!undo.ok) throw new Error('fail')
+    expect((undo.template.layers[0] as any).owner).toEqual({ by: 'layout', key: 'x' })
+  })
+  it('a reorder (setLayerDepth) is not a style edit and keeps the owner', () => {
+    const r = applyCompositorCommand(withOwned(), { op: 'setLayerDepth', target: 'r1', args: { to: 'front' } })
+    if (!r.ok) return
+    expect((r.template.layers.find(l => l.id === 'r1') as any).owner).toEqual({ by: 'layout', key: 'band-0' })
+  })
+})

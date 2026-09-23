@@ -21,10 +21,17 @@ export interface RoleTargets {
   /** The shape layer's kind. A `path` layer sizes from one uniform scale (apply writes
    *  `scale = w / bbox.w`), so it cannot take a non-square box; the others take `w` × `h`. */
   shapeKind?: string
+  /** A library shape to insert where the layout draws its shape (a `shape`-role circle or
+   *  rect), when the frame has no shape layer and the shape picker names one. `aspect` is the
+   *  shape's h / w. Without it the layout draws its own plain piece. */
+  libraryShape?: { id: string; aspect: number }
 }
 
 /** Used when the caller passes no palette (tests, previews): the same fallbacks as `rolesFromFamily`. */
 const FALLBACK_PALETTE: ResolvedPalette = { field: '#f2f0ef', ink: '#121212', accent: '#dd2200' }
+
+/** How many times Ring sets the word around its circle (the prototype's `unit.repeat(3)`). */
+const RING_REPEAT = 3
 
 /** Kit rule thickness, in kit units (the prototype's 0.16cqw border). */
 const RULE_H = 0.16
@@ -189,6 +196,18 @@ export function elementsToOps(
     ops.push({ target: layer.id, kind: 'shape', x: layer.x, y: layer.y, z, insert })
   }
 
+  /** The picked library shape, fitted inside the layout's box (centred, its own aspect) as a
+   *  sentinel op: `insertFromOps` turns it into a real path layer in the palette colour. */
+  const libraryOp = (cx: number, cy: number, bw: number, bh: number, z: number,
+    e: { color?: Colour; rot?: number; opacity?: number; blend?: boolean }): LayerOp => {
+    const { id, aspect } = targets.libraryShape!
+    const w = Math.min(bw, bh / aspect)
+    return {
+      target: 'shape', kind: 'shape', shapeId: id, x: cx, y: cy, w, h: w * aspect,
+      rotation: e.rot ?? 0, colorRole: e.color ?? 'accent', fill: 'solid', z, ...look(e),
+    }
+  }
+
   els.forEach((e, z) => {
     switch (e.k) {
       case 'missing':
@@ -212,7 +231,7 @@ export function elementsToOps(
         ops.push({
           target: imageTarget, kind: 'image',
           x: (p.x + p.w / 2) / 100, y: (p.y + p.h / 2) / S.H, w: p.w / 100, h: p.h / 100,
-          crop: { fit: 'cover' }, z, ...look(p),
+          crop: { fit: 'cover' }, rotation: 0, z, ...look(p),
         })
         return
       }
@@ -222,12 +241,14 @@ export function elementsToOps(
         if (c.photo) {
           ops.push({
             target: imageTarget, kind: 'image', x, y, w: d, h: d,
-            crop: { fit: 'cover' }, mask: { kind: 'ellipse', x, y, w: d, h: d }, z, ...look(c),
+            crop: { fit: 'cover' }, mask: { kind: 'ellipse', x, y, w: d, h: d }, rotation: 0, z, ...look(c),
           })
         } else if (targets.shape && c.role === 'shape') {
-          const op: LayerOp = { target: targets.shape, kind: 'shape', x, y, w: d, h: d, z, ...look(c) }
+          const op: LayerOp = { target: targets.shape, kind: 'shape', x, y, w: d, h: d, rotation: 0, z, ...look(c) }
           if (c.color) op.colorRole = c.color
           ops.push(op)
+        } else if (c.role === 'shape' && targets.libraryShape) {
+          ops.push(libraryOp(x, y, d, d, z, c))
         } else {
           const key = keyFor(c.role ?? 'circle')
           own(createEllipseLayer({ ...ownedBase(key, c), x, y, w: d, h: d, fill: paint(c.color) }), 'ellipse', key, z)
@@ -245,9 +266,13 @@ export function elementsToOps(
             target: targets.shape, kind: 'shape',
             x: (r.x + r.w / 2) / 100, y: (r.y + r.h / 2) / S.H, w: w / 100, h: h / 100, z, ...look(r),
           }
-          if (r.rot) op.rotation = r.rot
+          op.rotation = r.rot ?? 0
           if (r.color) op.colorRole = r.color
           ops.push(op)
+          return
+        }
+        if (baseRole(r.role) === 'shape' && targets.libraryShape) {
+          ops.push(libraryOp((r.x + r.w / 2) / 100, (r.y + r.h / 2) / S.H, r.w / 100, r.h / 100, z, r))
           return
         }
         const key = keyFor(r.role ?? 'rect')
@@ -274,7 +299,9 @@ export function elementsToOps(
         ops.push({
           target: targets.title, kind: 'text', x: g.cx / 100, y: g.cy / S.H,
           fontSize: g.size / 100, rotation: 0,
-          path: { follow: 'circle', radius: g.R / 100, start: 0.5, fit: true },
+          // The ring's text is the word three times over (the layout sized it so: `s` is
+          // `(title + ' — ') × 3`); the renderer repeats the layer's own word with `repeat`.
+          path: { follow: 'circle', radius: g.R / 100, start: 0.5, fit: true, repeat: RING_REPEAT },
           colorRole: DEFAULT_TEXT_ROLE, z, ...look(g),
         })
       }

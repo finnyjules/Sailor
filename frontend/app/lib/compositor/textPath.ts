@@ -104,7 +104,14 @@ export interface TextPathSpec {
   shift?: number
   /** Squeeze/stretch tracking so the run fills the guide exactly. Default false. */
   fit?: boolean
+  /** Set the text this many times along the path, each followed by `REPEAT_SEPARATOR` (a
+   *  ring then reads "WORD — WORD — WORD — " all the way round). Absent or < 2 ⇒ once. */
+  repeat?: number
 }
+
+/** What follows each repeat of a path's text (`TextPathSpec.repeat`) — the layout prototype's
+ *  Ring unit, `title + ' — '`. */
+export const REPEAT_SEPARATOR = ' — '
 
 /**
  * A text layer that may carry a path spec.
@@ -487,8 +494,10 @@ function transformCase(s: string, t: TextLayer['textTransform']): string {
  * V-align while it is on), so newlines become spaces rather than being dropped —
  * dropping them would weld the words either side together.
  */
-export function displayRun(layer: Pick<TextLayer, 'text' | 'textTransform'>): string {
-  return transformCase(layer.text ?? '', layer.textTransform).replace(/\s+/gu, ' ')
+export function displayRun(layer: Pick<TextLayer, 'text' | 'textTransform'> & { path?: Pick<TextPathSpec, 'repeat'> }): string {
+  const run = transformCase(layer.text ?? '', layer.textTransform).replace(/\s+/gu, ' ')
+  const n = Math.floor(layer.path?.repeat ?? 0)
+  return n >= 2 && run ? (run + REPEAT_SEPARATOR).repeat(n) : run
 }
 
 /**
@@ -500,7 +509,7 @@ export function displayRun(layer: Pick<TextLayer, 'text' | 'textTransform'>): st
  */
 export function measureRunPx(
   ctx: CanvasRenderingContext2D,
-  layer: Pick<TextLayer, 'text' | 'textTransform'>,
+  layer: Pick<TextLayer, 'text' | 'textTransform'> & { path?: Pick<TextPathSpec, 'repeat'> },
 ): number {
   const run = displayRun(layer)
   if (!run) return 0

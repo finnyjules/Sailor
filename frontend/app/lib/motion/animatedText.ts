@@ -6,7 +6,7 @@
  * can transform them individually.
  */
 import type { TextLayer } from '~/composables/useCompositorLayers'
-import { wrappedTextLines, applyFont, localBlendOp } from '~/composables/useCompositorLayers'
+import { wrappedTextLines, applyFont, localBlendOp, transformCase } from '~/composables/useCompositorLayers'
 import { paintPrimaryColor } from '~/lib/spacetype/fillTile'
 import { strokeStackOf, type StrokeInstance } from '~/lib/compositor/strokeStack'
 import type { UnitState } from './evaluate'
@@ -17,6 +17,28 @@ export interface CharCell {
   y: number
   w: number   // px advance width
   h: number   // px em box (fontSize px) — the unit box for dy deltas
+  /** A placed line's size, as a multiple of the layer's font size (TextRun.s). Absent ⇒ 1. */
+  s?: number
+}
+
+/** Cells for a layer with placed lines (`runs`): each run's text (in the layer's case) at its
+ *  own place and size — `drawTextRuns`' geometry: left-anchored at `x`, `y` its em-box middle,
+ *  both in em of the layer's font size, the font scaled by the run's `s`. */
+function layoutRunUnits(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number): CharCell[] {
+  const fontPx = layer.fontSize * W
+  const cells: CharCell[] = []
+  for (const run of layer.runs!) {
+    const s = run.s ?? 1
+    applyFont(ctx, s === 1 ? layer : { ...layer, fontSize: (layer.fontSize * W * s) / W }, W)
+    let x = run.x * fontPx
+    const y = run.y * fontPx
+    for (const char of [...transformCase(run.text, layer.textTransform)]) {
+      const w = ctx.measureText(char).width
+      if (char.trim()) cells.push(s === 1 ? { char, x: x + w / 2, y, w, h: fontPx } : { char, x: x + w / 2, y, w, h: fontPx * s, s })
+      x += w
+    }
+  }
+  return cells
 }
 
 /** One cell per non-whitespace char. Local frame: origin = layer center,
@@ -28,6 +50,8 @@ export function layoutTextUnits(
   H: number,
 ): CharCell[] {
   void H // unused — kept for API symmetry with the draw function
+  // A layout's placed lines take over the whole layout, as they do in drawText.
+  if (layer.runs?.length) return layoutRunUnits(ctx, layer, W)
   const lines = wrappedTextLines(ctx, layer, W)
   const fontPx = layer.fontSize * W
   const lineH = fontPx * layer.lineHeight
@@ -153,6 +177,7 @@ export function drawAnimatedTextLayer(
     }
     ctx.translate(cell.x + st.dx * cell.h, cell.y + st.dy * cell.h)
     if (st.rotation) ctx.rotate((st.rotation * Math.PI) / 180)
+    if (cell?.s) ctx.scale(cell.s, cell.s)   // a placed line set larger or smaller than the layer
     if (st.scale !== 1 || st.scaleX != null || st.scaleY != null) {
       ctx.scale(
         Math.max(0.001, st.scale * (st.scaleX ?? 1)),

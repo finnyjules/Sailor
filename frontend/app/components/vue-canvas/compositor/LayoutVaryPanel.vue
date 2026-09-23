@@ -130,7 +130,7 @@ function pick(row: ChoiceRow, k: string) {
           @pick="emit('select', it.id)"
         />
       </div>
-      <p v-if="dropped.length" class="text-[11px] text-white/40" data-testid="layout-not-offered">Not offered for this shape: {{ dropped.join(', ') }}.</p>
+      <p v-if="dropped.length" class="text-[11px] text-white/40" data-testid="layout-not-offered">Not offered for this Frame: {{ dropped.join(', ') }}.</p>
     </div>
   </div>
 </template>

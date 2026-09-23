@@ -1,7 +1,7 @@
 import { ref, computed, shallowRef, watch, toRaw, getCurrentScope, onScopeDispose } from 'vue'
 import type { Ref, ComputedRef } from 'vue'
 import { applyLayoutToFrame, candidatesForFrame, lineOptionsForFrame, planLayout } from '~/lib/frame/patterns/kit/plan'
-import type { LayoutEditor, LayoutPlan, LayoutPlanArgs } from '~/lib/frame/patterns/kit/plan'
+import type { LayoutEditor, LayoutPlan, LayoutPlanArgs, StoredRoles } from '~/lib/frame/patterns/kit/plan'
 import { DEFAULT_CHOICE } from '~/lib/frame/patterns/kit/vary'
 import type { Candidate, Choice } from '~/lib/frame/patterns/kit/vary'
 import type { Measure } from '~/lib/frame/patterns/kit/types'
@@ -10,6 +10,7 @@ import type { PosterState } from '~/lib/frame/patterns/applyToFrame'
 import { paletteFromFrame } from '~/lib/frame/patterns/framePalette'
 import { rolesFromFamily } from '~/lib/frame/patterns/palette'
 import type { FrameElements } from '~/lib/frame/patterns/types'
+import { cssFontStack } from '~/composables/useCompositorLayers'
 
 // ═══════════════════════ the Layout tab's state ═══════════════════════
 // One layout at a time, with every checked variation of it on this Frame (`candidatesForFrame`),
@@ -37,7 +38,7 @@ export interface LayoutVarySource {
   connectedSlots: () => number[]
   editor: () => LayoutEditor
   /** Persist the applied state (UI memory, outside the undo step). */
-  remember(s: { patternId: string; seed: number; choice: Choice; index: number }): void
+  remember(s: { patternId: string; seed: number; choice: Choice; index: number; roles?: StoredRoles }): void
   /** Whether the Layout tab is showing. The library plans only while it is. Default: always. */
   active?: () => boolean
   /** A text layer is being edited on the canvas: content re-plans wait until the edit ends. */
@@ -48,6 +49,22 @@ export interface LayoutVarySource {
 
 /** How long the layers must be still before a content change re-plans (ms). */
 export const CONTENT_SETTLE_MS = 200
+
+/** How long a re-plan waits for the Frame's faces to load before planning anyway (ms). */
+export const FONT_WAIT_MS = 1500
+
+/** The page's font set, or null where there is none (SSR, tests without a DOM). */
+function fontSet(): FontFaceSet | null {
+  return typeof document !== 'undefined' && (document as Document & { fonts?: FontFaceSet }).fonts ? document.fonts : null
+}
+
+/** One `document.fonts` spec per face and weight of the Frame's own text layers (the faces the
+ *  planner measures). Size does not change which face loads. */
+function faceSpecs(props: Record<string, unknown> | undefined): string[] {
+  const layers = ((props?.sailor_localLayers as Record<string, unknown>[] | undefined) ?? [])
+    .filter(l => l.kind === 'text' && !l.owner && typeof l.fontFamily === 'string')
+  return [...new Set(layers.map(l => `${l.fontWeight ?? 400} 32px ${cssFontStack(l.fontFamily as string)}`))]
+}
 
 /** How many library layouts plan at once; the rest plan when the browser is idle. */
 const LIBRARY_FIRST = 12
@@ -60,9 +77,9 @@ const LAYOUT_FIELDS = new Set([
 ])
 
 /** The Frame's content, as one string: every user layer minus the layout-set fields (the text
- *  with its line breaks folded, since a layout re-breaks it), the order of text sizes (it decides
- *  which text is the title), the grid and the Frame's size. Owned pieces are left out: a layout
- *  rebuilds its own. */
+ *  with its line breaks folded, since a layout re-breaks it), the order of text sizes and the
+ *  stored roles (they decide which text is the title), the grid and the Frame's size. Owned
+ *  pieces are left out: a layout rebuilds its own. */
 function contentKey(props: Record<string, unknown> | undefined, w: number, h: number, slots: number[]): string {
   const layers = ((props?.sailor_localLayers as Record<string, unknown>[] | undefined) ?? [])
     .filter(l => !l.owner)
@@ -78,7 +95,9 @@ function contentKey(props: Record<string, unknown> | undefined, w: number, h: nu
     }
     return o
   })
-  return JSON.stringify([w, h, slots, rank, rows, props?.sailor_localGrid ?? null])
+  // The roles the last apply stored decide which text is the title as much as the sizes do.
+  const roles = (props?.sailor_posterState as { roles?: unknown } | undefined)?.roles ?? null
+  return JSON.stringify([w, h, slots, rank, rows, props?.sailor_localGrid ?? null, roles])
 }
 
 const sameChoice = (a: Choice, b: Choice) =>
@@ -132,10 +151,39 @@ export function useLayoutVary(src: LayoutVarySource): {
   // from raw objects, and only when it settles (see `settle`).
   const isActive = () => src.active?.() ?? true
   const settledKey = ref('')
+  /** Nothing is planned yet and the Frame's faces are still loading: plan nothing until they are
+   *  (a plan measured in a fallback face is a wrong plan). */
+  const waitingForFaces = ref(false)
+  let pendingKey: string | null = null
   function settle() {
     clearTimeout(settleTimer); settleTimer = undefined
-    const k = contentKey(toRaw(src.props()), src.frameW(), src.frameH(), src.connectedSlots())
-    if (k !== settledKey.value) settledKey.value = k
+    const raw = toRaw(src.props())
+    const k = contentKey(raw, src.frameW(), src.frameH(), src.connectedSlots())
+    if (k === settledKey.value) { pendingKey = null; waitingForFaces.value = false; return }
+    // The planner measures the Frame's own faces: load them first (bounded), then re-plan.
+    const fonts = fontSet()
+    const missing = fonts ? faceSpecs(raw).filter((spec) => { try { return !fonts.check(spec) } catch { return false } }) : []
+    if (!missing.length) { pendingKey = null; waitingForFaces.value = false; settledKey.value = k; return }
+    if (pendingKey === k) return
+    pendingKey = k
+    if (!settledKey.value) waitingForFaces.value = true
+    const done = () => {
+      if (pendingKey !== k) return
+      pendingKey = null; waitingForFaces.value = false; settledKey.value = k
+    }
+    const loads = missing.map(spec => Promise.resolve().then(() => fonts!.load(spec)).catch(() => []))
+    Promise.race([Promise.all(loads), new Promise(r => setTimeout(r, FONT_WAIT_MS))]).then(done, done)
+  }
+  /** Bumped whenever the page finishes loading fonts: a face that arrives after a plan was made
+   *  (measured in a fallback) re-plans with the real one. */
+  const fontRev = ref(0)
+  {
+    const fonts = fontSet()
+    if (fonts && typeof fonts.addEventListener === 'function') {
+      const onFonts = () => { fontRev.value++ }
+      fonts.addEventListener('loadingdone', onFonts)
+      if (getCurrentScope()) onScopeDispose(() => fonts.removeEventListener('loadingdone', onFonts))
+    }
   }
   let settleTimer: ReturnType<typeof setTimeout> | undefined
   let heldByEdit = false
@@ -170,14 +218,14 @@ export function useLayoutVary(src: LayoutVarySource): {
       measure: src.measure,
     }
   }
-  const planKey = computed(() => JSON.stringify([settledKey.value, paletteMode.value, shapeMode.value ?? null, imageMode.value]))
+  const planKey = computed(() => JSON.stringify([settledKey.value, fontRev.value, paletteMode.value, shapeMode.value ?? null, imageMode.value]))
   /** Bumped when the Frame was re-arranged as a whole: an apply from here (bumped directly, so a
    *  host with plain props still re-plans), or anything that writes a new draw order — apply,
    *  undo, redo, a layer reorder. Identity only, never deep: a drag writes no order. */
   const rev = ref(0)
   // Re-arranged as a whole: the new content (a recolour, new line breaks) is settled at once too,
   // so the rebuild that follows is the only one.
-  watch(() => src.props()?.sailor_stackOrder, () => { if (isActive()) settle(); rev.value++ })
+  watch(() => src.props()?.sailor_stackOrder, () => { if (isActive()) settle(); rev.value++; followFrame() })
 
   // ── the current layout and its variations ──
   const layoutId = ref<string>(stored && layoutById(stored.patternId) ? stored.patternId : '')
@@ -185,6 +233,17 @@ export function useLayoutVary(src: LayoutVarySource): {
    *  Before that, the first Vary applies the variation on show rather than skipping past it. */
   const applied = ref<boolean>(!!layoutId.value)
   const choice = ref<Choice>(stored?.choice ? { ...DEFAULT_CHOICE, ...stored.choice } : { ...DEFAULT_CHOICE })
+
+  /** Follow the layout the Frame records (`sailor_posterState`, which undo and redo restore with
+   *  the layers): the layout, its variation — so "n of N" and the next V follow the Frame — and
+   *  whether one is applied at all. */
+  function followFrame() {
+    const st = src.props()?.sailor_posterState as PosterState | undefined
+    if (!st?.patternId || !layoutById(st.patternId)) { applied.value = false; return }
+    layoutId.value = st.patternId
+    if (st.choice) choice.value = { ...DEFAULT_CHOICE, ...st.choice }
+    applied.value = true
+  }
 
   /** A candidate whose plan is worked out on first read (only the tiles on screen are planned). */
   function withPlan(c: Candidate, a: Omit<LayoutPlanArgs, 'choice'>): VaryCandidate {
@@ -198,7 +257,7 @@ export function useLayoutVary(src: LayoutVarySource): {
   const enumerated = computed<Candidate[]>(() => {
     void planKey.value
     const id = layoutId.value
-    if (!id) return []
+    if (!id || waitingForFaces.value) return []
     return candidatesForFrame({ ...baseArgs(), layoutId: id })
   })
   /** Each with a lazy plan over the Frame as it is now (re-made on `rev`; cheap until read). */
@@ -273,7 +332,7 @@ export function useLayoutVary(src: LayoutVarySource): {
   }
   // The source reads the Frame only while the tab is showing: an inactive tab costs nothing, and
   // a host whose getters are not ready yet during its own setup is never called then.
-  watch(() => ((src.active?.() ?? true) ? `${planKey.value}#${rev.value}` : null), (key) => {
+  watch(() => ((src.active?.() ?? true) && !waitingForFaces.value ? `${planKey.value}#${rev.value}` : null), (key) => {
     if (key == null || key === libBuilt) return
     libBuilt = key
     buildLibrary()
@@ -293,7 +352,7 @@ export function useLayoutVary(src: LayoutVarySource): {
     applied.value = true
     settle()
     rev.value++
-    src.remember({ patternId: out.posterState.patternId, seed: out.posterState.seed, choice: { ...c.choice }, index: i })
+    src.remember({ patternId: out.posterState.patternId, seed: out.posterState.seed, choice: { ...c.choice }, index: i, roles: out.posterState.roles })
     return true
   }
   const applyAt = (i: number) => applyChoice(layoutId.value, candidates.value, i)
@@ -304,12 +363,17 @@ export function useLayoutVary(src: LayoutVarySource): {
     const list = id === layoutId.value ? candidates.value : candidatesForFrame({ ...baseArgs(), layoutId: id })
     applyChoice(id, list, 0)
   }
+  /** Apply from variation `start` on, stepping by `step` past any the apply refuses (its plan with
+   *  the real faces can fail the checks that passed when it was listed), for at most `tries`. */
+  function applyFrom(start: number, step: 1 | -1, n: number, tries: number) {
+    for (let k = 0; k < tries; k++) if (applyAt((((start + k * step) % n) + n) % n)) return
+  }
   function vary(step: 1 | -1) {
     const n = candidates.value.length
     if (!n) return
-    if (!applied.value) { applyAt(index.value); return }   // the first Vary applies what is shown
+    if (!applied.value) { applyFrom(index.value, step, n, n); return }   // the first Vary applies what is shown
     if (n < 2) return
-    applyAt((index.value + step + n) % n)
+    applyFrom(index.value + step, step, n, n - 1)                       // one full cycle, never the one on show
   }
   function jump(i: number) { applyAt(i) }
   /** The prototype's `setAxis`: of the variations with that value, the one that keeps the most

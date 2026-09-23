@@ -48,7 +48,6 @@ export function applyPlacement(
     const op = byId.get(layer.id)
     if (!op) return layer
     const next: any = { ...layer, x: op.x, y: op.y }
-    if (op.rotation != null) next.rotation = op.rotation
     const blend = op.blendMode ?? op.blend
     const textOrImage = layer.kind === 'text' || layer.kind === 'image' || layer.kind === 'wired'
     // Layout-set fields (opacity, blend, spacing, crop, mask, path, runs) are re-authored on
@@ -68,6 +67,10 @@ export function applyPlacement(
         delete prev[field]
       }
     }
+    // Text ops always carry their rotation. An image or shape takes the layout's angle (the kit
+    // writes 0 when the layout gives none), with the user's own angle remembered like the other
+    // layout-set fields and put back when an op leaves it unset.
+    if (layer.kind === 'text') { if (op.rotation != null) next.rotation = op.rotation } else track('rotation', op.rotation)
     if (textOrImage) {
       track('opacity', op.opacity)
       track('blend', blend)
@@ -95,6 +98,13 @@ export function applyPlacement(
       track('letterSpacing', op.letterSpacing)
       track('runs', op.runs?.length ? op.runs : undefined)
       track('path', op.path ?? undefined)
+      // Flow text is sized by the layout at the size the checker approved, measured with plain
+      // wrapping: a shrink / fill / break box fit would redraw it at another size or break. While
+      // the layout holds, the fit is 'wrap' (the renderer's default); the user's own fit comes
+      // back when a later op sets the layer as placed lines or on a path (where fit is unused).
+      const flow = !op.runs?.length && !op.path
+      const fit = (layer as any).boxFit
+      track('boxFit', flow && ((fit && fit !== 'wrap') || prev.boxFit) ? 'wrap' : undefined)
     } else if (layer.kind === 'path' && typeof op.w === 'number' && op.w > 0 && (layer as any).bbox?.w > 0) {
       // A path layer has no `w`: it sizes from `bbox × scale` (both in the same
       // normalized-frame-width units as op.w — see useCompositorLayers' layerBoxPx).

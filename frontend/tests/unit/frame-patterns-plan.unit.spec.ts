@@ -17,7 +17,7 @@ describe('planPattern', () => {
     expect(plan).not.toBeNull()
     expect(plan.layers).toHaveLength(2)
     expect(plan.order.indexOf('l:img')).toBeLessThan(plan.order.indexOf('l:t'))
-    expect(plan.posterState).toEqual({ patternId: 'photoBehind', seed: 7, shapeMode: undefined, imageMode: undefined, choice: DEFAULT_CHOICE })
+    expect(plan.posterState).toEqual({ patternId: 'photoBehind', seed: 7, shapeMode: undefined, imageMode: undefined, choice: DEFAULT_CHOICE, roles: { title: 't' } })
     expect(plan.did.length).toBeGreaterThan(0)
     expect(props.sailor_localLayers[0]).toBe(title)                 // input untouched
   })

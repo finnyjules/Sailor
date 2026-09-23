@@ -248,6 +248,11 @@ describe('elementsToOps — pieces and photos', () => {
     expect(ops[0]).toMatchObject({ target: 't', fontSize: 0.06, path: { follow: 'circle', radius: 0.3, start: 0.5, fit: true } })
   })
 
+  it('a ring repeats the word three times (the layout sized it for three)', () => {
+    const { ops } = elementsToOps([{ k: 'ring', cx: 50, cy: 60, R: 30, size: 6, s: 'RING' }], S, targets, frame)
+    expect(ops[0]!.path?.repeat).toBe(3)
+  })
+
   it('z follows element order', () => {
     const { ops } = elementsToOps([
       { k: 'p', x: 0, y: 0, w: 10, h: 10, role: 'photo' },

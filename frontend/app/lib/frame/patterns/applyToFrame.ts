@@ -2,7 +2,7 @@ import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { ResolvedPalette } from './palette'
 import type { FrameElements } from './types'
 import { planLayout, applyLayoutToFrame } from './kit/plan'
-import type { LayoutEditor, LayoutPlanArgs } from './kit/plan'
+import type { LayoutEditor, LayoutPlanArgs, StoredRoles } from './kit/plan'
 import { DEFAULT_CHOICE } from './kit/vary'
 import type { Choice } from './kit/vary'
 
@@ -18,6 +18,9 @@ import type { Choice } from './kit/vary'
 export interface PosterState {
   patternId: string; seed: number; shapeMode?: FrameElements['shapeMode']; imageMode?: boolean; choice?: Choice
   palette?: string[]; index?: number
+  /** Which layer holds which role, as the last apply saw it: the next plan keeps these rather
+   *  than re-inferring from font size (an overlap layout can leave details larger than the title). */
+  roles?: StoredRoles
 }
 
 export interface PlanArgs {
@@ -61,8 +64,8 @@ function kitArgs(args: PlanArgs): LayoutPlanArgs {
   }
 }
 
-function posterStateFor(args: PlanArgs, choice: Choice): PosterState {
-  return { patternId: args.patternId, seed: args.seed, shapeMode: args.shapeMode, imageMode: args.imageMode, choice: { ...choice } }
+function posterStateFor(args: PlanArgs, choice: Choice, roles: StoredRoles): PosterState {
+  return { patternId: args.patternId, seed: args.seed, shapeMode: args.shapeMode, imageMode: args.imageMode, choice: { ...choice }, roles }
 }
 
 /** Run a layout on a frame and return the plan. Pure: nothing is written. Null when the id is
@@ -71,7 +74,7 @@ function posterStateFor(args: PlanArgs, choice: Choice): PosterState {
 export function planPattern(args: PlanArgs): PatternPlan | null {
   const plan = planLayout(kitArgs(args))
   if (!plan || plan.issues.length) return null
-  return { layers: plan.layers, order: plan.order, did: plan.did, posterState: posterStateFor(args, plan.posterState.choice) }
+  return { layers: plan.layers, order: plan.order, did: plan.did, posterState: posterStateFor(args, plan.posterState.choice, plan.posterState.roles) }
 }
 
 /** Apply a layout as ONE undo step: history → layers → groups → order (the kit's
@@ -79,5 +82,5 @@ export function planPattern(args: PlanArgs): PatternPlan | null {
 export function applyPatternToFrame(args: ApplyArgs): { ok: boolean; posterState?: PosterState } {
   const out = applyLayoutToFrame({ ...kitArgs(args), editor: args.editor })
   if (!out.ok || !out.posterState) return { ok: false }
-  return { ok: true, posterState: posterStateFor(args, out.posterState.choice) }
+  return { ok: true, posterState: posterStateFor(args, out.posterState.choice, out.posterState.roles) }
 }

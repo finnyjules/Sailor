@@ -1,11 +1,11 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { reactive, nextTick } from 'vue'
 vi.mock('~/lib/frame/patterns/kit/plan', async (importOriginal) => {
   const m = await importOriginal<typeof import('~/lib/frame/patterns/kit/plan')>()
   return { ...m, planLayout: vi.fn(m.planLayout), applyLayoutToFrame: vi.fn(m.applyLayoutToFrame) }
 })
 import { planLayout, applyLayoutToFrame } from '~/lib/frame/patterns/kit/plan'
-import { useLayoutVary, CONTENT_SETTLE_MS } from '~/composables/useLayoutVary'
+import { useLayoutVary, CONTENT_SETTLE_MS, FONT_WAIT_MS } from '~/composables/useLayoutVary'
 import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
 import { LAYOUTS } from '~/lib/frame/patterns/layouts/catalog'
 import { createImageLayer, createTextLayer } from '~/composables/useCompositorLayers'
@@ -87,7 +87,7 @@ describe('useLayoutVary', () => {
     expect(editor.commit.mock.calls[0]![0]).toEqual(next.plan.layers)
     expect(editor.writeOrder.mock.calls[0]![0]).toEqual(next.plan.order)
     expect(vary.index.value).toBe(1)
-    expect(remember).toHaveBeenCalledWith({ patternId: 'statement', seed: next.plan.posterState.seed, choice: next.choice, index: 1 })
+    expect(remember).toHaveBeenCalledWith({ patternId: 'statement', seed: next.plan.posterState.seed, choice: next.choice, index: 1, roles: { title: 't', details: 'd', date: 'dt', caption: 'c' } })
   })
 
   it('vary(-1) from the first variation wraps to the last', () => {
@@ -295,5 +295,134 @@ describe('useLayoutVary', () => {
     const tileAfter = vary.candidates.value[2]!.plan
     expect(tileAfter).not.toBe(tileBefore)
     expect(spy.mock.calls.at(-1)![0].props?.sailor_localLayers).toBe(committed)
+  })
+})
+
+// ── Fonts (I4): the planner measures the Frame's own faces ──────────────────────────────────────
+/** A mocked `document.fonts`: `check` answers from `loaded`, `load` resolves when `finish()` runs,
+ *  and `fire()` dispatches `loadingdone`. */
+function mockFonts(loaded = false) {
+  const state = { loaded }
+  let finish!: () => void
+  const done = new Promise<void>(r => { finish = () => { state.loaded = true; r() } })
+  const listeners: Record<string, (() => void)[]> = {}
+  const fonts = {
+    check: vi.fn(() => state.loaded),
+    load: vi.fn(() => done.then(() => [])),
+    addEventListener: vi.fn((t: string, f: () => void) => { (listeners[t] ||= []).push(f) }),
+    removeEventListener: vi.fn(),
+  }
+  vi.stubGlobal('document', { fonts })
+  return { fonts, finish: () => finish(), fire: () => (listeners.loadingdone ?? []).forEach(f => f()) }
+}
+const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); await nextTick() }
+
+describe('useLayoutVary — fonts (I4)', () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
+
+  it('(a) nothing is planned until the Frame\'s faces have loaded; then it plans once', async () => {
+    vi.useFakeTimers()
+    const { fonts, finish } = mockFonts(false)
+    vi.mocked(planLayout).mockClear()
+    const { vary } = harness({ sailor_posterState: { patternId: 'statement', seed: 1 } })
+    await Promise.resolve()
+    expect(fonts.load).toHaveBeenCalledWith(expect.stringContaining('600 32px'))
+    expect(vary.candidates.value).toEqual([])
+    expect(vi.mocked(planLayout)).not.toHaveBeenCalled()
+    finish(); await flush()
+    expect(vary.candidates.value.length).toBeGreaterThan(1)
+    expect(vi.mocked(planLayout)).toHaveBeenCalled()
+  })
+
+  it('(a) a face that never loads does not hold the plans back for more than the wait', async () => {
+    vi.useFakeTimers()
+    mockFonts(false)                                          // never finishes
+    const { vary } = harness({ sailor_posterState: { patternId: 'statement', seed: 1 } })
+    expect(vary.candidates.value).toEqual([])
+    vi.advanceTimersByTime(FONT_WAIT_MS + 10); await flush()
+    expect(vary.candidates.value.length).toBeGreaterThan(1)
+  })
+
+  it('(b) loadingdone re-plans: the library and the variations rebuild with the faces that arrived', async () => {
+    vi.useFakeTimers()
+    const { fire } = mockFonts(true)
+    const { vary } = harness({ sailor_posterState: { patternId: 'statement', seed: 1 } })
+    vi.advanceTimersByTime(10)
+    const before = vary.candidates.value
+    const spy = vi.mocked(planLayout); spy.mockClear()
+    fire(); await nextTick()
+    expect(spy.mock.calls.filter(([a]) => a.layoutId === 'runoff').length).toBe(1)   // one library rebuild
+    expect(vary.candidates.value).not.toBe(before)
+  })
+
+  it('with no document.fonts it plans at once, as before', () => {
+    vi.stubGlobal('document', {})
+    const { vary } = harness({ sailor_posterState: { patternId: 'statement', seed: 1 } })
+    expect(vary.candidates.value.length).toBeGreaterThan(1)
+  })
+})
+
+describe('useLayoutVary — a refused apply (I4c)', () => {
+  it('vary(1) moves past a variation the apply refuses to the next one', () => {
+    const { vary, editor } = harness({ sailor_posterState: { patternId: 'statement', seed: 1 } })
+    const n = vary.candidates.value.length
+    expect(n).toBeGreaterThan(2)
+    const third = vary.candidates.value[2]!
+    vi.mocked(applyLayoutToFrame).mockReturnValueOnce({ ok: false })   // candidate 1 fails with the real faces
+    vary.vary(1)
+    expect(editor.recordHistory).toHaveBeenCalledTimes(1)
+    expect(editor.commit.mock.calls[0]![0]).toEqual(third.plan.layers)
+    expect(vary.index.value).toBe(2)
+  })
+
+  it('stops after one full cycle when every variation is refused', async () => {
+    const real = (await vi.importActual<typeof import('~/lib/frame/patterns/kit/plan')>('~/lib/frame/patterns/kit/plan')).applyLayoutToFrame
+    const { vary, editor } = harness({ sailor_posterState: { patternId: 'statement', seed: 1 } })
+    const n = vary.candidates.value.length
+    const spy = vi.mocked(applyLayoutToFrame)
+    spy.mockClear()
+    for (let i = 0; i < n; i++) spy.mockReturnValueOnce({ ok: false })
+    try {
+      vary.vary(1)
+      expect(spy).toHaveBeenCalledTimes(n - 1)                // every other variation, once
+      expect(editor.recordHistory).not.toHaveBeenCalled()
+      expect(vary.index.value).toBe(0)
+    } finally {
+      spy.mockReset()                                         // drop any unused refusal…
+      spy.mockImplementation(real)                            // …and apply for real again
+    }
+  })
+})
+
+// ── Undo / redo (M1): the tab follows the layout the Frame records ──────────────────────────────
+describe('useLayoutVary — undo and redo (M1)', () => {
+  it('after an undo restores the Frame\'s posterState, "n of N" and the next V follow it', async () => {
+    const props = reactive<Record<string, unknown>>({ sailor_localLayers: frameLayers() })
+    const editor = {
+      recordHistory: vi.fn(),
+      commit: vi.fn((next: LocalLayer[]) => { props.sailor_localLayers = next }),
+      writeOrder: vi.fn((o: string[]) => { props.sailor_stackOrder = o }),
+      writeGroups: vi.fn(),
+    }
+    const remember = (st: Record<string, unknown>) => { props.sailor_posterState = { ...(props.sailor_posterState as object), ...st } }
+    const vary = useLayoutVary({ props: () => props, frameW: () => 895, frameH: () => 1280, connectedSlots: () => [], editor: () => editor, remember, measure: makeStubMeasure() })
+    vary.select('statement'); await nextTick()
+    const first = JSON.parse(JSON.stringify(props.sailor_posterState))
+    const firstLayers = props.sailor_localLayers, firstOrder = props.sailor_stackOrder
+    vary.vary(1); vary.vary(1); await nextTick()
+    expect(vary.index.value).toBe(2)
+    // Undo back to the first apply: the editor restores layers, order and the layout record.
+    props.sailor_localLayers = firstLayers
+    props.sailor_posterState = first
+    props.sailor_stackOrder = [...(firstOrder as string[])]
+    await nextTick()
+    expect(vary.layoutId.value).toBe('statement')
+    expect(vary.index.value).toBe(0)
+    expect(vary.applied.value).toBe(true)
+    // Undo past the first apply: no layout recorded, so the next V applies the one on show.
+    props.sailor_posterState = {}
+    props.sailor_stackOrder = [...(firstOrder as string[])]
+    await nextTick()
+    expect(vary.applied.value).toBe(false)
   })
 })

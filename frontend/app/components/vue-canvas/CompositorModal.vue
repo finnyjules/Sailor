@@ -9480,7 +9480,7 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="px-4 pt-3 flex items-center gap-2 text-[11px] text-white/55">
-            <span class="shrink-0">Shape for the engine</span>
+            <span class="shrink-0">Shape</span>
             <select data-testid="layout-shape-family" :value="layoutFamily"
               class="ml-auto h-7 rounded-[7px] ring-1 ring-white/10 bg-white/5 hover:bg-white/10 text-white/80 px-1.5 cursor-pointer outline-none"
               @change="pickLayoutFamily(($event.target as HTMLSelectElement).value)">

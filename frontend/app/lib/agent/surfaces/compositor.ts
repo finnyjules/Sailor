@@ -941,9 +941,25 @@ function defaultLayer(kind: LocalLayerKind, id: string): Record<string, unknown>
   return base
 }
 
+/** Agent edits of a layer's geometry or style. Like a user's edit in the editor, any of them makes
+ *  a layout's own piece (a rule, a band) the user's: its `owner` goes, so the next layout keeps it. */
+const OWNER_CLEARING_OPS = new Set([
+  'setLayerProps', 'setText', 'setTextStyle', 'setFill', 'setStroke', 'addStroke', 'removeStroke', 'setStrokeProps',
+  'setSize', 'setLayerEffect', 'setLayerTornEdge', 'setLayerFeather', 'setLayerMaskBreak',
+])
+
 /** Apply one command to a Compositor frame, returning the new state + an inverse.
  *  Pure — the input is never mutated. */
 export function applyCompositorCommand(input: CompositorState, cmd: Command): CommandResult<CompositorState> {
+  const r = applyCommand(input, cmd)
+  if (r.ok && cmd.target && OWNER_CLEARING_OPS.has(cmd.op)) {
+    const layer = findLayer(r.template, cmd.target) as (LocalLayer & { owner?: unknown }) | undefined
+    if (layer && 'owner' in layer) delete layer.owner   // r.template is this call's own copy
+  }
+  return r
+}
+
+function applyCommand(input: CompositorState, cmd: Command): CommandResult<CompositorState> {
   const state = clone(input)
   const snapshot = (): Command => ({ op: 'restore', args: { layers: clone(input.layers), background: clone(input.background), postEffects: clone(input.postEffects), groups: clone(input.groups), templates: clone(input.templates), motion: clone(input.motion) } })
 

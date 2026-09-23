@@ -107,6 +107,20 @@ describe('text layer placed lines (runs)', () => {
     expect(box.h).toBeCloseTo(2 * 125)
   })
 
+  it('an uppercase layer draws and measures its runs in upper case (I3)', () => {
+    const { ctx, calls } = makeCtx()
+    const measured: string[] = []
+    const measure = ctx.measureText
+    ctx.measureText = (t: string) => { measured.push(t); return measure(t) }
+    __drawTextForTest(ctx, base({ runs: RUNS, textTransform: 'uppercase' }), 1000)
+    expect(calls.map(c => c.t)).toEqual(['WEATHER', 'REPORT'])
+    expect(measured).toContain('WEATHER')
+    expect(measured).not.toContain('Weather')
+    measured.length = 0
+    localLayerBox(ctx, base({ runs: RUNS, textTransform: 'uppercase' }), 1000, 1000)
+    expect(measured).toEqual(['WEATHER', 'REPORT'])
+  })
+
   it('editing the words drops the placed lines; moving the layer keeps them', () => {
     const properties: Record<string, any> = { sailor_localLayers: [base({ runs: RUNS })] }
     const node = reactive({ data: { properties } })

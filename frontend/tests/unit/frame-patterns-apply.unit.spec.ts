@@ -188,3 +188,50 @@ describe('applyPlacement — wired layer sizing', () => {
     expect('crop' in (b as any)).toBe(false)
   })
 })
+
+describe('applyPlacement — box fit while a layout holds (I5)', () => {
+  const flow = { target: 'title', kind: 'text', x: 0.4, y: 0.3, w: 0.8, fontSize: 0.1, rotation: 0 } as const
+  it('a shrink fit is set to plain wrap by a flow op, and comes back when a later op places the lines', () => {
+    const layers: LocalLayer[] = [textLayer('t', { boxFit: 'shrink', boxW: 0.5 })]
+    const a = applyPlacement(layers, { did: 'x', ops: [{ ...flow }] }, elements, palette)[0] as any
+    // 'wrap' is the renderer's default: it draws at the size the layout approved, like the kit's measure.
+    expect(a.boxFit).toBe('wrap')
+    const b = applyPlacement([a], { did: 'x', ops: [{ ...flow, runs: [{ text: 'NOISE', x: -1, y: 0 }] }] }, elements, palette)[0] as any
+    expect(b.boxFit).toBe('shrink')
+    expect(b.layoutPrev?.boxFit).toBeUndefined()
+  })
+  it('a layer with no fit (or plain wrap) is left alone', () => {
+    const a = applyPlacement([textLayer('t')], { did: 'x', ops: [{ ...flow }] }, elements, palette)[0] as any
+    expect(a.boxFit).toBeUndefined()
+    expect(a.layoutPrev).toBeUndefined()
+  })
+})
+
+describe('applyPlacement — image and shape rotation (I6)', () => {
+  const els = {
+    title: { role: 'title', id: 't', text: 'NOISE', words: ['NOISE'] },
+    images: [{ id: 'img' }], shapes: [{ id: 's', shapeId: 'circle' }], shapeMode: null,
+  } as unknown as FrameElements
+  const img = { id: 'img', kind: 'image', x: 0.5, y: 0.5, w: 0.4, h: 0.5, rotation: 12, opacity: 1, src: 'x.png' } as any
+  const shape = { id: 's', kind: 'rect', x: 0.5, y: 0.5, w: 0.2, h: 0.2, fill: '#000', rotation: -8, opacity: 1 } as any
+  it('an op at rotation 0 straightens the layer; the user\'s angle comes back when an op leaves rotation unset', () => {
+    const a = applyPlacement([img, shape], { did: 'x', ops: [
+      { target: 'img', kind: 'image', x: 0.3, y: 0.3, w: 0.5, h: 0.5, rotation: 0 },
+      { target: 's', kind: 'shape', x: 0.3, y: 0.3, w: 0.5, h: 0.5, rotation: 0 },
+    ] }, els, palette)
+    expect(a.map((l: any) => l.rotation)).toEqual([0, 0])
+    const b = applyPlacement(a, { did: 'x', ops: [
+      { target: 'img', kind: 'image', x: 0.3, y: 0.3, w: 0.5, h: 0.5 },
+      { target: 's', kind: 'shape', x: 0.3, y: 0.3, w: 0.5, h: 0.5 },
+    ] }, els, palette)
+    expect(b.map((l: any) => l.rotation)).toEqual([12, -8])
+  })
+  it('the kit\'s image op carries rotation 0: a tilted image is straightened by a layout', () => {
+    const title = textLayer('t', { text: 'Weather Report', fontSize: 0.12 })
+    const plan = planLayout({ props: { sailor_localLayers: [title, img] }, frameW: 895, frameH: 1280, layoutId: 'runoff', choice: { ...DEFAULT_CHOICE }, palette, connectedSlots: [], measure: makeStubMeasure() })!
+    expect(plan.issues).toEqual([])
+    const out = plan.layers.find(l => l.id === 'img') as any
+    expect(out.rotation).toBe(0)
+    expect(out.layoutPrev.rotation).toEqual({ was: 12, set: 0 })
+  })
+})

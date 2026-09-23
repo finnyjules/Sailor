@@ -1,5 +1,6 @@
 import type { LocalLayer, TextLayer } from '~/composables/useCompositorLayers'
 import { mulberry32 } from '~/lib/rng'
+import { SHAPES, familyOf, shapeById } from '~/lib/shapes/catalog'
 import { readGrid } from '~/lib/frame/gridConfig'
 import { framePresentKeys } from '~/lib/compositor/frameStack'
 import type { LayerGroup } from '~/lib/compositor/layerGroups'
@@ -64,8 +65,11 @@ export interface LayoutPlan {
   order: string[]
   did: string
   issues: string[]
-  posterState: { patternId: string; seed: number; choice: Choice }
+  posterState: { patternId: string; seed: number; choice: Choice; roles: StoredRoles }
 }
+
+/** Which layer holds which role, as the last apply saw it (`sailor_posterState.roles`). */
+export type StoredRoles = Partial<Record<RoleKey, string>>
 
 /** Everything about the frame that does not depend on the choice. */
 interface Prepared {
@@ -95,7 +99,8 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
   const layers = (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? []
   // A layout's own pieces (bands, rules, dots) are not the user's shapes: infer from the user's layers only.
   const userLayers = layers.filter(l => !isOwned(l as { owner?: { by: string } }))
-  const elements = inferElements(posterLayerViews({ ...a.props, sailor_localLayers: userLayers }), a.shapeMode ?? null, a.imageMode ?? false)
+  const inferred = inferElements(posterLayerViews({ ...a.props, sailor_localLayers: userLayers }), a.shapeMode ?? null, a.imageMode ?? false)
+  const elements = withStoredRoles(inferred, userLayers, (a.props?.sailor_posterState as { roles?: StoredRoles } | undefined)?.roles)
   if (!elements.title) return null
   // The title's words, re-joined: the layout does its own line breaking.
   const content: Content = { title: elements.title.words.join(' ') }
@@ -121,6 +126,35 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
     title: layerOf('title'), details: layerOf('details'), date: layerOf('date'), caption: layerOf('caption'),
   })
   return { def, index, layers, elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props) }
+}
+
+/** The roles the last apply stored win over size inference: an overlap layout (Ghost, Number
+ *  behind, Overprint) sets the details or the date as large as the title or larger, and inferring
+ *  from font size after it would pick the wrong title. A stored role holds while its layer still
+ *  exists and still has text; a role whose layer is gone (or emptied) falls back to inference,
+ *  unless the inferred layer already holds a stored role. */
+function withStoredRoles(inferred: FrameElements, userLayers: LocalLayer[], stored: StoredRoles | undefined): FrameElements {
+  if (!stored) return inferred
+  const text = (id: string | undefined) => {
+    const l = id ? userLayers.find(x => x.id === id && x.kind === 'text') as TextLayer | undefined : undefined
+    const t = l?.text ?? ''
+    return t.trim() ? t : null
+  }
+  const kept = new Map<RoleKey, string>()
+  for (const r of ROLES) { const id = stored[r]; if (id && text(id) != null) kept.set(r, id) }
+  if (!kept.size) return inferred
+  const claimed = new Set(kept.values())
+  const out: FrameElements = { ...inferred }
+  for (const r of ROLES) {
+    const id = kept.get(r)
+    if (id) {
+      const t = text(id)!
+      out[r] = { role: r, id, text: t, words: t.trim().split(/\s+/).filter(Boolean) }
+    } else if (inferred[r] && claimed.has(inferred[r]!.id)) {
+      delete out[r]
+    }
+  }
+  return out
 }
 
 /** Whether a layout can run on this frame at all: its kinds, and the image / shape / number it needs. */
@@ -195,6 +229,27 @@ function checkRun({ out, S, side }: Run, premise: LayoutDef['premise']): string[
   return issues
 }
 
+const rolesOf = (el: FrameElements): StoredRoles => {
+  const out: StoredRoles = {}
+  for (const r of ROLES) if (el[r]) out[r] = el[r]!.id
+  return out
+}
+
+/** The shape picker's library shape for a frame with no shape layer (the old engine's
+ *  `pickShape`): a named shape, or a seeded pick from a family. Its own random stream, so the
+ *  layout's randomness is untouched. Undefined with no picker choice or an unknown shape. */
+function pickLibraryShape(mode: FrameElements['shapeMode'], seed: number): { id: string; aspect: number } | undefined {
+  if (!mode) return undefined
+  let id: string | undefined
+  if ('id' in mode) id = mode.id
+  else {
+    const pool = SHAPES.filter(s => familyOf(s.id) === mode.family)
+    if (pool.length) id = pool[Math.floor(mulberry32(seed * 31 + 5)() * pool.length)]!.id
+  }
+  const sh = id ? shapeById(id) : undefined
+  return sh ? { id: sh.id, aspect: sh.box[3] / sh.box[2] } : undefined
+}
+
 /** Run a layout on a frame and return the plan. Pure: nothing is written. Null when the layout
  *  is unknown, the frame has no title, or the layout does not fit the frame (`fitsFrame`). */
 export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
@@ -204,7 +259,9 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
   const { out, S } = ran
   const issues = checkRun(ran, p.def.premise)
 
-  const el = elementsToOps(out.els, S, p.targets, { w: a.frameW, h: a.frameH }, a.palette)
+  const libraryShape = p.targets.shape ? undefined : pickLibraryShape(p.elements.shapeMode, seedFor(p.index, a.choice))
+  const targets = libraryShape ? { ...p.targets, libraryShape } : p.targets
+  const el = elementsToOps(out.els, S, targets, { w: a.frameW, h: a.frameH }, a.palette)
   // Stand-in image / library shape sentinels become real layers first (existing path).
   const ins = insertFromOps(p.layers, el.ops, a.palette, `stand-${p.def.id}-${seedFor(p.index, a.choice)}`)
   // Ruling R7: merge the owned pieces FIRST, so `present` (and so the order) includes them.
@@ -225,7 +282,7 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
   const order = nextOrderFor(saved, present, ops, p.elements, ins.inserted)
   return {
     layers: next, order, did: out.did, issues,
-    posterState: { patternId: p.def.id, seed: seedFor(p.index, a.choice), choice: { ...a.choice } },
+    posterState: { patternId: p.def.id, seed: seedFor(p.index, a.choice), choice: { ...a.choice }, roles: rolesOf(p.elements) },
   }
 }
 

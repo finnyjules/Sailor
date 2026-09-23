@@ -289,11 +289,33 @@ export function useLocalLayerEditor(opts: EditorOpts) {
   }
   // `frameSize`: the Frame section's size + Responsive (lib/frame/frameSize) — output, so it undoes.
   // Absent for a node without size widgets, and restored only when present.
-  type Snapshot = { layers: LocalLayer[]; order: string[]; bg: Paint | undefined; fx: PostEffect[]; groups: LayerGroup[]; frameTemplates: unknown[]; motion?: MotionSnap; frameSize?: FrameSizeState }
+  // `layout`: the Layout tab's record of the layout applied (`sailor_posterState` — which layout,
+  // which variation, which layer holds which role), so an undo or redo of an apply leaves the tab
+  // on the layout the Frame now shows. Its picker settings (shape, image, palette) are settings,
+  // not edits, and are never rewound.
+  type LayoutSnap = Record<string, unknown>
+  const LAYOUT_KEYS = ['patternId', 'seed', 'choice', 'index', 'roles'] as const
+  function readLayoutSnap(): LayoutSnap {
+    const st = (node()?.data?.properties as any)?.sailor_posterState as Record<string, unknown> | undefined
+    const out: LayoutSnap = {}
+    for (const k of LAYOUT_KEYS) if (st?.[k] !== undefined) out[k] = JSON.parse(JSON.stringify(st[k]))
+    return out
+  }
+  function writeLayoutSnap(snap: LayoutSnap | undefined) {
+    const n = node(); if (!n) return
+    const cur = (n.data.properties as any)?.sailor_posterState as Record<string, unknown> | undefined
+    const has = LAYOUT_KEYS.some(k => snap?.[k] !== undefined)
+    if (!cur && !has) return                      // never had a layout — leave the key absent
+    const next: Record<string, unknown> = { ...(cur ?? {}) }
+    for (const k of LAYOUT_KEYS) { if (snap?.[k] !== undefined) next[k] = snap[k]; else delete next[k] }
+    if (!n.data.properties) n.data.properties = {}
+    ;(n.data.properties as any).sailor_posterState = next
+  }
+  type Snapshot = { layers: LocalLayer[]; order: string[]; bg: Paint | undefined; fx: PostEffect[]; groups: LayerGroup[]; frameTemplates: unknown[]; motion?: MotionSnap; frameSize?: FrameSizeState; layout?: LayoutSnap }
   const HISTORY_CAP = 120
   const _past = ref<Snapshot[]>([])
   const _future = ref<Snapshot[]>([])
-  function snapshot(): Snapshot { return { layers: JSON.parse(JSON.stringify(localLayers.value)), order: [...readOrder()], bg: background.value, fx: JSON.parse(JSON.stringify(postEffects.value)), groups: JSON.parse(JSON.stringify(localGroups.value)), frameTemplates: JSON.parse(JSON.stringify((node()?.data?.properties as any)?.sailor_frametemplates ?? [])), motion: readMotionSnap(), frameSize: frameSizeSnap() } }
+  function snapshot(): Snapshot { return { layers: JSON.parse(JSON.stringify(localLayers.value)), order: [...readOrder()], bg: background.value, fx: JSON.parse(JSON.stringify(postEffects.value)), groups: JSON.parse(JSON.stringify(localGroups.value)), frameTemplates: JSON.parse(JSON.stringify((node()?.data?.properties as any)?.sailor_frametemplates ?? [])), motion: readMotionSnap(), frameSize: frameSizeSnap(), layout: readLayoutSnap() } }
   function restore(s: Snapshot) {
     commit(s.layers); writeOrder([...s.order]); writeBg(s.bg); writeFx(s.fx?.length ? s.fx : undefined); writeGroups([...s.groups])
     const n = node()
@@ -302,6 +324,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       ;(n.data.properties as any).sailor_frametemplates = s.frameTemplates
     }
     writeMotionSnap(s.motion)
+    if (s.layout) writeLayoutSnap(s.layout)
     const nd = node()?.data
     if (s.frameSize && nd) writeFrameSizeState(nd, s.frameSize)
   }

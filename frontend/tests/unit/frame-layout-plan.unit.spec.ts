@@ -7,6 +7,7 @@ import { DEFAULT_CHOICE } from '~/lib/frame/patterns/kit/vary'
 import type { LayoutDef } from '~/lib/frame/patterns/kit/types'
 import { createImageLayer, createTextLayer } from '~/composables/useCompositorLayers'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
+import { familyOf } from '~/lib/shapes/catalog'
 
 // The Task 9 matrix content: phrase title, details, date, two-line caption.
 const TEXTS = {
@@ -307,5 +308,118 @@ describe('planLayout — recolour', () => {
     const title = texts(plan.layers).find(l => l.id === 't')
     expect(title.color).toBe(palette.ink)
     for (const t of texts(plan.layers)) expect(t.color).not.toBe('#111111')
+  })
+})
+
+describe('planLayout — roles stored on apply (C1)', () => {
+  /** Apply a plan the way the Layout tab does: the layers, the order and the remembered state. */
+  const applied = (plan: NonNullable<ReturnType<typeof planLayout>>, prev: Record<string, unknown> = {}) =>
+    props(plan.layers, { sailor_stackOrder: plan.order, sailor_posterState: { ...(prev.sailor_posterState as object), ...plan.posterState } })
+  const textOf = (plan: NonNullable<ReturnType<typeof planLayout>>, id: string | undefined) =>
+    (plan.layers.find(l => l.id === id) as any)?.text
+
+  it('after Ghost (details set larger than the title), Run-off still takes "Weather Report" as the title', () => {
+    // Ghost with the title on two lines: the ghost details end up larger than the title.
+    const ghost = planLayout(args({ layoutId: 'ghost', choice: { ...DEFAULT_CHOICE, lines: 1 } }))!
+    expect(ghost.issues).toEqual([])
+    expect(ghost.posterState.roles).toEqual({ title: 't', details: 'd', date: 'dt', caption: 'c' })
+    // The premise of the test: Ghost really does leave the details larger than the title.
+    const size = (id: string) => (ghost.layers.find(l => l.id === id) as any).fontSize
+    expect(size('d')).toBeGreaterThan(size('t'))
+    const next = planLayout(args({ layoutId: 'runoff', props: applied(ghost) }))!
+    expect(next.posterState.roles.title).toBe('t')
+    expect(textOf(next, next.posterState.roles.title)).toBe(TEXTS.title)
+    expect(next.posterState.roles).toEqual({ title: 't', details: 'd', date: 'dt', caption: 'c' })
+  })
+
+  it('caption before date, with a postcode in the caption: the roles hold across two applies', () => {
+    const t = (id: string, text: string, fontSize: number) =>
+      createTextLayer({ id, text, fontSize, fontFamily: 'Inter', fontWeight: 600, color: '#111111' }) as LocalLayer
+    const layers = [t('t', TEXTS.title, 0.12), t('d', TEXTS.details, 0.04), t('c', TEXTS.caption, 0.02), t('dt', TEXTS.date, 0.03)]
+    const one = planLayout(args({ layoutId: 'runoff', props: props(layers) }))!
+    expect(one.posterState.roles).toMatchObject({ date: 'dt', caption: 'c' })
+    const two = planLayout(args({ layoutId: 'runoff', props: applied(one) }))!
+    expect(two.posterState.roles).toMatchObject({ title: 't', date: 'dt', caption: 'c' })
+    const three = planLayout(args({ layoutId: 'runoff', props: applied(two) }))!
+    expect(three.posterState.roles).toMatchObject({ title: 't', date: 'dt', caption: 'c' })
+  })
+
+  it('a role whose layer is gone falls back to inference; the others hold', () => {
+    const ghost = planLayout(args({ layoutId: 'ghost', choice: { ...DEFAULT_CHOICE, lines: 1 } }))!
+    const p = applied(ghost)
+    p.sailor_localLayers = (p.sailor_localLayers as LocalLayer[]).filter(l => l.id !== 'c')
+    const next = planLayout(args({ layoutId: 'runoff', props: p }))!
+    expect(next.posterState.roles.title).toBe('t')
+    expect(next.posterState.roles.details).toBe('d')
+    expect(next.posterState.roles.caption).toBeUndefined()
+  })
+})
+
+describe('planLayout — owned ids stay unique after a user edit (C2)', () => {
+  it('apply Index, edit a rule (owner stripped), apply Index again: no duplicate ids or order entries', () => {
+    const a = planLayout(args({ layoutId: 'index' }))!
+    expect(a.issues).toEqual([])
+    const rule = a.layers.find(l => (l as any).owner?.key === 'rule-0')!
+    expect(rule.id).toBe('layout-rule-0')
+    // A user edit clears the owner; the id stays.
+    const edited = a.layers.map(l => l.id === rule.id ? ({ ...l, owner: undefined, x: 0.1 } as LocalLayer) : l)
+    const b = planLayout(args({ layoutId: 'index', props: props(edited, { sailor_stackOrder: a.order, sailor_posterState: a.posterState }) }))!
+    expect(b.issues).toEqual([])
+    const ids = b.layers.map(l => l.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(new Set(b.order).size).toBe(b.order.length)
+    expect(new Set(b.order)).toEqual(new Set(ids.map(id => 'l:' + id)))
+    // The user's edited rule is kept as it is; the layout's new rule-0 has a fresh id.
+    expect((b.layers.find(l => l.id === rule.id) as any).x).toBe(0.1)
+    const fresh = b.layers.find(l => (l as any).owner?.key === 'rule-0')!
+    expect(fresh.id).not.toBe(rule.id)
+    expect(fresh.id).toBe('layout-rule-0-2')
+  })
+})
+
+describe('planLayout — the shape picker\'s library shape (I8)', () => {
+  // A layout whose circle is the user's shape when there is one (role 'shape'), else its own dot.
+  const dotLayout = (): LayoutDef => ({
+    id: 'dot', name: 'dot', fits: ['word', 'phrase', 'sentence'],
+    fn(S, ctx) {
+      const out = testLayout('x', 'none').fn(S, ctx)
+      out.els.push({ k: 'c', cx: S.X(10), cy: S.L(8), r: 4, role: 'shape', color: 'accent' })
+      return out
+    },
+  })
+
+  it('no shape layer, shapeMode names a shape: a library shape layer is inserted at the layout\'s box', () => {
+    unregister.push(__registerLayoutForTest(dotLayout()))
+    const plain = planLayout(args({ layoutId: 'dot' }))!
+    const dot = plain.layers.find(l => (l as any).owner?.key === 'shape-0') as any
+    expect(dot).toBeTruthy()                                       // no shapeMode: the owned plain piece
+    const plan = planLayout(args({ layoutId: 'dot', shapeMode: { id: 'circle' } }))!
+    expect(plan.issues).toEqual([])
+    expect(plan.layers.some(l => (l as any).owner)).toBe(false)    // no owned ellipse
+    const shape = plan.layers.find(l => l.kind === 'path') as any
+    expect(shape).toBeTruthy()
+    expect(shape.shapeId).toBe('circle')
+    expect(shape.x).toBeCloseTo(dot.x, 6)
+    expect(shape.y).toBeCloseTo(dot.y, 6)
+    expect(shape.bbox.w * shape.scale).toBeCloseTo(dot.w, 6)       // fitted in the circle's box
+    expect(shape.bbox.h * shape.scale).toBeLessThanOrEqual(dot.h + 1e-9)
+    expect(shape.fill).toBe(palette.accent)
+    expect(plan.order).toContain('l:' + shape.id)
+  })
+
+  it('a real layout (Shape counter-form) with a family: a library shape of that family is placed', () => {
+    const p = planLayout(args({ layoutId: 'shapeCounter', shapeMode: { family: 'suns' } }))!
+    expect(p.issues).toEqual([])
+    const shapes = p.layers.filter(l => l.kind === 'path') as any[]
+    expect(shapes).toHaveLength(1)
+    expect(familyOf(shapes[0].shapeId)).toBe('suns')
+    expect(p.layers.some(l => (l as any).owner?.key?.startsWith('shape'))).toBe(false)
+    expect(planLayout(args({ layoutId: 'shapeCounter', shapeMode: { family: 'suns' } }))).toEqual(p)   // seeded: reproducible
+  })
+
+  it('a re-apply moves the inserted shape (now the Frame\'s own) rather than inserting another', () => {
+    const a = planLayout(args({ layoutId: 'shapeCounter', shapeMode: { id: 'circle' } }))!
+    const b = planLayout(args({ layoutId: 'shapeCounter', shapeMode: { id: 'circle' }, props: props(a.layers, { sailor_stackOrder: a.order }) }))!
+    expect(b.layers.filter(l => l.kind === 'path')).toHaveLength(1)
   })
 })

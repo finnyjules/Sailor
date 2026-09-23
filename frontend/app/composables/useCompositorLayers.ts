@@ -1653,12 +1653,14 @@ function textRunsBox(ctx: CanvasRenderingContext2D | null, layer: TextLayer, W: 
   let ex = 0, ey = 0
   for (const run of layer.runs!) {
     const s = run.s ?? 1
+    // Measured as drawn: in the layer's case (the kit measures `transformCase` too).
+    const text = transformCase(run.text, layer.textTransform)
     let w: number
     if (ctx) {
       applyFont(ctx, runFontLayer(layer, s, W), W)
-      w = ctx.measureText(run.text || ' ').width
+      w = ctx.measureText(text || ' ').width
     } else {
-      w = (run.text.length || 1) * fontPx * s * 0.6
+      w = (text.length || 1) * fontPx * s * 0.6
     }
     const left = run.x * fontPx
     const mid = run.y * fontPx
@@ -4922,18 +4924,20 @@ function drawTextRuns(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number
   let anyDashUsed = false
   for (const run of layer.runs!) {
     const s = run.s ?? 1
+    // Drawn in the layer's case, like flow text (`textLines`) — the kit measured it so.
+    const text = transformCase(run.text, layer.textTransform)
     applyFont(ctx, runFontLayer(layer, s, W), W)
     ctx.textAlign = 'left'
     ctx.textBaseline = 'middle'
-    const box = { w: Math.max(ctx.measureText(run.text || ' ').width, 1), h: Math.max(fontPx * s, 1) }
+    const box = { w: Math.max(ctx.measureText(text || ' ').width, 1), h: Math.max(fontPx * s, 1) }
     const passes = textStrokePasses(ctx, layer, W, box)
     const anyDash = passes.some(p => p.dash)
     anyDashUsed ||= anyDash
     if (passes.length) ctx.lineJoin = 'round'
     ctx.fillStyle = resolvePaint(ctx, layer.color, box, _fieldCtx)
     const x = run.x * fontPx, y = run.y * fontPx
-    strokeTextPasses(ctx, passes, anyDash, run.text, x, y)
-    ctx.fillText(run.text, x, y)
+    strokeTextPasses(ctx, passes, anyDash, text, x, y)
+    ctx.fillText(text, x, y)
   }
   if (anyDashUsed) ctx.setLineDash([])   // never leak the pattern to the next layer
 }

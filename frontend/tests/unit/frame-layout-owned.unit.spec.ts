@@ -84,3 +84,39 @@ describe('copies of an owned piece belong to the user', () => {
     expect(r.layers.find((l: any) => l.id === 'p1')!.owner).toBeUndefined()
   })
 })
+
+describe('mergeOwned — unique ids (C2)', () => {
+  it('a new piece whose id is taken by an edited (no longer owned) layer gets a fresh id', () => {
+    const edited = { ...rule('rule-0', 'layout-rule-0'), owner: undefined }
+    const out = mergeOwned([user, edited], [rule('rule-0', 'layout-rule-0'), rule('rule-1', 'layout-rule-0-2')])
+    const ids = out.map(l => l.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(ids).toEqual(['u1', 'layout-rule-0', 'layout-rule-0-2', 'layout-rule-0-2-2'])
+    expect((out[2] as any).owner.key).toBe('rule-0')
+  })
+})
+
+describe('undo / redo restore the layout record (M1)', () => {
+  it('an undo of an apply puts back the previous layout and variation; picker settings are not rewound', () => {
+    const { node, ed } = makeEditor([createRectLayer({ id: 'r' })])
+    const props = node.data.properties as any
+    props.sailor_posterState = { patternId: 'runoff', seed: 1, choice: { lines: 0, arr: 0, scale: 'full', side: 'right' }, index: 0, shapeMode: null }
+    ed.recordHistory()                                        // the apply's undo step
+    ed.commit([createRectLayer({ id: 'r', x: 0.2 })])
+    props.sailor_posterState = { ...props.sailor_posterState, patternId: 'index', seed: 9, index: 3, roles: { title: 't' } }
+    props.sailor_posterState.shapeMode = { id: 'circle' }    // a picker setting, changed after
+    ed.undo()
+    expect(props.sailor_posterState).toMatchObject({ patternId: 'runoff', seed: 1, index: 0, shapeMode: { id: 'circle' } })
+    expect(props.sailor_posterState.roles).toBeUndefined()
+    ed.redo()
+    expect(props.sailor_posterState).toMatchObject({ patternId: 'index', seed: 9, index: 3, roles: { title: 't' }, shapeMode: { id: 'circle' } })
+  })
+
+  it('a Frame that never had a layout gets no posterState from an undo', () => {
+    const { node, ed } = makeEditor([createRectLayer({ id: 'r' })])
+    ed.recordHistory()
+    ed.commit([createRectLayer({ id: 'r', x: 0.2 })])
+    ed.undo()
+    expect((node.data.properties as any).sailor_posterState).toBeUndefined()
+  })
+})
