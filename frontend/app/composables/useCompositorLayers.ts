@@ -387,6 +387,10 @@ interface LayerCommon {
   /** Set only by the Layout tab. Any user edit clears it; owned layers are removed or
    *  replaced when another layout is applied. */
   owner?: { by: 'layout'; key: string }
+  /** Set only by the Layout tab's apply: the layer's own values from before a layout first
+   *  overrode them, restored (and the entry dropped) when a later layout leaves them unset.
+   *  `null` = the field was absent. Never read by the renderer; absent ⇒ nothing changes. */
+  layoutPrev?: { lineHeight?: number; letterSpacing?: number | null; opacity?: number; blend?: string | null }
 }
 
 /** True when a layer is hidden (visible === false; undefined means visible). */

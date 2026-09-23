@@ -39,7 +39,35 @@ export function applyPlacement(
     if (!op) return layer
     const next: any = { ...layer, x: op.x, y: op.y }
     if (op.rotation != null) next.rotation = op.rotation
-    if (op.blend) next.blend = op.blend
+    const blend = op.blendMode ?? op.blend
+    const textOrImage = layer.kind === 'text' || layer.kind === 'image' || layer.kind === 'wired'
+    if (textOrImage) {
+      // Opacity, blend (and, for text, line/letter spacing) are re-authored on every apply.
+      // The layer's own value is remembered the first time a layout overrides it and put
+      // back when a later op leaves the field unset — so switching layouts leaves no residue
+      // and never loses what the user had.
+      const prev: Record<string, unknown> = { ...((layer as any).layoutPrev ?? {}) }
+      const track = (field: string, value: unknown) => {
+        if (value !== undefined) {
+          if (!(field in prev)) prev[field] = (layer as any)[field] ?? null
+          next[field] = value
+        } else if (field in prev) {
+          const orig = prev[field]
+          if (orig == null) delete next[field]; else next[field] = orig
+          delete prev[field]
+        }
+      }
+      track('opacity', op.opacity)
+      track('blend', blend)
+      if (layer.kind === 'text') {
+        track('lineHeight', op.lineHeight)
+        track('letterSpacing', op.letterSpacing)
+      }
+      if (Object.keys(prev).length) next.layoutPrev = prev; else delete next.layoutPrev
+    } else {
+      if (op.opacity != null) next.opacity = op.opacity
+      if (blend) next.blend = blend
+    }
     if (recolour && op.colorRole) {
       const paint = roleToPaint(op.colorRole, palette)
       if (layer.kind === 'text') next.color = paint
@@ -56,6 +84,8 @@ export function applyPlacement(
       if (op.expressive) next.expressive = op.expressive; else delete next.expressive
       if (op.valign) next.valign = op.valign; else delete next.valign
       if (op.boxH != null) next.boxH = op.boxH; else delete next.boxH
+      if (op.runs?.length) next.runs = op.runs; else delete next.runs
+      if (op.path) next.path = op.path; else delete next.path
     } else if (layer.kind === 'path' && typeof op.w === 'number' && op.w > 0 && (layer as any).bbox?.w > 0) {
       // A path layer has no `w`: it sizes from `bbox × scale` (both in the same
       // normalized-frame-width units as op.w — see useCompositorLayers' layerBoxPx).
@@ -67,6 +97,10 @@ export function applyPlacement(
     } else {
       if (op.w != null) next.w = op.w
       if (op.h != null) next.h = op.h
+    }
+    if (layer.kind === 'image' || layer.kind === 'wired') {
+      if (op.crop) next.crop = op.crop; else delete next.crop
+      if (op.mask) next.mask = op.mask; else delete next.mask
     }
     return next as LocalLayer
   })

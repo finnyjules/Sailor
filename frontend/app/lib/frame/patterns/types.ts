@@ -85,6 +85,26 @@ export interface LayerOp {
   fill?: 'solid' | 'outline' | 'photo'
   /** Relative stacking hint: lower renders behind. Default 0. */
   z?: number
+  // ── Layout kit fields (see kit/toOps.ts). For a text/image target, apply.ts
+  // re-authors these on every apply: set when present, cleared when absent. ──
+  /** Text op: line height multiplier. */
+  lineHeight?: number
+  /** Text op: letter spacing in em. */
+  letterSpacing?: number
+  /** Layer opacity 0..1. */
+  opacity?: number
+  /** Blend mode vs the layers below (all renderer modes). Wins over `blend`. */
+  blendMode?: 'normal' | 'multiply' | 'screen' | 'overlay' | 'soft_light' | 'hard_light' | 'difference' | 'lighten' | 'darken' | 'add'
+  /** Image op: crop the source to cover the box. */
+  crop?: { fit: 'cover'; fx?: number; fy?: number }
+  /** Text op: placed lines (em of the layer's font size, union centred on the origin). */
+  runs?: import('~/composables/useCompositorLayers').TextRun[]
+  /** An owned piece the layout inserts (descriptive; kit/toOps returns owned layers directly). */
+  insert?: { kind: 'rect' | 'ellipse'; key: string; radius?: number }
+  /** Clip to a region in frame-normalised coordinates (x/y centre by W/H, w/h by width). */
+  mask?: { kind: 'ellipse' | 'rect'; x: number; y: number; w: number; h: number }
+  /** Text op: set the text along a path. */
+  path?: import('~/composables/useCompositorLayers').TextLayer['path']
 }
 
 export interface PatternPlacement {
