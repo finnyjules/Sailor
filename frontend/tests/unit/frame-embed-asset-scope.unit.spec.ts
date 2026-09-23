@@ -1,8 +1,8 @@
-import { describe, it, expect, afterEach, beforeEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { registerAssetResolver, resolveAssetUrl, __resetAssetResolversForTest } from '~/lib/compositor/assetScope'
 import {
   imageLayerUrl, ensureLayerImages, sweepClipCache,
-  __setClipFramesForTest, __clipCacheKeysForTest,
+  __setClipFramesForTest, __clipCacheKeysForTest, __imageCacheEntriesForTest, __clearImageCacheForTest,
 } from '~/composables/useCompositorLayers'
 import { clipFrameUrl, clipFrameKey, type ImageClip } from '~/lib/compositor/clip'
 import { vtFontFileUrl, parseVtFontToken } from '~/lib/vectortype/fontToken'
@@ -77,5 +77,45 @@ describe('ensureLayerImages keep option', () => {
     await ensureLayerImages(layers, { keep: true })
     for (const d of ['p', 'q', 'r']) __setClipFramesForTest(clip(d), [1, 2, 3])
     expect(__clipCacheKeysForTest()).toEqual(expect.arrayContaining(['p:3', 'q:3', 'r:3']))
+  })
+})
+
+// I4: the poster bake runs the export's adapter INSIDE the app, with its resolver registered.
+// The image cache must stay keyed by the app URL (the /view URL) so the live editor's repaints in
+// that span still find their bitmaps; only the load's `src` asks the resolver.
+describe('image layer cache keying', () => {
+  const srcs: string[] = []
+  beforeEach(() => {
+    srcs.length = 0
+    __clearImageCacheForTest()
+    vi.stubGlobal('window', globalThis)
+    vi.stubGlobal('Image', class {
+      onload: (() => void) | null = null; onerror: (() => void) | null = null
+      complete = false; naturalWidth = 0; private _src = ''
+      get src() { return this._src }
+      set src(u: string) { this._src = u; srcs.push(u); queueMicrotask(() => { this.complete = true; this.naturalWidth = 1; this.onload?.() }) }
+    })
+  })
+  afterEach(() => { vi.unstubAllGlobals(); __clearImageCacheForTest() })
+
+  it('nothing registered: key and src are both the /view URL (byte-identical app)', async () => {
+    await ensureLayerImages([{ kind: 'image', id: 'a', filename: 'a.png', w: 0.5, h: 0.5 } as any])
+    expect(__imageCacheEntriesForTest()).toEqual([['/view?filename=a.png&type=input', '/view?filename=a.png&type=input']])
+    expect(srcs).toEqual(['/view?filename=a.png&type=input'])
+  })
+
+  it('a registered resolver changes the src only: the key stays the /view URL', async () => {
+    registerAssetResolver((kind, key) => (kind === 'image' && key === 'a.png' ? 'data:image/webp;base64,AA' : null))
+    await ensureLayerImages([{ kind: 'image', id: 'a', filename: 'a.png', w: 0.5, h: 0.5 } as any])
+    expect(__imageCacheEntriesForTest()).toEqual([['/view?filename=a.png&type=input', 'data:image/webp;base64,AA']])
+    expect(srcs).toEqual(['data:image/webp;base64,AA'])
+  })
+
+  it('an image the editor already holds is not reloaded while a resolver is registered', async () => {
+    await ensureLayerImages([{ kind: 'image', id: 'a', filename: 'a.png', w: 0.5, h: 0.5 } as any])
+    registerAssetResolver(() => 'data:image/webp;base64,AA')
+    await ensureLayerImages([{ kind: 'image', id: 'a', filename: 'a.png', w: 0.5, h: 0.5 } as any])
+    expect(srcs).toEqual(['/view?filename=a.png&type=input'])
+    expect(__imageCacheEntriesForTest()).toEqual([['/view?filename=a.png&type=input', '/view?filename=a.png&type=input']])
   })
 })

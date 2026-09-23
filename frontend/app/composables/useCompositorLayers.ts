@@ -1143,12 +1143,30 @@ export function createBrushLayer(partial: Partial<BrushLayer> = {}): BrushLayer 
 }
 
 // ── Image-layer asset loading ────────────────────────────────────────────────
+// Keyed by the APP URL (`imageLayerCacheKey`, the /view URL), never the resolved one: a web
+// export's adapter registers a resolver for its whole life, and the poster bake runs that adapter
+// inside the app — keyed by the resolved URL, every editor repaint in that span would look its
+// images up by data URL (a miss: blank, then WebP copies that stay cached). The resolver is asked
+// only when a load assigns `im.src`, exactly as imageFillCache does for image fills.
 const _imageCache = new Map<string, HTMLImageElement>()
+
+/** The cache key for an image layer's bitmap: its ComfyUI /view URL, whatever is registered. */
+function imageLayerCacheKey(filename: string): string {
+  return `/view?${new URLSearchParams({ filename, type: 'input' })}`
+}
 
 /** Resolve an image layer's filename to a ComfyUI /view URL — or, while a web export's adapter is
  *  mounted, to its inlined copy (see ~/lib/compositor/assetScope). */
 export function imageLayerUrl(filename: string): string {
-  return resolveAssetUrl('image', filename, `/view?${new URLSearchParams({ filename, type: 'input' })}`)
+  return resolveAssetUrl('image', filename, imageLayerCacheKey(filename))
+}
+
+/** Test seam: the image cache as [key, src] pairs, and a way to empty it. */
+export function __imageCacheEntriesForTest(): [string, string][] {
+  return [..._imageCache].map(([k, im]) => [k, im.src])
+}
+export function __clearImageCacheForTest(): void {
+  _imageCache.clear()
 }
 
 // ── Living-image clip frames ─────────────────────────────────────────────────
@@ -1329,13 +1347,13 @@ export async function ensureLayerImages(layers: LocalLayer[], opts?: { keep?: bo
     // applied) has nothing to load: asking would only be a failing `/view?filename=` request —
     // and, in a web export, a request from a page that must make none. The painter draws the
     // stand-in box (or nothing) for it either way, so the pixels are unchanged.
-    const url = layer.filename ? imageLayerUrl(layer.filename) : ''
-    if (url && !_imageCache.get(url)?.complete) {
+    const key = layer.filename ? imageLayerCacheKey(layer.filename) : ''
+    if (key && !_imageCache.get(key)?.complete) {
       jobs.push(new Promise((res) => {
         const im = new Image()
-        im.onload = () => { _imageCache.set(url, im); res(null) }
+        im.onload = () => { _imageCache.set(key, im); res(null) }
         im.onerror = () => res(null)
-        im.src = url
+        im.src = imageLayerUrl(layer.filename)
       }))
     }
     if (layer.clip && layer.clip.frames > 0) jobs.push(ensureClip(layer.clip))
@@ -2401,7 +2419,7 @@ function silhouetteContentReady(layer: LocalLayer, W: number): boolean {
   const font = layer.kind !== 'text' || textFontReady(layer, W)
   let image = true
   if (layer.kind === 'image') {
-    const img = _imageCache.get(imageLayerUrl(layer.filename))
+    const img = _imageCache.get(imageLayerCacheKey(layer.filename))
     image = !!img && img.complete && !!img.naturalWidth
   }
   const fillBitmaps = !layerPaints(layer).some(p => isImageFill(p) && p.src && !getFillBitmap(p.src))
@@ -3990,7 +4008,7 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     // paintLayerStack) offset by the clone being painted; without a clip, or until
     // every frame is loaded, `clipFrameFor` is null and the still paints exactly as before.
     const img = clipFrameFor(layer, _fieldCtx.t, _cloneSlot.k, _cloneSlot.n)
-      ?? _imageCache.get(imageLayerUrl(layer.filename))
+      ?? _imageCache.get(imageLayerCacheKey(layer.filename))
     if (img && img.complete && img.naturalWidth) {
       if (hasPaint(layer.tint)) drawTintedImage(ctx, img, layer, w, h)
       else ctx.drawImage(img, -w / 2, -h / 2, w, h)
