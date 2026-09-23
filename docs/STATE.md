@@ -31,6 +31,22 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
 
+### Frame layouts, stage 1 — the Layout tab is rebuilt on one Swiss system, with Vary — LANDED 2026-09-23 (`472d4c00e`..`65921fb89`, non-contiguous — 24 commits across 15 tasks, subagent-driven, a review per task, a whole-feature review and its fix wave)
+
+Spec `docs/superpowers/specs/2026-09-23-frame-layout-system-design.md`; plan `docs/superpowers/plans/2026-09-23-frame-layout-system-stage1.md`; prototypes `docs/superpowers/specs/assets/2026-09-23-frame-layout-system/`.
+
+**What shipped:** the old Layout-tab engine (27 hand-written pattern files, each with its own fractions) is gone. Every layout is now written against one shared kit in `lib/frame/patterns/kit/`: a column grid and baseline worked out from the Frame's size (12 columns portrait, 16 landscape, 20 banner), one type scale, and measurement in the user's real faces through the renderer's own line breaking. There are 42 layouts: the 27 old ones rebuilt, plus 15 image and overlap layouts from the prototype. Every one goes through one checker before anything is applied. The checker covers collisions (unless declared as an intended overlap), text off the page, text below the minimum size, text not fitting inside its shape, text too close to its panel edge, and each layout's own promise (it must actually run off the page, overlap, or rotate). The Layout tab has **Vary**: the button, `V`, or the arrow keys when nothing is selected step through every checked, distinct variation of the current layout (line breaks, arrangement, scale, image side), best first, each one undo step. Choices show as pills; line breaks quote the Frame's own text. Layouts that can't be offered for this Frame are named under the grid.
+
+**What a layout may change:** position, size, rotation, line and letter spacing, opacity, blend, image crop. Never the font, weight or colour of the user's text (colour only with recolour on). Pieces a layout adds (rules, bands, tags) belong to the layout: the next layout removes or replaces them, and any edit (drag, style, the agent) makes a piece yours. Anything a layout sets on your layers is remembered and handed back when a later layout leaves it alone, unless you changed it since.
+
+**Renderer additions (byte-identical when absent):** images crop to cover their box (`crop`); text layers can carry placed lines (`runs`), which scale with the layer, keep their case, and animate from their own positions; a text path can repeat its text (`repeat`).
+
+**Proof:** a matrix test runs every layout × content kind × with/without image × 4 Frame shapes through the real planner. That is 880 combinations and 3,136 candidates, each re-planned and re-checked. The 18 combinations with no valid variation are listed with measured reasons. A separate sweep checks that the overlap layouts really overlap, independently of the checker. Playwright on `/dev/frame-lab`: tiles paint the real image, apply is one undo step, Vary/V/arrows step and undo, and a layout's rules go when another layout is applied (4/4). The full unit suite is green (1,135 files).
+
+**Known gaps (decisions owed, see the morning report):** Knockout stretches an ellipse shape into a band, and shape geometry is not handed back; with recolour off, Overprint and Number behind lose their accent; extra images and wired input slots the layout doesn't place keep their position and stacking (in the lab the wired "Shader plate" sat over the title); Block and Behind the image are justified in the prototype but render flush-left. **Owed:** a browser look at Ring after its repeat fix, and a real-font pass over the matrix (the tests use a stub measure).
+
+**Next:** stage 2 of the spec (content types beyond posters: ads and social formats, with the Performance/Editorial/Street styles and the research-backed ad layouts).
+
 ### Frame web export, stage 1 — a Frame can be a live web file, not just a picture or a video — LANDED 2026-09-23 (`a25ce45f5`..`37385a0fa`, non-contiguous — 15 commits across 10 tasks, subagent-driven, a review per task, 2 fix rounds on the bundle split)
 
 Spec `docs/superpowers/specs/2026-09-21-frame-web-export-design.md` (amended the same day — see its own "Changed while planning and building" section); plan `docs/superpowers/plans/2026-09-22-frame-web-export-stage1.md`.
