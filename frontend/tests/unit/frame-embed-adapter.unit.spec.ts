@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import frameSurface from '~/lib/embed/surfaces/frame'
+import frameSurface, { capDeviceSize, MAX_CANVAS_PX } from '~/lib/embed/surfaces/frame'
 import { assetKey, type FrameSnapshot, type FrameVariant } from '~/lib/embed/frame/types'
 import { clipFrameKey } from '~/lib/compositor/clip'
 import { createImageLayer, createRectLayer } from '~/composables/useCompositorLayers'
@@ -223,5 +223,44 @@ describe('frame adapter — outline fonts (C1)', () => {
     await expect(frameSurface.mount(document.createElement('div'), snapshotOf([createRectLayer({})], {})))
       .rejects.toThrow('embed: no 2D context')
     expect(warm).not.toHaveBeenCalled()
+  })
+})
+
+// I6: Safari leaves a canvas past ~16.7 M device pixels blank, silently. A big box on a HiDPI
+// screen — or, under Fill, the artboard-sized offscreen it implies — is scaled down to fit.
+describe('frame adapter — canvas size cap (I6)', () => {
+  const art = { w: 1000, h: 500 }
+
+  it('leaves an ordinary size alone', () => {
+    expect(capDeviceSize(2000, 1000, art, 'fit')).toEqual({ w: 2000, h: 1000 })
+  })
+
+  it('scales an oversized box down proportionally, under the cap', () => {
+    const d = capDeviceSize(8000, 4000, art, 'fit')
+    expect(d.w * d.h).toBeLessThanOrEqual(MAX_CANVAS_PX)
+    expect(d.w * d.h).toBeGreaterThan(MAX_CANVAS_PX * 0.99)
+    expect(d.w / d.h).toBeCloseTo(2, 2)
+  })
+
+  it('under Fill, caps by the offscreen the Frame would need, not only the box', () => {
+    // A 4000 × 4000 box filled by a 2:1 Frame needs an 8000 × 4000 offscreen (32 M px).
+    const d = capDeviceSize(4000, 4000, art, 'fill')
+    expect(d.w).toBe(d.h)
+    const fillScale = Math.max(d.w / art.w, d.h / art.h)
+    expect(art.w * fillScale * art.h * fillScale).toBeLessThanOrEqual(MAX_CANVAS_PX + 1)
+  })
+
+  it('setSize applies the cap to the live canvas', async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(new Proxy({}, {
+      get: (_t, prop) => (prop === 'canvas' ? undefined : (() => undefined)), set: () => true,
+    }) as any)
+    const box = document.createElement('div')
+    const handle = await frameSurface.mount(box, snapshotOf([createRectLayer({})], {}))
+    handle.setSize(8000, 4000)
+    const cv = box.querySelector('canvas')!
+    expect(cv.width * cv.height).toBeLessThanOrEqual(MAX_CANVAS_PX)
+    handle.setSize(1200, 600)
+    expect([cv.width, cv.height]).toEqual([1200, 600])
+    handle.destroy()
   })
 })

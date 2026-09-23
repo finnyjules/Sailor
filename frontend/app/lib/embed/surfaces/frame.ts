@@ -74,6 +74,25 @@ function missingInlinedAsset(v: FrameVariant, urls: Record<string, string>): boo
   return false
 }
 
+/** The most device pixels one canvas may hold. Safari refuses a canvas past ~16.7 M pixels
+ *  (4096 × 4096) — silently: it stays blank. A big Fill box on a HiDPI screen can ask for more. */
+export const MAX_CANVAS_PX = 16_000_000
+
+/**
+ * The device size to give the visible canvas for a requested one: the request itself, or — when
+ * it, or the artboard-sized offscreen it implies (under Fill the Frame can be larger than the box),
+ * would pass MAX_CANVAS_PX — the same shape scaled down until both fit. The canvas is stretched
+ * back to its box by CSS, so the page shows the Frame softer, never blank.
+ */
+export function capDeviceSize(w: number, h: number, art: { w: number; h: number }, fit: FrameSnapshot['fit']): { w: number; h: number } {
+  const bw = Math.max(1, Math.round(w)), bh = Math.max(1, Math.round(h))
+  const r = fitRect({ w: bw, h: bh }, art, fit)
+  const area = Math.max(bw * bh, r.w * r.h)
+  if (area <= MAX_CANVAS_PX) return { w: bw, h: bh }
+  const k = Math.sqrt(MAX_CANVAS_PX / area)
+  return { w: Math.max(1, Math.floor(bw * k)), h: Math.max(1, Math.floor(bh * k)) }
+}
+
 const frameSurface: EmbedSurface = {
   kind: 'frame',
   // Genuinely true: with no background the painter never fills, so the canvas keeps its
@@ -172,8 +191,13 @@ const frameSurface: EmbedSurface = {
       canvas.style.display = 'block'
       canvas.style.width = '100%'
       canvas.style.height = '100%'
-      canvas.width = Math.max(1, Math.round(v.width))
-      canvas.height = Math.max(1, Math.round(v.height))
+      const artSize = { w: v.width, h: v.height }
+      const sizeTo = (w: number, h: number) => {
+        const d = capDeviceSize(w, h, artSize, snap.fit)
+        canvas.width = d.w
+        canvas.height = d.h
+      }
+      sizeTo(v.width, v.height)
       const ctx = canvas.getContext('2d')
       if (!ctx) throw new Error('embed: no 2D context')
 
@@ -201,6 +225,12 @@ const frameSurface: EmbedSurface = {
           undefined, tSec, undefined, undefined, v.background!, undefined, undefined, true)
       }
 
+      // Every paint is a bake (`bake = true`: shader fields at full resolution, no editor
+      // affordances such as the displacement map's ghost), the live loop included. Measured (I6,
+      // the 'vector' harness Frame, GPU work included): 8.6 ms a frame at 1000×500 and 10.8 ms at
+      // 2000×1000 — inside a 60 fps budget; the editor's live-field clamp would save ~4 ms but
+      // soften any field over 512 px and, through the same flag, draw the displacement ghost.
+      // The canvas cap above bounds the worst case instead.
       const paint = (t01: number) => {
         lastT = t01
         const tSec = t01 * snap.duration
@@ -252,8 +282,7 @@ const frameSurface: EmbedSurface = {
       return {
         setTime: paint,
         setSize(w: number, h: number) {
-          canvas.width = Math.max(1, Math.round(w))
-          canvas.height = Math.max(1, Math.round(h))
+          sizeTo(w, h)
           paint(lastT)
         },
         destroy() { canvas.remove(); cleanup() },
