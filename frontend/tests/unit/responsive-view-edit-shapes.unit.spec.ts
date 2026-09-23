@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { createRectLayer, createTextLayer, type LocalLayer } from '~/composables/useCompositorLayers'
 import { resolveLayout } from '~/lib/frame/responsive'
-import { resizeLayerAtView, scaleLayerAtView, rotateLayerAtView, hitTestView, viewSelectionGeometry, type ViewEdit } from '~/lib/frame/responsive/viewEdit'
+import { resizeLayerAtView, scaleLayerAtView, rotateLayerAtView, hitTestView, viewSelectionGeometry, moveUnitAtView, type ViewEdit } from '~/lib/frame/responsive/viewEdit'
 import type { FrameDoc } from '~/lib/frame/responsive/types'
 
 const doc = (layers: LocalLayer[]): FrameDoc => ({
@@ -59,6 +59,23 @@ describe('resizeLayerAtView', () => {
     expectBox(drop, { x: 550, y: 200, w: 1949.99, h: 100 })
     const drag = resizeLayerAtView(u, l, { x: 550, y: 200, w: 2000, h: 100 }, 1000, 500, 'drag', WH)
     expectBox(drawnAfter([l], drag, 'a'), drop)
+  })
+  it('a stretched rect narrowed hard draws on drop exactly where the last drag frame drew it (sweep)', () => {
+    const l = createRectLayer({ id: 'a', x: 0.5, y: 0.5, w: 0.9, h: 0.1 })     // design 50..950, drawn 550..2450
+    const u = unitAt([l], 'a')
+    for (let right = 600; right <= 2900; right += 50) {
+      const box = { x: 550, y: 200, w: right - 550, h: 100 }
+      const drag = drawnAfter([l], resizeLayerAtView(u, l, box, 1000, 500, 'drag', WH), 'a')
+      const drop = drawnAfter([l], resizeLayerAtView(u, l, box, 1000, 500, 'drop', WH), 'a')
+      expectBox(drop, drag)
+      expect(drop.w).toBeGreaterThan(0)
+    }
+    // The re-review's case: right edge to 1000 → far maps to −500, stops at 50 + 1 → drawn 550..1551.
+    // The left reading of that stopped box, 50..1051, reads stretched → rejected; the held pin is stored.
+    const e = resizeLayerAtView(u, l, { x: 550, y: 200, w: 450, h: 100 }, 1000, 500, 'drop', WH)
+    expect(e.patches[0]!.patch.w).toBeCloseTo(0.001, 9)
+    expect(e.pins!.patch.h).toBe('both')
+    expectBox(drawnAfter([l], e, 'a'), { x: 550, y: 200, w: 1001, h: 100 })
   })
   it('a stretched rect narrowed below the spare room stops at a 1 px design width (never negative)', () => {
     const l = createRectLayer({ id: 'a', x: 0.5, y: 0.5, w: 0.9, h: 0.1 })     // design 50..950, drawn 550..2450
@@ -147,6 +164,16 @@ describe('rotateLayerAtView', () => {
     const after = drawnAfter([l], drop, 'a')
     expect(after.x).toBeCloseTo(1050, 6); expect(after.w).toBeCloseTo(900, 6)   // centre map: 1000 + 50 .. 1000 + 950
     expectBox(after, drawnAfter([l], drag, 'a'))
+  })
+})
+
+describe('the 1 px stop and moves', () => {
+  it('a zero move of a stretched hairline thinner than 1 px leaves it exactly where it was', () => {
+    // h .0005 → 0.5 px tall, explicitly stretched vertically: design 249.75..250.25.
+    const l = createRectLayer({ id: 'a', x: 0.5, y: 0.5, w: 0.2, h: 0.0005, pins: { v: 'both' } })
+    const e = moveUnitAtView(unitAt([l], 'a'), [l], 1000, 500, 0, 0, 'drop')
+    expect(e.patches[0]!.patch.y).toBeCloseTo(0.5, 12)                        // was .5005 (grown to 1 px about near)
+    expect(e.patches[0]!.patch.x).toBeCloseTo(0.5, 12)
   })
 })
 

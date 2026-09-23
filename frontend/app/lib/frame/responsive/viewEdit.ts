@@ -55,7 +55,9 @@ export function bleeds(ax: AxisInfo): { near: boolean; far: boolean } {
  *  - A welded (bleeding) edge keeps its design position.
  *  - Every other edge stops EDGE_GAP inside the reference. An edge that reached the reference would
  *    be drawn at the REAL box edge (bleed), so bleeding cannot be made by dragging at a view.
- *  - When the extent would drop below MIN_EXTENT, the edge that moved further stops. */
+ *  - When the extent would drop below the floor, the edge that moved further stops. The floor is
+ *    MIN_EXTENT, or the unit's own extent if that is already smaller, so a move never grows a
+ *    sub-1 px hairline. */
 export function designExtentFor(ax: AxisInfo, pin: AxisPin, a: number, b: number, designSize: number): [number, number] {
   const kind: AxisPin = pin === 'both' && !ax.canStretch ? 'center' : pin
   const m: AxisMap = { ...ax.map, kind }
@@ -65,22 +67,39 @@ export function designExtentFor(ax: AxisInfo, pin: AxisPin, a: number, b: number
     const lo = ax.refDesign.start + EDGE_GAP, hi = ax.refDesign.start + ax.refDesign.extent - EDGE_GAP
     let near = weld.near ? dNear : Math.max(lo, invertMap(m, a, 'near'))
     let far = weld.far ? dFar : Math.min(hi, invertMap(m, b, 'far'))
-    if (far - near < MIN_EXTENT) {
+    const floor = minExtentFor(ax)
+    if (far - near < floor - 1e-9) {
       const farMoves = weld.near || (!weld.far && Math.abs(far - dFar) >= Math.abs(near - dNear))
-      if (farMoves) far = near + MIN_EXTENT
-      else near = far - MIN_EXTENT
+      if (farMoves) far = near + floor
+      else near = far - floor
     }
     return [near, far]
   }
-  const size = Math.max(designSize, MIN_EXTENT)
+  const size = Math.max(designSize, minExtentFor(ax))
   const c = invertMap(m, (a + b) / 2)
   return [c - size / 2, c + size / 2]
 }
 
-/** Whether a stretching design extent draws exactly at [a, b]. Used to reject a clamped candidate. */
+/** The smallest extent an edit may leave on this axis: MIN_EXTENT, or the unit's own design extent
+ *  when that is already smaller (never grow what the user drew). */
+function minExtentFor(ax: AxisInfo): number {
+  return Math.max(0, Math.min(MIN_EXTENT, ax.design.extent))
+}
+
+/** Whether a stretching design extent draws at [a, b], i.e. no clamp moved it. Compared in design
+ *  px against half the edge gap, so view/canvas round-off on the caller's box never counts as a clamp. */
 function drawsAt(ax: AxisInfo, near: number, far: number, a: number, b: number): boolean {
   const m: AxisMap = { ...ax.map, kind: 'both' }
-  return Math.abs(applyMap(m, near, 'near') - a) < EPS && Math.abs(applyMap(m, far, 'far') - b) < EPS
+  return Math.abs(near - invertMap(m, a, 'near')) < EDGE_GAP / 2 && Math.abs(far - invertMap(m, b, 'far')) < EDGE_GAP / 2
+}
+
+/** Where a HELD stretch pin actually draws [a, b] once its clamps apply (edge gap, 1 px stop). A
+ *  welded edge stays where it is drawn (the real box edge). Any other held pin draws at [a, b]. */
+function heldDrawnSpan(ax: AxisInfo, a: number, b: number, designSize: number): [number, number] {
+  if (ax.map.kind !== 'both') return [a, b]
+  const weld = bleeds(ax)
+  const [near, far] = designExtentFor(ax, 'both', a, b, designSize)
+  return [weld.near ? a : applyMap(ax.map, near, 'near'), weld.far ? b : applyMap(ax.map, far, 'far')]
 }
 
 /** During a drag: map back with the held pin and hold it (write it on an automatic axis). */
@@ -94,17 +113,22 @@ export function holdAxis(ax: AxisInfo, a: number, b: number, designSize: number)
  * after the edit (view px). An explicit pin maps straight back. An automatic axis tries the pin read
  * from where it now sits in the VIEW, then the pin it had; the first whose mapped-back design
  * position reads as that same pin keeps it automatic. If neither does, the held pin is stored.
- * Either way the unit ends up drawn exactly at [a, b].
+ * Either way the unit ends up drawn where the last drag frame (holdAxis) drew it: [a, b], or for a
+ * held stretch, [a, b] after its edge stops.
  */
-export function settleAxis(ax: AxisInfo, a: number, b: number, designSize: number): Settled {
+export function settleAxis(ax: AxisInfo, a0: number, b0: number, designSize0: number): Settled {
   const held = ax.map.kind
-  if (ax.explicit) { const [near, far] = designExtentFor(ax, held, a, b, designSize); return { near, far, pin: null } }
+  if (ax.explicit) { const [near, far] = designExtentFor(ax, held, a0, b0, designSize0); return { near, far, pin: null } }
+  // Judge the drop from where the last drag frame drew it: a held stretch stops its edges (edge
+  // gap, 1 px), so run the rule on that stopped box, not the pointer's. A no-op for other pins.
+  const [a, b] = heldDrawnSpan(ax, a0, b0, designSize0)
+  const designSize = (a === a0 && b === b0) ? designSize0 : designSize0 + (b - a - (b0 - a0)) / ax.map.s
   const viewPin = inferAxisPin(a, b - a, ax.refView.start, ax.refView.extent, ax.canStretch)
   for (const pin of viewPin === held ? [held] : [viewPin, held]) {
     const [near, far] = designExtentFor(ax, pin, a, b, designSize)
     // A stretching candidate that is not the held pin must draw where it was dropped. If its edges
-    // were stopped inside the reference it would jump on release, so reject it. The held pin was
-    // already stopped the same way while dragging, so it draws where the drag left it.
+    // were stopped inside the reference it would jump on release, so reject it. [a, b] is already
+    // the held pin's stopped box, so every accepted candidate draws where the last drag frame did.
     if (pin !== held && pin === 'both' && ax.canStretch && !drawsAt(ax, near, far, a, b)) continue
     if (inferAxisPin(near, far - near, ax.refDesign.start, ax.refDesign.extent, ax.canStretch) === pin) {
       return { near, far, pin: { clear: true } }
