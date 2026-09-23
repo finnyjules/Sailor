@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { applyLayoutToFrame, candidatesForFrame, hiddenLinesForFrame, planLayout } from '~/lib/frame/patterns/kit/plan'
+import { applyLayoutToFrame, candidatesForFrame, hiddenLayerIdsForFrame, hiddenLinesForFrame, planLayout } from '~/lib/frame/patterns/kit/plan'
+import { localStackKey } from '~/lib/compositor/frameStack'
 import { LAYOUTS } from '~/lib/frame/patterns/layouts/catalog'
 import { makeSheet } from '~/lib/frame/patterns/kit/sheet'
 import { boxOf } from '~/lib/frame/patterns/kit/check'
@@ -756,3 +757,168 @@ describe('candidatesForFrame — the cover penalty through the real planner (Tas
     } finally { unregister() }
   })
 })
+
+// ═══════════════ Stage 3 Task 2: the action line and the brand logo ═══════════════
+describe('planLayout — the action line and the brand logo (Stage 3)', () => {
+  const tl = (id: string, text: string, fontSize: number) =>
+    createTextLayer({ id, text, fontSize, fontFamily: 'Inter', fontWeight: 600, color: '#111111' }) as LocalLayer
+  // Set smaller than the caption: before Stage 3 it would have been read as the caption.
+  const action = () => tl('a', 'Shop now', 0.015)
+  const withAction = (o: { image?: boolean } = {}) => [...frameLayers(o), action()]
+
+  function capture(id: string) {
+    const seen: { c?: import('~/lib/frame/patterns/kit/types').Content } = {}
+    const def: LayoutDef = {
+      id, name: id, fits: ['word', 'phrase', 'sentence'],
+      fn(S, { c }) {
+        seen.c = c
+        return { els: [S.disp(c.title, { size: S.fitSize([c.title], S.SPAN(1, 12)), x: S.X(1), top: S.L(1) })], did: 'capture' }
+      },
+    }
+    unregister.push(__registerLayoutForTest(def))
+    return seen
+  }
+
+  it('the layout gets the action line\'s text and the brand logo in its content', () => {
+    const seen = capture('t-capture')
+    const brandLogo = { url: 'https://x/logo.svg', aspect: 0.4, onDarkUrl: 'https://x/logo-dark.svg' }
+    const plan = planLayout(args({ layoutId: 't-capture', props: props(withAction()), brandLogo }))!
+    expect(plan).not.toBeNull()
+    expect(seen.c).toEqual({
+      title: TEXTS.title, details: TEXTS.details, date: TEXTS.date, caption: TEXTS.caption,
+      action: 'Shop now', logo: brandLogo,
+    })
+  })
+
+  it('no action line and no brand logo: the content is exactly Stage 2\'s', () => {
+    const seen = capture('t-capture2')
+    planLayout(args({ layoutId: 't-capture2' }))
+    expect(seen.c).toEqual({ title: TEXTS.title, details: TEXTS.details, date: TEXTS.date, caption: TEXTS.caption })
+    expect('action' in seen.c!).toBe(false)
+    expect('logo' in seen.c!).toBe(false)
+  })
+
+  it('the stored roles record the action; a stored action holds after its text changes', () => {
+    const plan = planLayout(args({ props: props(withAction()) }))!
+    expect(plan.posterState.roles).toEqual({ title: 't', details: 'd', date: 'dt', caption: 'c', action: 'a' })
+    // The action text is edited to something that no longer reads as an action: the stored role wins.
+    const edited = plan.layers.map(l => (l.id === 'a' ? { ...l, text: 'Offer ends soon' } : l)) as LocalLayer[]
+    const seen = capture('t-capture3')
+    const again = planLayout(args({ layoutId: 't-capture3', props: props(edited, { sailor_posterState: plan.posterState }) }))!
+    expect(again.posterState.roles.action).toBe('a')
+    expect(seen.c!.action).toBe('Offer ends soon')
+    expect(seen.c!.caption).toBe(TEXTS.caption)
+  })
+
+  it('fix round 1: a pre-Stage-3 stored caption on "Shop now" gives way to the action; the caption is re-inferred', () => {
+    const seen = capture('t-capture4')
+    const stored = { title: 't', details: 'd', date: 'dt', caption: 'a' }
+    const plan = planLayout(args({ layoutId: 't-capture4', props: props(withAction(), { sailor_posterState: { roles: stored } }) }))!
+    expect(plan.posterState.roles).toEqual({ title: 't', details: 'd', date: 'dt', caption: 'c', action: 'a' })
+    expect(seen.c!.action).toBe('Shop now')
+    expect(seen.c!.caption).toBe(TEXTS.caption)
+  })
+
+  it('fix round 1: a pre-Stage-3 stored details on "Shop now" gives way to the action too', () => {
+    // Before Stage 3 a mid-size "Shop now" could be read as the details; the details re-infer.
+    const layers = [...frameLayers(), tl('a', 'Shop now', 0.045)]
+    const plan = planLayout(args({ props: props(layers, { sailor_posterState: { roles: { title: 't', details: 'a', date: 'dt', caption: 'c' } } }) }))!
+    expect(plan.posterState.roles).toEqual({ title: 't', details: 'd', date: 'dt', caption: 'c', action: 'a' })
+  })
+
+  it('fix round 1: stored roles on non-action layers are unchanged (they still beat inference)', () => {
+    // Swap details and caption in the stored roles: both hold, the action is still read.
+    const stored = { title: 't', details: 'c', date: 'dt', caption: 'd' }
+    const plan = planLayout(args({ props: props(withAction(), { sailor_posterState: { roles: stored } }) }))!
+    expect(plan.posterState.roles).toEqual({ ...stored, action: 'a' })
+    // Without an action line: exactly as before.
+    const p2 = planLayout(args({ props: props(frameLayers(), { sailor_posterState: { roles: stored } }) }))!
+    expect(p2.posterState.roles).toEqual(stored)
+  })
+
+  it('fix round 1: a stored title or date on an action-like layer still wins', () => {
+    const layers = [...frameLayers(), tl('a', 'Shop now', 0.015)]
+    const plan = planLayout(args({ props: props(layers, { sailor_posterState: { roles: { title: 't', details: 'd', date: 'a', caption: 'c' } } }) }))!
+    expect(plan.posterState.roles.date).toBe('a')
+    expect(plan.posterState.roles.action).toBeUndefined()
+  })
+
+  // The ONE intended Swiss change of Stage 3: an action line is no longer read as the caption (or
+  // the details). No Swiss layout reads `action`, so the other four lines are placed exactly as on
+  // the same Frame without the action line, and the action layer is left as it was.
+  it('Swiss, every layout: a Frame with an action line places the other four exactly as without it', () => {
+    let compared = 0
+    for (const l of LAYOUTS) for (const image of [false, true]) {
+      const without = planLayout(args({ layoutId: l.id, props: props(frameLayers({ image })) }))
+      const layersWith = withAction({ image })
+      const withA = planLayout(args({ layoutId: l.id, props: props(layersWith) }))
+      expect(withA == null, `${l.id} image=${image}`).toBe(without == null)
+      if (!without || !withA) continue
+      compared++
+      const tag = `${l.id} image=${image}`
+      expect(withA.did, tag).toBe(without.did)
+      expect(withA.issues, tag).toEqual(without.issues)
+      expect(withA.layers.filter(x => x.id !== 'a'), tag).toEqual(without.layers)
+      expect(withA.layers.find(x => x.id === 'a'), tag).toEqual(layersWith.find(x => x.id === 'a'))
+      expect(withA.order.filter(k => k !== localStackKey('a')), tag).toEqual(without.order)
+      expect(withA.posterState.roles, tag).toEqual({ ...without.posterState.roles, action: 'a' })
+    }
+    expect(compared).toBeGreaterThan(40)
+  })
+
+  it('Swiss candidates are unchanged by an action line', () => {
+    for (const l of LAYOUTS) {
+      const a0 = candidatesForFrame({ ...args({ layoutId: l.id }), choice: undefined } as never)
+      const a1 = candidatesForFrame({ ...args({ layoutId: l.id, props: props(withAction()) }), choice: undefined } as never)
+      expect(a1.map(c => c.choice), l.id).toEqual(a0.map(c => c.choice))
+    }
+  })
+
+  describe('a format counts the action as one more level (Swiss: after the date)', () => {
+    const on = (layers: LocalLayer[], preset: string, w: number, h: number, style?: 'swiss' | 'performance') => {
+      const base = { props: props(layers, { sailor_frame: { preset } }), frameW: w, frameH: h, palette, connectedSlots: [], measure: makeStubMeasure(), ...(style ? { style } : {}) }
+      const plan = planLayout({ ...base, layoutId: 'statement', choice: { ...DEFAULT_CHOICE } })
+      return { plan, lines: hiddenLinesForFrame(base), ids: hiddenLayerIdsForFrame(base) }
+    }
+
+    it('300×600 (carries 3), five lines: the action and the caption are hidden, in level order', () => {
+      const r = on(withAction(), 'ad-300x600', 300, 600)
+      expect(r.plan?.format?.hidden).toEqual(['action', 'caption'])
+      expect(r.lines).toEqual(['Shop now', TEXTS.caption])
+      expect(r.ids).toEqual(['a', 'c'])
+      expect((r.plan!.layers.find(l => l.id === 'a') as { visible?: boolean }).visible).toBe(false)
+      expect((r.plan!.layers.find(l => l.id === 'c') as { visible?: boolean }).visible).toBe(false)
+      expect((r.plan!.layers.find(l => l.id === 'dt') as { visible?: boolean }).visible).not.toBe(false)
+    })
+
+    it('video-thumb (carries 2), five lines: date, action and caption hidden', () => {
+      const r = on(withAction(), 'video-thumb', 1280, 720)
+      expect(r.plan?.format?.hidden).toEqual(['date', 'action', 'caption'])
+      expect(r.ids).toEqual(['dt', 'a', 'c'])
+    })
+
+    it('title, details and the action on 300×600 (carries 3): nothing hidden — only the lines the Frame has count', () => {
+      const r = on([tl('t', 'Weather Report', 0.12), tl('d', 'Ines Vollmer', 0.04), action()], 'ad-300x600', 300, 600)
+      expect(r.plan?.format?.hidden).toEqual([])
+      expect(r.ids).toEqual([])
+    })
+
+    it('without an action line, the hidden lines are Stage 2\'s', () => {
+      expect(on(frameLayers(), 'ad-300x600', 300, 600).ids).toEqual(['c'])
+      expect(on(frameLayers(), 'video-thumb', 1280, 720).ids).toEqual(['dt', 'c'])
+    })
+
+    it('a style\'s own level order: Performance puts the date before the details', () => {
+      const r = on(withAction(), 'video-thumb', 1280, 720, 'performance')
+      expect(r.lines).toEqual([TEXTS.details, 'Shop now', TEXTS.caption])
+      expect(r.ids).toEqual(['d', 'a', 'c'])
+    })
+
+    it('a format that carries every level (meta-story) hides nothing, action included', () => {
+      const r = on(withAction(), 'meta-story', 1080, 1920)
+      expect(r.ids).toEqual([])
+      expect(r.lines).toEqual([])
+    })
+  })
+})
+

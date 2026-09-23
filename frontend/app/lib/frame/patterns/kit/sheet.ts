@@ -1,5 +1,5 @@
 import { faceOf } from './types'
-import type { Content, Measure, MissingEl, PhotoEl, RuleEl, Style, TextEl } from './types'
+import type { Content, Measure, MissingEl, PhotoEl, RuleEl, Style, TextEl, TextKey } from './types'
 import { STYLES } from './styles'
 import type { StyleId } from './styles'
 
@@ -51,15 +51,15 @@ export interface Sheet {
   info(s: string, o: Partial<TextEl>): TextEl
   rule(x: number, y: number, w: number): RuleEl
   infoStack(items: { s: string; wt?: number; role?: string }[], c1: number, c2: number, top: number): { els: TextEl[]; bottom: number }
-  infoRow(c: Content, spec: [keyof Content, number, number][], where: 'foot' | 'head'): { els: TextEl[]; top: number; bottom: number }
-  infoRowAt(c: Content, spec: [keyof Content, number, number][], base: number): { els: TextEl[]; top: number }
+  infoRow(c: Content, spec: [TextKey, number, number][], where: 'foot' | 'head'): { els: TextEl[]; top: number; bottom: number }
+  infoRowAt(c: Content, spec: [TextKey, number, number][], base: number): { els: TextEl[]; top: number }
   stackBottom(items: { s: string; wt?: number; role?: string }[], c1: number, c2: number, bottom: number): { els: TextEl[]; top: number }
   photoIn(z: { c1: number; c2: number; top: number; bottom: number }, o?: { ax?: 'left' | 'right'; ay?: 'top' | 'bottom' }): PhotoEl | MissingEl
   cover(ph: boolean): PhotoEl
   pick<T>(r: () => number, arr: readonly T[]): T
   /** UI copy: quote the Frame's own words (first line, max 20 chars) instead of naming a role. */
   q(s: string | undefined, fallback?: string): string
-  FOOT2: [keyof Content, number, number][]; FOOT3: [keyof Content, number, number][]
+  FOOT2: [TextKey, number, number][]; FOOT3: [TextKey, number, number][]
   PHOTO_ASPECT: number
 }
 
@@ -156,7 +156,7 @@ export function makeSheet(o: SheetOpts): Sheet {
     return { els, bottom: y }
   }
   // a row of information blocks sharing one baseline or one cap line
-  function infoRow(c: Content, spec: [keyof Content, number, number][], where: 'foot' | 'head') {
+  function infoRow(c: Content, spec: [TextKey, number, number][], where: 'foot' | 'head') {
     const els: TextEl[] = []; let extent = 0
     for (const [key, a, b] of spec) {
       const s = c[key]; if (!s) continue
@@ -168,7 +168,7 @@ export function makeSheet(o: SheetOpts): Sheet {
     }
     return { els, top: where === 'foot' ? L(16) - extent : M, bottom: where === 'foot' ? L(16) : M + extent }
   }
-  function infoRowAt(c: Content, spec: [keyof Content, number, number][], base: number) {
+  function infoRowAt(c: Content, spec: [TextKey, number, number][], base: number) {
     const els: TextEl[] = []; let extent = 0
     for (const [key, a, b] of spec) {
       const s = c[key]; if (!s) continue
@@ -182,8 +182,8 @@ export function makeSheet(o: SheetOpts): Sheet {
     st.els.forEach(e => { e.top = (e.top ?? 0) + bottom - st.bottom })
     return { els: st.els, top: bottom - st.bottom }
   }
-  const FOOT3: [keyof Content, number, number][] = [['details', 1, 4], ['date', 5, 8], ['caption', 9, 12]]
-  const FOOT2: [keyof Content, number, number][] = [['date', 1, 4], ['caption', 5, 12]]
+  const FOOT3: [TextKey, number, number][] = [['details', 1, 4], ['date', 5, 8], ['caption', 9, 12]]
+  const FOOT2: [TextKey, number, number][] = [['date', 1, 4], ['caption', 5, 12]]
 
   // the photo: whole columns, 4:5, the largest that fits the zone
   const PHOTO_ASPECT = 1.25

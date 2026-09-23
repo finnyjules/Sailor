@@ -25,7 +25,9 @@ import type { RoleTargets } from './toOps'
 import { isOwned, mergeOwned } from './owned'
 import { enumerate, lineOptions } from './vary'
 import type { Candidate, Choice, LineOption } from './vary'
-import type { Content, El, Kind, LayoutDef, LayoutOut, Measure, PhotoEl, RoleKey } from './types'
+import type { BrandLogo, Content, El, Kind, LayoutDef, LayoutOut, Measure, PhotoEl, RoleKey } from './types'
+import { STYLES } from './styles'
+import type { StyleId } from './styles'
 
 // ═══════════════════════ the planner ═══════════════════════
 // Runs a kit layout on a real Frame: infer the user's elements, build the sheet from the
@@ -51,6 +53,12 @@ export interface LayoutPlanArgs {
   shapeMode?: FrameElements['shapeMode']
   /** Injected in tests; default: the renderer-exact canvas measure over the frame's role layers. */
   measure?: Measure
+  /** The style (Stage 3): its type on the sheet and its level order for a format's `carries`.
+   *  Absent: `'swiss'` — Stages 1–2 exactly. */
+  style?: StyleId
+  /** The project's brand kit logo (ruling S2), passed through to `content.logo`. Absent: layouts
+   *  simply omit it. */
+  brandLogo?: BrandLogo
 }
 
 /** What apply writes through. `writeGroups` is required: a layout clears the pins of the groups
@@ -94,7 +102,9 @@ interface Prepared {
   hidden: RoleKey[]
 }
 
-const ROLES: RoleKey[] = ['title', 'details', 'date', 'caption']
+/** Every text role a Frame can hold: the targets, the measure and the stored roles cover all of
+ *  them. Level order (which a format keeps) is the style's `levels`, not this list. */
+const ROLES: RoleKey[] = ['title', 'details', 'date', 'caption', 'action']
 
 /** Re-exported so existing importers keep working; the one copy lives in `hierarchy.ts`
  *  (which `inferElements` also needs it in, and can't import from here without a cycle). */
@@ -108,11 +118,12 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
   const elements = frameElements(a, layers)
   if (!elements.title) return null
   const content = contentOf(elements)
+  if (a.brandLogo) content.logo = { ...a.brandLogo }
   // Levels (Stage 2): a format that carries N levels keeps the first N of the lines the Frame
-  // has, in title → details → date → caption order; the rest leave the content before the layout
-  // runs, and their layers are hidden.
+  // has, in the style's level order (Swiss: title → details → date → action → caption); the rest
+  // leave the content before the layout runs, and their layers are hidden.
   const fmt = formatFor(a.props, a.frameW, a.frameH)
-  const hidden = hiddenRoles(fmt, content)
+  const hidden = hiddenRoles(fmt, content, a.style)
   for (const r of hidden) delete content[r]
   const kind = kindOf(elements.title.words.length) as Kind
   const targets: RoleTargets = {}
@@ -134,7 +145,7 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
   return { def, index, layers, elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props), fmt, hidden }
 }
 
-type FrameArgs = Pick<LayoutPlanArgs, 'props' | 'frameW' | 'frameH' | 'shapeMode' | 'imageMode'>
+type FrameArgs = Pick<LayoutPlanArgs, 'props' | 'frameW' | 'frameH' | 'shapeMode' | 'imageMode' | 'style'>
 
 /** Which of the Frame's layers holds which role: size inference over the user's own layers, then
  *  the roles the last apply stored. A layout's own pieces (bands, rules, dots) are not the user's
@@ -149,19 +160,21 @@ function frameElements(a: FrameArgs, layers: LocalLayer[]): FrameElements {
  *  breaking. Call only when the Frame has a title. */
 function contentOf(elements: FrameElements): Content {
   const content: Content = { title: elements.title!.words.join(' ') }
-  for (const r of ['details', 'date', 'caption'] as const) {
+  for (const r of ['details', 'date', 'caption', 'action'] as const) {
     const t = elements[r]?.text
     if (t && t.trim()) content[r] = t
   }
   return content
 }
 
-/** The roles on this Frame a format does not carry: of the lines the Frame HAS, in title →
- *  details → date → caption order, those past its `carries` (a two-line Frame on a two-level
- *  format hides nothing). None without a format. */
-function hiddenRoles(fmt: FrameFormat | null, content: Content): RoleKey[] {
-  if (!fmt) return []
-  return ROLES.filter(r => content[r] != null).slice(fmt.carries ?? 4)
+/** The roles on this Frame a format does not carry: of the lines the Frame HAS, in the style's
+ *  level order (Swiss: title → details → date → action → caption — Stage 2's order with the
+ *  action one more level after the date), those past its `carries` (a two-line Frame on a
+ *  two-level format hides nothing). None without a format, or when the format carries every level
+ *  (`carries` absent). */
+function hiddenRoles(fmt: FrameFormat | null, content: Content, style: StyleId = 'swiss'): RoleKey[] {
+  if (!fmt || fmt.carries == null) return []
+  return STYLES[style].levels.filter(r => content[r] != null).slice(fmt.carries)
 }
 
 /** The text of the lines this Frame's format leaves out (Stage 2), in role order — the same roles
@@ -169,28 +182,29 @@ function hiddenRoles(fmt: FrameFormat | null, content: Content): RoleKey[] {
  *  been planned or applied). Empty without a format, or without a title. */
 export function hiddenLinesForFrame(a: FrameArgs): string[] {
   const fmt = formatFor(a.props, a.frameW, a.frameH)
-  if (!fmt || (fmt.carries ?? 4) >= ROLES.length) return []
+  if (!fmt || fmt.carries == null) return []
   const elements = frameElements(a, (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? [])
   if (!elements.title) return []
   const content = contentOf(elements)
-  return hiddenRoles(fmt, content).map(r => content[r]!)
+  return hiddenRoles(fmt, content, a.style).map(r => content[r] as string)
 }
 
 /** The ids of the text layers this Frame's format leaves out — the layers of the roles
  *  `hiddenLinesForFrame` quotes. Empty without a format, or without a title. */
 export function hiddenLayerIdsForFrame(a: FrameArgs): string[] {
   const fmt = formatFor(a.props, a.frameW, a.frameH)
-  if (!fmt || (fmt.carries ?? 4) >= ROLES.length) return []
+  if (!fmt || fmt.carries == null) return []
   const elements = frameElements(a, (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? [])
   if (!elements.title) return []
-  return hiddenRoles(fmt, contentOf(elements)).map(r => elements[r]!.id)
+  return hiddenRoles(fmt, contentOf(elements), a.style).map(r => elements[r]!.id)
 }
 
 /** The roles the last apply stored win over size inference: an overlap layout (Ghost, Number
  *  behind, Overprint) sets the details or the date as large as the title or larger, and inferring
  *  from font size after it would pick the wrong title. A stored role holds while its layer still
  *  exists and still has text; a role whose layer is gone (or emptied) falls back to inference,
- *  unless the inferred layer already holds a stored role. */
+ *  unless the inferred layer already holds a stored role. One exception: a stored caption or details on
+ *  the layer fresh inference reads as the action gives way to the action (ruling S3). */
 function withStoredRoles(inferred: FrameElements, userLayers: LocalLayer[], stored: StoredRoles | undefined): FrameElements {
   if (!stored) return inferred
   const text = (id: string | undefined) => {
@@ -199,7 +213,16 @@ function withStoredRoles(inferred: FrameElements, userLayers: LocalLayer[], stor
     return t.trim() ? t : null
   }
   const kept = new Map<RoleKey, string>()
-  for (const r of ROLES) { const id = stored[r]; if (id && text(id) != null) kept.set(r, id) }
+  for (const r of ROLES) {
+    const id = stored[r]
+    if (!id || text(id) == null) continue
+    // Ruling S3 over a pre-Stage-3 reading: a layer fresh inference reads as the action is the
+    // action, even if an earlier apply stored it as the caption or the details (before Stage 3
+    // "Shop now" had no role of its own). That slot falls back to fresh inference. A stored title
+    // or date still wins — the overlap layouts need them.
+    if ((r === 'caption' || r === 'details') && inferred.action?.id === id) continue
+    kept.set(r, id)
+  }
   if (!kept.size) return inferred
   const claimed = new Set(kept.values())
   const out: FrameElements = { ...inferred }
@@ -248,7 +271,7 @@ function formatSheetOpts(fmt: FrameFormat | null): SheetOpts['format'] {
  *  inside the band the platform leaves uncovered, everything is moved down by the top inset, and
  *  a panel or a bleeding image that fills the band runs on to the real edges — only text keeps
  *  clear. The returned sheet is then the full-height one (for the checker and the ops). */
-function runChoice(p: Prepared, a: { frameW: number; frameH: number }, choice: Choice): Run {
+function runChoice(p: Prepared, a: { frameW: number; frameH: number; style?: StyleId }, choice: Choice): Run {
   const fmt = p.fmt
   const keep = fmt?.keep
   const H_full = 100 * a.frameH / a.frameW
@@ -258,6 +281,7 @@ function runChoice(p: Prepared, a: { frameW: number; frameH: number }, choice: C
     frameW: a.frameW, frameH: a.frameH, grid: p.grid, measure: p.measure,
     scale: choice.scale === 'quiet' ? 0.8 : 1, flip: choice.side === 'left',
     ...(format ? { format } : {}),
+    ...(a.style ? { style: a.style } : {}),
     ...(keep ? { composeH: H_full * (1 - keep.top - keep.bottom) } : {}),
   }
   let S = makeSheet(opts)
@@ -443,7 +467,7 @@ export function candidatesForFrame(a: Omit<LayoutPlanArgs, 'choice'>): Candidate
   }
   const check = (out: LayoutOut) => checkRun(runs.get(out)!, p.def.premise)
   const format = formatSheetOpts(p.fmt)
-  const infoSize = makeSheet({ frameW: a.frameW, frameH: a.frameH, grid: p.grid, measure: p.measure, ...(format ? { format } : {}) }).INFO.size
+  const infoSize = makeSheet({ frameW: a.frameW, frameH: a.frameH, grid: p.grid, measure: p.measure, ...(format ? { format } : {}), ...(a.style ? { style: a.style } : {}) }).INFO.size
   const box = (e: El) => {
     const S = sheetOf.get(e)
     return S ? boxOf(e, S) : null

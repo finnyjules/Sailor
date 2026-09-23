@@ -1,4 +1,4 @@
-import type { Content, El, LayoutDef, PhotoEl, RectEl } from '../kit/types'
+import type { TextKey, El, LayoutDef, PhotoEl, RectEl } from '../kit/types'
 import { presentItems } from './swissLines'
 
 // ═══════════════════════ the overlap family ═══════════════════════
@@ -17,7 +17,7 @@ import { presentItems } from './swissLines'
 const ALL = ['word', 'phrase', 'sentence'] as const
 
 /** The prototype's details / date / caption column (details at weight 500). */
-const COLUMN: [keyof Content, number?][] = [['details', 500], ['date'], ['caption']]
+const COLUMN: [TextKey, number?][] = [['details', 500], ['date'], ['caption']]
 
 /** Overprint — the details, set as large as the title, overprint its lower half in accent. */
 export const overprint: LayoutDef = {

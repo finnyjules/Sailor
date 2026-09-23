@@ -9,28 +9,52 @@ export const isNumberish = (s: string | undefined) =>
   !!s && (/[%€$£]/.test(s) || s.replace(/\D/g, '').length / Math.max(1, s.replace(/\s/g, '').length) >= 0.3)
 
 const words = (t: string) => t.trim().split(/\s+/).filter(Boolean)
+
+/** Call-to-action verbs (ruling S3): the action line's first word (or first two, "sign up"). */
+const ACTION_RE = /^(shop|buy|order|get|book|reserve|download|sign up|join|subscribe|learn|discover|see|try|start|register|apply|donate|watch|listen|call|visit|explore)\b/i
+/** Ends with an arrow: "Book tickets →", "More ›". */
+const ARROW_RE = /[→›]\s*$/
+
+/** Ruling S3: an action line ("Shop now", "Book tickets →") is ≤ 4 words, not number-like, and
+ *  opens with a call-to-action verb or ends with an arrow. (Not being the largest text is the
+ *  caller's check.) */
+export const isActionText = (s: string | undefined): boolean => {
+  const t = (s ?? '').trim()
+  if (!t || words(t).length > 4 || isNumberish(t)) return false
+  return ACTION_RE.test(t) || ARROW_RE.test(t)
+}
+
 const asText = (l: PosterLayerView, role: TextEl['role']): TextEl =>
   ({ role, id: l.id, text: l.text ?? '', words: words(l.text ?? '') })
 
-/** Largest text ⇒ title, smallest ⇒ caption, a date-shaped remaining line ⇒
- *  date, the rest ⇒ details. Images/shapes collected in document order. */
+/** The action line first (ruling S3: the first text in document order that reads as a call to
+ *  action and is not the largest text) — it leaves the texts before the rest is inferred, so it is
+ *  never taken for the caption or the details. Then: largest text ⇒ title, smallest ⇒ caption, a
+ *  date-shaped remaining line ⇒ date, the rest ⇒ details. Images/shapes collected in document
+ *  order. A Frame with no action line infers exactly as in Stages 1–2. */
 export function inferElements(
   layers: PosterLayerView[],
   shapeMode: FrameElements['shapeMode'] = null,
   imageMode: boolean = false,
 ): FrameElements {
-  const texts = layers.filter(l => l.kind === 'text' && (l.text ?? '').trim().length > 0)
+  const allTexts = layers.filter(l => l.kind === 'text' && (l.text ?? '').trim().length > 0)
   const images: ImageEl[] = layers.filter(l => l.kind === 'image').map(l => ({ id: l.id }))
   const shapes: ShapeEl[] = layers
     .filter(l => l.kind === 'shape')
     .map(l => ({ id: l.id, shapeId: l.shapeId ?? 'circle' }))
 
   const base: FrameElements = { images, shapes, shapeMode, imageMode }
-  if (!texts.length) return base
+  if (!allTexts.length) return base
+
+  // "Not the largest text": strictly smaller than the largest, so a lone line is never the action.
+  const largest = Math.max(...allTexts.map(l => l.fontSize ?? 0))
+  const actionLayer = allTexts.find(l => (l.fontSize ?? 0) < largest && isActionText(l.text))
+  const texts = actionLayer ? allTexts.filter(l => l !== actionLayer) : allTexts
 
   const bySize = [...texts].sort((a, b) => (b.fontSize ?? 0) - (a.fontSize ?? 0))
   const title = bySize[0]!
   base.title = asText(title, 'title')
+  if (actionLayer) base.action = asText(actionLayer, 'action')
   const rest = bySize.slice(1)
   if (!rest.length) return base
 

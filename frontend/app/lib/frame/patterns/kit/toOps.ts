@@ -18,7 +18,7 @@ import type { RoleKey } from './types'
 // line inside it, `top` is the cap top of the first line and `base` the baseline of the last.
 
 export interface RoleTargets {
-  title?: string; details?: string; date?: string; caption?: string; image?: string; shape?: string
+  title?: string; details?: string; date?: string; caption?: string; action?: string; image?: string; shape?: string
   /** The shape layer's kind. A `path` layer sizes from one uniform scale (apply writes
    *  `scale = w / bbox.w`), so it cannot take a non-square box; the others take `w` × `h`. */
   shapeKind?: string
@@ -37,8 +37,8 @@ const RING_REPEAT = 3
 /** Kit rule thickness, in kit units (the prototype's 0.16cqw border). */
 const RULE_H = 0.16
 
-type TextRole = 'title' | 'details' | 'date' | 'caption'
-const TEXT_ROLES: readonly string[] = ['title', 'details', 'date', 'caption']
+type TextRole = 'title' | 'details' | 'date' | 'caption' | 'action'
+const TEXT_ROLES: readonly string[] = ['title', 'details', 'date', 'caption', 'action']
 
 /** `title2` → `title`. */
 const baseRole = (role: string | undefined) => (role ?? '').replace(/\d+$/, '')

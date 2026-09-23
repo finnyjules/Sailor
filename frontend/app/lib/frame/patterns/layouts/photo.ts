@@ -1,4 +1,4 @@
-import type { Content, El, LayoutDef } from '../kit/types'
+import type { TextKey, El, LayoutDef } from '../kit/types'
 import { presentItems } from './swissLines'
 
 // ═══════════════════════ image-led layouts ═══════════════════════
@@ -15,7 +15,7 @@ import { presentItems } from './swissLines'
 const ALL = ['word', 'phrase', 'sentence'] as const
 
 /** The prototype's details / date / caption column (details at weight 500). */
-const COLUMN: [keyof Content, number?][] = [['details', 500], ['date'], ['caption']]
+const COLUMN: [TextKey, number?][] = [['details', 500], ['date'], ['caption']]
 
 /** Plate — like a museum plate: the image in nine columns, the smaller text beside it, the title underneath. */
 export const plate: LayoutDef = {

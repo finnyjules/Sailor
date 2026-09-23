@@ -1,4 +1,4 @@
-import type { Content, El, LayoutDef } from '../kit/types'
+import type { Content, TextKey, El, LayoutDef } from '../kit/types'
 
 // ═══════════════════════ Swiss line layouts ═══════════════════════
 // Ported from the prototype (docs/superpowers/specs/assets/2026-09-23-frame-layout-system/
@@ -14,12 +14,12 @@ const ALL = ['word', 'phrase', 'sentence'] as const
 
 /** `infoStack` items for the roles present, in order, with their weights (a role with no text
  *  is left out). */
-export function presentItems(c: Content, keys: [keyof Content, number?][]): { s: string; wt?: number; role: string }[] {
+export function presentItems(c: Content, keys: [TextKey, number?][]): { s: string; wt?: number; role: string }[] {
   return keys.flatMap(([key, wt]) => (c[key] ? [{ s: c[key]!, role: key, ...(wt ? { wt } : {}) }] : []))
 }
 
 /** The prototype's details / date / caption column (details at weight 500). */
-const COLUMN: [keyof Content, number?][] = [['details', 500], ['date'], ['caption']]
+const COLUMN: [TextKey, number?][] = [['details', 500], ['date'], ['caption']]
 
 /** Title role for the i-th separately set word or line. */
 const titleRole = (i: number) => (i ? 'title' + i : 'title')

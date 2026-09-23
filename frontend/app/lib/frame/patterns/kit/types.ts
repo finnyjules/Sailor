@@ -3,7 +3,7 @@ import type { StyleId } from './styles'
 
 // Layout kit types. Units: percent of frame width (W = 100, H = 100 × frameH / frameW).
 
-export type RoleKey = 'title' | 'details' | 'date' | 'caption'
+export type RoleKey = 'title' | 'details' | 'date' | 'caption' | 'action'
 export type Colour = 'ink' | 'accent' | 'field'
 /** Text style. `role` picks whose face is measured (the user's real family/weight). */
 export interface Style { role?: RoleKey; size?: number; wt?: number; ls: number; lh: number
@@ -20,7 +20,15 @@ export interface RuleEl extends Base { k: 'l'; x: number; y: number; w: number }
 export interface RingEl extends Base { k: 'ring'; cx: number; cy: number; R: number; size: number; s: string }
 export interface MissingEl { k: 'missing'; why?: string }
 export type El = TextEl | PhotoEl | CircleEl | RectEl | RuleEl | RingEl | MissingEl
-export interface Content { title: string; details?: string; date?: string; caption?: string }
+/** The brand kit's logo (ruling S2): `aspect` is h / w; `onDarkUrl` for a dark field. */
+export interface BrandLogo { url: string; aspect: number; onDarkUrl?: string }
+export interface Content { title: string; details?: string; date?: string; caption?: string
+  /** The action line's text ("Shop now") — ruling S3. No Swiss layout reads it. */
+  action?: string
+  /** The project's brand kit logo — ruling S2. No Swiss layout reads it. */
+  logo?: BrandLogo }
+/** The content keys that hold a line of text (every key but `logo`). */
+export type TextKey = Exclude<keyof Content, 'logo'>
 export type Kind = 'word' | 'phrase' | 'sentence'
 export interface LayoutCtx { c: Content; kind: Kind; ph: boolean; r: () => number; words: string[]; lines: string[]; arr: number }
 export interface LayoutOut { els: El[]; did: string }
@@ -50,7 +58,7 @@ export interface Measure {
 }
 
 /** The face an element is measured in, from its `role`: `details`/`date`/`caption`/`title`
- *  map to themselves; `info` and anything else map to `caption`. */
+ *  map to themselves; `action`, `info` and anything else map to `caption` (the info face). */
 export function faceOf(role: string | undefined): RoleKey {
   return role === 'title' || role === 'details' || role === 'date' || role === 'caption' ? role : 'caption'
 }

@@ -5,7 +5,7 @@ import type { ExpressiveParams } from '~~/shared/text-layout/expressive'
 export type PosterKind = 'word' | 'phrase' | 'sentence'
 
 /** Inferred role of an element on the poster. */
-export type Role = 'title' | 'details' | 'caption' | 'date'
+export type Role = 'title' | 'details' | 'caption' | 'date' | 'action'
 
 /** Classify a title by its word count: 1 = word, 2–4 = phrase, 5+ = sentence. */
 export function kindOf(wordCount: number): PosterKind {
@@ -40,6 +40,8 @@ export interface FrameElements {
   details?: TextEl
   caption?: TextEl
   date?: TextEl
+  /** The action line ("Shop now") — ruling S3. Read before the other roles, so it is never the caption. */
+  action?: TextEl
   images: ImageEl[]
   shapes: ShapeEl[]
   shapeMode: { id: string } | { family: string } | null

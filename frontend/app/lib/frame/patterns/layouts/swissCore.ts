@@ -1,4 +1,4 @@
-import type { Content, El, LayoutDef } from '../kit/types'
+import type { Content, TextKey, El, LayoutDef } from '../kit/types'
 
 // ═══════════════════════ Swiss core layouts ═══════════════════════
 // Ported from the prototype (docs/superpowers/specs/assets/2026-09-23-frame-layout-system/
@@ -234,6 +234,6 @@ export const footer: LayoutDef = {
 }
 
 /** `infoStack` items for the roles present, in order (a role with no text is left out). */
-function stackItems(c: Content, keys: [keyof Content][]): { s: string; role: string }[] {
+function stackItems(c: Content, keys: [TextKey][]): { s: string; role: string }[] {
   return keys.flatMap(([key]) => (c[key] ? [{ s: c[key]!, role: key }] : []))
 }
