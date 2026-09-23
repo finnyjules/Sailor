@@ -228,8 +228,10 @@ export async function recordVideo(req: RecordRequest, deps: RecorderDeps = {}): 
   const mb: MediabunnyLike = deps.lib ?? await import('mediabunny')
   const { canvas, ctx } = (deps.createCanvas ?? defaultCanvas)(plan.width, plan.height, { readBack: plan.alpha })
   // VP9 + alpha: one I420A buffer for the whole video. Safe to refill each
-  // frame: VideoFrame copies the bytes it is given, and source.add() has made
-  // that frame before it resolves.
+  // frame because mediabunny 1.59's VideoSample constructor copies the bytes
+  // (`toUint8Array(data).slice()` in mediabunny/dist/modules/src/sample.js,
+  // unless `_doNotCopy`), so the buffer is free again as soon as the
+  // constructor returns. Never pass `_doNotCopy` here.
   const i420a = plan.alpha ? new Uint8Array(i420aSize(plan.width, plan.height)) : null
 
   const target = new mb.BufferTarget()

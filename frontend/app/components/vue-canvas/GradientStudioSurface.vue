@@ -44,7 +44,7 @@ import type { GradientEmbedConfig } from '~/lib/embed/surfaces/gradient'
 import { clampExportDims } from '~/lib/gradientfx/exportDims'
 import { exportStudioVideo, resultBlob, videoErrorText, type StudioVideoResult } from '~/lib/studio/studioVideoExport'
 import { prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
-import { isAbortError } from '~/lib/engine/videoRecorder'
+import { isAbortError, throwIfAborted } from '~/lib/engine/videoRecorder'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 import {
   ASPECTS, CURVE_DEFAULTS, DEFAULT_CENTER, DEFAULT_FOCUS, DEFAULT_LIGHT, DIRECTIONS, GRADIENT_DIRS, LAYER_MAX, LAYOUTS, LAYOUT_LABELS, MAPPINGS, MIRROR_KINDS, RAMP_DEFAULTS, RING_SHAPES, SHAPE_KINDS,
@@ -758,14 +758,17 @@ async function bakeGradientVideo(publish: boolean): Promise<StudioVideoResult | 
         bakeMsg.value = `Rendering ${i + 1}/${total}`
         gradientFx.renderInto(ctx, config.value, w, h, i / m.fps)
       },
-      serverFallback: async () => {
+      onStatus: t => { bakeMsg.value = t },
+      serverFallback: async (signal) => {
         const bakeCfg = { fps: m.fps, loopDuration: m.duration, W: w, H: h, seed: config.value.seed, sig: JSON.stringify(config.value) }
         const bake = await ensureSpaceTypeBake(bakeCfg as any, undefined, {
           renderFrame: async (i) => {
+            throwIfAborted(signal)   // Cancel stops a long bake between frames
             bakeMsg.value = `Baking ${i + 1}/${total}`
             return gradientFx.renderToBlob(config.value, w, h, (i / m.fps))
           },
         })
+        throwIfAborted(signal)
         bakeMsg.value = 'Encoding…'
         try {
           return await encodeFrames({ frames: bake.frames, fps: m.fps, width: w, height: h })
@@ -901,6 +904,7 @@ onMounted(() => {
   registerStudioParamBaker(props.nodeId, renderBlobWithOverrides)
 })
 onBeforeUnmount(() => {
+  videoAbort?.abort()   // closing the studio cancels its video export
   saveConfig(); stopPreview()
   resizeObs?.disconnect(); resizeObs = null
   window.removeEventListener('keydown', onKey)

@@ -23,7 +23,7 @@ import { canvasHasAlpha } from '~/lib/engine/hasAlpha'
 import { downloadBlobAsFile } from '~/lib/studio/downloadBlob'
 import { exportStudioVideo, resultBlob, videoErrorText, type StudioVideoResult } from '~/lib/studio/studioVideoExport'
 import { prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
-import { isAbortError } from '~/lib/engine/videoRecorder'
+import { isAbortError, throwIfAborted } from '~/lib/engine/videoRecorder'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 import { useStudioAutosave } from '~/lib/studio/autosave'
 import { loopMultiplier, previewFrameAt } from '~/lib/spacetype/loop'
@@ -1264,6 +1264,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  videoAbort?.abort()   // closing the studio cancels its video export
   // stopPreview() below cancels the rAF loop that reads effectiveRenderParams(), so
   // there's no lingering head-on render to undo — flipping the flag here is belt-and-
   // suspenders for any late synchronous renderFrameAt call in this same teardown.
@@ -1648,13 +1649,22 @@ async function bakeSpaceTypeVideo(publish: boolean): Promise<StudioVideoResult |
       // Unwrapped t01 = i / origFrames runs 0..k so motions keep their per-loop
       // rate across k loops and land on whole cycles → seamless.
       drawFrame: (i, ctx) => {
+        videoNotice.value = `Rendering ${i + 1}/${total}`
         engine!.renderFrameAt(i / origFrames, params)
         engine!.drawFrameInto(ctx, W.value, H.value)
       },
-      serverFallback: async () => {
+      onStatus: t => { videoNotice.value = t },
+      serverFallback: async (signal) => {
         const bake = await ensureSpaceTypeBake(loopCfg, undefined, {
-          renderFrame: async (i) => { engine!.renderFrameAt(i / origFrames, params); return engine!.frameToBlob(W.value, H.value) },
+          renderFrame: async (i) => {
+            throwIfAborted(signal)   // Cancel stops a long bake between frames
+            videoNotice.value = `Baking ${i + 1}/${total}`
+            engine!.renderFrameAt(i / origFrames, params)
+            return engine!.frameToBlob(W.value, H.value)
+          },
         })
+        throwIfAborted(signal)
+        videoNotice.value = 'Encoding…'
         return encodeFrames({ frames: bake.frames, fps: fps.value, width: W.value, height: H.value, alpha: wantAlpha })
       },
     }, { hosted: hostedModeEnabled(useRuntimeConfig().public), forceServer: prefersServerVideoExport() })
@@ -1672,7 +1682,8 @@ async function generateVideo() {
   stopPreview()
   try {
     const made = await bakeSpaceTypeVideo(true)
-    if (!made?.filename) return
+    // Nothing made: never leave a "Rendering n/N" progress line behind.
+    if (!made?.filename) { videoNotice.value = ''; return }
     await recordAsset(activeTab.value?.projectUuid, 'video', made.filename)
     window.dispatchEvent(new CustomEvent('sailor:spaceTypeOutput', {
       detail: { sourceNodeId: props.nodeId, nodeType: 'Video', widgetOverrides: { file: made.filename } },
@@ -1705,7 +1716,7 @@ async function downloadVideoFile() {
   stopPreview()
   try {
     const made = await bakeSpaceTypeVideo(false)
-    if (!made) return
+    if (!made) { videoNotice.value = ''; return }
     downloadBlobAsFile(await resultBlob(made), `spacetype_${Date.now()}.${made.ext}`)
     videoNotice.value = made.notice ?? ''
   } catch (e) {

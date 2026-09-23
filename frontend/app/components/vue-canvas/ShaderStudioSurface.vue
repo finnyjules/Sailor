@@ -52,7 +52,7 @@ import { exportEmbedHtml, downloadEmbed } from '~/lib/embed/export'
 import type { ShaderEmbedConfig } from '~/lib/embed/surfaces/shader'
 import { exportStudioVideo, resultBlob, videoErrorText, type StudioVideoResult } from '~/lib/studio/studioVideoExport'
 import { prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
-import { isAbortError } from '~/lib/engine/videoRecorder'
+import { isAbortError, throwIfAborted } from '~/lib/engine/videoRecorder'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 
 const props = defineProps<{ nodeId: string; nodes: any[]; edges?: any[]; wiredUrl?: string | null }>()
@@ -647,11 +647,17 @@ async function bakeShaderVideo(publish: boolean): Promise<StudioVideoResult | nu
         bakeMsg.value = `Rendering ${i + 1}/${total}`
         await renderShaderFrame(i / total, ctx)   // copies onto ctx right after the render
       },
-      serverFallback: async () => {
+      onStatus: t => { bakeMsg.value = t },
+      serverFallback: async (signal) => {
         const bakeCfg = { fps: clock.fps, loopDuration: clock.duration, W: w, H: h, seed: 'shader', sig: JSON.stringify(config.value) }
         const bake = await ensureSpaceTypeBake(bakeCfg as any, undefined, {
-          renderFrame: async (i) => { bakeMsg.value = `Baking ${i + 1}/${total}`; return await renderBlob(i / total) },
+          renderFrame: async (i) => {
+            throwIfAborted(signal)   // Cancel stops a long bake between frames
+            bakeMsg.value = `Baking ${i + 1}/${total}`
+            return await renderBlob(i / total)
+          },
         })
+        throwIfAborted(signal)
         bakeMsg.value = 'Encoding…'
         try {
           return await encodeFrames({ frames: bake.frames, fps: clock.fps, width: w, height: h })
@@ -819,7 +825,8 @@ onMounted(async () => {
   await nextTick()
   if (canvas.value) { maskRO = new ResizeObserver(() => measureMaskBox()); maskRO.observe(canvas.value); measureMaskBox() }
 })
-onBeforeUnmount(() => { saveConfig(); stopPreview(); unregisterStudioParamBaker(props.nodeId); maskRO?.disconnect() })
+// Closing the studio cancels its video export first.
+onBeforeUnmount(() => { videoAbort?.abort(); saveConfig(); stopPreview(); unregisterStudioParamBaker(props.nodeId); maskRO?.disconnect() })
 
 function setParam(uniform: string, value: ParamValue) { const e = activeEffectCfg.value; if (e) e.params = { ...e.params, [uniform]: value } }
 

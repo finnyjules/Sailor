@@ -132,7 +132,7 @@ import { showIfVisible } from '~/lib/studio/sections'
 import type { PostSettings } from '~/lib/spacetype/post'
 import { exportStudioVideo, resultBlob, videoErrorText, type StudioVideoResult } from '~/lib/studio/studioVideoExport'
 import { prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
-import { isAbortError } from '~/lib/engine/videoRecorder'
+import { isAbortError, throwIfAborted } from '~/lib/engine/videoRecorder'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 
 const props = withDefaults(defineProps<{ nodeId: string; nodes?: any[]; edges?: any[] }>(), {
@@ -568,23 +568,29 @@ async function bakeSceneVideo(publish: boolean): Promise<StudioVideoResult | nul
     videoAbort = new AbortController()
     videoNotice.value = ''
     bakeError.value = ''
-    return await exportStudioVideo({
+    const made = await exportStudioVideo({
       prefix: 'scene3d', publish,
       width: W, height: H, fps, frameCount: total, alpha: false,
       signal: videoAbort.signal,
       drawFrame: (i, ctx) => {
+        videoNotice.value = `Rendering ${i + 1}/${total}`
         const cv = renderMotionFrame(engine!, doc, total > 1 ? i / total : 0)
         ctx.drawImage(cv, 0, 0, W, H)   // same turn as the render
       },
-      serverFallback: async () => {
+      onStatus: t => { videoNotice.value = t },
+      serverFallback: async (signal) => {
         const { ensureSpaceTypeBake } = await import('~/lib/spacetype/bake')
         const cfg = { fps, loopDuration: dur, W, H, seed: 'scene3d', sig: JSON.stringify({ id: props.nodeId, n: total, w: W, h: H, s: serializeDoc(doc) }) }
         const bake = await ensureSpaceTypeBake(cfg as any, undefined, {
           renderFrame: async (i) => {
+            throwIfAborted(signal)   // Cancel stops a long bake between frames
+            videoNotice.value = `Baking ${i + 1}/${total}`
             const cv = renderMotionFrame(engine!, doc, total > 1 ? i / total : 0)
             return await new Promise<Blob>((res, rej) => cv.toBlob(b => b ? res(b) : rej(new Error('toBlob failed')), 'image/png'))
           },
         })
+        throwIfAborted(signal)
+        videoNotice.value = 'Encoding…'
         try {
           return await encodeFrames({ frames: bake.frames, fps, width: W, height: H })
         } catch {
@@ -593,8 +599,13 @@ async function bakeSceneVideo(publish: boolean): Promise<StudioVideoResult | nul
         }
       },
     }, { hosted: hostedModeEnabled(useRuntimeConfig().public), forceServer: prefersServerVideoExport() })
+    // Drop the progress line; the caller shows the notice (or bakeError says why
+    // nothing was made).
+    videoNotice.value = ''
+    return made
   } catch (err) {
     if (isAbortError(err)) { videoNotice.value = 'Export cancelled.'; return null }
+    videoNotice.value = ''
     bakeError.value = videoErrorText(err)
     console.error('[Scene3D] video export failed:', err)
     return null
@@ -613,11 +624,17 @@ async function bakeSceneVideo(publish: boolean): Promise<StudioVideoResult | nul
 async function exportVideo() {
   const made = await bakeSceneVideo(false)
   if (!made) return
-  const blob = await resultBlob(made)
-  const obj = URL.createObjectURL(blob)
-  const a = document.createElement('a'); a.href = obj; a.download = `scene3d-${props.nodeId}.${made.ext}`
-  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(obj)
-  videoNotice.value = made.notice ?? ''
+  try {
+    // Server route: the file comes back over /view, which can fail.
+    const blob = await resultBlob(made)
+    const obj = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = obj; a.download = `scene3d-${props.nodeId}.${made.ext}`
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(obj)
+    videoNotice.value = made.notice ?? ''
+  } catch (err) {
+    console.error('[Scene3D] video download failed:', err)
+    bakeError.value = videoErrorText(err)
+  }
 }
 // As video (canvas): bake, then dispatch a Video node onto the canvas instead of
 // downloading — mirrors exportToCanvas's dispatch/close exactly (same event name,
@@ -2656,6 +2673,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  videoAbort?.abort()   // closing the studio cancels its video export
   window.removeEventListener('keydown', onKey, true)
   window.removeEventListener('pointerup', onGeometryDragRelease)
   window.removeEventListener('pointercancel', onGeometryDragRelease)

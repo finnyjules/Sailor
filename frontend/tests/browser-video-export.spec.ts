@@ -10,8 +10,9 @@ import { test, expect, type Page } from '@playwright/test'
 const passMark = (serverMae: number) => Math.max(serverMae * 1.1, serverMae + 0.5)
 // Without ComfyUI there is nothing to compare to; hold an absolute ceiling.
 const ABSOLUTE_MAE_CEILING = 3.0
-// The transparent WebM's ceiling without ComfyUI: measured browser mae + 1.0.
-// Measured 2026-09-22 (Chromium, 320×180, 30 frames): browser 1.41, server 1.62.
+// The transparent WebM's ceiling without ComfyUI: set at the first measured
+// browser mae (1.41) + 1.0. Measured 2026-09-22 after the BT.709 I420A change
+// (Chromium, 320×180, 30 frames): browser 1.668, server 1.615 — still 0.7 under.
 const WEBM_ABSOLUTE_MAE_CEILING = 2.4
 
 async function harness(page: Page) {
@@ -34,6 +35,7 @@ test.describe('browser video export — quality gate', () => {
     expect(b.colorSpace.primaries).toBe('bt709')
     expect(b.colorSpace.transfer).toBe('bt709')
     expect(b.colorSpace.matrix).toBe('bt709')
+    expect(b.colorSpace.fullRange).toBe(false)
 
     const serverUp = await page.evaluate(() => fetch('/system_stats').then(r => r.ok).catch(() => false))
     if (serverUp) {
@@ -66,6 +68,7 @@ test.describe('browser video export — quality gate', () => {
     expect(b.colorSpace.primaries).toBe('bt709')
     expect(b.colorSpace.transfer).toBe('bt709')
     expect(b.colorSpace.matrix).toBe('bt709')
+    expect(b.colorSpace.fullRange).toBe(false)
 
     const serverUp = await page.evaluate(() => fetch('/system_stats').then(r => r.ok).catch(() => false))
     if (serverUp) {

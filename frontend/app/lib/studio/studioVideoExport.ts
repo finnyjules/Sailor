@@ -1,5 +1,5 @@
-import { recordVideo, isAbortError, type RecordRequest } from '~/lib/engine/videoRecorder'
-import { publishVideo } from '~/lib/engine/publishVideo'
+import { recordVideo, isAbortError, throwIfAborted, type RecordRequest } from '~/lib/engine/videoRecorder'
+import { publishVideo, HOSTED_UPLOAD_LIMIT } from '~/lib/engine/publishVideo'
 import { canRecordInBrowser } from '~/lib/engine/videoExportSupport'
 
 // The studios' one way to make a video. Record in the browser; when that is
@@ -12,8 +12,11 @@ export interface StudioVideoRequest extends RecordRequest {
   /** True → upload the file to input/ (for Assets / a canvas Video node). */
   publish: boolean
   /** Today's route: bake PNGs, upload, server-encode. Returns null when it
-   *  already reported its own failure to the user. */
-  serverFallback: () => Promise<{ filename: string; ext: 'mp4' | 'webm' } | null>
+   *  already reported its own failure to the user. Gets the request's signal,
+   *  and must stop (throwIfAborted) between frames when it is aborted. */
+  serverFallback: (signal?: AbortSignal) => Promise<{ filename: string; ext: 'mp4' | 'webm' } | null>
+  /** A short status line for the footer, e.g. 'Uploading…'. */
+  onStatus?: (text: string) => void
 }
 
 export interface StudioVideoResult {
@@ -51,19 +54,36 @@ export async function exportStudioVideo(req: StudioVideoRequest, deps: StudioVid
       rec = await record(req)
     } catch (err) {
       if (isAbortError(err)) throw err
+      // The encoder's own text (e.g. "EncodingError: …") stays in the console;
+      // the footer gets a plain reason.
       console.warn('[video export] browser recording failed', err)
-      reason = `the browser could not record it (${err instanceof Error ? err.message : String(err)})`
+      reason = "the browser's video encoder failed"
     }
     if (rec) {
-      // An upload failure is NOT a reason to re-make the video on the server:
-      // that route uploads far more, and would fail the same way.
-      const filename = req.publish ? await publish(rec.blob, rec.ext, req.prefix) : null
+      // Cancel pressed as the recording finished: stop before uploading.
+      throwIfAborted(req.signal)
+      let filename: string | null = null
+      if (req.publish) {
+        // Hosted uploads are capped; say so before sending 100 MB for nothing.
+        if (deps.hosted && rec.blob.size > HOSTED_UPLOAD_LIMIT) {
+          throw new Error('This video is larger than 100 MB, the upload limit.')
+        }
+        // An upload failure is NOT a reason to re-make the video on the server:
+        // that route uploads far more, and would fail the same way.
+        req.onStatus?.('Uploading…')
+        filename = await publish(rec.blob, rec.ext, req.prefix)
+        // Cancel pressed during the upload: the file is in input/, but no
+        // Video node may land and nothing may download.
+        throwIfAborted(req.signal)
+      }
       return { ext: rec.ext, blob: rec.blob, filename, via: 'browser', notice: null }
     }
   }
 
   if (deps.hosted) throw new Error(`Video export failed: ${reason}.`)
-  const made = await req.serverFallback()
+  const made = await req.serverFallback(req.signal)
+  // Cancel pressed while the server encoded: same rule as the upload.
+  throwIfAborted(req.signal)
   if (!made) return null
   return {
     ext: made.ext,
