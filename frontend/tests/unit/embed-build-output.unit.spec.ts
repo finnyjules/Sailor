@@ -100,11 +100,22 @@ const EMBED_DIR = path.join(ROOT, 'public', 'embed')
 // measured 366,652 bytes (126,953 bytes gzip) on 2026-09-22 — a 904,863-byte (71%) cut from
 // frame.js. FRAME_LEAN_CEILING_BYTES is that measurement × 1.15, rounded up to the next 10,000,
 // same rule as every other bucket here.
+//
+// frames.js (Task 5 of the "3D Studio on the web" plan) is the smallest bucket by a wide margin:
+// it knows nothing about 3D, GL, or any studio — mount() just decodes each frame's data: URI
+// through the browser's own <img> decoder and drawImage()s the right one into a 2D canvas. No
+// three.js, no shader source, no font table. Measured 1,316 bytes (unminified further by gzip;
+// this bucket is too small for gzip to matter) on 2026-09-23. FRAMES_CEILING_BYTES is that
+// measurement × 1.15, rounded up to the next 1,000 (not 10,000 — frame.js's rounding grain would
+// give this bucket ~7x its own measured size of headroom, defeating the point of a ceiling this
+// small), same rule as every other bucket here: re-derive it from the bundle, never pad it to
+// pass.
 const SHADER_CEILING_BYTES = 60_000
 const GRADIENT_CEILING_BYTES = 140_000
 const SPACETYPE_EFFECT_CEILING_BYTES = 1_750_000
 const FRAME_CEILING_BYTES = 1_470_000
 const FRAME_LEAN_CEILING_BYTES = 430_000
+const FRAMES_CEILING_BYTES = 2_000
 
 /** Classifies a built bundle's filename into one of the five size buckets
  *  documented above. Throws on anything unrecognised rather than silently
@@ -115,6 +126,7 @@ function ceilingFor(fileName: string): number {
   if (fileName === 'gradient.js') return GRADIENT_CEILING_BYTES
   if (fileName === 'frame.js') return FRAME_CEILING_BYTES
   if (fileName === 'frame-lean.js') return FRAME_LEAN_CEILING_BYTES
+  if (fileName === 'frames.js') return FRAMES_CEILING_BYTES
   if (/^spacetype-[^/]+\.js$/.test(fileName)) return SPACETYPE_EFFECT_CEILING_BYTES
   throw new Error(`embed-build-output: no size ceiling defined for unexpected bundle "${fileName}" — add one above`)
 }

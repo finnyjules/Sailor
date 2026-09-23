@@ -11,6 +11,7 @@ const REGISTRY: Record<string, () => Promise<{ default: EmbedSurface }>> = {
   gradient: () => import('./surfaces/gradient'),
   spacetype: () => import('./surfaces/spacetype'),
   frame: () => import('./surfaces/frame'),
+  frames: () => import('./surfaces/frames'),
 }
 
 export function embedSurfaceKinds(): string[] {
