@@ -35,8 +35,9 @@ export interface ButtonEl extends Base { k: 'btn'; x: number; y: number; w: numb
 /** The brand kit's logo (ruling S2), `w × h` with the logo's own aspect. */
 export interface LogoEl extends Base { k: 'logo'; x: number; y: number; w: number; h: number }
 /** A layout's OWN words (Stage 4: ✓ ✕, list numbers, "Before"/"After", the Notes app's chrome) —
- *  never the user's text. Drawn as an owned text layer in the Frame's caption layer's family, at the
- *  kit's weight `wt`, in its palette role `color` (default ink) or a fixed `hex` (ruling R6). Set as
+ *  never the user's text. Drawn as an owned text layer in the Frame's caption layer's family AND
+ *  weight (ruling R10: what is measured is what is drawn; `wt` only when the Frame has no caption
+ *  or title layer), in its palette role `color` (default ink) or a fixed `hex` (ruling R6). Set as
  *  placed lines (no wrapping: `s` breaks at '\n'), measured in the caption face. `x` is the left edge
  *  of the widest line (`align` places the others); `top` is the first cap top, `base` the last baseline. */
 export interface OwnTextEl extends Base { k: 'own'; s: string; x: number; top?: number; base?: number; size: number; wt: number; ls: number; lh: number; align?: 'left' | 'center' | 'right'; color?: Colour; hex?: string; rot?: number; role: string }

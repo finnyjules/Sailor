@@ -120,9 +120,10 @@ interface Prepared {
   /** The base view's elements (ruling C2): what `posterState.roles` stores, whatever the view, so
    *  applying a Stage 4 layout never changes how the other layouts read the Frame. */
   baseElements: FrameElements
-  /** The family a layout's own words are set in (Stage 4): the layer the caption face is measured
-   *  from (the caption, else the first content line measured in that face), else the title's. */
-  ownFamily: string | undefined
+  /** The face a layout's own words are set in (Stage 4, ruling R10): the family AND weight of the
+   *  layer the caption face is measured from (the caption, else the first content line measured in
+   *  that face), else the title's — so what the checker measured is what is drawn. */
+  ownFace: { family: string; weight: number } | undefined
 }
 
 /** Every text role a Frame can hold: the targets, the measure and the stored roles cover all of
@@ -190,7 +191,8 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
     caption: captionFace,
     action: layerOf('action'),
   })
-  const ownFamily = (captionFace ?? layerOf('title'))?.fontFamily
+  const faceLayer = captionFace ?? layerOf('title')
+  const ownFace = faceLayer ? { family: faceLayer.fontFamily, weight: faceLayer.fontWeight } : undefined
   // The height the layout composes on: the band a format leaves uncovered, or the whole frame.
   const fullH = 100 * a.frameH / a.frameW
   const composedH = fmt?.keep ? fullH * (1 - fmt.keep.top - fmt.keep.bottom) : fullH
@@ -203,7 +205,7 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
     layerColour: role => (TEXT_ROLES as string[]).includes(role) && targets[role as RoleKey] ? colourOf(targets[role as RoleKey]) ?? null : undefined,
     ...(shapeLayer ? { shapeFill: shapeLayer.fill ?? null } : {}),
   }
-  return { def, index, layers, elements, baseElements: views.base.elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props), fmt, hidden, style: a.style ?? 'swiss', composedH, fillCtx, read, ownFamily }
+  return { def, index, layers, elements, baseElements: views.base.elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props), fmt, hidden, style: a.style ?? 'swiss', composedH, fillCtx, read, ownFace }
 }
 
 type FrameArgs = Pick<LayoutPlanArgs, 'props' | 'frameW' | 'frameH' | 'shapeMode' | 'imageMode' | 'style'>
@@ -554,8 +556,9 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
     if (a.recolour) pieces.recolour = true
   }
   if (out.els.some(e => e.k === 'logo') && p.content.logo) pieces.logo = p.content.logo
-  // A layout's own words (Stage 4) take the caption layer's family — only passed when drawn.
-  if (out.els.some(e => e.k === 'own') && p.ownFamily) pieces.ownFamily = p.ownFamily
+  // A layout's own words (Stage 4, ruling R10) take the caption layer's family and weight — only
+  // passed when drawn.
+  if (out.els.some(e => e.k === 'own') && p.ownFace) { pieces.ownFamily = p.ownFace.family; pieces.ownWeight = p.ownFace.weight }
   // The fills the check just read (ruling R6): only when a piece carries text, so a layout without
   // one (every Swiss layout but Badge, Knockout and the panels) calls toOps exactly as before.
   if (pf.fills.size) pieces.fills = pf.fills

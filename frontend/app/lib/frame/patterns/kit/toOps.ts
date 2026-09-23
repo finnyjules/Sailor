@@ -239,6 +239,9 @@ export function elementsToOps(
     fills?: Map<El, PieceFill>
     /** The font family a layout's own words are set in (Stage 4): the caption layer's. */
     ownFamily?: string
+    /** Their weight (ruling R10): the caption layer's, the one the caption face is measured at.
+     *  Absent (a Frame with no caption or title layer): the kit's `wt`. */
+    ownWeight?: number
   },
 ): { ops: LayerOp[]; owned: LocalLayer[] } {
   const ops: LayerOp[] = []
@@ -443,15 +446,16 @@ export function elementsToOps(
       }
       case 'own': {
         // A layout's own words: an owned text layer set as placed lines (the display model, so it
-        // sits exactly where the checker measured it), in the caption layer's family, the kit's
-        // weight, and its palette role — or its fixed colour (ruling R6).
+        // sits exactly where the checker measured it), in the caption layer's family and weight
+        // (ruling R10 — the face it was measured in; the kit's `wt` only without one), and its
+        // palette role — or its fixed colour (ruling R6).
         const o = e as OwnTextEl
         const key = keyFor('own')
         const op = displayOp([ownAsText(o)], S, key, z)
         own(createTextLayer({
           ...ownedBase(key, o),
           text: o.s, x: op.x!, y: op.y!, rotation: op.rotation ?? 0,
-          fontFamily: opts?.ownFamily ?? 'Inter', fontWeight: o.wt, fontSize: op.fontSize!,
+          fontFamily: opts?.ownFamily ?? 'Inter', fontWeight: opts?.ownWeight ?? o.wt, fontSize: op.fontSize!,
           color: o.hex ?? paint(o.color), align: 'left', lineHeight: o.lh, letterSpacing: o.ls,
           runs: op.runs!,
         }), 'text', key, z)

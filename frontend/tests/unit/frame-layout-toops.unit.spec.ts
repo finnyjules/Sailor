@@ -650,6 +650,12 @@ describe('elementsToOps — Stage 4 kit pieces', () => {
     expect(ops).toEqual([{ target: 'layout-own-0', kind: 'text', x: l.x, y: l.y, z: 0, insert: { kind: 'text', key: 'own-0' } }])
   })
 
+  it('ruling R10: owned text takes the caption layer\'s weight when given; the kit\'s `wt` only without one', () => {
+    const e = P.own('✓', { x: 20, top: 30, size: 4, wt: 300 })
+    expect((elementsToOps([e], P, all, frame, palette, { ownFamily: 'Caption Serif', ownWeight: 700 }).owned[0] as any).fontWeight).toBe(700)
+    expect((elementsToOps([e], P, all, frame, palette).owned[0] as any).fontWeight).toBe(300)
+  })
+
   it('an `own` element with a fixed `hex` is drawn in it (ruling R6); keys count up', () => {
     const els: El[] = [
       P.own('‹ Notes', { x: 5, top: 5, hex: '#d49a1a', role: 'ui' }),
@@ -766,7 +772,7 @@ describe('Stage 4 through the planner: the owned words take the caption layer\'s
             { k: 'p', x: 0, y: 0, w: 50, h: 40, role: 'photo' },
             { k: 'p', x: 50, y: 0, w: 50, h: 40, role: 'photo2' },
             S.disp(c.title, { size: 8, x: S.M, top: 50 }),
-            S.own('Before', { x: S.M, top: 95, wt: 600 }),
+            S.own('Before', { x: S.M, top: 95, wt: 300 }),
           ],
         }),
       }
@@ -789,10 +795,20 @@ describe('Stage 4 through the planner: the owned words take the caption layer\'s
       })!
       const own = plan.layers.find(l => (l as any).owner?.key === 'own-0') as any
       expect(own.fontFamily).toBe('Caption Serif')
-      expect(own.fontWeight).toBe(600)
+      expect(own.fontWeight).toBe(600)                            // the caption layer's, not the kit's 300
       // The user's caption keeps its own face.
       expect((plan.layers.find(l => l.id === 'c') as any).fontFamily).toBe('Caption Serif')
       expect((plan.layers.find(l => l.id === 't') as any).fontFamily).toBe('Title Sans')
+      // Ruling R10: a caption at 700 gives owned text at 700, whatever the kit's `wt` (300 here).
+      const heavy = layers.map(l => (l.id === 'c' ? { ...l, fontWeight: 700 } : l))
+      const plan700 = planLayout({
+        props: { sailor_localLayers: heavy }, frameW: 1000, frameH: 1000, layoutId: 'testOwn',
+        choice: { lines: 0, arr: 0, scale: 'full', side: 'right' }, palette, connectedSlots: [], measure,
+      })!
+      const own700 = plan700.layers.find(l => (l as any).owner?.key === 'own-0') as any
+      expect(own700.fontWeight).toBe(700)
+      expect(own700.fontFamily).toBe('Caption Serif')
+      expect((plan700.layers.find(l => l.id === 'c') as any).fontWeight).toBe(700)   // the user's own, untouched
       const img2 = plan.layers.find(l => l.id === 'img2') as any
       expect(img2.crop).toEqual({ fit: 'cover' })
       expect(img2.x).toBeCloseTo(0.75, 9)
