@@ -25,14 +25,25 @@ function fontDataUrl(p: string): string {
 const TEST_FAMILY = 'Sailor Embed Network Test Font'
 
 /**
+ * Where an export is served from. A real http origin, not `setContent`'s about:blank:
+ * against about:blank a root-relative URL that leaked into an export (`/view?…`,
+ * `/sailor/…`) has no base to resolve against, so it never becomes a request and the
+ * zero-network gate would pass for the wrong reason. `.invalid` never resolves, so any
+ * request the page makes to this origin (other than the document itself, fulfilled by
+ * `page.route` below) still fires a `request` event and then fails. Same recipe as
+ * tests/_frameEmbedHelpers.ts's `renderExported`.
+ */
+const EMBED_URL = 'http://embed-network.invalid/'
+
+/**
  * data: URIs are not network requests (the poster and, for spacetype, the inlined font
- * are both multi-hundred-KB data: URIs referenced from attributes/CSS) and the
- * setContent() document itself is not a navigation over the network either — both are
- * confirmed empirically below (see "a clean export reports zero, and that is not
- * vacuous" and the module doc's own verification note), not just assumed.
+ * are both multi-hundred-KB data: URIs referenced from attributes/CSS), and the served
+ * document itself (EMBED_URL) is the one navigation every load makes — both are
+ * confirmed empirically below ("a clean export produces exactly one raw request event:
+ * its own document"), not just assumed.
  */
 function isNetworkRequest(url: string): boolean {
-  return !url.startsWith('data:') && url !== 'about:blank'
+  return !url.startsWith('data:') && url !== 'about:blank' && url !== EMBED_URL
 }
 
 /**
@@ -61,6 +72,13 @@ async function openWatchedPage(context: BrowserContext, viewport = { width: 512,
   return { page, requests }
 }
 
+/** Serves `html` at EMBED_URL and navigates there. Only that exact URL is fulfilled, so
+ *  every other request the page makes to the origin still fires (and then fails DNS). */
+async function loadExport(page: Page, html: string): Promise<void> {
+  await page.route(EMBED_URL, r => r.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: html }))
+  await page.goto(EMBED_URL)
+}
+
 /** Waits for the LIVE renderer (not the poster fallback) to have produced a real frame. */
 async function waitForLiveRender(page: Page): Promise<void> {
   await page.waitForFunction(() => {
@@ -75,10 +93,15 @@ async function waitForLiveRender(page: Page): Promise<void> {
  * a loader firing on, say, the third frame (not just at mount) would be caught — and
  * returns the network requests observed for that page's whole lifetime.
  */
-async function runExportAndCollectRequests(context: BrowserContext, html: string): Promise<string[]> {
+async function runExportAndCollectRequests(
+  context: BrowserContext, html: string, { live = true }: { live?: boolean } = {},
+): Promise<string[]> {
   const { page, requests } = await openWatchedPage(context)
-  await page.setContent(html)
-  await waitForLiveRender(page)
+  await loadExport(page, html)
+  // `live: false` is for a teeth case whose leaked asset fails to load and so, by design,
+  // rejects mount() and leaves the poster up: the request is what is under test there,
+  // not the render.
+  if (live) await waitForLiveRender(page)
   // A beat, not just one frame: several rAF ticks at typical refresh rates, and enough
   // headroom for a delayed setTimeout-based fetch (see the runtime teeth check below,
   // which fires at 50ms) to have long since resolved.
@@ -134,21 +157,22 @@ test.describe('embed export network isolation', () => {
     expect(requests).toEqual([])
   })
 
-  // Empirical proof (not an assumption) that inlined data: assets and the setContent()
-  // document itself are correctly excluded from "network request" — a genuinely clean
-  // export (large inlined poster + adapter bundle, all as data:/inline content) still
-  // has to clear this bar with an EMPTY raw request log, not just an empty FILTERED one.
-  // If a clean export produced any raw request event at all (a data: URI resolving
-  // through the network stack, or setContent()'s document counting as a navigation),
-  // this would catch that surprise before it silently hid inside the filter above.
-  test('a clean export produces literally zero raw request events, not merely zero after filtering', async ({ page, context }) => {
+  // Empirical proof (not an assumption) that inlined data: assets are correctly excluded
+  // from "network request", and that the served document is the ONLY thing the filter
+  // drops — a genuinely clean export (large inlined poster + adapter bundle, all as
+  // data:/inline content) has to clear this bar on the RAW request log, not just the
+  // filtered one. The raw log holds exactly one event, the navigation to EMBED_URL
+  // itself; if a data: URI ever resolved through the network stack, this would catch
+  // that surprise before it silently hid inside the filter above.
+  test('a clean export produces exactly one raw request event: its own document', async ({ page, context }) => {
     const html = await page.evaluate(() => (window as any).__embedHarness.exportHtml())
     const { page: embed, requests } = await openWatchedPage(context)
-    await embed.setContent(html)
+    await loadExport(embed, html)
     await waitForLiveRender(embed)
     await embed.waitForTimeout(800)
     await embed.close()
-    expect(requests).toEqual([])
+    expect(requests).toEqual([EMBED_URL])
+    expect(requests.filter(isNetworkRequest)).toEqual([])
   })
 })
 
@@ -211,5 +235,61 @@ test.describe('teeth check — the recorder catches leaks externalRefs cannot', 
 
     const requests = await runExportAndCollectRequests(context, leaky)
     expect(requests).toContain('https://example.com/y')
+  })
+})
+
+// ROOT-RELATIVE TEETH, one per surface. The leak the old setContent() loader could not
+// see: a root-relative URL (the shape a server asset takes — `/view?…`, `/sailor/…`) has
+// nothing to resolve against at about:blank, so it never became a request at all. Served
+// from EMBED_URL it resolves to `http://embed-network.invalid/…` and must be recorded.
+// Each of these was also run against the old setContent() loader during development and
+// recorded no request, which is what makes them teeth for THIS change.
+test.describe('teeth check — a root-relative asset reference is caught on every surface', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/dev/embed-harness')
+    await page.waitForFunction(() =>
+      (window as any).__embedHarnessReady === true
+      && (window as any).__embedHarnessGradientReady === true
+      && (window as any).__embedHarnessSpaceTypeReady === true)
+  })
+
+  const LEAK = '/sailor-teeth.png'
+  const LEAK_URL = new URL(LEAK, EMBED_URL).href
+
+  // Natural: the shader config's own image field, un-inlined. `baseDataUrl` goes straight
+  // to `img.src` at mount, and a bare "/…" string inside the JSON config matches none of
+  // externalRefs' patterns — so the export gate lets it through, exactly the case this
+  // runtime check exists for. The export mounts the config in the harness page to capture
+  // its poster, so the asset has to exist on the authoring server (as a real one would):
+  // it is served there as a 1x1 PNG. In the exported page it fails to load and mount()
+  // rejects (the poster stays up), so this one does not wait for a live render.
+  test('shader: an un-inlined base image in the config is caught', async ({ page, context }) => {
+    const PIXEL = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64')
+    await page.route(`**${LEAK}`, r => r.fulfill({ status: 200, contentType: 'image/png', body: PIXEL }))
+    const html = await page.evaluate(async (leak: string) => {
+      const H = (window as any).__embedHarness
+      return await H.exportWith({ ...H.config, baseDataUrl: leak }, 512, 512)
+    }, LEAK)
+    const requests = await runExportAndCollectRequests(context, html, { live: false })
+    expect(requests).toContain(LEAK_URL)
+  })
+
+  // Injected: the gradient config loads nothing by URL, so there is no field to leave
+  // un-inlined. A root-relative <img> is appended to the exported HTML instead.
+  test('gradient: an injected root-relative <img> is caught', async ({ page, context }) => {
+    const html = await page.evaluate(() => (window as any).__embedHarnessGradient.exportHtml())
+    const leaky = html.replace('</body>', `<img src="${LEAK}"></body>`)
+    const requests = await runExportAndCollectRequests(context, leaky)
+    expect(requests).toContain(LEAK_URL)
+  })
+
+  // Injected: Space Type's one URL-shaped asset, `font.dataUrl`, is refused at mount by
+  // fontFaceRule unless it is a data: URI, so it cannot carry a relative URL. Same <img>
+  // injection as the gradient case.
+  test('spacetype: an injected root-relative <img> is caught', async ({ page, context }) => {
+    const html = await page.evaluate(() => (window as any).__embedHarnessSpaceType.exportHtml())
+    const leaky = html.replace('</body>', `<img src="${LEAK}"></body>`)
+    const requests = await runExportAndCollectRequests(context, leaky)
+    expect(requests).toContain(LEAK_URL)
   })
 })
