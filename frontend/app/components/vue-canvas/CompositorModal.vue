@@ -47,7 +47,7 @@ import LayoutTile from '~/components/vue-canvas/compositor/LayoutTile.vue'
 import { snapshotFrameAsTemplate, addSlot } from '~/lib/frametemplate/author'
 import { placeTemplate, setInstanceSlot, freezeInstance, staleInstances, updateInstance, applySlotToLayer } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance, SlotKind } from '~/lib/frametemplate/types'
-import { resolveLayout, frameDocFromProps, isResponsiveFrame, effectivePins, guideLinesFor, type LayoutResult, type Pins } from '~/lib/frame/responsive'
+import { resolveLayout, frameDocFromProps, isResponsiveFrame, effectivePins, guideLinesFor, type LayoutResult, type Pins, type ViewEdit } from '~/lib/frame/responsive'
 import ResponsivePinsCard from './ResponsivePinsCard.vue'
 import { atDesignSize as isAtDesignSize, clampViewSize, resizeViewFromEdge, shapePresets, readoutLabel as viewReadoutLabel } from '~/lib/frame/responsive/viewport'
 import { useTemplateLibrary } from '~/composables/useTemplateLibrary'
@@ -391,8 +391,10 @@ const resolved = computed<LayoutResult | null>(() => {
   if (!frameIsResponsive.value || atDesign.value) return null
   const d = designSize.value
   const doc = frameDocFromProps(compositor.value?.data?.properties as any, d.w, d.h)
-  return resolveLayout(doc, viewSize.w, viewSize.h, { measureCtx: measureCtx() })
+  return resolveLayout(doc, viewSize.w, viewSize.h, { measureCtx: measureCtx(), withBoxes: true })
 })
+// Editing at a viewing size (slice 3): responsive, off the design size, and resolved.
+const viewEditing = computed(() => frameIsResponsive.value && !atDesign.value && !!resolved.value)
 // ── Grid overlay + inspector ─────────────────────────────────────────────────
 // `gridConfig` is display-only wiring: it feeds the overlay below (lines +
 // region rects drawn over the stage). It is never consumed by any
@@ -747,7 +749,13 @@ function wiredDimsForSlot(slot: number): { w: number; h: number } | undefined {
 
 const editor = useLocalLayerEditor({
   node: () => compositor.value,
-  dims: () => ({ w: canvasDisplay.w, h: canvasDisplay.h }),
+  // The editor works in DESIGN space. At a viewing size the artboard (canvasDisplay) takes the
+  // view's shape, so hand the editor the design shape at the same width instead — otherwise every
+  // commit re-syncs wired widgets, and every arrow nudge converts px, with the wrong shape.
+  // At the design size this is exactly canvasDisplay.
+  dims: () => atDesign.value
+    ? { w: canvasDisplay.w, h: canvasDisplay.h }
+    : { w: canvasDisplay.w, h: canvasDisplay.w * designSize.value.h / Math.max(1, designSize.value.w) },
   getRect: () => canvasRect(),
   wiredDims: wiredDimsForSlot,
   wiredContent: wiredContentForSlot,
@@ -863,6 +871,33 @@ function cleanPins(p: Record<string, unknown>): Pins | undefined {
 }
 function backToAutomatic(unitId: string) {
   setPins(unitId, { h: undefined, v: undefined, keepSize: undefined, holdTo: undefined } as any)
+}
+/** Write view edits as ONE doc change (no history — the gesture records it once). Layer patches and
+ *  a layer's pins merge into the same layer; a group's pins go to the group registry. Writes through
+ *  the same paths as setPins/setLocal (the editor's `commit` and `writeGroups`), minus setLocal's
+ *  per-call history entry. */
+function applyViewEdits(edits: ViewEdit[]) {
+  const byId = new Map<string, Record<string, unknown>>()
+  const groupPins = new Map<string, Record<string, unknown>>()
+  for (const e of edits) {
+    for (const p of e.patches) byId.set(p.id, { ...(byId.get(p.id) ?? {}), ...p.patch })
+    if (e.pins) {
+      if (e.pins.onGroup) groupPins.set(e.pins.unitId, { ...(groupPins.get(e.pins.unitId) ?? {}), ...e.pins.patch })
+      else byId.set(e.pins.unitId, { ...(byId.get(e.pins.unitId) ?? {}), __pins: e.pins.patch })
+    }
+  }
+  if (byId.size) {
+    const next = localLayers.value.map((l) => {
+      const p = byId.get(l.id); if (!p) return l
+      const { __pins, ...rest } = p as { __pins?: Record<string, unknown> }
+      const merged: Record<string, unknown> = { ...l, ...rest }
+      if (__pins) merged.pins = cleanPins({ ...((l as any).pins ?? {}), ...__pins })
+      return merged as unknown as LocalLayer
+    })
+    commit(next)
+  }
+  if (groupPins.size) writeGroups(localGroups.value.map(g => groupPins.has(g.id)
+    ? { ...g, pins: cleanPins({ ...((g as any).pins ?? {}), ...groupPins.get(g.id)! }) } : g))
 }
 
 // Guide lines for the selected unit at the current viewing size. `resolved` is null
@@ -1795,6 +1830,13 @@ function clientToNorm(e: PointerEvent | MouseEvent) {
   const r = canvasRect(); if (!r) return null
   return { nx: (e.clientX - r.left) / r.width, ny: (e.clientY - r.top) / r.height }
 }
+/** Canvas px per view px (the artboard is drawn at canvasDisplay, laid out at viewSize). */
+function viewScale(): number { return canvasDisplay.w / Math.max(1, viewSize.w) }
+/** A pointer position in VIEW px (the space resolveLayout's boxes live in). */
+function clientToView(e: { clientX: number; clientY: number }): { x: number; y: number } | null {
+  const r = canvasRef.value?.getBoundingClientRect(); if (!r || !r.width || !r.height) return null
+  return { x: (e.clientX - r.left) / r.width * viewSize.w, y: (e.clientY - r.top) / r.height * viewSize.h }
+}
 function onPenPointerDown(e: PointerEvent) {
   const p = clientToNorm(e); if (!p) return
   e.preventDefault(); e.stopPropagation()
@@ -1984,10 +2026,13 @@ async function onCanvasDrop(e: DragEvent) {
   const r = canvasRect()
   const cx = r ? Math.min(0.92, Math.max(0.08, (e.clientX - r.left) / r.width)) : 0.5
   const cy = r ? Math.min(0.92, Math.max(0.08, (e.clientY - r.top) / r.height)) : 0.5
+  // At a viewing size a view point has no design position yet (later work), so a dropped file
+  // lands at the design centre, which shows in the middle of the view.
+  const [dropX, dropY] = viewEditing.value ? [0.5, 0.5] : [cx, cy]
   for (const file of files) {
     const isSvg = file.type === 'image/svg+xml' || /\.svg$/i.test(file.name)
     try {
-      if (isSvg) await addPathFromSvg(await file.text(), { targetWidth: 0.5, cx, cy })
+      if (isSvg) await addPathFromSvg(await file.text(), { targetWidth: 0.5, cx: dropX, cy: dropY })
       else if (file.type.startsWith('image/')) await addImageFromFile(file)
     } catch (err) { console.error('[Compositor] drop import failed:', err) }
   }
@@ -6339,6 +6384,12 @@ const smartVersion = ref(0)                    // bump → regionFx rebuild
 const smartBnd = ref<BBox | null>(null)        // selection bbox, ARTBOARD px (action bar anchor)
 const smartHasScribble = ref(false)
 
+// Tools that paint or edit straight onto the artboard work at the design size only. They snap back
+// when picked (viewOnlyGuard); while one is on, the size controls hide so the view cannot change under it.
+// (Declared after smartActive, the last of the tool flags it reads.)
+const designOnlyToolActive = computed(() => !!(brush.active.value || pen.active.value || nodeEdit.active.value
+  || genActive.value || smartActive.value || regionSelectActive.value || drawSectionActive.value || distortTool.value))
+
 const smartTarget = computed<any | null>(() =>
   smartTargetId.value
     ? localLayers.value.find((l: any) => l.id === smartTargetId.value && l.kind === 'image') ?? null
@@ -7890,7 +7941,7 @@ onUnmounted(() => {
              the wrapper's transformed space so they track the artboard under pan/zoom;
              a fixed frame shows none, keeping its render byte-identical. Each grip
              stops propagation so a drag never also pans the stage or clears selection. -->
-        <template v-if="frameIsResponsive">
+        <template v-if="frameIsResponsive && !designOnlyToolActive">
           <div class="absolute top-0 -right-1 w-2 h-full cursor-ew-resize group/redge" style="pointer-events:auto"
             @pointerdown="onEdgeDown('e', $event)" @pointermove="onEdgeMove" @pointerup="onEdgeUp" @pointercancel="onEdgeUp">
             <div class="absolute inset-y-0 right-0 w-px bg-transparent group-hover/redge:bg-[#3b82f6]" />
@@ -7997,7 +8048,7 @@ onUnmounted(() => {
             fill="none" stroke="#ffffff" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"
           />
         </svg>
-        <template v-if="selectionBox && !editingId && !genActive">
+        <template v-if="selectionBox && !editingId && !genActive && atDesign">
           <div
             v-for="corner in (['tl', 'tr', 'br', 'bl'] as const)"
             :key="'g-' + corner"
@@ -8216,7 +8267,7 @@ onUnmounted(() => {
         <!-- Responsive Frames: the viewing-size readout. Fixed frames show nothing.
              Grey at the design size, accent (#3b82f6) once you are viewing another
              size; "Back to design size" only appears while off design. -->
-        <div v-if="frameIsResponsive"
+        <div v-if="frameIsResponsive && !designOnlyToolActive"
           class="flex items-center gap-1.5 pl-2 ml-1 border-l border-white/10 text-[11px]"
           :class="atDesign ? 'text-white/60' : 'text-[#3b82f6]'"
           @click.stop>
