@@ -52,7 +52,7 @@ import { mapKeyToEdit, snapAngle } from '~/lib/compositor/layerEdits'
 import { resizeBox, type Handle } from '~/lib/compositor/resizeBox'
 import ResponsivePinsCard from './ResponsivePinsCard.vue'
 import { atDesignSize as isAtDesignSize, clampViewSize, designShapedArtboard, resizeViewFromEdge, shapePresets, readoutLabel as viewReadoutLabel } from '~/lib/frame/responsive/viewport'
-import { FRAME_SIZE_PRESETS, applyFramePreset, framePresetId, readFrameSize, setFrameDim, setFrameResponsive } from '~/lib/frame/frameSize'
+import { FRAME_SIZE_PRESETS, applyFramePreset, frameDimFor, framePresetId, readFrameSize, setFrameDim, setFrameResponsive } from '~/lib/frame/frameSize'
 import { useTemplateLibrary } from '~/composables/useTemplateLibrary'
 import { serializeLayersForOS, parseLayersFromOS, setClipboard, type ClipboardPayload } from '~/lib/compositor/layerClipboard'
 import {
@@ -82,6 +82,7 @@ import StudioSection from '~/components/vue-canvas/StudioSection.vue'
 import StudioActionsFooter from '~/components/vue-canvas/studio/StudioActionsFooter.vue'
 import type { StudioFooterSpec } from '~/lib/studio/footer'
 import { useElementSize } from '@vueuse/core'
+import { downloadBlobAsFile } from '~/lib/studio/downloadBlob'
 import { useVectorNodeEdit } from '~/composables/useVectorNodeEdit'
 import { imageLayerUrl } from '~/composables/useCompositorLayers'
 import { useInpaint, loadImage, capDims, imageToDataUrl, cleanCutoutAlpha } from '~/composables/useInpaint'
@@ -407,8 +408,8 @@ const viewEditing = computed(() => frameIsResponsive.value && !atDesign.value &&
 // A size change moves baseAspect → the `watch([baseAspect, previewAspect], fitCanvasToStage)`
 // below re-fits the artboard; designSize (bakeSize reads the same widgets) resets the viewing
 // size. Responsive flips frameIsResponsive, which mounts/unmounts the edge grips and readout.
-// Not recorded in undo history: the editor's snapshot holds no size, so a step would restore
-// nothing (the Grid section's settings are left out of history for the same reason).
+// Each change is one undo step: the editor's snapshot holds the size state (frameSize), and
+// every handler records only when the value actually changes.
 const frameSizeNow = computed(() => compositor.value ? readFrameSize(compositor.value.data) : { w: 0, h: 0 })
 // A frame with no explicit size (it follows its image) reads as Custom too, with empty fields.
 const framePresetValue = computed(() => framePresetId(frameSizeNow.value.w, frameSizeNow.value.h) || 'custom')
@@ -418,14 +419,27 @@ const framePresetChoices = computed(() => {
   if (framePresetValue.value === 'custom') { ids.push('custom'); labels.push('Custom') }
   return { ids, labels }
 })
-function onFramePreset(id: string) { const n = compositor.value; if (n && id !== 'custom') applyFramePreset(n.data, id) }
-function onFrameDim(which: 'width' | 'height', e: Event) {
+function onFramePreset(id: string) {
   const n = compositor.value
-  if (n) setFrameDim(n.data, which, parseFloat((e.target as HTMLInputElement).value) || 0)
+  if (!n || id === 'custom' || id === framePresetValue.value) return
+  recordHistory(); applyFramePreset(n.data, id)
+}
+function onFrameDim(which: 'width' | 'height', e: Event) {
+  const n = compositor.value, input = e.target as HTMLInputElement
+  const cur = which === 'width' ? frameSizeNow.value.w : frameSizeNow.value.h
+  const v = n ? frameDimFor(n.data, parseFloat(input.value) || 0) : null
+  if (n && v != null && v !== cur) { recordHistory(); setFrameDim(n.data, which, v) }
+  // Show what was written: a refused clear or a rounded 1024.4 leaves the bound value unchanged,
+  // so Vue would not repaint the field on its own.
+  input.value = String((which === 'width' ? frameSizeNow.value.w : frameSizeNow.value.h) || '')
 }
 // baseAspect = the node's own "effective aspect" (explicit size, else the bottom wired image,
 // else square) — what setFrameResponsive writes as the design size when there is none yet.
-function onFrameResponsive(on: boolean) { const n = compositor.value; if (n) setFrameResponsive(n.data, on, baseAspect.value) }
+function onFrameResponsive(on: boolean) {
+  const n = compositor.value
+  if (!n || on === frameIsResponsive.value) return
+  recordHistory(); setFrameResponsive(n.data, on, baseAspect.value)
+}
 // ── Grid overlay + inspector ─────────────────────────────────────────────────
 // `gridConfig` is display-only wiring: it feeds the overlay below (lines +
 // region rects drawn over the stage). It is never consumed by any
@@ -4962,6 +4976,7 @@ async function generateImage() {
   if (!node || rendering.value || baking.value || encoding.value || exportingVideo.value) return
   rendering.value = true
   renderError.value = ''
+  webExportNotice.value = ''; videoStatus.value = ''   // the footer's one status line: the latest event wins
   try {
     const { W, H } = bakeSize()
     const blob = await renderStaticComposite(W, H)
@@ -5055,6 +5070,7 @@ function downloadWebExport() {
   if (webExport.state !== 'ready') return
   downloadEmbed('sailor-frame.html', webExport.html)
   renderError.value = ''
+  videoStatus.value = ''
   webExport.open = false
   webExportNotice.value = `Downloaded · ${formatBytes(webExport.bytes)}`
 }
@@ -5068,6 +5084,7 @@ async function generateVideo() {
   if (!node || rendering.value || baking.value || encoding.value || exportingVideo.value || !hasMotion.value) return
   renderError.value = ''
   videoStatus.value = ''
+  webExportNotice.value = ''   // a stale "Downloaded" must not hide this export's progress or notice
   const { W, H } = bakeSize()
   const motion = effectiveMotion.value
   const alpha = !hasPaint(background.value)
@@ -5129,21 +5146,45 @@ async function generateVideo() {
 // The status line puts the running job first — a finished web export's "Downloaded" must not
 // hide a video that is rendering now — then the web export's notice, then how the last video
 // went (a fallback notice or "Export cancelled."). These are the texts the old buttons wore.
+// Baking is checked first: it only runs inside a video export's server fallback, where
+// exportingVideo is already true and would otherwise hide its percentage.
 const frameFooterProgress = computed(() =>
-  exportingVideo.value ? (videoStatus.value || 'Rendering…')
-    : baking.value ? `Baking ${Math.round((bakeProgress.value ?? 0) * 100)}%`
+  baking.value ? `Baking ${Math.round((bakeProgress.value ?? 0) * 100)}%`
+    : exportingVideo.value ? (videoStatus.value || 'Rendering…')
       : encoding.value ? 'Encoding…'
-        : rendering.value ? 'Rendering…' : '')
+        : (rendering.value || downloadingPng.value) ? 'Rendering…' : '')
+// Download PNG: the same still As image renders (renderStaticComposite at the bake size), saved
+// locally and named like the other studios' PNG downloads (`<studio>_<timestamp>.png`).
+const downloadingPng = ref(false)
+async function downloadFramePng() {
+  if (rendering.value || baking.value || encoding.value || exportingVideo.value || downloadingPng.value) return
+  downloadingPng.value = true
+  renderError.value = ''; webExportNotice.value = ''; videoStatus.value = ''
+  try {
+    const { W, H } = bakeSize()
+    const blob = await renderStaticComposite(W, H)
+    if (blob) downloadBlobAsFile(blob, `frame_${Date.now()}.png`)
+  } catch (err: any) {
+    console.error('[frame] png download failed', err)
+    renderError.value = err?.message || 'Render failed'
+  } finally {
+    downloadingPng.value = false
+  }
+}
 const frameFooterSpec = computed<StudioFooterSpec>(() => {
-  const working = rendering.value || baking.value || encoding.value
+  const working = rendering.value || baking.value || encoding.value || downloadingPng.value
   return {
     status: {
       error: renderError.value || null,
       notice: frameFooterProgress.value || webExportNotice.value || videoStatus.value || null,
     },
     utilities: exportingVideo.value ? [{ label: 'Cancel', onClick: cancelVideoExport }] : [],
-    // "Export embed": the name Gradient, Shader and Space Type give the same HTML download.
-    downloads: [{ label: 'Export embed', onClick: openWebExport, disabled: working, testId: 'frame-web-export' }],
+    // "Export embed": the name Gradient, Shader and Space Type give the same HTML download; the
+    // ellipsis because here it opens the web export sheet first.
+    downloads: [
+      { label: 'Download PNG', onClick: downloadFramePng, busy: downloadingPng.value, disabled: working || exportingVideo.value },
+      { label: 'Export embed…', onClick: openWebExport, disabled: working, testId: 'frame-web-export' },
+    ],
     canvas: [
       { label: 'As image', onClick: generateImage, busy: rendering.value, disabled: working || exportingVideo.value },
       {
@@ -11853,7 +11894,11 @@ onUnmounted(() => {
           <!-- Frame: its size and the Responsive switch — the same controls as the Frame node's
                header on the canvas, written through lib/frame/frameSize. -->
           <StudioSection title="Frame">
-            <div data-testid="frame-size-section" class="flex flex-col gap-1.5">
+            <!-- A design-only tool (pen, brush, draw section…) works on the design-size artboard;
+                 the size cannot change under it, as the view-size controls hide for it too. -->
+            <p v-if="designOnlyToolActive" class="mb-1.5 text-[10px] text-white/40 leading-snug">Finish the current tool to change the size.</p>
+            <div data-testid="frame-size-section" class="flex flex-col gap-1.5"
+              :class="{ 'opacity-40 pointer-events-none': designOnlyToolActive }" :inert="designOnlyToolActive || undefined">
               <StudioSelect :label="frameIsResponsive ? 'Designed at' : 'Size'"
                 :options="framePresetChoices.ids" :option-labels="framePresetChoices.labels"
                 :model-value="framePresetValue" @update:model-value="onFramePreset" />
@@ -12026,7 +12071,7 @@ onUnmounted(() => {
            (the web export) and Render on canvas ▾ (as image / as video). Sits outside every
            template branch so it stays pinned to the bottom in all panel states. `stacked`:
            the panel is too narrow for the status to share a line with the two menus. -->
-      <div ref="frameFooterEl" class="mt-auto shrink-0 border-t border-white/10 p-3">
+      <div ref="frameFooterEl" class="mt-auto shrink-0 border-t border-white/10 px-4 py-3">
         <StudioActionsFooter stacked :spec="frameFooterSpec" />
       </div>
     </div>

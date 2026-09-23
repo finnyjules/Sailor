@@ -45,3 +45,39 @@ describe('StudioActionsFooter — Cancel button stability', () => {
     expect(onClick).toHaveBeenCalledTimes(1)
   })
 })
+
+// `stacked` (the Frame editor's narrow side panel) and `testId`. Without `stacked`, the two
+// groups are `display: contents`, so every other studio still gets its one flex row.
+describe('StudioActionsFooter — stacked and testId', () => {
+  const spec = {
+    status: { notice: 'Rendering 3/90' },
+    utilities: [{ label: 'Cancel', onClick: () => {}, testId: 'u-cancel' }],
+    downloads: [{ label: 'Download PNG', onClick: () => {}, testId: 'd-png' }],
+    canvas: [{ label: 'As image', onClick: () => {} }],
+  }
+  it('without stacked: one row, both groups display: contents, the spacer before Download', () => {
+    const w = mount(StudioActionsFooter, { props: { spec } })
+    expect(w.classes()).toContain('items-center')
+    expect(w.classes()).not.toContain('flex-col')
+    const groups = w.findAll(':scope > div')
+    expect(groups.map(g => g.classes())).toEqual([['contents'], ['contents']])
+    expect(w.find('span.flex-1').exists()).toBe(true)
+  })
+  it('stacked: status on its own line, menus spread edge to edge, Download opens rightwards', async () => {
+    const w = mount(StudioActionsFooter, { props: { spec, stacked: true } })
+    expect(w.classes()).toContain('flex-col')
+    const [statusRow, menuRow] = w.findAll(':scope > div')
+    expect(statusRow!.find('p').text()).toBe('Rendering 3/90')
+    expect(menuRow!.classes()).toContain('justify-between')
+    expect(w.find('span.flex-1').exists()).toBe(false)
+    await menuRow!.findAll('button')[0]!.trigger('click')
+    expect(w.find('.bottom-full').classes()).toContain('left-0')
+  })
+  it('puts testId on a utility button and on a menu row', async () => {
+    const w = mount(StudioActionsFooter, { props: { spec } })
+    expect(w.find('[data-testid="u-cancel"]').exists()).toBe(true)
+    const downloadTrigger = w.findAll('button').find(b => b.text().startsWith('Download'))!
+    await downloadTrigger.trigger('click')
+    expect(w.find('[data-testid="d-png"]').text()).toContain('Download PNG')
+  })
+})

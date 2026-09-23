@@ -13,6 +13,7 @@
  * Every write spreads the existing `sailor_frame`, so its other keys (e.g. `clock`) survive.
  * `data` is the node's reactive `data` object; writes mutate it in place.
  */
+import { isResponsiveFrame } from './responsive/fromNode'
 
 export interface FrameSizePreset { id: string; label: string; w: number; h: number }
 
@@ -72,10 +73,21 @@ export function applyFramePreset(data: FrameSizeNodeData, id: string): boolean {
   return true
 }
 
-/** Write one side from a typed number: rounded, never negative, NaN → 0. */
-export function setFrameDim(data: FrameSizeNodeData, which: Dim, value: number) {
-  writeDim(data, which, Math.max(0, Math.round(Number.isFinite(value) ? value : 0)))
+/** The value `setFrameDim` would write for a typed number — rounded, never negative, NaN → 0 —
+ *  or null when it refuses: a responsive frame's side cannot be cleared, because its design
+ *  size must stay concrete (slice 2; a 0 would re-derive it from the live editor canvas). */
+export function frameDimFor(data: FrameSizeNodeData, value: number): number | null {
+  const v = Math.max(0, Math.round(Number.isFinite(value) ? value : 0))
+  return v <= 0 && isResponsiveFrame(data.properties ?? undefined) ? null : v
+}
+
+/** Write one side from a typed number (see `frameDimFor`). False, and no write, when refused. */
+export function setFrameDim(data: FrameSizeNodeData, which: Dim, value: number): boolean {
+  const v = frameDimFor(data, value)
+  if (v == null) return false
+  writeDim(data, which, v)
   patchFrameProps(data, { preset: 'custom' })
+  return true
 }
 
 /** A concrete size of `aspect` (w/h) with 1024 on its long side; square for a bad aspect. */
@@ -104,4 +116,36 @@ export function setFrameResponsive(data: FrameSizeNodeData, on: boolean, aspect:
     }
   }
   patchFrameProps(data, { responsive: on })
+}
+
+/** Everything this module writes, as the editor's undo history keeps it. `responsive` and
+ *  `preset` are the raw `sailor_frame` values, absent when the key is absent. */
+export interface FrameSizeState { w: number; h: number; responsive?: boolean; preset?: string }
+
+/** The frame's size state, or undefined for a node without size widgets. */
+export function readFrameSizeState(data: FrameSizeNodeData): FrameSizeState | undefined {
+  if (widgetIdx(data, 'width') < 0 || widgetIdx(data, 'height') < 0) return undefined
+  const sf = data.properties?.sailor_frame as { responsive?: boolean; preset?: string } | undefined
+  return {
+    ...readFrameSize(data),
+    ...(sf?.responsive !== undefined ? { responsive: sf.responsive } : {}),
+    ...(sf?.preset !== undefined ? { preset: sf.preset } : {}),
+  }
+}
+
+/** Put a saved size state back exactly: raw widgets, and `responsive` / `preset` set or removed
+ *  as saved; the rest of `sailor_frame` is kept, and an emptied one is removed. Writes nothing
+ *  that already matches, so restoring an unchanged size does not churn reactive state. */
+export function writeFrameSizeState(data: FrameSizeNodeData, s: FrameSizeState) {
+  const cur = readFrameSize(data)
+  if (cur.w !== s.w) writeDim(data, 'width', s.w)
+  if (cur.h !== s.h) writeDim(data, 'height', s.h)
+  const sf = data.properties?.sailor_frame as Record<string, unknown> | undefined
+  if (sf?.responsive === s.responsive && sf?.preset === s.preset) return
+  const next: Record<string, unknown> = { ...sf }
+  if (s.responsive === undefined) delete next.responsive; else next.responsive = s.responsive
+  if (s.preset === undefined) delete next.preset; else next.preset = s.preset
+  if (!data.properties) data.properties = {}
+  if (Object.keys(next).length) data.properties.sailor_frame = next
+  else delete data.properties.sailor_frame
 }

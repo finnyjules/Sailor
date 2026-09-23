@@ -10,8 +10,8 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
-  FRAME_SIZE_PRESETS, applyFramePreset, designSizeForAspect, framePresetId, readFrameSize,
-  setFrameDim, setFrameResponsive, type FrameSizeNodeData,
+  FRAME_SIZE_PRESETS, applyFramePreset, designSizeForAspect, frameDimFor, framePresetId, readFrameSize,
+  readFrameSizeState, setFrameDim, setFrameResponsive, writeFrameSizeState, type FrameSizeNodeData,
 } from '~/lib/frame/frameSize'
 import { isResponsiveFrame } from '~/lib/frame/responsive'
 
@@ -68,6 +68,14 @@ describe('setFrameDim', () => {
     expect(readFrameSize(d)).toEqual({ w: 1301, h: 0 })
     expect(d.properties!.sailor_frame.preset).toBe('custom')
   })
+  it('refuses to clear a side of a responsive frame — its design size must stay concrete', () => {
+    const d = frameData(1280, 720, { sailor_frame: { responsive: true } })
+    expect(frameDimFor(d, 0)).toBeNull()
+    expect(setFrameDim(d, 'width', 0)).toBe(false)
+    expect(readFrameSize(d)).toEqual({ w: 1280, h: 720 })
+    expect(d.properties!.sailor_frame.preset).toBeUndefined()
+    expect(frameDimFor(d, 900.4)).toBe(900)
+  })
   it('treats a non-number as 0', () => {
     const d = frameData(1024, 1024)
     setFrameDim(d, 'width', Number.NaN)
@@ -110,5 +118,36 @@ describe('designSizeForAspect', () => {
     expect(designSizeForAspect(1)).toEqual({ w: 1024, h: 1024 })
     expect(designSizeForAspect(2)).toEqual({ w: 1024, h: 512 })
     expect(designSizeForAspect(0)).toEqual({ w: 1024, h: 1024 })
+  })
+})
+
+describe('readFrameSizeState / writeFrameSizeState (the undo snapshot of the size)', () => {
+  it('is undefined for a node without size widgets', () => {
+    expect(readFrameSizeState({ widgetDefs: [{ name: 'x' }], widgetsValues: [1] })).toBeUndefined()
+  })
+  it('round-trips the size, Responsive and the preset exactly, keeping the rest of sailor_frame', () => {
+    const d = frameData(1280, 720, { sailor_frame: { responsive: true, preset: '16:9', clock: { duration: 3 } } })
+    const saved = readFrameSizeState(d)!
+    expect(saved).toEqual({ w: 1280, h: 720, responsive: true, preset: '16:9' })
+    setFrameResponsive(d, false, 1)
+    applyFramePreset(d, 'A4')
+    writeFrameSizeState(d, saved)
+    expect(readFrameSize(d)).toEqual({ w: 1280, h: 720 })
+    expect(d.properties!.sailor_frame).toEqual({ responsive: true, preset: '16:9', clock: { duration: 3 } })
+  })
+  it('restores absent keys as absent, and no sailor_frame when there was none', () => {
+    const d = frameData(0, 0)
+    const saved = readFrameSizeState(d)!
+    expect(saved).toEqual({ w: 0, h: 0 })
+    setFrameResponsive(d, true, 2)
+    writeFrameSizeState(d, saved)
+    expect(readFrameSize(d)).toEqual({ w: 0, h: 0 })
+    expect(d.properties?.sailor_frame).toBeUndefined()
+  })
+  it('writes nothing when the state already matches', () => {
+    const sf = { responsive: false, preset: '1:1' }
+    const d = frameData(1024, 1024, { sailor_frame: sf })
+    writeFrameSizeState(d, readFrameSizeState(d)!)
+    expect(d.properties!.sailor_frame).toBe(sf)
   })
 })

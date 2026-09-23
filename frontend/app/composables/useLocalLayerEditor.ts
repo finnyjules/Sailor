@@ -33,6 +33,7 @@ import { inject, type Ref } from 'vue'
 import type { BrandKit } from '~~/shared/brand/types'
 import { readGrid, gridProperty } from '~/lib/frame/gridConfig'
 import { resolveGrid, type FrameGrid, type Rect } from '~/lib/frame/grid'
+import { readFrameSizeState, writeFrameSizeState, type FrameSizeState } from '~/lib/frame/frameSize'
 
 interface EditorOpts {
   node: () => any                       // the compositor node (reactive)
@@ -273,11 +274,13 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     }
     writeMotionSnap(next)
   }
-  type Snapshot = { layers: LocalLayer[]; order: string[]; bg: Paint | undefined; fx: PostEffect[]; groups: LayerGroup[]; frameTemplates: unknown[]; motion?: MotionSnap }
+  // `frameSize`: the Frame section's size + Responsive (lib/frame/frameSize) — output, so it undoes.
+  // Absent for a node without size widgets, and restored only when present.
+  type Snapshot = { layers: LocalLayer[]; order: string[]; bg: Paint | undefined; fx: PostEffect[]; groups: LayerGroup[]; frameTemplates: unknown[]; motion?: MotionSnap; frameSize?: FrameSizeState }
   const HISTORY_CAP = 120
   const _past = ref<Snapshot[]>([])
   const _future = ref<Snapshot[]>([])
-  function snapshot(): Snapshot { return { layers: JSON.parse(JSON.stringify(localLayers.value)), order: [...readOrder()], bg: background.value, fx: JSON.parse(JSON.stringify(postEffects.value)), groups: JSON.parse(JSON.stringify(localGroups.value)), frameTemplates: JSON.parse(JSON.stringify((node()?.data?.properties as any)?.sailor_frametemplates ?? [])), motion: readMotionSnap() } }
+  function snapshot(): Snapshot { return { layers: JSON.parse(JSON.stringify(localLayers.value)), order: [...readOrder()], bg: background.value, fx: JSON.parse(JSON.stringify(postEffects.value)), groups: JSON.parse(JSON.stringify(localGroups.value)), frameTemplates: JSON.parse(JSON.stringify((node()?.data?.properties as any)?.sailor_frametemplates ?? [])), motion: readMotionSnap(), frameSize: frameSizeSnap() } }
   function restore(s: Snapshot) {
     commit(s.layers); writeOrder([...s.order]); writeBg(s.bg); writeFx(s.fx?.length ? s.fx : undefined); writeGroups([...s.groups])
     const n = node()
@@ -286,7 +289,10 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       ;(n.data.properties as any).sailor_frametemplates = s.frameTemplates
     }
     writeMotionSnap(s.motion)
+    const nd = node()?.data
+    if (s.frameSize && nd) writeFrameSizeState(nd, s.frameSize)
   }
+  function frameSizeSnap(): FrameSizeState | undefined { const nd = node()?.data; return nd ? readFrameSizeState(nd) : undefined }
   function recordHistory() {
     _past.value.push(snapshot())
     if (_past.value.length > HISTORY_CAP) _past.value.shift()

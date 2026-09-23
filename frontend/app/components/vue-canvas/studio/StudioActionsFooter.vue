@@ -5,8 +5,9 @@ import { resolveStatus, type StudioFooterSpec } from '~/lib/studio/footer'
 import { computed } from 'vue'
 
 // `stacked`: for a footer in a narrow side panel (the Frame editor's), where the two menus
-// fill the width on their own. Utilities and status move to a line of their own above them,
-// and the Download menu opens rightwards so it is not cut off by the panel's left edge.
+// fill the width on their own. Utilities and status move to a line of their own above them;
+// the menus spread to the two edges, and the Download menu, now at the left edge, opens
+// rightwards so the panel's clipping cannot cut it off.
 // Without it the two groups are `display: contents`, so the footer is the one row it always was.
 const props = defineProps<{ spec: StudioFooterSpec; stacked?: boolean }>()
 const status = computed(() => resolveStatus(props.spec.status))
@@ -30,8 +31,8 @@ const toneClass: Record<string, string> = {
       </StudioButton>
       <p v-if="status" class="truncate text-xs tabular-nums" :class="toneClass[status.tone]" :title="stacked ? status.text : undefined">{{ status.text }}</p>
     </div>
-    <div :class="stacked ? 'flex items-center gap-2' : 'contents'">
-      <span class="flex-1" />
+    <div :class="stacked ? 'flex items-center justify-between gap-2' : 'contents'">
+      <span v-if="!stacked" class="flex-1" />
       <!-- ② download ▾ -->
       <StudioFooterMenu v-if="spec.downloads?.length" label="Download" variant="secondary" :align="stacked ? 'start' : 'end'" :actions="spec.downloads" />
       <!-- ③ render on canvas ▾ -->
