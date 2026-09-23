@@ -1,6 +1,6 @@
 import { ref, computed, shallowRef, watch, toRaw, getCurrentScope, onScopeDispose } from 'vue'
 import type { Ref, ComputedRef } from 'vue'
-import { applyLayoutToFrame, candidatesForFrame, lineOptionsForFrame, planLayout } from '~/lib/frame/patterns/kit/plan'
+import { applyLayoutToFrame, candidatesForFrame, hiddenLinesForFrame, lineOptionsForFrame, planLayout } from '~/lib/frame/patterns/kit/plan'
 import type { LayoutEditor, LayoutPlan, LayoutPlanArgs, StoredRoles } from '~/lib/frame/patterns/kit/plan'
 import { DEFAULT_CHOICE } from '~/lib/frame/patterns/kit/vary'
 import type { Candidate, Choice } from '~/lib/frame/patterns/kit/vary'
@@ -11,6 +11,8 @@ import { paletteFromFrame } from '~/lib/frame/patterns/framePalette'
 import { rolesFromFamily } from '~/lib/frame/patterns/palette'
 import type { FrameElements } from '~/lib/frame/patterns/types'
 import { cssFontStack } from '~/composables/useCompositorLayers'
+import { formatFor, keepKind, keepNote } from '~/lib/frame/formats'
+import type { FrameFormat, KeepClear } from '~/lib/frame/formats'
 
 // ═══════════════════════ the Layout tab's state ═══════════════════════
 // One layout at a time, with every checked variation of it on this Frame (`candidatesForFrame`),
@@ -29,6 +31,10 @@ import { cssFontStack } from '~/composables/useCompositorLayers'
 
 export type VaryCandidate = Candidate & { plan: LayoutPlan }
 export interface LibraryItem { id: string; name: string; plan: LayoutPlan | null; reason?: string }
+/** The Frame's format as the tab shows it: its name, its rules as plain sentences, and the text of
+ *  the lines it leaves out (quoted in the UI). `keep` is the area the platform covers or may crop
+ *  (the stage hatches it), and `keepKind` which of the two it is. */
+export interface LayoutFormatInfo { label: string; notes: string[]; hidden: string[]; keep?: KeepClear; keepKind?: 'app' | 'crop' }
 export interface ChoiceRow { key: keyof Choice; label: string; options: { value: unknown; label: string; on: boolean }[] }
 
 export interface LayoutVarySource {
@@ -110,6 +116,16 @@ const AXES: { key: keyof Choice; label: string; values?: unknown[]; labels?: str
   { key: 'side', label: 'Image side', values: ['right', 'left'], labels: ['Right', 'Left'] },
 ]
 
+/** A format's rules, as the sentences the tab shows (Stage 2, spec §6). */
+export function formatNotes(fmt: FrameFormat): string[] {
+  const notes: string[] = []
+  const keep = keepNote(fmt)
+  if (keep) notes.push(keep)
+  if (fmt.view) notes.push(`Seen about ${fmt.view} px wide, so no text is smaller than 9 px there.`)
+  if (fmt.carries) notes.push(`Carries the ${fmt.carries === 2 ? 'two' : 'three'} most important lines.`)
+  return notes
+}
+
 /** Idle scheduling, with a timeout fallback (tests, Safari). */
 function whenIdle(fn: () => void): () => void {
   const w = typeof window !== 'undefined' ? (window as Window & { requestIdleCallback?: (cb: () => void) => number; cancelIdleCallback?: (h: number) => void }) : null
@@ -127,6 +143,7 @@ export function useLayoutVary(src: LayoutVarySource): {
   shapeMode: Ref<FrameElements['shapeMode'] | undefined>; setShapeMode(m: FrameElements['shapeMode']): void
   imageMode: Ref<boolean>; setImageMode(on: boolean): void
   paletteMode: Ref<string[] | null>; setPaletteMode(hexes: string[] | null): void
+  format: ComputedRef<LayoutFormatInfo | null>
 } {
   const stored = src.props()?.sailor_posterState as PosterState | undefined
 
@@ -340,6 +357,28 @@ export function useLayoutVary(src: LayoutVarySource): {
   if (getCurrentScope()) onScopeDispose(() => { cancelIdle?.(); clearTimeout(settleTimer) })
   const library = computed(() => libItems.value)
 
+  // ── the format: the same inputs the plan uses (props, design size), no deep reads ──
+  // The name and rules come from `formatFor`, which reads only the stored preset and the size. The
+  // lines it leaves out come from the format and the Frame alone (`hiddenLinesForFrame`, the
+  // planner's own role inference), so they show before any layout is planned or applied. The
+  // layers are read raw; the content key (settled after the debounce, never on a drag) and `rev`
+  // (apply, undo, redo, reorder) are what re-read them.
+  const format = computed<LayoutFormatInfo | null>(() => {
+    if (!isActive()) return null
+    const fmt = formatFor(src.props(), src.frameW(), src.frameH())
+    if (!fmt) return null
+    void settledKey.value; void rev.value
+    const hidden = hiddenLinesForFrame({
+      props: toRaw(src.props()), frameW: src.frameW(), frameH: src.frameH(),
+      shapeMode: toRaw(shapeMode.value) ?? undefined, imageMode: imageMode.value,
+    }).map(t => t.trim().split(/\s+/).join(' ')).filter(Boolean)
+    const kind = keepKind(fmt)
+    return {
+      label: fmt.label, notes: formatNotes(fmt), hidden,
+      ...(fmt.keep && kind ? { keep: { ...fmt.keep }, keepKind: kind } : {}),
+    }
+  })
+
   // ── actions: each applies at once, as one undo step ──
   /** Apply variation `i` of layout `id` (from `list`). Nothing changes here unless it applies. */
   function applyChoice(id: string, list: Candidate[], i: number): boolean {
@@ -392,6 +431,6 @@ export function useLayoutVary(src: LayoutVarySource): {
 
   return {
     layoutId, index, applied, candidates, library, choices, select, vary, jump, setChoice,
-    shapeMode, setShapeMode, imageMode, setImageMode, paletteMode, setPaletteMode,
+    shapeMode, setShapeMode, imageMode, setImageMode, paletteMode, setPaletteMode, format,
   }
 }

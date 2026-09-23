@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { FRAME_FORMATS, formatFor } from '~/lib/frame/formats'
+import { FRAME_FORMATS, formatFor, keepKind, keepLabel, keepNote } from '~/lib/frame/formats'
 import { FRAME_SIZE_PRESETS, framePresetId, applyFramePreset, type FrameSizeNodeData } from '~/lib/frame/frameSize'
 import { PLAIN_SIZE_PRESETS } from '~/lib/frame/plainPresets'
 
@@ -105,5 +105,35 @@ describe('FRAME_SIZE_PRESETS — gains the formats', () => {
     }
     expect(applyFramePreset(data, 'ad-728x90')).toBe(true)
     expect(data.widgetsValues).toEqual([728, 90])
+  })
+})
+
+// ── What the keep-clear areas are, in words (Stage 2, Task 8) ─────────────────────────────────
+describe('keepKind / keepNote / keepLabel', () => {
+  const fmt = (id: string) => FRAME_FORMATS.find(f => f.id === id)!
+
+  it('Meta story: covered by the app, top and bottom (its 6% side margins are not named)', () => {
+    expect(keepKind(fmt('meta-story'))).toBe('app')
+    expect(keepNote(fmt('meta-story'))).toBe('The app covers the top and bottom of this format; text stays clear of them.')
+    expect(keepLabel('app')).toBe('Covered by the app')
+  })
+
+  it('Pinterest idea pin: covered by the app, top, bottom and sides', () => {
+    expect(keepKind(fmt('pinterest-9x16'))).toBe('app')
+    expect(keepNote(fmt('pinterest-9x16'))).toBe('The app covers the top, bottom and sides of this format; text stays clear of them.')
+  })
+
+  it('Google display: may be cropped', () => {
+    for (const id of ['pmax-landscape', 'pmax-square']) {
+      expect(keepKind(fmt(id))).toBe('crop')
+      expect(keepNote(fmt(id))).toBe('Google may crop the edges; text stays in the middle.')
+    }
+    expect(keepLabel('crop')).toBe('May be cropped')
+  })
+
+  it('a format without keep-clear areas, or none at all: null', () => {
+    expect(keepKind(fmt('video-thumb'))).toBeNull()
+    expect(keepNote(fmt('video-thumb'))).toBeNull()
+    expect(keepKind(null)).toBeNull()
   })
 })

@@ -44,6 +44,7 @@ import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/com
 import { useLocalLayerEditor, resizableKind, cornerResizableKind, aspectLockedResizeKind, textBoxResizable, boxHandles as editorBoxHandles } from '~/composables/useLocalLayerEditor'
 import { useLayoutVary } from '~/composables/useLayoutVary'
 import LayoutVaryPanel from '~/components/vue-canvas/compositor/LayoutVaryPanel.vue'
+import KeepClearOverlay from '~/components/vue-canvas/compositor/KeepClearOverlay.vue'
 import { layoutById } from '~/lib/frame/patterns/layouts/catalog'
 import type { Choice } from '~/lib/frame/patterns/kit/vary'
 import { layoutKeyAction } from '~/lib/frame/layoutKeys'
@@ -8298,6 +8299,17 @@ onUnmounted(() => {
           />
         </svg>
 
+        <!-- Covered areas — the Layout tab's editor guide: where the Frame's format puts the
+             platform's own interface (or may crop). Same box as the grid overlay (pans and zooms
+             with the Frame), never catches the pointer, never painted into an export. A responsive
+             Frame seen at another viewing size shows its DESIGN format's areas, scaled to the
+             artboard as fractions of it — accepted: the format is the design size's. -->
+        <KeepClearOverlay
+          v-if="layoutTabShowing && layoutVary.format.value?.keep"
+          :keep="layoutVary.format.value.keep" :kind="layoutVary.format.value.keepKind"
+          :w="canvasDisplay.w" :h="canvasDisplay.h"
+        />
+
         <!-- Shader-fill live-field ceiling hint (Task 6) — never truncate silently,
              same wording as Space Type / Shape Studio's own hint. -->
         <div v-if="shaderFieldsFrozen > 0"
@@ -9470,6 +9482,7 @@ onUnmounted(() => {
               :choices="layoutVary.choices.value" :library="layoutVary.library.value"
               :frame-w="editorDims().w" :frame-h="editorDims().h"
               :background="background" :groups="localGroups" :wired-content="wiredContentForSlot"
+              :format="layoutVary.format.value"
               @vary="onLayoutVary" @jump="onLayoutJump" @select="onLayoutSelect" @choice="onLayoutChoice"
             />
           </div>

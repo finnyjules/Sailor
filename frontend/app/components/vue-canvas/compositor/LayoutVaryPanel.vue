@@ -9,7 +9,7 @@ import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
 import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
 import StudioSegmentedRow from '~/components/vue-canvas/studio/StudioSegmentedRow.vue'
 import LayoutTile from '~/components/vue-canvas/compositor/LayoutTile.vue'
-import type { ChoiceRow, LibraryItem, VaryCandidate } from '~/composables/useLayoutVary'
+import type { ChoiceRow, LayoutFormatInfo, LibraryItem, VaryCandidate } from '~/composables/useLayoutVary'
 import type { Choice } from '~/lib/frame/patterns/kit/vary'
 import type { WiredContentProvider } from '~/composables/useCompositorLayers'
 import type { Paint } from '~/lib/compositor/paint'
@@ -30,6 +30,8 @@ const props = defineProps<{
   background?: Paint
   groups?: LayerGroup[]
   wiredContent?: WiredContentProvider | null
+  /** The format the Frame is sized for, its rules and the lines it leaves out (null: none). */
+  format?: LayoutFormatInfo | null
 }>()
 const emit = defineEmits<{
   (e: 'vary', step: 1 | -1): void
@@ -50,6 +52,10 @@ const strip = computed(() => {
   const start = props.index < 8 ? 0 : props.index - 7
   return Array.from({ length: n }, (_, k) => start + k)
 })
+
+/** The lines the format leaves out, quoted: the first 24 characters of each, cut with an ellipsis. */
+const hiddenQuoted = computed(() => (props.format?.hidden ?? [])
+  .map(t => `“${t.length > 24 ? `${t.slice(0, 24).trimEnd()}…` : t}”`).join(', '))
 
 const offered = computed(() => props.library.filter(it => it.plan))
 const dropped = computed(() => props.library.filter(it => !it.plan).map(it => it.name))
@@ -73,6 +79,13 @@ function pick(row: ChoiceRow, k: string) {
         <span v-if="count" class="ml-auto shrink-0 text-[11px] text-white/45 tabular-nums" data-testid="layout-vary-count">{{ index + 1 }} of {{ count }}</span>
       </div>
       <p v-if="current" class="text-[11px] leading-snug text-white/55" data-testid="layout-vary-did">{{ current.out.did }}</p>
+    </div>
+
+    <!-- 1b. The format the Frame is sized for, its rules, and the lines it leaves out. -->
+    <div v-if="format" class="flex flex-col gap-1" data-testid="layout-format">
+      <span class="text-[11px] text-white/70" data-testid="layout-format-label">Format: {{ format.label }}</span>
+      <p v-for="n in format.notes" :key="n" class="text-[11px] leading-snug text-white/45">{{ n }}</p>
+      <p v-if="format.hidden.length" class="text-[11px] leading-snug text-white/45" data-testid="layout-format-hidden">Not shown in this format: {{ hiddenQuoted }}.</p>
     </div>
 
     <!-- 2. ‹ Vary › -->

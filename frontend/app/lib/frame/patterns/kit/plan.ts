@@ -105,25 +105,14 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
   const def = LAYOUTS[index]
   if (!def) return null
   const layers = (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? []
-  // A layout's own pieces (bands, rules, dots) are not the user's shapes: infer from the user's layers only.
-  const userLayers = layers.filter(l => !isOwned(l as { owner?: { by: string } }))
-  const inferred = inferElements(posterLayerViews({ ...a.props, sailor_localLayers: userLayers }), a.shapeMode ?? null, a.imageMode ?? false)
-  const elements = withStoredRoles(inferred, userLayers, (a.props?.sailor_posterState as { roles?: StoredRoles } | undefined)?.roles)
+  const elements = frameElements(a, layers)
   if (!elements.title) return null
-  // The title's words, re-joined: the layout does its own line breaking.
-  const content: Content = { title: elements.title.words.join(' ') }
-  for (const r of ['details', 'date', 'caption'] as const) {
-    const t = elements[r]?.text
-    if (t && t.trim()) content[r] = t
-  }
+  const content = contentOf(elements)
   // Levels (Stage 2): a format that carries N levels keeps the first N of title → details →
   // date → caption; the rest leave the content before the layout runs, and their layers are hidden.
   const fmt = formatFor(a.props, a.frameW, a.frameH)
-  const hidden: RoleKey[] = []
-  if (fmt) {
-    const carries = fmt.carries ?? 4
-    for (const r of ROLES.slice(carries)) if (content[r] != null) { delete content[r]; hidden.push(r) }
-  }
+  const hidden = hiddenRoles(fmt, content)
+  for (const r of hidden) delete content[r]
   const kind = kindOf(elements.title.words.length) as Kind
   const targets: RoleTargets = {}
   for (const r of ROLES) if (elements[r]) targets[r] = elements[r]!.id
@@ -142,6 +131,47 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
     title: layerOf('title'), details: layerOf('details'), date: layerOf('date'), caption: layerOf('caption'),
   })
   return { def, index, layers, elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props), fmt, hidden }
+}
+
+type FrameArgs = Pick<LayoutPlanArgs, 'props' | 'frameW' | 'frameH' | 'shapeMode' | 'imageMode'>
+
+/** Which of the Frame's layers holds which role: size inference over the user's own layers, then
+ *  the roles the last apply stored. A layout's own pieces (bands, rules, dots) are not the user's
+ *  shapes: inference reads the user's layers only. */
+function frameElements(a: FrameArgs, layers: LocalLayer[]): FrameElements {
+  const userLayers = layers.filter(l => !isOwned(l as { owner?: { by: string } }))
+  const inferred = inferElements(posterLayerViews({ ...a.props, sailor_localLayers: userLayers }), a.shapeMode ?? null, a.imageMode ?? false)
+  return withStoredRoles(inferred, userLayers, (a.props?.sailor_posterState as { roles?: StoredRoles } | undefined)?.roles)
+}
+
+/** The text a layout places, by role. The title's words re-joined: the layout does its own line
+ *  breaking. Call only when the Frame has a title. */
+function contentOf(elements: FrameElements): Content {
+  const content: Content = { title: elements.title!.words.join(' ') }
+  for (const r of ['details', 'date', 'caption'] as const) {
+    const t = elements[r]?.text
+    if (t && t.trim()) content[r] = t
+  }
+  return content
+}
+
+/** The roles on this Frame a format does not carry: past its `carries`, in title → details →
+ *  date → caption order. None without a format. */
+function hiddenRoles(fmt: FrameFormat | null, content: Content): RoleKey[] {
+  if (!fmt) return []
+  return ROLES.slice(fmt.carries ?? 4).filter(r => content[r] != null)
+}
+
+/** The text of the lines this Frame's format leaves out (Stage 2), in role order — the same roles
+ *  `planLayout` hides, worked out from the format and the Frame alone (no layout needs to have
+ *  been planned or applied). Empty without a format, or without a title. */
+export function hiddenLinesForFrame(a: FrameArgs): string[] {
+  const fmt = formatFor(a.props, a.frameW, a.frameH)
+  if (!fmt || (fmt.carries ?? 4) >= ROLES.length) return []
+  const elements = frameElements(a, (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? [])
+  if (!elements.title) return []
+  const content = contentOf(elements)
+  return hiddenRoles(fmt, content).map(r => content[r]!)
 }
 
 /** The roles the last apply stored win over size inference: an overlap layout (Ghost, Number

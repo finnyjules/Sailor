@@ -4,9 +4,10 @@ vi.mock('~/lib/frame/patterns/kit/plan', async (importOriginal) => {
   const m = await importOriginal<typeof import('~/lib/frame/patterns/kit/plan')>()
   return { ...m, planLayout: vi.fn(m.planLayout), applyLayoutToFrame: vi.fn(m.applyLayoutToFrame) }
 })
-import { planLayout, applyLayoutToFrame } from '~/lib/frame/patterns/kit/plan'
+import { planLayout, applyLayoutToFrame, hiddenLinesForFrame } from '~/lib/frame/patterns/kit/plan'
 import { useLayoutVary, CONTENT_SETTLE_MS, FONT_WAIT_MS } from '~/composables/useLayoutVary'
 import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
+import { DEFAULT_CHOICE } from '~/lib/frame/patterns/kit/vary'
 import { LAYOUTS } from '~/lib/frame/patterns/layouts/catalog'
 import { createImageLayer, createTextLayer } from '~/composables/useCompositorLayers'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
@@ -424,5 +425,75 @@ describe('useLayoutVary — undo and redo (M1)', () => {
     props.sailor_stackOrder = [...(firstOrder as string[])]
     await nextTick()
     expect(vary.applied.value).toBe(false)
+  })
+})
+
+// ── The format (Stage 2, Task 8): the tab names it, its rules, and the lines it leaves out ──────
+describe('useLayoutVary — format', () => {
+  const at = (w: number, h: number, extra: Record<string, unknown> = {}) => {
+    const props: Record<string, unknown> = { sailor_localLayers: frameLayers(), ...extra }
+    const editor = { recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn(), writeGroups: vi.fn() }
+    return useLayoutVary({ props: () => props, frameW: () => w, frameH: () => h, connectedSlots: () => [], editor: () => editor, remember: vi.fn(), measure: makeStubMeasure() })
+  }
+
+  it('is null for a Frame with no recognised format', () => {
+    expect(at(895, 1280).format.value).toBeNull()
+    expect(at(1280, 720).format.value).toBeNull()                // plain 16:9, no preset stored
+  })
+
+  it('video thumbnail: names it, gives the view and two-lines rules, and quotes the date and caption', () => {
+    const f = at(1280, 720, { sailor_frame: { preset: 'video-thumb' } }).format.value!
+    expect(f.label).toBe('Video thumbnail · 16:9')
+    expect(f.notes).toEqual([
+      'Seen about 170 px wide, so no text is smaller than 9 px there.',
+      'Carries the two most important lines.',
+    ])
+    expect(f.hidden).toEqual(['19.09.–15.11.2026', 'Kunstraum Lenz'])
+    expect(f.keep).toBeUndefined()
+  })
+
+  it('a story: the app covers the top and bottom; nothing hidden (it carries every line)', () => {
+    const f = at(1080, 1920).format.value!
+    expect(f.label).toBe('Meta story / reel · 9:16')
+    expect(f.notes).toEqual([
+      'The app covers the top and bottom of this format; text stays clear of them.',
+      'Seen about 390 px wide, so no text is smaller than 9 px there.',
+    ])
+    expect(f.hidden).toEqual([])
+    expect(f.keep).toEqual({ top: 0.14, bottom: 0.35, left: 0.06, right: 0.06 })
+  })
+
+  it('Google display: the edges may be cropped', () => {
+    const f = at(1200, 1200, { sailor_frame: { preset: 'pmax-square' } }).format.value!
+    expect(f.notes[0]).toBe('Google may crop the edges; text stays in the middle.')
+  })
+
+  it('the lines left out come from the format alone: on a Frame with no layout applied, and before any plan', () => {
+    const props = { sailor_localLayers: frameLayers(), sailor_frame: { preset: 'video-thumb' } }
+    expect(props).not.toHaveProperty('sailor_posterState')
+    expect(hiddenLinesForFrame({ props, frameW: 1280, frameH: 720 })).toEqual(['19.09.–15.11.2026', 'Kunstraum Lenz'])
+    // A three-level banner leaves out only the caption; a format that carries every line, nothing.
+    expect(hiddenLinesForFrame({ props: { ...props, sailor_frame: { preset: 'ad-300x600' } }, frameW: 300, frameH: 600 })).toEqual(['Kunstraum Lenz'])
+    expect(hiddenLinesForFrame({ props: { sailor_localLayers: frameLayers() }, frameW: 1080, frameH: 1920 })).toEqual([])
+    expect(hiddenLinesForFrame({ props: { sailor_localLayers: frameLayers() }, frameW: 895, frameH: 1280 })).toEqual([])
+    // The same answer the planner gives (its hidden roles, by their layers' text).
+    const plan = planLayout({ props, frameW: 1280, frameH: 720, layoutId: 'statement', choice: { ...DEFAULT_CHOICE }, palette: { field: '#f2f0ef', ink: '#121212', accent: '#dd2200' } as any, connectedSlots: [], measure: makeStubMeasure() })!
+    expect(plan.format!.hidden.map(r => (frameLayers().find(l => l.id === plan.posterState.roles[r]) as any).text)).toEqual(['19.09.–15.11.2026', 'Kunstraum Lenz'])
+    // The tab on a Frame with no layout applied.
+    const v = useLayoutVary({ props: () => props, frameW: () => 1280, frameH: () => 720, connectedSlots: () => [], editor: () => ({ recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn(), writeGroups: vi.fn() }), remember: vi.fn(), measure: makeStubMeasure() })
+    expect(v.applied.value).toBe(false)
+    expect(v.format.value!.hidden).toEqual(['19.09.–15.11.2026', 'Kunstraum Lenz'])
+  })
+
+  it('Google display: the areas may be cropped', () => {
+    expect(at(1200, 1200, { sailor_frame: { preset: 'pmax-square' } }).format.value!.keepKind).toBe('crop')
+    expect(at(1080, 1920).format.value!.keepKind).toBe('app')
+  })
+
+  it('is null while the tab is not showing', () => {
+    const props: Record<string, unknown> = { sailor_localLayers: frameLayers(), sailor_frame: { preset: 'video-thumb' } }
+    const editor = { recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn(), writeGroups: vi.fn() }
+    const v = useLayoutVary({ props: () => props, frameW: () => 1280, frameH: () => 720, connectedSlots: () => [], editor: () => editor, remember: vi.fn(), measure: makeStubMeasure(), active: () => false })
+    expect(v.format.value).toBeNull()
   })
 })

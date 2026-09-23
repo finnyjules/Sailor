@@ -99,3 +99,36 @@ const SOCIAL_FORMAT_IDS = new Set<string>([
 export function frameFormatGroup(id: string): FrameFormatGroup {
   return SOCIAL_FORMAT_IDS.has(id) ? 'Social' : 'Display ads'
 }
+
+/** What a format's keep-clear areas are: covered by the platform's own interface (`app`), or an
+ *  edge the platform may crop (`crop`, Google Performance Max). Null: the format has none. */
+export function keepKind(fmt: Pick<FrameFormat, 'id' | 'keep'> | null | undefined): 'app' | 'crop' | null {
+  if (!fmt?.keep) return null
+  return fmt.id.startsWith('pmax-') ? 'crop' : 'app'
+}
+
+/** The label drawn on a keep-clear area on the stage. */
+export function keepLabel(kind: 'app' | 'crop'): string {
+  return kind === 'crop' ? 'May be cropped' : 'Covered by the app'
+}
+
+/** A side strip narrower than this (fraction of the width) is a safe margin, not the app's own
+ *  interface: Meta's stories keep 6% at each side, which the sentence does not call covered;
+ *  Pinterest's idea pin covers 18% on the right, which it does. */
+const SIDE_COVER_MIN = 0.1
+
+/** The Layout tab's sentence for a format's keep-clear areas, naming the sides it really covers
+ *  ("the top, bottom and sides"). Null: the format has none. */
+export function keepNote(fmt: Pick<FrameFormat, 'id' | 'keep'> | null | undefined): string | null {
+  const kind = keepKind(fmt)
+  if (!kind) return null
+  if (kind === 'crop') return 'Google may crop the edges; text stays in the middle.'
+  const k = fmt!.keep!
+  const parts: string[] = []
+  if (k.top > 0) parts.push('top')
+  if (k.bottom > 0) parts.push('bottom')
+  if (Math.max(k.left, k.right) >= SIDE_COVER_MIN) parts.push('sides')
+  if (!parts.length) return null
+  const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+  return `The app covers the ${list} of this format; text stays clear of them.`
+}
