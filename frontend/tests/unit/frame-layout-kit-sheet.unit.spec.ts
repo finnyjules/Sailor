@@ -263,3 +263,16 @@ describe('layout kit — Stage 3 pieces (the prototype’s builders, maths verba
     expect(S.logo(50, 5, 6, { aspect: 0.3, align: 'right' }).x).toBeCloseTo(30, 9)
   })
 })
+
+describe('faceOf', () => {
+  it('measures further title lines in the title face, not the caption face', async () => {
+    const { faceOf } = await import('~/lib/frame/patterns/kit/types')
+    expect(faceOf('title')).toBe('title')
+    expect(faceOf('title1')).toBe('title')
+    expect(faceOf('title12')).toBe('title')
+    expect(faceOf('details2')).toBe('details')
+    expect(faceOf('action')).toBe('caption')
+    expect(faceOf('tagtext')).toBe('caption')
+    expect(faceOf(undefined)).toBe('caption')
+  })
+})
