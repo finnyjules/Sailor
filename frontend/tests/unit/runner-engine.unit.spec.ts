@@ -1,7 +1,10 @@
-import { existsSync } from 'node:fs'
+import { existsSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { createLimiter } from '~~/server/runner/engine'
+import { createFileRunStore, type RunStore } from '~~/server/runner/store'
+import type { RunRecord } from '~~/server/runner/types'
 import { makeKit, gatedFlow, ofType, types, until } from './__runner__/kit'
 import type { ApiPrompt } from '#shared/runner/graph'
 
@@ -94,6 +97,22 @@ describe('money (hosted)', () => {
     expect(ofType(k.seen, 'execution_success')[0]!.data.credits).toBe(2)
     expect(k.graphRuns.appendOutput).toHaveBeenCalledWith(promptIds[0], expect.stringMatching(/^output:u_[0-9a-f]{12}:generate_image_00001_\.png$/))
   })
+  it('the render credit goes to the first take that makes something, not to take 0', async () => {
+    const k = makeKit({ hosted: true })
+    const a = await k.engine.startRun({ userId: 'user_1', takes: [gatedFlow({ imageSeed: 7 })], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    await k.engine.settled(a.runId)
+    const b = await k.engine.startRun({ userId: 'user_1', takes: [gatedFlow({ imageSeed: 7 }), gatedFlow({ imageSeed: 8 })], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    await k.engine.settled(b.runId)
+    expect(k.fal.submitted()).toHaveLength(2) // take 0 was reused
+    // every take's hold is an upper bound that includes the render credit
+    expect(k.ledger.hold).toHaveBeenCalledWith('user_1', 2, `runner:${b.promptIds[0]}`)
+    expect(k.ledger.hold).toHaveBeenCalledWith('user_1', 2, `runner:${b.promptIds[1]}`)
+    const run = (await k.store.get(b.runId))!
+    expect(run.charges.map(c => [c.state, c.actual])).toEqual([['released', 0], ['settled', 2]])
+    expect(run.baseCharged).toBe(true)
+    const credits = (i: number) => ofType(k.seen, 'execution_success').find(m => m.data.prompt_id === b.promptIds[i])!.data.credits
+    expect([credits(0), credits(1)]).toEqual([0, 2])
+  })
   it('refuses before anything runs when credits are short', async () => {
     const k = makeKit({ hosted: true, available: 1 })
     await expect(k.engine.startRun({ userId: 'user_1', takes: [gatedFlow()], workflow: null, canvasId: null, projectUuid: null, projectName: null }))
@@ -167,6 +186,53 @@ describe('never pay twice', () => {
       await k.engine.settled(r.runId)
     }
     expect(k.fal.submitted()).toHaveLength(2)
+  })
+})
+
+describe('when things go wrong', () => {
+  it('a save that fails after the image is made still ends the leg and sends the closing event', async () => {
+    const inner = createFileRunStore(mkdtempSync(join(tmpdir(), 'runner-engine-failing-')))
+    let failing = false
+    let lastAttempt: RunRecord | null = null
+    const store: RunStore = {
+      ...inner,
+      save: async (run) => {
+        lastAttempt = run
+        if (failing) throw new Error('disk full')
+        return inner.save(run)
+      },
+    }
+    const k = makeKit({
+      deps: {
+        store,
+        download: async (url: string) => {
+          failing = true
+          return { bytes: new TextEncoder().encode(url), contentType: 'image/png' }
+        },
+      },
+    })
+    const { runId, promptIds } = await k.engine.startRun({ userId: null, takes: [gatedFlow()], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    await k.engine.settled(runId)
+    const closing = k.seen.filter(m => (m.type === 'execution_success' || m.type === 'execution_error') && m.data.prompt_id === promptIds[0])
+    expect(closing).toHaveLength(1)
+    const last = lastAttempt as RunRecord | null
+    expect(last!.legs[0]!.status).toBe('done')
+    expect(last!.status).not.toBe('running')
+    expect(k.deps.reportError).toHaveBeenCalled()
+  })
+  it('a finished run lets go of its memory; settled() still answers and the next run works', async () => {
+    const k = makeKit()
+    const first = await k.engine.startRun({ userId: null, takes: [gatedFlow({ bypass: true })], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    await k.engine.settled(first.runId)
+    expect((await k.store.get(first.runId))!.status).toBe('done')
+    const second = await k.engine.startRun({ userId: null, takes: [gatedFlow({ bypass: true })], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    const quick = await Promise.race([
+      k.engine.settled(first.runId).then(() => 'settled'),
+      new Promise(r => setTimeout(() => r('late'), 50)),
+    ])
+    expect(quick).toBe('settled')
+    await k.engine.settled(second.runId)
+    expect((await k.store.get(second.runId))!.status).toBe('done')
   })
 })
 

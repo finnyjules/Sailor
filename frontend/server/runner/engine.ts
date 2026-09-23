@@ -224,13 +224,13 @@ export function createEngine(deps: EngineDeps) {
     const index = run.legs.length
     const legId = `${run.id}.${index}`
     const charges: StageCharge[] = []
-    let baseAssigned = false
     try {
       for (const t of takeIdx) {
         const take = run.takes[t]!
         const nodes = legNodes(take.prompt, gateStateOf(take))
-        const includesBase = !run.baseCharged && !baseAssigned && hasOutputNode(take.prompt)
-        if (includesBase) baseAssigned = true
+        // Every take's hold covers the render credit (a hold is an upper bound);
+        // which take actually pays it is only known once one makes something.
+        const includesBase = !run.baseCharged && hasOutputNode(take.prompt)
         let estimate: number
         try { estimate = stageEstimate(take.prompt, nodes, includesBase) }
         catch (e) {
@@ -266,19 +266,41 @@ export function createEngine(deps: EngineDeps) {
 
   // ── Running a leg ──────────────────────────────────────────────────────
   async function runLeg(run: RunRecord, leg: LegRecord, signal: AbortSignal): Promise<void> {
-    const outcomes = await Promise.all(leg.takes.map(t => runTakeLeg(run, run.takes[t]!, leg, signal)))
-    leg.status = 'done'
-    leg.endedAt = deps.now()
-    const gates = pausedChoices(run)
-    let status: RunStatus
-    if (gates.size) status = 'paused'
-    else if (run.stopRequested || outcomes.includes('stopped')) status = 'stopped'
-    else if (outcomes.length && outcomes.every(o => o === 'error')) status = 'error'
-    else status = 'done'
-    run.status = status
-    await persist(run)
-    for (const [gateId, choices] of gates) {
-      publish(run, ev.gatePaused(leg.id, run.id, gateId, choices, choices.length === 1 ? [choices[0]!.take] : []))
+    let outcomes: TakeOutcome[] = []
+    try {
+      const results = await Promise.allSettled(leg.takes.map(t => runTakeLeg(run, run.takes[t]!, leg, signal)))
+      outcomes = results.map((r, i) => {
+        if (r.status === 'fulfilled') return r.value
+        deps.reportError(r.reason, { site: 'runner.take', runId: run.id, legId: leg.id, take: leg.takes[i] })
+        return 'error'
+      })
+    }
+    finally {
+      // The leg always ends, even when a take or a save failed: a leg left
+      // 'running' would refuse Gate actions and replay a phantom "running".
+      leg.status = 'done'
+      leg.endedAt = deps.now()
+      const gates = pausedChoices(run)
+      let status: RunStatus
+      if (gates.size) status = 'paused'
+      else if (run.stopRequested || outcomes.includes('stopped')) status = 'stopped'
+      else if (outcomes.length && outcomes.every(o => o === 'error')) status = 'error'
+      else status = 'done'
+      run.status = status
+      let saved = true
+      try { await persist(run) }
+      catch (e) {
+        saved = false
+        deps.reportError(e, { site: 'runner.leg.save', runId: run.id, legId: leg.id })
+      }
+      for (const [gateId, choices] of gates) {
+        publish(run, ev.gatePaused(leg.id, run.id, gateId, choices, choices.length === 1 ? [choices[0]!.take] : []))
+      }
+      // A finished run lives on in the store only. Kept in memory when its
+      // last save failed, so the in-memory truth is not lost to a stale copy.
+      if (saved && (status === 'done' || status === 'error' || status === 'stopped') && live.get(run.id)?.run === run) {
+        live.delete(run.id)
+      }
     }
   }
 
@@ -329,12 +351,13 @@ export function createEngine(deps: EngineDeps) {
     }
 
     // Charge exactly what was made (reused results are free); the flat
-    // render credit rides on the first stage that makes something.
+    // render credit rides on the first stage that makes something. The
+    // check and the set below must stay together, with no await between.
     const legIds = [...nodes]
     let actual = legIds
       .filter(id => take.nodes[id]!.status === 'done' && !take.nodes[id]!.reused)
       .reduce((s, id) => s + take.nodes[id]!.credits, 0)
-    if (charge.includesBase && actual > 0) {
+    if (charge.includesBase && actual > 0 && !run.baseCharged) {
       actual += BASE_RENDER_CREDITS
       run.baseCharged = true
     }
@@ -343,7 +366,8 @@ export function createEngine(deps: EngineDeps) {
       charge.finished = true
       deps.reportError(e, { site: 'runner.finish', stageKey, actual })
     }
-    await persist(run)
+    // A failed save must not swallow the closing event below.
+    await persist(run).catch(e => deps.reportError(e, { site: 'runner.stage.save', stageKey }))
 
     const outcome = takeOutcome(take, leg.index)
     const credits = deps.hosted() ? (charge.actual ?? 0) : null
