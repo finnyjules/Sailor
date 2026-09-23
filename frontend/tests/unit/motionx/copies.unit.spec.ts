@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { copyRanks, copyClock, staggerOf, COPY_ORDERS, echoOffsets } from '~/lib/motionx/copies'
+import { copyRanks, copyClock, staggerOf, COPY_ORDERS, echoOffsets, staggerOverrun, echoCut, fitFrameDuration } from '~/lib/motionx/copies'
 import { DEFAULT_CLONER } from '~/composables/useCloner'
 
 describe('copyRanks', () => {
@@ -60,5 +60,54 @@ describe('echoOffsets — the timeline\'s stagger echoes', () => {
     expect(echoOffsets(0, 4, 0, 4)).toEqual([])
     expect(echoOffsets(NaN, 4, 0, 4)).toEqual([])
     expect(echoOffsets(0.25, 0, 0, 4)).toEqual([])
+  })
+})
+
+describe('staggerOverrun — copies the Frame\'s end cuts off', () => {
+  it('counts copies cut mid-move, copies that never start, and when the last one ends', () => {
+    // 8 copies, 0.3s stagger, a 2.0–2.6s bar in a 4s Frame. Copy starts: 2.3 … 4.1.
+    // Copies 5 (3.5→4.1) and 6 (3.8→4.4) are cut; copy 7 starts at 4.1 and never appears.
+    const o = staggerOverrun(0.3, 8, 2, 2.6, 4, 6)
+    expect(o.cut).toBe(2)
+    expect(o.unstarted).toBe(1)
+    expect(o.lastEnd).toBeCloseTo(4.7)
+    // 6 echoes fit on screen (copies 1–6), so one copy (7) goes undrawn.
+    expect(o.hidden).toBe(1)
+  })
+  it('everything inside the Frame: nothing cut, nothing hidden', () => {
+    expect(staggerOverrun(0.25, 4, 0, 1, 4)).toEqual({ cut: 0, unstarted: 0, hidden: 0, lastEnd: 1.75 })
+  })
+  it('copies past the echo cap are hidden but not cut', () => {
+    const o = staggerOverrun(0.1, 20, 0, 0.5, 4, 6)
+    expect(o).toMatchObject({ cut: 0, unstarted: 0, hidden: 13 })
+    expect(o.lastEnd).toBeCloseTo(2.4)
+  })
+  it('a copy ending exactly at the Frame\'s end is not cut', () => {
+    expect(staggerOverrun(0.5, 3, 2, 3, 4).cut).toBe(0)   // last copy 3.0 → 4.0
+  })
+  it('no stagger, a bad stagger, or one copy → nothing to report; lastEnd is the bar\'s end', () => {
+    for (const o of [staggerOverrun(0, 4, 1, 2, 4), staggerOverrun(NaN, 4, 1, 2, 4), staggerOverrun(0.25, 1, 1, 2, 4)])
+      expect(o).toEqual({ cut: 0, unstarted: 0, hidden: 0, lastEnd: 2 })
+  })
+})
+
+describe('echoCut — an echo still moving when the Frame ends', () => {
+  it('true only when the echo ends after the Frame', () => {
+    expect(echoCut(2.6, 1.5, 4)).toBe(true)    // ends 4.1
+    expect(echoCut(2.6, 1.4, 4)).toBe(false)   // ends exactly 4.0
+    expect(echoCut(1, 0.5, 4)).toBe(false)
+  })
+})
+
+describe('fitFrameDuration — the "Fit copies" length', () => {
+  it('rounds the last copy\'s end up to the next half second', () => {
+    expect(fitFrameDuration(4.7, 4)).toBe(5)
+    expect(fitFrameDuration(5.5, 4)).toBe(5.5)
+    expect(fitFrameDuration(5.5 + 1e-9, 4)).toBe(5.5)   // float noise doesn't add half a second
+  })
+  it('caps at 60s, never shortens the Frame, and ignores a bad end', () => {
+    expect(fitFrameDuration(70, 4)).toBe(60)
+    expect(fitFrameDuration(3, 4)).toBe(4)
+    expect(fitFrameDuration(NaN, 4)).toBe(4)
   })
 })

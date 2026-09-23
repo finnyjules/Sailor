@@ -11,7 +11,7 @@ import { isTextBehaviour } from '~/lib/motionx/text'
 import { bandsForLayer, behaviourBandsForLayer, legacyBandForLayer, numberBandCurve, colorBandCss, gradientBandCss, trackSpan, type Band } from '~/lib/motionx/bands'
 import { animatableProperties, MOTION_ONLY_LABELS, isMotionOnlyPath } from '~/lib/motionx/adapter/frame'
 import { expandClones, type Cloner } from '~/composables/useCloner'
-import { staggerOf, echoOffsets } from '~/lib/motionx/copies'
+import { staggerOf, echoOffsets, staggerOverrun, echoCut, fitFrameDuration, type StaggerOverrun } from '~/lib/motionx/copies'
 import { shiftTrack, retimeTrack, movePoint, removePoint, setBandTrack, ripplePoint, segmentAt, bandTrackAt } from '~/lib/motionx/bandEdit'
 import { deriveView, timeToX, xToTime, zoomAboutPivot, clampViewStart, computeTicks, formatRulerSeconds, ghostCycles, type View } from '~/lib/motionx/timelineView'
 
@@ -128,17 +128,63 @@ const isLegSel = (b: Band, i: number) => props.selection?.kind === 'point' && pr
 // staggering transitions; position / opacity / letters echo whenever a stagger is set. Capped
 // so a big copy count stays legible; the delays past the last are the ones dropped.
 const MAX_ECHOES = 6
-function echoDelaysFor(l: LocalLayer, b: Band, isReveal: boolean): number[] {
+function echoStagger(l: LocalLayer, isReveal: boolean): { s: number; copies: number } | null {
   const cloner = (l as { cloner?: Cloner }).cloner
-  if (!cloner?.enabled) return []
+  if (!cloner?.enabled) return null
   const s = staggerOf(cloner)
-  if (s <= 0) return []
-  if (isReveal && !cloner.staggerReveals) return []
-  const distinct = new Set(expandClones(cloner, 1).map((c) => c.k)).size
-  return echoOffsets(s, distinct, b.start, props.duration, MAX_ECHOES)
+  if (s <= 0) return null
+  if (isReveal && !cloner.staggerReveals) return null
+  return { s, copies: new Set(expandClones(cloner, 1).map((c) => c.k)).size }
+}
+function echoDelaysFor(l: LocalLayer, b: Band, isReveal: boolean): number[] {
+  const st = echoStagger(l, isReveal)
+  return st ? echoOffsets(st.s, st.copies, b.start, props.duration, MAX_ECHOES) : []
 }
 // Fade the later echoes so a long trail reads as a tail, not N equal bars.
 const echoOpacity = (i: number) => Math.max(0.28, 1 - i * 0.13)
+// ── The Frame's end cuts staggered copies ────────────────────────────────────
+// Copies run past their bar, so the Frame's end can cut them: an echo still moving at the end
+// is drawn up to the end with a hatched cap, a row badge counts the copies with no echo (past
+// the cap, or starting after the end), and "Fit copies" lengthens the Frame to hold them all.
+// A looping bar is meant to run to the end and a muted one doesn't play — neither is "cut".
+const echoIsCut = (b: Band, d: number) => !b.loop && echoCut(b.end, d, props.duration)
+const echoStyle = (b: Band, d: number, i: number) => ({
+  left: px(xOf(b.start + d)),
+  width: px(wOf(b.start + d, echoIsCut(b, d) ? props.duration : b.end + d)),
+  background: 'rgba(255,255,255,.05)', opacity: echoOpacity(i),
+})
+function overrunFor(l: LocalLayer, b: Band, isReveal: boolean): StaggerOverrun | null {
+  if (b.loop || b.muted) return null
+  const st = echoStagger(l, isReveal)
+  return st ? staggerOverrun(st.s, st.copies, b.start, b.end, props.duration, MAX_ECHOES) : null
+}
+/** One badge per row: the copies drawn with no echo, and how many of them never appear. */
+function rowBadge(l: LocalLayer, bands: Band[], isReveal: boolean): { hidden: number; unstarted: number } | null {
+  let hidden = 0, unstarted = 0
+  for (const b of bands) { const o = overrunFor(l, b, isReveal); if (o) { hidden += o.hidden; unstarted += o.unstarted } }
+  return hidden > 0 ? { hidden, unstarted } : null
+}
+// The badge sits just left of the Frame's end, clear of a cut echo's 8px hatched cap — and of
+// the row's ∞ marker when a looping bar shares the row.
+const badgeLeft = (hasLoop: boolean) => px(xOf(props.duration) - (hasLoop ? 30 : 11))
+const badgeTitle = (r: { hidden: number; unstarted: number }) =>
+  `${r.hidden} more ${r.hidden === 1 ? 'copy' : 'copies'}` +
+  (r.unstarted ? ` · ${r.unstarted} ${r.unstarted === 1 ? 'starts' : 'start'} after the Frame ends and never ${r.unstarted === 1 ? 'appears' : 'appear'}` : '')
+/** The Frame length that lets every cut copy finish, or null when nothing is cut. */
+const fitTarget = computed((): number | null => {
+  let lastEnd = -Infinity
+  const take = (l: LocalLayer, b: Band, isReveal: boolean) => {
+    const o = overrunFor(l, b, isReveal)
+    if (o && o.cut + o.unstarted > 0) lastEnd = Math.max(lastEnd, o.lastEnd)
+  }
+  for (const l of props.layers) {
+    for (const b of lettersBandsFor(l.id)) take(l, b, false)
+    for (const r of rowsFor(l)) for (const b of [...r.behaviours, ...(r.property ? [r.property] : [])]) take(l, b, isMotionOnlyPath(r.path))
+  }
+  if (lastEnd === -Infinity) return null
+  const fit = fitFrameDuration(lastEnd, props.duration)
+  return fit > props.duration + 1e-6 ? fit : null
+})
 // A looping bar is ONE cycle; these are its faint repeats out to the end of the timeline.
 const ghostsOf = (b: Band) => (b.loop ? ghostCycles(b.start, b.end - b.start, props.duration, dv.value.safeViewStart) : [])
 // A loop owns its property from its start to the END of the timeline, not just its bar.
@@ -459,6 +505,10 @@ function deletePoint(b: Band, i: number) {
         <input v-scrubnum type="number" min="0.5" max="60" step="0.5" :value="duration"
           class="w-12 bg-[#0d0d0d] border border-white/10 rounded px-1 py-0.5 text-white/90 outline-none tabular-nums"
           @change="emit('update:motion', { duration: Math.max(0.5, Number(($event.target as HTMLInputElement).value) || 4) })"></label>
+      <button v-if="open && fitTarget" type="button" data-testid="fit-copies"
+        class="h-7 px-2.5 rounded-md text-[11px] font-medium cursor-pointer transition-colors bg-white/10 text-white/85 hover:bg-white/15"
+        title="Lengthen the Frame so every staggered copy finishes"
+        @click="emit('update:motion', { duration: fitTarget })">Fit copies · {{ +fitTarget.toFixed(2) }} s</button>
       <label v-if="open" class="flex items-center gap-1 text-white/45">fps
         <input v-scrubnum type="number" min="1" max="60" step="1" :value="fps ?? 30"
           class="w-11 bg-[#0d0d0d] border border-white/10 rounded px-1 py-0.5 text-white/90 outline-none tabular-nums"
@@ -546,9 +596,14 @@ function deletePoint(b: Band, i: number) {
             <div data-band-lane class="relative my-0.5 h-6">
               <div v-if="playheadVisible" class="absolute inset-y-0 w-px bg-[#7c9cff]/50 pointer-events-none z-30" :style="{ left: px(playheadX) }" />
               <div v-for="(d, i) in echoDelaysFor(l, b, false)" :key="'echo-' + b.key + '-' + i" aria-hidden="true"
-                data-testid="stagger-echo"
-                class="absolute inset-y-0.5 rounded-md border border-dashed border-white/15 pointer-events-none select-none"
-                :style="{ left: px(xOf(b.start + d)), width: px(wOf(b.start, b.end)), background: 'rgba(255,255,255,.05)', opacity: echoOpacity(i) }" />
+                data-testid="stagger-echo" :data-cut="echoIsCut(b, d) ? '' : undefined"
+                class="absolute inset-y-0.5 overflow-hidden rounded-md border border-dashed border-white/15 pointer-events-none select-none"
+                :class="echoIsCut(b, d) ? 'rounded-r-none border-r-0' : ''"
+                :style="echoStyle(b, d, i)"><div v-if="echoIsCut(b, d)" class="echo-cut" /></div>
+              <span v-for="bd in [rowBadge(l, [b], false)].filter((x) => !!x)" :key="'badge-' + b.key"
+                data-testid="stagger-badge" :data-unstarted="bd!.unstarted ? '' : undefined"
+                class="stagger-badge" :class="bd!.unstarted ? 'is-warn' : ''"
+                :style="{ left: badgeLeft(false) }" :title="badgeTitle(bd!)" @pointerdown.stop>+{{ bd!.hidden }}</span>
               <div :data-testid="'beh-band-' + b.behaviourId" :data-muted="b.muted ? '' : undefined"
                 class="absolute inset-y-0 flex items-center gap-1.5 rounded-md border px-2 text-[9.5px] cursor-grab active:cursor-grabbing overflow-hidden select-none"
                 :class="[isBehSel(b) ? 'ring-2 ring-[#7c9cff] text-white border-[#7c9cff]' : 'text-white/80 border-white/25 hover:border-white/45', b.muted ? 'opacity-40 border-dashed' : '']"
@@ -586,10 +641,16 @@ function deletePoint(b: Band, i: number) {
               <!-- stagger echoes: faint dashed copies showing the per-copy time spread (read-only) -->
               <template v-for="b in r.behaviours" :key="'echo-' + b.key">
                 <div v-for="(d, i) in echoDelaysFor(l, b, isMotionOnlyPath(r.path))" :key="i" aria-hidden="true"
-                  data-testid="stagger-echo"
-                  class="absolute inset-y-0.5 rounded-md border border-dashed border-white/15 pointer-events-none select-none"
-                  :style="{ left: px(xOf(b.start + d)), width: px(wOf(b.start, b.end)), background: 'rgba(255,255,255,.05)', opacity: echoOpacity(i) }" />
+                  data-testid="stagger-echo" :data-cut="echoIsCut(b, d) ? '' : undefined"
+                  class="absolute inset-y-0.5 overflow-hidden rounded-md border border-dashed border-white/15 pointer-events-none select-none"
+                  :class="echoIsCut(b, d) ? 'rounded-r-none border-r-0' : ''"
+                  :style="echoStyle(b, d, i)"><div v-if="echoIsCut(b, d)" class="echo-cut" /></div>
               </template>
+              <span v-for="bd in [rowBadge(l, [...r.behaviours, ...(r.property ? [r.property] : [])], isMotionOnlyPath(r.path))].filter((x) => !!x)" :key="'badge-' + r.path"
+                data-testid="stagger-badge" :data-unstarted="bd!.unstarted ? '' : undefined"
+                class="stagger-badge" :class="bd!.unstarted ? 'is-warn' : ''"
+                :style="{ left: badgeLeft([...r.behaviours, r.property].some((x) => x?.loop)) }"
+                :title="badgeTitle(bd!)" @pointerdown.stop>+{{ bd!.hidden }}</span>
 
               <!-- behaviour bars -->
               <div v-for="b in r.behaviours" :key="b.key" :data-testid="'beh-band-' + b.behaviourId" :data-muted="b.muted ? '' : undefined"
@@ -616,9 +677,10 @@ function deletePoint(b: Band, i: number) {
 
               <!-- stagger echoes for the property band (read-only) -->
               <div v-for="(d, i) in (r.property ? echoDelaysFor(l, r.property, isMotionOnlyPath(r.path)) : [])" :key="'echo-prop-' + i" aria-hidden="true"
-                data-testid="stagger-echo"
-                class="absolute inset-y-0.5 rounded-md border border-dashed border-white/15 pointer-events-none select-none"
-                :style="{ left: px(xOf(r.property!.start + d)), width: px(wOf(r.property!.start, r.property!.end)), background: 'rgba(255,255,255,.05)', opacity: echoOpacity(i) }" />
+                data-testid="stagger-echo" :data-cut="echoIsCut(r.property!, d) ? '' : undefined"
+                class="absolute inset-y-0.5 overflow-hidden rounded-md border border-dashed border-white/15 pointer-events-none select-none"
+                :class="echoIsCut(r.property!, d) ? 'rounded-r-none border-r-0' : ''"
+                :style="echoStyle(r.property!, d, i)"><div v-if="echoIsCut(r.property!, d)" class="echo-cut" /></div>
 
               <!-- explicit property band (control points) -->
               <div v-if="r.property" :data-testid="'band-' + r.property.key" :data-muted="r.property.muted ? '' : undefined"
@@ -680,4 +742,17 @@ function deletePoint(b: Band, i: number) {
 .dock-rows::-webkit-scrollbar { width: 8px; }
 .dock-rows::-webkit-scrollbar-track { background: transparent; }
 .dock-rows::-webkit-scrollbar-thumb { border-radius: 999px; background: rgba(255, 255, 255, 0.18); }
+/* A staggered copy still moving when the Frame ends: its echo stops at the end, hatched. */
+.echo-cut {
+  position: absolute; top: 0; bottom: 0; right: 0; width: 8px;
+  background: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.45) 0 1.5px, transparent 1.5px 4px);
+}
+/* "+N" at the Frame's end: copies the row draws no echo for. Amber when some never appear. */
+.stagger-badge {
+  position: absolute; top: 50%; z-index: 20; transform: translate(-100%, -50%);
+  padding: 0 4px; border-radius: 4px; font-size: 9px; line-height: 14px;
+  font-variant-numeric: tabular-nums; user-select: none; cursor: default;
+  background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.6);
+}
+.stagger-badge.is-warn { background: rgba(251, 191, 36, 0.2); color: rgb(253, 230, 138); }
 </style>

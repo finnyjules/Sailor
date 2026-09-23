@@ -77,3 +77,37 @@ export function echoOffsets(stagger: number, copyCount: number, barStart: number
   for (let i = 1; i <= n; i++) { if (barStart + i * s <= duration + 1e-6) out.push(i * s) }
   return out
 }
+
+/** How a Frame's end cuts into a staggered bar's copies. Copy `i` (rank i, 1 … n−1) plays the
+ *  bar `i × stagger` later, so it runs past the bar and can run past the Frame:
+ *  - `cut`: copies that start inside the Frame but are still moving when it ends;
+ *  - `unstarted`: copies that would start after the Frame ends — they never appear;
+ *  - `hidden`: copies the timeline draws no echo for (past the `max` cap, or unstarted);
+ *  - `lastEnd`: when the last copy finishes — the length that would fit them all.
+ *  Counts every copy, not just the `max` drawn. Same start boundary as `echoOffsets`. Pure. */
+export interface StaggerOverrun { cut: number; unstarted: number; hidden: number; lastEnd: number }
+export function staggerOverrun(stagger: number, copyCount: number, barStart: number, barEnd: number, duration: number, max = 6): StaggerOverrun {
+  const s = typeof stagger === 'number' && Number.isFinite(stagger) && stagger > 0 ? stagger : 0
+  const extra = s > 0 ? Math.max(0, Math.floor(copyCount) - 1) : 0
+  let cut = 0, unstarted = 0
+  for (let i = 1; i <= extra; i++) {
+    if (barStart + i * s > duration + 1e-6) unstarted++
+    else if (echoCut(barEnd, i * s, duration)) cut++
+  }
+  const drawn = echoOffsets(s, copyCount, barStart, duration, max).length
+  return { cut, unstarted, hidden: extra - drawn, lastEnd: barEnd + extra * s }
+}
+
+/** True when the echo `offset` seconds behind a bar ending at `barEnd` is still moving when the
+ *  Frame ends — the timeline draws its end hatched, cut at the Frame's edge. */
+export function echoCut(barEnd: number, offset: number, duration: number): boolean {
+  return barEnd + offset > duration + 1e-6
+}
+
+/** The Frame length for "Fit copies": the last copy's end, rounded up to the duration field's
+ *  half-second step and capped at its 60s maximum. Never shorter than the Frame already is. */
+export function fitFrameDuration(lastEnd: number, current: number, step = 0.5, maxDuration = 60): number {
+  if (!Number.isFinite(lastEnd)) return current
+  const fit = Math.min(maxDuration, Math.ceil(lastEnd / step - 1e-6) * step)
+  return Math.max(current, fit)
+}
