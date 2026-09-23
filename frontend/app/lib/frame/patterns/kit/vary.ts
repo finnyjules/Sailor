@@ -9,7 +9,13 @@ import type { Box } from './check'
 //
 // No accent-colour choice in stage 1 — it would recolour the user's own text.
 
-export interface Choice { lines: number; arr: number; scale: 'full' | 'quiet'; side: 'right' | 'left' }
+export interface Choice {
+  lines: number; arr: number; scale: 'full' | 'quiet'; side: 'right' | 'left'
+  /** The platform's own button (ruling R7) vs the layout's drawn one. Only meaningful — and only
+   *  ever set — when the format draws a platform button AND the Frame has an action line; every
+   *  other candidate's `cta` is undefined, which reads as `'drawn'` (the default). */
+  cta?: 'drawn' | 'native'
+}
 
 export const DEFAULT_CHOICE: Choice = { lines: 0, arr: 0, scale: 'full', side: 'right' }
 
@@ -116,24 +122,33 @@ export function enumerate(def: LayoutDef, opts: {
   /** The style's own reward (Task 4), added to the Stage 1 score. Omitted (Swiss): scores are
    *  exactly Stage 1's. */
   rank?: (out: LayoutOut) => number
+  /** Ruling R7: the format draws its own button. With `hasAction` too, the `cta` axis is offered
+   *  (`'drawn'` | `'native'`); otherwise `cta` never appears on any candidate and every score, sig
+   *  and diversity input is exactly as before the axis existed. */
+  platformButton?: boolean
+  /** The Frame has an action line (a button can be drawn at all). */
+  hasAction?: boolean
 }): Candidate[] {
   const { run, check, infoSize, hasImage, boxOf, rank } = opts
   const lineOpts = lineOptions(opts.kind, opts.title, def.oneLineFirst)
+  const offerCta = !!(opts.platformButton && opts.hasAction)
 
   const defSig = sigOf(run(DEFAULT_CHOICE))
   const arrVaries = [1, 2].some(a => sigOf(run({ ...DEFAULT_CHOICE, arr: a })) !== defSig)
   const sideMatters = hasImage && sigOf(run({ ...DEFAULT_CHOICE, side: 'left' })) !== defSig
 
-  const vals: { lines: number[]; arr: number[]; scale: Array<'full' | 'quiet'>; side: Array<'right' | 'left'> } = {
+  const vals: { lines: number[]; arr: number[]; scale: Array<'full' | 'quiet'>; side: Array<'right' | 'left'>; cta: Array<'drawn' | 'native'> } = {
     lines: lineOpts.map(o => o.v),
     arr: arrVaries ? [0, 1, 2] : [0],
     scale: def.keepScale ? ['full'] : ['full', 'quiet'],
     side: sideMatters ? ['right', 'left'] : ['right'],
+    cta: ['drawn', 'native'],
   }
 
+  const keys: (keyof Choice)[] = offerCta ? ['lines', 'arr', 'scale', 'side', 'cta'] : ['lines', 'arr', 'scale', 'side']
   let combos: Choice[] = [{ ...DEFAULT_CHOICE }]
-  for (const key of ['lines', 'arr', 'scale', 'side'] as const) {
-    combos = combos.flatMap(c => vals[key].map(v => ({ ...c, [key]: v }) as Choice))
+  for (const key of keys) {
+    combos = combos.flatMap(c => vals[key as 'lines' | 'arr' | 'scale' | 'side' | 'cta'].map(v => ({ ...c, [key]: v }) as Choice))
   }
 
   const seen = new Set<string>()
@@ -152,6 +167,7 @@ export function enumerate(def: LayoutDef, opts: {
     ).size
     const isDefault = choice.lines === DEFAULT_CHOICE.lines && choice.arr === DEFAULT_CHOICE.arr
       && choice.scale === DEFAULT_CHOICE.scale && choice.side === DEFAULT_CHOICE.side
+      && (choice.cta ?? 'drawn') === 'drawn'
     // Soft penalty, not rejection (spec §6): text sitting on top of more than a fifth of the
     // image ranks down, but still gets ordered — never dropped by `check`.
     const cover = coverOf(out, boxOf)
@@ -161,13 +177,17 @@ export function enumerate(def: LayoutDef, opts: {
     list.push({ choice, out, score, sig: s })
   }
 
-  const WT: Record<keyof Choice, number> = { lines: 3, arr: 3, side: 2, scale: 1.5 }
+  const WT: Record<keyof Choice, number> = { lines: 3, arr: 3, side: 2, scale: 1.5, cta: 1.5 }
   const dist = (a: Candidate, b: Candidate) =>
     (Object.keys(WT) as (keyof Choice)[]).reduce((d, k) => d + (a.choice[k] !== b.choice[k] ? WT[k] : 0), 0)
 
   list.sort((a, b) => b.score - a.score)
-  // The default always leads when it passes — the score bonus alone could be outranked.
-  const di = list.findIndex(c => (Object.keys(DEFAULT_CHOICE) as (keyof Choice)[]).every(k => c.choice[k] === DEFAULT_CHOICE[k]))
+  // The default always leads when it passes — the score bonus alone could be outranked. `cta`
+  // is not a `DEFAULT_CHOICE` key (adding it there would break every non-cta layout's default
+  // match, since their candidates carry no `cta` at all): checked separately, `'drawn'` (or
+  // absent) reading as the default.
+  const di = list.findIndex(c => (Object.keys(DEFAULT_CHOICE) as (keyof Choice)[]).every(k => c.choice[k] === DEFAULT_CHOICE[k])
+    && (c.choice.cta ?? 'drawn') === 'drawn')
   if (di > 0) list.unshift(...list.splice(di, 1))
   const ordered: Candidate[] = list.length ? [list.shift()!] : []
   while (list.length) {

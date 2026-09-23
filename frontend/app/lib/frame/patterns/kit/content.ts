@@ -289,3 +289,52 @@ export function elementsOf(read: ReadContent, inferred: FrameElements, userLayer
   }
   return out
 }
+
+// ── R9 content hints ────────────────────────────────────────────────────────
+// Shown under the Layout tab's Content section (Task 6); never enforced — the checker never
+// refuses on them. Pure functions of what `readContent` already read, plus the layers it read
+// the roles from (a `ReadContent` holds ids, not text).
+
+const HINT_RATING_5 = 'Ratings between 4.0 and 4.8 tend to read as more believable than a perfect 5.'
+const HINT_PERCENT_OR_AMOUNT = 'For prices under 100, a percentage reads bigger; above it, an amount does.'
+
+const PRICE_RE = /[€$£]\s?(\d+(?:[.,]\d+)?)/g
+
+/** Every price named in `s` ("$120", "€19,50"), as numbers. */
+function pricesIn(s: string): number[] {
+  return [...s.matchAll(PRICE_RE)].map(m => Number(m[1]!.replace(',', '.')))
+}
+
+/** R9: the two research hints, verbatim, when they apply.
+ *  - A rating of exactly 5.0 (whatever role holds it, tagged or recognised, shaped into a review
+ *    or not) reads as less believable than one a little short of perfect.
+ *  - The offer (the `date` role — Stage 1–3's discount/offer line) written as a percentage while a
+ *    price of 100 or more appears elsewhere in the Frame's content, or written as a currency
+ *    amount while a price under 100 appears elsewhere: research says the other form reads bigger. */
+export function contentHints(read: ReadContent, userLayers: LocalLayer[]): string[] {
+  const byId = new Map(userLayers.map(l => [l.id, l]))
+  const textOfRole = (r: ContentRole): string | undefined => {
+    const id = read.roles[r]
+    return id ? textOf(byId.get(id)) : undefined
+  }
+  const hints: string[] = []
+
+  if (ratingOf(textOfRole('rating'), true) === 5) hints.push(HINT_RATING_5)
+
+  const offer = textOfRole('date')
+  if (offer) {
+    const isPercent = offer.includes('%')
+    const isAmount = !isPercent && PRICE_RE.test(offer)
+    PRICE_RE.lastIndex = 0
+    if (isPercent || isAmount) {
+      const elsewhere = (CONTENT_ROLES as readonly ContentRole[])
+        .filter(r => r !== 'date' && r !== 'image2')
+        .flatMap(r => pricesIn(textOfRole(r) ?? ''))
+      if (isPercent ? elsewhere.some(p => p >= 100) : elsewhere.some(p => p < 100)) {
+        hints.push(HINT_PERCENT_OR_AMOUNT)
+      }
+    }
+  }
+
+  return hints
+}

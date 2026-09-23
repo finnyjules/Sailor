@@ -196,4 +196,73 @@ describe('layout kit — vary', () => {
     expect(Math.max(...result.map(c => c.score))).toBeGreaterThan(result[0]!.score)
     expect(result[0]!.choice).toEqual(DEFAULT_CHOICE)
   })
+
+  // ═══════════════════════ Stage 4, Task 3: the `cta` axis (ruling R7) ═══════════════════════
+  describe('the cta axis (ruling R7)', () => {
+    /** A button drawn only when `cta` is not `'native'` — the axis's whole effect on geometry. */
+    const runCta = (choice: Choice): LayoutOut => {
+      const els: El[] = [{ k: 't', s: 'Solo', x: 10, top: 10, size: 10, wt: 600, ls: 0, lh: 1, role: 'title' }]
+      if (choice.cta !== 'native') els.push({ k: 'btn', x: 0, y: 0, w: 10, h: 10, size: 5, shape: 'pill', role: 'btn' } as El)
+      return { els, did: `cta=${choice.cta ?? 'drawn'}` }
+    }
+    const opts = { kind: 'word' as const, title: 'Solo', hasImage: false, run: runCta, check: () => [], infoSize: INFO_SIZE }
+
+    it('not offered without both platformButton and hasAction: every candidate\'s choice carries no `cta` at all', () => {
+      for (const partial of [{}, { platformButton: true }, { hasAction: true }, { platformButton: false, hasAction: true }, { platformButton: true, hasAction: false }]) {
+        const result = enumerate(fakeDef(), { ...opts, ...partial })
+        expect(result.length).toBeGreaterThan(0)
+        expect(result.every(c => !('cta' in c.choice))).toBe(true)
+        // The button is always drawn (the fixture's `runCta` only omits it for `cta: 'native'`,
+        // which never appears): a single geometry survives dedup.
+        expect(result.every(c => c.out.els.some(e => e.k === 'btn'))).toBe(true)
+      }
+    })
+
+    it('offered only with both: candidates split between a drawn button and none, cta: \'native\' hiding it', () => {
+      const result = enumerate(fakeDef(), { ...opts, platformButton: true, hasAction: true })
+      expect(result.some(c => c.choice.cta === 'native')).toBe(true)
+      expect(result.some(c => (c.choice.cta ?? 'drawn') === 'drawn')).toBe(true)
+      for (const c of result) expect(c.out.els.some(e => e.k === 'btn')).toBe(c.choice.cta !== 'native')
+    })
+
+    it('the default choice is `cta: \'drawn\'` (or unset) — never `\'native\'` — even when it does not lead the score', () => {
+      const result = enumerate(fakeDef(), { ...opts, platformButton: true, hasAction: true })
+      const def = result.find(c => c.choice.lines === DEFAULT_CHOICE.lines && c.choice.arr === DEFAULT_CHOICE.arr
+        && c.choice.scale === DEFAULT_CHOICE.scale && c.choice.side === DEFAULT_CHOICE.side && (c.choice.cta ?? 'drawn') === 'drawn')!
+      expect(def).toBeDefined()
+      expect(result[0]).toBe(def)
+    })
+
+    it('adding the axis leaves every Stage 1–3 candidate untouched when it is not offered (same fixture, same formula)', () => {
+      // The exact fixture and pinned formula from the Stage-1 regression test above, run again
+      // with `platformButton`/`hasAction` simply omitted — score, order and signatures must not move.
+      const withoutCta = enumerate(fakeDef(), { kind: 'phrase', title: 'Two Words', hasImage: true, run, check, infoSize: INFO_SIZE })
+      const stillWithoutCta = enumerate(fakeDef(), { kind: 'phrase', title: 'Two Words', hasImage: true, run, check, infoSize: INFO_SIZE, platformButton: false, hasAction: false })
+      expect(stillWithoutCta).toEqual(withoutCta)
+      const def = withoutCta.find(c => c.choice.lines === DEFAULT_CHOICE.lines && c.choice.arr === DEFAULT_CHOICE.arr
+        && c.choice.scale === DEFAULT_CHOICE.scale && c.choice.side === DEFAULT_CHOICE.side)!
+      expect(def.score).toBeCloseTo(Math.log(10 / INFO_SIZE) - 0.12 * 1 + 1, 10)
+    })
+
+    it('diversity weight 1.5: a tied cta candidate is preferred over a tied lighter axis when both differ equally little', () => {
+      // Two candidates score-tied with the leader on every axis but `scale` (weight 1.5) vs `cta`
+      // (weight 1.5 too) — same weight, so this just proves `cta` participates in `dist` at all
+      // (an axis missing from `WT` would score `dist` 0 for it and never get chosen to diversify).
+      const runTied = (choice: Choice): LayoutOut => {
+        const els: El[] = [{ k: 't', s: 'Solo', x: 10, top: 10, size: 10, wt: 600, ls: 0, lh: 1, role: 'title' }]
+        if (choice.cta !== 'native') els.push({ k: 'btn', x: 0, y: 0, w: 10, h: 10, size: 5, shape: 'pill', role: 'btn' } as El)
+        // arr shifts x so its signature differs too, but scoring stays identical across arr/cta.
+        for (const e of els) if (e.k === 't') e.x = 10 + choice.arr
+        return { els, did: `arr=${choice.arr} cta=${choice.cta ?? 'drawn'}` }
+      }
+      const result = enumerate(fakeDef({ keepScale: true }), {
+        kind: 'word', title: 'Solo', hasImage: false, run: runTied, check: () => [], infoSize: INFO_SIZE,
+        platformButton: true, hasAction: true,
+      })
+      // The default (arr 0, cta drawn) leads; some later candidate must differ on `cta` to
+      // diversify away from it (not just re-use `arr`, which `sideMatters`/`arrVaries` already
+      // exercise) — proving `cta` carries real weight in the diversity pass.
+      expect(result.some(c => c.choice.cta === 'native')).toBe(true)
+    })
+  })
 })

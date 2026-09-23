@@ -129,6 +129,60 @@ describe('style ranks order candidates as the prototype would', () => {
   })
 })
 
+// Stage 4, Task 3: the research rank additions (ruling R8), Performance only.
+describe('performance rank — R8 research additions (Stage 4, Task 3)', () => {
+  const ctx = { infoSize: 5, W: 100, H: 100 }
+  const t = (size: number, role = 'caption') => ({ k: 't' as const, s: '', x: 0, top: 0, size, wt: 500, ls: 0, lh: 1, role })
+
+  it('clutter: −0.25 per small text (size < 1.3 × INFO) past the first four', () => {
+    const four = { els: [t(5), t(5), t(5), t(5)], did: '' }
+    const five = { els: [t(5), t(5), t(5), t(5), t(5)], did: '' }
+    const six = { els: [t(5), t(5), t(5), t(5), t(5), t(5)], did: '' }
+    // No penalty at or under four.
+    expect(STYLES.performance.rank!(four, ctx)).toBeCloseTo(0, 10)
+    expect(STYLES.performance.rank!(five, ctx)).toBeCloseTo(-0.25, 10)
+    expect(STYLES.performance.rank!(six, ctx)).toBeCloseTo(-0.5, 10)
+    expect(STYLES.performance.rank!(four, ctx)).toBeGreaterThan(STYLES.performance.rank!(five, ctx))
+    // A text at or above 1.3 × INFO (6.5) does not count as small.
+    const notSmall = { els: [t(5), t(5), t(5), t(5), t(6.5)], did: '' }
+    expect(STYLES.performance.rank!(notSmall, ctx)).toBeCloseTo(0, 10)
+  })
+
+  it('a single dominant element (the largest ≥ 2× the second-largest) ranks +0.4 higher', () => {
+    const dominant = { els: [t(20), t(5)], did: '' }
+    const even = { els: [t(12), t(10)], did: '' }
+    expect(STYLES.performance.rank!(dominant, ctx)).toBeGreaterThan(STYLES.performance.rank!(even, ctx))
+    expect(STYLES.performance.rank!(dominant, ctx)).toBeCloseTo(0.4, 10)
+    expect(STYLES.performance.rank!(even, ctx)).toBeCloseTo(0, 10)
+    // Exactly 2× counts (the boundary is inclusive); just under does not.
+    const boundary = { els: [t(20), t(10)], did: '' }
+    const justUnder = { els: [t(20), t(10.01)], did: '' }
+    expect(STYLES.performance.rank!(boundary, ctx) - STYLES.performance.rank!(justUnder, ctx)).toBeCloseTo(0.4, 10)
+  })
+
+  it('a drawn button whose fill contrasts ≥ 4.5:1 with the page ranks +0.3 higher', () => {
+    const btn = { k: 'btn' as const, x: 0, y: 0, w: 10, h: 10, size: 5, shape: 'pill' as const, role: 'action' }
+    const withBtn = { els: [btn], did: '' }
+    const rankAt = (contrast: number | undefined) => STYLES.performance.rank!(withBtn, { ...ctx, fillContrast: () => contrast })
+    expect(rankAt(4.5)).toBeCloseTo(rankAt(4.49) + 0.3, 10)
+    expect(rankAt(4.5)).toBeCloseTo(0.5 + 0.3, 10)   // the base "a button" reward (0.5) plus the contrast reward
+    // Below the floor, or unresolved (an outline or a link — no solid fill), no reward.
+    expect(rankAt(4.49)).toBeCloseTo(0.5, 10)
+    expect(rankAt(undefined)).toBeCloseTo(0.5, 10)
+  })
+
+  it('no `fillContrast` passed at all (graceful degrade, same pattern as `boxOf`/`drawn`): never rewarded', () => {
+    const btn = { k: 'btn' as const, x: 0, y: 0, w: 10, h: 10, size: 5, shape: 'pill' as const, role: 'action' }
+    expect(STYLES.performance.rank!({ els: [btn], did: '' }, ctx)).toBeCloseTo(0.5, 10)
+  })
+
+  it('a button that is not drawn (an outline or a link, ctx.drawn false) never earns the contrast reward either', () => {
+    const btn = { k: 'btn' as const, x: 0, y: 0, w: 10, h: 10, size: 5, shape: 'pill' as const, role: 'action' }
+    const rank = STYLES.performance.rank!({ els: [btn], did: '' }, { ...ctx, drawn: () => false, fillContrast: () => 10 })
+    expect(rank).toBeCloseTo(0, 10)   // no button-drawn bonus, no contrast bonus
+  })
+})
+
 describe('the sheet takes a style', () => {
   it.each(IDS)('%s: DISPLAY and INFO come from the table; SECOND keeps its Swiss values', id => {
     const S = makeSheet({ frameW: 895, frameH: 1280, measure, style: id })

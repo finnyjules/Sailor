@@ -69,10 +69,11 @@ const EXPECTED_THIN: (Partial<Combo> & { offered: number; reason: string })[] = 
   // a button adds a row at the foot, and on a small or tall-and-covered frame the bands then hide
   // too much. Price tag (a half-page panel: always 50.0%) survives. The least-covered choice of
   // each refused layout, measured across every choice (all kinds unless named):
-  // Story, action and logo — only 90.7 of its 177.8 height is seen: Offer 65.4–65.7%, Sticker
-  // 66.5–69.9%, Card 55.8%, Centred 77.8–78.8%.
-  { style: 'performance', frame: 'meta-story', image: true, action: true, logo: true, offered: 1,
-    reason: 'story, action and logo: the bands hide 55.8–78.8% of the visible image (limit 55%); only Price tag (50.0%)' },
+  // Story, action and logo used to thin to Price tag alone (Offer 65.4–65.7%, Sticker 66.5–69.9%,
+  // Card 55.8%, Centred 77.8–78.8%, all with the button drawn) — Stage 4 Task 3 (ruling R7) adds
+  // the platform's-own-button choice, whose `cta: 'native'` candidates draw no button at all: the
+  // freed foot row brings Card (and, on a two-line title, Sticker) back under the 55% limit, so
+  // this frame now meets the general floor on its own and is no longer in EXPECTED_THIN.
   // 300×250, logo only: Offer 69.5%, Sticker 55.9–58.6%, Card 56.4%, Centred 69.2–69.5%.
   { style: 'performance', frame: 'ad-300x250', image: true, action: false, logo: true, offered: 1,
     reason: '300×250 with a logo: the bands hide 55.9–69.5% of the image (limit 55%); only Price tag (50.0%)' },

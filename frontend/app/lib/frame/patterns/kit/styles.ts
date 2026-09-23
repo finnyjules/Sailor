@@ -26,6 +26,11 @@ export interface RankCtx {
   /** Whether a piece is drawn (a button filled or outlined — not a link; ruling R8). Omitted:
    *  every piece counts as drawn. */
   drawn?: (e: El) => boolean
+  /** The contrast ratio of a piece's resolved fill against the page (`palette.field`) — the same
+   *  fill `pieceFills` (`kit/contrast.ts`) picked for it. `undefined`: the piece carries no solid
+   *  fill (an outline, a link, or unresolved) — Stage 4 ruling R8. Omitted entirely: the button
+   *  contrast reward never applies (graceful degrade, same pattern as `boxOf`/`drawn`). */
+  fillContrast?: (e: El) => number | undefined
 }
 
 export interface StyleSpec {
@@ -95,8 +100,20 @@ export const STYLES: Record<StyleId, StyleSpec> = {
     rank: (out, ctx) => {
       const n = out.els.find((e): e is Extract<El, { k: 't' }> => e.k === 't' && e.role === 'date')
       // A button counts only when it is drawn and visible (filled or outlined — ruling R8).
-      const btn = out.els.some(e => e.k === 'btn' && (ctx.drawn?.(e) ?? true))
+      const btnEl = out.els.find((e): e is Extract<El, { k: 'btn' }> => e.k === 'btn')
+      const btn = !!btnEl && (ctx.drawn?.(btnEl) ?? true)
+      // Stage 4 ruling R8 (research): clutter (many small competing elements) ranks down; a
+      // single dominant element, and a drawn button that stands out from the page (≥ 4.5:1),
+      // rank up.
+      const texts = out.els.filter((e): e is Extract<El, { k: 't' }> => e.k === 't')
+      const smallTexts = texts.filter(e => e.size < 1.3 * ctx.infoSize).length
+      const sizes = texts.map(e => e.size).sort((a, b) => b - a)
+      const dominant = sizes.length >= 2 && sizes[0]! >= 2 * sizes[1]!
+      const contrast = btn && btnEl ? ctx.fillContrast?.(btnEl) : undefined
       return (n ? Math.log(n.size / ctx.infoSize) * 0.8 : 0) + (btn ? 0.5 : 0)
+        - 0.25 * Math.max(0, smallTexts - 4)
+        + (dominant ? 0.4 : 0)
+        + (contrast != null && contrast >= 4.5 ? 0.3 : 0)
     },
   },
   editorial: {

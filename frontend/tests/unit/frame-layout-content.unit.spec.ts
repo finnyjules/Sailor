@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { reactive } from 'vue'
 import {
-  compareRows, elementsOf, isByText, isListText, isQuoteText, isStatText, listItems, ratingOf, readContent, themOf,
+  compareRows, contentHints, elementsOf, isByText, isListText, isQuoteText, isStatText, listItems, ratingOf, readContent, themOf,
 } from '~/lib/frame/patterns/kit/content'
 import type { ContentTags } from '~/lib/frame/patterns/kit/content'
 import { __setRecognitionForTest } from '~/lib/frame/patterns/kit/content'
@@ -17,6 +17,7 @@ import { DEFAULT_CHOICE } from '~/lib/frame/patterns/kit/vary'
 import { createImageLayer, createRectLayer, createTextLayer } from '~/composables/useCompositorLayers'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import { useLocalLayerEditor } from '~/composables/useLocalLayerEditor'
+import { AD_LOGO, adFrameLayers, palette } from './helpers/frameLayoutFixtures'
 
 const tl = (id: string, text: string, fontSize: number) =>
   createTextLayer({ id, text, fontSize, fontFamily: 'Inter', fontWeight: 600, color: '#111111' }) as LocalLayer
@@ -401,5 +402,124 @@ describe('fix round 2 — explicit rating markers, unshaped content goes back to
     // With a quote, the tagged bare digit is the stars.
     const q = [...layers, tl('q', '“Lightest shoe I have ever raced in.”', 0.03)]
     expect(contentForFrame(at(q, { c: 'rating' })).review).toEqual({ stars: 3, quote: '“Lightest shoe I have ever raced in.”' })
+  })
+})
+
+// ═══════════════════════ Stage 4, Task 3 — the platform button choice (ruling R7) ═══════════════════════
+describe('the platform button choice reaches the real planner (ruling R7)', () => {
+  const metaStoryArgs = (o: { action: boolean; image?: boolean }, layoutId: string, style: LayoutPlanArgs['style']): Omit<LayoutPlanArgs, 'choice'> => ({
+    props: { sailor_localLayers: adFrameLayers('phrase', { image: o.image ?? true, action: o.action }), sailor_frame: { preset: 'meta-story' } },
+    frameW: 1080, frameH: 1920, layoutId, palette, connectedSlots: [], measure: makeStubMeasure(), style,
+  })
+  // A plain, custom-size Frame: no format at all, so `platformButton` is never true — the
+  // control for "no platform button" (as opposed to meta-story's "no action line").
+  const plainArgs = (o: { action: boolean }, layoutId: string, style: LayoutPlanArgs['style']): Omit<LayoutPlanArgs, 'choice'> => ({
+    props: { sailor_localLayers: adFrameLayers('phrase', { image: true, action: o.action }) },
+    frameW: 1280, frameH: 720, layoutId, palette, connectedSlots: [], measure: makeStubMeasure(), style,
+  })
+
+  it('offered only on a platformButton format with an action line (Performance\'s Offer layout)', () => {
+    // meta-story has platformButton; with an action line, `cta: 'native'` candidates appear.
+    const withAction = candidatesForFrame(metaStoryArgs({ action: true }, 'perfOffer', 'performance'))
+    expect(withAction.length).toBeGreaterThan(0)
+    expect(withAction.some(c => c.choice.cta === 'native')).toBe(true)
+    // No action line: nothing to hide, so the axis is never offered — no candidate carries `cta`.
+    const noAction = candidatesForFrame(metaStoryArgs({ action: false }, 'perfOffer', 'performance'))
+    expect(noAction.length).toBeGreaterThan(0)
+    expect(noAction.every(c => !('cta' in c.choice))).toBe(true)
+    // No format at all (so no platformButton), even with an action line: never offered.
+    const noPlatformButton = candidatesForFrame(plainArgs({ action: true }, 'perfOffer', 'performance'))
+    expect(noPlatformButton.length).toBeGreaterThan(0)
+    expect(noPlatformButton.every(c => !('cta' in c.choice))).toBe(true)
+  })
+
+  it("'native' hides the action, draws no button, and lists it in notPlaced", () => {
+    const cands = candidatesForFrame(metaStoryArgs({ action: true }, 'perfOffer', 'performance'))
+    const native = cands.find(c => c.choice.cta === 'native')!
+    expect(native).toBeDefined()
+    expect(native.out.els.some(e => e.k === 'btn')).toBe(false)
+    expect(native.out.els.some(e => e.k === 't' && e.role === 'action')).toBe(false)
+    const plan = planLayout({ ...metaStoryArgs({ action: true }, 'perfOffer', 'performance'), choice: native.choice })!
+    expect(plan.issues).toEqual([])
+    expect(plan.notPlaced).toEqual([{ role: 'action', text: 'Shop now' }])
+    const actionLayer = plan.layers.find(l => l.id === 'a') as { visible?: boolean } | undefined
+    expect(actionLayer?.visible).toBe(false)
+    // The drawn ('cta: drawn', the default) choice still draws the button, action shown.
+    const drawn = cands.find(c => (c.choice.cta ?? 'drawn') === 'drawn')!
+    expect(drawn.out.els.some(e => e.k === 'btn')).toBe(true)
+    const drawnPlan = planLayout({ ...metaStoryArgs({ action: true }, 'perfOffer', 'performance'), choice: drawn.choice })!
+    expect(drawnPlan.notPlaced).toEqual([])
+  })
+
+  it('Swiss, Editorial and Street never offer it, even on a platformButton format with an action line', () => {
+    const swiss = candidatesForFrame(metaStoryArgs({ action: true }, 'statement', undefined))
+    expect(swiss.length).toBeGreaterThan(0)
+    expect(swiss.every(c => !('cta' in c.choice))).toBe(true)
+
+    const editorial = candidatesForFrame(metaStoryArgs({ action: true, image: true }, 'edCover', 'editorial'))
+    expect(editorial.length).toBeGreaterThan(0)
+    expect(editorial.every(c => !('cta' in c.choice))).toBe(true)
+
+    const street = candidatesForFrame(metaStoryArgs({ action: true, image: false }, 'stFill', 'street'))
+    expect(street.length).toBeGreaterThan(0)
+    expect(street.every(c => !('cta' in c.choice))).toBe(true)
+  })
+})
+
+// ═══════════════════════ Stage 4, Task 3 — content hints (ruling R9) ═══════════════════════
+describe('contentHints (ruling R9)', () => {
+  it('a rating of exactly 5.0 (recognised, or bare and tagged) gets the believability hint', () => {
+    const layers = [tl('t', 'Run lighter.', 0.12), tl('q', '“Best shoe ever made in a long while.”', 0.05), tl('r', '5 ★', 0.03), tl('c', 'Free returns', 0.02)]
+    expect(contentHints(read(layers), layers)).toEqual(['Ratings between 4.0 and 4.8 tend to read as more believable than a perfect 5.'])
+    // 4.7 does not fire it.
+    const under = [tl('t', 'Run lighter.', 0.12), tl('q', '“Best shoe ever made in a long while.”', 0.05), tl('r', '4.7 ★', 0.03)]
+    expect(contentHints(read(under), under)).toEqual([])
+    // A tagged bare "5" (no ★, no quote — never shaped into a review) still fires: the hint reads
+    // whatever line holds the rating role, not only a formed review.
+    const bare = [tl('t', 'Run lighter.', 0.12), tl('c', '5', 0.02)]
+    expect(contentHints(read(bare, { c: 'rating' }), bare)).toEqual(['Ratings between 4.0 and 4.8 tend to read as more believable than a perfect 5.'])
+    // No rating at all: nothing.
+    expect(contentHints(read([tl('t', 'Run lighter.', 0.12)]), [tl('t', 'Run lighter.', 0.12)])).toEqual([])
+  })
+
+  // Both the offer and the "elsewhere" price line carry a currency mark, so Stage 1–3's own
+  // number-like inference (`isNumberish`, `hierarchy.ts`) would compete with the offer for the
+  // `date` slot (the first number-like middle line wins it). Tags settle it — the fixture is
+  // still read as an ordinary Frame otherwise, only which line is the date is pinned.
+  const dateIs = { d: 'details', dt: 'date' } as const
+
+  it('a percentage offer with a price ≥ 100 elsewhere prefers an amount', () => {
+    const layers = [tl('t', 'Run lighter.', 0.12), tl('d', 'Halden Trail 2, was $149', 0.04), tl('dt', '–30%', 0.03), tl('c', 'While stocks last.', 0.015)]
+    expect(contentHints(read(layers, dateIs), layers)).toEqual(['For prices under 100, a percentage reads bigger; above it, an amount does.'])
+    // The same offer with every other price under 100: no hint (a percentage is already right).
+    const under100 = [tl('t', 'Run lighter.', 0.12), tl('d', 'Halden Trail 2, was $89', 0.04), tl('dt', '–30%', 0.03)]
+    expect(contentHints(read(under100, dateIs), under100)).toEqual([])
+    // No price named anywhere else: nothing to compare against.
+    const noPrice = [tl('t', 'Run lighter.', 0.12), tl('d', 'Halden Trail 2', 0.04), tl('dt', '–30%', 0.03)]
+    expect(contentHints(read(noPrice, dateIs), noPrice)).toEqual([])
+  })
+
+  it('an amount offer with a price under 100 elsewhere prefers a percentage', () => {
+    const layers = [tl('t', 'Run lighter.', 0.12), tl('d', 'Now $79, was $149', 0.04), tl('dt', '$40 off', 0.03)]
+    expect(contentHints(read(layers, dateIs), layers)).toEqual(['For prices under 100, a percentage reads bigger; above it, an amount does.'])
+    // Every other price is ≥ 100: an amount already reads bigger, no hint.
+    const allHigh = [tl('t', 'Run lighter.', 0.12), tl('d', 'Now $120, was $149', 0.04), tl('dt', '$40 off', 0.03)]
+    expect(contentHints(read(allHigh, dateIs), allHigh)).toEqual([])
+  })
+
+  it('neither hint on an ordinary Frame', () => {
+    const layers = [tl('t', 'Weather Report', 0.12), tl('d', 'Ines Vollmer', 0.04), tl('dt', '19.09.–15.11.2026', 0.03), tl('c', 'Kunstraum Lenz', 0.02)]
+    expect(contentHints(read(layers), layers)).toEqual([])
+  })
+
+  it('both hints can fire together', () => {
+    const layers = [
+      tl('t', 'Run lighter.', 0.12), tl('q', '“Best shoe ever made in a long while.”', 0.06), tl('r', '5 ★', 0.03),
+      tl('d', 'Halden Trail 2, was $149', 0.04), tl('dt', '–30%', 0.03),
+    ]
+    expect(contentHints(read(layers, dateIs), layers)).toEqual([
+      'Ratings between 4.0 and 4.8 tend to read as more believable than a perfect 5.',
+      'For prices under 100, a percentage reads bigger; above it, an amount does.',
+    ])
   })
 })

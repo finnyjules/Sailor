@@ -21,8 +21,9 @@ import type { Sheet, SheetOpts } from './sheet'
 import { makeCanvasMeasure } from './measure'
 import { boxOf, checkPlan } from './check'
 import { elementsToOps } from './toOps'
-import { isSolid, pieceFills } from './contrast'
-import type { FillCtx, PieceFills } from './contrast'
+import { hex6, isSolid, pieceFills } from './contrast'
+import type { FillCtx, PieceFill, PieceFills } from './contrast'
+import { contrastRatio } from '../palette'
 import type { RoleTargets } from './toOps'
 import { isOwned, mergeOwned } from './owned'
 import { enumerate, lineOptions } from './vary'
@@ -384,6 +385,22 @@ function formatSheetOpts(fmt: FrameFormat | null): SheetOpts['format'] {
  *  inside the band the platform leaves uncovered, everything is moved down by the top inset, and
  *  a panel or a bleeding image that fills the band runs on to the real edges — only text keeps
  *  clear. The returned sheet is then the full-height one (for the checker and the ops). */
+/** Ruling R7: `cta: 'native'` on a platform-button format with an action line drops the action
+ *  from the content the layout runs on — no button is built, no action text is placed (it lands
+ *  in `notPlaced`, ruling R7). Every other case (no platform button, no action, `cta: 'drawn'`
+ *  or unset) runs on `p.content` unchanged. */
+function contentForChoice(p: Prepared, choice: Choice): Content {
+  if (choice.cta !== 'native' || !offersCta(p)) return p.content
+  const { action: _action, ...rest } = p.content
+  return rest
+}
+
+/** Ruling R7: the platform's-own-button choice is a Performance thing (the style table's Button
+ *  row lists "pill, drawn or platform's own" only for Performance — Editorial's is a link,
+ *  Street's a hard-edged box; neither names a platform alternative), offered only on a format
+ *  that draws its own button, with a Frame that has an action line to hide. */
+const offersCta = (p: Prepared): boolean => p.style === 'performance' && !!p.fmt?.platformButton && !!p.content.action
+
 function runChoice(p: Prepared, a: { frameW: number; frameH: number; style?: StyleId }, choice: Choice): Run {
   const fmt = p.fmt
   const keep = fmt?.keep
@@ -414,7 +431,7 @@ function runChoice(p: Prepared, a: { frameW: number; frameH: number; style?: Sty
       S = makeSheet({ ...opts, colRange: [1, n] })
     }
   }
-  const c = p.content
+  const c = contentForChoice(p, choice)
   const words = c.title.split(' ')
   const lineOpts = lineOptions(p.kind, c.title, p.def.oneLineFirst)
   const lines = (lineOpts[choice.lines] ?? lineOpts[0]!).lines
@@ -514,6 +531,17 @@ function checkRun({ out, S, side, keep, fullH, style }: Run, premise: LayoutDef[
 
 /** The contrast picker over a run (ruling R6) — the one result the checker and toOps share. */
 const fillsOf = (p: Prepared, { out, S }: Run): PieceFills => pieceFills(out.els, S, p.fillCtx)
+
+/** A piece's fill (`pieceFills`'s pick, ruling R6), resolved to a hex and measured against the
+ *  page (`palette.field`) — Stage 4 ruling R8's button-contrast reward reads this. `undefined`:
+ *  no fill (an outline or a link, or the piece was never a candidate for one). */
+function fillContrastOf(fill: PieceFill | undefined, palette: ResolvedPalette): number | undefined {
+  if (fill == null) return undefined
+  const field = hex6(palette.field)
+  if (!field) return undefined
+  const bg = typeof fill === 'string' ? hex6(palette[fill]) : 'plain' in fill ? hex6(fill.plain) : null
+  return bg ? contrastRatio(bg, field) : undefined
+}
 
 const rolesOf = (el: FrameElements): StoredRoles => {
   const out: StoredRoles = {}
@@ -649,9 +677,18 @@ export function candidatesForFrame(a: Omit<LayoutPlanArgs, 'choice'>): Candidate
   // A button counts only when it is drawn (filled or outlined — ruling R8), not as a link.
   const rank = styleRank ? (out: LayoutOut) => {
     const fills = runs.get(out)?.pf.fills
-    return styleRank(out, { infoSize, W, H, boxOf: box, drawn: e => (fills ? fills.get(e) != null : true) })
+    return styleRank(out, {
+      infoSize, W, H, boxOf: box, drawn: e => (fills ? fills.get(e) != null : true),
+      // Stage 4 ruling R8 (research): the same fill `pieceFills` picked, resolved against the
+      // page (`palette.field`) — a plain hex or a palette role reads as a real fill; an outline
+      // or a link (no fill) contrasts nothing.
+      fillContrast: e => fillContrastOf(fills?.get(e), a.palette),
+    })
   } : undefined
-  return enumerate(p.def, { kind: p.kind, title: p.content.title, hasImage: p.hasImage, run, check, infoSize, boxOf: box, rank })
+  return enumerate(p.def, {
+    kind: p.kind, title: p.content.title, hasImage: p.hasImage, run, check, infoSize, boxOf: box, rank,
+    platformButton: offersCta(p), hasAction: !!p.content.action,
+  })
 }
 
 /** The ways this frame's title can break into lines for a layout (`lineOptions` on the frame's
