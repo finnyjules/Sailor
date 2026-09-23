@@ -56,9 +56,29 @@ export interface FrameDoc {
 export interface ResolveOptions {
   /** A scratch 2D context for text measuring. null ⇒ text keeps its centre (no re-wrap). */
   measureCtx?: CanvasRenderingContext2D | null
+  /**
+   * Fill `boxes`, `maps` and `units` even when the layout is otherwise identity — for the
+   * editor, which needs them at every size. Layers still come back by reference when nothing moved.
+   */
+  withBoxes?: boolean
 }
 
 export interface ResolvedBox { x: number; y: number; w: number; h: number } // box px, top-left
+
+/** What an edit at a viewing size needs to know about the unit a layer belongs to. */
+export interface UnitInfo {
+  unitId: string                                   // layer id, group id, or mask-source id
+  kind: 'layer' | 'group' | 'maskPair' | 'cloner'
+  memberIds: string[]
+  canStretch: boolean                              // after Keep size
+  kSize: number                                    // view px per design px for the unit's size
+  designBox: ResolvedBox                           // design px, top-left
+  viewBox: ResolvedBox                             // view px, top-left (as drawn)
+  refDesign: ResolvedBox                           // the section or frame, design px
+  refView: ResolvedBox                             // the same, view px
+  h: AxisMap; v: AxisMap                           // resolved maps; .kind is the held (effective) pin
+  hExplicit: boolean; vExplicit: boolean           // the pin on that axis is stored
+}
 
 export interface LayoutResult {
   layers: LocalLayer[]
@@ -67,6 +87,8 @@ export interface LayoutResult {
   grid: { xs: number[]; ys: number[]; regions: ResolvedBox[] } | null
   boxes: Map<string, ResolvedBox>
   maps: Map<string, { h: AxisMap; v: AxisMap }>
+  /** Per member layer id: what an edit at this size needs. Empty unless `withBoxes`. */
+  units: Map<string, UnitInfo>
   /** True when the inputs were returned by reference. */
   identity: boolean
 }

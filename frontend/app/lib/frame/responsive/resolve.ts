@@ -5,12 +5,12 @@ import { sectionsAt, sectionOf } from './sections'
 import { buildUnits, type Box } from './units'
 import { placeLayer, textNaturalHeightPx } from './stretch'
 import { remapMotion } from './motion'
-import type { AxisMap, AxisPin, FrameDoc, LayoutResult, ResolveOptions, ResolvedBox } from './types'
+import type { AxisMap, AxisPin, FrameDoc, LayoutResult, ResolveOptions, ResolvedBox, UnitInfo } from './types'
 
 interface Ref { design: Box; box: Box }
 
 function identityResult(frame: FrameDoc, gridBox: LayoutResult['grid']): LayoutResult {
-  return { layers: frame.layers, motion: frame.motion, grid: gridBox, boxes: new Map(), maps: new Map(), identity: true }
+  return { layers: frame.layers, motion: frame.motion, grid: gridBox, boxes: new Map(), maps: new Map(), units: new Map(), identity: true }
 }
 
 /** One axis of one unit: the map plus the resolved near/far edges in box px. */
@@ -57,13 +57,16 @@ export function resolveLayout(frame: FrameDoc, W: number, H: number, opts: Resol
   // Read keepSize straight off the stored pins, BEFORE buildUnits: the fast path must not pay
   // for a canvas text measurement per layer just to discover it had nothing to do.
   const hasKeep = frame.layers.some(l => l.pins?.keepSize) || frame.groups.some(g => g.pins?.keepSize)
-  if (spare.x === 0 && spare.y === 0 && Math.abs(k - 1) < 1e-12 && !hasKeep) return identityResult(frame, gridOut)
+  if (!opts.withBoxes && spare.x === 0 && spare.y === 0 && Math.abs(k - 1) < 1e-12 && !hasKeep) return identityResult(frame, gridOut)
   const units = buildUnits(frame.layers, frame.groups, ctx, W0, H0)
 
   const frameRef: Ref = { design: { x: 0, y: 0, w: W0, h: H0 }, box: { x: 0, y: 0, w: W, h: H } }
   const byId = new Map(frame.layers.map(l => [l.id, l]))
   const boxes = new Map<string, ResolvedBox>()
   const maps = new Map<string, { h: AxisMap; v: AxisMap }>()
+  // Filled only with `withBoxes` (the `units` name is taken by buildUnits' list above).
+  const unitInfos = new Map<string, UnitInfo>()
+  const withBoxes = !!opts.withBoxes
   const placed = new Map<string, LocalLayer>()
 
   for (const unit of units) {
@@ -87,6 +90,13 @@ export function resolveLayout(frame: FrameDoc, W: number, H: number, opts: Resol
     const unitBox: ResolvedBox = { x: hx.near, y: vy.near, w: hx.far - hx.near, h: vy.far - vy.near }
     const ucx = unit.box.x + unit.box.w / 2, ucy = unit.box.y + unit.box.h / 2
     const ucx2 = unitBox.x + unitBox.w / 2, ucy2 = unitBox.y + unitBox.h / 2
+    const info: Omit<UnitInfo, 'viewBox'> | null = withBoxes
+      ? {
+          unitId: unit.id, kind: unit.kind, memberIds: unit.memberIds, canStretch, kSize,
+          designBox: unit.box, refDesign: ref.design, refView: ref.box,
+          h: hx.map, v: vy.map, hExplicit: unit.pins?.h != null, vExplicit: unit.pins?.v != null,
+        }
+      : null
 
     for (const id of unit.memberIds) {
       const layer = byId.get(id)!
@@ -109,12 +119,14 @@ export function resolveLayout(frame: FrameDoc, W: number, H: number, opts: Resol
           else if (vPin === 'right') { target.cy = vy.far - natural / 2; boxH = natural }
         }
         boxes.set(id, { x: target.cx - boxW / 2, y: target.cy - boxH / 2, w: boxW, h: boxH })
+        if (info) unitInfos.set(id, { ...info, viewBox: boxes.get(id)! })
       } else {
         // Rigid unit: members keep their arrangement, scaled by kSize about the unit centre.
         // Selection and pins act on the UNIT, so every member reports the unit's box.
         const lcx = layer.x * W0, lcy = layer.y * H0
         target = { cx: ucx2 + (lcx - ucx) * kSize, cy: ucy2 + (lcy - ucy) * kSize }
         boxes.set(id, unitBox)
+        if (info) unitInfos.set(id, { ...info, viewBox: unitBox })
       }
       let out = placeLayer(layer, target, W, H, kLayer, ctx, kvLayer)
       if (Math.abs(kLayer - 1) > 1e-12) out = { ...out, layoutScale: kLayer } as unknown as LocalLayer
@@ -125,6 +137,10 @@ export function resolveLayout(frame: FrameDoc, W: number, H: number, opts: Resol
   let changed = false
   const layers = frame.layers.map(l => { const p = placed.get(l.id) ?? l; if (p !== l) changed = true; return p })
   const motion = remapMotion(frame.motion, maps, W0, H0, W, H)
-  if (!changed && motion === frame.motion) return identityResult(frame, gridOut)
-  return { layers, motion, grid: gridOut, boxes, maps, identity: false }
+  if (!changed && motion === frame.motion) {
+    return withBoxes
+      ? { layers: frame.layers, motion: frame.motion, grid: gridOut, boxes, maps, units: unitInfos, identity: true }
+      : identityResult(frame, gridOut)
+  }
+  return { layers, motion, grid: gridOut, boxes, maps, units: unitInfos, identity: false }
 }
