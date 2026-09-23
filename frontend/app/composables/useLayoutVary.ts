@@ -137,6 +137,7 @@ function contentKey(props: Record<string, unknown> | undefined, w: number, h: nu
 
 const sameChoice = (a: Choice, b: Choice) =>
   a.lines === b.lines && a.arr === b.arr && a.scale === b.scale && a.side === b.side
+  && (a.cta ?? 'drawn') === (b.cta ?? 'drawn')
 
 const AXES: { key: keyof Choice; label: string; values?: unknown[]; labels?: string[] }[] = [
   { key: 'lines', label: 'Line breaks' },

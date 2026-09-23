@@ -685,10 +685,16 @@ export function candidatesForFrame(a: Omit<LayoutPlanArgs, 'choice'>): Candidate
       fillContrast: e => fillContrastOf(fills?.get(e), a.palette),
     })
   } : undefined
-  return enumerate(p.def, {
+  const result = enumerate(p.def, {
     kind: p.kind, title: p.content.title, hasImage: p.hasImage, run, check, infoSize, boxOf: box, rank,
     platformButton: offersCta(p), hasAction: !!p.content.action,
   })
+  // Fix round 1, ruling R11: the platform's own button is an alternative, never a rescue. A
+  // layout is offered only when at least one DRAWN candidate (no `cta`, or `cta: 'drawn'`) passes
+  // on its own; a `cta: 'native'` candidate may only ride along beside one that does. Without the
+  // axis (`offersCta` false) every candidate is drawn already, so this never refuses anything new.
+  if (offersCta(p) && !result.some(c => (c.choice.cta ?? 'drawn') === 'drawn')) return []
+  return result
 }
 
 /** The ways this frame's title can break into lines for a layout (`lineOptions` on the frame's

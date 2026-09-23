@@ -244,25 +244,33 @@ describe('layout kit — vary', () => {
       expect(def.score).toBeCloseTo(Math.log(10 / INFO_SIZE) - 0.12 * 1 + 1, 10)
     })
 
-    it('diversity weight 1.5: a tied cta candidate is preferred over a tied lighter axis when both differ equally little', () => {
-      // Two candidates score-tied with the leader on every axis but `scale` (weight 1.5) vs `cta`
-      // (weight 1.5 too) — same weight, so this just proves `cta` participates in `dist` at all
-      // (an axis missing from `WT` would score `dist` 0 for it and never get chosen to diversify).
+    it('diversity weight 1.5: `cta` actually moves the diversify order, not just the candidate set', () => {
+      // `x` shifts with `arr` (so `arr` still varies the geometry, giving it a distinct
+      // signature), but a lone text element's own "distinct left edges" count is always 1
+      // regardless of its actual x — and `btn` elements never enter the score formula at all — so
+      // every one of the six (arr × cta) combinations scores IDENTICALLY except for the default's
+      // own +1 bonus. That isolates the diversify pass itself: with every candidate tied on score,
+      // which one gets picked next depends only on `dist`'s weights.
       const runTied = (choice: Choice): LayoutOut => {
-        const els: El[] = [{ k: 't', s: 'Solo', x: 10, top: 10, size: 10, wt: 600, ls: 0, lh: 1, role: 'title' }]
+        const els: El[] = [{ k: 't', s: 'Solo', x: 10, top: 10 + choice.arr, size: 10, wt: 600, ls: 0, lh: 1, role: 'title' }]
         if (choice.cta !== 'native') els.push({ k: 'btn', x: 0, y: 0, w: 10, h: 10, size: 5, shape: 'pill', role: 'btn' } as El)
-        // arr shifts x so its signature differs too, but scoring stays identical across arr/cta.
-        for (const e of els) if (e.k === 't') e.x = 10 + choice.arr
         return { els, did: `arr=${choice.arr} cta=${choice.cta ?? 'drawn'}` }
       }
       const result = enumerate(fakeDef({ keepScale: true }), {
         kind: 'word', title: 'Solo', hasImage: false, run: runTied, check: () => [], infoSize: INFO_SIZE,
         platformButton: true, hasAction: true,
       })
-      // The default (arr 0, cta drawn) leads; some later candidate must differ on `cta` to
-      // diversify away from it (not just re-use `arr`, which `sideMatters`/`arrVaries` already
-      // exercise) — proving `cta` carries real weight in the diversity pass.
-      expect(result.some(c => c.choice.cta === 'native')).toBe(true)
+      expect(result).toHaveLength(6)   // 3 arr values × {drawn, native}, every score tied but the default's
+      // Once offered, every combo (the default included) carries an explicit `cta` — set by the
+      // same per-key `flatMap` as `lines`/`arr`/`scale`/`side`.
+      expect(result[0]!.choice).toEqual({ ...DEFAULT_CHOICE, cta: 'drawn' })   // arr 0, drawn — the default, +1 ahead of the rest
+      // Every other combo ties on score, so the second slot goes to whichever maximises `dist`
+      // from the default alone: (arr 1, native) differs on BOTH `arr` (weight 3) and `cta`
+      // (weight 1.5) — 4.5 total — beating (arr 1, drawn) or (arr 2, drawn), which differ only on
+      // `arr` (3), and (arr 0, native), which differs only on `cta` (1.5). Zero out `cta`'s
+      // weight and (arr 1, drawn) — the first arr-3.0 candidate generated — would win that tie
+      // instead: `cta` is not just present in the candidate set, it decides this pick.
+      expect(result[1]!.choice).toEqual({ lines: 0, arr: 1, scale: 'full', side: 'right', cta: 'native' })
     })
   })
 })

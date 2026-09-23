@@ -522,4 +522,37 @@ describe('contentHints (ruling R9)', () => {
       'For prices under 100, a percentage reads bigger; above it, an amount does.',
     ])
   })
+
+  // Fix round 1: price parsing — thousands vs. decimal separators, currency after the number.
+  const HINT = 'For prices under 100, a percentage reads bigger; above it, an amount does.'
+  it('a thousands separator: "$1,299" reads as 1299 (≥ 100), not 1.299', () => {
+    const layers = [tl('t', 'Run lighter.', 0.12), tl('d', 'Halden Trail 2, was $1,299', 0.04), tl('dt', '–30%', 0.03)]
+    expect(contentHints(read(layers, dateIs), layers)).toEqual([HINT])
+  })
+  it('a decimal separator: "19,50" reads as 19.5 (< 100)', () => {
+    // An amount offer with a comma-decimal price of 19.50 elsewhere (under 100): a percentage
+    // would read bigger there — the hint fires.
+    const layers = [tl('t', 'Run lighter.', 0.12), tl('d', 'Now €19,50', 0.04), tl('dt', '€8 off', 0.03)]
+    expect(contentHints(read(layers, dateIs), layers)).toEqual([HINT])
+    // The same price with a percentage offer: 19.50 is under 100, so a percentage is already
+    // the right choice there — no hint.
+    const withPercent = [tl('t', 'Run lighter.', 0.12), tl('d', 'Now €19,50', 0.04), tl('dt', '–30%', 0.03)]
+    expect(contentHints(read(withPercent, dateIs), withPercent)).toEqual([])
+  })
+  it('the currency mark after the number ("149 €", "19,50 €") is recognised too', () => {
+    const layers = [tl('t', 'Run lighter.', 0.12), tl('d', 'Halden Trail 2, was 149 €', 0.04), tl('dt', '–30%', 0.03)]
+    expect(contentHints(read(layers, dateIs), layers)).toEqual([HINT])
+    // As the offer itself (an amount, currency trailing): a price under 100 elsewhere prefers %.
+    const asOffer = [tl('t', 'Run lighter.', 0.12), tl('d', 'Was 79 €', 0.04), tl('dt', '19,50 €', 0.03)]
+    expect(contentHints(read(asOffer, dateIs), asOffer)).toEqual([HINT])
+  })
+  it('a non-global test regex: two Frames in a row each read correctly (no stale lastIndex)', () => {
+    // A global RegExp's `.test` advances its own `lastIndex`; called on one Frame then another,
+    // a leftover index can silently start the second scan mid-string and miss the match.
+    const first = [tl('t', 'Run lighter.', 0.12), tl('d', 'Halden Trail 2, was $149', 0.04), tl('dt', '–30%', 0.03)]
+    const second = [tl('t', 'Run lighter.', 0.12), tl('d', 'Halden Trail 2, was $149', 0.04), tl('dt', '–30%', 0.03)]
+    expect(contentHints(read(first, dateIs), first)).toEqual([HINT])
+    expect(contentHints(read(second, dateIs), second)).toEqual([HINT])
+    expect(contentHints(read(first, dateIs), first)).toEqual([HINT])
+  })
 })

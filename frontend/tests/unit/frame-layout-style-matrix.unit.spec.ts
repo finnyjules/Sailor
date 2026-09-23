@@ -69,11 +69,14 @@ const EXPECTED_THIN: (Partial<Combo> & { offered: number; reason: string })[] = 
   // a button adds a row at the foot, and on a small or tall-and-covered frame the bands then hide
   // too much. Price tag (a half-page panel: always 50.0%) survives. The least-covered choice of
   // each refused layout, measured across every choice (all kinds unless named):
-  // Story, action and logo used to thin to Price tag alone (Offer 65.4–65.7%, Sticker 66.5–69.9%,
-  // Card 55.8%, Centred 77.8–78.8%, all with the button drawn) — Stage 4 Task 3 (ruling R7) adds
-  // the platform's-own-button choice, whose `cta: 'native'` candidates draw no button at all: the
-  // freed foot row brings Card (and, on a two-line title, Sticker) back under the 55% limit, so
-  // this frame now meets the general floor on its own and is no longer in EXPECTED_THIN.
+  // Story, action and logo — only 90.7 of its 177.8 height is seen: Offer 65.4–65.7%, Sticker
+  // 66.5–69.9%, Card 55.8%, Centred 77.8–78.8%. Stage 4 Task 3 (ruling R7) adds the
+  // platform's-own-button choice: its `cta: 'native'` candidates draw no button and so would
+  // otherwise clear this frame's 55% limit, but ruling R11 (fix round 1) refuses a layout unless
+  // a DRAWN candidate passes on its own — a native candidate never rescues an otherwise-thin
+  // layout — so this stays pinned exactly as the button-drawn measurement above.
+  { style: 'performance', frame: 'meta-story', image: true, action: true, logo: true, offered: 1,
+    reason: 'story, action and logo: the bands hide 55.8–78.8% of the visible image (limit 55%); only Price tag (50.0%)' },
   // 300×250, logo only: Offer 69.5%, Sticker 55.9–58.6%, Card 56.4%, Centred 69.2–69.5%.
   { style: 'performance', frame: 'ad-300x250', image: true, action: false, logo: true, offered: 1,
     reason: '300×250 with a logo: the bands hide 55.9–69.5% of the image (limit 55%); only Price tag (50.0%)' },
@@ -122,6 +125,10 @@ describe('style matrix — each style\'s layouts through the real planner', () =
       const cands = candidatesForFrame(a)
       if (!cands.length) continue
       offered.push(def.id)
+      // Ruling R11 (fix round 1): the platform's own button is an alternative, never a rescue —
+      // a layout's candidates are never ALL `cta: 'native'`; at least one drawn one must pass on
+      // its own for the layout to be offered at all.
+      expect.soft(cands.some(cd => (cd.choice.cta ?? 'drawn') === 'drawn'), `${def.id}: every candidate is cta: 'native'`).toBe(true)
       for (const cand of cands) {
         const label = `${def.id} ${JSON.stringify(cand.choice)}`
         const plan = planLayout({ ...a, choice: cand.choice })

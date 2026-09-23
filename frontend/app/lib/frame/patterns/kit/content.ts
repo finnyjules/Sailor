@@ -298,11 +298,28 @@ export function elementsOf(read: ReadContent, inferred: FrameElements, userLayer
 const HINT_RATING_5 = 'Ratings between 4.0 and 4.8 tend to read as more believable than a perfect 5.'
 const HINT_PERCENT_OR_AMOUNT = 'For prices under 100, a percentage reads bigger; above it, an amount does.'
 
-const PRICE_RE = /[€$£]\s?(\d+(?:[.,]\d+)?)/g
+// A price: the currency mark before the number ("$120") or after it ("149 €", "19,50 €") — one
+// capture group per side, so `pricesIn` knows which one matched. Fix round 1: a non-global sibling
+// (`PRICE_TEST`) for `.test` — a global regex's `lastIndex` state does not survive a `some`/`||`
+// short-circuit, and a stray leftover index silently misses a later match.
+const NUM_RE_SRC = '\\d+(?:[.,]\\d+)?'
+const PRICE_RE = new RegExp(`[€$£]\\s?(${NUM_RE_SRC})|(${NUM_RE_SRC})\\s?[€$£]`, 'g')
+const PRICE_TEST = new RegExp(`[€$£]\\s?${NUM_RE_SRC}|${NUM_RE_SRC}\\s?[€$£]`)
 
-/** Every price named in `s` ("$120", "€19,50"), as numbers. */
+/** A matched number ("1,299", "19,50", "149") to its value: a separator (`,` or `.`) followed by
+ *  exactly three digits is a thousands mark (dropped); by one or two digits, a decimal point. Only
+ *  one separator is recognised (a single price, not a fully-punctuated "1.234.567,89"). */
+function amountOf(raw: string): number {
+  const m = /^(\d+)(?:[.,](\d+))?$/.exec(raw)
+  if (!m) return Number(raw)
+  const [, whole, frac] = m
+  if (!frac) return Number(whole)
+  return frac.length === 3 ? Number(whole + frac) : Number(whole + '.' + frac)
+}
+
+/** Every price named in `s` ("$120", "€19,50", "149 €", "$1,299"), as numbers. */
 function pricesIn(s: string): number[] {
-  return [...s.matchAll(PRICE_RE)].map(m => Number(m[1]!.replace(',', '.')))
+  return [...s.matchAll(PRICE_RE)].map(m => amountOf((m[1] ?? m[2])!))
 }
 
 /** R9: the two research hints, verbatim, when they apply.
@@ -324,8 +341,7 @@ export function contentHints(read: ReadContent, userLayers: LocalLayer[]): strin
   const offer = textOfRole('date')
   if (offer) {
     const isPercent = offer.includes('%')
-    const isAmount = !isPercent && PRICE_RE.test(offer)
-    PRICE_RE.lastIndex = 0
+    const isAmount = !isPercent && PRICE_TEST.test(offer)
     if (isPercent || isAmount) {
       const elsewhere = (CONTENT_ROLES as readonly ContentRole[])
         .filter(r => r !== 'date' && r !== 'image2')
