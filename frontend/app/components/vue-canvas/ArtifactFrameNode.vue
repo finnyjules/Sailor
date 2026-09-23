@@ -908,6 +908,7 @@ onMounted(() => {
   applyGate()
 })
 onBeforeUnmount(() => {
+  unmounted = true
   videoAbort?.abort()
   unregisterStudioBaker(props.id); stopAnim(); unsubFieldCatalog()
   gateIo?.disconnect(); gateIo = null
@@ -942,6 +943,9 @@ async function renderCompositeAtTime(t: number): Promise<HTMLCanvasElement | nul
 // The running video download, so the button can stop it; and a short line
 // beside the button saying how it is going or how it was made.
 let videoAbort: AbortController | null = null
+// Set as the first line of onBeforeUnmount, so downloadVideo's finally (which can settle
+// after unmount once the abort's rejection propagates) knows not to restart the preview loop.
+let unmounted = false
 const exportingVideo = ref(false)
 const videoStatus = ref('')
 function stopVideoExport() { videoAbort?.abort() }
@@ -1000,7 +1004,7 @@ async function downloadVideo() {
   } finally {
     exportingVideo.value = false
     videoAbort = null
-    applyGate()
+    if (!unmounted) applyGate()
   }
 }
 
