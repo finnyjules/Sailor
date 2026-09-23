@@ -104,7 +104,7 @@ const EMBED_DIR = path.join(ROOT, 'public', 'embed')
 // frames.js (Task 5 of the "3D Studio on the web" plan) is the smallest bucket by a wide margin:
 // it knows nothing about 3D, GL, or any studio — mount() just decodes each frame's data: URI
 // through the browser's own <img> decoder and drawImage()s the right one into a 2D canvas. No
-// three.js, no shader source, no font table. Measured 1,316 bytes (unminified further by gzip;
+// three.js, no shader source, no font table. Measured 1,315 bytes (unminified further by gzip;
 // this bucket is too small for gzip to matter) on 2026-09-23. FRAMES_CEILING_BYTES is that
 // measurement × 1.15, rounded up to the next 1,000 (not 10,000 — frame.js's rounding grain would
 // give this bucket ~7x its own measured size of headroom, defeating the point of a ceiling this

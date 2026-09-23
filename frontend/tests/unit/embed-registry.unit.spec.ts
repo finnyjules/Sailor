@@ -42,6 +42,17 @@ describe('embed surface registry', () => {
     // consumer of EmbedCaps.alpha / EmbedSnapshot.transparent.
     expect(s!.caps.alpha).toBe(true)
   })
+
+  it('lists frames as an embeddable kind', () => {
+    expect(embedSurfaceKinds()).toContain('frames')
+  })
+
+  it('loads the frames surface with the right kind and declared caps', async () => {
+    const s = await loadEmbedSurface('frames')
+    expect(s).not.toBeNull()
+    expect(s!.kind).toBe('frames')
+    expect(s!.caps.alpha).toBe(true)
+  })
 })
 
 describe('bundleNameFor', () => {

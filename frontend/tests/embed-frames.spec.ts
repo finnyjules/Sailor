@@ -169,3 +169,59 @@ test.describe('the frames embed player', () => {
     expect(r.lumaSpread).toBeGreaterThan(400)
   })
 })
+
+// PROOF THIS TEST HAS TEETH, modelled directly on embed-network.spec.ts's identical-purpose
+// "teeth check" describe blocks. A "zero requests" assertion above is worthless unless it would
+// actually catch a real leak — the two tests above assert `.toEqual([])` against the recorder,
+// but nothing yet proves that recorder isn't just blind (e.g. a typo'd event name, or a filter
+// that happens to swallow everything). This starts from the SAME real, clean `frames` export the
+// tests above build via the real export pipeline, injects a leak the export pipeline itself never
+// produces, and proves the identical `page.on('request')` recorder catches and names it.
+//
+// Root-relative, not an absolute URL: this mirrors embed-network.spec.ts's "root-relative asset
+// reference" teeth check (not its "absolute URL"/"runtime fetch" pair, which target
+// externalRefs()'s static scan specifically) because frames.ts's own asset field
+// (FramesEmbedConfig.frames) is validated to require `data:` URIs (see frames.ts's `validate`),
+// so there is no "un-inlined config field" case to exercise for this surface — an injected <img>
+// is the only realistic leak shape here, same as the gradient/spacetype root-relative cases in
+// embed-network.spec.ts.
+//
+// Verified by temporarily breaking the recorder itself (commenting out this test file's
+// `p.on('request', ...)` push below) and re-running just this test: it failed with
+// `expect(received).toContain(expected)` / `Expected value: "http://embed-frames.invalid/leak-frame.webp"`
+// / `Received array: []` — i.e. with a blind recorder the leak goes undetected and the test
+// correctly fails. The break was then reverted (not committed) and the test re-run green.
+test.describe('teeth check — the recorder catches a leak in an otherwise clean frames export', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/dev/embed-harness')
+    await page.waitForFunction(() => (window as any).__embedHarnessReady === true)
+  })
+
+  test('an injected root-relative <img> in an otherwise clean export is caught', async ({ page, context }) => {
+    const frames = await makeFrameDataUrls(page)
+    const html = await exportFrames(page, frames, 3, 16, 16, 1)
+    const LEAK = '/leak-frame.webp'
+    const LEAK_URL = new URL(LEAK, EMBED_URL).href
+    const leaky = html.replace('</body>', `<img src="${LEAK}"></body>`)
+
+    await context.addInitScript((t: number) => { (window as any).__SAILOR_FREEZE_T01__ = t }, 0.1)
+    const p = await context.newPage()
+    const requests: string[] = []
+    p.on('request', (req) => { requests.push(req.url()) })
+    p.on('websocket', (ws) => { requests.push(`ws:${ws.url()}`) })
+    await p.setViewportSize({ width: 16, height: 16 })
+    await p.route(EMBED_URL, r => r.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: leaky }))
+    await p.goto(EMBED_URL)
+    // The leak is an <img> appended alongside the real stage, not inside it — it does not
+    // interfere with the live canvas mounting, so the same "did the live path actually run"
+    // wait as every other test in this file still applies.
+    await p.waitForFunction(() => {
+      const c = document.querySelector('#sailor-embed canvas') as HTMLCanvasElement | null
+      return !!c && c.width > 1
+    }, undefined, { timeout: 15_000 })
+    await p.waitForTimeout(800)
+    await p.close()
+
+    expect(requests.filter(isNetworkRequest)).toContain(LEAK_URL)
+  })
+})
