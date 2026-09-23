@@ -127,6 +127,8 @@ import CanvasContextMenu, { type MenuItem } from '~/components/vue-canvas/Canvas
 import { Play, EyeOff, Ban, Copy, Trash2, Group, SquareDashedMousePointer, Palette, Edit3, Frame, Maximize2, PlusSquare, Boxes, ChevronsUpDown, ChevronsDownUp, Lock, Unlock, Flag, StickyNote, ListChecks, Image as ImageIcon, ArrowRight, Check } from 'lucide-vue-next'
 import { useBlockLibrary } from '~/composables/useBlockLibrary'
 import { fetchPausedGates } from '~/lib/runner/client'
+import { runnerEventScope } from '~/lib/runner/routing'
+import { ensureRunnerEvents } from '~/composables/useRunnerEvents'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/minimap/dist/style.css'
@@ -233,6 +235,8 @@ async function restoreRunnerGates(): Promise<void> {
   const canvasId = props.displayedCanvasId
   if (!runnerOn || !canvasId) return
   const gates = await fetchPausedGates(canvasId)
+  // Paused Gates here: listen for the runner's events from now on (the stream opens lazily).
+  if (gates.length) void ensureRunnerEvents()
   if (props.displayedCanvasId !== canvasId) return // switched away while asking
   for (const g of gates) {
     const target = (nodes.value as any[]).find((n: any) => n.id === g.nodeId && n.data?.nodeType === 'ComfyGateNode')
@@ -2868,8 +2872,24 @@ function handleBridgeMessage(event: MessageEvent) {
   // then the live registry entry, then null. Fallback (== null — pre-Task-6, or
   // no registered run e.g. bridge path): preserve today's displayed-canvas
   // behavior, still gated by runScopeMatches so nothing regresses.
-  const runCanvasId = (promptIdForRoute ? canvasByPrompt.get(promptIdForRoute) : null)
-    ?? entry?.canvasId ?? null
+  // Runner events (run_ ids) never take the displayed-canvas fallback below: a
+  // registered stage uses the per-run routing; an unregistered one lands only
+  // on the canvas it names, when that canvas is on screen (see lib/runner/routing.ts).
+  const eventCanvasId = ((event.data as any).canvas_id ?? null) as string | null
+  const cachedCanvasId = promptIdForRoute ? canvasByPrompt.get(promptIdForRoute) ?? null : null
+  const runnerScope = runnerEventScope({
+    promptId: promptIdForRoute,
+    registered: !!entry || cachedCanvasId != null,
+    knownCanvasId: cachedCanvasId ?? entry?.canvasId ?? eventCanvasId,
+    eventCanvasId,
+    displayedCanvasId: props.displayedCanvasId ?? null,
+  })
+  if (runnerScope === 'ignore') {
+    if ((evt === 'execution_complete' || evt === 'execution_error') && promptIdForRoute) canvasByPrompt.delete(promptIdForRoute)
+    return
+  }
+  const runCanvasId = cachedCanvasId
+    ?? entry?.canvasId ?? (runnerScope === 'route' ? eventCanvasId : null) ?? null
 
   // Reap the cache entry on terminal events HERE — above the off-screen
   // early-return below. A run dispatched to a non-displayed canvas never
@@ -2883,7 +2903,9 @@ function handleBridgeMessage(event: MessageEvent) {
   if ((evt === 'execution_complete' || evt === 'execution_error') && promptIdForRoute) {
     canvasByPrompt.delete(promptIdForRoute)
   }
-  if (runCanvasId != null) {
+  if (runnerScope === 'apply') {
+    // An unregistered runner event naming the canvas on screen: place it.
+  } else if (runCanvasId != null) {
     if (props.displayedCanvasId != null && runCanvasId !== props.displayedCanvasId) {
       if (evt === 'executed' && nodeId && event.data.output) {
         const take = takeFromExecutedEvent(event)

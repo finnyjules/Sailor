@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   falSubmit, falStatus, falResult, falCancel, percentFromLogs, falImageUrls, falVideoUrl, FalError,
+  isFalNetworkError, downloadResult,
 } from '~~/server/runner/falQueue'
 
 const res = (body: unknown, status = 200) => ({
@@ -57,6 +58,10 @@ describe('falStatus', () => {
     fetchMock.mockResolvedValueOnce(res({ detail: 'gone' }, 404))
     await expect(falStatus('S')).rejects.toBeInstanceOf(FalError)
   })
+  it('a network error (no answer at all) is a blip too, in the usual shape', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('fetch failed'))
+    expect(await falStatus('S')).toEqual({ status: 'UNKNOWN', queuePosition: null, logs: [], error: null, transient: true, raw: null })
+  })
   it('passes through a completed-with-error answer', async () => {
     fetchMock.mockResolvedValueOnce(res({ status: 'COMPLETED', error: 'NSFW content detected' }))
     expect((await falStatus('S')).error).toBe('NSFW content detected')
@@ -93,5 +98,47 @@ describe('helpers', () => {
     expect(falImageUrls({})).toEqual([])
     expect(falVideoUrl({ video: { url: 'v' } })).toBe('v')
     expect(falVideoUrl({ video: {} })).toBeNull()
+  })
+})
+
+describe('network errors', () => {
+  it('only a missing answer counts, never an HTTP status', () => {
+    expect(isFalNetworkError(new TypeError('fetch failed'))).toBe(true)
+    expect(isFalNetworkError(new FalError('fal result 500: x', 500))).toBe(false)
+    expect(isFalNetworkError(new FalError('fal result 404: x', 404))).toBe(false)
+    expect(isFalNetworkError(new SyntaxError('Unexpected token'))).toBe(false)
+  })
+})
+
+describe('downloadResult', () => {
+  const file = (status: number) => ({
+    ok: status >= 200 && status < 300, status,
+    headers: { get: (h: string) => (h === 'content-type' ? 'image/png' : null) },
+    arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+  })
+  it('tries again after a network error and a 5xx, waiting 1s then 2s', async () => {
+    const sleep = vi.fn(async () => {})
+    fetchMock
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(file(502))
+      .mockResolvedValueOnce(file(200))
+    const got = await downloadResult('https://fal.media/a.png', { sleep })
+    expect(Array.from(got.bytes)).toEqual([1, 2, 3])
+    expect(got.contentType).toBe('image/png')
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(sleep.mock.calls.map(c => (c as unknown[])[0])).toEqual([1000, 2000])
+  })
+  it('gives up after three tries', async () => {
+    const sleep = vi.fn(async () => {})
+    fetchMock.mockResolvedValue(file(503))
+    await expect(downloadResult('https://fal.media/a.png', { sleep })).rejects.toThrow('Could not download the result (503)')
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+  it('a 4xx fails at once', async () => {
+    const sleep = vi.fn(async () => {})
+    fetchMock.mockResolvedValueOnce(file(404))
+    await expect(downloadResult('https://fal.media/a.png', { sleep })).rejects.toThrow('Could not download the result (404)')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(sleep).not.toHaveBeenCalled()
   })
 })

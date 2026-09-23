@@ -37,6 +37,38 @@ export function resolveVideoModelId(model: unknown): string {
   return LEGACY_VIDEO_MODEL_REMAP[m] ?? m
 }
 
+/** `model_options` as GenerateImageNode reads it: a JSON object, anything unreadable is empty. */
+function modelOptions(raw: unknown): Record<string, unknown> {
+  let v: unknown = raw
+  if (typeof raw === 'string') {
+    if (!raw.trim()) return {}
+    try { v = JSON.parse(raw) }
+    catch { return {} }
+  }
+  return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {}
+}
+
+/** An integer option the way the fal builders read it (server/runner/generators/opts.ts optInt). */
+function optionInt(opts: Record<string, unknown>, key: string): number {
+  const v = opts[key]
+  if (typeof v === 'boolean') return v ? 1 : 0
+  if (typeof v === 'number') return Number.isFinite(v) ? Math.trunc(v) : 1
+  if (typeof v === 'string' && /^\s*[+-]?\d+\s*$/.test(v)) return Number.parseInt(v.trim(), 10)
+  return 1
+}
+
+/**
+ * The runner makes and charges one picture per image node. A node asking for
+ * more (several outputs, or Seedream's picture series) goes to Python whole.
+ */
+function asksForSeveralImages(inputs: Record<string, unknown>): boolean {
+  const opts = modelOptions(inputs.model_options)
+  if (optionInt(opts, 'num_outputs') > 1) return true
+  return opts.sequential_image_generation != null
+    && String(opts.sequential_image_generation) === 'auto'
+    && optionInt(opts, 'max_images') > 1
+}
+
 export function isRunnerEligible(prompt: ApiPrompt | null | undefined): boolean {
   if (!prompt) return false
   const nodes = Object.values(prompt)
@@ -48,6 +80,7 @@ export function isRunnerEligible(prompt: ApiPrompt | null | undefined): boolean 
     if (n.class_type === 'GenerateImageNode') {
       generators++
       if (!IMAGE_IDS.has(String(inputs.model))) return false
+      if (asksForSeveralImages(inputs)) return false
     }
     else if (n.class_type === 'GenerateVideoNode') {
       generators++

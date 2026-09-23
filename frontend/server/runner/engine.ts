@@ -15,7 +15,7 @@ import type { GateChoice, RunnerMessage } from '#shared/runner/messages'
 import { MeterRefusalError } from '../utils/requestMeter'
 import { BASE_RENDER_CREDITS, UnpricedGraphError } from '../utils/priceBook'
 import { extractGraphPromptText } from '../utils/graphPromptText'
-import { falImageUrls, falVideoUrl, percentFromLogs, type FalClient } from './falQueue'
+import { falImageUrls, falVideoUrl, isFalNetworkError, percentFromLogs, type FalClient, type FalStatus } from './falQueue'
 import { planNode } from './executors'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, type OwnershipCheck } from './inputs'
@@ -147,7 +147,20 @@ interface LiveRun {
 }
 
 const GENERATORS = new Set(['GenerateImageNode', 'GenerateVideoNode'])
+/** Provider calls one user may have queued or in flight across all their runs. */
+export const MAX_QUEUED_CALLS = 32
 const refuse = (message: string, status: number, data?: unknown) => new MeterRefusalError(message, status, data)
+
+/** Larger than this, the workflow is not stored (Open workflow then falls back, with its toast). */
+export const MAX_STORED_WORKFLOW_CHARS = 2_000_000
+
+function storableWorkflow(workflow: unknown): unknown {
+  if (workflow == null) return null
+  let text: string | undefined
+  try { text = JSON.stringify(workflow) }
+  catch { return null }
+  return text != null && text.length <= MAX_STORED_WORKFLOW_CHARS ? workflow : null
+}
 
 function plainError(e: unknown): string {
   const m = e instanceof Error ? e.message : String(e)
@@ -262,7 +275,10 @@ export function createEngine(deps: EngineDeps) {
   const locks = new Map<string, Promise<unknown>>()
   const wakers = new Map<string, () => void>()
   const limiter = createLimiter(deps.perUserLimit)
-  const publish = (run: RunRecord, m: RunnerMessage) => deps.events.publish(userKeyOf(run.userId), m)
+  // Every runner message names the canvas its run belongs to, so a browser
+  // window only applies it to that canvas (and ignores other projects' runs).
+  const forCanvas = (run: RunRecord, m: RunnerMessage): RunnerMessage => ({ ...m, data: { ...m.data, canvas_id: run.canvasId } })
+  const publish = (run: RunRecord, m: RunnerMessage) => deps.events.publish(userKeyOf(run.userId), forCanvas(run, m))
 
   function entryFor(run: RunRecord): LiveRun {
     let e = live.get(run.id)
@@ -329,7 +345,7 @@ export function createEngine(deps: EngineDeps) {
         }
         const stageKey = stageKeyOf(legId, t)
         const holdId = await deps.metering.hold(run.userId, stageKey, estimate)
-        charges.push({ stageKey, leg: index, take: t, estimate, includesBase, holdId, state: holdId == null ? 'free' : 'held', actual: null, finished: false })
+        charges.push({ stageKey, leg: index, take: t, estimate, includesBase, holdId, state: holdId == null ? 'free' : 'held', actual: null, finished: false, nodeIds: [...nodes] })
       }
     }
     catch (e) {
@@ -396,6 +412,14 @@ export function createEngine(deps: EngineDeps) {
     }
   }
 
+  /** The nodes one take ran in one leg: written down when the leg opened (older charges: every node last run in this leg). */
+  function stageNodeIds(take: TakeRecord, charge: StageCharge, legIndex: number): string[] {
+    const planned = charge.nodeIds ? new Set(charge.nodeIds) : null
+    return Object.entries(take.nodes)
+      .filter(([id, n]) => n.leg === legIndex && (!planned || planned.has(id)))
+      .map(([id]) => id)
+  }
+
   function takeOutcome(take: TakeRecord, legIndex: number): TakeOutcome {
     const ns = Object.values(take.nodes).filter(n => n.leg === legIndex)
     if (ns.some(n => n.status === 'stopped')) return 'stopped'
@@ -445,7 +469,9 @@ export function createEngine(deps: EngineDeps) {
     // Charge exactly what was made (reused results are free); the flat
     // render credit rides on the first stage that makes something. The
     // check and the set below must stay together, with no await between.
-    const legIds = [...nodes]
+    // Everything this take ran in this leg counts, including nodes that
+    // finished before a restart (legNodes above no longer lists those).
+    const legIds = stageNodeIds(take, charge, leg.index)
     let actual = legIds
       .filter(id => take.nodes[id]!.status === 'done' && !take.nodes[id]!.reused)
       .reduce((s, id) => s + take.nodes[id]!.credits, 0)
@@ -474,7 +500,7 @@ export function createEngine(deps: EngineDeps) {
         .catch(e => deps.reportError(e, { site: 'runner.record', stageKey }))
     }
     if (outcome === 'error') {
-      const [id, rec] = Object.entries(take.nodes).find(([i, n]) => nodes.has(i) && n.status === 'error')!
+      const [id, rec] = Object.entries(take.nodes).find(([i, n]) => legIds.includes(i) && n.status === 'error')!
       publish(run, ev.error(stageKey, id, rec.classType, rec.error ?? 'Something went wrong', { runId: run.id, credits }))
     }
     else {
@@ -575,7 +601,9 @@ export function createEngine(deps: EngineDeps) {
       rec.status = 'done'
       rec.endedAt = deps.now()
       if (fp) await deps.store.putResult(userKey, fp, files).catch(e => deps.reportError(e, { site: 'runner.putResult' }))
-      await persist(run)
+      // The result is made, kept and billed: a failed save here must not turn
+      // the node into an error. The stage's closing save writes it down again.
+      await persist(run).catch(e => deps.reportError(e, { site: 'runner.node.save', stageKey, node: id }))
       const ui = plan.uiFor(files)
       if (ui) publish(run, ev.executed(stageKey, id, ui))
     }
@@ -597,6 +625,8 @@ export function createEngine(deps: EngineDeps) {
     const req = rec.request!
     const deadline = req.submittedAt + (media === 'video' ? deps.timeouts.videoMs : deps.timeouts.imageMs)
     let attempt = 0
+    // Only a real answer from fal counts as having asked: a blip says nothing.
+    let asked = false
     let lastPos: number | null = req.queuePosition
     let lastPct = -1
     let started = false
@@ -605,14 +635,20 @@ export function createEngine(deps: EngineDeps) {
       if (signal.aborted) throw new RunStopped()
       // Ask fal at least once before giving up: after a restart the request
       // may already have finished while the server was down.
-      if (attempt > 0 && deps.now() > deadline) {
+      if (asked && deps.now() > deadline) {
         await deps.fal.cancel(req.cancelUrl).catch(() => {})
         throw new Error(media === 'video'
           ? 'The video took longer than 30 minutes, so it was cancelled'
           : 'The image took longer than 5 minutes, so it was cancelled')
       }
-      const s = await deps.fal.status(req.statusUrl, { logs: started })
+      let s: FalStatus
+      try { s = await deps.fal.status(req.statusUrl, { logs: started }) }
+      catch (e) {
+        if (!isFalNetworkError(e)) throw e
+        s = { status: 'UNKNOWN', queuePosition: null, logs: [], error: null, transient: true, raw: null }
+      }
       if (!s.transient) {
+        asked = true
         if (s.status === 'IN_QUEUE') {
           if (s.queuePosition != null && s.queuePosition !== lastPos) {
             lastPos = s.queuePosition
@@ -635,7 +671,10 @@ export function createEngine(deps: EngineDeps) {
         }
         else if (s.status === 'COMPLETED') {
           if (s.error) throw new Error(s.error)
-          return await deps.fal.result(req.responseUrl)
+          // fal has made (and billed) it: a network error fetching it is tried
+          // again on the next turn, until the time limit.
+          try { return await deps.fal.result(req.responseUrl) }
+          catch (e) { if (!isFalNetworkError(e)) throw e }
         }
         else {
           throw new Error(`The provider stopped this request (${s.status})`)
@@ -646,6 +685,28 @@ export function createEngine(deps: EngineDeps) {
   }
 
   // ── Public API ─────────────────────────────────────────────────────────
+  /** Generator calls this user has waiting or running, across the running legs of their runs. */
+  function queuedCalls(userId: string | null): number {
+    let n = 0
+    for (const { run } of live.values()) {
+      if (run.userId !== userId) continue
+      for (const leg of run.legs) {
+        if (leg.status !== 'running') continue
+        for (const t of leg.takes) {
+          const take = run.takes[t]!
+          const charge = run.charges.find(c => c.stageKey === stageKeyOf(leg.id, t))
+          if (!charge || charge.finished) continue
+          for (const id of charge.nodeIds ?? stageNodeIds(take, charge, leg.index)) {
+            const rec = take.nodes[id]
+            if (!rec) continue
+            if (GENERATORS.has(rec.classType) && (rec.status === 'waiting' || rec.status === 'running')) n++
+          }
+        }
+      }
+    }
+    return n
+  }
+
   async function startRun(i: StartRunInput): Promise<LegStarted> {
     const takes = i.takes
     if (!Array.isArray(takes) || !takes.length) throw refuse('There is nothing to run', 400)
@@ -654,6 +715,9 @@ export function createEngine(deps: EngineDeps) {
       if (!p || typeof p !== 'object' || !isRunnerEligible(p as ApiPrompt)) throw refuse('This workflow can’t run on the Sailor runner', 400)
     }
     const prompts = takes as ApiPrompt[]
+    const noGates: TakeGateState = { done: new Set(), open: new Set(), dropped: new Set() }
+    const wanted = prompts.reduce((n, p) => n + [...legNodes(p, noGates)].filter(id => GENERATORS.has(p[id]!.class_type)).length, 0)
+    if (queuedCalls(i.userId) + wanted > MAX_QUEUED_CALLS) throw refuse('You have too many runs waiting. Try again when one finishes.', 429)
     await deps.metering.spendGuard(i.userId)
     const files = new Map<string, OutputFile>()
     for (const p of prompts) for (const f of collectInputFiles(p)) files.set(`${f.type}:${f.subfolder}:${f.filename}`, f)
@@ -667,7 +731,7 @@ export function createEngine(deps: EngineDeps) {
       canvasId: i.canvasId,
       projectUuid: i.projectUuid,
       projectName: i.projectName,
-      workflow: i.workflow ?? null,
+      workflow: storableWorkflow(i.workflow),
       createdAt: now,
       updatedAt: now,
       status: 'running',
@@ -779,6 +843,7 @@ export function createEngine(deps: EngineDeps) {
     const out: RunnerMessage[] = []
     for (const { run } of live.values()) {
       if (run.userId !== userId) continue
+      const from = out.length
       const leg = run.legs.find(l => l.status === 'running')
       if (leg) {
         for (const t of leg.takes) {
@@ -795,6 +860,7 @@ export function createEngine(deps: EngineDeps) {
       else if (run.status === 'paused') {
         for (const g of gatesOf(run)) out.push(ev.gatePaused(g.promptId, run.id, g.nodeId, g.choices, g.picked))
       }
+      for (let j = from; j < out.length; j++) out[j] = forCanvas(run, out[j]!)
     }
     return out
   }

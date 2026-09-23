@@ -87,6 +87,12 @@ export interface StageCharge {
   /** Credits actually charged, once the stage has finished. */
   actual: number | null
   finished: boolean
+  /**
+   * The nodes this take runs in this leg, written down when the leg opens.
+   * Charging, outputs and records read this set, so nodes that finished before
+   * a restart still count. Absent on charges saved before 2026-09-23.
+   */
+  nodeIds?: string[]
 }
 
 export interface RunRecord {

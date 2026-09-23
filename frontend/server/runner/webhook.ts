@@ -47,13 +47,29 @@ async function fetchFalKeys(): Promise<FalJwk[]> {
   return Array.isArray(body.keys) ? body.keys : []
 }
 
-export function createJwksCache(fetchKeys: () => Promise<FalJwk[]> = fetchFalKeys, ttlMs = 24 * 60 * 60 * 1000) {
+/** A failed key fetch is remembered this long, so a burst of calls does not hammer fal. */
+export const JWKS_FAILURE_TTL_MS = 60_000
+
+export function createJwksCache(
+  fetchKeys: () => Promise<FalJwk[]> = fetchFalKeys,
+  ttlMs = 24 * 60 * 60 * 1000,
+  now: () => number = Date.now,
+) {
   let cached: { keys: FalJwk[]; at: number } | null = null
+  let failed: { error: unknown; at: number } | null = null
   return {
     async keys(): Promise<FalJwk[]> {
-      if (cached && Date.now() - cached.at < ttlMs) return cached.keys
-      cached = { keys: await fetchKeys(), at: Date.now() }
-      return cached.keys
+      if (cached && now() - cached.at < ttlMs) return cached.keys
+      if (failed && now() - failed.at < JWKS_FAILURE_TTL_MS) throw failed.error
+      try {
+        cached = { keys: await fetchKeys(), at: now() }
+        failed = null
+        return cached.keys
+      }
+      catch (e) {
+        failed = { error: e, at: now() }
+        throw e
+      }
     },
   }
 }

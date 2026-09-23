@@ -54,6 +54,20 @@ describe('runner routes', () => {
     expect(engine.pausedGates).toHaveBeenCalledWith('user_1', 'c1')
     expect((await get(handler(record), '?promptId=run_a.0.t0')).status).toBe(404)
   })
+  it('the fal webhook refuses a call missing any of its four headers before fetching fal\'s keys', async () => {
+    const fetchMock = vi.fn(async () => new Response('{"keys":[]}'))
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const signed = { 'x-fal-webhook-request-id': 'r1', 'x-fal-webhook-signature': 'ab'.repeat(64) }
+      for (const extra of [{}, { 'x-fal-webhook-user-id': 'u' }, { 'x-fal-webhook-timestamp': '1700000000' }]) {
+        const res = await handler(falHook, null)(new Request('http://x/', { method: 'POST', headers: { 'content-type': 'application/json', ...signed, ...extra }, body: '{}' }))
+        expect(res.status).toBe(401)
+      }
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(engine.nudge).not.toHaveBeenCalled()
+    }
+    finally { vi.unstubAllGlobals() }
+  })
   it('the fal webhook ignores unsigned calls', async () => {
     const res = await post(handler(falHook, null), { request_id: 'r1' })
     expect(res.status).toBe(401)

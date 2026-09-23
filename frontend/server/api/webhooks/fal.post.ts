@@ -19,7 +19,10 @@ export default defineEventHandler(async (event) => {
     timestamp: getHeader(event, 'x-fal-webhook-timestamp'),
     signature: getHeader(event, 'x-fal-webhook-signature'),
   }
-  if (!headers.requestId || !headers.signature) throw createError({ statusCode: 401, message: 'Unsigned' })
+  // All four headers must be there before fal's keys are fetched.
+  if (!headers.requestId || !headers.userId || !headers.timestamp || !headers.signature) {
+    throw createError({ statusCode: 401, message: 'Unsigned' })
+  }
   let keys
   try { keys = await jwks.keys() }
   catch { throw createError({ statusCode: 503, message: 'Could not check the signature' }) }

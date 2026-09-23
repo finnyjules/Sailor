@@ -176,6 +176,17 @@ describe('mapWsEvent', () => {
     expect(mapWsEvent({ type: 'gate_paused', data: { prompt_id: 'p', node_id: '2' } }, CID))
       .toEqual({ event: 'gate_paused', prompt_id: 'p', node_id: '2' })
   })
+  it('passes a runner message’s canvas_id through, and leaves ComfyUI messages alone', () => {
+    const on = (type: string, data: Record<string, unknown>) => mapWsEvent({ type, data }, CID)
+    expect(on('execution_start', { prompt_id: 'run_a.0.t0', canvas_id: 'c7' })).toEqual({ event: 'execution_start', prompt_id: 'run_a.0.t0', canvas_id: 'c7' })
+    expect(on('executing', { prompt_id: 'run_a.0.t0', node: '1', display_node: '1', canvas_id: 'c7' })).toMatchObject({ event: 'executing', canvas_id: 'c7' })
+    expect(on('queue_position', { prompt_id: 'run_a.0.t0', node: '1', position: 2, canvas_id: null })).toMatchObject({ event: 'queue_position', canvas_id: null })
+    expect(on('execution_success', { prompt_id: 'run_a.0.t0', run_id: 'run_a', credits: 2, recorded: true, canvas_id: 'c7' })).toMatchObject({ event: 'execution_complete', canvas_id: 'c7' })
+    expect(on('gate_paused', { prompt_id: 'run_a.0', run_id: 'run_a', node_id: '2', choices: [], picked: [], canvas_id: 'c7' })).toMatchObject({ event: 'gate_paused', canvas_id: 'c7' })
+    // ComfyUI's own messages never carry it, even if something put it there
+    expect(on('execution_start', { prompt_id: 'p1', canvas_id: 'c7' })).toEqual({ event: 'execution_start', prompt_id: 'p1' })
+    expect(on('executed', { prompt_id: 'p1', node: '3', output: {}, canvas_id: 'c7' })).toEqual({ event: 'executed', node_id: '3', output: {}, prompt_id: 'p1' })
+  })
   it('keeps the runner’s charge on a failure', () => {
     expect(mapWsEvent({ type: 'execution_error', data: { prompt_id: 'run_a.0.t0', node_id: '1', node_type: 'GenerateImageNode', exception_message: 'x', exception_type: 'RunnerError', traceback: [], run_id: 'run_a', credits: 0, recorded: true } }, CID))
       .toMatchObject({ event: 'execution_error', prompt_id: 'run_a.0.t0', run_id: 'run_a', credits: 0, recorded: true })

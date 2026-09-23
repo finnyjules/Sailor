@@ -9,8 +9,12 @@
 // caller can simply skip dispatch.
 
 import type { GateChoice } from '#shared/runner/messages'
+import { isRunnerPromptId } from '#shared/runner/messages'
 
-export type BridgeShapedEvent =
+/** Runner messages also carry the run's canvas (`canvas_id`); ComfyUI's never do. */
+export type BridgeShapedEvent = BridgeShapedEventBody & { canvas_id?: string | null }
+
+type BridgeShapedEventBody =
   | { event: 'execution_start'; prompt_id: string | null }
   | { event: 'progress'; percent: number; prompt_id: string | null; node_id: string | null }
   | { event: 'executing'; node_id: string; display_node: string | undefined; prompt_id: string | null }
@@ -51,6 +55,15 @@ function isForeignClient(data: Record<string, any>, myClientId: string): boolean
 }
 
 export function mapWsEvent(msg: { type: string; data: any } | null | undefined, myClientId: string): BridgeShapedEvent | null {
+  const mapped = mapBody(msg, myClientId)
+  if (!mapped) return null
+  // A runner message names its run's canvas, so a window applies it only there.
+  const data = msg!.data as Record<string, any>
+  const fromRunner = data.recorded === true || Array.isArray(data.choices) || isRunnerPromptId(data.prompt_id)
+  return fromRunner && 'canvas_id' in data ? { ...mapped, canvas_id: data.canvas_id ?? null } : mapped
+}
+
+function mapBody(msg: { type: string; data: any } | null | undefined, myClientId: string): BridgeShapedEventBody | null {
   if (!msg || typeof msg.type !== 'string') return null
   const data = msg.data
   if (!isPlainObject(data)) return null

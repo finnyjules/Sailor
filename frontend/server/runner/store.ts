@@ -131,8 +131,19 @@ export function createPgRunStore(db: DbLike): RunStore {
       return rows.map(r => parse(r.doc))
     },
     async listForUser(userId, opts = {}) {
+      // The filters go into the query, so a user with many runs is not read whole.
+      const where = ['user_id IS NOT DISTINCT FROM $1']
+      const params: unknown[] = [userId]
+      if (opts.canvasId !== undefined) {
+        params.push(opts.canvasId)
+        where.push(`canvas_id IS NOT DISTINCT FROM $${params.length}`)
+      }
+      if (opts.statuses) {
+        params.push(opts.statuses)
+        where.push(`status = ANY($${params.length}::text[])`)
+      }
       const { rows } = await db.query(
-        `SELECT doc FROM runner_runs WHERE user_id IS NOT DISTINCT FROM $1 ORDER BY (doc->>'createdAt')::bigint`, [userId])
+        `SELECT doc FROM runner_runs WHERE ${where.join(' AND ')} ORDER BY (doc->>'createdAt')::bigint`, params)
       return rows.map(r => parse(r.doc) as RunRecord).filter(r => matches(r, userId, opts))
     },
     async getResult(userKey, fp) {

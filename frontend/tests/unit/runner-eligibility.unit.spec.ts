@@ -29,6 +29,22 @@ describe('isRunnerEligible', () => {
   it('refuses a video node with sound wired in', () => {
     expect(isRunnerEligible({ '1': { class_type: 'GenerateVideoNode', inputs: { model: 'veo-3.1', audio: ['1', 0] } } })).toBe(false)
   })
+  it('refuses an image node that asks for more than one picture (it goes to Python whole)', () => {
+    const withOpts = (model: string, opts: unknown) => ({ '1': { class_type: 'GenerateImageNode', inputs: { model, prompt: 'x', aspect_ratio: '1:1', seed: 1, model_options: opts } } })
+    expect(isRunnerEligible(withOpts('flux-schnell', JSON.stringify({ num_outputs: 2 })))).toBe(false)
+    expect(isRunnerEligible(withOpts('flux-schnell', JSON.stringify({ num_outputs: '3' })))).toBe(false)
+    expect(isRunnerEligible(withOpts('flux-schnell', { num_outputs: 4 }))).toBe(false)
+    expect(isRunnerEligible(withOpts('seedream-5-lite', JSON.stringify({ sequential_image_generation: 'auto', max_images: 4 })))).toBe(false)
+    // one picture is fine, however it is written
+    expect(isRunnerEligible(withOpts('flux-schnell', JSON.stringify({ num_outputs: 1 })))).toBe(true)
+    expect(isRunnerEligible(withOpts('seedream-5-lite', JSON.stringify({ sequential_image_generation: 'auto', max_images: 1 })))).toBe(true)
+    expect(isRunnerEligible(withOpts('seedream-5-lite', JSON.stringify({ sequential_image_generation: 'disabled', max_images: 6 })))).toBe(true)
+    // unreadable options are no options, as GenerateImageNode treats them
+    expect(isRunnerEligible(withOpts('flux-schnell', '{not json'))).toBe(true)
+    expect(isRunnerEligible(withOpts('flux-schnell', '[2]'))).toBe(true)
+    expect(isRunnerEligible(withOpts('flux-schnell', ''))).toBe(true)
+    expect(isRunnerEligible(withOpts('flux-schnell', undefined))).toBe(true)
+  })
   it('maps legacy video labels the way GenerateVideoNode does', () => {
     expect(resolveVideoModelId('Veo 3')).toBe('veo-3.1')
     expect(resolveVideoModelId('Seedance 2.0')).toBe('seedance-2.0')

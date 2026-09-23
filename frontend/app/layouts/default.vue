@@ -56,8 +56,9 @@ import { CostConfirmQueue } from '~/lib/graph/costConfirmQueue'
 import { resolveCreditDelta, type CreditWatchCandidate } from '~/lib/graph/creditAttribution'
 import { resolveEventTab } from '~/lib/graph/resolveEventTab'
 import { withKeyedLock } from '~/lib/graph/keyedLock'
-import { shouldUseRunner, startRunnerRun, runnerGateAction, stopRunnerRuns, fetchRunnerRecord, runIdOfPrompt } from '~/lib/runner/client'
-import { useRunnerEvents } from '~/composables/useRunnerEvents'
+import { shouldUseRunner, startRunnerRun, runnerGateAction, stopRunnerRuns, fetchRunnerRecord, runIdOfPrompt, isRunnerNotFound, type LegStarted } from '~/lib/runner/client'
+import { useRunnerEvents, ensureRunnerEvents } from '~/composables/useRunnerEvents'
+import { createRunnerEventBuffer, ownerTabForCanvas, runnerRunIdsForTab } from '~/lib/runner/routing'
 import { RUNNER_WORKER, isRunnerPromptId } from '#shared/runner/messages'
 import { useDirectExecution } from '~/composables/useDirectExecution'
 import { useDirectExecutionEnabled } from '~/composables/useDirectExecutionEnabled'
@@ -899,20 +900,36 @@ async function runVueWorkflow(
         perRun(res.prompt_id).estimateNodes = runEstimateNodes
         // Explicit (non-live) runs get a per-run no-response watchdog. Live-preview
         // runs fire continuously and silently by design, so they're exempt.
-        if (!opts.live && !isRunnerPromptId(res.prompt_id)) armDirectRunWatchdog(res.prompt_id, runTabId)
+        if (!opts.live) armDirectRunWatchdog(res.prompt_id, runTabId, isRunnerPromptId(res.prompt_id) ? RUNNER_STAGE_STALL_MS : DIRECT_RUN_STALL_MS)
       }
       const runnerPrompts = [firstTake, ...extraTakes].map(tk => tk.directPrompt)
+      let sentToRunner = false
       if (shouldUseRunner(runnerEnabled, runnerPrompts)) {
         // One run for all takes: with a Gate they pause once and you pick;
-        // without one they simply all finish.
-        const started = await startRunnerRun({
-          takes: runnerPrompts as import('~/lib/graph/graphToPrompt').ApiPrompt[],
-          workflow: plainWorkflow,
-          canvasId: runCanvasId,
-          projectUuid: activeTab.value?.projectUuid ?? null,
-          projectName: activeTab.value?.label ?? null,
-        })
-        for (const promptId of started.promptIds) registerResult({ prompt_id: promptId, worker: RUNNER_WORKER })
+        // without one they simply all finish. The project is the run's own
+        // tab (captured before the awaits above), not whichever tab is active now.
+        const runTab = tabs.value.find(t => t.id === runTabId)
+        try {
+          await sendRunnerPost(
+            () => startRunnerRun({
+              takes: runnerPrompts as import('~/lib/graph/graphToPrompt').ApiPrompt[],
+              workflow: plainWorkflow,
+              canvasId: runCanvasId,
+              projectUuid: runTab?.projectUuid ?? null,
+              projectName: runTab?.label ?? null,
+            }),
+            started => { for (const promptId of started.promptIds) registerResult({ prompt_id: promptId, worker: RUNNER_WORKER }) },
+          )
+          sentToRunner = true
+        }
+        catch (err) {
+          // 404: the runner is switched off on the server — this run goes to ComfyUI as before.
+          if (!isRunnerNotFound(err)) throw err
+          console.warn('[Run] the Sailor runner is off on the server; running on ComfyUI')
+        }
+      }
+      if (sentToRunner) {
+        // Registered as the POST returned (sendRunnerPost), before its early events were replayed.
       } else if (takeCount > 1) {
         // Parallel takes: fan N fresh-seeded prompts across the cloud pool.
         // queueParallel decides worker assignment internally (and falls back to
@@ -1343,10 +1360,10 @@ async function handleRunnerGateAction(e: Event) {
   const runDoc = savedWorkflows[runTabId]
   const canvasId = isProjectDoc(runDoc) ? runDoc.activeCanvasId : null
   try {
-    const res = await runnerGateAction({ runId, nodeId: d.nodeId, action: d.action, takes: d.takes })
-    for (const promptId of res.promptIds) {
-      registerRun({ promptId, tabId: runTabId, live: false, worker: RUNNER_WORKER, canvasId })
-    }
+    await sendRunnerPost(
+      () => runnerGateAction({ runId, nodeId: d.nodeId, action: d.action, takes: d.takes }),
+      res => { for (const promptId of res.promptIds) registerRunnerStage(promptId, runTabId, canvasId) },
+    )
   }
   catch (err) {
     const body = (err as any)?.data
@@ -1360,12 +1377,15 @@ async function handleRunnerGateAction(e: Event) {
 
 // Stop/interrupt the current ComfyUI execution and clear the queue
 async function stopVueWorkflow() {
+  // Runner runs: only the ones registered to the active tab (other tabs' runs keep going).
+  const stopTabId = activeTab.value?.id || ''
+  const runnerRunIds = runnerEnabled ? runnerRunIdsForTab(inFlight({ tabId: stopTabId }), stopTabId) : []
   try {
     await Promise.all([
       fetch('/interrupt', { method: 'POST' }),
       fetch('/queue', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clear: true }) }),
-      // Runner runs: cancelled at fal; holds for unfinished stages dropped.
-      ...(runnerEnabled ? [stopRunnerRuns()] : []),
+      // Cancelled at fal; holds for unfinished stages dropped.
+      ...(runnerRunIds.length ? [stopRunnerRuns(runnerRunIds)] : []),
     ])
   }
   catch (err) {
@@ -1911,7 +1931,11 @@ let pendingLiveRunsResetTimer: ReturnType<typeof setTimeout> | null = null
 // NB: `Map` here would resolve to the lucide-vue-next icon imported above,
 // not the global constructor — use globalThis.Map explicitly.
 const DIRECT_RUN_STALL_MS = 120_000
+// Runner stages: longer than the 30-minute video limit, so only a stage that
+// ended without any closing event (a lost stream, a crashed server) trips it.
+const RUNNER_STAGE_STALL_MS = 35 * 60_000
 const directRunWatchdogs = new globalThis.Map<string, ReturnType<typeof setTimeout>>()
+const directRunWatchdogMs = new globalThis.Map<string, number>()
 // prompt_id → its originating tab, so a re-arm (which only carries the id) can
 // still idle the right tab if the run ultimately stalls.
 const directRunWatchdogTabs = new globalThis.Map<string, string>()
@@ -1919,22 +1943,25 @@ function clearDirectRunWatchdog(promptId: string) {
   const t = directRunWatchdogs.get(promptId)
   if (t) { clearTimeout(t); directRunWatchdogs.delete(promptId) }
   directRunWatchdogTabs.delete(promptId)
+  directRunWatchdogMs.delete(promptId)
 }
-function armDirectRunWatchdog(promptId: string, tabId: string) {
+function armDirectRunWatchdog(promptId: string, tabId: string, stallMs = DIRECT_RUN_STALL_MS) {
   directRunWatchdogTabs.set(promptId, tabId)
+  directRunWatchdogMs.set(promptId, stallMs)
   const existing = directRunWatchdogs.get(promptId)
   if (existing) clearTimeout(existing)
   directRunWatchdogs.set(promptId, setTimeout(() => {
     directRunWatchdogs.delete(promptId)
     directRunWatchdogTabs.delete(promptId)
-    console.error('[Run] no WS event for direct prompt in %dms — run stalled', DIRECT_RUN_STALL_MS)
+    directRunWatchdogMs.delete(promptId)
+    console.error('[Run] no WS event for direct prompt in %dms — run stalled', stallMs)
     toast.error('Run stalled — no response from the server')
     finishRun(promptId, 'error')
     if (tabId && inFlight({ tabId }).length === 0) updateTabStatus(tabId, 'idle')
     // A stalled run's node would shimmer forever (no completion event will
     // ever clear it) — once NOTHING is in flight anywhere, sweep run visuals.
     if (inFlight().length === 0) vueCanvasRef.value?.clearAllRunVisuals?.()
-  }, DIRECT_RUN_STALL_MS))
+  }, stallMs))
 }
 // Re-arm the stall timer on any event carrying this prompt_id, IF a watchdog is
 // still live for it (i.e. it hasn't been cleared by a completion event). Reuses
@@ -1942,7 +1969,44 @@ function armDirectRunWatchdog(promptId: string, tabId: string) {
 function rearmDirectRunWatchdog(promptId: string) {
   if (!directRunWatchdogs.has(promptId)) return
   const tabId = directRunWatchdogTabs.get(promptId) ?? ''
-  armDirectRunWatchdog(promptId, tabId)
+  armDirectRunWatchdog(promptId, tabId, directRunWatchdogMs.get(promptId))
+}
+
+// ── Runner events: registration and the early-event buffer ──────────────────
+// The server starts a leg before the POST that asked for it returns, so its
+// first events can arrive before this window has registered the stage. While
+// any runner POST (start or Gate button) is in flight, handleBridgeEvent holds
+// every unregistered runner event here; once the POST's stages are registered
+// they are replayed in order. See lib/runner/routing.ts.
+const runnerEventBuffer = createRunnerEventBuffer<any>()
+
+function registerRunnerStage(promptId: string, tabId: string, canvasId: string | null) {
+  registerRun({ promptId, tabId, live: false, worker: RUNNER_WORKER, canvasId })
+  armDirectRunWatchdog(promptId, tabId, RUNNER_STAGE_STALL_MS)
+}
+
+/** Sends one runner POST with its early events held; `register` runs before they are replayed. */
+async function sendRunnerPost(post: () => Promise<LegStarted>, register: (res: LegStarted) => void): Promise<LegStarted> {
+  await ensureRunnerEvents()
+  runnerEventBuffer.begin()
+  let res: LegStarted
+  try { res = await post() }
+  catch (e) {
+    runnerEventBuffer.end()
+    flushRunnerEvents()
+    throw e
+  }
+  runnerEventBuffer.end()
+  register(res)
+  for (const held of runnerEventBuffer.take(res.runId)) handleBridgeEvent(held)
+  flushRunnerEvents()
+  return res
+}
+
+/** With no runner POST in flight, held events take the usual rule: an open tab owns their canvas, or they are dropped. */
+function flushRunnerEvents() {
+  if (runnerEventBuffer.busy) return
+  for (const held of runnerEventBuffer.takeAll()) handleBridgeEvent(held)
 }
 function handleLiveRun(e: Event) {
   // Live preview runs are SCOPED to the node that asked for them. targetIds
@@ -2879,7 +2943,7 @@ onMounted(async () => {
     })
   }
   if (directExecutionEnabled.value) direct.connect()
-  if (runnerEnabled) runnerEvents.connect()
+  // The runner's event stream opens lazily (ensureRunnerEvents), on first use.
   watch(directExecutionEnabled, (on) => {
     if (on) direct.connect()
     else direct.disconnect()
@@ -3043,6 +3107,20 @@ function handleBridgeEvent(data: any) {
   let tabId: string | null = projectTabs.find((t) => t.id === activeTabId.value)?.id ?? null
 
   const { event: evt, percent, prompt_id, node_id } = data
+
+  // Runner events (never the active-tab fallback: another window's or another
+  // project's run must not light this canvas). A runner id this window has not
+  // registered is held while a runner POST is in flight (it may be that POST's
+  // run); otherwise it belongs to the open tab whose document owns its canvas,
+  // and is registered there — or it is not ours, and is dropped.
+  if (isRunnerPromptId(prompt_id) && !getRun(prompt_id)) {
+    if (runnerEventBuffer.hold(prompt_id, data)) return
+    const owner = ownerTabForCanvas(projectTabs, savedWorkflows, data.canvas_id)
+    if (!owner) return
+    // A Gate's pause names the leg, which never gets a closing event: attribute it, don't register it.
+    if (evt !== 'gate_paused') registerRunnerStage(prompt_id, owner, data.canvas_id ?? null)
+    tabId = owner
+  }
 
   // Registry attribution (direct mode): if this event carries a prompt_id the
   // run registry knows, that run's originating tab wins over the active-tab

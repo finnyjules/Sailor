@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createLimiter } from '~~/server/runner/engine'
 import { createFileRunStore, type RunStore } from '~~/server/runner/store'
 import type { RunRecord } from '~~/server/runner/types'
@@ -54,7 +54,7 @@ describe('run → Gate', () => {
     expect(ofType(k.seen, 'execution_success')[0]!.data).toMatchObject({ prompt_id: stage, run_id: runId, recorded: true, credits: null })
     const paused = ofType(k.seen, 'gate_paused')
     expect(paused).toHaveLength(1)
-    expect(paused[0]!.data).toEqual({ prompt_id: legId, run_id: runId, node_id: '2', choices: [{ take: 0, files: [img] }], picked: [0] })
+    expect(paused[0]!.data).toEqual({ prompt_id: legId, run_id: runId, node_id: '2', choices: [{ take: 0, files: [img] }], picked: [0], canvas_id: 'c1' })
     // the pause is the last word
     expect(k.seen.at(-1)!.type).toBe('gate_paused')
 
@@ -220,6 +220,36 @@ describe('when things go wrong', () => {
     expect(last!.status).not.toBe('running')
     expect(k.deps.reportError).toHaveBeenCalled()
   })
+  it('a failed save right after the result is kept does not turn the finished node into an error', async () => {
+    const inner = createFileRunStore(mkdtempSync(join(tmpdir(), 'runner-engine-failing-once-')))
+    let failOnce = false
+    const store: RunStore = {
+      ...inner,
+      save: async (run) => {
+        if (failOnce) { failOnce = false; throw new Error('disk hiccup') }
+        return inner.save(run)
+      },
+    }
+    const k = makeKit({
+      hosted: true,
+      deps: {
+        store,
+        download: async (url: string) => {
+          failOnce = true // the next save is the one right after the result is kept
+          return { bytes: new TextEncoder().encode(url), contentType: 'image/png' }
+        },
+      },
+    })
+    const { runId, promptIds } = await k.engine.startRun({ userId: 'user_1', takes: [gatedFlow()], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    await k.engine.settled(runId)
+    const run = (await store.get(runId))!
+    expect(run.takes[0]!.nodes['1']!.status).toBe('done')
+    expect(run.status).toBe('paused')
+    expect(ofType(k.seen, 'execution_error')).toHaveLength(0)
+    expect(ofType(k.seen, 'executed').some(m => m.data.node === '1')).toBe(true)
+    expect(ofType(k.seen, 'execution_success').find(m => m.data.prompt_id === promptIds[0])!.data.credits).toBe(2)
+    expect(k.deps.reportError).toHaveBeenCalledWith(expect.objectContaining({ message: 'disk hiccup' }), expect.objectContaining({ site: 'runner.node.save' }))
+  })
   it('a finished run lets go of its memory; settled() still answers and the next run works', async () => {
     const k = makeKit()
     const first = await k.engine.startRun({ userId: null, takes: [gatedFlow({ bypass: true })], workflow: null, canvasId: null, projectUuid: null, projectName: null })
@@ -233,6 +263,127 @@ describe('when things go wrong', () => {
     expect(quick).toBe('settled')
     await k.engine.settled(second.runId)
     expect((await k.store.get(second.runId))!.status).toBe('done')
+  })
+})
+
+describe('too many runs waiting', () => {
+  const fiveImages = (tag: string): ApiPrompt => {
+    const p: ApiPrompt = {}
+    for (let i = 1; i <= 5; i++) p[String(i)] = { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: `${tag}${i}`, aspect_ratio: '1:1', seed: 0, model_options: '{}' } }
+    return p
+  }
+  const start = (k: ReturnType<typeof makeKit>, n: number, tag: string, userId: string | null = k.userId) =>
+    k.engine.startRun({ userId, takes: Array.from({ length: n }, (_, t) => fiveImages(`${tag}${t}-`)), workflow: null, canvasId: null, projectUuid: null, projectName: null })
+
+  it('refuses a run that would put more than 32 provider calls in line for one user', async () => {
+    const k = makeKit()
+    k.fal.holdNext(100)
+    const first = await start(k, 4, 'a') // 20 calls
+    await until(() => k.fal.submitted().length === 4)
+    await expect(start(k, 3, 'b')).rejects.toMatchObject({ statusCode: 429, message: 'You have too many runs waiting. Try again when one finishes.' })
+    const ok = await start(k, 2, 'c') // 20 + 10 = 30: fine
+    await expect(start(k, 1, 'd')).rejects.toMatchObject({ statusCode: 429 }) // 30 + 5 = 35
+    k.fal.holdNext(0)
+    k.fal.release()
+    await k.engine.settled(first.runId)
+    await k.engine.settled(ok.runId)
+    const again = await start(k, 4, 'e') // everything finished: the line is empty again
+    k.fal.holdNext(0)
+    k.fal.release()
+    await k.engine.settled(again.runId)
+  })
+  it('another user’s runs do not count', async () => {
+    const k = makeKit({ hosted: true, available: 100_000 })
+    k.fal.holdNext(100)
+    const first = await start(k, 6, 'a', 'user_1') // 30 calls
+    await until(() => k.fal.submitted().length === 4)
+    const other = await start(k, 6, 'b', 'user_2')
+    k.fal.holdNext(0)
+    k.fal.release()
+    await k.engine.settled(first.runId)
+    await k.engine.settled(other.runId)
+  })
+})
+
+describe('the saved workflow', () => {
+  it('is kept as sent, unless it is over 2 MB (then Open workflow falls back)', async () => {
+    const k = makeKit()
+    const small = await k.engine.startRun({ userId: null, takes: [gatedFlow({ bypass: true })], workflow: { nodes: ['as run'] }, canvasId: null, projectUuid: null, projectName: null })
+    await k.engine.settled(small.runId)
+    expect((await k.store.get(small.runId))!.workflow).toEqual({ nodes: ['as run'] })
+    const huge = { nodes: ['x'.repeat(2_000_001)] }
+    const big = await k.engine.startRun({ userId: null, takes: [gatedFlow({ bypass: true })], workflow: huge, canvasId: null, projectUuid: null, projectName: null })
+    await k.engine.settled(big.runId)
+    expect((await k.store.get(big.runId))!.workflow).toBeNull()
+  })
+})
+
+describe('every message names its canvas', () => {
+  it('published messages and the catch-up snapshot carry canvas_id', async () => {
+    const k = makeKit()
+    k.fal.holdNext(1)
+    const { runId } = await k.engine.startRun({ userId: null, takes: [gatedFlow()], workflow: null, canvasId: 'canvas-7', projectUuid: null, projectName: null })
+    await until(() => k.fal.submitted().length === 1)
+    const snap = k.engine.snapshot(null)
+    expect(snap.length).toBeGreaterThan(0)
+    expect(snap.every(m => m.data.canvas_id === 'canvas-7')).toBe(true)
+    k.fal.release()
+    await k.engine.settled(runId)
+    for (const t of ['execution_start', 'executing', 'queue_position', 'executed', 'execution_success', 'gate_paused']) expect(types(k.seen)).toContain(t)
+    expect(k.seen.every(m => m.data.canvas_id === 'canvas-7')).toBe(true)
+    const paused = k.engine.snapshot(null)
+    expect(paused.map(m => [m.type, m.data.canvas_id])).toEqual([['gate_paused', 'canvas-7']])
+  })
+  it('a run without a canvas says so (null)', async () => {
+    const k = makeKit()
+    const { runId } = await k.engine.startRun({ userId: null, takes: [gatedFlow({ bypass: true })], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    await k.engine.settled(runId)
+    expect(k.seen.every(m => 'canvas_id' in m.data && m.data.canvas_id === null)).toBe(true)
+  })
+})
+
+describe('network blips (fal still bills the request)', () => {
+  const blip = () => { throw new TypeError('fetch failed') }
+  it('a status check that gets no answer is tried again, not failed', async () => {
+    const k = makeKit()
+    vi.mocked(k.fal.client.status).mockImplementationOnce(async () => blip())
+    const { runId } = await k.engine.startRun({ userId: null, takes: [gatedFlow()], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    await k.engine.settled(runId)
+    const run = (await k.store.get(runId))!
+    expect(run.takes[0]!.nodes['1']!.status).toBe('done')
+    expect(run.status).toBe('paused')
+    expect(k.fal.submitted()).toHaveLength(1)
+  })
+  it('fetching the finished result is tried again after a network error', async () => {
+    const k = makeKit()
+    vi.mocked(k.fal.client.result).mockImplementationOnce(async () => blip())
+    const { runId } = await k.engine.startRun({ userId: null, takes: [gatedFlow()], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    await k.engine.settled(runId)
+    const run = (await k.store.get(runId))!
+    expect(run.takes[0]!.nodes['1']!.status).toBe('done')
+    expect(k.fal.client.result).toHaveBeenCalledTimes(2)
+    expect(k.fal.submitted()).toHaveLength(1)
+  })
+  it('an HTTP refusal of the result still fails the node', async () => {
+    const k = makeKit()
+    const { FalError } = await import('~~/server/runner/falQueue')
+    vi.mocked(k.fal.client.result).mockImplementationOnce(async () => { throw new FalError('fal result 422: bad', 422) })
+    const { runId } = await k.engine.startRun({ userId: null, takes: [gatedFlow()], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    await k.engine.settled(runId)
+    expect((await k.store.get(runId))!.takes[0]!.nodes['1']!).toMatchObject({ status: 'error', error: 'fal result 422: bad' })
+  })
+  it('a blip is not an answer: past the time limit, fal is still asked properly once', async () => {
+    let clock = 1_000_000
+    const k = makeKit({ deps: { now: () => clock } })
+    vi.mocked(k.fal.client.status).mockImplementationOnce(async () => {
+      clock += 10 * 60_000 // the network was down for ten minutes
+      k.fal.submitted()[0]!.polls = 1 // fal finished meanwhile
+      return { status: 'UNKNOWN', queuePosition: null, logs: [], error: null, transient: true, raw: null }
+    })
+    const { runId } = await k.engine.startRun({ userId: null, takes: [gatedFlow()], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    await k.engine.settled(runId)
+    expect(k.fal.client.cancel).not.toHaveBeenCalled()
+    expect((await k.store.get(runId))!.takes[0]!.nodes['1']!.status).toBe('done')
   })
 })
 

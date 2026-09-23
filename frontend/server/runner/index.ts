@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto'
 import { createEngine, type Engine } from './engine'
 import { getRunStore } from './store'
-import { realFalClient } from './falQueue'
+import { downloadResult, realFalClient } from './falQueue'
 import { createEngineResultStore } from './results'
 import { createHandoff } from './handoff'
 import { createMetering } from './metering'
@@ -67,11 +67,8 @@ export function getEngine(): Engine {
         if (!r.ok) throw new Error(`generation record ${r.status}`)
       },
     }),
-    download: async (url) => {
-      const r = await fetch(url)
-      if (!r.ok) throw new Error(`Could not download the result (${r.status})`)
-      return { bytes: new Uint8Array(await r.arrayBuffer()), contentType: r.headers.get('content-type') }
-    },
+    // Network errors and 5xx are tried again (1s, 2s): fal has already billed the result.
+    download: url => downloadResult(url),
     hosted: isHosted,
     webhookUrl: () => {
       const base = webhookBaseUrl()

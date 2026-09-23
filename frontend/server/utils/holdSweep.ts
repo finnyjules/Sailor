@@ -14,17 +14,24 @@
  */
 import { getLiveLedger } from './ledgerLive'
 import { getSharedLedgerDb } from './ledgerDb'
+import type { LedgerDb } from './ledger'
 import { isHosted } from './deployMode'
 
 /** Longest legitimate provider job is minutes — 2h is a wide safety margin. */
 export const HOLD_TTL_MS = 2 * 60 * 60 * 1000
+/**
+ * The Sailor runner's holds (idempotency key `runner:…`) can sit queued at
+ * fal for a long time before the job even starts, so they get a day.
+ */
+export const RUNNER_HOLD_TTL_MS = 24 * 60 * 60 * 1000
 /** Sweep cadence — well inside the TTL so a stale hold is short-lived. */
 export const HOLD_SWEEP_INTERVAL_MS = 15 * 60_000
 /** Boot must not pay for a sweep: the first one runs a minute in. */
 export const HOLD_SWEEP_FIRST_RUN_MS = 60_000
 
 export interface HoldSweepDeps {
-  listStaleHoldIds(cutoff: Date): Promise<number[]>
+  /** Open holds created before `cutoff`; runner holds only before `runnerCutoff`. */
+  listStaleHoldIds(cutoff: Date, runnerCutoff: Date): Promise<number[]>
   release(holdId: number): Promise<void>
 }
 
@@ -38,7 +45,8 @@ export interface HoldSweepDeps {
  */
 export async function sweepStaleHoldsWith(deps: HoldSweepDeps, now = new Date()): Promise<number> {
   const cutoff = new Date(now.getTime() - HOLD_TTL_MS)
-  const ids = await deps.listStaleHoldIds(cutoff)
+  const runnerCutoff = new Date(now.getTime() - RUNNER_HOLD_TTL_MS)
+  const ids = await deps.listStaleHoldIds(cutoff, runnerCutoff)
 
   let released = 0
   for (const id of ids) {
@@ -53,16 +61,21 @@ export async function sweepStaleHoldsWith(deps: HoldSweepDeps, now = new Date())
   return released
 }
 
+/** The open holds past their TTL: `runner:` holds past `runnerCutoff`, all others past `cutoff`. */
+export async function listStaleHoldIds(db: LedgerDb, cutoff: Date, runnerCutoff: Date): Promise<number[]> {
+  const { rows } = await db.query(
+    `SELECT id FROM holds WHERE state = 'open' AND created_at < $1
+       AND (left(idempotency_key, 7) <> 'runner:' OR created_at < $2)
+     ORDER BY id`, [cutoff, runnerCutoff])
+  return rows.map(r => Number(r.id))
+}
+
 /** Production wiring: the shared ledger session + the live ledger's release. */
 export async function sweepStaleHolds(now = new Date()): Promise<number> {
   const db = getSharedLedgerDb()
   const ledger = getLiveLedger()
   return sweepStaleHoldsWith({
-    async listStaleHoldIds(cutoff) {
-      const { rows } = await db.query(
-        `SELECT id FROM holds WHERE state = 'open' AND created_at < $1 ORDER BY id`, [cutoff])
-      return rows.map(r => Number(r.id))
-    },
+    listStaleHoldIds: (cutoff, runnerCutoff) => listStaleHoldIds(db, cutoff, runnerCutoff),
     release: holdId => ledger.release(holdId),
   }, now)
 }

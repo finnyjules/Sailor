@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import type { ApiPrompt } from '#shared/runner/graph'
 import { makeKit, gatedFlow, createFakeFal, createFakeLedger, ofType, until } from './__runner__/kit'
 
 async function pausedRun(k: ReturnType<typeof makeKit>, takes = [gatedFlow({ imageSeed: 7 })]) {
@@ -317,6 +318,103 @@ describe('restart recovery', () => {
     expect(run.status).toBe('paused')
     const file = run.takes[0]!.nodes['1']!.outputs[0]!
     expect(existsSync(join(k2.root, 'output', file.filename))).toBe(true)
+  })
+
+  // A leg interrupted after one of its generators finished: the restarted
+  // server must still charge and record the work finished before the crash.
+  const crashingKit = (fal: ReturnType<typeof createFakeFal>, ledger: ReturnType<typeof createFakeLedger>) => {
+    const state = { crashed: false }
+    const k = makeKit({
+      hosted: true, fal, ledger,
+      deps: { sleep: () => (state.crashed ? new Promise<void>(() => {}) : new Promise<void>(r => setTimeout(r, 1))) },
+    })
+    return { k, state }
+  }
+  const reqFor = (fal: ReturnType<typeof createFakeFal>, prompt: string) => fal.submitted().find(r => r.payload.prompt === prompt)!
+
+  it.each([
+    ['', false],
+    [' (a run saved before the leg wrote down its nodes)', true],
+  ])('a restart mid-leg charges and records both generators of the leg, once%s', async (_label, legacy) => {
+    const fal = createFakeFal()
+    const ledger = createFakeLedger()
+    const { k: k1, state } = crashingKit(fal, ledger)
+    const twoGenerators: ApiPrompt = {
+      '1': { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'first', aspect_ratio: '1:1', seed: 0, model_options: '{}' } },
+      '2': { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'second', aspect_ratio: '1:1', seed: 0, model_options: '{}' } },
+      '3': { class_type: 'Image', inputs: { image: '', export: false, images: ['1', 0], batch_index: -1 } },
+    }
+    fal.holdNext(2)
+    const { runId, promptIds } = await k1.engine.startRun({ userId: 'user_1', takes: [twoGenerators], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    await until(() => fal.submitted().length === 2)
+    fal.release(reqFor(fal, 'first').id)
+    let saved: Awaited<ReturnType<typeof k1.store.get>> = null
+    for (const end = Date.now() + 3000; Date.now() < end;) {
+      saved = await k1.store.get(runId)
+      if (saved?.takes[0]!.nodes['1']!.status === 'done') break
+      await new Promise(r => setTimeout(r, 2))
+    }
+    expect(saved!.takes[0]!.nodes['1']!.status).toBe('done')
+    state.crashed = true
+    await new Promise(r => setTimeout(r, 20))
+    if (legacy) {
+      const old = (await k1.store.get(runId))!
+      expect(old.charges[0]!.nodeIds).toEqual(['1', '2', '3'])
+      delete old.charges[0]!.nodeIds
+      await k1.store.save(old)
+    }
+
+    const k2 = makeKit({ hosted: true, dir: k1.dir, root: k1.root, fal, ledger })
+    expect(await k2.engine.reattach()).toBe(1)
+    fal.release()
+    await k2.engine.settled(runId)
+    expect(fal.submitted()).toHaveLength(2)
+    expect(ledger.hold).toHaveBeenCalledTimes(1)
+    expect(ledger.settle).toHaveBeenCalledTimes(1)
+    // two images (1 each) + the render credit (1)
+    expect([...ledger.holds.values()].map(h => [h.state, h.actual])).toEqual([['settled', 3]])
+    const run = (await k2.store.get(runId))!
+    expect(run.charges[0]!.actual).toBe(3)
+    expect(ofType(k2.seen, 'execution_success').find(m => m.data.prompt_id === promptIds[0])!.data.credits).toBe(3)
+    expect(k2.records.write).toHaveBeenCalledTimes(1)
+    const summary = (k2.records.write.mock.calls[0] as unknown[])[0] as { outputs: unknown[] }
+    expect(summary.outputs).toHaveLength(2)
+  })
+
+  it('after a restart mid-leg, the image before a Gate is still charged', async () => {
+    const fal = createFakeFal()
+    const ledger = createFakeLedger()
+    const { k: k1, state } = crashingKit(fal, ledger)
+    // image(1) → Gate(2) …, plus a second, independent generator (6) that is still going at the crash
+    const flow: ApiPrompt = {
+      ...gatedFlow(),
+      '6': { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'the other one', aspect_ratio: '1:1', seed: 0, model_options: '{}' } },
+    }
+    fal.holdNext(2)
+    const { runId } = await k1.engine.startRun({ userId: 'user_1', takes: [flow], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    await until(() => fal.submitted().length === 2)
+    fal.release(reqFor(fal, 'a red fox').id)
+    let saved: Awaited<ReturnType<typeof k1.store.get>> = null
+    for (const end = Date.now() + 3000; Date.now() < end;) {
+      saved = await k1.store.get(runId)
+      if (saved?.takes[0]!.nodes['2']!.status === 'paused') break
+      await new Promise(r => setTimeout(r, 2))
+    }
+    expect(saved!.takes[0]!.nodes['1']!.status).toBe('done')
+    expect(saved!.takes[0]!.nodes['2']!.status).toBe('paused')
+    state.crashed = true
+    await new Promise(r => setTimeout(r, 20))
+
+    const k2 = makeKit({ hosted: true, dir: k1.dir, root: k1.root, fal, ledger })
+    expect(await k2.engine.reattach()).toBe(1)
+    fal.release()
+    await k2.engine.settled(runId)
+    expect(fal.submitted()).toHaveLength(2)
+    // image (1) + the other image (1) + the render credit (1)
+    expect([...ledger.holds.values()].map(h => [h.state, h.actual])).toEqual([['settled', 3]])
+    const run = (await k2.store.get(runId))!
+    expect(run.status).toBe('paused')
+    expect(ofType(k2.seen, 'gate_paused')).toHaveLength(1)
   })
 
   it('the time limit still holds once fal has been asked', async () => {

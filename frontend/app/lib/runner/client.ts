@@ -32,6 +32,12 @@ export function runIdOfPrompt(promptId: unknown): string | null {
   return (promptId as string).split('.')[0]!
 }
 
+/** An HTTP 404 from /api/runs: the runner is switched off on the server (the run then goes to ComfyUI). */
+export function isRunnerNotFound(e: unknown): boolean {
+  const x = e as { statusCode?: unknown; status?: unknown; response?: { status?: unknown } } | null
+  return !!x && (x.statusCode === 404 || x.status === 404 || x.response?.status === 404)
+}
+
 export function startRunnerRun(body: { takes: ApiPrompt[]; workflow: unknown; canvasId: string | null; projectUuid: string | null; projectName: string | null }): Promise<LegStarted> {
   return $fetch<LegStarted>('/api/runs', { method: 'POST', body })
 }
@@ -40,8 +46,10 @@ export function runnerGateAction(body: { runId: string; nodeId: string; action: 
   return $fetch<LegStarted>('/api/runs/gate', { method: 'POST', body })
 }
 
-export async function stopRunnerRuns(): Promise<void> {
-  try { await $fetch('/api/runs/stop', { method: 'POST', body: {} }) }
+/** Stops the listed runner runs (only those: other tabs' runs keep going). */
+export async function stopRunnerRuns(runIds: string[]): Promise<void> {
+  if (!runIds.length) return
+  try { await $fetch('/api/runs/stop', { method: 'POST', body: { runIds } }) }
   catch (e) { console.warn('[runner] stop failed', e) }
 }
 

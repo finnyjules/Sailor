@@ -14,13 +14,17 @@ import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { PGlite } from '@electric-sql/pglite'
 import {
   HOLD_SWEEP_FIRST_RUN_MS,
   HOLD_SWEEP_INTERVAL_MS,
   HOLD_TTL_MS,
+  RUNNER_HOLD_TTL_MS,
+  listStaleHoldIds,
   startHoldSweeperWith,
   sweepStaleHoldsWith,
 } from '../../server/utils/holdSweep'
+import { createLedger } from '../../server/utils/ledger'
 
 let errorSpy: ReturnType<typeof vi.spyOn>
 let warnSpy: ReturnType<typeof vi.spyOn>
@@ -55,6 +59,14 @@ describe('sweepStaleHoldsWith', () => {
     expect(cutoff.getTime()).toBe(NOW.getTime() - HOLD_TTL_MS)
   })
 
+  it('runner holds get 24 hours: the listing is also given now - RUNNER_HOLD_TTL_MS', async () => {
+    const listStaleHoldIds = vi.fn(async (_cutoff: Date, _runnerCutoff: Date) => [] as number[])
+    await sweepStaleHoldsWith({ listStaleHoldIds, release: async () => {} }, NOW)
+
+    expect(RUNNER_HOLD_TTL_MS).toBe(24 * 60 * 60 * 1000)
+    expect(listStaleHoldIds.mock.calls[0]![1].getTime()).toBe(NOW.getTime() - RUNNER_HOLD_TTL_MS)
+  })
+
   it('nothing stale: returns 0 and stays quiet', async () => {
     const released = await sweepStaleHoldsWith(
       { listStaleHoldIds: async () => [], release: async () => {} }, NOW,
@@ -87,6 +99,32 @@ describe('sweepStaleHoldsWith', () => {
 
   it('the TTL is far longer than any legitimate job (2h)', () => {
     expect(HOLD_TTL_MS).toBe(2 * 60 * 60 * 1000)
+  })
+})
+
+describe('listStaleHoldIds (the real query)', () => {
+  it('a runner hold is swept only after 24 hours; any other hold after 2', async () => {
+    const schema = readFileSync(fileURLToPath(new URL('../../server/db/schema.sql', import.meta.url)), 'utf8')
+    const db = new PGlite()
+    await db.exec(schema)
+    const ledger = createLedger(db)
+    await ledger.ensureUser('u1')
+    await ledger.credit('u1', 1000, 'topup', 'seed')
+    const ids: Record<string, number> = {}
+    for (const key of ['runner:run_a.0.t0', 'runner:run_b.0.t0', 'train:job1', 'fal:call1']) {
+      const h = await ledger.hold('u1', 10, key)
+      if (!h.ok) throw new Error('hold failed')
+      ids[key] = h.holdId
+    }
+    const ago = async (key: string, hours: number) =>
+      db.query(`UPDATE holds SET created_at = $1 WHERE id = $2`, [new Date(NOW.getTime() - hours * 3600_000), ids[key]])
+    await ago('runner:run_a.0.t0', 3) // queued at fal for 3 hours: not stale yet
+    await ago('runner:run_b.0.t0', 25)
+    await ago('train:job1', 3)
+    await ago('fal:call1', 1)
+
+    const stale = await listStaleHoldIds(db, new Date(NOW.getTime() - HOLD_TTL_MS), new Date(NOW.getTime() - RUNNER_HOLD_TTL_MS))
+    expect(stale).toEqual([ids['runner:run_b.0.t0'], ids['train:job1']].sort((a, b) => a! - b!))
   })
 })
 

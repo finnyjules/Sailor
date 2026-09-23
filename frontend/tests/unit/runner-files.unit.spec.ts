@@ -65,6 +65,20 @@ describe('handoff', () => {
     expect(mimeFor('clip.MP4')).toBe('video/mp4')
     expect(mimeFor('x.jpeg')).toBe('image/jpeg')
   })
+  it('uploads again once the remembered link is a day old', async () => {
+    let clock = 1_000_000
+    let n = 0
+    const upload = vi.fn(async () => `https://fal.media/up${++n}.png`)
+    const h = createHandoff({ read: async () => new Uint8Array([9]), upload, now: () => clock })
+    const f = { filename: 'a.png', subfolder: '', type: 'output' as const }
+    expect(await h.toUrl(f)).toBe('https://fal.media/up1.png')
+    clock += 24 * 60 * 60 * 1000 - 1
+    expect(await h.toUrl(f)).toBe('https://fal.media/up1.png')
+    clock += 2
+    expect(await h.toUrl(f)).toBe('https://fal.media/up2.png')
+    expect(upload).toHaveBeenCalledTimes(2)
+    expect(h.hashOf('https://fal.media/up2.png')).toBe(sha256Hex(new Uint8Array([9])))
+  })
 })
 
 describe('inputs', () => {

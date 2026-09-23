@@ -72,6 +72,19 @@ describe('fal webhook signature', () => {
     await cache.keys(); await cache.keys()
     expect(fetchKeys).toHaveBeenCalledTimes(1)
   })
+  it('remembers a failed key fetch for a minute, then tries again', async () => {
+    let clock = 1_000_000
+    const fetchKeys = vi.fn(async () => { throw new Error('fal JWKS 503') })
+    const cache = createJwksCache(fetchKeys, 60_000, () => clock)
+    await expect(cache.keys()).rejects.toThrow('fal JWKS 503')
+    clock += 59_999
+    await expect(cache.keys()).rejects.toThrow('fal JWKS 503')
+    expect(fetchKeys).toHaveBeenCalledTimes(1)
+    clock += 2
+    fetchKeys.mockImplementationOnce(async () => keys)
+    await expect(cache.keys()).resolves.toEqual(keys)
+    expect(fetchKeys).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe('poll pacing', () => {

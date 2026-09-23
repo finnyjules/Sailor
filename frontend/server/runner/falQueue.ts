@@ -33,7 +33,7 @@ export interface FalStatus {
   queuePosition: number | null
   logs: { message: string }[]
   error: string | null
-  /** A 5xx from fal: try again later, nothing is known. */
+  /** A 5xx from fal, or no answer at all (network error): try again later, nothing is known. */
   transient: boolean
   raw: unknown
 }
@@ -43,6 +43,16 @@ function headers(): Record<string, string> {
   if (!token) throw new Error('FAL_KEY is not set (add it to frontend/.env)')
   return { Authorization: `Key ${token}`, 'Content-Type': 'application/json' }
 }
+
+/**
+ * True when the call got no HTTP answer at all (connection refused or reset,
+ * DNS, timeout). Every HTTP status is a FalError; a garbled body is a SyntaxError.
+ */
+export function isFalNetworkError(e: unknown): boolean {
+  return !(e instanceof FalError) && !(e instanceof SyntaxError)
+}
+
+const transientStatus = (): FalStatus => ({ status: 'UNKNOWN', queuePosition: null, logs: [], error: null, transient: true, raw: null })
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
 const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
@@ -74,13 +84,17 @@ export async function falSubmit(
 
 export async function falStatus(statusUrl: string, opts: { logs?: boolean } = {}): Promise<FalStatus> {
   const url = opts.logs ? `${statusUrl}${statusUrl.includes('?') ? '&' : '?'}logs=1` : statusUrl
-  const r = await fetch(url, { headers: headers() })
+  const h = headers()
+  let r: Response
+  // No answer at all is a blip, like a 5xx: fal may still be working (and billing).
+  try { r = await fetch(url, { headers: h }) }
+  catch { return transientStatus() }
   if (r.status !== 200 && r.status !== 202) {
     if (r.status >= 400 && r.status < 500) {
       const t = await r.text().catch(() => '')
       throw new FalError(`fal status ${r.status} (not retryable): ${t}`, r.status)
     }
-    return { status: 'UNKNOWN', queuePosition: null, logs: [], error: null, transient: true, raw: null }
+    return transientStatus()
   }
   const body = await r.json() as Record<string, unknown>
   const logs = Array.isArray(body.logs)
@@ -103,6 +117,33 @@ export async function falResult<T = unknown>(responseUrl: string): Promise<T> {
     throw new FalError(`fal result ${r.status}: ${t}`, r.status)
   }
   return await r.json() as T
+}
+
+/**
+ * Fetch a finished result file (a fal.media URL). A network error or a 5xx is
+ * tried again, three tries in all, waiting 1s then 2s; a 4xx fails at once.
+ */
+export async function downloadResult(
+  url: string,
+  opts: { sleep?: (ms: number) => Promise<void> } = {},
+): Promise<{ bytes: Uint8Array; contentType: string | null }> {
+  const sleep = opts.sleep ?? (ms => new Promise<void>(r => setTimeout(r, ms)))
+  const waits = [1000, 2000]
+  for (let attempt = 0; ; attempt++) {
+    let failure: Error
+    let final = false
+    try {
+      const r = await fetch(url)
+      if (r.ok) return { bytes: new Uint8Array(await r.arrayBuffer()), contentType: r.headers.get('content-type') }
+      failure = new Error(`Could not download the result (${r.status})`)
+      final = r.status < 500
+    }
+    catch (e) {
+      failure = e instanceof Error ? e : new Error(String(e)) // no answer, or the body broke off
+    }
+    if (final || attempt >= waits.length) throw failure
+    await sleep(waits[attempt]!)
+  }
 }
 
 export async function falCancel(cancelUrl: string): Promise<'cancelled' | 'already-done' | 'not-found'> {

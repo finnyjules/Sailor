@@ -52,6 +52,25 @@ describe('Postgres run store', () => {
     await db.exec(readFileSync(fileURLToPath(new URL('../../server/db/schema.sql', import.meta.url)), 'utf8'))
     await contract(createPgRunStore(db as any))
   })
+  it('filters by canvas and status in the query, not after reading every run', async () => {
+    const db = new PGlite()
+    await db.exec(readFileSync(fileURLToPath(new URL('../../server/db/schema.sql', import.meta.url)), 'utf8'))
+    const seen: { sql: string; params: unknown[] }[] = []
+    const spy = { query: async (sql: string, params: unknown[] = []) => { seen.push({ sql, params }); return db.query(sql, params) } }
+    const store = createPgRunStore(spy as any)
+    const RUN_C = 'run_2b7c6a52-8e0e-4c4e-9c6f-1f2a3b4c5d6e'
+    await store.save(run(RUN_A, { status: 'paused', createdAt: 3 }))
+    await store.save(run(RUN_B, { status: 'paused', canvasId: 'c2', createdAt: 2 }))
+    await store.save(run(RUN_C, { status: 'done', createdAt: 1 }))
+    await store.save(run('run_3b7c6a52-8e0e-4c4e-9c6f-1f2a3b4c5d6e', { status: 'paused', canvasId: null, createdAt: 4 }))
+    seen.length = 0
+    expect((await store.listForUser('u1', { canvasId: 'c1', statuses: ['paused'] })).map(r => r.id)).toEqual([RUN_A])
+    expect(seen[0]!.params).toEqual(['u1', 'c1', ['paused']])
+    expect((await store.listForUser('u1', { canvasId: null })).map(r => r.id)).toEqual(['run_3b7c6a52-8e0e-4c4e-9c6f-1f2a3b4c5d6e'])
+    // no filters: every run of this user, oldest first
+    expect((await store.listForUser('u1')).map(r => r.id)).toEqual([RUN_C, RUN_B, RUN_A, 'run_3b7c6a52-8e0e-4c4e-9c6f-1f2a3b4c5d6e'])
+    expect(seen.at(-1)!.params).toEqual(['u1'])
+  })
 })
 
 describe('ids', () => {
