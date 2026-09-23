@@ -217,6 +217,32 @@ describe('elementsToOps — pieces and photos', () => {
     expect(ops[0]).toMatchObject({ target: 'sh', kind: 'shape', w: 0.2, colorRole: 'ink' })
   })
 
+  it('a shape rect (Knockout\'s band) moves the real shape layer to its box, centre-anchored', () => {
+    const band: El = { k: 'r', x: 0, y: 40, w: 100, h: 30, role: 'shape', color: 'ink', ok: true, bleed: true }
+    const { ops, owned } = elementsToOps([band], S, { ...targets, shape: 'sh', shapeKind: 'ellipse' }, frame)
+    expect(owned).toEqual([])
+    expect(ops).toHaveLength(1)
+    expect(ops[0]).toMatchObject({ target: 'sh', kind: 'shape', x: 0.5, w: 1, h: 0.3, colorRole: 'ink' })
+    expect(ops[0]!.y).toBeCloseTo(55 / S.H, 9)
+    expect(ops[0]!.insert).toBeUndefined()
+  })
+
+  it('a shape rect on a path layer (no stretch) gets the largest centred square', () => {
+    const band: El = { k: 'r', x: 0, y: 40, w: 100, h: 30, role: 'shape', color: 'ink' }
+    const { ops } = elementsToOps([band], S, { ...targets, shape: 'sh', shapeKind: 'path' }, frame)
+    expect(ops[0]).toMatchObject({ target: 'sh', kind: 'shape', x: 0.5, w: 0.3, h: 0.3 })
+    expect(ops[0]!.y).toBeCloseTo(55 / S.H, 9)
+  })
+
+  it('a shape rect with no shape layer stays an owned piece', () => {
+    const band: El = { k: 'r', x: 0, y: 40, w: 100, h: 30, role: 'shape', color: 'ink' }
+    const { ops, owned } = elementsToOps([band], S, targets, frame)
+    expect(owned).toHaveLength(1)
+    expect(owned[0]!.kind).toBe('rect')
+    expect((owned[0] as any).owner).toEqual({ by: 'layout', key: 'shape-0' })
+    expect(ops[0]!.insert).toEqual({ kind: 'rect', key: 'shape-0' })
+  })
+
   it('a ring sets the title on a circle', () => {
     const { ops } = elementsToOps([{ k: 'ring', cx: 50, cy: 60, R: 30, size: 6, s: 'RING' }], S, targets, frame)
     expect(ops[0]).toMatchObject({ target: 't', fontSize: 0.06, path: { follow: 'circle', radius: 0.3, start: 0.5, fit: true } })

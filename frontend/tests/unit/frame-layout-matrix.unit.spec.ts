@@ -51,6 +51,7 @@ type Combo = { id: string; kind: Kind; image: boolean; w: number; h: number }
 const EXPECTED_EMPTY: (Partial<Combo> & { reason: string })[] = [
   { id: 'photoBehind', image: false, reason: 'needs an image and the frame has none (the product shows it only in image mode, with a stand-in)' },
   { id: 'fullBleed', image: false, reason: 'needs an image and the frame has none (the product shows it only in image mode, with a stand-in)' },
+  { id: 'split', image: false, reason: 'needs an image and the frame has none (the product shows it only in image mode, with a stand-in)' },
   // Run-off's promise is a title that runs off the page. On a 1280×400 banner with no image the
   // title is height-bound (baseline row 10/12, cap top no higher than row 1, details and foot
   // below): "Echoes" fits at size 22.1 and its ink ends at 68 of 100; the sentence needs 2–4
@@ -91,7 +92,8 @@ describe('layout matrix — every candidate passes the checker and keeps its pre
       expect(plan, JSON.stringify(cand.choice)).not.toBeNull()
       expect(plan!.issues, JSON.stringify(cand.choice)).toEqual([])
       // Nothing the user wrote is dropped: every text role on the frame is placed by the layout.
-      const roles = new Set(cand.out.els.map(e => (e.k === 't' ? (e.role ?? '').replace(/\d+$/, '') : '')))
+      // (Ring sets the title on a `ring` element, which the planner turns into a text path.)
+      const roles = new Set(cand.out.els.map(e => (e.k === 't' || e.k === 'ring' ? (e.role ?? '').replace(/\d+$/, '') : '')))
       for (const r of TEXT_ROLES) expect(roles.has(r), `${r} not placed (${JSON.stringify(cand.choice)})`).toBe(true)
       checked++
     }
@@ -120,5 +122,77 @@ describe('the catalog', () => {
 
   it('every EXPECTED_EMPTY entry names a layout in the catalog', () => {
     for (const e of EXPECTED_EMPTY) expect(LAYOUTS.some(l => l.id === e.id), e.id).toBe(true)
+  })
+})
+
+describe('shape and letter layouts on a real frame', () => {
+  it.each(FRAMES)('Ring: the title survives the planner as a text path round the ring (%i×%i)', (w, h) => {
+    const def = LAYOUTS.find(l => l.id === 'ring')!
+    for (const image of [false, true]) {
+      const a = baseArgs(def, { id: 'ring', kind: 'word', image, w, h })
+      const cand = candidatesForFrame(a)[0]!
+      const ringEl = cand.out.els.find(e => e.k === 'ring')!
+      const plan = planLayout({ ...a, choice: cand.choice })!
+      const title = plan.layers.find(l => l.id === 't') as { path?: { follow: string; radius: number; start: number }; fontSize: number; x: number; y: number }
+      expect(title.path).toMatchObject({ follow: 'circle', start: 0.5 })
+      expect(ringEl.k === 'ring' && title.path!.radius).toBeCloseTo(ringEl.k === 'ring' ? ringEl.R / 100 : 0, 6)
+      expect(title.fontSize).toBeGreaterThan(0)
+    }
+  })
+
+  it.each(FRAMES)('Badge: the date\'s real ink sits inside the badge, never spilling past it (%i×%i)', (w, h) => {
+    const def = LAYOUTS.find(l => l.id === 'badge')!
+    const m = makeStubMeasure()
+    for (const kind of def.fits) {
+      for (const image of [false, true]) {
+        const a = baseArgs(def, { id: 'badge', kind, image, w, h })
+        const cands = candidatesForFrame(a)
+        expect(cands.length).toBeGreaterThan(0)
+        for (const cand of cands) {
+          const date = cand.out.els.find(e => e.k === 't' && e.role === 'date')
+          const circle = cand.out.els.find(e => e.k === 'c' && e.role === 'shape')
+          if (date?.k !== 't' || circle?.k !== 'c') throw new Error('badge lost its date or its circle')
+          expect(date.inside).toBe('shape')
+          // The unclipped ink: the date never breaks (no spaces), so it is one line of its full width.
+          const ink = m.w100(date.s, 'date', date.ls) * date.size / 100
+          const cx = date.x + date.w! / 2
+          const top = date.top!, bottom = top + 0.7 * date.size
+          for (const [x, y] of [[cx - ink / 2, top], [cx + ink / 2, top], [cx - ink / 2, bottom], [cx + ink / 2, bottom]] as const) {
+            expect(Math.hypot(x - circle.cx, y - circle.cy)).toBeLessThanOrEqual(circle.r * 0.97)
+          }
+        }
+      }
+    }
+  })
+
+  it.each(FRAMES)('Knockout: the band moves the user\'s own shape layer, no owned band (%i×%i)', (w, h) => {
+    const def = LAYOUTS.find(l => l.id === 'knockout')!
+    for (const image of [false, true]) {
+      const a = baseArgs(def, { id: 'knockout', kind: 'phrase', image, w, h })
+      const cand = candidatesForFrame(a)[0]!
+      const band = cand.out.els.find(e => e.k === 'r' && e.role === 'shape')
+      if (band?.k !== 'r') throw new Error('knockout lost its band')
+      const plan = planLayout({ ...a, choice: cand.choice })!
+      const shp = plan.layers.find(l => l.id === 'shp') as { x: number; y: number; w: number; h: number }
+      const H = 100 * h / w
+      expect(shp.x).toBeCloseTo((band.x + band.w / 2) / 100, 9)
+      expect(shp.y).toBeCloseTo((band.y + band.h / 2) / H, 9)
+      expect(shp.w).toBeCloseTo(band.w / 100, 9)
+      expect(shp.h).toBeCloseTo(band.h / 100, 9)
+      expect(plan.layers.some(l => (l as { owner?: { by: string } }).owner?.by === 'layout' && l.kind === 'rect' && (l as { owner?: { key: string } }).owner?.key.startsWith('shape'))).toBe(false)
+    }
+  })
+
+  it('the checker catches a badge date that overflows its circle (rule 5 on the real ink)', async () => {
+    const { makeSheet } = await import('~/lib/frame/patterns/kit/sheet')
+    const { checkPlan } = await import('~/lib/frame/patterns/kit/check')
+    const S = makeSheet({ frameW: 1280, frameH: 400, measure: makeStubMeasure() })
+    // The prototype's row-5 badge on a banner: radius 4.3, a text box 6.0 wide, the date's ink 8.5.
+    const rad = 4.3, cx = 50, cy = 10
+    const els = [
+      { k: 'c' as const, cx, cy, r: rad, color: 'ink' as const, role: 'shape', ok: true },
+      { k: 't' as const, s: TEXTS.date, x: cx - rad * 0.7, w: rad * 1.4, top: cy - 0.35 * S.INFO.size, size: S.INFO.size, ls: 0, lh: 1.3, align: 'center' as const, role: 'date', ok: true, inside: 'shape' },
+    ]
+    expect(checkPlan(els, S)).toContain('date does not fit inside its shape')
   })
 })

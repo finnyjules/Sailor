@@ -41,8 +41,10 @@ function rotateBox(b: Box, rot: number, origin: string | undefined): Box {
   return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) }
 }
 
-/** The ink box of a text element: widest measured line × cap-top..last-baseline. */
-function textBox(e: TextEl, S: Sheet): Box {
+/** The ink box of a text element: widest measured line × cap-top..last-baseline.
+ *  `overflow`: a word wider than the box is not clipped to it — the renderer only wraps at
+ *  spaces, so an unbreakable word (a date such as "19.09.–15.11.2026") spills past its box. */
+function textBox(e: TextEl, S: Sheet, overflow = false): Box {
   const face = faceOf(e.role)
   const CAP = S.measure.capAbove(face) + S.measure.baseBelow(face)
 
@@ -65,7 +67,7 @@ function textBox(e: TextEl, S: Sheet): Box {
   // The ink is the widest line, except justified flow text, which fills the box.
   const boxW = e.w ?? widestLine
   const align = e.align ?? 'left'
-  const width = e.just && !e.pre ? boxW : Math.min(widestLine, boxW)
+  const width = e.just && !e.pre ? Math.max(boxW, overflow ? widestLine : 0) : overflow ? widestLine : Math.min(widestLine, boxW)
   const x0 = align === 'center' ? e.x + (boxW - width) / 2 : align === 'right' ? e.x + boxW - width : e.x
 
   // Cap top of the first line .. baseline of the last line.
@@ -118,8 +120,10 @@ export function checkPlan(els: El[], S: Sheet, premise?: LayoutDef['premise']): 
   }
 
   const present = els.filter((e): e is Present => e.k !== 'missing')
+  // Rules 3 and 4 measure the real ink: a word wider than its text box spills past it (the
+  // renderer only wraps at spaces), so it counts towards off-page and overlap.
   const boxed = present
-    .map(e => ({ e, box: boxOf(e, S) }))
+    .map(e => ({ e, box: e.k === 't' ? textBox(e, S, true) : boxOf(e, S) }))
     .filter((it): it is { e: Present; box: Box } => it.box != null)
 
   // Rule 2: text below the minimum size.
@@ -149,11 +153,11 @@ export function checkPlan(els: El[], S: Sheet, premise?: LayoutDef['premise']): 
     }
   }
 
-  // Rule 5: text meant to sit inside a shape must fit inside it.
+  // Rule 5: text meant to sit inside a shape must fit inside it — measured on the real ink, so a
+  // word that overflows its text box (the renderer does not break inside a word) is caught.
   for (const e of present) {
     if (e.k !== 't' || !e.inside) continue
-    const box = boxOf(e, S)
-    if (!box) continue
+    const box = textBox(e, S, true)
     const shape = present.find(s => s.role === e.inside)
     const shapeBox = shape ? boxOf(shape, S) : null
     if (!shape || !shapeBox) continue

@@ -213,3 +213,24 @@ describe('checker — named-risk coverage', () => {
     expect((d.x0 + d.x1) / 2).not.toBeCloseTo(21)
   })
 })
+
+describe('checker — an unbreakable word wider than its box counts (real ink)', () => {
+  // "19.09.–15.11.2026": 17 chars × 0.55 em at size 4 = 37.4 wide, in a box 10 wide.
+  const date = (o: Partial<TextEl>): TextEl =>
+    ({ k: 't', s: '19.09.–15.11.2026', x: 0, w: 10, top: 20, size: 4, wt: 400, ls: 0, lh: 1.3, role: 'date', ...o })
+
+  it('rule 3: the spill runs off the page', () => {
+    // Box ends at 98 (inside); the ink ends at 88 + 37.4 = 125.4.
+    expect(checkPlan([date({ x: 88 })], S)).toContain('date: off the page')
+  })
+
+  it('rule 4: the spill runs into a neighbour beside the box', () => {
+    const els: El[] = [date({ x: 5 }), title({ role: 'caption', s: 'Basel', x: 25, w: 20, top: 20, size: 4 })]
+    // Boxes 5..15 and 25..45 do not touch; the date's ink 5..42.4 does.
+    expect(checkPlan(els, S)).toContain('date overlaps caption')
+  })
+
+  it('a word that fits its box is measured as before', () => {
+    expect(checkPlan([date({ s: '2026', x: 88 })], S)).toEqual([])
+  })
+})

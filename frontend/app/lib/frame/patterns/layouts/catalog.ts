@@ -1,5 +1,7 @@
 import type { LayoutDef } from '../kit/types'
 import { bottomHeavy, footer, fourCorners, fullBleed, index, photoBehind, runoff, shapeCounter, statement, tilt } from './swissCore'
+import { block, diagonal, edges, kicker, ragged, sidebar, spacedLines, staircase, wall } from './swissLines'
+import { badge, cascade, cells, knockout, ring, scatter, shapeBleed, split } from './swissShapes'
 
 // ORDER RULE (Ruling R9): a layout's index in this list seeds its random choices
 // (`7000 + index·97 + 13 + arr·7919`, as in the prototype). The FINAL order of this list must
@@ -18,8 +20,23 @@ export const LAYOUTS: LayoutDef[] = [
   tilt,
   bottomHeavy,
   fourCorners,
-  // spacedLines, ragged, edges, staircase, block, knockout, shapeBleed, badge, split, diagonal,
-  // wall, scatter, cascade, ring, cells, kicker, sidebar go here.
+  spacedLines,
+  ragged,
+  edges,
+  staircase,
+  block,
+  knockout,
+  shapeBleed,
+  badge,
+  split,
+  diagonal,
+  wall,
+  scatter,
+  cascade,
+  ring,
+  cells,
+  kicker,
+  sidebar,
   footer,
   // defNew (plate … rising) and defOver (overprint … ghost) follow footer.
 ]

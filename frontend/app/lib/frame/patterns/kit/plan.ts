@@ -98,7 +98,11 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
   const targets: RoleTargets = {}
   for (const r of ROLES) if (elements[r]) targets[r] = elements[r]!.id
   if (elements.images[0]) targets.image = elements.images[0].id
-  if (elements.shapes[0]) targets.shape = elements.shapes[0].id
+  if (elements.shapes[0]) {
+    targets.shape = elements.shapes[0].id
+    const kind = layers.find(l => l.id === targets.shape)?.kind
+    if (kind) targets.shapeKind = kind
+  }
   const hasImage = elements.images.length > 0 || elements.imageMode
   const layerOf = (r: RoleKey) => {
     const id = elements[r]?.id

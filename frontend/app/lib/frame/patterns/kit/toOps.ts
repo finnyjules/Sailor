@@ -16,7 +16,12 @@ import type { LocalLayer, TextRun } from '~/composables/useCompositorLayers'
 // LEFT edge of a box `w` wide (or of the widest line when there is no `w`), `align` places each
 // line inside it, `top` is the cap top of the first line and `base` the baseline of the last.
 
-export interface RoleTargets { title?: string; details?: string; date?: string; caption?: string; image?: string; shape?: string }
+export interface RoleTargets {
+  title?: string; details?: string; date?: string; caption?: string; image?: string; shape?: string
+  /** The shape layer's kind. A `path` layer sizes from one uniform scale (apply writes
+   *  `scale = w / bbox.w`), so it cannot take a non-square box; the others take `w` × `h`. */
+  shapeKind?: string
+}
 
 /** Used when the caller passes no palette (tests, previews): the same fallbacks as `rolesFromFamily`. */
 const FALLBACK_PALETTE: ResolvedPalette = { field: '#f2f0ef', ink: '#121212', accent: '#dd2200' }
@@ -226,6 +231,20 @@ export function elementsToOps(
       }
       case 'r': {
         const r = e as RectEl
+        if (targets.shape && baseRole(r.role) === 'shape') {
+          // The user's shape layer takes the rect's box, centre-anchored like the circle path.
+          // A path layer can't stretch: it gets the largest square centred in the box.
+          let w = r.w, h = r.h
+          if (targets.shapeKind === 'path') w = h = Math.min(r.w, r.h)
+          const op: LayerOp = {
+            target: targets.shape, kind: 'shape',
+            x: (r.x + r.w / 2) / 100, y: (r.y + r.h / 2) / S.H, w: w / 100, h: h / 100, z, ...look(r),
+          }
+          if (r.rot) op.rotation = r.rot
+          if (r.color) op.colorRole = r.color
+          ops.push(op)
+          return
+        }
         const key = keyFor(r.role ?? 'rect')
         own(createRectLayer({
           ...ownedBase(key, r),
