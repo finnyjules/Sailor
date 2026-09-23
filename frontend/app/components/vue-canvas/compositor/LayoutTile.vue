@@ -8,12 +8,15 @@ import { paintLayerStack, ensureLayerFonts, ensureLayerImages, withWiredContent 
 import type { LocalLayer, StackItem, WiredContentProvider } from '~/composables/useCompositorLayers'
 import type { Paint } from '~/lib/compositor/paint'
 import type { LayerGroup } from '~/lib/compositor/layerGroups'
-import type { PatternPlan } from '~/lib/frame/patterns/applyToFrame'
 import { tileSize } from '~/lib/frame/patterns/tileSize'
 import { localStackKey } from '~/lib/compositor/frameStack'
 
+/** What a tile paints: the layers + draw order an apply would commit (a kit `LayoutPlan`, or
+ *  anything of that shape). */
+interface TilePlan { layers: LocalLayer[]; order: string[]; posterState: { patternId: string; seed: number } }
+
 const props = withDefaults(defineProps<{
-  plan: PatternPlan
+  plan: TilePlan
   frameW: number
   frameH: number
   background?: Paint
@@ -24,8 +27,11 @@ const props = withDefaults(defineProps<{
   /** The host's slot → live content resolver, so wired layers paint their real
    *  pixels instead of a bare background — see `withWiredContent` below. */
   wiredContent?: WiredContentProvider | null
-}>(), { selected: false, maxPx: 116 })
-const emit = defineEmits<{ (e: 'pick'): void; (e: 'more'): void }>()
+  /** The word shown before the label when `selected` ("Last applied" by default). Empty: the
+   *  ring alone marks it (small tiles), and the tooltip says "Current". */
+  selectedLabel?: string
+}>(), { selected: false, maxPx: 116, selectedLabel: 'Last applied' })
+const emit = defineEmits<{ (e: 'pick'): void }>()
 
 const canvas = ref<HTMLCanvasElement | null>(null)
 const size = ref(tileSize(props.frameW, props.frameH, props.maxPx, props.maxPx))
@@ -70,7 +76,7 @@ watch(() => [props.plan, props.frameW, props.frameH, props.background], paint)
 // The ring only means "the tile last applied" — it stays lit after an undo of
 // that apply (`remember()` is UI memory outside the undo step, on purpose), so
 // the label says exactly that instead of implying "currently applied".
-const tileTitle = () => (props.selected ? `Last applied — ${props.label}` : `${props.label} — apply`)
+const tileTitle = () => (props.selected ? `${props.selectedLabel || 'Current'} — ${props.label}` : `${props.label} — apply`)
 </script>
 
 <template>
@@ -86,15 +92,8 @@ const tileTitle = () => (props.selected ? `Last applied — ${props.label}` : `$
     >
       <canvas ref="canvas" class="block" :style="{ width: size.w + 'px', height: size.h + 'px' }" />
     </button>
-    <div class="flex items-center gap-1 max-w-[116px]">
-      <div class="text-[11px] text-white/55 truncate" :title="label">
-        <span v-if="selected" class="text-white/40">Last applied </span>{{ label }}
-      </div>
-      <button
-        type="button" data-testid="layout-tile-more" title="More like this"
-        class="shrink-0 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white/80 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-black/80"
-        @click.stop="emit('more')"
-      >More</button>
+    <div class="text-[11px] text-white/55 truncate" :style="{ maxWidth: maxPx + 'px' }" :title="label">
+      <span v-if="selected && selectedLabel" class="text-white/40">{{ selectedLabel }} </span>{{ label }}
     </div>
   </div>
 </template>

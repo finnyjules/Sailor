@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { applyPlacement } from '~/lib/frame/patterns/apply'
-import { shapeCounter } from '~/lib/frame/patterns/patterns/shapeCounter'
 import { inferElements } from '~/lib/frame/patterns/hierarchy'
-import { ctxFor } from './_poster-fixtures'
+import { planLayout } from '~/lib/frame/patterns/kit/plan'
+import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
+import { DEFAULT_CHOICE } from '~/lib/frame/patterns/kit/vary'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { PatternPlacement, FrameElements } from '~/lib/frame/patterns/types'
 import type { ExpressiveParams } from '~~/shared/text-layout/expressive'
@@ -75,15 +76,16 @@ describe('applyPlacement', () => {
     expect(s.scale).toBeCloseTo(2)
     expect(s.w).toBeUndefined()
   })
-  it('shapeCounter targets the real shape layer id, not the sentinel \'shape\'', () => {
-    const els = inferElements([
-      { id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2 },
-      { id: 'sh', kind: 'shape', shapeId: 'circle' },
-    ])
-    const { ops } = shapeCounter.place(ctxFor({ elements: els }))
-    const shapeOp = ops.find(o => o.kind === 'shape')!
-    expect(shapeOp.target).toBe(els.shapes[0]!.id)
-    expect(shapeOp.target).not.toBe('shape')
+  it('Shape counter moves the user\'s own shape layer (its real id), inserting no stand-in', () => {
+    const title = textLayer('t', { text: 'NOISE', fontSize: 0.2 })
+    const shape: any = { id: 'sh', kind: 'path', x: 0.2, y: 0.2, rotation: 0, opacity: 1, d: 'M0 0h1v1z', bbox: { x: 0, y: 0, w: 0.3, h: 0.3 }, scale: 1, fill: '#000', fillRule: 'nonzero', stroke: '', strokeWidth: 0, shapeId: 'circle' }
+    const els = inferElements([{ id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2 }, { id: 'sh', kind: 'shape', shapeId: 'circle' }])
+    expect(els.shapes[0]!.id).toBe('sh')
+    const plan = planLayout({ props: { sailor_localLayers: [title, shape] }, frameW: 800, frameH: 1000, layoutId: 'shapeCounter', choice: { ...DEFAULT_CHOICE }, palette, connectedSlots: [], measure: makeStubMeasure() })!
+    expect(plan).not.toBeNull()
+    const moved = plan.layers.find(l => l.id === 'sh') as any
+    expect(moved.x !== 0.2 || moved.y !== 0.2).toBe(true)
+    expect(plan.layers.filter(l => l.kind === 'path')).toHaveLength(1)
   })
   it('last op for an id wins', () => {
     const layers: LocalLayer[] = [textLayer('t')]

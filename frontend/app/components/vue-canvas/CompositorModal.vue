@@ -42,8 +42,11 @@ import { createWiredMaskCache } from '~/lib/compositor/wiredMaskCache'
 import { readWiredTreatments, setWiredMask, setWiredMaskShowSource, setWiredMaskUrl, maskCandidateKeys } from '~/composables/useWiredTreatments'
 import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/compositor/maskBreak'
 import { useLocalLayerEditor, resizableKind, cornerResizableKind, aspectLockedResizeKind, textBoxResizable, boxHandles as editorBoxHandles } from '~/composables/useLocalLayerEditor'
-import { useLayoutSheet } from '~/composables/useLayoutSheet'
-import LayoutTile from '~/components/vue-canvas/compositor/LayoutTile.vue'
+import { useLayoutVary } from '~/composables/useLayoutVary'
+import LayoutVaryPanel from '~/components/vue-canvas/compositor/LayoutVaryPanel.vue'
+import { layoutById } from '~/lib/frame/patterns/layouts/catalog'
+import type { Choice } from '~/lib/frame/patterns/kit/vary'
+import { layoutKeyAction } from '~/lib/frame/layoutKeys'
 import { snapshotFrameAsTemplate, addSlot } from '~/lib/frametemplate/author'
 import { placeTemplate, setInstanceSlot, freezeInstance, staleInstances, updateInstance, applySlotToLayer } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance, SlotKind } from '~/lib/frametemplate/types'
@@ -989,14 +992,20 @@ const selectionGuides = computed(() => {
   return guideLinesFor(box, maps, viewSize.w, viewSize.h)
 })
 
-// Layout tab — the poster engine's sheet over this frame's own elements.
-const layoutSheet = useLayoutSheet({
+// Layout tab — the layout kit over this frame's own elements: one layout at a time with every
+// checked variation of it (Vary), plus the library of layouts that fit. `active` keeps the
+// library from planning while the tab is not showing. (`inspectorTab` is declared further down,
+// so the showing flag is a ref synced there — reading it here would hit its TDZ during setup.)
+const layoutTabShowing = ref(false)
+const layoutVary = useLayoutVary({
   props: () => compositor.value?.data?.properties as Record<string, unknown> | undefined,
   frameW: () => canvasDisplay.w,
   frameH: () => canvasDisplay.h,
   connectedSlots: () => connectedSlots0.value,
   editor: () => editor,
-  remember: (s) => { const n = compositor.value; if (!n) return; const p = (n.data.properties ||= {}); (p as any).sailor_posterState = s },
+  // Merge, so the picker state kept alongside (shape, image, palette) survives an apply.
+  remember: (s) => { const n = compositor.value; if (!n) return; const p = (n.data.properties ||= {}); (p as any).sailor_posterState = { ...(p as any).sailor_posterState, ...s } },
+  active: () => layoutTabShowing.value,
 })
 
 // Shape picker for the Layout tab: choose a library shape the engine may use
@@ -1005,19 +1014,19 @@ const layoutShapeOpen = ref(false)
 const layoutShapeAnchor = ref({ x: 0, y: 0 })
 const layoutShapeTrigger = ref<HTMLElement | null>(null)
 const layoutShapeValue = computed(() => {
-  const m = layoutSheet.shapeMode.value
+  const m = layoutVary.shapeMode.value
   return m && 'id' in m ? m.id : SHAPE_NONE
 })
 // Trigger label + family mode: shapeMode can be a specific {id} OR a {family}
 // (the seed picks a shape within it per tile — the engine already handles both).
 const layoutShapeLabel = computed(() => {
-  const m = layoutSheet.shapeMode.value
+  const m = layoutVary.shapeMode.value
   if (!m) return 'No shape'
   if ('family' in m) return 'Any ' + (SHAPE_FAMILIES.find(f => f.id === m.family)?.label ?? m.family).toLowerCase()
   return shapeById(m.id)?.name ?? m.id
 })
-const layoutFamily = computed(() => { const m = layoutSheet.shapeMode.value; return m && 'family' in m ? m.family : '' })
-function pickLayoutFamily(fam: string) { if (fam) layoutSheet.setShapeMode({ family: fam }) }
+const layoutFamily = computed(() => { const m = layoutVary.shapeMode.value; return m && 'family' in m ? m.family : '' })
+function pickLayoutFamily(fam: string) { if (fam) layoutVary.setShapeMode({ family: fam }) }
 function openLayoutShape(e: MouseEvent) {
   const el = e.currentTarget as HTMLElement
   const r = el.getBoundingClientRect()
@@ -1026,18 +1035,28 @@ function openLayoutShape(e: MouseEvent) {
   layoutShapeOpen.value = !layoutShapeOpen.value
 }
 function pickLayoutShape(id: string) {
-  layoutSheet.setShapeMode(id === SHAPE_NONE ? null : { id })
+  layoutVary.setShapeMode(id === SHAPE_NONE ? null : { id })
 }
-function onLayoutPalette(fam: { hexes: string[] }) { layoutSheet.setPaletteMode(fam.hexes) }
-function onLayoutPaletteStops(stops: GradientStop[]) { layoutSheet.setPaletteMode(stops.map(s => s.color)) }
-function clearLayoutPalette() { layoutSheet.setPaletteMode(null) }
+function onLayoutPalette(fam: { hexes: string[] }) { layoutVary.setPaletteMode(fam.hexes) }
+function onLayoutPaletteStops(stops: GradientStop[]) { layoutVary.setPaletteMode(stops.map(s => s.color)) }
+function clearLayoutPalette() { layoutVary.setPaletteMode(null) }
 // Applying a layout writes design geometry planned on the artboard's shape: snap back to the design
-// size first (the tiles re-plan there). The other sheet controls only re-plan the tiles.
-function onLayoutPick(t: Parameters<typeof layoutSheet.apply>[0]) {
-  if (viewOnlyGuard()) return
-  layoutSheet.apply(t)
+// size first (the tiles re-plan there). The other Layout controls only re-plan the tiles.
+function onLayoutSelect(id: string) { if (!viewOnlyGuard()) layoutVary.select(id) }
+function onLayoutVary(step: 1 | -1) { if (!viewOnlyGuard()) layoutVary.vary(step) }
+function onLayoutJump(i: number) { if (!viewOnlyGuard()) layoutVary.jump(i) }
+function onLayoutChoice(key: keyof Choice, value: unknown) { if (!viewOnlyGuard()) layoutVary.setChoice(key, value) }
+const layoutName = computed(() => layoutById(layoutVary.layoutId.value)?.name ?? '')
+/** The Layout tab's keys (`layoutKeyAction`): V → next variation; ← / → step only with nothing
+ *  selected (with a selection they nudge). True when the Layout tab took the key. */
+function layoutVaryKey(e: KeyboardEvent, typing: boolean): boolean {
+  const act = layoutKeyAction(e, { tabVisible: layoutTabShowing.value, inTextField: typing, editingText: !!editingId.value, selectionEmpty: selectedIds.value.size === 0 })
+  if (!act) return false
+  e.preventDefault(); e.stopPropagation()
+  if (act !== 'swallow') onLayoutVary(act === 'next' ? 1 : -1)
+  return true
 }
-const layoutPaletteHexes = computed(() => layoutSheet.paletteMode.value)
+const layoutPaletteHexes = computed(() => layoutVary.paletteMode.value)
 
 // Face pickers for the Layout tab: title face → the inferred title layer; text
 // face → the inferred details/caption/date layers; Suggest pairs a text face
@@ -2170,6 +2189,8 @@ function onKeydown(e: KeyboardEvent) {
   // A focused control that owns the arrow keys (the easing-curve handles nudge themselves)
   // must not also nudge the selected layer.
   const ownsKeys = !!t?.closest?.('[data-owns-keys]')
+  // The Layout tab owns V and ←/→ (Vary) while it is showing — ahead of the nudge and the V tool.
+  if (!ownsKeys && !pen.active.value && layoutVaryKey(e, typing || t?.tagName === 'SELECT')) return
   // At a viewing size the arrow keys move what is DRAWN by one screen px, settled at the design size.
   if (!typing && !editingId.value && !ownsKeys && viewEditing.value && viewNudge(e)) return
   if (!typing && !editingId.value && !ownsKeys && handleEditorKey(e)) return
@@ -4751,6 +4772,7 @@ function exitMotionPreview() {
 // Motion active ⇔ motion mode: the docked timeline replaces the bottom
 // toolbar cluster and the inspector shows animation controls.
 const inspectorTab = ref<'design' | 'motion' | 'layout'>('design')
+watch(() => inspectorTab.value === 'layout' && panelsVisible.value, (on) => { layoutTabShowing.value = on }, { immediate: true })
 watch(inspectorTab, (tab) => {
   if (tab === 'motion') { if (previewT.value == null) scrubTo(0) }
   else exitMotionPreview()
@@ -9425,78 +9447,71 @@ onUnmounted(() => {
            and model live on the fixed edit toolbar, and the prompt on a floating
            bar over the area (see the stage overlay). -->
 
-      <!-- Layout tab: the poster engine's sheet. Every tile arranges THIS frame's
-           own elements (face, weight, colour, content untouched); click applies it
-           as one undo step; Another re-rolls the seed; More narrows to one pattern. -->
+      <!-- Layout tab: the layout kit over THIS frame's own elements (face, weight and the colour of
+           your text untouched unless a palette is picked). One layout at a time: Vary (V, ←/→)
+           steps through its checked variations, each pick applies at once as one undo step. -->
       <template v-else-if="inspectorTab === 'layout'">
         <div class="px-4 py-3 border-b border-white/10 flex items-center gap-2">
           <LayoutGrid class="size-3.5 text-white/70" />
-          <span class="text-sm font-medium">{{ layoutSheet.focus.value ? 'More like this' : 'Frame layout' }}</span>
+          <span class="text-sm font-medium">Frame layout</span>
         </div>
-        <div v-if="posterFaceEls.titleId" class="px-4 pt-3 flex flex-col gap-2">
-          <div class="flex items-center gap-2 text-[11px] text-white/55">
-            <span class="w-16 shrink-0">Title face</span>
-            <div class="flex-1 min-w-0"><FontPicker :selected-key="titleFaceKey" :label="titleFaceFamily" sublabel="" @pick="onPickTitleFace" /></div>
+        <div data-testid="layout-sheet" class="flex-1 min-h-0 overflow-y-auto pb-4">
+          <div class="px-4 pt-3">
+            <p v-if="!layoutVary.library.value.length" class="text-xs text-white/40 italic">Add a text layer to get layout options. The largest text is read as the title.</p>
+            <LayoutVaryPanel v-else
+              :name="layoutName" :layout-id="layoutVary.layoutId.value"
+              :candidates="layoutVary.candidates.value" :index="layoutVary.index.value"
+              :choices="layoutVary.choices.value" :library="layoutVary.library.value"
+              :frame-w="canvasDisplay.w" :frame-h="canvasDisplay.h"
+              :background="background" :groups="localGroups" :wired-content="wiredContentForSlot"
+              @vary="onLayoutVary" @jump="onLayoutJump" @select="onLayoutSelect" @choice="onLayoutChoice"
+            />
           </div>
-          <div v-if="hasTextRole" class="flex items-center gap-2 text-[11px] text-white/55">
-            <span class="w-16 shrink-0">Text face</span>
-            <div class="flex-1 min-w-0"><FontPicker :selected-key="textFaceKey" :label="textFaceFamily" sublabel="" @pick="onPickTextFace" /></div>
-            <button type="button" data-testid="layout-suggest-face" class="h-7 px-2 shrink-0 rounded-[7px] ring-1 ring-white/10 bg-white/5 hover:bg-white/10 text-white/80" @click="onSuggestTextFace">Suggest</button>
-          </div>
-        </div>
-        <div class="px-4 pt-3 flex items-center gap-2 text-[11px] text-white/55">
-          <span class="shrink-0">Shape for the engine</span>
-          <select data-testid="layout-shape-family" :value="layoutFamily"
-            class="ml-auto h-7 rounded-[7px] ring-1 ring-white/10 bg-white/5 hover:bg-white/10 text-white/80 px-1.5 cursor-pointer outline-none"
-            @change="pickLayoutFamily(($event.target as HTMLSelectElement).value)">
-            <option value="">a shape…</option>
-            <option v-for="f in SHAPE_FAMILIES" :key="f.id" :value="f.id">Any {{ f.label.toLowerCase() }}</option>
-          </select>
-          <button type="button" data-testid="layout-shape-trigger"
-            class="flex items-center gap-1.5 h-7 px-2 shrink-0 rounded-[7px] ring-1 ring-white/10 bg-white/5 hover:bg-white/10 text-white/80"
-            @click="openLayoutShape">
-            {{ layoutShapeLabel }}
-          </button>
-        </div>
-        <ShapePicker v-if="layoutShapeOpen"
-          :model-value="layoutShapeValue" :anchor="layoutShapeAnchor" :ignore="layoutShapeTrigger"
-          @update:model-value="pickLayoutShape" @close="layoutShapeOpen = false" />
-        <div class="px-4 pt-3">
-          <StudioSwitch :model-value="layoutSheet.imageMode.value" data-testid="layout-photo-moves"
-            label="Photo moves" hint="Show photo layouts with a grey stand-in, even before you drop a photo."
-            @update:model-value="layoutSheet.setImageMode" />
-        </div>
-        <div class="px-4 pt-3 space-y-1.5">
-          <div class="flex items-center gap-2 text-[11px] text-white/55">
-            <span class="shrink-0">Palette</span>
-            <span v-if="layoutPaletteHexes" class="flex items-center gap-1 ml-1">
-              <span v-for="(h, i) in layoutPaletteHexes" :key="i" class="size-3.5 rounded-sm ring-1 ring-white/10" :style="{ background: h }"></span>
-            </span>
-            <span v-else class="text-white/40 italic">Frame's own colours</span>
-            <button v-if="layoutPaletteHexes" data-testid="layout-palette-clear"
-              class="ml-auto h-6 px-2 shrink-0 rounded-[7px] ring-1 ring-white/10 bg-white/5 hover:bg-white/10 text-white/80" @click="clearLayoutPalette">Reset</button>
-          </div>
-          <PalettePicker mode="stops" data-testid="layout-palette" @apply-family="onLayoutPalette" @apply-stops="onLayoutPaletteStops" />
-        </div>
-        <div data-testid="layout-sheet" class="p-4 flex flex-col gap-3 flex-1 min-h-0 overflow-y-auto">
-          <p v-if="!layoutSheet.tiles.value.length" class="text-xs text-white/40 italic">Add a text layer to get layout options. The largest text is read as the title.</p>
-          <template v-else>
-            <p class="text-[11px] text-white/45">Your elements, arranged. Faces, weights and colours stay as you set them.</p>
-            <div class="grid grid-cols-2 gap-3 justify-items-center">
-              <LayoutTile
-                v-for="t in layoutSheet.tiles.value" :key="t.patternId + ':' + t.seed"
-                :plan="t.plan" :frame-w="canvasDisplay.w" :frame-h="canvasDisplay.h"
-                :background="background" :groups="localGroups" :label="t.name"
-                :wired-content="wiredContentForSlot"
-                :selected="(compositor?.data?.properties as any)?.sailor_posterState?.patternId === t.patternId && (compositor?.data?.properties as any)?.sailor_posterState?.seed === t.seed"
-                @pick="onLayoutPick(t)" @more="layoutSheet.moreLikeThis(t)"
-              />
+          <div v-if="posterFaceEls.titleId" class="px-4 pt-3 flex flex-col gap-2">
+            <div class="flex items-center gap-2 text-[11px] text-white/55">
+              <span class="w-16 shrink-0">Title face</span>
+              <div class="flex-1 min-w-0"><FontPicker :selected-key="titleFaceKey" :label="titleFaceFamily" sublabel="" @pick="onPickTitleFace" /></div>
             </div>
-            <div class="flex gap-2 pt-1">
-              <StudioButton v-if="layoutSheet.focus.value" variant="secondary" class="flex-1" data-testid="layout-back" @click="layoutSheet.back()">All layouts</StudioButton>
-              <StudioButton variant="secondary" class="flex-1" data-testid="layout-another" @click="layoutSheet.another()">Another</StudioButton>
+            <div v-if="hasTextRole" class="flex items-center gap-2 text-[11px] text-white/55">
+              <span class="w-16 shrink-0">Text face</span>
+              <div class="flex-1 min-w-0"><FontPicker :selected-key="textFaceKey" :label="textFaceFamily" sublabel="" @pick="onPickTextFace" /></div>
+              <button type="button" data-testid="layout-suggest-face" class="h-7 px-2 shrink-0 rounded-[7px] ring-1 ring-white/10 bg-white/5 hover:bg-white/10 text-white/80" @click="onSuggestTextFace">Suggest</button>
             </div>
-          </template>
+          </div>
+          <div class="px-4 pt-3 flex items-center gap-2 text-[11px] text-white/55">
+            <span class="shrink-0">Shape for the engine</span>
+            <select data-testid="layout-shape-family" :value="layoutFamily"
+              class="ml-auto h-7 rounded-[7px] ring-1 ring-white/10 bg-white/5 hover:bg-white/10 text-white/80 px-1.5 cursor-pointer outline-none"
+              @change="pickLayoutFamily(($event.target as HTMLSelectElement).value)">
+              <option value="">Shape family…</option>
+              <option v-for="f in SHAPE_FAMILIES" :key="f.id" :value="f.id">Any {{ f.label.toLowerCase() }}</option>
+            </select>
+            <button type="button" data-testid="layout-shape-trigger"
+              class="flex items-center gap-1.5 h-7 px-2 shrink-0 rounded-[7px] ring-1 ring-white/10 bg-white/5 hover:bg-white/10 text-white/80"
+              @click="openLayoutShape">
+              {{ layoutShapeLabel }}
+            </button>
+          </div>
+          <ShapePicker v-if="layoutShapeOpen"
+            :model-value="layoutShapeValue" :anchor="layoutShapeAnchor" :ignore="layoutShapeTrigger"
+            @update:model-value="pickLayoutShape" @close="layoutShapeOpen = false" />
+          <div class="px-4 pt-3">
+            <StudioSwitch :model-value="layoutVary.imageMode.value" data-testid="layout-photo-moves"
+              label="Image moves" hint="Show image layouts with a grey stand-in, even before you drop an image."
+              @update:model-value="layoutVary.setImageMode" />
+          </div>
+          <div class="px-4 pt-3 space-y-1.5">
+            <div class="flex items-center gap-2 text-[11px] text-white/55">
+              <span class="shrink-0">Palette</span>
+              <span v-if="layoutPaletteHexes" class="flex items-center gap-1 ml-1">
+                <span v-for="(h, i) in layoutPaletteHexes" :key="i" class="size-3.5 rounded-sm ring-1 ring-white/10" :style="{ background: h }"></span>
+              </span>
+              <span v-else class="text-white/40 italic">Frame's own colours</span>
+              <button v-if="layoutPaletteHexes" data-testid="layout-palette-clear"
+                class="ml-auto h-6 px-2 shrink-0 rounded-[7px] ring-1 ring-white/10 bg-white/5 hover:bg-white/10 text-white/80" @click="clearLayoutPalette">Reset</button>
+            </div>
+            <PalettePicker mode="stops" data-testid="layout-palette" @apply-family="onLayoutPalette" @apply-stops="onLayoutPaletteStops" />
+          </div>
         </div>
       </template>
 

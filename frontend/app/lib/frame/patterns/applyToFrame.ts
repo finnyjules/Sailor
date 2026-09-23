@@ -1,20 +1,24 @@
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { ResolvedPalette } from './palette'
-import type { FrameElements, PatternPlacement } from './types'
+import type { FrameElements } from './types'
 import { planLayout, applyLayoutToFrame } from './kit/plan'
-import type { LayoutPlanArgs } from './kit/plan'
+import type { LayoutEditor, LayoutPlanArgs } from './kit/plan'
 import { DEFAULT_CHOICE } from './kit/vary'
 import type { Choice } from './kit/vary'
-import { ancestorsOf, type LayerGroup } from '~/lib/compositor/layerGroups'
 
-// The Layout tab's engine is the layout kit (`kit/plan.ts`, `layouts/catalog.ts`). These are the
-// long-standing entry points, kept by name and signature so every importer keeps working; they
-// run the kit with `DEFAULT_CHOICE` unless a `choice` is given.
+// Plan-and-apply by layout id over the layout kit (`kit/plan.ts`, `layouts/catalog.ts`), in the
+// long-standing `planPattern` / `applyPatternToFrame` shape. They run the kit with
+// `DEFAULT_CHOICE` unless a `choice` is given. The Layout tab itself drives the kit directly
+// (`useLayoutVary`); `PosterState` is the shape it remembers.
 
 /** What a Frame remembers about the layout last applied (`sailor_posterState`). Frames saved
- *  before the kit have no `choice`; they read as the default choice. `seed` is the sheet's seed
- *  (the Layout tab's "Another" counter), stored as given. */
-export interface PosterState { patternId: string; seed: number; shapeMode?: FrameElements['shapeMode']; imageMode?: boolean; choice?: Choice }
+ *  before the kit have no `choice`; they read as the default choice. `seed` is whatever the
+ *  writer stored (the Layout tab stores the kit's seed for the choice). The Layout tab also keeps
+ *  its picker state here: `shapeMode`, `imageMode`, `palette`, and the variation `index`. */
+export interface PosterState {
+  patternId: string; seed: number; shapeMode?: FrameElements['shapeMode']; imageMode?: boolean; choice?: Choice
+  palette?: string[]; index?: number
+}
 
 export interface PlanArgs {
   props: Record<string, unknown> | undefined
@@ -22,7 +26,7 @@ export interface PlanArgs {
   frameH: number
   /** A layout id from `layouts/catalog.ts` (the old pattern ids are all kept). */
   patternId: string
-  /** The sheet's seed. The kit has no free seed (its randomness follows from the layout and the
+  /** A caller's seed. The kit has no free seed (its randomness follows from the layout and the
    *  choice), so this is only remembered in `posterState`; it does not change the plan. */
   seed: number
   palette: ResolvedPalette
@@ -35,9 +39,6 @@ export interface PlanArgs {
   /** Write colours from the role palette. Off by default: a layout changes no
    *  colour; the palette picker turns it on. */
   recolour?: boolean
-  /** Old-engine placement from the old sheet. The kit cannot take a precomputed placement, so
-   *  this is ignored: the plan always comes from the kit, the same pipeline apply runs. */
-  placement?: PatternPlacement
   /** Which variation of the layout to run. Default: `DEFAULT_CHOICE`. */
   choice?: Choice
 }
@@ -45,7 +46,7 @@ export interface PlanArgs {
 export interface ApplyArgs extends PlanArgs {
   /** `writeGroups` is required: a pattern clears the pins of the groups it moves, and an editor
    *  without it would silently keep them. */
-  editor: { recordHistory(): void; commit(next: LocalLayer[]): void; writeOrder(order: string[]): void; writeGroups(next: LayerGroup[]): void }
+  editor: LayoutEditor
 }
 
 /** What an apply would commit: the next layers, the next draw order, and the state to remember. */
@@ -71,46 +72,6 @@ export function planPattern(args: PlanArgs): PatternPlan | null {
   const plan = planLayout(kitArgs(args))
   if (!plan || plan.issues.length) return null
   return { layers: plan.layers, order: plan.order, did: plan.did, posterState: posterStateFor(args, plan.posterState.choice) }
-}
-
-const PLACEMENT_KEYS = ['x', 'y', 'w', 'h', 'boxW', 'boxH', 'fontSize', 'rotation', 'scale'] as const
-function placementChanged(p: Record<string, unknown>, cur: Record<string, unknown>): boolean {
-  return PLACEMENT_KEYS.some(k => p[k] !== cur[k])
-}
-/** A pattern is a new arrangement: any layer it moved loses its explicit pins (spec, "Editing at a
- *  viewing size"). Unmoved and new layers come back by reference. */
-export function clearPinsOfMoved(before: LocalLayer[], after: LocalLayer[]): LocalLayer[] {
-  const prev = new Map(before.map(l => [l.id, l as unknown as Record<string, unknown>]))
-  return after.map((l) => {
-    const p = prev.get(l.id)
-    if (!p || !(l as { pins?: unknown }).pins) return l
-    if (!placementChanged(p, l as unknown as Record<string, unknown>)) return l
-    const { pins: _drop, ...rest } = l as LocalLayer & { pins?: unknown }
-    return rest as LocalLayer
-  })
-}
-/** The group side of `clearPinsOfMoved`: every group that encloses a layer the pattern moved (its
- *  own group and each one above it, up to the outermost, where the resolver reads group pins) loses
- *  its pins. An inner group's pins would come back into force if it were ever ungrouped out.
- *  Null when nothing changes. */
-export function clearGroupPinsOfMoved(before: LocalLayer[], after: LocalLayer[], groups: LayerGroup[]): LayerGroup[] | null {
-  if (!groups.some(g => g.pins)) return null
-  const prev = new Map(before.map(l => [l.id, l as unknown as Record<string, unknown>]))
-  const hit = new Set<string>()
-  for (const l of after) {
-    const p = prev.get(l.id)
-    if (!p || !l.groupId || !placementChanged(p, l as unknown as Record<string, unknown>)) continue
-    hit.add(l.groupId)
-    for (const a of ancestorsOf(l.groupId, groups)) hit.add(a)
-  }
-  let changed = false
-  const out = groups.map((g) => {
-    if (!g.pins || !hit.has(g.id)) return g
-    changed = true
-    const { pins: _drop, ...rest } = g
-    return rest as LayerGroup
-  })
-  return changed ? out : null
 }
 
 /** Apply a layout as ONE undo step: history → layers → groups → order (the kit's

@@ -2,6 +2,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import { planPattern, applyPatternToFrame } from '~/lib/frame/patterns/applyToFrame'
 import { paletteFromFrame } from '~/lib/frame/patterns/framePalette'
+import { DEFAULT_CHOICE } from '~/lib/frame/patterns/kit/vary'
+import { candidatesForFrame } from '~/lib/frame/patterns/kit/plan'
 
 const title = { id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2, x: 0.5, y: 0.5, rotation: 0, opacity: 1, fontFamily: 'Inter', fontWeight: 700, color: '#112233', align: 'center', lineHeight: 1.2, strokeColor: '#000', strokeWidth: 0 }
 const img = { id: 'img', kind: 'image', filename: 'x.png', x: 0.5, y: 0.5, w: 0.5, h: 0.5, rotation: 0, opacity: 1 }
@@ -15,7 +17,7 @@ describe('planPattern', () => {
     expect(plan).not.toBeNull()
     expect(plan.layers).toHaveLength(2)
     expect(plan.order.indexOf('l:img')).toBeLessThan(plan.order.indexOf('l:t'))
-    expect(plan.posterState).toEqual({ patternId: 'photoBehind', seed: 7, shapeMode: undefined })
+    expect(plan.posterState).toEqual({ patternId: 'photoBehind', seed: 7, shapeMode: undefined, imageMode: undefined, choice: DEFAULT_CHOICE })
     expect(plan.did.length).toBeGreaterThan(0)
     expect(props.sailor_localLayers[0]).toBe(title)                 // input untouched
   })
@@ -53,16 +55,13 @@ describe('planPattern', () => {
     const capOn = on.layers.find(l => l.id === 'cap') as any
     expect(capOn.color).toBe(palette.ink)
   })
-  it('uses a provided placement verbatim and does not re-run the pattern', () => {
-    // A placement whose `did` no real pattern would produce: if planPattern echoes
-    // it back, place() was skipped (deduped). The title op targets the fixture title.
-    const placement = {
-      ops: [{ target: 'title', kind: 'text', x: 0.5, y: 0.5, w: 0.8, fontSize: 0.2, align: 'left', colorRole: 'ink' }],
-      did: 'SENTINEL-PROVIDED-PLACEMENT',
-    } as any
-    const plan = planPattern({ ...base, patternId: 'runoff', placement })!
-    expect(plan.did).toBe('SENTINEL-PROVIDED-PLACEMENT')   // proves place() was not called
-    expect(plan.layers.length).toBeGreaterThan(0)          // it still applied the ops
-    expect(plan.posterState).toEqual({ patternId: 'runoff', seed: base.seed, shapeMode: undefined })
+  it('runs the given variation: a choice changes the plan, and posterState remembers it', () => {
+    const cands = candidatesForFrame({ props, frameW: 800, frameH: 1000, layoutId: 'photoBehind', palette, connectedSlots: [] })
+    expect(cands.length).toBeGreaterThan(1)
+    const other = cands[1]!.choice
+    const first = planPattern({ ...base, patternId: 'photoBehind' })!
+    const second = planPattern({ ...base, patternId: 'photoBehind', choice: other })!
+    expect(second.posterState.choice).toEqual(other)
+    expect(JSON.stringify(second.layers)).not.toBe(JSON.stringify(first.layers))
   })
 })

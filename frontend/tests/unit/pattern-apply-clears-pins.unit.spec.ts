@@ -1,7 +1,8 @@
 // frontend/tests/unit/pattern-apply-clears-pins.unit.spec.ts
 import { describe, it, expect, vi } from 'vitest'
 import { createRectLayer } from '~/composables/useCompositorLayers'
-import { clearPinsOfMoved, clearGroupPinsOfMoved, applyPatternToFrame } from '~/lib/frame/patterns/applyToFrame'
+import { clearPinsOfMoved, clearGroupPinsOfMoved } from '~/lib/frame/patterns/pins'
+import { applyPatternToFrame } from '~/lib/frame/patterns/applyToFrame'
 
 describe('clearPinsOfMoved', () => {
   it('drops explicit pins from layers whose placement changed, keeps them on the rest', () => {

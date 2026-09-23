@@ -1,11 +1,11 @@
 // frontend/tests/unit/frame-patterns-applytoframe.unit.spec.ts
 import { describe, it, expect, vi } from 'vitest'
-vi.mock('~/lib/frame/patterns/frameMeasure', async (importOriginal) => {
-  const m = await importOriginal<typeof import('~/lib/frame/patterns/frameMeasure')>()
-  return { ...m, makeFrameMeasure: vi.fn(m.makeFrameMeasure) }
+vi.mock('~/lib/frame/patterns/kit/measure', async (importOriginal) => {
+  const m = await importOriginal<typeof import('~/lib/frame/patterns/kit/measure')>()
+  return { ...m, makeCanvasMeasure: vi.fn(m.makeCanvasMeasure) }
 })
 import { applyPatternToFrame } from '~/lib/frame/patterns/applyToFrame'
-import { makeFrameMeasure } from '~/lib/frame/patterns/frameMeasure'
+import { makeCanvasMeasure } from '~/lib/frame/patterns/kit/measure'
 
 function frameProps(extra: Record<string, unknown> = {}) {
   return { sailor_localLayers: [
@@ -38,15 +38,17 @@ describe('applyPatternToFrame', () => {
     const committed = editor.commit.mock.calls[0][0] as any[]
     expect(new Set(order)).toEqual(new Set(committed.map(l => 'l:' + l.id)))
   })
-  it('shapeCounter with no shape layer inserts one and orders it behind the title', () => {
+  it('Shape counter puts the image in a circle: the image is masked round, and no shape is inserted', () => {
     const editor = mk()
     const out = applyPatternToFrame({ props: frameProps(), frameW: 800, frameH: 1000, patternId: 'shapeCounter', seed: 5, palette, editor, shapeMode: { id: 'circle' }, connectedSlots: [] })
     expect(out.ok).toBe(true)
     const committed = editor.commit.mock.calls[0][0] as any[]
-    const added = committed.find(l => l.kind === 'path')
-    expect(added?.shapeId).toBe('circle')
+    const img = committed.find(l => l.id === 'img')
+    expect(img.mask?.kind).toBe('ellipse')
+    expect(img.mask.w).toBeCloseTo(img.mask.h)                      // a circle, not an oval
+    expect(img.w).toBeCloseTo(img.h)
+    expect(committed.filter(l => l.kind === 'path')).toHaveLength(0)
     const order = editor.writeOrder.mock.calls[0][0] as string[]
-    expect(order.indexOf(`l:${added.id}`)).toBeLessThan(order.indexOf('l:t'))
     expect(new Set(order)).toEqual(new Set(committed.map(l => 'l:' + l.id)))
   })
   it('keeps a connected wired slot in the order where the user left it', () => {
@@ -68,12 +70,13 @@ describe('applyPatternToFrame', () => {
       { id: 'cap', kind: 'text', text: 'a small caption', fontSize: 0.03, x: 0.5, y: 0.9, rotation: 0, opacity: 1, fontFamily: 'Caption Face', fontWeight: 400, color: '#000', align: 'left', lineHeight: 1.2, strokeColor: '#000', strokeWidth: 0 },
       { id: 't', kind: 'text', text: 'NOISE', fontSize: 0.2, x: 0.5, y: 0.5, rotation: 0, opacity: 1, fontFamily: 'Inter', fontWeight: 900, textTransform: 'uppercase', color: '#000', align: 'center', lineHeight: 1.2, strokeColor: '#000', strokeWidth: 0 },
     ] }
-    vi.mocked(makeFrameMeasure).mockClear()
+    vi.mocked(makeCanvasMeasure).mockClear()
     const out = applyPatternToFrame({ props, frameW: 800, frameH: 1000, patternId: 'runoff', seed: 7, palette, editor, connectedSlots: [] })
     expect(out.ok).toBe(true)
-    const [family, weight, , transform] = vi.mocked(makeFrameMeasure).mock.calls.at(-1)!
-    expect(family).toBe('Inter')
-    expect(weight).toBe(900)
-    expect(transform!('noise')).toBe('NOISE')
+    const roles = vi.mocked(makeCanvasMeasure).mock.calls.at(-1)![0]
+    expect(roles.title?.id).toBe('t')                              // the largest text, not the first
+    expect(roles.title?.fontWeight).toBe(900)
+    expect(roles.title?.textTransform).toBe('uppercase')
+    expect(roles.caption?.id).toBe('cap')
   })
 })

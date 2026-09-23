@@ -59,7 +59,7 @@ test.describe('Frame Layout tab', () => {
     expect(await tiles.count()).toBeGreaterThanOrEqual(3)
     await page.waitForTimeout(800)                 // fonts + images + paint
     expect(await tileIsPainted(page)).toBe(true)
-    const labels = await page.locator('[data-testid="layout-sheet"] .text-\\[11px\\]').allTextContents()
+    const labels = await page.locator('[data-testid="layout-sheet"] [data-testid="layout-tile"] + div').allTextContents()
     for (const l of labels) expect(l.trim()).toMatch(/^[A-Z]/)
     // Prove the wired photo itself painted, not just SOME pixels: a tile using
     // photoBehind must carry far more distinct colours than type on a flat
@@ -91,18 +91,27 @@ test.describe('Frame Layout tab', () => {
     expect(undone.order).toEqual(before.order)
   })
 
-  test('Another re-rolls the seed; More like this narrows to one pattern; All layouts returns', async ({ page }) => {
-    const seeds0 = await page.locator('[data-testid="layout-tile"]').evaluateAll(els => els.map(e => e.getAttribute('data-seed')))
-    await page.click('[data-testid="layout-another"]')
-    const seeds1 = await page.locator('[data-testid="layout-tile"]').evaluateAll(els => els.map(e => e.getAttribute('data-seed')))
-    expect(seeds1).not.toEqual(seeds0)
-    await page.locator('[data-testid="layout-tile"]').first().hover()
-    await page.locator('[data-testid="layout-tile-more"]').first().click({ force: true })
-    const patterns = await page.locator('[data-testid="layout-tile"]').evaluateAll(els => els.map(e => e.getAttribute('data-pattern')))
-    expect(new Set(patterns).size).toBe(1)
-    expect(patterns.length).toBe(6)
-    await page.click('[data-testid="layout-back"]')
-    const again = await page.locator('[data-testid="layout-tile"]').evaluateAll(els => els.map(e => e.getAttribute('data-pattern')))
-    expect(new Set(again).size).toBeGreaterThan(1)
+  test('Vary (the button, V and the arrow keys) steps through the variations, each one undo step', async ({ page }) => {
+    // Start from an applied layout, so the count and the choices belong to it.
+    await page.locator('[data-testid="layout-sheet"] [data-testid="layout-tile"]').first().click()
+    const count = page.locator('[data-testid="layout-vary-count"]')
+    await expect(count).toHaveText(/^1 of \d+$/)
+    const total = Number((await count.textContent())!.split(' of ')[1])
+    test.skip(total < 2, 'the fixture\'s first layout has a single variation')
+    const before = await frame(page)
+    await page.click('[data-testid="layout-vary-next"]')
+    await expect(count).toHaveText(`2 of ${total}`)
+    const after = await frame(page)
+    expect(after.poster?.index).toBe(1)
+    expect(after.layers).not.toEqual(before.layers)
+    await page.locator('[data-testid="layout-vary-name"]').click()   // focus off any field
+    await page.keyboard.press('v')
+    await expect(count).toHaveText(total > 2 ? `3 of ${total}` : `1 of ${total}`)
+    const beforeArrow = await frame(page)
+    await page.keyboard.press('ArrowLeft')
+    await expect(count).toHaveText(`2 of ${total}`)
+    // each step is one undo step: one undo returns the layers from before the arrow
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z')
+    expect((await frame(page)).layers).toEqual(beforeArrow.layers)
   })
 })

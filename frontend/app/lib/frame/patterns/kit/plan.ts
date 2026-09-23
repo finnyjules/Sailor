@@ -11,8 +11,7 @@ import { inferElements } from '../hierarchy'
 import { insertFromOps } from '../insert'
 import { applyPlacement } from '../apply'
 import { nextOrderFor } from '../order'
-import { clearGroupPinsOfMoved, clearPinsOfMoved } from '../applyToFrame'
-import type { ApplyArgs } from '../applyToFrame'
+import { clearGroupPinsOfMoved, clearPinsOfMoved } from '../pins'
 import { LAYOUTS } from '../layouts/catalog'
 import { makeSheet } from './sheet'
 import type { Sheet } from './sheet'
@@ -22,7 +21,7 @@ import { elementsToOps } from './toOps'
 import type { RoleTargets } from './toOps'
 import { isOwned, mergeOwned } from './owned'
 import { enumerate, lineOptions } from './vary'
-import type { Candidate, Choice } from './vary'
+import type { Candidate, Choice, LineOption } from './vary'
 import type { Content, Kind, LayoutDef, LayoutOut, Measure, PhotoEl, RoleKey } from './types'
 
 // ═══════════════════════ the planner ═══════════════════════
@@ -51,6 +50,15 @@ export interface LayoutPlanArgs {
   measure?: Measure
 }
 
+/** What apply writes through. `writeGroups` is required: a layout clears the pins of the groups
+ *  it moves, and an editor without it would silently keep them. */
+export interface LayoutEditor {
+  recordHistory(): void
+  commit(next: LocalLayer[]): void
+  writeOrder(order: string[]): void
+  writeGroups(next: LayerGroup[]): void
+}
+
 export interface LayoutPlan {
   layers: LocalLayer[]
   order: string[]
@@ -75,8 +83,9 @@ interface Prepared {
 
 const ROLES: RoleKey[] = ['title', 'details', 'date', 'caption']
 
-/** "Number-like": a price, a discount, a date or a time (the prototype's `isNumberish`). */
-const isNumberish = (s: string | undefined) =>
+/** "Number-like": a price, a discount, a date or a time (the prototype's `isNumberish`). The one
+ *  copy: `needs.number` is gated here and nowhere else. */
+export const isNumberish = (s: string | undefined) =>
   !!s && (/[%€$£]/.test(s) || s.replace(/\D/g, '').length / Math.max(1, s.replace(/\s/g, '').length) >= 0.3)
 
 function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
@@ -222,7 +231,7 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
 
 /** Apply a layout as ONE undo step: history → layers (pins of moved layers cleared) → groups →
  *  order. Refuses (`ok: false`, nothing written) when the plan has checker issues. */
-export function applyLayoutToFrame(a: LayoutPlanArgs & { editor: ApplyArgs['editor'] }): { ok: boolean; posterState?: LayoutPlan['posterState'] } {
+export function applyLayoutToFrame(a: LayoutPlanArgs & { editor: LayoutEditor }): { ok: boolean; posterState?: LayoutPlan['posterState'] } {
   const plan = planLayout(a)
   if (!plan || plan.issues.length) return { ok: false }
   const before = (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? []
@@ -249,4 +258,12 @@ export function candidatesForFrame(a: Omit<LayoutPlanArgs, 'choice'>): Candidate
   const check = (out: LayoutOut) => checkRun(runs.get(out)!, p.def.premise)
   const infoSize = makeSheet({ frameW: a.frameW, frameH: a.frameH, grid: p.grid, measure: p.measure }).INFO.size
   return enumerate(p.def, { kind: p.kind, title: p.content.title, hasImage: p.hasImage, run, check, infoSize })
+}
+
+/** The ways this frame's title can break into lines for a layout (`lineOptions` on the frame's
+ *  own title), so a picker can quote them. Empty when the layout is unknown or does not fit. */
+export function lineOptionsForFrame(a: Omit<LayoutPlanArgs, 'choice'>): LineOption[] {
+  const p = prepare(a)
+  if (!p || !fitsFrame(p)) return []
+  return lineOptions(p.kind, p.content.title, p.def.oneLineFirst)
 }
