@@ -243,10 +243,20 @@ function wiredAspect(layer: WiredLayer, live: { w: number; h: number } | null): 
  * lib/compositor/wiredLayer.ts is the other consumer of it).
  */
 function wiredBoxPx(layer: WiredLayer, W: number, live: { w: number; h: number } | null): { w: number; h: number } {
+  if (layer.crop && typeof layer.h === 'number' && layer.h > 0) return { w: layer.w * W, h: layer.h * W }
   return {
     w: layer.w * W,
     h: wiredLayerHeight({ w: layer.w, lastAspect: wiredAspect(layer, live) }) * W,
   }
+}
+
+/** Source rectangle that makes `src` cover a `boxW×boxH` box without distortion,
+ *  cropped around the focus point (0..1). Same aspect ⇒ the whole source. */
+export function coverSourceRect(srcW: number, srcH: number, boxW: number, boxH: number, fx = 0.5, fy = 0.5): { sx: number; sy: number; sw: number; sh: number } {
+  const srcA = srcW / srcH, boxA = boxW / boxH
+  if (Math.abs(srcA - boxA) < 1e-9) return { sx: 0, sy: 0, sw: srcW, sh: srcH }
+  if (srcA > boxA) { const sw = srcH * boxA; return { sx: (srcW - sw) * fx, sy: 0, sw, sh: srcH } }
+  const sh = srcW / boxA; return { sx: 0, sy: (srcH - sh) * fy, sw: srcW, sh }
 }
 
 // ── Paint (solid color or gradient) ──────────────────────────────────────────
@@ -585,6 +595,12 @@ export interface LineLayer extends LayerCommon {
   strokeDash?: StrokeDash
 }
 
+/** How an image (or wired) layer's content fills a box that doesn't match its own
+ *  aspect. `fit: 'cover'` scales to fill the box and crops the overflow, centred by
+ *  default; `fx`/`fy` (0..1, default 0.5) shift the crop's focus point. Absent
+ *  `crop` ⇒ the legacy stretch-to-box behaviour, byte-identical. */
+export interface ImageCrop { fit: 'cover'; fx?: number; fy?: number }
+
 export interface ImageLayer extends LayerCommon {
   kind: 'image'
   filename: string        // uploaded image in ComfyUI's input dir
@@ -592,6 +608,8 @@ export interface ImageLayer extends LayerCommon {
    *  so image moves are visible before a photo is dropped. Absent ⇒ a normal image. */
   standIn?: boolean
   w: number; h: number    // normalized to canvas width (aspect preserved on drop)
+  /** Crop the source to cover the box instead of stretching it. Absent ⇒ stretch. */
+  crop?: ImageCrop
   tint?: Paint            // optional fill blended over the image, clipped to its alpha
   tintBlend?: string      // blend mode for the tint (same names as layer blend)
   tintOpacity?: number    // 0..1 tint strength; default 1
@@ -624,6 +642,12 @@ export interface WiredLayer extends LayerCommon {
   w: number          // normalized to canvas width (like every other layer)
   lastAspect: number // contentH / contentW of the last-seen content
   unlinked?: boolean // true = keep `lastAspect` even when live content differs
+  /** Crop the live content to cover the box instead of stretching it. Absent ⇒ the
+   *  legacy behaviour: height follows the content aspect (see `h` below). */
+  crop?: ImageCrop
+  /** Fixed box height, normalized like `w`. Honoured ONLY when `crop` is set —
+   *  otherwise height follows the content aspect as always (`wiredLayerHeight`). */
+  h?: number
   /**
    * Depth-map cache key for this slot's content (the upstream `/view` URL), so a
    * wired layer can carry a `dof` effect like a local image layer does — which is
@@ -1165,6 +1189,12 @@ export function imageLayerUrl(filename: string): string {
 export function __imageCacheEntriesForTest(): [string, string][] {
   return [..._imageCache].map(([k, im]) => [k, im.src])
 }
+/** Test seam: seed the image cache directly with a stand-in image, bypassing the
+ *  real network load — so a paint-seam test can drive `drawLayerContent`'s image
+ *  branch with a known `naturalWidth`/`naturalHeight` (needed by `coverSourceRect`). */
+export function __setImageForTest(filename: string, img: CanvasImageSource & { complete?: boolean; naturalWidth: number; naturalHeight: number }): void {
+  _imageCache.set(imageLayerCacheKey(filename), img as unknown as HTMLImageElement)
+}
 export function __clearImageCacheForTest(): void {
   _imageCache.clear()
 }
@@ -1439,15 +1469,25 @@ function drawTintedImage(
   const off = document.createElement('canvas'); off.width = tw; off.height = th
   const octx = off.getContext('2d')
   if (!octx) { ctx.drawImage(img, -w / 2, -h / 2, w, h); return }
+  // Crop is applied the same way the plain (untinted) image branch does: a source
+  // rect covering the box, drawn to fill the whole offscreen — the tint/clip passes
+  // below then treat the cropped, filled image exactly like a stretched one.
+  const cropped = layer.crop?.fit === 'cover' && 'naturalWidth' in (img as object) && 'naturalHeight' in (img as object)
+    ? coverSourceRect((img as HTMLImageElement).naturalWidth, (img as HTMLImageElement).naturalHeight, tw, th, layer.crop.fx ?? 0.5, layer.crop.fy ?? 0.5)
+    : null
+  const drawSrc = () => {
+    if (cropped) octx.drawImage(img, cropped.sx, cropped.sy, cropped.sw, cropped.sh, -tw / 2, -th / 2, tw, th)
+    else octx.drawImage(img, -tw / 2, -th / 2, tw, th)
+  }
   octx.translate(tw / 2, th / 2) // center, so resolvePaint's gradient/pattern geometry lines up
-  octx.drawImage(img, -tw / 2, -th / 2, tw, th)
+  drawSrc()
   octx.globalCompositeOperation = WIRED_BLEND_OP[layer.tintBlend ?? 'normal'] ?? 'source-over'
   octx.globalAlpha = Math.max(0, Math.min(1, layer.tintOpacity ?? 1))
   octx.fillStyle = resolvePaint(octx, layer.tint!, { w: tw, h: th }, _fieldCtx)
   octx.fillRect(-tw / 2, -th / 2, tw, th)
   octx.globalAlpha = 1
   octx.globalCompositeOperation = 'destination-in' // clip the tint back to the image silhouette
-  octx.drawImage(img, -tw / 2, -th / 2, tw, th)
+  drawSrc()
   ctx.drawImage(off, -w / 2, -h / 2, w, h)
 }
 
@@ -4011,7 +4051,10 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       ?? _imageCache.get(imageLayerCacheKey(layer.filename))
     if (img && img.complete && img.naturalWidth) {
       if (hasPaint(layer.tint)) drawTintedImage(ctx, img, layer, w, h)
-      else ctx.drawImage(img, -w / 2, -h / 2, w, h)
+      else if (layer.crop?.fit === 'cover') {
+        const r = coverSourceRect(img.naturalWidth, img.naturalHeight, w, h, layer.crop.fx ?? 0.5, layer.crop.fy ?? 0.5)
+        ctx.drawImage(img, r.sx, r.sy, r.sw, r.sh, -w / 2, -h / 2, w, h)
+      } else ctx.drawImage(img, -w / 2, -h / 2, w, h)
     } else if ((layer as ImageLayer).standIn) {
       // Poster stand-in: a clear grey "photo goes here" box (a real photo replaces it on apply).
       ctx.fillStyle = 'rgba(140,140,140,0.55)'
@@ -4041,7 +4084,10 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     // placeholder here would bake into exports.
     if (!live) return
     const box = wiredBoxPx(layer, W, live)
-    ctx.drawImage(live.src, -box.w / 2, -box.h / 2, box.w, box.h)
+    if (layer.crop?.fit === 'cover') {
+      const r = coverSourceRect(live.w, live.h, box.w, box.h, layer.crop.fx ?? 0.5, layer.crop.fy ?? 0.5)
+      ctx.drawImage(live.src, r.sx, r.sy, r.sw, r.sh, -box.w / 2, -box.h / 2, box.w, box.h)
+    } else ctx.drawImage(live.src, -box.w / 2, -box.h / 2, box.w, box.h)
   } else if (layer.kind === 'brush') {
     if (!layer.strokes.length) return
     // Size the offscreen to the painted BOUNDS (a tight box), not the whole artboard,
