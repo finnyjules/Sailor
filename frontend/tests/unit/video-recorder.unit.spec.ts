@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { planRecording, recordVideo, isAbortError, BT709, rgbaToI420aBt709, i420aSize, vp9Quality, RECORD_QUALITY } from '../../app/lib/engine/videoRecorder'
+import { planRecording, recordVideo, isAbortError, BT709, rgbaToI420aBt709, i420aSize, vp9Quality, RECORD_QUALITY, AAC_PRIMING_SAMPLES, audioStartTimestamp } from '../../app/lib/engine/videoRecorder'
 
 // A fake mediabunny that records what the recorder asks of it. The real library
 // needs WebCodecs; this checks the ORCHESTRATION: order, timestamps, colour tag,
@@ -22,7 +22,7 @@ function fakeLib(opts?: { failStart?: boolean }) {
     async add(_s: any) { log.order.push('video') }
   }
   class AudioBufferSource {
-    constructor(public config: any) { log.audio = { config, added: [] as any[] } }
+    constructor(public config: any, public options: any = {}) { log.audio = { config, options, added: [] as any[] } }
     async add(b: any) { log.audio.added.push(b); log.order.push('audio') }
   }
   class Output {
@@ -203,6 +203,15 @@ describe('recordVideo — sound', () => {
     expect(log.audio.config.codec).toBe('aac')
     expect(log.audio.added).toEqual([buf])
     expect(log.order).toEqual(['audio', 'video', 'video'])
+  })
+
+  it('AAC starts its sound early by the encoder priming, so the audible audio lands at 0 s', async () => {
+    const { lib, log } = fakeLib()
+    const c = fakeCanvas(2, 2)
+    await recordVideo({ width: 2, height: 2, fps: 30, frameCount: 1, audio: { duration: 1, sampleRate: 48000 } as any, drawFrame: () => {} },
+      { lib, createCanvas: () => ({ canvas: c.canvas, ctx: c.ctx }) })
+    expect(log.audio.options.startTimestamp).toBeCloseTo(-AAC_PRIMING_SAMPLES / 48000, 10)
+    expect(audioStartTimestamp('webm', 48000)).toBe(0)
   })
 
   it('transparent WebM with sound uses Opus', async () => {

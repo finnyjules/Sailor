@@ -72,6 +72,19 @@ export type MediabunnyLike = Pick<typeof Mediabunny,
   'Output' | 'BufferTarget' | 'Mp4OutputFormat' | 'WebMOutputFormat' | 'VideoSampleSource' | 'VideoSample' | 'Quality' | 'AudioBufferSource'>
 
 /** AAC in MP4 (the format Chrome and Safari both play), Opus in WebM. */
+/** Samples of silence an AAC-LC encoder puts before the real audio (its
+ *  "priming"). Chrome's encoder does not tell the muxer, so without a
+ *  correction every exported sound plays this late (measured: a beep at
+ *  1.500 s decoded at 1.544 s by ffmpeg and by mediabunny alike). */
+export const AAC_PRIMING_SAMPLES = 2112
+
+/** Where the sound track's first sample goes so that the audible audio starts
+ *  at 0: AAC starts early by its priming, which the muxer then trims with an
+ *  edit list (a negative start). Opus carries its own pre-skip. */
+export function audioStartTimestamp(ext: 'mp4' | 'webm', sampleRate: number): number {
+  return ext === 'mp4' ? -AAC_PRIMING_SAMPLES / sampleRate : 0
+}
+
 export function audioCodecFor(ext: 'mp4' | 'webm'): 'aac' | 'opus' {
   return ext === 'mp4' ? 'aac' : 'opus'
 }
@@ -251,7 +264,10 @@ export async function recordVideo(req: RecordRequest, deps: RecorderDeps = {}): 
   })
   output.addVideoTrack(source, { frameRate: plan.fps })
   const audioSource = req.audio
-    ? new mb.AudioBufferSource({ codec: audioCodecFor(plan.ext), quality: new mb.Quality('high') })
+    ? new mb.AudioBufferSource(
+        { codec: audioCodecFor(plan.ext), quality: new mb.Quality('high') },
+        { startTimestamp: audioStartTimestamp(plan.ext, req.audio.sampleRate) },
+      )
     : null
   if (audioSource) output.addAudioTrack(audioSource)
 
