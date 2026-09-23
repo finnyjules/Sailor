@@ -32,6 +32,10 @@ describe('R2 recognition — the rules one by one', () => {
     expect(ratingOf('4,5 out of 5')).toBe(4.5)
     expect(ratingOf('4 stars')).toBe(4)
     expect(ratingOf('4.7 million')).toBeUndefined()
+    // Fix round 2: a bare 0–5 is not a rating without a marker (unless tagged: `bare`).
+    expect(ratingOf('3')).toBeUndefined()
+    expect(ratingOf('4.7')).toBeUndefined()
+    expect(ratingOf('3', true)).toBe(3)
     expect(ratingOf('6/5')).toBeUndefined()
     expect(ratingOf('★★★★★★')).toBeUndefined()
     expect(ratingOf('Great ★')).toBeUndefined()
@@ -347,5 +351,55 @@ describe('ruling C2 — the base view and the content view', () => {
     // Unused: gone from both.
     expect(Object.values(roleIdsForFrame(at({ x: 'unused' })))).not.toContain('x')
     expect(Object.values(contentForFrame(at({ x: 'unused' })).roles)).not.toContain('x')
+  })
+})
+
+// ── Fix round 2: a bare digit is not a rating; unshaped claims go back ─────
+describe('fix round 2 — explicit rating markers, unshaped content goes back to its base role', () => {
+  const at = (layers: LocalLayer[], tags?: ContentTags) =>
+    ({ props: { sailor_localLayers: layers, ...(tags ? { sailor_posterState: { tags } } : {}) }, frameW: 895, frameH: 1280 })
+
+  it('a lone "3" with no ★ keeps its caption role in both views', () => {
+    const layers = [tl('t', 'Run lighter.', 0.12), tl('d', 'Halden Trail 2', 0.04), tl('c', '3', 0.02)]
+    expect(roleIdsForFrame(at(layers))).toEqual({ title: 't', details: 'd', caption: 'c' })
+    const c = contentForFrame(at(layers))
+    expect(c.roles).toEqual({ title: 't', details: 'd', caption: 'c' })
+    expect(c.review).toBeUndefined()
+  })
+
+  it('"4.5 ★" with no quote goes back to its base role in the content view', () => {
+    const layers = [tl('t', 'Run lighter.', 0.12), tl('d', 'Halden Trail 2', 0.04), tl('r', '4.5 ★', 0.03), tl('c', 'Free returns', 0.02)]
+    const base = roleIdsForFrame(at(layers))
+    expect(base).toEqual({ title: 't', details: 'd', date: 'r', caption: 'c' })
+    expect(contentForFrame(at(layers)).roles).toEqual(base)
+    // Directly (no re-inference) too.
+    expect(read(layers).roles).toEqual(base)
+    // …and alongside other content that does claim lines (so the base roles are re-inferred).
+    const withStat = [...layers, tl('s', '198 g', 0.05)]
+    const c = contentForFrame(at(withStat))
+    expect(c.roles.rating).toBeUndefined()
+    expect(Object.values(c.roles)).toContain('r')
+  })
+
+  it('a reviewer without a quote, "vs …" without a list: back to their base roles', () => {
+    const layers = [tl('t', 'Run lighter.', 0.12), tl('b', '— Maya R.', 0.04), tl('v', 'vs a typical trail shoe', 0.02)]
+    const c = contentForFrame(at(layers))
+    // ("— Maya R." reads as the date in Stage 3 — "May" — and goes back to exactly that.)
+    expect(c.roles).toEqual(roleIdsForFrame(at(layers)))
+    expect(c.roles).toMatchObject({ title: 't', caption: 'v' })
+    expect(Object.values(c.roles)).toContain('b')
+    expect(c.compare).toBeUndefined()
+  })
+
+  it('a tagged rating without a quote stays a rating (even a bare digit)', () => {
+    const layers = [tl('t', 'Run lighter.', 0.12), tl('d', 'Halden Trail 2', 0.04), tl('c', '3', 0.02)]
+    const c = contentForFrame(at(layers, { c: 'rating' }))
+    expect(c.roles.rating).toBe('c')
+    // The tagged line leaves the base roles; they are re-inferred from the rest (ruling C2).
+    expect(c.roles).toEqual({ title: 't', caption: 'd', rating: 'c' })
+    expect(c.review).toBeUndefined()
+    // With a quote, the tagged bare digit is the stars.
+    const q = [...layers, tl('q', '“Lightest shoe I have ever raced in.”', 0.03)]
+    expect(contentForFrame(at(q, { c: 'rating' })).review).toEqual({ stars: 3, quote: '“Lightest shoe I have ever raced in.”' })
   })
 })

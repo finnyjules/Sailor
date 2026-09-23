@@ -35,16 +35,19 @@ const words = (t: string) => t.trim().split(/\s+/).filter(Boolean)
 
 // ── R2 recognition ──────────────────────────────────────────────────────────
 
-const RATING_NUM_RE = /^\s*([0-5](?:[.,]\d)?)\s*(?:★|stars?|\/\s*5|out of 5)?\s*$/i
+const RATING_NUM_RE = /^\s*([0-5](?:[.,]\d)?)\s*(?:★|stars?|\/\s*5|out of 5)\s*$/i
+const RATING_BARE_RE = /^\s*([0-5](?:[.,]\d)?)\s*$/
 const RATING_STARS_RE = /^\s*(★{1,5})☆*\s*$/
 
-/** A rating (R2): "4.7 ★", "5/5", "4,5 out of 5", or 1–5 ★ followed by ☆s. Its value: the number,
- *  or the ★ count. Undefined when the text is not a rating. */
-export function ratingOf(s: string | undefined): number | undefined {
+/** A rating (R2, fix round 2): "4.7 ★", "5/5", "4,5 out of 5", "4 stars", or 1–5 ★ followed by
+ *  ☆s — always with an explicit marker; a bare "3" is not a rating. Its value: the number, or the
+ *  ★ count. `bare`: also read a bare 0–5 (a line the user TAGGED as the rating). Undefined when
+ *  the text is not a rating. */
+export function ratingOf(s: string | undefined, bare = false): number | undefined {
   if (!s) return undefined
   const stars = RATING_STARS_RE.exec(s)
   if (stars) return stars[1]!.length
-  const n = RATING_NUM_RE.exec(s)
+  const n = RATING_NUM_RE.exec(s) ?? (bare ? RATING_BARE_RE.exec(s) : null)
   return n ? Number(n[1]!.replace(',', '.')) : undefined
 }
 
@@ -175,6 +178,8 @@ export function readContent(userLayers: LocalLayer[], inferred: FrameElements, t
   //    title — and not the action, ruling S3). The first line in document order that fits a role
   //    holds it; a later one keeps what it had.
   const held = (id: string) => (Object.keys(roles) as ContentRole[]).find(r => roles[r] === id)
+  /** The base role a recognised line held before (so it can go back if no shape uses it). */
+  const before = new Map<string, ContentRole>()
   if (recognise) for (const l of userLayers) {
     const t = textOf(l)
     if (t == null || taken.has(l.id)) continue
@@ -182,7 +187,7 @@ export function readContent(userLayers: LocalLayer[], inferred: FrameElements, t
     if (cur === 'title' || cur === 'action') continue
     const hit = RULES.find(([r, test]) => roles[r] == null && test(t))
     if (!hit) continue
-    if (cur) delete roles[cur]
+    if (cur) { delete roles[cur]; before.set(l.id, cur) }
     roles[hit[0]] = l.id
   }
 
@@ -201,9 +206,25 @@ export function readContent(userLayers: LocalLayer[], inferred: FrameElements, t
     for (const l of cands) if (!best || size(l.id) > size(best.id)) best = l
     if (best) {
       const cur = held(best.id)
-      if (cur) delete roles[cur]
+      if (cur) { delete roles[cur]; before.set(best.id, cur) }
       roles.statline = best.id
     }
+  }
+
+  // Fix round 2: a line claimed by a new role whose content shape does not form (a rating or a
+  // reviewer with no quote, a comparison's other side with no list, a stat's line with no stat) is
+  // not content: it goes back to its base role. A role the user TAGGED is kept, shaped or not.
+  const unshaped: ContentRole[] = [
+    ...(roles.quote ? [] : ['rating', 'by'] as const),
+    ...(roles.list ? [] : ['them'] as const),
+    ...(roles.stat ? [] : ['statline'] as const),
+  ]
+  for (const r of unshaped) {
+    const id = roles[r]
+    if (!id || taggedRoles.has(r)) continue
+    delete roles[r]
+    const prev = before.get(id)
+    if (prev && roles[prev] == null) roles[prev] = id
   }
 
   // Ruling C2: the lines claimed as new content leave their base roles, and the base roles no tag
@@ -236,7 +257,7 @@ function finish(roles: Partial<Record<ContentRole, string>>, byId: Map<string, L
   const out: ReadContent = { roles }
   const quote = txt('quote')
   if (quote) {
-    const stars = ratingOf(txt('rating'))
+    const stars = ratingOf(txt('rating'), true)
     const by = txt('by')
     out.review = { ...(stars != null ? { stars } : {}), quote, ...(by ? { by } : {}) }
   }
