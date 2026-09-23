@@ -187,14 +187,17 @@ export function moveUnitAtView(u: UnitInfo, layers: LocalLayer[], W0: number, H0
 
 /** The pins after an edit that keeps the centre where it is (scale, rotate): hold them while
  *  dragging; on drop an automatic axis stays automatic if the new design box still reads as the
- *  held pin, otherwise the held pin is stored so nothing moves. */
+ *  held pin, otherwise the held pin is stored so nothing moves. The held pin is compared as it
+ *  takes EFFECT: a layer that cannot stretch (rotated) draws a held "both" centred, so an automatic
+ *  stretched layer that is rotated and reads as centred stays automatic. */
 function holdPins(u: UnitInfo, nb: ResolvedBox, canStretch: boolean, phase: 'drag' | 'drop'): ViewEdit['pins'] {
   const one = (axis: 'h' | 'v'): PinWrite => {
     const ax = axisInfo(u, axis)
     if (ax.explicit) return null
     if (phase === 'drag') return { set: ax.map.kind }
     const start = axis === 'h' ? nb.x : nb.y, extent = axis === 'h' ? nb.w : nb.h
-    return inferAxisPin(start, extent, ax.refDesign.start, ax.refDesign.extent, canStretch) === ax.map.kind
+    const effective: AxisPin = ax.map.kind === 'both' && !canStretch ? 'center' : ax.map.kind
+    return inferAxisPin(start, extent, ax.refDesign.start, ax.refDesign.extent, canStretch) === effective
       ? { clear: true } : { set: ax.map.kind }
   }
   return pinsPatch(u, one('h'), one('v'))

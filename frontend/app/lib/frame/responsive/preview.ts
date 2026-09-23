@@ -1,5 +1,5 @@
 import { buildUnits, type Unit } from './units'
-import { inferAxisPin } from './infer'
+import { inferAxisPin, V_NAME } from './infer'
 import { sectionsAt, sectionOf } from './sections'
 import type { FrameDoc, PinH, PinV, AxisMap, ResolvedBox } from './types'
 
@@ -9,9 +9,6 @@ export interface EffectivePins {
   sectionAvailable: boolean
   unitId: string
 }
-
-const V_NAME: Record<'left' | 'right' | 'both' | 'center' | 'relative', PinV> =
-  { left: 'top', right: 'bottom', both: 'both', center: 'middle', relative: 'relative' }
 
 /** The unit that owns `layerId`'s pins, or null. */
 function unitOf(units: Unit[], layerId: string): Unit | null {

@@ -165,6 +165,18 @@ describe('rotateLayerAtView', () => {
     expect(after.x).toBeCloseTo(1050, 6); expect(after.w).toBeCloseTo(900, 6)   // centre map: 1000 + 50 .. 1000 + 950
     expectBox(after, drawnAfter([l], drag, 'a'))
   })
+  it('an automatic stretched banner rotated 15° stays automatic: a rotated layer holds "both" as centred', () => {
+    const l = createRectLayer({ id: 'a', x: 0.5, y: 0.5, w: 0.8, h: 0.1 })     // 800×50, centred, span 0.8
+    const u = unitAt([l], 'a')
+    expect(u.h.kind).toBe('both')
+    expect(u.hExplicit).toBe(false)
+    const drag = rotateLayerAtView(u, l, 15, { w: 800, h: 50 }, 'drag')
+    const drop = rotateLayerAtView(u, l, 15, { w: 800, h: 50 }, 'drop')
+    // Rotated, it cannot stretch, so the held "both" is drawn centred — which is also what the
+    // automatic reading of the rotated box gives. Nothing to store.
+    expect(drop.pins!.patch).toEqual({ h: undefined, v: undefined })
+    expectBox(drawnAfter([l], drop, 'a'), drawnAfter([l], drag, 'a'))
+  })
 })
 
 describe('the 1 px stop and moves', () => {

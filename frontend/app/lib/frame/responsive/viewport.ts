@@ -39,3 +39,19 @@ export function atDesignSize(view: Size, design: Size): boolean {
 export function readoutLabel(view: Size, design: Size): 'Design size' | 'Viewing size' {
   return atDesignSize(view, design) ? 'Design size' : 'Viewing size'
 }
+
+/**
+ * The artboard the editor works in: DESIGN-shaped at the artboard's width. At a viewing size
+ * the artboard takes the view's shape, and it only re-fits a tick after a snap back to the design
+ * size, so this goes by the artboard's actual shape rather than by "at the design size": an
+ * artboard already at the design shape is returned as it is, anything else gets the design shape.
+ * The artboard's sides are each rounded when it is fitted, which is the tolerance. A fixed Frame
+ * always gets the artboard as it is.
+ */
+export function designShapedArtboard(canvas: Size, design: Size, responsive: boolean): Size {
+  if (!responsive || !(design.w > 0) || !(design.h > 0)) return { w: canvas.w, h: canvas.h }
+  const ratio = design.h / design.w
+  const h = canvas.w * ratio
+  if (Math.abs(canvas.h - h) <= 0.5 + 0.5 * ratio + 1e-9) return { w: canvas.w, h: canvas.h }
+  return { w: canvas.w, h }
+}
