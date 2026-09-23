@@ -2098,6 +2098,9 @@ async function onCanvasDrop(e: DragEvent) {
 
 // Esc cancels an in-progress pen draft (before it bubbles to modal-close).
 function onKeydown(e: KeyboardEvent) {
+  // Escape during a move drag at a viewing size settles the drop where the last frame drew it
+  // (so no held pin is left stored) and ends the drag. It must not also close the modal.
+  if (e.key === 'Escape' && viewDrag.value) { e.preventDefault(); e.stopPropagation(); onViewPointerUp(); return }
   // Keyboard nudge/duplicate on the current selection — deferred first so it
   // doesn't fire while typing in a field or text-editing a layer.
   const t = e.target as HTMLElement | null
@@ -3350,8 +3353,10 @@ const viewDrag = ref<null | {
 }>(null)
 function onViewPointerDown(e: PointerEvent) {
   const t = e.target as HTMLElement | null
-  if (t?.closest?.('[data-view-handle],[data-handle],[data-gen-bar],[data-smart-bar]')) return
-  if (editingId.value && t?.closest?.('textarea')) return // the inline text editor keeps its caret
+  // In-canvas chrome keeps its own clicks: handles, the generate / smart / edit-result toolbars,
+  // and any button or field (the inline text editor keeps its caret). Capturing the pointer here
+  // would retarget their pointer-up and click to the artboard.
+  if (t?.closest?.('[data-view-handle],[data-handle],[data-gen-bar],[data-smart-bar],[data-edit-result-bar],button,input,textarea,select')) return
   const r = resolved.value; if (!r) return
   const id = viewHitAt(e)
   if (!id) { lastDownHitLayer = false; if (!e.shiftKey) selectLocal(null); return } // no marquee at a view (later work)
@@ -3396,6 +3401,8 @@ function onViewPointerUp() {
   const { w: W0, h: H0 } = designSize.value
   applyViewEdits(d.units.map(u => moveUnitAtView(u, d.layers, W0, H0, d.dx, d.dy, 'drop')))
 }
+// Closing the modal mid-drag settles the drop too, so the saved doc never keeps a held pin.
+onBeforeUnmount(() => { onViewPointerUp() })
 /** Arrow keys at a viewing size: one press moves the selection one canvas px ON SCREEN (ten with
  *  Shift), settled with the drop rule. Returns true when it handled the key. */
 function viewNudge(e: KeyboardEvent): boolean {
@@ -3489,6 +3496,9 @@ function onCanvasContextMenu(e: MouseEvent) {
 }
 // Task 3/4 replace these bodies:
 function editImageStart(id: string) {
+  // Its result toolbar is placed from design positions, so the edit runs at the design size:
+  // snap back first (as "Edit an area…" does), then open it on the same layer.
+  viewOnlyGuard()
   exitOtherToolsFor('region')      // leave any other tool; reuse the mutual-exclusion reducer
   if (editRegion.value) editRegionCancel()   // peer takeover slot — only one of the two can be up
   editImage.value = { layerId: id }
@@ -7854,6 +7864,7 @@ onUnmounted(() => {
         @pointermove="onCanvasPointerMoveCapture"
         @pointerup="onCanvasPointerUpCapture"
         @pointercancel="onViewPointerUp"
+        @lostpointercapture="onViewPointerUp"
         @pointerleave="genCursor.on = false; smartCursor.on = false; brush.cursor.value = null"
         @dblclick.capture="onCanvasDblClickCapture"
         @contextmenu="onCanvasContextMenu"
