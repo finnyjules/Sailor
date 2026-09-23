@@ -2,7 +2,7 @@ import type { Clip, EditState } from '~~/shared/timeline/types'
 import { computeTotalFrames } from '~~/shared/timeline/types'
 import type { ClipPreview } from '~/composables/usePlaybackEngine'
 import { WebGLPreviewRenderer, resolutionPlanFor } from '~/lib/engine/webglPreviewRenderer'
-import { recordVideo, type RecordResult } from '~/lib/engine/videoRecorder'
+import { recordVideo, isAbortError, type RecordResult } from '~/lib/engine/videoRecorder'
 import { mixTimelineAudio } from '~/lib/engine/audio/mixdown'
 
 // The timeline recorded in the browser: a private WebGL preview renderer (the
@@ -44,13 +44,31 @@ export async function recordTimeline(
   state: EditState,
   deps: TimelineRecordDeps,
   o: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void; onPhase?: (p: 'mixing' | 'rendering') => void } = {},
-): Promise<{ result: RecordResult; skippedAudio: number; skippedClips: string[] }> {
+): Promise<{
+  result: RecordResult; skippedAudio: number; skippedClips: string[]
+  /** Why the file has no sound at all, when the mix itself could not be made
+   *  (e.g. "the timeline is longer than 30 minutes"). Absent when it could. */
+  audioLeftOut?: string
+}> {
   const { width, height, fps } = state.canvas
   const clips = new Map<string, Clip>()
   for (const t of state.tracks) for (const c of t.clips) clips.set(c.id, c)
 
   o.onPhase?.('mixing')
-  const { buffer, skipped: skippedAudio } = await (deps.mixAudio ?? mixTimelineAudio)(state, deps.resolveAudioUrl)
+  // A mix that can't be made (the 30-minute cap, an allocation the browser
+  // refuses) is not an encoder failure: record the pictures without sound and
+  // say why, rather than failing the whole export.
+  let buffer: AudioBuffer | null = null
+  let skippedAudio = 0
+  let audioLeftOut: string | undefined
+  try {
+    ({ buffer, skipped: skippedAudio } = await (deps.mixAudio ?? mixTimelineAudio)(state, deps.resolveAudioUrl))
+  } catch (err) {
+    if (isAbortError(err)) throw err
+    console.warn('[timeline] sound could not be mixed; recording without it', err)
+    const msg = (err instanceof Error ? err.message : String(err)).replace(/\.$/, '')
+    audioLeftOut = /^timeline\b/.test(msg) ? `the ${msg}` : msg
+  }
 
   // Clips the draw list never shows: muted or audio tracks (same filter as
   // compositor's buildDrawList). A problem reported against one of these must
@@ -65,6 +83,10 @@ export async function recordTimeline(
     const clip = clips.get(id)
     return clip ? describeClip(clip, fps) : 'a clip'
   }
+
+  // Text is drawn with web fonts: wait for them, as the Motion / Space Type
+  // bake this route replaced did, or the first frames fall back to a system face.
+  if (typeof document !== 'undefined') await document.fonts?.ready
 
   const renderer = (deps.createRenderer ?? (() => new WebGLPreviewRenderer()))()
   try {
@@ -100,7 +122,9 @@ export async function recordTimeline(
         ctx.drawImage(scratch, 0, 0)
       },
     })
-    return { result, skippedAudio, skippedClips }
+    return audioLeftOut === undefined
+      ? { result, skippedAudio, skippedClips }
+      : { result, skippedAudio, skippedClips, audioLeftOut }
   } finally {
     renderer.dispose()
   }

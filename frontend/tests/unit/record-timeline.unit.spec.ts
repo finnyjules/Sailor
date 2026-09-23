@@ -72,6 +72,40 @@ describe('recordTimeline', () => {
     expect(f.record.mock.calls[0]![0].audio).toBeUndefined()
   })
 
+  it('a mix that cannot be made records without sound and says why — not an encoder failure', async () => {
+    const f = fakes()
+    f.mixAudio.mockRejectedValueOnce(new Error('timeline is longer than 30 minutes'))
+    const r = await recordTimeline(S([img('a', 0, 2)]), {
+      resolve: () => ({ url: 'u', kind: 'image' } as any), resolveAudioUrl: () => null,
+      createRenderer: () => f.renderer as any, record: f.record as any, mixAudio: f.mixAudio as any, createCanvas: f.createCanvas,
+    })
+    expect(r.audioLeftOut).toBe('the timeline is longer than 30 minutes')
+    expect(r.skippedAudio).toBe(0)
+    expect(r.skippedClips).toEqual([])
+    expect(f.record.mock.calls[0]![0].audio).toBeUndefined()
+    expect(f.record.mock.calls[0]![0].frameCount).toBe(2)
+  })
+
+  it('a mix that works reports no sound left out', async () => {
+    const f = fakes()
+    const r = await recordTimeline(S([img('a', 0, 1)]), {
+      resolve: () => null, resolveAudioUrl: () => null,
+      createRenderer: () => f.renderer as any, record: f.record as any, mixAudio: f.mixAudio as any, createCanvas: f.createCanvas,
+    })
+    expect(r.audioLeftOut).toBeUndefined()
+  })
+
+  it('a cancel during the mix is still a cancel, not "recorded without sound"', async () => {
+    const f = fakes()
+    f.mixAudio.mockRejectedValueOnce(new DOMException('Export cancelled', 'AbortError'))
+    const err = await recordTimeline(S([img('a', 0, 1)]), {
+      resolve: () => null, resolveAudioUrl: () => null,
+      createRenderer: () => f.renderer as any, record: f.record as any, mixAudio: f.mixAudio as any, createCanvas: f.createCanvas,
+    }).then(() => null, e => e)
+    expect(err?.name).toBe('AbortError')
+    expect(f.record).not.toHaveBeenCalled()
+  })
+
   it('describeClip speaks plainly', () => {
     expect(describeClip({ kind: 'lower_third', start_frame: 45 } as any, 30)).toBe('the lower third clip at 1.5 s')
   })

@@ -1165,67 +1165,126 @@ async function exportTimeline() {
   renderResult.value = null
   renderProgress.value = null
   isRendering.value = true
+  // Before any await, so closing the editor during the checks below stops the
+  // export too (onUnmounted aborts exportAbort).
+  const abort = new AbortController()
+  exportAbort = abort
   store.pause()
-  const es = store.state.value
+  const live = store.state.value
   const hosted = hostedModeEnabled(useRuntimeConfig().public)
   let reason = ''   // why the browser route was not used ('' = the server route was chosen on purpose)
+  const finish = () => { isRendering.value = false; renderPhase.value = null; renderProgress.value = null }
+  const cancelled = () => { renderNotice.value = 'Export cancelled.'; finish() }
 
-  if (!hosted && prefersServerVideoExport()) {
-    // fall through to the server route below
-  } else if (!(await canRecordInBrowser({ width: es.canvas.width, height: es.canvas.height, fps: es.canvas.fps, audio: true }))) {
-    reason = "this browser can't record video"
-  } else {
-    exportAbort = new AbortController()
-    browserExporting.value = true
-    try {
-      const { result, skippedAudio, skippedClips } = await recordTimeline(es, {
-        resolve: clip => resolveClipPreview(clip),
-        resolveAudioUrl: clip => resolveAudioUrl(clip),
-      }, {
-        signal: exportAbort.signal,
-        onPhase: p => { renderPhase.value = p; renderProgress.value = null },
-        onProgress: (done, total) => { renderProgress.value = { current: done, total } },
-      })
-      if (hosted && result.blob.size > HOSTED_UPLOAD_LIMIT) throw new Error('This video is larger than 100 MB, the upload limit.')
-      renderPhase.value = 'uploading'
-      renderProgress.value = null
-      const filename = await publishVideo(result.blob, result.ext, 'timeline', undefined, exportAbort.signal)
-      if (exportAbort.signal.aborted) throw new DOMException('Export cancelled', 'AbortError')
-      renderResult.value = { url: `/view?${new URLSearchParams({ filename, type: 'input' })}`, filename }
-      const notes: string[] = []
-      if (skippedClips.length) notes.push(`Left out, nothing to draw yet: ${skippedClips.join(', ')}.`)
-      if (skippedAudio === 1) notes.push('One audio clip could not be loaded, so it was left out.')
-      else if (skippedAudio > 1) notes.push(`${skippedAudio} audio clips could not be loaded, so they were left out.`)
-      renderNotice.value = notes.join(' ') || null
-      isRendering.value = false
-      renderPhase.value = null
-      renderProgress.value = null
-      return
-    } catch (err) {
-      if (isAbortError(err)) {
-        renderNotice.value = 'Export cancelled.'
-        isRendering.value = false; renderPhase.value = null; renderProgress.value = null
-        return
+  try {
+    if (!hosted && prefersServerVideoExport()) {
+      // fall through to the server route below
+    } else if (!webglPreviewSupported()) {
+      reason = 'this browser has no WebGL2'
+    } else if (!(await canRecordInBrowser({
+      width: live.canvas.width, height: live.canvas.height, fps: live.canvas.fps,
+      // Only a timeline with sound needs an audio encoder: a silent one must
+      // not be refused on a browser without AAC.
+      audio: live.tracks.some(t => t.kind === 'audio' && !t.muted && t.clips.some(c => c.kind === 'audio')),
+    }))) {
+      reason = "this browser can't record video"
+    } else {
+      if (abort.signal.aborted) return cancelled()
+      // Record from a snapshot: an edit made while the export runs must not
+      // change the file partway through. In it, a wired workflow clip whose
+      // node resolves to a real file becomes that plain video/image clip — as
+      // the server route does — so wired footage is drawn, not left black.
+      const es: EditState = JSON.parse(JSON.stringify(live))
+      const previews = new Map<string, NonNullable<ReturnType<typeof resolveClipPreview>>>()
+      for (const track of es.tracks) {
+        for (const clip of track.clips) {
+          if (clip.kind !== 'workflow') continue
+          const preview = resolveClipPreview(clip)
+          if (preview && (preview.kind === 'video' || preview.kind === 'image')) {
+            (clip as { kind: string }).kind = preview.kind
+            previews.set(clip.id, preview)
+          }
+        }
       }
-      console.warn('[timeline] browser export failed', err)
-      if (err instanceof TimelineExportRefused) reason = err.message.replace(/\.$/, '')
-      else if (err instanceof Error && err.message.startsWith('This video is larger')) reason = err.message.replace(/\.$/, '')
-      else reason = "the browser's video encoder failed"
-    } finally {
-      exportAbort = null
-      browserExporting.value = false
-    }
-  }
 
-  if (hosted) {
-    renderError.value = reason.startsWith('These clips')
-      ? `${reason}. Replace them with a smaller or more common video file.`
-      : `Video export failed: ${reason}.`
-    isRendering.value = false; renderPhase.value = null; renderProgress.value = null
-    return
+      browserExporting.value = true
+      try {
+        let recorded: Awaited<ReturnType<typeof recordTimeline>> | null = null
+        try {
+          recorded = await recordTimeline(es, {
+            resolve: clip => previews.get(clip.id) ?? resolveClipPreview(clip),
+            resolveAudioUrl: clip => resolveAudioUrl(clip),
+          }, {
+            signal: abort.signal,
+            onPhase: p => { renderPhase.value = p; renderProgress.value = null },
+            onProgress: (done, total) => { renderProgress.value = { current: done, total } },
+          })
+        } catch (err) {
+          if (isAbortError(err)) return cancelled()
+          console.warn('[timeline] browser export failed', err)
+          reason = err instanceof TimelineExportRefused ? err.message.replace(/\.$/, '') : "the browser's video encoder failed"
+        }
+
+        if (recorded) {
+          // The upload has its own error: a failed upload is NOT a reason to
+          // re-make the video on the server — that route uploads far more, and
+          // would fail the same way.
+          const { result, skippedAudio, skippedClips, audioLeftOut } = recorded
+          renderPhase.value = 'uploading'
+          renderProgress.value = null
+          let filename: string
+          try {
+            if (hosted && result.blob.size > HOSTED_UPLOAD_LIMIT) throw new Error('This video is larger than 100 MB, the upload limit.')
+            filename = await publishVideo(result.blob, result.ext, 'timeline', undefined, abort.signal)
+            if (abort.signal.aborted) throw new DOMException('Export cancelled', 'AbortError')
+          } catch (err) {
+            if (isAbortError(err)) return cancelled()
+            console.warn('[timeline] video upload failed', err)
+            renderError.value = uploadErrorText(err)
+            finish()
+            return
+          }
+          renderResult.value = { url: `/view?${new URLSearchParams({ filename, type: 'input' })}`, filename }
+          const notes: string[] = []
+          if (skippedClips.length) notes.push(`Left out, nothing to draw: ${skippedClips.join(', ')}.`)
+          if (audioLeftOut) notes.push(`Recorded without sound: ${audioLeftOut}.`)
+          if (skippedAudio === 1) notes.push('One audio clip could not be loaded, so it was left out.')
+          else if (skippedAudio > 1) notes.push(`${skippedAudio} audio clips could not be loaded, so they were left out.`)
+          renderNotice.value = notes.join(' ') || null
+          finish()
+          return
+        }
+      } finally {
+        browserExporting.value = false
+      }
+    }
+
+    if (hosted) {
+      renderError.value = reason.startsWith('These clips')
+        ? `${reason}. Replace them with a smaller or more common video file.`
+        : `Video export failed: ${reason}.`
+      finish()
+      return
+    }
+    if (abort.signal.aborted) return cancelled()
+    const notes = [reason ? `Made on the server, because ${reason.charAt(0).toLowerCase()}${reason.slice(1)}.` : 'Made on the server (browser recording is switched off).']
+    // The server renderer draws no titles or lower thirds: say so, never drop them quietly.
+    if (live.tracks.some(t => !t.muted && t.kind !== 'audio' && t.clips.some(c => c.kind === 'title' || c.kind === 'lower_third'))) {
+      notes.push('The server render leaves out titles and lower thirds.')
+    }
+    renderNotice.value = notes.join(' ')
+  } finally {
+    if (exportAbort === abort) exportAbort = null
   }
-  renderNotice.value = reason ? `Made on the server, because ${reason.charAt(0).toLowerCase()}${reason.slice(1)}.` : 'Made on the server (browser recording is switched off).'
   await renderOnServer()
+}
+
+/** A failed upload in plain words (publishVideo's own messages, or the network's). */
+function uploadErrorText(err: unknown): string {
+  const msg = (err instanceof Error ? err.message : String(err)).replace(/\.$/, '')
+  if (/^This video/.test(msg)) return `${msg}.`
+  if (/^video upload failed/i.test(msg)) return `V${msg.slice(1)}.`
+  return `Video upload failed: ${msg}.`
 }
 
 /** Today's route: bake Motion/Space Type clips, mix and upload the sound, and let the Python renderer draw every frame. The local fallback (and the only route a Timeline node inside a workflow uses). */
@@ -2024,7 +2083,7 @@ const assetTab = ref<'ports' | 'files' | 'library'>(portBindings.value.length > 
             class="text-xs text-action hover:text-action/80 underline underline-offset-2">
             {{ renderResult.filename }}
           </a>
-          <span v-if="renderError" class="text-xs text-amber-400 truncate max-w-[200px]">{{ renderError }}</span>
+          <span v-if="renderError" class="text-xs leading-tight text-amber-400 max-w-[360px] whitespace-normal break-words line-clamp-2" :title="renderError">{{ renderError }}</span>
           <span v-if="renderNotice" class="text-xs text-white/50 truncate max-w-[280px]" :title="renderNotice">{{ renderNotice }}</span>
           <button
             class="flex items-center justify-center size-7 rounded hover:bg-white/10 transition-colors"
