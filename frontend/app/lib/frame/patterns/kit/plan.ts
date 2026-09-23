@@ -21,7 +21,7 @@ import type { Sheet, SheetOpts } from './sheet'
 import { makeCanvasMeasure } from './measure'
 import { boxOf, checkPlan } from './check'
 import { elementsToOps } from './toOps'
-import { pieceFills } from './contrast'
+import { isSolid, pieceFills } from './contrast'
 import type { FillCtx, PieceFills } from './contrast'
 import type { RoleTargets } from './toOps'
 import { isOwned, mergeOwned } from './owned'
@@ -410,7 +410,7 @@ function checkRun({ out, S, side, keep, fullH, style }: Run, premise: LayoutDef[
   // reads the picker's buttons: only a filled one covers its label (an outline or a link does not).
   const styled = style && style !== 'swiss'
   const opts = keep || styled
-    ? { ...(keep ? { keep, fullH } : {}), ...(styled ? { style, btnFilled: (e: El) => typeof pf.fills.get(e) === 'string' } : {}) }
+    ? { ...(keep ? { keep, fullH } : {}), ...(styled ? { style, btnFilled: (e: El) => isSolid(pf.fills.get(e)) } : {}) }
     : undefined
   const issues = !side || !bleed.length
     ? checkPlan(out.els, S, premise, opts)

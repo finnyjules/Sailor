@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { candidatesForFrame, planLayout } from '~/lib/frame/patterns/kit/plan'
 import type { LayoutPlanArgs } from '~/lib/frame/patterns/kit/plan'
-import { pickFill, pieceFills, textsOn } from '~/lib/frame/patterns/kit/contrast'
+import { pickFill, pickPlain, pieceFills, textsOn } from '~/lib/frame/patterns/kit/contrast'
+import { paletteFromFrame } from '~/lib/frame/patterns/framePalette'
 import { contrastRatio } from '~/lib/frame/patterns/palette'
 import { STYLES } from '~/lib/frame/patterns/kit/styles'
 import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
@@ -195,9 +196,77 @@ describe('ruling R8: a button that can\'t stand out is an outline; the rank coun
     const S = makeSheet({ frameW: 895, frameH: 1280, measure: makeStubMeasure(), style: 'performance' })
     const { btn, text } = S.button('Shop now', 10, 50)
     const ctx = { palette: { field: '#777777', ink: '#808080', accent: '#707070' }, hasAction: true, layerColour: () => '#7a7a7a' }
-    const out = pieceFills([btn, text], S, ctx)
+    // Grey page: no role stands out, but plain white does (4.3:1 with the label, 4.5:1 against the page — R12).
+    expect(pieceFills([btn, text], S, ctx).fills.get(btn)).toEqual({ plain: '#ffffff' })
+    // Paper page, dark label: no role and no plain colour — an outline.
+    const out = pieceFills([btn, text], S, { ...ctx, palette: LAB, layerColour: () => '#111111' })
     expect(out.issues).toEqual([])
-    expect(out.fills.get(btn)).toEqual({ outline: '#7a7a7a' })
+    expect(out.fills.get(btn)).toEqual({ outline: '#111111' })
     expect(pieceFills([btn, text], S, { ...ctx, layerColour: () => ({ type: 'linear' }) }).fills.get(btn)).toBeNull()
+  })
+})
+
+// ═══════════════════════ follow-up R12: plain paper before refusing ═══════════════════════
+describe('ruling R12: a tag, sticker or button no role can carry tries plain paper first', () => {
+  /** The lab Frame in the browser: a pink page, near-black text, no shape — its own palette. */
+  const pinkLayers = (layers: LocalLayer[]) => recolourText(layers, ['t', 'd', 'dt', 'c', 'a'], '#121212')
+  const pinkPalette = (layers: LocalLayer[]) => paletteFromFrame({ sailor_localBg: '#ee7fb0', sailor_localLayers: layers })
+
+  it('the pink page: no role reads under the dark text and stands out from the page', () => {
+    const P = pinkPalette(pinkLayers(eventFrameLayers('phrase', { image: false, action: true })))
+    expect(P.field).toBe('#ee7fb0')
+    expect(pickFill(['accent', 'ink', 'field'], ['#121212'], P, true)).toBeNull()
+    // White: 18.4:1 with the text, 2.6:1 against the page.
+    expect(pickPlain(['#121212'], P)).toBe('#ffffff')
+  })
+
+  it('Street Fill on the pink page: the tag is plain white and the candidate is offered', () => {
+    const layers = pinkLayers(eventFrameLayers('phrase', { image: false, action: true }))
+    const a = { ...base, palette: pinkPalette(layers), style: 'street' as const, props: { sailor_localLayers: layers, sailor_localBg: '#ee7fb0' }, layoutId: 'stFill' }
+    const cands = candidatesForFrame(a)
+    expect(cands.length).toBeGreaterThan(0)
+    const plan = planLayout({ ...a, choice: cands[0]!.choice })!
+    expect(plan.issues).toEqual([])
+    expect(owned(plan.layers, 'tag-0')!.fill).toBe('#ffffff')
+    const els = cands[0]!.out.els
+    const S = makeSheet({ frameW: 895, frameH: 1280, measure: makeStubMeasure(), style: 'street' })
+    const tag = els.find(e => e.k === 'r' && e.role === 'tag')!
+    expect(pieceFills(els, S, { palette: a.palette, hasAction: true, layerColour: () => '#121212' }).fills.get(tag)).toEqual({ plain: '#ffffff' })
+  })
+
+  it('a sticker on the pink page is plain white, and offered', () => {
+    const layers = pinkLayers(adFrameLayers('word', { image: true, action: false }))
+    const a = { ...base, palette: pinkPalette(layers), style: 'performance' as const, props: { sailor_localLayers: layers, sailor_localBg: '#ee7fb0' }, layoutId: 'perfSticker' }
+    const cands = candidatesForFrame(a)
+    expect(cands.length).toBeGreaterThan(0)
+    const plan = planLayout({ ...a, choice: cands[0]!.choice })!
+    expect(plan.issues).toEqual([])
+    expect(owned(plan.layers, 'sticker-0')!.fill).toBe('#ffffff')
+  })
+
+  it('a button on the pink page is plain white, not an outline', () => {
+    const layers = pinkLayers(adFrameLayers('word', { image: true, action: true }))
+    const a = { ...base, palette: pinkPalette(layers), style: 'performance' as const, props: { sailor_localLayers: layers, sailor_localBg: '#ee7fb0' }, layoutId: 'perfOffer' }
+    const cands = candidatesForFrame(a)
+    expect(cands.length).toBeGreaterThan(0)
+    const b = owned(planLayout({ ...a, choice: cands[0]!.choice })!.layers, 'button-0')!
+    expect(b.fill).toBe('#ffffff')
+    expect(b.stroke).toBe('')
+  })
+
+  it('negative control: the lab-like paper palette is unchanged — white does not stand out from paper (1.1:1), near-black is the text', () => {
+    expect(pickPlain(['#111111'], LAB)).toBeNull()
+    const a = { ...base, palette: LAB, style: 'street' as const, props: { sailor_localLayers: eventFrameLayers('phrase', { image: false, action: true }) }, layoutId: 'stFill' }
+    expect(candidatesForFrame(a)).toEqual([])
+  })
+
+  it('bands stay role-only: a band no role can carry is still refused, never plain', () => {
+    const P = { ...palette, accent: palette.ink }
+    const els = candidatesForFrame({ ...base, palette, style: 'performance', props: { sailor_localLayers: adFrameLayers('word', { image: true, action: false }) }, layoutId: 'perfOffer' })[0]!.out.els
+    const S = makeSheet({ frameW: 895, frameH: 1280, measure: makeStubMeasure(), style: 'performance' })
+    const colour = (r: string) => (r === 'caption' ? '#111111' : '#ffffff')
+    const out = pieceFills(els, S, { palette: P, hasAction: false, layerColour: colour })
+    expect(out.issues.some(i => / is unreadable on its band$/.test(i))).toBe(true)
+    for (const f of out.fills.values()) expect(f && typeof f === 'object' && 'plain' in f).toBe(false)
   })
 })

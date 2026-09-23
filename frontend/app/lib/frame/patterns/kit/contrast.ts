@@ -18,9 +18,28 @@ export const READABLE = 3
 /** A piece that stands out from the page. */
 export const STAND_OUT = 1.5
 
-/** A piece's fill: a palette role; an outline in the label's colour (a button that can't stand
- *  out — ruling R8); or null (a button drawn as a link: no shape, the label underlined). */
-export type PieceFill = Colour | { outline: string } | null
+/** A piece's fill: a palette role; a plain paper colour (a tag, sticker or button no role can
+ *  carry — ruling R12); an outline in the label's colour (a button that can't stand out — ruling
+ *  R8); or null (a button drawn as a link: no shape, the label underlined). */
+export type PieceFill = Colour | { plain: string } | { outline: string } | null
+
+/** Ruling R12: the plain paper colours a tag, sticker or button tries when no palette role
+ *  passes — white, then near-black (a white label with dark text on a coloured page). */
+export const PLAIN = ['#ffffff', '#111111'] as const
+
+/** The first plain colour every text reads on (≥ 3:1) that stands out from the page (≥ 1.5:1). */
+export function pickPlain(texts: string[], palette: ResolvedPalette): string | null {
+  const field = hex6(palette.field)
+  for (const bg of PLAIN) {
+    if (!texts.every(t => contrastRatio(t, bg) >= READABLE)) continue
+    if (field && contrastRatio(bg, field) < STAND_OUT) continue
+    return bg
+  }
+  return null
+}
+
+/** A piece drawn solid (a role or a plain colour): it covers what lies under it. */
+export const isSolid = (f: PieceFill | undefined): boolean => typeof f === 'string' || (!!f && 'plain' in f)
 
 /** A `#rgb` / `#rrggbb` / `#rrggbbaa` colour as `#rrggbb`; null for anything else. */
 export function hex6(c: unknown): string | null {
@@ -61,12 +80,16 @@ function buttonOrder(label: string, palette: ResolvedPalette, bg?: Colour): Colo
   return bg ? [bg, ...byContrast.filter(r => r !== bg)] : byContrast
 }
 
-/** A button's fill for a label colour (ruling S1 + R6 + R8): a readable role that stands out; an
- *  outline in the label's colour when none does; null (a link) when the label's colour is unknown. */
+/** A button's fill for a label colour (ruling S1 + R6 + R12 + R8): a readable role that stands
+ *  out; else a plain paper colour that does; an outline in the label's colour when neither does;
+ *  null (a link) when the label's colour is unknown. */
 export function buttonFill(labelColour: unknown, palette: ResolvedPalette, bg?: Colour): PieceFill {
   const label = hex6(labelColour)
   if (!label) return null
-  return pickFill(buttonOrder(label, palette, bg), [label], palette, true) ?? { outline: label }
+  const role = pickFill(buttonOrder(label, palette, bg), [label], palette, true)
+  if (role) return role
+  const plain = pickPlain([label], palette)
+  return plain ? { plain } : { outline: label }
 }
 
 /** `title2` → `title`. */
@@ -168,7 +191,7 @@ export function pieceFills(els: El[], S: Sheet, ctx: FillCtx): PieceFills {
   /** Text sits on the topmost piece under it: a card on a band holds its own text, a filled button
    *  its label. An outline or a link covers nothing — its label is on whatever lies beneath. */
   const coveredAbove = (t: TextEl, i: number) => [...on.entries()].some(([k, ts]) => k > i && ts.includes(t)
-    && (els[k]!.k !== 'btn' || typeof fills.get(els[k]!) === 'string'))
+    && (els[k]!.k !== 'btn' || isSolid(fills.get(els[k]!))))
   els.forEach((p, i) => {
     const kind = pieceKind(p)
     if (!kind || kind === 'btn') return
@@ -191,8 +214,13 @@ export function pieceFills(els: El[], S: Sheet, ctx: FillCtx): PieceFills {
     const order = kind === 'tag' || kind === 'sticker' ? TAG_ORDER
       : kind === 'shape' ? [color ?? 'accent', ...PANEL_ORDER.filter(r => r !== (color ?? 'accent'))]
         : PANEL_ORDER
-    const fill = pickFill(order, colours, ctx.palette, kind === 'tag' || kind === 'sticker')
+    const standOut = kind === 'tag' || kind === 'sticker'
+    const fill = pickFill(order, colours, ctx.palette, standOut)
+    // Ruling R12: a tag or a sticker tries plain paper before refusing. Bands, cards, panels and
+    // Swiss shapes stay role-only.
+    const plain = !fill && standOut ? pickPlain(colours, ctx.palette) : null
     if (fill) fills.set(p, fill)
+    else if (plain) fills.set(p, { plain })
     else refuse(hex6(ctx.palette[order[0]!]))
   })
   return { fills, issues }

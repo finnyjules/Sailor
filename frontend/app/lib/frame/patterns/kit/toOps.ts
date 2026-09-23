@@ -234,6 +234,12 @@ export function elementsToOps(
     const f = opts?.fills?.get(e)
     return typeof f === 'string' ? f : own
   }
+  /** The paint an owned piece is filled with: a plain paper colour the picker chose (ruling R12,
+   *  drawn as that exact colour — not a role), else its role's paint. */
+  const fillPaint = (e: El, own: Colour | undefined): string => {
+    const f = opts?.fills?.get(e)
+    return f && typeof f === 'object' && 'plain' in f ? f.plain : paint(roleOf(e, own))
+  }
   const ownedBase = (key: string, e: { opacity?: number; blend?: boolean }) => ({
     id: `layout-${key}`, owner: { by: 'layout' as const, key },
     ...(e.opacity != null ? { opacity: e.opacity } : {}),
@@ -313,7 +319,8 @@ export function elementsToOps(
         const radius = b.shape === 'pill' ? b.h / 2 / 100 : 0
         // An outline (ruling R8): no fill, a stroke in the label's colour, 0.08 × the button's size.
         const drawn = typeof btnFill === 'string' ? { fill: paint(btnFill) }
-          : { fill: 'none', stroke: btnFill.outline, strokeWidth: (0.08 * b.size) / 100 }
+          : 'plain' in btnFill ? { fill: btnFill.plain }
+            : { fill: 'none', stroke: btnFill.outline, strokeWidth: (0.08 * b.size) / 100 }
         own(createRectLayer({
           ...ownedBase(key, b),
           x: (b.x + b.w / 2) / 100, y: (b.y + b.h / 2) / S.H, w: b.w / 100, h: b.h / 100,
@@ -367,7 +374,7 @@ export function elementsToOps(
           ops.push(libraryOp(x, y, d, d, z, c))
         } else {
           const key = keyFor(c.role ?? 'circle')
-          own(createEllipseLayer({ ...ownedBase(key, c), x, y, w: d, h: d, fill: paint(roleOf(c, c.color)) }), 'ellipse', key, z)
+          own(createEllipseLayer({ ...ownedBase(key, c), x, y, w: d, h: d, fill: fillPaint(c, c.color) }), 'ellipse', key, z)
         }
         return
       }
@@ -396,7 +403,7 @@ export function elementsToOps(
         own(createRectLayer({
           ...ownedBase(key, r),
           x: (r.x + r.w / 2) / 100, y: (r.y + r.h / 2) / S.H, w: r.w / 100, h: r.h / 100,
-          rotation: r.rot ?? 0, radius: (r.radius ?? 0) / 100, fill: paint(roleOf(r, r.color)),
+          rotation: r.rot ?? 0, radius: (r.radius ?? 0) / 100, fill: fillPaint(r, r.color),
         }), 'rect', key, z, r.radius ? r.radius / 100 : undefined)
         return
       }

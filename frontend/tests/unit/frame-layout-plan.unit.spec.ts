@@ -966,14 +966,17 @@ describe('planLayout — band, button and logo (Stage 3)', () => {
     expect(plan.issues).toEqual(['title: sits on the raw image'])
   })
 
-  it('an action colour no role contrasts with draws an outlined button (ruling R8)', () => {
+  it('an action colour no role contrasts with: plain white on grey (R12), an outlined button on paper (R8)', () => {
     unregister.push(__registerLayoutForTest(piecesLayout('t-pieces-link')))
     const grey = { field: '#777777', ink: '#808080', accent: '#707070' }
-    const plan = planLayout(args({ layoutId: 't-pieces-link', props: props(layersWith('#7a7a7a')), style: 'performance', brandLogo, palette: grey }))!
+    const g = planLayout(args({ layoutId: 't-pieces-link', props: props(layersWith('#7a7a7a')), style: 'performance', brandLogo, palette: grey }))!
+    expect((g.layers.find(l => (l as any).owner?.key === 'button-0') as any).fill).toBe('#ffffff')
+    const paper = { field: '#f2f0ef', ink: '#111111', accent: '#111111' }
+    const plan = planLayout(args({ layoutId: 't-pieces-link', props: props(layersWith('#111111')), style: 'performance', brandLogo, palette: paper }))!
     const keys = plan.layers.filter(l => (l as any).owner?.by === 'layout').map(l => (l as any).owner.key).sort()
     expect(keys).toEqual(['band-0', 'button-0', 'logo-0'])
     const b = plan.layers.find(l => (l as any).owner?.key === 'button-0') as any
-    expect([b.fill, b.stroke]).toEqual(['none', '#7a7a7a'])
+    expect([b.fill, b.stroke]).toEqual(['none', '#111111'])
     expect((plan.layers.find(l => l.id === 'a') as any).underline).toBeUndefined()
   })
 

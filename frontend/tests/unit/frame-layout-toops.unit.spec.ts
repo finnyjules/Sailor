@@ -494,14 +494,19 @@ describe('elementsToOps — Stage 3 pieces: band, button, logo', () => {
     expect((owned[0] as any).radius).toBe(0)
   })
 
-  it('action text that contrasts with no role draws an outlined button (ruling R8); an unknown colour a link', () => {
+  it('action text no role carries: plain paper (R12), else an outlined button (R8); an unknown colour a link', () => {
     const grey = { field: '#777777', ink: '#808080', accent: '#707070' }
     const { btn, text } = P.button('Shop now', 10, 50)
-    const { ops, owned } = elementsToOps([btn, text], P, withAction, frame, grey, { actionColor: '#7a7a7a' })
+    // Grey page: plain white reads with the label (4.3:1) and stands out from the page (4.5:1).
+    const plain = elementsToOps([btn, text], P, withAction, frame, grey, { actionColor: '#7a7a7a' })
+    expect((plain.owned[0] as any).fill).toBe('#ffffff')
+    // Paper page, near-black label: white is the page (1.1:1), near-black the label — an outline.
+    const paper = { field: '#f2f0ef', ink: '#111111', accent: '#111111' }
+    const { ops, owned } = elementsToOps([btn, text], P, withAction, frame, paper, { actionColor: '#111111' })
     expect(owned).toHaveLength(1)
     const r = owned[0] as any
     expect(r.fill).toBe('none')
-    expect(r.stroke).toBe('#7a7a7a')
+    expect(r.stroke).toBe('#111111')
     expect(r.strokeWidth).toBeCloseTo(0.08 * btn.size / 100, 9)
     expect(ops.find(o => o.target === 'a')!.underline).toBeUndefined()
     // An unknown colour (a gradient) is a link too.
