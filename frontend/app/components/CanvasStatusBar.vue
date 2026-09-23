@@ -13,6 +13,7 @@
  */
 import { CheckCircle2, Loader2, AlertCircle, X, Square } from 'lucide-vue-next'
 import { fmtSec, elapsedSince } from '~/lib/canvas/elapsed'
+import { inLineLabel } from '~/lib/canvas/capsuleReadout'
 import { resolveCostDisplay } from '~/lib/canvas/runCostDisplay'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 
@@ -36,6 +37,7 @@ const props = defineProps<{
   progress: { completed: number; total: number }
   percent: number
   startedAt: number | null
+  queuePosition?: number | null
   lastResult: RunResult | null
   backendBusy?: boolean
   backendLabel?: string
@@ -117,7 +119,7 @@ const view = computed<'backend' | 'backend-success' | 'running' | 'success' | 'e
       <template v-else-if="view === 'running'">
         <Loader2 class="size-3.5 shrink-0 animate-spin text-palette-blue" />
         <span class="text-[12px] text-white/85 truncate max-w-[280px]" :title="currentNode">
-          {{ currentNode || 'Starting…' }}
+          {{ queuePosition && queuePosition > 0 ? `${currentNode ? `${currentNode} · ` : ''}${inLineLabel(queuePosition)}` : (currentNode || 'Starting…') }}
         </span>
         <span v-if="progress.total > 0" class="text-[11px] text-white/45 tabular-nums shrink-0">
           {{ progress.completed }}/{{ progress.total }}

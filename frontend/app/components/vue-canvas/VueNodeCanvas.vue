@@ -126,6 +126,7 @@ import ArrowsLayer, { type ResolvedArrow } from '~/components/vue-canvas/ArrowsL
 import CanvasContextMenu, { type MenuItem } from '~/components/vue-canvas/CanvasContextMenu.vue'
 import { Play, EyeOff, Ban, Copy, Trash2, Group, SquareDashedMousePointer, Palette, Edit3, Frame, Maximize2, PlusSquare, Boxes, ChevronsUpDown, ChevronsDownUp, Lock, Unlock, Flag, StickyNote, ListChecks, Image as ImageIcon, ArrowRight, Check } from 'lucide-vue-next'
 import { useBlockLibrary } from '~/composables/useBlockLibrary'
+import { fetchPausedGates } from '~/lib/runner/client'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/minimap/dist/style.css'
@@ -222,6 +223,21 @@ function applyPendingTakesForDisplayedCanvas() {
       const tagged = tagTakeFromRunMeta(take, String(target.id), { draftMetaFor, consumePendingPromote })
       target.data = appendTake({ ...target.data }, tagged)
     }
+  }
+}
+
+// Runner: Gates paused on the server come back when their canvas is shown —
+// the canvas rebuild (and a page reload) forgets the paused state and pictures.
+const runnerOn = !!(useRuntimeConfig().public as { runnerEnabled?: boolean }).runnerEnabled
+async function restoreRunnerGates(): Promise<void> {
+  const canvasId = props.displayedCanvasId
+  if (!runnerOn || !canvasId) return
+  const gates = await fetchPausedGates(canvasId)
+  if (props.displayedCanvasId !== canvasId) return // switched away while asking
+  for (const g of gates) {
+    const target = (nodes.value as any[]).find((n: any) => n.id === g.nodeId && n.data?.nodeType === 'ComfyGateNode')
+    if (!target) continue
+    target.data = { ...target.data, paused: true, running: false, promptId: g.promptId, choices: g.choices, picked: g.picked, runnerRunId: g.runId }
   }
 }
 
@@ -2200,6 +2216,7 @@ watch(
     // Multi-canvas: results that landed while this canvas was off-screen, and
     // the running glow if its run is still in flight (the rebuild wiped both).
     applyPendingTakesForDisplayedCanvas()
+    void restoreRunnerGates()
     nextTick(() => {
       applyRunningForActiveWorker()
       fitView({ padding: 0.2 })
@@ -2946,6 +2963,7 @@ function handleBridgeMessage(event: MessageEvent) {
             error: false,
             errorMessage: null,
             runningSince: Date.now(),
+            queuePosition: null,
           }
         } else if (target.data?.error) {
           // A sketch-output card never paints a running state (see above), but
@@ -2982,6 +3000,12 @@ function handleBridgeMessage(event: MessageEvent) {
       const pct = percent ?? (prog ? Math.round((prog.value / prog.max) * 100) : undefined)
       if (pct !== undefined) running.data = { ...running.data, progress: pct }
     }
+  }
+
+  if (evt === 'queue_position') {
+    const target = (nodes.value as any[]).find((n: any) => n.id === String(nodeId))
+    const pos = Number((event.data as any).position) || 0
+    if (target) target.data = { ...target.data, queuePosition: pos > 0 ? pos : null }
   }
 
   if (evt === 'executed') {
@@ -3181,10 +3205,17 @@ function handleBridgeMessage(event: MessageEvent) {
   if (evt === 'gate_paused') {
     const promptId = event.data.prompt_id
     const target = (nodes.value as any[]).find((n: any) => n.id === String(nodeId))
-    console.log('[Gate] gate_paused handler:', { nodeId, promptId, found: !!target })
     if (target) {
-      target.data = { ...target.data, paused: true, promptId, running: false }
-      console.log('[Gate] node data after update:', { paused: target.data.paused, promptId: target.data.promptId })
+      target.data = {
+        ...target.data,
+        paused: true,
+        promptId,
+        running: false,
+        // Runner only: the pictures that reached the Gate, one per take.
+        choices: Array.isArray((event.data as any).choices) ? (event.data as any).choices : null,
+        picked: Array.isArray((event.data as any).picked) ? (event.data as any).picked : [],
+        runnerRunId: (event.data as any).run_id ?? null,
+      }
     }
   }
 

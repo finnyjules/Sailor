@@ -253,3 +253,20 @@ describe('resolveReadout — part.format', () => {
     })).toBeNull()
   })
 })
+
+describe('waiting in line and real progress', () => {
+  it('shows place in line while queued', () => {
+    expect(resolveReadout({ running: true, runningSince: 1000, now: 5000, queuePosition: 3 })).toBe('3rd in line')
+    expect(resolveReadout({ running: true, queuePosition: 1 })).toBe('1st in line')
+    expect(resolveReadout({ running: true, queuePosition: 12 })).toBe('12th in line')
+    expect(resolveReadout({ running: true, queuePosition: 22 })).toBe('22nd in line')
+  })
+  it('shows the provider’s percentage once it starts', () => {
+    expect(resolveReadout({ running: true, runningSince: 1000, now: 14000, progress: 40 }))
+      .toBe(`rendering${READOUT_SEPARATOR}40%${READOUT_SEPARATOR}13s`)
+  })
+  it('ignores both when not running, and a failure still wins', () => {
+    expect(resolveReadout({ running: false, queuePosition: 3 })).toBeNull()
+    expect(resolveReadout({ running: true, queuePosition: 3, errorMessage: 'boom' })).toBe('boom')
+  })
+})

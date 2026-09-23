@@ -2364,6 +2364,8 @@ const historyItems = ref<HistoryItem[]>([])
 // Per-prompt fine progress (0-100) from bridge `progress`/`executed` events,
 // keyed by prompt_id. Drives the queue panel and the active-run status bar.
 const promptProgress = ref<Record<string, number>>({})
+// Runner: place in the provider's queue while a request waits, keyed by prompt_id.
+const promptQueuePos = ref<Record<string, number>>({})
 
 // The status bar and running-node label are now driven per-run (Tier 3): the
 // old single globals (tabNodeProgress / currentRunningNode / executionStartTime
@@ -2406,6 +2408,7 @@ const activeRunDisplay = computed(() => {
       progress: { completed: st.nodeProgress.completed, total: st.nodeProgress.total },
       runningNode: st.runningNode || '',
       percent: promptProgress.value[entry.promptId] ?? 0,
+      queuePosition: promptQueuePos.value[entry.promptId] ?? null,
     }
   }
   // Bridge-path fallback: a single unregistered run in flight (direct exec off).
@@ -3146,6 +3149,11 @@ function handleBridgeEvent(data: any) {
     }
     // Poke the display recompute — perRun mutations are non-reactive.
     runDisplayTick.value++
+  } else if (evt === 'queue_position') {
+    if (prompt_id) {
+      if (data.position > 0) promptQueuePos.value[prompt_id] = data.position
+      else delete promptQueuePos.value[prompt_id]
+    }
   } else if (evt === 'executed') {
     if (data.output) perRun(prompt_id).outputs.push(...extractOutputFiles(data.output))
     // Track node completion for coarse progress — per-run (audit C5).
@@ -3220,6 +3228,7 @@ function handleBridgeEvent(data: any) {
     runDisplayTick.value++
     if (prompt_id) {
       delete promptProgress.value[prompt_id]
+      delete promptQueuePos.value[prompt_id]
       delete promptNodeInfo.value[prompt_id]
       finishRun(prompt_id, 'done') // remove this run before the tab-drain check below (registry no-op for bridge runs)
     }
@@ -3375,7 +3384,10 @@ function handleBridgeEvent(data: any) {
     // Remove this run first, then idle the tab only if it has no other run in
     // flight — a second concurrent direct run must keep the spinner up. Bridge
     // runs aren't registered, so inFlight is empty and this idles as before.
-    if (prompt_id) finishRun(prompt_id, 'error')
+    if (prompt_id) {
+      delete promptQueuePos.value[prompt_id]
+      finishRun(prompt_id, 'error')
+    }
     const tabDrained = tabId ? inFlight({ tabId }).length === 0 : true
     if (!errWasSilent && tabDrained) updateTabStatus(tabId, 'idle')
     if (inFlight().length === 0) vueCanvasRef.value?.clearAllRunVisuals?.()
@@ -4035,6 +4047,7 @@ function dismissRunResult() {
           :progress="activeRunDisplay?.progress ?? { completed: 0, total: 0 }"
           :percent="activeRunDisplay?.percent ?? 0"
           :started-at="activeRunDisplay?.startedAt ?? null"
+          :queue-position="activeRunDisplay?.queuePosition ?? null"
           :last-result="lastRunResult"
           :backend-busy="backendBusy"
           :backend-label="backendLabel"

@@ -50,6 +50,10 @@ export interface ReadoutInput {
   /** Run state, straight off node.data. */
   running?: boolean
   runningSince?: number | null
+  /** Runner: place in the provider's queue while waiting (null once started). */
+  queuePosition?: number | null
+  /** Runner: the provider's own percentage, when it reports one. */
+  progress?: number | null
   errorMessage?: string | null
   /** Injected for testability; defaults to the wall clock. */
   now?: number
@@ -118,6 +122,14 @@ function fromControls(controls: ControlSpec[], config: Record<string, unknown>):
   return out
 }
 
+/** 1 → "1st in line", 3 → "3rd in line", 12 → "12th in line". */
+export function inLineLabel(position: number): string {
+  const n = Math.max(1, Math.floor(position))
+  const tens = n % 100
+  const suffix = tens >= 11 && tens <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th'
+  return `${n}${suffix} in line`
+}
+
 export function resolveReadout(input: ReadoutInput): string | null {
   // 1. Failure wins. It is the only thing you need to know.
   if (input.errorMessage) {
@@ -125,12 +137,15 @@ export function resolveReadout(input: ReadoutInput): string | null {
     if (msg) return truncate(msg, MAX_ERROR_CHARS)
   }
 
-  // 2. Running. Live elapsed if we stamped a start, bare word if we did not.
+  // 2. Running. Waiting in the provider's queue first, then live progress.
   if (input.running) {
+    if (typeof input.queuePosition === 'number' && input.queuePosition > 0) return inLineLabel(input.queuePosition)
     const started = input.runningSince
-    if (!started) return 'rendering'
+    const pct = typeof input.progress === 'number' && input.progress > 0 && input.progress < 100
+      ? `${READOUT_SEPARATOR}${Math.round(input.progress)}%` : ''
+    if (!started) return `rendering${pct}`
     const now = input.now ?? Date.now()
-    return `rendering${READOUT_SEPARATOR}${fmtSec(elapsedSince(started, now))}`
+    return `rendering${pct}${READOUT_SEPARATOR}${fmtSec(elapsedSince(started, now))}`
   }
 
   // 3. The declared rule.

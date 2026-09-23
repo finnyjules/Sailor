@@ -55,6 +55,7 @@ const props = defineProps<{
     collapsed?: boolean
     error?: boolean
     progress?: number
+    queuePosition?: number | null
     images?: string[]
     audios?: string[]
     animated?: boolean
@@ -280,6 +281,8 @@ const capsuleReadout = computed(() => resolveReadout({
   properties: props.data.properties,
   running: props.data.running,
   runningSince: props.data.runningSince,
+  queuePosition: props.data.queuePosition ?? null,
+  progress: props.data.progress ?? null,
   // Gated on `error`, exactly as the expanded card's error chip is (:1460).
   // errorMessage is a sticky field — it holds the last exception text until
   // something overwrites it — so passing it ungated would pin a dead failure

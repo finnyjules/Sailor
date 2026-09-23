@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { SkipBack, RotateCcw, Play, Pause } from 'lucide-vue-next'
 import { getTypeColor } from '~/composables/useVueNodes'
+import { initialTicks, continueLabel, viewUrl, isVideoFile } from '~/lib/runner/gateChoices'
+import { isRunnerPromptId } from '#shared/runner/messages'
 
 const props = defineProps<{
   id: string
@@ -17,6 +19,9 @@ const props = defineProps<{
     promptId?: string
     running?: boolean
     error?: boolean
+    choices?: { take: number; files: { filename: string; subfolder: string; type: string }[] }[] | null
+    picked?: number[]
+    runnerRunId?: string | null
   }
 }>()
 
@@ -45,8 +50,43 @@ function toggleBypass() {
   if (vals) vals[0] = !vals[0]
 }
 
+const isRunner = computed(() => isRunnerPromptId(props.data.promptId))
+const choices = computed(() => props.data.choices ?? [])
+const ticked = ref<number[]>(initialTicks(props.data.choices, props.data.picked))
+watch(() => props.data.choices, () => { ticked.value = initialTicks(props.data.choices, props.data.picked) })
+function toggleTick(take: number) {
+  ticked.value = ticked.value.includes(take) ? ticked.value.filter(t => t !== take) : [...ticked.value, take].sort((a, b) => a - b)
+}
+// A finished runner run keeps its pictures, so Continue can make another
+// video from the same picture ("Continue after the run has finished").
+const showActions = computed(() => !isBypassed.value && (!!props.data.paused
+  || (isRunner.value && !props.data.running && choices.value.length > 0)))
+const canContinue = computed(() => !props.data.paused || choices.value.length <= 1 || ticked.value.length > 0)
+
+// The layout refuses a runner Gate action by sending this back; put the pause
+// back so the pictures and buttons return.
+let wasPaused = false
+function onActionFailed(e: Event) {
+  if ((e as CustomEvent).detail?.nodeId === props.id && wasPaused) props.data.paused = true
+}
+onMounted(() => window.addEventListener('sailor:runnerGateActionFailed', onActionFailed))
+onBeforeUnmount(() => window.removeEventListener('sailor:runnerGateActionFailed', onActionFailed))
+
 async function resumeGate(action: 'continue' | 'redo' | 'restart') {
   const fromPause = !!props.data.paused
+  if (isRunner.value) {
+    wasPaused = fromPause
+    props.data.paused = false
+    window.dispatchEvent(new CustomEvent('sailor:runnerGateAction', {
+      detail: {
+        nodeId: props.id,
+        promptId: props.data.promptId,
+        action,
+        takes: fromPause && action === 'continue' && choices.value.length > 1 ? [...ticked.value] : undefined,
+      },
+    }))
+    return
+  }
   props.data.paused = false
   try {
     const res = await $fetch<{ prompt_id?: string }>('/gate/resume', {
@@ -133,6 +173,28 @@ async function resumeGate(action: 'continue' | 'redo' | 'restart') {
       </div>
     </div>
 
+    <!-- Runner: the pictures that reached the Gate. With several, tick the ones worth continuing. -->
+    <div v-if="choices.length && (data.paused || isRunner)" class="grid gap-1.5 px-2 pt-2 nopan nodrag" :class="choices.length > 1 ? 'grid-cols-2' : 'grid-cols-1'">
+      <button
+        v-for="c in choices"
+        :key="c.take"
+        type="button"
+        class="relative rounded-md overflow-hidden border cursor-pointer bg-black/30 aspect-square"
+        :class="ticked.includes(c.take) ? 'border-white/70' : 'border-white/10'"
+        :aria-pressed="ticked.includes(c.take)"
+        :disabled="!data.paused || choices.length <= 1"
+        @click="toggleTick(c.take)"
+      >
+        <video v-if="c.files[0] && isVideoFile(c.files[0].filename)" :src="viewUrl(c.files[0])" class="size-full object-cover" muted loop autoplay playsinline />
+        <img v-else-if="c.files[0]" :src="viewUrl(c.files[0])" alt="" class="size-full object-cover" draggable="false">
+        <span
+          v-if="data.paused && choices.length > 1"
+          class="absolute top-1 right-1 size-4 rounded-sm border flex items-center justify-center text-[10px]"
+          :class="ticked.includes(c.take) ? 'bg-white text-black border-white' : 'bg-black/50 border-white/50'"
+        >{{ ticked.includes(c.take) ? '✓' : '' }}</span>
+      </button>
+    </div>
+
     <!-- Bypass toggle + action buttons -->
     <div class="flex flex-col gap-2.5 px-2 py-2.5 border-t border-[#2a2a2a]">
       <!-- Toggle row: single Bypass label -->
@@ -150,8 +212,8 @@ async function resumeGate(action: 'continue' | 'redo' | 'restart') {
         </button>
       </div>
 
-      <!-- Action buttons (only while paused) -->
-      <div v-if="data.paused && !isBypassed" class="flex items-center gap-1.5 nopan nodrag">
+      <!-- Action buttons (while paused; runner Gates also after the run, to continue again) -->
+      <div v-if="showActions" class="flex items-center gap-1.5 nopan nodrag">
         <button
           class="gate-btn flex items-center justify-center gap-1.5 flex-1 h-9 rounded bg-zinc-800 text-white/80 shadow-sm cursor-pointer hover:bg-zinc-700 transition-colors text-[11px] font-medium"
           data-tooltip="Re-run from the start"
@@ -161,6 +223,7 @@ async function resumeGate(action: 'continue' | 'redo' | 'restart') {
           <span>Restart</span>
         </button>
         <button
+          v-if="data.paused"
           class="gate-btn flex items-center justify-center gap-1.5 flex-1 h-9 rounded bg-zinc-800 text-white/80 shadow-sm cursor-pointer hover:bg-zinc-700 transition-colors text-[11px] font-medium"
           data-tooltip="Redo last step"
           @click="resumeGate('redo')"
@@ -169,12 +232,13 @@ async function resumeGate(action: 'continue' | 'redo' | 'restart') {
           <span>Redo</span>
         </button>
         <button
-          class="gate-btn flex items-center justify-center gap-1.5 flex-1 h-9 rounded bg-action text-white shadow-sm cursor-pointer hover:bg-action/85 transition-colors text-[11px] font-semibold"
-          data-tooltip="Continue downstream"
+          class="gate-btn flex items-center justify-center gap-1.5 flex-1 h-9 rounded bg-action text-white shadow-sm cursor-pointer hover:bg-action/85 transition-colors text-[11px] font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+          :data-tooltip="data.paused ? 'Continue downstream' : 'Run the steps after this Gate again'"
+          :disabled="!canContinue"
           @click="resumeGate('continue')"
         >
           <Play class="size-3.5" :fill="'currentColor'" />
-          <span>Continue</span>
+          <span>{{ data.paused ? continueLabel(choices.length, ticked.length) : 'Again' }}</span>
         </button>
       </div>
     </div>
