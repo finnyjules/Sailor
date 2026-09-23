@@ -5006,9 +5006,36 @@ const webExport = reactive({
   open: false, state: 'working' as 'working' | 'ready' | 'blocked' | 'error',
   notices: [] as FrameNotice[], bytes: 0, fit: 'fit' as FrameFit, transparent: false, still: false,
   html: '', errorText: '', artAspect: 1,
+  copyStatus: null as 'copied' | 'failed' | null, snippet: '',
 })
 const webExportNotice = ref('')
 let webExportGen = 0
+let webExportRebuildTimer: ReturnType<typeof setTimeout> | null = null
+let webExportCopiedTimer: ReturnType<typeof setTimeout> | null = null
+function clearWebExportTimers() {
+  if (webExportRebuildTimer) { clearTimeout(webExportRebuildTimer); webExportRebuildTimer = null }
+  if (webExportCopiedTimer) { clearTimeout(webExportCopiedTimer); webExportCopiedTimer = null }
+}
+// Editing while the sheet is open must not leave a stale file behind Download (a blocked sheet
+// must re-check too): every input the file is built from is watched while the sheet is open, and
+// a change rebuilds it after a short pause. The generation counter drops a build a newer one
+// overtook. Closed, the getter reads only `webExport.open`, so nothing deep is traversed.
+watch(
+  () => webExport.open
+    ? [localLayers.value, stackKeys.value, localGroups.value, background.value, postEffects.value,
+        hasMotion.value ? effectiveMotion.value : null, wiredTreatments.value, bakeSize()]
+    : null,
+  (now, before) => {
+    if (!now || !before) return   // opening builds at once (openWebExport); closing cancels
+    if (webExportRebuildTimer) clearTimeout(webExportRebuildTimer)
+    webExportRebuildTimer = setTimeout(() => {
+      webExportRebuildTimer = null
+      if (webExport.open) void buildWebExport()
+    }, 300)
+  },
+  { deep: true },
+)
+onBeforeUnmount(clearWebExportTimers)
 
 function webExportVariant(): FrameVariant {
   const { W, H } = bakeSize()
@@ -5062,8 +5089,11 @@ async function buildWebExport() {
   }
 }
 
-function openWebExport() { webExport.open = true; webExport.transparent = false; webExportNotice.value = ''; void buildWebExport() }
-function closeWebExport() { webExport.open = false; webExportGen++ }
+function openWebExport() {
+  webExport.open = true; webExport.transparent = false; webExport.copyStatus = null; webExportNotice.value = ''
+  void buildWebExport()
+}
+function closeWebExport() { webExport.open = false; webExportGen++; webExport.copyStatus = null; clearWebExportTimers() }
 function setWebExportFit(f: FrameFit) { webExport.fit = f; void buildWebExport() }
 function setWebExportTransparent(on: boolean) { webExport.transparent = on; void buildWebExport() }
 function downloadWebExport() {
@@ -5075,8 +5105,18 @@ function downloadWebExport() {
   webExportNotice.value = `Downloaded · ${formatBytes(webExport.bytes)}`
 }
 async function copyWebExportSnippet() {
+  if (webExport.state !== 'ready') return
   const { W, H } = bakeSize()
-  await navigator.clipboard.writeText(embedSnippet('sailor-frame.html', W, H))
+  webExport.snippet = embedSnippet('sailor-frame.html', W, H)
+  if (webExportCopiedTimer) { clearTimeout(webExportCopiedTimer); webExportCopiedTimer = null }
+  try {
+    await navigator.clipboard.writeText(webExport.snippet)
+    webExport.copyStatus = 'copied'
+    webExportCopiedTimer = setTimeout(() => { webExportCopiedTimer = null; if (webExport.copyStatus === 'copied') webExport.copyStatus = null }, 2000)
+  } catch {
+    // No clipboard permission (or no clipboard at all): the sheet shows the code to copy by hand.
+    webExport.copyStatus = 'failed'
+  }
 }
 
 async function generateVideo() {
@@ -5183,7 +5223,7 @@ const frameFooterSpec = computed<StudioFooterSpec>(() => {
     // ellipsis because here it opens the web export sheet first.
     downloads: [
       { label: 'Download PNG', onClick: downloadFramePng, busy: downloadingPng.value, disabled: working || exportingVideo.value },
-      { label: 'Export embed…', onClick: openWebExport, disabled: working, testId: 'frame-web-export' },
+      { label: 'Export embed…', onClick: openWebExport, disabled: working || exportingVideo.value, testId: 'frame-web-export' },
     ],
     canvas: [
       { label: 'As image', onClick: generateImage, busy: rendering.value, disabled: working || exportingVideo.value },
@@ -7637,6 +7677,8 @@ function handleKeydown(e: KeyboardEvent) {
     if (pickerDialogOpen.value) { pickerDialogOpen.value = false; return }
     if (fxMenuLayerId.value) { closeFxMenu(); return }
     if (editingId.value) { endEdit(); return }
+    // The web export sheet is the topmost thing open: Escape closes it, not the Frame editor.
+    if (webExport.open) { closeWebExport(); return }
     if (typing) return
     // The busy guard now lives inside exitSmartMode itself.
     if (smartActive.value) { exitSmartMode(); return }
@@ -9248,6 +9290,7 @@ onUnmounted(() => {
       :state="webExport.state" :notices="webExport.notices" :bytes="webExport.bytes" :fit="webExport.fit"
       :transparent-allowed="background == null" :transparent="webExport.transparent" :still="webExport.still"
       :art-aspect="webExport.artAspect" :error-text="webExport.errorText"
+      :copy-status="webExport.copyStatus" :snippet="webExport.snippet"
       @update:fit="setWebExportFit" @update:transparent="setWebExportTransparent"
       @download="downloadWebExport" @copy="copyWebExportSnippet" @close="closeWebExport" />
 

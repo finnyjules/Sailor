@@ -16,6 +16,10 @@ const props = defineProps<{
   still: boolean
   artAspect: number
   errorText?: string
+  /** After Copy embed code: 'copied' for a moment, or 'failed' when the clipboard refused —
+   *  then `snippet` is shown so it can be copied by hand. */
+  copyStatus?: 'copied' | 'failed' | null
+  snippet?: string
 }>()
 const emit = defineEmits<{
   'update:fit': [fit: FrameFit]
@@ -59,6 +63,7 @@ const blocked = computed(() => byGroup('blocked'))
 <template>
   <div
     data-testid="frame-web-export-sheet"
+    role="dialog" aria-label="Web export"
     class="absolute bottom-[120px] right-4 w-[640px] max-w-[calc(100%-32px)] z-[60] bg-[#161616] border border-white/10 rounded-lg shadow-2xl text-white/85"
     @pointerdown.stop>
     <div class="flex items-center gap-3 px-4 pt-3 pb-2 border-b border-white/10">
@@ -123,7 +128,9 @@ const blocked = computed(() => byGroup('blocked'))
         type="button"
         class="h-8 px-3 rounded text-[12px] font-medium flex items-center gap-1.5 cursor-pointer disabled:opacity-50 bg-white/[0.06] hover:bg-white/12 text-white/85"
         data-testid="frame-web-export-copy"
+        :disabled="state !== 'ready'"
         @click="emit('copy')">Copy embed code</button>
+      <span v-if="copyStatus === 'copied'" class="text-[11px] text-white/60" role="status" data-testid="frame-web-export-copied">Copied</span>
       <span class="flex-1" />
       <button
         type="button"
@@ -135,6 +142,13 @@ const blocked = computed(() => byGroup('blocked'))
         data-testid="frame-web-export-download"
         :disabled="state !== 'ready'"
         @click="emit('download')">Download</button>
+    </div>
+    <div v-if="copyStatus === 'failed'" class="px-4 pb-3 -mt-1 flex flex-col gap-1.5" data-testid="frame-web-export-copy-failed">
+      <p class="text-[11px] text-rose-400" role="status">Couldn't copy. Select the code below and copy it by hand.</p>
+      <textarea
+        readonly rows="2" :value="snippet" aria-label="Embed code"
+        class="w-full resize-none rounded bg-white/[0.04] border border-white/[0.08] px-2 py-1 font-mono text-[11px] text-white/80"
+        @focus="($event.target as HTMLTextAreaElement).select()" />
     </div>
   </div>
 </template>
