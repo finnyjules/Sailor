@@ -38,4 +38,12 @@ export interface EmbedSnapshot {
   /** Baked still frame, inlined as a data: URI. Fallback and pre-mount frame. */
   posterDataUrl: string
   transparent: boolean
+  /** 'box' hands the adapter the page's whole box; it frames the piece itself. */
+  framing?: 'contain' | 'box'
+  /** How the fallback poster image fits its box. */
+  posterFit?: 'contain' | 'cover'
+  /** Nothing moves: render one frame, never start the clock. */
+  still?: boolean
+  /** A #hex colour behind the stage when not transparent. */
+  backdrop?: string
 }

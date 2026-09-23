@@ -154,9 +154,12 @@ export function buildEmbedHtml(snapshot: EmbedSnapshot, adapterJs: string): stri
     )
   }
 
-  const bg = snapshot.transparent ? 'transparent' : '#000'
+  const backdrop = typeof snapshot.backdrop === 'string' && /^#[0-9a-f]{3,8}$/i.test(snapshot.backdrop) ? snapshot.backdrop : '#000'
+  const bg = snapshot.transparent ? 'transparent' : backdrop
+  const posterFit = snapshot.posterFit === 'cover' ? 'cover' : 'contain'
 
-  // Framing policy: CONTAIN, for both the poster and the live canvas.
+  // Framing policy: CONTAIN, for both the poster and the live canvas — unless
+  // the snapshot asks for 'box'.
   //
   // The renderers draw a fullscreen triangle with no aspect correction, so
   // handing them the host window's dimensions squashes the piece to whatever
@@ -165,10 +168,15 @@ export function buildEmbedHtml(snapshot: EmbedSnapshot, adapterJs: string): stri
   // the exported aspect and it governs: #sailor-stage is letterboxed to that
   // ratio and centred, and the area around it is left to the page background
   // (transparent when the surface declared alpha, otherwise the export's own
-  // backdrop). The poster is object-fit:contain against the same box and its
-  // intrinsic aspect IS snapshot.width/height, so it lands on exactly the same
-  // rectangle — the poster→live swap must not visibly jump, which rules out
-  // cover on one side and contain on the other.
+  // backdrop). The poster is object-fit:${posterFit} against the same box and
+  // its intrinsic aspect IS snapshot.width/height, so it lands on exactly the
+  // same rectangle — the poster→live swap must not visibly jump, which rules
+  // out cover on one side and contain on the other for the default policy.
+  //
+  // 'box' is the escape hatch a Frame export needs: the adapter is handed the
+  // page's whole box — its own fit()/fill() logic (see frame/fit.ts) frames
+  // the piece, not this runtime — so the background can reach the box's edges
+  // instead of being letterboxed to the exported aspect.
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -180,7 +188,7 @@ export function buildEmbedHtml(snapshot: EmbedSnapshot, adapterJs: string): stri
   #sailor-embed{position:relative;width:100vw;height:100vh;overflow:hidden}
   #sailor-stage{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}
   #sailor-embed canvas{display:block;width:100%;height:100%}
-  #sailor-poster{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+  #sailor-poster{position:absolute;inset:0;width:100%;height:100%;object-fit:${posterFit}}
   #sailor-poster[hidden]{display:none}
 </style>
 </head>
@@ -217,6 +225,12 @@ ${adapterJs}
   // bundle.ts — the poster is object-fit:contain over the same box, so both
   // land on the same rectangle.
   function fit() {
+    if (snap.framing === 'box') {
+      var fw = box.clientWidth || snap.width, fh = box.clientHeight || snap.height;
+      stage.style.width = fw + 'px';
+      stage.style.height = fh + 'px';
+      return [Math.max(1, Math.round(fw * dpr)), Math.max(1, Math.round(fh * dpr))];
+    }
     var bw = box.clientWidth || snap.width, bh = box.clientHeight || snap.height;
     var sw = snap.width > 0 ? snap.width : bw, sh = snap.height > 0 ? snap.height : bh;
     var k = Math.min(bw / sw, bh / sh);
@@ -274,7 +288,7 @@ ${adapterJs}
     var frozen = typeof window.__SAILOR_FREEZE_T01__ === 'number'
       ? window.__SAILOR_FREEZE_T01__
       : null;
-    if (frozen !== null || reduce) {
+    if (frozen !== null || reduce || snap.still) {
       try { handle.setTime(frozen === null ? 0 : frozen); } catch (e) { fail(); }
       return;
     }

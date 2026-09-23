@@ -11,6 +11,14 @@ export interface ExportEmbedOptions {
   transparent?: boolean
   /** Loop position the still frame is baked from. */
   posterT01?: number
+  /** 'box' hands the adapter the page's whole box; it frames the piece itself. */
+  framing?: 'contain' | 'box'
+  /** How the fallback poster image fits its box. */
+  posterFit?: 'contain' | 'cover'
+  /** Nothing moves: render one frame, never start the clock. */
+  still?: boolean
+  /** A #hex colour behind the stage when not transparent. */
+  backdrop?: string
 }
 
 /**
@@ -91,6 +99,11 @@ export async function exportEmbedHtml(opts: ExportEmbedOptions): Promise<string>
     posterDataUrl,
     transparent,
   }
+  if (opts.framing !== undefined) snapshot.framing = opts.framing
+  if (opts.posterFit !== undefined) snapshot.posterFit = opts.posterFit
+  if (opts.still !== undefined) snapshot.still = opts.still
+  if (opts.backdrop !== undefined) snapshot.backdrop = opts.backdrop
+
   const html = buildEmbedHtml(snapshot, adapterJs)
 
   // The self-containment guarantee has to hold for real user configs, not just
