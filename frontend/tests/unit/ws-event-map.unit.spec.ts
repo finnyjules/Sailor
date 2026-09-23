@@ -158,6 +158,28 @@ describe('mapWsEvent', () => {
     expect(mapWsEvent(undefined as any, CID)).toBeNull()
     expect(mapWsEvent({} as any, CID)).toBeNull()
   })
+
+  it('maps the runner’s queue position', () => {
+    expect(mapWsEvent({ type: 'queue_position', data: { prompt_id: 'run_a.0.t0', node: '1', position: 3 } }, CID))
+      .toEqual({ event: 'queue_position', prompt_id: 'run_a.0.t0', node_id: '1', position: 3 })
+  })
+  it('carries the runner’s exact cost on completion, and nothing extra for ComfyUI', () => {
+    expect(mapWsEvent({ type: 'execution_success', data: { prompt_id: 'run_a.0.t0', run_id: 'run_a', credits: 47, recorded: true, stopped: false } }, CID))
+      .toEqual({ event: 'execution_complete', prompt_id: 'run_a.0.t0', run_id: 'run_a', credits: 47, recorded: true, stopped: false })
+    expect(mapWsEvent({ type: 'execution_success', data: { prompt_id: 'p1' } }, CID))
+      .toEqual({ event: 'execution_complete', prompt_id: 'p1' })
+  })
+  it('carries Gate choices', () => {
+    const choices = [{ take: 0, files: [{ filename: 'a.png', subfolder: '', type: 'output' }] }]
+    expect(mapWsEvent({ type: 'gate_paused', data: { prompt_id: 'run_a.0', run_id: 'run_a', node_id: '2', choices, picked: [0] } }, CID))
+      .toEqual({ event: 'gate_paused', prompt_id: 'run_a.0', node_id: '2', run_id: 'run_a', choices, picked: [0] })
+    expect(mapWsEvent({ type: 'gate_paused', data: { prompt_id: 'p', node_id: '2' } }, CID))
+      .toEqual({ event: 'gate_paused', prompt_id: 'p', node_id: '2' })
+  })
+  it('keeps the runner’s charge on a failure', () => {
+    expect(mapWsEvent({ type: 'execution_error', data: { prompt_id: 'run_a.0.t0', node_id: '1', node_type: 'GenerateImageNode', exception_message: 'x', exception_type: 'RunnerError', traceback: [], run_id: 'run_a', credits: 0, recorded: true } }, CID))
+      .toMatchObject({ event: 'execution_error', prompt_id: 'run_a.0.t0', run_id: 'run_a', credits: 0, recorded: true })
+  })
 })
 
 describe('reconnectDelayMs', () => {

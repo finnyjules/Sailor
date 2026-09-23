@@ -8,11 +8,22 @@
 // Pure function: no I/O, no state. Unknown/ignored types return null so the
 // caller can simply skip dispatch.
 
+import type { GateChoice } from '#shared/runner/messages'
+
 export type BridgeShapedEvent =
   | { event: 'execution_start'; prompt_id: string | null }
   | { event: 'progress'; percent: number; prompt_id: string | null; node_id: string | null }
   | { event: 'executing'; node_id: string; display_node: string | undefined; prompt_id: string | null }
-  | { event: 'execution_complete'; prompt_id: string | null }
+  | {
+      event: 'execution_complete'
+      prompt_id: string | null
+      // Runner only: the stage's exact charge; `recorded` = the server already
+      // wrote the generation record, so the browser must not save its own.
+      run_id?: string | null
+      credits?: number | null
+      recorded?: boolean
+      stopped?: boolean
+    }
   | { event: 'executed'; node_id: string; output: any; prompt_id: string | null }
   | {
       event: 'execution_error'
@@ -21,9 +32,13 @@ export type BridgeShapedEvent =
       exception_message: string | null
       exception_type: string | null
       traceback: string | undefined
-    ; prompt_id: string | null
+      prompt_id: string | null
+      run_id?: string | null
+      credits?: number | null
+      recorded?: boolean
     }
-  | { event: 'gate_paused'; node_id: string | undefined; prompt_id: string | undefined }
+  | { event: 'gate_paused'; node_id: string | undefined; prompt_id: string | undefined; run_id?: string; choices?: GateChoice[]; picked?: number[] }
+  | { event: 'queue_position'; prompt_id: string | null; node_id: string | null; position: number }
 
 function isPlainObject(v: unknown): v is Record<string, any> {
   return !!v && typeof v === 'object' && !Array.isArray(v)
@@ -74,9 +89,9 @@ export function mapWsEvent(msg: { type: string; data: any } | null | undefined, 
         prompt_id: data.prompt_id ?? null,
       }
 
-    case 'execution_error':
-      return {
-        event: 'execution_error',
+    case 'execution_error': {
+      const base = {
+        event: 'execution_error' as const,
         node_id: data.node_id ?? data.node ?? null,
         node_type: data.node_type ?? null,
         exception_message: data.exception_message ?? data.message ?? null,
@@ -84,15 +99,30 @@ export function mapWsEvent(msg: { type: string; data: any } | null | undefined, 
         traceback: Array.isArray(data.traceback) ? data.traceback.join('') : data.traceback,
         prompt_id: data.prompt_id ?? null,
       }
+      return data.recorded === true
+        ? { ...base, run_id: data.run_id ?? null, credits: typeof data.credits === 'number' ? data.credits : null, recorded: true }
+        : base
+    }
 
     // Modern ComfyUI emits execution_success; older/alt builds may emit
     // execution_complete directly. Both map to the bridge's completion shape.
     case 'execution_success':
-    case 'execution_complete':
-      return { event: 'execution_complete', prompt_id: data.prompt_id ?? null }
+    case 'execution_complete': {
+      const base = { event: 'execution_complete' as const, prompt_id: data.prompt_id ?? null }
+      return data.recorded === true
+        ? { ...base, run_id: data.run_id ?? null, credits: typeof data.credits === 'number' ? data.credits : null, recorded: true, stopped: data.stopped === true }
+        : base
+    }
 
-    case 'gate_paused':
-      return { event: 'gate_paused', node_id: data.node_id, prompt_id: data.prompt_id }
+    case 'gate_paused': {
+      const base = { event: 'gate_paused' as const, node_id: data.node_id, prompt_id: data.prompt_id }
+      return Array.isArray(data.choices)
+        ? { ...base, run_id: data.run_id, choices: data.choices, picked: Array.isArray(data.picked) ? data.picked : [] }
+        : base
+    }
+
+    case 'queue_position':
+      return { event: 'queue_position', prompt_id: data.prompt_id ?? null, node_id: data.node ?? null, position: Number(data.position) || 0 }
 
     // Queue-length/exec-info heartbeat — not consumed by the bridge's event
     // switch today. Ignored in v1 per brief.
