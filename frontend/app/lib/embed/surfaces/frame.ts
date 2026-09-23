@@ -10,12 +10,14 @@
  *
  * Fit and bleed without touching the painter: the background is painted once across the whole
  * box (a paintLayerStack call with no layers, sized to the box in artboard units), then the layers
- * are painted under the fit transform with no background. Post effects already work on the whole
- * device canvas (applyStackPost), so they cover the bleed too.
+ * are painted under the fit transform with no background, clipped to the artboard (the editor
+ * crops there too). The doc-level post chain runs after the clip is lifted, on the whole device
+ * canvas (applyStackPost), so it covers the bleed as well.
  */
 import type { EmbedHandle, EmbedSurface } from '../contract'
 import { assetKey, type FrameSnapshot, type FrameVariant } from '../frame/types'
 import { fitRect } from '../frame/fit'
+import { clipFrameKey, type ImageClip } from '~/lib/compositor/clip'
 import { fontFaceId, fontFaceRule } from '../fontFace'
 import { registerAssetResolver } from '~/lib/compositor/assetScope'
 import { addShaderFxEffects } from '~/lib/shaderfx/catalogStore'
@@ -25,6 +27,7 @@ import { ensureRevealShadersReady } from '~/lib/motionx/reveal/paintPixels'
 import {
   paintLayerStack, ensureLayerImages, withWiredContent, type LocalLayer, type StackItem,
 } from '~/composables/useCompositorLayers'
+import { applyStackPost, chainActive } from '~/lib/compositor/postEffects'
 import '~/lib/motion/paint' // registers the per-layer animation painter paintLayerStack relies on
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -49,6 +52,20 @@ export function stackItemsFor(v: FrameVariant): StackItem[] {
   return out
 }
 
+/** True when an image layer or a clip frame the painter will ask for has no inlined copy. */
+function missingInlinedAsset(v: FrameVariant, urls: Record<string, string>): boolean {
+  for (const l of v.layers) {
+    if (l.kind !== 'image') continue
+    const img = l as LocalLayer & { filename?: string; standIn?: boolean; clip?: ImageClip }
+    if (img.filename && !img.standIn && !(assetKey('image', img.filename) in urls)) return true
+    const clip = img.clip
+    if (clip && clip.frames > 0) {
+      for (let i = 0; i < clip.frames; i++) if (!(assetKey('clipFrame', clipFrameKey(clip, i)) in urls)) return true
+    }
+  }
+  return false
+}
+
 const frameSurface: EmbedSurface = {
   kind: 'frame',
   // Genuinely true: with no background the painter never fills, so the canvas keeps its
@@ -60,8 +77,15 @@ const frameSurface: EmbedSurface = {
     const v = snap.variants?.[0]
     if (!v) throw new Error('embed: frame snapshot has no variant')
     const urls = snap.assets.urls
+    // Defence in depth (the gatherer already blocks such an export): an image or clip frame the
+    // snapshot does not carry would make the painter fall back to its server URL — a request, and
+    // a wrong picture on a page that has no server. Refuse before anything is loaded.
+    if (missingInlinedAsset(v, urls)) throw new Error('embed: frame snapshot is missing an inlined asset')
     const unregister = registerAssetResolver((kind, key) => urls[assetKey(kind, key)] ?? null)
     const styles: HTMLStyleElement[] = []
+    // Declared outside the try so a mount that fails after the canvas went into the container
+    // (the first paint throwing) takes it out again: a rejected mount leaves nothing behind.
+    let appended: HTMLCanvasElement | null = null
     const cleanup = () => { unregister(); for (const s of styles) s.remove() }
 
     try {
@@ -116,12 +140,29 @@ const frameSurface: EmbedSurface = {
           paintLayerStack(ctx, canvas.width / r.scale, canvas.height / r.scale, [], [],
             undefined, tSec, undefined, undefined, v.background, undefined, undefined, true)
         }
+        // The layers are cropped at the artboard edge, as the editor crops them: in a box wider
+        // (Fit) or taller than the artboard, the bleed shows background only, never a layer
+        // that overflows the artboard.
         ctx.setTransform(r.scale, 0, 0, r.scale, r.x, r.y)
-        withWiredContent(provider, () => paintLayerStack(ctx, v.width, v.height, items, layers,
-          undefined, tSec, v.motion ?? undefined, v.wiredTreatments, undefined, v.groups, v.post, true))
+        ctx.save()
+        ctx.beginPath()
+        ctx.rect(0, 0, v.width, v.height)
+        ctx.clip()
+        try {
+          withWiredContent(provider, () => paintLayerStack(ctx, v.width, v.height, items, layers,
+            undefined, tSec, v.motion ?? undefined, v.wiredTreatments, undefined, v.groups, undefined, true))
+        } finally {
+          ctx.restore()
+        }
+        // The doc-level post chain, outside the clip: it must cover the bleed as well, or an
+        // Invert or a Duotone would leave a seam at the artboard edge. The painter would run this
+        // same call last (paintLayerStack's final step), under this same transform — so when the
+        // box is the artboard, the pixels are the painter's own.
+        if (v.post && chainActive(v.post)) applyStackPost(ctx, v.post, v.width)
       }
 
       container.appendChild(canvas)
+      appended = canvas
       paint(0)
 
       return {
@@ -134,6 +175,7 @@ const frameSurface: EmbedSurface = {
         destroy() { canvas.remove(); cleanup() },
       }
     } catch (err) {
+      appended?.remove()
       cleanup()
       throw err
     }
