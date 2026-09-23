@@ -41,14 +41,15 @@ import { framePresentKeys, finalizeWiredSentinels, reconcileWiredContent, syncWi
 import { createWiredMaskCache } from '~/lib/compositor/wiredMaskCache'
 import { readWiredTreatments, setWiredMask, setWiredMaskShowSource, setWiredMaskUrl, maskCandidateKeys } from '~/composables/useWiredTreatments'
 import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/compositor/maskBreak'
-import { useLocalLayerEditor, resizableKind, cornerResizableKind, textBoxResizable, boxHandles as editorBoxHandles } from '~/composables/useLocalLayerEditor'
+import { useLocalLayerEditor, resizableKind, cornerResizableKind, aspectLockedResizeKind, textBoxResizable, boxHandles as editorBoxHandles } from '~/composables/useLocalLayerEditor'
 import { useLayoutSheet } from '~/composables/useLayoutSheet'
 import LayoutTile from '~/components/vue-canvas/compositor/LayoutTile.vue'
 import { snapshotFrameAsTemplate, addSlot } from '~/lib/frametemplate/author'
 import { placeTemplate, setInstanceSlot, freezeInstance, staleInstances, updateInstance, applySlotToLayer } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance, SlotKind } from '~/lib/frametemplate/types'
-import { resolveLayout, frameDocFromProps, isResponsiveFrame, effectivePins, guideLinesFor, moveUnitAtView, hitTestView, viewSelectionGeometry, type LayoutResult, type Pins, type ViewEdit, type UnitInfo } from '~/lib/frame/responsive'
-import { mapKeyToEdit } from '~/lib/compositor/layerEdits'
+import { resolveLayout, frameDocFromProps, isResponsiveFrame, effectivePins, guideLinesFor, moveUnitAtView, resizeLayerAtView, scaleLayerAtView, rotateLayerAtView, hitTestView, viewSelectionGeometry, type LayoutResult, type Pins, type ViewEdit, type UnitInfo } from '~/lib/frame/responsive'
+import { mapKeyToEdit, snapAngle } from '~/lib/compositor/layerEdits'
+import { resizeBox, type Handle } from '~/lib/compositor/resizeBox'
 import ResponsivePinsCard from './ResponsivePinsCard.vue'
 import { atDesignSize as isAtDesignSize, clampViewSize, resizeViewFromEdge, shapePresets, readoutLabel as viewReadoutLabel } from '~/lib/frame/responsive/viewport'
 import { useTemplateLibrary } from '~/composables/useTemplateLibrary'
@@ -3346,11 +3347,21 @@ function viewHitAt(e: { clientX: number; clientY: number }): string | null {
 // The move drag at a viewing size. `units` and `layers` are captured at pointer-down: every
 // frame moves from those origins by the total delta (never cumulative). `dx`/`dy` are the last
 // frame's delta in view px, so the drop settles exactly where the last drag frame drew.
-// Task 6's handles share this ref (other `kind`s).
+// The resize / scale / rotate handles share this ref (the other `kind`s): each captures the unit
+// and layer at pointer-down, and `edit` is the last drag frame's edit, re-run with 'drop' on release.
+type ViewHandleEdit = (phase: 'drag' | 'drop') => ViewEdit
+interface ViewHandleDragBase { unit: UnitInfo; layer: LocalLayer; sx: number; sy: number; edit: ViewHandleEdit | null; recorded: boolean; pointerId: number; el: HTMLElement }
 const viewDrag = ref<null | {
   kind: 'move'; sx: number; sy: number; dx: number; dy: number
   units: UnitInfo[]; layers: LocalLayer[]; recorded: boolean; pointerId: number; el: HTMLElement
-}>(null)
+} | (ViewHandleDragBase & {
+  kind: 'resize'; handle: Handle; start: { cx: number; cy: number; w: number; h: number }
+  p0: { x: number; y: number }; fields: { w: string; h: string | null }; locked: boolean
+}) | (ViewHandleDragBase & {
+  kind: 'scale'; cx: number; cy: number; startDist: number; start: Record<string, number>
+}) | (ViewHandleDragBase & {
+  kind: 'rotate'; cx: number; cy: number; startAngle: number; startRot: number; local: { w: number; h: number }
+})>(null)
 function onViewPointerDown(e: PointerEvent) {
   const t = e.target as HTMLElement | null
   // In-canvas chrome keeps its own clicks: handles, the generate / smart / edit-result toolbars,
@@ -3392,14 +3403,123 @@ function onViewPointerMove(e: PointerEvent) {
   const { w: W0, h: H0 } = designSize.value
   applyViewEdits(d.units.map(u => moveUnitAtView(u, d.layers, W0, H0, dx, dy, 'drag')))
 }
-/** Pointer up (or cancel): settle the drop rule at the LAST drag frame's delta. */
+/** Pointer up (or cancel, Escape, lost capture, unmount): settle the drop rule at the LAST drag
+ *  frame — the move's last delta, or a handle's last edit — for a move and a handle drag alike. */
 function onViewPointerUp() {
-  const d = viewDrag.value; if (!d || d.kind !== 'move') return
+  const d = viewDrag.value; if (!d) return
   viewDrag.value = null
   if (d.el.hasPointerCapture?.(d.pointerId)) d.el.releasePointerCapture(d.pointerId)
-  if (!d.recorded) return // never moved: a plain click-select, nothing to write
+  if (!d.recorded) return // never moved: a plain click-select or handle press, nothing to write
+  if (d.kind !== 'move') { if (d.edit) applyViewEdits([d.edit('drop')]); return }
   const { w: W0, h: H0 } = designSize.value
   applyViewEdits(d.units.map(u => moveUnitAtView(u, d.layers, W0, H0, d.dx, d.dy, 'drop')))
+}
+
+// ── Resize, scale and rotate handles at a viewing size ─────────────────────────
+// A single selected LAYER gets the design-size handle set, drawn from its resolved box: resize on
+// the kinds that resize at the design size (unrotated), a uniform scale from the corners on the
+// rest, and rotate. Every frame edits from the gesture-START unit and layer (origin-based), holding
+// the pins; release settles the drop rule on the last frame's edit. A group, mask pair or cloner
+// gets the outline only (move it by dragging; group resize at a view is later work — Ruling E).
+
+/** The selected layer's drawn centre in client px (the artboard's on-screen rect includes the zoom). */
+function viewCentreClient(): { x: number; y: number } | null {
+  const s = viewSel.value; const rect = canvasRef.value?.getBoundingClientRect()
+  if (!s || !s.single || !rect || !canvasDisplay.w || !canvasDisplay.h) return null
+  return { x: rect.left + s.g.cx / canvasDisplay.w * rect.width, y: rect.top + s.g.cy / canvasDisplay.h * rect.height }
+}
+/** The single selected layer a view handle may act on (never a group's lead on its own). */
+function viewHandleTarget() {
+  const s = viewSel.value
+  return s && s.single && s.layer && s.unit.kind === 'layer' ? { s, layer: { ...s.layer } as LocalLayer } : null
+}
+/** Common handle pointer-down: keep the press off the canvas and the backdrop, and capture the
+ *  pointer so a release anywhere (even outside the modal) comes back to this handle. */
+function beginViewHandle(e: PointerEvent): HTMLElement {
+  e.preventDefault(); e.stopPropagation()
+  const el = e.currentTarget as HTMLElement
+  el.setPointerCapture?.(e.pointerId)
+  return el
+}
+function onViewResizeDown(handle: Handle, e: PointerEvent) {
+  const t = viewHandleTarget(); const p = clientToView(e)
+  if (!t || !p) return
+  const el = beginViewHandle(e)
+  const { s, layer: l } = t
+  const vb = s.unit.viewBox
+  const tb = textBoxResizable(l), locked = aspectLockedResizeKind(l.kind)
+  // A text box's height field is written only when it already has one or this handle can change the
+  // height: on the side handles a text without boxH keeps wrapping to its content (Task 3 ruling).
+  const hField = locked ? null : tb ? (((l as TextLayer).boxH ?? 0) > 0 || (handle !== 'l' && handle !== 'r') ? 'boxH' : null) : 'h'
+  viewDrag.value = {
+    kind: 'resize', handle, unit: s.unit, layer: l, sx: e.clientX, sy: e.clientY, edit: null,
+    start: { cx: vb.x + vb.w / 2, cy: vb.y + vb.h / 2, w: vb.w, h: vb.h }, p0: p,
+    fields: { w: tb ? 'boxW' : 'w', h: hField }, locked, recorded: false, pointerId: e.pointerId, el,
+  }
+}
+function onViewScaleDown(e: PointerEvent) {
+  const t = viewHandleTarget(); const c = viewCentreClient()
+  if (!t || !c) return
+  const el = beginViewHandle(e)
+  const l = t.layer as LocalLayer & Record<string, unknown>
+  // The fields the design-size corner scale multiplies (a wired layer's height is derived). A text
+  // box only reaches this when rotated; its box scales with the type so the wrap is kept. Only a
+  // field the layer has is scaled: an absent or zero one stays so (the clamp would lift it to 0.002).
+  const keys = l.kind === 'text' ? ['fontSize', 'boxW', 'boxH'] : l.kind === 'line' || l.kind === 'wired' ? ['w'] : l.kind === 'path' ? ['scale'] : ['w', 'h']
+  const start: Record<string, number> = {}
+  for (const k of keys) { const v = Number(l[k]); if (Number.isFinite(v) && v > 0) start[k] = v }
+  viewDrag.value = {
+    kind: 'scale', unit: t.s.unit, layer: t.layer, sx: e.clientX, sy: e.clientY, edit: null,
+    cx: c.x, cy: c.y, startDist: Math.max(1, Math.hypot(e.clientX - c.x, e.clientY - c.y)), start,
+    recorded: false, pointerId: e.pointerId, el,
+  }
+}
+function onViewRotateDown(e: PointerEvent) {
+  const t = viewHandleTarget(); const c = viewCentreClient()
+  if (!t || !c) return
+  const el = beginViewHandle(e)
+  viewDrag.value = {
+    kind: 'rotate', unit: t.s.unit, layer: t.layer, sx: e.clientX, sy: e.clientY, edit: null,
+    cx: c.x, cy: c.y, startAngle: Math.atan2(e.clientY - c.y, e.clientX - c.x), startRot: t.layer.rotation ?? 0,
+    local: { w: t.s.local.w, h: t.s.local.h }, recorded: false, pointerId: e.pointerId, el,
+  }
+}
+/** This frame's edit for a handle drag, from the gesture-start unit and layer. Shift keeps the
+ *  aspect (resize) or snaps to 15° (rotate), Alt resizes from the centre — as at the design size. */
+function viewHandleEditFor(e: PointerEvent): ViewHandleEdit | null {
+  const d = viewDrag.value; if (!d || d.kind === 'move') return null
+  const { w: W0, h: H0 } = designSize.value
+  if (d.kind === 'resize') {
+    const p = clientToView(e); if (!p) return null
+    const b = resizeBox(d.start, 0, d.handle, d.p0, p, { aspect: e.shiftKey || d.locked, fromCenter: e.altKey })
+    const box = { x: b.cx - b.w / 2, y: b.cy - b.h / 2, w: b.w, h: b.h }
+    const { unit, layer, fields } = d
+    return phase => resizeLayerAtView(unit, layer, box, W0, H0, phase, fields)
+  }
+  if (d.kind === 'scale') {
+    const ratio = Math.max(0.05, Math.hypot(e.clientX - d.cx, e.clientY - d.cy) / d.startDist)
+    const { unit, layer, start } = d
+    return phase => scaleLayerAtView(unit, layer, start, ratio, phase)
+  }
+  let rot = d.startRot + ((Math.atan2(e.clientY - d.cy, e.clientX - d.cx) - d.startAngle) * 180) / Math.PI
+  while (rot > 180) rot -= 360
+  while (rot < -180) rot += 360
+  const rotation = Math.round(snapAngle(rot, e.shiftKey ? 15 : null))
+  const { unit, layer, local } = d
+  return phase => rotateLayerAtView(unit, layer, rotation, local, phase)
+}
+function onViewHandleMove(e: PointerEvent) {
+  const d = viewDrag.value; if (!d || d.kind === 'move' || e.pointerId !== d.pointerId) return
+  // Snapped back to the design size mid-drag (a design-only tool's shortcut): settle and stop.
+  if (!viewEditing.value) { onViewPointerUp(); return }
+  if (!d.recorded) {
+    if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 3) return // a press, not a drag yet
+    recordHistory() // the whole handle drag is ONE undo step, recorded on the first real movement
+    d.recorded = true
+  }
+  const edit = viewHandleEditFor(e); if (!edit) return
+  d.edit = edit
+  applyViewEdits([edit('drag')])
 }
 // Closing the modal mid-drag settles the drop too, so the saved doc never keeps a held pin.
 onBeforeUnmount(() => { onViewPointerUp() })
@@ -8229,10 +8349,22 @@ onUnmounted(() => {
           class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"
           :viewBox="`0 0 ${canvasDisplay.w} ${canvasDisplay.h}`"
         >
+          <template v-if="viewSel.single && viewSel.layer && viewSel.unit.kind === 'layer'">
+            <polygon
+              :points="`${viewSel.handles.tl.x},${viewSel.handles.tl.y} ${viewSel.handles.tr.x},${viewSel.handles.tr.y} ${viewSel.handles.br.x},${viewSel.handles.br.y} ${viewSel.handles.bl.x},${viewSel.handles.bl.y}`"
+              fill="none" stroke="#ffffff" stroke-width="2" vector-effect="non-scaling-stroke"
+            />
+            <line
+              :x1="viewSel.handles.topCenter.x" :y1="viewSel.handles.topCenter.y"
+              :x2="viewSel.handles.rot.x" :y2="viewSel.handles.rot.y"
+              stroke="#ffffff" stroke-width="2" vector-effect="non-scaling-stroke"
+            />
+          </template>
+          <!-- A group, mask pair or cloner: the dashed box the design size draws for a group. -->
           <polygon
-            v-if="viewSel.single"
+            v-else-if="viewSel.single"
             :points="`${viewSel.handles.tl.x},${viewSel.handles.tl.y} ${viewSel.handles.tr.x},${viewSel.handles.tr.y} ${viewSel.handles.br.x},${viewSel.handles.br.y} ${viewSel.handles.bl.x},${viewSel.handles.bl.y}`"
-            fill="none" stroke="#ffffff" stroke-width="2" vector-effect="non-scaling-stroke"
+            fill="none" stroke="#ffffff" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"
           />
           <rect
             v-else
@@ -8240,6 +8372,48 @@ onUnmounted(() => {
             fill="none" stroke="#ffffff" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"
           />
         </svg>
+        <!-- Its handles: the design-size set and look, for a single LAYER only (a group, mask pair or
+             cloner moves by dragging; its lead member must never be scaled on its own). Resize on the
+             kinds that resize at the design size (unrotated), a uniform scale from the corners on the
+             rest. Each handle captures the pointer, so its release never reaches the backdrop. -->
+        <template v-if="viewSel && viewSel.single && viewSel.layer && viewSel.unit.kind === 'layer' && !editingId && !genActive && !brush.active.value">
+          <div
+            v-for="corner in (['tl', 'tr', 'br', 'bl'] as const)"
+            :key="'v-' + corner"
+            data-view-handle
+            class="absolute z-20 size-2.5 bg-white border border-white/60 cursor-nwse-resize"
+            :style="{ left: viewSel.handles[corner].x + 'px', top: viewSel.handles[corner].y + 'px', transform: 'translate(-50%, -50%)' }"
+            @pointerdown="(Math.abs(viewSel.layer.rotation ?? 0) < 1e-9 && (cornerResizableKind(viewSel.layer.kind) || textBoxResizable(viewSel.layer))) ? onViewResizeDown(corner, $event) : onViewScaleDown($event)"
+            @pointermove="onViewHandleMove"
+            @pointerup="onViewPointerUp"
+            @pointercancel="onViewPointerUp"
+            @lostpointercapture="onViewPointerUp"
+          />
+          <template v-if="Math.abs(viewSel.layer.rotation ?? 0) < 1e-9 && (resizableKind(viewSel.layer.kind) || textBoxResizable(viewSel.layer))">
+            <div
+              v-for="edge in (['t', 'r', 'b', 'l'] as const)"
+              :key="'v-e-' + edge"
+              data-view-handle
+              :class="['absolute z-20 size-2.5 bg-white border border-white/60', edge === 't' || edge === 'b' ? 'cursor-ns-resize' : 'cursor-ew-resize']"
+              :style="{ left: viewSel.handles[edge].x + 'px', top: viewSel.handles[edge].y + 'px', transform: 'translate(-50%, -50%)' }"
+              @pointerdown="onViewResizeDown(edge, $event)"
+              @pointermove="onViewHandleMove"
+              @pointerup="onViewPointerUp"
+              @pointercancel="onViewPointerUp"
+              @lostpointercapture="onViewPointerUp"
+            />
+          </template>
+          <div
+            data-view-handle
+            class="absolute z-20 size-3 rounded-full bg-white cursor-grab border-2 border-[#1a1a1a]"
+            :style="{ left: viewSel.handles.rot.x + 'px', top: viewSel.handles.rot.y + 'px', transform: 'translate(-50%, -50%)' }"
+            @pointerdown="onViewRotateDown"
+            @pointermove="onViewHandleMove"
+            @pointerup="onViewPointerUp"
+            @pointercancel="onViewPointerUp"
+            @lostpointercapture="onViewPointerUp"
+          />
+        </template>
 
         <!-- Responsive guides: dashed amber lines to the edges the selected unit holds.
              Only present off the design size (selectionGuides is null at identity / on a fixed frame). -->
