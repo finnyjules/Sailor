@@ -75,6 +75,31 @@ describe('planFrameExport', () => {
     expect(planFrameExport(input(variant([a]))).fonts[0]!.outline).toBe(true)
   })
 
+  it('text on a path alone is inked with fillText, not outlined', () => {
+    const a = createTextLayer({ text: 'Curve', fontFamily: 'Inter', fontWeight: 400 })
+    ;(a as any).path = { d: 'M0,0 L1,1' }
+    expect(planFrameExport(input(variant([a]))).fonts[0]!.outline).toBe(false)
+  })
+
+  it('an invisible geometry effect does not force an outline', () => {
+    const a = createTextLayer({ text: 'Hidden', fontFamily: 'Inter', fontWeight: 400 })
+    ;(a as any).effects = [{ ...createEffect('trim'), visible: false }]
+    expect(planFrameExport(input(variant([a]))).fonts[0]!.outline).toBe(false)
+  })
+
+  it('a visible geometry effect forces an outline', () => {
+    const a = createTextLayer({ text: 'Shown', fontFamily: 'Inter', fontWeight: 400 })
+    ;(a as any).effects = [{ ...createEffect('trim'), visible: true }]
+    expect(planFrameExport(input(variant([a]))).fonts[0]!.outline).toBe(true)
+  })
+
+  it('decorated text stays fillText even when it asks for an outline', () => {
+    const a = createTextLayer({ text: 'Under', fontFamily: 'Inter', fontWeight: 400 })
+    ;(a as any).renderAsOutline = true
+    ;(a as any).underline = true
+    expect(planFrameExport(input(variant([a]))).fonts[0]!.outline).toBe(false)
+  })
+
   it('shader ids are found anywhere in the Frame, plus what the transitions need', () => {
     const r = createRectLayer({})
     ;(r as any).fill = { ...DEFAULT_FILL, type: 'shader', shader: { effectId: 'liquify', params: {}, anchor: 'object', speed: 1, seed: 42, input: '#000000' } }

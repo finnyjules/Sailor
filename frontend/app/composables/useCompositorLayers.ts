@@ -3852,9 +3852,7 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     // F2: a geometry effect must force the outline path even when `renderAsOutline` is unset,
     // or the effect is silently dropped. A decorated text layer is excluded (it inks with
     // fillText); a system font makes `collectTextOutline` return null → safe fillText fallback.
-    const oc = (needsTextOutline(layer) || layerGeometryEffects(layer).length > 0)
-      && !textHasDecoration(layer as TextLayer)
-      ? collectTextOutline(layer, W) : null
+    const oc = textDrawsFromOutlines(layer) ? collectTextOutline(layer, W) : null
     if (oc) {
       // F2: transform the outline by any geometry effect first. `needsComputedOutline`
       // is false for a decorated text layer, so a decorated one keeps its exact F1 `d`;
@@ -4814,6 +4812,16 @@ export function textLayerOutline(
  *  OR-in "a geometry effect is present" here. */
 function needsTextOutline(layer: LocalLayer): boolean {
   return layer.kind === 'text' && (layer as TextLayer).renderAsOutline === true
+}
+
+/** True when the painter draws this text layer from glyph outlines (fontkit) rather than
+ *  fillText: an explicit outline or a visible geometry effect, and no decoration. The ONE
+ *  statement of that rule — drawLayerContent's text branch and the web export's planner
+ *  both ask it. */
+export function textDrawsFromOutlines(layer: LocalLayer): boolean {
+  return layer.kind === 'text'
+    && (needsTextOutline(layer) || layerGeometryEffects(layer).length > 0)
+    && !textHasDecoration(layer as TextLayer)
 }
 
 /**

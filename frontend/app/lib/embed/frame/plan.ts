@@ -6,8 +6,8 @@
  * with the file.
  */
 import type { LocalLayer } from '~/composables/useCompositorLayers'
-import { collectFillImageSrcs } from '~/composables/useCompositorLayers'
-import { effectStackOf, GEOMETRY_KINDS } from '~/lib/compositor/effectStack'
+import { collectFillImageSrcs, textDrawsFromOutlines } from '~/composables/useCompositorLayers'
+import { effectStackOf } from '~/lib/compositor/effectStack'
 import { depthSourceFromViewUrl, type DepthRef } from '~/lib/compositor/depthRegistry'
 import { revealEffectIdsFor } from '~/lib/motionx/reveal/params'
 import { resolveEffectId } from '~/lib/shaderfx/catalogStore'
@@ -40,8 +40,6 @@ export interface FramePlan {
   notices: FrameNotice[]
 }
 
-const GEOMETRY = new Set<string>(GEOMETRY_KINDS)
-
 /** A name for a layer in a sentence. */
 export function layerLabel(l: LocalLayer): string {
   const named = (l as { name?: unknown }).name
@@ -54,13 +52,12 @@ export function layerLabel(l: LocalLayer): string {
   }
 }
 
-/** True when the painter will draw this text from glyph outlines (fontkit), not fillText. Mirrors
- *  drawLayerContent's rule: an explicit outline, a path to follow, or any geometry effect. */
+/** True when the painter will draw this text from glyph outlines (fontkit), not fillText. Asks
+ *  the painter's own `textDrawsFromOutlines` — the one statement of that rule — rather than
+ *  mirroring it: an explicit outline or a visible geometry effect, and no decoration. Text
+ *  following a path is still inked with fillText. */
 export function textNeedsOutline(l: LocalLayer): boolean {
-  if (l.kind !== 'text') return false
-  const t = l as { renderAsOutline?: boolean; path?: unknown }
-  if (t.renderAsOutline === true || t.path) return true
-  return effectStackOf(l as any).some(e => GEOMETRY.has(e.type))
+  return textDrawsFromOutlines(l)
 }
 
 function drawnLongSide(l: { w?: number; h?: number }, width: number): number {
