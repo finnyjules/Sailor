@@ -1,0 +1,1328 @@
+{
+  "image": [
+    {
+      "args": {
+        "adv": {},
+        "ar": "1:1",
+        "prompt": "a red fox",
+        "seed": 0
+      },
+      "model": "flux-1.1-pro",
+      "payload": {
+        "image_size": "square_hd",
+        "num_images": 1,
+        "output_format": "png",
+        "prompt": "a red fox",
+        "safety_tolerance": "2"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "16:9",
+        "prompt": "a red fox",
+        "seed": 42
+      },
+      "model": "flux-1.1-pro",
+      "payload": {
+        "image_size": "landscape_16_9",
+        "num_images": 1,
+        "output_format": "png",
+        "prompt": "a red fox",
+        "safety_tolerance": "2",
+        "seed": 42
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "7:3",
+        "prompt": "wide",
+        "seed": 5
+      },
+      "model": "flux-1.1-pro",
+      "payload": {
+        "image_size": "square_hd",
+        "num_images": 1,
+        "output_format": "png",
+        "prompt": "wide",
+        "safety_tolerance": "2",
+        "seed": 5
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "output_format": "jpg"
+        },
+        "ar": "4:5",
+        "prompt": "portrait",
+        "seed": 0
+      },
+      "model": "flux-1.1-pro",
+      "payload": {
+        "image_size": "portrait_4_3",
+        "num_images": 1,
+        "output_format": "jpg",
+        "prompt": "portrait",
+        "safety_tolerance": "2"
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "safety_tolerance": 9
+        },
+        "ar": "3:2",
+        "prompt": "p",
+        "seed": 1
+      },
+      "model": "flux-1.1-pro",
+      "payload": {
+        "image_size": "landscape_4_3",
+        "num_images": 1,
+        "output_format": "png",
+        "prompt": "p",
+        "safety_tolerance": "6",
+        "seed": 1
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "safety_tolerance": "0"
+        },
+        "ar": "3:2",
+        "prompt": "p",
+        "seed": 1
+      },
+      "model": "flux-1.1-pro",
+      "payload": {
+        "image_size": "landscape_4_3",
+        "num_images": 1,
+        "output_format": "png",
+        "prompt": "p",
+        "safety_tolerance": "1",
+        "seed": 1
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "1:1",
+        "prompt": "a red fox",
+        "seed": 0
+      },
+      "model": "flux-schnell",
+      "payload": {
+        "image_size": "square_hd",
+        "num_images": 1,
+        "num_inference_steps": 4,
+        "output_format": "png",
+        "prompt": "a red fox"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "16:9",
+        "prompt": "a red fox",
+        "seed": 42
+      },
+      "model": "flux-schnell",
+      "payload": {
+        "image_size": "landscape_16_9",
+        "num_images": 1,
+        "num_inference_steps": 4,
+        "output_format": "png",
+        "prompt": "a red fox",
+        "seed": 42
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "7:3",
+        "prompt": "wide",
+        "seed": 5
+      },
+      "model": "flux-schnell",
+      "payload": {
+        "image_size": "square_hd",
+        "num_images": 1,
+        "num_inference_steps": 4,
+        "output_format": "png",
+        "prompt": "wide",
+        "seed": 5
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "output_format": "jpg"
+        },
+        "ar": "4:5",
+        "prompt": "portrait",
+        "seed": 0
+      },
+      "model": "flux-schnell",
+      "payload": {
+        "image_size": "portrait_4_3",
+        "num_images": 1,
+        "num_inference_steps": 4,
+        "output_format": "jpg",
+        "prompt": "portrait"
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "num_inference_steps": "6",
+          "num_outputs": 3
+        },
+        "ar": "9:21",
+        "prompt": "p",
+        "seed": 3
+      },
+      "model": "flux-schnell",
+      "payload": {
+        "image_size": "portrait_16_9",
+        "num_images": 3,
+        "num_inference_steps": 6,
+        "output_format": "png",
+        "prompt": "p",
+        "seed": 3
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "num_outputs": 9
+        },
+        "ar": "1:1",
+        "prompt": "p",
+        "seed": 3
+      },
+      "model": "flux-schnell",
+      "payload": {
+        "image_size": "square_hd",
+        "num_images": 4,
+        "num_inference_steps": 4,
+        "output_format": "png",
+        "prompt": "p",
+        "seed": 3
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "1:1",
+        "prompt": "a red fox",
+        "seed": 0
+      },
+      "model": "nano-banana-pro",
+      "payload": {
+        "aspect_ratio": "1:1",
+        "num_images": 1,
+        "output_format": "png",
+        "prompt": "a red fox",
+        "resolution": "2K"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "16:9",
+        "prompt": "a red fox",
+        "seed": 42
+      },
+      "model": "nano-banana-pro",
+      "payload": {
+        "aspect_ratio": "16:9",
+        "num_images": 1,
+        "output_format": "png",
+        "prompt": "a red fox",
+        "resolution": "2K",
+        "seed": 42
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "7:3",
+        "prompt": "wide",
+        "seed": 5
+      },
+      "model": "nano-banana-pro",
+      "payload": {
+        "aspect_ratio": "1:1",
+        "num_images": 1,
+        "output_format": "png",
+        "prompt": "wide",
+        "resolution": "2K",
+        "seed": 5
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "output_format": "jpg"
+        },
+        "ar": "4:5",
+        "prompt": "portrait",
+        "seed": 0
+      },
+      "model": "nano-banana-pro",
+      "payload": {
+        "aspect_ratio": "4:5",
+        "num_images": 1,
+        "output_format": "jpeg",
+        "prompt": "portrait",
+        "resolution": "2K"
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "resolution": "1K"
+        },
+        "ar": "21:9",
+        "prompt": "p",
+        "seed": 0
+      },
+      "model": "nano-banana-pro",
+      "payload": {
+        "aspect_ratio": "21:9",
+        "num_images": 1,
+        "output_format": "png",
+        "prompt": "p",
+        "resolution": "1K"
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "resolution": "0.5K"
+        },
+        "ar": "4:1",
+        "prompt": "p",
+        "seed": 0
+      },
+      "model": "nano-banana-pro",
+      "payload": {
+        "aspect_ratio": "1:1",
+        "num_images": 1,
+        "output_format": "png",
+        "prompt": "p",
+        "resolution": "2K"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "1:1",
+        "prompt": "a red fox",
+        "seed": 0
+      },
+      "model": "nano-banana-2",
+      "payload": {
+        "aspect_ratio": "1:1",
+        "enable_web_search": false,
+        "num_images": 1,
+        "output_format": "png",
+        "prompt": "a red fox",
+        "resolution": "1K"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "16:9",
+        "prompt": "a red fox",
+        "seed": 42
+      },
+      "model": "nano-banana-2",
+      "payload": {
+        "aspect_ratio": "16:9",
+        "enable_web_search": false,
+        "num_images": 1,
+        "output_format": "png",
+        "prompt": "a red fox",
+        "resolution": "1K",
+        "seed": 42
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "7:3",
+        "prompt": "wide",
+        "seed": 5
+      },
+      "model": "nano-banana-2",
+      "payload": {
+        "aspect_ratio": "1:1",
+        "enable_web_search": false,
+        "num_images": 1,
+        "output_format": "png",
+        "prompt": "wide",
+        "resolution": "1K",
+        "seed": 5
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "output_format": "jpg"
+        },
+        "ar": "4:5",
+        "prompt": "portrait",
+        "seed": 0
+      },
+      "model": "nano-banana-2",
+      "payload": {
+        "aspect_ratio": "4:5",
+        "enable_web_search": false,
+        "num_images": 1,
+        "output_format": "jpeg",
+        "prompt": "portrait",
+        "resolution": "1K"
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "google_search": true,
+          "resolution": "4K"
+        },
+        "ar": "4:1",
+        "prompt": "p",
+        "seed": 2
+      },
+      "model": "nano-banana-2",
+      "payload": {
+        "aspect_ratio": "4:1",
+        "enable_web_search": true,
+        "num_images": 1,
+        "output_format": "png",
+        "prompt": "p",
+        "resolution": "4K",
+        "seed": 2
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "google_search": "yes",
+          "resolution": "huge"
+        },
+        "ar": "1:1",
+        "prompt": "p",
+        "seed": 2
+      },
+      "model": "nano-banana-2",
+      "payload": {
+        "aspect_ratio": "1:1",
+        "enable_web_search": true,
+        "num_images": 1,
+        "output_format": "png",
+        "prompt": "p",
+        "resolution": "1K",
+        "seed": 2
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "1:1",
+        "prompt": "a red fox",
+        "seed": 0
+      },
+      "model": "ideogram-v3-quality",
+      "payload": {
+        "expand_prompt": true,
+        "image_size": "square_hd",
+        "num_images": 1,
+        "prompt": "a red fox",
+        "rendering_speed": "QUALITY"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "16:9",
+        "prompt": "a red fox",
+        "seed": 42
+      },
+      "model": "ideogram-v3-quality",
+      "payload": {
+        "expand_prompt": true,
+        "image_size": "landscape_16_9",
+        "num_images": 1,
+        "prompt": "a red fox",
+        "rendering_speed": "QUALITY",
+        "seed": 42
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "7:3",
+        "prompt": "wide",
+        "seed": 5
+      },
+      "model": "ideogram-v3-quality",
+      "payload": {
+        "expand_prompt": true,
+        "image_size": "square_hd",
+        "num_images": 1,
+        "prompt": "wide",
+        "rendering_speed": "QUALITY",
+        "seed": 5
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "output_format": "jpg"
+        },
+        "ar": "4:5",
+        "prompt": "portrait",
+        "seed": 0
+      },
+      "model": "ideogram-v3-quality",
+      "payload": {
+        "expand_prompt": true,
+        "image_size": "portrait_4_3",
+        "num_images": 1,
+        "prompt": "portrait",
+        "rendering_speed": "QUALITY"
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "magic_prompt": "Off",
+          "style_type": "Design"
+        },
+        "ar": "3:1",
+        "prompt": "p",
+        "seed": 4
+      },
+      "model": "ideogram-v3-quality",
+      "payload": {
+        "expand_prompt": false,
+        "image_size": "square_hd",
+        "num_images": 1,
+        "prompt": "p",
+        "rendering_speed": "QUALITY",
+        "seed": 4,
+        "style": "DESIGN"
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "style_type": "Fancy"
+        },
+        "ar": "3:1",
+        "prompt": "p",
+        "seed": 4
+      },
+      "model": "ideogram-v3-quality",
+      "payload": {
+        "expand_prompt": true,
+        "image_size": "square_hd",
+        "num_images": 1,
+        "prompt": "p",
+        "rendering_speed": "QUALITY",
+        "seed": 4
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "1:1",
+        "prompt": "a red fox",
+        "seed": 0
+      },
+      "model": "ideogram-v3-balanced",
+      "payload": {
+        "expand_prompt": true,
+        "image_size": "square_hd",
+        "num_images": 1,
+        "prompt": "a red fox",
+        "rendering_speed": "BALANCED"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "16:9",
+        "prompt": "a red fox",
+        "seed": 42
+      },
+      "model": "ideogram-v3-balanced",
+      "payload": {
+        "expand_prompt": true,
+        "image_size": "landscape_16_9",
+        "num_images": 1,
+        "prompt": "a red fox",
+        "rendering_speed": "BALANCED",
+        "seed": 42
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "7:3",
+        "prompt": "wide",
+        "seed": 5
+      },
+      "model": "ideogram-v3-balanced",
+      "payload": {
+        "expand_prompt": true,
+        "image_size": "square_hd",
+        "num_images": 1,
+        "prompt": "wide",
+        "rendering_speed": "BALANCED",
+        "seed": 5
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "output_format": "jpg"
+        },
+        "ar": "4:5",
+        "prompt": "portrait",
+        "seed": 0
+      },
+      "model": "ideogram-v3-balanced",
+      "payload": {
+        "expand_prompt": true,
+        "image_size": "portrait_4_3",
+        "num_images": 1,
+        "prompt": "portrait",
+        "rendering_speed": "BALANCED"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "1:1",
+        "prompt": "a red fox",
+        "seed": 0
+      },
+      "model": "ideogram-v3-turbo",
+      "payload": {
+        "expand_prompt": true,
+        "image_size": "square_hd",
+        "num_images": 1,
+        "prompt": "a red fox",
+        "rendering_speed": "TURBO"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "16:9",
+        "prompt": "a red fox",
+        "seed": 42
+      },
+      "model": "ideogram-v3-turbo",
+      "payload": {
+        "expand_prompt": true,
+        "image_size": "landscape_16_9",
+        "num_images": 1,
+        "prompt": "a red fox",
+        "rendering_speed": "TURBO",
+        "seed": 42
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "7:3",
+        "prompt": "wide",
+        "seed": 5
+      },
+      "model": "ideogram-v3-turbo",
+      "payload": {
+        "expand_prompt": true,
+        "image_size": "square_hd",
+        "num_images": 1,
+        "prompt": "wide",
+        "rendering_speed": "TURBO",
+        "seed": 5
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "output_format": "jpg"
+        },
+        "ar": "4:5",
+        "prompt": "portrait",
+        "seed": 0
+      },
+      "model": "ideogram-v3-turbo",
+      "payload": {
+        "expand_prompt": true,
+        "image_size": "portrait_4_3",
+        "num_images": 1,
+        "prompt": "portrait",
+        "rendering_speed": "TURBO"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "1:1",
+        "prompt": "a red fox",
+        "seed": 0
+      },
+      "model": "seedream-5-lite",
+      "payload": {
+        "image_size": "square_hd",
+        "max_images": 1,
+        "num_images": 1,
+        "prompt": "a red fox"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "16:9",
+        "prompt": "a red fox",
+        "seed": 42
+      },
+      "model": "seedream-5-lite",
+      "payload": {
+        "image_size": "landscape_16_9",
+        "max_images": 1,
+        "num_images": 1,
+        "prompt": "a red fox"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "7:3",
+        "prompt": "wide",
+        "seed": 5
+      },
+      "model": "seedream-5-lite",
+      "payload": {
+        "image_size": "square_hd",
+        "max_images": 1,
+        "num_images": 1,
+        "prompt": "wide"
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "output_format": "jpg"
+        },
+        "ar": "4:5",
+        "prompt": "portrait",
+        "seed": 0
+      },
+      "model": "seedream-5-lite",
+      "payload": {
+        "image_size": "portrait_4_3",
+        "max_images": 1,
+        "num_images": 1,
+        "prompt": "portrait"
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "max_images": 9,
+          "sequential_image_generation": "auto"
+        },
+        "ar": "2:3",
+        "prompt": "p",
+        "seed": 9
+      },
+      "model": "seedream-5-lite",
+      "payload": {
+        "image_size": "portrait_4_3",
+        "max_images": 6,
+        "num_images": 1,
+        "prompt": "p"
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "sequential_image_generation": "auto"
+        },
+        "ar": "2:3",
+        "prompt": "p",
+        "seed": 9
+      },
+      "model": "seedream-5-lite",
+      "payload": {
+        "image_size": "portrait_4_3",
+        "max_images": 1,
+        "num_images": 1,
+        "prompt": "p"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "1:1",
+        "prompt": "a red fox",
+        "seed": 0
+      },
+      "model": "seedream-4",
+      "payload": {
+        "image_size": "square_hd",
+        "max_images": 1,
+        "num_images": 1,
+        "prompt": "a red fox"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "16:9",
+        "prompt": "a red fox",
+        "seed": 42
+      },
+      "model": "seedream-4",
+      "payload": {
+        "image_size": "landscape_16_9",
+        "max_images": 1,
+        "num_images": 1,
+        "prompt": "a red fox",
+        "seed": 42
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "7:3",
+        "prompt": "wide",
+        "seed": 5
+      },
+      "model": "seedream-4",
+      "payload": {
+        "image_size": "square_hd",
+        "max_images": 1,
+        "num_images": 1,
+        "prompt": "wide",
+        "seed": 5
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "output_format": "jpg"
+        },
+        "ar": "4:5",
+        "prompt": "portrait",
+        "seed": 0
+      },
+      "model": "seedream-4",
+      "payload": {
+        "image_size": "portrait_4_3",
+        "max_images": 1,
+        "num_images": 1,
+        "prompt": "portrait"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "21:9",
+        "prompt": "p",
+        "seed": 11
+      },
+      "model": "seedream-4",
+      "payload": {
+        "image_size": "landscape_16_9",
+        "max_images": 1,
+        "num_images": 1,
+        "prompt": "p",
+        "seed": 11
+      }
+    }
+  ],
+  "video": [
+    {
+      "args": {
+        "adv": {},
+        "ar": "16:9",
+        "dur": 5,
+        "image": null,
+        "prompt": "a wave",
+        "seed": 0
+      },
+      "model": "veo-3.1",
+      "payload": {
+        "aspect_ratio": "16:9",
+        "auto_fix": true,
+        "duration": "4s",
+        "generate_audio": true,
+        "prompt": "a wave",
+        "resolution": "720p"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "9:16",
+        "dur": 7,
+        "image": "IMAGE_URL",
+        "prompt": "a wave",
+        "seed": 12
+      },
+      "model": "veo-3.1",
+      "payload": {
+        "auto_fix": true,
+        "duration": "6s",
+        "generate_audio": true,
+        "image_url": "IMAGE_URL",
+        "prompt": "a wave",
+        "resolution": "720p",
+        "seed": 12
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "4:1",
+        "dur": 100,
+        "image": null,
+        "prompt": "a wave",
+        "seed": 0
+      },
+      "model": "veo-3.1",
+      "payload": {
+        "aspect_ratio": "16:9",
+        "auto_fix": true,
+        "duration": "8s",
+        "generate_audio": true,
+        "prompt": "a wave",
+        "resolution": "720p"
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "enhance_prompt": false,
+          "generate_audio": false,
+          "negative_prompt": "blur",
+          "resolution": "1080p"
+        },
+        "ar": "16:9",
+        "dur": 6,
+        "image": null,
+        "prompt": "p",
+        "seed": 3
+      },
+      "model": "veo-3.1",
+      "payload": {
+        "aspect_ratio": "16:9",
+        "auto_fix": false,
+        "duration": "6s",
+        "generate_audio": false,
+        "negative_prompt": "blur",
+        "prompt": "p",
+        "resolution": "1080p",
+        "seed": 3
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "16:9",
+        "dur": 5,
+        "image": null,
+        "prompt": "a wave",
+        "seed": 0
+      },
+      "model": "veo-3.1-fast",
+      "payload": {
+        "aspect_ratio": "16:9",
+        "auto_fix": true,
+        "duration": "4s",
+        "generate_audio": true,
+        "prompt": "a wave",
+        "resolution": "720p"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "9:16",
+        "dur": 7,
+        "image": "IMAGE_URL",
+        "prompt": "a wave",
+        "seed": 12
+      },
+      "model": "veo-3.1-fast",
+      "payload": {
+        "auto_fix": true,
+        "duration": "6s",
+        "generate_audio": true,
+        "image_url": "IMAGE_URL",
+        "prompt": "a wave",
+        "resolution": "720p",
+        "seed": 12
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "4:1",
+        "dur": 100,
+        "image": null,
+        "prompt": "a wave",
+        "seed": 0
+      },
+      "model": "veo-3.1-fast",
+      "payload": {
+        "aspect_ratio": "16:9",
+        "auto_fix": true,
+        "duration": "8s",
+        "generate_audio": true,
+        "prompt": "a wave",
+        "resolution": "720p"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "16:9",
+        "dur": 5,
+        "image": null,
+        "prompt": "a wave",
+        "seed": 0
+      },
+      "model": "flux-3",
+      "payload": {
+        "aspect_ratio": "16:9",
+        "duration": 5,
+        "generate_audio": true,
+        "prompt": "a wave",
+        "resolution": "720p"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "9:16",
+        "dur": 7,
+        "image": "IMAGE_URL",
+        "prompt": "a wave",
+        "seed": 12
+      },
+      "model": "flux-3",
+      "payload": {
+        "duration": 5,
+        "generate_audio": true,
+        "image_url": "IMAGE_URL",
+        "prompt": "a wave",
+        "resolution": "720p",
+        "seed": 12
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "4:1",
+        "dur": 100,
+        "image": null,
+        "prompt": "a wave",
+        "seed": 0
+      },
+      "model": "flux-3",
+      "payload": {
+        "aspect_ratio": "16:9",
+        "duration": 20,
+        "generate_audio": true,
+        "prompt": "a wave",
+        "resolution": "720p"
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "generate_audio": "off"
+        },
+        "ar": "1:1",
+        "dur": 12,
+        "image": null,
+        "prompt": "p",
+        "seed": 0
+      },
+      "model": "flux-3",
+      "payload": {
+        "aspect_ratio": "1:1",
+        "duration": 10,
+        "generate_audio": false,
+        "prompt": "p",
+        "resolution": "720p"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "16:9",
+        "dur": 5,
+        "image": null,
+        "prompt": "a wave",
+        "seed": 0
+      },
+      "model": "seedance-2.0",
+      "payload": {
+        "aspect_ratio": "16:9",
+        "duration": "5",
+        "prompt": "a wave",
+        "resolution": "720p"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "9:16",
+        "dur": 7,
+        "image": "IMAGE_URL",
+        "prompt": "a wave",
+        "seed": 12
+      },
+      "model": "seedance-2.0",
+      "payload": {
+        "duration": "7",
+        "image_url": "IMAGE_URL",
+        "prompt": "a wave",
+        "resolution": "720p"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "4:1",
+        "dur": 100,
+        "image": null,
+        "prompt": "a wave",
+        "seed": 0
+      },
+      "model": "seedance-2.0",
+      "payload": {
+        "aspect_ratio": "16:9",
+        "duration": "15",
+        "prompt": "a wave",
+        "resolution": "720p"
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "generate_audio": true,
+          "image_urls": [
+            "https://r/1.png"
+          ]
+        },
+        "ar": "3:4",
+        "dur": 14,
+        "image": null,
+        "prompt": "p",
+        "seed": 0
+      },
+      "model": "seedance-2.0",
+      "payload": {
+        "aspect_ratio": "3:4",
+        "duration": "13",
+        "generate_audio": true,
+        "image_urls": [
+          "https://r/1.png"
+        ],
+        "prompt": "p",
+        "resolution": "720p"
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "end_image_url": "https://r/last.png",
+          "image_url": "https://r/first.png"
+        },
+        "ar": "3:4",
+        "dur": 5,
+        "image": null,
+        "prompt": "p",
+        "seed": 0
+      },
+      "model": "seedance-2.0",
+      "payload": {
+        "duration": "5",
+        "end_image_url": "https://r/last.png",
+        "image_url": "https://r/first.png",
+        "prompt": "p",
+        "resolution": "720p"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "16:9",
+        "dur": 5,
+        "image": null,
+        "prompt": "a wave",
+        "seed": 0
+      },
+      "model": "hailuo-h3",
+      "payload": {
+        "aspect_ratio": "16:9",
+        "duration": 5,
+        "prompt": "a wave",
+        "prompt_expansion_mode": "balanced",
+        "resolution": "768P"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "9:16",
+        "dur": 7,
+        "image": "IMAGE_URL",
+        "prompt": "a wave",
+        "seed": 12
+      },
+      "model": "hailuo-h3",
+      "payload": {
+        "duration": 6,
+        "image_url": "IMAGE_URL",
+        "prompt": "a wave",
+        "prompt_expansion_mode": "balanced",
+        "resolution": "768P",
+        "seed": 12
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "4:1",
+        "dur": 100,
+        "image": null,
+        "prompt": "a wave",
+        "seed": 0
+      },
+      "model": "hailuo-h3",
+      "payload": {
+        "aspect_ratio": "16:9",
+        "duration": 10,
+        "prompt": "a wave",
+        "prompt_expansion_mode": "balanced",
+        "resolution": "768P"
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "prompt_expansion_mode": "fast",
+          "resolution": "4k"
+        },
+        "ar": "21:9",
+        "dur": 10,
+        "image": null,
+        "prompt": "p",
+        "seed": 8
+      },
+      "model": "hailuo-h3",
+      "payload": {
+        "aspect_ratio": "21:9",
+        "duration": 10,
+        "prompt": "p",
+        "prompt_expansion_mode": "fast",
+        "resolution": "4K",
+        "seed": 8
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "16:9",
+        "dur": 5,
+        "image": null,
+        "prompt": "a wave",
+        "seed": 0
+      },
+      "model": "hailuo-h3-max",
+      "payload": {
+        "aspect_ratio": "16:9",
+        "duration": 5,
+        "prompt": "a wave",
+        "prompt_expansion_mode": "balanced",
+        "resolution": "768P"
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "9:16",
+        "dur": 7,
+        "image": "IMAGE_URL",
+        "prompt": "a wave",
+        "seed": 12
+      },
+      "model": "hailuo-h3-max",
+      "payload": {
+        "duration": 6,
+        "image_url": "IMAGE_URL",
+        "prompt": "a wave",
+        "prompt_expansion_mode": "balanced",
+        "resolution": "768P",
+        "seed": 12
+      }
+    },
+    {
+      "args": {
+        "adv": {},
+        "ar": "4:1",
+        "dur": 100,
+        "image": null,
+        "prompt": "a wave",
+        "seed": 0
+      },
+      "model": "hailuo-h3-max",
+      "payload": {
+        "aspect_ratio": "16:9",
+        "duration": 10,
+        "prompt": "a wave",
+        "prompt_expansion_mode": "balanced",
+        "resolution": "768P"
+      }
+    },
+    {
+      "args": {
+        "adv": {
+          "end_image_url": "https://r/last.png",
+          "prompt_expansion_mode": "fast"
+        },
+        "ar": "21:9",
+        "dur": 6,
+        "image": "IMAGE_URL",
+        "prompt": "p",
+        "seed": 8
+      },
+      "model": "hailuo-h3-max",
+      "payload": {
+        "duration": 6,
+        "end_image_url": "https://r/last.png",
+        "image_url": "IMAGE_URL",
+        "prompt": "p",
+        "prompt_expansion_mode": "balanced",
+        "resolution": "768P",
+        "seed": 8
+      }
+    }
+  ]
+}
