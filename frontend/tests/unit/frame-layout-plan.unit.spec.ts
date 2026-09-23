@@ -976,8 +976,11 @@ describe('planLayout — band, button and logo (Stage 3)', () => {
     const plan = planLayout(args({ layoutId: 't-pieces-raw', props: props(layersWith()), style: 'performance', brandLogo }))!
     expect(plan.issues).toContain('caption: sits on the raw image')
     expect(plan.issues).not.toContain('action: sits on the raw image')
-    // Swiss (no style) never runs rule 10.
-    const swiss = planLayout(args({ layoutId: 't-pieces-raw', props: props(layersWith()), brandLogo }))!
+    // Swiss (no style) never runs rule 10. A style's layouts are only offered to that style
+    // (Task 5), so the same layout is registered again as a Swiss one.
+    const { style: _performance, ...swissTwin } = piecesLayout('t-pieces-raw-swiss', { band: false })
+    unregister.push(__registerLayoutForTest(swissTwin))
+    const swiss = planLayout(args({ layoutId: 't-pieces-raw-swiss', props: props(layersWith()), brandLogo }))!
     expect(swiss.issues.filter(i => i.includes('raw image'))).toEqual([])
   })
 

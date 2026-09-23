@@ -33,3 +33,35 @@ export function frameLayers(kind: Kind, o: { image: boolean; shape: boolean; dat
   if (o.shape) out.push(createEllipseLayer({ id: 'shp', x: 0.5, y: 0.5, w: 0.3, h: 0.3 }) as LocalLayer)
   return out
 }
+
+// ── Stage 3: the ad content (the style matrix, `frame-layout-style-matrix.unit.spec.ts`) ──
+/** The ad fixture's title for each kind — the phrase is the spec's "Run lighter.". */
+export const AD_TITLES: Record<Kind, string> = {
+  word: 'Lighter.',
+  phrase: 'Run lighter.',
+  sentence: 'Run lighter on every trail this autumn.',
+}
+export const AD_TEXTS = {
+  details: 'Halden Trail 2',
+  date: '–30%',
+  caption: 'Offer ends 12 October. While stocks last.',
+  action: 'Shop now',
+}
+/** A brand kit logo (ruling S2): `aspect` is h / w, so a wide wordmark. */
+export const AD_LOGO = { url: 'data:image/png;base64,AA', aspect: 0.3 }
+
+/** An ad Frame: title, details, the number, the fine print and — when `action` — an action line
+ *  ("Shop now", read as the action by ruling S3), plus an image layer when `image`. */
+export function adFrameLayers(kind: Kind, o: { image: boolean; action: boolean }): LocalLayer[] {
+  const t = (id: string, text: string, fontSize: number) =>
+    createTextLayer({ id, text, fontSize, fontFamily: 'Inter', fontWeight: 600, color: '#111111' }) as LocalLayer
+  const out = [
+    t('t', AD_TITLES[kind], 0.12),
+    t('d', AD_TEXTS.details, 0.04),
+    t('dt', AD_TEXTS.date, 0.03),
+    t('c', AD_TEXTS.caption, 0.02),
+  ]
+  if (o.action) out.push(t('a', AD_TEXTS.action, 0.025))
+  if (o.image) out.push(createImageLayer('x.png', 1.25, { id: 'img', w: 0.5, h: 0.625 }) as LocalLayer)
+  return out
+}

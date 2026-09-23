@@ -50,6 +50,9 @@ export interface LayoutDef {
   /** Built around the smaller text (the prototype's list): does not fit a format that carries
    *  fewer than three levels. */
   smallText?: boolean
+  /** One row for wide formats (the prototype's `wideOnly`): offered only when the sheet the
+   *  layout composes on is wide (`H < 70` — the band a format leaves uncovered, if it has one). */
+  wideOnly?: boolean
   /** The layout's promise, asserted by the checker: roles that must overlap, must bleed, must be rotated. */
   premise?: { overlap?: [string, string][]; bleed?: string[]; rotated?: string[] }
   fn(S: Sheet, ctx: LayoutCtx): LayoutOut

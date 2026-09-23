@@ -13,7 +13,7 @@ import { insertFromOps } from '../insert'
 import { applyPlacement } from '../apply'
 import { nextOrderFor } from '../order'
 import { clearGroupPinsOfMoved, clearPinsOfMoved } from '../pins'
-import { LAYOUTS } from '../layouts/catalog'
+import { layoutEntry } from '../layouts/catalog'
 import { formatFor } from '~/lib/frame/formats'
 import type { FrameFormat, KeepClear } from '~/lib/frame/formats'
 import { makeSheet } from './sheet'
@@ -79,6 +79,11 @@ export interface LayoutPlan {
   /** The format the Frame is sized for (ruling P5) and the roles it hid because the format
    *  carries fewer levels (the UI quotes their text). Null: no format, the Stage 1 plan. */
   format: { id: string; label: string; hidden: RoleKey[] } | null
+  /** Lines the Frame has that this layout does not place (a style layout only — e.g. Strip sets
+   *  no details or fine print), in role order, with their text for the Layout tab to quote. Their
+   *  layers are hidden the way a format's levels are (a hidden-only op, tracked `visible`), so a
+   *  later layout that places them shows them again. Always empty for Swiss. */
+  notPlaced: { role: RoleKey; text: string }[]
 }
 
 /** Which layer holds which role, as the last apply saw it (`sailor_posterState.roles`). */
@@ -100,6 +105,10 @@ interface Prepared {
   fmt: FrameFormat | null
   /** Roles on the Frame the format does not carry: removed from `content`, their layers hidden. */
   hidden: RoleKey[]
+  /** The style asked for (absent: `'swiss'`): only its own layouts fit. */
+  style: StyleId
+  /** The height (kit units) the layout composes on — for `wideOnly`. */
+  composedH: number
 }
 
 /** Every text role a Frame can hold: the targets, the measure and the stored roles cover all of
@@ -111,9 +120,9 @@ const ROLES: RoleKey[] = ['title', 'details', 'date', 'caption', 'action']
 export { isNumberish }
 
 function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
-  const index = LAYOUTS.findIndex(l => l.id === a.layoutId)
-  const def = LAYOUTS[index]
-  if (!def) return null
+  const entry = layoutEntry(a.layoutId)
+  if (!entry) return null
+  const { def, index } = entry
   const layers = (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? []
   const elements = frameElements(a, layers)
   if (!elements.title) return null
@@ -142,7 +151,10 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
   const measure = a.measure ?? makeCanvasMeasure({
     title: layerOf('title'), details: layerOf('details'), date: layerOf('date'), caption: layerOf('caption'),
   })
-  return { def, index, layers, elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props), fmt, hidden }
+  // The height the layout composes on: the band a format leaves uncovered, or the whole frame.
+  const fullH = 100 * a.frameH / a.frameW
+  const composedH = fmt?.keep ? fullH * (1 - fmt.keep.top - fmt.keep.bottom) : fullH
+  return { def, index, layers, elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props), fmt, hidden, style: a.style ?? 'swiss', composedH }
 }
 
 type FrameArgs = Pick<LayoutPlanArgs, 'props' | 'frameW' | 'frameH' | 'shapeMode' | 'imageMode' | 'style'>
@@ -238,9 +250,13 @@ function withStoredRoles(inferred: FrameElements, userLayers: LocalLayer[], stor
   return out
 }
 
-/** Whether a layout can run on this frame at all: its kinds, and the image / shape / number it needs. */
+/** Whether a layout can run on this frame at all: its style, its kinds, and the image / shape / number it needs. */
 function fitsFrame(p: Prepared): boolean {
   const { def, elements } = p
+  // Stage 3: a style's library holds only its own layouts (no style asked for: Swiss).
+  if ((def.style ?? 'swiss') !== p.style) return false
+  // One row for wide formats: only on a wide sheet (the prototype's `wideOnly`, `H < 70`).
+  if (def.wideOnly && !(p.composedH < 70)) return false
   if (!def.fits.includes(p.kind)) return false
   if (def.needs?.image && !p.hasImage) return false
   if (def.needs?.shape && !(elements.shapes.length > 0 || elements.shapeMode != null)) return false
@@ -435,7 +451,11 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
     if (a.recolour) pieces.recolour = true
   }
   if (out.els.some(e => e.k === 'logo') && p.content.logo) pieces.logo = p.content.logo
-  if (p.hidden.length) pieces.hide = p.hidden
+  // A style layout may leave a line out (Strip: no details, no fine print). Its layer is hidden
+  // like a level the format does not carry, rather than left where it was under the new layout.
+  const notPlaced = notPlacedRoles(p, out.els, a.style)
+  const hide = [...p.hidden, ...notPlaced]
+  if (hide.length) pieces.hide = hide
   const el = elementsToOps(out.els, S, targets, { w: a.frameW, h: a.frameH }, a.palette, Object.keys(pieces).length ? pieces : undefined)
   // Stand-in image / library shape sentinels become real layers first (existing path).
   const ins = insertFromOps(p.layers, el.ops, a.palette, `stand-${p.def.id}-${seedFor(p.index, a.choice)}`)
@@ -459,7 +479,17 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
     layers: next, order, did: out.did, issues,
     posterState: { patternId: p.def.id, seed: seedFor(p.index, a.choice), choice: { ...a.choice }, roles: rolesOf(p.elements) },
     format: p.fmt ? { id: p.fmt.id, label: p.fmt.label, hidden: [...p.hidden] } : null,
+    notPlaced: notPlaced.map(role => ({ role, text: p.content[role] as string })),
   }
+}
+
+/** The text roles in the (carried) content that no text element of the layout's output places
+ *  (base role: `title2` counts as `title`; a ring is the title). Swiss (no style, or `'swiss'`):
+ *  none — Stages 1–2 are untouched, and their layouts never place the action anyway. */
+function notPlacedRoles(p: Prepared, els: El[], style: StyleId | undefined): RoleKey[] {
+  if (!style || style === 'swiss') return []
+  const placed = new Set(els.filter(e => e.k === 't' || e.k === 'ring').map(e => (e.role ?? '').replace(/\d+$/, '')))
+  return ROLES.filter(r => p.content[r] != null && !placed.has(r))
 }
 
 /** Apply a layout as ONE undo step: history → layers (pins of moved layers cleared) → groups →
