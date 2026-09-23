@@ -18,9 +18,13 @@ import StudioControlPanel from '~/components/vue-canvas/studio/StudioControlPane
 import { postControls, POST_SECTIONS } from '~/lib/studio/post/controls'
 import { texOptsFromState, type SpaceTypeState } from '~/lib/spacetype/state'
 import { ensureSpaceTypeBake } from '~/lib/spacetype/bake'
-import { encodeFrames, type EncodeFramesResult } from '~/lib/engine/encodeVideo'
+import { encodeFrames } from '~/lib/engine/encodeVideo'
 import { canvasHasAlpha } from '~/lib/engine/hasAlpha'
 import { downloadBlobAsFile } from '~/lib/studio/downloadBlob'
+import { exportStudioVideo, resultBlob, videoErrorText, type StudioVideoResult } from '~/lib/studio/studioVideoExport'
+import { prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
+import { isAbortError } from '~/lib/engine/videoRecorder'
+import { hostedModeEnabled } from '~/lib/hostedMode'
 import { useStudioAutosave } from '~/lib/studio/autosave'
 import { loopMultiplier, previewFrameAt } from '~/lib/spacetype/loop'
 import { effectiveLoopSeconds } from '~/lib/compositor/loopReconcile'
@@ -481,6 +485,12 @@ let previewStart = 0
 // each startPreview so a fresh start always paints frame 0.
 let lastPreviewFrame = -1
 const baking = ref(false)
+// The running video export, so Cancel can stop it; and the line the footer
+// shows about how the last video was made (a fallback must be seen).
+let videoAbort: AbortController | null = null
+const exportingVideo = ref(false)
+const videoNotice = ref('')
+function cancelVideoExport() { videoAbort?.abort() }
 const renderError = ref<string | null>(null)
 const webglOk = ref(true)
 // Preview transport (all effects): play/pause + scrub. `playing` gates the rAF loop;
@@ -1601,15 +1611,16 @@ function sendToTimeline() {
 
 /**
  * Bake the current Space Type state (frames at `fps`/`loopDuration`, full-res
- * unclamped shader fields) and encode it server-side to a video file under
- * input/. Shared by generateVideo() (dispatches a Video node onto the canvas)
- * and downloadVideoFile() (saves the file locally) so this frame-bake exists
- * in exactly one place. Callers own baking.value/stopPreview/startPreview and
- * engine.setBake(false) cleanup — this only does the bake + encode and either
- * returns the result or throws (a bake or encode failure look the same to a
- * caller: nothing to dispatch/download).
+ * unclamped shader fields) into a video file. Shared by generateVideo()
+ * (dispatches a Video node onto the canvas) and downloadVideoFile() (saves the
+ * file locally) so this frame-bake exists in exactly one place. Callers own
+ * baking.value/stopPreview/startPreview and engine.setBake(false) cleanup —
+ * this only does the bake and either returns the result or throws (a bake
+ * failure looks the same to a caller: nothing to dispatch/download).
+ * Records in the browser, or — local mode only, with a notice — through
+ * today's server route.
  */
-async function bakeSpaceTypeVideo(): Promise<EncodeFramesResult | null> {
+async function bakeSpaceTypeVideo(publish: boolean): Promise<StudioVideoResult | null> {
   if (!engine) return null
   await ensureEffectFonts()
   engine.setSize(W.value * BAKE_SS, H.value * BAKE_SS)
@@ -1623,34 +1634,55 @@ async function bakeSpaceTypeVideo(): Promise<EncodeFramesResult | null> {
   const k = loopMultiplier(rates)
   const origFrames = Math.max(1, Math.round(fps.value * loopDuration.value))
   const loopCfg = k > 1 ? { ...cfg.value, loopDuration: loopDuration.value * k } : cfg.value
-  const bake = await ensureSpaceTypeBake(loopCfg, undefined, {
-    // Unwrapped t01 = i / origFrames runs 0..k so motions keep their per-loop rate across k loops
-    // and land on whole cycles → seamless. k=1 is identical to the previous behavior.
-    renderFrame: async (i) => { engine!.renderFrameAt(i / origFrames, params); return engine!.frameToBlob(W.value, H.value) },
-  })
-  engine.setSize(W.value, H.value)
-  // Gate on exportAlphaAvailable too, not just the checkbox: it's a stale UI value
-  // once the menu closes, and the request-side flag is what actually changes the
-  // server's encoder path (VP9/WebM instead of h264/mp4) — never send it unearned.
+  const total = Math.max(1, Math.round(loopCfg.fps * loopCfg.loopDuration))
+  // Gate on exportAlphaAvailable too, not just the checkbox: it's a stale UI
+  // value once the menu closes — never make a transparent file unearned.
   const wantAlpha = exportAlpha.value && exportAlphaAvailable.value
-  return encodeFrames({ frames: bake.frames, fps: fps.value, width: W.value, height: H.value, alpha: wantAlpha })
+  videoAbort = new AbortController()
+  exportingVideo.value = true
+  try {
+    return await exportStudioVideo({
+      prefix: 'spacetype', publish,
+      width: W.value, height: H.value, fps: fps.value, frameCount: total, alpha: wantAlpha,
+      signal: videoAbort.signal,
+      // Unwrapped t01 = i / origFrames runs 0..k so motions keep their per-loop
+      // rate across k loops and land on whole cycles → seamless.
+      drawFrame: (i, ctx) => {
+        engine!.renderFrameAt(i / origFrames, params)
+        engine!.drawFrameInto(ctx, W.value, H.value)
+      },
+      serverFallback: async () => {
+        const bake = await ensureSpaceTypeBake(loopCfg, undefined, {
+          renderFrame: async (i) => { engine!.renderFrameAt(i / origFrames, params); return engine!.frameToBlob(W.value, H.value) },
+        })
+        return encodeFrames({ frames: bake.frames, fps: fps.value, width: W.value, height: H.value, alpha: wantAlpha })
+      },
+    }, { hosted: hostedModeEnabled(useRuntimeConfig().public), forceServer: prefersServerVideoExport() })
+  } finally {
+    engine?.setSize(W.value, H.value)
+    exportingVideo.value = false
+    videoAbort = null
+  }
 }
 
 async function generateVideo() {
   if (!engine) return
   baking.value = true
+  videoNotice.value = ''
   stopPreview()
   try {
-    const encoded = await bakeSpaceTypeVideo()
-    if (!encoded) return
-    await recordAsset(activeTab.value?.projectUuid, 'video', encoded.filename)
+    const made = await bakeSpaceTypeVideo(true)
+    if (!made?.filename) return
+    await recordAsset(activeTab.value?.projectUuid, 'video', made.filename)
     window.dispatchEvent(new CustomEvent('sailor:spaceTypeOutput', {
-      detail: { sourceNodeId: props.nodeId, nodeType: 'Video', widgetOverrides: { file: encoded.filename } },
+      detail: { sourceNodeId: props.nodeId, nodeType: 'Video', widgetOverrides: { file: made.filename } },
     }))
-    closeEditor()
-  } catch (encErr) {
-    console.error('[spacetype] video encode failed', encErr)
-    alert('Video encode failed — make sure ComfyUI was restarted to load the encoder. See console.')
+    videoNotice.value = made.notice ?? ''
+    if (!made.notice) closeEditor()
+  } catch (e) {
+    if (isAbortError(e)) { videoNotice.value = 'Export cancelled.'; return }
+    console.error('[spacetype] video export failed', e)
+    videoNotice.value = videoErrorText(e)
   } finally {
     engine?.setBake(false)
     baking.value = false
@@ -1665,20 +1697,21 @@ async function downloadPng() {
   downloadBlobAsFile(blob, `spacetype_${Date.now()}.png`)
 }
 
-/** Same bake as generateVideo(), but saves the encoded file locally instead of
- *  dispatching a Video node onto the canvas. */
+/** Same video as generateVideo(), saved locally instead of dispatched. */
 async function downloadVideoFile() {
   if (!engine) return
   baking.value = true
+  videoNotice.value = ''
   stopPreview()
   try {
-    const encoded = await bakeSpaceTypeVideo()
-    if (!encoded) return
-    const res = await fetch(`/view?${new URLSearchParams({ filename: encoded.filename, type: 'input' })}`)
-    if (!res.ok) throw new Error(`/view returned ${res.status}`)
-    downloadBlobAsFile(await res.blob(), `spacetype_${Date.now()}.${encoded.ext}`)
+    const made = await bakeSpaceTypeVideo(false)
+    if (!made) return
+    downloadBlobAsFile(await resultBlob(made), `spacetype_${Date.now()}.${made.ext}`)
+    videoNotice.value = made.notice ?? ''
   } catch (e) {
+    if (isAbortError(e)) { videoNotice.value = 'Export cancelled.'; return }
     console.error('[spacetype] video download failed', e)
+    videoNotice.value = videoErrorText(e)
   } finally {
     engine?.setBake(false)
     baking.value = false
@@ -2362,7 +2395,8 @@ async function exportWebEmbed() {
          automatic and debounced (see useStudioAutosave above). -->
     <template #actions>
       <StudioActionsFooter :spec="{
-        status: { saving: autoSaving, saved: autoSaved, error: embedErr ? embedMsg : null, notice: embedErr ? null : embedMsg },
+        status: { saving: autoSaving, saved: autoSaved, error: embedErr ? embedMsg : null, notice: embedErr ? null : (embedMsg || videoNotice || null) },
+        utilities: exportingVideo ? [{ label: 'Cancel', onClick: cancelVideoExport }] : [],
         downloads: [
           { label: 'Download PNG', onClick: downloadPng },
           { label: 'Download video', onClick: downloadVideoFile, busy: baking },

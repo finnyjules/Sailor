@@ -380,6 +380,18 @@ export class SpaceTypeEngine {
     }
   }
 
+  /** Re-render the current frame and draw it onto `ctx` at targetW×targetH in
+   *  the same turn — the canvas equivalent of frameToBlob, for the video
+   *  recorder. A supersampled render is downscaled with high-quality smoothing,
+   *  exactly as frameToBlob does. */
+  drawFrameInto(ctx: CanvasRenderingContext2D, targetW: number, targetH: number): void {
+    if (postEnabled(this.post) && this.postChain) this.postChain.render(this.scene, this.activeCam)
+    else this.renderer.render(this.scene, this.activeCam)
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(this.renderer.domElement, 0, 0, targetW, targetH)
+  }
+
   /** Read the current canvas back as a PNG blob. Forces a fresh render first so this
    *  works without preserveDrawingBuffer (the preview renderer disables it for perf).
    *  If targetW/targetH are smaller than the render size, the caller rendered at a higher
