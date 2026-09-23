@@ -387,10 +387,11 @@ interface LayerCommon {
   /** Set only by the Layout tab. Any user edit clears it; owned layers are removed or
    *  replaced when another layout is applied. */
   owner?: { by: 'layout'; key: string }
-  /** Set only by the Layout tab's apply: the layer's own values from before a layout first
-   *  overrode them, restored (and the entry dropped) when a later layout leaves them unset.
-   *  `null` = the field was absent. Never read by the renderer; absent ⇒ nothing changes. */
-  layoutPrev?: { lineHeight?: number; letterSpacing?: number | null; opacity?: number; blend?: string | null }
+  /** Set only by the Layout tab's apply, per field a layout overrode: `was` = the layer's own
+   *  value before (`null` = absent), `set` = what the layout wrote. When a later layout leaves
+   *  the field unset, `was` comes back only if the layer still holds `set` (otherwise the user
+   *  changed it and their value stays). Never read by the renderer; absent ⇒ nothing changes. */
+  layoutPrev?: Record<string, { was: unknown; set: unknown }>
 }
 
 /** True when a layer is hidden (visible === false; undefined means visible). */

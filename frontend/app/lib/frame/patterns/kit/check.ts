@@ -95,7 +95,8 @@ export function boxOf(e: El, S: Sheet): Box | null {
     case 'c':
       return { x0: e.cx - e.r, y0: e.cy - e.r, x1: e.cx + e.r, y1: e.cy + e.r }
     case 'l':
-      return { x0: e.x, y0: e.y - 0.1, x1: e.x + e.w, y1: e.y + 0.1 }
+      // The prototype draws a rule as a 0.16-thick border whose TOP is at `y`.
+      return { x0: e.x, y0: e.y, x1: e.x + e.w, y1: e.y + 0.16 }
     case 'ring': {
       const rad = e.R + e.size / 2
       return { x0: e.cx - rad, y0: e.cy - rad, x1: e.cx + rad, y1: e.cy + rad }

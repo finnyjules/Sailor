@@ -72,7 +72,9 @@ function displayOp(els: TextEl[], S: Sheet, target: string, z: number): LayerOp 
     const capAbove = S.measure.capAbove(face)
     const CAP = capAbove + S.measure.baseBelow(face)
     const texts = e.s.split('\n')
-    const widths = texts.map(t => (S.measure.w100(t, face, e.ls) * e.size) / 100)
+    // One layer, one letter spacing: every run is measured with the first element's, which is
+    // what the renderer draws them all with.
+    const widths = texts.map(t => (S.measure.w100(t, face, first.ls) * e.size) / 100)
     const boxW = e.w ?? Math.max(...widths)
     const capTop0 = capTopOf(e, texts.length, CAP)
     const align = e.align ?? 'left'
@@ -169,6 +171,13 @@ export function elementsToOps(
   }
   const imageTarget = targets.image ?? 'image'
   const doneDisplay = new Set<string>()
+  /** Add an owned piece, plus an `insert` op that carries its stacking (`z` = element index) to
+   *  order.ts; applyPlacement skips insert ops. The op targets the piece's id, `layout-<key>`. */
+  const own = (layer: LocalLayer, kind: 'rect' | 'ellipse', key: string, z: number, radius?: number) => {
+    owned.push(layer)
+    const insert: LayerOp['insert'] = radius ? { kind, key, radius } : { kind, key }
+    ops.push({ target: layer.id, kind: 'shape', x: layer.x, y: layer.y, z, insert })
+  }
 
   els.forEach((e, z) => {
     switch (e.k) {
@@ -211,28 +220,28 @@ export function elementsToOps(
           ops.push(op)
         } else {
           const key = keyFor(c.role ?? 'circle')
-          owned.push(createEllipseLayer({ ...ownedBase(key, c), x, y, w: d, h: d, fill: paint(c.color) }))
+          own(createEllipseLayer({ ...ownedBase(key, c), x, y, w: d, h: d, fill: paint(c.color) }), 'ellipse', key, z)
         }
         return
       }
       case 'r': {
         const r = e as RectEl
         const key = keyFor(r.role ?? 'rect')
-        owned.push(createRectLayer({
+        own(createRectLayer({
           ...ownedBase(key, r),
           x: (r.x + r.w / 2) / 100, y: (r.y + r.h / 2) / S.H, w: r.w / 100, h: r.h / 100,
           rotation: r.rot ?? 0, radius: (r.radius ?? 0) / 100, fill: paint(r.color),
-        }))
+        }), 'rect', key, z, r.radius ? r.radius / 100 : undefined)
         return
       }
       case 'l': {
         const l = e as RuleEl
         const key = keyFor(l.role ?? 'rule')
-        owned.push(createRectLayer({
+        own(createRectLayer({
           ...ownedBase(key, l),
           x: (l.x + l.w / 2) / 100, y: (l.y + RULE_H / 2) / S.H, w: l.w / 100, h: RULE_H / 100,
           radius: 0, fill: paint('ink'),
-        }))
+        }), 'rect', key, z)
         return
       }
       case 'ring': {

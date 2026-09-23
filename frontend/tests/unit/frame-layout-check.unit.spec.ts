@@ -147,8 +147,8 @@ describe('layout kit — boxOf', () => {
     expect(boxOf({ k: 'c', cx: 10, cy: 10, r: 5, role: 'sticker' }, S)).toEqual({ x0: 5, y0: 5, x1: 15, y1: 15 })
   })
 
-  it('a rule box is x..x+w, y±0.1', () => {
-    expect(boxOf({ k: 'l', x: 1, y: 5, w: 10, role: 'rule' }, S)).toEqual({ x0: 1, y0: 4.9, x1: 11, y1: 5.1 })
+  it('a rule box is x..x+w, top at y, 0.16 thick', () => {
+    expect(boxOf({ k: 'l', x: 1, y: 5, w: 10, role: 'rule' }, S)).toEqual({ x0: 1, y0: 5, x1: 11, y1: 5.16 })
   })
 
   it('a ring box is cx±(R+size/2)', () => {

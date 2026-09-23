@@ -7,6 +7,9 @@ import { applyPlacement } from '~/lib/frame/patterns/apply'
 import { __drawTextForTest } from '~/composables/useCompositorLayers'
 import type { El, TextEl } from '~/lib/frame/patterns/kit/types'
 import type { FrameElements } from '~/lib/frame/patterns/types'
+import { mergeOwned } from '~/lib/frame/patterns/kit/owned'
+import { nextOrderFor } from '~/lib/frame/patterns/order'
+import { localStackKey } from '~/lib/compositor/frameStack'
 
 // Layout elements → layer ops. Kit units are percent of frame width; Sailor layers take x/100,
 // y/S.H and sizes/100. The stub measure: 0.55 em per character, cap metrics 0.35 / 0.35.
@@ -75,6 +78,16 @@ describe('elementsToOps — display text', () => {
     expect(right).toBeCloseTo(b.x1, 9)
     // …and vertically, cap top of the line = the checker's y0.
     expect(op.y * S.H + r.y * 12 - 0.35 * 12).toBeCloseTo(b.y0, 9)
+  })
+
+  it('grouped title lines are measured with the first element\'s letter spacing (what the layer draws with)', () => {
+    const els: El[] = [
+      disp('AAAA', { x: 10, top: 10, size: 10, ls: -0.05 }),
+      disp('BBBB', { role: 'title1', x: 10, w: 60, top: 30, size: 10, ls: 0.2, align: 'right' }),
+    ]
+    const op = elementsToOps(els, S, targets, frame).ops[0]!
+    const r = op.runs![1]!
+    expect(op.x * 100 + r.x * 10 + lw('BBBB', 10, -0.05)).toBeCloseTo(70, 9)
   })
 
   it('a base-anchored display element puts its last baseline on `base`', () => {
@@ -152,7 +165,10 @@ describe('elementsToOps — pieces and photos', () => {
       { k: 'l', x: 5, y: 80, w: 90 },
     ]
     const { ops, owned } = elementsToOps(els, S, targets, frame, { field: '#fff', ink: '#000', accent: '#f00' })
-    expect(ops).toEqual([])
+    // Each owned piece also gets an insert op carrying its stacking, aimed at its own id.
+    expect(ops.map(o => [o.target, o.insert?.key, o.z])).toEqual([
+      ['layout-rule-0', 'rule-0', 0], ['layout-band-0', 'band-0', 1], ['layout-rule-1', 'rule-1', 2],
+    ])
     expect(owned.map(l => (l as any).owner.key)).toEqual(['rule-0', 'band-0', 'rule-1'])
     expect(owned.map(l => l.id)).toEqual(['layout-rule-0', 'layout-band-0', 'layout-rule-1'])
     for (const l of owned) {
@@ -266,5 +282,81 @@ describe('applyPlacement — layout fields', () => {
   it('an op without the new fields leaves an untouched layer free of them (byte-identical)', () => {
     const [out] = applyPlacement([text()], { did: 'x', ops: [{ target: 't', kind: 'text', x: 0.3, y: 0.5 }] }, elements, palette)
     expect(out).toEqual({ ...text(), x: 0.3, y: 0.5 })
+  })
+})
+
+describe('owned pieces keep their place in the stack', () => {
+  it('a band listed before the title ends up below the title in the final order', () => {
+    const title: any = { id: 't', kind: 'text', x: 0.5, y: 0.5, rotation: 0, opacity: 1, text: 'A', fontFamily: 'Inter', fontWeight: 700, fontSize: 0.1, color: '#000', align: 'center', lineHeight: 1.2, strokeColor: '#000', strokeWidth: 0 }
+    const els: El[] = [
+      { k: 'r', x: 0, y: 40, w: 100, h: 20, color: 'accent', role: 'band' },
+      disp('A', { top: 45 }),
+    ]
+    const { ops, owned } = elementsToOps(els, S, targets, frame)
+    const elements = { images: [], shapes: [], shapeMode: null } as unknown as FrameElements
+    const placed = applyPlacement([title], { did: 'x', ops }, elements, { field: '#fff', ink: '#000', accent: '#f00' })
+    const merged = mergeOwned(placed, owned)
+    // mergeOwned appends the band on top; the saved order only knows the title.
+    const present = merged.map(l => localStackKey(l.id))
+    const order = nextOrderFor([localStackKey('t')], present, ops, elements, new Map())
+    expect(order.indexOf(localStackKey('layout-band-0'))).toBeLessThan(order.indexOf(localStackKey('t')))
+    // The insert op never patches the owned layer.
+    expect(merged.find(l => l.id === 'layout-band-0')).toBe(owned[0])
+  })
+})
+
+describe('applyPlacement — only clears what a layout set', () => {
+  const palette = { field: '#fff', ink: '#000', accent: '#f00' }
+  const elements = { title: { role: 'title', id: 't', text: 'NOISE', words: ['NOISE'] }, images: [{ id: 'img' }], shapes: [], shapeMode: null } as unknown as FrameElements
+  const text = (over: any = {}): any => ({ id: 't', kind: 'text', x: 0.5, y: 0.5, rotation: 0, opacity: 1, text: 'NOISE',
+    fontFamily: 'Inter', fontWeight: 700, fontSize: 0.08, color: '#000', align: 'center', lineHeight: 1.2, strokeColor: '#000', strokeWidth: 0, ...over })
+  const img = (over: any = {}): any => ({ id: 'img', kind: 'image', filename: 'a.png', x: 0.5, y: 0.5, w: 0.5, h: 0.5, rotation: 0, opacity: 1, ...over })
+  const userPath = { follow: 'curve' as const, bend: 0.4 }
+  const oldOp = (target: string, kind: 'text' | 'image') => ({ did: 'x', ops: [{ target, kind, x: 0.3, y: 0.4, w: 0.5, h: 0.5 }] })
+
+  it('a user path on a text layer survives an old-style op', () => {
+    const [out] = applyPlacement([text({ path: userPath })], oldOp('t', 'text'), elements, palette)
+    expect((out as any).path).toEqual(userPath)
+  })
+
+  it('a user mask on an image survives any op', () => {
+    const mask = { kind: 'rect' as const, x: 0.5, y: 0.5, w: 0.2, h: 0.2 }
+    const [out] = applyPlacement([img({ mask })], oldOp('img', 'image'), elements, palette)
+    expect((out as any).mask).toEqual(mask)
+  })
+
+  it('a user crop focus survives an old-pattern image op', () => {
+    const crop = { fit: 'cover' as const, fx: 0.2, fy: 0.8 }
+    const [out] = applyPlacement([img({ crop })], oldOp('img', 'image'), elements, palette)
+    expect((out as any).crop).toEqual(crop)
+  })
+
+  it('a ring sets path; a later op without it restores the user\'s path, or removes one there was not', () => {
+    const { ops } = elementsToOps([{ k: 'ring', cx: 50, cy: 60, R: 30, size: 6, s: 'RING' }], S, { title: 't' }, frame)
+    for (const start of [text({ path: userPath }), text()]) {
+      const a = applyPlacement([start], { did: 'x', ops }, elements, palette)
+      expect((a[0] as any).path.follow).toBe('circle')
+      const [b] = applyPlacement(a, oldOp('t', 'text'), elements, palette)
+      if (start.path) expect((b as any).path).toEqual(userPath)
+      else expect('path' in (b as any)).toBe(false)
+      expect('layoutPrev' in (b as any)).toBe(false)
+    }
+  })
+
+  it('a value the user changed after a layout set it is kept when the next layout omits it', () => {
+    const a = applyPlacement([text()], { did: 'x', ops: [{ target: 't', kind: 'text', x: 0.5, y: 0.5, opacity: 0.4 }] }, elements, palette)
+    expect((a[0] as any).opacity).toBe(0.4)
+    const edited = [{ ...(a[0] as any), opacity: 0.6 }]
+    const [b] = applyPlacement(edited, { did: 'x', ops: [{ target: 't', kind: 'text', x: 0.5, y: 0.5 }] }, elements, palette)
+    expect((b as any).opacity).toBe(0.6)
+    expect('layoutPrev' in (b as any)).toBe(false)
+  })
+
+  it('a user change between two layouts becomes the value restored later', () => {
+    const a = applyPlacement([text()], { did: 'x', ops: [{ target: 't', kind: 'text', x: 0.5, y: 0.5, opacity: 0.4 }] }, elements, palette)
+    const edited = [{ ...(a[0] as any), opacity: 0.6 }]
+    const b = applyPlacement(edited, { did: 'x', ops: [{ target: 't', kind: 'text', x: 0.5, y: 0.5, opacity: 0.3 }] }, elements, palette)
+    const [c] = applyPlacement(b, { did: 'x', ops: [{ target: 't', kind: 'text', x: 0.5, y: 0.5 }] }, elements, palette)
+    expect((c as any).opacity).toBe(0.6)
   })
 })

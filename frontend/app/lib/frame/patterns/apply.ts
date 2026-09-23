@@ -5,6 +5,11 @@ import type { LocalLayer } from '~/composables/useCompositorLayers'
 
 const ROLES: Role[] = ['title', 'details', 'caption', 'date']
 
+/** Value equality for layout-set fields (numbers, strings, small plain objects/arrays). */
+function same(a: unknown, b: unknown): boolean {
+  return a === b || (typeof a === 'object' && a !== null && JSON.stringify(a) === JSON.stringify(b))
+}
+
 /** Resolve an op's target to a concrete layer id: a role → the inferred element's
  *  id; anything else is treated as a literal layer id (image/shape ops). */
 function targetId(op: LayerOp, elements: FrameElements): string | undefined {
@@ -33,7 +38,12 @@ export function applyPlacement(
   const recolour = opts.recolour !== false
   // index ops by resolved layer id (last op for an id wins — patterns emit one per element)
   const byId = new Map<string, LayerOp>()
-  for (const op of placement.ops) { const id = targetId(op, elements); if (id) byId.set(id, op) }
+  for (const op of placement.ops) {
+    // An owned piece's op only carries its stacking (`z`, read by order.ts); the piece itself
+    // arrives fully built through mergeOwned, so apply leaves it alone.
+    if (op.insert) continue
+    const id = targetId(op, elements); if (id) byId.set(id, op)
+  }
   return layers.map(layer => {
     const op = byId.get(layer.id)
     if (!op) return layer
@@ -41,29 +51,26 @@ export function applyPlacement(
     if (op.rotation != null) next.rotation = op.rotation
     const blend = op.blendMode ?? op.blend
     const textOrImage = layer.kind === 'text' || layer.kind === 'image' || layer.kind === 'wired'
-    if (textOrImage) {
-      // Opacity, blend (and, for text, line/letter spacing) are re-authored on every apply.
-      // The layer's own value is remembered the first time a layout overrides it and put
-      // back when a later op leaves the field unset — so switching layouts leaves no residue
-      // and never loses what the user had.
-      const prev: Record<string, unknown> = { ...((layer as any).layoutPrev ?? {}) }
-      const track = (field: string, value: unknown) => {
-        if (value !== undefined) {
-          if (!(field in prev)) prev[field] = (layer as any)[field] ?? null
-          next[field] = value
-        } else if (field in prev) {
-          const orig = prev[field]
-          if (orig == null) delete next[field]; else next[field] = orig
-          delete prev[field]
-        }
+    // Layout-set fields (opacity, blend, spacing, crop, mask, path, runs) are re-authored on
+    // every apply, but apply only ever clears what a layout set: the layer's own value is
+    // remembered the first time a layout overrides it (with what the layout wrote), and put
+    // back when a later op leaves the field unset — unless the user has changed it since.
+    const prev: Record<string, { was: unknown; set: unknown }> = { ...((layer as any).layoutPrev ?? {}) }
+    const track = (field: string, value: unknown) => {
+      const cur = (layer as any)[field]
+      const entry = prev[field]
+      const untouched = entry !== undefined && same(cur, entry.set)
+      if (value !== undefined) {
+        prev[field] = { was: untouched ? entry!.was : (cur ?? null), set: value }
+        next[field] = value
+      } else if (entry !== undefined) {
+        if (untouched) { if (entry.was == null) delete next[field]; else next[field] = entry.was }
+        delete prev[field]
       }
+    }
+    if (textOrImage) {
       track('opacity', op.opacity)
       track('blend', blend)
-      if (layer.kind === 'text') {
-        track('lineHeight', op.lineHeight)
-        track('letterSpacing', op.letterSpacing)
-      }
-      if (Object.keys(prev).length) next.layoutPrev = prev; else delete next.layoutPrev
     } else {
       if (op.opacity != null) next.opacity = op.opacity
       if (blend) next.blend = blend
@@ -84,8 +91,10 @@ export function applyPlacement(
       if (op.expressive) next.expressive = op.expressive; else delete next.expressive
       if (op.valign) next.valign = op.valign; else delete next.valign
       if (op.boxH != null) next.boxH = op.boxH; else delete next.boxH
-      if (op.runs?.length) next.runs = op.runs; else delete next.runs
-      if (op.path) next.path = op.path; else delete next.path
+      track('lineHeight', op.lineHeight)
+      track('letterSpacing', op.letterSpacing)
+      track('runs', op.runs?.length ? op.runs : undefined)
+      track('path', op.path ?? undefined)
     } else if (layer.kind === 'path' && typeof op.w === 'number' && op.w > 0 && (layer as any).bbox?.w > 0) {
       // A path layer has no `w`: it sizes from `bbox × scale` (both in the same
       // normalized-frame-width units as op.w — see useCompositorLayers' layerBoxPx).
@@ -99,9 +108,10 @@ export function applyPlacement(
       if (op.h != null) next.h = op.h
     }
     if (layer.kind === 'image' || layer.kind === 'wired') {
-      if (op.crop) next.crop = op.crop; else delete next.crop
-      if (op.mask) next.mask = op.mask; else delete next.mask
+      track('crop', op.crop ?? undefined)
+      track('mask', op.mask ?? undefined)
     }
+    if (Object.keys(prev).length) next.layoutPrev = prev; else delete next.layoutPrev
     return next as LocalLayer
   })
 }
