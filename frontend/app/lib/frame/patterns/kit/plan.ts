@@ -1,0 +1,244 @@
+import type { LocalLayer, TextLayer } from '~/composables/useCompositorLayers'
+import { mulberry32 } from '~/lib/rng'
+import { readGrid } from '~/lib/frame/gridConfig'
+import { framePresentKeys } from '~/lib/compositor/frameStack'
+import type { LayerGroup } from '~/lib/compositor/layerGroups'
+import type { ResolvedPalette } from '../palette'
+import type { FrameElements, LayerOp } from '../types'
+import { kindOf } from '../types'
+import { posterLayerViews } from '../frameContext'
+import { inferElements } from '../hierarchy'
+import { insertFromOps } from '../insert'
+import { applyPlacement } from '../apply'
+import { nextOrderFor } from '../order'
+import { clearGroupPinsOfMoved, clearPinsOfMoved } from '../applyToFrame'
+import type { ApplyArgs } from '../applyToFrame'
+import { LAYOUTS } from '../layouts/catalog'
+import { makeSheet } from './sheet'
+import type { Sheet } from './sheet'
+import { makeCanvasMeasure } from './measure'
+import { boxOf, checkPlan } from './check'
+import { elementsToOps } from './toOps'
+import type { RoleTargets } from './toOps'
+import { mergeOwned } from './owned'
+import { enumerate, lineOptions } from './vary'
+import type { Candidate, Choice } from './vary'
+import type { Content, Kind, LayoutDef, LayoutOut, Measure, PhotoEl, RoleKey } from './types'
+
+// ═══════════════════════ the planner ═══════════════════════
+// Runs a kit layout on a real Frame: infer the user's elements, build the sheet from the
+// Frame's shape and grid, run the layout for a `Choice`, check it, turn it into layer ops and
+// owned pieces, and work out the next draw order. `applyLayoutToFrame` writes the result as
+// ONE undo step. `candidatesForFrame` runs every variation through the very same pipeline,
+// so each candidate is exactly what apply would produce.
+
+export interface LayoutPlanArgs {
+  props: Record<string, unknown> | undefined
+  frameW: number
+  frameH: number
+  layoutId: string
+  choice: Choice
+  palette: ResolvedPalette
+  /** Write colours from the role palette onto the user's own layers. Off by default. */
+  recolour?: boolean
+  /** Wired image slots connected on the node (for the present-keys reconcile). */
+  connectedSlots: number[]
+  /** Show image layouts with a stand-in when the frame has no image layer. */
+  imageMode?: boolean
+  /** A library shape to use when the frame has no shape layer. */
+  shapeMode?: FrameElements['shapeMode']
+  /** Injected in tests; default: the renderer-exact canvas measure over the frame's role layers. */
+  measure?: Measure
+}
+
+export interface LayoutPlan {
+  layers: LocalLayer[]
+  order: string[]
+  did: string
+  issues: string[]
+  posterState: { patternId: string; seed: number; choice: Choice }
+}
+
+/** Everything about the frame that does not depend on the choice. */
+interface Prepared {
+  def: LayoutDef
+  index: number
+  layers: LocalLayer[]
+  elements: FrameElements
+  content: Content
+  kind: Kind
+  targets: RoleTargets
+  hasImage: boolean
+  measure: Measure
+  grid: ReturnType<typeof readGrid>
+}
+
+const ROLES: RoleKey[] = ['title', 'details', 'date', 'caption']
+
+/** "Number-like": a price, a discount, a date or a time (the prototype's `isNumberish`). */
+const isNumberish = (s: string | undefined) =>
+  !!s && (/[%€$£]/.test(s) || s.replace(/\D/g, '').length / Math.max(1, s.replace(/\s/g, '').length) >= 0.3)
+
+function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
+  const index = LAYOUTS.findIndex(l => l.id === a.layoutId)
+  const def = LAYOUTS[index]
+  if (!def) return null
+  const layers = (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? []
+  const elements = inferElements(posterLayerViews(a.props), a.shapeMode ?? null, a.imageMode ?? false)
+  if (!elements.title) return null
+  // The title's words, re-joined: the layout does its own line breaking.
+  const content: Content = { title: elements.title.words.join(' ') }
+  for (const r of ['details', 'date', 'caption'] as const) {
+    const t = elements[r]?.text
+    if (t && t.trim()) content[r] = t
+  }
+  const kind = kindOf(elements.title.words.length) as Kind
+  const targets: RoleTargets = {}
+  for (const r of ROLES) if (elements[r]) targets[r] = elements[r]!.id
+  if (elements.images[0]) targets.image = elements.images[0].id
+  if (elements.shapes[0]) targets.shape = elements.shapes[0].id
+  const hasImage = elements.images.length > 0 || elements.imageMode
+  const layerOf = (r: RoleKey) => {
+    const id = elements[r]?.id
+    return layers.find(l => l.id === id && l.kind === 'text') as TextLayer | undefined
+  }
+  const measure = a.measure ?? makeCanvasMeasure({
+    title: layerOf('title'), details: layerOf('details'), date: layerOf('date'), caption: layerOf('caption'),
+  })
+  return { def, index, layers, elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props) }
+}
+
+/** Whether a layout can run on this frame at all: its kinds, and the image / shape / number it needs. */
+function fitsFrame(p: Prepared): boolean {
+  const { def, elements } = p
+  if (!def.fits.includes(p.kind)) return false
+  if (def.needs?.image && !p.hasImage) return false
+  if (def.needs?.shape && !(elements.shapes.length > 0 || elements.shapeMode != null)) return false
+  if (def.needs?.number && !isNumberish(p.content.date)) return false
+  return true
+}
+
+/** The seed of a choice's random stream (the prototype's). */
+const seedFor = (index: number, choice: Choice) => 7000 + index * 97 + 13 + choice.arr * 7919
+
+/** Run the layout for one choice — the ONE pipeline shared by plan and candidates. Wide frames
+ *  with an image get the prototype's side image (`runCandidate`): the layout composes on the
+ *  first 62% of the columns (the last ones when the image is on the left) and the image bleeds
+ *  full height on the other side. */
+function runChoice(p: Prepared, a: { frameW: number; frameH: number }, choice: Choice): Run {
+  const opts = {
+    frameW: a.frameW, frameH: a.frameH, grid: p.grid, measure: p.measure,
+    scale: choice.scale === 'quiet' ? 0.8 : 1, flip: choice.side === 'left',
+  }
+  let S = makeSheet(opts)
+  let side: PhotoEl | null = null
+  const wide = S.H < 70
+  if (wide && p.hasImage && !p.def.needs?.image && !p.def.ownPhoto) {
+    const { NC, Xr, G, W, H, PHOTO_ASPECT } = S
+    const n = Math.round(NC * 0.62)
+    if (choice.side === 'left') {
+      const colA = NC - n + 1
+      const x1 = Xr(colA) - G, w = Math.max(x1, H / PHOTO_ASPECT), h = w * PHOTO_ASPECT
+      side = { k: 'p', x: x1 - w, y: (H - h) / 2, w, h, role: 'photo', bleed: true }
+      S = makeSheet({ ...opts, colRange: [colA, NC] })
+    } else {
+      const x0 = Xr(n + 1), w = Math.max(W - x0, H / PHOTO_ASPECT), h = w * PHOTO_ASPECT
+      side = { k: 'p', x: x0, y: (H - h) / 2, w, h, role: 'photo', bleed: true }
+      S = makeSheet({ ...opts, colRange: [1, n] })
+    }
+  }
+  const c = p.content
+  const words = c.title.split(' ')
+  const lineOpts = lineOptions(p.kind, c.title, p.def.oneLineFirst)
+  const lines = (lineOpts[choice.lines] ?? lineOpts[0]!).lines
+  const r = mulberry32(seedFor(p.index, choice))
+  const out = p.def.fn(S, { c, kind: p.kind, ph: p.hasImage && !side, r, words, lines, arr: choice.arr })
+  // Run-off keeps its image OVER the title (the title runs under it); everything else puts it behind.
+  if (side && p.def.id === 'runoff') { side.ok = true; out.els.push(side) } else if (side) out.els.unshift(side)
+  return { out, S, side }
+}
+
+interface Run { out: LayoutOut; S: Sheet; side: PhotoEl | null }
+
+/** The checker, with one adaptation for the side image of a wide frame: there the side image's
+ *  edge is the page's edge for the type, so a `bleed` premise holds when the role runs off the
+ *  page OR runs under the side image (Run-off's title on a wide frame runs under the image, as
+ *  in the prototype). Every other rule and premise is checked unchanged. */
+function checkRun({ out, S, side }: Run, premise: LayoutDef['premise']): string[] {
+  const bleed = premise?.bleed ?? []
+  if (!side || !bleed.length) return checkPlan(out.els, S, premise)
+  const issues = checkPlan(out.els, S, { ...premise, bleed: [] })
+  const sb = boxOf(side, S)!
+  for (const role of bleed) {
+    const e = out.els.find(x => x.k !== 'missing' && x.role === role)
+    const b = e ? boxOf(e, S) : null
+    const runsOff = b != null && (b.x0 < 0 || b.y0 < 0 || b.x1 > S.W || b.y1 > S.H)
+    const under = b != null && Math.min(b.x1, sb.x1) - Math.max(b.x0, sb.x0) > 0 && Math.min(b.y1, sb.y1) - Math.max(b.y0, sb.y0) > 0
+    if (!runsOff && !under) issues.push(`promise broken: ${role} should run off the page`)
+  }
+  return issues
+}
+
+/** Run a layout on a frame and return the plan. Pure: nothing is written. */
+export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
+  const p = prepare(a)
+  if (!p) return null
+  const ran = runChoice(p, a, a.choice)
+  const { out, S } = ran
+  const issues = checkRun(ran, p.def.premise)
+
+  const el = elementsToOps(out.els, S, p.targets, { w: a.frameW, h: a.frameH }, a.palette)
+  // Stand-in image / library shape sentinels become real layers first (existing path).
+  const ins = insertFromOps(p.layers, el.ops, a.palette, `stand-${p.def.id}-${seedFor(p.index, a.choice)}`)
+  // Ruling R7: merge the owned pieces FIRST, so `present` (and so the order) includes them.
+  const merged = mergeOwned(ins.layers, el.owned)
+  // An owned piece that already existed keeps its old id — point its op at that id.
+  const ownedId = new Map<string, string>()
+  for (const l of merged) {
+    const key = (l as { owner?: { by: string; key: string } }).owner
+    if (key?.by === 'layout') ownedId.set(key.key, l.id)
+  }
+  const ops: LayerOp[] = ins.ops.map(op => (op.insert && ownedId.has(op.insert.key)
+    ? { ...op, target: ownedId.get(op.insert.key)! }
+    : op))
+  const next = applyPlacement(merged, { ops, did: out.did }, p.elements, a.palette, { recolour: a.recolour ?? false })
+
+  const saved = (a.props?.sailor_stackOrder as string[] | undefined) ?? []
+  const present = framePresentKeys(a.connectedSlots, next)
+  const order = nextOrderFor(saved, present, ops, p.elements, ins.inserted)
+  return {
+    layers: next, order, did: out.did, issues,
+    posterState: { patternId: p.def.id, seed: seedFor(p.index, a.choice), choice: { ...a.choice } },
+  }
+}
+
+/** Apply a layout as ONE undo step: history → layers (pins of moved layers cleared) → groups →
+ *  order. Refuses (`ok: false`, nothing written) when the plan has checker issues. */
+export function applyLayoutToFrame(a: LayoutPlanArgs & { editor: ApplyArgs['editor'] }): { ok: boolean; posterState?: LayoutPlan['posterState'] } {
+  const plan = planLayout(a)
+  if (!plan || plan.issues.length) return { ok: false }
+  const before = (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? []
+  const groups = (a.props?.sailor_localGroups as LayerGroup[] | undefined) ?? []
+  const nextGroups = clearGroupPinsOfMoved(before, plan.layers, groups)
+  a.editor.recordHistory()
+  a.editor.commit(clearPinsOfMoved(before, plan.layers))
+  if (nextGroups) a.editor.writeGroups(nextGroups)
+  a.editor.writeOrder(plan.order)
+  return { ok: true, posterState: plan.posterState }
+}
+
+/** Every checked, distinct variation of a layout on this frame, best first (see `enumerate`).
+ *  Empty when the layout does not fit the frame's content. */
+export function candidatesForFrame(a: Omit<LayoutPlanArgs, 'choice'>): Candidate[] {
+  const p = prepare(a)
+  if (!p || !fitsFrame(p)) return []
+  const runs = new WeakMap<LayoutOut, Run>()
+  const run = (choice: Choice) => {
+    const ran = runChoice(p, a, choice)
+    runs.set(ran.out, ran)
+    return ran.out
+  }
+  const check = (out: LayoutOut) => checkRun(runs.get(out)!, p.def.premise)
+  const infoSize = makeSheet({ frameW: a.frameW, frameH: a.frameH, grid: p.grid, measure: p.measure }).INFO.size
+  return enumerate(p.def, { kind: p.kind, title: p.content.title, hasImage: p.hasImage, run, check, infoSize })
+}
