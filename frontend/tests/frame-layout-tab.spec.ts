@@ -174,4 +174,34 @@ test.describe('Frame Layout tab', () => {
     expect(hidden.date).toBe(false)
     expect(hidden.caption).toBe(false)
   })
+
+  test('styles: Performance applies with its own layouts; Editorial suggests a face as one undo step', async ({ page }) => {
+    const style = page.locator('[data-testid="layout-style"]')
+    await style.getByText('Performance', { exact: true }).click()
+    const tile = page.locator('[data-testid="layout-sheet"] [data-testid="layout-tile"]').first()
+    await expect(tile).toBeVisible()
+    const id = await tile.getAttribute('data-pattern')
+    expect(id).toMatch(/^perf/)
+    await tile.click()
+    await expect.poll(async () => (await frame(page)).poster?.style).toBe('performance')
+    expect((await frame(page)).poster?.patternId).toBe(id)
+
+    // Editorial: the suggested face changes the title's family, and one undo takes it back
+    await style.getByText('Editorial', { exact: true }).click()
+    const use = page.locator('[data-testid="layout-use-face"]')
+    await expect(use).toBeVisible()
+    const titleFamily = async () => {
+      const f = await frame(page)
+      const id = f.poster?.roles?.title
+      const layers = f.layers.filter((l: any) => l.kind === 'text')
+      const t = id ? layers.find((l: any) => l.id === id) : layers.sort((a: any, b: any) => (b.fontSize ?? 0) - (a.fontSize ?? 0))[0]
+      return t?.fontFamily
+    }
+    const before = await titleFamily()
+    await use.click()
+    await expect.poll(titleFamily).toBe('Instrument Serif')
+    await page.locator('[data-testid="layout-vary-name"]').click()
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z')
+    await expect.poll(titleFamily).toBe(before)
+  })
 })
