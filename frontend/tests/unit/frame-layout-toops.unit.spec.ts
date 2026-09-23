@@ -386,3 +386,27 @@ describe('applyPlacement — only clears what a layout set', () => {
     expect((c as any).opacity).toBe(0.6)
   })
 })
+
+describe('elementsToOps — text colour roles', () => {
+  const flowEl = (o: Partial<TextEl>): TextEl =>
+    ({ k: 't', s: 'Some details', x: 10, top: 60, w: 40, size: 3, ls: 0, lh: 1.3, role: 'details', ...o } as TextEl)
+
+  it('a user text op with no colour on its element takes the ink role (display, flow and ring)', () => {
+    const els: El[] = [
+      disp('TITLE', { top: 10, size: 12 }),
+      flowEl({}),
+    ]
+    const { ops } = elementsToOps(els, S, targets, frame)
+    expect(ops.find(o => o.target === 't')!.colorRole).toBe('ink')
+    expect(ops.find(o => o.target === 'd')!.colorRole).toBe('ink')
+    const ring = elementsToOps([{ k: 'ring', cx: 50, cy: 50, R: 30, size: 8, s: 'WORD' } as El], S, targets, frame).ops[0]!
+    expect(ring.colorRole).toBe('ink')
+  })
+
+  it('an element that names a colour keeps that role', () => {
+    const els: El[] = [disp('TITLE', { top: 10, size: 12, color: 'field' }), flowEl({ color: 'accent' })]
+    const { ops } = elementsToOps(els, S, targets, frame)
+    expect(ops.find(o => o.target === 't')!.colorRole).toBe('field')
+    expect(ops.find(o => o.target === 'd')!.colorRole).toBe('accent')
+  })
+})

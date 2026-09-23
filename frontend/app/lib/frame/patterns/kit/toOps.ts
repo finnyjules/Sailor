@@ -66,6 +66,11 @@ function capTopOf(e: TextEl, n: number, CAP: number): number {
   return e.top != null ? e.top : (e.base ?? 0) - (n - 1) * e.lh * e.size - CAP * e.size
 }
 
+/** The palette role a user's text layer takes when its element names no colour — the old
+ *  engine's default for text. `applyPlacement` paints it only when `recolour` is on, so with
+ *  recolour off the user's own text colour is never touched. */
+const DEFAULT_TEXT_ROLE: Colour = 'ink'
+
 /** Display text: every `pre` element sharing a base role becomes one op with placed lines. */
 function displayOp(els: TextEl[], S: Sheet, target: string, z: number): LayerOp {
   const first = els[0]!
@@ -110,7 +115,7 @@ function displayOp(els: TextEl[], S: Sheet, target: string, z: number): LayerOp 
     lineHeight: first.lh, letterSpacing: first.ls,
     runs, z, ...look(first),
   }
-  if (first.color) op.colorRole = first.color
+  op.colorRole = first.color ?? DEFAULT_TEXT_ROLE
   return op
 }
 
@@ -142,7 +147,7 @@ function flowOp(e: TextEl, S: Sheet, target: string, z: number): LayerOp {
     z, ...look(e),
   }
   if (e.w != null) op.w = e.w / 100
-  if (e.color) op.colorRole = e.color
+  op.colorRole = e.color ?? DEFAULT_TEXT_ROLE
   return op
 }
 
@@ -270,7 +275,7 @@ export function elementsToOps(
           target: targets.title, kind: 'text', x: g.cx / 100, y: g.cy / S.H,
           fontSize: g.size / 100, rotation: 0,
           path: { follow: 'circle', radius: g.R / 100, start: 0.5, fit: true },
-          z, ...look(g),
+          colorRole: DEFAULT_TEXT_ROLE, z, ...look(g),
         })
       }
     }

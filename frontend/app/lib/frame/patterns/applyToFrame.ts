@@ -1,23 +1,29 @@
-import type { LocalLayer, TextLayer } from '~/composables/useCompositorLayers'
+import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { ResolvedPalette } from './palette'
-import type { FrameElements, Pattern, PatternPlacement } from './types'
-import { buildFrameContext, posterLayerViews } from './frameContext'
-import { inferElements } from './hierarchy'
-import { makeFrameMeasure, titleMeasureFrom } from './frameMeasure'
-import { PATTERNS } from './catalog'
-import { applyPlacement } from './apply'
-import { insertFromOps } from './insert'
-import { nextOrderFor } from './order'
-import { framePresentKeys } from '~/lib/compositor/frameStack'
+import type { FrameElements, PatternPlacement } from './types'
+import { planLayout, applyLayoutToFrame } from './kit/plan'
+import type { LayoutPlanArgs } from './kit/plan'
+import { DEFAULT_CHOICE } from './kit/vary'
+import type { Choice } from './kit/vary'
 import { ancestorsOf, type LayerGroup } from '~/lib/compositor/layerGroups'
 
-export interface PosterState { patternId: string; seed: number; shapeMode?: FrameElements['shapeMode']; imageMode?: boolean }
+// The Layout tab's engine is the layout kit (`kit/plan.ts`, `layouts/catalog.ts`). These are the
+// long-standing entry points, kept by name and signature so every importer keeps working; they
+// run the kit with `DEFAULT_CHOICE` unless a `choice` is given.
+
+/** What a Frame remembers about the layout last applied (`sailor_posterState`). Frames saved
+ *  before the kit have no `choice`; they read as the default choice. `seed` is the sheet's seed
+ *  (the Layout tab's "Another" counter), stored as given. */
+export interface PosterState { patternId: string; seed: number; shapeMode?: FrameElements['shapeMode']; imageMode?: boolean; choice?: Choice }
 
 export interface PlanArgs {
   props: Record<string, unknown> | undefined
   frameW: number
   frameH: number
+  /** A layout id from `layouts/catalog.ts` (the old pattern ids are all kept). */
   patternId: string
+  /** The sheet's seed. The kit has no free seed (its randomness follows from the layout and the
+   *  choice), so this is only remembered in `posterState`; it does not change the plan. */
   seed: number
   palette: ResolvedPalette
   /** A library shape to use when the frame has no shape layer (the picker's family/id choice). */
@@ -29,8 +35,11 @@ export interface PlanArgs {
   /** Write colours from the role palette. Off by default: a layout changes no
    *  colour; the palette picker turns it on. */
   recolour?: boolean
-  /** A pre-computed placement to use verbatim; when supplied, skips running the pattern. */
+  /** Old-engine placement from the old sheet. The kit cannot take a precomputed placement, so
+   *  this is ignored: the plan always comes from the kit, the same pipeline apply runs. */
   placement?: PatternPlacement
+  /** Which variation of the layout to run. Default: `DEFAULT_CHOICE`. */
+  choice?: Choice
 }
 
 export interface ApplyArgs extends PlanArgs {
@@ -42,38 +51,26 @@ export interface ApplyArgs extends PlanArgs {
 /** What an apply would commit: the next layers, the next draw order, and the state to remember. */
 export interface PatternPlan { layers: LocalLayer[]; order: string[]; posterState: PosterState; did: string }
 
-/** Build the measure + context and run the pattern — the fall-back when no
- *  precomputed placement is supplied. The title measured is the one the layer
- *  hierarchy inference names (largest fontSize), not the first text layer in
- *  array order, so the width oracle matches what the engine treats as the title. */
-function runPattern(pattern: Pattern, args: PlanArgs, layers: LocalLayer[], elements: FrameElements): PatternPlacement {
-  const titleLayer = layers.find(l => l.id === elements.title?.id && l.kind === 'text') as TextLayer | undefined
-  const tm = titleLayer ? titleMeasureFrom(titleLayer) : { family: 'Inter', weight: 700, transform: (t: string) => t }
-  const measure = makeFrameMeasure(tm.family, tm.weight, undefined, tm.transform)
-  const ctx = buildFrameContext(args.props, args.frameW, args.frameH, measure, elements)
-  ctx.seed = args.seed
-  return pattern.place(ctx)
+function kitArgs(args: PlanArgs): LayoutPlanArgs {
+  return {
+    props: args.props, frameW: args.frameW, frameH: args.frameH,
+    layoutId: args.patternId, choice: args.choice ?? DEFAULT_CHOICE,
+    palette: args.palette, recolour: args.recolour, connectedSlots: args.connectedSlots,
+    imageMode: args.imageMode, shapeMode: args.shapeMode,
+  }
 }
 
-/** Run a pattern on a frame and return the plan. Pure: nothing is written. */
+function posterStateFor(args: PlanArgs, choice: Choice): PosterState {
+  return { patternId: args.patternId, seed: args.seed, shapeMode: args.shapeMode, imageMode: args.imageMode, choice: { ...choice } }
+}
+
+/** Run a layout on a frame and return the plan. Pure: nothing is written. Null when the id is
+ *  unknown, the frame has no title, the layout does not fit the frame, or the kit's checker
+ *  finds issues (apply would refuse those, so they are never offered). */
 export function planPattern(args: PlanArgs): PatternPlan | null {
-  const pattern = PATTERNS.find(p => p.id === args.patternId)
-  if (!pattern) return null
-  const layers = ((args.props?.sailor_localLayers as LocalLayer[] | undefined) ?? [])
-  const elements = inferElements(posterLayerViews(args.props))
-  if (args.shapeMode !== undefined) elements.shapeMode = args.shapeMode
-  if (args.imageMode !== undefined) elements.imageMode = args.imageMode
-  // Reuse the placement the sheet already computed; only fall back to running the
-  // pattern (and building the measure/context it needs) when none was supplied.
-  const placement = args.placement ?? runPattern(pattern, args, layers, elements)
-  // insert any library shape the pattern wanted but the frame lacks, then patch
-  const ins = insertFromOps(layers, placement.ops, args.palette, `poster-${args.patternId}-${args.seed}`)
-  const next = applyPlacement(ins.layers, { ...placement, ops: ins.ops }, elements, args.palette, { recolour: args.recolour ?? false })
-  // draw order: reconcile the saved order against what is present, then honour z
-  const saved = (args.props?.sailor_stackOrder as string[] | undefined) ?? []
-  const present = framePresentKeys(args.connectedSlots, next)
-  const order = nextOrderFor(saved, present, ins.ops, elements, ins.inserted)
-  return { layers: next, order, did: placement.did, posterState: { patternId: args.patternId, seed: args.seed, shapeMode: args.shapeMode, imageMode: args.imageMode } }
+  const plan = planLayout(kitArgs(args))
+  if (!plan || plan.issues.length) return null
+  return { layers: plan.layers, order: plan.order, did: plan.did, posterState: posterStateFor(args, plan.posterState.choice) }
 }
 
 const PLACEMENT_KEYS = ['x', 'y', 'w', 'h', 'boxW', 'boxH', 'fontSize', 'rotation', 'scale'] as const
@@ -116,17 +113,10 @@ export function clearGroupPinsOfMoved(before: LocalLayer[], after: LocalLayer[],
   return changed ? out : null
 }
 
-/** Apply a pattern as ONE undo step: history → layers → order. */
+/** Apply a layout as ONE undo step: history → layers → groups → order (the kit's
+ *  `applyLayoutToFrame`). `ok: false` and nothing written when `planPattern` would be null. */
 export function applyPatternToFrame(args: ApplyArgs): { ok: boolean; posterState?: PosterState } {
-  const plan = planPattern(args)
-  if (!plan) return { ok: false }
-  // the plan was computed from the frame's stored layers (planPattern reads props.sailor_localLayers)
-  const before = (args.props?.sailor_localLayers as LocalLayer[] | undefined) ?? []
-  const groups = (args.props?.sailor_localGroups as LayerGroup[] | undefined) ?? []
-  const nextGroups = clearGroupPinsOfMoved(before, plan.layers, groups)
-  args.editor.recordHistory()
-  args.editor.commit(clearPinsOfMoved(before, plan.layers))
-  if (nextGroups) args.editor.writeGroups(nextGroups)
-  args.editor.writeOrder(plan.order)
-  return { ok: true, posterState: plan.posterState }
+  const out = applyLayoutToFrame({ ...kitArgs(args), editor: args.editor })
+  if (!out.ok || !out.posterState) return { ok: false }
+  return { ok: true, posterState: posterStateFor(args, out.posterState.choice) }
 }

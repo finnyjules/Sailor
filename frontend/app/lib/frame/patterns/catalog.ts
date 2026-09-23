@@ -28,9 +28,33 @@ import { kicker } from './patterns/kicker'
 import { sidebar } from './patterns/sidebar'
 import { footer } from './patterns/footer'
 
-export const PATTERNS: Pattern[] = [runOff, statement, indexPattern, shapeCounter, photoBehind, fullBleed, tilt, bottomHeavy, fourCorners, spacedLines, ragged, edges, staircase, block, knockout, shapeBleed, badge, split, diagonal, wall, scatter, cascade, ring, cells, kicker, sidebar, footer]
+import { LAYOUTS } from './layouts/catalog'
 
-/** Patterns that fit the title's kind and whose required elements are present. */
+/** The old engine's per-pattern placements, by id. Only the old sheet (`sheet.ts`) still calls
+ *  `place`; the plan and apply run the layout kit (`applyToFrame.ts` → `kit/plan.ts`). */
+const OLD_PLACE = new Map<string, Pattern>([runOff, statement, indexPattern, shapeCounter, photoBehind, fullBleed, tilt, bottomHeavy, fourCorners, spacedLines, ragged, edges, staircase, block, knockout, shapeBleed, badge, split, diagonal, wall, scatter, cascade, ring, cells, kicker, sidebar, footer].map(p => [p.id, p]))
+
+/** Every layout in the kit's catalog (`layouts/catalog.ts`, all 42, in its order), in the old
+ *  `Pattern` shape so the name/id consumers keep working. `place` runs the old engine where the
+ *  layout had an old pattern; a layout new with the kit has no old placement (empty ops) — its
+ *  plan comes from the kit. */
+export const PATTERNS: Pattern[] = LAYOUTS.map((l): Pattern => {
+  const old = OLD_PLACE.get(l.id)
+  return {
+    id: l.id,
+    name: l.name,
+    fits: [...l.fits],
+    needs: l.needs,
+    place: old ? ctx => old.place(ctx) : () => ({ ops: [], did: l.name }),
+  }
+})
+
+/** "Number-like": a price, a discount, a date or a time (the kit's `needs.number` test, as in
+ *  `kit/plan.ts`). */
+const isNumberish = (s: string | undefined) =>
+  !!s && (/[%€$£]/.test(s) || s.replace(/\D/g, '').length / Math.max(1, s.replace(/\s/g, '').length) >= 0.3)
+
+/** Layouts that fit the title's kind and whose required elements are present. */
 export function fittingPatterns(ctx: PatternContext): Pattern[] {
   const kind = kindOf(ctx.elements.title?.words.length ?? 0)
   const hasShape = ctx.elements.shapes.length > 0 || ctx.elements.shapeMode != null
@@ -39,6 +63,7 @@ export function fittingPatterns(ctx: PatternContext): Pattern[] {
     if (!p.fits.includes(kind)) return false
     if (p.needs?.shape && !hasShape) return false
     if (p.needs?.image && !hasImage) return false
+    if ((p.needs as { number?: boolean } | undefined)?.number && !isNumberish(ctx.elements.date?.text)) return false
     return true
   })
 }

@@ -291,3 +291,21 @@ describe('candidatesForFrame', () => {
     expect(candidatesForFrame(rest)).toEqual([])
   })
 })
+
+describe('planLayout — recolour', () => {
+  const texts = (layers: LocalLayer[]) => layers.filter(l => l.kind === 'text') as any[]
+
+  it('recolour off (the default): every user text layer keeps its own colour', () => {
+    const plan = planLayout(args())!
+    expect(plan.issues).toEqual([])
+    for (const t of texts(plan.layers)) expect(t.color).toBe('#111111')
+  })
+
+  it('recolour on: user text with no layout colour is painted the palette ink', () => {
+    const plan = planLayout(args({ recolour: true }))!
+    expect(plan.issues).toEqual([])
+    const title = texts(plan.layers).find(l => l.id === 't')
+    expect(title.color).toBe(palette.ink)
+    for (const t of texts(plan.layers)) expect(t.color).not.toBe('#111111')
+  })
+})
