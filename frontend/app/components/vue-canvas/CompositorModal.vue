@@ -54,7 +54,7 @@ import { useTemplateLibrary } from '~/composables/useTemplateLibrary'
 import { serializeLayersForOS, parseLayersFromOS, setClipboard, type ClipboardPayload } from '~/lib/compositor/layerClipboard'
 import {
   allGroupIds, childGroupIds, layersInGroup, groupDisplayName, isDescendantOrSelf,
-  reparentGroup as reparentGroupOp, directLayerIds, upsertGroup,
+  reparentGroup as reparentGroupOp, directLayerIds, upsertGroup, topGroupOf,
 } from '~/lib/compositor/layerGroups'
 import { arrangeMembers, unionBBoxPx } from '~/lib/compositor/expressiveArrange'
 import { rotatedUnionBoxPx } from '~/lib/compositor/groupResize'
@@ -613,11 +613,14 @@ function selectionBoundsPx(): { cx: number, cy: number, w: number, h: number } |
   const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys)
   return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) }
 }
-const hasSelectionToZoom = computed(() => !!selectionBox.value || !!localHandlePositions.value)
+// Off at a viewing size for now: the selection bounds are design positions, not where the layers
+// are drawn (the view path's selection box can take this over later).
+const hasSelectionToZoom = computed(() => !viewEditing.value && (!!selectionBox.value || !!localHandlePositions.value))
 /** ⌘2 — fill ~60% of the visible gap with the selection, centred in that gap. */
 const ZOOM_SELECTION_FILL = 0.6
 function zoomToSelection(): boolean {
   zoomMenuOpen.value = false
+  if (viewEditing.value) return false // ⌘2 does nothing at a viewing size for now (see hasSelectionToZoom)
   const b = selectionBoundsPx(); const c = gapCentre(); const wrap = stageWrapRef.value
   if (!b || !c || !wrap) return false
   // A degenerate (<2px) box is an unresolved wired sentinel or otherwise not yet
@@ -747,15 +750,19 @@ function wiredDimsForSlot(slot: number): { w: number; h: number } | undefined {
   return naturalDims.value[slot + 1]
 }
 
+// The editor works in DESIGN space. At a viewing size the artboard (canvasDisplay) takes the
+// view's shape, so the editor gets the design shape at the same width instead — otherwise every
+// commit re-syncs wired widgets, and every arrow nudge converts px, with the wrong shape. Anything
+// else that derives design geometry from the artboard's shape uses this too.
+// At the design size this is exactly canvasDisplay.
+function editorDims(): { w: number; h: number } {
+  return atDesign.value
+    ? { w: canvasDisplay.w, h: canvasDisplay.h }
+    : { w: canvasDisplay.w, h: canvasDisplay.w * designSize.value.h / Math.max(1, designSize.value.w) }
+}
 const editor = useLocalLayerEditor({
   node: () => compositor.value,
-  // The editor works in DESIGN space. At a viewing size the artboard (canvasDisplay) takes the
-  // view's shape, so hand the editor the design shape at the same width instead — otherwise every
-  // commit re-syncs wired widgets, and every arrow nudge converts px, with the wrong shape.
-  // At the design size this is exactly canvasDisplay.
-  dims: () => atDesign.value
-    ? { w: canvasDisplay.w, h: canvasDisplay.h }
-    : { w: canvasDisplay.w, h: canvasDisplay.w * designSize.value.h / Math.max(1, designSize.value.w) },
+  dims: editorDims,
   getRect: () => canvasRect(),
   wiredDims: wiredDimsForSlot,
   wiredContent: wiredContentForSlot,
@@ -856,12 +863,26 @@ const selectedPins = computed(() => {
 // layer id the layer's. cleanPins drops keys set back to automatic (absent).
 function setPins(unitId: string, patch: Partial<Pins>) {
   const groups = localGroups.value
-  if (groups.some(g => g.id === unitId)) {
-    writeGroups(groups.map(g => g.id === unitId ? { ...g, pins: cleanPins({ ...(g as any).pins, ...patch }) } : g))
+  if (isGroupUnit(unitId)) {
+    // upsertGroup, not map: an older Frame's group can be missing from the registry (a flat root)
+    // while still being a unit, and its pins must still land.
+    const cur = groups.find(g => g.id === unitId) as any
+    writeGroups(upsertGroup(groups, unitId, { pins: cleanPins({ ...(cur?.pins ?? {}), ...patch }) }))
   } else {
     const layer = localLayers.value.find(l => l.id === unitId)
     if (layer) setLocal(unitId, { pins: cleanPins({ ...(layer as any).pins, ...patch }) } as any)
   }
+}
+// A group unit: in the registry, or named by a layer's groupId (directly or as its outermost group)
+// — the resolver's buildUnits makes a unit of both, registry entry or not.
+function isGroupUnit(id: string): boolean {
+  const groups = localGroups.value
+  if (groups.some(g => g.id === id)) return true
+  if (localLayers.value.some(l => l.id === id)) return false
+  return localLayers.value.some((l) => {
+    const gid = (l as any).groupId as string | undefined
+    return !!gid && (gid === id || topGroupOf(gid, groups) === id)
+  })
 }
 // Drop keys set back to their automatic (absent) state so "Back to automatic" clears them.
 function cleanPins(p: Record<string, unknown>): Pins | undefined {
@@ -883,7 +904,10 @@ function applyViewEdits(edits: ViewEdit[]) {
     for (const p of e.patches) byId.set(p.id, { ...(byId.get(p.id) ?? {}), ...p.patch })
     if (e.pins) {
       if (e.pins.onGroup) groupPins.set(e.pins.unitId, { ...(groupPins.get(e.pins.unitId) ?? {}), ...e.pins.patch })
-      else byId.set(e.pins.unitId, { ...(byId.get(e.pins.unitId) ?? {}), __pins: e.pins.patch })
+      else {
+        const cur = byId.get(e.pins.unitId) ?? {}
+        byId.set(e.pins.unitId, { ...cur, __pins: { ...((cur as any).__pins ?? {}), ...e.pins.patch } })
+      }
     }
   }
   if (byId.size) {
@@ -896,8 +920,15 @@ function applyViewEdits(edits: ViewEdit[]) {
     })
     commit(next)
   }
-  if (groupPins.size) writeGroups(localGroups.value.map(g => groupPins.has(g.id)
-    ? { ...g, pins: cleanPins({ ...((g as any).pins ?? {}), ...groupPins.get(g.id)! }) } : g))
+  if (groupPins.size) {
+    // upsertGroup, as setPins: a unit group missing from the registry still takes its pins.
+    let gs = localGroups.value
+    for (const [id, p] of groupPins) {
+      const cur = gs.find(g => g.id === id) as any
+      gs = upsertGroup(gs, id, { pins: cleanPins({ ...(cur?.pins ?? {}), ...p }) })
+    }
+    writeGroups(gs)
+  }
 }
 
 // Guide lines for the selected unit at the current viewing size. `resolved` is null
@@ -953,6 +984,12 @@ function pickLayoutShape(id: string) {
 function onLayoutPalette(fam: { hexes: string[] }) { layoutSheet.setPaletteMode(fam.hexes) }
 function onLayoutPaletteStops(stops: GradientStop[]) { layoutSheet.setPaletteMode(stops.map(s => s.color)) }
 function clearLayoutPalette() { layoutSheet.setPaletteMode(null) }
+// Applying a layout writes design geometry planned on the artboard's shape: snap back to the design
+// size first (the tiles re-plan there). The other sheet controls only re-plan the tiles.
+function onLayoutPick(t: Parameters<typeof layoutSheet.apply>[0]) {
+  if (viewOnlyGuard()) return
+  layoutSheet.apply(t)
+}
 const layoutPaletteHexes = computed(() => layoutSheet.paletteMode.value)
 
 // Face pickers for the Layout tab: title face → the inferred title layer; text
@@ -1006,7 +1043,14 @@ function onSuggestTextFace() {
 // this point is real, avoidable layer-panel/render clutter for a feature meant
 // for coarse layout grids. Dense fills are a later feature (see Task 7 brief).
 const GRID_SECTIONS_CAP = 24
+// Draw section is design-only: turning it on snaps back to the design size first (and stays off,
+// like picking the pen or brush there). Turning it off is always allowed.
+function onDrawSectionSwitch(v: boolean) {
+  if (v && viewOnlyGuard()) return
+  setDrawSectionActive(v)
+}
 function onFillGridWithSections() {
+  if (viewOnlyGuard()) return // design-space authoring: snap back to the design size first
   const { regions } = gridResolved.value
   if (!regions.length) { toast('Turn the grid on first', { description: 'Fill grid with sections needs an explicit or generated grid.' }); return }
   if (regions.length > GRID_SECTIONS_CAP) {
@@ -1354,10 +1398,13 @@ const asScatterSelect = (c: ScatterControl) => c as ScatterSelectControl
 // correctly-boxed new layer matches its bounds and is skipped.
 watch(
   () => localLayers.value.filter(l => l.kind === 'brush')
-    .map(l => `${l.id}:${(l as BrushLayer).strokes.length}`).join(',') + `|${canvasDisplay.w}x${canvasDisplay.h}`,
+    .map(l => `${l.id}:${(l as BrushLayer).strokes.length}`).join(',') + `|${editorDims().w}x${editorDims().h}`,
   () => {
     if (!localLayers.value.some(l => l.kind === 'brush')) return
-    const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
+    // Design-shaped (editorDims): at a viewing size the artboard takes the view's shape, and
+    // re-deriving the box with that aspect would rewrite every brush layer's design position.
+    const { w: dw, h: dh } = editorDims()
+    const aspect = dh / Math.max(1, dw)
     let changed = false
     const next = localLayers.value.map((l) => {
       if (l.kind !== 'brush' || !(l as BrushLayer).strokes.length) return l
@@ -1389,7 +1436,7 @@ const {
     grid: readGrid(compositor.value?.data?.properties as any),
     // H/W, same as the UI's Deal buttons use, so an agent-created deal fills the
     // frame instead of a square (layer boxes are width-normalized).
-    aspect: canvasDisplay.h / Math.max(1, canvasDisplay.w),
+    aspect: editorDims().h / Math.max(1, editorDims().w),
     brandPalette: brandSwatches(projectBrand?.activeKit.value),
     motion: motionDoc.value,
   }),
@@ -1410,8 +1457,15 @@ const {
     }
   },
   apiKey: () => getLocalSetting('Sailor.AI.AnthropicApiKey') ?? '',
-  dims: () => ({ w: canvasDisplay.w, h: canvasDisplay.h }),
+  dims: editorDims,
 })
+// The agent writes layer geometry, so an ask snaps back to the design size first. It then goes on
+// (after the artboard has re-fitted) instead of returning, because the bar has already cleared the
+// typed request.
+async function onAgentAsk(phrase: string) {
+  if (viewOnlyGuard()) await nextTick()
+  return caAsk(phrase)
+}
 // The agent's progress / proposed changes take over the right inspector while active.
 const caPanelActive = computed(() => caBusy.value || caReviewing.value || caHasProposal.value)
 
@@ -1424,7 +1478,7 @@ const caPanelActive = computed(() => caBusy.value || caReviewing.value || caHasP
 // wholesale. Id minting for placement lives HERE, not in the pure module —
 // the pure functions only ever take id factories.
 const templateLib = useTemplateLibrary()
-function templateFrameSize(): { w: number; h: number } { return { w: canvasDisplay.w, h: canvasDisplay.h } }
+function templateFrameSize(): { w: number; h: number } { return editorDims() } // design shape, at any viewing size
 const frameTemplateInstances = computed<TemplateInstance[]>(() =>
   ((compositor.value?.data?.properties)?.sailor_frametemplates as TemplateInstance[]) ?? [])
 function commitTemplateInstances(next: TemplateInstance[]) {
@@ -1476,6 +1530,9 @@ function defaultSlotValues(t: Template): Record<string, string> {
 }
 
 function placeTemplateIntoFrame(t: Template) {
+  // Design-space authoring: snap back to the design size first. Placement reads no artboard shape,
+  // so it goes on rather than returning (the sidebar gallery's Place has no second click).
+  viewOnlyGuard()
   const r = placeTemplate({ layers: localLayers.value, groups: localGroups.value }, t, defaultSlotValues(t), {
     mkLayerId: mkTemplateId('ll'), mkGroupId: mkTemplateId('g'), mkInstanceId: mkTemplateId('inst'),
   })
@@ -1710,7 +1767,7 @@ watch(recolourImages, (v) => {
   writeRecolourMemory({ hexes: m?.hexes ?? [], applied: m?.applied ?? {}, images: v, imageEffects: m?.imageEffects ?? {} })
 })
 function recolourWith(hexes: string[]) {
-  const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
+  const aspect = editorDims().h / Math.max(1, editorDims().w) // design shape (colour weights only)
   const mapping = mapFamily(frameColourSlots.value, hexes)
   const next = recolourFrame(localLayers.value as LocalLayer[], background.value, mapping, aspect)
   const prior = recolourMemory.value?.imageEffects ?? {}
@@ -1730,7 +1787,7 @@ function applyFamilyToFrame(fam: PaletteFamily) { recolourWith(fam.hexes) }
 function applyStopsToFrame(stops: GradientStop[]) { recolourWith(stops.map(s => s.color)) }
 function reassignSlot(slotHex: string, toHex: string, alpha?: string) {
   if (toHex.toLowerCase() === slotHex.toLowerCase() && alpha === undefined) return
-  const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
+  const aspect = editorDims().h / Math.max(1, editorDims().w) // design shape (colour weights only)
   const next = recolourSlot(localLayers.value as LocalLayer[], background.value, slotHex, toHex, aspect, alpha)
   recordHistory(); commit(next.layers); editor.writeBackground(next.background)
   const m = recolourMemory.value; if (m) writeRecolourMemory({ ...m, applied: { ...m.applied, [slotHex.toLowerCase()]: toHex.toLowerCase() } })
@@ -2085,8 +2142,10 @@ function onKeydown(e: KeyboardEvent) {
   const inField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || !!editingId.value
   // Option/Alt spring-loads the drag-to-generate gesture (like holding Space to pan).
   // Only from a clean Select state, and never while typing (the on-box prompt is a field).
+  // At a viewing size a held Option is ignored (no snap back): a modifier hold must not change
+  // the view, and Alt is a plain modifier there (resize from the centre).
   if (e.key === 'Alt' && !inField && !optDown.value && !genActive.value
-      && !smartActive.value && isSelectTool.value && !editingId.value) {
+      && !smartActive.value && isSelectTool.value && !editingId.value && !viewEditing.value) {
     optDown.value = true
     armGenGesture(true)
     return
@@ -3262,6 +3321,9 @@ function onCanvasPointerDownCapture(e: PointerEvent) {
 }
 const imageCtxMenu = ref<{ x: number; y: number; layerId: string; items: MenuItem[] } | null>(null)
 function onCanvasContextMenu(e: MouseEvent) {
+  // At a viewing size the image menu is off for now: hitTopStackKey hit-tests DESIGN positions, so it
+  // could pick a layer other than the one under the pointer. Task 5 wires this to hitTestView.
+  if (viewEditing.value) return
   const key = hitTopStackKey(e.clientX, e.clientY)
   const res = key ? resolveStackKey(key) : null
   if (res?.type !== 'local' || res.layer.kind !== 'image') return // native menu for non-images
@@ -5696,6 +5758,9 @@ const genBarStyle = computed(() => {
 watch(genBarBnd, (b) => { if (b) nextTick(() => genPromptRef.value?.focus()) })
 
 function armGenGesture(spring = false) {
+  // Generate is design-only: the toolbar button snaps back to the design size first, like the
+  // other design-only tools. The held-Option spring never arms at a viewing size (see onKeydown).
+  if (!spring && viewOnlyGuard()) return
   if (!exitOtherToolsFor('region')) return
   const d = genGestureDefaults()
   genActive.value = true
@@ -6915,12 +6980,14 @@ const SHAPE_ICONS: Record<ToolbarShapeId, Component> = {
  *  expression the old Grid-section create used. Records history + selects via
  *  addLocal, like every other stamp. */
 function addMosaic() {
+  if (viewOnlyGuard()) return // frame-filling, so its size comes from the design shape
   addLocal(newMosaicLayer(canvasDisplay.h / Math.max(1, canvasDisplay.w)))
 }
 /** Stamp a Scatter: a frame-filling Chaff scatter (one scatter layer; see
  *  newScatterLayer). `h = aspect` because boxes are width-normalized, the same as
  *  the Mosaic stamp above. Records history + selects via addLocal. */
 function addScatter() {
+  if (viewOnlyGuard()) return // frame-filling, so its size comes from the design shape
   addLocal(newScatterLayer(canvasDisplay.h / Math.max(1, canvasDisplay.w)))
 }
 function stampLibraryShape() {
@@ -7857,8 +7924,8 @@ onUnmounted(() => {
             data-testid="smart-action-delete" @click="smartDelete">Delete</button>
         </div>
 
-        <!-- Multi-select outlines (when 2+ layers selected) -->
-        <template v-if="selectedCount > 1 && !nodeEdit.active.value && !genActive">
+        <!-- Multi-select outlines (when 2+ layers selected). Design positions, so design size only. -->
+        <template v-if="selectedCount > 1 && !nodeEdit.active.value && !genActive && atDesign">
           <div v-for="l in selectedLayers" :key="'ms-' + l.id"
             class="absolute pointer-events-none border border-white/40 rounded-[1px]"
             :style="multiOutlineStyle(l)" />
@@ -7958,7 +8025,7 @@ onUnmounted(() => {
              nothing is feeding it. Badge it on the selection itself, not only in
              the layers panel, or an empty selection box reads as a bug. -->
         <div
-          v-if="localHandlePositions && (selectedLocal as any)?.kind === 'wired' && (selectedLocal as any)?.unlinked"
+          v-if="localHandlePositions && (selectedLocal as any)?.kind === 'wired' && (selectedLocal as any)?.unlinked && atDesign"
           class="absolute z-20 pointer-events-none rounded px-1.5 py-px text-[10px] uppercase tracking-wide bg-amber-400/20 text-amber-200 border border-amber-400/40 whitespace-nowrap"
           :style="{ left: localHandlePositions.topCenter.x + 'px', top: (localHandlePositions.topCenter.y - 18) + 'px', transform: 'translate(-50%, -100%)' }"
         >unlinked — re-wire this input</div>
@@ -8036,9 +8103,9 @@ onUnmounted(() => {
           />
         </template>
 
-        <!-- Group selection box + resize handles (≥2 selected) -->
+        <!-- Group selection box + resize handles (≥2 selected). Design positions, so design size only. -->
         <svg
-          v-if="selectionBox && !editingId && !genActive"
+          v-if="selectionBox && !editingId && !genActive && atDesign"
           class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"
           :viewBox="`0 0 ${canvasDisplay.w} ${canvasDisplay.h}`"
         >
@@ -8202,7 +8269,7 @@ onUnmounted(() => {
         @input="onPromptInput"
       >
         <div class="transition-opacity duration-150" :class="promptExpanded ? 'opacity-100' : 'opacity-0'">
-          <AgentBar :busy="caBusy" :error="caError" :notice="caNotice" :chips="[]" @submit="caAsk" @chip="caAsk" />
+          <AgentBar :busy="caBusy" :error="caError" :notice="caNotice" :chips="[]" @submit="onAgentAsk" @chip="onAgentAsk" />
         </div>
         <!-- The collapsed face. Not a replacement for the bar — it sits ON it and
              hands focus straight to the input underneath. -->
@@ -8815,7 +8882,7 @@ onUnmounted(() => {
                 :background="background" :groups="localGroups" :label="t.name"
                 :wired-content="wiredContentForSlot"
                 :selected="(compositor?.data?.properties as any)?.sailor_posterState?.patternId === t.patternId && (compositor?.data?.properties as any)?.sailor_posterState?.seed === t.seed"
-                @pick="layoutSheet.apply(t)" @more="layoutSheet.moreLikeThis(t)"
+                @pick="onLayoutPick(t)" @more="layoutSheet.moreLikeThis(t)"
               />
             </div>
             <div class="flex gap-2 pt-1">
@@ -11346,7 +11413,7 @@ onUnmounted(() => {
               <StudioSwitch label="Show overlay" :model-value="gridConfig.overlay"
                 @update:model-value="(v: boolean) => patchGrid({ overlay: v })" />
               <StudioSwitch label="Draw section" hint="Drag on the artboard to stamp a rect snapped to the grid"
-                :model-value="drawSectionActive" @update:model-value="(v: boolean) => setDrawSectionActive(v)" />
+                :model-value="drawSectionActive" @update:model-value="onDrawSectionSwitch" />
               <StudioButton variant="secondary" @click="onFillGridWithSections">Fill grid with sections</StudioButton>
             </div>
           </StudioSection>
