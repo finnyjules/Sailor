@@ -8789,10 +8789,11 @@ onUnmounted(() => {
         </div>
         <!-- Responsive Frames: the viewing-size readout. Fixed frames show nothing.
              Grey at the design size, accent (#3b82f6) once you are viewing another
-             size; "Back to design size" only appears while off design. Hidden during a view drag. -->
-        <div v-if="frameIsResponsive && !designOnlyToolActive && !viewDrag"
+             size; "Back to design size" only appears while off design. Invisible during a
+             view drag (keeps its space so the toolbar does not reflow; blocks pointer events). -->
+        <div v-if="frameIsResponsive && !designOnlyToolActive"
           class="flex items-center gap-1.5 pl-2 ml-1 border-l border-white/10 text-[11px]"
-          :class="atDesign ? 'text-white/60' : 'text-[#3b82f6]'"
+          :class="[atDesign ? 'text-white/60' : 'text-[#3b82f6]', { invisible: !!viewDrag }]"
           @click.stop>
           <span>{{ viewReadout }}</span>
           <input type="number" min="1"
