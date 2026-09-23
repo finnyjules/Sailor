@@ -48,6 +48,7 @@ import {
   makeBlankWorkflow, makeCanvasId, nextCanvasName, pickNewerDoc, stampDocForSave, toProjectDoc,
   type ProjectCanvas, type ProjectDoc,
 } from '~/lib/projectDoc'
+import { shouldOfferStartPicker } from '~/lib/startPicker'
 import { setRef, type RefRegistry } from '~/lib/refs/registry'
 import { graphToPrompt } from '~/lib/graph/graphToPrompt'
 import { UnknownNodeTypeError } from '~/lib/graph/widgetOrder'
@@ -252,9 +253,12 @@ watch(() => activeTabId.value, (id) => {
   // even if it was opened without a workflowId (e.g. "Use in new workflow",
   // a generation in progress). Tying the modal to real content — not just the
   // volatile seen-Set — stops it re-appearing over an existing generation.
-  const hasSavedContent = docHasContent(savedWorkflows[id])
-  const isFreshBlankProject = tab?.type === 'project' && !tab?.workflowId
-    && !seenStartModalTabIds.has(id) && !hasSavedContent
+  // A tab opened from a past run (promptId) is not blank either: its graph is
+  // still being fetched when this runs.
+  const isFreshBlankProject = shouldOfferStartPicker(tab, {
+    seen: seenStartModalTabIds.has(id),
+    hasSavedContent: docHasContent(savedWorkflows[id]),
+  })
   if (isFreshBlankProject) {
     seenStartModalTabIds.add(id)
     if (tab.seedNodeType) {
