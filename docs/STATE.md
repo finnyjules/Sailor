@@ -31,6 +31,22 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
 
+### Frame layouts, stage 3 — Performance, Editorial and Street styles — LANDED 2026-09-24 (`5f6ab549c`..HEAD, non-contiguous — 16 commits across 9 tasks, subagent-driven, a review per task, a whole-stage review and its fix wave)
+
+Plan `docs/superpowers/plans/2026-09-24-frame-layout-system-stage3.md` (spec §7).
+
+**What shipped:** a **Style** control at the top of the Layout tab — Swiss (the 42 layouts of stages 1–2), **Performance** (Offer, Sticker, Price tag, Card, Centred, Strip), **Editorial** (Cover, Framed, Quiet, Diptych) and **Street** (Fill, Tag, Drop, Repeat, Strip). A style is a rule set on the same kit: its own type spacing and letter case (Street and Editorial's small text in capitals — case is display-only and comes back when you leave), its own order of importance (Performance puts the offer before the product name), its own Vary ranking and its own checks. New layout pieces: fading **bands** (page colour → clear), **buttons** behind your own call-to-action line ("Shop now" is now read from the Frame), your brand kit's **logo** (with clear space checked), **cards**, **panels**, **stickers** and rotated **tags**. Performance never puts text on the raw image and keeps at least 45% of the image visible. Editorial and Street suggest a title face (Instrument Serif, Anton) — applied only when you click it, as its own undo step. Lines a style layout doesn't use are hidden and named ("Not shown: …"), and come back when a layout that places them is applied.
+
+**Readable by construction:** every piece that carries your text (tag, sticker, button, band, card, panel, and the Swiss Badge/Knockout shape) picks a fill that reads against your text's actual colour (3:1) and stands out from the page — trying the palette, then plain white or near-black — or the variation is refused. A Frame with no coloured shape gets a real accent (brand kit, else a small pool) instead of repeating the text colour.
+
+**Proof:** a style matrix (Performance, Editorial, Street × 6 frames incl. story and 300×250 × content kinds × image × call-to-action × logo; ~6,400 variations through the real planner), the Stage 1 and format matrices unchanged, 6 Playwright tests (styles apply their own layouts; the suggested face is one undo step), and the layout suites green. Swiss is byte-identical except one intended change: a "Shop now" line is hidden and named instead of being mistaken for the caption.
+
+**Caught on the way:** the Frame's "accent" was the text colour whenever the Frame had no coloured shape, so tags and stickers were text-coloured under text-coloured words (invisible — found in the browser); buttons came out page-coloured on the page; the palette was reading the layout's own pieces back; titles' second lines had been measured in the caption's face since Stage 1; the font pickers and the new suggested face disagreed about which text is the title; leaving Street measured in capitals.
+
+**Deferred / owed:** the platform's own button choice (Stage 2 P1) moves to Stage 4 with the ad content; a pixel contrast check for Street text over images (structural rule only for now); faint Street repeats need per-run opacity; re-applying the layout after accepting a suggested face (needs the font to load first); Performance thins out on small banners (the 55% visibility rule); on the lab Frame in the browser Street offered only Drop while the test measure passes all its tag layouts — a real-font check owed.
+
+**Next:** Stage 4 — ad content (reviews, lists, comparisons, stats) and the research-backed ad layouts.
+
 ### Frame layouts, stage 2 — layouts know the ad or social format a Frame is for — LANDED 2026-09-24 (`8d78f6865`..HEAD, non-contiguous — 11 commits across 9 tasks, subagent-driven, a review per task, a whole-stage review and its fix wave)
 
 Plan `docs/superpowers/plans/2026-09-24-frame-layout-system-stage2.md` (spec §6).
