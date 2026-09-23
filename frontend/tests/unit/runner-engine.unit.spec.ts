@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createLimiter } from '~~/server/runner/engine'
 import { createFileRunStore, type RunStore } from '~~/server/runner/store'
 import type { RunRecord } from '~~/server/runner/types'
-import { makeKit, gatedFlow, ofType, types, until } from './__runner__/kit'
+import { createFakeFal, makeKit, gatedFlow, ofType, types, until } from './__runner__/kit'
 import type { ApiPrompt } from '#shared/runner/graph'
 
 describe('limiter', () => {
@@ -384,6 +384,51 @@ describe('network blips (fal still bills the request)', () => {
     await k.engine.settled(runId)
     expect(k.fal.client.cancel).not.toHaveBeenCalled()
     expect((await k.store.get(runId))!.takes[0]!.nodes['1']!.status).toBe('done')
+  })
+
+  it('fal never answering (a network error on every poll) ends the node after the grace period, freeing its limiter slot', async () => {
+    let clock = 1_000_000
+    const fal = createFakeFal()
+    const origStatus = fal.client.status.getMockImplementation()!
+    let stuck = true // every poll misbehaves while this run is going
+    vi.mocked(fal.client.status).mockImplementation(async (url: string, opts?: { logs?: boolean }) => {
+      if (stuck) {
+        clock += 60_000 // a minute passes on every failed check
+        throw new TypeError('fetch failed')
+      }
+      return origStatus(url, opts)
+    })
+    const k = makeKit({ fal, deps: { now: () => clock, perUserLimit: 1 } })
+    const single = (prompt: string): ApiPrompt => ({
+      '1': { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt, aspect_ratio: '1:1', seed: 0, model_options: '{}' } },
+      '5': { class_type: 'Image', inputs: { image: '', export: false, images: ['1', 0], batch_index: -1 } },
+    })
+    const { runId } = await k.engine.startRun({ userId: null, takes: [single('never answers')], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    await k.engine.settled(runId) // must not hang
+    const rec = (await k.store.get(runId))!.takes[0]!.nodes['1']!
+    expect(rec).toMatchObject({ status: 'error', error: 'The provider did not answer, so the request was cancelled' })
+    expect(fal.client.cancel).toHaveBeenCalled()
+    // perUserLimit: 1 — a second, independent run for the same user proves the
+    // stuck node's limiter slot was released, not held forever.
+    stuck = false
+    const { runId: runId2 } = await k.engine.startRun({ userId: null, takes: [single('runs fine after')], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    await k.engine.settled(runId2)
+    expect((await k.store.get(runId2))!.takes[0]!.nodes['1']!.status).toBe('done')
+  })
+
+  it('a status URL stuck returning 5xx (transient forever, never a real answer) also ends the node after the grace period', async () => {
+    let clock = 1_000_000
+    const fal = createFakeFal()
+    vi.mocked(fal.client.status).mockImplementation(async () => {
+      clock += 60_000
+      return { status: 'UNKNOWN', queuePosition: null, logs: [], error: null, transient: true, raw: null }
+    })
+    const k = makeKit({ fal, deps: { now: () => clock } })
+    const { runId } = await k.engine.startRun({ userId: null, takes: [gatedFlow()], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    await k.engine.settled(runId) // must not hang
+    const rec = (await k.store.get(runId))!.takes[0]!.nodes['1']!
+    expect(rec).toMatchObject({ status: 'error', error: 'The provider did not answer, so the request was cancelled' })
+    expect(fal.client.cancel).toHaveBeenCalled()
   })
 })
 

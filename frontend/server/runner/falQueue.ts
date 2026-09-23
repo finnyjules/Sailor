@@ -44,12 +44,20 @@ function headers(): Record<string, string> {
   return { Authorization: `Key ${token}`, 'Content-Type': 'application/json' }
 }
 
+const NETWORK_ERROR_CODES = new Set(['ECONNRESET', 'ENOTFOUND', 'ETIMEDOUT', 'EAI_AGAIN', 'ECONNREFUSED'])
+
 /**
- * True when the call got no HTTP answer at all (connection refused or reset,
- * DNS, timeout). Every HTTP status is a FalError; a garbled body is a SyntaxError.
+ * True only for a real network failure: a TypeError thrown by fetch itself
+ * (undici's "fetch failed"), or an error whose cause carries a known socket/DNS
+ * code. Everything else — a FalError (any HTTP status), a SyntaxError from a
+ * garbled body, "FAL_KEY is not set", or any other Error — is NOT a blip: it
+ * must surface, not be swallowed as "try again later" forever.
  */
 export function isFalNetworkError(e: unknown): boolean {
-  return !(e instanceof FalError) && !(e instanceof SyntaxError)
+  if (e instanceof FalError || e instanceof SyntaxError) return false
+  if (e instanceof TypeError) return true
+  const code = (e as { cause?: { code?: unknown } } | null | undefined)?.cause?.code
+  return typeof code === 'string' && (NETWORK_ERROR_CODES.has(code) || code.startsWith('UND_ERR_'))
 }
 
 const transientStatus = (): FalStatus => ({ status: 'UNKNOWN', queuePosition: null, logs: [], error: null, transient: true, raw: null })

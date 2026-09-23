@@ -108,6 +108,17 @@ describe('network errors', () => {
     expect(isFalNetworkError(new FalError('fal result 404: x', 404))).toBe(false)
     expect(isFalNetworkError(new SyntaxError('Unexpected token'))).toBe(false)
   })
+  it('a socket/DNS code on the cause counts too', () => {
+    expect(isFalNetworkError(Object.assign(new Error('x'), { cause: { code: 'ECONNRESET' } }))).toBe(true)
+    expect(isFalNetworkError(Object.assign(new Error('x'), { cause: { code: 'ENOTFOUND' } }))).toBe(true)
+    expect(isFalNetworkError(Object.assign(new Error('x'), { cause: { code: 'UND_ERR_CONNECT_TIMEOUT' } }))).toBe(true)
+  })
+  it('a plain Error — including "FAL_KEY is not set" — is never a blip: it must surface, not loop forever', () => {
+    expect(isFalNetworkError(new Error('FAL_KEY is not set (add it to frontend/.env)'))).toBe(false)
+    expect(isFalNetworkError(new Error('something else went wrong'))).toBe(false)
+    expect(isFalNetworkError(Object.assign(new Error('x'), { cause: { code: 123 } }))).toBe(false)
+    expect(isFalNetworkError(Object.assign(new Error('x'), { cause: 'not an object' }))).toBe(false)
+  })
 })
 
 describe('downloadResult', () => {

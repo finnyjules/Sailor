@@ -153,6 +153,13 @@ const refuse = (message: string, status: number, data?: unknown) => new MeterRef
 
 /** Larger than this, the workflow is not stored (Open workflow then falls back, with its toast). */
 export const MAX_STORED_WORKFLOW_CHARS = 2_000_000
+/**
+ * Extra time past the deadline before a node is cancelled even when fal has
+ * never given a real (non-transient) answer. Without this, a restart-time gap
+ * in FAL_KEY, or a status URL that only ever returns 5xx, keeps `asked` false
+ * forever and the wait loop never ends — see waitForResult.
+ */
+const GRACE_MS = 5 * 60_000
 
 function storableWorkflow(workflow: unknown): unknown {
   if (workflow == null) return null
@@ -640,6 +647,17 @@ export function createEngine(deps: EngineDeps) {
         throw new Error(media === 'video'
           ? 'The video took longer than 30 minutes, so it was cancelled'
           : 'The image took longer than 5 minutes, so it was cancelled')
+      }
+      // Outer limit that applies even when fal never gave a real answer (a
+      // status URL stuck returning 5xx, or a network error on every poll): do
+      // not wait on `asked` forever, or the node — and its limiter slot and
+      // queued-call count — never frees up. `attempt > 0` still gives fal one
+      // chance to answer first, the same reasoning as the `asked` check above:
+      // after a restart the deadline is measured from the original submit
+      // time, and a real answer waiting at fal must still be fetched.
+      if (attempt > 0 && deps.now() > deadline + GRACE_MS) {
+        await deps.fal.cancel(req.cancelUrl).catch(() => {})
+        throw new Error('The provider did not answer, so the request was cancelled')
       }
       let s: FalStatus
       try { s = await deps.fal.status(req.statusUrl, { logs: started }) }
