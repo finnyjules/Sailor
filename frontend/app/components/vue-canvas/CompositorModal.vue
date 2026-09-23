@@ -123,7 +123,7 @@ import type { EffectDef, ParamValue, ShaderFxCatalog } from '~/lib/shaderfx/type
 import { cleanStops } from '~/lib/shaderfx/params'
 import { buildShaderParamRows, type ShaderParamRow } from '~/lib/shaderfill/controls'
 import '~/lib/motion/paint' // registers the motion painter for paintLayerStack(t)
-import { bakeAndUpload, motionSourceKey, type MotionParams, prepareMotionFramePainter } from '~/lib/motion/bake'
+import { bakeAndUpload, motionSourceKey, type MotionParams, prepareMotionFramePainter, type FrameDocPaint } from '~/lib/motion/bake'
 import { exportStudioVideo, videoErrorText } from '~/lib/studio/studioVideoExport'
 import { prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
 import { isAbortError, throwIfAborted } from '~/lib/engine/videoRecorder'
@@ -3609,7 +3609,7 @@ function startLive() { cancelAnimationFrame(liveRaf); liveStart = 0; liveInFligh
 function stopLive() { cancelAnimationFrame(liveRaf); liveRaf = 0 }
 watch(needsLiveLoop, startLive)
 onMounted(startLive)
-onBeforeUnmount(() => { videoAbort?.abort(); stopLive() })
+onBeforeUnmount(() => { unmounted = true; videoAbort?.abort(); stopLive() })
 /** Depth source for a wired slot, or null when there is no file behind it (a live
  *  studio slot). Kept here so the render path and the panel agree on one answer. */
 function wiredDepthSource(layer: Layer) {
@@ -4270,10 +4270,23 @@ function bakeSize(): { W: number; H: number } {
   return { W: canvasDisplay.w, H: canvasDisplay.h }
 }
 
+// The doc-level parts of the Frame every paint draws around the layers — the same four
+// renderStack() (the live view) passes. One painter, one look: the motion bake and the
+// browser video export hand these to the painter too, so a recording keeps the Frame's
+// background, groups, wired treatments and post effects.
+function frameDocPaint(): FrameDocPaint {
+  return {
+    treatments: wiredTreatments.value,
+    background: background.value,
+    groups: localGroups.value,
+    post: postEffects.value,
+  }
+}
+
 // Full composite (wired + local) at bake resolution, for Harmonize context.
-// Mirrors renderStack()'s paint call (background + wiredTreatments + groups)
-// so the scene crop matches exactly what the editor shows — unlike bakeMotion,
-// which only needs layer pixels frame-by-frame and skips those extras.
+// Mirrors renderStack()'s paint call (background + wiredTreatments + groups + post)
+// so the scene crop matches exactly what the editor shows — as bakeMotion and the
+// video export now do too (they pass frameDocPaint()).
 function renderSceneForHarmonize(): { canvas: HTMLCanvasElement; W: number; H: number } {
   const { W, H } = bakeSize()
   const canvas = document.createElement('canvas')
@@ -4318,6 +4331,10 @@ const motionStale = computed(() => {
 
 async function bakeMotion(motionOverride?: FrameMotion, opts?: { signal?: AbortSignal; keepPaused?: boolean }) {
   if (baking.value) return
+  // A Bake mid-export would pull the same wired canvases at other times, and its
+  // `finally` clears the wired-content registration the export relies on. The
+  // export's own server safety net passes a signal, so it still runs.
+  if (exportingVideo.value && !opts?.signal) return
   const node = compositor.value
   if (!node) return
   baking.value = true
@@ -4343,6 +4360,7 @@ async function bakeMotion(motionOverride?: FrameMotion, opts?: { signal?: AbortS
         const animated = layers.value.filter(l => l.live && l.live.duration > 0)
         await Promise.all(animated.map(l => pullLiveFrameModal(l, slotPhase01(t, l.live!.duration))))
       },
+      frameDocPaint(),
     )
     const p = (node.data.properties ||= {})
     p.sailor_motionParams = params
@@ -4363,7 +4381,9 @@ async function bakeMotion(motionOverride?: FrameMotion, opts?: { signal?: AbortS
   } finally {
     _registerWiredContent(null)
     baking.value = false
-    if (!opts?.keepPaused) startLive()
+    // Not on a closed editor: a Bake still running when it unmounts would otherwise
+    // restart the live loop on a dead modal, forever.
+    if (!opts?.keepPaused && !unmounted) startLive()
   }
 }
 
@@ -4388,6 +4408,9 @@ const encoding = ref(false)
 // The running video export, so Cancel can stop it; and the footer line saying
 // how it is going or how the last video was made (a fallback must be seen).
 let videoAbort: AbortController | null = null
+// Set first thing on unmount: an export or bake settling after the editor closed must
+// not restart the live loop (see the `finally`s of generateVideo and bakeMotion).
+let unmounted = false
 const exportingVideo = ref(false)
 const videoStatus = ref('')
 function cancelVideoExport() { videoAbort?.abort() }
@@ -4416,7 +4439,7 @@ const hasMotion = computed(() => localLayers.value.some((l: any) => l.animation)
 // ── outputs (mirror Gradient Studio's generateImage/generateVideo idiom) ────
 async function generateImage() {
   const node = compositor.value
-  if (!node || rendering.value || baking.value || encoding.value) return
+  if (!node || rendering.value || baking.value || encoding.value || exportingVideo.value) return
   rendering.value = true
   renderError.value = ''
   try {
@@ -4464,7 +4487,7 @@ async function generateVideo() {
       const animated = layers.value.filter(l => l.live && l.live.duration > 0)
       await Promise.all(animated.map(l => pullLiveFrameModal(l, slotPhase01(t, l.live!.duration))))
     }
-    const painter = await prepareMotionFramePainter(() => buildStackItems(), localLayers.value as LocalLayer[], W, H, motion, pull)
+    const painter = await prepareMotionFramePainter(() => buildStackItems(), localLayers.value as LocalLayer[], W, H, motion, pull, {}, frameDocPaint())
     const made = await exportStudioVideo({
       prefix: 'frame', publish: true,
       width: W, height: H, fps: motion.fps, frameCount: painter.total, alpha,
@@ -4501,7 +4524,7 @@ async function generateVideo() {
     _registerWiredContent(null)
     exportingVideo.value = false
     videoAbort = null
-    startLive()
+    if (!unmounted) startLive()
   }
 }
 
@@ -8401,7 +8424,7 @@ onUnmounted(() => {
           :duration="effectiveMotion.duration" :t="previewT"
           :selection="motionSel"
           :playing="playing" :fps="effectiveMotion.fps" :loop="effectiveMotion.loop ?? false"
-          :baking="baking" :bake-progress="bakeProgress" :stale="motionStale" :bake-error="bakeError"
+          :baking="baking" :busy="exportingVideo" :bake-progress="bakeProgress" :stale="motionStale" :bake-error="bakeError"
           :gallery-open="behaviourPickerOpen && !!selectedLocal"
           :property-picker-open="propertyPickerOpen && !!selectedLocal"
           @select="(id: string) => selectLocal(id)"
@@ -11250,7 +11273,7 @@ onUnmounted(() => {
         </button>
         <button
           class="h-8 px-3 rounded text-[12px] font-medium flex items-center gap-1.5 cursor-pointer disabled:opacity-50 bg-white hover:bg-white/90 text-neutral-900"
-          :disabled="rendering || baking || encoding"
+          :disabled="rendering || baking || encoding || exportingVideo"
           title="Render the frame and generate an image artifact"
           @click="generateImage">
           <Play class="size-3" />

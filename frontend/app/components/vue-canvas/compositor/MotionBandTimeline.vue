@@ -30,6 +30,8 @@ const props = defineProps<{
   fps?: number
   loop?: boolean
   baking?: boolean
+  /** Something else is using the Frame's frames (a video export) — Bake waits. */
+  busy?: boolean
   bakeProgress?: number
   stale?: boolean
   bakeError?: string | null
@@ -467,7 +469,7 @@ function deletePoint(b: Band, i: number) {
       <span v-if="bakeError" class="max-w-[160px] truncate text-rose-400" :title="bakeError">{{ bakeError }}</span>
       <button type="button" class="h-7 px-2.5 rounded-md text-[11px] font-medium cursor-pointer transition-colors"
         :class="stale ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30' : 'bg-white/10 text-white/80 hover:bg-white/15'"
-        :disabled="baking" :title="stale ? 'Layers changed since last bake' : 'Bake motion to frames'"
+        :disabled="baking || busy" :title="busy ? 'Waiting for the video export' : stale ? 'Layers changed since last bake' : 'Bake motion to frames'"
         data-testid="dock-bake" @click="emit('bake')">
         {{ baking ? `Baking ${Math.round((bakeProgress ?? 0) * 100)}%` : stale ? 'Re-bake' : 'Bake' }}
       </button>

@@ -4,7 +4,9 @@
  * existing /upload/image batch helper, and produce the motion_params payload
  * the Compositor backend node consumes.
  */
-import type { LocalLayer, TextLayer, StackItem } from '~/composables/useCompositorLayers'
+import type { LocalLayer, TextLayer, StackItem, PostEffect } from '~/composables/useCompositorLayers'
+import type { Paint } from '~/lib/compositor/paint'
+import type { LayerGroup } from '~/lib/compositor/layerGroups'
 import {
   paintLayerStack, ensureLayerFonts, ensureLayerImages,
 } from '~/composables/useCompositorLayers'
@@ -54,6 +56,15 @@ export interface MotionFramePainter {
   paint(i: number, ctx: CanvasRenderingContext2D): Promise<void>
 }
 
+/** Doc-level parts of the Frame the painter draws around the layers — the same four the
+ *  editor's live view passes. Absent ⇒ layers only (the old bake behaviour). */
+export interface FrameDocPaint {
+  treatments?: Record<string, { maskedByKey?: string; showSource?: boolean }>
+  background?: Paint
+  groups?: LayerGroup[]
+  post?: PostEffect[]
+}
+
 export async function prepareMotionFramePainter(
   buildItems: () => StackItem[],
   localLayers: LocalLayer[],
@@ -62,6 +73,7 @@ export async function prepareMotionFramePainter(
   motion: FrameMotion,
   prepareFrame?: (t: number) => Promise<void>,
   deps: { paint?: typeof paintLayerStack; ensure?: () => Promise<void> } = {},
+  doc?: FrameDocPaint,
 ): Promise<MotionFramePainter> {
   if (deps.ensure) {
     await deps.ensure()
@@ -85,6 +97,9 @@ export async function prepareMotionFramePainter(
   // into later frames and produce an inconsistent sequence.
   const items = buildItems()
   const frozenLayers = [...localLayers]
+  // …and the doc-level parts with them (a reassigned background or post chain mid-bake
+  // must not change the look part-way through).
+  const d: FrameDocPaint = { ...doc }
   const total = Math.max(1, Math.round(motion.duration * motion.fps))
   const time = (i: number) => i / motion.fps
   // The Frame's own size, not the target canvas' — the browser recorder hands a
@@ -104,8 +119,11 @@ export async function prepareMotionFramePainter(
       // bake=true (Task 10): this IS the final motion export — shader-fill fields must
       // render unclamped (full res) and stay live past LIVE_FIELD_CEILING, matching the
       // bake/preview split every other export path now honours.
+      // The doc-level parts (background, groups, wired treatments, post effects) come
+      // from the caller — the editor passes the same four its live view draws with, so a
+      // Frame on a red ground records on a red ground, not a transparent (→ black) one.
       paint(ctx, pw, ph, items, frozenLayers, undefined, t, motion,
-        undefined, undefined, undefined, undefined, true)
+        d.treatments, d.background, d.groups, d.post, true)
     },
   }
 }
@@ -121,8 +139,9 @@ export async function bakeMotionFrames(
   // time-parameterized wired sources (live studio slots) to frame time t
   // before the stack is painted.
   prepareFrame?: (t: number) => Promise<void>,
+  doc?: FrameDocPaint,
 ): Promise<Blob[]> {
-  const painter = await prepareMotionFramePainter(buildItems, localLayers, W, H, motion, prepareFrame)
+  const painter = await prepareMotionFramePainter(buildItems, localLayers, W, H, motion, prepareFrame, {}, doc)
   const canvas = document.createElement('canvas')
   canvas.width = Math.max(1, Math.round(W))
   canvas.height = Math.max(1, Math.round(H))
@@ -146,8 +165,9 @@ export async function bakeAndUpload(
   motion: FrameMotion,
   onProgress?: (done: number, total: number) => void,
   prepareFrame?: (t: number) => Promise<void>,
+  doc?: FrameDocPaint,
 ): Promise<MotionParams> {
-  const blobs = await bakeMotionFrames(buildItems, localLayers, W, H, motion, onProgress, prepareFrame)
+  const blobs = await bakeMotionFrames(buildItems, localLayers, W, H, motion, onProgress, prepareFrame, doc)
   const rendered = await uploadFrameBatch(blobs, 'slate')
   if (rendered.length !== blobs.length) {
     throw new Error(`motion bake: uploaded ${rendered.length}/${blobs.length} frames — retry`)

@@ -6,7 +6,7 @@ import {
 } from 'lucide-vue-next'
 import { getTypeColor } from '~/composables/useVueNodes'
 import { useLocalLayerEditor, aspectLockedResizeKind } from '~/composables/useLocalLayerEditor'
-import { type LocalLayer, type TextLayer, type StackItem, type WiredLayer as UnifiedWiredLayer, drawWiredImageLayer, ensureLayerFonts, ensureLayerImages, paintLayerStack, hasAnimatedShaderFill, withWiredContent, clipClocks } from '~/composables/useCompositorLayers'
+import { type LocalLayer, type TextLayer, type StackItem, type WiredLayer as UnifiedWiredLayer, drawWiredImageLayer, ensureLayerFonts, ensureLayerImages, paintLayerStack, hasAnimatedShaderFill, withWiredContent, clipClocks, clipFrameFor } from '~/composables/useCompositorLayers'
 import { hasPaint } from '~/lib/paint/resolve'
 import { migrateFrameToUnifiedLayers } from '~/lib/compositor/wiredMigration'
 import { framePresentKeys, finalizeWiredSentinels, reconcileWiredContent, syncWiredLayerLinks, wiredReconcileKey, legacyWiredFlagsActive, isWiredSentinel } from '~/lib/compositor/frameStack'
@@ -670,6 +670,10 @@ function gateOk() { return gate.visible && gate.tabActive && !gate.editorOpen &&
 // see createOcclusionRepaintGate's doc comment for why.
 const repaintGate = createOcclusionRepaintGate()
 function applyGate() {
+  // A video export pulls wired slots to each frame's time and then paints them; the
+  // preview loop writing the same canvases in between would corrupt that frame. Keep the
+  // loop stopped for the whole export — downloadVideo's `finally` calls this again.
+  if (exportingVideo.value) { if (animRaf) stopAnim(); return }
   const shouldRun = needsClock.value && gateOk()
   if (shouldRun && !animRaf) startAnim()
   else if (!shouldRun && animRaf) stopAnim()
@@ -680,6 +684,9 @@ watch(needsClock, applyGate)
 // card shows a stable poster instead of freezing mid-motion. Nothing loops until hovered,
 // so the whole canvas's ambient render load collapses to just the card you're pointing at.
 function renderPosterFrame() {
+  // Pulls wired slots to t=0 — during a video export that lands between the export's
+  // pull and its paint. downloadVideo's `finally` repaints the poster once it is done.
+  if (exportingVideo.value) return
   const animated = wiredLayers.value.filter(l => l.live && l.live.duration > 0).slice(0, MAX_LIVE_SLOTS)
   if (animated.length) Promise.all(animated.map(l => pullLiveFrame(l, 0))).then(() => renderStack(0)).catch(() => {})
   else renderStack(hasAnimatedFill.value ? 0 : undefined)
@@ -837,7 +844,10 @@ function openEditor() { window.dispatchEvent(new CustomEvent('sailor:openComposi
 // canvas at full output resolution. This is what the artboard shows — so Save
 // matches the canvas exactly, including local shapes/text, with no dependency
 // on a backend run having happened or the live-preview being fresh.
-function exportCompositeCanvas(): HTMLCanvasElement | null {
+// `t` (seconds) is the paint clock for living images and animated shader fills — the video
+// export passes each frame's time. Omitted (still download, the render cascade) ⇒ t=0,
+// exactly as before. `motion` stays undefined for the same reason as in renderStack.
+function exportCompositeCanvas(t?: number): HTMLCanvasElement | null {
   const keys = stackKeys.value
   if (!keys.length) return null
   const W = box.value.w, H = box.value.h
@@ -864,7 +874,7 @@ function exportCompositeCanvas(): HTMLCanvasElement | null {
   // fields must render unclamped and stay live past LIVE_FIELD_CEILING.
   withWiredContent(wiredContentForSlot, () =>
     paintLayerStack(ctx, W, H, buildStackItems(), editor.localLayers.value,
-      undefined, undefined, undefined, wiredTreatments.value, editor.background.value, editor.localGroups.value, editor.postEffects.value, true))
+      undefined, t, undefined, wiredTreatments.value, editor.background.value, editor.localGroups.value, editor.postEffects.value, true))
   return cv
 }
 
@@ -931,13 +941,33 @@ async function recordFrameToAssets(blob: Blob) {
   }
 }
 
+// A living image paints its still until EVERY frame of its clip is in the shared clip
+// cache (`clipFrameFor` is null until then), and that cache can drop a clip another Frame's
+// layer list no longer names. So before a video frame is painted, make sure each clip is
+// resident — loading it (awaited) if it is not — and refuse loudly when one cannot load,
+// rather than record the still (or a blank) as if it were the motion.
+async function ensureClipsForExport(): Promise<void> {
+  const clipLayers = editor.localLayers.value.filter(l => l.kind === 'image' && l.clip && l.clip.frames > 0)
+  if (!clipLayers.length) return
+  const missing = () => clipLayers.filter(l => !clipFrameFor(l, 0, 0, 1))
+  if (!missing().length) return
+  // `keep`: pin these clips rather than sweep — another Frame on the canvas may be showing
+  // its own, and this card's must not be evicted by the cache cap mid-export.
+  await ensureLayerImages(editor.localLayers.value, { keep: true })
+  if (missing().length) throw new Error('Video export failed: a living image\'s frames could not be loaded.')
+}
+
 // Composite the full stack at master time `t` (seconds): pull every animated slot to
-// its phase for `t`, then paint. Used by the video export so each baked frame reflects
-// that instant of the animation.
+// its phase for `t`, make sure every living image's frames are loaded, then paint at `t`
+// (living images and animated shader fills follow it too). Used by the video export so
+// each frame reflects that instant of the animation.
 async function renderCompositeAtTime(t: number): Promise<HTMLCanvasElement | null> {
   const animated = wiredLayers.value.filter(l => l.live && l.live.duration > 0)
-  await Promise.all(animated.map(l => pullLiveFrame(l, slotPhase01(t, l.live!.duration))))
-  return exportCompositeCanvas()
+  await Promise.all([
+    ...animated.map(l => pullLiveFrame(l, slotPhase01(t, l.live!.duration))),
+    ensureClipsForExport(),
+  ])
+  return exportCompositeCanvas(t)
 }
 
 // The running video download, so the button can stop it; and a short line
@@ -1004,7 +1034,12 @@ async function downloadVideo() {
   } finally {
     exportingVideo.value = false
     videoAbort = null
-    if (!unmounted) applyGate()
+    if (!unmounted) {
+      applyGate()
+      // The export left the wired slots at its last frame's time, and a pointer-leave
+      // during it skipped the poster repaint — put the idle card back on its first frame.
+      if (!gate.hovered) renderPosterFrame()
+    }
   }
 }
 

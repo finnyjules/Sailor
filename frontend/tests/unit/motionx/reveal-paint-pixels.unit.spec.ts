@@ -603,7 +603,9 @@ describe('the bake waits for the shader before its first frame', () => {
     const guard = BAKE.indexOf('motionUsesShaderStyle(motion.behaviours)')
     expect(guard).toBeGreaterThan(-1)
     expect(guard).toBeLessThan(wait)
-    const loop = BAKE.indexOf('for (let i = 0; i < total; i++)')
+    // The wait lives in prepareMotionFramePainter, which bakeMotionFrames calls before
+    // its loop (`i < painter.total`) — and the browser recorder's loop runs after it too.
+    const loop = BAKE.search(/for \(let i = 0; i < (painter\.)?total; i\+\+\)/)
     expect(loop).toBeGreaterThan(-1)
     expect(wait).toBeLessThan(loop)
     // …and after the other two awaits it already does, so one cold start pays once.
