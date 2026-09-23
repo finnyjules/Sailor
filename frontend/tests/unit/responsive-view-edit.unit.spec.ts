@@ -53,6 +53,13 @@ describe('moveUnitAtView', () => {
     expect(e.patches[0]!.patch.y).toBeCloseTo(0.5, 9)
     expect(e.pins).toStrictEqual({ unitId: 'a', onGroup: false, patch: { h: undefined, v: undefined } })
   })
+  it('a return to the start pixel writes the origin back (the editor only writes returned patches)', () => {
+    const l = [leftRect()]
+    const e = moveUnitAtView(unitAt(l, 'a'), l, 1000, 500, 0, 0, 'drop')
+    expect(e.patches).toHaveLength(1)
+    expect(e.patches[0]!.patch.x).toBeCloseTo(0.1, 9)
+    expect(e.patches[0]!.patch.y).toBeCloseTo(0.5, 9)
+  })
   it('drag holds the pin it had; drop then flips it to the automatic one — same place on screen', () => {
     const l = [leftRect()]
     const u = unitAt(l, 'a')

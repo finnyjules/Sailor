@@ -104,10 +104,11 @@ export function pinsPatch(u: UnitInfo, h: PinWrite, v: PinWrite): ViewEdit['pins
  * stays put (Ruling C).
  */
 export function moveUnitAtView(u: UnitInfo, layers: LocalLayer[], W0: number, H0: number, dx: number, dy: number, phase: 'drag' | 'drop'): ViewEdit {
+  let welded = 0
   const one = (axis: 'h' | 'v', d: number): Settled => {
     const ax = axisInfo(u, axis)
     const bl = bleeds(ax)
-    if (bl.near || bl.far) return { near: ax.design.start, far: ax.design.start + ax.design.extent, pin: null }
+    if (bl.near || bl.far) { welded++; return { near: ax.design.start, far: ax.design.start + ax.design.extent, pin: null } }
     let a = ax.view.start + d, b = ax.view.start + ax.view.extent + d
     if (ax.map.kind === 'both') {
       // A stretched edge that reaches its reference would be drawn to the REAL box edge (bleed),
@@ -122,8 +123,10 @@ export function moveUnitAtView(u: UnitInfo, layers: LocalLayer[], W0: number, H0
   const dcx = (sh.near + sh.far) / 2 - (u.designBox.x + u.designBox.w / 2)
   const dcy = (sv.near + sv.far) / 2 - (u.designBox.y + u.designBox.h / 2)
   const pins = pinsPatch(u, sh.pin, sv.pin)
-  // Nothing moved (e.g. a welded background): no layer writes.
-  if (Math.abs(dcx) < 1e-9 && Math.abs(dcy) < 1e-9) return { patches: [], pins }
+  // Both axes welded (e.g. a full-bleed background): it cannot move, so no layer writes. Any other
+  // unit ALWAYS gets its origin-based position — the editor writes only returned patches, so a
+  // return to the start pixel must write the origin back.
+  if (welded === 2) return { patches: [], pins }
   const byId = new Map(layers.map(l => [l.id, l]))
   const patches = u.memberIds.flatMap((id) => {
     const l = byId.get(id)
