@@ -44,7 +44,7 @@ describe('frame adapter — a snapshot missing an inlined asset', () => {
       .rejects.toThrow('embed: frame snapshot is missing an inlined asset')
   })
 
-  it('does not ask for a stand-in image or an image layer with no file', async () => {
+  it('lets a stand-in image and an image layer with no file past the asset check', async () => {
     const standIn = createImageLayer('x.png', 1, { standIn: true } as any)
     const empty = createImageLayer('', 1)
     const box = document.createElement('div')
@@ -56,6 +56,22 @@ describe('frame adapter — a snapshot missing an inlined asset', () => {
     // the check let these through.
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
     await expect(frameSurface.mount(box, snapshotOf([standIn, empty], {}))).rejects.toThrow('embed: no 2D context')
+  })
+
+  // R10: the painter's preload (ensureLayerImages) must not ask for an image layer that has no
+  // file — a pattern's stand-in before a photo is applied. It used to request
+  // `/view?filename=&type=input`, which in an exported file is a request from a page that must
+  // make none. Counted at the only place a load can start: every `Image.src` assignment.
+  it('never asks for an image layer that has no file', async () => {
+    const srcs: string[] = []
+    vi.stubGlobal('Image', class { onload: (() => void) | null = null; onerror: (() => void) | null = null
+      complete = false; set src(u: string) { srcs.push(u); queueMicrotask(() => this.onerror?.()) } })
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
+    const standIn = createImageLayer('', 4 / 3, { standIn: true } as any)   // lib/frame/patterns/insert.ts's shape
+    const empty = createImageLayer('', 1)
+    await expect(frameSurface.mount(document.createElement('div'), snapshotOf([standIn, empty], {})))
+      .rejects.toThrow('embed: no 2D context')
+    expect(srcs).toEqual([])
   })
 })
 

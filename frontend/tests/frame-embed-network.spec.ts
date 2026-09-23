@@ -4,7 +4,7 @@ import { openHarness, renderExported } from './_frameEmbedHelpers'
 test.describe('Frame embed — zero network', () => {
   test.beforeEach(async ({ page }) => openHarness(page))
 
-  for (const name of ['vector', 'image', 'backdrop', 'still', 'fill']) {
+  for (const name of ['vector', 'image', 'backdrop', 'still', 'fill', 'standin']) {
     test(`the "${name}" export makes no request`, async ({ page, context }) => {
       const html = await page.evaluate(async (n) => {
         const H = (window as any).__frameEmbedHarness

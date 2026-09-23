@@ -1325,8 +1325,12 @@ export async function ensureLayerImages(layers: LocalLayer[], opts?: { keep?: bo
   const jobs: Promise<unknown>[] = []
   for (const layer of layers) {
     if (layer.kind !== 'image') continue
-    const url = imageLayerUrl(layer.filename)
-    if (!_imageCache.get(url)?.complete) {
+    // An image layer with no file (a pattern's "photo goes here" stand-in, before a photo is
+    // applied) has nothing to load: asking would only be a failing `/view?filename=` request —
+    // and, in a web export, a request from a page that must make none. The painter draws the
+    // stand-in box (or nothing) for it either way, so the pixels are unchanged.
+    const url = layer.filename ? imageLayerUrl(layer.filename) : ''
+    if (url && !_imageCache.get(url)?.complete) {
       jobs.push(new Promise((res) => {
         const im = new Image()
         im.onload = () => { _imageCache.set(url, im); res(null) }

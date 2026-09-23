@@ -22,6 +22,13 @@ import { createImageLayer, createRectLayer, createTextLayer } from '~/composable
 import { DEFAULT_FILL } from '~/lib/spacetype/fillTile'
 import { createEffect } from '~/lib/compositor/effectStack'
 import { defaultPostEffect } from '~/lib/compositor/postEffects'
+// The reference render (the studio's paint, for the parity spec) — deliberately NOT through the
+// adapter: no surfaces/frame.ts, no stackItemsFor. It paints the way CompositorModal's
+// renderStack does, with the app's own loaders.
+import { ensureLayerFonts, ensureLayerImages, paintLayerStack, withWiredContent, type LocalLayer, type StackItem } from '~/composables/useCompositorLayers'
+import { registerAssetResolver } from '~/lib/compositor/assetScope'
+import { whenFieldEffectReady } from '~/lib/shaderfill/field'
+import '~/lib/motion/paint' // the per-layer animation painter paintLayerStack relies on (the modal has it loaded)
 
 definePageMeta({ layout: false })
 
@@ -29,7 +36,22 @@ type Slot = 'a' | 'b'
 const handles: Partial<Record<Slot, EmbedHandle>> = {}
 /** The image fill's source, as the app stores one: a server URL the gatherer fetches. */
 const HARNESS_FILL_SRC = '/view?filename=harness-photo.png&type=input'
-const FIXTURES = ['vector', 'image', 'backdrop', 'still', 'fill', 'bleed', 'bleed-post']
+const FIXTURES = ['vector', 'image', 'backdrop', 'still', 'fill', 'bleed', 'bleed-post', 'standin']
+/** The font the `font` mutation swaps in: another cut of the harness face (there is no
+ *  ABCROM-BoldItalic in public/fonts — BlackItalic is the nearest italic). */
+const MUTANT_FONT_URL = '/fonts/ABCROM-BlackItalic.otf'
+/** The `shader` mutation's fragment: every pixel solid magenta. Same interface as the catalog's
+ *  single-pass effects (GLSL ES 3.00, `v_texCoord` in, `fragColor0` out). */
+const MAGENTA_FRAGMENT = `#version 300 es
+precision highp float;
+uniform sampler2D u_image0;
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform float u_seed;
+in vec2 v_texCoord;
+layout(location = 0) out vec4 fragColor0;
+void main() { fragColor0 = vec4(1.0, 0.0, 1.0, 1.0); }
+`
 
 // ── Synthetic assets ─────────────────────────────────────────────────────────────────────────
 // Smooth on purpose: no noise, because lossy re-encoding of noise would swamp a pixel diff.
@@ -69,6 +91,12 @@ onMounted(async () => {
   assets.set('harness-photo.png', drawPhoto())
   for (let i = 0; i < 6; i++) assets.set(`harness-clip/${i}`, drawClipFrame(i))
   assets.set('harness-rose.png', assets.get('harness-clip/0')!)
+
+  // The mutant font's bytes, read once so `mutate` can stay synchronous.
+  const mutantBlob = await (await fetch(MUTANT_FONT_URL)).blob()
+  const mutantFont = await new Promise<string>((res, rej) => {
+    const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = () => rej(r.error); r.readAsDataURL(mutantBlob)
+  })
 
   const cat = await fetchShaderFxCatalog()
   const catalogIds = new Set(cat.effects.map(e => e.id))
@@ -150,6 +178,14 @@ onMounted(async () => {
       const text = createTextLayer({ text: 'Still here', fontFamily: 'Harness Font', fontWeight: 700, fontSize: 0.1 })
       return { hasMotion: false, variant: variantOf(1000, 500, [text], { background: '#1b4d3e' }) }
     }
+    if (name === 'standin') {
+      // A pattern's "photo goes here" stand-in (standIn, no file yet — the shape
+      // lib/frame/patterns/insert.ts creates) beside a visible rect. The export must not ask
+      // for the file-less layer's image (R10): the network spec requires zero requests.
+      const standIn = createImageLayer('', 4 / 3, { x: 0.3, y: 0.5, w: 0.4, h: 0.3, standIn: true } as any)
+      const rect = createRectLayer({ x: 0.75, y: 0.5, w: 0.2, h: 0.3, radius: 0, fill: '#f25c54' })
+      return { hasMotion: false, variant: variantOf(1000, 500, [standIn, rect], { background: '#1b4d3e' }) }
+    }
     if (name === 'bleed' || name === 'bleed-post') {
       // A rect half outside the artboard's right edge (artboard x 900..1100 of 1000): in a box
       // wider than the artboard, the part past x = 1000 must NOT paint into the bleed.
@@ -167,6 +203,85 @@ onMounted(async () => {
       variant, fit: over.fit ?? 'fit', wiredSlots: [], catalogIds, hasMotion, animatedFill: false,
     })
     return await buildFrameSnapshot(plan, variant, io)
+  }
+
+  // ── The reference: the studio's own paint ───────────────────────────────────────────────────
+  // What the Frame editor draws for a fixture at t01, independent of the adapter: items from the
+  // stack order (as CompositorModal.buildStackItems does), the painter called the way
+  // renderStack calls it (motion, wired treatments, background, groups AND the post chain in the
+  // painter itself, bake = true as an export would), at w × h in the editor's units (W = the
+  // display width, dpr transform). Assets load the app's way: `ensureLayerImages` (the synthetic
+  // files and clip frames answered with their ORIGINAL full-size PNGs by a resolver standing in
+  // for /view), `ensureLayerFonts` over a harness @font-face for the full, unsubsetted
+  // /fonts/ABCROM-Bold.otf, and the shaders' readiness.
+  //
+  // Caveat: the painter's clip-frame cache is keyed by folder, not URL. Call `reference` before
+  // any adapter mount of the same fixture in this page (the parity spec does), or it would reuse
+  // the adapter's (WebP) frames.
+  async function reference(name: string, t01: number, w: number, h: number): Promise<string> {
+    const { variant: v } = fixture(name)
+    const layers = v.layers as LocalLayer[]
+    const byId = new Map(layers.map(l => [l.id, l]))
+    const items: StackItem[] = v.stackOrder
+      .filter(k => k.startsWith('l:') && byId.has(k.slice(2)))
+      .map(k => ({ type: 'local', key: k, layer: byId.get(k.slice(2))! }))
+    // The Frame's clock, as the planner states it: its Motion duration, else 4 s.
+    const duration = v.motion && v.motion.duration > 0 ? v.motion.duration : 4
+
+    const unregister = registerAssetResolver((kind, key) => {
+      if (kind === 'image') return assets.get(key) ?? null
+      if (kind === 'clipFrame' && key.startsWith('harness-clip/')) return assets.get(key) ?? null
+      return null
+    })
+    const face = document.createElement('style')
+    face.textContent = "@font-face{font-family:'Harness Font';font-weight:700;font-style:normal;src:url('/fonts/ABCROM-Bold.otf')}"
+    document.head.appendChild(face)
+    try {
+      await ensureLayerImages(layers)
+      await ensureLayerFonts(layers, w)
+      await document.fonts.load("700 16px 'Harness Font'")
+      await document.fonts.ready
+      await Promise.all([fillEffect.id, backdropEffect.id].map(id => whenFieldEffectReady(id)))
+
+      const dpr = Math.min(2, window.devicePixelRatio || 1)
+      const [cv, ctx] = canvasOf(Math.max(1, Math.round(w * dpr)), Math.max(1, Math.round(h * dpr)))
+      const paint = () => {
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+        ctx.clearRect(0, 0, w, h)
+        withWiredContent(() => null, () => paintLayerStack(ctx, w, h, items, layers, undefined,
+          t01 * duration, v.motion ?? undefined, v.wiredTreatments, v.background ?? undefined,
+          v.groups, v.post, true))
+      }
+      // Warm-up: paint and read once, discard (Task 7: Chrome's GPU canvas can return a
+      // different first read-back), then paint again and read the one we compare.
+      paint(); cv.toDataURL()
+      paint()
+      return cv.toDataURL()
+    } finally {
+      face.remove()
+      unregister()
+    }
+  }
+
+  // ── Mutations: one deliberate break each, for the parity spec's teeth ───────────────────────
+  function mutate(snap: FrameSnapshot, kind: 'colour' | 'font' | 'shader'): FrameSnapshot {
+    const out = structuredClone(snap)
+    if (kind === 'colour') {
+      const rect = out.variants[0]!.layers.find(l => l.kind === 'rect') as any
+      if (!rect) throw new Error('mutate colour: the snapshot has no rect')
+      rect.fill = '#00ff00'
+    } else if (kind === 'font') {
+      const f = out.assets.fonts[0]
+      if (!f) throw new Error('mutate font: the snapshot has no font')
+      f.dataUrl = mutantFont
+    } else if (kind === 'shader') {
+      const d = out.assets.shaders[0]
+      if (!d) throw new Error('mutate shader: the snapshot has no shader')
+      d.source = MAGENTA_FRAGMENT
+    } else {
+      throw new Error(`mutate: unknown kind "${kind}"`)
+    }
+    return out
   }
 
   const slotEl = (slot: Slot) => document.getElementById(`slot-${slot}`)!
@@ -193,7 +308,8 @@ onMounted(async () => {
     destroy(slot: Slot) { handles[slot]?.destroy(); delete handles[slot] },
     pixels(slot: Slot): string { return canvasOfSlot(slot)?.toDataURL() ?? '' },
     canvasCount(slot: Slot): number { return slotEl(slot).querySelectorAll('canvas').length },
-    reference: async (_name: string, _t01: number, _w: number, _h: number) => '',   // Task 8
+    reference,
+    mutate,
     async exportHtml(snap: FrameSnapshot): Promise<string> {
       const v = snap.variants[0]!
       return await exportEmbedHtml({
