@@ -16,6 +16,11 @@ import { ensureSpaceTypeClipBake } from '~/lib/engine/spaceTypeClipBake'
 import { spaceTypeEngineAvailable } from '~/lib/engine/spaceTypeEnginePool'
 import { ensureMotionFonts } from '~/composables/useTemplateFonts'
 import { ensureTimelineMix } from '~/lib/engine/audio/mixdown'
+import { recordTimeline, TimelineExportRefused } from '~/lib/timeline/recordTimeline'
+import { publishVideo, HOSTED_UPLOAD_LIMIT } from '~/lib/engine/publishVideo'
+import { canRecordInBrowser, prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
+import { isAbortError } from '~/lib/engine/videoRecorder'
+import { hostedModeEnabled } from '~/lib/hostedMode'
 import type { Clip, Track, BlendMode, MotionClip, SpaceTypeClip, Transition, TransitionKind, EditState } from '~~/shared/timeline/types'
 import { computeTotalFrames } from '~~/shared/timeline/types'
 import { interpolateClipAt } from '~~/shared/timeline/interpolate'
@@ -111,6 +116,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  exportAbort?.abort()
   store.pause()
   engine.destroy()
   store.unbind()
@@ -1142,16 +1148,88 @@ const renderProgress = ref<{ current: number; total: number } | null>(null)
  *  before the server renders, and that bake is slow enough to look like a hang
  *  — so the button must say which phase the bar is measuring, or it fills to
  *  100% twice with no explanation. */
-const renderPhase = ref<'baking' | 'mixing' | 'rendering' | null>(null)
+const renderPhase = ref<'baking' | 'mixing' | 'rendering' | 'uploading' | null>(null)
+// The browser export in flight, so Cancel can stop it.
+let exportAbort: AbortController | null = null
+// Mirrors exportAbort for the template — a plain `let` doesn't trigger a
+// re-render on its own, so the Cancel button needs a ref to show up on time.
+const browserExporting = ref(false)
+function cancelExport() { exportAbort?.abort() }
 
-async function renderViaFFmpeg() {
+/** Export: recorded in the browser — the preview's own renderer, with the
+ *  sound — or, in local mode only and said out loud, today's server render. */
+async function exportTimeline() {
   if (isRendering.value) return
   renderError.value = null
   renderNotice.value = null
   renderResult.value = null
   renderProgress.value = null
   isRendering.value = true
+  store.pause()
+  const es = store.state.value
+  const hosted = hostedModeEnabled(useRuntimeConfig().public)
+  let reason = ''   // why the browser route was not used ('' = the server route was chosen on purpose)
 
+  if (!hosted && prefersServerVideoExport()) {
+    // fall through to the server route below
+  } else if (!(await canRecordInBrowser({ width: es.canvas.width, height: es.canvas.height, fps: es.canvas.fps, audio: true }))) {
+    reason = "this browser can't record video"
+  } else {
+    exportAbort = new AbortController()
+    browserExporting.value = true
+    try {
+      const { result, skippedAudio, skippedClips } = await recordTimeline(es, {
+        resolve: clip => resolveClipPreview(clip),
+        resolveAudioUrl: clip => resolveAudioUrl(clip),
+      }, {
+        signal: exportAbort.signal,
+        onPhase: p => { renderPhase.value = p; renderProgress.value = null },
+        onProgress: (done, total) => { renderProgress.value = { current: done, total } },
+      })
+      if (hosted && result.blob.size > HOSTED_UPLOAD_LIMIT) throw new Error('This video is larger than 100 MB, the upload limit.')
+      renderPhase.value = 'uploading'
+      renderProgress.value = null
+      const filename = await publishVideo(result.blob, result.ext, 'timeline', undefined, exportAbort.signal)
+      if (exportAbort.signal.aborted) throw new DOMException('Export cancelled', 'AbortError')
+      renderResult.value = { url: `/view?${new URLSearchParams({ filename, type: 'input' })}`, filename }
+      const notes: string[] = []
+      if (skippedClips.length) notes.push(`Left out, nothing to draw yet: ${skippedClips.join(', ')}.`)
+      if (skippedAudio === 1) notes.push('One audio clip could not be loaded, so it was left out.')
+      else if (skippedAudio > 1) notes.push(`${skippedAudio} audio clips could not be loaded, so they were left out.`)
+      renderNotice.value = notes.join(' ') || null
+      isRendering.value = false
+      renderPhase.value = null
+      renderProgress.value = null
+      return
+    } catch (err) {
+      if (isAbortError(err)) {
+        renderNotice.value = 'Export cancelled.'
+        isRendering.value = false; renderPhase.value = null; renderProgress.value = null
+        return
+      }
+      console.warn('[timeline] browser export failed', err)
+      if (err instanceof TimelineExportRefused) reason = err.message.replace(/\.$/, '')
+      else if (err instanceof Error && err.message.startsWith('This video is larger')) reason = err.message.replace(/\.$/, '')
+      else reason = "the browser's video encoder failed"
+    } finally {
+      exportAbort = null
+      browserExporting.value = false
+    }
+  }
+
+  if (hosted) {
+    renderError.value = reason.startsWith('These clips')
+      ? `${reason}. Replace them with a smaller or more common video file.`
+      : `Video export failed: ${reason}.`
+    isRendering.value = false; renderPhase.value = null; renderProgress.value = null
+    return
+  }
+  renderNotice.value = reason ? `Made on the server, because ${reason.charAt(0).toLowerCase()}${reason.slice(1)}.` : 'Made on the server (browser recording is switched off).'
+  await renderOnServer()
+}
+
+/** Today's route: bake Motion/Space Type clips, mix and upload the sound, and let the Python renderer draw every frame. The local fallback (and the only route a Timeline node inside a workflow uses). */
+async function renderOnServer() {
   const es = store.state.value
   const assetLib = assetsList.value
   const fps = es.canvas.fps
@@ -1215,12 +1293,14 @@ async function renderViaFFmpeg() {
   try {
     const mix = await ensureTimelineMix(es, clip => resolveAudioUrl(clip), store.boundNodeId())
     mixFile = mix.file
-    if (mix.skipped && !mix.file) renderNotice.value = 'None of the audio clips could be loaded, so this export only has the first audio clip.'
-    else if (mix.skipped === 1) renderNotice.value = 'One audio clip could not be loaded, so it was left out of this export.'
-    else if (mix.skipped > 1) renderNotice.value = `${mix.skipped} audio clips could not be loaded, so they were left out of this export.`
+    let mixNotice: string | null = null
+    if (mix.skipped && !mix.file) mixNotice = 'None of the audio clips could be loaded, so this export only has the first audio clip.'
+    else if (mix.skipped === 1) mixNotice = 'One audio clip could not be loaded, so it was left out of this export.'
+    else if (mix.skipped > 1) mixNotice = `${mix.skipped} audio clips could not be loaded, so they were left out of this export.`
+    if (mixNotice) renderNotice.value = [renderNotice.value, mixNotice].filter(Boolean).join(' ')
   } catch (err: any) {
     console.warn('[timeline] audio mix failed', err)
-    renderNotice.value = `Audio could not be mixed (${err?.message ?? err}), so this export only has the first audio clip.`
+    renderNotice.value = [renderNotice.value, `Audio could not be mixed (${err?.message ?? err}), so this export only has the first audio clip.`].filter(Boolean).join(' ')
   }
 
   renderPhase.value = 'rendering'
@@ -1918,7 +1998,7 @@ const assetTab = ref<'ports' | 'files' | 'library'>(portBindings.value.length > 
             class="relative overflow-hidden flex items-center gap-1.5 px-3 h-7 rounded text-xs transition-colors border border-white/10 disabled:opacity-90 min-w-[110px]"
             :class="renderResult ? 'bg-action/20 hover:bg-action/30 text-action' : 'bg-white/15 hover:bg-white/20 text-white/70'"
             :disabled="isRendering"
-            @click="renderViaFFmpeg"
+            @click="exportTimeline"
           >
             <!-- Progress fill -->
             <div
@@ -1933,11 +2013,13 @@ const assetTab = ref<'ports' | 'files' | 'library'>(portBindings.value.length > 
                   ? (renderPhase === 'baking'
                       ? (renderProgress ? `Baking ${Math.round(renderProgress.current / Math.max(1, renderProgress.total) * 100)}%` : 'Baking…')
                       : renderPhase === 'mixing' ? 'Mixing sound…'
+                      : renderPhase === 'uploading' ? 'Uploading…'
                       : (renderProgress ? `${Math.round(renderProgress.current / Math.max(1, renderProgress.total) * 100)}%` : 'Rendering…'))
                   : (renderResult ? 'Re-render' : 'Export')
               }}
             </span>
           </button>
+          <button v-if="isRendering && browserExporting" type="button" class="px-2 h-7 rounded text-xs text-white/60 hover:text-white hover:bg-white/10" @click="cancelExport">Cancel</button>
           <a v-if="renderResult" :href="renderResult.url" target="_blank"
             class="text-xs text-action hover:text-action/80 underline underline-offset-2">
             {{ renderResult.filename }}
