@@ -63,9 +63,15 @@ export interface Content { title: string; details?: string; date?: string; capti
   /** The list's items, markers stripped (the user's layer keeps them). */
   list?: string[]
   compare?: { them: string; rows: { label: string; us: boolean; them: boolean }[] }
-  stat?: { value: string; line?: string } }
+  stat?: { value: string; line?: string }
+  /** Stage 4: each content line's text exactly as its layer holds it (markers, "vs", the rating's
+   *  "★"), for the layouts that place those layers — they measure what the layer draws. Present
+   *  only for a layout that reads the content view (`needsContent`). */
+  raw?: Partial<Record<ContentLineKey, string>> }
+/** The Stage 4 roles a text layer can hold (a layout places the layer itself). */
+export type ContentLineKey = 'quote' | 'by' | 'rating' | 'list' | 'stat' | 'statline' | 'them'
 /** The content keys that hold a line of text (every key but the logo and the Stage 4 shapes). */
-export type TextKey = Exclude<keyof Content, 'logo' | 'review' | 'list' | 'compare' | 'stat'>
+export type TextKey = Exclude<keyof Content, 'logo' | 'review' | 'list' | 'compare' | 'stat' | 'raw'>
 export type Kind = 'word' | 'phrase' | 'sentence'
 export interface LayoutCtx { c: Content; kind: Kind; ph: boolean; r: () => number; words: string[]; lines: string[]; arr: number }
 export interface LayoutOut { els: El[]; did: string }

@@ -18,14 +18,14 @@ import { isNumberish } from '../hierarchy'
 const ALL = ['word', 'phrase', 'sentence'] as const
 
 /** The number an offer leads with: the date's text when it is number-like ("–30%", "€49"). */
-const numberOf = (c: Content): string | null => (c.date && isNumberish(c.date) ? c.date : null)
+export const numberOf = (c: Content): string | null => (c.date && isNumberish(c.date) ? c.date : null)
 
 /** The number is drawn in the display style but measured in the date's own face. */
-const numStyle = (S: Sheet): Style => ({ ...S.DISPLAY, role: 'date' })
+export const numStyle = (S: Sheet): Style => ({ ...S.DISPLAY, role: 'date' })
 
 /** The offer, up from the bottom of a box: fine print; the number and the button on one line;
  *  the product name. Returns the elements and the top of the stack. */
-function offerBox(S: Sheet, c: Content, bx: { x: number; w: number; bottom: number }, align: 'left' | 'center' = 'left'): { els: El[]; top: number } {
+export function offerBox(S: Sheet, c: Content, bx: { x: number; w: number; bottom: number }, align: 'left' | 'center' = 'left'): { els: El[]; top: number } {
   const { INFO, SECOND, CAP, RH, GAP, SPAN, countLines, blockH, info, disp, sec, fitSize, w100, button, gapBelow, groupGap } = S
   const els: El[] = []
   const { x, w } = bx

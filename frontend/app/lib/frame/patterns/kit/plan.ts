@@ -156,6 +156,13 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
     if (read.list) content.list = read.list
     if (read.compare) content.compare = read.compare
     if (read.stat) content.stat = read.stat
+    // Each content line's own text (Task 4): the layouts place these layers and measure what they draw.
+    const raw: NonNullable<Content['raw']> = {}
+    for (const r of NEW_TEXT_ROLES) {
+      const l = read.roles[r] ? layers.find(x => x.id === read.roles[r] && x.kind === 'text') as TextLayer | undefined : undefined
+      if (l?.text?.trim()) raw[r] = l.text
+    }
+    if (Object.keys(raw).length) content.raw = raw
   }
   // Levels (Stage 2): a format that carries N levels keeps the first N of the lines the Frame
   // has, in the style's level order (Swiss: title → details → date → action → caption); the rest
@@ -362,7 +369,24 @@ function fitsFrame(p: Prepared): boolean {
   if (def.needs?.number && !isNumberish(p.content.date)) return false
   // Built around the smaller text: no room for it in a format that carries fewer than three levels.
   if (def.smallText && p.fmt && (p.fmt.carries ?? 4) < 3) return false
+  // Stage 4 (Task 4): a layout built around a kind of content is offered only when the Frame has it
+  // (read in the content view, ruling C2 — `needsContent` is what puts the layout there).
+  if (def.needsContent && !def.needsContent.every(k => hasContent(p, k))) return false
   return true
+}
+
+/** Whether the Frame (in the content view) has the content a Stage 4 layout is built around. The
+ *  number is the date's text when it is number-like, as `needs.number` reads it (a hidden date
+ *  never counts). */
+function hasContent(p: Prepared, k: NonNullable<LayoutDef['needsContent']>[number]): boolean {
+  switch (k) {
+    case 'number': return isNumberish(p.content.date)
+    case 'stat': return p.content.stat != null
+    case 'review': return p.content.review != null
+    case 'compare': return p.content.compare != null
+    case 'list': return p.content.list != null
+    case 'image2': return p.targets.image2 != null
+  }
 }
 
 /** The seed of a choice's random stream (the prototype's). */
@@ -618,7 +642,7 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
     layers: next, order, did: out.did, issues,
     posterState: { patternId: p.def.id, seed: seedFor(p.index, a.choice), choice: { ...a.choice }, roles: rolesOf(p.baseElements) },
     format: p.fmt ? { id: p.fmt.id, label: p.fmt.label, hidden: [...p.hidden] } : null,
-    notPlaced: notPlaced.map(role => ({ role, text: p.content[role] as string })),
+    notPlaced: notPlaced.map(role => ({ role, text: lineText(p, role) })),
   }
 }
 
@@ -626,11 +650,19 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
  *  (base role: `title2` counts as `title`; a ring is the title). Swiss (no style, or `'swiss'`):
  *  the action line only (ruling R9) — no Swiss layout places it, so it is hidden and quoted rather
  *  than stranded where it was; every other Swiss line is as in Stages 1–2. */
-function notPlacedRoles(p: Prepared, els: El[], style: StyleId | undefined): FaceKey[] {
+function notPlacedRoles(p: Prepared, els: El[], style: StyleId | undefined): RoleKey[] {
   const placed = new Set(els.filter(e => e.k === 't' || e.k === 'ring').map(e => (e.role ?? '').replace(/\d+$/, '')))
   const roles: FaceKey[] = !style || style === 'swiss' ? ['action'] : ROLES
-  return roles.filter(r => p.content[r] != null && !placed.has(r))
+  const base: RoleKey[] = roles.filter(r => p.content[r] != null && !placed.has(r))
+  // Stage 4 (Task 4): a content-view layout hides the content lines it does not place too (Offer
+  // first leaves a quote out), rather than leaving them where they were under the new layout.
+  if (!p.def.needsContent) return base
+  return [...base, ...NEW_TEXT_ROLES.filter(r => p.content.raw?.[r] != null && !placed.has(r))]
 }
+
+/** The text of a line `notPlacedRoles` named. */
+const lineText = (p: Prepared, r: RoleKey): string =>
+  ((NEW_TEXT_ROLES as readonly string[]).includes(r) ? p.content.raw?.[r as keyof NonNullable<Content['raw']>] : p.content[r as FaceKey]) ?? ''
 
 /** Apply a layout as ONE undo step: history → layers (pins of moved layers cleared) → groups →
  *  order. Refuses (`ok: false`, nothing written) when the plan has checker issues. */

@@ -77,9 +77,10 @@ const EXPECTED_THIN: (Partial<Combo> & { offered: number; reason: string })[] = 
   // layout — so this stays pinned exactly as the button-drawn measurement above.
   { style: 'performance', frame: 'meta-story', image: true, action: true, logo: true, offered: 1,
     reason: 'story, action and logo: the bands hide 55.8–78.8% of the visible image (limit 55%); only Price tag (50.0%)' },
-  // 300×250, logo only: Offer 69.5%, Sticker 55.9–58.6%, Card 56.4%, Centred 69.2–69.5%.
-  { style: 'performance', frame: 'ad-300x250', image: true, action: false, logo: true, offered: 1,
-    reason: '300×250 with a logo: the bands hide 55.9–69.5% of the image (limit 55%); only Price tag (50.0%)' },
+  // 300×250, logo only: Offer 69.5%, Sticker 55.9–58.6%, Card 56.4%, Centred 69.2–69.5% — of the
+  // Stage 3 layouts only Price tag (50.0%) is offered. No longer thin since Stage 4 Task 4: this
+  // Frame has a number, so Offer first (its image under the panel, no button band) is offered too
+  // — 2 layouts, the floor. The Stage 3 layouts' own count here is unchanged (1).
   // 300×250, action only: Offer 56.5%, Sticker 64.2–67.0%, Card 55.6%, Centred 77.5–77.9%.
   { style: 'performance', frame: 'ad-300x250', image: true, action: true, logo: false, offered: 1,
     reason: '300×250 with a button: the bands hide 55.6–77.9% of the image (limit 55%); only Price tag (50.0%)' },
@@ -188,14 +189,16 @@ describe('style matrix — each style\'s layouts through the real planner', () =
 
 describe('styles filter the library (ruling S4)', () => {
   const PERF = ['perfOffer', 'perfSticker', 'perfPriceTag', 'perfCard', 'perfCentred', 'perfStrip']
+  // Stage 4 (Task 4): the Performance ad layouts, appended after Street (seed order).
+  const ADS = ['perfOfferFirst', 'perfStat', 'perfReview', 'perfVersus']
   const ED = ['edCover', 'edFramed', 'edQuiet', 'edDiptych']
   const ST = ['stFill', 'stTag', 'stDrop', 'stRepeat', 'stStrip']
 
   it('the catalog is the 42 Swiss layouts, then Performance, Editorial and Street (seed order)', () => {
     expect(CATALOG.slice(0, 42)).toEqual(LAYOUTS)
     expect(LAYOUTS).toHaveLength(42)
-    expect(CATALOG.slice(42).map(l => l.id)).toEqual([...PERF, ...ED, ...ST])
-    expect(layoutsForStyle('performance').map(l => l.id)).toEqual(PERF)
+    expect(CATALOG.slice(42).map(l => l.id)).toEqual([...PERF, ...ED, ...ST, ...ADS])
+    expect(layoutsForStyle('performance').map(l => l.id)).toEqual([...PERF, ...ADS])
     expect(layoutsForStyle('editorial').map(l => l.id)).toEqual(ED)
     expect(layoutsForStyle('street').map(l => l.id)).toEqual(ST)
     expect(layoutsForStyle('swiss')).toBe(LAYOUTS)
@@ -205,7 +208,7 @@ describe('styles filter the library (ruling S4)', () => {
       expect(l.oneLineFirst, l.id).toBe(true)
     }
     for (const l of CATALOG.slice(48, 52)) expect(l.style, l.id).toBe('editorial')
-    for (const l of CATALOG.slice(52)) expect(l.style, l.id).toBe('street')
+    for (const l of CATALOG.slice(52, 57)) expect(l.style, l.id).toBe('street')
     expect(CATALOG.slice(42).filter(l => l.wideOnly).map(l => l.id)).toEqual(['perfStrip', 'stStrip'])
   })
 

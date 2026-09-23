@@ -8,6 +8,7 @@ import { behindPhoto, collage, dateBehind, ghost, label, overprint, tightStack }
 import { PERFORMANCE_LAYOUTS } from './performance'
 import { EDITORIAL_LAYOUTS } from './editorial'
 import { STREET_LAYOUTS } from './street'
+import { PERFORMANCE_AD_LAYOUTS } from './performanceAds'
 
 // ORDER RULE (Ruling R9): a layout's index in this list seeds its random choices
 // (`7000 + index·97 + 13 + arr·7919`, as in the prototype). The FINAL order of this list must
@@ -67,8 +68,10 @@ export const LAYOUTS: LayoutDef[] = [
 ]
 
 /** Every layout, in seed order: the 42 Swiss layouts, then each style's in the prototype's order
- *  (Performance 42–47, Editorial 48–51, Street 52–56). */
-export const CATALOG: readonly LayoutDef[] = [...LAYOUTS, ...PERFORMANCE_LAYOUTS, ...EDITORIAL_LAYOUTS, ...STREET_LAYOUTS]
+ *  (Performance 42–47, Editorial 48–51, Street 52–56), then the Stage 4 layouts, appended and never
+ *  interleaved so every earlier seed is unchanged (Performance ad layouts 57–60). */
+export const CATALOG: readonly LayoutDef[] = [...LAYOUTS, ...PERFORMANCE_LAYOUTS, ...EDITORIAL_LAYOUTS, ...STREET_LAYOUTS,
+  ...PERFORMANCE_AD_LAYOUTS]
 
 /** A layout and its seed index: the catalog's, or — for a layout a test registered — its place
  *  in `LAYOUTS` (as before Stage 3). */
