@@ -6,3 +6,5 @@ export type { Pins, PinH, PinV, FrameDoc, ResolveOptions, LayoutResult, Resolved
 export type { EffectivePins, GuideLines } from './preview'
 export { shapePresets, clampViewSize, resizeViewFromEdge, atDesignSize, readoutLabel } from './viewport'
 export type { Size, ShapePreset } from './viewport'
+export { axisInfo, bleeds, designExtentFor, holdAxis, settleAxis, pinsPatch, moveUnitAtView } from './viewEdit'
+export type { AxisInfo, AxisSpan, PinWrite, Settled, ViewEdit } from './viewEdit'
