@@ -66,10 +66,16 @@ export class WebGLPreviewRenderer implements PreviewRenderer {
   /** Per-clip load failures (clip id → message). Cleared per load(). */
   readonly loadWarnings = new Map<string, string>()
 
+  /** Video clips drawn through the seek-and-capture fallback, which can land
+   *  one frame off — fine for preview, not for export (recordTimeline refuses
+   *  them). Clip id → plain-language reason. Cleared per load(). */
+  readonly inexactClips = new Map<string, string>()
+
   async load(state: EditState, opts: RendererLoadOptions = {}): Promise<void> {
     if (this.disposed) return
     this.disposeSources()
     this.loadWarnings.clear()
+    this.inexactClips.clear()
     this.gl ??= new GlRenderer()
     this.state = state
     const resolve = opts.resolve ?? defaultResolve
@@ -87,7 +93,7 @@ export class WebGLPreviewRenderer implements PreviewRenderer {
           continue
         }
         loads.push(
-          this.loadSource(clip, plan, W, H, fps)
+          this.loadSource(clip.id, clip, plan, W, H, fps)
             .then(src => {
               if (this.disposed) { src.dispose(); return }
               this.sources.set(clip.id, src)
@@ -111,7 +117,7 @@ export class WebGLPreviewRenderer implements PreviewRenderer {
     if (this.state) this.state = state
   }
 
-  private async loadSource(clip: Clip, plan: Exclude<ResolutionPlan, null>, W: number, H: number, fps: number): Promise<FrameSource> {
+  private async loadSource(clipId: string, clip: Clip, plan: Exclude<ResolutionPlan, null>, W: number, H: number, fps: number): Promise<FrameSource> {
     switch (plan.kind) {
       case 'text':
         return new TextCanvasSource(clip as any, W, H, fps)
@@ -124,6 +130,7 @@ export class WebGLPreviewRenderer implements PreviewRenderer {
       case 'video': {
         if (await this.tooLargeForWebCodecs(plan.url)) {
           console.warn(`WebGLPreviewRenderer: ${plan.url} exceeds WebCodecs size cap — element source`)
+          this.inexactClips.set(clipId, 'the file is larger than 96 MB')
           return VideoElementSource.load(plan.url, fps)
         }
         try {
@@ -131,6 +138,7 @@ export class WebGLPreviewRenderer implements PreviewRenderer {
         } catch (e) {
           if (e instanceof UnsupportedSourceError) {
             console.warn(`WebGLPreviewRenderer: WebCodecs unavailable for ${plan.url} (${e.message}) — element fallback`)
+            this.inexactClips.set(clipId, 'this browser cannot decode its format frame by frame')
             return VideoElementSource.load(plan.url, fps)
           }
           throw e
