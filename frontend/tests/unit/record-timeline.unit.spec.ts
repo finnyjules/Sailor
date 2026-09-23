@@ -75,4 +75,39 @@ describe('recordTimeline', () => {
   it('describeClip speaks plainly', () => {
     expect(describeClip({ kind: 'lower_third', start_frame: 45 } as any, 30)).toBe('the lower third clip at 1.5 s')
   })
+
+  it('lists any clip the renderer draws nothing for as skipped — not just workflow', async () => {
+    const f = fakes()
+    const state = S([img('a', 0, 2), img('missing', 30, 10)])
+    const r = await recordTimeline(state, {
+      resolve: c => (c.id === 'missing' ? null : { url: 'u', kind: 'image' } as any), resolveAudioUrl: () => null,
+      createRenderer: () => f.renderer as any, record: f.record as any, mixAudio: f.mixAudio as any, createCanvas: f.createCanvas,
+    })
+    expect(r.skippedClips).toEqual(['the image clip at 1.0 s'])
+  })
+
+  it('does not refuse over an inexact clip on a muted track — the draw list never shows it', async () => {
+    const f = fakes({ inexact: [['v1', 'the file is larger than 96 MB']] })
+    const state = S([], {
+      tracks: [{ id: 'v', kind: 'video', name: 'V', muted: true, locked: false, clips: [{ id: 'v1', kind: 'video', asset_id: 'a', start_frame: 120, in_frame: 0, length: 30 }] }],
+    })
+    const r = await recordTimeline(state, {
+      resolve: () => null, resolveAudioUrl: () => null,
+      createRenderer: () => f.renderer as any, record: f.record as any, mixAudio: f.mixAudio as any, createCanvas: f.createCanvas,
+    })
+    expect(r.result).toBeDefined()
+    expect(r.skippedClips).toEqual([])
+  })
+
+  it('refuses with "a clip" rather than throwing when a warning names an unknown id', async () => {
+    const f = fakes({ failed: [['ghost', 'fetch 404']] })
+    const state = S([img('a', 0, 3)])
+    const err = await recordTimeline(state, {
+      resolve: () => ({ url: 'u', kind: 'image' } as any), resolveAudioUrl: () => null,
+      createRenderer: () => f.renderer as any, record: f.record as any, mixAudio: f.mixAudio as any, createCanvas: f.createCanvas,
+    }).then(() => null, e => e)
+    expect(err).toBeInstanceOf(TimelineExportRefused)
+    expect(err.clips).toEqual(['a clip'])
+    expect(err.message).toBe("These clips can't be drawn frame-exactly in the browser: a clip (fetch 404).")
+  })
 })

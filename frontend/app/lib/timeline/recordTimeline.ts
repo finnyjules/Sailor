@@ -1,7 +1,7 @@
 import type { Clip, EditState } from '~~/shared/timeline/types'
 import { computeTotalFrames } from '~~/shared/timeline/types'
 import type { ClipPreview } from '~/composables/usePlaybackEngine'
-import { WebGLPreviewRenderer } from '~/lib/engine/webglPreviewRenderer'
+import { WebGLPreviewRenderer, resolutionPlanFor } from '~/lib/engine/webglPreviewRenderer'
 import { recordVideo, type RecordResult } from '~/lib/engine/videoRecorder'
 import { mixTimelineAudio } from '~/lib/engine/audio/mixdown'
 
@@ -9,8 +9,12 @@ import { mixTimelineAudio } from '~/lib/engine/audio/mixdown'
 // same draw list, transitions, filters and text the preview shows) draws each
 // frame; the audio mix the preview plays becomes the sound track. A clip the
 // renderer can only draw ±1 frame, or could not load, is refused by name — an
-// export must not quietly contain a wrong frame. Workflow clips with no file
-// yet are left out, exactly as the server render does, and listed.
+// export must not quietly contain a wrong frame. A clip the renderer draws
+// nothing for at all — a workflow clip with no file yet, or an image/video
+// whose asset is missing — is left out, exactly as the server render does,
+// and listed by name in skippedClips. Both checks only look at clips on
+// tracks the draw list would ever show: a muted track's clips can't refuse
+// or vanish from an export that never drew them in the first place.
 
 type RendererLike = Pick<WebGLPreviewRenderer, 'load' | 'renderFrame' | 'dispose' | 'loadWarnings' | 'inexactClips'>
 
@@ -48,23 +52,40 @@ export async function recordTimeline(
   o.onPhase?.('mixing')
   const { buffer, skipped: skippedAudio } = await (deps.mixAudio ?? mixTimelineAudio)(state, deps.resolveAudioUrl)
 
+  // Clips the draw list never shows: muted or audio tracks (same filter as
+  // compositor's buildDrawList). A problem reported against one of these must
+  // never refuse an export it would never actually affect. An id that names
+  // no known clip at all is NOT hidden by this — it still refuses, just
+  // without a clip name to give (see describeById below).
+  const hiddenClipIds = new Set<string>()
+  for (const t of state.tracks) {
+    if (t.muted || t.kind === 'audio') for (const c of t.clips) hiddenClipIds.add(c.id)
+  }
+  const describeById = (id: string): string => {
+    const clip = clips.get(id)
+    return clip ? describeClip(clip, fps) : 'a clip'
+  }
+
   const renderer = (deps.createRenderer ?? (() => new WebGLPreviewRenderer()))()
   try {
     await renderer.load(state, { resolve: deps.resolve })
     const problems: [string, string][] = []
-    for (const [id, why] of renderer.inexactClips) problems.push([id, why])
-    for (const [id, why] of renderer.loadWarnings) problems.push([id, why])
+    for (const [id, why] of renderer.inexactClips) if (!hiddenClipIds.has(id)) problems.push([id, why])
+    for (const [id, why] of renderer.loadWarnings) if (!hiddenClipIds.has(id)) problems.push([id, why])
     if (problems.length) {
-      const names = problems.map(([id]) => describeClip(clips.get(id)!, fps))
+      const names = problems.map(([id]) => describeById(id))
       throw new TimelineExportRefused(
         `These clips can't be drawn frame-exactly in the browser: ${problems.map(([, why], i) => `${names[i]} (${why})`).join('; ')}.`,
         names,
       )
     }
+    // Any clip the renderer will draw nothing for (workflow with no file yet,
+    // or any clip whose asset failed to resolve) — same decision table the
+    // renderer itself uses, so nothing vanishes unannounced.
     const skippedClips: string[] = []
     for (const t of state.tracks) {
       if (t.muted || t.kind === 'audio') continue
-      for (const c of t.clips) if (c.kind === 'workflow' && !deps.resolve(c)) skippedClips.push(describeClip(c, fps))
+      for (const c of t.clips) if (resolutionPlanFor(c, deps.resolve(c)) === null) skippedClips.push(describeClip(c, fps))
     }
     o.onPhase?.('rendering')
     const scratch = (deps.createCanvas ?? (() => document.createElement('canvas')))()
