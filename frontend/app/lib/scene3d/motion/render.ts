@@ -16,7 +16,16 @@ export function sceneHasMotion(doc: SceneDoc): boolean {
     const m = o.motion
     if (m && ((m.loop && m.loop.kind !== 'none') || m.in || m.out)) return true
   }
+  // Keyframe tracks animate too: a scene moved only by tracks used to export as a still.
+  if ((doc.motion.tracks ?? []).some(t => t.from !== t.to)) return true
   return !!(doc.camera.motion && doc.camera.motion.preset !== 'none')
+}
+
+/** The one answer to "how long is this scene's loop" — the export, the node's frame source and
+ *  the surface all read it. A still scene is `{ animated: false, duration: 0 }`. */
+export function sceneLoop(doc: SceneDoc): { animated: boolean; duration: number; fps: number } {
+  const animated = sceneHasMotion(doc)
+  return { animated, duration: animated ? doc.motion.duration : 0, fps: doc.motion.fps }
 }
 
 export interface SceneFrameClock { duration: number; fps: number; width: number; height: number }

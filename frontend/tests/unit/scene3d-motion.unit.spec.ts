@@ -659,6 +659,34 @@ describe('sceneFrameClock', () => {
   })
 })
 
+import { sceneLoop } from '~/lib/scene3d/motion/render'
+
+describe('a scene animated only by keyframe tracks', () => {
+  const track = (from: number, to: number) => ({ path: 'camera.fov', from, to, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 })
+  it('counts as motion when a track moves', () => {
+    const doc = defaultDoc()
+    doc.motion = { ...doc.motion, tracks: [track(30, 60) as any] }
+    expect(sceneHasMotion(doc)).toBe(true)
+    expect(sceneFrameClock(doc).duration).toBe(doc.motion.duration)
+  })
+  it('a track that goes nowhere is not motion', () => {
+    const doc = defaultDoc()
+    doc.motion = { ...doc.motion, tracks: [track(40, 40) as any] }
+    expect(sceneHasMotion(doc)).toBe(false)
+  })
+})
+
+describe('sceneLoop', () => {
+  it('an animated scene loops for its motion duration at its fps', () => {
+    const doc = defaultDoc()
+    doc.motion = { ...doc.motion, duration: 3, fps: 24, tracks: [{ path: 'camera.fov', from: 30, to: 60, easing: 'linear', loops: 1, hold: 0, cycleOffset: 0, delay: 0 } as any] }
+    expect(sceneLoop(doc)).toEqual({ animated: true, duration: 3, fps: 24 })
+  })
+  it('a still scene reports animated false and duration 0', () => {
+    expect(sceneLoop(defaultDoc())).toMatchObject({ animated: false, duration: 0 })
+  })
+})
+
 describe('scene3d lighting fields', () => {
   it('defaults the new simple-lighting fields', () => {
     const d = defaultDoc()
