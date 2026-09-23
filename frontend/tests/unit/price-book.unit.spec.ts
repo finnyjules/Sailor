@@ -90,6 +90,9 @@ describe('price book: coverage of the codebase', () => {
   // Every provider model slug that appears in server code must be priced —
   // an unpriced model is unmetered spend waiting for Stage 4.
   const serverRoot = fileURLToPath(new URL('../../server', import.meta.url))
+  // Runner model tables are priced per stage by model id (priceGraph), guarded by
+  // runner-image-models / runner-video-models specs, so they are outside this per-call scan.
+  const RUNNER_MODEL_TABLES = join(serverRoot, 'runner', 'generators')
   const SLUG = /'((?:black-forest-labs|fal-ai|meta|bytedance|recraft-ai|ostris|lucataco|minimax|krea|851-labs)\/[a-z0-9./-]+)'/g
   // Non-inference references that legitimately appear in code without a price:
   const EXEMPT = new Set<string>([
@@ -101,8 +104,9 @@ describe('price book: coverage of the codebase', () => {
   function walk(dir: string, acc: string[] = []): string[] {
     for (const name of readdirSync(dir)) {
       const p = join(dir, name)
-      if (statSync(p).isDirectory()) walk(p, acc)
-      else if (p.endsWith('.ts')) acc.push(p)
+      if (statSync(p).isDirectory()) {
+        if (p !== RUNNER_MODEL_TABLES) walk(p, acc)
+      } else if (p.endsWith('.ts')) acc.push(p)
     }
     return acc
   }
