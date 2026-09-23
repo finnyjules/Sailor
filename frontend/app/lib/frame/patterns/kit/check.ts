@@ -1,4 +1,5 @@
 import { faceOf } from './types'
+import type { KeepClear } from '~/lib/frame/formats'
 import type { El, LayoutDef, MissingEl, RectEl, Sheet, Style, TextEl } from './types'
 
 // ═══════════════════════ the checker ═══════════════════════
@@ -110,8 +111,12 @@ function intersects(a: Box, b: Box): boolean {
   return Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0) > 0 && Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0) > 0
 }
 
+/** A format's keep-clear rule for the checker (Stage 2): the areas the platform covers, and the
+ *  frame's full height in kit units (the band is measured from it). */
+export interface CheckOpts { keep?: KeepClear; fullH?: number }
+
 /** Every rule; returns human-readable reasons (empty = passes). */
-export function checkPlan(els: El[], S: Sheet, premise?: LayoutDef['premise']): string[] {
+export function checkPlan(els: El[], S: Sheet, premise?: LayoutDef['premise'], opts?: CheckOpts): string[] {
   const issues: string[] = []
 
   // Rule 1: an element the layout couldn't place.
@@ -216,6 +221,22 @@ export function checkPlan(els: El[], S: Sheet, premise?: LayoutDef['premise']): 
       const e = byRole(role)
       const rot = e && 'rot' in e ? e.rot : undefined
       if (!rot) issues.push(`promise broken: ${role} should be rotated`)
+    }
+  }
+
+  // Rule 8: text under the platform's interface (a format with keep-clear areas). Text only —
+  // images, panels and bands run on under the app's bars. Measured on the real ink, like rule 3;
+  // a ring (the title set on a path) is text too, as in the prototype.
+  const keep = opts?.keep
+  if (keep) {
+    const fullH = opts?.fullH ?? S.H
+    const top = fullH * keep.top, bottom = fullH * (1 - keep.bottom)
+    const left = 100 * keep.left, right = 100 - 100 * keep.right
+    for (const { e, box } of boxed) {
+      if (e.k !== 't' && e.k !== 'ring') continue
+      if (box.y0 < top - 0.3 || box.y1 > bottom + 0.3 || box.x0 < left - 0.3 || box.x1 > right + 0.3) {
+        issues.push(`${roleLabel(e)}: under the app's interface`)
+      }
     }
   }
 

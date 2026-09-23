@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { applyLayoutToFrame, candidatesForFrame, planLayout } from '~/lib/frame/patterns/kit/plan'
+import { LAYOUTS } from '~/lib/frame/patterns/layouts/catalog'
+import { makeSheet } from '~/lib/frame/patterns/kit/sheet'
+import { boxOf } from '~/lib/frame/patterns/kit/check'
 import type { LayoutPlanArgs } from '~/lib/frame/patterns/kit/plan'
 import { __registerLayoutForTest } from '~/lib/frame/patterns/layouts/catalog'
 import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
@@ -421,5 +424,134 @@ describe('planLayout — the shape picker\'s library shape (I8)', () => {
     const a = planLayout(args({ layoutId: 'shapeCounter', shapeMode: { id: 'circle' } }))!
     const b = planLayout(args({ layoutId: 'shapeCounter', shapeMode: { id: 'circle' }, props: props(a.layers, { sailor_stackOrder: a.order }) }))!
     expect(b.layers.filter(l => l.kind === 'path')).toHaveLength(1)
+  })
+})
+
+// ═══════════════════════ Stage 2: the planner runs the Frame's format ═══════════════════════
+describe('planLayout — a format (Stage 2)', () => {
+  const fmtArgs = (preset: string | null, w: number, h: number, o: { image?: boolean } = {}): Omit<LayoutPlanArgs, 'choice' | 'layoutId'> => ({
+    props: props(frameLayers(o), preset ? { sailor_frame: { preset } } : {}),
+    frameW: w, frameH: h, palette, connectedSlots: [], measure: makeStubMeasure(),
+  })
+  const cands = (id: string, a: Omit<LayoutPlanArgs, 'choice' | 'layoutId'>) => candidatesForFrame({ ...a, layoutId: id })
+
+  // Recorded on 895×1280 (a custom size: no format) BEFORE Stage 2's planner change, with this
+  // file's Frame fixture: [no image, image]. A Frame with no format must plan exactly as Stage 1.
+  const STAGE1_COUNTS: Record<string, [number, number]> = {
+    runoff: [6, 8], statement: [8, 14], index: [4, 4], shapeCounter: [0, 0], photoBehind: [0, 2], fullBleed: [0, 4],
+    tilt: [2, 2], bottomHeavy: [4, 8], fourCorners: [4, 8], spacedLines: [2, 2], ragged: [3, 6], edges: [2, 4],
+    staircase: [1, 2], block: [1, 2], knockout: [0, 0], shapeBleed: [0, 0], badge: [0, 0], split: [0, 4],
+    diagonal: [4, 8], wall: [1, 2], scatter: [3, 3], cascade: [0, 0], ring: [0, 0], cells: [1, 2], kicker: [2, 4],
+    sidebar: [4, 4], footer: [4, 7], plate: [0, 4], panel: [0, 4], sideSplit: [0, 2], cross: [0, 1], overlap: [0, 4],
+    stamp: [0, 4], column: [0, 2], rising: [0, 4], overprint: [4, 8], dateBehind: [4, 8], tightStack: [4, 8],
+    behindPhoto: [0, 2], collage: [0, 0], label: [0, 4], ghost: [2, 4],
+  }
+
+  it('no format (895×1280, custom): plan.format is null and every layout offers exactly its Stage 1 candidates', () => {
+    expect(planLayout(args())!.format).toBeNull()
+    expect(Object.keys(STAGE1_COUNTS)).toEqual(LAYOUTS.map(l => l.id))
+    const got: Record<string, [number, number]> = {}
+    for (const l of LAYOUTS) got[l.id] = [cands(l.id, fmtArgs(null, 895, 1280)).length, cands(l.id, fmtArgs(null, 895, 1280, { image: true })).length]
+    expect(got).toEqual(STAGE1_COUNTS)
+  })
+
+  describe('meta-story (1080×1920, preset stored): compose in the uncovered band', () => {
+    const H_full = 100 * 1920 / 1080
+    const keep = { top: 0.14, bottom: 0.35, left: 0.06, right: 0.06 }
+    const Sfull = makeSheet({ frameW: 1080, frameH: 1920, measure: makeStubMeasure(), format: { view: 390 } })
+
+    it('the plan names the format', () => {
+      const plan = planLayout({ ...fmtArgs('meta-story', 1080, 1920), layoutId: 'statement', choice: { ...DEFAULT_CHOICE } })!
+      expect(plan.format).toEqual({ id: 'meta-story', label: 'Meta story / reel · 9:16', hidden: [] })
+    })
+
+    it.each(['runoff', 'statement', 'footer'])('%s: every text box of every candidate lies inside the band', (id) => {
+      for (const image of [false, true]) {
+        for (const c of cands(id, fmtArgs('meta-story', 1080, 1920, { image }))) {
+          for (const e of c.out.els) {
+            if (e.k !== 't') continue
+            const b = boxOf(e, Sfull)!
+            expect(b.y0, `${id} ${e.role}`).toBeGreaterThanOrEqual(H_full * keep.top - 0.3)
+            expect(b.y1, `${id} ${e.role}`).toBeLessThanOrEqual(H_full * (1 - keep.bottom) + 0.3)
+            expect(b.x0, `${id} ${e.role}`).toBeGreaterThanOrEqual(100 * keep.left - 0.3)
+            expect(b.x1, `${id} ${e.role}`).toBeLessThanOrEqual(100 - 100 * keep.right + 0.3)
+          }
+        }
+      }
+      if (id !== 'runoff') expect(cands(id, fmtArgs('meta-story', 1080, 1920)).length).toBeGreaterThan(0)
+    })
+
+    it('runoff is not offered: its title runs off the right edge, which the app covers (as in the prototype)', () => {
+      expect(cands('runoff', fmtArgs('meta-story', 1080, 1920))).toEqual([])
+      const plan = planLayout({ ...fmtArgs('meta-story', 1080, 1920), layoutId: 'runoff', choice: { ...DEFAULT_CHOICE } })!
+      expect(plan.issues).toContain('title: under the app\'s interface')
+    })
+
+    it('Full bleed with an image: the image runs on under the app\'s bars, 0..H_full', () => {
+      const list = cands('fullBleed', fmtArgs('meta-story', 1080, 1920, { image: true }))
+      expect(list.length).toBeGreaterThan(0)
+      for (const c of list) {
+        const ph = c.out.els.find(e => e.k === 'p' && e.bleed)!
+        const b = boxOf(ph, Sfull)!
+        expect(b.y0).toBeLessThanOrEqual(0)
+        expect(b.y1).toBeGreaterThanOrEqual(H_full)
+        expect(b.x0).toBeLessThanOrEqual(0)
+        expect(b.x1).toBeGreaterThanOrEqual(100)
+      }
+      const plan = planLayout({ ...fmtArgs('meta-story', 1080, 1920, { image: true }), layoutId: 'fullBleed', choice: list[0]!.choice })!
+      expect(plan.issues).toEqual([])
+      const img = plan.layers.find(l => l.id === 'img') as any
+      expect(img.h * 1080 / 1920).toBeGreaterThanOrEqual(1 - 1e-9)   // layer h by width → at least the full height
+    })
+  })
+
+  it('pmax-landscape (a wide band): the side image runs on to the real top and bottom, and stays on its side', () => {
+    const H_full = 100 * 628 / 1200
+    const Sfull = makeSheet({ frameW: 1200, frameH: 628, measure: makeStubMeasure(), format: { view: 390, keepSide: 0.1 } })
+    const list = cands('dateBehind', fmtArgs('pmax-landscape', 1200, 628, { image: true }))
+    expect(list.length).toBeGreaterThan(0)
+    for (const c of list) {
+      const b = boxOf(c.out.els.find(e => e.k === 'p')!, Sfull)!
+      expect(b.y0).toBeLessThanOrEqual(0)
+      expect(b.y1).toBeGreaterThanOrEqual(H_full)
+      expect(c.choice.side === 'left' ? b.x1 < 50 : b.x0 > 50).toBe(true)
+    }
+  })
+
+  describe('video-thumb (1280×720, preset stored): two levels, a readable minimum', () => {
+    const a = (o: { image?: boolean } = {}) => fmtArgs('video-thumb', 1280, 720, o)
+
+    it('hides the date and caption: named in plan.format, their layers end hidden, the others visible', () => {
+      const plan = planLayout({ ...a(), layoutId: 'statement', choice: { ...DEFAULT_CHOICE } })!
+      expect(plan.issues).toEqual([])
+      expect(plan.format).toEqual({ id: 'video-thumb', label: 'Video thumbnail · 16:9', hidden: ['date', 'caption'] })
+      const vis = (id: string) => (plan.layers.find(l => l.id === id) as any).visible
+      expect(vis('dt')).toBe(false)
+      expect(vis('c')).toBe(false)
+      expect(vis('t')).not.toBe(false)
+      expect(vis('d')).not.toBe(false)
+      expect(plan.posterState.roles).toEqual({ title: 't', details: 'd', date: 'dt', caption: 'c' })   // shape unchanged
+    })
+
+    it('without the stored preset, 1280×720 is the plain 16:9 size: no format, nothing hidden (P5)', () => {
+      const plan = planLayout({ ...fmtArgs(null, 1280, 720), layoutId: 'statement', choice: { ...DEFAULT_CHOICE } })!
+      expect(plan.format).toBeNull()
+      expect((plan.layers.find(l => l.id === 'dt') as any).visible).not.toBe(false)
+    })
+
+    it('a layout built around the smaller text (Index) is not offered; it is without the format', () => {
+      expect(LAYOUTS.filter(l => l.smallText).map(l => l.id).sort())
+        .toEqual(['badge', 'dateBehind', 'fourCorners', 'index', 'label', 'sidebar'])
+      expect(cands('index', a())).toEqual([])
+      expect(cands('index', fmtArgs(null, 1280, 720)).length).toBeGreaterThan(0)
+    })
+
+    it('minimum size: every text element of every candidate is at least 9px at 170px wide', () => {
+      let n = 0
+      for (const l of LAYOUTS) for (const image of [false, true]) for (const c of cands(l.id, a({ image }))) {
+        for (const e of c.out.els) if (e.k === 't') { n++; expect(e.size, `${l.id} ${e.role}`).toBeGreaterThanOrEqual(900 / 170 - 0.01) }
+      }
+      expect(n).toBeGreaterThan(0)
+    })
   })
 })

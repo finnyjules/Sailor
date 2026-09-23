@@ -200,7 +200,7 @@ export const kicker: LayoutDef = {
 
 /** Sidebar — title in eight columns; information in the last three, from the same cap line. */
 export const sidebar: LayoutDef = {
-  id: 'sidebar', name: 'Sidebar', fits: [...LINES],
+  id: 'sidebar', name: 'Sidebar', fits: [...LINES], smallText: true,
   fn(S, { c, ph, lines }) {
     const { X, SPAN, L, M, GAP, DISPLAY, sizeFor, blockH, disp, infoStack, photoIn } = S
     const maxH = (ph ? L(8) : L(16)) - M

@@ -47,7 +47,7 @@ export const overprint: LayoutDef = {
 
 /** Number behind — the date (a number), huge in accent, sits behind the title. */
 export const dateBehind: LayoutDef = {
-  id: 'dateBehind', name: 'Number behind', fits: [...ALL],
+  id: 'dateBehind', name: 'Number behind', fits: [...ALL], smallText: true,
   needs: { number: true },
   premise: { overlap: [['title', 'date']] },
   fn(S, { c, ph, lines }) {
@@ -131,7 +131,7 @@ export const collage: LayoutDef = {
 
 /** Label — a tag in the field colour holds the smaller text and sits over the image's corner. */
 export const label: LayoutDef = {
-  id: 'label', name: 'Label', fits: [...ALL],
+  id: 'label', name: 'Label', fits: [...ALL], smallText: true,
   // Its tag is always its own piece, never the user's shape, so a shape is not required (prototype asked for one).
   needs: { image: true },
   premise: { overlap: [['label', 'photo']] },

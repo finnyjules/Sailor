@@ -55,7 +55,7 @@ export const shapeBleed: LayoutDef = {
 
 /** Badge — the date in a small round badge, top right; the title large below. */
 export const badge: LayoutDef = {
-  id: 'badge', name: 'Badge', fits: [...ALL],
+  id: 'badge', name: 'Badge', fits: [...ALL], smallText: true,
   needs: { shape: true },
   fn(S, { c, ph, lines }) {
     const { X, XR, SPAN, L, M, GAP, DISPLAY, SECOND, INFO, sizeFor, blockH, countLines, disp, sec, info, photoIn, q } = S

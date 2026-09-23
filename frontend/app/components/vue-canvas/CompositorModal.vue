@@ -1000,8 +1000,10 @@ const selectionGuides = computed(() => {
 const layoutTabShowing = ref(false)
 const layoutVary = useLayoutVary({
   props: () => compositor.value?.data?.properties as Record<string, unknown> | undefined,
-  frameW: () => canvasDisplay.w,
-  frameH: () => canvasDisplay.h,
+  // The Frame's DESIGN size in pixels (not the on-screen artboard): a format is found by its
+  // exact size (Stage 2, ruling P5). Kit geometry depends only on the aspect.
+  frameW: () => designSize.value.w,
+  frameH: () => designSize.value.h,
   connectedSlots: () => connectedSlots0.value,
   editor: () => editor,
   // Merge, so the picker state kept alongside (shape, image, palette) survives an apply.

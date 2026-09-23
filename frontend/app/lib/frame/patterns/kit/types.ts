@@ -23,6 +23,9 @@ export interface LayoutDef {
   id: string; name: string; fits: Kind[]
   needs?: { image?: boolean; shape?: boolean; number?: boolean }
   oneLineFirst?: boolean; keepScale?: boolean; ownPhoto?: boolean
+  /** Built around the smaller text (the prototype's list): does not fit a format that carries
+   *  fewer than three levels. */
+  smallText?: boolean
   /** The layout's promise, asserted by the checker: roles that must overlap, must bleed, must be rotated. */
   premise?: { overlap?: [string, string][]; bleed?: string[]; rotated?: string[] }
   fn(S: Sheet, ctx: LayoutCtx): LayoutOut

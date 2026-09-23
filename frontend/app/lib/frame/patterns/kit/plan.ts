@@ -14,8 +14,10 @@ import { applyPlacement } from '../apply'
 import { nextOrderFor } from '../order'
 import { clearGroupPinsOfMoved, clearPinsOfMoved } from '../pins'
 import { LAYOUTS } from '../layouts/catalog'
+import { formatFor } from '~/lib/frame/formats'
+import type { FrameFormat, KeepClear } from '~/lib/frame/formats'
 import { makeSheet } from './sheet'
-import type { Sheet } from './sheet'
+import type { Sheet, SheetOpts } from './sheet'
 import { makeCanvasMeasure } from './measure'
 import { boxOf, checkPlan } from './check'
 import { elementsToOps } from './toOps'
@@ -66,6 +68,9 @@ export interface LayoutPlan {
   did: string
   issues: string[]
   posterState: { patternId: string; seed: number; choice: Choice; roles: StoredRoles }
+  /** The format the Frame is sized for (ruling P5) and the roles it hid because the format
+   *  carries fewer levels (the UI quotes their text). Null: no format, the Stage 1 plan. */
+  format: { id: string; label: string; hidden: RoleKey[] } | null
 }
 
 /** Which layer holds which role, as the last apply saw it (`sailor_posterState.roles`). */
@@ -83,6 +88,10 @@ interface Prepared {
   hasImage: boolean
   measure: Measure
   grid: ReturnType<typeof readGrid>
+  /** The Frame's format (Stage 2), or null — then everything runs exactly as in Stage 1. */
+  fmt: FrameFormat | null
+  /** Roles on the Frame the format does not carry: removed from `content`, their layers hidden. */
+  hidden: RoleKey[]
 }
 
 const ROLES: RoleKey[] = ['title', 'details', 'date', 'caption']
@@ -108,6 +117,14 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
     const t = elements[r]?.text
     if (t && t.trim()) content[r] = t
   }
+  // Levels (Stage 2): a format that carries N levels keeps the first N of title → details →
+  // date → caption; the rest leave the content before the layout runs, and their layers are hidden.
+  const fmt = formatFor(a.props, a.frameW, a.frameH)
+  const hidden: RoleKey[] = []
+  if (fmt) {
+    const carries = fmt.carries ?? 4
+    for (const r of ROLES.slice(carries)) if (content[r] != null) { delete content[r]; hidden.push(r) }
+  }
   const kind = kindOf(elements.title.words.length) as Kind
   const targets: RoleTargets = {}
   for (const r of ROLES) if (elements[r]) targets[r] = elements[r]!.id
@@ -125,7 +142,7 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
   const measure = a.measure ?? makeCanvasMeasure({
     title: layerOf('title'), details: layerOf('details'), date: layerOf('date'), caption: layerOf('caption'),
   })
-  return { def, index, layers, elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props) }
+  return { def, index, layers, elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props), fmt, hidden }
 }
 
 /** The roles the last apply stored win over size inference: an overlap layout (Ghost, Number
@@ -163,21 +180,44 @@ function fitsFrame(p: Prepared): boolean {
   if (!def.fits.includes(p.kind)) return false
   if (def.needs?.image && !p.hasImage) return false
   if (def.needs?.shape && !(elements.shapes.length > 0 || elements.shapeMode != null)) return false
+  // A hidden role has left `content`, so a number in a hidden date never counts.
   if (def.needs?.number && !isNumberish(p.content.date)) return false
+  // Built around the smaller text: no room for it in a format that carries fewer than three levels.
+  if (def.smallText && p.fmt && (p.fmt.carries ?? 4) < 3) return false
   return true
 }
 
 /** The seed of a choice's random stream (the prototype's). */
 const seedFor = (index: number, choice: Choice) => 7000 + index * 97 + 13 + choice.arr * 7919
 
+/** The sheet options a format sets (Stage 2): its minimum text size, column count and side
+ *  margins. Undefined without a format, so the sheet is exactly Stage 1's. */
+function formatSheetOpts(fmt: FrameFormat | null): SheetOpts['format'] {
+  if (!fmt) return undefined
+  const keepSide = fmt.keep ? Math.max(fmt.keep.left, fmt.keep.right) : undefined
+  return { view: fmt.view, nc: fmt.nc, ...(keepSide != null ? { keepSide } : {}) }
+}
+
 /** Run the layout for one choice — the ONE pipeline shared by plan and candidates. Wide frames
  *  with an image get the prototype's side image (`runCandidate`): the layout composes on the
  *  first 62% of the columns (the last ones when the image is on the left) and the image bleeds
- *  full height on the other side. */
+ *  full height on the other side.
+ *
+ *  A format with keep-clear areas (Stage 2, the prototype's `runCandidate`): the layout composes
+ *  inside the band the platform leaves uncovered, everything is moved down by the top inset, and
+ *  a panel or a bleeding image that fills the band runs on to the real edges — only text keeps
+ *  clear. The returned sheet is then the full-height one (for the checker and the ops). */
 function runChoice(p: Prepared, a: { frameW: number; frameH: number }, choice: Choice): Run {
-  const opts = {
+  const fmt = p.fmt
+  const keep = fmt?.keep
+  const H_full = 100 * a.frameH / a.frameW
+  const inset = keep ? H_full * keep.top : 0
+  const format = formatSheetOpts(fmt)
+  const opts: SheetOpts = {
     frameW: a.frameW, frameH: a.frameH, grid: p.grid, measure: p.measure,
     scale: choice.scale === 'quiet' ? 0.8 : 1, flip: choice.side === 'left',
+    ...(format ? { format } : {}),
+    ...(keep ? { composeH: H_full * (1 - keep.top - keep.bottom) } : {}),
   }
   let S = makeSheet(opts)
   let side: PhotoEl | null = null
@@ -204,19 +244,44 @@ function runChoice(p: Prepared, a: { frameW: number; frameH: number }, choice: C
   const out = p.def.fn(S, { c, kind: p.kind, ph: p.hasImage && !side, r, words, lines, arr: choice.arr })
   // Run-off keeps its image OVER the title (the title runs under it); everything else puts it behind.
   if (side && p.def.id === 'runoff') { side.ok = true; out.els.push(side) } else if (side) out.els.unshift(side)
-  return { out, S, side }
+  if (!keep) return { out, S, side }
+
+  // Compose-in-the-band → the real frame: move down by the top inset, then extend what fills the band.
+  const { W, PHOTO_ASPECT } = S
+  const bandEnd = H_full * (1 - keep.bottom)
+  for (const e of out.els) {
+    const m = e as unknown as Record<string, number | undefined>
+    for (const k of ['y', 'top', 'base', 'cy'] as const) if (m[k] != null) m[k] = m[k]! + inset
+  }
+  for (const e of out.els) {
+    if (e.k === 'r' && e.role === 'panel' && e.y <= inset + 0.5 && e.y + e.h >= bandEnd - 0.5) { e.y = 0; e.h = H_full; continue }
+    if (e.k !== 'p' || !e.bleed || e.y > inset + 0.5 || e.y + e.h < bandEnd - 0.5) continue
+    if (e === side) {
+      // The wide band's side image runs on to the real top and bottom on ITS side (the
+      // prototype's centred cover would spread it across the whole frame, over the type).
+      const w = Math.max(e.w, H_full / PHOTO_ASPECT), h = w * PHOTO_ASPECT
+      Object.assign(e, { x: choice.side === 'left' ? e.x + e.w - w : e.x, y: (H_full - h) / 2, w, h })
+      continue
+    }
+    const w = Math.max(W, H_full / PHOTO_ASPECT, e.w), h = w * PHOTO_ASPECT
+    Object.assign(e, { x: e.x + (e.w - w) / 2, y: (H_full - h) / 2, w, h })
+  }
+  // The checker and the ops work on the real, full-height frame.
+  const { composeH: _band, colRange: _cols, ...fullOpts } = opts
+  return { out, S: makeSheet(fullOpts), side, keep, fullH: H_full }
 }
 
-interface Run { out: LayoutOut; S: Sheet; side: PhotoEl | null }
+interface Run { out: LayoutOut; S: Sheet; side: PhotoEl | null; keep?: KeepClear; fullH?: number }
 
 /** The checker, with one adaptation for the side image of a wide frame: there the side image's
  *  edge is the page's edge for the type, so a `bleed` premise holds when the role runs off the
  *  page OR runs under the side image (Run-off's title on a wide frame runs under the image, as
  *  in the prototype). Every other rule and premise is checked unchanged. */
-function checkRun({ out, S, side }: Run, premise: LayoutDef['premise']): string[] {
+function checkRun({ out, S, side, keep, fullH }: Run, premise: LayoutDef['premise']): string[] {
   const bleed = premise?.bleed ?? []
-  if (!side || !bleed.length) return checkPlan(out.els, S, premise)
-  const issues = checkPlan(out.els, S, { ...premise, bleed: [] })
+  const opts = keep ? { keep, fullH } : undefined
+  if (!side || !bleed.length) return checkPlan(out.els, S, premise, opts)
+  const issues = checkPlan(out.els, S, { ...premise, bleed: [] }, opts)
   const sb = boxOf(side, S)!
   for (const role of bleed) {
     const e = out.els.find(x => x.k !== 'missing' && x.role === role)
@@ -261,7 +326,7 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
 
   const libraryShape = p.targets.shape ? undefined : pickLibraryShape(p.elements.shapeMode, seedFor(p.index, a.choice))
   const targets = libraryShape ? { ...p.targets, libraryShape } : p.targets
-  const el = elementsToOps(out.els, S, targets, { w: a.frameW, h: a.frameH }, a.palette)
+  const el = elementsToOps(out.els, S, targets, { w: a.frameW, h: a.frameH }, a.palette, p.hidden.length ? { hide: p.hidden } : undefined)
   // Stand-in image / library shape sentinels become real layers first (existing path).
   const ins = insertFromOps(p.layers, el.ops, a.palette, `stand-${p.def.id}-${seedFor(p.index, a.choice)}`)
   // Ruling R7: merge the owned pieces FIRST, so `present` (and so the order) includes them.
@@ -283,6 +348,7 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
   return {
     layers: next, order, did: out.did, issues,
     posterState: { patternId: p.def.id, seed: seedFor(p.index, a.choice), choice: { ...a.choice }, roles: rolesOf(p.elements) },
+    format: p.fmt ? { id: p.fmt.id, label: p.fmt.label, hidden: [...p.hidden] } : null,
   }
 }
 
@@ -313,7 +379,8 @@ export function candidatesForFrame(a: Omit<LayoutPlanArgs, 'choice'>): Candidate
     return ran.out
   }
   const check = (out: LayoutOut) => checkRun(runs.get(out)!, p.def.premise)
-  const infoSize = makeSheet({ frameW: a.frameW, frameH: a.frameH, grid: p.grid, measure: p.measure }).INFO.size
+  const format = formatSheetOpts(p.fmt)
+  const infoSize = makeSheet({ frameW: a.frameW, frameH: a.frameH, grid: p.grid, measure: p.measure, ...(format ? { format } : {}) }).INFO.size
   return enumerate(p.def, { kind: p.kind, title: p.content.title, hasImage: p.hasImage, run, check, infoSize })
 }
 

@@ -64,7 +64,7 @@ export const statement: LayoutDef = {
 
 /** Index — title top-left, a ruled table on the right, the date large at the foot in accent. */
 export const index: LayoutDef = {
-  id: 'index', name: 'Index', fits: [...ALL],
+  id: 'index', name: 'Index', fits: [...ALL], smallText: true,
   fn(S, { c, ph, lines }) {
     const { X, SPAN, L, M, RH, GAP, CAP, DISPLAY, INFO, fitSize, sizeFor, blockH, countLines, disp, info, rule, photoIn, q } = S
     const size = sizeFor(lines, SPAN(1, 8), RH * 5)
@@ -197,7 +197,7 @@ export const bottomHeavy: LayoutDef = {
 
 /** Four corners — the title flush-left mid-page; the small texts pinned to three corners of the grid. */
 export const fourCorners: LayoutDef = {
-  id: 'fourCorners', name: 'Four corners', fits: [...ALL],
+  id: 'fourCorners', name: 'Four corners', fits: [...ALL], smallText: true,
   fn(S, { c, ph, lines }) {
     const { X, SPAN, L, M, GAP, DISPLAY, SECOND, sizeFor, blockH, countLines, disp, sec, info, photoIn } = S
     const maxH = ph ? L(12) - L(8) : L(12) - L(3)

@@ -234,3 +234,38 @@ describe('checker — an unbreakable word wider than its box counts (real ink)',
     expect(checkPlan([date({ s: '2026', x: 88 })], S)).toEqual([])
   })
 })
+
+describe('checker rule 8 — text under the app\'s interface (a format\'s keep-clear areas)', () => {
+  // meta-story: 1080×1920, top 14%, bottom 35%, sides 6%. Full height 177.78; band 24.9..115.6.
+  const fullH = 100 * 1920 / 1080
+  const keep = { top: 0.14, bottom: 0.35, left: 0.06, right: 0.06 }
+  const Sst = makeSheet({ frameW: 1080, frameH: 1920, measure })
+  const inBand = (o: Partial<TextEl> = {}) => title({ x: 10, w: 40, top: 40, ...o })
+
+  it('text inside the uncovered band passes', () => {
+    expect(checkPlan([inBand()], Sst, undefined, { keep, fullH })).toEqual([])
+  })
+
+  it('negative control: the same text at top 1 is under the app\'s interface', () => {
+    expect(checkPlan([inBand({ top: 1 })], Sst, undefined, { keep, fullH })).toEqual(['title: under the app\'s interface'])
+  })
+
+  it('without keep-clear areas the same text passes (the rule is the format\'s alone)', () => {
+    expect(checkPlan([inBand({ top: 1 })], Sst)).toEqual([])
+  })
+
+  it('the bottom and side areas count too', () => {
+    const c = (o: Partial<TextEl>) => checkPlan([inBand(o)], Sst, undefined, { keep, fullH })
+    expect(c({ top: 120 })).toEqual(['title: under the app\'s interface'])
+    expect(c({ x: 2 })).toEqual(['title: under the app\'s interface'])
+    expect(c({ x: 90, w: 9 })).toContain('title: under the app\'s interface')
+  })
+
+  it('only text: an image and a panel under the bars pass', () => {
+    const els: El[] = [
+      { k: 'p', x: 0, y: 0, w: 100, h: fullH, role: 'photo', ok: true },
+      { k: 'r', x: 0, y: 0, w: 100, h: 10, role: 'band', ok: true },
+    ]
+    expect(checkPlan(els, Sst, undefined, { keep, fullH })).toEqual([])
+  })
+})
