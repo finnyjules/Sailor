@@ -1,15 +1,18 @@
 import { describe, it, expect } from 'vitest'
 import { writeFileSync } from 'node:fs'
 import { applyLayoutToFrame, candidatesForFrame, planLayout } from '~/lib/frame/patterns/kit/plan'
+import { boxOf, checkPlan } from '~/lib/frame/patterns/kit/check'
+import { __registerLayoutForTest } from '~/lib/frame/patterns/layouts/catalog'
+import { stTag } from '~/lib/frame/patterns/layouts/street'
 import type { LayoutPlanArgs } from '~/lib/frame/patterns/kit/plan'
 import { CATALOG, LAYOUTS, layoutsForStyle } from '~/lib/frame/patterns/layouts/catalog'
 import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
 import { makeSheet } from '~/lib/frame/patterns/kit/sheet'
-import type { Kind, LayoutDef, RoleKey } from '~/lib/frame/patterns/kit/types'
+import type { El, Kind, LayoutDef, RoleKey } from '~/lib/frame/patterns/kit/types'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { StyleId } from '~/lib/frame/patterns/kit/styles'
 import { FRAME_FORMATS } from '~/lib/frame/formats'
-import { AD_LOGO, adFrameLayers, frameLayers, palette } from './helpers/frameLayoutFixtures'
+import { AD_LOGO, adFrameLayers, eventFrameLayers, frameLayers, galleryFrameLayers, palette } from './helpers/frameLayoutFixtures'
 
 // ═══════════════════════ the style matrix (Stage 3, Tasks 5–7) ═══════════════════════
 // Each style's layouts × six frames (three plain shapes and three formats) × {word, phrase,
@@ -41,6 +44,8 @@ type Combo = { style: StyleId; frame: string; kind: Kind; image: boolean; action
 /** A style under test: the Frame its content fixture builds. */
 const STYLE_RUNS: { style: StyleId; layers: (kind: Kind, o: { image: boolean; action: boolean }) => ReturnType<typeof adFrameLayers> }[] = [
   { style: 'performance', layers: adFrameLayers },
+  { style: 'editorial', layers: galleryFrameLayers },
+  { style: 'street', layers: eventFrameLayers },
 ]
 
 const floorOf = (c: Combo) => (c.image ? 2 : 1)
@@ -169,19 +174,25 @@ describe('style matrix — each style\'s layouts through the real planner', () =
 
 describe('styles filter the library (ruling S4)', () => {
   const PERF = ['perfOffer', 'perfSticker', 'perfPriceTag', 'perfCard', 'perfCentred', 'perfStrip']
+  const ED = ['edCover', 'edFramed', 'edQuiet', 'edDiptych']
+  const ST = ['stFill', 'stTag', 'stDrop', 'stRepeat', 'stStrip']
 
-  it('the catalog is the 42 Swiss layouts, then the six Performance layouts (seed order)', () => {
+  it('the catalog is the 42 Swiss layouts, then Performance, Editorial and Street (seed order)', () => {
     expect(CATALOG.slice(0, 42)).toEqual(LAYOUTS)
     expect(LAYOUTS).toHaveLength(42)
-    expect(CATALOG.slice(42).map(l => l.id)).toEqual(PERF)
+    expect(CATALOG.slice(42).map(l => l.id)).toEqual([...PERF, ...ED, ...ST])
     expect(layoutsForStyle('performance').map(l => l.id)).toEqual(PERF)
+    expect(layoutsForStyle('editorial').map(l => l.id)).toEqual(ED)
+    expect(layoutsForStyle('street').map(l => l.id)).toEqual(ST)
     expect(layoutsForStyle('swiss')).toBe(LAYOUTS)
     expect(layoutsForStyle()).toBe(LAYOUTS)
-    for (const l of CATALOG.slice(42)) {
+    for (const l of CATALOG.slice(42, 48)) {
       expect(l.style, l.id).toBe('performance')
       expect(l.oneLineFirst, l.id).toBe(true)
     }
-    expect(CATALOG.slice(42).filter(l => l.wideOnly).map(l => l.id)).toEqual(['perfStrip'])
+    for (const l of CATALOG.slice(48, 52)) expect(l.style, l.id).toBe('editorial')
+    for (const l of CATALOG.slice(52)) expect(l.style, l.id).toBe('street')
+    expect(CATALOG.slice(42).filter(l => l.wideOnly).map(l => l.id)).toEqual(['perfStrip', 'stStrip'])
   })
 
   const plain = { frameW: 1280, frameH: 720, palette, connectedSlots: [], measure: makeStubMeasure() }
@@ -204,6 +215,27 @@ describe('styles filter the library (ruling S4)', () => {
 
   it('Strip is offered only on a wide sheet', () => {
     const at = (w: number, h: number) => candidatesForFrame({ ...plain, frameW: w, frameH: h, props: withImage('phrase'), layoutId: 'perfStrip', style: 'performance' }).length
+    expect(at(1280, 720)).toBeGreaterThan(0)            // H 56.3
+    expect(at(1080, 1080)).toBe(0)                      // H 100
+    expect(at(895, 1280)).toBe(0)                       // H 143
+  })
+
+  it('a style\'s layouts are offered only to that style', () => {
+    for (const id of [...ED, ...ST]) {
+      // Strip beside a side image has no room for the title with a button (see the report): no image.
+      const props = { sailor_localLayers: eventFrameLayers('phrase', { image: id !== 'stStrip', action: true }) }
+      const own = ED.includes(id) ? 'editorial' : 'street'
+      for (const style of [undefined, 'swiss', 'performance', 'editorial', 'street'] as const) {
+        if (style === own) continue
+        expect(candidatesForFrame({ ...plain, props, layoutId: id, ...(style ? { style } : {}) }), `${id} ${style}`).toEqual([])
+      }
+      expect(candidatesForFrame({ ...plain, props, layoutId: id, style: own }).length, id).toBeGreaterThan(0)
+    }
+  })
+
+  it('Street Strip is offered only on a wide sheet', () => {
+    const props = { sailor_localLayers: eventFrameLayers('phrase', { image: false, action: true }) }
+    const at = (w: number, h: number) => candidatesForFrame({ ...plain, frameW: w, frameH: h, props, layoutId: 'stStrip', style: 'street' }).length
     expect(at(1280, 720)).toBeGreaterThan(0)            // H 56.3
     expect(at(1080, 1080)).toBe(0)                      // H 100
     expect(at(895, 1280)).toBe(0)                       // H 143
@@ -288,3 +320,126 @@ describe('lines a style layout does not place are hidden (fix round 1)', () => {
   })
 })
 
+
+describe('the title drawn as several lines is never hidden (ruling R4)', () => {
+  const at = (layoutId: string, kind: Kind, image: boolean) => {
+    const a = { frameW: 895, frameH: 1280, palette, connectedSlots: [], measure: makeStubMeasure(), style: 'street' as const,
+      props: { sailor_localLayers: eventFrameLayers(kind, { image, action: true }) }, layoutId }
+    return { a, cands: candidatesForFrame(a) }
+  }
+  const titleEls = (els: El[]) => els.filter(e => e.k === 't' && /^title\d*$/.test(e.role ?? ''))
+
+  it.each([['stFill', 'phrase'], ['stFill', 'sentence'], ['stTag', 'sentence'], ['stRepeat', 'phrase'], ['stRepeat', 'word']] as const)('%s (%s): every choice keeps the title layer shown, as ONE layer', (id, kind) => {
+    const { a, cands } = at(id, kind, id === 'stTag')
+    expect(cands.length).toBeGreaterThan(0)
+    let several = 0
+    for (const cand of cands) {
+      const plan = planLayout({ ...a, choice: cand.choice })!
+      expect(plan.issues).toEqual([])
+      expect(plan.notPlaced.map(n => n.role)).not.toContain('title')
+      const title = plan.layers.find(l => l.id === 't') as { visible?: boolean; runs?: unknown[] }
+      expect(title.visible, JSON.stringify(cand.choice)).not.toBe(false)
+      // Several title elements (title, title1, …) become runs of the one title layer — no new text layers.
+      const n = titleEls(cand.out.els).length
+      if (n > 1) { several++; expect(title.runs?.length ?? 0).toBeGreaterThanOrEqual(n) }
+      expect(plan.layers.filter(l => l.kind === 'text').length).toBe(5)
+    }
+    expect(several, 'some choice draws the title as several elements').toBeGreaterThan(0)
+  })
+
+  it('Editorial places every line: nothing hidden', () => {
+    for (const id of ['edCover', 'edFramed', 'edQuiet', 'edDiptych']) {
+      const a = { frameW: 895, frameH: 1280, palette, connectedSlots: [], measure: makeStubMeasure(), style: 'editorial' as const,
+        props: { sailor_localLayers: galleryFrameLayers('sentence', { image: true, action: true }) }, layoutId: id }
+      const plan = planLayout({ ...a, choice: candidatesForFrame(a)[0]!.choice })!
+      expect(plan.notPlaced, id).toEqual([])
+      for (const l of plan.layers) if (l.kind === 'text') expect((l as { visible?: boolean }).visible, `${id} ${l.id}`).not.toBe(false)
+    }
+  })
+})
+
+describe('the Editorial and Street findings, pinned', () => {
+  const base = { frameW: 895, frameH: 1280, palette, connectedSlots: [], measure: makeStubMeasure() }
+
+  it('Editorial\'s action is a link: the user\'s text underlined, no button shape (ruling R3)', () => {
+    const a = { ...base, style: 'editorial' as const, props: { sailor_localLayers: galleryFrameLayers('phrase', { image: true, action: true }) }, layoutId: 'edCover' }
+    const cand = candidatesForFrame(a)[0]!
+    expect(cand.out.els.find(e => e.k === 'btn')).toMatchObject({ shape: 'link' })
+    const plan = planLayout({ ...a, choice: cand.choice })!
+    expect(plan.issues).toEqual([])
+    expect(plan.layers.some(l => (l as { owner?: { key: string } }).owner?.key.startsWith('button'))).toBe(false)
+    expect((plan.layers.find(l => l.id === 'a') as { underline?: boolean }).underline).toBe(true)
+  })
+
+  it('Street\'s tag holds the user\'s own number: the date layer, rotated on an owned accent rect', () => {
+    const a = { ...base, style: 'street' as const, props: { sailor_localLayers: eventFrameLayers('phrase', { image: false, action: true }) }, layoutId: 'stFill' }
+    const cand = candidatesForFrame(a)[0]!
+    const tagText = cand.out.els.find(e => e.k === 't' && e.role === 'date')!
+    expect(tagText).toMatchObject({ s: 'Sat 4.10., 18–23h', inside: 'tag', origin: 'center' })
+    expect(tagText.k === 't' && tagText.rot).toBe(-7)
+    const plan = planLayout({ ...a, choice: cand.choice })!
+    expect(plan.issues).toEqual([])
+    expect((plan.layers.find(l => l.id === 'dt') as { rotation: number }).rotation).toBe(-7)
+    expect(plan.layers.some(l => (l as { owner?: { key: string } }).owner?.key === 'tag-0')).toBe(true)
+    // The details are not placed when the tag holds the number: hidden, quoted.
+    expect(plan.notPlaced).toEqual([{ role: 'details', text: 'Mara Lind and guests' }])
+  })
+
+  it('Street Tag (ruling S5): the title and the fine print sit on a band — the prototype set them straight on the image', () => {
+    const props = { sailor_localLayers: eventFrameLayers('phrase', { image: true, action: true }) }
+    const a = { ...base, style: 'street' as const, props, layoutId: 'stTag' }
+    const cands = candidatesForFrame(a)
+    expect(cands.length).toBeGreaterThan(0)
+    for (const cand of cands) {
+      const band = cand.out.els.find(e => e.k === 'band')!
+      const title = cand.out.els.find(e => e.k === 't' && e.role === 'title')!
+      expect(band.k === 'band' && title.k === 't' && band.y + band.h * (1 - band.solid) <= title.top!, 'the band is solid from the title\'s cap line down').toBe(true)
+    }
+    // The prototype's geometry — the same layout without the band — fails rule 10.
+    const proto: LayoutDef = { ...stTag, id: 'protoStTag', fn: (S, ctx) => { const out = stTag.fn(S, ctx); return { ...out, els: out.els.filter(e => e.k !== 'band') } } }
+    const undo = __registerLayoutForTest(proto)
+    try {
+      const plan = planLayout({ ...a, layoutId: 'protoStTag', choice: cands[0]!.choice })!
+      expect(plan.issues).toContain('title: sits on the raw image')
+      expect(plan.issues).toContain('caption: sits on the raw image')
+    } finally { undo() }
+  })
+
+  it('Street Repeat (ruling S5): the real title never overlaps the image; the image sits above it', () => {
+    for (const [w, h] of [[895, 1280], [1080, 1080], [1080, 1920]]) {
+      const a = { ...base, frameW: w, frameH: h, style: 'street' as const, props: { sailor_localLayers: eventFrameLayers('phrase', { image: true, action: true }) }, layoutId: 'stRepeat' }
+      const S = makeSheet({ frameW: w, frameH: h, measure: makeStubMeasure(), style: 'street' })
+      for (const cand of candidatesForFrame(a)) {
+        const photo = cand.out.els.find(e => e.k === 'p')
+        const title = cand.out.els.find(e => e.k === 't' && e.role === 'title')!
+        if (!photo) continue
+        const pb = boxOf(photo, S)!, tb = boxOf(title, S)!
+        expect(pb.y1, `${w}×${h}`).toBeLessThan(tb.y0)
+        // No repeat crosses the image or the real title.
+        for (const e of cand.out.els) {
+          if (e.k !== 't' || !/^title\d+$/.test(e.role ?? '')) continue
+          const b = boxOf(e, S)!
+          expect(b.y1 <= pb.y0 || b.y0 >= pb.y1, `${e.role} vs image`).toBe(true)
+          expect(b.y1 <= tb.y0 || b.y0 >= tb.y1, `${e.role} vs title`).toBe(true)
+        }
+      }
+    }
+  })
+})
+
+describe('rule 6 rounds (ruling R5)', () => {
+  const S = makeSheet({ frameW: 1080, frameH: 1080, measure: makeStubMeasure(), style: 'performance' })
+  const at = (pad: number) => {
+    const t = S.info('Offer ends', { x: 0, top: 0, role: 'caption' })
+    const b = boxOf(t, S)!
+    const panel: El = { k: 'r', x: b.x0 - pad, y: b.y0 - pad, w: b.x1 - b.x0 + 2 * pad, h: b.y1 - b.y0 + 2 * pad, role: 'panel', color: 'field', ok: true }
+    const shifted = { ...t, x: t.x + 20, top: 20 }
+    const p = { ...panel, x: panel.x + 20, y: panel.y + 20 } as El
+    return checkPlan([p, shifted], S)
+  }
+  it('a pad of exactly the minimum passes; a hair less still fails', () => {
+    const min = 0.9 * S.M
+    expect(at(min)).toEqual([])
+    expect(at(min - 1e-4)).toEqual(['too close to the edge of its panel'])
+  })
+})

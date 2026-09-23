@@ -65,3 +65,43 @@ export function adFrameLayers(kind: Kind, o: { image: boolean; action: boolean }
   if (o.image) out.push(createImageLayer('x.png', 1.25, { id: 'img', w: 0.5, h: 0.625 }) as LocalLayer)
   return out
 }
+
+// ── Stage 3: the gallery and event content (Editorial and Street in the style matrix) ──
+/** A text Frame from a content set: title, details, date, caption and — when `action` — the
+ *  action line, plus an image layer when `image`. Same layer ids and sizes as `adFrameLayers`. */
+function contentFrameLayers(title: string, texts: { details: string; date: string; caption: string; action: string }, o: { image: boolean; action: boolean }): LocalLayer[] {
+  const t = (id: string, text: string, fontSize: number) =>
+    createTextLayer({ id, text, fontSize, fontFamily: 'Inter', fontWeight: 600, color: '#111111' }) as LocalLayer
+  const out = [
+    t('t', title, 0.12),
+    t('d', texts.details, 0.04),
+    t('dt', texts.date, 0.03),
+    t('c', texts.caption, 0.02),
+  ]
+  if (o.action) out.push(t('a', texts.action, 0.025))
+  if (o.image) out.push(createImageLayer('x.png', 1.25, { id: 'img', w: 0.5, h: 0.625 }) as LocalLayer)
+  return out
+}
+
+/** The gallery content (Editorial): the Stage 1 titles and texts, with "Book tickets". The phrase
+ *  is the prototype's "Weather Report". */
+export const GALLERY_TEXTS = { ...TEXTS, action: 'Book tickets' }
+export function galleryFrameLayers(kind: Kind, o: { image: boolean; action: boolean }): LocalLayer[] {
+  return contentFrameLayers(KIND_TITLES[kind], GALLERY_TEXTS, o)
+}
+
+/** The event content (Street): the prototype's `event` set. The phrase is its "Open Studio". */
+export const EVENT_TITLES: Record<Kind, string> = {
+  word: 'Studio',
+  phrase: 'Open Studio',
+  sentence: 'Open Studio at the Werkhof all night',
+}
+export const EVENT_TEXTS = {
+  details: 'Mara Lind and guests',
+  date: 'Sat 4.10., 18–23h',
+  caption: 'Werkhof 3, Zürich\nFree entry',
+  action: 'Get tickets',
+}
+export function eventFrameLayers(kind: Kind, o: { image: boolean; action: boolean }): LocalLayer[] {
+  return contentFrameLayers(EVENT_TITLES[kind], EVENT_TEXTS, o)
+}

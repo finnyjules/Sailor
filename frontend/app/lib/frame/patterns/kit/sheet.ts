@@ -1,5 +1,5 @@
 import { faceOf } from './types'
-import type { BandEl, ButtonEl, Colour, Content, LogoEl, Measure, MissingEl, PhotoEl, RuleEl, Style, TextEl, TextKey } from './types'
+import type { BandEl, ButtonEl, Colour, Content, LogoEl, Measure, MissingEl, PhotoEl, RectEl, RoleKey, RuleEl, Style, TextEl, TextKey } from './types'
 import { STYLES } from './styles'
 import type { StyleId } from './styles'
 
@@ -80,6 +80,10 @@ export interface Sheet {
   groupGap(): number
   /** Inside panels and cards: at least the page margin. */
   inset(): number
+  /** A rotated tag in accent (Street): an owned rect and the user's own text on it (`role`, the
+   *  line it holds), in the display style. Placed by its rotated edge: the rotated box ends at
+   *  `right`, centred on `cy`, turned `deg` degrees. `over`: what the tag may lie across. */
+  tag(s: string, right: number, cy: number, deg: number, over?: string[], role?: RoleKey): [RectEl, TextEl]
 }
 
 /** Design rows. */
@@ -267,6 +271,22 @@ export function makeSheet(o: SheetOpts): Sheet {
   const gapBelow = (s: number) => Math.max(s * 0.4, INFO.size * 1.1)
   const groupGap = () => Math.max(RH * 1.4, INFO.size * 3.4)
   const inset = () => Math.max(M, INFO.size * 2.4)
+  // A rotated tag in accent (Street), the prototype's `tag()` (~1159), maths verbatim. The text is
+  // the user's own line (`role`), measured in that line's face with the display style.
+  function tag(s: string, right: number, cy: number, deg: number, over: string[] = [], role: RoleKey = 'date'): [RectEl, TextEl] {
+    const st: Style = { ...DISPLAY, role: faceOf(role) }
+    const cap = measure.capAbove(faceOf(role)) + measure.baseBelow(faceOf(role))
+    let ts = Math.max(SECOND.size * 1.15, INFO.size * 2)
+    const maxW = SPAN(4, 12), a = Math.abs(deg) * Math.PI / 180
+    const widthAt = (t: number) => w100(s, st) / 100 * t + t * 0.9
+    if (widthAt(ts) > maxW) ts *= maxW / widthAt(ts)
+    const w = widthAt(ts), h = cap * ts + ts * 0.8
+    const cx = right - (w * Math.cos(a) + h * Math.sin(a)) / 2       // the rotated box ends at the right edge
+    return [
+      { k: 'r', x: cx - w / 2, y: cy - h / 2, w, h, color: 'accent', rot: deg, role: 'tag', over },
+      disp(s, { size: ts, x: cx - w / 2, w, align: 'center', top: cy - cap * ts / 2, rot: deg, origin: 'center', color: 'field', role, over: ['tag', ...over], inside: 'tag' }),
+    ]
+  }
 
   return {
     measure,
@@ -277,6 +297,6 @@ export function makeSheet(o: SheetOpts): Sheet {
     text, disp, sec, info, rule,
     infoStack, infoRow, infoRowAt, stackBottom, photoIn, cover, pick, q,
     FOOT2, FOOT3, PHOTO_ASPECT,
-    band, button, logo, logoH, clear, gapBelow, groupGap, inset,
+    band, button, logo, logoH, clear, gapBelow, groupGap, inset, tag,
   }
 }

@@ -172,9 +172,8 @@ export const perfCard: LayoutDef = {
     const { X, SPAN, L, M, INFO, cover, band } = S
     const head = headStack(S, c, lines, 1, 12)
     // The prototype pads the card by exactly the checker's minimum (0.9 × the margin) when the
-    // margin wins; its checker allowed 0.2 of slack, ours allows none, so floating-point rounding
-    // decided the tie (4.00 + 3.60 − 4.00 < 3.60 on a square). A millionth of a unit settles it.
-    const [a, b] = arr === 1 ? [6, 12] : [1, 7], pad = Math.max(M * 0.9, INFO.size * 2.2) + 1e-6
+    // margin wins; the checker's rule 6 allows 1e-6 of rounding for that tie (ruling R5).
+    const [a, b] = arr === 1 ? [6, 12] : [1, 7], pad = Math.max(M * 0.9, INFO.size * 2.2)
     const offer = offerBox(S, c, { x: X(a) + pad, w: SPAN(a, b) - 2 * pad, bottom: L(16) - pad })
     const cardTop = offer.top - pad
     return {

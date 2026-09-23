@@ -6,6 +6,8 @@ import { badge, cascade, cells, knockout, ring, scatter, shapeBleed, split } fro
 import { column, cross, overlap, panel, plate, rising, sideSplit, stamp } from './photo'
 import { behindPhoto, collage, dateBehind, ghost, label, overprint, tightStack } from './overlap'
 import { PERFORMANCE_LAYOUTS } from './performance'
+import { EDITORIAL_LAYOUTS } from './editorial'
+import { STREET_LAYOUTS } from './street'
 
 // ORDER RULE (Ruling R9): a layout's index in this list seeds its random choices
 // (`7000 + index·97 + 13 + arr·7919`, as in the prototype). The FINAL order of this list must
@@ -64,8 +66,9 @@ export const LAYOUTS: LayoutDef[] = [
   ghost,
 ]
 
-/** Every layout, in seed order: the 42 Swiss layouts, then each style's (Performance first). */
-export const CATALOG: readonly LayoutDef[] = [...LAYOUTS, ...PERFORMANCE_LAYOUTS]
+/** Every layout, in seed order: the 42 Swiss layouts, then each style's in the prototype's order
+ *  (Performance 42–47, Editorial 48–51, Street 52–56). */
+export const CATALOG: readonly LayoutDef[] = [...LAYOUTS, ...PERFORMANCE_LAYOUTS, ...EDITORIAL_LAYOUTS, ...STREET_LAYOUTS]
 
 /** A layout and its seed index: the catalog's, or — for a layout a test registered — its place
  *  in `LAYOUTS` (as before Stage 3). */

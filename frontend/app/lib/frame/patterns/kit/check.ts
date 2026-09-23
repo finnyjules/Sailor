@@ -230,7 +230,10 @@ export function checkPlan(els: El[], S: Sheet, premise?: LayoutDef['premise'], o
       for (const p of panels) {
         if (cx > p.x0 && cx < p.x1 && cy > p.y0 && cy < p.y1) {
           const pad = Math.min(box.x0 - p.x0, p.x1 - box.x1, box.y0 - p.y0, p.y1 - box.y1)
-          if (pad < minPad) { issues.push('too close to the edge of its panel'); break }
+          // A millionth of a unit of rounding tolerance (ruling R5): a layout that pads by exactly
+          // the minimum (Performance's Card, 0.9 × the margin on a square) must not fail on float
+          // noise (4.00 + 3.60 − 4.00 < 3.60).
+          if (pad < minPad - 1e-6) { issues.push('too close to the edge of its panel'); break }
         }
       }
     }
