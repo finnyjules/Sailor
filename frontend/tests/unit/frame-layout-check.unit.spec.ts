@@ -187,3 +187,29 @@ describe('text box model (matches the prototype and toOps)', () => {
     expect(b.y1).toBeCloseTo(20); expect(b.y0).toBeCloseTo(14.4)
   })
 })
+
+describe('checker — named-risk coverage', () => {
+  const date = (o: Partial<TextEl> = {}): TextEl =>
+    ({ k: 't', s: 'Hello', x: 10, w: 40, top: 10, size: 8, wt: 400, ls: 0, lh: 1, role: 'date', ...o })
+
+  it('over works in both directions and ignores trailing digits on roles', () => {
+    expect(checkPlan([title({ role: 'title3' }), date()], S)).toEqual(['title3 overlaps date'])
+    expect(checkPlan([title({ role: 'title3' }), date({ over: ['title'] })], S)).toEqual([])
+    expect(checkPlan([title({ over: ['date'] }), date({ role: 'date2' })], S)).toEqual([])
+  })
+
+  it('panel padding measures from the page edge when the panel bleeds', () => {
+    const panel = { k: 'r', x: -10, y: 10, w: 50, h: 40, role: 'panel' } as El
+    const near = date({ x: 2, top: 20, over: ['panel'] })
+    expect(checkPlan([panel, near], S)).toContain('too close to the edge of its panel')
+    expect(checkPlan([panel, date({ x: 6, top: 20, over: ['panel'] })], S)).not.toContain('too close to the edge of its panel')
+  })
+
+  it('rotated text turns about its centre only when origin is centre', () => {
+    const c = boxOf(title({ rot: 90, origin: 'center' }), S)!
+    expect((c.x0 + c.x1) / 2).toBeCloseTo(21); expect((c.y0 + c.y1) / 2).toBeCloseTo(12.8)
+    expect(c.x1 - c.x0).toBeCloseTo(5.6); expect(c.y1 - c.y0).toBeCloseTo(22)
+    const d = boxOf(title({ rot: 90 }), S)!
+    expect((d.x0 + d.x1) / 2).not.toBeCloseTo(21)
+  })
+})
