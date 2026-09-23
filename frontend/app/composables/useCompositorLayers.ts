@@ -384,6 +384,9 @@ interface LayerCommon {
    *  about the layer's own centre at every site that builds the layer's transform. Written
    *  only on clones by lib/frame/responsive/resolve. Absent/1 ⇒ byte-identical draw. */
   layoutScale?: number
+  /** Set only by the Layout tab. Any user edit clears it; owned layers are removed or
+   *  replaced when another layout is applied. */
+  owner?: { by: 'layout'; key: string }
 }
 
 /** True when a layer is hidden (visible === false; undefined means visible). */

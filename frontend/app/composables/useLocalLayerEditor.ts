@@ -162,6 +162,16 @@ export function useLocalLayerEditor(opts: EditorOpts) {
   const localLayers = computed<LocalLayer[]>(() =>
     (node()?.data?.properties?.sailor_localLayers as LocalLayer[]) ?? [])
 
+  /** A user-initiated geometry/property edit on an owned layer (one the Layout tab
+   *  placed) makes it the user's own from that point on — never strip `owner` from
+   *  a programmatic commit (a layout apply passing owned layers through `commit`),
+   *  only at the user-edit entry points that call this. */
+  function stripOwner(l: LocalLayer): LocalLayer {
+    if (!(l as { owner?: unknown }).owner) return l
+    const { owner: _owner, ...rest } = l as LocalLayer & { owner?: unknown }
+    return rest as LocalLayer
+  }
+
   function commit(next: LocalLayer[]) {
     const n = node(); if (!n) return
     if (!n.data.properties) n.data.properties = {}
@@ -320,12 +330,13 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     if (!drag.value) recordHistory() // drags record once at pointer-down
     commit(localLayers.value.map(l => {
       if (l.id !== id) return l
-      const next = { ...l, ...patch } as LocalLayer
+      let next = { ...l, ...patch } as LocalLayer
       // Placed lines (`runs`) were set for the old words: new words drop them, and the
       // layer goes back to flowing its text. Any other edit (move, size, colour) keeps them.
       if (next.kind === 'text' && l.kind === 'text' && l.runs && 'text' in patch && patch.text !== l.text) {
         delete (next as { runs?: unknown }).runs
       }
+      next = stripOwner(next)
       return next
     }))
   }
@@ -558,7 +569,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     })
     recordHistory()
     const patch = (id: string, p: Record<string, number>) =>
-      commit(localLayers.value.map(x => (x.id === id ? { ...x, ...p } as LocalLayer : x)))
+      commit(localLayers.value.map(x => (x.id === id ? stripOwner({ ...x, ...p } as LocalLayer) : x)))
     if (mode === 'left') { const t = Math.min(...ext.map(e => e.l.x - e.hx)); for (const e of ext) patch(e.l.id, { x: t + e.hx }) }
     else if (mode === 'right') { const t = Math.max(...ext.map(e => e.l.x + e.hx)); for (const e of ext) patch(e.l.id, { x: t - e.hx }) }
     else if (mode === 'hcenter') { const lo = Math.min(...ext.map(e => e.l.x - e.hx)), hi = Math.max(...ext.map(e => e.l.x + e.hx)); const c = (lo + hi) / 2; for (const e of ext) patch(e.l.id, { x: c }) }
@@ -590,12 +601,12 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       const b = boxPx(l)
       const hx = b.w / 2 / W, hy = b.h / 2 / H
       const oyN = textVAlignCenterOffset(l, b.h) / H   // valign shifts the box off stored y
-      if (mode === 'left') return { ...l, x: hx } as LocalLayer
-      if (mode === 'right') return { ...l, x: 1 - hx } as LocalLayer
-      if (mode === 'hcenter') return { ...l, x: 0.5 } as LocalLayer
-      if (mode === 'top') return { ...l, y: hy - oyN } as LocalLayer
-      if (mode === 'bottom') return { ...l, y: 1 - hy - oyN } as LocalLayer
-      if (mode === 'vcenter') return { ...l, y: 0.5 - oyN } as LocalLayer
+      if (mode === 'left') return stripOwner({ ...l, x: hx } as LocalLayer)
+      if (mode === 'right') return stripOwner({ ...l, x: 1 - hx } as LocalLayer)
+      if (mode === 'hcenter') return stripOwner({ ...l, x: 0.5 } as LocalLayer)
+      if (mode === 'top') return stripOwner({ ...l, y: hy - oyN } as LocalLayer)
+      if (mode === 'bottom') return stripOwner({ ...l, y: 1 - hy - oyN } as LocalLayer)
+      if (mode === 'vcenter') return stripOwner({ ...l, y: 0.5 - oyN } as LocalLayer)
       return l
     }))
   }
@@ -604,7 +615,8 @@ export function useLocalLayerEditor(opts: EditorOpts) {
   function nudgeSelection(dx: number, dy: number) {
     if (!selectedIds.value.size || (dx === 0 && dy === 0)) return
     recordHistory()
-    commit(nudgeLayers(localLayers.value, selectedIds.value, dx, dy))
+    commit(nudgeLayers(localLayers.value, selectedIds.value, dx, dy).map(
+      l => (selectedIds.value.has(l.id) ? stripOwner(l) : l)))
   }
 
   /** The selection minus its `wired` members — the part that can be CLONED. A
@@ -907,7 +919,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       const map = new Map(d.origins.map(o => [o.id, o]))
       commit(localLayers.value.map(l => {
         const o = map.get(l.id)
-        return o ? { ...l, x: clamp(o.ox + dx, -0.5, 1.5), y: clamp(o.oy + dy, -0.5, 1.5) } as LocalLayer : l
+        return o ? stripOwner({ ...l, x: clamp(o.ox + dx, -0.5, 1.5), y: clamp(o.oy + dy, -0.5, 1.5) } as LocalLayer) : l
       }))
     } else if (d.type === 'scale') {
       const ratio = Math.max(0.05, Math.hypot(e.clientX - d.cx, e.clientY - d.cy) / d.startDist)
@@ -949,7 +961,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
       commit(localLayers.value.map((l) => {
         const s = d.start[l.id]; if (!s) return l
         const startLayer = { ...l, x: s.x, y: s.y, ...s.size } as LocalLayer
-        return { ...l, ...scaleLayerAbout(startLayer, d.anchor, f, W, H) } as LocalLayer
+        return stripOwner({ ...l, ...scaleLayerAbout(startLayer, d.anchor, f, W, H) } as LocalLayer)
       }))
     }
   }
@@ -1024,7 +1036,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     }
     if (!patches.size) return
     recordHistory()
-    commit(localLayers.value.map(l => (patches.has(l.id) ? { ...l, ...patches.get(l.id)! } as LocalLayer : l)))
+    commit(localLayers.value.map(l => (patches.has(l.id) ? stripOwner({ ...l, ...patches.get(l.id)! } as LocalLayer) : l)))
   }
 
   /** "Draw section" mode: while on, a marquee drag on the artboard creates a
