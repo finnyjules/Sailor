@@ -15,7 +15,7 @@ import {
   newScatterLayer,
   hasAnimatedShaderFill, withWiredContent, _registerWiredContent, renderLayerThumbnail,
   outlinePathData, canTakeGeometry, canWarpRaster, cornerPinActive,
-  applyShaderPixelEffect, shaderSpecFromEffect, type ShaderPixelEffect,
+  applyShaderPixelEffect, shaderSpecFromEffect, type ShaderPixelEffect, textVAlignCenterOffset,
 } from '~/composables/useCompositorLayers'
 import { onPaperBooleanReady, warmPaperBoolean } from '~/lib/compositor/booleanGeometry'
 import { DEAL_VOCABS, dealVocabDrivesLook, type DealVocab } from '~/lib/compositor/dealVocab'
@@ -47,7 +47,7 @@ import LayoutTile from '~/components/vue-canvas/compositor/LayoutTile.vue'
 import { snapshotFrameAsTemplate, addSlot } from '~/lib/frametemplate/author'
 import { placeTemplate, setInstanceSlot, freezeInstance, staleInstances, updateInstance, applySlotToLayer } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance, SlotKind } from '~/lib/frametemplate/types'
-import { resolveLayout, frameDocFromProps, isResponsiveFrame, effectivePins, guideLinesFor, moveUnitAtView, resizeLayerAtView, scaleLayerAtView, rotateLayerAtView, hitTestView, viewSelectionGeometry, type LayoutResult, type Pins, type ViewEdit, type UnitInfo } from '~/lib/frame/responsive'
+import { resolveLayout, frameDocFromProps, isResponsiveFrame, effectivePins, guideLinesFor, moveUnitAtView, resizeLayerAtView, scaleLayerAtView, rotateLayerAtView, hitTestView, viewSelectionGeometry, layoutScaleOf, type LayoutResult, type Pins, type ViewEdit, type UnitInfo } from '~/lib/frame/responsive'
 import { mapKeyToEdit, snapAngle } from '~/lib/compositor/layerEdits'
 import { resizeBox, type Handle } from '~/lib/compositor/resizeBox'
 import ResponsivePinsCard from './ResponsivePinsCard.vue'
@@ -3821,7 +3821,7 @@ function onCanvasPointerUpCapture(e: PointerEvent) {
   else if (marquee.value) endMarquee(e.shiftKey)
 }
 function onCanvasDblClickCapture(e: MouseEvent) {
-  if (viewEditing.value) { e.preventDefault(); return } // in-place text editing at a view comes later (Task 7)
+  if (viewEditing.value) { void onViewDblClick(e); return }
   // Double-click a path → enter node edit; otherwise fall back to text edit.
   if (!pen.active.value && !nodeEdit.active.value) {
     const id = hitTopStackKey(e.clientX, e.clientY)
@@ -3833,6 +3833,29 @@ function onCanvasDblClickCapture(e: MouseEvent) {
     return
   }
   onCanvasDblClick(e)
+}
+/** A double-click at a viewing size. It picks the layer exactly as the single click does
+ *  (viewHitAt: the drawn box, then the opaque-pixel test on the resolved layer). A text is edited
+ *  in place, at this size; a path snaps back to the design size first, because node editing is
+ *  design-only, and enters node edit once the artboard has re-fitted to the design shape. */
+async function onViewDblClick(e: MouseEvent) {
+  const t = e.target as HTMLElement | null
+  // The inline text editor (and any field or button) keeps its own double-click: word select.
+  if (t?.closest?.('textarea,input,select,button')) return
+  e.preventDefault(); e.stopPropagation()
+  // Each click of the pair settled its own (never-moved) view drag on its pointer-up, which
+  // lands before the dblclick. Settle defensively anyway: a drag must never outlive this.
+  if (viewDrag.value) onViewPointerUp()
+  const id = viewHitAt(e)
+  const l = id ? localLayers.value.find(x => x.id === id) : null
+  if (l?.kind === 'text') { beginEdit(l.id); return }   // edit in place at this size
+  if (l?.kind === 'path') {
+    backToDesignSize()
+    // enterNodeEdit sizes the node overlay from canvasDisplay, which re-fits to the design
+    // shape in the pre-flush watcher on previewAspect: wait for it.
+    await nextTick()
+    await enterNodeEdit(l.id)
+  }
 }
 // Set in onCanvasPointerDownCapture: was the just-completed press on a layer?
 // Local shapes are painted on a pointer-events-none canvas, so the trailing
@@ -3873,6 +3896,32 @@ editor.registerEditFocus(() => editRef.value)
 const editingStyle = computed(() => {
   const l = editingLayer.value
   if (!l) return {}
+  // At a viewing size the textarea sits over the layer AS DRAWN: the resolved layer, measured and
+  // placed the way the painter draws it. Its x/y are fractions of the VIEW, and the artboard
+  // (canvasDisplay) has the view's shape, so they place straight onto it. Its size fields are in
+  // units of the artboard width times its layout scale k (the painter scales by k about the
+  // centre), so its local box at the artboard width, times k, is its drawn size in canvas px —
+  // including a re-wrapped text, whose resolved box keeps the DESIGN height when centred. A
+  // top/bottom text is drawn anchored at that edge (textVAlignCenterOffset, along the rotation).
+  const rl = viewEditing.value ? resolved.value?.layers.find(x => x.id === l.id) : undefined
+  if (rl?.kind === 'text') {
+    const W = canvasDisplay.w, H = canvasDisplay.h, k = layoutScaleOf(rl)
+    const lb = localLayerBox(measureCtx(), rl, W, H)
+    const bw = lb.w * k, bh = lb.h * k
+    const oy = textVAlignCenterOffset(rl, bh), rad = (rl.rotation || 0) * Math.PI / 180
+    return {
+      left: rl.x * W - oy * Math.sin(rad) + 'px', top: rl.y * H + oy * Math.cos(rad) + 'px',
+      width: Math.max(bw + 8, 40) + 'px', height: Math.max(bh + 6, 24) + 'px',
+      transform: `translate(-50%, -50%) rotate(${rl.rotation}deg)`,
+      fontFamily: /\s/.test(rl.fontFamily) ? `"${rl.fontFamily}", sans-serif` : `${rl.fontFamily}, sans-serif`,
+      fontWeight: String(rl.fontWeight), fontSize: rl.fontSize * W * k + 'px',
+      lineHeight: String(rl.lineHeight), color: paintPrimaryColor(rl.color, '#ffffff'), textAlign: rl.align as any,
+      letterSpacing: `${rl.letterSpacing || 0}em`,
+      textTransform: (rl.textTransform || 'none') as any,
+      textDecoration: [rl.underline && 'underline', rl.strikethrough && 'line-through'].filter(Boolean).join(' ') || 'none',
+      opacity: String(rl.opacity), caretColor: paintPrimaryColor(rl.color, '#ffffff'),
+    }
+  }
   const box = boxPx(l)
   return {
     left: l.x * canvasDisplay.w + 'px', top: l.y * canvasDisplay.h + 'px',
