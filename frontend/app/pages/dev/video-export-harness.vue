@@ -62,6 +62,32 @@ async function readBack(blob: Blob, o: Opts, ms: number) {
   return { frames, duration, width, height, colorSpace, mae: errSum / Math.max(1, frames), alphaMin, alphaMax, bytes: blob.size, ms }
 }
 
+// Task 4 (the embed bridge, plan 2): a raw dynamic `import('mediabunny')`
+// typed straight into a page's dev-tools console (or from a Playwright
+// page.evaluate string) fails to resolve — there is no import map for bare
+// specifiers at that level. Inside this SFC's own <script>, Vite already
+// resolves it (readBack above does exactly that), so exposing a helper here
+// gets a test the read-back it needs without hard-coding a node_modules/.vite
+// pre-bundle path, which is a private cache location, not a stable API.
+async function readEmbedVideo(blob: Blob) {
+  const { Input, BlobSource, ALL_FORMATS, CanvasSink } = await import('mediabunny')
+  const input = new Input({ source: new BlobSource(blob), formats: ALL_FORMATS })
+  const track = await input.getPrimaryVideoTrack()
+  if (!track) throw new Error('no video track')
+  let frames = 0, lumaSpread = 0
+  let first: number | null = null
+  for await (const wc of new CanvasSink(track).canvases()) {
+    const c = wc.canvas as HTMLCanvasElement
+    const px = c.getContext('2d')!.getImageData(Math.floor(c.width / 2), Math.floor(c.height / 2), 1, 1).data
+    const y = px[0]! + px[1]! + px[2]!
+    if (first === null) first = y
+    lumaSpread = Math.max(lumaSpread, Math.abs(y - first))
+    frames++
+  }
+  const colorSpace = await track.getColorSpace()
+  return { frames, width: await track.getDisplayWidth(), height: await track.getDisplayHeight(), colorSpace, lumaSpread }
+}
+
 // The last file each route made, so a debugging script can pull it out of the
 // page (fileBase64) and inspect it with compare_videos.py.
 const lastFile: { browser?: Blob; server?: Blob } = {}
@@ -117,5 +143,5 @@ async function runCancel(o: Opts) {
   }
 }
 
-onMounted(() => { (window as any).__videoHarness = { run, runServer, runCancel, fileBase64 } })
+onMounted(() => { (window as any).__videoHarness = { run, runServer, runCancel, fileBase64, readEmbedVideo } })
 </script>
