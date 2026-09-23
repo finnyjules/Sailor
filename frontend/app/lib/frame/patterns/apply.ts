@@ -102,7 +102,9 @@ export function applyPlacement(
       next.scale = op.w / (layer as any).bbox.w
     } else if (layer.kind === 'wired') {
       if (op.w != null) next.w = op.w
-      // no h: a wired layer's height comes from its lastAspect, not the op
+      // A wired layer's height comes from its lastAspect — unless it is cropped to a box,
+      // when the renderer honours `h` (cover crop). The layout's box height travels with its crop.
+      track('h', op.crop && op.h != null ? op.h : undefined)
     } else {
       if (op.w != null) next.w = op.w
       if (op.h != null) next.h = op.h

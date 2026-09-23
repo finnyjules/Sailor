@@ -176,4 +176,15 @@ describe('applyPlacement — wired layer sizing', () => {
     expect((out as any).x).toBe(0.4)
     expect('h' in (out as any)).toBe(false)   // wired height comes from lastAspect
   })
+
+  it('a cover-cropped wired layer takes the layout box height, and loses it when the crop goes', () => {
+    const cropOp = [{ target: 'w', kind: 'image', x: 0.4, y: 0.3, w: 0.8, h: 0.5, crop: { fit: 'cover' } }] as any
+    const [a] = applyPlacement([wired], { ops: cropOp, did: 'x' }, elements, palette, { recolour: false })
+    expect((a as any).h).toBe(0.5)
+    expect((a as any).crop).toEqual({ fit: 'cover' })
+    const plainOp = [{ target: 'w', kind: 'image', x: 0.4, y: 0.3, w: 0.8 }] as any
+    const [b] = applyPlacement([a], { ops: plainOp, did: 'x' }, elements, palette, { recolour: false })
+    expect('h' in (b as any)).toBe(false)
+    expect('crop' in (b as any)).toBe(false)
+  })
 })
