@@ -5,7 +5,7 @@ import { planRecording, recordVideo, isAbortError, BT709, rgbaToI420aBt709, i420
 // needs WebCodecs; this checks the ORCHESTRATION: order, timestamps, colour tag,
 // cleanup, cancel. The real encode is proven by tests/browser-video-export.spec.ts.
 function fakeLib(opts?: { failStart?: boolean }) {
-  const log: any = { samples: [] as any[], rawData: [] as (Uint8Array | null)[], closed: 0, started: false, finalized: false, cancelled: false, track: null, source: null, format: null }
+  const log: any = { samples: [] as any[], rawData: [] as (Uint8Array | null)[], closed: 0, started: false, finalized: false, cancelled: false, track: null, source: null, format: null, audio: null, order: [] as string[] }
   class BufferTarget { buffer: ArrayBuffer | null = null }
   class Mp4OutputFormat { kind = 'mp4'; constructor(public opts?: any) {} }
   class WebMOutputFormat { kind = 'webm'; constructor(public opts?: any) {} }
@@ -19,16 +19,21 @@ function fakeLib(opts?: { failStart?: boolean }) {
   }
   class VideoSampleSource {
     constructor(public config: any) { log.source = config }
-    async add(_s: any) {}
+    async add(_s: any) { log.order.push('video') }
+  }
+  class AudioBufferSource {
+    constructor(public config: any) { log.audio = { config, added: [] as any[] } }
+    async add(b: any) { log.audio.added.push(b); log.order.push('audio') }
   }
   class Output {
     constructor(public opts: any) { log.format = opts.format }
     addVideoTrack(_src: any, meta: any) { log.track = meta }
+    addAudioTrack(_src: any) { log.audioTrack = true }
     async start() { if (opts?.failStart) throw new Error('no encoder'); log.started = true }
     async finalize() { log.finalized = true; this.opts.target.buffer = new ArrayBuffer(16) }
     async cancel() { log.cancelled = true }
   }
-  return { lib: { BufferTarget, Mp4OutputFormat, WebMOutputFormat, Quality, VideoSample, VideoSampleSource, Output } as any, log }
+  return { lib: { BufferTarget, Mp4OutputFormat, WebMOutputFormat, Quality, VideoSample, VideoSampleSource, AudioBufferSource, Output } as any, log }
 }
 
 // A fake 2D context that remembers how each frame was prepared.
@@ -184,6 +189,36 @@ describe('recordVideo', () => {
     expect(err?.message).toBe('no encoder')
     expect(log.cancelled).toBe(true)
     expect(log.finalized).toBe(false)
+  })
+})
+
+describe('recordVideo — sound', () => {
+  it('MP4 gets an AAC track; the whole buffer is added once, before the first frame', async () => {
+    const { lib, log } = fakeLib()
+    const c = fakeCanvas(2, 2)
+    const buf = { duration: 1 } as any
+    await recordVideo({ width: 2, height: 2, fps: 30, frameCount: 2, audio: buf, drawFrame: () => {} },
+      { lib, createCanvas: () => ({ canvas: c.canvas, ctx: c.ctx }) })
+    expect(log.audioTrack).toBe(true)
+    expect(log.audio.config.codec).toBe('aac')
+    expect(log.audio.added).toEqual([buf])
+    expect(log.order).toEqual(['audio', 'video', 'video'])
+  })
+
+  it('transparent WebM with sound uses Opus', async () => {
+    const { lib, log } = fakeLib()
+    const c = fakeCanvas(2, 2)
+    await recordVideo({ width: 2, height: 2, fps: 30, frameCount: 1, alpha: true, audio: { duration: 1 } as any, drawFrame: () => {} },
+      { lib, createCanvas: () => ({ canvas: c.canvas, ctx: c.ctx }) })
+    expect(log.audio.config.codec).toBe('opus')
+  })
+
+  it('no audio → no audio track', async () => {
+    const { lib, log } = fakeLib()
+    const c = fakeCanvas(2, 2)
+    await recordVideo({ width: 2, height: 2, fps: 30, frameCount: 1, drawFrame: () => {} },
+      { lib, createCanvas: () => ({ canvas: c.canvas, ctx: c.ctx }) })
+    expect(log.audioTrack).toBeUndefined()
   })
 })
 

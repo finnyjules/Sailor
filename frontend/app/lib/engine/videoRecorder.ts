@@ -17,6 +17,8 @@ export interface RecordRequest {
   drawFrame: (i: number, ctx: CanvasRenderingContext2D) => Promise<void> | void
   /** True → VP9 in WebM with an alpha plane. Otherwise H.264 in MP4. */
   alpha?: boolean
+  /** Optional sound for the whole video, starting at 0 s (the timeline mix). */
+  audio?: AudioBuffer
   onProgress?: (done: number, total: number) => void
   signal?: AbortSignal
 }
@@ -67,7 +69,12 @@ export function vp9Quality(plan: Pick<RecordingPlan, 'width' | 'height' | 'fps'>
 }
 
 export type MediabunnyLike = Pick<typeof Mediabunny,
-  'Output' | 'BufferTarget' | 'Mp4OutputFormat' | 'WebMOutputFormat' | 'VideoSampleSource' | 'VideoSample' | 'Quality'>
+  'Output' | 'BufferTarget' | 'Mp4OutputFormat' | 'WebMOutputFormat' | 'VideoSampleSource' | 'VideoSample' | 'Quality' | 'AudioBufferSource'>
+
+/** AAC in MP4 (the format Chrome and Safari both play), Opus in WebM. */
+export function audioCodecFor(ext: 'mp4' | 'webm'): 'aac' | 'opus' {
+  return ext === 'mp4' ? 'aac' : 'opus'
+}
 
 export interface RecorderDeps {
   lib?: MediabunnyLike
@@ -243,10 +250,15 @@ export async function recordVideo(req: RecordRequest, deps: RecorderDeps = {}): 
     alpha: plan.alpha ? 'keep' : 'discard',
   })
   output.addVideoTrack(source, { frameRate: plan.fps })
+  const audioSource = req.audio
+    ? new mb.AudioBufferSource({ codec: audioCodecFor(plan.ext), quality: new mb.Quality('high') })
+    : null
+  if (audioSource) output.addAudioTrack(audioSource)
 
   const dt = 1 / plan.fps
   try {
     await output.start()
+    if (audioSource) await audioSource.add(req.audio!)
     for (let i = 0; i < plan.frameCount; i++) {
       throwIfAborted(req.signal)
       ctx.setTransform(1, 0, 0, 1, 0, 0)
