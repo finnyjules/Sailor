@@ -62,8 +62,11 @@ onMounted(async () => {
   saved.value = localStorage.getItem(`sailor-saved-${props.promptId}`) === '1'
 
   if (isRunnerPromptId(props.promptId)) {
-    runnerRecord.value = await fetchRunnerRecord(props.promptId)
-    loadingHistory.value = false
+    try {
+      runnerRecord.value = await fetchRunnerRecord(props.promptId)
+    } finally {
+      loadingHistory.value = false
+    }
     return
   }
 
@@ -258,10 +261,22 @@ async function openWorkflow() {
     const embedded = entry.value?.prompt?.[3]?.extra_pnginfo?.workflow
     const projectUuid: string | undefined = props.projectUuid || embedded?.extra?.projectUuid || undefined
 
+    // A runner result whose exact graph is gone still falls back to the
+    // project's latest version below — but that's not the graph as it ran,
+    // so say so before opening it.
+    const isRunnerFallback = isRunnerPromptId(props.promptId) && !runnerRecord.value?.workflow
+    function announceRunnerFallback() {
+      if (!isRunnerFallback) return
+      toast('Opened the project’s latest version', {
+        description: 'The exact workflow for this result is no longer available.',
+      })
+    }
+
     // Project already open in a tab → go to it rather than opening a twin.
     if (projectUuid) {
       const existing = tabs.value.find((t) => t.type === 'project' && t.projectUuid === projectUuid)
       if (existing) {
+        announceRunnerFallback()
         setActiveTab(existing.id)
         emit('close')
         return
@@ -280,6 +295,7 @@ async function openWorkflow() {
       return
     }
 
+    announceRunnerFallback()
     openTab({
       type: 'project',
       label: props.projectName || props.image.filename,

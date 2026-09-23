@@ -3157,7 +3157,7 @@ function handleBridgeEvent(data: any) {
       else delete promptQueuePos.value[prompt_id]
     }
   } else if (evt === 'gate_paused') {
-    headsUp.notify('paused')
+    if (!isSilentEvent(prompt_id)) headsUp.notify('paused')
   } else if (evt === 'executed') {
     if (data.output) perRun(prompt_id).outputs.push(...extractOutputFiles(data.output))
     // Track node completion for coarse progress — per-run (audit C5).
