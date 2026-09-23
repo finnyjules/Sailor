@@ -496,10 +496,12 @@ export function createEngine(deps: EngineDeps) {
 
     const outcome = takeOutcome(take, leg.index)
     const credits = deps.hosted() ? (charge.actual ?? 0) : null
+    // Only what this stage newly made: a reused result is an earlier run's
+    // file, already recorded then. Nothing new → no record at all.
     const outputs: OutputFile[] = []
     for (const id of legIds) {
       const rec = take.nodes[id]!
-      if (rec.status === 'done' && GENERATORS.has(rec.classType)) outputs.push(...rec.outputs.filter(f => f.type === 'output'))
+      if (rec.status === 'done' && !rec.reused && GENERATORS.has(rec.classType)) outputs.push(...rec.outputs.filter(f => f.type === 'output'))
     }
     if (outputs.length) {
       const nodeTypes = [...new Set(legIds.filter(id => take.nodes[id]!.status === 'done').map(id => take.nodes[id]!.classType))]

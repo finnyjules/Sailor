@@ -179,6 +179,15 @@ describe('never pay twice', () => {
     expect(successB.data.credits).toBe(0)
     expect(k.ledger.release).toHaveBeenCalledWith(2)
   })
+  it('a reused result writes no second history record', async () => {
+    const k = makeKit()
+    for (let i = 0; i < 2; i++) {
+      const r = await k.engine.startRun({ userId: null, takes: [gatedFlow({ imageSeed: 7 })], workflow: null, canvasId: null, projectUuid: 'p1', projectName: 'P' })
+      await k.engine.settled(r.runId)
+    }
+    expect(k.fal.submitted()).toHaveLength(1) // the second run was reused
+    expect(k.records.write).toHaveBeenCalledTimes(1)
+  })
   it('seed 0 always asks again', async () => {
     const k = makeKit()
     for (let i = 0; i < 2; i++) {

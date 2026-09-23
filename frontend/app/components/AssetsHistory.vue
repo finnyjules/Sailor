@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import { Heart, MessageSquare, ChevronDown, Layers } from 'lucide-vue-next'
+import {
+  diskFileItemId,
+  galleryFileKey,
+  galleryItemKey,
+  mergeGenerationIntoGallery,
+  type GalleryItem,
+} from '~/lib/assets/galleryMerge'
 
-interface HistoryItem {
-  promptId: string
-  status: 'completed' | 'failed'
-  images: { filename: string; subfolder: string; type: string }[]
-  executionTime: number | null
-  timestamp: number
-  // The project this run belongs to, when known. /history is volatile (cleared
-  // on every Comfy restart), so this is what lets "Open Workflow" recover the
-  // graph from the durable projects store instead. Disk-listed files have none.
-  projectUuid?: string
-  projectName?: string
-}
+// projectUuid/projectName: the project this run belongs to, when known.
+// /history is volatile (cleared on every Comfy restart), so this is what lets
+// "Open Workflow" recover the graph from the durable projects store instead.
+// Disk-listed files have none unless a durable record claims them.
+type HistoryItem = GalleryItem
 
 const items = ref<HistoryItem[]>([])
 const loading = ref(true)
@@ -113,9 +113,9 @@ async function fetchHistory() {
       if (listRes.ok) {
         const { items: diskItems = [] } = await listRes.json() as { items: any[] }
         for (const f of diskItems) {
-          const key = `${f.type}:${f.subfolder || ''}:${f.filename}`
+          const key = galleryFileKey(f)
           if (fileToPrompt.has(key)) continue
-          const fakeId = `file:${key}`
+          const fakeId = diskFileItemId(key)
           byPrompt.set(fakeId, {
             promptId: fakeId,
             status: 'completed',
@@ -134,26 +134,19 @@ async function fetchHistory() {
     try {
       const seen = new Set<string>()
       for (const it of byPrompt.values())
-        for (const f of it.images) seen.add(`${f.type}:${f.subfolder || ''}:${f.filename}`)
+        for (const f of it.images) seen.add(galleryFileKey(f))
 
       const { fetchGenerations, generationsByProject } = useProjectGenerations()
       await fetchGenerations(true)
       for (const proj of generationsByProject.value) {
         for (const g of proj.generations) {
           if (skipLivePreview(g)) continue
-          const key = `${g.type}:${g.subfolder || ''}:${g.filename}`
-          if (seen.has(key)) continue
-          seen.add(key)
-          byPrompt.set(`gen:${key}`, {
-            promptId: g.promptId,
-            status: 'completed',
-            images: [{ filename: g.filename, subfolder: g.subfolder || '', type: g.type }],
-            executionTime: null,
-            timestamp: g.timestamp,
-            // A group's workflowId IS its project uuid (see useProjectGenerations).
-            projectUuid: proj.workflowId,
-            projectName: proj.name,
-          })
+          // A file the disk listing gave a made-up `file:` id (every runner
+          // result — the runner never writes /history) takes the record's
+          // promptId and project, so the detail view can say how it was made.
+          // Files owned by a real ComfyUI prompt are skipped, as before.
+          // A group's workflowId IS its project uuid (see useProjectGenerations).
+          mergeGenerationIntoGallery(byPrompt, seen, g, { uuid: proj.workflowId, name: proj.name })
         }
       }
     } catch { /* durable store optional — fall through */ }
@@ -329,7 +322,7 @@ watch(() => activeTab.value.type, (type) => {
             <div class="flex flex-wrap gap-6">
               <div
                 v-for="item in group.items"
-                :key="item.promptId"
+                :key="galleryItemKey(item)"
                 class="relative size-[200px] rounded overflow-hidden group cursor-pointer transition-shadow duration-300 hover:shadow-[0_0_40px_rgba(255,255,255,0.2)]"
                 @click="openItem(item)"
               >
