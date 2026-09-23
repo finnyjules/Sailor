@@ -17,6 +17,7 @@ import {
   type GradientStop, type ReliefSpec, type SceneMaterial, type MatcapSpec,
 } from './config'
 import { toHeightPixels } from './relief'
+import { AssetTracker } from './assetTracker'
 import { isResolvedTexture, textureMapFilename, ensureTextureFetched, type TextureManifest } from './textures'
 import { applyImageTransform, imageWrapMode, seamlessWidth, seamlessCanvas, type NaturalSize } from './imageMap'
 import {
@@ -125,6 +126,32 @@ export function onTextureError(cb: (filename: string) => void): () => void {
   errorSubs.add(cb)
   return () => errorSubs.delete(cb)
 }
+
+/** Every image-texture load in flight, across every open engine (export only — spec Part 1).
+ *  Module-level because the caches here are: a second engine asking for a file the first is
+ *  still downloading starts no load of its own, so only a shared tracker can wait on it. The
+ *  editor never reads this; `SceneEngine.settleAllAssets` does. */
+export const textureLoads = new AssetTracker()
+
+/** Track one image load. The returned wrappers run the site's own `onLoad` / `onError` exactly
+ *  as before (same arguments, same moment, same exceptions) and only THEN settle the tracked
+ *  promise, so settle means "the picture is on the material", not merely "downloaded".
+ *  `stillWanted` is read before the site's error handler runs: a load whose material was
+ *  disposed mid-download is not a failure of the scene, so it settles quietly. */
+function trackTextureLoad(name: string) {
+  let ok!: () => void
+  let bad!: (err: unknown) => void
+  textureLoads.observe('texture', name, new Promise<void>((resolve, reject) => { ok = resolve; bad = reject }))
+  return {
+    loaded: <A extends unknown[]>(fn?: (...a: A) => void) => (...a: A): void => {
+      try { fn?.(...a) } finally { ok() }
+    },
+    failed: <A extends unknown[]>(fn?: (...a: A) => void, stillWanted: () => boolean = () => true) => (...a: A): void => {
+      const wanted = stillWanted()
+      try { fn?.(...a) } finally { if (wanted) bad(new Error('could not load the image')); else ok() }
+    },
+  }
+}
 /** Every live opalescent material, across every open Scene3D engine. Walked by `refreshOpalTime`
  *  once per host frame to write wall-clock seconds into each `uOpalTime` uniform — the only
  *  per-frame cost the opal material has, and only paid when the doc has a flowing opal (see
@@ -175,17 +202,18 @@ function getImageTexture(filename: string, colorSpace: THREE.ColorSpace = THREE.
   const key = colorSpace === THREE.SRGBColorSpace ? filename : `${colorSpace}:${filename}`
   let t = imageCache.get(key)
   if (!t) {
+    const track = trackTextureLoad(filename)
     const tex = new THREE.TextureLoader().load(
       inputViewUrl(filename),
+      track.loaded(),
       undefined,
-      undefined,
-      () => {
+      track.failed(() => {
         // Only the SHARED cache's users reach here now — a user-supplied normal map, or a
         // relief source. The image material has owned its own Texture (and its own error
         // handler) since the image-options work, so there is no `.map` to drop from here.
         imageCache.delete(key)
         errorSubs.forEach((cb) => cb(filename))
-      },
+      }),
     )
     t = tex
     t.colorSpace = colorSpace
@@ -223,7 +251,12 @@ function getImageTexture(filename: string, colorSpace: THREE.ColorSpace = THREE.
 //     refetch, no new canvas, and `contrast` is deliberately EXCLUDED from `reliefKey` below.
 //     `invert` still forces a rebuild (reliefKey), a deliberate, occasional toggle — but now
 //     rebuilds cheaply, repainting from the ALREADY-cached source rather than re-fetching.
-interface ReliefSourceEntry { canvas: HTMLCanvasElement; ready: boolean; subs: Set<() => void> }
+interface ReliefSourceEntry {
+  canvas: HTMLCanvasElement; ready: boolean; subs: Set<() => void>
+  /** Set when the decode failed. Tracking only (the editor ignores it): the entry stays cached
+   *  as before, so a later engine asking for this file starts no load — it is told here. */
+  failed?: boolean
+}
 const reliefSourceCache = new Map<string, ReliefSourceEntry>()
 
 /** Long-edge cap for a relief SOURCE image (px). Bump is a low-frequency height
@@ -241,14 +274,17 @@ function getReliefImageSource(filename: string, onReady: () => void): ReliefSour
   let entry = reliefSourceCache.get(filename)
   if (entry) {
     if (!entry.ready) entry.subs.add(onReady)
+    if (entry.failed) textureLoads.fail('texture', filename, 'could not load the image')
     return entry
   }
   const canvas = document.createElement('canvas')
   entry = { canvas, ready: false, subs: new Set([onReady]) }
   reliefSourceCache.set(filename, entry)
+  const track = trackTextureLoad(filename)
   const img = new Image()
   img.crossOrigin = 'anonymous'
-  img.onload = () => {
+  img.onerror = track.failed(() => { entry!.failed = true })
+  img.onload = track.loaded(() => {
     // Cap the source to RELIEF_SOURCE_MAX on its long edge. A bump map is a
     // low-frequency height field — a full-resolution photo buys no visible relief
     // but costs a full-res canvas, a full-res getImageData + a second full-res
@@ -266,7 +302,7 @@ function getReliefImageSource(filename: string, onReady: () => void): ReliefSour
     const subs = entry!.subs
     entry!.subs = new Set()
     for (const cb of subs) cb()
-  }
+  })
   img.src = inputViewUrl(filename)
   return entry
 }
@@ -523,7 +559,8 @@ function bindTextureMaps(m: THREE.Material, mat: SceneMaterial, manifest: Textur
   // from a mutation into a rebind, so it is a swap of this function's body, not a redesign.
   const tex = (k: TextureManifest['maps'][number], cs: THREE.ColorSpace) => {
     if (!hasDOM) return null
-    const own = new THREE.TextureLoader().load(inputViewUrl(textureMapFilename(id, k)), undefined, undefined, () => {
+    const track = trackTextureLoad(textureMapFilename(id, k))
+    const own = new THREE.TextureLoader().load(inputViewUrl(textureMapFilename(id, k)), track.loaded(), undefined, track.failed(() => {
       // Load failure: drop just this slot so the material degrades to the plain surface. Free
       // the dead Texture and un-stamp its key — `textureMaps` is what disposeMaterial and the
       // retile loop trust, so a key left behind claims a live map that is not there.
@@ -533,7 +570,7 @@ function bindTextureMaps(m: THREE.Material, mat: SceneMaterial, manifest: Textur
       own.dispose()
       const stamped = t.userData.textureMaps as string[] | undefined
       if (stamped) t.userData.textureMaps = stamped.filter((sk) => sk !== k)
-    })
+    }, () => !t.userData.disposed))
     own.colorSpace = cs
     setRepeat(own, tiling)
     return own
@@ -582,7 +619,9 @@ export function applyTextureSet(m: THREE.Material, mat: SceneMaterial, finishes?
   m.userData.textureTiling = mat.textureTiling ?? MATERIAL_DEFAULTS.textureTiling
   if (!hasDOM) return // node/unit tests: no TextureLoader, nothing to bind
   const id = mat.texture!
-  ensureTextureFetched(id).then((manifest) => {
+  // Observed as the WHOLE chain, so settling waits until the maps are bound (and their own
+  // loads, started inside, are tracked) — the chain itself is unchanged and never rejects.
+  textureLoads.observe('texture', id, ensureTextureFetched(id).then((manifest) => {
     // A disposed material still awaiting its texture set must not be re-populated — same
     // hazard as `reliefHealPending`, and checked BEFORE the identity guard because disposal
     // leaves `identity` intact (a delete-during-fetch, or an A→B→A flip inside the fetch
@@ -600,8 +639,8 @@ export function applyTextureSet(m: THREE.Material, mat: SceneMaterial, finishes?
     // agent sets `texture`, nothing surfaces — the material just stays untextured, which is
     // the spec's stated behaviour for this path (error table: "silent, keeps the plain
     // surface"). Anything louder here would fire on every reopened document while
-    // ambientcg.com is down.
-  }).catch(() => {})
+    // ambientcg.com is down. (Recorded for export only — the editor still says nothing.)
+  }).catch((err) => { if (!m.userData.disposed) textureLoads.fail('texture', id, err) }))
 }
 
 // ── Fresnel / gradient: LIT materials (Spline-style layers over lighting) ────
@@ -1158,9 +1197,10 @@ function applyImageGlow(m: THREE.Material, mat: SceneMaterial): void {
 function ownedImageTexture(m: THREE.Material, mat: SceneMaterial): THREE.Texture | null {
   const filename = mat.image ?? ''
   if (!hasDOM || !filename) return null
+  const track = trackTextureLoad(filename)
   const tex = new THREE.TextureLoader().load(
     inputViewUrl(filename),
-    (loaded) => {
+    track.loaded((loaded: THREE.Texture) => {
       // A material disposed while its file was still downloading must not be touched —
       // same hazard, and the same guard, as reliefHealPending and applyTextureSet.
       if (m.userData.disposed) return
@@ -1210,9 +1250,9 @@ function ownedImageTexture(m: THREE.Material, mat: SceneMaterial): THREE.Texture
       // it was built with until the NEXT dial move triggers updateMaterial.
       const u = m.userData.imageUniforms as ImageUniforms | undefined
       if (u) syncImageMapMatrix(u, loaded)
-    },
+    }),
     undefined,
-    () => {
+    track.failed(() => {
       // A material disposed while its file was still downloading must not be touched — same
       // guard as onLoad above. Without it, a request that fails AFTER disposeMaterial already
       // ran would null `.map`/bump `needsUpdate` on a dead material, dispose `tex` a SECOND
@@ -1227,7 +1267,7 @@ function ownedImageTexture(m: THREE.Material, mat: SceneMaterial): THREE.Texture
       if (s.emissiveMap === tex) { s.emissiveMap = null; s.needsUpdate = true }
       tex.dispose()
       errorSubs.forEach((cb) => cb(filename))
-    },
+    }, () => !m.userData.disposed),
   )
   tex.colorSpace = THREE.SRGBColorSpace
   // Finding 2 fix: prime wrapS/wrapT + the userData stamp to match `mat.imageWrap` BEFORE

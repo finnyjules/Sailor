@@ -21,7 +21,8 @@ import { orderParentsFirst, worldMatrixOf } from './hierarchy'
 import { loadGlb, clearGlbCache, ensureUv } from './glb'
 import { registerWebGLContext, type WebGLContextHandle } from '~/lib/webgl/contextRegistry'
 import { loadFont, fontCacheGet, textOutline, shapeOutline, type Font } from '~/lib/scene3d/outlines'
-import { materialFor, updateMaterial, disposeMaterial, refreshSceneShaderFields, refreshOpalTime, type RestyleSpec } from './materials'
+import { materialFor, updateMaterial, disposeMaterial, refreshSceneShaderFields, refreshOpalTime, textureLoads, type RestyleSpec } from './materials'
+import { AssetTracker, type AssetFailure } from './assetTracker'
 import { refreshImageBounds, type ImageUniforms } from './imageShader'
 import { applyModifiers, applyModifierStack, type ModifierApplyCtx } from '~/lib/scene3d/modifiers'
 import { PRIMITIVE_PARAMS, paramValue, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
@@ -574,6 +575,20 @@ let _nextSceneEngineId = 1
  *  console. Module-level, like the texture cache it mirrors. */
 const warnedDecalTextures = new Set<string>()
 
+/** The name an export's "could not load" message uses for an object's asset: what a person
+ *  recognises — the object's own name, else the file's name from its URL. */
+function assetNameFor(obj: { name?: string }, url?: string): string {
+  const own = obj.name?.trim()
+  if (own) return own
+  if (!url) return 'an object'
+  if (url.startsWith('data:')) return 'an embedded file'
+  try {
+    const u = new URL(url, 'http://local')
+    const file = u.searchParams.get('filename') ?? u.pathname.split('/').pop()
+    return file || url
+  } catch { return url }
+}
+
 export class SceneEngine {
   readonly renderer: THREE.WebGLRenderer
   readonly scene: THREE.Scene
@@ -671,6 +686,12 @@ export class SceneEngine {
    *  `syncFromDoc`, with no rAF loop to catch up on a later frame) doesn't bake
    *  a frame with every decal missing. */
   private pendingDecals = new Map<string, Promise<void>>()
+  /** Every async load this engine starts (model, font, mesh, HDRI; decal failures), observed
+   *  for export — `settleAllAssets`. Watching only: no site's own promise chain changes. */
+  readonly assets = new AssetTracker()
+  /** Where the shared `textureLoads` failure list stood when this engine was made, so
+   *  `settleAllAssets` reports only texture failures from this engine's lifetime. */
+  private readonly textureFailureBase = textureLoads.failureCount
   private token = 0
   /** While a sculpt session is live, `geometryForObject` returns geometry built
    *  directly from THESE arrays (by reference, no copy) instead of decoding
@@ -826,7 +847,7 @@ export class SceneEngine {
   private applyHdriEnvironment(slug: string): void {
     const token = ++this.hdriToken
     this.hdriSlug = slug
-    loadHdriEquirect(slug).then((equirect) => {
+    this.assets.observe('hdri', slug, loadHdriEquirect(slug).then((equirect) => {
       if (token !== this.hdriToken) return // superseded by a newer selection
       const pmrem = new THREE.PMREMGenerator(this.renderer)
       this.envTarget?.dispose()
@@ -841,7 +862,10 @@ export class SceneEngine {
       if (this.lastDoc?.background === 'environment') this.scene.background = equirect
       // Re-point the live cinematic trace at the real HDR env (no bake, no ambient floor needed).
       if (this._cinematic && this.pathTracer?.isActive) this.cinematicRefresh(true)
-    }).catch(() => { /* network/parse failure — keep the current environment */ })
+    }).catch((err) => {
+      /* network/parse failure — keep the current environment */
+      if (token === this.hdriToken) this.assets.fail('hdri', slug, err) // a superseded pick is not the scene's
+    }))
   }
 
   /** The texture the cinematic tracer lights from: the loaded HDRI equirect when one is active
@@ -1218,14 +1242,17 @@ export class SceneEngine {
       } else {
         const tok = ++this.token
         this.fontTokens.set(obj.id, tok)
-        loadFont(url).then(() => {
+        this.assets.observe('font', url, loadFont(url).then(() => {
           if (this.fontTokens.get(obj.id) !== tok) return // stale
           const root = this.objectRoots.get(obj.id)
           if (!root) return // removed while loading
           const latest = (root.userData.primObj as PrimitiveObject | undefined) ?? obj
           root.userData.geoKey = undefined
           this.syncObject(latest)
-        }).catch(() => { /* keep the placeholder; Task 5 surfaces the error state */ })
+        }).catch((err) => {
+          /* keep the placeholder; Task 5 surfaces the error state */
+          if (this.fontTokens.get(obj.id) === tok && this.objectRoots.has(obj.id)) this.assets.fail('font', url, err)
+        }))
       }
     }
     if (obj.primitive === 'mesh') {
@@ -1249,14 +1276,17 @@ export class SceneEngine {
       if (encoded && key && !meshCacheGet(key)) {
         const tok = ++this.token
         this.meshTokens.set(obj.id, tok)
-        loadMesh(encoded, key).then(() => {
+        this.assets.observe('mesh', assetNameFor(obj), loadMesh(encoded, key).then(() => {
           if (this.meshTokens.get(obj.id) !== tok) return // stale
           const root = this.objectRoots.get(obj.id)
           if (!root) return // removed while decoding
           const latest = (root.userData.primObj as PrimitiveObject | undefined) ?? obj
           root.userData.geoKey = undefined
           this.syncObject(latest)
-        }).catch(() => { /* keep the placeholder; Scene3DStudioSurface's meshError watch surfaces the error state, mirroring fontError (I4, final review) */ })
+        }).catch((err) => {
+          /* keep the placeholder; Scene3DStudioSurface's meshError watch surfaces the error state, mirroring fontError (I4, final review) */
+          if (this.meshTokens.get(obj.id) === tok && this.objectRoots.has(obj.id)) this.assets.fail('mesh', assetNameFor(obj), err)
+        }))
       } else if (key) {
         this.meshTokens.delete(obj.id)
       }
@@ -1435,7 +1465,7 @@ export class SceneEngine {
         root = new THREE.Group() // placeholder while the GLB loads
         const tok = ++this.token
         this.glbTokens.set(obj.id, tok)
-        loadGlb(obj.url).then((g) => {
+        this.assets.observe('model', assetNameFor(obj, obj.url), loadGlb(obj.url).then((g) => {
           if (this.glbTokens.get(obj.id) !== tok) return // stale (object deleted/replaced)
           g.traverse((c) => { if ((c as THREE.Mesh).isMesh) { c.castShadow = c.receiveShadow = true } })
           ensureUv(g)
@@ -1447,7 +1477,10 @@ export class SceneEngine {
           syncGlbMaterials(root!, glbObj, this.lightView, this.clay, this.id, this.restyleSpecFor(glbObj))
           // The interior meshes only exist now — attach any edge treatments to them.
           syncTreatmentShells(root!, (root!.userData.glbObj as GlbObject | undefined) ?? obj, { lightView: this.lightView })
-        }).catch(() => { /* surface shows the error state; the group stays empty */ })
+        }).catch((err) => {
+          /* surface shows the error state; the group stays empty */
+          if (this.glbTokens.get(obj.id) === tok) this.assets.fail('model', assetNameFor(obj, obj.url), err)
+        }))
       } else if (obj.kind === 'group') {
         root = new THREE.Group() // an empty transform node — no geometry, no light, no marker
       } else if (obj.kind === 'decal') {
@@ -1651,6 +1684,7 @@ export class SceneEngine {
           warnedDecalTextures.add(ck)
           console.warn('[scene3d] decal texture failed to load', ck, err)
         }
+        if (this.decalTokens.get(obj.id) === tok) this.assets.fail('decal', assetNameFor(obj), err)
       })
       this.pendingDecals.set(pendingKey, build)
       // Registered BEFORE settleAsyncAssets ever awaits `build`, so this
@@ -1686,6 +1720,21 @@ export class SceneEngine {
     for (let round = 0; round < 10 && this.pendingDecals.size; round++) {
       await Promise.all([...this.pendingDecals.values()])
     }
+  }
+
+  /** Export only: wait for every asset this engine (and the shared texture cache) is loading,
+   *  including decals, until nothing is left in flight — a finished load can start another (a
+   *  model's materials start their textures), hence the rounds, capped so a load that keeps
+   *  re-arming cannot hang an export. Returns every failure seen since this engine was made. */
+  async settleAllAssets(): Promise<AssetFailure[]> {
+    for (let round = 0; round < 20; round++) {
+      const busy = this.assets.pending + textureLoads.pending + this.pendingDecals.size
+      if (!busy) break
+      await Promise.all([this.assets.settle(1), textureLoads.settle(1), this.settleAsyncAssets()])
+    }
+    const texFailures = (await textureLoads.settle(0)).slice(this.textureFailureBase)
+    const own = await this.assets.settle(0)
+    return [...own, ...texFailures]
   }
 
   /** Heals every `text` mesh stuck on the placeholder cube after a font URL

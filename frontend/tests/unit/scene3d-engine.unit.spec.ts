@@ -11,6 +11,7 @@ import { modifierStackOf, writeModifierStack, createModifier, type ModifierInsta
 import { loadFont, type Font } from '~/lib/scene3d/outlines'
 import { encodeMesh, meshDataFromGeometry } from '~/lib/scene3d/mesh'
 import { loadMesh, meshCacheClear } from '~/lib/scene3d/meshCache'
+import { AssetTracker } from '~/lib/scene3d/assetTracker'
 
 // vitest runs in node, so parse a real .otf off disk rather than fetching —
 // same approach as scene3d-outlines.unit.spec.ts.
@@ -318,6 +319,7 @@ describe('scene3d engine deferred geometry', () => {
     glbTokens: new Map<string, number>(),
     fontTokens: new Map<string, number>(),
     decalTokens: new Map<string, number>(),
+    assets: new AssetTracker(),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     geometryForObject: (SceneEngine.prototype as any).geometryForObject,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -398,6 +400,7 @@ describe('scene3d engine Cloner Vary integration', () => {
     glbTokens: new Map<string, number>(),
     fontTokens: new Map<string, number>(),
     decalTokens: new Map<string, number>(),
+    assets: new AssetTracker(),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     geometryForObject: (SceneEngine.prototype as any).geometryForObject,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -450,6 +453,7 @@ describe('scene3d engine light view clay mode', () => {
     glbTokens: new Map<string, number>(),
     fontTokens: new Map<string, number>(),
     decalTokens: new Map<string, number>(),
+    assets: new AssetTracker(),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     geometryForObject: (SceneEngine.prototype as any).geometryForObject,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -513,6 +517,7 @@ describe('scene3d engine GLB material override', () => {
     glbTokens: new Map<string, number>(),
     fontTokens: new Map<string, number>(),
     decalTokens: new Map<string, number>(),
+    assets: new AssetTracker(),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     geometryForObject: (SceneEngine.prototype as any).geometryForObject,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -950,6 +955,7 @@ describe('scene3d engine text font async re-sync', () => {
     glbTokens: new Map<string, number>(),
     fontTokens: new Map<string, number>(),
     decalTokens: new Map<string, number>(),
+    assets: new AssetTracker(),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     geometryForObject: (SceneEngine.prototype as any).geometryForObject,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1072,6 +1078,7 @@ describe('scene3d engine mesh decode async re-sync', () => {
     glbTokens: new Map<string, number>(),
     fontTokens: new Map<string, number>(),
     decalTokens: new Map<string, number>(),
+    assets: new AssetTracker(),
     meshTokens: new Map<string, number>(),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     geometryForObject: (SceneEngine.prototype as any).geometryForObject,
@@ -1176,6 +1183,7 @@ describe('scene3d engine sculpt override clear (C2)', () => {
     glbTokens: new Map<string, number>(),
     fontTokens: new Map<string, number>(),
     decalTokens: new Map<string, number>(),
+    assets: new AssetTracker(),
     meshTokens: new Map<string, number>(),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     geometryForObject: (SceneEngine.prototype as any).geometryForObject,
