@@ -270,3 +270,47 @@ describe('ruling R12: a tag, sticker or button no role can carry tries plain pap
     for (const f of out.fills.values()) expect(f && typeof f === 'object' && 'plain' in f).toBe(false)
   })
 })
+
+// ═══════════════════════ Stage 4 Task 2: a layout's own words and stars on a piece ═══════════════════════
+
+describe('the contrast picker — owned text and stars on a piece (Stage 4)', () => {
+  const S = makeSheet({ frameW: 1000, frameH: 1000, measure: makeStubMeasure(), style: 'performance' })
+  const panel: El = { k: 'r', x: 0, y: 0, w: 100, h: 40, color: 'accent', role: 'panel', ok: true, bleed: true }
+  /** The user's layers: none of these texts is theirs. */
+  const ctx = (pal: typeof palette) => ({ palette: pal, layerColour: () => undefined, hasAction: false })
+
+  it('owned text sits on its panel and is read in its fixed colour: white on the page colour takes the ink', () => {
+    const els: El[] = [panel, S.own('Before', { x: 10, top: 10, hex: '#ffffff', role: 'label' })]
+    expect(textsOn(els, 0, S).map(t => t.role)).toEqual(['label'])
+    expect(pieceFills(els, S, ctx(palette)).fills.get(panel)).toBe('ink')
+  })
+
+  it('owned text in its palette role: ink text keeps the panel on the page colour', () => {
+    const els: El[] = [panel, S.own('Before', { x: 10, top: 10, role: 'label' })]
+    const pf = pieceFills(els, S, ctx(palette))
+    expect(pf.fills.get(panel)).toBe('field')
+    expect(pf.issues).toEqual([])
+  })
+
+  it('stars read by their accent: an accent close to the page puts them on the ink', () => {
+    const pale = { field: '#f2f0ef', ink: '#121212', accent: '#eeeeee' }
+    const els: El[] = [panel, S.stars(4.7, 10, 10, 5)]
+    expect(textsOn(els, 0, S).map(t => t.role)).toEqual(['stars'])
+    expect(pieceFills(els, S, ctx(pale)).fills.get(panel)).toBe('ink')
+    // Negative control: a clear accent reads on the page colour.
+    expect(pieceFills(els, S, ctx(palette)).fills.get(panel)).toBe('field')
+  })
+
+  it('owned text no role can carry refuses the candidate', () => {
+    const grey = { field: '#999999', ink: '#777777', accent: '#8a8a8a' }
+    const els: El[] = [panel, S.own('✓', { x: 10, top: 10, hex: '#888888', role: 'tick' })]
+    expect(pieceFills(els, S, ctx(grey)).issues).toEqual(['tick is unreadable on its panel'])
+  })
+
+  it('negative control: owned text drawn BEFORE the panel lies under it and is not on it', () => {
+    const own = S.own('Before', { x: 10, top: 10, hex: '#ffffff', role: 'label' })
+    const els: El[] = [own, panel]
+    expect(textsOn(els, 1, S)).toEqual([])
+    expect(pieceFills(els, S, ctx(palette)).fills.has(panel)).toBe(false)
+  })
+})

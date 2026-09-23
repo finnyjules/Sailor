@@ -120,6 +120,9 @@ interface Prepared {
   /** The base view's elements (ruling C2): what `posterState.roles` stores, whatever the view, so
    *  applying a Stage 4 layout never changes how the other layouts read the Frame. */
   baseElements: FrameElements
+  /** The family a layout's own words are set in (Stage 4): the layer the caption face is measured
+   *  from (the caption, else the first content line measured in that face), else the title's. */
+  ownFamily: string | undefined
 }
 
 /** Every text role a Frame can hold: the targets, the measure and the stored roles cover all of
@@ -181,11 +184,13 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
   // The action is measured in its own layer's face (a button grows with it). Stage 4 roles are
   // measured in the details face (quote, stat) or the caption face (the rest — `faceOf`): with no
   // details or caption layer of its own, that face is the content line's layer.
+  const captionFace = layerOf('caption') ?? layerOf('by') ?? layerOf('list') ?? layerOf('statline') ?? layerOf('rating') ?? layerOf('them')
   const measure = a.measure ?? makeCanvasMeasure({
     title: layerOf('title'), details: layerOf('details') ?? layerOf('quote') ?? layerOf('stat'), date: layerOf('date'),
-    caption: layerOf('caption') ?? layerOf('by') ?? layerOf('list') ?? layerOf('statline') ?? layerOf('rating') ?? layerOf('them'),
+    caption: captionFace,
     action: layerOf('action'),
   })
+  const ownFamily = (captionFace ?? layerOf('title'))?.fontFamily
   // The height the layout composes on: the band a format leaves uncovered, or the whole frame.
   const fullH = 100 * a.frameH / a.frameW
   const composedH = fmt?.keep ? fullH * (1 - fmt.keep.top - fmt.keep.bottom) : fullH
@@ -198,7 +203,7 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
     layerColour: role => (TEXT_ROLES as string[]).includes(role) && targets[role as RoleKey] ? colourOf(targets[role as RoleKey]) ?? null : undefined,
     ...(shapeLayer ? { shapeFill: shapeLayer.fill ?? null } : {}),
   }
-  return { def, index, layers, elements, baseElements: views.base.elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props), fmt, hidden, style: a.style ?? 'swiss', composedH, fillCtx, read }
+  return { def, index, layers, elements, baseElements: views.base.elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props), fmt, hidden, style: a.style ?? 'swiss', composedH, fillCtx, read, ownFamily }
 }
 
 type FrameArgs = Pick<LayoutPlanArgs, 'props' | 'frameW' | 'frameH' | 'shapeMode' | 'imageMode' | 'style'>
@@ -422,7 +427,7 @@ function runChoice(p: Prepared, a: { frameW: number; frameH: number; style?: Sty
   const bandEnd = H_full * (1 - keep.bottom)
   for (const e of out.els) {
     const m = e as unknown as Record<string, number | undefined>
-    for (const k of ['y', 'top', 'base', 'cy'] as const) if (m[k] != null) m[k] = m[k]! + inset
+    for (const k of ['y', 'top', 'base', 'cy', 'y1', 'y2'] as const) if (m[k] != null) m[k] = m[k]! + inset
   }
   for (const e of out.els) {
     // A band (Stage 3, the prototype's scrim rule) that starts at the band's top runs on to the
@@ -549,6 +554,8 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
     if (a.recolour) pieces.recolour = true
   }
   if (out.els.some(e => e.k === 'logo') && p.content.logo) pieces.logo = p.content.logo
+  // A layout's own words (Stage 4) take the caption layer's family — only passed when drawn.
+  if (out.els.some(e => e.k === 'own') && p.ownFamily) pieces.ownFamily = p.ownFamily
   // The fills the check just read (ruling R6): only when a piece carries text, so a layout without
   // one (every Swiss layout but Badge, Knockout and the panels) calls toOps exactly as before.
   if (pf.fills.size) pieces.fills = pf.fills

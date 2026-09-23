@@ -34,7 +34,20 @@ export interface BandEl extends Base { k: 'band'; side: 'top' | 'bottom'; y: num
 export interface ButtonEl extends Base { k: 'btn'; x: number; y: number; w: number; h: number; size: number; shape: 'pill' | 'box' | 'link'; bg?: Colour }
 /** The brand kit's logo (ruling S2), `w × h` with the logo's own aspect. */
 export interface LogoEl extends Base { k: 'logo'; x: number; y: number; w: number; h: number }
-export type El = TextEl | PhotoEl | CircleEl | RectEl | RuleEl | RingEl | BandEl | ButtonEl | LogoEl | MissingEl
+/** A layout's OWN words (Stage 4: ✓ ✕, list numbers, "Before"/"After", the Notes app's chrome) —
+ *  never the user's text. Drawn as an owned text layer in the Frame's caption layer's family, at the
+ *  kit's weight `wt`, in its palette role `color` (default ink) or a fixed `hex` (ruling R6). Set as
+ *  placed lines (no wrapping: `s` breaks at '\n'), measured in the caption face. `x` is the left edge
+ *  of the widest line (`align` places the others); `top` is the first cap top, `base` the last baseline. */
+export interface OwnTextEl extends Base { k: 'own'; s: string; x: number; top?: number; base?: number; size: number; wt: number; ls: number; lh: number; align?: 'left' | 'center' | 'right'; color?: Colour; hex?: string; rot?: number; role: string }
+/** Five owned stars filled to `value` (0..5), the prototype's `.stars`: each star `size` square,
+ *  0.08 × size apart, starting at `x`, top at `y`. The number is not part of it (the user's rating
+ *  line, when placed, is a text element of its own). */
+export interface StarsEl extends Base { k: 'stars'; x: number; y: number; size: number; value: number; role: string }
+/** An owned leader line from (x1, y1) to (x2, y2) (Feature callouts), 0.2 thick, in ink. Lines
+ *  never collide with anything (the checker skips them for overlaps and the logo's clear space). */
+export interface LineEl extends Base { k: 'ln'; x1: number; y1: number; x2: number; y2: number }
+export type El = TextEl | PhotoEl | CircleEl | RectEl | RuleEl | RingEl | BandEl | ButtonEl | LogoEl | OwnTextEl | StarsEl | LineEl | MissingEl
 /** The brand kit's logo (ruling S2): `aspect` is h / w; `onDarkUrl` for a dark field. */
 export interface BrandLogo { url: string; aspect: number; onDarkUrl?: string
   /** The on-dark file's own h/w (it can differ from the main logo's). Absent: `aspect`. */

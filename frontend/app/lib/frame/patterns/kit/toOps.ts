@@ -1,12 +1,12 @@
-import { boxOf } from './check'
+import { boxOf, isPlaced, LINE_W, ownAsText, STAR_GAP } from './check'
 import { faceOf } from './types'
-import type { BandEl, BrandLogo, ButtonEl, CircleEl, Colour, El, LogoEl, PhotoEl, RectEl, RingEl, RuleEl, Sheet, TextEl } from './types'
+import type { BandEl, BrandLogo, ButtonEl, CircleEl, Colour, El, LineEl, LogoEl, OwnTextEl, PhotoEl, RectEl, RingEl, RuleEl, Sheet, StarsEl, TextEl } from './types'
 import type { LayerOp } from '../types'
 import type { ResolvedPalette } from '../palette'
 import { contrastRatio, roleToPaint } from '../palette'
 import { buttonFill, hex6 } from './contrast'
 import type { PieceFill } from './contrast'
-import { createEllipseLayer, createImageLayer, createRectLayer } from '~/composables/useCompositorLayers'
+import { createEllipseLayer, createImageLayer, createLineLayer, createRectLayer, createStarLayer, createTextLayer } from '~/composables/useCompositorLayers'
 import type { LinearGradient } from '~/lib/compositor/paint'
 import type { LocalLayer, TextRun } from '~/composables/useCompositorLayers'
 import type { RoleKey } from './types'
@@ -45,7 +45,21 @@ const RING_REPEAT = 3
 const RULE_H = 0.16
 
 type TextRole = 'title' | 'details' | 'date' | 'caption' | 'action'
-const TEXT_ROLES: readonly string[] = ['title', 'details', 'date', 'caption', 'action']
+  | 'quote' | 'by' | 'rating' | 'list' | 'stat' | 'statline' | 'them'
+/** Every role a user's text layer can hold. The Stage 4 content roles only have a target in a
+ *  layout that reads the content view (`needsContent`), so no Stage 1–3 layout ever reaches one. */
+const TEXT_ROLES: readonly string[] = ['title', 'details', 'date', 'caption', 'action',
+  'quote', 'by', 'rating', 'list', 'stat', 'statline', 'them']
+
+/** An owned star's inner radius over its outer one (the ★ glyph's proportions). */
+const STAR_INNER = 0.4
+/** The unfilled part of a star: ink at 22% (the prototype's `color-mix(ink 22%, transparent)`). */
+const STAR_EMPTY_ALPHA = 0.22
+
+/** How much of star `i` (0-based) a rating of `value` fills, 0..1, to 4 decimals (4.7 → the 5th: 0.7). */
+export function starFill(value: number, i: number): number {
+  return Math.round(Math.max(0, Math.min(1, value - i)) * 1e4) / 1e4
+}
 
 /** `title2` → `title`. */
 const baseRole = (role: string | undefined) => (role ?? '').replace(/\d+$/, '')
@@ -119,7 +133,8 @@ function capTopOf(e: TextEl, n: number, CAP: number): number {
  *  recolour off the user's own text colour is never touched. */
 const DEFAULT_TEXT_ROLE: Colour = 'ink'
 
-/** Display text: every `pre` element sharing a base role becomes one op with placed lines. */
+/** Display text: every `pre` element sharing a base role becomes one op with placed lines (a
+ *  list's items always are — ruling R5, `isPlaced`). */
 function displayOp(els: TextEl[], S: Sheet, target: string, z: number): LayerOp {
   const first = els[0]!
   const f0 = first.size
@@ -222,6 +237,8 @@ export function elementsToOps(
      *  A piece absent from the map keeps its layout colour; a button absent from it takes
      *  `buttonFill` of `actionColor`. */
     fills?: Map<El, PieceFill>
+    /** The font family a layout's own words are set in (Stage 4): the caption layer's. */
+    ownFamily?: string
   },
 ): { ops: LayerOp[]; owned: LocalLayer[] } {
   const ops: LayerOp[] = []
@@ -257,10 +274,10 @@ export function elementsToOps(
   const doneDisplay = new Set<string>()
   /** Add an owned piece, plus an `insert` op that carries its stacking (`z` = element index) to
    *  order.ts; applyPlacement skips insert ops. The op targets the piece's id, `layout-<key>`. */
-  const own = (layer: LocalLayer, kind: 'rect' | 'ellipse' | 'image', key: string, z: number, radius?: number) => {
+  const own = (layer: LocalLayer, kind: NonNullable<LayerOp['insert']>['kind'], key: string, z: number, radius?: number) => {
     owned.push(layer)
     const insert: LayerOp['insert'] = radius ? { kind, key, radius } : { kind, key }
-    ops.push({ target: layer.id, kind: kind === 'image' ? 'image' : 'shape', x: layer.x, y: layer.y, z, insert })
+    ops.push({ target: layer.id, kind: kind === 'image' ? 'image' : kind === 'text' ? 'text' : 'shape', x: layer.x, y: layer.y, z, insert })
   }
 
   // The button (ruling S1): its fill is decided once, by the contrast picker (ruling R6) from the
@@ -293,11 +310,11 @@ export function elementsToOps(
       case 't': {
         const target = textTarget(e.role)
         if (!target) return
-        if (e.pre) {
+        if (isPlaced(e)) {
           const b = baseRole(e.role)
           if (doneDisplay.has(b)) return
           doneDisplay.add(b)
-          const group = els.filter((x): x is TextEl => x.k === 't' && !!x.pre && baseRole(x.role) === b)
+          const group = els.filter((x): x is TextEl => x.k === 't' && isPlaced(x) && baseRole(x.role) === b)
           ops.push(displayOp(group, S, target, z))
         } else {
           const op = flowOp(e, S, target, z)
@@ -354,8 +371,11 @@ export function elementsToOps(
       }
       case 'p': {
         const p = e as PhotoEl
+        // Stage 4: the second image (Before / after) goes to the Frame's second image layer.
+        const second = p.role === 'photo2' || p.role === 'image2'
+        if (second && !targets.image2) return
         ops.push({
-          target: imageTarget, kind: 'image',
+          target: second ? targets.image2! : imageTarget, kind: 'image',
           x: (p.x + p.w / 2) / 100, y: (p.y + p.h / 2) / S.H, w: p.w / 100, h: p.h / 100,
           crop: { fit: 'cover' }, rotation: 0, z, ...look(p),
         })
@@ -419,6 +439,53 @@ export function elementsToOps(
           x: (l.x + l.w / 2) / 100, y: (l.y + RULE_H / 2) / S.H, w: l.w / 100, h: RULE_H / 100,
           radius: 0, fill: paint('ink'),
         }), 'rect', key, z)
+        return
+      }
+      case 'own': {
+        // A layout's own words: an owned text layer set as placed lines (the display model, so it
+        // sits exactly where the checker measured it), in the caption layer's family, the kit's
+        // weight, and its palette role — or its fixed colour (ruling R6).
+        const o = e as OwnTextEl
+        const key = keyFor('own')
+        const op = displayOp([ownAsText(o)], S, key, z)
+        own(createTextLayer({
+          ...ownedBase(key, o),
+          text: o.s, x: op.x!, y: op.y!, rotation: op.rotation ?? 0,
+          fontFamily: opts?.ownFamily ?? 'Inter', fontWeight: o.wt, fontSize: op.fontSize!,
+          color: o.hex ?? paint(o.color), align: 'left', lineHeight: o.lh, letterSpacing: o.ls,
+          runs: op.runs!,
+        }), 'text', key, z)
+        return
+      }
+      case 'stars': {
+        // Five owned star shapes, each filled to the rating by a hard stop: the accent up to the
+        // fill, ink at 22% after it (the prototype's background-clip gradient per ★).
+        const st = e as StarsEl
+        const on = paint('accent'), off = withAlpha(paint('ink'), STAR_EMPTY_ALPHA)
+        for (let i = 0; i < 5; i++) {
+          const f = starFill(st.value, i)
+          const key = keyFor(st.role || 'stars')
+          const cx = st.x + st.size / 2 + i * st.size * (1 + STAR_GAP)
+          own(createStarLayer({
+            ...ownedBase(key, st),
+            x: cx / 100, y: (st.y + st.size / 2) / S.H, w: st.size / 100, h: st.size / 100,
+            points: 5, innerRatio: STAR_INNER, cornerRadius: 0, rotation: 0, stroke: '', strokeWidth: 0,
+            fill: { type: 'linear', angle: 0, stops: [{ offset: 0, color: on }, { offset: f, color: on }, { offset: f, color: off }, { offset: 1, color: off }] },
+          }), 'star', key, z)
+        }
+        return
+      }
+      case 'ln': {
+        // A leader line: an owned line layer centred between its ends, turned to their angle.
+        const l = e as LineEl
+        const key = keyFor(l.role ?? 'leader')
+        const len = Math.hypot(l.x2 - l.x1, l.y2 - l.y1)
+        const ang = (Math.atan2(l.y2 - l.y1, l.x2 - l.x1) * 180) / Math.PI
+        own(createLineLayer({
+          ...ownedBase(key, l),
+          x: (l.x1 + l.x2) / 2 / 100, y: (l.y1 + l.y2) / 2 / S.H, w: len / 100, rotation: ang,
+          stroke: paint('ink'), strokeWidth: LINE_W / 100,
+        }), 'line', key, z)
         return
       }
       case 'ring': {

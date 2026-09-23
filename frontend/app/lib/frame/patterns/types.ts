@@ -106,7 +106,7 @@ export interface LayerOp {
   /** Text op: placed lines (em of the layer's font size, union centred on the origin). */
   runs?: import('~/composables/useCompositorLayers').TextRun[]
   /** An owned piece the layout inserts (descriptive; kit/toOps returns owned layers directly). */
-  insert?: { kind: 'rect' | 'ellipse' | 'image'; key: string; radius?: number }
+  insert?: { kind: 'rect' | 'ellipse' | 'image' | 'text' | 'star' | 'line'; key: string; radius?: number }
   /** Clip to a region in frame-normalised coordinates (x/y centre by W/H, w/h by width). */
   mask?: { kind: 'ellipse' | 'rect'; x: number; y: number; w: number; h: number }
   /** Text op: set the text along a path. */

@@ -1,6 +1,6 @@
 import { faceOf } from './types'
 import type { KeepClear } from '~/lib/frame/formats'
-import type { El, LayoutDef, MissingEl, RectEl, Sheet, Style, TextEl } from './types'
+import type { El, LayoutDef, LineEl, MissingEl, OwnTextEl, RectEl, Sheet, StarsEl, Style, TextEl } from './types'
 import { STYLES } from './styles'
 import type { StyleId } from './styles'
 
@@ -44,6 +44,37 @@ function rotateBox(b: Box, rot: number, origin: string | undefined): Box {
   return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) }
 }
 
+/** Stage 4 (ruling R5): a list's items are placed lines (runs) of the one list layer, whatever
+ *  the element says — measured and drawn line by line, never wrapped by the renderer. */
+export const isPlaced = (e: TextEl): boolean => !!e.pre || baseRole(e.role ?? '') === 'list'
+
+/** The gap between two owned stars, in their size (the prototype's `gap: .08em`). */
+export const STAR_GAP = 0.08
+/** An owned leader line's thickness in kit units (the prototype's 0.2cqw border). */
+export const LINE_W = 0.2
+
+/** A layout's own words as the text element they are measured and placed as: lines (no wrap) in
+ *  the caption face — the face of the caption layer whose family the owned layer takes. */
+export function ownAsText(e: OwnTextEl): TextEl {
+  const t: TextEl = { k: 't', s: e.s, x: e.x, size: e.size, wt: e.wt, ls: e.ls, lh: e.lh, role: 'caption', pre: true }
+  if (e.top != null) t.top = e.top
+  if (e.base != null) t.base = e.base
+  if (e.align) t.align = e.align
+  if (e.rot) t.rot = e.rot
+  return t
+}
+
+/** Five stars in a row: `size` square each, `STAR_GAP × size` apart. */
+export function starsBox(e: StarsEl): Box {
+  return { x0: e.x, y0: e.y, x1: e.x + e.size * (5 + 4 * STAR_GAP), y1: e.y + e.size }
+}
+
+/** A leader line's box: its two ends, `LINE_W` thick. */
+function lineBox(e: LineEl): Box {
+  const h = LINE_W / 2
+  return { x0: Math.min(e.x1, e.x2) - h, y0: Math.min(e.y1, e.y2) - h, x1: Math.max(e.x1, e.x2) + h, y1: Math.max(e.y1, e.y2) + h }
+}
+
 /** The ink box of a text element: widest measured line × cap-top..last-baseline.
  *  `overflow`: a word wider than the box is not clipped to it — the renderer only wraps at
  *  spaces, so an unbreakable word (a date such as "19.09.–15.11.2026") spills past its box. */
@@ -53,7 +84,7 @@ function textBox(e: TextEl, S: Sheet, overflow = false): Box {
 
   let n: number
   let widestLine: number
-  if (e.pre) {
+  if (isPlaced(e)) {
     const lines = e.s.split('\n')
     n = lines.length
     widestLine = Math.max(...lines.map(l => (S.measure.w100(l, face, e.ls, e.upper) * e.size) / 100))
@@ -112,6 +143,12 @@ export function boxOf(e: El, S: Sheet): Box | null {
     case 'btn':
     case 'logo':
       return { x0: e.x, y0: e.y, x1: e.x + e.w, y1: e.y + e.h }
+    case 'own':
+      return textBox(ownAsText(e), S)
+    case 'stars':
+      return starsBox(e)
+    case 'ln':
+      return lineBox(e)
   }
 }
 
@@ -165,13 +202,14 @@ export function checkPlan(els: El[], S: Sheet, premise?: LayoutDef['premise'], o
   // Rules 3 and 4 measure the real ink: a word wider than its text box spills past it (the
   // renderer only wraps at spaces), so it counts towards off-page and overlap.
   const boxed = present
-    .map(e => ({ e, box: e.k === 't' ? textBox(e, S, true) : boxOf(e, S) }))
+    .map(e => ({ e, box: e.k === 't' ? textBox(e, S, true) : e.k === 'own' ? textBox(ownAsText(e), S, true) : boxOf(e, S) }))
     .filter((it): it is { e: Present; box: Box } => it.box != null)
 
   // Rule 2: text below the minimum size. A ring (the title set on a path) is text too, as in
   // rule 8 — without it, Ring on a 320×50 banner set its title at 1.89 against a floor of 2.81.
   for (const e of present) {
-    if ((e.k === 't' || e.k === 'ring') && e.size < S.INFO.size - 0.01) issues.push(`${roleLabel(e)}: below minimum size`)
+    // A layout's own words (Stage 4) are text too.
+    if ((e.k === 't' || e.k === 'ring' || e.k === 'own') && e.size < S.INFO.size - 0.01) issues.push(`${roleLabel(e)}: below minimum size`)
   }
 
   // Rule 3: off the page.
@@ -187,6 +225,8 @@ export function checkPlan(els: El[], S: Sheet, premise?: LayoutDef['premise'], o
       const a = boxed[i]!
       const b = boxed[j]!
       if (a.e.ok || b.e.ok) continue
+      // A leader line runs from a label to the product on purpose: it never collides (Stage 4).
+      if (a.e.k === 'ln' || b.e.k === 'ln') continue
       const aRole = roleLabel(a.e)
       const bRole = roleLabel(b.e)
       if (a.e.over?.includes(baseRole(bRole)) || b.e.over?.includes(baseRole(aRole))) continue
@@ -274,7 +314,7 @@ export function checkPlan(els: El[], S: Sheet, premise?: LayoutDef['premise'], o
     const top = fullH * keep.top, bottom = fullH * (1 - keep.bottom)
     const left = 100 * keep.left, right = 100 - 100 * keep.right
     for (const { e, box } of boxed) {
-      if (e.k !== 't' && e.k !== 'ring') continue
+      if (e.k !== 't' && e.k !== 'ring' && e.k !== 'own') continue
       if (box.y0 < top - 0.3 || box.y1 > bottom + 0.3 || box.x0 < left - 0.3 || box.x1 > right + 0.3) {
         issues.push(`${roleLabel(e)}: under the app's interface`)
       }
@@ -289,7 +329,7 @@ export function checkPlan(els: El[], S: Sheet, premise?: LayoutDef['premise'], o
     const pad = 0.35 * (lg.box.y1 - lg.box.y0)
     const zone: Box = { x0: lg.box.x0 - pad, y0: lg.box.y0 - pad, x1: lg.box.x1 + pad, y1: lg.box.y1 + pad }
     for (const o of boxed) {
-      if (o === lg || o.e.ok) continue
+      if (o === lg || o.e.ok || o.e.k === 'ln') continue
       if (o.e.over?.includes('logo') || lg.e.over?.includes(baseRole(roleLabel(o.e)))) continue
       if (Math.min(zone.x1, o.box.x1) - Math.max(zone.x0, o.box.x0) > 0.01 && Math.min(zone.y1, o.box.y1) - Math.max(zone.y0, o.box.y0) > 0.01) {
         issues.push('logo: needs clear space')

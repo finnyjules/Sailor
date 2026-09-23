@@ -619,3 +619,186 @@ describe('elementsToOps — Stage 3 fix round 1', () => {
     ])
   })
 })
+
+// ═══════════════════════ Stage 4 Task 2: owned words, stars, leader lines, the second image, lists ═══════════════════════
+
+describe('elementsToOps — Stage 4 kit pieces', () => {
+  const palette = { field: '#f2f0ef', ink: '#121212', accent: '#dd2200' }
+  const P = makeSheet({ frameW: frame.w, frameH: frame.h, measure, style: 'performance' })
+  const all = { ...targets, list: 'li', image2: 'img2' }
+
+  it('an `own` element becomes an owned text layer in the caption layer\'s family, its colour role applied', () => {
+    const e = P.own('✓', { x: 20, top: 30, size: 4, wt: 700, color: 'accent', role: 'us0' })
+    const { ops, owned } = elementsToOps([e], P, all, frame, palette, { ownFamily: 'Caption Serif' })
+    expect(owned).toHaveLength(1)
+    const l = owned[0] as any
+    expect(l.kind).toBe('text')
+    expect(l.owner).toEqual({ by: 'layout', key: 'own-0' })
+    expect(l.id).toBe('layout-own-0')
+    expect(l.text).toBe('✓')
+    expect(l.fontFamily).toBe('Caption Serif')
+    expect(l.fontWeight).toBe(700)
+    expect(l.color).toBe('#dd2200')
+    expect(l.fontSize).toBeCloseTo(0.04, 9)
+    // Placed where the checker measures it: the run's cap top at `top`, its left edge at `x`.
+    const b = boxOf(e, P)!
+    const r = l.runs[0]
+    expect(l.x * 100 + r.x * 4).toBeCloseTo(b.x0, 9)
+    expect(l.y * P.H + r.y * 4 - 0.35 * 4).toBeCloseTo(b.y0, 9)
+    expect(r.x * 2 + measure.w100('✓', 'caption', 0) / 100).toBeCloseTo(0, 9)    // centred on the origin (R2)
+    // One insert op carrying its stacking; no op touches a user's layer.
+    expect(ops).toEqual([{ target: 'layout-own-0', kind: 'text', x: l.x, y: l.y, z: 0, insert: { kind: 'text', key: 'own-0' } }])
+  })
+
+  it('an `own` element with a fixed `hex` is drawn in it (ruling R6); keys count up', () => {
+    const els: El[] = [
+      P.own('‹ Notes', { x: 5, top: 5, hex: '#d49a1a', role: 'ui' }),
+      P.own('Done', { x: 70, top: 5, hex: '#d49a1a', role: 'ui2' }),
+      P.own('1', { x: 5, top: 40 }),
+    ]
+    const { owned } = elementsToOps(els, P, all, frame, palette, { ownFamily: 'Caption Serif' })
+    expect(owned.map(l => (l as any).owner.key)).toEqual(['own-0', 'own-1', 'own-2'])
+    expect(owned.map(l => (l as any).color)).toEqual(['#d49a1a', '#d49a1a', '#121212'])
+  })
+
+  it('negative control: the layout\'s own words never become an op on a user\'s text layer', () => {
+    const e = P.own('Before', { x: 5, top: 5, role: 'caption' })   // even named like a user role
+    const { ops } = elementsToOps([e], P, all, frame, palette)
+    expect(ops.every(o => o.insert)).toBe(true)
+    expect(ops.some(o => o.target === 'c')).toBe(false)
+  })
+
+  it('stars 4.7 → five owned star layers, each a hard-stop accent → ink at 22%; the fifth stops at 70%', () => {
+    const st = P.stars(4.7, 10, 20, 5)
+    const { ops, owned } = elementsToOps([st], P, all, frame, palette)
+    expect(owned).toHaveLength(5)
+    expect(owned.map(l => l.kind)).toEqual(['star', 'star', 'star', 'star', 'star'])
+    expect(owned.map(l => (l as any).owner.key)).toEqual(['stars-0', 'stars-1', 'stars-2', 'stars-3', 'stars-4'])
+    const stops = owned.map(l => (l as any).fill.stops as { offset: number; color: string }[])
+    for (const s of stops.slice(0, 4)) expect(s[1]!.offset).toBe(1)
+    expect(stops[4]!.map(s => s.offset)).toEqual([0, 0.7, 0.7, 1])
+    expect(stops[4]!.map(s => s.color)).toEqual(['#dd2200', '#dd2200', 'rgba(18, 18, 18, 0.22)', 'rgba(18, 18, 18, 0.22)'])
+    expect((owned[0] as any).fill.angle).toBe(0)                 // left → right
+    // Each `size` square, 0.08 × size apart, in the checker's box.
+    const l0 = owned[0] as any, l4 = owned[4] as any
+    expect(l0.w).toBeCloseTo(0.05, 9)
+    expect(l0.x * 100).toBeCloseTo(12.5, 9)
+    expect(l4.x * 100).toBeCloseTo(12.5 + 4 * 5.4, 9)
+    expect(l0.y * P.H).toBeCloseTo(22.5, 9)
+    const b = boxOf(st, P)!
+    expect(l4.x * 100 + 2.5).toBeCloseTo(b.x1, 9)
+    expect(ops.map(o => o.insert?.kind)).toEqual(['star', 'star', 'star', 'star', 'star'])
+    // A whole rating: nothing left unfilled on the fifth; zero fills none.
+    expect(((elementsToOps([P.stars(5, 10, 20, 5)], P, all, frame, palette).owned[4] as any).fill.stops[1].offset)).toBe(1)
+    expect(((elementsToOps([P.stars(4, 10, 20, 5)], P, all, frame, palette).owned[4] as any).fill.stops[1].offset)).toBe(0)
+  })
+
+  it('a leader line → an owned line layer centred between its ends, turned to their angle, in ink', () => {
+    const ln = P.leader(10, 40, 40, 70)
+    const { ops, owned } = elementsToOps([ln], P, all, frame, palette)
+    expect(owned).toHaveLength(1)
+    const l = owned[0] as any
+    expect(l.kind).toBe('line')
+    expect(l.owner).toEqual({ by: 'layout', key: 'leader-0' })
+    expect(l.x).toBeCloseTo(0.25, 9)
+    expect(l.y * P.H).toBeCloseTo(55, 9)
+    expect(l.w).toBeCloseTo(Math.hypot(30, 30) / 100, 9)
+    expect(l.rotation).toBeCloseTo(45, 9)
+    expect(l.stroke).toBe('#121212')
+    expect(l.strokeWidth).toBeCloseTo(0.002, 9)
+    expect(ops[0]!.insert).toEqual({ kind: 'line', key: 'leader-0' })
+  })
+
+  it('an image2 photo → an op on the second image with a cover crop; the first image is untouched', () => {
+    const els: El[] = [
+      { k: 'p', x: 0, y: 0, w: 50, h: 60, role: 'photo' },
+      { k: 'p', x: 50, y: 0, w: 50, h: 60, role: 'photo2' },
+    ]
+    const { ops } = elementsToOps(els, P, all, frame, palette)
+    expect(ops.map(o => o.target)).toEqual(['img', 'img2'])
+    expect(ops[1]).toMatchObject({ kind: 'image', x: 0.75, w: 0.5, h: 0.6, crop: { fit: 'cover' }, z: 1 })
+    expect(ops[1]!.y! * P.H).toBeCloseTo(30, 9)
+    // `image2` names the same role.
+    expect(elementsToOps([{ ...els[1]!, role: 'image2' } as El], P, all, frame, palette).ops[0]!.target).toBe('img2')
+    // Negative control: no second image layer, no op (never the first image's).
+    expect(elementsToOps([els[1]!], P, targets, frame, palette).ops).toEqual([])
+  })
+
+  it('three list items → ONE op on the list layer, the items as its runs, union centred (ruling R5 + R2)', () => {
+    const it = (s: string, role: string, top: number): TextEl =>
+      ({ k: 't', s, x: 10, w: 60, top, size: 3, wt: 500, ls: 0, lh: 1.2, role } as TextEl)
+    const els: El[] = [it('Light', 'list', 20), it('Warm\nand dry', 'list1', 30), it('Grippy', 'list2', 45)]
+    const { ops, owned } = elementsToOps(els, P, all, frame, palette)
+    expect(owned).toEqual([])
+    expect(ops).toHaveLength(1)
+    const op = ops[0]!
+    expect(op.target).toBe('li')
+    expect(op.runs!.map(r => r.text)).toEqual(['Light', 'Warm', 'and dry', 'Grippy'])
+    expect(op.w).toBeUndefined()                                  // placed lines, not a flow box
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
+    for (const r of op.runs!) {
+      const w = measure.w100(r.text, 'caption', 0) / 100
+      x0 = Math.min(x0, r.x); x1 = Math.max(x1, r.x + w)
+      y0 = Math.min(y0, r.y - 0.5); y1 = Math.max(y1, r.y + 0.5)
+    }
+    expect(x0 + x1).toBeCloseTo(0, 9)
+    expect(y0 + y1).toBeCloseTo(0, 9)
+    // Each item's first line has its cap top at the item's `top`; the checker agrees.
+    expect(op.y! * P.H + op.runs![3]!.y * 3 - 0.35 * 3).toBeCloseTo(45, 9)
+    expect(boxOf(els[2]!, P)!.y0).toBeCloseTo(45, 9)
+    // Negative control: without a list layer the items are skipped.
+    expect(elementsToOps(els, P, targets, frame, palette).ops).toEqual([])
+  })
+})
+
+describe('Stage 4 through the planner: the owned words take the caption layer\'s family', () => {
+  it('a layout\'s own words are set in the caption layer\'s family; the second image is cropped to cover', async () => {
+    const { vi } = await import('vitest')
+    const palette = { field: '#f2f0ef', ink: '#121212', accent: '#dd2200' }
+    vi.resetModules()
+    vi.doMock('~/lib/frame/patterns/layouts/catalog', async (orig) => {
+      const m = await orig() as typeof import('~/lib/frame/patterns/layouts/catalog')
+      const def = {
+        id: 'testOwn', name: 'Test own', fits: ['word', 'phrase', 'sentence'], needsContent: ['image2'],
+        fn: (S: any, { c }: any) => ({
+          did: 'test',
+          els: [
+            { k: 'p', x: 0, y: 0, w: 50, h: 40, role: 'photo' },
+            { k: 'p', x: 50, y: 0, w: 50, h: 40, role: 'photo2' },
+            S.disp(c.title, { size: 8, x: S.M, top: 50 }),
+            S.own('Before', { x: S.M, top: 95, wt: 600 }),
+          ],
+        }),
+      }
+      return { ...m, layoutEntry: (id: string) => (id === 'testOwn' ? { def, index: 0 } : m.layoutEntry(id)) }
+    })
+    try {
+      const { planLayout } = await import('~/lib/frame/patterns/kit/plan')
+      const { createImageLayer, createTextLayer } = await import('~/composables/useCompositorLayers')
+      const t = (id: string, text: string, fontSize: number, fontFamily: string) =>
+        createTextLayer({ id, text, fontSize, fontFamily, fontWeight: 600, color: '#111111' })
+      const layers = [
+        t('t', 'Run lighter.', 0.12, 'Title Sans'), t('d', 'Halden Trail 2', 0.04, 'Title Sans'),
+        t('c', 'Offer ends 12 October.', 0.02, 'Caption Serif'),
+        createImageLayer('a.png', 1.25, { id: 'img', w: 0.5, h: 0.625 }),
+        createImageLayer('b.png', 1.25, { id: 'img2', w: 0.5, h: 0.625 }),
+      ]
+      const plan = planLayout({
+        props: { sailor_localLayers: layers }, frameW: 1000, frameH: 1000, layoutId: 'testOwn',
+        choice: { lines: 0, arr: 0, scale: 'full', side: 'right' } as any, palette, connectedSlots: [], measure,
+      })!
+      const own = plan.layers.find(l => (l as any).owner?.key === 'own-0') as any
+      expect(own.fontFamily).toBe('Caption Serif')
+      expect(own.fontWeight).toBe(600)
+      // The user's caption keeps its own face.
+      expect((plan.layers.find(l => l.id === 'c') as any).fontFamily).toBe('Caption Serif')
+      expect((plan.layers.find(l => l.id === 't') as any).fontFamily).toBe('Title Sans')
+      const img2 = plan.layers.find(l => l.id === 'img2') as any
+      expect(img2.crop).toEqual({ fit: 'cover' })
+      expect(img2.x).toBeCloseTo(0.75, 9)
+    } finally {
+      vi.doUnmock('~/lib/frame/patterns/layouts/catalog')
+      vi.resetModules()
+    }
+  })
+})

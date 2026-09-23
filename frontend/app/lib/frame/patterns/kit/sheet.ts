@@ -1,5 +1,5 @@
 import { faceOf } from './types'
-import type { BandEl, ButtonEl, Colour, Content, LogoEl, Measure, MissingEl, PhotoEl, RectEl, RoleKey, RuleEl, Style, TextEl, TextKey } from './types'
+import type { BandEl, ButtonEl, Colour, Content, LineEl, LogoEl, Measure, MissingEl, OwnTextEl, PhotoEl, RectEl, RoleKey, RuleEl, StarsEl, Style, TextEl, TextKey } from './types'
 import { STYLES } from './styles'
 import type { StyleId } from './styles'
 
@@ -84,6 +84,15 @@ export interface Sheet {
    *  line it holds), in the display style. Placed by its rotated edge: the rotated box ends at
    *  `right`, centred on `cy`, turned `deg` degrees. `over`: what the tag may lie across. */
   tag(s: string, right: number, cy: number, deg: number, over?: string[], role?: RoleKey): [RectEl, TextEl]
+  // ── Stage 4 pieces ──
+  /** The layout's own words (✓, "Before", a list number): an owned text layer in the caption
+   *  layer's family. Defaults: the information size and weight, no letter spacing, line height 1,
+   *  role `'own'`, at x 0 — `o` sets the rest (`top` or `base`). */
+  own(s: string, o: Partial<OwnTextEl>): OwnTextEl
+  /** Five stars filled to `value`, each `size` square, top-left at (x, y). */
+  stars(value: number, x: number, y: number, size: number): StarsEl
+  /** A leader line from (x1, y1) to (x2, y2). */
+  leader(x1: number, y1: number, x2: number, y2: number): LineEl
 }
 
 /** Design rows. */
@@ -288,6 +297,14 @@ export function makeSheet(o: SheetOpts): Sheet {
     ]
   }
 
+  // ── Stage 4 pieces: owned words, stars and leader lines ──
+  const own = (s: string, o: Partial<OwnTextEl>): OwnTextEl =>
+    ({ k: 'own', s, x: 0, size: INFO.size, wt: INFO.wt ?? 400, ls: 0, lh: 1, role: 'own', ...o } as OwnTextEl)
+  const stars = (value: number, x: number, y: number, size: number): StarsEl =>
+    ({ k: 'stars', x, y, size, value, role: 'stars' })
+  const leader = (x1: number, y1: number, x2: number, y2: number): LineEl =>
+    ({ k: 'ln', x1, y1, x2, y2, role: 'leader' })
+
   return {
     measure,
     W, H, M, G, NC, CW, RH, GAP, CAP, B,
@@ -298,5 +315,6 @@ export function makeSheet(o: SheetOpts): Sheet {
     infoStack, infoRow, infoRowAt, stackBottom, photoIn, cover, pick, q,
     FOOT2, FOOT3, PHOTO_ASPECT,
     band, button, logo, logoH, clear, gapBelow, groupGap, inset, tag,
+    own, stars, leader,
   }
 }

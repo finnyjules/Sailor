@@ -358,3 +358,63 @@ describe('layout kit — checker, Stage 3 pieces (rules 9 and 10)', () => {
     })
   })
 })
+
+// ═══════════════════════ Stage 4 Task 2: the new kit pieces ═══════════════════════
+
+describe('layout kit — checker, Stage 4 pieces', () => {
+  it('owned text is measured as lines in the caption face: its box is the text box of the same words', () => {
+    const o = S.own('Before', { x: 10, top: 20, size: 4, role: 'label' })
+    const as: TextEl = { k: 't', s: 'Before', x: 10, top: 20, size: 4, wt: o.wt, ls: 0, lh: 1, role: 'caption', pre: true }
+    expect(boxOf(o, S)).toEqual(boxOf(as, S))
+  })
+
+  it('owned text off the page fails; the same words on the page pass (negative control)', () => {
+    expect(checkPlan([S.own('After', { x: 96, top: 20, role: 'label' })], S)).toEqual(['label: off the page'])
+    expect(checkPlan([S.own('After', { x: 5, top: 20, role: 'label' })], S)).toEqual([])
+  })
+
+  it('owned text below the minimum size fails; at the minimum it passes (negative control)', () => {
+    expect(checkPlan([S.own('✓', { x: 10, top: 20, size: S.INFO.size * 0.8, role: 'tick' })], S)).toEqual(['tick: below minimum size'])
+    expect(checkPlan([S.own('✓', { x: 10, top: 20, size: S.INFO.size, role: 'tick' })], S)).toEqual([])
+  })
+
+  it('owned text collides like text', () => {
+    const t = title({ x: 5, top: 10, w: 40 })
+    expect(checkPlan([t, S.own('Before', { x: 6, top: 11, size: 4, role: 'label' })], S)).toEqual(['title overlaps label'])
+    expect(checkPlan([t, S.own('Before', { x: 6, top: 40, size: 4, role: 'label' })], S)).toEqual([])
+  })
+
+  it('owned text under the app\'s interface fails (rule 8)', () => {
+    const keep = { top: 0.1, bottom: 0.2, left: 0, right: 0 }
+    expect(checkPlan([S.own('Done', { x: 10, top: 2, role: 'ui' })], S, undefined, { keep })).toEqual(['ui: under the app\'s interface'])
+    expect(checkPlan([S.own('Done', { x: 10, top: 30, role: 'ui' })], S, undefined, { keep })).toEqual([])
+  })
+
+  it('a leader line never collides; a rect in its place does (negative control)', () => {
+    const t = title({ x: 5, top: 10, w: 40 })
+    const ln = S.leader(0, 12, 60, 12)
+    expect(boxOf(ln, S)).toEqual({ x0: -0.1, y0: 11.9, x1: 60.1, y1: 12.1 })
+    expect(checkPlan([t, ln], S)).toEqual([])
+    expect(checkPlan([t, { k: 'r', x: 0, y: 11.9, w: 60, h: 0.4, role: 'bar' }], S)).toEqual(['title overlaps bar'])
+    // …but it still stays on the page.
+    expect(checkPlan([S.leader(50, 50, 120, 50)], S)).toEqual(['leader: off the page'])
+  })
+
+  it('stars: five `size` squares 0.08 × size apart; they collide and stay on the page like any piece', () => {
+    const st = S.stars(4.5, 10, 50, 5)
+    expect(boxOf(st, S)).toEqual({ x0: 10, y0: 50, x1: 10 + 5 * 5.32, y1: 55 })
+    expect(checkPlan([st], S)).toEqual([])
+    expect(checkPlan([st, title({ x: 12, top: 51, w: 20 })], S)).toEqual(['stars overlaps title'])
+    expect(checkPlan([S.stars(4.5, 80, 50, 5)], S)).toEqual(['stars: off the page'])
+  })
+
+  it('list items are measured as placed lines (ruling R5), never re-wrapped to their box', () => {
+    const long = 'A long list item that would wrap'
+    const item: TextEl = { k: 't', s: long, x: 10, w: 10, top: 20, size: 3, wt: 500, ls: 0, lh: 1.2, role: 'list1' }
+    const b = boxOf(item, S)!
+    expect(b.y1 - b.y0).toBeCloseTo(0.7 * 3, 9)                                  // one line
+    // Negative control: the same element as a caption wraps to its box.
+    const c = boxOf({ ...item, role: 'caption' }, S)!
+    expect(c.y1 - c.y0).toBeGreaterThan(0.7 * 3 + 1)
+  })
+})

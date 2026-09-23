@@ -2,7 +2,7 @@ import type { ResolvedPalette } from '../palette'
 import { contrastRatio } from '../palette'
 import { boxOf } from './check'
 import type { Box } from './check'
-import type { Colour, El, Sheet, TextEl } from './types'
+import type { Colour, El, OwnTextEl, Sheet, StarsEl, TextEl } from './types'
 
 // ═══════════════════════ text on a piece: one contrast picker (ruling R6) ═══════════════════════
 // Every layout-drawn piece that carries the user's text — a tag, a sticker, a button, a band, a
@@ -110,6 +110,10 @@ function pieceKind(e: El): PieceKind | null {
 
 const intersects = (a: Box, b: Box) => Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0) > 0 && Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0) > 0
 
+/** What can sit on a piece and must read on it: the user's text, and (Stage 4) the layout's own
+ *  words and its stars. */
+export type OnPiece = TextEl | OwnTextEl | StarsEl
+
 /** True when text box `b` lies inside piece `p` (a circle: all four corners inside it). */
 function within(b: Box, p: El, pb: Box): boolean {
   if (p.k === 'c') {
@@ -127,20 +131,20 @@ function within(b: Box, p: El, pb: Box): boolean {
  * A Swiss shape counts only the text set inside it (Badge, Knockout): a title that merely crosses
  * a shape on purpose (Overlap, Counter) is the layout's premise, not text on a piece.
  */
-export function textsOn(els: El[], i: number, S: Sheet): TextEl[] {
+export function textsOn(els: El[], i: number, S: Sheet): OnPiece[] {
   const p = els[i]!
   const kind = pieceKind(p)
   const pb = kind ? boxOf(p, S) : null
   if (!kind || !pb) return []
   const role = kind === 'btn' ? 'btn' : baseRole((p as { role?: string }).role) || kind
-  const out: TextEl[] = []
+  const out: OnPiece[] = []
   for (let j = i + 1; j < els.length; j++) {
     const e = els[j]!
-    if (e.k !== 't') continue
+    if (e.k !== 't' && e.k !== 'own' && e.k !== 'stars') continue
     const b = boxOf(e, S)
     if (!b) continue
     const over = kind !== 'shape' && !!e.over?.includes(role) && intersects(b, pb)
-    if (over || e.inside === role || within(b, p, pb)) out.push(e)
+    if (over || (e.k === 't' && e.inside === role) || within(b, p, pb)) out.push(e)
   }
   return out
 }
@@ -169,8 +173,12 @@ export interface PieceFills {
   issues: string[]
 }
 
-/** The colour a text element is drawn in, as a hex; null when unknown or not drawn. */
-function textColour(e: TextEl, ctx: FillCtx): string | null {
+/** The colour a text element is drawn in, as a hex; null when unknown or not drawn. A layout's own
+ *  words are drawn in their fixed colour or their palette role (whatever recolour says — they are
+ *  the layout's, not the user's); stars read by their filled part, the accent. */
+function textColour(e: OnPiece, ctx: FillCtx): string | null {
+  if (e.k === 'own') return hex6(e.hex ?? ctx.palette[e.color ?? 'ink'])
+  if (e.k === 'stars') return hex6(ctx.palette.accent)
   if (ctx.layerColour(baseRole(e.role)) === undefined) return null
   return hex6(ctx.recolour ? ctx.palette[e.color ?? 'ink'] : ctx.layerColour(baseRole(e.role)))
 }
@@ -179,7 +187,7 @@ function textColour(e: TextEl, ctx: FillCtx): string | null {
 export function pieceFills(els: El[], S: Sheet, ctx: FillCtx): PieceFills {
   const fills = new Map<El, PieceFill>()
   const issues: string[] = []
-  const on = new Map<number, TextEl[]>()
+  const on = new Map<number, OnPiece[]>()
   els.forEach((p, i) => { if (pieceKind(p)) on.set(i, textsOn(els, i, S)) })
   // Buttons first: a filled button is what its label sits on.
   els.forEach((p, i) => {
@@ -190,13 +198,13 @@ export function pieceFills(els: El[], S: Sheet, ctx: FillCtx): PieceFills {
   })
   /** Text sits on the topmost piece under it: a card on a band holds its own text, a filled button
    *  its label. An outline or a link covers nothing — its label is on whatever lies beneath. */
-  const coveredAbove = (t: TextEl, i: number) => [...on.entries()].some(([k, ts]) => k > i && ts.includes(t)
+  const coveredAbove = (t: OnPiece, i: number) => [...on.entries()].some(([k, ts]) => k > i && ts.includes(t)
     && (els[k]!.k !== 'btn' || isSolid(fills.get(els[k]!))))
   els.forEach((p, i) => {
     const kind = pieceKind(p)
     if (!kind || kind === 'btn') return
     const texts = on.get(i)!.filter(t => !coveredAbove(t, i))
-      .map(t => ({ t, c: textColour(t, ctx) })).filter((x): x is { t: TextEl; c: string } => x.c != null)
+      .map(t => ({ t, c: textColour(t, ctx) })).filter((x): x is { t: OnPiece; c: string } => x.c != null)
     if (!texts.length) return
     const colours = texts.map(x => x.c)
     const pieceName = baseRole((p as { role?: string }).role) || kind
