@@ -74,6 +74,7 @@ export function materializePaste(
   const clones = payload.layers.filter(isClonableLayer).map((l) => {
     const c = JSON.parse(JSON.stringify(l)) as any
     c.id = mkId(); newIds.push(c.id)
+    delete c.owner // a copy is the user's own piece, never the layout's
     idMap.set(l.id, c.id)
     c.x = clamp(l.x + offset, -0.5, 1.5)
     c.y = clamp(l.y + offset, -0.5, 1.5)

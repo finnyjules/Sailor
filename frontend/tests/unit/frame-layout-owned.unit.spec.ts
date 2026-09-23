@@ -68,3 +68,19 @@ describe('user edits clear owner', () => {
     expect(committed.owner).toBeUndefined()
   })
 })
+
+describe('copies of an owned piece belong to the user', () => {
+  it('duplicate drops owner on the copy, keeps it on the original', async () => {
+    const { duplicateLayers } = await import('~/lib/compositor/layerEdits')
+    const src = rule('band', 'a')
+    const r = duplicateLayers([src], [], new Set(['a']), 0.02, () => 'd1', () => 'g1')
+    expect(r.layers.find(l => l.id === 'a')!.owner).toEqual({ by: 'layout', key: 'band' })
+    expect(r.layers.find(l => l.id === 'd1')!.owner).toBeUndefined()
+  })
+
+  it('paste drops owner on the pasted piece', async () => {
+    const { materializePaste } = await import('~/lib/compositor/layerClipboard')
+    const r = (materializePaste as any)({ layers: [rule('band', 'a')], groups: [] }, [], [], 0.02, () => 'p1', () => 'g1')
+    expect(r.layers.find((l: any) => l.id === 'p1')!.owner).toBeUndefined()
+  })
+})
