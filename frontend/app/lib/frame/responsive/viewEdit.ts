@@ -1,7 +1,7 @@
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import { applyMap, invertMap } from './axis'
 import { inferAxisPin, V_NAME } from './infer'
-import type { AxisMap, AxisPin, UnitInfo } from './types'
+import type { AxisMap, AxisPin, ResolvedBox, UnitInfo } from './types'
 
 const EPS = 1e-6
 /** How far (design px) a moved stretched edge stays inside its reference, so it never reads as touching it and gets welded (bled) to the real box edge. */
@@ -133,4 +133,74 @@ export function moveUnitAtView(u: UnitInfo, layers: LocalLayer[], W0: number, H0
     return l ? [{ id, patch: { x: l.x + dcx / W0, y: l.y + dcy / H0 } as Record<string, unknown> }] : []
   })
   return { patches, pins }
+}
+
+/** The pins after an edit that keeps the centre where it is (scale, rotate): hold them while
+ *  dragging; on drop an automatic axis stays automatic if the new design box still reads as the
+ *  held pin, otherwise the held pin is stored so nothing moves. */
+function holdPins(u: UnitInfo, nb: ResolvedBox, canStretch: boolean, phase: 'drag' | 'drop'): ViewEdit['pins'] {
+  const one = (axis: 'h' | 'v'): PinWrite => {
+    const ax = axisInfo(u, axis)
+    if (ax.explicit) return null
+    if (phase === 'drag') return { set: ax.map.kind }
+    const start = axis === 'h' ? nb.x : nb.y, extent = axis === 'h' ? nb.w : nb.h
+    return inferAxisPin(start, extent, ax.refDesign.start, ax.refDesign.extent, canStretch) === ax.map.kind
+      ? { clear: true } : { set: ax.map.kind }
+  }
+  return pinsPatch(u, one('h'), one('v'))
+}
+
+export function resizeLayerAtView(u: UnitInfo, layer: LocalLayer, box: ResolvedBox, W0: number, H0: number, phase: 'drag' | 'drop', fields: { w: string; h: string | null }): ViewEdit {
+  const one = (axis: 'h' | 'v', a0: number, b0: number): Settled => {
+    const ax = axisInfo(u, axis)
+    const bl = bleeds(ax)
+    const a = bl.near ? ax.view.start : a0
+    const b = bl.far ? ax.view.start + ax.view.extent : b0
+    const size = (b - a) / u.kSize
+    return phase === 'drag' ? holdAxis(ax, a, b, size) : settleAxis(ax, a, b, size)
+  }
+  const sh = one('h', box.x, box.x + box.w)
+  const sv = one('v', box.y, box.y + box.h)
+  const patch: Record<string, unknown> = { x: (sh.near + sh.far) / 2 / W0, y: (sv.near + sv.far) / 2 / H0 }
+  patch[fields.w] = (sh.far - sh.near) / W0
+  if (fields.h) patch[fields.h] = (sv.far - sv.near) / W0
+  return { patches: [{ id: layer.id, patch }], pins: pinsPatch(u, sh.pin, sv.pin) }
+}
+
+export function scaleLayerAtView(u: UnitInfo, layer: LocalLayer, start: Record<string, number>, ratio: number, phase: 'drag' | 'drop'): ViewEdit {
+  const patch: Record<string, unknown> = {}
+  for (const k of Object.keys(start)) patch[k] = Math.min(4, Math.max(0.002, start[k]! * ratio))
+  const b = u.designBox
+  const cx = b.x + b.w / 2, cy = b.y + b.h / 2
+  const nb = { x: cx - (b.w * ratio) / 2, y: cy - (b.h * ratio) / 2, w: b.w * ratio, h: b.h * ratio }
+  return { patches: [{ id: layer.id, patch }], pins: holdPins(u, nb, u.canStretch, phase) }
+}
+
+export function rotateLayerAtView(u: UnitInfo, layer: LocalLayer, rotation: number, designLocal: { w: number; h: number }, phase: 'drag' | 'drop'): ViewEdit {
+  const b = u.designBox
+  const cx = b.x + b.w / 2, cy = b.y + b.h / 2
+  const r = (rotation * Math.PI) / 180, c = Math.abs(Math.cos(r)), s = Math.abs(Math.sin(r))
+  const w = designLocal.w * c + designLocal.h * s, h = designLocal.w * s + designLocal.h * c
+  const nb = { x: cx - w / 2, y: cy - h / 2, w, h }
+  const canStretch = u.canStretch && Math.abs(rotation) < EPS
+  return { patches: [{ id: layer.id, patch: { rotation } }], pins: holdPins(u, nb, canStretch, phase) }
+}
+
+export function hitTestView(boxes: Map<string, ResolvedBox>, idsTopFirst: string[], x: number, y: number, pad: number): string | null {
+  for (const id of idsTopFirst) {
+    const b = boxes.get(id)
+    if (b && x >= b.x - pad && x <= b.x + b.w + pad && y >= b.y - pad && y <= b.y + b.h + pad) return id
+  }
+  return null
+}
+
+export function viewSelectionGeometry(u: UnitInfo, rotation: number, designLocal: { w: number; h: number }, viewScale: number): { cx: number; cy: number; hw: number; hh: number; rot: number } {
+  const vb = u.viewBox
+  const single = u.kind === 'layer'
+  // An unrotated layer's drawn box IS its box (stretch and text re-wrap included); a rotated one
+  // cannot stretch, so its own size × the fit scale is exact.
+  const useDrawn = !single || Math.abs(rotation) < EPS
+  const w = useDrawn ? vb.w : designLocal.w * u.kSize
+  const h = useDrawn ? vb.h : designLocal.h * u.kSize
+  return { cx: (vb.x + vb.w / 2) * viewScale, cy: (vb.y + vb.h / 2) * viewScale, hw: (w / 2) * viewScale, hh: (h / 2) * viewScale, rot: single ? rotation : 0 }
 }
