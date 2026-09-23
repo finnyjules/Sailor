@@ -41,20 +41,21 @@ import { framePresentKeys, finalizeWiredSentinels, reconcileWiredContent, syncWi
 import { createWiredMaskCache } from '~/lib/compositor/wiredMaskCache'
 import { readWiredTreatments, setWiredMask, setWiredMaskShowSource, setWiredMaskUrl, maskCandidateKeys } from '~/composables/useWiredTreatments'
 import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/compositor/maskBreak'
-import { useLocalLayerEditor, resizableKind, cornerResizableKind, textBoxResizable } from '~/composables/useLocalLayerEditor'
+import { useLocalLayerEditor, resizableKind, cornerResizableKind, textBoxResizable, boxHandles as editorBoxHandles } from '~/composables/useLocalLayerEditor'
 import { useLayoutSheet } from '~/composables/useLayoutSheet'
 import LayoutTile from '~/components/vue-canvas/compositor/LayoutTile.vue'
 import { snapshotFrameAsTemplate, addSlot } from '~/lib/frametemplate/author'
 import { placeTemplate, setInstanceSlot, freezeInstance, staleInstances, updateInstance, applySlotToLayer } from '~/lib/frametemplate/apply'
 import type { Template, TemplateInstance, SlotKind } from '~/lib/frametemplate/types'
-import { resolveLayout, frameDocFromProps, isResponsiveFrame, effectivePins, guideLinesFor, type LayoutResult, type Pins, type ViewEdit } from '~/lib/frame/responsive'
+import { resolveLayout, frameDocFromProps, isResponsiveFrame, effectivePins, guideLinesFor, moveUnitAtView, hitTestView, viewSelectionGeometry, type LayoutResult, type Pins, type ViewEdit, type UnitInfo } from '~/lib/frame/responsive'
+import { mapKeyToEdit } from '~/lib/compositor/layerEdits'
 import ResponsivePinsCard from './ResponsivePinsCard.vue'
 import { atDesignSize as isAtDesignSize, clampViewSize, resizeViewFromEdge, shapePresets, readoutLabel as viewReadoutLabel } from '~/lib/frame/responsive/viewport'
 import { useTemplateLibrary } from '~/composables/useTemplateLibrary'
 import { serializeLayersForOS, parseLayersFromOS, setClipboard, type ClipboardPayload } from '~/lib/compositor/layerClipboard'
 import {
   allGroupIds, childGroupIds, layersInGroup, groupDisplayName, isDescendantOrSelf,
-  reparentGroup as reparentGroupOp, directLayerIds, upsertGroup, topGroupOf,
+  reparentGroup as reparentGroupOp, directLayerIds, upsertGroup, topGroupOf, resolveGroupCascade,
 } from '~/lib/compositor/layerGroups'
 import { arrangeMembers, unionBBoxPx } from '~/lib/compositor/expressiveArrange'
 import { rotatedUnionBoxPx } from '~/lib/compositor/groupResize'
@@ -2109,6 +2110,8 @@ function onKeydown(e: KeyboardEvent) {
   // A focused control that owns the arrow keys (the easing-curve handles nudge themselves)
   // must not also nudge the selected layer.
   const ownsKeys = !!t?.closest?.('[data-owns-keys]')
+  // At a viewing size the arrow keys move what is DRAWN by one screen px, settled at the design size.
+  if (!typing && !editingId.value && !ownsKeys && viewEditing.value && viewNudge(e)) return
   if (!typing && !editingId.value && !ownsKeys && handleEditorKey(e)) return
   // Escape disarms the drag-to-generate gesture — checked before the pen's own
   // Escape and BEFORE handleKeydown's bubble-phase Escape (which closes the whole
@@ -3277,7 +3280,142 @@ function hitTopStackKey(clientX: number, clientY: number): StackKey | null {
   return null
 }
 
+// ── Select, move and nudge at a viewing size (responsive slice 3) ───────────────
+// Off the design size the editor's own hit-test and drag read DESIGN positions against a
+// view-shaped artboard, so every gesture here goes through the resolved boxes instead
+// (clientToView + the pure viewEdit functions) and writes back through applyViewEdits.
+// Everything below is reached only while `viewEditing`; at the design size it is inert.
+
+/** The selected units at the current viewing size, one entry per unit (a group moves as one). */
+function selectedViewUnits(r: LayoutResult): UnitInfo[] {
+  return [...new Map([...selectedIds.value].map(id => r.units.get(id))
+    .filter((u): u is UnitInfo => !!u).map(u => [u.unitId, u])).values()]
+}
+// The selection drawn at a viewing size, in canvas px: one unit → a (rotated) box with handle
+// positions; several → the union of their drawn boxes. Null at the design size.
+const viewSel = computed(() => {
+  const r = resolved.value
+  if (!viewEditing.value || !r || !selectedIds.value.size) return null
+  const units = selectedViewUnits(r)
+  if (!units.length) return null
+  const sc = viewScale()
+  if (units.length === 1) {
+    const u = units[0]!
+    const lead = localLayers.value.find(l => l.id === (u.kind === 'layer' ? u.memberIds[0] : selectedLocalId.value)) ?? null
+    const rot = u.kind === 'layer' ? (lead?.rotation ?? 0) : 0
+    const local = u.kind === 'layer' && lead
+      ? localLayerBox(measureCtx(), lead, designSize.value.w, designSize.value.h)
+      : { w: u.designBox.w, h: u.designBox.h }
+    const g = viewSelectionGeometry(u, rot, { w: local.w, h: local.h }, sc)
+    return { single: true as const, unit: u, layer: lead, local, g, handles: editorBoxHandles(g.cx, g.cy, g.hw, g.hh, g.rot) }
+  }
+  const xs = units.flatMap(u => [u.viewBox.x, u.viewBox.x + u.viewBox.w])
+  const ys = units.flatMap(u => [u.viewBox.y, u.viewBox.y + u.viewBox.h])
+  const x0 = Math.min(...xs) * sc, x1 = Math.max(...xs) * sc, y0 = Math.min(...ys) * sc, y1 = Math.max(...ys) * sc
+  return { single: false as const, units, rect: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } }
+})
+/** Local layer ids top-first that a canvas hit can land on at a viewing size (unmigrated
+ *  wired slots are not local layers; hidden or locked layers and groups are click-through). */
+function viewHitIds(): string[] {
+  const byId = new Map(localLayers.value.map(l => [l.id, l]))
+  return [...stackKeys.value].reverse().filter(k => k.startsWith('l:')).map(k => k.slice(2)).filter((id) => {
+    const l = byId.get(id); if (!l || l.visible === false || l.locked) return false
+    const gc = resolveGroupCascade(l.groupId, localGroups.value)
+    return !gc.hidden && !gc.locked
+  })
+}
+/** The layer under the pointer at a viewing size: the drawn box (plus the same 8 canvas px of
+ *  slack the design-size hit uses) as a pre-filter, then the same opaque-pixel test, run on the
+ *  RESOLVED layer at the artboard's size — which is exactly how the stack is painted here. */
+function viewHitAt(e: { clientX: number; clientY: number }): string | null {
+  const r = resolved.value; const p = clientToView(e); if (!r || !p) return null
+  const pad = 8 / Math.max(1e-6, viewScale())
+  const placed = new Map(r.layers.map(l => [l.id, l]))
+  const W = canvasDisplay.w, H = canvasDisplay.h
+  const px = p.x * W / Math.max(1, viewSize.w), py = p.y * H / Math.max(1, viewSize.h)
+  for (const id of viewHitIds()) {
+    if (!hitTestView(r.boxes, [id], p.x, p.y, pad)) continue
+    const l = placed.get(id); if (!l) continue
+    if (layerHitAt({ type: 'local', layer: l }, px, py, W, H)) return id
+  }
+  return null
+}
+// The move drag at a viewing size. `units` and `layers` are captured at pointer-down: every
+// frame moves from those origins by the total delta (never cumulative). `dx`/`dy` are the last
+// frame's delta in view px, so the drop settles exactly where the last drag frame drew.
+// Task 6's handles share this ref (other `kind`s).
+const viewDrag = ref<null | {
+  kind: 'move'; sx: number; sy: number; dx: number; dy: number
+  units: UnitInfo[]; layers: LocalLayer[]; recorded: boolean; pointerId: number; el: HTMLElement
+}>(null)
+function onViewPointerDown(e: PointerEvent) {
+  const t = e.target as HTMLElement | null
+  if (t?.closest?.('[data-view-handle],[data-handle],[data-gen-bar],[data-smart-bar]')) return
+  if (editingId.value && t?.closest?.('textarea')) return // the inline text editor keeps its caret
+  const r = resolved.value; if (!r) return
+  const id = viewHitAt(e)
+  if (!id) { lastDownHitLayer = false; if (!e.shiftKey) selectLocal(null); return } // no marquee at a view (later work)
+  e.preventDefault(); e.stopPropagation()
+  lastDownHitLayer = true
+  if (e.shiftKey) { toggleSelect(id); return }
+  if (!selectedIds.value.has(id)) selectLocal(id)   // keep the group when pressing within it
+  else selectedLocalId.value = id
+  if (e.button !== 0) return                          // select only; a drag is the primary button
+  const units = selectedViewUnits(r)
+  if (!units.length) return
+  const el = e.currentTarget as HTMLElement
+  el.setPointerCapture?.(e.pointerId)
+  viewDrag.value = { kind: 'move', sx: e.clientX, sy: e.clientY, dx: 0, dy: 0, units, layers: localLayers.value.slice(), recorded: false, pointerId: e.pointerId, el }
+}
+/** Screen delta since pointer-down → view px (the artboard's on-screen rect includes the zoom). */
+function viewDelta(e: PointerEvent, d: { sx: number; sy: number }): { dx: number; dy: number } {
+  const rect = canvasRef.value?.getBoundingClientRect()
+  if (!rect || !rect.width || !rect.height) return { dx: 0, dy: 0 }
+  return { dx: (e.clientX - d.sx) * viewSize.w / rect.width, dy: (e.clientY - d.sy) * viewSize.h / rect.height }
+}
+function onViewPointerMove(e: PointerEvent) {
+  const d = viewDrag.value; if (!d || d.kind !== 'move') return
+  // Snapped back to the design size mid-drag (a design-only tool's shortcut): settle and stop.
+  if (!viewEditing.value) { onViewPointerUp(); return }
+  if (!d.recorded) {
+    if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 3) return // a click, not a drag yet
+    recordHistory() // the whole drag is ONE undo step, recorded on the first real movement (Ruling B)
+    d.recorded = true
+  }
+  const { dx, dy } = viewDelta(e, d)
+  d.dx = dx; d.dy = dy
+  const { w: W0, h: H0 } = designSize.value
+  applyViewEdits(d.units.map(u => moveUnitAtView(u, d.layers, W0, H0, dx, dy, 'drag')))
+}
+/** Pointer up (or cancel): settle the drop rule at the LAST drag frame's delta. */
+function onViewPointerUp() {
+  const d = viewDrag.value; if (!d || d.kind !== 'move') return
+  viewDrag.value = null
+  if (d.el.hasPointerCapture?.(d.pointerId)) d.el.releasePointerCapture(d.pointerId)
+  if (!d.recorded) return // never moved: a plain click-select, nothing to write
+  const { w: W0, h: H0 } = designSize.value
+  applyViewEdits(d.units.map(u => moveUnitAtView(u, d.layers, W0, H0, d.dx, d.dy, 'drop')))
+}
+/** Arrow keys at a viewing size: one press moves the selection one canvas px ON SCREEN (ten with
+ *  Shift), settled with the drop rule. Returns true when it handled the key. */
+function viewNudge(e: KeyboardEvent): boolean {
+  const a = mapKeyToEdit(e, 1, 10)
+  if (!a || a.type !== 'nudge' || !selectedIds.value.size) return false
+  const r = resolved.value; if (!r) return false
+  e.preventDefault()
+  const units = selectedViewUnits(r)
+  if (!units.length) return true // nothing movable here; never fall through to a design-space nudge
+  const kx = viewSize.w / Math.max(1, canvasDisplay.w), ky = viewSize.h / Math.max(1, canvasDisplay.h) // canvas px → view px
+  const { w: W0, h: H0 } = designSize.value
+  const edits = units.map(u => moveUnitAtView(u, localLayers.value, W0, H0, a.dxPx * kx, a.dyPx * ky, 'drop'))
+  if (!edits.some(ed => ed.patches.length || ed.pins)) return true // welded (full-bleed): no empty undo step
+  recordHistory() // one undo step per press
+  applyViewEdits(edits)
+  return true
+}
+
 function onCanvasPointerDownCapture(e: PointerEvent) {
+  if (viewEditing.value) { onViewPointerDown(e); return } // a viewing size: the resolved-box path above
   if (viewOnlyGuard()) return // view-only at a viewing size: snap back to design first
   // The generated-object mini toolbar lives inside the canvas — let its buttons
   // receive the click instead of starting a region draw / deselecting.
@@ -3321,15 +3459,21 @@ function onCanvasPointerDownCapture(e: PointerEvent) {
 }
 const imageCtxMenu = ref<{ x: number; y: number; layerId: string; items: MenuItem[] } | null>(null)
 function onCanvasContextMenu(e: MouseEvent) {
-  // At a viewing size the image menu is off for now: hitTopStackKey hit-tests DESIGN positions, so it
-  // could pick a layer other than the one under the pointer. Task 5 wires this to hitTestView.
-  if (viewEditing.value) return
-  const key = hitTopStackKey(e.clientX, e.clientY)
-  const res = key ? resolveStackKey(key) : null
-  if (res?.type !== 'local' || res.layer.kind !== 'image') return // native menu for non-images
+  // At a viewing size, hit-test where the layers are DRAWN (the resolved boxes); hitTopStackKey
+  // reads design positions and could pick a layer other than the one under the pointer.
+  let hit: any = null
+  if (viewEditing.value) {
+    const vid = viewHitAt(e)
+    hit = vid ? localLayers.value.find(l => l.id === vid) ?? null : null
+  } else {
+    const key = hitTopStackKey(e.clientX, e.clientY)
+    const res = key ? resolveStackKey(key) : null
+    hit = res?.type === 'local' ? res.layer : null
+  }
+  if (hit?.kind !== 'image') return // native menu for non-images
   e.preventDefault()
-  selectLocal(res.layer.id)
-  const id = res.layer.id
+  selectLocal(hit.id)
+  const id = hit.id as string
   imageCtxMenu.value = {
     x: e.clientX, y: e.clientY, layerId: id,
     items: [
@@ -3485,6 +3629,7 @@ async function runRegionEdit() {
 }
 function selectObjectStart(id: string) { editImageCancel(); editRegionCancel(); selectLocal(id); toggleSmartMode() }
 function onCanvasPointerMoveCapture(e: PointerEvent) {
+  if (viewDrag.value) { onViewPointerMove(e); return } // only ever set at a viewing size
   if (smartActive.value) { onSmartPointerMove(e); return }
   if (regionSelectActive.value) { onRegionSelectPointerMove(e); return }
   if (genActive.value) {
@@ -3499,6 +3644,7 @@ function onCanvasPointerMoveCapture(e: PointerEvent) {
   else if (marquee.value) { const p = clientToNorm(e); if (p) moveMarquee(p.nx, p.ny) }
 }
 function onCanvasPointerUpCapture(e: PointerEvent) {
+  if (viewDrag.value) { onViewPointerUp(); return } // only ever set at a viewing size
   if (smartActive.value) { void onSmartPointerUp(e); return }
   if (regionSelectActive.value) { onRegionSelectPointerUp(e); return }
   if (genActive.value && genDraw.value) { onGenPointerUp(e); return }
@@ -3509,6 +3655,7 @@ function onCanvasPointerUpCapture(e: PointerEvent) {
   else if (marquee.value) endMarquee(e.shiftKey)
 }
 function onCanvasDblClickCapture(e: MouseEvent) {
+  if (viewEditing.value) { e.preventDefault(); return } // in-place text editing at a view comes later (Task 7)
   // Double-click a path → enter node edit; otherwise fall back to text edit.
   if (!pen.active.value && !nodeEdit.active.value) {
     const id = hitTopStackKey(e.clientX, e.clientY)
@@ -3527,6 +3674,7 @@ function onCanvasDblClickCapture(e: MouseEvent) {
 // shape we just selected on pointer-down.
 let lastDownHitLayer = false
 function onCanvasClick(e: MouseEvent) {
+  if (viewEditing.value) { lastDownHitLayer = false; return } // the view pointer-down already selected
   if (viewOnlyGuard()) return // view-only at a viewing size: snap back to design first
   if (brush.active.value) return // brush owns the canvas
   if (smartActive.value) return // smart select owns the canvas
@@ -7705,6 +7853,7 @@ onUnmounted(() => {
         @pointerdown.capture="onCanvasPointerDownCapture"
         @pointermove="onCanvasPointerMoveCapture"
         @pointerup="onCanvasPointerUpCapture"
+        @pointercancel="onViewPointerUp"
         @pointerleave="genCursor.on = false; smartCursor.on = false; brush.cursor.value = null"
         @dblclick.capture="onCanvasDblClickCapture"
         @contextmenu="onCanvasContextMenu"
@@ -8057,6 +8206,27 @@ onUnmounted(() => {
             :x1="localHandlePositions.topCenter.x" :y1="localHandlePositions.topCenter.y"
             :x2="localHandlePositions.rot.x" :y2="localHandlePositions.rot.y"
             stroke="#ffffff" stroke-width="2" vector-effect="non-scaling-stroke"
+          />
+        </svg>
+
+        <!-- The selection at a viewing size: drawn from the resolved boxes (where the layers are
+             drawn), in the same canvas-px space and stroke as the design-size outlines above.
+             viewSel is null at the design size and on a fixed frame, so this renders nothing there. -->
+        <svg
+          v-if="viewSel && !editingId"
+          data-testid="frame-view-selection"
+          class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"
+          :viewBox="`0 0 ${canvasDisplay.w} ${canvasDisplay.h}`"
+        >
+          <polygon
+            v-if="viewSel.single"
+            :points="`${viewSel.handles.tl.x},${viewSel.handles.tl.y} ${viewSel.handles.tr.x},${viewSel.handles.tr.y} ${viewSel.handles.br.x},${viewSel.handles.br.y} ${viewSel.handles.bl.x},${viewSel.handles.bl.y}`"
+            fill="none" stroke="#ffffff" stroke-width="2" vector-effect="non-scaling-stroke"
+          />
+          <rect
+            v-else
+            :x="viewSel.rect.x" :y="viewSel.rect.y" :width="viewSel.rect.w" :height="viewSel.rect.h"
+            fill="none" stroke="#ffffff" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"
           />
         </svg>
 
