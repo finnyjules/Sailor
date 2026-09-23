@@ -22,7 +22,7 @@ import { loadGlb, clearGlbCache, ensureUv } from './glb'
 import { registerWebGLContext, type WebGLContextHandle } from '~/lib/webgl/contextRegistry'
 import { loadFont, fontCacheGet, textOutline, shapeOutline, type Font } from '~/lib/scene3d/outlines'
 import { materialFor, updateMaterial, disposeMaterial, refreshSceneShaderFields, refreshOpalTime, textureLoads, type RestyleSpec } from './materials'
-import { AssetTracker, type AssetFailure } from './assetTracker'
+import { AssetTracker, beforeDeadline, mergeFailures, REASON_DIDNT_FINISH, REASON_KEPT_RELOADING, type AssetFailure, type AssetRef } from './assetTracker'
 import { refreshImageBounds, type ImageUniforms } from './imageShader'
 import { applyModifiers, applyModifierStack, type ModifierApplyCtx } from '~/lib/scene3d/modifiers'
 import { PRIMITIVE_PARAMS, paramValue, modifierValue, varySettingsFor } from '~/lib/scene3d/primParams'
@@ -689,9 +689,10 @@ export class SceneEngine {
   /** Every async load this engine starts (model, font, mesh, HDRI; decal failures), observed
    *  for export — `settleAllAssets`. Watching only: no site's own promise chain changes. */
   readonly assets = new AssetTracker()
-  /** Where the shared `textureLoads` failure list stood when this engine was made, so
-   *  `settleAllAssets` reports only texture failures from this engine's lifetime. */
-  private readonly textureFailureBase = textureLoads.failureCount
+  /** The shared `textureLoads`' mark when this engine was made. Texture loads and failures are
+   *  already scoped to this engine by its `id` (every material it builds carries it); the mark
+   *  is a second fence, so nothing recorded before this engine existed can ever be its. */
+  private readonly textureMark = textureLoads.mark
   private token = 0
   /** While a sculpt session is live, `geometryForObject` returns geometry built
    *  directly from THESE arrays (by reference, no copy) instead of decoding
@@ -1722,19 +1723,46 @@ export class SceneEngine {
     }
   }
 
-  /** Export only: wait for every asset this engine (and the shared texture cache) is loading,
-   *  including decals, until nothing is left in flight — a finished load can start another (a
-   *  model's materials start their textures), hence the rounds, capped so a load that keeps
-   *  re-arming cannot hang an export. Returns every failure seen since this engine was made. */
-  async settleAllAssets(): Promise<AssetFailure[]> {
-    for (let round = 0; round < 20; round++) {
-      const busy = this.assets.pending + textureLoads.pending + this.pendingDecals.size
-      if (!busy) break
-      await Promise.all([this.assets.settle(1), textureLoads.settle(1), this.settleAsyncAssets()])
+  /** Export only: wait for every asset this engine is loading — its own loads, the texture
+   *  loads its materials asked for (shared-cache loads included, but never another engine's),
+   *  and its decals — until nothing is left in flight. A finished load can start another (a
+   *  model's materials start their textures), hence the rounds, capped at 20 so a load that
+   *  keeps re-arming cannot hang an export; and ONE deadline across all of it (`timeoutMs`,
+   *  default 30 s) so a load that never settles cannot either. Returns every failure seen since
+   *  this engine was made, one per asset, plus — when it stopped early — every load still in
+   *  flight ("didn't finish loading" at the deadline, "kept reloading" when the rounds ran
+   *  out). The loads keep running; this only stops waiting. Cheap when nothing is in flight, so
+   *  a per-frame caller pays almost nothing. */
+  async settleAllAssets(opts: { timeoutMs?: number } = {}): Promise<AssetFailure[]> {
+    const deadline = Date.now() + (opts.timeoutMs ?? 30_000)
+    const owner = this.id
+    const busy = () => this.assets.pending > 0 || textureLoads.pendingFor(owner) > 0 || this.pendingDecals.size > 0
+    let stopped: string | null = null
+    for (let round = 0; busy(); round++) {
+      if (round >= 20) { stopped = REASON_KEPT_RELOADING; break }
+      const done = await Promise.all([
+        this.assets.waitRound({ deadline }),
+        textureLoads.waitRound({ owner, deadline }),
+        this.pendingDecals.size ? beforeDeadline(Promise.all([...this.pendingDecals.values()]), deadline) : true,
+      ])
+      if (done.includes(false)) { stopped = REASON_DIDNT_FINISH; break }
     }
-    const texFailures = (await textureLoads.settle(0)).slice(this.textureFailureBase)
-    const own = await this.assets.settle(0)
-    return [...own, ...texFailures]
+    const failed = [...this.assets.failures(), ...textureLoads.failures({ owner, since: this.textureMark })]
+    if (!stopped) return mergeFailures(failed)
+    const reason = stopped
+    const stuck: AssetRef[] = [...this.assets.pendingLoads(), ...textureLoads.pendingLoads(owner), ...this.pendingDecalNames()]
+    return mergeFailures([...failed, ...stuck.map((p) => ({ ...p, reason }))])
+  }
+
+  /** The decals still building, named from their object (pending keys are `${objectId}#${token}`). */
+  private pendingDecalNames(): AssetRef[] {
+    const out: AssetRef[] = []
+    for (const key of this.pendingDecals.keys()) {
+      const id = key.slice(0, key.lastIndexOf('#'))
+      const decalObj = this.objectRoots.get(id)?.userData.decalObj as DecalObject | undefined
+      out.push({ kind: 'decal', name: assetNameFor(decalObj ?? {}) })
+    }
+    return out
   }
 
   /** Heals every `text` mesh stuck on the placeholder cube after a font URL
@@ -1965,6 +1993,9 @@ export class SceneEngine {
     // attaching to a disposed root.
     this.glbTokens.clear()
     this.fontTokens.clear()
+    // Export tracking only: this engine's tags on the shared texture tracker go with it, so
+    // that tracker stays bounded by the engines still alive.
+    textureLoads.forgetOwner(this.id)
     // Flatten first: nested roots would otherwise be disposed twice — once via
     // their parent's traverse, once directly.
     for (const root of this.objectRoots.values()) this.scene.add(root)
