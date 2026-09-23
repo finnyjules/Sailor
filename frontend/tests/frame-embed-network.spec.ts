@@ -4,10 +4,13 @@ import { openHarness, renderExported } from './_frameEmbedHelpers'
 test.describe('Frame embed — zero network', () => {
   test.beforeEach(async ({ page }) => openHarness(page))
 
-  // 'shatter' (R9): even cold (this frozen single-paint render never gets past the pass-through
-  // frame), applyShatter still KICKS `warmPaperBoolean`'s dynamic `import('paper')` — proving
-  // that import resolves against the bundle's own inlined paper-core, not a network fetch.
-  for (const name of ['vector', 'image', 'backdrop', 'still', 'fill', 'standin', 'shatter']) {
+  // 'shatter'/'boolean' (R9/R14c): both fixtures carry FrameSnapshot.needsOutlines: true, so
+  // surfaces/frame.ts's mount() now `await warmPaperBoolean()`s — which does `import('paper')` —
+  // BEFORE its first paint, every time, not merely on some cold/best-effort path. This proves that
+  // AWAITED import resolves against the full bundle's own inlined paper-core module and never
+  // reaches the network, however this fixture's needsOutlines flag routes it (currently 'frame',
+  // never 'frame-lean' — see gather.ts's computeNeedsOutlines).
+  for (const name of ['vector', 'image', 'backdrop', 'still', 'fill', 'standin', 'shatter', 'boolean']) {
     test(`the "${name}" export makes no request`, async ({ page, context }) => {
       const html = await page.evaluate(async (n) => {
         const H = (window as any).__frameEmbedHarness
@@ -32,7 +35,10 @@ test.describe('Frame embed — zero network', () => {
       delete snap.assets.urls[key]
       return await H.exportHtml(snap)
     })
-    const { requests } = await renderExported(context, html, 0.4, { width: 1000, height: 500 })
+    // allowPageErrors: this test deliberately makes the painter reach for a missing asset —
+    // Chromium logs its own console.error for the resulting failed request (ERR_NAME_NOT_RESOLVED,
+    // since EMBED_URL's origin never resolves), which is proof the mechanism worked, not a defect.
+    const { requests } = await renderExported(context, html, 0.4, { width: 1000, height: 500 }, { allowPageErrors: true })
     expect(requests.some(u => u.includes('/view?'))).toBe(true)
   })
 })

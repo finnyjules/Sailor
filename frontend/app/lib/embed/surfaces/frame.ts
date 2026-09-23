@@ -27,6 +27,7 @@ import { addShaderFxEffects } from '~/lib/shaderfx/catalogStore'
 import { whenFieldEffectReady } from '~/lib/shaderfill/field'
 import { seedDepthImage } from '~/lib/compositor/depthRegistry'
 import { ensureRevealShadersReady } from '~/lib/motionx/reveal/paintPixels'
+import { warmPaperBoolean, isPaperWarm } from '~/lib/compositor/booleanGeometry'
 import {
   paintLayerStack, ensureLayerImages, withWiredContent, type LocalLayer, type StackItem,
 } from '~/composables/useCompositorLayers'
@@ -94,6 +95,26 @@ const frameSurface: EmbedSurface = {
     const cleanup = () => { unregister(); for (const s of styles) s.remove() }
 
     try {
+      // R14c: a Frame whose gathered snapshot needs paper.js (FrameSnapshot.needsOutlines —
+      // F3's `boolean`/`shatter`/`morph`) must have it WARM before the very first paint below, or
+      // that paint samples the geometry effect's cold pass-through (unclipped) frame — the F3 doc
+      // in booleanGeometry.ts's own "one-frame no-op, warm in background" design is fine for the
+      // LIVE editor (the compositor subscribes `renderStack` to `onPaperBooleanReady` and simply
+      // repaints once it lands), but an export has no such repaint: a still Frame's runtime calls
+      // `setTime` exactly ONCE (bundle.ts), and even an animated one's first tick would ship one
+      // visibly wrong frame. `warmPaperBoolean` never itself rejects (its own `.catch` swallows a
+      // failed `import('paper')` — see that module's doc) — check `isPaperWarm()` afterwards and
+      // THROW if it is still cold, so a paper failure (a real network hiccup on the full bundle,
+      // or `paperLean.embed.ts`'s throwing stand-in if a `needsOutlines` gate regression ever
+      // routed a Frame that truly needs paper to the lean bundle) rejects the mount instead of
+      // silently shipping the unclipped shape. bundle.ts's runtime keeps the poster — a correct
+      // still — on a rejected mount, and `export.ts`'s `bakePoster` runs this SAME `mount()`, so
+      // the poster inherits this fix for free.
+      if (snap.needsOutlines) {
+        await warmPaperBoolean()
+        if (!isPaperWarm()) throw new Error('embed: paper.js failed to load for a Frame that needs it')
+      }
+
       for (const f of snap.assets.fonts) {
         const el = document.createElement('style')
         el.dataset.sailorEmbedFont = fontFaceId(f.family, f.weight)

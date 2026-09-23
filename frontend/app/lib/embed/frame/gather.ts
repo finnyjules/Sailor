@@ -12,7 +12,7 @@ import { imageLayerUrl } from '~/composables/useCompositorLayers'
 import { clipFrameUrl, clipFrameKey } from '~/lib/compositor/clip'
 import { shaderTextureUrl, shaderTextureKey } from '~/lib/shaderfill/field'
 import { compositorFontToken } from '~/lib/compositor/textOutline'
-import { effectStackOf } from '~/lib/compositor/effectStack'
+import { effectStackOf, isGeometryKind } from '~/lib/compositor/effectStack'
 import type { DepthRef } from '~/lib/compositor/depthRegistry'
 import type { EffectDef } from '~/lib/shaderfx/types'
 import type { FontWeightSpec } from '../fontFace'
@@ -60,23 +60,50 @@ export function isBlocked(snapshot: FrameSnapshot): boolean {
  *  LayerId`) F3 geometry kind alongside boolean, so a Frame using it keeps the full bundle rather
  *  than betting on morph never growing a paper dependency later. Trim/offset/round_corners/
  *  roughen/warp/long_shadow are all self-contained and never touch paper. */
-const FULL_BUNDLE_GEOMETRY_KINDS = new Set(['boolean', 'shatter', 'morph'])
+const PAPER_GEOMETRY_KINDS = new Set(['boolean', 'shatter', 'morph'])
 
 /**
  * Task 10: true when this Frame needs the full `frame.js` bundle (paper.js and/or fontkit) rather
  * than the lean one — `bundleNameFor('frame', snap)` (surfaces.ts) reads `FrameSnapshot.needsOutlines`,
  * this function's result, to choose between them. Pure and exported for the unit test.
  *
- * A geometry effect gates on VISIBILITY, same as `applyGeometry`'s own `e.visible !== false` filter
- * (geometryEffects.ts) and plan.ts's `textNeedsOutline`/`textDrawsFromOutlines` for text: a
- * disabled boolean/shatter/morph never actually runs, so it never calls `warmPaperBoolean` either
- * — gating on presence alone would force the full bundle for Frames that will never touch paper.
+ * R14f (fix round 1) — deliberately IGNORES each effect's `visible` flag, unlike the render path's
+ * own gates (`applyGeometry`'s `e.visible !== false`, `layerGeometryEffects`'s `e.visible`). Traced
+ * on request: `Track.path` (motionx) is an open string with no allowlist, and its generic apply
+ * (`applyResolvedValue`'s `effects.<id>.<dial>` branch, ~/lib/motionx/adapter/frame.ts) writes
+ * WHATEVER `dial` name a track names onto the effect object, `visible` included — the picker never
+ * offers it (`effectDials.ts`: "`visible` — the show/hide toggle, not a dial"), but nothing at the
+ * type or runtime level refuses a hand-built or legacy track that targets it anyway. Because
+ * motionx's `PropertyValue` is `number | string | GradientStop[]` — never `boolean` — such a track
+ * can only push a STORED `visible: false` towards some non-`false` value (a number/string), and
+ * every visibility check in this codebase is `!== false`, so a non-`false` value reads as VISIBLE.
+ * The gap is one-directional but real: an effect stored `visible: false` (this function, reading
+ * the static document, would count it as absent) could still render as active for some frames if a
+ * track like this existed — a plan built on the static flag would then under-count what the
+ * playback actually needs. Gating on presence instead closes that gap by never depending on
+ * `visible`'s trustworthiness at all. The cost is a false positive (the full bundle for a Frame
+ * whose boolean/shatter/morph effect is disabled and no track ever revives it) — accepted, since a
+ * false NEGATIVE here is the "still Frame draws unclipped" bug this whole fix round exists to close.
+ *
+ * The same reasoning applies to TEXT: `textDrawsFromOutlines`/`layerGeometryEffects`
+ * (useCompositorLayers.ts) gate outline-mode drawing on `e.visible` too, so `plan.fonts[].outline`
+ * (which this function otherwise trusts) inherits the same gap for a text layer's geometry effect.
+ * This function does not modify that render-path gate (out of scope — it governs the LIVE editor,
+ * not just this export heuristic) but independently re-checks every text layer for ANY geometry
+ * effect (not just the three paper kinds — trim/offset/etc. force outline mode on text too, which
+ * needs fontkit even though it never touches paper), regardless of `visible`, as a second, cheaper
+ * safety net alongside `plan.fonts[].outline`.
  */
 export function computeNeedsOutlines(plan: Pick<FramePlan, 'fonts'>, variant: Pick<FrameVariant, 'layers'>): boolean {
   if (plan.fonts.some(f => f.outline)) return true
-  return variant.layers.some(l => effectStackOf(l as any).some(
-    e => FULL_BUNDLE_GEOMETRY_KINDS.has(e.type) && e.visible !== false,
-  ))
+  for (const l of variant.layers as ReadonlyArray<{ kind?: unknown }>) {
+    for (const e of effectStackOf(l as Parameters<typeof effectStackOf>[0])) {
+      if (!isGeometryKind(e.type)) continue
+      if (PAPER_GEOMETRY_KINDS.has(e.type)) return true // needs paper.js — any layer, any visibility
+      if (l.kind === 'text') return true // needs fontkit's outline mode — any visibility
+    }
+  }
+  return false
 }
 
 export async function buildFrameSnapshot(plan: FramePlan, variant: FrameVariant, io: FrameExportIO): Promise<FrameSnapshot> {

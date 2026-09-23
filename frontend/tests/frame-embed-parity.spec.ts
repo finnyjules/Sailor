@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { openHarness, pixelDiff, renderExported, renderExportedLive } from './_frameEmbedHelpers'
+import { openHarness, pixelDiff, renderExported } from './_frameEmbedHelpers'
 
 /** Records the measured count on the test (visible in the JSON / HTML reports). */
 const note = (d: { differing: number; total: number }) =>
@@ -117,25 +117,29 @@ test.describe('Frame embed — parity with the editor', () => {
     })
   }
 
-  // Two times on different clip frames. The Frame's clock is 4 s (no Motion duration) and the clip
-  // loops every 1 s (6 frames at 6 fps), so the frame is round(t01 × 4 × 6) mod 6: 0.1 → 2 and
-  // 0.2 → 5. (0.1 and 0.6 would both land on frame 2 — 2.4 s is 0.4 s plus two whole loops.)
   // R9: the Frame embed bundle aliases the bare `paper` import to paper-core (drops PaperScript
-  // + acorn, ~149 KB). The one paper.js-backed geometry effect the harness can exercise without
-  // sibling-reference wiring is `shatter` (F3, self-only): this proves paper-core's CompoundPath /
-  // boolean-ops draw the exact same clipped cells the app's own (full) `paper` package draws for
-  // the editor. `renderExportedLive`, not `renderExported`: the effect is COLD on a mount's very
-  // first paint (paper's dynamic import is always async), so a frozen single-shot render would
-  // only ever capture the pass-through, unclipped square — it would pass by accident, not prove
-  // anything about paper-core's geometry.
+  // + acorn, ~149 KB). `shatter` (F3, self-only — no sibling reference) exercises paper-core's
+  // CompoundPath / boolean-ops: this proves it draws the exact same clipped cells the app's own
+  // (full) `paper` package draws for the editor.
+  //
+  // R14c/d: both fixtures are plain STILL Frames (`hasMotion: false`), and this uses the ordinary
+  // FROZEN `renderExported` — not a live/settled render. That is only correct because
+  // `surfaces/frame.ts`'s `mount()` now `await warmPaperBoolean()`s BEFORE its own first paint
+  // whenever the snapshot's `needsOutlines` is true (R14c): the fix moved the warm-wait from this
+  // test (a live-render workaround that only proved the render loop COULD eventually catch up,
+  // never that a still export — the common case for a static boolean/shatter shape — did) into
+  // the adapter itself, so even a single frozen paint already reflects the warmed, real geometry.
   test('shatter (paper-core): the exported bundle clips the same cells as the editor', async ({ page, context }) => {
-    const ref = await reference(page, 'shatter')
-    const html = await page.evaluate(async () => {
-      const H = (window as any).__frameEmbedHarness
-      return await H.exportHtml(await H.snapshot('shatter'))
-    })
-    const { png: exp } = await renderExportedLive(context, html, VIEW)
-    const d = await pixelDiff(page, ref, exp)
+    const d = await pixelDiff(page, await reference(page, 'shatter'), await exported(page, context, 'shatter'))
+    note(d)
+    expect(d.differing).toBe(0)
+  })
+
+  // The other paper-backed F3 kind: `boolean` needs a live sibling reference (`refLayerId`),
+  // unlike `shatter`'s self-only op — cheap to add once the harness already wires a sibling
+  // rect into the fixture's own layer list (paintLayerStack resolves it automatically).
+  test('boolean (paper-core): the exported bundle subtracts the same shape as the editor', async ({ page, context }) => {
+    const d = await pixelDiff(page, await reference(page, 'boolean'), await exported(page, context, 'boolean'))
     note(d)
     expect(d.differing).toBe(0)
   })

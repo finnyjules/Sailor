@@ -105,4 +105,30 @@ describe('bundleNameFor', () => {
     expect(() => bundleNameFor('spacetype', { effectId: '/etc/passwd' })).toThrow()
     expect(() => bundleNameFor('spacetype', { effectId: 'ball/../../../etc/passwd' })).toThrow()
   })
+
+  // R14e: 'frame' picks 'frame-lean' ONLY on an explicit `needsOutlines === false` — every other
+  // shape of config falls back to the full, safe 'frame'. A permissive `needsOutlines ?
+  // 'frame' : 'frame-lean'` would pick lean for a MISSING field (undefined is falsy) too, which
+  // is exactly the "still Frame draws unclipped" failure mode this fix round exists to close.
+  it('maps frame to frame-lean only on an explicit needsOutlines: false', () => {
+    expect(bundleNameFor('frame', { needsOutlines: false })).toBe('frame-lean')
+  })
+
+  it('maps frame to the full bundle on needsOutlines: true', () => {
+    expect(bundleNameFor('frame', { needsOutlines: true })).toBe('frame')
+  })
+
+  it('maps frame to the full bundle when needsOutlines is missing, not to frame-lean', () => {
+    expect(bundleNameFor('frame', {})).toBe('frame')
+  })
+
+  it('maps frame to the full bundle for a null or non-object config, not to frame-lean', () => {
+    expect(bundleNameFor('frame', null)).toBe('frame')
+    expect(bundleNameFor('frame', undefined)).toBe('frame')
+  })
+
+  it('maps frame to the full bundle for a truthy-but-not-boolean needsOutlines, not to frame-lean', () => {
+    expect(bundleNameFor('frame', { needsOutlines: 'false' })).toBe('frame')
+    expect(bundleNameFor('frame', { needsOutlines: 0 })).toBe('frame')
+  })
 })

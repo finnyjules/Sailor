@@ -33,7 +33,23 @@ export function compositorFontToken(_layer: CompositorFontLayerLike): string | n
   return null
 }
 
+// R14a: a one-time (not per-call — a redraw can call this every frame) diagnostic. `getCompositorFont`
+// should be provably unreachable for any snapshot that selected the lean bundle (see the module doc
+// above) — this warning existing at all means that proof failed somewhere: a `needsOutlines` gate
+// regression, or a caller reaching this function through a path this module's doc did not account
+// for. Always on (not gated behind `import.meta.dev`, unlike booleanGeometry.ts's own dev-only
+// warm-failure log) — this needs to surface in the actual built bundle a real export runs, not just
+// in a local dev server.
+let warnedOnce = false
 export function getCompositorFont(_layer: CompositorFontLayerLike): VtFont | null {
+  if (!warnedOnce) {
+    warnedOnce = true
+    console.warn(
+      '[sailor-embed] frame-lean.js: getCompositorFont was called, but this bundle ships no font outline '
+      + 'engine — a Frame that needed outline text was exported with the lean bundle (a needsOutlines gate '
+      + 'regression). Text drew as fillText instead of its glyph outlines.',
+    )
+  }
   return null
 }
 

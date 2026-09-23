@@ -54,11 +54,19 @@ export async function loadEmbedSurface(kind: string): Promise<EmbedSurface | nul
  * carry no outlined text and no `boolean`/`shatter`/`morph` geometry effect, so they take the
  * smaller `frame-lean.js` (no paper.js, no fontkit) — see FrameSnapshot.needsOutlines's doc and
  * gather.ts's computeNeedsOutlines for exactly what forces the full bundle.
+ *
+ * R14e: 'frame-lean' only on an EXPLICIT `needsOutlines === false` — every other value (`true`,
+ * `undefined`, a missing field, a malformed/non-object `config`) falls back to the full 'frame'.
+ * Same asymmetric-default posture as the spacetype branch below refusing rather than guessing a
+ * default effect: an incomplete or unexpected config is a reason to take the SAFE (full) bundle,
+ * never the lean one — the failure mode a permissive `needsOutlines ? 'frame' : 'frame-lean'`
+ * would have (silently picking lean for anything falsy, missing field included) is exactly the
+ * "still Frame draws unclipped" bug this whole fix round exists to close.
  */
 export function bundleNameFor(kind: string, config: unknown): string {
   if (kind === 'frame') {
-    const needsOutlines = (config as { needsOutlines?: boolean } | null | undefined)?.needsOutlines
-    return needsOutlines ? 'frame' : 'frame-lean'
+    const needsOutlines = (config as { needsOutlines?: unknown } | null | undefined)?.needsOutlines
+    return needsOutlines === false ? 'frame-lean' : 'frame'
   }
   if (kind !== 'spacetype') return kind
 

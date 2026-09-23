@@ -4,6 +4,7 @@ import frameSurface from '~/lib/embed/surfaces/frame'
 import { assetKey, type FrameSnapshot, type FrameVariant } from '~/lib/embed/frame/types'
 import { clipFrameKey } from '~/lib/compositor/clip'
 import { createImageLayer, createRectLayer } from '~/composables/useCompositorLayers'
+import * as booleanGeometry from '~/lib/compositor/booleanGeometry'
 
 function snapshotOf(layers: any[], urls: Record<string, string>): FrameSnapshot {
   const v: FrameVariant = {
@@ -93,5 +94,62 @@ describe('frame adapter — a first paint that throws', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(broken as any)
     await expect(frameSurface.mount(box, snapshotOf([createRectLayer({})], {}))).rejects.toThrow('paint broke')
     expect(box.querySelectorAll('canvas').length).toBe(0)
+  })
+})
+
+// R14c: a Frame whose snapshot says it needs paper.js (`needsOutlines: true` — F3's
+// `boolean`/`shatter`/`morph`) must not silently draw the unclipped shape if paper never warms.
+// `warmPaperBoolean` itself never rejects (its own `.catch` swallows a failed `import('paper')`),
+// so the adapter has to check `isPaperWarm()` afterwards and refuse the mount itself — these tests
+// spy on both booleanGeometry exports directly (rather than actually breaking the real dynamic
+// `import('paper')`, which the module-level singleton state in booleanGeometry.ts makes hard to
+// reset deterministically once warmed by another test in the same process) to prove that exact
+// contract: paper-fails-to-warm rejects the mount (→ bundle.ts's runtime keeps the poster — a
+// correct still, never a silent wrong picture — see paperLean.embed.ts's doc for the full chain),
+// and a Frame that does NOT need paper never even asks.
+describe('frame adapter — paper.js required and unavailable (R14c)', () => {
+  it('rejects the mount when needsOutlines is true but paper never warms', async () => {
+    vi.spyOn(booleanGeometry, 'warmPaperBoolean').mockResolvedValue(undefined)
+    vi.spyOn(booleanGeometry, 'isPaperWarm').mockReturnValue(false)
+    const box = document.createElement('div')
+    document.body.appendChild(box)
+    const snap = snapshotOf([createRectLayer({})], {})
+    snap.needsOutlines = true
+    await expect(frameSurface.mount(box, snap)).rejects.toThrow('embed: paper.js failed to load for a Frame that needs it')
+    expect(box.querySelectorAll('canvas').length).toBe(0)
+  })
+
+  // happy-dom has no real canvas 2D backend (getContext returns null); every other passing-mount
+  // assertion in this file works around that with a permissive stand-in context. This one never
+  // throws and never returns anything meaningful — fine here, since these two tests only check
+  // whether mount() RESOLVES and whether warmPaperBoolean was called, never the painted pixels.
+  function permissiveCtx2D(): CanvasRenderingContext2D {
+    return new Proxy({}, {
+      get: (_t, prop) => (prop === 'canvas' ? undefined : (() => undefined)),
+      set: () => true,
+    }) as unknown as CanvasRenderingContext2D
+  }
+
+  it('mounts normally when needsOutlines is true and paper does warm', async () => {
+    vi.spyOn(booleanGeometry, 'warmPaperBoolean').mockResolvedValue(undefined)
+    vi.spyOn(booleanGeometry, 'isPaperWarm').mockReturnValue(true)
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(permissiveCtx2D())
+    const box = document.createElement('div')
+    document.body.appendChild(box)
+    const snap = snapshotOf([createRectLayer({})], {})
+    snap.needsOutlines = true
+    const handle = await frameSurface.mount(box, snap)
+    expect(box.querySelectorAll('canvas').length).toBe(1)
+    handle.destroy()
+  })
+
+  it('never checks paper at all when needsOutlines is false (the common case)', async () => {
+    const warmSpy = vi.spyOn(booleanGeometry, 'warmPaperBoolean')
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(permissiveCtx2D())
+    const box = document.createElement('div')
+    document.body.appendChild(box)
+    const handle = await frameSurface.mount(box, snapshotOf([createRectLayer({})], {}))
+    expect(warmSpy).not.toHaveBeenCalled()
+    handle.destroy()
   })
 })

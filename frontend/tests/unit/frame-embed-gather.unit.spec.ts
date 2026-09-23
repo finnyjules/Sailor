@@ -202,9 +202,37 @@ describe('computeNeedsOutlines', () => {
     expect(computeNeedsOutlines(plan([r]), v([r]))).toBe(true)
   })
 
-  it('an invisible boolean effect alone does not force the full bundle', () => {
+  // R14f: an INVISIBLE boolean/shatter/morph STILL forces the full bundle — the stored `visible`
+  // flag is not trustworthy at export-plan time. Motion (motionx) can write an arbitrary value
+  // onto `effects.<id>.visible` via a generic apply path (~/lib/motionx/adapter/frame.ts's
+  // `effects.<id>.<dial>` branch has no dial allowlist), and while `PropertyValue` excludes
+  // `boolean` — so it can never write the literal `false` a "hidden" check tests for — it COULD
+  // push a stored `visible: false` to some non-`false` value, which every `!== false` visibility
+  // check in this codebase then reads as visible. Counting presence, not visibility, closes that
+  // gap without depending on whether such a track could really be authored today.
+  for (const kind of ['boolean', 'shatter', 'morph'] as const) {
+    it(`an invisible ${kind} effect still forces the full bundle (visible is not trustworthy — R14f)`, () => {
+      const r = createRectLayer({})
+      ;(r as any).effects = [{ ...createEffect(kind), visible: false }]
+      expect(computeNeedsOutlines(plan([r]), v([r]))).toBe(true)
+    })
+  }
+
+  // R14f, the text half: ANY geometry effect on a TEXT layer forces outline mode (fontkit) when
+  // visible — see `textDrawsFromOutlines`/`layerGeometryEffects` (useCompositorLayers.ts) — so
+  // this function independently re-checks for one regardless of `visible` too, same reasoning as
+  // above. `trim` never touches paper, but it still needs fontkit's outline path on text.
+  it('an invisible non-paper geometry effect on TEXT still forces the full bundle (fontkit, not paper)', () => {
+    const t = createTextLayer({ text: 'Hi', fontFamily: 'Inter', fontWeight: 400 })
+    ;(t as any).effects = [{ ...createEffect('trim'), visible: false }]
+    expect(computeNeedsOutlines(plan([t]), v([t]))).toBe(true)
+  })
+
+  // The same effect on a NON-text layer (a rect) never needs outline mode — trim/offset/etc. are
+  // ordinary SVG-path transforms the painter can apply without fontkit or paper.
+  it('a geometry effect that never touches paper, on a non-text layer, does not force the full bundle', () => {
     const r = createRectLayer({})
-    ;(r as any).effects = [{ ...createEffect('boolean'), visible: false }]
+    ;(r as any).effects = [{ ...createEffect('trim'), visible: true }]
     expect(computeNeedsOutlines(plan([r]), v([r]))).toBe(false)
   })
 

@@ -22,13 +22,16 @@ import { createImageLayer, createRectLayer, createTextLayer } from '~/composable
 import { DEFAULT_FILL } from '~/lib/spacetype/fillTile'
 import { createEffect } from '~/lib/compositor/effectStack'
 import { defaultPostEffect } from '~/lib/compositor/postEffects'
-// R9 (paper-core): warms the SAME detached paper.js scope the F3 boolean/shatter geometry
-// effects use, so `reference()` can await it before painting the 'shatter' fixture — otherwise
-// the harness's own synchronous double-paint would sample the COLD pass-through frame (the
-// dynamic `import('paper')` inside `warmPaperBoolean` is always asynchronous, so the very first
-// paint after enabling a shatter/boolean effect is a guaranteed no-op by design; see
-// booleanGeometry.ts). Awaiting it here is a no-op for every other fixture — no geometry effect
-// they carry reads paper at all, so their painted bytes are unaffected.
+// R9 (paper-core) / R14 fix round: warms the SAME detached paper.js scope the F3 boolean/shatter
+// geometry effects use, so `reference()` can await it before painting the 'shatter'/'boolean'
+// fixtures — otherwise the harness's own synchronous double-paint would sample the COLD
+// pass-through frame (the dynamic `import('paper')` inside `warmPaperBoolean` is always
+// asynchronous, so the very first paint after enabling a shatter/boolean effect is a guaranteed
+// no-op by design; see booleanGeometry.ts). Awaiting it here is a no-op for every other fixture —
+// no geometry effect they carry reads paper at all, so their painted bytes are unaffected.
+// (The ADAPTER side of this same problem — `surfaces/frame.ts`'s `mount()` — now awaits it too,
+// before its own first paint, whenever the snapshot's `needsOutlines` is true; this harness
+// import is only for the STUDIO reference paint below, which bypasses the adapter entirely.)
 import { warmPaperBoolean } from '~/lib/compositor/booleanGeometry'
 // The reference render (the studio's paint, for the parity spec) — deliberately NOT through the
 // adapter: no surfaces/frame.ts, no stackItemsFor. It paints the way CompositorModal's
@@ -44,7 +47,7 @@ type Slot = 'a' | 'b'
 const handles: Partial<Record<Slot, EmbedHandle>> = {}
 /** The image fill's source, as the app stores one: a server URL the gatherer fetches. */
 const HARNESS_FILL_SRC = '/view?filename=harness-photo.png&type=input'
-const FIXTURES = ['vector', 'image', 'backdrop', 'still', 'fill', 'bleed', 'bleed-post', 'standin', 'shatter']
+const FIXTURES = ['vector', 'image', 'backdrop', 'still', 'fill', 'bleed', 'bleed-post', 'standin', 'shatter', 'boolean']
 /** The font the `font` mutation swaps in: another cut of the harness face (there is no
  *  ABCROM-BoldItalic in public/fonts — BlackItalic is the nearest italic). */
 const MUTANT_FONT_URL = '/fonts/ABCROM-BlackItalic.otf'
@@ -200,19 +203,30 @@ onMounted(async () => {
       return { hasMotion: false, variant: variantOf(1000, 500, [bare, missing, photo, rect], { background: '#1b4d3e' }) }
     }
     if (name === 'shatter') {
-      // R9: the one fixture that reaches paper.js — F3's `shatter` geometry effect (self-only,
-      // no sibling reference, unlike `boolean`), so this exercises the SAME paper-core CompoundPath
-      // / boolean-op code path `boolean` would without needing siblingRef wiring in the harness.
+      // R9/R14: a paper.js fixture — F3's `shatter` geometry effect (self-only, no sibling
+      // reference, unlike `boolean`), so this exercises the SAME paper-core CompoundPath /
+      // boolean-op code path `boolean` would without needing sibling wiring in the harness.
       // Deterministically seeded, so both the reference and the export produce the exact same
-      // cells. `hasMotion: true` with NO motionx entry touching the rect: nothing about the
-      // painted pixels depends on the clock (still a single static square), but it keeps the
-      // exported bundle OFF the `still` path (plan.ts: `still = !hasMotion && …`) — a still export
-      // paints exactly once and never again, so paper (always cold on a mount's very first paint)
-      // would never get the later tick that repaints with its warmed, real clipped geometry; see
-      // `renderExportedLive` and this fixture's parity test.
+      // cells. A plain STILL Frame (`hasMotion: false`, like every other still fixture here) —
+      // R14c fixed the real bug this fixture used to work around: `surfaces/frame.ts`'s `mount()`
+      // now awaits `warmPaperBoolean()` before its own first paint whenever the snapshot's
+      // `needsOutlines` is true, so even a still export's single paint already sees the warmed,
+      // real clipped geometry. No special-cased "keep it animating" trick needed any more.
       const rect = createRectLayer({ x: 0.5, y: 0.5, w: 0.4, h: 0.4, radius: 0, fill: '#3fb68b' }) as any
       rect.effects = [{ ...createEffect('shatter'), cells: 8, gap: 0.015, seed: 11, visible: true }]
-      return { hasMotion: true, variant: variantOf(1000, 500, [rect], { background: '#1b4d3e' }) }
+      return { hasMotion: false, variant: variantOf(1000, 500, [rect], { background: '#1b4d3e' }) }
+    }
+    if (name === 'boolean') {
+      // R14: a second, cheap paper.js fixture — F3's `boolean` effect, the one that needs a live
+      // sibling reference. `paintLayerStack` auto-wires the resolver from the FULL layers array it
+      // is given (`buildSiblingResolver`, useCompositorLayers.ts), keyed `l:<id>` — so a second
+      // plain rect sharing the stack is all the wiring this needs. `self` subtracts `sibling`
+      // (an L-shaped result), visibly distinct from either square alone — the parity test would
+      // pass by accident on an unclipped square if the op silently no-op'd.
+      const sibling = createRectLayer({ x: 0.62, y: 0.5, w: 0.3, h: 0.3, radius: 0, fill: '#f25c54' })
+      const self = createRectLayer({ x: 0.4, y: 0.5, w: 0.3, h: 0.3, radius: 0, fill: '#3fb68b' }) as any
+      self.effects = [{ ...createEffect('boolean'), op: 'subtract', refLayerId: `l:${sibling.id}`, visible: true }]
+      return { hasMotion: false, variant: variantOf(1000, 500, [self, sibling], { background: '#1b4d3e' }) }
     }
     if (name === 'bleed' || name === 'bleed-post') {
       // A rect half outside the artboard's right edge (artboard x 900..1100 of 1000): in a box
