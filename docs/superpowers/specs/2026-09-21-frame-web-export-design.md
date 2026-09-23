@@ -55,6 +55,59 @@ the download is the honest first step.
 | Delivery (v1) | Download + "Copy embed code" | Works today with no hosting. Publish follows as its own spec |
 | Snapshot / runtime | **Must stay separable** in the assembled file | Publish and a script-tag embed later serve the same two pieces as cacheable files |
 
+## Changed while planning and building (2026-09-22/23)
+
+Stage 1 is built and reviewed. Reading the real code moved this spec in eight ways:
+
+1. **Supply lines are resolved at runtime, not swapped by build alias — except two.** The poster is
+   baked inside the app itself, where a build alias never applies, and two exported Frames can sit on
+   one page. So the five URL builders (image, clip frame, image fill, shader texture, outline font)
+   call a registered resolver chain (`lib/compositor/assetScope.ts`) that answers from the snapshot
+   when one is mounted and falls back to the app's own URL otherwise. Only the depth-estimate call and
+   `variable-fonts.ts`'s `cssUrl` table are cut off at build time, because that code must not be
+   *present* in the file at all. See the corrected "Supply-line stand-ins" table above.
+2. **Fit and bleed needed a bigger change than "paint the background once."** The adapter paints the
+   Frame on its own artboard-sized offscreen canvas — so a backdrop effect (glass, backdrop shader,
+   long shadow) reads exactly the shape the editor's own canvas would give it — then composites that
+   onto the visible canvas at a whole-pixel offset. The background is painted across the union of the
+   box and the artboard on both canvases, so Fill's crop never leaves a transparent margin for a
+   backdrop effect to read. Layers never paint past the artboard edge into the bleed; doc-level post
+   effects run once, on the visible canvas, over the whole box. Offset invariance is proven for solid
+   backgrounds; a gradient or shader background legitimately spans the wider box under Fit, by design,
+   so it is not expected to match at other shapes.
+3. **The two bundles are real, and picked by a stricter rule than "any text is outlined."**
+   `frame.js` (paper aliased to its core build, dropping PaperScript's host-page script loader and
+   acorn; plus fontkit) measures ≈ 1.27 MB / 382 KB gzip. `frame-lean.js` (neither) measures
+   ≈ 367 KB / 127 KB gzip. The choice is `needsOutlines`: true when any text draws from outlines, or
+   any layer carries a boolean, shatter or morph effect — counted by *presence*, regardless of the
+   effect's own `visible` flag, because a motion track can in principle switch it on. The shared
+   predicate for "this text draws from outlines" is `textDrawsFromOutlines` in
+   `useCompositorLayers.ts`, called by both the live painter and the export planner, so the two can
+   never disagree. Because a wrong `needsOutlines` would otherwise ship a silently unclipped picture,
+   the adapter re-derives the same answer from the actual layers it is about to paint
+   (`layersNeedPaper`) and refuses to paint without paper when one is needed — the export falls back
+   to its poster rather than showing the wrong geometry.
+4. **Stand-in images are not always frozen out.** A stand-in layer that names a real file is inlined
+   like any other image when the file loads; when it does not, the snapshot stores an undecodable
+   placeholder so the painter draws its usual grey box, exactly as it would on a 404 in the editor —
+   and the export makes no request either way. Only a stand-in with no filename at all is skipped
+   before it is ever requested.
+5. **The keyed bundle registry moves to stage 2**, with nesting — a single Frame export needs only one
+   bundle. There is also no shared stack-builder extraction: the adapter builds its own local (`l:`)
+   stack items; the modal's and card's builders still carry legacy `w:` wired keys, and a Frame that
+   still holds one is refused export with a plain-language notice rather than taught to the adapter.
+6. **The embed build cache was missing nine folders** the Frame bundle depends on
+   (`app/composables`, `lib/frame`, `lib/motion`, `lib/motionx`, `lib/paint`, `lib/scene3d`,
+   `lib/shapes`, `lib/vary`, `lib/vectortype`), plus the installed `paper` and `fontkit` versions. A
+   guard test now walks the bundle's real import graph and fails if a folder it touches is left out of
+   the hash.
+7. **The embed runtime gained four optional snapshot fields** — `framing` (`'box'`), `posterFit`,
+   `still`, `backdrop` — each defaulting to today's behaviour when absent, so every existing embed
+   (Shader, Gradient, Space Type) is unchanged.
+8. **The sheet doesn't fit where it was designed to sit.** The right panel is too narrow for a 640px
+   sheet, so it mounts above the panel's footer instead of inside it; the footer itself now wraps to
+   two rows to fit its buttons and status text alongside the new "Web export" button.
+
 ## What exists today (verified 2026-09-21)
 
 - "Frame" is the Compositor in code. There is no single document type: the document is a bag of
@@ -206,26 +259,27 @@ Asset policy:
 
 ### Supply-line stand-ins
 
-The painter reaches outside itself in six places. In the **embed build only**, a Vite alias replaces
-each module with a stand-in that reads `FrameSnapshot.assets`:
+The painter reaches outside itself in six places. Most of them are **not** build-time aliases — see
+"Changed while planning and building" below for why. In the **embed build only**, a Vite alias
+replaces a module with a stand-in that reads `FrameSnapshot.assets`; everywhere else, the module asks
+a runtime resolver chain and falls back to the app's own URL when nothing answers:
 
-| Supply line | App module | Stand-in returns |
+| Supply line | App module | Resolved by |
 |---|---|---|
-| Image URL | `imageLayerUrl` in `useCompositorLayers.ts` | data URL from the asset table |
-| Clip frame URL | `clipFrameUrl` in `lib/compositor/clip.ts` | data URL (WebP) from the asset table |
-| Shader texture URL | `textureAssetUrl` in `lib/shaderfill/field.ts` | data URL |
-| Font bytes | `lib/vectortype/font.ts` + `fontToken.ts` | bytes from the asset table |
-| Shader catalog | `lib/shaderfx/catalogStore.ts` | pre-filled from the snapshot |
-| Depth map | `lib/compositor/depthRegistry.ts` | cached map or "none" |
+| Image URL | `imageLayerUrl` in `useCompositorLayers.ts` | runtime resolver (`assetScope.ts`, kind `image`) |
+| Clip frame URL | `clipFrameUrl` in `lib/compositor/clip.ts` | runtime resolver (kind `clipFrame`) |
+| Image fill URL | `ensureFillBitmaps` in `lib/paint/imageFillCache.ts` | runtime resolver (kind `fillImage`) |
+| Shader texture URL | `textureAssetUrl` in `lib/shaderfill/field.ts` | runtime resolver (kind `shaderTexture`) |
+| Outline font URL | `vtFontFileUrl` in `lib/vectortype/fontToken.ts` | runtime resolver (kind `outlineFont`) |
+| Depth map | `lib/compositor/depthRequest.ts` | **build-time alias** → `depthRequest.embed.ts` stand-in |
+| Google Fonts CSS URL | `variable-fonts.ts`'s `cssUrl` | **build-time alias** (a Vite plugin strips the literal strings) |
 
 Where a supply line is a function inside a large file rather than its own module (`imageLayerUrl`), it
-is first moved into a small module of its own so the alias has something to target. That is the only
-edit to `useCompositorLayers.ts` this spec requires.
+is first moved into a small module of its own so the resolver has something to call from. That is the
+only edit to `useCompositorLayers.ts` this spec requires.
 
-`frontend/app/data/variable-fonts.ts` (13 literal Google Fonts URLs, pulled in by
-`lib/compositor/textOutline.ts`) is the known first offender for the network scan; it gets a stand-in
-too. **Enforcement is `externalRefs`**, which already runs on every export and throws on any surviving
-network reference.
+**Enforcement is `externalRefs`**, which already runs on every export and throws on any surviving
+network reference, whichever way a supply line was cut off.
 
 ### Adapter — `frontend/app/lib/embed/surfaces/frame.ts`
 
