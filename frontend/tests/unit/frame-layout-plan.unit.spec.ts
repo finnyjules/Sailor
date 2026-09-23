@@ -7,11 +7,12 @@ import type { LayoutPlanArgs } from '~/lib/frame/patterns/kit/plan'
 import { __registerLayoutForTest } from '~/lib/frame/patterns/layouts/catalog'
 import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
 import { DEFAULT_CHOICE } from '~/lib/frame/patterns/kit/vary'
-import type { LayoutDef } from '~/lib/frame/patterns/kit/types'
+import type { El, LayoutDef } from '~/lib/frame/patterns/kit/types'
 import { createImageLayer, createTextLayer } from '~/composables/useCompositorLayers'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import { familyOf } from '~/lib/shapes/catalog'
 import { createHash } from 'node:crypto'
+import { readGrid } from '~/lib/frame/gridConfig'
 
 // The Task 9 matrix content: phrase title, details, date, two-line caption.
 const TEXTS = {
@@ -618,5 +619,97 @@ describe('planLayout — a format (Stage 2)', () => {
       }
       expect(n).toBeGreaterThan(0)
     })
+  })
+})
+
+// ═══════════════ Task 6 fix round 1: the cover penalty proven through the REAL planner ═══════════
+// The Swiss layouts barely put text over the image, so the penalty may never fire on them in the
+// matrix. This proves the wiring itself — the per-choice Sheet reaching `boxOf`, and the kit units
+// (percent of frame width/height) `coverOf` measures in — end to end through `candidatesForFrame`,
+// not just the fake `enumerate` fixture in frame-layout-vary.unit.spec.ts.
+describe('candidatesForFrame — the cover penalty through the real planner (Task 6 fix round 1)', () => {
+  // A square 1000×1000 frame: S.W = 100, S.H = 100 × 1000/1000 = 100 (round kit units).
+  const FRAME_W = 1000
+  const FRAME_H = 1000
+  // A 20×20 photo at the origin (area 400 kit-units²). `arr === 0` is the DEFAULT_CHOICE arm;
+  // `defaultCovers` picks which of the two fixed arrangements sits at arr 0, so the same layout
+  // can prove the guarantee with the default on either side of the penalty.
+  function coverProofLayout(id: string, defaultCovers: boolean): LayoutDef {
+    return {
+      id, name: id, fits: ['word', 'phrase', 'sentence'],
+      needs: { image: true },
+      fn(S, { c, ph, arr }) {
+        const covers = defaultCovers ? arr === 0 : arr !== 0
+        const photo: El = { k: 'p', x: 0, y: 0, w: 20, h: 20, stand: !ph, role: 'photo' }
+        // `disp` is `pre: true` (unwrapped): the checker's off-page/collision rules measure its
+        // FULL ink width (~70.5 units here, from the frame's own title text at size 10), not the
+        // `w` box override — so `w` only clips the box `boxOf` reports for scoring, and the real
+        // ink must still fit the 100-unit page on its own. Covering: box x0..20 × y0..7 sits over
+        // the photo (x0..20 × y0..20) — overlap area 20×7=140, 140/400=35% of the photo, over the
+        // 20% threshold. Clear: x 25..45 never touches the photo at all (0% cover).
+        const title = S.disp(c.title, {
+          x: covers ? 0 : 25, top: 0, w: 20, size: 10,
+          ...(covers ? { over: ['photo'] } : {}),   // let the checker's collision rule pass
+        })
+        return { els: [photo, title], did: covers ? 'covering' : 'clear' }
+      },
+    }
+  }
+
+  const frameProps = props(frameLayers({ image: true }))
+  const a = (layoutId: string): Omit<LayoutPlanArgs, 'choice' | 'layoutId'> & { layoutId: string } =>
+    ({ props: frameProps, frameW: FRAME_W, frameH: FRAME_H, layoutId, palette, connectedSlots: [], measure: makeStubMeasure() })
+
+  // The formula's non-cover terms, computed independently of `candidatesForFrame` (same inputs
+  // `runChoice`/`enumerate` use: `p.grid` from `readGrid`, `p.measure`, the frame's own W/H).
+  const infoSize = makeSheet({ frameW: FRAME_W, frameH: FRAME_H, grid: readGrid(frameProps), measure: makeStubMeasure() }).INFO.size
+  const MAX_TEXT_SIZE = 10         // the only text element, always size 10
+  const DISTINCT_LEFT_EDGES = 1    // one text element ⇒ one distinct left edge either way
+  const baseScore = Math.log(MAX_TEXT_SIZE / infoSize) - 0.12 * DISTINCT_LEFT_EDGES
+  const scoreWithout = (isDefault: boolean) => baseScore + (isDefault ? 1 : 0)   // no quiet scale used here
+
+  it('(a) the covering candidate scores exactly 0.5 lower than the formula without the penalty', () => {
+    const unregister = __registerLayoutForTest(coverProofLayout('coverProofA', true))   // arr 0 = covering = default
+    try {
+      const cs = candidatesForFrame(a('coverProofA'))
+      expect(cs.length).toBe(2)
+      const covering = cs.find(c => c.out.did === 'covering')!
+      expect(covering).toBeDefined()
+      expect(covering.choice).toEqual(DEFAULT_CHOICE)   // arr 0, and nothing else varies
+      expect(covering.score).toBeCloseTo(scoreWithout(true) - 0.5, 6)
+    } finally { unregister() }
+  })
+
+  it('(b1) default is the non-covering arrangement: it leads, the covering one ranks below', () => {
+    const unregister = __registerLayoutForTest(coverProofLayout('coverProofB1', false))   // arr 0 = clear = default
+    try {
+      const cs = candidatesForFrame(a('coverProofB1'))
+      expect(cs.length).toBe(2)
+      const clear = cs.find(c => c.out.did === 'clear')!
+      const covering = cs.find(c => c.out.did === 'covering')!
+      expect(clear.choice).toEqual(DEFAULT_CHOICE)
+      expect(covering.choice).not.toEqual(DEFAULT_CHOICE)
+      // No cover penalty on the clear/default one, the full 0.5 on the covering one.
+      expect(clear.score).toBeCloseTo(scoreWithout(true), 6)
+      expect(covering.score).toBeCloseTo(scoreWithout(false) - 0.5, 6)
+      expect(cs[0]).toBe(clear)
+      expect(cs.indexOf(covering)).toBeGreaterThan(cs.indexOf(clear))
+    } finally { unregister() }
+  })
+
+  it('(b2) default is the covering arrangement: the default-first guarantee still puts it first', () => {
+    const unregister = __registerLayoutForTest(coverProofLayout('coverProofB2', true))   // arr 0 = covering = default
+    try {
+      const cs = candidatesForFrame(a('coverProofB2'))
+      expect(cs.length).toBe(2)
+      const covering = cs.find(c => c.out.did === 'covering')!
+      const clear = cs.find(c => c.out.did === 'clear')!
+      expect(covering.choice).toEqual(DEFAULT_CHOICE)
+      expect(clear.choice).not.toEqual(DEFAULT_CHOICE)
+      expect(covering.score).toBeCloseTo(scoreWithout(true) - 0.5, 6)
+      expect(clear.score).toBeCloseTo(scoreWithout(false), 6)
+      // The default leads regardless of score (Stage 1 guarantee, unaffected by the penalty).
+      expect(cs[0]).toBe(covering)
+    } finally { unregister() }
   })
 })

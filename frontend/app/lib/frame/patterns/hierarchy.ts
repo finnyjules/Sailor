@@ -40,6 +40,12 @@ export function inferElements(
 
   // Rule (Stage 2): the date/number role is the first middle text that is number-like — a
   // price, a discount, a date or a time — falling back to the Stage 1 DATE_RE match.
+  // Trade-off: `isNumberish` doesn't know "date" from "any digit-heavy short line" — a bare
+  // middle line like "Room 101" or "Gate 23" now reads as the number on a FRESH Frame (no
+  // apply has run yet, so there's no stored role to defer to). A Frame laid out earlier keeps
+  // whatever `sailor_posterState.roles` recorded (`withStoredRoles` in `kit/plan.ts` wins over
+  // this inference), so only a Frame's first-ever layout can mis-read a room/gate number as
+  // the date role.
   const dateLayer = middle.find(l => isNumberish(l.text)) ?? middle.find(l => DATE_RE.test(l.text ?? ''))
   if (dateLayer) base.date = asText(dateLayer, 'date')
   const details = middle.find(l => l !== dateLayer)
