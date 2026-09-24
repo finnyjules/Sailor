@@ -19,6 +19,18 @@ void main() {
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`
 
+/** A uniform value. Plain numbers are floats (ints only for `uTapCount`, DOF's loop bound),
+ *  a Float32Array is an array of vec2s (DOF's tap offsets), and `{ vec3 }` is one vec3 —
+ *  a wrapper rather than "guess by length", so a vec2 array is never misread. */
+export type GpuUniform = number | Float32Array | { vec3: readonly [number, number, number] }
+
+export function uniformSetter(name: string, value: GpuUniform): '1i' | '1f' | '2fv' | '3f' {
+  if (value instanceof Float32Array) return '2fv'
+  if (typeof value === 'object') return '3f'
+  if (Number.isInteger(value) && name === 'uTapCount') return '1i'
+  return '1f'
+}
+
 export class GpuPost {
   private canvas: HTMLCanvasElement | null = null
   private gl: WebGL2RenderingContext | null = null
@@ -115,7 +127,7 @@ export class GpuPost {
     depth: CanvasImageSource,
     w: number,
     h: number,
-    uniforms: Record<string, number | Float32Array>,
+    uniforms: Record<string, GpuUniform>,
   ): HTMLCanvasElement | null {
     this.init()
     const { gl, program, canvas } = this
@@ -146,9 +158,12 @@ export class GpuPost {
     for (const [name, value] of Object.entries(uniforms)) {
       const loc = gl.getUniformLocation(program, name)
       if (!loc) continue
-      if (value instanceof Float32Array) gl.uniform2fv(loc, value)
-      else if (Number.isInteger(value) && name === 'uTapCount') gl.uniform1i(loc, value)
-      else gl.uniform1f(loc, value)
+      switch (uniformSetter(name, value)) {
+        case '2fv': gl.uniform2fv(loc, value as Float32Array); break
+        case '3f': { const v = (value as { vec3: readonly [number, number, number] }).vec3; gl.uniform3f(loc, v[0], v[1], v[2]); break }
+        case '1i': gl.uniform1i(loc, value as number); break
+        default: gl.uniform1f(loc, value as number)
+      }
     }
 
     gl.drawArrays(gl.TRIANGLES, 0, 3)
