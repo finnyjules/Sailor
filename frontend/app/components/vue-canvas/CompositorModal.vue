@@ -1062,10 +1062,10 @@ function onLayoutSelect(id: string) { if (!viewOnlyGuard()) layoutVary.select(id
 function onLayoutVary(step: 1 | -1) { if (!viewOnlyGuard()) layoutVary.vary(step) }
 function onLayoutJump(i: number) { if (!viewOnlyGuard()) layoutVary.jump(i) }
 function onLayoutChoice(key: keyof Choice, value: unknown) { if (!viewOnlyGuard()) layoutVary.setChoice(key, value) }
-// Picking a style only changes what is offered; the suggested face is a face change like the
-// Title face picker's (one undo step), so neither needs the design size.
+// Picking a style only changes what is offered. The suggested face is a face change (one undo
+// step); the layout refits into that step once the font loads, but only at the design size.
 function onLayoutStyle(s: StyleId) { layoutVary.setStyle(s) }
-function onLayoutUseFace() { layoutVary.applySuggestedFace() }
+function onLayoutUseFace() { if (!viewOnlyGuard()) layoutVary.applySuggestedFace({ canReapply: () => atDesign.value }) }
 /** The Content section: tag a line (null: Automatic) — its own undo step, then a re-plan. */
 function onLayoutTag(id: string, tag: ContentTag | null) { if (!viewOnlyGuard()) layoutVary.setTag(id, tag) }
 const layoutName = computed(() => layoutById(layoutVary.layoutId.value)?.name ?? '')

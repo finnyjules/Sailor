@@ -137,7 +137,7 @@ describe('Content section — a tag changes the library', () => {
     const { visible, layoutPrev, ...rest } = left
     expect(rest).toEqual(original)
     expect(visible).toBe(false)
-    expect(layoutPrev).toEqual({ visible: { was: null, set: false } })          // it had no visibility of its own
+    expect(layoutPrev).toEqual({ visible: { was: null, set: false, by: 'unused' } })   // no visibility of its own; hidden for the tag
   })
 })
 
@@ -424,8 +424,26 @@ describe('Task 6 — a tag change applies the Frame\'s layout again, in the same
     expect(Object.values(props.sailor_posterState.roles)).not.toContain('q')           // no role
     expect(layerOf(props, 'q').visible).not.toBe(false)
     expect(vary.candidates.value[vary.index.value]!.plan.notPlaced.some(n => n.text.includes('Lightest'))).toBe(false)
-    // Tagged Not used, it goes; back to Automatic, it holds no role — it stays hidden, named (R15).
+    // Tagged Not used, it goes.
+    const before = JSON.parse(JSON.stringify(layerOf(props, 'q')))
     vary.setTag('q', 'unused')
+    expect(layerOf(props, 'q').visible).toBe(false)
+    // Back to Automatic (fix round 2): it holds no role, and it was showing before — it comes back
+    // exactly as it was (nothing else about it changed), and is not listed.
+    vary.setTag('q', null)
+    expect(layerOf(props, 'q').visible).not.toBe(false)
+    expect(JSON.parse(JSON.stringify(layerOf(props, 'q')))).toEqual(before)
+    await idle()
+    expect(vary.candidates.value[vary.index.value]!.plan.notPlaced.some(n => n.text.includes('Lightest'))).toBe(false)
+  })
+
+  it('fix round 2: a line the user hid before a layout hid it stays hidden when untagged', async () => {
+    const layers = reviewFrame().map(l => (l.id === 'q' ? { ...l, visible: false } as LocalLayer : l))
+    const { props, vary } = realHarness(layers)
+    await idle()
+    vary.select('statement'); await nextTick()
+    vary.setTag('q', 'unused')
+    vary.setTag('q', null)
     expect(layerOf(props, 'q').visible).toBe(false)
   })
 
@@ -542,6 +560,34 @@ describe('Task 6 — the suggested face: the layout is applied again once the fa
     g.resolve(true); await flush()
     expect(layersOf(g.props)).toBe(g.beforeFace)
     expect(JSON.stringify(g.props.sailor_posterState)).toBe(g.beforeState)
+  })
+
+  it('closing the tab while the face loads: no write when it arrives', async () => {
+    const { effectScope } = await import('vue')
+    let resolve!: (ok: boolean) => void
+    const loadFont = vi.fn(() => new Promise<boolean>((res) => { resolve = res }))
+    const scope = effectScope()
+    const h = scope.run(() => realHarness(reviewFrame(), {}, { w: 895, h: 1280 }, { loadFont }))!
+    h.vary.setStyle('editorial'); await idle()
+    h.vary.select(offeredIds(h.vary)[0]!); await nextTick()
+    h.ed.setLocal('t', { x: 0.9, y: 0.93 })
+    h.vary.applySuggestedFace(); await flush()
+    const layers = h.props.sailor_localLayers, state = h.props.sailor_posterState, order = h.props.sailor_stackOrder
+    scope.stop()                                                            // the tab is closed
+    resolve(true); await flush()
+    expect(h.props.sailor_localLayers).toBe(layers)
+    expect(h.props.sailor_posterState).toBe(state)
+    expect(h.props.sailor_stackOrder).toBe(order)
+  })
+
+  it('the host says it is at a viewing size when the face arrives: no re-apply', async () => {
+    const f = await faceFrame()
+    let atDesign = true
+    f.vary.applySuggestedFace({ canReapply: () => atDesign }); await flush()
+    atDesign = false
+    const now = layersOf(f.props)
+    f.resolve(true); await flush()
+    expect(layersOf(f.props)).toBe(now)
   })
 
   it('a face that does not load in time (or a loader that fails) leaves the face step as it is', async () => {

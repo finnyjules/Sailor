@@ -801,7 +801,7 @@ function carriedOver(p: Prepared, a: LayoutPlanArgs, ops: LayerOp[], z: number):
     if (l.kind !== 'text' && l.kind !== 'image') continue
     if (isOwned(l as { owner?: { by: string } }) || isFromLayout(l as { fromLayout?: unknown })) continue
     if (placed.has(l.id) || hiddenHere.has(l.id)) continue
-    const tracked = l as { visible?: boolean; layoutPrev?: Record<string, { set: unknown }> }
+    const tracked = l as { visible?: boolean; layoutPrev?: Record<string, { was: unknown; set: unknown }> }
     const layoutHid = tracked.visible === false && tracked.layoutPrev?.visible?.set === false
     const showing = tracked.visible !== false
     // A line an earlier layout hid is named whether or not it still holds a role (an untag, or
@@ -812,10 +812,20 @@ function carriedOver(p: Prepared, a: LayoutPlanArgs, ops: LayerOp[], z: number):
       : l.kind === 'image'
         ? (l.id === p.contentRead.roles.image2 ? 'image2' : layoutHid ? 'unused' : undefined)
         : roleOf.get(l.id) ?? (layoutHid ? 'unused' : undefined)
+    // Task 6 fix round 2: a line hidden BECAUSE it was tagged Not used (D3's hide, marked
+    // `by: 'unused'`), now untagged and holding no role, that was showing before, comes back — a
+    // tracked show op — rather than staying hidden and named as `'unused'` for ever. A line a
+    // layout hid for not placing it (R15, with or without a role now) is not this: it stays.
+    const hasRole = l.kind === 'image' ? l.id === p.contentRead.roles.image2 : roleOf.has(l.id)
+    const prevVis = tracked.layoutPrev?.visible as { was: unknown; set: unknown; by?: string } | undefined
+    if (layoutHid && prevVis?.by === 'unused' && !tags?.[l.id] && !hasRole && prevVis.was !== false) {
+      hide.push({ target: l.id, kind: l.kind === 'image' ? 'image' : 'text', shown: true, z })
+      continue
+    }
     if (!role) continue
     const strand = showing && (tagUnused || l.id === image2 || (prevWasStage4 && contentRole.has(l.id)))
     if (!layoutHid && !strand) continue
-    if (strand) hide.push({ target: l.id, kind: l.kind === 'image' ? 'image' : 'text', hidden: true, z })
+    if (strand) hide.push({ target: l.id, kind: l.kind === 'image' ? 'image' : 'text', hidden: true, z, ...(tagUnused ? { hiddenBy: 'unused' as const } : {}) })
     if (l.kind === 'image') {
       const name = (l as { name?: string }).name?.trim()
       named.push({ role, text: name || `Image ${images.indexOf(l) + 1}`, image: true })

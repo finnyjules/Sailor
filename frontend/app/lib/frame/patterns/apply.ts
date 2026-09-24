@@ -83,7 +83,9 @@ export function applyPlacement(
     // like every other layout-set field: restored when a later op leaves `hidden` unset, unless
     // the user changed visibility since). Stop here: nothing else about the layer changes.
     track('visible', op.hidden ? false : undefined)
-    if (op.hidden) {
+    if (op.hidden && op.hiddenBy && prev.visible) prev.visible = { ...prev.visible, by: op.hiddenBy } as typeof prev.visible
+    // A shown op only gives the visibility back (the `track` above restored it): same early stop.
+    if (op.hidden || op.shown) {
       if (Object.keys(prev).length) next.layoutPrev = prev; else delete next.layoutPrev
       return next as LocalLayer
     }

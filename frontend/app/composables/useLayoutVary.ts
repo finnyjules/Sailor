@@ -312,7 +312,10 @@ export function useLayoutVary(src: LayoutVarySource): {
   /** Which layer holds which role, as the planner reads the Frame ({} while the tab is hidden). */
   roleIds: ComputedRef<StoredRoles>
   titleId: ComputedRef<string | undefined>
-  suggestedFace: ComputedRef<SuggestedFace | null>; applySuggestedFace(): boolean
+  suggestedFace: ComputedRef<SuggestedFace | null>
+  /** `canReapply`: read when the face has loaded — false (the host shows the Frame at a viewing
+   *  size, not its design size) skips the late re-apply, as every other apply is refused there. */
+  applySuggestedFace(opts?: { canReapply?: () => boolean }): boolean
   /** The brand kit's logo as the planner takes it, once resolved (undefined: none, or not yet). */
   brandLogo: Ref<BrandLogo | undefined>
   /** The Content section's rows: every text layer of the user's, then each image beyond the first. */
@@ -717,9 +720,10 @@ export function useLayoutVary(src: LayoutVarySource): {
    *  it the way the Title face picker does, and re-plan (after it loads — `settle` waits).
    *  Frame layout decisions, Task 6: once the face has loaded (`loadFont`, given up after
    *  `FACE_LOAD_MS`), the Frame's layout is applied again — measured in the real face — folded into
-   *  the face's undo step (no new one). Not when the face never loads, the tab has gone, or anything
-   *  changed the Frame meanwhile (another step, an undo, a write to its layers, order or record). */
-  function applySuggestedFace(): boolean {
+   *  the face's undo step (no new one). Not when the face never loads, the tab has gone, anything
+   *  changed the Frame meanwhile (another step, an undo, a write to its layers, order or record),
+   *  or the host's `canReapply` says no (a responsive Frame shown at a viewing size). */
+  function applySuggestedFace(opts: { canReapply?: () => boolean } = {}): boolean {
     const face = suggestedFace.value
     const id = titleId.value
     const layers = (src.props()?.sailor_localLayers as LocalLayer[] | undefined) ?? []
@@ -737,6 +741,7 @@ export function useLayoutVary(src: LayoutVarySource): {
       .catch(() => false)
       .then((ok) => {
         if (!ok || disposed || !sameMark(mark, frameMark())) return
+        if (opts.canReapply && !opts.canReapply()) return             // at a viewing size
         reapplyFrameLayout(folded(src.editor()))
       })
     return true

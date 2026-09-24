@@ -65,6 +65,14 @@ export interface LayerOp {
    *  other layout-set fields: restored when a later op omits it, unless the user changed
    *  visibility since. A hidden op carries no geometry — it must not move the layer. */
   hidden?: boolean
+  /** Give back a visibility an earlier layout hid (the tracked `visible` restored) and change
+   *  nothing else — like a hidden op, it carries no geometry (Task 6 fix round 2: a line untagged
+   *  from Not used that holds no role any more comes back). */
+  shown?: boolean
+  /** Why a hidden op hides the layer, recorded on its `layoutPrev.visible` entry (`by`). Only
+   *  `'unused'` (ruling D3: tagged Not used): such a line, untagged later with no role, is given
+   *  back (`shown`) — unlike a line a layout hid for not placing it (R15, it stays hidden). */
+  hiddenBy?: 'unused'
   w?: number
   h?: number
   fontSize?: number
