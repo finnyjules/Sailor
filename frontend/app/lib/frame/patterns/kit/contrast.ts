@@ -219,8 +219,10 @@ export function pieceFills(els: El[], S: Sheet, ctx: FillCtx): PieceFills {
       // Ruling R6: the fill stays as designed; the user's text (and any owned word in a palette
       // role) must read on it, or the candidate is refused. The layout's own words in a fixed colour
       // on its own fixed piece (the Notes app's amber "‹ Notes" / "Done") are that design, not checked.
+      // A fixed colour that is not a plain hex can't be checked: the variation is refused, never
+      // passed unchecked.
       const bg = hex6((p as { hex?: string }).hex)
-      const bad = bg ? texts.find(x => !(x.t.k === 'own' && x.t.hex) && contrastRatio(x.c, bg) < READABLE) : undefined
+      const bad = bg ? texts.find(x => !(x.t.k === 'own' && x.t.hex) && contrastRatio(x.c, bg) < READABLE) : texts[0]
       if (bad) issues.push(`${baseRole(bad.t.role)} is unreadable on its ${pieceName}`)
       return
     }

@@ -301,7 +301,7 @@ export const perfBeforeAfter: LayoutDef = {
         { k: 'r', x: half - 0.25, y: 0, w: 0.5, h: bandTop, color: 'field', role: 'divider', ok: true, bleed: true },
         ...label('Before', X(1), 'before'), ...label('After', half + X(1), 'after'),
         disp(lines.join('\n'), { size, x: X(1), base: tb }), ...foot.els],
-      did: 'Two halves, before and after, over a band with the headline and the offer. Needs two images; Meta limits this for health products.',
+      did: 'Two halves, before and after, with the headline and the offer below them on the page colour. Needs two images; Meta limits this for health products.',
     }
   },
 }
@@ -452,7 +452,10 @@ export const perfPostit: LayoutDef = {
       { k: 'r', x: nx, y: ny, w: nw, h: nh, hex: POSTIT, rot: ROT, role: 'sticker', over: ['photo'] },
       place(lines.join('\n'), T, 'title', top, lines.length)]
     if (num) els.push(place(num, D, 'date', top + lines.length * size * LH, 1))
-    return { els: [...els, ...foot.els], did: 'The product fills the page with a note stuck on it; the button sits on a band at the foot.' }
+    // Say what the foot really holds: the button (none without an action, or with the platform's
+    // own), else the fine print, else nothing.
+    const foot1 = cc.action ? '; the button sits on a band at the foot.' : cc.caption ? '; the fine print sits on a band at the foot.' : '.'
+    return { els: [...els, ...foot.els], did: 'The product fills the page with a note stuck on it' + foot1 }
   },
 }
 

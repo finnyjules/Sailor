@@ -5,6 +5,7 @@ import { boxOf } from '~/lib/frame/patterns/kit/check'
 import { CATALOG, layoutById, layoutsForStyle } from '~/lib/frame/patterns/layouts/catalog'
 import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
 import { makeSheet } from '~/lib/frame/patterns/kit/sheet'
+import { pieceFills } from '~/lib/frame/patterns/kit/contrast'
 import type { El } from '~/lib/frame/patterns/kit/types'
 import { FRAME_FORMATS } from '~/lib/frame/formats'
 import { createImageLayer, createTextLayer } from '~/composables/useCompositorLayers'
@@ -295,7 +296,12 @@ describe('what each layout places (rulings R4, R5, R10)', () => {
     expect(img2.x).toBeGreaterThan(0.5)
     const own = ownedOf(plan, 'own-') as TextLayer[]
     expect(own.map(l => l.text)).toEqual(['Before', 'After'])
-    for (const l of own) expect([l.fontFamily, l.fontWeight]).toEqual(['Inter', 600])
+    // Ruling R10: the labels take the caption layer's family AND weight — a caption in Georgia 400
+    // (not the kit's 600, not the other lines' Inter) tells R10 from the kit's own weight.
+    const georgia = fullAdLayers({ action: true, image2: true }).map(l => l.id === 'c'
+      ? { ...l, fontFamily: 'Georgia', fontWeight: 400 } as LocalLayer : l)
+    const g = ownedOf(first('perfBeforeAfter', georgia).plan, 'own-') as TextLayer[]
+    expect(g.map(l => [l.text, l.fontFamily, l.fontWeight])).toEqual([['Before', 'Georgia', 400], ['After', 'Georgia', 400]])
     // Each label on its own card, filled by the picker (the page colour carries ink here).
     expect(ownedOf(plan, 'card-').map(l => (l as { fill?: unknown }).fill)).toEqual([palette.field, palette.field])
     // Its content lines left out are hidden and named.
@@ -362,6 +368,29 @@ describe('what each layout places (rulings R4, R5, R10)', () => {
     expect(textOf(cand.out.els, 'date').map(e => e.k === 't' && e.s)).toEqual([LINES.dt[0]])
     // The product name is left out (as the prototype), hidden and named.
     expect(plan.notPlaced.map(n => n.role)).toContain('details')
+  })
+
+  it('Post-it\'s description names the button only when one is drawn', () => {
+    expect(first('perfPostit').cand.out.did).toMatch(/the button sits on a band/)
+    const noAction = first('perfPostit', fullAdLayers({ action: false })).cand.out.did
+    expect(noAction).not.toMatch(/button/)
+    expect(noAction).toMatch(/the fine print sits on a band/)
+    // The platform's own button (story): no button drawn, none described.
+    const story = FRAMES.find(f => f.id === 'meta-story')!
+    const native = candidatesForFrame(argsFor('perfPostit', story, fullAdLayers({ action: true }))).find(c => c.choice.cta === 'native')!
+    expect(native.out.did).not.toMatch(/button/)
+  })
+
+  it('a fixed colour that is not a plain hex refuses the variation (ruling R6), never passes unchecked', () => {
+    const S = makeSheet({ frameW: 1080, frameH: 1080, measure: makeStubMeasure(), style: 'performance' })
+    const ctx = { palette, hasAction: false, layerColour: (r: string) => (r === 'title' ? '#111111' : undefined) }
+    const els = (hex: string): El[] => [
+      { k: 'r', x: 10, y: 10, w: 60, h: 40, hex, role: 'sticker' },
+      { k: 't', s: 'Run lighter.', x: 15, top: 20, size: 6, ls: 0, lh: 1, pre: true, role: 'title', over: ['sticker'] },
+    ]
+    expect(pieceFills(els('#ffe45c'), S, ctx).issues).toEqual([])
+    expect(pieceFills(els('not-a-colour'), S, ctx).issues).toEqual(['title is unreadable on its sticker'])
+    expect(pieceFills(els('rgb(255, 228, 92)'), S, ctx).issues).toEqual(['title is unreadable on its sticker'])
   })
 
   it('Post-it is refused when the user\'s text does not read on the note (ruling R6)', () => {
