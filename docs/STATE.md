@@ -31,6 +31,18 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
 
+### Frame web export — wired Space Type and Gradient play live — LANDED 2026-09-23 (`4cec9128b`..`3efb2bfb0`, non-contiguous — 5 tasks + a final fix wave, subagent-driven, a review per task, a whole-change review, its fix wave and a re-review)
+
+Plan `docs/superpowers/plans/2026-09-23-frame-export-live-wired-layers.md` (its own design; Task 5 added after Task 4's measurement).
+
+**What changed.** An animated wired Space Type or Gradient layer in a Frame web export now carries its studio's own embed player, nested inside the Frame player, instead of pre-rendered frames. The Space Type Frame that was 28.5 MB as frames is **1.66 MB** live, stays sharp at any size and makes zero network requests. 3D, Vector Type and Shape layers keep the frames route.
+
+**How.** `lib/embed/nested.ts` + `bundleNamesFor` put every player the file needs in its one script (nested bundles first, each filed under its name); the Frame surface mounts them in detached containers, sizes each to how the painter draws it (cover crop, source aspect, [64, 4096]) and hands its canvas to the painter as the slot's picture; a lost nested context restores the poster. `StudioFrameSource.embed()` (Gradient; Space Type through `lib/spacetype/embedConfig.ts`, one config builder shared with the standalone export) offers a player; `lib/embed/frame/liveCheck.ts` runs the exact bundle the file will carry in a blank iframe and compares it with the editor's picture at three frame-boundary times (mean < 2, < 0.5% of pixels off by > 24) — anything else, an error or a 10 s timeout means frames. The check adds 50–95 ms per live layer; Fit/Transparent reuse it.
+
+**Found on the way.** A per-effect verified list was not enough: verified effects drew visibly different letters in Inter 600 (6.5–10% of pixels) and Fraunces 700 (14%) — hence the export-time check. Fonts deduplicated by family+weight collided between the Frame's text and a live layer ("Café" / "CAFÉ" shipped a fallback É) — every inlined Space Type face now has a private name (`Work Sans sailor-<hash>`), applied in the config builder so the check proves it. Standalone Space Type exports also gained: the full seamless loop (`loops`), the upper-cased and filler-token glyphs in the font subset, and the 400 face for contour/spiral/tunnel/streamer. `LIVE_VERIFIED_EFFECTS` (44 of 63: 34 Showcase layouts + ribbon, ticker, field, coil, streamer, spiral, tunnel, contour, ring, slot) is the cheap first filter; `tests/spacetype-live-parity.spec.ts` guards it.
+
+**Open.** The Space Type font race (a pull can build with a fallback face) and Loft's unresolved `google:` font token — spun off as their own task. The check samples 3 moments at 480 px. A Gradient's "animated" rule differs between the node card and its frame source (pre-existing). Minors listed in `.superpowers/sdd/live-wired/final-review.md`.
+
 ### Frame layouts, stage 4 — ad content and the research layouts — LANDED 2026-09-24 (`0e66d9a24`..HEAD, non-contiguous — 7 tasks, subagent-driven, a review per task, a whole-stage review and its fix wave)
 
 Plan `docs/superpowers/plans/2026-09-24-frame-layout-system-stage4.md` (spec §8, §6).
