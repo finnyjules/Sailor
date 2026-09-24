@@ -442,7 +442,7 @@ describe('hosted mode: alias forms hit the same gates as canonical paths', () =>
     }
   })
 
-  it('T2b: audited stateless catalog/capability routes still raw-proxy', async () => {
+  it('T2b: audited stateless catalog/capability routes are answered by Sailor itself (A3), never raw-proxied', async () => {
     for (const [p, m] of [
       ['/sailor/shader_effects', 'GET'],
       ['/sailor/shader_effects/assets/atlas.png', 'GET'],
@@ -454,8 +454,9 @@ describe('hosted mode: alias forms hit the same gates as canonical paths', () =>
       ['/comfyui/sailor/shader_effects', 'GET'],
     ] as const) {
       proxyRequest.mockClear()
-      await middleware(ev(p, m))
-      expect(proxyRequest, `${m} ${p} must still proxy`).toHaveBeenCalledTimes(1)
+      const res = await middleware({ ...ev(p, m), node: { req: {}, res: { setHeader() {} } } })
+      expect(res, `${m} ${p} is answered natively`).toBeDefined()
+      expect(proxyRequest, `${m} ${p} must not raw-proxy`).not.toHaveBeenCalled()
       expect(handleHostedSailorData, `${m} ${p} must not be data-gated`).not.toHaveBeenCalled()
     }
   })
@@ -594,12 +595,11 @@ describe('local mode is byte-identical — no gate, no 403, same proxy target', 
     // Stage 6 Task 2's projects gate and spend refusal are hosted-only; since
     // engine-free Phase A those paths are answered natively in local mode (see
     // the next describe), so they are no longer in this raw-proxy list.
-    // Stage 6 Task 2b: every /sailor bucket — capability, refuse — raw-proxies
-    // unchanged in local mode. (The DATA bucket — listings, deletes, assets,
-    // thumbnails — is answered natively since engine-free Phase A: see below.)
-    ['/sailor/shader_effects', 'GET'], ['/sailor/font_subset', 'POST'],
-    ['/sailor/render_timeline', 'POST'], ['/sailor/lora/clear_dataset', 'POST'], ['/sailor/models/download', 'GET'],
-    ['/sailor/space_thumbnail/burst', 'POST'],
+    // Stage 6 Task 2b: the /sailor routes Sailor does not serve itself still
+    // raw-proxy unchanged in local mode. (The DATA bucket and, since A3, the
+    // capability routes and the lora/motion/space-preset writes are answered
+    // natively since engine-free Phase A: see below.)
+    ['/sailor/render_timeline', 'POST'], ['/sailor/spacetype_encode', 'POST'],
   ] as const
 
   it('proxies every path the hosted gates intercept', async () => {
@@ -623,7 +623,7 @@ describe('local mode is byte-identical — no gate, no 403, same proxy target', 
       ['/comfyui/api/queue', 'http://127.0.0.1:8188/api/queue'],
       ['/comfyui/internal/files/output', 'http://127.0.0.1:8188/internal/files/output'],
       ['/comfyui/settings', 'http://127.0.0.1:8188/settings'],
-      ['/comfyui/sailor/shader_effects', 'http://127.0.0.1:8188/sailor/shader_effects'],
+      ['/comfyui/sailor/render_timeline', 'http://127.0.0.1:8188/sailor/render_timeline'],
       ['/queue?comfyWorker=2', 'http://127.0.0.1:8191/queue'],
       ['/comfyui', 'http://127.0.0.1:8188/'],
     ]
@@ -682,5 +682,30 @@ describe('local mode: projects and spend are answered by Sailor itself (engine-f
       expect(res, `${m} ${p}`).toBeDefined()
     }
     expect(handleHostedSailorData, 'local mode must never enter the data gate').not.toHaveBeenCalled()
+  })
+
+  it('answers the small /sailor routes natively too (A3), including the writes the hosted gate refuses', async () => {
+    for (const [p, m] of [
+      ['/sailor/shader_effects', 'GET'], ['/comfyui/sailor/shader_effects/assets/a.png', 'GET'], ['/api/sailor/space_defaults', 'GET'],
+      ['/sailor/space_default/burst', 'POST'], ['/sailor/space_thumbnails', 'GET'], ['/sailor/space_thumbnail/burst', 'GET'],
+      ['/sailor/space_thumbnail/burst', 'POST'], ['/sailor/font_subset', 'POST'], ['/sailor/lora/save_captions', 'POST'],
+      ['/sailor/lora/clear_dataset', 'POST'], ['/sailor/motion/cleanup_frames', 'POST'], ['/sailor/models/status', 'GET'],
+    ] as const) {
+      proxyRequest.mockClear()
+      const res = await middleware({ ...ev(p, m), node: { req: {}, res: { setHeader() {} } } })
+      expect(proxyRequest, `${m} ${p} is native in local mode`).not.toHaveBeenCalled()
+      expect(res, `${m} ${p}`).toBeDefined()
+    }
+  })
+
+  it('models/download: raw-proxied while the engine answers, 503 when it does not', async () => {
+    proxyRequest.mockClear()
+    expect(await middleware({ ...ev('/sailor/models/download?key=upscale', 'GET'), node: { req: {}, res: { setHeader() {} } } }))
+      .toEqual({ error: 'This needs the local engine' })
+    expect(proxyRequest).not.toHaveBeenCalled()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}')))
+    await middleware(ev('/sailor/models/download?key=upscale', 'GET'))
+    expect(proxyRequest).toHaveBeenCalledTimes(1)
+    expect(proxyRequest.mock.calls[0]?.[1]).toBe('http://127.0.0.1:8188/sailor/models/download?key=upscale')
   })
 })

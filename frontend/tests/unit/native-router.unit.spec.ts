@@ -62,13 +62,13 @@ describe('which paths are native', () => {
   })
 
   it('leaves every other path to the proxy', () => {
-    for (const p of ['/sailor/render_timeline', '/sailor/projectsX', '/sailor/shader_effects', '/prompt', '/api/wallet', '/api/sailor/render_timeline']) {
+    for (const p of ['/sailor/render_timeline', '/sailor/projectsX', '/sailor/spacetype_encode', '/prompt', '/api/wallet', '/api/sailor/render_timeline']) {
       expect(nativeEnginePath(p), p).toBeNull()
     }
   })
 
   it('falls through for a path it does not own', async () => {
-    expect((await json('GET', '/sailor/shader_effects')).body).toEqual({ fallthrough: true })
+    expect((await json('GET', '/sailor/spacetype_encode')).body).toEqual({ fallthrough: true })
   })
 })
 

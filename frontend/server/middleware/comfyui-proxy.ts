@@ -36,7 +36,8 @@ export default defineEventHandler(async (event) => {
   if (NITRO_ROUTE_PREFIXES.some((p) => path === p || path.startsWith(p + '?') || path.startsWith(p + '/'))) return
 
   // Engine-free Phase A: the /sailor routes Sailor now serves itself (projects,
-  // spend) — same folders, same formats as the Python it replaces. LOCAL MODE
+  // spend, media, the small A3 routes) — same folders, same formats as the
+  // Python it replaces. LOCAL MODE
   // ONLY here: hosted reaches the same handlers through the tenant gates below,
   // after the ownership check, never directly.
   if (deployMode() !== 'hosted') {
@@ -91,6 +92,15 @@ export default defineEventHandler(async (event) => {
     // hosted raw proxying is refused, so a route nobody has audited can
     // never become a cross-tenant surface merely by existing upstream.
     if (decision.kind === 'forbid') throw createError({ statusCode: 403, message: decision.message })
+    // Engine-free Phase A (A3): the audited stateless /sailor routes (shader
+    // catalog, Space Type preset reads, font subset, model status) keep their
+    // hosted 'proxy' classification but are answered by Sailor itself, from
+    // the same folders. Everything else classified 'proxy' is not native and
+    // falls through to the raw proxy below.
+    if (decision.kind === 'proxy') {
+      const native = await nativeEngineRoute(event)
+      if (native !== undefined) return native
+    }
   }
 
   for (const prefix of PROXY_PREFIXES) {

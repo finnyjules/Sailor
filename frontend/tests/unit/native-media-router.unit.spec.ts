@@ -71,7 +71,7 @@ describe('which media paths are native', () => {
   })
 
   it('leaves other /sailor routes to the proxy', () => {
-    for (const p of ['/sailor/shader_effects', '/sailor/render_timeline', '/sailor/assetsx', '/sailor/input_listings']) expect(nativeEnginePath(p), p).toBeNull()
+    for (const p of ['/sailor/spacetype_encode', '/sailor/render_timeline', '/sailor/assetsx', '/sailor/input_listings']) expect(nativeEnginePath(p), p).toBeNull()
   })
 })
 

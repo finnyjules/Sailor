@@ -600,8 +600,8 @@ describe('LOCAL MODE — single user: no registry, no filter; projects served na
   it('still raw-proxies the /sailor routes that are not native yet', async () => {
     mode = 'local'
     for (const [p, target] of [
-      ['/sailor/models/status', 'http://127.0.0.1:8188/sailor/models/status'],
-      ['/sailor/shader_effects?comfyWorker=2', 'http://127.0.0.1:8191/sailor/shader_effects'],
+      ['/sailor/render_timeline', 'http://127.0.0.1:8188/sailor/render_timeline'],
+      ['/sailor/spacetype_encode?comfyWorker=2', 'http://127.0.0.1:8191/sailor/spacetype_encode'],
     ] as const) {
       proxyRequest.mockClear()
       const r = await via(p, 'GET', null)
@@ -624,14 +624,20 @@ describe('LOCAL MODE — single user: no registry, no filter; projects served na
 // ------------------------------------------------- non-projects /sailor routes
 
 describe('the rest of the /sailor extension is audited (Task 2b)', () => {
-  it('audited stateless capability routes still raw-proxy in hosted mode', async () => {
+  it('audited stateless capability routes are answered by Sailor itself in hosted mode (A3), never raw-proxied', async () => {
     // Task 2b closed the gap this test used to document: only the audited
-    // stateless catalog/capability routes now raw-proxy. The per-user DATA
-    // routes (assets, listings) are gated and the compute/write routes are
-    // refused — those are covered end to end in sailor-routes-gate.unit.spec.ts.
+    // stateless catalog/capability routes pass the hosted gate unchecked. The
+    // per-user DATA routes (assets, listings) are gated and the compute/write
+    // routes are refused — those are covered end to end in
+    // sailor-routes-gate.unit.spec.ts. Since A3 the capability routes are
+    // served natively from the same folders instead of proxied.
     for (const p of ['/sailor/shader_effects', '/sailor/space_defaults', '/sailor/models/status']) {
       proxyRequest.mockClear()
-      expect((await via(p, 'GET')).status, p).toBe('proxied')
+      const r = await via(p, 'GET')
+      expect(r.status, p).not.toBe('proxied')
+      expect(proxyRequest, p).not.toHaveBeenCalled()
     }
+    expect((await via('/sailor/space_defaults', 'GET')).body).toEqual({})
+    expect((await via('/sailor/models/status?key=nope', 'GET')).body).toMatchObject({ error: 'unknown bundle \'nope\'' })
   })
 })

@@ -16,6 +16,7 @@
 import { createError, getRequestHeader, readRawBody, setResponseHeader, setResponseStatus, type H3Event } from 'h3'
 import { userDir } from './paths'
 import { MEDIA_PREFIXES, matchMediaRoute, mediaContext, runMediaRoute, type MediaResult } from './media'
+import { SMALL_PREFIXES, matchSmallRoute, runSmallRoute } from './smallRoutes'
 import {
   ensureBootMigrationsRan,
   generationsListRoute,
@@ -32,7 +33,7 @@ import {
 } from './projects'
 
 /** Namespaces served natively, boundary-matched. Everything else is proxied. */
-export const NATIVE_ENGINE_PREFIXES = ['/sailor/projects', '/sailor/spend', ...MEDIA_PREFIXES]
+export const NATIVE_ENGINE_PREFIXES = ['/sailor/projects', '/sailor/spend', ...MEDIA_PREFIXES, ...SMALL_PREFIXES]
 
 /** Request bodies are whole workflow graphs; ComfyUI's aiohttp cap was 100 MB. */
 export const NATIVE_MAX_BODY_BYTES = 100 * 1024 * 1024
@@ -128,8 +129,8 @@ const NO_DATA_FOLDER: NativeResult = {
   body: { error: 'Sailor can\'t find its data folder. Set SAILOR_ENGINE_ROOT to the folder that holds input/, output/ and user/.' },
 }
 
-/** Read and parse a JSON request body the way aiohttp's `request.json()` does. */
-async function readJsonBody(event: H3Event): Promise<{ ok: true, value: unknown, raw: Buffer } | { ok: false, result: NativeResult }> {
+/** The request body's bytes (`request.read()`), within the 100 MB cap. */
+async function readBodyBytes(event: H3Event): Promise<Buffer> {
   const declared = Number(getRequestHeader(event, 'content-length'))
   if (Number.isFinite(declared) && declared > NATIVE_MAX_BODY_BYTES) {
     throw createError({ statusCode: 413, message: 'Request body exceeds the 100 MB limit' })
@@ -138,9 +139,15 @@ async function readJsonBody(event: H3Event): Promise<{ ok: true, value: unknown,
   if (raw && raw.length > NATIVE_MAX_BODY_BYTES) {
     throw createError({ statusCode: 413, message: 'Request body exceeds the 100 MB limit' })
   }
-  const source = raw ? Buffer.from(raw).toString('utf8') : ''
+  return raw ? Buffer.from(raw) : Buffer.alloc(0)
+}
+
+/** Read and parse a JSON request body the way aiohttp's `request.json()` does. */
+async function readJsonBody(event: H3Event): Promise<{ ok: true, value: unknown, raw: Buffer } | { ok: false, result: NativeResult }> {
+  const raw = await readBodyBytes(event)
+  const source = raw.toString('utf8')
   try {
-    return { ok: true, value: JSON.parse(source), raw: raw ? Buffer.from(raw) : Buffer.alloc(0) }
+    return { ok: true, value: JSON.parse(source), raw }
   }
   catch (e) {
     const detail = source.trim() === '' ? 'Expecting value: line 1 column 1 (char 0)' : (e as Error).message
@@ -197,13 +204,36 @@ async function dispatchMedia(event: H3Event, p: string): Promise<NativeResult> {
 }
 
 /**
+ * The small routes (server/native/smallRoutes.ts): shader catalog, Space Type
+ * presets, font subset, LoRA dataset and bake-frame housekeeping, model
+ * status. Undefined = hand the request to the engine proxy unchanged
+ * (`models/download` while the engine is up).
+ */
+async function dispatchSmall(event: H3Event, p: string): Promise<NativeResult | undefined> {
+  const match = matchSmallRoute(p, (event.method || 'GET').toUpperCase(), decodeSegment)
+  if (match.kind === 'notFound') return text(404, '404: Not Found')
+  if (match.kind === 'badMethod') return text(405, '405: Method Not Allowed')
+  try {
+    const r = await runSmallRoute(match.handler, event, { json: () => readJsonBody(event), bytes: () => readBodyBytes(event) })
+    return r === 'proxy' ? undefined : r
+  }
+  catch (e) {
+    if ((e as { statusCode?: number })?.statusCode === 413) throw e
+    console.error(`[native] ${event.method} ${p} failed`, e)
+    return text(500, '500 Internal Server Error\n\nServer got itself in trouble')
+  }
+}
+
+/**
  * Serve a native request and return `{ status, body }`, or undefined when the
- * path is not native. Used by the hosted gate, which sets the status itself.
+ * path is not native (or is a native path the engine itself must answer, see
+ * dispatchSmall). Used by the hosted gate, which sets the status itself.
  */
 export async function dispatchNative(event: H3Event): Promise<NativeResult | undefined> {
   const p = nativeEnginePath(event.path)
   if (!p) return undefined
   if (MEDIA_PREFIXES.some(pre => p === pre || p.startsWith(`${pre}/`))) return dispatchMedia(event, p)
+  if (SMALL_PREFIXES.some(pre => p === pre || p.startsWith(`${pre}/`))) return dispatchSmall(event, p)
   const match = matchRoute(p, (event.method || 'GET').toUpperCase())
   if (match.kind === 'notFound') return text(404, '404: Not Found')
   if (match.kind === 'badMethod') return text(405, '405: Method Not Allowed')
