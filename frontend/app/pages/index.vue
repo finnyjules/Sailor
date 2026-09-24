@@ -22,6 +22,8 @@ import {
 import { getNewest } from '~/data/community/workflowService.js'
 import { formatNumber } from '~/lib/community/formatters.js'
 import { useCommunityNav } from '~/composables/useCommunityNav'
+import { toast } from 'vue-sonner'
+import { openTemplateWorkflow, dispatchLoadTabWorkflow } from '~/lib/openTemplateWorkflow'
 
 const { openTab } = useTabs()
 const { navigateTo: navCommunity } = useCommunityNav()
@@ -173,8 +175,27 @@ function openTemplateCommunity(workflow: any) {
   })
 }
 
-function openTemplateProject(workflow: any) {
-  openTab({ type: 'project', label: workflow.title })
+// Slug of the template whose graph is being fetched — blocks a second click
+// from opening a duplicate tab while the first is still loading.
+const openingTemplateSlug = ref<string | null>(null)
+
+async function openTemplateProject(workflow: any) {
+  if (openingTemplateSlug.value) return
+  openingTemplateSlug.value = workflow.slug
+  try {
+    await openTemplateWorkflow(workflow, {
+      fetch: (url) => fetch(url),
+      openTab,
+      loadIntoTab: dispatchLoadTabWorkflow,
+    })
+  } catch (err: any) {
+    console.error('Failed to load workflow:', err)
+    toast.error("Couldn't open this template", {
+      description: err?.message || "The workflow graph isn't available.",
+    })
+  } finally {
+    openingTemplateSlug.value = null
+  }
 }
 
 function isVideo(filename: string): boolean {
@@ -540,11 +561,12 @@ function isVideo(filename: string): boolean {
             <!-- Hover actions -->
             <div class="absolute inset-0 bg-black/50 flex flex-col items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity rounded-[16px]">
               <button
-                class="flex items-center gap-2 h-9 px-5 bg-white text-[#18181b] text-sm font-medium rounded-md hover:bg-white/90 transition-colors cursor-pointer"
+                class="flex items-center gap-2 h-9 px-5 bg-white text-[#18181b] text-sm font-medium rounded-md hover:bg-white/90 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+                :disabled="openingTemplateSlug !== null"
                 @click.stop="openTemplateProject(template)"
               >
                 <Play class="size-3.5" fill="currentColor" />
-                Open template
+                {{ openingTemplateSlug === template.slug ? 'Opening…' : 'Open template' }}
               </button>
               <button
                 class="flex items-center gap-2 h-9 px-5 bg-white/15 text-white text-sm font-medium rounded-md hover:bg-white/25 transition-colors cursor-pointer backdrop-blur-sm"
