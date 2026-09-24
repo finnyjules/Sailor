@@ -18,7 +18,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { planNode } from '~~/server/runner/executors'
 import { createMetering, extraPromptText, nodeCredits, stageEstimate, unpricedProviderNode } from '~~/server/runner/metering'
 import { collectInputFiles } from '~~/server/runner/inputs'
-import { BASE_RENDER_CREDITS, GRAPH_NODE_CREDITS } from '~~/server/utils/priceBook'
+import { BASE_RENDER_CREDITS } from '~~/server/utils/priceBook'
+import { priceNode } from '#shared/pricing/nodePrice'
 import {
   RESTYLE_DEFAULT_PROMPT, RESTYLE_MODELS, RESTYLE_NO_STYLE_SOURCE, RESTYLE_STYLE_EMPHASIS, STYLE_REFS_INSTRUCTION,
   STYLE_TRANSFER_NO_PICTURE, buildRestyleInstruction, isUnreadableFile, structureStrengthOf,
@@ -331,17 +332,24 @@ describe('restyle eligibility', () => {
   })
 })
 
+/** The shared price of a Restyle node with these settings (Task P4: priced by model × resolution). */
+function restylePrice(model: string, resolution: string): number {
+  return (priceNode('RestyleFromImageNode', { model, resolution }) as { credits: number }).credits
+}
+
 // ── Price ────────────────────────────────────────────────────────────────
 
 describe('restyle price', () => {
-  it('every model prices above 0 at the flat price, and the stage holds it plus the render credit', () => {
+  it('every model prices above 0 at the shared price for its settings, and the stage holds it plus the render credit', () => {
     for (const model of RESTYLE_MODELS) {
       const n = { class_type: 'RestyleFromImageNode', inputs: { model, resolution: '4K' } }
-      expect(nodeCredits(n), model).toBe(GRAPH_NODE_CREDITS.RestyleFromImageNode)
+      expect(nodeCredits(n), model).toBe(restylePrice(model, '4K'))
       expect(nodeCredits(n), model).toBeGreaterThan(0)
       expect(unpricedProviderNode(withNode(n))).toBeNull()
-      expect(stageEstimate(withNode(n), ['1', '2'], true)).toBe(GRAPH_NODE_CREDITS.RestyleFromImageNode! + BASE_RENDER_CREDITS)
+      expect(stageEstimate(withNode(n), ['1', '2'], true)).toBe(restylePrice(model, '4K') + BASE_RENDER_CREDITS)
     }
+    // Task P4: Nano Banana Pro at 4K costs $0.30 → 45 credits (it was 10 flat).
+    expect(restylePrice('Nano Banana Pro', '4K')).toBe(45)
   })
 })
 
@@ -382,7 +390,6 @@ function kit(o: { deps?: Parameters<typeof makeKit>[0]['deps'] } = {}) {
 
 const uploadedNames = (k: ReturnType<typeof kit>) => k.upload.mock.calls.map(c => c[1] as string)
 const link = (name: string) => `https://fal.storage/${name}`
-const FLAT = GRAPH_NODE_CREDITS.RestyleFromImageNode!
 
 describe('restyle on the engine (hosted, fake providers)', () => {
   it('a moodboard in the input folder: content then the board pictures, handed off in order, one fal call', async () => {
@@ -407,8 +414,9 @@ describe('restyle on the engine (hosted, fake providers)', () => {
       output_format: 'jpeg', resolution: '2K', num_images: 1,
     })
     expect(k.replicate.client.submit).not.toHaveBeenCalled()
-    expect(k.ledger.hold).toHaveBeenCalledWith('user_1', FLAT + BASE_RENDER_CREDITS, `runner:${promptIds[0]}`)
-    expect(k.ledger.settle).toHaveBeenCalledWith(1, FLAT + BASE_RENDER_CREDITS, `runner:${promptIds[0]}`)
+    const price = restylePrice('Nano Banana 2', '2K')
+    expect(k.ledger.hold).toHaveBeenCalledWith('user_1', price + BASE_RENDER_CREDITS, `runner:${promptIds[0]}`)
+    expect(k.ledger.settle).toHaveBeenCalledWith(1, price + BASE_RENDER_CREDITS, `runner:${promptIds[0]}`)
     const rec = (k.records.write.mock.calls[0] as unknown as [{ outputs: OutputFile[] }])[0]
     expect(rec.outputs.map(f => f.filename)).toEqual(['restyle_00001_.png'])
     const own = ofType(k.seen, 'executed').find(m => m.data.node === '2')!.data.output as { animated: boolean[] }
@@ -463,7 +471,7 @@ describe('restyle on the engine (hosted, fake providers)', () => {
       prompt: 'ink wash', style_image: link('00_a.png'), structure_image: link('content.png'),
       structure_denoising_strength: 0.8, output_format: 'jpg', number_of_images: 1, seed: 12,
     }]])
-    expect(k.ledger.settle).toHaveBeenCalledWith(1, FLAT + BASE_RENDER_CREDITS, `runner:${promptIds[0]}`)
+    expect(k.ledger.settle).toHaveBeenCalledWith(1, restylePrice(IP, '2K') + BASE_RENDER_CREDITS, `runner:${promptIds[0]}`)
   })
 
   it('no style source fails the node with Python’s words before anything is handed off, and the hold is released', async () => {

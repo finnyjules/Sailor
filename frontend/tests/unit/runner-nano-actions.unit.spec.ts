@@ -16,7 +16,8 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { planNode } from '~~/server/runner/executors'
 import { nodeCredits, stageEstimate, unpricedProviderNode } from '~~/server/runner/metering'
-import { BASE_RENDER_CREDITS, GRAPH_NODE_CREDITS } from '~~/server/utils/priceBook'
+import { BASE_RENDER_CREDITS } from '~~/server/utils/priceBook'
+import { priceNode } from '#shared/pricing/nodePrice'
 import {
   KEEP_OUTFIT_PROMPT, NEW_LOOK_PROMPT, SWAP_PRODUCT_PROMPT, actionPassThrough, personSwapInstruction,
   recolorInstruction, removeObjectInstruction, swapBackgroundInstruction, swapProductInstruction, textEditInstruction,
@@ -373,13 +374,15 @@ describe('nano-actions eligibility', () => {
 // ── Price ────────────────────────────────────────────────────────────────
 
 describe('nano-actions price', () => {
-  it('every class prices above 0 at its flat price; PersonSwap is 10 (B1 key fix)', () => {
+  it('every class prices above 0 at the shared price for its call; PersonSwap is priced (B1 key fix)', () => {
     for (const ct of [...ACTIONS, 'BlendSceneNode']) {
-      const credits = nodeCredits({ class_type: ct, inputs: ct === 'BlendSceneNode' ? { model: 'Nano Banana' } : {} })
+      const inputs = ct === 'BlendSceneNode' ? { model: 'Nano Banana' } : {}
+      const credits = nodeCredits({ class_type: ct, inputs })
       expect(credits, ct).toBeGreaterThan(0)
-      expect(credits, ct).toBe(GRAPH_NODE_CREDITS[ct])
+      expect(credits, ct).toBe((priceNode(ct, inputs) as { credits: number }).credits)
     }
-    expect(nodeCredits({ class_type: 'PersonSwap', inputs: {} })).toBe(10)
+    // Task P4: google/nano-banana-2 on Replicate at 1K is $0.067 → 14 credits.
+    expect(nodeCredits({ class_type: 'PersonSwap', inputs: {} })).toBe(14)
     for (const [, p] of takesForGuard()) expect(unpricedProviderNode(p)).toBeNull()
   })
 
@@ -387,8 +390,8 @@ describe('nano-actions price', () => {
     const passing = node('RemoveObjectNode', { image: ['1', 0], target: '  ' })
     expect(stageEstimate(passing, ['1', '2'], true)).toBe(0)
     const calling = node('RemoveObjectNode', { image: ['1', 0], target: 'the cup' })
-    expect(stageEstimate(calling, ['1', '2'], true)).toBe(10 + BASE_RENDER_CREDITS)
-    expect(stageEstimate(calling, ['1', '2'], false)).toBe(10)
+    expect(stageEstimate(calling, ['1', '2'], true)).toBe(14 + BASE_RENDER_CREDITS)
+    expect(stageEstimate(calling, ['1', '2'], false)).toBe(14)
   })
 })
 
@@ -429,7 +432,7 @@ const ENGINE_CASES: [string, ApiPrompt, string, string, string[]][] = [
 ]
 
 describe('nano-actions on the engine (hosted, fake Replicate)', () => {
-  it.each(ENGINE_CASES)('%s: one Replicate call, charged its flat price', async (ct, prompt, slug, prefix, pictures) => {
+  it.each(ENGINE_CASES)('%s: one Replicate call, charged its price', async (ct, prompt, slug, prefix, pictures) => {
     const k = kit()
     const { runId, promptIds } = await k.engine.startRun({ userId: k.userId, takes: [prompt], ...START })
     await k.engine.settled(runId)
@@ -440,8 +443,8 @@ describe('nano-actions on the engine (hosted, fake Replicate)', () => {
     expect(k.fal.client.submit).not.toHaveBeenCalled()
     // Each picture handed off once; image_input in the node's order.
     expect(sent[0]!.payload.image_input).toEqual(pictures.map(p => `https://fal.storage/${p}`))
-    const flat = GRAPH_NODE_CREDITS[ct]!
-    if (ct === 'PersonSwap') expect(flat).toBe(10)
+    const flat = (priceNode(ct, prompt[2]!.inputs) as { credits: number }).credits
+    if (ct === 'PersonSwap') expect(flat).toBe(14)
     expect(k.ledger.hold).toHaveBeenCalledWith('user_1', flat + BASE_RENDER_CREDITS, `runner:${promptIds[0]}`)
     expect(k.ledger.settle).toHaveBeenCalledWith(1, flat + BASE_RENDER_CREDITS, `runner:${promptIds[0]}`)
     expect(k.records.write).toHaveBeenCalledTimes(1)

@@ -20,7 +20,7 @@
  * the caller drops back to the static regex estimate.
  */
 import {
-  MODEL_PRICED_CLASS_SET,
+  SHARED_PRICED_CLASS_SET,
   priceNode,
   providerUsd,
   type NodeInputs,
@@ -30,10 +30,13 @@ import {
 export const BASE_RENDER_CREDITS = 1
 
 /**
- * The classes whose price depends on a `model` widget — the server's
- * MODEL_PRICED_NODE_CLASSES, as a set (the badge only asks "is this one?").
+ * The classes whose price depends on their widgets — the server's
+ * MODEL_PRICED_NODE_CLASSES (a `model` widget) and SETTING_PRICED_NODE_CLASSES
+ * (the image edit tools: model, resolution, size), as a set (the badge only
+ * asks "is this one?"). The badge prices these from the node's widgets, as
+ * the charge does, rather than from the static Python price_badge.
  */
-export const MODEL_PRICED_BADGE_CLASSES: ReadonlySet<string> = MODEL_PRICED_CLASS_SET
+export const MODEL_PRICED_BADGE_CLASSES: ReadonlySet<string> = SHARED_PRICED_CLASS_SET
 
 /**
  * Provider USD for `nodeType` as configured by `inputs` (the whole widget

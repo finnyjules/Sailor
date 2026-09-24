@@ -9,8 +9,8 @@ import { IMAGE_MODELS } from '~/data/image-models'
 import { LEGACY_VIDEO_MODEL_IDS } from '~/data/video-prices'
 import { VIDEO_RATES, videoUsd } from '#shared/pricing/videoRates'
 import { effectiveVideoSettings } from '#shared/pricing/videoSettings'
-import { ENGINE_USD } from '~/data/engine-prices'
-import { MODEL_PRICED_NODE_CLASSES, UnpricedGraphError, priceGraph } from '../../server/utils/priceBook'
+import { ENHANCE_ENGINE_SLUGS, UPSCALE_ENGINE_SLUGS } from '#shared/pricing/editSettings'
+import { MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, UnpricedGraphError, priceGraph } from '../../server/utils/priceBook'
 
 // The hosted node badge must price a model-picker node from the model the user
 // actually picked, not from the static price_badge string baked into the Python
@@ -24,8 +24,8 @@ const BASE_RENDER = 1
 const defaultClipUsd = (id: string) => videoUsd(id, effectiveVideoSettings(id, undefined, undefined, {})!)!
 
 describe('MODEL_PRICED_BADGE_CLASSES', () => {
-  it('covers exactly the five picker classes the server prices by model', () => {
-    expect([...MODEL_PRICED_BADGE_CLASSES].sort()).toEqual([
+  it('covers the five picker classes the server prices by model', () => {
+    expect([...MODEL_PRICED_NODE_CLASSES].sort()).toEqual([
       'EnhanceDetailNode',
       'FilmShotNode',
       'GenerateImageNode',
@@ -34,8 +34,8 @@ describe('MODEL_PRICED_BADGE_CLASSES', () => {
     ])
   })
 
-  it('is the same set the server price book prices by model', () => {
-    expect([...MODEL_PRICED_BADGE_CLASSES].sort()).toEqual([...MODEL_PRICED_NODE_CLASSES].sort())
+  it('is the same set the server price book prices from widgets: by model, and (Task P4) the edit tools by their settings', () => {
+    expect([...MODEL_PRICED_BADGE_CLASSES].sort()).toEqual([...MODEL_PRICED_NODE_CLASSES, ...SETTING_PRICED_NODE_CLASSES].sort())
   })
 })
 
@@ -102,10 +102,11 @@ describe('modelPricedUsd — video models', () => {
 })
 
 describe('modelPricedUsd — engine pickers', () => {
-  it('prices each engine off ENGINE_USD keyed by node class', () => {
-    expect(modelPricedUsd('UpscaleImageNode', { model: 'Clarity' })).toBe(ENGINE_USD.UpscaleImageNode!.Clarity)
-    expect(modelPricedUsd('UpscaleImageNode', { model: 'Real-ESRGAN' })).toBe(ENGINE_USD.UpscaleImageNode!['Real-ESRGAN'])
-    expect(modelPricedUsd('EnhanceDetailNode', { model: 'Faithful' })).toBe(ENGINE_USD.EnhanceDetailNode!.Faithful)
+  it('prices each engine at the largest accepted input × the default scale (Task P4)', () => {
+    // Clarity at 2× makes 16 MP: $0.20. Real-ESRGAN: $0.002 a picture. Topaz in place, 4 MP: one $0.08 unit.
+    expect(modelPricedUsd('UpscaleImageNode', { model: 'Clarity' })).toBe(0.20)
+    expect(modelPricedUsd('UpscaleImageNode', { model: 'Real-ESRGAN' })).toBe(0.002)
+    expect(modelPricedUsd('EnhanceDetailNode', { model: 'Faithful' })).toBe(0.08)
   })
 
   it('returns null for an unknown engine name', () => {
@@ -161,7 +162,8 @@ describe('badge = charge, exhaustively', () => {
     ...IMAGE_MODELS.map(m => m.id),
     ...Object.keys(VIDEO_RATES),
     ...Object.keys(LEGACY_VIDEO_MODEL_IDS),
-    ...Object.values(ENGINE_USD).flatMap(e => Object.keys(e)),
+    ...Object.keys(UPSCALE_ENGINE_SLUGS),
+    ...Object.keys(ENHANCE_ENGINE_SLUGS),
   ])]
 
   it('the id list is the full catalogue (control)', () => {

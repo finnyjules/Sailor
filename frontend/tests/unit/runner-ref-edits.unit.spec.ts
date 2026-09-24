@@ -18,7 +18,8 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { planNode } from '~~/server/runner/executors'
 import { nodeCredits, unpricedProviderNode } from '~~/server/runner/metering'
-import { BASE_RENDER_CREDITS, GRAPH_NODE_CREDITS } from '~~/server/utils/priceBook'
+import { BASE_RENDER_CREDITS } from '~~/server/utils/priceBook'
+import { priceNode } from '#shared/pricing/nodePrice'
 import {
   PRODUCT_SHOT_DEFAULT_PROMPT, REFERENCE_MODEL_IDS, cameraToPhrase, parseCamera, pitchPhrase, rollPhrase, yawPhrase,
 } from '~~/server/runner/generators/refEdits'
@@ -269,7 +270,7 @@ describe('ref-edits eligibility', () => {
 // ── Price ────────────────────────────────────────────────────────────────
 
 describe('ref-edits price', () => {
-  it('every class and model prices above 0 at its flat price', () => {
+  it('every class and model prices above 0 at the shared price for its settings', () => {
     const nodes = [
       ...REFERENCE_MODEL_IDS.map(m => ({ class_type: 'GenerateFromReferencesNode', inputs: { model: m } })),
       { class_type: 'RotateCameraNode', inputs: {} },
@@ -277,7 +278,7 @@ describe('ref-edits price', () => {
     ]
     for (const n of nodes) {
       expect(nodeCredits(n), n.class_type).toBeGreaterThan(0)
-      expect(nodeCredits(n), n.class_type).toBe(GRAPH_NODE_CREDITS[n.class_type])
+      expect(nodeCredits(n), n.class_type).toBe((priceNode(n.class_type, n.inputs) as { credits: number }).credits)
       expect(unpricedProviderNode(withNode(n))).toBeNull()
     }
   })
@@ -328,7 +329,9 @@ describe('ref-edits on the engine (hosted, fake providers)', () => {
       prompt: 'the mug on the table', image_input: storage([1, 2, 3, 4, 5, 6]), size: '2K', aspect_ratio: '4:3', seed: 5,
     })
     expect(k.fal.client.submit).not.toHaveBeenCalled()
-    const flat = GRAPH_NODE_CREDITS.GenerateFromReferencesNode!
+    // Seedream 5 Pro at 2K: $0.09 → 18 credits (Task P4).
+    const flat = (priceNode('GenerateFromReferencesNode', { model: 'seedream-5-pro', size: '2K' }) as { credits: number }).credits
+    expect(flat).toBe(18)
     expect(k.ledger.hold).toHaveBeenCalledWith('user_1', flat + BASE_RENDER_CREDITS, `runner:${promptIds[0]}`)
     expect(k.ledger.settle).toHaveBeenCalledWith(1, flat + BASE_RENDER_CREDITS, `runner:${promptIds[0]}`)
     expect(k.records.write).toHaveBeenCalledTimes(1)
@@ -447,7 +450,7 @@ describe('Product shot on a community model (the real Replicate client, a fetch 
         product_fill: '60', apply_img: false, seed: 11,
       },
     })
-    const flat = GRAPH_NODE_CREDITS.ProductShotNode!
+    const flat = (priceNode('ProductShotNode', {}) as { credits: number }).credits
     expect(k.ledger.settle).toHaveBeenCalledWith(1, flat + BASE_RENDER_CREDITS, `runner:${promptIds[0]}`)
     const rec = (k.records.write.mock.calls[0] as unknown as [{ outputs: OutputFile[] }])[0]
     expect(rec.outputs.map(f => f.filename)).toEqual(['product_shot_00001_.png'])

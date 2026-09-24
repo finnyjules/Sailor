@@ -19,6 +19,7 @@ import {
   GRAPH_NODE_CREDITS,
   MODEL_PRICED_NODE_CLASSES,
   PROVIDER_NODE_CLASSES,
+  SETTING_PRICED_NODE_CLASSES,
   PROVIDER_NODE_EXEMPT,
   UnpricedGraphError,
   VIDEO_RATES,
@@ -73,9 +74,10 @@ function comfyExtrasProviderClasses(): string[] {
 const EXTRAS_CLASSES = comfyExtrasProviderClasses()
 const ALL_PROVIDER_CLASSES = [...REPLICATE_CLASSES, ...EXTRAS_CLASSES]
 
-function classify(c: string): 'flat' | 'model' | 'exempt' | 'UNCLASSIFIED' {
+function classify(c: string): 'flat' | 'model' | 'settings' | 'exempt' | 'UNCLASSIFIED' {
   if (c in GRAPH_NODE_CREDITS) return 'flat'
   if (MODEL_PRICED_NODE_CLASSES.includes(c)) return 'model'
+  if (SETTING_PRICED_NODE_CLASSES.includes(c)) return 'settings'
   if (c in PROVIDER_NODE_EXEMPT) return 'exempt'
   return 'UNCLASSIFIED'
 }
@@ -86,9 +88,12 @@ describe('graph price book coverage', () => {
     expect(EXTRAS_CLASSES.length).toBeGreaterThan(5)
   })
 
-  it('every provider node class is priced, model-priced, or exempt with a reason', () => {
+  it('every provider node class is priced, model-priced, setting-priced, or exempt with a reason', () => {
     const unclassified = ALL_PROVIDER_CLASSES.filter(c => classify(c) === 'UNCLASSIFIED')
     expect(unclassified).toEqual([])
+    // One price per class: no class sits in two tables.
+    const doubled = ALL_PROVIDER_CLASSES.filter(c => [c in GRAPH_NODE_CREDITS, MODEL_PRICED_NODE_CLASSES.includes(c), SETTING_PRICED_NODE_CLASSES.includes(c)].filter(Boolean).length > 1)
+    expect(doubled).toEqual([])
   })
 
   it('the checked-in provider-class list matches the Python surface (drift guard)', () => {
@@ -102,9 +107,10 @@ describe('graph price book coverage', () => {
 
   it('prices the nodes whose node_id differs from their class name, as the canvas sends them', () => {
     const base = priceGraph({ 2: { class_type: 'SaveImage', inputs: {} } }).credits
-    expect(priceGraph({ 1: { class_type: 'PersonSwap', inputs: {} } }).credits).toBe(10)
-    expect(priceGraph({ 1: { class_type: 'PersonSwap', inputs: {} }, 2: { class_type: 'SaveImage', inputs: {} } }).credits).toBe(10 + base)
-    expect(priceGraph({ 1: { class_type: 'LensReframe', inputs: {} } }).credits).toBe(10)
+    // PersonSwap and LensReframe: google/nano-banana-2 at 1K, $0.067 → 14 (Task P4).
+    expect(priceGraph({ 1: { class_type: 'PersonSwap', inputs: {} } }).credits).toBe(14)
+    expect(priceGraph({ 1: { class_type: 'PersonSwap', inputs: {} }, 2: { class_type: 'SaveImage', inputs: {} } }).credits).toBe(14 + base)
+    expect(priceGraph({ 1: { class_type: 'LensReframe', inputs: {} } }).credits).toBe(14)
     expect(priceGraph({ 1: { class_type: 'PoseMannequin', inputs: {} } }).credits).toBe(10)
     expect(priceGraph({ 1: { class_type: 'IdeogramV3TurboRemoteNode', inputs: {} } }).credits).toBe(6)
   })
@@ -164,7 +170,8 @@ describe('graph price book coverage', () => {
   })
 
   it('keeps the spike-v3 hand-set prices for the classes that stayed flat', () => {
-    expect(GRAPH_NODE_CREDITS.EditImageNode).toBe(23)
+    // EditImageNode (23 flat) is priced by its settings since Task P4 (edit-pricing.unit.spec.ts).
+    expect(GRAPH_NODE_CREDITS.EditImageNode).toBeUndefined()
     expect(GRAPH_NODE_CREDITS.LipSyncNode).toBe(150)
     expect(GRAPH_NODE_CREDITS.LoraTrainingNode).toBe(600)
     expect(GRAPH_NODE_CREDITS.RestyleWithLoRANode).toBe(18)
@@ -284,6 +291,8 @@ describe('model-aware pricing: video', () => {
 })
 
 describe('model-aware pricing: engine-picker nodes', () => {
+  // Task P4: each engine is priced at the largest accepted input × the scale
+  // chosen (edit-pricing.unit.spec.ts pins the figures).
   it('UpscaleImageNode prices per engine', () => {
     const esrgan = priceGraph({ 1: { class_type: 'UpscaleImageNode', inputs: { model: 'Real-ESRGAN' } } })
     const clarity = priceGraph({ 1: { class_type: 'UpscaleImageNode', inputs: { model: 'Clarity' } } })
@@ -347,7 +356,8 @@ describe('golden price table (no price changed by the shared pricing move)', () 
 
   it('covers every model-priced class and every flat class (the table is not empty)', () => {
     expect(Object.keys(golden.modelPriced).sort()).toEqual([...MODEL_PRICED_NODE_CLASSES].sort())
-    expect(Object.keys(golden.flat).sort()).toEqual(Object.keys(GRAPH_NODE_CREDITS).sort())
+    // Task P4 moved the edit classes from the flat table to their settings.
+    expect(Object.keys(golden.flat).sort()).toEqual([...Object.keys(GRAPH_NODE_CREDITS), ...SETTING_PRICED_NODE_CLASSES].sort())
     // Both outcomes are present, so a pricer that refused (or priced) everything would fail.
     const cells = Object.values(golden.modelPriced).flatMap(row => Object.values(row))
     expect(cells.filter(c => c === 'refused').length).toBeGreaterThan(50)
@@ -359,8 +369,9 @@ describe('golden price table (no price changed by the shared pricing move)', () 
   // so those classes keep only their shape from the table: a model that
   // refused still refuses and a model that priced still prices. Their figures
   // are pinned by tests/unit/video-pricing.unit.spec.ts and
-  // tests/unit/image-pricing.unit.spec.ts.
-  const REPRICED = new Set(['GenerateVideoNode', 'FilmShotNode', 'GenerateImageNode'])
+  // tests/unit/image-pricing.unit.spec.ts. Task P4 re-priced the engine
+  // pickers and the edit classes by their settings (tests/unit/edit-pricing.unit.spec.ts).
+  const REPRICED = new Set(['GenerateVideoNode', 'FilmShotNode', 'GenerateImageNode', 'UpscaleImageNode', 'EnhanceDetailNode'])
   // Models that were refused as unpriced and now have a price.
   const NEWLY_PRICED: Record<string, string[]> = { GenerateImageNode: ['krea-2-large', 'krea-2-medium'] }
 
@@ -385,7 +396,9 @@ describe('golden price table (no price changed by the shared pricing move)', () 
     const drift: string[] = []
     for (const [ct, want] of Object.entries(golden.flat)) {
       const got = priceOrRefused(ct, {})
-      if (got !== want) drift.push(`${ct}: recorded ${want}, now ${got}`)
+      // A setting-priced edit class keeps only its shape: it still prices.
+      if (SETTING_PRICED_NODE_CLASSES.includes(ct)) { if (typeof got !== 'number') drift.push(`${ct}: recorded ${want}, now ${got}`) }
+      else if (got !== want) drift.push(`${ct}: recorded ${want}, now ${got}`)
     }
     expect(drift).toEqual([])
   })

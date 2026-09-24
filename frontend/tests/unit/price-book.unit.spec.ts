@@ -41,7 +41,10 @@ describe('price book: graph pricer (unchanged spike behavior)', () => {
   // was 12cr against a 23cr direct-route price for the same action.
   it('LipSync and EditImage are priced above provider cost', () => {
     expect(priceGraph({ 1: { class_type: 'SaveImage' }, 2: { class_type: 'LipSyncNode' } }).credits).toBe(151)
-    expect(priceGraph({ 1: { class_type: 'SaveImage' }, 2: { class_type: 'EditImageNode' } }).credits).toBe(24)
+    // Task P4: EditImageNode is priced by its settings. With no model set, its
+    // dearest model at 1K (FLUX.2 edit at the largest input, $0.135 → 21), plus the render.
+    expect(priceGraph({ 1: { class_type: 'SaveImage' }, 2: { class_type: 'EditImageNode' } }).credits).toBe(22)
+    expect(priceGraph({ 1: { class_type: 'SaveImage' }, 2: { class_type: 'EditImageNode', inputs: { model: 'Nano Banana 2', resolution: '4K' } } }).credits).toBe(25)
   })
 })
 

@@ -10,15 +10,18 @@
  * GenerateImageNode was missing from the table.
  */
 import { creditsForUsd } from '../../shared/pricing/markup'
-import { MODEL_PRICED_NODE_CLASSES, MODEL_PRICED_CLASS_SET, priceNode } from '../../shared/pricing/nodePrice'
+import { MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, SHARED_PRICED_CLASS_SET, priceNode } from '../../shared/pricing/nodePrice'
 import { VIDEO_RATES } from '../../shared/pricing/videoRates'
-export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES }
+export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES }
 // lineup-p2 (model line-up Task P2): video priced per second of the clip
 // actually sent (shared/pricing/videoRates.ts), replacing one flat figure per model.
 // lineup-p3 (Task P3, one bump for P2's fix round and P3): images priced by
 // size, quality and picture count (shared/pricing/imageRates.ts); Krea 2
 // priced; the markup no longer charges a credit for float noise.
-export const PRICE_BOOK_VERSION = 'lineup-p3'
+// lineup-p4 (Task P4): the image edit tools priced by the call their settings
+// make (shared/pricing/editRates.ts): resolution, size and model; Upscale and
+// Enhance detail at the largest accepted input × the scale chosen.
+export const PRICE_BOOK_VERSION = 'lineup-p4'
 
 export const BASE_RENDER_CREDITS = 1
 
@@ -126,7 +129,7 @@ export const creditsForUsdServer = creditsForUsd
  * rider, same as MODEL_COSTS.
  *
  * Coverage guard in price-graph.unit.spec.ts forces this table plus
- * MODEL_PRICED_NODE_CLASSES plus PROVIDER_NODE_EXEMPT to cover every
+ * MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES and PROVIDER_NODE_EXEMPT to cover every
  * IO.ComfyNode class in the provider modules.
  *
  * Keys are NODE_IDS (the `node_id="…"` in each class's schema), which is what
@@ -135,7 +138,8 @@ export const creditsForUsdServer = creditsForUsd
  */
 export const GRAPH_NODE_CREDITS: Record<string, number> = {
   // — spike-v3 hand-set rows: kept verbatim —
-  EditImageNode: 23,       // nano-banana-pro edit era: $0.15 observed — was 12 (≈0% margin) and half the direct-route price for the same action
+  // (EditImageNode, 23 flat, is priced by its settings since lineup-p4 — see
+  // SETTING_PRICED_NODE_CLASSES below.)
   LipSyncNode: 150,        // observed $1.00/run — was 30 (a 70¢ LOSS per run); 150 ≈ 1.5× on a 6–10s clip
   LoraTrainingNode: 600,
   RestyleWithLoRANode: RESTYLE_LORA_CREDITS,
@@ -147,15 +151,13 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   // re-verify against a live invoice at the pre-launch estimate-row sweep.)
 
   // — image generation / editing —
+  // (Edit image, Develop, Generate from references, Blend scene, Restyle,
+  // Product shot, Rotate camera, Relight, Lens reframe and the Nano Banana
+  // actions are priced by their settings since lineup-p4: see
+  // SETTING_PRICED_NODE_CLASSES below.)
   FluxProRemoteNode: 8,            // badge $0.04
   FluxKontextRemoteNode: 8,        // badge $0.04
   IdeogramV3TurboRemoteNode: 6,    // badge $0.03 (Python class IdeogramV3TurboNode; node_id below)
-  DevelopImageNode: 10,            // badge $0.05
-  GenerateFromReferencesNode: 12,  // badge $0.06
-  BlendSceneNode: 8,               // badge $0.04
-  RestyleFromImageNode: 10,        // badge $0.05
-  ProductShotNode: 8,              // badge $0.04
-  RotateCameraNode: 8,             // badge $0.04
   TextEffectNode: 8,               // badge $0.04
   SketchToImageNode: 8,            // badge $0.04
   OutpaintImageNode: 10,           // badge $0.05
@@ -223,22 +225,17 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   ReasonStepByStepNode: 2,         // badge $0.01
 
   // — comfy_extras wrappers that dispatch through nodes_replicate —
-  RemoveObjectNode: 10,            // badge $0.05
-  TextEditNode: 10,                // badge $0.05
-  RecolorObjectNode: 10,           // badge $0.05
-  PersonSwap: 10,                  // badge $0.05 (Python class PersonSwapNode)
   PoseMannequin: 10,               // badge $0.05 (Python class PoseMannequinNode)
-  SwapBackgroundNode: 10,          // badge $0.05
-  SwapProductNode: 10,             // badge $0.05
-  RelightNode: 10,                 // badge $0.05
-  LensReframe: 10,                 // no badge — same nano-banana-2 edit call as its $0.05 siblings (Python class LensReframeNode)
   TurntableNode: 75,               // badge $0.50
 }
 
 // MODEL_PRICED_NODE_CLASSES — the classes whose price depends on a
 // model/engine widget in `inputs` — lives in shared/pricing/nodePrice.ts and
 // is re-exported at the top of this file. Each one refuses when the widget
-// value is missing or unknown.
+// value is missing or unknown. SETTING_PRICED_NODE_CLASSES — the image edit
+// tools, priced by the call their settings make — lives in
+// shared/pricing/editSettings.ts and is re-exported too; an edit node refuses
+// only a model it does not offer.
 
 /**
  * Classes that are free by design — no provider call in their execute body.
@@ -281,8 +278,9 @@ export const PROVIDER_NODE_CLASSES: string[] = [
 
 // Video rates (VIDEO_RATES, per second or per clip) live in
 // shared/pricing/videoRates.ts; the legacy model-label remap
-// (LEGACY_VIDEO_MODEL_IDS) in app/data/video-prices.ts, alongside ENGINE_USD
-// in app/data/engine-prices.ts. The calculation that reads them — for the
+// (LEGACY_VIDEO_MODEL_IDS) in app/data/video-prices.ts; the edit and
+// upscale rates (EDIT_RATES) in shared/pricing/editRates.ts, which replaced
+// app/data/engine-prices.ts. The calculation that reads them — for the
 // charge here, the node badge and the run estimate alike — is priceNode in
 // shared/pricing/nodePrice.ts. VIDEO_RATES is re-exported at the top of this
 // file for server importers.
@@ -325,11 +323,12 @@ export function priceGraph(prompt: Record<string, { class_type: string; inputs?:
     if (!ct) continue
     if (OUTPUT_CLASS_TYPES.has(ct)) hasOutput = true
 
-    if (MODEL_PRICED_CLASS_SET.has(ct)) {
+    if (SHARED_PRICED_CLASS_SET.has(ct)) {
       const inputs = prompt[id]?.inputs
       const credits = graphNodeModelCredits(ct, inputs)
       const model = (inputs as { model?: unknown } | undefined)?.model
-      breakdown.push({ action: `${ct}:${String(model)}`, credits })
+      // A class with no model widget (Develop, Relight…) is named alone, as its flat row was.
+      breakdown.push({ action: model === undefined ? ct : `${ct}:${String(model)}`, credits })
       continue
     }
 

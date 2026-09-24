@@ -26,7 +26,7 @@ import { __setEngineForTests } from '~~/server/runner/index'
 import { runnerFamilies } from '~~/server/runner/config'
 import { nodeCredits } from '~~/server/runner/metering'
 import { _resetRateLimits } from '~~/server/lib/rateLimit'
-import { BASE_RENDER_CREDITS, GRAPH_NODE_CREDITS, priceGraph } from '~~/server/utils/priceBook'
+import { BASE_RENDER_CREDITS, priceGraph } from '~~/server/utils/priceBook'
 import startRoute from '~~/server/api/runs/index.post'
 import gateRoute from '~~/server/api/runs/gate.post'
 import stopRoute from '~~/server/api/runs/stop.post'
@@ -511,15 +511,15 @@ describe('B10 · a pass-through action', () => {
 // ── 5. PersonSwap's price; a 0-credit class is refused ───────────────────
 
 describe('B10 · money', () => {
-  it('PersonSwap charges 10', async () => {
+  it('PersonSwap charges 14', async () => {
     const c = pick(FIX.nanoActions, 'PersonSwap call', x => x.class_type === 'PersonSwap' && hasCall(x))
     const f = nodeFlow('nano-actions', c)
-    // The node is 10 (B1's price-key fix; it was 0 before). The Image cards
-    // bring the flat render credit on top, as priceGraph has it.
-    expect(GRAPH_NODE_CREDITS.PersonSwap).toBe(10)
-    expect(nodeCredits(f.prompt['1']!)).toBe(10)
-    expect(priceGraph(f.prompt).breakdown).toEqual([{ action: 'base_render', credits: BASE_RENDER_CREDITS }, { action: 'PersonSwap', credits: 10 }])
-    const price = 10 + BASE_RENDER_CREDITS
+    // The node is priced (B1's price-key fix; it was 0 before): since Task P4,
+    // google/nano-banana-2 on Replicate at 1K, $0.067 → 14 credits. The Image
+    // cards bring the flat render credit on top, as priceGraph has it.
+    expect(nodeCredits(f.prompt['1']!)).toBe(14)
+    expect(priceGraph(f.prompt).breakdown).toEqual([{ action: 'base_render', credits: BASE_RENDER_CREDITS }, { action: 'PersonSwap', credits: 14 }])
+    const price = 14 + BASE_RENDER_CREDITS
     const k = kit()
     writeCards(k, f.files)
     const events = await openEvents()

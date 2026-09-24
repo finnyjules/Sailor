@@ -14,7 +14,8 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { planNode } from '~~/server/runner/executors'
 import { extraPromptText, nodeCredits, unpricedProviderNode } from '~~/server/runner/metering'
-import { BASE_RENDER_CREDITS, GRAPH_NODE_CREDITS } from '~~/server/utils/priceBook'
+import { BASE_RENDER_CREDITS } from '~~/server/utils/priceBook'
+import { priceNode } from '#shared/pricing/nodePrice'
 import { PRESETS, PRESET_PHRASES, lightToPhrase, parseLight, relightInstruction } from '~~/server/runner/generators/relight'
 import { DEVELOP_PROMPT } from '~~/server/runner/generators/edit'
 import { PROVIDER_TYPES, RUNNER_NODE_RULES, isRunnerEligible, runnerTakesNode, type RunnerNodeRule } from '#shared/runner/eligibility'
@@ -245,7 +246,7 @@ describe('fal-edit eligibility', () => {
 // ── Price ────────────────────────────────────────────────────────────────
 
 describe('fal-edit price', () => {
-  it('every class and model prices above 0 at its flat price', () => {
+  it('every class and model prices above 0, at the shared price for its settings (Task P4)', () => {
     const nodes: [string, Record<string, unknown>][] = [
       ['EditImageNode', { model: 'Nano Banana 2' }], ['EditImageNode', { model: 'Flux Kontext Pro' }], ['EditImageNode', { model: 'Flux 2 Pro' }],
       ['DevelopImageNode', {}], ['RelightNode', {}],
@@ -254,7 +255,7 @@ describe('fal-edit price', () => {
     for (const [ct, inputs] of nodes) {
       const credits = nodeCredits({ class_type: ct, inputs })
       expect(credits).toBeGreaterThan(0)
-      expect(credits).toBe(GRAPH_NODE_CREDITS[ct])
+      expect(credits).toBe((priceNode(ct, inputs) as { credits: number }).credits)
     }
     for (const [, p] of [['e', edit('Flux 2 Pro')], ['d', develop()], ['r', relight()], ['b', blend('Flux Kontext Pro')]] as const) {
       expect(unpricedProviderNode(p)).toBeNull()
@@ -295,8 +296,8 @@ describe('fal-edit on the engine (hosted, fake fal)', () => {
     const sent = k.fal.submitted()
     expect(sent.map(r => r.endpoint)).toEqual([endpoint])
     expect(JSON.stringify(sent[0]!.payload)).toContain('https://fal.storage/a.png')
-    // The charge is the flat price (+ the render credit the output card brings).
-    const flat = GRAPH_NODE_CREDITS[ct]!
+    // The charge is the node's price for its settings (+ the render credit the output card brings).
+    const flat = (priceNode(ct, prompt[2]!.inputs) as { credits: number }).credits
     expect(k.ledger.hold).toHaveBeenCalledWith('user_1', flat + BASE_RENDER_CREDITS, `runner:${promptIds[0]}`)
     expect(k.ledger.settle).toHaveBeenCalledWith(1, flat + BASE_RENDER_CREDITS, `runner:${promptIds[0]}`)
     // One generation record, holding the node's output.

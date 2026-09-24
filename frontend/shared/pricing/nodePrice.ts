@@ -27,13 +27,22 @@
  * expensive request, a linked `aspect_ratio` at the largest picture. The catalogue decides which ids exist
  * (IMAGE_MODELS); an id with no rate card is refused as unpriced.
  *
- * The engine pickers read ENGINE_USD. Relative imports on purpose: this
- * module is loaded by Nitro, the Vue app and vitest alike.
+ * Image edits (Edit image, Develop, Relight, Blend scene, the Nano Banana
+ * actions, Generate from references, Rotate camera, Product shot, Restyle)
+ * and the engine pickers (Upscale, Enhance detail) are the first service's
+ * rate for the call the node's settings make (editRates.ts × editSettings.ts):
+ * the resolution or size sent, and for the upscalers the largest accepted
+ * input × the scale chosen. A linked or missing model on an edit node is
+ * priced at the dearest model it offers.
+ *
+ * Relative imports on purpose: this module is loaded by Nitro, the Vue app
+ * and vitest alike.
  */
 import { IMAGE_MODELS } from '../../app/data/image-models'
 import { LEGACY_VIDEO_MODEL_IDS } from '../../app/data/video-prices'
-import { ENGINE_USD } from '../../app/data/engine-prices'
 import { creditsForUsd } from './markup'
+import { editUsd } from './editRates'
+import { SETTING_PRICED_NODE_CLASSES, editCalls } from './editSettings'
 import { imageMaxUsd, imageRate, imageUsd } from './imageRates'
 import { LARGEST_RATIO, effectiveImageSettings } from './imageSettings'
 import { videoMaxUsd, videoRate, videoUsd } from './videoRates'
@@ -57,6 +66,16 @@ export const MODEL_PRICED_NODE_CLASSES: string[] = [
 
 /** Same classes as a set, for "is this one of them?" checks. */
 export const MODEL_PRICED_CLASS_SET: ReadonlySet<string> = new Set(MODEL_PRICED_NODE_CLASSES)
+
+/** The edit classes priced by their settings (editSettings.ts); they have no flat price. */
+export { SETTING_PRICED_NODE_CLASSES }
+const SETTING_PRICED_CLASS_SET: ReadonlySet<string> = new Set(SETTING_PRICED_NODE_CLASSES)
+
+/**
+ * Every class this module prices — model-priced and setting-priced. The
+ * charge (priceGraph) and the node badge both price these through priceNode.
+ */
+export const SHARED_PRICED_CLASS_SET: ReadonlySet<string> = new Set([...MODEL_PRICED_NODE_CLASSES, ...SETTING_PRICED_NODE_CLASSES])
 
 // Lazily-built lookup. Never derive this at module top level from another
 // module's const: a top-level read breaks on import reorder.
@@ -101,6 +120,23 @@ function imageNodeUsd(model: string, inputs: NodeInputs): number {
   return imageUsd(model, effectiveImageSettings(model, ratio, inputs.model_options)!)!
 }
 
+/**
+ * Dollars for an edit node or engine picker as configured: the dearest of the
+ * calls its settings can make (one call unless the model is linked or
+ * missing), or the refusal.
+ */
+function editNodeUsd(classType: string, inputs: NodeInputs): number | { refused: string } {
+  const c = editCalls(classType, inputs)
+  if ('refused' in c) return c
+  let usd = 0
+  for (const one of c.calls) {
+    const price = editUsd(one)
+    if (price == null) return { refused: `${one.endpoint} has no listed price` }
+    usd = Math.max(usd, price)
+  }
+  return usd
+}
+
 /** A priced node, or the reason it can't be priced (the server refuses it). */
 export type NodePrice =
   | { usd: number; credits: number }
@@ -111,6 +147,10 @@ export type NodePrice =
  * UnpricedGraphError; the badge and estimate treat it as "no price".
  */
 export function priceNode(classType: string, inputs: NodeInputs | null | undefined): NodePrice {
+  if (SETTING_PRICED_CLASS_SET.has(classType)) {
+    const usd = editNodeUsd(classType, inputs ?? {})
+    return typeof usd === 'number' ? { usd, credits: creditsForUsd(usd) } : usd
+  }
   if (!MODEL_PRICED_CLASS_SET.has(classType)) return { refused: 'not a model-priced class' }
   const picked = inputs?.model
   const model = typeof picked === 'string' ? picked : ''
@@ -129,10 +169,10 @@ export function priceNode(classType: string, inputs: NodeInputs | null | undefin
   }
   else {
     // Engine pickers (UpscaleImageNode / EnhanceDetailNode): the `model`
-    // widget names an engine, not a catalogue id.
-    const table = ENGINE_USD[classType]
-    const price = table && hasOwn(table, model) ? table[model] : undefined
-    if (typeof price !== 'number') return { refused: `unknown engine ${model}` }
+    // widget names an engine, priced by the output size it makes from the
+    // largest accepted input.
+    const price = editNodeUsd(classType, inputs!)
+    if (typeof price !== 'number') return price
     usd = price
   }
   return { usd, credits: creditsForUsd(usd) }
