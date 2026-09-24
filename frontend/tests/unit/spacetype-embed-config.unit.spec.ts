@@ -116,9 +116,12 @@ describe('seamless loops', () => {
 })
 
 describe('liveEmbedBlocker', () => {
-  it('LIVE_VERIFIED_EFFECTS starts empty, so every effect is blocked as not yet checked', () => {
-    expect(LIVE_VERIFIED_EFFECTS.size).toBe(0)
-    expect(liveEmbedBlocker(stateFor('ribbon'))).toMatch(/not been checked/)
+  it('an effect off LIVE_VERIFIED_EFFECTS is blocked as not yet checked; a verified one is not', () => {
+    // The list is filled by tests/spacetype-live-parity.spec.ts: cascade measured as differing.
+    expect(LIVE_VERIFIED_EFFECTS.has('cascade')).toBe(false)
+    expect(liveEmbedBlocker(stateFor('cascade'))).toMatch(/not been checked/)
+    expect(LIVE_VERIFIED_EFFECTS.has('ribbon')).toBe(true)
+    expect(liveEmbedBlocker(stateFor('ribbon'))).toBeNull()
   })
 
   it('a clean state on a verified effect is not blocked', () => {
@@ -200,9 +203,9 @@ describe('spaceTypeWiredEmbed', () => {
   const size = { width: 960, height: 540 }
   const font = { family: 'Inter', weight: 700, dataUrl: 'data:font/ttf;base64,AAAA' }
 
-  it('null (without fetching the font) when blocked — including by the empty verified list', async () => {
+  it('null (without fetching the font) when blocked — including by the verified list', async () => {
     const loadFont = vi.fn(async () => font)
-    expect(await spaceTypeWiredEmbed(stateFor('ribbon'), size, { loadFont })).toBeNull()
+    expect(await spaceTypeWiredEmbed(stateFor('cascade'), size, { loadFont })).toBeNull()
     const boost = stateFor('boost')
     expect(await spaceTypeWiredEmbed(boost, size, { verified: verifiedFor(boost), loadFont })).toBeNull()
     expect(loadFont).not.toHaveBeenCalled()

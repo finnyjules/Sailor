@@ -23,8 +23,17 @@ import type { StudioEmbed } from '~/lib/studio/frameSource'
 
 /** Effects whose embed player was measured to match the editor (Task 4 of the Frame
  *  live-wired plan fills this from a pixel comparison). Until an effect is on this list, a
- *  wired layer of it keeps the pre-rendered route — which is always correct. */
-export const LIVE_VERIFIED_EFFECTS: ReadonlySet<string> = new Set<string>([])
+ *  wired layer of it keeps the pre-rendered route — which is always correct.
+ *  Measured by tests/spacetype-live-parity.spec.ts on each effect's default state; exactly the
+ *  effects that passed. That spec fails if one of these stops matching. */
+export const LIVE_VERIFIED_EFFECTS: ReadonlySet<string> = new Set<string>([
+  'ribbon', 'ticker', 'field', 'coil', 'streamer', 'spiral', 'tunnel', 'contour', 'ring', 'slot',
+  'showcoverring', 'showsphere', 'showglobe', 'showcloud', 'showdome', 'showspiral', 'showbloom',
+  'showcoverflow', 'showfocus', 'showfilmstrip', 'showtotem', 'showfeed', 'showcascade', 'showgrid',
+  'showmarquee', 'showiso', 'showturntable', 'showparallax', 'showorbit', 'showhalo', 'showwheel',
+  'showvortex', 'showstack', 'showtunnel', 'showdeck', 'showslide', 'showfan', 'showstage',
+  'showfocusshift', 'showtrail', 'showburst', 'showtoss', 'showdance', 'showmedley',
+])
 
 /** The seamless multiplier k: base loops one pass spans (1 unless the piece is seamless). */
 function seamlessLoops(state: SpaceTypeState): number {

@@ -228,3 +228,117 @@ test.describe('Frame embed — a wired Gradient plays live', () => {
     expect(nested.some(c => c.w === 512 && c.h === 512)).toBe(false)
   })
 })
+
+// ── Task 4 (live wired layers): a wired Space Type on a verified effect plays LIVE ────────────────
+// End to end in the real app, like the Gradient case above: a Space Type node on a verified effect
+// (its own default state: a 6 s loop, 16:9) wired into a Frame, the Frame editor's export sheet,
+// the downloaded file. The file carries the effect's own player with its face inlined, makes no
+// request, and moves inside the layer's box. An effect that is NOT verified still exports as
+// frames (the fallback). tests/spacetype-live-parity.spec.ts is what fills the verified list.
+
+/** Builds a blank project with one Space Type node holding `state`, wires it into a new Frame,
+ *  opens the Frame's export sheet and downloads the file. */
+async function exportWiredSpaceType(page: Page, state: unknown, shot: string): Promise<{ sheetText: string; html: string; bytes: number }> {
+  await openBlankWorkflow(page)
+  await waitForBackend(page)
+  const ids = async () => await page.locator('.vue-flow__node').evaluateAll(els => els.map(e => e.getAttribute('data-id')))
+  const before = new Set(await ids())
+  await page.evaluate((s) => {
+    window.dispatchEvent(new CustomEvent('sailor:addNode', { detail: { nodeType: 'SpaceType', propertyOverrides: { sailor_spaceType: s } } }))
+  }, state)
+  await expect.poll(async () => (await ids()).filter(i => !before.has(i)).length, { timeout: 10_000 }).toBe(1)
+  const spaceTypeId = (await ids()).find(i => !before.has(i))!
+  const withNode = new Set(await ids())
+  await page.evaluate((id) => {
+    window.dispatchEvent(new CustomEvent('sailor:applyEffect', { detail: { nodeId: id, nodeType: 'Compositor', output: 'IMAGE' } }))
+  }, spaceTypeId)
+  await expect.poll(async () => (await ids()).filter(i => !withNode.has(i)).length, { timeout: 15_000 }).toBe(1)
+  const frameId = (await ids()).find(i => !withNode.has(i))!
+
+  await page.evaluate((id) => window.dispatchEvent(new CustomEvent('sailor:openCompositor', { detail: { nodeId: id } })), frameId)
+  await page.locator('[data-testid="compositor-stack-canvas"]').waitFor({ state: 'visible', timeout: 15_000 })
+  await page.waitForTimeout(1_000)
+  await page.locator('[data-testid="compositor-right-panel"]').getByRole('button', { name: /^Download/ }).click()
+  await page.locator('[data-testid="frame-web-export"]').click()
+  const sheet = page.locator('[data-testid="frame-web-export-sheet"]')
+  await expect(sheet).toBeVisible()
+  await expect(sheet.getByText('One file · plays anywhere')).toBeVisible({ timeout: 180_000 })
+  await sheet.screenshot({ path: shot })
+  const sheetText = await sheet.innerText()
+  const [download] = await Promise.all([page.waitForEvent('download'), sheet.getByRole('button', { name: 'Download' }).click()])
+  const html = await readFile((await download.path())!, 'utf8')
+  return { sheetText, html, bytes: Buffer.byteLength(html, 'utf8') }
+}
+
+function snapshotOf(html: string): any {
+  const start = html.indexOf('window.__SAILOR_SNAPSHOT__ = ')
+  return JSON.parse(html.slice(start + 'window.__SAILOR_SNAPSHOT__ = '.length, html.indexOf('</script>', start)).trim().replace(/;$/, '')).config
+}
+
+async function spaceTypeDefaultState(page: Page, effectId: string): Promise<{ state: any; verified: string[] }> {
+  await page.goto('/dev/spacetype-live-parity')
+  await page.waitForFunction(() => (window as any).__parityHarnessReady === true, undefined, { timeout: 60_000 })
+  return await page.evaluate((id) => {
+    const H = (window as any).__parityHarness
+    return { state: JSON.parse(JSON.stringify(H.defaultState(id))), verified: H.verified() }
+  }, effectId)
+}
+
+test.describe('Frame embed — a wired Space Type plays live', () => {
+  test('a verified effect: the sheet says it plays live; the file carries its player, makes no request and moves', async ({ page, context }, testInfo) => {
+    test.setTimeout(300_000)
+    const EFFECT = 'field'
+    const { state, verified } = await spaceTypeDefaultState(page, EFFECT)
+    expect(verified).toContain(EFFECT)
+    expect(state.loopDuration).toBe(6)
+
+    const { sheetText, html, bytes } = await exportWiredSpaceType(page, state, testInfo.outputPath('live-spacetype-sheet.png'))
+    const line = sheetText.split('\n').find(l => / · plays live · adds \d/.test(l)) ?? ''
+    testInfo.annotations.push({ type: 'export', description: `${line} · file ${bytes} bytes` })
+    console.log(`[live-spacetype] sheet line "${line}", file ${bytes} bytes (${(bytes / 1024 / 1024).toFixed(2)} MB)`)
+    expect(line).not.toBe('')
+    expect(sheetText).not.toMatch(/pre-rendered/)
+
+    expect(externalRefs(html)).toEqual([])
+    const snap = snapshotOf(html)
+    const entry = snap.wired[0]
+    expect(entry).toMatchObject({ kind: 'live', surface: 'spacetype', bundle: `spacetype-${EFFECT}`, duration: 6 })
+    expect(entry.config.font).toMatchObject({ family: 'Inter', weight: 700 })
+    expect(entry.config.font.dataUrl.startsWith('data:font/ttf;base64,')).toBe(true)
+    expect(html).toContain(`m["spacetype-${EFFECT}"]`)   // the effect's player, registered as a nested one
+    expect(bytes).toBeLessThan(3 * 1024 * 1024)   // a player, a face and a config — not 180 frames
+
+    const v = snap.variants[0]
+    const vw = 1000, vh = Math.round(1000 * v.height / v.width)
+    const a = await renderExported(context, html, 0, { width: vw, height: vh })
+    const b = await renderExported(context, html, 0.5, { width: vw, height: vh })
+    expect(a.requests).toEqual([])
+    expect(b.requests).toEqual([])
+    await writeFile(testInfo.outputPath('live-spacetype-export-t0.png'), Buffer.from(a.png.split(',')[1]!, 'base64'))
+    await writeFile(testInfo.outputPath('live-spacetype-export-t05.png'), Buffer.from(b.png.split(',')[1]!, 'base64'))
+    const dims = await page.evaluate(async (u) => await new Promise<[number, number]>((res) => { const i = new Image(); i.onload = () => res([i.width, i.height]); i.src = u }), a.png)
+    const box = boxOf(snap, dims[0], dims[1])
+    const { differing, total } = await regionDiff(page, a.png, b.png, box)
+    console.log(`[live-spacetype] frame ${v.width}×${v.height}, canvas ${dims[0]}×${dims[1]}, box ${box.w.toFixed(0)}×${box.h.toFixed(0)}; t 0 vs 0.5: ${differing} of ${total} px differ`)
+    expect(box.w).toBeGreaterThan(dims[0] * 0.95)   // the layer fills the Frame
+    expect(differing).toBeGreaterThan(total * 0.2)
+  })
+
+  test('an effect that is not verified still exports as frames', async ({ page }, testInfo) => {
+    test.setTimeout(400_000)
+    // cascade: no "cannot carry" reason, but the parity spec measured it differing from the editor.
+    const EFFECT = 'cascade'
+    const { state, verified } = await spaceTypeDefaultState(page, EFFECT)
+    expect(verified).not.toContain(EFFECT)
+
+    const { sheetText, html, bytes } = await exportWiredSpaceType(page, state, testInfo.outputPath('frames-spacetype-sheet.png'))
+    const line = sheetText.split('\n').find(l => / · pre-rendered · /.test(l)) ?? ''
+    console.log(`[frames-spacetype] sheet line "${line}", file ${bytes} bytes (${(bytes / 1024 / 1024).toFixed(2)} MB)`)
+    expect(line).not.toBe('')
+    expect(sheetText).not.toMatch(/plays live/)
+    expect(externalRefs(html)).toEqual([])
+    const entry = snapshotOf(html).wired[0]
+    expect(entry.kind).toBe('clip')
+    expect(html).not.toContain(`m["spacetype-${EFFECT}"]`)   // no nested player was concatenated in
+  })
+})
