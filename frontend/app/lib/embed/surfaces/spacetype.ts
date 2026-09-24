@@ -27,7 +27,8 @@ export interface SpaceTypeEmbedConfig {
   effectId: string
   params: Params
   opts: Omit<EngineOptions, 'effect'>
-  /** Loop length in seconds. Present for parity with EmbedSnapshot.duration and the
+  /** Seconds one pass lasts (loopDuration × loops — see spaceTypeEmbedDuration in
+   *  ~/lib/spacetype/embedConfig). Present for parity with EmbedSnapshot.duration and the
    *  other two embed configs, but UNUSED here: engine.renderFrameAt takes t01
    *  directly (already normalized, already synchronous — see engine.ts's docstring),
    *  unlike GradientFxRenderer.render/composePasses which want seconds. */
@@ -46,6 +47,9 @@ export interface SpaceTypeEmbedConfig {
    *  off) at mount(), preserving the pre-existing no-post-processing export
    *  behaviour for configs saved before this field existed. */
   post?: PostSettings
+  /** Base loops one pass of the embed spans (the studio's seamless k). Absent = 1.
+   *  setTime(t01) draws renderFrameAt(t01 * loops). */
+  loops?: number
 }
 
 // Effects whose glyphs size to their own (uppercased or as-typed) word with NO
@@ -226,10 +230,16 @@ export function createSpaceTypeEmbedSurface(effects: SpaceTypeEffect[]): EmbedSu
       // Draw once at mount so the container is never empty before the first tick.
       engine.renderFrameAt(0, cfg.params)
 
+      // A seamless piece spans k base loops (the studio's loopMultiplier): one pass of the
+      // embed runs t01 over [0, k), so every motion finishes whole cycles before the wrap —
+      // the same span the studio's seamless video export and wired frame source cover.
+      // Absent (every config saved before this field, and every non-seamless piece) = 1.
+      const loops = Number(cfg.loops) >= 1 ? Number(cfg.loops) : 1
+
       return {
-        // renderFrameAt already takes normalized t01 and is synchronous — no
+        // renderFrameAt takes the base-loop position and is synchronous — no seconds
         // conversion, unlike the gradient/shader adapters' `t01 * duration`.
-        setTime: (t01: number) => engine.renderFrameAt(t01, cfg.params),
+        setTime: (t01: number) => engine.renderFrameAt(t01 * loops, cfg.params),
         setSize: (nw: number, nh: number) => {
           engine.setSize(Math.max(1, Math.round(nw)), Math.max(1, Math.round(nh)))
         },

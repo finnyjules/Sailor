@@ -149,3 +149,37 @@ describe('spacetype embed adapter mount() — post-processing passthrough (Gap 3
     expect(setPostOrder).toBeLessThan(renderOrder)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Seamless loops: a config's `loops` (the studio's seamless k) stretches one embed pass
+// over k base loops — setTime(t01) draws renderFrameAt(t01 * loops). Absent = 1, so every
+// config saved before the field (and every non-seamless piece) plays exactly as before.
+describe('spacetype embed adapter setTime() — seamless loops', () => {
+  beforeEach(() => renderFrameAtSpy.mockClear())
+
+  it('with loops: 3, setTime(0.5) draws base-loop position 1.5', async () => {
+    const { default: spaceTypeEmbedSurface } = await import('~/lib/embed/surfaces/spacetype')
+    const cfg = baseConfig({ loops: 3 })
+    const handle = await spaceTypeEmbedSurface.mount(document.createElement('div'), cfg)
+    renderFrameAtSpy.mockClear()
+    handle.setTime(0.5)
+    expect(renderFrameAtSpy).toHaveBeenCalledTimes(1)
+    expect(renderFrameAtSpy).toHaveBeenCalledWith(1.5, cfg.params)
+  })
+
+  it('without loops, setTime(0.5) draws 0.5 (unchanged)', async () => {
+    const { default: spaceTypeEmbedSurface } = await import('~/lib/embed/surfaces/spacetype')
+    const cfg = baseConfig()
+    const handle = await spaceTypeEmbedSurface.mount(document.createElement('div'), cfg)
+    renderFrameAtSpy.mockClear()
+    handle.setTime(0.5)
+    expect(renderFrameAtSpy).toHaveBeenCalledWith(0.5, cfg.params)
+  })
+
+  it('the mount frame is still base position 0', async () => {
+    const { default: spaceTypeEmbedSurface } = await import('~/lib/embed/surfaces/spacetype')
+    renderFrameAtSpy.mockClear()
+    await spaceTypeEmbedSurface.mount(document.createElement('div'), baseConfig({ loops: 3 }))
+    expect(renderFrameAtSpy).toHaveBeenCalledWith(0, expect.anything())
+  })
+})

@@ -9,7 +9,7 @@
 // Dependencies are injected so the module stays unit-testable with no WebGL
 // context and no Vue component around it.
 
-import type { StudioFrameSource } from '~/lib/studio/frameSource'
+import type { StudioEmbed, StudioFrameSource } from '~/lib/studio/frameSource'
 
 export interface SpaceTypeFrameDeps {
   getClock: () => { duration: number; fps: number; width: number; height: number }
@@ -17,10 +17,16 @@ export interface SpaceTypeFrameDeps {
    *  May be async: a Showcase must load its image cards before the engine's (synchronous)
    *  build, or the first pulled frames carry blank cards. */
   renderAt: (t01: number, w: number, h: number) => TexImageSource | null | Promise<TexImageSource | null>
+  /** The studio's live embed player for a Frame export (see spaceTypeWiredEmbed), or null
+   *  when this piece cannot play live faithfully. Absent = the source never offers one. */
+  embed?: () => Promise<StudioEmbed | null>
 }
 
 export function makeSpaceTypeFrameSource(deps: SpaceTypeFrameDeps): StudioFrameSource {
+  const embed = deps.embed
   return {
+    // Only present when the dep is given, so "absent" keeps meaning "frames only".
+    ...(embed ? { embed: () => embed() } : {}),
     // Getters, not captured values: the studio's config is edited live, so a
     // snapshot taken at registration time would go stale immediately.
     get duration() { return deps.getClock().duration },

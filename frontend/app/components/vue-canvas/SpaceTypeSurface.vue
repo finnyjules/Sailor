@@ -65,16 +65,14 @@ import { effectiveColumns, makeLookupResolver } from '~/lib/collection/lookup'
 import { nodeSpaceTypeStateSource, clipSpaceTypeStateSource, type SpaceTypeStateSource } from '~/lib/spacetype/stateSource'
 import SweepPopover from '~/components/vue-canvas/studio/SweepPopover.vue'
 import { exportEmbedHtml, downloadEmbed } from '~/lib/embed/export'
-import type { SpaceTypeEmbedConfig } from '~/lib/embed/surfaces/spacetype'
+import { spaceTypeEmbedConfig, spaceTypeEmbedDuration, spaceTypeEmbedFace, spaceTypeEmbedFont } from '~/lib/spacetype/embedConfig'
 import { presetStops, serializeStops } from '~/lib/spacetype/loftStops'
-// fontSourceUrl already resolves a `google:Family@weight` token to the
-// `/api/scene3d/google-font-file` proxy URL for the 3D Studio's text-extrude
-// path (see outlines.ts's own doc) — reused here rather than inventing a
-// second font-fetch path for the embed export. loadFont/fontCacheGet are the
-// same module's async fetch+parse and its sync cache peek — loft's word mode
+// fontSourceUrl resolves a `google:Family@weight` token to the
+// `/api/scene3d/google-font-file` proxy URL (see outlines.ts's own doc); the embed
+// export's font fetch now lives in ~/lib/spacetype/embedConfig. loadFont/fontCacheGet
+// are the same module's async fetch+parse and its sync cache peek — loft's word mode
 // (buildScene) reads the peek synchronously; this file does the async warming.
 import { fontSourceUrl, loadFont, fontCacheGet, parseLibraryFontValue } from '~/lib/scene3d/outlines'
-import { bufferToBase64, subsetFontBase64 } from '~/lib/embed/fontBytes'
 // outlineFontValue normalizes a bare family (carried over from another effect via
 // CARRY_ON_SWITCH, e.g. Ribbon's default 'Inter') into a `google:`-prefixed value so
 // fontSourceUrl treats it as fetchable rather than a bogus local path — MUST be applied
@@ -1025,10 +1023,10 @@ function loadConfig() {
   nextTick(() => { hydrating = false })
 }
 
-// Persist the full current editor state back onto the node's properties so the
-// config survives tab switches / reloads and the editor can be reopened to edit.
-function saveConfig() {
-  stateSource.value.write({
+// The full current editor state, exactly as it is saved (sailor_spaceType) — the save path
+// and the embed export both read it, so an exported piece is the piece the node holds.
+function currentState(): SpaceTypeState {
+  return {
     effectId: effectId.value,
     params: { ...params },
     gradientStops: gradientStops.map(s => ({ ...s })),
@@ -1037,7 +1035,13 @@ function saveConfig() {
     dimsKey: dimsKey.value, W: W.value, H: H.value, transparent: transparent.value, bgColor: bgColor.value,
     projection: projection.value,
     panX: panX.value, panY: panY.value,
-  })
+  }
+}
+
+// Persist the full current editor state back onto the node's properties so the
+// config survives tab switches / reloads and the editor can be reopened to edit.
+function saveConfig() {
+  stateSource.value.write(currentState())
 }
 
 // Sticky footer status (StudioActionsFooter): real Saving…/Saved ✓ driven by
@@ -1731,61 +1735,6 @@ async function downloadVideoFile() {
   }
 }
 
-// Cache of family+weight -> raw font bytes (or null on a fetch failure) so
-// re-exporting the same node repeatedly doesn't re-fetch the file from Google Fonts
-// every time. Keyed by family+weight only, NOT text: the raw bytes fetched here are
-// the same regardless of what the piece says, so caching them is safe. Subsetting
-// (below) depends on text and is intentionally NOT cached — it re-runs on every
-// export in case the text changed since the last one, and it's a single fast local
-// POST, not a network fetch of an external font host.
-const fontBytesCache = new Map<string, ArrayBuffer | null>()
-
-/**
- * Fetch the actual font FILE for family+weight as raw bytes. Reuses fontSourceUrl
- * (~/lib/scene3d/outlines) — the SAME resolution path the 3D Studio's text-extrude
- * primitive already uses to turn a `google:Family@weight` token into
- * `/api/scene3d/google-font-file`, a server proxy that forces Google Fonts to hand
- * back a raw, parseable TTF instead of the woff2 it serves real browsers — rather
- * than inventing a second font-fetch path here.
- *
- * Returns null on any failure (family Google doesn't have, network error, ...). The
- * caller degrades to `font: null` (viewer's system font) instead of failing the whole
- * export over a font that couldn't be fetched — see exportWebEmbed.
- */
-async function fetchFontBytes(family: string, weight: number): Promise<ArrayBuffer | null> {
-  const key = `${family}@${weight}`
-  if (fontBytesCache.has(key)) return fontBytesCache.get(key)!
-  try {
-    const url = fontSourceUrl(`google:${family}@${weight}`)
-    const res = await fetch(url)
-    if (!res.ok) { fontBytesCache.set(key, null); return null }
-    const buf = await res.arrayBuffer()
-    fontBytesCache.set(key, buf)
-    return buf
-  } catch (e) {
-    console.error('[space-type] embed export: font fetch failed', e)
-    fontBytesCache.set(key, null)
-    return null
-  }
-}
-
-/**
- * Fetch family+weight as a data: URI for inlining into a web embed export, subsetted
- * to `text`'s characters plus basic Latin (via subsetFontBase64/`/sailor/font_subset`)
- * whenever that succeeds. Falls back to the full, un-subsetted font on ANY subsetting
- * failure — the fetch from Google Fonts is a separate concern with its own fallback:
- * only a failure to fetch the font AT ALL (family/weight genuinely unavailable)
- * returns null here, in which case the caller degrades further to `font: null` (the
- * viewer's system font) — see exportWebEmbed.
- */
-async function fetchFontDataUrl(family: string, weight: number, text: string): Promise<string | null> {
-  const buf = await fetchFontBytes(family, weight)
-  if (!buf) return null
-  const fullB64 = bufferToBase64(buf)
-  const subsetB64 = await subsetFontBase64(fullB64, text, '[space-type] embed export:')
-  return `data:font/ttf;base64,${subsetB64 ?? fullB64}`
-}
-
 // Mirrors GradientStudioSurface.vue's exportWebEmbed: in-flight guard (a double-click
 // otherwise starts two full-resolution GL bakes and downloads two files), size shown
 // BEFORE the download, and error styling distinct from success (embedErr).
@@ -1797,9 +1746,14 @@ async function fetchFontDataUrl(family: string, weight: number, text: string): P
 // does anything. And the font: the studio's live family/weight (resolved exactly like
 // texOptsFromState/buildTexOpts do — same resolveFontFamily/fontHasWeightAxis calls)
 // is fetched as real bytes, subsetted to the piece's text plus basic Latin via
-// /sailor/font_subset, and inlined; a fetch failure degrades to `font: null` (viewer's
-// system font), and a subsetting failure alone degrades to the full, un-subsetted font
-// (still logged either way) rather than silently shipping a broken or oversized export.
+// /sailor/font_subset, and inlined (spaceTypeEmbedFont); a fetch failure degrades to
+// `font: null` (viewer's system font), and a subsetting failure alone degrades to the full,
+// un-subsetted font (still logged either way) rather than silently shipping a broken or
+// oversized export.
+//
+// The config comes from the ONE shared builder (spaceTypeEmbedConfig) the Frame export's
+// live route also uses. A seamless piece plays its full k loops (`loops`), over
+// spaceTypeEmbedDuration seconds; a non-seamless piece exports exactly as before.
 async function exportWebEmbed() {
   if (embedding.value) return
   embedding.value = true
@@ -1808,34 +1762,15 @@ async function exportWebEmbed() {
   try {
     if (!engine) throw new Error('Preview not ready')
 
-    const family = resolveFontFamily(String(params.font))
-    // Static families have no weight axis — pin to 400, matching texOptsFromState/
-    // buildTexOpts, so a variable-only weight isn't faux-bolted onto a single cut.
-    const weight = fontHasWeightAxis(family) ? Number(params.typeWeight ?? 700) : 400
-    // The piece's text, same source texOptsFromState/texOpts() splits into lines —
-    // what /sailor/font_subset keeps beyond basic Latin.
-    const text = String(params.text ?? '')
-    const dataUrl = await fetchFontDataUrl(family, weight, text)
-    const font = dataUrl ? { family, weight, dataUrl } : null
-
-    const embedConfig: SpaceTypeEmbedConfig = {
-      effectId: effect.value.id,
-      params: { ...params },
-      opts: {
-        width: W.value, height: H.value, fps: fps.value, loopDuration: loopDuration.value,
-        alpha: transparent.value, bgColor: bgColor.value, projection: projection.value,
-        panX: panX.value, panY: panY.value,
-      },
-      duration: loopDuration.value,
-      font,
-      gradientStops: gradientStops.map(g => ({ ...g })),
-      post: { ...post },
-    }
+    const state = currentState()
+    const { family } = spaceTypeEmbedFace(state)
+    const font = await spaceTypeEmbedFont(state)
+    const embedConfig = spaceTypeEmbedConfig(state, font)
 
     const html = await exportEmbedHtml({
       kind: 'spacetype',
       config: embedConfig,
-      duration: loopDuration.value,
+      duration: spaceTypeEmbedDuration(state),
       width: W.value,
       height: H.value,
       // Without this, the exported PAGE's own html/body background stays opaque

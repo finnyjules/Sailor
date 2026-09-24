@@ -4,7 +4,7 @@ import { Pencil, Sparkles } from 'lucide-vue-next'
 import { SpaceTypeEngine } from '~/lib/spacetype/engine'
 import { detectWebGL } from '~/lib/spacetype/webgl'
 import { getEffect } from '~/lib/spacetype/effects'
-import { loopMultiplier, wiredLoopFrameArg } from '~/lib/spacetype/loop'
+import { loopMultiplier } from '~/lib/spacetype/loop'
 import { effectiveLoopSeconds } from '~/lib/compositor/loopReconcile'
 import {
   defaultSpaceTypeState, dimsFromState, ensureSpaceTypeFont, texOptsFromState,
@@ -17,6 +17,8 @@ import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade
 import { registerStudioFrameSource, unregisterStudioFrameSource } from '~/lib/studio/frameSource'
 import { onCanvasOcclusion } from '~/lib/studio/occlusion'
 import { makeSpaceTypeFrameSource } from '~/lib/spacetype/frameSource'
+import { createWiredSpaceTypeRenderer } from '~/lib/spacetype/wiredRenderer'
+import { spaceTypeWiredEmbed } from '~/lib/spacetype/embedConfig'
 import { syncImageTextures } from '~/lib/spacetype/imageTextures'
 import { fetchShaderFxCatalog } from '~/lib/shaderfx/catalog'
 import { loadGoogleCatalog } from '~/data/google-fonts'
@@ -64,13 +66,10 @@ const previewH = ref(previewHeight(state.value))
 // Engine is a plain (non-reactive) handle — never wrap a WebGL renderer in a Vue proxy.
 let engine: SpaceTypeEngine | null = null
 // A SECOND engine, separate from the card-preview `engine`, dedicated to the
-// cross-studio frame source. Lazily created on first pull (ensureHeadless), so a
-// Space Type node with no live downstream consumer never pays the extra WebGL
-// context. Its own offscreen canvas — never the card's — so the two never fight
-// over one canvas at different frame indices (which would ghost the card).
-let headlessEngine: SpaceTypeEngine | null = null
-let headlessCanvas: HTMLCanvasElement | null = null
-let headlessDirty = true   // config changed since the last headless build
+// cross-studio frame source (~/lib/spacetype/wiredRenderer — lazily created on first
+// pull, its own offscreen canvas). Shared with the Frame export's parity harness, so
+// what a wired layer shows and what that harness measures are one code path.
+const wired = createWiredSpaceTypeRenderer()
 let raf = 0
 let previewStart = 0
 const renderError = ref<string | null>(null)
@@ -191,35 +190,25 @@ onMounted(async () => {
   // Weight pinning for static families (texOptsFromState) reads the Google
   // catalog cache; module-cached, one fetch per page. Rebuild both engines when
   // it lands so a static font drops its faux-bold without opening the modal.
-  void loadGoogleCatalog().then(() => { headlessDirty = true; rebuild() })
+  void loadGoogleCatalog().then(() => { wired.markDirty(); rebuild() })
   registerStudioBaker(props.id, bakeOutput)
   // Modal-independent live frame source: a directly-wired downstream Shader Studio
   // pulls frames from here even when this node's editor is closed. Uses its OWN
-  // lazily-created headless engine (ensureHeadless), not the card-preview `engine`.
+  // lazily-created headless engine (the wired renderer), not the card-preview `engine`.
   // renderAt honors the requested w/h, so a chained export is full-resolution.
+  const getClock = () => {
+    const s = state.value
+    const [cw, ch] = dimsFromState(s)
+    const k = s.seamless ? loopMultiplier(getEffect(s.effectId).loopRates?.(s.params) ?? []) : 1
+    return { duration: effectiveLoopSeconds(s.loopDuration, k), fps: s.fps, width: cw, height: ch }
+  }
   registerStudioFrameSource(props.id, makeSpaceTypeFrameSource({
-    getClock: () => {
-      const s = state.value
-      const [cw, ch] = dimsFromState(s)
-      const k = s.seamless ? loopMultiplier(getEffect(s.effectId).loopRates?.(s.params) ?? []) : 1
-      return { duration: effectiveLoopSeconds(s.loopDuration, k), fps: s.fps, width: cw, height: ch }
-    },
-    renderAt: async (t01, w, h) => {
-      // A Showcase's image cards must be loaded into THIS engine before its synchronous
-      // build. A no-op (no await on anything real) unless the image set changed.
-      const fresh = createHeadless(w, h)
-      if (fresh && await syncImageTextures(fresh, state.value.effectId, state.value.params, () => headlessEngine === fresh)) headlessDirty = true
-      const eng = ensureHeadless(w, h)
-      if (!eng || !headlessCanvas) return null
-      const s = state.value
-      eng.setSize(w, h)   // covers a scale change between pulls (same aspect, no rebuild)
-      // Match the studio's own export (SpaceTypeSurface bakeSpaceTypeVideo): spans the
-      // FULL seamless k-loop, not just one base loop, so motion plays at native speed
-      // and seams only at the k-loop wrap.
-      const k = s.seamless ? loopMultiplier(getEffect(s.effectId).loopRates?.(s.params) ?? []) : 1
-      eng.renderFrameAt(wiredLoopFrameArg(t01, s.fps, s.loopDuration, k), s.params)
-      return headlessCanvas
-    },
+    getClock,
+    // A getter, so a config saved while image cards load is read fresh after the await.
+    renderAt: (t01, w, h) => wired.render(() => state.value, t01, w, h),
+    // A Frame export plays this layer with the Space Type embed player when that is proven
+    // faithful (spaceTypeWiredEmbed's blockers + verified list); otherwise null → frames.
+    embed: () => spaceTypeWiredEmbed(state.value, getClock()),
   }))
   io = new IntersectionObserver(([entry]) => { gate.visible = !!entry?.isIntersecting; applyGate() }, { threshold: 0.01 })
   if (canvasEl.value?.parentElement) io.observe(canvasEl.value.parentElement)
@@ -228,50 +217,6 @@ onMounted(async () => {
   unsubOcclusion = onCanvasOcclusion((open) => { gate.occluded = open; applyGate() })
   applyGate()
 })
-
-// Lazily build (and keep in sync) the dedicated frame-source engine. Called only
-// from the frame source's renderAt, so nothing is created until a downstream
-// consumer actually pulls. `headlessDirty` defers geometry rebuilds to the next
-// pull instead of rebuilding an offscreen engine per config keystroke.
-function createHeadless(w: number, h: number): SpaceTypeEngine | null {
-  if (!detectWebGL()) return null
-  if (!headlessEngine) {
-    headlessCanvas = document.createElement('canvas')
-    const s = state.value
-    // Construct at the requested size, not the preview size: aspect-dependent
-    // effects (string/contour/tunnel/…) read env.width/height at BUILD time.
-    headlessEngine = new SpaceTypeEngine(headlessCanvas, {
-      effect: getEffect(s.effectId), width: w, height: h,
-      fps: s.fps, loopDuration: s.loopDuration, alpha: s.transparent, bgColor: s.bgColor,
-      projection: s.projection ?? 'perspective',
-    })
-    headlessDirty = true
-    // Card mount usually primes the font first (shared global cache), but if a pull
-    // races ahead, force one rebuild once the font resolves so text isn't baked with
-    // a fallback face. Config-driven font changes are primed by the card's own await.
-    void ensureSpaceTypeFont(String(s.params.font)).then(() => { headlessDirty = true })
-  }
-  return headlessEngine
-}
-
-function ensureHeadless(w: number, h: number): SpaceTypeEngine | null {
-  const eng = createHeadless(w, h)
-  if (!eng) return null
-  if (headlessDirty) {
-    const s = state.value
-    eng.setSize(w, h)   // BEFORE build — geometry layout reads the size
-    eng.setBackground(s.transparent, s.bgColor)
-    eng.setProjection(s.projection ?? 'perspective')
-    eng.setPost({ ...(s.post ?? DEFAULT_POST) })
-    eng.setPan(s.panX ?? 0, s.panY ?? 0)
-    eng.setFps(s.fps)
-    eng.setLoopDuration(s.loopDuration)
-    eng.setEffect(getEffect(s.effectId))
-    eng.build(s.params, texOptsFromState(s))
-    headlessDirty = false
-  }
-  return eng
-}
 
 // Headless full-res frame for the render cascade (generative — no input). Renders
 // frame 0 at the configured output dims, then restores the live preview.
@@ -321,9 +266,7 @@ onBeforeUnmount(() => {
   unregisterStudioFrameSource(props.id)
   engine?.dispose()
   engine = null
-  headlessEngine?.dispose()
-  headlessEngine = null
-  headlessCanvas = null
+  wired.dispose()
 })
 
 // The modal writes config back to node.data.properties on edits — rebuild the
@@ -332,7 +275,7 @@ onBeforeUnmount(() => {
 let rebuildTimer: ReturnType<typeof setTimeout> | null = null
 watch(state, (s) => {
   if (rebuildTimer) clearTimeout(rebuildTimer)
-  headlessDirty = true   // next frame-source pull rebuilds the (lazy) headless engine
+  wired.markDirty()   // next frame-source pull rebuilds the (lazy) headless engine
   rebuildTimer = setTimeout(async () => {
     rebuildTimer = null
     if (!engine) return
