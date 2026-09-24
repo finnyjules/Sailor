@@ -51,7 +51,7 @@ const groups = computed(() => {
     { key: 'fonts', title: 'Fonts going into the file', items: byGroup('fonts') },
   ]
   if (!props.still) {
-    out.push({ key: 'live', title: 'Plays live', items: byGroup('live') })
+    out.push({ key: 'live', title: 'What moves', items: byGroup('live') })
     out.push({ key: 'still', title: 'Will be a still', items: byGroup('still') })
   }
   out.push({ key: 'leftOut', title: 'Left out', items: byGroup('leftOut') })

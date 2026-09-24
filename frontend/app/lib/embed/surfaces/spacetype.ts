@@ -191,44 +191,53 @@ export function createSpaceTypeEmbedSurface(effects: SpaceTypeEffect[]): EmbedSu
 
       // Inject and await the font BEFORE the first render. Skipped only when
       // `font` is explicitly null (params.font already names a family the
-      // viewer's browser provides natively). Never wrapped in try/catch here —
-      // a failed font load must reject mount(), not render confidently in the
+      // viewer's browser provides natively). A failed font load rejects mount()
+      // (after releasing the face below), never renders confidently in the
       // wrong typeface with no visible sign anything went wrong.
-      if (cfg.font) {
-        const { family, weight, dataUrl } = cfg.font
-        const id = fontFaceId(family, weight)
-        if (!document.head.querySelector(`style[data-sailor-embed-font="${id}"]`)) {
-          const styleEl = document.createElement('style')
-          styleEl.setAttribute('data-sailor-embed-font', id)
-          styleEl.textContent = fontFaceRule({ family, weight, dataUrl })
-          document.head.appendChild(styleEl)
-        }
-        await document.fonts.load(`${weight} 16px "${family}"`)
-        await document.fonts.ready
-      }
-
-      // Own canvas + own engine instance, not a pooled/shared one — two Space
-      // Type embeds on one page must not share a GL context (mirrors the
-      // gradient/shader adapters' identical guard). Per-effect state lives on
-      // root.userData (see engine.ts's build()), which is what makes two
-      // concurrent engines safe.
+      //
+      // The face is SHARED by id and COUNTED: a mount that finds its id already
+      // present uses that style (the config builder names a face after its own
+      // bytes — privateFontFamily in ~/lib/spacetype/embedConfig — so one id is
+      // one face), and every mount releases its hold on destroy() or on a failed
+      // mount. The last release removes the style, so a player mounted in the
+      // app's own document (the in-app poster bake) leaves no face behind.
+      const releaseFont = cfg.font ? holdFontFace(cfg.font) : () => {}
+      let engine: SpaceTypeEngine | null = null
       const canvas = document.createElement('canvas')
-      canvas.style.display = 'block'
-      canvas.style.width = '100%'
-      canvas.style.height = '100%'
-      const engine = new SpaceTypeEngine(canvas, { ...cfg.opts, effect })
-      // Absent `post` (older configs saved before this field existed) must
-      // render exactly as before this fix — DEFAULT_POST is all-off, and
-      // setPost is a no-op cost-wise when postEnabled() is false (see
-      // engine.ts's setPost doc).
-      engine.setPost(cfg.post ?? DEFAULT_POST)
+      try {
+        if (cfg.font) {
+          await document.fonts.load(`${cfg.font.weight} 16px "${cfg.font.family}"`)
+          await document.fonts.ready
+        }
 
-      const texOpts = buildTexOpts(effect, cfg.params, cfg.font, cfg.gradientStops ?? [])
-      engine.build(cfg.params, texOpts)
+        // Own canvas + own engine instance, not a pooled/shared one — two Space
+        // Type embeds on one page must not share a GL context (mirrors the
+        // gradient/shader adapters' identical guard). Per-effect state lives on
+        // root.userData (see engine.ts's build()), which is what makes two
+        // concurrent engines safe.
+        canvas.style.display = 'block'
+        canvas.style.width = '100%'
+        canvas.style.height = '100%'
+        engine = new SpaceTypeEngine(canvas, { ...cfg.opts, effect })
+        // Absent `post` (older configs saved before this field existed) must
+        // render exactly as before this fix — DEFAULT_POST is all-off, and
+        // setPost is a no-op cost-wise when postEnabled() is false (see
+        // engine.ts's setPost doc).
+        engine.setPost(cfg.post ?? DEFAULT_POST)
 
-      container.appendChild(canvas)
-      // Draw once at mount so the container is never empty before the first tick.
-      engine.renderFrameAt(0, cfg.params)
+        const texOpts = buildTexOpts(effect, cfg.params, cfg.font, cfg.gradientStops ?? [])
+        engine.build(cfg.params, texOpts)
+
+        container.appendChild(canvas)
+        // Draw once at mount so the container is never empty before the first tick.
+        engine.renderFrameAt(0, cfg.params)
+      } catch (err) {
+        canvas.remove()
+        try { engine?.dispose() } catch { /* the mount has failed either way */ }
+        releaseFont()
+        throw err
+      }
+      const eng = engine
 
       // A seamless piece spans k base loops (the studio's loopMultiplier): one pass of the
       // embed runs t01 over [0, k), so every motion finishes whole cycles before the wrap —
@@ -236,21 +245,55 @@ export function createSpaceTypeEmbedSurface(effects: SpaceTypeEffect[]): EmbedSu
       // Absent (every config saved before this field, and every non-seamless piece) = 1.
       const loops = Number(cfg.loops) >= 1 ? Number(cfg.loops) : 1
 
+      let destroyed = false
       return {
         // renderFrameAt takes the base-loop position and is synchronous — no seconds
         // conversion, unlike the gradient/shader adapters' `t01 * duration`.
-        setTime: (t01: number) => engine.renderFrameAt(t01 * loops, cfg.params),
+        setTime: (t01: number) => eng.renderFrameAt(t01 * loops, cfg.params),
         setSize: (nw: number, nh: number) => {
-          engine.setSize(Math.max(1, Math.round(nw)), Math.max(1, Math.round(nh)))
+          eng.setSize(Math.max(1, Math.round(nw)), Math.max(1, Math.round(nh)))
         },
         destroy: () => {
+          // Twice is once: a second destroy must not release another mount's hold on the face.
+          if (destroyed) return
+          destroyed = true
           canvas.remove()
           // Frees GPU resources AND force-loses the WebGL context (see
           // engine.dispose()'s doc) — browsers cap live contexts at ~16.
-          engine.dispose()
+          try { eng.dispose() } finally { releaseFont() }
         },
       }
     },
+  }
+}
+
+/** Injects `font`'s @font-face into the document (or joins the mount already holding it) and
+ *  returns this mount's release. Holds are counted on the style element itself, so every copy
+ *  of this adapter in one document — each nested bundle carries its own — shares one count. The
+ *  last release removes the style. Exported for unit testing. */
+export function holdFontFace(font: { family: string; weight: number; dataUrl: string }): () => void {
+  const id = fontFaceId(font.family, font.weight)
+  let styleEl = [...document.head.querySelectorAll<HTMLStyleElement>('style[data-sailor-embed-font]')]
+    .find(el => el.getAttribute('data-sailor-embed-font') === id) ?? null
+  // A face under this id that no player holds (the Frame surface's own, which it removes itself)
+  // is used as it is and never removed from here. With private names that only happens to a
+  // config built before them.
+  if (styleEl && styleEl.dataset.sailorEmbedFontHolds == null) return () => {}
+  if (!styleEl) {
+    styleEl = document.createElement('style')
+    styleEl.setAttribute('data-sailor-embed-font', id)
+    styleEl.textContent = fontFaceRule(font)
+    document.head.appendChild(styleEl)
+  }
+  const el = styleEl
+  el.dataset.sailorEmbedFontHolds = String(Number(el.dataset.sailorEmbedFontHolds ?? 0) + 1)
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    const left = Number(el.dataset.sailorEmbedFontHolds ?? 1) - 1
+    if (left > 0) el.dataset.sailorEmbedFontHolds = String(left)
+    else el.remove()
   }
 }
 

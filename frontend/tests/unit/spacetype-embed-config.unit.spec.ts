@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import {
   spaceTypeEmbedConfig, spaceTypeEmbedDuration, liveEmbedBlocker, LIVE_VERIFIED_EFFECTS,
   spaceTypeEmbedFont, spaceTypeWiredEmbed, spaceTypeSubsetText, spaceTypeEmbedFace, DEFAULT_WEIGHT_EFFECTS,
+  privateFontFamily,
 } from '~/lib/spacetype/embedConfig'
 import { defaultSpaceTypeState, type SpaceTypeState } from '~/lib/spacetype/state'
 import { getEffect } from '~/lib/spacetype/effects'
@@ -44,17 +45,20 @@ describe('spaceTypeEmbedConfig — same config the studio export built', () => {
     projection: 'isometric' as const, panX: 0.25, panY: -0.4,
   }
   const font = { family: 'Fraunces', weight: 600, dataUrl: 'data:font/ttf;base64,AAAA' }
+  // The one deliberate change since: the inlined face is declared, and params.font names it,
+  // under its private family name (privateFontFamily — see the describe below).
+  const privateFamily = privateFontFamily(font)
   function oldInlineConfig() {
     return {
       effectId: getEffect(refs.effectId).id,
-      params: { ...refs.params },
+      params: { ...refs.params, font: privateFamily },
       opts: {
         width: refs.W, height: refs.H, fps: refs.fps, loopDuration: refs.loopDuration,
         alpha: refs.transparent, bgColor: refs.bgColor, projection: refs.projection,
         panX: refs.panX, panY: refs.panY,
       },
       duration: refs.loopDuration,
-      font,
+      font: { ...font, family: privateFamily },
       gradientStops: refs.gradientStops.map(g => ({ ...g })),
       post: { ...refs.post },
     }
@@ -67,7 +71,7 @@ describe('spaceTypeEmbedConfig — same config the studio export built', () => {
     projection: refs.projection, panX: refs.panX, panY: refs.panY,
   }
 
-  it('equals the old inline export config exactly, with no `loops`', () => {
+  it('equals the old inline export config exactly (bar the private face name), with no `loops`', () => {
     const cfg = spaceTypeEmbedConfig(saved, font)
     expect(cfg).toEqual(oldInlineConfig())
     expect('loops' in cfg).toBe(false)
@@ -92,6 +96,64 @@ describe('spaceTypeEmbedConfig — same config the studio export built', () => {
     expect(cfg.opts).toMatchObject({ width: 960, height: 540, projection: 'perspective', panX: 0, panY: 0 })
     expect(cfg.post).toEqual(DEFAULT_POST)
     expect(cfg.font).toBeNull()
+  })
+})
+
+// C-1 of the final review: in a Frame export, a live layer's face must not collide with the Frame's
+// own fonts or another live layer's. Each inlined face gets a family name nothing else can use —
+// the family plus a hash of its weight and data — and everything in the player draws with it.
+describe('private face names', () => {
+  const a = { family: 'Work Sans', weight: 700, dataUrl: 'data:font/ttf;base64,QUFBQQ==' }
+  const b = { family: 'Work Sans', weight: 700, dataUrl: 'data:font/ttf;base64,QkJCQg==' }
+
+  it('the family plus a short hash of the face — stable, and different for another subset or weight', () => {
+    expect(privateFontFamily(a)).toMatch(/^Work Sans sailor-[0-9a-f]{12}$/)
+    expect(privateFontFamily(a)).toBe(privateFontFamily({ ...a }))
+    expect(privateFontFamily(b)).not.toBe(privateFontFamily(a))
+    expect(privateFontFamily({ ...a, weight: 400 })).not.toBe(privateFontFamily(a))
+    // Idempotent: a face already under its private name keeps it.
+    expect(privateFontFamily({ ...a, family: privateFontFamily(a) })).toBe(privateFontFamily(a))
+  })
+
+  it('the config declares the face under its private name, and params.font names it too', () => {
+    const s = stateFor('field', { font: 'Work Sans', typeWeight: 700, text: 'Café' })
+    const cfg = spaceTypeEmbedConfig(s, a)
+    expect(cfg.font).toEqual({ ...a, family: privateFontFamily(a) })
+    expect(cfg.params.font).toBe(privateFontFamily(a))
+    // The state itself is untouched.
+    expect(s.params.font).toBe('Work Sans')
+    // Two layers on the same family and weight with different subsets draw under different names.
+    expect(spaceTypeEmbedConfig(s, b).font!.family).not.toBe(cfg.font!.family)
+  })
+
+  it('every place the player names a family resolves to the private name', async () => {
+    const { buildTexOpts } = await import('~/lib/embed/surfaces/spacetype')
+    const { resolveFontFamily } = await import('~/lib/font/resolveFamily')
+    const s = stateFor('field', { font: 'Work Sans', typeWeight: 700 })
+    const cfg = spaceTypeEmbedConfig(s, a)
+    const name = privateFontFamily(a)
+    // The shared text atlas…
+    expect(buildTexOpts(getEffect('field'), cfg.params, cfg.font, []).fontFamily).toBe(name)
+    // …and every effect that resolves params.font itself (cascade, coil, contour, spiral, tunnel,
+    // streamer, showcase, slot, …) — with or without the app's catalog loaded.
+    expect(resolveFontFamily(String(cfg.params.font))).toBe(name)
+    setFontCatalog([{ family: 'Work Sans', weights: [100, 900], axes: [{ tag: 'wght' }] }])
+    expect(resolveFontFamily(String(cfg.params.font))).toBe(name)
+  })
+
+  it('the 400 face of contour, spiral, tunnel and streamer is aliased the same way', () => {
+    for (const id of DEFAULT_WEIGHT_EFFECTS) {
+      const face = { family: 'Work Sans', weight: 400, dataUrl: 'data:font/ttf;base64,QUFBQQ==' }
+      const cfg = spaceTypeEmbedConfig(stateFor(id, { font: 'Work Sans' }), face)
+      expect(cfg.font).toEqual({ ...face, family: privateFontFamily(face) })
+      expect(cfg.params.font).toBe(privateFontFamily(face))
+    }
+  })
+
+  it('no inlined face (a system family): params.font is left as it is', () => {
+    const cfg = spaceTypeEmbedConfig(stateFor('ribbon', { font: 'sans-serif' }), null)
+    expect(cfg.font).toBeNull()
+    expect(cfg.params.font).toBe('sans-serif')
   })
 })
 

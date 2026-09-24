@@ -142,6 +142,33 @@ async function regionDiff(page: Page, a: string, b: string, box: { x: number; y:
   }, [a, b, box, threshold] as const)
 }
 
+/** The live check's own metric (lib/embed/frame/compare.ts) over one box of two pictures: the mean
+ *  absolute difference over R, G and B, and the share of pixels where any channel, alpha
+ *  included, differs by more than 24. The box is inset 2 px so its edges' resampling is left out. */
+async function regionCompare(page: Page, a: string, b: string, box: { x: number; y: number; w: number; h: number }) {
+  return await page.evaluate(async ([x, y, bx]) => {
+    const load = (u: string) => new Promise<HTMLImageElement>((res) => { const i = new Image(); i.onload = () => res(i); i.src = u })
+    const [ia, ib] = await Promise.all([load(x as string), load(y as string)])
+    if (ia.width !== ib.width || ia.height !== ib.height) throw new Error(`sizes differ: ${ia.width}×${ia.height} vs ${ib.width}×${ib.height}`)
+    const r = bx as { x: number; y: number; w: number; h: number }
+    const x0 = Math.max(0, Math.ceil(r.x) + 2), y0 = Math.max(0, Math.ceil(r.y) + 2)
+    const w = Math.min(ia.width - x0, Math.floor(r.w) - 4), h = Math.min(ia.height - y0, Math.floor(r.h) - 4)
+    const data = (i: HTMLImageElement) => {
+      const c = document.createElement('canvas'); c.width = i.width; c.height = i.height
+      const g = c.getContext('2d')!; g.drawImage(i, 0, 0); return g.getImageData(x0, y0, w, h).data
+    }
+    const da = data(ia), db = data(ib)
+    let sum = 0, over = 0
+    for (let p = 0; p < da.length; p += 4) {
+      const dr = Math.abs(da[p]! - db[p]!), dg = Math.abs(da[p + 1]! - db[p + 1]!), dbb = Math.abs(da[p + 2]! - db[p + 2]!), dal = Math.abs(da[p + 3]! - db[p + 3]!)
+      sum += dr + dg + dbb
+      if (dr > 24 || dg > 24 || dbb > 24 || dal > 24) over++
+    }
+    const n = da.length / 4
+    return { mean: sum / (n * 3), shareOver: over / n }
+  }, [a, b, box] as const)
+}
+
 test.describe('Frame embed — a wired Gradient plays live', () => {
   test('the sheet says it plays live; the file carries its player, makes no request, animates, and keeps its shape', async ({ page, context }, testInfo) => {
     test.setTimeout(240_000)
@@ -316,7 +343,9 @@ test.describe('Frame embed — a wired Space Type plays live', () => {
     const snap = snapshotOf(html)
     const entry = snap.wired[0]
     expect(entry).toMatchObject({ kind: 'live', surface: 'spacetype', bundle: `spacetype-${EFFECT}`, duration: 6 })
-    expect(entry.config.font).toMatchObject({ family: 'Inter', weight: 700 })
+    // Inter 700, declared — and named by params.font — under its private family name (C-1).
+    expect(entry.config.font).toMatchObject({ family: expect.stringMatching(/^Inter sailor-[0-9a-f]{12}$/), weight: 700 })
+    expect(entry.config.params.font).toBe(entry.config.font.family)
     expect(entry.config.font.dataUrl.startsWith('data:font/ttf;base64,')).toBe(true)
     expect(html).toContain(`m["spacetype-${EFFECT}"]`)   // the effect's player, registered as a nested one
     expect(bytes).toBeLessThan(3 * 1024 * 1024)   // a player, a face and a config — not 180 frames
@@ -363,7 +392,7 @@ test.describe('Frame embed — a wired Space Type plays live', () => {
     expect(externalRefs(live.html)).toEqual([])
     const liveEntry = snapshotOf(live.html).wired[0]
     expect(liveEntry).toMatchObject({ kind: 'live', bundle: `spacetype-${EFFECT}` })
-    expect(liveEntry.config.font).toMatchObject({ family: 'Inter', weight: 700 })
+    expect(liveEntry.config.font).toMatchObject({ family: expect.stringMatching(/^Inter sailor-[0-9a-f]{12}$/), weight: 700 })
 
     // 2. The same Frame, the Space Type switched to Inter 600 → the check mismatches → frames.
     const at600 = { ...state, params: { ...state.params, font: 'Inter', typeWeight: 600 } }
@@ -397,6 +426,84 @@ test.describe('Frame embed — a wired Space Type plays live', () => {
       expect(r.requests, name).toEqual([])
       await writeFile(testInfo.outputPath(`check-${name}-export.png`), Buffer.from(r.png.split(',')[1]!, 'base64'))
     }
+  })
+
+  // Final review C-1: a live layer's face must not collide with the Frame's own. Scenario A of the
+  // review: the Frame's own text says "Café" in Work Sans 700 — the Frame inlines a static Work
+  // Sans 700 face subset to "Café" plus basic Latin, which has no "É" — and a live field layer in
+  // Work Sans 700 draws "CAFÉ". Before private face names the nested player found the Frame's face
+  // by its id, skipped its own, and drew "É" from a face that lacks it; its check, alone in its
+  // own document, had passed. Now: either the layer passes the check and the exported file draws
+  // BOTH boxes as the editor draws them, or the layer goes to frames. The control ships the same
+  // checked config under the family's real name (the old naming) and must be seen to differ.
+  test('a Frame\'s own text in the live layer\'s family and weight: each box matches the editor (Café / CAFÉ)', async ({ page, context }, testInfo) => {
+    test.setTimeout(300_000)
+    const { state } = await spaceTypeDefaultState(page, 'field')
+    const cafe = { ...state, params: { ...state.params, text: 'Café', font: 'Work Sans', typeWeight: 700, textCase: 'upper' } }
+    await openHarness(page)
+    const T = [0, 67 / 180]
+    const run = async (realNames: boolean) => await page.evaluate(
+      ([s, t, r]) => (window as any).__frameEmbedHarness.liveSpaceTypeWithText(s, { frameText: 'Café', t01s: t, realNames: r }),
+      [cafe, T, realNames] as const,
+    )
+    const MATCH = { maxMean: 2, maxShareOver: 0.005 }   // LIVE_MATCH, the check's own thresholds
+    const within = (d: { mean: number; shareOver: number }) => d.mean < MATCH.maxMean && d.shareOver < MATCH.maxShareOver
+    const fmt = (d: { mean: number; shareOver: number }) => `mean ${d.mean.toFixed(3)} / ${(d.shareOver * 100).toFixed(3)}%`
+
+    /** Each moment of the exported file against the editor's picture, box by box. */
+    async function boxesAgainstEditor(r: any, tag: string) {
+      const out: { t: number; text: { mean: number; shareOver: number }; spaceType: { mean: number; shareOver: number } }[] = []
+      for (let i = 0; i < T.length; i++) {
+        const file = await renderExported(context, r.html, T[i]!, { width: 1000, height: 500 })
+        expect(file.requests).toEqual([])
+        await writeFile(testInfo.outputPath(`cafe-${tag}-file-${i}.png`), Buffer.from(file.png.split(',')[1]!, 'base64'))
+        await writeFile(testInfo.outputPath(`cafe-${tag}-editor-${i}.png`), Buffer.from(r.references[i].split(',')[1]!, 'base64'))
+        out.push({
+          t: T[i]!,
+          text: await regionCompare(page, r.references[i], file.png, r.textBox),
+          spaceType: await regionCompare(page, r.references[i], file.png, r.spaceTypeBox),
+        })
+      }
+      return out
+    }
+
+    const live = await run(false)
+    console.log(`[cafe] check: ${live.check.ok ? 'match' : `mismatch (${live.check.reason})`}; ${live.check.diffs.map(fmt).join(', ')}`)
+    console.log(`[cafe] sheet: ${live.notices.join(' | ')}`)
+    console.log(`[cafe] Frame faces ${JSON.stringify(live.frameFonts)}; live layer ${JSON.stringify(live.wired)}; faces left in the app after the poster bake ${JSON.stringify(live.facesLeft)}`)
+    expect(externalRefs(live.html)).toEqual([])
+    // The Frame carries its own Work Sans 700, under its real name.
+    expect(live.frameFonts).toContainEqual({ family: 'Work Sans', weight: 700 })
+    // I-1: the poster bake's nested player left no face in the app's document.
+    expect(live.facesLeft.filter((id: string) => / sailor-/.test(id))).toEqual([])
+
+    if (!live.check.ok) {
+      // The other acceptable outcome: the layer goes to frames, which draw what the editor draws.
+      expect(live.wired.kind).toBe('clip')
+      testInfo.annotations.push({ type: 'cafe', description: `frames: ${live.check.reason}` })
+      return
+    }
+    expect(live.wired.kind).toBe('live')
+    expect(live.wired.font.family).toMatch(/^Work Sans sailor-[0-9a-f]{12}$/)
+    expect(live.wired.font.weight).toBe(700)
+    expect(live.wired.paramsFont).toBe(live.wired.font.family)
+    const liveBoxes = await boxesAgainstEditor(live, 'live')
+    for (const b of liveBoxes) console.log(`[cafe] live t ${b.t.toFixed(3)}: Frame text ${fmt(b.text)}; Space Type ${fmt(b.spaceType)}`)
+    testInfo.annotations.push({ type: 'cafe-live', description: liveBoxes.map(b => `t ${b.t.toFixed(3)}: text ${fmt(b.text)}, space type ${fmt(b.spaceType)}`).join(' | ') })
+    for (const b of liveBoxes) {
+      expect(within(b.text), `Frame text at t ${b.t}: ${fmt(b.text)}`).toBe(true)
+      expect(within(b.spaceType), `Space Type at t ${b.t}: ${fmt(b.spaceType)}`).toBe(true)
+    }
+
+    // The control: the same checked config shipped under the real family name meets the Frame's
+    // "Café" subset — this comparison must see it.
+    const control = await run(true)
+    expect(control.check.ok).toBe(true)
+    expect(control.wired).toMatchObject({ kind: 'live', font: { family: 'Work Sans', weight: 700 }, paramsFont: 'Work Sans' })
+    const controlBoxes = await boxesAgainstEditor(control, 'real-names')
+    for (const b of controlBoxes) console.log(`[cafe] control (real names) t ${b.t.toFixed(3)}: Frame text ${fmt(b.text)}; Space Type ${fmt(b.spaceType)}`)
+    testInfo.annotations.push({ type: 'cafe-control', description: controlBoxes.map(b => `t ${b.t.toFixed(3)}: text ${fmt(b.text)}, space type ${fmt(b.spaceType)}`).join(' | ') })
+    expect(controlBoxes.some(b => !within(b.spaceType))).toBe(true)
   })
 
   test('an effect that is not verified still exports as frames', async ({ page }, testInfo) => {

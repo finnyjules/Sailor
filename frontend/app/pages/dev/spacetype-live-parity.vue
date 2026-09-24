@@ -254,7 +254,8 @@ async function measureSpaceType(
     const font = (embed.config as { font?: { family: string; weight: number; dataUrl: string } | null }).font
     const result: ParityResult = {
       id, status: statusOf(times), width: w, height: h, times, pass: passes(times),
-      font: font ? `${font.family} ${font.weight} (${Math.round(font.dataUrl.length * 3 / 4 / 1024)} KB inlined)` : 'none (system family)',
+      // The face is declared under its private name (privateFontFamily); the table names the family.
+      font: font ? `${font.family.replace(/ sailor-[0-9a-f]{12}$/, '')} ${font.weight} (${Math.round(font.dataUrl.length * 3 / 4 / 1024)} KB inlined)` : 'none (system family)',
     }
     if (opts.images) result.images = { a: a.map(px => pngOf(px, w, h)), b: b.map(px => pngOf(px, w, h)) }
     return result

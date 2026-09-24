@@ -42,6 +42,15 @@ import { registerAssetResolver } from '~/lib/compositor/assetScope'
 import { warmCompositorFont } from '~/lib/compositor/textOutline'
 import { whenFieldEffectReady } from '~/lib/shaderfill/field'
 import '~/lib/motion/paint' // the per-layer animation painter paintLayerStack relies on (the modal has it loaded)
+// The live Space Type case (final review C-1): a real wired Space Type, the real check, the editor's
+// own renderer as the reference.
+import { createWiredSpaceTypeRenderer } from '~/lib/spacetype/wiredRenderer'
+import { spaceTypeWiredEmbed, spaceTypeEmbedDuration, spaceTypeSubsetText, spaceTypeEmbedFace } from '~/lib/spacetype/embedConfig'
+import { dimsFromState, ensureSpaceTypeFont, type SpaceTypeState } from '~/lib/spacetype/state'
+import { loadGoogleCatalog } from '~/data/google-fonts'
+import { checkLiveEmbed } from '~/lib/embed/frame/liveCheck'
+import { nestedDeviceSize } from '~/lib/embed/nested'
+import type { StudioFrameSource } from '~/lib/studio/frameSource'
 
 definePageMeta({ layout: false })
 
@@ -397,6 +406,126 @@ onMounted(async () => {
   const slotEl = (slot: Slot) => document.getElementById(`slot-${slot}`)!
   const canvasOfSlot = (slot: Slot) => slotEl(slot).querySelector('canvas') as HTMLCanvasElement | null
 
+  // ── A Frame with its own text beside a live Space Type layer (final review C-1) ────────────
+  // The Frame's text and the Space Type share a family and weight but not their characters: the
+  // Frame says "Café", the Space Type draws "CAFÉ". The Space Type layer is offered live exactly
+  // as the modal offers it — spaceTypeWiredEmbed, then checkLiveEmbed against the editor's own
+  // wired renderer — and the Frame is gathered and exported for real. `references` is the
+  // editor's picture of the whole Frame at each t01: the painter as renderStack calls it, the
+  // wired slot drawn from the editor's renderer at the box's device size, fonts from the app.
+  // `realNames` (the control): after the check has passed, the shipped config is put back under
+  // the family's REAL name — the naming before private faces — so the file's player meets the
+  // Frame's own face of that name.
+  async function liveSpaceTypeWithText(
+    state: SpaceTypeState,
+    opts: { frameText: string; t01s: number[]; realNames?: boolean },
+  ) {
+    const { family, weight } = spaceTypeEmbedFace(state)
+    const [cw, ch] = dimsFromState(state)
+    const duration = spaceTypeEmbedDuration(state)
+
+    // The editor's faces, settled (the parity harness's order: catalog, stylesheet, then load).
+    await loadGoogleCatalog()
+    await ensureSpaceTypeFont(family)
+    const link = document.querySelector(`link[data-stg-font="${family.replace(/[^a-zA-Z0-9]/g, '_')}"]`) as HTMLLinkElement | null
+    if (link && !link.sheet) {
+      await new Promise<void>((resolve) => {
+        link.addEventListener('load', () => resolve(), { once: true })
+        link.addEventListener('error', () => resolve(), { once: true })
+        setTimeout(resolve, 15_000)
+      })
+    }
+    const allText = spaceTypeSubsetText(state) + opts.frameText
+    await document.fonts.load(`${weight} 32px "${family}"`, allText)
+    await document.fonts.ready
+    if (!document.fonts.check(`${weight} 32px "${family}"`, allText)) throw new Error(`the editor's face ${family} ${weight} did not load`)
+
+    const renderer = createWiredSpaceTypeRenderer()
+    try {
+      await renderer.render(state, 0, 480, Math.round(480 * ch / cw))
+      await document.fonts.ready
+      await new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r())))
+      renderer.markDirty()
+      const source: StudioFrameSource = {
+        duration, fps: state.fps, width: cw, height: ch,
+        async getFrame(t01: number, w: number, h: number) {
+          const c = await renderer.render(state, t01, w, h)
+          if (!c) throw new Error('the wired renderer drew nothing')
+          return c
+        },
+      }
+
+      // The live route, as the modal takes it.
+      const embed = await spaceTypeWiredEmbed(state, { width: cw, height: ch })
+      if (!embed) throw new Error('the Space Type offered no live player')
+      const bundleJs = await real.bundleText(embed.bundle)
+      const check = await checkLiveEmbed(source, embed, bundleJs)
+      const shipped = opts.realNames
+        ? (() => {
+            const c = structuredClone(embed.config) as { font: { family: string } | null; params: Record<string, unknown> }
+            if (c.font) c.font.family = family
+            c.params.font = family
+            return { ...embed, config: c }
+          })()
+        : embed
+
+      // The Frame: its own text on top, the Space Type below, not overlapping.
+      const text = createTextLayer({ text: opts.frameText, fontFamily: family, fontWeight: weight, y: 0.2, fontSize: 0.1 })
+      const wired = createWiredLayer(0, { x: 0.5, y: 0.66, w: 0.5, lastAspect: ch / cw })
+      const variant = variantOf(1000, 500, [text, wired], { background: '#1b4d3e' })
+      const wiredSlots: WiredSlotInfo[] = [{ slot: 0, layerId: wired.id, label: 'Space Type', animated: true, fps: state.fps, duration }]
+      const plan = planFrameExport({ variant, fit: 'fit', wiredSlots, catalogIds, hasMotion: true, ownMotion: false, animatedFill: false })
+      const liveIo: FrameExportIO = { ...io, wiredEmbed: async () => (check.ok ? shipped : null), bundleBytes: real.bundleBytes }
+      const snap = await buildFrameSnapshot(plan, variant, liveIo)
+      const html = await exportEmbedHtml({
+        kind: 'frame', config: snap, duration: snap.duration, width: 1000, height: 500,
+        framing: 'box', posterFit: 'contain', still: snap.still,
+      })
+      // The poster bake mounted the Frame — and its nested player — in THIS document (I-1).
+      const facesLeft = [...document.head.querySelectorAll('style[data-sailor-embed-font]')].map(el => el.getAttribute('data-sailor-embed-font'))
+
+      // The editor's picture of the whole Frame at each moment.
+      const layers = variant.layers as LocalLayer[]
+      const byId = new Map(layers.map(l => [l.id, l]))
+      const items: StackItem[] = variant.stackOrder
+        .filter(k => k.startsWith('l:') && byId.has(k.slice(2)))
+        .map(k => ({ type: 'local', key: k, layer: byId.get(k.slice(2))! }))
+      await ensureLayerFonts(layers, 1000)
+      const box = nestedDeviceSize(500, cw, ch)
+      const references: string[] = []
+      for (const t of opts.t01s) {
+        const content = await renderer.render(state, t, box.w, box.h)
+        if (!content) throw new Error('the wired renderer drew nothing')
+        const [cv, ctx] = canvasOf(1000, 500)
+        const paint = () => {
+          ctx.setTransform(1, 0, 0, 1, 0, 0)
+          ctx.clearRect(0, 0, 1000, 500)
+          withWiredContent(slot => (slot === 0 ? content : null), () => paintLayerStack(ctx, 1000, 500, items, layers, undefined,
+            t * snap.duration, variant.motion ?? undefined, variant.wiredTreatments, variant.background ?? undefined,
+            variant.groups, variant.post, true))
+        }
+        paint(); cv.toDataURL()
+        paint()
+        references.push(cv.toDataURL())
+      }
+      return {
+        html, references, facesLeft,
+        check: { ok: check.ok, reason: check.reason ?? null, diffs: check.diffs },
+        duration: snap.duration,
+        // The text's band (100 px type centred at y 100) and the wired layer's box, in Frame px.
+        textBox: { x: 0, y: 15, w: 1000, h: 165 },
+        spaceTypeBox: { x: 250, y: 0.66 * 500 - 250 * ch / cw, w: 500, h: 500 * ch / cw },
+        frameFonts: snap.assets.fonts.map(f => ({ family: f.family, weight: f.weight })),
+        wired: snap.wired?.[0]
+          ? { kind: snap.wired[0].kind, font: (snap.wired[0] as any).config?.font ? { family: (snap.wired[0] as any).config.font.family, weight: (snap.wired[0] as any).config.font.weight } : null, paramsFont: (snap.wired[0] as any).config?.params?.font ?? null }
+          : null,
+        notices: snap.notices.map(n => n.text),
+      }
+    } finally {
+      renderer.dispose()
+    }
+  }
+
   ;(window as any).__frameEmbedHarness = {
     fixtures: FIXTURES,
     snapshot,
@@ -420,6 +549,7 @@ onMounted(async () => {
     canvasCount(slot: Slot): number { return slotEl(slot).querySelectorAll('canvas').length },
     reference,
     mutate,
+    liveSpaceTypeWithText,
     async exportHtml(snap: FrameSnapshot): Promise<string> {
       const v = snap.variants[0]!
       return await exportEmbedHtml({

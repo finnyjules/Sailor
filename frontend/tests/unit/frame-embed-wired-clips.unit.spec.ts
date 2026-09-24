@@ -5,7 +5,7 @@
  * the slot's live frame source, instead of freezing to a still.
  *
  * Planner: an animated slot with a known clock goes to `wiredClips` and counts towards the Frame's
- * loop exactly as an image clip does; the gatherer says it once in the "Plays live" group
+ * loop exactly as an image clip does; the gatherer says it once in the sheet's "What moves" group
  * ("{label} · pre-rendered · {n} frames · adds {size}").
  * Gatherer: asks the IO for round(duration × fps) frames at the planned size and inlines each as
  * WebP in `snap.wired[slot]`, as each frame arrives. A source with its own export session

@@ -183,3 +183,108 @@ describe('spacetype embed adapter setTime() — seamless loops', () => {
     expect(renderFrameAtSpy).toHaveBeenCalledWith(0, expect.anything())
   })
 })
+
+// ---------------------------------------------------------------------------
+// Faces in one document (final review C-1 and I-1). In a Frame export several players — and the
+// Frame's own text — share one document; during the in-app poster bake that document is the app.
+// Each inlined face is declared under its private name (privateFontFamily), held by every mount
+// that uses it, and removed when the last one is destroyed.
+describe('spacetype embed adapter — faces in a shared document', () => {
+  const FACE_A = { family: 'Work Sans', weight: 700, dataUrl: 'data:font/ttf;base64,Q0FGRQ==' }      // "CAFE" subset
+  const FACE_B = { family: 'Work Sans', weight: 700, dataUrl: 'data:font/ttf;base64,Q0FGw4k=' }      // "CAFÉ" subset
+  const faceStyles = () => [...document.head.querySelectorAll('style[data-sailor-embed-font]')] as HTMLStyleElement[]
+
+  beforeEach(() => {
+    buildSpy.mockClear()
+    for (const el of faceStyles()) el.remove()
+    // happy-dom has no FontFaceSet; the adapter only awaits it.
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: { load: vi.fn(async () => []), ready: Promise.resolve() },
+    })
+  })
+
+  async function mountWith(face: typeof FACE_A, text: string) {
+    const { default: surface } = await import('~/lib/embed/surfaces/spacetype')
+    const { spaceTypeEmbedConfig } = await import('~/lib/spacetype/embedConfig')
+    const { defaultSpaceTypeState } = await import('~/lib/spacetype/state')
+    const s = defaultSpaceTypeState()
+    s.effectId = 'ribbon'
+    s.params = { ...s.params, text, font: 'Work Sans', typeWeight: 700 }
+    const cfg = spaceTypeEmbedConfig(s, face)
+    const handle = await surface.mount(document.createElement('div'), cfg)
+    return { cfg, handle, texOpts: buildSpy.mock.calls.at(-1)![1] as { fontFamily: string } }
+  }
+
+  it('two mounts on the same family and weight with different subsets each keep — and draw with — their own face', async () => {
+    const one = await mountWith(FACE_A, 'Cafe')
+    const two = await mountWith(FACE_B, 'Café')
+    expect(one.cfg.font!.family).not.toBe(two.cfg.font!.family)
+    expect(faceStyles()).toHaveLength(2)
+    const ruleFor = (family: string) => faceStyles().find(el => el.textContent!.includes(`'${family}'`))!.textContent!
+    expect(ruleFor(one.cfg.font!.family)).toContain(FACE_A.dataUrl)
+    expect(ruleFor(two.cfg.font!.family)).toContain(FACE_B.dataUrl)
+    // Each atlas, and every effect reading params.font, names its own face.
+    expect(one.texOpts.fontFamily).toBe(one.cfg.font!.family)
+    expect(two.texOpts.fontFamily).toBe(two.cfg.font!.family)
+    expect(buildSpy.mock.calls.at(-1)![0].font).toBe(two.cfg.font!.family)
+    // Neither is the Frame's own family name, so the Frame's faces cannot stand in for it.
+    expect(faceStyles().some(el => el.getAttribute('data-sailor-embed-font') === 'Work Sans__700')).toBe(false)
+    one.handle.destroy()
+    two.handle.destroy()
+  })
+
+  it('destroy removes the face it injected, and only its own', async () => {
+    const one = await mountWith(FACE_A, 'Cafe')
+    const two = await mountWith(FACE_B, 'Café')
+    one.handle.destroy()
+    expect(faceStyles()).toHaveLength(1)
+    expect(faceStyles()[0]!.textContent).toContain(FACE_B.dataUrl)
+    two.handle.destroy()
+    expect(faceStyles()).toHaveLength(0)
+  })
+
+  it('two mounts of the very same face share one style, which outlives the first destroy (a second destroy is a no-op)', async () => {
+    const one = await mountWith(FACE_A, 'Cafe')
+    const two = await mountWith(FACE_A, 'Cafe')
+    expect(faceStyles()).toHaveLength(1)
+    one.handle.destroy()
+    one.handle.destroy()
+    expect(faceStyles()).toHaveLength(1)
+    two.handle.destroy()
+    expect(faceStyles()).toHaveLength(0)
+  })
+
+  it('a mount that fails releases its face', async () => {
+    buildSpy.mockImplementationOnce(() => { throw new Error('no GL') })
+    await expect(mountWith(FACE_A, 'Cafe')).rejects.toThrow('no GL')
+    expect(faceStyles()).toHaveLength(0)
+  })
+
+  it('a face someone else put under the same id (another player copy in the document) is counted, not replaced', async () => {
+    const { holdFontFace } = await import('~/lib/embed/surfaces/spacetype')
+    const releaseOther = holdFontFace({ ...FACE_A, family: 'Work Sans sailor-000000000000' })
+    const one = await mountWith(FACE_A, 'Cafe')
+    const releaseSame = holdFontFace(one.cfg.font!)
+    expect(faceStyles()).toHaveLength(2)
+    one.handle.destroy()
+    expect(faceStyles()).toHaveLength(2)
+    releaseSame()
+    releaseOther()
+    expect(faceStyles()).toHaveLength(0)
+  })
+})
+
+describe('holdFontFace — a face someone else injected', () => {
+  it('is used as it is and never removed by a player (the Frame surface removes its own faces)', async () => {
+    const { holdFontFace } = await import('~/lib/embed/surfaces/spacetype')
+    const frameOwn = document.createElement('style')
+    frameOwn.setAttribute('data-sailor-embed-font', 'Work Sans__700')
+    document.head.appendChild(frameOwn)
+    const release = holdFontFace({ family: 'Work Sans', weight: 700, dataUrl: 'data:font/ttf;base64,QQ==' })
+    expect(document.head.querySelectorAll('style[data-sailor-embed-font]')).toHaveLength(1)
+    release()
+    expect(frameOwn.isConnected).toBe(true)
+    frameOwn.remove()
+  })
+})

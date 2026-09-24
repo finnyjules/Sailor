@@ -45,14 +45,50 @@ export function spaceTypeEmbedDuration(state: SpaceTypeState): number {
   return effectiveLoopSeconds(state.loopDuration, seamlessLoops(state))
 }
 
+/** 48 bits of FNV-1a over a string (two 32-bit passes, different offsets), as 12 hex digits.
+ *  Not cryptographic: it only has to tell two faces apart. */
+function faceHash(s: string): string {
+  let a = 0x811c9dc5, b = 0x01000193 ^ 0x5bd1e995
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    a = Math.imul(a ^ c, 0x01000193)
+    b = Math.imul(b ^ c, 0x01000193)
+  }
+  return (a >>> 0).toString(16).padStart(8, '0') + ((b >>> 0) & 0xffff).toString(16).padStart(4, '0')
+}
+
+/** The private family name an inlined face is declared and drawn under: the family plus a short
+ *  hash of the face's weight and data, e.g. `Inter sailor-3f09a1c27b44`. Nothing else can use it:
+ *  not the Frame's own text (it names real families), not another live layer with a different
+ *  subset (another hash), not the app's text when a poster bake leaves a face behind. Two faces
+ *  with the same name are the same bytes at the same weight, so sharing one is harmless.
+ *  Idempotent: a face already under its private name keeps it. */
+export function privateFontFamily(font: { family: string; weight: number; dataUrl: string }): string {
+  const suffix = ` sailor-${faceHash(`${font.weight}|${font.dataUrl}`)}`
+  return font.family.endsWith(suffix) ? font.family : `${font.family}${suffix}`
+}
+
 /** The embed config for a saved Space Type state — the ONE builder the studio's own export
- *  and the Frame's live route share. `font` is the inlined face (or null). */
+ *  and the Frame's live route share. `font` is the inlined face (or null).
+ *
+ *  An inlined face is declared under its private family name (privateFontFamily), and
+ *  `params.font` names it too, so everything in the player that draws text resolves to that
+ *  face and nothing else: the shared text atlas (buildTexOpts reads `font.family`), every
+ *  effect that resolves `params.font` itself (cascade, coil, cylinder, showcase, slot, …), and
+ *  the 400 face contour, spiral, tunnel and streamer draw with. `resolveFontFamily` passes an
+ *  unknown name through unchanged, and the player has no catalog, so the name survives to the
+ *  canvas. The two effects that look `params.font` up in an app-only cache (Boost's outlines,
+ *  Loft's word shape) never find it in the player with or without the alias — the player never
+ *  fills those caches — and both are always blocked from the live route (liveEmbedBlocker).
+ *  The Frame's export-time check runs this exact config, so if the alias ever changed a
+ *  picture, that layer would go to frames. */
 export function spaceTypeEmbedConfig(state: SpaceTypeState, font: SpaceTypeEmbedConfig['font']): SpaceTypeEmbedConfig {
   const [width, height] = dimsFromState(state)
+  const face = font ? { ...font, family: privateFontFamily(font) } : null
   const config: SpaceTypeEmbedConfig = {
     // Canonical id (getEffect is case-insensitive) — what the studio export always sent.
     effectId: getEffect(state.effectId).id,
-    params: { ...state.params },
+    params: face ? { ...state.params, font: face.family } : { ...state.params },
     opts: {
       width, height, fps: state.fps, loopDuration: state.loopDuration,
       alpha: state.transparent, bgColor: state.bgColor,
@@ -60,7 +96,7 @@ export function spaceTypeEmbedConfig(state: SpaceTypeState, font: SpaceTypeEmbed
       panX: state.panX ?? 0, panY: state.panY ?? 0,
     },
     duration: spaceTypeEmbedDuration(state),
-    font,
+    font: face,
     gradientStops: state.gradientStops.map(g => ({ ...g })),
     post: { ...(state.post ?? DEFAULT_POST) },
   }

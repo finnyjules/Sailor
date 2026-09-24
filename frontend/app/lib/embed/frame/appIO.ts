@@ -8,6 +8,7 @@ import type { EffectDef } from '~/lib/shaderfx/types'
 import { StudioExportFailed, type StudioFrameSource } from '~/lib/studio/frameSource'
 import { bufferToBase64, subsetFontBase64 } from '../fontBytes'
 import type { FontSource, FrameExportIO, WiredFrames } from './gather'
+import { checkLiveEmbed, type LiveCheckResult } from './liveCheck'
 
 export function makeFontSource(uploaded: UploadedFontEntry[]) {
   return (family: string, weight: number): FontSource | null => {
@@ -64,6 +65,22 @@ export async function withSourcePull<T>(source: StudioFrameSource, run: () => Pr
   const mine = prev.catch(() => {}).then(run)
   pulling.set(source, mine)
   try { return await mine } finally { if (pulling.get(source) === mine) pulling.delete(source) }
+}
+
+/** A live layer's export-time check (checkLiveEmbed) under `source`'s pull lock. The lock is held
+ *  until the check's own pulls have SETTLED, not just until it has a result: a check that times
+ *  out resolves while a `getFrame` of its own may still be running, and the frames fallback that
+ *  follows pulls the same source — releasing the lock at the result would let the orphaned pull
+ *  land between one fallback frame's render and its copy. A caller that stopped the preview for
+ *  the check restarts it after this resolves, for the same reason. */
+export function checkLiveEmbedLocked(
+  source: StudioFrameSource, embed: Parameters<typeof checkLiveEmbed>[1], bundleJs: string, opts?: { timeoutMs?: number },
+): Promise<LiveCheckResult> {
+  return withSourcePull(source, async () => {
+    const check = checkLiveEmbed(source, embed, bundleJs, opts)
+    await check.settled
+    return check
+  })
 }
 
 /**

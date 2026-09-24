@@ -150,9 +150,9 @@ import MotionCopiesPanel from '~/components/vue-canvas/compositor/MotionCopiesPa
 import FrameWebExportSheet from '~/components/vue-canvas/compositor/FrameWebExportSheet.vue'
 import { planFrameExport } from '~/lib/embed/frame/plan'
 import { buildFrameSnapshot, isBlocked, formatBytes } from '~/lib/embed/frame/gather'
-import { createAppFrameExportIO, pullSourceFrames, withSourcePull } from '~/lib/embed/frame/appIO'
+import { createAppFrameExportIO, pullSourceFrames, checkLiveEmbedLocked } from '~/lib/embed/frame/appIO'
 import { createWiredClipCache } from '~/lib/embed/frame/clipCache'
-import { checkLiveEmbed, type LiveCheckResult } from '~/lib/embed/frame/liveCheck'
+import type { LiveCheckResult } from '~/lib/embed/frame/liveCheck'
 import type { FrameFit, FrameNotice, FrameVariant } from '~/lib/embed/frame/types'
 import { embedSnippet } from '~/lib/embed/snippet'
 import { exportEmbedHtml, downloadEmbed } from '~/lib/embed/export'
@@ -5169,13 +5169,15 @@ async function buildWebExport() {
         const bundleJs = await io.bundleText(embed.bundle)
         const label = wiredSlots.find(s => s.slot === slot)?.label ?? `Layer ${slot + 1}`
         // The check pulls the source as frame pulls do, under the same bracket: no preview render
-        // and no other build's pull may interleave with its reads of the source's canvas.
+        // and no other build's pull may interleave with its reads of the source's canvas. Both the
+        // lock and the stopped preview are held until the check's own pulls have settled — past a
+        // timeout too — so an orphaned pull can never land inside the frames fallback's pulls.
         const shared = !live.openExport
         if (shared && webExportPulls++ === 0) stopLive()
         const t0 = performance.now()
         let result: LiveCheckResult
         try {
-          result = await withSourcePull(live, () => checkLiveEmbed(live, embed, bundleJs))
+          result = await checkLiveEmbedLocked(live, embed, bundleJs)
         } finally { if (shared && --webExportPulls === 0 && !unmounted) startLive() }
         const ms = Math.round(performance.now() - t0)
         webExportLiveChecks.set(slot, { source: live, key, ok: result.ok })

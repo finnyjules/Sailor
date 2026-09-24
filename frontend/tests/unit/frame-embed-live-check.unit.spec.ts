@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { checkLiveEmbed, liveCheckTimes, LIVE_CHECK_AT } from '~/lib/embed/frame/liveCheck'
+import { checkLiveEmbedLocked, pullSourceFrames } from '~/lib/embed/frame/appIO'
 import type { StudioEmbed, StudioFrameSource } from '~/lib/studio/frameSource'
 
 const STUB_BUNDLE = `
@@ -164,5 +165,72 @@ describe('checkLiveEmbed', () => {
       if (had) Object.defineProperty(document, 'fonts', had)
       else delete (document as any).fonts
     }
+  })
+})
+
+// Final review M-1: a check that times out resolves while its own source pull may still be running.
+// The source must stay locked (and the preview stopped) until that pull has actually settled, so the
+// frames fallback that follows can never interleave with it.
+describe('a timed-out check keeps the source until its pull settles', () => {
+  /** A source whose first pull hangs until `release()`; every later pull answers at once. */
+  function stalledSource() {
+    let release!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    const events: string[] = []
+    let n = 0
+    const source = fakeSource({
+      getFrame: vi.fn(async (t01: number, w: number, h: number) => {
+        const i = n++
+        events.push(`pull ${i} start`)
+        if (i === 0) await gate
+        events.push(`pull ${i} end`)
+        return { width: w, height: h, __v: Math.round(t01 * 100) } as unknown as TexImageSource
+      }) as any,
+    })
+    return { source, events, release }
+  }
+
+  it('checkLiveEmbed: the result comes at the timeout; `settled` only once the pull has landed', async () => {
+    const { source, events, release } = stalledSource()
+    const check = checkLiveEmbed(source, embedOf(), STUB_BUNDLE, { timeoutMs: 30 })
+    let settled = false
+    void check.settled.then(() => { settled = true })
+    const r = await check
+    expect(r.reason).toMatch(/timed out/)
+    await new Promise(res => setTimeout(res, 40))
+    expect(settled).toBe(false)
+    release()
+    await check.settled
+    expect(settled).toBe(true)
+    // The orphaned pull stopped there: no further pulls, nothing mounted.
+    expect(events).toEqual(['pull 0 start', 'pull 0 end'])
+    expect(log).toEqual([])
+  })
+
+  it('checkLiveEmbed: `settled` also resolves for a check that finished normally', async () => {
+    const check = checkLiveEmbed(fakeSource(), embedOf(), STUB_BUNDLE)
+    expect((await check).ok).toBe(true)
+    await expect(check.settled).resolves.toBeUndefined()
+  })
+
+  it('checkLiveEmbedLocked: the frames fallback\'s pulls wait for the timed-out check\'s pull to land', async () => {
+    const { source, events, release } = stalledSource()
+    const checked = checkLiveEmbedLocked(source, embedOf(), STUB_BUNDLE, { timeoutMs: 30 })
+    // The fallback queues on the same source straight away, as buildWebExport's gatherer does.
+    const pulled = pullSourceFrames(source, 2, 64, {
+      encode: async () => 'frame',
+      copy: (surface) => surface as unknown as CanvasImageSource,
+    })
+    // Well past the timeout: the check has its answer, but its pull is still out — the fallback
+    // must not have started a pull of its own.
+    await new Promise(res => setTimeout(res, 80))
+    expect(events).toEqual(['pull 0 start'])
+    release()
+    const r = await checked
+    expect(r.ok).toBe(false)
+    expect(r.reason).toMatch(/timed out/)
+    expect(await pulled).toEqual({ frames: ['frame', 'frame'], failures: [] })
+    // Strictly one after the other: the orphan landed before the fallback's first pull began.
+    expect(events).toEqual(['pull 0 start', 'pull 0 end', 'pull 1 start', 'pull 1 end', 'pull 2 start', 'pull 2 end'])
   })
 })
