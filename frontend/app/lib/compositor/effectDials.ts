@@ -91,6 +91,7 @@ export const EFFECT_DIAL_SCHEMA: Record<EffectKind, DialSpec[]> = {
   shader: [num('speed', 'Speed', 0, 4)], // effectId/params/seed/id excluded.
   // ── pixel — post (F4) ────────────────────────────────────────────────────────────
   bloom: [num('threshold', 'Threshold', 0, 1), num('radius', 'Radius', 0, 0.5), num('intensity', 'Intensity', 0, 2)],
+  halation: [num('amount', 'Amount', 0, 1.5), num('spread', 'Spread', 0.3, 2)],
   vignette: [num('amount', 'Amount', 0, 1), num('size', 'Size', 0, 1), num('softness', 'Softness', 0, 1)],
   grain: [num('amount', 'Amount', 0, 1), num('size', 'Size', 1, 8)],
   // Torn edge distances are in px (not normalised, unlike everything else) — ranges reflect that.
