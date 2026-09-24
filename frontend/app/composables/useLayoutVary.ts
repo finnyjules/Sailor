@@ -5,6 +5,7 @@ import type { LayoutEditor, LayoutPlan, LayoutPlanArgs, StoredRoles } from '~/li
 import { axisValue, closestFirst, DEFAULT_CHOICE, sameChoice } from '~/lib/frame/patterns/kit/vary'
 import type { Candidate, Choice } from '~/lib/frame/patterns/kit/vary'
 import type { BrandLogo, Measure } from '~/lib/frame/patterns/kit/types'
+import type { MeasurePool } from '~/lib/frame/patterns/kit/measure'
 import { contentHints } from '~/lib/frame/patterns/kit/content'
 import type { ContentTag, ContentTags } from '~/lib/frame/patterns/kit/content'
 import { isOwned } from '~/lib/frame/patterns/kit/owned'
@@ -206,8 +207,8 @@ export function formatNotes(fmt: FrameFormat): string[] {
   return notes
 }
 
-/** Idle scheduling, with a timeout fallback (tests, Safari). */
-function whenIdle(fn: () => void): () => void {
+/** Idle scheduling, with a timeout fallback (tests, Safari). Returns a cancel. */
+export function whenIdle(fn: () => void): () => void {
   const w = typeof window !== 'undefined' ? (window as Window & { requestIdleCallback?: (cb: () => void) => number; cancelIdleCallback?: (h: number) => void }) : null
   if (w?.requestIdleCallback) { const h = w.requestIdleCallback(fn); return () => w.cancelIdleCallback?.(h) }
   const t = setTimeout(fn, 0)
@@ -327,15 +328,22 @@ export function useLayoutVary(src: LayoutVarySource): {
    *  accent copy of that line (ruling D2) and the copy no longer shows its words, the layout is
    *  applied again, folded into the edit's own history step. True when it re-applied or tried to. */
   textEdited(id: string): boolean
-  /** Stage 5, Make a set: the formats ticked for the set (`sailor_posterState.set.formats`), in
-   *  `FRAME_FORMATS` order; unknown ids left out. */
+  /** Stage 5, Make a set: the formats ticked for the set (`sailor_layoutSet.formats`; a Frame saved
+   *  before reads `sailor_posterState.set.formats`), in `FRAME_FORMATS` order; unknown ids left out. */
   setFormats: ComputedRef<string[]>
-  /** Remember the ticked formats on the Frame — UI memory, NOT a history step (and not one of the
-   *  editor's `LAYOUT_KEYS`, so an undo leaves the selection as it is). */
+  /** Remember the ticked formats on the Frame (`sailor_layoutSet`) — UI memory, NOT a history step,
+   *  and never a write of the layout record (`sailor_posterState`) except to drop an old `set`. */
   setSetFormats(ids: readonly string[]): void
   /** The Frame's applied layout planned at each format (`planSet`), with the same inputs the tab
-   *  plans with. Pure: the Frame is never written. [] when no layout is applied. */
-  planSet(formats: readonly string[]): SetEntry[]
+   *  plans with. Pure: the Frame is never written. [] when no layout is applied. `measures`: one
+   *  measure pool for the whole set (`makeMeasurePool`), so its plans share one cache. */
+  planSet(formats: readonly string[], o?: { measures?: MeasurePool }): SetEntry[]
+  /** Everything a set is planned from, by identity (each write makes a new array or object) or as
+   *  small values: the layers, draw order, background, groups, grid and size record; the layout
+   *  record's layout, variation, style, roles and tags; the design size; the connected slots; the
+   *  font revision; the tab's pickers and the brand's logo and accent. Equal, element by element:
+   *  the set planned from it is still current. */
+  setInputs(): unknown[]
 } {
   const stored = src.props()?.sailor_posterState as PosterState | undefined
 
@@ -899,29 +907,52 @@ export function useLayoutVary(src: LayoutVarySource): {
   }
 
   // ── Make a set (Stage 5) ──
+  // The ticks live in their own property (`sailor_layoutSet`), NOT in `sailor_posterState`: a tick
+  // must not replace the layout record, whose identity a suggested face's late re-apply compares
+  // (`frameMark`). A Frame saved before that keeps its ticks in `sailor_posterState.set`: read once
+  // when there is no `sailor_layoutSet`, and dropped from the record on the next tick.
   const setFormats = computed<string[]>(() => {
-    const st = src.props()?.sailor_posterState as { set?: { formats?: unknown } } | undefined
-    const ids = Array.isArray(st?.set?.formats) ? new Set(st.set.formats as unknown[]) : null
+    const p = src.props()
+    const own = p?.sailor_layoutSet as { formats?: unknown } | undefined
+    const old = (p?.sailor_posterState as { set?: { formats?: unknown } } | undefined)?.set
+    const list = own ? own.formats : old?.formats
+    const ids = Array.isArray(list) ? new Set(list as unknown[]) : null
     return ids ? FRAME_FORMATS.filter(f => ids.has(f.id)).map(f => f.id) : []
   })
   function setSetFormats(ids: readonly string[]) {
     const p = src.props(); if (!p) return
     const want = new Set(ids)
     const formats = FRAME_FORMATS.filter(f => want.has(f.id)).map(f => f.id)
-    p.sailor_posterState = { ...(p.sailor_posterState as object | undefined), set: { formats } }
+    p.sailor_layoutSet = { formats }
+    const st = p.sailor_posterState as Record<string, unknown> | undefined
+    if (st && 'set' in st) { const { set: _old, ...rest } = st; p.sailor_posterState = rest }
   }
-  function planSet(formats: readonly string[]): SetEntry[] {
+  function planSet(formats: readonly string[], o: { measures?: MeasurePool } = {}): SetEntry[] {
     const st = src.props()?.sailor_posterState as PosterState | undefined
     const id = st?.patternId
     const s = styleOfLayout(id)
     if (!id || !s || !formats.length) return []
-    return planSetKit({ ...baseArgs(), style: s, layoutId: id, choice: { ...DEFAULT_CHOICE, ...(st?.choice ?? {}) }, formats: [...formats] })
+    return planSetKit({
+      ...baseArgs(), style: s, layoutId: id, choice: { ...DEFAULT_CHOICE, ...(st?.choice ?? {}) }, formats: [...formats],
+      ...(o.measures ? { measures: o.measures } : {}),
+    })
+  }
+  function setInputs(): unknown[] {
+    const p = src.props()
+    const st = p?.sailor_posterState as (PosterState & { tags?: ContentTags }) | undefined
+    const small = (v: unknown) => JSON.stringify(v ?? null)
+    return [
+      p?.sailor_localLayers, p?.sailor_stackOrder, p?.sailor_localBg, p?.sailor_localGroups, p?.sailor_localGrid, p?.sailor_frame,
+      st?.patternId ?? null, small(st?.choice), st?.style ?? null, small(st?.roles), small(st?.tags),
+      src.frameW(), src.frameH(), src.connectedSlots().join(','), fontRev.value,
+      small(paletteMode.value), small(shapeMode.value), imageMode.value, brandLogo.value ?? null, brandAccent.value ?? null,
+    ]
   }
 
   return {
     layoutId, index, applied, candidates, library, choices, select, vary, jump, setChoice,
     shapeMode, setShapeMode, imageMode, setImageMode, paletteMode, setPaletteMode, format,
     style, setStyle, libraryDone, hasTitle, roleIds, titleId, suggestedFace, applySuggestedFace, brandLogo,
-    content, hints, setTag, textEdited, setFormats, setSetFormats, planSet,
+    content, hints, setTag, textEdited, setFormats, setSetFormats, planSet, setInputs,
   }
 }

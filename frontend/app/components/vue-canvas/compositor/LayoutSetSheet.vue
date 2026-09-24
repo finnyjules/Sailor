@@ -6,6 +6,9 @@
 // (`useLayoutSet`), and answers `send` (one format to the canvas), `download`, `cancel` (the
 // download) and `close`. Nothing here writes the Frame. While a download runs the footer shows its
 // progress (`Rendering 3 of 7…`) and a Cancel; afterwards each format that failed is named.
+// A format not planned yet (`pending`) shows a placeholder until its plan lands. A tile leaves out
+// the Frame's post effects and paints shader fills at preview quality; the footer says the download
+// adds them (`effectsInDownload`) when the Frame has any.
 import { computed, ref } from 'vue'
 import { X } from 'lucide-vue-next'
 import LayoutTile from '~/components/vue-canvas/compositor/LayoutTile.vue'
@@ -15,12 +18,14 @@ import { FRAME_FORMATS, keepKind } from '~/lib/frame/formats'
 import type { FrameFormat } from '~/lib/frame/formats'
 import { tileSize } from '~/lib/frame/patterns/tileSize'
 import type { SetEntry } from '~/lib/frame/patterns/kit/set'
+import type { LayoutPlan } from '~/lib/frame/patterns/kit/plan'
+import type { SheetEntry } from '~/composables/useLayoutSet'
 import type { WiredContentProvider } from '~/composables/useCompositorLayers'
 import type { Paint } from '~/lib/compositor/paint'
 import type { SetExportFailure } from '~/lib/frame/layoutSetExport'
 
 const props = defineProps<{
-  entries: SetEntry[]
+  entries: SheetEntry[]
   /** The Frame's own layout's name. */
   layoutName: string
   /** The Frame moves: the set is its stills ("Stills only for now."). */
@@ -33,6 +38,8 @@ const props = defineProps<{
   failures?: SetExportFailure[]
   /** The last download's outcome when nothing was saved (`Download cancelled.`). */
   notice?: string
+  /** The Frame has post effects or shader fills, which the tiles leave out and the download adds. */
+  effectsInDownload?: boolean
 }>()
 const emit = defineEmits<{
   (e: 'send', formatId: string): void
@@ -47,8 +54,8 @@ const TILE_MAX = 180
 const WIDE = 3
 const tileMax = (e: SetEntry) => (e.w / e.h >= WIDE ? TILE_MAX * 2 : TILE_MAX)
 
-type Kind = 'kept' | 'swapped' | 'none'
-const kindOf = (e: SetEntry): Kind => (!e.plan || !e.layers ? 'none' : e.swapped ? 'swapped' : 'kept')
+type Kind = 'kept' | 'swapped' | 'none' | 'pending'
+const kindOf = (e: SheetEntry): Kind => (e.pending ? 'pending' : !e.plan || !e.layers ? 'none' : e.swapped ? 'swapped' : 'kept')
 function chip(e: SetEntry): string {
   const k = kindOf(e)
   if (k === 'none') return 'Nothing fits this format'
@@ -57,7 +64,7 @@ function chip(e: SetEntry): string {
 }
 
 const counts = computed(() => {
-  const c = { kept: 0, swapped: 0, none: 0 }
+  const c = { kept: 0, swapped: 0, none: 0, pending: 0 }
   for (const e of props.entries) c[kindOf(e)]++
   return c
 })
@@ -76,7 +83,9 @@ const summary = computed(() => {
 })
 /** Only the formats something fits are exported. */
 const exportable = computed(() => counts.value.kept + counts.value.swapped)
-const downloadLabel = computed(() => `Download ${exportable.value} ${exportable.value === 1 ? 'image' : 'images'}`)
+/** While formats are still being planned the count is not known yet (the download plans them first). */
+const downloadLabel = computed(() => counts.value.pending ? 'Download images'
+  : `Download ${exportable.value} ${exportable.value === 1 ? 'image' : 'images'}`)
 const downloading = computed(() => props.progress != null)
 
 // ── the covered areas: each format's keep-clear bands, over its tile ──
@@ -84,13 +93,20 @@ const showCovered = ref(false)
 const formatOf = (id: string): FrameFormat | undefined => FRAME_FORMATS.find(f => f.id === id)
 const anyCovered = computed(() => props.entries.some(e => !!formatOf(e.formatId)?.keep))
 
-interface Tile { e: SetEntry; kind: Kind; size: { w: number; h: number }; max: number; fmt?: FrameFormat }
+interface Tile { e: SheetEntry; kind: Kind; size: { w: number; h: number }; max: number; fmt?: FrameFormat }
 const tiles = computed<Tile[]>(() => props.entries.map((e) => {
   const max = tileMax(e)
   return { e, kind: kindOf(e), size: tileSize(e.w, e.h, max, max), max, fmt: formatOf(e.formatId) }
 }))
-/** What `LayoutTile` paints: the plan's draw order over the layers the apply would commit. */
-const tilePlan = (e: SetEntry) => ({ ...e.plan!, layers: e.layers! })
+/** What `LayoutTile` paints: the plan's draw order over the layers the apply would commit. One
+ *  object per entry, kept while the entry is (a tile repaints when its `plan` changes identity —
+ *  never on a re-render of the sheet, such as each download progress step). */
+const tilePlans = new WeakMap<SetEntry, LayoutPlan>()
+function tilePlan(e: SetEntry): LayoutPlan {
+  let p = tilePlans.get(e)
+  if (!p) { p = { ...e.plan!, layers: e.layers! }; tilePlans.set(e, p) }
+  return p
+}
 </script>
 
 <template>
@@ -120,8 +136,14 @@ const tilePlan = (e: SetEntry) => ({ ...e.plan!, layers: e.layers! })
           v-for="t in tiles" :key="t.e.formatId"
           class="flex flex-col items-center gap-1.5" data-testid="layout-set-tile" :data-format="t.e.formatId" :data-kind="t.kind">
           <div class="relative" :style="{ width: `${t.size.w}px` }">
+            <template v-if="t.kind === 'pending'">
+              <div
+                class="flex items-center justify-center rounded-md ring-1 ring-white/10 bg-white/[0.03] text-[11px] text-white/45"
+                :style="{ width: `${t.size.w}px`, height: `${t.size.h}px` }" data-testid="layout-set-pending">Planning…</div>
+              <div class="mt-1 text-center text-[11px] text-white/55 truncate" :title="t.e.label">{{ t.e.label }}</div>
+            </template>
             <LayoutTile
-              v-if="t.kind !== 'none'"
+              v-else-if="t.kind !== 'none'"
               :plan="tilePlan(t.e)" :frame-w="t.e.w" :frame-h="t.e.h" :max-px="t.max"
               :background="background" :groups="t.e.groups ?? undefined" :wired-content="wiredContent"
               :label="t.e.label" :pickable="false"
@@ -138,11 +160,12 @@ const tilePlan = (e: SetEntry) => ({ ...e.plan!, layers: e.layers! })
             </div>
           </div>
           <span
+            v-if="t.kind !== 'pending'"
             class="max-w-[220px] truncate rounded px-1.5 py-0.5 text-[11px]"
             :class="t.kind === 'swapped' ? 'bg-amber-400/15 text-amber-300' : t.kind === 'none' ? 'bg-white/[0.04] text-white/45' : 'bg-white/[0.06] text-white/70'"
             :title="chip(t.e)" data-testid="layout-set-chip">{{ chip(t.e) }}</span>
           <button
-            v-if="t.kind !== 'none'" type="button"
+            v-if="t.kind === 'kept' || t.kind === 'swapped'" type="button"
             class="h-7 px-2.5 rounded text-[11px] font-medium cursor-pointer bg-white/[0.06] hover:bg-white/12 text-white/80"
             data-testid="layout-set-send" @click="emit('send', t.e.formatId)">Send to canvas</button>
         </div>
@@ -151,6 +174,7 @@ const tilePlan = (e: SetEntry) => ({ ...e.plan!, layers: e.layers! })
 
     <div class="flex flex-wrap items-center gap-2 px-4 py-3 border-t border-white/10">
       <span v-if="hasMotion" class="text-[11px] text-white/45" data-testid="layout-set-stills">Stills only for now.</span>
+      <span v-if="effectsInDownload" class="text-[11px] text-white/45" data-testid="layout-set-effects">Effects and shader fills are added in the download.</span>
       <span v-if="notice && !downloading" class="text-[11px] text-white/55" data-testid="layout-set-notice">{{ notice }}</span>
       <span
         v-for="f in (downloading ? [] : failures ?? [])" :key="f.formatId"
@@ -171,7 +195,7 @@ const tilePlan = (e: SetEntry) => ({ ...e.plan!, layers: e.layers! })
         v-if="!downloading"
         type="button"
         class="h-8 px-3 rounded text-[12px] font-medium cursor-pointer disabled:opacity-50 bg-white hover:bg-white/90 text-neutral-900"
-        data-testid="layout-set-download" :disabled="!exportable"
+        data-testid="layout-set-download" :disabled="!exportable && !counts.pending"
         @click="emit('download')">{{ downloadLabel }}</button>
     </div>
   </div>

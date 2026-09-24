@@ -12,7 +12,7 @@ import { ARTIFACT_NODE_COMPONENTS, ARTIFACT_NODE_FOR_OUTPUT, fetchObjectInfo, ge
 import { useSubgraphNavigation } from '~/composables/useSubgraphNavigation'
 import { matchStylesInText, type CanvasSnapshot, type StyleLite } from '~/lib/agent/surfaces/canvas'
 import { planFrameFromSelection, MAX_FRAME_LAYERS } from '~/lib/canvas/combineFrame'
-import { frameCardSize, placeRightOf, sentFrameData, sentFrameEdges, sentFrameToast } from '~/lib/frame/layoutSetSend'
+import { frameCardSize, placeRightOf, sendFailedToast, sentFrameData, sentFrameEdges, sentFrameToast } from '~/lib/frame/layoutSetSend'
 import { computeRunLeafIds } from '~/lib/canvas/runLeaves'
 import { edgeTopologyKey } from '~/lib/canvas/edgeTopologyKey'
 import type { Command } from '~/lib/agent/commandSurface'
@@ -3479,7 +3479,7 @@ function handleFrameSendToCanvas(e: Event) {
   const src = (nodes.value as any[]).find(n => String(n.id) === String(detail?.nodeId))
   if (!src || !detail?.entry) return
   const data = sentFrameData(src.data, detail.entry)
-  if (!data) return
+  if (!data) { toast.error(sendFailedToast(detail.entry)); return }
   const id = mintNodeId()
   const size = frameCardSize(data.properties?.sailor_frame?.displayEdge, detail.entry.w, detail.entry.h)
   const position = placeRightOf(src, nodes.value as any[], size)

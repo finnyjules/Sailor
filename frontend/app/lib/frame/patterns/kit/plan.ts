@@ -19,6 +19,7 @@ import type { FrameFormat, KeepClear } from '~/lib/frame/formats'
 import { makeSheet, splitDateRange } from './sheet'
 import type { Sheet, SheetOpts } from './sheet'
 import { makeCanvasMeasure } from './measure'
+import type { MeasurePool } from './measure'
 import { boxOf, checkPlan, checkSideRunOff, freeRects, inkBoxOf } from './check'
 import type { Box } from './check'
 import { elementsToOps } from './toOps'
@@ -61,6 +62,10 @@ export interface LayoutPlanArgs {
   shapeMode?: FrameElements['shapeMode']
   /** Injected in tests; default: the renderer-exact canvas measure over the frame's role layers. */
   measure?: Measure
+  /** Stage 5 (a set): where the default canvas measure comes from — one pool shared by every plan
+   *  of the set (`makeMeasurePool`), so they share its cache. Absent: a fresh canvas measure per
+   *  plan, as before. Ignored when `measure` is given. */
+  measures?: MeasurePool
   /** The style (Stage 3): its type on the sheet and its level order for a format's `carries`.
    *  Absent: `'swiss'` — Stages 1–2 exactly. */
   style?: StyleId
@@ -232,7 +237,7 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
   const captionFace = layerOf('caption') ?? layerOf('by') ?? layerOf('list') ?? layerOf('statline') ?? layerOf('rating') ?? layerOf('them')
   const contentFaces: Partial<Record<RoleKey, TextLayer>> = {}
   if (contentView) for (const r of NEW_TEXT_ROLES) { const l = layerOf(r); if (l) contentFaces[r] = l }
-  const measure = a.measure ?? makeCanvasMeasure({
+  const measure = a.measure ?? (a.measures ?? makeCanvasMeasure)({
     title: layerOf('title'), details: layerOf('details') ?? layerOf('quote') ?? layerOf('stat'), date: layerOf('date'),
     caption: captionFace,
     action: layerOf('action'),

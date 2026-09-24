@@ -27,9 +27,14 @@ export function sentFrameName(source: { title?: unknown; subgraphName?: unknown 
   return `${frameDisplayName(source)} · ${entry.label}`
 }
 
-/** The toast after a send. */
+/** The toast after a send: the new Frame's own name, quoted. */
 export function sentFrameToast(source: { title?: unknown; subgraphName?: unknown } | null | undefined, entry: Pick<SetEntry, 'label'>): string {
-  return `Added “${frameDisplayName(source)}” · ${entry.label} to the canvas.`
+  return `Added “${sentFrameName(source, entry)}” to the canvas.`
+}
+
+/** The toast when a send could not be made (`sentFrameData` gave nothing). */
+export function sendFailedToast(entry: Pick<SetEntry, 'label'>): string {
+  return `Couldn't send ${entry.label} to the canvas.`
 }
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) // JSON: the editor hands Vue proxies
@@ -48,7 +53,9 @@ export function sentFrameData(source: Record<string, any>, entry: SetEntry): Rec
   p.sailor_stackOrder = [...entry.plan.order]
   // The source's picker state (shape, image, palette, tags) is kept: it is what the set planned
   // with. The layout, its variation, roles, style and placed lines are this plan's. The source's
-  // set ticks and list position (`index`, a place in another size's list) are not carried.
+  // set ticks (`sailor_layoutSet`, and the older `sailor_posterState.set`) and list position
+  // (`index`, a place in another size's list) are not carried.
+  delete p.sailor_layoutSet
   const { set: _set, index: _index, placed: _placed, ...keep } = (p.sailor_posterState ?? {}) as Record<string, any>
   const ps = entry.plan.posterState
   const def = layoutById(ps.patternId)

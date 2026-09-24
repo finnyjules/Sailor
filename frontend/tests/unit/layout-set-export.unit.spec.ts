@@ -115,6 +115,20 @@ describe('zipBlobs', () => {
   })
 })
 
+describe('the tiles leave out effects and shader fills: the footer note', () => {
+  it('is shown for a post effect that is on, or a shader fill on a layer or the background', async () => {
+    const { effectsInDownload } = await import('~/lib/frame/layoutSetExport')
+    const shader = { type: 'shader', a: '#000', b: '#fff', density: 1, shader: { effectId: 'prism' } }
+    expect(effectsInDownload([], [{ id: 't', kind: 'text', color: '#111' }], '#fff')).toBe(false)
+    expect(effectsInDownload([{ visible: false }], [], '#fff')).toBe(false)
+    expect(effectsInDownload([{ visible: true }], [], '#fff')).toBe(true)
+    expect(effectsInDownload([], [{ id: 'r', kind: 'rect', fill: shader }], '#fff')).toBe(true)
+    expect(effectsInDownload([], [{ id: 't', kind: 'text', stroke: { paint: shader } }], undefined)).toBe(true)
+    expect(effectsInDownload(undefined, [], shader)).toBe(true)
+    expect(effectsInDownload([], [{ id: 'r', kind: 'rect', fill: { type: 'shader', a: '#000', density: 1 } }], '#fff')).toBe(false)
+  })
+})
+
 describe('useLayoutSet — download', () => {
   function openedSet(entries: SetEntry[] = SET) {
     const set = useLayoutSet({ formats: () => entries.map(e => e.formatId), plan: () => entries })

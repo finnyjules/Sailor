@@ -3,7 +3,7 @@
 // pieces, name, source untouched), the wired-slot edges, the placement, and the toast.
 import { describe, it, expect } from 'vitest'
 import {
-  frameCardSize, placeRightOf, sentFrameData, sentFrameEdges, sentFrameName, sentFrameToast,
+  frameCardSize, placeRightOf, sendFailedToast, sentFrameData, sentFrameEdges, sentFrameName, sentFrameToast,
 } from '~/lib/frame/layoutSetSend'
 import { FRAME_FORMATS, formatFor } from '~/lib/frame/formats'
 import { framePresetId, readFrameSize } from '~/lib/frame/frameSize'
@@ -33,6 +33,7 @@ function source() {
         shapeMode: { family: 'blob' }, imageMode: true, palette: ['#111111'], tags: { t1: 'title' },
         set: { formats: ['meta-story', 'ad-300x250'] },
       },
+      sailor_layoutSet: { formats: ['meta-story', 'ad-300x250'] },
     },
   }
 }
@@ -103,6 +104,7 @@ describe('sentFrameData — the new Frame node', () => {
     expect(st.palette).toEqual(['#111111'])
     expect(st.set).toBeUndefined()
     expect(st.index).toBeUndefined()
+    expect(d.properties.sailor_layoutSet).toBeUndefined()
   })
 
   it('a Swiss layout is remembered as Swiss, with no stale placed lines', () => {
@@ -144,11 +146,18 @@ describe('sentFrameData — the new Frame node', () => {
 })
 
 describe('names and toast', () => {
-  it('names the new Frame and says what was added, quoting the Frame’s name', () => {
+  it('names the new Frame and says what was added, quoting the new Frame’s own name', () => {
     const label = FRAME_FORMATS.find(f => f.id === 'meta-story')!.label
     expect(sentFrameName({ title: 'Summer sale' }, { label })).toBe(`Summer sale · ${label}`)
-    expect(sentFrameToast({ title: 'Summer sale' }, { label })).toBe(`Added “Summer sale” · ${label} to the canvas.`)
-    expect(sentFrameToast({}, { label })).toBe(`Added “Frame” · ${label} to the canvas.`)
+    expect(sentFrameToast({ title: 'Summer sale' }, { label })).toBe(`Added “Summer sale · ${label}” to the canvas.`)
+    expect(sentFrameToast({}, { label })).toBe(`Added “Frame · ${label}” to the canvas.`)
+    // …the name the new Frame is given.
+    expect(sentFrameToast(source(), entry('meta-story'))).toBe(`Added “${sentFrameData(source(), entry('meta-story'))!.title}” to the canvas.`)
+  })
+
+  it('says so when a send could not be made', () => {
+    const label = FRAME_FORMATS.find(f => f.id === 'meta-story')!.label
+    expect(sendFailedToast({ label })).toBe(`Couldn't send ${label} to the canvas.`)
   })
 })
 

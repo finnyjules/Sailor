@@ -125,3 +125,31 @@ export function makeCanvasMeasure(layers: Partial<Record<RoleKey, TextLayer>>): 
 
   return { w100, lines, capAbove: r => cap(r)[0], baseBelow: r => cap(r)[1] }
 }
+
+/** A planner's measure for one set of faces (`makeCanvasMeasure`'s argument). */
+export type MeasurePool = (layers: Partial<Record<RoleKey, TextLayer>>) => Measure
+
+/** What a canvas measure reads from a role's layer: its face (family, weight, axes) and its letter
+ *  case (its own, and the case a layout set on it — `makeCanvasMeasure`'s `ownCase`). Everything
+ *  else a probe sets itself (text, size, spacing, box). */
+function faceKey(l: TextLayer | undefined): unknown {
+  if (!l) return null
+  const prev = (l as { layoutPrev?: Record<string, { was: unknown; set: unknown }> }).layoutPrev?.textTransform
+  return [l.fontFamily, l.fontWeight, l.axes ?? null, l.textTransform ?? null, prev ? [prev.was ?? null, prev.set ?? null] : null]
+}
+
+/** One canvas measure per set of faces, kept for the pool's life — so every plan of a set (each
+ *  format, and a swapped layout that reads the Frame the same way) shares one measure and its
+ *  cache. Two readings that give a role different faces get two measures: each plan is measured in
+ *  exactly the faces `makeCanvasMeasure` would have been given. Make a new pool when the Frame's
+ *  faces may have changed (or loaded). */
+export function makeMeasurePool(make: (layers: Partial<Record<RoleKey, TextLayer>>) => Measure = makeCanvasMeasure): MeasurePool {
+  const pool = new Map<string, Measure>()
+  return (layers) => {
+    const roles = (Object.keys(layers) as RoleKey[]).filter(r => layers[r]).sort()
+    const key = JSON.stringify(roles.map(r => [r, faceKey(layers[r])]))
+    let m = pool.get(key)
+    if (!m) { m = make(layers); pool.set(key, m) }
+    return m
+  }
+}

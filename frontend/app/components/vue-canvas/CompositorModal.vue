@@ -48,7 +48,7 @@ import KeepClearOverlay from '~/components/vue-canvas/compositor/KeepClearOverla
 import LayoutSetSection from '~/components/vue-canvas/compositor/LayoutSetSection.vue'
 import LayoutSetSheet from '~/components/vue-canvas/compositor/LayoutSetSheet.vue'
 import { useLayoutSet } from '~/composables/useLayoutSet'
-import { mergeStackOrder } from '~/lib/frame/layoutSetExport'
+import { effectsInDownload, mergeStackOrder } from '~/lib/frame/layoutSetExport'
 import type { LayerGroup } from '~/lib/compositor/layerGroups'
 import { layoutById } from '~/lib/frame/patterns/layouts/catalog'
 import type { Choice } from '~/lib/frame/patterns/kit/vary'
@@ -1029,13 +1029,16 @@ const layoutVary = useLayoutVary({
   // The suggested title face loads the way the Title face picker loads a Google family.
   loadFace: (family) => { ensureGoogleFont(family) },
 })
-// Make a set (Stage 5): the set sheet — the Frame's layout planned at each ticked format, on open
-// and whenever the ticks change. Planning never writes the Frame.
-const layoutSet = useLayoutSet({ formats: () => layoutVary.setFormats.value, plan: f => layoutVary.planSet(f) })
+// Make a set (Stage 5): the set sheet — the Frame's layout planned at each ticked format, on open,
+// when the ticks change, and 300 ms after any change to what it is planned from while it is open.
+// Planning never writes the Frame.
+const layoutSet = useLayoutSet({ formats: () => layoutVary.setFormats.value, plan: (f, o) => layoutVary.planSet(f, o), inputs: () => layoutVary.setInputs() })
+// The tiles leave out post effects and final-quality shader fills; the sheet says the download adds them.
+const layoutSetEffects = computed(() => layoutSet.open.value && effectsInDownload(postEffects.value, localLayers.value, background.value))
 // Send to canvas (Stage 5 Task 4): this format's Frame as a new, independent Frame node beside this
 // one. The canvas owns the graph, so it is asked (`sailor:frameSendToCanvas`); this Frame is not written.
 function onLayoutSetSend(formatId: string) {
-  const entry = layoutSet.entries.value.find(e => e.formatId === formatId)
+  const entry = layoutSet.entryFor(formatId)   // planned from the Frame as it is now
   if (!entry?.plan || !entry.layers) return
   window.dispatchEvent(new CustomEvent('sailor:frameSendToCanvas', { detail: { nodeId: props.nodeId, entry } }))
 }
@@ -9512,7 +9515,7 @@ onUnmounted(() => {
       v-if="layoutSet.open.value && panelsVisible"
       :entries="layoutSet.entries.value" :layout-name="layoutName" :has-motion="hasMotion"
       :background="background" :wired-content="wiredContentForSlot"
-      :progress="layoutSet.progress.value" :failures="layoutSet.failures.value" :notice="layoutSet.notice.value"
+      :progress="layoutSet.progress.value" :failures="layoutSet.failures.value" :notice="layoutSet.notice.value" :effects-in-download="layoutSetEffects"
       @send="onLayoutSetSend" @download="onLayoutSetDownload" @cancel="layoutSet.cancelDownload" @close="layoutSet.close" />
 
     <!-- Right sidebar: floating glass properties panel -->

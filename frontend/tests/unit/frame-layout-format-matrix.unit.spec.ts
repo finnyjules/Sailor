@@ -206,6 +206,32 @@ describe('the format findings, pinned', () => {
         for (const image of [false, true]) expect(offeredOn('runoff', fid, kind, image), `${fid} ${kind} ${image}`).toBe(0)
   })
 
+  it('Run-off on the 728×90 and 320×50 banners with an image: the counts that fell to zero, pinned', () => {
+    // Fix 2026-09-24 (Run-off with the side image on the left): Run-off's title is anchored clear of
+    // the side image and fitted to the design columns beside it. Before, these counts were
+    // 728×90 word 2, sentence 6; 320×50 word 2, sentence 4 — every one a left-side variation that
+    // passed only because the title's start sat under the image. Anchored clear of it, the title no
+    // longer reaches the page's right edge, so each is refused with the measured reason below (the
+    // right side was already refused for the same reason). The phrase keeps its count.
+    const COUNTS: Record<string, Record<Kind, number>> = {
+      'ad-728x90': { word: 0, phrase: 2, sentence: 0 }, // before: 2 / 2 / 6
+      'ad-320x50': { word: 0, phrase: 6, sentence: 0 }, // before: 2 / 6 / 4
+    }
+    for (const [fid, byKind] of Object.entries(COUNTS)) {
+      for (const kind of ['word', 'phrase', 'sentence'] as Kind[]) expect(offeredOn('runoff', fid, kind, true), `${fid} ${kind}`).toBe(byKind[kind])
+      const f = FRAME_FORMATS.find(x => x.id === fid)!
+      const def = LAYOUTS.find(l => l.id === 'runoff')!
+      for (const kind of ['word', 'sentence'] as Kind[]) {
+        const a = argsFor(def, f, { format: fid, kind, image: true, content: 'dates' })
+        for (const lines of [0, 1, 2, 3]) for (const arr of [0, 1, 2]) for (const scale of ['full', 'quiet'] as const) {
+          const plan = planLayout({ ...a, choice: { lines, arr, scale, side: 'left' } })
+          if (!plan) continue
+          expect(plan.issues, `${fid} ${kind} ${lines}${arr}${scale}`).toContain('promise broken: title should run off the page')
+        }
+      }
+    }
+  })
+
   it('Ring is not offered on a 320×50 banner: its title on the ring would be 1.89, under the 2.81 floor (rule 2 covers rings)', () => {
     for (const image of [false, true]) expect(offeredOn('ring', 'ad-320x50', 'word', image)).toBe(0)
     // …and it still is where the ring's title clears the floor.

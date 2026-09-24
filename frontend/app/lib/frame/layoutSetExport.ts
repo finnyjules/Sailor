@@ -82,3 +82,22 @@ export async function runSetExport(entries: readonly SetEntry[], o: RunSetExport
   }
   return { files, failures, cancelled: false }
 }
+
+/** Whether `v` holds a shader fill anywhere (a `Fill` of type `shader` carrying its spec —
+ *  `fillIsShader`): a layer's fill, stroke, text or cell paint, or the background. */
+function holdsShaderFill(v: unknown, seen = new Set<unknown>()): boolean {
+  if (!v || typeof v !== 'object' || seen.has(v)) return false
+  seen.add(v)
+  if (Array.isArray(v)) return v.some(x => holdsShaderFill(x, seen))
+  const o = v as Record<string, unknown>
+  if (o.type === 'shader' && o.shader && typeof o.shader === 'object') return true
+  return Object.values(o).some(x => holdsShaderFill(x, seen))
+}
+
+/** The set sheet's footer note: a tile leaves out the Frame's post effects and paints shader fills
+ *  at preview quality, and the downloaded PNG adds them — true when the Frame has either (a post
+ *  effect that is not switched off, or a shader fill on a layer or the background). */
+export function effectsInDownload(postEffects: readonly { visible?: boolean }[] | null | undefined, layers: unknown, background: unknown): boolean {
+  if ((postEffects ?? []).some(e => e.visible !== false)) return true
+  return holdsShaderFill(layers) || holdsShaderFill(background)
+}

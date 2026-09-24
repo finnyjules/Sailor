@@ -12,7 +12,10 @@ import { useLayoutVary } from '~/composables/useLayoutVary'
 import { useLayoutSet } from '~/composables/useLayoutSet'
 import { FRAME_FORMATS, frameFormatGroup } from '~/lib/frame/formats'
 import { planLayout } from '~/lib/frame/patterns/kit/plan'
-import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
+import { makeMeasurePool, makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
+import { planSet as planSetKit } from '~/lib/frame/patterns/kit/set'
+import { createTextLayer } from '~/composables/useCompositorLayers'
+import type { TextLayer } from '~/composables/useCompositorLayers'
 import { DEFAULT_CHOICE } from '~/lib/frame/patterns/kit/vary'
 import type { Choice } from '~/lib/frame/patterns/kit/vary'
 import type { SetEntry } from '~/lib/frame/patterns/kit/set'
@@ -93,19 +96,64 @@ describe('LayoutSetSection — Make a set', () => {
 // ── the remembered selection, and the set's planning ──
 
 describe('useLayoutVary — the set', () => {
-  it('ticking persists on the Frame (sailor_posterState.set) without a history step', () => {
+  it('ticking persists on the Frame (sailor_layoutSet) without a history step, and leaves the layout record alone', () => {
     const { props, editor, remember, vary } = appliedFrame('sentence', 'runoff', RUNOFF)
-    const before = { ...(props.sailor_posterState as object) }
+    const record = props.sailor_posterState
+    const before = JSON.stringify(record)
     vary.setSetFormats(['meta-story', 'nope', 'meta-feed-1x1'])
-    expect((props.sailor_posterState as { set?: unknown }).set).toEqual({ formats: ['meta-feed-1x1', 'meta-story'] })
-    expect(props.sailor_posterState).toMatchObject(before)             // the layout record is kept
+    expect(props.sailor_layoutSet).toEqual({ formats: ['meta-feed-1x1', 'meta-story'] })
+    // The layout record is not replaced: a suggested face's pending re-apply compares its identity.
+    expect(props.sailor_posterState).toBe(record)
+    expect(JSON.stringify(props.sailor_posterState)).toBe(before)
     expect(vary.setFormats.value).toEqual(['meta-feed-1x1', 'meta-story'])
     for (const f of [editor.recordHistory, editor.commit, editor.writeOrder, editor.writeGroups, remember]) expect(f).not.toHaveBeenCalled()
   })
 
   it('reads a remembered selection back in table order, unknown ids left out', () => {
-    const { vary } = appliedFrame('sentence', 'runoff', RUNOFF, 'swiss', { set: { formats: ['ad-320x50', 'gone', 'meta-feed-4x5'] } })
+    const { props, vary } = appliedFrame('sentence', 'runoff', RUNOFF)
+    props.sailor_layoutSet = { formats: ['ad-320x50', 'gone', 'meta-feed-4x5'] }
     expect(vary.setFormats.value).toEqual(['meta-feed-4x5', 'ad-320x50'])
+  })
+
+  it('a Frame saved with its ticks in sailor_posterState.set reads them, and the next tick moves them out', () => {
+    const { props, vary } = appliedFrame('sentence', 'runoff', RUNOFF, 'swiss', { set: { formats: ['ad-320x50', 'gone', 'meta-feed-4x5'] } })
+    expect(vary.setFormats.value).toEqual(['meta-feed-4x5', 'ad-320x50'])
+    const st = props.sailor_posterState as Record<string, unknown>
+    vary.setSetFormats(['meta-story'])
+    expect(props.sailor_layoutSet).toEqual({ formats: ['meta-story'] })
+    expect('set' in (props.sailor_posterState as object)).toBe(false)
+    const { set: _set, ...rest } = st
+    expect(props.sailor_posterState).toEqual(rest)                      // everything else is kept
+    expect(vary.setFormats.value).toEqual(['meta-story'])
+  })
+
+  it('a tick does not cancel a suggested face\'s late re-apply', async () => {
+    // An Editorial Frame whose title is not in the suggested face: applying the face waits for it
+    // to load, then applies the layout again — only while the Frame (its layout record included)
+    // has not changed. Ticking a format meanwhile must not count as a change.
+    const base = { sailor_localLayers: frameLayers('sentence', { image: false, shape: false }), sailor_frame: { preset: SOURCE.id } } as Record<string, unknown>
+    const plan = planLayout({ props: base, frameW: SOURCE.w, frameH: SOURCE.h, palette, connectedSlots: [], measure: makeStubMeasure(), style: 'editorial', layoutId: 'edQuiet', choice: DEFAULT_CHOICE })!
+    const props: Record<string, unknown> = reactive({ ...base, sailor_localLayers: plan.layers, sailor_stackOrder: plan.order, sailor_posterState: { ...plan.posterState, style: 'editorial' } })
+    const editor = {
+      recordHistory: vi.fn(), historyRev: () => 1,
+      commit: vi.fn((n: unknown) => { props.sailor_localLayers = n }), writeOrder: vi.fn((o: unknown) => { props.sailor_stackOrder = o }), writeGroups: vi.fn(),
+    }
+    let loaded!: (ok: boolean) => void
+    const vary = useLayoutVary({
+      props: () => props, frameW: () => SOURCE.w, frameH: () => SOURCE.h, connectedSlots: () => [],
+      editor: () => editor as never, remember: vi.fn(), measure: makeStubMeasure(), active: () => true,
+      loadFont: () => new Promise<boolean>((r) => { loaded = r }),
+    })
+    vary.setStyle('editorial')
+    await nextTick()
+    expect(vary.suggestedFace.value).not.toBeNull()
+    expect(vary.applySuggestedFace()).toBe(true)
+    const commits = editor.commit.mock.calls.length
+    vary.setSetFormats(['meta-story'])                                  // ticked while the face loads
+    await Promise.resolve(); await Promise.resolve()
+    loaded(true)
+    for (let i = 0; i < 5; i++) await Promise.resolve()
+    expect(editor.commit.mock.calls.length).toBeGreaterThan(commits)   // the re-apply still ran
   })
 
   it('plans the Frame\'s applied layout at each format, and never writes the Frame', () => {
@@ -124,23 +172,145 @@ describe('useLayoutVary — the set', () => {
   })
 })
 
+describe('a set measures through one pool', () => {
+  it('the pool gives one measure per set of faces, and a new one for other faces', () => {
+    const make = vi.fn(() => makeStubMeasure())
+    const pool = makeMeasurePool(make)
+    const t = (o: Partial<TextLayer>) => createTextLayer({ fontFamily: 'Inter', fontWeight: 600, ...o }) as TextLayer
+    const a = pool({ title: t({ id: 'x', text: 'One', x: 0.1 }), caption: t({ id: 'c', fontWeight: 400 }) })
+    // Same faces (other text, place, size): the same measure.
+    expect(pool({ title: t({ id: 'x', text: 'Two', x: 0.7, fontSize: 0.3 }), caption: t({ id: 'c', fontWeight: 400 }) })).toBe(a)
+    expect(pool({ title: t({ id: 'x', fontWeight: 700 }), caption: t({ id: 'c', fontWeight: 400 }) })).not.toBe(a)
+    expect(pool({ title: t({ id: 'x', textTransform: 'uppercase' }), caption: t({ id: 'c', fontWeight: 400 }) })).not.toBe(a)
+    expect(pool({ title: t({ id: 'x' }) })).not.toBe(a)                  // another role set
+    expect(make).toHaveBeenCalledTimes(4)
+  })
+
+  it('planSet with a pool plans exactly as with its measure, building one measure for every format', () => {
+    const base = { sailor_localLayers: frameLayers('sentence', { image: false, shape: false }), sailor_frame: { preset: SOURCE.id } } as Record<string, unknown>
+    const plan = planLayout({ props: base, frameW: SOURCE.w, frameH: SOURCE.h, palette, connectedSlots: [], measure: makeStubMeasure(), style: 'swiss', layoutId: 'runoff', choice: RUNOFF })!
+    const props = { ...base, sailor_localLayers: plan.layers, sailor_stackOrder: plan.order, sailor_posterState: { ...plan.posterState, style: 'swiss' } }
+    const formats = ['meta-feed-1x1', 'meta-story', 'ad-300x250', 'ad-728x90']
+    const args = { props, frameW: SOURCE.w, frameH: SOURCE.h, palette, connectedSlots: [], style: 'swiss' as const, layoutId: 'runoff', choice: RUNOFF, formats }
+    const make = vi.fn(() => makeStubMeasure())
+    const pooled = planSetKit({ ...args, measures: makeMeasurePool(make) })
+    const direct = planSetKit({ ...args, measure: makeStubMeasure() })
+    expect(JSON.stringify(pooled)).toBe(JSON.stringify(direct))
+    expect(make).toHaveBeenCalled()
+    expect(make.mock.calls.length).toBeLessThanOrEqual(2)                // one per reading of the Frame, not per plan
+  })
+})
+
 describe('useLayoutSet — when the set is planned', () => {
-  it('plans on open and when the selection changes while open; never while closed', async () => {
-    const sel = reactive({ ids: ['meta-feed-1x1'] as string[] })
-    const plan = vi.fn((f: readonly string[]) => f.map(id => ({ formatId: id }) as SetEntry))
-    const set = useLayoutSet({ formats: () => sel.ids, plan })
-    sel.ids = ['meta-story']; await nextTick()
+  /** A set over a fake Frame: `plan` records each call; idle slices run when `runIdle` is called. */
+  function fakeSet(ids: string[]) {
+    const sel = reactive({ ids })
+    const frame = reactive({ layers: [{ id: 'a' }] as unknown[], choice: 'x' })
+    let n = 0
+    const plan = vi.fn((f: readonly string[], _o?: { measures?: unknown }) => f.map(id => ({ formatId: id, plan: { rev: n }, layers: [] }) as unknown as SetEntry))
+    const queue: (() => void)[] = []
+    const pools: unknown[] = []
+    const set = useLayoutSet({
+      formats: () => sel.ids, plan, inputs: () => [frame.layers, frame.choice],
+      idle: (fn) => { queue.push(fn); return () => { const i = queue.indexOf(fn); if (i >= 0) queue.splice(i, 1) } },
+      pool: () => { const p = () => ({}) as never; pools.push(p); return p },
+    })
+    const runIdle = () => { const fn = queue.shift(); fn?.() }
+    const edit = () => { n++; frame.layers = [...frame.layers] }
+    return { sel, frame, plan, set, queue, runIdle, edit, pools }
+  }
+  const ids = (set: ReturnType<typeof useLayoutSet>) => set.entries.value.map(e => [e.formatId, (e as { pending?: boolean }).pending ? 'pending' : (e.plan as unknown as { rev: number }).rev])
+
+  it('never plans while closed; on open, one format per idle slice, a placeholder until then', async () => {
+    const { sel, plan, set, runIdle, queue } = fakeSet(['meta-feed-1x1'])
+    sel.ids = ['meta-story', 'ad-300x250']; await nextTick()
     expect(plan).not.toHaveBeenCalled()
     set.openSet()
     expect(set.open.value).toBe(true)
-    expect(set.entries.value.map(e => e.formatId)).toEqual(['meta-story'])
-    sel.ids = ['meta-story', 'ad-300x250']; await nextTick()
-    expect(plan).toHaveBeenCalledTimes(2)
-    expect(set.entries.value.map(e => e.formatId)).toEqual(['meta-story', 'ad-300x250'])
+    expect(plan).not.toHaveBeenCalled()                                 // nothing blocks the open
+    expect(ids(set)).toEqual([['meta-story', 'pending'], ['ad-300x250', 'pending']])
+    expect(set.entries.value[0]).toMatchObject({ label: FRAME_FORMATS.find(f => f.id === 'meta-story')!.label, w: 1080, h: 1920 })
+    runIdle()
+    expect(plan).toHaveBeenCalledTimes(1)
+    expect(plan.mock.calls[0]![0]).toEqual(['meta-story'])               // one format per slice
+    expect(ids(set)).toEqual([['meta-story', 0], ['ad-300x250', 'pending']])
+    runIdle()
+    expect(ids(set)).toEqual([['meta-story', 0], ['ad-300x250', 0]])
+    expect(queue).toHaveLength(0)
     set.close()
     expect(set.entries.value).toEqual([])
     sel.ids = []; await nextTick()
     expect(plan).toHaveBeenCalledTimes(2)
+  })
+
+  it('a tick plans only the format it adds; the others are kept from the cache', async () => {
+    const { sel, plan, set, runIdle } = fakeSet(['meta-story'])
+    set.openSet(); runIdle()
+    sel.ids = ['meta-feed-1x1', 'meta-story']; await nextTick()
+    expect(ids(set)).toEqual([['meta-feed-1x1', 'pending'], ['meta-story', 0]])
+    runIdle()
+    expect(plan.mock.calls.map(c => c[0])).toEqual([['meta-story'], ['meta-feed-1x1']])
+    sel.ids = ['meta-story']; await nextTick()
+    sel.ids = ['meta-feed-1x1', 'meta-story']; await nextTick()
+    expect(ids(set)).toEqual([['meta-feed-1x1', 0], ['meta-story', 0]])
+    expect(plan).toHaveBeenCalledTimes(2)
+  })
+
+  it('every plan of one set of inputs shares one measure pool; a change makes a new one', async () => {
+    const { plan, set, runIdle, edit, pools } = fakeSet(['meta-story', 'ad-300x250'])
+    set.openSet(); runIdle(); runIdle()
+    expect(plan.mock.calls[0]![1]!.measures).toBe(plan.mock.calls[1]![1]!.measures)
+    const first = plan.mock.calls[0]![1]!.measures
+    edit(); set.flush()
+    expect(plan.mock.calls[2]![1]!.measures).not.toBe(first)
+    expect(pools.length).toBeGreaterThan(1)
+  })
+
+  it('follows the Frame while open: a change re-plans 300 ms after it settles, the old tiles shown meanwhile', async () => {
+    vi.useFakeTimers()
+    try {
+      const { plan, set, runIdle, edit, frame } = fakeSet(['meta-story'])
+      set.openSet(); runIdle()
+      expect(ids(set)).toEqual([['meta-story', 0]])
+      edit(); await nextTick()
+      vi.advanceTimersByTime(200)
+      edit(); await nextTick()                                             // still changing: the debounce restarts
+      vi.advanceTimersByTime(299)
+      expect(plan).toHaveBeenCalledTimes(1)
+      vi.advanceTimersByTime(1)
+      expect(ids(set)).toEqual([['meta-story', 0]])                        // shown until its re-plan lands
+      runIdle()
+      expect(plan).toHaveBeenCalledTimes(2)
+      expect(ids(set)).toEqual([['meta-story', 2]])
+      // A value that comes back to what was planned re-plans nothing.
+      const same = frame.layers
+      frame.choice = 'y'; await nextTick(); frame.choice = 'x'; await nextTick()
+      expect(frame.layers).toBe(same)
+      vi.advanceTimersByTime(300)
+      runIdle()
+      expect(plan).toHaveBeenCalledTimes(2)
+      // Closed: a change is not followed.
+      set.close()
+      edit(); await nextTick(); vi.advanceTimersByTime(1000); runIdle()
+      expect(plan).toHaveBeenCalledTimes(2)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('Send and Download use a plan current at the click: a pending re-plan is flushed first', async () => {
+    const { plan, set, runIdle, edit } = fakeSet(['meta-story', 'ad-300x250'])
+    set.openSet(); runIdle(); runIdle()
+    edit(); await nextTick()                                               // the debounce has not fired
+    const e = set.entryFor('ad-300x250')!
+    expect((e.plan as unknown as { rev: number }).rev).toBe(1)
+    expect(ids(set)).toEqual([['meta-story', 1], ['ad-300x250', 1]])
+    expect(plan).toHaveBeenCalledTimes(4)
+    // A change the watcher has not even seen yet is caught too.
+    edit()
+    const saved: string[][] = []
+    await set.download({ name: 'x', render: async en => new Blob([String((en.plan as unknown as { rev: number }).rev)]), zip: async f => { saved.push(await Promise.all(f.map(x => x.blob.text()))); return new Blob() }, save: () => {} })
+    expect(saved).toEqual([['2', '2']])
+    // Unplanned formats are planned at once too.
+    expect(set.entryFor('meta-feed-1x1')).toBeUndefined()
   })
 })
 
@@ -234,6 +404,40 @@ describe('LayoutSetSheet', () => {
   it('no switch when no ticked format has covered areas', () => {
     const wrap = mount(LayoutSetSheet, { props: { entries: [entry('meta-feed-1x1', 'kept')], layoutName: 'Run-off' }, global: { stubs } })
     expect(wrap.find('[data-testid="layout-set-covered"]').exists()).toBe(false)
+  })
+
+  it('a format not planned yet shows a placeholder: no chip, no Send, not counted', () => {
+    const f = FRAME_FORMATS.find(x => x.id === 'meta-story')!
+    const pending = { ...entry('meta-story', 'none'), pending: true as const }
+    const wrap = mount(LayoutSetSheet, { props: { entries: [entry('meta-feed-1x1', 'kept'), pending], layoutName: 'Run-off' }, global: { stubs } })
+    const tile = wrap.get('[data-format="meta-story"]')
+    expect(tile.attributes('data-kind')).toBe('pending')
+    expect(tile.get('[data-testid="layout-set-pending"]').text()).toBe('Planning…')
+    expect(tile.text()).toContain(f.label)
+    expect(tile.find('[data-testid="layout-set-chip"]').exists()).toBe(false)
+    expect(tile.find('[data-testid="layout-set-send"]').exists()).toBe(false)
+    expect(wrap.get('[data-testid="layout-set-summary"]').text()).toBe('1 as Run-off')
+    expect(wrap.get('[data-testid="layout-set-download"]').text()).toBe('Download images')
+    expect(wrap.get('[data-testid="layout-set-download"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('each tile keeps one plan object across re-renders (a download\'s progress repaints nothing)', async () => {
+    const wrap = mount(LayoutSetSheet, { props: { entries, layoutName: 'Run-off' }, global: { stubs } })
+    const plans = () => wrap.findAllComponents({ name: 'LayoutTile' }).map(t => t.props('plan'))
+    const before = plans()
+    await wrap.setProps({ progress: 'Rendering 1 of 2…' })
+    await wrap.setProps({ progress: 'Rendering 2 of 2…' })
+    await wrap.setProps({ progress: null, entries: [...entries] })
+    const after = plans()
+    expect(after).toHaveLength(2)
+    after.forEach((p, i) => expect(p).toBe(before[i]))
+  })
+
+  it('says the download adds effects and shader fills, only when the Frame has them', async () => {
+    const wrap = mount(LayoutSetSheet, { props: { entries, layoutName: 'Run-off' }, global: { stubs } })
+    expect(wrap.find('[data-testid="layout-set-effects"]').exists()).toBe(false)
+    await wrap.setProps({ effectsInDownload: true })
+    expect(wrap.get('[data-testid="layout-set-effects"]').text()).toBe('Effects and shader fills are added in the download.')
   })
 
   it('shows the real set: kept, swapped and nothing-fits chips from the planner', () => {
