@@ -294,6 +294,25 @@ describe('LoRA dataset and bake-frame housekeeping', () => {
     expect(fs.existsSync(input('keep.png'))).toBe(true)
   })
 
+  it('a symlink inside input/ cannot carry a dataset folder outside it', async () => {
+    const sibling = path.join(root, 'sibling')
+    fs.mkdirSync(path.join(sibling, 'sub'), { recursive: true })
+    fs.writeFileSync(path.join(sibling, 'sub', 'precious.png'), 'x')
+    fs.symlinkSync(sibling, input('link'))
+    for (const folder of ['link/sub', 'link', 'link/missing/deeper']) {
+      expect(await post('/sailor/lora/clear_dataset', { folder }), folder).toMatchObject({ status: 400, body: { error: 'folder escapes input directory' } })
+    }
+    expect(await post('/sailor/lora/save_captions', { folder: 'link', captions: { 'a.png': 'leak' } }))
+      .toMatchObject({ status: 400, body: { error: 'folder escapes input directory' } })
+    expect(await post('/sailor/lora/save_captions', { folder: 'link/sub', captions: { 'b.png': 'leak' } })).toMatchObject({ status: 400 })
+    expect(fs.readdirSync(path.join(sibling, 'sub'))).toEqual(['precious.png'])
+    expect(fs.readdirSync(sibling).sort()).toEqual(['sub'])
+    // A symlink that stays inside input/ still works.
+    fs.mkdirSync(input('real', 'set'), { recursive: true })
+    fs.symlinkSync(input('real'), input('alias'))
+    expect(await post('/sailor/lora/save_captions', { folder: 'alias/set', captions: { 'c.png': 'ok' } })).toMatchObject({ status: 200, body: { written: 1 } })
+  })
+
   it('cleanup_frames deletes only bare slate frames at the top of input/, never a kept one', async () => {
     for (const n of ['slate_1_0001.png', 'slate_1_0002.png', 'slate_1_0003.png', 'photo.png']) fs.writeFileSync(input(n), 'x')
     fs.mkdirSync(input('sub'))

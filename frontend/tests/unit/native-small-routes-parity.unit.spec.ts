@@ -43,7 +43,8 @@ let input: string
 let bridge: string
 
 function python(calls: PyCall[]): PyResult[] {
-  const env: Record<string, string> = { ...process.env as Record<string, string>, HOME: home }
+  // PYTHONDONTWRITEBYTECODE: importing comfy_extras must not leave __pycache__ in the real checkout.
+  const env: Record<string, string> = { ...process.env as Record<string, string>, HOME: home, PYTHONDONTWRITEBYTECODE: '1' }
   delete env.HF_HOME
   delete env.HUGGINGFACE_HUB_CACHE
   const r = spawnSync(PYTHON, [ORACLE], {

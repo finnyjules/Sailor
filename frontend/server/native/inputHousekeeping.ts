@@ -11,8 +11,9 @@
  * on unnormalised paths), so on the Python side `folder: "../output"` passed
  * its guard and `clear_dataset` would `rmtree` the output folder; `"."` or
  * `"/"` named input/ itself. Here both are refused with the Python's own
- * `folder escapes input directory` 400 — escaping input/ always, and naming
- * input/ itself for a dataset clear.
+ * `folder escapes input directory` 400 — escaping input/ always (by `..` or
+ * through a symlink: real paths are compared), and naming input/ itself for a
+ * dataset clear.
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -75,7 +76,32 @@ export function safeDatasetFolder(inputDir: string, folder: string, allowRoot: b
   const normalized = normpath(folder).replace(/^[/\\]+/, '')
   const inside = resolveInside(inputDir, normalized)
   if (!inside || (!allowRoot && inside === path.resolve(inputDir))) throw new FolderEscapesError()
+  // A symlink inside input/ must not carry the folder out of it: compare real paths.
+  const realRoot = realpathLoose(inputDir)
+  const realTarget = realpathLoose(inside)
+  const within = realTarget === realRoot || realTarget.startsWith(realRoot === '/' ? '/' : realRoot + path.sep)
+  if (!within || (!allowRoot && realTarget === realRoot)) throw new FolderEscapesError()
   return inside
+}
+
+/**
+ * `os.path.realpath` (non-strict): symlinks resolved for the deepest part of
+ * the path that exists, the missing remainder appended as written.
+ */
+function realpathLoose(p: string): string {
+  let head = path.resolve(p)
+  const tail: string[] = []
+  for (;;) {
+    try {
+      return path.join(fs.realpathSync.native(head), ...tail)
+    }
+    catch {
+      const parent = path.dirname(head)
+      if (parent === head) return path.join(head, ...tail)
+      tail.unshift(path.basename(head))
+      head = parent
+    }
+  }
 }
 
 function isDir(p: string): boolean {

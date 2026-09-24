@@ -639,5 +639,12 @@ describe('the rest of the /sailor extension is audited (Task 2b)', () => {
     }
     expect((await via('/sailor/space_defaults', 'GET')).body).toEqual({})
     expect((await via('/sailor/models/status?key=nope', 'GET')).body).toMatchObject({ error: 'unknown bundle \'nope\'' })
+    // font_subset is a hosted 'proxy' POST: answered natively too (the body is read, checked, never raw-proxied).
+    proxyRequest.mockClear()
+    body('{"font":"abc","text":"x"}')
+    const fs1 = await via('/sailor/font_subset', 'POST')
+    expect(fs1.status).not.toBe('proxied')
+    expect(fs1.body).toEqual({ error: 'undecodable font: Incorrect padding' })
+    expect(proxyRequest).not.toHaveBeenCalled()
   })
 })
