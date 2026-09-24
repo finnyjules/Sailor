@@ -16,13 +16,28 @@ import { ref } from 'vue'
  * texture before pulling again.
  *
  * `duration` is the source's natural clock in seconds; `<= 0` means "still".
+ *
+ * `openExport` (optional): an export session with its OWN renderer, apart from the one the live
+ * preview and card share — every asset loaded (or named in `failures`) before the first frame,
+ * and no preview render can resize or redraw it between an export's render and its read. A
+ * source without one is exported through `getFrame`. The caller always `close()`s it. `frame`'s
+ * surface is valid until the next `frame` call.
  */
+export interface StudioExportSession {
+  /** Assets that could not load, by what a person calls them (`model "Sneaker"`). Non-empty:
+   *  do not pull — the frames would show a hole where the asset belongs. */
+  failures: { name: string; reason: string }[]
+  frame(t01: number): TexImageSource | Promise<TexImageSource>
+  close(): void
+}
+
 export interface StudioFrameSource {
   getFrame: (t01: number, w: number, h: number) => Promise<TexImageSource>
   duration: number
   fps: number
   width: number
   height: number
+  openExport?(size: { width: number; height: number }): Promise<StudioExportSession>
 }
 
 const _frameSources = new Map<string, StudioFrameSource>()

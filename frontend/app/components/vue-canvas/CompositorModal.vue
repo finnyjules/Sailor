@@ -148,7 +148,7 @@ import MotionGallery from '~/components/vue-canvas/compositor/MotionGallery.vue'
 import MotionInspector from '~/components/vue-canvas/compositor/MotionInspector.vue'
 import MotionCopiesPanel from '~/components/vue-canvas/compositor/MotionCopiesPanel.vue'
 import FrameWebExportSheet from '~/components/vue-canvas/compositor/FrameWebExportSheet.vue'
-import { planFrameExport, layerLabel } from '~/lib/embed/frame/plan'
+import { planFrameExport } from '~/lib/embed/frame/plan'
 import { buildFrameSnapshot, isBlocked, formatBytes } from '~/lib/embed/frame/gather'
 import { createAppFrameExportIO, pullSourceFrames } from '~/lib/embed/frame/appIO'
 import type { FrameFit, FrameNotice, FrameVariant } from '~/lib/embed/frame/types'
@@ -5014,7 +5014,11 @@ async function renderStaticComposite(W: number, H: number): Promise<Blob | null>
 // they animate glyphs, not properties, so they compile to no track) — gates
 // the footer's "As video". hasAnimatedSlot is defined above
 // (~line 1292), before this computed, so it can be referenced directly.
-const hasMotion = computed(() => localLayers.value.some((l: any) => l.animation) || hasAnimatedSlot.value || motionxTracks.value.length > 0 || motionBehaviours.value.length > 0)
+// The Frame's OWN motion — what the Motion tab animates — apart from animated slots. The web
+// export's "Everything you animated in the Motion tab" line reads this: an animated slot says
+// for itself that it plays.
+const hasOwnMotion = computed(() => localLayers.value.some((l: any) => l.animation) || motionxTracks.value.length > 0 || motionBehaviours.value.length > 0)
+const hasMotion = computed(() => hasOwnMotion.value || hasAnimatedSlot.value)
 
 // ── outputs (mirror Gradient Studio's generateImage/generateVideo idiom) ────
 async function generateImage() {
@@ -5084,7 +5088,8 @@ watch(
   },
   { deep: true },
 )
-onBeforeUnmount(clearWebExportTimers)
+// Closing the modal stops a build in flight: its next frame pull sees a newer generation.
+onBeforeUnmount(() => { webExportGen++; clearWebExportTimers() })
 
 function webExportVariant(): FrameVariant {
   const { W, H } = bakeSize()
@@ -5105,24 +5110,27 @@ async function buildWebExport() {
     webExport.artAspect = variant.width / variant.height
     // A wired layer's `slot` is 0-based; the modal's per-slot records (`layers`) number from 1 —
     // the same offset wiredContentForSlot applies. `live.duration > 0` is exactly hasAnimatedSlot's test.
+    // A layer is named as the Layers panel names it (`rowLabel`: its name, else "Layer {n}").
     const wiredSlots = variant.layers.filter(l => l.kind === 'wired').map((l) => {
       const slot = (l as { slot: number }).slot
       const live = layers.value.find(x => x.slot === slot + 1)?.live
-      return { slot, layerId: l.id, label: layerLabel(l), animated: !!live && live.duration > 0, fps: live?.fps, duration: live?.duration }
+      return { slot, layerId: l.id, label: rowLabel({ layer: l }), animated: !!live && live.duration > 0, fps: live?.fps, duration: live?.duration }
     })
     const plan = planFrameExport({
       variant, fit: webExport.fit, wiredSlots, catalogIds: new Set(cat.effects.map(e => e.id)),
-      hasMotion: hasMotion.value, animatedFill: hasAnimatedShaderFill(buildStackItems(), background.value),
+      hasMotion: hasMotion.value, ownMotion: hasOwnMotion.value,
+      animatedFill: hasAnimatedShaderFill(buildStackItems(), background.value),
     })
     // An animated slot's loop is pre-rendered from its live frame source (`live` IS the slot's
-    // StudioFrameSource), frame by frame — see pullSourceFrames. A build a newer one overtook
+    // StudioFrameSource), frame by frame, each encoded as it arrives — see pullSourceFrames (a 3D
+    // slot through its own export session). A build a newer one overtook, or a closed modal,
     // stops pulling at its next frame.
     const io = createAppFrameExportIO({
       uploaded: uploadedFonts.value, wiredStill: wiredContentForSlot, catalog: cat.effects,
-      wiredFrames: async (slot, count, maxPx) => {
+      wiredFrames: async (slot, count, maxPx, encode) => {
         if (webExportPulls++ === 0) stopLive()
         try {
-          return await pullSourceFrames(layers.value.find(x => x.slot === slot + 1)?.live, count, maxPx, { stale: () => gen !== webExportGen })
+          return await pullSourceFrames(layers.value.find(x => x.slot === slot + 1)?.live, count, maxPx, { encode, stale: () => gen !== webExportGen })
         } finally { if (--webExportPulls === 0 && !unmounted) startLive() }
       },
     })

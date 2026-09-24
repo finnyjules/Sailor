@@ -22,7 +22,7 @@ function fakeIO(over: Partial<FrameExportIO> = {}): FrameExportIO {
     subsetFont: vi.fn(async () => 'U1VC'),
     fontSource: vi.fn((family: string, weight: number) => ({ url: `/f/${family}/${weight}`, origin: 'google' as const, weight })),
     wiredStill: vi.fn(() => ({ width: 4, height: 4 } as any)),
-    wiredFrames: vi.fn(async () => []),
+    wiredFrames: vi.fn(async () => ({ frames: [], failures: [] })),
     depthImage: vi.fn(() => null),
     shaderDefs: vi.fn(() => []),
     ...over,

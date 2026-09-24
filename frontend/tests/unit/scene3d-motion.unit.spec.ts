@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { parseDoc, serializeDoc, defaultDoc, createPrimitive } from '~/lib/scene3d/config'
 import type { ObjectMotion, LoopKind, LoopSpec, CameraMotion } from '~/lib/scene3d/motion/types'
 import {
@@ -429,6 +429,30 @@ describe('scene3d motion — frame source factory', () => {
   it('getFrame throws when an async renderAt resolves null', async () => {
     const src = makeScene3DFrameSource({ getClock: () => ({ duration: 4, fps: 30, width: 8, height: 8 }), renderAt: async () => null })
     await expect(src.getFrame(0, 8, 8)).rejects.toThrow(/not ready/)
+  })
+  it('openExport opens the export session and names its failures for a sentence', async () => {
+    const close = vi.fn()
+    const openExport = vi.fn(async () => ({
+      failures: [
+        { kind: 'model' as const, name: '/view?filename=Sneaker.glb&type=input', reason: 'HTTP 404' },
+        { kind: 'shader' as const, name: 'Shader effects', reason: "didn't finish loading" },
+      ],
+      frame: () => fakeCanvas, close,
+    }))
+    const src = makeScene3DFrameSource({ getClock: () => ({ duration: 4, fps: 30, width: 8, height: 8 }), renderAt: () => fakeCanvas, openExport })
+    const session = await src.openExport!({ width: 40, height: 20 })
+    expect(openExport).toHaveBeenCalledWith({ width: 40, height: 20 })
+    expect(session.failures).toEqual([
+      { name: 'model "Sneaker"', reason: 'HTTP 404' },
+      { name: 'Shader effects', reason: "didn't finish loading" },
+    ])
+    expect(await session.frame(0.5)).toBe(fakeCanvas)
+    session.close()
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+  it('a source with no export session has no openExport (the Frame pulls it through getFrame)', () => {
+    const src = makeScene3DFrameSource({ getClock: () => ({ duration: 4, fps: 30, width: 8, height: 8 }), renderAt: () => fakeCanvas })
+    expect(src.openExport).toBeUndefined()
   })
 })
 

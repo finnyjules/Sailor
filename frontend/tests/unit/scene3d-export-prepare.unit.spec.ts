@@ -31,7 +31,7 @@ vi.mock('~/lib/scene3d/engine', () => ({
 }))
 
 const {
-  prepareExportEngine, renderExportFrameSettled, createRestyleLoader, ensureShaderCatalog,
+  prepareExportEngine, renderExportFrameSettled, createRestyleLoader, ensureShaderCatalog, openSceneExport,
   EXPORT_TIMEOUT_MS, PREVIEW_TIMEOUT_MS, RETRY_AFTER_MS,
 } = await import('~/lib/scene3d/exportRender')
 const { SceneEngine } = await import('~/lib/scene3d/engine')
@@ -186,5 +186,36 @@ describe('retries after a cool-down, not every frame and not never', () => {
     vi.advanceTimersByTime(RETRY_AFTER_MS)
     await ensureShaderCatalog(doc, io, preview)
     expect(io.loadShaderCatalog).toHaveBeenCalledTimes(3)
+  })
+})
+
+describe('openSceneExport — a Frame export\'s 3D session', () => {
+  it('renders every frame on an engine of its own, over a snapshot of the scene, and close() disposes it once', async () => {
+    const io: ExportIO = { loadRestyle: async () => new THREE.Texture(), loadShaderCatalog: async () => {} }
+    const preview = new SceneEngine(null as never, 1, 1)   // the node's shared preview engine
+    const doc = restyledDoc('r.png')
+    const session = await openSceneExport(doc, { width: 320, height: 180 }, io)
+    const own = lastEngine as unknown as InstanceType<typeof SceneEngine>
+    expect(own).not.toBe(preview)
+    expect(session.failures).toEqual([])
+    const synced: number[] = []
+    vi.spyOn(own, 'syncFromDoc').mockImplementation(((d: SceneDoc) => { synced.push(d.objects.length) }) as never)
+    doc.objects.push(createPrimitive('sphere', doc.objects))   // an edit after the session opened
+    calls.length = 0
+    expect(session.frame(0.5)).toBeTruthy()
+    expect(calls).toContain('render')
+    expect(synced).toEqual([1])                                // the snapshot, not the edit
+    expect(own.dispose).not.toHaveBeenCalled()
+    session.close(); session.close()
+    expect(own.dispose).toHaveBeenCalledTimes(1)
+    expect(preview.dispose).not.toHaveBeenCalled()
+    expect(() => session.frame(0)).toThrow()
+  })
+
+  it('hands back what could not load, by name', async () => {
+    const io: ExportIO = { loadRestyle: async () => { throw new Error('gone') } }
+    const session = await openSceneExport(restyledDoc('lost.png'), { width: 64, height: 64 }, io)
+    expect(session.failures).toEqual([{ kind: 'restyle', name: 'lost.png', reason: 'gone' }])
+    session.close()
   })
 })

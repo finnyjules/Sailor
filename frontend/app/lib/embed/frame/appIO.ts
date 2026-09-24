@@ -7,7 +7,7 @@ import type { UploadedFontEntry } from '~/composables/useUploadedFonts'
 import type { EffectDef } from '~/lib/shaderfx/types'
 import type { StudioFrameSource } from '~/lib/studio/frameSource'
 import { bufferToBase64, subsetFontBase64 } from '../fontBytes'
-import type { FontSource, FrameExportIO } from './gather'
+import type { FontSource, FrameExportIO, WiredFrames } from './gather'
 
 export function makeFontSource(uploaded: UploadedFontEntry[]) {
   return (family: string, weight: number): FontSource | null => {
@@ -37,22 +37,19 @@ function sizeOf(img: CanvasImageSource): { w: number; h: number } {
   return { w: a.naturalWidth || Number(a.width) || 1, h: a.naturalHeight || Number(a.height) || 1 }
 }
 
-/** Keeps one pulled frame past the source's next render: drawn into a canvas of our own, then
- *  held as a lossless PNG image rather than the canvas itself — a loop of 90 frames at 2× size
- *  held as canvases would pin gigabytes of pixels; encoded images stay compressed until drawn. */
-async function keepFrame(surface: TexImageSource, w: number, h: number): Promise<CanvasImageSource> {
-  const c = document.createElement('canvas')
-  c.width = w; c.height = h
-  c.getContext('2d')!.drawImage(surface as CanvasImageSource, 0, 0, w, h)
-  const blob = await new Promise<Blob | null>(res => c.toBlob(res, 'image/png'))
-  if (!blob) return c
-  const url = URL.createObjectURL(blob)
-  try {
-    const im = new Image()
-    im.src = url
-    await im.decode()
-    return im
-  } finally { URL.revokeObjectURL(url) }
+/** Copies one pulled surface at the pull size into ONE reused canvas, so the frame's picture is
+ *  exactly what it always was (the surface drawn at w×h) whatever size the source hands back.
+ *  Encoded before the next pull, so nothing past the current frame is held as pixels. */
+function scratchCopier(): (surface: TexImageSource, w: number, h: number) => CanvasImageSource {
+  let c: HTMLCanvasElement | null = null
+  return (surface, w, h) => {
+    if (!c) c = document.createElement('canvas')
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h }
+    const g = c.getContext('2d')!
+    g.clearRect(0, 0, w, h)
+    g.drawImage(surface as CanvasImageSource, 0, 0, w, h)
+    return c
+  }
 }
 
 /** One pull at a time per source: two exports in flight (a rebuild overtaking an older build)
@@ -61,31 +58,54 @@ const pulling = new WeakMap<StudioFrameSource, Promise<unknown>>()
 
 /**
  * `count` frames of a wired slot's live source — frame `i` at `t01 = i / count`, the editor's
- * `slotPhase01` timing — each rendered at the source's aspect to fit `maxPx` on its long side.
- * The source's surface is only valid until its next `getFrame`, so each is kept (copied) before
- * the next is asked for. `stale` is asked before every frame and abandons a pull nobody wants
- * any more (a newer build overtook it); `keep` is the copy, injectable for the unit test.
+ * `slotPhase01` timing — each rendered at the source's aspect to fit `maxPx` on its long side,
+ * and each handed to `encode` (the gatherer's WebP encode) as it arrives, so a long clip is held
+ * as encoded strings, never as pixels.
+ *
+ * A source with `openExport` (3D) is pulled through an export session of its own at the pull
+ * size — its own engine, every asset waited for — and the session is ALWAYS closed. A session
+ * that names failures is not pulled at all: its failures come back for the gatherer to block
+ * with. A source without one is pulled through `getFrame`.
+ *
+ * The source's surface is only valid until its next render, so each is copied (`copy`) and
+ * encoded before the next is asked for. `stale` is asked before every frame and abandons a pull
+ * nobody wants any more (a newer build overtook it, or the modal closed); `copy` is injectable
+ * for the unit test.
  */
 export async function pullSourceFrames(
   src: StudioFrameSource | undefined, count: number, maxPx: number,
   opts: {
-    keep?: (surface: TexImageSource, w: number, h: number) => Promise<CanvasImageSource>
+    encode: (frame: CanvasImageSource) => Promise<string>
+    copy?: (surface: TexImageSource, w: number, h: number) => CanvasImageSource
     stale?: () => boolean
-  } = {},
-): Promise<CanvasImageSource[]> {
+  },
+): Promise<WiredFrames> {
   if (!src) throw new Error('wired slot has no live frame source')
   const source = src
-  const keep = opts.keep ?? keepFrame
-  const run = async () => {
+  const copy = opts.copy ?? scratchCopier()
+  const checkStale = () => { if (opts.stale?.()) throw new Error('wired frames: superseded') }
+  const run = async (): Promise<WiredFrames> => {
     const sw = Math.max(1, source.width || 1024), sh = Math.max(1, source.height || 1024)
     const k = maxPx / Math.max(sw, sh)
     const w = Math.max(1, Math.round(sw * k)), h = Math.max(1, Math.round(sh * k))
-    const out: CanvasImageSource[] = []
-    for (let i = 0; i < count; i++) {
-      if (opts.stale?.()) throw new Error('wired frames: superseded')
-      out.push(await keep(await source.getFrame(i / count, w, h), w, h))
+    const frames: string[] = []
+    if (source.openExport) {
+      checkStale()
+      const session = await source.openExport({ width: w, height: h })
+      try {
+        if (session.failures.length) return { frames: [], failures: session.failures }
+        for (let i = 0; i < count; i++) {
+          checkStale()
+          frames.push(await opts.encode(copy(await session.frame(i / count), w, h)))
+        }
+      } finally { session.close() }
+      return { frames, failures: [] }
     }
-    return out
+    for (let i = 0; i < count; i++) {
+      checkStale()
+      frames.push(await opts.encode(copy(await source.getFrame(i / count, w, h), w, h)))
+    }
+    return { frames, failures: [] }
   }
   const prev = pulling.get(source) ?? Promise.resolve()
   const mine = prev.catch(() => {}).then(run)
@@ -98,7 +118,7 @@ export function createAppFrameExportIO(opts: {
   wiredStill: (slot: number) => CanvasImageSource | null
   /** An animated wired slot's frames (usually `pullSourceFrames` over the slot's live source).
    *  Absent: no slot can play, and a planned clip blocks the export with its name. */
-  wiredFrames?: (slot: number, count: number, maxPx: number) => Promise<CanvasImageSource[]>
+  wiredFrames?: FrameExportIO['wiredFrames']
   catalog: EffectDef[]
 }): FrameExportIO {
   return {

@@ -26,6 +26,10 @@ export interface FrameExportInput {
   catalogIds: ReadonlySet<string>
   /** The modal's own `hasMotion` (local animation, animated slot, motion bands or behaviours). */
   hasMotion: boolean
+  /** The Frame's OWN motion — what the Motion tab animates (local animation, bands,
+   *  behaviours) — without animated slots, which say for themselves that they play. Gates the
+   *  "Everything you animated in the Motion tab" line. Absent: `hasMotion`. */
+  ownMotion?: boolean
   /** `hasAnimatedShaderFill(items, background)` — a live shader fill with no other motion. */
   animatedFill: boolean
 }
@@ -216,7 +220,7 @@ export function planFrameExport(input: FrameExportInput): FramePlan {
   for (const id of revealEffectIdsFor(v.motion?.behaviours)) shaderIds.add(id)
 
   const still = !input.hasMotion && !input.animatedFill && clips.length === 0 && wiredClips.length === 0
-  if (input.hasMotion) notices.push({ group: 'live', text: 'Everything you animated in the Motion tab' })
+  if (input.ownMotion ?? input.hasMotion) notices.push({ group: 'live', text: 'Everything you animated in the Motion tab' })
   if (input.animatedFill) notices.push({ group: 'live', text: 'Moving shader fills' })
   const duration = still ? 1 : loopSeconds(v, clips, wiredClips)
   // A clip whose played length does not divide the Frame's loop jumps at the wrap. Said in the

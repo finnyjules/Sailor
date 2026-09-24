@@ -140,14 +140,16 @@ onMounted(async () => {
     wiredStill: () => null,
     // Task 7: a wired slot's loop, as the modal's pullSourceFrames would hand it over — here a
     // disc going round, one position per frame, drawn at the size asked for.
-    async wiredFrames(_slot: number, count: number, maxPx: number) {
-      return Array.from({ length: count }, (_, i) => {
+    async wiredFrames(_slot: number, count: number, maxPx: number, encode: (frame: CanvasImageSource) => Promise<string>) {
+      const frames: string[] = []
+      for (let i = 0; i < count; i++) {
         const [c, g] = canvasOf(maxPx, maxPx)
         g.fillStyle = '#20183a'; g.fillRect(0, 0, maxPx, maxPx)
         const a = (i / count) * Math.PI * 2, r = maxPx / 2
         softDisc(g, r + Math.cos(a) * r * 0.55, r + Math.sin(a) * r * 0.55, r * 0.35, '#7ae0ff')
-        return c
-      })
+        frames.push(await encode(c))
+      }
+      return { frames, failures: [] }
     },
   }
 

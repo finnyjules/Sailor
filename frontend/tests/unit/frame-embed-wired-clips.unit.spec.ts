@@ -7,12 +7,14 @@
  * Planner: an animated slot with a known clock goes to `wiredClips`, says "plays as frames" in the
  * "Plays live" group, and counts towards the Frame's loop exactly as an image clip does.
  * Gatherer: asks the IO for round(duration × fps) frames at the planned size and inlines each as
- * WebP in `snap.wired[slot]`. Adapter: picks the frame for the time being painted, wrapping on the
+ * WebP in `snap.wired[slot]`, as each frame arrives. A source with its own export session
+ * (`openExport`, 3D) is pulled through it — and a session that could not load an asset blocks the
+ * export by name instead of baking a hole. Adapter: picks the frame for the time being painted, wrapping on the
  * clip's own length.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { planFrameExport, type FrameExportInput, type WiredSlotInfo } from '~/lib/embed/frame/plan'
-import { buildFrameSnapshot, isBlocked, type FrameExportIO } from '~/lib/embed/frame/gather'
+import { buildFrameSnapshot, formatBytes, isBlocked, type FrameExportIO } from '~/lib/embed/frame/gather'
 import { pullSourceFrames } from '~/lib/embed/frame/appIO'
 import type { FrameSnapshot, FrameVariant } from '~/lib/embed/frame/types'
 import frameSurface, { wiredClipFrameAt } from '~/lib/embed/surfaces/frame'
@@ -47,6 +49,15 @@ describe('planFrameExport — animated wired slots', () => {
     expect(p.notices).toContainEqual({ group: 'live', text: '3D scene · plays as frames', layerId: 'w1' })
     expect(p.notices.some(n => n.group === 'still')).toBe(false)
     expect(p.still).toBe(false)
+  })
+
+  it('an animated slot alone does not claim "Everything you animated in the Motion tab"', () => {
+    const slots = [{ slot: 0, layerId: 'w1', label: 'Layer 1', animated: true, fps: 24, duration: 2 }]
+    const motionLine = (p: ReturnType<typeof planFrameExport>) => p.notices.some(n => n.text === 'Everything you animated in the Motion tab')
+    expect(motionLine(planFrameExport(input(variant([wired('w1', 0)]), slots, { hasMotion: true, ownMotion: false })))).toBe(false)
+    expect(motionLine(planFrameExport(input(variant([wired('w1', 0)]), slots, { hasMotion: true, ownMotion: true })))).toBe(true)
+    // A caller that does not say keeps the old reading.
+    expect(motionLine(planFrameExport(input(variant([wired('w1', 0)]), slots, { hasMotion: true })))).toBe(true)
   })
 
   it('a still wired slot is unchanged', () => {
@@ -99,7 +110,11 @@ function fakeIO(over: Partial<FrameExportIO> = {}): FrameExportIO {
     subsetFont: vi.fn(async () => 'U1VC'),
     fontSource: vi.fn(() => null),
     wiredStill: vi.fn(() => ({ width: 4, height: 4 } as any)),
-    wiredFrames: vi.fn(async (_slot: number, count: number) => Array.from({ length: count }, (_, i) => ({ i, width: 4, height: 4 } as any))),
+    wiredFrames: vi.fn(async (_slot: number, count: number, _maxPx: number, encode: (f: any) => Promise<string>) => {
+      const frames: string[] = []
+      for (let i = 0; i < count; i++) frames.push(await encode({ i, width: 4, height: 4 }))
+      return { frames, failures: [] }
+    }),
     depthImage: vi.fn(() => null),
     shaderDefs: vi.fn(() => []),
     ...over,
@@ -112,7 +127,7 @@ describe('buildFrameSnapshot — wired clips', () => {
     const plan = planFrameExport(input(v, [{ slot: 2, layerId: 'w1', label: '3D scene', animated: true, fps: 24, duration: 2 }]))
     const io = fakeIO()
     const snap = await buildFrameSnapshot(plan, v, io)
-    expect(io.wiredFrames).toHaveBeenCalledWith(2, 48, 1000)
+    expect(io.wiredFrames).toHaveBeenCalledWith(2, 48, 1000, expect.any(Function))
     expect(io.wiredStill).not.toHaveBeenCalled()
     const entry = snap.wired[2]!
     expect(entry.kind).toBe('clip')
@@ -132,42 +147,127 @@ describe('buildFrameSnapshot — wired clips', () => {
     const plan = planFrameExport(input(v, [{ slot: 0, layerId: 'w1', label: 'Shader', animated: true, fps: 1, duration: 0.2 }]))
     const io = fakeIO()
     await buildFrameSnapshot(plan, v, io)
-    expect(io.wiredFrames).toHaveBeenCalledWith(0, 1, 1000)
+    expect(io.wiredFrames).toHaveBeenCalledWith(0, 1, 1000, expect.any(Function))
   })
 
   it('frames that cannot be rendered block the export and name the layer', async () => {
     const v = variant([wired('w1', 0)])
     const plan = planFrameExport(input(v, [{ slot: 0, layerId: 'w1', label: '3D scene', animated: true, fps: 24, duration: 1 }]))
-    for (const wiredFrames of [vi.fn(async () => { throw new Error('gone') }), vi.fn(async () => [])]) {
+    for (const wiredFrames of [vi.fn(async () => { throw new Error('gone') }), vi.fn(async () => ({ frames: [], failures: [] }))]) {
       const snap = await buildFrameSnapshot(plan, v, fakeIO({ wiredFrames }))
       expect(isBlocked(snap)).toBe(true)
       expect(snap.notices.find(n => n.group === 'blocked')).toEqual({ group: 'blocked', layerId: 'w1', text: '3D scene couldn\'t be rendered as frames.' })
     }
   })
+
+  it('a wired clip says what it adds to the file, as an image clip does', async () => {
+    const v = variant([wired('w1', 0)])
+    const plan = planFrameExport(input(v, [{ slot: 0, layerId: 'w1', label: 'Layer 1', animated: true, fps: 4, duration: 1 }]))
+    const snap = await buildFrameSnapshot(plan, v, fakeIO())
+    const entry = snap.wired[0]!
+    if (entry.kind !== 'clip') throw new Error('expected a clip')
+    const bytes = entry.frames.reduce((n, u) => n + Math.floor((u.length - u.indexOf(',') - 1) * 3 / 4), 0)
+    expect(snap.notices).toContainEqual({ group: 'live', text: `Layer 1 · adds ${formatBytes(bytes)}`, layerId: 'w1', bytes })
+  })
+})
+
+/** The app's wiring, in small: the IO pulls the slot's source through pullSourceFrames. */
+const ioOverSource = (src: StudioFrameSource) => fakeIO({
+  wiredFrames: vi.fn((_slot: number, count: number, maxPx: number, encode: (f: any) => Promise<string>) =>
+    pullSourceFrames(src, count, maxPx, { encode, copy: (s: any) => s })),
+})
+
+describe('a source with its own export session (3D)', () => {
+  const plan3d = (v: FrameVariant) => planFrameExport(input(v, [{ slot: 0, layerId: 'w1', label: 'Layer 1', animated: true, fps: 2, duration: 2 }]))
+
+  it('a session that could not load an asset blocks, naming the layer and the asset, and is never pulled', async () => {
+    const frame = vi.fn(() => ({}) as any)
+    const close = vi.fn()
+    const src: StudioFrameSource = {
+      duration: 2, fps: 2, width: 1000, height: 500, getFrame: vi.fn(async () => ({}) as any),
+      openExport: vi.fn(async () => ({ failures: [{ name: 'model "Sneaker"', reason: 'HTTP 404' }], frame, close })),
+    }
+    const v = variant([wired('w1', 0)])
+    const snap = await buildFrameSnapshot(plan3d(v), v, ioOverSource(src))
+    expect(isBlocked(snap)).toBe(true)
+    expect(snap.notices.filter(n => n.group === 'blocked')).toEqual([
+      { group: 'blocked', layerId: 'w1', text: 'Layer 1 · model "Sneaker" couldn\'t load — re-generate or re-upload it' },
+    ])
+    expect(frame).not.toHaveBeenCalled()
+    expect(src.getFrame).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(snap.wired[0]).toBeUndefined()
+  })
+
+  it('frames come from the session at t = i / count and the pull size, never from getFrame; the session is closed', async () => {
+    const ts: number[] = []
+    const close = vi.fn()
+    const src: StudioFrameSource = {
+      duration: 2, fps: 2, width: 1000, height: 500, getFrame: vi.fn(async () => ({}) as any),
+      openExport: vi.fn(async () => ({ failures: [], frame: (t01: number) => { ts.push(t01); return { i: ts.length - 1 } as any }, close })),
+    }
+    const v = variant([wired('w1', 0)])
+    const snap = await buildFrameSnapshot(plan3d(v), v, ioOverSource(src))
+    expect(isBlocked(snap)).toBe(false)
+    expect(src.openExport).toHaveBeenCalledWith({ width: 1000, height: 500 })
+    expect(ts).toEqual([0, 0.25, 0.5, 0.75])
+    expect(src.getFrame).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalledTimes(1)
+    const entry = snap.wired[0]!
+    expect(entry.kind === 'clip' && entry.frames).toEqual([0, 1, 2, 3].map(i => `data:image/webp;base64,F${i}-1000`))
+  })
+
+  it('the session is closed even when a frame throws, and the export blocks', async () => {
+    const close = vi.fn()
+    const src: StudioFrameSource = {
+      duration: 2, fps: 2, width: 1000, height: 500, getFrame: vi.fn(async () => ({}) as any),
+      openExport: vi.fn(async () => ({ failures: [], frame: (t01: number) => { if (t01 > 0.3) throw new Error('context lost'); return {} as any }, close })),
+    }
+    await expect(pullSourceFrames(src, 4, 1000, { encode: async () => 'data:,', copy: (s: any) => s })).rejects.toThrow('context lost')
+    expect(close).toHaveBeenCalledTimes(1)
+    const v = variant([wired('w1', 0)])
+    const snap = await buildFrameSnapshot(plan3d(v), v, ioOverSource(src))
+    expect(snap.notices.find(n => n.group === 'blocked')?.text).toBe('Layer 1 couldn\'t be rendered as frames.')
+    expect(close).toHaveBeenCalledTimes(2)
+  })
+
+  it('a superseded pull closes its session before its next frame', async () => {
+    const frame = vi.fn(() => ({}) as any)
+    const close = vi.fn()
+    const src: StudioFrameSource = {
+      duration: 1, fps: 4, width: 10, height: 10, getFrame: vi.fn(async () => ({}) as any),
+      openExport: vi.fn(async () => ({ failures: [], frame, close })),
+    }
+    let n = 0
+    await expect(pullSourceFrames(src, 4, 10, { encode: async () => 'data:,', copy: (s: any) => s, stale: () => ++n > 2 })).rejects.toThrow()
+    expect(frame).toHaveBeenCalledTimes(1)
+    expect(close).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('pullSourceFrames', () => {
-  it('pulls each frame at t = i / count, sized to fit maxPx at the source\'s aspect, keeping it before the next pull', async () => {
+  it('pulls each frame at t = i / count, sized to fit maxPx at the source\'s aspect, encoding it before the next pull', async () => {
     const log: string[] = []
     const src: StudioFrameSource = {
       duration: 2, fps: 24, width: 1600, height: 900,
       getFrame: vi.fn(async (t01: number, w: number, h: number) => { log.push(`get ${t01} ${w}x${h}`); return { t01 } as any }),
     }
-    const keep = vi.fn(async (s: any, w: number, h: number) => { log.push(`keep ${s.t01} ${w}x${h}`); return { kept: s.t01 } as any })
-    const out = await pullSourceFrames(src, 4, 800, { keep })
+    const copy = vi.fn((s: any, w: number, h: number) => { log.push(`copy ${s.t01} ${w}x${h}`); return { kept: s.t01 } as any })
+    const encode = vi.fn(async (f: any) => { log.push(`encode ${f.kept}`); return `data:image/webp;base64,${f.kept}` })
+    const out = await pullSourceFrames(src, 4, 800, { copy, encode })
     expect(log).toEqual([
-      'get 0 800x450', 'keep 0 800x450',
-      'get 0.25 800x450', 'keep 0.25 800x450',
-      'get 0.5 800x450', 'keep 0.5 800x450',
-      'get 0.75 800x450', 'keep 0.75 800x450',
+      'get 0 800x450', 'copy 0 800x450', 'encode 0',
+      'get 0.25 800x450', 'copy 0.25 800x450', 'encode 0.25',
+      'get 0.5 800x450', 'copy 0.5 800x450', 'encode 0.5',
+      'get 0.75 800x450', 'copy 0.75 800x450', 'encode 0.75',
     ])
-    expect(out).toEqual([{ kept: 0 }, { kept: 0.25 }, { kept: 0.5 }, { kept: 0.75 }])
+    expect(out).toEqual({ frames: [0, 0.25, 0.5, 0.75].map(t => `data:image/webp;base64,${t}`), failures: [] })
   })
 
   it('a superseded pull stops before its next frame', async () => {
     const src: StudioFrameSource = { duration: 1, fps: 4, width: 10, height: 10, getFrame: vi.fn(async () => ({}) as any) }
     let n = 0
-    await expect(pullSourceFrames(src, 4, 10, { keep: async () => ({}) as any, stale: () => ++n > 2 })).rejects.toThrow()
+    await expect(pullSourceFrames(src, 4, 10, { copy: s => s as any, encode: async () => 'data:,', stale: () => ++n > 2 })).rejects.toThrow()
     expect(src.getFrame).toHaveBeenCalledTimes(2)
   })
 
@@ -179,9 +279,10 @@ describe('pullSourceFrames', () => {
       duration: 1, fps: 2, width: 10, height: 10,
       getFrame: vi.fn(async (t01: number) => { log.push(`get ${t01}`); if (t01 === 0 && log.length === 1) await gate; return { t01 } as any }),
     }
-    const keep = async (s: any) => { log.push(`keep ${s.t01}`); return s }
-    const a = pullSourceFrames(src, 2, 10, { keep })
-    const b = pullSourceFrames(src, 2, 10, { keep })
+    const copy = (s: any) => { log.push(`keep ${s.t01}`); return s }
+    const encode = async () => 'data:,'
+    const a = pullSourceFrames(src, 2, 10, { copy, encode })
+    const b = pullSourceFrames(src, 2, 10, { copy, encode })
     await Promise.resolve(); release()
     await Promise.all([a, b])
     expect(log).toEqual(['get 0', 'keep 0', 'get 0.5', 'keep 0.5', 'get 0', 'keep 0', 'get 0.5', 'keep 0.5'])
@@ -189,10 +290,10 @@ describe('pullSourceFrames', () => {
 
   it('a portrait source fits its height; no source is an error', async () => {
     const src: StudioFrameSource = { duration: 1, fps: 1, width: 500, height: 1000, getFrame: vi.fn(async () => ({}) as any) }
-    const keep = vi.fn(async () => ({}) as any)
-    await pullSourceFrames(src, 1, 600, { keep })
+    const opts = { copy: vi.fn(() => ({}) as any), encode: async () => 'data:,' }
+    await pullSourceFrames(src, 1, 600, opts)
     expect(src.getFrame).toHaveBeenCalledWith(0, 300, 600)
-    await expect(pullSourceFrames(undefined, 1, 600, { keep })).rejects.toThrow()
+    await expect(pullSourceFrames(undefined, 1, 600, opts)).rejects.toThrow()
   })
 })
 

@@ -11,7 +11,7 @@ import { parseDoc } from '~/lib/scene3d/config'
 import { SceneEngine } from '~/lib/scene3d/engine'
 import { renderPasses } from '~/lib/scene3d/passes'
 import { sceneHasMotion, renderMotionFrameSettled, sceneFrameClock } from '~/lib/scene3d/motion/render'
-import { appExportIO, createRestyleLoader, renderExportFrameSettled, PREVIEW_TIMEOUT_MS } from '~/lib/scene3d/exportRender'
+import { appExportIO, createRestyleLoader, openSceneExport, renderExportFrameSettled, PREVIEW_TIMEOUT_MS } from '~/lib/scene3d/exportRender'
 import { makeScene3DFrameSource } from '~/lib/scene3d/motion/frameSource'
 import { registerStudioFrameSource, unregisterStudioFrameSource } from '~/lib/studio/frameSource'
 import { registerScene3DRebaker, unregisterScene3DRebaker } from '~/lib/scene3d/rebake'
@@ -155,6 +155,11 @@ function syncRegistration() {
           scheduleEngineRelease()
         }
       },
+      // A Frame EXPORT does not go through renderAt: it opens a session on an engine of its own
+      // over a snapshot of the scene — every asset waited for on the export deadline and named
+      // if it fails, and no preview or card render can resize or redraw it mid-pull. The preview
+      // path above and the card thumbnail are untouched.
+      openExport: size => openSceneExport(sceneDoc.value, size, appExportIO),
     }))
     registered = true
   } else if (!renderable && registered) {

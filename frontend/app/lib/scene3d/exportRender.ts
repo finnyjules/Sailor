@@ -189,6 +189,31 @@ export function renderExportFrame(engine: SceneEngine, doc: SceneDoc, t01: numbe
   }
 }
 
+/** An export session over a snapshot of `doc` on an engine of its own (`prepareExportEngine`),
+ *  apart from any preview engine: `frame(t01)` is `renderExportFrame` on that engine, `close()`
+ *  disposes it (once; a `frame` after it throws). A later edit to `doc` does not reach the
+ *  session. The Frame's 3D source hands this out as its `openExport`. */
+export async function openSceneExport(
+  doc: SceneDoc, size: { width: number; height: number }, io: ExportIO = appExportIO,
+): Promise<{ failures: AssetFailure[]; frame(t01: number): HTMLCanvasElement; close(): void }> {
+  const snap = JSON.parse(JSON.stringify(doc)) as SceneDoc
+  const width = Math.max(1, Math.round(size.width)), height = Math.max(1, Math.round(size.height))
+  const { engine, failures } = await prepareExportEngine(snap, { width, height, io })
+  let closed = false
+  return {
+    failures,
+    frame(t01) {
+      if (closed) throw new Error('scene export session is closed')
+      return renderExportFrame(engine, snap, t01)
+    },
+    close() {
+      if (closed) return
+      closed = true
+      engine.dispose()
+    },
+  }
+}
+
 /** `renderExportFrame` for a long-lived engine drawing one frame per call (the Frame's 3D
  *  source). ONE deadline, `timeoutMs` from now, covers everything it waits for: the restyle
  *  results (`restyle`) and the shader catalog (`io`), then the frame's own assets after the

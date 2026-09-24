@@ -22,6 +22,10 @@ import { assetKey, type FrameFontAsset, type FrameFontOrigin, type FrameNotice, 
 
 export interface FontSource { url: string; origin: FrameFontOrigin; weight: FontWeightSpec }
 
+/** A wired clip's pull: the encoded frames, or — when the source's export session named assets
+ *  that could not load (`name`: what a person calls it, `model "Sneaker"`) — none and those. */
+export interface WiredFrames { frames: string[]; failures: { name: string; reason: string }[] }
+
 export interface FrameExportIO {
   fetchBlob(url: string): Promise<Blob>
   blobToImage(blob: Blob): Promise<CanvasImageSource>
@@ -32,8 +36,10 @@ export interface FrameExportIO {
   fontSource(family: string, weight: number): FontSource | null
   wiredStill(slot: number): CanvasImageSource | null
   /** `count` pictures of a wired slot's live source, frame `i` at `i / count` of its loop, each
-   *  at most `maxPx` on its long side. Each must stay valid after the next is pulled. */
-  wiredFrames(slot: number, count: number, maxPx: number): Promise<CanvasImageSource[]>
+   *  at most `maxPx` on its long side, each handed to `encode` as it arrives (the picture need
+   *  only stay valid until `encode` resolves) — or, when the source's own export session could
+   *  not load an asset, no frames and the failures. */
+  wiredFrames(slot: number, count: number, maxPx: number, encode: (frame: CanvasImageSource) => Promise<string>): Promise<WiredFrames>
   depthImage(ref: DepthRef): CanvasImageSource | null
   shaderDefs(ids: string[]): EffectDef[]
 }
@@ -200,14 +206,24 @@ export async function buildFrameSnapshot(plan: FramePlan, variant: FrameVariant,
   // An animated wired slot: its loop, pre-rendered from the live source (the editor's
   // `slotPhase01` timing — frame i at i / count). Frames that cannot be rendered BLOCK: a still in
   // their place would be a plausible wrong picture.
+  // An asset the source could not load BLOCKS too, named: the frames would show a hole (an
+  // unloaded model) or a stand-in (a grey box for a failed font) where it belongs.
   for (const c of plan.wiredClips) {
     const count = Math.max(1, Math.round(c.duration * c.fps))
+    let bytes = 0
     try {
-      const imgs = await io.wiredFrames(c.slot, count, c.maxPx)
-      if (imgs.length !== count) throw new Error(`wired slot ${c.slot}: ${imgs.length} of ${count} frames`)
-      const frames: string[] = []
-      for (const img of imgs) frames.push(await io.imageToDataUrl(img, c.maxPx, 'image/webp'))
-      wired[c.slot] = { kind: 'clip', frames, fps: c.fps, duration: c.duration }
+      const got = await io.wiredFrames(c.slot, count, c.maxPx, async (img) => {
+        const u = await io.imageToDataUrl(img, c.maxPx, 'image/webp')
+        bytes += dataUrlBytes(u)
+        return u
+      })
+      if (got.failures.length) {
+        for (const f of got.failures) block(`${c.label} · ${f.name} couldn't load — re-generate or re-upload it`, c.layerId)
+        continue
+      }
+      if (got.frames.length !== count) throw new Error(`wired slot ${c.slot}: ${got.frames.length} of ${count} frames`)
+      wired[c.slot] = { kind: 'clip', frames: got.frames, fps: c.fps, duration: c.duration }
+      liveNotices.push({ group: 'live', text: `${c.label} · adds ${formatBytes(bytes)}`, layerId: c.layerId, bytes })
     } catch { block(`${c.label} couldn't be rendered as frames.`, c.layerId) }
   }
 

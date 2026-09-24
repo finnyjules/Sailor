@@ -1,32 +1,10 @@
 <script lang="ts">
-import type { AssetFailure, AssetKind } from '~/lib/scene3d/assetTracker'
+// What each asset kind is called and the plain sentence for a failed one live in
+// `lib/scene3d/assetNames` — a Frame export pulling a 3D slot names its failures the same way.
+import type { AssetFailure } from '~/lib/scene3d/assetTracker'
+import { assetDisplayName, failureSentence } from '~/lib/scene3d/assetNames'
 
-/** What a person calls each kind of asset. */
-const KIND_LABEL: Record<AssetKind, string> = {
-  model: 'Model', font: 'Font', mesh: 'Shape', hdri: 'Lighting', texture: 'Image',
-  decal: 'Sticker', restyle: 'Restyle', shader: 'Shader effect',
-}
-// Only a real file extension is dropped, so a plain object name like "Robot v1.2" keeps its dot.
-const FILE_EXT = /\.(glb|gltf|bin|ttf|otf|woff2?|json|svg|png|jpe?g|webp|avif|gif|hdr|exr|ktx2)$/i
-
-/** An asset name as a person recognises it: a path or URL becomes its file name (a `/view`
- *  URL's `filename`), without the extension; a texture-library id loses its prefix. */
-export function assetDisplayName(name: string): string {
-  let n = name.trim().replace(/^ambientcg:/i, '')
-  const q = n.match(/[?&]filename=([^&#]+)/)
-  if (q) n = decodeURIComponent(q[1]!)
-  else if (n.includes('/')) n = n.replace(/[?#].*$/, '').split('/').filter(Boolean).pop() ?? n
-  return n.replace(FILE_EXT, '') || name
-}
-
-/** The plain sentence for one asset that stopped the export. */
-export function failureSentence(f: AssetFailure): string {
-  const label = KIND_LABEL[f.kind] ?? 'Something'
-  const name = assetDisplayName(f.name)
-  // A name that is only the kind again ("Shader effects") reads as the subject on its own.
-  const subject = name.toLowerCase().startsWith(label.toLowerCase()) ? name : `${label} "${name}"`
-  return `${subject} couldn't load.${f.kind === 'model' ? ' Re-generate or re-upload it.' : ''}`
-}
+export { assetDisplayName, failureSentence }
 </script>
 
 <script setup lang="ts">
