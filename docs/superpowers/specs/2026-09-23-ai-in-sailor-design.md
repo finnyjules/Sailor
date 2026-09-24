@@ -1,6 +1,6 @@
 # AI in Sailor: one prompt, results on the work, and AI-made shaders
 
-**Date:** 2026-09-23 · **Status:** direction approved in prototype; open questions decided (§10); ready to plan
+**Date:** 2026-09-23 · **Status:** direction approved; open questions decided (§10); layout revised 2026-09-24 (prompt stays above the toolbar, no rail); stage 1 built
 **Replaces:** the 11 separate AI surfaces and 5 prompt input components described in §5
 **Visual reference (open in a browser):**
 - `assets/2026-09-23-ai-in-sailor/sailor-ask-prototype.html` is the clickable prototype, version 11. It covers the canvas, the Shader studio, Frame and the effect gallery, all running live shaders.
@@ -22,10 +22,10 @@ Neither page calls AI. The prototype's takes are canned from the spike, and its 
 
 **What changes.**
 
-1. **One prompt.** It lives at the end of the bottom bar, which holds the tools for making things.
-   - On the canvas the bar is Select · Hand | Add · Studios · Generate · Actions | ✦ Ask. In Frame and 3D it's their own tool bar, ending in ✦ Ask.
-   - Press / or ⌘K, or click it, and it grows across the whole bar. What you've selected shows inside it as a chip, with suggestions above.
-   - When you send, it shrinks back and shows progress.
+1. **One prompt.** It stays where the canvas prompt bar is today: a full-width row directly above the toolbar, always visible. (Decided 2026-09-24 after trying the app: this arrangement works; it just needs the new behaviour.)
+   - What you've selected shows inside it as a chip. Press / or ⌘K to type; suggestions for the selection appear above it.
+   - While a request runs, the prompt shows its progress, with Stop.
+   - Studios use the same stack: the prompt row above their own tool bar, as Frame and 3D already do.
 2. **Results land on the work.**
    - Three takes appear in a strip just above the prompt. On the canvas, the node they belong to glows and each take previews on the node itself when you hover it; in a studio, they preview on the preview. Nothing on the canvas moves or gets covered. Then Keep.
    - Changes to the graph appear on the canvas as dashed "proposed" nodes, for you to approve.
@@ -34,24 +34,24 @@ Neither page calls AI. The prototype's takes are canned from the spike, and its 
    - Selecting a node shows a small toolbar with **Edit ▾** ("the same thing, better": fix, retouch, tune, write copy) and **Develop ▾** ("take it somewhere new": vary, restyle, remix, layouts, animate).
    - AI items sit among the others, marked with a small ✦ and a note on where the result lands ("3 takes" or "adds a step").
    - Studio inspectors list the same actions as light button rows, in the same two groups.
-4. **Libraries move to a rail on the left of the canvas:** Assets, Styles, Characters, Templates, and More (Toolbox, Nodes, Blocks). Each button sits next to the panel it opens.
+4. **The canvas toolbar stays as it is**, minus Explain. Nothing moves to a side rail, and nothing essential is hidden in menus.
 5. **Content prompts stay where they are.** The prompt on a Generate node, a Frame element and so on is part of the recipe, so it stays visible on the thing. But all ~16 of them become one shared field, with an @reference picker, history and "Improve prompt".
 6. **AI can write shaders.** Remix an effect, or describe a new one, and you get three new effects, each with 3–5 dials of its own. The one you keep goes into **My effects**, which is available in every effect picker in Sailor. Asking for changes later makes new versions and keeps the old ones.
 
 **What falls out of it.**
 
 - **Removed:** Explain (it was for explaining Comfy graphs), the orphaned "next steps" strip, the header Critique icon (it becomes Edit ▾ → Fix and a fixes badge on the node), and four of the five prompt components.
-- **Tidied:** the canvas toolbar goes from 14 buttons plus a prompt bar to 7 buttons plus the prompt, with a 5-button rail.
+- **Tidied:** one prompt instead of five prompt components, and the toolbar loses Explain.
 - **Consistent:** the canvas, the simple studios, Frame and 3D follow one rule. The bottom is for making and asking, the left is for structure and libraries, and the right is for details.
 
 **What is risky.**
 
-1. **Moving everyone's toolbar.** It's the most-used control in the app. The rail and the shorter bar change where hands go.
+1. **Changing the most-used prompt.** The canvas prompt keeps its place, but it now carries chips, suggestions and progress. It has to stay as quick to type into as it is today.
 2. **AI-written shaders can be bad without being broken.** The spike's automatic checks passed every bad take. Picking from three takes, and a model looking at each render, are what protect quality.
 3. **AI-written shaders can hang the graphics card.** Loops must be capped, and compile failures handled, before anything reaches the canvas.
 4. **Canvas takes sit above the prompt, away from their node** (§3.1). The link between them has to stay obvious: the node glows, and the strip names it.
 
-**Built in seven stages, each shippable (§9).** In order: a real-model run of the shader engine; the new bottom bar, rail and node toolbar; results on the work; studios; shader generation and My effects; the shared content prompt field; cleanup.
+**Built in seven stages, each shippable (§9).** In order: a real-model run of the shader engine (done); the new prompt behaviour and the node toolbar; results on the work; studios; shader generation and My effects; the shared content prompt field; cleanup.
 
 ---
 
@@ -59,18 +59,14 @@ Neither page calls AI. The prototype's takes are canned from the spike, and its 
 
 These are the decisions the rest of the spec applies. Every placement in the prototype follows from them.
 
-### 1.1 Bottom is for making and asking, left is for libraries
+### 1.1 The bottom is for making and asking
 
-Every button passes one test: **"am I starting or changing something, or picking from a collection?"**
-
-- **Starting or changing → the bottom bar.** On the canvas that's Select, Hand, Add, Studios, Generate and Actions. Actions opens a left panel, but you use it to *make* something, so placement goes by intent, not by mechanism.
-- **Picking from a collection → the left rail.** That's Assets, Styles, Characters, Templates, and More (Toolbox, Nodes, Blocks).
-- **Annotations** (sticky note S, checklist C, image pin, arrow A) move from More into **Add**. Adding a note is making.
-- **Studios** already keep structure on the left (layer list, object list), so they get no rail.
+- **The prompt row sits directly above the tool bar**, on the canvas and in every studio. You ask in the row above, and you make with the tools below.
+- **The canvas toolbar keeps its buttons as they are today**, minus Explain. An earlier design moved the libraries (Assets, Styles, Characters, Templates, More) to a left rail to make room for a prompt inside the bar. With the prompt on its own row, that room isn't needed, so the rail is dropped (2026-09-24).
 
 ### 1.2 One prompt, and it knows the selection
 
-- **There is only one place to type an instruction:** ✦ Ask at the end of the bottom bar, the same in every view.
+- **There is only one place to type an instruction:** the prompt row above the tool bar, the same in every view.
 - **The selection shows inside it as a chip.** The chip uses the thing's own name or text ("Rainy shop", "“Open late” · text"), never a guessed role. That follows the standing UI-copy rule.
 - **Mode chips.** Menu items that need words (Remix…, Tune…, Restyle…, New effect…) put a mode chip ("Remix ×") in the prompt, focus it and wait. Esc on an empty field clears the mode.
 
@@ -108,34 +104,21 @@ Every item shows:
 
 ## 2. Layout
 
-### 2.1 The canvas bottom bar
+### 2.1 The canvas prompt and toolbar
 
-The bar is at the bottom centre, where the toolbar is today (`layouts/default.vue` ~4152–4304). It holds:
+The arrangement is today's: a prompt row directly above the toolbar at the bottom centre, sharing its width (`layouts/default.vue` ~4152–4304, the `canvas-bottom-bar-stack` column). What changes is the behaviour of the prompt.
 
-```
-[↖ Select] [✥ Hand] | [＋ Add ▾] [◧ Studios ▾] [✺ Generate ▾] [↯ Actions] | [✦ Ask about Rainy shop    /]
-```
+- **The toolbar is unchanged except that Explain is removed**, along with `ExplainOverlay`, `ExplainPanel`, `useExplain` and `/api/explain`, once nothing else uses them. "What does this do?" in the prompt replaces it. Every other button (Select, Hand, Add, Studios, Generate, Assets, Actions, Styles, Characters, Toolbox, More, Templates) stays where it is.
+- **The prompt row is always visible**, the full width of the toolbar:
+  - **At rest:** "Ask Sailor", or "Change or ask about ‹selection›", with the selection as a chip inside the field ("Rainy shop ×", "2 nodes ×") and a `/` hint.
+  - **Focused:** opened by a click, `/` (when not typing in a field), ⌘K, or a menu item that needs words (which also adds a mode chip such as "Remix ×"). 2–3 suggestions for the current selection appear just above it.
+  - **Working:** after you send, the field shows what's happening ("Writing three new effects…") with Stop. Results then land on the work (§3), and the takes strip sits just above the prompt.
+- **Leaving:** Esc clears a mode chip first (on an empty field), then leaves the field. Clicking away leaves it.
+- **It replaces `CanvasPromptBar`'s internals in the same place.** The zoom bar and minimap (bottom right) and the top bar (project menu, Run with its cost, the status pill) are unchanged.
 
-- **Add ▾** has three sections:
-  - Surfaces: Frame, Smart layout, Timeline.
-  - Sources: Image, Text, Audio, Video, Collection, Moodboard, and 3D (coming soon).
-  - **Annotate**, moved here from More: Sticky note, Checklist, Image pin, Arrow, with the same S, C and A shortcuts.
-- **Studios ▾, Generate ▾ and Actions** are unchanged.
-- **Explain is removed**, along with `ExplainOverlay`, `ExplainPanel`, `useExplain` and `/api/explain`, once nothing else uses them. "What does this do?" in the prompt replaces it.
-- **The prompt has three states:**
-  - **At rest:** a field at the end of the bar reading "Ask Sailor", or "Ask about ‹selection›", with a `/` hint.
-  - **Active:** opened by a click, `/` (when not typing in a field), ⌘K, or a menu item that needs words. The field grows across the whole bar and the tools slide out; the bar keeps its width and the transition is about 0.28 s. Chips and a send button appear inside it, and 2–3 suggestions for the current selection appear above it.
-  - **Working:** after you send, the field shrinks back and the tools return. The field reads what's happening ("Writing three new effects…"), with Stop.
-- **Leaving the active state:** Esc or clicking away closes it. Esc with a mode chip and an empty field clears the mode first.
-- **It replaces `CanvasPromptBar`,** which today sits above the toolbar at the same width. The zoom bar and minimap (bottom right) and the top bar (project menu, Run with its cost, the status pill) are unchanged.
+### 2.2 No libraries rail (dropped 2026-09-24)
 
-### 2.2 The libraries rail (canvas only)
-
-- **Position:** a vertical rail on the left edge, centred vertically.
-- **Contents:** Assets · Styles · Characters · Templates | More ▾ (Toolbox, Nodes, Blocks).
-- **Labels** stay under the icons at about 10 px. On short windows the rail shrinks, then folds (decided: question 6, option A). Below 760 px it goes icon-only, with tooltips. Below about 560 px the lowest buttons move into More.
-- **Menus** open to the rail's right. Panels open where they do today, beside the rail.
-- **Canvas content** keeps clear of the rail: fit-view and the node margin account for its width.
+The earlier design's left rail existed only to free room in the bar for a prompt. The prompt keeps its own row instead, so the libraries stay in the toolbar where they are today. The rail-related decisions (short-window folding, Annotate moving into Add, Toolbox moving into More) are withdrawn.
 
 ### 2.3 The node toolbar
 
@@ -152,17 +135,11 @@ The bar is at the bottom centre, where the toolbar is today (`layouts/default.vu
 
 ### 2.4 Studios
 
-The same rule applies everywhere: **the studio's tools and ✦ Ask share one bar at the bottom, and results land just above it.**
+The same stack applies everywhere: **the prompt row above the studio's tool bar, and results just above the prompt.**
 
-- **Frame** (`CompositorModal.vue`):
-  - Its bar becomes zoom −/%/+ | Select · Undo · Redo | Text · Shapes · Generate · Pen · Brush | Insert · Brand · Templates | ✦ Ask.
-  - Frame's "Ask…" pill already stretches to the bar's width. It moves *into* the bar as the last item.
-  - At rest the prompt is a compact **✦ Ask**, because a 15-tool bar plus a wide field overflows a 1024 px window. It grows across the bar when active.
-- **3D** (`Scene3DStudioSurface.vue`): the bar becomes Primitive · Upload · Light · Decal · Generate | ✦ Ask.
-- **Simple studios** (Shader, Gradient, Shape, Texture, Vector type, Space type):
-  - Today they have only the prompt under the preview. They get the same bar, with their scattered viewport controls moved into it: Gradient's zoom (now at the top), Texture's 1×/2×/3× repeat (now under the canvas), and Vector and Space type's play/pause and scrub.
-  - With no controls, the bar is just the prompt: 260 px at rest, 560 px when active.
-- **Modes that take over the bottom** (3D sculpting, the Motion timeline in Frame and 3D, the Timeline editor): ✦ Ask stays the last item of whichever bar is showing, so it's always in the same spot.
+- **Frame** (`CompositorModal.vue`) and **3D** (`Scene3DStudioSurface.vue`) already stack their prompt above their tool bar. They keep that arrangement and get the new prompt behaviour. Frame's prompt no longer collapses to an "Ask…" pill; it stays a full row, like the canvas.
+- **Simple studios** (Shader, Gradient, Shape, Texture, Vector type, Space type): the prompt row sits under the preview, as today. Their scattered viewport controls (Gradient's zoom at the top, Texture's 1×/2×/3× repeat under the canvas, Vector and Space type's play/pause and scrub) move into a small tool bar below the prompt, so every studio has the same stack.
+- **Modes that take over the bottom** (3D sculpting, the Motion timeline in Frame and 3D, the Timeline editor): the prompt row stays above whichever bar is showing, so it's always in the same spot.
 - **The output footer** (`StudioActionsFooter`: Download, Render on canvas) is unchanged. It's output, not making.
 - **The inspector** reads top to bottom:
   1. **The thing itself:**
@@ -349,13 +326,12 @@ Instructions can edit a content field (§1.5). The edit appears in the field, br
   - the automatic render checks (black, flat, no change, not moving), using the spike page's thresholds;
   - My effects version handling.
 - **E2E (Playwright):**
-  - the bottom bar's three states;
+  - the prompt's states (at rest, focused, working);
   - `/` and ⌘K focus, and Esc clearing the mode, then closing;
   - selection chips;
   - take strip placement, hover preview and Keep, on a node and in a studio;
   - the proposed-node Approve and Reject flow;
-  - the rail's menus.
-- **Real-mouse check.** The standing rule is that synthetic pointer events prove nothing. Hover-to-preview and the bar's grow and shrink must be checked by hand in the browser pane.
+- **Real-mouse check.** The standing rule is that synthetic pointer events prove nothing. Hover-to-preview and typing into the prompt must be checked by hand in the browser pane.
 - **Engine run (stage 1):** the spike's 6 requests on the real tiers, scored the same way as the spike page.
 
 ---
@@ -364,7 +340,7 @@ Instructions can edit a content field (§1.5). The edit appears in the field, br
 
 1. **Engine run.** The spike's 6 requests through the real engine (§7.2) on Sonnet 5 and Haiku, shown next to the spike's takes on one page. It costs a few dollars, and needs **your OK before running**. It confirms the model tier and the checks.
 2. **Canvas layout.**
-   - The bottom bar with the three prompt states, the rail, and Annotate moved into Add.
+   - The prompt row's new behaviour in place of `CanvasPromptBar` (selection chips, suggestions, progress with Stop), and Explain removed from the toolbar.
    - The node toolbar (Edit ▾ / Develop ▾, existing items regrouped by intent, landing hints).
    - The multi-selection toolbar, Run rows on nodes, and the fixes badge.
    - Explain removed.
@@ -391,6 +367,6 @@ The options were shown visually in `assets/2026-09-23-ai-in-sailor/open-question
 3. **Canvas zoom:** take strips **stay the same size on screen**, like the node toolbar (option B).
 4. **The port "Ask AI" popover:** the popover only searches node types; its last row **hands off to the one prompt** with the connector as a chip (option B).
 5. **Frame's "Describe the element…":** it's the **recipe**, so it stays on the element in the shared content field (option A).
-6. **The rail on short windows:** **icon-only below 760 px, then the lowest buttons fold into More** below about 560 px (option A).
+6. **The rail on short windows:** withdrawn. The rail itself was dropped on 2026-09-24 (§2.2).
 
 No open questions remain that block stage 1 or 2.
