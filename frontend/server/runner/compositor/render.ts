@@ -15,10 +15,11 @@
  * when its turn comes and let go after, so at most the canvas, one layer and
  * the first layer (which sets the size) are held at once.
  */
+import { MAX_FRAME_WORK } from '#shared/runner/eligibility'
 import { pyTruthy } from '#shared/runner/pyText'
 import { hexToRgb } from '~/lib/vary'
 import { expandLayer, parseClonerJson, pyFloat, pyInt } from './cloner'
-import { core, type CopyPose, type Plane } from './plane'
+import { core, type CopyPose, type Picture, type Plane } from './plane'
 
 export const MAX_LAYERS = 16
 /** The largest canvas the runner renders: 8192 × 8192, the Frame's own widget limit. */
@@ -33,8 +34,8 @@ export interface FrameSources {
   overlayMask: Plane | null
 }
 
-/** A picture, decoded when asked for. */
-export type Loader = () => Promise<Plane>
+/** A picture, decoded when asked for (a tensor, or a raw RGBA8 picture the backend turns into one). */
+export type Loader = () => Promise<Picture>
 
 export interface FrameLoaders {
   layers: ReadonlyArray<Loader | null>
@@ -46,22 +47,26 @@ export interface FrameLoaders {
 export interface FrameResult {
   /** The composite, 3 channels, clamped to [0, 1]. */
   image: Plane
-  /** The protect_mask output: 1 where a protected layer covers (zeros when it was not asked for). */
-  protect: Plane
+  /** The protect_mask output: 1 where a protected layer covers; null when it was not asked for. */
+  protect: Plane | null
 }
 
-/** Where the pixel work happens. One composite at a time per backend. */
-export interface FrameBackend {
+/** Where the pixel work happens, and what it hands back. One composite at a time per backend. */
+export interface FrameBackend<R> {
   begin(ch: number, cw: number): Promise<void>
-  paint(image: Plane, mask: Plane | null, blend: string, copies: CopyPose[], protect: boolean): Promise<void>
-  overlay(image: Plane, mask: Plane | null): Promise<void>
-  finish(): Promise<FrameResult>
+  paint(image: Picture, mask: Picture | null, blend: string, copies: CopyPose[], protect: boolean): Promise<void>
+  overlay(image: Picture, mask: Picture | null): Promise<void>
+  finish(): Promise<R>
 }
 
 export interface ComposeOptions {
   /** Union the protected layers' coverage (the protect_mask output). The runner never reads it. */
   protect: boolean
   signal?: AbortSignal
+  /** The largest canvas (default 8192²; hosted passes 4096²). */
+  maxCanvasPixels?: number
+  /** The most copies × canvas pixels (default MAX_FRAME_WORK). */
+  maxWork?: number
 }
 
 /** A widget as execute() reads it: `kwargs.get(name, def)`. */
@@ -75,7 +80,7 @@ function checkStop(signal?: AbortSignal): void {
 }
 
 /** `CompositorNode.execute`, the static path, reading pictures through `loaders` and painting through `backend`. */
-export async function composeFrame(inputs: Record<string, unknown>, loaders: FrameLoaders, backend: FrameBackend, opts: ComposeOptions): Promise<FrameResult> {
+export async function composeFrame<R>(inputs: Record<string, unknown>, loaders: FrameLoaders, backend: FrameBackend<R>, opts: ComposeOptions): Promise<R> {
   // Gather the connected layers in slot order.
   const gathered = []
   for (let i = 1; i <= MAX_LAYERS; i++) {
@@ -105,37 +110,46 @@ export async function composeFrame(inputs: Record<string, unknown>, loaders: Fra
   const height = dim('height')
   const explicit = width > 0 && height > 0
 
+  if (!explicit && !gathered.length) {
+    // Nothing connected and no size: a 16×16 black picture (the overlay is not laid either).
+    await backend.begin(16, 16)
+    return backend.finish()
+  }
   let ch: number, cw: number
   // The first gathered layer sets the size; it is kept until its own turn.
-  let first: Plane | null = null
+  let first: Picture | null = null
   if (explicit) { ch = height; cw = width }
-  else if (gathered.length) {
+  else {
     first = await gathered[0]!.load()
     ch = first.h
     cw = first.w
   }
-  else {
-    // Nothing connected and no size: a 16×16 black picture (the overlay is not laid either).
-    return { image: core.plane(3, 16, 16), protect: core.plane(1, 16, 16) }
+  const maxCanvas = opts.maxCanvasPixels ?? MAX_CANVAS_PIXELS
+  if (ch * cw > maxCanvas) {
+    const side = Math.round(Math.sqrt(maxCanvas))
+    throw new Error(`This Frame is larger than ${side} × ${side}, too large to render`)
   }
-  if (ch * cw > MAX_CANVAS_PIXELS) throw new Error('This Frame is larger than 8192 × 8192, too large to render')
 
-  await backend.begin(ch, cw)
   // The cloner, now the canvas aspect is known. Copies come back to front,
   // and every copy of a layer shares its z, so a stable sort of the layers
   // is Python's stable sort of the copies.
   const aspect = ch ? cw / ch : 1
+  const copiesOf = gathered.map(g => expandLayer({ x: g.x, y: g.y, rot: g.rot, scl: g.scl, op: g.op }, g.cloner, aspect).map((c): CopyPose => {
+    let tint: [number, number, number] | null = null
+    if (c.tint) {
+      const [r, gg, b] = hexToRgb(c.tint)
+      tint = [f(r / 255), f(gg / 255), f(b / 255)]
+    }
+    return { x: c.x, y: c.y, rot: c.rot, scl: c.scl, op: c.op, tint, tintStrength: c.tintStrength }
+  }))
+  const work = copiesOf.reduce((n, c) => n + c.length, 0) * ch * cw
+  if (work > (opts.maxWork ?? MAX_FRAME_WORK)) throw new Error('This Frame asks for too many copies at this size to render (at most 256 copies of 4 megapixels)')
+
+  await backend.begin(ch, cw)
   const order = gathered.map((g, i) => ({ g, i })).sort((p, q) => (p.g.z - q.g.z) || (p.i - q.i))
   for (const { g, i } of order) {
     checkStop(opts.signal)
-    const copies: CopyPose[] = expandLayer({ x: g.x, y: g.y, rot: g.rot, scl: g.scl, op: g.op }, g.cloner, aspect).map((c) => {
-      let tint: [number, number, number] | null = null
-      if (c.tint) {
-        const [r, gg, b] = hexToRgb(c.tint)
-        tint = [f(r / 255), f(gg / 255), f(b / 255)]
-      }
-      return { x: c.x, y: c.y, rot: c.rot, scl: c.scl, op: c.op, tint, tintStrength: c.tintStrength }
-    })
+    const copies = copiesOf[i]!
     const image = i === 0 && first ? first : await g.load()
     if (i === 0) first = null
     const mask = g.mask ? await g.mask() : null
@@ -152,8 +166,8 @@ export async function composeFrame(inputs: Record<string, unknown>, loaders: Fra
   return backend.finish()
 }
 
-/** The core in this thread, yielding to the event loop between layers. */
-export function inThreadBackend(signal?: AbortSignal): FrameBackend {
+/** The core in this thread, yielding to the event loop between layers (tests, the parity spec). */
+export function inThreadBackend(signal?: AbortSignal, withProtect = true): FrameBackend<FrameResult> {
   let cv: ReturnType<typeof core.createCanvas> | null = null
   const breathe = () => new Promise<void>(r => setImmediate(r))
   return {
@@ -163,7 +177,7 @@ export function inThreadBackend(signal?: AbortSignal): FrameBackend {
       await breathe()
     },
     async overlay(image, mask) { core.overlay(cv!, image, mask) },
-    async finish() { return core.finish(cv!) },
+    async finish() { return core.finish(cv!, withProtect) },
   }
 }
 

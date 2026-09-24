@@ -30,7 +30,7 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
 import sharp from 'sharp'
 import { renderFrame, type FrameSources } from '~~/server/runner/compositor/render'
-import { decodeLoadMask, decodePicture, encodePreviewPng, type PictureSource } from '~~/server/runner/compositor/decode'
+import { decodeLoadMask, decodePicture, decodeRaw, decodeRawMask, pngFromPreview8, type PictureSource } from '~~/server/runner/compositor/decode'
 import { plane, type Plane } from '~~/server/runner/compositor/plane'
 import { renderFrameInWorker } from '~~/server/runner/compositor/worker'
 
@@ -149,21 +149,23 @@ describe('composite parity: renderFrame vs CompositorNode.execute', () => {
     const r = await renderFrame(c.inputs, await sourcesOf(c, pythonDecode))
     expect([r.image.h, r.image.w]).toEqual([c.height, c.width])
     const e1 = c.image ? maxAbs(planeToHwc(r.image), u16(c.image)) : 0
-    const e2 = maxAbs(r.protect.data, u16(c.protect))
+    const e2 = maxAbs(r.protect!.data, u16(c.protect))
     report.push(`composite ${c.name}: image ${c.image ? (e1 * 255).toFixed(4) : '(8-bit only)'}/255, protect ${(e2 * 255).toFixed(4)}/255`)
     expect(e1).toBeLessThanOrEqual(TOL_FLOAT)
     expect(e2).toBeLessThanOrEqual(TOL_FLOAT)
   })
 
   it.each(FIX.cases.map(c => [c.name, c] as const))('%s — end to end on the worker, the 8-bit PNG', async (_n, c) => {
-    const lazy = (link: [string, string] | undefined) => (link ? () => ourDecode(link[0], link[1]) : null)
+    // The runner's own path: raw RGBA8 from sharp, the tensors and the 8-bit pixels made in the worker.
+    const raw = (name: string, via: string) => via === 'load_mask' ? decodeRawMask(asset(name)) : decodeRaw(asset(name), via as PictureSource)
+    const lazy = (link: [string, string] | undefined) => (link ? () => raw(link[0], link[1]) : null)
     const r = await renderFrameInWorker(c.inputs, {
       layers: Array.from({ length: 16 }, (_, i) => lazy(c.links[`layer${i + 1}`])),
       masks: Array.from({ length: 16 }, (_, i) => lazy(c.links[`layer${i + 1}_mask`])),
       overlay: lazy(c.links.overlay),
       overlayMask: lazy(c.links.overlay_mask),
     })
-    const png = await encodePreviewPng(r.image)
+    const png = await pngFromPreview8(r.px, r.w, r.h)
     const { data, info } = await sharp(png).raw().toBuffer({ resolveWithObject: true })
     expect([info.height, info.width, info.channels]).toEqual([c.height, c.width, 3])
     const want = unpack(c.image8)

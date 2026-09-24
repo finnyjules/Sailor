@@ -60,6 +60,8 @@ export interface PlanContext {
   gateOpen: boolean
   /** The bytes of one of our files (a local render reads its pictures). Absent: local renders fail plainly. */
   readFile?(file: OutputFile): Promise<Uint8Array>
+  /** Hosted (a shared server): local renders take the lower limits. */
+  hosted?: boolean
 }
 
 export async function planNode(ctx: PlanContext): Promise<NodePlan> {

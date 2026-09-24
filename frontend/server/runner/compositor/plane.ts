@@ -41,6 +41,24 @@ export interface CopyPose {
   tintStrength: number
 }
 
+/**
+ * A picture as sharp decodes it (RGBA, 8 bits, EXIF already turned where the
+ * source turns it), not yet a tensor: the worker turns it into one, so the
+ * main thread never loops over pixels. `source` says how the Python loader
+ * for it builds its tensor (see decode.ts); `data` is null for Python's
+ * stand-ins: an empty Image card's 1×1 black, LoadImage's 64×64 zero mask.
+ */
+export interface RawPicture {
+  raw: true
+  source: 'provider' | 'card' | 'load' | 'rgb' | 'blank' | 'mask' | 'nomask'
+  w: number
+  h: number
+  data: Uint8Array | null
+}
+
+/** A layer, mask or overlay: a tensor already (the parity spec), or a raw picture. */
+export type Picture = Plane | RawPicture
+
 export const BLEND_MODES = [
   'normal', 'multiply', 'screen', 'overlay', 'soft_light', 'hard_light',
   'difference', 'lighten', 'darken', 'add',
@@ -386,10 +404,11 @@ export function compositorCore() {
    * unions their coverage into the protect mask. `stopped` is checked before
    * each copy. The first drawn copy lands on implicit black (`rgb · a`).
    */
-  function paint(cv: Canvas, image: Plane, mask: Plane | null, blend: string, copies: CopyPose[], protect: boolean, stopped?: () => boolean): void {
+  function paint(cv: Canvas, picture: Plane | RawPicture, maskPicture: Plane | RawPicture | null, blend: string, copies: CopyPose[], protect: boolean, stopped?: () => boolean): void {
     const { ch, cw } = cv
     const n = ch * cw
-    const m = mask ? resizeTo(mask, ch, cw).data : null
+    const image = toTensor(picture)
+    const m = maskPicture ? resizeTo(toTensor(maskPicture), ch, cw).data : null
     for (const copy of copies) {
       if (stopped && stopped()) throw new Error('Stopped')
       if (!drawable(copy)) continue
@@ -423,7 +442,9 @@ export function compositorCore() {
   }
 
   /** The overlay: always on top, straight per-pixel alpha (its mask is 1 − alpha, an RGBA overlay folds its own alpha too). */
-  function overlay(cv: Canvas, src: Plane, mask: Plane | null): void {
+  function overlay(cv: Canvas, srcPicture: Plane | RawPicture, maskPicture: Plane | RawPicture | null): void {
+    const src = toTensor(srcPicture)
+    const mask = maskPicture ? toTensor(maskPicture) : null
     const { ch, cw } = cv
     const n = ch * cw
     if (!cv.result) cv.result = plane(3, ch, cw)
@@ -456,22 +477,89 @@ export function compositorCore() {
     }
   }
 
-  /** The clamped composite (black when nothing was drawn) and the protect mask (zeros when nothing is protected). */
-  function finish(cv: Canvas): { image: Plane; protect: Plane } {
+  /**
+   * The clamped composite (black when nothing was drawn), and — only when
+   * asked — the protect mask (zeros when nothing is protected).
+   */
+  function finish(cv: Canvas, withProtect: boolean): { image: Plane; protect: Plane | null } {
     const image = cv.result !== null ? cv.result : plane(3, cv.ch, cv.cw)
     const out = image.data
     for (let i = 0; i < out.length; i++) {
       const v = out[i]!
       out[i] = v < 0 ? 0 : v > 1 ? 1 : v
     }
-    const protect = plane(1, cv.ch, cv.cw)
-    if (cv.protect) protect.data.set(cv.protect)
+    let protect: Plane | null = null
+    if (withProtect) {
+      protect = plane(1, cv.ch, cv.cw)
+      if (cv.protect) protect.data.set(cv.protect)
+    }
     return { image, protect }
+  }
+
+  /** uint8 → float32 as numpy does it: float32(v) / 255. */
+  function unit(v: number): number {
+    return f(v / 255)
+  }
+
+  /**
+   * A raw picture → the tensor its Python loader makes:
+   *   provider — bytesio_to_image_tensor: RGBA, alpha a/255;
+   *   card     — Image.process: RGB, or RGBA (alpha rebuilt as 1 − (1 − a/255))
+   *              when any pixel is not fully opaque (mask.max() > 1e-3 ⇔ some a ≤ 254);
+   *   load, rgb — RGB;  blank — 1×1 black;
+   *   mask     — LoadImage MASK: 1 − a/255;  nomask — its 64×64 zeros.
+   * A tensor passes through.
+   */
+  function toTensor(p: Plane | RawPicture): Plane {
+    if (!('raw' in p)) return p
+    if (p.source === 'blank') return plane(3, 1, 1)
+    if (p.source === 'nomask') return plane(1, 64, 64)
+    const d = p.data
+    if (!d) throw new Error('A picture for the Frame is missing')
+    const n = p.w * p.h
+    if (p.source === 'mask') {
+      const out = plane(1, p.h, p.w)
+      for (let i = 0; i < n; i++) out.data[i] = f(1 - unit(d[i * 4 + 3]!))
+      return out
+    }
+    let alpha = p.source === 'provider'
+    if (p.source === 'card') {
+      for (let i = 3; i < d.length; i += 4) {
+        if (d[i]! < 255) { alpha = true; break }
+      }
+    }
+    const out = plane(alpha ? 4 : 3, p.h, p.w)
+    const o = out.data
+    for (let i = 0; i < n; i++) {
+      o[i] = unit(d[i * 4]!)
+      o[n + i] = unit(d[i * 4 + 1]!)
+      o[2 * n + i] = unit(d[i * 4 + 2]!)
+    }
+    if (alpha) {
+      for (let i = 0; i < n; i++) {
+        const a = unit(d[i * 4 + 3]!)
+        o[3 * n + i] = p.source === 'provider' ? a : f(1 - f(1 - a))
+      }
+    }
+    return out
+  }
+
+  /** save_live_preview's pixels: clip(255·x) truncated to uint8 (255.0·x a float32 product), RGB interleaved. */
+  function toPreview8(img: Plane): Uint8Array {
+    const n = img.h * img.w
+    const px = new Uint8Array(n * 3)
+    for (let k = 0; k < 3; k++) {
+      for (let i = 0; i < n; i++) {
+        const v = f(255 * img.data[k * n + i]!)
+        px[i * 3 + k] = v <= 0 ? 0 : v >= 255 ? 255 : Math.trunc(v)
+      }
+    }
+    return px
   }
 
   return {
     plane, channel, channels, repeat3, concat, resizeBilinear, resizeTo, fitToCanvas, transform, blendValue,
-    drawable, prepLayer, createCanvas, paint, overlay, finish,
+    drawable, prepLayer, createCanvas, paint, overlay, finish, toTensor, toPreview8,
   }
 }
 

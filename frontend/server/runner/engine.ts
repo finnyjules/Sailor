@@ -587,6 +587,7 @@ export function createEngine(deps: EngineDeps) {
         toUrl: f => deps.handoff.toUrl(f),
         gateOpen: take.openGates.includes(id),
         readFile: f => deps.results.read(f),
+        hosted: deps.hosted(),
       })
       // Rendered here (the Frame): no provider, no charge, not an asset.
       if (plan.kind === 'local') {
@@ -834,7 +835,7 @@ export function createEngine(deps: EngineDeps) {
     // a marker it reads as "run this on ComfyUI instead" (isRunnerDeclined).
     const families = deps.families?.() ?? NO_FAMILIES
     for (const p of takes) {
-      if (!p || typeof p !== 'object' || !isRunnerEligible(p as ApiPrompt, families)) {
+      if (!p || typeof p !== 'object' || !isRunnerEligible(p as ApiPrompt, families, { hosted: deps.hosted() })) {
         throw refuse('This workflow can’t run on the Sailor runner', 400, { reason: RUNNER_NOT_ELIGIBLE })
       }
     }

@@ -12,7 +12,8 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import sharp from 'sharp'
 import {
-  COMPOSITOR_BLEND_MODES, IMAGE_OUTPUT_CLASSES, LOCAL_RENDER_TYPES, MAX_FRAME_COPIES, PROVIDER_TYPES, RUNNER_NODE_RULES,
+  COMPOSITOR_BLEND_MODES, HOSTED_MAX_FRAME_ARTBOARD_PIXELS, IMAGE_OUTPUT_CLASSES, LOCAL_RENDER_TYPES, MAX_FRAME_COPIES,
+  MAX_FRAME_WORK, PROVIDER_TYPES, RUNNER_NODE_RULES,
   clonerCopies, isRunnerEligible, nodeRuleAllows, runnerTakesNode,
 } from '#shared/runner/eligibility'
 import { NO_FAMILIES, RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
@@ -30,9 +31,14 @@ import { existsSync } from 'node:fs'
 import { BASE_RENDER_CREDITS } from '~~/server/utils/priceBook'
 import { MAX_QUEUED_CALLS } from '~~/server/runner/engine'
 import { userSubfolder } from '~~/server/runner/results'
-import { __frameWorkerForTests, renderFrameInWorker } from '~~/server/runner/compositor/worker'
+import { FRAME_TIMEOUT_MESSAGE, __frameWorkerForTests, __setFrameTimeoutForTests, renderFrameInWorker, workerScript } from '~~/server/runner/compositor/worker'
+import { Worker } from 'node:worker_threads'
+import { createRequire } from 'node:module'
+import { mkdtempSync, readdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { pathToFileURL } from 'node:url'
 import { MAX_CANVAS_PIXELS, composeFrame, inThreadBackend } from '~~/server/runner/compositor/render'
-import { compositorCore, plane } from '~~/server/runner/compositor/plane'
+import { compositorCore, core, plane } from '~~/server/runner/compositor/plane'
 
 const FRAME: ReadonlySet<RunnerFamily> = new Set(['frame'])
 const ALL: ReadonlySet<RunnerFamily> = new Set(RUNNER_FAMILIES)
@@ -399,20 +405,164 @@ describe('server health: caps, sources, Stop', () => {
     const pic = () => { const p = plane(3, 64, 64); p.data.fill(0.5); return p }
     const done = new AbortController()
     done.abort()
-    await expect(renderFrameInWorker({}, { layers: [async () => pic(), ...Array(15).fill(null)], masks: Array(16).fill(null), overlay: null, overlayMask: null }, done.signal))
+    await expect(renderFrameInWorker({}, { layers: [async () => pic(), ...Array(15).fill(null)], masks: Array(16).fill(null), overlay: null, overlayMask: null }, { signal: done.signal }))
       .rejects.toThrow('Stopped')
     // Stop pressed while the second layer is being read: nothing after it is painted.
     const ctl = new AbortController()
     const later: Array<(() => Promise<ReturnType<typeof pic>>) | null> = [async () => pic(), async () => { ctl.abort(); return pic() }, async () => { throw new Error('read after Stop') }]
-    await expect(renderFrameInWorker({}, { layers: [...later, ...Array(13).fill(null)], masks: Array(16).fill(null), overlay: null, overlayMask: null }, ctl.signal))
+    await expect(renderFrameInWorker({}, { layers: [...later, ...Array(13).fill(null)], masks: Array(16).fill(null), overlay: null, overlayMask: null }, { signal: ctl.signal }))
       .rejects.toThrow('Stopped')
     // Stop during a layer's copies: the worker's flag is read before each copy.
     const mid = new AbortController()
     const many = JSON.stringify({ enabled: true, countX: 200, spacingX: 0.001 })
-    const run = renderFrameInWorker({ layer1_cloner: many }, { layers: [async () => { const p = plane(3, 512, 512); setTimeout(() => mid.abort(), 5); return p }, ...Array(15).fill(null)], masks: Array(16).fill(null), overlay: null, overlayMask: null }, mid.signal)
+    const run = renderFrameInWorker({ layer1_cloner: many }, { layers: [async () => { const p = plane(3, 512, 512); setTimeout(() => mid.abort(), 5); return p }, ...Array(15).fill(null)], masks: Array(16).fill(null), overlay: null, overlayMask: null }, { signal: mid.signal })
     await expect(run).rejects.toThrow('Stopped')
     // The worker is still usable afterwards.
     const ok = await renderFrameInWorker({}, { layers: [async () => pic(), ...Array(15).fill(null)], masks: Array(16).fill(null), overlay: null, overlayMask: null })
-    expect([ok.image.h, ok.image.w]).toEqual([64, 64])
+    expect([ok.h, ok.w, ok.px.length]).toEqual([64, 64, 64 * 64 * 3])
   }, 30_000)
+})
+
+describe('fix round 2: the worker does the pixels, work caps, watchdog', () => {
+  const noLayers = (first: () => Promise<any>) => ({ layers: [first, ...Array(15).fill(null)], masks: Array(16).fill(null), overlay: null, overlayMask: null })
+  const cl = (c: Record<string, unknown>) => JSON.stringify({ enabled: true, ...c })
+
+  it(`work: copies × explicit canvas pixels ≤ ${MAX_FRAME_WORK} (256 × 4 MP), else ComfyUI`, () => {
+    expect(MAX_FRAME_WORK).toBe(256 * 4 * 1024 * 1024)
+    // 4096² with frameFlow's two layers: 63 + 1 copies is exactly the limit; 64 + 1 is over.
+    expect(isRunnerEligible(frameFlow({ width: 4096, height: 4096, layer1_cloner: cl({ countX: 63 }) }), FRAME)).toBe(true)
+    expect(isRunnerEligible(frameFlow({ width: 4096, height: 4096, layer1_cloner: cl({ countX: 64 }) }), FRAME)).toBe(false)
+  })
+
+  it('work, for a canvas sized from layer 1, fails plainly in the render before anything is painted', async () => {
+    const big = { c: 3, h: 4096, w: 4096, data: new Float32Array(0) }
+    let begun = false
+    const backend = { ...inThreadBackend(), async begin() { begun = true } }
+    await expect(composeFrame({ layer1_cloner: cl({ countX: 65 }) }, noLayers(async () => big), backend, { protect: false }))
+      .rejects.toThrow('This Frame asks for too many copies at this size to render (at most 256 copies of 4 megapixels)')
+    expect(begun).toBe(false)
+  })
+
+  it('hosted: the artboard cap is 4096² (eligibility, the server, and a layer-sized canvas)', async () => {
+    expect(HOSTED_MAX_FRAME_ARTBOARD_PIXELS).toBe(4096 * 4096)
+    const p = frameFlow({ width: 4097, height: 4096 })
+    expect(isRunnerEligible(p, FRAME)).toBe(true)
+    expect(isRunnerEligible(p, FRAME, { hosted: true })).toBe(false)
+    expect(isRunnerEligible(frameFlow({ width: 4096, height: 4096 }), FRAME, { hosted: true })).toBe(true)
+    const k = makeKit({ hosted: true, deps: { families: () => FRAME } })
+    await expect(k.engine.startRun({ userId: k.userId, takes: [p], ...START })).rejects.toMatchObject({ statusCode: 400, data: { reason: 'not-eligible' } })
+    const wide = { c: 3, h: 4096, w: 4097, data: new Float32Array(0) }
+    await expect(composeFrame({}, noLayers(async () => wide), inThreadBackend(), { protect: false, maxCanvasPixels: HOSTED_MAX_FRAME_ARTBOARD_PIXELS }))
+      .rejects.toThrow('This Frame is larger than 4096 × 4096, too large to render')
+  })
+
+  it('finish makes no protect plane unless asked', () => {
+    const cv = core.createCanvas(8, 8)
+    expect(core.finish(cv, false).protect).toBeNull()
+    expect(core.finish(core.createCanvas(8, 8), true).protect!.data.length).toBe(64)
+  })
+
+  it('a render that fails in the worker lets its canvas go; the next render is fine', async () => {
+    const broken = { raw: true as const, source: 'provider' as const, w: 4, h: 4, data: null }
+    await expect(renderFrameInWorker({}, noLayers(async () => broken))).rejects.toThrow('A picture for the Frame is missing')
+    const ok = await renderFrameInWorker({}, noLayers(async () => { const q = plane(3, 8, 8); q.data.fill(1); return q }))
+    expect([...ok.px.slice(0, 3)]).toEqual([255, 255, 255])
+  })
+
+  it('the worker killed mid-render: that render fails plainly, the next gets a fresh worker', async () => {
+    const heavy = renderFrameInWorker({ layer1_cloner: cl({ countX: 200, spacingX: 0.001 }) }, noLayers(async () => plane(3, 512, 512)))
+    await new Promise(r => setTimeout(r, 30))
+    const w = __frameWorkerForTests()!
+    expect(w).not.toBeNull()
+    await w.terminate()
+    await expect(heavy).rejects.toThrow(/The Frame renderer stopped/)
+    const ok = await renderFrameInWorker({}, noLayers(async () => plane(3, 8, 8)))
+    expect([ok.w, ok.h]).toEqual([8, 8])
+    expect(__frameWorkerForTests()).not.toBe(w)
+  }, 30_000)
+
+  it('the watchdog: a render past its time limit terminates the worker and fails plainly; the next render starts fresh', async () => {
+    __setFrameTimeoutForTests(50)
+    try {
+      const before = (await renderFrameInWorker({}, noLayers(async () => plane(3, 8, 8))), __frameWorkerForTests())!
+      const exited = new Promise<boolean>((res) => { before.once('exit', () => res(true)); setTimeout(() => res(false), 5000) })
+      await expect(renderFrameInWorker({ layer1_cloner: cl({ countX: 200, spacingX: 0.001 }) }, noLayers(async () => plane(3, 512, 512))))
+        .rejects.toThrow(FRAME_TIMEOUT_MESSAGE)
+      // The stuck worker is terminated, not just abandoned.
+      expect(await exited).toBe(true)
+      __setFrameTimeoutForTests(null)
+      const ok = await renderFrameInWorker({}, noLayers(async () => plane(3, 8, 8)))
+      expect([ok.w, ok.h]).toEqual([8, 8])
+      expect(__frameWorkerForTests()).not.toBe(before)
+    }
+    finally { __setFrameTimeoutForTests(null) }
+  }, 30_000)
+
+  it('the main thread hands raw RGBA8 over: the loaders the plan makes decode no pixel', async () => {
+    const { decodeRaw, decodeRawMask } = await import('~~/server/runner/compositor/decode')
+    const r = await decodeRaw(new Uint8Array(asset('disc.png')), 'card')
+    expect(r).toMatchObject({ raw: true, source: 'card', w: 40, h: 40 })
+    expect(r.data).toBeInstanceOf(Uint8Array)
+    expect(r.data!.byteLength).toBe(40 * 40 * 4)
+    expect(r.data!.buffer.byteLength).toBe(40 * 40 * 4) // its own buffer: transferable
+    expect(await decodeRawMask(new Uint8Array(asset('land.png')))).toEqual({ raw: true, source: 'nomask', w: 64, h: 64, data: null })
+  })
+})
+
+// ── The esbuild guard: plane.ts built the way Nitro builds server code ────
+
+describe('esbuild guard: the worker core survives Nitro’s build', () => {
+  const require = createRequire(import.meta.url)
+  const pnpm = fileURLToPath(new URL('../../node_modules/.pnpm/', import.meta.url))
+  const builds = readdirSync(pnpm).filter(d => /^esbuild@\d/.test(d)).map(d => join(pnpm, d, 'node_modules', 'esbuild'))
+  const planeSrc = readFileSync(fileURLToPath(new URL('../../server/runner/compositor/plane.ts', import.meta.url)), 'utf8')
+  const dir = mkdtempSync(join(tmpdir(), 'frame-esbuild-'))
+
+  // One small composite in this thread, as the reference.
+  const job = () => {
+    const pic = { raw: true, source: 'card', w: 3, h: 2, data: new Uint8Array([255, 0, 0, 255, 0, 255, 0, 128, 0, 0, 255, 255, 10, 20, 30, 0, 200, 100, 50, 255, 1, 2, 3, 4]) }
+    const copies = [{ x: 0.1, y: 0, rot: 30, scl: 0.8, op: 0.9, tint: null, tintStrength: 1 }]
+    return { pic, copies }
+  }
+  const reference = (() => {
+    const { pic, copies } = job()
+    const cv = core.createCanvas(5, 7)
+    core.paint(cv, pic as any, null, 'screen', copies, false)
+    return [...core.toPreview8(core.finish(cv, false).image)]
+  })()
+
+  it('finds an esbuild to build with', () => {
+    expect(builds.length).toBeGreaterThan(0)
+  })
+
+  for (const esbuildDir of builds) {
+    for (const minify of [false, true]) {
+      it(`${esbuildDir.split('/').at(-3)} target es2019, minify ${minify}: the source-text core runs, in a Worker too, pixel for pixel`, async () => {
+        const esb = require(esbuildDir) as typeof import('esbuild')
+        let code = (await esb.transform(planeSrc, { loader: 'ts', target: 'es2019', format: 'esm' })).code
+        if (minify) code = (await esb.transform(code, { loader: 'js', target: 'es2019', minify: true })).code
+        const file = join(dir, `plane-${minify}.mjs`)
+        writeFileSync(file, code)
+        const mod = await import(`${pathToFileURL(file).href}?${Math.random()}`) as { compositorCore: () => ReturnType<typeof compositorCore> }
+        expect(typeof mod.compositorCore).toBe('function')
+        // Rebuilt from its own source text, with nothing in scope.
+        const built = new Function(`return (${mod.compositorCore.toString()})()`)() as ReturnType<typeof compositorCore>
+        const { pic, copies } = job()
+        const cv = built.createCanvas(5, 7)
+        built.paint(cv, pic as any, null, 'screen', copies, false)
+        expect([...built.toPreview8(built.finish(cv, false).image)]).toEqual(reference)
+        // And as the worker's own script.
+        const w = new Worker(workerScript(mod.compositorCore), { eval: true, workerData: { stop: new SharedArrayBuffer(4) } })
+        try {
+          const reply = (m: Record<string, unknown>) => new Promise<any>((res) => { w.once('message', res); w.postMessage(m) })
+          const j = job()
+          expect((await reply({ id: 1, op: 'begin', ch: 5, cw: 7 })).error).toBeUndefined()
+          expect((await reply({ id: 2, op: 'paint', image: j.pic, mask: null, blend: 'screen', copies: j.copies, protect: false })).error).toBeUndefined()
+          const done = await reply({ id: 3, op: 'finish' })
+          expect([...done.value.px]).toEqual(reference)
+        }
+        finally { await w.terminate() }
+      }, 30_000)
+    }
+  }
 })

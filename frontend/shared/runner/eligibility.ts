@@ -60,8 +60,26 @@ export interface RunnerNodeRule {
    * a video generator) wired in is left to ComfyUI.
    */
   imageInputs?: readonly string[]
-  /** The Frame's server-health caps: copies summed over its wired layers' cloners, and an explicit width × height. */
-  frameLimits?: { maxCopies: number; maxArtboardPixels: number }
+  /**
+   * The Frame's server-health caps: copies summed over its wired layers'
+   * cloners; an explicit width × height (lower in hosted); and the work,
+   * copies × explicit canvas pixels. (A canvas sized from layer 1 is checked
+   * by the render itself, once the picture's size is known.)
+   */
+  frameLimits?: FrameLimits
+}
+
+export interface FrameLimits {
+  maxCopies: number
+  maxArtboardPixels: number
+  hostedMaxArtboardPixels: number
+  maxWork: number
+}
+
+/** What the runner's host changes about eligibility. */
+export interface RunnerEligibilityOptions {
+  /** Hosted: the Frame's artboard is capped lower. */
+  hosted?: boolean
 }
 
 /** A widget as ComfyUI's validation reads it. */
@@ -151,6 +169,10 @@ export const IMAGE_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
 export const MAX_FRAME_COPIES = 256
 /** The largest explicit Frame artboard the runner renders, in pixels. */
 export const MAX_FRAME_ARTBOARD_PIXELS = 8192 * 8192
+/** Hosted, a shared server: the largest Frame artboard is 4096². */
+export const HOSTED_MAX_FRAME_ARTBOARD_PIXELS = 4096 * 4096
+/** The most pixel work one Frame may ask for: copies × canvas pixels ≤ 256 copies of 4 MP (4 × 2²⁰ pixels). */
+export const MAX_FRAME_WORK = 256 * 4 * 1024 * 1024
 
 /** A MASK input the runner can supply: a LoadImage's MASK output (1 − alpha of its file). */
 const LOAD_IMAGE_MASK = [['LoadImage', 1]] as const
@@ -256,7 +278,12 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     ]),
     noJsonList: { motion_params: 'rendered' },
     imageInputs: [...Array.from({ length: COMPOSITOR_MAX_LAYERS }, (_, i) => `layer${i + 1}`), 'overlay'],
-    frameLimits: { maxCopies: MAX_FRAME_COPIES, maxArtboardPixels: MAX_FRAME_ARTBOARD_PIXELS },
+    frameLimits: {
+      maxCopies: MAX_FRAME_COPIES,
+      maxArtboardPixels: MAX_FRAME_ARTBOARD_PIXELS,
+      hostedMaxArtboardPixels: HOSTED_MAX_FRAME_ARTBOARD_PIXELS,
+      maxWork: MAX_FRAME_WORK,
+    },
   },
   // The LoadImage the Frame editor injects at submit for baked text/shape
   // layers and masks (VueNodeCanvas injectCompositorOverlays). Taken only
@@ -357,6 +384,7 @@ export function nodeRuleAllows(
   rule: RunnerNodeRule,
   inputs: Record<string, unknown>,
   families: ReadonlySet<RunnerFamily>,
+  opts: RunnerEligibilityOptions = {},
 ): boolean {
   const need: string[] = [...(rule.mustLink ?? [])]
   let family: RunnerFamily | undefined = rule.family
@@ -379,7 +407,7 @@ export function nodeRuleAllows(
   for (const [name, key] of Object.entries(rule.noJsonList ?? {})) {
     if (hasJsonList(inputs[name], key)) return false
   }
-  if (rule.frameLimits && !withinFrameLimits(inputs, rule.frameLimits)) return false
+  if (rule.frameLimits && !withinFrameLimits(inputs, rule.frameLimits, !!opts.hosted)) return false
   return true
 }
 
@@ -414,7 +442,7 @@ export function clonerCopies(raw: unknown): number | null {
   return (pyTruthy(o.mirrorX) ? 2 * nx - 1 : nx) * (pyTruthy(o.mirrorY) ? 2 * ny - 1 : ny)
 }
 
-function withinFrameLimits(inputs: Record<string, unknown>, lim: { maxCopies: number; maxArtboardPixels: number }): boolean {
+function withinFrameLimits(inputs: Record<string, unknown>, lim: FrameLimits, hosted: boolean): boolean {
   let copies = 0
   for (let i = 1; i <= COMPOSITOR_MAX_LAYERS; i++) {
     if (!isLink(inputs[`layer${i}`])) continue
@@ -425,7 +453,10 @@ function withinFrameLimits(inputs: Record<string, unknown>, lim: { maxCopies: nu
   }
   const w = pyIntValue(inputs.width ?? 0)
   const h = pyIntValue(inputs.height ?? 0)
-  if (w !== null && h !== null && w > 0 && h > 0 && w * h > lim.maxArtboardPixels) return false
+  if (w !== null && h !== null && w > 0 && h > 0) {
+    if (w * h > (hosted ? lim.hostedMaxArtboardPixels : lim.maxArtboardPixels)) return false
+    if (copies * w * h > lim.maxWork) return false
+  }
   return true
 }
 
@@ -517,12 +548,12 @@ function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule): b
  * names the nodes that fail this, so there is one rule, not two. With no
  * families (the default) this is exactly the rule before families existed.
  */
-export function runnerTakesNode(prompt: ApiPrompt, id: string, families: ReadonlySet<RunnerFamily> = NO_FAMILIES): boolean {
+export function runnerTakesNode(prompt: ApiPrompt, id: string, families: ReadonlySet<RunnerFamily> = NO_FAMILIES, opts: RunnerEligibilityOptions = {}): boolean {
   const n = prompt[id]
   if (!n) return false
   const inputs = n.inputs ?? {}
   const rule = families.size ? RUNNER_NODE_RULES[n.class_type] : undefined
-  const byRule = !!rule && nodeRuleAllows(n.class_type, rule, inputs, families) && graphRuleAllows(prompt, id, rule)
+  const byRule = !!rule && nodeRuleAllows(n.class_type, rule, inputs, families, opts) && graphRuleAllows(prompt, id, rule)
   if (!RUNNER_NODE_TYPES.has(n.class_type) && !byRule) return false
   if (n.class_type === 'GenerateImageNode') {
     if (!IMAGE_IDS.has(String(inputs.model)) && !byRule) return false
@@ -538,13 +569,13 @@ export function runnerTakesNode(prompt: ApiPrompt, id: string, families: Readonl
   return true
 }
 
-export function isRunnerEligible(prompt: ApiPrompt | null | undefined, families: ReadonlySet<RunnerFamily> = NO_FAMILIES): boolean {
+export function isRunnerEligible(prompt: ApiPrompt | null | undefined, families: ReadonlySet<RunnerFamily> = NO_FAMILIES, opts: RunnerEligibilityOptions = {}): boolean {
   if (!prompt) return false
   const ids = Object.keys(prompt)
   if (!ids.length) return false
   let work = 0
   for (const id of ids) {
-    if (!runnerTakesNode(prompt, id, families)) return false
+    if (!runnerTakesNode(prompt, id, families, opts)) return false
     const ct = prompt[id]!.class_type
     if (PROVIDER_TYPES.has(ct) || LOCAL_RENDER_TYPES.has(ct)) work++
   }

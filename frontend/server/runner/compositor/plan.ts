@@ -6,12 +6,12 @@
  * protect_mask or video output, a mask not from a LoadImage, invalid widgets.
  */
 import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from '#shared/runner/graph'
-import { PROVIDER_TYPES } from '#shared/runner/eligibility'
+import { HOSTED_MAX_FRAME_ARTBOARD_PIXELS, PROVIDER_TYPES } from '#shared/runner/eligibility'
 import { actionPassThrough } from '../generators/actions'
 import { parseInputFileRef } from '../inputs'
 import type { NodePlan, PlanContext } from '../executors'
 import type { OutputFile } from '../types'
-import { decodeLoadMask, decodePicture, encodePreviewPng, type PictureSource } from './decode'
+import { decodeRaw, decodeRawMask, pngFromPreview8, type PictureSource } from './decode'
 import { MAX_LAYERS, type Loader } from './render'
 import { renderFrameInWorker } from './worker'
 
@@ -85,8 +85,9 @@ export function planCompositor(ctx: PlanContext): NodePlan {
         if (!w) return null
         return async () => {
           try {
-            if (w.source === 'mask') return await decodeLoadMask(await read(w.file!))
-            return await decodePicture(w.file ? await read(w.file) : null, w.source)
+            // Raw RGBA8 only: the worker builds the tensor.
+            if (w.source === 'mask') return await decodeRawMask(await read(w.file!))
+            return await decodeRaw(w.file ? await read(w.file) : null, w.source)
           }
           catch (e) {
             if (e instanceof Error && /Frame/.test(e.message)) throw e
@@ -94,13 +95,14 @@ export function planCompositor(ctx: PlanContext): NodePlan {
           }
         }
       }
-      const result = await renderFrameInWorker(inputs, {
+      const out = await renderFrameInWorker(inputs, {
         layers: layers.map(loader),
         masks: masks.map(loader),
         overlay: loader(overlay),
         overlayMask: loader(overlayMask),
-      }, signal)
-      return encodePreviewPng(result.image)
+      }, { signal, maxCanvasPixels: ctx.hosted ? HOSTED_MAX_FRAME_ARTBOARD_PIXELS : undefined })
+      // Only the PNG encode (sharp) runs on this thread.
+      return pngFromPreview8(out.px, out.w, out.h)
     },
     // save_live_preview's ui.
     uiFor: files => ({ images: files, animated: [false] }),
