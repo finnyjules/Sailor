@@ -1,10 +1,11 @@
 # AI in Sailor: one prompt, results on the work, and AI-made shaders
 
-**Date:** 2026-09-23 · **Status:** direction approved in prototype, ready to plan
+**Date:** 2026-09-23 · **Status:** direction approved in prototype; open questions decided (§10); ready to plan
 **Replaces:** the 11 separate AI surfaces and 5 prompt input components described in §5
 **Visual reference (open in a browser):**
 - `assets/2026-09-23-ai-in-sailor/sailor-ask-prototype.html` is the clickable prototype, version 10. It covers the canvas, the Shader studio, Frame and the effect gallery, all running live shaders.
 - `assets/2026-09-23-ai-in-sailor/shader-takes-spike.html` holds the 24 AI-written shaders from the spike, rendered by Sailor's own renderer and checked automatically.
+- `assets/2026-09-23-ai-in-sailor/open-questions.html` draws the six open questions as side-by-side options. They are decided in §10.
 
 Neither page calls AI. The prototype's takes are canned from the spike, and its routing is keyword-based. It is the model for layout and behaviour, not for the engine.
 
@@ -48,7 +49,7 @@ Neither page calls AI. The prototype's takes are canned from the spike, and its 
 1. **Moving everyone's toolbar.** It's the most-used control in the app. The rail and the shorter bar change where hands go.
 2. **AI-written shaders can be bad without being broken.** The spike's automatic checks passed every bad take. The four-takes pick, and a model looking at each render, are what protect quality.
 3. **AI-written shaders can hang the graphics card.** Loops must be capped, and compile failures handled, before anything reaches the canvas.
-4. **Take strips on a crowded canvas** can cover the node below. That needs a placement rule (§3.1).
+4. **Take strips on a crowded canvas** would cover the node below. So the nodes below slide out of the way while you choose (§3.1). Seeing the graph move could feel restless, so the slide must be quick and always slide back.
 
 **Built in seven stages, each shippable (§9).** In order: a real-model run of the shader engine; the new bottom bar, rail and node toolbar; results on the work; studios; shader generation and My effects; the shared content prompt field; cleanup.
 
@@ -132,7 +133,7 @@ The bar is at the bottom centre, where the toolbar is today (`layouts/default.vu
 
 - **Position:** a vertical rail on the left edge, centred vertically.
 - **Contents:** Assets · Styles · Characters · Templates | More ▾ (Toolbox, Nodes, Blocks).
-- **Labels** stay under the icons at about 10 px. In windows shorter than 760 px the rail goes icon-only, with tooltips.
+- **Labels** stay under the icons at about 10 px. On short windows the rail shrinks, then folds (decided: question 6, option A). Below 760 px it goes icon-only, with tooltips. Below about 560 px the lowest buttons move into More.
 - **Menus** open to the rail's right. Panels open where they do today, beside the rail.
 - **Canvas content** keeps clear of the rail: fit-view and the node margin account for its width.
 
@@ -192,8 +193,14 @@ The prompt's suggestions and results follow Frame's selection:
 - **Where the strip goes:**
   - On the canvas, it hangs from the bottom edge of the node, pointing up at it.
   - In a studio, it sits under the preview, sized to fit between the preview and the bar. The preview shrinks to `min(520px, 100vh − 400px)`.
-- **Placement on a crowded canvas** (open): the strip must not cover the node below. Candidates are to push nodes below it down temporarily, or to flip the strip to the node's right. It must be decided before stage 3.
-- **v1 shows one set of takes at a time.** A new request replaces an unkept strip. Parallel jobs on different nodes are a later step (§10).
+- **On a crowded canvas, nodes below slide out of the way** (decided: open question 1, option A).
+  - While a strip is open, every node whose top is below the target node's bottom edge, and which overlaps the strip horizontally, slides down by the strip's height plus a gap. The slide takes about 200 ms, and edges follow the nodes.
+  - When you Keep a take or close the strip, those nodes slide back.
+  - The push is display-only: it isn't saved, and it doesn't create an undo step.
+  - If you drag a pushed node while the strip is open, where you drop it becomes its real position, and it doesn't slide back.
+- **The strip stays the same size on screen at any canvas zoom** (decided: question 3, option B), like the node toolbar, and stays pinned to its node.
+- **v1 shows one set of takes at a time.** A new request replaces an unkept strip.
+- **Later: several jobs at once** (decided: question 2, option B). Each node shows its own progress and then its own takes, and the prompt shows "N running". That opens a small list with Stop for each job.
 
 ### 3.2 Changes to the graph
 
@@ -240,7 +247,7 @@ The prompt's suggestions and results follow Frame's selection:
 | Template editor agent (`GridEditorShell` side panel + `useLayoutAgent`) | The prompt in a bottom bar in the template editor (same component) |
 | Copy assist textarea + Variations/Translate buttons (`GridPropertyPanel`) | **Write copy** / **Translate…** actions (Edit) → headline takes |
 | Font suggest in the font pickers | Unchanged. It's a search inside a picker, and its results already land where the work is. It uses the shared field's styling. |
-| "Ask AI" row in `PortIntentPopover` | Kept at the port (the connector is the selection); it hands off to the same router. See §10. |
+| "Ask AI" row in `PortIntentPopover` | The popover only searches node types. Its last row, "✦ Describe it instead…", opens the one prompt with the connector as a chip ("Rainy shop · output"). Decided: question 4, option B. |
 | Explain tool + panel | **Removed.** "What does this do?" in the prompt, with the nodes selected. |
 | Critique icon (ComfyNode header) + Fix in the image Edit menu | Edit ▾ → **Fix**; results as fixes |
 | Auto-review after paid renders | Unchanged trigger; output becomes the fixes badge on the node (§2.3) |
@@ -255,7 +262,7 @@ The prompt's suggestions and results follow Frame's selection:
 
 ## 6. The shared content prompt field
 
-All ~16 generation-prompt fields become one component. That's inpaint (fill and "describe the edit"), Frame's "Describe the element…" and "Describe the change…", Frame's animate prompt, Texture's "Describe a texture…", 3D restyle and surface, the product-shot backdrop, the pose prompt, outfit prompts, the LoRA gallery and trainer fields, the node inspector's style prefix, Shot Director beats, and the Generate node's prompt.
+All ~16 generation-prompt fields become one component. Frame's "Describe the element…" is one of them. It's the element's recipe, so it stays on the element, in its inspector, where you can edit it and regenerate (decided: question 5, option A). That's inpaint (fill and "describe the edit"), Frame's "Describe the element…" and "Describe the change…", Frame's animate prompt, Texture's "Describe a texture…", 3D restyle and surface, the product-shot backdrop, the pose prompt, outfit prompts, the LoRA gallery and trainer fields, the node inspector's style prefix, Shot Director beats, and the Generate node's prompt.
 
 The component has:
 
@@ -360,7 +367,7 @@ Instructions can edit a content field (§1.5). The edit appears in the field, br
    - The multi-selection toolbar, Run rows on nodes, and the fixes badge.
    - Explain removed.
    - The prompt runs the existing agent flows at first; results still use today's shapes.
-3. **Results on the work.** Take strips under nodes (placement rule decided, §3.1), proposed nodes on the canvas, the answer card, and progress in the prompt. `CanvasPromptBar` is retired.
+3. **Results on the work.** Take strips under nodes, with the nodes below sliding out of the way (§3.1), proposed nodes on the canvas, the answer card, and progress in the prompt. `CanvasPromptBar` is retired.
 4. **Studios.**
    - A shared studio bottom bar in `StudioModalShell` with ✦ Ask.
    - ✦ added at the end of Frame's and 3D's bars (takeover modes included).
@@ -373,11 +380,15 @@ Instructions can edit a content field (§1.5). The edit appears in the field, br
 
 ---
 
-## 10. Open questions
+## 10. Decisions on the open questions (2026-09-23)
 
-1. **Take strips on a crowded canvas:** push neighbours down, or flip to the side? This must be decided before stage 3.
-2. **Parallel jobs:** can two nodes run requests at once? The prompt would need to show more than one job in progress.
-3. **Canvas zoom:** the node toolbar stays a constant size. Should take strips scale with the node, or stay the same size on screen?
-4. **The port "Ask AI" popover:** keep it at the port (the connector as the selection), or send it to the prompt with a port chip?
-5. **Frame's "Describe the element…" field:** is it a content prompt (it stays on the element) or an instruction (it moves to the prompt)? Proposed: content, since it's what the element *is*.
-6. **The rail on short windows:** below 760 px it goes icon-only. Below about 560 px, does More absorb the lower buttons?
+The options were shown visually in `assets/2026-09-23-ai-in-sailor/open-questions.html`.
+
+1. **Take strips on a crowded canvas:** **push the nodes below out of the way** while the strip is open, then slide them back (option A, your choice over the recommended side placement). Details in §3.1.
+2. **Parallel jobs:** one at a time in v1; **several later**, each shown on its own node, with "N running" in the prompt (option B).
+3. **Canvas zoom:** take strips **stay the same size on screen**, like the node toolbar (option B).
+4. **The port "Ask AI" popover:** the popover only searches node types; its last row **hands off to the one prompt** with the connector as a chip (option B).
+5. **Frame's "Describe the element…":** it's the **recipe**, so it stays on the element in the shared content field (option A).
+6. **The rail on short windows:** **icon-only below 760 px, then the lowest buttons fold into More** below about 560 px (option A).
+
+No open questions remain that block stage 1 or 2.

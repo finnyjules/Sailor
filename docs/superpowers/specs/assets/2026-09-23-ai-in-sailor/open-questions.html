@@ -1,0 +1,282 @@
+<meta charset="utf-8">
+<title>Six open questions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  /* One dark world on purpose: it matches the Sailor prototype. */
+  :root {
+    color-scheme: dark;
+    --ground: #0e0f11; --panel: #17181b; --panel2: #1e1f23; --line: #2a2c31;
+    --ink: #ebe8e1; --muted: #8e8a83; --ai: #e3a857; --ai-soft: rgba(227,168,87,.14);
+    --sel: #6ea8ff; --good: #7fbf8a; --bad: #e2645a;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--ground); color: var(--ink); font: 14px/1.5 var(--sans); }
+  .wrap { max-width: 1180px; margin: 0 auto; padding-inline: 20px; padding-block: 32px 72px; }
+  h1 { font-size: 26px; font-weight: 600; margin: 0 0 6px; letter-spacing: -.01em; }
+  .lede { color: var(--muted); margin: 0 0 8px; max-width: 70ch; }
+  section { border-top: 1px solid var(--line); padding-top: 22px; margin-top: 30px; }
+  .qh { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+  .qn { font-family: var(--mono); color: var(--ai); font-size: 13px; }
+  h2 { margin: 0; font-size: 19px; font-weight: 500; text-wrap: balance; }
+  .when { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 99px; padding: 0 9px; }
+  .when.now { color: var(--ai); border-color: #5a4a30; }
+  .why { color: var(--muted); margin: 6px 0 16px; max-width: 75ch; }
+  .opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 16px; }
+  .opt { display: grid; gap: 8px; align-content: start; }
+  .opt h3 { margin: 0; font-size: 14px; font-weight: 600; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .rec { font-size: 11px; font-weight: 600; color: #1b1408; background: var(--ai); border-radius: 99px; padding: 0 8px; }
+  .opt p { margin: 0; font-size: 13px; color: #cfcac1; }
+  .opt p.cost { color: var(--muted); }
+  .opt.pick .scene { outline: 1.5px solid var(--ai); outline-offset: 3px; }
+
+  /* mini scenes */
+  .scene { position: relative; height: 190px; border-radius: 10px; overflow: hidden; background-color: #111214; background-image: radial-gradient(#23252a 1px, transparent 1px); background-size: 14px 14px; border: 1px solid var(--line); }
+  .n { position: absolute; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; font-size: 10px; color: var(--muted); padding: 4px 6px; }
+  .n b { display: block; color: var(--ink); font-weight: 500; font-size: 10.5px; }
+  .n .th { margin-top: 4px; height: 30px; border-radius: 3px; background: linear-gradient(135deg, #2c6fd6, #e8883a); }
+  .n.sel { border-color: var(--sel); box-shadow: 0 0 0 1px var(--sel); }
+  .n.dim { opacity: .35; }
+  .n.ghost { background: none; border: 1px dashed #555; color: transparent; }
+  .strip { position: absolute; display: flex; gap: 3px; padding: 4px; background: #18191c; border: 1px solid #5a4a30; border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.5); }
+  .strip i { display: block; width: 18px; height: 18px; border-radius: 3px; background: linear-gradient(135deg, #3d7bd8, #e0a050); }
+  .strip i:first-child { outline: 1px dashed #555; outline-offset: 1px; }
+  .strip.grid { display: grid; grid-template-columns: repeat(2, 18px); }
+  .strip.big i { width: 26px; height: 26px; }
+  .arrow { position: absolute; color: var(--ai); font-size: 14px; }
+  .bar { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); display: flex; gap: 4px; align-items: center; background: #1b1c20; border: 1px solid #34363c; border-radius: 8px; padding: 4px 5px; font-size: 9.5px; white-space: nowrap; }
+  .bar .t { width: 14px; height: 14px; border-radius: 3px; background: #2a2c31; }
+  .bar .ask { display: flex; gap: 4px; align-items: center; background: #24252a; border: 1px solid #34363c; border-radius: 6px; padding: 2px 7px; color: #9d998f; min-width: 90px; }
+  .bar .ask.wide { min-width: 170px; border-color: #5a4a30; color: var(--ink); }
+  .spark { color: var(--ai); }
+  .chip { font-size: 9px; border-radius: 99px; padding: 0 6px; background: #1c2a3d; color: #b9d3f7; }
+  .chip.ai { background: var(--ai-soft); color: #f0cf9c; }
+  .pop { position: absolute; background: var(--panel2); border: 1px solid var(--line); border-radius: 7px; padding: 5px; font-size: 9.5px; display: grid; gap: 3px; width: 128px; box-shadow: 0 8px 20px rgba(0,0,0,.5); }
+  .pop .in { background: #0f1012; border: 1px solid var(--line); border-radius: 4px; padding: 2px 5px; color: #6f6b64; }
+  .pop .row { padding: 1px 4px; color: #cfcac1; }
+  .pop .row.ai { color: var(--ai); }
+  .port { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: var(--sel); box-shadow: 0 0 0 3px rgba(110,168,255,.25); }
+  .ring { position: absolute; width: 14px; height: 14px; border-radius: 50%; border: 2px solid #3a3c42; border-top-color: var(--ai); }
+  .tag { position: absolute; font-size: 9px; color: var(--muted); }
+  .insp { position: absolute; right: 0; top: 0; bottom: 0; width: 110px; background: var(--panel); border-left: 1px solid var(--line); padding: 7px; font-size: 9px; color: var(--muted); display: grid; gap: 4px; align-content: start; }
+  .insp .fld { background: #0f1012; border: 1px solid var(--line); border-radius: 4px; padding: 3px 5px; color: #cfcac1; min-height: 34px; }
+  .insp .lbl { text-transform: uppercase; letter-spacing: .06em; font-size: 8px; }
+  .art { position: absolute; left: 18px; top: 18px; width: 92px; height: 115px; border-radius: 2px; background: linear-gradient(160deg, #2c6fd6, #1a3f7a 60%, #e8883a); }
+  .art .el { position: absolute; left: 12px; right: 12px; top: 42px; height: 30px; border: 1.5px solid var(--sel); border-radius: 2px; }
+  .rail { position: absolute; left: 6px; top: 8px; bottom: 8px; width: 30px; background: #1b1c20; border: 1px solid #34363c; border-radius: 7px; display: grid; align-content: start; justify-items: center; gap: 4px; padding: 5px 0; overflow: hidden; }
+  .rail i { display: block; width: 14px; height: 14px; border-radius: 3px; background: #2e3036; }
+  .rail i.lab { height: 20px; }
+  .rail .more { font-size: 10px; color: var(--muted); line-height: 10px; }
+  .rail.one { width: 40px; bottom: auto; align-content: center; font-size: 8.5px; color: var(--ink); padding: 6px 0; }
+  .scrollhint { position: absolute; left: 12px; bottom: 10px; font-size: 9px; color: var(--muted); }
+  .win { position: absolute; left: 44px; top: 8px; right: 8px; bottom: 8px; border: 1px dashed #2f3136; border-radius: 6px; }
+  @media (max-width: 640px) { h2 { font-size: 17px; } }
+</style>
+
+<div class="wrap">
+  <h1>Six open questions</h1>
+  <p class="lede">From the AI-in-Sailor spec. Each one shows the options side by side; the outlined one is my recommendation. Only the first has to be decided before building starts; the rest can wait until the stage that needs them.</p>
+
+  <!-- 1 -->
+  <section>
+    <div class="qh"><span class="qn">1</span><h2>Where do four takes go when there's a node right below?</h2><span class="when now">Decide before stage 3</span></div>
+    <p class="why">Takes hang under the node they belong to. On a busy canvas the strip lands on top of the next node down, which is exactly what we're trying to avoid.</p>
+    <div class="opts">
+      <div class="opt">
+        <div class="scene">
+          <div class="n sel" style="left:70px;top:14px;width:90px"><b>Rainy shop</b><div class="th"></div></div>
+          <div class="strip" style="left:70px;top:76px"><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="n ghost" style="left:70px;top:88px;width:110px;height:40px"></div>
+          <div class="n" style="left:70px;top:118px;width:110px"><b>Night version</b>Generate image</div>
+          <span class="arrow" style="left:190px;top:100px">↓</span>
+        </div>
+        <h3>A. Push the node below out of the way</h3>
+        <p>Nodes underneath slide down while the takes are open, and slide back when you keep one or close them.</p>
+        <p class="cost">Your graph moves under you, briefly, every time you ask for something.</p>
+      </div>
+      <div class="opt pick">
+        <div class="scene">
+          <div class="n sel" style="left:40px;top:14px;width:90px"><b>Rainy shop</b><div class="th"></div></div>
+          <div class="strip grid" style="left:138px;top:18px"><i></i><i></i><i></i><i></i></div>
+          <div class="n" style="left:40px;top:92px;width:110px"><b>Night version</b>Generate image</div>
+          <span class="tag" style="left:138px;top:68px">left side if there's no room</span>
+        </div>
+        <h3>B. Put them beside the node, 2 × 2 <span class="rec">Recommended</span></h3>
+        <p>A compact square to the node's right (or left, if that side is busy). Nothing moves, and it's still clearly attached to its node.</p>
+        <p class="cost">Can still land on an edge or a node on that side; tiles are a bit smaller.</p>
+      </div>
+      <div class="opt">
+        <div class="scene">
+          <div class="n sel" style="left:70px;top:14px;width:90px"><b>Rainy shop</b><div class="th"></div></div>
+          <div class="n dim" style="left:70px;top:92px;width:110px"><b>Night version</b>Generate image</div>
+          <div class="strip" style="left:70px;top:76px;z-index:2"><i></i><i></i><i></i><i></i><i></i></div>
+        </div>
+        <h3>C. Float on top and dim what's underneath</h3>
+        <p>The strip sits over the node below, which fades while you choose.</p>
+        <p class="cost">Simplest, but you can't see the node you covered.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 -->
+  <section>
+    <div class="qh"><span class="qn">2</span><h2>Can you ask for things on two nodes at once?</h2><span class="when">Later</span></div>
+    <p class="why">Four new effects take 10–20 seconds. It's natural to start something on another node while you wait.</p>
+    <div class="opts">
+      <div class="opt">
+        <div class="scene">
+          <div class="n" style="left:24px;top:18px;width:84px"><b>Rainy shop</b><div class="th"></div></div>
+          <div class="strip" style="left:24px;top:78px"><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="n sel" style="left:150px;top:18px;width:84px"><b>Shop front</b><div class="th"></div></div>
+          <span class="tag" style="left:150px;top:78px">replaces the other request</span>
+          <div class="bar"><span class="ask"><span class="spark">✦</span> Writing four new effects…</span></div>
+        </div>
+        <h3>A. One at a time (v1)</h3>
+        <p>A new request replaces whatever is running or waiting for you to pick.</p>
+        <p class="cost">Simple and clear, but you wait.</p>
+      </div>
+      <div class="opt pick">
+        <div class="scene">
+          <div class="n" style="left:24px;top:18px;width:84px"><b>Rainy shop</b><div class="th"></div></div>
+          <div class="ring" style="left:98px;top:12px"></div>
+          <div class="n sel" style="left:150px;top:18px;width:84px"><b>Shop front</b><div class="th"></div></div>
+          <div class="ring" style="left:224px;top:12px"></div>
+          <div class="bar"><span class="ask"><span class="spark">✦</span> Ask about Shop front</span><span class="chip ai">2 running ▾</span></div>
+        </div>
+        <h3>B. Several, each shown on its own node <span class="rec">Recommended, after v1</span></h3>
+        <p>Each node shows its own spinner, then its own takes. The prompt shows "2 running", which opens a small list with Stop per job.</p>
+        <p class="cost">More to track; takes from two nodes can be open at once.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 -->
+  <section>
+    <div class="qh"><span class="qn">3</span><h2>When you zoom out, how big are the takes?</h2><span class="when">Stage 3</span></div>
+    <p class="why">The node toolbar already stays the same size on screen at any zoom. The take strip could follow the canvas instead.</p>
+    <div class="opts">
+      <div class="opt">
+        <div class="scene">
+          <div class="n sel" style="left:30px;top:30px;width:46px;padding:2px 3px"><b style="font-size:7px">Rainy shop</b><div class="th" style="height:16px"></div></div>
+          <div class="strip" style="left:30px;top:66px;padding:2px;gap:1px;transform:scale(.55);transform-origin:left top"><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="n" style="left:110px;top:40px;width:46px;padding:2px 3px"><b style="font-size:7px">Poster</b><div class="th" style="height:16px"></div></div>
+          <div class="n" style="left:180px;top:90px;width:46px;padding:2px 3px"><b style="font-size:7px">Night</b></div>
+          <span class="tag" style="left:14px;top:160px">zoomed out to 40%</span>
+        </div>
+        <h3>A. Scale with the canvas</h3>
+        <p>Takes shrink with the node, like everything else on the canvas.</p>
+        <p class="cost">Too small to judge a look once you've zoomed out.</p>
+      </div>
+      <div class="opt pick">
+        <div class="scene">
+          <div class="n sel" style="left:30px;top:30px;width:46px;padding:2px 3px"><b style="font-size:7px">Rainy shop</b><div class="th" style="height:16px"></div></div>
+          <div class="strip big" style="left:30px;top:66px"><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="n" style="left:110px;top:40px;width:46px;padding:2px 3px"><b style="font-size:7px">Poster</b><div class="th" style="height:16px"></div></div>
+          <div class="n" style="left:190px;top:110px;width:46px;padding:2px 3px"><b style="font-size:7px">Night</b></div>
+          <span class="tag" style="left:14px;top:160px">zoomed out to 40%</span>
+        </div>
+        <h3>B. Stay the same size on screen <span class="rec">Recommended</span></h3>
+        <p>Takes keep a readable size, like the toolbar, and stay pinned to their node.</p>
+        <p class="cost">At far zoom they're bigger than the node they belong to.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 -->
+  <section>
+    <div class="qh"><span class="qn">4</span><h2>Where does "Ask AI" go at a node's connector?</h2><span class="when">Stage 2</span></div>
+    <p class="why">Clicking a node's input or output opens a small menu of node types to add, with an "Ask AI" row at the bottom. It's the one place outside the prompt where you type to AI.</p>
+    <div class="opts">
+      <div class="opt">
+        <div class="scene">
+          <div class="n" style="left:24px;top:40px;width:90px"><b>Rainy shop</b><div class="th"></div></div>
+          <div class="port" style="left:110px;top:66px"></div>
+          <div class="pop" style="left:124px;top:30px"><span class="in">What do you want to do?</span><span class="row">Upscale</span><span class="row">Blur</span><span class="row ai">✦ Ask AI: "make it grainy"</span></div>
+          <div class="bar"><span class="t"></span><span class="t"></span><span class="ask"><span class="spark">✦</span> Ask Sailor</span></div>
+        </div>
+        <h3>A. Keep typing in the connector menu</h3>
+        <p>It stays as today: the menu searches node types, and the last row sends what you typed to AI.</p>
+        <p class="cost">A second place to type to AI, with its own look.</p>
+      </div>
+      <div class="opt pick">
+        <div class="scene">
+          <div class="n" style="left:24px;top:40px;width:90px"><b>Rainy shop</b><div class="th"></div></div>
+          <div class="port" style="left:110px;top:66px"></div>
+          <div class="pop" style="left:124px;top:30px"><span class="in">Search nodes…</span><span class="row">Upscale</span><span class="row">Blur</span><span class="row ai">✦ Describe it instead…</span></div>
+          <div class="bar"><span class="ask wide"><span class="spark">✦</span><span class="chip">Rainy shop · output</span> make it grainy</span></div>
+        </div>
+        <h3>B. The menu hands off to the prompt <span class="rec">Recommended</span></h3>
+        <p>The menu is just for picking node types. Its last row opens the one prompt with the connector as a chip ("Rainy shop · output").</p>
+        <p class="cost">One more step if you like typing right at the connector.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 -->
+  <section>
+    <div class="qh"><span class="qn">5</span><h2>Frame's "Describe the element…": recipe or instruction?</h2><span class="when">Stage 6</span></div>
+    <p class="why">When you generate an element in Frame, you describe it. Is that description part of the element, kept and editable like a Generate node's prompt, or a one-off instruction?</p>
+    <div class="opts">
+      <div class="opt pick">
+        <div class="scene">
+          <div class="art"><div class="el"></div></div>
+          <div class="insp"><span class="lbl">Element</span><span class="fld">A paper lantern glowing orange, @shopfront style</span><span>@ · History · Improve</span></div>
+          <div class="bar" style="left:38%"><span class="t"></span><span class="t"></span><span class="t"></span><span class="ask"><span class="spark">✦</span> Ask</span></div>
+        </div>
+        <h3>A. It's the recipe, so it stays on the element <span class="rec">Recommended</span></h3>
+        <p>The description lives in the element's inspector as the shared prompt field. Edit it and regenerate any time.</p>
+        <p class="cost">Two places you can type while in Frame, one for what things are and one for instructions.</p>
+      </div>
+      <div class="opt">
+        <div class="scene">
+          <div class="art"><div class="el"></div></div>
+          <div class="insp"><span class="lbl">Element</span><span>Image · generated</span></div>
+          <div class="bar" style="left:38%"><span class="ask wide"><span class="spark">✦</span><span class="chip">Element</span> a paper lantern…</span></div>
+        </div>
+        <h3>B. It's an instruction, so it goes through the prompt</h3>
+        <p>You describe the element in the one prompt, and the description isn't kept on it.</p>
+        <p class="cost">You can't see or edit what made the element later.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 -->
+  <section>
+    <div class="qh"><span class="qn">6</span><h2>What happens to the rail on a short window?</h2><span class="when">Stage 2</span></div>
+    <p class="why">With labels the rail is about 330 px tall, and it has to share the height with the top bar and the prompt. On a small laptop or a half-screen window it runs out of room.</p>
+    <div class="opts">
+      <div class="opt pick">
+        <div class="scene">
+          <div class="rail"><i></i><i></i><i></i><i></i><span class="more">⋯</span></div>
+          <div class="win"></div>
+          <span class="tag" style="left:48px;top:16px">below 760 px: icons only · below 560 px: the last ones fold into ⋯</span>
+        </div>
+        <h3>A. Shrink, then fold into More <span class="rec">Recommended</span></h3>
+        <p>First the labels go (with tooltips), then the lowest buttons move into More.</p>
+        <p class="cost">On very short windows some libraries are two clicks away.</p>
+      </div>
+      <div class="opt">
+        <div class="scene">
+          <div class="rail" style="bottom:30px"><i class="lab"></i><i class="lab"></i><i class="lab"></i><i class="lab"></i><i class="lab"></i><i class="lab"></i></div>
+          <span class="scrollhint">↕ scrolls</span>
+          <div class="win"></div>
+        </div>
+        <h3>B. Let the rail scroll</h3>
+        <p>Nothing moves or hides; the rail scrolls when it doesn't fit.</p>
+        <p class="cost">Hidden buttons with no hint that they exist.</p>
+      </div>
+      <div class="opt">
+        <div class="scene">
+          <div class="rail one">▦<br>Library</div>
+          <div class="win"></div>
+          <span class="tag" style="left:48px;top:16px">one button, the panel has tabs</span>
+        </div>
+        <h3>C. Collapse to one Library button</h3>
+        <p>On short windows the rail becomes a single button that opens one panel with tabs.</p>
+        <p class="cost">Every library becomes two clicks away.</p>
+      </div>
+    </div>
+  </section>
+</div>
