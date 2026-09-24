@@ -333,7 +333,14 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     if (s.frameSize && nd) writeFrameSizeState(nd, s.frameSize)
   }
   function frameSizeSnap(): FrameSizeState | undefined { const nd = node()?.data; return nd ? readFrameSizeState(nd) : undefined }
+  /** Bumped by every history change (record, undo, redo): a caller holding a value from before an
+   *  async wait can tell whether any step happened meanwhile — even one that changed nothing (a
+   *  click records at pointer-down). `useLayoutVary` folds a late re-apply into the step before
+   *  only while this is unchanged (the top snapshot is then still that step's "before"). */
+  let _historyRev = 0
+  const historyRev = () => _historyRev
   function recordHistory() {
+    _historyRev++
     _past.value.push(snapshot())
     if (_past.value.length > HISTORY_CAP) _past.value.shift()
     _future.value = []
@@ -342,12 +349,14 @@ export function useLocalLayerEditor(opts: EditorOpts) {
   const canRedo = computed(() => _future.value.length > 0)
   function undo() {
     if (!_past.value.length) return
+    _historyRev++
     _future.value.push(snapshot())
     restore(_past.value.pop()!)
     if (selectedId.value && !localLayers.value.some(l => l.id === selectedId.value)) selectedId.value = null
   }
   function redo() {
     if (!_future.value.length) return
+    _historyRev++
     _past.value.push(snapshot())
     restore(_future.value.pop()!)
     if (selectedId.value && !localLayers.value.some(l => l.id === selectedId.value)) selectedId.value = null
@@ -1247,7 +1256,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     writeBackground: writeBg, // non-recording: for callers that batch a layers write + background write under ONE recordHistory()
     postEffects, setPostEffects,
     grid, setGrid,
-    undo, redo, canUndo, canRedo,
+    undo, redo, canUndo, canRedo, historyRev,
     selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, alignToFrame, nudgeSelection, duplicateSelection, handleEditorKey,
     copySelection, pasteClipboard,
     groupSelected, ungroupSelected, ungroupGroup, renameGroup, canGroup, canUngroup,

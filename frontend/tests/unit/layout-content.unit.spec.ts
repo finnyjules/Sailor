@@ -4,10 +4,11 @@
 // through `sailor_posterState.tags` as their own undo step (the real layer editor); a tag changes
 // what the library offers; the R9 hints render under the section; the Button pills (ruling R7)
 // appear only on a platform-button format with an action line.
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { reactive, nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
-import { useLayoutVary } from '~/composables/useLayoutVary'
+import { useLayoutVary, waitForFont, FACE_LOAD_MS } from '~/composables/useLayoutVary'
+import type { LayoutVarySource } from '~/composables/useLayoutVary'
 import { useLocalLayerEditor } from '~/composables/useLocalLayerEditor'
 import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
 import { createImageLayer, createTextLayer } from '~/composables/useCompositorLayers'
@@ -27,14 +28,14 @@ function reviewFrame(): LocalLayer[] {
 }
 
 /** The tab over a node the real layer editor edits (its undo snapshot holds the tags). */
-function realHarness(layers: LocalLayer[], extra: Record<string, unknown> = {}, size = { w: 895, h: 1280 }) {
+function realHarness(layers: LocalLayer[], extra: Record<string, unknown> = {}, size = { w: 895, h: 1280 }, more: Partial<LayoutVarySource> = {}) {
   const node = reactive({ data: { widgetDefs: [], widgetsValues: [], properties: { sailor_localLayers: layers, ...extra } as Record<string, any> } })
   const ed = useLocalLayerEditor({ node: () => node as any, dims: () => ({ w: size.w, h: size.h }), getRect: () => null })
   const props = node.data.properties
   const remember = (st: Record<string, unknown>) => { props.sailor_posterState = { ...props.sailor_posterState, ...st } }
   const vary = useLayoutVary({
     props: () => props, frameW: () => size.w, frameH: () => size.h, connectedSlots: () => [],
-    editor: () => ed, remember, measure: makeStubMeasure(),
+    editor: () => ed, remember, measure: makeStubMeasure(), ...more,
   })
   return { node, props, ed, vary }
 }
@@ -52,8 +53,9 @@ describe('Content section — tags round-trip and undo', () => {
 
     expect(vary.setTag('q', 'quote')).toBe(true)
     expect(props.sailor_posterState.tags).toEqual({ q: 'quote' })
-    // The rest of the layout record is kept.
-    expect(props.sailor_posterState).toMatchObject({ patternId: 'statement', seed: 1, style: 'swiss' })
+    // The rest of the layout record is kept (Task 6: the Frame's layout is applied again with the
+    // new reading, so its seed is the re-apply's own).
+    expect(props.sailor_posterState).toMatchObject({ patternId: 'statement', style: 'swiss' })
     expect(past.value).toBe(true)
     expect(vary.content.value.find(r => r.id === 'q')!.tag).toBe('quote')
     // The same tag again is no change, and no undo step.
@@ -342,5 +344,220 @@ describe('Content section — a moved piece of the layout\'s own words is not co
     const l = (props.sailor_localLayers as LocalLayer[]).find(x => x.id === 'own-x') as { owner?: unknown; fromLayout?: unknown }
     expect(l.owner).toBeUndefined()
     expect(l.fromLayout).toBeUndefined()
+  })
+})
+
+// ── Frame layout decisions, Task 6: the Frame's layout is applied again ─────────────────────────
+const layersOf = (props: Record<string, any>) => JSON.stringify(props.sailor_localLayers)
+const layerOf = (props: Record<string, any>, id: string) => (props.sailor_localLayers as LocalLayer[]).find(l => l.id === id) as LocalLayer & { fontFamily?: string; fontSize: number }
+const canUndo = (ed: unknown) => (ed as { canUndo: { value: boolean } }).canUndo.value
+
+describe('Task 6 — a tag change applies the Frame\'s layout again, in the same undo step', () => {
+  it('the fine print tagged Headline is placed as the headline at once; one undo restores the tag and the layers', async () => {
+    const { props, ed, vary } = realHarness(reviewFrame())
+    await idle()
+    vary.select('statement'); await nextTick()
+    const applied = layersOf(props)
+    const small = layerOf(props, 'c').fontSize
+    expect(vary.setTag('c', 'title')).toBe(true)
+    expect(props.sailor_posterState.tags).toEqual({ c: 'title' })
+    expect(props.sailor_posterState.patternId).toBe('statement')
+    expect(props.sailor_posterState.roles.title).toBe('c')               // the new reading was applied
+    expect(layerOf(props, 'c').fontSize).toBeGreaterThan(small)          // …at once, on the Frame
+    expect(vary.layoutId.value).toBe('statement')
+    expect(vary.applied.value).toBe(true)
+    // ONE undo: the tag and the layers together.
+    ed.undo(); await nextTick()
+    expect(props.sailor_posterState.tags).toBeUndefined()
+    expect(props.sailor_posterState.roles.title).toBe('t')
+    expect(layersOf(props)).toBe(applied)
+    // …and the step before it is the apply itself.
+    ed.undo(); await nextTick()
+    expect(canUndo(ed)).toBe(false)
+    ed.redo(); ed.redo(); await nextTick()
+    expect(props.sailor_posterState.tags).toEqual({ c: 'title' })
+    expect(props.sailor_posterState.roles.title).toBe('c')
+  })
+
+  it('Not used: the layout is applied again without that line (it holds no role), in the same step', async () => {
+    const { props, ed, vary } = realHarness(reviewFrame())
+    await idle()
+    vary.select('statement'); await nextTick()
+    expect(props.sailor_posterState.roles.caption).toBe('c')
+    const applied = layersOf(props)
+    vary.setTag('c', 'unused')
+    expect(props.sailor_posterState.roles.caption).toBeUndefined()
+    ed.undo(); await nextTick()
+    expect(props.sailor_posterState.roles.caption).toBe('c')
+    expect(props.sailor_posterState.tags).toBeUndefined()
+    expect(layersOf(props)).toBe(applied)
+  })
+
+  it('the variation kept is the one on show when it is still offered', async () => {
+    const { props, vary } = realHarness(reviewFrame())
+    await idle()
+    vary.select('statement'); await nextTick()
+    expect(vary.candidates.value.length).toBeGreaterThan(2)
+    vary.jump(2); await nextTick()
+    const choice = { ...props.sailor_posterState.choice }
+    vary.setTag('dt', 'unused')
+    expect(props.sailor_posterState.roles.date).toBeUndefined()           // applied again…
+    expect(props.sailor_posterState.choice).toEqual(choice)                 // …as the same variation
+    expect(vary.index.value).toBe(vary.candidates.value.findIndex(c => JSON.stringify({ ...c.choice }) === JSON.stringify({ ...choice })))
+  })
+
+  it('a layout no longer offered: the tag is written, the Frame\'s layers are left exactly as they are', async () => {
+    const { props, ed, vary } = realHarness(reviewFrame())
+    vary.setStyle('performance')
+    vary.setTag('q', 'quote'); await idle()
+    vary.select('perfReview'); await nextTick()
+    expect(props.sailor_posterState.patternId).toBe('perfReview')
+    const layers = props.sailor_localLayers
+    const json = layersOf(props)
+    // Back to Automatic: the line no longer reads as a quote, so Review is not offered.
+    expect(vary.setTag('q', null)).toBe(true)
+    expect(props.sailor_posterState.tags).toBeUndefined()
+    expect(props.sailor_localLayers).toBe(layers)                        // not even re-committed
+    expect(layersOf(props)).toBe(json)
+    // The tab keeps the layout, with nothing to vary (the panel's Vary is disabled at 0).
+    expect(vary.layoutId.value).toBe('perfReview')
+    expect(vary.candidates.value).toEqual([])
+    await idle()
+    expect(offeredIds(vary)).not.toContain('perfReview')
+    // One undo gives the tag back.
+    ed.undo(); await nextTick()
+    expect(props.sailor_posterState.tags).toEqual({ q: 'quote' })
+    expect(layersOf(props)).toBe(json)
+  })
+
+  it('no layout applied: a tag touches no layer', () => {
+    const { props, vary } = realHarness(reviewFrame())
+    const layers = props.sailor_localLayers
+    vary.setTag('c', 'title')
+    expect(props.sailor_localLayers).toBe(layers)
+  })
+})
+
+describe('Task 6 — the suggested face: the layout is applied again once the face has loaded', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+  const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); await nextTick() }
+
+  /** An editorial Frame with its layout applied, then the title moved by hand (its own step). */
+  async function faceFrame() {
+    let resolve!: (ok: boolean) => void
+    let reject!: (e: unknown) => void
+    const loadFont = vi.fn(() => new Promise<boolean>((res, rej) => { resolve = res; reject = rej }))
+    const h = realHarness(reviewFrame(), {}, { w: 895, h: 1280 }, { loadFont })
+    h.vary.setStyle('editorial'); await idle()
+    const id = offeredIds(h.vary)[0]!
+    h.vary.select(id); await nextTick()
+    const placed = { x: layerOf(h.props, 't').x, y: layerOf(h.props, 't').y }
+    h.ed.setLocal('t', { x: 0.9, y: 0.93 })
+    const beforeFace = layersOf(h.props)
+    const beforeState = JSON.stringify(h.props.sailor_posterState)
+    return { ...h, id, placed, beforeFace, beforeState, loadFont, resolve: (ok: boolean) => resolve(ok), reject: (e: unknown) => reject(e) }
+  }
+
+  it('re-applies after the font loads, folded into the face\'s step: one undo in total', async () => {
+    const f = await faceFrame()
+    expect(f.vary.applySuggestedFace()).toBe(true)
+    await flush()
+    expect(f.loadFont).toHaveBeenCalledWith('400 16px "Instrument Serif"', FACE_LOAD_MS)
+    // Not yet: the title keeps the hand-set place until the face has loaded.
+    expect(layerOf(f.props, 't')).toMatchObject({ x: 0.9, y: 0.93, fontFamily: 'Instrument Serif' })
+    f.resolve(true); await flush()
+    const t = layerOf(f.props, 't')
+    expect(t.fontFamily).toBe('Instrument Serif')
+    expect({ x: t.x, y: t.y }).not.toEqual({ x: 0.9, y: 0.93 })           // placed by the layout again
+    expect(f.props.sailor_posterState.patternId).toBe(f.id)
+    // ONE undo: the face and the re-apply together, back to the hand-moved title in its old face.
+    f.ed.undo(); await nextTick()
+    expect(layersOf(f.props)).toBe(f.beforeFace)
+    // The step before is the hand move.
+    f.ed.undo(); await nextTick()
+    expect({ x: layerOf(f.props, 't').x, y: layerOf(f.props, 't').y }).toEqual(f.placed)
+    // Redo twice: the face with its re-apply comes back as one step.
+    f.ed.redo(); f.ed.redo(); await nextTick()
+    expect(layerOf(f.props, 't').fontFamily).toBe('Instrument Serif')
+    expect({ x: layerOf(f.props, 't').x, y: layerOf(f.props, 't').y }).not.toEqual({ x: 0.9, y: 0.93 })
+  })
+
+  it('skipped when the user edited the Frame while the face loaded', async () => {
+    const f = await faceFrame()
+    f.vary.applySuggestedFace(); await flush()
+    f.ed.setLocal('d', { x: 0.2 })                                         // an edit meanwhile
+    const now = layersOf(f.props)
+    f.resolve(true); await flush()
+    expect(layersOf(f.props)).toBe(now)
+    expect(layerOf(f.props, 't')).toMatchObject({ x: 0.9, y: 0.93 })
+  })
+
+  it('skipped after a step that changed nothing (a click records one) or an undo meanwhile', async () => {
+    const f = await faceFrame()
+    f.vary.applySuggestedFace(); await flush()
+    f.ed.recordHistory()
+    const now = layersOf(f.props)
+    f.resolve(true); await flush()
+    expect(layersOf(f.props)).toBe(now)
+
+    const g = await faceFrame()
+    g.vary.applySuggestedFace(); await flush()
+    g.ed.undo(); await nextTick()                                         // the face undone
+    g.resolve(true); await flush()
+    expect(layersOf(g.props)).toBe(g.beforeFace)
+    expect(JSON.stringify(g.props.sailor_posterState)).toBe(g.beforeState)
+  })
+
+  it('a face that does not load in time (or a loader that fails) leaves the face step as it is', async () => {
+    const f = await faceFrame()
+    f.vary.applySuggestedFace(); await flush()
+    const now = layersOf(f.props)
+    f.resolve(false); await flush()
+    expect(layersOf(f.props)).toBe(now)
+    f.ed.undo(); await nextTick()
+    expect(layersOf(f.props)).toBe(f.beforeFace)                           // still exactly one step
+
+    const g = await faceFrame()
+    g.vary.applySuggestedFace(); await flush()
+    const gNow = layersOf(g.props)
+    g.reject(new Error('network')); await flush()
+    expect(layersOf(g.props)).toBe(gNow)
+  })
+})
+
+describe('Task 6 — waitForFont (the default loader)', () => {
+  const doc = document as Document & { fonts?: unknown }
+  const had = Object.getOwnPropertyDescriptor(doc, 'fonts')
+  afterEach(() => {
+    if (had) Object.defineProperty(doc, 'fonts', had)
+    else delete (doc as { fonts?: unknown }).fonts
+  })
+  const stubFonts = (load: (spec: string) => Promise<unknown[]>) =>
+    Object.defineProperty(doc, 'fonts', { configurable: true, value: { load: vi.fn(load), check: () => true } })
+
+  it('no font set: nothing to wait for', async () => {
+    Object.defineProperty(doc, 'fonts', { configurable: true, value: undefined })
+    expect(await waitForFont('400 16px "Anton"', 50)).toBe(true)
+  })
+
+  it('asks again until the family\'s stylesheet has arrived (load finds no face before it does)', async () => {
+    let n = 0
+    stubFonts(async () => (++n < 3 ? [] : [{}]))
+    expect(await waitForFont('400 16px "Anton"', 2000)).toBe(true)
+    expect(n).toBe(3)
+  })
+
+  it('gives up after the wait: false', async () => {
+    stubFonts(async () => [])
+    const t0 = Date.now()
+    expect(await waitForFont('400 16px "Anton"', 250)).toBe(false)
+    expect(Date.now() - t0).toBeLessThan(1000)
+  })
+
+  it('a load that never settles or throws still gives up after the wait', async () => {
+    stubFonts(() => new Promise(() => {}))
+    expect(await waitForFont('400 16px "Anton"', 150)).toBe(false)
+    stubFonts(async () => { throw new Error('bad') })
+    expect(await waitForFont('400 16px "Anton"', 150)).toBe(false)
   })
 })

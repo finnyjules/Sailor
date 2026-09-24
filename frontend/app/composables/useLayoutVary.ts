@@ -68,7 +68,10 @@ export interface LayoutVarySource {
   frameW: () => number
   frameH: () => number
   connectedSlots: () => number[]
-  editor: () => LayoutEditor
+  /** The Frame's layer editor. `historyRev` (the real editor has it) moves with every history step:
+   *  a late re-apply (after a suggested face loads) folds into the face's step only while it has
+   *  not moved. */
+  editor: () => LayoutEditor & { historyRev?: () => number }
   /** Persist the applied state (UI memory, outside the undo step). */
   remember(s: { patternId: string; seed: number; choice: Choice; index: number; roles?: StoredRoles; style?: StyleId }): void
   /** Whether the Layout tab is showing. The library plans only while it is. Default: always. */
@@ -84,6 +87,9 @@ export interface LayoutVarySource {
   loadFace?: (family: string) => void
   /** Injected in tests. Default: `resolveBrandImage` (the brand image picker's route). */
   resolveImage?: (url: string) => Promise<ResolvedBrandImage | null>
+  /** Injected in tests. Wait for one `document.fonts` face spec to load; true once it has, false
+   *  when it has not within `ms`. Default: `waitForFont`. */
+  loadFont?: (spec: string, ms: number) => Promise<boolean>
 }
 
 /** How long the layers must be still before a content change re-plans (ms). */
@@ -92,9 +98,33 @@ export const CONTENT_SETTLE_MS = 200
 /** How long a re-plan waits for the Frame's faces to load before planning anyway (ms). */
 export const FONT_WAIT_MS = 1500
 
+/** How long a suggested face may take to load before its re-apply is given up (ms). */
+export const FACE_LOAD_MS = 3000
+
 /** The page's font set, or null where there is none (SSR, tests without a DOM). */
 function fontSet(): FontFaceSet | null {
   return typeof document !== 'undefined' && (document as Document & { fonts?: FontFaceSet }).fonts ? document.fonts : null
+}
+
+/** Wait for a face to load (`document.fonts.load(spec)`), true once it has; false after `ms`. A
+ *  Google family's stylesheet is injected by `loadFace` and arrives later: until it does, `load`
+ *  finds no face and resolves empty at once, so it is asked again every 100 ms until the deadline.
+ *  No font set (SSR, a test without a DOM): nothing to wait for — true. */
+export function waitForFont(spec: string, ms: number = FACE_LOAD_MS): Promise<boolean> {
+  const fonts = fontSet()
+  if (!fonts) return Promise.resolve(true)
+  const deadline = Date.now() + ms
+  return new Promise<boolean>((resolve) => {
+    const attempt = () => {
+      if (Date.now() >= deadline) { resolve(false); return }
+      Promise.resolve().then(() => fonts.load(spec)).then(
+        got => (got.length ? resolve(true) : setTimeout(attempt, 100)),
+        () => setTimeout(attempt, 100),
+      )
+    }
+    attempt()
+    setTimeout(() => resolve(false), ms)
+  })
 }
 
 /** One `document.fonts` spec per face and weight of the Frame's own text layers (the faces the
@@ -684,7 +714,11 @@ export function useLayoutVary(src: LayoutVarySource): {
     return { family: face.family, wt: face.wt, note: face.note, title: quoteStart(String(t.text ?? '')) }
   })
   /** Set the title's face to the suggestion (family and the face's weight) as ONE undo step, load
-   *  it the way the Title face picker does, and re-plan (after it loads — `settle` waits). */
+   *  it the way the Title face picker does, and re-plan (after it loads — `settle` waits).
+   *  Frame layout decisions, Task 6: once the face has loaded (`loadFont`, given up after
+   *  `FACE_LOAD_MS`), the Frame's layout is applied again — measured in the real face — folded into
+   *  the face's undo step (no new one). Not when the face never loads, the tab has gone, or anything
+   *  changed the Frame meanwhile (another step, an undo, a write to its layers, order or record). */
   function applySuggestedFace(): boolean {
     const face = suggestedFace.value
     const id = titleId.value
@@ -696,7 +730,66 @@ export function useLayoutVary(src: LayoutVarySource): {
     ed.commit(layers.map(l => (l.id === id ? { ...l, fontFamily: face.family, fontWeight: face.wt } as LocalLayer : l)))
     settle()
     rev.value++
+    const mark = frameMark()
+    const load = src.loadFont ?? waitForFont
+    void Promise.resolve()
+      .then(() => load(`${face.wt} 16px "${face.family}"`, FACE_LOAD_MS))
+      .catch(() => false)
+      .then((ok) => {
+        if (!ok || disposed || !sameMark(mark, frameMark())) return
+        reapplyFrameLayout(folded(src.editor()))
+      })
     return true
+  }
+
+  // ── re-applying the Frame's layout (Frame layout decisions, Task 6) ──
+  let disposed = false
+  if (getCurrentScope()) onScopeDispose(() => { disposed = true })
+  /** What "the Frame has not changed" compares: the editor's history revision (any step, even one
+   *  that changed nothing) and the identity of everything an edit writes — layers, order, groups,
+   *  background, the layout record. Every write makes a new array or object; nothing is deep-read. */
+  function frameMark(): unknown[] {
+    const p = toRaw(src.props())
+    return [src.editor().historyRev?.(), ...['sailor_localLayers', 'sailor_stackOrder', 'sailor_localGroups', 'sailor_localBg', 'sailor_posterState', 'sailor_localGrid'].map(k => toRaw(p?.[k]))]
+  }
+  const sameMark = (a: unknown[], b: unknown[]) => a.length === b.length && a.every((v, i) => v === b[i])
+  /** The editor, with `recordHistory` a no-op: an apply through it joins the step already recorded
+   *  (the history holds each step's "before"; its "after" is the live Frame, so writing more of it
+   *  before the next step extends that step — one undo restores both). */
+  const folded = (ed: LayoutEditor): LayoutEditor => ({
+    recordHistory: () => {},
+    commit: n => ed.commit(n),
+    writeOrder: o => ed.writeOrder(o),
+    writeGroups: g => ed.writeGroups(g),
+  })
+  /** Apply the Frame's own layout (`sailor_posterState.patternId`) again, over the Frame as it is
+   *  now: the variation equal to the recorded choice, else the closest (the most axes the same),
+   *  else the first — any the apply refuses is passed over, in that order. Planned in the layout's
+   *  own style. The tab follows only when that style is on show. 'none': no layout applied;
+   *  'not-offered': no variation of it passes now — the Frame is left exactly as it is. */
+  function reapplyFrameLayout(ed: LayoutEditor): 'applied' | 'not-offered' | 'none' {
+    const st = src.props()?.sailor_posterState as PosterState | undefined
+    const id = st?.patternId
+    const s = styleOfLayout(id)
+    if (!id || !s) return 'none'
+    const a = { ...baseArgs(), style: s, layoutId: id }
+    const list = candidatesForFrame(a)
+    if (!list.length) return 'not-offered'
+    const now: Choice = { ...DEFAULT_CHOICE, ...(st?.choice ?? {}) }
+    const keys: (keyof Choice)[] = ['lines', 'arr', 'scale', 'side', 'cta']
+    const score = (c: Choice) => sameChoice(c, now) ? Infinity : keys.filter(k => axisValue(c, k) === axisValue(now, k)).length
+    // Stable: equal scores keep the candidates' own order (best first), so "else the first" holds.
+    const order = list.map((c, i) => ({ c, i, sc: score(c.choice) })).sort((x, y) => y.sc - x.sc || x.i - y.i)
+    for (const { c, i } of order) {
+      const out = applyLayoutToFrame({ ...a, choice: c.choice, editor: ed })
+      if (!out.ok || !out.posterState) continue
+      if (s === style.value) { layoutId.value = id; choice.value = { ...c.choice }; applied.value = true }
+      settle()
+      rev.value++
+      src.remember({ patternId: out.posterState.patternId, seed: out.posterState.seed, choice: { ...c.choice }, index: i, roles: out.posterState.roles, style: s })
+      return 'applied'
+    }
+    return 'not-offered'
   }
 
   // ── the Content section (Stage 4, ruling R1) and its hints (ruling R9) ──
@@ -738,7 +831,10 @@ export function useLayoutVary(src: LayoutVarySource): {
   /** Write the layer's tag into `sailor_posterState.tags` (an empty set removes the key) as ONE
    *  undo step — the editor's snapshot holds the tags (`LAYOUT_KEYS`), so undo and redo restore
    *  them — then re-plan at once: the content key holds the tags, so the variations and the
-   *  library follow. The Frame's layers are not touched; the next pick applies the new reading.
+   *  library follow. Frame layout decisions, Task 6: with a layout applied, it is applied again
+   *  with the new reading (`reapplyFrameLayout`) in the SAME step — one undo restores the tag and
+   *  the layers. When the layout is no longer offered, the layers are left as they are (the tab
+   *  then shows the layout with no variations and Vary disabled).
    *  Ruling R16: one line holds a role — tagging a role another line holds MOVES it there (that
    *  line goes back to Automatic), in the same step. "Not used" is not a role. */
   function setTag(id: string, tag: ContentTag | null): boolean {
@@ -751,13 +847,13 @@ export function useLayoutVary(src: LayoutVarySource): {
     if (tag && tag !== 'unused') for (const [other, t] of Object.entries(tags)) if (other !== id && t === tag) delete tags[other]
     if (tag) tags[id] = tag
     else delete tags[id]
-    src.editor().recordHistory()
+    const ed0 = src.editor()
+    ed0.recordHistory()
     const next: Record<string, unknown> = { ...(st ?? {}) }
     if (Object.keys(tags).length) next.tags = tags
     else delete next.tags
     p.sailor_posterState = next
-    settle()
-    rev.value++
+    if (reapplyFrameLayout(folded(ed0)) !== 'applied') { settle(); rev.value++ }
     return true
   }
 
