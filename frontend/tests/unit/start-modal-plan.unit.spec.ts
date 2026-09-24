@@ -32,6 +32,7 @@ describe('planStart', () => {
     const p = planStart('shader')
     expect(types(p)).toEqual(['Image', 'ShaderStudio', 'Compositor'])
     expect(p.nodes[0]!.starter).toBe('shaderPicture')
+    expect(p.nodes[1]!.starter).toBe('shaderEffect')
     expect(wires(p)).toEqual(['src:0->a.image', 'a:0->frame.layer1'])
   })
 

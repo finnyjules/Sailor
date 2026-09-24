@@ -8,6 +8,7 @@ import { planStart } from '~/lib/startModal/plan'
 import type { StartPickId } from '~/data/start-modal'
 import { serializeDoc } from '~/lib/scene3d/config'
 import { starterSceneDoc } from '~/lib/startModal/scene3dStill'
+import { starterShaderConfig } from '~/lib/startModal/shaderStill'
 import { ARTIFACT_NODE_COMPONENTS, ARTIFACT_NODE_FOR_OUTPUT, fetchObjectInfo, getVueFlowType, getWidgetDefs, isSubgraphType, subgraphToLiteGraph, useVueNodes } from '~/composables/useVueNodes'
 import { useSubgraphNavigation } from '~/composables/useSubgraphNavigation'
 import { matchStylesInText, type CanvasSnapshot, type StyleLite } from '~/lib/agent/surfaces/canvas'
@@ -7864,7 +7865,9 @@ async function materializeStart(pick: StartPickId | null): Promise<boolean> {
       if (name) widgets.image = name
     }
     if (pn.starter === 'scene3dObject') widgets.scene_state = starterSceneState()
-    const node = createNodeData(pn.nodeType, { x: pn.col * COL_W, y: 0 }, Object.keys(widgets).length ? widgets : undefined)
+    // Same starter effect the start tile renders, so the tile and the node agree.
+    const properties = pn.starter === 'shaderEffect' ? { sailor_shaderStudio: starterShaderConfig() } : undefined
+    const node = createNodeData(pn.nodeType, { x: pn.col * COL_W, y: 0 }, Object.keys(widgets).length ? widgets : undefined, properties)
     nodes.value.push(node) // push before minting the next id (mintNodeId dedupes against nodes.value)
     minted.set(pn.key, node)
   }

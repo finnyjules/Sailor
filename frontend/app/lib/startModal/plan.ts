@@ -5,7 +5,7 @@
 import type { StartPickId } from '~/data/start-modal'
 
 export type PlanKey = string
-export interface PlanNode { key: PlanKey; nodeType: string; col: number; widgets?: Record<string, unknown>; starter?: 'shaderPicture' | 'scene3dObject' }
+export interface PlanNode { key: PlanKey; nodeType: string; col: number; widgets?: Record<string, unknown>; starter?: 'shaderPicture' | 'scene3dObject' | 'shaderEffect' }
 /** `input` is an input NAME on the target, or '@IMAGE' for its first IMAGE input. */
 export interface PlanEdge { from: PlanKey; out: number; to: PlanKey; input: string }
 export interface StartPlan { nodes: PlanNode[]; edges: PlanEdge[] }
@@ -48,7 +48,7 @@ export function planStart(pick: StartPickId | null): StartPlan {
       return {
         nodes: [
           { key: 'src', nodeType: 'Image', col: 0, starter: 'shaderPicture' },
-          { key: 'a', nodeType: 'ShaderStudio', col: 1 },
+          { key: 'a', nodeType: 'ShaderStudio', col: 1, starter: 'shaderEffect' },
           { key: 'frame', nodeType: 'Compositor', col: 2 },
         ],
         edges: [{ from: 'src', out: 0, to: 'a', input: 'image' }, intoFrame('a')],
