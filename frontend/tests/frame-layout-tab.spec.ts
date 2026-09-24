@@ -289,3 +289,55 @@ test.describe('Frame Layout tab — content', () => {
     await expect(page.locator('[data-testid="layout-not-shown"], [data-testid="layout-format-hidden"]').first()).toContainText('Shop now')
   })
 })
+
+// The layout calls of 09-24: words on the arrangement pills, the Button choice in every style,
+// and every layout placing the Frame's other images.
+test.describe('Frame Layout tab — layout calls', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/dev/frame-lab')
+    await page.waitForSelector('[data-ready]')
+    await page.click('[data-testid="layout-tab"]')
+    await page.waitForSelector('[data-testid="layout-tile"]')
+  })
+  const tile = (page: Page, id: string) => page.locator(`[data-testid="layout-sheet"] [data-testid="layout-tile"][data-pattern="${id}"]`).first()
+
+  test('the arrangement pills say what changes', async ({ page }) => {
+    await tile(page, 'runoff').click()
+    await expect.poll(async () => (await frame(page)).poster?.patternId).toBe('runoff')
+    const row = page.locator('[data-choice="arr"]')
+    await expect(row).toBeVisible()
+    const names = await row.getByRole('radio').allTextContents()
+    expect(names.map(n => n.trim())).toEqual(expect.arrayContaining(['Right edge']))
+    for (const n of names) expect(n.trim()).not.toMatch(/^[ABC]$/)
+  })
+
+  test('Editorial offers the platform\'s own button on a Meta story', async ({ page }) => {
+    await page.evaluate(() => {
+      const w = window as any
+      const L = w.__compositorLayers() as any[]
+      const texts = L.filter(l => l.kind === 'text').sort((a, b) => (b.fontSize ?? 0) - (a.fontSize ?? 0))
+      const action = texts[2]?.id
+      w.__compositorSetLayers(L.map(l => l.id === action ? { ...l, text: 'Shop now' } : l))
+    })
+    await page.click('[data-testid="design-tab"], button:has-text("Design")')
+    await page.locator('select:has(option[value="meta-story"])').first().selectOption('meta-story')
+    await page.click('[data-testid="layout-tab"]')
+    await page.locator('[data-testid="layout-style"]').getByText('Editorial', { exact: true }).click()
+    await page.locator('[data-testid="layout-sheet"] [data-testid="layout-tile"]').first().click()
+    const row = page.locator('[data-choice="cta"]')
+    await expect(row).toBeVisible()
+    await expect(row.getByRole('radio', { name: 'In the image' })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  test('a layout places the Frame\'s second image instead of leaving it over the text', async ({ page }) => {
+    const images = await page.evaluate(() => (window as any).__compositorLayers().filter((l: any) => (l.kind === 'wired' || l.kind === 'image') && l.visible !== false).map((l: any) => l.id))
+    test.skip(images.length < 2, 'the lab Frame shows one image')
+    await tile(page, 'runoff').click()
+    await expect.poll(async () => (await frame(page)).poster?.patternId).toBe('runoff')
+    const layers = await page.evaluate(() => (window as any).__compositorLayers())
+    const second = layers.find((l: any) => l.id === images[1])
+    expect(second?.visible).not.toBe(false)
+    expect(second?.layoutPrev).toBeTruthy()            // the layout placed it
+    await expect(page.locator('[data-testid="layout-not-shown"]:has-text("Image")')).toHaveCount(0)
+  })
+})
