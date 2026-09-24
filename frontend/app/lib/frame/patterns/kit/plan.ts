@@ -734,6 +734,9 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
  *  colour, not a shade of the same one. */
 export const ACCENT_COPY_MIN_DIFF = 0.1
 
+/** The colour the renderer draws a text layer with no `color` in: the canvas's initial fillStyle. */
+const TEXT_RENDER_DEFAULT_INK = '#000000'
+
 const oklabDistance = (a: string, b: string): number => {
   const [l1, a1, b1] = hexToOklab(a), [l2, a2, b2] = hexToOklab(b)
   return Math.hypot(l1 - l2, a1 - a2, b1 - b2)
@@ -742,7 +745,7 @@ const oklabDistance = (a: string, b: string): number => {
 /** The accent copy an overlap layout draws (`LayoutDef.accentCopy`, ruling D2), or undefined when
  *  it draws none and runs as before: recolour is on (the user's line takes the accent itself); the
  *  Frame has no text layer for that role; or the copy would not differ visibly from the user's
- *  line — its colour is not a plain colour, or it is the palette's accent already, or all but
+ *  line — its colour is not a plain colour (none at all reads as the renderer's black), or it is the palette's accent already, or all but
  *  (`ACCENT_COPY_MIN_DIFF`). Both overlap layouts set that line in the accent. The face is the user's
  *  layer's, with its own letter case as this apply leaves it (a case an earlier layout set and the
  *  user kept goes back to theirs). */
@@ -752,7 +755,9 @@ function accentCopyFor(def: LayoutDef, layers: LocalLayer[], targets: RoleTarget
   const id = targets[role]
   const layer = id ? layers.find(l => l.id === id && l.kind === 'text') as TextLayer | undefined : undefined
   if (!layer) return undefined
-  const mine = hex6(layer.color), accent = hex6(palette.accent)
+  // A text layer with no colour at all draws in the canvas's initial fill, black: `resolvePaint`
+  // hands the renderer an undefined paint, which a canvas ignores (its fillStyle starts '#000000').
+  const mine = hex6(layer.color ?? TEXT_RENDER_DEFAULT_INK), accent = hex6(palette.accent)
   if (!mine || !accent || oklabDistance(mine, accent) < ACCENT_COPY_MIN_DIFF) return undefined
   const prevCase = (layer as { layoutPrev?: Record<string, { was: unknown; set: unknown }> }).layoutPrev?.textTransform
   const ownCase = (prevCase && layer.textTransform === prevCase.set ? prevCase.was : layer.textTransform) as AccentCopy['textTransform'] | null

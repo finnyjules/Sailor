@@ -292,7 +292,10 @@ export function checkPlan(els: El[], S: Sheet, premise?: LayoutDef['premise'], o
 
   // Rule 7: the layout's own premise.
   if (premise) {
-    const byRole = (role: string) => present.find(e => e.role === role)
+    // The element a premise names is the first of that role — except that a layout's accent copy
+    // (ruling D2) is preferred when there is one: the crossing is the big copy's, never the user's
+    // small line of the same role (the overlap layouts also push the copy first).
+    const byRole = (role: string) => present.find(e => e.role === role && e.k === 't' && !!e.copy) ?? present.find(e => e.role === role)
     for (const [a, b] of premise.overlap ?? []) {
       const ea = byRole(a)
       const eb = byRole(b)

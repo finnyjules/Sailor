@@ -144,7 +144,10 @@ function contentKey(props: Record<string, unknown> | undefined, w: number, h: nu
   // The user's content tags (Stage 4, ruling R1) decide what each line is: a tag change (and its
   // undo) is a content change.
   const tags = st?.tags && Object.keys(st.tags).length ? st.tags : null
-  return JSON.stringify([w, h, formatFor(props, w, h)?.id ?? '', slots, rank, rows, props?.sailor_localGrid ?? null, roles, ...(tags ? [tags] : [])])
+  // The background is the palette's field (`paletteFromFrame`): it feeds the contrast picker and
+  // whether an overlap layout draws its accent copy (ruling D2), so a new background re-plans.
+  const bg = props?.sailor_localBg ?? null
+  return JSON.stringify([w, h, formatFor(props, w, h)?.id ?? '', slots, rank, rows, props?.sailor_localGrid ?? null, roles, tags, bg])
 }
 
 /** A choice's value on one axis. `cta` absent reads as `'drawn'` (ruling R7's default). */
@@ -360,12 +363,12 @@ export function useLayoutVary(src: LayoutVarySource): {
   }
   // The tab showing: settle at once (a first look must not wait for the debounce).
   watch(isActive, (on) => { if (on) settle() }, { immediate: true })
-  // A content change (a new layer array, grid, size, format or slots): settle after the debounce.
+  // A content change (a new layer array, grid, background, size, format or slots): settle after the debounce.
   watch(() => {
     if (!isActive()) return null
     const p = src.props()
     const w = src.frameW(), h = src.frameH()
-    return [p?.sailor_localLayers, p?.sailor_localGrid, w, h, formatFor(p, w, h)?.id ?? '', src.connectedSlots().join(',')]
+    return [p?.sailor_localLayers, p?.sailor_localGrid, p?.sailor_localBg, w, h, formatFor(p, w, h)?.id ?? '', src.connectedSlots().join(',')]
   }, (v) => { if (v) settleSoon() })
   // The end of a text edit settles what was held back while typing.
   watch(() => !!src.editing?.(), (editing) => {

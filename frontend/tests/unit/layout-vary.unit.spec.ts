@@ -183,6 +183,29 @@ describe('useLayoutVary', () => {
     } finally { vi.useRealTimers() }
   })
 
+  it('re-plans when the background changes: it is the palette\'s field (contrast, the overlap accent copy)', async () => {
+    vi.useFakeTimers()
+    try {
+      const props = reactive<Record<string, unknown>>({ sailor_localLayers: frameLayers(), sailor_localBg: '#f2f0ef', sailor_posterState: { patternId: 'statement', seed: 1 } })
+      const editor = { recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn(), writeGroups: vi.fn() }
+      const vary = useLayoutVary({ props: () => props, frameW: () => 895, frameH: () => 1280, connectedSlots: () => [], editor: () => editor, remember: vi.fn(), measure: makeStubMeasure() })
+      const first = vary.candidates.value
+      vi.advanceTimersByTime(10)                                                 // the idle half of the first build
+      const spy = vi.mocked(planLayout)
+      spy.mockClear()
+      props.sailor_localBg = '#1a1a1a'
+      await nextTick()
+      vi.advanceTimersByTime(CONTENT_SETTLE_MS + 50); await nextTick()
+      expect(vary.candidates.value).not.toBe(first)
+      expect(spy.mock.calls.length).toBeGreaterThan(0)
+      // The rebuilt library plans on the new field; so does the current layout's re-plan (the old
+      // candidates' lazy plans keep the palette they were made with).
+      const calls = spy.mock.calls.map(([a]) => [a.layoutId, a.palette.field])
+      expect(calls.filter(([id]) => id !== 'statement').every(([, f]) => f === '#1a1a1a')).toBe(true)
+      expect(calls.some(([id, f]) => id === 'statement' && f === '#1a1a1a')).toBe(true)
+    } finally { vi.useRealTimers() }
+  })
+
   it('typing: 5 text changes within 100 ms rebuild the library at most once, after the debounce', async () => {
     vi.useFakeTimers()
     try {

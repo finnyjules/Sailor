@@ -5,7 +5,8 @@ import type { LayoutPlanArgs } from '~/lib/frame/patterns/kit/plan'
 import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
 import { localStackKey } from '~/lib/compositor/frameStack'
 import { makeSheet } from '~/lib/frame/patterns/kit/sheet'
-import { boxOf } from '~/lib/frame/patterns/kit/check'
+import { boxOf, checkPlan } from '~/lib/frame/patterns/kit/check'
+import type { El } from '~/lib/frame/patterns/kit/types'
 import { createPathLayer } from '~/composables/useCompositorLayers'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { FrameElements } from '~/lib/frame/patterns/types'
@@ -174,6 +175,16 @@ describe('Overprint and Number behind with recolour off: the big line is the lay
     expect(line.runs?.length).toBeGreaterThan(0)
   })
 
+  it('a line with no colour of its own reads as the renderer\'s black: the copy is drawn, and skipped against a black accent', () => {
+    const noColour = frameLayers('phrase', { image: false, shape: false }).map((l) => {
+      if (l.id !== 'd') return l
+      const { color: _c, ...rest } = l as any
+      return rest
+    }) as LocalLayer[]
+    expect(copyOf(planFirst(noColour, 'overprint').layers)).toHaveLength(1)
+    expect(copyOf(planFirst(noColour, 'overprint', { palette: { ...palette, accent: '#000000' } }).layers)).toEqual([])
+  })
+
   it('the next layout removes the copy', () => {
     const over = planFirst(frameLayers('phrase', { image: false, shape: false }), 'overprint')
     expect(copyOf(over.layers)).toHaveLength(1)
@@ -191,5 +202,18 @@ describe('Overprint and Number behind with recolour off: the big line is the lay
       const d = plan.layers.find(l => l.id === 'd') as any
       expect(d.runs, color).toEqual((on.layers.find(l => l.id === 'd') as any).runs)
     }
+  })
+})
+
+describe('the overlap premise reads the accent copy (ruling D2)', () => {
+  it('the copy is the element the premise names, even when the user\'s small line of the role comes first', () => {
+    const S = makeSheet({ frameW: 895, frameH: 1280, measure: makeStubMeasure() })
+    const title: El = { k: 't', s: 'Weather', x: 10, top: 40, size: 12, ls: 0, lh: 1, role: 'title', pre: true, over: ['detailsCopy'] }
+    const small: El = { k: 't', s: 'Ines Vollmer', x: 10, w: 30, top: 120, size: 3, ls: 0, lh: 1.2, role: 'details' }
+    const copy: El = { k: 't', s: 'Ines', x: 10, top: 45, size: 12, ls: 0, lh: 1, role: 'details', pre: true, over: ['title'], copy: true }
+    const premise = { overlap: [['title', 'details']] as [string, string][] }
+    expect(checkPlan([title, small, copy], S, premise)).toEqual([])
+    // Without the copy, the small line alone does not cross the title: the promise is broken.
+    expect(checkPlan([title, small], S, premise)).toContain('promise broken: title should overlap details')
   })
 })
