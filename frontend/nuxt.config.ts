@@ -57,9 +57,12 @@ export default defineNuxtConfig({
       // Off by default; NUXT_PUBLIC_RUNNER_ENABLED=true turns it on at runtime.
       runnerEnabled: false,
       // Runner families the browser routes to the runner: a comma list, e.g.
-      // NUXT_PUBLIC_RUNNER_FAMILIES=fal-edit. Empty = none. Works only with
-      // runnerEnabled on; the server's NUXT_RUNNER_FAMILIES is the authority.
-      runnerFamilies: '',
+      // fal-edit. Empty = none. Works only with runnerEnabled on. Defaults to
+      // the server's NUXT_RUNNER_FAMILIES (the authority), so one env var
+      // normally drives both; NUXT_PUBLIC_RUNNER_FAMILIES still overrides it.
+      // A browser list wider than the server's is refused as not-eligible and
+      // the run falls back to ComfyUI (isRunnerDeclined).
+      runnerFamilies: process.env.NUXT_RUNNER_FAMILIES ?? '',
       // Client Sentry DSN — present ONLY when NUXT_PUBLIC_SENTRY_DSN is set
       // (hosted). Conditionally spread so local boot carries no sentry key and
       // stays byte-identical; sentry.client.config.ts reads it. See below.

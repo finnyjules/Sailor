@@ -13,7 +13,7 @@
  * nodes_swap_background.py, nodes_swap_product.py, nodes_person_swap.py).
  */
 import { isLink } from '#shared/runner/graph'
-import { pyStrip } from './opts'
+import { pyStrip, textSetting } from './opts'
 
 export const NANO_BANANA_2_SLUG = 'google/nano-banana-2'
 /** BlendSceneNode's `Nano Banana` mode (nodes_replicate.py BlendSceneNode.execute). */
@@ -198,10 +198,7 @@ const TEXT_LABELS: Readonly<Record<string, string>> = {
  * not guess what anything else meant, so it neither sends nor passes it on.
  */
 export function checkActionText(classType: string, inputs: Record<string, unknown>): void {
-  for (const name of ACTION_TEXT_INPUTS[classType] ?? []) {
-    const v = inputs[name]
-    if (v !== undefined && typeof v !== 'string') throw new Error(`The ${TEXT_LABELS[name] ?? name} must be text`)
-  }
+  for (const name of ACTION_TEXT_INPUTS[classType] ?? []) textSetting(inputs, name, '', TEXT_LABELS[name] ?? name)
 }
 
 /**

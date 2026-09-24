@@ -5,7 +5,7 @@
  */
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { GateChoice } from '#shared/runner/messages'
-import { isRunnerPromptId } from '#shared/runner/messages'
+import { RUNNER_NOT_ELIGIBLE, isRunnerPromptId } from '#shared/runner/messages'
 import { isRunnerEligible } from '#shared/runner/eligibility'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 
@@ -38,6 +38,21 @@ export function runIdOfPrompt(promptId: unknown): string | null {
 export function isRunnerNotFound(e: unknown): boolean {
   const x = e as { statusCode?: unknown; status?: unknown; response?: { status?: unknown } } | null
   return !!x && (x.statusCode === 404 || x.status === 404 || x.response?.status === 404)
+}
+
+/**
+ * The server's refusal of a workflow it does not take (its families are off,
+ * e.g. the browser's NUXT_PUBLIC_RUNNER_FAMILIES lists more than the server's
+ * NUXT_RUNNER_FAMILIES): a 400 whose body carries `data.reason: 'not-eligible'`.
+ */
+export function isRunnerNotEligible(e: unknown): boolean {
+  const x = e as { data?: { data?: { reason?: unknown } } } | null
+  return x?.data?.data?.reason === RUNNER_NOT_ELIGIBLE
+}
+
+/** The runner said no to the whole run before starting it — off, or not taking this workflow: the run goes to ComfyUI as before. */
+export function isRunnerDeclined(e: unknown): boolean {
+  return isRunnerNotFound(e) || isRunnerNotEligible(e)
 }
 
 export function startRunnerRun(body: { takes: ApiPrompt[]; workflow: unknown; canvasId: string | null; projectUuid: string | null; projectName: string | null }): Promise<LegStarted> {

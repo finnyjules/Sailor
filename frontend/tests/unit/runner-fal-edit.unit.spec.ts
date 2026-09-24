@@ -111,6 +111,25 @@ describe('fal-edit payloads match the Python nodes', () => {
   it('light values Python cannot read as numbers fail the node', async () => {
     expect(() => parseLight('{"azimuth":"left"}')).toThrow('The light setting can’t be read')
     expect(() => parseLight('{"intensity":[1]}')).toThrow('The light setting can’t be read')
+    expect(() => parseLight('{"azimuth":"1__0"}')).toThrow('The light setting can’t be read')
+    expect(() => parseLight('{"azimuth":"0x10"}')).toThrow('The light setting can’t be read')
+  })
+
+  it('light text is read the way float() reads it (the shared pyFloatOf)', () => {
+    // Underscores between digits, Python's blanks, inf and nan all read.
+    expect(parseLight('{"azimuth":"1_0","elevation":"\\u00a030\\u00a0","intensity":" .5 "}')).toEqual({ azimuth: 10, elevation: 30, intensity: 0.5 })
+    expect(parseLight('{"azimuth":"-inf"}').azimuth).toBe(-Infinity)
+    expect(Number.isNaN(parseLight('{"elevation":"nan"}').elevation)).toBe(true)
+    // U+FEFF is not blank to float() (JS trim() would strip it).
+    expect(() => parseLight('{"azimuth":"\\ufeff10"}')).toThrow('The light setting can’t be read')
+  })
+
+  it('a NaN light clamps as Python’s max(lo, min(hi, v)) does: to the top', () => {
+    // min(90.0, nan) is 90.0 in Python, so NaN elevation is overhead; NaN intensity is 1.0.
+    expect(lightToPhrase(0, Number.NaN, 0.6)).toBe('a strong, defined key light from the front, positioned directly overhead')
+    expect(lightToPhrase(0, 0, Number.NaN)).toBe('a dramatic, high-contrast key light from the front')
+    // (nan + 180) % 360 - 180 is nan: every comparison is False → back-left, as in Python.
+    expect(lightToPhrase(Number.NaN, 0, 0.6)).toContain('from the back-left')
   })
 })
 

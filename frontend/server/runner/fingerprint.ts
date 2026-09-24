@@ -1,7 +1,7 @@
 /**
  * A request's fingerprint is built from the FULL body that would be sent to
- * fal (never a hand-picked list of settings), with input-file links replaced
- * by what the files contain. Two requests with the same fingerprint would get
+ * the provider, fal or Replicate (never a hand-picked list of settings), with
+ * input-file links replaced by what the files contain. Two requests with the same fingerprint would get
  * the same answer — if, and only if, the seed is fixed.
  */
 import { createHash } from 'node:crypto'

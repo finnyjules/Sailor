@@ -1,6 +1,7 @@
 /**
  * How Python reads text, for the readers the browser (eligibility) and the
  * server (runner generators) share, so both sides agree on one grammar.
+ * Also Python's `%`, which the generators' angle buckets need.
  */
 
 // Python str.isspace(): the ASCII blanks, U+001C–U+001F, and the Unicode
@@ -31,4 +32,10 @@ export const PY_INT_RE = /^[+-]?\d(?:_?\d)*$/
 export function pyIntOf(s: string): number | null {
   const t = pyNumStrip(s)
   return PY_INT_RE.test(t) ? Number.parseInt(t.replace(/_/g, ''), 10) : null
+}
+
+/** Python's float `%`: fmod, then moved to the divisor's sign (`-1 % 360` is 359). */
+export function pyMod(a: number, n: number): number {
+  const r = a % n
+  return r !== 0 && (r < 0) !== (n < 0) ? r + n : r
 }

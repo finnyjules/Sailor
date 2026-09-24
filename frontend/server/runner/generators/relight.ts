@@ -5,6 +5,8 @@
  * The gimbal's {azimuth, elevation, intensity}, the preset, the background
  * toggle and the optional reference become one director's note.
  */
+import { pyMod } from '#shared/runner/pyText'
+import { pyFloatOf } from './opts'
 
 /** Preset → mood/colour/quality clause. "Custom" = neutral white, gimbal only. */
 export const PRESET_PHRASES: Readonly<Record<string, string>> = {
@@ -22,8 +24,11 @@ export const PRESET_PHRASES: Readonly<Record<string, string>> = {
 
 export const PRESETS: readonly string[] = Object.keys(PRESET_PHRASES)
 
-/** Python's `%`: the result takes the divisor's sign. */
-const pyMod = (a: number, n: number) => ((a % n) + n) % n
+/** Python's max(lo, min(hi, v)), argument order kept: a NaN reads as `hi`, as in Python. */
+function pyClamp(v: number, lo: number, hi: number): number {
+  const m = v < hi ? v : hi
+  return m > lo ? m : lo
+}
 
 /** Azimuth in [-180, 180]: 0 = front, +90 = right, ±180 = behind. 45° buckets. */
 function directionPhrase(azimuthDeg: number): string {
@@ -43,7 +48,7 @@ function directionPhrase(azimuthDeg: number): string {
 
 /** Elevation in [-90, 90]: 0 = eye level (omitted), + = above, - = below. */
 function elevationPhrase(elevationDeg: number): string | null {
-  const e = Math.max(-90, Math.min(90, elevationDeg))
+  const e = pyClamp(elevationDeg, -90, 90)
   if (Math.abs(e) < 15) return null
   if (e > 0) {
     if (e < 45) return 'above'
@@ -58,7 +63,7 @@ function elevationPhrase(elevationDeg: number): string | null {
 
 /** Intensity in [0, 1] → strength/quality word. */
 function intensityPhrase(intensity: number): string {
-  const i = Math.max(0, Math.min(1, intensity))
+  const i = pyClamp(intensity, 0, 1)
   if (i < 0.25) return 'soft, diffused'
   if (i < 0.5) return 'moderate'
   if (i < 0.75) return 'strong, defined'
@@ -112,9 +117,6 @@ export function relightInstruction(
 
 const UNREADABLE = 'The light setting can’t be read'
 
-/** A plain decimal number, as Python's float() reads a string (no hex, no blanks). */
-const DECIMAL = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/
-
 /**
  * `float(cfg.get(key, def) or def)`: a missing or falsy value (0, "", null,
  * false, [] or {}) is the default — so an intensity of 0 reads as 0.6, as in
@@ -126,9 +128,9 @@ function pyFloatOr(v: unknown, def: number): number {
   if (typeof v === 'number') return v
   if (v === true) return 1
   if (typeof v === 'string') {
-    const s = v.trim()
-    if (DECIMAL.test(s)) return Number(s)
-    throw new Error(UNREADABLE)
+    const f = pyFloatOf(v)
+    if (f === null) throw new Error(UNREADABLE)
+    return f
   }
   if (Array.isArray(v) && v.length === 0) return def
   if (typeof v === 'object' && !Array.isArray(v) && Object.keys(v as object).length === 0) return def

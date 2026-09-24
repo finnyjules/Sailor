@@ -12,7 +12,7 @@ import {
   GATE_CLASS, dependenciesOf, downstreamNodes, legNodes, upstreamStage,
   type ApiPrompt, type TakeGateState,
 } from '#shared/runner/graph'
-import type { GateChoice, RunnerMessage } from '#shared/runner/messages'
+import { RUNNER_NOT_ELIGIBLE, type GateChoice, type RunnerMessage } from '#shared/runner/messages'
 import { MeterRefusalError } from '../utils/requestMeter'
 import { BASE_RENDER_CREDITS, UnpricedGraphError } from '../utils/priceBook'
 import { extractGraphPromptText } from '../utils/graphPromptText'
@@ -169,10 +169,11 @@ const fingerprintEndpoint = (provider: RunnerProvider, endpoint: string): string
 /** Larger than this, the workflow is not stored (Open workflow then falls back, with its toast). */
 export const MAX_STORED_WORKFLOW_CHARS = 2_000_000
 /**
- * Extra time past the deadline before a node is cancelled even when fal has
- * never given a real (non-transient) answer. Without this, a restart-time gap
- * in FAL_KEY, or a status URL that only ever returns 5xx, keeps `asked` false
- * forever and the wait loop never ends — see waitForResult.
+ * Extra time past the deadline before a node is cancelled even when the
+ * provider (fal or Replicate) has never given a real (non-transient) answer.
+ * Without this, a restart-time gap in the provider's key (FAL_KEY or
+ * NUXT_REPLICATE_TOKEN), or a status URL that only ever returns 5xx, keeps
+ * `asked` false forever and the wait loop never ends — see waitForResult.
  */
 const GRACE_MS = 5 * 60_000
 
@@ -734,6 +735,8 @@ export function createEngine(deps: EngineDeps) {
             }
             // A Replicate hiccup: wait, send the same request again, and write
             // the new one down before waiting on it. Nothing more is charged.
+            // waitForResult only runs inside runNode's limiter slot, so the
+            // backoff and the re-run hold that slot: no other call slips in.
             await sleepOrWake(2000 * (retries + 1), req.requestId, signal)
             if (signal.aborted) throw new RunStopped()
             const sub = await client.submit(rec.endpoint, rec.payload, { webhookUrl: webhookFor(provider) })
@@ -795,10 +798,13 @@ export function createEngine(deps: EngineDeps) {
     const takes = i.takes
     if (!Array.isArray(takes) || !takes.length) throw refuse('There is nothing to run', 400)
     if (takes.length > deps.maxTakes) throw refuse(`At most ${deps.maxTakes} versions can run at once`, 400)
-    // The server's families decide; a browser that disagrees is refused.
+    // The server's families decide; a browser that disagrees is refused, with
+    // a marker it reads as "run this on ComfyUI instead" (isRunnerDeclined).
     const families = deps.families?.() ?? NO_FAMILIES
     for (const p of takes) {
-      if (!p || typeof p !== 'object' || !isRunnerEligible(p as ApiPrompt, families)) throw refuse('This workflow can’t run on the Sailor runner', 400)
+      if (!p || typeof p !== 'object' || !isRunnerEligible(p as ApiPrompt, families)) {
+        throw refuse('This workflow can’t run on the Sailor runner', 400, { reason: RUNNER_NOT_ELIGIBLE })
+      }
     }
     const prompts = takes as ApiPrompt[]
     // Fail closed on price, before anything is held: a provider node that

@@ -11,9 +11,9 @@
  *     ProductShotNode.execute's input dict (catacolabs/sdxl-ad-inpaint, a
  *     community model: the Replicate client finds its latest version)
  */
-import { pyStrip } from '#shared/runner/pyText'
+import { pyMod, pyStrip } from '#shared/runner/pyText'
 import { NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP, falNanoBananaEdit } from './edit'
-import { pyFloatOf, pyTruthy } from './opts'
+import { maybeSetSeed, pyFloatOf, pyTruthy, textSetting } from './opts'
 
 // ── image_edit_models.py ─────────────────────────────────────────────────
 
@@ -22,10 +22,6 @@ type EditAdv = Record<string, unknown>
 /** `value if value in allowed else fallback`. */
 function clampSize(value: unknown, allowed: ReadonlySet<string>, fallback: string): string {
   return typeof value === 'string' && allowed.has(value) ? value : fallback
-}
-
-function maybeSetSeed(inp: Record<string, unknown>, seed: number): void {
-  if (seed && seed > 0) inp.seed = seed
 }
 
 export interface ImageEditModelDesc {
@@ -109,12 +105,6 @@ export function imageEditCall(slug: string, input: Record<string, unknown>): { p
 }
 
 // ── Camera angle → English (nodes_replicate.py :3536–3597) ───────────────
-
-/** Python's float `%`: fmod, then moved to the divisor's sign. */
-function pyMod(a: number, n: number): number {
-  const r = a % n
-  return r !== 0 && (r < 0) !== (n < 0) ? r + n : r
-}
 
 export function yawPhrase(yawDeg: number): string {
   const y = pyMod(yawDeg + 180, 360) - 180
@@ -282,14 +272,5 @@ export function productShotInput(o: {
 
 // ── Text settings ────────────────────────────────────────────────────────
 
-/**
- * A text widget: missing is its default, text is itself. Anything else (a
- * number, say) fails the node: the canvas always writes text, and the runner
- * will not guess what anything else meant.
- */
-export function textSetting(inputs: Record<string, unknown>, name: string, def: string, label: string): string {
-  const v = inputs[name]
-  if (v === undefined) return def
-  if (typeof v !== 'string') throw new Error(`The ${label} must be text`)
-  return v
-}
+/** Lives in opts.ts (the nano actions read their text the same way); re-exported for existing callers. */
+export { textSetting }

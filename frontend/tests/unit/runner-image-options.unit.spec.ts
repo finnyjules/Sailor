@@ -10,7 +10,8 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { optInt } from '~~/server/runner/generators/opts'
+import { asInt, optInt } from '~~/server/runner/generators/opts'
+import { pyMod } from '#shared/runner/pyText'
 import { IMAGE_RATIO_SETS } from '~~/server/runner/generators/image'
 import { isRunnerEligible } from '#shared/runner/eligibility'
 
@@ -30,6 +31,26 @@ describe('int readers follow Python int()', () => {
     const p = { 1: { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'p', model_options: JSON.stringify({ num_outputs: v }) } } }
     // optionInt's default is 1: an unreadable value asks for one picture.
     expect(isRunnerEligible(p)).toBe(!((want ?? 1) > 1))
+  })
+  it.each(TABLE)('asInt(%j) agrees (widget seeds and durations)', (v, want) => {
+    expect(asInt(v, -99)).toBe(want ?? -99)
+  })
+  it('asInt keeps numbers (truncated) and gives the default for anything else', () => {
+    expect(asInt(7.9, 0)).toBe(7)
+    expect(asInt(-7.9, 0)).toBe(-7)
+    expect(asInt(Number.NaN, 5)).toBe(5)
+    expect(asInt(null, 5)).toBe(5)
+  })
+})
+
+describe('pyMod is Python’s float %', () => {
+  it.each([
+    [-1, 360, 359], [361, 360, 1], [0, 360, 0], [720, 360, 0], [-30.5, 360, 329.5], [5, -3, -1], [-5, 3, 1],
+  ])('%s %% %s is %s', (a, n, want) => {
+    expect(pyMod(a, n)).toBe(want)
+  })
+  it('a tiny negative lands on the divisor, as fmod-then-add does in CPython', () => {
+    expect(pyMod(-1e-20, 360)).toBe(360)
   })
 })
 

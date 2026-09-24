@@ -236,6 +236,65 @@ describe('a Replicate hiccup is sent again', () => {
     expect((await k.store.get(runId))!.takes[0]!.nodes['1']!.status).toBe('error')
   })
 
+  it('the re-run is sent inside the node’s per-user slot: another node never slips in during the backoff', async () => {
+    // One slot per user, two versions. The first prediction hiccups; its
+    // re-run must go out before the second version gets the slot.
+    const k = makeKit({ hosted: true, deps: { perUserLimit: 1 } })
+    let inFlight = 0
+    let most = 0
+    const submit = (k.replicate.client.submit as any).getMockImplementation()!
+    ;(k.replicate.client.submit as any).mockImplementation(async (...a: unknown[]) => {
+      most = Math.max(most, ++inFlight)
+      return submit(...a)
+    })
+    const status = (k.replicate.client.status as any).getMockImplementation()!
+    ;(k.replicate.client.status as any).mockImplementation(async (url: string) => {
+      const s = await status(url)
+      if (s.status === 'COMPLETED') inFlight--
+      return s
+    })
+    k.replicate.hiccupNext(1)
+    const { runId } = await start(k, [onReplicate('first'), onReplicate('second')])
+    await k.engine.settled(runId)
+
+    // Whichever version got the slot first, its re-run follows it directly.
+    const sent = k.replicate.submitted().map(r => r.payload.prompt)
+    expect(sent).toHaveLength(3)
+    expect(sent[1]).toBe(sent[0])
+    expect(sent[2]).not.toBe(sent[0])
+    expect(most).toBe(1)
+    const run = (await k.store.get(runId))!
+    expect(run.takes.map(t => t.nodes['1']!.status)).toEqual(['done', 'done'])
+    expect(run.takes.map(t => t.nodes['1']!.request!.retries ?? 0).sort()).toEqual([0, 1])
+  })
+
+  it('Stop during the backoff sends nothing more, and the version waiting for the slot never goes out', async () => {
+    let backingOff = false
+    const k = makeKit({
+      hosted: true,
+      deps: {
+        perUserLimit: 1,
+        // The 2 s backoff waits until Stop; every other wait is short.
+        sleep: (ms, signal) => new Promise<void>((resolve) => {
+          if (ms >= 2000) backingOff = true
+          const t = ms >= 2000 ? null : setTimeout(resolve, 1)
+          signal.addEventListener('abort', () => { if (t) clearTimeout(t); resolve() }, { once: true })
+        }),
+      },
+    })
+    k.replicate.hiccupNext(1)
+    const { runId } = await start(k, [onReplicate('first'), onReplicate('second')])
+    await until(() => backingOff)
+    await k.engine.stop(k.userId)
+    await k.engine.settled(runId)
+
+    expect(k.replicate.submitted()).toHaveLength(1)
+    const run = (await k.store.get(runId))!
+    expect(run.status).toBe('stopped')
+    expect(run.takes.map(t => t.nodes['1']!.status)).toEqual(['stopped', 'stopped'])
+    expect(holds(k.ledger).every(([state]) => state === 'released')).toBe(true)
+  })
+
   it('a restart during a re-run carries on with the new prediction and its count', async () => {
     const fal = createFakeFal()
     const replicate = createFakeReplicate()

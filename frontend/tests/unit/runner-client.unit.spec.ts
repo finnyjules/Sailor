@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { shouldUseRunner, runIdOfPrompt } from '~/lib/runner/client'
+import { isRunnerDeclined, isRunnerNotEligible, isRunnerNotFound, shouldUseRunner, runIdOfPrompt } from '~/lib/runner/client'
 import { ensureRunnerEvents, runnerMessageToPipe, useRunnerEvents } from '~/composables/useRunnerEvents'
 
 const img = { '1': { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'x' } } }
@@ -12,6 +12,33 @@ describe('shouldUseRunner', () => {
     expect(shouldUseRunner(true, [img, blur])).toBe(false)
     expect(shouldUseRunner(true, [img, null])).toBe(false)
     expect(shouldUseRunner(true, [])).toBe(false)
+  })
+})
+
+// ofetch's FetchError (what $fetch throws): statusCode is the HTTP status,
+// data is the parsed body — for an h3 error, { statusCode, statusMessage, message, data }.
+const fetchError = (status: number, body: unknown) => Object.assign(new Error(`[POST] "/api/runs": ${status}`), { statusCode: status, status, data: body })
+
+describe('isRunnerDeclined: when a run falls back to ComfyUI', () => {
+  it('a 404 (the runner is off on the server)', () => {
+    const e = fetchError(404, { statusCode: 404, message: 'Not found' })
+    expect(isRunnerNotFound(e)).toBe(true)
+    expect(isRunnerDeclined(e)).toBe(true)
+  })
+  it('a not-eligible 400 (the server does not take this workflow: its families are off)', () => {
+    const e = fetchError(400, { statusCode: 400, statusMessage: 'This workflow can’t run on the Sailor runner', data: { reason: 'not-eligible' } })
+    expect(isRunnerNotFound(e)).toBe(false)
+    expect(isRunnerNotEligible(e)).toBe(true)
+    expect(isRunnerDeclined(e)).toBe(true)
+  })
+  it('never any other refusal: those stay errors the user sees', () => {
+    expect(isRunnerDeclined(fetchError(400, { statusCode: 400, statusMessage: 'There is nothing to run' }))).toBe(false)
+    expect(isRunnerDeclined(fetchError(402, { statusCode: 402, data: { required: 5, available: 0 } }))).toBe(false)
+    expect(isRunnerDeclined(fetchError(429, { statusCode: 429 }))).toBe(false)
+    expect(isRunnerDeclined(fetchError(500, { statusCode: 500, data: { reason: 'something-else' } }))).toBe(false)
+    expect(isRunnerDeclined(new TypeError('Failed to fetch'))).toBe(false)
+    expect(isRunnerDeclined(null)).toBe(false)
+    expect(isRunnerDeclined(undefined)).toBe(false)
   })
 })
 

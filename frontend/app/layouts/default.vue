@@ -57,7 +57,7 @@ import { CostConfirmQueue } from '~/lib/graph/costConfirmQueue'
 import { resolveCreditDelta, type CreditWatchCandidate } from '~/lib/graph/creditAttribution'
 import { resolveEventTab } from '~/lib/graph/resolveEventTab'
 import { withKeyedLock } from '~/lib/graph/keyedLock'
-import { shouldUseRunner, startRunnerRun, runnerGateAction, stopRunnerRuns, fetchRunnerRecord, runIdOfPrompt, isRunnerNotFound, type LegStarted } from '~/lib/runner/client'
+import { shouldUseRunner, startRunnerRun, runnerGateAction, stopRunnerRuns, fetchRunnerRecord, runIdOfPrompt, isRunnerDeclined, type LegStarted } from '~/lib/runner/client'
 import { useRunnerEvents, ensureRunnerEvents } from '~/composables/useRunnerEvents'
 import { createRunnerEventBuffer, ownerTabForCanvas, runnerRunIdsForTab } from '~/lib/runner/routing'
 import { nodesNeedingEngine, workflowNodeTitles, needsEngineDescription } from '~/lib/runner/needsEngine'
@@ -944,9 +944,9 @@ async function runVueWorkflow(
           sentToRunner = true
         }
         catch (err) {
-          // 404: the runner is switched off on the server — this run goes to ComfyUI as before.
-          if (!isRunnerNotFound(err)) throw err
-          console.warn('[Run] the Sailor runner is off on the server; running on ComfyUI')
+          // 404 (runner off) or a not-eligible 400 (the server's families are off): this run goes to ComfyUI as before.
+          if (!isRunnerDeclined(err)) throw err
+          console.warn('[Run] the Sailor runner is off on the server or does not take this workflow; running on ComfyUI')
         }
       }
       if (sentToRunner) {

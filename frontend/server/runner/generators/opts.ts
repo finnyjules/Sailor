@@ -107,11 +107,23 @@ export function asText(v: unknown): string {
  */
 export { pyStrip }
 
-/** `int(value or 0)` for widget values that are numbers or numeric strings. */
+/** `int(value or 0)` for widget values that are numbers or numeric strings (read as int() reads them). */
 export function asInt(v: unknown, def: number): number {
   if (typeof v === 'number' && Number.isFinite(v)) return Math.trunc(v)
-  if (typeof v === 'string' && /^\s*[+-]?\d+\s*$/.test(v)) return Number.parseInt(v, 10)
+  if (typeof v === 'string') return pyIntOf(v) ?? def
   return def
+}
+
+/**
+ * A text widget: missing is its default, text is itself. Anything else (a
+ * number, say) fails the node: the canvas always writes text, and the runner
+ * will not guess what anything else meant. `label` names it in the error.
+ */
+export function textSetting(inputs: Record<string, unknown>, name: string, def: string, label: string): string {
+  const v = inputs[name]
+  if (v === undefined) return def
+  if (typeof v !== 'string') throw new Error(`The ${label} must be text`)
+  return v
 }
 
 export { pyTruthy }

@@ -36,6 +36,7 @@ import { RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { RunnerMessage } from '#shared/runner/messages'
 import { nodesNeedingEngine } from '~~/app/lib/runner/needsEngine'
+import { isRunnerDeclined } from '~~/app/lib/runner/client'
 import { createFakeFal, createFakeLedger, createFakeReplicate, makeKit, until } from './__runner__/kit'
 
 // ── Fixtures ─────────────────────────────────────────────────────────────
@@ -575,7 +576,11 @@ describe('B10 · each family switched off in turn', () => {
 
     const res = await startRun([f.prompt])
     expect(res.status).toBe(400)
-    expect(((await res.json()) as { statusMessage?: string }).statusMessage).toBe('This workflow can’t run on the Sailor runner')
+    const body = (await res.json()) as { statusMessage?: string; data?: unknown }
+    expect(body.statusMessage).toBe('This workflow can’t run on the Sailor runner')
+    // The stable marker: the browser reads it (as $fetch's FetchError: statusCode + parsed body) and runs on ComfyUI.
+    expect(body.data).toEqual({ reason: 'not-eligible' })
+    expect(isRunnerDeclined({ statusCode: res.status, data: body })).toBe(true)
     expect(k.fal.client.submit).not.toHaveBeenCalled()
     expect(k.replicate.client.submit).not.toHaveBeenCalled()
     expect(k.ledger.hold).not.toHaveBeenCalled()
@@ -585,5 +590,13 @@ describe('B10 · each family switched off in turn', () => {
     // With the family back on, nothing needs the engine.
     process.env.NUXT_RUNNER_FAMILIES = ALL
     expect(nodesNeedingEngine(f.prompt, { runnerOn: true, families: runnerFamilies(), titleOf })).toEqual([])
+  })
+  it('any other refusal carries no marker, so the browser shows it rather than falling back', async () => {
+    kit()
+    const res = await startRun([])
+    expect(res.status).toBe(400)
+    const body = (await res.json()) as { statusMessage?: string; data?: unknown }
+    expect(body.statusMessage).toBe('There is nothing to run')
+    expect(isRunnerDeclined({ statusCode: res.status, data: body })).toBe(false)
   })
 })

@@ -46,7 +46,10 @@ export interface PlanContext {
   nodeId: string
   /** Files produced by the node a link points at. */
   filesFrom(link: [string, number]): OutputFile[]
-  /** Our saved file → a link fal can fetch. */
+  /**
+   * Our saved file → a link the provider can fetch: a fal storage link,
+   * which Replicate fetches too (so one hand-off serves both providers).
+   */
   toUrl(file: OutputFile): Promise<string>
   /** For a Gate: this take was let through it. */
   gateOpen: boolean
@@ -63,7 +66,7 @@ export async function planNode(ctx: PlanContext): Promise<NodePlan> {
   // The first file of the linked node, or null. Python sends only the first
   // frame of an IMAGE batch (_image_tensor_to_data_url); so does the runner.
   const linkedFirstFile = (name: string): OutputFile | null => linked(name)[0] ?? null
-  // A linked picture as a link fal can fetch; a link that brought no file fails the node.
+  // A linked picture as a link the provider (fal or Replicate) can fetch; a link that brought no file fails the node.
   const pictureUrl = async (name: string, missing: string): Promise<string> => {
     const f = linkedFirstFile(name)
     if (!f) throw new Error(missing)
