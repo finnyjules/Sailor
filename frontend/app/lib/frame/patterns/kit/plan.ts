@@ -660,28 +660,73 @@ function placeExtras(p: Prepared, ran: Run): Run {
   const H = ran.fullH ?? S.H
   const top = keep ? H * keep.top : 0, bottom = keep ? H * (1 - keep.bottom) : H
   const area: Box = { x0: S.M, y0: top + S.M, x1: S.W - S.M, y1: bottom - S.M }
-  const taken = ran.out.els.map(e => inkBoxOf(e, S)).filter((b): b is Box => b != null)
-  const tiles = tileRooms(freeRects(area, taken, S.GAP, EXTRA_MIN_TILE), n, S.GAP)
-  if (!tiles) ran.out.els.push({ k: 'missing', why: NO_ROOM_FOR_IMAGES })
-  else tiles.forEach((t, i) => ran.out.els.push({ k: 'p', x: t.x0, y: t.y0, w: t.x1 - t.x0, h: t.y1 - t.y0, role: 'extra', extra: i }))
+  const els = ran.out.els
+  const boxes = els.map(e => takenBox(e, S, S.GAP))
+  let tiles = tileRooms(freeRects(area, boxes.filter((b): b is Box => b != null), S.GAP, EXTRA_MIN_TILE), n, S.GAP)
+  let over: string[] | undefined
+  if (!tiles) {
+    // Ruling D5: no room off the image — when the layout's own image is full-bleed (it covers the
+    // content area), the tiles may go ON it as an inset, still clear of every other element (the
+    // text, the owned pieces) by the gap. The checker lets them lie on that image (`over`), and
+    // Performance counts them as covering it ("the image is mostly hidden").
+    const bleed = els.map((e, i) => (e.k === 'p' && e.extra == null && boxes[i] && contains(boxes[i]!, area) ? i : -1)).filter(i => i >= 0)
+    if (bleed.length) {
+      const rest = boxes.filter((b, i): b is Box => b != null && !bleed.includes(i))
+      tiles = tileRooms(freeRects(area, rest, S.GAP, EXTRA_MIN_TILE), n, S.GAP, EXTRA_INSET_MAX * (area.x1 - area.x0))
+      over = [...new Set(bleed.map(i => (els[i]!.k === 'p' ? els[i]!.role ?? 'p' : 'p').replace(/\d+$/, '')))]
+    }
+  }
+  if (!tiles) els.push({ k: 'missing', why: NO_ROOM_FOR_IMAGES })
+  else tiles.forEach((t, i) => els.push({ k: 'p', x: t.x0, y: t.y0, w: t.x1 - t.x0, h: t.y1 - t.y0, role: 'extra', extra: i, ...(over ? { over } : {}) }))
   return ran
 }
 
-/** `n` equal tiles, `gap` apart, in the first room (largest first) that holds them at
+/** Whether box `a` covers box `b` entirely. */
+const contains = (a: Box, b: Box): boolean => a.x0 <= b.x0 && a.y0 <= b.y0 && a.x1 >= b.x1 && a.y1 >= b.y1
+
+/** The room an element takes for the extra images (Task 7): its ink box — a logo's grown to its
+ *  own clear space (checker rule 9: 0.35 × its height) where that is more than the kit's gap, so a
+ *  tile never breaks it. */
+function takenBox(e: El, S: Sheet, gap: number): Box | null {
+  const b = inkBoxOf(e, S)
+  if (!b || e.k !== 'logo') return b
+  const g = Math.max(0, 0.35 * (b.y1 - b.y0) - gap)
+  return { x0: b.x0 - g, y0: b.y0 - g, x1: b.x1 + g, y1: b.y1 + g }
+}
+
+/** Ruling D6: the longest a tile may be, as a multiple of its other side (1:2 to 2:1). */
+export const EXTRA_MAX_ASPECT = 2
+/** Ruling D5 (fix round 1): an inset on the layout's image is a small picture on it, not a second
+ *  cover — each side at most a third of the content area's width. (A room-filling inset hid the
+ *  image under Performance's rule on every layout.) */
+export const EXTRA_INSET_MAX = 1 / 3
+
+/** `n` equal slots, `gap` apart, in the first room (largest first) that holds them at
  *  `EXTRA_MIN_TILE` or more: as one row or one column, whichever tile is bigger (the row on a tie).
- *  Null: no room holds them. */
-function tileRooms(rooms: Box[], n: number, gap: number): Box[] | null {
+ *  Ruling D6: each tile keeps an aspect between 1:2 and 2:1 — its longer side is cut to twice the
+ *  shorter, and it sits centred in its slot (the shorter side, and so the minimum, is unchanged).
+ *  `maxSide` (an inset, ruling D5): no side longer than that (never under the minimum). Null: no
+ *  room holds them. */
+function tileRooms(rooms: Box[], n: number, gap: number, maxSide = Infinity): Box[] | null {
+  const clamp = (w: number, h: number) => {
+    const w1 = Math.min(w, EXTRA_MAX_ASPECT * h, maxSide)
+    const th = Math.min(h, EXTRA_MAX_ASPECT * w1, maxSide)
+    return { tw: Math.min(w1, EXTRA_MAX_ASPECT * th), th }
+  }
   for (const r of rooms) {
     const rw = r.x1 - r.x0, rh = r.y1 - r.y0
     const row = { w: (rw - (n - 1) * gap) / n, h: rh, row: true }
     const col = { w: rw, h: (rh - (n - 1) * gap) / n, row: false }
     const fits = [row, col].filter(t => Math.min(t.w, t.h) >= EXTRA_MIN_TILE)
     if (!fits.length) continue
-    const t = fits.length === 2 && col.w * col.h > row.w * row.h ? col : fits[0]!
+    const area = (t: { w: number; h: number }) => { const { tw, th } = clamp(t.w, t.h); return tw * th }
+    const t = fits.length === 2 && area(col) > area(row) ? col : fits[0]!
+    const { tw, th } = clamp(t.w, t.h)
     return Array.from({ length: n }, (_, i) => {
-      const x0 = t.row ? r.x0 + i * (t.w + gap) : r.x0
-      const y0 = t.row ? r.y0 : r.y0 + i * (t.h + gap)
-      return { x0, y0, x1: x0 + t.w, y1: y0 + t.h }
+      const sx = t.row ? r.x0 + i * (t.w + gap) : r.x0
+      const sy = t.row ? r.y0 : r.y0 + i * (t.h + gap)
+      const x0 = sx + (t.w - tw) / 2, y0 = sy + (t.h - th) / 2
+      return { x0, y0, x1: x0 + tw, y1: y0 + th }
     })
   }
   return null
@@ -870,12 +915,14 @@ function carriedOver(p: Prepared, a: LayoutPlanArgs, ops: LayerOp[], z: number):
   for (const [r, id] of Object.entries(p.contentRead.roles) as [ContentRole, string | undefined][]) if (id) contentRole.set(id, r)
   const roleOf = new Map(contentRole)
   for (const r of ROLES) { const id = p.baseElements[r]?.id; if (id && !roleOf.has(id)) roleOf.set(id, r) }
-  const images = p.layers.filter(l => l.kind === 'image' && !isOwned(l as { owner?: { by: string } }))
+  // Ruling D7: a wired image is an image here too (hidden, tracked and named like one).
+  const isImage = (l: LocalLayer) => l.kind === 'image' || l.kind === 'wired'
+  const images = p.layers.filter(l => isImage(l) && !isOwned(l as { owner?: { by: string } }))
   const tags = (a.props?.sailor_posterState as { tags?: Record<string, string> } | undefined)?.tags
   const hide: LayerOp[] = []
   const named: NotPlaced[] = []
   for (const l of p.layers) {
-    if (l.kind !== 'text' && l.kind !== 'image') continue
+    if (l.kind !== 'text' && !isImage(l)) continue
     if (isOwned(l as { owner?: { by: string } }) || isFromLayout(l as { fromLayout?: unknown })) continue
     if (placed.has(l.id) || hiddenHere.has(l.id)) continue
     const tracked = l as { visible?: boolean; layoutPrev?: Record<string, { was: unknown; set: unknown }> }
@@ -886,24 +933,24 @@ function carriedOver(p: Prepared, a: LayoutPlanArgs, ops: LayerOp[], z: number):
     // Ruling D3: tagged Not used — gone from the Frame (a showing one is hidden below).
     const tagUnused = tags?.[l.id] === 'unused'
     const role: NotPlaced['role'] | undefined = tagUnused ? 'unused'
-      : l.kind === 'image'
+      : isImage(l)
         ? (l.id === p.contentRead.roles.image2 ? 'image2' : layoutHid ? 'unused' : undefined)
         : roleOf.get(l.id) ?? (layoutHid ? 'unused' : undefined)
     // Task 6 fix round 2: a line hidden BECAUSE it was tagged Not used (D3's hide, marked
     // `by: 'unused'`), now untagged and holding no role, that was showing before, comes back — a
     // tracked show op — rather than staying hidden and named as `'unused'` for ever. A line a
     // layout hid for not placing it (R15, with or without a role now) is not this: it stays.
-    const hasRole = l.kind === 'image' ? l.id === p.contentRead.roles.image2 : roleOf.has(l.id)
+    const hasRole = isImage(l) ? l.id === p.contentRead.roles.image2 : roleOf.has(l.id)
     const prevVis = tracked.layoutPrev?.visible as { was: unknown; set: unknown; by?: string } | undefined
     if (layoutHid && prevVis?.by === 'unused' && !tags?.[l.id] && !hasRole && prevVis.was !== false) {
-      hide.push({ target: l.id, kind: l.kind === 'image' ? 'image' : 'text', shown: true, z })
+      hide.push({ target: l.id, kind: isImage(l) ? 'image' : 'text', shown: true, z })
       continue
     }
     if (!role) continue
     const strand = showing && (tagUnused || (prevWasStage4 && contentRole.has(l.id)))
     if (!layoutHid && !strand) continue
-    if (strand) hide.push({ target: l.id, kind: l.kind === 'image' ? 'image' : 'text', hidden: true, z, ...(tagUnused ? { hiddenBy: 'unused' as const } : {}) })
-    if (l.kind === 'image') {
+    if (strand) hide.push({ target: l.id, kind: isImage(l) ? 'image' : 'text', hidden: true, z, ...(tagUnused ? { hiddenBy: 'unused' as const } : {}) })
+    if (isImage(l)) {
       const name = (l as { name?: string }).name?.trim()
       named.push({ role, text: name || `Image ${images.indexOf(l) + 1}`, image: true })
     } else named.push({ role, text: (l as TextLayer).text ?? '' })

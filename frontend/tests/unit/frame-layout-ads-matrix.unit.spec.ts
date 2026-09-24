@@ -506,14 +506,15 @@ describe('the catalog (seed order)', () => {
 // Task 7 of the layout decisions: every layout places the Frame's extra images, or is refused ("no
 // room for the other images"). The ad Frame with a second image (Before / after's fixture) through
 // the other eight layouts, pinned: Stat, Review, Us vs them, Feature callouts and Reasons why tile it
-// and keep every variation; Offer first, Notes app and Post-it lose everything they offer with one
-// image. Measured: on every one of their one-image variations no free room of 12 × 12 (the minimum
-// tile) is left in the content area — Post-it bleeds its image over the whole page (the note and the
-// offer band on it), Notes app sets its paper over the whole page, and Offer first fills the page with
-// its panel and the image under it.
+// off the image and keep every variation; Post-it (its image bleeds over the whole page) sets it on
+// that image as an inset (fix round 1, ruling D5) and keeps every variation too. Offer first and
+// Notes app lose everything they offer with one image. Measured: on every one of their one-image
+// variations no free room of 12 × 12 (the minimum tile) is left in the content area, and neither has
+// a full-bleed image to set an inset on — Notes app sets its own paper (a piece, not an image) over
+// the whole page; Offer first fills the page with its panel and an image that starts under it.
 describe('a second image (Task 7): what the ad Frame keeps', () => {
-  const KEPT = ['perfStat', 'perfReview', 'perfVersus', 'perfCallouts', 'perfListicle']
-  const LOST = ['perfOfferFirst', 'perfNotes', 'perfPostit']
+  const KEPT = ['perfStat', 'perfReview', 'perfVersus', 'perfCallouts', 'perfListicle', 'perfPostit']
+  const LOST = ['perfOfferFirst', 'perfNotes']
   it.each(combos.map(c => [`${c.frame} · ${c.action ? 'action' : 'no action'}`, c] as const))('%s', (_label, c) => {
     const f = FRAMES.find(x => x.id === c.frame)!
     const format = f.preset ? FRAME_FORMATS.find(x => x.id === f.preset)! : null
@@ -527,7 +528,12 @@ describe('a second image (Task 7): what the ad Frame keeps', () => {
       if (KEPT.includes(id)) {
         // Every variation kept, each with the second image as a tile.
         expect(two.map(x => x.choice), id).toEqual(one.map(x => x.choice))
-        for (const x of two) expect(x.out.els.filter(e => e.k === 'p' && e.extra === 0), id).toHaveLength(1)
+        for (const x of two) {
+          const tiles = x.out.els.filter(e => e.k === 'p' && e.extra === 0)
+          expect(tiles, id).toHaveLength(1)
+          // Only Post-it needs the inset (ruling D5).
+          expect(tiles[0]!.over, id).toEqual(id === 'perfPostit' ? ['photo'] : undefined)
+        }
       } else {
         expect(LOST, id).toContain(id)
         expect(two, id).toEqual([])

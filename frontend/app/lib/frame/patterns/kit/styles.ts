@@ -98,7 +98,8 @@ export const STYLES: Record<StyleId, StyleSpec> = {
           const clip = (a: number, b: number) => Math.max(0, Math.min(vis.y1, b) - Math.max(vis.y0, a))
           // A fade to transparent mostly shows the product through.
           covered += size.W * (clip(s0, s1) + clip(f0, f1) * 0.35)
-        } else if (e.k === 'r' && (e.role === 'card' || e.role === 'panel')) {
+        } else if ((e.k === 'r' && (e.role === 'card' || e.role === 'panel')) || (e.k === 'p' && e.extra != null)) {
+          // Layout decisions ruling D5: an extra image set on the image as an inset hides it too.
           covered += Math.max(0, Math.min(vis.x1, e.x + e.w) - Math.max(vis.x0, e.x))
             * Math.max(0, Math.min(vis.y1, e.y + e.h) - Math.max(vis.y0, e.y))
         }
