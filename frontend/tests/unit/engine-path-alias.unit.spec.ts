@@ -590,7 +590,9 @@ describe('local mode is byte-identical — no gate, no 403, same proxy target', 
     ['/comfyui/internal/files/output', 'GET'], ['/comfyui/settings', 'GET'], ['/object_info', 'GET'],
     // Round 2: the three prefixes that stopped raw-proxying in HOSTED mode
     // must still raw-proxy locally — no scrubber, no overwrite sniff, no 403.
-    ['/comfyui/object_info', 'GET'], ['/upload/image', 'POST'], ['/gate/resume', 'POST'],
+    // (`/upload/image` and `/upload/mask` are native since engine-free Phase A
+    // A4: see the next describe.)
+    ['/comfyui/object_info', 'GET'], ['/upload', 'POST'], ['/gate/resume', 'POST'],
     ['/extensions/../history', 'GET'],
     // Stage 6 Task 2's projects gate and spend refusal are hosted-only; since
     // engine-free Phase A those paths are answered natively in local mode (see
@@ -695,6 +697,17 @@ describe('local mode: projects and spend are answered by Sailor itself (engine-f
       const res = await middleware({ ...ev(p, m), node: { req: {}, res: { setHeader() {} } } })
       expect(proxyRequest, `${m} ${p} is native in local mode`).not.toHaveBeenCalled()
       expect(res, `${m} ${p}`).toBeDefined()
+    }
+  })
+
+  it('answers /upload/image and /upload/mask natively (A4), under any spelling', async () => {
+    // GET is aiohttp's 405 on these POST routes — enough to prove the router
+    // owns them without a body; native-uploads covers the writes.
+    for (const p of ['/upload/image', '/api/upload/mask', '/comfyui/upload/image', '/comfyui/api/upload/image?comfyWorker=2']) {
+      proxyRequest.mockClear()
+      const res = await middleware({ ...ev(p, 'GET'), node: { req: {}, res: { setHeader() {} } } })
+      expect(proxyRequest, `${p} is native in local mode`).not.toHaveBeenCalled()
+      expect(res, p).toBe('405: Method Not Allowed')
     }
   })
 

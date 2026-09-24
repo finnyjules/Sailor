@@ -86,3 +86,19 @@ export function pySafeResolve(root: string, subfolder: string, filename: string)
   if (realCandidate !== realRoot && !realCandidate.startsWith(realRoot === '/' ? '/' : realRoot + path.sep)) return null
   return candidate
 }
+
+/**
+ * Review C2 — an exact mirror of ComfyUI's folder_paths.annotated_filepath().
+ * The engine resolves a trailing `[output]` / `[input]` / `[temp]` annotation
+ * to a base directory BEFORE it looks at the `type` query param, so `type`
+ * alone is not the type. Kept byte-for-byte faithful to the Python (plain
+ * endsWith + fixed-width strip, which also eats the separating space) rather
+ * than a tidier regex — if the two ever disagree, the gate and the engine
+ * disagree about which file is being served.
+ */
+export function annotatedFilepath(name: string): { name: string, type: 'output' | 'input' | 'temp' | null } {
+  if (name.endsWith('[output]')) return { name: name.slice(0, -9), type: 'output' }
+  if (name.endsWith('[input]')) return { name: name.slice(0, -8), type: 'input' }
+  if (name.endsWith('[temp]')) return { name: name.slice(0, -7), type: 'temp' }
+  return { name, type: null }
+}

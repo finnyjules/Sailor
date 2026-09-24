@@ -13,25 +13,13 @@ import { parseUploadForm } from './multipart'
 import { canonicalUploadKey, ownedInputFilenames, recordUpload, releaseUpload, unsafeUploadTarget, uploadExistsOnDisk, uploadOwner } from './inputUploads'
 import { normalizeEnginePath } from './enginePath'
 import { hostedCanMutate, ownedIds, ownerOf, recordOwner, releaseOwner } from './resourceOwners'
-import { isSafeId, userDir } from '../native/paths'
-import { dispatchNative } from '../native/router'
+import { annotatedFilepath, isSafeId, userDir } from '../native/paths'
+import { dispatchNative, dispatchUpload, nativeEnginePath } from '../native/router'
 import { ensureBootMigrationsRan, listProjects, projectsRoot } from '../native/projects'
 
-/**
- * Review C2 — an exact mirror of ComfyUI's folder_paths.annotated_filepath().
- * The engine resolves a trailing `[output]` / `[input]` / `[temp]` annotation
- * to a base directory BEFORE it looks at the `type` query param, so `type`
- * alone is not the type. Kept byte-for-byte faithful to the Python (plain
- * endsWith + fixed-width strip, which also eats the separating space) rather
- * than a tidier regex — if the two ever disagree, the gate and the engine
- * disagree about which file is being served.
- */
-export function annotatedFilepath(name: string): { name: string, type: 'output' | 'input' | 'temp' | null } {
-  if (name.endsWith('[output]')) return { name: name.slice(0, -9), type: 'output' }
-  if (name.endsWith('[input]')) return { name: name.slice(0, -8), type: 'input' }
-  if (name.endsWith('[temp]')) return { name: name.slice(0, -7), type: 'temp' }
-  return { name, type: null }
-}
+// Review C2's exact mirror of folder_paths.annotated_filepath() lives in
+// server/native/paths.ts now, shared with the native /view and mask upload.
+export { annotatedFilepath }
 
 export type ViewGate =
   | { kind: 'ungated' }
@@ -313,7 +301,7 @@ export async function handleHostedObjectInfo(event: H3Event): Promise<unknown> {
 
 /**
  * The hosted upload body cap (R4). The gate has to hold the whole body to
- * inspect it and forward the identical bytes, so the size has to be bounded
+ * inspect it and write the same parsed form, so the size has to be bounded
  * somewhere — `proxyRequest` used to stream it and never did.
  */
 export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024
@@ -344,7 +332,7 @@ export function isOverwriteValue(v: string): boolean {
  * sides and still means different things. Un-escaping (plus trim/lowercase,
  * since aiohttp accepts `NAME=`) collapses that gap. Everything ELSE aiohttp
  * tolerates and undici refuses never gets this far: the parse fails and the
- * body is rejected with a 400 rather than forwarded.
+ * body is rejected with a 400 rather than written.
  */
 export function normalizeFieldName(raw: string): string {
   return raw.replace(/\\(.)/g, '$1').trim().toLowerCase()
@@ -372,11 +360,11 @@ export function decideOverwrite(userId: string, owner: string | null, existsOnDi
 /**
  * F4 (round 3) — /upload is ownership-scoped rather than overwrite-free.
  *
- * The body is PARSED for inspection and FORWARDED unchanged: the parser decides
- * whether the request may proceed, the original bytes fly untouched under the
- * original content-type, so nothing here can corrupt an upload by re-encoding
- * it. Ownership is then recorded from the ENGINE's response, because the name
- * the engine stored may be an auto-suffixed `shot (1).png` rather than the one
+ * The body is PARSED for inspection, and (engine-free Phase A) the SAME parsed
+ * form is then written natively (server/native/uploads.ts) — the form the gate
+ * checked is the form that is written, so no second parser can read it
+ * differently. Ownership is then recorded from the write's response, because
+ * the name stored may be an auto-suffixed `shot (1).png` rather than the one
  * that was asked for.
  */
 export async function handleHostedUpload(event: H3Event): Promise<unknown> {
@@ -392,7 +380,8 @@ export async function handleHostedUpload(event: H3Event): Promise<unknown> {
 
   // Read ONCE, as a Buffer. This is proxy middleware, so the request stream is
   // still unconsumed here — but it is single-shot, and proxyRequest is no
-  // longer downstream of us to re-read it. The same bytes are forwarded below.
+  // longer downstream of us to re-read it. The form parsed from it is the one
+  // written below.
   const body = await readRawBody(event, false)
   if (body && body.length > MAX_UPLOAD_BYTES) {
     throw createError({ statusCode: 413, message: 'Upload exceeds the 100 MB limit' })
@@ -452,22 +441,13 @@ export async function handleHostedUpload(event: H3Event): Promise<unknown> {
     }
   }
 
-  const { target, backendPath } = engineTarget(event.path)
-  const headers: Record<string, string> = { origin: target }
-  // The multipart boundary lives in this header — forwarding the body without
-  // it makes the engine reject every part.
-  if (contentType) headers['content-type'] = contentType
-
-  const res = await fetch(`${target}${backendPath}`, { method: 'POST', headers, body: body as any })
+  // Any spelling of the path (`/api/…`, `/comfyui/…`, `?comfyWorker=N`) names
+  // the same two routes; the pool workers share these folders.
+  const p = nativeEnginePath(event.path) ?? event.path.split('?')[0]!
+  const res = await dispatchUpload(p, (event.method || 'POST').toUpperCase(), form)
   setResponseStatus(event, res.status)
-  const raw = await res.text()
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  }
-  catch {
-    return raw
-  }
+  if (res.text) setResponseHeader(event, 'content-type', 'text/plain; charset=utf-8')
+  const parsed = res.body
 
   if (res.status >= 200 && res.status < 300) {
     const stored = parsed as { name?: unknown, subfolder?: unknown, type?: unknown }

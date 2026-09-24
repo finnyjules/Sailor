@@ -15,10 +15,16 @@
  * resolution mode that skips annotation handling entirely and resolves
  * through the engine's asset store.
  *
- * These tests drive the REAL route handler (server/routes/view.get.ts) with
- * a stubbed engine, so they fail against the pre-fix tree.
+ * These tests drive the REAL route handler (server/routes/view.get.ts), so
+ * they fail against the pre-fix tree. Since engine-free Phase A (A4) the route
+ * reads the files itself: "served" means the bytes came off a temp engine
+ * root, and "the engine was asked" means a file was read at all.
  */
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { __setInputUploadsEngineRootForTests } from '../../server/utils/inputUploads'
 
 const g = globalThis as any
 g.defineEventHandler = (fn: any) => fn
@@ -49,33 +55,48 @@ vi.mock('../../server/utils/engineGate', async (orig) => {
 })
 
 // Keep the disk cache out of the test run entirely.
-vi.mock('node:fs/promises', () => ({
-  mkdir: vi.fn(async () => {}),
-  writeFile: vi.fn(async () => {}),
-  readFile: vi.fn(async () => Buffer.from('')),
-}))
-vi.mock('node:fs', () => ({ existsSync: () => false }))
+vi.mock('node:fs/promises', async (orig) => {
+  const actual = await orig() as any
+  return { ...actual, mkdir: vi.fn(async () => {}), copyFile: vi.fn(async () => {}) }
+})
 
-const fetchMock = vi.fn(async (_url: string) => ({
-  ok: true,
-  headers: { get: () => 'image/png' },
-  arrayBuffer: async () => new TextEncoder().encode('PIXELS').buffer,
-}))
-g.fetch = fetchMock
+// Every file read the route makes goes through openSync — the "engine was
+// asked" signal the pre-A4 version of this spec took from a stubbed fetch.
+// The old proxy's disk cache (<cwd>/.cache/images) is never consulted.
+const { openSync } = vi.hoisted(() => ({ openSync: vi.fn() }))
+vi.mock('node:fs', async (orig) => {
+  const actual = await orig() as any
+  openSync.mockImplementation(actual.openSync)
+  const existsSync = (p: string) => !String(p).includes('/.cache/images/') && actual.existsSync(p)
+  return { ...actual, default: { ...actual, openSync, existsSync }, openSync, existsSync }
+})
+const fetchMock = openSync
 
 let handler: (event: any) => Promise<any>
 beforeAll(async () => { handler = (await import('../../server/routes/view.get')).default as any })
 
+let root = ''
 beforeEach(() => {
   mode = 'hosted'
   owned = new Set()
   fetchMock.mockClear()
   harvestPendingOutputs.mockClear()
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'view-route-gate-'))
+  for (const f of ['output/mine.png', 'output/victim.png', 'output/whatever.png', 'output/anything.png',
+    'output/sub/mine.png', 'output/other/mine.png', 'temp/scratch.png']) {
+    fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true })
+    fs.writeFileSync(path.join(root, f), 'PIXELS')
+  }
+  __setInputUploadsEngineRootForTests(root)
+})
+afterEach(() => {
+  __setInputUploadsEngineRootForTests(undefined)
+  fs.rmSync(root, { recursive: true, force: true })
 })
 
 type Query = Record<string, string | string[]>
 function ev(query: Query) {
-  return { query, context: { userId: 'u1' }, node: { req: {}, res: {} } }
+  return { query, method: 'GET', context: { userId: 'u1' }, node: { req: { headers: {} }, res: { statusCode: 200, setHeader() {} } } }
 }
 async function code(query: Query): Promise<number | 'served'> {
   try {
@@ -100,6 +121,7 @@ describe('hosted /view — annotation resolves the EFFECTIVE type', () => {
     expect(await code({ type: 'temp', filename: 'mine.png [output]' })).toBe('served')
     expect(await code({ filename: 'mine.png [output]' })).toBe('served')
     expect(await code({ filename: 'mine.png' })).toBe('served')
+    expect(fetchMock, 'an owned file is really read off disk').toHaveBeenCalledTimes(3)
   })
 
   it('carries the subfolder into the ownership key', async () => {
@@ -171,12 +193,15 @@ describe('hosted /view — annotation resolves the EFFECTIVE type', () => {
   })
 })
 
-describe('local mode is untouched', () => {
+describe('local mode is ungated', () => {
   beforeEach(() => { mode = 'local' })
-  it('serves annotated and blake3 filenames exactly as before', async () => {
+  it('serves annotated filenames with no ownership check', async () => {
     expect(await code({ type: 'temp', filename: 'anything.png [output]' })).toBe('served')
-    expect(await code({ filename: 'blake3:deadbeef' })).toBe('served')
     expect(await code({ type: 'output', filename: 'whatever.png' })).toBe('served')
     expect(harvestPendingOutputs).not.toHaveBeenCalled()
+  })
+
+  it('answers blake3 hashes 404, as the engine did without --enable-assets', async () => {
+    expect(await code({ filename: 'blake3:deadbeef' })).toBe(404)
   })
 })

@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto'
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { readFile, copyFile, mkdir } from 'node:fs/promises'
+import { createReadStream, existsSync, openSync } from 'node:fs'
 import { join } from 'node:path'
+import { getRequestHeaders, setResponseStatus } from 'h3'
 import { deployMode } from '../utils/deployMode'
 import { ownedOutputKeys } from '../utils/graphRuns'
 import { harvestPendingOutputs, viewGateDecision } from '../utils/engineGate'
+import { resolveViewTarget, viewFileResponse, type ViewQuery } from '../native/view'
 
-const COMFY_BACKEND = 'http://127.0.0.1:8188'
 const CACHE_DIR = join(process.cwd(), '.cache', 'images')
 
 function cacheKey(filename: string, type: string, subfolder: string): string {
@@ -61,38 +62,38 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  // Build the backend URL with original query params
-  const params = new URLSearchParams()
-  for (const [k, v] of Object.entries(query)) {
-    if (v != null) params.set(k, String(v))
-  }
-  const backendUrl = `${COMFY_BACKEND}/view?${params}`
-  const cacheFile = join(CACHE_DIR, cacheKey(filename, type, subfolder))
-
-  // Try fetching from ComfyUI first
-  try {
-    const res = await fetch(backendUrl)
-    if (res.ok) {
-      const buffer = Buffer.from(await res.arrayBuffer())
-      const contentType = res.headers.get('content-type') || 'image/png'
-
-      // Cache to disk (fire and forget for temp images, cache all for durability)
-      mkdir(CACHE_DIR, { recursive: true })
-        .then(() => writeFile(cacheFile, buffer))
-        .catch(() => {})
-
-      setResponseHeaders(event, {
-        'content-type': contentType,
-        'cache-control': 'public, max-age=86400',
-      })
-      return buffer
+  // Engine-free Phase A: the bytes come straight off disk, resolved exactly as
+  // ComfyUI's view_image resolved them (server/native/view.ts).
+  const target = resolveViewTarget(query as ViewQuery)
+  if (target.kind === 'file') {
+    const res = viewFileResponse(target, getRequestHeaders(event))
+    setResponseStatus(event, res.status)
+    setResponseHeaders(event, { ...res.headers, 'cache-control': 'public, max-age=86400' })
+    // temp/ is emptied every time the engine starts, so a copy is kept for
+    // pages that still show those images afterwards (read back below).
+    if (target.type === 'temp' && res.status === 200) {
+      const cacheFile = join(CACHE_DIR, cacheKey(filename, type, subfolder))
+      if (!existsSync(cacheFile)) {
+        mkdir(CACHE_DIR, { recursive: true })
+          .then(() => copyFile(target.file, cacheFile))
+          .catch(() => {})
+      }
     }
+    if (!res.range || event.method === 'HEAD') return ''
+    // Opened here, not lazily by the stream: a file removed after the stat
+    // above must not surface later as an unhandled stream error.
+    let fd: number
+    try { fd = openSync(target.file, 'r') }
+    catch { throw createError({ statusCode: 404, message: 'Image not found' }) }
+    const stream = createReadStream('', { fd, start: res.range.start, end: res.range.end })
+    stream.on('error', (e) => { console.error('[view] read failed', target.file, e) })
+    return stream
   }
-  catch {
-    // ComfyUI might be down — fall through to cache
-  }
+  if (target.status !== 404) throw createError({ statusCode: target.status, message: 'Invalid image request' })
 
-  // Fallback: serve from cache
+  // Fallback: a copy kept by the cache above (or by the proxy this route used
+  // to be), for a file that is no longer on disk.
+  const cacheFile = join(CACHE_DIR, cacheKey(filename, type, subfolder))
   if (existsSync(cacheFile)) {
     const buffer = await readFile(cacheFile)
     const ext = cacheFile.slice(cacheFile.lastIndexOf('.') + 1).toLowerCase()

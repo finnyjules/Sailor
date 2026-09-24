@@ -36,8 +36,13 @@
  * has claimed and nothing on disk answers to.
  *
  * R4 — the body is buffered to be parsed, so it needs an explicit cap.
+ *
+ * Engine-free Phase A (A4): the gate no longer forwards the body to ComfyUI —
+ * the SAME parsed form is written natively (server/native/uploads.ts). The
+ * ownership rules below are unchanged; "reached the engine" now reads "was
+ * written to the (temp) engine folders".
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const rawBody = vi.fn(async () => undefined as Buffer | undefined)
 const requestHeader = vi.fn((_e: any, _n: string) => undefined as string | undefined)
@@ -48,6 +53,7 @@ vi.mock('h3', async (orig) => {
     readRawBody: (...a: any[]) => rawBody(...(a as [])),
     getRequestHeader: (...a: any[]) => requestHeader(...(a as [any, string])),
     setResponseStatus: (_e: any, s: number) => { lastStatus = s },
+    setResponseHeader: () => {},
   }
 })
 
@@ -106,12 +112,32 @@ __setInputUploadsDbForTests({
   },
 })
 
-const fetchMock = vi.fn()
+// Nothing here may reach a real engine: uploads are written natively now.
+const fetchMock = vi.fn(async () => { throw new Error('uploads must not be forwarded to the engine') })
 ;(globalThis as any).fetch = fetchMock
 
+const realFs = await vi.importActual<typeof import('node:fs')>('node:fs')
+const { tmpdir } = await import('node:os')
+let root = ''
+/** Every file the upload wrote under the temp engine root, as `type/sub/name`. */
+function written(): string[] {
+  const out: string[] = []
+  const walk = (d: string, rel: string) => {
+    for (const e of realFs.readdirSync(d, { withFileTypes: true })) {
+      const r = rel ? `${rel}/${e.name}` : e.name
+      if (e.isDirectory()) walk(`${d}/${e.name}`, r)
+      else out.push(r)
+    }
+  }
+  if (root) walk(root, '')
+  return out.sort()
+}
+
 beforeEach(() => {
-  fetchMock.mockReset()
-  fetchMock.mockResolvedValue({ status: 200, text: async () => '{"name":"a.png","subfolder":"","type":"input"}' })
+  fetchMock.mockClear()
+  if (root) realFs.rmSync(root, { recursive: true, force: true })
+  root = realFs.mkdtempSync(`${tmpdir()}/engine-upload-ownership-`)
+  for (const d of ['input', 'output', 'temp']) realFs.mkdirSync(`${root}/${d}`)
   rawBody.mockReset()
   requestHeader.mockReset()
   requestHeader.mockReturnValue(`multipart/form-data; boundary=${BOUNDARY}`)
@@ -124,10 +150,12 @@ beforeEach(() => {
   // so without an override every test's engine-root marker check would ride
   // the SAME existsOnDisk mock as the on-disk file check above — a test that
   // sets existsOnDisk to false to mean "nothing on disk" would incidentally
-  // also make the root unresolvable. Pin a fake resolved root by default so
+  // also make the root unresolvable. Pin a resolved (temp) root by default so
   // these tests keep exercising the on-disk-existence decision they're
-  // named for; the dedicated S2 tests below override this back to null.
-  __setInputUploadsEngineRootForTests('/fake/engine/root')
+  // named for; the dedicated S2 tests below override this back to null. The
+  // gate's disk check still rides the existsOnDisk mock; the native write
+  // uses stat, so it sees the real temp folders.
+  __setInputUploadsEngineRootForTests(root)
 })
 
 // ------------------------------------------------------------------- fixtures
@@ -173,7 +201,7 @@ describe('R1 — the overwrite field is found by a parser, not by a byte scan', 
         { disposition, value: 'true' },
       ]))
       await expect(handleHostedUpload(ev())).rejects.toMatchObject({ statusCode: 400 })
-      expect(fetchMock, 'the smuggle must never reach the engine').not.toHaveBeenCalled()
+      expect(written(), 'the smuggle must never be written').toEqual([])
     })
 
     it(`refuses the ${label} smuggle for the OWNER too — the two parsers disagree about these bytes`, async () => {
@@ -183,7 +211,7 @@ describe('R1 — the overwrite field is found by a parser, not by a byte scan', 
         { disposition, value: 'true' },
       ]))
       await expect(handleHostedUpload(ev())).rejects.toMatchObject({ statusCode: 400 })
-      expect(fetchMock).not.toHaveBeenCalled()
+      expect(written()).toEqual([])
     })
   }
 
@@ -196,7 +224,7 @@ describe('R1 — the overwrite field is found by a parser, not by a byte scan', 
       { disposition: `name="over\\write"`, value: 'true' },
     ]))
     await expect(handleHostedUpload(ev())).rejects.toMatchObject({ statusCode: 400 })
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(written()).toEqual([])
   })
 
   it('refuses a backslash in ANY field name, not just overwrite', async () => {
@@ -209,7 +237,7 @@ describe('R1 — the overwrite field is found by a parser, not by a byte scan', 
       { disposition: `name="overwrite"`, value: 'true' },
     ]))
     await expect(handleHostedUpload(ev())).rejects.toMatchObject({ statusCode: 400 })
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(written()).toEqual([])
   })
 
   it('gates on ANY truthy overwrite part, not on the one a lookup would find', async () => {
@@ -217,7 +245,6 @@ describe('R1 — the overwrite field is found by a parser, not by a byte scan', 
     // real `true` (or before it) must not decide this for us either way.
     owners.set('input::victim.png', 'u2')
     for (const values of [['true', 'false'], ['false', 'true']]) {
-      fetchMock.mockClear()
       rawBody.mockResolvedValue(raw([
         { disposition: `name="image"; filename="victim.png"`, value: 'PIXELS' },
         { disposition: `name="overwrite"`, value: values[0]! },
@@ -225,7 +252,7 @@ describe('R1 — the overwrite field is found by a parser, not by a byte scan', 
       ]))
       await expect(handleHostedUpload(ev()), `values ${values.join(',')}`)
         .rejects.toMatchObject({ statusCode: 403 })
-      expect(fetchMock).not.toHaveBeenCalled()
+      expect(written()).toEqual([])
     }
   })
 
@@ -245,8 +272,7 @@ describe('R2 — overwrite is scoped to the owner, not refused outright', () => 
     existsOnDisk.mockReturnValue(true)
 
     await handleHostedUpload(ev())
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8188/upload/image')
+    expect(written()).toEqual(['input/mine.png'])
   })
 
   it('REFUSES a cross-tenant overwrite with a 403 that names the conflict', async () => {
@@ -254,15 +280,14 @@ describe('R2 — overwrite is scoped to the owner, not refused outright', () => 
     rawBody.mockResolvedValue(upload({ filename: 'victim.png', fields: { overwrite: 'true' } }))
 
     await expect(handleHostedUpload(ev())).rejects.toMatchObject({ statusCode: 403 })
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(written()).toEqual([])
   })
 
   it('ALLOWS overwrite of a fresh name — no owner, nothing on disk — and records it', async () => {
     rawBody.mockResolvedValue(upload({ filename: 'agent_gen_123.png', fields: { overwrite: 'true' } }))
-    fetchMock.mockResolvedValue({ status: 200, text: async () => '{"name":"agent_gen_123.png","subfolder":"","type":"input"}' })
 
     await handleHostedUpload(ev())
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(written()).toEqual(['input/agent_gen_123.png'])
     expect(owners.get('input::agent_gen_123.png')).toBe('u1')
   })
 
@@ -273,21 +298,24 @@ describe('R2 — overwrite is scoped to the owner, not refused outright', () => 
     rawBody.mockResolvedValue(upload({ filename: 'legacy.png', fields: { overwrite: 'true' } }))
 
     await expect(handleHostedUpload(ev())).rejects.toMatchObject({ statusCode: 403 })
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(written()).toEqual([])
   })
 
   it('treats only aiohttp-truthy values as an overwrite request', async () => {
     // server.py: `overwrite == "true" or overwrite == "1"`. Anything else and
     // the engine auto-suffixes, so there is nothing to gate.
     owners.set('input::victim.png', 'u2')
-    for (const v of ['false', '0', 'yes', '']) {
-      fetchMock.mockClear()
-      rawBody.mockResolvedValue(upload({ filename: 'victim.png', fields: { overwrite: v } }))
+    for (const [i, v] of ['false', '0', 'yes', ''].entries()) {
+      // Distinct bytes each time, so the write auto-suffixes instead of
+      // answering the identical earlier file.
+      rawBody.mockResolvedValue(raw([
+        { disposition: 'name="image"; filename="victim.png"', value: `PIXELS${i}` },
+        { disposition: 'name="overwrite"', value: v },
+      ]))
       await handleHostedUpload(ev())
-      expect(fetchMock, `overwrite=${JSON.stringify(v)} is not an overwrite`).toHaveBeenCalledTimes(1)
+      expect(written().length, `overwrite=${JSON.stringify(v)} is not an overwrite`).toBe(i + 1)
     }
     for (const v of ['true', '1', 'TRUE', ' true ']) {
-      fetchMock.mockClear()
       rawBody.mockResolvedValue(upload({ filename: 'victim.png', fields: { overwrite: v } }))
       await expect(handleHostedUpload(ev()), `overwrite=${JSON.stringify(v)} must be gated`)
         .rejects.toMatchObject({ statusCode: 403 })
@@ -299,7 +327,7 @@ describe('R2 — overwrite is scoped to the owner, not refused outright', () => 
     existsOnDisk.mockReturnValue(true)
     rawBody.mockResolvedValue(upload({ filename: 'victim.png' }))
     await handleHostedUpload(ev())
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(written()).toEqual(['input/victim.png'])
   })
 
   it('keys ownership by type + subfolder, not by filename alone', async () => {
@@ -308,10 +336,9 @@ describe('R2 — overwrite is scoped to the owner, not refused outright', () => 
     await expect(handleHostedUpload(ev())).rejects.toMatchObject({ statusCode: 403 })
 
     // Same filename, different subfolder: a different file, not the victim's.
-    fetchMock.mockClear()
     rawBody.mockResolvedValue(upload({ filename: 'v.png', fields: { subfolder: 'other', overwrite: 'true' } }))
     await handleHostedUpload(ev())
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(written()).toEqual(['input/other/v.png'])
   })
 
   it('decideOverwrite is the whole rule', () => {
@@ -373,23 +400,28 @@ describe('S1 — the ownership check and the record key are canonicalized the SA
 
       await expect(handleHostedUpload(ev('/upload/image', 'attacker')))
         .rejects.toMatchObject({ statusCode: 403 })
-      expect(fetchMock, 'the clobber must never reach the engine').not.toHaveBeenCalled()
+      expect(written(), 'the clobber must never be written').toEqual([])
     })
   }
 
   it('the OWNER themself can still overwrite under an alias — canonicalization is symmetric', async () => {
     owners.set(canonicalUploadKey('input', '', 'mine.png'), 'u1')
-    rawBody.mockResolvedValue(upload({ filename: 'mine.png', fields: { type: 'bogus', overwrite: 'true' } }))
-
+    rawBody.mockResolvedValue(upload({ filename: 'mine.png', fields: { subfolder: '.', overwrite: 'true' } }))
     await handleHostedUpload(ev('/upload/image', 'u1'))
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(written()).toEqual(['input/mine.png'])
+
+    // type=bogus passes the gate too; the native write then refuses the
+    // unknown type itself (the Python crashed on it), writing nothing new.
+    rawBody.mockResolvedValue(upload({ filename: 'mine.png', fields: { type: 'bogus', overwrite: 'true' } }))
+    await handleHostedUpload(ev('/upload/image', 'u1'))
+    expect(lastStatus).toBe(400)
+    expect(written()).toEqual(['input/mine.png'])
   })
 
   it('the post-response record is canonicalized too, so a later alias check matches it', async () => {
-    rawBody.mockResolvedValue(upload({ filename: 'fresh.png', fields: { type: 'bogus', overwrite: 'true' } }))
-    fetchMock.mockResolvedValue({ status: 200, text: async () => '{"name":"fresh.png","subfolder":".","type":"input"}' })
+    rawBody.mockResolvedValue(upload({ filename: 'fresh.png', fields: { subfolder: '.', overwrite: 'true' } }))
 
-    await handleHostedUpload(ev('/upload/image', 'u1'))
+    expect(await handleHostedUpload(ev('/upload/image', 'u1'))).toEqual({ name: 'fresh.png', subfolder: '.', type: 'input' })
     expect(owners.get(canonicalUploadKey('input', '', 'fresh.png'))).toBe('u1')
   })
 })
@@ -403,7 +435,7 @@ describe('S2 — the overwrite path fails CLOSED when the engine root cannot be 
 
     await expect(handleHostedUpload(ev('/upload/image', 'u1')))
       .rejects.toMatchObject({ statusCode: 403, message: expect.stringMatching(/engine|configur/i) })
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(written()).toEqual([])
   })
 
   it('an OWNED file still overwrites fine even with the root unresolved — ownership never needed the disk', async () => {
@@ -411,27 +443,29 @@ describe('S2 — the overwrite path fails CLOSED when the engine root cannot be 
     owners.set(canonicalUploadKey('input', '', 'mine.png'), 'u1')
     rawBody.mockResolvedValue(upload({ filename: 'mine.png', fields: { overwrite: 'true' } }))
 
+    // Past the gate; the write itself then has no folder to go to.
     await handleHostedUpload(ev('/upload/image', 'u1'))
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(lastStatus).toBe(503)
   })
 })
 
 // ------------------------------------------------------------- recording
 
-describe('ownership is recorded from the ENGINE response', () => {
-  it('records the auto-suffixed name the engine actually stored', async () => {
+describe('ownership is recorded from the name actually stored', () => {
+  it('records the auto-suffixed name the write actually stored', async () => {
+    realFs.writeFileSync(`${root}/input/shot.png`, 'someone else')
     rawBody.mockResolvedValue(upload({ filename: 'shot.png' }))
-    fetchMock.mockResolvedValue({ status: 200, text: async () => '{"name":"shot (1).png","subfolder":"","type":"input"}' })
 
     await handleHostedUpload(ev())
+    expect(written()).toEqual(['input/shot (1).png', 'input/shot.png'])
     expect(owners.get('input::shot (1).png')).toBe('u1')
     expect(owners.has('input::shot.png'), 'the REQUESTED name was never written').toBe(false)
   })
 
   it('records subfolder and type from the response too', async () => {
     rawBody.mockResolvedValue(upload({ filename: 'm.png', fields: { type: 'temp', subfolder: 'clips' } }))
-    fetchMock.mockResolvedValue({ status: 200, text: async () => '{"name":"m.png","subfolder":"clips","type":"temp"}' })
     await handleHostedUpload(ev())
+    expect(written()).toEqual(['temp/clips/m.png'])
     expect(owners.get('temp:clips:m.png')).toBe('u1')
   })
 
@@ -442,10 +476,10 @@ describe('ownership is recorded from the ENGINE response', () => {
     expect(owners.get('input::a.png')).toBe('u2')
   })
 
-  it('records nothing when the engine did not accept the upload', async () => {
-    rawBody.mockResolvedValue(upload({ filename: 'a.png' }))
-    fetchMock.mockResolvedValue({ status: 400, text: async () => 'Bad Request' })
-    expect(await handleHostedUpload(ev())).toBe('Bad Request')
+  it('records nothing when the upload was not accepted', async () => {
+    rawBody.mockResolvedValue(raw([{ disposition: 'name="type"', value: 'input' }]))
+    expect(await handleHostedUpload(ev())).toBe('')
+    expect(lastStatus).toBe(400)
     expect(owners.size).toBe(0)
   })
 })
@@ -458,13 +492,13 @@ describe('R4 — the buffered body has an explicit cap', () => {
       n === 'content-length' ? String(MAX_UPLOAD_BYTES + 1) : `multipart/form-data; boundary=${BOUNDARY}`)
     await expect(handleHostedUpload(ev())).rejects.toMatchObject({ statusCode: 413 })
     expect(rawBody, 'must not buffer a body it has already refused').not.toHaveBeenCalled()
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(written()).toEqual([])
   })
 
   it('rejects an over-cap body that lied about its length', async () => {
     rawBody.mockResolvedValue(Buffer.alloc(MAX_UPLOAD_BYTES + 1))
     await expect(handleHostedUpload(ev())).rejects.toMatchObject({ statusCode: 413 })
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(written()).toEqual([])
   })
 
   it('caps at 100 MiB', () => {
@@ -488,30 +522,25 @@ describe('the ownership key can never be built from a traversing path', () => {
     it(`400s ${JSON.stringify(c)}`, async () => {
       rawBody.mockResolvedValue(upload({ ...c, fields: { ...(c.fields ?? {}), overwrite: 'true' } }))
       await expect(handleHostedUpload(ev())).rejects.toMatchObject({ statusCode: 400 })
-      expect(fetchMock).not.toHaveBeenCalled()
+      expect(written()).toEqual([])
     })
   }
 
   it('allows an ordinary nested subfolder', async () => {
     rawBody.mockResolvedValue(upload({ filename: 'a.png', fields: { subfolder: 'clips/2026', overwrite: 'true' } }))
     await handleHostedUpload(ev())
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(written()).toEqual(['input/clips/2026/a.png'])
   })
 })
 
-// --------------------------------------------------------- forwarding shape
+// ------------------------------------------------------------ the write
 
-describe('the parser decides, the bytes fly untouched', () => {
-  it('forwards the ORIGINAL buffer and content-type byte for byte', async () => {
-    const body = upload({ filename: 'a.png', fields: { overwrite: 'true' } })
-    rawBody.mockResolvedValue(body)
-
+describe('the parser decides, and the parsed form is what gets written', () => {
+  it('writes the checked upload natively, byte for byte, and never forwards it', async () => {
+    rawBody.mockResolvedValue(upload({ filename: 'a.png', fields: { overwrite: 'true' } }))
     await handleHostedUpload(ev())
-    const [url, init] = fetchMock.mock.calls[0]
-    expect(url).toBe('http://127.0.0.1:8188/upload/image')
-    expect(init.method).toBe('POST')
-    expect(init.headers['content-type']).toBe(`multipart/form-data; boundary=${BOUNDARY}`)
-    expect(Buffer.compare(init.body as Buffer, body), 'forwarded bytes must be identical').toBe(0)
+    expect(realFs.readFileSync(`${root}/input/a.png`, 'utf8')).toBe('PIXELS')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('reads the request body exactly once', async () => {
@@ -520,23 +549,32 @@ describe('the parser decides, the bytes fly untouched', () => {
     expect(rawBody).toHaveBeenCalledTimes(1)
   })
 
-  it('preserves ?comfyWorker=N, the /comfyui base and /upload/mask', async () => {
-    rawBody.mockResolvedValue(upload())
-    await handleHostedUpload(ev('/upload/image?comfyWorker=2'))
-    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8191/upload/image')
+  it('serves every spelling of the two routes, pool worker included, and 404s the rest', async () => {
+    for (const [i, p] of ['/upload/image?comfyWorker=2', '/comfyui/upload/image', '/api/upload/image', '/comfyui/api/upload/image'].entries()) {
+      rawBody.mockResolvedValue(upload({ filename: `w${i}.png` }))
+      await handleHostedUpload(ev(p))
+      expect(lastStatus, p).toBe(200)
+    }
+    expect(written()).toEqual(['input/w0.png', 'input/w1.png', 'input/w2.png', 'input/w3.png'])
 
-    fetchMock.mockClear()
-    rawBody.mockResolvedValue(upload())
+    // A mask with no original_ref crashed aiohttp's handler: 500, nothing written.
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
+    rawBody.mockResolvedValue(upload({ filename: 'm.png' }))
     await handleHostedUpload(ev('/comfyui/upload/mask'))
-    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8188/upload/mask')
+    expect(lastStatus).toBe(500)
+    quiet.mockRestore()
+
+    rawBody.mockResolvedValue(upload({ filename: 'x.png' }))
+    expect(await handleHostedUpload(ev('/upload/elsewhere'))).toBe('404: Not Found')
+    expect(lastStatus).toBe(404)
+    expect(written()).toHaveLength(4)
   })
 
-  it('returns the engine status and body verbatim', async () => {
+  it('returns the write\'s status and body', async () => {
     rawBody.mockResolvedValue(upload())
-    fetchMock.mockResolvedValue({ status: 201, text: async () => '{"name":"a.png","subfolder":"","type":"input"}' })
     const out = await handleHostedUpload(ev())
     expect(out).toEqual({ name: 'a.png', subfolder: '', type: 'input' })
-    expect(lastStatus).toBe(201)
+    expect(lastStatus).toBe(200)
   })
 
   it('requires a session', async () => {
@@ -547,23 +585,27 @@ describe('the parser decides, the bytes fly untouched', () => {
     rawBody.mockResolvedValue(Buffer.from('{"json":true}'))
     requestHeader.mockImplementation((_e: any, n: string) => n === 'content-type' ? 'application/json' : undefined)
     await expect(handleHostedUpload(ev())).rejects.toMatchObject({ statusCode: 400 })
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(written()).toEqual([])
   })
 })
 
 // ------------------------------------------------------------------ local
 
-describe('local mode is untouched — no parse, no table, no gate', () => {
-  it('raw-proxies POST /upload/image WITH overwrite=true', async () => {
+describe('local mode — no table, no gate (single user)', () => {
+  it('writes POST /upload/image WITH overwrite=true natively, never proxying', async () => {
     mode = 'local'
     proxyRequest.mockClear()
+    realFs.writeFileSync(`${root}/input/victim.png`, 'old')
     rawBody.mockResolvedValue(upload({ filename: 'victim.png', fields: { overwrite: 'true' } }))
     owners.set('input::victim.png', 'someone-else')
 
     const out = await middleware({ path: '/upload/image', method: 'POST', context: {} })
-    expect(out).toEqual({ proxiedTo: 'http://127.0.0.1:8188/upload/image' })
-    expect(rawBody, 'the local path never buffers the body').not.toHaveBeenCalled()
+    expect(out).toEqual({ name: 'victim.png', subfolder: '', type: 'input' })
+    expect(realFs.readFileSync(`${root}/input/victim.png`, 'utf8')).toBe('PIXELS')
+    expect(proxyRequest).not.toHaveBeenCalled()
     expect(queries, 'the local path never touches the ownership table').toEqual([])
     mode = 'hosted'
   })
 })
+
+afterAll(() => { if (root) realFs.rmSync(root, { recursive: true, force: true }) })
