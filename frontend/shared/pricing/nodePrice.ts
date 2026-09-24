@@ -21,14 +21,21 @@
  * The badge marks linked widgets the same way (app/lib/costEstimate.ts), so
  * the badge and the charge agree.
  *
- * Images and the engine pickers read IMAGE_MODELS.pricePerImage and
- * ENGINE_USD. Relative imports on purpose: this module is loaded by Nitro,
- * the Vue app and vitest alike.
+ * Images (GenerateImageNode) are the first service's rate for the size,
+ * quality and picture count the request carries (imageRates.ts ×
+ * imageSettings.ts). A linked `model_options` is priced at the card's most
+ * expensive request, a linked `aspect_ratio` at the largest picture. The catalogue decides which ids exist
+ * (IMAGE_MODELS); an id with no rate card is refused as unpriced.
+ *
+ * The engine pickers read ENGINE_USD. Relative imports on purpose: this
+ * module is loaded by Nitro, the Vue app and vitest alike.
  */
 import { IMAGE_MODELS } from '../../app/data/image-models'
 import { LEGACY_VIDEO_MODEL_IDS } from '../../app/data/video-prices'
 import { ENGINE_USD } from '../../app/data/engine-prices'
 import { creditsForUsd } from './markup'
+import { imageMaxUsd, imageRate, imageUsd } from './imageRates'
+import { LARGEST_RATIO, effectiveImageSettings } from './imageSettings'
 import { videoMaxUsd, videoRate, videoUsd } from './videoRates'
 import { effectiveVideoSettings, maxVideoSeconds } from './videoSettings'
 
@@ -53,10 +60,10 @@ export const MODEL_PRICED_CLASS_SET: ReadonlySet<string> = new Set(MODEL_PRICED_
 
 // Lazily-built lookup. Never derive this at module top level from another
 // module's const: a top-level read breaks on import reorder.
-let _imagePrices: Map<string, number | null> | null = null
-function imagePriceFor(id: string): number | null | undefined {
-  if (!_imagePrices) _imagePrices = new Map(IMAGE_MODELS.map(m => [m.id, m.pricePerImage]))
-  return _imagePrices.get(id)
+let _imageIds: Set<string> | null = null
+function isCatalogueImage(id: string): boolean {
+  if (!_imageIds) _imageIds = new Set(IMAGE_MODELS.map(m => m.id))
+  return _imageIds.has(id)
 }
 
 const hasOwn = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k)
@@ -76,11 +83,22 @@ function videoNodeUsd(model: string, inputs: NodeInputs): number | null {
   const id = videoModelIdFor(model)
   if (!videoRate(id)) return null
   const durationLinked = isLinkedInput(inputs.duration)
-  const s = effectiveVideoSettings(id, inputs.duration, inputs.aspect_ratio, isLinkedInput(inputs.model_options) ? {} : inputs.model_options)
+  const s = effectiveVideoSettings(id, inputs.duration, inputs.aspect_ratio, isLinkedInput(inputs.model_options) ? {} : inputs.model_options, inputs.image)
   if (!s) return null
   if (durationLinked) s.seconds = maxVideoSeconds(id)!
   if (isLinkedInput(inputs.model_options)) return videoMaxUsd(id, s.seconds)
   return videoUsd(id, s)
+}
+
+/**
+ * Dollars for an image node as configured. The id must have a rate card.
+ * Linked `model_options`: the card's most expensive request. A linked ratio:
+ * the ratio with the largest picture.
+ */
+function imageNodeUsd(model: string, inputs: NodeInputs): number {
+  if (isLinkedInput(inputs.model_options)) return imageMaxUsd(model)!
+  const ratio = isLinkedInput(inputs.aspect_ratio) ? LARGEST_RATIO : inputs.aspect_ratio
+  return imageUsd(model, effectiveImageSettings(model, ratio, inputs.model_options)!)!
 }
 
 /** A priced node, or the reason it can't be priced (the server refuses it). */
@@ -100,10 +118,9 @@ export function priceNode(classType: string, inputs: NodeInputs | null | undefin
 
   let usd: number
   if (classType === 'GenerateImageNode') {
-    const price = imagePriceFor(model)
-    if (price === undefined) return { refused: `unknown model id ${model}` }
-    if (price == null) return { refused: `model ${model} has no listed price` }
-    usd = price
+    if (!isCatalogueImage(model)) return { refused: `unknown model id ${model}` }
+    if (!imageRate(model)) return { refused: `model ${model} has no listed price` }
+    usd = imageNodeUsd(model, inputs!)
   }
   else if (classType === 'GenerateVideoNode' || classType === 'FilmShotNode') {
     const price = videoNodeUsd(model, inputs!)

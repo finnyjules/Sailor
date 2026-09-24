@@ -334,8 +334,9 @@ export const LOCAL_RENDER_TYPES: ReadonlySet<string> = new Set(
   Object.entries(RUNNER_NODE_RULES).filter(([, r]) => r.local === 'render').map(([k]) => k),
 )
 
-/** The image models that default to fal AND have a price. krea-2-large,
- *  krea-2-medium and seedream-5-pro are left out until they are priced. */
+/** The image models that default to fal AND have a price. seedream-5-pro is
+ *  left out until it is priced. krea-2-large and krea-2-medium are priced
+ *  (shared/pricing/imageRates.ts) and join with their own family. */
 export const RUNNER_IMAGE_MODEL_IDS = [
   'flux-1.1-pro', 'flux-schnell', 'nano-banana-pro', 'nano-banana-2',
   'ideogram-v3-quality', 'ideogram-v3-balanced', 'ideogram-v3-turbo',

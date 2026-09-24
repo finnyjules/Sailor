@@ -354,18 +354,25 @@ describe('golden price table (no price changed by the shared pricing move)', () 
     expect(cells.filter(c => typeof c === 'number').length).toBeGreaterThan(50)
   })
 
-  // Task P2 re-priced video per second (shared/pricing/videoRates.ts), so the
-  // two video classes keep only their shape from the table: a model that
+  // Task P2 re-priced video per second (shared/pricing/videoRates.ts), and
+  // Task P3 re-priced images by size and quality (shared/pricing/imageRates.ts),
+  // so those classes keep only their shape from the table: a model that
   // refused still refuses and a model that priced still prices. Their figures
-  // are pinned by tests/unit/video-pricing.unit.spec.ts.
-  const REPRICED = new Set(['GenerateVideoNode', 'FilmShotNode'])
+  // are pinned by tests/unit/video-pricing.unit.spec.ts and
+  // tests/unit/image-pricing.unit.spec.ts.
+  const REPRICED = new Set(['GenerateVideoNode', 'FilmShotNode', 'GenerateImageNode'])
+  // Models that were refused as unpriced and now have a price.
+  const NEWLY_PRICED: Record<string, string[]> = { GenerateImageNode: ['krea-2-large', 'krea-2-medium'] }
 
   it('every model id × model-priced class prices exactly as recorded', () => {
     const drift: string[] = []
     for (const [ct, row] of Object.entries(golden.modelPriced)) {
       for (const [model, want] of Object.entries(row)) {
         const got = priceOrRefused(ct, { model })
-        if (REPRICED.has(ct)) {
+        if (NEWLY_PRICED[ct]?.includes(model)) {
+          if (want !== 'refused' || typeof got !== 'number') drift.push(`${ct} @ ${model}: recorded ${want}, now ${got}`)
+        }
+        else if (REPRICED.has(ct)) {
           if ((got === 'refused') !== (want === 'refused')) drift.push(`${ct} @ ${model}: recorded ${want}, now ${got}`)
         }
         else if (got !== want) drift.push(`${ct} @ ${model}: recorded ${want}, now ${got}`)
@@ -404,10 +411,15 @@ describe('one price calculation (guard)', () => {
     /function\s+creditsForUsd\w*\s*\(/,
     // a new body under the name (an alias of the shared function is fine)
     /(?:const|let|var)\s+creditsForUsd\w*\s*=\s*(?:\(|function\b|async\b|\w+\s*=>)/,
-    // an operand before the ×, on one line, so a JSDoc ' * markup' line is not one
-    /[\w)\]][ \t]*\*[ \t]*markup\b/,
+    // an operand before the ×, on one line, so a JSDoc ' * markup' line is not
+    // one; any case and any name holding it (MARKUP, houseMarkup, markupRate)
+    /[\w)\]][ \t]*\*[ \t]*\w*markup\w*\b/i,
     /Math\.ceil\(\s*usd\b/,
-    /usd\s*<=\s*0\.10?\s*\?\s*2\b/,
+    // rounding a plain product up by the markup's own factors: ×100 (cents),
+    // ×2 or ×1.5 — `Math.ceil(cost * 100 * 1.5)`. A sum (`w + pad * 2`) or a
+    // nested call (`Math.sqrt(n * 1.5)`) is layout maths, not a price.
+    /Math\.ceil\(\s*[\w.]+(?:\s*\*\s*[\w.]+)*\s*\*\s*(?:100|1\.5|2)\b/,
+    /\w+\s*<=\s*0\.10?\s*\?\s*2\b/,
   ]
   /** Files allowed a markup of their own, each with the reason. */
   const ALLOWED: Record<string, string> = {
@@ -442,10 +454,22 @@ describe('one price calculation (guard)', () => {
     expect(offences('const creditsForUsdX = (usd: number) => usd * 2')).toHaveLength(1)
     expect(offences('export const creditsForUsdServer = creditsForUsd')).toEqual([])
     expect(offences(' * emit identical\n *  markup share one definition')).toEqual([])
+    // Task P3 hardening: any case, any name, and a ceil by the markup's factors.
+    expect(offences('const c = cost * MARKUP')).toHaveLength(1)
+    expect(offences('const c = cost * houseMarkup')).toHaveLength(1)
+    expect(offences('return Math.ceil(cost * 100 * 1.5)')).toHaveLength(1)
+    expect(offences('return Math.ceil(price*2)')).toHaveLength(1)
+    expect(offences('return Math.ceil(2 * price * 100)')).toHaveLength(1)
+    expect(offences('const m = price <= 0.1 ? 2 : 1.5')).toHaveLength(1)
+    // …and still not layout maths or prose.
+    expect(offences('canvas.width = Math.max(2, Math.ceil(textW + pad * 2))')).toEqual([])
+    expect(offences('const bands = Math.ceil(span / (pitch * 2)) + 2')).toEqual([])
+    expect(offences('const cols = Math.max(1, Math.ceil(Math.sqrt(n * 1.5)))')).toEqual([])
+    expect(offences(' * Markup policy: 2× up to $0.10')).toEqual([])
     // The scanner reads real files: the one true copy trips it.
     const markupFile = join(FRONTEND, 'shared/pricing/markup.ts')
     expect(sourceFiles(join(FRONTEND, 'shared'))).toContain(markupFile)
-    expect(offences(readFileSync(markupFile, 'utf8')).length).toBeGreaterThanOrEqual(3)
+    expect(offences(readFileSync(markupFile, 'utf8')).length).toBeGreaterThanOrEqual(2)
   })
 
   it('nothing outside shared/pricing re-implements the markup', () => {

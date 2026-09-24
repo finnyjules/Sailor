@@ -26,7 +26,13 @@ export interface CreditPack {
 // "Covers ~" hedges deliberately: premium image models and long-form video cost more.
 const IMAGE_RENDER_CREDITS = MODEL_COSTS['black-forest-labs/flux-dev']!.credits
 export const PACK_VIDEO_CLIP = { model: 'seedance-2.0', duration: '5', model_options: '{"resolution":"720p"}' }
-const VIDEO_CLIP_CREDITS = nodeCredits('GenerateVideoNode', PACK_VIDEO_CLIP)!
+const VIDEO_CLIP_CREDITS = packClipCredits()
+/** The pack's video clip in credits. Throws at load if the price refuses it: a covers line must never read "~NaN". */
+export function packClipCredits(clip: Record<string, unknown> = PACK_VIDEO_CLIP): number {
+  const credits = nodeCredits('GenerateVideoNode', clip)
+  if (credits == null || !(credits > 0)) throw new Error(`credit packs: the video clip ${JSON.stringify(clip)} has no price`)
+  return credits
+}
 function coversLine(credits: number): string {
   const images = Math.floor(credits / IMAGE_RENDER_CREDITS / 10) * 10
   const clips = Math.floor(credits / VIDEO_CLIP_CREDITS)

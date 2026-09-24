@@ -64,7 +64,7 @@ describe('ratio sets match comfy_api_nodes/image_models.py', () => {
   const NOT_PORTED: Record<string, string> = {
     _IDEOGRAM_V3_AR: 'ideogram-v3 runs on fal, which takes image_size; its Replicate builder is not ported',
     _REVE_AR: 'reve-create is unpriced, so the runner does not take it',
-    _KREA_AR: 'krea-2-large and krea-2-medium are unpriced, so the runner does not take them',
+    _KREA_AR: 'krea-2-large and krea-2-medium are priced, but the runner takes them only with their own family (not built yet)',
   }
 
   it('the Python file has the sets (the parser works)', () => {

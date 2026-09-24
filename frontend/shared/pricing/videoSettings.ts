@@ -25,7 +25,21 @@ export interface VideoSettings {
   resolution: string | null
   /** Whether the clip comes back with sound. */
   audio: boolean
+  /**
+   * Seconds of reference video the service also bills (0 for none). Seedance
+   * 2.0 on fal bills a reference-to-video call on input + output seconds; the
+   * input length can't be seen before the run, so it is fal's maximum total
+   * input (SEEDANCE_MAX_INPUT_VIDEO_SECONDS).
+   */
+  inputVideoSeconds: number
 }
+
+/**
+ * fal bytedance/seedance-2.0/reference-to-video: "(input video duration +
+ * output video duration)" in the token count, and reference videos total at
+ * most 15 s (its llms.txt, read 2026-09-24). Priced at the maximum: fail-safe.
+ */
+export const SEEDANCE_MAX_INPUT_VIDEO_SECONDS = 15
 
 type Adv = Record<string, unknown>
 
@@ -86,12 +100,25 @@ interface Rule {
   fixedSeconds?: number
   resolution(adv: Adv): string | null
   audio(adv: Adv): boolean
+  /** Billed seconds of reference video, given whether a first frame is sent. Absent = 0. */
+  inputVideo?(adv: Adv, firstFrame: boolean): number
 }
 
 const lower = (s: string) => s.toLowerCase()
 const res = (key: string, def: string) => (adv: Adv) => lower(optStr(adv, key, def))
 const fixed = <T>(v: T) => () => v
 const audioOpt = (def: boolean) => (adv: Adv) => optBool(adv, 'generate_audio', def)
+
+// PixVerse v6 on Replicate renders `quality` (default 540p) and
+// `generate_audio_switch` (default false); the builder sends `resolution` and
+// `generate_audio`, which the schema doesn't have. Until it sends `quality`,
+// the price reads the higher of what is sent and 540p, and no sound.
+const PIXVERSE_ORDER = ['360p', '540p', '720p', '1080p']
+function pixverseResolution(adv: Adv): string {
+  const sent = lower(optStr(adv, 'resolution', '720p'))
+  const i = PIXVERSE_ORDER.indexOf(sent)
+  return i >= 0 && i < PIXVERSE_ORDER.indexOf('540p') ? '540p' : sent
+}
 
 /**
  * One rule per video model id, mirroring its builder (video.ts line refs are
@@ -108,6 +135,13 @@ const RULES: Record<string, Rule> = {
   'seedance-2.0': {
     durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15], defaultDuration: 5, resolution: res('resolution', '720p'),
     audio: adv => (has(adv, 'generate_audio') ? pyTruthy(adv.generate_audio) : true),
+    // seedance20: with no first frame (the linked image or image_url), a
+    // non-empty video_urls goes to reference-to-video, billed on input seconds too.
+    inputVideo: (adv, firstFrame) => {
+      if (firstFrame || optStr(adv, 'image_url', '')) return 0
+      const v = adv.video_urls
+      return Array.isArray(v) && v.length ? SEEDANCE_MAX_INPUT_VIDEO_SECONDS : 0
+    },
   },
   // hailuoH3Core: H3_RES of the lower-cased option, else 768P. H3 always renders sound.
   'hailuo-h3': { durations: [5, 6, 10], defaultDuration: 5, resolution: adv => H3_RES[lower(optStr(adv, 'resolution', '768p'))] ?? '768p', audio: fixed(true) },
@@ -132,7 +166,7 @@ const RULES: Record<string, Rule> = {
   'luma-ray-2-720p': { durations: [5, 9], defaultDuration: 5, resolution: fixed('720p'), audio: fixed(false) },
   // ltxVideo sends no length or resolution; priced per clip.
   'ltx-video': { durations: null, defaultDuration: 5, fixedSeconds: 5, resolution: fixed(null), audio: fixed(false) },
-  'pixverse-v6': { durations: [5, 8], defaultDuration: 5, resolution: res('resolution', '720p'), audio: audioOpt(true) },
+  'pixverse-v6': { durations: [5, 8], defaultDuration: 5, resolution: pixverseResolution, audio: fixed(false) },
 
   // ── ComfyUI only ──
   // _b_fabric_1_0 (comfy_api_nodes/video_models.py:465-477) ignores the duration
@@ -158,6 +192,8 @@ export function maxVideoSeconds(modelId: string): number | null {
 /**
  * The seconds, resolution and sound the request for `modelId` carries, given
  * the node's raw `duration` widget and `model_options` (JSON text or object).
+ * `firstFrame` is the node's `image` input (a link reference or a URL; empty =
+ * none): it decides whether Seedance 2.0's reference videos are sent.
  * `aspectRatio` is taken for the signature's sake: no builder's length,
  * resolution or sound depends on it. Null for an id with no rules.
  */
@@ -166,10 +202,12 @@ export function effectiveVideoSettings(
   duration: unknown,
   _aspectRatio: unknown,
   modelOptions: unknown,
+  firstFrame?: unknown,
 ): VideoSettings | null {
   if (!hasVideoSettings(modelId)) return null
   const r = RULES[modelId]!
   const adv = readModelOptions(modelOptions)
   const seconds = r.durations ? durOr(r.durations, durationInt(duration, r.defaultDuration)) : r.fixedSeconds!
-  return { seconds, resolution: r.resolution(adv), audio: r.audio(adv) }
+  const inputVideoSeconds = r.inputVideo ? r.inputVideo(adv, pyTruthy(firstFrame)) : 0
+  return { seconds, resolution: r.resolution(adv), audio: r.audio(adv), inputVideoSeconds }
 }

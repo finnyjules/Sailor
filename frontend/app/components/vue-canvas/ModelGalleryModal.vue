@@ -20,6 +20,8 @@ import {
   type ImageModel, type ImageModelTag, type ImageModelAdvancedField,
 } from '~/data/image-models'
 import { BRAND_COLORS, getBrandIcon } from '~/data/brand-icons'
+import { hostedModeEnabled } from '~/lib/hostedMode'
+import { imageRateLabel } from '#shared/pricing/imageRates'
 
 // -- Replicate cover image fetch + cache -----------------------------------
 //
@@ -217,11 +219,13 @@ function brandHue(brand: string): string {
   return (BRAND_COLORS as Record<string, string>)[brand] ?? '#888'
 }
 
-function priceLabel(p: number | null): string {
-  if (p == null) return '—'
-  if (p < 0.01) return `<$0.01`
-  if (p < 1) return `$${p.toFixed(p < 0.1 ? 3 : 2).replace(/0$/, '')}`
-  return `$${p.toFixed(2)}`
+// Price text from the rate card: one picture at the model's default settings,
+// and "up to" the dearest size or quality when that costs more (credits in
+// hosted mode). The default figure is the catalogue's pricePerImage (a test
+// pins the two together).
+const hostedPrices = hostedModeEnabled(useRuntimeConfig().public)
+function priceLabel(m: ImageModel): string | null {
+  return imageRateLabel(m.id, m.defaultAspectRatio, { hosted: hostedPrices })
 }
 
 // -- Commit ------------------------------------------------------------------
@@ -307,9 +311,9 @@ const focusedModel = computed<ImageModel | null>(() =>
         />
         <!-- Price badge -->
         <span
-          v-if="(item as ImageModel).pricePerImage != null"
+          v-if="priceLabel(item as ImageModel)"
           class="absolute top-2 right-2 text-[9px] tabular-nums leading-none px-1.5 py-1 rounded bg-black/55 text-amber-200 border border-amber-400/20 backdrop-blur-sm"
-        >{{ priceLabel((item as ImageModel).pricePerImage) }}</span>
+        >{{ priceLabel(item as ImageModel) }}</span>
       </div>
       <!-- Body -->
       <div class="px-3 pt-2.5 pb-3 flex flex-col gap-1.5">
@@ -401,10 +405,10 @@ const focusedModel = computed<ImageModel | null>(() =>
         <!-- Price + tag chips -->
         <div class="flex flex-wrap items-center gap-1.5">
           <span
-            v-if="(item as ImageModel).pricePerImage != null"
+            v-if="priceLabel(item as ImageModel)"
             class="inline-flex items-center gap-1 text-[10px] tabular-nums px-2 py-1 rounded bg-amber-500/10 text-amber-200 border border-amber-400/15"
           >
-            {{ priceLabel((item as ImageModel).pricePerImage) }} per image
+            {{ priceLabel(item as ImageModel) }} per image
           </span>
           <span
             v-for="t in (item as ImageModel).tags"

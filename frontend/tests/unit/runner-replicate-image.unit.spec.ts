@@ -198,8 +198,17 @@ describe('the Replicate image list', () => {
   })
 
   it('keeps out the unpriced models: hosted would refuse them', () => {
-    for (const id of ['reve-create', 'seedream-5-pro', 'krea-2-large', 'krea-2-medium']) {
+    for (const id of ['reve-create', 'seedream-5-pro']) {
       expect(IMAGE_MODELS_BY_ID[id]!.pricePerImage, id).toBeNull()
+      expect((RUNNER_REPLICATE_IMAGE_MODEL_IDS as readonly string[]).includes(id), id).toBe(false)
+      expect(isRunnerEligible(one(img(id)), ALL), id).toBe(false)
+    }
+  })
+
+  it('keeps out Krea 2: priced (Task P3), but fal-first and waiting for its own family', () => {
+    for (const id of ['krea-2-large', 'krea-2-medium']) {
+      expect(IMAGE_MODELS_BY_ID[id]!.pricePerImage, id).toBeGreaterThan(0)
+      expect(byId.get(id)!.primary, id).toBe('fal')
       expect((RUNNER_REPLICATE_IMAGE_MODEL_IDS as readonly string[]).includes(id), id).toBe(false)
       expect(isRunnerEligible(one(img(id)), ALL), id).toBe(false)
     }

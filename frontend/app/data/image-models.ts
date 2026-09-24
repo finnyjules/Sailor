@@ -151,7 +151,7 @@ export const IMAGE_MODELS: ImageModel[] = [
       'BFL\'s workhorse Pro tier — strong photoreal output, good prompt adherence, '
       + 'sane defaults. Use it when you don\'t know what else to pick.',
     tags: ['flagship', 'photoreal'],
-    pricePerImage: 0.04,
+    pricePerImage: 0.04194304,
     aspectRatios: FLUX_PRO_AR,
     defaultAspectRatio: '1:1',
     advanced: [
@@ -223,7 +223,7 @@ export const IMAGE_MODELS: ImageModel[] = [
     replicateSlug: 'black-forest-labs/flux-schnell',
     pitch: '4-step Flux for rapid iteration — 333 images per dollar.',
     tags: ['fast', 'cheap', 'open-source'],
-    pricePerImage: 0.003,
+    pricePerImage: 0.00314573,
     aspectRatios: FLUX_DEV_AR,
     defaultAspectRatio: '1:1',
     advanced: [
@@ -240,7 +240,7 @@ export const IMAGE_MODELS: ImageModel[] = [
     replicateSlug: 'black-forest-labs/flux-2-max',
     pitch: 'BFL\'s highest-fidelity model — product photography and character consistency.',
     tags: ['flagship', 'photoreal'],
-    pricePerImage: 0.07,
+    pricePerImage: 0.07145728,
     aspectRatios: FLUX_2_AR,
     defaultAspectRatio: '1:1',
     advanced: [
@@ -257,7 +257,7 @@ export const IMAGE_MODELS: ImageModel[] = [
     replicateSlug: 'black-forest-labs/flux-2-pro',
     pitch: 'Most of Flux 2 Max\'s quality at half the price — supports JSON prompts.',
     tags: ['flagship'],
-    pricePerImage: 0.015,
+    pricePerImage: 0.03072864,
     aspectRatios: FLUX_2_AR,
     defaultAspectRatio: '1:1',
     advanced: [
@@ -274,7 +274,7 @@ export const IMAGE_MODELS: ImageModel[] = [
     replicateSlug: 'black-forest-labs/flux-2-flex',
     pitch: 'Tunable Flux 2 — exposes steps and guidance to trade speed for fidelity.',
     tags: ['flagship', 'typography'],
-    pricePerImage: 0.06,
+    pricePerImage: 0.06291456,
     aspectRatios: FLUX_2_AR,
     defaultAspectRatio: '1:1',
     advanced: [
@@ -294,7 +294,7 @@ export const IMAGE_MODELS: ImageModel[] = [
     replicateSlug: 'black-forest-labs/flux-2-klein-4b',
     pitch: 'Sub-second 4B-parameter Flux 2 — cheapest, fastest in the family.',
     tags: ['fast', 'cheap'],
-    pricePerImage: 0.001,
+    pricePerImage: 0.00104858,
     aspectRatios: ['1:1', '16:9', '9:16', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '21:9', '9:21'],
     defaultAspectRatio: '1:1',
     advanced: [
@@ -311,7 +311,7 @@ export const IMAGE_MODELS: ImageModel[] = [
     replicateSlug: 'black-forest-labs/flux-2-dev',
     pitch: 'Open-weight Flux 2 — tunable steps and guidance, self-hostable lineage.',
     tags: ['flagship', 'typography'],
-    pricePerImage: 0.03,
+    pricePerImage: 0.01258291,
     aspectRatios: FLUX_2_AR,
     defaultAspectRatio: '1:1',
     advanced: [
@@ -332,7 +332,7 @@ export const IMAGE_MODELS: ImageModel[] = [
     replicateSlug: 'krea/krea-2-large',
     pitch: 'Krea\'s foundation model — photoreal, raw aesthetics, strong style transfer.',
     tags: ['flagship', 'photoreal'],
-    pricePerImage: null,
+    pricePerImage: 0.06,
     aspectRatios: KREA_AR,
     defaultAspectRatio: '1:1',
     advanced: [
@@ -348,7 +348,7 @@ export const IMAGE_MODELS: ImageModel[] = [
     replicateSlug: 'krea/krea-2-medium',
     pitch: 'Smaller, faster Krea 2 — strong for illustration, anime, and painterly styles.',
     tags: ['fast'],
-    pricePerImage: null,
+    pricePerImage: 0.03,
     aspectRatios: KREA_AR,
     defaultAspectRatio: '1:1',
     advanced: [
@@ -384,7 +384,7 @@ export const IMAGE_MODELS: ImageModel[] = [
     replicateSlug: 'google/nano-banana-2',
     pitch: 'Multilingual text rendering plus 14-image fusion and search grounding.',
     tags: ['typography', 'multi-image'],
-    pricePerImage: 0.067,
+    pricePerImage: 0.08,
     aspectRatios: ['1:1', '1:4', '1:8', '2:3', '3:2', '3:4', '4:1', '4:3', '4:5', '5:4', '8:1', '9:16', '16:9', '21:9'],
     defaultAspectRatio: '1:1',
     advanced: [
@@ -767,7 +767,7 @@ export const IMAGE_MODELS: ImageModel[] = [
     replicateSlug: 'openai/gpt-image-2',
     pitch: 'OpenAI\'s newest — best-in-class sharp text and complex instructions.',
     tags: ['flagship', 'typography'],
-    pricePerImage: 0.047,
+    pricePerImage: 0.128,
     aspectRatios: OPENAI_AR,
     defaultAspectRatio: '1:1',
     advanced: [
@@ -787,7 +787,7 @@ export const IMAGE_MODELS: ImageModel[] = [
     replicateSlug: 'openai/gpt-image-1.5',
     pitch: 'Strong instruction following for complex multi-step prompts.',
     tags: ['typography'],
-    pricePerImage: 0.05,
+    pricePerImage: 0.136,
     aspectRatios: OPENAI_AR,
     defaultAspectRatio: '1:1',
     advanced: [

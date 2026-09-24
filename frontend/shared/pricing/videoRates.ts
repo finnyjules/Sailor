@@ -23,7 +23,7 @@
  * vitest all load it).
  */
 import { creditsForUsd } from './markup'
-import { effectiveVideoSettings, type VideoSettings } from './videoSettings'
+import { SEEDANCE_MAX_INPUT_VIDEO_SECONDS, effectiveVideoSettings, type VideoSettings } from './videoSettings'
 
 export type PerSecondPrice = number | { audio: number, silent: number }
 
@@ -36,6 +36,12 @@ interface RateMeta {
   read: string
   confidence: 'verified' | 'estimate'
   note?: string
+  /**
+   * Where the service also bills reference-video input seconds (Seedance 2.0
+   * reference-to-video): the factor on the per-second rate for input + output
+   * seconds together.
+   */
+  inputVideoFactor?: number
 }
 
 export type VideoRate =
@@ -70,11 +76,19 @@ export const VIDEO_RATES: Record<string, VideoRate> = {
   },
   // "$0.3034/second" at 720p and "$0.682/second" at 1080p; otherwise $0.014 per
   // 1000 tokens (480p–1080p) or $0.008 (4k), tokens = h × w × seconds × 24 / 1024.
-  // 480p from the formula at its largest frame (864×496): $0.1406/s. 4k from
-  // the formula at 3840×2160: $1.5552/s. Sound doesn't change the price.
+  // 480p from the formula at its largest frame (864×496): $0.1406/s. 4k: fal
+  // gives no frame size per aspect ratio, and 3840×2160 (16:9) is $1.5552/s, but
+  // a 21:9 frame at 2160 lines is 5040×2160, $2.0412/s — priced at that larger
+  // frame so a wide 4k clip is never under-priced. Sound doesn't change the price.
+  // Reference-to-video (reference videos, no first frame): "the number of tokens
+  // is given by (height × width × (input video duration + output video duration)
+  // × 24) / 1024. If video inputs are provided the price is multiplied by 0.6"
+  // (fal('bytedance/seedance-2.0/reference-to-video'), read 2026-09-24).
   'seedance-2.0': {
     unit: 'per_second', service: 'fal', source: fal('bytedance/seedance-2.0/text-to-video'), read: READ, confidence: 'verified',
-    byResolution: { '480p': 0.1406, '720p': 0.3034, '1080p': 0.682, '4k': 1.5552 },
+    byResolution: { '480p': 0.1406, '720p': 0.3034, '1080p': 0.682, '4k': 2.0412 },
+    inputVideoFactor: 0.6,
+    note: '4k at the 21:9 frame (5040×2160); reference videos billed on input + output seconds × 0.6',
   },
   // "$0.05 per second at 480p, $0.06 per second at 768p, $0.13 per second at 2K and $0.16 per second at 4K."
   'hailuo-h3': {
@@ -141,14 +155,21 @@ export const VIDEO_RATES: Record<string, VideoRate> = {
     unit: 'per_second', service: 'replicate', source: rep('luma/ray-2-720p'), read: READ, confidence: 'verified',
     byResolution: { '*': 0.18 },
   },
-  // Billed by compute time ($0.000975/s of GPU). The page says "approximately
-  // $0.081 to run … but this varies depending on your inputs."
+  // Billed by GPU time: "This model runs on Nvidia L40S GPU hardware", and
+  // Replicate's L40S rate is $0.000975 per second (the page's billing line).
+  // "Predictions typically complete within 84 seconds" at the schema default of
+  // 30 steps; the ceiling scales that to the 50-step maximum: 84 × 50/30 = 140 s
+  // × $0.000975 = $0.1365 a clip. (The builder sends `num_inference_steps`, which
+  // the schema doesn't have, so the service runs its 30-step default today; the
+  // ceiling still holds if the builder is fixed to send `steps` up to 50.)
   'ltx-video': {
-    unit: 'per_clip', service: 'replicate', source: rep('lightricks/ltx-video'), read: READ, confidence: 'estimate',
-    byResolution: { '*': { '*': 0.081 } },
-    note: 'hardware-billed; the page\'s approximate run cost',
+    unit: 'per_clip', service: 'replicate', source: rep('lightricks/ltx-video'), read: READ, confidence: 'verified',
+    byResolution: { '*': { '*': 0.1365 } },
+    note: 'ceiling: L40S $0.000975/s × 140 s (typical 84 s at 30 steps, scaled to 50 steps)',
   },
-  // "Billing is per output second, tiered by resolution and audio."
+  // "Billing is per output second, tiered by resolution and audio." The service
+  // renders `quality` (default 540p) and `generate_audio_switch` (default off),
+  // which the builder doesn't send; videoSettings prices max(sent, 540p), silent.
   'pixverse-v6': {
     unit: 'per_second', service: 'replicate', source: rep('pixverse/pixverse-v6'), read: READ, confidence: 'verified',
     byResolution: {
@@ -199,7 +220,11 @@ export function videoUsd(modelId: string, s: VideoSettings): number | null {
   const key = s.resolution ?? '*'
   if (rate.unit === 'per_second') {
     const p = own(rate.byResolution, key) ?? own(rate.byResolution, '*')
-    return tidy((p === undefined ? topPerSecond(rate) : perSecond(p, s.audio)) * s.seconds)
+    const perSec = p === undefined ? topPerSecond(rate) : perSecond(p, s.audio)
+    if (s.inputVideoSeconds > 0 && rate.inputVideoFactor) {
+      return tidy(perSec * rate.inputVideoFactor * (s.seconds + s.inputVideoSeconds))
+    }
+    return tidy(perSec * s.seconds)
   }
   const row = own(rate.byResolution, key) ?? own(rate.byResolution, '*')
   const clip = row && (own(row, String(s.seconds)) ?? own(row, '*'))
@@ -221,7 +246,10 @@ export function videoMaxUsd(modelId: string, seconds: number): number | null {
     const clip = flat && own(flat, '*')
     if (clip !== undefined && Object.keys(rate.byResolution).length === 1) return tidy(clip)
   }
-  return tidy(topPerSecond(rate) * seconds)
+  const top = topPerSecond(rate)
+  // Linked options may carry reference videos: the dearer of the two billings.
+  const withRefs = rate.inputVideoFactor ? top * rate.inputVideoFactor * (seconds + SEEDANCE_MAX_INPUT_VIDEO_SECONDS) : 0
+  return tidy(Math.max(top * seconds, withRefs))
 }
 
 function dollars(usd: number): string {

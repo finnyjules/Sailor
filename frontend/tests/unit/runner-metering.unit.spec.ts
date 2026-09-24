@@ -8,13 +8,14 @@ const vid = (model: string) => ({ class_type: 'GenerateVideoNode', inputs: { mod
 describe('prices', () => {
   it('prices generators from the existing price table and nothing else', () => {
     expect(nodeCredits(img('flux-schnell'))).toBe(1)
-    expect(nodeCredits(img('nano-banana-2'))).toBe(14)
-    expect(nodeCredits(img('seedream-5-lite'))).toBe(8)
+    // Task P3: Nano Banana 2 at fal's $0.08 (1K); Seedream 5 Lite's $0.035 is 7 credits (float noise fixed).
+    expect(nodeCredits(img('nano-banana-2'))).toBe(16)
+    expect(nodeCredits(img('seedream-5-lite'))).toBe(7)
     expect(nodeCredits(vid('hailuo-h3'))).toBe(45)
     expect(nodeCredits(vid('Veo 3'))).toBe(480)
     expect(nodeCredits({ class_type: 'Image', inputs: {} })).toBe(0)
     expect(nodeCredits({ class_type: 'ComfyGateNode', inputs: {} })).toBe(0)
-    expect(() => nodeCredits(img('krea-2-large'))).toThrow(/no listed price/)
+    expect(() => nodeCredits(img('reve-create'))).toThrow(/no listed price/)
   })
   it('adds the flat render credit only when asked', () => {
     const p = { '1': img('flux-schnell'), '2': { class_type: 'ComfyGateNode', inputs: {} }, '3': vid('hailuo-h3'), '4': { class_type: 'Video', inputs: {} } }

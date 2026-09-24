@@ -1,0 +1,246 @@
+/**
+ * The settings an image model's request actually carries that its service
+ * bills by — how many pictures, the size or quality tier, the output
+ * megapixels, and Nano Banana's paid web search — read from a node's
+ * widgets exactly as that model's request builder reads them.
+ *
+ * The price multiplies a rate by these (imageRates.ts), so it must never
+ * read a setting the builder would send differently ("priced on what is
+ * sent"). The builders are server/runner/generators/image.ts (fal and
+ * Replicate) and, for the models the runner does not build (the Recraft SVG
+ * models, Krea 2), comfy_api_nodes/image_models.py. The settings-parity test
+ * (tests/unit/image-pricing.unit.spec.ts) runs every runner builder over
+ * every setting and checks it sends what this module says.
+ *
+ * Pure: no server imports, so the badge, the run estimate and the charge all
+ * load it. Relative imports only.
+ */
+import { pyIntOf, pyTruthy } from '../runner/pyText'
+import { readModelOptions } from './videoSettings'
+
+export interface ImageSettings {
+  /** Pictures the request asks for (every service here bills per output picture). */
+  images: number
+  /** The priced tier the request carries: a resolution ('1K', '2K'…) or a quality ('high', 'auto'), else null. */
+  tier: string | null
+  /** Output megapixels of one picture (1 MP = 1,000,000 pixels), for the per-megapixel models; else null. */
+  megapixels: number | null
+  /** Nano Banana 2's web search (a flat extra per request on fal). */
+  webSearch: boolean
+}
+
+type Adv = Record<string, unknown>
+
+const has = (adv: Adv, key: string) => Object.prototype.hasOwnProperty.call(adv, key)
+
+// Ports of the readers in server/runner/generators/opts.ts (Python's _opt_str,
+// _opt_int, _opt_bool). Kept here because shared code must not import the
+// server; the settings-parity test holds the two to the same answers.
+function optStr(adv: Adv, key: string, def: string): string {
+  if (!has(adv, key)) return def
+  const v = adv[key]
+  if (v === null || v === undefined) return def
+  if (typeof v === 'boolean') return v ? 'True' : 'False'
+  return String(v)
+}
+function optInt(adv: Adv, key: string, def: number): number {
+  if (!has(adv, key)) return def
+  const v = adv[key]
+  if (typeof v === 'boolean') return v ? 1 : 0
+  if (typeof v === 'number') return Number.isFinite(v) ? Math.trunc(v) : def
+  if (typeof v !== 'string') return def
+  return pyIntOf(v) ?? def
+}
+function optBool(adv: Adv, key: string, def: boolean): boolean {
+  if (!has(adv, key)) return def
+  const v = adv[key]
+  if (typeof v === 'boolean') return v
+  if (typeof v === 'string') return ['true', '1', 'yes', 'on'].includes(v.toLowerCase())
+  return pyTruthy(v)
+}
+const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n))
+
+/**
+ * fal's named sizes, in pixels (fal's ImageSize enum), and the aspect ratio
+ * → name map the fal builders use (image.ts FAL_IMAGE_SIZE_BY_AR; anything
+ * else is square_hd).
+ */
+const FAL_SIZE_PIXELS: Record<string, number> = {
+  square_hd: 1024 * 1024,
+  landscape_4_3: 1024 * 768,
+  portrait_4_3: 768 * 1024,
+  landscape_16_9: 1024 * 576,
+  portrait_16_9: 576 * 1024,
+}
+const FAL_IMAGE_SIZE_BY_AR: Record<string, string> = {
+  '1:1': 'square_hd',
+  '4:3': 'landscape_4_3',
+  '3:4': 'portrait_4_3',
+  '16:9': 'landscape_16_9',
+  '9:16': 'portrait_16_9',
+  '3:2': 'landscape_4_3',
+  '5:4': 'landscape_4_3',
+  '16:10': 'landscape_16_9',
+  '21:9': 'landscape_16_9',
+  '2:1': 'landscape_16_9',
+  '2:3': 'portrait_4_3',
+  '4:5': 'portrait_4_3',
+  '10:16': 'portrait_16_9',
+  '9:21': 'portrait_16_9',
+  '1:2': 'portrait_16_9',
+}
+/** The fal size name the builder sends for this aspect ratio. */
+export function falSizeFor(aspectRatio: string): string {
+  return Object.prototype.hasOwnProperty.call(FAL_IMAGE_SIZE_BY_AR, aspectRatio) ? FAL_IMAGE_SIZE_BY_AR[aspectRatio]! : 'square_hd'
+}
+/** Megapixels of a fal named size. */
+export function falSizeMegapixels(name: string): number {
+  return (FAL_SIZE_PIXELS[name] ?? FAL_SIZE_PIXELS.square_hd!) / 1e6
+}
+
+/**
+ * Black Forest Labs' megapixel labels ("1 MP", "4"): one label MP is 1024 ×
+ * 1024 pixels (a 1:1 "1 MP" picture is 1024 × 1024), capped at 2048 × 2048,
+ * the largest picture the service makes. Replicate bills output megapixels,
+ * so a label is priced at the most pixels it can come back with. A label the
+ * builder passes through but the service does not list is priced at the cap.
+ */
+const BFL_MP = 1024 * 1024 / 1e6
+const BFL_CAP_MP = 2048 * 2048 / 1e6
+function bflMegapixels(label: string, allowed: readonly string[]): number {
+  const n = Number.parseFloat(label)
+  if (!allowed.includes(label) || !(n > 0)) return BFL_CAP_MP
+  return Math.min(n * BFL_MP, BFL_CAP_MP)
+}
+export const FLUX_2_RESOLUTIONS = ['0.5 MP', '1 MP', '2 MP', '4 MP'] as const
+export const FLUX_KLEIN_MEGAPIXELS = ['0.25', '0.5', '1', '2', '4'] as const
+
+type Rule = (adv: Adv, aspectRatio: string) => ImageSettings
+
+const one = (tier: string | null = null): ImageSettings => ({ images: 1, tier, megapixels: null, webSearch: false })
+const flat: Rule = () => one()
+
+/**
+ * One rule per priced image model id, mirroring its builder (the name in each
+ * comment is the builder function in image.ts, or the Python builder).
+ */
+const RULES: Record<string, Rule> = {
+  // ── fal (RUNNER_IMAGE_MODELS) ──
+  // fluxProV11: image_size from the ratio, one picture.
+  'flux-1.1-pro': (_adv, ar) => ({ ...one(), megapixels: falSizeMegapixels(falSizeFor(ar)) }),
+  // fluxSchnell: image_size from the ratio, num_images = num_outputs clamped 1–4.
+  'flux-schnell': (adv, ar) => ({
+    ...one(), images: clamp(optInt(adv, 'num_outputs', 1), 1, 4), megapixels: falSizeMegapixels(falSizeFor(ar)),
+  }),
+  // nanoBananaPro: resolution 1K/2K/4K, anything else 2K. No web search sent.
+  'nano-banana-pro': (adv) => {
+    const r = optStr(adv, 'resolution', '2K')
+    return one(['1K', '2K', '4K'].includes(r) ? r : '2K')
+  },
+  // nanoBanana2: resolution 0.5K/1K/2K/4K, anything else 1K; enable_web_search
+  // from google_search. (The edit endpoint, used when moodboard pictures ride
+  // along, gets no web search; the price can't see the pictures, so it counts
+  // the search whenever it is switched on: never under.)
+  'nano-banana-2': (adv) => {
+    const r = optStr(adv, 'resolution', '1K')
+    return { ...one(['0.5K', '1K', '2K', '4K'].includes(r) ? r : '1K'), webSearch: optBool(adv, 'google_search', false) }
+  },
+  // ideogramV3: the speed is the model id; one picture.
+  'ideogram-v3-quality': flat,
+  'ideogram-v3-balanced': flat,
+  'ideogram-v3-turbo': flat,
+  // seedream5Lite: max_images 1, or 1–6 when sequential_image_generation is "auto".
+  'seedream-5-lite': adv => ({
+    ...one(),
+    images: optStr(adv, 'sequential_image_generation', 'disabled') === 'auto' ? clamp(optInt(adv, 'max_images', 1), 1, 6) : 1,
+  }),
+  'seedream-4': flat,
+
+  // ── Replicate (RUNNER_REPLICATE_IMAGE_MODELS) ──
+  'flux-1.1-pro-ultra': flat,
+  'flux-pro': flat,
+  // rFluxDev: num_outputs clamped 1–4 (billed per output picture; megapixels don't change it).
+  'flux-dev': adv => ({ ...one(), images: clamp(optInt(adv, 'num_outputs', 1), 1, 4) }),
+  // rFlux2Basic / rFlux2Tunable: resolution label, default "1 MP".
+  'flux-2-max': adv => ({ ...one(), megapixels: bflMegapixels(optStr(adv, 'resolution', '1 MP'), FLUX_2_RESOLUTIONS) }),
+  'flux-2-pro': adv => ({ ...one(), megapixels: bflMegapixels(optStr(adv, 'resolution', '1 MP'), FLUX_2_RESOLUTIONS) }),
+  'flux-2-flex': adv => ({ ...one(), megapixels: bflMegapixels(optStr(adv, 'resolution', '1 MP'), FLUX_2_RESOLUTIONS) }),
+  'flux-2-dev': adv => ({ ...one(), megapixels: bflMegapixels(optStr(adv, 'resolution', '1 MP'), FLUX_2_RESOLUTIONS) }),
+  // rFluxKlein: output_megapixels label, default "1".
+  'flux-2-klein-4b': adv => ({ ...one(), megapixels: bflMegapixels(optStr(adv, 'output_megapixels', '1'), FLUX_KLEIN_MEGAPIXELS) }),
+  'imagen-4-ultra': flat,
+  'imagen-4': flat,
+  'imagen-4-fast': flat,
+  'imagen-3': flat,
+  'imagen-3-fast': flat,
+  'ideogram-v2': flat,
+  'ideogram-v2a-turbo': flat,
+  // rSeedream45 sends size 2K/4K; Replicate charges one price for both.
+  'seedream-4.5': flat,
+  'seedream-3': flat,
+  'recraft-v4-pro': flat,
+  'recraft-v4': flat,
+  'recraft-v3': flat,
+  'stable-diffusion-3.5-large': flat,
+  'stable-diffusion-3.5-large-turbo': flat,
+  'stable-diffusion-3.5-medium': flat,
+  // rGptImage2 / rGptImage15: quality as given, default "auto"; one picture.
+  'gpt-image-2': adv => one(optStr(adv, 'quality', 'auto')),
+  'gpt-image-1.5': adv => one(optStr(adv, 'quality', 'auto')),
+  'qwen-image': flat,
+  'hunyuan-image-3': flat,
+  'grok-imagine': flat,
+  'flux-fast': flat,
+  'p-image': flat,
+  // rWan22Pruna sends megapixels 1/2; Replicate charges one price for both.
+  'wan-2.2-image-pruna': flat,
+  'bria-fibo': flat,
+  'bria-image-3.2': flat,
+  'photon': flat,
+  'photon-flash': flat,
+  'minimax-image-01': flat,
+
+  // ── ComfyUI only (comfy_api_nodes/image_models.py) ──
+  // _b_recraft_v4 / _b_recraft_v3_svg: prompt, ratio (and style); one picture.
+  'recraft-v4-pro-svg': flat,
+  'recraft-v4-svg': flat,
+  'recraft-v3-svg': flat,
+  // _fal_krea2: prompt, ratio, creativity, seed — no style pictures, so the text-to-image price.
+  'krea-2-large': flat,
+  'krea-2-medium': flat,
+}
+
+/** True when the id has settings rules (every priced image model does; a test pins it). */
+export function hasImageSettings(modelId: string): boolean {
+  return has(RULES, modelId)
+}
+
+/**
+ * What the request for `modelId` carries that its price depends on, given
+ * the node's `aspect_ratio` widget and `model_options` (JSON text or object),
+ * read as the builder reads them (an empty ratio is 1:1, as the executor
+ * sends it). Null for an id with no rules.
+ */
+export function effectiveImageSettings(modelId: string, aspectRatio: unknown, modelOptions: unknown): ImageSettings | null {
+  if (!hasImageSettings(modelId)) return null
+  const ar = (typeof aspectRatio === 'string' && aspectRatio) || '1:1'
+  return RULES[modelId]!(readModelOptions(modelOptions), ar)
+}
+
+/** The most pictures a builder can ask for in one request (flux-schnell / flux-dev: num_outputs up to 4; Seedream 5 Lite: max_images up to 6). */
+const MAX_IMAGES: Record<string, number> = { 'flux-schnell': 4, 'flux-dev': 4, 'seedream-5-lite': 6 }
+export function maxImageCount(modelId: string): number {
+  return has(MAX_IMAGES, modelId) ? MAX_IMAGES[modelId]! : 1
+}
+
+/**
+ * The ratio whose picture is the largest for every model whose size follows
+ * the ratio (fal's square_hd, 1024 × 1024). A linked ratio, unknown until the
+ * run, is priced at it. A test pins that no ratio prices higher.
+ */
+export const LARGEST_RATIO = '1:1'
+
+/** The largest picture the fal per-megapixel models can be asked for (any ratio). */
+export const FAL_MAX_MEGAPIXELS = Math.max(...Object.values(FAL_SIZE_PIXELS)) / 1e6
+/** The largest picture a BFL megapixel label can come back as. */
+export const BFL_MAX_MEGAPIXELS = BFL_CAP_MP

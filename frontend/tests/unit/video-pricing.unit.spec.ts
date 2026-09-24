@@ -18,7 +18,7 @@ import { RUNNER_REPLICATE_VIDEO_MODELS, RUNNER_VIDEO_MODELS } from '~~/server/ru
 import { asInt, parseJsonObject } from '~~/server/runner/generators/opts'
 import { RUNNER_REPLICATE_VIDEO_MODEL_IDS, RUNNER_VIDEO_MODEL_IDS } from '#shared/runner/eligibility'
 import { MODEL_COSTS, UnpricedGraphError, priceGraph } from '~~/server/utils/priceBook'
-import { PACKS, PACK_VIDEO_CLIP } from '~~/server/utils/packs'
+import { PACKS, PACK_VIDEO_CLIP, packClipCredits } from '~~/server/utils/packs'
 import { creditsForUsd } from '#shared/pricing/markup'
 import { nodeCredits, priceNode, providerUsd } from '#shared/pricing/nodePrice'
 import { VIDEO_RATES, videoRate, videoRateLabel, videoUsd } from '#shared/pricing/videoRates'
@@ -61,18 +61,12 @@ describe('the video rate card', () => {
     expect(VIDEO_RATES['fabric-1.0']!.service).toBe('replicate')
   })
 
-  // A model a family switch can turn on must have a verified price. The one
-  // exception is reported to the controller: LTX-Video is billed by GPU time,
-  // so Replicate publishes no per-clip figure (it is on the hide list).
-  const ESTIMATE_OK: Record<string, string> = {
-    'ltx-video': 'Replicate bills it by compute time; the page gives only an approximate run cost',
-  }
-  it('every runner video model is priced verified, except the listed ones', () => {
+  // A model a family switch can turn on must have a verified price, with no
+  // exceptions (LTX-Video is priced at a GPU-time ceiling, fix round 1).
+  it('every runner video model is priced verified', () => {
     for (const id of [...RUNNER_VIDEO_MODEL_IDS, ...RUNNER_REPLICATE_VIDEO_MODEL_IDS]) {
-      if (id in ESTIMATE_OK) continue
       expect(videoRate(id)!.confidence, id).toBe('verified')
     }
-    for (const id of Object.keys(ESTIMATE_OK)) expect(videoRate(id)!.confidence, id).toBe('estimate')
   })
 
   it('every catalogue model prices above zero at its defaults, on both video classes', () => {
@@ -108,16 +102,31 @@ const SERVICE_DEFAULT: Record<string, { seconds?: number, resolution?: string | 
   'seedance-2.0': { audio: true },
 }
 
+const PIXVERSE_TIERS = ['360p', '540p', '720p', '1080p']
+
 /** The seconds, resolution and sound a built payload carries (or the service's default for one it doesn't). */
 function sentSettings(id: string, payload: Record<string, unknown>) {
   const def = SERVICE_DEFAULT[id] ?? {}
   const d = payload.duration
   const seconds = d === undefined ? def.seconds : (typeof d === 'number' ? d : Number.parseInt(String(d), 10))
   const r = payload.resolution
-  const resolution = r === undefined ? def.resolution : String(r).toLowerCase()
+  let resolution = r === undefined ? def.resolution : String(r).toLowerCase()
   const a = payload.generate_audio
-  const audio = a === undefined ? def.audio : a
-  return { seconds, resolution, audio }
+  let audio = a === undefined ? def.audio : a
+  if (id === 'pixverse-v6') {
+    // pixverse/pixverse-v6 renders `quality` (default 540p) and
+    // `generate_audio_switch` (default false); `resolution` and `generate_audio`
+    // are not in its schema. Priced at the higher of what is sent and what renders.
+    const rendered = String(payload.quality ?? '540p').toLowerCase()
+    const sent = resolution ?? rendered
+    resolution = PIXVERSE_TIERS.indexOf(sent) >= 0 && PIXVERSE_TIERS.indexOf(sent) < PIXVERSE_TIERS.indexOf(rendered) ? rendered : sent
+    audio = payload.generate_audio_switch === undefined ? false : payload.generate_audio_switch
+  }
+  // A reference video sent (fal reference-to-video) is billed on its seconds
+  // too: fal's maximum total input, 15 s, until the run can measure it.
+  const refs = payload.video_urls
+  const inputVideoSeconds = Array.isArray(refs) && refs.length ? 15 : 0
+  return { seconds, resolution, audio, inputVideoSeconds }
 }
 
 describe('settings parity: the price reads what the builder sends', () => {
@@ -140,12 +149,18 @@ describe('settings parity: the price reads what the builder sends', () => {
       const resolutions: (string | undefined)[] = [...new Set([...(cat.resolutions ?? []), '480p', '720p', '768p', '1080p', '2k', '4K', undefined])]
       const sounds: unknown[] = [true, false, 'false', 0, undefined]
       const images: (string | null)[] = takesNoImage ? [null, 'https://x/first.png'] : ['https://x/first.png']
+      // Reference videos (Shot Director writes video_urls), alone, empty, and beside an image_url first frame.
+      const refVariants: Record<string, unknown>[] = [
+        {}, { video_urls: ['https://x/ref.mp4'] }, { video_urls: [] },
+        { video_urls: ['https://x/ref.mp4'], image_url: 'https://x/first.png' },
+      ]
       let cases = 0
       const drift: string[] = []
       for (const dur of durations) {
         for (const res of resolutions) {
           for (const snd of sounds) {
-            const adv: Record<string, unknown> = {}
+           for (const refs of refVariants) {
+            const adv: Record<string, unknown> = { ...refs }
             if (res !== undefined) adv.resolution = res
             if (snd !== undefined) adv.generate_audio = snd
             const modelOptions = JSON.stringify(adv)
@@ -156,12 +171,13 @@ describe('settings parity: the price reads what the builder sends', () => {
                 image, adv: parseJsonObject(modelOptions),
               })
               const want = sentSettings(id, payload)
-              const got = effectiveVideoSettings(id, dur, '16:9', modelOptions)
+              const got = effectiveVideoSettings(id, dur, '16:9', modelOptions, image)
               cases++
               if (JSON.stringify(got) !== JSON.stringify(want)) {
                 drift.push(`${JSON.stringify({ dur, adv, image: !!image })}: sent ${JSON.stringify(want)}, priced ${JSON.stringify(got)}`)
               }
             }
+           }
           }
         }
       }
@@ -182,7 +198,7 @@ describe('settings parity: the price reads what the builder sends', () => {
     const node = readFileSync(`${REPO}comfy_api_nodes/nodes_replicate.py`, 'utf8')
     expect(node).toContain('audio_data_url = _audio_dict_to_wav_data_url(audio, max_seconds=60) if audio is not None else None')
     for (const dur of ['5', '10', 60, undefined]) {
-      expect(effectiveVideoSettings('fabric-1.0', dur, '16:9', '{}')).toEqual({ seconds: 60, resolution: '720p', audio: true })
+      expect(effectiveVideoSettings('fabric-1.0', dur, '16:9', '{}')).toEqual({ seconds: 60, resolution: '720p', audio: true, inputVideoSeconds: 0 })
       expect(effectiveVideoSettings('fabric-1.0', dur, '16:9', '{"resolution":"480p"}')!.resolution).toBe('480p')
     }
   })
@@ -247,7 +263,8 @@ describe('worked examples', () => {
     expect(providerUsd('GenerateVideoNode', { model: 'hailuo-2.3', duration: '6', model_options: '{"resolution":"1080p"}' })).toBeCloseTo(0.49)
     // 1080p at 10 s has no clip price: the card's dearest second × 10.
     expect(providerUsd('GenerateVideoNode', { model: 'hailuo-2.3', duration: '10', model_options: '{"resolution":"1080p"}' })).toBeCloseTo(0.49 / 6 * 10, 6)
-    expect(providerUsd('GenerateVideoNode', { model: 'ltx-video', duration: '5' })).toBeCloseTo(0.081)
+    // LTX-Video: the GPU-time ceiling, L40S $0.000975/s × 140 s.
+    expect(providerUsd('GenerateVideoNode', { model: 'ltx-video', duration: '5' })).toBeCloseTo(0.000975 * 140, 9)
   })
 
   it('a resolution the card has no price for is priced at the card\'s highest rate', () => {
@@ -264,6 +281,48 @@ describe('worked examples', () => {
   })
 })
 
+// ── Fix round 1: Seedance reference videos, Seedance 4k, PixVerse ────────────
+describe('Seedance 2.0 reference videos are priced on input + output seconds', () => {
+  const refs = '{"video_urls":["https://x/a.mp4","https://x/b.mp4"]}'
+  it('no first frame: rate × 0.6 × (seconds + 15), on both classes, badge = charge', () => {
+    for (const ct of VIDEO_CLASSES) {
+      const inputs = { model: 'seedance-2.0', duration: '4', model_options: refs }
+      expect(providerUsd(ct, inputs), ct).toBeCloseTo(0.3034 * 0.6 * (4 + 15), 6)
+      expect(nodeCreditEstimate(ct, inputs), ct).toBe(charge(ct, inputs))
+    }
+  })
+  it('a first frame (linked image, or image_url) drops the references: plain per-second price', () => {
+    const plain = 0.3034 * 4
+    expect(providerUsd('GenerateVideoNode', { model: 'seedance-2.0', duration: '4', model_options: refs, image: ['9', 0] })).toBeCloseTo(plain, 6)
+    expect(providerUsd('GenerateVideoNode', { model: 'seedance-2.0', duration: '4', model_options: '{"video_urls":["u"],"image_url":"https://x/f.png"}' })).toBeCloseTo(plain, 6)
+    expect(providerUsd('GenerateVideoNode', { model: 'seedance-2.0', duration: '4', model_options: '{"video_urls":[]}' })).toBeCloseTo(plain, 6)
+  })
+  it('a linked image on the badge prices like the charge (the badge map marks it linked)', () => {
+    const defs = ['model', 'duration', 'model_options'].map(name => ({ name }))
+    const values = ['seedance-2.0', '4', refs]
+    const badge = nodeCreditEstimate('GenerateVideoNode', widgetValueMap(defs, values, ['image']))
+    expect(badge).toBe(charge('GenerateVideoNode', { model: 'seedance-2.0', duration: '4', model_options: refs, image: ['9', 0] }))
+  })
+  it('linked model_options may hide references: priced at the dearer billing', () => {
+    const linked = providerUsd('GenerateVideoNode', { model: 'seedance-2.0', duration: '4', model_options: ['9', 0] })!
+    expect(linked).toBeCloseTo(2.0412 * 0.6 * (4 + 15), 6)
+  })
+  it('4k is priced at the 21:9 frame (5040×2160 × 24 / 1024 × $0.008 / 1000 per second)', () => {
+    expect(5040 * 2160 * 24 / 1024 * 0.008 / 1000).toBeCloseTo(2.0412, 4)
+    expect(providerUsd('GenerateVideoNode', { model: 'seedance-2.0', duration: '5', model_options: '{"resolution":"4k"}' })).toBeCloseTo(2.0412 * 5, 6)
+    expect(VIDEO_RATES['seedance-2.0']!.note).toMatch(/21:9/)
+  })
+})
+
+describe('PixVerse v6 is priced as the service renders it', () => {
+  it('at the higher of the sent resolution and 540p, silent', () => {
+    expect(effectiveVideoSettings('pixverse-v6', '5', '16:9', '{"resolution":"360p","generate_audio":true}'))
+      .toEqual({ seconds: 5, resolution: '540p', audio: false, inputVideoSeconds: 0 })
+    expect(providerUsd('GenerateVideoNode', { model: 'pixverse-v6', duration: '5', model_options: '{"resolution":"1080p"}' })).toBeCloseTo(0.18 * 5, 6)
+    expect(providerUsd('GenerateVideoNode', { model: 'pixverse-v6', duration: '8' })).toBeCloseTo(0.09 * 8, 6)
+  })
+})
+
 // The line-up page's "where we lose money" table (24 Sep 2026), video rows.
 // "It costs" is the service's price; our charge must now be at or above it.
 describe('the line-up page\'s loss table: no video row is below cost', () => {
@@ -275,7 +334,14 @@ describe('the line-up page\'s loss table: no video row is below cost', () => {
     { what: 'Kling 3.0, 15 s with sound', inputs: { model: 'kling-v3', duration: '15' }, costs: 3.78 },
     { what: 'Luma Ray 2, 9 s', inputs: { model: 'luma-ray-2-720p', duration: '9' }, costs: 1.62 },
     { what: 'Seedance 2.0 fast, 10 s', inputs: { model: 'seedance-2.0-fast', duration: '10' }, costs: 1.50 },
-    { what: 'PixVerse v6, 8 s', inputs: { model: 'pixverse-v6', duration: '8' }, costs: 0.96 },
+    // The page's $0.96 was 720p with sound; the service renders what its schema
+    // defaults to (quality 540p, sound off, since the builder sends neither
+    // field it reads): 8 × $0.07. Priced at 720p silent, 8 × $0.09.
+    { what: 'PixVerse v6, 8 s (as rendered)', inputs: { model: 'pixverse-v6', duration: '8' }, costs: 0.56 },
+    // Seedance 2.0 reference-to-video: 4 s out with 15 s of reference video at
+    // 720p is (4 + 15) × $0.3034 × 0.6 = $3.46 on fal (the review's $3.45).
+    { what: 'Seedance 2.0 with reference videos, 4 s at 720p', inputs: { model: 'seedance-2.0', duration: '4', model_options: '{"video_urls":["https://x/ref.mp4"]}' }, costs: 3.45 },
+    { what: 'Seedance 2.0 with reference videos, 15 s at 1080p', inputs: { model: 'seedance-2.0', duration: '15', model_options: '{"resolution":"1080p","video_urls":["https://x/ref.mp4"]}' }, costs: 0.682 * 0.6 * 30 },
   ]
   for (const r of rows) {
     it(`${r.what}: charged at or above $${r.costs.toFixed(2)}`, () => {
@@ -374,7 +440,7 @@ describe('prototype names are refused, never priced at 0', () => {
   })
   it('the rate card lookup reads own keys only', () => {
     for (const model of names) expect(videoRate(model)).toBeNull()
-    expect(videoUsd('constructor', { seconds: 5, resolution: null, audio: true })).toBeNull()
+    expect(videoUsd('constructor', { seconds: 5, resolution: null, audio: true, inputVideoSeconds: 0 })).toBeNull()
   })
 })
 
@@ -386,20 +452,20 @@ describe('credit packs price their video clip through the shared calculation', (
     expect(clip).toBe(228)
     expect(PACKS.map(p => p.covers.match(/~(\d+) video clips/)![1])).toEqual(
       PACKS.map(p => String(Math.floor(p.credits / clip))))
+    expect(packClipCredits()).toBe(clip)
+  })
+  it('an unpriceable pack clip throws instead of reading "~NaN video clips"', () => {
+    expect(() => packClipCredits({ model: 'veo-99', duration: '5' })).toThrow(/has no price/)
+    for (const p of PACKS) expect(p.covers).not.toMatch(/NaN|Infinity/)
   })
 })
 
 // ── P1 review minor 4: every MODEL_COSTS row follows the markup ─────────────
 describe('MODEL_COSTS rows follow the markup', () => {
   // Rows allowed to differ, each with its reason.
-  const FLOAT_NOISE = 'creditsForUsd ceils binary float noise one credit high (0.035 × 200 = 7.000000000000001); the row holds the exact policy figure'
+  // Task P3 fixed creditsForUsd's float noise (0.035 × 200 = 7.000000000000001
+  // charged 8), so the six rows it made differ now follow the markup and left this list.
   const ALLOWED: Record<string, string> = {
-    'krea/krea-2-medium': FLOAT_NOISE,
-    'fal-ai/flux-lora': FLOAT_NOISE,
-    'fal-ai/flux-control-lora-depth': FLOAT_NOISE,
-    'fal-ai/bytedance/seedream/v5/lite/edit': FLOAT_NOISE,
-    'kwaivgi/kling-lip-sync': FLOAT_NOISE,
-    'fal-ai/kling-video/v3/pro/image-to-video': FLOAT_NOISE,
     'meta/sam-2': 'retired from inpaint, kept for pricing history (hand-set 4 credits; the markup gives 5)',
     'ostris/flux-dev-lora-trainer': 'hardware-billed training: 600 credits keeps parity with LoraTrainingNode in the graph table',
     'ostris/sdxl-lora-trainer': 'hardware-billed training: 600 credits keeps parity with LoraTrainingNode in the graph table',
@@ -434,7 +500,7 @@ describe('the video gallery price label', () => {
   })
   it('per-clip models show the clip price', () => {
     expect(videoRateLabel('hailuo-2.3')).toBe('$0.28 for 6 s at 768p')
-    expect(videoRateLabel('ltx-video')).toBe('$0.081 a clip')
+    expect(videoRateLabel('ltx-video')).toBe('$0.1365 a clip')
   })
   it('in hosted mode, credits per second of the default clip', () => {
     expect(videoRateLabel('hailuo-h3-max', { hosted: true })).toBe('12 credits/s at 768p')

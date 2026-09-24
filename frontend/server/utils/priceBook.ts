@@ -15,7 +15,10 @@ import { VIDEO_RATES } from '../../shared/pricing/videoRates'
 export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES }
 // lineup-p2 (model line-up Task P2): video priced per second of the clip
 // actually sent (shared/pricing/videoRates.ts), replacing one flat figure per model.
-export const PRICE_BOOK_VERSION = 'lineup-p2'
+// lineup-p3 (Task P3, one bump for P2's fix round and P3): images priced by
+// size, quality and picture count (shared/pricing/imageRates.ts); Krea 2
+// priced; the markup no longer charges a credit for float noise.
+export const PRICE_BOOK_VERSION = 'lineup-p3'
 
 export const BASE_RENDER_CREDITS = 1
 
