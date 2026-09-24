@@ -95,6 +95,12 @@ export interface LayoutDef {
   /** One row for wide formats (the prototype's `wideOnly`): offered only when the sheet the
    *  layout composes on is wide (`H < 70` — the band a format leaves uncovered, if it has one). */
   wideOnly?: boolean
+  /** Frame layout decisions, Task 4 (overlap accent): the role of the line this layout sets in a
+   *  colour of its own to cross another (Overprint's details, Number behind's number). With
+   *  recolour off the user's line keeps its own colour, so the planner adds an owned copy of it in
+   *  the element's colour, drawn directly under it — the same words, face, weight and size (an
+   *  exception to ruling R10: a copy must match what it copies). With recolour on: no copy. */
+  accentCopy?: RoleKey
   /** The layout's promise, asserted by the checker: roles that must overlap, must bleed, must be rotated. */
   premise?: { overlap?: [string, string][]; bleed?: string[]; rotated?: string[] }
   fn(S: Sheet, ctx: LayoutCtx): LayoutOut

@@ -24,7 +24,8 @@ import { elementsToOps } from './toOps'
 import { hex6, isSolid, pieceFills } from './contrast'
 import type { FillCtx, PieceFill, PieceFills } from './contrast'
 import { contrastRatio } from '../palette'
-import type { RoleTargets } from './toOps'
+import type { AccentCopy, RoleTargets } from './toOps'
+import { hexToOklab } from '~/lib/color/convert'
 import { isOwned, mergeOwned } from './owned'
 import { enumerate, lineOptions } from './vary'
 import type { Candidate, Choice, LineOption } from './vary'
@@ -682,6 +683,10 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
   // A layout's own words (Stage 4, ruling R10) take the caption layer's family and weight — only
   // passed when drawn.
   if (out.els.some(e => e.k === 'own') && p.ownFace) { pieces.ownFamily = p.ownFace.family; pieces.ownWeight = p.ownFace.weight }
+  // Task 4 of the layout decisions: an overlap layout's accent copy of its crossing line, recolour
+  // off only — only passed when drawn, so every other call is unchanged.
+  const copy = accentCopyFor(p, out.els, a)
+  if (copy) pieces.accentCopy = copy
   // The fills the check just read (ruling R6): only when a piece carries text, so a layout without
   // one (every Swiss layout but Badge, Knockout and the panels) calls toOps exactly as before.
   if (pf.fills.size) pieces.fills = pf.fills
@@ -718,6 +723,40 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
     posterState: { patternId: p.def.id, seed: seedFor(p.index, a.choice), choice: { ...a.choice }, roles: rolesOf(p.baseElements) },
     format: p.fmt ? { id: p.fmt.id, label: p.fmt.label, hidden: [...p.hidden], lines: p.hidden.map(r => p.elements[r]?.text ?? '') } : null,
     notPlaced: [...notPlaced.map(role => ({ role, text: lineText(p, role) })), ...carried.named],
+  }
+}
+
+/** How far apart (Oklab distance) the accent and the user's line colour must be for the accent
+ *  copy to be drawn: 0.1 is about five just-noticeable differences (≈ 0.02 each) — clearly another
+ *  colour, not a shade of the same one. */
+export const ACCENT_COPY_MIN_DIFF = 0.1
+
+const oklabDistance = (a: string, b: string): number => {
+  const [l1, a1, b1] = hexToOklab(a), [l2, a2, b2] = hexToOklab(b)
+  return Math.hypot(l1 - l2, a1 - a2, b1 - b2)
+}
+
+/** The accent copy an overlap layout draws (`LayoutDef.accentCopy`), or undefined when it draws
+ *  none: recolour is on (the user's line takes the accent itself); the layout set no line of that
+ *  role, or the Frame has no text layer for it; or the copy would not differ visibly from the
+ *  user's line — its colour is not a plain colour, or it is the accent already, or all but
+ *  (`ACCENT_COPY_MIN_DIFF`). The face is the user's layer's, with its own letter case as this apply
+ *  leaves it (a case an earlier layout set and the user kept goes back to theirs). */
+function accentCopyFor(p: Prepared, els: El[], a: LayoutPlanArgs): AccentCopy | undefined {
+  const role = p.def.accentCopy
+  if (!role || a.recolour) return undefined
+  const id = p.targets[role]
+  const layer = id ? p.layers.find(l => l.id === id && l.kind === 'text') as TextLayer | undefined : undefined
+  const e = els.find((x): x is Extract<El, { k: 't' }> => x.k === 't' && (x.role ?? '').replace(/\d+$/, '') === role)
+  if (!layer || !e) return undefined
+  const mine = hex6(layer.color), accent = hex6(a.palette[e.color ?? 'accent'])
+  if (!mine || !accent || oklabDistance(mine, accent) < ACCENT_COPY_MIN_DIFF) return undefined
+  const prevCase = (layer as { layoutPrev?: Record<string, { was: unknown; set: unknown }> }).layoutPrev?.textTransform
+  const ownCase = (prevCase && layer.textTransform === prevCase.set ? prevCase.was : layer.textTransform) as AccentCopy['textTransform'] | null
+  return {
+    role, fontFamily: layer.fontFamily, fontWeight: layer.fontWeight,
+    ...(layer.axes ? { axes: layer.axes } : {}),
+    ...(ownCase ? { textTransform: ownCase } : {}),
   }
 }
 

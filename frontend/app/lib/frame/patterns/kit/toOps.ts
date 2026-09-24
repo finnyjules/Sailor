@@ -35,6 +35,18 @@ export interface RoleTargets {
   libraryShape?: { id: string; aspect: number }
 }
 
+/** The face of the user's line an overlap layout copies (`LayoutDef.accentCopy`, Task 4 of the
+ *  layout decisions): its role, and the family, weight, variable axes and letter case its layer is
+ *  drawn in — so the copy draws exactly the words the user's layer draws. */
+export interface AccentCopy {
+  role: RoleKey
+  fontFamily: string
+  fontWeight: number
+  axes?: Record<string, number>
+  /** The layer's own case (what it shows when the layout sets none). */
+  textTransform?: 'uppercase' | 'lowercase' | 'capitalize'
+}
+
 /** Used when the caller passes no palette (tests, previews): the same fallbacks as `rolesFromFamily`. */
 const FALLBACK_PALETTE: ResolvedPalette = { field: '#f2f0ef', ink: '#121212', accent: '#dd2200' }
 
@@ -242,6 +254,9 @@ export function elementsToOps(
     /** Their weight (ruling R10): the caption layer's, the one the caption face is measured at.
      *  Absent (a Frame with no caption or title layer): the kit's `wt`. */
     ownWeight?: number
+    /** Recolour off, on an overlap layout (`LayoutDef.accentCopy`): the user's line of this role
+     *  gets an owned copy in its element's colour, stacked just under it. Absent: no copy. */
+    accentCopy?: AccentCopy
   },
 ): { ops: LayerOp[]; owned: LocalLayer[] } {
   const ops: LayerOp[] = []
@@ -318,7 +333,25 @@ export function elementsToOps(
           if (doneDisplay.has(b)) return
           doneDisplay.add(b)
           const group = els.filter((x): x is TextEl => x.k === 't' && isPlaced(x) && baseRole(x.role) === b)
-          ops.push(displayOp(group, S, target, z))
+          const op = displayOp(group, S, target, z)
+          ops.push(op)
+          const cp = opts?.accentCopy
+          if (cp && cp.role === b) {
+            // The overlap layout's accent copy: the very runs, size and spacing of the user's line,
+            // in its face, in the element's colour, just under it (z − ½; the line keeps z).
+            const first = group[0]!
+            const key = keyFor('copy')
+            const tt = op.textTransform ?? cp.textTransform
+            own(createTextLayer({
+              ...ownedBase(key, first),
+              text: group.map(g => g.s).join('\n'), x: op.x!, y: op.y!, rotation: op.rotation ?? 0,
+              fontFamily: cp.fontFamily, fontWeight: cp.fontWeight, fontSize: op.fontSize!,
+              color: paint(first.color ?? 'accent'), align: 'left', lineHeight: op.lineHeight!, letterSpacing: op.letterSpacing,
+              runs: op.runs!,
+              ...(cp.axes ? { axes: { ...cp.axes } } : {}),
+              ...(tt ? { textTransform: tt } : {}),
+            }), 'text', key, z - 0.5)
+          }
         } else {
           const op = flowOp(e, S, target, z)
           if (underlineAction && baseRole(e.role) === 'action') op.underline = true

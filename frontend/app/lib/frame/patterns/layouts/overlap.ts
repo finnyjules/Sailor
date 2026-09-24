@@ -23,6 +23,7 @@ const COLUMN: [TextKey, number?][] = [['details', 500], ['date'], ['caption']]
 export const overprint: LayoutDef = {
   id: 'overprint', name: 'Overprint', fits: [...ALL],
   premise: { overlap: [['title', 'details']] },
+  accentCopy: 'details',
   fn(S, { c, ph, lines }) {
     const { X, SPAN, L, M, GAP, DISPLAY, sizeFor, blockH, disp, info, infoRow, photoIn, FOOT2, q } = S
     const els: El[] = []
@@ -50,6 +51,7 @@ export const dateBehind: LayoutDef = {
   id: 'dateBehind', name: 'Number behind', fits: [...ALL], smallText: true,
   needs: { number: true },
   premise: { overlap: [['title', 'date']] },
+  accentCopy: 'date',
   fn(S, { c, ph, lines }) {
     const { X, SPAN, L, M, RH, GAP, DISPLAY, sizeFor, blockH, disp, infoRow, photoIn, q } = S
     // `needs.number` guarantees a date; without one there is nothing to set behind the title.

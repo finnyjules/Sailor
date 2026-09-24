@@ -45,14 +45,17 @@ export function applyPlacement(
     const id = targetId(op, elements); if (id) byId.set(id, op)
   }
   return layers.map(layer => {
+    const textOrImage = layer.kind === 'text' || layer.kind === 'image' || layer.kind === 'wired'
+    // A shape a layout placed remembers its own place and size (Knockout's band), so a layout
+    // that does not place the shape at all gives it back: it is applied as an op that sets
+    // nothing, and every field the earlier layout set comes back (unless the user changed it
+    // since). Text and image layers no op targets are left exactly as they are.
     const op = byId.get(layer.id)
+      ?? (!textOrImage && (layer as any).layoutPrev ? { target: layer.id, kind: 'shape' } as LayerOp : undefined)
     if (!op) return layer
     const next: any = { ...layer }
-    if (op.x != null) next.x = op.x
-    if (op.y != null) next.y = op.y
     const blend = op.blendMode ?? op.blend
-    const textOrImage = layer.kind === 'text' || layer.kind === 'image' || layer.kind === 'wired'
-    // Layout-set fields (opacity, blend, spacing, crop, mask, path, runs) are re-authored on
+    // Layout-set fields (opacity, blend, spacing, crop, mask, path, runs; a shape's place and size) are re-authored on
     // every apply, but apply only ever clears what a layout set: the layer's own value is
     // remembered the first time a layout overrides it (with what the layout wrote), and put
     // back when a later op leaves the field unset — unless the user has changed it since.
@@ -68,6 +71,13 @@ export function applyPlacement(
         if (untouched) { if (entry.was == null) delete next[field]; else next[field] = entry.was }
         delete prev[field]
       }
+    }
+    if (textOrImage) {
+      if (op.x != null) next.x = op.x
+      if (op.y != null) next.y = op.y
+    } else {
+      track('x', op.x)
+      track('y', op.y)
     }
     // A hidden op carries no geometry or other fields — it only toggles visibility (tracked
     // like every other layout-set field: restored when a later op leaves `hidden` unset, unless
@@ -117,11 +127,15 @@ export function applyPlacement(
       const flow = !op.runs?.length && !op.path
       const fit = (layer as any).boxFit
       track('boxFit', flow && ((fit && fit !== 'wrap') || prev.boxFit) ? 'wrap' : undefined)
-    } else if (layer.kind === 'path' && typeof op.w === 'number' && op.w > 0 && (layer as any).bbox?.w > 0) {
+    } else if (layer.kind === 'path' && (layer as any).bbox?.w > 0) {
       // A path layer has no `w`: it sizes from `bbox × scale` (both in the same
       // normalized-frame-width units as op.w — see useCompositorLayers' layerBoxPx).
       // Writing `w` here would add a dead field and leave the shape at its old size.
-      next.scale = op.w / (layer as any).bbox.w
+      track('scale', typeof op.w === 'number' && op.w > 0 ? op.w / (layer as any).bbox.w : undefined)
+    } else if (!textOrImage) {
+      // Any other shape takes the layout's box, remembered like the other layout-set fields.
+      track('w', op.w)
+      track('h', op.h)
     } else if (layer.kind === 'wired') {
       if (op.w != null) next.w = op.w
       // A wired layer's height comes from its lastAspect — unless it is cropped to a box,
