@@ -12,8 +12,8 @@ import { parseInputFileRef } from '../inputs'
 import type { NodePlan, PlanContext } from '../executors'
 import type { OutputFile } from '../types'
 import { decodeLoadMask, decodePicture, encodePreviewPng, type PictureSource } from './decode'
-import { MAX_LAYERS, renderFrame } from './render'
-import type { Plane } from './plane'
+import { MAX_LAYERS, type Loader } from './render'
+import { renderFrameInWorker } from './worker'
 
 /**
  * How the node at the end of this wire hands its picture to Python, which
@@ -77,33 +77,29 @@ export function planCompositor(ctx: PlanContext): NodePlan {
 
   return {
     kind: 'local',
-    async render() {
+    async render(signal?: AbortSignal) {
       const read = ctx.readFile
       if (!read) throw new Error('The runner cannot read pictures here')
-      const cache = new Map<string, Promise<Uint8Array>>()
-      const bytes = (f: OutputFile) => {
-        const key = `${f.type}:${f.subfolder}:${f.filename}`
-        let p = cache.get(key)
-        if (!p) cache.set(key, p = read(f))
-        return p
-      }
-      const load = async (w: Wired | null): Promise<Plane | null> => {
+      // Each picture is read and decoded only when composeFrame reaches it.
+      const loader = (w: Wired | null): Loader | null => {
         if (!w) return null
-        try {
-          if (w.source === 'mask') return await decodeLoadMask(await bytes(w.file!))
-          return await decodePicture(w.file ? await bytes(w.file) : null, w.source)
-        }
-        catch (e) {
-          if (e instanceof Error && /Frame/.test(e.message)) throw e
-          throw new Error(`A picture for the Frame could not be read (${w.file?.filename ?? 'none'})`)
+        return async () => {
+          try {
+            if (w.source === 'mask') return await decodeLoadMask(await read(w.file!))
+            return await decodePicture(w.file ? await read(w.file) : null, w.source)
+          }
+          catch (e) {
+            if (e instanceof Error && /Frame/.test(e.message)) throw e
+            throw new Error(`A picture for the Frame could not be read (${w.file?.filename ?? 'none'})`)
+          }
         }
       }
-      const result = await renderFrame(inputs, {
-        layers: await Promise.all(layers.map(load)),
-        masks: await Promise.all(masks.map(load)),
-        overlay: await load(overlay),
-        overlayMask: await load(overlayMask),
-      })
+      const result = await renderFrameInWorker(inputs, {
+        layers: layers.map(loader),
+        masks: masks.map(loader),
+        overlay: loader(overlay),
+        overlayMask: loader(overlayMask),
+      }, signal)
       return encodePreviewPng(result.image)
     },
     // save_live_preview's ui.

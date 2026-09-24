@@ -10,7 +10,7 @@
  * provider node that prices at 0 is refused in hosted (unpricedProviderNode).
  */
 import type { ApiNode, ApiPrompt } from '#shared/runner/graph'
-import { PROVIDER_TYPES } from '#shared/runner/eligibility'
+import { LOCAL_RENDER_TYPES, PROVIDER_TYPES } from '#shared/runner/eligibility'
 import { BASE_RENDER_CREDITS, OUTPUT_CLASS_TYPES, priceGraph } from '../utils/priceBook'
 import { extractGraphPromptText } from '../utils/graphPromptText'
 import { MeterRefusalError } from '../utils/requestMeter'
@@ -80,16 +80,21 @@ export function hasOutputNode(prompt: ApiPrompt): boolean {
  * The hold for one stage: every node that may make a call, plus the render
  * credit. A nano-actions node that will hand its picture on (actionPassThrough,
  * the same rule planNode follows) makes no call and is not held. The render
- * credit is only ever charged on top of something made, so a stage that can
- * make nothing holds nothing.
+ * credit is only ever charged on top of something made (a provider result,
+ * or a finished Frame render: the Frame itself is free, but its stage pays
+ * the render credit, as on the Python path), so a stage that can make
+ * nothing holds nothing.
  */
 export function stageEstimate(prompt: ApiPrompt, nodeIds: Iterable<string>, includeBase: boolean): number {
   let total = 0
+  let renders = false
   for (const id of nodeIds) {
     const n = prompt[id]
-    if (n && !actionPassThrough(n.class_type, n.inputs ?? {})) total += nodeCredits(n)
+    if (!n) continue
+    if (LOCAL_RENDER_TYPES.has(n.class_type)) renders = true
+    else if (!actionPassThrough(n.class_type, n.inputs ?? {})) total += nodeCredits(n)
   }
-  return includeBase && total > 0 ? total + BASE_RENDER_CREDITS : total
+  return includeBase && (total > 0 || renders) ? total + BASE_RENDER_CREDITS : total
 }
 
 export interface LedgerPort {

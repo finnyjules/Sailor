@@ -136,8 +136,3 @@ export function expandLayer(pose: LayerPose, raw: Record<string, unknown> | null
     tintStrength: t.tintStrength,
   }))
 }
-
-/** `_drawable`: every number of the copy's transform is finite. */
-export function drawable(p: LayerPose): boolean {
-  return [p.x, p.y, p.rot, p.scl, p.op].every(Number.isFinite)
-}

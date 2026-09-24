@@ -14,9 +14,10 @@ export interface ResultStore {
   save(bytes: Uint8Array, o: { userId: string | null; prefix: string; ext: string }): Promise<OutputFile>
   /**
    * A result shown in a node but not an asset: save_live_preview(unique=True)'s
-   * `live_preview_<node>_<nnnnn>.png` in the temp folder (the Frame render).
+   * `live_preview_<node>_<nnnnn>.png` in the temp folder (the Frame render);
+   * hosted, in the user's own subfolder of it.
    */
-  saveLivePreview(bytes: Uint8Array, o: { nodeId: string }): Promise<OutputFile>
+  saveLivePreview(bytes: Uint8Array, o: { nodeId: string; userId: string | null }): Promise<OutputFile>
   read(file: OutputFile): Promise<Uint8Array>
   exists(file: OutputFile): Promise<boolean>
 }
@@ -94,9 +95,11 @@ export function createEngineResultStore(o: { dirForType(type: string): string | 
       }
       throw new Error('Could not find a free file name')
     },
-    async saveLivePreview(bytes, { nodeId }) {
-      const base = o.dirForType('temp')
-      if (!base) throw new Error('The file store is not available')
+    async saveLivePreview(bytes, { nodeId, userId }) {
+      const root = o.dirForType('temp')
+      if (!root) throw new Error('The file store is not available')
+      const subfolder = userSubfolder(userId, o.hosted())
+      const base = join(root, subfolder)
       await mkdir(base, { recursive: true })
       // Node ids come from the browser: keep them to a safe file-name alphabet.
       const prefix = `live_preview_${nodeId.replace(/[^A-Za-z0-9_-]/g, '_')}`
@@ -105,7 +108,7 @@ export function createEngineResultStore(o: { dirForType(type: string): string | 
         const filename = `${prefix}_${String(counter).padStart(5, '0')}.png`
         try {
           await writeFile(join(base, filename), bytes, { flag: 'wx' })
-          return { filename, subfolder: '', type: 'temp' }
+          return { filename, subfolder, type: 'temp' }
         }
         catch (e: any) {
           if (e?.code !== 'EEXIST') throw e

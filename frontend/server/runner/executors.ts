@@ -44,7 +44,7 @@ export type NodePlan =
   | { kind: 'pass'; files: OutputFile[]; ui: Record<string, unknown> | null }
   | { kind: 'pause'; files: OutputFile[] }
   /** Computed on this server: `render` makes the PNG, saved as a temp live preview (as Python's save_live_preview). */
-  | { kind: 'local'; render(): Promise<Uint8Array>; uiFor(files: OutputFile[]): Record<string, unknown> | null }
+  | { kind: 'local'; render(signal?: AbortSignal): Promise<Uint8Array>; uiFor(files: OutputFile[]): Record<string, unknown> | null }
 
 export interface PlanContext {
   prompt: ApiPrompt

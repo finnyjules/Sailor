@@ -1,23 +1,28 @@
 /**
  * The Compositor node's static composite (`CompositorNode.execute` in
- * comfy_extras/nodes_compositor.py, everything after the baked-motion path),
- * on decoded pictures. The runner never takes a Frame with baked motion
- * (eligibility), so that path is not here.
+ * comfy_extras/nodes_compositor.py, everything after the baked-motion path).
+ * The runner never takes a Frame with baked motion (eligibility), so that
+ * path is not here.
  *
  * Same order as Python: gather the connected layers by slot, size the canvas
  * (the explicit width × height, else the lowest connected slot's picture),
  * expand each layer's cloner, composite by ascending z on implicit black,
  * lay the overlay on top, clamp, and union the protected layers' coverage.
- * Pure: no files, no sharp; `decode.ts` feeds it and encodes the result.
+ *
+ * `composeFrame` does the reading and ordering here and hands the pixel work
+ * to a backend: `workerBackend` (worker.ts) on the runner, the in-thread core
+ * for `renderFrame` (the parity spec). Each layer's picture is decoded only
+ * when its turn comes and let go after, so at most the canvas, one layer and
+ * the first layer (which sets the size) are held at once.
  */
 import { pyTruthy } from '#shared/runner/pyText'
-import { drawable, expandLayer, parseClonerJson, pyFloat, pyInt, type Clone } from './cloner'
-import {
-  blendValue, channel, channels, concat, fitToCanvas, plane, repeat3, resizeTo, transform, type Plane,
-} from './plane'
 import { hexToRgb } from '~/lib/vary'
+import { expandLayer, parseClonerJson, pyFloat, pyInt } from './cloner'
+import { core, type CopyPose, type Plane } from './plane'
 
 export const MAX_LAYERS = 16
+/** The largest canvas the runner renders: 8192 × 8192, the Frame's own widget limit. */
+export const MAX_CANVAS_PIXELS = 8192 * 8192
 
 export interface FrameSources {
   /** layer1 … layer16: the picture on each connected slot (1, 3 or 4 channels), else null. */
@@ -28,98 +33,57 @@ export interface FrameSources {
   overlayMask: Plane | null
 }
 
+/** A picture, decoded when asked for. */
+export type Loader = () => Promise<Plane>
+
+export interface FrameLoaders {
+  layers: ReadonlyArray<Loader | null>
+  masks: ReadonlyArray<Loader | null>
+  overlay: Loader | null
+  overlayMask: Loader | null
+}
+
 export interface FrameResult {
   /** The composite, 3 channels, clamped to [0, 1]. */
   image: Plane
-  /** The protect_mask output: 1 where a protected layer covers. */
+  /** The protect_mask output: 1 where a protected layer covers (zeros when it was not asked for). */
   protect: Plane
 }
 
-interface GatheredLayer extends Clone {
-  image: Plane
-  blend: string
-  z: number
-  mask: Plane | null
+/** Where the pixel work happens. One composite at a time per backend. */
+export interface FrameBackend {
+  begin(ch: number, cw: number): Promise<void>
+  paint(image: Plane, mask: Plane | null, blend: string, copies: CopyPose[], protect: boolean): Promise<void>
+  overlay(image: Plane, mask: Plane | null): Promise<void>
+  finish(): Promise<FrameResult>
+}
+
+export interface ComposeOptions {
+  /** Union the protected layers' coverage (the protect_mask output). The runner never reads it. */
   protect: boolean
+  signal?: AbortSignal
 }
 
 /** A widget as execute() reads it: `kwargs.get(name, def)`. */
 const get = (inputs: Record<string, unknown>, name: string, def: unknown): unknown =>
   Object.prototype.hasOwnProperty.call(inputs, name) ? inputs[name] : def
 
-/** Every operation rounds to float32, as torch's float32 tensors do (see plane.ts). */
 const f = Math.fround
 
-/** Yields to the event loop between layers, so a large Frame does not hold the server up. */
-const breathe = () => new Promise<void>(r => setImmediate(r))
-
-/**
- * `_prep_layer`: the layer (one copy of it) at canvas size, as its RGB and its
- * alpha (coverage × opacity × embedded alpha × (1 − mask)).
- */
-export function prepLayer(l: GatheredLayer, ch: number, cw: number): { rgb: Plane; a: Float32Array } {
-  let t = l.image
-  if (t.c === 1) t = repeat3(t)
-  else if (t.c === 2) t = concat(repeat3(channels(t, 0, 1)), channels(t, 1, 2))
-  t = fitToCanvas(t, ch, cw)
-  const { out, geo } = transform(t, l.x, l.y, l.rot, l.scl)
-  const n = ch * cw
-  let rgb = channels(out, 0, 3)
-  if (l.tint) {
-    // _tint_rgb: rgb·(1 − s) + tint·s, for a strength s = clamp01 > 0.
-    const s0 = typeof l.tintStrength === 'number' ? l.tintStrength : 1
-    const s = s0 < 0 ? 0 : s0 > 1 ? 1 : s0
-    if (s > 0) {
-      const [r, g, b] = hexToRgb(l.tint)
-      const tint = [f(r / 255), f(g / 255), f(b / 255)]
-      // Python scalars: (1.0 − s) in double, then float32 like s itself.
-      const keep = f(1 - s)
-      const sf = f(s)
-      const tinted = plane(3, ch, cw)
-      for (let k = 0; k < 3; k++) {
-        const src = channel(rgb, k)
-        const dst = channel(tinted, k)
-        const tk = tint[k]!
-        const tintPart = f(tk * sf)
-        for (let i = 0; i < n; i++) dst[i] = f(f(src[i]! * keep) + tintPart)
-      }
-      rgb = tinted
-    }
-  }
-  const a = new Float32Array(n)
-  const g = geo.data
-  const op = f(l.op)
-  for (let i = 0; i < n; i++) {
-    const v = f(g[i]! * op)
-    a[i] = v < 0 ? 0 : v > 1 ? 1 : v
-  }
-  if (out.c >= 4) {
-    const emb = channel(out, 3)
-    for (let i = 0; i < n; i++) {
-      const e = emb[i]! < 0 ? 0 : emb[i]! > 1 ? 1 : emb[i]!
-      const v = f(a[i]! * e)
-      a[i] = v < 0 ? 0 : v > 1 ? 1 : v
-    }
-  }
-  if (l.mask) {
-    const m = resizeTo(l.mask, ch, cw).data
-    for (let i = 0; i < n; i++) {
-      const v = f(a[i]! * f(1 - m[i]!))
-      a[i] = v < 0 ? 0 : v > 1 ? 1 : v
-    }
-  }
-  return { rgb, a }
+function checkStop(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new Error('Stopped')
 }
 
-/** `CompositorNode.execute`, the static path. `inputs` are the node's widget values. */
-export async function renderFrame(inputs: Record<string, unknown>, src: FrameSources): Promise<FrameResult> {
+/** `CompositorNode.execute`, the static path, reading pictures through `loaders` and painting through `backend`. */
+export async function composeFrame(inputs: Record<string, unknown>, loaders: FrameLoaders, backend: FrameBackend, opts: ComposeOptions): Promise<FrameResult> {
   // Gather the connected layers in slot order.
-  const gathered: Array<Omit<GatheredLayer, 'tint' | 'tintStrength'> & { cloner: Record<string, unknown> | null }> = []
+  const gathered = []
   for (let i = 1; i <= MAX_LAYERS; i++) {
-    const image = src.layers[i - 1]
-    if (!image) continue
+    const load = loaders.layers[i - 1]
+    if (!load) continue
     gathered.push({
-      image,
+      load,
+      mask: loaders.masks[i - 1] ?? null,
       x: pyFloat(get(inputs, `layer${i}_x`, 0), `layer${i}_x`),
       y: pyFloat(get(inputs, `layer${i}_y`, 0), `layer${i}_y`),
       rot: pyFloat(get(inputs, `layer${i}_rotation`, 0), `layer${i}_rotation`),
@@ -127,7 +91,6 @@ export async function renderFrame(inputs: Record<string, unknown>, src: FrameSou
       op: pyFloat(get(inputs, `layer${i}_opacity`, 1), `layer${i}_opacity`),
       blend: String(get(inputs, `layer${i}_blend`, 'normal')),
       z: pyFloat(get(inputs, `layer${i}_z`, i), `layer${i}_z`),
-      mask: src.masks[i - 1] ?? null,
       protect: pyTruthy(get(inputs, `layer${i}_protect`, false)),
       cloner: parseClonerJson(get(inputs, `layer${i}_cloner`, '')),
     })
@@ -142,96 +105,75 @@ export async function renderFrame(inputs: Record<string, unknown>, src: FrameSou
   const height = dim('height')
   const explicit = width > 0 && height > 0
 
-  if (!gathered.length && !explicit) {
-    return { image: plane(3, 16, 16), protect: plane(1, 16, 16) }
+  let ch: number, cw: number
+  // The first gathered layer sets the size; it is kept until its own turn.
+  let first: Plane | null = null
+  if (explicit) { ch = height; cw = width }
+  else if (gathered.length) {
+    first = await gathered[0]!.load()
+    ch = first.h
+    cw = first.w
   }
-  const ch = explicit ? height : gathered[0]!.image.h
-  const cw = explicit ? width : gathered[0]!.image.w
+  else {
+    // Nothing connected and no size: a 16×16 black picture (the overlay is not laid either).
+    return { image: core.plane(3, 16, 16), protect: core.plane(1, 16, 16) }
+  }
+  if (ch * cw > MAX_CANVAS_PIXELS) throw new Error('This Frame is larger than 8192 × 8192, too large to render')
 
-  // The cloner, now the canvas aspect is known. Copies come back to front.
+  await backend.begin(ch, cw)
+  // The cloner, now the canvas aspect is known. Copies come back to front,
+  // and every copy of a layer shares its z, so a stable sort of the layers
+  // is Python's stable sort of the copies.
   const aspect = ch ? cw / ch : 1
-  const layers: GatheredLayer[] = []
-  for (const g of gathered) {
-    for (const copy of expandLayer({ x: g.x, y: g.y, rot: g.rot, scl: g.scl, op: g.op }, g.cloner, aspect)) {
-      layers.push({ ...g, ...copy })
-    }
+  const order = gathered.map((g, i) => ({ g, i })).sort((p, q) => (p.g.z - q.g.z) || (p.i - q.i))
+  for (const { g, i } of order) {
+    checkStop(opts.signal)
+    const copies: CopyPose[] = expandLayer({ x: g.x, y: g.y, rot: g.rot, scl: g.scl, op: g.op }, g.cloner, aspect).map((c) => {
+      let tint: [number, number, number] | null = null
+      if (c.tint) {
+        const [r, gg, b] = hexToRgb(c.tint)
+        tint = [f(r / 255), f(gg / 255), f(b / 255)]
+      }
+      return { x: c.x, y: c.y, rot: c.rot, scl: c.scl, op: c.op, tint, tintStrength: c.tintStrength }
+    })
+    const image = i === 0 && first ? first : await g.load()
+    if (i === 0) first = null
+    const mask = g.mask ? await g.mask() : null
+    checkStop(opts.signal)
+    await backend.paint(image, mask, g.blend, copies, opts.protect && g.protect)
   }
 
-  // _composite_layers: ascending z, a stable sort (equal z keeps slot order).
-  const n = ch * cw
-  const ordered = layers.map((l, i) => ({ l, i })).sort((p, q) => (p.l.z - q.l.z) || (p.i - q.i)).map(p => p.l)
-  let result: Plane | null = null
-  for (const l of ordered) {
-    if (!drawable(l)) continue
-    const { rgb, a } = prepLayer(l, ch, cw)
-    if (!result) {
-      result = plane(3, ch, cw)
-      for (let k = 0; k < 3; k++) {
-        const s = channel(rgb, k)
-        const d = channel(result, k)
-        for (let i = 0; i < n; i++) d[i] = f(s[i]! * a[i]!)
-      }
-    }
-    else {
-      for (let k = 0; k < 3; k++) {
-        const s = channel(rgb, k)
-        const d = channel(result, k)
-        for (let i = 0; i < n; i++) {
-          const base = d[i]!
-          const blended = blendValue(base, s[i]!, l.blend)
-          d[i] = f(f(base * f(1 - a[i]!)) + f(blended * a[i]!))
-        }
-      }
-    }
-    await breathe()
+  if (loaders.overlay) {
+    checkStop(opts.signal)
+    const o = await loaders.overlay()
+    const m = loaders.overlayMask ? await loaders.overlayMask() : null
+    await backend.overlay(o, m)
   }
-  if (!result) result = plane(3, ch, cw)
+  return backend.finish()
+}
 
-  // The overlay: always on top, straight per-pixel alpha.
-  if (src.overlay) {
-    let o = resizeTo(src.overlay, ch, cw)
-    let embedded: Float32Array | null = null
-    if (o.c === 1) o = repeat3(o)
-    else if (o.c >= 4) {
-      embedded = Float32Array.from(channel(o, 3), v => (v < 0 ? 0 : v > 1 ? 1 : v))
-      o = channels(o, 0, 3)
-    }
-    const a = new Float32Array(n)
-    if (src.overlayMask) {
-      const m = resizeTo(src.overlayMask, ch, cw).data
-      for (let i = 0; i < n; i++) {
-        const v = f(1 - m[i]!)
-        a[i] = v < 0 ? 0 : v > 1 ? 1 : v
-      }
-    }
-    else a.fill(1)
-    if (embedded) {
-      for (let i = 0; i < n; i++) {
-        const v = f(a[i]! * embedded[i]!)
-        a[i] = v < 0 ? 0 : v > 1 ? 1 : v
-      }
-    }
-    for (let k = 0; k < 3; k++) {
-      const s = channel(o, k)
-      const d = channel(result, k)
-      for (let i = 0; i < n; i++) d[i] = f(f(d[i]! * f(1 - a[i]!)) + f(s[i]! * a[i]!))
-    }
+/** The core in this thread, yielding to the event loop between layers. */
+export function inThreadBackend(signal?: AbortSignal): FrameBackend {
+  let cv: ReturnType<typeof core.createCanvas> | null = null
+  const breathe = () => new Promise<void>(r => setImmediate(r))
+  return {
+    async begin(ch, cw) { cv = core.createCanvas(ch, cw) },
+    async paint(image, mask, blend, copies, protect) {
+      core.paint(cv!, image, mask, blend, copies, protect, () => !!signal?.aborted)
+      await breathe()
+    },
+    async overlay(image, mask) { core.overlay(cv!, image, mask) },
+    async finish() { return core.finish(cv!) },
   }
+}
 
-  const out = result.data
-  for (let i = 0; i < out.length; i++) {
-    const v = out[i]!
-    out[i] = v < 0 ? 0 : v > 1 ? 1 : v
-  }
-
-  // _protect_coverage: the max of every protected, drawable copy's alpha.
-  const protect = plane(1, ch, cw)
-  for (const l of layers) {
-    if (!l.protect || !drawable(l)) continue
-    const { a } = prepLayer(l, ch, cw)
-    const p = protect.data
-    for (let i = 0; i < n; i++) if (a[i]! > p[i]!) p[i] = a[i]!
-    await breathe()
-  }
-  return { image: result, protect }
+/** `CompositorNode.execute` on decoded pictures, in this thread, protect_mask included (the parity spec). */
+export async function renderFrame(inputs: Record<string, unknown>, src: FrameSources): Promise<FrameResult> {
+  const wrap = (p: Plane | null): Loader | null => (p ? async () => p : null)
+  return composeFrame(inputs, {
+    layers: src.layers.map(wrap),
+    masks: src.masks.map(wrap),
+    overlay: wrap(src.overlay),
+    overlayMask: wrap(src.overlayMask),
+  }, inThreadBackend(), { protect: true })
 }

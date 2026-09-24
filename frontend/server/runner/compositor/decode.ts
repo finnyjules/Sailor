@@ -22,14 +22,23 @@
 import sharp from 'sharp'
 import { plane, type Plane } from './plane'
 
+/** The largest picture read: 8192 × 8192 pixels, the Frame's own size limit. */
+export const MAX_INPUT_PIXELS = 8192 * 8192
+
+/** sharp's refusal of a picture over the limit, as plain words. */
+function tooLarge(e: unknown): never {
+  if (e instanceof Error && /pixel limit/i.test(e.message)) throw new Error('A picture for the Frame is larger than 8192 × 8192, too large to render')
+  throw e
+}
+
 export type PictureSource = 'provider' | 'card' | 'load' | 'rgb' | 'blank'
 
 interface Rgba8 { w: number; h: number; data: Uint8Array }
 
 async function rgba8(bytes: Uint8Array, turn: boolean): Promise<Rgba8> {
-  let s = sharp(bytes, { ignoreIcc: true, pages: 1, page: 0, autoOrient: turn, failOn: 'none' })
+  let s = sharp(bytes, { ignoreIcc: true, pages: 1, page: 0, autoOrient: turn, failOn: 'none', limitInputPixels: MAX_INPUT_PIXELS })
   s = s.toColourspace('srgb').ensureAlpha(1)
-  const { data, info } = await s.raw({ depth: 'uchar' }).toBuffer({ resolveWithObject: true })
+  const { data, info } = await s.raw({ depth: 'uchar' }).toBuffer({ resolveWithObject: true }).catch(tooLarge)
   if (info.channels !== 4) throw new Error('A picture could not be read')
   return { w: info.width, h: info.height, data: new Uint8Array(data.buffer, data.byteOffset, data.byteLength) }
 }
@@ -88,7 +97,7 @@ export async function decodePicture(bytes: Uint8Array | null, source: PictureSou
 
 /** LoadImage's MASK output: 1 − alpha, or a 64×64 zero mask for a file with no alpha. */
 export async function decodeLoadMask(bytes: Uint8Array): Promise<Plane> {
-  const meta = await sharp(bytes, { pages: 1, page: 0 }).metadata()
+  const meta = await sharp(bytes, { pages: 1, page: 0, limitInputPixels: MAX_INPUT_PIXELS }).metadata()
   if (!meta.hasAlpha) return plane(1, 64, 64)
   const p = await rgba8(bytes, true)
   const n = p.w * p.h

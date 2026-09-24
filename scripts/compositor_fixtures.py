@@ -154,6 +154,13 @@ def _assets() -> dict[str, bytes]:
     buf = io.BytesIO()
     im.save(buf, "JPEG", quality=90, exif=exif.tobytes())
     a["sideways.jpg"] = buf.getvalue()
+    # A large RGBA picture for a strong downscale onto a 640×360 artboard:
+    # smooth gradients, fine stripes (the aliasing a downscale meets) and a soft oval of alpha.
+    y, x = np.mgrid[0:900, 0:1600].astype(np.float64)
+    huge = np.stack([x / 1599, y / 899, 0.5 + 0.5 * np.sin(x / 90.0)], axis=-1)
+    huge[:, :, 2] = np.where((x.astype(int) // 3) % 2 == 0, huge[:, :, 2], 1 - huge[:, :, 2])
+    oval = np.clip(1.5 - np.sqrt(((x - 800) / 700) ** 2 + ((y - 450) / 380) ** 2) * 1.5, 0, 1)
+    a["huge.png"] = _png(np.dstack([np.floor(huge * 255 + 0.5).astype(np.uint8), np.floor(oval * 255 + 0.5).astype(np.uint8)]), "RGBA")
     return a
 
 
@@ -342,6 +349,9 @@ CASES += [
     case("a JPEG card", {"layer1": ["land.png", "card"], "layer2": ["photo.jpg", "card"]}, **layer(2, rot=10.0)),
     case("an EXIF-turned JPEG card sets the size", {"layer1": ["sideways.jpg", "card"], "layer2": ["disc.png", "card"]}, **layer(2, scale=0.5)),
     case("an EXIF JPEG from a provider is not turned", {"layer1": ["sideways.jpg", "provider"], "layer2": ["disc.png", "card"]}, **layer(2, scale=0.5)),
+    case("640×360: a 1600×900 RGBA picture downscaled 2.5×, turned, over a card",
+         {"layer1": ["wide.png", "card"], "layer2": ["huge.png", "provider"], "layer3": ["huge.png", "card"]},
+         width=640, height=360, **layer(2, rot=7.0, scale=0.9, blend="screen"), **layer(3, scale=0.3, x=0.3, y=-0.2, op=0.8)),
     case("an all-opaque RGBA card loads as RGB", {"layer1": ["wide.png", "card"], "layer2": ["opaque_rgba.png", "card"]}, **layer(2, rot=30.0)),
     case("one pixel at 254 makes the card RGBA", {"layer1": ["wide.png", "card"], "layer2": ["almost.png", "card"]}, **layer(2, rot=30.0)),
 ]
@@ -361,16 +371,24 @@ def run_case(c: dict) -> dict:
     assert previews and previews[0] is image, "save_live_preview must get the composite"
     _b, h, w, ch = image.shape
     assert ch == 3
-    return {
+    out = {
         "name": c["name"],
         "links": c["links"],
         "inputs": c["inputs"],
         "width": int(w),
         "height": int(h),
-        "image": u16(image[0]),
         "image8": u8_truncated(image[0]),
         "protect": u16(protect[0]),
     }
+    # The float composite of a large case is left out to keep the file small:
+    # its 8-bit PNG pixels (the deliverable) are still compared exactly.
+    if w * h <= LARGE:
+        out["image"] = u16(image[0])
+    return out
+
+
+# Pictures and composites bigger than this many pixels are stored only as their 8-bit PNG pixels.
+LARGE = 200_000
 
 
 def main() -> None:
@@ -382,6 +400,8 @@ def main() -> None:
             if key in decoded:
                 continue
             t = load(asset, via)
+            if via != "load_mask" and t.shape[1] * t.shape[2] > LARGE:
+                continue  # a large picture's decode is checked end to end instead
             t = t[0] if t.dim() >= 3 and via != "load_mask" else t
             if via == "load_mask":
                 t = t[0]

@@ -16,8 +16,13 @@
  *   decode: exact (checked to the fixtures' 16-bit storage, 1/65535);
  *   composite and protect_mask, float: max |Δ| ≤ 1e-5 (the 16-bit storage);
  *   the 8-bit PNG: identical, every value.
- * On another CPU torch itself can round a float32 ulp differently; the most
- * that can move is one 8-bit level.
+ * These fixtures were written on arm64 (Apple silicon). On x86, torch's own
+ * kernels may fuse or order float32 operations differently, so the Python
+ * result there can differ from these (and from the port) by one float32 ulp,
+ * which moves at most one 8-bit level (1/255) on a value sitting on a level.
+ *
+ * The end-to-end test runs through the runner's own path: pictures decoded
+ * one at a time as their turn comes, the pixel work on the worker thread.
  */
 import { inflateSync } from 'node:zlib'
 import { readFileSync } from 'node:fs'
@@ -27,6 +32,7 @@ import sharp from 'sharp'
 import { renderFrame, type FrameSources } from '~~/server/runner/compositor/render'
 import { decodeLoadMask, decodePicture, encodePreviewPng, type PictureSource } from '~~/server/runner/compositor/decode'
 import { plane, type Plane } from '~~/server/runner/compositor/plane'
+import { renderFrameInWorker } from '~~/server/runner/compositor/worker'
 
 interface Decoded { width: number; height: number; channels: number; data: string }
 interface FixtureCase {
@@ -35,7 +41,8 @@ interface FixtureCase {
   inputs: Record<string, unknown>
   width: number
   height: number
-  image: string
+  /** The float composite; left out of large cases (their 8-bit pixels are still compared). */
+  image?: string
   image8: string
   protect: string
 }
@@ -81,8 +88,10 @@ const asset = (name: string) => new Uint8Array(Buffer.from(FIX.assets[name]!, 'b
 async function ourDecode(name: string, via: string): Promise<Plane> {
   return via === 'load_mask' ? decodeLoadMask(asset(name)) : decodePicture(asset(name), via as PictureSource)
 }
-function pythonDecode(name: string, via: string): Plane {
-  const d = FIX.decoded[`${name}|${via}`]!
+/** The Python loader's tensor; a large picture is not stored, and our decode (exact on every stored one) stands in. */
+function pythonDecode(name: string, via: string): Plane | Promise<Plane> {
+  const d = FIX.decoded[`${name}|${via}`]
+  if (!d) return ourDecode(name, via)
   return hwcToPlane(u16(d.data), d.height, d.width, d.channels)
 }
 
@@ -139,15 +148,21 @@ describe('composite parity: renderFrame vs CompositorNode.execute', () => {
   it.each(FIX.cases.map(c => [c.name, c] as const))('%s — the port, on the Python tensors', async (_n, c) => {
     const r = await renderFrame(c.inputs, await sourcesOf(c, pythonDecode))
     expect([r.image.h, r.image.w]).toEqual([c.height, c.width])
-    const e1 = maxAbs(planeToHwc(r.image), u16(c.image))
+    const e1 = c.image ? maxAbs(planeToHwc(r.image), u16(c.image)) : 0
     const e2 = maxAbs(r.protect.data, u16(c.protect))
-    report.push(`composite ${c.name}: image ${(e1 * 255).toFixed(4)}/255, protect ${(e2 * 255).toFixed(4)}/255`)
+    report.push(`composite ${c.name}: image ${c.image ? (e1 * 255).toFixed(4) : '(8-bit only)'}/255, protect ${(e2 * 255).toFixed(4)}/255`)
     expect(e1).toBeLessThanOrEqual(TOL_FLOAT)
     expect(e2).toBeLessThanOrEqual(TOL_FLOAT)
   })
 
-  it.each(FIX.cases.map(c => [c.name, c] as const))('%s — end to end, the 8-bit PNG', async (_n, c) => {
-    const r = await renderFrame(c.inputs, await sourcesOf(c, ourDecode))
+  it.each(FIX.cases.map(c => [c.name, c] as const))('%s — end to end on the worker, the 8-bit PNG', async (_n, c) => {
+    const lazy = (link: [string, string] | undefined) => (link ? () => ourDecode(link[0], link[1]) : null)
+    const r = await renderFrameInWorker(c.inputs, {
+      layers: Array.from({ length: 16 }, (_, i) => lazy(c.links[`layer${i + 1}`])),
+      masks: Array.from({ length: 16 }, (_, i) => lazy(c.links[`layer${i + 1}_mask`])),
+      overlay: lazy(c.links.overlay),
+      overlayMask: lazy(c.links.overlay_mask),
+    })
     const png = await encodePreviewPng(r.image)
     const { data, info } = await sharp(png).raw().toBuffer({ resolveWithObject: true })
     expect([info.height, info.width, info.channels]).toEqual([c.height, c.width, 3])

@@ -6,7 +6,7 @@
  * failed or paused at a Gate. Money is held per take before a leg starts and
  * charged exactly when it ends. See docs/superpowers/specs/2026-09-22-sailor-runner-and-gate-design.md.
  */
-import { PROVIDER_TYPES, isRunnerEligible } from '#shared/runner/eligibility'
+import { LOCAL_RENDER_TYPES, PROVIDER_TYPES, isRunnerEligible } from '#shared/runner/eligibility'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import {
   GATE_CLASS, dependenciesOf, downstreamNodes, legNodes, upstreamStage,
@@ -19,7 +19,7 @@ import { extractGraphPromptText } from '../utils/graphPromptText'
 import { isProviderNetworkError, percentFromLogs, type FalStatus, type ProviderClient } from './falQueue'
 import { planNode } from './executors'
 import { isReusable, requestFingerprint } from './fingerprint'
-import { assertFilesOwned, collectInputFiles, type OwnershipCheck } from './inputs'
+import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
 import { extraPromptText, hasOutputNode, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
 import { ev, type RunEvents } from './events'
 import type { Handoff } from './handoff'
@@ -66,6 +66,22 @@ export function createLimiter(limit: number) {
     inFlight: (key: string) => active.get(key) ?? 0,
     waiting: (key: string) => queues.get(key)?.length ?? 0,
   }
+}
+
+/** What counts against MAX_QUEUED_CALLS: provider calls, and Frame renders (one worker renders them in turn). */
+const isQueuedWork = (classType: string) => PROVIDER_TYPES.has(classType) || LOCAL_RENDER_TYPES.has(classType)
+
+/** The files the prompts' LoadImage nodes read. */
+function loadImageFiles(prompts: ApiPrompt[]): OutputFile[] {
+  const out = new Map<string, OutputFile>()
+  for (const p of prompts) {
+    for (const n of Object.values(p)) {
+      if (n.class_type !== 'LoadImage') continue
+      const f = parseInputFileRef(n.inputs?.image)
+      if (f) out.set(`${f.type}:${f.subfolder}:${f.filename}`, f)
+    }
+  }
+  return [...out.values()]
 }
 
 const FINISHED_BADLY = new Set(['error', 'skipped', 'stopped', 'dropped'])
@@ -504,7 +520,8 @@ export function createEngine(deps: EngineDeps) {
     }
 
     // Charge exactly what was made (reused results are free); the flat
-    // render credit rides on the first stage that makes something. The
+    // render credit rides on the first stage that makes something — a
+    // finished Frame render counts, as the Python path charges it. The
     // check and the set below must stay together, with no await between.
     // Everything this take ran in this leg counts, including nodes that
     // finished before a restart (legNodes above no longer lists those).
@@ -512,7 +529,8 @@ export function createEngine(deps: EngineDeps) {
     let actual = legIds
       .filter(id => take.nodes[id]!.status === 'done' && !take.nodes[id]!.reused)
       .reduce((s, id) => s + take.nodes[id]!.credits, 0)
-    if (charge.includesBase && actual > 0 && !run.baseCharged) {
+    const rendered = legIds.some(id => take.nodes[id]!.status === 'done' && LOCAL_RENDER_TYPES.has(take.nodes[id]!.classType))
+    if (charge.includesBase && (actual > 0 || rendered) && !run.baseCharged) {
       actual += BASE_RENDER_CREDITS
       run.baseCharged = true
     }
@@ -572,9 +590,9 @@ export function createEngine(deps: EngineDeps) {
       })
       // Rendered here (the Frame): no provider, no charge, not an asset.
       if (plan.kind === 'local') {
-        const bytes = await plan.render()
+        const bytes = await plan.render(signal)
         if (signal.aborted) throw new RunStopped()
-        const file = await deps.results.saveLivePreview(bytes, { nodeId: id })
+        const file = await deps.results.saveLivePreview(bytes, { nodeId: id, userId: run.userId })
         rec.outputs = [file]
         rec.status = 'done'
         rec.endedAt = deps.now()
@@ -800,7 +818,7 @@ export function createEngine(deps: EngineDeps) {
           for (const id of charge.nodeIds ?? stageNodeIds(take, charge, leg.index)) {
             const rec = take.nodes[id]
             if (!rec) continue
-            if (PROVIDER_TYPES.has(rec.classType) && (rec.status === 'waiting' || rec.status === 'running')) n++
+            if (isQueuedWork(rec.classType) && (rec.status === 'waiting' || rec.status === 'running')) n++
           }
         }
       }
@@ -835,12 +853,17 @@ export function createEngine(deps: EngineDeps) {
       }
     }
     const noGates: TakeGateState = { done: new Set(), open: new Set(), dropped: new Set() }
-    const wanted = prompts.reduce((n, p) => n + [...legNodes(p, noGates)].filter(id => PROVIDER_TYPES.has(p[id]!.class_type)).length, 0)
+    const wanted = prompts.reduce((n, p) => n + [...legNodes(p, noGates)].filter(id => isQueuedWork(p[id]!.class_type)).length, 0)
     if (queuedCalls(i.userId) + wanted > MAX_QUEUED_CALLS) throw refuse('You have too many runs waiting. Try again when one finishes.', 429)
     await deps.metering.spendGuard(i.userId)
     const files = new Map<string, OutputFile>()
     for (const p of prompts) for (const f of collectInputFiles(p)) files.set(`${f.type}:${f.subfolder}:${f.filename}`, f)
     await assertFilesOwned([...files.values()], i.userId, deps.hosted(), deps.ownership)
+    // A Frame's baked layers and masks are files the browser uploaded just
+    // before: one that is gone fails now, before anything runs or is charged.
+    for (const f of loadImageFiles(prompts)) {
+      if (!(await deps.results.exists(f))) throw refuse('A picture this Frame needs is missing. Run it again.', 400, { file: f.filename })
+    }
     await deps.metering.moderate(prompts)
 
     const now = deps.now()

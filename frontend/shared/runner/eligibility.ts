@@ -4,7 +4,7 @@
  */
 import { isLink, linksOf, type ApiPrompt } from './graph'
 import { NO_FAMILIES, type RunnerFamily } from './families'
-import { pyFloatOf, pyIntOf } from './pyText'
+import { pyFloatOf, pyIntOf, pyTruthy } from './pyText'
 
 export const RUNNER_NODE_TYPES: ReadonlySet<string> = new Set([
   'GenerateImageNode', 'GenerateVideoNode', 'ComfyGateNode', 'Image', 'Video',
@@ -54,6 +54,14 @@ export interface RunnerNodeRule {
    * does not parse is taken only when it does not mention the key.
    */
   noJsonList?: Readonly<Record<string, string>>
+  /**
+   * Inputs that, when wired, must carry a picture: output 0 of a class in
+   * IMAGE_OUTPUT_CLASSES, followed back through Gates. A video (a Video card,
+   * a video generator) wired in is left to ComfyUI.
+   */
+  imageInputs?: readonly string[]
+  /** The Frame's server-health caps: copies summed over its wired layers' cloners, and an explicit width × height. */
+  frameLimits?: { maxCopies: number; maxArtboardPixels: number }
 }
 
 /** A widget as ComfyUI's validation reads it. */
@@ -126,6 +134,23 @@ function compositorWidgets(): Record<string, RunnerWidgetSpec> {
   w.motion_params = { type: 'STRING' }
   return w
 }
+
+/**
+ * The classes whose output 0 is a picture (IMAGE) the runner can hand a
+ * Frame: every runner image node, the Image card, another Frame, and the
+ * injected LoadImage. Not GenerateVideoNode or the Video card.
+ */
+export const IMAGE_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
+  'GenerateImageNode', 'Image', 'Compositor', 'LoadImage',
+  'EditImageNode', 'DevelopImageNode', 'RelightNode', 'BlendSceneNode',
+  'RemoveObjectNode', 'TextEditNode', 'RecolorObjectNode', 'SwapBackgroundNode', 'SwapProductNode', 'PersonSwap',
+  'GenerateFromReferencesNode', 'RotateCameraNode', 'ProductShotNode', 'RestyleFromImageNode',
+])
+
+/** The most Frame copies (every layer's cloner, summed) the runner renders; more goes to ComfyUI. */
+export const MAX_FRAME_COPIES = 256
+/** The largest explicit Frame artboard the runner renders, in pixels. */
+export const MAX_FRAME_ARTBOARD_PIXELS = 8192 * 8192
 
 /** A MASK input the runner can supply: a LoadImage's MASK output (1 − alpha of its file). */
 const LOAD_IMAGE_MASK = [['LoadImage', 1]] as const
@@ -230,6 +255,8 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       ['overlay_mask', LOAD_IMAGE_MASK] as const,
     ]),
     noJsonList: { motion_params: 'rendered' },
+    imageInputs: [...Array.from({ length: COMPOSITOR_MAX_LAYERS }, (_, i) => `layer${i + 1}`), 'overlay'],
+    frameLimits: { maxCopies: MAX_FRAME_COPIES, maxArtboardPixels: MAX_FRAME_ARTBOARD_PIXELS },
   },
   // The LoadImage the Frame editor injects at submit for baked text/shape
   // layers and masks (VueNodeCanvas injectCompositorOverlays). Taken only
@@ -352,7 +379,65 @@ export function nodeRuleAllows(
   for (const [name, key] of Object.entries(rule.noJsonList ?? {})) {
     if (hasJsonList(inputs[name], key)) return false
   }
+  if (rule.frameLimits && !withinFrameLimits(inputs, rule.frameLimits)) return false
   return true
+}
+
+/** Python int(v) for a JSON value, or null where int() raises. */
+function pyIntValue(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isFinite(v) ? Math.trunc(v) : null
+  if (typeof v === 'boolean') return Number(v)
+  if (typeof v === 'string') return pyIntOf(v)
+  return null
+}
+
+/**
+ * How many copies one layer's cloner widget stamps, read as `_expand_clones`
+ * reads it; null when Python's int() would raise on a count.
+ */
+export function clonerCopies(raw: unknown): number | null {
+  if (!raw || typeof raw !== 'string') return 1
+  let c: unknown
+  try { c = JSON.parse(raw) }
+  catch { return 1 }
+  if (!c || typeof c !== 'object' || Array.isArray(c)) return 1
+  const o = c as Record<string, unknown>
+  if (!pyTruthy(o.enabled)) return 1
+  const count = (k: string) => {
+    const n = pyIntValue(Object.prototype.hasOwnProperty.call(o, k) ? o[k] : 1)
+    return n === null ? null : Math.max(1, n)
+  }
+  if (o.mode === 'radial') return count('count')
+  const nx = count('countX')
+  const ny = count('countY')
+  if (nx === null || ny === null) return null
+  return (pyTruthy(o.mirrorX) ? 2 * nx - 1 : nx) * (pyTruthy(o.mirrorY) ? 2 * ny - 1 : ny)
+}
+
+function withinFrameLimits(inputs: Record<string, unknown>, lim: { maxCopies: number; maxArtboardPixels: number }): boolean {
+  let copies = 0
+  for (let i = 1; i <= COMPOSITOR_MAX_LAYERS; i++) {
+    if (!isLink(inputs[`layer${i}`])) continue
+    const n = clonerCopies(inputs[`layer${i}_cloner`])
+    if (n === null) return false
+    copies += n
+    if (copies > lim.maxCopies) return false
+  }
+  const w = pyIntValue(inputs.width ?? 0)
+  const h = pyIntValue(inputs.height ?? 0)
+  if (w !== null && h !== null && w > 0 && h > 0 && w * h > lim.maxArtboardPixels) return false
+  return true
+}
+
+/** Whether a wire carries a picture: output 0 of an image class, followed back through Gates. */
+function carriesImage(prompt: ApiPrompt, link: [string, number], depth = 0): boolean {
+  const from = prompt[link[0]]
+  if (!from || link[1] !== 0 || depth > 64) return false
+  if (from.class_type === 'ComfyGateNode') {
+    const d = from.inputs?.data_in
+    return isLink(d) && carriesImage(prompt, d, depth + 1)
+  }
+  return IMAGE_OUTPUT_CLASSES.has(from.class_type)
 }
 
 /** ComfyUI's validate_inputs for one widget (execution.py): present if required, converts, in range, in the options. */
@@ -408,6 +493,10 @@ function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule): b
     }
   }
   const inputs = prompt[id]?.inputs ?? {}
+  for (const name of rule.imageInputs ?? []) {
+    const v = inputs[name]
+    if (isLink(v) && !carriesImage(prompt, v)) return false
+  }
   for (const [name, sources] of Object.entries(rule.linkSources ?? {})) {
     const v = inputs[name]
     if (!isLink(v)) continue
