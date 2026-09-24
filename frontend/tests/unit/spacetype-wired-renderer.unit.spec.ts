@@ -34,11 +34,12 @@ vi.mock('~/lib/spacetype/engine', () => {
   return { SpaceTypeEngine: FakeSpaceTypeEngine }
 })
 vi.mock('~/lib/spacetype/webgl', () => ({ detectWebGL: () => true }))
-// The font priming would inject a Google Fonts <link> that happy-dom tries to fetch.
-const ensureFontSpy = vi.fn(async () => {})
+// The font loader would inject a Google Fonts <link> that happy-dom tries to fetch.
+// (tests/unit/spacetype-font-ready.unit.spec.ts pins the loader's own ordering.)
+const ensureFontSpy = vi.fn(async (..._a: unknown[]) => true)
 vi.mock('~/lib/spacetype/state', async (importOriginal) => ({
   ...(await importOriginal<typeof import('~/lib/spacetype/state')>()),
-  ensureSpaceTypeFont: (...a: unknown[]) => ensureFontSpy(...(a as [])),
+  ensureSpaceTypeStateFont: (...a: unknown[]) => ensureFontSpy(...a),
 }))
 
 const { createWiredSpaceTypeRenderer } = await import('~/lib/spacetype/wiredRenderer')
@@ -51,8 +52,6 @@ beforeEach(() => { calls.length = 0; renderArgs.length = 0; ctorOpts.length = 0;
 
 describe('createWiredSpaceTypeRenderer', () => {
   it('creates its engine lazily at the requested size and rebuilds with the original setter order', async () => {
-    let fontLanded!: () => void
-    ensureFontSpy.mockImplementationOnce(() => new Promise<void>(res => { fontLanded = res }))
     const r = createWiredSpaceTypeRenderer()
     expect(ctorOpts).toHaveLength(0)
     const canvas = await r.render(state(), 0.25, 640, 360)
@@ -63,17 +62,54 @@ describe('createWiredSpaceTypeRenderer', () => {
       'setSize', 'setBackground', 'setProjection', 'setPost', 'setPan', 'setFps', 'setLoopDuration', 'setEffect', 'build',
       'setSize', 'renderFrameAt',
     ])
-    // The font is primed once, at creation, and its landing forces one rebuild.
-    expect(ensureFontSpy).toHaveBeenCalledTimes(1)
-    calls.length = 0
-    await r.render(state(), 0.25, 640, 360)
-    expect(calls).toEqual(['setSize', 'renderFrameAt'])   // font not landed yet: no rebuild
+  })
+
+  it('the first pull builds only after the state\'s faces have loaded (never a fallback atlas)', async () => {
+    let fontLanded!: () => void
+    ensureFontSpy.mockImplementationOnce(() => new Promise<boolean>(res => { fontLanded = () => res(true) }))
+    const s = state()
+    const r = createWiredSpaceTypeRenderer()
+    const pull = r.render(s, 0.25, 640, 360)
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    expect(ensureFontSpy).toHaveBeenCalledWith(s)
+    expect(calls).not.toContain('build')   // waiting on the face: no atlas yet
     fontLanded()
-    await Promise.resolve(); await Promise.resolve()
-    calls.length = 0
-    await r.render(state(), 0.25, 640, 360)
+    expect(await pull).toBeInstanceOf(HTMLCanvasElement)
     expect(calls).toContain('build')
+    // A clean pull does not wait on fonts again.
+    calls.length = 0; ensureFontSpy.mockClear()
+    await r.render(s, 0.5, 640, 360)
+    expect(ensureFontSpy).not.toHaveBeenCalled()
+    expect(calls).toEqual(['setSize', 'renderFrameAt'])
+  })
+
+  it('a changed state (markDirty) waits for its faces again before rebuilding', async () => {
+    const r = createWiredSpaceTypeRenderer()
+    await r.render(state(), 0, 320, 180)
+    ensureFontSpy.mockClear(); calls.length = 0
+    r.markDirty()
+    await r.render(state(), 0, 320, 180)
     expect(ensureFontSpy).toHaveBeenCalledTimes(1)
+    expect(calls).toContain('build')
+  })
+
+  it('when the wait runs out it builds with what there is, and rebuilds once the face lands', async () => {
+    let lateLanded!: () => void
+    ensureFontSpy
+      .mockImplementationOnce(async () => false)   // the bounded wait ran out
+      .mockImplementationOnce(() => new Promise<boolean>(res => { lateLanded = () => res(true) }))
+    const r = createWiredSpaceTypeRenderer()
+    await r.render(state(), 0, 320, 180)
+    expect(calls).toContain('build')
+    expect(ensureFontSpy.mock.calls[1]![1]).toEqual({ timeoutMs: Infinity })
+    calls.length = 0
+    await r.render(state(), 0, 320, 180)
+    expect(calls).not.toContain('build')   // not landed yet
+    lateLanded()
+    for (let i = 0; i < 5; i++) await Promise.resolve()
+    calls.length = 0
+    await r.render(state(), 0, 320, 180)
+    expect(calls).toContain('build')
   })
 
   it('does not rebuild until marked dirty', async () => {

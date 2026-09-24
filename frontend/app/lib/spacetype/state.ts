@@ -4,7 +4,7 @@ import { defaultsFromControls, RAW_WORD_EFFECTS } from './effect'
 import { separatorFromParams } from './separator'
 import { resolveFontFamily, fontHasWeightAxis } from '~/lib/font/resolveFamily'
 import { parseLibraryFontValue } from '~/lib/scene3d/outlines'
-import { googleFontCssUrl } from '~/data/google-fonts'
+import { googleFontCssUrl, loadGoogleCatalog } from '~/data/google-fonts'
 import { useLibraryFonts } from '~/composables/useLibraryFonts'
 import type { SpaceTypeState } from '~~/shared/spacetype/state'
 
@@ -60,34 +60,108 @@ function familyFromValue(value: string): string {
   return local ? local.family : resolveFontFamily(value || 'Inter')
 }
 
-// Families whose CSS has been injected this page load (Google <link> path only;
-// library families are tracked by useLibraryFonts itself).
-const loadedFontFamilies = new Set<string>()
+// Stylesheet readiness per <link>, so every caller waits on one promise per sheet (and a
+// sheet that failed is waited on once, not once per build).
+const sheetReady = new WeakMap<HTMLLinkElement, Promise<void>>()
 
-/** Load the CSS face for a stored font value so the text atlas rasterizes with
- *  the real font. Mirrors the modal's ensureFont: `local:` tokens inject the
- *  library @font-face block; anything else resolves to a family and injects a
- *  Google Fonts stylesheet. Legacy VARIABLE_FONTS ids resolve via
- *  resolveFamily's LEGACY_FONT_IDS, so saved nodes keep working. */
-export async function ensureSpaceTypeFont(value: string): Promise<void> {
-  if (typeof document === 'undefined') return
-  const local = parseLibraryFontValue(value)
-  if (local) {
-    useLibraryFonts().ensure(local.family)
-    try { await document.fonts.load(`700 32px "${local.family}"`) } catch { /* best-effort */ }
-    return
+/** Resolves once the stylesheet's @font-face rules are in document.fonts: at its load, at its
+ *  error (nothing more will arrive), or after `ms`. A sheet that has already loaded resolves
+ *  at once. */
+function stylesheetSettled(link: HTMLLinkElement, ms: number): Promise<void> {
+  let p = sheetReady.get(link)
+  if (!p) {
+    p = link.sheet ? Promise.resolve() : new Promise<void>((resolve) => {
+      link.addEventListener('load', () => resolve(), { once: true })
+      link.addEventListener('error', () => resolve(), { once: true })
+      setTimeout(resolve, ms)
+    })
+    sheetReady.set(link, p)
   }
-  const family = resolveFontFamily(value || 'Inter')
-  if (!loadedFontFamilies.has(family)) {
-    const key = family.replace(/[^a-zA-Z0-9]/g, '_')
-    if (!document.querySelector(`link[data-stg-font="${key}"]`)) {
-      const link = document.createElement('link')
-      link.rel = 'stylesheet'; link.href = googleFontCssUrl(family); link.setAttribute('data-stg-font', key)
-      document.head.appendChild(link)
+  return p
+}
+
+/** The stylesheet <link> that serves `family`, injected if absent. The href comes from the
+ *  catalog when it has loaded (every weight / the full axis ranges); a link injected before
+ *  the catalog (400 only) is kept, and the full one is added beside it once it is known, so a
+ *  bold drawn later is never the 400 cut thickened. */
+function familyStylesheet(family: string): HTMLLinkElement {
+  const key = family.replace(/[^a-zA-Z0-9]/g, '_')
+  const href = googleFontCssUrl(family)
+  const existing = [...document.querySelectorAll<HTMLLinkElement>(`link[data-stg-font="${key}"]`)]
+  const same = existing.find(l => l.getAttribute('href') === href)
+  if (same) return same
+  const link = document.createElement('link')
+  link.rel = 'stylesheet'; link.href = href; link.setAttribute('data-stg-font', key)
+  document.head.appendChild(link)
+  return link
+}
+
+const STYLESHEET_WAIT_MS = 10_000
+const CATALOG_WAIT_MS = 3_000
+
+/** Wait (bounded) for the Google catalog: the stylesheet href and the static-family weight
+ *  pinning both read it. It resolves to [] on failure, so this never throws. */
+async function catalogSettled(): Promise<void> {
+  await Promise.race([loadGoogleCatalog(), new Promise(r => setTimeout(r, CATALOG_WAIT_MS))])
+}
+
+/** Load the CSS face for a stored font value so the text atlas rasterizes with the real font.
+ *  `local:` tokens inject the library @font-face block; anything else resolves to a family
+ *  (legacy VARIABLE_FONTS ids and `google:Family@W` tokens included, via resolveFontFamily)
+ *  and gets its Google Fonts stylesheet.
+ *
+ *  The order is the point. A face cannot be loaded before the stylesheet that declares it
+ *  has arrived: `document.fonts.load` would find no @font-face, resolve with nothing, and a
+ *  build right after would rasterize a fallback face into the atlas — and a wired layer's
+ *  pre-rendered frames with it. So: the catalog (bounded), then the stylesheet has LOADED,
+ *  then `document.fonts.load` for each exact weight, with the text to draw so every
+ *  unicode-range file it needs comes too.
+ *
+ *  Resolves true once the faces have loaded (or failed for good), false when `timeoutMs`
+ *  ran out first; never throws. */
+export async function ensureSpaceTypeFont(
+  value: string,
+  opts: { weights?: number[]; text?: string; timeoutMs?: number } = {},
+): Promise<boolean> {
+  if (typeof document === 'undefined') return true
+  const weights = [...new Set(opts.weights?.length ? opts.weights : [700])]
+  const text = opts.text || undefined
+  const settle = async (): Promise<void> => {
+    const local = parseLibraryFontValue(value)
+    let family: string
+    if (local) {
+      useLibraryFonts().ensure(local.family)   // injects its @font-face rules synchronously
+      family = local.family
+    } else {
+      await catalogSettled()
+      family = resolveFontFamily(value || 'Inter')
+      await stylesheetSettled(familyStylesheet(family), STYLESHEET_WAIT_MS)
     }
-    loadedFontFamilies.add(family)
+    await Promise.all(weights.map(async (w) => {
+      try { await document.fonts.load(`${w} 32px "${family}"`, text) } catch { /* best-effort */ }
+    }))
   }
-  try { await document.fonts.load(`700 32px "${family}"`) } catch { /* best-effort */ }
+  const ms = opts.timeoutMs ?? STYLESHEET_WAIT_MS + CATALOG_WAIT_MS + 5_000
+  if (!Number.isFinite(ms)) { await settle(); return true }
+  return Promise.race([settle().then(() => true), new Promise<boolean>(r => setTimeout(() => r(false), ms))])
+}
+
+/** The faces one state's build rasterizes, loaded (ensureSpaceTypeFont): the atlas weight
+ *  texOptsFromState resolves — read AFTER the catalog, which pins a static family to 400 —
+ *  and 400, the weight effects that draw their own glyphs without naming one use. The text
+ *  is the atlas labels plus the raw text, so an accented or non-Latin word loads its files. */
+export async function ensureSpaceTypeStateFont(
+  s: Pick<SpaceTypeState, 'effectId' | 'params' | 'gradientStops'>,
+  opts: { timeoutMs?: number } = {},
+): Promise<boolean> {
+  if (typeof document === 'undefined') return true
+  if (!parseLibraryFontValue(String(s.params.font ?? ''))) await catalogSettled()
+  const tex = texOptsFromState(s)
+  return ensureSpaceTypeFont(String(s.params.font ?? ''), {
+    weights: [400, tex.fontWeight],
+    text: tex.labels.join('') + String(s.params.text ?? ''),
+    timeoutMs: opts.timeoutMs,
+  })
 }
 
 /**

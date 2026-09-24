@@ -4,14 +4,14 @@
 // MOVED verbatim from SpaceTypeNode.vue (createHeadless / ensureHeadless / renderAt, plus the
 // `headlessDirty` flag the node sets on config changes, now `markDirty()`), so the node and the
 // Frame-export parity harness render through ONE code path. Keep it that way: same setters in
-// the same order, same font priming, same syncImageTextures handling, same wiredLoopFrameArg
+// the same order, same font readiness, same syncImageTextures handling, same wiredLoopFrameArg
 // timing. A change here changes what every wired Space Type layer shows.
 
 import { SpaceTypeEngine } from './engine'
 import { detectWebGL } from './webgl'
 import { getEffect } from './effects'
 import { loopMultiplier, wiredLoopFrameArg } from './loop'
-import { ensureSpaceTypeFont, texOptsFromState, type SpaceTypeState } from './state'
+import { ensureSpaceTypeStateFont, texOptsFromState, type SpaceTypeState } from './state'
 import { DEFAULT_POST } from './post'
 import { syncImageTextures } from './imageTextures'
 
@@ -50,10 +50,6 @@ export function createWiredSpaceTypeRenderer(): WiredSpaceTypeRenderer {
         projection: s.projection ?? 'perspective',
       })
       headlessDirty = true
-      // A card mount usually primes the font first (shared global cache), but if a pull
-      // races ahead, force one rebuild once the font resolves so text isn't baked with
-      // a fallback face. Config-driven font changes are primed by the card's own await.
-      void ensureSpaceTypeFont(String(s.params.font)).then(() => { headlessDirty = true })
     }
     return headlessEngine
   }
@@ -85,6 +81,18 @@ export function createWiredSpaceTypeRenderer(): WiredSpaceTypeRenderer {
       const fresh = createHeadless(read(), w, h)
       if (fresh && await syncImageTextures(fresh, read().effectId, read().params, () => headlessEngine === fresh)) headlessDirty = true
       if (disposed) return null
+      // A build rasterizes the text atlas once, so its faces must be LOADED first — on the
+      // very first pull of a freshly opened project too, before any card has primed them.
+      // Otherwise the atlas (and every pre-rendered export frame built from it) is drawn in a
+      // fallback face. Bounded: if the font is still out when the wait runs out, build with
+      // what there is and rebuild on the next pull after it lands.
+      if (headlessDirty) {
+        const s = read()
+        if (!await ensureSpaceTypeStateFont(s)) {
+          void ensureSpaceTypeStateFont(s, { timeoutMs: Infinity }).then(() => { headlessDirty = true })
+        }
+        if (disposed) return null
+      }
       const eng = ensureHeadless(read(), w, h)
       if (!eng || !headlessCanvas) return null
       const s = read()

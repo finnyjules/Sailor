@@ -7,7 +7,7 @@ import { getEffect } from '~/lib/spacetype/effects'
 import { loopMultiplier } from '~/lib/spacetype/loop'
 import { effectiveLoopSeconds } from '~/lib/compositor/loopReconcile'
 import {
-  defaultSpaceTypeState, dimsFromState, ensureSpaceTypeFont, texOptsFromState,
+  defaultSpaceTypeState, dimsFromState, ensureSpaceTypeStateFont, texOptsFromState,
   type SpaceTypeState,
 } from '~/lib/spacetype/state'
 import { DEFAULT_POST } from '~/lib/spacetype/post'
@@ -184,7 +184,7 @@ onMounted(async () => {
     fps: s.fps, loopDuration: s.loopDuration, alpha: s.transparent, bgColor: s.bgColor,
     projection: s.projection ?? 'perspective',
   })
-  await ensureSpaceTypeFont(String(s.params.font))
+  await ensureSpaceTypeStateFont(s)
   await syncCardImages()
   rebuild()
   // Weight pinning for static families (texOptsFromState) reads the Google
@@ -234,7 +234,7 @@ async function bakeOutput(): Promise<Blob | null> {
     // `fetchShaderFxCatalog` throws SYNCHRONOUSLY outside a Nuxt runtime context, which
     // `.catch()` cannot intercept (see spaceTypeClipBake.ts's identical guard for the full why).
     try { await fetchShaderFxCatalog() } catch { /* offline/backend down, or non-Nuxt context — bake proceeds and falls back same as before */ }
-    await ensureSpaceTypeFont(String(s.params.font))
+    await ensureSpaceTypeStateFont(s)
     // Important 5 (final review): this IS an export (the studio render cascade), not the
     // live preview — without setBake(true) a shader fill stayed clamped to the LIVE_FIELD_PX
     // live-preview field size (engine.build's withShaderFillContext hardcoded `this._bake`,
@@ -280,7 +280,7 @@ watch(state, (s) => {
     rebuildTimer = null
     if (!engine) return
     previewH.value = previewHeight(s)
-    await ensureSpaceTypeFont(String(s.params.font))
+    await ensureSpaceTypeStateFont(s)
     await syncCardImages()
     rebuild()
   }, 80)

@@ -16,7 +16,7 @@ import { detectWebGL } from '~/lib/spacetype/webgl'
 import { DEFAULT_POST, type PostSettings } from '~/lib/spacetype/post'
 import StudioControlPanel from '~/components/vue-canvas/studio/StudioControlPanel.vue'
 import { postControls, POST_SECTIONS } from '~/lib/studio/post/controls'
-import { texOptsFromState, type SpaceTypeState } from '~/lib/spacetype/state'
+import { ensureSpaceTypeStateFont, texOptsFromState, type SpaceTypeState } from '~/lib/spacetype/state'
 import { ensureSpaceTypeBake } from '~/lib/spacetype/bake'
 import { encodeFrames } from '~/lib/engine/encodeVideo'
 import { canvasHasAlpha } from '~/lib/engine/hasAlpha'
@@ -28,7 +28,7 @@ import { hostedModeEnabled } from '~/lib/hostedMode'
 import { useStudioAutosave } from '~/lib/studio/autosave'
 import { loopMultiplier, previewFrameAt } from '~/lib/spacetype/loop'
 import { effectiveLoopSeconds } from '~/lib/compositor/loopReconcile'
-import { loadGoogleCatalog, googleFontCssUrl, googleAxisList, resolveFontFamily, fontHasWeightAxis, type GoogleFont } from '~/data/google-fonts'
+import { loadGoogleCatalog, googleAxisList, resolveFontFamily, fontHasWeightAxis, type GoogleFont } from '~/data/google-fonts'
 import type { GradientStop } from '~/lib/spacetype/gradient'
 import FontPicker from '~/components/vue-canvas/FontPicker.vue'
 import StudioModalShell from '~/components/vue-canvas/StudioModalShell.vue'
@@ -740,7 +740,7 @@ function selectFont(key: string, family: string) {
 // A `local:` token carries its real family name directly (no catalog lookup needed,
 // unlike a Google value which may be a legacy VARIABLE_FONTS id) — used everywhere
 // `resolveFontFamily(String(params.font))` used to stand alone, so the CSS-render path
-// (fontIsVariable/varAxisList/texOpts/ensureFont) treats a library pick like any other.
+// (fontIsVariable/varAxisList/texOpts/ensureEffectFonts) treats a library pick like any other.
 function displayFontFamily(value: string): string {
   const local = parseLibraryFontValue(value)
   return local ? local.family : resolveFontFamily(value)
@@ -782,30 +782,6 @@ watch(() => String(params.font), syncFontAxes)
 watch(fontCatalog, syncFontAxes)
 watch(fontAxes, () => rebuild(), { deep: true })
 
-const loadedFontFamilies = new Set<string>()
-async function ensureFont(value: string) {
-  // A `local:` token needs its family's @font-face rules injected (the CSS-world half
-  // of the font library — mirrors useUploadedFonts.ensure()) rather than a Google Fonts
-  // <link>; resolveFontFamily doesn't understand the token, so branch before it.
-  const local = parseLibraryFontValue(value)
-  if (local) {
-    useLibraryFonts().ensure(local.family)
-    try { await document.fonts.load(`700 32px "${local.family}"`) } catch { /* best-effort */ }
-    return
-  }
-  const family = resolveFontFamily(value)
-  if (!loadedFontFamilies.has(family)) {
-    const key = family.replace(/[^a-zA-Z0-9]/g, '_')
-    if (!document.querySelector(`link[data-stg-font="${key}"]`)) {
-      const link = document.createElement('link')
-      link.rel = 'stylesheet'; link.href = googleFontCssUrl(family); link.setAttribute('data-stg-font', key)
-      document.head.appendChild(link)
-    }
-    loadedFontFamilies.add(family)
-  }
-  try { await document.fonts.load(`700 32px "${family}"`) } catch { /* best-effort */ }
-}
-
 // Boost needs the font's vector OUTLINE (via fontkit), not just the CSS face. Preload it
 // before rebuild so buildScene has the glyph shapes; never throws (falls back internally).
 //
@@ -820,7 +796,9 @@ async function ensureFont(value: string) {
 // build) picks up the real glyph outlines. Never throws: a failed font load leaves the cache
 // cold and buildScene's `?? [shapeContour('oval', ...)]` fallback keeps handling it.
 async function ensureEffectFonts() {
-  await ensureFont(String(params.font))
+  // The shared loader (ensureSpaceTypeStateFont): the stylesheet has LOADED before the exact
+  // faces are asked for, so the first build of a new family is not rasterized in a fallback.
+  await ensureSpaceTypeStateFont({ effectId: effectId.value, params: params as SpaceTypeState['params'], gradientStops })
   if (effectId.value === 'boost') { try { await ensureBoostFont(String(params.font)) } catch { /* fallback */ } }
   if (effectId.value === 'loft' && resolveShape(params) === 'word') {
     const url = fontSourceUrl(outlineFontValue(String(params.font || '')))
