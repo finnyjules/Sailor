@@ -116,6 +116,17 @@ The arrangement is today's: a prompt row directly above the toolbar at the botto
 - **Leaving:** Esc clears a mode chip first (on an empty field), then leaves the field. Clicking away leaves it.
 - **It replaces `CanvasPromptBar`'s internals in the same place.** The zoom bar and minimap (bottom right) and the top bar (project menu, Run with its cost, the status pill) are unchanged.
 
+### 2.1a One prompt component, identical everywhere (decided 2026-09-24)
+
+The canvas, every studio, Frame, 3D and the template editor render **the same prompt component** (one Vue component; working name `SailorPrompt`), not look-alikes. It replaces `CanvasPromptBar`, `AgentBar` and `VibeControlBar`.
+
+- **Identical in every place:** height, corner radius, colours and border, the ✦ mark, chip style (selection and mode), placeholder wording pattern, the suggestion row above it, the progress-with-Stop state, the takes strip above it, keyboard behaviour (/ and ⌘K to focus, Esc, Enter), and its answer and approval cards.
+- **Allowed to differ, and only these:**
+  - **width:** the toolbar's width on the canvas; the preview's or tool bar's width in a studio;
+  - **what fills it:** the selection chip, the suggestions, and the placeholder, which follow what's selected where you are.
+- **Where hosts plug in:** each host supplies its context (the selection label, suggestions, and where takes preview) through props or a small adapter, never through its own markup or styles. A host that needs a visual variation is a design change to the one component, not a local override.
+- **Guard:** a unit test fails if any `.vue` file outside the component renders its own prompt input for instructions (content prompts use the shared content field, §6).
+
 ### 2.2 No libraries rail (dropped 2026-09-24)
 
 The earlier design's left rail existed only to free room in the bar for a prompt. The prompt keeps its own row instead, so the libraries stay in the toolbar where they are today. The rail-related decisions (short-window folding, Annotate moving into Add, Toolbox moving into More) are withdrawn.
@@ -227,7 +238,7 @@ The prompt's suggestions and results follow Frame's selection:
 | `NextStepsStrip.vue` (not rendered anywhere) | Deleted |
 | Moodboard read, wardrobe describe, LoRA trainer captions | Unchanged. They fill fields automatically and aren't prompts. |
 
-**Prompt input components go from 5 to 2:**
+**Prompt input components go from 5 to 2, and the instruction prompt looks identical in every view (§2.1a):**
 - **the prompt** (instructions);
 - **the shared content field** (§6).
 
