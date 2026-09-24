@@ -24,24 +24,29 @@ export const overprint: LayoutDef = {
   id: 'overprint', name: 'Overprint', fits: [...ALL],
   premise: { overlap: [['title', 'details']] },
   accentCopy: 'details',
-  fn(S, { c, ph, lines }) {
-    const { X, SPAN, L, M, GAP, DISPLAY, sizeFor, blockH, disp, info, infoRow, photoIn, FOOT2, q } = S
+  fn(S, { c, ph, lines, accentCopy }) {
+    const { X, SPAN, L, M, GAP, DISPLAY, sizeFor, blockH, disp, info, infoRow, infoStack, photoIn, FOOT2, FOOT3, q } = S
+    // Ruling D2 (recolour off): the big details are the layout's own accent copy, and the user's
+    // details line joins the small information — the top-left column with the date beside an
+    // image, else the foot row (FOOT3, the Swiss row with the details).
+    const copy = accentCopy && !!c.details
     const els: El[] = []
     const tTop = ph ? L(6) : L(2)
     const size = sizeFor(lines, SPAN(1, 12), (ph ? L(10) : L(9)) - tTop)
     const tH = blockH(lines.length, size, DISPLAY.lh)
-    els.push(disp(lines.join('\n'), { size, x: X(1), top: tTop, over: ['details'] }))
+    els.push(disp(lines.join('\n'), { size, x: X(1), top: tTop, over: [copy ? 'detailsCopy' : 'details'] }))
     if (c.details) {
       const dLines = c.details.split(' ')
       const dTop = tTop + tH * 0.55
       const dSize = Math.min(size, sizeFor(dLines, SPAN(1, 12), L(15) - GAP - dTop, { ...DISPLAY, role: 'details' }))
-      els.push(disp(dLines.join('\n'), { size: dSize, x: X(1), top: dTop, color: 'accent', blend: true, role: 'details', over: ['title'] }))
+      els.push(disp(dLines.join('\n'), { size: dSize, x: X(1), top: dTop, color: 'accent', blend: true, role: 'details', over: ['title'], ...(copy ? { copy: true as const } : {}) }))
     }
     if (ph) {
-      if (c.date) els.push(info(c.date, { x: X(1), w: SPAN(1, 6), top: M, role: 'date' }))
+      if (copy) els.push(...infoStack([{ s: c.details!, wt: 500, role: 'details' }, ...(c.date ? [{ s: c.date, role: 'date' }] : [])], 1, 6, M).els)
+      else if (c.date) els.push(info(c.date, { x: X(1), w: SPAN(1, 6), top: M, role: 'date' }))
       els.push(photoIn({ c1: 7, c2: 12, top: M, bottom: tTop - GAP }))
       if (c.caption) els.push(info(c.caption, { x: X(1), w: SPAN(1, 6), base: L(16), role: 'caption' }))
-    } else els.push(...infoRow(c, FOOT2, 'foot').els)
+    } else els.push(...infoRow(c, copy ? FOOT3 : FOOT2, 'foot').els)
     return { els, did: `${q(c.details)}, set as large as the title, overprints its lower half in accent.` }
   },
 }
@@ -52,22 +57,24 @@ export const dateBehind: LayoutDef = {
   needs: { number: true },
   premise: { overlap: [['title', 'date']] },
   accentCopy: 'date',
-  fn(S, { c, ph, lines }) {
-    const { X, SPAN, L, M, RH, GAP, DISPLAY, sizeFor, blockH, disp, infoRow, photoIn, q } = S
+  fn(S, { c, ph, lines, accentCopy }) {
+    const { X, SPAN, L, M, RH, GAP, DISPLAY, sizeFor, blockH, disp, infoRow, photoIn, FOOT3, q } = S
     // `needs.number` guarantees a date; without one there is nothing to set behind the title.
     if (!c.date) return { els: [{ k: 'missing', why: 'no number to set behind the title' }], did: '' }
+    // Ruling D2 (recolour off): the huge number is the layout's own accent copy, and the user's
+    // date line joins the foot row (FOOT3, the Swiss row with the date between details and caption).
     // short lines set bigger: "19.09.–15.11.2026" → 19.09. / –15.11. / 2026
     let dl = c.date.replace('–', '\n–').split('\n')
     const yr = dl[dl.length - 1]!.match(/^(.*\.)(\d{4})$/)
     if (yr && !/\d{4}/.test(dl[0]!)) dl = [...dl.slice(0, -1), yr[1]!, yr[2]!]
-    const f = infoRow(c, [['details', 1, 4], ['caption', 5, 12]], 'foot')
+    const f = infoRow(c, accentCopy ? FOOT3 : [['details', 1, 4], ['caption', 5, 12]], 'foot')
     const dSize = sizeFor(dl, SPAN(1, 12), (ph ? L(7) : f.top - GAP) - M, { ...DISPLAY, role: 'date' })
-    const els: El[] = [disp(dl.join('\n'), { size: dSize, x: X(1), top: M, color: 'accent', role: 'date', over: ['title'] })]
+    const els: El[] = [disp(dl.join('\n'), { size: dSize, x: X(1), top: M, color: 'accent', role: 'date', over: ['title'], ...(accentCopy ? { copy: true as const } : {}) })]
     const dH = blockH(dl.length, dSize, DISPLAY.lh)
     const size = sizeFor(lines, SPAN(1, 12), Math.min(RH * 6, dH * 0.8))
     const tH = blockH(lines.length, size, DISPLAY.lh)
     const base = M + dH / 2 + tH / 2                    // the title sits on the middle of the date block
-    els.push(disp(lines.join('\n'), { size, x: X(1), base, blend: true, over: ['date'] }))
+    els.push(disp(lines.join('\n'), { size, x: X(1), base, blend: true, over: [accentCopy ? 'dateCopy' : 'date'] }))
     els.push(...f.els)
     if (ph) els.push(photoIn({ c1: 1, c2: 12, top: Math.max(base, M + dH) + GAP, bottom: f.top - GAP }, { ay: 'bottom' }))
     return { els, did: `${q(c.date)}, huge in accent, sits behind the title.` }

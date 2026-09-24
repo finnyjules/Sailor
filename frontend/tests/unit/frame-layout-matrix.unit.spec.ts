@@ -78,7 +78,8 @@ describe('layout matrix — every candidate passes the checker and keeps its pre
       expect(plan!.issues, JSON.stringify(cand.choice)).toEqual([])
       // Nothing the user wrote is dropped: every text role on the frame is placed by the layout.
       // (Ring sets the title on a `ring` element, which the planner turns into a text path.)
-      const roles = new Set(cand.out.els.map(e => (e.k === 't' || e.k === 'ring' ? (e.role ?? '').replace(/\d+$/, '') : '')))
+      // A layout's accent copy of a line (ruling D2) is not the line: the user's own must be placed too.
+      const roles = new Set(cand.out.els.map(e => ((e.k === 't' && !e.copy) || e.k === 'ring' ? (e.role ?? '').replace(/\d+$/, '') : '')))
       for (const r of TEXT_ROLES) expect(roles.has(r), `${r} not placed (${JSON.stringify(cand.choice)})`).toBe(true)
       checked++
     }
@@ -236,11 +237,22 @@ describe('image and overlap layouts on a real frame', () => {
     const cand = candidatesForFrame(a)[0]!
     return { cand, plan: planLayout({ ...a, choice: cand.choice })! }
   }
+  const layersOfRecolour = (id: string, w: number, h: number) => {
+    const def = LAYOUTS.find(l => l.id === id)!
+    const a = { ...baseArgs(def, { id, kind: 'phrase', image: false, w, h }), recolour: true }
+    return planLayout({ ...a, choice: candidatesForFrame(a)[0]!.choice })!.layers as unknown as Layer[]
+  }
   type Layer = { id: string; kind: string; opacity?: number; blend?: string; crop?: { fit: string }; mask?: { kind: string }; standIn?: boolean; x: number; y: number; w: number }
 
   it.each(FRAMES)('blend and opacity reach the layers: Overprint, Number behind, Ghost (%i×%i)', (w, h) => {
     const over = layersOf('overprint', 'phrase', w, h, false).plan.layers as unknown as Layer[]
-    expect(over.find(l => l.id === 'd')!.blend).toBe('multiply')          // the details overprint in accent, multiplied
+    // Recolour off (ruling D2): the big details are the layout's accent copy, multiplied; the
+    // user's own details line is a small one in the foot row, drawn plainly.
+    const copy = over.find(l => (l as { owner?: { key: string } }).owner?.key === 'copy-0')!
+    expect(copy.blend).toBe('multiply')
+    expect(over.find(l => l.id === 'd')!.blend).toBeUndefined()
+    const overOn = layersOfRecolour('overprint', w, h)
+    expect(overOn.find(l => l.id === 'd')!.blend).toBe('multiply')        // recolour on: the details overprint in accent, multiplied
     const behind = layersOf('dateBehind', 'phrase', w, h, false).plan.layers as unknown as Layer[]
     expect(behind.find(l => l.id === 't')!.blend).toBe('multiply')        // the title multiplies over the date
     const ghost = layersOf('ghost', 'phrase', w, h, false).plan.layers as unknown as Layer[]

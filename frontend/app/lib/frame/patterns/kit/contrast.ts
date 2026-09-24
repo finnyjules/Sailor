@@ -182,6 +182,8 @@ export interface PieceFills {
 function textColour(e: OnPiece, ctx: FillCtx): string | null {
   if (e.k === 'own') return hex6(e.hex ?? ctx.palette[e.color ?? 'ink'])
   if (e.k === 'stars') return hex6(ctx.palette.accent)
+  // A layout's accent copy of a line (ruling D2) is its piece, drawn in its element's colour.
+  if (e.copy) return hex6(ctx.palette[e.color ?? 'accent'])
   if (ctx.layerColour(baseRole(e.role)) === undefined) return null
   return hex6(ctx.recolour ? ctx.palette[e.color ?? 'ink'] : ctx.layerColour(baseRole(e.role)))
 }

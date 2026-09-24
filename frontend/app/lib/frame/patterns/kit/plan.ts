@@ -144,6 +144,9 @@ interface Prepared {
    *  layer the caption face is measured from (the caption, else the first content line measured in
    *  that face), else the title's — so what the checker measured is what is drawn. */
   ownFace: { family: string; weight: number } | undefined
+  /** Ruling D2: the overlap layout draws its crossing line as an owned accent copy (the face of the
+   *  user's line it copies). Undefined: the layout runs exactly as before. */
+  accentCopy: AccentCopy | undefined
 }
 
 /** Every text role a Frame can hold: the targets, the measure and the stored roles cover all of
@@ -237,7 +240,8 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
     layerColour: role => (TEXT_ROLES as string[]).includes(role) && targets[role as RoleKey] ? colourOf(targets[role as RoleKey]) ?? null : undefined,
     ...(shapeLayer ? { shapeFill: shapeLayer.fill ?? null } : {}),
   }
-  return { def, index, layers, elements, baseElements: views.base.elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props), fmt, hidden, style: a.style ?? 'swiss', composedH, fillCtx, read, contentRead: views.content.read, ownFace }
+  const accentCopy = accentCopyFor(def, layers, targets, a.palette, a.recolour)
+  return { def, index, layers, elements, baseElements: views.base.elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props), fmt, hidden, style: a.style ?? 'swiss', composedH, fillCtx, read, contentRead: views.content.read, ownFace, accentCopy }
 }
 
 /** The Frame and how to read it. `layoutId` (the functions below that quote or restore a format's
@@ -512,7 +516,7 @@ function runChoice(p: Prepared, a: { frameW: number; frameH: number; style?: Sty
   const lineOpts = lineOptions(p.kind, c.title, p.def.oneLineFirst)
   const lines = (lineOpts[choice.lines] ?? lineOpts[0]!).lines
   const r = mulberry32(seedFor(p.index, choice))
-  const out = p.def.fn(S, { c, kind: p.kind, ph: p.hasImage && !side, r, words, lines, arr: choice.arr })
+  const out = p.def.fn(S, { c, kind: p.kind, ph: p.hasImage && !side, r, words, lines, arr: choice.arr, ...(p.accentCopy ? { accentCopy: true as const } : {}) })
   // Run-off keeps its image OVER the title (the title runs under it); everything else puts it behind.
   if (side && p.def.id === 'runoff') { side.ok = true; out.els.push(side) } else if (side) out.els.unshift(side)
   const designW = fmt ? { designW: fmt.w } : {}
@@ -683,10 +687,9 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
   // A layout's own words (Stage 4, ruling R10) take the caption layer's family and weight — only
   // passed when drawn.
   if (out.els.some(e => e.k === 'own') && p.ownFace) { pieces.ownFamily = p.ownFace.family; pieces.ownWeight = p.ownFace.weight }
-  // Task 4 of the layout decisions: an overlap layout's accent copy of its crossing line, recolour
-  // off only — only passed when drawn, so every other call is unchanged.
-  const copy = accentCopyFor(p, out.els, a)
-  if (copy) pieces.accentCopy = copy
+  // Ruling D2: an overlap layout's accent copy of its crossing line (recolour off) — the face is
+  // only passed when the layout drew a copy, so every other call is unchanged.
+  if (p.accentCopy && out.els.some(e => e.k === 't' && e.copy)) pieces.accentCopy = p.accentCopy
   // The fills the check just read (ruling R6): only when a piece carries text, so a layout without
   // one (every Swiss layout but Badge, Knockout and the panels) calls toOps exactly as before.
   if (pf.fills.size) pieces.fills = pf.fills
@@ -736,20 +739,20 @@ const oklabDistance = (a: string, b: string): number => {
   return Math.hypot(l1 - l2, a1 - a2, b1 - b2)
 }
 
-/** The accent copy an overlap layout draws (`LayoutDef.accentCopy`), or undefined when it draws
- *  none: recolour is on (the user's line takes the accent itself); the layout set no line of that
- *  role, or the Frame has no text layer for it; or the copy would not differ visibly from the
- *  user's line — its colour is not a plain colour, or it is the accent already, or all but
- *  (`ACCENT_COPY_MIN_DIFF`). The face is the user's layer's, with its own letter case as this apply
- *  leaves it (a case an earlier layout set and the user kept goes back to theirs). */
-function accentCopyFor(p: Prepared, els: El[], a: LayoutPlanArgs): AccentCopy | undefined {
-  const role = p.def.accentCopy
-  if (!role || a.recolour) return undefined
-  const id = p.targets[role]
-  const layer = id ? p.layers.find(l => l.id === id && l.kind === 'text') as TextLayer | undefined : undefined
-  const e = els.find((x): x is Extract<El, { k: 't' }> => x.k === 't' && (x.role ?? '').replace(/\d+$/, '') === role)
-  if (!layer || !e) return undefined
-  const mine = hex6(layer.color), accent = hex6(a.palette[e.color ?? 'accent'])
+/** The accent copy an overlap layout draws (`LayoutDef.accentCopy`, ruling D2), or undefined when
+ *  it draws none and runs as before: recolour is on (the user's line takes the accent itself); the
+ *  Frame has no text layer for that role; or the copy would not differ visibly from the user's
+ *  line — its colour is not a plain colour, or it is the palette's accent already, or all but
+ *  (`ACCENT_COPY_MIN_DIFF`). Both overlap layouts set that line in the accent. The face is the user's
+ *  layer's, with its own letter case as this apply leaves it (a case an earlier layout set and the
+ *  user kept goes back to theirs). */
+function accentCopyFor(def: LayoutDef, layers: LocalLayer[], targets: RoleTargets, palette: ResolvedPalette, recolour: boolean | undefined): AccentCopy | undefined {
+  const role = def.accentCopy
+  if (!role || recolour) return undefined
+  const id = targets[role]
+  const layer = id ? layers.find(l => l.id === id && l.kind === 'text') as TextLayer | undefined : undefined
+  if (!layer) return undefined
+  const mine = hex6(layer.color), accent = hex6(palette.accent)
   if (!mine || !accent || oklabDistance(mine, accent) < ACCENT_COPY_MIN_DIFF) return undefined
   const prevCase = (layer as { layoutPrev?: Record<string, { was: unknown; set: unknown }> }).layoutPrev?.textTransform
   const ownCase = (prevCase && layer.textTransform === prevCase.set ? prevCase.was : layer.textTransform) as AccentCopy['textTransform'] | null

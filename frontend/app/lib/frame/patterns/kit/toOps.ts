@@ -254,8 +254,8 @@ export function elementsToOps(
     /** Their weight (ruling R10): the caption layer's, the one the caption face is measured at.
      *  Absent (a Frame with no caption or title layer): the kit's `wt`. */
     ownWeight?: number
-    /** Recolour off, on an overlap layout (`LayoutDef.accentCopy`): the user's line of this role
-     *  gets an owned copy in its element's colour, stacked just under it. Absent: no copy. */
+    /** Ruling D2 — recolour off, on an overlap layout (`LayoutDef.accentCopy`): the face of the
+     *  user's line its `copy` element copies. Absent: no copy is drawn. */
     accentCopy?: AccentCopy
   },
 ): { ops: LayerOp[]; owned: LocalLayer[] } {
@@ -326,32 +326,34 @@ export function elementsToOps(
       case 'missing':
         return
       case 't': {
+        if (e.copy) {
+          // Ruling D2: the layout's own accent copy of the user's line — placed lines where the
+          // layout set them, in that line's face, weight and variable axes (`accentCopy`), in the
+          // element's colour. The planner passes the face only when it drew the copy.
+          const cp = opts?.accentCopy
+          if (!cp || cp.role !== baseRole(e.role)) return
+          const key = keyFor('copy')
+          const op = displayOp([e], S, key, z)
+          const tt = op.textTransform ?? cp.textTransform
+          own(createTextLayer({
+            ...ownedBase(key, e),
+            text: e.s, x: op.x!, y: op.y!, rotation: op.rotation ?? 0,
+            fontFamily: cp.fontFamily, fontWeight: cp.fontWeight, fontSize: op.fontSize!,
+            color: paint(e.color ?? 'accent'), align: 'left', lineHeight: op.lineHeight!, letterSpacing: op.letterSpacing,
+            runs: op.runs!,
+            ...(cp.axes ? { axes: { ...cp.axes } } : {}),
+            ...(tt ? { textTransform: tt } : {}),
+          }), 'text', key, z)
+          return
+        }
         const target = textTarget(e.role)
         if (!target) return
         if (isPlaced(e)) {
           const b = baseRole(e.role)
           if (doneDisplay.has(b)) return
           doneDisplay.add(b)
-          const group = els.filter((x): x is TextEl => x.k === 't' && isPlaced(x) && baseRole(x.role) === b)
-          const op = displayOp(group, S, target, z)
-          ops.push(op)
-          const cp = opts?.accentCopy
-          if (cp && cp.role === b) {
-            // The overlap layout's accent copy: the very runs, size and spacing of the user's line,
-            // in its face, in the element's colour, just under it (z − ½; the line keeps z).
-            const first = group[0]!
-            const key = keyFor('copy')
-            const tt = op.textTransform ?? cp.textTransform
-            own(createTextLayer({
-              ...ownedBase(key, first),
-              text: group.map(g => g.s).join('\n'), x: op.x!, y: op.y!, rotation: op.rotation ?? 0,
-              fontFamily: cp.fontFamily, fontWeight: cp.fontWeight, fontSize: op.fontSize!,
-              color: paint(first.color ?? 'accent'), align: 'left', lineHeight: op.lineHeight!, letterSpacing: op.letterSpacing,
-              runs: op.runs!,
-              ...(cp.axes ? { axes: { ...cp.axes } } : {}),
-              ...(tt ? { textTransform: tt } : {}),
-            }), 'text', key, z - 0.5)
-          }
+          const group = els.filter((x): x is TextEl => x.k === 't' && isPlaced(x) && !x.copy && baseRole(x.role) === b)
+          ops.push(displayOp(group, S, target, z))
         } else {
           const op = flowOp(e, S, target, z)
           if (underlineAction && baseRole(e.role) === 'action') op.underline = true

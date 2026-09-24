@@ -24,6 +24,14 @@ function roleLabel(e: Present): string {
   return e.role ?? (e.k === 't' ? 't' : e.k)
 }
 
+/** The name an element answers to in another's `over` list (rule 4): its base role — or, for a
+ *  layout's accent copy of a line (ruling D2), `<role>Copy`, so a crossing declared on the copy
+ *  never excuses the user's own small line of the same role. */
+function overKey(e: Present): string {
+  const r = baseRole(roleLabel(e))
+  return e.k === 't' && e.copy ? `${r}Copy` : r
+}
+
 /** Rotate a box's four corners about `origin` ('top left', the box's own top-left corner, or
  *  'center') by `rot` degrees (CSS `rotate()`, clockwise in screen space) and return the new
  *  axis-aligned bounding box. */
@@ -229,7 +237,7 @@ export function checkPlan(els: El[], S: Sheet, premise?: LayoutDef['premise'], o
       if (a.e.k === 'ln' || b.e.k === 'ln') continue
       const aRole = roleLabel(a.e)
       const bRole = roleLabel(b.e)
-      if (a.e.over?.includes(baseRole(bRole)) || b.e.over?.includes(baseRole(aRole))) continue
+      if (a.e.over?.includes(overKey(b.e)) || b.e.over?.includes(overKey(a.e))) continue
       const ix = Math.min(a.box.x1, b.box.x1) - Math.max(a.box.x0, b.box.x0)
       const iy = Math.min(a.box.y1, b.box.y1) - Math.max(a.box.y0, b.box.y0)
       if (ix > 0.25 && iy > 0.25) issues.push(`${aRole} overlaps ${bRole}`)

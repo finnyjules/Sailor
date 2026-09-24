@@ -4,6 +4,8 @@ import { candidatesForFrame, planLayout } from '~/lib/frame/patterns/kit/plan'
 import type { LayoutPlanArgs } from '~/lib/frame/patterns/kit/plan'
 import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
 import { localStackKey } from '~/lib/compositor/frameStack'
+import { makeSheet } from '~/lib/frame/patterns/kit/sheet'
+import { boxOf } from '~/lib/frame/patterns/kit/check'
 import { createPathLayer } from '~/composables/useCompositorLayers'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import type { FrameElements } from '~/lib/frame/patterns/types'
@@ -100,56 +102,94 @@ describe('Knockout → a layout that leaves the shape alone (planner)', () => {
   })
 })
 
-describe('Overprint and Number behind: an accent copy of the overlapping line with recolour off', () => {
-  const layers = frameLayers('phrase', { image: false, shape: false })
+describe('Overprint and Number behind with recolour off: the big line is the layout\'s accent copy (ruling D2)', () => {
   const copyOf = (ls: LocalLayer[]) => ls.filter(l => (l as { owner?: { by: string; key: string } }).owner?.key?.startsWith('copy')) as any[]
+  const bare = (t: string) => t.replace(/\s/g, '')
+  const CASES = [['overprint', 'd', 'details'], ['dateBehind', 'dt', 'date']] as const
+  const FRAMES: [number, number][] = [[895, 1280], [1080, 1080], [1280, 720]]
 
-  it.each([['overprint', 'd'], ['dateBehind', 'dt']] as const)('%s: an owned copy of the line in the accent, under it, the same words, face, weight and size', (id, lineId) => {
-    const plan = planFirst(layers, id)
-    const copies = copyOf(plan.layers)
-    expect(copies).toHaveLength(1)
-    const copy = copies[0]!
-    const line = plan.layers.find(l => l.id === lineId) as any
-    const user = layers.find(l => l.id === lineId) as any
-    expect(copy.owner).toEqual({ by: 'layout', key: 'copy-0' })
-    expect(copy.color).toBe(palette.accent)
-    // The user's line keeps its own colour.
-    expect(line.color).toBe(user.color)
-    // Same words, face, weight and size, set exactly where the user's line is.
-    expect(copy.runs).toEqual(line.runs)
-    const bare = (t: string) => t.replace(/\s/g, '')
-    expect(bare(copy.runs.map((r: { text: string }) => r.text).join(''))).toBe(bare(user.text))
-    expect([copy.fontFamily, copy.fontWeight]).toEqual([user.fontFamily, user.fontWeight])
-    for (const k of ['fontSize', 'x', 'y', 'rotation', 'lineHeight', 'letterSpacing', 'blend', 'opacity'] as const) expect(copy[k], k).toEqual(line[k])
-    // Drawn directly under the user's line.
-    const at = (lid: string) => plan.order.indexOf(localStackKey(lid))
-    expect(at(copy.id)).toBeGreaterThanOrEqual(0)
-    expect(at(copy.id)).toBe(at(lineId) - 1)
+  describe.each([false, true])('image: %s', (image) => {
+    const layers = frameLayers('phrase', { image, shape: false })
+
+    it.each(CASES)('%s: the big element is owned, in the accent, in the copied line\'s face, weight and size', (id, lineId, role) => {
+      const a = argsFor(layers, id)
+      const cand = candidatesForFrame(a)[0]!
+      const plan = planLayout({ ...a, choice: cand.choice })!
+      expect(plan.issues).toEqual([])
+      const copies = copyOf(plan.layers)
+      expect(copies).toHaveLength(1)
+      const copy = copies[0]!
+      const user = layers.find(l => l.id === lineId) as any
+      expect(copy.owner).toEqual({ by: 'layout', key: 'copy-0' })
+      expect(copy.color).toBe(palette.accent)
+      expect([copy.fontFamily, copy.fontWeight]).toEqual([user.fontFamily, user.fontWeight])
+      expect(bare(copy.text)).toBe(bare(user.text))
+      expect(bare(copy.runs.map((r: { text: string }) => r.text).join(''))).toBe(bare(user.text))
+      // Exactly the big line the layout sets: the `copy` element's size and place.
+      const big = cand.out.els.find(e => e.k === 't' && e.copy)
+      if (big?.k !== 't') throw new Error('no copy element')
+      expect(big.role).toBe(role)
+      expect(copy.fontSize).toBeCloseTo(big.size / 100, 12)
+    })
+
+    it.each(CASES)('%s: the user\'s line is visible, small, in its own colour, and clear of the title', (id, lineId, role) => {
+      for (const [w, h] of FRAMES) {
+        const a = { ...argsFor(layers, id), frameW: w, frameH: h }
+        const S = makeSheet({ frameW: w, frameH: h, measure: makeStubMeasure() })
+        const cands = candidatesForFrame(a)
+        expect(cands.length, `${w}×${h}`).toBeGreaterThan(0)
+        for (const cand of cands) {
+          const plan = planLayout({ ...a, choice: cand.choice })!
+          expect(plan.issues).toEqual([])
+          const line = plan.layers.find(l => l.id === lineId) as any
+          const copy = copyOf(plan.layers)[0]!
+          expect(line.visible).not.toBe(false)
+          expect(line.color).toBe((layers.find(l => l.id === lineId) as any).color)
+          expect(line.fontSize).toBeLessThan(copy.fontSize / 2)
+          const small = cand.out.els.find(e => e.k === 't' && !e.copy && e.role === role)!
+          const title = cand.out.els.filter(e => e.k === 't' && (e.role ?? '').replace(/\d+$/, '') === 'title')
+          const sb = boxOf(small, S)!
+          for (const t of title) {
+            const tb = boxOf(t, S)!
+            const cross = Math.min(sb.x1, tb.x1) - Math.max(sb.x0, tb.x0) > 0 && Math.min(sb.y1, tb.y1) - Math.max(sb.y0, tb.y0) > 0
+            expect(cross, `${w}×${h} ${JSON.stringify(cand.choice)}`).toBe(false)
+          }
+        }
+      }
+    })
   })
 
-  it.each(['overprint', 'dateBehind'])('%s with recolour on: no copy (the line itself takes the accent)', (id) => {
+  it('Number behind: the title is drawn over the accent number', () => {
+    const plan = planFirst(frameLayers('phrase', { image: false, shape: false }), 'dateBehind')
+    const at = (lid: string) => plan.order.indexOf(localStackKey(lid))
+    expect(at(copyOf(plan.layers)[0]!.id)).toBeLessThan(at('t'))
+  })
+
+  it.each(['overprint', 'dateBehind'])('%s with recolour on: no copy; the big line is the user\'s own layer', (id) => {
+    const layers = frameLayers('phrase', { image: false, shape: false })
     const plan = planFirst(layers, id, { recolour: true })
     expect(copyOf(plan.layers)).toEqual([])
+    const line = plan.layers.find(l => l.id === (id === 'overprint' ? 'd' : 'dt')) as any
+    expect(line.color).toBe(palette.accent)
+    expect(line.runs?.length).toBeGreaterThan(0)
   })
 
   it('the next layout removes the copy', () => {
-    const over = planFirst(layers, 'overprint')
+    const over = planFirst(frameLayers('phrase', { image: false, shape: false }), 'overprint')
     expect(copyOf(over.layers)).toHaveLength(1)
     expect(copyOf(planFirst(over.layers, 'statement').layers)).toEqual([])
   })
 
-  it('an accent the line already wears (or all but) draws no copy', () => {
-    const same = layers.map(l => (l.id === 'd' ? { ...l, color: palette.accent } : l)) as LocalLayer[]
-    expect(copyOf(planFirst(same, 'overprint').layers)).toEqual([])
-    const near = layers.map(l => (l.id === 'd' ? { ...l, color: '#dc2301' } : l)) as LocalLayer[]
-    expect(copyOf(planFirst(near, 'overprint').layers)).toEqual([])
-  })
-
-  it('the candidates are the same with recolour on and off (the copy is not checked on its own: it is the line\'s own box)', () => {
-    for (const id of ['overprint', 'dateBehind']) {
-      const off = candidatesForFrame(argsFor(layers, id)).map(c => c.choice)
-      const on = candidatesForFrame(argsFor(layers, id, { recolour: true })).map(c => c.choice)
-      expect(off, id).toEqual(on)
+  it('an accent the line already wears (or all but), or a colour that is not plain, draws no copy: today\'s one-colour layout', () => {
+    const base = frameLayers('phrase', { image: false, shape: false })
+    const on = planFirst(base, 'overprint', { recolour: true })
+    for (const color of [palette.accent, '#dc2301', 'rgb(1, 2, 3)']) {
+      const layers = base.map(l => (l.id === 'd' ? { ...l, color } : l)) as LocalLayer[]
+      const plan = planFirst(layers, 'overprint')
+      expect(copyOf(plan.layers), color).toEqual([])
+      // The same geometry as recolour on (the big details are the user's own layer).
+      const d = plan.layers.find(l => l.id === 'd') as any
+      expect(d.runs, color).toEqual((on.layers.find(l => l.id === 'd') as any).runs)
     }
   })
 })

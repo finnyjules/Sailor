@@ -18,7 +18,12 @@ export interface Style { role?: RoleKey; size?: number; wt?: number; ls: number;
 interface Base { role?: string; over?: string[]; ok?: boolean; bleed?: boolean; opacity?: number; blend?: boolean }
 export interface TextEl extends Base { k: 't'; s: string; x: number; w?: number; top?: number; base?: number; size: number; wt?: number; ls: number; lh: number; align?: 'left' | 'center' | 'right'; color?: Colour; pre?: boolean; just?: boolean; rot?: number; origin?: string; inside?: string
   /** Set in capitals: measured upper-cased, and toOps writes `textTransform: 'uppercase'`. */
-  upper?: boolean }
+  upper?: boolean
+  /** Ruling D2 (layout decisions, Task 4): not the user's layer but the layout's own accent COPY of
+   *  the line of this `role` — same words, measured and drawn in that line's face, weight and size
+   *  (an exception to ruling R10). toOps draws it as an owned text layer in `color`; the user's
+   *  line itself is placed elsewhere by the same layout, as an ordinary small line. */
+  copy?: true }
 export interface PhotoEl extends Base { k: 'p'; x: number; y: number; w: number; h: number; stand?: boolean; filter?: string; radius?: number }
 /** `prefer` (ruling R12, Task 4 fix round 1): the role the contrast picker tries FIRST for an owned
  *  piece that carries text — kept only if it passes the same thresholds, else the picker's own order. */
@@ -77,7 +82,12 @@ export type ContentLineKey = 'quote' | 'by' | 'rating' | 'list' | 'stat' | 'stat
 /** The content keys that hold a line of text (every key but the logo and the Stage 4 shapes). */
 export type TextKey = Exclude<keyof Content, 'logo' | 'review' | 'list' | 'compare' | 'stat' | 'raw'>
 export type Kind = 'word' | 'phrase' | 'sentence'
-export interface LayoutCtx { c: Content; kind: Kind; ph: boolean; r: () => number; words: string[]; lines: string[]; arr: number }
+export interface LayoutCtx { c: Content; kind: Kind; ph: boolean; r: () => number; words: string[]; lines: string[]; arr: number
+  /** Ruling D2: the planner draws this layout's `accentCopy` line as an owned accent copy (recolour
+   *  off, and the accent differs visibly from that line's own colour). The layout then sets the big
+   *  crossing line as a `copy` element and places the user's own line as an ordinary small one.
+   *  Absent: the layout runs exactly as before (recolour on, or no copy possible). */
+  accentCopy?: true }
 export interface LayoutOut { els: El[]; did: string }
 export interface LayoutDef {
   id: string; name: string; fits: Kind[]
@@ -95,11 +105,12 @@ export interface LayoutDef {
   /** One row for wide formats (the prototype's `wideOnly`): offered only when the sheet the
    *  layout composes on is wide (`H < 70` — the band a format leaves uncovered, if it has one). */
   wideOnly?: boolean
-  /** Frame layout decisions, Task 4 (overlap accent): the role of the line this layout sets in a
-   *  colour of its own to cross another (Overprint's details, Number behind's number). With
-   *  recolour off the user's line keeps its own colour, so the planner adds an owned copy of it in
-   *  the element's colour, drawn directly under it — the same words, face, weight and size (an
-   *  exception to ruling R10: a copy must match what it copies). With recolour on: no copy. */
+  /** Frame layout decisions, Task 4 (overlap accent, ruling D2): the role of the line this layout
+   *  sets big, in the accent, to cross another (Overprint's details, Number behind's number). With
+   *  recolour off the user's line keeps its own colour, so — when the accent differs visibly from
+   *  it — the planner runs the layout with `LayoutCtx.accentCopy`: the big line is the layout's own
+   *  accent copy (a `copy` element: the same words, face, weight and size — an exception to ruling
+   *  R10), and the user's line is placed as an ordinary small line. With recolour on: unchanged. */
   accentCopy?: RoleKey
   /** The layout's promise, asserted by the checker: roles that must overlap, must bleed, must be rotated. */
   premise?: { overlap?: [string, string][]; bleed?: string[]; rotated?: string[] }

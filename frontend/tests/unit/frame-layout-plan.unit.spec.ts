@@ -472,8 +472,8 @@ describe('planLayout — a format (Stage 2)', () => {
     panel: ['4f53cda18c2baa0c', 'ce8d4a52c929ae32'], sideSplit: ['4f53cda18c2baa0c', '38ef11da765fc027'],
     cross: ['4f53cda18c2baa0c', '2bbbc01f15ab840a'], overlap: ['4f53cda18c2baa0c', 'd0d1468d32474717'],
     stamp: ['4f53cda18c2baa0c', 'a192833f32c57a0d'], column: ['4f53cda18c2baa0c', '2cf3f052c12d25ad'],
-    rising: ['4f53cda18c2baa0c', 'f86e449448f6f9ca'], overprint: ['b2b94833a86512dd', '31749b05fcf719f7'],
-    dateBehind: ['cd065765c23683a5', '71ebeac54e7ef22d'], tightStack: ['fba74f9d0963fd6e', 'e8102e680df084df'],
+    rising: ['4f53cda18c2baa0c', 'f86e449448f6f9ca'], overprint: ['716c45e67cb2edbd', 'a78e634b8f983d45'],
+    dateBehind: ['60271b884614d96e', '6a30f674dcbd7215'], tightStack: ['fba74f9d0963fd6e', 'e8102e680df084df'],
     behindPhoto: ['4f53cda18c2baa0c', '5f73e0b50643b94b'], collage: ['4f53cda18c2baa0c', '4f53cda18c2baa0c'],
     label: ['4f53cda18c2baa0c', '6127de94a2d1d00f'], ghost: ['0b68f5276f4ae89e', '48fb34b638c8e2a1'],
   }
@@ -486,6 +486,22 @@ describe('planLayout — a format (Stage 2)', () => {
     const got: Record<string, [string, string]> = {}
     for (const l of LAYOUTS) got[l.id] = [geometrySig(cands(l.id, fmtArgs(null, 895, 1280))), geometrySig(cands(l.id, fmtArgs(null, 895, 1280, { image: true })))]
     expect(got).toEqual(STAGE1_GEOMETRY)
+  })
+
+  // Ruling D2 (layout decisions, Task 4, fix round 1): with recolour off (these pins' default) and
+  // an accent that differs from the fixture's #111111 text, Overprint and Number behind set their
+  // big line as the layout's own accent copy and place the user's line small in the foot row (or
+  // beside the image) — so their geometry above moved on purpose (counts unchanged). With recolour
+  // on they are byte-identical to the Stage 1 geometry, recorded here as it was before D2.
+  const STAGE1_GEOMETRY_RECOLOUR: Record<string, [string, string]> = {
+    overprint: ['b2b94833a86512dd', '31749b05fcf719f7'], dateBehind: ['cd065765c23683a5', '71ebeac54e7ef22d'],
+  }
+  it('no format, recolour on: Overprint and Number behind keep their Stage 1 geometry exactly (ruling D2)', () => {
+    const got: Record<string, [string, string]> = {}
+    for (const id of Object.keys(STAGE1_GEOMETRY_RECOLOUR)) {
+      got[id] = [geometrySig(cands(id, { ...fmtArgs(null, 895, 1280), recolour: true })), geometrySig(cands(id, { ...fmtArgs(null, 895, 1280, { image: true }), recolour: true }))]
+    }
+    expect(got).toEqual(STAGE1_GEOMETRY_RECOLOUR)
   })
 
   it('no format (895×1280, custom): plan.format is null and every layout offers exactly its Stage 1 candidates', () => {
