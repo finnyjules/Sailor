@@ -26,8 +26,9 @@ import path from 'node:path'
 import sharp from 'sharp'
 import type { H3Event } from 'h3'
 import { resolveWorkerTarget } from '../utils/workerRoute'
-import { engineFolder, pySafeResolve, resolveInside } from './paths'
+import { engineFolder, listdirEntries, pySafeResolve, resolveInside, writeFileAtomic } from './paths'
 import { pyDumps } from './pyJson'
+import { ENGINE_MAIN_PORT, engineHealth } from './engineHealth'
 import { truthy } from './projects'
 
 type Json = any
@@ -126,18 +127,6 @@ function statOrNull(p: string): fs.Stats | null {
   catch { return null }
 }
 
-/** Directory entry names in the order the OS returns them (`os.listdir`/`scandir` order, unsorted). */
-function listdirRaw(dir: string): fs.Dirent[] {
-  const handle = fs.opendirSync(dir)
-  const out: fs.Dirent[] = []
-  try {
-    for (let d = handle.readSync(); d; d = handle.readSync()) out.push(d)
-  }
-  finally {
-    handle.closeSync()
-  }
-  return out
-}
 
 // ------------------------------------------------------------------ listings
 
@@ -156,7 +145,7 @@ function byMtimeDesc<T extends { mtime: number }>(items: T[]): T[] {
  */
 function walkFiles(top: string, visit: (root: string, file: string) => void): void {
   let entries: fs.Dirent[]
-  try { entries = listdirRaw(top) }
+  try { entries = listdirEntries(top) }
   catch { return }
   const dirs: string[] = []
   const files: string[] = []
@@ -198,7 +187,7 @@ export function outputListing(outputDir: string): MediaResult {
 export function inputListing(inputDir: string): MediaResult {
   const items: InputItem[] = []
   let entries: fs.Dirent[]
-  try { entries = listdirRaw(inputDir) }
+  try { entries = listdirEntries(inputDir) }
   catch (e) { return { status: 500, body: { error: pyOSErrorText(e, inputDir), items: [] } } }
   for (const e of entries) {
     const fname = e.name
@@ -249,22 +238,11 @@ export function loadAssets(userDirectory: string): Json {
 /**
  * `_save_assets()` — `json.dump(assets, f, indent=2)`. Written atomically
  * (temp file in the same dir + rename), like `projects.ts`'s
- * `atomicWriteJson`, so a reader never observes a half-written file.
+ * `atomicWriteJson` (both via paths.ts `writeFileAtomic`), so a reader never
+ * observes a half-written file.
  */
 export function saveAssets(userDirectory: string, assets: Json): void {
-  const file = assetsFile(userDirectory)
-  const dir = path.dirname(file)
-  const tmp = path.join(dir, `tmp${randomUUID().replace(/-/g, '').slice(0, 8)}.tmp`)
-  try {
-    fs.writeFileSync(tmp, pyDumps(assets, 2), { mode: 0o600, flag: 'wx' })
-    fs.renameSync(tmp, file)
-  }
-  finally {
-    if (fs.existsSync(tmp)) {
-      try { fs.unlinkSync(tmp) }
-      catch {}
-    }
-  }
+  writeFileAtomic(assetsFile(userDirectory), pyDumps(assets, 2), { mode: 0o600 })
 }
 
 /** Python's `a[k]` on an asset record: a TypeError/KeyError (a 500) when it isn't there. */
@@ -465,7 +443,7 @@ export async function inputThumbnailRoute(
     if (!isImageFile(p)) return (await engine()) ?? NEEDS_ENGINE
     const png = await imageThumbnailPng(p)
     if (!png) return EMPTY_404
-    try { fs.writeFileSync(cachePng, png) }
+    try { writeFileAtomic(cachePng, png) }
     catch { return EMPTY_404 }
   }
   return {
@@ -499,7 +477,7 @@ export async function assetThumbnailsRoute(
   const thumbs = png ? [`data:image/png;base64,${png.toString('base64')}`] : []
   const payload = { thumbnails: thumbs, asset_id: assetId, count }
   if (file) {
-    try { fs.writeFileSync(file, pyDumps(payload)) }
+    try { writeFileAtomic(file, pyDumps(payload)) }
     catch {}
   }
   return { status: 200, body: payload }
@@ -540,6 +518,8 @@ export const ENGINE_ASSET_IMPORT_TIMEOUT_MS = 120_000
  */
 export async function forwardToEngine(event: H3Event, canonicalPath: string, rawBody?: Buffer, timeoutMs?: number): Promise<MediaResult | null> {
   const { port, cleanUrl } = resolveWorkerTarget(event.path)
+  // The main engine already known down (cached health check): don't wait out a doomed fetch.
+  if (port === ENGINE_MAIN_PORT && await engineHealth() === 'down') return null
   const q = cleanUrl.indexOf('?')
   const query = q === -1 ? '' : cleanUrl.slice(q)
   const target = `http://127.0.0.1:${port}`

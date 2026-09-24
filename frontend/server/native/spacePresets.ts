@@ -14,11 +14,11 @@
  * unit tests (whose engine root is a temp folder) never touch the real ones.
  * Presets are written as `json.dump(scene, f, indent=2)` writes them.
  */
-import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { resolveEngineRoot } from '../utils/inputUploads'
 import { pyDumps } from './pyJson'
+import { isDir, isFile, listdir, writeFileAtomic } from './paths'
 
 type Json = any
 
@@ -46,38 +46,6 @@ export function isValidEffectId(s: unknown): s is string {
 
 const INVALID_ID: PresetResult = { status: 400, body: { error: 'invalid effect id' } }
 
-function isDir(p: string): boolean {
-  try { return fs.statSync(p).isDirectory() }
-  catch { return false }
-}
-
-/** `os.listdir` order (unsorted), as the Python iterates it. */
-function listdir(dir: string): string[] {
-  const handle = fs.opendirSync(dir)
-  const out: string[] = []
-  try {
-    for (let d = handle.readSync(); d; d = handle.readSync()) out.push(d.name)
-  }
-  finally {
-    handle.closeSync()
-  }
-  return out
-}
-
-/** Write via a temp file in the same folder + rename, so a reader never sees half a file. */
-function atomicWrite(file: string, data: string | Buffer): void {
-  const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${randomUUID().slice(0, 8)}.tmp`)
-  try {
-    fs.writeFileSync(tmp, data, { flag: 'wx' })
-    fs.renameSync(tmp, file)
-  }
-  finally {
-    if (fs.existsSync(tmp)) {
-      try { fs.unlinkSync(tmp) }
-      catch {}
-    }
-  }
-}
 
 /** `_space_defaults_list` — an unreadable or unparseable preset is left out. */
 export function spaceDefaultsRoute(bridgeDir: string): PresetResult {
@@ -112,7 +80,7 @@ export async function spaceDefaultSaveRoute(
   }
   const d = sceneDefaultsDir(bridgeDir)
   fs.mkdirSync(d, { recursive: true })
-  atomicWrite(path.join(d, `${effectId}.json`), pyDumps(scene, 2))
+  writeFileAtomic(path.join(d, `${effectId}.json`), pyDumps(scene, 2))
   return { status: 200, body: { ok: true } }
 }
 
@@ -138,7 +106,7 @@ export function spaceThumbnailSaveRoute(bridgeDir: string, effectId: string, rea
     if (!data.length) return { status: 400, body: { error: 'empty body' } }
     const d = sceneThumbnailsDir(bridgeDir)
     fs.mkdirSync(d, { recursive: true })
-    atomicWrite(path.join(d, `${effectId}.png`), data)
+    writeFileAtomic(path.join(d, `${effectId}.png`), data)
     return { status: 200, body: { ok: true } }
   })
 }
@@ -147,9 +115,6 @@ export function spaceThumbnailSaveRoute(bridgeDir: string, effectId: string, rea
 export function spaceThumbnailGetRoute(bridgeDir: string, effectId: string): PresetResult {
   if (!isValidEffectId(effectId)) return INVALID_ID
   const p = path.join(sceneThumbnailsDir(bridgeDir), `${effectId}.png`)
-  let isFile = false
-  try { isFile = fs.statSync(p).isFile() }
-  catch {}
-  if (!isFile) return { status: 404, body: { error: 'not found' } }
+  if (!isFile(p)) return { status: 404, body: { error: 'not found' } }
   return { status: 200, body: fs.readFileSync(p), headers: { 'content-type': 'image/png' } }
 }

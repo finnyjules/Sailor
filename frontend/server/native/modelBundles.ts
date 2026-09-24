@@ -15,6 +15,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { isDir, isFile, listdir } from './paths'
 
 export interface ModelFile { name: string, path: string, size: number }
 export interface ModelBundle {
@@ -34,33 +35,6 @@ export interface BundleEnv {
 
 export function defaultBundleEnv(modelsDir: string): BundleEnv {
   return { modelsDir, home: process.env.HOME || os.homedir(), env: process.env }
-}
-
-function isDir(p: string): boolean {
-  try { return fs.statSync(p).isDirectory() }
-  catch { return false }
-}
-
-function isFile(p: string): boolean {
-  try { return fs.statSync(p).isFile() }
-  catch { return false }
-}
-
-/**
- * `os.listdir` — in the order the OS returns entries (`fs.readdirSync` sorts;
- * the order matters where a probe raises part-way), and throwing where Python
- * raises (not a folder, unreadable).
- */
-function listdir(p: string): string[] {
-  const handle = fs.opendirSync(p)
-  const out: string[] = []
-  try {
-    for (let d = handle.readSync(); d; d = handle.readSync()) out.push(d.name)
-  }
-  finally {
-    handle.closeSync()
-  }
-  return out
 }
 
 /** The bundles every ML module registers, in registration order. */

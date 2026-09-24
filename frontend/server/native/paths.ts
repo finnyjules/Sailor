@@ -8,6 +8,7 @@
  * address the same files. Null means the engine root could not be found;
  * callers must say so rather than guess a folder.
  */
+import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { resolveEngineRoot } from '../utils/inputUploads'
@@ -47,15 +48,79 @@ export function isSafeId(value: unknown): value is string {
 export function resolveInside(root: string, ...names: string[]): string | null {
   const base = path.resolve(root)
   const full = path.resolve(base, ...names)
-  if (full !== base && !full.startsWith(base + path.sep)) return null
+  if (full !== base && !full.startsWith(base === path.sep ? base : base + path.sep)) return null
   return full
+}
+
+/**
+ * The file-name rule ComfyUI's /view (and the mask upload's `original_ref`,
+ * which reuses /view's checks) applies after the annotation is stripped: a
+ * name starting with `/` or containing `..` anywhere is refused.
+ */
+export function isRefusedViewName(name: string): boolean {
+  return name[0] === '/' || name.includes('..')
+}
+
+/** `os.path.isdir`: follows symlinks; any error is False. */
+export function isDir(p: string): boolean {
+  try { return fs.statSync(p).isDirectory() }
+  catch { return false }
+}
+
+/** `os.path.isfile`: follows symlinks; any error is False. */
+export function isFile(p: string): boolean {
+  try { return fs.statSync(p).isFile() }
+  catch { return false }
+}
+
+/**
+ * `os.scandir` — entries in the order the OS returns them (`fs.readdirSync`
+ * sorts; the order matters where the Python keeps the first match or raises
+ * part-way), throwing where Python raises (not a folder, unreadable).
+ */
+export function listdirEntries(dir: string): fs.Dirent[] {
+  const handle = fs.opendirSync(dir)
+  const out: fs.Dirent[] = []
+  try {
+    for (let d = handle.readSync(); d; d = handle.readSync()) out.push(d)
+  }
+  finally {
+    handle.closeSync()
+  }
+  return out
+}
+
+/** `os.listdir` — entry names in OS order; throws where Python raises. */
+export function listdir(dir: string): string[] {
+  return listdirEntries(dir).map(d => d.name)
+}
+
+/**
+ * Write via a temp file in the same folder + rename, so a reader never sees
+ * half a file and a crash mid-write leaves the old file whole. The temp file
+ * is created exclusively (`wx`) with `mode` (default: the usual 0666 less
+ * umask); the rename keeps that mode. Synchronous on purpose — callers that
+ * choose a name and then write rely on nothing else running in between.
+ */
+export function writeFileAtomic(file: string, data: string | Buffer, opts: { mode?: number } = {}): void {
+  const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${randomUUID().slice(0, 8)}.tmp`)
+  try {
+    fs.writeFileSync(tmp, data, { flag: 'wx', ...(opts.mode === undefined ? {} : { mode: opts.mode }) })
+    fs.renameSync(tmp, file)
+  }
+  finally {
+    if (fs.existsSync(tmp)) {
+      try { fs.unlinkSync(tmp) }
+      catch {}
+    }
+  }
 }
 
 /**
  * `os.path.realpath` (non-strict): symlinks resolved for the part of the path
  * that exists, the missing remainder appended as written.
  */
-function realpathLoose(p: string): string {
+export function realpathLoose(p: string): string {
   let head = path.resolve(p)
   const tail: string[] = []
   for (;;) {

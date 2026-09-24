@@ -18,7 +18,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { truthy } from './projects'
-import { resolveInside } from './paths'
+import { isDir, realpathLoose, resolveInside } from './paths'
 
 type Json = any
 
@@ -82,31 +82,6 @@ export function safeDatasetFolder(inputDir: string, folder: string, allowRoot: b
   const within = realTarget === realRoot || realTarget.startsWith(realRoot === '/' ? '/' : realRoot + path.sep)
   if (!within || (!allowRoot && realTarget === realRoot)) throw new FolderEscapesError()
   return inside
-}
-
-/**
- * `os.path.realpath` (non-strict): symlinks resolved for the deepest part of
- * the path that exists, the missing remainder appended as written.
- */
-function realpathLoose(p: string): string {
-  let head = path.resolve(p)
-  const tail: string[] = []
-  for (;;) {
-    try {
-      return path.join(fs.realpathSync.native(head), ...tail)
-    }
-    catch {
-      const parent = path.dirname(head)
-      if (parent === head) return path.join(head, ...tail)
-      tail.unshift(path.basename(head))
-      head = parent
-    }
-  }
-}
-
-function isDir(p: string): boolean {
-  try { return fs.statSync(p).isDirectory() }
-  catch { return false }
 }
 
 /** `_save_captions`: `{folder, captions: {image_filename: text}}` → `<stem>.txt` sidecars; `{written}`. */

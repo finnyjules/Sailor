@@ -6,6 +6,17 @@
  * `fetch` is stubbed in every test, so nothing here can reach a real engine.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// The cached engine-health check (server/native/engineHealth.ts) is stubbed:
+// its 3 s process-wide cache would otherwise carry one test's engine state
+// into the next, and a real probe would reach whatever is on :8188. 'up'
+// (the default) defers to each test's own fetch stub, as before the check.
+const engineHealthState = vi.hoisted(() => ({ value: 'up' as 'up' | 'down' }))
+vi.mock('../../server/native/engineHealth', async orig => ({
+  ...(await orig() as object),
+  engineHealth: async () => engineHealthState.value,
+}))
+beforeEach(() => { engineHealthState.value = 'up' })
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -181,6 +192,15 @@ describe('video and audio need the local engine', () => {
     const r = await call('GET', '/sailor/input_thumbnail?filename=clip.mp4')
     expect([...r.buf]).toEqual([0x89, 0x50, 0x4e, 0x47])
     expect(r.headers.get('cache-control')).toBe('max-age=86400')
+  })
+
+  it('the main engine already known down (cached health): no forward, the plain 503', async () => {
+    engineHealthState.value = 'down'
+    engineFetch.mockResolvedValue(new Response(Buffer.from([0x89]), { status: 200, headers: { 'content-type': 'image/png' } }))
+    const r = await call('GET', '/sailor/input_thumbnail?filename=clip.mp4')
+    expect(r.status).toBe(503)
+    expect(r.body).toEqual({ error: 'This needs the local engine' })
+    expect(engineFetch).not.toHaveBeenCalled()
   })
 
   it('an import forwards the same body to the engine', async () => {

@@ -11,6 +11,17 @@
  * `fetch` is stubbed in every test, so nothing here can reach a real engine.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// The cached engine-health check (server/native/engineHealth.ts) is stubbed:
+// its 3 s process-wide cache would otherwise carry one test's engine state
+// into the next, and a real probe would reach whatever is on :8188. 'up'
+// (the default) defers to each test's own fetch stub, as before the check.
+const engineHealthState = vi.hoisted(() => ({ value: 'up' as 'up' | 'down' }))
+vi.mock('../../server/native/engineHealth', async orig => ({
+  ...(await orig() as object),
+  engineHealth: async () => engineHealthState.value,
+}))
+beforeEach(() => { engineHealthState.value = 'up' })
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -280,6 +291,16 @@ describe('engine up: exact bytes, Python JSON, and a remembered outage', () => {
     finally {
       now.mockRestore()
     }
+  })
+
+  it('the main engine already known down (cached health): the stored catalog, no fetch; a pool worker is still asked', async () => {
+    writeBaseline(staleCatalog())
+    engineHealthState.value = 'down'
+    engineAnswers({ Live: {} })
+    expect((await call('GET', '/object_info')).body).not.toEqual({ Live: {} })
+    expect(engineFetch).not.toHaveBeenCalled()
+    expect((await call('GET', '/object_info?comfyWorker=2')).body).toEqual({ Live: {} })
+    expect(engineFetch.mock.calls[0]?.[0]).toBe('http://127.0.0.1:8191/object_info')
   })
 })
 

@@ -9,6 +9,17 @@
  * nothing here can reach a real engine.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// The cached engine-health check (server/native/engineHealth.ts) is stubbed:
+// its 3 s process-wide cache would otherwise carry one test's engine state
+// into the next, and a real probe would reach whatever is on :8188. 'up'
+// (the default) defers to each test's own fetch stub, as before the check.
+const engineHealthState = vi.hoisted(() => ({ value: 'up' as 'up' | 'down' }))
+vi.mock('../../server/native/engineHealth', async orig => ({
+  ...(await orig() as object),
+  engineHealth: async () => engineHealthState.value,
+}))
+beforeEach(() => { engineHealthState.value = 'up' })
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -353,6 +364,17 @@ describe('models', () => {
     engineFetch.mockResolvedValue(new Response('{}', { status: 200 }))
     const r = await call('GET', '/sailor/models/download?key=upscale&comfyWorker=2')
     expect(r.body).toEqual({ fallthrough: true })
+    expect(engineFetch.mock.calls[0]?.[0]).toBe('http://127.0.0.1:8191/system_stats')
+  })
+
+  it('download: the main engine already known down (cached health) is 503 with no probe of its own', async () => {
+    engineHealthState.value = 'down'
+    engineFetch.mockResolvedValue(new Response('{}', { status: 200 }))
+    const r = await call('GET', '/sailor/models/download?key=upscale')
+    expect(r).toMatchObject({ status: 503, body: { error: 'This needs the local engine' } })
+    expect(engineFetch).not.toHaveBeenCalled()
+    // A pool worker is not covered by the main engine's health: probed as before.
+    expect((await call('GET', '/sailor/models/download?key=upscale&comfyWorker=2')).body).toEqual({ fallthrough: true })
     expect(engineFetch.mock.calls[0]?.[0]).toBe('http://127.0.0.1:8191/system_stats')
   })
 })

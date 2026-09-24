@@ -31,7 +31,7 @@ import path from 'node:path'
 import zlib from 'node:zlib'
 import sharp from 'sharp'
 import type { UploadForm } from '../utils/multipart'
-import { annotatedFilepath, engineFolder, resolveInside } from './paths'
+import { annotatedFilepath, engineFolder, isFile, isRefusedViewName, resolveInside, writeFileAtomic } from './paths'
 
 export const UPLOAD_PREFIXES = ['/upload/image', '/upload/mask']
 
@@ -147,7 +147,9 @@ export async function runUpload(kind: UploadKind, form: UploadForm, folders: Fol
 
   if (!duplicate) {
     if ('error' in masked) throw masked.error
-    if (masked.bytes) fs.writeFileSync(filepath, masked.bytes)
+    // Atomic (temp file + rename) and still synchronous: no await between
+    // choosing the free name above and this write.
+    if (masked.bytes) writeFileAtomic(filepath, masked.bytes)
   }
   return { status: 200, body: { name: filename, subfolder, type } }
 }
@@ -169,7 +171,7 @@ async function maskedOriginal(form: UploadForm, mask: Buffer, folders: Folders):
 
   const { name, type: annotated } = annotatedFilepath(ref.filename)
   if (!name) return null
-  if (name[0] === '/' || name.includes('..')) return null
+  if (isRefusedViewName(name)) return null
 
   const refType = annotated ?? ('type' in ref ? ref.type : 'output')
   let dir: string | null = refType === 'input' || refType === 'output' || refType === 'temp' ? folders[refType] : null
@@ -184,10 +186,7 @@ async function maskedOriginal(form: UploadForm, mask: Buffer, folders: Folders):
   }
 
   const file = path.join(dir, name)
-  let isFile = false
-  try { isFile = fs.statSync(file).isFile() }
-  catch { isFile = false }
-  if (!isFile) return null
+  if (!isFile(file)) return null
 
   return maskOriginal(fs.readFileSync(file), mask)
 }

@@ -26,6 +26,8 @@ import { resolveEngineRoot } from '../utils/inputUploads'
 import { storeDir } from '../utils/dataDir'
 import { resolveWorkerTarget } from '../utils/workerRoute'
 import { PY_ENCODING_SUFFIXES, PY_MIME_TOP, PY_SUFFIX_MAP } from './pyMimeTypes'
+import { isDir, isFile } from './paths'
+import { ENGINE_MAIN_PORT, engineHealth } from './engineHealth'
 
 type Catalog = Record<string, any>
 
@@ -35,7 +37,7 @@ export const OBJECT_INFO_ENGINE_TIMEOUT_MS = 3_000
 /** The paths served here (boundary-matched by the router). */
 export const OBJECT_INFO_PREFIXES = ['/object_info']
 
-const MAIN_ENGINE_PORT = 8188
+const MAIN_ENGINE_PORT = ENGINE_MAIN_PORT
 
 // ------------------------------------------------------------ Python helpers
 
@@ -134,17 +136,11 @@ export function pyFilterFilesContentTypes(files: string[], contentTypes: string[
   return out
 }
 
-function isDir(p: string): boolean {
-  try { return fs.statSync(p).isDirectory() }
-  catch { return false }
-}
-
-function isFile(p: string): boolean {
-  try { return fs.statSync(p).isFile() }
-  catch { return false }
-}
-
-/** `os.listdir` (every entry name), or null when the folder can't be read. */
+/**
+ * `os.listdir` (every entry name), or null when the folder can't be read.
+ * Not paths.ts `listdirEntries`: this one is sorted (fs.readdirSync) and
+ * never throws, which the recursive walk below relies on.
+ */
 function listdir(dir: string): fs.Dirent[] | null {
   try { return fs.readdirSync(dir, { withFileTypes: true }) }
   catch { return null }
@@ -795,12 +791,17 @@ export function __resetObjectInfoEngineStateForTests(): void { engineDownUntil.c
 
 /**
  * Ask the engine (or pool worker) for the catalog; null when it does not
- * answer in time or answers an error. A failure is remembered for the same
- * 3 s, so a hung engine costs one timeout, not one per request.
+ * answer in time or answers an error. The main engine is first checked
+ * against the shared cached health check (engineHealth.ts) — known down means
+ * no fetch. A failure here is also remembered for 3 s per port: that covers
+ * the pool workers (which the health check doesn't speak for) and an engine
+ * that answers /system_stats but hangs or errors on /object_info, so a hung
+ * engine costs one timeout, not one per request.
  */
 async function fromEngine(rawPath: string, canonicalPath: string): Promise<{ text: string, body: Catalog | null, port: number } | null> {
   const { port, cleanUrl } = resolveWorkerTarget(rawPath)
   if ((engineDownUntil.get(port) ?? 0) > Date.now()) return null
+  if (port === MAIN_ENGINE_PORT && await engineHealth() === 'down') return null
   const q = cleanUrl.indexOf('?')
   const query = q === -1 ? '' : cleanUrl.slice(q)
   const target = `http://127.0.0.1:${port}`

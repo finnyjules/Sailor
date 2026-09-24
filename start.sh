@@ -67,7 +67,10 @@ if [ -d /data ]; then
   # user/ joins them for engine-free Phase A: Sailor now reads and writes
   # user/sailor/projects and user/sailor/spend.jsonl itself (server/native), so
   # <repo-root>/user must be the same /data/user the engine is launched with.
-  for d in input output user; do
+  # temp/ likewise: the engine runs with --temp-directory /data/temp and Sailor's
+  # native /view?type=temp reads <repo-root>/temp, so the two must be one dir.
+  # (.dockerignore drops /temp, so normally this just creates the symlink.)
+  for d in input output user temp; do
     if [ -d "/app/$d" ] && [ ! -L "/app/$d" ]; then
       if cp -an "/app/$d/." "/data/$d/"; then
         rm -rf "/app/$d"

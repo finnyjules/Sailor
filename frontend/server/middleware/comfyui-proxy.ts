@@ -10,11 +10,30 @@ import { handleHostedQueueGet, handleHostedInterrupt, handleHostedObjectInfo, ha
 import { normalizeEnginePath, hostedEngineDecision } from '../utils/enginePath'
 import { NITRO_API_PATHS, NITRO_API_PREFIXES } from '../lib/nitroApiPaths'
 import { nativeEngineRoute } from '../native/router'
+import { ENGINE_MAIN_PORT, engineHealth } from '../native/engineHealth'
+import { setResponseStatus } from 'h3'
 
 // Paths under PROXY_PREFIXES that should be handled by Nitro routes, not proxied
 // — the lists live in their own module so the reachability guard can import the
 // real values rather than scrape this file. See server/lib/nitroApiPaths.ts.
+//
+// These catch the bare `/view` and `/history` spellings only. The aliases
+// `/api/view`, `/comfyui/view` and `/api/history` are NOT caught here, so in
+// local mode they still fall through to the raw proxy below and reach the
+// engine directly (hosted mode gates every spelling through the canonical
+// path). Sailor's app doesn't use those spellings.
 const NITRO_ROUTE_PREFIXES = ['/view', '/history']
+
+/** Spec ruling 4: an engine-only route asked for while the engine is down. */
+const NEEDS_LOCAL_ENGINE_MESSAGE = 'This needs the local engine'
+
+/** `/ws` in any of its spellings (`/comfyui/ws`, `/api/ws`, …) — the socket keeps its own handling. */
+function isWsPath(p: string): boolean {
+  let bare = p.split('?')[0] ?? p
+  if (bare === '/comfyui' || bare.startsWith('/comfyui/')) bare = bare.slice('/comfyui'.length) || '/'
+  if (bare === '/api' || bare.startsWith('/api/')) bare = bare.slice('/api'.length) || '/'
+  return bare === '/ws' || bare.startsWith('/ws/')
+}
 
 export default defineEventHandler(async (event) => {
   const path = event.path
@@ -113,6 +132,16 @@ export default defineEventHandler(async (event) => {
       const backendPath = cleanUrl.startsWith('/comfyui')
         ? cleanUrl.replace(/^\/comfyui/, '') || '/'
         : cleanUrl
+      // Spec ruling 4: with the main engine known down (the cached health
+      // check, server/native/engineHealth.ts), an engine-only route — /prompt,
+      // the timeline renders, spacetype_encode, … — answers a plain 503 rather
+      // than h3's 502 from a refused proxy. Local and hosted alike (hosted gets
+      // here only for what its gate classified 'proxy'). Pool workers (8189+)
+      // aren't covered by that check and are proxied as before.
+      if (port === ENGINE_MAIN_PORT && !isWsPath(backendPath) && await engineHealth() === 'down') {
+        setResponseStatus(event, 503)
+        return { error: NEEDS_LOCAL_ENGINE_MESSAGE }
+      }
       // Override the Origin header so ComfyUI's origin-check middleware
       // sees host == origin (both 127.0.0.1:<port>) instead of blocking the
       // Nuxt dev-server port (3000) with a 403.

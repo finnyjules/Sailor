@@ -25,6 +25,17 @@
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
+// The cached engine-health check (server/native/engineHealth.ts) is stubbed:
+// its 3 s process-wide cache would otherwise carry one test's engine state
+// into the next, and a real probe would reach whatever is on :8188. 'up'
+// (the default) defers to each test's own fetch stub, as before the check.
+const engineHealthState = vi.hoisted(() => ({ value: 'up' as 'up' | 'down' }))
+vi.mock('../../server/native/engineHealth', async orig => ({
+  ...(await orig() as object),
+  engineHealth: async () => engineHealthState.value,
+}))
+beforeEach(() => { engineHealthState.value = 'up' })
+
 // Nitro auto-imports used at module scope / inside the handler.
 const g = globalThis as any
 g.defineEventHandler = (fn: any) => fn
@@ -731,5 +742,79 @@ describe('local mode: projects and spend are answered by Sailor itself (engine-f
     await middleware(ev('/sailor/models/download?key=upscale', 'GET'))
     expect(proxyRequest).toHaveBeenCalledTimes(1)
     expect(proxyRequest.mock.calls[0]?.[1]).toBe('http://127.0.0.1:8188/sailor/models/download?key=upscale')
+  })
+})
+
+/**
+ * Final-review I2 (spec ruling 4): an engine-only route asked for while the
+ * cached health check says the main engine is down answers 503
+ * {error:'This needs the local engine'} — never h3's 502 from a refused proxy
+ * — in local and hosted mode alike; the socket and pool workers are left alone.
+ */
+describe('engine down: engine-only routes answer 503, not a failed proxy', () => {
+  function evWithRes(path: string, method = 'GET') {
+    const res: { statusCode?: number, setHeader(): void } = { setHeader() {} }
+    return { event: { ...ev(path, method), node: { req: {}, res } }, res }
+  }
+
+  const engineOnly: Array<[string, string]> = [
+    ['/prompt', 'POST'],
+    ['/api/prompt', 'POST'],
+    ['/sailor/render_timeline', 'POST'],
+    ['/sailor/render_timeline_stream', 'POST'],
+    ['/sailor/timeline/render_frame', 'POST'],
+    ['/sailor/spacetype_encode', 'POST'],
+    ['/queue', 'GET'],
+  ]
+
+  it('local mode: each answers 503 with the plain message and is never proxied', async () => {
+    mode = 'local'
+    engineHealthState.value = 'down'
+    for (const [p, m] of engineOnly) {
+      proxyRequest.mockClear()
+      const { event, res } = evWithRes(p, m)
+      expect(await middleware(event), `${m} ${p}`).toEqual({ error: 'This needs the local engine' })
+      expect(res.statusCode, `${m} ${p}`).toBe(503)
+      expect(proxyRequest, `${m} ${p}`).not.toHaveBeenCalled()
+    }
+  })
+
+  it('local mode: with the engine up the same routes are proxied as before', async () => {
+    mode = 'local'
+    engineHealthState.value = 'up'
+    for (const [p, m] of engineOnly) {
+      proxyRequest.mockClear()
+      await middleware(ev(p, m))
+      expect(proxyRequest, `${m} ${p}`).toHaveBeenCalledTimes(1)
+    }
+  })
+
+  it('hosted mode: a route the gate proxies answers 503 when the engine is down; the forbid still wins', async () => {
+    mode = 'hosted'
+    engineHealthState.value = 'down'
+    const { event, res } = evWithRes('/system_stats', 'GET')
+    expect(await middleware(event)).toEqual({ error: 'This needs the local engine' })
+    expect(res.statusCode).toBe(503)
+    expect(proxyRequest).not.toHaveBeenCalled()
+    // A refused route stays refused (403), not turned into a 503.
+    expect(await status('/sailor/render_timeline', 'POST')).toBe(403)
+  })
+
+  it('a pool worker target is still proxied — the health check only speaks for :8188', async () => {
+    mode = 'local'
+    engineHealthState.value = 'down'
+    await middleware(ev('/queue?comfyWorker=1', 'GET'))
+    expect(proxyRequest).toHaveBeenCalledTimes(1)
+    expect(proxyRequest.mock.calls[0]?.[1]).toBe('http://127.0.0.1:8190/queue')
+  })
+
+  it('the socket (/api/ws, /comfyui/ws) is left to its own handling, not answered 503', async () => {
+    mode = 'local'
+    engineHealthState.value = 'down'
+    for (const p of ['/api/ws?clientId=x', '/comfyui/ws']) {
+      proxyRequest.mockClear()
+      await middleware(ev(p, 'GET'))
+      expect(proxyRequest, p).toHaveBeenCalledTimes(1)
+    }
   })
 })

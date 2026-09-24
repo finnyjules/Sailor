@@ -46,7 +46,7 @@
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { isSafeId, resolveInside } from './paths'
+import { isDir, isSafeId, resolveInside, writeFileAtomic } from './paths'
 import { pyDumps } from './pyJson'
 
 type Json = any
@@ -190,24 +190,8 @@ function readJson(file: string): Json {
  * `tempfile.mkstemp`, and the rename keeps that mode.
  */
 function atomicWriteJson(file: string, data: Json): void {
-  const dir = path.dirname(file)
-  fs.mkdirSync(dir, { recursive: true })
-  const tmp = path.join(dir, `tmp${randomUUID().replace(/-/g, '').slice(0, 8)}.tmp`)
-  try {
-    fs.writeFileSync(tmp, pyDumps(data, 2), { encoding: 'utf8', mode: 0o600, flag: 'wx' })
-    fs.renameSync(tmp, file)
-  }
-  finally {
-    if (fs.existsSync(tmp)) {
-      try { fs.unlinkSync(tmp) }
-      catch {}
-    }
-  }
-}
-
-function isDir(p: string): boolean {
-  try { return fs.statSync(p).isDirectory() }
-  catch { return false }
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  writeFileAtomic(file, pyDumps(data, 2), { mode: 0o600 })
 }
 
 function newHexId(prefix: string): string {

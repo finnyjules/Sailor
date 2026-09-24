@@ -24,7 +24,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { annotatedFilepath, engineFolder, pyBasename } from './paths'
+import { annotatedFilepath, engineFolder, isFile, isRefusedViewName, pyBasename, resolveInside } from './paths'
 
 /**
  * `mimetypes.guess_type` as the engine's Python answers it on the dev machine
@@ -61,13 +61,6 @@ function dirByType(type: string | null | undefined): string | null {
   return type === 'output' || type === 'temp' || type === 'input' ? engineFolder(type) : null
 }
 
-/** `os.path.commonpath((os.path.abspath(child), parent)) == parent` for an absolute, normalised parent. */
-function staysInside(parent: string, child: string): boolean {
-  const base = path.resolve(parent)
-  const full = path.resolve(base, child)
-  return full === base || full.startsWith(base === path.sep ? base : base + path.sep)
-}
-
 /** One value per query key, as aiohttp's `query[key]` / `.get()` (first occurrence). */
 export type ViewQuery = Record<string, string | string[] | undefined>
 function first(q: ViewQuery, key: string): string | undefined {
@@ -91,7 +84,7 @@ export function resolveViewTarget(query: ViewQuery): ViewTarget {
 
   const { name, type: annotated } = annotatedFilepath(raw)
   if (!name) return { kind: 'status', status: 400 }
-  if (name[0] === '/' || name.includes('..')) return { kind: 'status', status: 400 }
+  if (isRefusedViewName(name)) return { kind: 'status', status: 400 }
 
   const type = annotated ?? (first(query, 'type') ?? 'output')
   let dir = dirByType(type)
@@ -99,8 +92,10 @@ export function resolveViewTarget(query: ViewQuery): ViewTarget {
 
   const subfolder = first(query, 'subfolder')
   if (subfolder !== undefined) {
-    if (!staysInside(dir, subfolder)) return { kind: 'status', status: 403 }
-    dir = path.resolve(dir, subfolder)
+    // `os.path.commonpath((os.path.abspath(child), parent)) == parent`
+    const inside = resolveInside(dir, subfolder)
+    if (inside === null) return { kind: 'status', status: 403 }
+    dir = inside
   }
 
   const filename = pyBasename(name)
@@ -109,11 +104,6 @@ export function resolveViewTarget(query: ViewQuery): ViewTarget {
   return { kind: 'file', file, filename, type, subfolder: subfolder ?? '' }
 }
 
-/** `os.path.isfile`: follows symlinks; any error is False. */
-function isFile(p: string): boolean {
-  try { return fs.statSync(p).isFile() }
-  catch { return false }
-}
 
 // ------------------------------------------------------------ the response
 

@@ -15,6 +15,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { resolveEngineRoot } from '../utils/inputUploads'
+import { isFile } from './paths'
 
 type Json = any
 
@@ -198,10 +199,7 @@ export function catalogPayload(dir: string): { version: Json, effects: Json[] } 
     const eid = item(entry, 'id')
     if (effects.has(eid)) throw new Error(`shader_effects manifest: duplicate effect id '${eid}'`)
     const fragPath = path.join(dir, `${eid}.frag`)
-    let isFile = false
-    try { isFile = fs.statSync(fragPath).isFile() }
-    catch {}
-    if (!isFile) throw new Error(`shader_effects manifest: missing shader file for '${eid}'`)
+    if (!isFile(fragPath)) throw new Error(`shader_effects manifest: missing shader file for '${eid}'`)
     const source = readText(fragPath)
     const params = [...item(entry, 'params')].map(effectParam)
     for (const p of params) validateParam(eid, p)
