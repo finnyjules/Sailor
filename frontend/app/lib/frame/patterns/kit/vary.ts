@@ -19,6 +19,28 @@ export interface Choice {
 
 export const DEFAULT_CHOICE: Choice = { lines: 0, arr: 0, scale: 'full', side: 'right' }
 
+/** Every axis of a choice. */
+export const CHOICE_AXES: readonly (keyof Choice)[] = ['lines', 'arr', 'scale', 'side', 'cta']
+
+/** A choice's value on one axis. `cta` absent reads as `'drawn'` (ruling R7's default). */
+export const axisValue = (c: Choice, key: keyof Choice): unknown => (key === 'cta' ? (c.cta ?? 'drawn') : c[key])
+
+/** Two choices are the same variation (an absent `cta` reads as `'drawn'`). */
+export const sameChoice = (a: Choice, b: Choice): boolean =>
+  a.lines === b.lines && a.arr === b.arr && a.scale === b.scale && a.side === b.side
+  && (a.cta ?? 'drawn') === (b.cta ?? 'drawn')
+
+/** `list` (with each item's index in it) ordered closest to `now` first: the variation equal to it,
+ *  then the most axes the same, ties in the list's own order (best first) — so "else the first"
+ *  holds. The one order a layout is re-applied in (a tag change) and carried to another format in
+ *  (a set, Stage 5). */
+export function closestFirst<T extends { choice: Choice }>(list: readonly T[], now: Choice): { c: T; i: number }[] {
+  const score = (c: Choice) => sameChoice(c, now) ? Infinity : CHOICE_AXES.filter(k => axisValue(c, k) === axisValue(now, k)).length
+  return list.map((c, i) => ({ c, i, sc: score(c.choice) }))
+    .sort((x, y) => y.sc - x.sc || x.i - y.i)
+    .map(({ c, i }) => ({ c, i }))
+}
+
 export interface LineOption { v: number; lines: string[]; label: string }
 
 /** Balance `words` into `n` roughly equal-length lines (by character count). */

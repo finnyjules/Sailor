@@ -2,7 +2,7 @@ import { ref, computed, shallowRef, watch, toRaw, getCurrentScope, onScopeDispos
 import type { Ref, ComputedRef } from 'vue'
 import { applyLayoutToFrame, candidatesForFrame, contentForFrame, hiddenLinesForFrame, isFromLayout, lineOptionsForFrame, planLayout, roleIdsForFrame, staleAccentCopySource } from '~/lib/frame/patterns/kit/plan'
 import type { LayoutEditor, LayoutPlan, LayoutPlanArgs, StoredRoles } from '~/lib/frame/patterns/kit/plan'
-import { DEFAULT_CHOICE } from '~/lib/frame/patterns/kit/vary'
+import { axisValue, closestFirst, DEFAULT_CHOICE, sameChoice } from '~/lib/frame/patterns/kit/vary'
 import type { Candidate, Choice } from '~/lib/frame/patterns/kit/vary'
 import type { BrandLogo, Measure } from '~/lib/frame/patterns/kit/types'
 import { contentHints } from '~/lib/frame/patterns/kit/content'
@@ -182,13 +182,6 @@ function contentKey(props: Record<string, unknown> | undefined, w: number, h: nu
   const bg = props?.sailor_localBg ?? null
   return JSON.stringify([w, h, formatFor(props, w, h)?.id ?? '', slots, rank, rows, props?.sailor_localGrid ?? null, roles, tags, bg])
 }
-
-/** A choice's value on one axis. `cta` absent reads as `'drawn'` (ruling R7's default). */
-const axisValue = (c: Choice, key: keyof Choice): unknown => (key === 'cta' ? (c.cta ?? 'drawn') : c[key])
-
-const sameChoice = (a: Choice, b: Choice) =>
-  a.lines === b.lines && a.arr === b.arr && a.scale === b.scale && a.side === b.side
-  && (a.cta ?? 'drawn') === (b.cta ?? 'drawn')
 
 const AXES: { key: keyof Choice; label: string; values?: unknown[]; labels?: string[] }[] = [
   { key: 'lines', label: 'Line breaks' },
@@ -796,11 +789,8 @@ export function useLayoutVary(src: LayoutVarySource): {
     const list = candidatesForFrame(a)
     if (!list.length) return 'not-offered'
     const now: Choice = { ...DEFAULT_CHOICE, ...(st?.choice ?? {}) }
-    const keys: (keyof Choice)[] = ['lines', 'arr', 'scale', 'side', 'cta']
-    const score = (c: Choice) => sameChoice(c, now) ? Infinity : keys.filter(k => axisValue(c, k) === axisValue(now, k)).length
-    // Stable: equal scores keep the candidates' own order (best first), so "else the first" holds.
-    const order = list.map((c, i) => ({ c, i, sc: score(c.choice) })).sort((x, y) => y.sc - x.sc || x.i - y.i)
-    for (const { c, i } of order) {
+    // The kit's one closest-choice order (shared with a set, Stage 5): equal, then most axes the same.
+    for (const { c, i } of closestFirst(list, now)) {
       const out = applyLayoutToFrame({ ...a, choice: c.choice, editor: ed })
       if (!out.ok || !out.posterState) continue
       if (s === style.value) { layoutId.value = id; choice.value = { ...c.choice }; applied.value = true }
