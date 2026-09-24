@@ -25,7 +25,9 @@ export type LocalLayerKind = 'text' | 'rect' | 'ellipse' | 'line' | 'path' | 'im
 import type { LayerMotionState } from '~/lib/motion/evaluate'
 import type { FrameMotion } from '~/lib/motion/types'
 import { applyEffectDialTracks, type EffectDialTrack } from '~/lib/motion/effectTracks'
-import { applyMotionxTracks, applyTextBehaviours, applyRevealBehaviours, applyMorphBehaviours, type TextMotion } from '~/lib/motionx/adapter/frame'
+import { applyMotionxTracks, applyTextBehaviours, applyRevealBehaviours, applyMorphBehaviours, type TextMotion, type MotionMorph } from '~/lib/motionx/adapter/frame'
+import { prepareMorph } from '~/lib/vector/morphPieces'
+import { blendMorphPaint, morphFillOf, ringsBBoxOfD } from '~/lib/compositor/morphDraw'
 import type { StoredBehaviour, Track as MotionxTrack } from '~/lib/motionx'
 import { beginReveal, finishReveal, type RevealPass } from '~/lib/motionx/reveal/paint'
 import { drawRevealShaderStyle, revealShaderReady } from '~/lib/motionx/reveal/paintPixels'
@@ -269,7 +271,7 @@ export {
 } from '~/lib/compositor/paint'
 import { type Paint, isFill, isImageFill, paintTileBox } from '~/lib/compositor/paint'
 import { buildDisplacementField, resampleBilinear, type DisplaceMapSpec } from '~/lib/compositor/displace'
-import { effectStackOf, orderablePasses, pinnedEffect, rasterablePasses, splitTrailingBlurs, isGeometryKind } from '~/lib/compositor/effectStack'
+import { effectStackOf, orderablePasses, pinnedEffect, rasterablePasses, splitTrailingBlurs, isGeometryKind, regionOf, writeStackToLayer } from '~/lib/compositor/effectStack'
 import { expandRecipe } from '~/lib/compositor/recipes'
 // Frame slice F2: the pure outline transform (trim / offset / round corners / roughen).
 // `applyGeometry(d, effects, {W})` is identity (same reference) when no geometry effect
@@ -1495,6 +1497,62 @@ function buildSiblingResolver(localLayers: LocalLayer[], W: number, H: number): 
       x: l.x, y: l.y, rotation: l.rotation, skewX: l.skewX, skewY: l.skewY, unitPx: outlineUnitPx(l, W),
     }),
   })
+}
+
+/**
+ * Frame Morph (spec 2026-09-23): swap every layer carrying `motionMorph` for a transient PATH
+ * clone whose outline is the morph, at that amount, between A's computed outline and its target's
+ * outline resolved into A's frame (so it lands where B really is). A's placement, effects (minus
+ * geometry ones — already inside its computed outline) and blend stay; fill and opacity blend
+ * toward B's; strokes are dropped for the bar (fill + A's non-geometry effects only). Either
+ * outline missing (photo, system font, decoration, font still loading) → cross-fade: A fades
+ * out, the target fades in. Same references back when nothing morphs.
+ *
+ * Runs AFTER the copies-stagger expansion, so a staggered cloner's per-copy items all share one
+ * layer id; each keeps its own `motionCopy` when swapped, or every copy item would redraw the
+ * whole array.
+ */
+function resolveMorphs(
+  items: StackItem[], localLayers: LocalLayer[], W: number, resolver: SiblingResolver<LocalLayer>,
+): { items: StackItem[]; localLayers: LocalLayer[] } {
+  const swaps = new Map<string, LocalLayer>()
+  for (const layer of localLayers) {
+    const mm = (layer as unknown as { motionMorph?: MotionMorph }).motionMorph
+    if (!mm) continue
+    const target = localLayers.find(l => `l:${l.id}` === mm.target)
+    if (!target) continue
+    const dA = computedOutlineD(layer, W, (key) => resolver(key, layer))
+    const sib = resolver(mm.target, layer)
+    const bare = { ...layer, motionMorph: undefined } as unknown as LocalLayer
+    if (!dA || !sib) {
+      swaps.set(layer.id, { ...bare, opacity: (layer.opacity ?? 1) * (1 - mm.amount) } as LocalLayer)
+      swaps.set(target.id, { ...target, motionHidden: undefined, opacity: (target.opacity ?? 1) * mm.amount } as unknown as LocalLayer)
+      continue
+    }
+    const d = prepareMorph(dA, sib.d, mm.style)(mm.amount)
+    const unit = outlineUnitPx(layer, W)
+    const stack = effectStackOf(layer).filter(e => regionOf(e.type) !== 'geometry')
+    swaps.set(layer.id, {
+      ...bare,
+      ...writeStackToLayer(stack),
+      kind: 'path', d, bbox: ringsBBoxOfD(d), scale: unit / W, fillRule: 'nonzero',
+      fill: blendMorphPaint(morphFillOf(layer as never), morphFillOf(target as never), mm.amount),
+      stroke: '', strokeWidth: 0, strokes: undefined,
+      opacity: (layer.opacity ?? 1) + ((target.opacity ?? 1) - (layer.opacity ?? 1)) * mm.amount,
+    } as unknown as LocalLayer)
+  }
+  if (swaps.size === 0) return { items, localLayers }
+  const copyOf = (l: LocalLayer) => (l as { motionCopy?: number }).motionCopy
+  return {
+    localLayers: localLayers.map(l => swaps.get(l.id) ?? l),
+    items: items.map((it) => {
+      if (it.type !== 'local') return it
+      const sw = swaps.get(it.layer.id)
+      if (!sw) return it
+      const k = copyOf(it.layer)
+      return { ...it, layer: (k === undefined ? sw : { ...sw, motionCopy: k }) as LocalLayer }
+    }),
+  }
 }
 
 /** Draw an image with a fill (`tint`) blended over it, clipped to the image's
@@ -5937,6 +5995,9 @@ export function paintLayerStack(
   // today — no geometry kind carries a `refLayerId` — so this changes no pixels.
   const siblingResolver = buildSiblingResolver(localLayers, W, H)
   _siblingResolveFor = (self: LocalLayer) => (key: string) => siblingResolver(key, self)
+  // Frame Morph: swap morphing layers for their transient path clone. The resolver keeps the
+  // PRE-swap list, so the target's outline and placement are its own.
+  ;({ items, localLayers } = resolveMorphs(items, localLayers, W, siblingResolver))
   try {
     return withFieldFrame(shaderRequests, (frozenCount, token) => {
       _fieldCtx.token = token   // resolveShaderFill reads this to pass into every resolveField call
