@@ -616,6 +616,13 @@ describe('setLayerEffect writes through the effect stack', () => {
     expect(COMPOSITOR_HINT_CEILING).toBe(27700)
   })
 
+  it('does not offer the print finishes to the agent (picker only, hint budget unchanged)', () => {
+    for (const type of ['gold_foil', 'spot_uv']) {
+      const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type } } })
+      expect(r.ok).toBe(false)
+    }
+  })
+
   it('clamps out-of-range recipe numbers, falls back a bad colour, and drops unknown fields', () => {
     const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'risograph', levels: 99, ink: 'not-a-colour', bogus: 'x' } } })
     expect(r.ok).toBe(true); if (!r.ok) return

@@ -111,6 +111,8 @@ export const EFFECT_DIAL_SCHEMA: Record<EffectKind, DialSpec[]> = {
   risograph: [col('ink', 'Ink'), col('inkTwo', 'Second ink'), num('levels', 'Levels', 2, 8), num('grain', 'Grain', 0, 1), num('contrast', 'Contrast', 0.5, 2)],
   photocopy: [num('threshold', 'Threshold', 0, 1), num('dirt', 'Dirt', 0, 1), num('contrast', 'Contrast', 0.5, 3)],
   letterpress: [num('depth', 'Depth', 0, 1), col('ink', 'Ink'), num('paper', 'Paper', 0, 1)],
+  gold_foil: [num('brushed', 'Brushed', 0, 1), num('pressed', 'Pressed in', 0, 1)],
+  spot_uv: [num('gloss', 'Gloss', 0, 1), num('raised', 'Raised', 0, 1)],
   // ── pixel — motion blur / trailing blur / stamp ──────────────────────────────────
   directional_blur: [num('angle', 'Angle', 0, 360), num('distance', 'Distance', 0, 0.2)],
   radial_blur: [num('centerX', 'Centre X', 0, 1), num('centerY', 'Centre Y', 0, 1), num('amount', 'Amount', 0, 1)],

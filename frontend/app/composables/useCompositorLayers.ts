@@ -275,6 +275,7 @@ import { type Paint, isFill, isImageFill, paintTileBox } from '~/lib/compositor/
 import { buildDisplacementField, resampleBilinear, type DisplaceMapSpec } from '~/lib/compositor/displace'
 import { effectStackOf, orderablePasses, pinnedEffect, rasterablePasses, splitTrailingBlurs, isGeometryKind, regionOf, writeStackToLayer } from '~/lib/compositor/effectStack'
 import { expandRecipe } from '~/lib/compositor/recipes'
+import { applyFinish } from '~/lib/compositor/finishPass'
 // Frame slice F2: the pure outline transform (trim / offset / round corners / roughen).
 // `applyGeometry(d, effects, {W})` is identity (same reference) when no geometry effect
 // is enabled, so the no-effect draw stays byte-identical below.
@@ -298,12 +299,14 @@ import type {
   TornEdgeEffect, FeatherEffect, LayerEffect, EffectInstance, EffectKind, WarpEffect,
   ShaderPixelEffect, BackdropShaderEffect, BackdropLuminanceMaskEffect,
   RisographEffect, PhotocopyEffect, LetterpressEffect,
+  GoldFoilEffect, SpotUvEffect,
 } from '~/lib/compositor/effectStack'
 export type {
   DropShadowEffect, LayerBlurEffect, InnerShadowEffect, BackgroundBlurEffect,
   TornEdgeEffect, FeatherEffect, LayerEffect, EffectInstance, EffectKind,
   ShaderPixelEffect, BackdropShaderEffect, BackdropLuminanceMaskEffect,
   RisographEffect, PhotocopyEffect, LetterpressEffect,
+  GoldFoilEffect, SpotUvEffect,
 }
 export type { AdjustEffect, BloomEffect, DofEffect, DuotoneEffect, GradientMapEffect, GrainEffect, PostEffect, VignetteEffect }
 
@@ -3228,6 +3231,12 @@ function paintLayer(
               case 'photocopy':
               case 'letterpress':
                 applyPasses(off, expandRecipe(e as unknown as RisographEffect | PhotocopyEffect | LetterpressEffect), { W, scale: s }); break
+              // Print finishes: GPU passes lit by the Frame's light; the layer's alpha is the mask.
+              // No WebGL2 ⇒ applyFinish returns false and off stays the plain layer (the inspector
+              // says why). Needs its own case: applyPasses silently skips unknown kinds.
+              case 'gold_foil':
+              case 'spot_uv':
+                applyFinish(off, e.type, e as unknown as GoldFoilEffect | SpotUvEffect, _frameLight, s); break
               default:
                 applyPasses(off, [e], { W, scale: s })
             }
