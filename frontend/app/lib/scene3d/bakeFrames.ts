@@ -52,9 +52,11 @@ export interface SceneBakeResult { frames: string[]; fps: number; duration: numb
  *  Capped at `target * TILE_CALL_CEILING` `render()` calls so a tracer stuck mid-compile (a lost
  *  GL context, `isCompiling` never clearing) cannot hang the bake forever; falling short of
  *  `target` there just means a noisier frame, not a thrown error — the bake still finishes. */
-const TILE_CALL_CEILING = 20 // ~2x the measured 9 calls/sample, headroom for a finer tile grid
+// ~2x the measured 9 calls/sample (3x3 tiles, see PathTracer.ts's `tiles.set(3, 3)`), headroom for
+// a finer tile grid
+export const TILE_CALL_CEILING = 20
 
-function finishCinematicSample(engine: Pick<SceneEngine, 'render' | 'cinematicStatus'>, target: number): void {
+export function finishCinematicSample(engine: Pick<SceneEngine, 'render' | 'cinematicStatus'>, target: number): void {
   const ceiling = target * TILE_CALL_CEILING
   for (let calls = 0; engine.cinematicStatus().samples < target && calls < ceiling; calls++) engine.render()
 }
