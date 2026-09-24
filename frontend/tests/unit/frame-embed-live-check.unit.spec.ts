@@ -207,6 +207,21 @@ describe('a timed-out check keeps the source until its pull settles', () => {
     expect(log).toEqual([])
   })
 
+  it('checkLiveEmbedLocked: a mount that never settles does not hold the source (final re-review I-A)', async () => {
+    const source = fakeSource()
+    const check = checkLiveEmbed(source, embedOf({ hang: true }), STUB_BUNDLE, { timeoutMs: 30 })
+    expect((await check).reason).toMatch(/timed out/)
+    await expect(check.settled).resolves.toBeUndefined()
+    // The lock is released too: a pull queued behind the locked check goes through.
+    const locked = checkLiveEmbedLocked(source, embedOf({ hang: true }), STUB_BUNDLE, { timeoutMs: 30 })
+    const pulled = pullSourceFrames(source, 1, 64, {
+      encode: async () => 'frame',
+      copy: (surface) => surface as unknown as CanvasImageSource,
+    })
+    expect((await locked).reason).toMatch(/timed out/)
+    expect(await pulled).toEqual({ frames: ['frame'], failures: [] })
+  })
+
   it('checkLiveEmbed: `settled` also resolves for a check that finished normally', async () => {
     const check = checkLiveEmbed(fakeSource(), embedOf(), STUB_BUNDLE)
     expect((await check).ok).toBe(true)

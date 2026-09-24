@@ -20,7 +20,7 @@ import { diffImages, matches, type ImageDiff } from './compare'
 export interface LiveCheckResult { ok: boolean; reason?: string; diffs: ImageDiff[] }
 
 /** A running check: resolves with its result — at the latest when it times out — and carries
- *  `settled`, which resolves only once the check's own work has actually stopped. A timed-out
+ *  `settled`, which resolves once the check no longer touches the source. A timed-out
  *  check may still be inside a `source.getFrame` it cannot cancel; whoever lent it the source
  *  (the pull lock, the stopped preview) must hold that loan until `settled`, or the orphaned
  *  pull can land in the middle of the next reader's pull (the frames fallback). Never rejects. */
@@ -92,8 +92,8 @@ const pct = (x: number) => `${(x * 100).toFixed(2)}%`
  * times (t01 = i / frames, i near 0, 0.37, 0.71 of `frames = round(source.fps * embed.duration)`),
  * at a long side of 480 px in the source's aspect. Resolves ok only when every time matches.
  * Never rejects; errors and a 10 s timeout resolve { ok: false, reason }. Always removes the iframe
- * and destroys the handle. The returned promise's `settled` resolves once the check's own pulls and
- * mount have finished too — after the result when the check timed out (see LiveCheck).
+ * and destroys the handle. The returned promise's `settled` resolves once the check's source pull in
+ * flight has landed — after the result when the check timed out mid-pull (see LiveCheck).
  *
  * The player is mounted with the config as is (it builds at the source's native size) and then
  * `setSize`d, as the Frame export's nested player is — so an effect whose layout depends on its
@@ -107,6 +107,8 @@ export function checkLiveEmbed(
   const timeoutMs = opts.timeoutMs ?? LIVE_CHECK_TIMEOUT_MS
   const diffs: ImageDiff[] = []
   let done = false
+  /** The source pull in flight, if any — the only work of the check's that touches the source. */
+  let pulling: Promise<unknown> | null = null
   let frame: HTMLIFrameElement | null = null
   let handle: EmbedHandle | null = null
   const cleanup = () => {
@@ -129,7 +131,10 @@ export function checkLiveEmbed(
     const reference: Uint8ClampedArray[] = []
     for (const t of times) {
       if (done) return { ok: false, diffs }
-      const surface = await source.getFrame(t, w, h)
+      const pull = source.getFrame(t, w, h)
+      pulling = pull
+      const surface = await pull
+      pulling = null
       reference.push(read(surface as CanvasImageSource, w, h))
     }
     if (done) return { ok: false, diffs }
@@ -156,8 +161,6 @@ export function checkLiveEmbed(
     return { ok: false, reason: `the player differs at frame ${at} of ${frames}: mean ${d.mean.toFixed(2)}, ${pct(d.shareOver)} of pixels`, diffs }
   }
 
-  let settle!: () => void
-  const settled = new Promise<void>((r) => { settle = r })
   const result = new Promise<LiveCheckResult>((resolve) => {
     const finish = (r: LiveCheckResult) => {
       if (done) return
@@ -167,11 +170,15 @@ export function checkLiveEmbed(
       resolve(r)
     }
     const timer = setTimeout(() => finish({ ok: false, reason: `timed out after ${timeoutMs} ms`, diffs: [...diffs] }), timeoutMs)
-    // `settled` follows run() itself, not the result: after a timeout, run() is still awaiting
-    // the pull (or the mount) it started, and only its own `done` checks stop it afterwards.
-    run()
-      .then(finish, (err: unknown) => finish({ ok: false, reason: err instanceof Error ? err.message : String(err), diffs: [...diffs] }))
-      .finally(settle)
+    run().then(finish, (err: unknown) => finish({ ok: false, reason: err instanceof Error ? err.message : String(err), diffs: [...diffs] }))
+  })
+  // `settled` waits for the source pull in flight when the result was decided — after a timeout,
+  // run() may still be awaiting it, and `done` stops it from starting another. It never waits for
+  // the player's mount: that runs in the check's own (by then removed) iframe, never touches the
+  // source, and a mount stuck on a font in a removed document may never settle at all.
+  const settled = result.then(() => {
+    const p = pulling
+    return p ? p.then(() => undefined, () => undefined) : undefined
   })
   return Object.assign(result, { settled })
 }
