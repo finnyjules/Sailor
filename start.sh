@@ -64,7 +64,10 @@ if [ -d /data ]; then
   # models/ above (defensive: .dockerignore keeps these out of the image, so on a
   # fresh container there's nothing to seed and we just create the symlink; the
   # gated seed covers the case where a real dir already exists).
-  for d in input output; do
+  # user/ joins them for engine-free Phase A: Sailor now reads and writes
+  # user/sailor/projects and user/sailor/spend.jsonl itself (server/native), so
+  # <repo-root>/user must be the same /data/user the engine is launched with.
+  for d in input output user; do
     if [ -d "/app/$d" ] && [ ! -L "/app/$d" ]; then
       if cp -an "/app/$d/." "/data/$d/"; then
         rm -rf "/app/$d"

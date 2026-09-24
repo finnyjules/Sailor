@@ -9,6 +9,7 @@ import { handleMeteredPrompt } from '../utils/meterGraphRun'
 import { handleHostedQueueGet, handleHostedInterrupt, handleHostedObjectInfo, handleHostedUpload, handleHostedSailor, handleHostedSailorData, handleHostedOutputListing, handleHostedUserScoped } from '../utils/engineGate'
 import { normalizeEnginePath, hostedEngineDecision } from '../utils/enginePath'
 import { NITRO_API_PATHS, NITRO_API_PREFIXES } from '../lib/nitroApiPaths'
+import { nativeEngineRoute } from '../native/router'
 
 // Paths under PROXY_PREFIXES that should be handled by Nitro routes, not proxied
 // — the lists live in their own module so the reachability guard can import the
@@ -33,6 +34,15 @@ export default defineEventHandler(async (event) => {
   if (NITRO_API_PATHS.some((p) => path === p || path.startsWith(p + '?'))) return
   if (NITRO_API_PREFIXES.some((p) => path === p || path.startsWith(p + '/') || path.startsWith(p + '?'))) return
   if (NITRO_ROUTE_PREFIXES.some((p) => path === p || path.startsWith(p + '?') || path.startsWith(p + '/'))) return
+
+  // Engine-free Phase A: the /sailor routes Sailor now serves itself (projects,
+  // spend) — same folders, same formats as the Python it replaces. LOCAL MODE
+  // ONLY here: hosted reaches the same handlers through the tenant gates below,
+  // after the ownership check, never directly.
+  if (deployMode() !== 'hosted') {
+    const native = await nativeEngineRoute(event)
+    if (native !== undefined) return native
+  }
 
   // Stage 5 review C1: ComfyUI serves every route at BOTH `/x` and `/api/x`,
   // and this proxy strips a leading `/comfyui` — so one endpoint has up to

@@ -591,9 +591,9 @@ describe('local mode is byte-identical — no gate, no 403, same proxy target', 
     // must still raw-proxy locally — no scrubber, no overwrite sniff, no 403.
     ['/comfyui/object_info', 'GET'], ['/upload/image', 'POST'], ['/gate/resume', 'POST'],
     ['/extensions/../history', 'GET'],
-    // Stage 6 Task 2: the projects gate and the spend refusal are hosted-only.
-    ['/sailor/projects', 'GET'], ['/sailor/projects/abc', 'PUT'], ['/sailor/projects/abc', 'DELETE'],
-    ['/sailor/projects/abc/versions', 'POST'], ['/sailor/spend/summary', 'GET'],
+    // Stage 6 Task 2's projects gate and spend refusal are hosted-only; since
+    // engine-free Phase A those paths are answered natively in local mode (see
+    // the next describe), so they are no longer in this raw-proxy list.
     // Stage 6 Task 2b: every /sailor bucket — data, capability, refuse — raw-
     // proxies unchanged in local mode.
     ['/sailor/input_listing', 'GET'], ['/sailor/output_listing', 'GET'], ['/sailor/assets', 'GET'],
@@ -625,9 +625,7 @@ describe('local mode is byte-identical — no gate, no 403, same proxy target', 
       ['/comfyui/api/queue', 'http://127.0.0.1:8188/api/queue'],
       ['/comfyui/internal/files/output', 'http://127.0.0.1:8188/internal/files/output'],
       ['/comfyui/settings', 'http://127.0.0.1:8188/settings'],
-      ['/sailor/projects', 'http://127.0.0.1:8188/sailor/projects'],
-      ['/comfyui/sailor/projects/abc', 'http://127.0.0.1:8188/sailor/projects/abc'],
-      ['/sailor/spend/summary', 'http://127.0.0.1:8188/sailor/spend/summary'],
+      ['/comfyui/sailor/assets', 'http://127.0.0.1:8188/sailor/assets'],
       ['/queue?comfyWorker=2', 'http://127.0.0.1:8191/queue'],
       ['/comfyui', 'http://127.0.0.1:8188/'],
     ]
@@ -636,5 +634,34 @@ describe('local mode is byte-identical — no gate, no 403, same proxy target', 
       await middleware(ev(p, 'GET'))
       expect(proxyRequest.mock.calls[0]?.[1], p).toBe(url)
     }
+  })
+})
+
+describe('local mode: projects and spend are answered by Sailor itself (engine-free Phase A)', () => {
+  let root = ''
+  beforeEach(async () => {
+    const { mkdtempSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    root = mkdtempSync(join(tmpdir(), 'engine-path-alias-'))
+    ;(await import('../../server/utils/inputUploads')).__setInputUploadsEngineRootForTests(root)
+  })
+  afterEach(async () => {
+    ;(await import('../../server/utils/inputUploads')).__setInputUploadsEngineRootForTests(undefined)
+    ;(await import('node:fs')).rmSync(root, { recursive: true, force: true })
+  })
+
+  it('never raw-proxies them and never enters the hosted projects gate, under any spelling', async () => {
+    for (const [p, m] of [
+      ['/sailor/projects', 'GET'], ['/api/sailor/projects', 'GET'], ['/comfyui/sailor/projects/abc', 'GET'],
+      ['/comfyui/api/sailor/projects/abc/generations', 'GET'], ['/sailor/projects/abc', 'DELETE'],
+      ['/sailor/spend/summary', 'GET'], ['/sailor/projects?comfyWorker=2', 'GET'],
+    ] as const) {
+      proxyRequest.mockClear()
+      const res = await middleware(ev(p, m))
+      expect(proxyRequest, `${m} ${p} is native in local mode`).not.toHaveBeenCalled()
+      expect(res, `${m} ${p}`).toBeDefined()
+    }
+    expect(handleHostedSailor, 'local mode must never enter the projects gate').not.toHaveBeenCalled()
   })
 })

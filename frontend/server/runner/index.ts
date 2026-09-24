@@ -18,8 +18,7 @@ import { moderatePrompt } from '../utils/moderation'
 import { ownerOf, recordOwner } from '../utils/resourceOwners'
 import { isHosted } from '../utils/deployMode'
 import { captureError } from '../utils/observe'
-
-const ENGINE_ORIGIN = 'http://127.0.0.1:8188'
+import { nativeGenerationPost } from '../native/router'
 
 /** comfy_api_nodes/fal_refs.py's ramp: min(2s, 0.35s × 1.5^attempt). */
 export function pollDelayMs(attempt: number): number {
@@ -60,11 +59,11 @@ export function getEngine(): Engine {
       hosted: isHosted,
       ownerOf,
       recordOwner,
+      // Written straight into the project's store (same file the engine route
+      // wrote), no HTTP hop to ComfyUI.
       post: async (uuid, body) => {
-        const r = await fetch(`${ENGINE_ORIGIN}/sailor/projects/${encodeURIComponent(uuid)}/generations`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-        })
-        if (!r.ok) throw new Error(`generation record ${r.status}`)
+        const r = await nativeGenerationPost(uuid, body)
+        if (r.status < 200 || r.status >= 300) throw new Error(`generation record ${r.status}`)
       },
     }),
     // Network errors and 5xx are tried again (1s, 2s): fal has already billed the result.

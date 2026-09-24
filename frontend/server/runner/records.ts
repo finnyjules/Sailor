@@ -1,8 +1,9 @@
 /**
  * The runner writes one generation-history record per finished stage, with
- * the exact charge, into the project's store (served by the engine at
- * /sailor/projects/{uuid}/generations). The browser sees `recorded: true`
- * on the finish event and does not save its own copy.
+ * the exact charge, into the project's store — the file behind
+ * /sailor/projects/{uuid}/generations, written natively (server/native). The
+ * browser sees `recorded: true` on the finish event and does not save its own
+ * copy.
  */
 import { isSafeProjectId } from '../utils/engineGate'
 import type { StageRecordSummary } from './engine'

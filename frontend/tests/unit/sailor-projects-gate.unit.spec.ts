@@ -28,11 +28,18 @@
  * a project owned by anyone else refuses the same write).
  *
  * These tests drive the REAL middleware and the REAL handler (the harness from
- * engine-upload-ownership.unit.spec.ts) with a faked ownership table and a
- * faked engine fetch, so they fail against the pre-fix tree instead of merely
- * describing a new helper.
+ * engine-upload-ownership.unit.spec.ts) with a faked ownership table, so they
+ * fail against the pre-fix tree instead of merely describing a new helper.
+ *
+ * Engine-free Phase A: the projects are no longer forwarded to ComfyUI — the
+ * gate hands the request to Sailor's native storage (server/native/projects.ts)
+ * AFTER its ownership decision. The storage here is a temp engine root, and
+ * "engine untouched" is asserted on disk (and no fetch is ever made).
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 
 const rawBody = vi.fn(async () => undefined as Buffer | undefined)
 const requestHeader = vi.fn((_e: any, _n: string) => undefined as string | undefined)
@@ -69,6 +76,8 @@ const { handleHostedSailor, sailorProjectsRoute } = await import('../../server/u
 const { hostedEngineDecision, normalizeEnginePath } = await import('../../server/utils/enginePath')
 const { __setResourceOwnersDbForTests } = await import('../../server/utils/resourceOwners')
 const middleware = (await import('../../server/middleware/comfyui-proxy')).default as any
+const { __setInputUploadsEngineRootForTests } = await import('../../server/utils/inputUploads')
+const P = await import('../../server/native/projects')
 
 // ---------------------------------------------------------------- fake table
 
@@ -113,7 +122,26 @@ function upstream(body: unknown, status = 200) {
   fetchMock.mockResolvedValue({ status, ok: status >= 200 && status < 300, text: async () => JSON.stringify(body) })
 }
 
+let engineRoot = ''
+let root = ''
+
+/** Put a project on disk the way the storage writes it. */
+function seed(uuid: string, fields: Record<string, unknown> = {}) {
+  P.ensureProject(root, uuid, { name: String(fields.name ?? uuid), now: 1 })
+  if (Object.keys(fields).length) P.writeProject(root, { ...P.readProject(root, uuid), ...fields })
+}
+const onDisk = (uuid: string) => fs.existsSync(path.join(root, uuid))
+const body = (json: string) => rawBody.mockResolvedValue(Buffer.from(json))
+
+afterEach(() => {
+  __setInputUploadsEngineRootForTests(undefined)
+  fs.rmSync(engineRoot, { recursive: true, force: true })
+})
+
 beforeEach(() => {
+  engineRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sailor-projects-gate-'))
+  root = path.join(engineRoot, 'user', 'sailor', 'projects')
+  __setInputUploadsEngineRootForTests(engineRoot)
   mode = 'hosted'
   fetchMock.mockReset()
   upstream({ ok: true })
@@ -240,15 +268,14 @@ describe('sailorProjectsRoute — the pure path/verb table', () => {
   })
 })
 
+
 // -------------------------------------------------------------- the list
 
 describe('GET /sailor/projects — the index shows only the caller\'s projects', () => {
   it('drops other tenants\' projects AND unowned ones', async () => {
-    upstream({ projects: [
-      { uuid: 'p-mine', name: 'Mine', cover: null, updatedAt: 3 },
-      { uuid: 'p-theirs', name: 'Theirs', cover: null, updatedAt: 2 },
-      { uuid: 'p-orphan', name: 'Orphan', cover: null, updatedAt: 1 },
-    ] })
+    seed('p-mine', { updatedAt: 3 })
+    seed('p-theirs', { updatedAt: 2 })
+    seed('p-orphan', { updatedAt: 1 })
     const { body } = await call('/sailor/projects')
     expect(body.projects.map((p: any) => p.uuid)).toEqual(['p-mine'])
   })
@@ -256,48 +283,55 @@ describe('GET /sailor/projects — the index shows only the caller\'s projects',
   it('an UNOWNED project is invisible — projects are personal, not curated content', async () => {
     // The Stage-6 unowned-is-global READ rule (hostedCanRead) must not reach
     // this list: an orphaned project is someone's saved work.
-    upstream({ projects: [{ uuid: 'p-orphan', name: 'Orphan', updatedAt: 1 }] })
+    seed('p-orphan', { updatedAt: 1 })
     const { body } = await call('/sailor/projects')
     expect(body.projects).toEqual([])
   })
 
-  it('preserves each surviving entry verbatim and adds no other top-level keys', async () => {
-    upstream({ projects: [{ uuid: 'p-mine', name: 'Mine', cover: 'c.png', updatedAt: 7 }], secretTotals: { usd: 12 } })
+  it('serves each surviving entry as the index view and adds no other top-level keys', async () => {
+    seed('p-mine', { name: 'Mine', cover: 'c.png', updatedAt: 7, secretTotals: { usd: 12 } })
     const { body } = await call('/sailor/projects')
     expect(body).toEqual({ projects: [{ uuid: 'p-mine', name: 'Mine', cover: 'c.png', updatedAt: 7 }] })
   })
 
   it('is empty — not unfiltered — when the caller owns nothing', async () => {
     owners.clear()
-    upstream({ projects: [{ uuid: 'p-theirs' }, { uuid: 'p-orphan' }] })
+    seed('p-theirs')
+    seed('p-orphan')
     const { body } = await call('/sailor/projects')
     expect(body.projects).toEqual([])
   })
 
-  it('fails closed on a malformed upstream payload', async () => {
-    upstream({ projects: 'not-an-array' })
+  it('skips a corrupt project file rather than failing the list', async () => {
+    seed('p-mine', { updatedAt: 3 })
+    fs.mkdirSync(path.join(root, 'p-broken'), { recursive: true })
+    fs.writeFileSync(path.join(root, 'p-broken', 'project.json'), '{ nope')
+    owners.set(key('project', 'p-broken'), 'u1')
     const { body } = await call('/sailor/projects')
-    expect(body.projects).toEqual([])
+    expect(body.projects.map((p: any) => p.uuid)).toEqual(['p-mine'])
   })
 
-  it('502s when the engine is unavailable rather than serving an unfiltered body', async () => {
-    upstream({ error: 'boom' }, 500)
-    expect((await call('/sailor/projects')).status).toBe(502)
+  it('503s when the data folder cannot be found rather than serving anything', async () => {
+    __setInputUploadsEngineRootForTests(null)
+    expect((await call('/sailor/projects')).status).toBe(503)
   })
 })
 
 // ------------------------------------------------------- per-project reads
 
 describe('GET /sailor/projects/<uuid> — 404 for anything not yours', () => {
-  it('serves the owner\'s own project verbatim', async () => {
-    upstream({ project: { uuid: 'p-mine', name: 'Mine' }, currentVersion: { id: 'current' } })
-    const { body } = await call('/sailor/projects/p-mine')
-    expect(body).toEqual({ project: { uuid: 'p-mine', name: 'Mine' }, currentVersion: { id: 'current' } })
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8188/sailor/projects/p-mine')
+  it('serves the owner\'s own project from storage, without calling the engine', async () => {
+    seed('p-mine', { name: 'Mine' })
+    P.writeVersion(root, 'p-mine', { id: 'current', name: 'Mine', createdAt: 5 }, { now: 5 })
+    const { body, status } = await call('/sailor/projects/p-mine')
+    expect(status).toBe(200)
+    expect(body.project).toMatchObject({ uuid: 'p-mine', name: 'Mine', currentVersionId: 'current' })
+    expect(body.currentVersion).toEqual({ id: 'current', name: 'Mine', createdAt: 5 })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('404s another tenant\'s project WITHOUT touching the engine', async () => {
+    seed('p-theirs')
     const r = await call('/sailor/projects/p-theirs')
     expect(r.status).toBe(404)
     expect(r.message).not.toMatch(/permission|forbidden|owner/i) // must not confirm it exists
@@ -305,11 +339,14 @@ describe('GET /sailor/projects/<uuid> — 404 for anything not yours', () => {
   })
 
   it('404s an unowned project — orphaned saved work is not curated content', async () => {
+    seed('p-orphan')
     expect((await call('/sailor/projects/p-orphan')).status).toBe(404)
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('applies the same rule to the version and generation subroutes', async () => {
+    seed('p-theirs')
+    seed('p-orphan')
     for (const p of [
       '/sailor/projects/p-theirs/versions/v_1',
       '/sailor/projects/p-theirs/generations',
@@ -322,13 +359,15 @@ describe('GET /sailor/projects/<uuid> — 404 for anything not yours', () => {
   })
 
   it('serves owned subroutes', async () => {
-    upstream({ version: { id: 'v_1' } })
-    expect((await call('/sailor/projects/p-mine/versions/v_1', 'GET')).body).toEqual({ version: { id: 'v_1' } })
-    upstream({ generations: [{ id: 'g_1' }] })
-    expect((await call('/sailor/projects/p-mine/generations', 'GET')).body).toEqual({ generations: [{ id: 'g_1' }] })
+    seed('p-mine')
+    P.writeVersion(root, 'p-mine', { id: 'v_1', createdAt: 5 }, { now: 5 })
+    P.appendGeneration(root, 'p-mine', { id: 'g_1', ts: 9 })
+    expect((await call('/sailor/projects/p-mine/versions/v_1', 'GET')).body).toEqual({ version: { id: 'v_1', createdAt: 5 } })
+    expect((await call('/sailor/projects/p-mine/generations', 'GET')).body).toEqual({ generations: [{ id: 'g_1', ts: 9 }] })
   })
 
   it('honours the encoded spelling of an id it does not own', async () => {
+    seed('p-theirs')
     expect((await call('/sailor/projects/%70-theirs')).status).toBe(404)
     expect(fetchMock).not.toHaveBeenCalled()
   })
@@ -337,61 +376,66 @@ describe('GET /sailor/projects/<uuid> — 404 for anything not yours', () => {
 // ------------------------------------------------------ per-project writes
 
 describe('PUT /sailor/projects/<uuid> — writes claim, or are refused', () => {
-  it('forwards a write to a NEW uuid and records ownership on success', async () => {
-    rawBody.mockResolvedValue(Buffer.from('{"name":"Fresh"}'))
+  it('writes a NEW uuid and records ownership on success', async () => {
+    body('{"name":"Fresh"}')
     requestHeader.mockImplementation((_e: any, n: string) => (n === 'content-type' ? 'application/json' : undefined))
-    upstream({ project: { uuid: 'p-new', name: 'Fresh' } })
-    const { body } = await call('/sailor/projects/p-new', 'PUT')
-    expect(body).toEqual({ project: { uuid: 'p-new', name: 'Fresh' } })
+    const r = await call('/sailor/projects/p-new', 'PUT')
+    expect(r.status).toBe(200)
+    expect(r.body.project).toMatchObject({ uuid: 'p-new', name: 'Fresh' })
+    expect(P.readProject(root, 'p-new').name).toBe('Fresh')
     expect(owners.get(key('project', 'p-new'))).toBe('u1')
-    const [, init] = fetchMock.mock.calls[0]
-    expect(init.method).toBe('PUT')
-    expect(init.headers['content-type']).toBe('application/json')
-    expect(Buffer.from(init.body).toString()).toBe('{"name":"Fresh"}')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('does NOT claim a uuid the engine refused to write', async () => {
-    rawBody.mockResolvedValue(Buffer.from('{"name":"Fresh"}'))
-    upstream({ error: 'bad json' }, 400)
+  it('does NOT claim a uuid the storage refused to write', async () => {
+    body('{ not json')
     const r = await call('/sailor/projects/p-new', 'PUT')
     expect(r.status).toBe(400)
-    expect(r.body).toEqual({ error: 'bad json' })
+    expect(r.body.error).toMatch(/^bad json: /)
     expect(owners.has(key('project', 'p-new'))).toBe(false)
+    expect(onDisk('p-new')).toBe(false)
   })
 
-  it('404s a write to another tenant\'s project, engine untouched', async () => {
-    rawBody.mockResolvedValue(Buffer.from('{"name":"pwned"}'))
+  it('404s a write to another tenant\'s project, storage untouched', async () => {
+    seed('p-theirs', { name: 'Theirs' })
+    body('{"name":"pwned"}')
     expect((await call('/sailor/projects/p-theirs', 'PUT')).status).toBe(404)
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(P.readProject(root, 'p-theirs').name).toBe('Theirs')
     expect(owners.get(key('project', 'p-theirs'))).toBe('u2')
   })
 
   it('lets the owner keep writing without re-claiming', async () => {
-    rawBody.mockResolvedValue(Buffer.from('{"name":"Renamed"}'))
-    upstream({ project: { uuid: 'p-mine' } })
-    expect((await call('/sailor/projects/p-mine', 'PUT')).body).toEqual({ project: { uuid: 'p-mine' } })
+    seed('p-mine')
+    body('{"name":"Renamed"}')
+    expect((await call('/sailor/projects/p-mine', 'PUT')).body.project).toMatchObject({ uuid: 'p-mine', name: 'Renamed' })
     expect(owners.get(key('project', 'p-mine'))).toBe('u1')
   })
 
   it('applies the identical rule to version + generation POSTs (they ensure_project too)', async () => {
-    rawBody.mockResolvedValue(Buffer.from('{"version":{"id":"current"}}'))
-    // another tenant's project: refused, engine untouched
+    seed('p-theirs')
+    seed('p-mine')
+    body('{"version":{"id":"current"}}')
+    // another tenant's project: refused, storage untouched
     for (const p of ['/sailor/projects/p-theirs/versions', '/sailor/projects/p-theirs/generations']) {
       expect((await call(p, 'POST')).status, p).toBe(404)
     }
-    expect(fetchMock).not.toHaveBeenCalled()
-    // a brand-new uuid: the subroute CREATES the project upstream, so it must
-    // claim it — otherwise the project stays unowned and invisible forever.
-    upstream({ id: 'v_1' })
-    expect((await call('/sailor/projects/p-fresh/versions', 'POST')).body).toEqual({ id: 'v_1' })
+    expect(P.readProject(root, 'p-theirs').versionIndex).toEqual([])
+    expect(P.listGenerations(root, 'p-theirs')).toEqual([])
+    // a brand-new uuid: the subroute CREATES the project, so it must claim it
+    // — otherwise the project stays unowned and invisible forever.
+    expect((await call('/sailor/projects/p-fresh/versions', 'POST')).body).toEqual({ id: 'current' })
+    expect(onDisk('p-fresh')).toBe(true)
     expect(owners.get(key('project', 'p-fresh'))).toBe('u1')
     // and the owner's own project keeps working
-    expect((await call('/sailor/projects/p-mine/generations', 'POST')).body).toEqual({ id: 'v_1' })
+    const gen = await call('/sailor/projects/p-mine/generations', 'POST')
+    expect(gen.status).toBe(200)
+    expect(gen.body.id).toMatch(/^g_[0-9a-f]{12}$/)
   })
 
-  it('passes an upstream 409 (stale rolling write) through verbatim', async () => {
-    rawBody.mockResolvedValue(Buffer.from('{"version":{"id":"current"}}'))
-    upstream({ error: 'stale', storedSavedAt: 42 }, 409)
+  it('passes a 409 (stale rolling write) through verbatim', async () => {
+    seed('p-mine')
+    P.writeVersion(root, 'p-mine', { id: 'current', workflow: { savedAt: 42 } }, { now: 5 })
+    body('{"version":{"id":"current","workflow":{"savedAt":1}}}')
     const r = await call('/sailor/projects/p-mine/versions', 'POST')
     expect(r.status).toBe(409)
     expect(r.body).toEqual({ error: 'stale', storedSavedAt: 42 })
@@ -399,38 +443,42 @@ describe('PUT /sailor/projects/<uuid> — writes claim, or are refused', () => {
 })
 
 describe('DELETE /sailor/projects/<uuid>', () => {
-  it('forwards the owner\'s delete and releases the ownership row', async () => {
-    upstream({ ok: true })
+  it('deletes the owner\'s project and releases the ownership row', async () => {
+    seed('p-mine')
     expect((await call('/sailor/projects/p-mine', 'DELETE')).body).toEqual({ ok: true })
-    expect(fetchMock.mock.calls[0][1].method).toBe('DELETE')
+    expect(onDisk('p-mine')).toBe(false)
     expect(owners.has(key('project', 'p-mine'))).toBe(false)
   })
 
-  it('404s another tenant\'s project and an unowned one, engine untouched', async () => {
+  it('404s another tenant\'s project and an unowned one, storage untouched', async () => {
+    seed('p-theirs')
+    seed('p-orphan')
     for (const p of ['/sailor/projects/p-theirs', '/sailor/projects/p-orphan']) {
       expect((await call(p, 'DELETE')).status, p).toBe(404)
     }
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(onDisk('p-theirs')).toBe(true)
+    expect(onDisk('p-orphan')).toBe(true)
     expect(owners.get(key('project', 'p-theirs'))).toBe('u2')
   })
 
-  it('keeps the ownership row when the engine refused the delete', async () => {
-    upstream({ error: 'nope' }, 500)
-    expect((await call('/sailor/projects/p-mine', 'DELETE')).status).toBe(500)
+  it('keeps the ownership row when the storage could not delete', async () => {
+    seed('p-mine')
+    __setInputUploadsEngineRootForTests(null)
+    expect((await call('/sailor/projects/p-mine', 'DELETE')).status).toBe(503)
     expect(owners.get(key('project', 'p-mine'))).toBe('u1')
   })
 })
 
 // ---------------------------------------------------------------- envelope
 
-describe('the gate\'s envelope: auth, verbs, worker targeting', () => {
+describe('the gate\'s envelope: auth, verbs, aliases', () => {
   it('401s an unauthenticated caller before any ownership lookup', async () => {
     expect((await call('/sailor/projects', 'GET', null)).status).toBe(401)
     expect(queries).toEqual([])
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('405s a verb the engine does not serve — never a raw proxy', async () => {
+  it('405s a verb the route table does not serve — never a raw proxy', async () => {
     for (const [p, m] of [['/sailor/projects', 'DELETE'], ['/sailor/projects/p-mine', 'POST'], ['/sailor/projects/p-mine/versions', 'DELETE']] as const) {
       expect((await call(p, m)).status, `${m} ${p}`).toBe(405)
     }
@@ -438,24 +486,16 @@ describe('the gate\'s envelope: auth, verbs, worker targeting', () => {
     expect(proxyRequest).not.toHaveBeenCalled()
   })
 
-  it('keeps ?comfyWorker=N targeting on the forward', async () => {
-    upstream({ project: {} })
-    await call('/sailor/projects/p-mine?comfyWorker=2')
-    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8191/sailor/projects/p-mine')
+  it('serves the same store whatever ?comfyWorker=N says', async () => {
+    seed('p-mine', { name: 'Mine' })
+    expect((await call('/sailor/projects/p-mine?comfyWorker=2')).body.project.name).toBe('Mine')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('forwards the /comfyui alias to the engine\'s real path', async () => {
-    upstream({ project: {} })
-    await call('/comfyui/sailor/projects/p-mine')
-    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8188/sailor/projects/p-mine')
-  })
-
-  it('never forwards a client-supplied identity header — only origin + content-type', async () => {
-    rawBody.mockResolvedValue(Buffer.from('{}'))
-    requestHeader.mockImplementation((_e: any, n: string) => (n === 'content-type' ? 'application/json' : 'spoofed'))
-    upstream({ project: {} })
-    await call('/sailor/projects/p-mine', 'PUT')
-    expect(Object.keys(fetchMock.mock.calls[0][1].headers).sort()).toEqual(['content-type', 'origin'])
+  it('serves the /comfyui alias from the same store', async () => {
+    seed('p-mine', { name: 'Mine' })
+    expect((await call('/comfyui/sailor/projects/p-mine')).body.project.name).toBe('Mine')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
 
@@ -463,8 +503,9 @@ describe('the gate\'s envelope: auth, verbs, worker targeting', () => {
 
 describe('hosted middleware: every alias reaches the gate, none reach the raw proxy', () => {
   it('gates the canonical and /comfyui-aliased projects routes', async () => {
+    seed('p-theirs')
     for (const p of ['/sailor/projects/p-theirs', '/comfyui/sailor/projects/p-theirs', '/sailor/assets/../projects/p-theirs']) {
-      proxyRequest.mockClear(); fetchMock.mockClear(); upstream({ project: {} })
+      proxyRequest.mockClear(); fetchMock.mockClear()
       const r = await via(p, 'GET')
       expect(r.status, p).toBe(404)
       expect(proxyRequest, p).not.toHaveBeenCalled()
@@ -473,10 +514,11 @@ describe('hosted middleware: every alias reaches the gate, none reach the raw pr
   })
 
   it('refuses the /api mirror of the projects routes outright', async () => {
-    // ComfyUI mirrors EVERY route under /api (server.py:1207-1218), including
+    // ComfyUI mirrored EVERY route under /api (server.py:1207-1218), including
     // this extension's. `/sailor` is not in ENGINE_ROUTE_PREFIXES, so the alias
     // never normalizes — and the deny-by-default tail refuses it. Either way it
-    // must never raw-proxy or reach the engine.
+    // must never raw-proxy, and the native store is never reached ungated.
+    seed('p-theirs')
     for (const p of ['/api/sailor/projects', '/api/sailor/projects/p-theirs', '/comfyui/api/sailor/projects/p-theirs']) {
       proxyRequest.mockClear()
       const r = await via(p, 'GET')
@@ -494,7 +536,8 @@ describe('hosted middleware: every alias reaches the gate, none reach the raw pr
   })
 
   it('serves the caller\'s own list end to end through the middleware', async () => {
-    upstream({ projects: [{ uuid: 'p-mine' }, { uuid: 'p-theirs' }] })
+    seed('p-mine', { updatedAt: 2 })
+    seed('p-theirs', { updatedAt: 1 })
     const r = await via('/sailor/projects')
     expect(r.body.projects.map((p: any) => p.uuid)).toEqual(['p-mine'])
     expect(proxyRequest).not.toHaveBeenCalled()
@@ -503,35 +546,54 @@ describe('hosted middleware: every alias reaches the gate, none reach the raw pr
 
 // ------------------------------------------------------------- local mode
 
-describe('LOCAL MODE IS BYTE-IDENTICAL — no registry, no filter, no 404', () => {
-  const ALL = [
-    ['/sailor/projects', 'GET', 'http://127.0.0.1:8188/sailor/projects'],
-    ['/sailor/projects/p-theirs', 'GET', 'http://127.0.0.1:8188/sailor/projects/p-theirs'],
-    ['/sailor/projects/p-theirs', 'PUT', 'http://127.0.0.1:8188/sailor/projects/p-theirs'],
-    ['/sailor/projects/p-theirs', 'DELETE', 'http://127.0.0.1:8188/sailor/projects/p-theirs'],
-    ['/sailor/projects/p-orphan/versions', 'POST', 'http://127.0.0.1:8188/sailor/projects/p-orphan/versions'],
-    ['/sailor/projects/p-orphan/generations', 'GET', 'http://127.0.0.1:8188/sailor/projects/p-orphan/generations'],
-    ['/sailor/spend/summary', 'GET', 'http://127.0.0.1:8188/sailor/spend/summary'],
-    ['/comfyui/sailor/projects', 'GET', 'http://127.0.0.1:8188/sailor/projects'],
-    ['/sailor/projects?comfyWorker=2', 'GET', 'http://127.0.0.1:8191/sailor/projects'],
-    ['/sailor/assets', 'GET', 'http://127.0.0.1:8188/sailor/assets'],
-  ] as const
-
-  it('raw-proxies every /sailor path to the pre-Stage-6 target', async () => {
+describe('LOCAL MODE — single user: no registry, no filter; projects served natively', () => {
+  it('serves every projects + spend route from native storage, never the proxy', async () => {
     mode = 'local'
-    for (const [p, m, target] of ALL) {
+    seed('p-theirs', { name: 'Theirs' })
+    const cases: [string, string, (r: any) => void][] = [
+      ['/sailor/projects', 'GET', r => expect(r.body.projects.map((p: any) => p.uuid)).toEqual(['p-theirs'])],
+      ['/sailor/projects/p-theirs', 'GET', r => expect(r.body.project.name).toBe('Theirs')],
+      ['/comfyui/sailor/projects', 'GET', r => expect(r.body.projects).toHaveLength(1)],
+      ['/api/sailor/projects', 'GET', r => expect(r.body.projects).toHaveLength(1)],
+      ['/sailor/projects?comfyWorker=2', 'GET', r => expect(r.body.projects).toHaveLength(1)],
+      ['/sailor/projects/p-orphan/generations', 'GET', r => expect(r.body).toEqual({ generations: [] })],
+      ['/sailor/spend/summary', 'GET', r => expect(r.body).toEqual({ month: { usd: 0, credits: 0 }, total: { usd: 0, credits: 0 }, byProject: [] })],
+    ]
+    for (const [p, m, check] of cases) {
       proxyRequest.mockClear()
       const r = await via(p, m, null)
-      expect(r.status, `${m} ${p}`).toBe('proxied')
-      expect(r.target, `${m} ${p}`).toBe(target)
+      expect(proxyRequest, `${m} ${p}`).not.toHaveBeenCalled()
+      check(r)
+    }
+    body('{"name":"Renamed"}')
+    expect((await via('/sailor/projects/p-theirs', 'PUT', null)).body.project.name).toBe('Renamed')
+    body('{"version":{"id":"v_1"}}')
+    expect((await via('/sailor/projects/p-orphan/versions', 'POST', null)).body).toEqual({ id: 'v_1' })
+    expect((await via('/sailor/projects/p-theirs', 'DELETE', null)).body).toEqual({ ok: true })
+    expect(onDisk('p-theirs')).toBe(false)
+  })
+
+  it('still raw-proxies the /sailor routes that are not native yet', async () => {
+    mode = 'local'
+    for (const [p, target] of [
+      ['/sailor/assets', 'http://127.0.0.1:8188/sailor/assets'],
+      ['/sailor/shader_effects?comfyWorker=2', 'http://127.0.0.1:8191/sailor/shader_effects'],
+    ] as const) {
+      proxyRequest.mockClear()
+      const r = await via(p, 'GET', null)
+      expect(r.status, p).toBe('proxied')
+      expect(r.target, p).toBe(target)
     }
   })
 
-  it('never consults the ownership registry or the gate\'s own fetch locally', async () => {
+  it('never consults the ownership registry or makes an engine fetch locally', async () => {
     mode = 'local'
-    for (const [p, m] of ALL) await via(p, m, null)
+    seed('p-theirs')
+    for (const [p, m] of [['/sailor/projects', 'GET'], ['/sailor/projects/p-theirs', 'GET'], ['/sailor/projects/p-theirs', 'DELETE'], ['/sailor/spend/summary', 'GET'], ['/sailor/assets', 'GET']] as const) {
+      await via(p, m, null)
+    }
     expect(queries, 'local mode must never query resource_owners').toEqual([])
-    expect(fetchMock, 'local mode must never take the gate\'s forward path').not.toHaveBeenCalled()
+    expect(fetchMock, 'local mode must never fetch the engine for native routes').not.toHaveBeenCalled()
   })
 })
 

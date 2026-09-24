@@ -13,6 +13,9 @@ import { parseUploadForm } from './multipart'
 import { canonicalUploadKey, ownedInputFilenames, recordUpload, releaseUpload, unsafeUploadTarget, uploadExistsOnDisk, uploadOwner } from './inputUploads'
 import { normalizeEnginePath } from './enginePath'
 import { hostedCanMutate, ownedIds, ownerOf, recordOwner, releaseOwner } from './resourceOwners'
+import { isSafeId, userDir } from '../native/paths'
+import { dispatchNative } from '../native/router'
+import { listProjects, projectsRoot } from '../native/projects'
 
 /**
  * Review C2 — an exact mirror of ComfyUI's folder_paths.annotated_filepath().
@@ -575,16 +578,13 @@ export type SailorRoute =
 const PROJECTS_PREFIX = '/sailor/projects'
 
 /**
- * A byte-faithful mirror of `_is_safe_id` in nodes_sailor_projects.py:35-45.
- * An id the engine would refuse can never legitimately be owned, so it is
- * refused here too rather than forwarded to find out.
+ * `_is_safe_id` from nodes_sailor_projects.py — the one shared guard
+ * (server/native/paths.ts) the native project storage also uses. An id the
+ * storage would refuse can never legitimately be owned, so it is refused here
+ * too.
  */
 export function isSafeProjectId(value: string): boolean {
-  return value.length > 0
-    && !value.includes('/')
-    && !value.includes('\\')
-    && !value.includes('..')
-    && !value.startsWith('.')
+  return isSafeId(value)
 }
 
 /**
@@ -706,15 +706,12 @@ async function forwardSailor(event: H3Event): Promise<{ status: number, body: un
  * spread (Stage 5 review M5): only `projects` leaves this function, so a key
  * the extension adds later cannot ride out unfiltered.
  */
-async function listOwnedProjects(event: H3Event, userId: string): Promise<unknown> {
-  const { status, body } = await forwardSailor(event)
-  if (status < 200 || status >= 300) {
-    throw createError({ statusCode: 502, message: 'Engine projects list unavailable' })
-  }
+async function listOwnedProjects(userId: string): Promise<unknown> {
+  const dir = userDir()
+  if (!dir) throw createError({ statusCode: 503, message: 'Sailor can\'t find its data folder' })
   const owned = await ownedIds('project', userId)
-  const entries = (body as { projects?: unknown })?.projects
-  const list = Array.isArray(entries) ? entries : []
-  return { projects: list.filter(e => owned.has(String((e as { uuid?: unknown })?.uuid))) }
+  const list = listProjects(projectsRoot(dir))
+  return { projects: list.filter(e => owned.has(String(e.uuid))) }
 }
 
 export async function handleHostedSailor(event: H3Event): Promise<unknown> {
@@ -724,7 +721,7 @@ export async function handleHostedSailor(event: H3Event): Promise<unknown> {
   const [pathNoQuery] = normalizeEnginePath(event.path).split('?')
   const route = sailorProjectsRoute(pathNoQuery ?? '', event.method)
   if (route.kind === 'reject') throw createError({ statusCode: route.status, message: route.message })
-  if (route.kind === 'list') return listOwnedProjects(event, userId)
+  if (route.kind === 'list') return listOwnedProjects(userId)
 
   const owner = await ownerOf('project', route.uuid)
   // Same 404 for "owned by someone else" and "does not exist" — the caller
@@ -737,11 +734,17 @@ export async function handleHostedSailor(event: H3Event): Promise<unknown> {
     throw missing()
   }
 
-  const { status, body } = await forwardSailor(event)
+  // Engine-free Phase A: the projects are served from Sailor's own copy of
+  // the storage (server/native/projects.ts), same files as the Python — only
+  // ever AFTER the ownership decision above.
+  const native = await dispatchNative(event)
+  if (!native) throw missing()
+  const { status, body } = native
   setResponseStatus(event, status)
+  if (native.text) setResponseHeader(event, 'content-type', 'text/plain; charset=utf-8')
   const wrote = status >= 200 && status < 300
 
-  // Claim only what the ENGINE actually created: a refused write must not
+  // Claim only what the STORAGE actually created: a refused write must not
   // leave an ownership row pointing at a project that does not exist.
   if (wrote && route.access === 'write' && owner === null) {
     try {
