@@ -303,7 +303,12 @@ Instructions can edit a content field (§1.5). The edit appears in the field, br
 5. **A model looks at the four renders** (one image) and drops obvious misses, such as muddy results or ones that lose the subject. Replacements are generated to keep the count at four.
 6. **Return four takes.**
 
-- **Model tiers:** Sonnet 5 (`plan` tier) for writing code, and Haiku for dial-only takes. Stage 1 confirms or changes this.
+- **Model (measured 2026-09-24, see `assets/2026-09-23-ai-in-sailor/engine-run-results.md`):** **Opus 5.5 writes the shaders**, and every request carries **the user's image and two good existing effects as examples**. There is **no look-and-revise pass**.
+  - Sonnet 5 and Haiku 4.5 on their own were nowhere near the quality bar.
+  - Sonnet with the image and examples was "OK".
+  - Opus 5.5 was best. It was equally good with and without the extras.
+  - Opus 5.5 is not one of today's `AI_TIERS`; stage 5 adds a dedicated shader-generation model setting rather than changing the `campaign` tier that other features use.
+  - Dial-only takes (Tune…, Vary) stay on Haiku, as before.
 - **Latency:** expected 10–20 s for four; tiles appear as each passes.
 
 ### 7.3 Where it's used
