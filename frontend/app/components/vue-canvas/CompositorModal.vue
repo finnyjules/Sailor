@@ -2630,7 +2630,7 @@ const morphTargets = computed<{ key: string; label: string }[]>(() => {
   if (!self) return []
   return (localLayers.value as LocalLayer[])
     .filter(l => l.id !== self.id && canTakeGeometry(l) && !cornerPinActive((l as any).cornerPin) && !(l as any).cloner)
-    .map(l => ({ key: localKey(l.id), label: layerLabelByKey(localKey(l.id)) }))
+    .map(l => ({ key: localKey(l.id), label: rowLabel({ layer: l }) }))
 })
 /** The referenced layer, if the current ref points at a live, still-eligible vector partner. */
 function geometrySiblingRefResolvable(ref: string): boolean {
