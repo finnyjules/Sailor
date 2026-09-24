@@ -205,3 +205,87 @@ test.describe('Frame Layout tab', () => {
     await expect.poll(titleFamily).toBe(before)
   })
 })
+
+// Stage 4: the Frame's content. The lab fixture's lines are rewritten through the editor's own
+// test hook (`__compositorSetLayers`) — fixture setup, not the feature under test; every step
+// after that goes through the Layout tab.
+test.describe('Frame Layout tab — content', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/dev/frame-lab')
+    await page.waitForSelector('[data-ready]')
+    await page.click('[data-testid="layout-tab"]')
+    await page.waitForSelector('[data-testid="layout-tile"]')
+  })
+
+  /** Rewrite the Frame's text lines, largest first; returns their ids in the same order. */
+  async function setLines(page: Page, texts: string[]): Promise<string[]> {
+    return await page.evaluate((texts) => {
+      const w = window as any
+      const L = w.__compositorLayers() as any[]
+      const byImp = L.filter(l => l.kind === 'text').sort((a, b) => (b.fontSize ?? 0) - (a.fontSize ?? 0))
+      const ids = byImp.slice(0, texts.length).map(l => l.id)
+      // Only the first image stays: a second, unplaced image is a separate (owed) decision.
+      const images = L.filter(l => l.kind === 'wired' || l.kind === 'image').map(l => l.id)
+      w.__compositorSetLayers(L.map(l => {
+        const i = ids.indexOf(l.id)
+        if (i >= 0) return { ...l, text: texts[i], visible: true }
+        if (l.kind === 'text') return { ...l, visible: false }
+        if (images.indexOf(l.id) > 0) return { ...l, visible: false }
+        return l
+      }))
+      return ids
+    }, texts)
+  }
+  async function tag(page: Page, id: string, value: string) {
+    const content = page.locator('[data-testid="layout-content"] details')
+    if (!(await content.evaluate((d: HTMLDetailsElement) => d.open))) await content.locator('summary').click()
+    await page.locator(`[data-content-row="${id}"] select`).selectOption(value)
+  }
+  const tile = (page: Page, id: string) => page.locator(`[data-testid="layout-sheet"] [data-testid="layout-tile"][data-pattern="${id}"]`)
+
+  test('tagging a line Quote and one Rating offers Review, which applies with its stars', async ({ page }) => {
+    const [, quote, rating] = await setLines(page, ['Run lighter.', 'Lightest shoe I have ever raced in', '4.7 out of 5', 'Maya R.'])
+    await page.locator('[data-testid="layout-style"]').getByText('Performance', { exact: true }).click()
+    await expect(tile(page, 'perfReview')).toHaveCount(0)
+    await tag(page, quote!, 'quote')
+    await tag(page, rating!, 'rating')
+    await expect.poll(async () => (await frame(page)).poster?.tags).toEqual({ [quote!]: 'quote', [rating!]: 'rating' })
+    await expect(tile(page, 'perfReview')).toHaveCount(1)
+    await tile(page, 'perfReview').click()
+    await expect.poll(async () => (await frame(page)).poster?.patternId).toBe('perfReview')
+    const layers = await page.evaluate(() => (window as any).__compositorLayers())
+    expect(layers.filter((l: any) => l.kind === 'star').length).toBe(5)
+    expect(layers.find((l: any) => l.id === quote)?.visible).not.toBe(false)
+  })
+
+  test('a list line offers Reasons why, which places the list layer\'s own lines', async ({ page }) => {
+    const [, , list] = await setLines(page, ['Run lighter.', 'Halden Trail 2', 'Carbon plate for push-off\n198 g per shoe\nGrips on wet rock', 'Free returns for 60 days.'])
+    await page.locator('[data-testid="layout-style"]').getByText('Performance', { exact: true }).click()
+    await tag(page, list!, 'list')
+    await expect(tile(page, 'perfListicle')).toHaveCount(1)
+    await tile(page, 'perfListicle').click()
+    await expect.poll(async () => (await frame(page)).poster?.patternId).toBe('perfListicle')
+    const layers = await page.evaluate(() => (window as any).__compositorLayers())
+    const l = layers.find((x: any) => x.id === list)
+    expect(l?.visible).not.toBe(false)
+    expect(l?.text).toBe('Carbon plate for push-off\n198 g per shoe\nGrips on wet rock')
+  })
+
+  test('on a Meta story the Button choice appears, and the platform\'s own button hides the action line', async ({ page }) => {
+    const [, , action] = await setLines(page, ['Run lighter.', 'Halden Trail 2', 'Shop now', 'Offer ends 12 October.'])
+    await page.click('[data-testid="design-tab"], button:has-text("Design")')
+    await page.locator('select:has(option[value="meta-story"])').first().selectOption('meta-story')
+    await page.click('[data-testid="layout-tab"]')
+    await page.locator('[data-testid="layout-style"]').getByText('Performance', { exact: true }).click()
+    await page.locator('[data-testid="layout-sheet"] [data-testid="layout-tile"]').first().click()
+    const row = page.locator('[data-choice="cta"]')
+    await expect(row).toBeVisible()
+    // The first variation always draws its button (ruling R11b).
+    await expect(row.getByRole('radio', { name: 'In the image' })).toHaveAttribute('aria-checked', 'true')
+    const vis = async () => (await page.evaluate((id) => (window as any).__compositorLayers().find((l: any) => l.id === id)?.visible, action))
+    expect(await vis()).not.toBe(false)
+    await row.getByRole('radio', { name: 'Platform\'s own' }).click()
+    await expect.poll(vis).toBe(false)
+    await expect(page.locator('[data-testid="layout-not-shown"], [data-testid="layout-format-hidden"]').first()).toContainText('Shop now')
+  })
+})
