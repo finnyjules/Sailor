@@ -5,10 +5,12 @@ import { textureFx } from '~/lib/texturefx/renderer'
 import { preloadStylize, stylizeTile } from '~/lib/texturefx/stylize'
 import { textureDefaults } from '~/lib/texturefx/controls'
 import { loadRaster, getRaster } from '~/lib/texturefx/raster'
-import { bakeSheetBlob } from '~/lib/texturefx/bake'
+import { bakeSheetBlob, renderSheetCanvas } from '~/lib/texturefx/bake'
 import { drawSheet, fitLetterbox, isSheetFramed, sheetFromParams } from '~/lib/texturefx/sheet'
 import type { Params } from '~/lib/spacetype/effect'
 import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade'
+import { registerStudioFrameSource, unregisterStudioFrameSource } from '~/lib/studio/frameSource'
+import { makeTextureFrameSource } from '~/lib/texturefx/frameSource'
 import StudioRenderButton from '~/components/vue-canvas/StudioRenderButton.vue'
 
 // Texture Studio — a frontend-only config node (no backend class_type, never
@@ -113,8 +115,13 @@ onMounted(() => {
     loadRaster(String(p.rasterSrc)).then(renderFrame).catch(() => {})
   }
   registerStudioBaker(props.id, bakeOutput)
+  registerStudioFrameSource(props.id, makeTextureFrameSource({
+    getParams: () => params.value,
+    render: p => renderSheetCanvas(p),
+    size: p => { const s = sheetFromParams(p); return { w: s.w, h: s.h } },
+  }))
 })
-onBeforeUnmount(() => { if (timer) clearTimeout(timer); unregisterStudioBaker(props.id) })
+onBeforeUnmount(() => { if (timer) clearTimeout(timer); unregisterStudioBaker(props.id); unregisterStudioFrameSource(props.id) })
 
 function openEditor() {
   window.dispatchEvent(new CustomEvent('sailor:openTextureStudio', { detail: { nodeId: props.id } }))

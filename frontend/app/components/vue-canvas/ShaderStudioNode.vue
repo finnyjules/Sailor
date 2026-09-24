@@ -10,7 +10,8 @@ import { stackWantsClock } from '~/lib/shaderstudio/clock'
 import { migrateShaderConfig } from '~/lib/shaderstudio/migrate'
 import { applyMotion } from '~/lib/shaderstudio/motion'
 import { makeImageSource, makeLiveSource, motionConfigFor, resolveSourceKind, type ResolvedSource } from '~/lib/shaderstudio/resolve'
-import { frameSourceEpoch } from '~/lib/studio/frameSource'
+import { frameSourceEpoch, registerStudioFrameSource, unregisterStudioFrameSource } from '~/lib/studio/frameSource'
+import { makeShaderFrameSource } from '~/lib/shaderstudio/frameSource'
 import { loadImage } from '~/lib/shaderstudio/source'
 import { hydrateConfig, outputDims, type ShaderStudioConfig } from '~/lib/shaderstudio/types'
 import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade'
@@ -184,12 +185,73 @@ async function bakeOutput(): Promise<Blob | null> {
   }
 }
 
+// Frame-source snapshot pool — same reasoning as gradientfx/frameSource.ts's
+// SNAP_POOL (see the long comment there): shaderFx is ONE shared WebGL renderer,
+// so its output canvas is shared across the card's own preview loop, bakeOutput,
+// and every wired-Frame consumer pulling frames at its own size/time. Copy the
+// render into a per-call canvas SYNCHRONOUSLY (no await between render and copy)
+// so a consumer never captures a frame another render clobbered mid-flight.
+const frameSnaps: HTMLCanvasElement[] = []
+let frameSnapIdx = 0
+const FRAME_SNAP_POOL = 4
+
+/** Render one frame at an arbitrary size/time for a wired Frame — follows
+ *  bakeOutput's pipeline (resolve the source fresh, composePasses, shaderFx.render)
+ *  but at the requested t01/w/h instead of a fixed still at t=0, and returns a
+ *  private snapshot instead of the shared canvas. Takes the same `baking` lock as
+ *  bakeOutput so the two can't corrupt each other's read of the shared canvas. */
+async function renderForFrame(t01: number, w: number, h: number): Promise<TexImageSource | null> {
+  baking = true
+  try {
+    let src = resolved.value
+    const kind = sourceKind.value
+    if (kind?.kind === 'live') src = makeLiveSource(kind.source)
+    else {
+      const url = kind?.kind === 'url' ? kind.url : ownSourceUrl.value
+      if (url) { try { src = makeImageSource(await loadImage(url)) } catch { /* keep previous */ } }
+    }
+    if (!src) return null
+    const base = await src.getFrame(t01, w, h)
+    const dur = src.duration > 0 ? src.duration : Math.max(0.1, config.value.motion?.duration ?? 4)
+    const t = t01 * dur
+    const cfg = animated.value ? applyMotion(motionConfigFor(config.value, dur), t) : config.value
+    const passes = composePasses(cfg, effectDef, t)
+    const live = shaderFx.render(passes, base, w, h)
+    const snap = (frameSnaps[frameSnapIdx] ??= document.createElement('canvas'))
+    frameSnapIdx = (frameSnapIdx + 1) % FRAME_SNAP_POOL
+    if (snap.width !== w) snap.width = w
+    if (snap.height !== h) snap.height = h
+    const ctx = snap.getContext('2d')
+    if (!ctx) return live
+    ctx.clearRect(0, 0, w, h)
+    ctx.drawImage(live as CanvasImageSource, 0, 0, w, h)
+    return snap
+  } finally {
+    baking = false
+    renderStill()
+  }
+}
+
+/** The size a wired Frame should pull us at: the resolved source's own size, upscaled/
+ *  downscaled to the studio's output resolution — same target bakeOutput bakes to. No
+ *  source wired in yet → report 0×0 rather than guessing; getFrame rejects in that case. */
+function frameSourceSize(): { w: number; h: number } {
+  const src = resolved.value
+  if (!src) return { w: 0, h: 0 }
+  return outputDims(src.width, src.height, config.value.resolution || 1536, { upscale: true })
+}
+
 onMounted(async () => {
   registerStudioBaker(props.id, bakeOutput)   // register first, before the async catalog fetch
+  registerStudioFrameSource(props.id, makeShaderFrameSource({
+    getSize: frameSourceSize,
+    getDuration: clockDuration,
+    render: renderForFrame,
+  }))
   catalog.value = await fetchShaderFxCatalog().catch(() => null)
   renderStill()   // initial static preview; the gated loop animates only while hovered/visible
 })
-onBeforeUnmount(() => { unregisterStudioBaker(props.id) })
+onBeforeUnmount(() => { unregisterStudioBaker(props.id); unregisterStudioFrameSource(props.id) })
 
 let timer: ReturnType<typeof setTimeout> | null = null
 // Re-render on config change. While the loop is actively animating it picks up the new
