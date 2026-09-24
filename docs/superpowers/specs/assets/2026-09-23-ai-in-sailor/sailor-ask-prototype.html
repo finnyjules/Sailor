@@ -292,6 +292,14 @@
   .alab { display: inline-flex; align-items: center; gap: 9px; min-width: 0; }
   .aic { font-style: normal; width: 16px; text-align: center; color: #b5b1a8; font-size: 13px; }
 
+  /* canvas takes live above the prompt; the node they belong to glows */
+  .cm-takes { display: grid; justify-items: center; }
+  .cm-takes:empty { display: none; }
+  .cm-takes .tstrip { position: static; }
+  .cm-takes .tstrip::before { display: none; }
+  .node.has-takes { border-color: var(--ai); box-shadow: 0 0 0 1px var(--ai), 0 0 24px rgba(227,168,87,.25); }
+  .tsh .chip { flex: none; }
+
   /* action row: verbs on the selection (retired in option A) */
   .actions { position: absolute; z-index: 40; display: flex; gap: 2px; padding: 3px; background: #202126; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 22px rgba(0,0,0,.45); white-space: nowrap; }
   .actions button { background: none; border: 0; padding: 4px 9px; border-radius: 5px; cursor: pointer; font-size: 12.5px; }
@@ -432,7 +440,7 @@
       <ol>
         <li>The bottom bar is for making and asking: Select, Hand, Add, Studios, Generate, Actions, then the prompt. The libraries (Assets, Styles, Characters, Templates, and More with Toolbox, Nodes and Blocks) are in a rail on the left. Annotations moved into Add, beside the panels they open. Explain is gone.</li>
         <li>Select a node and the prompt reads “Ask about Rainy shop”. Click it or press <kbd>/</kbd>: it grows across the bar while you type, then shrinks back and shows progress while the results land on the work.</li>
-        <li>Select Rainy shop and pick “make it rain on a window”. The takes land under the node, not in a popup. Hover to preview, then Keep.</li>
+        <li>Select Rainy shop and pick “make it rain on a window”. The takes appear just above the prompt, and the node glows. Hovering a take previews it on the node itself; nothing on the canvas moves or gets covered. Then Keep.</li>
         <li>The node toolbar is just Edit ▾ and Develop ▾. Items that need words (Remix…, Tune…, Restyle…) put a chip in the composer and wait for you.</li>
         <li>Shop front shows <b>2 fixes</b> on the node. Click it for the fixes.</li>
         <li>Double-click Poster to open Frame. Frame's own tool bar is at the bottom, ending in the prompt. Select the headline, the background or nothing, and the prompt suggests different things: headlines, background effects or layouts. The takes land under the artboard.</li>
@@ -531,6 +539,7 @@
 
 
   <div class="composer" id="composer">
+    <div class="cm-takes" id="cmTakes"></div>
     <div class="cm-card" id="cmCard" hidden></div>
     <div class="cm-sugg" id="cmSugg"></div>
     <div class="cm-box">
@@ -2553,10 +2562,10 @@ void main(){
     el.addEventListener('pointerdown', e => e.stopPropagation())
     if (inStudio) $(S.view === 'frame' ? 'frameStrip' : 'studioStrip').append(el)
     else {
-      $('stage').append(el); node.classList.add('has-takes')
-      el.style.left = node.offsetLeft + 'px'; el.style.top = (node.offsetTop + node.offsetHeight + 8) + 'px'
-      const sc = $('scroller'), br = el.getBoundingClientRect(), vr = sc.getBoundingClientRect()
-      if (br.bottom > vr.bottom - 150) sc.scrollBy({ top: br.bottom - vr.bottom + 170, behavior: 'smooth' })
+      // Canvas: the tiles sit above the prompt (nothing on the canvas moves or gets covered);
+      // hovering previews on the node itself, which is highlighted and named in the strip.
+      head.insertBefore(h('span', 'chip sel', node.querySelector('header strong').textContent), title)
+      $('cmTakes').append(el); node.classList.add('has-takes')
     }
     strip = { el }
 

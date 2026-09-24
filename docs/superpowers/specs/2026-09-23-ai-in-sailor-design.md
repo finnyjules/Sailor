@@ -3,7 +3,7 @@
 **Date:** 2026-09-23 · **Status:** direction approved in prototype; open questions decided (§10); ready to plan
 **Replaces:** the 11 separate AI surfaces and 5 prompt input components described in §5
 **Visual reference (open in a browser):**
-- `assets/2026-09-23-ai-in-sailor/sailor-ask-prototype.html` is the clickable prototype, version 10. It covers the canvas, the Shader studio, Frame and the effect gallery, all running live shaders.
+- `assets/2026-09-23-ai-in-sailor/sailor-ask-prototype.html` is the clickable prototype, version 11. It covers the canvas, the Shader studio, Frame and the effect gallery, all running live shaders.
 - `assets/2026-09-23-ai-in-sailor/shader-takes-spike.html` holds the 24 AI-written shaders from the spike, rendered by Sailor's own renderer and checked automatically.
 - `assets/2026-09-23-ai-in-sailor/open-questions.html` draws the six open questions as side-by-side options. They are decided in §10.
 
@@ -27,9 +27,9 @@ Neither page calls AI. The prototype's takes are canned from the spike, and its 
    - Press / or ⌘K, or click it, and it grows across the whole bar. What you've selected shows inside it as a chip, with suggestions above.
    - When you send, it shrinks back and shows progress.
 2. **Results land on the work.**
-   - Four takes appear in a strip under the node, or under the studio preview. Hover to preview, then Keep.
+   - Four takes appear in a strip just above the prompt. On the canvas, the node they belong to glows and each take previews on the node itself when you hover it; in a studio, they preview on the preview. Nothing on the canvas moves or gets covered. Then Keep.
    - Changes to the graph appear on the canvas as dashed "proposed" nodes, for you to approve.
-   - Only answers, which are words about the work, appear above the prompt.
+   - Answers, which are words about the work, appear above the prompt in a small card.
 3. **AI actions are ordinary actions.**
    - Selecting a node shows a small toolbar with **Edit ▾** ("the same thing, better": fix, retouch, tune, write copy) and **Develop ▾** ("take it somewhere new": vary, restyle, remix, layouts, animate).
    - AI items sit among the others, marked with a small ✦ and a note on where the result lands ("4 takes" or "adds a step").
@@ -49,7 +49,7 @@ Neither page calls AI. The prototype's takes are canned from the spike, and its 
 1. **Moving everyone's toolbar.** It's the most-used control in the app. The rail and the shorter bar change where hands go.
 2. **AI-written shaders can be bad without being broken.** The spike's automatic checks passed every bad take. The four-takes pick, and a model looking at each render, are what protect quality.
 3. **AI-written shaders can hang the graphics card.** Loops must be capped, and compile failures handled, before anything reaches the canvas.
-4. **Take strips on a crowded canvas** would cover the node below. So the nodes below slide out of the way while you choose (§3.1). Seeing the graph move could feel restless, so the slide must be quick and always slide back.
+4. **Canvas takes sit above the prompt, away from their node** (§3.1). The link between them has to stay obvious: the node glows, and the strip names it.
 
 **Built in seven stages, each shippable (§9).** In order: a real-model run of the shader engine; the new bottom bar, rail and node toolbar; results on the work; studios; shader generation and My effects; the shared content prompt field; cleanup.
 
@@ -76,11 +76,11 @@ Every button passes one test: **"am I starting or changing something, or picking
 
 ### 1.3 Results land on the work
 
-A result appears where the thing it changes lives, never inside a popup.
+A result is always **shown on the thing it changes**: the node, the preview, the artboard or the prompt field. It is never shown only inside a popup. The controls for choosing (take tiles, Approve) sit just above the prompt.
 
 | Kind of request | What appears | Where |
 |---|---|---|
-| A visual change you choose from (vary, restyle, remix, new effect, copy, layouts) | **Four takes** | A strip under the node on the canvas; under the preview or artboard in a studio |
+| A visual change you choose from (vary, restyle, remix, new effect, copy, layouts) | **Four takes**, each previewed on the thing itself when you hover it | A strip just above the prompt; the target node glows (canvas), or the preview or artboard shows it (studio) |
 | A change to the graph (add, connect, remove a step) | **Proposed nodes and edges**, dashed | On the canvas; approve or reject in a card above the prompt |
 | An instruction that edits a recipe ("add heavy rain to the prompt") | **The edit itself**, briefly highlighted | In the content prompt on the node, with Undo |
 | A question | **An answer**, with follow-up chips | A card above the prompt |
@@ -190,15 +190,11 @@ The prompt's suggestions and results follow Frame's selection:
 - **Tiles arrive one by one** as they're ready. Pending tiles pulse.
 - **Hovering or focusing a tile** previews it in place: on the node's own thumbnail, the studio preview or the artboard. Leaving the strip goes back to the clicked tile, or to the current version.
 - **Keep** applies the take. The other takes go into the node's existing take history (`TakesStrip`, the Light Table), so nothing is lost and any take can still be branched.
-- **Where the strip goes:**
-  - On the canvas, it hangs from the bottom edge of the node, pointing up at it.
-  - In a studio, it sits under the preview, sized to fit between the preview and the bar. The preview shrinks to `min(520px, 100vh − 400px)`.
-- **On a crowded canvas, nodes below slide out of the way** (decided: open question 1, option A).
-  - While a strip is open, every node whose top is below the target node's bottom edge, and which overlaps the strip horizontally, slides down by the strip's height plus a gap. The slide takes about 200 ms, and edges follow the nodes.
-  - When you Keep a take or close the strip, those nodes slide back.
-  - The push is display-only: it isn't saved, and it doesn't create an undo step.
-  - If you drag a pushed node while the strip is open, where you drop it becomes its real position, and it doesn't slide back.
-- **The strip stays the same size on screen at any canvas zoom** (decided: question 3, option B), like the node toolbar, and stays pinned to its node.
+- **Where the strip goes** (decided: open question 1, option D). The strip always sits **just above the prompt**, in the canvas and in studios alike. Nothing on the canvas moves, and nothing gets covered.
+  - **On the canvas,** the node the takes belong to **glows** in the accent colour, and the strip's header names it with a chip ("Rainy shop"). Hovering a tile previews the take **on that node's own thumbnail**, and on anything downstream that shows it, such as the Poster. So the result still shows up on the work, even though the tiles don't sit next to it.
+  - **In a studio,** the preview or artboard shows the hovered take. The preview shrinks to `min(520px, 100vh − 400px)` so that the preview, the strip and the bar all fit.
+  - If the target node is off screen when the takes arrive, the canvas pans just enough to bring it into view, so the preview can be seen. That's a view change, not a node move.
+- **The strip stays the same size on screen at any canvas zoom** (question 3, option B). Since it sits above the prompt, this comes for free.
 - **v1 shows one set of takes at a time.** A new request replaces an unkept strip.
 - **Later: several jobs at once** (decided: question 2, option B). Each node shows its own progress and then its own takes, and the prompt shows "N running". That opens a small list with Stop for each job.
 
@@ -367,7 +363,7 @@ Instructions can edit a content field (§1.5). The edit appears in the field, br
    - The multi-selection toolbar, Run rows on nodes, and the fixes badge.
    - Explain removed.
    - The prompt runs the existing agent flows at first; results still use today's shapes.
-3. **Results on the work.** Take strips under nodes, with the nodes below sliding out of the way (§3.1), proposed nodes on the canvas, the answer card, and progress in the prompt. `CanvasPromptBar` is retired.
+3. **Results on the work.** Take strips above the prompt, with the target node glowing and previewing each take (§3.1), proposed nodes on the canvas, the answer card, and progress in the prompt. `CanvasPromptBar` is retired.
 4. **Studios.**
    - A shared studio bottom bar in `StudioModalShell` with ✦ Ask.
    - ✦ added at the end of Frame's and 3D's bars (takeover modes included).
@@ -384,7 +380,7 @@ Instructions can edit a content field (§1.5). The edit appears in the field, br
 
 The options were shown visually in `assets/2026-09-23-ai-in-sailor/open-questions.html`.
 
-1. **Take strips on a crowded canvas:** **push the nodes below out of the way** while the strip is open, then slide them back (option A, your choice over the recommended side placement). Details in §3.1.
+1. **Take strips on a crowded canvas:** **the strip sits above the prompt, and the preview is on the node** (option D). An earlier pick, pushing the nodes below out of the way, was dropped because nodes must never move when takes open. Details in §3.1.
 2. **Parallel jobs:** one at a time in v1; **several later**, each shown on its own node, with "N running" in the prompt (option B).
 3. **Canvas zoom:** take strips **stay the same size on screen**, like the node toolbar (option B).
 4. **The port "Ask AI" popover:** the popover only searches node types; its last row **hands off to the one prompt** with the connector as a chip (option B).
