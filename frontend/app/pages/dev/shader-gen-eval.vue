@@ -152,7 +152,10 @@ async function runTier(tier: 'plan' | 'patch') {
 }
 
 async function run() {
-  if (!armed.value) { armed.value = true; return }
+  // Either run can call the paid API; never let both fire at once, and arming
+  // one disarms the other so a stray click can't confirm the wrong run.
+  if (running.value || variantRunning.value) return
+  if (!armed.value) { armed.value = true; variantArmed.value = false; return }
   armed.value = false
   running.value = true
   try { await Promise.all([runTier('plan'), runTier('patch')]) } finally { running.value = false }
@@ -185,7 +188,8 @@ async function runVariant(id: VariantId) {
 }
 
 async function runVariants() {
-  if (!variantArmed.value) { variantArmed.value = true; return }
+  if (running.value || variantRunning.value) return
+  if (!variantArmed.value) { variantArmed.value = true; armed.value = false; return }
   variantArmed.value = false
   variantRunning.value = true
   try {
@@ -252,7 +256,7 @@ async function copyResults() {
       <h1>Shader generation: engine run</h1>
       <p>The six requests from the spike. The first row of each is the hand-written spike; the others are the real engine. Click a tile to mark it a keeper.</p>
       <div class="bar">
-        <button type="button" :disabled="!ready || running" @click="run">
+        <button type="button" :disabled="!ready || running || variantRunning" @click="run">
           {{ running ? 'Running…' : armed ? 'Confirm: this calls the paid API' : 'Run Sonnet 5 and Haiku 4.5' }}
         </button>
         <span v-if="!apiKey" class="note">No key in Settings → AI, so the server's key is used if it has one.</span>
@@ -294,7 +298,7 @@ async function copyResults() {
       <h2>Quality variants</h2>
       <p>Four ways to close the gap with the spike, on two requests. Same rules as above: click keepers, then copy results.</p>
       <div class="bar">
-        <button type="button" :disabled="!ready || variantRunning" @click="runVariants">
+        <button type="button" :disabled="!ready || running || variantRunning" @click="runVariants">
           {{ variantRunning ? 'Running…' : variantArmed ? 'Confirm: this calls the paid API' : 'Run variants A–D on rain and ink' }}
         </button>
         <span v-for="id in VARIANT_KEYS" :key="id" class="tally">

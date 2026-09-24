@@ -49,6 +49,10 @@ describe('buildShaderGenPayload', () => {
     it('is rejected on the patch tier (Haiku rejects effort)', () => {
       expect(() => buildShaderGenPayload({ prompt: 'x', tier: 'patch', effort: 'high' })).toThrow("effort can't be set on the patch tier")
     })
+
+    it('reports the patch-tier reason (not the generic one) when both are wrong at once', () => {
+      expect(() => buildShaderGenPayload({ prompt: 'x', tier: 'patch', effort: 'low' })).toThrow("effort can't be set on the patch tier")
+    })
   })
 
   describe('model override', () => {

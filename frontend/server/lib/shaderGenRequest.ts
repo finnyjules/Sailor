@@ -41,8 +41,8 @@ export function buildShaderGenPayload(
   const tier = optionalTier(body?.tier) ?? 'plan'
   let effort: AiEffort | undefined = effortForTier(tier)
   if (body?.effort !== undefined && body.effort !== null) {
-    if (body.effort !== 'high') throw badRequest("effort must be 'high' when set")
     if (tier === 'patch') throw badRequest("effort can't be set on the patch tier")
+    if (body.effort !== 'high') throw badRequest("effort must be 'high' when set")
     effort = 'high'
   }
 
