@@ -304,10 +304,17 @@ describe('freeRects: the free room, largest first', () => {
   })
 })
 
+// The fix (bug: a 728×90 ad offered 0 Swiss layouts because a landscape frame's width-relative 12%
+// tile — 87px — was taller than the whole 90px banner): the minimum tile is 12% of the frame's
+// SHORTER side, in kit units (percent of width). Portrait/square keep 12 (the width IS the shorter
+// side); landscape scales down by `h / w`.
+const minTileForFrame = (f: Frame): number => Math.min(EXTRA_MIN_TILE, EXTRA_MIN_TILE * f.h / f.w)
+
 describe('the extra image is placed by every offered layout', () => {
   for (const style of STYLES) for (const f of FRAMES) {
-    it(`${style} · ${f.id}: a tile of at least 12, cropped, in the content area, clear of every element by the gap`, () => {
+    it(`${style} · ${f.id}: a tile of at least its frame's minimum, cropped, in the content area, clear of every element by the gap`, () => {
       const area = contentArea(f)
+      const minTile = minTileForFrame(f)
       let seen = 0
       for (const def of layoutsForStyle(style)) {
         const a = argsFor(def.id, f, labFrame(), style)
@@ -319,7 +326,7 @@ describe('the extra image is placed by every offered layout', () => {
           const tiles = cand.out.els.filter((e): e is PhotoEl => e.k === 'p' && e.extra != null)
           expect(tiles, label).toHaveLength(1)
           const t = tiles[0]!
-          expect.soft(Math.min(t.w, t.h), label).toBeGreaterThanOrEqual(EXTRA_MIN_TILE - 1e-9)
+          expect.soft(Math.min(t.w, t.h), label).toBeGreaterThanOrEqual(minTile - 1e-9)
           // Ruling D6: never longer than twice its other side.
           expect.soft(Math.max(t.w, t.h) / Math.min(t.w, t.h), label).toBeLessThanOrEqual(2 + 1e-9)
           expect.soft(t.x >= area.x0 - 1e-6 && t.y >= area.y0 - 1e-6 && t.x + t.w <= area.x1 + 1e-6 && t.y + t.h <= area.y1 + 1e-6, `inside ${JSON.stringify(area)} · ${label}`).toBe(true)
@@ -353,6 +360,29 @@ describe('the extra image is placed by every offered layout', () => {
       expect(seen).toBe(Object.values(pinned.offered).reduce((n, [two]) => n + two, 0))
     })
   }
+})
+
+// Bug found in the browser: on a 728×90 display-ad Frame with two images, the Layout tab offered 0
+// Swiss layouts — `EXTRA_MIN_TILE` (12% of the frame's WIDTH) is 87px, taller than the whole 90px
+// banner, so `placeExtras` refused every variation with `NO_ROOM_FOR_IMAGES`. The fix: the minimum
+// tile side is 12% of the frame's SHORTER side (`minTileForFrame` above matches the production
+// formula). This is a regression test for that fix.
+describe('the fix: a 728×90 banner with two images', () => {
+  const banner: Frame = { id: 'ad-728x90', w: 728, h: 90, preset: 'ad-728x90' }
+  const twoImages = () => [...frameLayers('phrase', { image: true, shape: false }), createImageLayer('y.png', 1.25, { id: 'img2', w: 0.5, h: 0.625 }) as LocalLayer]
+
+  it('offers at least one Swiss layout, with a tile at least 12% of the 90px height tall', () => {
+    const candidates = layoutsForStyle('swiss').flatMap(def => candidatesForFrame(argsFor(def.id, banner, twoImages(), 'swiss')))
+    expect(candidates.length).toBeGreaterThan(0)
+    const minPx = 0.12 * banner.h
+    for (const cand of candidates) {
+      const t = cand.out.els.find((e): e is PhotoEl => e.k === 'p' && e.extra != null)!
+      expect(t).toBeDefined()
+      const tilePx = { w: t.w * banner.w / 100, h: t.h * banner.w / 100 }
+      expect(tilePx.h).toBeGreaterThanOrEqual(minPx - 1e-6)
+      expect(Math.min(tilePx.w, tilePx.h)).toBeGreaterThanOrEqual(minPx - 1e-6)
+    }
+  })
 })
 
 describe('no room: the variation is refused', () => {

@@ -631,9 +631,20 @@ function checkRun({ out, S, side, keep, fullH, style, designW }: Run, premise: L
 /** The contrast picker over a run (ruling R6) — the one result the checker and toOps share. */
 const fillsOf = (p: Prepared, { out, S }: Run): PieceFills => pieceFills(out.els, S, p.fillCtx)
 
-/** Layout decisions, Task 7: the smallest side of an extra image's tile — 12% of the frame's width
- *  (kit units: the width is 100). */
+/** Layout decisions, Task 7: the smallest side of an extra image's tile — 12% of the frame's
+ *  SHORTER side. Kit units are percent of the frame's width, so on a portrait or square frame
+ *  (the width is the shorter side) that is this constant unchanged; on a landscape frame it scales
+ *  down by the frame's aspect ratio (fix: a 728×90 banner's width-relative 12% is 87px, taller than
+ *  the whole 90px frame, so no room ever passed — `minTileFor` converts to the frame's own units). */
 export const EXTRA_MIN_TILE = 12
+
+/** `EXTRA_MIN_TILE`, scaled for a frame's own aspect (fix above): `fullH` is the frame's full
+ *  height in kit units (`100 * frameH / frameW`, ruling: portrait/square keep `fullH >= 100` so
+ *  this is a no-op there; landscape frames have `fullH < 100` and get a proportionally smaller
+ *  minimum, still 12% of the shorter (height) side). */
+function minTileFor(fullH: number): number {
+  return Math.min(EXTRA_MIN_TILE, EXTRA_MIN_TILE * fullH / 100)
+}
 /** The checker's reason when the extra images have no room (Task 7). */
 export const NO_ROOM_FOR_IMAGES = 'no room for the other images'
 
@@ -649,7 +660,7 @@ function extrasOf(p: Prepared, els: El[]): string[] {
  *  the largest free rectangle inside the content area (the sheet's margin, inside the band a
  *  format's keep-clear areas leave) that clears every placed element's ink by the kit's gap
  *  (`freeRects`) takes the N extra images as N equal tiles, one row or one column — whichever gives
- *  the bigger tiles — the kit's gap apart. A tile's smaller side is at least `EXTRA_MIN_TILE`; when
+ *  the bigger tiles — the kit's gap apart. A tile's smaller side is at least `minTileFor`'s result; when
  *  the largest room cannot hold that, the next largest is tried, and with no room at all the run
  *  gets a `missing` element: the variation is refused, `NO_ROOM_FOR_IMAGES`. The tiles are
  *  appended after the layout's own elements (no index moves), cropped to cover by toOps. A Frame
@@ -663,7 +674,8 @@ function placeExtras(p: Prepared, ran: Run): Run {
   const area: Box = { x0: S.M, y0: top + S.M, x1: S.W - S.M, y1: bottom - S.M }
   const els = ran.out.els
   const boxes = els.map(e => takenBox(e, S, S.GAP))
-  let tiles = tileRooms(freeRects(area, boxes.filter((b): b is Box => b != null), S.GAP, EXTRA_MIN_TILE), n, S.GAP)
+  const minTile = minTileFor(H)
+  let tiles = tileRooms(freeRects(area, boxes.filter((b): b is Box => b != null), S.GAP, minTile), n, S.GAP, minTile)
   let over: string[] | undefined
   if (!tiles) {
     // Ruling D5: no room off the image — when the layout's own image is full-bleed (it covers the
@@ -673,7 +685,7 @@ function placeExtras(p: Prepared, ran: Run): Run {
     const bleed = els.map((e, i) => (e.k === 'p' && e.extra == null && boxes[i] && contains(boxes[i]!, area) ? i : -1)).filter(i => i >= 0)
     if (bleed.length) {
       const rest = boxes.filter((b, i): b is Box => b != null && !bleed.includes(i))
-      tiles = tileRooms(freeRects(area, rest, S.GAP, EXTRA_MIN_TILE), n, S.GAP, { maxSide: EXTRA_INSET_MAX * (area.x1 - area.x0), S, frameH: H })
+      tiles = tileRooms(freeRects(area, rest, S.GAP, minTile), n, S.GAP, minTile, { maxSide: EXTRA_INSET_MAX * (area.x1 - area.x0), S, frameH: H })
       over = [...new Set(bleed.map(i => (els[i]!.k === 'p' ? els[i]!.role ?? 'p' : 'p').replace(/\d+$/, '')))]
     }
   }
@@ -702,14 +714,14 @@ export const EXTRA_MAX_ASPECT = 2
  *  image under Performance's rule on every layout.) */
 export const EXTRA_INSET_MAX = 1 / 3
 
-/** `n` equal slots, `gap` apart, in the first room (largest first) that holds them at
- *  `EXTRA_MIN_TILE` or more: as one row or one column, whichever tile is bigger (the row on a tie).
- *  Ruling D6: each tile keeps an aspect between 1:2 and 2:1 — its longer side is cut to twice the
- *  shorter, and it sits centred in its slot (the shorter side, and so the minimum, is unchanged).
- *  `inset` (ruling D5): no side longer than `maxSide` (never under the minimum), and the tiles sit
- *  in a corner of the room on the grid (`insetInCorner`, ruling D8) rather than centred. Null: no
- *  room holds them. */
-function tileRooms(rooms: Box[], n: number, gap: number, inset?: { maxSide: number; S: Sheet; frameH: number }): Box[] | null {
+/** `n` equal slots, `gap` apart, in the first room (largest first) that holds them at `minTile`
+ *  (`minTileFor`'s result for this frame) or more: as one row or one column, whichever tile is
+ *  bigger (the row on a tie). Ruling D6: each tile keeps an aspect between 1:2 and 2:1 — its longer
+ *  side is cut to twice the shorter, and it sits centred in its slot (the shorter side, and so the
+ *  minimum, is unchanged). `inset` (ruling D5): no side longer than `maxSide` (never under the
+ *  minimum), and the tiles sit in a corner of the room on the grid (`insetInCorner`, ruling D8)
+ *  rather than centred. Null: no room holds them. */
+function tileRooms(rooms: Box[], n: number, gap: number, minTile: number, inset?: { maxSide: number; S: Sheet; frameH: number }): Box[] | null {
   const maxSide = inset?.maxSide ?? Infinity
   const clamp = (w: number, h: number) => {
     const w1 = Math.min(w, EXTRA_MAX_ASPECT * h, maxSide)
@@ -720,7 +732,7 @@ function tileRooms(rooms: Box[], n: number, gap: number, inset?: { maxSide: numb
     const rw = r.x1 - r.x0, rh = r.y1 - r.y0
     const row = { w: (rw - (n - 1) * gap) / n, h: rh, row: true }
     const col = { w: rw, h: (rh - (n - 1) * gap) / n, row: false }
-    const fits = [row, col].filter(t => Math.min(t.w, t.h) >= EXTRA_MIN_TILE)
+    const fits = [row, col].filter(t => Math.min(t.w, t.h) >= minTile)
     if (!fits.length) continue
     const area = (t: { w: number; h: number }) => { const { tw, th } = clamp(t.w, t.h); return tw * th }
     const t = fits.length === 2 && area(col) > area(row) ? col : fits[0]!
@@ -748,6 +760,7 @@ const CORNERS = [['right', 'bottom'], ['left', 'bottom'], ['right', 'top'], ['le
  *  the tiles' own width, still in the corner. The tiles meet the room's edges on the corner's
  *  sides. Deterministic: a function of the room, the sizes and the sheet only. */
 export function insetInCorner(r: Box, n: number, row: boolean, tw: number, th: number, gap: number, S: Sheet, frameH: number): Box[] {
+  const minTile = minTileFor(frameH)
   let corner: typeof CORNERS[number] = CORNERS[0], best = Infinity
   for (const c of CORNERS) {
     const d = Math.hypot(c[0] === 'right' ? S.W - r.x1 : r.x0, c[1] === 'bottom' ? frameH - r.y1 : r.y0)
@@ -764,7 +777,7 @@ export function insetInCorner(r: Box, n: number, row: boolean, tw: number, th: n
     const sw = k * S.CW + (k - 1) * S.G
     if (need > cols.length || sw > tw + 1e-9) continue
     const sh = Math.min(th, EXTRA_MAX_ASPECT * sw)
-    if (Math.min(sw, sh) < EXTRA_MIN_TILE) break                        // a narrower span only gets smaller
+    if (Math.min(sw, sh) < minTile) break                        // a narrower span only gets smaller
     const first = right ? cols.length - need : 0
     xs = row ? Array.from({ length: n }, (_, i) => cols[first + i * k]!) : [cols[first]!]
     w = sw; h = sh

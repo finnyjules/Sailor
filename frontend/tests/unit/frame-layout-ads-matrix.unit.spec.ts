@@ -509,9 +509,11 @@ describe('the catalog (seed order)', () => {
 // off the image and keep every variation; Post-it (its image bleeds over the whole page) sets it on
 // that image as an inset (fix round 1, ruling D5) and keeps every variation too. Offer first and
 // Notes app lose everything they offer with one image. Measured: on every one of their one-image
-// variations no free room of 12 × 12 (the minimum tile) is left in the content area, and neither has
-// a full-bleed image to set an inset on — Notes app sets its own paper (a piece, not an image) over
-// the whole page; Offer first fills the page with its panel and an image that starts under it.
+// variations no free room of the frame's minimum tile (12% of the shorter side — flat 12 on these
+// portrait/square frames, scaled down by h/w on the landscape ad-300x250) is left in the content
+// area, and neither has a full-bleed image to set an inset on — Notes app sets its own paper (a
+// piece, not an image) over the whole page; Offer first fills the page with its panel and an image
+// that starts under it.
 describe('a second image (Task 7): what the ad Frame keeps', () => {
   const KEPT = ['perfStat', 'perfReview', 'perfVersus', 'perfCallouts', 'perfListicle', 'perfPostit']
   const LOST = ['perfOfferFirst', 'perfNotes']
@@ -521,6 +523,7 @@ describe('a second image (Task 7): what the ad Frame keeps', () => {
     const S = makeSheet({ frameW: f.w, frameH: f.h, measure: makeStubMeasure(), style: 'performance', ...(format ? { format: { view: format.view, nc: format.nc, ...(format.keep ? { keepSide: Math.max(format.keep.left, format.keep.right) } : {}) } } : {}) })
     const keep = format?.keep
     const area = { x0: S.M, x1: 100 - S.M, y0: (keep ? S.H * keep.top : 0) + S.M, y1: (keep ? S.H * (1 - keep.bottom) : S.H) - S.M }
+    const minTile = Math.min(EXTRA_MIN_TILE, EXTRA_MIN_TILE * S.H / 100)
     for (const id of ADS) {
       if (id === 'perfBeforeAfter') continue
       const one = candidatesForFrame(argsFor(id, f, fullAdLayers({ action: c.action })))
@@ -539,7 +542,7 @@ describe('a second image (Task 7): what the ad Frame keeps', () => {
         expect(two, id).toEqual([])
         for (const x of one) {
           const taken = x.out.els.map(e => inkBoxOf(e, S)).filter((b): b is NonNullable<typeof b> => b != null)
-          expect(freeRects(area, taken, S.GAP, EXTRA_MIN_TILE), `${id} ${JSON.stringify(x.choice)}`).toEqual([])
+          expect(freeRects(area, taken, S.GAP, minTile), `${id} ${JSON.stringify(x.choice)}`).toEqual([])
         }
       }
     }
