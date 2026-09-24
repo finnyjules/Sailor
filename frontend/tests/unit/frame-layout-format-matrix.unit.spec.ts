@@ -160,17 +160,32 @@ describe('format matrix — every format × kind × image through the real plann
 })
 
 describe('the format findings, pinned', () => {
-  it('Pinterest with the long date: the date breaks after its dash, so it offers far more (Task 3)', () => {
-    // Measured with the stub measure, when Task 3 landed (before: 3 / 3 / 3 without an image;
-    // 8 / 8 / 8 on 2:3 and 7 / 7 / 5 on 9:16 with one).
-    const PINNED: Record<string, [number, number, number, number, number, number]> = {
+  /** The layouts offered for one combination, computed here (not read from the matrix above), so
+   *  each pin passes when run on its own. */
+  const offeredCount = (fid: string, kind: Kind, image: boolean, content: Content) => {
+    const f = FRAME_FORMATS.find(x => x.id === fid)!
+    return LAYOUTS.filter(def => candidatesForFrame(argsFor(def, f, { format: fid, kind, image, content })).length).length
+  }
+
+  it('the long date breaks after its dash where it must (Task 3): the counts it changed, pinned', () => {
+    // Measured with the stub measure when Task 3 landed, "19.09.–15.11.2026" (the `dates` content).
+    // Every change is an addition: a choice that failed with the date on one line passes with it
+    // broken ("19.09.–" / "15.11.2026"). Every other format and content is unchanged.
+    const PINS: Record<string, [number, number, number, number, number, number]> = {
       // word none, word image, phrase none, phrase image, sentence none, sentence image
-      'pinterest-2x3': [19, 33, 26, 40, 23, 37],
-      'pinterest-9x16': [10, 18, 14, 22, 13, 16],
+      'meta-story': [17, 30, 24, 37, 21, 35], // before: 17 / 29 / 22 / 34 / 19 / 32
+      'meta-story-hd': [17, 30, 24, 37, 21, 35], // before: 17 / 29 / 22 / 34 / 19 / 32
+      'pinterest-2x3': [19, 33, 26, 40, 23, 37], // before: 3 / 8 / 3 / 8 / 3 / 8
+      'pinterest-9x16': [10, 18, 14, 22, 13, 16], // before: 3 / 7 / 3 / 7 / 3 / 5
+      'link-preview': [19, 32, 26, 39, 23, 37], // before: 19 / 31 / 26 / 36 / 23 / 34
+      'pmax-landscape': [14, 15, 21, 24, 18, 17], // before: 14 / 11 / 19 / 11 / 16 / 9
+      'pmax-square': [16, 28, 24, 34, 21, 32], // before: 16 / 27 / 22 / 31 / 19 / 29
+      'ad-300x250': [18, 33, 26, 40, 23, 37], // before: 18 / 32 / 24 / 37 / 21 / 34
+      'ad-300x600': [19, 33, 26, 40, 23, 37], // before: 19 / 32 / 24 / 37 / 21 / 34
+      'ad-160x600': [18, 31, 23, 36, 20, 33], // before: 13 / 21 / 19 / 27 / 15 / 23
     }
-    for (const [fid, counts] of Object.entries(PINNED)) {
-      const got = (['word', 'phrase', 'sentence'] as Kind[]).flatMap(kind => [false, true].map(image =>
-        results.get(keyOf({ format: fid, kind, image, content: 'dates' }))?.length))
+    for (const [fid, counts] of Object.entries(PINS)) {
+      const got = (['word', 'phrase', 'sentence'] as Kind[]).flatMap(kind => [false, true].map(image => offeredCount(fid, kind, image, 'dates')))
       expect(got, fid).toEqual(counts)
     }
   })

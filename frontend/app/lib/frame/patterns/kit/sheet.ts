@@ -186,29 +186,29 @@ export function makeSheet(o: SheetOpts): Sheet {
   }
   /** The date line's own breaks (Task 3 of the layout decisions): the renderer wraps only at
    *  spaces, so a date range too wide for its box ("19.09.–15.11.2026") may break after the dash
-   *  between its two dates — nowhere else. Returns the lines to place (every one measured in the
-   *  date's face with `w100`, exactly as `displayOp` draws placed lines), or null when no such
-   *  break is needed and the renderer's own wrap stands. A token breaks only when it alone is
-   *  wider than the box. Only on a sheet with `breakDates`. */
+   *  between its two dates — nowhere else. Returns the lines to place, or null when no such break
+   *  is needed and the renderer's own wrap stands. The text is cut ONLY right after such a dash
+   *  (a range token that alone is wider than the box): every other character, spaces included,
+   *  stays exactly where the user put it, so the lines joined give back the user's text. Each line
+   *  is measured with `w100`, exactly as `displayOp` draws placed lines. Only on a sheet with
+   *  `breakDates`. */
   function dateLines(s: string, width: number, st: Style, size: number): string[] | null {
     if (!o.breakDates || !(width > 0)) return null
     const wOf = (t: string) => w100(t, st) * size / 100
     let broke = false
     const out: string[] = []
     for (const para of s.split('\n')) {
-      // Pieces: `glue` joins a piece to the one before without a space (the two halves of a range).
-      const pieces: { t: string; glue: boolean }[] = []
-      for (const tok of para.split(' ').filter(Boolean)) {
+      let from = 0
+      for (const m of para.matchAll(/\S+/g)) {
+        const tok = m[0]
         const r = wOf(tok) > width ? splitDateRange(tok) : null
-        if (r) { broke = true; pieces.push({ t: r[0], glue: false }, { t: r[1], glue: true }) } else pieces.push({ t: tok, glue: false })
+        if (!r) continue
+        const cut = m.index! + r[0].length
+        out.push(para.slice(from, cut))
+        from = cut
+        broke = true
       }
-      if (!pieces.length) { out.push(''); continue }
-      let cur = ''
-      for (const pc of pieces) {
-        const t = cur ? cur + (pc.glue ? '' : ' ') + pc.t : pc.t
-        if (cur && (pc.glue || wOf(t) > width)) { out.push(cur); cur = pc.t } else cur = t
-      }
-      out.push(cur)
+      out.push(para.slice(from))
     }
     return broke ? out : null
   }

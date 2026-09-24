@@ -113,6 +113,13 @@ const argsFor = (def: LayoutDef, f: Frame, c: Combo): Omit<LayoutPlanArgs, 'choi
   }
 }
 
+/** The style's layouts offered for one combination, computed here (not read from the matrix's
+ *  results), so a pin passes when run on its own. `frame` may be any format id. */
+const offeredFor = (c: Combo): string[] => {
+  const f = FRAMES.find(x => x.id === c.frame) ?? fmt(c.frame)
+  return layoutsForStyle(c.style).filter(def => candidatesForFrame(argsFor(def, f, c)).length).map(def => def.id)
+}
+
 const combos: Combo[] = STYLE_RUNS.flatMap(({ style }) => FRAMES.flatMap(f => KINDS.flatMap(kind =>
   [false, true].flatMap(image => [false, true].flatMap(action => [false, true].map(logo =>
     ({ style, frame: f.id, kind, image, action, logo })))))))
@@ -205,9 +212,25 @@ describe('style matrix — each style\'s layouts through the real planner', () =
       [{ frame: 'meta-story', action: true, logo: true }, ['perfPriceTag']],
     ]
     for (const [c, stage3] of PINS) for (const kind of KINDS) {
-      const offered = results.get(keyOf({ style: 'performance', kind, image: true, ...c } as Combo))
-      expect(offered, `${c.frame} ${kind}`).toBeDefined()
-      expect(offered!.filter(id => !stage4.has(id)), `${JSON.stringify(c)} ${kind}`).toEqual(stage3)
+      const offered = offeredFor({ style: 'performance', kind, image: true, action: false, logo: false, ...c } as Combo)
+      expect(offered.filter(id => !stage4.has(id)), `${JSON.stringify(c)} ${kind}`).toEqual(stage3)
+    }
+  })
+
+  it('Performance on the other small banners (300×600, 160×600): the 70% limit changes nothing there', () => {
+    // Layout decisions Task 3: both are under 336 px of design width, so up to 70% of the image
+    // may be hidden. Measured when it landed (every kind, with and without a button and a logo):
+    // the offered layouts AND each layout's candidate count are exactly those of the 55% limit —
+    // their bands and cards already leave most of the tall image showing.
+    const ALL7 = ['perfOffer', 'perfSticker', 'perfPriceTag', 'perfCard', 'perfCentred', 'perfOfferFirst', 'perfPostit']
+    const PINS: [string, Kind, string[]][] = [
+      ...KINDS.map(kind => ['ad-300x600', kind, ALL7] as [string, Kind, string[]]),
+      ['ad-160x600', 'word', ['perfOffer', 'perfCard', 'perfCentred', 'perfOfferFirst', 'perfPostit']],
+      ['ad-160x600', 'phrase', ['perfOffer', 'perfCard', 'perfCentred', 'perfOfferFirst', 'perfPostit']],
+      ['ad-160x600', 'sentence', ['perfOffer', 'perfCard', 'perfCentred', 'perfOfferFirst']],
+    ]
+    for (const [frame, kind, want] of PINS) for (const action of [false, true]) for (const logo of [false, true]) {
+      expect(offeredFor({ style: 'performance', frame, kind, image: true, action, logo }), `${frame} ${kind} ${action} ${logo}`).toEqual(want)
     }
   })
 

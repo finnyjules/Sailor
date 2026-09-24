@@ -612,15 +612,17 @@ const fillsOf = (p: Prepared, { out, S }: Run): PieceFills => pieceFills(out.els
 
 /** Run and check one choice (the ONE path plan and candidates share). Task 3 of the layout
  *  decisions: a date range too wide for its box may break after its dash ("19.09.–" /
- *  "15.11.2026"). The choice runs first exactly as before; only when that fails, and the Frame's
- *  date has such a dash, does it run again with the break allowed — kept when it passes. So every
+ *  "15.11.2026"). The choice runs first exactly as before; only when that fails, on a recognised
+ *  format (ruling D1), and the Frame's date has such a dash, does it run again with the break
+ *  allowed — kept when it passes. So every
  *  choice that passed before is byte-identical; the break only ever adds candidates. */
 function runChecked(p: Prepared, a: { frameW: number; frameH: number; style?: StyleId }, choice: Choice): { ran: Run; pf: PieceFills; issues: string[] } {
   const ran = runChoice(p, a, choice)
   const pf = fillsOf(p, ran)
   const issues = checkRun(ran, p.def.premise, pf)
+  // Ruling D1: only on a recognised format — a Frame with no format plans exactly as in Stage 1.
   const date = p.content.date
-  if (!issues.length || !date || !date.split(/\s+/).some(t => splitDateRange(t))) return { ran, pf, issues }
+  if (!issues.length || !p.fmt || !date || !date.split(/\s+/).some(t => splitDateRange(t))) return { ran, pf, issues }
   const ran2 = runChoice(p, a, choice, true)
   const pf2 = fillsOf(p, ran2)
   const issues2 = checkRun(ran2, p.def.premise, pf2)

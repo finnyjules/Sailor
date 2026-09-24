@@ -8,7 +8,7 @@ import { applyPlacement } from '~/lib/frame/patterns/apply'
 import { candidatesForFrame, planLayout } from '~/lib/frame/patterns/kit/plan'
 import type { El, TextEl } from '~/lib/frame/patterns/kit/types'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
-import { layoutsForStyle } from '~/lib/frame/patterns/layouts/catalog'
+import { LAYOUTS, layoutsForStyle } from '~/lib/frame/patterns/layouts/catalog'
 import { AD_LOGO, adFrameLayers, frameLayers, palette } from './helpers/frameLayoutFixtures'
 
 // Frame layout decisions, Task 3: small banners and long dates.
@@ -77,15 +77,21 @@ describe('Performance on a small format: the image may be up to 70% hidden', () 
   })
 
   it('the planner passes the format\'s own width, not the Frame\'s size on screen', () => {
-    // A 300×250 banner stored at twice its size (600×500): still a 300 px design.
-    const base = { palette, connectedSlots: [], measure, style: 'performance' as const, layoutId: 'perfCard' }
-    const props = (preset?: string) => ({
-      sailor_localLayers: frameLayers('word', { image: true, shape: false, date: '–30%' }),
-      ...(preset ? { sailor_frame: { preset } } : {}),
-    })
-    const at2x = candidatesForFrame({ ...base, props: props('ad-300x250'), frameW: 600, frameH: 500 })
-    const at1x = candidatesForFrame({ ...base, props: props('ad-300x250'), frameW: 300, frameH: 250 })
-    expect(at2x.map(c => JSON.stringify(c.choice))).toEqual(at1x.map(c => JSON.stringify(c.choice)))
+    // A 300×250 banner stored at twice its size (600×500) is still a 300 px design. Measured on
+    // the phrase with a logo: Offer hides 69.5–72.5% of the image and Centred 69.2–71.7% — over
+    // 55%, under 70% for two choices each. Were the Frame's 600 px width read instead, both would
+    // be refused, as they are on the same 600×500 Frame with no format.
+    for (const id of ['perfOffer', 'perfCentred']) {
+      const at1x = perf('ad-300x250', 300, 250, id, { action: false, logo: true })
+      const at2x = perf('ad-300x250', 600, 500, id, { action: false, logo: true })
+      expect(at1x.length, id).toBe(2)
+      expect(at2x.map(c => JSON.stringify(c.choice)), id).toEqual(at1x.map(c => JSON.stringify(c.choice)))
+      const plain = candidatesForFrame({
+        props: { sailor_localLayers: adFrameLayers('phrase', { image: true, action: false }) },
+        frameW: 600, frameH: 500, layoutId: id, palette, connectedSlots: [], measure, style: 'performance', brandLogo: { ...AD_LOGO },
+      })
+      expect(plain.length, `${id} with no format`).toBe(0)
+    }
   })
 })
 
@@ -119,6 +125,13 @@ describe('a date range may break after its dash', () => {
     expect(e.s).toBe('19.09.–15.11.2026')
   })
 
+  it('keeps the user\'s spacing: the text is cut only right after the dash', () => {
+    const s = 'Open  19.09.–15.11.2026  daily'
+    const e = S.info(s, { x: 0, w: one('19.09.–15.11.2026') - 1, top: 0, role: 'date' })
+    expect(e.s).toBe('Open  19.09.–\n15.11.2026  daily')
+    expect(e.s.replace('\n', '')).toBe(s)
+  })
+
   it('a sheet without `breakDates` never breaks a date — every line wraps as the renderer does', () => {
     const plain = makeSheet({ frameW: 1000, frameH: 1500, measure, format: { view: 236 } })
     const w = one('19.09.–15.11.2026') - 1
@@ -150,6 +163,25 @@ describe('a date range may break after its dash', () => {
     const layer = { id: 'dt', kind: 'text', text: '19.09.–15.11.2026', fontSize: 0.03, x: 0.5, y: 0.5 } as unknown as LocalLayer
     const [next] = applyPlacement([layer], { ops } as never, { date: { id: 'dt' } } as never, palette as never)
     expect((next as { text: string }).text).toBe('19.09.–15.11.2026')
+  })
+
+  it('ruling D1: a Frame with no format never breaks its date — it plans exactly as in Stage 1', () => {
+    // A 400×1200 Frame (no format) with the long date. The stub measure gives every character the
+    // same width, so "19.09.x15.11.2026" (no dash, never broken) lays out the same: every layout
+    // must offer exactly the same choices with the range as without it. Before the ruling, Spaced
+    // lines, Sidebar and Plate gained candidates here from the break.
+    for (const image of [false, true]) for (const kind of ['word', 'phrase', 'sentence'] as const) {
+      for (const def of LAYOUTS) {
+        // Number behind splits the date at its en dash itself (its own two lines), so the control
+        // date would lay out differently there; it never goes through the date break.
+        if (!(def.fits as string[]).includes(kind) || def.id === 'dateBehind') continue
+        const run = (date: string) => candidatesForFrame({
+          props: { sailor_localLayers: frameLayers(kind, { image, shape: !!def.needs?.shape, date }) },
+          frameW: 400, frameH: 1200, layoutId: def.id, palette, connectedSlots: [], measure,
+        }).map(c => JSON.stringify(c.choice))
+        expect(run('19.09.–15.11.2026'), `${def.id} ${kind} ${image}`).toEqual(run('19.09.x15.11.2026'))
+      }
+    }
   })
 
   it('Pinterest with the long date: a layout that was refused for the date now plans cleanly', () => {
