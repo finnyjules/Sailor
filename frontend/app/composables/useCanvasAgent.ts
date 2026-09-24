@@ -10,7 +10,6 @@
  * on Dismiss, opts.discard removes them.
  */
 import { computed, ref } from 'vue'
-import { $fetch } from 'ofetch'
 import type { Command } from '~/lib/agent/commandSurface'
 import type { ProposedChange, VisualReview } from '~/composables/useLayoutAgent'
 import { applyCanvasCommand, describeCanvas, scopeSnapshotToUpstream, searchImageRequests, sketchRequests, summarizeCanvasChange, verifyCanvas, type CanvasSnapshot } from '~/lib/agent/surfaces/canvas'
@@ -80,18 +79,15 @@ export function useCanvasAgent(opts: {
   let pendingReview: { targets: string[]; intent: string } | null = null
   let original: CanvasSnapshot | null = null
   const hasProposal = computed(() => changes.value.length > 0)
-  // Stop lifecycle: an in-flight ask() aborts via `controller`; `runSeq` bumps on
-  // every ask() and every stop() so a reply for an older run is ignored even if
-  // the abort itself doesn't win the race (e.g. the fetch had already resolved).
+  // Stop lifecycle (per-instance, not shared across useCanvasAgent() calls): an
+  // in-flight ask() aborts via `controller`; `runSeq` bumps on every ask() and
+  // every stop() so a reply for an older run is ignored even if the abort
+  // itself doesn't win the race (e.g. the fetch had already resolved).
   let controller: AbortController | null = null
   let runSeq = 0
 
   async function callModel(prompt: string, commands: { op: string }[], signal?: AbortSignal) {
-    // Prefer a globally-stubbed $fetch when one is present (unit tests stub
-    // globalThis.$fetch to observe/abort the call) — falls back to the real
-    // ofetch import for the app.
-    const fetcher: typeof $fetch = (globalThis as any).$fetch ?? $fetch
-    const res = await fetcher<{ text: string }>('/api/agent-plan', {
+    const res = await $fetch<{ text: string }>('/api/agent-plan', {
       method: 'POST',
       body: { apiKey: opts.apiKey(), tier: opts.tier ?? 'plan', prompt, schema: buildCommandSchema(commands) },
       timeout: 60_000,
