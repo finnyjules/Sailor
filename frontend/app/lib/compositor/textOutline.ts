@@ -80,7 +80,12 @@ export function compositorFontToken(layer: CompositorFontLayerLike): string | nu
   const curated = VARIABLE_FONTS.find((f) => f.family === family)
   if (curated) return formatVtFontToken({ kind: 'catalog', id: curated.id })
 
-  if (libraryFamily(family)) return formatVtFontToken({ kind: 'local', family, weight })
+  // A library family is a LOCAL file only when it ships faces. Featured fonts are listed with
+  // `source: 'google'` and no faces — a `local:` token has nothing to load for them, so every
+  // outline (morph, geometry effects, outlined text) silently failed. Send those to Google.
+  const lib = libraryFamily(family)
+  if (lib && lib.faces.length > 0) return formatVtFontToken({ kind: 'local', family, weight })
+  if (lib?.source === 'google') return formatVtFontToken({ kind: 'google', family: lib.googleFamily ?? family, weight })
 
   return formatVtFontToken({ kind: 'google', family, weight })
 }

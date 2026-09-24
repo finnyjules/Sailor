@@ -69,6 +69,14 @@ describe('compositorFontToken', () => {
     expect(compositorFontToken({ fontFamily: 'OT 2049', fontWeight: 700 })).toBe('local:OT 2049@700')
   })
 
+  it('sends a Google-sourced library family (no local faces) to Google, not to a local file', () => {
+    // Featured fonts (Climate Crisis, Boldonse, …) are listed in the library manifest with
+    // `source: 'google'` and `faces: []`. A `local:` token has no file to load, so every
+    // outline for them failed and a Morph fell back to a cross-fade (2026-09-24).
+    expect(compositorFontToken({ fontFamily: 'Climate Crisis', fontWeight: 800 })).toBe('google:Climate Crisis@800')
+    expect(compositorFontToken({ fontFamily: 'Boldonse', fontWeight: 800 })).toBe('google:Boldonse@800')
+  })
+
   it('falls back to a google token for an unknown, non-system family', () => {
     expect(compositorFontToken({ fontFamily: 'Roboto', fontWeight: 400 })).toBe('google:Roboto@400')
     expect(compositorFontToken({ fontFamily: 'Poppins', fontWeight: 600 })).toBe('google:Poppins@600')
