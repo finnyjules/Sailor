@@ -55,4 +55,20 @@ describe('applyMorphBehaviours', () => {
     const ls = [A, B]
     expect(applyMorphBehaviours(ls, [], [], 1)).toBe(ls)
   })
+
+  it('per-copy singleton fold: knownIds recognises a target that lives elsewhere in the stack', () => {
+    const knownIds = new Set(['a', 'b'])
+    const after = applyMorphBehaviours([A], tr, bs, 3, knownIds)
+    expect(get(after, 'a').motionHidden).toBe(true)
+    const mid = applyMorphBehaviours([A], tr, bs, 1.5, knownIds)
+    const mm = get(mid, 'a').motionMorph as { target: string; style: string; amount: number }
+    expect(mm.target).toBe('l:b')
+    expect(mm.amount).toBeGreaterThan(0)
+    expect(mm.amount).toBeLessThan(1)
+  })
+
+  it('per-copy singleton fold WITHOUT knownIds: still treated as dangling (existing behaviour)', () => {
+    const ls = [A]
+    expect(applyMorphBehaviours(ls, tr, bs, 3)).toBe(ls)
+  })
 })

@@ -5792,6 +5792,10 @@ export function paintLayerStack(
   // the copies-stagger expansion folds reveals at the FRAME clock (every copy reveals in step,
   // done when the bar is done) while position, opacity and letters still stagger. The main fold
   // leaves it defaulted to `clock`, so a frame without a stagger is byte-identical.
+  // The full pre-fold stack, so a per-copy fold below (which folds a SINGLETON `[source]`) still
+  // recognises a morph target that lives elsewhere in the stack rather than treating it as
+  // dangling — the main fold and every per-copy fold must agree on what counts as a live id.
+  const morphIds = new Set(localLayers.map(l => l.id))
   const foldMotion = (ls: LocalLayer[], clock: number | undefined, revealClock: number | undefined = clock): LocalLayer[] =>
     applyMorphBehaviours(applyRevealBehaviours(applyTextBehaviours(applyMotionxTracks(
       applyFillPhaseTracks(
@@ -5801,7 +5805,7 @@ export function paintLayerStack(
       ),
       motion?.motionx,
       clock,
-    ), motion?.behaviours, clock), motion?.motionx, motion?.behaviours, revealClock), motion?.motionx, motion?.behaviours, revealClock)
+    ), motion?.behaviours, clock), motion?.motionx, motion?.behaviours, revealClock), motion?.motionx, motion?.behaviours, revealClock, morphIds)
 
   const storedLocals = localLayers      // pre-fold, for the per-copy folds below
   const animatedLocals = foldMotion(localLayers, t)

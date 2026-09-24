@@ -201,13 +201,17 @@ export interface MotionMorph { target: string; style: 'letters' | 'shape'; amoun
  *   amount ≤ 0 → A unchanged; the target hidden (it has not arrived yet);
  *   between    → `motionMorph` on A; the target hidden;
  *   amount ≥ 1 → A hidden; the target shown (unless another unfinished morph targets it).
- * A bar with no target, or a target that is not in `layers`, does nothing at all — A leaves as
- * if it had no Out transition. Hidden = a transient `motionHidden` the painter skips; the layer
- * stays in the list so the sibling resolver can still read its outline and placement.
- * Same-reference return when nothing is attached.
+ * A bar with no target, or a target that is not in `layers` (or `knownIds`, when given), does
+ * nothing at all — A leaves as if it had no Out transition. Hidden = a transient `motionHidden`
+ * the painter skips; the layer stays in the list so the sibling resolver can still read its
+ * outline and placement. Same-reference return when nothing is attached.
+ *
+ * `knownIds`, when given, replaces `layers` as the set a target id must belong to — the per-copy
+ * stagger fold passes a single layer but targets live elsewhere in the stack.
  */
 export function applyMorphBehaviours(
   layers: LocalLayer[], tracks: Track[] | undefined, behaviours: StoredBehaviour[] | undefined, t: number | undefined,
+  knownIds?: ReadonlySet<string>,
 ): LocalLayer[] {
   if (!tracks || tracks.length === 0 || !behaviours || behaviours.length === 0 || t == null) return layers
   const byLayer = new Map<string, Track[]>()
@@ -219,7 +223,7 @@ export function applyMorphBehaviours(
     if (list) list.push(tr); else byLayer.set(m[1]!, [tr])
   }
   if (byLayer.size === 0) return layers
-  const ids = new Set(layers.map(l => l.id))
+  const ids = knownIds ?? new Set(layers.map(l => l.id))
   const self = new Map<string, { hidden?: true; morph?: MotionMorph }>()
   const hideTargets = new Set<string>()
   for (const [id, list] of byLayer) {
