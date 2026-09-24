@@ -587,12 +587,12 @@ describe('local mode is byte-identical — no gate, no 403, same proxy target', 
     ['/queue', 'POST'], ['/api/queue', 'DELETE'],
     ['/interrupt', 'POST'], ['/api/interrupt', 'POST'], ['/comfyui/interrupt', 'POST'],
     ['/api/history', 'GET'], ['/comfyui/history', 'GET'], ['/api/view?filename=a.png', 'GET'],
-    ['/comfyui/internal/files/output', 'GET'], ['/comfyui/settings', 'GET'], ['/object_info', 'GET'],
-    // Round 2: the three prefixes that stopped raw-proxying in HOSTED mode
-    // must still raw-proxy locally — no scrubber, no overwrite sniff, no 403.
+    ['/comfyui/internal/files/output', 'GET'], ['/comfyui/settings', 'GET'],
+    // Round 2: the prefixes that stopped raw-proxying in HOSTED mode must
+    // still raw-proxy locally — no scrubber, no overwrite sniff, no 403.
     // (`/upload/image` and `/upload/mask` are native since engine-free Phase A
-    // A4: see the next describe.)
-    ['/comfyui/object_info', 'GET'], ['/upload', 'POST'], ['/gate/resume', 'POST'],
+    // A4, and `/object_info` since A5: see the next describe.)
+    ['/upload', 'POST'], ['/gate/resume', 'POST'],
     ['/extensions/../history', 'GET'],
     // Stage 6 Task 2's projects gate and spend refusal are hosted-only; since
     // engine-free Phase A those paths are answered natively in local mode (see
@@ -709,6 +709,17 @@ describe('local mode: projects and spend are answered by Sailor itself (engine-f
       expect(proxyRequest, `${p} is native in local mode`).not.toHaveBeenCalled()
       expect(res, p).toBe('405: Method Not Allowed')
     }
+  })
+
+  it('answers /object_info natively (A5), under any spelling, never entering the hosted scrubber', async () => {
+    // fetch is stubbed to fail (engine down), so the committed baseline answers.
+    for (const p of ['/object_info', '/api/object_info', '/comfyui/object_info', '/comfyui/api/object_info/KSampler', '/object_info?comfyWorker=2']) {
+      proxyRequest.mockClear()
+      const res = await middleware({ ...ev(p, 'GET'), node: { req: {}, res: { setHeader() {} } } }) as any
+      expect(proxyRequest, `${p} is native in local mode`).not.toHaveBeenCalled()
+      expect(res?.KSampler, p).toBeTruthy()
+    }
+    expect(handleHostedObjectInfo, 'local mode must never enter the hosted scrubber').not.toHaveBeenCalled()
   })
 
   it('models/download: raw-proxied while the engine answers, 503 when it does not', async () => {

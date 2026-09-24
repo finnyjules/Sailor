@@ -301,10 +301,15 @@ describe('handleHostedObjectInfo', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8188/object_info')
   })
 
-  it('requires a session, and reports an engine failure as 502', async () => {
+  it('requires a session, and still scrubs when the engine fails (A5: stored catalog served)', async () => {
     await expect(handleHostedObjectInfo(ev('/object_info', null))).rejects.toMatchObject({ statusCode: 401 })
+    // Engine-free Phase A: an engine failure no longer 502s — the committed
+    // baseline is served (native-object-info.unit.spec.ts covers the 502 when
+    // nothing at all is stored), and the scrub still applies to it.
     fetchMock.mockResolvedValue({ ok: false })
-    await expect(handleHostedObjectInfo(ev('/object_info'))).rejects.toMatchObject({ statusCode: 502 })
+    const out = await handleHostedObjectInfo(ev('/object_info')) as any
+    expect(out.LoadImage.input.required.image[0]).toEqual([])
+    expect(out.KSampler).toBeTruthy()
   })
 })
 

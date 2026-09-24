@@ -18,6 +18,7 @@ import { userDir } from './paths'
 import { MEDIA_PREFIXES, matchMediaRoute, mediaContext, runMediaRoute, type MediaResult } from './media'
 import { SMALL_PREFIXES, matchSmallRoute, runSmallRoute } from './smallRoutes'
 import { UPLOAD_PREFIXES, matchUploadRoute, runUpload, uploadFolders } from './uploads'
+import { OBJECT_INFO_PREFIXES, matchObjectInfoRoute, runObjectInfo } from './objectInfo'
 import { parseUploadForm, type UploadForm } from '../utils/multipart'
 import {
   ensureBootMigrationsRan,
@@ -35,7 +36,7 @@ import {
 } from './projects'
 
 /** Namespaces served natively, boundary-matched. Everything else is proxied. */
-export const NATIVE_ENGINE_PREFIXES = ['/sailor/projects', '/sailor/spend', ...MEDIA_PREFIXES, ...SMALL_PREFIXES, ...UPLOAD_PREFIXES]
+export const NATIVE_ENGINE_PREFIXES = ['/sailor/projects', '/sailor/spend', ...MEDIA_PREFIXES, ...SMALL_PREFIXES, ...UPLOAD_PREFIXES, ...OBJECT_INFO_PREFIXES]
 
 /** Request bodies are whole workflow graphs; ComfyUI's aiohttp cap was 100 MB. */
 export const NATIVE_MAX_BODY_BYTES = 100 * 1024 * 1024
@@ -73,7 +74,7 @@ export function nativeEnginePath(rawPath: string): string | null {
  * are decoded, except an encoded `/` (yarl keeps `%2F` as-is), and a malformed
  * escape stays literal.
  */
-function decodeSegment(seg: string): string {
+export function decodeSegment(seg: string): string {
   try { return decodeURIComponent(seg.replace(/%2f/gi, '%252F')) }
   catch { return seg }
 }
@@ -248,6 +249,25 @@ export async function dispatchUpload(p: string, method: string, form: UploadForm
 }
 
 /**
+ * GET /object_info and /object_info/{node} (server/native/objectInfo.ts): the
+ * engine's own catalog while it answers, else the stored one refreshed from
+ * disk. Local mode only — hosted serves it through handleHostedObjectInfo,
+ * which scrubs the upload lists per tenant.
+ */
+async function dispatchObjectInfo(event: H3Event, p: string): Promise<NativeResult> {
+  const match = matchObjectInfoRoute(p, (event.method || 'GET').toUpperCase(), decodeSegment)
+  if (match.kind === 'notFound') return text(404, '404: Not Found')
+  if (match.kind === 'badMethod') return text(405, '405: Method Not Allowed')
+  try {
+    return await runObjectInfo(event.path, p, match.node)
+  }
+  catch (e) {
+    console.error(`[native] ${event.method} ${p} failed`, e)
+    return text(500, '500 Internal Server Error\n\nServer got itself in trouble')
+  }
+}
+
+/**
  * Serve a native request and return `{ status, body }`, or undefined when the
  * path is not native (or is a native path the engine itself must answer, see
  * dispatchSmall). Used by the hosted gate, which sets the status itself.
@@ -257,6 +277,7 @@ export async function dispatchNative(event: H3Event): Promise<NativeResult | und
   if (!p) return undefined
   if (MEDIA_PREFIXES.some(pre => p === pre || p.startsWith(`${pre}/`))) return dispatchMedia(event, p)
   if (SMALL_PREFIXES.some(pre => p === pre || p.startsWith(`${pre}/`))) return dispatchSmall(event, p)
+  if (OBJECT_INFO_PREFIXES.some(pre => p === pre || p.startsWith(`${pre}/`))) return dispatchObjectInfo(event, p)
   if (UPLOAD_PREFIXES.some(pre => p === pre || p.startsWith(`${pre}/`))) {
     return dispatchUpload(p, (event.method || 'GET').toUpperCase(), async () => {
       const body = await readBodyBytes(event)

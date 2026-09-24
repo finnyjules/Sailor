@@ -47,11 +47,17 @@ beforeEach(async () => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sailor-unit-test-engine-root-'))
   const { __setInputUploadsEngineRootForTests } = await import('../../../server/utils/inputUploads')
   __setInputUploadsEngineRootForTests(dir)
+  // A5: the saved /object_info copy lives in storeDir('data') — the real
+  // frontend/.data/ from a test's cwd. Redirect it into the same temp folder.
+  const { __setObjectInfoCacheFileForTests } = await import('../../../server/native/objectInfo')
+  __setObjectInfoCacheFileForTests(path.join(dir, 'data', 'object_info.json'))
 })
 
 afterEach(async () => {
   const { __setInputUploadsEngineRootForTests } = await import('../../../server/utils/inputUploads')
   __setInputUploadsEngineRootForTests(undefined)
+  const { __setObjectInfoCacheFileForTests } = await import('../../../server/native/objectInfo')
+  __setObjectInfoCacheFileForTests(undefined)
   if (dir) {
     try { fs.rmSync(dir, { recursive: true, force: true }) }
     catch { /* best effort */ }

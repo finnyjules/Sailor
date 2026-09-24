@@ -14,7 +14,8 @@ import { canonicalUploadKey, ownedInputFilenames, recordUpload, releaseUpload, u
 import { normalizeEnginePath } from './enginePath'
 import { hostedCanMutate, ownedIds, ownerOf, recordOwner, releaseOwner } from './resourceOwners'
 import { annotatedFilepath, isSafeId, pyBasename, userDir } from '../native/paths'
-import { dispatchNative, dispatchUpload, nativeEnginePath } from '../native/router'
+import { decodeSegment, dispatchNative, dispatchUpload, nativeEnginePath } from '../native/router'
+import { matchObjectInfoRoute, objectInfoBody } from '../native/objectInfo'
 import { ensureBootMigrationsRan, listProjects, projectsRoot } from '../native/projects'
 
 // Review C2's exact mirror of folder_paths.annotated_filepath() lives in
@@ -265,36 +266,28 @@ export async function handleHostedOutputListing(event: H3Event): Promise<string[
   return names
 }
 
-/** Resolve the pool worker and rewrite `/comfyui`-prefixed paths, as the raw proxy does. */
-function engineTarget(path: string): { target: string, backendPath: string } {
-  const { port, cleanUrl } = resolveWorkerTarget(path)
-  const target = `http://127.0.0.1:${port}`
-  const backendPath = cleanUrl.startsWith('/comfyui')
-    ? cleanUrl.replace(/^\/comfyui/, '') || '/'
-    : cleanUrl
-  return { target, backendPath }
-}
-
 export async function handleHostedObjectInfo(event: H3Event): Promise<unknown> {
   const userId = event.context.userId
   if (!userId) throw createError({ statusCode: 401, message: 'Sign in required' })
-  // `?comfyWorker=N` must keep targeting the pool worker: node availability
+  const p = nativeEnginePath(event.path)
+  const match = p ? matchObjectInfoRoute(p, 'GET', decodeSegment) : null
+  if (!p || match?.kind !== 'route') throw createError({ statusCode: 404, message: 'Not Found' })
+  // Engine-free Phase A (A5): the engine's catalog while it answers, else the
+  // saved copy / committed baseline refreshed from disk (objectInfo.ts).
+  // `?comfyWorker=N` still targets the pool worker: node availability
   // differs per worker, so answering from the main instance would hand the
-  // canvas a schema the executing engine does not have.
-  const { target, backendPath } = engineTarget(event.path)
-  // Fetched once per request, in parallel with the engine round trip — the
-  // ownership lookup and the catalog fetch are independent, so there is no
-  // reason to serialize them.
-  const [owned, res] = await Promise.all([
+  // canvas a schema the executing engine does not have. The ownership lookup
+  // and the catalog are independent, so they run in parallel.
+  const [owned, got] = await Promise.all([
     ownedInputFilenames(userId),
-    fetch(`${target}${backendPath}`, { headers: { origin: target } }),
+    objectInfoBody(event.path, p, match.node),
   ])
-  if (!res.ok) throw createError({ statusCode: 502, message: 'Engine object_info unavailable' })
+  if (!got) throw createError({ statusCode: 502, message: 'Engine object_info unavailable' })
   // Sorted for a stable `default` (ComfyUI itself seeds default from the
   // alphabetically-first directory entry — this mirrors that ordering scoped
   // to the caller's own files) and for deterministic tests.
   const ownedFilenames = Array.from(owned).sort()
-  return scrubObjectInfo(await res.json(), ownedFilenames)
+  return scrubObjectInfo(got.body, ownedFilenames)
 }
 
 // ---------------------------------------------------------------------------
