@@ -19,6 +19,12 @@ export interface ExportEmbedOptions {
   still?: boolean
   /** A #hex colour behind the stage when not transparent. */
   backdrop?: string
+  /** Whether the fallback poster keeps an alpha channel (a lossless PNG) or is a JPEG. Default:
+   *  whenever the surface can render alpha (`caps.alpha`). A surface that only has alpha when
+   *  the export is transparent — the pre-rendered `frames` player, whose frames are opaque
+   *  otherwise — passes `transparent` here, so an opaque export gets the smaller JPEG. Never
+   *  turns alpha on for a surface without it. */
+  posterAlpha?: boolean
 }
 
 /**
@@ -87,7 +93,7 @@ export async function exportEmbedHtml(opts: ExportEmbedOptions): Promise<string>
 
   const posterDataUrl = await bakePoster(
     surface, opts.config, opts.width, opts.height, opts.posterT01 ?? 0,
-    surface.caps.alpha,
+    surface.caps.alpha && (opts.posterAlpha ?? true),
   )
 
   const snapshot: EmbedSnapshot = {

@@ -2,7 +2,7 @@
 // What each asset kind is called and the plain sentence for a failed one live in
 // `lib/scene3d/assetNames` — a Frame export pulling a 3D slot names its failures the same way.
 import type { AssetFailure } from '~/lib/scene3d/assetTracker'
-import { assetDisplayName, failureSentence } from '~/lib/scene3d/assetNames'
+import { assetDisplayName, failureSentence, plainFailureReason } from '~/lib/scene3d/assetNames'
 
 export { assetDisplayName, failureSentence }
 </script>
@@ -12,7 +12,7 @@ export { assetDisplayName, failureSentence }
  *  HTML file; this shows the options, the progress, what stops the export, and answers
  *  `build` / `cancel` / `download` / `copy`. The same family as the Frame's web export sheet. */
 import { computed } from 'vue'
-import { formatBytes } from '~/lib/embed/frame/gather'
+import { formatBytes } from '~/lib/embed/formatBytes'
 import StudioSegmentedRow from '~/components/vue-canvas/studio/StudioSegmentedRow.vue'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
@@ -59,7 +59,14 @@ const sizeLabels = computed(() => {
   return [`Output · ${w}×${h}`, `2× sharp · ${w * 2}×${h * 2}`]
 })
 const working = computed(() => props.state === 'working')
-const lines = computed(() => props.failures.map(f => ({ text: failureSentence(f), reason: f.reason })))
+// Each failure: the sentence, the loader's reason in plain words when it is a common one (and
+// not already said by the sentence — "didn't finish loading"), and the raw reason only as a
+// tooltip, for whoever needs to report it.
+const lines = computed(() => props.failures.map((f) => {
+  const text = failureSentence(f)
+  const plain = plainFailureReason(f.reason)
+  return { text, plain: plain && !text.includes(plain) ? plain : null, reason: f.reason }
+}))
 </script>
 
 <template>
@@ -105,9 +112,9 @@ const lines = computed(() => props.failures.map(f => ({ text: failureSentence(f)
         <section v-if="lines.length" data-testid="scene3d-web-export-blocked">
           <h4 class="mb-1 text-[11px] font-medium text-rose-400">Can't export yet</h4>
           <ul class="flex flex-col gap-1">
-            <li v-for="(l, i) in lines" :key="i" class="text-[12px] text-rose-400">
+            <li v-for="(l, i) in lines" :key="i" class="text-[12px] text-rose-400" :title="l.reason">
               {{ l.text }}
-              <span class="block text-[11px] text-white/40 break-words">{{ l.reason }}</span>
+              <span v-if="l.plain" class="block text-[11px] text-white/40 break-words">{{ l.plain.charAt(0).toUpperCase() + l.plain.slice(1) }}.</span>
             </li>
           </ul>
         </section>

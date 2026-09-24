@@ -8,6 +8,9 @@ const calls: string[] = []
 const settleOpts: Array<{ timeoutMs?: number }> = []
 let failSetSize = false
 let lastEngine: { dispose: ReturnType<typeof vi.fn> } | null = null
+/** What the stand-in engine reports: loads in flight after a sync, and what a settle returns. */
+let pendingAfterSync = false
+let settleResult: Array<{ kind: string; name: string; reason: string }> = []
 
 vi.mock('~/lib/scene3d/engine', () => ({
   SceneEngine: class {
@@ -20,8 +23,9 @@ vi.mock('~/lib/scene3d/engine', () => ({
     setSize() { calls.push('setSize'); if (failSetSize) throw new Error('context lost') }
     setRestyleTextures(m: Map<string, unknown>) { calls.push(`setRestyleTextures:${m.size}`) }
     syncFromDoc() { calls.push('syncFromDoc') }
+    hasPendingAssets() { calls.push('hasPendingAssets'); return pendingAfterSync }
     refreshShaderFields(t: number) { calls.push(`refreshShaderFields:${t}`) }
-    async settleAllAssets(opts: { timeoutMs?: number }) { calls.push('settleAllAssets'); settleOpts.push(opts); return [] }
+    async settleAllAssets(opts: { timeoutMs?: number }) { calls.push('settleAllAssets'); settleOpts.push(opts); return settleResult }
     applyCameraFromDoc() {}
     applyObjectOpacities() {}
     setMotionVelocities() {}
@@ -32,6 +36,7 @@ vi.mock('~/lib/scene3d/engine', () => ({
 
 const {
   prepareExportEngine, renderExportFrameSettled, createRestyleLoader, ensureShaderCatalog, openSceneExport,
+  settleFrameLoads, sceneShaderEffectIds, SceneExportFailed,
   EXPORT_TIMEOUT_MS, PREVIEW_TIMEOUT_MS, RETRY_AFTER_MS,
 } = await import('~/lib/scene3d/exportRender')
 const { SceneEngine } = await import('~/lib/scene3d/engine')
@@ -52,7 +57,7 @@ function restyledDoc(ref = 'r.png', shaderFill = false): SceneDoc {
 
 const never = <T>() => new Promise<T>(() => {})
 
-beforeEach(() => { calls.length = 0; settleOpts.length = 0; failSetSize = false; lastEngine = null })
+beforeEach(() => { calls.length = 0; settleOpts.length = 0; failSetSize = false; lastEngine = null; pendingAfterSync = false; settleResult = [] })
 afterEach(() => { vi.useRealTimers() })
 
 describe('prepareExportEngine — the export\'s first frame has everything', () => {
@@ -202,14 +207,150 @@ describe('openSceneExport — a Frame export\'s 3D session', () => {
     vi.spyOn(own, 'syncFromDoc').mockImplementation(((d: SceneDoc) => { synced.push(d.objects.length) }) as never)
     doc.objects.push(createPrimitive('sphere', doc.objects))   // an edit after the session opened
     calls.length = 0
-    expect(session.frame(0.5)).toBeTruthy()
+    expect(await session.frame(0.5)).toBeTruthy()
     expect(calls).toContain('render')
-    expect(synced).toEqual([1])                                // the snapshot, not the edit
+    expect(new Set(synced)).toEqual(new Set([1]))              // the snapshot, not the edit
     expect(own.dispose).not.toHaveBeenCalled()
     session.close(); session.close()
     expect(own.dispose).toHaveBeenCalledTimes(1)
     expect(preview.dispose).not.toHaveBeenCalled()
-    expect(() => session.frame(0)).toThrow()
+    await expect(session.frame(0)).rejects.toThrow()
+  })
+
+  it('a frame whose sync starts nothing does not settle; one that starts a load waits for it, then renders', async () => {
+    const io: ExportIO = { loadRestyle: async () => new THREE.Texture() }
+    const session = await openSceneExport(restyledDoc('r.png'), { width: 64, height: 64 }, io)
+    calls.length = 0; settleOpts.length = 0
+    await session.frame(0.25)
+    expect(calls).not.toContain('settleAllAssets')
+    pendingAfterSync = true                                     // this frame rebuilt a decal
+    calls.length = 0
+    await session.frame(0.5)
+    const i = (name: string) => calls.indexOf(name)
+    expect(i('syncFromDoc')).toBeLessThan(i('hasPendingAssets'))
+    expect(i('hasPendingAssets')).toBeLessThan(i('settleAllAssets'))
+    expect(i('settleAllAssets')).toBeLessThan(i('render'))
+    expect(settleOpts.at(-1)!.timeoutMs).toBe(EXPORT_TIMEOUT_MS)
+    session.close()
+  })
+
+  it('a load a frame started that fails stops the session with it (the Frame blocks), rendering nothing', async () => {
+    const io: ExportIO = { loadRestyle: async () => new THREE.Texture() }
+    const session = await openSceneExport(restyledDoc('r.png'), { width: 64, height: 64 }, io)
+    pendingAfterSync = true
+    settleResult = [{ kind: 'decal', name: 'Logo', reason: 'HTTP 404' }]
+    calls.length = 0
+    const err = await session.frame(0.5).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(SceneExportFailed)
+    expect((err as InstanceType<typeof SceneExportFailed>).assetFailures).toEqual(settleResult)
+    expect(calls).not.toContain('render')
+    session.close()
+  })
+})
+
+describe('settleFrameLoads', () => {
+  it('syncs at t01 and returns [] without waiting when nothing started loading', async () => {
+    const engine = new SceneEngine(null as never, 1, 1)
+    expect(await settleFrameLoads(engine, restyledDoc(), 0.5)).toEqual([])
+    expect(calls).toEqual(['syncFromDoc', 'hasPendingAssets'])
+  })
+})
+
+describe('shader effects are waited for, and one that never gets its images is named', () => {
+  function shaderDoc(effectId: string): SceneDoc {
+    const doc = defaultDoc()
+    const o = createPrimitive('box', doc.objects)
+    o.material = { ...o.material, type: 'shaderFill', shader: { effectId, params: {}, anchor: 'object' } } as never
+    doc.objects.push(o)
+    return doc
+  }
+
+  it('lists a shader fill\'s and a shader relief\'s effects, once each', () => {
+    const doc = shaderDoc('liquid')
+    const r = createPrimitive('sphere', doc.objects)
+    r.material = { ...r.material, relief: { source: 'shader', spec: { effectId: 'grain', params: {}, anchor: 'object' } } } as never
+    doc.objects.push(r)
+    const again = createPrimitive('box', doc.objects)
+    again.material = { ...again.material, type: 'shaderFill', shader: { effectId: 'liquid', params: {}, anchor: 'object' } } as never
+    doc.objects.push(again)
+    expect(sceneShaderEffectIds(doc).sort()).toEqual(['grain', 'liquid'])
+  })
+
+  it('an effect whose images arrive is waited for; one that never does is named by its label', async () => {
+    const ready = vi.fn(async (id: string) => id !== 'stuck')
+    const io: ExportIO = {
+      loadRestyle: async () => new THREE.Texture(), loadShaderCatalog: async () => {},
+      shaderEffectReady: ready, shaderEffectLabel: id => (id === 'stuck' ? 'Liquid chrome' : id),
+    }
+    expect((await prepareExportEngine(shaderDoc('fine'), { width: 8, height: 8, io })).failures).toEqual([])
+    const { failures } = await prepareExportEngine(shaderDoc('stuck'), { width: 8, height: 8, io })
+    expect(failures).toEqual([{ kind: 'shader', name: 'Liquid chrome', reason: "didn't finish loading" }])
+    expect(ready.mock.calls[1]![1]).toBeGreaterThan(0)          // inside the export deadline
+    expect(ready.mock.calls[1]![1]).toBeLessThanOrEqual(EXPORT_TIMEOUT_MS)
+  })
+
+  it('does not wait for the effects when the catalog itself failed (that is the one failure worth naming)', async () => {
+    const ready = vi.fn(async () => false)
+    const io: ExportIO = { loadRestyle: async () => new THREE.Texture(), loadShaderCatalog: async () => { throw new Error('offline') }, shaderEffectReady: ready }
+    const { failures } = await prepareExportEngine(shaderDoc('x'), { width: 8, height: 8, io })
+    expect(failures).toEqual([{ kind: 'shader', name: 'Shader effects', reason: 'offline' }])
+    expect(ready).not.toHaveBeenCalled()
+  })
+})
+
+describe('a hung load costs the Frame preview ONE wait, not one per frame', () => {
+  it('after one timed-out pull, the next pull does not wait; once nothing is pending it waits again', async () => {
+    vi.useFakeTimers()
+    let resolve!: (t: THREE.Texture) => void
+    const io: ExportIO = { loadRestyle: vi.fn(() => new Promise<THREE.Texture>((r) => { resolve = r })) }
+    const loader = createRestyleLoader(io)
+    const engine = new SceneEngine(null as never, 1, 1)
+    const doc = restyledDoc('hung.png')
+    const stall = { stalled: false }
+    const opts = { timeoutMs: PREVIEW_TIMEOUT_MS, restyle: loader, io, stall }
+
+    const first = renderExportFrameSettled(engine, doc, 0, opts)
+    await vi.advanceTimersByTimeAsync(PREVIEW_TIMEOUT_MS)
+    await first
+    expect(stall.stalled).toBe(true)
+
+    // Still hung: the next pull renders at once — no timer has to run.
+    let done = false
+    const second = renderExportFrameSettled(engine, doc, 0.1, opts).then(() => { done = true })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(done).toBe(true)
+    await second
+    expect(settleOpts.at(-1)!.timeoutMs).toBe(0)
+    expect(stall.stalled).toBe(true)
+
+    // It lands: this pull finds nothing pending and clears the stall …
+    resolve(new THREE.Texture())
+    await vi.advanceTimersByTimeAsync(0)
+    await renderExportFrameSettled(engine, doc, 0.2, opts)
+    expect(stall.stalled).toBe(false)
+    expect(calls.filter(c => c.startsWith('setRestyleTextures')).at(-1)).toBe('setRestyleTextures:1')
+    // … and the one after it gets the full deadline back.
+    await renderExportFrameSettled(engine, doc, 0.3, opts)
+    expect(settleOpts.at(-1)!.timeoutMs).toBe(PREVIEW_TIMEOUT_MS)
+  })
+
+  it('an engine asset that did not finish stalls too; a loaded shader catalog never does', async () => {
+    const io: ExportIO = { loadRestyle: async () => new THREE.Texture(), loadShaderCatalog: vi.fn(async () => {}) }
+    const engine = new SceneEngine(null as never, 1, 1)
+    const stall = { stalled: false }
+    const doc = restyledDoc('r.png', true)
+    settleResult = [{ kind: 'model', name: 'm.glb', reason: "didn't finish loading" }]
+    await renderExportFrameSettled(engine, doc, 0, { timeoutMs: PREVIEW_TIMEOUT_MS, io, stall })
+    expect(stall.stalled).toBe(true)
+    settleResult = [{ kind: 'model', name: 'm.glb', reason: 'HTTP 404' }]     // failed, not pending
+    await renderExportFrameSettled(engine, doc, 0, { timeoutMs: PREVIEW_TIMEOUT_MS, io, stall })
+    expect(stall.stalled).toBe(false)
+    // The catalog loaded on the first pull; with no time left it still counts as in hand.
+    stall.stalled = true
+    settleResult = []
+    await renderExportFrameSettled(engine, doc, 0, { timeoutMs: PREVIEW_TIMEOUT_MS, io, stall })
+    expect(stall.stalled).toBe(false)
+    expect(io.loadShaderCatalog).toHaveBeenCalledTimes(1)
   })
 
   it('hands back what could not load, by name', async () => {

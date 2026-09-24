@@ -94,7 +94,7 @@ import { bakeSceneFrames } from '~/lib/scene3d/bakeFrames'
 import type { AssetFailure } from '~/lib/scene3d/assetTracker'
 import { exportEmbedHtml, downloadEmbed } from '~/lib/embed/export'
 import { embedSnippet } from '~/lib/embed/snippet'
-import { formatBytes } from '~/lib/embed/frame/gather'
+import { formatBytes } from '~/lib/embed/formatBytes'
 import Scene3DWebExportSheet from '~/components/vue-canvas/Scene3DWebExportSheet.vue'
 import { RESTYLE_MODELS } from '~/data/scene3d-restyle-models'
 import { useMoodboards } from '~/composables/useMoodboards'
@@ -724,6 +724,11 @@ let webExportSig = ''     // the scene as it was rendered — a later edit makes
 let webExportGen = 0      // bumped on every reset, so a superseded bake's result is dropped
 let webExportAbort: AbortController | null = null
 let webExportCopiedTimer: ReturnType<typeof setTimeout> | null = null
+/** The bake that paused playback and owns putting it back: its generation and whether the scene
+ *  was playing before ANY bake paused it. A bake cancelled while its engine is still being set up
+ *  keeps running until setup ends; if Render started a new bake meanwhile, the old one's cleanup
+ *  must not restart playback mid-bake — the new bake inherits the pause and restores it. */
+let webExportPause: { gen: number; wasPlaying: boolean } | null = null
 const webExportStill = computed(() => !sceneLoop(doc).animated)
 const webExportWarning = computed(() => (webExport.open && webExport.cinematic ? cinematicScopeWarning(doc) ?? undefined : undefined))
 // `bakeSceneFrames` only ever forces transparency ON — with the doc's own background already
@@ -757,7 +762,11 @@ async function buildWebExport() {
   const gen = webExportGen
   const abort = new AbortController(); webExportAbort = abort
   webExport.state = 'working'
-  const wasPlaying = playing.value; playing.value = false
+  // An earlier bake still out (cancelled mid-setup) already paused playback: inherit what it
+  // will no longer restore.
+  const wasPlaying = webExportPause ? webExportPause.wasPlaying : playing.value
+  webExportPause = { gen, wasPlaying }
+  playing.value = false
   try {
     // As bakeSceneVideo: render from the live view (while playing, doc.camera already holds the
     // base captured at play start). The bake reads a COPY, so an edit mid-bake can't leak in.
@@ -780,6 +789,8 @@ async function buildWebExport() {
     const html = await exportEmbedHtml({
       kind: 'frames', config: { frames: made.frames, fps: made.fps, width, height },
       duration: loop.animated ? loop.duration : 1, width, height, transparent, still: !loop.animated,
+      // The frames only carry alpha when the export is transparent: otherwise a JPEG poster.
+      posterAlpha: transparent,
     })
     if (gen !== webExportGen) return
     webExportHtml = html; webExportSig = sig
@@ -792,7 +803,8 @@ async function buildWebExport() {
     webExport.errorText = "The file couldn't be made. Try again, or reload 3D Studio."
   } finally {
     if (gen === webExportGen) { webExport.progress = null; webExportAbort = null }
-    playing.value = wasPlaying
+    // Only the bake that owns the pause puts playback back (see `webExportPause`).
+    if (webExportPause?.gen === gen) { webExportPause = null; playing.value = wasPlaying }
   }
 }
 /** The built file still shows the scene; otherwise say so and ask for a new render. */

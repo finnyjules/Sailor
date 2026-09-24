@@ -442,9 +442,11 @@ describe('scene3d motion — frame source factory', () => {
     const src = makeScene3DFrameSource({ getClock: () => ({ duration: 4, fps: 30, width: 8, height: 8 }), renderAt: () => fakeCanvas, openExport })
     const session = await src.openExport!({ width: 40, height: 20 })
     expect(openExport).toHaveBeenCalledWith({ width: 40, height: 20 })
+    // Named mid-sentence (lower case, even a name that is only the kind), and worded whole as
+    // 3D Studio's own sheet words it: advice by kind, a timeout to try again.
     expect(session.failures).toEqual([
-      { name: 'model "Sneaker"', reason: 'HTTP 404' },
-      { name: 'Shader effects', reason: "didn't finish loading" },
+      { name: 'model "Sneaker"', reason: 'HTTP 404', text: 'model "Sneaker" couldn\'t load — re-generate or re-upload it' },
+      { name: 'shader effects', reason: "didn't finish loading", text: "shader effects didn't finish loading — try again" },
     ])
     expect(await session.frame(0.5)).toBe(fakeCanvas)
     session.close()

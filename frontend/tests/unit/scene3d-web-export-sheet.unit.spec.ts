@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import Sheet, { assetDisplayName, failureSentence } from '~/components/vue-canvas/Scene3DWebExportSheet.vue'
+import { failureAdvice, failureClause, failureName, plainFailureReason } from '~/lib/scene3d/assetNames'
 import type { AssetFailure } from '~/lib/scene3d/assetTracker'
 
 type Props = InstanceType<typeof Sheet>['$props']
@@ -40,10 +41,45 @@ describe('failureSentence', () => {
     expect(failureSentence({ kind: 'hdri', name: 'studio_small', reason: 'x' })).toBe('Lighting "studio_small" couldn\'t load.')
   })
   it('tells a person what to do about a model', () => {
-    expect(failureSentence({ kind: 'model', name: 'Robot', reason: 'x' })).toBe('Model "Robot" couldn\'t load. Re-generate or re-upload it.')
+    expect(failureSentence({ kind: 'model', name: 'Robot', reason: 'x' })).toBe('Model "Robot" couldn\'t load — re-generate or re-upload it.')
+  })
+  it('a load that ran out of time says so and to try again, whatever its kind', () => {
+    expect(failureSentence({ kind: 'model', name: 'Robot', reason: "didn't finish loading" })).toBe('Model "Robot" didn\'t finish loading — try again.')
+    expect(failureSentence({ kind: 'hdri', name: 'studio_small', reason: "didn't finish loading" })).toBe('Lighting "studio_small" didn\'t finish loading — try again.')
   })
   it('does not quote a name that is only the kind again', () => {
     expect(failureSentence({ kind: 'shader', name: 'Shader effects', reason: 'x' })).toBe('Shader effects couldn\'t load.')
+  })
+})
+
+describe('failureAdvice / failureClause', () => {
+  it('advises only for a model, and a retry for a timeout — nothing for lighting, the shader list or a font', () => {
+    expect(failureAdvice({ kind: 'model', name: 'a', reason: '404' })).toBe('re-generate or re-upload it')
+    for (const kind of ['hdri', 'shader', 'font', 'texture', 'decal', 'restyle', 'mesh'] as const) {
+      expect(failureAdvice({ kind, name: 'a', reason: '404' }), kind).toBe('')
+    }
+    expect(failureAdvice({ kind: 'font', name: 'a', reason: "didn't finish loading" })).toBe('try again')
+  })
+  it('mid-sentence, the subject is lower case — a name that is only the kind again included', () => {
+    expect(failureClause({ kind: 'shader', name: 'Shader effects', reason: 'offline' }, { lower: true })).toBe('shader effects couldn\'t load')
+    expect(failureClause({ kind: 'model', name: 'Robot', reason: '404' }, { lower: true })).toBe('model "Robot" couldn\'t load — re-generate or re-upload it')
+    expect(failureName({ kind: 'shader', name: 'Shader effects', reason: 'x' })).toBe('shader effects')
+  })
+})
+
+describe('plainFailureReason', () => {
+  it('puts the common loader reasons in plain words', () => {
+    expect(plainFailureReason('glb fetch failed: 404')).toBe('the file is no longer there')
+    expect(plainFailureReason('HTTP 403')).toBe('the file is no longer there')
+    expect(plainFailureReason('Failed to fetch')).toBe('couldn\'t reach it')
+    expect(plainFailureReason('NetworkError when attempting to fetch resource.')).toBe('couldn\'t reach it')
+    expect(plainFailureReason('Unexpected token < in JSON at position 0')).toBe('the file is damaged or not a supported format')
+    expect(plainFailureReason("didn't finish loading")).toBe('didn\'t finish loading')
+    expect(plainFailureReason('request timed out')).toBe('didn\'t finish loading')
+  })
+  it('gives nothing for a reason it does not recognise (the raw text is only a tooltip)', () => {
+    expect(plainFailureReason('kept reloading')).toBeNull()
+    expect(plainFailureReason('something odd')).toBeNull()
   })
 })
 
@@ -59,17 +95,27 @@ describe('Scene3DWebExportSheet', () => {
     const failures: AssetFailure[] = [
       { kind: 'model', name: '/view?filename=robot.glb', reason: 'Unexpected token < in JSON at position 0' },
       { kind: 'font', name: '/fonts/Inter-Bold.ttf', reason: "didn't finish loading" },
+      { kind: 'hdri', name: 'studio_small', reason: 'glb fetch failed: 404' },
+      { kind: 'texture', name: 'ambientcg:Bricks104', reason: 'kept reloading' },
     ]
     const w = mountWith({ state: 'blocked', failures })
     const group = byTestId(w, 'scene3d-web-export-blocked')
     expect(group.exists()).toBe(true)
     expect(group.text()).toContain('Can\'t export yet')
     const items = group.findAll('li')
-    expect(items).toHaveLength(2)
-    expect(items[0]!.text()).toContain('Model "robot" couldn\'t load. Re-generate or re-upload it.')
-    expect(items[0]!.text()).toContain('Unexpected token < in JSON at position 0')
-    expect(items[1]!.text()).toContain('Font "Inter-Bold" couldn\'t load.')
-    expect(items[1]!.text()).not.toContain('Re-generate')
+    expect(items).toHaveLength(4)
+    expect(items[0]!.text()).toContain('Model "robot" couldn\'t load — re-generate or re-upload it.')
+    // The loader's own words only as a tooltip; the plain version is what shows.
+    expect(items[0]!.text()).toContain('The file is damaged or not a supported format.')
+    expect(items[0]!.text()).not.toContain('Unexpected token')
+    expect(items[0]!.attributes('title')).toBe('Unexpected token < in JSON at position 0')
+    expect(items[1]!.text()).toBe('Font "Inter-Bold" didn\'t finish loading — try again.')   // not said twice
+    expect(items[1]!.text()).not.toContain('re-generate')
+    expect(items[2]!.text()).toContain('Lighting "studio_small" couldn\'t load.')
+    expect(items[2]!.text()).toContain('The file is no longer there.')
+    expect(items[2]!.text()).not.toContain('re-generate')
+    expect(items[3]!.text()).toBe('Image "Bricks104" couldn\'t load.')
+    expect(items[3]!.attributes('title')).toBe('kept reloading')
   })
 
   it('shows no failure group when nothing failed', () => {

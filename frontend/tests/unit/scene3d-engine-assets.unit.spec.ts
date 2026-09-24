@@ -178,6 +178,20 @@ describe('settleAllAssets', () => {
   })
 })
 
+describe('hasPendingAssets (an export frame asks it after each sync)', () => {
+  it('is true exactly while a load the sync started is in flight', async () => {
+    const host = makeHost()
+    const pending = () => proto.hasPendingAssets.call(host) as boolean
+    expect(pending()).toBe(false)
+    const obj = createGlbObject('http://127.0.0.1:1/Late.glb', [])
+    sync(host, obj)
+    expect(pending()).toBe(true)
+    loads.map.get(`glb:${obj.url}`)!.resolve(new THREE.Group())
+    await tick()
+    expect(pending()).toBe(false)
+  })
+})
+
 describe('trackTextureLoad', () => {
   it('the load callback throws: the error still reaches the caller, and the tracked load still settles', async () => {
     const owner = `track-${++hostSeq}`

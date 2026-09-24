@@ -1754,6 +1754,14 @@ export class SceneEngine {
     return mergeFailures([...failed, ...stuck.map((p) => ({ ...p, reason }))])
   }
 
+  /** True while anything `settleAllAssets` would wait for is in flight — this engine's own loads,
+   *  the texture loads its materials asked for, its decals (the same test as its `busy`). Read-only
+   *  and cheap: an export frame asks it after each sync so a frame that started nothing pays
+   *  nothing. */
+  hasPendingAssets(): boolean {
+    return this.assets.pending > 0 || textureLoads.pendingFor(this.id) > 0 || this.pendingDecals.size > 0
+  }
+
   /** The decals still building, named from their object (pending keys are `${objectId}#${token}`). */
   private pendingDecalNames(): AssetRef[] {
     const out: AssetRef[] = []

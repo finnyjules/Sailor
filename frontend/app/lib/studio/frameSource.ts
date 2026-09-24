@@ -25,10 +25,24 @@ import { ref } from 'vue'
  */
 export interface StudioExportSession {
   /** Assets that could not load, by what a person calls them (`model "Sneaker"`). Non-empty:
-   *  do not pull — the frames would show a hole where the asset belongs. */
-  failures: { name: string; reason: string }[]
+   *  do not pull — the frames would show a hole where the asset belongs. `text`: the whole
+   *  clause, when the source words it itself (`model "Sneaker" couldn't load — re-generate or
+   *  re-upload it`). */
+  failures: StudioExportFailure[]
+  /** A frame. Rejects with `StudioExportFailed` when an asset the frame started loading could not
+   *  load (a decal rebuilt on this frame's sync) — the pull stops and names it. */
   frame(t01: number): TexImageSource | Promise<TexImageSource>
   close(): void
+}
+
+export interface StudioExportFailure { name: string; reason: string; text?: string }
+
+/** Thrown by `StudioExportSession.frame` when the frame found an asset that could not load. */
+export class StudioExportFailed extends Error {
+  constructor(readonly failures: StudioExportFailure[]) {
+    super(`export stopped: ${failures.map(f => f.name).join(', ')} couldn't load`)
+    this.name = 'StudioExportFailed'
+  }
 }
 
 export interface StudioFrameSource {

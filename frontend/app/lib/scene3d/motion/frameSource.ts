@@ -8,9 +8,22 @@
 // Dependencies are injected so the module stays unit-testable with no WebGL
 // context and no Vue component around it.
 
-import type { StudioExportSession, StudioFrameSource } from '~/lib/studio/frameSource'
+import { StudioExportFailed, type StudioExportFailure, type StudioExportSession, type StudioFrameSource } from '~/lib/studio/frameSource'
 import type { AssetFailure } from '~/lib/scene3d/assetTracker'
-import { failureName } from '~/lib/scene3d/assetNames'
+import { failureClause, failureName } from '~/lib/scene3d/assetNames'
+
+/** A 3D asset failure as the Frame reads it: named for a sentence, and the whole clause worded as
+ *  3D Studio's own Export embed sheet words it (`failureClause`, mid-sentence). */
+function frameFailure(f: AssetFailure): StudioExportFailure {
+  return { name: failureName(f), reason: f.reason, text: failureClause(f, { lower: true }) }
+}
+
+/** What a scene export session's `frame` throws when that frame's sync started a load that
+ *  failed (`openSceneExport`). Structural, so this module needs no import of the renderer. */
+function assetFailuresOf(err: unknown): AssetFailure[] | null {
+  const list = (err as { assetFailures?: unknown } | null)?.assetFailures
+  return Array.isArray(list) && list.length ? list as AssetFailure[] : null
+}
 
 export interface Scene3DFrameSourceDeps {
   getClock: () => { duration: number; fps: number; width: number; height: number }
@@ -19,9 +32,11 @@ export interface Scene3DFrameSourceDeps {
    *  texture builds before its one-shot render (see renderMotionFrameSettled). */
   renderAt: (t01: number, w: number, h: number) => HTMLCanvasElement | null | Promise<HTMLCanvasElement | null>
   /** An export session on an engine of its own (`openSceneExport`): the export path, apart from
-   *  `renderAt`'s preview path. Its failures come back named for a sentence (`failureName`). */
+   *  `renderAt`'s preview path. Its failures come back named for a sentence (`failureName`),
+   *  worded whole (`failureClause`) — and a frame that finds a failed load stops the pull with
+   *  them (`StudioExportFailed`). */
   openExport?: (size: { width: number; height: number }) => Promise<{
-    failures: AssetFailure[]; frame(t01: number): HTMLCanvasElement; close(): void
+    failures: AssetFailure[]; frame(t01: number): HTMLCanvasElement | Promise<HTMLCanvasElement>; close(): void
   }>
 }
 
@@ -49,8 +64,15 @@ export function makeScene3DFrameSource(deps: Scene3DFrameSourceDeps): StudioFram
     ...(deps.openExport ? { openExport: async (size: { width: number; height: number }): Promise<StudioExportSession> => {
       const session = await deps.openExport!(size)
       return {
-        failures: session.failures.map(f => ({ name: failureName(f), reason: f.reason })),
-        frame: t01 => session.frame(t01) as unknown as TexImageSource,
+        failures: session.failures.map(frameFailure),
+        frame: async (t01) => {
+          try {
+            return (await session.frame(t01)) as unknown as TexImageSource
+          } catch (err) {
+            const failed = assetFailuresOf(err)
+            throw failed ? new StudioExportFailed(failed.map(frameFailure)) : err
+          }
+        },
         close: () => session.close(),
       }
     } } : {}),

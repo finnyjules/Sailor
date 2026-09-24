@@ -3,7 +3,7 @@
 // injected) so its ordering, progress and cancelling are unit-tested without a GPU.
 import type { SceneDoc } from '~/lib/scene3d/config'
 import { sceneLoop } from '~/lib/scene3d/motion/render'
-import { prepareExportEngine, renderExportFrame, appExportIO, type ExportIO } from '~/lib/scene3d/exportRender'
+import { prepareExportEngine, renderExportFrame, settleFrameLoads, appExportIO, SceneExportFailed, type ExportIO } from '~/lib/scene3d/exportRender'
 import type { SceneEngine } from '~/lib/scene3d/engine'
 import type { AssetFailure } from '~/lib/scene3d/assetTracker'
 
@@ -75,28 +75,38 @@ export async function bakeSceneFrames(doc: SceneDoc, opts: {
     const base = { fps: opts.fps, duration: loop.duration, width: opts.width, height: opts.height }
     if (failures.length) return { ...base, frames: [], failures }
     if (opts.cinematic) await engine.setCinematic(true)
-    const frames = await bakeFrameSequence({
-      count: frameCountFor(loop, opts.fps),
-      renderAt: (t01) => {
-        if (!opts.cinematic) return renderExportFrame(engine, bakeDoc, t01)
-        // Path-traced: pose the scene at t01 first (syncs objects/camera — one throwaway raster/
-        // trace sample against the STALE BVH, discarded below). `cinematicReset` only clears the
-        // accumulation buffer, it does not rebuild the BVH (see PathTracer.reset vs .rebuild), so
-        // after every frame's objects have actually moved (motion moves them every frame) it would
-        // keep accumulating samples traced against the PREVIOUS frame's geometry. `cinematicRefresh`
-        // is what the live surface calls after every doc change for exactly this reason (see
-        // Scene3DStudioSurface's doc watcher) — it rebuilds the BVH from the now-current pose AND
-        // restarts accumulation (PathTracer.rebuild's own doc: "restart accumulation"), so the
-        // samples below all trace the correct, freshly-synced frame.
-        renderExportFrame(engine, bakeDoc, t01)
-        engine.cinematicRefresh()
-        finishCinematicSample(engine, opts.cinematic!.samples)
-        return engine.renderer.domElement as HTMLCanvasElement
-      },
-      encode: c => encodeWebp(c),
-      onProgress: opts.onProgress,
-      signal: opts.signal,
-    })
+    let frames: string[]
+    try {
+      frames = await bakeFrameSequence({
+        count: frameCountFor(loop, opts.fps),
+        renderAt: async (t01) => {
+          // A load this frame's sync started (a decal rebuilt on a text or mesh object) is waited
+          // for before the render, and one that fails stops the bake by name — as at t=0.
+          const late = await settleFrameLoads(engine, bakeDoc, t01)
+          if (late.length) throw new SceneExportFailed(late)
+          if (!opts.cinematic) return renderExportFrame(engine, bakeDoc, t01)
+          // Path-traced: pose the scene at t01 first (syncs objects/camera — one throwaway raster/
+          // trace sample against the STALE BVH, discarded below). `cinematicReset` only clears the
+          // accumulation buffer, it does not rebuild the BVH (see PathTracer.reset vs .rebuild), so
+          // after every frame's objects have actually moved (motion moves them every frame) it would
+          // keep accumulating samples traced against the PREVIOUS frame's geometry. `cinematicRefresh`
+          // is what the live surface calls after every doc change for exactly this reason (see
+          // Scene3DStudioSurface's doc watcher) — it rebuilds the BVH from the now-current pose AND
+          // restarts accumulation (PathTracer.rebuild's own doc: "restart accumulation"), so the
+          // samples below all trace the correct, freshly-synced frame.
+          renderExportFrame(engine, bakeDoc, t01)
+          engine.cinematicRefresh()
+          finishCinematicSample(engine, opts.cinematic!.samples)
+          return engine.renderer.domElement as HTMLCanvasElement
+        },
+        encode: c => encodeWebp(c),
+        onProgress: opts.onProgress,
+        signal: opts.signal,
+      })
+    } catch (err) {
+      if (err instanceof SceneExportFailed) return { ...base, frames: [], failures: err.assetFailures }
+      throw err
+    }
     return { ...base, frames, failures: [] }
   } finally {
     engine.dispose()

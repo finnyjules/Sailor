@@ -104,6 +104,10 @@ let releaseTimer: ReturnType<typeof setTimeout> | null = null
 // The card thumbnail (renderPreview) applies it too, so the card shows restyle whether or not a
 // Frame has pulled first. A result that lands after the card stopped waiting redraws the card.
 const frameRestyle = createRestyleLoader(appExportIO, { onLate: () => schedulePreview() })
+// Whether the Frame's last pull ran out of time: while it did, pulls render with what is in hand
+// instead of waiting again, so one hung request costs one wait, not one per frame
+// (`renderExportFrameSettled`'s `stall`).
+const frameStall = { stalled: false }
 
 function scheduleEngineRelease(): void {
   if (releaseTimer) clearTimeout(releaseTimer)
@@ -146,7 +150,7 @@ function syncRegistration() {
         inFlight++
         try {
           return await renderExportFrameSettled(eng, sceneDoc.value, t01, {
-            timeoutMs: PREVIEW_TIMEOUT_MS, restyle: frameRestyle, io: appExportIO,
+            timeoutMs: PREVIEW_TIMEOUT_MS, restyle: frameRestyle, io: appExportIO, stall: frameStall,
           })
         } finally {
           inFlight--
