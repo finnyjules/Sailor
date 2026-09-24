@@ -594,12 +594,10 @@ describe('local mode is byte-identical — no gate, no 403, same proxy target', 
     // Stage 6 Task 2's projects gate and spend refusal are hosted-only; since
     // engine-free Phase A those paths are answered natively in local mode (see
     // the next describe), so they are no longer in this raw-proxy list.
-    // Stage 6 Task 2b: every /sailor bucket — data, capability, refuse — raw-
-    // proxies unchanged in local mode.
-    ['/sailor/input_listing', 'GET'], ['/sailor/output_listing', 'GET'], ['/sailor/assets', 'GET'],
-    ['/sailor/asset_import', 'POST'], ['/sailor/assets/a-1', 'DELETE'], ['/sailor/input_file?filename=a.png', 'DELETE'],
-    ['/sailor/output_file?filename=a.png', 'DELETE'], ['/sailor/input_thumbnail?filename=a.png', 'GET'],
-    ['/sailor/asset_thumbnails?asset_id=a-1', 'GET'], ['/sailor/shader_effects', 'GET'], ['/sailor/font_subset', 'POST'],
+    // Stage 6 Task 2b: every /sailor bucket — capability, refuse — raw-proxies
+    // unchanged in local mode. (The DATA bucket — listings, deletes, assets,
+    // thumbnails — is answered natively since engine-free Phase A: see below.)
+    ['/sailor/shader_effects', 'GET'], ['/sailor/font_subset', 'POST'],
     ['/sailor/render_timeline', 'POST'], ['/sailor/lora/clear_dataset', 'POST'], ['/sailor/models/download', 'GET'],
     ['/sailor/space_thumbnail/burst', 'POST'],
   ] as const
@@ -625,7 +623,7 @@ describe('local mode is byte-identical — no gate, no 403, same proxy target', 
       ['/comfyui/api/queue', 'http://127.0.0.1:8188/api/queue'],
       ['/comfyui/internal/files/output', 'http://127.0.0.1:8188/internal/files/output'],
       ['/comfyui/settings', 'http://127.0.0.1:8188/settings'],
-      ['/comfyui/sailor/assets', 'http://127.0.0.1:8188/sailor/assets'],
+      ['/comfyui/sailor/shader_effects', 'http://127.0.0.1:8188/sailor/shader_effects'],
       ['/queue?comfyWorker=2', 'http://127.0.0.1:8191/queue'],
       ['/comfyui', 'http://127.0.0.1:8188/'],
     ]
@@ -663,5 +661,20 @@ describe('local mode: projects and spend are answered by Sailor itself (engine-f
       expect(res, `${m} ${p}`).toBeDefined()
     }
     expect(handleHostedSailor, 'local mode must never enter the projects gate').not.toHaveBeenCalled()
+  })
+
+  it('answers the media library routes natively too, never entering the hosted data gate', async () => {
+    for (const [p, m] of [
+      ['/sailor/input_listing', 'GET'], ['/api/sailor/output_listing', 'GET'], ['/comfyui/sailor/assets', 'GET'],
+      ['/sailor/assets/a-1', 'DELETE'], ['/comfyui/api/sailor/input_file?filename=a.png', 'DELETE'],
+      ['/sailor/output_file?filename=a.png', 'DELETE'], ['/sailor/input_thumbnail?filename=a.png', 'GET'],
+      ['/sailor/asset_thumbnails?asset_id=a-1', 'GET'], ['/sailor/asset_waveform?asset_id=a-1', 'GET'],
+    ] as const) {
+      proxyRequest.mockClear()
+      const res = await middleware({ ...ev(p, m), node: { req: {}, res: { setHeader() {} } } })
+      expect(proxyRequest, `${m} ${p} is native in local mode`).not.toHaveBeenCalled()
+      expect(res, `${m} ${p}`).toBeDefined()
+    }
+    expect(handleHostedSailorData, 'local mode must never enter the data gate').not.toHaveBeenCalled()
   })
 })

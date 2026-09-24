@@ -1986,7 +1986,9 @@ function clipWaveform(clip: Clip): number[] | null {
   if (clip.kind !== 'audio') return null
   const id = (clip as any).asset_id
   if (!id) return null
-  return getWaveform(id, WAVEFORM_BUCKETS)
+  // Empty when the local engine isn't there to read the audio: no waveform.
+  const peaks = getWaveform(id, WAVEFORM_BUCKETS)
+  return peaks?.length ? peaks : null
 }
 
 function waveformPath(peaks: number[], widthPx: number, heightPx: number): string {

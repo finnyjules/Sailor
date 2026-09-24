@@ -15,6 +15,7 @@
  */
 import { createError, getRequestHeader, readRawBody, setResponseHeader, setResponseStatus, type H3Event } from 'h3'
 import { userDir } from './paths'
+import { MEDIA_PREFIXES, matchMediaRoute, mediaContext, runMediaRoute, type MediaResult } from './media'
 import {
   generationsListRoute,
   generationsPostRoute,
@@ -30,7 +31,7 @@ import {
 } from './projects'
 
 /** Namespaces served natively, boundary-matched. Everything else is proxied. */
-export const NATIVE_ENGINE_PREFIXES = ['/sailor/projects', '/sailor/spend']
+export const NATIVE_ENGINE_PREFIXES = ['/sailor/projects', '/sailor/spend', ...MEDIA_PREFIXES]
 
 /** Request bodies are whole workflow graphs; ComfyUI's aiohttp cap was 100 MB. */
 export const NATIVE_MAX_BODY_BYTES = 100 * 1024 * 1024
@@ -38,6 +39,8 @@ export const NATIVE_MAX_BODY_BYTES = 100 * 1024 * 1024
 export interface NativeResult extends RouteResult {
   /** A plain-text body (aiohttp's own 404/405/500 pages). */
   text?: boolean
+  /** Extra response headers (a thumbnail's content type and cache lifetime). */
+  headers?: Record<string, string>
 }
 
 function isNative(p: string): boolean {
@@ -120,7 +123,7 @@ const NO_DATA_FOLDER: NativeResult = {
 }
 
 /** Read and parse a JSON request body the way aiohttp's `request.json()` does. */
-async function readJsonBody(event: H3Event): Promise<{ ok: true, value: unknown } | { ok: false, result: NativeResult }> {
+async function readJsonBody(event: H3Event): Promise<{ ok: true, value: unknown, raw: Buffer } | { ok: false, result: NativeResult }> {
   const declared = Number(getRequestHeader(event, 'content-length'))
   if (Number.isFinite(declared) && declared > NATIVE_MAX_BODY_BYTES) {
     throw createError({ statusCode: 413, message: 'Request body exceeds the 100 MB limit' })
@@ -131,7 +134,7 @@ async function readJsonBody(event: H3Event): Promise<{ ok: true, value: unknown 
   }
   const source = raw ? Buffer.from(raw).toString('utf8') : ''
   try {
-    return { ok: true, value: JSON.parse(source) }
+    return { ok: true, value: JSON.parse(source), raw: raw ? Buffer.from(raw) : Buffer.alloc(0) }
   }
   catch (e) {
     const detail = source.trim() === '' ? 'Expecting value: line 1 column 1 (char 0)' : (e as Error).message
@@ -164,6 +167,29 @@ function guarded(fn: () => RouteResult, where: string): NativeResult {
   }
 }
 
+/** The media library routes (server/native/media.ts). */
+async function dispatchMedia(event: H3Event, p: string): Promise<NativeResult> {
+  const match = matchMediaRoute(p, (event.method || 'GET').toUpperCase(), decodeSegment)
+  if (match.kind === 'notFound') return text(404, '404: Not Found')
+  if (match.kind === 'badMethod') return text(405, '405: Method Not Allowed')
+  const ctx = mediaContext()
+  if (!ctx) return NO_DATA_FOLDER
+  let body: { value: unknown, raw: Buffer } | undefined
+  if (match.handler.name === 'assetImport') {
+    const parsed = await readJsonBody(event)
+    if (!parsed.ok) return parsed.result
+    body = parsed
+  }
+  try {
+    const r: MediaResult = await runMediaRoute(ctx, match.handler, event, p, body)
+    return r
+  }
+  catch (e) {
+    console.error(`[native] ${event.method} ${p} failed`, e)
+    return text(500, '500 Internal Server Error\n\nServer got itself in trouble')
+  }
+}
+
 /**
  * Serve a native request and return `{ status, body }`, or undefined when the
  * path is not native. Used by the hosted gate, which sets the status itself.
@@ -171,6 +197,7 @@ function guarded(fn: () => RouteResult, where: string): NativeResult {
 export async function dispatchNative(event: H3Event): Promise<NativeResult | undefined> {
   const p = nativeEnginePath(event.path)
   if (!p) return undefined
+  if (MEDIA_PREFIXES.some(pre => p === pre || p.startsWith(`${pre}/`))) return dispatchMedia(event, p)
   const match = matchRoute(p, (event.method || 'GET').toUpperCase())
   if (match.kind === 'notFound') return text(404, '404: Not Found')
   if (match.kind === 'badMethod') return text(405, '405: Method Not Allowed')
@@ -194,6 +221,7 @@ export async function nativeEngineRoute(event: H3Event): Promise<unknown | undef
   if (!r) return undefined
   setResponseStatus(event, r.status)
   if (r.text) setResponseHeader(event, 'content-type', 'text/plain; charset=utf-8')
+  for (const [k, v] of Object.entries(r.headers ?? {})) setResponseHeader(event, k, v)
   return r.body
 }
 

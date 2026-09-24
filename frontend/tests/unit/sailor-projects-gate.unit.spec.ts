@@ -576,7 +576,7 @@ describe('LOCAL MODE — single user: no registry, no filter; projects served na
   it('still raw-proxies the /sailor routes that are not native yet', async () => {
     mode = 'local'
     for (const [p, target] of [
-      ['/sailor/assets', 'http://127.0.0.1:8188/sailor/assets'],
+      ['/sailor/models/status', 'http://127.0.0.1:8188/sailor/models/status'],
       ['/sailor/shader_effects?comfyWorker=2', 'http://127.0.0.1:8191/sailor/shader_effects'],
     ] as const) {
       proxyRequest.mockClear()

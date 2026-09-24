@@ -653,55 +653,6 @@ export function sailorProjectsRoute(pathNoQuery: string, method: string): Sailor
 }
 
 /**
- * Project bodies are whole workflow graphs, and the gate buffers them to
- * forward the identical bytes — so, like the upload gate, the buffer needs an
- * explicit ceiling (proxyRequest used to stream and never had one).
- */
-export const MAX_SAILOR_BODY_BYTES = 100 * 1024 * 1024
-
-const SAILOR_BODY_METHODS = new Set(['PUT', 'POST', 'PATCH'])
-
-/**
- * Forward to the engine the way the raw proxy would: same worker
- * (`?comfyWorker=N` still selects a pool worker), same canonical path, same
- * bytes, same content-type. NOTHING else from the client request is
- * forwarded — no client-supplied identity headers reach the engine.
- */
-async function forwardSailor(event: H3Event): Promise<{ status: number, body: unknown }> {
-  const { port, cleanUrl } = resolveWorkerTarget(event.path)
-  const target = `http://127.0.0.1:${port}`
-  // Forward the NORMALIZED path, not the raw one: `/comfyui/...` and folded
-  // dot segments must reach aiohttp as the path this gate actually decided on.
-  const enginePath = normalizeEnginePath(cleanUrl)
-  const method = (event.method || 'GET').toUpperCase()
-  const headers: Record<string, string> = { origin: target }
-  let body: Buffer | undefined
-
-  if (SAILOR_BODY_METHODS.has(method)) {
-    const declared = Number(getRequestHeader(event, 'content-length'))
-    if (Number.isFinite(declared) && declared > MAX_SAILOR_BODY_BYTES) {
-      throw createError({ statusCode: 413, message: 'Project body exceeds the 100 MB limit' })
-    }
-    const raw = await readRawBody(event, false)
-    if (raw && raw.length > MAX_SAILOR_BODY_BYTES) {
-      throw createError({ statusCode: 413, message: 'Project body exceeds the 100 MB limit' })
-    }
-    body = raw ?? undefined
-    const contentType = getRequestHeader(event, 'content-type')
-    if (contentType) headers['content-type'] = contentType
-  }
-
-  const res = await fetch(`${target}${enginePath}`, { method, headers, body: body as any })
-  const text = await res.text()
-  try {
-    return { status: res.status, body: JSON.parse(text) }
-  }
-  catch {
-    return { status: res.status, body: text }
-  }
-}
-
-/**
  * The index is rebuilt from the caller's own ownership rows — allowlist, never
  * spread (Stage 5 review M5): only `projects` leaves this function, so a key
  * the extension adds later cannot ride out unfiltered.
@@ -834,30 +785,12 @@ export function sailorDataRoute(pathNoQuery: string, query: string, method: stri
 }
 
 /**
- * Forward a BINARY engine response (input_thumbnail serves a raw PNG) with the
- * bytes and content-type intact. forwardSailor round-trips through res.text()
- * + JSON.parse, which is correct for the JSON routes but would UTF-8-mangle an
- * image, so binary reads take this path once ownership is settled.
- */
-async function forwardSailorBinary(event: H3Event): Promise<Buffer> {
-  const { port, cleanUrl } = resolveWorkerTarget(event.path)
-  const target = `http://127.0.0.1:${port}`
-  const enginePath = normalizeEnginePath(cleanUrl)
-  const res = await fetch(`${target}${enginePath}`, { headers: { origin: target } })
-  setResponseStatus(event, res.status)
-  const ct = res.headers?.get?.('content-type')
-  if (ct) setResponseHeader(event, 'content-type', ct)
-  const cc = res.headers?.get?.('cache-control')
-  if (cc) setResponseHeader(event, 'cache-control', cc)
-  return Buffer.from(await res.arrayBuffer())
-}
-
-/**
  * The per-user DATA gate. Reads are filtered to the caller's owned files/
  * assets; deletes and metadata reads are ownership-checked and 404 when the
  * resource is not the caller's (no existence disclosure), with the ENGINE
- * NEVER TOUCHED on a miss. Every forward reuses forwardSailor (JSON) or
- * forwardSailorBinary (images) — same worker, same normalized path, no
+ * NEVER TOUCHED on a miss. Everything past the ownership decision is served
+ * by the native media library (server/native/media.ts); a video/audio request
+ * it hands on to the engine keeps the same worker and normalized path, with no
  * client-supplied identity headers.
  */
 export async function handleHostedSailorData(event: H3Event): Promise<unknown> {
@@ -871,9 +804,20 @@ export async function handleHostedSailorData(event: H3Event): Promise<unknown> {
   // Same 404 for "unowned/other-owned" and "does not exist" — no oracle.
   const notFound = () => createError({ statusCode: 404, message: 'Not found' })
 
+  // Engine-free Phase A: the data routes are served by Sailor's own port of
+  // the media library (server/native/media.ts), same files as the Python —
+  // only ever AFTER the ownership decision for the route.
+  const serve = async (): Promise<{ status: number, body: unknown }> => {
+    const r = await dispatchNative(event)
+    if (!r) throw notFound()
+    setResponseStatus(event, r.status)
+    if (r.text) setResponseHeader(event, 'content-type', 'text/plain; charset=utf-8')
+    for (const [k, v] of Object.entries(r.headers ?? {})) setResponseHeader(event, k, v)
+    return r
+  }
   const forwardJson = async (unavailable: string): Promise<{ status: number, body: unknown }> => {
-    const r = await forwardSailor(event)
-    if (r.status < 200 || r.status >= 300) throw createError({ statusCode: 502, message: unavailable })
+    const r = await dispatchNative(event)
+    if (!r || r.status < 200 || r.status >= 300) throw createError({ statusCode: 502, message: unavailable })
     return r
   }
 
@@ -912,8 +856,8 @@ export async function handleHostedSailorData(event: H3Event): Promise<unknown> {
       // ownership-checked media routes. So the import must name an input file
       // the caller ALREADY owns; the engine is NEVER touched otherwise.
       //
-      // Buffer the body ONCE and validate it before forwarding. readRawBody
-      // caches on the request, so the forwardSailor below re-forwards the very
+      // Buffer the body ONCE and validate it before serving. readRawBody
+      // caches on the request, so the native import below reads the very
       // same bytes (no second network-observable read of a mutated stream).
       const raw = await readRawBody(event, false)
       let importPath: unknown
@@ -957,8 +901,7 @@ export async function handleHostedSailorData(event: H3Event): Promise<unknown> {
       // Record what the engine ACTUALLY stored (its `asset.id`) on a 2xx; a
       // duplicate import returns the existing record, and recordOwner's
       // first-owner-wins leaves that asset with its original owner.
-      const { status, body } = await forwardSailor(event)
-      setResponseStatus(event, status)
+      const { status, body } = await serve()
       if (status >= 200 && status < 300) {
         const id = (body as { asset?: { id?: unknown } })?.asset?.id
         if (typeof id === 'string' && id) {
@@ -975,8 +918,7 @@ export async function handleHostedSailorData(event: H3Event): Promise<unknown> {
     case 'assetDelete': {
       const owner = await ownerOf(SAILOR_ASSET_KIND, route.assetId)
       if (owner !== userId) throw notFound()
-      const { status, body } = await forwardSailor(event)
-      setResponseStatus(event, status)
+      const { status, body } = await serve()
       if (status >= 200 && status < 300) {
         try {
           await releaseOwner(SAILOR_ASSET_KIND, route.assetId)
@@ -992,23 +934,21 @@ export async function handleHostedSailorData(event: H3Event): Promise<unknown> {
       if (!route.assetId) throw createError({ statusCode: 400, message: 'missing asset_id' })
       const owner = await ownerOf(SAILOR_ASSET_KIND, route.assetId)
       if (owner !== userId) throw notFound()
-      const { status, body } = await forwardSailor(event)
-      setResponseStatus(event, status)
+      const { status, body } = await serve()
       return body
     }
     case 'inputThumbnail': {
       if (!route.filename) throw notFound()
       const owned = await ownedInputFilenames(userId)
       if (!owned.has(route.filename)) throw notFound()
-      return forwardSailorBinary(event)
+      return (await serve()).body
     }
     case 'inputFileDelete': {
       if (!route.filename) throw createError({ statusCode: 400, message: 'invalid filename' })
       const fileKey = canonicalUploadKey('input', '', route.filename)
       const owner = await uploadOwner(fileKey)
       if (owner !== userId) throw notFound()
-      const { status, body } = await forwardSailor(event)
-      setResponseStatus(event, status)
+      const { status, body } = await serve()
       if (status >= 200 && status < 300) {
         try {
           await releaseUpload(fileKey)
@@ -1023,8 +963,7 @@ export async function handleHostedSailorData(event: H3Event): Promise<unknown> {
       if (!route.filename) throw createError({ statusCode: 400, message: 'invalid filename' })
       const owned = await ownedOutputKeys(userId)
       if (!owned.has(outputKey({ filename: route.filename, subfolder: route.subfolder, type: 'output' }))) throw notFound()
-      const { status, body } = await forwardSailor(event)
-      setResponseStatus(event, status)
+      const { status, body } = await serve()
       return body
     }
   }

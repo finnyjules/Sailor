@@ -1,0 +1,35 @@
+[
+  {
+    "id": "420ce63a-dc87-49c2-af11-efe583971e8e",
+    "path": "/engine/input/clip \u00fc \ud83c\udfac.mp4",
+    "kind": "video",
+    "name": "clip \u00fc \ud83c\udfac.mp4",
+    "duration_sec": 31.948583333333332,
+    "width": 4096,
+    "height": 2160,
+    "thumbnail_path": null,
+    "waveform_path": null
+  },
+  {
+    "id": "7d5666d1-0f1f-4c3c-b997-a1160d7133b5",
+    "path": "/engine/input/voice\"quote'.wav",
+    "kind": "audio",
+    "name": "voice\"quote'.wav",
+    "duration_sec": 1e-05,
+    "width": null,
+    "height": null,
+    "thumbnail_path": null,
+    "waveform_path": null
+  },
+  {
+    "id": "b3c1",
+    "path": "/engine/input/still.png",
+    "kind": "image",
+    "name": "still.png",
+    "duration_sec": null,
+    "width": 1920,
+    "height": 1080,
+    "thumbnail_path": null,
+    "waveform_path": null
+  }
+]

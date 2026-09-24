@@ -24,12 +24,20 @@
  * newly-added `/sailor` route fails this suite instead of silently proxying.
  *
  * These tests drive the REAL handler (handleHostedSailorData) and the REAL
- * classifier with faked ownership tables + a faked engine fetch, so they fail
- * against the pre-fix tree rather than describing a helper.
+ * classifier with faked ownership tables, so they fail against the pre-fix
+ * tree rather than describing a helper.
+ *
+ * Engine-free Phase A: past the ownership decision the data routes are served
+ * natively (server/native/media.ts) from a TEMP engine root set per test —
+ * never the real input/, output/ or user/. "Engine never touched" is checked
+ * on disk (the victim's file survives) and by asserting no fetch; the faked
+ * engine fetch now only answers the video/audio work native code hands on.
  */
-import { readFileSync, readdirSync } from 'node:fs'
+import fs, { readFileSync, readdirSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const rawBody = vi.fn(async () => undefined as Buffer | undefined)
 const requestHeader = vi.fn((_e: any, _n: string) => undefined as string | undefined)
@@ -65,7 +73,7 @@ g.proxyRequest = proxyRequest
 const { handleHostedSailorData, sailorDataRoute, SAILOR_ASSET_KIND } = await import('../../server/utils/engineGate')
 const { classifySailor, hostedEngineDecision, normalizeEnginePath } = await import('../../server/utils/enginePath')
 const { __setResourceOwnersDbForTests } = await import('../../server/utils/resourceOwners')
-const { __setInputUploadsDbForTests } = await import('../../server/utils/inputUploads')
+const { __setInputUploadsDbForTests, __setInputUploadsEngineRootForTests, resolveEngineRoot } = await import('../../server/utils/inputUploads')
 const { __setGraphRunsDbForTests } = await import('../../server/utils/graphRuns')
 const middleware = (await import('../../server/middleware/comfyui-proxy')).default as any
 
@@ -142,21 +150,51 @@ __setGraphRunsDbForTests({
 const fetchMock = vi.fn()
 ;(globalThis as any).fetch = fetchMock
 
-/** Upstream JSON answer, as forwardSailor consumes it (status + text()). */
+/** The local engine is up and answers this JSON (only video/audio work reaches it now). */
 function upstream(body: unknown, status = 200) {
-  fetchMock.mockResolvedValue({ status, ok: status >= 200 && status < 300, text: async () => JSON.stringify(body) })
+  fetchMock.mockImplementation(async () => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8' } }))
+}
+/** The local engine is not running. */
+function engineDown() {
+  fetchMock.mockRejectedValue(new TypeError('fetch failed'))
 }
 
+// ------------------------------------------------ temp engine root (on disk)
+
+let engineRoot = ''
+const inDir = (...p: string[]) => path.join(engineRoot, 'input', ...p)
+const outDir = (...p: string[]) => path.join(engineRoot, 'output', ...p)
+const userFile = (...p: string[]) => path.join(engineRoot, 'user', ...p)
+function file(full: string, bytes = 'x') {
+  fs.mkdirSync(path.dirname(full), { recursive: true })
+  fs.writeFileSync(full, bytes)
+}
+function writeAssets(assets: unknown[]) {
+  file(userFile('timeline_assets.json'), JSON.stringify(assets, null, 2))
+}
+const readAssets = () => JSON.parse(fs.readFileSync(userFile('timeline_assets.json'), 'utf8'))
+
 beforeEach(() => {
+  engineRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sailor-routes-gate-')))
+  for (const d of ['input', 'output', 'user']) fs.mkdirSync(path.join(engineRoot, d))
+  __setInputUploadsEngineRootForTests(engineRoot)
   mode = 'hosted'
   fetchMock.mockReset()
-  upstream({ ok: true })
+  engineDown()
   proxyRequest.mockClear()
   rawBody.mockReset(); rawBody.mockResolvedValue(undefined)
   requestHeader.mockReset(); requestHeader.mockReturnValue(undefined)
   owners.clear(); uploads.clear(); runs.length = 0
   for (const k of Object.keys(lastHeaders)) delete lastHeaders[k]
   lastStatus = 0
+})
+afterEach(() => {
+  __setInputUploadsEngineRootForTests(undefined)
+  fs.rmSync(engineRoot, { recursive: true, force: true })
+})
+
+it('these tests serve from a temp engine root, never the real folders', () => {
+  expect(resolveEngineRoot()).toBe(engineRoot)
 })
 
 function ev(path: string, method = 'GET', userId: string | null = 'u1') {
@@ -282,18 +320,17 @@ describe('GET /sailor/input_listing filters to the caller\'s owned uploads', () 
   it('drops files owned by another tenant', async () => {
     uploads.set('input::mine.png', 'u1')
     uploads.set('input::theirs.png', 'u2')
-    upstream({ items: [
-      { filename: 'mine.png', type: 'input' },
-      { filename: 'theirs.png', type: 'input' },
-      { filename: 'orphan.png', type: 'input' }, // no ownership row
-    ] })
+    file(inDir('mine.png'))
+    file(inDir('theirs.png'))
+    file(inDir('orphan.png')) // no ownership row
     const r = await call('/sailor/input_listing', 'GET', 'u1')
     expect(r.body.items.map((i: any) => i.filename)).toEqual(['mine.png'])
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('a subfolder upload does not leak into the flat top-level listing', async () => {
     uploads.set('input:sub:nested.png', 'u1') // non-empty subfolder → excluded
-    upstream({ items: [{ filename: 'nested.png', type: 'input' }] })
+    file(inDir('nested.png'))
     const r = await call('/sailor/input_listing', 'GET', 'u1')
     expect(r.body.items).toEqual([])
   })
@@ -303,11 +340,9 @@ describe('GET /sailor/output_listing filters to the caller\'s owned outputs', ()
   it('keeps only outputs recorded against the caller\'s graph runs', async () => {
     runs.push({ userId: 'u1', outputs: ['output::a.png', 'output:sub:b.png'] })
     runs.push({ userId: 'u2', outputs: ['output::secret.png'] })
-    upstream({ items: [
-      { filename: 'a.png', subfolder: '', type: 'output' },
-      { filename: 'b.png', subfolder: 'sub', type: 'output' },
-      { filename: 'secret.png', subfolder: '', type: 'output' },
-    ] })
+    file(outDir('a.png'))
+    file(outDir('sub', 'b.png'))
+    file(outDir('secret.png'))
     const r = await call('/sailor/output_listing', 'GET', 'u1')
     expect(r.body.items.map((i: any) => i.filename).sort()).toEqual(['a.png', 'b.png'])
   })
@@ -319,25 +354,38 @@ describe('the timeline-asset library is per-user', () => {
   it('GET /sailor/assets returns only the caller\'s owned assets (unowned are invisible)', async () => {
     owners.set(okey(SAILOR_ASSET_KIND, 'a-mine'), 'u1')
     owners.set(okey(SAILOR_ASSET_KIND, 'a-theirs'), 'u2')
-    upstream({ assets: [
+    writeAssets([
       { id: 'a-mine', name: 'mine.mp4' },
       { id: 'a-theirs', name: 'theirs.mp4' },
       { id: 'a-orphan', name: 'orphan.mp4' }, // no owner row
-    ] })
+    ])
     const r = await call('/sailor/assets', 'GET', 'u1')
     expect(r.body.assets.map((a: any) => a.id)).toEqual(['a-mine'])
   })
 
   it('POST /sailor/asset_import records ownership from the engine\'s returned asset.id', async () => {
     uploads.set('input::clip.mp4', 'u1') // the caller owns the input file being imported
+    file(inDir('clip.mp4'))
     upstream({ asset: { id: 'a-new', name: 'clip.mp4' }, created: true })
     const r = await call('/sailor/asset_import', 'POST', 'u1', { path: 'clip.mp4' })
     expect(r.body.asset.id).toBe('a-new')
     expect(owners.get(okey(SAILOR_ASSET_KIND, 'a-new'))).toBe('u1')
   })
 
+  it('POST /sailor/asset_import served natively records ownership of the id it stored', async () => {
+    uploads.set('input::still.png', 'u1')
+    file(inDir('still.png'))
+    const r = await call('/sailor/asset_import', 'POST', 'u1', { path: 'still.png' })
+    expect(r.status).toBe(200)
+    const id = r.body.asset.id
+    expect(readAssets().map((a: any) => a.id)).toEqual([id])
+    expect(owners.get(okey(SAILOR_ASSET_KIND, id))).toBe('u1')
+    expect(fetchMock, 'an image never needs the engine').not.toHaveBeenCalled()
+  })
+
   it('asset_import of a nested (subfolder) input the caller owns forwards + records', async () => {
     uploads.set('input:sub:clip.mp4', 'u1')
+    file(inDir('sub', 'clip.mp4'))
     upstream({ asset: { id: 'a-nested', name: 'clip.mp4' }, created: true })
     const r = await call('/sailor/asset_import', 'POST', 'u1', { path: 'sub/clip.mp4' })
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -347,6 +395,7 @@ describe('the timeline-asset library is per-user', () => {
   it('asset_import ownership is first-writer-wins on a duplicate path import', async () => {
     uploads.set('input::clip.mp4', 'u1') // u1 owns the input file
     owners.set(okey(SAILOR_ASSET_KIND, 'a-dup'), 'u2') // but u2 imported it as an asset first
+    file(inDir('clip.mp4'))
     upstream({ asset: { id: 'a-dup', name: 'clip.mp4' }, created: false })
     await call('/sailor/asset_import', 'POST', 'u1', { path: 'clip.mp4' })
     expect(owners.get(okey(SAILOR_ASSET_KIND, 'a-dup')), 'must not transfer ownership').toBe('u2')
@@ -415,9 +464,11 @@ describe('the timeline-asset library is per-user', () => {
 
   it('DELETE /sailor/assets/{id} of another tenant\'s asset 404s, engine never touched', async () => {
     owners.set(okey(SAILOR_ASSET_KIND, 'a-theirs'), 'u2')
+    writeAssets([{ id: 'a-theirs', name: 'theirs.mp4' }])
     const r = await call('/sailor/assets/a-theirs', 'DELETE', 'u1')
     expect(r.status).toBe(404)
     expect(fetchMock).not.toHaveBeenCalled()
+    expect(readAssets().map((a: any) => a.id), 'the victim\'s record survives').toEqual(['a-theirs'])
     expect(owners.has(okey(SAILOR_ASSET_KIND, 'a-theirs')), 'the victim\'s asset row survives').toBe(true)
   })
 
@@ -427,11 +478,13 @@ describe('the timeline-asset library is per-user', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('DELETE of the caller\'s own asset forwards and releases the ownership row', async () => {
+  it('DELETE of the caller\'s own asset removes the record and releases the ownership row', async () => {
     owners.set(okey(SAILOR_ASSET_KIND, 'a-mine'), 'u1')
+    writeAssets([{ id: 'a-mine', name: 'mine.mp4' }, { id: 'a-other', name: 'other.mp4' }])
     const r = await call('/sailor/assets/a-mine', 'DELETE', 'u1')
-    expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(r.status).toBe(200)
+    expect(r.body).toEqual({ ok: true })
+    expect(readAssets().map((a: any) => a.id)).toEqual(['a-other'])
     expect(owners.has(okey(SAILOR_ASSET_KIND, 'a-mine'))).toBe(false)
   })
 
@@ -445,12 +498,35 @@ describe('the timeline-asset library is per-user', () => {
     }
   })
 
-  it('asset_thumbnails of the caller\'s own asset forwards', async () => {
+  it('asset_thumbnails of the caller\'s own (video) asset goes to the engine', async () => {
     owners.set(okey(SAILOR_ASSET_KIND, 'a-mine'), 'u1')
+    writeAssets([{ id: 'a-mine', path: inDir('mine.mp4'), kind: 'video' }])
     upstream({ thumbnails: ['data:...'], asset_id: 'a-mine' })
     const r = await call('/sailor/asset_thumbnails?asset_id=a-mine&count=5', 'GET', 'u1')
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(r.body.asset_id).toBe('a-mine')
+  })
+})
+
+describe('GET /sailor/input_thumbnail is ownership-scoped', () => {
+  it('another tenant\'s file → 404, nothing rendered', async () => {
+    uploads.set('input::theirs.png', 'u2')
+    file(inDir('theirs.png'))
+    const r = await call('/sailor/input_thumbnail?filename=theirs.png', 'GET', 'u1')
+    expect(r.status).toBe(404)
+    expect(fs.existsSync(userFile('timeline_thumbs')), 'no thumbnail rendered for a file that is not yours').toBe(false)
+  })
+
+  it('the caller\'s own image → PNG bytes with the thumbnail headers', async () => {
+    const sharp = (await import('sharp')).default
+    uploads.set('input::mine.png', 'u1')
+    await sharp({ create: { width: 96, height: 48, channels: 3, background: '#f00' } }).png().toFile(inDir('mine.png'))
+    const r = await call('/sailor/input_thumbnail?filename=mine.png', 'GET', 'u1')
+    expect(r.status).toBe(200)
+    expect(Buffer.isBuffer(r.body)).toBe(true)
+    expect(lastHeaders['content-type']).toBe('image/png')
+    expect(lastHeaders['cache-control']).toBe('max-age=86400')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
 
@@ -459,9 +535,11 @@ describe('the timeline-asset library is per-user', () => {
 describe('DELETE /sailor/input_file is ownership-scoped', () => {
   it('another tenant\'s upload → 404, engine never touched, victim row intact', async () => {
     uploads.set('input::theirs.png', 'u2')
+    file(inDir('theirs.png'))
     const r = await call('/sailor/input_file?filename=theirs.png', 'DELETE', 'u1')
     expect(r.status).toBe(404)
     expect(fetchMock).not.toHaveBeenCalled()
+    expect(fs.existsSync(inDir('theirs.png')), 'the victim\'s file survives').toBe(true)
     expect(uploads.get('input::theirs.png')).toBe('u2')
   })
 
@@ -471,11 +549,13 @@ describe('DELETE /sailor/input_file is ownership-scoped', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('the caller\'s own upload forwards and frees the ownership row', async () => {
+  it('the caller\'s own upload is deleted and frees the ownership row', async () => {
     uploads.set('input::mine.png', 'u1')
+    file(inDir('mine.png'))
     const r = await call('/sailor/input_file?filename=mine.png', 'DELETE', 'u1')
-    expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(r.status).toBe(200)
+    expect(r.body).toEqual({ ok: true })
+    expect(fs.existsSync(inDir('mine.png'))).toBe(false)
     expect(uploads.has('input::mine.png'), 'name freed for the next writer').toBe(false)
   })
 })
@@ -483,16 +563,20 @@ describe('DELETE /sailor/input_file is ownership-scoped', () => {
 describe('DELETE /sailor/output_file is ownership-scoped', () => {
   it('an output the caller never produced → 404, engine never touched', async () => {
     runs.push({ userId: 'u2', outputs: ['output::theirs.png'] })
+    file(outDir('theirs.png'))
     const r = await call('/sailor/output_file?filename=theirs.png', 'DELETE', 'u1')
     expect(r.status).toBe(404)
     expect(fetchMock).not.toHaveBeenCalled()
+    expect(fs.existsSync(outDir('theirs.png'))).toBe(true)
   })
 
-  it('the caller\'s own output (subfolder-aware) forwards', async () => {
+  it('the caller\'s own output (subfolder-aware) is deleted', async () => {
     runs.push({ userId: 'u1', outputs: ['output:sub:mine.png'] })
+    file(outDir('sub', 'mine.png'))
     const r = await call('/sailor/output_file?filename=mine.png&subfolder=sub', 'DELETE', 'u1')
-    expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(r.status).toBe(200)
+    expect(r.body).toEqual({ ok: true })
+    expect(fs.existsSync(outDir('sub', 'mine.png'))).toBe(false)
   })
 })
 

@@ -8,6 +8,7 @@
  * address the same files. Null means the engine root could not be found;
  * callers must say so rather than guess a folder.
  */
+import fs from 'node:fs'
 import path from 'node:path'
 import { resolveEngineRoot } from '../utils/inputUploads'
 
@@ -48,4 +49,40 @@ export function resolveInside(root: string, ...names: string[]): string | null {
   const full = path.resolve(base, ...names)
   if (full !== base && !full.startsWith(base + path.sep)) return null
   return full
+}
+
+/**
+ * `os.path.realpath` (non-strict): symlinks resolved for the part of the path
+ * that exists, the missing remainder appended as written.
+ */
+function realpathLoose(p: string): string {
+  let head = path.resolve(p)
+  const tail: string[] = []
+  for (;;) {
+    try {
+      return path.join(fs.realpathSync.native(head), ...tail)
+    }
+    catch {
+      const parent = path.dirname(head)
+      if (parent === head) return path.join(head, ...tail)
+      tail.unshift(path.basename(head))
+      head = parent
+    }
+  }
+}
+
+/**
+ * Port of `_safe_resolve` (comfy_extras/nodes_timeline.py), the guard behind
+ * the input/output file deletes: refuse an empty or absolute filename or an
+ * absolute subfolder, then refuse anything whose real path leaves `root`.
+ * Returns the normalised (not the real) path, as the Python does.
+ */
+export function pySafeResolve(root: string, subfolder: string, filename: string): string | null {
+  if (!filename || filename.startsWith('/') || (subfolder || '').startsWith('/')) return null
+  const candidate = path.normalize([root, subfolder || '', filename].filter(Boolean).join('/'))
+    .replace(/(.)\/+$/, '$1')
+  const realRoot = realpathLoose(root)
+  const realCandidate = realpathLoose(candidate)
+  if (realCandidate !== realRoot && !realCandidate.startsWith(realRoot === '/' ? '/' : realRoot + path.sep)) return null
+  return candidate
 }
