@@ -4,6 +4,9 @@ import { VueFlow, useVueFlow, type NodeTypesObject, type EdgeTypesObject } from 
 import { MiniMap } from '@vue-flow/minimap'
 import { toast } from 'vue-sonner'
 import { describeQueueRefusal } from '~/lib/queueRefusal'
+import { planStart } from '~/lib/startModal/plan'
+import type { StartPickId } from '~/data/start-modal'
+import { defaultDoc, createPrimitive, serializeDoc, PLACEABLE_PRIMITIVE_KINDS } from '~/lib/scene3d/config'
 import { ARTIFACT_NODE_COMPONENTS, ARTIFACT_NODE_FOR_OUTPUT, fetchObjectInfo, getVueFlowType, getWidgetDefs, isSubgraphType, subgraphToLiteGraph, useVueNodes } from '~/composables/useVueNodes'
 import { useSubgraphNavigation } from '~/composables/useSubgraphNavigation'
 import { matchStylesInText, type CanvasSnapshot, type StyleLite } from '~/lib/agent/surfaces/canvas'
@@ -23,7 +26,7 @@ import { registerWireDrag } from '~/composables/useWireDrag'
 import AgentSweep from '~/components/agent/AgentSweep.vue'
 import { useCanvasHistory } from '~/composables/useCanvasHistory'
 import { useCanvasGroups, GROUP_COLORS, type CanvasGroup } from '~/composables/useCanvasGroups'
-import { useCanvasAnnotations, STICKY_COLORS, STICKY_PAPER, type Annotation, type ArrowEndpoint } from '~/composables/useCanvasAnnotations'
+import { useCanvasAnnotations, STICKY_COLORS, type Annotation, type ArrowEndpoint } from '~/composables/useCanvasAnnotations'
 import { applyArtifactLocks, applyVariantFanOut, backfillStandaloneArtifactImages, buildFilteredWorkflow, collectKeepSet, realignWidgetValues, setNamedWidget } from '~/composables/useFilteredPrompt'
 import { type LocalLayer, ensureLayerFonts, ensureLayerImages, bakeOverlay, createImageLayer, parseIdeogramLayers, parseSeedreamLayers, drawWiredImageLayer, drawLayerSilhouette } from '~/composables/useCompositorLayers'
 import { framePresentKeys, legacyWiredFlagsActive } from '~/lib/compositor/frameStack'
@@ -7795,20 +7798,12 @@ function wireStartPair(sourceId: string, sourceData: StartNodeData, generatorId:
  * wired into it via the first input port whose type matches the source's
  * primary output. Otherwise just the generator is placed (prompt-only path).
  *
- * The plain "Generate an image" pick is special-cased into a showcase tour
- * (several ready-to-run ways to make an image, explained by sticky notes) —
- * see materializeImageShowcase below.
- *
  * Positions are absolute canvas coords — fitView at the end frames whatever
  * we just dropped, so the user doesn't have to zoom around.
  */
 function materializeStartGraph(opts: { sourceNodeType?: string; generatorNodeType: string }) {
   const genInfo = objectInfo.value[opts.generatorNodeType]
   if (!genInfo) return false
-
-  if (opts.generatorNodeType === 'GenerateImageNode' && !opts.sourceNodeType) {
-    return materializeImageShowcase()
-  }
 
   let idSeed = Date.now()
   const sourceId = opts.sourceNodeType ? String(idSeed++) : null
@@ -7843,149 +7838,93 @@ function materializeStartGraph(opts: { sourceNodeType?: string; generatorNodeTyp
 }
 
 /**
- * The "Generate an image" welcome tour: instead of one bare generator, seed a
- * 2×2 grid of ready-to-run ways to make an image, each captioned by a small
- * sticky note (plus one intro sticky up top). Deliberately quiet: one paper
- * colour, zero rotation, caption-length copy, labels left-aligned above their
- * cards on an even grid — the seeded canvas should read as a curated welcome,
- * not a brainstorm wall (the first, louder version did). Ways whose node type
- * is missing from object_info are skipped rather than failing the whole seed;
- * the image-fed ways get an Image card pre-wired in so the canvas also
- * demonstrates wiring. Stickies persist like any user annotation
- * (workflow.extra), so the tour survives save/load and the user deletes
- * pieces as they claim the canvas.
+ * The start modal's pick → canvas (spec 2026-09-23). Every project gets a Frame;
+ * the pick lands to its left, wired into layer1 when it makes a picture. The
+ * node/edge recipe is the pure planStart (unit-tested); this mints and wires.
+ * Returns false (and toasts) when a node type is missing from object_info.
  */
-function materializeImageShowcase(): boolean {
-  interface ShowcaseWay {
-    nodeType: string
-    note: string
-    prompt?: string
-    /** Pre-wire an Image artifact card into the generator's IMAGE input. */
-    withImageSource?: boolean
+async function materializeStart(pick: StartPickId | null): Promise<boolean> {
+  const plan = planStart(pick)
+  if (!objectInfo.value['Compositor']) await fetchObjectInfo()
+  // Frontend-only studios (GradientStudio, SpaceType, …) never appear in object_info;
+  // everything else must, or the pick can't be built.
+  const missing = plan.nodes.find(n => !FRONTEND_ONLY_START_TYPES.has(n.nodeType) && !objectInfo.value[n.nodeType])
+  if (missing) {
+    toast.error('Couldn’t set up the project', { description: `The backend doesn’t provide “${missing.nodeType}”. Check that ComfyUI is running and up to date, then try again from the + menu.` })
+    return false
   }
-  const ways: ShowcaseWay[] = [
-    {
-      nodeType: 'GenerateImageNode',
-      note: 'Describe it\nType a prompt and press Run.',
-      prompt: 'A lighthouse on a rocky coast at golden hour, gouache painting',
-    },
-    {
-      nodeType: 'FluxLoRARemoteNode',
-      note: 'Give it a style\nEvery image comes out in one look.',
-    },
-    {
-      nodeType: 'SketchToImageNode',
-      note: 'Start from a sketch\nDrop a rough drawing into the card.',
-      prompt: 'Turn this sketch into a soft watercolor illustration',
-      withImageSource: true,
-    },
-    {
-      nodeType: 'GenerateFromReferencesNode',
-      note: 'Start from references\nDrop in photos to blend and remix.',
-      prompt: 'Combine these references into one scene',
-      withImageSource: true,
-    },
-  ].filter(w => !!objectInfo.value[w.nodeType])
-  if (!ways.length) return false
 
-  // One colour, no tilt — the shared soft-white sticky paper.
-  const PAPER = STICKY_PAPER
-  const COL_PITCH = 680
-  const ROW_PITCH = 560
-  const LABEL_H = 84
-
-  const intro = createSticky({
-    x: 0,
-    y: 0,
-    color: PAPER,
-    text: 'Four ways to make an image\nEvery card is ready to run — pick one, delete the rest.',
-  })
-  intro.width = 400
-  intro.height = LABEL_H
-  intro.rotation = 0
-
-  let idSeed = Date.now()
-  const imageSourceData = buildStartNodeData('Image')
-  const placedIds: string[] = []
-  const stickyRects: { x: number; y: number; width: number; height: number }[] = [intro]
-
-  ways.forEach((way, i) => {
-    const qx = (i % 2) * COL_PITCH
-    const qy = 150 + Math.floor(i / 2) * ROW_PITCH
-
-    const sticky = createSticky({ x: qx, y: qy, text: way.note, color: PAPER })
-    sticky.width = 260
-    sticky.height = LABEL_H
-    sticky.rotation = 0
-    stickyRects.push(sticky)
-
-    const generatorData = buildStartNodeData(way.nodeType)
-    if (!generatorData) return
-
-    const contentY = qy + LABEL_H + 28
-    let generatorX = qx
-    let sourceId: string | null = null
-    if (way.withImageSource && imageSourceData) {
-      sourceId = String(idSeed++)
-      pushStartNode({ id: sourceId, nodeType: 'Image', data: imageSourceData, x: qx, y: contentY, size: [240, 280] })
-      placedIds.push(sourceId)
-      generatorX = qx + 320
+  const COL_W = 320
+  const minted = new Map<string, any>()
+  for (const pn of plan.nodes) {
+    const widgets: Record<string, unknown> = { ...(pn.widgets ?? {}) }
+    if (pn.starter === 'shaderPicture') {
+      const name = await uploadStarterPicture('/start-modal/shader-starter.webp')
+      if (name) widgets.image = name
     }
+    if (pn.starter === 'scene3dObject') widgets.scene_state = starterSceneState()
+    const node = createNodeData(pn.nodeType, { x: pn.col * COL_W, y: 0 }, Object.keys(widgets).length ? widgets : undefined)
+    nodes.value.push(node) // push before minting the next id (mintNodeId dedupes against nodes.value)
+    minted.set(pn.key, node)
+  }
 
-    const generatorId = String(idSeed++)
-    pushStartNode({
-      id: generatorId,
-      nodeType: way.nodeType,
-      data: generatorData,
-      x: generatorX,
-      y: contentY,
-      size: [220, 120],
-      prompt: way.prompt,
-    })
-    placedIds.push(generatorId)
+  for (const pe of plan.edges) {
+    const from = minted.get(pe.from), to = minted.get(pe.to)
+    if (!from || !to) continue
+    const ins = (to.data.inputs ?? []) as any[]
+    const idx = pe.input === '@IMAGE'
+      ? ins.findIndex(i => String(i.type).toUpperCase() === 'IMAGE')
+      : ins.findIndex(i => i.name === pe.input)
+    const out = (from.data.outputs ?? [])[pe.out]
+    if (idx < 0 || !out) { console.warn('[start] cannot wire', pe, 'on', to.data.nodeType); continue }
+    edges.value.push({
+      id: `e-start-${from.id}-${to.id}`,
+      source: from.id,
+      sourceHandle: `output-${pe.out}`,
+      target: to.id,
+      targetHandle: `input-${idx}`,
+      type: 'comfy',
+      data: { dataType: String(out.type).toUpperCase() === '*' ? 'IMAGE' : String(out.type).toUpperCase() },
+    } as any)
+  }
 
-    if (sourceId && imageSourceData) {
-      wireStartPair(sourceId, imageSourceData, generatorId, generatorData)
-    }
-  })
-
-  // Frame the whole tour — stickies included, which plain fitView would crop
-  // (it only measures vue-flow nodes). Vue Flow measures new nodes via
-  // ResizeObserver AFTER they render — bounds computed from stated sizes
-  // frame a fraction of the real cards, so wait (bounded) until every card
-  // carries real dimensions, then fit the union of cards and stickies.
-  ;(async () => {
-    await nextTick()
-    let picked: any[] = []
-    for (let i = 0; i < 20; i++) {
-      picked = (nodes.value as any[]).filter((n: any) => placedIds.includes(String(n.id)))
-      if (picked.length === placedIds.length && picked.every((n: any) => (n.dimensions?.width ?? 0) > 0)) break
-      await new Promise<void>(r => requestAnimationFrame(() => r()))
-    }
-    const rects = [
-      ...stickyRects,
-      ...picked.map((n: any) => ({
-        x: n.position.x,
-        y: n.position.y,
-        width: n.dimensions?.width || 240,
-        height: n.dimensions?.height || 280,
-      })),
-    ]
-    const minX = Math.min(...rects.map(r => r.x))
-    const minY = Math.min(...rects.map(r => r.y))
-    const maxX = Math.max(...rects.map(r => r.x + r.width))
-    // Extra bottom margin: the floating prompt bar + toolbar overlay the
-    // viewport's lower edge, so a tight fit hides the bottom row behind them.
-    const maxY = Math.max(...rects.map(r => r.y + r.height)) + 180
-    fitBounds({ x: minX, y: minY, width: maxX - minX, height: maxY - minY }, { padding: 0.06 })
-  })()
-
+  await nextTick()
+  fitView({ padding: 0.3 })
   return true
+}
+
+const FRONTEND_ONLY_START_TYPES = new Set(['GradientStudio', 'ShaderStudio', 'TextureStudio', 'ShapeStudio', 'VectorType', 'SpaceType'])
+
+/** Upload a bundled picture to ComfyUI's input folder so an Image card can hold it. */
+async function uploadStarterPicture(url: string): Promise<string | null> {
+  try {
+    const blob = await (await fetch(url)).blob()
+    const fd = new FormData()
+    fd.append('image', new File([blob], url.split('/').pop()!, { type: blob.type }))
+    fd.append('overwrite', 'true')
+    const res = await fetch('/upload/image', { method: 'POST', body: fd })
+    if (!res.ok) throw new Error(`upload ${res.status}`)
+    return (await res.json())?.name ?? null
+  }
+  catch (e) {
+    console.error('[start] starter picture upload failed', e)
+    toast.error('Couldn’t add the starter picture', { description: 'Drop any image onto the Image card to feed the Shader.' })
+    return null
+  }
+}
+
+/** A 3D scene with one object, so the studio never starts empty. */
+function starterSceneState(): string {
+  const doc = defaultDoc()
+  const kind = (['torusKnot', 'sphere', 'box'] as const).find(k => (PLACEABLE_PRIMITIVE_KINDS as string[]).includes(k)) ?? PLACEABLE_PRIMITIVE_KINDS[0]!
+  doc.objects.push(createPrimitive(kind as any, doc.objects))
+  return serializeDoc(doc)
 }
 
 // Expose methods and state for parent layout
 defineExpose({
   materializeStartGraph,
+  materializeStart,
   // Orphan-glow reaper: clears every run visual (node shimmer, edge glow,
   // progress) and the per-prompt bookkeeping. Called by the layout when the
   // run registry drains to zero — glow state orphaned by an HMR mid-run or a
