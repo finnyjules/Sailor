@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { candidatesForFrame, planLayout, EXTRA_INSET_MAX, EXTRA_MIN_TILE, NO_ROOM_FOR_IMAGES } from '~/lib/frame/patterns/kit/plan'
+import { candidatesForFrame, insetInCorner, planLayout, EXTRA_INSET_MAX, EXTRA_MIN_TILE, NO_ROOM_FOR_IMAGES } from '~/lib/frame/patterns/kit/plan'
 import type { LayoutPlanArgs } from '~/lib/frame/patterns/kit/plan'
 import { freeRects, inkBoxOf } from '~/lib/frame/patterns/kit/check'
 import type { Box } from '~/lib/frame/patterns/kit/check'
-import { CATALOG, layoutsForStyle } from '~/lib/frame/patterns/layouts/catalog'
+import { CATALOG, __registerLayoutForTest, layoutsForStyle } from '~/lib/frame/patterns/layouts/catalog'
 import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
 import { makeSheet } from '~/lib/frame/patterns/kit/sheet'
-import type { El, PhotoEl } from '~/lib/frame/patterns/kit/types'
+import type { El, LayoutDef, PhotoEl } from '~/lib/frame/patterns/kit/types'
 import type { StyleId } from '~/lib/frame/patterns/kit/styles'
 import { FRAME_FORMATS } from '~/lib/frame/formats'
 import { createImageLayer } from '~/composables/useCompositorLayers'
@@ -62,19 +62,22 @@ function contentArea(f: Frame): Box {
 // marked 'inset' when the tile sits on the layout's full-bleed image (ruling D5); and each layout
 // offered with one image that two images lose, with the checker's reason for its first variation.
 //
-// Offered, one image → two (fix round 1): Swiss 35 → 35 (the story 32 → 32; the lab Frame has no
-// shape, so the five shape layouts are not offered either way), Performance 5 → 3 (the story 5 → 2,
-// 300×250 4 → 3), Editorial 4 → 4, Street 4 → 4.
+// Offered, one image → two (fix rounds 1–2): Swiss 35 → 35 (the story 32 → 32; the lab Frame has
+// no shape, so the five shape layouts are not offered either way), Performance 5 → 3 (the story
+// 5 → 2, 300×250 4 → 3), Editorial 4 → 4, Street 4 → 4. Since fix round 2 (ruling D8) an inset sits
+// in the corner of its free room nearest a frame corner, on whole columns (29.6 × 30.7 on the
+// portrait, 29.8 × 30.7 on the square, 28.1 × 29.3 on the story).
 //
 // Measured reasons (Performance limit: 55% of the image hidden):
-// - Price tag: its panel already hides 50.0% of the image; the inset (a third of the content width
-//   square — 30.7 on the portrait, 30.7 on the square, 29.3 on the story) adds 6.6% / 9.4% / 9.5%.
+// - Price tag: its panel already hides 50.0% of the image; the inset adds 6.4% (portrait) / 9.1%
+//   (square) / 9.1% (story).
 // - Offer first: its image is not full-bleed (it starts at 30.0–37.6 under the panel on the
 //   portrait), so there is no inset; the panel and the image leave no free room off it.
-// - Centred on the story: the bands already hide 51.0–53.0%; the inset adds 9.5%.
+// - Centred on the story: the bands already hide 51.0–53.0%; the inset adds 9.1%.
 // - Variations lost inside a layout still offered — Performance: Offer on the square 1 of 8 (47.1%
-//   hidden + 9.4%), Centred on the square 1 of 4 (46.6% + 9.4%), Offer on the story 5 of 6
-//   (45.6–53.4% + 9.5%). Swiss, where no inset is needed and the free room is too small (its
+//   hidden + 9.1%), Centred on the square 1 of 4 (46.6% + 9.1%), Offer on the story 4 of 6
+//   (46.1–53.4% + 9.1%; its 45.6% variation now passes at 54.7%). Swiss, where no inset is needed
+//   and the free room is too small (its
 //   shorter side, under 12): Statement on the portrait 6 of 14 (4.1–7.7), Bottom heavy 2 of 8
 //   (7.7), Split 1 of 4 (7.4), Footer 3 of 7 (4.1–7.7), Rising on the square 1 of 4 (4.7), Split on
 //   the story 1 of 4 (11.9); Street's Fill on the portrait 6 of 12 (7.6).
@@ -83,7 +86,7 @@ const PINNED: Record<string, Pin> = {
   'swiss|portrait': {
     offered: {
       runoff: [8, 8, [19, 99.9, 62, 31]], statement: [8, 14, [4, 24.5, 27, 54]], index: [4, 4, [69, 48, 27, 54]],
-      photoBehind: [2, 2, [4, 62.5, 16.9, 33.8]], fullBleed: [4, 4, [34.7, 37.4, 30.7, 30.7], 'inset'],
+      photoBehind: [2, 2, [4, 62.5, 16.9, 33.8]], fullBleed: [4, 4, [66.4, 12.1, 29.6, 30.7], 'inset'],
       tilt: [2, 2, [49.6, 111, 46.4, 28]], bottomHeavy: [6, 8, [69, 27.6, 27, 54]],
       fourCorners: [8, 8, [4, 11.3, 50.4, 56]], spacedLines: [2, 2, [4, 22.3, 92, 85.3]],
       ragged: [6, 6, [4, 4, 34.8, 69.5]], edges: [4, 4, [4, 4, 42.6, 63.3]],
@@ -92,8 +95,8 @@ const PINNED: Record<string, Pin> = {
       wall: [2, 2, [4, 64.7, 27, 54]], scatter: [3, 3, [65.9, 89.6, 30.1, 41.3]],
       cells: [2, 2, [4, 84.3, 58.2, 49.1]], kicker: [4, 4, [4, 29.8, 19.2, 38.4]],
       sidebar: [4, 4, [69, 53.7, 27, 54]], footer: [4, 7, [4, 64.6, 27, 54]],
-      plate: [4, 4, [75.7, 36.1, 20.3, 40.5]], panel: [4, 4, [34.7, 28.6, 30.7, 30.7], 'inset'],
-      sideSplit: [2, 2, [5.7, 56.2, 30.7, 30.7], 'inset'], cross: [1, 1, [9.1, 90, 81.7, 40.9]],
+      plate: [4, 4, [75.7, 36.1, 20.3, 40.5]], panel: [4, 4, [66.4, 12.1, 29.6, 30.7], 'inset'],
+      sideSplit: [2, 2, [4, 108.4, 29.6, 30.7], 'inset'], cross: [1, 1, [9.1, 90, 81.7, 40.9]],
       overlap: [4, 4, [25.2, 106.1, 49.6, 24.8]], stamp: [4, 4, [4, 11.3, 66, 71.8]],
       column: [2, 2, [4, 60.9, 92, 78.1]], rising: [4, 4, [32.1, 49.7, 35.8, 17.9]],
       overprint: [8, 8, [4, 13.4, 58.2, 37]], dateBehind: [8, 8, [4, 67.3, 42.6, 66.1]],
@@ -106,7 +109,7 @@ const PINNED: Record<string, Pin> = {
     offered: {
       runoff: [6, 6, [4, 4, 59.4, 44.1]], statement: [16, 16, [4, 8, 59.4, 43.6]],
       index: [8, 8, [44.4, 34.3, 51.6, 51.3]], photoBehind: [2, 2, [4, 20.1, 40.8, 69.8]],
-      fullBleed: [4, 4, [34.7, 21.9, 30.7, 30.7], 'inset'], tilt: [4, 4, [16, 31.8, 16.2, 32.5]],
+      fullBleed: [4, 4, [66.2, 10.1, 29.8, 30.7], 'inset'], tilt: [4, 4, [16, 31.8, 16.2, 32.5]],
       bottomHeavy: [8, 8, [36.6, 13.3, 59.4, 39.6]], fourCorners: [8, 8, [4, 9.5, 59.4, 37.7]],
       spacedLines: [2, 2, [4.8, 20.4, 90.4, 45.2]], ragged: [6, 6, [4, 4, 59.4, 37.4]],
       edges: [4, 4, [4, 4, 59.4, 43.1]], staircase: [2, 2, [44.4, 38.8, 51.6, 51]],
@@ -115,7 +118,7 @@ const PINNED: Record<string, Pin> = {
       scatter: [6, 6, [37.6, 4, 25.7, 43.1]], cells: [4, 4, [4, 56.1, 67.1, 33.8]],
       kicker: [4, 4, [4, 4, 43.8, 58.1]], sidebar: [6, 6, [52.2, 34.3, 43.8, 61.7]],
       footer: [8, 8, [4, 47.1, 59.4, 44.9]], plate: [4, 4, [52.9, 16.5, 43.1, 46.4]],
-      panel: [4, 4, [34.7, 16.2, 30.7, 30.7], 'inset'], sideSplit: [2, 2, [6.3, 34.7, 30.7, 30.7], 'inset'],
+      panel: [4, 4, [66.2, 10.1, 29.8, 30.7], 'inset'], sideSplit: [2, 2, [4, 65.3, 29.8, 30.7], 'inset'],
       cross: [1, 1, [47, 80.8, 30.4, 15.2]], overlap: [4, 4, [4, 56.3, 37.9, 33.5]],
       stamp: [4, 4, [4, 9.5, 67.1, 34.6]], column: [2, 2, [36.6, 30.8, 59.4, 65.2]],
       rising: [3, 4, [80.2, 9.6, 15.8, 31.6]], overprint: [8, 8, [57.9, 34.4, 38.1, 61.6]],
@@ -128,7 +131,7 @@ const PINNED: Record<string, Pin> = {
   'swiss|meta-story': {
     offered: {
       statement: [16, 16, [6, 37.7, 54.7, 27.4]], index: [8, 8, [39.3, 60.7, 54.7, 36.5]],
-      photoBehind: [2, 2, [6, 47.8, 41.5, 51.9]], fullBleed: [4, 4, [35.3, 47.1, 29.3, 29.3], 'inset'],
+      photoBehind: [2, 2, [6, 47.8, 41.5, 51.9]], fullBleed: [4, 4, [65.9, 43.7, 28.1, 29.3], 'inset'],
       tilt: [4, 4, [19, 40.7, 26.7, 53.4]], bottomHeavy: [8, 8, [41.1, 48.2, 43.5, 21.8]],
       fourCorners: [8, 8, [54.8, 67.8, 39.2, 41.8]], spacedLines: [2, 2, [6, 49, 62.2, 42.5]],
       ragged: [6, 6, [7.8, 30.9, 58.5, 29.2]], edges: [4, 4, [6, 30.9, 54.7, 34.2]],
@@ -137,8 +140,8 @@ const PINNED: Record<string, Pin> = {
       wall: [2, 2, [6, 75, 54.7, 27.8]], scatter: [6, 6, [40, 30.9, 20.7, 34.2]],
       cells: [4, 4, [11.1, 80.5, 44.6, 22.3]], kicker: [4, 4, [6, 30.9, 47.2, 45.4]],
       sidebar: [8, 8, [46.8, 62.2, 47.2, 47.3]], footer: [8, 8, [6, 70.5, 54.7, 32.3]],
-      plate: [4, 4, [68.5, 57.1, 25.5, 51.1]], panel: [4, 4, [35.3, 40.7, 29.3, 29.3], 'inset'],
-      sideSplit: [2, 2, [7, 55.6, 29.3, 29.3], 'inset'], overlap: [4, 4, [6, 78.4, 41.6, 21.4]],
+      plate: [4, 4, [68.5, 57.1, 25.5, 51.1]], panel: [4, 4, [65.9, 40.7, 28.1, 29.3], 'inset'],
+      sideSplit: [2, 2, [6, 30.9, 28.1, 29.3], 'inset'], overlap: [4, 4, [6, 78.4, 41.6, 21.4]],
       stamp: [4, 4, [20.7, 39.5, 33.8, 16.9]], column: [2, 2, [39.3, 58.9, 54.7, 50.7]],
       rising: [4, 4, [78.8, 30.9, 15.2, 29]], overprint: [8, 8, [54.8, 61.9, 39.2, 47.7]],
       dateBehind: [8, 8, [6, 70.5, 54.7, 32.3]], tightStack: [8, 8, [6, 75.4, 54.7, 27.4]],
@@ -150,7 +153,7 @@ const PINNED: Record<string, Pin> = {
     offered: {
       runoff: [6, 6, [4, 4, 67.6, 34.2]], statement: [16, 16, [4, 8.5, 59.8, 30.9]],
       index: [8, 8, [36.2, 32.3, 59.8, 37.1]], photoBehind: [2, 2, [4, 18, 50.1, 53]],
-      fullBleed: [4, 4, [34.7, 19.5, 30.7, 30.7], 'inset'], tilt: [4, 4, [13.8, 9.7, 42.2, 55.4]],
+      fullBleed: [4, 4, [66.1, 16.3, 29.9, 30.7], 'inset'], tilt: [4, 4, [13.8, 9.7, 42.2, 55.4]],
       bottomHeavy: [8, 8, [36.4, 22.1, 43.8, 21.9]], fourCorners: [8, 8, [8.2, 9.7, 59.2, 29.6]],
       spacedLines: [2, 2, [4, 19.9, 67.6, 43.5]], ragged: [6, 6, [7.2, 4, 61.2, 30.6]],
       edges: [2, 2, [4, 4, 67.6, 35.3]], staircase: [2, 2, [33.5, 38.3, 57.5, 28.8]],
@@ -158,8 +161,8 @@ const PINNED: Record<string, Pin> = {
       diagonal: [8, 8, [34.6, 9.7, 55.2, 27.6]], wall: [2, 2, [5.9, 46.9, 55.9, 28]],
       scatter: [6, 6, [35.7, 4, 35.8, 35.3]], cells: [4, 4, [7.9, 48.9, 52, 26]], kicker: [4, 4, [4, 4, 59.8, 44.8]],
       sidebar: [8, 8, [36.2, 35.8, 59.8, 43.6]], footer: [8, 8, [4, 39.3, 59.8, 35.6]],
-      plate: [4, 4, [61.2, 35.8, 34.8, 43.6]], panel: [4, 4, [34.7, 12.9, 30.7, 30.7], 'inset'],
-      sideSplit: [2, 2, [6.6, 26.3, 30.7, 30.7], 'inset'], cross: [1, 1, [73.1, 8.5, 22.9, 28.9]],
+      plate: [4, 4, [61.2, 35.8, 34.8, 43.6]], panel: [4, 4, [66.1, 12.4, 29.9, 30.7], 'inset'],
+      sideSplit: [2, 2, [4, 48.7, 29.9, 30.7], 'inset'], cross: [1, 1, [73.1, 8.5, 22.9, 28.9]],
       overlap: [4, 4, [4.1, 46.8, 48.3, 24.1]], stamp: [4, 4, [20.4, 9.7, 38, 19]],
       column: [2, 2, [36.2, 30.3, 59.8, 49]], rising: [4, 4, [65.3, 4, 30.7, 27.8]],
       overprint: [8, 8, [48.1, 24.2, 47.9, 55.1]], dateBehind: [8, 8, [4, 39.3, 59.8, 35.6]],
@@ -170,8 +173,8 @@ const PINNED: Record<string, Pin> = {
   },
   'performance|portrait': {
     offered: {
-      perfOffer: [8, 8, [34.7, 50.7, 30.7, 30.7], 'inset'], perfCard: [8, 8, [34.7, 55.6, 30.7, 30.7], 'inset'],
-      perfCentred: [4, 4, [34.7, 50.2, 30.7, 30.7], 'inset'],
+      perfOffer: [8, 8, [66.4, 34.8, 29.6, 30.7], 'inset'], perfCard: [8, 8, [66.4, 34.8, 29.6, 30.7], 'inset'],
+      perfCentred: [4, 4, [66.4, 33.3, 29.6, 30.7], 'inset'],
     },
     lost: {
       perfPriceTag: 'the image is mostly hidden',
@@ -180,8 +183,8 @@ const PINNED: Record<string, Pin> = {
   },
   'performance|square': {
     offered: {
-      perfOffer: [7, 8, [34.7, 31.1, 30.7, 30.7], 'inset'], perfCard: [8, 8, [34.7, 33.8, 30.7, 30.7], 'inset'],
-      perfCentred: [3, 4, [34.7, 30.6, 30.7, 30.7], 'inset'],
+      perfOffer: [7, 8, [66.2, 27.8, 29.8, 30.7], 'inset'], perfCard: [8, 8, [66.2, 27.8, 29.8, 30.7], 'inset'],
+      perfCentred: [3, 4, [66.2, 26.3, 29.8, 30.7], 'inset'],
     },
     lost: {
       perfPriceTag: 'the image is mostly hidden',
@@ -190,7 +193,7 @@ const PINNED: Record<string, Pin> = {
   },
   'performance|meta-story': {
     offered: {
-      perfOffer: [1, 6, [35.3, 33.7, 29.3, 29.3], 'inset'], perfCard: [8, 8, [35.3, 54.9, 29.3, 20.2], 'inset'],
+      perfOffer: [2, 6, [65.9, 30.9, 28.1, 29.3], 'inset'], perfCard: [8, 8, [65.9, 54.9, 28.1, 20.2], 'inset'],
     },
     lost: {
       perfPriceTag: 'the image is mostly hidden',
@@ -200,8 +203,8 @@ const PINNED: Record<string, Pin> = {
   },
   'performance|ad-300x250': {
     offered: {
-      perfOffer: [8, 8, [34.7, 25.1, 30.7, 19], 'inset'], perfCard: [4, 4, [62.4, 36.9, 30.7, 30.7], 'inset'],
-      perfCentred: [2, 2, [34.7, 23.6, 30.7, 21], 'inset'],
+      perfOffer: [8, 8, [66.1, 25.1, 29.9, 19], 'inset'], perfCard: [4, 4, [66.1, 48.7, 29.9, 30.7], 'inset'],
+      perfCentred: [2, 2, [66.1, 23.6, 29.9, 21], 'inset'],
     },
     lost: {
       perfOfferFirst: 'no room for the other images',
@@ -209,56 +212,56 @@ const PINNED: Record<string, Pin> = {
   },
   'editorial|portrait': {
     offered: {
-      edCover: [4, 4, [34.7, 34.1, 30.7, 30.7], 'inset'], edFramed: [8, 8, [4, 93.2, 21.7, 43.4]],
-      edQuiet: [3, 3, [4, 50.4, 21.1, 42.2]], edDiptych: [8, 8, [9.6, 56.2, 30.7, 30.7], 'inset'],
+      edCover: [4, 4, [66.4, 4, 29.6, 30.7], 'inset'], edFramed: [8, 8, [4, 93.2, 21.7, 43.4]],
+      edQuiet: [3, 3, [4, 50.4, 21.1, 42.2]], edDiptych: [8, 8, [4, 108.4, 29.6, 30.7], 'inset'],
     },
     lost: {},
   },
   'editorial|square': {
     offered: {
-      edCover: [4, 4, [34.7, 18.1, 30.7, 30.7], 'inset'], edFramed: [8, 8, [76.8, 30.8, 19.2, 38.4]],
-      edQuiet: [4, 4, [4, 24.2, 25.8, 51.7]], edDiptych: [8, 8, [10.2, 34.7, 30.7, 30.7], 'inset'],
+      edCover: [4, 4, [66.2, 4, 29.8, 30.7], 'inset'], edFramed: [8, 8, [76.8, 30.8, 19.2, 38.4]],
+      edQuiet: [4, 4, [4, 24.2, 25.8, 51.7]], edDiptych: [8, 8, [4, 65.3, 29.8, 30.7], 'inset'],
     },
     lost: {},
   },
   'editorial|meta-story': {
     offered: {
-      edCover: [4, 4, [35.3, 38.4, 29.3, 29.3], 'inset'], edFramed: [4, 4, [74.3, 45.3, 19.7, 39.4]],
-      edQuiet: [4, 4, [6, 37.3, 22.9, 45.8]], edDiptych: [8, 8, [10.7, 55.6, 29.3, 29.3], 'inset'],
+      edCover: [4, 4, [65.9, 30.9, 28.1, 29.3], 'inset'], edFramed: [4, 4, [74.3, 45.3, 19.7, 39.4]],
+      edQuiet: [4, 4, [6, 37.3, 22.9, 45.8]], edDiptych: [8, 8, [6, 30.9, 28.1, 29.3], 'inset'],
     },
     lost: {},
   },
   'editorial|ad-300x250': {
     offered: {
-      edCover: [4, 4, [34.7, 9.7, 30.7, 30.7], 'inset'], edFramed: [4, 4, [70.2, 11.3, 25.8, 51.6]],
-      edQuiet: [4, 4, [4, 4, 28.4, 55.6]], edDiptych: [8, 8, [10.5, 26.3, 30.7, 30.7], 'inset'],
+      edCover: [4, 4, [66.1, 4, 29.9, 30.7], 'inset'], edFramed: [4, 4, [70.2, 11.3, 25.8, 51.6]],
+      edQuiet: [4, 4, [4, 4, 28.4, 55.6]], edDiptych: [8, 8, [4, 48.7, 29.9, 30.7], 'inset'],
     },
     lost: {},
   },
   'street|portrait': {
     offered: {
-      stFill: [6, 12, [4, 71.7, 17.5, 35]], stTag: [4, 4, [34.7, 22.7, 30.7, 30.7], 'inset'],
+      stFill: [6, 12, [4, 71.7, 17.5, 35]], stTag: [4, 4, [66.4, 4, 29.6, 30.7], 'inset'],
       stDrop: [5, 5, [8.9, 123.6, 30.8, 15.4]], stRepeat: [4, 4, [4, 4, 24.3, 48]],
     },
     lost: {},
   },
   'street|square': {
     offered: {
-      stFill: [12, 12, [4, 37.7, 48.3, 58.3]], stTag: [4, 4, [34.7, 6.5, 30.7, 30.7], 'inset'],
+      stFill: [12, 12, [4, 37.7, 48.3, 58.3]], stTag: [4, 4, [66.2, 4, 29.8, 30.7], 'inset'],
       stDrop: [8, 8, [44.4, 32.3, 41.2, 54.5]], stRepeat: [4, 4, [4, 4, 33.1, 27.8]],
     },
     lost: {},
   },
   'street|meta-story': {
     offered: {
-      stFill: [12, 12, [6, 72.4, 45.4, 37.1]], stTag: [4, 4, [35.3, 30.9, 29.3, 21.1], 'inset'],
+      stFill: [12, 12, [6, 72.4, 45.4, 37.1]], stTag: [4, 4, [65.9, 30.9, 28.1, 21.1], 'inset'],
       stDrop: [8, 8, [39.3, 60.4, 43.1, 35]], stRepeat: [4, 4, [6, 30.9, 28.4, 19.5]],
     },
     lost: {},
   },
   'street|ad-300x250': {
     offered: {
-      stFill: [12, 12, [4, 42.1, 53.9, 37.2]], stTag: [4, 4, [36.6, 4, 26.9, 13.4], 'inset'],
+      stFill: [12, 12, [4, 42.1, 53.9, 37.2]], stTag: [4, 4, [73.9, 4, 22.1, 13.4], 'inset'],
       stDrop: [8, 8, [28.4, 31.8, 59.1, 29.7]], stRepeat: [4, 4, [9.7, 58.1, 42.4, 21.2]],
     },
     lost: {},
@@ -498,6 +501,106 @@ describe('fix round 1 (rulings D5, D6, D7)', () => {
     expect(w.visible).toBe(false)
     expect(w.layoutPrev?.visible).toMatchObject({ set: false, by: 'unused' })
     expect(plan.notPlaced).toContainEqual({ role: 'unused', text: 'Image 2', image: true })
+  })
+})
+
+describe('fix round 2 (ruling D8, the logo\'s clear space, D7 untag)', () => {
+  const portrait = FRAMES[0]!
+  const S = makeSheet({ frameW: portrait.w, frameH: portrait.h, measure: makeStubMeasure() })
+  const colRights = Array.from({ length: S.NC }, (_, i) => S.Xr(i + 1) + S.CW)
+  const colLefts = Array.from({ length: S.NC }, (_, i) => S.Xr(i + 1))
+  const onGrid = (v: number, edges: number[]) => edges.some(x => Math.abs(x - v) < 1e-9)
+  const spanOf = (w: number) => Array.from({ length: S.NC }, (_, k) => (k + 1) * S.CW + k * S.G).some(x => Math.abs(x - w) < 1e-9)
+
+  it('D8: an inset sits in the corner of its room nearest a frame corner, on whole columns — ties go bottom-right', () => {
+    // The whole content area: every corner is the margin from the frame's — a tie, so bottom-right.
+    const room: Box = { x0: S.M, y0: S.M, x1: S.W - S.M, y1: S.H - S.M }
+    const [t] = insetInCorner(room, 1, true, 30, 30, S.GAP, S, S.H)
+    expect(t!.x1).toBeCloseTo(S.Xr(S.NC) + S.CW, 9)
+    expect(t!.y1).toBeCloseTo(room.y1, 9)
+    expect(spanOf(t!.x1 - t!.x0)).toBe(true)
+    expect(t!.x1 - t!.x0).toBeLessThanOrEqual(30)
+    // Not centred.
+    expect(Math.abs((t!.x0 + t!.x1) / 2 - 50)).toBeGreaterThan(5)
+  })
+
+  it('D8: the nearest corner wins; the tie order is bottom-right, bottom-left, top-right, top-left', () => {
+    // A room up against the top-left: its top-left corner is 4 from the frame's.
+    const tl = insetInCorner({ x0: S.M, y0: S.M, x1: 60, y1: 60 }, 1, true, 20, 20, S.GAP, S, S.H)[0]!
+    expect([tl.x0, tl.y0]).toEqual([S.Xr(1), S.M])
+    // A room across the full width at the top: top-left and top-right tie — top-right wins.
+    const tr = insetInCorner({ x0: S.M, y0: S.M, x1: S.W - S.M, y1: 40 }, 1, true, 20, 20, S.GAP, S, S.H)[0]!
+    expect(tr.x1).toBeCloseTo(S.Xr(S.NC) + S.CW, 9)
+    expect(tr.y0).toBe(S.M)
+    // A room down the left side: bottom-left and top-left tie — bottom-left wins.
+    const bl = insetInCorner({ x0: S.M, y0: S.M, x1: 40, y1: S.H - S.M }, 1, true, 20, 20, S.GAP, S, S.H)[0]!
+    expect([bl.x0, bl.y1]).toEqual([S.Xr(1), S.H - S.M])
+  })
+
+  it('D8: two insets in a row sit on the grid, one gutter apart, in the corner', () => {
+    const [a, b] = insetInCorner({ x0: S.M, y0: S.M, x1: S.W - S.M, y1: S.H - S.M }, 2, true, 20, 20, S.GAP, S, S.H)
+    expect(b!.x1).toBeCloseTo(S.Xr(S.NC) + S.CW, 9)
+    expect(b!.x0 - a!.x1).toBeCloseTo(S.G, 9)
+    for (const t of [a!, b!]) expect(onGrid(t.x0, colLefts) && onGrid(t.x1, colRights)).toBe(true)
+  })
+
+  it('D8: the same room gives the same place every time', () => {
+    const room: Box = { x0: 10, y0: 20, x1: 80, y1: 90 }
+    expect(insetInCorner(room, 1, false, 25, 25, S.GAP, S, S.H)).toEqual(insetInCorner(room, 1, false, 25, 25, S.GAP, S, S.H))
+  })
+
+  it('D8: Full bleed\'s inset on the lab Frame is in a corner, on column edges — not centred at x = 0.5', () => {
+    const plan = planLayout({ ...argsFor('fullBleed', portrait, labFrame(), 'swiss'), choice: DEFAULT })!
+    const t = candidatesForFrame(argsFor('fullBleed', portrait, labFrame(), 'swiss'))[0]!.out.els.find((e): e is PhotoEl => e.k === 'p' && e.extra != null)!
+    expect(t.over).toEqual(['photo'])
+    expect(onGrid(t.x, colLefts) && onGrid(t.x + t.w, colRights)).toBe(true)
+    const w = plan.layers.find(l => l.id === 'wired')!
+    expect(Math.abs(w.x - 0.5)).toBeGreaterThan(0.05)
+  })
+
+  it('a tile keeps clear of a logo by the logo\'s own clear space (0.35 × its height), not just the gap', () => {
+    // A test layout: a small title at the top, a 20-tall logo at the bottom-left. The gap (4.2 on
+    // the portrait) is less than the logo's clear space (7): a tile only the gap away breaks rule 9.
+    const def: LayoutDef = {
+      id: 'zzLogoGap', name: 'Logo gap', fits: ['word', 'phrase', 'sentence'],
+      fn: (Sh, { lines }) => ({
+        els: [Sh.disp(lines.join('\n'), { size: 8, x: Sh.X(1), top: Sh.M }), { k: 'logo', x: Sh.M, y: Sh.H - Sh.M - 20, w: 20, h: 20, role: 'logo' }],
+        did: 'A logo.',
+      }),
+    }
+    const undo = __registerLayoutForTest(def)
+    try {
+      expect(S.GAP).toBeLessThan(0.35 * 20)
+      const a = argsFor('zzLogoGap', portrait, labFrame(), 'swiss')
+      const cands = candidatesForFrame(a)
+      expect(cands.length).toBeGreaterThan(0)
+      for (const c of cands) {
+        expect(planLayout({ ...a, choice: c.choice })!.issues).toEqual([])
+        const t = c.out.els.find((e): e is PhotoEl => e.k === 'p' && e.extra != null)!
+        const lg = c.out.els.find(e => e.k === 'logo') as { x: number; y: number; w: number; h: number }
+        const d = Math.max(lg.x - (t.x + t.w), t.x - (lg.x + lg.w), lg.y - (t.y + t.h), t.y - (lg.y + lg.h))
+        // Exactly the clear space: the growth is what bounds the tile.
+        expect(d).toBeCloseTo(0.35 * 20, 9)
+      }
+    } finally { undo() }
+  })
+
+  it('D7: untagging a wired image shows it again and tiles it; nothing is left under "Not shown"', () => {
+    const tagged = { sailor_localLayers: labFrame(), sailor_posterState: { tags: { wired: 'unused' } } }
+    const a1 = { ...argsFor('statement', portrait, labFrame(), 'swiss'), props: tagged }
+    const first = planLayout({ ...a1, choice: candidatesForFrame(a1)[0]!.choice })!
+    expect((first.layers.find(l => l.id === 'wired') as { visible?: boolean }).visible).toBe(false)
+    const untagged = { sailor_localLayers: first.layers, sailor_posterState: { ...first.posterState, tags: {} } }
+    const a2 = { ...argsFor('statement', portrait, first.layers, 'swiss'), props: untagged }
+    const cand = candidatesForFrame(a2)[0]!
+    const t = cand.out.els.find((e): e is PhotoEl => e.k === 'p' && e.extra != null)
+    expect(t).toBeDefined()
+    const plan = planLayout({ ...a2, choice: cand.choice })!
+    const w = plan.layers.find(l => l.id === 'wired') as unknown as { visible?: boolean; crop?: unknown; w: number }
+    expect(w.visible).not.toBe(false)
+    expect(w.crop).toEqual({ fit: 'cover' })
+    expect(w.w).toBeCloseTo(t!.w / 100, 9)
+    expect(plan.notPlaced).toEqual([])
   })
 })
 

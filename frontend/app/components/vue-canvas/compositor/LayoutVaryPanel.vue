@@ -70,8 +70,9 @@ const count = computed(() => props.candidates.length)
 /** Nothing to vary; or already applied with only one variation. Before the first apply, Vary
  *  applies the variation on show, so one is enough. */
 const stuck = computed(() => count.value === 0 || (props.applied && count.value < 2))
-/** Ruling D4: the layout on the Frame has no variation left (a tag, or the Frame's own lines,
- *  changed what it reads) — said where its count and description would be. Only once the style's
+/** Ruling D4: the layout on the Frame has no variation left (a tag, or the Frame's own lines or
+ *  images, changed what it reads) — said where its count and description would be, naming the
+ *  Frame rather than its lines (ruling D4b: an image can be what no longer fits). Only once the style's
  *  library has been planned: before the first plan (faces still loading) nothing is listed yet. */
 const noLongerFits = computed(() => props.applied && !!props.name && count.value === 0 && !!props.libraryDone)
 
@@ -151,7 +152,7 @@ function pick(row: ChoiceRow, k: string) {
         <span v-if="count" class="ml-auto shrink-0 text-[11px] text-white/45 tabular-nums" data-testid="layout-vary-count">{{ index + 1 }} of {{ count }}</span>
       </div>
       <p v-if="current" class="text-[11px] leading-snug text-white/55" data-testid="layout-vary-did">{{ current.out.did }}</p>
-      <p v-else-if="noLongerFits" class="text-[11px] leading-snug text-white/55" data-testid="layout-vary-no-longer-fits">This layout no longer fits the Frame's lines.</p>
+      <p v-else-if="noLongerFits" class="text-[11px] leading-snug text-white/55" data-testid="layout-vary-no-longer-fits">This layout no longer fits the Frame.</p>
     </div>
 
     <!-- 1b. The format the Frame is sized for, its rules, and the lines it leaves out. -->

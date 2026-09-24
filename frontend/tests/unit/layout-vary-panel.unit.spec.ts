@@ -120,7 +120,8 @@ describe('LayoutVaryPanel — lines not shown', () => {
 
 // Ruling D4: the applied layout has no variation left after a tag change.
 describe('LayoutVaryPanel — a layout that no longer fits (D4)', () => {
-  const SENTENCE = 'This layout no longer fits the Frame\'s lines.'
+  // Ruling D4b: about the Frame, not only its lines (an image can be what no longer fits).
+  const SENTENCE = 'This layout no longer fits the Frame.'
   const at = (p: Record<string, unknown>) => mount(LayoutVaryPanel, { props: { ...base, libraryDone: true, ...p }, global: { stubs } })
   it('applied, planned, and no variation: the sentence, where the count and description would be', () => {
     const wrap = at({})

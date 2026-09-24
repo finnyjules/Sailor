@@ -672,7 +672,7 @@ function placeExtras(p: Prepared, ran: Run): Run {
     const bleed = els.map((e, i) => (e.k === 'p' && e.extra == null && boxes[i] && contains(boxes[i]!, area) ? i : -1)).filter(i => i >= 0)
     if (bleed.length) {
       const rest = boxes.filter((b, i): b is Box => b != null && !bleed.includes(i))
-      tiles = tileRooms(freeRects(area, rest, S.GAP, EXTRA_MIN_TILE), n, S.GAP, EXTRA_INSET_MAX * (area.x1 - area.x0))
+      tiles = tileRooms(freeRects(area, rest, S.GAP, EXTRA_MIN_TILE), n, S.GAP, { maxSide: EXTRA_INSET_MAX * (area.x1 - area.x0), S, frameH: H })
       over = [...new Set(bleed.map(i => (els[i]!.k === 'p' ? els[i]!.role ?? 'p' : 'p').replace(/\d+$/, '')))]
     }
   }
@@ -705,9 +705,11 @@ export const EXTRA_INSET_MAX = 1 / 3
  *  `EXTRA_MIN_TILE` or more: as one row or one column, whichever tile is bigger (the row on a tie).
  *  Ruling D6: each tile keeps an aspect between 1:2 and 2:1 — its longer side is cut to twice the
  *  shorter, and it sits centred in its slot (the shorter side, and so the minimum, is unchanged).
- *  `maxSide` (an inset, ruling D5): no side longer than that (never under the minimum). Null: no
+ *  `inset` (ruling D5): no side longer than `maxSide` (never under the minimum), and the tiles sit
+ *  in a corner of the room on the grid (`insetInCorner`, ruling D8) rather than centred. Null: no
  *  room holds them. */
-function tileRooms(rooms: Box[], n: number, gap: number, maxSide = Infinity): Box[] | null {
+function tileRooms(rooms: Box[], n: number, gap: number, inset?: { maxSide: number; S: Sheet; frameH: number }): Box[] | null {
+  const maxSide = inset?.maxSide ?? Infinity
   const clamp = (w: number, h: number) => {
     const w1 = Math.min(w, EXTRA_MAX_ASPECT * h, maxSide)
     const th = Math.min(h, EXTRA_MAX_ASPECT * w1, maxSide)
@@ -722,6 +724,7 @@ function tileRooms(rooms: Box[], n: number, gap: number, maxSide = Infinity): Bo
     const area = (t: { w: number; h: number }) => { const { tw, th } = clamp(t.w, t.h); return tw * th }
     const t = fits.length === 2 && area(col) > area(row) ? col : fits[0]!
     const { tw, th } = clamp(t.w, t.h)
+    if (inset) return insetInCorner(r, n, t.row, tw, th, gap, inset.S, inset.frameH)
     return Array.from({ length: n }, (_, i) => {
       const sx = t.row ? r.x0 + i * (t.w + gap) : r.x0
       const sy = t.row ? r.y0 : r.y0 + i * (t.h + gap)
@@ -730,6 +733,53 @@ function tileRooms(rooms: Box[], n: number, gap: number, maxSide = Infinity): Bo
     })
   }
   return null
+}
+
+/** The corners of a room, in ruling D8's tie order: bottom-right, bottom-left, top-right, top-left. */
+const CORNERS = [['right', 'bottom'], ['left', 'bottom'], ['right', 'top'], ['left', 'top']] as const
+
+/** Ruling D8: an inset's `n` tiles (at most `tw × th` each, one row or one column) in the corner of
+ *  room `r` nearest a corner of the frame (the distance from each of the room's corners to the
+ *  frame's own corner on the same sides; ties in `CORNERS` order), on the grid: each tile spans
+ *  whole columns of the sheet (`Xr(c)` .. `Xr(c) + CW`, the way `photoIn` sizes the image), the
+ *  widest span no wider than `tw` that keeps the minimum tile, a row's tiles one gutter apart; the
+ *  tiles' height is cut to 2:1 of the span (ruling D6). A room whose columns cannot hold that keeps
+ *  the tiles' own width, still in the corner. The tiles meet the room's edges on the corner's
+ *  sides. Deterministic: a function of the room, the sizes and the sheet only. */
+export function insetInCorner(r: Box, n: number, row: boolean, tw: number, th: number, gap: number, S: Sheet, frameH: number): Box[] {
+  let corner: typeof CORNERS[number] = CORNERS[0], best = Infinity
+  for (const c of CORNERS) {
+    const d = Math.hypot(c[0] === 'right' ? S.W - r.x1 : r.x0, c[1] === 'bottom' ? frameH - r.y1 : r.y0)
+    if (d < best - 1e-6) { best = d; corner = c }
+  }
+  const right = corner[0] === 'right', bottom = corner[1] === 'bottom'
+  // The sheet's columns that lie wholly inside the room, left to right.
+  const cols: number[] = []
+  for (let c = 1; c <= S.NC; c++) if (S.Xr(c) >= r.x0 - 1e-6 && S.Xr(c) + S.CW <= r.x1 + 1e-6) cols.push(S.Xr(c))
+  let w = tw, h = th
+  let xs: number[] | null = null
+  for (let k = cols.length; k >= 1; k--) {
+    const need = row ? n * k : k
+    const sw = k * S.CW + (k - 1) * S.G
+    if (need > cols.length || sw > tw + 1e-9) continue
+    const sh = Math.min(th, EXTRA_MAX_ASPECT * sw)
+    if (Math.min(sw, sh) < EXTRA_MIN_TILE) break                        // a narrower span only gets smaller
+    const first = right ? cols.length - need : 0
+    xs = row ? Array.from({ length: n }, (_, i) => cols[first + i * k]!) : [cols[first]!]
+    w = sw; h = sh
+    break
+  }
+  if (!xs) {
+    const gw = row ? n * tw + (n - 1) * gap : tw
+    const x0 = right ? r.x1 - gw : r.x0
+    xs = row ? Array.from({ length: n }, (_, i) => x0 + i * (tw + gap)) : [x0]
+  }
+  const gh = row ? h : n * h + (n - 1) * gap
+  const y0 = bottom ? r.y1 - gh : r.y0
+  return Array.from({ length: n }, (_, i) => {
+    const x = row ? xs![i]! : xs![0]!, y = row ? y0 : y0 + i * (h + gap)
+    return { x0: x, y0: y, x1: x + w, y1: y + h }
+  })
 }
 
 /** Run and check one choice (the ONE path plan and candidates share). Task 3 of the layout
