@@ -299,6 +299,15 @@ export function elementsOf(read: ReadContent, inferred: FrameElements, userLayer
 
 const HINT_RATING_5 = 'Ratings between 4.0 and 4.8 tend to read as more believable than a perfect 5.'
 const HINT_PERCENT_OR_AMOUNT = 'For prices under 100, a percentage reads bigger; above it, an amount does.'
+const HINT_PARTIAL_MARKERS = "Some lines start with a number and some don't."
+
+/** Whether the list's own lines carry a marker (a number or a bullet) on some but not all of them
+ *  (Reasons why then draws no owned numbers of its own — the user's markers lead, ruling R5). */
+function hasPartialMarkers(s: string): boolean {
+  const ls = linesOf(s)
+  const marked = ls.map(l => MARKER_RE.test(l))
+  return marked.some(Boolean) && marked.some(m => !m)
+}
 
 // A price: the currency mark before the number ("$120") or after it ("149 €", "19,50 €") — one
 // capture group per side, so `pricesIn` knows which one matched. Fix round 1: a non-global sibling
@@ -339,6 +348,9 @@ export function contentHints(read: ReadContent, userLayers: LocalLayer[]): strin
   const hints: string[] = []
 
   if (ratingOf(textOfRole('rating'), true) === 5) hints.push(HINT_RATING_5)
+
+  const list = textOfRole('list')
+  if (list && hasPartialMarkers(list)) hints.push(HINT_PARTIAL_MARKERS)
 
   const offer = textOfRole('date')
   if (offer) {

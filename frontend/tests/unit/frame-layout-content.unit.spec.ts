@@ -508,6 +508,17 @@ describe('contentHints (ruling R9)', () => {
     expect(contentHints(read(allHigh, dateIs), allHigh)).toEqual([])
   })
 
+  it('some list lines carry a marker and some don\'t: the partial-marker hint fires, verbatim', () => {
+    const layers = [tl('t', 'Run lighter.', 0.12), tl('l', '1. Carbon plate\nUnder 200 g\n3. Free returns', 0.03)]
+    expect(contentHints(read(layers, { l: 'list' }), layers)).toEqual(["Some lines start with a number and some don't."])
+    // Every line marked: no hint (nothing partial about it).
+    const allMarked = [tl('t', 'Run lighter.', 0.12), tl('l', '1. Carbon plate\n2. Under 200 g\n3. Free returns', 0.03)]
+    expect(contentHints(read(allMarked, { l: 'list' }), allMarked)).toEqual([])
+    // No line marked: no hint either.
+    const noneMarked = [tl('t', 'Run lighter.', 0.12), tl('l', 'Carbon plate\nUnder 200 g\nFree returns', 0.03)]
+    expect(contentHints(read(noneMarked, { l: 'list' }), noneMarked)).toEqual([])
+  })
+
   it('neither hint on an ordinary Frame', () => {
     const layers = [tl('t', 'Weather Report', 0.12), tl('d', 'Ines Vollmer', 0.04), tl('dt', '19.09.–15.11.2026', 0.03), tl('c', 'Kunstraum Lenz', 0.02)]
     expect(contentHints(read(layers), layers)).toEqual([])

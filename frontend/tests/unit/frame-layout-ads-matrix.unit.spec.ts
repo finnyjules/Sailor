@@ -217,14 +217,31 @@ describe('what each layout places (rulings R4, R5, R10)', () => {
   }
   const textOf = (els: El[], role: string) => els.filter(e => e.k === 't' && (e.role ?? '').replace(/\d+$/, '') === role)
 
-  it('Review places the quote as written (no quote marks added), the stars as owned shapes and the user\'s rating line', () => {
+  it('Review places the quote as written (no quote marks added) and the user\'s rating line', () => {
     const { cand, plan } = first('perfReview')
     const q = textOf(cand.out.els, 'quote')
     expect(q).toHaveLength(1)
     expect(q[0]!.k === 't' && q[0]!.s.replace(/\n/g, ' ')).toBe(LINES.q[0])
     expect(textOf(cand.out.els, 'by').map(e => e.k === 't' && e.s)).toEqual([LINES.b[0]])
     expect(textOf(cand.out.els, 'rating').map(e => e.k === 't' && e.s)).toEqual([LINES.r[0]])
-    expect(plan.layers.filter(l => (l as { owner?: { key: string } }).owner?.key.startsWith('stars-'))).toHaveLength(5)
+    // The fixture's rating ("4.7 ★") already shows a star glyph — Review draws no owned stars on
+    // top of it (they would double up).
+    expect(plan.layers.filter(l => (l as { owner?: { key: string } }).owner?.key.startsWith('stars-'))).toHaveLength(0)
+  })
+
+  it('Review draws its own stars only when the rating line carries no star glyph of its own; "did" says "stars" either way', () => {
+    const glyphLayers = fullAdLayers({ action: true })
+    const plain = fullAdLayers({ action: true }).map(l => l.id === 'r' ? { ...l, text: '4.7 out of 5' } as LocalLayer : l)
+    const withGlyph = first('perfReview', glyphLayers)
+    const withoutGlyph = first('perfReview', plain)
+    expect(withGlyph.plan.layers.filter(l => (l as { owner?: { key: string } }).owner?.key.startsWith('stars-'))).toHaveLength(0)
+    expect(withoutGlyph.plan.layers.filter(l => (l as { owner?: { key: string } }).owner?.key.startsWith('stars-'))).toHaveLength(5)
+    expect(textOf(withoutGlyph.cand.out.els, 'rating').map(e => e.k === 't' && e.s)).toEqual(['4.7 out of 5'])
+    expect(withGlyph.cand.out.did).toMatch(/stars and the quote/)
+    expect(withoutGlyph.cand.out.did).toMatch(/stars and the quote/)
+    // ☆ (an empty star) inside an already-recognised rating counts as a glyph too.
+    const outline = fullAdLayers({ action: true }).map(l => l.id === 'r' ? { ...l, text: '★★★★☆' } as LocalLayer : l)
+    expect(first('perfReview', outline).plan.layers.filter(l => (l as { owner?: { key: string } }).owner?.key.startsWith('stars-'))).toHaveLength(0)
   })
 
   it('Us vs them places the list as runs of the one list layer, ✓/✕ as owned text, and the user\'s "vs" line', () => {
@@ -239,6 +256,19 @@ describe('what each layout places (rulings R4, R5, R10)', () => {
     expect(own.map(l => l.text).sort()).toEqual(['✓', '✓', '✓', '✓', '✕', '✕', '✕', '✕'])
     // Ruling R10: the caption layer's family and weight.
     for (const l of own) expect([l.fontFamily, l.fontWeight]).toEqual(['Inter', 600])
+  })
+
+  it('Us vs them: the product image sits below the table, full content width, filling what is left above the foot', () => {
+    const { cand } = first('perfVersus')
+    const S = makeSheet({ frameW: square.w, frameH: square.h, measure: makeStubMeasure(), style: 'performance' })
+    const photo = cand.out.els.find(e => e.k === 'p')!
+    expect(photo.role).toBe('photo')
+    // Full content width (was a small column beside the headings in the prototype).
+    expect(photo.k === 'p' && photo.x).toBeCloseTo(S.X(1), 1)
+    expect(photo.k === 'p' && photo.w).toBeCloseTo(S.SPAN(1, 12), 1)
+    // Below the table's last rule, not above the headings.
+    const lastRuleY = Math.max(...cand.out.els.filter((e): e is El & { k: 'l' } => e.k === 'l').map(e => e.y))
+    expect(photo.k === 'p' && photo.y).toBeGreaterThan(lastRuleY)
   })
 
   it('Us vs them keeps the user\'s markers (ruling R5) and draws a "both" row ticked twice', () => {
@@ -332,6 +362,12 @@ describe('what each layout places (rulings R4, R5, R10)', () => {
     expect(m.cand.out.els.filter(e => e.k === 'own')).toEqual([])
     expect(textOf(m.cand.out.els, 'list').map(e => e.k === 't' && e.s)).toEqual(marked.split('\n'))
     expect((m.plan.layers.find(l => l.id === 'l') as TextLayer).text).toBe(marked)
+    // Partial markers (some lines start with a number, some don't, ruling R9's new hint): the
+    // user's markers still lead and no owned number is drawn for any line.
+    const partial = '1. Carbon plate\nUnder 200 g\nFree returns'
+    const p = first('perfListicle', withList(partial))
+    expect(p.cand.out.els.filter(e => e.k === 'own')).toEqual([])
+    expect(textOf(p.cand.out.els, 'list').map(e => e.k === 't' && e.s)).toEqual(partial.split('\n'))
   })
 
   it('Notes app: the paper and chrome in their fixed colours, owned bullets, the user\'s text in its own colour; with markers, no bullets', () => {

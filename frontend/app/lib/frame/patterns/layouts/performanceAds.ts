@@ -54,6 +54,9 @@ const capOf = (S: Sheet, role: RoleKey) => S.measure.capAbove(faceOf(role)) + S.
 
 const noRoom: MissingEl = { k: 'missing', why: 'no room for the image' }
 
+/** Star glyphs (★ full, ☆ empty, ⭐ emoji) the user may already have put in their own rating line. */
+const STAR_GLYPH_RE = /[★☆⭐]/
+
 /** What an offer foot (`offerBox`) really draws, for a layout's `did`, most prominent first: the
  *  offer (the number), the button (none without an action line, or with the platform's own — the
  *  action has then left the content), the fine print. Every Performance ad says only what it drew. */
@@ -152,8 +155,11 @@ export const perfReview: LayoutDef = {
     let y = topY(S)
     const sSize = Math.max(INFO.size * 2.2, SECOND.size * 0.85)
     const rating = c.raw?.rating
-    if (rv.stars != null) {
-      els.push(stars(rv.stars, X(1), y, sSize))
+    // Owned stars only when the user's own rating line does not already show a star glyph — else
+    // it would double up (the prototype never had a user rating line to collide with).
+    const ownStars = rv.stars != null && !(rating && STAR_GLYPH_RE.test(rating))
+    if (ownStars) {
+      els.push(stars(rv.stars!, X(1), y, sSize))
       // The number after the stars (the prototype's `.stars b`: 0.62 em, 0.5 em after, centred on
       // the stars) — the user's own rating line.
       if (rating) {
@@ -224,9 +230,6 @@ export const perfVersus: LayoutDef = {
     els.push(disp(lines.join('\n'), { size, x: X(1), top: y }))
     y += blockH(lines.length, size, DISPLAY.lh) + groupGap()
     const usX = X(7), usW = SPAN(7, 9), thX = X(10), thW = SPAN(10, 12)
-    const imgH = Math.min(usW * 1.1, RH * 3.2)
-    els.push({ k: 'p', x: usX, y, w: usW, h: imgH, stand: !ph, role: 'photo', radius: 1 })
-    y += imgH + gapBelow(INFO.size)
     // The column headings: the product name (the details line) and the user's own "vs …" line.
     const them = c.raw?.them ?? cmp.them
     const usN = c.details ? countLines(c.details, usW, inFace(INFO, 'details'), INFO.size) : 1
@@ -258,8 +261,17 @@ export const perfVersus: LayoutDef = {
     els.push(rule(X(1), y, SPAN(1, 12)))
     const { details: _details, ...rest } = c                              // the product name heads its column
     const foot = offerBox(S, rest, { x: X(1), w: SPAN(1, 12), bottom: L(16) })
-    if (foot.top < y + groupGap() * 0.8) els.push({ k: 'missing', why: 'the table leaves no room for the offer' })
-    return { els: [...els, ...foot.els], did: 'The headline, then a two-column table: yours ticked in accent, the other side greyed out.' }
+    // The product image grows into the height left under the table, full content width (in place
+    // of the prototype's small image above it) — the same room-check other Performance ads use.
+    const imgTop = y + groupGap()
+    const imgH = foot.top - groupGap() - imgTop
+    const photo: El = imgH > RH * 2
+      ? { k: 'p', x: X(1), y: imgTop, w: SPAN(1, 12), h: imgH, stand: !ph, role: 'photo', radius: 1 }
+      : noRoom
+    return {
+      els: [...els, photo, ...foot.els],
+      did: 'The headline, then a two-column table: yours ticked in accent, the other side greyed out; the product fills what is left under it.',
+    }
   },
 }
 
