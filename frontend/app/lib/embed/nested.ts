@@ -9,7 +9,10 @@
  * - in an exported file, each nested bundle runs before the Frame's and `nestedRegistrationJs`
  *   files the surface it assigned to `__SAILOR_SURFACE__` under `__SAILOR_NESTED__[name]`;
  * - in the app (the poster bake runs the Frame adapter there), `export.ts` registers a loader over
- *   the app registry with `setNestedSurfaceLoader`.
+ *   the app registry with `setNestedSurfaceLoader`. That registration is a side effect of
+ *   IMPORTING `export.ts`: any other in-app Frame mount (a recorder, a preview) must import it
+ *   too, or register its own loader, or every live layer fails with "a live layer's player is
+ *   missing".
  */
 import type { EmbedSurface } from './contract'
 

@@ -528,6 +528,45 @@ describe('frame adapter — a live wired layer', () => {
     handle.destroy()
   })
 
+  it('is sized before its first draw: setSize precedes the first setTime', async () => {
+    setNestedSurfaceLoader(async () => fakeSurface() as any)
+    const handle = await frameSurface.mount(box(), snapWith({ 3: live('gradient') }, [wired('w1', 3)]))
+    const { setSize, setTime } = made[0]!.handle
+    expect(setSize.mock.invocationCallOrder[0]!).toBeLessThan(setTime.mock.invocationCallOrder[0]!)
+    handle.destroy()
+  })
+
+  it('a cover-cropped box of another shape sizes the player by the source it draws, not the box', async () => {
+    setNestedSurfaceLoader(async () => fakeSurface() as any)
+    // A 16:9 source (800×450) cover-cropped into a portrait 300×533 box of a 1000 px Frame at
+    // scale 1: the source must be drawn 948 px wide to cover it — never 300×169.
+    const layer = wired('w1', 3, { w: 0.3, h: 0.533, crop: { fit: 'cover' } })
+    const handle = await frameSurface.mount(box(), snapWith({ 3: live('gradient') }, [layer]))
+    expect(made[0]!.handle.setSize.mock.calls).toEqual([[948, 533]])
+    handle.destroy()
+  })
+
+  it('a nested player that loses its WebGL context makes the next paint throw (the runtime brings back the poster)', async () => {
+    setNestedSurfaceLoader(async () => fakeSurface() as any)
+    const handle = await frameSurface.mount(box(), snapWith({ 3: live('gradient') }, [wired('w1', 3)]))
+    expect(() => handle.setTime(0.2)).not.toThrow()
+    const lost = new Event('webglcontextlost', { cancelable: true })
+    made[0]!.canvas.dispatchEvent(lost)
+    expect(lost.defaultPrevented).toBe(true)
+    expect(() => handle.setTime(0.3)).toThrow('lost its drawing context')
+    expect(() => handle.setSize(2000, 1000)).toThrow('lost its drawing context')
+    handle.destroy()
+  })
+
+  it('destroy stops watching the nested canvas', async () => {
+    setNestedSurfaceLoader(async () => fakeSurface() as any)
+    const handle = await frameSurface.mount(box(), snapWith({ 3: live('gradient') }, [wired('w1', 3)]))
+    handle.destroy()
+    const lost = new Event('webglcontextlost', { cancelable: true })
+    made[0]!.canvas.dispatchEvent(lost)
+    expect(lost.defaultPrevented).toBe(false)
+  })
+
   it('destroy destroys the nested player', async () => {
     setNestedSurfaceLoader(async () => fakeSurface() as any)
     const handle = await frameSurface.mount(box(), snapWith({ 3: live('gradient') }, [wired('w1', 3)]))

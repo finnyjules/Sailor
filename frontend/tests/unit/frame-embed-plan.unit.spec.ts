@@ -129,6 +129,23 @@ describe('planFrameExport', () => {
     expect(p.notices).toContainEqual({ group: 'still', text: 'Space Type · shown as a still in this version', layerId: 'w1' })
   })
 
+  it('a wired layer cover-cropped into a box of another shape is sized by the source it draws, not the box', () => {
+    // A 16:9 source (lastAspect 0.5625) cover-cropped into a portrait 300×533 box of a 1000 px
+    // Frame is drawn 948 px wide: 2× that, not 2 × 533.
+    const w = { kind: 'wired', id: 'w1', slot: 0, w: 0.3, h: 0.533, crop: { fit: 'cover' }, lastAspect: 0.5625, x: 0.5, y: 0.5 } as any
+    const p = planFrameExport(input(variant([w]), {
+      wiredSlots: [{ slot: 0, layerId: 'w1', label: 'Gradient', animated: true, fps: 30, duration: 2 }],
+    }))
+    expect(p.wiredClips[0]!.maxPx).toBe(Math.ceil(2 * 0.533 * 1000 / 0.5625))   // 1896
+    // The same layer as a still is sized the same way.
+    expect(planFrameExport(input(variant([w]))).wiredStills).toEqual([{ slot: 0, maxPx: 1896 }])
+  })
+
+  it('an extreme cover crop is capped at 4096 px', () => {
+    const w = { kind: 'wired', id: 'w1', slot: 0, w: 0.1, h: 1, crop: { fit: 'cover' }, lastAspect: 0.1, x: 0.5, y: 0.5 } as any
+    expect(planFrameExport(input(variant([w]))).wiredStills).toEqual([{ slot: 0, maxPx: 4096 }])
+  })
+
   it('a still wired layer is captured without a notice', () => {
     const w = { kind: 'wired', id: 'w1', slot: 1, w: 0.5, lastAspect: 1, x: 0.5, y: 0.5 } as any
     const p = planFrameExport(input(variant([w]), {

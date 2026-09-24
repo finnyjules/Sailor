@@ -41,6 +41,7 @@ import { applyStackPost, chainActive } from '~/lib/compositor/postEffects'
 import '~/lib/motion/paint' // registers the per-layer animation painter paintLayerStack relies on
 import { slotPhase01 } from '~/lib/compositor/masterClock'
 import { resolveNestedSurface, nestedDeviceSize } from '../nested'
+import { wiredSourceLongSide, type WiredDrawLayer } from '../frame/wiredDraw'
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((res, rej) => {
@@ -79,18 +80,17 @@ export function stackItemsFor(v: FrameVariant): StackItem[] {
 }
 
 /**
- * The longest side, in Frame (artboard) pixels, any wired layer on each slot is drawn at — as the
- * planner sizes a wired slot's pictures (plan.ts's wired branch): `w` is a fraction of the Frame's
- * width, the height is `w × lastAspect`.
+ * The longest side, in Frame (artboard) pixels, the SOURCE of each slot is drawn at by any wired
+ * layer on it — the painter's box and cover crop (../frame/wiredDraw.ts, shared with the planner),
+ * with the source's own size from `srcFor` (a live entry's width × height).
  */
-export function wiredLongSides(v: FrameVariant): Map<number, number> {
+export function wiredLongSides(v: FrameVariant, srcFor: (slot: number) => { w: number; h: number } | undefined = () => undefined): Map<number, number> {
   const out = new Map<number, number>()
   for (const l of v.layers) {
     if (l.kind !== 'wired') continue
-    const wl = l as LocalLayer & { slot: number; w: number; lastAspect: number }
-    const w = Number(wl.w) || 0
-    const aspect = Number(wl.lastAspect) || 1
-    const long = Math.max(w, w * aspect) * v.width
+    const wl = l as LocalLayer & { slot: number } & WiredDrawLayer
+    const src = srcFor(wl.slot)
+    const long = wiredSourceLongSide(wl, v.width, src?.w, src?.h)
     out.set(wl.slot, Math.max(out.get(wl.slot) ?? 0, long))
   }
   return out
@@ -167,7 +167,15 @@ const frameSurface: EmbedSurface = {
     // Nested players mounted so far — destroyed with the handle, and by a mount that fails later
     // (a later nested player rejecting included), so a rejected mount leaves no GL context behind.
     const nested: EmbedHandle[] = []
+    // A nested player's canvas losing its WebGL context (the browser's context cap, a GPU reset)
+    // would paint an empty box inside a Frame that keeps playing. The runtime watches only the
+    // stage's own canvas — the Frame's 2D one — so each nested canvas is watched here, and the
+    // next paint THROWS: the runtime's catch then brings back the poster, as it does for the
+    // Frame's own canvas. Never a half-drawn Frame.
+    let nestedLost = false
+    const unlisten: (() => void)[] = []
     const cleanup = () => {
+      for (const off of unlisten.splice(0)) off()
       for (const h of nested.splice(0)) {
         try { h.destroy() } catch { /* one failing destroy must not keep the rest alive */ }
       }
@@ -243,7 +251,10 @@ const frameSurface: EmbedSurface = {
       const stills = new Map<number, HTMLImageElement>()
       const clips = new Map<number, { frames: HTMLImageElement[]; duration: number }>()
       const lives = new Map<number, LiveSlot>()
-      const longSides = wiredLongSides(v)
+      const longSides = wiredLongSides(v, (slot) => {
+        const e = snap.wired?.[slot]
+        return e?.kind === 'live' ? { w: e.width, h: e.height } : undefined
+      })
       for (const [slot, entry] of Object.entries(snap.wired ?? {})) {
         if (entry.kind === 'clip') {
           // Every frame decodes at once (they are data URIs — no network), in order.
@@ -261,6 +272,9 @@ const frameSurface: EmbedSurface = {
           nested.push(handle)
           const nestedCanvas = holder.querySelector('canvas')
           if (!nestedCanvas) throw new Error('embed: a live layer\'s player drew no canvas')
+          const onLost = (e: Event) => { e.preventDefault(); nestedLost = true }
+          nestedCanvas.addEventListener('webglcontextlost', onLost)
+          unlisten.push(() => nestedCanvas.removeEventListener('webglcontextlost', onLost))
           lives.set(Number(slot), {
             handle, canvas: nestedCanvas, duration: entry.duration, srcW: entry.width, srcH: entry.height,
             longPx: longSides.get(Number(slot)) ?? 0, size: null,
@@ -325,6 +339,7 @@ const frameSurface: EmbedSurface = {
       // soften any field over 512 px and, through the same flag, draw the displacement ghost.
       // The canvas cap above bounds the worst case instead.
       const paint = (t01: number) => {
+        if (nestedLost) throw new Error('embed: a live layer lost its drawing context')
         lastT = t01
         const tSec = t01 * snap.duration
         paintSec = tSec

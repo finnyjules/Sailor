@@ -14,6 +14,12 @@ import { resolveEffectId } from '~/lib/shaderfx/catalogStore'
 import { clipPlayedSeconds, type ImageClip } from '~/lib/compositor/clip'
 import { deriveMasterClock } from '~/lib/compositor/masterClock'
 import type { FrameFit, FrameNotice, FrameVariant } from './types'
+import { wiredSourceLongSide, type WiredDrawLayer } from './wiredDraw'
+
+/** The longest side a wired slot's pre-rendered pictures are made at — the live player's own
+ *  ceiling (nested.ts). An extreme cover crop (a very wide source in a tall box) would otherwise
+ *  ask for frames far past what a canvas or a WebP can hold. */
+export const MAX_WIRED_PX = 4096
 
 /** `fps`/`duration`: the slot's live frame source's clock, when it has one. An animated slot
  *  with both plays as pre-rendered frames; one without stays a still. */
@@ -181,10 +187,12 @@ export function planFrameExport(input: FrameExportInput): FramePlan {
       if (t.accentFace) addFont(t.accentFace, weight, text, outline)
     }
     if (l.kind === 'wired') {
-      const wl = l as LocalLayer & { slot: number; w: number; lastAspect: number }
-      const w = Number(wl.w) || 0
-      const aspect = Number(wl.lastAspect) || 1
-      const maxPx = Math.ceil(2 * Math.max(w, w * aspect) * v.width)
+      const wl = l as LocalLayer & { slot: number } & WiredDrawLayer
+      // 2× the size the painter draws the SOURCE at (its box and cover crop — wiredDraw.ts, the
+      // rule the live player shares), not the layer's box: a 16:9 source cover-cropped into a
+      // portrait box is drawn far wider than the box. `lastAspect` is the content's aspect here
+      // (the host keeps it so for every layer that is not unlinked). Capped at MAX_WIRED_PX.
+      const maxPx = Math.min(MAX_WIRED_PX, Math.ceil(2 * wiredSourceLongSide(wl, v.width)))
       const info = input.wiredSlots.find(s => s.layerId === l.id)
       const fps = Number(info?.fps), duration = Number(info?.duration)
       if (info?.animated && fps > 0 && duration > 0) {
