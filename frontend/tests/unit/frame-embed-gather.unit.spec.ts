@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildFrameSnapshot, computeNeedsOutlines, isBlocked, type FrameExportIO } from '~/lib/embed/frame/gather'
+import { buildFrameSnapshot, computeNeedsOutlines, formatBytes, isBlocked, type FrameExportIO } from '~/lib/embed/frame/gather'
 import { planFrameExport } from '~/lib/embed/frame/plan'
 import { assetKey, type FrameVariant } from '~/lib/embed/frame/types'
-import { makeFontSource } from '~/lib/embed/frame/appIO'
+import { createAppFrameExportIO, makeFontSource } from '~/lib/embed/frame/appIO'
 import { createTextLayer, createImageLayer, createRectLayer } from '~/composables/useCompositorLayers'
 import { clipFrameKey } from '~/lib/compositor/clip'
 import { createEffect } from '~/lib/compositor/effectStack'
@@ -242,5 +242,122 @@ describe('computeNeedsOutlines', () => {
     ;(t as any).renderAsOutline = true
     const snap = await buildFrameSnapshot(plan([t]), v([t]), fakeIO())
     expect(snap.needsOutlines).toBe(true)
+  })
+})
+
+// Task 2 (live wired layers): an animated wired slot whose studio can play live carries that
+// studio's own embed player instead of pre-rendered frames. Anything else keeps the frames path.
+describe('buildFrameSnapshot — a wired slot that plays live', () => {
+  const wiredLayer = (id: string, slot: number) =>
+    ({ kind: 'wired', id, slot, w: 0.5, lastAspect: 0.5, x: 0.5, y: 0.5, rotation: 0, opacity: 1 }) as any
+  const gradientEmbed = (seed = 1) => ({
+    surface: 'gradient', bundle: 'gradient', config: { cfg: { seed, layers: [{}] }, duration: 4 },
+    width: 1080, height: 608, duration: 4,
+  })
+  const configBytes = (c: unknown) => new TextEncoder().encode(JSON.stringify(c)).length
+  const livePlan = (layers: any[], slots: { slot: number; layerId: string; label: string }[], extra: Record<string, unknown> = {}) =>
+    planFrameExport({
+      variant: v(layers), fit: 'fit', catalogIds: new Set(), hasMotion: false, animatedFill: false,
+      wiredSlots: slots.map(s => ({ ...s, animated: true, fps: 30, duration: 4 })), ...extra,
+    })
+
+  it('carries the player and its config, pulls no frames, and says what it adds', async () => {
+    const w = wiredLayer('w1', 0)
+    const p = livePlan([w], [{ slot: 0, layerId: 'w1', label: 'Gradient' }])
+    const embed = gradientEmbed()
+    const io = fakeIO({ wiredEmbed: vi.fn(async () => embed), bundleBytes: vi.fn(async () => 300_000) })
+    const snap = await buildFrameSnapshot(p, v([w]), io)
+    expect(io.wiredEmbed).toHaveBeenCalledWith(0)
+    expect(io.wiredFrames).not.toHaveBeenCalled()
+    expect(io.bundleBytes).toHaveBeenCalledWith('gradient')
+    expect(snap.wired[0]).toEqual({ kind: 'live', ...embed })
+    const bytes = 300_000 + configBytes(embed.config)
+    expect(snap.notices).toContainEqual({ group: 'live', text: `Gradient · plays live · adds ${formatBytes(bytes)}`, layerId: 'w1', bytes })
+    expect(snap.notices.some(n => n.text.includes('pre-rendered'))).toBe(false)
+    expect(isBlocked(snap)).toBe(false)
+  })
+
+  it('a source that cannot play live, or fails to say, keeps the pre-rendered frames — no block', async () => {
+    const w = wiredLayer('w1', 0)
+    const p = livePlan([w], [{ slot: 0, layerId: 'w1', label: 'Gradient' }])
+    const frames = ['data:image/webp;base64,AAAA']
+    for (const wiredEmbed of [vi.fn(async () => null), vi.fn(async () => { throw new Error('no') })]) {
+      const io = fakeIO({ wiredEmbed, bundleBytes: vi.fn(async () => 300_000), wiredFrames: vi.fn(async () => ({ frames: Array(120).fill(frames[0]), failures: [] })) })
+      const snap = await buildFrameSnapshot(p, v([w]), io)
+      expect(io.wiredFrames).toHaveBeenCalledTimes(1)
+      expect(snap.wired[0]?.kind).toBe('clip')
+      expect(snap.notices.find(n => n.layerId === 'w1')!.text).toMatch(/^Gradient · pre-rendered · 120 frames · adds /)
+      expect(isBlocked(snap)).toBe(false)
+    }
+  })
+
+  it('a player whose bundle cannot be measured keeps the pre-rendered frames', async () => {
+    const w = wiredLayer('w1', 0)
+    const p = livePlan([w], [{ slot: 0, layerId: 'w1', label: 'Gradient' }])
+    const io = fakeIO({
+      wiredEmbed: vi.fn(async () => gradientEmbed()), bundleBytes: vi.fn(async () => { throw new Error('404') }),
+      wiredFrames: vi.fn(async () => ({ frames: Array(120).fill('data:image/webp;base64,AAAA'), failures: [] })),
+    })
+    const snap = await buildFrameSnapshot(p, v([w]), io)
+    expect(snap.wired[0]?.kind).toBe('clip')
+    expect(isBlocked(snap)).toBe(false)
+  })
+
+  it('an IO without the live route (no wiredEmbed, or no bundleBytes) is today\'s frames path', async () => {
+    const w = wiredLayer('w1', 0)
+    const p = livePlan([w], [{ slot: 0, layerId: 'w1', label: 'Gradient' }])
+    const frames = vi.fn(async () => ({ frames: Array(120).fill('data:image/webp;base64,AAAA'), failures: [] }))
+    const noBytes = fakeIO({ wiredEmbed: vi.fn(async () => gradientEmbed()), wiredFrames: frames })
+    expect((await buildFrameSnapshot(p, v([w]), noBytes)).wired[0]?.kind).toBe('clip')
+    expect(noBytes.wiredEmbed).not.toHaveBeenCalled()
+    expect((await buildFrameSnapshot(p, v([w]), fakeIO({ wiredFrames: frames }))).wired[0]?.kind).toBe('clip')
+  })
+
+  it('two slots on one player: the second counts only its config', async () => {
+    const a = wiredLayer('w1', 0), b = wiredLayer('w2', 1)
+    const p = livePlan([a, b], [{ slot: 0, layerId: 'w1', label: 'Gradient' }, { slot: 1, layerId: 'w2', label: 'Layer 2' }])
+    const embeds = [gradientEmbed(1), gradientEmbed(22)]
+    const io = fakeIO({ wiredEmbed: vi.fn(async (slot: number) => embeds[slot]!), bundleBytes: vi.fn(async () => 300_000) })
+    const snap = await buildFrameSnapshot(p, v([a, b]), io)
+    expect(snap.wired[0]).toEqual({ kind: 'live', ...embeds[0] })
+    expect(snap.wired[1]).toEqual({ kind: 'live', ...embeds[1] })
+    const first = 300_000 + configBytes(embeds[0]!.config), second = configBytes(embeds[1]!.config)
+    expect(snap.notices).toContainEqual({ group: 'live', text: `Gradient · plays live · adds ${formatBytes(first)}`, layerId: 'w1', bytes: first })
+    expect(snap.notices).toContainEqual({ group: 'live', text: `Layer 2 · plays live · adds ${formatBytes(second)}`, layerId: 'w2', bytes: second })
+  })
+
+  it('the Frame\'s loop is the plan\'s, whichever route a slot takes', async () => {
+    const w = wiredLayer('w1', 0)
+    const p = planFrameExport({
+      variant: v([w]), fit: 'fit', catalogIds: new Set(), hasMotion: false, animatedFill: false,
+      wiredSlots: [{ slot: 0, layerId: 'w1', label: 'Gradient', animated: true, fps: 30, duration: 3 }],
+    })
+    const live = await buildFrameSnapshot(p, v([w]), fakeIO({
+      wiredEmbed: vi.fn(async () => ({ ...gradientEmbed(), duration: 3 })), bundleBytes: vi.fn(async () => 1),
+    }))
+    expect(p.duration).toBe(3)
+    expect(live.duration).toBe(3)
+    expect(live.still).toBe(false)
+  })
+})
+
+describe('createAppFrameExportIO — the live route', () => {
+  it('passes wiredEmbed through, and measures each bundle once, in bytes, from the file export.ts inlines', async () => {
+    const fetch = vi.fn(async (url: string) => (url.includes('missing')
+      ? new Response('', { status: 404 })
+      : new Response('é'.repeat(10))))   // 10 characters, 20 bytes
+    vi.stubGlobal('fetch', fetch)
+    try {
+      const wiredEmbed = vi.fn(async () => null)
+      const io = createAppFrameExportIO({ uploaded: [], wiredStill: () => null, catalog: [], wiredEmbed })
+      expect(io.wiredEmbed).toBe(wiredEmbed)
+      expect(await io.bundleBytes!('gradient')).toBe(20)
+      expect(await io.bundleBytes!('gradient')).toBe(20)
+      expect(fetch.mock.calls.map(c => c[0])).toEqual(['/embed/gradient.js'])
+      await expect(io.bundleBytes!('missing')).rejects.toThrow('404')
+      await expect(io.bundleBytes!('missing')).rejects.toThrow('404')
+      expect(fetch).toHaveBeenCalledTimes(3)   // a failure is not remembered as a size
+      expect(createAppFrameExportIO({ uploaded: [], wiredStill: () => null, catalog: [] }).wiredEmbed).toBeUndefined()
+    } finally { vi.unstubAllGlobals() }
   })
 })

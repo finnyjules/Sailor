@@ -5149,6 +5149,9 @@ async function buildWebExport() {
           } finally { if (shared && --webExportPulls === 0 && !unmounted) startLive() }
         })
       },
+      // Tried first for an animated slot: a studio that can play live ships its own embed player
+      // instead of frames (StudioFrameSource.embed); null or absent → the frames above.
+      wiredEmbed: slot => layers.value.find(x => x.slot === slot + 1)?.live?.embed?.() ?? Promise.resolve(null),
     })
     const snap = await buildFrameSnapshot(plan, variant, io)
     if (gen !== webExportGen) return

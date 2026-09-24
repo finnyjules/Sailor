@@ -125,8 +125,13 @@ export function createAppFrameExportIO(opts: {
   /** An animated wired slot's frames (usually `pullSourceFrames` over the slot's live source).
    *  Absent: no slot can play, and a planned clip blocks the export with its name. */
   wiredFrames?: FrameExportIO['wiredFrames']
+  /** An animated wired slot's studio embed player (usually the slot's live source's `embed()`).
+   *  Absent: no slot plays live — every animated slot takes the frames path. */
+  wiredEmbed?: FrameExportIO['wiredEmbed']
   catalog: EffectDef[]
 }): FrameExportIO {
+  // One fetch per bundle per IO (one build): two live slots on one player measure it once.
+  const bundleSizes = new Map<string, Promise<number>>()
   return {
     async fetchBlob(url) {
       const res = await fetch(url)
@@ -152,5 +157,21 @@ export function createAppFrameExportIO(opts: {
     wiredFrames: opts.wiredFrames ?? (async () => { throw new Error('no wired frame source') }),
     depthImage: ref => depthImageFor(ref),
     shaderDefs: ids => opts.catalog.filter(d => ids.includes(d.id)),
+    wiredEmbed: opts.wiredEmbed,
+    // The bundle export.ts will inline (the same `/embed/{name}.js`), measured as the bytes it
+    // adds to the file. A failed fetch is not kept, so it is not remembered as a size.
+    bundleBytes(bundle) {
+      let size = bundleSizes.get(bundle)
+      if (!size) {
+        size = (async () => {
+          const res = await fetch(`/embed/${bundle}.js`)
+          if (!res.ok) throw new Error(`/embed/${bundle}.js: HTTP ${res.status}`)
+          return new Blob([await res.text()]).size
+        })()
+        bundleSizes.set(bundle, size)
+        size.catch(() => { if (bundleSizes.get(bundle) === size) bundleSizes.delete(bundle) })
+      }
+      return size
+    },
   }
 }

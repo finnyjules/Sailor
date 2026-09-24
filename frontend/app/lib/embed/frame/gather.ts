@@ -19,6 +19,7 @@ import type { DepthRef } from '~/lib/compositor/depthRegistry'
 import type { EffectDef } from '~/lib/shaderfx/types'
 import type { FontWeightSpec } from '../fontFace'
 import type { FramePlan } from './plan'
+import type { StudioEmbed } from '~/lib/studio/frameSource'
 import { assetKey, type FrameFontAsset, type FrameFontOrigin, type FrameNotice, type FrameSnapshot, type FrameVariant, type WiredEntry } from './types'
 
 export interface FontSource { url: string; origin: FrameFontOrigin; weight: FontWeightSpec }
@@ -51,6 +52,11 @@ export interface FrameExportIO {
   wiredFrames(slot: number, count: number, maxPx: number, encode: (frame: CanvasImageSource) => Promise<string>): Promise<WiredFrames>
   depthImage(ref: DepthRef): CanvasImageSource | null
   shaderDefs(ids: string[]): EffectDef[]
+  /** An animated wired slot's studio embed player (StudioFrameSource.embed), or null when the
+   *  source cannot play live faithfully. With `bundleBytes`, the live route; either absent, none. */
+  wiredEmbed?(slot: number): Promise<StudioEmbed | null>
+  /** The size in bytes of the embed bundle `bundle` (`/embed/{bundle}.js`), for the sheet. */
+  bundleBytes?(bundle: string): Promise<number>
 }
 
 const ORIGIN_LABEL: Record<FrameFontOrigin, string> = {
@@ -210,7 +216,24 @@ export async function buildFrameSnapshot(plan: FramePlan, variant: FrameVariant,
     const src = io.wiredStill(w.slot)
     if (src) wired[w.slot] = { kind: 'still', dataUrl: await io.imageToDataUrl(src, w.maxPx, 'image/webp') }
   }
-  // An animated wired slot: its loop, pre-rendered from the live source (the editor's
+  // The live route first: a studio that can play its slot faithfully ships its own embed player
+  // (the bundle once per file, the config per slot) instead of frames. A source that cannot — no
+  // embed, null, a rejection, or a bundle that cannot be measured — takes the frames path below,
+  // which is today's route: a fallback, never a block.
+  const bundlesCounted = new Set<string>()
+  const liveEntry = async (slot: number): Promise<{ entry: WiredEntry; bytes: number } | null> => {
+    if (!io.wiredEmbed || !io.bundleBytes) return null
+    try {
+      const e = await io.wiredEmbed(slot)
+      if (!e) return null
+      const bundle = bundlesCounted.has(e.bundle) ? 0 : await io.bundleBytes(e.bundle)
+      bundlesCounted.add(e.bundle)
+      const config = new TextEncoder().encode(JSON.stringify(e.config)).length
+      const { surface, bundle: name, config: cfg, width, height, duration } = e
+      return { entry: { kind: 'live', surface, bundle: name, config: cfg, width, height, duration }, bytes: bundle + config }
+    } catch { return null }
+  }
+  // Otherwise an animated wired slot: its loop, pre-rendered from the live source (the editor's
   // `slotPhase01` timing — frame i at i / count). Frames that cannot be rendered BLOCK: a still in
   // their place would be a plausible wrong picture.
   // An asset the source could not load BLOCKS too, named: the frames would show a hole (an
@@ -218,6 +241,12 @@ export async function buildFrameSnapshot(plan: FramePlan, variant: FrameVariant,
   // The size is counted from the frames handed back, not inside `encode`: the app may hand back
   // frames it pulled for an earlier build (the Frame editor keeps them while the sheet is open).
   for (const c of plan.wiredClips) {
+    const live = await liveEntry(c.slot)
+    if (live) {
+      wired[c.slot] = live.entry
+      liveNotices.push({ group: 'live', text: `${c.label} · plays live · adds ${formatBytes(live.bytes)}`, layerId: c.layerId, bytes: live.bytes })
+      continue
+    }
     const count = Math.max(1, Math.round(c.duration * c.fps))
     try {
       const got = await io.wiredFrames(c.slot, count, c.maxPx,

@@ -45,6 +45,11 @@ export class StudioExportFailed extends Error {
   }
 }
 
+/** What a wired layer needs to play live in a Frame export: the studio's own embed player
+ *  (`surface` = its embed kind, `bundle` = bundleNameFor(surface, config)) and config.
+ *  `width`/`height`: the source's native size (the aspect the player keeps). */
+export interface StudioEmbed { surface: string; bundle: string; config: unknown; width: number; height: number; duration: number }
+
 export interface StudioFrameSource {
   getFrame: (t01: number, w: number, h: number) => Promise<TexImageSource>
   duration: number
@@ -52,6 +57,9 @@ export interface StudioFrameSource {
   width: number
   height: number
   openExport?(size: { width: number; height: number }): Promise<StudioExportSession>
+  /** Absent, or resolving null: this source cannot play live faithfully right now — export it
+   *  as frames. Never rejects for an ordinary reason; a rejection is treated like null. */
+  embed?(): Promise<StudioEmbed | null>
 }
 
 const _frameSources = new Map<string, StudioFrameSource>()

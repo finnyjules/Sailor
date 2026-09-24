@@ -147,6 +147,37 @@ describe('makeGradientFrameSource', () => {
     expect(a).not.toBe(b)
   })
 
+  // Task 2 (Frame export live route): an animated gradient plays in a Frame export as its own
+  // embed player, with exactly the config GradientStudioSurface's exportWebEmbed builds.
+  it('embed(): an animated config resolves the gradient player, a deep copy of the config and the loop', async () => {
+    const c = cfg({ flow: { speed: 40 }, layers: [{ color: { stops: ['#000', '#fff'] } }] })
+    const src = makeGradientFrameSource({ getConfig: () => c, render: () => ({} as any) })
+    const e = await src.embed!()
+    expect(e).toEqual({
+      surface: 'gradient', bundle: 'gradient',
+      config: { cfg: c, duration: 6 },
+      width: 1080, height: 608, duration: 6,
+    })
+    const copy = (e!.config as any).cfg
+    expect(copy).not.toBe(c)
+    expect(copy.layers).not.toBe(c.layers)
+    expect(copy.layers[0].color).not.toBe(c.layers[0].color)
+  })
+
+  it('embed(): a reactive config is copied from its raw object', async () => {
+    const { reactive } = await import('vue')
+    const c = reactive(cfg({ motion: { tracks: [{ path: 'flow.angle' }], duration: 3, fps: 25, size: 800 }, canvas: { aspect: '1:1' } }))
+    const src = makeGradientFrameSource({ getConfig: () => c, render: () => ({} as any) })
+    const e = await src.embed!()
+    expect(e).toMatchObject({ width: 800, height: 800, duration: 3, config: { duration: 3 } })
+    expect((e!.config as any).cfg.motion.tracks).toEqual([{ path: 'flow.angle' }])
+  })
+
+  it('embed(): a still config resolves null — nothing to play', async () => {
+    const src = makeGradientFrameSource({ getConfig: () => cfg(), render: () => ({} as any) })
+    expect(await src.embed!()).toBeNull()
+  })
+
   it('one source serves several consumers in a tick without handing them the same canvas', async () => {
     const src = makeGradientFrameSource({
       getConfig: () => cfg(), render: () => ({ painted: 'x' } as any),

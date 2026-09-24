@@ -1,5 +1,8 @@
-import { test, expect } from '@playwright/test'
+import { readFile, writeFile } from 'node:fs/promises'
+import { test, expect, type BrowserContext, type Page } from '@playwright/test'
 import { openHarness, renderExported, pixelDiff } from './_frameEmbedHelpers'
+import { openBlankWorkflow, waitForBackend } from './_helpers'
+import { externalRefs } from '../app/lib/embed/bundle'
 
 test.describe('Frame embed — zero network', () => {
   test.beforeEach(async ({ page }) => openHarness(page))
@@ -65,5 +68,163 @@ test.describe('Frame embed — zero network', () => {
       context, html, 0.4, { width: 1000, height: 500 }, { ignorePageErrorsMatching: /ERR_NAME_NOT_RESOLVED/ },
     )
     expect(requests.some(u => u.includes('/view?'))).toBe(true)
+  })
+})
+
+// ── Task 2 (live wired layers): an animated wired Gradient plays LIVE in the Frame export ────────
+// End to end in the real app: a Gradient Studio node (animated: one hue track) wired into a Frame,
+// the Frame editor's own export sheet, the downloaded file. The file carries the Gradient's own
+// embed player, not frames; it makes no request; two frozen moments differ inside the Gradient's
+// box; and the nested player draws at the box's size and the Gradient's own aspect — not the
+// 512-square its adapter falls back to when mounted off-document, stretched into the box.
+
+/** The Frame's wired layer box in the exported canvas's pixels, from the file's own snapshot. */
+function boxOf(snap: any, cw: number, ch: number): { x: number; y: number; w: number; h: number } {
+  const v = snap.variants[0]
+  const wl = v.layers.find((l: any) => l.kind === 'wired')
+  const k = cw / v.width   // the viewport has the artboard's aspect, so Fit maps it edge to edge
+  const w = wl.w * v.width * k, h = wl.w * (wl.lastAspect || 1) * v.width * k
+  return { x: wl.x * cw - w / 2, y: wl.y * ch - h / 2, w, h }
+}
+
+/** Loads the file frozen at `t01` and reads every WebGL2 canvas it made (the nested players draw
+ *  off-document, so they are found by hooking getContext) plus the Frame's own canvas size. */
+async function probeGlCanvases(context: BrowserContext, html: string, t01: number, viewport: { width: number; height: number }) {
+  const url = 'http://frame-embed-probe.invalid/'
+  await context.addInitScript((t: number) => {
+    ;(window as any).__SAILOR_FREEZE_T01__ = t
+    const gl: HTMLCanvasElement[] = ((window as any).__glCanvases = [])
+    const orig = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, kind: string, ...rest: any[]) {
+      if (kind === 'webgl2' && !gl.includes(this)) gl.push(this)
+      return (orig as any).call(this, kind, ...rest)
+    } as any
+  }, t01)
+  const p = await context.newPage()
+  await p.route(url, r => r.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: html }))
+  await p.setViewportSize(viewport)
+  await p.goto(url)
+  await p.waitForFunction(() => {
+    const c = document.querySelector('#sailor-embed canvas') as HTMLCanvasElement | null
+    return !!c && c.width > 1
+  }, undefined, { timeout: 30_000 })
+  await p.waitForTimeout(300)
+  const out = await p.evaluate(() => {
+    const main = document.querySelector('#sailor-embed canvas') as HTMLCanvasElement
+    return {
+      main: { w: main.width, h: main.height },
+      gl: ((window as any).__glCanvases as HTMLCanvasElement[]).map(c => ({ w: c.width, h: c.height, inDocument: c.isConnected })),
+    }
+  })
+  await p.close()
+  return out
+}
+
+/** Pixels inside `box` whose any channel differs by more than `threshold` levels. */
+async function regionDiff(page: Page, a: string, b: string, box: { x: number; y: number; w: number; h: number }, threshold = 8) {
+  return await page.evaluate(async ([x, y, bx, th]) => {
+    const load = (u: string) => new Promise<HTMLImageElement>((res) => { const i = new Image(); i.onload = () => res(i); i.src = u })
+    const [ia, ib] = await Promise.all([load(x as string), load(y as string)])
+    const r = bx as { x: number; y: number; w: number; h: number }
+    const x0 = Math.max(0, Math.ceil(r.x) + 2), y0 = Math.max(0, Math.ceil(r.y) + 2)
+    const w = Math.min(ia.width - x0, Math.floor(r.w) - 4), h = Math.min(ia.height - y0, Math.floor(r.h) - 4)
+    const data = (i: HTMLImageElement) => {
+      const c = document.createElement('canvas'); c.width = i.width; c.height = i.height
+      const g = c.getContext('2d')!; g.drawImage(i, 0, 0); return g.getImageData(x0, y0, w, h).data
+    }
+    const da = data(ia), db = data(ib)
+    let differing = 0
+    for (let p = 0; p < da.length; p += 4) {
+      if (Math.abs(da[p]! - db[p]!) > (th as number) || Math.abs(da[p + 1]! - db[p + 1]!) > (th as number)
+        || Math.abs(da[p + 2]! - db[p + 2]!) > (th as number)) differing++
+    }
+    return { differing, total: da.length / 4 }
+  }, [a, b, box, threshold] as const)
+}
+
+test.describe('Frame embed — a wired Gradient plays live', () => {
+  test('the sheet says it plays live; the file carries its player, makes no request, animates, and keeps its shape', async ({ page, context }, testInfo) => {
+    test.setTimeout(240_000)
+
+    // An animated Gradient config: the embed harness's own fixture (the studio's defaults plus a
+    // full hue sweep over 4 s), made 16:9 so a stretched square would show.
+    await page.goto('/dev/embed-harness')
+    await page.waitForFunction(() => (window as any).__embedHarnessGradientReady === true, undefined, { timeout: 30_000 })
+    const cfg = await page.evaluate(() => JSON.parse(JSON.stringify((window as any).__embedHarnessGradient.config.cfg)))
+    cfg.canvas.aspect = '16:9'
+
+    await openBlankWorkflow(page)
+    await waitForBackend(page)
+    const ids = async () => await page.locator('.vue-flow__node').evaluateAll(els => els.map(e => e.getAttribute('data-id')))
+    const before = new Set(await ids())
+    await page.evaluate((c) => {
+      window.dispatchEvent(new CustomEvent('sailor:addNode', { detail: { nodeType: 'GradientStudio', propertyOverrides: { sailor_gradientStudio: c } } }))
+    }, cfg)
+    await expect.poll(async () => (await ids()).filter(i => !before.has(i)).length, { timeout: 10_000 }).toBe(1)
+    const gradientId = (await ids()).find(i => !before.has(i))!
+    const withGradient = new Set(await ids())
+    await page.evaluate((id) => {
+      window.dispatchEvent(new CustomEvent('sailor:applyEffect', { detail: { nodeId: id, nodeType: 'Compositor', output: 'IMAGE' } }))
+    }, gradientId)
+    await expect.poll(async () => (await ids()).filter(i => !withGradient.has(i)).length, { timeout: 15_000 }).toBe(1)
+    const frameId = (await ids()).find(i => !withGradient.has(i))!
+
+    await page.evaluate((id) => window.dispatchEvent(new CustomEvent('sailor:openCompositor', { detail: { nodeId: id } })), frameId)
+    const stack = page.locator('[data-testid="compositor-stack-canvas"]')
+    await stack.waitFor({ state: 'visible', timeout: 15_000 })
+    // The editor's picture of the same Frame, kept beside the export's for a look by eye (the hue
+    // sweeps with time, so they are compared for shape, not colour).
+    await page.waitForTimeout(1_000)
+    await stack.screenshot({ path: testInfo.outputPath('live-gradient-editor.png') })
+    await page.locator('[data-testid="compositor-right-panel"]').getByRole('button', { name: /^Download/ }).click()
+    await page.locator('[data-testid="frame-web-export"]').click()
+    const sheet = page.locator('[data-testid="frame-web-export-sheet"]')
+    await expect(sheet).toBeVisible()
+    await expect(sheet.getByText('One file · plays anywhere')).toBeVisible({ timeout: 120_000 })
+    await expect(sheet.getByText(/ · plays live · adds \d/)).toBeVisible()
+    await expect(sheet.getByText(/pre-rendered/)).toHaveCount(0)
+    const line = await sheet.getByText(/ · plays live · adds \d/).innerText()
+    await sheet.screenshot({ path: testInfo.outputPath('live-gradient-sheet.png') })
+
+    const [download] = await Promise.all([page.waitForEvent('download'), sheet.getByRole('button', { name: 'Download' }).click()])
+    const html = await readFile((await download.path())!, 'utf8')
+    const bytes = Buffer.byteLength(html, 'utf8')
+    testInfo.annotations.push({ type: 'export', description: `${line} · file ${bytes} bytes` })
+    console.log(`[live-gradient] sheet line "${line}", file ${bytes} bytes (${(bytes / 1024).toFixed(0)} KB)`)
+    expect(externalRefs(html)).toEqual([])
+    const start = html.indexOf('window.__SAILOR_SNAPSHOT__ = ')
+    const outer = JSON.parse(html.slice(start + 'window.__SAILOR_SNAPSHOT__ = '.length, html.indexOf('</script>', start)).trim().replace(/;$/, ''))
+    const snap = outer.config   // the Frame's own snapshot
+    const entry = snap.wired[0]
+    expect(entry).toMatchObject({ kind: 'live', surface: 'gradient', bundle: 'gradient', duration: 4 })
+    expect(entry.width / entry.height).toBeCloseTo(16 / 9, 2)
+    expect(html).toContain('__SAILOR_NESTED__')
+    expect(bytes).toBeLessThan(2 * 1024 * 1024)   // a player and a config, not 120 frames
+
+    const v = snap.variants[0]
+    const vw = 1000, vh = Math.round(1000 * v.height / v.width)
+    const a = await renderExported(context, html, 0, { width: vw, height: vh })
+    const b = await renderExported(context, html, 0.5, { width: vw, height: vh })
+    expect(a.requests).toEqual([])
+    expect(b.requests).toEqual([])
+    await writeFile(testInfo.outputPath('live-gradient-export-t0.png'), Buffer.from(a.png.split(',')[1]!, 'base64'))
+    await writeFile(testInfo.outputPath('live-gradient-export-t05.png'), Buffer.from(b.png.split(',')[1]!, 'base64'))
+    const dims = await page.evaluate(async (u) => await new Promise<[number, number]>((res) => { const i = new Image(); i.onload = () => res([i.width, i.height]); i.src = u }), a.png)
+    const box = boxOf(snap, dims[0], dims[1])
+    const { differing, total } = await regionDiff(page, a.png, b.png, box)
+    console.log(`[live-gradient] frame ${v.width}×${v.height}, canvas ${dims[0]}×${dims[1]}, box ${box.w.toFixed(0)}×${box.h.toFixed(0)}; t 0 vs 0.5: ${differing} of ${total} px differ`)
+    expect(differing).toBeGreaterThan(total * 0.5)
+
+    // Shape: the nested player's canvas is off-document, at the Gradient's own 16:9 and the box's
+    // size in device pixels — the Frame hands it a box-sized picture, never a stretched square.
+    const probe = await probeGlCanvases(context, html, 0.25, { width: vw, height: vh })
+    console.log(`[live-gradient] main ${probe.main.w}×${probe.main.h}; webgl2 canvases ${JSON.stringify(probe.gl)}`)
+    const pbox = boxOf(snap, probe.main.w, probe.main.h)
+    const nested = probe.gl.filter(c => !c.inDocument)
+    expect(nested.length).toBeGreaterThan(0)
+    const player = nested.find(c => Math.abs(c.w / c.h - 16 / 9) < 0.01)
+    expect(player, `no off-document 16:9 player canvas among ${JSON.stringify(nested)}`).toBeTruthy()
+    expect(Math.abs(player!.w - Math.round(Math.max(pbox.w, pbox.h)))).toBeLessThanOrEqual(2)
+    expect(nested.some(c => c.w === 512 && c.h === 512)).toBe(false)
   })
 })

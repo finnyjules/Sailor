@@ -5,6 +5,7 @@
 //
 // `render` is injected so this stays unit-testable with no WebGL context.
 
+import { toRaw } from 'vue'
 import type { StudioFrameSource } from '~/lib/studio/frameSource'
 import { aspectRatio } from '~/lib/gradientfx/types'
 
@@ -47,19 +48,37 @@ export function makeGradientFrameSource(deps: GradientFrameDeps): StudioFrameSou
     return { duration: m.duration ?? 4, fps: m.fps ?? 30 }
   }
 
+  const width = (): number => deps.getConfig()?.motion?.size ?? 1080
+  // aspectRatio() takes a string and calls .split on it — cfg.canvas may be
+  // partial/absent on a fresh or migrating config, so guard the argument
+  // (not just the result) before it ever reaches that call.
+  const height = (): number => {
+    const size = deps.getConfig()?.motion?.size ?? 1080
+    const ar = aspectRatio(deps.getConfig()?.canvas?.aspect ?? '1:1') || 1
+    return Math.max(1, Math.round(size / ar))
+  }
+
   return {
     // Getters, not captured values: the studio's config is edited live, so a
     // snapshot taken at registration time would go stale immediately.
     get duration() { return clock().duration },
     get fps() { return clock().fps },
-    get width() { return deps.getConfig()?.motion?.size ?? 1080 },
-    // aspectRatio() takes a string and calls .split on it — cfg.canvas may be
-    // partial/absent on a fresh or migrating config, so guard the argument
-    // (not just the result) before it ever reaches that call.
-    get height() {
-      const size = deps.getConfig()?.motion?.size ?? 1080
-      const ar = aspectRatio(deps.getConfig()?.canvas?.aspect ?? '1:1') || 1
-      return Math.max(1, Math.round(size / ar))
+    get width() { return width() },
+    get height() { return height() },
+    // A Frame export plays an animated gradient with the studio's own embed player (the Frame
+    // export plan's live route). The config is exactly what GradientStudioSurface.vue's
+    // exportWebEmbed builds — the whole config, deep-copied off the live (reactive) one, plus the
+    // loop — so the nested player draws what a standalone gradient embed draws. A still has no
+    // loop to play: it exports as the still it is.
+    async embed() {
+      const { duration } = clock()
+      if (!(duration > 0)) return null
+      const cfg = deps.getConfig()
+      return {
+        surface: 'gradient', bundle: 'gradient',
+        config: { cfg: structuredClone(toRaw(cfg)), duration },
+        width: width(), height: height(), duration,
+      }
     },
     getFrame: async (t01, w, h) => {
       const cfg = deps.getConfig()
