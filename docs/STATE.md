@@ -43,6 +43,18 @@ Plan `docs/superpowers/plans/2026-09-23-frame-export-live-wired-layers.md` (its 
 
 **Open.** The Space Type font race (a pull can build with a fallback face) and Loft's unresolved `google:` font token — spun off as their own task. The check samples 3 moments at 480 px. A Gradient's "animated" rule differs between the node card and its frame source (pre-existing). Minors listed in `.superpowers/sdd/live-wired/final-review.md`.
 
+### Frame layouts — the 16 layout calls — BUILT 2026-09-24 (`d0404bf4d`..HEAD, non-contiguous — 7 tasks, subagent-driven, a review per task, a whole-batch review and its fix wave)
+
+Plan `docs/superpowers/plans/2026-09-24-frame-layout-decisions.md`. Julien picked all 16 open layout decisions on the "Layout calls" page; 4 keep today's behaviour (Review/Stat/Post-it hide the headline, plain "Automatic", Run-off stays off stories, Street Repeat stays solid), 12 were built:
+
+**What shipped:** **every layout places the Frame's other images** — as tiles in the space it leaves, or as an inset in a grid-aligned corner of a full-page image, or the variation says "no room for the other images" (on the lab Frame with two images Swiss, Editorial and Street lose nothing; Performance keeps 3 of 5); **arrangement pills are words** ("Right edge", "Card left", "Steep"); the **Button choice** (in the image / platform's own) in every style that draws a button; a **shape Knockout reshaped comes back** at its own size and place; with recolour off, **Overprint and Number behind draw their big line as their own accent copy** and your line stays small in its own colour; **small banners** (under 336 px) may cover up to 70% of the image; a **date range breaks after its dash** on ad formats (Pinterest 3–8 → 19–40 layouts); **changing what a line is re-applies the layout** and **a suggested face refits once it loads**, each in the same undo step; **"Not used" takes a line or image off the Frame** and names it; Review skips its stars when your rating has one; a hint for half-numbered lists; Us vs them's image fills the space below its table.
+
+**Proof:** one-image Frames plan byte-identically (26,295 plans compared); Frames with no format plan exactly as in Stage 1; 12 Playwright tests; layout suites green (~2,590). Browser: Run-off placing the lab's second image, Performance Offer's corner inset, arrangement words.
+
+**Caught on the way:** the accent copy as first briefed sat invisibly under your line; a line marked Not used and set back to Automatic stayed hidden forever; the date break reached Frames with no format; the platform's button choice in a face refit could apply at a viewing size; wired images had no Content row, and images were numbered differently in two places; Fill's arrangement words lied on wide frames when the image side row was offered.
+
+**Known:** the accent copy (and the title ring) keep the old words if you edit the copied line, until the next apply; on wide frames Fill's "Tilted tag" is reachable only through Vary; the automatic second image is chosen from local images only.
+
 ### Frame layouts, stage 4 — ad content and the research layouts — LANDED 2026-09-24 (`0e66d9a24`..HEAD, non-contiguous — 7 tasks, subagent-driven, a review per task, a whole-stage review and its fix wave)
 
 Plan `docs/superpowers/plans/2026-09-24-frame-layout-system-stage4.md` (spec §8, §6).
