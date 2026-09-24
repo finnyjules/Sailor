@@ -15,7 +15,7 @@ import { normalizeEnginePath } from './enginePath'
 import { hostedCanMutate, ownedIds, ownerOf, recordOwner, releaseOwner } from './resourceOwners'
 import { annotatedFilepath, isSafeId, pyBasename, userDir } from '../native/paths'
 import { decodeSegment, dispatchNative, dispatchUpload, nativeEnginePath } from '../native/router'
-import { matchObjectInfoRoute, objectInfoBody } from '../native/objectInfo'
+import { INPUT_FOLDER_INPUTS, findSpec, matchObjectInfoRoute, objectInfoBody, setComboOptions, storedObjectInfoBody } from '../native/objectInfo'
 import { ensureBootMigrationsRan, listProjects, projectsRoot } from '../native/projects'
 
 // Review C2's exact mirror of folder_paths.annotated_filepath() lives in
@@ -200,6 +200,10 @@ export function scrubObjectInfo(catalog: unknown, ownedFilenames: string[] = [])
       }
     }
   }
+  // A5 fix round 1: the dataset folder pickers list input/'s SUBFOLDERS —
+  // shared across tenants, and carrying no upload flag, so the rule above
+  // misses them. Hosted doesn't offer dataset folders; they are emptied.
+  for (const key of INPUT_FOLDER_INPUTS) setComboOptions(findSpec(out, key), [], false)
   return out
 }
 
@@ -282,12 +286,15 @@ export async function handleHostedObjectInfo(event: H3Event): Promise<unknown> {
     ownedInputFilenames(userId),
     objectInfoBody(event.path, p, match.node),
   ])
-  if (!got) throw createError({ statusCode: 502, message: 'Engine object_info unavailable' })
+  // An engine answer JSON.parse refuses (Python's NaN/Infinity) can't be
+  // scrubbed, so hosted serves the stored catalog instead of the raw text.
+  const served = got?.body ? got : storedObjectInfoBody(match.node)
+  if (!served?.body) throw createError({ statusCode: 502, message: 'Engine object_info unavailable' })
   // Sorted for a stable `default` (ComfyUI itself seeds default from the
   // alphabetically-first directory entry — this mirrors that ordering scoped
   // to the caller's own files) and for deterministic tests.
   const ownedFilenames = Array.from(owned).sort()
-  return scrubObjectInfo(got.body, ownedFilenames)
+  return scrubObjectInfo(served.body, ownedFilenames)
 }
 
 // ---------------------------------------------------------------------------

@@ -49,8 +49,10 @@ beforeEach(async () => {
   __setInputUploadsEngineRootForTests(dir)
   // A5: the saved /object_info copy lives in storeDir('data') — the real
   // frontend/.data/ from a test's cwd. Redirect it into the same temp folder.
-  const { __setObjectInfoCacheFileForTests } = await import('../../../server/native/objectInfo')
+  const { __setObjectInfoCacheFileForTests, __resetObjectInfoEngineStateForTests } = await import('../../../server/native/objectInfo')
   __setObjectInfoCacheFileForTests(path.join(dir, 'data', 'object_info.json'))
+  // …and forget an engine another test saw down (it is remembered for 3 s).
+  __resetObjectInfoEngineStateForTests()
 })
 
 afterEach(async () => {

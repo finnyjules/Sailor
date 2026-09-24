@@ -34,6 +34,8 @@ const catalog = () => JSON.parse(catalogText)
 
 const fetchMock = vi.fn()
 ;(globalThis as any).fetch = fetchMock
+// The engine's answer as a real Response: objectInfo.ts reads its exact text.
+const engineOk = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
 
 // Default fake input_uploads db: nobody owns anything. handleHostedObjectInfo
 // now calls ownedInputFilenames on every request, so every test in this file
@@ -276,27 +278,27 @@ describe('ownedInputFilenames — flat top-level input:: keys, prefix stripped',
 
 describe('handleHostedObjectInfo', () => {
   it('scrubs what the engine returns', async () => {
-    fetchMock.mockResolvedValue({ ok: true, json: async () => catalog() })
+    fetchMock.mockImplementation(async () => engineOk(catalog()))
     const out = await handleHostedObjectInfo(ev('/object_info')) as any
     expect(out.LoadImage.input.required.image[0]).toEqual([])
     expect(out.LatentUpscale).toEqual(catalog().LatentUpscale)
   })
 
   it('scrubs the single-node form too (/object_info/LoadImage)', async () => {
-    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ LoadImage: catalog().LoadImage }) })
+    fetchMock.mockImplementation(async () => engineOk({ LoadImage: catalog().LoadImage }))
     const out = await handleHostedObjectInfo(ev('/object_info/LoadImage')) as any
     expect(out.LoadImage.input.required.image[0]).toEqual([])
     expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8188/object_info/LoadImage')
   })
 
   it('preserves ?comfyWorker=N targeting — node availability differs per worker', async () => {
-    fetchMock.mockResolvedValue({ ok: true, json: async () => catalog() })
+    fetchMock.mockImplementation(async () => engineOk(catalog()))
     await handleHostedObjectInfo(ev('/object_info?comfyWorker=2'))
     expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8191/object_info')
   })
 
   it('strips the /comfyui base like the raw proxy did', async () => {
-    fetchMock.mockResolvedValue({ ok: true, json: async () => catalog() })
+    fetchMock.mockImplementation(async () => engineOk(catalog()))
     await handleHostedObjectInfo(ev('/comfyui/object_info'))
     expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8188/object_info')
   })
@@ -328,7 +330,7 @@ describe('handleHostedObjectInfo — refills the pickers with the CALLER\'s own 
         throw new Error(`unexpected sql: ${sql}`)
       },
     })
-    fetchMock.mockResolvedValue({ ok: true, json: async () => catalog() })
+    fetchMock.mockImplementation(async () => engineOk(catalog()))
 
     const out = await handleHostedObjectInfo(ev('/object_info', 'u1')) as any
     expect(out.LoadImage.input.required.image[0]).toEqual(['a.png', 'z.png'])
@@ -344,7 +346,7 @@ describe('handleHostedObjectInfo — refills the pickers with the CALLER\'s own 
         throw new Error(`unexpected sql: ${sql}`)
       },
     })
-    fetchMock.mockResolvedValue({ ok: true, json: async () => catalog() })
+    fetchMock.mockImplementation(async () => engineOk(catalog()))
 
     const out = await handleHostedObjectInfo(ev('/object_info', 'u2')) as any
     expect(out.LoadImage.input.required.image[0]).toEqual([])
@@ -372,7 +374,7 @@ describe('handleHostedObjectInfo — refills the pickers with the CALLER\'s own 
     // call recordUpload makes from handleHostedUpload's success path.
     await recordUpload('u1', canonicalUploadKey('input', '', 'freshly-uploaded.png'))
 
-    fetchMock.mockResolvedValue({ ok: true, json: async () => catalog() })
+    fetchMock.mockImplementation(async () => engineOk(catalog()))
     const mine = await handleHostedObjectInfo(ev('/object_info', 'u1')) as any
     expect(mine.LoadImage.input.required.image[0]).toEqual(['freshly-uploaded.png'])
 

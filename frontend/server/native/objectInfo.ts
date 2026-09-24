@@ -2,20 +2,22 @@
  * `/object_info` — the node definitions — served by Sailor itself.
  *
  * While ComfyUI answers (within 3 s) its body is passed through untouched and
- * a copy of the full catalog is kept at `<storeDir('data')>/object_info.json`.
- * While it does not, the saved copy is served — or, before one exists, the
- * committed baseline `objectInfo.baseline.json.gz` — with every file-list
- * combo it knows how to rebuild refreshed from disk, the way ComfyUI builds
- * them on each request:
+ * a copy of the full catalog — file lists blanked — is kept at
+ * `<storeDir('data')>/object_info.json`. While it does not (a failure is
+ * remembered for 3 s), the saved copy is served — or, before one exists, the
+ * committed baseline `objectInfo.baseline.json.gz`, blanked the same way —
+ * with every file-list combo it knows how to rebuild refreshed from disk, the
+ * way ComfyUI builds them on each request:
  *
- *   - the upload widgets (`UPLOAD_INPUT_LISTS`): each node's own listing of
- *     `input/`, ported from its `INPUT_TYPES` / `define_schema`;
+ *   - the input-derived combos (`UPLOAD_INPUT_LISTS`): each node's own listing
+ *     of `input/`, ported from its `INPUT_TYPES` / `define_schema`;
  *   - the model pickers (`MODEL_INPUT_LISTS`): `folder_paths.get_filename_list`
  *     over `models/*` plus `extra_model_paths.yaml`, with the same extensions,
  *     the legacy folder names, the recursive walk and the sort.
  *
  * Every other byte of the served catalog is left as it was saved.
  */
+import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -474,22 +476,28 @@ export const MODEL_INPUT_LISTS: Record<string, { folder: string, append?: string
   'RestyleWithLoRANode.lora_name': { folder: 'loras', append: ['[None]'] },
 }
 
-/** One listing of `input/`, shared by every upload widget in a request. */
+/** One listing of `input/`, shared by every input-derived combo in a request. */
 interface InputListing {
   /** `os.listdir(input_dir)`, in directory order. */
   names: string[]
   /** The same names filtered by `os.path.isfile`. */
   files: string[]
-  inputDir: string
+  /** `Load3D`'s rglob of `input/3d`, relative to input/. */
+  load3d: () => string[]
+  /** `folder_paths.get_input_subfolders()`. */
+  subfolders: () => string[]
 }
 
-function listInput(inputDir: string): InputListing | null {
+const EMPTY_INPUT: InputListing = { names: [], files: [], load3d: () => [], subfolders: () => [] }
+
+function listInput(inputDir: string): InputListing {
   const entries = listdir(inputDir)
-  if (!entries) return null
+  if (!entries) return EMPTY_INPUT
   return {
     names: entries.map(e => e.name),
     files: entries.filter(e => direntIsFile(inputDir, e)).map(e => e.name),
-    inputDir,
+    load3d: () => load3dFiles(inputDir),
+    subfolders: () => inputSubfolders(inputDir),
   }
 }
 
@@ -518,12 +526,32 @@ function load3dFiles(inputDir: string): string[] {
 }
 
 /**
- * Upload widgets: `Class.input` → the node's own listing of `input/`, and
- * whether its `default` is seeded from that listing. Ported one by one:
+ * `folder_paths.get_input_subfolders()`: every folder `os.walk(input_dir)`
+ * visits (symlinked folders are not followed; an unreadable one is skipped),
+ * relative, `/`-separated, sorted, the input folder itself left out.
+ */
+export function inputSubfolders(inputDir: string): string[] {
+  const out: string[] = []
+  const walk = (dir: string, rel: string) => {
+    const entries = listdir(dir)
+    if (!entries) return
+    if (rel) out.push(rel)
+    for (const e of entries) {
+      if (e.isDirectory()) walk(path.join(dir, e.name), rel ? `${rel}/${e.name}` : e.name)
+    }
+  }
+  walk(inputDir, '')
+  return pySorted(out)
+}
+
+/**
+ * Input-derived combos: `Class.input` → the node's own listing of `input/`,
+ * and whether its `default` is seeded from that listing. Ported one by one:
  * nodes.py LoadImage / LoadImageMask, nodes_image.py Image, nodes_audio.py
  * LoadAudio / Audio, nodes_load_3d.py Load3D, nodes_video.py LoadVideo /
  * Video, nodes_video_effects.py LoadVideoFrames / SaveVideoFrames,
- * nodes_timeline.py Timeline, nodes_video_pro.py AudioWaveform.
+ * nodes_timeline.py Timeline, nodes_video_pro.py AudioWaveform, and
+ * nodes_dataset.py's two folder pickers (`get_input_subfolders`).
  * (LoadImageOutput and Painter carry the upload flag but no inline list.)
  */
 export const UPLOAD_INPUT_LISTS: Record<string, { list: (l: InputListing) => string[], seedsDefault?: true }> = {
@@ -532,7 +560,7 @@ export const UPLOAD_INPUT_LISTS: Record<string, { list: (l: InputListing) => str
   'Image.image': { list: l => ['', ...pySorted(pyFilterFilesContentTypes(pySorted(l.files), ['image']))] },
   'LoadAudio.audio': { list: l => pySorted(pyFilterFilesContentTypes(l.names, ['audio', 'video'])) },
   'Audio.audio': { list: l => ['', ...pySorted(pyFilterFilesContentTypes(l.names, ['audio', 'video']))] },
-  'Load3D.model_file': { list: l => load3dFiles(l.inputDir) },
+  'Load3D.model_file': { list: l => l.load3d() },
   'LoadVideo.file': { list: l => pySorted(pyFilterFilesContentTypes(l.files, ['video'])) },
   'Video.file': { list: l => ['', ...pySorted(pyFilterFilesContentTypes(l.files, ['video']))] },
   'LoadVideoFrames.file': { list: l => pySorted(pyFilterFilesContentTypes(l.files, ['video'])) },
@@ -545,10 +573,19 @@ export const UPLOAD_INPUT_LISTS: Record<string, { list: (l: InputListing) => str
     },
     seedsDefault: true,
   },
+  'LoadImageDataSetFromFolder.folder': { list: l => l.subfolders() },
+  'LoadImageTextDataSetFromFolder.folder': { list: l => l.subfolders() },
 }
 
+/**
+ * The input-folder combos that are NOT upload-flagged, so the hosted scrub's
+ * flag rule misses them: they list `input/`'s subfolders, which are shared
+ * across tenants. Hosted empties them (engineGate.ts scrubObjectInfo).
+ */
+export const INPUT_FOLDER_INPUTS = ['LoadImageDataSetFromFolder.folder', 'LoadImageTextDataSetFromFolder.folder']
+
 /** Replace a combo's option list in place — legacy `[[...], opts]` or v2 `["COMBO", {options}]`. */
-function setComboOptions(spec: unknown, options: string[], seedsDefault: boolean): void {
+export function setComboOptions(spec: unknown, options: string[], seedsDefault: boolean): void {
   if (!Array.isArray(spec)) return
   const opts = spec[1] && typeof spec[1] === 'object' && !Array.isArray(spec[1]) ? spec[1] as Record<string, unknown> : null
   if (Array.isArray(spec[0])) spec[0] = options
@@ -557,7 +594,8 @@ function setComboOptions(spec: unknown, options: string[], seedsDefault: boolean
   if (seedsDefault && opts && 'default' in opts) opts.default = options[0]
 }
 
-function findSpec(catalog: Catalog, key: string): unknown {
+/** The input spec `Class.input` names in `catalog` (any section), or undefined. */
+export function findSpec(catalog: Catalog, key: string): unknown {
   const dot = key.indexOf('.')
   const node = catalog[key.slice(0, dot)]
   const input = key.slice(dot + 1)
@@ -573,24 +611,24 @@ function findSpec(catalog: Catalog, key: string): unknown {
 
 /**
  * Rebuild, in place, every file-list combo in `catalog` that ComfyUI lists
- * from disk and that this module knows how to list: the upload widgets from
- * `<root>/input`, the model pickers from `<root>/models` (+ extra paths).
+ * from disk and that this module knows how to list: the input-derived ones
+ * from `<root>/input`, the model pickers from `<root>/models` (+ extra paths).
+ * A null root lists nothing — exactly what ComfyUI shows for empty folders.
  */
-export function refreshFileLists(catalog: Catalog, root: string): Catalog {
-  let input: InputListing | null | undefined
+export function refreshFileLists(catalog: Catalog, root: string | null): Catalog {
+  let input: InputListing | undefined
   for (const [key, { list, seedsDefault }] of Object.entries(UPLOAD_INPUT_LISTS)) {
     const spec = findSpec(catalog, key)
     if (spec === undefined) continue
-    if (input === undefined) input = listInput(path.join(root, 'input'))
-    const empty: InputListing = { names: [], files: [], inputDir: path.join(root, 'input') }
-    setComboOptions(spec, list(input ?? empty), Boolean(seedsDefault))
+    input ??= root ? listInput(path.join(root, 'input')) : EMPTY_INPUT
+    setComboOptions(spec, list(input), Boolean(seedsDefault))
   }
   let table: FolderTable | undefined
   const lists = new Map<string, string[]>()
   for (const [key, rule] of Object.entries(MODEL_INPUT_LISTS)) {
     const spec = findSpec(catalog, key)
     if (spec === undefined) continue
-    table ??= modelFolderTable(root)
+    table ??= root ? modelFolderTable(root) : new Map()
     const cacheKey = rule === 'vae_list' ? '\0vae_list' : rule.folder
     let files = lists.get(cacheKey)
     if (!files) {
@@ -600,6 +638,15 @@ export function refreshFileLists(catalog: Catalog, root: string): Catalog {
     setComboOptions(spec, rule === 'vae_list' ? [...files] : [...files, ...(rule.append ?? [])], false)
   }
   return catalog
+}
+
+/**
+ * Every refreshed combo set to what ComfyUI shows for empty folders — the form
+ * the baseline is committed in and the saved copy is written in, so neither
+ * holds this machine's (or any tenant's) file names.
+ */
+export function blankFileLists(catalog: Catalog): Catalog {
+  return refreshFileLists(catalog, null)
 }
 
 // ------------------------------------------------------- stored catalogs
@@ -619,13 +666,36 @@ export function objectInfoCacheFile(): string | null {
   return path.join(storeDir('data'), 'object_info.json')
 }
 
-export function objectInfoBaselineFile(): string {
-  return baselineFileOverride ?? path.join(process.cwd(), 'server', 'native', 'objectInfo.baseline.json.gz')
+const BASELINE_REL = path.join('server', 'native', 'objectInfo.baseline.json.gz')
+const warnedMissingBaseline = new Set<string>()
+
+/**
+ * The committed baseline, first that exists of: `SAILOR_OBJECT_INFO_BASELINE`,
+ * `<engine root>/frontend/server/native/…`, `<cwd>/server/native/…`. Null (with
+ * one warning per set of candidates) when none does.
+ */
+export function objectInfoBaselineFile(): string | null {
+  if (baselineFileOverride !== undefined) return baselineFileOverride
+  const root = resolveEngineRoot()
+  const candidates = [
+    process.env.SAILOR_OBJECT_INFO_BASELINE || null,
+    root ? path.join(root, 'frontend', BASELINE_REL) : null,
+    path.join(process.cwd(), BASELINE_REL),
+  ].filter((c): c is string => Boolean(c))
+  const found = candidates.find(c => isFile(c))
+  if (found) return found
+  const key = candidates.join('\n')
+  if (!warnedMissingBaseline.has(key)) {
+    warnedMissingBaseline.add(key)
+    console.warn(`[native] object_info: no node-list baseline found (looked in ${candidates.join(', ')}); set SAILOR_OBJECT_INFO_BASELINE`)
+  }
+  return null
 }
 
 let savedMemo: { file: string, mtimeMs: number, size: number, value: Catalog } | null = null
 let baselineMemo: { file: string, value: Catalog } | null = null
 let lastWritten: { file: string, text: string } | null = null
+let pendingSave: Promise<void> = Promise.resolve()
 
 function isCatalog(v: unknown): v is Catalog {
   return Boolean(v) && typeof v === 'object' && !Array.isArray(v)
@@ -651,6 +721,7 @@ function readSaved(): Catalog | null {
 
 function readBaseline(): Catalog | null {
   const file = objectInfoBaselineFile()
+  if (!file) return null
   if (baselineMemo?.file === file) return baselineMemo.value
   try {
     const value = JSON.parse(zlib.gunzipSync(fs.readFileSync(file)).toString('utf8'))
@@ -663,23 +734,36 @@ function readBaseline(): Catalog | null {
   }
 }
 
-/** Keep the engine's full catalog for the next time it is down (atomic; skipped when unchanged). */
+/**
+ * Keep the engine's full catalog, lists blanked, for the next time it is down
+ * (atomic; skipped when unchanged). Runs after the response, never before it.
+ */
 async function saveCopy(body: Catalog): Promise<void> {
   const file = objectInfoCacheFile()
   if (!file) return
-  const text = JSON.stringify(body)
+  const text = JSON.stringify(blankFileLists(structuredClone(body)))
   if (lastWritten && lastWritten.file === file && lastWritten.text === text && fs.existsSync(file)) return
+  await fs.promises.mkdir(path.dirname(file), { recursive: true })
+  const tmp = `${file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
   try {
-    await fs.promises.mkdir(path.dirname(file), { recursive: true })
-    const tmp = `${file}.${process.pid}.tmp`
     await fs.promises.writeFile(tmp, text)
     await fs.promises.rename(tmp, file)
     lastWritten = { file, text }
   }
   catch (e) {
-    console.warn('[native] object_info: could not save a copy', e)
+    await fs.promises.rm(tmp, { force: true }).catch(() => {})
+    throw e
   }
 }
+
+function saveCopyInBackground(body: Catalog): void {
+  pendingSave = pendingSave
+    .then(() => saveCopy(body))
+    .catch((e) => { console.warn('[native] object_info: could not save a copy', e) })
+}
+
+/** Tests: wait for the background save to land. */
+export function __objectInfoSaveSettledForTests(): Promise<void> { return pendingSave }
 
 // ------------------------------------------------------------ the route
 
@@ -698,29 +782,67 @@ export function matchObjectInfoRoute(p: string, method: string, decode: (seg: st
   return verb === 'GET' ? { kind: 'route', node } : { kind: 'badMethod' }
 }
 
-export interface ObjectInfoBody {
-  body: Catalog
-  source: 'engine' | 'saved' | 'baseline'
-}
+export type ObjectInfoBody =
+  /** The engine's answer: its exact text, and the parsed catalog when it is plain JSON. */
+  | { source: 'engine', text: string, body: Catalog | null }
+  | { source: 'saved' | 'baseline', body: Catalog }
 
-/** Ask the engine (or pool worker) for the catalog; null when it does not answer in time. */
-async function fromEngine(rawPath: string, canonicalPath: string): Promise<{ body: Catalog, port: number } | null> {
+/** Ports that just failed to answer, and until when they are taken as down. */
+const engineDownUntil = new Map<number, number>()
+
+/** Tests: forget which engines were seen down. */
+export function __resetObjectInfoEngineStateForTests(): void { engineDownUntil.clear() }
+
+/**
+ * Ask the engine (or pool worker) for the catalog; null when it does not
+ * answer in time or answers an error. A failure is remembered for the same
+ * 3 s, so a hung engine costs one timeout, not one per request.
+ */
+async function fromEngine(rawPath: string, canonicalPath: string): Promise<{ text: string, body: Catalog | null, port: number } | null> {
   const { port, cleanUrl } = resolveWorkerTarget(rawPath)
+  if ((engineDownUntil.get(port) ?? 0) > Date.now()) return null
   const q = cleanUrl.indexOf('?')
   const query = q === -1 ? '' : cleanUrl.slice(q)
   const target = `http://127.0.0.1:${port}`
+  let text: string
   try {
     const res = await fetch(`${target}${canonicalPath}${query}`, {
       headers: { origin: target },
       signal: AbortSignal.timeout(OBJECT_INFO_ENGINE_TIMEOUT_MS),
     })
-    if (!res.ok) return null
-    const body = await res.json()
-    return isCatalog(body) ? { body, port } : null
+    if (!res.ok) throw new Error(`engine answered ${res.status}`)
+    text = await res.text()
   }
   catch {
+    engineDownUntil.set(port, Date.now() + OBJECT_INFO_ENGINE_TIMEOUT_MS)
     return null
   }
+  engineDownUntil.delete(port)
+  // Python's json may write NaN/Infinity, which JSON.parse refuses: the engine
+  // still answered, so its text is still the answer — just not a parsed one.
+  let body: Catalog | null = null
+  try {
+    const parsed = JSON.parse(text)
+    if (isCatalog(parsed)) body = parsed
+  }
+  catch {}
+  return { text, body, port }
+}
+
+/**
+ * The stored catalog for `node` (all of it when null), refreshed from disk.
+ * Null when there is no saved copy and no baseline.
+ */
+export function storedObjectInfoBody(node: string | null): ObjectInfoBody | null {
+  const saved = readSaved()
+  const stored = saved ?? readBaseline()
+  if (!stored) return null
+  let body: Catalog
+  if (node === null) body = structuredClone(stored)
+  else body = Object.prototype.hasOwnProperty.call(stored, node) ? { [node]: structuredClone(stored[node]) } : {}
+  const root = resolveEngineRoot()
+  if (root) refreshFileLists(body, root)
+  return { source: saved ? 'saved' : 'baseline', body }
 }
 
 /**
@@ -732,19 +854,10 @@ export async function objectInfoBody(rawPath: string, canonicalPath: string, nod
   const live = await fromEngine(rawPath, canonicalPath)
   if (live) {
     // The main instance's full catalog only: a pool worker's node set can differ.
-    if (node === null && live.port === MAIN_ENGINE_PORT) await saveCopy(live.body)
-    return { body: live.body, source: 'engine' }
+    if (live.body && node === null && live.port === MAIN_ENGINE_PORT) saveCopyInBackground(live.body)
+    return { source: 'engine', text: live.text, body: live.body }
   }
-  const saved = readSaved()
-  const stored = saved ?? readBaseline()
-  if (!stored) return null
-  const source = saved ? 'saved' : 'baseline'
-  let body: Catalog
-  if (node === null) body = structuredClone(stored)
-  else body = Object.prototype.hasOwnProperty.call(stored, node) ? { [node]: structuredClone(stored[node]) } : {}
-  const root = resolveEngineRoot()
-  if (root) refreshFileLists(body, root)
-  return { body, source }
+  return storedObjectInfoBody(node)
 }
 
 export const NO_NODE_DEFINITIONS = {
@@ -752,8 +865,10 @@ export const NO_NODE_DEFINITIONS = {
   body: { error: 'Sailor can\'t load the node list: the engine is not answering and no saved copy was found.' },
 }
 
-/** The local route: 200 with the catalog, or 503 when there is nothing to serve. */
-export async function runObjectInfo(rawPath: string, canonicalPath: string, node: string | null): Promise<{ status: number, body: unknown }> {
+/** The local route: the engine's own bytes, else the stored catalog, else 503. */
+export async function runObjectInfo(rawPath: string, canonicalPath: string, node: string | null): Promise<{ status: number, body: unknown, headers?: Record<string, string> }> {
   const got = await objectInfoBody(rawPath, canonicalPath, node)
-  return got ? { status: 200, body: got.body } : NO_NODE_DEFINITIONS
+  if (!got) return NO_NODE_DEFINITIONS
+  if (got.source === 'engine') return { status: 200, body: got.text, headers: { 'content-type': 'application/json; charset=utf-8' } }
+  return { status: 200, body: got.body }
 }
