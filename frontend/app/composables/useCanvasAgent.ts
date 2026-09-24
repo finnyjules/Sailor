@@ -80,12 +80,22 @@ export function useCanvasAgent(opts: {
   let pendingReview: { targets: string[]; intent: string } | null = null
   let original: CanvasSnapshot | null = null
   const hasProposal = computed(() => changes.value.length > 0)
+  // Stop lifecycle: an in-flight ask() aborts via `controller`; `runSeq` bumps on
+  // every ask() and every stop() so a reply for an older run is ignored even if
+  // the abort itself doesn't win the race (e.g. the fetch had already resolved).
+  let controller: AbortController | null = null
+  let runSeq = 0
 
-  async function callModel(prompt: string, commands: { op: string }[]) {
-    const res = await $fetch<{ text: string }>('/api/agent-plan', {
+  async function callModel(prompt: string, commands: { op: string }[], signal?: AbortSignal) {
+    // Prefer a globally-stubbed $fetch when one is present (unit tests stub
+    // globalThis.$fetch to observe/abort the call) — falls back to the real
+    // ofetch import for the app.
+    const fetcher: typeof $fetch = (globalThis as any).$fetch ?? $fetch
+    const res = await fetcher<{ text: string }>('/api/agent-plan', {
       method: 'POST',
       body: { apiKey: opts.apiKey(), tier: opts.tier ?? 'plan', prompt, schema: buildCommandSchema(commands) },
       timeout: 60_000,
+      signal,
     })
     const parsed = parseAgentResponse(res.text)
     if (parsed.parseFailed) throw new Error('The model reply could not be read — please try again.')
@@ -117,13 +127,16 @@ export function useCanvasAgent(opts: {
   async function ask(phrase: string) {
     const p = phrase.trim()
     if (!p || busy.value) return
+    const seq = ++runSeq
+    controller = new AbortController()
     busy.value = true; error.value = ''; reasoning.value = ''; answer.value = ''; issues.value = []; lastPhrase.value = p
     review.value = null // drop any stale run→look→fix critique so it doesn't bleed into a fresh request
     opts.discard(); opts.tuneRevert?.(); changes.value = [] // clear any prior un-kept ghost / tune preview
     try {
       original = clone(opts.getSnapshot(p))
       const desc = describeCanvas(original)
-      const { commands, changeRationales, message } = await callModel(buildAgentPrompt(desc, p), desc.commands)
+      const { commands, changeRationales, message } = await callModel(buildAgentPrompt(desc, p), desc.commands, controller.signal)
+      if (seq !== runSeq) return
       // Graph ops are ghost-previewed; tuneNode is delegated to a node's OWN studio
       // surface (e.g. a Frame's background) and applied in place.
       const graphBuilt: ProposedChange[] = []
@@ -174,12 +187,14 @@ export function useCanvasAgent(opts: {
       if (graphBuilt.length) {
         opts.preview(graphBuilt.map(c => c.command), true)
         await new Promise(r => setTimeout(r, 1800)) // matches the blueprint duration
+        if (seq !== runSeq) return
       }
       // Studio-tune delegations run AFTER the ghosts exist (applied in place).
       let tuneBuilt: ProposedChange[] = []
       let tuneNotice = ''
       if (tuneInputs.length && opts.tune) {
         const res = await opts.tune(tuneInputs)
+        if (seq !== runSeq) return
         tuneBuilt = res.changes
         tuneNotice = res.notice ?? ''
       }
@@ -201,11 +216,26 @@ export function useCanvasAgent(opts: {
       if (tuneNotice) answer.value = tuneNotice
       changes.value = built
     } catch (e: any) {
+      if (seq !== runSeq) return // aborted by stop() — not an error to show
       error.value = e?.data?.message || e?.message || String(e)
       opts.discard(); opts.tuneRevert?.()
     } finally {
-      busy.value = false
+      if (seq === runSeq) { busy.value = false; controller = null }
     }
+  }
+
+  /** Stop: abort the in-flight /api/agent-plan call, discard the ghost preview
+   *  (+ any in-place studio-tune edit), and clear proposal state. Bumps runSeq
+   *  so a reply that lands after this — the abort didn't win the race, or the
+   *  network already had the response in flight — changes nothing. */
+  function stop() {
+    if (!busy.value) return
+    runSeq++
+    controller?.abort()
+    controller = null
+    opts.discard(); opts.tuneRevert?.()
+    changes.value = []; answer.value = ''; error.value = ''; issues.value = []; reasoning.value = ''
+    busy.value = false
   }
 
   function acceptChange(i: number) { const c = changes.value[i]; if (c) { c.accepted = true; recompute() } }
@@ -379,5 +409,5 @@ export function useCanvasAgent(opts: {
   /** Dismiss: remove the ghost preview + undo any in-place studio-tune edits. */
   function dismiss() { opts.discard(); opts.tuneRevert?.(); changes.value = []; original = null; issues.value = []; answer.value = ''; error.value = ''; review.value = null; pendingReview = null }
 
-  return { busy, error, reasoning, answer, changes, issues, review, reviewing, hasProposal, hovered, lastPhrase, ask, acceptChange, rejectChange, reroll, keep, keepAndRun, reviewLastRun, reviewNode, autoReviewNode, dismiss }
+  return { busy, error, reasoning, answer, changes, issues, review, reviewing, hasProposal, hovered, lastPhrase, ask, stop, acceptChange, rejectChange, reroll, keep, keepAndRun, reviewLastRun, reviewNode, autoReviewNode, dismiss }
 }

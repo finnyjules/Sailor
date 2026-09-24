@@ -8,6 +8,7 @@ import vue from '@vitejs/plugin-vue'
 // the copy nuxt itself resolves.
 const require = createRequire(import.meta.url)
 const h3Path = require.resolve('h3', { paths: [require.resolve('nuxt/package.json').replace('/package.json', '')] })
+const ofetchPath = require.resolve('ofetch', { paths: [require.resolve('nuxt/package.json').replace('/package.json', '')] })
 
 // Unit tests for shared timeline logic (types, interpolate, commands) — pure
 // TS, no Vue/Nuxt runtime needed. E2E stays in Playwright (tests/*.spec.ts);
@@ -20,6 +21,7 @@ export default defineConfig({
   resolve: {
     alias: {
       'h3': h3Path,
+      'ofetch': ofetchPath,
       '~~': fileURLToPath(new URL('.', import.meta.url)),
       '~': fileURLToPath(new URL('./app', import.meta.url)),
       '#shared': fileURLToPath(new URL('./shared', import.meta.url)),
