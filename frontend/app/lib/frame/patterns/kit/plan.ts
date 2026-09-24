@@ -468,11 +468,12 @@ function contentForChoice(p: Prepared, choice: Choice): Content {
   return rest
 }
 
-/** Ruling R7: the platform's-own-button choice is a Performance thing (the style table's Button
- *  row lists "pill, drawn or platform's own" only for Performance — Editorial's is a link,
- *  Street's a hard-edged box; neither names a platform alternative), offered only on a format
- *  that draws its own button, with a Frame that has an action line to hide. */
-const offersCta = (p: Prepared): boolean => p.style === 'performance' && !!p.fmt?.platformButton && !!p.content.action
+/** Ruling R7 (Task 2 lifts it off Performance alone): the platform's-own-button choice is
+ *  offered in every style that draws a button at all — Performance's pill, Editorial's link,
+ *  Street's hard-edged box (`STYLES[style].button`) — on a format that draws its own button, with
+ *  a Frame that has an action line to hide. Swiss has no `button` spec (it never draws one; ruling
+ *  R9 always hides its action line instead), so it never offers the axis. */
+const offersCta = (p: Prepared): boolean => STYLES[p.style].button != null && !!p.fmt?.platformButton && !!p.content.action
 
 function runChoice(p: Prepared, a: { frameW: number; frameH: number; style?: StyleId }, choice: Choice): Run {
   const fmt = p.fmt

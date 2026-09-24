@@ -452,18 +452,34 @@ describe('the platform button choice reaches the real planner (ruling R7)', () =
     expect(drawnPlan.notPlaced).toEqual([])
   })
 
-  it('Swiss, Editorial and Street never offer it, even on a platformButton format with an action line', () => {
+  it('Swiss never offers it, even on a platformButton format with an action line (it hides the action line instead)', () => {
     const swiss = candidatesForFrame(metaStoryArgs({ action: true }, 'statement', undefined))
     expect(swiss.length).toBeGreaterThan(0)
     expect(swiss.every(c => !('cta' in c.choice))).toBe(true)
+  })
 
+  // Task 2: every style that draws a button offers the choice, not Performance alone — Editorial's
+  // link and Street's hard-edged box included (`STYLES[style].button`; only Swiss has none).
+  it('Editorial and Street offer it too, on a platformButton format with an action line', () => {
     const editorial = candidatesForFrame(metaStoryArgs({ action: true, image: true }, 'edCover', 'editorial'))
     expect(editorial.length).toBeGreaterThan(0)
-    expect(editorial.every(c => !('cta' in c.choice))).toBe(true)
+    expect(editorial.some(c => c.choice.cta === 'native')).toBe(true)
+    expect(editorial.some(c => (c.choice.cta ?? 'drawn') === 'drawn')).toBe(true)
 
     const street = candidatesForFrame(metaStoryArgs({ action: true, image: false }, 'stFill', 'street'))
     expect(street.length).toBeGreaterThan(0)
-    expect(street.every(c => !('cta' in c.choice))).toBe(true)
+    expect(street.some(c => c.choice.cta === 'native')).toBe(true)
+    expect(street.some(c => (c.choice.cta ?? 'drawn') === 'drawn')).toBe(true)
+  })
+
+  it('Editorial and Street do not offer it without a platformButton format, or without an action line', () => {
+    const noPlatformButton = candidatesForFrame(plainArgs({ action: true }, 'edCover', 'editorial'))
+    expect(noPlatformButton.length).toBeGreaterThan(0)
+    expect(noPlatformButton.every(c => !('cta' in c.choice))).toBe(true)
+
+    const noAction = candidatesForFrame(metaStoryArgs({ action: false, image: false }, 'stFill', 'street'))
+    expect(noAction.length).toBeGreaterThan(0)
+    expect(noAction.every(c => !('cta' in c.choice))).toBe(true)
   })
 })
 

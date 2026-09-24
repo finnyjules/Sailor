@@ -279,6 +279,56 @@ describe('styles filter the library (ruling S4)', () => {
   })
 })
 
+describe('the cta axis is offered in every style that draws a button (Task 2)', () => {
+  const metaFeed = FRAME_FORMATS.find(f => f.id === 'meta-feed-4x5')!
+  const platform = { frameW: metaFeed.w, frameH: metaFeed.h, palette, connectedSlots: [], measure: makeStubMeasure() }
+
+  it('Editorial and Street offer both the drawn and the platform\'s own button on a platform format with an action line', () => {
+    const cases: [StyleId, string, LocalLayer[]][] = [
+      ['editorial', 'edCover', galleryFrameLayers('phrase', { image: true, action: true })],
+      ['street', 'stFill', eventFrameLayers('phrase', { image: true, action: true })],
+    ]
+    for (const [style, layoutId, layers] of cases) {
+      const a = { ...platform, style, layoutId, props: { sailor_localLayers: layers, sailor_frame: { preset: 'meta-feed-4x5' } } }
+      const cands = candidatesForFrame(a)
+      expect(cands.length, `${style} ${layoutId}`).toBeGreaterThan(0)
+      expect(cands.some(c => c.choice.cta === 'native'), `${style} ${layoutId}: no native candidate offered`).toBe(true)
+      expect(cands.some(c => (c.choice.cta ?? 'drawn') === 'drawn'), `${style} ${layoutId}: no drawn candidate offered`).toBe(true)
+    }
+  })
+
+  it('Swiss never offers the cta axis, even on a platform format with an action line (it hides the action line instead)', () => {
+    const a = {
+      ...platform, layoutId: 'statement',
+      props: { sailor_localLayers: adFrameLayers('phrase', { image: true, action: true }), sailor_frame: { preset: 'meta-feed-4x5' } },
+    }
+    const cands = candidatesForFrame(a)
+    expect(cands.length).toBeGreaterThan(0)
+    expect(cands.every(c => !('cta' in c.choice))).toBe(true)
+  })
+
+  it('a non-platform format with the same action line still offers no cta axis', () => {
+    const a = {
+      frameW: 895, frameH: 1280, palette, connectedSlots: [], measure: makeStubMeasure(),
+      style: 'editorial' as const, layoutId: 'edCover',
+      props: { sailor_localLayers: galleryFrameLayers('phrase', { image: true, action: true }) },
+    }
+    const cands = candidatesForFrame(a)
+    expect(cands.length).toBeGreaterThan(0)
+    expect(cands.every(c => !('cta' in c.choice))).toBe(true)
+  })
+
+  it('a platform format with no action line still offers no cta axis', () => {
+    const a = {
+      ...platform, style: 'street' as const, layoutId: 'stFill',
+      props: { sailor_localLayers: eventFrameLayers('phrase', { image: true, action: false }), sailor_frame: { preset: 'meta-feed-4x5' } },
+    }
+    const cands = candidatesForFrame(a)
+    expect(cands.length).toBeGreaterThan(0)
+    expect(cands.every(c => !('cta' in c.choice))).toBe(true)
+  })
+})
+
 describe('the Performance findings, pinned', () => {
   const S300 = { frameW: 300, frameH: 250, palette, connectedSlots: [], measure: makeStubMeasure(), style: 'performance' as const }
   const props300 = (o: { action: boolean }) => ({ sailor_localLayers: adFrameLayers('word', { image: true, ...o }), sailor_frame: { preset: 'ad-300x250' } })
