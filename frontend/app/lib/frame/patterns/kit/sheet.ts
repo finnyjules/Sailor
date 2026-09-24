@@ -29,6 +29,10 @@ export interface SheetOpts {
   /** The style's type: DISPLAY and INFO weight, letter spacing, line height and letter case
    *  (SECOND keeps its Swiss values in every style). Absent: `'swiss'` — Stages 1–2, unchanged. */
   style?: StyleId
+  /** A date range too wide for its box may break after its dash (`dateLines`). Absent: never —
+   *  every line wraps as the renderer does, exactly as before. The planner turns it on only for a
+   *  choice that fails without it. */
+  breakDates?: boolean
 }
 
 export interface Sheet {
@@ -46,6 +50,8 @@ export interface Sheet {
   sizeFor(lines: string[], width: number, maxH: number, st?: Style): number
   blockH(n: number, size: number, lh: number): number
   countLines(s: string, width: number, st: Style, size: number): number
+  /** A date line's breaks after its range dash, or null when the renderer's wrap stands. */
+  dateLines(s: string, width: number, st: Style, size: number): string[] | null
   breakLines(words: string[], width: number, size: number, st: Style): string[]
   balance(words: string[], n: number): string[]
   text(s: string, o: Partial<TextEl>): TextEl
@@ -100,6 +106,24 @@ export interface Sheet {
 
 /** Design rows. */
 const NR = 16
+
+/** A date part: a day, month or year, with its dots or slashes ("19.09.", "15.11.2026", "9/19"). */
+const DATE_PART = /^\d{1,4}(?:[./]\d{1,4})*[./]?$/
+/** Where a date range may break: right after an en dash, or a hyphen, that sits between two date
+ *  parts ("19.09.–15.11.2026" → "19.09.–" / "15.11.2026"). A hyphen only when both sides carry a
+ *  dot or slash — so an ISO date ("2026-09-19") is one date, never a range. Null: no such dash.
+ *  Only a line break is ever added: the pieces joined give back the user's characters. */
+export function splitDateRange(token: string): [string, string] | null {
+  for (let i = 1; i < token.length - 1; i++) {
+    const ch = token[i]
+    if (ch !== '–' && ch !== '-') continue
+    const a = token.slice(0, i), b = token.slice(i + 1)
+    if (!DATE_PART.test(a) || !DATE_PART.test(b)) continue
+    if (ch === '-' && !(/[./]/.test(a) && /[./]/.test(b))) continue
+    return [a + ch, b]
+  }
+  return null
+}
 
 export function makeSheet(o: SheetOpts): Sheet {
   const { measure } = o
@@ -160,9 +184,44 @@ export function makeSheet(o: SheetOpts): Sheet {
     if (cur) out.push(cur)
     return out
   }
+  /** The date line's own breaks (Task 3 of the layout decisions): the renderer wraps only at
+   *  spaces, so a date range too wide for its box ("19.09.–15.11.2026") may break after the dash
+   *  between its two dates — nowhere else. Returns the lines to place (every one measured in the
+   *  date's face with `w100`, exactly as `displayOp` draws placed lines), or null when no such
+   *  break is needed and the renderer's own wrap stands. A token breaks only when it alone is
+   *  wider than the box. Only on a sheet with `breakDates`. */
+  function dateLines(s: string, width: number, st: Style, size: number): string[] | null {
+    if (!o.breakDates || !(width > 0)) return null
+    const wOf = (t: string) => w100(t, st) * size / 100
+    let broke = false
+    const out: string[] = []
+    for (const para of s.split('\n')) {
+      // Pieces: `glue` joins a piece to the one before without a space (the two halves of a range).
+      const pieces: { t: string; glue: boolean }[] = []
+      for (const tok of para.split(' ').filter(Boolean)) {
+        const r = wOf(tok) > width ? splitDateRange(tok) : null
+        if (r) { broke = true; pieces.push({ t: r[0], glue: false }, { t: r[1], glue: true }) } else pieces.push({ t: tok, glue: false })
+      }
+      if (!pieces.length) { out.push(''); continue }
+      let cur = ''
+      for (const pc of pieces) {
+        const t = cur ? cur + (pc.glue ? '' : ' ') + pc.t : pc.t
+        if (cur && (pc.glue || wOf(t) > width)) { out.push(cur); cur = pc.t } else cur = t
+      }
+      out.push(cur)
+    }
+    return broke ? out : null
+  }
+  /** The date face: `dateLines` applies. */
+  const isDate = (st: Style) => st.role === 'date'
   // The renderer's own wrap, paragraph by paragraph — so line counts match what the Frame draws.
-  const countLines = (s: string, width: number, st: Style, size: number) =>
-    s.split('\n').reduce((a, p) => a + measure.lines(p, st.role ?? 'caption', size, st.ls, width, st.upper).length, 0)
+  // A date range that has to break after its dash is drawn as placed lines (`text` below), and
+  // counted as those lines.
+  const countLines = (s: string, width: number, st: Style, size: number) => {
+    const dl = isDate(st) ? dateLines(s, width, st, size) : null
+    if (dl) return dl.length
+    return s.split('\n').reduce((a, p) => a + measure.lines(p, st.role ?? 'caption', size, st.ls, width, st.upper).length, 0)
+  }
   function balance(words: string[], n: number): string[] {
     const total = words.join(' ').length, target = total / n, out: string[] = []; let cur = ''
     for (const w of words) {
@@ -174,7 +233,15 @@ export function makeSheet(o: SheetOpts): Sheet {
   }
 
   // element builders
-  const text = (s: string, o: Partial<TextEl>): TextEl => ({ k: 't', s, ...o } as TextEl)
+  // A flowing date line (its own box, `w`) that has to break after its range dash becomes placed
+  // lines — the mechanism a title's line breaks use (`pre`: the op carries the lines as runs, the
+  // layer's text is never rewritten), so the break measured here is the break drawn.
+  const text = (s: string, o: Partial<TextEl>): TextEl => {
+    const e = { k: 't', s, ...o } as TextEl
+    if (e.pre || e.w == null || faceOf(e.role) !== 'date' || e.size == null) return e
+    const dl = dateLines(s, e.w, { role: 'date', ls: e.ls ?? 0, lh: e.lh, upper: e.upper }, e.size)
+    return dl ? { ...e, s: dl.join('\n'), pre: true } : e
+  }
   const disp = (s: string, o: Partial<TextEl>) => text(s, { wt: DISPLAY.wt, ls: DISPLAY.ls, lh: DISPLAY.lh, role: 'title', pre: true, ...upperOf(DISPLAY.upper), ...o })
   const sec = (s: string, o: Partial<TextEl>) => text(s, { size: SECOND.size, wt: SECOND.wt, ls: SECOND.ls, lh: SECOND.lh, role: 'details', ...o })
   const info = (s: string, o: Partial<TextEl>) => text(s, { role: 'info', size: INFO.size, wt: INFO.wt, ls: INFO.ls, lh: INFO.lh, ...upperOf(INFO.upper), ...o })
@@ -315,7 +382,7 @@ export function makeSheet(o: SheetOpts): Sheet {
     W, H, M, G, NC, CW, RH, GAP, CAP, B, defaultMargin,
     DISPLAY, SECOND, INFO,
     X, XR, SPAN, L, Xr,
-    w100, fitSize, sizeFor, blockH, countLines, breakLines, balance,
+    w100, fitSize, sizeFor, blockH, countLines, dateLines, breakLines, balance,
     text, disp, sec, info, rule,
     infoStack, infoRow, infoRowAt, stackBottom, photoIn, cover, pick, q,
     FOOT2, FOOT3, PHOTO_ASPECT,

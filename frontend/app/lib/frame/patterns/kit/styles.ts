@@ -13,7 +13,15 @@ export type LevelKey = 'title' | 'details' | 'date' | 'action' | 'caption'
 
 /** The frame dimensions a style's `check` needs (kit units) — passed in rather than the full
  *  `Sheet` type, so this module stays a leaf (`sheet.ts` and `check.ts` both import `STYLES`). */
-export interface StyleCheckSize { W: number; H: number }
+export interface StyleCheckSize {
+  W: number; H: number
+  /** The Frame's design width in pixels: its format's own size (`FrameFormat.w`), never the size
+   *  it is shown at. Absent (no recognised format): the large-format rules apply. */
+  designW?: number
+}
+
+/** Below this design width (px) a banner is small: Performance lets more of its image be hidden. */
+export const SMALL_DESIGN_W = 336
 
 /** What a style's `rank` needs beyond the candidate's own elements — passed in by the caller
  *  (`plan.ts`) rather than imported, for the same reason. `boxOf` is the candidate's own sheet's
@@ -95,7 +103,10 @@ export const STYLES: Record<StyleId, StyleSpec> = {
             * Math.max(0, Math.min(vis.y1, e.y + e.h) - Math.max(vis.y0, e.y))
         }
       }
-      return covered / area > 0.55 ? ['the image is mostly hidden'] : []
+      // A small banner (under 336 px of design width) has no room for a band beside the image:
+      // up to 70% of the image may be hidden there (at least 30% seen); elsewhere 55%.
+      const limit = size.designW != null && size.designW < SMALL_DESIGN_W ? 0.7 : 0.55
+      return covered / area > limit ? ['the image is mostly hidden'] : []
     },
     rank: (out, ctx) => {
       const n = out.els.find((e): e is Extract<El, { k: 't' }> => e.k === 't' && e.role === 'date')

@@ -16,7 +16,7 @@ import { clearGroupPinsOfMoved, clearPinsOfMoved } from '../pins'
 import { layoutEntry } from '../layouts/catalog'
 import { formatFor } from '~/lib/frame/formats'
 import type { FrameFormat, KeepClear } from '~/lib/frame/formats'
-import { makeSheet } from './sheet'
+import { makeSheet, splitDateRange } from './sheet'
 import type { Sheet, SheetOpts } from './sheet'
 import { makeCanvasMeasure } from './measure'
 import { boxOf, checkPlan } from './check'
@@ -475,7 +475,7 @@ function contentForChoice(p: Prepared, choice: Choice): Content {
  *  R9 always hides its action line instead), so it never offers the axis. */
 const offersCta = (p: Prepared): boolean => STYLES[p.style].button != null && !!p.fmt?.platformButton && !!p.content.action
 
-function runChoice(p: Prepared, a: { frameW: number; frameH: number; style?: StyleId }, choice: Choice): Run {
+function runChoice(p: Prepared, a: { frameW: number; frameH: number; style?: StyleId }, choice: Choice, breakDates = false): Run {
   const fmt = p.fmt
   const keep = fmt?.keep
   const H_full = 100 * a.frameH / a.frameW
@@ -487,6 +487,7 @@ function runChoice(p: Prepared, a: { frameW: number; frameH: number; style?: Sty
     ...(format ? { format } : {}),
     ...(a.style ? { style: a.style } : {}),
     ...(keep ? { composeH: H_full * (1 - keep.top - keep.bottom) } : {}),
+    ...(breakDates ? { breakDates } : {}),
   }
   let S = makeSheet(opts)
   let side: PhotoEl | null = null
@@ -513,7 +514,8 @@ function runChoice(p: Prepared, a: { frameW: number; frameH: number; style?: Sty
   const out = p.def.fn(S, { c, kind: p.kind, ph: p.hasImage && !side, r, words, lines, arr: choice.arr })
   // Run-off keeps its image OVER the title (the title runs under it); everything else puts it behind.
   if (side && p.def.id === 'runoff') { side.ok = true; out.els.push(side) } else if (side) out.els.unshift(side)
-  if (!keep) return { out, S, side, ...(a.style ? { style: a.style } : {}) }
+  const designW = fmt ? { designW: fmt.w } : {}
+  if (!keep) return { out, S, side, ...(a.style ? { style: a.style } : {}), ...designW }
 
   // Compose-in-the-band → the real frame: move down by the top inset, then extend what fills the band.
   const { W, PHOTO_ASPECT } = S
@@ -562,16 +564,18 @@ function runChoice(p: Prepared, a: { frameW: number; frameH: number; style?: Sty
   }
   // The checker and the ops work on the real, full-height frame.
   const { composeH: _band, colRange: _cols, ...fullOpts } = opts
-  return { out, S: makeSheet(fullOpts), side, keep, fullH: H_full, ...(a.style ? { style: a.style } : {}) }
+  return { out, S: makeSheet(fullOpts), side, keep, fullH: H_full, ...(a.style ? { style: a.style } : {}), ...designW }
 }
 
-interface Run { out: LayoutOut; S: Sheet; side: PhotoEl | null; keep?: KeepClear; fullH?: number; style?: StyleId }
+interface Run { out: LayoutOut; S: Sheet; side: PhotoEl | null; keep?: KeepClear; fullH?: number; style?: StyleId
+  /** The format's own width in px (its design width, never the on-screen size). Absent: no format. */
+  designW?: number }
 
 /** The checker, with one adaptation for the side image of a wide frame: there the side image's
  *  edge is the page's edge for the type, so a `bleed` premise holds when the role runs off the
  *  page OR runs under the side image (Run-off's title on a wide frame runs under the image, as
  *  in the prototype). Every other rule and premise is checked unchanged. */
-function checkRun({ out, S, side, keep, fullH, style }: Run, premise: LayoutDef['premise'], pf: PieceFills): string[] {
+function checkRun({ out, S, side, keep, fullH, style, designW }: Run, premise: LayoutDef['premise'], pf: PieceFills): string[] {
   const bleed = premise?.bleed ?? []
   // Swiss (no style) checks exactly as in Stages 1–2; a style adds its own rules (rule 10). Rule 10
   // reads the picker's buttons: only a filled one covers its label (an outline or a link does not).
@@ -597,7 +601,7 @@ function checkRun({ out, S, side, keep, fullH, style }: Run, premise: LayoutDef[
   // Task 4: the style's own check (product visibility for Performance), in addition to the
   // shared rules above.
   const styleCheck = style && style !== 'swiss' ? STYLES[style].check : undefined
-  if (styleCheck) issues.push(...styleCheck(out.els, { W: S.W, H: S.H }, keep))
+  if (styleCheck) issues.push(...styleCheck(out.els, { W: S.W, H: S.H, ...(designW != null ? { designW } : {}) }, keep))
   // Ruling R6: text must be readable on the piece it sits on.
   issues.push(...pf.issues)
   return issues
@@ -605,6 +609,23 @@ function checkRun({ out, S, side, keep, fullH, style }: Run, premise: LayoutDef[
 
 /** The contrast picker over a run (ruling R6) — the one result the checker and toOps share. */
 const fillsOf = (p: Prepared, { out, S }: Run): PieceFills => pieceFills(out.els, S, p.fillCtx)
+
+/** Run and check one choice (the ONE path plan and candidates share). Task 3 of the layout
+ *  decisions: a date range too wide for its box may break after its dash ("19.09.–" /
+ *  "15.11.2026"). The choice runs first exactly as before; only when that fails, and the Frame's
+ *  date has such a dash, does it run again with the break allowed — kept when it passes. So every
+ *  choice that passed before is byte-identical; the break only ever adds candidates. */
+function runChecked(p: Prepared, a: { frameW: number; frameH: number; style?: StyleId }, choice: Choice): { ran: Run; pf: PieceFills; issues: string[] } {
+  const ran = runChoice(p, a, choice)
+  const pf = fillsOf(p, ran)
+  const issues = checkRun(ran, p.def.premise, pf)
+  const date = p.content.date
+  if (!issues.length || !date || !date.split(/\s+/).some(t => splitDateRange(t))) return { ran, pf, issues }
+  const ran2 = runChoice(p, a, choice, true)
+  const pf2 = fillsOf(p, ran2)
+  const issues2 = checkRun(ran2, p.def.premise, pf2)
+  return issues2.length ? { ran, pf, issues } : { ran: ran2, pf: pf2, issues: issues2 }
+}
 
 /** A piece's fill (`pieceFills`'s pick, ruling R6), resolved to a hex and measured against the
  *  page (`palette.field`) — Stage 4 ruling R8's button-contrast reward reads this. `undefined`:
@@ -643,10 +664,8 @@ function pickLibraryShape(mode: FrameElements['shapeMode'], seed: number): { id:
 export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
   const p = prepare(a)
   if (!p || !fitsFrame(p)) return null
-  const ran = runChoice(p, a, a.choice)
+  const { ran, pf, issues } = runChecked(p, a, a.choice)
   const { out, S } = ran
-  const pf = fillsOf(p, ran)
-  const issues = checkRun(ran, p.def.premise, pf)
 
   const libraryShape = p.targets.shape ? undefined : pickLibraryShape(p.elements.shapeMode, seedFor(p.index, a.choice))
   const targets = libraryShape ? { ...p.targets, libraryShape } : p.targets
@@ -786,18 +805,18 @@ export function applyLayoutToFrame(a: LayoutPlanArgs & { editor: LayoutEditor })
 export function candidatesForFrame(a: Omit<LayoutPlanArgs, 'choice'>): Candidate[] {
   const p = prepare(a)
   if (!p || !fitsFrame(p)) return []
-  const runs = new WeakMap<LayoutOut, Run & { pf: PieceFills }>()
+  const runs = new WeakMap<LayoutOut, Run & { pf: PieceFills; issues: string[] }>()
   // Each choice runs on its own sheet (scale/flip can differ) — so an element's box needs the
   // Sheet its own run built, not just any Sheet; keyed per element rather than per `LayoutOut`
   // because `enumerate`'s cover check (`vary.ts`) only ever hands us elements, not their `out`.
   const sheetOf = new WeakMap<El, Sheet>()
   const run = (choice: Choice) => {
-    const ran = runChoice(p, a, choice)
-    runs.set(ran.out, { ...ran, pf: fillsOf(p, ran) })
+    const { ran, pf, issues } = runChecked(p, a, choice)
+    runs.set(ran.out, { ...ran, pf, issues })
     for (const e of ran.out.els) sheetOf.set(e, ran.S)
     return ran.out
   }
-  const check = (out: LayoutOut) => { const r = runs.get(out)!; return checkRun(r, p.def.premise, r.pf) }
+  const check = (out: LayoutOut) => runs.get(out)!.issues
   const format = formatSheetOpts(p.fmt)
   const infoSize = makeSheet({ frameW: a.frameW, frameH: a.frameH, grid: p.grid, measure: p.measure, ...(format ? { format } : {}), ...(a.style ? { style: a.style } : {}) }).INFO.size
   const box = (e: El) => {

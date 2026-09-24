@@ -65,7 +65,8 @@ const EXPECTED_THIN: (Partial<Combo> & { offered: number; reason: string })[] = 
   ...['portrait', 'square', 'meta-story', 'meta-feed-4x5', 'ad-300x250'].map(frame =>
     ({ style: 'performance' as const, frame, image: false, offered: 0, reason: PERF_NO_IMAGE })),
   // With an image, the product visibility check (bands, cards and panels may hide at most 55% of
-  // the visible image; a fade counts 0.35) is what thins these out: a logo adds a band at the top,
+  // the visible image — 70% under 336 px of design width since Layout decisions Task 3; a fade
+  // counts 0.35) is what thins these out: a logo adds a band at the top,
   // a button adds a row at the foot, and on a small or tall-and-covered frame the bands then hide
   // too much. Price tag (a half-page panel: always 50.0%) survives. The least-covered choice of
   // each refused layout, measured across every choice (all kinds unless named):
@@ -88,8 +89,13 @@ const EXPECTED_THIN: (Partial<Combo> & { offered: number; reason: string })[] = 
   // "–30%" no longer fits a readable sticker; Price tag's half-page panel has no height left for
   // the title between the logo and the offer (fitted size −4.95, floor 3.00). Stage 4 Task 5: Post-it
   // (it draws no logo, as the prototype) is offered — 1, still under the floor; Stage 3's own: 0.
-  { style: 'performance', frame: 'ad-300x250', image: true, action: true, logo: true, offered: 1,
-    reason: '300×250 with a button and a logo: 66.7–88.9% of the image hidden, the sticker too small, no room for Price tag\'s title; only Post-it (Stage 4)' },
+  // No longer thin since Layout decisions Task 3: a Frame under 336 px of design width may hide up
+  // to 70% of its image, so Card (66.7–68.9% hidden) is offered beside Post-it — 2, the floor.
+  // The small-format limit on 300×250 (measured on the phrase, every choice; Task 3 pins them
+  // below): logo only, Offer 69.5–72.5% (2 of 8 choices pass), Sticker 55.9–61.8%, Card
+  // 56.4–58.5%, Centred 69.2–71.7% (2 pass) — all four now offered; action only, Offer
+  // 56.5–64.6%, Sticker 64.2–70.1% (6 pass), Card 55.6–57.8% now offered, Centred 77.5–80.0%
+  // still refused; neither, Centred 58.1–60.6% now offered too.
 ]
 const matches = (e: Partial<Combo>, c: Combo) =>
   (['style', 'frame', 'kind', 'image', 'action', 'logo'] as const).every(k => e[k] === undefined || e[k] === c[k])
@@ -189,9 +195,13 @@ describe('style matrix — each style\'s layouts through the real planner', () =
     // action. Without the Stage 4 layouts each offers exactly what it did before.
     const stage4 = new Set(CATALOG.filter(l => l.needsContent).map(l => l.id))
     const PINS: [Partial<Combo>, string[]][] = [
-      [{ frame: 'ad-300x250', action: false, logo: true }, ['perfPriceTag']],
-      [{ frame: 'ad-300x250', action: true, logo: false }, ['perfPriceTag']],
-      [{ frame: 'ad-300x250', action: true, logo: true }, []],
+      // Layout decisions Task 3: under 336 px of design width up to 70% of the image may be hidden
+      // (measured percentages in EXPECTED_THIN's notes above) — 300×250 now offers these Stage 3
+      // layouts. The story (1080 px) keeps the 55% limit, so its count is unchanged.
+      [{ frame: 'ad-300x250', action: false, logo: false }, ['perfOffer', 'perfSticker', 'perfPriceTag', 'perfCard', 'perfCentred']],
+      [{ frame: 'ad-300x250', action: false, logo: true }, ['perfOffer', 'perfSticker', 'perfPriceTag', 'perfCard', 'perfCentred']],
+      [{ frame: 'ad-300x250', action: true, logo: false }, ['perfOffer', 'perfSticker', 'perfPriceTag', 'perfCard']],
+      [{ frame: 'ad-300x250', action: true, logo: true }, ['perfCard']],
       [{ frame: 'meta-story', action: true, logo: true }, ['perfPriceTag']],
     ]
     for (const [c, stage3] of PINS) for (const kind of KINDS) {

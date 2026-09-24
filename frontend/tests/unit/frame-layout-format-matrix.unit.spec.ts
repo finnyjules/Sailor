@@ -44,23 +44,17 @@ const floorOf = (f: FrameFormat) => FLOOR[f.id] ?? 6
 type Combo = { format: string; kind: Kind; image: boolean; content: Content }
 
 // Pinterest is seen at 236 px, so its INFO floor is 9/236 = 3.81 units, and the Stage 1 date
-// "19.09.–15.11.2026" never breaks (the renderer wraps only at spaces): one line 35.7 wide. The
-// quarter-width info column most layouts give the date is 29.6 wide on 2:3 and 20.1 on 9:16 (its
-// 18% right keep sets both side margins to 18.1), so the date runs into the caption or off the
-// page and the checker rightly refuses. Measured on 2:3 phrase, no image: 16 layouts "date
-// overlaps caption", 6 "date: off the page". Only Index, Tilt and Number behind still pass. With the number fixture ("–30%", 8.4 wide) the same formats offer 14–40.
-const PINTEREST_DATE = 'Pinterest, 236 px: the unbreakable date is 35.7 wide at the 3.81 floor; its column is 29.6 (2:3) / 20.1 (9:16) — date overlaps caption or runs off the page'
+// "19.09.–15.11.2026" is one line 35.7 wide. The quarter-width info column most layouts give the
+// date is 29.6 wide on 2:3 and 20.1 on 9:16 (its 18% right keep sets both side margins to 18.1).
+// Until Layout decisions Task 3 the date never broke (the renderer wraps only at spaces), so it
+// ran into the caption or off the page: 3 layouts offered (Index, Tilt, Number behind) with no
+// image, 5 for the 9:16 sentence with one. Since Task 3 a date too wide for its box may break
+// after the dash between its two dates ("19.09.–" / "15.11.2026", 14.7 and 21.0 wide at the
+// floor), tried only when a choice fails without it — Pinterest now meets its floor everywhere.
+// The measured counts are pinned in 'the format findings, pinned' below.
 /** Combinations allowed under their floor. Each entry matches by the fields it gives, and pins
  *  the count measured when it was written (`offered`), so a change either way is noticed. */
-const EXPECTED_THIN: (Partial<Combo> & { offered: number; reason: string })[] = [
-  // index, tilt, dateBehind
-  { format: 'pinterest-2x3', image: false, content: 'dates', offered: 3, reason: PINTEREST_DATE },
-  { format: 'pinterest-9x16', image: false, content: 'dates', offered: 3, reason: PINTEREST_DATE },
-  // index, tilt, column, overprint, dateBehind — and the two image layouts that still pass for
-  // word and phrase here (Panel, Label) fit the sentence's lines into their narrow text area
-  // only below the title's floor ("title: below minimum size").
-  { format: 'pinterest-9x16', kind: 'sentence', image: true, content: 'dates', offered: 5, reason: PINTEREST_DATE },
-]
+const EXPECTED_THIN: (Partial<Combo> & { offered: number; reason: string })[] = []
 const matches = (e: Partial<Combo>, c: Combo) =>
   (['format', 'kind', 'image', 'content'] as const).every(k => e[k] === undefined || e[k] === c[k])
 const expectedThin = (c: Combo) => EXPECTED_THIN.find(e => matches(e, c))
@@ -166,6 +160,21 @@ describe('format matrix — every format × kind × image through the real plann
 })
 
 describe('the format findings, pinned', () => {
+  it('Pinterest with the long date: the date breaks after its dash, so it offers far more (Task 3)', () => {
+    // Measured with the stub measure, when Task 3 landed (before: 3 / 3 / 3 without an image;
+    // 8 / 8 / 8 on 2:3 and 7 / 7 / 5 on 9:16 with one).
+    const PINNED: Record<string, [number, number, number, number, number, number]> = {
+      // word none, word image, phrase none, phrase image, sentence none, sentence image
+      'pinterest-2x3': [19, 33, 26, 40, 23, 37],
+      'pinterest-9x16': [10, 18, 14, 22, 13, 16],
+    }
+    for (const [fid, counts] of Object.entries(PINNED)) {
+      const got = (['word', 'phrase', 'sentence'] as Kind[]).flatMap(kind => [false, true].map(image =>
+        results.get(keyOf({ format: fid, kind, image, content: 'dates' }))?.length))
+      expect(got, fid).toEqual(counts)
+    }
+  })
+
   const offeredOn = (id: string, fid: string, kind: Kind, image: boolean) => {
     const f = FRAME_FORMATS.find(x => x.id === fid)!
     const def = LAYOUTS.find(l => l.id === id)!
