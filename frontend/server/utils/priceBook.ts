@@ -21,7 +21,11 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES }
 // lineup-p4 (Task P4): the image edit tools priced by the call their settings
 // make (shared/pricing/editRates.ts): resolution, size and model; Upscale and
 // Enhance detail at the largest accepted input × the scale chosen.
-export const PRICE_BOOK_VERSION = 'lineup-p4'
+// lineup-p4b (P4 fix round 1): a Nano Banana edit is priced at the dearest
+// step of the ComfyUI path's fallback chain; Upscale, Enhance detail and
+// FLUX.2 edit read the measured input size where the gate or runner sees it,
+// else the 4096² cap.
+export const PRICE_BOOK_VERSION = 'lineup-p4b'
 
 export const BASE_RENDER_CREDITS = 1
 
@@ -300,9 +304,9 @@ function isProviderClass(ct: string): boolean {
  * calculation (the same one the node badge and the run estimate read), given
  * the node's WHOLE input map.
  */
-function graphNodeModelCredits(ct: string, inputs: unknown): number {
+function graphNodeModelCredits(ct: string, inputs: unknown, inputPixels: number | undefined): number {
   const map = inputs && typeof inputs === 'object' ? inputs as Record<string, unknown> : {}
-  const price = priceNode(ct, map)
+  const price = priceNode(ct, map, { inputPixels })
   if ('refused' in price) throw new UnpricedGraphError(ct, price.refused)
   return price.credits
 }
@@ -313,7 +317,13 @@ export interface GraphPrice {
   breakdown: { action: string; credits: number }[]
 }
 
-export function priceGraph(prompt: Record<string, { class_type: string; inputs?: unknown }>): GraphPrice {
+/**
+ * `opts.inputPixels`: node id → the measured size of the picture a
+ * size-priced node (Upscale, Enhance detail, FLUX.2 edit) is sent, where the
+ * caller could read it (graphInputPixels.ts on the hosted gate, the runner
+ * before it submits). A node with no entry is priced at the input cap.
+ */
+export function priceGraph(prompt: Record<string, { class_type: string; inputs?: unknown }>, opts: { inputPixels?: Record<string, number> } = {}): GraphPrice {
   const breakdown: { action: string; credits: number }[] = []
   let hasOutput = false
 
@@ -325,7 +335,8 @@ export function priceGraph(prompt: Record<string, { class_type: string; inputs?:
 
     if (SHARED_PRICED_CLASS_SET.has(ct)) {
       const inputs = prompt[id]?.inputs
-      const credits = graphNodeModelCredits(ct, inputs)
+      const px = opts.inputPixels && Object.prototype.hasOwnProperty.call(opts.inputPixels, id) ? opts.inputPixels[id] : undefined
+      const credits = graphNodeModelCredits(ct, inputs, px)
       const model = (inputs as { model?: unknown } | undefined)?.model
       // A class with no model widget (Develop, Relight…) is named alone, as its flat row was.
       breakdown.push({ action: model === undefined ? ct : `${ct}:${String(model)}`, credits })

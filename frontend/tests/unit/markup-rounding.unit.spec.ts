@@ -6,7 +6,7 @@
  * 7.000000000000001 and charged 8 credits for a 7-credit price.
  */
 import { describe, expect, it } from 'vitest'
-import { creditsForUsd } from '#shared/pricing/markup'
+import { creditsForUsd, usdChargedAtCost } from '#shared/pricing/markup'
 
 describe('creditsForUsd rounding', () => {
   it('exact prices do not round up from float noise', () => {
@@ -79,5 +79,25 @@ describe('creditsForUsd rounding', () => {
     }
     expect(off.slice(0, 5)).toEqual([])
     expect(ks.length).toBeGreaterThan(30000)
+  })
+})
+
+/**
+ * Task: the fallback-chain pricing rule (editRates.ts editMaxUsd) covers a
+ * rarely-taken fallback at cost, never at the house markup — `usdChargedAtCost`
+ * is the inverse of `creditsForUsd`'s policy: the provider price whose
+ * marked-up credits equal a raw cost charged with no markup at all.
+ */
+describe('usdChargedAtCost', () => {
+  it('creditsForUsd(usdChargedAtCost(c)) recovers ceil(c × 100) — charged at cost, no markup', () => {
+    for (const c of [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.50, 1.00]) {
+      expect(creditsForUsd(usdChargedAtCost(c)), `cost=${c}`).toBe(Math.ceil(c * 100))
+    }
+  })
+
+  it('zero for zero or negative input', () => {
+    expect(usdChargedAtCost(0)).toBe(0)
+    expect(usdChargedAtCost(-1)).toBe(0)
+    expect(usdChargedAtCost(-0.05)).toBe(0)
   })
 })

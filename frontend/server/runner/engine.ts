@@ -21,7 +21,7 @@ import { isProviderNetworkError, percentFromLogs, type FalStatus, type ProviderC
 import { planNode } from './executors'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
-import { extraPromptText, hasOutputNode, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
+import { extraPromptText, hasOutputNode, measuredInputPixels, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
 import { ev, type RunEvents } from './events'
 import type { Handoff } from './handoff'
 import { extFor, type ResultStore } from './results'
@@ -627,7 +627,8 @@ export function createEngine(deps: EngineDeps) {
 
       rec.endpoint = plan.endpoint
       rec.payload = plan.payload
-      rec.credits = nodeCredits(take.prompt[id]!)
+      // Priced on the measured picture where the price depends on its size (FLUX.2 edit).
+      rec.credits = nodeCredits(take.prompt[id]!, await measuredInputPixels(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], f => deps.results.read(f)))
       const fp = isReusable(plan.payload)
         ? requestFingerprint(fingerprintEndpoint(plan.provider, plan.endpoint), plan.payload, u => deps.handoff.hashOf(u))
         : null

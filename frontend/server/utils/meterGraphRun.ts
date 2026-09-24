@@ -12,6 +12,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { H3Event } from 'h3'
 import { readBody, setResponseStatus } from 'h3'
 import { priceGraph, UnpricedGraphError } from './priceBook'
+import { graphInputPixels } from './graphInputPixels'
 import { MeterRefusalError } from './requestMeter'
 import { createGraphRun, resolveGraphRun, outputKey, ownedOutputKeys } from './graphRuns'
 import { settleOnCompletion } from './settleWatcher'
@@ -312,6 +313,13 @@ export async function holdWithRefusal(
 export interface GraphRunDeps {
   priceGraph: typeof priceGraph
   /**
+   * Node id → the measured size of the picture each size-priced node
+   * (Upscale, Enhance detail, FLUX.2 edit) is sent — graphInputPixels. Runs
+   * after the file-ownership check, so it only reads the caller's own files.
+   * Absent (the unit tests), every such picture is priced at the input cap.
+   */
+  measureInputPixels?(prompt: any): Promise<Record<string, number>>
+  /**
    * Operator safety valves (Stage 7 final review C1) — the global kill-switch,
    * the per-user disable set, and the daily spend ceiling. Runs FIRST, before
    * file-ref validation / moderation / pricing / hold, so a paused or
@@ -373,9 +381,13 @@ export async function meterGraphSubmit(userId: string | null, body: any, deps: G
     throw new MeterRefusalError('This prompt was blocked by content moderation', 400, { categories: mod.categories })
   }
 
+  // The size of the pictures a size-priced node is sent, where the gate can
+  // read it; the rest price at the input cap (never below what runs).
+  const inputPixels = deps.measureInputPixels ? await deps.measureInputPixels(body.prompt).catch(() => ({})) : undefined
+
   let price
   try {
-    price = deps.priceGraph(body.prompt)
+    price = deps.priceGraph(body.prompt, inputPixels ? { inputPixels } : undefined)
   } catch (e) {
     if (e instanceof UnpricedGraphError) throw new MeterRefusalError(e.message, 500)
     throw e
@@ -449,6 +461,7 @@ export async function handleMeteredPrompt(event: H3Event): Promise<any> {
 
   const result = await meterGraphSubmit(userId, body, {
     priceGraph,
+    measureInputPixels: prompt => graphInputPixels(prompt),
     // Stage 7 final review C1: the operator kill-switch + daily ceiling. Wired
     // the SAME way moderatePrompt (Task 3) is — the real implementation passed
     // in here, stubbed in the unit tests. Local mode is a no-op inside

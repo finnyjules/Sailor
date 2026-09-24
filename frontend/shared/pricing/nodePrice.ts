@@ -33,7 +33,14 @@
  * rate for the call the node's settings make (editRates.ts × editSettings.ts):
  * the resolution or size sent, and for the upscalers the largest accepted
  * input × the scale chosen. A linked or missing model on an edit node is
- * priced at the dearest model it offers.
+ * priced at the dearest model it offers, and a call with a fallback chain
+ * (the ComfyUI path's Nano Banana edits) at the dearest step of it.
+ *
+ * `opts.inputPixels` is the measured size of the picture a size-priced node
+ * (Upscale, Enhance detail, FLUX.2 edit) is sent, where the caller could see
+ * it; without it the picture is priced at the cap (editSettings.ts). The
+ * badge may show that ceiling while the charge reads the measured size, so
+ * the badge is never below the charge.
  *
  * Relative imports on purpose: this module is loaded by Nitro, the Vue app
  * and vitest alike.
@@ -41,7 +48,7 @@
 import { IMAGE_MODELS } from '../../app/data/image-models'
 import { LEGACY_VIDEO_MODEL_IDS } from '../../app/data/video-prices'
 import { creditsForUsd } from './markup'
-import { editUsd } from './editRates'
+import { editMaxUsd } from './editRates'
 import { SETTING_PRICED_NODE_CLASSES, editCalls } from './editSettings'
 import { imageMaxUsd, imageRate, imageUsd } from './imageRates'
 import { LARGEST_RATIO, effectiveImageSettings } from './imageSettings'
@@ -125,16 +132,22 @@ function imageNodeUsd(model: string, inputs: NodeInputs): number {
  * calls its settings can make (one call unless the model is linked or
  * missing), or the refusal.
  */
-function editNodeUsd(classType: string, inputs: NodeInputs): number | { refused: string } {
-  const c = editCalls(classType, inputs)
+function editNodeUsd(classType: string, inputs: NodeInputs, opts: PriceOptions): number | { refused: string } {
+  const c = editCalls(classType, inputs, { inputPixels: opts.inputPixels })
   if ('refused' in c) return c
   let usd = 0
   for (const one of c.calls) {
-    const price = editUsd(one)
+    const price = editMaxUsd(one)
     if (price == null) return { refused: `${one.endpoint} has no listed price` }
     usd = Math.max(usd, price)
   }
   return usd
+}
+
+/** What the caller measured about a node's run-time inputs. */
+export interface PriceOptions {
+  /** Pixels of the picture a size-priced node is sent (see editSettings.ts sizePricedInput). */
+  inputPixels?: number | null
 }
 
 /** A priced node, or the reason it can't be priced (the server refuses it). */
@@ -146,9 +159,9 @@ export type NodePrice =
  * The core calculation. `refused` carries the reason the server puts in its
  * UnpricedGraphError; the badge and estimate treat it as "no price".
  */
-export function priceNode(classType: string, inputs: NodeInputs | null | undefined): NodePrice {
+export function priceNode(classType: string, inputs: NodeInputs | null | undefined, opts: PriceOptions = {}): NodePrice {
   if (SETTING_PRICED_CLASS_SET.has(classType)) {
-    const usd = editNodeUsd(classType, inputs ?? {})
+    const usd = editNodeUsd(classType, inputs ?? {}, opts)
     return typeof usd === 'number' ? { usd, credits: creditsForUsd(usd) } : usd
   }
   if (!MODEL_PRICED_CLASS_SET.has(classType)) return { refused: 'not a model-priced class' }
@@ -171,7 +184,7 @@ export function priceNode(classType: string, inputs: NodeInputs | null | undefin
     // Engine pickers (UpscaleImageNode / EnhanceDetailNode): the `model`
     // widget names an engine, priced by the output size it makes from the
     // largest accepted input.
-    const price = editNodeUsd(classType, inputs!)
+    const price = editNodeUsd(classType, inputs!, opts)
     if (typeof price !== 'number') return price
     usd = price
   }
@@ -179,13 +192,13 @@ export function priceNode(classType: string, inputs: NodeInputs | null | undefin
 }
 
 /** What the service charges us in USD for this node as configured, or null. */
-export function providerUsd(classType: string, inputs: NodeInputs | null | undefined): number | null {
-  const p = priceNode(classType, inputs)
+export function providerUsd(classType: string, inputs: NodeInputs | null | undefined, opts: PriceOptions = {}): number | null {
+  const p = priceNode(classType, inputs, opts)
   return 'refused' in p ? null : p.usd
 }
 
 /** Credits we charge for this node as configured (markup applied), or null. */
-export function nodeCredits(classType: string, inputs: NodeInputs | null | undefined): number | null {
-  const p = priceNode(classType, inputs)
+export function nodeCredits(classType: string, inputs: NodeInputs | null | undefined, opts: PriceOptions = {}): number | null {
+  const p = priceNode(classType, inputs, opts)
   return 'refused' in p ? null : p.credits
 }

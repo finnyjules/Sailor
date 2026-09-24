@@ -9,9 +9,13 @@
  *  - `by_resolution`: dollars per picture by the resolution tier sent
  *    (1K / 2K / 4K); a tier the card does not list is priced at its top tier;
  *  - `flux2_megapixels`: fal FLUX.2 edit — a first output megapixel, then a
- *    price per extra megapixel of input AND output;
+ *    price per extra megapixel of input AND output, each rounded up to a whole
+ *    megapixel of 1024 × 1024 pixels (fal's page says so: 1024² is $0.03,
+ *    1920 × 1080 is two);
  *  - `by_output_pixels`: a price per picture that steps up with the output
- *    size (Crystal, Topaz); above the last step, the last step's price;
+ *    size (Crystal, Topaz); above the last step, the last step's price, or,
+ *    where the service lists no price there, the last step's price per pixel
+ *    carried on (`beyondPerPixel`);
  *  - `per_output_megapixel`: a model billed by GPU time, priced per output
  *    megapixel with a floor (an estimate: the service publishes no per-unit
  *    figure).
@@ -26,6 +30,7 @@
  * Pure data and pure functions; relative imports only (Nitro, the app and
  * vitest all load it).
  */
+import { usdChargedAtCost } from './markup'
 
 interface RateMeta {
   service: 'fal' | 'replicate'
@@ -39,8 +44,8 @@ interface RateMeta {
 export type EditRate =
   | (RateMeta & { unit: 'per_image', usd: number })
   | (RateMeta & { unit: 'by_resolution', byTier: Record<string, number> })
-  | (RateMeta & { unit: 'flux2_megapixels', firstMegapixel: number, extraMegapixel: number })
-  | (RateMeta & { unit: 'by_output_pixels', steps: readonly (readonly [maxPixels: number, usd: number])[] })
+  | (RateMeta & { unit: 'flux2_megapixels', firstMegapixel: number, extraMegapixel: number, megapixelPixels: number })
+  | (RateMeta & { unit: 'by_output_pixels', steps: readonly (readonly [maxPixels: number, usd: number])[], beyondPerPixel?: number })
   | (RateMeta & { unit: 'per_output_megapixel', perMegapixel: number, minUsd: number })
 
 /** One priced provider call: the endpoint and the settings it is billed by. */
@@ -53,6 +58,12 @@ export interface EditCall {
   inputPixels: number | null
   /** Pixels of the picture that comes back, where the price depends on it. */
   outputPixels: number | null
+  /**
+   * The calls the ComfyUI path makes next when this one fails (Python's
+   * fallback chain, _run_nano_banana_edit). The node is priced at the most
+   * expensive entry, so the charge covers whichever one runs.
+   */
+  fallbacks?: EditCall[]
 }
 
 const READ = '2026-09-24'
@@ -78,7 +89,7 @@ export const EDIT_RATES: Record<string, EditRate> = {
   // "$0.03 for the first megapixel of output, plus $0.015 per extra megapixel
   // of input and output, rounded up to the nearest megapixel."
   'fal-ai/flux-2-pro/edit': {
-    unit: 'flux2_megapixels', firstMegapixel: 0.03, extraMegapixel: 0.015,
+    unit: 'flux2_megapixels', firstMegapixel: 0.03, extraMegapixel: 0.015, megapixelPixels: 1024 * 1024,
     ...verified('fal', fal('fal-ai/flux-2-pro/edit')),
   },
   // "Price: $0.04 per images".
@@ -89,6 +100,12 @@ export const EDIT_RATES: Record<string, EditRate> = {
   'google/nano-banana-2': {
     unit: 'by_resolution', byTier: { '1K': 0.067, '2K': 0.101, '4K': 0.151 },
     ...verified('replicate', rep('google/nano-banana-2')),
+  },
+  // By "target resolution": 1K $0.15, 2K $0.15, 4K $0.30 — the last step of
+  // Restyle Pro's chain (fal Nano Banana Pro, then this).
+  'google/nano-banana-pro': {
+    unit: 'by_resolution', byTier: { '1K': 0.15, '2K': 0.15, '4K': 0.30 },
+    ...verified('replicate', rep('google/nano-banana-pro')),
   },
   // "$0.039 per output image" (the original Nano Banana takes no resolution).
   'google/nano-banana': { unit: 'per_image', usd: 0.039, ...verified('replicate', rep('google/nano-banana')) },
@@ -111,10 +128,10 @@ export const EDIT_RATES: Record<string, EditRate> = {
   'fofr/style-transfer': { unit: 'per_image', usd: 0.05, ...estimate(rep('fofr/style-transfer')) },
 
   // ── Upscale and Enhance detail (Replicate) ──────────────────────────────
-  // Billed by GPU time (A100 40GB, $0.00115/s), "approximately $0.020 to run"
-  // for a typical picture. Tiled upscaling time grows with the output size,
-  // so it is priced per output megapixel: $0.0125/MP makes a 4 MP picture
-  // at 2× (16 MP out) $0.20, the figure charged before, which stays the floor.
+  // Billed by GPU time (A100 40GB, $0.00115/s), "approximately $0.036 to run"
+  // for a typical picture (re-read 2026-09-24; it said $0.020 earlier that day). Tiled upscaling time grows with the output size,
+  // so it is priced per output megapixel: $0.0125/MP makes 16 MP out (a 2 × 2K
+  // picture at 2×) $0.20, the figure charged before, which stays the floor.
   'philz1337x/clarity-upscaler': {
     unit: 'per_output_megapixel', perMegapixel: 0.0125, minUsd: 0.20,
     ...estimate(rep('philz1337x/clarity-upscaler')),
@@ -133,9 +150,11 @@ export const EDIT_RATES: Record<string, EditRate> = {
   // "$0.08 per unit"; the units by output megapixels, from the page's table:
   // 24 MP 1, 48 MP 2, 60 MP 3, 96 MP 4, 132 MP 5, 168 MP 6, 336 MP 11, 512 MP 17.
   // (The same table quotes $0.05 a unit; the billed tier says $0.08, so $0.08.)
+  // Above 512 MP the table stops: 17 units per 512 MP, carried on.
   'topazlabs/image-upscale': {
     unit: 'by_output_pixels',
-    steps: [[24e6, 0.08], [48e6, 0.16], [60e6, 0.24], [96e6, 0.32], [132e6, 0.40], [168e6, 0.48], [336e6, 0.88], [Infinity, 1.36]],
+    steps: [[24e6, 0.08], [48e6, 0.16], [60e6, 0.24], [96e6, 0.32], [132e6, 0.40], [168e6, 0.48], [336e6, 0.88], [512e6, 1.36]],
+    beyondPerPixel: 1.36 / 512e6,
     ...verified('replicate', rep('topazlabs/image-upscale')),
   },
   // Billed by GPU time (L40S), "approximately $0.031 to run" for a typical
@@ -161,7 +180,10 @@ export const megapixelsOf = (pixels: number) => Math.ceil(pixels / 1e6 - 1e-9)
 /** Round away binary float noise (a tenth of a micro-dollar). */
 const tidy = (usd: number) => Math.round(usd * 1e8) / 1e8
 
-/** Dollars the first service charges for this call, or null when the endpoint has no card. */
+/**
+ * Dollars the service charges for this one call (its fallbacks aside), or
+ * null when the endpoint has no card.
+ */
 export function editUsd(call: EditCall): number | null {
   const rate = editRate(call.endpoint)
   if (!rate) return null
@@ -172,14 +194,37 @@ export function editUsd(call: EditCall): number | null {
       return p ?? Math.max(...Object.values(rate.byTier))
     }
     case 'flux2_megapixels': {
-      const mp = Math.max(1, megapixelsOf(call.inputPixels ?? 0) + megapixelsOf(call.outputPixels ?? 0))
+      const whole = (px: number) => Math.ceil(px / rate.megapixelPixels - 1e-9)
+      const mp = Math.max(1, whole(call.inputPixels ?? 0) + whole(call.outputPixels ?? 0))
       return tidy(rate.firstMegapixel + rate.extraMegapixel * (mp - 1))
     }
     case 'by_output_pixels': {
       const px = call.outputPixels ?? Infinity
-      return rate.steps.find(([max]) => px <= max)![1]
+      const step = rate.steps.find(([max]) => px <= max)
+      if (step) return step[1]
+      const last = rate.steps[rate.steps.length - 1]!
+      return rate.beyondPerPixel == null ? last[1] : tidy(Math.max(last[1], rate.beyondPerPixel * px))
     }
     case 'per_output_megapixel':
       return tidy(Math.max(rate.minUsd, rate.perMegapixel * megapixelsOf(call.outputPixels ?? 0)))
   }
+}
+
+/**
+ * The price that covers this call and every call the ComfyUI path falls back
+ * to after it (controller ruling, P4): the first call carries the usual
+ * markup, a fallback is only covered at cost — it is rarely taken, so it must
+ * never lose money but does not earn the markup. Null when any of them has no
+ * card.
+ */
+export function editMaxUsd(call: EditCall): number | null {
+  const first = editUsd(call)
+  if (first == null) return null
+  let usd = first
+  for (const one of call.fallbacks ?? []) {
+    const p = editUsd(one)
+    if (p == null) return null
+    usd = Math.max(usd, usdChargedAtCost(p))
+  }
+  return usd
 }

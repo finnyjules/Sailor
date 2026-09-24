@@ -24,7 +24,7 @@ describe('Continue', () => {
     expect(ofType(k.seen, 'executed').some(m => m.data.node === '4')).toBe(true)
     expect((await k.store.get(runId))!.status).toBe('done')
     // image once, video once
-    expect([...k.ledger.holds.values()].map(h => [h.state, h.actual])).toEqual([['settled', 2], ['settled', 45]])
+    expect([...k.ledger.holds.values()].map(h => [h.state, h.actual])).toEqual([['settled', 3], ['settled', 45]])
   })
 
   it('works after a server restart', async () => {
@@ -55,11 +55,11 @@ describe('Continue', () => {
   })
 
   it('not enough credits: says how many, and the run stays paused', async () => {
-    const ledger = createFakeLedger(10) // image stage costs 2, video 45
+    const ledger = createFakeLedger(10) // image stage costs 3 (flux-schnell 1:1 is 2 MP: 2 + the render), video 45
     const k = makeKit({ hosted: true, ledger })
     const { runId } = await pausedRun(k)
     await expect(k.engine.gateAction({ userId: 'user_1', runId, gateId: '2', action: 'continue' }))
-      .rejects.toMatchObject({ statusCode: 402, data: { required: 45, available: 8 } })
+      .rejects.toMatchObject({ statusCode: 402, data: { required: 45, available: 7 } })
     const run = (await k.store.get(runId))!
     expect(run.status).toBe('paused')
     expect(run.takes[0]!.nodes['2']!.status).toBe('paused')
@@ -211,7 +211,7 @@ describe('Stop', () => {
     await continuing
     await k.engine.settled(runId)
     expect(k.fal.submitted().map(r => r.endpoint)).toEqual(['fal-ai/flux/schnell'])
-    expect([...k.ledger.holds.values()].map(h => [h.credits, h.state])).toEqual([[2, 'settled'], [45, 'released']])
+    expect([...k.ledger.holds.values()].map(h => [h.credits, h.state])).toEqual([[3, 'settled'], [45, 'released']])
     const run = (await k.store.get(runId))!
     expect(run.takes[0]!.nodes['3']!.status).toBe('stopped')
     expect(run.status).toBe('stopped')
@@ -371,11 +371,11 @@ describe('restart recovery', () => {
     expect(fal.submitted()).toHaveLength(2)
     expect(ledger.hold).toHaveBeenCalledTimes(1)
     expect(ledger.settle).toHaveBeenCalledTimes(1)
-    // two images (1 each) + the render credit (1)
-    expect([...ledger.holds.values()].map(h => [h.state, h.actual])).toEqual([['settled', 3]])
+    // two images (2 each: 1:1 is 2 MP) + the render credit (1)
+    expect([...ledger.holds.values()].map(h => [h.state, h.actual])).toEqual([['settled', 5]])
     const run = (await k2.store.get(runId))!
-    expect(run.charges[0]!.actual).toBe(3)
-    expect(ofType(k2.seen, 'execution_success').find(m => m.data.prompt_id === promptIds[0])!.data.credits).toBe(3)
+    expect(run.charges[0]!.actual).toBe(5)
+    expect(ofType(k2.seen, 'execution_success').find(m => m.data.prompt_id === promptIds[0])!.data.credits).toBe(5)
     expect(k2.records.write).toHaveBeenCalledTimes(1)
     const summary = (k2.records.write.mock.calls[0] as unknown[])[0] as { outputs: unknown[] }
     expect(summary.outputs).toHaveLength(2)
@@ -410,8 +410,8 @@ describe('restart recovery', () => {
     fal.release()
     await k2.engine.settled(runId)
     expect(fal.submitted()).toHaveLength(2)
-    // image (1) + the other image (1) + the render credit (1)
-    expect([...ledger.holds.values()].map(h => [h.state, h.actual])).toEqual([['settled', 3]])
+    // image (2) + the other image (2) + the render credit (1)
+    expect([...ledger.holds.values()].map(h => [h.state, h.actual])).toEqual([['settled', 5]])
     const run = (await k2.store.get(runId))!
     expect(run.status).toBe('paused')
     expect(ofType(k2.seen, 'gate_paused')).toHaveLength(1)
@@ -465,7 +465,7 @@ describe('lookups', () => {
     const k = makeKit({ hosted: true })
     const { runId, promptIds } = await pausedRun(k)
     const rec = await k.engine.record('user_1', promptIds[0]!)
-    expect(rec).toMatchObject({ runId, promptId: promptIds[0], workflow: { nodes: ['as run'] }, credits: 2, prompt: 'a red fox', nodeTypes: ['GenerateImageNode', 'ComfyGateNode', 'Image'] })
+    expect(rec).toMatchObject({ runId, promptId: promptIds[0], workflow: { nodes: ['as run'] }, credits: 3, prompt: 'a red fox', nodeTypes: ['GenerateImageNode', 'ComfyGateNode', 'Image'] })
     expect(await k.engine.record('user_2', promptIds[0]!)).toBeNull()
     expect(await k.engine.record('user_1', 'not-a-run')).toBeNull()
   })

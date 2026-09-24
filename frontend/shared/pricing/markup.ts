@@ -22,3 +22,18 @@ export function creditsForUsd(usd: number): number {
   const credits = Math.round(price * 100 * markup * 1e6) / 1e6
   return Math.max(1, Math.ceil(credits))
 }
+
+/**
+ * The provider price whose marked-up credits equal `usd` charged at cost (no
+ * markup) — for a rarely-taken fallback that must never be charged below what
+ * it costs, but should not carry the house markup either. The inverse of the
+ * policy above: half the cost up to a $0.10 price, two thirds of it above.
+ */
+export function usdChargedAtCost(usd: number): number {
+  if (!(usd > 0)) return 0
+  const half = usd / 2
+  const price = half <= 0.10 ? half : usd / 1.5
+  // Rounded DOWN to 1e-8: creditsForUsd rounds its credits up, so this can
+  // only drop float noise, never land a credit above the cost.
+  return Math.floor(price * 1e8) / 1e8
+}

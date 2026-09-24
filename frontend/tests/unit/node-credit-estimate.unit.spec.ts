@@ -102,9 +102,9 @@ describe('modelPricedUsd — video models', () => {
 })
 
 describe('modelPricedUsd — engine pickers', () => {
-  it('prices each engine at the largest accepted input × the default scale (Task P4)', () => {
-    // Clarity at 2× makes 16 MP: $0.20. Real-ESRGAN: $0.002 a picture. Topaz in place, 4 MP: one $0.08 unit.
-    expect(modelPricedUsd('UpscaleImageNode', { model: 'Clarity' })).toBe(0.20)
+  it('prices each engine at the input cap (4096²) × the default scale (Task P4 fix round 1)', () => {
+    // Clarity at 2× makes 67.1 M px, 68 MP × $0.0125. Real-ESRGAN: $0.002 a picture. Topaz in place, 16.8 MP: one $0.08 unit.
+    expect(modelPricedUsd('UpscaleImageNode', { model: 'Clarity' })).toBe(0.85)
     expect(modelPricedUsd('UpscaleImageNode', { model: 'Real-ESRGAN' })).toBe(0.002)
     expect(modelPricedUsd('EnhanceDetailNode', { model: 'Faithful' })).toBe(0.08)
   })
@@ -136,7 +136,7 @@ describe('nodeCreditEstimate', () => {
     const cheap = nodeCreditEstimate('UpscaleImageNode', { model: 'Real-ESRGAN' })!
     const dear = nodeCreditEstimate('UpscaleImageNode', { model: 'Clarity' })!
     expect(cheap).toBe(creditsForUsd(0.002) + BASE_RENDER)
-    expect(dear).toBe(creditsForUsd(0.20) + BASE_RENDER)
+    expect(dear).toBe(creditsForUsd(0.85) + BASE_RENDER)
     expect(dear).toBeGreaterThan(cheap)
   })
 

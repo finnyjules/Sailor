@@ -27,6 +27,7 @@
 import { BASE_RENDER_CREDITS } from '~/lib/nodeCreditEstimate'
 import { creditsForUsd } from '~/lib/pricing'
 import { priceNode } from '#shared/pricing/nodePrice'
+import { sizePricedInput, sourceOutputPixels } from '#shared/pricing/editSettings'
 
 export interface BadgeCost { usd: number; approximate: boolean }
 
@@ -57,6 +58,8 @@ export interface EstimateInputNode {
   widgetsValues?: unknown[] | null
   /** Names of the node's inputs fed by a link (see `linkedInputNames`). */
   linkedInputs?: string[] | null
+  /** Size-priced nodes: the picture size the canvas can see upstream (upstreamInputPixels), else absent (the cap). */
+  inputPixels?: number | null
 }
 export interface CostBreakdownItem { id: string; label: string; usd: number; credits?: boolean }
 export interface CostEstimate {
@@ -165,7 +168,7 @@ export function estimateUsdForNodes(
     // Hosted: a model-priced picker is charged by the server whatever its
     // billing class, so price it even if the badge/category filter misses it.
     // Priced from the WHOLE widget map, the same way the server charges it.
-    const shared = hosted ? priceNode(n.type, widgetValueMap(n.widgetDefs, n.widgetsValues, n.linkedInputs)) : null
+    const shared = hosted ? priceNode(n.type, widgetValueMap(n.widgetDefs, n.widgetsValues, n.linkedInputs), { inputPixels: n.inputPixels }) : null
     const modelPrice = shared && !('refused' in shared) ? shared : null
     if (modelPrice == null && !isReplicateBilled(n) && !creditBilled) continue
     // The selected model's real price beats the static badge when we have it.
@@ -205,5 +208,27 @@ export function vueNodesToEstimateInput(nodes: any[], edges?: any[] | null): Est
       widgetDefs: n?.data?.widgetDefs ?? null,
       widgetsValues: n?.data?.widgetsValues ?? null,
       linkedInputs: linkedInputNames(String(n.id), n?.data?.inputs, edges),
+      inputPixels: upstreamInputPixels(n, nodes, edges),
     }))
+}
+
+/**
+ * The size of the picture a size-priced canvas node (Upscale, Enhance detail,
+ * FLUX.2 edit) will be sent, when the canvas can tell: the live edge into its
+ * picture input comes from a GenerateImageNode whose settings say how large
+ * its picture is (sourceOutputPixels — the hosted gate reads the same). Null
+ * otherwise: the badge then shows the input-cap ceiling, never below the charge.
+ */
+export function upstreamInputPixels(node: any, nodes?: readonly any[] | null, edges?: readonly any[] | null): number | null {
+  const data = node?.data
+  if (!data || !nodes || !edges) return null
+  const own = widgetValueMap(data.widgetDefs, data.widgetsValues, linkedInputNames(String(node.id), data.inputs, edges))
+  const name = sizePricedInput(String(data.nodeType || ''), own)
+  const port = name ? (data.inputs || []).findIndex((i: any) => i?.name === name) : -1
+  if (port < 0) return null
+  const edge = edges.find((e: any) => String(e?.target) === String(node.id) && e?.targetHandle === `input-${port}`)
+  const src = edge ? nodes.find((m: any) => String(m?.id) === String(edge.source)) : null
+  if (!src?.data) return null
+  const srcInputs = widgetValueMap(src.data.widgetDefs, src.data.widgetsValues, linkedInputNames(String(src.id), src.data.inputs, edges))
+  return sourceOutputPixels(String(src.data.nodeType || ''), srcInputs)
 }

@@ -92,9 +92,10 @@ describe('money (hosted)', () => {
     const { runId, promptIds } = await k.engine.startRun({ userId: 'user_1', takes: [gatedFlow()], workflow: null, canvasId: null, projectUuid: null, projectName: null })
     await k.engine.settled(runId)
     expect(k.ledger.hold).toHaveBeenCalledTimes(1)
-    expect(k.ledger.hold).toHaveBeenCalledWith('user_1', 2, `runner:${promptIds[0]}`)
-    expect(k.ledger.settle).toHaveBeenCalledWith(1, 2, `runner:${promptIds[0]}`)
-    expect(ofType(k.seen, 'execution_success')[0]!.data.credits).toBe(2)
+    // flux-schnell 1:1 is 1024² = 2 MP under the megapixel ruling (ceil(pixels / 1e6)): 2 credits + the render.
+    expect(k.ledger.hold).toHaveBeenCalledWith('user_1', 3, `runner:${promptIds[0]}`)
+    expect(k.ledger.settle).toHaveBeenCalledWith(1, 3, `runner:${promptIds[0]}`)
+    expect(ofType(k.seen, 'execution_success')[0]!.data.credits).toBe(3)
     expect(k.graphRuns.appendOutput).toHaveBeenCalledWith(promptIds[0], expect.stringMatching(/^output:u_[0-9a-f]{12}:generate_image_00001_\.png$/))
   })
   it('the render credit goes to the first take that makes something, not to take 0', async () => {
@@ -105,18 +106,18 @@ describe('money (hosted)', () => {
     await k.engine.settled(b.runId)
     expect(k.fal.submitted()).toHaveLength(2) // take 0 was reused
     // every take's hold is an upper bound that includes the render credit
-    expect(k.ledger.hold).toHaveBeenCalledWith('user_1', 2, `runner:${b.promptIds[0]}`)
-    expect(k.ledger.hold).toHaveBeenCalledWith('user_1', 2, `runner:${b.promptIds[1]}`)
+    expect(k.ledger.hold).toHaveBeenCalledWith('user_1', 3, `runner:${b.promptIds[0]}`)
+    expect(k.ledger.hold).toHaveBeenCalledWith('user_1', 3, `runner:${b.promptIds[1]}`)
     const run = (await k.store.get(b.runId))!
-    expect(run.charges.map(c => [c.state, c.actual])).toEqual([['released', 0], ['settled', 2]])
+    expect(run.charges.map(c => [c.state, c.actual])).toEqual([['released', 0], ['settled', 3]])
     expect(run.baseCharged).toBe(true)
     const credits = (i: number) => ofType(k.seen, 'execution_success').find(m => m.data.prompt_id === b.promptIds[i])!.data.credits
-    expect([credits(0), credits(1)]).toEqual([0, 2])
+    expect([credits(0), credits(1)]).toEqual([0, 3])
   })
   it('refuses before anything runs when credits are short', async () => {
     const k = makeKit({ hosted: true, available: 1 })
     await expect(k.engine.startRun({ userId: 'user_1', takes: [gatedFlow()], workflow: null, canvasId: null, projectUuid: null, projectName: null }))
-      .rejects.toMatchObject({ statusCode: 402, data: { required: 2, available: 1 } })
+      .rejects.toMatchObject({ statusCode: 402, data: { required: 3, available: 1 } })
     expect(k.fal.client.submit).not.toHaveBeenCalled()
   })
   it('a failed request drops the hold, skips what comes after and says why', async () => {
@@ -256,7 +257,7 @@ describe('when things go wrong', () => {
     expect(run.status).toBe('paused')
     expect(ofType(k.seen, 'execution_error')).toHaveLength(0)
     expect(ofType(k.seen, 'executed').some(m => m.data.node === '1')).toBe(true)
-    expect(ofType(k.seen, 'execution_success').find(m => m.data.prompt_id === promptIds[0])!.data.credits).toBe(2)
+    expect(ofType(k.seen, 'execution_success').find(m => m.data.prompt_id === promptIds[0])!.data.credits).toBe(3)
     expect(k.deps.reportError).toHaveBeenCalledWith(expect.objectContaining({ message: 'disk hiccup' }), expect.objectContaining({ site: 'runner.node.save' }))
   })
   it('a finished run lets go of its memory; settled() still answers and the next run works', async () => {

@@ -17,11 +17,40 @@ import { MeterRefusalError } from '../utils/requestMeter'
 import { outputKey } from '../utils/graphRuns'
 import { actionPassThrough } from './generators/actions'
 import type { OutputFile, StageCharge } from './types'
+import { sizePricedInput } from '#shared/pricing/editSettings'
+import { isLink } from '#shared/runner/graph'
+import { picturePixels } from '../utils/graphInputPixels'
 
-export function nodeCredits(node: ApiNode): number {
+/**
+ * Credits for one provider node. `inputPixels`: the measured size of the
+ * picture a size-priced node (FLUX.2 edit) is sent — without it, the input cap
+ * (the stage hold is taken that way, an upper bound).
+ */
+export function nodeCredits(node: ApiNode, inputPixels?: number): number {
   if (!PROVIDER_TYPES.has(node.class_type)) return 0
-  const p = priceGraph({ n: { class_type: node.class_type, inputs: node.inputs } })
+  const p = priceGraph({ n: { class_type: node.class_type, inputs: node.inputs } }, inputPixels ? { inputPixels: { n: inputPixels } } : {})
   return p.breakdown.filter(b => b.action !== 'base_render').reduce((s, b) => s + b.credits, 0)
+}
+
+/**
+ * The size of the picture a size-priced node is about to be sent: the first
+ * file of its picture link, measured from its header. Undefined when the node
+ * isn't size-priced or the file can't be read (it is then priced at the cap).
+ * The runner measures before it submits, so the charge reads the real size.
+ */
+export async function measuredInputPixels(
+  node: ApiNode,
+  filesFrom: (link: [string, number]) => OutputFile[],
+  read: (f: OutputFile) => Promise<Uint8Array>,
+): Promise<number | undefined> {
+  const inputs = node.inputs ?? {}
+  const name = sizePricedInput(node.class_type, inputs)
+  const link = name ? inputs[name] : undefined
+  if (!isLink(link)) return undefined
+  const f = filesFrom(link as [string, number])[0]
+  if (!f) return undefined
+  try { return (await picturePixels(await read(f))) ?? undefined }
+  catch { return undefined }
 }
 
 /**

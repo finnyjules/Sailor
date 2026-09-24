@@ -24,12 +24,17 @@ import {
   priceNode,
   providerUsd,
   type NodeInputs,
+  type PriceOptions,
 } from '#shared/pricing/nodePrice'
 
 /** Flat credits the graph pricer adds once for producing a deliverable. */
 export const BASE_RENDER_CREDITS = 1
 
 /**
+ * (The name is historical: it began as the five model pickers. It now holds
+ * every class the badge prices from its widgets rather than from Python's
+ * static price_badge.)
+ *
  * The classes whose price depends on their widgets — the server's
  * MODEL_PRICED_NODE_CLASSES (a `model` widget) and SETTING_PRICED_NODE_CLASSES
  * (the image edit tools: model, resolution, size), as a set (the badge only
@@ -48,12 +53,20 @@ export function modelPricedUsd(nodeType: string, inputs: NodeInputs | null | und
 }
 
 /**
+ * THE BADGE RULE for size-priced nodes (Upscale, Enhance detail, FLUX.2 edit;
+ * P4 fix round 1): the badge is never below the charge. Where the canvas can
+ * see the picture's size (an upstream generator's settings: costEstimate.ts
+ * upstreamInputPixels, the same sourceOutputPixels the hosted gate reads) it
+ * passes it as `opts.inputPixels` and the badge equals the charge. Where it
+ * can't (a loaded file), the badge shows the input-cap ceiling, and the
+ * charge, which reads the file's real size, may be lower.
+ *
  * Total credits the graph pricer would charge for this node as configured:
  * the shared node price plus the one-off base render. Null when the estimate
  * can't be derived — the caller keeps its static badge.
  */
-export function nodeCreditEstimate(nodeType: string, inputs: NodeInputs | null | undefined): number | null {
-  const price = priceNode(nodeType, inputs)
+export function nodeCreditEstimate(nodeType: string, inputs: NodeInputs | null | undefined, opts: PriceOptions = {}): number | null {
+  const price = priceNode(nodeType, inputs, opts)
   if ('refused' in price || !(price.usd > 0)) return null
   return price.credits + BASE_RENDER_CREDITS
 }

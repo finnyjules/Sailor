@@ -73,10 +73,10 @@ describe('a Replicate request', () => {
     expect(k.replicate.client.outputUrls).toHaveBeenCalledWith(expect.objectContaining({ output: ['https://replicate.delivery/pred1.png'] }), 'image')
     // The terminal status body already carried the output: no second GET.
     expect(k.replicate.client.result).not.toHaveBeenCalled()
-    // flux-schnell (1) + the render credit (1), held and settled once
+    // flux-schnell (2: 1:1 is 2 MP under the megapixel ruling) + the render credit (1), held and settled once
     expect(k.ledger.hold).toHaveBeenCalledTimes(1)
     expect(k.ledger.settle).toHaveBeenCalledTimes(1)
-    expect(holds(k.ledger)).toEqual([['settled', 2]])
+    expect(holds(k.ledger)).toEqual([['settled', 3]])
     expect(k.records.write).toHaveBeenCalledTimes(1)
     expect(ofType(k.seen, 'progress').some(m => m.data.value === 50)).toBe(true)
   })
@@ -144,7 +144,7 @@ describe('a Replicate request', () => {
     expect(fal.client.submit).not.toHaveBeenCalled()
     expect(fal.client.status).not.toHaveBeenCalled()
     expect((await k2.store.get(runId))!.takes[0]!.nodes['1']!.status).toBe('done')
-    expect(holds(ledger)).toEqual([['settled', 2]])
+    expect(holds(ledger)).toEqual([['settled', 3]])
   })
 
   it('without a Replicate token the node fails plainly, sends nothing and charges nothing', async () => {
@@ -200,7 +200,7 @@ describe('a Replicate hiccup is sent again', () => {
     expect(rec.request).toMatchObject({ provider: 'replicate', requestId: 'pred3', retries: 2 })
     expect(k.ledger.hold).toHaveBeenCalledTimes(1)
     expect(k.ledger.settle).toHaveBeenCalledTimes(1)
-    expect(holds(k.ledger)).toEqual([['settled', 2]])
+    expect(holds(k.ledger)).toEqual([['settled', 3]])
     expect(k.records.write).toHaveBeenCalledTimes(1)
   })
 
@@ -320,7 +320,7 @@ describe('a Replicate hiccup is sent again', () => {
     await k2.engine.settled(runId)
     expect(replicate.submitted()).toHaveLength(2)
     expect((await k2.store.get(runId))!.takes[0]!.nodes['1']!.status).toBe('done')
-    expect(holds(ledger)).toEqual([['settled', 2]])
+    expect(holds(ledger)).toEqual([['settled', 3]])
   })
 })
 
@@ -352,7 +352,7 @@ describe('fal and Replicate in one workflow', () => {
     expect(run.takes[0]!.nodes['3']!.request!.provider).toBe('fal')
     expect(run.takes[0]!.nodes['3']!.outputs[0]!.filename).toMatch(/\.mp4$/)
     // image once on Replicate, video once on fal
-    expect(holds(k.ledger)).toEqual([['settled', 2], ['settled', 45]])
+    expect(holds(k.ledger)).toEqual([['settled', 3], ['settled', 45]])
     expect(k.records.write).toHaveBeenCalledTimes(2)
   })
 })

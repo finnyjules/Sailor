@@ -42,9 +42,11 @@ describe('price book: graph pricer (unchanged spike behavior)', () => {
   it('LipSync and EditImage are priced above provider cost', () => {
     expect(priceGraph({ 1: { class_type: 'SaveImage' }, 2: { class_type: 'LipSyncNode' } }).credits).toBe(151)
     // Task P4: EditImageNode is priced by its settings. With no model set, its
-    // dearest model at 1K (FLUX.2 edit at the largest input, $0.135 → 21), plus the render.
-    expect(priceGraph({ 1: { class_type: 'SaveImage' }, 2: { class_type: 'EditImageNode' } }).credits).toBe(22)
-    expect(priceGraph({ 1: { class_type: 'SaveImage' }, 2: { class_type: 'EditImageNode', inputs: { model: 'Nano Banana 2', resolution: '4K' } } }).credits).toBe(25)
+    // dearest model at 1K (FLUX.2 edit at the 4096² input cap, $0.315 → 48), plus the render.
+    expect(priceGraph({ 1: { class_type: 'SaveImage' }, 2: { class_type: 'EditImageNode' } }).credits).toBe(49)
+    // Nano Banana 2 at 4K: the first call ($0.16, usual markup) is beaten by the
+    // fal Nano Banana Pro fallback covered only at cost ($0.30 → $0.20 → 30), plus the render.
+    expect(priceGraph({ 1: { class_type: 'SaveImage' }, 2: { class_type: 'EditImageNode', inputs: { model: 'Nano Banana 2', resolution: '4K' } } }).credits).toBe(31)
   })
 })
 
