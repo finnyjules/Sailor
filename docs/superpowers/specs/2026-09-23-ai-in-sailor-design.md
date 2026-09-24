@@ -27,16 +27,16 @@ Neither page calls AI. The prototype's takes are canned from the spike, and its 
    - Press / or ⌘K, or click it, and it grows across the whole bar. What you've selected shows inside it as a chip, with suggestions above.
    - When you send, it shrinks back and shows progress.
 2. **Results land on the work.**
-   - Four takes appear in a strip just above the prompt. On the canvas, the node they belong to glows and each take previews on the node itself when you hover it; in a studio, they preview on the preview. Nothing on the canvas moves or gets covered. Then Keep.
+   - Three takes appear in a strip just above the prompt. On the canvas, the node they belong to glows and each take previews on the node itself when you hover it; in a studio, they preview on the preview. Nothing on the canvas moves or gets covered. Then Keep.
    - Changes to the graph appear on the canvas as dashed "proposed" nodes, for you to approve.
    - Answers, which are words about the work, appear above the prompt in a small card.
 3. **AI actions are ordinary actions.**
    - Selecting a node shows a small toolbar with **Edit ▾** ("the same thing, better": fix, retouch, tune, write copy) and **Develop ▾** ("take it somewhere new": vary, restyle, remix, layouts, animate).
-   - AI items sit among the others, marked with a small ✦ and a note on where the result lands ("4 takes" or "adds a step").
+   - AI items sit among the others, marked with a small ✦ and a note on where the result lands ("3 takes" or "adds a step").
    - Studio inspectors list the same actions as light button rows, in the same two groups.
 4. **Libraries move to a rail on the left of the canvas:** Assets, Styles, Characters, Templates, and More (Toolbox, Nodes, Blocks). Each button sits next to the panel it opens.
 5. **Content prompts stay where they are.** The prompt on a Generate node, a Frame element and so on is part of the recipe, so it stays visible on the thing. But all ~16 of them become one shared field, with an @reference picker, history and "Improve prompt".
-6. **AI can write shaders.** Remix an effect, or describe a new one, and you get four new effects, each with 3–5 dials of its own. The one you keep goes into **My effects**, which is available in every effect picker in Sailor. Asking for changes later makes new versions and keeps the old ones.
+6. **AI can write shaders.** Remix an effect, or describe a new one, and you get three new effects, each with 3–5 dials of its own. The one you keep goes into **My effects**, which is available in every effect picker in Sailor. Asking for changes later makes new versions and keeps the old ones.
 
 **What falls out of it.**
 
@@ -47,7 +47,7 @@ Neither page calls AI. The prototype's takes are canned from the spike, and its 
 **What is risky.**
 
 1. **Moving everyone's toolbar.** It's the most-used control in the app. The rail and the shorter bar change where hands go.
-2. **AI-written shaders can be bad without being broken.** The spike's automatic checks passed every bad take. The four-takes pick, and a model looking at each render, are what protect quality.
+2. **AI-written shaders can be bad without being broken.** The spike's automatic checks passed every bad take. Picking from three takes, and a model looking at each render, are what protect quality.
 3. **AI-written shaders can hang the graphics card.** Loops must be capped, and compile failures handled, before anything reaches the canvas.
 4. **Canvas takes sit above the prompt, away from their node** (§3.1). The link between them has to stay obvious: the node glows, and the strip names it.
 
@@ -80,7 +80,7 @@ A result is always **shown on the thing it changes**: the node, the preview, the
 
 | Kind of request | What appears | Where |
 |---|---|---|
-| A visual change you choose from (vary, restyle, remix, new effect, copy, layouts) | **Four takes**, each previewed on the thing itself when you hover it | A strip just above the prompt; the target node glows (canvas), or the preview or artboard shows it (studio) |
+| A visual change you choose from (vary, restyle, remix, new effect, copy, layouts) | **Three takes**, each previewed on the thing itself when you hover it | A strip just above the prompt; the target node glows (canvas), or the preview or artboard shows it (studio) |
 | A change to the graph (add, connect, remove a step) | **Proposed nodes and edges**, dashed | On the canvas; approve or reject in a card above the prompt |
 | An instruction that edits a recipe ("add heavy rain to the prompt") | **The edit itself**, briefly highlighted | In the content prompt on the node, with Undo |
 | A question | **An answer**, with follow-up chips | A card above the prompt |
@@ -96,7 +96,7 @@ Today's menus already follow this intent, even though "Edit" items create new br
 
 Every item shows:
 - a small **✦** if it uses AI;
-- a grey hint for where the result lands: **"4 takes"** (on this node) or **"adds a step"** (a new node after it).
+- a grey hint for where the result lands: **"3 takes"** (on this node) or **"adds a step"** (a new node after it).
 
 ### 1.5 Instructions and content prompts are different things
 
@@ -125,7 +125,7 @@ The bar is at the bottom centre, where the toolbar is today (`layouts/default.vu
 - **The prompt has three states:**
   - **At rest:** a field at the end of the bar reading "Ask Sailor", or "Ask about ‹selection›", with a `/` hint.
   - **Active:** opened by a click, `/` (when not typing in a field), ⌘K, or a menu item that needs words. The field grows across the whole bar and the tools slide out; the bar keeps its width and the transition is about 0.28 s. Chips and a send button appear inside it, and 2–3 suggestions for the current selection appear above it.
-  - **Working:** after you send, the field shrinks back and the tools return. The field reads what's happening ("Writing four new effects…"), with Stop.
+  - **Working:** after you send, the field shrinks back and the tools return. The field reads what's happening ("Writing three new effects…"), with Stop.
 - **Leaving the active state:** Esc or clicking away closes it. Esc with a mode chip and an empty field clears the mode first.
 - **It replaces `CanvasPromptBar`,** which today sits above the toolbar at the same width. The zoom bar and minimap (bottom right) and the top bar (project menu, Run with its cost, the status pill) are unchanged.
 
@@ -168,7 +168,7 @@ The same rule applies everywhere: **the studio's tools and ✦ Ask share one bar
   1. **The thing itself:**
      - A shader layer shows its **Recipe**. A built-in effect shows its name, category and a Remix button. A My effect shows its name (editable), what it was made from ("from Water Ripple"), the request that made it ("make it rain on a window"), version chips (v1, v2, …) and Remix.
      - A Frame layer shows Text, Background or Frame.
-  2. **Actions, as light button rows:** a subtle filled row with an icon, the label, and the "4 takes" / "adds a step" hint plus ✦ on the right, grouped under **Edit** and **Develop**. There's no primary button.
+  2. **Actions, as light button rows:** a subtle filled row with an icon, the label, and the "3 takes" / "adds a step" hint plus ✦ on the right, grouped under **Edit** and **Develop**. There's no primary button.
   3. **Dials,** unchanged.
 - **Retired:** `AgentBar`'s place under the preview, the agent panel taking over the right column, and `VibeControlBar` (Space type).
 
@@ -186,7 +186,7 @@ The prompt's suggestions and results follow Frame's selection:
 
 ### 3.1 Takes
 
-- **Always four,** in a strip showing: the request in quotes, a status ("Working…", then "Four new effects · hover to preview, Keep one"), Four more, and ×. The strip holds the current version, then four tiles.
+- **Always three,** in a strip showing: the request in quotes, a status ("Working…", then "Three new effects · hover to preview, Keep one"), Three more, and ×. The strip holds the current version, then three tiles. (Decided 2026-09-24: three is enough choice, and it costs a quarter less than four.)
 - **Tiles arrive one by one** as they're ready. Pending tiles pulse.
 - **Hovering or focusing a tile** previews it in place: on the node's own thumbnail, the studio preview or the artboard. Leaving the strip goes back to the clicked tile, or to the current version.
 - **Keep** applies the take. The other takes go into the node's existing take history (`TakesStrip`, the Light Table), so nothing is lost and any take can still be branched.
@@ -212,7 +212,7 @@ The prompt's suggestions and results follow Frame's selection:
 
 ### 3.4 Progress and stopping
 
-- **While working,** the prompt at rest shows the job ("Writing four new effects…", "Planning the change…") with Stop.
+- **While working,** the prompt at rest shows the job ("Writing three new effects…", "Planning the change…") with Stop.
 - **Stop** cancels the job and clears any partial takes.
 
 ---
@@ -278,7 +278,7 @@ Instructions can edit a content field (§1.5). The edit appears in the field, br
 - **The test:** 24 first-draft shaders, 6 requests with 4 takes each, written under the contract below and rendered by `ShaderFxRenderer`.
 - **Nothing broke.** 24 of 24 compiled first time, and the slowest added under 1 ms per 1024² frame over a plain copy.
 - **About half were good.** 11 of 24 were keepers by eye, and **the automatic checks passed all five misses**: muddy, too dark, or losing the picture. Quality is the risk, not breakage.
-- **Every request produced a keeper, but not predictably which take.** That's why it's four takes and a pick.
+- **Every request produced a keeper, but not predictably which take.** That's why the product offers several takes and a pick (three, decided 2026-09-24).
 - **Creating from nothing did as well as transforming.** Concrete, physical requests predicted success, whether or not there was a base effect.
 - **Caveat:** Claude stood in for the model. Stage 1 (§9) measures the real tiers.
 
@@ -300,16 +300,17 @@ Instructions can edit a content field (§1.5). The edit appears in the field, br
    - it costs less than 8 ms extra per 1024² frame over a plain copy.
 
    A take that fails is regenerated once.
-5. **A model looks at the four renders** (one image) and drops obvious misses, such as muddy results or ones that lose the subject. Replacements are generated to keep the count at four.
-6. **Return four takes.**
+5. **A model looks at the three renders** (one image) and drops obvious misses, such as muddy results or ones that lose the subject. Replacements are generated to keep the count at three.
+6. **Return three takes.**
 
-- **Model (measured 2026-09-24, see `assets/2026-09-23-ai-in-sailor/engine-run-results.md`):** **Opus 5.5 writes the shaders**, and every request carries **the user's image and two good existing effects as examples**. There is **no look-and-revise pass**.
+- **Model (measured 2026-09-24, see `assets/2026-09-23-ai-in-sailor/engine-run-results.md`):** **Opus 5.5 writes the shaders at effort `medium`** (Opus 5.5's own default), and every request carries **the user's image and two good existing effects as examples**. There is **no look-and-revise pass**.
   - Sonnet 5 and Haiku 4.5 on their own were nowhere near the quality bar.
   - Sonnet with the image and examples was "OK".
   - Opus 5.5 was best. It was equally good with and without the extras.
   - Opus 5.5 is not one of today's `AI_TIERS`; stage 5 adds a dedicated shader-generation model setting rather than changing the `campaign` tier that other features use.
   - Dial-only takes (Tune…, Vary) stay on Haiku, as before.
-- **Latency:** expected 10–20 s for four; tiles appear as each passes.
+  - **Cost estimate** (list prices, $4 / $20 per million tokens in/out; not yet measured): about 2¢ input and 4–8¢ output (thinking included) per take at medium effort; ×3 takes and about 1.3× for repairs gives **about 25–40¢ per request**. Sailor's current flat charge (2 credits per AI call, `ANTHROPIC_ASSIST_CREDITS`) underprices this route: shader generation needs its own price before it ships. Measure the real figure at the start of stage 5 by running one request.
+- **Latency:** not yet measured for Opus 5.5 at medium effort (the takes run in parallel, so a request takes about as long as its slowest take); tiles appear as each passes.
 
 ### 7.3 Where it's used
 

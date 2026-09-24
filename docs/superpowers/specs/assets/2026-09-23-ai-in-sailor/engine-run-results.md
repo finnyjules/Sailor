@@ -27,7 +27,7 @@ Run by Julien on `/dev/shader-gen-eval`, judged by eye against the 24 hand-writt
 
 ## Decision
 
-**Opus 5.5 writes the shaders, with the user's image and two good existing effects as examples, and no revise pass.** Dial-only takes stay on Haiku. Recorded in the spec, §7.2.
+**Opus 5.5 writes the shaders at effort medium, three takes per request, with the user's image and two good existing effects as examples, and no revise pass.** (Julien, 2026-09-24: three takes are enough, and medium effort is fine. Together that brings the estimate to about 25–40¢ per request, from about 40–80¢ for four takes at high effort.) Dial-only takes stay on Haiku. Recorded in the spec, §7.2.
 
 Ruling (the controller's, which Julien can overturn): photo and examples are kept for Opus even though B and E tied. They cost little next to Opus's output, they are what made the weaker model acceptable, and in the product the image is the user's own, which the model needs to choose good defaults.
 
