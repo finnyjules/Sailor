@@ -1,0 +1,589 @@
+/**
+ * Phase B, Task B10: the controller check, end to end, every family switched
+ * on. This file is the evidence for the B10 checklist
+ * (.superpowers/sdd/2026-09-24-engine-free-phase-b/task-B10-brief.md).
+ *
+ * Everything goes through the real routes (h3 `toWebHandler`, as
+ * runner-routes.unit.spec.ts does): POST /api/runs, POST /api/runs/gate,
+ * POST /api/runs/stop and the SSE stream GET /api/runs/events. Behind them is
+ * the real engine, file store and metering (hosted, with the kit's fake
+ * ledger), and the kit's fake fal and fake Replicate. The server's families
+ * come from the real `runnerFamilies()` (NUXT_RUNNER_ENABLED +
+ * NUXT_RUNNER_FAMILIES). No provider key is read and nothing reaches the
+ * network: run with FAL_KEY, NUXT_REPLICATE_TOKEN and REPLICATE_API_TOKEN unset.
+ *
+ * Request bodies are checked against the Python fixtures
+ * (fixtures/runner-families.json), with each `IMG:<input>` placeholder
+ * replaced by the fal storage link the kit's hand-off gives that card's file.
+ * Charges are checked against `priceGraph` for the nodes that ran.
+ */
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createApp, eventHandler, toWebHandler } from 'h3'
+import { __setEngineForTests } from '~~/server/runner/index'
+import { runnerFamilies } from '~~/server/runner/config'
+import { nodeCredits } from '~~/server/runner/metering'
+import { _resetRateLimits } from '~~/server/lib/rateLimit'
+import { BASE_RENDER_CREDITS, GRAPH_NODE_CREDITS, priceGraph } from '~~/server/utils/priceBook'
+import startRoute from '~~/server/api/runs/index.post'
+import gateRoute from '~~/server/api/runs/gate.post'
+import stopRoute from '~~/server/api/runs/stop.post'
+import eventsRoute from '~~/server/api/runs/events.get'
+import { PROVIDER_TYPES, RUNNER_NODE_RULES, type RunnerNodeRule } from '#shared/runner/eligibility'
+import { RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
+import type { ApiPrompt } from '#shared/runner/graph'
+import type { RunnerMessage } from '#shared/runner/messages'
+import { nodesNeedingEngine } from '~~/app/lib/runner/needsEngine'
+import { createFakeFal, createFakeLedger, createFakeReplicate, makeKit, until } from './__runner__/kit'
+
+// ── Fixtures ─────────────────────────────────────────────────────────────
+
+interface NodeCase {
+  class_type: string
+  links: string[]
+  widgets: Record<string, unknown>
+  call: { provider: 'fal' | 'replicate'; endpoint: string; payload: Record<string, unknown> } | { passthrough: true }
+  passes?: string
+  error?: string
+}
+interface VideoCase {
+  model: string
+  slug: string
+  args: { prompt: string; ar: string; dur: number; seed: number; image: string | null; adv: Record<string, unknown> }
+  payload?: Record<string, unknown>
+  error?: string
+}
+const FIX = JSON.parse(readFileSync(fileURLToPath(new URL('./fixtures/runner-families.json', import.meta.url)), 'utf8')) as {
+  falEdit: NodeCase[]; replicateImage: NodeCase[]; nanoActions: NodeCase[]; refEdits: NodeCase[]; restyle: NodeCase[]; replicateVideo: VideoCase[]
+}
+
+const called = (c: NodeCase) => c.call as { provider: 'fal' | 'replicate'; endpoint: string; payload: Record<string, unknown> }
+function pick<T>(list: T[], label: string, ok: (c: T) => boolean): T {
+  const c = list.find(ok)
+  if (!c) throw new Error(`fixture has no ${label} case`)
+  return c
+}
+
+const storageUrl = (name: string) => `https://fal.storage/${name}.png`
+/** The fixture body with each `IMG:<input>` (or the video's IMAGE_URL) as the storage link the card's file was handed off as. */
+function expectedBody(payload: Record<string, unknown>, swaps: Record<string, string>): Record<string, unknown> {
+  let text = JSON.stringify(payload)
+  for (const [from, to] of Object.entries(swaps)) text = text.split(JSON.stringify(from)).join(JSON.stringify(to))
+  return JSON.parse(text) as Record<string, unknown>
+}
+
+const imageCard = (file: string) => ({ class_type: 'Image', inputs: { image: file } })
+const outImage = (from: string) => ({ class_type: 'Image', inputs: { image: '', export: false, images: [from, 0], batch_index: -1 } })
+const outVideo = (from: string) => ({ class_type: 'Video', inputs: { file: '', export: false, filename_prefix: 'video/ComfyUI', source: [from, 0] } })
+
+interface FamilyFlow {
+  family: RunnerFamily
+  label: string
+  prompt: ApiPrompt
+  /** Card files to write into the input folder. */
+  files: string[]
+  provider: 'fal' | 'replicate'
+  endpoint: string
+  body: Record<string, unknown>
+}
+
+/**
+ * A node fixture case as the canvas sends it: each linked picture comes from
+ * its own loaded Image card (`<input>.png`, node ids 11, 12, …), the node is
+ * `1`, and an Image card `2` shows its output.
+ */
+function nodeFlow(family: RunnerFamily, c: NodeCase, o: { output?: boolean } = {}): FamilyFlow {
+  const prompt: ApiPrompt = {}
+  const inputs: Record<string, unknown> = { ...c.widgets }
+  const swaps: Record<string, string> = {}
+  c.links.forEach((name, i) => {
+    const id = String(11 + i)
+    prompt[id] = imageCard(`${name}.png`)
+    inputs[name] = [id, 0]
+    swaps[`IMG:${name}`] = storageUrl(name)
+  })
+  prompt['1'] = { class_type: c.class_type, inputs }
+  if (o.output !== false) prompt['2'] = outImage('1')
+  const call = called(c)
+  return {
+    family,
+    label: `${c.class_type} ${String(c.widgets.model ?? '')}`.trim(),
+    prompt,
+    files: c.links.map(n => `${n}.png`),
+    provider: call.provider,
+    endpoint: call.endpoint,
+    body: call.payload ? expectedBody(call.payload, swaps) : {},
+  }
+}
+
+/** A video fixture case: the first frame from a loaded card `image.png` (11) → GenerateVideoNode (1) → Video card (2). */
+function videoFlow(c: VideoCase): FamilyFlow {
+  const inputs: Record<string, unknown> = {
+    model: c.model, prompt: c.args.prompt, aspect_ratio: c.args.ar, duration: String(c.args.dur),
+    seed: c.args.seed, model_options: JSON.stringify(c.args.adv),
+  }
+  const prompt: ApiPrompt = {}
+  if (c.args.image) {
+    prompt['11'] = imageCard('image.png')
+    inputs.image = ['11', 0]
+  }
+  prompt['1'] = { class_type: 'GenerateVideoNode', inputs }
+  prompt['2'] = outVideo('1')
+  return {
+    family: 'replicate-video',
+    label: `GenerateVideoNode ${c.model}`,
+    prompt,
+    files: c.args.image ? ['image.png'] : [],
+    provider: 'replicate',
+    endpoint: c.slug,
+    body: expectedBody(c.payload!, c.args.image ? { [c.args.image]: storageUrl('image') } : {}),
+  }
+}
+
+const hasCall = (c: NodeCase) => 'endpoint' in c.call && !c.error
+
+/** One workflow per family, each a Python fixture case (see the labels). */
+const FLOWS: FamilyFlow[] = [
+  nodeFlow('fal-edit', pick(FIX.falEdit, 'fal-edit Edit', c => c.class_type === 'EditImageNode' && hasCall(c) && c.links.length === 1)),
+  nodeFlow('replicate-image', pick(FIX.replicateImage, 'flux-2-pro seed 42', c => c.widgets.model === 'flux-2-pro' && c.widgets.seed === 42 && hasCall(c))),
+  nodeFlow('nano-actions', pick(FIX.nanoActions, 'Remove object', c => c.class_type === 'RemoveObjectNode' && hasCall(c))),
+  videoFlow(pick(FIX.replicateVideo, 'kling-v3 with a frame', c => c.model === 'kling-v3' && !!c.args.image && !c.error)),
+  nodeFlow('ref-edits', pick(FIX.refEdits, 'references ×3', c => c.class_type === 'GenerateFromReferencesNode' && c.links.length === 3 && hasCall(c))),
+  nodeFlow('restyle', pick(FIX.restyle, 'restyle with a style picture', c => c.class_type === 'RestyleFromImageNode' && hasCall(c) && c.links.includes('style_image'))),
+]
+
+// ── The routes ───────────────────────────────────────────────────────────
+
+const USER = 'user_1'
+function handler(route: any, userId: string | null = USER) {
+  const app = createApp()
+  app.use(eventHandler((e) => { if (userId) e.context.userId = userId }))
+  app.use(route)
+  return toWebHandler(app)
+}
+const post = (route: any, body: unknown) => handler(route)(new Request('http://x/', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }))
+const startRun = (takes: ApiPrompt[]) => post(startRoute, { takes, workflow: { nodes: [] }, canvasId: 'c1', projectUuid: 'p1', projectName: 'Phase B' })
+async function started(takes: ApiPrompt[]): Promise<{ runId: string; legId: string; promptIds: string[] }> {
+  const res = await startRun(takes)
+  if (res.status !== 200) throw new Error(`POST /api/runs → ${res.status}: ${await res.text()}`)
+  return await res.json()
+}
+
+/** GET /api/runs/events, read in the background: every runner message, in order (the named ready/ping events left out). */
+async function openEvents() {
+  const res = await handler(eventsRoute)(new Request('http://x/'))
+  expect(res.status).toBe(200)
+  expect(res.headers.get('content-type')).toBe('text/event-stream')
+  const reader = res.body!.getReader()
+  const msgs: RunnerMessage[] = []
+  const dec = new TextDecoder()
+  let buf = ''
+  void (async () => {
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) return
+      buf += dec.decode(value, { stream: true })
+      let i: number
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const block = buf.slice(0, i)
+        buf = buf.slice(i + 2)
+        if (/^event:/m.test(block)) continue
+        const data = block.split('\n').filter(l => l.startsWith('data:')).map(l => l.replace(/^data: ?/, '')).join('\n')
+        if (data) msgs.push(JSON.parse(data) as RunnerMessage)
+      }
+    }
+  })().catch(() => {})
+  return {
+    msgs,
+    until: (check: (m: RunnerMessage[]) => boolean) => until(() => check(msgs), 5000),
+    // Not reader.cancel(): under toWebHandler (no socket) h3 re-raises the
+    // cancel reason as unhandled rejections. Over a real Node socket a client
+    // that goes away raises nothing (checked by hand, 2026-09-24), so this is
+    // the harness, not the route. The stream is simply left; its ping
+    // interval is faked, and each test has its own kit and event bus.
+    close: async () => {},
+  }
+}
+const ends = (promptId: string) => (m: RunnerMessage) =>
+  (m.type === 'execution_success' || m.type === 'execution_error') && m.data.prompt_id === promptId
+
+// ── Harness ──────────────────────────────────────────────────────────────
+
+const ALL = RUNNER_FAMILIES.join(',')
+const kits: ReturnType<typeof makeKit>[] = []
+function kit(o: Parameters<typeof makeKit>[0] = {}) {
+  const k = makeKit({ hosted: true, ...o, deps: { families: runnerFamilies, ...o.deps } })
+  kits.push(k)
+  __setEngineForTests(k.engine)
+  return k
+}
+function writeCards(k: ReturnType<typeof makeKit>, files: string[]) {
+  files.forEach((f, i) => writeFileSync(join(k.root, 'input', f), new Uint8Array([i + 1, 7, 7])))
+}
+const holds = (ledger: ReturnType<typeof createFakeLedger>) => [...ledger.holds.values()].map(h => [h.state, h.actual])
+
+beforeAll(() => {
+  // The evidence only counts with no provider key in the environment.
+  expect(process.env.FAL_KEY).toBeUndefined()
+  expect(process.env.NUXT_REPLICATE_TOKEN).toBeUndefined()
+  expect(process.env.REPLICATE_API_TOKEN).toBeUndefined()
+})
+beforeEach(() => {
+  process.env.NUXT_RUNNER_ENABLED = 'true'
+  process.env.NUXT_RUNNER_FAMILIES = ALL
+  _resetRateLimits()
+  // Only the SSE route's 25 s ping interval is faked, so it never fires or leaks.
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+})
+afterEach(() => {
+  vi.useRealTimers()
+  delete process.env.NUXT_RUNNER_ENABLED
+  delete process.env.NUXT_RUNNER_FAMILIES
+  __setEngineForTests(null)
+  kits.length = 0
+})
+
+// ── 1. One workflow per family, every switch on ──────────────────────────
+
+describe('B10 · one workflow per family, POST /api/runs to the last event', () => {
+  it('the server has every family on', () => {
+    expect([...runnerFamilies()].sort()).toEqual([...RUNNER_FAMILIES].sort())
+    expect(FLOWS.map(f => f.family).sort()).toEqual([...RUNNER_FAMILIES].sort())
+  })
+
+  it.each(FLOWS.map(f => [`${f.family}: ${f.label} → ${f.endpoint}`, f] as const))('%s', async (_l, f) => {
+    const k = kit()
+    writeCards(k, f.files)
+    const events = await openEvents()
+    try {
+      const { runId, promptIds } = await started([f.prompt])
+      expect(promptIds).toEqual([`${runId}.0.t0`])
+      await events.until(m => m.some(ends(promptIds[0]!)))
+      await k.engine.settled(runId)
+
+      // Exactly one request, to the fixture's provider and endpoint, with the fixture's body.
+      const [mine, other] = f.provider === 'fal' ? [k.fal, k.replicate] : [k.replicate, k.fal]
+      expect(mine.submitted().map(r => r.endpoint)).toEqual([f.endpoint])
+      expect(mine.submitted()[0]!.payload).toEqual(f.body)
+      expect(other.client.submit).not.toHaveBeenCalled()
+      // Each card was handed off once.
+      expect((k.upload.mock.calls as unknown as [Uint8Array, string][]).map(c => c[1]).sort()).toEqual([...f.files].sort())
+
+      // The charge is priceGraph for the nodes that ran (all of them), held and settled once.
+      const price = priceGraph(f.prompt).credits
+      expect(price).toBe(nodeCredits(f.prompt['1']!) + BASE_RENDER_CREDITS)
+      expect(k.ledger.hold).toHaveBeenCalledTimes(1)
+      expect(k.ledger.settle).toHaveBeenCalledTimes(1)
+      expect(holds(k.ledger)).toEqual([['settled', price]])
+
+      // The last event on the stream closes the stage, with that charge.
+      const last = events.msgs.at(-1)!
+      expect(last.type).toBe('execution_success')
+      expect(last.data).toMatchObject({ prompt_id: promptIds[0], run_id: runId, credits: price, stopped: false, canvas_id: 'c1' })
+      expect(events.msgs[0]).toMatchObject({ type: 'execution_start', data: { prompt_id: promptIds[0] } })
+      expect(events.msgs.some(m => m.type === 'executing' && m.data.node === '1')).toBe(true)
+      // A still shows itself on the node; a video node has no ui of its own (as today).
+      expect(events.msgs.some(m => m.type === 'executed' && m.data.node === '1')).toBe(f.family !== 'replicate-video')
+
+      const run = (await k.store.get(runId))!
+      expect(run.status).toBe('done')
+      expect(run.takes[0]!.nodes['1']!.request!.provider).toBe(f.provider)
+      expect(k.records.write).toHaveBeenCalledTimes(1)
+    }
+    finally { await events.close() }
+  })
+})
+
+// ── 2. Replicate image → Gate → Replicate video ─────────────────────────
+
+describe('B10 · a Replicate image feeds a Gate, which feeds a Replicate video', () => {
+  const img = FLOWS.find(f => f.family === 'replicate-image')!
+  const vid = FLOWS.find(f => f.family === 'replicate-video')!
+  /** The fixture image node (1) → Gate (2) → the fixture video node (3) → Video card (4); image → Image card (5). */
+  const gated = (seed: number): ApiPrompt => ({
+    '1': { class_type: 'GenerateImageNode', inputs: { ...img.prompt['1']!.inputs, seed } },
+    '2': { class_type: 'ComfyGateNode', inputs: { data_in: ['1', 0], bypass: false } },
+    '3': { class_type: 'GenerateVideoNode', inputs: { ...vid.prompt['1']!.inputs, image: ['2', 0] } },
+    '4': outVideo('3'),
+    '5': outImage('1'),
+  })
+
+  it('Re-roll ×4, pick 2, Continue, pay for 2', async () => {
+    const k = kit()
+    const seeds = [42, 43, 44, 45]
+    const takes = seeds.map(gated)
+    const events = await openEvents()
+    try {
+      // Four takes (the re-rolls), one POST.
+      const { runId, promptIds } = await started(takes)
+      expect(promptIds).toHaveLength(4)
+      await events.until(m => m.some(x => x.type === 'gate_paused'))
+      await k.engine.settled(runId)
+      expect((await k.store.get(runId))!.status).toBe('paused')
+      // Four Replicate pictures, each the fixture body at its own seed (take 0 is the fixture exactly); no video yet.
+      const pics = k.replicate.submitted()
+      expect(pics.map(r => r.endpoint)).toEqual(Array(4).fill(img.endpoint))
+      expect(pics[0]!.payload).toEqual(img.body)
+      expect(pics.map(r => r.payload)).toEqual(seeds.map(seed => ({ ...img.body, seed })))
+      expect(k.fal.client.submit).not.toHaveBeenCalled()
+      const paused = events.msgs.at(-1)!
+      expect(paused.type).toBe('gate_paused')
+      expect((paused.data.choices as unknown[]).length).toBe(4)
+      expect(events.msgs.filter(m => m.type === 'execution_success')).toHaveLength(4)
+
+      // Pick takes 1 and 3, Continue.
+      const cont = await post(gateRoute, { runId, nodeId: '2', action: 'continue', takes: [1, 3] })
+      expect(cont.status).toBe(200)
+      const leg = await cont.json() as { promptIds: string[] }
+      expect(leg.promptIds).toEqual([`${runId}.1.t1`, `${runId}.1.t3`])
+      await events.until(m => leg.promptIds.every(p => m.some(ends(p))))
+      await k.engine.settled(runId)
+
+      const run = (await k.store.get(runId))!
+      expect(run.status).toBe('done')
+      expect(run.takes.map(t => t.nodes['2']!.status)).toEqual(['dropped', 'done', 'dropped', 'done'])
+      // Two Replicate videos, each the fixture body with its own take's picture as the first frame.
+      const videos = k.replicate.submitted().slice(4)
+      expect(videos).toHaveLength(2)
+      for (const [j, t] of [1, 3].entries()) {
+        const frame = run.takes[t]!.nodes['1']!.outputs[0]!.filename
+        expect(videos[j]!.endpoint).toBe(vid.endpoint)
+        expect(videos[j]!.payload).toEqual({ ...vid.body, start_image: `https://fal.storage/${frame}` })
+        expect(run.takes[t]!.nodes['3']!.request!.provider).toBe('replicate')
+      }
+      for (const t of [0, 2]) expect(run.takes[t]!.nodes['3']!.request ?? null).toBeNull()
+      expect(k.fal.client.submit).not.toHaveBeenCalled()
+
+      // Pay for 4 pictures (+ the render credit once) and exactly 2 videos, each at priceGraph.
+      const picPrice = priceGraph({ '1': takes[0]!['1']! }).credits
+      const vidPrice = priceGraph({ '3': takes[0]!['3']! }).credits
+      expect(vidPrice).toBeGreaterThan(0)
+      const all = [...k.ledger.holds.values()]
+      const videoHolds = all.filter(h => h.key.includes('.1.'))
+      expect(videoHolds.map(h => [h.state, h.actual])).toEqual([['settled', vidPrice], ['settled', vidPrice]])
+      const picHolds = all.filter(h => !h.key.includes('.1.'))
+      expect(picHolds.every(h => h.state === 'settled')).toBe(true)
+      expect(picHolds.reduce((n, h) => n + h.actual!, 0)).toBe(4 * picPrice + BASE_RENDER_CREDITS)
+      for (const p of leg.promptIds) {
+        expect(events.msgs.find(ends(p))!.data).toMatchObject({ credits: vidPrice, stopped: false })
+      }
+      expect(events.msgs.at(-1)!.type).toBe('execution_success')
+    }
+    finally { await events.close() }
+  })
+})
+
+// ── 3. Restart, Stop, a transient failure — on Replicate ────────────────
+
+describe('B10 · Replicate: restart, Stop, a transient failure', () => {
+  const f = FLOWS.find(x => x.family === 'replicate-image')!
+  const price = priceGraph(f.prompt).credits
+
+  it('a restart halfway through a Replicate request resumes on Replicate', async () => {
+    const fal = createFakeFal()
+    const replicate = createFakeReplicate()
+    const ledger = createFakeLedger()
+    const state = { crashed: false }
+    const k1 = kit({
+      fal, replicate, ledger,
+      deps: { sleep: () => (state.crashed ? new Promise<void>(() => {}) : new Promise<void>(r => setTimeout(r, 1))) },
+    })
+    replicate.holdNext(1)
+    const { runId, promptIds } = await started([f.prompt])
+    await until(() => (replicate.submitted()[0]?.polls ?? 0) >= 2)
+    state.crashed = true // the old server stops mid-request
+    await new Promise(r => setTimeout(r, 20))
+    expect((await k1.store.get(runId))!.takes[0]!.nodes['1']!.request).toMatchObject({ provider: 'replicate', requestId: 'pred1' })
+
+    // A new server on the same run store. Picking up saved runs happens at
+    // server start (reattach), which no route exposes, so it is called on the
+    // engine directly; the browser's side still goes through the event route.
+    const k2 = kit({ dir: k1.dir, root: k1.root, fal, replicate, ledger })
+    const events = await openEvents()
+    try {
+      const pollsBefore = replicate.submitted()[0]!.polls
+      expect(await k2.engine.reattach()).toBe(1)
+      replicate.release()
+      await events.until(m => m.some(ends(promptIds[0]!)))
+      await k2.engine.settled(runId)
+
+      expect(replicate.submitted()).toHaveLength(1) // polled again, not sent again
+      expect(replicate.submitted()[0]!.polls).toBeGreaterThan(pollsBefore)
+      expect(replicate.submitted()[0]!.payload).toEqual(f.body)
+      expect(fal.client.submit).not.toHaveBeenCalled()
+      expect(fal.client.status).not.toHaveBeenCalled()
+      expect((await k2.store.get(runId))!.takes[0]!.nodes['1']!.status).toBe('done')
+      expect(holds(ledger)).toEqual([['settled', price]])
+      expect(events.msgs.at(-1)).toMatchObject({ type: 'execution_success', data: { prompt_id: promptIds[0], credits: price } })
+    }
+    finally { await events.close() }
+  })
+
+  it('Stop cancels at Replicate', async () => {
+    const k = kit()
+    k.replicate.holdNext(1)
+    const events = await openEvents()
+    try {
+      const { runId, promptIds } = await started([f.prompt])
+      await until(() => (k.replicate.submitted()[0]?.polls ?? 0) >= 2)
+      const res = await post(stopRoute, {})
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ stopped: [runId] })
+      await events.until(m => m.some(ends(promptIds[0]!)))
+
+      expect(k.replicate.client.cancel).toHaveBeenCalledWith('replicate://pred1/cancel')
+      expect(k.fal.client.cancel).not.toHaveBeenCalled()
+      const run = (await k.store.get(runId))!
+      expect(run.status).toBe('stopped')
+      expect(run.takes[0]!.nodes['1']!.status).toBe('stopped')
+      expect(holds(k.ledger)).toEqual([['released', null]])
+      expect(k.records.write).not.toHaveBeenCalled()
+      expect(events.msgs.at(-1)).toMatchObject({ type: 'execution_success', data: { prompt_id: promptIds[0], credits: 0, stopped: true } })
+    }
+    finally { await events.close() }
+  })
+
+  it('a transient failure re-runs once and charges once', async () => {
+    const k = kit()
+    k.replicate.hiccupNext(1)
+    const events = await openEvents()
+    try {
+      const { runId, promptIds } = await started([f.prompt])
+      await events.until(m => m.some(ends(promptIds[0]!)))
+      await k.engine.settled(runId)
+
+      const sent = k.replicate.submitted()
+      expect(sent).toHaveLength(2)
+      expect(sent.map(r => [r.endpoint, r.payload])).toEqual([[f.endpoint, f.body], [f.endpoint, f.body]])
+      const rec = (await k.store.get(runId))!.takes[0]!.nodes['1']!
+      expect(rec.status).toBe('done')
+      expect(rec.request).toMatchObject({ provider: 'replicate', requestId: 'pred2', retries: 1 })
+      expect(k.ledger.hold).toHaveBeenCalledTimes(1)
+      expect(k.ledger.settle).toHaveBeenCalledTimes(1)
+      expect(holds(k.ledger)).toEqual([['settled', price]])
+      expect(k.records.write).toHaveBeenCalledTimes(1)
+      expect(events.msgs.at(-1)).toMatchObject({ type: 'execution_success', data: { prompt_id: promptIds[0], credits: price } })
+    }
+    finally { await events.close() }
+  })
+})
+
+// ── 4. A pass-through action ─────────────────────────────────────────────
+
+describe('B10 · a pass-through action', () => {
+  it('charges nothing and records nothing', async () => {
+    const c = pick(FIX.nanoActions, 'Remove object pass-through', x => x.class_type === 'RemoveObjectNode' && 'passthrough' in x.call && x.passes === 'image')
+    const prompt: ApiPrompt = {
+      '11': imageCard('image.png'),
+      '1': { class_type: c.class_type, inputs: { ...c.widgets, image: ['11', 0] } },
+      '2': outImage('1'),
+    }
+    const k = kit()
+    writeCards(k, ['image.png'])
+    const events = await openEvents()
+    try {
+      const { runId, promptIds } = await started([prompt])
+      await events.until(m => m.some(ends(promptIds[0]!)))
+      await k.engine.settled(runId)
+
+      expect(k.replicate.client.submit).not.toHaveBeenCalled()
+      expect(k.fal.client.submit).not.toHaveBeenCalled()
+      expect(k.upload).not.toHaveBeenCalled()
+      expect(k.ledger.hold).not.toHaveBeenCalled()
+      expect(k.ledger.settle).not.toHaveBeenCalled()
+      expect(k.records.write).not.toHaveBeenCalled()
+      expect(k.graphRuns.appendOutput).not.toHaveBeenCalled()
+      const run = (await k.store.get(runId))!
+      expect(run.status).toBe('done')
+      expect(run.charges[0]).toMatchObject({ estimate: 0, holdId: null, state: 'free', actual: 0 })
+      // The node hands the card's picture on unchanged.
+      expect(run.takes[0]!.nodes['1']!.outputs).toEqual(run.takes[0]!.nodes['11']!.outputs)
+      expect(events.msgs.at(-1)).toMatchObject({ type: 'execution_success', data: { prompt_id: promptIds[0], credits: 0 } })
+    }
+    finally { await events.close() }
+  })
+})
+
+// ── 5. PersonSwap's price; a 0-credit class is refused ───────────────────
+
+describe('B10 · money', () => {
+  it('PersonSwap charges 10', async () => {
+    const c = pick(FIX.nanoActions, 'PersonSwap call', x => x.class_type === 'PersonSwap' && hasCall(x))
+    const f = nodeFlow('nano-actions', c)
+    // The node is 10 (B1's price-key fix; it was 0 before). The Image cards
+    // bring the flat render credit on top, as priceGraph has it.
+    expect(GRAPH_NODE_CREDITS.PersonSwap).toBe(10)
+    expect(nodeCredits(f.prompt['1']!)).toBe(10)
+    expect(priceGraph(f.prompt).breakdown).toEqual([{ action: 'base_render', credits: BASE_RENDER_CREDITS }, { action: 'PersonSwap', credits: 10 }])
+    const price = 10 + BASE_RENDER_CREDITS
+    const k = kit()
+    writeCards(k, f.files)
+    const events = await openEvents()
+    try {
+      const { runId, promptIds } = await started([f.prompt])
+      await events.until(m => m.some(ends(promptIds[0]!)))
+      await k.engine.settled(runId)
+      expect(k.replicate.submitted().map(r => [r.endpoint, r.payload])).toEqual([[f.endpoint, f.body]])
+      expect(k.ledger.hold).toHaveBeenCalledWith(USER, price, `runner:${promptIds[0]}`)
+      expect(holds(k.ledger)).toEqual([['settled', price]])
+      expect(events.msgs.at(-1)).toMatchObject({ type: 'execution_success', data: { credits: price } })
+    }
+    finally { await events.close() }
+  })
+
+  it('a test-only class at 0 credits is refused', async () => {
+    // A test-only rule row under a family that is on. The row table and
+    // PROVIDER_TYPES are built at load time, so the row is added (and taken
+    // away) here; the class has no price-book entry, so it prices at 0.
+    const CLASS = 'PhaseBZeroCreditTestNode'
+    const rules = RUNNER_NODE_RULES as Record<string, RunnerNodeRule>
+    const providers = PROVIDER_TYPES as Set<string>
+    rules[CLASS] = { family: 'fal-edit' }
+    providers.add(CLASS)
+    try {
+      const prompt: ApiPrompt = { '1': { class_type: CLASS, inputs: { prompt: 'free lunch' } }, '2': outImage('1') }
+      expect(nodeCredits(prompt['1']!)).toBe(0)
+      const k = kit()
+      const res = await startRun([prompt])
+      expect(res.status).toBe(500)
+      const body = await res.json() as { statusMessage?: string; data?: unknown }
+      expect(body.statusMessage).toBe('This step has no price yet, so it can’t run')
+      expect(body.data).toEqual({ nodeId: '1', classType: CLASS })
+      expect(k.ledger.hold).not.toHaveBeenCalled()
+      expect(k.graphRuns.create).not.toHaveBeenCalled()
+      expect(k.fal.client.submit).not.toHaveBeenCalled()
+      expect(k.replicate.client.submit).not.toHaveBeenCalled()
+    }
+    finally {
+      delete rules[CLASS]
+      providers.delete(CLASS)
+    }
+  })
+})
+
+// ── 6. Each family off in turn ───────────────────────────────────────────
+
+describe('B10 · each family switched off in turn', () => {
+  it.each(FLOWS.map(f => [f.family, f] as const))('%s off: /api/runs refuses its workflow and nodesNeedingEngine names its node', async (family, f) => {
+    process.env.NUXT_RUNNER_FAMILIES = RUNNER_FAMILIES.filter(x => x !== family).join(',')
+    expect(runnerFamilies().has(family)).toBe(false)
+    expect(runnerFamilies().size).toBe(RUNNER_FAMILIES.length - 1)
+    const k = kit()
+    writeCards(k, f.files)
+
+    const res = await startRun([f.prompt])
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { statusMessage?: string }).statusMessage).toBe('This workflow can’t run on the Sailor runner')
+    expect(k.fal.client.submit).not.toHaveBeenCalled()
+    expect(k.replicate.client.submit).not.toHaveBeenCalled()
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+
+    const titleOf = (id: string) => `${f.prompt[id]!.class_type} #${id}`
+    expect(nodesNeedingEngine(f.prompt, { runnerOn: true, families: runnerFamilies(), titleOf })).toEqual([titleOf('1')])
+    // With the family back on, nothing needs the engine.
+    process.env.NUXT_RUNNER_FAMILIES = ALL
+    expect(nodesNeedingEngine(f.prompt, { runnerOn: true, families: runnerFamilies(), titleOf })).toEqual([])
+  })
+})
