@@ -182,7 +182,7 @@ function pick(row: ChoiceRow, k: string) {
     <!-- 3. Only the choices that change something on this Frame. -->
     <div v-if="choices.length" class="flex flex-col gap-1.5" data-testid="layout-vary-choices">
       <template v-for="row in choices" :key="row.key">
-        <div v-if="row.key === 'lines'" class="flex flex-col gap-1">
+        <div v-if="row.key === 'lines' || row.key === 'arr'" class="flex flex-col gap-1">
           <span class="text-[11px] text-white/55">{{ row.label }}</span>
           <StudioSegmented :model-value="onKey(row)" :options="optionKeys(row)" :option-labels="optionLabels(row)"
             :data-choice="row.key" @update:model-value="pick(row, $event)" />
