@@ -203,6 +203,40 @@ Spec `docs/superpowers/specs/2026-09-23-scene3d-web-embed-design.md` (its own "P
 
 **Known limits for slice 2:** layer blur, torn edge, grain and `localLayerBox` still ride the unscaled device scale; members of a rigid unit share the unit's motion map (exact for edge and centre pins, drifts for a manually relative-pinned or Keep-size group); a re-wrapped text's reported box uses the design height when its vertical pin is centre or relative. The three review findings above all landed, so slice 2 inherits nothing new from them.
 
+### Sailor without ComfyUI — Phase B BUILT, EVERY FAMILY SWITCHED OFF — 2026-09-24 (`040c48c0b`..`68a52f10d`, subagent-driven, a review per task, a whole-phase review and its fix wave)
+
+**What:** the runner (`frontend/server/runner/`) now handles six more groups of nodes ("families") without ComfyUI. Each group has its own switch: `NUXT_RUNNER_FAMILIES` on the server; the browser's list defaults to the same value. With a family off, nothing changes. A workflow the server's families don't take goes to ComfyUI as before, even when the browser thinks otherwise.
+- `fal-edit`: Edit an image (Nano Banana 2, Kontext, Flux 2), Develop, Relight, Blend scene (Kontext / Flux 2).
+- `replicate-image`: Generate an image on Replicate, 36 priced models (flux-2-* included, D5).
+- `nano-actions`: Remove object, Edit text, Recolor, Swap background, Swap product, Person swap, and Blend scene on Nano Banana. When Python would skip the call, the node passes its picture through: no call, no hold, no charge.
+- `replicate-video`: 12 Replicate video models (Fabric stays out because it needs audio).
+- `ref-edits`: Generate from references (up to 6 pictures), Rotate camera, Product shot.
+- `restyle`: Restyle from image, four engines. Board files are checked for ownership in hosted mode.
+
+Under them sits a Replicate client (`replicateQueue.ts`: create, poll, cancel; retries on 429; falls back to the latest version on a 404; the token only goes to api.replicate.com). The runner also has a money guard: in hosted mode a paid node priced at 0 is refused.
+
+A price-key fix is **live on the Python path today**: PersonSwap, LensReframe and PoseMannequin were charging 0 in hosted mode and now charge 10; IdeogramV3Turbo was refused and now charges 6.
+
+**Proven:**
+- Every request body equals what the Python node sends first (about 3,500 cases recorded from the real Python with the network blocked; `scripts/runner_builder_fixtures.py`).
+- An end-to-end spec runs every family through the real routes against a fake fal and a fake Replicate (`runner-phase-b-e2e.unit.spec.ts`).
+- The full unit suite passes 24,953 tests with the provider keys unset. The 5 failures belong to other sessions.
+
+**Not proven, and must be before any switch goes on:**
+- one cheap live call per family (D9);
+- Julien's price calls (below);
+- B9, the Replicate webhook for hosted mode, was skipped (polling works).
+
+**Julien's price calls:**
+- Develop and Relight at 2K and 4K, Restyle on Nano Banana Pro ($0.15–0.24 against 10 credits) and Generate from references at 2K all cost more than they charge.
+- Image prices are flat whatever the resolution or quality.
+- Video prices are flat per clip, even where a model allows a longer clip.
+- The Python path charges the same today.
+
+**Security, older than this work:** in hosted mode, the ComfyUI path never checks who owns a moodboard file, so a user could read another user's board. A separate task is queued.
+
+Plan: `docs/superpowers/plans/2026-09-24-engine-free-phase-b.md`; ledger `.superpowers/sdd/2026-09-24-engine-free-phase-b/progress.md`.
+
 ### Sailor without ComfyUI — Phase A LANDED — 2026-09-24 (`b909e1249`..`dec8db18b`, 13 commits, subagent-driven, a review per task, a whole-phase review and its fix wave)
 
 **What:** Sailor's own server (`frontend/server/native/`) now answers every request the app makes of ComfyUI except running non-runner workflows. It reads and writes the same folders and the same file formats as the Python did (tested against the real Python handlers, which the tests lift out of the source and run), so going back is a code revert and no data moves.
@@ -241,7 +275,7 @@ The runner was not re-run live, because the test project now holds an unrun paid
 `font_subset` returns the whole font when the engine is off (fontkit's subsetter makes unusable web fonts).
 
 **Open, for Julien:**
-- Phase B (Replicate + more runner families) not started.
+- Phase B built the same night (entry above), every family switched off.
 - A hosted re-upload of byte-identical content claims an unowned legacy input file (older than this work).
 - 26 empty "New Project" folders were made around 00:50 on 09-24 by a test run against :3002; they were not deleted.
 - Tests now always point the engine root at a temp folder (`tests/unit/__setup__/engine-root-safety-net.ts`).
