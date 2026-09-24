@@ -47,9 +47,11 @@ style"):
    facing interpolate separately, smoothed, so strokes keep their weight while they turn. A counter only one
    side has shuts in the first half of the bar and opens in the second.
 5. **Colour.** Solid ↔ solid blends. Anything else (gradient, shader fill) switches at the midpoint.
-6. **Effects.** During the bar the moving shape keeps **A's** stroke and effects; at the end B's own take
-   over. (The approved sketch said effects cross-fade; that needs a second full effect pass per frame and is
-   left for later — see Deferred.)
+6. **Effects.** During the bar the moving shape keeps **A's** effects (not its geometry effects — they are
+   already in its outline); **strokes are dropped** for the bar and long shadows sit it out; at the end B's
+   own take over. (The approved sketch said effects cross-fade; that needs a second full effect pass per frame
+   and is left for later — see Deferred. Strokes: amended 2026-09-24 — stroke widths are in different units per
+   element kind, and a wrong width reads worse than none.)
 7. **No outline, no morph.** If A or B has no outline (a photo, a system font, underlined or struck-through
    text, a font still loading) the bar becomes a **cross-fade**: A fades out while B fades in. Never an error.
 8. **Dangling target.** If B is deleted the bar does nothing and A leaves as if it had no Out transition.
@@ -69,11 +71,12 @@ style"):
 - **Fold:** `applyMorphBehaviours(layers, tracks, behaviours, t)` in `adapter/frame.ts`, after the reveal
   stage. It parks a transient `motionMorph { target, style, amount }` on A's clone while 0 < amount < 1,
   hides A at amount ≥ 1, and hides every target whose morph has not finished. Same array back when idle.
-- **Drawing:** in `paintLayerStack`, after the sibling resolver is built (it sees the animated placements),
-  a layer carrying `motionMorph` is replaced by a transient **path** clone: `d` = the morph at `amount`
-  between A's computed outline and B's outline resolved into A's frame, placement = A's, fill = the blended
-  colour, A's non-geometry effects kept (its geometry effects are already inside its computed outline).
-  Missing outline → the cross-fade of rule 7.
+- **Drawing (amended 2026-09-24):** in `paintLayerStack`, after the fold, a layer carrying `motionMorph` is
+  replaced by a transient **path** clone. The two SHAPES morph in their own scale-free local frames (so the
+  cached analysis survives any movement, rotation or scale animation during the bar) and the placement —
+  position, rotation along the shortest turn, skew and size — interpolates from A's to B's separately.
+  Fill = the blended colour, A's non-geometry effects kept. Missing outline or an engine error → the
+  cross-fade of rule 7.
 - **Caches and gates:** `motionMorph` joins `SILHOUETTE_KEY_STRIP`; `hasMotion` already counts any
   behaviour, so export picks it up. Text outlines need the fontkit font; `warmCompositorFont` is called for
   A and B when the behaviour is added and before export.
@@ -98,6 +101,12 @@ another word, a text into a star, scrubbed and played with Steps; pixel-checked 
 bar and present after; an exported video.
 
 ## Deferred (not in this build)
+
+- **Open question for Julien:** still renders (Design tab, image export, the canvas card, a web-export
+  poster) run no clock, so A and B both draw on top of each other. Hiding B there would also hide it while
+  it is being designed.
+- A one-letter line of a short letter ("a" above "Tight") is read as part of the next line (a rule added in
+  the final fix wave); fix = drop that rule.
 
 - Effects cross-fading during the bar (rule 6).
 - The Frame **card** on the canvas does not play Motion at all (programme-wide gap, unchanged).

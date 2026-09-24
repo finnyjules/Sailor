@@ -31,6 +31,14 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
 
+### Frame Morph transition — an element turns into another element over its out bar — LANDED 2026-09-24 (`37404fab8`..`ea303d17a`, non-contiguous — 11 commits across 6 tasks, subagent-driven, a review per task, a whole-feature review and its fix wave)
+
+Motion tab → Out: **Morph into** (letter by letter) and **Shape morph into** (whole shape). Pick the element it becomes in the inspector; that element stays hidden until the bar ends, then carries on. Engine = the 2026-09-23 medial-pinning spike (`lib/vector/medial.ts`: the real outline pinned to its centreline; samples pair by where they sit on the letter; centreline, thickness and facing interpolate apart) + `lib/vector/morphPieces.ts` (pieces in reading order, extras shrink into / grow out of their neighbour, `prepareMorph` cached per outline pair). Fold `applyMorphBehaviours` (`motionMorph` on A, `motionHidden` on the target); draw `resolveMorphs` swaps A for a path clone — scale-free shapes morph, placement and size interpolate apart, fill blends solid↔solid. No outline on either side (photo, system font, decorated text) or an engine error → cross-fade. Web export loads outline fonts for both ends.
+
+Live-checked through the painter: start vs A 101 of ~20,800 ink px, end vs B 57–84 px (moved + rotated too), before/after the bar exact, control 22,269 px; first frame of a new pair ~220 ms, then ~8 ms. Real Frame editor: tiles, picker, note, scrub (pink → blended → white).
+
+**Open:** (1) a one-letter line of a short letter ("a" over "Tight") joins the next line — the fix wave's extra "lone mark" rule in `splitPieces`; fix = drop the rule, make the reading-order test's `i` dot realistically small. (2) Julien's call: still renders (Design tab, image export, card, poster) draw A and B on top of each other. (3) Deferred: effects cross-fade (A's effects ride the bar, strokes dropped, long shadow sits out), per-copy stagger in unison during the bar, loop on a morph bar, B's own In transition clashing, long-text sample density, Vector Type Studio morph sequence + capped weight dial (needs `clipper-lib`).
+
 ### Frame diffused edge — colour held at the outline, fading to a fill — LANDED 2026-09-24 (`f196fa0ae`)
 
 From a Threads post (@nono_ai_archive, cut-out fruit whose colour holds at the silhouette and fades to white inward). The look was settled in a browser prototype first (https://claude.ai/artifact/MZHFiJUhwqnS51xLHX2uvS) — Julien asked for grain, then rejected it twice: pixellated at large sizes (value noise on a grid of the speck size), then blurry (partial-blend jitter, and the prototype rendered at 1200 px on a 2× screen).
