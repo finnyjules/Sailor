@@ -31,6 +31,16 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
 
+### Frame diffused edge — colour held at the outline, fading to a fill — LANDED 2026-09-24 (`f196fa0ae`)
+
+From a Threads post (@nono_ai_archive, cut-out fruit whose colour holds at the silhouette and fades to white inward). The look was settled in a browser prototype first (https://claude.ai/artifact/MZHFiJUhwqnS51xLHX2uvS) — Julien asked for grain, then rejected it twice: pixellated at large sizes (value noise on a grid of the speck size), then blurry (partial-blend jitter, and the prototype rendered at 1200 px on a 2× screen).
+
+**What changed.** A new pixel layer style, `diffused_edge` (Fill colour, Width, Strength, Grain, Grain size; defaults white / 5% / 100% / 80% / 1.5 px), in the add menu after Inner glow. The pass builds the outside of the silhouette, blurs it by the width and reads that as distance from the edge; `lib/compositor/diffusedEdge.ts` holds the pure pixel math. Grain is **all-or-nothing** — each pixel is the fill or its own colour, the fade decides how many — from a fixed-seed field (1 px noise, 3-pass box blur, normal CDF back to an even 0..1), sized in device px. CHAIN_ORDER puts it after the edge distortions so it reads the reshaped edge. Motion dials for all five.
+
+**Proven.** 9 unit tests (fade, strength, alpha untouched, all-or-nothing grain at the right share, field evenness/determinism/smoothness, registration); a Playwright case (centre = fill, edge = own colour, hidden byte-identical, strength 0 a no-op, grain a different picture); in the frame lab the inspector card drove the render and each grain value re-renders identically.
+
+**Open.** The agent can set it (colour whitelisted, numbers clamp generically) but the setLayerEffect hint does not name it — about 30 characters over `COMPOSITOR_HINT_CEILING` (27,700). The grain field is fixed to the canvas, not the layer, so a moving layer slides under its grain.
+
 ### Frame web export — wired Space Type and Gradient play live — LANDED 2026-09-23 (`4cec9128b`..`3efb2bfb0`, non-contiguous — 5 tasks + a final fix wave, subagent-driven, a review per task, a whole-change review, its fix wave and a re-review)
 
 Plan `docs/superpowers/plans/2026-09-23-frame-export-live-wired-layers.md` (its own design; Task 5 added after Task 4's measurement).
