@@ -209,8 +209,8 @@ export function formatNotes(fmt: FrameFormat): string[] {
 
 /** Idle scheduling, with a timeout fallback (tests, Safari). Returns a cancel. */
 export function whenIdle(fn: () => void): () => void {
-  const w = typeof window !== 'undefined' ? (window as Window & { requestIdleCallback?: (cb: () => void) => number; cancelIdleCallback?: (h: number) => void }) : null
-  if (w?.requestIdleCallback) { const h = w.requestIdleCallback(fn); return () => w.cancelIdleCallback?.(h) }
+  const w = typeof window !== 'undefined' ? (window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number; cancelIdleCallback?: (h: number) => void }) : null
+  if (w?.requestIdleCallback) { const h = w.requestIdleCallback(fn, { timeout: 250 }); return () => w.cancelIdleCallback?.(h) }
   const t = setTimeout(fn, 0)
   return () => clearTimeout(t)
 }
