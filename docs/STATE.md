@@ -31,6 +31,22 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
 
+### Frame layouts, stage 4 — ad content and the research layouts — LANDED 2026-09-24 (`0e66d9a24`..HEAD, non-contiguous — 7 tasks, subagent-driven, a review per task, a whole-stage review and its fix wave)
+
+Plan `docs/superpowers/plans/2026-09-24-frame-layout-system-stage4.md` (spec §8, §6).
+
+**What shipped:** the Frame's lines are read as **ad content** — a quote and its reviewer, a rating ("4.7 ★"), a list (each line of one text layer), a stat and its line, a competitor ("vs a typical trail shoe"), a second image. A new **Content** section in the Layout tab (collapsed, under Style) lets you say what each line is (Headline, Product or name, Offer or date, Fine print, Button, Quote, Reviewer, Rating, List, Stat, Stat line, Competitor, Not used — or Automatic); what you say always wins, and each change is one undo step. Nine new Performance layouts, each offered only when its content exists: **Offer first, Stat, Review, Us vs them, Before / after, Feature callouts, Reasons why, Notes app, Post-it**. Their own words ("✓", "Before", "‹ Notes", numbers) use your caption's face and weight; stars and leader lines are their own pieces. On platform formats a **Button** choice — *In the image* / *Platform's own* — lets the app draw the button instead; picking a layout always applies a variation with its button drawn. Vary ranks Performance by the research (image visible, button contrast, not cluttered), and two hints warn about a percentage-vs-amount mix-up.
+
+**Proof:** an ads matrix (the ad fixture × portrait, square, story, feed 4:5, 300×250 × with/without a button), the Stage 1, format and style matrices unchanged (a 10,752-combination before/after snapshot of Stages 1–3 is byte-identical), 9 Playwright tests (tags offer Review and Reasons why; the platform's own button hides the action line), layout suites green (~2,430 tests). Browser: Review, Us vs them and Notes app checked on the lab Frame.
+
+**Caught on the way:** a bare "3" was read as a rating and vanished; native buttons could rescue a layout that failed with its button drawn (and hide "Shop now" silently); switching from a content layout back to any other left the quote and rating hidden and unnamed, or stranded on top; "Not shown in this format" named the wrong lines; new lines were measured in another layer's face; moving a layout's own "1" turned it into your offer.
+
+**Decisions owed to Julien:** Review, Stat and Post-it hide the headline (named under Not shown); Review draws ★★★★★ then your "4.7 ★"; a tag change re-plans but doesn't re-apply the layout; Us vs them leaves ~40% of a portrait Frame empty; the platform-button choice is Performance-only; Reasons why with only some lines marked; plus the Stage 1–3 list (extra images, Knockout ellipse, A/B/C pills…).
+
+**Known:** untagging a line after a content layout placed it can leave it where it was; sizes still restore base lines a layout left unplaced; stub-measured thin cases may move with real fonts.
+
+**Next:** Stage 5 — Campaigns: one Frame recomposed into every chosen format, reviewed on a contact sheet and exported as a set.
+
 ### Frame layouts, stage 3 — Performance, Editorial and Street styles — LANDED 2026-09-24 (`5f6ab549c`..HEAD, non-contiguous — 16 commits across 9 tasks, subagent-driven, a review per task, a whole-stage review and its fix wave)
 
 Plan `docs/superpowers/plans/2026-09-24-frame-layout-system-stage3.md` (spec §7).
