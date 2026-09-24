@@ -281,6 +281,12 @@ CASES += [
     case("an explicit artboard with no layers is black", {}, width=40, height=24),
     case("no layers and no size: 16×16 black", {}),
     case("width without height sizes from layer 1", {"layer1": ["port.png", "card"], "layer2": ["land.png", "provider"]}, width=50, height=0),
+    # No layer 1 (ComfyUI's validation refuses these prompts; execute() itself renders them).
+    case("only the overlay, no size: 16×16 black, the overlay not laid", {"overlay": ["overlay.png", "load"], "overlay_mask": ["overlay.png", "load_mask"]}),
+    case("only the overlay on an explicit artboard", {"overlay": ["overlay.png", "load"], "overlay_mask": ["overlay.png", "load_mask"]}, width=48, height=32),
+    case("only baked local layers, on slots 3 and 5", {"layer3": ["overlay.png", "load"], "layer3_mask": ["overlay.png", "load_mask"],
+                                                     "layer5": ["disc.png", "load"], "layer5_mask": ["disc.png", "load_mask"]},
+         **layer(5, z=0.0, x=0.2)),
     case("the lowest connected slot sets the size", {"layer2": ["wide.png", "card"], "layer3": ["disc.png", "provider"]}),
     # Overlay.
     case("overlay with its mask", {"layer1": ["land.png", "card"], "overlay": ["overlay.png", "load"], "overlay_mask": ["overlay.png", "load_mask"]}),

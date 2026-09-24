@@ -133,6 +133,22 @@ describe('eligibility: family frame', () => {
   })
 })
 
+describe('the blank-project Frame (no layer 1) stays with ComfyUI', () => {
+  // ComfyUI's validation marks a missing required input — layer1 included —
+  // required_input_missing, and validate_prompt drops that Frame (and what
+  // reads it): the prompt is refused, or, with another good output, succeeds
+  // without rendering the Frame. The runner does not render what ComfyUI drops.
+  it('an empty Frame, and a Frame on an empty Frame, are not taken', () => {
+    const empty: ApiPrompt = { 3: frame({}) }
+    const chained: ApiPrompt = { 3: frame({}), 5: frame({ layer1: ['3', 0] }) }
+    const withCard: ApiPrompt = { 1: card('a.png'), 3: frame({}), 5: frame({ layer1: ['3', 0] }) }
+    for (const p of [empty, chained, withCard]) expect(isRunnerEligible(p, ALL)).toBe(false)
+    expect(runnerTakesNode(chained, '3', ALL)).toBe(false)
+    // The chained Frame itself is fine: only the empty one is left to ComfyUI.
+    expect(runnerTakesNode(chained, '5', ALL)).toBe(true)
+  })
+})
+
 describe('which decode a wired picture gets', () => {
   const p: ApiPrompt = {
     1: card('a.png'),

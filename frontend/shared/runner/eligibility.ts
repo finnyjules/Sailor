@@ -264,8 +264,16 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // ── frame: the Frame render, computed by the runner (server/runner/compositor/) ──
   // The static composite only. Left to ComfyUI: baked motion (a frame batch
   // and a real video), anything reading the protect_mask or video outputs,
-  // a mask from anything but a LoadImage, and layer 1 unwired (ComfyUI
-  // refuses that prompt: layer1 is required).
+  // a mask from anything but a LoadImage, and layer 1 unwired. layer1 is a
+  // REQUIRED input (`_layer_inputs(1, optional=False)`), and ComfyUI's
+  // validate_inputs reports any missing required input, wire or widget, as
+  // required_input_missing. validate_prompt then drops that output: with no
+  // other valid output the prompt is refused ("Prompt outputs failed
+  // validation"); with one (an Image card) the prompt succeeds WITHOUT
+  // running the Frame or anything reading it (history c7690393, 2026-09-24:
+  // two layer1-less Frames, status success, outputs only the Image card).
+  // The runner leaves those prompts to ComfyUI rather than render a Frame
+  // ComfyUI never renders.
   Compositor: {
     family: 'frame',
     local: 'render',
