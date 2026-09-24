@@ -91,10 +91,11 @@ describe('R2 recognition — the rules one by one', () => {
       { label: 'Recycled upper', us: true, them: true },
     ])
   })
-  it('faceOf: quote and stat measure in the details face; by, rating, list, statline, them in the caption face', () => {
-    expect(faceOf('quote')).toBe('details')
-    expect(faceOf('stat')).toBe('details')
-    for (const r of ['by', 'rating', 'list', 'statline', 'them', 'list2']) expect(faceOf(r)).toBe('caption')
+  // Final review I2: each content line is drawn by its own layer, so it is measured in that layer's
+  // face (the measure falls back to the details / caption face when there is none).
+  it('faceOf: each content role measures in its own face (list2 in the list\'s)', () => {
+    for (const r of ['quote', 'stat', 'by', 'rating', 'list', 'statline', 'them']) expect(faceOf(r)).toBe(r)
+    expect(faceOf('list2')).toBe('list')
     expect(faceOf('title2')).toBe('title')
     expect(faceOf('action')).toBe('action')
   })

@@ -100,6 +100,18 @@ describe('LayoutVaryPanel — lines not shown', () => {
     expect(wrap.get('[data-testid="layout-not-shown"]').text()).toBe('Not shown: “Lightest shoe I have ev…, "Fast", “Offer ends”.')
   })
 
+  it('review I1: the format\'s lines come from the plan on show (what it really hid), not the Frame\'s base reading', () => {
+    const c = { ...(cand([]) as object), plan: { notPlaced: [], format: { id: 'video-thumb', label: 'Video thumbnail · 16:9', hidden: ['caption'], lines: ['Offer ends 12 October.'] } } } as never
+    const wrap = mount(LayoutVaryPanel, { props: { ...base, format: { ...fmt, hidden: ['— Maya R., verified buyer'] }, candidates: [c] }, global: { stubs } })
+    expect(wrap.get('[data-testid="layout-format-hidden"]').text()).toBe('Not shown in this format: “Offer ends 12 October.”.')
+  })
+
+  it('an image the layout leaves out is named, not quoted', () => {
+    const c = { ...(cand([]) as object), plan: { notPlaced: [{ role: 'quote', text: 'Fast shoe' }, { role: 'image2', text: 'Image 2', image: true }] } } as never
+    const wrap = mount(LayoutVaryPanel, { props: { ...base, format: null, candidates: [c] }, global: { stubs } })
+    expect(wrap.get('[data-testid="layout-not-shown"]').text()).toBe('Not shown: “Fast shoe”, Image 2.')
+  })
+
   it('nothing left out: no line', () => {
     const wrap = mount(LayoutVaryPanel, { props: { ...base, format: null, candidates: [cand([])] }, global: { stubs } })
     expect(wrap.find('[data-testid="layout-not-shown"]').exists()).toBe(false)

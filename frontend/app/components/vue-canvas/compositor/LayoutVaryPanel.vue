@@ -79,17 +79,30 @@ const strip = computed(() => {
 })
 
 /** The lines not shown, quoted: the first 24 characters of each, cut with an ellipsis. The
- *  format's hidden levels, then the lines the current layout does not place (a style layout —
- *  Strip places no fine print). Only the format: Stage 2's words ("in this format"). */
+ *  format's hidden levels — as the plan on show hid them (final review I1: a Stage 4 layout reads
+ *  the Frame's lines another way), else as the Frame reads before any plan — then what the current
+ *  layout leaves hidden (a line it does not place, one an earlier layout hid, an image — named by
+ *  its name, not quoted). Only the format: Stage 2's words ("in this format"). */
 // A line that opens with its own quotation mark (a review's quote) is not wrapped in a second pair.
 const quote = quoteLine
 const fold = (t: string) => t.trim().split(/\s+/).join(' ')
-const notPlaced = computed(() => (current.value?.plan.notPlaced ?? []).map(n => fold(n.text)).filter(Boolean))
+const notPlaced = computed(() => (current.value?.plan.notPlaced ?? [])
+  .map(n => ({ text: fold(n.text), image: !!n.image })).filter(n => n.text))
+const formatLines = computed(() => {
+  const planned = current.value?.plan.format?.lines
+  return planned ? planned.map(fold).filter(Boolean) : (props.format?.hidden ?? [])
+})
 const notShown = computed(() => {
-  const lines = [...new Set([...(props.format?.hidden ?? []), ...notPlaced.value])]
-  if (!lines.length) return ''
+  const seen = new Set<string>()
+  const items: string[] = []
+  for (const n of [...formatLines.value.map(text => ({ text, image: false })), ...notPlaced.value]) {
+    if (seen.has(n.text)) continue
+    seen.add(n.text)
+    items.push(n.image ? n.text : quote(n.text))
+  }
+  if (!items.length) return ''
   const label = notPlaced.value.length ? 'Not shown' : 'Not shown in this format'
-  return `${label}: ${lines.map(quote).join(', ')}.`
+  return `${label}: ${items.join(', ')}.`
 })
 
 const offered = computed(() => props.library.filter(it => it.plan))

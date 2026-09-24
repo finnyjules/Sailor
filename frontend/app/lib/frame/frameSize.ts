@@ -20,7 +20,7 @@
 import { isResponsiveFrame } from './responsive/fromNode'
 import { FRAME_FORMATS, formatFor, frameFormatGroup } from './formats'
 import { PLAIN_SIZE_PRESETS } from './plainPresets'
-import { hiddenLayerIdsForFrame } from './patterns/kit/plan'
+import { hiddenLayerIdsForFrame, levelLayerIdsForFrame } from './patterns/kit/plan'
 import type { StyleId } from './patterns/kit/styles'
 import type { FrameElements } from './patterns/types'
 
@@ -98,20 +98,27 @@ type HideTracked = { id: string; visible?: boolean; layoutPrev?: Record<string, 
 /** Show again every line a layout hid for a format (`layoutPrev.visible` still `set: false`, the
  *  layer still hidden) that the Frame's CURRENT format carries — every such line when it has no
  *  format. `visible` goes back to what it was (removed when it had none) and the entry is
- *  dropped. A line the user showed or hid again by hand since is theirs, and left alone. */
+ *  dropped. A line the user showed or hid again by hand since is theirs, and left alone.
+ *
+ *  The lines are read the way the layout that hid them read the Frame (`posterState.patternId`: a
+ *  Stage 4 layout reads the content view, ruling C2 — final review I1). Only a level (title,
+ *  details, date, action, caption in that view) can be a format's: a content line or an image a
+ *  layout hid stays hidden (rulings R14, R15). */
 export function restoreFormatHiddenLines(data: FrameSizeNodeData) {
   const props = data.properties
   const layers = props?.sailor_localLayers as HideTracked[] | undefined
   if (!props || !Array.isArray(layers)) return
   const { w, h } = readFrameSize(data)
-  const st = props.sailor_posterState as { shapeMode?: FrameElements['shapeMode']; imageMode?: boolean; style?: StyleId } | undefined
+  const st = props.sailor_posterState as { patternId?: string; shapeMode?: FrameElements['shapeMode']; imageMode?: boolean; style?: StyleId } | undefined
   // The levels a format keeps follow the style of the layout that hid them (Performance ranks the
-  // date above the details).
-  const still = new Set(hiddenLayerIdsForFrame({ props, frameW: w, frameH: h, shapeMode: st?.shapeMode ?? undefined, imageMode: st?.imageMode, style: st?.style ?? 'swiss' }))
+  // date above the details), and the view it read.
+  const args = { props, frameW: w, frameH: h, shapeMode: st?.shapeMode ?? undefined, imageMode: st?.imageMode, style: st?.style ?? 'swiss', ...(st?.patternId ? { layoutId: st.patternId } : {}) }
+  const still = new Set(hiddenLayerIdsForFrame(args))
+  const levels = new Set(levelLayerIdsForFrame(args))
   let changed = false
   const next = layers.map((l) => {
     const e = l.layoutPrev?.visible
-    if (!e || e.set !== false || l.visible !== false || still.has(l.id)) return l
+    if (!e || e.set !== false || l.visible !== false || still.has(l.id) || !levels.has(l.id)) return l
     changed = true
     const out: HideTracked = { ...l }
     if (e.was == null) delete out.visible; else out.visible = e.was as boolean

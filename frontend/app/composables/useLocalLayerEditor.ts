@@ -165,10 +165,14 @@ export function useLocalLayerEditor(opts: EditorOpts) {
   /** A user-initiated geometry/property edit on an owned layer (one the Layout tab
    *  placed) makes it the user's own from that point on — never strip `owner` from
    *  a programmatic commit (a layout apply passing owned layers through `commit`),
-   *  only at the user-edit entry points that call this. */
+   *  only at the user-edit entry points that call this. A layout's own words (an owned
+   *  text piece) keep a mark, `fromLayout` (its key): the user now owns the layer, but its
+   *  words are still the layout's, never read as the user's content. */
   function stripOwner(l: LocalLayer): LocalLayer {
-    if (!(l as { owner?: unknown }).owner) return l
+    const owner = (l as { owner?: { by?: string; key?: string } }).owner
+    if (!owner) return l
     const { owner: _owner, ...rest } = l as LocalLayer & { owner?: unknown }
+    if (l.kind === 'text' && owner.by === 'layout' && owner.key) (rest as { fromLayout?: string }).fromLayout = owner.key
     return rest as LocalLayer
   }
 
@@ -360,6 +364,10 @@ export function useLocalLayerEditor(opts: EditorOpts) {
         delete (next as { runs?: unknown }).runs
       }
       next = stripOwner(next)
+      // New words typed into a layout's own words make them the user's line.
+      if ((next as { fromLayout?: string }).fromLayout && 'text' in patch && patch.text !== (l as { text?: string }).text) {
+        delete (next as { fromLayout?: string }).fromLayout
+      }
       return next
     }))
   }

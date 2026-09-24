@@ -113,12 +113,15 @@ export interface Measure {
 
 /** The face an element is measured in, from its `role`: `details`/`date`/`caption`/`title`/
  *  `action` map to themselves (a measure with no action layer measures it in the caption's face);
- *  Stage 4: `quote` and `stat` → `details`; `by`, `rating`, `list`, `statline`, `them` → `caption`;
- *  `info` and anything else map to `caption` (the info face). */
-export function faceOf(role: string | undefined): FaceKey {
+ *  Stage 4 (final review I2): each content role (`quote`, `by`, `rating`, `list`, `stat`,
+ *  `statline`, `them`) maps to ITSELF — it is drawn by its own layer, so it is measured in that
+ *  layer's family and weight (a measure with no layer for it falls back to the details face for
+ *  `quote`/`stat`, the caption face for the rest — `makeCanvasMeasure`). `info`, a layout's own
+ *  words and anything else map to `caption` (the info face; ruling R10 for owned text). */
+export function faceOf(role: string | undefined): RoleKey {
   // `title1`, `title2` … are further lines of the same layer: measure them in its face.
   const base = role?.replace(/\d+$/, '')
-  if (base === 'quote' || base === 'stat') return 'details'
+  if (base === 'quote' || base === 'by' || base === 'rating' || base === 'list' || base === 'stat' || base === 'statline' || base === 'them') return base
   return base === 'title' || base === 'details' || base === 'date' || base === 'caption' || base === 'action' ? base : 'caption'
 }
 

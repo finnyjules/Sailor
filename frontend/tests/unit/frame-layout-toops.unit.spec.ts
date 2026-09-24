@@ -724,8 +724,9 @@ describe('elementsToOps — Stage 4 kit pieces', () => {
     expect(ops.map(o => o.target)).toEqual(['img', 'img2'])
     expect(ops[1]).toMatchObject({ kind: 'image', x: 0.75, w: 0.5, h: 0.6, crop: { fit: 'cover' }, z: 1 })
     expect(ops[1]!.y! * P.H).toBeCloseTo(30, 9)
-    // `image2` names the same role.
-    expect(elementsToOps([{ ...els[1]!, role: 'image2' } as El], P, all, frame, palette).ops[0]!.target).toBe('img2')
+    // Only `photo2` (the one role a layout emits — Before / after) names it; the dead `image2`
+    // alias was removed in the Stage 4 final fix wave.
+    expect(elementsToOps([{ ...els[1]!, role: 'image2' } as El], P, all, frame, palette).ops[0]!.target).toBe('img')
     // Negative control: no second image layer, no op (never the first image's).
     expect(elementsToOps([els[1]!], P, targets, frame, palette).ops).toEqual([])
   })

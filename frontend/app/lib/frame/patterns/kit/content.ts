@@ -90,7 +90,9 @@ export function isListText(s: string | undefined): boolean {
 /** The list's items, markers stripped (the user's text keeps them). */
 export const listItems = (s: string): string[] => linesOf(s).map(l => l.replace(MARKER_RE, '').trim()).filter(Boolean)
 
-const BOTH_RE = /\s+(?:✓✓|\(both\))\s*$/
+/** A comparison row's "both" marker: " ✓✓" or " (both)" at the end of the line. The one copy
+ *  (Us vs them strips it from the row's label too). */
+export const BOTH_RE = /\s+(?:✓✓|\(both\))\s*$/
 /** A comparison's rows from the list's items: ours ✓ and theirs ✕, unless the line ends in " ✓✓"
  *  or " (both)" — then both (the suffix is stripped from the label). */
 export const compareRows = (items: string[]): { label: string; us: boolean; them: boolean }[] =>

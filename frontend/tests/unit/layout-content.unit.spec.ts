@@ -283,3 +283,64 @@ describe('Choices — the Button pills (R7)', () => {
     expect(out.every(o => !o.row)).toBe(true)
   })
 })
+
+// Ruling R16: each role is held by one line — tagging a role another line holds moves the tag.
+describe('Content section — a role moves to the line tagged last (R16)', () => {
+  it('the previous holder goes back to Automatic, in the same single undo step', async () => {
+    const layers = [...reviewFrame(), tl('q2', 'Best shoe of the season', 0.03)]
+    const { props, ed, vary } = realHarness(layers)
+    expect(vary.setTag('q', 'quote')).toBe(true)
+    const past = (ed as unknown as { canUndo: { value: boolean } }).canUndo
+    expect(vary.setTag('q2', 'quote')).toBe(true)
+    expect(props.sailor_posterState.tags).toEqual({ q2: 'quote' })
+    expect(vary.content.value.find(r => r.id === 'q')!.tag).toBeNull()
+    expect(vary.content.value.find(r => r.id === 'q2')!.tag).toBe('quote')
+    // One undo gives the role back to the first line.
+    ed.undo(); await nextTick()
+    expect(props.sailor_posterState.tags).toEqual({ q: 'quote' })
+    expect(past.value).toBe(true)
+    ed.undo(); await nextTick()
+    expect(props.sailor_posterState.tags).toBeUndefined()
+    expect(past.value).toBe(false)
+  })
+
+  it('"Not used" is not a role: many lines can be not used', () => {
+    const { props, vary } = realHarness(reviewFrame())
+    vary.setTag('q', 'unused')
+    vary.setTag('c', 'unused')
+    expect(props.sailor_posterState.tags).toEqual({ q: 'unused', c: 'unused' })
+  })
+})
+
+// Review finding I3: a layout's own words (Reasons why's "1") stay the layout's words when the user
+// moves them — never read as the user's content.
+describe('Content section — a moved piece of the layout\'s own words is not content (I3)', () => {
+  it('a moved owned "1" is not the offer, and has no Content row', async () => {
+    const layers = [tl('t', 'Run lighter.', 0.1), tl('l', 'Carbon plate\n198 g per shoe\nGrips on wet rock', 0.022), tl('dt', 'Free returns', 0.02), createImageLayer('x.png', 1.25, { id: 'img', w: 0.5, h: 0.625 }) as LocalLayer]
+    const { props, ed, vary } = realHarness(layers)
+    vary.setStyle('performance')
+    await idle()
+    vary.select('perfListicle'); await nextTick()
+    const one = (props.sailor_localLayers as LocalLayer[]).find(l => l.kind === 'text' && (l as { owner?: { key: string } }).owner && (l as { text?: string }).text === '1')
+    expect(one, 'Reasons why numbers the list').toBeDefined()
+    ed.setLocal(one!.id, { x: 0.3, y: 0.4 })
+    const moved = (props.sailor_localLayers as LocalLayer[]).find(l => l.id === one!.id)!
+    expect((moved as { owner?: unknown }).owner).toBeUndefined()           // the user's move de-owns it
+    expect((moved as { fromLayout?: string }).fromLayout).toBeTruthy()      // …but it stays marked
+    const { contentForFrame } = await import('~/lib/frame/patterns/kit/plan')
+    const read = contentForFrame({ props, frameW: 895, frameH: 1280 })
+    expect(Object.values(read.roles)).not.toContain(one!.id)
+    expect(read.roles.date).toBeUndefined()
+    await new Promise(r => setTimeout(r, 400)); await nextTick()
+    expect(vary.content.value.some(r => r.id === one!.id)).toBe(false)
+    expect(vary.setTag(one!.id, 'date')).toBe(false)
+  })
+
+  it('new words typed into it make it the user\'s own line', () => {
+    const { props, ed } = realHarness([...reviewFrame(), { ...tl('own-x', '1', 0.05), owner: { by: 'layout', key: 'own-0' } } as LocalLayer])
+    ed.setLocal('own-x', { text: 'Only 3 left' })
+    const l = (props.sailor_localLayers as LocalLayer[]).find(x => x.id === 'own-x') as { owner?: unknown; fromLayout?: unknown }
+    expect(l.owner).toBeUndefined()
+    expect(l.fromLayout).toBeUndefined()
+  })
+})

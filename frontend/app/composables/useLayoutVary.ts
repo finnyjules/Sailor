@@ -1,6 +1,6 @@
 import { ref, computed, shallowRef, watch, toRaw, getCurrentScope, onScopeDispose } from 'vue'
 import type { Ref, ComputedRef } from 'vue'
-import { applyLayoutToFrame, candidatesForFrame, contentForFrame, hiddenLinesForFrame, lineOptionsForFrame, planLayout, roleIdsForFrame } from '~/lib/frame/patterns/kit/plan'
+import { applyLayoutToFrame, candidatesForFrame, contentForFrame, hiddenLinesForFrame, isFromLayout, lineOptionsForFrame, planLayout, roleIdsForFrame } from '~/lib/frame/patterns/kit/plan'
 import type { LayoutEditor, LayoutPlan, LayoutPlanArgs, StoredRoles } from '~/lib/frame/patterns/kit/plan'
 import { DEFAULT_CHOICE } from '~/lib/frame/patterns/kit/vary'
 import type { Candidate, Choice } from '~/lib/frame/patterns/kit/vary'
@@ -583,9 +583,11 @@ export function useLayoutVary(src: LayoutVarySource): {
     const fmt = formatFor(src.props(), src.frameW(), src.frameH())
     if (!fmt) return null
     void settledKey.value; void rev.value
+    // Read in the current layout's view (a Stage 4 layout reads the content view — final review I1).
     const hidden = hiddenLinesForFrame({
       props: toRaw(src.props()), frameW: src.frameW(), frameH: src.frameH(),
       shapeMode: toRaw(shapeMode.value) ?? undefined, imageMode: imageMode.value, style: style.value,
+      ...(layoutId.value ? { layoutId: layoutId.value } : {}),
     }).map(t => t.trim().split(/\s+/).join(' ')).filter(Boolean)
     const kind = keepKind(fmt)
     return {
@@ -689,8 +691,9 @@ export function useLayoutVary(src: LayoutVarySource): {
   // ── the Content section (Stage 4, ruling R1) and its hints (ruling R9) ──
   // Read like the format: raw layers, re-read on the settled content key (which holds the tags)
   // and `rev` only.
+  // A layout's own words the user moved (`fromLayout`, final review I3) are not the user's content.
   const userLayers = (): LocalLayer[] => ((toRaw(src.props())?.sailor_localLayers as LocalLayer[] | undefined) ?? [])
-    .filter(l => !isOwned(l as { owner?: { by: string } }))
+    .filter(l => !isOwned(l as { owner?: { by: string } }) && !isFromLayout(l))
   const storedTags = (): ContentTags => ((toRaw(src.props())?.sailor_posterState as { tags?: ContentTags } | undefined)?.tags ?? {})
   const content = computed<ContentRow[]>(() => {
     if (!isActive()) return []
@@ -724,7 +727,9 @@ export function useLayoutVary(src: LayoutVarySource): {
   /** Write the layer's tag into `sailor_posterState.tags` (an empty set removes the key) as ONE
    *  undo step — the editor's snapshot holds the tags (`LAYOUT_KEYS`), so undo and redo restore
    *  them — then re-plan at once: the content key holds the tags, so the variations and the
-   *  library follow. The Frame's layers are not touched; the next pick applies the new reading. */
+   *  library follow. The Frame's layers are not touched; the next pick applies the new reading.
+   *  Ruling R16: one line holds a role — tagging a role another line holds MOVES it there (that
+   *  line goes back to Automatic), in the same step. "Not used" is not a role. */
   function setTag(id: string, tag: ContentTag | null): boolean {
     const p = src.props(); if (!p) return false
     const st = p.sailor_posterState as (PosterState & { tags?: ContentTags }) | undefined
@@ -732,6 +737,7 @@ export function useLayoutVary(src: LayoutVarySource): {
     if ((was[id] ?? null) === tag) return false
     if (!userLayers().some(l => l.id === id)) return false
     const tags: ContentTags = { ...was }
+    if (tag && tag !== 'unused') for (const [other, t] of Object.entries(tags)) if (other !== id && t === tag) delete tags[other]
     if (tag) tags[id] = tag
     else delete tags[id]
     src.editor().recordHistory()

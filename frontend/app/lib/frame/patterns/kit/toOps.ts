@@ -374,8 +374,9 @@ export function elementsToOps(
       }
       case 'p': {
         const p = e as PhotoEl
-        // Stage 4: the second image (Before / after) goes to the Frame's second image layer.
-        const second = p.role === 'photo2' || p.role === 'image2'
+        // Stage 4: the second image (Before / after, role `photo2` — the only one a layout emits)
+        // goes to the Frame's second image layer.
+        const second = p.role === 'photo2'
         if (second && !targets.image2) return
         ops.push({
           target: second ? targets.image2! : imageTarget, kind: 'image',

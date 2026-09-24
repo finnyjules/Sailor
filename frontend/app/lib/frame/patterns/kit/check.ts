@@ -340,12 +340,13 @@ export function checkPlan(els: El[], S: Sheet, premise?: LayoutDef['premise'], o
 
   // Rule 10 (a style with `textOffImage`): text never sits on a raw image. Text that overlaps an
   // image (more than 0.25 on both axes, the collision threshold) must lie inside the union of the
-  // bands, cards, panels, stickers and tags drawn ABOVE that image (later in element order).
+  // bands, cards, panels, stickers and tags drawn ABOVE that image (later in element order). The
+  // user's text, the layout's own words (`own`) and its stars alike (Stage 4 final review).
   if (opts?.style && STYLES[opts.style].textOffImage) {
     const isImage = (e: Present) => e.k === 'p' || (e.k === 'c' && !!e.photo)
     const images = boxed.map((it, i) => ({ ...it, i })).filter(it => isImage(it.e))
     boxed.forEach(({ e, box }) => {
-      if (e.k !== 't') return
+      if (e.k !== 't' && e.k !== 'own' && e.k !== 'stars') return
       for (const img of images) {
         const ix = Math.min(box.x1, img.box.x1) - Math.max(box.x0, img.box.x0)
         const iy = Math.min(box.y1, img.box.y1) - Math.max(box.y0, img.box.y0)

@@ -1,5 +1,6 @@
 import type { Content, El, LayoutDef, MissingEl, RectEl, RoleKey, Sheet, Style, TextEl } from '../kit/types'
 import { faceOf } from '../kit/types'
+import { BOTH_RE } from '../kit/content'
 import { STAR_GAP } from '../kit/check'
 import { headStack, numberOf, numStyle, offerBox } from './performance'
 
@@ -53,9 +54,12 @@ const capOf = (S: Sheet, role: RoleKey) => S.measure.capAbove(faceOf(role)) + S.
 
 const noRoom: MissingEl = { k: 'missing', why: 'no room for the image' }
 
-/** A comparison row's "both" marker (`kit/content.ts`, ruling R2): its meaning is drawn in the
- *  glyph columns, so it leaves the row's label. */
-const BOTH_RE = /\s+(?:✓✓|\(both\))\s*$/
+/** What an offer foot (`offerBox`) really draws, for a layout's `did`, most prominent first: the
+ *  offer (the number), the button (none without an action line, or with the platform's own — the
+ *  action has then left the content), the fine print. Every Performance ad says only what it drew. */
+function footOf(c: Content): string[] {
+  return [numberOf(c) ? 'the offer' : '', c.action ? 'the button' : '', c.caption ? 'the fine print' : ''].filter(Boolean)
+}
 
 /** The list's lines as the user wrote them (markers kept, ruling R5), one per item — or the items
  *  themselves when the layer's lines do not line up with them. */
@@ -99,7 +103,8 @@ export const perfOfferFirst: LayoutDef = {
     return {
       els: [photo, { k: 'r', x: 0, y: 0, w: W, h: blockB, color: 'accent', prefer: 'accent', role: 'panel', ok: true, bleed: true }, ...blk,
         band('bottom', foot.top, H), ...foot.els],
-      did: 'The number leads on a solid panel at the top — in the accent colour when the text reads on it; the product fills the rest, with the button at the foot.',
+      did: 'The number leads on a solid panel at the top — in the accent colour when the text reads on it; the product fills the rest'
+        + (footOf(rest).includes('the button') ? ', with the button at the foot.' : '.'),
     }
   },
 }
@@ -198,7 +203,11 @@ export const perfReview: LayoutDef = {
     }
     const h = footTop - groupGap() * 0.8 - top
     els.unshift(h > RH * 3 ? { k: 'p', x: X(5), y: top, w: W - X(5), h, stand: !ph, role: 'photo', bleed: true } : noRoom)
-    return { els, did: 'A customer’s words lead: stars and the quote, the product below, logo and button at the foot.' }
+    // Say only what was drawn: stars only with a number of stars, the logo and the button only when there.
+    const atFoot = [c.logo ? 'the logo' : '', ...footOf({ title: c.title, ...(c.action ? { action: c.action } : {}) })].filter(Boolean)
+    const did = `A customer’s words lead: ${rv.stars != null ? 'stars and the quote' : 'the quote'}, the product below`
+      + (atFoot.length ? `, ${atFoot.join(' and ')} at the foot.` : '.')
+    return { els, did }
   },
 }
 
@@ -372,7 +381,9 @@ export const perfListicle: LayoutDef = {
       if (!marked) els.push(own(String(i + 1), { size: ns, wt: 700, ls: DISPLAY.ls, x: X(1), top, color: 'accent', role: `n${i}` }))
       els.push(text(breakLines(wordsOf(t), tw, ts, LIST).join('\n'), { size: ts, ls: -0.01, lh: LH, x: tx, w: tw, top, role: listRole(i) }))
     })
-    return { els: [...els, ...foot.els], did: 'A numbered list of reasons beside the product, the offer at the foot.' }
+    // Numbered only when the layout drew the numbers (the user's own markers lead otherwise).
+    const inFoot = footOf(rest)[0]
+    return { els: [...els, ...foot.els], did: `A ${marked ? '' : 'numbered '}list of reasons beside the product` + (inFoot ? `, ${inFoot} at the foot.` : '.') }
   },
 }
 
@@ -454,7 +465,8 @@ export const perfPostit: LayoutDef = {
     if (num) els.push(place(num, D, 'date', top + lines.length * size * LH, 1))
     // Say what the foot really holds: the button (none without an action, or with the platform's
     // own), else the fine print, else nothing.
-    const foot1 = cc.action ? '; the button sits on a band at the foot.' : cc.caption ? '; the fine print sits on a band at the foot.' : '.'
+    const inFoot = footOf(cc)[0]
+    const foot1 = inFoot ? `; ${inFoot} sits on a band at the foot.` : '.'
     return { els: [...els, ...foot.els], did: 'The product fills the page with a note stuck on it' + foot1 }
   },
 }

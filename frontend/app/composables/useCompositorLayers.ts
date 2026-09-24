@@ -387,6 +387,11 @@ interface LayerCommon {
   /** Set only by the Layout tab. Any user edit clears it; owned layers are removed or
    *  replaced when another layout is applied. */
   owner?: { by: 'layout'; key: string }
+  /** The `owner.key` of a layout's own words (a text piece: Reasons why's "1") the user has since
+   *  edited — no longer the layout's piece (kept by the next layout), but still the layout's words,
+   *  not the user's content: left out of role inference, recognition and the Content section.
+   *  Cleared when the user types new words into it. */
+  fromLayout?: string
   /** Set only by the Layout tab's apply, per field a layout overrode: `was` = the layer's own
    *  value before (`null` = absent), `set` = what the layout wrote. When a later layout leaves
    *  the field unset, `was` comes back only if the layer still holds `set` (otherwise the user

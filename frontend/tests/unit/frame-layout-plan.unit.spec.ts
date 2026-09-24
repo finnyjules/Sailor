@@ -503,7 +503,7 @@ describe('planLayout — a format (Stage 2)', () => {
 
     it('the plan names the format', () => {
       const plan = planLayout({ ...fmtArgs('meta-story', 1080, 1920), layoutId: 'statement', choice: { ...DEFAULT_CHOICE } })!
-      expect(plan.format).toEqual({ id: 'meta-story', label: 'Meta story / reel · 9:16', hidden: [] })
+      expect(plan.format).toEqual({ id: 'meta-story', label: 'Meta story / reel · 9:16', hidden: [], lines: [] })
     })
 
     it.each(['runoff', 'statement', 'footer'])('%s: every text box of every candidate lies inside the band', (id) => {
@@ -591,7 +591,7 @@ describe('planLayout — a format (Stage 2)', () => {
     it('hides the date and caption: named in plan.format, their layers end hidden, the others visible', () => {
       const plan = planLayout({ ...a(), layoutId: 'statement', choice: { ...DEFAULT_CHOICE } })!
       expect(plan.issues).toEqual([])
-      expect(plan.format).toEqual({ id: 'video-thumb', label: 'Video thumbnail · 16:9', hidden: ['date', 'caption'] })
+      expect(plan.format).toEqual({ id: 'video-thumb', label: 'Video thumbnail · 16:9', hidden: ['date', 'caption'], lines: [TEXTS.date, TEXTS.caption] })
       const vis = (id: string) => (plan.layers.find(l => l.id === id) as any).visible
       expect(vis('dt')).toBe(false)
       expect(vis('c')).toBe(false)

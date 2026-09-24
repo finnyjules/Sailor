@@ -35,6 +35,11 @@ export function makeStubMeasure(): Measure {
   return { w100, lines, capAbove: () => 0.35, baseBelow: () => 0.35 }
 }
 
+/** The face a Stage 4 content role is measured in when the Frame has no layer for it. */
+const CONTENT_FALLBACK: Partial<Record<RoleKey, RoleKey>> = {
+  quote: 'details', stat: 'details', by: 'caption', rating: 'caption', list: 'caption', statline: 'caption', them: 'caption',
+}
+
 /** Virtual frame width the canvas measure lays out on: 1 kit unit = 10 px. */
 const VW = 1000
 
@@ -52,10 +57,16 @@ export function makeCanvasMeasure(layers: Partial<Record<RoleKey, TextLayer>>): 
   const c = ctx
   const stub = makeStubMeasure()
 
-  // A role with no layer of its own is measured in the nearest role that has one.
-  const base = (role: RoleKey): TextLayer =>
-    layers[role] ?? layers.caption ?? layers.details ?? layers.date ?? layers.title
+  // A role with no layer of its own is measured in the nearest role that has one: a Stage 4 content
+  // role in the face it was measured in before it had its own (`quote`/`stat`: the details face;
+  // the rest: the caption face), every other role in the caption's, then the details', ….
+  const base = (role: RoleKey): TextLayer => {
+    const own = layers[role]
+    if (own) return own
+    const near = CONTENT_FALLBACK[role]
+    return near ? base(near) : layers.caption ?? layers.details ?? layers.date ?? layers.title
       ?? createTextLayer({ fontWeight: 400 })
+  }
   /** The layer's OWN letter case: a case a layout set (Street's capitals, still on the layer after
    *  it was applied) is not the user's — while the layer still holds what the layout wrote, it is
    *  measured in the case it had before (`layoutPrev.textTransform.was`; null: none). */

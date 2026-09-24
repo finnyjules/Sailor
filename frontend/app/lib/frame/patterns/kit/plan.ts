@@ -31,7 +31,7 @@ import type { Candidate, Choice, LineOption } from './vary'
 import type { BrandLogo, Content, El, FaceKey, Kind, LayoutDef, LayoutOut, Measure, PhotoEl, RoleKey } from './types'
 import { STYLES } from './styles'
 import { BASE_ROLES, elementsOf, NEW_TEXT_ROLES, readContent } from './content'
-import type { ContentTags, ReadContent } from './content'
+import type { ContentRole, ContentTags, ReadContent } from './content'
 import type { StyleId } from './styles'
 
 // ═══════════════════════ the planner ═══════════════════════
@@ -81,15 +81,28 @@ export interface LayoutPlan {
   did: string
   issues: string[]
   posterState: { patternId: string; seed: number; choice: Choice; roles: StoredRoles }
-  /** The format the Frame is sized for (ruling P5) and the roles it hid because the format
-   *  carries fewer levels (the UI quotes their text). Null: no format, the Stage 1 plan. */
-  format: { id: string; label: string; hidden: RoleKey[] } | null
-  /** Lines the Frame has that this layout does not place (a style layout only — e.g. Strip sets
-   *  no details or fine print), in role order, with their text for the Layout tab to quote. Their
-   *  layers are hidden the way a format's levels are (a hidden-only op, tracked `visible`), so a
-   *  later layout that places them shows them again. Always empty for Swiss. */
-  notPlaced: { role: RoleKey; text: string }[]
+  /** The format the Frame is sized for (ruling P5), the roles it hid because the format carries
+   *  fewer levels, and their text in the same order (`lines`, what the Layout tab quotes — read in
+   *  the view this layout reads, final review I1). Null: no format, the Stage 1 plan. */
+  format: { id: string; label: string; hidden: RoleKey[]; lines: string[] } | null
+  /** What the Frame has that this plan leaves hidden, with its text for the Layout tab to quote
+   *  ("Not shown"), each once:
+   *  - the lines this layout does not place, in role order: Swiss, the action line (ruling R9); a
+   *    style layout, any level it has no place for (Strip sets no details or fine print); a Stage 4
+   *    layout, any content line too;
+   *  - Stage 4 (ruling R14): a second image a Stage 4 layout does not place — named by its own name,
+   *    else "Image 2" (`image: true`: the tab names it rather than quoting it);
+   *  - ruling R15, in layer order: a line or image an EARLIER layout hid (tracked `visible`) that
+   *    this one does not place — it stays hidden and is named; and one a previous Stage 4 layout
+   *    placed that this one does not — hidden too, never left stranded over the new layout.
+   *  Hidden the way a format's levels are (a hidden-only op, tracked `visible`), so a later layout
+   *  that places one shows it again. A Frame no Stage 4 layout has touched gets only the first kind. */
+  notPlaced: NotPlaced[]
 }
+
+/** One entry of `LayoutPlan.notPlaced`: the role it held, its text (an image: its name, else
+ *  "Image n"), and `image` for an image. */
+export interface NotPlaced { role: ContentRole; text: string; image?: true }
 
 /** Which layer holds which role, as the last apply saw it (`sailor_posterState.roles`). */
 export type StoredRoles = Partial<Record<RoleKey, string>>
@@ -121,6 +134,9 @@ interface Prepared {
   /** The base view's elements (ruling C2): what `posterState.roles` stores, whatever the view, so
    *  applying a Stage 4 layout never changes how the other layouts read the Frame. */
   baseElements: FrameElements
+  /** The content view's reading of the Frame (ruling C2), whatever view this layout reads: what a
+   *  previous Stage 4 layout placed (ruling R15) and the role a line held, for naming it. */
+  contentRead: ReadContent
   /** The face a layout's own words are set in (Stage 4, ruling R10): the family AND weight of the
    *  layer the caption face is measured from (the caption, else the first content line measured in
    *  that face), else the title's — so what the checker measured is what is drawn. */
@@ -190,14 +206,19 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
     const id = targets[r]
     return id ? layers.find(l => l.id === id && l.kind === 'text') as TextLayer | undefined : undefined
   }
-  // The action is measured in its own layer's face (a button grows with it). Stage 4 roles are
-  // measured in the details face (quote, stat) or the caption face (the rest — `faceOf`): with no
-  // details or caption layer of its own, that face is the content line's layer.
+  // The action is measured in its own layer's face (a button grows with it), and so is each Stage 4
+  // content line (final review I2: `faceOf` names the role, the measure gets its layer) — each is
+  // drawn by its own layer. With no details or caption layer of its own, that face is a content
+  // line's layer (the caption face is also what the layout's own words are measured and drawn in,
+  // ruling R10).
   const captionFace = layerOf('caption') ?? layerOf('by') ?? layerOf('list') ?? layerOf('statline') ?? layerOf('rating') ?? layerOf('them')
+  const contentFaces: Partial<Record<RoleKey, TextLayer>> = {}
+  if (contentView) for (const r of NEW_TEXT_ROLES) { const l = layerOf(r); if (l) contentFaces[r] = l }
   const measure = a.measure ?? makeCanvasMeasure({
     title: layerOf('title'), details: layerOf('details') ?? layerOf('quote') ?? layerOf('stat'), date: layerOf('date'),
     caption: captionFace,
     action: layerOf('action'),
+    ...contentFaces,
   })
   const faceLayer = captionFace ?? layerOf('title')
   const ownFace = faceLayer ? { family: faceLayer.fontFamily, weight: faceLayer.fontWeight } : undefined
@@ -213,12 +234,21 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
     layerColour: role => (TEXT_ROLES as string[]).includes(role) && targets[role as RoleKey] ? colourOf(targets[role as RoleKey]) ?? null : undefined,
     ...(shapeLayer ? { shapeFill: shapeLayer.fill ?? null } : {}),
   }
-  return { def, index, layers, elements, baseElements: views.base.elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props), fmt, hidden, style: a.style ?? 'swiss', composedH, fillCtx, read, ownFace }
+  return { def, index, layers, elements, baseElements: views.base.elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props), fmt, hidden, style: a.style ?? 'swiss', composedH, fillCtx, read, contentRead: views.content.read, ownFace }
 }
 
-type FrameArgs = Pick<LayoutPlanArgs, 'props' | 'frameW' | 'frameH' | 'shapeMode' | 'imageMode' | 'style'>
+/** The Frame and how to read it. `layoutId` (the functions below that quote or restore a format's
+ *  hidden lines): the layout they are about — a Stage 4 layout (`needsContent`) reads the content
+ *  view (ruling C2), so its format hides the lines THAT view gives the levels (final review I1).
+ *  Absent, or any other layout: the base view. */
+type FrameArgs = Pick<LayoutPlanArgs, 'props' | 'frameW' | 'frameH' | 'shapeMode' | 'imageMode' | 'style'> & { layoutId?: string }
 
 interface View { elements: FrameElements; read: ReadContent }
+
+/** A layer the user moved after a layout set it as its own words (Reasons why's "1"): no longer the
+ *  layout's piece (a user edit clears `owner`), but not the user's content either (final review
+ *  I3) — left out of role inference, content recognition and the Content section. */
+export const isFromLayout = (l: { fromLayout?: unknown }): boolean => l.fromLayout != null
 
 /** Which of the Frame's layers holds which role: size inference over the user's own layers, then
  *  the roles the last apply stored. A layout's own pieces (bands, rules, dots) are not the user's
@@ -233,7 +263,7 @@ interface View { elements: FrameElements; read: ReadContent }
  *  With no tags the base view is exactly Stage 3's; with none of the new content either, the two
  *  views agree. */
 function readFrame(a: FrameArgs, layers: LocalLayer[]): { base: View; content: View } {
-  const userLayers = layers.filter(l => !isOwned(l as { owner?: { by: string } }))
+  const userLayers = layers.filter(l => !isOwned(l as { owner?: { by: string } }) && !isFromLayout(l as { fromLayout?: unknown }))
   const st = a.props?.sailor_posterState as { roles?: StoredRoles; tags?: ContentTags } | undefined
   const tags = st?.tags && Object.keys(st.tags).length ? st.tags : undefined
   // Base-role tags and 'unused' settle a layer in both views; new-content tags only in the content view.
@@ -258,6 +288,13 @@ function readFrame(a: FrameArgs, layers: LocalLayer[]): { base: View; content: V
 
 /** The base view's elements (ruling C2) — what every Stage 1–3 reader of the Frame uses. */
 const frameElements = (a: FrameArgs, layers: LocalLayer[]): FrameElements => readFrame(a, layers).base.elements
+
+/** The elements of the view `a.layoutId` reads (a Stage 4 layout: the content view; else, or
+ *  without one, the base view — ruling C2). */
+function viewElements(a: FrameArgs, layers: LocalLayer[]): FrameElements {
+  const views = readFrame(a, layers)
+  return a.layoutId && layoutEntry(a.layoutId)?.def.needsContent != null ? views.content.elements : views.base.elements
+}
 
 /** The Frame's content as the Stage 4 layouts read it (the content view, ruling C2): which layer
  *  holds which role — the Stage 1–3 roles and the content roles — and the review / list /
@@ -289,25 +326,35 @@ function hiddenRoles(fmt: FrameFormat | null, content: Content, style: StyleId =
 }
 
 /** The text of the lines this Frame's format leaves out (Stage 2), in role order — the same roles
- *  `planLayout` hides, worked out from the format and the Frame alone (no layout needs to have
- *  been planned or applied). Empty without a format, or without a title. */
+ *  `planLayout` hides for `a.layoutId` (read in its view), worked out from the format and the Frame
+ *  alone (no layout needs to have been planned or applied). Empty without a format, or without a
+ *  title. */
 export function hiddenLinesForFrame(a: FrameArgs): string[] {
   const fmt = formatFor(a.props, a.frameW, a.frameH)
   if (!fmt || fmt.carries == null) return []
-  const elements = frameElements(a, (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? [])
+  const elements = viewElements(a, (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? [])
   if (!elements.title) return []
   const content = contentOf(elements)
   return hiddenRoles(fmt, content, a.style).map(r => content[r] as string)
 }
 
 /** The ids of the text layers this Frame's format leaves out — the layers of the roles
- *  `hiddenLinesForFrame` quotes. Empty without a format, or without a title. */
+ *  `hiddenLinesForFrame` quotes (in `a.layoutId`'s view). Empty without a format, or without a
+ *  title. */
 export function hiddenLayerIdsForFrame(a: FrameArgs): string[] {
   const fmt = formatFor(a.props, a.frameW, a.frameH)
   if (!fmt || fmt.carries == null) return []
-  const elements = frameElements(a, (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? [])
+  const elements = viewElements(a, (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? [])
   if (!elements.title) return []
   return hiddenRoles(fmt, contentOf(elements), a.style).map(r => elements[r]!.id)
+}
+
+/** The ids of the layers holding a level (title, details, date, action, caption) in `a.layoutId`'s
+ *  view — the only lines a format can hide (Stage 2). A format change restores only these
+ *  (`restoreFormatHiddenLines`): a content line or an image a layout hid is not the format's. */
+export function levelLayerIdsForFrame(a: FrameArgs): string[] {
+  const elements = viewElements(a, (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? [])
+  return ROLES.map(r => elements[r]?.id).filter((id): id is string => !!id)
 }
 
 /** Which layer holds which role, as the planner reads the Frame (the stored roles, then size
@@ -633,6 +680,10 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
   const ops: LayerOp[] = ins.ops.map(op => (op.insert && ownedId.has(op.insert.key)
     ? { ...op, target: ownedId.get(op.insert.key)! }
     : op))
+  // Rulings R14 and R15: what this plan leaves hidden beyond its own roles — a second image a Stage 4
+  // layout does not place, and what an earlier layout hid or a previous Stage 4 layout placed.
+  const carried = carriedOver(p, a, ops, out.els.length)
+  ops.push(...carried.hide)
   const next = applyPlacement(merged, { ops, did: out.did }, p.elements, a.palette, { recolour: a.recolour ?? false })
 
   const saved = (a.props?.sailor_stackOrder as string[] | undefined) ?? []
@@ -641,9 +692,52 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
   return {
     layers: next, order, did: out.did, issues,
     posterState: { patternId: p.def.id, seed: seedFor(p.index, a.choice), choice: { ...a.choice }, roles: rolesOf(p.baseElements) },
-    format: p.fmt ? { id: p.fmt.id, label: p.fmt.label, hidden: [...p.hidden] } : null,
-    notPlaced: notPlaced.map(role => ({ role, text: lineText(p, role) })),
+    format: p.fmt ? { id: p.fmt.id, label: p.fmt.label, hidden: [...p.hidden], lines: p.hidden.map(r => p.elements[r]?.text ?? '') } : null,
+    notPlaced: [...notPlaced.map(role => ({ role, text: lineText(p, role) })), ...carried.named],
   }
+}
+
+/** Rulings R14 and R15, over the layers this plan does not place or hide itself:
+ *  - a layer an earlier layout hid (`visible` false, tracked as the layout's) stays hidden — apply
+ *    leaves an untargeted layer as it is — and is NAMED;
+ *  - a layer a previous Stage 4 layout placed (the Frame's `posterState.patternId` is a
+ *    `needsContent` layout, and the layer holds a role in the content view) that is still showing
+ *    is HIDDEN and named — never left where that layout put it, under this one;
+ *  - R14: a Stage 4 layout hides the second image it does not place, and names it.
+ *  The user's own hiding (untracked `visible`) is theirs: not named. A layer that holds no role in
+ *  either view (nothing to call it) or is tagged Not used is left alone. */
+function carriedOver(p: Prepared, a: LayoutPlanArgs, ops: LayerOp[], z: number): { hide: LayerOp[]; named: NotPlaced[] } {
+  const placed = new Set(ops.filter(o => !o.hidden && !o.insert).map(o => o.target))
+  const hiddenHere = new Set(ops.filter(o => o.hidden).map(o => o.target))
+  const image2 = p.def.needsContent && p.targets.image2 && !placed.has(p.targets.image2) ? p.targets.image2 : undefined
+  const prev = (a.props?.sailor_posterState as { patternId?: string } | undefined)?.patternId
+  const prevWasStage4 = !!prev && layoutEntry(prev)?.def.needsContent != null
+  // The role a layer holds in the content view (what a previous Stage 4 layout read), else in the base view.
+  const contentRole = new Map<string, ContentRole>()
+  for (const [r, id] of Object.entries(p.contentRead.roles) as [ContentRole, string | undefined][]) if (id) contentRole.set(id, r)
+  const roleOf = new Map(contentRole)
+  for (const r of ROLES) { const id = p.baseElements[r]?.id; if (id && !roleOf.has(id)) roleOf.set(id, r) }
+  const images = p.layers.filter(l => l.kind === 'image' && !isOwned(l as { owner?: { by: string } }))
+  const hide: LayerOp[] = []
+  const named: NotPlaced[] = []
+  for (const l of p.layers) {
+    if (l.kind !== 'text' && l.kind !== 'image') continue
+    if (isOwned(l as { owner?: { by: string } }) || isFromLayout(l as { fromLayout?: unknown })) continue
+    if (placed.has(l.id) || hiddenHere.has(l.id)) continue
+    const tracked = l as { visible?: boolean; layoutPrev?: Record<string, { set: unknown }> }
+    const layoutHid = tracked.visible === false && tracked.layoutPrev?.visible?.set === false
+    const showing = tracked.visible !== false
+    const role = l.kind === 'image' ? (l.id === p.contentRead.roles.image2 ? 'image2' : undefined) : roleOf.get(l.id)
+    if (!role) continue
+    const strand = showing && (l.id === image2 || (prevWasStage4 && contentRole.has(l.id)))
+    if (!layoutHid && !strand) continue
+    if (strand) hide.push({ target: l.id, kind: l.kind === 'image' ? 'image' : 'text', hidden: true, z })
+    if (l.kind === 'image') {
+      const name = (l as { name?: string }).name?.trim()
+      named.push({ role, text: name || `Image ${images.indexOf(l) + 1}`, image: true })
+    } else named.push({ role, text: (l as TextLayer).text ?? '' })
+  }
+  return { hide, named }
 }
 
 /** The text roles in the (carried) content that no text element of the layout's output places
