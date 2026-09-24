@@ -762,7 +762,7 @@ export function createEngine(deps: EngineDeps) {
           if (e instanceof UnpricedGraphError) throw refuse('A model in this workflow has no price yet', 500)
           throw e
         }
-        if (unpriced != null) throw refuse('This step has no price yet, so it can\'t run', 500, { nodeId: unpriced, classType: p[unpriced]!.class_type })
+        if (unpriced != null) throw refuse('This step has no price yet, so it can’t run', 500, { nodeId: unpriced, classType: p[unpriced]!.class_type })
       }
     }
     const noGates: TakeGateState = { done: new Set(), open: new Set(), dropped: new Set() }

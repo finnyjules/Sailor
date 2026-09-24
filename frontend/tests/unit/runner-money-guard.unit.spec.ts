@@ -49,7 +49,7 @@ describe('money guard', () => {
   it('hosted: refuses a run with a free provider node before anything is held or sent', async () => {
     const k = makeKit({ hosted: true })
     await expect(start(k, [image('nano-banana-2'), image('flux-schnell')])).rejects.toMatchObject({
-      statusCode: 500, message: 'This step has no price yet, so it can\'t run',
+      statusCode: 500, message: 'This step has no price yet, so it can’t run',
     })
     expect(k.ledger.hold).not.toHaveBeenCalled()
     expect(k.graphRuns.create).not.toHaveBeenCalled()

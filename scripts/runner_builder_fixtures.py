@@ -118,7 +118,10 @@ def capture_first_call(node_cls, **kwargs) -> dict:
     seen: dict = {}
 
     def record(provider: str, endpoint: str, payload: dict):
-        seen.update(provider=provider, endpoint=endpoint, payload=json.loads(json.dumps(payload)))
+        # Keep the raw payload and stop at once: serialising here could raise
+        # a TypeError, which the failover chain would catch and move on to
+        # the SECOND provider. It is serialised after the _FirstCall below.
+        seen.update(provider=provider, endpoint=endpoint, payload=payload)
         raise _FirstCall()
 
     async def fake_fal(app, fn, input_dict, **_kw):
@@ -130,6 +133,9 @@ def capture_first_call(node_cls, **kwargs) -> dict:
     async def fake_download(url, cls=None, *_a, **_kw):
         return "TENSOR"
 
+    async def fake_upload(data, filename, content_type="application/octet-stream"):
+        return f"UPLOAD:{filename}"
+
     from comfy_api.latest._io import HiddenHolder
     patches = [
         # What the executor sets before execute(): a node id for live previews.
@@ -139,6 +145,8 @@ def capture_first_call(node_cls, **kwargs) -> dict:
         mock.patch.object(fal_refs, "run_fal_prediction", fake_fal),
         mock.patch.object(fal_refs, "get_fal_token", lambda: "fixture-token"),
         mock.patch.object(nr, "download_url_to_image_tensor", fake_download),
+        # Uploads to fal storage over aiohttp with the fal token: never reached.
+        mock.patch.object(nr, "_upload_public_file", fake_upload),
         mock.patch.object(nr, "_moodboard_ref_data_urls",
                           lambda folder, files, input_dir=None: [f"BOARD:{f}" for f in files]),
     ]
@@ -153,7 +161,7 @@ def capture_first_call(node_cls, **kwargs) -> dict:
         try:
             asyncio.run(node_cls.execute(**kwargs))
         except _FirstCall:
-            return seen
+            return {**seen, "payload": json.loads(json.dumps(seen["payload"]))}
     return {"passthrough": True}
 
 
@@ -162,8 +170,126 @@ def capture_first_call(node_cls, **kwargs) -> dict:
 FAMILY_KEYS = ["falEdit", "replicateImage", "replicateVideo", "nanoActions", "refEdits", "restyle"]
 
 
+def _node_case(node_cls, links: list, widgets: dict) -> dict:
+    """One captured case: a node's widget values, which picture inputs are
+    linked (each is passed as its own input name, so it arrives as
+    `IMG:<name>`), and the first provider call execute() makes."""
+    kwargs = dict(widgets)
+    for name in links:
+        kwargs[name] = name
+    return {
+        "class_type": node_cls.__name__,
+        "links": list(links),
+        "widgets": widgets,
+        "call": capture_first_call(node_cls, **kwargs),
+    }
+
+
+# Seeds: 0 (random), an ordinary one, and the ones either side of 2^32 — Nano
+# Banana masks with & 0xFFFFFFFF after its `> 0` check; the Flux editors don't.
+_EDIT_SEEDS = [0, 42, 2**32 - 1, 2**32, 2**32 + 5]
+
+
+def _fal_edit_cases() -> list:
+    """Task B2 (fal-edit): EditImageNode ×3 models, DevelopImageNode,
+    RelightNode, BlendSceneNode (Flux Kontext Pro / Flux 2 Pro)."""
+    nr, _fal_refs, _extras = _node_modules()
+    from comfy_extras.nodes_relight import RelightNode
+    from comfy_extras._relight_prompts import PRESETS
+    cases = []
+
+    edit_base = {"model": "Nano Banana 2", "prompt": "make her hair blue", "aspect_ratio": "match_input_image",
+                 "resolution": "1K", "seed": 0, "safety_tolerance": 2, "prompt_upsampling": False,
+                 "output_format": "png"}
+
+    def edit(**over):
+        cases.append(_node_case(nr.EditImageNode, ["input_image"], {**edit_base, **over}))
+
+    # Nano Banana 2
+    for seed in _EDIT_SEEDS:
+        for fmt in ("png", "jpg"):
+            edit(seed=seed, output_format=fmt)
+    for res in ("1K", "2K", "4K"):
+        edit(resolution=res, seed=7)
+    # Kontext dials are ignored by Nano Banana 2.
+    edit(aspect_ratio="16:9", safety_tolerance=5, prompt_upsampling=True)
+
+    # Flux Kontext Pro
+    for ar in nr._FLUX_KONTEXT_ASPECT_RATIOS:
+        edit(model="Flux Kontext Pro", aspect_ratio=ar)
+    for safety in (1, 2, 5, 6):
+        edit(model="Flux Kontext Pro", safety_tolerance=safety)
+    for up in (False, True):
+        edit(model="Flux Kontext Pro", prompt_upsampling=up, seed=11)
+    for seed in _EDIT_SEEDS:
+        edit(model="Flux Kontext Pro", seed=seed, output_format="jpg")
+    edit(model="Flux Kontext Pro", resolution="4K", output_format="png")
+
+    # Flux 2 Pro
+    for seed in _EDIT_SEEDS:
+        for fmt in ("png", "jpg"):
+            edit(model="Flux 2 Pro", seed=seed, output_format=fmt)
+    edit(model="Flux 2 Pro", aspect_ratio="9:16", safety_tolerance=6, prompt_upsampling=True, resolution="4K")
+
+    # Develop
+    for res in ("1K", "2K", "4K"):
+        for seed in (0, 9, 2**32 - 1, 2**32 + 3):
+            cases.append(_node_case(nr.DevelopImageNode, ["input_image"], {"resolution": res, "seed": seed}))
+
+    # Relight
+    relight_base = {"preset": "Custom", "light": '{"azimuth":-30,"elevation":20,"intensity":0.6}',
+                    "keep_background": True, "instructions": ""}
+
+    def relight(links=("image",), **over):
+        cases.append(_node_case(RelightNode, list(links), {**relight_base, **over}))
+
+    for preset in PRESETS:
+        relight(preset=preset)
+    relight(preset="Not a preset")
+    for az in (0, 22.4, 22.5, -22.5, 67.4, 67.5, -67.5, 112.4, 112.5, -112.5, 157.5, 157.6, -157.6,
+               180, -180, 360, -270, 540):
+        relight(light=json.dumps({"azimuth": az, "elevation": 0, "intensity": 0.6}))
+    for el in (14.9, 15, -14.9, -15, 44.9, 45, 74.9, 75, -45, -75, 90, -90, 120, -120):
+        relight(light=json.dumps({"azimuth": 0, "elevation": el, "intensity": 0.6}))
+    for it in (0, 0.1, 0.24, 0.25, 0.49, 0.5, 0.74, 0.75, 1, 1.5, -1):
+        relight(light=json.dumps({"azimuth": 45, "elevation": 30, "intensity": it}))
+    # Tolerant parsing: unreadable → defaults; falsy values → defaults; numeric strings and booleans read as numbers.
+    for light in ("", "{}", "not json", "[1, 2]", "null", '"text"', "7",
+                  '{"azimuth": null, "elevation": null, "intensity": null}',
+                  '{"azimuth": "95", "elevation": " 50 ", "intensity": "0.3"}',
+                  '{"azimuth": true, "elevation": false, "intensity": true}',
+                  '{"azimuth": -100}'):
+        relight(light=light)
+    relight(keep_background=False)
+    relight(links=("image", "reference"))
+    relight(links=("image", "reference"), preset="Golden hour", keep_background=False,
+            instructions="  warmer please  ")
+    relight(instructions="   ")
+    relight(instructions="a touch of haze")
+
+    # BlendScene (Flux Kontext Pro / Flux 2 Pro)
+    blend_base = {"model": "Flux Kontext Pro", "unify_lighting": True, "contact_shadows": True,
+                  "match_camera_look": True, "preserve_identity": True, "keep_feather": 2.0,
+                  "prompt": "", "seed": 0, "output_format": "png"}
+
+    def blend(**over):
+        cases.append(_node_case(nr.BlendSceneNode, ["image"], {**blend_base, **over}))
+
+    for model in ("Flux Kontext Pro", "Flux 2 Pro"):
+        for mask in range(16):
+            blend(model=model, unify_lighting=bool(mask & 1), contact_shadows=bool(mask & 2),
+                  match_camera_look=bool(mask & 4), preserve_identity=bool(mask & 8))
+        for seed in _EDIT_SEEDS:
+            blend(model=model, seed=seed, output_format="jpg")
+        blend(model=model, prompt="  make it one cosy photo  ")
+        blend(model=model, prompt="   ", unify_lighting=False)
+    return cases
+
+
 def family_cases() -> dict:
-    return {key: [] for key in FAMILY_KEYS}
+    out = {key: [] for key in FAMILY_KEYS}
+    out["falEdit"] = _fal_edit_cases()
+    return out
 
 
 def write_json(dest: str, out: dict) -> None:

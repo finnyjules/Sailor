@@ -31,11 +31,27 @@ export interface RunnerNodeRule {
 
 /**
  * The node classes (or extra models of a runner class) the families add,
- * keyed by class_type. Empty until a family's task adds its rows. For
- * GenerateImageNode / GenerateVideoNode a row only ADDS models; the models
- * the runner takes without any family stay as they are.
+ * keyed by class_type. For GenerateImageNode / GenerateVideoNode a row only
+ * ADDS models; the models the runner takes without any family stay as they
+ * are.
  */
-export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {}
+export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
+  // ── fal-edit (Task B2): fal only, at most two linked pictures ──
+  EditImageNode: {
+    models: { 'Nano Banana 2': 'fal-edit', 'Flux Kontext Pro': 'fal-edit', 'Flux 2 Pro': 'fal-edit' },
+    mustLink: ['input_image'],
+  },
+  DevelopImageNode: { family: 'fal-edit', mustLink: ['input_image'] },
+  // With no `image` Python makes a blank no-op; the runner leaves that to Python.
+  RelightNode: { family: 'fal-edit', mustLink: ['image'] },
+  // The Nano Banana mode is Replicate (Task B5). A linked keep_subject needs a
+  // local mask composite after the call, which the runner does not do.
+  BlendSceneNode: {
+    models: { 'Flux Kontext Pro': 'fal-edit', 'Flux 2 Pro': 'fal-edit' },
+    mustLink: ['image'],
+    mustNotLink: ['keep_subject'],
+  },
+}
 
 /**
  * The classes that make a provider call (and so are charged): the two

@@ -1,5 +1,4534 @@
 {
-  "falEdit": [],
+  "falEdit": [
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "make her hair blue",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Nano Banana 2",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "jpeg",
+          "prompt": "make her hair blue",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Nano Banana 2",
+        "output_format": "jpg",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "make her hair blue",
+          "resolution": "1K",
+          "seed": 42
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Nano Banana 2",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 42
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "jpeg",
+          "prompt": "make her hair blue",
+          "resolution": "1K",
+          "seed": 42
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Nano Banana 2",
+        "output_format": "jpg",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 42
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "make her hair blue",
+          "resolution": "1K",
+          "seed": 4294967295
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Nano Banana 2",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 4294967295
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "jpeg",
+          "prompt": "make her hair blue",
+          "resolution": "1K",
+          "seed": 4294967295
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Nano Banana 2",
+        "output_format": "jpg",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 4294967295
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "make her hair blue",
+          "resolution": "1K",
+          "seed": 0
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Nano Banana 2",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 4294967296
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "jpeg",
+          "prompt": "make her hair blue",
+          "resolution": "1K",
+          "seed": 0
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Nano Banana 2",
+        "output_format": "jpg",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 4294967296
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "make her hair blue",
+          "resolution": "1K",
+          "seed": 5
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Nano Banana 2",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 4294967301
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "jpeg",
+          "prompt": "make her hair blue",
+          "resolution": "1K",
+          "seed": 5
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Nano Banana 2",
+        "output_format": "jpg",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 4294967301
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "make her hair blue",
+          "resolution": "1K",
+          "seed": 7
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Nano Banana 2",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 7
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "make her hair blue",
+          "resolution": "2K",
+          "seed": 7
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Nano Banana 2",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "2K",
+        "safety_tolerance": 2,
+        "seed": 7
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "make her hair blue",
+          "resolution": "4K",
+          "seed": 7
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Nano Banana 2",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "4K",
+        "safety_tolerance": 2,
+        "seed": 7
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "make her hair blue",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "16:9",
+        "model": "Nano Banana 2",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": true,
+        "resolution": "1K",
+        "safety_tolerance": 5,
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:input_image",
+          "output_format": "png",
+          "prompt": "make her hair blue"
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "aspect_ratio": "1:1",
+          "image_url": "IMG:input_image",
+          "output_format": "png",
+          "prompt": "make her hair blue"
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "1:1",
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "aspect_ratio": "16:9",
+          "image_url": "IMG:input_image",
+          "output_format": "png",
+          "prompt": "make her hair blue"
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "16:9",
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "aspect_ratio": "9:16",
+          "image_url": "IMG:input_image",
+          "output_format": "png",
+          "prompt": "make her hair blue"
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "9:16",
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "aspect_ratio": "4:3",
+          "image_url": "IMG:input_image",
+          "output_format": "png",
+          "prompt": "make her hair blue"
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "4:3",
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "aspect_ratio": "3:4",
+          "image_url": "IMG:input_image",
+          "output_format": "png",
+          "prompt": "make her hair blue"
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "3:4",
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "aspect_ratio": "3:2",
+          "image_url": "IMG:input_image",
+          "output_format": "png",
+          "prompt": "make her hair blue"
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "3:2",
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "aspect_ratio": "2:3",
+          "image_url": "IMG:input_image",
+          "output_format": "png",
+          "prompt": "make her hair blue"
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "2:3",
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:input_image",
+          "output_format": "png",
+          "prompt": "make her hair blue",
+          "safety_tolerance": "1"
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 1,
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:input_image",
+          "output_format": "png",
+          "prompt": "make her hair blue"
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:input_image",
+          "output_format": "png",
+          "prompt": "make her hair blue",
+          "safety_tolerance": "5"
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 5,
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:input_image",
+          "output_format": "png",
+          "prompt": "make her hair blue",
+          "safety_tolerance": "6"
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 6,
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:input_image",
+          "output_format": "png",
+          "prompt": "make her hair blue",
+          "seed": 11
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 11
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "enhance_prompt": true,
+          "image_url": "IMG:input_image",
+          "output_format": "png",
+          "prompt": "make her hair blue",
+          "seed": 11
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": true,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 11
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:input_image",
+          "output_format": "jpeg",
+          "prompt": "make her hair blue"
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux Kontext Pro",
+        "output_format": "jpg",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:input_image",
+          "output_format": "jpeg",
+          "prompt": "make her hair blue",
+          "seed": 42
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux Kontext Pro",
+        "output_format": "jpg",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 42
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:input_image",
+          "output_format": "jpeg",
+          "prompt": "make her hair blue",
+          "seed": 4294967295
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux Kontext Pro",
+        "output_format": "jpg",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 4294967295
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:input_image",
+          "output_format": "jpeg",
+          "prompt": "make her hair blue",
+          "seed": 4294967296
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux Kontext Pro",
+        "output_format": "jpg",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 4294967296
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:input_image",
+          "output_format": "jpeg",
+          "prompt": "make her hair blue",
+          "seed": 4294967301
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux Kontext Pro",
+        "output_format": "jpg",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 4294967301
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:input_image",
+          "output_format": "png",
+          "prompt": "make her hair blue"
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "4K",
+        "safety_tolerance": 2,
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "output_format": "png",
+          "prompt": "make her hair blue"
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "output_format": "jpeg",
+          "prompt": "make her hair blue"
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux 2 Pro",
+        "output_format": "jpg",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "output_format": "png",
+          "prompt": "make her hair blue",
+          "seed": 42
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 42
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "output_format": "jpeg",
+          "prompt": "make her hair blue",
+          "seed": 42
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux 2 Pro",
+        "output_format": "jpg",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 42
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "output_format": "png",
+          "prompt": "make her hair blue",
+          "seed": 4294967295
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 4294967295
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "output_format": "jpeg",
+          "prompt": "make her hair blue",
+          "seed": 4294967295
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux 2 Pro",
+        "output_format": "jpg",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 4294967295
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "output_format": "png",
+          "prompt": "make her hair blue",
+          "seed": 4294967296
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 4294967296
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "output_format": "jpeg",
+          "prompt": "make her hair blue",
+          "seed": 4294967296
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux 2 Pro",
+        "output_format": "jpg",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 4294967296
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "output_format": "png",
+          "prompt": "make her hair blue",
+          "seed": 4294967301
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 4294967301
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "output_format": "jpeg",
+          "prompt": "make her hair blue",
+          "seed": 4294967301
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "match_input_image",
+        "model": "Flux 2 Pro",
+        "output_format": "jpg",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": false,
+        "resolution": "1K",
+        "safety_tolerance": 2,
+        "seed": 4294967301
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "output_format": "png",
+          "prompt": "make her hair blue"
+        },
+        "provider": "fal"
+      },
+      "class_type": "EditImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "aspect_ratio": "9:16",
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "prompt": "make her hair blue",
+        "prompt_upsampling": true,
+        "resolution": "4K",
+        "safety_tolerance": 6,
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Turn this rough into a polished, finished, highly detailed image \u2014 keep the same composition and subject.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "DevelopImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "resolution": "1K",
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Turn this rough into a polished, finished, highly detailed image \u2014 keep the same composition and subject.",
+          "resolution": "1K",
+          "seed": 9
+        },
+        "provider": "fal"
+      },
+      "class_type": "DevelopImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "resolution": "1K",
+        "seed": 9
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Turn this rough into a polished, finished, highly detailed image \u2014 keep the same composition and subject.",
+          "resolution": "1K",
+          "seed": 4294967295
+        },
+        "provider": "fal"
+      },
+      "class_type": "DevelopImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "resolution": "1K",
+        "seed": 4294967295
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Turn this rough into a polished, finished, highly detailed image \u2014 keep the same composition and subject.",
+          "resolution": "1K",
+          "seed": 3
+        },
+        "provider": "fal"
+      },
+      "class_type": "DevelopImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "resolution": "1K",
+        "seed": 4294967299
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Turn this rough into a polished, finished, highly detailed image \u2014 keep the same composition and subject.",
+          "resolution": "2K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "DevelopImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "resolution": "2K",
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Turn this rough into a polished, finished, highly detailed image \u2014 keep the same composition and subject.",
+          "resolution": "2K",
+          "seed": 9
+        },
+        "provider": "fal"
+      },
+      "class_type": "DevelopImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "resolution": "2K",
+        "seed": 9
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Turn this rough into a polished, finished, highly detailed image \u2014 keep the same composition and subject.",
+          "resolution": "2K",
+          "seed": 4294967295
+        },
+        "provider": "fal"
+      },
+      "class_type": "DevelopImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "resolution": "2K",
+        "seed": 4294967295
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Turn this rough into a polished, finished, highly detailed image \u2014 keep the same composition and subject.",
+          "resolution": "2K",
+          "seed": 3
+        },
+        "provider": "fal"
+      },
+      "class_type": "DevelopImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "resolution": "2K",
+        "seed": 4294967299
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Turn this rough into a polished, finished, highly detailed image \u2014 keep the same composition and subject.",
+          "resolution": "4K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "DevelopImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "resolution": "4K",
+        "seed": 0
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Turn this rough into a polished, finished, highly detailed image \u2014 keep the same composition and subject.",
+          "resolution": "4K",
+          "seed": 9
+        },
+        "provider": "fal"
+      },
+      "class_type": "DevelopImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "resolution": "4K",
+        "seed": 9
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Turn this rough into a polished, finished, highly detailed image \u2014 keep the same composition and subject.",
+          "resolution": "4K",
+          "seed": 4294967295
+        },
+        "provider": "fal"
+      },
+      "class_type": "DevelopImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "resolution": "4K",
+        "seed": 4294967295
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:input_image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Turn this rough into a polished, finished, highly detailed image \u2014 keep the same composition and subject.",
+          "resolution": "4K",
+          "seed": 3
+        },
+        "provider": "fal"
+      },
+      "class_type": "DevelopImageNode",
+      "links": [
+        "input_image"
+      ],
+      "widgets": {
+        "resolution": "4K",
+        "seed": 4294967299
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-left, positioned above. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\":-30,\"elevation\":20,\"intensity\":0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-left, positioned above. Lighting style: warm golden-hour sunlight, long soft shadows, amber tones. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\":-30,\"elevation\":20,\"intensity\":0.6}",
+        "preset": "Golden hour"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-left, positioned above. Lighting style: clean studio softbox lighting, gentle falloff, neutral white balance. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\":-30,\"elevation\":20,\"intensity\":0.6}",
+        "preset": "Studio softbox"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-left, positioned above. Lighting style: harsh midday sun, hard-edged shadows, high contrast, cool daylight. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\":-30,\"elevation\":20,\"intensity\":0.6}",
+        "preset": "Hard noon"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-left, positioned above. Lighting style: cool blue-hour twilight, soft ambient light, moody desaturated tones. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\":-30,\"elevation\":20,\"intensity\":0.6}",
+        "preset": "Blue hour"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-left, positioned above. Lighting style: strong rim/backlight separating the subject from the background, glowing edges. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\":-30,\"elevation\":20,\"intensity\":0.6}",
+        "preset": "Rim/backlight"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-left, positioned above. Lighting style: soft directional window light, natural indoor falloff. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\":-30,\"elevation\":20,\"intensity\":0.6}",
+        "preset": "Window light"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-left, positioned above. Lighting style: colourful neon night lighting, saturated magenta and cyan accents, urban glow. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\":-30,\"elevation\":20,\"intensity\":0.6}",
+        "preset": "Neon night"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-left, positioned above. Lighting style: warm low-key candlelight, flickering amber glow, deep shadows. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\":-30,\"elevation\":20,\"intensity\":0.6}",
+        "preset": "Candlelit"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-left, positioned above. Lighting style: flat overcast daylight, very soft shadows, even cool illumination. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\":-30,\"elevation\":20,\"intensity\":0.6}",
+        "preset": "Overcast soft"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-left, positioned above. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\":-30,\"elevation\":20,\"intensity\":0.6}",
+        "preset": "Not a preset"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 0, \"elevation\": 0, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 22.4, \"elevation\": 0, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-right. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 22.5, \"elevation\": 0, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-left. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": -22.5, \"elevation\": 0, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-right. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 67.4, \"elevation\": 0, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the right. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 67.5, \"elevation\": 0, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the left. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": -67.5, \"elevation\": 0, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the right. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 112.4, \"elevation\": 0, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the back-right. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 112.5, \"elevation\": 0, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the back-left. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": -112.5, \"elevation\": 0, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the back-right. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 157.5, \"elevation\": 0, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from behind. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 157.6, \"elevation\": 0, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from behind. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": -157.6, \"elevation\": 0, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from behind. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 180, \"elevation\": 0, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from behind. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": -180, \"elevation\": 0, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 360, \"elevation\": 0, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the right. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": -270, \"elevation\": 0, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from behind. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 540, \"elevation\": 0, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 0, \"elevation\": 14.9, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front, positioned above. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 0, \"elevation\": 15, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 0, \"elevation\": -14.9, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front, positioned slightly below. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 0, \"elevation\": -15, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front, positioned above. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 0, \"elevation\": 44.9, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front, positioned high above. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 0, \"elevation\": 45, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front, positioned high above. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 0, \"elevation\": 74.9, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front, positioned directly overhead. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 0, \"elevation\": 75, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front, positioned below. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 0, \"elevation\": -45, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front, positioned far below. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 0, \"elevation\": -75, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front, positioned directly overhead. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 0, \"elevation\": 90, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front, positioned far below. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 0, \"elevation\": -90, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front, positioned directly overhead. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 0, \"elevation\": 120, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front, positioned far below. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 0, \"elevation\": -120, \"intensity\": 0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-right, positioned above. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 45, \"elevation\": 30, \"intensity\": 0}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a soft, diffused key light from the front-right, positioned above. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 45, \"elevation\": 30, \"intensity\": 0.1}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a soft, diffused key light from the front-right, positioned above. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 45, \"elevation\": 30, \"intensity\": 0.24}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a moderate key light from the front-right, positioned above. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 45, \"elevation\": 30, \"intensity\": 0.25}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a moderate key light from the front-right, positioned above. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 45, \"elevation\": 30, \"intensity\": 0.49}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-right, positioned above. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 45, \"elevation\": 30, \"intensity\": 0.5}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-right, positioned above. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 45, \"elevation\": 30, \"intensity\": 0.74}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a dramatic, high-contrast key light from the front-right, positioned above. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 45, \"elevation\": 30, \"intensity\": 0.75}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a dramatic, high-contrast key light from the front-right, positioned above. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 45, \"elevation\": 30, \"intensity\": 1}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a dramatic, high-contrast key light from the front-right, positioned above. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 45, \"elevation\": 30, \"intensity\": 1.5}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a soft, diffused key light from the front-right, positioned above. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": 45, \"elevation\": 30, \"intensity\": -1}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "not json",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "[1, 2]",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "null",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "\"text\"",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "7",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": null, \"elevation\": null, \"intensity\": null}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a moderate key light from the right, positioned high above. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": \"95\", \"elevation\": \" 50 \", \"intensity\": \"0.3\"}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a dramatic, high-contrast key light from the front. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": true, \"elevation\": false, \"intensity\": true}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the left. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\": -100}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-left, positioned above. You may transform the surrounding environment and background to suit the new lighting; keep the subject's identity and pose. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": false,
+        "light": "{\"azimuth\":-30,\"elevation\":20,\"intensity\":0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image",
+            "IMG:reference"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-left, positioned above. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. A second image is provided as a lighting reference \u2014 match its lighting direction, quality and colour temperature. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image",
+        "reference"
+      ],
+      "widgets": {
+        "instructions": "",
+        "keep_background": true,
+        "light": "{\"azimuth\":-30,\"elevation\":20,\"intensity\":0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image",
+            "IMG:reference"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-left, positioned above. Lighting style: warm golden-hour sunlight, long soft shadows, amber tones. You may transform the surrounding environment and background to suit the new lighting; keep the subject's identity and pose. A second image is provided as a lighting reference \u2014 match its lighting direction, quality and colour temperature. Additional direction: warmer please. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image",
+        "reference"
+      ],
+      "widgets": {
+        "instructions": "  warmer please  ",
+        "keep_background": false,
+        "light": "{\"azimuth\":-30,\"elevation\":20,\"intensity\":0.6}",
+        "preset": "Golden hour"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-left, positioned above. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "   ",
+        "keep_background": true,
+        "light": "{\"azimuth\":-30,\"elevation\":20,\"intensity\":0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/nano-banana-2/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "num_images": 1,
+          "output_format": "png",
+          "prompt": "Relight the image with a strong, defined key light from the front-left, positioned above. Keep the subject, composition, pose, background and colours exactly as they are \u2014 change ONLY the lighting and the shadows it casts. Additional direction: a touch of haze. Output only the edited image.",
+          "resolution": "1K"
+        },
+        "provider": "fal"
+      },
+      "class_type": "RelightNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "instructions": "a touch of haze",
+        "keep_background": true,
+        "light": "{\"azimuth\":-30,\"elevation\":20,\"intensity\":0.6}",
+        "preset": "Custom"
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": false,
+        "keep_feather": 2.0,
+        "match_camera_look": false,
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "preserve_identity": false,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": false
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": false,
+        "keep_feather": 2.0,
+        "match_camera_look": false,
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "preserve_identity": false,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Add soft, realistic contact shadows where objects meet surfaces."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": false,
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "preserve_identity": false,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": false
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Add soft, realistic contact shadows where objects meet surfaces."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": false,
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "preserve_identity": false,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Match film grain and depth of field."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": false,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "preserve_identity": false,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": false
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Match film grain and depth of field."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": false,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "preserve_identity": false,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Add soft, realistic contact shadows where objects meet surfaces. Match film grain and depth of field."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "preserve_identity": false,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": false
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Add soft, realistic contact shadows where objects meet surfaces. Match film grain and depth of field."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "preserve_identity": false,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": false,
+        "keep_feather": 2.0,
+        "match_camera_look": false,
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": false
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": false,
+        "keep_feather": 2.0,
+        "match_camera_look": false,
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Add soft, realistic contact shadows where objects meet surfaces. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": false,
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": false
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Add soft, realistic contact shadows where objects meet surfaces. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": false,
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Match film grain and depth of field. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": false,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": false
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Match film grain and depth of field. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": false,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Add soft, realistic contact shadows where objects meet surfaces. Match film grain and depth of field. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": false
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Add soft, realistic contact shadows where objects meet surfaces. Match film grain and depth of field. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "jpeg",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Add soft, realistic contact shadows where objects meet surfaces. Match film grain and depth of field. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux Kontext Pro",
+        "output_format": "jpg",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "jpeg",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Add soft, realistic contact shadows where objects meet surfaces. Match film grain and depth of field. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element.",
+          "seed": 42
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux Kontext Pro",
+        "output_format": "jpg",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 42,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "jpeg",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Add soft, realistic contact shadows where objects meet surfaces. Match film grain and depth of field. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element.",
+          "seed": 4294967295
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux Kontext Pro",
+        "output_format": "jpg",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 4294967295,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "jpeg",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Add soft, realistic contact shadows where objects meet surfaces. Match film grain and depth of field. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element.",
+          "seed": 4294967296
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux Kontext Pro",
+        "output_format": "jpg",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 4294967296,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "jpeg",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Add soft, realistic contact shadows where objects meet surfaces. Match film grain and depth of field. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element.",
+          "seed": 4294967301
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux Kontext Pro",
+        "output_format": "jpg",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 4294967301,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "png",
+          "prompt": "make it one cosy photo"
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "preserve_identity": true,
+        "prompt": "  make it one cosy photo  ",
+        "seed": 0,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-pro/kontext",
+        "payload": {
+          "image_url": "IMG:image",
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Add soft, realistic contact shadows where objects meet surfaces. Match film grain and depth of field. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux Kontext Pro",
+        "output_format": "png",
+        "preserve_identity": true,
+        "prompt": "   ",
+        "seed": 0,
+        "unify_lighting": false
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": false,
+        "keep_feather": 2.0,
+        "match_camera_look": false,
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "preserve_identity": false,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": false
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": false,
+        "keep_feather": 2.0,
+        "match_camera_look": false,
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "preserve_identity": false,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Add soft, realistic contact shadows where objects meet surfaces."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": false,
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "preserve_identity": false,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": false
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Add soft, realistic contact shadows where objects meet surfaces."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": false,
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "preserve_identity": false,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Match film grain and depth of field."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": false,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "preserve_identity": false,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": false
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Match film grain and depth of field."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": false,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "preserve_identity": false,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Add soft, realistic contact shadows where objects meet surfaces. Match film grain and depth of field."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "preserve_identity": false,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": false
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Add soft, realistic contact shadows where objects meet surfaces. Match film grain and depth of field."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "preserve_identity": false,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": false,
+        "keep_feather": 2.0,
+        "match_camera_look": false,
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": false
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": false,
+        "keep_feather": 2.0,
+        "match_camera_look": false,
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Add soft, realistic contact shadows where objects meet surfaces. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": false,
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": false
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Add soft, realistic contact shadows where objects meet surfaces. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": false,
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Match film grain and depth of field. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": false,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": false
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Match film grain and depth of field. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": false,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Add soft, realistic contact shadows where objects meet surfaces. Match film grain and depth of field. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": false
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Add soft, realistic contact shadows where objects meet surfaces. Match film grain and depth of field. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "jpeg",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Add soft, realistic contact shadows where objects meet surfaces. Match film grain and depth of field. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux 2 Pro",
+        "output_format": "jpg",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 0,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "jpeg",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Add soft, realistic contact shadows where objects meet surfaces. Match film grain and depth of field. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element.",
+          "seed": 42
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux 2 Pro",
+        "output_format": "jpg",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 42,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "jpeg",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Add soft, realistic contact shadows where objects meet surfaces. Match film grain and depth of field. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element.",
+          "seed": 4294967295
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux 2 Pro",
+        "output_format": "jpg",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 4294967295,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "jpeg",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Add soft, realistic contact shadows where objects meet surfaces. Match film grain and depth of field. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element.",
+          "seed": 4294967296
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux 2 Pro",
+        "output_format": "jpg",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 4294967296,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "jpeg",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Unify the lighting direction, color temperature and ambient tone across the whole scene. Add soft, realistic contact shadows where objects meet surfaces. Match film grain and depth of field. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element.",
+          "seed": 4294967301
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux 2 Pro",
+        "output_format": "jpg",
+        "preserve_identity": true,
+        "prompt": "",
+        "seed": 4294967301,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "png",
+          "prompt": "make it one cosy photo"
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "preserve_identity": true,
+        "prompt": "  make it one cosy photo  ",
+        "seed": 0,
+        "unify_lighting": true
+      }
+    },
+    {
+      "call": {
+        "endpoint": "fal-ai/flux-2-pro/edit",
+        "payload": {
+          "image_urls": [
+            "IMG:image"
+          ],
+          "output_format": "png",
+          "prompt": "Blend all elements into a single cohesive, photorealistic image. Add soft, realistic contact shadows where objects meet surfaces. Match film grain and depth of field. Keep each element's shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element."
+        },
+        "provider": "fal"
+      },
+      "class_type": "BlendSceneNode",
+      "links": [
+        "image"
+      ],
+      "widgets": {
+        "contact_shadows": true,
+        "keep_feather": 2.0,
+        "match_camera_look": true,
+        "model": "Flux 2 Pro",
+        "output_format": "png",
+        "preserve_identity": true,
+        "prompt": "   ",
+        "seed": 0,
+        "unify_lighting": false
+      }
+    }
+  ],
   "nanoActions": [],
   "refEdits": [],
   "replicateImage": [],

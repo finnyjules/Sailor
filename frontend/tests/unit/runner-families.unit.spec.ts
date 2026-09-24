@@ -1,8 +1,8 @@
 /**
  * Runner families (Phase B, Task B1): the switches, the rule table and the
  * wider provider set. With every family off the runner takes exactly what it
- * took before; with the rule table still empty, switching every family on
- * changes nothing either.
+ * took before; switching every family on changes nothing for the nodes no
+ * family row covers.
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -86,16 +86,19 @@ const CASES: Array<[string, ApiPrompt, boolean]> = [
   ['no options', one(img('flux-schnell', undefined)), true],
   ['a legacy video label', one({ class_type: 'GenerateVideoNode', inputs: { model: 'Veo 3', prompt: 'p' } }), true],
   ['a video model the runner does not run yet', one({ class_type: 'GenerateVideoNode', inputs: { model: 'kling-v3', prompt: 'p' } }), false],
-  ['an edit node (no row yet)', { '1': { class_type: 'Image', inputs: { image: 'a.png' } }, '2': { class_type: 'EditImageNode', inputs: { model: 'Nano Banana 2', input_image: ['1', 0], prompt: 'p' } } }, false],
+  ['a node no family takes', { '1': { class_type: 'Image', inputs: { image: 'a.png' } }, '2': { class_type: 'RestyleWithLoRANode', inputs: { image: ['1', 0], prompt: 'p' } } }, false],
   ['a Replicate action (no row yet)', { '1': { class_type: 'Image', inputs: { image: 'a.png' } }, '2': { class_type: 'RemoveObjectNode', inputs: { image: ['1', 0], target: 'the cup' } } }, false],
 ]
 
 describe('eligibility with families', () => {
-  it('the rule table is still empty in this task', () => {
-    expect(Object.keys(RUNNER_NODE_RULES)).toEqual([])
+  it('every rule row names known families', () => {
+    for (const rule of Object.values(RUNNER_NODE_RULES)) {
+      const named = [rule.family, ...Object.values(rule.models ?? {}).map(m => typeof m === 'string' ? m : m.family)]
+      for (const f of named.filter(Boolean)) expect(RUNNER_FAMILIES).toContain(f)
+    }
   })
-  it('the provider set is the two generators', () => {
-    expect([...PROVIDER_TYPES].sort()).toEqual(['GenerateImageNode', 'GenerateVideoNode'])
+  it('the provider set is the two generators plus every rule row', () => {
+    expect([...PROVIDER_TYPES].sort()).toEqual(['GenerateImageNode', 'GenerateVideoNode', ...Object.keys(RUNNER_NODE_RULES)].sort())
   })
   it.each(CASES)('%s: the same answer with no families, the default and every family', (_label, prompt, want) => {
     expect(isRunnerEligible(prompt)).toBe(want)
