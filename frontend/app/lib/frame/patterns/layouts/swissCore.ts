@@ -25,13 +25,19 @@ export const runoff: LayoutDef = {
     const base = arr === 2 ? L(12) : L(10)                 // A: right edge · B: left edge · C: lower baseline
     const ls = kind === 'word' ? [c.title] : lines
     const hh = (ls.length - 1) * DISPLAY.lh + CAP
-    let size = fitSize(ls, (XR(12) + M) * 1.1 - M)
+    // The page the type sees: the design columns plus a margin each side. On a wide frame with the
+    // planner's side image on the LEFT the design columns start after the image, so the title is
+    // anchored at the first design column, never at the page margin (under the image) — fix
+    // 2026-09-24, Run-off on a 728×90 banner. Without a side image, or with it on the right,
+    // X(1) is exactly M and `pageL` exactly 0: the Stage 1 geometry, unchanged.
+    const pageL = X(1) - M
+    let size = fitSize(ls, (XR(12) + M - pageL) * 1.1 - M)
     size = Math.min(size, (base - (ph ? L(5) : L(1))) / hh)
     const capTop = base - hh * size
     const wpx = Math.max(...ls.map(l => w100(l, DISPLAY))) * size / 100
     const els: El[] = [disp(ls.join('\n'), arr === 1
       ? { size, x: XR(12) - wpx + 0.03 * size, w: wpx, align: 'right', base, bleed: true }
-      : { size, x: M - 0.04 * size, base, bleed: true })]
+      : { size, x: X(1) - 0.04 * size, base, bleed: true })]
     // The prototype always has details; a real Frame may not — skip the block rather than set `undefined`.
     if (c.details) els.push(sec(c.details, { x: X(1), w: SPAN(1, 9), top: base + GAP }))
     els.push(...infoRow(c, FOOT2, 'foot').els)

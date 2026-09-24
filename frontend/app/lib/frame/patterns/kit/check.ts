@@ -198,6 +198,25 @@ export function freeRects(area: Box, taken: Box[], gap: number, minSide: number)
   return out.sort((a, b) => areaOf(b) - areaOf(a) || a.y0 - b.y0 || a.x0 - b.x0 || (b.x1 - b.x0) - (a.x1 - a.x0))
 }
 
+/** Run-off's title on a wide frame runs off under the planner's side image, drawn over it (the
+ *  image's edge is the page's edge for the type). That overlap is declared for the title's RUN-OFF
+ *  end only: its anchored edge — the left edge of a left-aligned title, the right edge of a
+ *  right-aligned one — must lie clear of the image (the collision threshold, 0.25 units), or the
+ *  title's start is hidden under it (fix 2026-09-24: "Weathe" under the image on a 728×90 banner
+ *  with the image on the left). Measured on the real ink, like rules 3 and 4. Empty: it holds, or
+ *  the two do not overlap at all. */
+export function checkSideRunOff(e: El, side: El, S: Sheet): string[] {
+  if (e.k !== 't') return []
+  const b = textBox(e, S, true)
+  const sb = boxOf(side, S)
+  if (!sb) return []
+  const ix = Math.min(b.x1, sb.x1) - Math.max(b.x0, sb.x0)
+  const iy = Math.min(b.y1, sb.y1) - Math.max(b.y0, sb.y0)
+  if (!(ix > 0.25 && iy > 0.25)) return []
+  const anchor = e.align === 'right' ? b.x1 : e.align === 'center' ? (b.x0 + b.x1) / 2 : b.x0
+  return anchor > sb.x0 + 0.25 && anchor < sb.x1 - 0.25 ? [`${roleLabel(e)}: starts under the image`] : []
+}
+
 /** True when `box` lies inside the union of `covers` (rectangle subtraction; 0.05-unit slack). */
 function insideUnion(box: Box, covers: Box[]): boolean {
   const eps = 0.05

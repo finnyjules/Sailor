@@ -19,7 +19,7 @@ import type { FrameFormat, KeepClear } from '~/lib/frame/formats'
 import { makeSheet, splitDateRange } from './sheet'
 import type { Sheet, SheetOpts } from './sheet'
 import { makeCanvasMeasure } from './measure'
-import { boxOf, checkPlan, freeRects, inkBoxOf } from './check'
+import { boxOf, checkPlan, checkSideRunOff, freeRects, inkBoxOf } from './check'
 import type { Box } from './check'
 import { elementsToOps } from './toOps'
 import { hex6, isSolid, pieceFills } from './contrast'
@@ -618,6 +618,9 @@ function checkRun({ out, S, side, keep, fullH, style, designW }: Run, premise: L
           // "Under" means a real overlap — the checker's collision threshold (0.25 units both axes).
           const under = b != null && Math.min(b.x1, sb.x1) - Math.max(b.x0, sb.x0) > 0.25 && Math.min(b.y1, sb.y1) - Math.max(b.y0, sb.y0) > 0.25
           if (!runsOff && !under) withoutBleed.push(`promise broken: ${role} should run off the page`)
+          // The side image is drawn over the title (Run-off, `ok`): only the title's run-off end may
+          // go under it, never its start (fix 2026-09-24).
+          if (e && under && side.ok) withoutBleed.push(...checkSideRunOff(e, side, S))
         }
         return withoutBleed
       })()

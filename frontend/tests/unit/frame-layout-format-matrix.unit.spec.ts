@@ -178,7 +178,11 @@ describe('the format findings, pinned', () => {
       'pinterest-2x3': [19, 33, 26, 40, 23, 37], // before: 3 / 8 / 3 / 8 / 3 / 8
       'pinterest-9x16': [10, 18, 14, 22, 13, 16], // before: 3 / 7 / 3 / 7 / 3 / 5
       'link-preview': [19, 32, 26, 39, 23, 37], // before: 19 / 31 / 26 / 36 / 23 / 34
-      'pmax-landscape': [14, 15, 21, 24, 18, 17], // before: 14 / 11 / 19 / 11 / 16 / 9
+      // pmax-landscape phrase + image 24 → 25 (fix 2026-09-24, Run-off with the side image on the
+      // left): Run-off's title now fits the design columns beside the image instead of the whole
+      // page, so its "Left edge" variation no longer reaches under the app's interface — Run-off is
+      // offered there (1 variation; before: "date overlaps caption", "title: under the app's interface").
+      'pmax-landscape': [14, 15, 21, 25, 18, 17], // before: 14 / 11 / 19 / 11 / 16 / 9
       'pmax-square': [16, 28, 24, 34, 21, 32], // before: 16 / 27 / 22 / 31 / 19 / 29
       'ad-300x250': [18, 33, 26, 40, 23, 37], // before: 18 / 32 / 24 / 37 / 21 / 34
       'ad-300x600': [19, 33, 26, 40, 23, 37], // before: 19 / 32 / 24 / 37 / 21 / 34
