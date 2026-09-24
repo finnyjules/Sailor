@@ -3,7 +3,7 @@
  *   provider — send a request to a provider (fal or Replicate), save what comes back
  *   pass     — hand files on (result cards, an open Gate)
  *   pause    — a closed Gate: stop this branch and show what reached it
- * Mirrors the Python nodes (GenerateImageNode on fal or Replicate, GenerateVideoNode, Gate,
+ * Mirrors the Python nodes (GenerateImageNode and GenerateVideoNode on fal or Replicate, Gate,
  * Image, Video, the fal-edit family: EditImageNode, DevelopImageNode,
  * RelightNode, BlendSceneNode, and the nano-actions family on Replicate:
  * RemoveObjectNode, TextEditNode, RecolorObjectNode, SwapBackgroundNode,
@@ -13,7 +13,7 @@
 import { GATE_CLASS, isLink, type ApiPrompt } from '#shared/runner/graph'
 import { resolveVideoModelId } from '#shared/runner/eligibility'
 import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS, composeImagePrompt, imageAppFor } from './generators/image'
-import { RUNNER_VIDEO_MODELS, falVideoFn } from './generators/video'
+import { RUNNER_REPLICATE_VIDEO_MODELS, RUNNER_VIDEO_MODELS, falVideoFn } from './generators/video'
 import { asInt, asText, parseJsonObject, pyStrip, pyTruthy } from './generators/opts'
 import {
   DEVELOP_PROMPT, FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP,
@@ -137,6 +137,27 @@ export async function planNode(ctx: PlanContext): Promise<NodePlan> {
 
     case 'GenerateVideoNode': {
       const id = resolveVideoModelId(inputs.model)
+      // A model that isn't one of the fal ids goes to Replicate, its Python
+      // provider (family replicate-video): _run_prediction on the slug, the
+      // first output URL is the clip. The first frame goes in the model's own
+      // field; a text-to-video-only model ignores a linked one, as Python
+      // does, so it isn't handed off at all.
+      const onReplicate = RUNNER_REPLICATE_VIDEO_MODELS[id]
+      if (!RUNNER_VIDEO_MODELS[id] && onReplicate) {
+        const first = onReplicate.modes.includes('i2v') ? linkedFirstFile('image') : null
+        const payload = onReplicate.build({
+          prompt: asText(inputs.prompt),
+          aspectRatio: asText(inputs.aspect_ratio) || '16:9',
+          duration: asInt(inputs.duration, onReplicate.defaultDuration),
+          seed: asInt(inputs.seed, 0),
+          image: first ? await ctx.toUrl(first) : null,
+          adv: parseJsonObject(inputs.model_options),
+        })
+        return {
+          kind: 'provider', provider: 'replicate', endpoint: onReplicate.slug, payload, media: 'video', prefix: 'generate_video',
+          uiFor: () => null,
+        }
+      }
       const desc = RUNNER_VIDEO_MODELS[id]
       if (!desc) throw new Error(`Unknown video model: ${String(inputs.model)}`)
       const first = linkedFirstFile('image')

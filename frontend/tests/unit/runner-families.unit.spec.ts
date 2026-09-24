@@ -85,7 +85,7 @@ const CASES: Array<[string, ApiPrompt, boolean]> = [
   ['empty options', one(img('flux-schnell', '')), true],
   ['no options', one(img('flux-schnell', undefined)), true],
   ['a legacy video label', one({ class_type: 'GenerateVideoNode', inputs: { model: 'Veo 3', prompt: 'p' } }), true],
-  ['a video model the runner does not run yet', one({ class_type: 'GenerateVideoNode', inputs: { model: 'kling-v3', prompt: 'p' } }), false],
+  ['a video model no family takes (fabric-1.0)', one({ class_type: 'GenerateVideoNode', inputs: { model: 'fabric-1.0', prompt: 'p' } }), false],
   ['a node no family takes', { '1': { class_type: 'Image', inputs: { image: 'a.png' } }, '2': { class_type: 'RestyleWithLoRANode', inputs: { image: ['1', 0], prompt: 'p' } } }, false],
   ['a Nano Banana sibling no family takes (LensReframe)', { '1': { class_type: 'Image', inputs: { image: 'a.png' } }, '2': { class_type: 'LensReframe', inputs: { image: ['1', 0] } } }, false],
 ]

@@ -53,6 +53,17 @@ export const RUNNER_REPLICATE_IMAGE_MODEL_IDS = [
 ] as const
 
 /**
+ * The video models whose Python provider is Replicate (family
+ * `replicate-video`, Task B6), every one priced. Left out: fabric-1.0, which
+ * needs a sound clip (the runner refuses a linked `audio`).
+ */
+export const RUNNER_REPLICATE_VIDEO_MODEL_IDS = [
+  'sora-2', 'sora-2-pro', 'runway-gen-4.5', 'kling-v3', 'kling-v2.5-turbo-pro',
+  'seedance-2.0-fast', 'hailuo-2.3', 'wan-2.7-t2v', 'wan-2.5-i2v-fast',
+  'luma-ray-2-720p', 'ltx-video', 'pixverse-v6',
+] as const
+
+/**
  * The node classes (or extra models of a runner class) the families add,
  * keyed by class_type. For GenerateImageNode / GenerateVideoNode a row only
  * ADDS models; the models the runner takes without any family stay as they
@@ -98,6 +109,16 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   GenerateImageNode: {
     models: Object.fromEntries(RUNNER_REPLICATE_IMAGE_MODEL_IDS.map(id => [id, 'replicate-image' as const])),
     mustNotLink: ['prompt', 'model_options', 'style_block', 'style_refs', 'prompt_in', 'style_in'],
+  },
+  // ── replicate-video (Task B6): the Replicate-provider video models ──
+  // Only ADDS these models; the fal ones stay as they are. A legacy label is
+  // looked up by its current id ('Kling 2.1' → kling-v2.5-turbo-pro).
+  // wan-2.5-i2v-fast is image-to-video only: Python raises without a first frame.
+  GenerateVideoNode: {
+    models: Object.fromEntries(RUNNER_REPLICATE_VIDEO_MODEL_IDS.map(id => [id, id === 'wan-2.5-i2v-fast'
+      ? { family: 'replicate-video' as const, mustLink: ['image'] }
+      : 'replicate-video' as const])),
+    mustNotLink: ['prompt', 'model_options'],
   },
 }
 

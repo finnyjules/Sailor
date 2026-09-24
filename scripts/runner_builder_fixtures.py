@@ -558,10 +558,89 @@ def _nano_actions_cases() -> list:
     return cases
 
 
+# ── replicateVideo (Task B6) ─────────────────────────────────────────────
+
+# The Replicate-provider video models the runner takes: every one but
+# fabric-1.0, which needs sound (shared/runner/eligibility.ts
+# RUNNER_REPLICATE_VIDEO_MODEL_IDS).
+REPLICATE_VIDEO_IDS = [
+    "sora-2", "sora-2-pro", "runway-gen-4.5", "kling-v3", "kling-v2.5-turbo-pro",
+    "seedance-2.0-fast", "hailuo-2.3", "wan-2.7-t2v", "wan-2.5-i2v-fast",
+    "luma-ray-2-720p", "ltx-video", "pixverse-v6",
+]
+
+# Each Replicate video builder's `model_options` keys and how it reads them.
+_REPLICATE_VIDEO_ADV_KEYS = {
+    "sora-2": {},
+    "sora-2-pro": {},
+    "runway-gen-4.5": {"motion": "int"},
+    "kling-v3": {"generate_audio": "bool", "cfg_scale": "float", "negative_prompt": "str"},
+    "kling-v2.5-turbo-pro": {"negative_prompt": "str"},
+    "seedance-2.0-fast": {"resolution": "str", "camera_fixed": "bool"},
+    "hailuo-2.3": {"resolution": "str", "prompt_optimizer": "bool"},
+    "wan-2.7-t2v": {"resolution": "str", "num_frames": "int", "negative_prompt": "str"},
+    "wan-2.5-i2v-fast": {"resolution": "str", "negative_prompt": "str"},
+    "luma-ray-2-720p": {"loop": "bool"},
+    "ltx-video": {"guidance_scale": "float", "num_inference_steps": "int", "negative_prompt": "str"},
+    "pixverse-v6": {"resolution": "str", "generate_audio": "bool", "style": "str", "negative_prompt": "str"},
+}
+_VIDEO_STR_EXTRA = {"negative_prompt": ["a blur", "  "], "resolution": ["1080p"], "style": ["none", "anime"]}
+# Durations and ratios off every model's list, as well as on it.
+_VIDEO_DURATIONS_EXTRA = [0, 1, 2, 7, 9, 12, 100, -3]
+_VIDEO_RATIOS_EXTRA = ["4:1", "2:3", ""]
+
+
+def _replicate_video_cases() -> list:
+    """Task B6 (replicate-video): VIDEO_MODELS_BY_ID[id].build_input for every
+    Replicate-provider runner model — the three common video cases, every
+    model_options key the builder reads (in range, out of range, wrong type),
+    a first frame present and absent, and durations and ratios on and off the
+    model's list. A builder that raises (Wan 2.5 I2V Fast with no first frame)
+    records the message as `error`."""
+    from comfy_api_nodes.video_models import ALL_VIDEO_ASPECT_RATIOS, ALL_VIDEO_DURATIONS
+    cases = []
+
+    def build(mid, prompt="a wave", ar="16:9", dur=5, seed=0, image=None, adv=None):
+        spec = VIDEO_MODELS_BY_ID[mid]
+        args = {"prompt": prompt, "ar": ar, "dur": dur, "seed": seed, "image": image, "adv": adv or {}}
+        case = {"model": mid, "provider": spec.provider, "slug": spec.replicate_slug,
+                "modes": list(spec.modes), "default_duration": spec.default_duration, "args": args}
+        try:
+            payload = spec.build_input(prompt, ar, int(dur), int(seed or 0), image, None, dict(args["adv"]))
+            case["payload"] = json.loads(json.dumps(payload))
+        except RuntimeError as e:
+            case["error"] = str(e)
+        cases.append(case)
+
+    for mid in REPLICATE_VIDEO_IDS:
+        needs_image = "t2v" not in VIDEO_MODELS_BY_ID[mid].modes
+        frame = "IMAGE_URL" if needs_image else None
+        for c in COMMON_VIDEO_CASES:
+            build(mid, prompt=c["prompt"], ar=c["ar"], dur=c["dur"], seed=c["seed"], image=c["image"], adv=c["adv"])
+        for key, kind in _REPLICATE_VIDEO_ADV_KEYS[mid].items():
+            for v in _VALUES_BY_KIND[kind] + (_VIDEO_STR_EXTRA.get(key, []) if kind == "str" else []):
+                build(mid, seed=7, image=frame, adv={key: v})
+        # A first frame present and absent, with and without options.
+        for image in (None, "IMAGE_URL"):
+            build(mid, prompt="p", ar="9:16", dur=5, seed=3, image=image)
+        # Every duration the node offers, and some none does.
+        for dur in ALL_VIDEO_DURATIONS + _VIDEO_DURATIONS_EXTRA:
+            build(mid, prompt="p", dur=dur, seed=1, image=frame)
+        # Every ratio the node offers, and some none does.
+        for ar in ALL_VIDEO_ASPECT_RATIOS + _VIDEO_RATIOS_EXTRA:
+            build(mid, prompt="p", ar=ar, seed=1, image=frame)
+            build(mid, prompt="p", ar=ar, seed=1, image="IMAGE_URL")
+        for seed in (2**32 - 1, -1):
+            build(mid, prompt="p", seed=seed, image=frame)
+        build(mid, prompt="", seed=0, image=frame)
+    return cases
+
+
 def family_cases() -> dict:
     out = {key: [] for key in FAMILY_KEYS}
     out["falEdit"] = _fal_edit_cases()
     out["replicateImage"] = _replicate_image_cases()
+    out["replicateVideo"] = _replicate_video_cases()
     out["nanoActions"] = _nano_actions_cases()
     return out
 

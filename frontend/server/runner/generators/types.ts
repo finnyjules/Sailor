@@ -32,7 +32,7 @@ export interface VideoBuildArgs {
   aspectRatio: string
   duration: number
   seed: number
-  /** fal URL of the first frame, or null. */
+  /** Link of the first frame (fal storage), or null. */
   image: string | null
   adv: Record<string, unknown>
 }
@@ -45,5 +45,18 @@ export interface VideoModelDesc {
   defaultDuration: number
   /** fal function per mode, as in video_models.py fal_fn_by_mode. '' submits to the app itself. */
   fnByMode: { t2v: string, firstLast: string, reference?: string }
+  build(a: VideoBuildArgs): Record<string, unknown>
+}
+
+/** A Generate-video model whose Python provider is Replicate (video_models.py, provider="replicate"). */
+export interface ReplicateVideoModelDesc {
+  id: string
+  label: string
+  /** Replicate model slug (video_models.py replicate_slug). */
+  slug: string
+  defaultDuration: number
+  /** 't2v' and/or 'i2v'. A model without 'i2v' ignores a linked first frame, as Python does. */
+  modes: ReadonlyArray<'t2v' | 'i2v'>
+  /** Port of the model's build_input. `image` goes in the model's own field. */
   build(a: VideoBuildArgs): Record<string, unknown>
 }
