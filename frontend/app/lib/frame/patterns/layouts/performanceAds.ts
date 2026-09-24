@@ -1,7 +1,7 @@
-import type { Content, El, LayoutDef, MissingEl, RoleKey, Sheet, Style } from '../kit/types'
+import type { Content, El, LayoutDef, MissingEl, RectEl, RoleKey, Sheet, Style, TextEl } from '../kit/types'
 import { faceOf } from '../kit/types'
 import { STAR_GAP } from '../kit/check'
-import { numberOf, numStyle, offerBox } from './performance'
+import { headStack, numberOf, numStyle, offerBox } from './performance'
 
 // ═══════════════════════ Performance ad layouts (Stage 4) ═══════════════════════
 // Ported from the prototype (docs/superpowers/specs/assets/2026-09-23-frame-layout-system/
@@ -20,6 +20,25 @@ import { numberOf, numStyle, offerBox } from './performance'
 //   button (`cta: 'native'`) drops them like every Performance layout's.
 // - Layouts never set the family, weight or colour of the user's text (`color` is what recolour
 //   paints); a missing piece says "image", not "product".
+//
+// Task 5 adds `perfBeforeAfter`, `perfCallouts`, `perfListicle`, `perfNotes`, `perfPostit` (the
+// prototype's ~1368–1451), with rulings R4–R6:
+// - Before / after: the first image is "before", the second (`image2`) "after"; neither gets a
+//   filter (the prototype greyed the "before" — that would change the user's image). "Before" and
+//   "After" are the layout's own words, each on an owned card of page colour (owned text over an
+//   image always sits on a covering piece).
+// - Feature callouts, Reasons why, Notes app: the list is ONE user layer placed as runs (R5), each
+//   item the user's own line. Reasons why's numbers and the Notes app's bullets are owned text, drawn
+//   only when the user's lines carry no marker of their own — else their markers stand in for them.
+//   The leader lines and dots are owned. Every item is placed (the prototype cut the list to three
+//   or four; a line of the user's layer is never silently dropped).
+// - Notes app: the paper (#fbf8f1), the amber chrome (#d49a1a) and the bullets (#2a2722) are fixed
+//   colours by design (R6); the user's text on the paper is checked against it. The prototype's
+//   title colour and weight are dropped (the user's own).
+// - Post-it: the note (#ffe45c) is a fixed fill (R6); the user's text on it keeps its own face —
+//   no handwriting face (Caveat), no red number (the number is the user's date line). No shadow
+//   (the kit's pieces have none). It needs no content (ruling C2: `needsContent: []`), so it reads
+//   the content view and hides the lines it does not place.
 
 const ALL = ['word', 'phrase', 'sentence'] as const
 
@@ -235,5 +254,208 @@ export const perfVersus: LayoutDef = {
   },
 }
 
+// ─── Task 5 ───
+
+/** The Notes app's own colours (ruling R6): paper, the amber chrome, the body text (bullets). */
+const NOTES_PAPER = '#fbf8f1'
+const NOTES_CHROME = '#d49a1a'
+const NOTES_INK = '#2a2722'
+/** The Post-it's note (ruling R6). */
+const POSTIT = '#ffe45c'
+
+const wordsOf = (s: string) => s.split(/\s+/).filter(Boolean)
+/** A list item's role: the one list layer's runs (`list`, `list1`, …). */
+const listRole = (i: number) => (i ? `list${i}` : 'list')
+/** Ruling R5: the user's lines carry markers of their own (a line differs from its stripped item). */
+const hasMarkers = (c: Content, items: string[]) => listLines(c, items).some((l, i) => l !== items[i])
+/** The list's style: measured in the list's face (the caption's). */
+const listStyle = (ls: number, lh: number): Style => ({ role: faceOf('list'), ls, lh })
+
+/** Before / after — two halves, the first image "before" and the second "after", over a band with
+ *  the headline and the offer. */
+export const perfBeforeAfter: LayoutDef = {
+  id: 'perfBeforeAfter', name: 'Before / after', fits: [...ALL], style: 'performance', oneLineFirst: true,
+  needs: { image: true }, needsContent: ['image2'],
+  fn(S, { c, ph, lines }) {
+    const { X, SPAN, RH, W, L, INFO, SECOND, DISPLAY, sizeFor, blockH, disp, own, w100, gapBelow, inset } = S
+    const pad = inset()
+    const foot = offerBox(S, c, { x: X(1), w: SPAN(1, 12), bottom: L(16) })
+    const size = sizeFor(lines, SPAN(1, 12), RH * 1.6)
+    const tb = foot.top - gapBelow(SECOND.size) * 1.5
+    const bandTop = tb - blockH(lines.length, size, DISPLAY.lh) - pad
+    const half = W / 2
+    // The labels: the layout's own words on an owned card of page colour (the prototype's `tg`).
+    const ts = INFO.size * 1.2, p = ts * 0.7, LS = 0.06, cap = capOf(S, 'caption')
+    const label = (s: string, x: number, role: string): El[] => {
+      const tw = w100(s, { role: 'caption', ls: LS, lh: 1 }) / 100 * ts, y = topY(S)
+      const card: RectEl = { k: 'r', x, y, w: tw + 2 * p, h: cap * ts + 2 * p, color: 'field', role: 'card', ok: true }
+      return [card, own(s, { size: ts, wt: 600, ls: LS, lh: 1, x: x + p, top: y + p, role, over: ['card', 'photo'] })]
+    }
+    // The prototype does not guard it: a foot that reaches the top leaves the images no room.
+    if (bandTop < topY(S) + cap * ts + 2 * p + RH * 2) return { els: [{ k: 'missing', why: 'no room for the images' }], did: '' }
+    return {
+      els: [
+        // Neither image gets a filter: the prototype greyed the "before", which would change the user's image.
+        { k: 'p', x: 0, y: 0, w: half, h: bandTop, stand: !ph, role: 'photo', bleed: true },
+        { k: 'p', x: half, y: 0, w: W - half, h: bandTop, stand: !ph, role: 'photo2', bleed: true },
+        { k: 'r', x: half - 0.25, y: 0, w: 0.5, h: bandTop, color: 'field', role: 'divider', ok: true, bleed: true },
+        ...label('Before', X(1), 'before'), ...label('After', half + X(1), 'after'),
+        disp(lines.join('\n'), { size, x: X(1), base: tb }), ...foot.els],
+      did: 'Two halves, before and after, over a band with the headline and the offer. Needs two images; Meta limits this for health products.',
+    }
+  },
+}
+
+/** Feature callouts — the product in the centre, the list's lines pointed at it by thin lines. */
+export const perfCallouts: LayoutDef = {
+  id: 'perfCallouts', name: 'Feature callouts', fits: [...ALL], style: 'performance', oneLineFirst: true,
+  needs: { image: true }, needsContent: ['list'],
+  fn(S, { c, ph, lines }) {
+    const { X, XR, SPAN, RH, L, INFO, GAP, PHOTO_ASPECT, blockH, breakLines, text, leader, w100, groupGap } = S
+    const items = c.list!
+    const n = items.length
+    // The prototype pointed at three; two a side is the most that reads. Every line is placed (R5).
+    if (n > 4) return { els: [{ k: 'missing', why: 'more lines in the list than callouts can point at' }], did: '' }
+    const head = headStack(S, c, lines, 1, 12)
+    const els: El[] = [...head.els]
+    const y = head.bottom + groupGap()
+    const { details: _details, ...rest } = c                              // as the prototype: no product name
+    const foot = offerBox(S, rest, { x: X(1), w: SPAN(1, 12), bottom: L(16) })
+    const bottom = foot.top - groupGap()
+    const h = Math.min(bottom - y, SPAN(4, 9) * PHOTO_ASPECT), w = h / PHOTO_ASPECT
+    const px = (X(1) + XR(12)) / 2 - w / 2, py = y + (bottom - y - h) / 2
+    if (h < RH * 4) return { els: [noRoom], did: '' }
+    els.push({ k: 'p', x: px, y: py, w, h, stand: !ph, role: 'photo', over: ['dot'] })
+    const ls = INFO.size * 1.25, LH = 1.2, lw = Math.max(SPAN(1, 3), px - X(1) - GAP * 2)
+    const LIST = listStyle(0, LH)
+    const labels = listLines(c, items)
+    labels.forEach((t, i) => {
+      // The prototype's 0.2 / 0.5 / 0.8 of the image's height, spread over however many there are.
+      const left = i % 2 === 0, cy = py + h * (n === 1 ? 0.5 : 0.2 + 0.6 * i / (n - 1))
+      const ll = breakLines(wordsOf(t), lw, ls, LIST), bh = blockH(ll.length, ls, LH)
+      const x = left ? X(1) : XR(12) - lw
+      els.push(text(ll.join('\n'), { size: ls, ls: 0, lh: LH, x, w: lw, top: cy - bh / 2, align: left ? 'left' : 'right', role: listRole(i) }))
+      // The line starts beside the label's own ink (the prototype started it at the label's box, so a
+      // short right-hand label floated away from its line).
+      const ink = Math.min(lw, Math.max(...ll.map(l => w100(l, LIST) / 100 * ls)))
+      const lx = left ? X(1) + ink + GAP * 0.6 : XR(12) - ink - GAP * 0.6, tx = left ? px + w * 0.22 : px + w * 0.78
+      els.push(leader(lx, cy, tx, cy), { k: 'c', cx: tx, cy, r: 0.8, color: 'accent', role: 'dot', over: ['photo'] })
+    })
+    return { els: [...els, ...foot.els], did: 'The product in the centre with its features pointed out by thin lines.' }
+  },
+}
+
+/** Reasons why — a numbered list of reasons beside the product, the offer at the foot. */
+export const perfListicle: LayoutDef = {
+  id: 'perfListicle', name: 'Reasons why', fits: [...ALL], style: 'performance', oneLineFirst: true,
+  needs: { image: true }, needsContent: ['list'],
+  fn(S, { c, ph, lines }) {
+    const { X, XR, SPAN, G, W, L, INFO, SECOND, DISPLAY, breakLines, text, own, groupGap } = S
+    const items = c.list!
+    const head = headStack(S, c, lines, 1, 12)
+    const els: El[] = [...head.els]
+    const y = head.bottom + groupGap()
+    const { details: _details, ...rest } = c                              // as the prototype: no product name
+    const foot = offerBox(S, rest, { x: X(1), w: SPAN(1, 12), bottom: L(16) })
+    const bottom = foot.top - groupGap(), slot = (bottom - y) / items.length
+    if (slot < INFO.size * 3) return { els: [{ k: 'missing', why: 'no room for the list' }], did: '' }
+    els.unshift({ k: 'p', x: X(8), y, w: W - X(8), h: bottom - y, stand: !ph, role: 'photo', bleed: true })
+    // Ruling R5: the numbers are the layout's own words — unless the user numbered or bulleted the
+    // lines themselves; then their markers lead and the lines start at the margin.
+    const marked = hasMarkers(c, items)
+    const ns = Math.min(SECOND.size * 1.5, slot * 0.55 / capOf(S, 'caption'))
+    const ts = Math.max(INFO.size * 1.2, SECOND.size * 0.7), LH = 1.15
+    const tx = marked ? X(1) : X(2) + G, tw = XR(7) - tx
+    const LIST = listStyle(-0.01, LH)
+    listLines(c, items).forEach((t, i) => {
+      const top = y + i * slot
+      if (!marked) els.push(own(String(i + 1), { size: ns, wt: 700, ls: DISPLAY.ls, x: X(1), top, color: 'accent', role: `n${i}` }))
+      els.push(text(breakLines(wordsOf(t), tw, ts, LIST).join('\n'), { size: ts, ls: -0.01, lh: LH, x: tx, w: tw, top, role: listRole(i) }))
+    })
+    return { els: [...els, ...foot.els], did: 'A numbered list of reasons beside the product, the offer at the foot.' }
+  },
+}
+
+/** Notes app — looks like a phone note, not an ad: the headline, the list, the image pasted in. */
+export const perfNotes: LayoutDef = {
+  id: 'perfNotes', name: 'Notes app', fits: [...ALL], style: 'performance', oneLineFirst: true,
+  needs: { image: true }, needsContent: ['list'],
+  fn(S, { c, ph, lines }) {
+    const { X, XR, SPAN, RH, W, H, L, INFO, SECOND, PHOTO_ASPECT, sizeFor, blockH, breakLines, text, own, w100, gapBelow, groupGap } = S
+    // The notes app's own paper and amber, on purpose (ruling R6).
+    const els: El[] = [{ k: 'r', x: 0, y: 0, w: W, h: H, hex: NOTES_PAPER, role: 'paper', ok: true, bleed: true }]
+    let y = topY(S)
+    const ui = INFO.size * 1.3
+    const doneW = w100('Done', { role: 'caption', ls: 0, lh: 1 }) / 100 * ui
+    els.push(own('‹ Notes', { size: ui, wt: 500, x: X(1), top: y, hex: NOTES_CHROME, role: 'ui' }),
+      own('Done', { size: ui, wt: 600, x: XR(12) - doneW, top: y, hex: NOTES_CHROME, role: 'ui2' }))
+    y += capOf(S, 'caption') * ui + groupGap() * 0.8
+    // The headline in the user's own face and colour (the prototype set it 700 in near-black).
+    const T: Style = { role: 'title', ls: -0.02, lh: 1.05 }
+    const ts = sizeFor(lines, SPAN(1, 12), RH * 1.3 * lines.length, T)
+    els.push(text(lines.join('\n'), { size: ts, ls: -0.02, lh: 1.05, x: X(1), top: y, pre: true, role: 'title' }))
+    y += blockH(lines.length, ts, 1.05) + gapBelow(ts)
+    // The list: the user's lines as runs (R5); the bullets are the note's own, unless the user's
+    // lines carry markers.
+    const items = c.list!
+    const marked = hasMarkers(c, items)
+    const bs = Math.max(INFO.size * 1.25, SECOND.size * 0.7), LH = 1.3
+    const tx = marked ? X(1) : X(1) + w100('•', { role: 'caption', ls: 0, lh: 1 }) / 100 * bs + bs * 0.55
+    const LIST = listStyle(0, LH)
+    listLines(c, items).forEach((t, i) => {
+      if (!marked) els.push(own('•', { size: bs, x: X(1), top: y, hex: NOTES_INK, role: `b${i}` }))
+      const ll = breakLines(wordsOf(t), XR(12) - tx, bs, LIST)
+      els.push(text(ll.join('\n'), { size: bs, ls: 0, lh: LH, x: tx, w: XR(12) - tx, top: y, role: listRole(i) }))
+      y += blockH(ll.length, bs, LH) + bs * 0.6
+    })
+    const top = y + groupGap(), h = Math.min(L(16) - top, SPAN(1, 7) * PHOTO_ASPECT), w = h / PHOTO_ASPECT
+    els.push(h > RH * 3 ? { k: 'p', x: X(1), y: top, w, h, stand: !ph, role: 'photo', radius: 1.6 } : noRoom)
+    return { els, did: 'Looks like a phone note, not an ad: the headline, the list, the image pasted in. No logo, no button.' }
+  },
+}
+
+/** Where a text box's own centre must sit so that turning it `deg` about its centre puts it where
+ *  turning it about `pivot` would — the prototype's `transform-origin` at the note's centre. */
+function turnedAbout(e: TextEl, box: { x0: number; y0: number; x1: number; y1: number }, pivot: { x: number; y: number }, deg: number): TextEl {
+  const a = deg * Math.PI / 180, cos = Math.cos(a), sin = Math.sin(a)
+  const cx = (box.x0 + box.x1) / 2 - pivot.x, cy = (box.y0 + box.y1) / 2 - pivot.y
+  const dx = cx * cos - cy * sin - cx, dy = cx * sin + cy * cos - cy
+  return { ...e, x: e.x + dx, ...(e.top != null ? { top: e.top + dy } : {}), rot: deg, origin: 'center' }
+}
+
+/** Post-it — the product fills the page with a note stuck on it; the button on a band at the foot. */
+export const perfPostit: LayoutDef = {
+  id: 'perfPostit', name: 'Post-it', fits: [...ALL], style: 'performance', oneLineFirst: true,
+  needs: { image: true }, needsContent: [],
+  fn(S, { c, ph, lines }) {
+    const { X, SPAN, GAP, H, L, CAP, sizeFor, fitSize, blockH, text, w100, cover, band } = S
+    const { date: _number, details: _details, ...cc } = c                 // the number goes on the note
+    const foot = offerBox(S, cc, { x: X(1), w: SPAN(1, 12), bottom: L(16) })
+    const nw = SPAN(1, 7), nh = nw * 0.92, nx = X(1) + GAP, ny = topY(S) + GAP, pad = nw * 0.1, ROT = -4
+    const LH = 1.02
+    const T: Style = { role: 'title', ls: 0, lh: LH }, D: Style = { role: 'date', ls: 0, lh: LH }
+    const num = numberOf(c)
+    const rows = num ? [...lines, num] : lines
+    let size = sizeFor(rows, nw - 2 * pad, nh * 0.62, T)
+    if (num) size = Math.min(size, fitSize([num], nw - 2 * pad, D))
+    const top = ny + (nh - blockH(rows.length, size, LH)) / 2
+    const pivot = { x: nx + nw / 2, y: ny + nh / 2 }
+    const over = ['sticker', 'photo']
+    // Each text turns with the note, about the note's centre.
+    const place = (s: string, st: Style, role: RoleKey, capTop: number, n: number): TextEl => {
+      const wide = Math.max(...s.split('\n').map(l => w100(l, st) / 100 * size))
+      const x0 = nx + pad, cap = role === 'title' ? CAP : capOf(S, role)
+      return turnedAbout(text(s, { size, ls: 0, lh: LH, x: x0, top: capTop, pre: true, role, over }),
+        { x0, y0: capTop, x1: x0 + wide, y1: capTop + ((n - 1) * LH + cap) * size }, pivot, ROT)
+    }
+    const els: El[] = [cover(ph), band('bottom', foot.top, H),
+      { k: 'r', x: nx, y: ny, w: nw, h: nh, hex: POSTIT, rot: ROT, role: 'sticker', over: ['photo'] },
+      place(lines.join('\n'), T, 'title', top, lines.length)]
+    if (num) els.push(place(num, D, 'date', top + lines.length * size * LH, 1))
+    return { els: [...els, ...foot.els], did: 'The product fills the page with a note stuck on it; the button sits on a band at the foot.' }
+  },
+}
+
 /** The Stage 4 Performance layouts, in the prototype's order (seed order: appended after Street). */
-export const PERFORMANCE_AD_LAYOUTS: LayoutDef[] = [perfOfferFirst, perfStat, perfReview, perfVersus]
+export const PERFORMANCE_AD_LAYOUTS: LayoutDef[] = [perfOfferFirst, perfStat, perfReview, perfVersus,
+  perfBeforeAfter, perfCallouts, perfListicle, perfNotes, perfPostit]

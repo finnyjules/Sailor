@@ -69,7 +69,7 @@ export const LAYOUTS: LayoutDef[] = [
 
 /** Every layout, in seed order: the 42 Swiss layouts, then each style's in the prototype's order
  *  (Performance 42–47, Editorial 48–51, Street 52–56), then the Stage 4 layouts, appended and never
- *  interleaved so every earlier seed is unchanged (Performance ad layouts 57–60). */
+ *  interleaved so every earlier seed is unchanged (Performance ad layouts 57–65). */
 export const CATALOG: readonly LayoutDef[] = [...LAYOUTS, ...PERFORMANCE_LAYOUTS, ...EDITORIAL_LAYOUTS, ...STREET_LAYOUTS,
   ...PERFORMANCE_AD_LAYOUTS]
 

@@ -74,21 +74,22 @@ const EXPECTED_THIN: (Partial<Combo> & { offered: number; reason: string })[] = 
   // platform's-own-button choice: its `cta: 'native'` candidates draw no button and so would
   // otherwise clear this frame's 55% limit, but ruling R11 (fix round 1) refuses a layout unless
   // a DRAWN candidate passes on its own — a native candidate never rescues an otherwise-thin
-  // layout — so this stays pinned exactly as the button-drawn measurement above.
-  { style: 'performance', frame: 'meta-story', image: true, action: true, logo: true, offered: 1,
-    reason: 'story, action and logo: the bands hide 55.8–78.8% of the visible image (limit 55%); only Price tag (50.0%)' },
+  // layout — so the Stage 3 count stays exactly the button-drawn measurement above: 1 (Price tag).
+  // No longer thin since Stage 4 Task 5: Post-it (`needsContent: []`, the product under a note and
+  // one foot band) is offered too — 2 layouts, the floor. The Stage 3 count is pinned below.
   // 300×250, logo only: Offer 69.5%, Sticker 55.9–58.6%, Card 56.4%, Centred 69.2–69.5% — of the
   // Stage 3 layouts only Price tag (50.0%) is offered. No longer thin since Stage 4 Task 4: this
   // Frame has a number, so Offer first (its image under the panel, no button band) is offered too
   // — 2 layouts, the floor. The Stage 3 layouts' own count here is unchanged (1).
-  // 300×250, action only: Offer 56.5%, Sticker 64.2–67.0%, Card 55.6%, Centred 77.5–77.9%.
-  { style: 'performance', frame: 'ad-300x250', image: true, action: true, logo: false, offered: 1,
-    reason: '300×250 with a button: the bands hide 55.6–77.9% of the image (limit 55%); only Price tag (50.0%)' },
+  // 300×250, action only: Offer 56.5%, Sticker 64.2–67.0%, Card 55.6%, Centred 77.5–77.9% — of the
+  // Stage 3 layouts only Price tag (50.0%). No longer thin since Stage 4 Task 5: Post-it is offered
+  // too — 2 layouts, the floor. The Stage 3 count (1) is pinned below.
   // 300×250, action and logo: Offer 73.6%, Card 66.7%, Centred 88.6–88.9% hidden; Sticker's
   // "–30%" no longer fits a readable sticker; Price tag's half-page panel has no height left for
-  // the title between the logo and the offer (fitted size −4.95, floor 3.00).
-  { style: 'performance', frame: 'ad-300x250', image: true, action: true, logo: true, offered: 0,
-    reason: '300×250 with a button and a logo: 66.7–88.9% of the image hidden, the sticker too small, no room for Price tag\'s title' },
+  // the title between the logo and the offer (fitted size −4.95, floor 3.00). Stage 4 Task 5: Post-it
+  // (it draws no logo, as the prototype) is offered — 1, still under the floor; Stage 3's own: 0.
+  { style: 'performance', frame: 'ad-300x250', image: true, action: true, logo: true, offered: 1,
+    reason: '300×250 with a button and a logo: 66.7–88.9% of the image hidden, the sticker too small, no room for Price tag\'s title; only Post-it (Stage 4)' },
 ]
 const matches = (e: Partial<Combo>, c: Combo) =>
   (['style', 'frame', 'kind', 'image', 'action', 'logo'] as const).every(k => e[k] === undefined || e[k] === c[k])
@@ -182,14 +183,21 @@ describe('style matrix — each style\'s layouts through the real planner', () =
     if (process.env.STYLE_MATRIX_DUMP) writeFileSync(process.env.STYLE_MATRIX_DUMP, JSON.stringify({ checked, offered: Object.fromEntries(results) }, null, 1))
   })
 
-  it('300×250 with a logo and no action: the Stage 3 layouts\' own count is still 1 (Price tag)', () => {
-    // Task 4 fix round 1: Offer first (Stage 4, `needsContent`) lifted this combination to the floor;
-    // without the Stage 4 layouts it offers exactly what it did before.
+  it('the combinations Stage 4 lifted: the Stage 3 layouts\' own counts are unchanged', () => {
+    // Task 4 fix round 1: Offer first (Stage 4, `needsContent`) lifted 300×250 with a logo and no
+    // action to the floor; Task 5's Post-it lifted the story with action and logo, and 300×250 with
+    // action. Without the Stage 4 layouts each offers exactly what it did before.
     const stage4 = new Set(CATALOG.filter(l => l.needsContent).map(l => l.id))
-    for (const kind of KINDS) {
-      const offered = results.get(keyOf({ style: 'performance', frame: 'ad-300x250', kind, image: true, action: false, logo: true }))
-      expect(offered, kind).toBeDefined()
-      expect(offered!.filter(id => !stage4.has(id)), kind).toEqual(['perfPriceTag'])
+    const PINS: [Partial<Combo>, string[]][] = [
+      [{ frame: 'ad-300x250', action: false, logo: true }, ['perfPriceTag']],
+      [{ frame: 'ad-300x250', action: true, logo: false }, ['perfPriceTag']],
+      [{ frame: 'ad-300x250', action: true, logo: true }, []],
+      [{ frame: 'meta-story', action: true, logo: true }, ['perfPriceTag']],
+    ]
+    for (const [c, stage3] of PINS) for (const kind of KINDS) {
+      const offered = results.get(keyOf({ style: 'performance', kind, image: true, ...c } as Combo))
+      expect(offered, `${c.frame} ${kind}`).toBeDefined()
+      expect(offered!.filter(id => !stage4.has(id)), `${JSON.stringify(c)} ${kind}`).toEqual(stage3)
     }
   })
 
@@ -200,8 +208,9 @@ describe('style matrix — each style\'s layouts through the real planner', () =
 
 describe('styles filter the library (ruling S4)', () => {
   const PERF = ['perfOffer', 'perfSticker', 'perfPriceTag', 'perfCard', 'perfCentred', 'perfStrip']
-  // Stage 4 (Task 4): the Performance ad layouts, appended after Street (seed order).
-  const ADS = ['perfOfferFirst', 'perfStat', 'perfReview', 'perfVersus']
+  // Stage 4 (Tasks 4–5): the Performance ad layouts, appended after Street (seed order).
+  const ADS = ['perfOfferFirst', 'perfStat', 'perfReview', 'perfVersus',
+    'perfBeforeAfter', 'perfCallouts', 'perfListicle', 'perfNotes', 'perfPostit']
   const ED = ['edCover', 'edFramed', 'edQuiet', 'edDiptych']
   const ST = ['stFill', 'stTag', 'stDrop', 'stRepeat', 'stStrip']
 

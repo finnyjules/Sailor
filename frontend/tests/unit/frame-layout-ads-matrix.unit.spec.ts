@@ -11,14 +11,15 @@ import { createImageLayer, createTextLayer } from '~/composables/useCompositorLa
 import type { LocalLayer, TextLayer } from '~/composables/useCompositorLayers'
 import { adFrameLayers, palette } from './helpers/frameLayoutFixtures'
 
-// ═══════════════════════ the ad content matrix (Stage 4, Task 4) ═══════════════════════
-// The four layouts built around ad content — Offer first (a number), Stat (a stat), Review (a
-// review), Us vs them (a comparison) — × five frames (portrait, square, story, feed 4:5, 300×250)
+// ═══════════════════════ the ad content matrix (Stage 4, Tasks 4–5) ═══════════════════════
+// The nine layouts built around ad content — Offer first (a number), Stat (a stat), Review (a
+// review), Us vs them (a comparison), Before / after (a second image), Feature callouts, Reasons
+// why and Notes app (a list), Post-it (no extra content) — × five frames (portrait, square, story, feed 4:5, 300×250)
 // × with an image × {with action, without}, on the full ad fixture (every kind of content at once),
 // through the real planner with Performance asked for. For every candidate: no checker issues;
 // every text — the user's and the layout's own words — at least the floor; the platform's own
 // button only beside a drawn one (R11/R11b); every line placed shows and every line not placed is
-// hidden; no owned text on the raw image. Each layout is offered at least once per combination
+// hidden; owned text over an image only on a covering piece. Each layout is offered at least once per combination
 // unless EXPECTED_THIN names it with its measured reason. A Frame without the content a layout is
 // built around never offers it.
 
@@ -31,7 +32,8 @@ const FRAMES: Frame[] = [
   fmt('meta-feed-4x5'),
   fmt('ad-300x250'),
 ]
-const ADS = ['perfOfferFirst', 'perfStat', 'perfReview', 'perfVersus'] as const
+const ADS = ['perfOfferFirst', 'perfStat', 'perfReview', 'perfVersus',
+  'perfBeforeAfter', 'perfCallouts', 'perfListicle', 'perfNotes', 'perfPostit'] as const
 type AdId = typeof ADS[number]
 
 /** The ad fixture's lines: id, text, font size. Sizes keep inference unambiguous: the title the
@@ -52,15 +54,17 @@ const LINES = {
 } as const
 type LineId = keyof typeof LINES
 
-/** The full ad Frame; `without` leaves lines out, `action: false` the action line. */
-function fullAdLayers(o: { action: boolean; without?: LineId[] }): LocalLayer[] {
+/** The full ad Frame; `without` leaves lines out, `action: false` the action line; `image2` adds a
+ *  second image after the first (Before / after). */
+function fullAdLayers(o: { action: boolean; without?: LineId[]; image2?: boolean; colour?: string }): LocalLayer[] {
   const out: LocalLayer[] = []
   for (const [id, [text, fontSize]] of Object.entries(LINES) as [LineId, readonly [string, number]][]) {
     if (id === 'a' && !o.action) continue
     if (o.without?.includes(id)) continue
-    out.push(createTextLayer({ id, text, fontSize, fontFamily: 'Inter', fontWeight: 600, color: '#111111' }) as LocalLayer)
+    out.push(createTextLayer({ id, text, fontSize, fontFamily: 'Inter', fontWeight: 600, color: o.colour ?? '#111111' }) as LocalLayer)
   }
   out.push(createImageLayer('x.png', 1.25, { id: 'img', w: 0.5, h: 0.625 }) as LocalLayer)
+  if (o.image2) out.push(createImageLayer('y.png', 1.25, { id: 'img2', w: 0.5, h: 0.625 }) as LocalLayer)
   return out
 }
 
@@ -95,6 +99,11 @@ const EXPECTED_THIN: { layout: AdId; frame: string; action?: boolean; reason: st
   // the number and the fine print.
   { layout: 'perfVersus', frame: 'meta-story',
     reason: 'story: the table ends 88.5–90.3 into the 90.7 the bars leave uncovered; no room for the offer' },
+  // Task 5. 300×250 (H 83.3): between the headline (ends 21.4–23.1 with its group gap) and the offer
+  // (starts 45.6 with a button, 48.9 without), each of the four reasons gets a slot of 5.60–6.90;
+  // the prototype's minimum is three information sizes (9.00).
+  { layout: 'perfListicle', frame: 'ad-300x250',
+    reason: '300×250: each of the four reasons gets 5.60–6.90 (the minimum slot is 3 × the information size, 9.00)' },
 ]
 const thinFor = (id: AdId, c: Combo) => EXPECTED_THIN.find(e => e.layout === id && e.frame === c.frame && (e.action === undefined || e.action === c.action))
 
@@ -111,7 +120,7 @@ describe('the ad content is read as the layouts expect', () => {
   })
 })
 
-describe('ad content matrix — the four layouts through the real planner', () => {
+describe('ad content matrix — the nine layouts through the real planner', () => {
   let checked = 0
   let natives = 0
   it.each(combos.map(c => [`${c.frame} · ${c.action ? 'action' : 'no action'}`, c] as const))('%s', (_label, c) => {
@@ -120,10 +129,12 @@ describe('ad content matrix — the four layouts through the real planner', () =
     const S = makeSheet({ frameW: f.w, frameH: f.h, measure: makeStubMeasure(), style: 'performance', ...(format ? { format: { view: format.view, nc: format.nc } } : {}) })
     const floor = (format ? 900 / format.view! : S.INFO.size) - 0.01
     const layers = fullAdLayers({ action: c.action })
+    // Before / after runs on the Frame with a second image; the other eight on the one-image Frame.
+    const layers2 = fullAdLayers({ action: c.action, image2: true })
     const read = contentForFrame({ props: argsFor('perfStat', f, layers).props, frameW: f.w, frameH: f.h })
     const roleOfId = new Map(Object.entries(read.roles).filter(([r]) => r !== 'image2').map(([r, id]) => [id!, r]))
     for (const id of ADS) {
-      const a = argsFor(id, f, layers)
+      const a = argsFor(id, f, id === 'perfBeforeAfter' ? layers2 : layers)
       const cands = candidatesForFrame(a)
       const thin = thinFor(id, c)
       if (thin) expect(cands.length, `EXPECTED_THIN ${id} (${thin.reason})`).toBe(0)
@@ -161,16 +172,22 @@ describe('ad content matrix — the four layouts through the real planner', () =
         }
         expect.soft(plan.notPlaced.every(n => !placed.has(n.role)), label).toBe(true)
         // Carried over from Task 2: owned text never sits on the raw image (rule 10 checks only the
-        // user's text) — none of these four lays its own words over the image at all.
-        const photos = els.filter(e => e.k === 'p').map(e => boxOf(e, S)!)
-        for (const e of els) {
-          if (e.k !== 'own') continue
-          const b = boxOf(e, S)!
-          for (const p of photos) {
-            const over = Math.min(b.x1, p.x1) - Math.max(b.x0, p.x0) > 0.25 && Math.min(b.y1, p.y1) - Math.max(b.y0, p.y0) > 0.25
-            expect.soft(over, `${e.role} on the image · ${label}`).toBe(false)
+        // user's text) — over an image it lies inside a covering piece (a card, panel, sticker or
+        // tag) drawn above that image (Before / after's labels on their cards).
+        const COVERS = ['card', 'panel', 'sticker', 'tag']
+        els.forEach((p, pi) => {
+          if (p.k !== 'p') return
+          const pb = boxOf(p, S)!
+          const covers = els.slice(pi + 1).filter(e => e.k === 'r' && COVERS.includes(e.role ?? '')).map(e => boxOf(e, S)!)
+          for (const e of els) {
+            if (e.k !== 'own') continue
+            const b = boxOf(e, S)!
+            const over = Math.min(b.x1, pb.x1) - Math.max(b.x0, pb.x0) > 0.25 && Math.min(b.y1, pb.y1) - Math.max(b.y0, pb.y0) > 0.25
+            if (!over) continue
+            const covered = covers.some(k => b.x0 >= k.x0 - 0.05 && b.x1 <= k.x1 + 0.05 && b.y0 >= k.y0 - 0.05 && b.y1 <= k.y1 + 0.05)
+            expect.soft(covered, `${e.role} on the raw image · ${label}`).toBe(true)
           }
-        }
+        })
         checked++
       }
     }
@@ -261,32 +278,139 @@ describe('what each layout places (rulings R4, R5, R10)', () => {
     expect(textOf(cand.out.els, 'stat').map(e => e.k === 't' && e.s)).toEqual(['198 g'])
     expect(textOf(cand.out.els, 'statline').map(e => e.k === 't' && e.s)).toEqual([LINES.sl[0]])
   })
+
+  // ── Task 5 ──
+  const ownedOf = (plan: { layers: LocalLayer[] }, prefix: string) =>
+    plan.layers.filter(l => (l as { owner?: { key: string } }).owner?.key.startsWith(prefix))
+  const withList = (text: string, extra: Partial<Record<string, string>> = {}) => fullAdLayers({ action: true }).map(l => l.id === 'l'
+    ? { ...l, text } as LocalLayer : extra[l.id] ? { ...l, color: extra[l.id] } as LocalLayer : l)
+
+  it('Before / after: the first image left and the second right, no filter on either; "Before" / "After" are owned words on owned cards', () => {
+    const { cand, plan } = first('perfBeforeAfter', fullAdLayers({ action: true, image2: true }))
+    const photos = cand.out.els.filter(e => e.k === 'p')
+    expect(photos.map(e => e.role)).toEqual(['photo', 'photo2'])
+    for (const p of photos) expect(p.k === 'p' && p.filter, p.role).toBeFalsy()
+    const img = plan.layers.find(l => l.id === 'img')!, img2 = plan.layers.find(l => l.id === 'img2')!
+    expect(img.x).toBeLessThan(0.5)
+    expect(img2.x).toBeGreaterThan(0.5)
+    const own = ownedOf(plan, 'own-') as TextLayer[]
+    expect(own.map(l => l.text)).toEqual(['Before', 'After'])
+    for (const l of own) expect([l.fontFamily, l.fontWeight]).toEqual(['Inter', 600])
+    // Each label on its own card, filled by the picker (the page colour carries ink here).
+    expect(ownedOf(plan, 'card-').map(l => (l as { fill?: unknown }).fill)).toEqual([palette.field, palette.field])
+    // Its content lines left out are hidden and named.
+    expect(plan.notPlaced.map(n => n.role).sort()).toEqual(['by', 'list', 'quote', 'rating', 'stat', 'statline', 'them'])
+  })
+
+  it('Feature callouts: every list line is a run of the one list layer, each with an owned leader line and dot', () => {
+    const { cand, plan } = first('perfCallouts')
+    expect(textOf(cand.out.els, 'list')).toHaveLength(4)
+    const list = plan.layers.find(l => l.id === 'l') as TextLayer
+    expect(list.text).toBe(LINES.l[0])
+    expect(list.runs?.map(r => r.text).join(' ')).toBe(LINES.l[0].replace(/\n/g, ' '))
+    expect(ownedOf(plan, 'leader-')).toHaveLength(4)
+    expect(ownedOf(plan, 'dot-')).toHaveLength(4)
+  })
+
+  it('Feature callouts: a list longer than four is not pointed at (no line of it is dropped)', () => {
+    const a = argsFor('perfCallouts', square, withList('One\nTwo\nThree\nFour\nFive'))
+    expect(candidatesForFrame(a)).toEqual([])
+  })
+
+  it('Reasons why: owned numbers 1–4 beside the user\'s lines; with markers of their own, the user\'s markers lead and no number is drawn (R5)', () => {
+    const { cand, plan } = first('perfListicle')
+    expect(cand.out.els.filter(e => e.k === 'own').map(e => e.k === 'own' && e.s)).toEqual(['1', '2', '3', '4'])
+    expect((ownedOf(plan, 'own-') as TextLayer[]).map(l => l.color)).toEqual(Array(4).fill(palette.accent))
+    const marked = '1. Carbon plate\n2. Under 200 g\n3. Free returns'
+    const m = first('perfListicle', withList(marked))
+    expect(m.cand.out.els.filter(e => e.k === 'own')).toEqual([])
+    expect(textOf(m.cand.out.els, 'list').map(e => e.k === 't' && e.s)).toEqual(marked.split('\n'))
+    expect((m.plan.layers.find(l => l.id === 'l') as TextLayer).text).toBe(marked)
+  })
+
+  it('Notes app: the paper and chrome in their fixed colours, owned bullets, the user\'s text in its own colour; with markers, no bullets', () => {
+    const { cand, plan } = first('perfNotes')
+    expect(ownedOf(plan, 'paper-').map(l => (l as { fill?: unknown }).fill)).toEqual(['#fbf8f1'])
+    const own = ownedOf(plan, 'own-') as TextLayer[]
+    expect(own.filter(l => l.text === '‹ Notes' || l.text === 'Done').map(l => l.color)).toEqual(['#d49a1a', '#d49a1a'])
+    expect(own.filter(l => l.text === '•')).toHaveLength(4)
+    expect(textOf(cand.out.els, 'list')).toHaveLength(4)
+    // No logo, no button: the action line is hidden and named.
+    expect(cand.out.els.some(e => e.k === 'btn' || e.k === 'logo')).toBe(false)
+    expect(plan.notPlaced.map(n => n.role)).toContain('action')
+    // The user's title keeps its own colour (recolour off): the layout sets none.
+    expect((plan.layers.find(l => l.id === 't') as TextLayer).color).toBe('#111111')
+    const m = first('perfNotes', withList('• Carbon plate\n• Under 200 g\n• Free returns'))
+    expect(m.cand.out.els.filter(e => e.k === 'own').map(e => e.k === 'own' && e.s)).toEqual(['‹ Notes', 'Done'])
+  })
+
+  it('Notes app is refused when the user\'s text does not read on its paper (ruling R6)', () => {
+    const pale = fullAdLayers({ action: true, colour: '#f4f0e6' })
+    expect(candidatesForFrame(argsFor('perfNotes', square, pale))).toEqual([])
+    const plan = planLayout({ ...argsFor('perfNotes', square, pale), choice: { lines: 0, arr: 0, scale: 'full', side: 'right' } })!
+    expect(plan.issues.some(i => /unreadable on its paper/.test(i))).toBe(true)
+  })
+
+  it('Post-it: a fixed yellow note turned -4°, the headline and the number on it in the user\'s own face', () => {
+    const { cand, plan } = first('perfPostit')
+    const note = ownedOf(plan, 'sticker-')
+    expect(note.map(l => (l as { fill?: unknown }).fill)).toEqual(['#ffe45c'])
+    expect(note[0]!.rotation).toBe(-4)
+    const title = plan.layers.find(l => l.id === 't') as TextLayer
+    expect([title.fontFamily, title.fontWeight, title.color]).toEqual(['Inter', 600, '#111111'])
+    expect(title.rotation).toBe(-4)
+    expect(textOf(cand.out.els, 'date').map(e => e.k === 't' && e.s)).toEqual([LINES.dt[0]])
+    // The product name is left out (as the prototype), hidden and named.
+    expect(plan.notPlaced.map(n => n.role)).toContain('details')
+  })
+
+  it('Post-it is refused when the user\'s text does not read on the note (ruling R6)', () => {
+    // Only the headline and the number are pale: the offer on the band still reads.
+    const pale = fullAdLayers({ action: true }).map(l => l.id === 't' || l.id === 'dt' ? { ...l, color: '#fff6c8' } as LocalLayer : l)
+    expect(candidatesForFrame(argsFor('perfPostit', square, pale))).toEqual([])
+    const plan = planLayout({ ...argsFor('perfPostit', square, pale), choice: { lines: 0, arr: 0, scale: 'full', side: 'right' } })!
+    expect(plan.issues).toEqual(['title is unreadable on its sticker'])
+  })
 })
 
 describe('a Frame without the content never offers the layout', () => {
-  const MISSING: Record<AdId, LineId[]> = {
+  // Post-it needs nothing beyond the image (ruling C2: `needsContent: []`); Before / after's missing
+  // content is the second image, which `fullAdLayers` leaves out unless asked.
+  const MISSING: Record<Exclude<AdId, 'perfPostit'>, LineId[]> = {
     perfOfferFirst: ['dt'],
     perfStat: ['s'],
     perfReview: ['q'],
     perfVersus: ['v'],
+    perfBeforeAfter: [],
+    perfCallouts: ['l'],
+    perfListicle: ['l'],
+    perfNotes: ['l'],
   }
-  it.each(ADS)('%s', id => {
+  it.each(ADS.filter(id => id !== 'perfPostit') as Exclude<AdId, 'perfPostit'>[])('%s', id => {
     for (const f of FRAMES) for (const action of [false, true]) {
       const layers = fullAdLayers({ action, without: MISSING[id] })
       expect(candidatesForFrame(argsFor(id, f, layers)), `${id} ${f.id} ${action}`).toEqual([])
     }
   })
 
-  it('the Stage 3 ad Frame offers Offer first (it has a number) and none of the other three', () => {
+  it('the Stage 3 ad Frame offers Offer first (it has a number) and Post-it (it needs nothing), none of the other seven', () => {
     for (const f of FRAMES) {
       const layers = adFrameLayers('phrase', { image: true, action: true })
-      for (const id of ['perfStat', 'perfReview', 'perfVersus']) expect(candidatesForFrame(argsFor(id, f, layers)), `${id} ${f.id}`).toEqual([])
+      for (const id of ADS.filter(x => x !== 'perfOfferFirst' && x !== 'perfPostit')) expect(candidatesForFrame(argsFor(id, f, layers)), `${id} ${f.id}`).toEqual([])
     }
-    expect(candidatesForFrame(argsFor('perfOfferFirst', FRAMES[0]!, adFrameLayers('phrase', { image: true, action: true }))).length).toBeGreaterThan(0)
+    for (const id of ['perfOfferFirst', 'perfPostit']) expect(candidatesForFrame(argsFor(id, FRAMES[0]!, adFrameLayers('phrase', { image: true, action: true }))).length, id).toBeGreaterThan(0)
+  })
+
+  it('Post-it needs only a headline and an image', () => {
+    const layers = [createTextLayer({ id: 't', text: 'Run lighter.', fontSize: 0.12, fontFamily: 'Inter', fontWeight: 600, color: '#111111' }) as LocalLayer,
+      createImageLayer('x.png', 1.25, { id: 'img', w: 0.5, h: 0.625 }) as LocalLayer]
+    for (const f of FRAMES) expect(candidatesForFrame(argsFor('perfPostit', f, layers)).length, f.id).toBeGreaterThan(0)
+    // …but an image: without one it is not offered.
+    expect(candidatesForFrame(argsFor('perfPostit', FRAMES[1]!, layers.slice(0, 1)))).toEqual([])
   })
 
   it('never to another style', () => {
-    const layers = fullAdLayers({ action: true })
+    const layers = fullAdLayers({ action: true, image2: true })
     for (const id of ADS) for (const style of [undefined, 'swiss', 'editorial', 'street'] as const) {
       const { style: _s, ...a } = argsFor(id, FRAMES[1]!, layers)
       expect(candidatesForFrame({ ...a, ...(style ? { style } : {}) }), `${id} ${style}`).toEqual([])
@@ -295,15 +419,18 @@ describe('a Frame without the content never offers the layout', () => {
 })
 
 describe('the catalog (seed order)', () => {
-  it('the four are appended after Street, as Performance layouts with one line first', () => {
+  it('the nine are appended after Street, as Performance layouts with one line first', () => {
     expect(CATALOG.slice(57).map(l => l.id)).toEqual([...ADS])
     expect(layoutsForStyle('performance').slice(6).map(l => l.id)).toEqual([...ADS])
     for (const id of ADS) {
       const def = layoutById(id)!
       expect(def.style, id).toBe('performance')
       expect(def.oneLineFirst, id).toBe(true)
-      expect(def.needsContent?.length, id).toBe(1)
+      // Post-it reads the content view without being gated on any content (ruling C2).
+      expect(def.needsContent, id).toEqual(id === 'perfPostit' ? [] : [expect.any(String)])
     }
+    expect(layoutById('perfBeforeAfter')!.needsContent).toEqual(['image2'])
+    for (const id of ['perfCallouts', 'perfListicle', 'perfNotes']) expect(layoutById(id)!.needsContent, id).toEqual(['list'])
     // Every earlier layout reads the base view: none declares `needsContent`.
     expect(CATALOG.slice(0, 57).filter(l => l.needsContent)).toEqual([])
   })

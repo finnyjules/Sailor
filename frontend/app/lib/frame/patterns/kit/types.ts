@@ -23,7 +23,9 @@ export interface PhotoEl extends Base { k: 'p'; x: number; y: number; w: number;
 /** `prefer` (ruling R12, Task 4 fix round 1): the role the contrast picker tries FIRST for an owned
  *  piece that carries text — kept only if it passes the same thresholds, else the picker's own order. */
 export interface CircleEl extends Base { k: 'c'; cx: number; cy: number; r: number; color?: Colour; photo?: boolean; prefer?: Colour }
-export interface RectEl extends Base { k: 'r'; x: number; y: number; w: number; h: number; color?: Colour; rot?: number; radius?: number; prefer?: Colour }
+/** `hex` (Stage 4, ruling R6): a fixed fill by design (the Notes app's paper, the Post-it's note) —
+ *  drawn in exactly that colour, never a palette role; the text on it is only checked against it. */
+export interface RectEl extends Base { k: 'r'; x: number; y: number; w: number; h: number; color?: Colour; rot?: number; radius?: number; prefer?: Colour; hex?: string }
 export interface RuleEl extends Base { k: 'l'; x: number; y: number; w: number }
 export interface RingEl extends Base { k: 'ring'; cx: number; cy: number; R: number; size: number; s: string }
 export interface MissingEl { k: 'missing'; why?: string }

@@ -96,9 +96,12 @@ export function buttonFill(labelColour: unknown, palette: ResolvedPalette, bg?: 
 const baseRole = (role: string | undefined) => (role ?? '').replace(/\d+$/, '')
 
 /** The kind of piece an element is, when text can sit on it. */
-type PieceKind = 'tag' | 'sticker' | 'band' | 'card' | 'panel' | 'btn' | 'shape'
+type PieceKind = 'tag' | 'sticker' | 'band' | 'card' | 'panel' | 'btn' | 'shape' | 'fixed'
 function pieceKind(e: El): PieceKind | null {
   if (e.k === 'band') return 'band'
+  // Stage 4 (ruling R6): a piece with a fixed fill by design (the Notes app's paper, the Post-it's
+  // note), whatever its role — nothing is picked for it; the text on it is only checked.
+  if (e.k === 'r' && e.hex) return 'fixed'
   if (e.k === 'btn') return 'btn'
   if (e.k === 'r' || (e.k === 'c' && !e.photo)) {
     const r = baseRole(e.role)
@@ -211,6 +214,15 @@ export function pieceFills(els: El[], S: Sheet, ctx: FillCtx): PieceFills {
     const refuse = (bg: string | null) => {
       const bad = texts.find(x => !bg || contrastRatio(x.c, bg) < READABLE) ?? texts[0]!
       issues.push(`${baseRole(bad.t.role)} is unreadable on its ${pieceName}`)
+    }
+    if (kind === 'fixed') {
+      // Ruling R6: the fill stays as designed; the user's text (and any owned word in a palette
+      // role) must read on it, or the candidate is refused. The layout's own words in a fixed colour
+      // on its own fixed piece (the Notes app's amber "‹ Notes" / "Done") are that design, not checked.
+      const bg = hex6((p as { hex?: string }).hex)
+      const bad = bg ? texts.find(x => !(x.t.k === 'own' && x.t.hex) && contrastRatio(x.c, bg) < READABLE) : undefined
+      if (bad) issues.push(`${baseRole(bad.t.role)} is unreadable on its ${pieceName}`)
+      return
     }
     if (kind === 'shape' && ctx.shapeFill !== undefined && !ctx.recolour) {
       // The user's own shape keeps its own colour: it is only checked.

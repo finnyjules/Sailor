@@ -430,7 +430,7 @@ export function elementsToOps(
         own(createRectLayer({
           ...ownedBase(key, r),
           x: (r.x + r.w / 2) / 100, y: (r.y + r.h / 2) / S.H, w: r.w / 100, h: r.h / 100,
-          rotation: r.rot ?? 0, radius: (r.radius ?? 0) / 100, fill: fillPaint(r, r.color),
+          rotation: r.rot ?? 0, radius: (r.radius ?? 0) / 100, fill: r.hex ?? fillPaint(r, r.color),   // a fixed fill (ruling R6) as it is
         }), 'rect', key, z, r.radius ? r.radius / 100 : undefined)
         return
       }

@@ -77,7 +77,7 @@ const offerStack = (S: Sheet, c: Content, a: number, b: number, align: 'left' | 
   offerBox(S, c, { x: S.X(a), w: S.SPAN(a, b), bottom: S.L(16) }, align)
 
 /** The logo (when the brand kit has one) and the headline from the top margin. */
-function headStack(S: Sheet, c: Content, lines: string[], a: number, b: number, align: 'left' | 'center' = 'left', maxRows = 1.9): { els: El[]; bottom: number } {
+export function headStack(S: Sheet, c: Content, lines: string[], a: number, b: number, align: 'left' | 'center' = 'left', maxRows = 1.9): { els: El[]; bottom: number } {
   const { M, RH, DISPLAY, X, XR, SPAN, sizeFor, blockH, disp, logo, logoH, clear } = S
   const els: El[] = []
   let top = M
