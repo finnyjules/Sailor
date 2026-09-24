@@ -182,3 +182,39 @@
 - [ ] **Step 4: End to end** — in `tests/frame-embed-network.spec.ts`, a Frame with a wired Space Type node on a verified effect (6 s loop, filling the Frame): the export sheet line says `plays live`; the HTML makes zero network requests; frozen t01 0 and 0.5 differ inside the layer's box; the file size is recorded. Compare it in the report with the 28.5 MB pre-rendered figure. Also: a Frame whose Space Type effect is NOT verified still exports as frames (`pre-rendered` line) — the fallback works.
 - [ ] **Step 5:** run both Playwright specs plus the Task 1–3 unit specs → PASS.
 - [ ] **Step 6: Commit** — `feat(frame-embed): verified Space Type effects play live in Frame exports`.
+
+### Task 5: Check every live layer at export time (added after Task 4's measurement)
+
+**Why:** Task 4 verified 44 effects in their default fonts, then found verified effects mismatching badly in other fonts (field in Inter 600: 6.5% of pixels off; Fraunces 700: 14%). The likely cause is optical-size variable fonts in the app versus the static instance the export inlines. A per-effect list cannot promise "never a wrong picture" across every font, size and post effect. So each live layer is checked when it is exported: the same player the file will carry, in an isolated document that holds only the file's own fonts, is compared with the editor's picture of that same layer at a few frame-boundary times. A mismatch, an error or a timeout means frames. `LIVE_VERIFIED_EFFECTS` stays as a cheap first filter.
+
+**Files:**
+- Create: `frontend/app/lib/embed/frame/compare.ts` (pure pixel comparison, shared with the Task 4 harness)
+- Create: `frontend/app/lib/embed/frame/liveCheck.ts` (app side: isolated iframe, mount the built bundle, compare against the source)
+- Modify: `frontend/app/pages/dev/spacetype-live-parity.vue` (use `compare.ts` instead of its own copy)
+- Modify: `frontend/app/components/vue-canvas/CompositorModal.vue` (`buildWebExport`'s `wiredEmbed`: check before accepting; same stopLive bracket as frame pulls; result cached per slot + config while the sheet is open)
+- Test: `frontend/tests/unit/frame-embed-compare.unit.spec.ts`, `frontend/tests/unit/frame-embed-live-check.unit.spec.ts`; extend `frontend/tests/frame-embed-network.spec.ts` (a verified effect in Inter 600 → frames; in its default font → live)
+
+**Interfaces:**
+```ts
+// compare.ts — pure
+export interface ImageDiff { mean: number; shareOver: number }   // mean abs diff per channel (0–255); share of pixels with any channel diff > 24
+export function diffImages(a: Uint8ClampedArray, b: Uint8ClampedArray): ImageDiff
+export const LIVE_MATCH = { maxMean: 2, maxShareOver: 0.005 } as const
+export function matches(d: ImageDiff): boolean
+
+// liveCheck.ts — app side
+export interface LiveCheckResult { ok: boolean; reason?: string; diffs: ImageDiff[] }
+/** Mounts `bundleJs` (the exact file the export will carry) in a blank same-origin iframe, mounts
+ *  its surface with `embed.config`, and compares it with `source.getFrame` at three frame-boundary
+ *  times (t01 = i / frames, i near 0, 0.37, 0.71 of `frames = round(source.fps * embed.duration)`),
+ *  at a long side of 480 px in the source's aspect. Resolves ok only when every time matches.
+ *  Never rejects; errors and a 10 s timeout resolve { ok: false, reason }. Always removes the iframe
+ *  and destroys the handle. */
+export function checkLiveEmbed(source: StudioFrameSource, embed: StudioEmbed, bundleJs: string, opts?: { timeoutMs?: number }): Promise<LiveCheckResult>
+```
+
+- [ ] Step 1: failing unit tests for `diffImages`/`matches` (identical → 0/0; one pixel off by 30 in 100 → share 0.01; thresholds exactly as `LIVE_MATCH`); implement; make the Task 4 harness use it (its results must not change — re-run its spec).
+- [ ] Step 2: `liveCheck.ts` — reuse how the Task 4 harness loads a built bundle into a blank iframe (read `pages/dev/spacetype-live-parity.vue`). Unit tests with a fake source and a fake bundle (a tiny script assigning a stub `__SAILOR_SURFACE__`): match → ok; one differing time → not ok with its diff; a mount that throws → not ok, iframe removed; a hang → not ok after `timeoutMs`.
+- [ ] Step 3: the modal — `wiredEmbed` becomes: `embed()` → null ⇒ null; else fetch the bundle text (share the app IO's bundle cache so it is fetched once), stop the live preview (the same `webExportPulls`/`stopLive` bracket frame pulls use, so no preview render interleaves with the check's `getFrame` reads), `checkLiveEmbed`, restart; not ok ⇒ `console.info` one line naming the layer and the diff, return null (frames). Cache `{ key: JSON of embed.config, ok }` per slot while the sheet is open (cleared where `webExportClips` is cleared), so Fit/Transparent toggles do not re-check.
+- [ ] Step 4: Playwright — a wired Space Type on a verified effect in its default font exports `plays live`; the same Frame after switching the Space Type font to Inter at 600 exports `pre-rendered`; both files make zero requests. Record the time the check adds to an export.
+- [ ] Step 5: run the new unit specs, the gatherer/frame-embed/embed unit specs, `spacetype-live-parity.spec.ts`, `frame-embed-network.spec.ts` → PASS. Commit — `feat(frame-embed): check each live layer against the editor at export`.
