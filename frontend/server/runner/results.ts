@@ -12,6 +12,11 @@ import type { OutputFile } from './types'
 
 export interface ResultStore {
   save(bytes: Uint8Array, o: { userId: string | null; prefix: string; ext: string }): Promise<OutputFile>
+  /**
+   * A result shown in a node but not an asset: save_live_preview(unique=True)'s
+   * `live_preview_<node>_<nnnnn>.png` in the temp folder (the Frame render).
+   */
+  saveLivePreview(bytes: Uint8Array, o: { nodeId: string }): Promise<OutputFile>
   read(file: OutputFile): Promise<Uint8Array>
   exists(file: OutputFile): Promise<boolean>
 }
@@ -25,6 +30,17 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 /** folder_paths.get_save_image_path's counter: highest `<prefix>_<digits>_` + 1. */
 export function nextCounter(names: string[], prefix: string): number {
   const re = new RegExp(`^${escapeRe(prefix)}_(\\d+)_`)
+  let max = 0
+  for (const n of names) {
+    const m = re.exec(n)
+    if (m) max = Math.max(max, Number(m[1]))
+  }
+  return max + 1
+}
+
+/** The next `<prefix>_<nnnnn>.png` number: one past the highest there. */
+export function nextLivePreview(names: string[], prefix: string): number {
+  const re = new RegExp(`^${escapeRe(prefix)}_(\\d+)\\.png$`)
   let max = 0
   for (const n of names) {
     const m = re.exec(n)
@@ -71,6 +87,25 @@ export function createEngineResultStore(o: { dirForType(type: string): string | 
         try {
           await writeFile(join(dir, filename), bytes, { flag: 'wx' })
           return { filename, subfolder, type: 'output' }
+        }
+        catch (e: any) {
+          if (e?.code !== 'EEXIST') throw e
+        }
+      }
+      throw new Error('Could not find a free file name')
+    },
+    async saveLivePreview(bytes, { nodeId }) {
+      const base = o.dirForType('temp')
+      if (!base) throw new Error('The file store is not available')
+      await mkdir(base, { recursive: true })
+      // Node ids come from the browser: keep them to a safe file-name alphabet.
+      const prefix = `live_preview_${nodeId.replace(/[^A-Za-z0-9_-]/g, '_')}`
+      let counter = nextLivePreview(await readdir(base).catch(() => []), prefix)
+      for (let tries = 0; tries < 1000; tries++, counter++) {
+        const filename = `${prefix}_${String(counter).padStart(5, '0')}.png`
+        try {
+          await writeFile(join(base, filename), bytes, { flag: 'wx' })
+          return { filename, subfolder: '', type: 'temp' }
         }
         catch (e: any) {
           if (e?.code !== 'EEXIST') throw e

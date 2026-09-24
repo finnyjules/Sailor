@@ -3,14 +3,16 @@
  *   provider — send a request to a provider (fal or Replicate), save what comes back
  *   pass     — hand files on (result cards, an open Gate)
  *   pause    — a closed Gate: stop this branch and show what reached it
+ *   local    — compute the picture here (the Frame render): no provider, no charge
  * Mirrors the Python nodes (GenerateImageNode and GenerateVideoNode on fal or Replicate, Gate,
  * Image, Video, the fal-edit family: EditImageNode, DevelopImageNode,
  * RelightNode, BlendSceneNode, and the nano-actions family on Replicate:
  * RemoveObjectNode, TextEditNode, RecolorObjectNode, SwapBackgroundNode,
  * SwapProductNode, PersonSwap, BlendSceneNode's Nano Banana mode, and the
  * ref-edits family: GenerateFromReferencesNode, RotateCameraNode,
- * ProductShotNode, and the restyle family: RestyleFromImageNode) closely
- * enough that the same workflow gives the same result.
+ * ProductShotNode, the restyle family: RestyleFromImageNode, and the frame
+ * family: Compositor, fed by the LoadImage nodes the Frame editor injects)
+ * closely enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiPrompt } from '#shared/runner/graph'
 import { resolveVideoModelId } from '#shared/runner/eligibility'
@@ -34,12 +36,15 @@ import {
   checkStyleSource, isNanoBananaRestyle, isRestyleModel, isUnreadableFile, restyleCall, structureStrengthOf,
 } from './generators/restyle'
 import { moodboardFiles, parseInputFileRef } from './inputs'
+import { planCompositor } from './compositor/plan'
 import type { OutputFile, RunnerProvider } from './types'
 
 export type NodePlan =
   | { kind: 'provider'; provider: RunnerProvider; endpoint: string; payload: Record<string, unknown>; media: 'image' | 'video'; prefix: string; uiFor(files: OutputFile[]): Record<string, unknown> | null }
   | { kind: 'pass'; files: OutputFile[]; ui: Record<string, unknown> | null }
   | { kind: 'pause'; files: OutputFile[] }
+  /** Computed on this server: `render` makes the PNG, saved as a temp live preview (as Python's save_live_preview). */
+  | { kind: 'local'; render(): Promise<Uint8Array>; uiFor(files: OutputFile[]): Record<string, unknown> | null }
 
 export interface PlanContext {
   prompt: ApiPrompt
@@ -53,6 +58,8 @@ export interface PlanContext {
   toUrl(file: OutputFile): Promise<string>
   /** For a Gate: this take was let through it. */
   gateOpen: boolean
+  /** The bytes of one of our files (a local render reads its pictures). Absent: local renders fail plainly. */
+  readFile?(file: OutputFile): Promise<Uint8Array>
 }
 
 export async function planNode(ctx: PlanContext): Promise<NodePlan> {
@@ -394,6 +401,18 @@ export async function planNode(ctx: PlanContext): Promise<NodePlan> {
         seed: asInt(inputs.seed, 0),
       })
       return still(call.endpoint, call.payload, 'restyle', call.provider)
+    }
+
+    // ── frame family (comfy_extras/nodes_compositor.py) ──
+    case 'Compositor':
+      return planCompositor(ctx)
+
+    // The Frame editor's injected LoadImage: its file, handed to the Frame
+    // (which reads the picture, or its alpha as the mask, by the wire's slot).
+    case 'LoadImage': {
+      const f = parseInputFileRef(inputs.image)
+      if (!f) throw new Error('There is no picture to load')
+      return { kind: 'pass', files: [f], ui: null }
     }
 
     case GATE_CLASS: {

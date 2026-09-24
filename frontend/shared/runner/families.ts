@@ -13,9 +13,11 @@ export type RunnerFamily =
   | 'nano-actions'
   | 'ref-edits'
   | 'restyle'
+  /** The Frame render (Compositor), computed by the runner itself: no provider, no charge. */
+  | 'frame'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
-  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle',
+  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame',
 ]
 
 const KNOWN: ReadonlySet<string> = new Set(RUNNER_FAMILIES)

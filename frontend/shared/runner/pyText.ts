@@ -34,6 +34,34 @@ export function pyIntOf(s: string): number | null {
   return PY_INT_RE.test(t) ? Number.parseInt(t.replace(/_/g, ''), 10) : null
 }
 
+// Python float()'s string grammar: digits with single underscores between
+// them, an optional fraction and exponent, or inf / infinity / nan.
+const DIGITS = String.raw`\d(?:_?\d)*`
+const PY_FLOAT_RE = new RegExp(
+  String.raw`^[+-]?(?:(?:${DIGITS}(?:\.(?:${DIGITS})?)?|\.${DIGITS})(?:[eE][+-]?${DIGITS})?|inf|infinity|nan)$`, 'i')
+
+/** Python float(str): the string as float() reads it, or null where float() raises. */
+export function pyFloatOf(s: string): number | null {
+  const t = pyNumStrip(s)
+  if (!PY_FLOAT_RE.test(t)) return null
+  const lower = t.toLowerCase()
+  const neg = lower.startsWith('-')
+  const body = lower.replace(/^[+-]/, '')
+  if (body === 'nan') return Number.NaN
+  if (body === 'inf' || body === 'infinity') return neg ? -Infinity : Infinity
+  return Number(t.replace(/_/g, ''))
+}
+
+/** Python bool(v) for a JSON value: 0, "", [], {} and null are false; NaN is true. */
+export function pyTruthy(v: unknown): boolean {
+  if (v === null || v === undefined) return false
+  if (typeof v === 'number') return v !== 0
+  if (typeof v === 'string') return v.length > 0
+  if (Array.isArray(v)) return v.length > 0
+  if (typeof v === 'object') return Object.keys(v as object).length > 0
+  return Boolean(v)
+}
+
 /** Python's float `%`: fmod, then moved to the divisor's sign (`-1 % 360` is 359). */
 export function pyMod(a: number, n: number): number {
   const r = a % n

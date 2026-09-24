@@ -5,7 +5,7 @@
  * key is MISSING — a present-but-null value goes through the conversion,
  * which is why each reader checks own-property first.
  */
-import { pyIntOf, pyNumStrip, pyStrip } from '#shared/runner/pyText'
+import { pyFloatOf, pyIntOf, pyStrip } from '#shared/runner/pyText'
 
 const has = (adv: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(adv, key)
 
@@ -30,23 +30,9 @@ export function optInt(adv: Record<string, unknown>, key: string, def: number): 
   return pyIntOf(v) ?? def
 }
 
-// Python float()'s string grammar: digits with single underscores between
-// them, an optional fraction and exponent, or inf / infinity / nan.
-const DIGITS = String.raw`\d(?:_?\d)*`
-const PY_FLOAT_RE = new RegExp(
-  String.raw`^[+-]?(?:(?:${DIGITS}(?:\.(?:${DIGITS})?)?|\.${DIGITS})(?:[eE][+-]?${DIGITS})?|inf|infinity|nan)$`, 'i')
-
-/** Python float(str): the string as float() reads it, or null where float() raises. */
-export function pyFloatOf(s: string): number | null {
-  const t = pyNumStrip(s)
-  if (!PY_FLOAT_RE.test(t)) return null
-  const lower = t.toLowerCase()
-  const neg = lower.startsWith('-')
-  const body = lower.replace(/^[+-]/, '')
-  if (body === 'nan') return Number.NaN
-  if (body === 'inf' || body === 'infinity') return neg ? -Infinity : Infinity
-  return Number(t.replace(/_/g, ''))
-}
+// Python float(str) lives in shared/runner/pyText.ts (the Compositor's
+// eligibility reads it too); re-exported here for the generators.
+export { pyFloatOf }
 
 /** _opt_float: a bool is 1 or 0, a number is itself, anything else float(str(v)) or the default. */
 export function optFloat(adv: Record<string, unknown>, key: string, def: number): number {

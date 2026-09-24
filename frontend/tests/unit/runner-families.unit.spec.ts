@@ -34,8 +34,8 @@ describe('parseFamilies', () => {
   it('takes a list of names too (a runtime config value may arrive parsed)', () => {
     expect([...parseFamilies(['fal-edit', 7, 'nope', 'ref-edits'])].sort()).toEqual(['fal-edit', 'ref-edits'])
   })
-  it('knows the six families', () => {
-    expect([...RUNNER_FAMILIES].sort()).toEqual(['fal-edit', 'nano-actions', 'ref-edits', 'replicate-image', 'replicate-video', 'restyle'])
+  it('knows the seven families', () => {
+    expect([...RUNNER_FAMILIES].sort()).toEqual(['fal-edit', 'frame', 'nano-actions', 'ref-edits', 'replicate-image', 'replicate-video', 'restyle'])
   })
 })
 
@@ -97,8 +97,11 @@ describe('eligibility with families', () => {
       for (const f of named.filter(Boolean)) expect(RUNNER_FAMILIES).toContain(f)
     }
   })
-  it('the provider set is the two generators plus every rule row', () => {
-    expect([...PROVIDER_TYPES].sort()).toEqual([...new Set(['GenerateImageNode', 'GenerateVideoNode', ...Object.keys(RUNNER_NODE_RULES)])].sort())
+  it('the provider set is the two generators plus every rule row the runner does not compute itself', () => {
+    const provider = Object.entries(RUNNER_NODE_RULES).filter(([, r]) => !r.local).map(([k]) => k)
+    expect([...PROVIDER_TYPES].sort()).toEqual([...new Set(['GenerateImageNode', 'GenerateVideoNode', ...provider])].sort())
+    expect(PROVIDER_TYPES.has('Compositor')).toBe(false)
+    expect(PROVIDER_TYPES.has('LoadImage')).toBe(false)
   })
   it.each(CASES)('%s: the same answer with no families, the default and every family', (_label, prompt, want) => {
     expect(isRunnerEligible(prompt)).toBe(want)

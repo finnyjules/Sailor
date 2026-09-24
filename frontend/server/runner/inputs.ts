@@ -1,7 +1,7 @@
 /**
  * Files a workflow reads before it makes anything: moodboard reference
- * pictures (GenerateImageNode.style_refs, RestyleFromImageNode.style_refs) and pictures/clips loaded into an
- * unwired Image or Video card. In hosted, every one must be the user's own.
+ * pictures (GenerateImageNode.style_refs, RestyleFromImageNode.style_refs), pictures/clips loaded into an
+ * unwired Image or Video card, and a LoadImage's picture (the Frame's baked layers). In hosted, every one must be the user's own.
  */
 import { isLink, type ApiPrompt } from '#shared/runner/graph'
 import { MeterRefusalError } from '../utils/requestMeter'
@@ -55,6 +55,11 @@ export function collectInputFiles(prompt: ApiPrompt): OutputFile[] {
     const inputs = node.inputs ?? {}
     if (node.class_type === 'GenerateImageNode' || node.class_type === 'RestyleFromImageNode') out.push(...moodboardFiles(inputs.style_refs))
     if (node.class_type === 'Image' && !isLink(inputs.images)) {
+      const f = parseInputFileRef(inputs.image)
+      if (f) out.push(f)
+    }
+    // The Frame editor's injected LoadImage (baked layers and masks).
+    if (node.class_type === 'LoadImage' && !isLink(inputs.image)) {
       const f = parseInputFileRef(inputs.image)
       if (f) out.push(f)
     }

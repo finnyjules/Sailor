@@ -2,9 +2,9 @@
  * Which workflows the Sailor runner takes. Everything else goes to ComfyUI
  * whole — a workflow is never split between the two.
  */
-import { isLink, type ApiPrompt } from './graph'
+import { isLink, linksOf, type ApiPrompt } from './graph'
 import { NO_FAMILIES, type RunnerFamily } from './families'
-import { pyIntOf } from './pyText'
+import { pyFloatOf, pyIntOf } from './pyText'
 
 export const RUNNER_NODE_TYPES: ReadonlySet<string> = new Set([
   'GenerateImageNode', 'GenerateVideoNode', 'ComfyGateNode', 'Image', 'Video',
@@ -28,6 +28,41 @@ export interface RunnerNodeRule {
   models?: Readonly<Record<string, RunnerFamily | RunnerModelRule>>
   mustLink?: readonly string[]
   mustNotLink?: readonly string[]
+  /**
+   * A class the runner computes itself, with no provider and no charge:
+   * 'render' makes a picture (it counts as work, like a provider node);
+   * 'source' only hands a file on. Absent = a provider class.
+   */
+  local?: 'render' | 'source'
+  /**
+   * The widgets ComfyUI validates before anything runs (execution.py
+   * validate_inputs): the value converts to its type, sits within min/max,
+   * or is one of the options; a required one is present. A widget that is
+   * wired, or fails any of that, leaves the node to ComfyUI, which refuses
+   * the whole prompt with its own message before running (and charging) a thing.
+   */
+  widgets?: Readonly<Record<string, RunnerWidgetSpec>>
+  /** Output slots no node in the prompt may read (e.g. the Compositor's protect_mask and video). */
+  outputsNotLinked?: readonly number[]
+  /** Every node reading this one must be one of these classes. */
+  feedsOnly?: readonly string[]
+  /** A wired input must come from one of these (class, output slot) pairs. */
+  linkSources?: Readonly<Record<string, readonly (readonly [string, number])[]>>
+  /**
+   * JSON text inputs that must not carry a non-empty list under a key
+   * (the Compositor's baked motion: `motion_params.rendered`). Text that
+   * does not parse is taken only when it does not mention the key.
+   */
+  noJsonList?: Readonly<Record<string, string>>
+}
+
+/** A widget as ComfyUI's validation reads it. */
+export interface RunnerWidgetSpec {
+  type: 'FLOAT' | 'INT' | 'BOOLEAN' | 'STRING' | 'COMBO'
+  required?: boolean
+  min?: number
+  max?: number
+  options?: readonly string[]
 }
 
 /**
@@ -63,6 +98,37 @@ export const RUNNER_REPLICATE_VIDEO_MODEL_IDS = [
   'seedance-2.0-fast', 'hailuo-2.3', 'wan-2.7-t2v', 'wan-2.5-i2v-fast',
   'luma-ray-2-720p', 'ltx-video', 'pixverse-v6',
 ] as const
+
+/** comfy_extras/nodes_compositor.py `_BLEND_MODES`. */
+export const COMPOSITOR_BLEND_MODES = [
+  'normal', 'multiply', 'screen', 'overlay', 'soft_light', 'hard_light', 'difference', 'lighten', 'darken', 'add',
+] as const
+/** `_MAX_LAYERS`. */
+export const COMPOSITOR_MAX_LAYERS = 16
+
+/** CompositorNode.define_schema's widgets, as ComfyUI validates them. */
+function compositorWidgets(): Record<string, RunnerWidgetSpec> {
+  const w: Record<string, RunnerWidgetSpec> = {}
+  for (let i = 1; i <= COMPOSITOR_MAX_LAYERS; i++) {
+    // `_layer_inputs`: only the IMAGE port is optional; the six widgets are required on every slot.
+    w[`layer${i}_x`] = { type: 'FLOAT', required: true, min: -1.5, max: 1.5 }
+    w[`layer${i}_y`] = { type: 'FLOAT', required: true, min: -1.5, max: 1.5 }
+    w[`layer${i}_rotation`] = { type: 'FLOAT', required: true, min: -180, max: 180 }
+    w[`layer${i}_scale`] = { type: 'FLOAT', required: true, min: 0.1, max: 3 }
+    w[`layer${i}_opacity`] = { type: 'FLOAT', required: true, min: 0, max: 1 }
+    w[`layer${i}_blend`] = { type: 'COMBO', required: true, options: COMPOSITOR_BLEND_MODES }
+    w[`layer${i}_z`] = { type: 'FLOAT', min: -1000, max: 1000 }
+    w[`layer${i}_protect`] = { type: 'BOOLEAN' }
+    w[`layer${i}_cloner`] = { type: 'STRING' }
+  }
+  w.width = { type: 'INT', min: 0, max: 8192 }
+  w.height = { type: 'INT', min: 0, max: 8192 }
+  w.motion_params = { type: 'STRING' }
+  return w
+}
+
+/** A MASK input the runner can supply: a LoadImage's MASK output (1 − alpha of its file). */
+const LOAD_IMAGE_MASK = [['LoadImage', 1]] as const
 
 /**
  * The node classes (or extra models of a runner class) the families add,
@@ -148,16 +214,50 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       : 'replicate-video' as const])),
     mustNotLink: ['prompt', 'model_options'],
   },
+  // ── frame: the Frame render, computed by the runner (server/runner/compositor/) ──
+  // The static composite only. Left to ComfyUI: baked motion (a frame batch
+  // and a real video), anything reading the protect_mask or video outputs,
+  // a mask from anything but a LoadImage, and layer 1 unwired (ComfyUI
+  // refuses that prompt: layer1 is required).
+  Compositor: {
+    family: 'frame',
+    local: 'render',
+    mustLink: ['layer1'],
+    widgets: compositorWidgets(),
+    outputsNotLinked: [1, 2],
+    linkSources: Object.fromEntries([
+      ...Array.from({ length: COMPOSITOR_MAX_LAYERS }, (_, i) => [`layer${i + 1}_mask`, LOAD_IMAGE_MASK] as const),
+      ['overlay_mask', LOAD_IMAGE_MASK] as const,
+    ]),
+    noJsonList: { motion_params: 'rendered' },
+  },
+  // The LoadImage the Frame editor injects at submit for baked text/shape
+  // layers and masks (VueNodeCanvas injectCompositorOverlays). Taken only
+  // when it feeds Frames: anywhere else its RGB-only picture would differ
+  // from the file the runner hands a provider.
+  LoadImage: {
+    family: 'frame',
+    local: 'source',
+    mustNotLink: ['image', 'upload'],
+    feedsOnly: ['Compositor'],
+  },
 }
 
 /**
  * The classes that make a provider call (and so are charged): the two
- * generators, plus every class a family row adds. A workflow needs at least
- * one of them to go to the runner.
+ * generators, plus every class a family row adds that is not computed by
+ * the runner itself. A workflow needs at least one of them, or one local
+ * render (LOCAL_RENDER_TYPES), to go to the runner.
  */
 export const PROVIDER_TYPES: ReadonlySet<string> = new Set([
-  'GenerateImageNode', 'GenerateVideoNode', ...Object.keys(RUNNER_NODE_RULES),
+  'GenerateImageNode', 'GenerateVideoNode',
+  ...Object.entries(RUNNER_NODE_RULES).filter(([, r]) => !r.local).map(([k]) => k),
 ])
+
+/** Classes the runner renders itself (free, no provider): the Frame. They count as work. */
+export const LOCAL_RENDER_TYPES: ReadonlySet<string> = new Set(
+  Object.entries(RUNNER_NODE_RULES).filter(([, r]) => r.local === 'render').map(([k]) => k),
+)
 
 /** The image models that default to fal AND have a price. krea-2-large,
  *  krea-2-medium and seedream-5-pro are left out until they are priced. */
@@ -246,6 +346,74 @@ export function nodeRuleAllows(
   if (!family || !families.has(family)) return false
   if (need.some(name => !isLink(inputs[name]))) return false
   if ((rule.mustNotLink ?? []).some(name => isLink(inputs[name]))) return false
+  for (const [name, spec] of Object.entries(rule.widgets ?? {})) {
+    if (!widgetValid(inputs, name, spec)) return false
+  }
+  for (const [name, key] of Object.entries(rule.noJsonList ?? {})) {
+    if (hasJsonList(inputs[name], key)) return false
+  }
+  return true
+}
+
+/** ComfyUI's validate_inputs for one widget (execution.py): present if required, converts, in range, in the options. */
+export function widgetValid(inputs: Record<string, unknown>, name: string, spec: RunnerWidgetSpec): boolean {
+  if (!Object.prototype.hasOwnProperty.call(inputs, name)) return !spec.required
+  const v = inputs[name]
+  // A wire into a widget, a list that is not a wire, or an object: left to ComfyUI.
+  if (Array.isArray(v) || (v !== null && typeof v === 'object')) return false
+  let n: number | null = null
+  switch (spec.type) {
+    case 'FLOAT':
+      n = typeof v === 'number' ? v : typeof v === 'boolean' ? Number(v) : typeof v === 'string' ? pyFloatOf(v) : null
+      break
+    case 'INT':
+      n = typeof v === 'number' ? (Number.isFinite(v) ? Math.trunc(v) : null)
+        : typeof v === 'boolean' ? Number(v) : typeof v === 'string' ? pyIntOf(v) : null
+      break
+    case 'COMBO':
+      return typeof v === 'string' && (spec.options ?? []).includes(v)
+    default:
+      // BOOLEAN is bool(v) and STRING is str(v): every plain value converts.
+      return true
+  }
+  if (n === null) return false
+  // NaN passes both checks, as it does in Python.
+  if (spec.min !== undefined && n < spec.min) return false
+  if (spec.max !== undefined && n > spec.max) return false
+  return true
+}
+
+/** Whether a JSON text input carries a non-empty list under `key` (as `json.loads(v or "{}")` reads it). */
+function hasJsonList(v: unknown, key: string): boolean {
+  if (typeof v !== 'string' || !v) return false
+  let parsed: unknown
+  try { parsed = JSON.parse(v) }
+  // Python's json.loads also reads NaN and Infinity, which JSON.parse refuses: be safe.
+  catch { return v.includes(key) }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false
+  const list = (parsed as Record<string, unknown>)[key]
+  return Array.isArray(list) && list.length > 0
+}
+
+/** The checks a rule makes across the prompt: who reads this node, and where its wires come from. */
+function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule): boolean {
+  const notLinked = rule.outputsNotLinked ?? []
+  if (notLinked.length || rule.feedsOnly) {
+    for (const node of Object.values(prompt)) {
+      for (const l of linksOf(node)) {
+        if (l.from !== id) continue
+        if (notLinked.includes(l.slot)) return false
+        if (rule.feedsOnly && !rule.feedsOnly.includes(node.class_type)) return false
+      }
+    }
+  }
+  const inputs = prompt[id]?.inputs ?? {}
+  for (const [name, sources] of Object.entries(rule.linkSources ?? {})) {
+    const v = inputs[name]
+    if (!isLink(v)) continue
+    const from = prompt[v[0]]
+    if (!from || !sources.some(([cls, slot]) => cls === from.class_type && slot === v[1])) return false
+  }
   return true
 }
 
@@ -253,9 +421,10 @@ export function nodeRuleAllows(
  * Whether the runner can take this one node of the prompt: a runner node type,
  * on a runner model, asking for one picture, with no sound wired into a
  * video, and reading only from nodes in the same prompt — or a class (or
- * model) a switched-on family's row lets through. A workflow goes to the
- * runner only when every node passes AND it has a provider node
- * (isRunnerEligible). `nodesNeedingEngine` (app/lib/runner/needsEngine.ts)
+ * model) a switched-on family's row lets through (its widgets valid, and
+ * its readers and wire sources as the row allows). A workflow goes to the
+ * runner only when every node passes AND it has a provider node or a local
+ * render (isRunnerEligible). `nodesNeedingEngine` (app/lib/runner/needsEngine.ts)
  * names the nodes that fail this, so there is one rule, not two. With no
  * families (the default) this is exactly the rule before families existed.
  */
@@ -264,7 +433,7 @@ export function runnerTakesNode(prompt: ApiPrompt, id: string, families: Readonl
   if (!n) return false
   const inputs = n.inputs ?? {}
   const rule = families.size ? RUNNER_NODE_RULES[n.class_type] : undefined
-  const byRule = !!rule && nodeRuleAllows(n.class_type, rule, inputs, families)
+  const byRule = !!rule && nodeRuleAllows(n.class_type, rule, inputs, families) && graphRuleAllows(prompt, id, rule)
   if (!RUNNER_NODE_TYPES.has(n.class_type) && !byRule) return false
   if (n.class_type === 'GenerateImageNode') {
     if (!IMAGE_IDS.has(String(inputs.model)) && !byRule) return false
@@ -284,10 +453,11 @@ export function isRunnerEligible(prompt: ApiPrompt | null | undefined, families:
   if (!prompt) return false
   const ids = Object.keys(prompt)
   if (!ids.length) return false
-  let providers = 0
+  let work = 0
   for (const id of ids) {
     if (!runnerTakesNode(prompt, id, families)) return false
-    if (PROVIDER_TYPES.has(prompt[id]!.class_type)) providers++
+    const ct = prompt[id]!.class_type
+    if (PROVIDER_TYPES.has(ct) || LOCAL_RENDER_TYPES.has(ct)) work++
   }
-  return providers > 0
+  return work > 0
 }

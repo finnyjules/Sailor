@@ -568,7 +568,21 @@ export function createEngine(deps: EngineDeps) {
         filesFrom: ([from]) => take.nodes[from]?.outputs ?? [],
         toUrl: f => deps.handoff.toUrl(f),
         gateOpen: take.openGates.includes(id),
+        readFile: f => deps.results.read(f),
       })
+      // Rendered here (the Frame): no provider, no charge, not an asset.
+      if (plan.kind === 'local') {
+        const bytes = await plan.render()
+        if (signal.aborted) throw new RunStopped()
+        const file = await deps.results.saveLivePreview(bytes, { nodeId: id })
+        rec.outputs = [file]
+        rec.status = 'done'
+        rec.endedAt = deps.now()
+        await persist(run)
+        const ui = plan.uiFor([file])
+        if (ui) publish(run, ev.executed(stageKey, id, ui))
+        return
+      }
       if (plan.kind === 'pass') {
         rec.outputs = plan.files
         rec.status = 'done'

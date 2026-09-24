@@ -251,7 +251,8 @@ afterEach(() => {
 describe('B10 · one workflow per family, POST /api/runs to the last event', () => {
   it('the server has every family on', () => {
     expect([...runnerFamilies()].sort()).toEqual([...RUNNER_FAMILIES].sort())
-    expect(FLOWS.map(f => f.family).sort()).toEqual([...RUNNER_FAMILIES].sort())
+    // `frame` makes no provider call (the runner renders it): its end-to-end is runner-compositor-engine.unit.spec.ts.
+    expect(FLOWS.map(f => f.family).sort()).toEqual(RUNNER_FAMILIES.filter(f => f !== 'frame').sort())
   })
 
   it.each(FLOWS.map(f => [`${f.family}: ${f.label} → ${f.endpoint}`, f] as const))('%s', async (_l, f) => {
