@@ -43,3 +43,24 @@ export function lerpPlacement(a: MorphPlacement, b: MorphPlacement, t: number): 
     skewX: lin(a.skewX ?? 0, b.skewX ?? 0), skewY: lin(a.skewY ?? 0, b.skewY ?? 0),
   }
 }
+
+/**
+ * The extra stroke width, in px, Chromium adds when it draws a face at a weight the face
+ * does not ship (it synthesises bold). A morph draws the face's REAL outline, so without
+ * this a Boldonse at weight 800 (the file is 400) lost ~12% of its ink at the end of the bar
+ * and visibly jumped (2026-09-24). Skia's rule: stroke by fontPx × 1/24 at ≤ 9 px, 1/32 at
+ * ≥ 36 px, linear between — measured live at 0.00% ink error at 141 px. Synthesis happens
+ * when 600+ is asked of a face under 600 that has no weight axis to draw it with.
+ */
+export function syntheticBoldPx(
+  requestedWeight: number,
+  font: { axes?: readonly { tag: string }[]; raw?: unknown } | null,
+  fontPx: number,
+): number {
+  if (!font || !(requestedWeight >= 600) || !(fontPx > 0)) return 0
+  if (font.axes?.some(a => a.tag === 'wght')) return 0
+  const face = Number((font.raw as { 'OS/2'?: { usWeightClass?: number } } | undefined)?.['OS/2']?.usWeightClass) || 400
+  if (face >= 600) return 0
+  const ratio = fontPx <= 9 ? 1 / 24 : fontPx >= 36 ? 1 / 32 : 1 / 24 + ((fontPx - 9) / 27) * (1 / 32 - 1 / 24)
+  return fontPx * ratio
+}

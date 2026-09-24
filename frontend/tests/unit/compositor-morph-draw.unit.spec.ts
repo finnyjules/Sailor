@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { blendMorphPaint, lerpPlacement, morphFillOf, ringsBBoxOfD } from '~/lib/compositor/morphDraw'
+import { blendMorphPaint, lerpPlacement, morphFillOf, ringsBBoxOfD, syntheticBoldPx } from '~/lib/compositor/morphDraw'
 
 describe('morph draw helpers', () => {
   it('reads a text layer colour and a shape fill', () => {
@@ -37,5 +37,22 @@ describe('morph draw helpers', () => {
     // the other direction too
     const back = lerpPlacement({ x: 0, y: 0, rotation: 10 }, { x: 0, y: 0, rotation: 350 }, 0.5).rotation
     expect(((back % 360) + 360) % 360).toBeCloseTo(0)
+  })
+})
+
+describe('syntheticBoldPx — the bold Chromium fakes for a weight the face does not ship', () => {
+  const staticFace = (w = 400) => ({ axes: [], raw: { 'OS/2': { usWeightClass: w } } })
+  it('matches Skia: fontPx/32 at display sizes (measured: 0.00% ink error at 141 px)', () => {
+    expect(syntheticBoldPx(800, staticFace(), 141)).toBeCloseTo(141 / 32, 6)
+  })
+  it('ramps 1/24 → 1/32 between 9 and 36 px', () => {
+    expect(syntheticBoldPx(700, staticFace(), 9)).toBeCloseTo(9 / 24, 6)
+    expect(syntheticBoldPx(700, staticFace(), 36)).toBeCloseTo(36 / 32, 6)
+  })
+  it('is zero when nothing is faked', () => {
+    expect(syntheticBoldPx(500, staticFace(), 141)).toBe(0)                                 // not bold
+    expect(syntheticBoldPx(800, staticFace(700), 141)).toBe(0)                              // the face is bold
+    expect(syntheticBoldPx(800, { axes: [{ tag: 'wght' }], raw: {} }, 141)).toBe(0)         // a weight axis draws it
+    expect(syntheticBoldPx(800, null, 141)).toBe(0)                                         // no font
   })
 })

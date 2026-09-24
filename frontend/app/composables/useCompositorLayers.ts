@@ -27,7 +27,7 @@ import type { FrameMotion } from '~/lib/motion/types'
 import { applyEffectDialTracks, type EffectDialTrack } from '~/lib/motion/effectTracks'
 import { applyMotionxTracks, applyTextBehaviours, applyRevealBehaviours, applyMorphBehaviours, type TextMotion, type MotionMorph } from '~/lib/motionx/adapter/frame'
 import { prepareMorph } from '~/lib/vector/morphPieces'
-import { blendMorphPaint, lerpPlacement, morphFillOf, ringsBBoxOfD } from '~/lib/compositor/morphDraw'
+import { blendMorphPaint, lerpPlacement, morphFillOf, ringsBBoxOfD, syntheticBoldPx } from '~/lib/compositor/morphDraw'
 import type { StoredBehaviour, Track as MotionxTrack } from '~/lib/motionx'
 import { beginReveal, finishReveal, type RevealPass } from '~/lib/motionx/reveal/paint'
 import { drawRevealShaderStyle, revealShaderReady } from '~/lib/motionx/reveal/paintPixels'
@@ -1564,15 +1564,24 @@ export function resolveMorphs(
       continue
     }
     const sA = morphSizeOf(layer), sB = morphSizeOf(target)
+    const sT = sA + (sB - sA) * mm.amount
     const stack = effectStackOf(layer).filter(e => regionOf(e.type) !== 'geometry')
+    const fill = blendMorphPaint(morphFillOf(layer as never), morphFillOf(target as never), mm.amount)
+    // Text at a weight its face does not ship is drawn by the browser with a SYNTHESISED bold;
+    // the morph's outline is the real face, so each end gets that same stroke (px at its own
+    // size), blended across the bar — otherwise the text thins, then jumps back at the end.
+    const fauxBold = (l: LocalLayer) => (l.kind === 'text'
+      ? syntheticBoldPx(Number((l as TextLayer).fontWeight) || 400, getCompositorFont(l as TextLayer), (l as TextLayer).fontSize * W)
+      : 0)
+    const boldPx = fauxBold(layer) * sA + (fauxBold(target) * sB - fauxBold(layer) * sA) * mm.amount
     swaps.set(layer.id, {
       ...bare,
       ...writeStackToLayer(stack),
       ...lerpPlacement(layer, target, mm.amount),
-      kind: 'path', d, bbox: ringsBBoxOfD(d), scale: (sA + (sB - sA) * mm.amount) / W, fillRule: 'nonzero',
+      kind: 'path', d, bbox: ringsBBoxOfD(d), scale: sT / W, fillRule: 'nonzero',
       motionScale: undefined,
-      fill: blendMorphPaint(morphFillOf(layer as never), morphFillOf(target as never), mm.amount),
-      stroke: '', strokeWidth: 0, strokes: undefined,
+      fill,
+      stroke: boldPx > 0 ? fill : '', strokeWidth: boldPx > 0 ? boldPx / sT : 0, strokes: undefined,
       opacity: (layer.opacity ?? 1) + ((target.opacity ?? 1) - (layer.opacity ?? 1)) * mm.amount,
     } as unknown as LocalLayer)
   }

@@ -194,17 +194,29 @@ export interface CompositorRunStyle {
  * How far the alphabetic baseline sits ABOVE `run.y` (font units, y-up) for a
  * given `textBaseline`. Canvas anchors `run.y` to one of the font's alignment
  * lines; we shape on the alphabetic baseline, so we shift by the gap between it
- * and the requested line. `descent` arrives negative (below the baseline), so
- * `bottom`/`ideographic` naturally push the baseline UP by |descent|.
+ * and the requested line. `descent` arrives negative (below the baseline).
+ *
+ * Chromium resolves these on the EM box, not the raw font lines: ascent A and
+ * descent D are scaled so they sum to one em (top = A/(A+D)·em, bottom =
+ * −D/(A+D)·em, middle halfway), `hanging` is 0.8·A and `ideographic` the raw
+ * descent — each measured live against `measureText` (2026-09-24). The raw
+ * lines agree only when A + D is exactly one em; on a display face whose lines
+ * sum to nearly two ems (Boldonse) raw 'middle' put path text ~27 px low per
+ * 100 px of type, and a Morph onto it jumped at the end of its bar.
  */
-function baselineShiftUnits(baseline: CanvasTextBaseline, ascent: number, descent: number): number {
+function baselineShiftUnits(baseline: CanvasTextBaseline, ascent: number, descent: number, unitsPerEm: number): number {
+  const A = ascent, D = -descent, sum = A + D
+  const emA = sum > 0 ? (A / sum) * unitsPerEm : A
+  const emD = sum > 0 ? (D / sum) * unitsPerEm : D
   switch (baseline) {
     case 'top':
+      return emA
     case 'hanging':
-      return ascent
+      return 0.8 * A
     case 'middle':
-      return (ascent + descent) / 2
+      return (emA - emD) / 2
     case 'bottom':
+      return -emD
     case 'ideographic':
       return descent
     case 'alphabetic':
@@ -264,7 +276,7 @@ export function runToCommands(
     0 // left | start | justify → left-anchored
 
   // Canvas baseline (font y = 0 line) in the output space, per textBaseline.
-  const baseY = run.y + baselineShiftUnits(style.baseline, metrics.ascent, metrics.descent) * scale
+  const baseY = run.y + baselineShiftUnits(style.baseline, metrics.ascent, metrics.descent, unitsPerEm) * scale
 
   const out: VectorCommand[] = []
   for (let i = 0; i < n; i++) {

@@ -255,6 +255,31 @@ describe('runToCommands', () => {
     expect(bbox(cmds).maxY).toBeCloseTo(run.y + 50, 5)
   })
 
+  // Chromium resolves textBaseline on the EM box: the font's ascent and descent are scaled
+  // so they sum to one em. The stub above sums to exactly one em (800 + 200), where the raw
+  // and em-scaled lines coincide — so it cannot tell them apart. A display face whose
+  // ascent + descent is nearly two ems (Boldonse: 1520 / 400 over 1000) is where they part:
+  // raw 'middle' put path text ~27 px low per 100 px of type, and a Morph onto such text
+  // jumped at the end of its bar (2026-09-24). Expected values are Chromium's, measured live.
+  const tallFont = (): VtFont => {
+    const f = stubFont()
+    return { ...f, raw: { ...(f.raw as object), ascent: 1520, descent: -400 } } as VtFont
+  }
+  const baselineY = (bl: CanvasTextBaseline) => {
+    // The stub glyph's bottom is font-y −200 → 20 px below the alphabetic baseline at 0.1 scale.
+    return bbox(runToCommands(tallFont(), run, { ...style, baseline: bl })).maxY - 20
+  }
+  it.each([
+    ['middle', 29.1667],   // (A − D) / (A + D) · em / 2
+    ['top', 79.1667],      //  A / (A + D) · em
+    ['bottom', -20.8333],  // −D / (A + D) · em
+    ['hanging', 121.6],    //  0.8 · A
+    ['ideographic', -40],  // −D, unscaled
+    ['alphabetic', 0],
+  ] as const)('%s: the alphabetic baseline sits where Chromium puts it on a tall face', (bl, below) => {
+    expect(baselineY(bl)).toBeCloseTo(run.y + below, 3)
+  })
+
   it('alphabetic: the baseline (font-y 0) sits on run.y', () => {
     const cmds = runToCommands(stubFont(), run, style)
     // Box bottom at font-y −200 → run.y + 20; top at font-y 800 → run.y − 80.
