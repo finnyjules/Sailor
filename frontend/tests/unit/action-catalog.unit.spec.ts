@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
   ACTION_CATALOG, DEPRECATED_NODES, HERO_BY_DOMAIN, INTENT_ORDER, groupByIntent, CHIPS_BY_DOMAIN,
-  modalHero, ARTIFACT_NODE_FOR_SOURCE,
 } from '~/data/action-catalog'
 
 const VALID_INTENTS = ['create', 'edit', 'enhance', 'analyze']
@@ -49,30 +48,6 @@ describe('ACTION_CATALOG integrity', () => {
     }
   })
 
-  it('modalHero returns 8 catalog-backed entries with per-domain caps', () => {
-    const hero = modalHero()
-    expect(hero).toHaveLength(8)
-    for (const h of hero) {
-      expect(ACTION_CATALOG[h.nodeType], h.nodeType).toBeDefined()
-      expect(h.entry).toBe(ACTION_CATALOG[h.nodeType])
-    }
-    const domains = { image: 3, video: 2, audio: 2, '3d': 1 } as const
-    let i = 0
-    for (const [domain, cap] of Object.entries(domains)) {
-      const expected = HERO_BY_DOMAIN[domain as keyof typeof HERO_BY_DOMAIN].slice(0, cap)
-      expect(hero.slice(i, i + cap).map(h => h.nodeType)).toEqual(expected)
-      i += cap
-    }
-  })
-
-  it('every non-create modalHero entry declares a source, and sources map to artifacts', () => {
-    for (const h of modalHero()) {
-      if (h.entry.intent !== 'create') {
-        expect(h.entry.source, `${h.nodeType} needs source`).toBeDefined()
-        expect(ARTIFACT_NODE_FOR_SOURCE[h.entry.source!], `${h.nodeType} source maps`).toBeDefined()
-      }
-    }
-  })
 })
 
 describe('groupByIntent', () => {

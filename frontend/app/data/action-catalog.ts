@@ -158,19 +158,6 @@ export const ARTIFACT_NODE_FOR_SOURCE: Record<ActionSource, string> = {
   text: 'Text',
 }
 
-// Start-modal hero tier: flatten HERO_BY_DOMAIN with per-domain caps so the
-// modal shows 8 cards (2 rows) spanning all media types. Order = domain order.
-const MODAL_HERO_CAPS: [ActionDomain, number][] = [
-  ['image', 3], ['video', 2], ['audio', 2], ['3d', 1],
-]
-export function modalHero(): { nodeType: string; entry: ActionEntry }[] {
-  return MODAL_HERO_CAPS.flatMap(([domain, cap]) =>
-    HERO_BY_DOMAIN[domain].slice(0, cap)
-      .filter(nt => ACTION_CATALOG[nt] != null)
-      .map(nt => ({ nodeType: nt, entry: ACTION_CATALOG[nt]! })),
-  )
-}
-
 export interface ActionSection<T> {
   intent: ActionIntent | 'other'
   label: string

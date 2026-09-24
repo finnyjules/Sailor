@@ -30,7 +30,7 @@ import AllProjectsView from '~/components/AllProjectsView.vue'
 import StartProjectModal from '~/components/StartProjectModal.vue'
 import CanvasStatusBar, { type RunResult } from '~/components/CanvasStatusBar.vue'
 import AgentCanvasPromptBar from '~/components/agent/CanvasPromptBar.vue'
-import { ARTIFACT_NODE_FOR_SOURCE, type ActionSource } from '~/data/action-catalog'
+import type { StartPickId } from '~/data/start-modal'
 import { estimateUsdForNodes, vueNodesToEstimateInput, type CostEstimate } from '~/lib/costEstimate'
 import { formatCostBadge, formatEstimateBadge, formatEstimateLong } from '~/lib/pricing'
 import { hostedModeEnabled, engineOrigin } from '~/lib/hostedMode'
@@ -305,18 +305,13 @@ async function seedStarterGraph(nodeType: string, tries = 0) {
   }
 }
 
-function onStartModalPick(payload: { nodeType: string; source?: ActionSource }) {
-  const sourceNodeType = payload.source ? ARTIFACT_NODE_FOR_SOURCE[payload.source] : undefined
+// Start modal → canvas. Every pick (including skip = null) builds through the
+// canvas's materializeStart, so every blank project gets its Frame.
+function onStartModalStart(pick: StartPickId | null) {
   startModalTabId.value = null
-  // Defer one tick so the modal unmounts before we touch the canvas — keeps
-  // any focus/scroll state clean and ensures the canvas is fully mounted.
-  // Then ensure the schema is loaded before seeding: materializeStartGraph
-  // returns false when object_info hasn't arrived yet or lacks the picked
-  // generator — mirrors seedStarterGraph's refreshSchema safety, and both
-  // failure paths surface a toast rather than staying silent.
   nextTick(async () => {
     const canvas = vueCanvasRef.value
-    if (!canvas?.materializeStartGraph) {
+    if (!canvas?.materializeStart) {
       toast.error('Couldn’t set up the project', {
         description: vueNodesEnabled.value
           ? 'The canvas didn’t finish loading. Refresh the page and try again.'
@@ -325,20 +320,8 @@ function onStartModalPick(payload: { nodeType: string; source?: ActionSource }) 
       return
     }
     await canvas.refreshSchema?.()
-    const ok = canvas.materializeStartGraph({ sourceNodeType, generatorNodeType: payload.nodeType })
-    if (ok === false) {
-      toast.error('Couldn’t add the starter', { description: `The backend doesn’t provide “${payload.nodeType}”. Check that ComfyUI is running and up to date, then try again from the + menu.` })
-    }
+    await canvas.materializeStart(pick)
   })
-}
-
-// Studio tile in the start modal → same routing as the toolbar Studios door.
-function onStartModalStudio(opt: { label: string; nodeType?: string; special?: string }) {
-  startModalTabId.value = null
-  nextTick(() => onLoadOption(opt))
-}
-function onStartModalSkip() {
-  startModalTabId.value = null
 }
 
 const activeTool = ref<string>('select')
@@ -4526,9 +4509,7 @@ function dismissRunResult() {
          a runnable graph from the user's intent (output × input × model). -->
     <StartProjectModal
       v-if="startModalTabId && activeTabId === startModalTabId"
-      @start="onStartModalPick"
-      @studio="onStartModalStudio"
-      @skip="onStartModalSkip"
+      @start="onStartModalStart"
     />
 
     <!-- Private-beta gate: overlays everything (fixed inset-0 z-[200]) when
