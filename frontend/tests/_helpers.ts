@@ -15,6 +15,29 @@ export async function setStudioRow(page: Page, testid: string, value: number | s
 }
 
 /**
+ * Fresh blank projects pop the "What do you want to make?" StartProjectModal
+ * (StartProjectModal.vue), which covers the canvas (z-100). Every exit path —
+ * a pick, "Start with an empty Frame", the close button or Esc — now leaves a
+ * Frame (Compositor) node on the canvas; there is no more "skip to a bare
+ * canvas" option. Tests written against a bare canvas after skipping still
+ * need one, so this clicks the empty-Frame button and then removes the
+ * starter Frame it leaves behind.
+ */
+export async function dismissStartModal(page: Page) {
+  const emptyFrame = page.getByTestId('start-empty-frame')
+  if (await emptyFrame.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await emptyFrame.click()
+    await emptyFrame.waitFor({ state: 'hidden', timeout: 5_000 })
+    const frame = page.locator('.vue-flow__node').first()
+    if (await frame.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await frame.click()
+      await page.keyboard.press('Delete')
+      await page.locator('.vue-flow__node').first().waitFor({ state: 'detached', timeout: 5_000 }).catch(() => {})
+    }
+  }
+}
+
+/**
  * Open the home page and switch to a blank workflow so VueNodeCanvas is mounted.
  * The canvas listens for `sailor:openTimeline` and `sailor:openSmartLayout`
  * custom events to launch the respective full-screen editors.
@@ -39,13 +62,7 @@ export async function openBlankWorkflow(page: Page) {
   await page.getByRole('button', { name: /^Start a blank project$/ }).click()
   await page.locator('.vue-flow').first().waitFor({ state: 'visible', timeout: 20_000 })
 
-  // Fresh blank projects pop the "Get Started" intent modal (StartProjectModal),
-  // which intercepts all canvas clicks. Skip it when it shows up.
-  const skipStartModal = page.getByRole('button', { name: /Skip — start with a blank canvas/i })
-  if (await skipStartModal.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await skipStartModal.click()
-    await skipStartModal.waitFor({ state: 'hidden', timeout: 5_000 })
-  }
+  await dismissStartModal(page)
 }
 
 /** The timeline editor's full-screen overlay. Several modals share the

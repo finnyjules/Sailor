@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { dropNode, waitForBackend } from './_helpers'
+import { dropNode, waitForBackend, dismissStartModal } from './_helpers'
 
 /**
  * Grouping — end-to-end.
@@ -69,11 +69,11 @@ async function openBlankWorkflow(page: Page) {
     }
   }
 
-  const skipStartModal = page.getByRole('button', { name: /Skip — start with a blank canvas/i })
-  if (await skipStartModal.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await skipStartModal.click()
-    await skipStartModal.waitFor({ state: 'hidden', timeout: 5_000 })
-  }
+  // Skipping now lands a Frame (Compositor) on the canvas. This suite's
+  // object-row counts are read from the 3D Studio dialog, not the canvas
+  // node list, but a leftover Frame is still noise a bare-canvas test
+  // shouldn't carry — remove it before dropping this spec's own node.
+  await dismissStartModal(page)
 }
 
 // ── studio helpers ───────────────────────────────────────────────────────────

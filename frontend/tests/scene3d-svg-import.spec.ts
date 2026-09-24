@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { dropNode, waitForBackend } from './_helpers'
+import { dropNode, waitForBackend, dismissStartModal } from './_helpers'
 
 /**
  * 3D Studio — SVG import, end-to-end.
@@ -53,11 +53,11 @@ async function openBlankWorkflow(page: Page) {
     }
   }
 
-  const skipStartModal = page.getByRole('button', { name: /Skip — start with a blank canvas/i })
-  if (await skipStartModal.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await skipStartModal.click()
-    await skipStartModal.waitFor({ state: 'hidden', timeout: 5_000 })
-  }
+  // Skipping now lands a Frame (Compositor); this spec drops its own
+  // Scene3DStudio node and opens it by dispatched nodeId (not by index), so a
+  // leftover Frame wouldn't break it — but the suite's own object-count
+  // assertions (`allRows` etc.) are cleanest against a genuinely bare canvas.
+  await dismissStartModal(page)
 }
 
 /**

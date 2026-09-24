@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { PNG } from 'pngjs'
-import { waitForBackend } from './_helpers'
+import { waitForBackend, dismissStartModal } from './_helpers'
 
 /**
  * A generative catalog effect used as a Frame layer fill must paint the FIELD on the
@@ -27,11 +27,10 @@ async function openBlankWorkflow(page: Page) {
       if (attempt === 2) throw new Error('openBlankWorkflow: .vue-flow never appeared after 3 attempts')
     }
   }
-  const skip = page.getByRole('button', { name: /Skip — start with a blank canvas/i })
-  if (await skip.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await skip.click()
-    await skip.waitFor({ state: 'hidden', timeout: 5_000 })
-  }
+  // Skipping now lands a Frame (Compositor) on the canvas; this spec's very
+  // next assertion is `canvases` (frame-card-stack-canvas) at count 0 before
+  // adding anything, so the starter Frame must go, not stay.
+  await dismissStartModal(page)
   // When a project auto-resumes (the branch above's "already visible" case),
   // its own async workflow-restore fetch can still be in flight — and it
   // REPLACES the entire node list wholesale once it lands. Observed directly:

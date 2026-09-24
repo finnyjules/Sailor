@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { dropNode, waitForBackend } from './_helpers'
+import { dropNode, waitForBackend, dismissStartModal } from './_helpers'
 
 /**
  * The ambientCG texture picker row — end-to-end.
@@ -42,11 +42,10 @@ async function openBlankWorkflow(page: Page) {
     }
   }
 
-  const skipStartModal = page.getByRole('button', { name: /Skip — start with a blank canvas/i })
-  if (await skipStartModal.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await skipStartModal.click()
-    await skipStartModal.waitFor({ state: 'hidden', timeout: 5_000 })
-  }
+  // Skipping now lands a Frame (Compositor) on the canvas. Nothing here
+  // depends on it, so remove it for a bare canvas before dropping this
+  // spec's own Scene3DStudio node.
+  await dismissStartModal(page)
 }
 
 /** Blank project → a Scene3DStudio node → its studio open → one Box, selected. */

@@ -2,10 +2,17 @@ import { expect, test, type Page } from '@playwright/test'
 import { waitForBackend } from './_helpers'
 
 /**
- * Start modal — capability showcase (IA start-modal revamp). The modal is
- * the taxonomy's front door: 8 hero action cards + 6 studio tiles, no
- * search, no prompt. NOTE: openBlankWorkflow() from _helpers skips this
- * modal, so these tests reimplement the open WITHOUT the skip.
+ * Start modal — the blank-project rewrite (spec 2026-09-23). Two equal
+ * halves ("Make it with AI" / "Make it by hand"), a real picture or live
+ * still on every tile, and no more "skip to a bare canvas": every exit path
+ * — a tile pick, "Start with an empty Frame", the close button, Esc, or a
+ * backdrop click — lands a Frame (Compositor) node. Skipping leaves exactly
+ * one, empty. Video is deliberately left unwired (the Frame has no video
+ * input), so it's the one pick that lands 2 nodes with 0 edges.
+ *
+ * NOTE: openBlankWorkflow() from _helpers now dismisses this modal itself,
+ * so these tests reimplement the open WITHOUT dismissing it, to interact
+ * with the modal directly.
  */
 async function openToModal(page: Page) {
   await page.addInitScript(() => {
@@ -20,43 +27,80 @@ async function openToModal(page: Page) {
   await expect(page.getByText('What do you want to make?')).toBeVisible({ timeout: 5_000 })
 }
 
-test.describe('Start modal — capability showcase', () => {
+/** Wait for the canvas node count to settle: the canvas finishes loading its
+ *  empty workflow asynchronously after mount and can wipe/replace `nodes`
+ *  once that lands (see dropNodeAndWait's comment in port-intent.spec.ts), so
+ *  a single read right after a pick can catch a value mid-flight. */
+async function settledNodeCount(page: Page): Promise<number> {
+  const nodes = page.locator('.vue-flow__node')
+  let prev = -1
+  for (let i = 0; i < 20; i++) {
+    const count = await nodes.count()
+    if (count === prev) return count
+    prev = count
+    await page.waitForTimeout(300)
+  }
+  return prev
+}
+
+test.describe('Start modal — the blank-project rewrite', () => {
   test.beforeEach(async ({ page }) => {
     await waitForBackend(page)
     await openToModal(page)
   })
 
-  test('shows 8 hero cards and the studios row', async ({ page }) => {
-    await expect(page.getByText('Pick an action — or skip and build freely.')).toBeVisible()
-    for (const title of ['Generate an image', 'Edit an image', 'Generate a video', 'Sync lips to audio', 'Generate speech', 'Generate music', 'Generate a 3D model']) {
-      await expect(page.getByRole('button', { name: new RegExp(title) }).first()).toBeVisible()
+  test('shows both halves with the right tile counts, and no retired studios', async ({ page }) => {
+    const ai = page.getByTestId('start-ai')
+    const hand = page.getByTestId('start-hand')
+    await expect(ai).toBeVisible()
+    await expect(hand).toBeVisible()
+
+    const aiIds = ['gen', 'style', 'edit', 'upscale', 'video']
+    for (const id of aiIds) {
+      await expect(page.getByTestId(`start-tile-${id}`)).toBeVisible()
     }
-    await expect(page.getByText('Craft it by hand')).toBeVisible()
-    // Prefix match: the pastel dot's title ("Uses AI credits") joins the
-    // accessible name on Shot Director / Lip-Sync tiles.
-    for (const studio of ['Gradient', 'Shader', 'Pattern', 'Shot Director', 'Lip-Sync']) {
-      await expect(page.getByRole('button', { name: new RegExp(`^${studio}`) }).first()).toBeVisible()
+    expect(aiIds.length).toBe(5)
+
+    const handIds = ['expressive', 'gradient', 'shader', 'pattern', 'shape', 'vectortype', 'scene3d', 'moodboard']
+    let visibleHandCount = 0
+    for (const id of handIds) {
+      // 'expressive' (Space Type) is gated by a feature flag and may not render.
+      if (await page.getByTestId(`start-tile-${id}`).isVisible().catch(() => false)) visibleHandCount++
     }
-    // Dead affordances gone: no search box.
-    await expect(page.getByPlaceholder(/Search starting points/)).toHaveCount(0)
+    expect(visibleHandCount).toBeGreaterThanOrEqual(7)
+
+    // Retired: audio (speech, music, lip sync), Shot Director, and "Generate
+    // a 3D model" are no longer on the modal.
+    for (const gone of ['Shot Director', 'Lip-Sync', 'Generate music', 'Generate speech', 'Sync lips', 'Generate a 3D model']) {
+      await expect(page.getByText(gone, { exact: false })).toHaveCount(0)
+    }
   })
 
-  test('sourced action pick lands a pre-wired 2-node graph', async ({ page }) => {
-    await page.getByRole('button', { name: /Edit an image/ }).first().click()
+  test('picking Gradient closes the modal and lands a 2-node, 1-edge graph', async ({ page }) => {
+    await page.getByTestId('start-tile-gradient').click()
     await expect(page.getByText('What do you want to make?')).toHaveCount(0)
-    await expect.poll(async () => page.locator('.vue-flow__node').count()).toBe(2)
-    await expect.poll(async () => page.locator('.vue-flow__edge').count()).toBe(1)
+    await expect.poll(() => settledNodeCount(page), { timeout: 10_000 }).toBe(2)
+    await expect(page.locator('.vue-flow__edge')).toHaveCount(1)
   })
 
-  test('studio tile drops the studio node', async ({ page }) => {
-    await page.getByRole('button', { name: /^Gradient$/ }).click()
+  test('"Start with an empty Frame" leaves exactly one Frame and no edges', async ({ page }) => {
+    await page.getByTestId('start-empty-frame').click()
     await expect(page.getByText('What do you want to make?')).toHaveCount(0)
-    await expect.poll(async () => page.locator('.vue-flow__node').count()).toBe(1)
+    await expect.poll(() => settledNodeCount(page), { timeout: 10_000 }).toBe(1)
+    await expect(page.locator('.vue-flow__edge')).toHaveCount(0)
   })
 
-  test('skip leaves a blank canvas', async ({ page }) => {
-    await page.getByRole('button', { name: /Skip — start with a blank canvas/ }).click()
+  test('Esc does the same as "Start with an empty Frame"', async ({ page }) => {
+    await page.keyboard.press('Escape')
     await expect(page.getByText('What do you want to make?')).toHaveCount(0)
-    await expect(page.locator('.vue-flow__node')).toHaveCount(0)
+    await expect.poll(() => settledNodeCount(page), { timeout: 10_000 }).toBe(1)
+    await expect(page.locator('.vue-flow__edge')).toHaveCount(0)
+  })
+
+  test('picking "Generate a video" lands 2 nodes but leaves it unwired', async ({ page }) => {
+    await page.getByTestId('start-tile-video').click()
+    await expect(page.getByText('What do you want to make?')).toHaveCount(0)
+    await expect.poll(() => settledNodeCount(page), { timeout: 10_000 }).toBe(2)
+    await expect(page.locator('.vue-flow__edge')).toHaveCount(0)
   })
 })

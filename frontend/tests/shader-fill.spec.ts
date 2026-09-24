@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { PNG } from 'pngjs'
-import { waitForBackend } from './_helpers'
+import { waitForBackend, dismissStartModal } from './_helpers'
 
 /**
  * Shader as Fill — end-to-end coverage (Task 10).
@@ -60,11 +60,11 @@ async function openBlankWorkflow(page: Page) {
     }
   }
 
-  const skipStartModal = page.getByRole('button', { name: /Skip — start with a blank canvas/i })
-  if (await skipStartModal.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await skipStartModal.click()
-    await skipStartModal.waitFor({ state: 'hidden', timeout: 5_000 })
-  }
+  // Skipping now lands a Frame (Compositor) on the canvas. This suite's own
+  // node dropped via addNode() finds its "Edit" button by role — the Frame
+  // node has no such button, so a leftover Frame wouldn't collide — but
+  // remove it anyway for a genuinely bare canvas.
+  await dismissStartModal(page)
 }
 
 // ── shared pixel-stat helpers ────────────────────────────────────────────────

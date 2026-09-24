@@ -1,15 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { openBlankWorkflow, dropNode, waitForBackend } from './_helpers'
-
-/** Blank projects open the "What do you want to make?" StartProjectModal,
- *  which covers the canvas (z-100). Escape emits skip. */
-async function dismissStartModal(page: Page) {
-  const modal = page.locator('.fixed.inset-0.z-\\[100\\]')
-  if (await modal.isVisible().catch(() => false)) {
-    await page.keyboard.press('Escape')
-    await modal.waitFor({ state: 'hidden', timeout: 5000 })
-  }
-}
+import { openBlankWorkflow, dropNode, waitForBackend, dismissStartModal } from './_helpers'
 
 /** Drop a node and wait for it to stick. The canvas finishes loading the
  *  (empty) workflow asynchronously after mount and replaces `nodes` when done —
@@ -42,6 +32,11 @@ async function fitView(page: Page) {
 
 test.describe('port intent popover', () => {
   test.beforeEach(async ({ page }) => {
+    // openBlankWorkflow already dismisses the start modal (and the Frame it
+    // now leaves behind) via the shared dismissStartModal helper below; this
+    // second call is a harmless no-op guard (dismissStartModal checks
+    // visibility first) kept so the intent here — a bare canvas — stays
+    // explicit rather than implicit in openBlankWorkflow's internals.
     await openBlankWorkflow(page)
     await waitForBackend(page)
     await dismissStartModal(page)
