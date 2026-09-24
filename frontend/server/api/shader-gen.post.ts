@@ -1,14 +1,13 @@
 /**
  * Writes ONE shader take (AI in Sailor spec §7.2). The browser engine calls this
  * four times in parallel (one per take angle) plus repair calls, then compiles,
- * checks and reviews the results itself. Returns the raw JSON text and token
- * usage so the evaluation page can report cost.
+ * checks and reviews the results itself. Returns the raw JSON text, token usage
+ * (so the evaluation page can report cost) and the stop reason.
  */
 import { createError, defineEventHandler, readBody } from 'h3'
 import { assertRateLimit } from '../lib/rateLimit'
 import { optionalApiKey, resolveAnthropicKey } from '../lib/agentRequest'
-import { extractModelText } from '../lib/modelText'
-import { buildShaderGenPayload } from '../lib/shaderGenRequest'
+import { buildShaderGenPayload, readShaderGenReply } from '../lib/shaderGenRequest'
 import { meterAssist } from '../utils/anthropicMeter'
 
 export default defineEventHandler(async (event) => {
@@ -35,5 +34,5 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: res.status, statusMessage: `model error: ${detail.slice(0, 200)}` })
   }
   const json = await res.json()
-  return { text: extractModelText(json), usage: json?.usage ?? null }
+  return readShaderGenReply(json)
 })

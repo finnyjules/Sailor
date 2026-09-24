@@ -2013,7 +2013,7 @@ cd /Users/julien/Documents/GitHub/Sailor && git reset -q -- frontend/app/pages/d
 
 Ask Julien in chat, and wait for a clear yes:
 
-> "Ready to run the shader engine for real: the 6 spike requests × 4 takes on Sonnet 5 and on Haiku 4.5, with repairs as needed, plus 12 visual reviews on Sonnet 5. The page reports the exact tokens used. OK to run?"
+> "Ready to run the shader engine for real: the 6 spike requests × 4 takes on Sonnet 5 and on Haiku 4.5, with repairs as needed, plus 12 visual reviews on Sonnet 5. The page reports the tokens used for writing shaders (the 12 reviews are not counted). OK to run?"
 
 - [ ] **Step 2: Run it**
 
@@ -2038,6 +2038,8 @@ Create `docs/superpowers/specs/assets/2026-09-23-ai-in-sailor/engine-run-results
 | Model calls per delivered take (avg) | – | x.x | x.x |
 | Time per request (avg) | – | x.x s | x.x s |
 | Tokens per request (avg, in / out) | – | n / n | n / n |
+
+Both tiers run in parallel on one renderer, so each tier's time includes some of the other's rendering.
 
 **Decision:** …
 ```

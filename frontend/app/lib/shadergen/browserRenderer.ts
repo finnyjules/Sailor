@@ -2,7 +2,12 @@
  * The engine's TakeRenderer on Sailor's own WebGL2 renderer. Compiles by
  * rendering a tiny frame (ShaderFxRenderer throws "shaderfx compile (id): …"
  * with the info log), judges from two 24×24 samples (t = 2.0 and 3.37) plus a
- * cost measurement against a plain copy, exactly like the spike page.
+ * cost measurement against a plain copy, exactly like the spike page — except
+ * that cost is only measured for a take that already passes the other checks,
+ * and a single timed frame that is already far too slow stands in for the
+ * 10-frame average. A lost WebGL context (a shader hung the GPU) throws
+ * ContextLostError from compile, judge and sheet, so the engine aborts instead
+ * of reporting every later take as broken.
  * Holds its OWN renderer instance, never the app-wide `shaderFx` singleton.
  */
 import type { GenTake } from '~~/shared/shadergen/contract'
@@ -10,13 +15,15 @@ import { ShaderFxRenderer, expandPasses, type ShaderPass } from '~/lib/shaderfx/
 import { resolveUniforms } from '~/lib/shaderfx/params'
 import type { EffectDef } from '~/lib/shaderfx/types'
 import { toEffectDef } from './effectDef'
-import { judgeFrames } from './renderChecks'
-import type { TakeRenderer } from './engine'
+import { HARD_FLAGS, judgeFrames, THRESHOLDS } from './renderChecks'
+import { ContextLostError, type TakeRenderer } from './engine'
 
 const THUMB = 256
 const SAMPLE = 24
 const COST_SIZE = 1024
 const COST_FRAMES = 10
+/** One frame this slow is heavy beyond doubt; don't render ten more. */
+const SINGLE_FRAME_GIVE_UP_MS = 5 * THRESHOLDS.heavyMs
 const COPY_FS = `#version 300 es
 precision highp float; uniform sampler2D u_image0; in vec2 v_texCoord; layout(location = 0) out vec4 fragColor0;
 void main(){ fragColor0 = texture(u_image0, v_texCoord); }`
@@ -47,11 +54,29 @@ export function createBrowserTakeRenderer(source: HTMLImageElement | HTMLCanvasE
   }
   const sourcePx = sample(source)
 
+  const assertContext = () => {
+    if (renderer.outputCanvas?.getContext('webgl2')?.isContextLost()) {
+      throw new ContextLostError('The graphics context was lost (a shader probably hung the GPU)')
+    }
+  }
+  /** Runs fn; a lost context wins over whatever else fn threw or returned. */
+  const guarded = <T>(fn: () => T): T => {
+    let out: T
+    try { out = fn() } catch (e) { assertContext(); throw e }
+    assertContext()
+    return out
+  }
+
   const px = new Uint8Array(4)
   function cost(passes: ShaderPass[]): number {
     renderer.render(passes, source, COST_SIZE, COST_SIZE)
     const gl = renderer.outputCanvas!.getContext('webgl2')!
     gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px)
+    const t1 = performance.now()
+    renderer.render(passes.map(p => ({ ...p, uniforms: { ...p.uniforms, u_time: 3 } })), source, COST_SIZE, COST_SIZE)
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px)
+    const single = performance.now() - t1
+    if (single > SINGLE_FRAME_GIVE_UP_MS) return single
     const t0 = performance.now()
     for (let k = 0; k < COST_FRAMES; k++) {
       renderer.render(passes.map(p => ({ ...p, uniforms: { ...p.uniforms, u_time: 3 + k * 0.01 } })), source, COST_SIZE, COST_SIZE)
@@ -64,25 +89,32 @@ export function createBrowserTakeRenderer(source: HTMLImageElement | HTMLCanvasE
 
   return {
     compile(take) {
+      let err: string | null = null
       try {
         renderer.render(passesFor(defFor(take), 0), source, 64, 64)
-        return null
       } catch (e) {
-        return String((e as Error)?.message ?? e)
+        err = String((e as Error)?.message ?? e)
       }
+      assertContext()
+      return err
     },
-    judge(take) {
+    judge: take => guarded(() => {
       const def = defFor(take)
       renderer.render(passesFor(def, 2.0), source, THUMB, THUMB)
       const a = sample(renderer.outputCanvas!)
       const thumbnail = renderer.outputCanvas!.toDataURL('image/png')
       renderer.render(passesFor(def, 3.37), source, THUMB, THUMB)
       const b = sample(renderer.outputCanvas!)
+      assertContext()
+      const frames = { a, b, source: sourcePx, generative: take.generative, animated: take.animated }
+      const looks = judgeFrames({ ...frames, extraMs: 0 })
+      // Already rejected on looks: don't spend GPU time measuring its cost.
+      if (looks.flags.some(f => HARD_FLAGS.includes(f))) return { ...looks, thumbnail }
       if (baseline === null) { cost(copy); baseline = cost(copy) }
       const extraMs = Math.max(0, cost(passesFor(def, 3)) - baseline)
-      return { ...judgeFrames({ a, b, source: sourcePx, generative: take.generative, animated: take.animated, extraMs }), thumbnail }
-    },
-    sheet(takes) {
+      return { ...judgeFrames({ ...frames, extraMs }), thumbnail }
+    }),
+    sheet: takes => guarded(() => {
       const c = document.createElement('canvas')
       c.width = THUMB * takes.length
       c.height = THUMB
@@ -92,6 +124,6 @@ export function createBrowserTakeRenderer(source: HTMLImageElement | HTMLCanvasE
         ctx.drawImage(renderer.outputCanvas!, i * THUMB, 0)
       })
       return c.toDataURL('image/jpeg', 0.85)
-    },
+    }),
   }
 }

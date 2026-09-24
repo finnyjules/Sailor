@@ -4,7 +4,7 @@
  * reply into a GenTake, and the one-image visual review that drops misses
  * (sent through the existing /api/agent-review route).
  */
-import type { GenParam, GenTake } from '~~/shared/shadergen/contract'
+import { SHADERGEN_HELPERS, SHADERGEN_PREAMBLE, type GenParam, type GenTake } from '~~/shared/shadergen/contract'
 
 /** One angle per take, so four parallel calls don't return four near-copies. */
 export const TAKE_ANGLES = [
@@ -27,18 +27,50 @@ export interface GenRequest {
   avoid?: string
 }
 
+/** The lines Sailor supplies itself; a catalog source carries them, a body must not. */
+const SUPPLIED_LINES = [
+  /^[ \t]*#version\b.*$/,
+  /^[ \t]*precision\s+\w+\s+\w+\s*;[ \t]*$/,
+  /^[ \t]*uniform\s+sampler2D\s+u_image0\s*;[ \t]*$/,
+  /^[ \t]*uniform\s+vec2\s+u_resolution\s*;[ \t]*$/,
+  /^[ \t]*uniform\s+float\s+u_time\s*;[ \t]*$/,
+  /^[ \t]*uniform\s+float\s+u_seed\s*;[ \t]*$/,
+  /^[ \t]*in\s+vec2\s+v_texCoord\s*;[ \t]*$/,
+  /^[ \t]*layout\s*\(\s*location\s*=\s*0\s*\)\s*out\s+vec4\s+fragColor0\s*;[ \t]*$/,
+]
+
+/** A catalog source without its preamble lines, so the model doesn't copy them into a body. */
+export function stripSuppliedLines(source: string): string {
+  return source.split('\n').filter(line => !SUPPLIED_LINES.some(re => re.test(line))).join('\n').trim()
+}
+
+const HELPER_WARNING = 'Sailor already provides the preamble and the helpers h21, vnoise, fbm, tex, blur9, luma, ASP, hsv2rgb and thinfilm; if this source defines functions with those names, rename or drop them — redefining them will not compile.'
+
 export function buildGenPrompt(r: GenRequest): string {
   const parts: string[] = [`Request: "${r.request}"`]
   if (r.base) {
-    parts.push(`Start from this existing effect, "${r.base.name}". Keep what serves the request and change whatever you need to. Its full source (preamble included) and dials:\n\`\`\`glsl\n${r.base.source}\n\`\`\`\nDials: ${JSON.stringify(r.base.params)}`)
+    parts.push(`Start from this existing effect, "${r.base.name}". Keep what serves the request and change whatever you need to. Its source and dials:\n\`\`\`glsl\n${stripSuppliedLines(r.base.source)}\n\`\`\`\nDials: ${JSON.stringify(r.base.params)}\n${HELPER_WARNING}`)
   }
   for (const ref of r.references ?? []) {
-    parts.push(`For reference only, a related existing effect, "${ref.name}":\n\`\`\`glsl\n${ref.source}\n\`\`\``)
+    parts.push(`For reference only, a related existing effect, "${ref.name}":\n\`\`\`glsl\n${stripSuppliedLines(ref.source)}\n\`\`\`\n${HELPER_WARNING}`)
   }
   parts.push(TAKE_ANGLES[r.takeIndex % TAKE_ANGLES.length]!)
   if (r.avoid) parts.push(`A previous attempt failed: ${r.avoid}. Do not repeat that.`)
   parts.push('Reply with the JSON object only.')
   return parts.join('\n\n')
+}
+
+/** Lines before the body in assembleSource(): preamble + helpers + the joining newline. */
+const BODY_LINE_OFFSET = `${SHADERGEN_PREAMBLE}${SHADERGEN_HELPERS}\n`.split('\n').length - 1
+
+/** A compile log in the body's own line numbers, without the renderer's prefix. */
+export function rewriteCompileLog(log: string): string {
+  return log
+    .replace(/^shaderfx compile \([^)]*\):\s*/, '')
+    .replace(/\b(ERROR|WARNING): 0:(\d+):/g, (_, kind: string, n: string) => {
+      const line = Number(n) - BODY_LINE_OFFSET
+      return line > 0 ? `${kind}: body line ${line}:` : `${kind}: in Sailor's preamble:`
+    })
 }
 
 export function buildRepairPrompt(r: GenRequest, failed: GenTake, reason: string): string {
@@ -48,7 +80,7 @@ export function buildRepairPrompt(r: GenRequest, failed: GenTake, reason: string
 const HEX = /^#[0-9a-fA-F]{6}$/
 
 function parseParam(p: any): GenParam | null {
-  if (!p || typeof p.uniform !== 'string' || typeof p.label !== 'string') return null
+  if (!p || typeof p.uniform !== 'string' || typeof p.label !== 'string' || !p.label.trim()) return null
   if (p.type === 'float') {
     if (![p.min, p.max, p.default].every(Number.isFinite) || p.min >= p.max) return null
     const step = Number.isFinite(p.step) && p.step > 0 ? p.step : Math.round(((p.max - p.min) / 100) * 1e6) / 1e6

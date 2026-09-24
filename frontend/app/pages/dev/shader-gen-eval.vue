@@ -35,6 +35,7 @@ const ready = ref(false)
 const armed = ref(false)
 const running = ref(false)
 const copied = ref(false)
+const loadError = ref('')
 const catalog = shallowRef<EffectDef[]>([])
 let renderer: TakeRenderer | null = null
 
@@ -53,10 +54,21 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   })
 }
 
+/** Flags as display text: the first letter capitalised (data-flags keeps them raw). */
+function flagText(flags: string[]): string {
+  const s = flags.join(' · ')
+  return s ? s[0]!.toUpperCase() + s.slice(1) : 'Checks pass'
+}
+
 onMounted(async () => {
-  const [img, cat] = await Promise.all([loadImage('/house-styles/azure-bloom/thumb-2.webp'), fetchShaderFxCatalog()])
-  catalog.value = cat.effects
-  renderer = createBrowserTakeRenderer(img)
+  try {
+    const [img, cat] = await Promise.all([loadImage('/house-styles/azure-bloom/thumb-2.webp'), fetchShaderFxCatalog()])
+    catalog.value = cat.effects
+    renderer = createBrowserTakeRenderer(img)
+  } catch (e) {
+    loadError.value = `Couldn't load the test image or the effect catalog: ${String((e as Error)?.message ?? (e instanceof Event ? `${e.type} event` : e))}`
+    return
+  }
   for (const r of EVAL_REQUESTS) {
     const row = rows[r.key]!.spike
     row.tiles = (SPIKE_TAKES[r.key] ?? []).map((take): Tile => {
@@ -87,7 +99,8 @@ async function runTier(tier: 'plan' | 'patch') {
     row.status = 'running'
     row.error = ''
     try {
-      fill(row, await generateTakes({ request: r.prompt, base: baseFor(r.base) }, deps))
+      const references = (r.references ?? []).map(baseFor).filter((b): b is GenBase => !!b)
+      fill(row, await generateTakes({ request: r.prompt, base: baseFor(r.base), references }, deps))
     } catch (e) {
       row.status = 'error'
       row.error = String((e as Error)?.message ?? e)
@@ -115,7 +128,7 @@ const tally = computed(() => Object.fromEntries(ROWS.map(({ id }) => {
 
 async function copyResults() {
   const out = EVAL_REQUESTS.map(r => ({
-    key: r.key, prompt: r.prompt, base: r.base,
+    key: r.key, prompt: r.prompt, base: r.base, references: r.references ?? [],
     rows: Object.fromEntries(ROWS.map(({ id }) => {
       const row = rows[r.key]![id]
       return [id, {
@@ -145,6 +158,7 @@ async function copyResults() {
           {{ r.label }}: {{ tally[r.id].keep }} of {{ tally[r.id].total }} kept<template v-if="r.id !== 'spike'"> · {{ tally[r.id].failures }} failed</template>
         </span>
       </div>
+      <p v-if="loadError" class="err" data-load-error>{{ loadError }}</p>
     </header>
 
     <section v-for="req in EVAL_REQUESTS" :key="req.key">
@@ -167,7 +181,7 @@ async function copyResults() {
             <img v-if="t.thumbnail" :src="t.thumbnail" :alt="t.take.name">
             <span v-else class="broken">Didn't compile</span>
             <span class="name">{{ t.take.name }}</span>
-            <span class="meta">{{ t.flags.join(' · ') || 'Checks pass' }}<template v-if="t.calls"> · {{ t.calls }} call{{ t.calls > 1 ? 's' : '' }}</template></span>
+            <span class="meta">{{ flagText(t.flags) }}<template v-if="t.calls"> · {{ t.calls }} call{{ t.calls > 1 ? 's' : '' }}</template></span>
           </button>
         </div>
       </div>

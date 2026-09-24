@@ -1,17 +1,17 @@
 /** Network side of the engine: one take per /api/shader-gen call, and the visual
  *  review through the existing /api/agent-review route (always on 'plan', so
  *  both code-writing tiers are judged by the same reviewer). */
-import type { EngineDeps, Usage } from './engine'
+import type { EngineDeps, ModelUsage } from './engine'
 import { buildReviewPrompt, parseReview, REVIEW_SCHEMA } from './prompt'
 
 export function makeCallModel(apiKey: string, tier: 'patch' | 'plan'): EngineDeps['callModel'] {
   return async (prompt: string) => {
-    const res = await $fetch<{ text: string; usage: Usage | null }>('/api/shader-gen', {
+    const res = await $fetch<{ text: string; usage: ModelUsage | null; stop_reason?: string | null }>('/api/shader-gen', {
       method: 'POST',
       body: { apiKey, tier, prompt },
       timeout: 120_000,
     })
-    return { text: res.text, usage: res.usage ?? undefined }
+    return { text: res.text, usage: res.usage ?? undefined, stop_reason: res.stop_reason ?? null }
   }
 }
 

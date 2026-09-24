@@ -3,6 +3,11 @@
  * dial shape, uniform/dial agreement, and the loop and image-read limits that
  * keep a runaway shader from hanging the graphics card. Every `reason` is a
  * plain sentence the engine sends back to the model verbatim.
+ *
+ * Comments are stripped once (staticCheck) before any check, so commented-out
+ * code neither trips a check nor satisfies one. User-defined functions are
+ * followed one level deep: a call inside a loop costs the function's own
+ * iterations and image reads, multiplied by the loop.
  */
 import { LIMITS, PREAMBLE_UNIFORMS, type GenTake } from '~~/shared/shadergen/contract'
 
@@ -27,11 +32,23 @@ export function checkParams(take: GenTake): CheckResult {
   return OK
 }
 
-const UNIFORM_RE = /\buniform\s+(\w+)\s+(\w+)\s*;/g
+/** Blanks out `// …` and `/* … *\/` comments, keeping every newline and every
+ *  other character's position (an unterminated block comment runs to the end). */
+export function stripComments(body: string): string {
+  return body.replace(/\/\*[\s\S]*?(?:\*\/|$)|\/\/[^\n]*/g, m => m.replace(/[^\n]/g, ' '))
+}
 
+const UNIFORM_RE = /\buniform\s+(\w+)\s+(\w+)\s*;/g
+const SIMPLE_UNIFORM = /^uniform\s+\w+\s+\w+\s*;$/
+
+/** Expects a comment-free body (staticCheck passes one). */
 export function checkUniforms(take: GenTake): CheckResult {
   const body = take.body
   if (/#version|\bprecision\s+\w+\s+float/.test(body)) return fail('The body must not include #version or precision; Sailor adds them.')
+  if (/^[ \t]*#/m.test(body)) return fail('The body must not use preprocessor lines (#define, #if…); write the code out.')
+  for (const m of body.matchAll(/\buniform\b[^;]*;?/g)) {
+    if (!SIMPLE_UNIFORM.test(m[0])) return fail('Declare one uniform per line, like uniform float u_amount;')
+  }
   if (/\bout\s+vec4\b|\bin\s+vec2\s+v_texCoord/.test(body)) return fail('The body must not redeclare the preamble inputs or outputs.')
   if (!/\bvoid\s+main\s*\(\s*\)/.test(body)) return fail('The body has no void main().')
   const declared = new Map<string, string>()
@@ -51,7 +68,7 @@ export function checkUniforms(take: GenTake): CheckResult {
   return OK
 }
 
-interface Loop { start: number; end: number; iterations: number }
+interface Loop { start: number; end: number; iterations: number; counter: string; bodyStart: number }
 
 const FOR_HEADER = /^for ?\( ?int (\w+) ?= ?(-?\d+) ?; ?(\w+) ?(<=|<) ?(-?\d+) ?; ?(?:(\w+) ?\+\+|\+\+ ?(\w+)|(\w+) ?\+= ?1) ?\)$/
 
@@ -80,7 +97,7 @@ function findLoops(body: string): Loop[] | string {
     while (/\s/.test(body[k] ?? '')) k++
     const end = body[k] === '{' ? closing(body, k, '{', '}') : body.indexOf(';', k)
     if (end < 0) return 'A for loop body is not closed.'
-    loops.push({ start, end, iterations })
+    loops.push({ start, end, iterations, counter: h[1]!, bodyStart: parenClose + 1 })
   }
   return loops
 }
@@ -88,21 +105,85 @@ function findLoops(body: string): Loop[] | string {
 const READ_RE = /\b(texture|tex|blur9)\s*\(/g
 const READ_WEIGHT: Record<string, number> = { texture: 1, tex: 1, blur9: 25 }
 
+const FN_RE = /\b(?:void|float|int|bool|vec[234]|ivec[234]|mat[234])\s+(\w+)\s*\([^()]*\)\s*\{/g
+
+interface UserFn { name: string; start: number; end: number; nameAt: number }
+
+function findFunctions(body: string): UserFn[] {
+  const fns: UserFn[] = []
+  for (const m of body.matchAll(FN_RE)) {
+    if (m[1] === 'main') continue
+    const brace = m.index! + m[0].length - 1
+    const end = closing(body, brace, '{', '}')
+    if (end > 0) fns.push({ name: m[1]!, start: m.index!, end, nameAt: m.index! + m[0].indexOf(m[1]!) })
+  }
+  return fns
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/** Expects a comment-free body (staticCheck passes one). */
 export function checkLoops(body: string): CheckResult {
   if (/\bwhile\s*\(/.test(body)) return fail('While loops are not allowed; use a for loop with fixed bounds.')
   const loops = findLoops(body)
   if (typeof loops === 'string') return fail(loops)
   const enclosing = (pos: number) => loops.filter(l => l.start <= pos && pos <= l.end)
   const multiplier = (pos: number) => enclosing(pos).reduce((acc, l) => acc * l.iterations, 1)
+  const tooMany = (total: number) => fail(`A loop runs ${total} times per pixel (including nesting); the limit is ${LIMITS.maxLoopIterations}.`)
   for (const l of loops) {
     const total = multiplier(l.start)
-    if (total > LIMITS.maxLoopIterations) {
-      return fail(`A loop runs ${total} times per pixel (including nesting); the limit is ${LIMITS.maxLoopIterations}.`)
-    }
+    if (total > LIMITS.maxLoopIterations) return tooMany(total)
+    const v = escapeRe(l.counter)
+    const write = new RegExp(`\\b${v}\\s*(=[^=]|\\+=|-=|\\*=|/=|\\+\\+|--)|(\\+\\+|--)\\s*${v}\\b`)
+    if (write.test(body.slice(l.bodyStart, l.end + 1))) return fail(`Loop counter ${l.counter} must not be changed inside the loop.`)
   }
+
+  // User functions: each one's own cost per call — image reads (weighted, times
+  // its own loops) and the deepest nested iteration count inside it.
+  const fns = findFunctions(body)
+  const readsIn = (from: number, to: number) => {
+    let n = 0
+    for (const m of body.slice(from, to).matchAll(READ_RE)) n += READ_WEIGHT[m[1]!]! * multiplier(from + m.index!)
+    return n
+  }
+  const itersIn = (from: number, to: number) =>
+    loops.filter(l => l.start >= from && l.end <= to).reduce((acc, l) => Math.max(acc, multiplier(l.start)), 0)
+  const callsOf = (fn: UserFn, from = 0, to = body.length) => {
+    const at: number[] = []
+    for (const m of body.slice(from, to).matchAll(new RegExp(`\\b${escapeRe(fn.name)}\\s*\\(`, 'g'))) {
+      if (from + m.index! !== fn.nameAt) at.push(from + m.index!)
+    }
+    return at
+  }
+  const own = new Map(fns.map(f => [f.name, { reads: readsIn(f.start, f.end), iters: itersIn(f.start, f.end) }]))
+  // One level of calls between user functions (deeper recursion is illegal in GLSL).
+  const cost = new Map(fns.map((f) => {
+    let { reads, iters } = own.get(f.name)!
+    for (const g of fns) {
+      if (g === f) continue
+      for (const p of callsOf(g, f.start, f.end)) {
+        const m = multiplier(p)
+        reads += own.get(g.name)!.reads * m
+        iters = Math.max(iters, own.get(g.name)!.iters * m)
+      }
+    }
+    return [f.name, { reads, iters }]
+  }))
+
   let reads = 0
   for (const m of body.matchAll(READ_RE)) {
     if (enclosing(m.index!).length) reads += READ_WEIGHT[m[1]!]! * multiplier(m.index!)
+  }
+  // A call inside a loop runs the function once per iteration; calls outside
+  // loops are already covered by the reads counted inside the function itself.
+  for (const f of fns) {
+    for (const p of callsOf(f)) {
+      if (!enclosing(p).length) continue
+      const m = multiplier(p)
+      const c = cost.get(f.name)!
+      if (c.iters * m > LIMITS.maxLoopIterations) return tooMany(c.iters * m)
+      reads += c.reads * m
+    }
   }
   if (reads > LIMITS.maxLoopTextureReads) {
     return fail(`Loops read the image ${reads} times per pixel; the limit is ${LIMITS.maxLoopTextureReads}.`)
@@ -112,8 +193,10 @@ export function checkLoops(body: string): CheckResult {
 
 export function staticCheck(take: GenTake): CheckResult {
   if (take.body.length > LIMITS.maxBodyChars) return fail(`The body is ${take.body.length} characters; keep it under ${LIMITS.maxBodyChars}.`)
-  for (const check of [checkParams(take), checkUniforms(take), checkLoops(take.body)]) {
-    if (!check.ok) return check
+  const body = stripComments(take.body)
+  for (const check of [() => checkParams(take), () => checkUniforms({ ...take, body }), () => checkLoops(body)]) {
+    const r = check()
+    if (!r.ok) return r
   }
   return OK
 }

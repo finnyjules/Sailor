@@ -51,6 +51,58 @@ describe('staticCheck', () => {
   })
 })
 
+describe('staticCheck: bypasses closed (final review I3)', () => {
+  const withMain = (pre: string, main: string) => `uniform float u_a; uniform float u_b; uniform float u_c;
+${pre}
+void main(){
+  vec3 c = tex(v_texCoord) * u_a * u_b * u_c;
+${main}
+  fragColor0 = vec4(c, 1.0);
+}`
+  const thirtyReads = Array.from({ length: 30 }, (_, k) => `tex(p + ${k}.0 * 0.001)`).join(' + ')
+
+  it('counts a helper function\'s image reads at each call inside a loop', () => {
+    const r = staticCheck(take({ body: withMain(`vec3 H(vec2 p){ return ${thirtyReads}; }`, '  for(int i=0;i<4;i++){ c += H(v_texCoord + float(i)*0.01); }') }))
+    expect(reasonOf(r)).toContain('read the image 120 times')
+  })
+
+  it('counts a helper function\'s loop at each call inside a loop', () => {
+    const r = staticCheck(take({ body: withMain('float H(vec2 p){ float s=0.0; for(int j=0;j<8;j++){ s+=vnoise(p+float(j)); } return s; }', '  for(int i=0;i<16;i++){ c += H(v_texCoord + float(i)); }') }))
+    expect(reasonOf(r)).toContain('runs 128 times per pixel')
+  })
+
+  it('does not count helper calls made outside loops against the loop budgets', () => {
+    const r = staticCheck(take({ body: withMain(`vec3 H(vec2 p){ return ${thirtyReads}; }`, '  c += H(v_texCoord) + H(v_texCoord + 0.1) + H(v_texCoord - 0.1);') }))
+    expect(r).toEqual({ ok: true })
+  })
+
+  it('rejects changing a loop counter inside the loop', () => {
+    const r = staticCheck(take({ body: withMain('', '  for(int i=0;i<8;i++){ c += tex(v_texCoord); if (c.r > 2.0) i = 0; }') }))
+    expect(reasonOf(r)).toContain('Loop counter i must not be changed inside the loop.')
+    const dec = staticCheck(take({ body: withMain('', '  for(int i=0;i<8;i++){ c += tex(v_texCoord); --i; }') }))
+    expect(reasonOf(dec)).toContain('Loop counter i must not be changed inside the loop.')
+    expect(staticCheck(take({ body: withMain('', '  for(int i=0;i<8;i++){ if (i == 3) c += tex(v_texCoord); c *= (i <= 2 ? 1.0 : 0.9); }') }))).toEqual({ ok: true })
+  })
+
+  it('rejects preprocessor lines', () => {
+    const r = staticCheck(take({ body: `#define W while\n${GOOD}` }))
+    expect(reasonOf(r)).toBe('The body must not use preprocessor lines (#define, #if…); write the code out.')
+  })
+
+  it('ignores code inside comments', () => {
+    expect(staticCheck(take({ body: `${GOOD}\n// for (i = 0; i < n; i++) while (true)\n/* for (int k = 0; k < 999; k++) { tex(a); } */` }))).toEqual({ ok: true })
+    const onlyInComment = take({ body: GOOD.replace('*u_c', '') + '\n// u_c scales everything' })
+    expect(reasonOf(staticCheck(onlyInComment))).toContain('(u_c) is declared but never used')
+  })
+
+  it('needs one simple uniform declaration per line', () => {
+    const list = take({ body: GOOD.replace('uniform float u_a; uniform float u_b; uniform float u_c;', 'uniform float u_a, u_b; uniform float u_c;') })
+    expect(reasonOf(staticCheck(list))).toBe('Declare one uniform per line, like uniform float u_amount;')
+    const arr = take({ body: `uniform float u_arr[4];\n${GOOD}` })
+    expect(reasonOf(staticCheck(arr))).toBe('Declare one uniform per line, like uniform float u_amount;')
+  })
+})
+
 describe('checkLoops', () => {
   it('rejects loops whose bounds are not whole-number literals', () => {
     const r = checkLoops('void main(){ for(int i=0;i<n;i++){ } }')

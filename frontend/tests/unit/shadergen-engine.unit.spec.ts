@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { GenTake } from '~~/shared/shadergen/contract'
-import { generateTakes, type TakeRenderer } from '~/lib/shadergen/engine'
+import { SHADERGEN_HELPERS, SHADERGEN_PREAMBLE, type GenTake } from '~~/shared/shadergen/contract'
+import { ContextLostError, generateTakes, type TakeRenderer } from '~/lib/shadergen/engine'
 
 const P = (u: string) => ({ uniform: u, label: 'Amount', type: 'float', min: 0, max: 1, step: 0.01, default: 0.5 })
 const body = (marker = '') => `uniform float u_a; uniform float u_b; uniform float u_c;
@@ -20,7 +20,7 @@ function scripted(byTake: Record<number, string[]>) {
       const list = byTake[i] ?? [reply('', `Take ${i + 1}`)]
       const text = list[Math.min(used[i]!, list.length - 1)]!
       used[i]!++
-      return { text, usage: { input_tokens: 10, output_tokens: 5 } }
+      return { text, usage: { input_tokens: 10, output_tokens: 5 }, stop_reason: 'end_turn' }
     },
   }
 }
@@ -55,6 +55,80 @@ describe('generateTakes', () => {
     const r = await generateTakes({ request: 'rain' }, { callModel: m.callModel, renderer })
     expect(r.takes).toHaveLength(3)
     expect(r.failures).toEqual([expect.objectContaining({ index: 1, modelCalls: 3 })])
+  })
+
+  it('sends a static-check failure back once, then ends the take', async () => {
+    const twoDials = JSON.stringify({ name: 'X', animated: false, generative: false, params: [P('u_a'), P('u_b')], body: 'uniform float u_a; uniform float u_b; void main(){ fragColor0=vec4(u_a*u_b); }' })
+    const m = scripted({ 2: [twoDials] })
+    const r = await generateTakes({ request: 'rain' }, { callModel: m.callModel, renderer })
+    expect(r.takes).toHaveLength(3)
+    expect(r.failures).toEqual([expect.objectContaining({ index: 2, modelCalls: 2 })])
+    expect(r.failures[0]!.log.filter(l => l.startsWith('static:'))).toHaveLength(2)
+  })
+
+  it('asks again once after an unreadable reply, then ends the take', async () => {
+    const m = scripted({ 0: ['not json'] })
+    const r = await generateTakes({ request: 'rain' }, { callModel: m.callModel, renderer })
+    expect(r.failures).toEqual([expect.objectContaining({ index: 0, modelCalls: 2, log: ['reply could not be read', 'reply could not be read'] })])
+  })
+
+  it('says when an unreadable reply was cut off at the token limit', async () => {
+    const r = await generateTakes({ request: 'rain', count: 1 }, {
+      callModel: async () => ({ text: '{"name":"Half', stop_reason: 'max_tokens' }),
+      renderer,
+    })
+    expect(r.failures[0]!.log).toEqual(['reply was cut off (max tokens)', 'reply was cut off (max tokens)'])
+  })
+
+  it('counts cached prompt tokens as input', async () => {
+    const r = await generateTakes({ request: 'rain', count: 1 }, {
+      callModel: async () => ({ text: reply(), usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100, cache_creation_input_tokens: 7 } }),
+      renderer,
+    })
+    expect(r.usage).toEqual({ input_tokens: 117, output_tokens: 5 })
+  })
+
+  it('ends a take whose model call fails, without retrying, and keeps the others', async () => {
+    const m = scripted({})
+    let calls = 0
+    const r = await generateTakes({ request: 'rain' }, {
+      callModel: async (prompt) => {
+        calls++
+        if (prompt.includes('Take 2 of 4')) throw new Error('429 Too Many Requests: rate limited')
+        return m.callModel(prompt)
+      },
+      renderer,
+    })
+    expect(calls).toBe(4)
+    expect(r.takes).toHaveLength(3)
+    expect(r.failures).toEqual([expect.objectContaining({ index: 1, modelCalls: 1 })])
+    expect(r.failures[0]!.log).toEqual(['model error: 429 Too Many Requests: rate limited'])
+  })
+
+  it('keeps every take when the review call fails', async () => {
+    const m = scripted({})
+    const r = await generateTakes({ request: 'rain' }, { callModel: m.callModel, renderer, review: async () => { throw new Error('review down') } })
+    expect(r.takes).toHaveLength(4)
+    expect(r.dropped).toBe(0)
+    expect(r.failures).toEqual([])
+  })
+
+  it('aborts the whole request when the graphics context is lost', async () => {
+    const m = scripted({})
+    const lost: TakeRenderer = { ...renderer, compile: () => { throw new ContextLostError('The graphics context was lost (a shader probably hung the GPU)') } }
+    await expect(generateTakes({ request: 'rain' }, { callModel: m.callModel, renderer: lost })).rejects.toBeInstanceOf(ContextLostError)
+    const lostOnSheet: TakeRenderer = { ...renderer, sheet: () => { throw new ContextLostError('lost') } }
+    await expect(generateTakes({ request: 'rain' }, { callModel: m.callModel, renderer: lostOnSheet, review: async () => [true, true, true, true] })).rejects.toThrow(ContextLostError)
+  })
+
+  it('sends the compile error back in body line numbers', async () => {
+    const offset = `${SHADERGEN_PREAMBLE}${SHADERGEN_HELPERS}\n`.split('\n').length - 1
+    const m = scripted({ 0: [reply('BROKEN'), reply('fixed')] })
+    const numbered: TakeRenderer = { ...renderer, compile: t => (t.body.includes('BROKEN') ? `shaderfx compile (shadergen_1): ERROR: 0:${offset + 2}: 'x' : undeclared identifier` : null) }
+    const r = await generateTakes({ request: 'rain' }, { callModel: m.callModel, renderer: numbered })
+    expect(m.prompts[0]![1]).toContain("ERROR: body line 2: 'x' : undeclared identifier")
+    expect(m.prompts[0]![1]).not.toContain('shaderfx compile')
+    expect(r.takes).toHaveLength(4)
   })
 
   it('sends a static-check failure back as the reason', async () => {
