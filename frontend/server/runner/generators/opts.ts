@@ -24,12 +24,15 @@ export function optInt(adv: Record<string, unknown>, key: string, def: number): 
   // str(None), str([..]) and str({..}) never read as an int (JS String([1]) would be "1").
   if (typeof v !== 'string') return def
   const s = v.trim()
-  return /^[+-]?\d+$/.test(s) ? Number.parseInt(s, 10) : def
+  // int() allows single underscores between digits ("1_0" is 10), as float() does.
+  return PY_INT_RE.test(s) ? Number.parseInt(s.replace(/_/g, ''), 10) : def
 }
 
 // Python float()'s string grammar: digits with single underscores between
 // them, an optional fraction and exponent, or inf / infinity / nan.
 const DIGITS = String.raw`\d(?:_?\d)*`
+/** Python int(str)'s grammar (base 10): a sign, then digits with single underscores between them. */
+export const PY_INT_RE = new RegExp(String.raw`^[+-]?${DIGITS}$`)
 const PY_FLOAT_RE = new RegExp(
   String.raw`^[+-]?(?:(?:${DIGITS}(?:\.(?:${DIGITS})?)?|\.${DIGITS})(?:[eE][+-]?${DIGITS})?|inf|infinity|nan)$`, 'i')
 
@@ -53,6 +56,7 @@ export function optFloat(adv: Record<string, unknown>, key: string, def: number)
   if (typeof v === 'number') return v
   // str(None), str([..]) and str({..}) never read as a float.
   if (typeof v !== 'string') return def
+  // Known gap: "inf"/"nan" read as JS Infinity/NaN, which JSON sends as null where Python sends Infinity/NaN; the UI never writes them.
   return pyFloatOf(v) ?? def
 }
 
@@ -94,6 +98,14 @@ export function parseJsonObject(raw: unknown): Record<string, unknown> {
 
 export function asText(v: unknown): string {
   return typeof v === 'string' ? v : ''
+}
+
+/**
+ * Python str.strip() with no argument: strips what str.isspace() calls space.
+ * JS trim() differs: it also strips U+FEFF, and keeps U+001C–U+001F and U+0085.
+ */
+export function pyStrip(s: string): string {
+  return s.replace(/^[\t\n\v\f\r\x1c-\x1f \x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\t\n\v\f\r\x1c-\x1f \x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/g, '')
 }
 
 /** `int(value or 0)` for widget values that are numbers or numeric strings. */

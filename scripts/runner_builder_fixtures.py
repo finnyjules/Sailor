@@ -10,14 +10,45 @@ It also writes frontend/tests/unit/fixtures/runner-families.json: for each
 runner family (Phase B), the FIRST provider call a node's execute() makes,
 captured with the network patched out (capture_first_call). One top-level key
 per family; the families add their cases as they land.
+
+To prove no fixture came from a real provider, regenerate with --no-network:
+every outbound socket connect and DNS lookup raises, and the provider keys
+(FAL_KEY, FAL_API_KEY, NUXT_REPLICATE_TOKEN, REPLICATE_API_TOKEN) are removed
+from the environment before any node module is imported:
+
+    cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python scripts/runner_builder_fixtures.py --no-network
+
+Then check `git diff --stat -- frontend/tests/unit/fixtures/runner-builders.json`
+prints nothing.
 """
 import asyncio
 import contextlib
 import importlib
 import json
 import os
+import socket
 import sys
 from unittest import mock
+
+PROVIDER_KEYS = ("FAL_KEY", "FAL_API_KEY", "NUXT_REPLICATE_TOKEN", "REPLICATE_API_TOKEN")
+
+
+def block_network() -> None:
+    """--no-network: refuse every outbound connection and DNS lookup, and drop
+    the provider keys, so a capture that slipped past a patch fails loudly
+    instead of reaching (and paying) a provider."""
+    def refuse(*a, **_k):
+        raise RuntimeError(f"NETWORK BLOCKED: {a!r}")
+    socket.socket.connect = refuse
+    socket.socket.connect_ex = refuse
+    socket.create_connection = refuse
+    socket.getaddrinfo = refuse
+    for key in PROVIDER_KEYS:
+        os.environ.pop(key, None)
+
+
+if __name__ == "__main__" and "--no-network" in sys.argv[1:]:
+    block_network()
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -114,8 +145,15 @@ def capture_first_call(node_cls, **kwargs) -> dict:
     when it makes none. Pictures are passed as their input name (the "tensor");
     `_image_tensor_to_data_url` turns that into `IMG:<name>`, and moodboard
     files become `BOARD:<file>`."""
+    return _capture(node_cls, **kwargs)[0]
+
+
+def _capture(node_cls, **kwargs) -> tuple:
+    """capture_first_call, plus the pictures execute() handed to
+    save_live_preview (a pass-through shows its input there)."""
     nr, fal_refs, extras = _node_modules()
     seen: dict = {}
+    previews: list = []
 
     def record(provider: str, endpoint: str, payload: dict):
         # Keep the raw payload and stop at once: serialising here could raise
@@ -150,10 +188,15 @@ def capture_first_call(node_cls, **kwargs) -> dict:
         mock.patch.object(nr, "_moodboard_ref_data_urls",
                           lambda folder, files, input_dir=None: [f"BOARD:{f}" for f in files]),
     ]
+    def fake_preview(image, *_a, **_k):
+        previews.append(image)
+        return {}
+
     for mod in [nr, *extras, sys.modules.get(node_cls.__module__)]:
         for name in SAVE_HELPERS:
             if mod is not None and hasattr(mod, name):
-                patches.append(mock.patch.object(mod, name, lambda *a, **k: {}))
+                fake = fake_preview if name == "save_live_preview" else (lambda *a, **k: {})
+                patches.append(mock.patch.object(mod, name, fake))
 
     with contextlib.ExitStack() as stack:
         for p in patches:
@@ -161,8 +204,8 @@ def capture_first_call(node_cls, **kwargs) -> dict:
         try:
             asyncio.run(node_cls.execute(**kwargs))
         except _FirstCall:
-            return {**seen, "payload": json.loads(json.dumps(seen["payload"]))}
-    return {"passthrough": True}
+            return {**seen, "payload": json.loads(json.dumps(seen["payload"]))}, previews
+    return {"passthrough": True}, previews
 
 
 # One top-level key per runner family (shared/runner/families.ts). Each task
@@ -173,16 +216,24 @@ FAMILY_KEYS = ["falEdit", "replicateImage", "replicateVideo", "nanoActions", "re
 def _node_case(node_cls, links: list, widgets: dict) -> dict:
     """One captured case: a node's widget values, which picture inputs are
     linked (each is passed as its own input name, so it arrives as
-    `IMG:<name>`), and the first provider call execute() makes."""
+    `IMG:<name>`), and the first provider call execute() makes. The
+    class_type is the schema's node_id, as the canvas sends it (PersonSwap's
+    Python class is PersonSwapNode). A pass-through also records `passes`:
+    the input whose picture execute() handed on unchanged."""
     kwargs = dict(widgets)
     for name in links:
         kwargs[name] = name
-    return {
-        "class_type": node_cls.__name__,
+    call, previews = _capture(node_cls, **kwargs)
+    case = {
+        "class_type": node_cls.define_schema().node_id,
         "links": list(links),
         "widgets": widgets,
-        "call": capture_first_call(node_cls, **kwargs),
+        "call": call,
     }
+    if call.get("passthrough"):
+        passed = previews[0] if previews else None
+        case["passes"] = passed if isinstance(passed, str) else None
+    return case
 
 
 # Seeds: 0 (random), an ordinary one, and the ones either side of 2^32 — Nano
@@ -323,7 +374,7 @@ REPLICATE_IMAGE_IDS = [
 # the wrong type. Left out on purpose: whole-number floats and lists/dicts for
 # string keys (Python's str(1.0) is "1.0", but JSON.parse gives JS the number 1),
 # and inf/nan (not valid JSON for the fixture file).
-_INT_VALUES = [3, 9, -2, "0", " 7 ", "2.5", "abc", True, False, None, 3.7, [1]]
+_INT_VALUES = [3, 9, -2, "0", " 7 ", "2.5", "abc", "1_0", True, False, None, 3.7, [1]]
 _FLOAT_VALUES = [2.25, 99, -1, "4.2", " 3 ", "1e1", "1_0.5", ".5", "abc", True, None, [2]]
 _BOOL_VALUES = [True, False, "yes", "No", "TRUE", "off", 1, 0, None, [], ""]
 _STR_VALUES = ["png", "", 5, True, None, 0.25]
@@ -418,10 +469,100 @@ def _replicate_image_cases() -> list:
     return cases
 
 
+# ── nanoActions (Task B5) ────────────────────────────────────────────────
+
+# Blank (pass-through) and non-blank text, including the characters where
+# Python's str.strip() and JS trim() disagree: U+FEFF is not space to Python,
+# U+001F is.
+_ACTION_TEXTS = ["the red car", "  the red car  ", "", "   ", "\ufeff", "\x1f"]
+_ACTION_INSTRUCTIONS = ["", "   ", "match the brick texture", "  padded, with a \x1f  "]
+
+
+def _nano_actions_cases() -> list:
+    """Task B5 (nano-actions): the three edit actions, Swap Background, Swap
+    Product, Person Swap and BlendSceneNode's Nano Banana mode, over the text
+    and toggle combinations that call and every pass-through combination."""
+    nr, _fal_refs, _extras = _node_modules()
+    from comfy_extras.nodes_edit_actions import RemoveObjectNode, TextEditNode, RecolorObjectNode
+    from comfy_extras.nodes_swap_background import SwapBackgroundNode
+    from comfy_extras.nodes_swap_product import SwapProductNode
+    from comfy_extras.nodes_person_swap import PersonSwapNode
+    cases = []
+
+    def case(cls, links, widgets):
+        cases.append(_node_case(cls, links, widgets))
+
+    # Remove Object: target × instructions; instructions missing (optional).
+    for target in _ACTION_TEXTS:
+        for ins in _ACTION_INSTRUCTIONS:
+            case(RemoveObjectNode, ["image"], {"target": target, "instructions": ins})
+    case(RemoveObjectNode, ["image"], {"target": "the cup"})
+
+    # Edit Text: find × replace, then the instructions on a calling pair.
+    for find in ["SALE", " SALE ", "", "  ", "\ufeff"]:
+        for replace in ["50% OFF", "", " \x1f ", " it's "]:
+            case(TextEditNode, ["image"], {"find": find, "replace": replace, "instructions": ""})
+    for ins in _ACTION_INSTRUCTIONS:
+        case(TextEditNode, ["image"], {"find": "SALE", "replace": "50% OFF", "instructions": ins})
+    case(TextEditNode, ["image"], {"find": "SALE", "replace": "NEW"})
+
+    # Recolor Object: target × color, then the instructions.
+    for target in ["the shirt", " the shirt ", "", "  ", "\x1f"]:
+        for color in ["forest green (#2d6a4f)", "", "  #ff0000  ", "\ufeff"]:
+            case(RecolorObjectNode, ["image"], {"target": target, "color": color, "instructions": ""})
+    for ins in _ACTION_INSTRUCTIONS:
+        case(RecolorObjectNode, ["image"], {"target": "the mug", "color": "#ff0000", "instructions": ins})
+    case(RecolorObjectNode, ["image"], {"target": "the mug", "color": "red"})
+
+    # Swap Background: reference or not × scene prompt × the three toggles × instructions.
+    for links in (["product"], ["product", "background_reference"]):
+        for scene in ["", "   ", "marble bathroom counter, soft morning light", "  padded scene  ", "\ufeff"]:
+            for mask in range(8):
+                for ins in ("", "  warmer tone  "):
+                    case(SwapBackgroundNode, links, {
+                        "scene_prompt": scene, "relight_to_scene": bool(mask & 1),
+                        "ground_with_shadow": bool(mask & 2), "keep_scale_and_placement": bool(mask & 4),
+                        "instructions": ins})
+        # Only the required inputs (the toggles at their defaults; no scene prompt, no instructions).
+        case(SwapBackgroundNode, links, {"relight_to_scene": True, "ground_with_shadow": True,
+                                         "keep_scale_and_placement": True})
+    case(SwapBackgroundNode, ["product"], {"scene_prompt": "a beach", "relight_to_scene": 0,
+                                           "ground_with_shadow": 1, "keep_scale_and_placement": ""})
+
+    # Swap Product: both pictures, or the scene only (pass-through).
+    for links in (["scene_reference", "product"], ["scene_reference"]):
+        for ins in _ACTION_INSTRUCTIONS:
+            case(SwapProductNode, links, {"instructions": ins})
+        case(SwapProductNode, links, {})
+
+    # Person Swap: both pictures, or the scene only (pass-through); outfit on, off, missing.
+    for links in (["scene", "person"], ["scene"]):
+        for outfit in (True, False):
+            for ins in _ACTION_INSTRUCTIONS:
+                case(PersonSwapNode, links, {"keep_original_outfit": outfit, "instructions": ins})
+        case(PersonSwapNode, links, {})
+
+    # Blend Scene · Nano Banana: the 16 toggle sets, a custom prompt, a blank
+    # one, and the dials Nano Banana ignores (seed, output_format, keep_feather).
+    blend_base = {"model": "Nano Banana", "unify_lighting": True, "contact_shadows": True,
+                  "match_camera_look": True, "preserve_identity": True, "keep_feather": 2.0,
+                  "prompt": "", "seed": 0, "output_format": "png"}
+    for mask in range(16):
+        case(nr.BlendSceneNode, ["image"], {**blend_base, "unify_lighting": bool(mask & 1),
+                                            "contact_shadows": bool(mask & 2), "match_camera_look": bool(mask & 4),
+                                            "preserve_identity": bool(mask & 8)})
+    for over in ({"prompt": "  make it one cosy photo  "}, {"prompt": "   ", "unify_lighting": False},
+                 {"prompt": "\ufeff"}, {"seed": 2**32 + 5, "output_format": "jpg", "keep_feather": 0.0}):
+        case(nr.BlendSceneNode, ["image"], {**blend_base, **over})
+    case(nr.BlendSceneNode, ["image"], {k: v for k, v in blend_base.items() if k != "prompt"})
+    return cases
+
+
 def family_cases() -> dict:
     out = {key: [] for key in FAMILY_KEYS}
     out["falEdit"] = _fal_edit_cases()
     out["replicateImage"] = _replicate_image_cases()
+    out["nanoActions"] = _nano_actions_cases()
     return out
 
 

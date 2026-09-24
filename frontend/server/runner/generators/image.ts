@@ -191,6 +191,20 @@ const GROK_AR = new Set(['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '2:1
 const WAN22_AR = new Set(['1:1', '16:9', '9:16', '4:3', '3:4', '21:9'])
 const PIMAGE_AR = new Set(['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'])
 
+/**
+ * Every ratio set above, by its name in image_models.py. A guard test
+ * (runner-image-options.unit.spec.ts) parses the Python file and checks each
+ * one is the same, so a ratio added in Python can't be missed here.
+ */
+export const IMAGE_RATIO_SETS: Readonly<Record<string, ReadonlySet<string>>> = {
+  _NANO_BANANA_AR: NANO_BANANA_AR, _NANO_BANANA_PRO_AR: NANO_BANANA_PRO_AR,
+  _FLUX_PRO_AR: FLUX_PRO_AR, _FLUX_DEV_AR: FLUX_DEV_AR, _FLUX_2_AR: FLUX_2_AR, _FLUX_KLEIN_AR: FLUX_KLEIN_AR,
+  _FLUX_ULTRA_AR: FLUX_ULTRA_AR, _IDEOGRAM_V2_AR: IDEOGRAM_V2_AR, _GOOGLE_AR: GOOGLE_AR, _SEEDREAM_AR: SEEDREAM_AR,
+  _RECRAFT_AR: RECRAFT_AR, _SD35_AR: SD35_AR, _PHOTON_AR: PHOTON_AR, _BRIA_AR: BRIA_AR, _MINIMAX_AR: MINIMAX_AR,
+  _QWEN_AR: QWEN_AR, _OPENAI_AR: OPENAI_AR, _HUNYUAN_AR: HUNYUAN_AR, _GROK_AR: GROK_AR, _WAN22_AR: WAN22_AR,
+  _PIMAGE_AR: PIMAGE_AR,
+}
+
 type Builder = (a: ImageBuildArgs) => Record<string, unknown>
 
 /** Every builder ends with _maybe_set_seed. */

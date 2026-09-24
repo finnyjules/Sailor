@@ -4,20 +4,26 @@
  *   pass     — hand files on (result cards, an open Gate)
  *   pause    — a closed Gate: stop this branch and show what reached it
  * Mirrors the Python nodes (GenerateImageNode on fal or Replicate, GenerateVideoNode, Gate,
- * Image, Video, and the fal-edit family: EditImageNode, DevelopImageNode,
- * RelightNode, BlendSceneNode) closely enough that the same workflow gives
- * the same result.
+ * Image, Video, the fal-edit family: EditImageNode, DevelopImageNode,
+ * RelightNode, BlendSceneNode, and the nano-actions family on Replicate:
+ * RemoveObjectNode, TextEditNode, RecolorObjectNode, SwapBackgroundNode,
+ * SwapProductNode, PersonSwap, BlendSceneNode's Nano Banana mode) closely
+ * enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiPrompt } from '#shared/runner/graph'
 import { resolveVideoModelId } from '#shared/runner/eligibility'
 import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS, composeImagePrompt, imageAppFor } from './generators/image'
 import { RUNNER_VIDEO_MODELS, falVideoFn } from './generators/video'
-import { asInt, asText, parseJsonObject, pyTruthy } from './generators/opts'
+import { asInt, asText, parseJsonObject, pyStrip, pyTruthy } from './generators/opts'
 import {
   DEVELOP_PROMPT, FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP,
   blendInstruction, falFlux2Edit, falKontext, falNanoBananaEdit,
 } from './generators/edit'
 import { parseLight, relightInstruction } from './generators/relight'
+import {
+  NANO_BANANA_2_SLUG, NANO_BANANA_SLUG, actionPassThrough, personSwapInstruction,
+  recolorInstruction, removeObjectInstruction, swapBackgroundInstruction, swapProductInstruction, textEditInstruction,
+} from './generators/actions'
 import { moodboardFiles, parseInputFileRef } from './inputs'
 import type { OutputFile, RunnerProvider } from './types'
 
@@ -56,10 +62,22 @@ export async function planNode(ctx: PlanContext): Promise<NodePlan> {
   }
   // A widget toggle as Python reads it: missing is the node's default.
   const flag = (name: string, def: boolean): boolean => inputs[name] === undefined ? def : pyTruthy(inputs[name])
-  const still = (endpoint: string, payload: Record<string, unknown>, prefix: string): NodePlan => ({
-    kind: 'provider', provider: 'fal', endpoint, payload, media: 'image', prefix,
+  const still = (endpoint: string, payload: Record<string, unknown>, prefix: string, provider: RunnerProvider = 'fal'): NodePlan => ({
+    kind: 'provider', provider, endpoint, payload, media: 'image', prefix,
     uiFor: files => ({ images: files, animated: [false] }),
   })
+  // A nano-actions call: google/nano-banana-2 on Replicate, the pictures in the node's order.
+  const nanoAction = (prompt: string, imageInput: string[], prefix: string): NodePlan =>
+    still(NANO_BANANA_2_SLUG, { prompt, image_input: imageInput, resolution: '1K', output_format: 'png' }, prefix, 'replicate')
+
+  // A nano-actions node Python would return early from: its picture is handed
+  // on as it is. No call, no hand-off, no charge (stageEstimate holds nothing for it).
+  const passName = actionPassThrough(node.class_type, inputs)
+  if (passName) {
+    const f = linkedFirstFile(passName)
+    if (!f) throw new Error('There is no picture to pass on')
+    return { kind: 'pass', files: [f], ui: { images: [f] } }
+  }
 
   switch (node.class_type) {
     case 'GenerateImageNode': {
@@ -196,7 +214,7 @@ export async function planNode(ctx: PlanContext): Promise<NodePlan> {
     case 'BlendSceneNode': {
       const image = await pictureUrl('image', 'There is no picture to blend')
       const model = String(inputs.model)
-      const prompt = asText(inputs.prompt).trim() || blendInstruction({
+      const prompt = pyStrip(asText(inputs.prompt)) || blendInstruction({
         unifyLighting: flag('unify_lighting', true),
         contactShadows: flag('contact_shadows', true),
         matchCameraLook: flag('match_camera_look', true),
@@ -211,7 +229,56 @@ export async function planNode(ctx: PlanContext): Promise<NodePlan> {
         // Kontext here gets only output_format and seed: no aspect, safety or upsampling.
         return still(FLUX_KONTEXT_APP, falKontext({ imageUrl: image, prompt, outputFormat, seed }), 'blend_scene')
       }
+      if (model === 'Nano Banana') {
+        // Replicate google/nano-banana with only {prompt, image_input} (nano-actions).
+        return still(NANO_BANANA_SLUG, { prompt, image_input: [image] }, 'blend_scene', 'replicate')
+      }
       throw new Error(`The runner cannot blend with ${model}`)
+    }
+
+    // ── nano-actions family (comfy_extras/nodes_edit_actions.py, nodes_swap_*.py, nodes_person_swap.py) ──
+    // Each reaches here only when it makes its call (see actionPassThrough above).
+    case 'RemoveObjectNode': {
+      const image = await pictureUrl('image', 'There is no picture to edit')
+      return nanoAction(removeObjectInstruction(asText(inputs.target), asText(inputs.instructions)), [image], 'remove_object')
+    }
+    case 'TextEditNode': {
+      const image = await pictureUrl('image', 'There is no picture to edit')
+      return nanoAction(textEditInstruction(asText(inputs.find), asText(inputs.replace), asText(inputs.instructions)), [image], 'text_edit')
+    }
+    case 'RecolorObjectNode': {
+      const image = await pictureUrl('image', 'There is no picture to edit')
+      return nanoAction(recolorInstruction(asText(inputs.target), asText(inputs.color), asText(inputs.instructions)), [image], 'recolor_object')
+    }
+    // Reference mode sends [background, product] (the prompt's "first image /
+    // second image"); prompt mode sends [product] only.
+    case 'SwapBackgroundNode': {
+      const product = await pictureUrl('product', 'There is no product picture')
+      const hasReference = isLink(inputs.background_reference)
+      const imageInput = hasReference
+        ? [await pictureUrl('background_reference', 'There is no background picture'), product]
+        : [product]
+      const prompt = swapBackgroundInstruction({
+        hasReference,
+        scenePrompt: asText(inputs.scene_prompt),
+        relightToScene: flag('relight_to_scene', true),
+        groundWithShadow: flag('ground_with_shadow', true),
+        keepScaleAndPlacement: flag('keep_scale_and_placement', true),
+        instructions: asText(inputs.instructions),
+      })
+      return nanoAction(prompt, imageInput, 'swap_background')
+    }
+    // Order is load-bearing: [scene reference, new product].
+    case 'SwapProductNode': {
+      const scene = await pictureUrl('scene_reference', 'There is no scene picture')
+      const product = await pictureUrl('product', 'There is no product picture')
+      return nanoAction(swapProductInstruction(asText(inputs.instructions)), [scene, product], 'swap_product')
+    }
+    // Order is load-bearing: [scene, new person].
+    case 'PersonSwap': {
+      const scene = await pictureUrl('scene', 'There is no scene picture')
+      const person = await pictureUrl('person', 'There is no picture of the person')
+      return nanoAction(personSwapInstruction(flag('keep_original_outfit', true), asText(inputs.instructions)), [scene, person], 'person_swap')
     }
 
     case GATE_CLASS: {

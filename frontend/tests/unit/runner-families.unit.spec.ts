@@ -87,7 +87,7 @@ const CASES: Array<[string, ApiPrompt, boolean]> = [
   ['a legacy video label', one({ class_type: 'GenerateVideoNode', inputs: { model: 'Veo 3', prompt: 'p' } }), true],
   ['a video model the runner does not run yet', one({ class_type: 'GenerateVideoNode', inputs: { model: 'kling-v3', prompt: 'p' } }), false],
   ['a node no family takes', { '1': { class_type: 'Image', inputs: { image: 'a.png' } }, '2': { class_type: 'RestyleWithLoRANode', inputs: { image: ['1', 0], prompt: 'p' } } }, false],
-  ['a Replicate action (no row yet)', { '1': { class_type: 'Image', inputs: { image: 'a.png' } }, '2': { class_type: 'RemoveObjectNode', inputs: { image: ['1', 0], target: 'the cup' } } }, false],
+  ['a Nano Banana sibling no family takes (LensReframe)', { '1': { class_type: 'Image', inputs: { image: 'a.png' } }, '2': { class_type: 'LensReframe', inputs: { image: ['1', 0] } } }, false],
 ]
 
 describe('eligibility with families', () => {

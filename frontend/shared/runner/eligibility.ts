@@ -70,13 +70,27 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   DevelopImageNode: { family: 'fal-edit', mustLink: ['input_image'] },
   // With no `image` Python makes a blank no-op; the runner leaves that to Python.
   RelightNode: { family: 'fal-edit', mustLink: ['image'], mustNotLink: ['light', 'instructions'] },
-  // The Nano Banana mode is Replicate (Task B5). A linked keep_subject needs a
-  // local mask composite after the call, which the runner does not do.
+  // The Nano Banana mode is Replicate (nano-actions, Task B5). A linked
+  // keep_subject needs a local mask composite after the call, which the
+  // runner does not do.
   BlendSceneNode: {
-    models: { 'Flux Kontext Pro': 'fal-edit', 'Flux 2 Pro': 'fal-edit' },
+    models: { 'Flux Kontext Pro': 'fal-edit', 'Flux 2 Pro': 'fal-edit', 'Nano Banana': 'nano-actions' },
     mustLink: ['image'],
     mustNotLink: ['keep_subject', 'prompt'],
   },
+  // ── nano-actions (Task B5): google/nano-banana-2 on Replicate ──
+  // The main picture must be linked: without it Python makes a blank, which
+  // stays with Python. Text and toggles the runner reads must not be wired.
+  RemoveObjectNode: { family: 'nano-actions', mustLink: ['image'], mustNotLink: ['target', 'instructions'] },
+  TextEditNode: { family: 'nano-actions', mustLink: ['image'], mustNotLink: ['find', 'replace', 'instructions'] },
+  RecolorObjectNode: { family: 'nano-actions', mustLink: ['image'], mustNotLink: ['target', 'color', 'instructions'] },
+  SwapBackgroundNode: {
+    family: 'nano-actions',
+    mustLink: ['product'],
+    mustNotLink: ['scene_prompt', 'instructions', 'relight_to_scene', 'ground_with_shadow', 'keep_scale_and_placement'],
+  },
+  SwapProductNode: { family: 'nano-actions', mustLink: ['scene_reference'], mustNotLink: ['instructions'] },
+  PersonSwap: { family: 'nano-actions', mustLink: ['scene'], mustNotLink: ['keep_original_outfit', 'instructions'] },
   // ── replicate-image (Task B4): the Replicate-primary image models ──
   // Only ADDS these models; the fal ones stay as they are. The Idea socket
   // (prompt_in) and the taste wire (style_in) come from nodes the runner does
@@ -139,7 +153,8 @@ function optionInt(opts: Record<string, unknown>, key: string): number {
   const v = opts[key]
   if (typeof v === 'boolean') return v ? 1 : 0
   if (typeof v === 'number') return Number.isFinite(v) ? Math.trunc(v) : 1
-  if (typeof v === 'string' && /^\s*[+-]?\d+\s*$/.test(v)) return Number.parseInt(v.trim(), 10)
+  // int() allows single underscores between digits ("1_0" is 10), in step with optInt.
+  if (typeof v === 'string' && /^\s*[+-]?\d(?:_?\d)*\s*$/.test(v)) return Number.parseInt(v.trim().replace(/_/g, ''), 10)
   return 1
 }
 

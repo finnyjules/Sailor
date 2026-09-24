@@ -530,7 +530,8 @@ export function createEngine(deps: EngineDeps) {
     const outputs: OutputFile[] = []
     for (const id of legIds) {
       const rec = take.nodes[id]!
-      if (rec.status === 'done' && !rec.reused && PROVIDER_TYPES.has(rec.classType)) outputs.push(...rec.outputs.filter(f => f.type === 'output'))
+      // A node that handed its picture on (no call, so no endpoint) made nothing new.
+      if (rec.status === 'done' && !rec.reused && rec.endpoint !== null && PROVIDER_TYPES.has(rec.classType)) outputs.push(...rec.outputs.filter(f => f.type === 'output'))
     }
     if (outputs.length) {
       const nodeTypes = [...new Set(legIds.filter(id => take.nodes[id]!.status === 'done').map(id => take.nodes[id]!.classType))]

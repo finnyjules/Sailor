@@ -15,6 +15,7 @@ import { BASE_RENDER_CREDITS, OUTPUT_CLASS_TYPES, priceGraph } from '../utils/pr
 import { extractGraphPromptText } from '../utils/graphPromptText'
 import { MeterRefusalError } from '../utils/requestMeter'
 import { outputKey } from '../utils/graphRuns'
+import { actionPassThrough } from './generators/actions'
 import type { OutputFile, StageCharge } from './types'
 
 export function nodeCredits(node: ApiNode): number {
@@ -66,13 +67,20 @@ export function hasOutputNode(prompt: ApiPrompt): boolean {
   return Object.values(prompt).some(n => OUTPUT_CLASS_TYPES.has(n.class_type))
 }
 
+/**
+ * The hold for one stage: every node that may make a call, plus the render
+ * credit. A nano-actions node that will hand its picture on (actionPassThrough,
+ * the same rule planNode follows) makes no call and is not held. The render
+ * credit is only ever charged on top of something made, so a stage that can
+ * make nothing holds nothing.
+ */
 export function stageEstimate(prompt: ApiPrompt, nodeIds: Iterable<string>, includeBase: boolean): number {
-  let total = includeBase ? BASE_RENDER_CREDITS : 0
+  let total = 0
   for (const id of nodeIds) {
     const n = prompt[id]
-    if (n) total += nodeCredits(n)
+    if (n && !actionPassThrough(n.class_type, n.inputs ?? {})) total += nodeCredits(n)
   }
-  return total
+  return includeBase && total > 0 ? total + BASE_RENDER_CREDITS : total
 }
 
 export interface LedgerPort {
