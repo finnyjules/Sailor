@@ -4,7 +4,9 @@
  */
 import type { Paint } from '~/lib/compositor/paint'
 import { mixHex } from '~/lib/color/mix'
-import { ringsFromD } from '~/lib/vector/morphPieces'
+import { ringsFromD, ringsToD, type MorphFrame } from '~/lib/vector/morphPieces'
+import type { P } from '~/lib/vector/medial'
+import type { TextCell } from '~/lib/motionx/text/units'
 
 // `mixHex` reads all three through `parseHexA` (8-digit keeps its alpha; 3-digit expands).
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i
@@ -63,4 +65,40 @@ export function syntheticBoldPx(
   if (face >= 600) return 0
   const ratio = fontPx <= 9 ? 1 / 24 : fontPx >= 36 ? 1 / 32 : 1 / 24 + ((fontPx - 9) / 27) * (1 / 32 - 1 / 24)
   return fontPx * ratio
+}
+
+/** The part of a letter behaviour's per-glyph draw a morphing piece can take: where the glyph
+ *  sits, its turn, its size and its opacity (a Decode's substitute character, a Slot's reel and a
+ *  mask's clip have no meaning on a shape between two fonts, so they are not carried). */
+export interface LetterPose { x: number; y: number; rotation: number; scale: number; opacity: number }
+
+/**
+ * Letter behaviours riding a morph (USER 09-24: a Cascade in under a Morph into was invisible —
+ * the morph draws a shape, and letter behaviours only moved real text). Every ring of the morph
+ * frame belongs to the A letter at its anchor (the nearest cell); it takes that letter's pose:
+ * `p' = pose + R(pose.rotation) · scale · R(−cell.angle) · (p − cell)`, which is the identity for
+ * a letter at rest. Rings are grouped by opacity; a letter at opacity 0 (not started, "hide
+ * before it starts") is left out. Coordinates are A's own local px, the same the cells use.
+ */
+export function rideLetterMotion(frame: MorphFrame, cells: TextCell[], poses: LetterPose[]): { d: string; opacity: number }[] {
+  if (!cells.length) return [{ d: ringsToD(frame.rings), opacity: 1 }]
+  const groups = new Map<number, P[][]>()
+  frame.rings.forEach((ring, i) => {
+    const a = frame.anchors[i]!
+    let best = 0, bd = Infinity
+    cells.forEach((c, k) => { const d = (c.x - a[0]) ** 2 + (c.y - a[1]) ** 2; if (d < bd) { bd = d; best = k } })
+    const c = cells[best]!, pose = poses[best]
+    if (!pose) return
+    const op = Math.round(Math.max(0, Math.min(1, pose.opacity)) * 1000) / 1000
+    if (!(op > 0) || ![pose.x, pose.y, pose.rotation, pose.scale].every(Number.isFinite)) return
+    const back = -c.angle, turn = pose.rotation
+    const cb = Math.cos(back), sb = Math.sin(back), ct = Math.cos(turn), st = Math.sin(turn)
+    const moved = ring.map(([px, py]) => {
+      const dx = px - c.x, dy = py - c.y
+      const lx = (dx * cb - dy * sb) * pose.scale, ly = (dx * sb + dy * cb) * pose.scale
+      return [pose.x + lx * ct - ly * st, pose.y + lx * st + ly * ct] as P
+    })
+    const g = groups.get(op); if (g) g.push(moved); else groups.set(op, [moved])
+  })
+  return [...groups].map(([opacity, rings]) => ({ d: ringsToD(rings), opacity }))
 }

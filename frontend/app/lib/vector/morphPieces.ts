@@ -176,9 +176,15 @@ const centroid = (rings: P[][]): P => {
 const LETTER_WINDOW = 0.5
 const smooth01 =(e0: number, e1: number, x: number) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t) }
 
-function build(dA: string, dB: string, style: MorphStyle): (t: number) => string {
+/** One frame of a morph: its rings, and for each ring the REST point on A it belongs to (the
+ *  centre of the A letter it came from — for a piece only B has, the letter it grows out of).
+ *  Stable across the whole bar, so a caller can hand every ring the motion of "its" letter
+ *  (the Frame's letter behaviours riding a morph) without the assignment jumping mid-bar. */
+export interface MorphFrame { rings: P[][]; anchors: P[] }
+
+function build(dA: string, dB: string, style: MorphStyle): (t: number) => MorphFrame {
   const rA = ringsFromD(dA), rB = ringsFromD(dB)
-  if (!rA.length || !rB.length) return () => ''
+  if (!rA.length || !rB.length) return () => ({ rings: [], anchors: [] })
   const pA = splitPieces(rA), pB = splitPieces(rB)
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
   for (const p of [...rA, ...rB].flat()) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]) }
@@ -186,10 +192,17 @@ function build(dA: string, dB: string, style: MorphStyle): (t: number) => string
   const pin = (rings: P[][]) => pinGlyph(rings, { h, spur: 1.5 })
   if (style === 'shape' || pA.length === 0 || pB.length === 0) {
     const pairs = pairGlyphs(pin(pA.flatMap(p => p.rings)), pin(pB.flatMap(p => p.rings)))
-    return (t) => toD(evalGlyph(pairs, t, 'medial'))
+    // A contour only B has takes the A contour it is carried by; failing that, its own centre.
+    const anchors = pairs.map(pr => pr.a?.centroid ?? (pr.carrier ? pairs[pr.carrier.pair]!.a?.centroid : undefined) ?? pr.b!.centroid)
+    return (t) => ({ rings: evalGlyph(pairs, t, 'medial'), anchors })
   }
   const links = alignPieces(pA.length, pB.length)
   const matched = links.map(l => (l.a != null && l.b != null ? pairGlyphs(pin(pA[l.a]!.rings), pin(pB[l.b]!.rings)) : null))
+  const anchorOf = links.map((l) => {
+    const a = l.a ?? links[l.partner!]!.a
+    const pc = a != null ? pA[a]! : pB[l.b!]!
+    return [pc.cx, pc.cy] as P
+  })
   // Letter by letter means one AFTER another: each matched link turns in its own window of the
   // bar, starting in reading order (half the bar each, starts spread evenly); an extra keeps its
   // partner's clock. Without this, letters and whole shape looked the same (USER 09-24).
@@ -203,33 +216,46 @@ function build(dA: string, dB: string, style: MorphStyle): (t: number) => string
     return Math.max(0, Math.min(1, (t - s) / w))
   }
   return (t) => {
-    const out: P[][] = []
+    const rings: P[][] = [], anchors: P[] = []
     const now = links.map((l, k) => (matched[k] ? evalGlyph(matched[k]!, clock(k, t), 'medial') : null))
     links.forEach((l, k) => {
-      if (now[k]) { out.push(...now[k]!); return }
+      if (now[k]) { for (const r of now[k]!) { rings.push(r); anchors.push(anchorOf[k]!) } return }
       const C = centroid(now[l.partner!] ?? [])
-      const rings = l.a != null ? pA[l.a]!.rings : pB[l.b!]!.rings
+      const src = l.a != null ? pA[l.a]!.rings : pB[l.b!]!.rings
       // An extra piece shrinks into its partner in the first half (A only) or grows out of it
       // in the second (B only), riding with the partner's centre so it never flies off.
       const tk = clock(k, t)
       const shut = smooth01(0, 0.5, l.a != null ? tk : 1 - tk)
-      for (const r of rings) out.push(r.map(p => [p[0] + (C[0] - p[0]) * shut, p[1] + (C[1] - p[1]) * shut] as P))
+      for (const r of src) {
+        rings.push(r.map(p => [p[0] + (C[0] - p[0]) * shut, p[1] + (C[1] - p[1]) * shut] as P))
+        anchors.push(anchorOf[k]!)
+      }
     })
-    return toD(out)
+    return { rings, anchors }
   }
 }
 
+interface Prepared { frame: (t: number) => MorphFrame; d: (t: number) => string }
 const CACHE_MAX = 16
-const cache = new Map<string, (t: number) => string>()
-export function prepareMorph(dA: string, dB: string, style: MorphStyle): (t: number) => string {
+const cache = new Map<string, Prepared>()
+function prepared(dA: string, dB: string, style: MorphStyle): Prepared {
   const key = `${style}\u0000${dA}\u0000${dB}`
   const hit = cache.get(key)
   if (hit) { cache.delete(key); cache.set(key, hit); return hit }
-  const f = build(dA, dB, style)
-  cache.set(key, f)
+  const frame = build(dA, dB, style)
+  const p: Prepared = { frame, d: t => toD(frame(t).rings) }
+  cache.set(key, p)
   if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!)
-  return f
+  return p
 }
+export function prepareMorph(dA: string, dB: string, style: MorphStyle): (t: number) => string {
+  return prepared(dA, dB, style).d
+}
+/** The same morph as `prepareMorph`, frame by frame as rings with their A anchors — shares its cache. */
+export function prepareMorphFrames(dA: string, dB: string, style: MorphStyle): (t: number) => MorphFrame {
+  return prepared(dA, dB, style).frame
+}
+export { toD as ringsToD }
 export function clearMorphCache(): void { cache.clear() }
 /** How many analysed outline pairs the cache holds — for tests that prove a frame did not re-analyse. */
 export function morphCacheSize(): number { return cache.size }

@@ -114,3 +114,31 @@ describe('resolveMorphs', () => {
     expect(morphCacheSize()).toBe(0)
   })
 })
+
+// USER 09-24: "it doesn't look like cascade is applying" — a Cascade in under a Morph into.
+describe('resolveMorphs: letter behaviours ride the morph', () => {
+  const cascade = { id: 'c', layerId: 'A', kind: 'text.cascade', timing: { start: 0, duration: 1 }, params: { dir: 'in', style: 'rise', stagger: 0.5 } }
+  const cellsAtPx = () => [-100, 100].map(x => ({ char: 'A', x, y: 0, w: 40, h: 40, angle: 0, word: 0, line: 0 }))
+  const withCascade = (l: LocalLayer, t: number) => ({ ...l, textMotion: { behaviours: [cascade], t } }) as unknown as LocalLayer
+
+  it('mid-cascade, the clone carries its letters as pieces and a later letter is not yet shown', () => {
+    const a = createPathLayer({ id: 'A', d: 'M-0.12 -0.02L-0.08 -0.02L-0.08 0.02L-0.12 0.02ZM0.08 -0.02L0.12 -0.02L0.12 0.02L0.08 0.02Z' })
+    const b = createPathLayer({ id: 'B', d: 'M-0.13 -0.03L-0.07 -0.03L-0.07 0.03L-0.13 0.03ZM0.07 -0.03L0.13 -0.03L0.13 0.03L0.07 0.03Z' })
+    const layers = [withCascade(morphing(a, b, 0.1, 'letters'), 0.1), b]
+    const out = resolveMorphs(itemsOf(layers), layers, W, noSibling, () => cellsAtPx())
+    const clone = out.localLayers[0] as unknown as { motionPieces?: { d: string; opacity: number }[]; textMotion?: unknown }
+    expect(clone.textMotion).toBeUndefined()
+    expect(clone.motionPieces).toBeDefined()
+    // Only the first letter has started at t = 0.1 (letters start one after another).
+    const shown = clone.motionPieces!.filter(p => p.opacity > 0)
+    const xs = shown.flatMap(p => [...p.d.matchAll(/(-?\d+\.?\d*) (-?\d+\.?\d*)/g)].map(m => Number(m[1])))
+    expect(Math.max(...xs)).toBeLessThan(0)
+  })
+
+  it('with the cascade at rest, no pieces — the plain morph path, unchanged', () => {
+    const a = createPathLayer({ id: 'A', d: SQUARE }), b = createPathLayer({ id: 'B', d: STAR_ISH })
+    const layers = [withCascade(morphing(a, b, 0.5, 'letters'), 5), b]
+    const out = resolveMorphs(itemsOf(layers), layers, W, noSibling, () => cellsAtPx())
+    expect((out.localLayers[0] as unknown as { motionPieces?: unknown }).motionPieces).toBeUndefined()
+  })
+})

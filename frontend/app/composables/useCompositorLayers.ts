@@ -26,8 +26,9 @@ import type { LayerMotionState } from '~/lib/motion/evaluate'
 import type { FrameMotion } from '~/lib/motion/types'
 import { applyEffectDialTracks, type EffectDialTrack } from '~/lib/motion/effectTracks'
 import { applyMotionxTracks, applyTextBehaviours, applyRevealBehaviours, applyMorphBehaviours, type TextMotion, type MotionMorph } from '~/lib/motionx/adapter/frame'
-import { prepareMorph } from '~/lib/vector/morphPieces'
-import { blendMorphPaint, lerpPlacement, morphFillOf, ringsBBoxOfD, syntheticBoldPx } from '~/lib/compositor/morphDraw'
+import { prepareMorph, prepareMorphFrames, ringsToD } from '~/lib/vector/morphPieces'
+import { blendMorphPaint, lerpPlacement, morphFillOf, rideLetterMotion, ringsBBoxOfD, syntheticBoldPx } from '~/lib/compositor/morphDraw'
+import type { TextCell } from '~/lib/motionx/text/units'
 import type { StoredBehaviour, Track as MotionxTrack } from '~/lib/motionx'
 import { beginReveal, finishReveal, type RevealPass } from '~/lib/motionx/reveal/paint'
 import { drawRevealShaderStyle, revealShaderReady } from '~/lib/motionx/reveal/paintPixels'
@@ -1541,6 +1542,7 @@ function morphSizeOf(layer: LocalLayer): number {
  */
 export function resolveMorphs(
   items: StackItem[], localLayers: LocalLayer[], W: number, resolver: SiblingResolver<LocalLayer>,
+  cellsOf: (layer: LocalLayer) => TextCell[] | null = l => (l.kind === 'text' ? textMotionCells(l as TextLayer, W) : null),
 ): { items: StackItem[]; localLayers: LocalLayer[] } {
   const swaps = new Map<string, LocalLayer>()
   const toPx = (d: string, unit: number) => (unit === 1 ? d : transformPathD(d, [unit, 0, 0, unit, 0, 0]))
@@ -1552,10 +1554,18 @@ export function resolveMorphs(
     const oA = canTakeGeometry(layer) ? computedOutlineD(layer, W, (key) => resolver(key, layer)) : null
     const oB = canTakeGeometry(target) ? computedOutlineD(target, W) : null
     let d = ''
+    let pieces: { d: string; opacity: number }[] | undefined
     if (oA && oB) {
       try {
-        d = prepareMorph(toPx(oA, morphUnitPx(layer, W)), toPx(oB, morphUnitPx(target, W)), mm.style)(mm.amount)
-      } catch { d = '' }
+        const frame = prepareMorphFrames(toPx(oA, morphUnitPx(layer, W)), toPx(oB, morphUnitPx(target, W)), mm.style)(mm.amount)
+        d = ringsToD(frame.rings)
+        // Letter behaviours on A (a Cascade in under the morph) ride it: each ring takes the pose
+        // of the A letter it came from (USER 09-24 "it doesn't look like cascade is applying").
+        const tm = (layer as unknown as { textMotion?: TextMotion }).textMotion
+        const cells = d && tm ? cellsOf(layer) : null
+        const moving = cells ? movingTextFrame(cells, tm!.behaviours, tm!.t, motionFrameBox(W)) : null
+        if (moving) pieces = rideLetterMotion(frame, cells!, moving.frame.cells)
+      } catch { d = ''; pieces = undefined }
     }
     const bare = { ...layer, motionMorph: undefined } as unknown as LocalLayer
     if (!d) {
@@ -1579,7 +1589,7 @@ export function resolveMorphs(
       ...writeStackToLayer(stack),
       ...lerpPlacement(layer, target, mm.amount),
       kind: 'path', d, bbox: ringsBBoxOfD(d), scale: sT / W, fillRule: 'nonzero',
-      motionScale: undefined,
+      motionScale: undefined, textMotion: undefined, motionPieces: pieces,
       fill,
       stroke: boldPx > 0 ? fill : '', strokeWidth: boldPx > 0 ? boldPx / sT : 0, strokes: undefined,
       opacity: (layer.opacity ?? 1) + ((target.opacity ?? 1) - (layer.opacity ?? 1)) * mm.amount,
@@ -4757,6 +4767,7 @@ function collectTextOnPathOutline(
   applyFont(ctx, layer, W)
   const placed = placeGlyphs(ctx, layer, guide, W)
   if (!placed.length) return
+  if (collect.cells) collect.cells.push(...pathGlyphCells(placed, displayRun(layer), layer.fontSize * W))
   const cmds = placedGlyphsToCommands(collect.font, placed, layer.fontSize * W, outlineAxesForLayer(layer))
   for (const c of cmds) collect.out.push(c)
   collect.box = guide.bounds()
@@ -4788,6 +4799,9 @@ interface TextOutlineCollect {
   font: VtFont
   out: VectorCommand[]
   box: { w: number; h: number }
+  /** When present, also receives the letter-behaviour cells of the SAME layout the outline is
+   *  built from (Frame Morph: letter behaviours riding a morph). */
+  cells?: TextCell[]
 }
 
 /** Fill mode: the largest fontSize (normalized to width) at which the wrapped
@@ -4916,6 +4930,10 @@ function drawText(ctx: CanvasRenderingContext2D, layer: TextLayer, W: number, co
       dec = { left, y, w: lw }
     }
     drawn.push({ runs: [{ text: line, x: anchorX, y }], deco: dec })
+  }
+
+  if (collect?.cells) {
+    collect.cells.push(...textRunCells(ctx, drawn.flatMap((d, i) => d.runs.map(r => ({ text: r.text, x: r.x, y: r.y, line: i }))), fontPx, canvasAlign))
   }
 
   // Emit one run at (x, y): draw it as today (default), or — in collect mode —
@@ -5080,6 +5098,18 @@ function collectTextOutline(
  * geometry `fillText` would ink — or `null` when unavailable (system/unresolved
  * font, or bytes still loading). See `collectTextOutline`.
  */
+/** A text layer's letter-behaviour cells, from the same layout its outline is built from, in the
+ *  outline's own local px — or null where the layer has no outline (system font, still loading,
+ *  placed runs, expressive). Frame Morph uses it so letter behaviours ride a morph. */
+export function textMotionCells(layer: TextLayer, W: number): TextCell[] | null {
+  const font = getCompositorFont(layer)
+  const ctx = font ? measureCtx() : null
+  if (!font || !ctx) return null
+  const collect: TextOutlineCollect = { font, out: [], box: { w: 1, h: 1 }, cells: [] }
+  drawText(ctx, layer, W, collect)
+  return collect.out.length && collect.cells!.length ? collect.cells! : null
+}
+
 export function textLayerOutline(
   layer: TextLayer, W: number, ctxOverride?: CanvasRenderingContext2D | null,
 ): string | null {
@@ -5187,6 +5217,19 @@ function path2dFor(d: string): Path2D | null {
  * Path2D. Gradients resolve against the un-scaled local bbox.
  */
 function drawPath(ctx: CanvasRenderingContext2D, layer: PathLayer, W: number) {
+  // Frame Morph with letter behaviours riding it: the clone carries its letters as separate
+  // pieces, each at its own opacity (a letter not yet started is simply absent).
+  const pieces = (layer as unknown as { motionPieces?: { d: string; opacity: number }[] }).motionPieces
+  if (pieces) {
+    for (const pc of pieces) {
+      if (!(pc.opacity > 0) || !pc.d) continue
+      ctx.save()
+      ctx.globalAlpha *= pc.opacity
+      drawPath(ctx, { ...layer, d: pc.d, motionPieces: undefined } as unknown as PathLayer, W)
+      ctx.restore()
+    }
+    return
+  }
   const p = path2dFor(layer.d)
   if (!p) return
   const s = (layer.scale || 1) * W

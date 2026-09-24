@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { blendMorphPaint, lerpPlacement, morphFillOf, ringsBBoxOfD, syntheticBoldPx } from '~/lib/compositor/morphDraw'
+import { blendMorphPaint, lerpPlacement, morphFillOf, rideLetterMotion, ringsBBoxOfD, syntheticBoldPx } from '~/lib/compositor/morphDraw'
+import { ringsFromD } from '~/lib/vector/morphPieces'
 
 describe('morph draw helpers', () => {
   it('reads a text layer colour and a shape fill', () => {
@@ -54,5 +55,32 @@ describe('syntheticBoldPx — the bold Chromium fakes for a weight the face does
     expect(syntheticBoldPx(800, staticFace(700), 141)).toBe(0)                              // the face is bold
     expect(syntheticBoldPx(800, { axes: [{ tag: 'wght' }], raw: {} }, 141)).toBe(0)         // a weight axis draws it
     expect(syntheticBoldPx(800, null, 141)).toBe(0)                                         // no font
+  })
+})
+
+// USER 09-24: "it doesn't look like cascade is applying" — a Cascade in under a Morph into on the
+// same text was invisible, because the morph draws a shape and the Cascade only moved real text.
+describe('rideLetterMotion', () => {
+  const sq = (x: number, y: number): [number, number][] => [[x - 5, y - 5], [x + 5, y - 5], [x + 5, y + 5], [x - 5, y + 5]]
+  const frame = { rings: [sq(0, 0), sq(100, 0)], anchors: [[0, 0], [100, 0]] as [number, number][] }
+  const cell = (x: number) => ({ char: 'A', x, y: 0, w: 20, h: 20, angle: 0, word: 0, line: 0 })
+  const cells = [cell(0), cell(100)]
+  it('moves, turns, scales and fades each piece with the letter it came from', () => {
+    const out = rideLetterMotion(frame, cells, [
+      { x: 0, y: 0, rotation: 0, scale: 1, opacity: 0 },            // not started: hidden
+      { x: 100, y: 50, rotation: Math.PI / 2, scale: 2, opacity: 0.5 },
+    ])
+    expect(out).toHaveLength(1)
+    expect(out[0]!.opacity).toBe(0.5)
+    const pts = ringsFromD(out[0]!.d).flat()
+    const xs = pts.map(p => p[0]), ys = pts.map(p => p[1])
+    expect(Math.min(...xs)).toBeCloseTo(90); expect(Math.max(...xs)).toBeCloseTo(110)
+    expect(Math.min(...ys)).toBeCloseTo(40); expect(Math.max(...ys)).toBeCloseTo(60)
+  })
+  it('leaves a piece at rest exactly where it was, and merges pieces of equal opacity', () => {
+    const rest = cells.map(c => ({ x: c.x, y: c.y, rotation: 0, scale: 1, opacity: 1 }))
+    const out = rideLetterMotion(frame, cells, rest)
+    expect(out).toHaveLength(1)
+    expect(ringsBBoxOfD(out[0]!.d)).toEqual({ w: 110, h: 10 })
   })
 })
