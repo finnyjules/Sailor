@@ -11,6 +11,7 @@ import { parseDoc } from '~/lib/scene3d/config'
 import { SceneEngine } from '~/lib/scene3d/engine'
 import { renderPasses } from '~/lib/scene3d/passes'
 import { sceneHasMotion, renderMotionFrameSettled, sceneFrameClock } from '~/lib/scene3d/motion/render'
+import { appExportIO, createRestyleLoader, ensureShaderCatalog, renderExportFrameSettled } from '~/lib/scene3d/exportRender'
 import { makeScene3DFrameSource } from '~/lib/scene3d/motion/frameSource'
 import { registerStudioFrameSource, unregisterStudioFrameSource } from '~/lib/studio/frameSource'
 import { registerScene3DRebaker, unregisterScene3DRebaker } from '~/lib/scene3d/rebake'
@@ -98,6 +99,9 @@ let registered = false
 // (and are therefore `registered`, which used to be the disposal gate).
 let inFlight = 0
 let releaseTimer: ReturnType<typeof setTimeout> | null = null
+// The Frame's 3D source renders through the shared export renderer, which needs the scene's
+// restyle results loaded — kept across frames (and across engine re-creation) by this loader.
+const frameRestyle = createRestyleLoader(appExportIO)
 
 function scheduleEngineRelease(): void {
   if (releaseTimer) clearTimeout(releaseTimer)
@@ -129,15 +133,19 @@ function syncRegistration() {
       // Still scenes report duration 0 (see sceneFrameClock) so the Frame pulls
       // them once and runs no rAF; animated scenes report their real clock.
       getClock: () => sceneFrameClock(sceneDoc.value),
-      // Settled, not plain renderMotionFrame: decal meshes attach on a microtask
-      // after syncFromDoc, and a Frame pulls each frame exactly once — a sync
-      // render made the sticker pop in a few frames late. getFrame already awaits.
+      // The shared export renderer: restyle results loaded, the shader catalog in hand,
+      // every asset waited for (decal meshes attach on a microtask after syncFromDoc, and a
+      // Frame pulls each frame exactly once), editor helpers hidden. A short deadline, and
+      // failures are ignored — the preview draws what it has. getFrame already awaits.
       renderAt: async (t01, w, h) => {
         const eng = ensureHeadless(w, h)
         if (!eng) return null
         inFlight++
         try {
-          return await renderMotionFrameSettled(eng, sceneDoc.value, t01)
+          const doc = sceneDoc.value
+          await frameRestyle.apply(eng, doc)
+          await ensureShaderCatalog(doc, appExportIO)
+          return await renderExportFrameSettled(eng, doc, t01, { timeoutMs: 4000 })
         } finally {
           inFlight--
           // Release AFTER the consumer copies (pullLiveFrame drawImages once our
@@ -270,6 +278,7 @@ onBeforeUnmount(() => {
   unregisterScene3DRebaker(props.id)
   if (registered) unregisterStudioFrameSource(props.id)
   unsubFieldCatalog()
+  frameRestyle.dispose()
   headlessEngine?.dispose()
   headlessEngine = null
   headlessCanvas = null

@@ -62,7 +62,17 @@ export function sceneFrameClock(doc: SceneDoc): SceneFrameClock {
  *  catalog resolves. Gated on `sceneHasShaderFill` so an ordinary (non-shaderFill)
  *  scene's frame pull pays nothing new — same cost-gate convention every other
  *  Scene3D call site uses. */
-export function renderMotionFrame(engine: SceneEngine, doc: SceneDoc, t01: number): HTMLCanvasElement {
+export interface RenderMotionFrameOptions {
+  /** Called after the sync (which re-shows the floor grid) and just before the one render — the
+   *  export renderer hides editor helpers here. */
+  beforeRender?: (engine: SceneEngine) => void
+  /** Seconds fed to `engine.render` (film grain's clock). Default 0, as before. */
+  elapsedSec?: number
+}
+
+export function renderMotionFrame(
+  engine: SceneEngine, doc: SceneDoc, t01: number, opts?: RenderMotionFrameOptions,
+): HTMLCanvasElement {
   const { doc: sampled, opacities } = applyMotionToDoc(doc, t01)
   engine.syncFromDoc(sampled)
   engine.applyCameraFromDoc(sampled)
@@ -82,7 +92,9 @@ export function renderMotionFrame(engine: SceneEngine, doc: SceneDoc, t01: numbe
     engine.setGhostPoses(EMPTY_GHOSTS)
   }
   if (sceneHasShaderFill(doc)) engine.refreshShaderFields(t01 * doc.motion.duration, false)
-  engine.render()
+  opts?.beforeRender?.(engine)
+  if (opts?.elapsedSec !== undefined) engine.render(opts.elapsedSec)
+  else engine.render()
   return engine.renderer.domElement as HTMLCanvasElement
 }
 

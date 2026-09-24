@@ -88,7 +88,8 @@ import { svgToLeafPaths, outlineStrokes, type SvgLeafPath } from '~/composables/
 import { buildSvgObjects, SVG_SPLIT_THRESHOLD } from '~/lib/scene3d/svgImport'
 import { renderPasses, renderObjectPasses, screenRectOfBox } from '~/lib/scene3d/passes'
 import { cinematicScopeWarning } from '~/lib/scene3d/pathtrace/scope'
-import { restyleInputHash, restyleStyleSig, shouldRunRestyle } from '~/lib/scene3d/restyleCache'
+import { restyleInputHash, restyleStyleSig, shouldRunRestyle, restyleViewUrl } from '~/lib/scene3d/restyleCache'
+import { renderExportFrame } from '~/lib/scene3d/exportRender'
 import { RESTYLE_MODELS } from '~/data/scene3d-restyle-models'
 import { useMoodboards } from '~/composables/useMoodboards'
 import { moodboardStyleBlock } from '~/lib/taste/styleBlock'
@@ -543,8 +544,9 @@ function togglePlay() {
   if (playing.value) playStart = performance.now() - playhead.value * 1000
 }
 // Bake the Motion timeline to an encoded file (reuses the studios' bake→encode
-// pipeline — same renderMotionFrame path the live preview uses, so the clip matches
-// playback exactly). Renders N = fps*duration frames off-screen at the output
+// pipeline). Frames go through the shared export renderer (renderExportFrame: the
+// same motion sampling as live playback, with the floor grid and gizmos hidden and
+// film grain moving) so the clip matches every other 3D export. Renders N = fps*duration frames off-screen at the output
 // resolution, bakes/encodes server-side, and lands a file under input/ — it does NOT
 // download or dispatch anything; that's each caller's job (exportVideo downloads,
 // renderVideoToCanvas dispatches a Video node). Playback is paused for the duration
@@ -574,7 +576,7 @@ async function bakeSceneVideo(publish: boolean): Promise<StudioVideoResult | nul
       signal: videoAbort.signal,
       drawFrame: (i, ctx) => {
         videoNotice.value = `Rendering ${i + 1}/${total}`
-        const cv = renderMotionFrame(engine!, doc, total > 1 ? i / total : 0)
+        const cv = renderExportFrame(engine!, doc, total > 1 ? i / total : 0)
         ctx.drawImage(cv, 0, 0, W, H)   // same turn as the render
       },
       onStatus: t => { videoNotice.value = t },
@@ -585,7 +587,7 @@ async function bakeSceneVideo(publish: boolean): Promise<StudioVideoResult | nul
           renderFrame: async (i) => {
             throwIfAborted(signal)   // Cancel stops a long bake between frames
             videoNotice.value = `Baking ${i + 1}/${total}`
-            const cv = renderMotionFrame(engine!, doc, total > 1 ? i / total : 0)
+            const cv = renderExportFrame(engine!, doc, total > 1 ? i / total : 0)
             return await new Promise<Blob>((res, rej) => cv.toBlob(b => b ? res(b) : rej(new Error('toBlob failed')), 'image/png'))
           },
         })
@@ -2139,12 +2141,8 @@ function restyleTreatmentPromptOf(t: Treatment): string {
   return t.kind === 'aiRestyle' ? (t as AiRestyleTreatment).prompt.trim() : ''
 }
 
-// The /view URL for an input-dir file returned by /api/image-fetch (bare filename, no subfolder) —
-// the same shape app/lib/brand/upload.ts and materials.ts's inputViewUrl build. TextureLoader loads
-// it through the dev server's ComfyUI proxy, exactly as a generated material texture does.
-function restyleViewUrl(name: string): string {
-  return `/view?filename=${encodeURIComponent(name)}&type=input`
-}
+// `restyleViewUrl` (the /view URL for a stored result) lives in lib/scene3d/restyleCache so the
+// export renderer loads results through the same URL.
 
 /**
  * The S7 restyle re-run lifecycle (Task-0 (c)). An EXPLICIT button — never per-frame, never

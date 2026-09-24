@@ -66,3 +66,10 @@ export function shouldRunRestyle(
   const canReuse = prospectiveHash === storedHash && resultRef !== '' && hasCachedTexture
   return !canReuse
 }
+
+/** The /view URL for a stored restyle result (`resultRef`: a bare input-dir filename from
+ *  /api/image-fetch, no subfolder). The editor's re-run and the export renderer both load results
+ *  through this one function, via the dev server's ComfyUI proxy. */
+export function restyleViewUrl(name: string): string {
+  return `/view?filename=${encodeURIComponent(name)}&type=input`
+}
