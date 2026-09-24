@@ -6,7 +6,8 @@ import { toast } from 'vue-sonner'
 import { describeQueueRefusal } from '~/lib/queueRefusal'
 import { planStart } from '~/lib/startModal/plan'
 import type { StartPickId } from '~/data/start-modal'
-import { defaultDoc, createPrimitive, serializeDoc, PLACEABLE_PRIMITIVE_KINDS } from '~/lib/scene3d/config'
+import { serializeDoc } from '~/lib/scene3d/config'
+import { starterSceneDoc } from '~/lib/startModal/scene3dStill'
 import { ARTIFACT_NODE_COMPONENTS, ARTIFACT_NODE_FOR_OUTPUT, fetchObjectInfo, getVueFlowType, getWidgetDefs, isSubgraphType, subgraphToLiteGraph, useVueNodes } from '~/composables/useVueNodes'
 import { useSubgraphNavigation } from '~/composables/useSubgraphNavigation'
 import { matchStylesInText, type CanvasSnapshot, type StyleLite } from '~/lib/agent/surfaces/canvas'
@@ -7913,12 +7914,10 @@ async function uploadStarterPicture(url: string): Promise<string | null> {
   }
 }
 
-/** A 3D scene with one object, so the studio never starts empty. */
+/** A 3D scene with one object, so the studio never starts empty. The doc is
+ *  shared with the start modal's Scene3D tile, so the tile and the node agree. */
 function starterSceneState(): string {
-  const doc = defaultDoc()
-  const kind = (['torusKnot', 'sphere', 'box'] as const).find(k => (PLACEABLE_PRIMITIVE_KINDS as string[]).includes(k)) ?? PLACEABLE_PRIMITIVE_KINDS[0]!
-  doc.objects.push(createPrimitive(kind as any, doc.objects))
-  return serializeDoc(doc)
+  return serializeDoc(starterSceneDoc())
 }
 
 // Expose methods and state for parent layout
