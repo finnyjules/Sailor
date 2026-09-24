@@ -11,10 +11,10 @@ import { DEFAULT_FEATHER } from '~/lib/compositor/feather'
 import { canTakeGeometry, canWarpRaster } from '~/composables/useCompositorLayers'
 
 describe('effect kinds', () => {
-  it('has 42 kinds, 5 pinned and 37 orderable, all labelled in sentence case', () => {
-    expect(EFFECT_ORDER).toHaveLength(42)
+  it('has 43 kinds, 5 pinned and 38 orderable, all labelled in sentence case', () => {
+    expect(EFFECT_ORDER).toHaveLength(43)
     expect(PINNED_KINDS).toEqual(['background_blur', 'backdrop_shader', 'backdrop_luminance_mask', 'dof', 'drop_shadow'])
-    expect(ORDERABLE_KINDS).toHaveLength(37)
+    expect(ORDERABLE_KINDS).toHaveLength(38)
     expect(new Set([...PINNED_KINDS, ...ORDERABLE_KINDS])).toEqual(new Set(EFFECT_ORDER))
     for (const k of EFFECT_ORDER) expect(EFFECT_LABELS[k], k).toMatch(/^[A-Z][a-z]/)
     expect(EFFECT_LABELS.gradientMap).toBe('Gradient map')
@@ -72,7 +72,7 @@ describe('effect kinds', () => {
       background_blur: 'backdrop', backdrop_shader: 'backdrop', backdrop_luminance_mask: 'backdrop', dof: 'backdrop',
       trim: 'geometry', offset: 'geometry', round_corners: 'geometry', roughen: 'geometry',
       boolean: 'geometry', morph: 'geometry', warp: 'geometry', shatter: 'geometry', long_shadow: 'geometry',
-      inner_shadow: 'pixel', inner_glow: 'pixel', adjust: 'pixel', duotone: 'pixel', gradientMap: 'pixel',
+      inner_shadow: 'pixel', inner_glow: 'pixel', diffused_edge: 'pixel', adjust: 'pixel', duotone: 'pixel', gradientMap: 'pixel',
       bloom: 'pixel', vignette: 'pixel', grain: 'pixel', torn_edge: 'pixel',
       feather: 'pixel', layer_blur: 'pixel', outer_glow: 'pixel',
       color_overlay: 'pixel', gradient_overlay: 'pixel', stroke_from_alpha: 'pixel',

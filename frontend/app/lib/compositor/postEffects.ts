@@ -12,6 +12,7 @@ import {
   ROUGH_EDGE_MAX_W, INK_BLEED_MAX_W,
 } from './edgeDistort'
 import { scrollStops } from '~/lib/color/gradientTween'
+import { diffusedEdgeInPlace, diffusedEdgeGrainField } from './diffusedEdge'
 
 // Re-exported so the offscreen-pad helper (useCompositorLayers.ts) and its tests read the SAME
 // outward-reach constants the passes below use, mirroring how MOTION_BLUR_SAMPLES is shared.
@@ -91,6 +92,18 @@ export interface InnerGlowEffect {
   color: string       // hex/rgba (alpha allowed) — the halo colour
   radius: number      // blur radius / spread, normalized to canvas width
   intensity: number   // 0..2 — strength of the composite
+  visible: boolean
+}
+/** Diffused edge: the layer keeps its own colour at the silhouette and fades to `color` toward the
+ *  middle, optionally broken into all-or-nothing grain specks (stipple). Stays inside the alpha.
+ *  Pixel math in `diffusedEdge.ts`. Deterministic: a fixed-seed grain field. */
+export interface DiffusedEdgeEffect {
+  type: 'diffused_edge'
+  color: string       // hex — the fill the middle fades to
+  width: number       // how far the edge colour reaches inward, normalized to canvas width
+  strength: number    // 0..1 — how fully the middle turns to the fill
+  grain: number       // 0 = smooth fade … 1 = pure speckle
+  grainSize: number   // speck size in px (× scale)
   visible: boolean
 }
 /** A small curated set of real blend modes an overlay may composite through. Each maps to a
@@ -249,7 +262,7 @@ export interface InkBleedEffect {
   softness: number    // 0..1 — feathered outer boundary width (0 = crisp)
   visible: boolean
 }
-export type PostEffect = AdjustEffect | BloomEffect | GrainEffect | VignetteEffect | DuotoneEffect | GradientMapEffect | DofEffect | OuterGlowEffect | InnerGlowEffect | ColorOverlayEffect | GradientOverlayEffect | StrokeFromAlphaEffect | DirectionalBlurEffect | RadialBlurEffect | ZoomBlurEffect | LevelsEffect | PosteriseEffect | ThresholdEffect | InvertEffect | RoughEdgeEffect | InkBleedEffect
+export type PostEffect = AdjustEffect | BloomEffect | GrainEffect | VignetteEffect | DuotoneEffect | GradientMapEffect | DofEffect | OuterGlowEffect | InnerGlowEffect | DiffusedEdgeEffect | ColorOverlayEffect | GradientOverlayEffect | StrokeFromAlphaEffect | DirectionalBlurEffect | RadialBlurEffect | ZoomBlurEffect | LevelsEffect | PosteriseEffect | ThresholdEffect | InvertEffect | RoughEdgeEffect | InkBleedEffect
 
 export const POST_EFFECT_DEFAULTS: Record<PostEffect['type'], PostEffect> = {
   adjust: { type: 'adjust', brightness: 1, contrast: 1, saturation: 1, hue: 0, visible: true },
@@ -270,6 +283,8 @@ export const POST_EFFECT_DEFAULTS: Record<PostEffect['type'], PostEffect> = {
   // A soft warm glow, visible the moment it is added; the colour card + dials tune it.
   outer_glow: { type: 'outer_glow', color: '#ffd9a0', radius: 0.02, intensity: 0.8, visible: true },
   inner_glow: { type: 'inner_glow', color: '#ffd9a0', radius: 0.02, intensity: 0.8, visible: true },
+  // The look picked in the prototype: white middle, crisp stipple grain.
+  diffused_edge: { type: 'diffused_edge', color: '#ffffff', width: 0.05, strength: 1, grain: 0.8, grainSize: 1.5, visible: true },
   // A mid grey multiplied over the layer — visibly tints the moment it is added; the colour
   // card + blend + opacity tune it.
   color_overlay: { type: 'color_overlay', color: '#808080', blend: 'multiply', opacity: 1, visible: true },
@@ -317,6 +332,7 @@ export const POST_FX_PARAM_CLAMP: Record<string, Record<string, [number, number]
   // `color` is non-numeric, so it is not clamped (matches duotone's colours).
   outer_glow: { radius: [0, 0.5], intensity: [0, 2] },
   inner_glow: { radius: [0, 0.5], intensity: [0, 2] },
+  diffused_edge: { width: [0, 0.3], strength: [0, 1], grain: [0, 1], grainSize: [1, 8] },
   // Colours (`color`/`from`/`to`) and `blend` are non-numeric, so only the numeric dials clamp.
   color_overlay: { opacity: [0, 1] },
   gradient_overlay: { opacity: [0, 1], angle: [0, 360] },
@@ -339,7 +355,7 @@ export const POST_FX_PARAM_CLAMP: Record<string, Record<string, [number, number]
   ink_bleed: { amount: [0, 1], softness: [0, 1], seed: [0, 1e9] },
 }
 
-const CHAIN_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'levels', 'posterise', 'threshold', 'invert', 'rough_edge', 'ink_bleed'])
+const CHAIN_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'diffused_edge', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'levels', 'posterise', 'threshold', 'invert', 'rough_edge', 'ink_bleed'])
 export const isChainEffect = (e: { type: string }): e is PostEffect => CHAIN_TYPES.has(e.type)
 export const chainActive = (effects?: { type: string; visible?: boolean }[]): boolean =>
   !!effects?.some(e => e.visible !== false && CHAIN_TYPES.has(e.type))
@@ -776,6 +792,48 @@ function passInnerGlow(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e:
   ctx.restore()
 }
 
+/** Diffused edge: build the OUTSIDE of the silhouette (opaque everywhere, the layer knocked out),
+ *  blur it by `width` so it bleeds back across the edge, and let `diffusedEdgeInPlace` read its
+ *  alpha as "how close to an edge" to fade the layer's own pixels toward the fill. Grain specks are
+ *  sized in device px (`grainSize × scale`) so they stay crisp at the output resolution. */
+/** The fill as RGB — hex (3/6/8, alpha ignored) or rgb()/rgba(), which the agent and a colour
+ *  motion track may hand over. Anything unreadable falls back to white. */
+function fillRgb(color: string | undefined): readonly [number, number, number] {
+  const m = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/i.exec(color ?? '')
+  if (m) return [clamp(+m[1]!, 0, 255), clamp(+m[2]!, 0, 255), clamp(+m[3]!, 0, 255)]
+  if (!/^#[0-9a-f]{3}([0-9a-f]{3}([0-9a-f]{2})?)?$/i.test(color ?? '')) return [255, 255, 255]
+  const { r, g, b } = hexToRgb(color!)
+  return [r, g, b]
+}
+
+function passDiffusedEdge(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: DiffusedEdgeEffect, opts: PassOpts): void {
+  if (!(e.strength > 0 && e.width > 0)) return
+  const scale = opts.scale ?? 1
+  const w = off.width, h = off.height
+  const outside = mkCanvas(w, h)
+  const octx = outside.getContext('2d')
+  if (!octx) return
+  octx.fillStyle = '#000'
+  octx.fillRect(0, 0, w, h)
+  octx.globalCompositeOperation = 'destination-out'
+  octx.drawImage(off, 0, 0)
+  octx.globalCompositeOperation = 'source-over'
+  applyBlurPass(outside, e.width * opts.W * scale)
+  const edge = octx.getImageData(0, 0, w, h).data
+  const img = ctx.getImageData(0, 0, w, h)
+  const grain = clamp01(e.grain ?? 0)
+  diffusedEdgeInPlace(img.data, edge, {
+    strength: e.strength,
+    fill: fillRgb(e.color),
+    grain,
+    grainField: grain > 0 ? diffusedEdgeGrainField(w, h, clamp(e.grainSize ?? 1.5, 1, 8) * scale) : null,
+  })
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.putImageData(img, 0, 0)
+  ctx.restore()
+}
+
 /** Endpoints of the gradient axis across a `w×h` box for a given `angle` (degrees), centred and
  *  spanning the box's full projection onto that direction so the ramp always covers the box.
  *  Pure + deterministic; exported so a test can prove the direction is consumed. */
@@ -1051,7 +1109,7 @@ function passInkBleed(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: 
 /** The kinds this module owns as 2D passes over a layer/document offscreen. Everything
  *  else in a layer's stack (inner shadow, torn edge, feather, layer blur, drop shadow,
  *  background blur, dof) is applied by the caller at its own structural position. */
-const PASS_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'levels', 'posterise', 'threshold', 'invert', 'rough_edge', 'ink_bleed'])
+const PASS_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'diffused_edge', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'levels', 'posterise', 'threshold', 'invert', 'rough_edge', 'ink_bleed'])
 
 /**
  * Apply passes in ARRAY ORDER — the per-layer entry point. Order is the caller's, so the
@@ -1077,6 +1135,7 @@ export function applyPasses(
       case 'grain': passGrain(ctx, off, e as unknown as GrainEffect, opts); break
       case 'outer_glow': passOuterGlow(ctx, off, e as unknown as OuterGlowEffect, opts); break
       case 'inner_glow': passInnerGlow(ctx, off, e as unknown as InnerGlowEffect, opts); break
+      case 'diffused_edge': passDiffusedEdge(ctx, off, e as unknown as DiffusedEdgeEffect, opts); break
       case 'color_overlay': passColorOverlay(ctx, off, e as unknown as ColorOverlayEffect, opts); break
       case 'gradient_overlay': passGradientOverlay(ctx, off, e as unknown as GradientOverlayEffect, opts); break
       case 'stroke_from_alpha': passStrokeFromAlpha(ctx, off, e as unknown as StrokeFromAlphaEffect, opts); break
@@ -1139,9 +1198,10 @@ export function applyBlurPass(off: HTMLCanvasElement, radiusPx: number): void {
 // reshaped luminance to place colour. Grouped and ordered levels→posterise→threshold→invert, the
 // gentlest tonal move to the harshest.
 // The edge distortions (rough_edge → ink_bleed) run FIRST of all: they reshape the layer's alpha
-// silhouette, and every silhouette-derived pass after them — inner/outer glow, the alpha-clipped
+// silhouette, and every silhouette-derived pass after them — diffused_edge (which fades the
+// interior by distance from that edge) included — inner/outer glow, the alpha-clipped
 // overlays, stroke-from-alpha — must read the reshaped edge, not the clean one.
-const CHAIN_ORDER = ['rough_edge', 'ink_bleed', 'inner_glow', 'adjust', 'levels', 'posterise', 'threshold', 'invert', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'bloom', 'vignette', 'grain', 'outer_glow']
+const CHAIN_ORDER = ['rough_edge', 'ink_bleed', 'diffused_edge', 'inner_glow', 'adjust', 'levels', 'posterise', 'threshold', 'invert', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'bloom', 'vignette', 'grain', 'outer_glow']
 
 /**
  * The FIXED-ORDER entry point, unchanged in behaviour: one instance per type (the first VISIBLE

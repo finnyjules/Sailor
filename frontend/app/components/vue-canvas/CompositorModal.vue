@@ -10588,6 +10588,47 @@ onUnmounted(() => {
             </div>
           </div>
 
+          <!-- Diffused edge: the layer keeps its colour at the silhouette and fades to a fill colour
+               toward the middle, optionally as crisp grain specks. Fill colour (plain hex), Width
+               (frame-width fraction, shown ×100), Strength and Grain (shown as %), Grain size (px) —
+               all five read by passDiffusedEdge, no dead control. -->
+          <div v-else-if="activeEffect!.type === 'diffused_edge'" class="space-y-1.5">
+            <div class="flex items-center gap-1.5">
+              <input type="color" :value="(activeEffect as any).color || '#ffffff'" title="Fill colour"
+                class="w-8 h-8 rounded bg-transparent border border-[#2a2a2a] cursor-pointer shrink-0"
+                @input="updateActiveEffect({ color: ($event.target as HTMLInputElement).value })" />
+              <input type="text" spellcheck="false" maxlength="7" :value="(activeEffect as any).color || '#ffffff'" title="Hex colour"
+                class="flex-1 min-w-0 bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs font-mono uppercase text-white/90 outline-none"
+                @change="updateActiveEffect({ color: ($event.target as HTMLInputElement).value })" />
+            </div>
+            <div class="grid grid-cols-2 gap-1.5">
+              <div>
+                <div class="panel-sublabel mb-1">Width</div>
+                <input v-scrubnum type="number" min="0" max="30" step="0.5" :value="Math.round(((activeEffect as any).width ?? 0.05) * 1000) / 10"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ width: Math.min(0.3, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+              </div>
+              <div>
+                <div class="panel-sublabel mb-1">Strength %</div>
+                <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(((activeEffect as any).strength ?? 1) * 100)"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ strength: Math.min(1, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+              </div>
+              <div>
+                <div class="panel-sublabel mb-1">Grain %</div>
+                <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(((activeEffect as any).grain ?? 0.8) * 100)"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ grain: Math.min(1, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+              </div>
+              <div>
+                <div class="panel-sublabel mb-1">Grain size</div>
+                <input v-scrubnum type="number" min="1" max="8" step="0.1" :value="Math.round(((activeEffect as any).grainSize ?? 1.5) * 10) / 10"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  @input="updateActiveEffect({ grainSize: Math.min(8, Math.max(1, parseFloat(($event.target as HTMLInputElement).value) || 1)) })" />
+              </div>
+            </div>
+          </div>
+
           <!-- Colour overlay: a flat colour composited over the layer at a blend + opacity,
                clipped to the layer's alpha. Colour (plain hex), blend and opacity are all read
                by passColorOverlay — no dead control. -->

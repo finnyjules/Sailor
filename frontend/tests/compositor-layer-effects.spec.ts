@@ -1673,6 +1673,35 @@ test.describe('Frame layer styles — F4 pixel passes', () => {
     await expectNeutralNoop(page, bare, [{ id: 'ig', type: 'inner_glow', color: '#00e5ff', radius: 0.06, intensity: 0, visible: true }])
   })
 
+  // Diffused edge — colour holds at the silhouette, fades to the fill toward the middle.
+  test('diffused_edge fades the middle to the fill and keeps the edge; hidden byte-identical, strength 0 a no-op', async ({ page }) => {
+    await openCompositor(page)
+    await f4Seed(page, '#d0202c')
+    const bare = await stackPixels(page)
+    const fx = { id: 'de', type: 'diffused_edge', color: '#ffffff', width: 0.05, strength: 1, grain: 0, grainSize: 1.5 }
+
+    await expectHiddenIdentical(page, bare, [fx])
+    await expectNeutralNoop(page, bare, [{ ...fx, strength: 0, visible: true }])
+
+    const after = await expectChanges(page, bare, [{ ...fx, visible: true }])
+    // Sample the rect (box x∈[0.2,0.8]): the centre is the fill, a point just inside the edge
+    // is still the layer's red.
+    const px = await page.evaluate(async (url) => {
+      const img = new Image(); img.src = url; await img.decode()
+      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height
+      const ctx = c.getContext('2d')!; ctx.drawImage(img, 0, 0)
+      const at = (fx: number, fy: number) => Array.from(ctx.getImageData(Math.round(fx * img.width), Math.round(fy * img.height), 1, 1).data)
+      return { centre: at(0.5, 0.5), edge: at(0.205, 0.5) }
+    }, after)
+    expect(px.centre.slice(0, 3).every(v => v >= 245)).toBe(true)
+    expect(px.edge[0]).toBeGreaterThan(180)
+    expect(px.edge[1]).toBeLessThan(90)
+
+    // Full grain: the fade becomes all-or-nothing specks, a different picture from the smooth fade.
+    const grainy = await expectChanges(page, bare, [{ ...fx, grain: 1, visible: true }])
+    expect(grainy).not.toBe(after)
+  })
+
   // FAMILY 2 — colour overlay + gradient overlay (blend mode + opacity).
   test('color_overlay & gradient_overlay change pixels; hidden byte-identical, neutral (opacity 0) a no-op', async ({ page }) => {
     await openCompositor(page)

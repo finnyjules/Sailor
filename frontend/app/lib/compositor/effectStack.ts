@@ -191,7 +191,7 @@ export type EffectKind = LayerEffect['type']
  * the order the add menu lists them, and where a pinned kind sits.
  */
 export const EFFECT_ORDER = [
-  'background_blur', 'backdrop_shader', 'backdrop_luminance_mask', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'shatter', 'long_shadow', 'inner_shadow', 'inner_glow',
+  'background_blur', 'backdrop_shader', 'backdrop_luminance_mask', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'shatter', 'long_shadow', 'inner_shadow', 'inner_glow', 'diffused_edge',
   'adjust', 'levels', 'posterise', 'threshold', 'invert', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'shader',
   'bloom', 'vignette', 'grain', 'torn_edge', 'feather', 'rough_edge', 'ink_bleed', 'risograph', 'photocopy', 'letterpress',
   'directional_blur', 'radial_blur', 'zoom_blur', 'layer_blur', 'outer_glow', 'drop_shadow',
@@ -249,6 +249,7 @@ export const EFFECT_LABELS: Record<EffectKind, string> = {
   long_shadow: 'Long shadow',
   inner_shadow: 'Inner shadow',
   inner_glow: 'Inner glow',
+  diffused_edge: 'Diffused edge',
   outer_glow: 'Outer glow',
   adjust: 'Adjust',
   levels: 'Levels',

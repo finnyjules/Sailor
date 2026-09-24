@@ -396,6 +396,7 @@ const isColorString = (v: unknown): v is string =>
 const POST_FX_COLOR_KEYS: Record<string, readonly string[]> = {
   outer_glow: ['color'],
   inner_glow: ['color'],
+  diffused_edge: ['color'],
   color_overlay: ['color'],
   gradient_overlay: ['from', 'to'],
   stroke_from_alpha: ['color'],
