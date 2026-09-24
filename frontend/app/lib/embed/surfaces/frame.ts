@@ -375,7 +375,7 @@ const frameSurface: EmbedSurface = {
         if (v.background != null) paintBackground(artCtx, s, tSec, u, rx, ry)
         artCtx.setTransform(s, 0, 0, s, 0, 0)
         withWiredContent(provider, () => paintLayerStack(artCtx, v.width, v.height, items, layers,
-          undefined, tSec, v.motion ?? undefined, v.wiredTreatments, undefined, v.groups, undefined, true))
+          undefined, tSec, v.motion ?? undefined, v.wiredTreatments, undefined, v.groups, undefined, true, v.light))
 
         // 2. The visible canvas: the background across the whole box (the bleed), then the Frame.
         //    Its rect is cleared first so a background with any transparency is not laid twice.

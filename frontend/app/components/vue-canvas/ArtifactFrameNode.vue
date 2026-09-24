@@ -562,7 +562,7 @@ function renderStack(t?: number, live = false) {
   // second live host (the modal, or another Frame) numbers its slots the same way.
   withWiredContent(wiredContentForSlot, () =>
     paintLayerStack(ctx, W, H, buildStackItems(), editor.localLayers.value, l => l.id === editor.editingId.value,
-      t, undefined, wiredTreatments.value, editor.background.value, editor.localGroups.value, editor.postEffects.value))
+      t, undefined, wiredTreatments.value, editor.background.value, editor.localGroups.value, editor.postEffects.value, false, editor.frameLight.value))
 }
 
 // ── Live animation loop ──────────────────────────────────────────────────────
@@ -864,7 +864,7 @@ function exportCompositeCanvas(t?: number): HTMLCanvasElement | null {
   // fields must render unclamped and stay live past LIVE_FIELD_CEILING.
   withWiredContent(wiredContentForSlot, () =>
     paintLayerStack(ctx, W, H, buildStackItems(), editor.localLayers.value,
-      undefined, t, undefined, wiredTreatments.value, editor.background.value, editor.localGroups.value, editor.postEffects.value, true))
+      undefined, t, undefined, wiredTreatments.value, editor.background.value, editor.localGroups.value, editor.postEffects.value, true, editor.frameLight.value))
   return cv
 }
 

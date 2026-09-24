@@ -22,6 +22,7 @@ export type LocalLayerKind = 'text' | 'rect' | 'ellipse' | 'line' | 'path' | 'im
 // (modal preview, bake) import '~/lib/motion/paint' and guarantee registration.
 // Type-only imports are erased at runtime, so they don't create a cycle
 // (evaluate.ts/types.ts don't import this file).
+import { DEFAULT_FRAME_LIGHT, type FrameLight } from '~/lib/compositor/frameLight'
 import type { LayerMotionState } from '~/lib/motion/evaluate'
 import type { FrameMotion } from '~/lib/motion/types'
 import { applyEffectDialTracks, type EffectDialTrack } from '~/lib/motion/effectTracks'
@@ -1459,6 +1460,11 @@ export async function ensureLayerImages(layers: LocalLayer[], opts?: { keep?: bo
 // capture points are here (before every `applyXform`, and before the background's own
 // center translate).
 let _fieldCtx: ShaderFieldFrameCtx = { frameW: 1, frameH: 1, t: 0, fps: 30, base: null, bake: false, token: 0 }
+
+// The Frame's light for the paint in progress (Gold foil / Spot UV read it). Module-global for
+// the same reason as `_fieldCtx`: set once per paintLayerStack, read deep inside paintLayer.
+let _frameLight: FrameLight = DEFAULT_FRAME_LIGHT
+export function currentFrameLight(): FrameLight { return _frameLight }
 
 /** The clone being painted right now (set by paintLayer's cloner loop, read by the
  *  image branch of drawLayerContent). Outside a cloner loop it is the original alone. */
@@ -5912,7 +5918,10 @@ export function paintLayerStack(
    *  param existed — every EXISTING positional call site is therefore unaffected;
    *  only export call sites pass `true` explicitly. */
   bake = false,
+  /** The Frame's light (Gold foil / Spot UV). Absent ⇒ DEFAULT_FRAME_LIGHT; no finish ⇒ unread. */
+  light?: FrameLight,
 ): { frozenCount: number } {
+  _frameLight = light ?? DEFAULT_FRAME_LIGHT
   const fieldT = t ?? 0, fieldFps = motion?.fps ?? 30
   _fieldCtx = {
     frameW: W, frameH: H, t: fieldT, fps: fieldFps,

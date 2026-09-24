@@ -16,6 +16,7 @@ import type { EffectDef } from '~/lib/shaderfx/types'
 import type { DepthRef } from '~/lib/compositor/depthRegistry'
 import type { FrameAssetKind } from '~/lib/compositor/assetScope'
 import type { FontWeightSpec } from '../fontFace'
+import type { FrameLight } from '~/lib/compositor/frameLight'
 
 export type FrameFit = 'fit' | 'fill'
 
@@ -29,6 +30,8 @@ export interface FrameVariant {
   post: PostEffect[]
   motion: FrameMotion | null
   wiredTreatments: Record<string, WiredTreatment>
+  /** The Frame's light for Gold foil / Spot UV. Absent in older snapshots ⇒ the default light. */
+  light?: FrameLight
 }
 
 export type FrameFontOrigin = 'uploaded' | 'google' | 'library' | 'variable'

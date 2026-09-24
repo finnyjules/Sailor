@@ -885,6 +885,7 @@ const {
   addPathLayers, addPathFromSvg, deleteLayers,
   background, setBackground,
   postEffects, setPostEffects,
+  frameLight, setFrameLight,
   setGrid,
   undo, redo, canUndo, canRedo,
   selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, alignToFrame, recordHistory, commit, handleEditorKey, pasteClipboard,
@@ -4921,7 +4922,7 @@ function renderSceneForHarmonize(): { canvas: HTMLCanvasElement; W: number; H: n
   // live preview — shader-fill fields must render unclamped, same as Render/Export below.
   withWiredContent(wiredContentForSlot, () =>
     paintLayerStack(ctx, W, H, buildStackItems(), localLayers.value as LocalLayer[],
-      undefined, undefined, undefined, wiredTreatments.value, background.value, localGroups.value, postEffects.value, true))
+      undefined, undefined, undefined, wiredTreatments.value, background.value, localGroups.value, postEffects.value, true, frameLight.value))
   return { canvas, W, H }
 }
 
@@ -5052,7 +5053,7 @@ async function renderStaticComposite(W: number, H: number, frame?: { layers: Loc
   // bake=true (Task 10): the static Render/Export path — final output, not preview.
   withWiredContent(wiredContentForSlot, () =>
     paintLayerStack(ctx, W, H, frame ? stackItemsFor(frame.layers, frame.order) : buildStackItems(), frame ? frame.layers : localLayers.value as LocalLayer[],
-      undefined, undefined, undefined, wiredTreatments.value, background.value, frame ? frame.groups : localGroups.value, postEffects.value, true))
+      undefined, undefined, undefined, wiredTreatments.value, background.value, frame ? frame.groups : localGroups.value, postEffects.value, true, frameLight.value))
   return await new Promise<Blob | null>(resolve => off.toBlob(b => resolve(b), 'image/png'))
 }
 // Make a set (Stage 5): the stack items for GIVEN layers in a given stored order — what
@@ -5174,6 +5175,7 @@ function webExportVariant(): FrameVariant {
   return JSON.parse(JSON.stringify({
     width: W, height: H, layers: localLayers.value, stackOrder: stackKeys.value, groups: localGroups.value,
     background: background.value ?? null, post: postEffects.value ?? [], motion, wiredTreatments: wiredTreatments.value ?? {},
+    light: frameLight.value,
   }))
 }
 
@@ -5637,7 +5639,7 @@ function renderStack(wallT?: number, live = false) {
     paintLayerStack(ctx, W, H, items, paintLayers(), l =>
       l.id === editingId.value || (nodeEdit.active.value && l.id === nodeEdit.layerId.value),
       clockT, paintMotion,
-      wiredTreatments.value, background.value, localGroups.value, postEffects.value))
+      wiredTreatments.value, background.value, localGroups.value, postEffects.value, false, frameLight.value))
   shaderFieldsFrozen.value = frozenCount
 }
 
