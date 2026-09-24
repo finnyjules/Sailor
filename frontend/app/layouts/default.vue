@@ -60,6 +60,7 @@ import { withKeyedLock } from '~/lib/graph/keyedLock'
 import { shouldUseRunner, startRunnerRun, runnerGateAction, stopRunnerRuns, fetchRunnerRecord, runIdOfPrompt, isRunnerNotFound, type LegStarted } from '~/lib/runner/client'
 import { useRunnerEvents, ensureRunnerEvents } from '~/composables/useRunnerEvents'
 import { createRunnerEventBuffer, ownerTabForCanvas, runnerRunIdsForTab } from '~/lib/runner/routing'
+import { nodesNeedingEngine, workflowNodeTitles, needsEngineDescription } from '~/lib/runner/needsEngine'
 import { RUNNER_WORKER, isRunnerPromptId } from '#shared/runner/messages'
 import { useDirectExecution } from '~/composables/useDirectExecution'
 import { useDirectExecutionEnabled } from '~/composables/useDirectExecutionEnabled'
@@ -865,6 +866,23 @@ async function runVueWorkflow(
   const { firstTake, extraTakes } = assembled
   const { plainWorkflow, directPrompt } = firstTake
 
+  // Engine-free: with the local engine off, only what the runner takes goes
+  // out. Anything else is refused here, naming the nodes that need the engine,
+  // instead of a /prompt that can only fail. An open run socket means the
+  // engine is plainly there, whatever the last health poll said.
+  if (useDirect && directPrompt && !engineUp.value && !direct.isMainSocketOpen()) {
+    const needs = nodesNeedingEngine(directPrompt, {
+      runnerOn: runnerEnabled,
+      titleOf: workflowNodeTitles(plainWorkflow, objectInfo.value),
+    })
+    if (needs.length) {
+      toast.error('This workflow needs the local engine', { description: needsEngineDescription(needs) })
+      if (activeTab.value?.type === 'project') updateTabStatus(activeTab.value.id, 'idle')
+      currentRunSilent.value = false
+      return false
+    }
+  }
+
   // Tier 1 (bridge retirement): the bridge dispatch path — load the graph into a
   // worker iframe, then postMessage queuePrompt against it — has been removed.
   // Every run now dispatches directly to ComfyUI's /prompt below (the same path
@@ -1374,8 +1392,11 @@ async function stopVueWorkflow() {
   const runnerRunIds = runnerEnabled ? runnerRunIdsForTab(inFlight({ tabId: stopTabId }), stopTabId) : []
   try {
     await Promise.all([
-      fetch('/interrupt', { method: 'POST' }),
-      fetch('/queue', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clear: true }) }),
+      // Engine off: nothing queued there to stop (and no failed requests to log).
+      ...(engineUp.value || direct.isMainSocketOpen() ? [
+        fetch('/interrupt', { method: 'POST' }),
+        fetch('/queue', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clear: true }) }),
+      ] : []),
       // Cancelled at fal; holds for unfinished stages dropped.
       ...(runnerRunIds.length ? [stopRunnerRuns(runnerRunIds)] : []),
     ])
@@ -2056,24 +2077,27 @@ function forceReloadCanvas() {
 // Guard: while a generation is running, a heavy node can block ComfyUI's event
 // loop long enough that the probe times out — a *false* down→up that must NOT
 // reload the canvas (that mid-run reload was the cause of the flickering).
-// Hosted: probe SAME-ORIGIN. useBackendHealth fetches `${origin}/system_stats`,
-// so an empty origin yields the relative `/system_stats` the authed proxy
-// serves. The engine origin itself is not reachable from a hosted browser.
-const { backendUp, start: startHealthPoll, stop: stopHealthPoll } =
-  useBackendHealth(hostedShell ? '' : comfyOrigin, {
+// Probes Sailor's own same-origin `/api/engine/health` (local and hosted
+// alike): `backendUp` = Sailor answers; `engineUp` = the local engine does.
+// onRecovered fires when the engine comes (back) up.
+const { backendUp, engineUp, start: startHealthPoll, stop: stopHealthPoll } =
+  useBackendHealth('', {
     onRecovered: () => forceReloadCanvas(),
     suppressRecovery: () => runningCount.value > 0,
   })
+// Engine off: the run socket stops retrying; it reconnects when the engine answers.
+watch(engineUp, (up) => direct.setEngineAvailable(up), { immediate: true })
 
-// Ready = the engine answers over HTTP. There is no engine iframe to wait on.
+// Ready = Sailor answers. The engine is optional: without it only the runs
+// that need it are refused (runVueWorkflow).
 const canvasReady = computed(() => backendUp.value)
 const hasBeenReady = ref(false)
 watch(canvasReady, (v) => { if (v) hasBeenReady.value = true })
 
-// The status pill is "busy" while the engine isn't reachable.
+// The status pill is "busy" while Sailor isn't reachable.
 const backendBusy = computed(() => !canvasReady.value)
 const backendLabel = computed(() =>
-  hasBeenReady.value ? 'Reconnecting to engine…' : 'Starting engine…',
+  hasBeenReady.value ? 'Reconnecting…' : 'Starting…',
 )
 
 // First open of the heavy Vue canvas (VueNodeCanvas: Vue Flow + many node
@@ -2808,7 +2832,8 @@ function toggleQueue() {
 
 async function fetchQueueAndHistory() {
   const [queueRes, historyRes] = await Promise.allSettled([
-    fetch('/queue').then(r => r.json()),
+    // Engine off: its queue is empty, so don't ask (a failed request every 2 s).
+    engineUp.value || direct.isMainSocketOpen() ? fetch('/queue').then(r => r.json()) : Promise.resolve({ queue_running: [], queue_pending: [] }),
     fetch('/history').then(r => r.json()),
   ])
 

@@ -69,27 +69,40 @@ function asksForSeveralImages(inputs: Record<string, unknown>): boolean {
     && optionInt(opts, 'max_images') > 1
 }
 
+/**
+ * Whether the runner can take this one node of the prompt: a runner node type,
+ * on a runner model, asking for one picture, with no sound wired into a
+ * video, and reading only from nodes in the same prompt. A workflow goes to
+ * the runner only when every node passes AND it has a generator
+ * (isRunnerEligible). `nodesNeedingEngine` (app/lib/runner/needsEngine.ts)
+ * names the nodes that fail this, so there is one rule, not two.
+ */
+export function runnerTakesNode(prompt: ApiPrompt, id: string): boolean {
+  const n = prompt[id]
+  if (!n || !RUNNER_NODE_TYPES.has(n.class_type)) return false
+  const inputs = n.inputs ?? {}
+  if (n.class_type === 'GenerateImageNode') {
+    if (!IMAGE_IDS.has(String(inputs.model))) return false
+    if (asksForSeveralImages(inputs)) return false
+  }
+  else if (n.class_type === 'GenerateVideoNode') {
+    if (!VIDEO_IDS.has(resolveVideoModelId(inputs.model))) return false
+    if (isLink(inputs.audio)) return false
+  }
+  for (const v of Object.values(inputs)) {
+    if (isLink(v) && !(v[0] in prompt)) return false
+  }
+  return true
+}
+
 export function isRunnerEligible(prompt: ApiPrompt | null | undefined): boolean {
   if (!prompt) return false
-  const nodes = Object.values(prompt)
-  if (!nodes.length) return false
+  const ids = Object.keys(prompt)
+  if (!ids.length) return false
   let generators = 0
-  for (const n of nodes) {
-    if (!n || !RUNNER_NODE_TYPES.has(n.class_type)) return false
-    const inputs = n.inputs ?? {}
-    if (n.class_type === 'GenerateImageNode') {
-      generators++
-      if (!IMAGE_IDS.has(String(inputs.model))) return false
-      if (asksForSeveralImages(inputs)) return false
-    }
-    else if (n.class_type === 'GenerateVideoNode') {
-      generators++
-      if (!VIDEO_IDS.has(resolveVideoModelId(inputs.model))) return false
-      if (isLink(inputs.audio)) return false
-    }
-    for (const v of Object.values(inputs)) {
-      if (isLink(v) && !(v[0] in prompt)) return false
-    }
+  for (const id of ids) {
+    if (!runnerTakesNode(prompt, id)) return false
+    if (GENERATOR_TYPES.has(prompt[id]!.class_type)) generators++
   }
   return generators > 0
 }

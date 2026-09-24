@@ -102,6 +102,13 @@ export interface QueueParallelItem {
 export interface DirectExecution {
   connect: () => void
   disconnect: () => void
+  /** Tell the socket layer whether the local engine answers (useBackendHealth's
+   *  engineUp). While it doesn't, main's socket stops retrying — no failed
+   *  connect every few seconds — and reconnects as soon as it does. */
+  setEngineAvailable: (up: boolean) => void
+  /** Main's socket is open right now: the engine is plainly reachable, whatever
+   *  the last health poll said (a busy engine can miss a poll). */
+  isMainSocketOpen: () => boolean
   queue: (prompt: ApiPrompt, workflow: LiteGraphWorkflow, opts?: QueueOpts) => Promise<QueueResult>
   queueSmart: (prompt: ApiPrompt, workflow: LiteGraphWorkflow, ctx: { objectInfo: Record<string, any> }) => Promise<QueueResult>
   queueParallel: (items: QueueParallelItem[], ctx: { objectInfo: Record<string, any> }) => Promise<QueueResult[]>
@@ -118,6 +125,13 @@ export function reconnectDelayMs(attempt: number): number {
 /** After this many CONSECUTIVE failed reconnect attempts, a POOL worker's socket
  *  is declared lost (main/worker 0 is never given up — see shouldGiveUpWorker). */
 export const WORKER_LOST_MAX_FAILURES = 4
+
+/** Pure decision: may this socket schedule a reconnect? Main (worker 0) waits
+ *  while the local engine is reported down (setEngineAvailable reopens it);
+ *  pool workers keep their own retry/give-up rules. Exported for unit testing. */
+export function mayReconnect(worker: number, engineAvailable: boolean): boolean {
+  return worker >= 1 || engineAvailable
+}
 
 /** Pure decision: should we STOP reconnecting a socket and declare its worker
  *  lost? Main (worker 0) must retry forever, so always false for it; a pool
@@ -150,6 +164,9 @@ interface SocketState {
 }
 
 const sockets = new Map<number, SocketState>()
+// Whether the local engine answers, per the app's health poll. Optimistic:
+// until the first poll says otherwise, main connects as it always has.
+let engineAvailable = true
 let cachedClientId: string | null = null
 const listeners = new Set<(e: BridgeShapedEvent) => void>()
 
@@ -226,6 +243,7 @@ function scheduleReconnect(worker: number, clientId: string): void {
   const s = socketFor(worker)
   if (!s.wantConnected) return
   if (s.reconnectTimer) return
+  if (!mayReconnect(worker, engineAvailable)) return
   const delay = reconnectDelayMs(s.reconnectAttempt)
   s.reconnectAttempt++
   s.reconnectTimer = setTimeout(() => {
@@ -366,7 +384,26 @@ export function useDirectExecution(): DirectExecution {
     s.wantConnected = true
     s.reconnectAttempt = 0
     if (s.reconnectTimer) { clearTimeout(s.reconnectTimer); s.reconnectTimer = null }
+    // Engine reported down: stay wanted; setEngineAvailable(true) opens it.
+    if (!engineAvailable) return
     openSocket(0, clientId)
+  }
+
+  function setEngineAvailable(up: boolean): void {
+    if (engineAvailable === up) return
+    engineAvailable = up
+    if (!up || !import.meta.client) return
+    // The engine is back: reconnect main now, from a fresh backoff.
+    const s = socketFor(0)
+    if (!s.wantConnected || s.ws) return
+    s.reconnectAttempt = 0
+    if (s.reconnectTimer) { clearTimeout(s.reconnectTimer); s.reconnectTimer = null }
+    openSocket(0, clientId)
+  }
+
+  function isMainSocketOpen(): boolean {
+    const ws = sockets.get(0)?.ws
+    return !!ws && typeof WebSocket !== 'undefined' && ws.readyState === WebSocket.OPEN
   }
 
   function disconnect(): void {
@@ -631,7 +668,7 @@ export function useDirectExecution(): DirectExecution {
     listeners.add(cb)
   }
 
-  return { connect, disconnect, queue, queueSmart, queueParallel, onEvent, clientId }
+  return { connect, disconnect, setEngineAvailable, isMainSocketOpen, queue, queueSmart, queueParallel, onEvent, clientId }
 }
 
 /** Sequential fallback: queue every item on main, in order, collecting each
