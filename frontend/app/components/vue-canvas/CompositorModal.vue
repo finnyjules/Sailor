@@ -86,6 +86,9 @@ import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vue'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
 import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
+import FinishLightControl from '~/components/vue-canvas/compositor/FinishLightControl.vue'
+import { METALS, METAL_LABELS, finishAvailable, finishUnavailableReason, type FoilMetal } from '~/lib/compositor/finishPass'
+import type { FrameLight } from '~/lib/compositor/frameLight'
 import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
@@ -2171,6 +2174,22 @@ function onDistortPointerDown(cornerKey: 'tl' | 'tr' | 'br' | 'bl', e: PointerEv
     next[cornerKey] = { x: offX, y: offY }
     setLocal(l.id, { cornerPin: next } as any)
   }
+  const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
+  window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
+}
+
+/** The Frame light's on-canvas handle — shown while a Gold foil or Spot UV effect is selected. */
+const finishEffectSelected = computed(() => activeEffect.value?.type === 'gold_foil' || activeEffect.value?.type === 'spot_uv')
+const lightHandlePos = computed(() => ({ x: frameLight.value.x * canvasDisplay.w, y: frameLight.value.y * canvasDisplay.h }))
+function onLightPointerDown(e: PointerEvent) {
+  if (viewOnlyGuard()) return
+  e.preventDefault(); e.stopPropagation()
+  const r = canvasRect(); if (!r) return
+  recordHistory()                                   // one undo step for the whole drag
+  const height = frameLight.value.height
+  const move = (ev: PointerEvent) => setFrameLight({
+    x: (ev.clientX - r.left) / r.width, y: (ev.clientY - r.top) / r.height, height,
+  }, false)
   const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
   window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
 }
@@ -5702,6 +5721,7 @@ watch(
     JSON.stringify(background.value),
     JSON.stringify(postEffects.value),
     JSON.stringify(localGroups.value),
+    JSON.stringify(frameLight.value),
   ] as const,
   async () => {
     // TEMP open-cost probe: split the wall time between font/image prep and the
@@ -8965,6 +8985,18 @@ onUnmounted(() => {
             @pointerdown="onDistortPointerDown(ck, $event)"
           />
         </template>
+
+        <!-- The Frame light's handle — draggable while a Gold foil or Spot UV effect is selected. -->
+        <div
+          v-if="finishEffectSelected && !editingId && !genActive"
+          data-handle
+          data-testid="frame-light-handle"
+          aria-label="Light"
+          title="Drag to move the light"
+          class="absolute z-20 size-5 rounded-full bg-amber-100 border-2 border-[#0a0a0a] cursor-grab shadow-[0_0_14px_4px_rgba(255,214,140,0.55)]"
+          :style="{ left: lightHandlePos.x + 'px', top: lightHandlePos.y + 'px', transform: 'translate(-50%, -50%)' }"
+          @pointerdown="onLightPointerDown"
+        />
       </div>
 
       <!-- Chrome below is positioned against the stage box, which is now full-bleed
@@ -10550,6 +10582,43 @@ onUnmounted(() => {
               :model-value="(activeEffect as any).paper ?? 0.3"
               @update:model-value="(v: number) => updateActiveEffect({ paper: v })"
             />
+          </div>
+
+          <!-- Print finish · Gold foil: metal stamped into the card, lit by the Frame's light. -->
+          <div v-else-if="activeEffect!.type === 'gold_foil'" class="space-y-1.5">
+            <p class="text-xs text-white/50">Metal foil stamped into the card. It catches the Frame's light.</p>
+            <p v-if="!finishAvailable()" class="text-xs text-amber-300/80">{{ finishUnavailableReason() }}</p>
+            <StudioSegmented
+              data-testid="foil-metal"
+              :model-value="(activeEffect as any).metal ?? 'gold'"
+              :options="Object.keys(METALS)"
+              :option-labels="Object.keys(METALS).map(k => METAL_LABELS[k as FoilMetal])"
+              @update:model-value="(v: string) => updateActiveEffect({ metal: v })"
+            />
+            <StudioSlider data-testid="foil-brushed" label="Brushed" :min="0" :max="1" :step="0.01" :default="0.5"
+              :model-value="(activeEffect as any).brushed ?? 0.5"
+              @update:model-value="(v: number) => updateActiveEffect({ brushed: v })" />
+            <StudioSlider data-testid="foil-pressed" label="Pressed in" :min="0" :max="1" :step="0.01" :default="0.5"
+              :model-value="(activeEffect as any).pressed ?? 0.5"
+              @update:model-value="(v: number) => updateActiveEffect({ pressed: v })" />
+            <FinishLightControl :light="frameLight" @update="(l: FrameLight) => setFrameLight(l)" />
+          </div>
+
+          <!-- Print finish · Spot UV: a clear gloss coat; shows only where the light reflects. -->
+          <div v-else-if="activeEffect!.type === 'spot_uv'" class="space-y-1.5">
+            <p class="text-xs text-white/50">A clear gloss varnish. It shows where the light reflects off it.</p>
+            <p v-if="!finishAvailable()" class="text-xs text-amber-300/80">{{ finishUnavailableReason() }}</p>
+            <StudioSlider data-testid="uv-gloss" label="Gloss" :min="0" :max="1" :step="0.01" :default="0.75"
+              :model-value="(activeEffect as any).gloss ?? 0.75"
+              @update:model-value="(v: number) => updateActiveEffect({ gloss: v })" />
+            <StudioSlider data-testid="uv-raised" label="Raised" :min="0" :max="1" :step="0.01" :default="0.5"
+              :model-value="(activeEffect as any).raised ?? 0.5"
+              @update:model-value="(v: number) => updateActiveEffect({ raised: v })" />
+            <StudioSwitch data-testid="uv-varnish-only" label="Varnish only"
+              :model-value="(activeEffect as any).varnishOnly ?? false"
+              @update:model-value="(v: boolean) => updateActiveEffect({ varnishOnly: v })" />
+            <p class="text-[11px] text-white/40">Varnish only hides the layer's colours and leaves just the clear coat.</p>
+            <FinishLightControl :light="frameLight" @update="(l: FrameLight) => setFrameLight(l)" />
           </div>
 
           <!-- Outer glow / Inner glow: a tinted halo outside (behind) or inside (clipped to) the
