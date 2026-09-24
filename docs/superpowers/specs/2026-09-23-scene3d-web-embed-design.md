@@ -355,4 +355,35 @@ frames differ the most, consistent with a full-frame FOV sweep).
 `embed-frames.spec.ts` + `frame-embed-network.spec.ts` + `embed-network.spec.ts`: 26/26 green, no
 flakes to re-run.
 
+**Final fix wave (2026-09-23, after the whole-slice review, `837cf860b` + `300c5fb46`):**
+
+- **A hung load no longer drops the Frame's 3D preview to one frame per 4 s.** The node keeps a
+  stall flag: after a pull misses its deadline, later pulls render with what is in hand
+  (`timeoutMs: 0`) until nothing is pending, then get the 4 s back (`renderExportFrameSettled`'s
+  `stall`). A loaded shader catalog answers at once; the restyle loader says whether it settled.
+- **Loads a later frame starts are waited for** — the bake and the Frame's export session sync,
+  then settle only if that sync started a load (`settleFrameLoads`, `SceneEngine.hasPendingAssets`),
+  then render. A failure found then stops the bake by name, or rejects the session's frame so the
+  Frame blocks naming it.
+- **Shader-effect images are waited for** inside the export deadline (`waitShaderEffects`); one
+  that never arrives is named by its label, as a `shader` failure. No silent placeholder is left.
+- **One failure wording for both readers** (`assetNames.failureClause`): advice only for a model
+  ("re-generate or re-upload it"), "didn't finish loading — try again" for a timeout, nothing for
+  a lighting file, the shader list or a font; lower-case subject after "Layer N · ". The 3D sheet
+  shows the loader's reason in plain words ("the file is no longer there", "couldn't reach it",
+  "the file is damaged or not a supported format") and keeps the raw text only as a tooltip.
+- **Wired clips**: encoded at the plan's 0.82 WebP (was 0.9 — the 3D-cube Frame went 1.9 MB →
+  1.3 MB); one notice per clip ("Layer 1 · pre-rendered · 120 frames · adds 670 KB"); kept while
+  the Frame's export sheet is open, keyed by slot, frame count, size, source and the source node's
+  saved state, so toggling Fit or Transparent rebuilds in ~60 ms with no source pull instead of
+  re-rendering (cleared on close). A 3D slot no longer pauses the Frame's live preview while pulled.
+- **Poster**: a JPEG unless the 3D export is transparent (`exportEmbedHtml`'s new optional
+  `posterAlpha`; other surfaces unchanged) — the box scene went 636 KB → 590 KB.
+- Smaller: the Frame embed decodes a clip's frames together (`Promise.all`); pressing Render while
+  a cancelled bake is still setting up no longer restarts playback mid-bake (the pause is owned by
+  one bake generation); `formatBytes` lives in `lib/embed/formatBytes.ts`.
+- New tests: `bakeSceneFrames` (stops before encoding on a prepare failure; transparent bake leaves
+  the caller's doc alone; a late load's failure), the stall, the shader-effect wait, the poster
+  format, the clip cache, the failure wording end to end (3D source → Frame notice).
+
 **Next:** Phase 2 (the live route + the picker); Frame stage 2 (nesting live children); Publish.
