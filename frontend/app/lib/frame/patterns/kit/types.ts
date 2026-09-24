@@ -24,7 +24,10 @@ export interface TextEl extends Base { k: 't'; s: string; x: number; w?: number;
    *  (an exception to ruling R10). toOps draws it as an owned text layer in `color`; the user's
    *  line itself is placed elsewhere by the same layout, as an ordinary small line. */
   copy?: true }
-export interface PhotoEl extends Base { k: 'p'; x: number; y: number; w: number; h: number; stand?: boolean; filter?: string; radius?: number }
+export interface PhotoEl extends Base { k: 'p'; x: number; y: number; w: number; h: number; stand?: boolean; filter?: string; radius?: number
+  /** Layout decisions, Task 7: one of the Frame's extra images (the planner's tiles, never a
+   *  layout's own) — its index in `RoleTargets.extras`. */
+  extra?: number }
 /** `prefer` (ruling R12, Task 4 fix round 1): the role the contrast picker tries FIRST for an owned
  *  piece that carries text — kept only if it passes the same thresholds, else the picker's own order. */
 export interface CircleEl extends Base { k: 'c'; cx: number; cy: number; r: number; color?: Colour; photo?: boolean; prefer?: Colour }

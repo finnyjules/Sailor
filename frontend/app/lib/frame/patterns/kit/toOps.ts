@@ -26,6 +26,9 @@ export interface RoleTargets {
   quote?: string; by?: string; rating?: string; list?: string; stat?: string; statline?: string; them?: string
   /** The second image layer (document order, or tagged). */
   image2?: string
+  /** Layout decisions, Task 7: the Frame's extra images, in document order — the image layers a
+   *  layout does not place itself, which the planner tiles (`PhotoEl.extra` indexes this). */
+  extras?: string[]
   /** The shape layer's kind. A `path` layer sizes from one uniform scale (apply writes
    *  `scale = w / bbox.w`), so it cannot take a non-square box; the others take `w` × `h`. */
   shapeKind?: string
@@ -409,6 +412,18 @@ export function elementsToOps(
       }
       case 'p': {
         const p = e as PhotoEl
+        // Task 7: an extra image's tile goes to that image's own layer, cropped to cover like every
+        // placed image (a wired image honours `h` only with a crop).
+        if (p.extra != null) {
+          const id = targets.extras?.[p.extra]
+          if (!id) return
+          ops.push({
+            target: id, kind: 'image',
+            x: (p.x + p.w / 2) / 100, y: (p.y + p.h / 2) / S.H, w: p.w / 100, h: p.h / 100,
+            crop: { fit: 'cover' }, rotation: 0, z, ...look(p),
+          })
+          return
+        }
         // Stage 4: the second image (Before / after, role `photo2` — the only one a layout emits)
         // goes to the Frame's second image layer.
         const second = p.role === 'photo2'

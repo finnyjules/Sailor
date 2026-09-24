@@ -19,7 +19,8 @@ import type { FrameFormat, KeepClear } from '~/lib/frame/formats'
 import { makeSheet, splitDateRange } from './sheet'
 import type { Sheet, SheetOpts } from './sheet'
 import { makeCanvasMeasure } from './measure'
-import { boxOf, checkPlan } from './check'
+import { boxOf, checkPlan, freeRects, inkBoxOf } from './check'
+import type { Box } from './check'
 import { elementsToOps } from './toOps'
 import { hex6, isSolid, pieceFills } from './contrast'
 import type { FillCtx, PieceFill, PieceFills } from './contrast'
@@ -91,14 +92,16 @@ export interface LayoutPlan {
    *  - the lines this layout does not place, in role order: Swiss, the action line (ruling R9); a
    *    style layout, any level it has no place for (Strip sets no details or fine print); a Stage 4
    *    layout, any content line too;
-   *  - Stage 4 (ruling R14): a second image a Stage 4 layout does not place — named by its own name,
-   *    else "Image 2" (`image: true`: the tab names it rather than quoting it);
    *  - ruling R15, in layer order: a line or image an EARLIER layout hid (tracked `visible`) that
-   *    this one does not place — it stays hidden and is named by its own text, even when it holds
+   *    this one does not place (an image: named by its own name, else "Image n"; `image: true`, the
+   *    tab names it rather than quoting it) — it stays hidden and is named by its own text, even when it holds
    *    no role any more (untagged, or tagged Not used: role `'unused'`); and one a previous Stage 4
    *    layout placed that this one does not — hidden too, never left stranded over the new layout.
    *  Hidden the way a format's levels are (a hidden-only op, tracked `visible`), so a later layout
-   *  that places one shows it again. A Frame no Stage 4 layout has touched gets only the first kind. */
+   *  that places one shows it again. A Frame no Stage 4 layout has touched gets only the first kind.
+   *  A showing image is never listed: since Task 7 of the layout decisions every layout places the
+   *  Frame's extra images (`placeExtras`) or is refused — this replaces Stage 4's ruling R14, which
+   *  hid and named a second image a Stage 4 layout did not place. */
   notPlaced: NotPlaced[]
 }
 
@@ -147,6 +150,10 @@ interface Prepared {
   /** Ruling D2: the overlap layout draws its crossing line as an owned accent copy (the face of the
    *  user's line it copies). Undefined: the layout runs exactly as before. */
   accentCopy: AccentCopy | undefined
+  /** Layout decisions, Task 7: the Frame's images a layout may leave for the planner to tile, in
+   *  document order — every image but the first (`targets.image`), and not one the user hid. The
+   *  second leaves the list for a layout that places it itself (`extrasOf`). */
+  extraImages: string[]
 }
 
 /** Every text role a Frame can hold: the targets, the measure and the stored roles cover all of
@@ -241,7 +248,15 @@ function prepare(a: Omit<LayoutPlanArgs, 'choice'>): Prepared | null {
     ...(shapeLayer ? { shapeFill: shapeLayer.fill ?? null } : {}),
   }
   const accentCopy = accentCopyFor(def, layers, targets, a.palette, a.recolour)
-  return { def, index, layers, elements, baseElements: views.base.elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props), fmt, hidden, style: a.style ?? 'swiss', composedH, fillCtx, read, contentRead: views.content.read, ownFace, accentCopy }
+  // Task 7: the images beyond the first. Not one the user hid (`visible` false that no layout set):
+  // their hiding is theirs. One a layout hid (tracked) is placed — and so shown — again. An image
+  // tagged Not used never reaches `elements` (ruling D3: it stays hidden).
+  const extraImages = elements.images.map(i => i.id).filter(id => {
+    if (id === targets.image) return false
+    const l = layers.find(x => x.id === id) as { visible?: boolean; layoutPrev?: { visible?: { set: unknown } } } | undefined
+    return !(l?.visible === false && l.layoutPrev?.visible?.set !== false)
+  })
+  return { def, index, layers, elements, baseElements: views.base.elements, content, kind, targets, hasImage, measure, grid: readGrid(a.props), fmt, hidden, style: a.style ?? 'swiss', composedH, fillCtx, read, contentRead: views.content.read, ownFace, accentCopy, extraImages }
 }
 
 /** The Frame and how to read it. `layoutId` (the functions below that quote or restore a format's
@@ -615,6 +630,63 @@ function checkRun({ out, S, side, keep, fullH, style, designW }: Run, premise: L
 /** The contrast picker over a run (ruling R6) — the one result the checker and toOps share. */
 const fillsOf = (p: Prepared, { out, S }: Run): PieceFills => pieceFills(out.els, S, p.fillCtx)
 
+/** Layout decisions, Task 7: the smallest side of an extra image's tile — 12% of the frame's width
+ *  (kit units: the width is 100). */
+export const EXTRA_MIN_TILE = 12
+/** The checker's reason when the extra images have no room (Task 7). */
+export const NO_ROOM_FOR_IMAGES = 'no room for the other images'
+
+/** The extra images this run leaves for the planner (Task 7): `p.extraImages`, less the second
+ *  image when the layout places it itself (Before / after's `photo2`). */
+function extrasOf(p: Prepared, els: El[]): string[] {
+  if (!p.extraImages.length) return p.extraImages
+  const second = p.targets.image2 && els.some(e => e.k === 'p' && e.role === 'photo2') ? p.targets.image2 : undefined
+  return second ? p.extraImages.filter(id => id !== second) : p.extraImages
+}
+
+/** Task 7 — every layout places the Frame's extra images. After the layout has built its elements:
+ *  the largest free rectangle inside the content area (the sheet's margin, inside the band a
+ *  format's keep-clear areas leave) that clears every placed element's ink by the kit's gap
+ *  (`freeRects`) takes the N extra images as N equal tiles, one row or one column — whichever gives
+ *  the bigger tiles — the kit's gap apart. A tile's smaller side is at least `EXTRA_MIN_TILE`; when
+ *  the largest room cannot hold that, the next largest is tried, and with no room at all the run
+ *  gets a `missing` element: the variation is refused, `NO_ROOM_FOR_IMAGES`. The tiles are
+ *  appended after the layout's own elements (no index moves), cropped to cover by toOps. A Frame
+ *  with no extra image runs exactly as before: nothing is added. */
+function placeExtras(p: Prepared, ran: Run): Run {
+  const n = extrasOf(p, ran.out.els).length
+  if (!n) return ran
+  const { S, keep } = ran
+  const H = ran.fullH ?? S.H
+  const top = keep ? H * keep.top : 0, bottom = keep ? H * (1 - keep.bottom) : H
+  const area: Box = { x0: S.M, y0: top + S.M, x1: S.W - S.M, y1: bottom - S.M }
+  const taken = ran.out.els.map(e => inkBoxOf(e, S)).filter((b): b is Box => b != null)
+  const tiles = tileRooms(freeRects(area, taken, S.GAP, EXTRA_MIN_TILE), n, S.GAP)
+  if (!tiles) ran.out.els.push({ k: 'missing', why: NO_ROOM_FOR_IMAGES })
+  else tiles.forEach((t, i) => ran.out.els.push({ k: 'p', x: t.x0, y: t.y0, w: t.x1 - t.x0, h: t.y1 - t.y0, role: 'extra', extra: i }))
+  return ran
+}
+
+/** `n` equal tiles, `gap` apart, in the first room (largest first) that holds them at
+ *  `EXTRA_MIN_TILE` or more: as one row or one column, whichever tile is bigger (the row on a tie).
+ *  Null: no room holds them. */
+function tileRooms(rooms: Box[], n: number, gap: number): Box[] | null {
+  for (const r of rooms) {
+    const rw = r.x1 - r.x0, rh = r.y1 - r.y0
+    const row = { w: (rw - (n - 1) * gap) / n, h: rh, row: true }
+    const col = { w: rw, h: (rh - (n - 1) * gap) / n, row: false }
+    const fits = [row, col].filter(t => Math.min(t.w, t.h) >= EXTRA_MIN_TILE)
+    if (!fits.length) continue
+    const t = fits.length === 2 && col.w * col.h > row.w * row.h ? col : fits[0]!
+    return Array.from({ length: n }, (_, i) => {
+      const x0 = t.row ? r.x0 + i * (t.w + gap) : r.x0
+      const y0 = t.row ? r.y0 : r.y0 + i * (t.h + gap)
+      return { x0, y0, x1: x0 + t.w, y1: y0 + t.h }
+    })
+  }
+  return null
+}
+
 /** Run and check one choice (the ONE path plan and candidates share). Task 3 of the layout
  *  decisions: a date range too wide for its box may break after its dash ("19.09.–" /
  *  "15.11.2026"). The choice runs first exactly as before; only when that fails, on a recognised
@@ -622,13 +694,13 @@ const fillsOf = (p: Prepared, { out, S }: Run): PieceFills => pieceFills(out.els
  *  allowed — kept when it passes. So every
  *  choice that passed before is byte-identical; the break only ever adds candidates. */
 function runChecked(p: Prepared, a: { frameW: number; frameH: number; style?: StyleId }, choice: Choice): { ran: Run; pf: PieceFills; issues: string[] } {
-  const ran = runChoice(p, a, choice)
+  const ran = placeExtras(p, runChoice(p, a, choice))
   const pf = fillsOf(p, ran)
   const issues = checkRun(ran, p.def.premise, pf)
   // Ruling D1: only on a recognised format — a Frame with no format plans exactly as in Stage 1.
   const date = p.content.date
   if (!issues.length || !p.fmt || !date || !date.split(/\s+/).some(t => splitDateRange(t))) return { ran, pf, issues }
-  const ran2 = runChoice(p, a, choice, true)
+  const ran2 = placeExtras(p, runChoice(p, a, choice, true))
   const pf2 = fillsOf(p, ran2)
   const issues2 = checkRun(ran2, p.def.premise, pf2)
   return issues2.length ? { ran, pf, issues } : { ran: ran2, pf: pf2, issues: issues2 }
@@ -675,7 +747,11 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
   const { out, S } = ran
 
   const libraryShape = p.targets.shape ? undefined : pickLibraryShape(p.elements.shapeMode, seedFor(p.index, a.choice))
-  const targets = libraryShape ? { ...p.targets, libraryShape } : p.targets
+  // Task 7: the extra images the run tiled (`placeExtras`), each by its index.
+  const extras = extrasOf(p, out.els)
+  const targets = libraryShape || extras.length
+    ? { ...p.targets, ...(libraryShape ? { libraryShape } : {}), ...(extras.length ? { extras } : {}) }
+    : p.targets
   // Stage 3 pieces: the button adapts to the action text's own colour (ruling S1), the logo comes
   // from the brand kit (ruling S2). Only passed when a layout drew them, so Swiss calls are unchanged.
   const pieces: Parameters<typeof elementsToOps>[5] = {}
@@ -712,8 +788,9 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
   const ops: LayerOp[] = ins.ops.map(op => (op.insert && ownedId.has(op.insert.key)
     ? { ...op, target: ownedId.get(op.insert.key)! }
     : op))
-  // Rulings R14 and R15: what this plan leaves hidden beyond its own roles — a second image a Stage 4
-  // layout does not place, and what an earlier layout hid or a previous Stage 4 layout placed.
+  // Rulings R15 and D3: what this plan leaves hidden beyond its own roles — what an earlier layout hid
+  // or a previous Stage 4 layout placed, and what the user tagged Not used. (The extra images are
+  // placed by the run itself, Task 7 — ruling R14's hide is gone.)
   const carried = carriedOver(p, a, ops, out.els.length)
   ops.push(...carried.hide)
   const next = applyPlacement(merged, { ops, did: out.did }, p.elements, a.palette, { recolour: a.recolour ?? false })
@@ -768,13 +845,14 @@ function accentCopyFor(def: LayoutDef, layers: LocalLayer[], targets: RoleTarget
   }
 }
 
-/** Rulings R14 and R15, over the layers this plan does not place or hide itself:
+/** Rulings R15 and D3, over the layers this plan does not place or hide itself:
  *  - a layer an earlier layout hid (`visible` false, tracked as the layout's) stays hidden — apply
  *    leaves an untargeted layer as it is — and is NAMED;
  *  - a layer a previous Stage 4 layout placed (the Frame's `posterState.patternId` is a
  *    `needsContent` layout, and the layer holds a role in the content view) that is still showing
  *    is HIDDEN and named — never left where that layout put it, under this one;
- *  - R14: a Stage 4 layout hides the second image it does not place, and names it.
+ *  - (Stage 4's ruling R14 — a Stage 4 layout hid the second image it did not place — is gone: since
+ *    Task 7 of the layout decisions every layout places the Frame's extra images, or is refused.)
  *  The user's own hiding (untracked `visible`) is theirs: not named. A layer an earlier layout hid
  *  that holds no role any more is named as `'unused'`; a SHOWING layer with no role in either view
  *  is left where it is — unless the user tagged it Not used:
@@ -785,7 +863,6 @@ function accentCopyFor(def: LayoutDef, layers: LocalLayer[], targets: RoleTarget
 function carriedOver(p: Prepared, a: LayoutPlanArgs, ops: LayerOp[], z: number): { hide: LayerOp[]; named: NotPlaced[] } {
   const placed = new Set(ops.filter(o => !o.hidden && !o.insert).map(o => o.target))
   const hiddenHere = new Set(ops.filter(o => o.hidden).map(o => o.target))
-  const image2 = p.def.needsContent && p.targets.image2 && !placed.has(p.targets.image2) ? p.targets.image2 : undefined
   const prev = (a.props?.sailor_posterState as { patternId?: string } | undefined)?.patternId
   const prevWasStage4 = !!prev && layoutEntry(prev)?.def.needsContent != null
   // The role a layer holds in the content view (what a previous Stage 4 layout read), else in the base view.
@@ -823,7 +900,7 @@ function carriedOver(p: Prepared, a: LayoutPlanArgs, ops: LayerOp[], z: number):
       continue
     }
     if (!role) continue
-    const strand = showing && (tagUnused || l.id === image2 || (prevWasStage4 && contentRole.has(l.id)))
+    const strand = showing && (tagUnused || (prevWasStage4 && contentRole.has(l.id)))
     if (!layoutHid && !strand) continue
     if (strand) hide.push({ target: l.id, kind: l.kind === 'image' ? 'image' : 'text', hidden: true, z, ...(tagUnused ? { hiddenBy: 'unused' as const } : {}) })
     if (l.kind === 'image') {

@@ -160,6 +160,44 @@ export function boxOf(e: El, S: Sheet): Box | null {
   }
 }
 
+/** The real ink an element takes on the page — what rules 3 and 4 measure: a text's words as the
+ *  renderer draws them (a word wider than its box spills past it), every other element its box. */
+export function inkBoxOf(e: El, S: Sheet): Box | null {
+  return e.k === 't' ? textBox(e, S, true) : e.k === 'own' ? textBox(ownAsText(e), S, true) : boxOf(e, S)
+}
+
+/** Layout decisions, Task 7: the free rooms inside `area` — axis-aligned rectangles that clear
+ *  every `taken` box by `gap` — at least `minSide` on both sides, largest (by area) first. Ties: the
+ *  top-most first, then the left-most, then the wider. Every maximal room is among them (each is
+ *  bounded by the area's edges or a taken box's gap), so the first is the largest free rectangle.
+ *  Deterministic: the order of `taken` never changes the result. Touching counts as clear. */
+export function freeRects(area: Box, taken: Box[], gap: number, minSide: number): Box[] {
+  const obs = taken
+    .map(b => ({ x0: b.x0 - gap, y0: b.y0 - gap, x1: b.x1 + gap, y1: b.y1 + gap }))
+    .filter(b => intersects(b, area))
+  const uniq = (xs: number[]) => [...new Set(xs)].sort((a, b) => a - b)
+  const lefts = uniq([area.x0, ...obs.map(b => b.x1)].filter(x => x >= area.x0 && x < area.x1))
+  const rights = uniq([area.x1, ...obs.map(b => b.x0)].filter(x => x > area.x0 && x <= area.x1))
+  const out: Box[] = []
+  for (const x0 of lefts) {
+    for (const x1 of rights) {
+      if (x1 - x0 < minSide) continue
+      // The taken boxes across this column, top to bottom; the rooms are the gaps between them.
+      const across = obs.filter(b => b.x0 < x1 && b.x1 > x0)
+        .map(b => [Math.max(b.y0, area.y0), Math.min(b.y1, area.y1)] as const)
+        .sort((a, b) => a[0] - b[0] || a[1] - b[1])
+      let y = area.y0
+      for (const [t0, t1] of across) {
+        if (t0 - y >= minSide) out.push({ x0, y0: y, x1, y1: t0 })
+        y = Math.max(y, t1)
+      }
+      if (area.y1 - y >= minSide) out.push({ x0, y0: y, x1, y1: area.y1 })
+    }
+  }
+  const areaOf = (r: Box) => (r.x1 - r.x0) * (r.y1 - r.y0)
+  return out.sort((a, b) => areaOf(b) - areaOf(a) || a.y0 - b.y0 || a.x0 - b.x0 || (b.x1 - b.x0) - (a.x1 - a.x0))
+}
+
 /** True when `box` lies inside the union of `covers` (rectangle subtraction; 0.05-unit slack). */
 function insideUnion(box: Box, covers: Box[]): boolean {
   const eps = 0.05
@@ -210,7 +248,7 @@ export function checkPlan(els: El[], S: Sheet, premise?: LayoutDef['premise'], o
   // Rules 3 and 4 measure the real ink: a word wider than its text box spills past it (the
   // renderer only wraps at spaces), so it counts towards off-page and overlap.
   const boxed = present
-    .map(e => ({ e, box: e.k === 't' ? textBox(e, S, true) : e.k === 'own' ? textBox(ownAsText(e), S, true) : boxOf(e, S) }))
+    .map(e => ({ e, box: inkBoxOf(e, S) }))
     .filter((it): it is { e: Present; box: Box } => it.box != null)
 
   // Rule 2: text below the minimum size. A ring (the title set on a path) is text too, as in

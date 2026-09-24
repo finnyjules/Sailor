@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { candidatesForFrame, contentForFrame, planLayout } from '~/lib/frame/patterns/kit/plan'
+import { candidatesForFrame, contentForFrame, planLayout, EXTRA_MIN_TILE } from '~/lib/frame/patterns/kit/plan'
 import type { LayoutPlanArgs } from '~/lib/frame/patterns/kit/plan'
-import { boxOf } from '~/lib/frame/patterns/kit/check'
+import { boxOf, freeRects, inkBoxOf } from '~/lib/frame/patterns/kit/check'
 import { CATALOG, layoutById, layoutsForStyle } from '~/lib/frame/patterns/layouts/catalog'
 import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
 import { makeSheet } from '~/lib/frame/patterns/kit/sheet'
@@ -91,10 +91,12 @@ const EXPECTED_THIN: { layout: AdId; frame: string; action?: boolean; reason: st
   // (offered; the minimum is 3 rows, 14.13); the button's row takes 16.2 more, leaving none.
   { layout: 'perfStat', frame: 'ad-300x250', action: true,
     reason: '300×250 with a button: the button\'s row leaves the image less than 3 rows (14.13; 15.0–16.5 without it)' },
-  // 300×250: headline, the product image, headings and four rows end at 90.9–92.6 on a page 83.3
-  // tall, before the offer — the table alone overruns the banner.
+  // 300×250 (H 83.3; since Task 1 of the layout decisions the image sits below the table): the
+  // headline, the headings and four rows end at 72.5–74.2, below where the offer at the foot begins
+  // (59.2 with a button, 60.9 without) — the last rows run into the offer, and under the table there
+  // is no room for the image (it needs a group gap, 10.2, then more than two rows).
   { layout: 'perfVersus', frame: 'ad-300x250',
-    reason: '300×250: the table alone ends at 90.9–92.6 on a page 83.3 tall' },
+    reason: '300×250: the table ends at 72.5–74.2, past the offer (from 59.2–60.9); no room for the image below it' },
   // The story composes in the 90.7 its bars leave uncovered: the table ends 88.5–90.3 into that
   // band, and the offer (fine print, number, button) has no room under it; its last rows run into
   // the number and the fine print.
@@ -498,5 +500,42 @@ describe('the catalog (seed order)', () => {
     for (const id of ['perfCallouts', 'perfListicle', 'perfNotes']) expect(layoutById(id)!.needsContent, id).toEqual(['list'])
     // Every earlier layout reads the base view: none declares `needsContent`.
     expect(CATALOG.slice(0, 57).filter(l => l.needsContent)).toEqual([])
+  })
+})
+
+// Task 7 of the layout decisions: every layout places the Frame's extra images, or is refused ("no
+// room for the other images"). The ad Frame with a second image (Before / after's fixture) through
+// the other eight layouts, pinned: Stat, Review, Us vs them, Feature callouts and Reasons why tile it
+// and keep every variation; Offer first, Notes app and Post-it lose everything they offer with one
+// image. Measured: on every one of their one-image variations no free room of 12 × 12 (the minimum
+// tile) is left in the content area — Post-it bleeds its image over the whole page (the note and the
+// offer band on it), Notes app sets its paper over the whole page, and Offer first fills the page with
+// its panel and the image under it.
+describe('a second image (Task 7): what the ad Frame keeps', () => {
+  const KEPT = ['perfStat', 'perfReview', 'perfVersus', 'perfCallouts', 'perfListicle']
+  const LOST = ['perfOfferFirst', 'perfNotes', 'perfPostit']
+  it.each(combos.map(c => [`${c.frame} · ${c.action ? 'action' : 'no action'}`, c] as const))('%s', (_label, c) => {
+    const f = FRAMES.find(x => x.id === c.frame)!
+    const format = f.preset ? FRAME_FORMATS.find(x => x.id === f.preset)! : null
+    const S = makeSheet({ frameW: f.w, frameH: f.h, measure: makeStubMeasure(), style: 'performance', ...(format ? { format: { view: format.view, nc: format.nc, ...(format.keep ? { keepSide: Math.max(format.keep.left, format.keep.right) } : {}) } } : {}) })
+    const keep = format?.keep
+    const area = { x0: S.M, x1: 100 - S.M, y0: (keep ? S.H * keep.top : 0) + S.M, y1: (keep ? S.H * (1 - keep.bottom) : S.H) - S.M }
+    for (const id of ADS) {
+      if (id === 'perfBeforeAfter') continue
+      const one = candidatesForFrame(argsFor(id, f, fullAdLayers({ action: c.action })))
+      const two = candidatesForFrame(argsFor(id, f, fullAdLayers({ action: c.action, image2: true })))
+      if (KEPT.includes(id)) {
+        // Every variation kept, each with the second image as a tile.
+        expect(two.map(x => x.choice), id).toEqual(one.map(x => x.choice))
+        for (const x of two) expect(x.out.els.filter(e => e.k === 'p' && e.extra === 0), id).toHaveLength(1)
+      } else {
+        expect(LOST, id).toContain(id)
+        expect(two, id).toEqual([])
+        for (const x of one) {
+          const taken = x.out.els.map(e => inkBoxOf(e, S)).filter((b): b is NonNullable<typeof b> => b != null)
+          expect(freeRects(area, taken, S.GAP, EXTRA_MIN_TILE), `${id} ${JSON.stringify(x.choice)}`).toEqual([])
+        }
+      }
+    }
   })
 })

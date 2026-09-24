@@ -1,7 +1,8 @@
 // The Stage 4 final fix wave (rulings R14, R15; review findings C1, I1, I2, minors): switching
 // away from a Stage 4 layout never loses a line without naming it; the format's "Not shown"
 // quotes what the plan really hid; each content line is measured in its own layer's face; a
-// second image a Stage 4 layout does not place is hidden and named; owned text is held to rule 10;
+// second image is placed by every layout (Task 7 of the layout decisions, replacing R14) or the
+// variation is refused; owned text is held to rule 10;
 // every layout's description says only what it drew.
 import { describe, it, expect, vi, afterEach } from 'vitest'
 vi.mock('~/lib/frame/patterns/kit/measure', async (importOriginal) => {
@@ -142,36 +143,49 @@ describe('R15: a hidden line with no role left is named by its own text', () => 
   })
 })
 
-describe('R14: a Stage 4 layout hides a second image it does not place, and names it', () => {
-  it('Offer first hides the recognised second image, named "Image 2"; Run-off keeps it hidden and named', () => {
-    const first = apply({ sailor_localLayers: [...reviewAd(), img('img2')] }, 'perfOfferFirst', 'performance')
-    expect(layerOf(first.plan, 'img2').visible).toBe(false)
-    expect(first.plan.notPlaced).toContainEqual({ role: 'image2', text: 'Image 2', image: true })
-    const runoff = apply(first.props, 'runoff', 'swiss').plan
-    expect(layerOf(runoff, 'img2').visible).toBe(false)
-    expect(runoff.notPlaced).toContainEqual({ role: 'image2', text: 'Image 2', image: true })
+// Ruling R14 (a Stage 4 layout hid a second image it did not place, and named it) is replaced by
+// Task 7 of the layout decisions: every layout places the Frame's extra images in the free room it
+// leaves — or, with no room, is refused ("no room for the other images").
+describe('Task 7 (replaces R14): every layout places the second image, or is refused', () => {
+  it('Review places the recognised second image as a tile: shown, cropped, not named', () => {
+    const plan = apply({ sailor_localLayers: [...reviewAd(), img('img2')] }, 'perfReview', 'performance').plan
+    const l = layerOf(plan, 'img2') as LocalLayer & { visible?: boolean; crop?: unknown }
+    expect(l.visible).not.toBe(false)
+    expect(l.crop).toEqual({ fit: 'cover' })
+    expect(plan.notPlaced.some(n => n.image)).toBe(false)
   })
 
-  it('named by its own name when it has one', () => {
-    const first = apply({ sailor_localLayers: [...reviewAd(), img('img2', { name: 'Worn trail shoe' })] }, 'perfOfferFirst', 'performance')
-    expect(first.plan.notPlaced).toContainEqual({ role: 'image2', text: 'Worn trail shoe', image: true })
+  it('Offer first leaves no room for it: refused, with the reason', () => {
+    const a = args({ sailor_localLayers: [...reviewAd(), img('img2')] }, 'perfOfferFirst', 'performance')
+    expect(candidatesForFrame(a)).toEqual([])
+    expect(planLayout({ ...a, choice: { lines: 0, arr: 0, scale: 'full', side: 'right' } })!.issues).toContain('no room for the other images')
+    // With one image it is offered, as before.
+    expect(candidatesForFrame(args({ sailor_localLayers: reviewAd() }, 'perfOfferFirst', 'performance')).length).toBeGreaterThan(0)
   })
 
-  it('Before / after places it; switching to Run-off hides it and names it', () => {
+  it('Before / after places it; switching to Run-off places it again, shown and not named', () => {
     const layers = [tl('t', 'Run lighter.', 0.1), tl('dt', '–30%', 0.04), tl('c', 'Offer ends 12 October.', 0.02), img('img'), img('img2')]
     const ba = apply({ sailor_localLayers: layers }, 'perfBeforeAfter', 'performance')
     expect(layerOf(ba.plan, 'img2').visible).not.toBe(false)
     expect(ba.plan.notPlaced.map(n => n.role)).not.toContain('image2')
     const runoff = apply(ba.props, 'runoff', 'swiss').plan
-    expect(layerOf(runoff, 'img2').visible).toBe(false)
-    expect(runoff.notPlaced).toContainEqual({ role: 'image2', text: 'Image 2', image: true })
+    expect(layerOf(runoff, 'img2').visible).not.toBe(false)
+    expect(layerOf(runoff, 'img2')).not.toEqual(layerOf(ba.plan, 'img2'))
+    expect(runoff.notPlaced.some(n => n.image)).toBe(false)
   })
 
-  it('a Swiss layout on a fresh Frame leaves a second image exactly as before (no Stage 4 layout ran)', () => {
-    const layers = [...reviewAd(), img('img2')]
-    const plan = apply({ sailor_localLayers: layers }, 'runoff', 'swiss').plan
-    expect(layerOf(plan, 'img2')).toEqual(layers.find(l => l.id === 'img2'))
-    expect(plan.notPlaced.map(n => n.role)).not.toContain('image2')
+  it('a second image an earlier layout hid (R14, tracked) is placed and shown again', () => {
+    const hidden = { ...img('img2'), visible: false, layoutPrev: { visible: { was: null, set: false } } } as LocalLayer
+    const plan = apply({ sailor_localLayers: [...reviewAd(), hidden] }, 'runoff', 'swiss').plan
+    expect(layerOf(plan, 'img2').visible).not.toBe(false)
+    expect(plan.notPlaced.some(n => n.image)).toBe(false)
+  })
+
+  it('a second image tagged Not used stays hidden and is named by its own name (ruling D3)', () => {
+    const props = { sailor_localLayers: [...reviewAd(), img('img2', { name: 'Worn trail shoe' })], sailor_posterState: { tags: { img2: 'unused' } } }
+    const plan = apply(props, 'runoff', 'swiss').plan
+    expect(layerOf(plan, 'img2').visible).toBe(false)
+    expect(plan.notPlaced).toContainEqual({ role: 'unused', text: 'Worn trail shoe', image: true })
   })
 })
 
