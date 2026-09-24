@@ -325,3 +325,137 @@ describe('the regression this task exists for', () => {
     expect(p.breakdown.some(b => b.action.startsWith('GenerateImageNode:'))).toBe(true)
   })
 })
+
+// ───────────────────────────────────────────────────────────────────────────
+// Task P1 (model line-up): one price calculation for badge, estimate and
+// charge. Moving the calculation into shared/pricing must not change a single
+// price, so the credits priceGraph gave for every model id × model-priced
+// class, and for every flat class, were recorded BEFORE the move
+// (fixtures/pricing/price-graph-golden.json) and must come out identical.
+// ───────────────────────────────────────────────────────────────────────────
+describe('golden price table (no price changed by the shared pricing move)', () => {
+  const golden = JSON.parse(readFileSync(
+    fileURLToPath(new URL('./fixtures/pricing/price-graph-golden.json', import.meta.url)), 'utf8',
+  )) as {
+    modelPriced: Record<string, Record<string, number | 'refused'>>
+    flat: Record<string, number>
+  }
+
+  function priceOrRefused(ct: string, inputs: Record<string, unknown>): number | 'refused' {
+    try { return priceGraph({ 1: { class_type: ct, inputs } }).credits }
+    catch (e) { if (e instanceof UnpricedGraphError) return 'refused'; throw e }
+  }
+
+  it('covers every model-priced class and every flat class (the table is not empty)', () => {
+    expect(Object.keys(golden.modelPriced).sort()).toEqual([...MODEL_PRICED_NODE_CLASSES].sort())
+    expect(Object.keys(golden.flat).sort()).toEqual(Object.keys(GRAPH_NODE_CREDITS).sort())
+    // Both outcomes are present, so a pricer that refused (or priced) everything would fail.
+    const cells = Object.values(golden.modelPriced).flatMap(row => Object.values(row))
+    expect(cells.filter(c => c === 'refused').length).toBeGreaterThan(50)
+    expect(cells.filter(c => typeof c === 'number').length).toBeGreaterThan(50)
+  })
+
+  it('every model id × model-priced class prices exactly as recorded', () => {
+    const drift: string[] = []
+    for (const [ct, row] of Object.entries(golden.modelPriced)) {
+      for (const [model, want] of Object.entries(row)) {
+        const got = priceOrRefused(ct, { model })
+        if (got !== want) drift.push(`${ct} @ ${model}: recorded ${want}, now ${got}`)
+      }
+    }
+    expect(drift).toEqual([])
+  })
+
+  it('every flat class prices exactly as recorded', () => {
+    const drift: string[] = []
+    for (const [ct, want] of Object.entries(golden.flat)) {
+      const got = priceOrRefused(ct, {})
+      if (got !== want) drift.push(`${ct}: recorded ${want}, now ${got}`)
+    }
+    expect(drift).toEqual([])
+  })
+
+  it('other widgets in the input map do not move a price today', () => {
+    const bare = priceGraph({ 1: { class_type: 'GenerateVideoNode', inputs: { model: 'veo-3.1' } } }).credits
+    const full = priceGraph({ 1: { class_type: 'GenerateVideoNode', inputs: {
+      model: 'veo-3.1', prompt: 'a shot', duration: 8, model_options: '{"resolution":"1080p"}',
+    } } }).credits
+    expect(full).toBe(bare)
+  })
+})
+
+// The markup and the model USD live in frontend/shared/pricing/ and nowhere
+// else. A second copy is how the badge and the charge drifted apart before.
+describe('one price calculation (guard)', () => {
+  const FRONTEND = fileURLToPath(new URL('../../', import.meta.url))
+  const ROOTS = ['app', 'server', 'shared']
+  const SKIP_DIRS = new Set(['node_modules', '.nuxt', '.output'])
+  /** Re-implementations of the markup: its definition, its multiply, its ceil. */
+  const FORBIDDEN: RegExp[] = [
+    /function\s+creditsForUsd\w*\s*\(/,
+    // a new body under the name (an alias of the shared function is fine)
+    /(?:const|let|var)\s+creditsForUsd\w*\s*=\s*(?:\(|function\b|async\b|\w+\s*=>)/,
+    // an operand before the ×, on one line, so a JSDoc ' * markup' line is not one
+    /[\w)\]][ \t]*\*[ \t]*markup\b/,
+    /Math\.ceil\(\s*usd\b/,
+    /usd\s*<=\s*0\.10?\s*\?\s*2\b/,
+  ]
+  /** Files allowed a markup of their own, each with the reason. */
+  const ALLOWED: Record<string, string> = {
+    'server/utils/anthropicPrices.ts':
+      'Claude assist token metering: its own ASSIST_MARKUP on LLM usage, not a model node price',
+  }
+
+  function sourceFiles(dir: string): string[] {
+    const out: string[] = []
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (SKIP_DIRS.has(e.name)) continue
+      const p = join(dir, e.name)
+      if (e.isDirectory()) out.push(...sourceFiles(p))
+      else if (/\.(ts|vue|js|mjs)$/.test(e.name)) out.push(p)
+    }
+    return out
+  }
+  function offences(src: string): string[] {
+    return FORBIDDEN.filter(re => re.test(src)).map(re => re.source)
+  }
+  const rel = (p: string) => p.slice(FRONTEND.length).replace(/\\/g, '/')
+
+  it('positive control: the patterns catch the old copies and the real one', () => {
+    const oldCopy = [
+      'export function creditsForUsdServer(usd: number): number {',
+      '  if (!(usd > 0)) return 0',
+      '  const markup = usd <= 0.10 ? 2 : 1.5',
+      '  return Math.max(1, Math.ceil(usd * 100 * markup))',
+      '}',
+    ].join('\n')
+    expect(offences(oldCopy).length).toBeGreaterThanOrEqual(3)
+    expect(offences('const creditsForUsdX = (usd: number) => usd * 2')).toHaveLength(1)
+    expect(offences('export const creditsForUsdServer = creditsForUsd')).toEqual([])
+    expect(offences(' * emit identical\n *  markup share one definition')).toEqual([])
+    // The scanner reads real files: the one true copy trips it.
+    const markupFile = join(FRONTEND, 'shared/pricing/markup.ts')
+    expect(sourceFiles(join(FRONTEND, 'shared'))).toContain(markupFile)
+    expect(offences(readFileSync(markupFile, 'utf8')).length).toBeGreaterThanOrEqual(3)
+  })
+
+  it('nothing outside shared/pricing re-implements the markup', () => {
+    const bad: string[] = []
+    for (const root of ROOTS) {
+      for (const file of sourceFiles(join(FRONTEND, root))) {
+        const r = rel(file)
+        if (r.startsWith('shared/pricing/') || r in ALLOWED) continue
+        const hits = offences(readFileSync(file, 'utf8'))
+        if (hits.length) bad.push(`${r}: ${hits.join(', ')}`)
+      }
+    }
+    expect(bad).toEqual([])
+  })
+
+  it('the server charge, the badge and the estimate share one markup function', async () => {
+    const shared = await import('#shared/pricing/markup')
+    const client = await import('~/lib/pricing')
+    expect(creditsForUsdServer).toBe(shared.creditsForUsd)
+    expect(client.creditsForUsd).toBe(shared.creditsForUsd)
+  })
+})

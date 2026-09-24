@@ -9,10 +9,10 @@
  * to base_render — a real Flux 2 Pro run once went out at 1 credit because
  * GenerateImageNode was missing from the table.
  */
-import { IMAGE_MODELS } from '~~/app/data/image-models'
-import { ENGINE_USD } from '~~/app/data/engine-prices'
-import { VIDEO_MODEL_USD, LEGACY_VIDEO_MODEL_IDS } from '~~/app/data/video-prices'
-export { VIDEO_MODEL_USD }
+import { VIDEO_MODEL_USD } from '~~/app/data/video-prices'
+import { creditsForUsd } from '../../shared/pricing/markup'
+import { MODEL_PRICED_NODE_CLASSES, MODEL_PRICED_CLASS_SET, priceNode } from '../../shared/pricing/nodePrice'
+export { VIDEO_MODEL_USD, MODEL_PRICED_NODE_CLASSES }
 export const PRICE_BOOK_VERSION = 'spike-v4'
 
 export const BASE_RENDER_CREDITS = 1
@@ -101,17 +101,11 @@ export class UnpricedGraphError extends Error {
 }
 
 /**
- * Server copy of the markup policy — a deliberate mirror of
- * app/lib/pricing.ts `creditsForUsd`. server/ must not import app/lib for
- * money math; price-graph.unit.spec.ts asserts the two agree across a USD
- * sweep. Policy: 2x on provider cost <= $0.10 and 1.5x above with a floor of
- * 1 credit.
+ * The markup policy, under its historical server name. It is the one function
+ * in shared/pricing/markup.ts (2x on provider cost <= $0.10 and 1.5x above
+ * with a floor of 1 credit) — not a copy.
  */
-export function creditsForUsdServer(usd: number): number {
-  if (!(usd > 0)) return 0
-  const markup = usd <= 0.10 ? 2 : 1.5
-  return Math.max(1, Math.ceil(usd * 100 * markup))
-}
+export const creditsForUsdServer = creditsForUsd
 
 /**
  * Flat per-class credits — every provider class that always costs the same.
@@ -236,17 +230,10 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   TurntableNode: 75,               // badge $0.50
 }
 
-/**
- * Classes whose price depends on a model/engine widget in `inputs`. Each one
- * refuses when the widget value is missing or unknown.
- */
-export const MODEL_PRICED_NODE_CLASSES = [
-  'GenerateImageNode',
-  'GenerateVideoNode',
-  'FilmShotNode',
-  'UpscaleImageNode',
-  'EnhanceDetailNode',
-]
+// MODEL_PRICED_NODE_CLASSES — the classes whose price depends on a
+// model/engine widget in `inputs` — lives in shared/pricing/nodePrice.ts and
+// is re-exported at the top of this file. Each one refuses when the widget
+// value is missing or unknown.
 
 /**
  * Classes that are free by design — no provider call in their execute body.
@@ -288,23 +275,15 @@ export const PROVIDER_NODE_CLASSES: string[] = [
 ]
 
 // Per-clip video USD (VIDEO_MODEL_USD) and the legacy model-label remap
-// (LEGACY_VIDEO_MODEL_IDS) now live in app/data/video-prices.ts, alongside
-// ENGINE_USD in app/data/engine-prices.ts. Both are pure-data modules so the
-// hosted node cost badge (app/lib/nodeCreditEstimate.ts) can price a picker
-// node from the SAME table the server charges from without importing server/.
-// VIDEO_MODEL_USD is re-exported at the top of this file so existing importers
-// (and the catalog parity test) keep their import path.
-//
-// Engine-picker nodes: the `model` widget names an engine — not a catalog id.
+// (LEGACY_VIDEO_MODEL_IDS) live in app/data/video-prices.ts, alongside
+// ENGINE_USD in app/data/engine-prices.ts. The calculation that reads them —
+// for the charge here, the node badge and the run estimate alike — is
+// priceNode in shared/pricing/nodePrice.ts. VIDEO_MODEL_USD is re-exported at
+// the top of this file so existing importers (and the catalog parity test)
+// keep their import path.
 
-// Lazily-built lookups. Never derive these at module top level: a top-level
+// Lazily-built lookup. Never derive this at module top level: a top-level
 // const reading another module's const breaks on import reorder.
-let _imagePrices: Map<string, number | null> | null = null
-function imagePriceFor(id: string): number | null | undefined {
-  if (!_imagePrices) _imagePrices = new Map(IMAGE_MODELS.map(m => [m.id, m.pricePerImage]))
-  return _imagePrices.get(id)
-}
-
 let _providerClasses: Set<string> | null = null
 function isProviderClass(ct: string): boolean {
   if (!_providerClasses) _providerClasses = new Set(PROVIDER_NODE_CLASSES)
@@ -313,30 +292,16 @@ function isProviderClass(ct: string): boolean {
   return _providerClasses.has(ct) || ct.endsWith('RemoteNode')
 }
 
-/** Credits for a model-priced class, or a refusal. */
+/**
+ * Credits for a model-priced class, or a refusal. The price is the shared
+ * calculation (the same one the node badge and the run estimate read), given
+ * the node's WHOLE input map.
+ */
 function graphNodeModelCredits(ct: string, inputs: unknown): number {
-  const picked = (inputs as { model?: unknown } | undefined)?.model
-  const model = typeof picked === 'string' ? picked : ''
-  if (!model) throw new UnpricedGraphError(ct, 'no model selected')
-
-  if (ct === 'GenerateImageNode') {
-    const usd = imagePriceFor(model)
-    if (usd === undefined) throw new UnpricedGraphError(ct, `unknown model id ${model}`)
-    if (usd == null) throw new UnpricedGraphError(ct, `model ${model} has no listed price`)
-    return creditsForUsdServer(usd)
-  }
-
-  if (ct === 'GenerateVideoNode' || ct === 'FilmShotNode') {
-    const id = LEGACY_VIDEO_MODEL_IDS[model] ?? model
-    const row = VIDEO_MODEL_USD[id]
-    if (!row) throw new UnpricedGraphError(ct, `unknown video model id ${model}`)
-    return creditsForUsdServer(row.usd)
-  }
-
-  const engines = ENGINE_USD[ct]
-  const usd = engines?.[model]
-  if (usd == null) throw new UnpricedGraphError(ct, `unknown engine ${model}`)
-  return creditsForUsdServer(usd)
+  const map = inputs && typeof inputs === 'object' ? inputs as Record<string, unknown> : {}
+  const price = priceNode(ct, map)
+  if ('refused' in price) throw new UnpricedGraphError(ct, price.refused)
+  return price.credits
 }
 
 export interface GraphPrice {
@@ -355,7 +320,7 @@ export function priceGraph(prompt: Record<string, { class_type: string; inputs?:
     if (!ct) continue
     if (OUTPUT_CLASS_TYPES.has(ct)) hasOutput = true
 
-    if (MODEL_PRICED_NODE_CLASSES.includes(ct)) {
+    if (MODEL_PRICED_CLASS_SET.has(ct)) {
       const inputs = prompt[id]?.inputs
       const credits = graphNodeModelCredits(ct, inputs)
       const model = (inputs as { model?: unknown } | undefined)?.model

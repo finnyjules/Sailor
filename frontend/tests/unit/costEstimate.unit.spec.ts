@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   estimateUsdForNodes,
   isReplicateBilled,
-  modelWidgetValue,
+  widgetValueMap,
   vueNodesToEstimateInput,
   type EstimateInputNode,
 } from '~/lib/costEstimate'
@@ -104,15 +104,26 @@ function videoNode(model: string): EstimateInputNode {
   }
 }
 
-describe('modelWidgetValue', () => {
-  it('reads the value positionally out of widgetsValues by widgetDefs index', () => {
-    expect(modelWidgetValue(videoNode('veo-3.1'))).toBe('veo-3.1')
+describe('widgetValueMap', () => {
+  it('maps every widget name to its value, positionally by widgetDefs index', () => {
+    const n = videoNode('veo-3.1')
+    expect(widgetValueMap(n.widgetDefs, n.widgetsValues)).toEqual({ model: 'veo-3.1', prompt: 'a shot' })
   })
 
-  it('is undefined when the node carries no model widget', () => {
-    expect(modelWidgetValue({ id: '1', type: 'LoadImage' })).toBeUndefined()
-    expect(modelWidgetValue({ id: '1', type: 'GenerateVideoNode', widgetDefs: [{ name: 'prompt' }], widgetsValues: ['x'] }))
-      .toBeUndefined()
+  it('carries model_options through as the node holds it (JSON text)', () => {
+    expect(widgetValueMap(
+      [{ name: 'model' }, { name: 'model_options' }],
+      ['veo-3.1', '{"resolution":"1080p"}'],
+    )).toEqual({ model: 'veo-3.1', model_options: '{"resolution":"1080p"}' })
+  })
+
+  it('is empty for a node with no widgets, and has no model when there is no model widget', () => {
+    expect(widgetValueMap(undefined, undefined)).toEqual({})
+    expect(widgetValueMap([{ name: 'prompt' }], ['x'])).toEqual({ prompt: 'x' })
+  })
+
+  it('skips unnamed defs and keeps the first of a repeated name', () => {
+    expect(widgetValueMap([{}, { name: 'model' }, { name: 'model' }], [1, 'a', 'b'])).toEqual({ model: 'a' })
   })
 })
 
@@ -144,7 +155,7 @@ describe('estimateUsdForNodes — local mode is byte-identical', () => {
 describe('estimateUsdForNodes — hosted prices the selected model', () => {
   it('quotes EXACTLY the credits the node badge shows for a veo-3.1 run', () => {
     const est = estimateUsdForNodes([videoNode('veo-3.1')], { hosted: true })!
-    expect(est.hostedCredits).toBe(nodeCreditEstimate('GenerateVideoNode', 'veo-3.1'))
+    expect(est.hostedCredits).toBe(nodeCreditEstimate('GenerateVideoNode', { model: 'veo-3.1' }))
     // …and that is the model USD through the markup policy plus one base render.
     expect(est.hostedCredits).toBe(creditsForUsd(VIDEO_MODEL_USD['veo-3.1']!.usd) + 1)
     expect(est.hostedCredits).toBe(481)
@@ -153,13 +164,13 @@ describe('estimateUsdForNodes — hosted prices the selected model', () => {
   it('separates a cheap model from an expensive one on the same node', () => {
     const cheap = estimateUsdForNodes([videoNode('ltx-video')], { hosted: true })!
     const dear = estimateUsdForNodes([videoNode('veo-3.1')], { hosted: true })!
-    expect(cheap.hostedCredits).toBe(nodeCreditEstimate('GenerateVideoNode', 'ltx-video'))
+    expect(cheap.hostedCredits).toBe(nodeCreditEstimate('GenerateVideoNode', { model: 'ltx-video' }))
     expect(dear.hostedCredits!).toBeGreaterThan(cheap.hostedCredits! * 10)
   })
 
   it('honours the legacy model-label remap the node applies at execute time', () => {
     expect(estimateUsdForNodes([videoNode('Veo 3')], { hosted: true })!.hostedCredits)
-      .toBe(nodeCreditEstimate('GenerateVideoNode', 'veo-3.1'))
+      .toBe(nodeCreditEstimate('GenerateVideoNode', { model: 'veo-3.1' }))
   })
 
   it('adds base_render ONCE per run, not once per node (priceGraph semantics)', () => {
@@ -234,9 +245,9 @@ describe('vueNodesToEstimateInput', () => {
 
   it('carries the model widget through so hosted can price it', () => {
     const [n] = vueNodesToEstimateInput([vnode()])
-    expect(modelWidgetValue(n!)).toBe('veo-3.1')
+    expect(widgetValueMap(n!.widgetDefs, n!.widgetsValues).model).toBe('veo-3.1')
     expect(estimateUsdForNodes([n!], { hosted: true })!.hostedCredits)
-      .toBe(nodeCreditEstimate('GenerateVideoNode', 'veo-3.1'))
+      .toBe(nodeCreditEstimate('GenerateVideoNode', { model: 'veo-3.1' }))
   })
 
   it('still drops muted nodes and still reads the badge/category', () => {

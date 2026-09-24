@@ -6,9 +6,9 @@ import {
 } from '~/lib/nodeCreditEstimate'
 import { creditsForUsd } from '~/lib/pricing'
 import { IMAGE_MODELS } from '~/data/image-models'
-import { VIDEO_MODEL_USD } from '~/data/video-prices'
+import { VIDEO_MODEL_USD, LEGACY_VIDEO_MODEL_IDS } from '~/data/video-prices'
 import { ENGINE_USD } from '~/data/engine-prices'
-import { MODEL_PRICED_NODE_CLASSES, priceGraph } from '../../server/utils/priceBook'
+import { MODEL_PRICED_NODE_CLASSES, UnpricedGraphError, priceGraph } from '../../server/utils/priceBook'
 
 // The hosted node badge must price a model-picker node from the model the user
 // actually picked, not from the static price_badge string baked into the Python
@@ -57,7 +57,7 @@ describe('badge ↔ server price parity', () => {
         '1': { class_type: nodeType, inputs: { model } },
         '2': { class_type: 'SaveImage', inputs: {} },
       })
-      expect(nodeCreditEstimate(nodeType, model)).toBe(server.credits)
+      expect(nodeCreditEstimate(nodeType, { model })).toBe(server.credits)
     })
   }
 })
@@ -65,70 +65,70 @@ describe('badge ↔ server price parity', () => {
 describe('modelPricedUsd — image models', () => {
   it('reads pricePerImage off the image catalog by model id', () => {
     const priced = IMAGE_MODELS.find(m => typeof m.pricePerImage === 'number')!
-    expect(modelPricedUsd('GenerateImageNode', priced.id)).toBe(priced.pricePerImage)
+    expect(modelPricedUsd('GenerateImageNode', { model: priced.id })).toBe(priced.pricePerImage)
   })
 
   it('returns null for an unknown model id', () => {
-    expect(modelPricedUsd('GenerateImageNode', 'not-a-real-model')).toBeNull()
+    expect(modelPricedUsd('GenerateImageNode', { model: 'not-a-real-model' })).toBeNull()
   })
 
   it('returns null for a catalog model with no listed price', () => {
     const unpriced = IMAGE_MODELS.find(m => m.pricePerImage == null)
-    if (unpriced) expect(modelPricedUsd('GenerateImageNode', unpriced.id)).toBeNull()
+    if (unpriced) expect(modelPricedUsd('GenerateImageNode', { model: unpriced.id })).toBeNull()
   })
 })
 
 describe('modelPricedUsd — video models', () => {
   it('prices GenerateVideoNode and FilmShotNode off the same video table', () => {
-    expect(modelPricedUsd('GenerateVideoNode', 'veo-3.1')).toBe(VIDEO_MODEL_USD['veo-3.1']!.usd)
-    expect(modelPricedUsd('FilmShotNode', 'ltx-video')).toBe(VIDEO_MODEL_USD['ltx-video']!.usd)
+    expect(modelPricedUsd('GenerateVideoNode', { model: 'veo-3.1' })).toBe(VIDEO_MODEL_USD['veo-3.1']!.usd)
+    expect(modelPricedUsd('FilmShotNode', { model: 'ltx-video' })).toBe(VIDEO_MODEL_USD['ltx-video']!.usd)
   })
 
   it('honours the legacy model-label remap the node applies at execute time', () => {
-    expect(modelPricedUsd('GenerateVideoNode', 'Seedance 2.0')).toBe(VIDEO_MODEL_USD['seedance-2.0']!.usd)
-    expect(modelPricedUsd('GenerateVideoNode', 'Veo 3')).toBe(VIDEO_MODEL_USD['veo-3.1']!.usd)
-    expect(modelPricedUsd('GenerateVideoNode', 'Kling 2.1'))
+    expect(modelPricedUsd('GenerateVideoNode', { model: 'Seedance 2.0' })).toBe(VIDEO_MODEL_USD['seedance-2.0']!.usd)
+    expect(modelPricedUsd('GenerateVideoNode', { model: 'Veo 3' })).toBe(VIDEO_MODEL_USD['veo-3.1']!.usd)
+    expect(modelPricedUsd('GenerateVideoNode', { model: 'Kling 2.1' }))
       .toBe(VIDEO_MODEL_USD['kling-v2.5-turbo-pro']!.usd)
   })
 
   it('returns null for an unknown video model id', () => {
-    expect(modelPricedUsd('GenerateVideoNode', 'veo-99')).toBeNull()
+    expect(modelPricedUsd('GenerateVideoNode', { model: 'veo-99' })).toBeNull()
   })
 })
 
 describe('modelPricedUsd — engine pickers', () => {
   it('prices each engine off ENGINE_USD keyed by node class', () => {
-    expect(modelPricedUsd('UpscaleImageNode', 'Clarity')).toBe(ENGINE_USD.UpscaleImageNode!.Clarity)
-    expect(modelPricedUsd('UpscaleImageNode', 'Real-ESRGAN')).toBe(ENGINE_USD.UpscaleImageNode!['Real-ESRGAN'])
-    expect(modelPricedUsd('EnhanceDetailNode', 'Faithful')).toBe(ENGINE_USD.EnhanceDetailNode!.Faithful)
+    expect(modelPricedUsd('UpscaleImageNode', { model: 'Clarity' })).toBe(ENGINE_USD.UpscaleImageNode!.Clarity)
+    expect(modelPricedUsd('UpscaleImageNode', { model: 'Real-ESRGAN' })).toBe(ENGINE_USD.UpscaleImageNode!['Real-ESRGAN'])
+    expect(modelPricedUsd('EnhanceDetailNode', { model: 'Faithful' })).toBe(ENGINE_USD.EnhanceDetailNode!.Faithful)
   })
 
   it('returns null for an unknown engine name', () => {
-    expect(modelPricedUsd('UpscaleImageNode', 'Sharpener 9000')).toBeNull()
+    expect(modelPricedUsd('UpscaleImageNode', { model: 'Sharpener 9000' })).toBeNull()
   })
 })
 
 describe('modelPricedUsd — non-picker classes and empty values', () => {
   it('returns null for a class that is not model-priced', () => {
-    expect(modelPricedUsd('FluxProRemoteNode', 'anything')).toBeNull()
+    expect(modelPricedUsd('FluxProRemoteNode', { model: 'anything' })).toBeNull()
   })
 
   it('returns null when no model is selected', () => {
-    expect(modelPricedUsd('GenerateImageNode', '')).toBeNull()
-    expect(modelPricedUsd('GenerateImageNode', undefined)).toBeNull()
-    expect(modelPricedUsd('GenerateImageNode', null)).toBeNull()
+    expect(modelPricedUsd('GenerateImageNode', { model: '' })).toBeNull()
+    expect(modelPricedUsd('GenerateImageNode', { model: undefined })).toBeNull()
+    expect(modelPricedUsd('GenerateImageNode', { model: null })).toBeNull()
   })
 })
 
 describe('nodeCreditEstimate', () => {
   it('is the model USD through the markup policy plus base_render', () => {
     const usd = VIDEO_MODEL_USD['veo-3.1']!.usd
-    expect(nodeCreditEstimate('GenerateVideoNode', 'veo-3.1')).toBe(creditsForUsd(usd) + BASE_RENDER)
+    expect(nodeCreditEstimate('GenerateVideoNode', { model: 'veo-3.1' })).toBe(creditsForUsd(usd) + BASE_RENDER)
   })
 
   it('separates a cheap engine from an expensive one on the same node', () => {
-    const cheap = nodeCreditEstimate('UpscaleImageNode', 'Real-ESRGAN')!
-    const dear = nodeCreditEstimate('UpscaleImageNode', 'Clarity')!
+    const cheap = nodeCreditEstimate('UpscaleImageNode', { model: 'Real-ESRGAN' })!
+    const dear = nodeCreditEstimate('UpscaleImageNode', { model: 'Clarity' })!
     expect(cheap).toBe(creditsForUsd(0.002) + BASE_RENDER)
     expect(dear).toBe(creditsForUsd(0.20) + BASE_RENDER)
     expect(dear).toBeGreaterThan(cheap)
@@ -136,13 +136,53 @@ describe('nodeCreditEstimate', () => {
 
   it('never returns less than the base render for a priced model', () => {
     for (const id of Object.keys(VIDEO_MODEL_USD)) {
-      expect(nodeCreditEstimate('GenerateVideoNode', id)!).toBeGreaterThan(BASE_RENDER)
+      expect(nodeCreditEstimate('GenerateVideoNode', { model: id })!).toBeGreaterThan(BASE_RENDER)
     }
   })
 
   it('returns null (badge falls back to the static estimate) on anything unknown', () => {
-    expect(nodeCreditEstimate('GenerateImageNode', 'nope')).toBeNull()
-    expect(nodeCreditEstimate('UpscaleImageNode', undefined)).toBeNull()
-    expect(nodeCreditEstimate('SomeOtherNode', 'flux-dev')).toBeNull()
+    expect(nodeCreditEstimate('GenerateImageNode', { model: 'nope' })).toBeNull()
+    expect(nodeCreditEstimate('UpscaleImageNode', { model: undefined })).toBeNull()
+    expect(nodeCreditEstimate('SomeOtherNode', { model: 'flux-dev' })).toBeNull()
   })
+})
+
+// Task P1 (model line-up): the badge and the charge are ONE calculation, so
+// they must agree for every model-priced class at every model id any catalogue
+// knows — not just a hand-picked sample. Where the server refuses, the badge
+// has no figure (it falls back to the static label).
+describe('badge = charge, exhaustively', () => {
+  const ids = [...new Set([
+    ...IMAGE_MODELS.map(m => m.id),
+    ...Object.keys(VIDEO_MODEL_USD),
+    ...Object.keys(LEGACY_VIDEO_MODEL_IDS),
+    ...Object.values(ENGINE_USD).flatMap(e => Object.keys(e)),
+  ])]
+
+  it('the id list is the full catalogue (control)', () => {
+    expect(ids.length).toBeGreaterThan(60)
+  })
+
+  for (const nodeType of MODEL_PRICED_NODE_CLASSES) {
+    it(`${nodeType}: the badge quotes what priceGraph charges, for every model`, () => {
+      let priced = 0
+      const drift: string[] = []
+      for (const model of ids) {
+        const inputs = { model, prompt: 'a test', seed: 7 }
+        let charge: number | null = null
+        try {
+          charge = priceGraph({
+            '1': { class_type: nodeType, inputs },
+            '2': { class_type: 'SaveImage', inputs: {} },
+          }).credits
+        }
+        catch (e) { if (!(e instanceof UnpricedGraphError)) throw e }
+        const badge = nodeCreditEstimate(nodeType, inputs)
+        if (charge != null) priced++
+        if (badge !== charge) drift.push(`${model}: badge ${badge}, charge ${charge}`)
+      }
+      expect(drift).toEqual([])
+      expect(priced, 'every class prices at least one model').toBeGreaterThan(0)
+    })
+  }
 })

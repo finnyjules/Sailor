@@ -15,15 +15,18 @@
  * HOSTED (opt-in, `{ hosted: true }`): the static badge is a fiction on the
  * five model-PICKER classes — GenerateVideoNode ships ONE badge figure for a
  * model range spanning $0.04 to $3.20 — so those nodes are re-priced from the
- * model widget through the same helper the node cost badge uses. The result
- * carries `hostedCredits`, the credits figure to DISPLAY: the run surfaces must
+ * node's whole widget map through the one shared price calculation
+ * (shared/pricing/nodePrice.ts), the one the node badge and the server charge
+ * read too. The result carries `hostedCredits`, the credits figure to
+ * DISPLAY: the run surfaces must
  * not re-convert it (creditsForUsd would ceil a second time and the dialog
  * would disagree with the badge it sits next to). Local mode never takes any
  * of this path — the flag is a parameter, never read from runtime config here,
  * so this module stays pure and unit-testable.
  */
-import { modelPricedUsd, BASE_RENDER_CREDITS } from '~/lib/nodeCreditEstimate'
+import { BASE_RENDER_CREDITS } from '~/lib/nodeCreditEstimate'
 import { creditsForUsd } from '~/lib/pricing'
+import { priceNode } from '#shared/pricing/nodePrice'
 
 export interface BadgeCost { usd: number; approximate: boolean }
 
@@ -48,7 +51,7 @@ export interface EstimateInputNode {
   badgeExpr?: string | null
   category?: string | null
   /** Ordered widget definitions (Vue node `data.widgetDefs`). Carried so the
-   *  hosted path can find the `model` widget; unused in local mode. */
+   *  hosted path can price the node from its widgets; unused in local mode. */
   widgetDefs?: { name?: string }[] | null
   /** Widget values, positionally aligned with `widgetDefs`. */
   widgetsValues?: unknown[] | null
@@ -63,12 +66,22 @@ export interface CostEstimate {
   hostedCredits?: number | null
 }
 
-/** The value of a node's `model` widget, or undefined when it has none.
- *  Mirrors ComfyNode.vue's `widgetIndex('model')` lookup — widgetsValues is
- *  positional against widgetDefs, so the name must be resolved to an index. */
-export function modelWidgetValue(n: EstimateInputNode): unknown {
-  const idx = (n.widgetDefs || []).findIndex(d => d?.name === 'model')
-  return idx >= 0 ? n.widgetsValues?.[idx] : undefined
+/** A node's widgets as a name → value map — the input map the shared price
+ *  calculation takes. widgetsValues is positional against widgetDefs, so each
+ *  name is resolved by index. Unnamed defs are skipped; a name that appears
+ *  twice keeps its first value (the one `widgetIndex(name)` finds). */
+export function widgetValueMap(
+  widgetDefs: readonly ({ name?: string } | null | undefined)[] | null | undefined,
+  widgetsValues: readonly unknown[] | null | undefined,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  const defs = widgetDefs || []
+  for (let i = 0; i < defs.length; i++) {
+    const name = defs[i]?.name
+    if (!name || Object.prototype.hasOwnProperty.call(out, name)) continue
+    out[name] = widgetsValues?.[i]
+  }
+  return out
 }
 
 /** A node bills the user in USD (Replicate BYOK) rather than Comfy credits.
@@ -114,13 +127,17 @@ export function estimateUsdForNodes(
     const creditBilled = isApiCreditBilled(n)
     // Hosted: a model-priced picker is charged by the server whatever its
     // billing class, so price it even if the badge/category filter misses it.
-    const modelUsd = hosted ? modelPricedUsd(n.type, modelWidgetValue(n)) : null
-    if (modelUsd == null && !isReplicateBilled(n) && !creditBilled) continue
+    // Priced from the WHOLE widget map, the same way the server charges it.
+    const shared = hosted ? priceNode(n.type, widgetValueMap(n.widgetDefs, n.widgetsValues)) : null
+    const modelPrice = shared && !('refused' in shared) ? shared : null
+    if (modelPrice == null && !isReplicateBilled(n) && !creditBilled) continue
     // The selected model's real price beats the static badge when we have it.
-    const cost = modelUsd != null ? { usd: modelUsd, approximate: true } : parseBadgeUsd(n.badgeExpr)
+    const cost = modelPrice != null ? { usd: modelPrice.usd, approximate: true } : parseBadgeUsd(n.badgeExpr)
     if (!cost) continue
     usd += cost.usd
-    if (hosted) credits += creditsForUsd(cost.usd)
+    // A model-priced node carries its credits from the shared calculation; a
+    // static badge's USD goes through the same markup function.
+    if (hosted) credits += modelPrice != null ? modelPrice.credits : creditsForUsd(cost.usd)
     approximate = approximate || cost.approximate || creditBilled
     breakdown.push({
       id: n.id,
@@ -136,8 +153,8 @@ export function estimateUsdForNodes(
 /** Adapt Vue Flow canvas nodes (ComfyNode data shape) to estimate input.
  *  The LiteGraph class name lives in data.nodeType (data.type is the Vue Flow
  *  renderer type). Disabled nodes (mode 2) are excluded — they don't run.
- *  widgetDefs/widgetsValues ride along so the hosted estimate can read the
- *  selected model; local mode ignores them. */
+ *  widgetDefs/widgetsValues ride along so the hosted estimate can price the
+ *  node from its widgets; local mode ignores them. */
 export function vueNodesToEstimateInput(nodes: any[]): EstimateInputNode[] {
   return (nodes || [])
     .filter((n: any) => ((n?.data?.mode ?? 0) !== 2))

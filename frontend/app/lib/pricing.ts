@@ -5,20 +5,17 @@
  * spend — shown in dollars, unchanged.
  *
  * Hosted mode: users think and pay in credits (1 credit = $0.01 plus markup),
- * so every badge shows credits. The number here is an ESTIMATE derived from
- * the USD badge via the markup policy — the actual charge always comes from
- * the server price book (server/utils/priceBook.ts), whose hand-set entries
- * can diverge by a credit or two (e.g. sam-2 is booked at 4cr where the
- * formula gives 5). Hosted badges are therefore always shown approximate.
+ * so every badge shows credits. For a static USD badge the number here is an
+ * ESTIMATE — the actual charge always comes from the server price book
+ * (server/utils/priceBook.ts), whose hand-set flat entries can diverge by a
+ * credit or two (e.g. sam-2 is booked at 4cr where the formula gives 5).
+ * Hosted badges are therefore always shown approximate.
  *
- * POLICY MIRROR — if the markup policy changes, change BOTH here and the
- * price book: 2× on provider cost ≤ $0.10, 1.5× above, floor of 1 credit.
+ * The markup itself is NOT defined here: `creditsForUsd` is the one function
+ * in shared/pricing/markup.ts, re-exported so existing imports keep working.
  */
-export function creditsForUsd(usd: number): number {
-  if (!(usd > 0)) return 0
-  const markup = usd <= 0.10 ? 2 : 1.5
-  return Math.max(1, Math.ceil(usd * 100 * markup))
-}
+import { creditsForUsd } from '#shared/pricing/markup'
+export { creditsForUsd }
 
 /** Short badge text: "~$0.08" local, "~16 cr" hosted (hosted is always ~). */
 export function formatCostBadge(usd: number, approximate: boolean, hosted: boolean): string {
