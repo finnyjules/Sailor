@@ -48,11 +48,24 @@ export function setFontCatalog(cat: GoogleFontLike[] | null): void {
   catalog = cat
 }
 
+const GOOGLE_TOKEN = 'google:'
+
 /** Resolve a stored font value to a CSS family name. Accepts a family name
- *  directly, or a legacy VARIABLE_FONTS id (e.g. 'inter') saved by older
- *  Space Type nodes. */
+ *  directly, a legacy VARIABLE_FONTS id (e.g. 'inter') saved by older
+ *  Space Type nodes, or a `google:Family` / `google:Family@700` token — the
+ *  outline-font form Loft's Font control defaults to (scene3d/outlines'
+ *  parseGoogleFontValue reads the same token for the glyph fetch, via loft's
+ *  outlineFontValue; this is its CSS-family half, parsed inline so this module
+ *  stays import-free). Without it the raw token reached the stylesheet link,
+ *  the text atlas and the embed face fetch as a "family" none could find. */
 export function resolveFontFamily(value: string): string {
   if (!value) return 'Inter'
+  if (value.startsWith(GOOGLE_TOKEN)) {
+    const rest = value.slice(GOOGLE_TOKEN.length)
+    const at = rest.indexOf('@')
+    const family = (at === -1 ? rest : rest.slice(0, at)).trim()
+    return family ? resolveFontFamily(family) : 'Inter'
+  }
   if (catalog?.some(f => f.family === value)) return value
   if (libraryFamilies.some(f => f.family === value)) return value
   const legacy = LEGACY_FONT_IDS[value]

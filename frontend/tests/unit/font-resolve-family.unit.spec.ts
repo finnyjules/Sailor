@@ -51,6 +51,15 @@ describe('resolveFamily (network-free font resolver)', () => {
     it('returns an unknown value unchanged, assuming it is already a family name', () => {
       expect(resolveFontFamily('Some Unknown Font')).toBe('Some Unknown Font')
     })
+
+    it('reads a google:Family@weight token (Loft\'s Font default) as its family', () => {
+      expect(resolveFontFamily('google:Archivo Black@700')).toBe('Archivo Black')
+      expect(resolveFontFamily('google:Archivo Black')).toBe('Archivo Black')
+      expect(resolveFontFamily('google: Work Sans @ 500')).toBe('Work Sans')
+      // A token over a legacy id resolves through it; an empty one is the default family.
+      expect(resolveFontFamily('google:inter@400')).toBe('Inter')
+      expect(resolveFontFamily('google:@700')).toBe('Inter')
+    })
   })
 
   describe('fontHasWeightAxis', () => {

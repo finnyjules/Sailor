@@ -338,6 +338,22 @@ describe('spaceTypeEmbedFont', () => {
     expect(calls[0]).toBe('/api/scene3d/google-font-file?family=Work+Sans&weight=400')
   })
 
+  it("Loft's default token font (google:Archivo Black@700) fetches its family, not the raw token", async () => {
+    setFontCatalog([{ family: 'Archivo Black', weights: [400], axes: [] }])
+    const calls: string[] = []
+    globalThis.fetch = vi.fn(async (url: RequestInfo | URL) => {
+      calls.push(String(url))
+      if (String(url).startsWith('/api/scene3d/google-font-file')) return new Response(new Uint8Array([7, 8, 9]))
+      return new Response(JSON.stringify({ font: 'U1VCU0VU' }))
+    }) as typeof fetch
+    const s = stateFor('loft')
+    expect(s.params.font).toBe('google:Archivo Black@700')
+    expect(spaceTypeEmbedFace(s)).toEqual({ family: 'Archivo Black', weight: 400 })
+    expect(await spaceTypeEmbedFont(s)).toMatchObject({ family: 'Archivo Black', weight: 400 })
+    // Was `?family=google%3Agoogle%3AArchivo+Black%40700&weight=700`, which the proxy cannot serve.
+    expect(calls[0]).toBe('/api/scene3d/google-font-file?family=Archivo+Black&weight=400')
+  })
+
   it('null when the face cannot be fetched, and a later try fetches again', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const f = vi.fn(async () => new Response('nope', { status: 404 }))
