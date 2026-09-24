@@ -22,7 +22,7 @@ import { DEAL_VOCABS, dealVocabDrivesLook, type DealVocab } from '~/lib/composit
 import { MOSAIC_STYLE_LABELS, cellFillOfLabel, mosaicLabelOf, mosaicStylePatch, mosaicSeedPatch, freshMosaicSeed, isMosaicShaderFill, mosaicShaderSpec, mosaicLookNames, mosaicLookOf, applyMosaicLook } from '~/lib/compositor/mosaic'
 import ShaderFillEditor from '~/components/vue-canvas/widgets/ShaderFillEditor.vue'
 import { onFieldCatalogReady, retryFieldCatalog, renderFieldWithBase } from '~/lib/shaderfill/field'
-import { onCompositorFontReady } from '~/lib/compositor/textOutline'
+import { onCompositorFontReady, compositorFontToken, warmCompositorFont } from '~/lib/compositor/textOutline'
 import { CLIP_SPEED_MAX, CLIP_SPEED_MIN, withTake, withTakeSpeed, type ImageClip } from '~/lib/compositor/clip'
 import { defaultPane, PANE_LIMITS, PANE_PRESET_NAMES, panePresetPatch, panePresetOf, panePalette, paneInkPatch, type PaneParams, type PanePresetName } from '~/lib/compositor/pane'
 import { defaultModular, MODULAR_LIMITS, MODULAR_PRESET_NAMES, modularPresetPatch, modularPresetOf, type ModularParams, type ModularPresetName, type ModularType } from '~/lib/compositor/modular'
@@ -2617,6 +2617,16 @@ const geometrySiblingCandidates = computed<{ key: string; label: string }[]>(() 
       && canTakeGeometry(l)
       && !cornerPinActive((l as any).cornerPin)
       && !(l as any).cloner)
+    .map(l => ({ key: localKey(l.id), label: layerLabelByKey(localKey(l.id)) }))
+})
+/** Elements the selected layer can morph into — the geometry-sibling rule (another local element
+ *  with an outline, no active corner pin, no cloner), relative to the SELECTED layer (not
+ *  `activeEffectLayer`, which tracks the geometry-effect picker rather than the Motion tab). */
+const morphTargets = computed<{ key: string; label: string }[]>(() => {
+  const self = selectedLocal.value
+  if (!self) return []
+  return (localLayers.value as LocalLayer[])
+    .filter(l => l.id !== self.id && canTakeGeometry(l) && !cornerPinActive((l as any).cornerPin) && !(l as any).cloner)
     .map(l => ({ key: localKey(l.id), label: layerLabelByKey(localKey(l.id)) }))
 })
 /** The referenced layer, if the current ref points at a live, still-eligible vector partner. */
@@ -5650,6 +5660,25 @@ onBeforeUnmount(() => { stopFieldCatalog?.(); stopFieldCatalog = null })
 let stopFontOutline: (() => void) | null = null
 onMounted(() => { stopFontOutline = onCompositorFontReady(() => renderStack()) })
 onBeforeUnmount(() => { stopFontOutline?.(); stopFontOutline = null })
+// A morph bar draws the OUT layer's outline travelling into the target's outline (Task 5); both
+// need their glyph bytes in hand before the painter can shape them. Warm both layers' fonts as
+// soon as a morph behaviour names a target, rather than waiting for the painter's own draw-time
+// miss — the `onCompositorFontReady` subscription just above already repaints once each lands,
+// so this effect only needs to kick the load off.
+watch(motionBehaviours, (list) => {
+  for (const b of list) {
+    if (b.kind !== 'morph') continue
+    const target = (b.params as any)?.target as string | undefined
+    const targetId = target?.startsWith('l:') ? target.slice(2) : undefined
+    for (const id of [b.layerId, targetId]) {
+      if (!id) continue
+      const layer = localLayers.value.find(l => l.id === id) as any
+      if (!layer || layer.kind !== 'text') continue
+      const token = compositorFontToken(layer)
+      if (token) void warmCompositorFont(token)
+    }
+  }
+}, { immediate: true, deep: true })
 // A Combine-shapes (boolean) effect no-ops on its cold first frame while paper.js loads (it is
 // out of the no-boolean bundle for byte-identity); this repaints once paper is warm so the
 // boolean result replaces the pass-through with no user interaction. Same nudge shape as above.
@@ -9705,6 +9734,7 @@ onUnmounted(() => {
             :motionx="motionxTracks" :behaviours="motionBehaviours" :selection="motionSel"
             :duration="effectiveMotion.duration" :t="previewT"
             :label="motionSelLabel" :legacy-label="legacyMotionLabel" :piece-counts="motionPieceCounts"
+            :morph-targets="morphTargets"
             @update:motionx="updateMotionx" @before-change="recordHistory"
             @select-point="selectMotionPoint" @clear="clearMotionSel"
             @behaviour-change="editBehaviour" @behaviour-open="openBehaviour" @behaviour-delete="deleteBehaviour" @toggle-mute="toggleBandMuted"

@@ -39,6 +39,8 @@ const props = defineProps<{
   /** Letter/word/line counts of the selected TEXT layer — lets the Text section show how long
    *  each piece runs for. Undefined (non-text layer, or the modal hasn't computed it) hides that line. */
   pieceCounts?: { letters: number; words: number; lines: number }
+  /** Elements the selected layer can morph into (other local elements with an outline). */
+  morphTargets?: { key: string; label: string }[]
 }>()
 const emit = defineEmits<{
   'update:motionx': [tracks: Track[]]
@@ -207,6 +209,10 @@ const MORPH_MODES = ['crossfade', 'travel']
 const MORPH_MODE_LABELS = ['Crossfade', 'Travel']
 const MORPH_SPACES = ['oklab', 'hybrid']
 const MORPH_SPACE_LABELS = ['OKLab', 'Hybrid']
+const MORPH_STYLES = ['letters', 'shape']
+const MORPH_STYLE_LABELS = ['Letter by letter', 'Whole shape']
+const morphTargetOptions = computed(() => ['', ...(props.morphTargets ?? []).map(t => t.key)])
+const morphTargetLabels = computed(() => ['Choose an element', ...(props.morphTargets ?? []).map(t => t.label)])
 // `REVEAL_STYLES` is `readonly RevealStyle[]` (the library's own list, Pixels first, Assemble
 // second); copied into a plain mutable string[] so it can feed a Studio control's `options` prop.
 const DITHER_STYLES: string[] = [...REVEAL_STYLES]
@@ -607,6 +613,19 @@ function onGradient(g: Gradient) {
           @update:model-value="(v) => setBehNum('settle-strength', { strength: v })" />
         <StudioSwitch data-testid="settle-fade" label="Fade while it settles"
           :model-value="settle.fade" @update:model-value="(v) => setBehParams({ fade: v })" />
+      </template>
+      <template v-else-if="behaviour.kind === 'morph'">
+        <StudioSelect data-testid="morph-target" label="Morph into"
+          hint="The element this one turns into. It appears when the bar ends."
+          :model-value="String(behaviour.params?.target ?? '')" :options="morphTargetOptions" :option-labels="morphTargetLabels"
+          @update:model-value="(v) => setBehParams({ target: v || undefined })" />
+        <div v-if="!behaviour.params?.target" data-testid="morph-no-target"
+          class="px-2.5 text-[10px] leading-snug text-amber-300/80">
+          Pick an element to morph into. Until then this bar does nothing.
+        </div>
+        <StudioSegmentedRow data-testid="morph-style" label="Style"
+          :model-value="enumParam('style', 'letters')" :options="MORPH_STYLES" :option-labels="MORPH_STYLE_LABELS"
+          @update:model-value="(v) => setBehParams({ style: v })" />
       </template>
       <template v-else-if="isCopiesDirBeh">
         <StudioSegmentedRow data-testid="copies-dir" label="Direction"
