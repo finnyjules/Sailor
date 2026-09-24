@@ -26,6 +26,17 @@ export function userSubfolder(userId: string | null, hosted: boolean): string {
   return hosted && userId ? `u_${shortUserHash(userId)}` : ''
 }
 
+/**
+ * Local-mode live previews get their own subfolder of temp/ — ComfyUI's own
+ * save_live_preview(unique=True) writes `live_preview_<node>_<nnnnn>.png`
+ * straight into temp/ with the same name pattern, and when both the runner
+ * and ComfyUI render the same node id, one silently overwrites the other's
+ * file (seen live: ComfyUI's file replaced the runner's a moment later).
+ * Hosted mode already isolates by user subfolder, so this only applies
+ * locally, where userSubfolder() would otherwise return ''.
+ */
+export const LOCAL_LIVE_PREVIEW_SUBFOLDER = 'sailor_runner'
+
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /** folder_paths.get_save_image_path's counter: highest `<prefix>_<digits>_` + 1. */
@@ -98,7 +109,7 @@ export function createEngineResultStore(o: { dirForType(type: string): string | 
     async saveLivePreview(bytes, { nodeId, userId }) {
       const root = o.dirForType('temp')
       if (!root) throw new Error('The file store is not available')
-      const subfolder = userSubfolder(userId, o.hosted())
+      const subfolder = o.hosted() ? userSubfolder(userId, true) : LOCAL_LIVE_PREVIEW_SUBFOLDER
       const base = join(root, subfolder)
       await mkdir(base, { recursive: true })
       // Node ids come from the browser: keep them to a safe file-name alphabet.

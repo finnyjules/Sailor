@@ -24,7 +24,7 @@ import { nodeCredits, stageEstimate, unpricedProviderNode } from '~~/server/runn
 import { pictureSourceOf } from '~~/server/runner/compositor/plan'
 import { decodeLoadMask, decodePicture, encodePreviewPng } from '~~/server/runner/compositor/decode'
 import { renderFrame } from '~~/server/runner/compositor/render'
-import { nextLivePreview } from '~~/server/runner/results'
+import { nextLivePreview, LOCAL_LIVE_PREVIEW_SUBFOLDER } from '~~/server/runner/results'
 import type { OutputFile } from '~~/server/runner/types'
 import { makeKit, ofType } from './__runner__/kit'
 import { existsSync } from 'node:fs'
@@ -306,8 +306,37 @@ describe('the engine renders a Frame (hosted, frame on)', () => {
     await k.engine.settled(runId)
     const run = (await k.store.get(runId))!
     expect(run.status).toBe('done')
-    expect(run.takes[0]!.nodes['3']!.outputs[0]!.subfolder).toBe('')
+    // Its own subfolder of temp/, not ComfyUI's save_live_preview's own bare
+    // temp/live_preview_<node>_<nnnnn>.png — same name pattern, same folder,
+    // so one node id running on both engines would otherwise overwrite the
+    // other's file (LOCAL_LIVE_PREVIEW_SUBFOLDER, results.ts).
+    const out = run.takes[0]!.nodes['3']!.outputs[0]!
+    expect(out.subfolder).toBe(LOCAL_LIVE_PREVIEW_SUBFOLDER)
+    expect(existsSync(join(k.root, 'temp', LOCAL_LIVE_PREVIEW_SUBFOLDER, out.filename))).toBe(true)
     expect(k.ledger.hold).not.toHaveBeenCalled()
+  })
+
+  it('does not collide with ComfyUI’s own live preview in the same temp/ folder', async () => {
+    const k = makeKit({ hosted: false, deps: { families: () => FRAME } })
+    writeFileSync(join(k.root, 'input', 'base.png'), asset('wide.png'))
+    writeFileSync(join(k.root, 'input', 'sailor_local_3_1_1.png'), asset('overlay.png'))
+    // ComfyUI's save_live_preview(unique=True) writes straight into temp/,
+    // with the same node id and name pattern the runner uses.
+    const comfyFile = join(k.root, 'temp', 'live_preview_3_00001.png')
+    const comfyBytes = Buffer.from('not the runner’s bytes')
+    writeFileSync(comfyFile, comfyBytes)
+
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [frameFlow()], ...START })
+    await k.engine.settled(runId)
+    const run = (await k.store.get(runId))!
+    expect(run.status).toBe('done')
+    const out = run.takes[0]!.nodes['3']!.outputs[0]!
+    // The runner's own file, in its own subfolder — numbered from scratch,
+    // since its counter only scans that subfolder.
+    expect(out).toEqual({ filename: 'live_preview_3_00001.png', subfolder: LOCAL_LIVE_PREVIEW_SUBFOLDER, type: 'temp' })
+    expect(existsSync(join(k.root, 'temp', LOCAL_LIVE_PREVIEW_SUBFOLDER, 'live_preview_3_00001.png'))).toBe(true)
+    // ComfyUI's file, sitting bare in temp/, is untouched.
+    expect(readFileSync(comfyFile)).toEqual(comfyBytes)
   })
 
   it('Frame renders count against the queued-calls limit', async () => {

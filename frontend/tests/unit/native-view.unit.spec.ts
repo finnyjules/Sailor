@@ -133,6 +133,23 @@ describe('GET /view — the response', () => {
     }
   })
 
+  it('serves the runner\'s live-preview subfolder file distinctly from ComfyUI\'s same-named temp/ file', async () => {
+    // The runner's local-mode live preview (results.ts LOCAL_LIVE_PREVIEW_SUBFOLDER)
+    // and ComfyUI's own save_live_preview can both produce
+    // temp/live_preview_3_00001.png — one bare in temp/, the other in its own
+    // subfolder — and /view must resolve each independently by subfolder.
+    put('temp/live_preview_3_00001.png', 'comfy-bytes')
+    put('temp/sailor_runner/live_preview_3_00001.png', 'runner-bytes')
+
+    const comfy = await view('filename=live_preview_3_00001.png&type=temp&subfolder=')
+    expect(comfy.status).toBe(200)
+    expect(await comfy.text()).toBe('comfy-bytes')
+
+    const runner = await view('filename=live_preview_3_00001.png&type=temp&subfolder=sailor_runner')
+    expect(runner.status).toBe(200)
+    expect(await runner.text()).toBe('runner-bytes')
+  })
+
   it('serves byte ranges (206) and refuses bad ones (416)', async () => {
     put('output/v.mp4', '0123456789')
     let res = await view('filename=v.mp4', { range: 'bytes=2-5' })
