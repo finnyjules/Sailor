@@ -74,10 +74,20 @@ describe('Content section — tags round-trip and undo', () => {
     expect('tags' in props.sailor_posterState).toBe(false)
   })
 
-  it('a layer that is not the user\'s (or does not exist) cannot be tagged', () => {
+  it('a layer that is not the user\'s (or does not exist) cannot be tagged', async () => {
     const { props, vary } = realHarness(reviewFrame())
     expect(vary.setTag('nope', 'quote')).toBe(false)
     expect(props.sailor_posterState).toBeUndefined()
+    // A layout's own piece (after a Performance apply) is not the user's: no tag, no undo step.
+    vary.setStyle('performance')
+    await idle()
+    vary.select('perfOffer'); await nextTick()
+    const owned = (props.sailor_localLayers as LocalLayer[]).find(l => (l as { owner?: { by: string } }).owner?.by === 'layout')
+    expect(owned).toBeDefined()
+    const before = JSON.stringify(props.sailor_posterState)
+    expect(vary.setTag(owned!.id, 'quote')).toBe(false)
+    expect(JSON.stringify(props.sailor_posterState)).toBe(before)
+    expect(vary.content.value.some(r => r.id === owned!.id)).toBe(false)
   })
 
   it('rows: every text line of the user\'s, then each image beyond the first (named, else numbered)', () => {
@@ -239,6 +249,20 @@ describe('Choices — the Button pills (R7)', () => {
     const row = vary.choices.value.find(r => r.key === 'cta')!
     expect(row.options.find(o => o.on)!.label).toBe('Platform\'s own')
     expect(vary.candidates.value[vary.index.value]!.choice.cta).toBe('native')
+  })
+
+  it('tagging the action line Not used takes the Button row away (the tags are in the content key); undo brings it back', async () => {
+    const { ed, vary } = realHarness(adFrameLayers('phrase', { image: true, action: true }), onFeed, size)
+    vary.setStyle('performance')
+    await idle()
+    vary.select('perfOffer'); await nextTick(); await idle()
+    expect(vary.layoutId.value).toBe('perfOffer')
+    expect(vary.choices.value.some(r => r.key === 'cta')).toBe(true)
+    expect(vary.setTag('a', 'unused')).toBe(true)
+    await nextTick(); await idle()
+    expect(vary.choices.value.some(r => r.key === 'cta')).toBe(false)
+    ed.undo(); await nextTick(); await idle()
+    expect(vary.choices.value.some(r => r.key === 'cta')).toBe(true)
   })
 
   it('no action line: no Button row', async () => {
