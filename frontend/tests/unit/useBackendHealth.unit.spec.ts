@@ -96,6 +96,29 @@ describe('useBackendHealth', () => {
     h.stop()
   })
 
+  it('retries a suppressed recovery on the next poll instead of dropping it forever', async () => {
+    // A recovery landing mid-run is suppressed once, engine stays up on the
+    // next poll, and suppressRecovery() turns false — onRecovered must still
+    // fire then, not be lost because the first attempt was suppressed.
+    const onRecovered = vi.fn()
+    const fetchFn = makeFetch([true, false, false, true, true])
+    let suppressed = true
+    const h = useBackendHealth('http://x', {
+      fetchFn, onRecovered, suppressRecovery: () => suppressed,
+      healthyMs: 100, downMs: 50, failures: 2,
+    })
+    h.start()
+    await vi.advanceTimersByTimeAsync(0)     // up → everUp
+    await vi.advanceTimersByTimeAsync(100)   // fail #1 → still up
+    await vi.advanceTimersByTimeAsync(100)   // fail #2 → down
+    await vi.advanceTimersByTimeAsync(50)    // up → would recover, but suppressed
+    expect(onRecovered).not.toHaveBeenCalled()
+    suppressed = false
+    await vi.advanceTimersByTimeAsync(100)   // still up, suppression lifted → fires now
+    expect(onRecovered).toHaveBeenCalledTimes(1)
+    h.stop()
+  })
+
   it('resets the failure counter after recovery (one later fail does not flip down)', async () => {
     // up → 2 fails (down) → up (recovered, counter reset) → 1 fail → still up
     const fetchFn = makeFetch([true, false, false, true, false])

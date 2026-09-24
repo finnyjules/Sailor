@@ -871,10 +871,18 @@ async function runVueWorkflow(
   // instead of a /prompt that can only fail. An open run socket means the
   // engine is plainly there, whatever the last health poll said.
   if (useDirect && directPrompt && !engineUp.value && !direct.isMainSocketOpen()) {
-    const needs = nodesNeedingEngine(directPrompt, {
-      runnerOn: runnerEnabled,
-      titleOf: workflowNodeTitles(plainWorkflow, objectInfo.value),
-    })
+    // Runner routing (below) considers every take, not just the first — the
+    // refusal must name nodes across all of them too, or a take-2+-only
+    // engine-bound node would dispatch to a /prompt that can only fail.
+    const needsSet = new Set<string>()
+    for (const tk of [firstTake, ...extraTakes]) {
+      if (!tk.directPrompt) continue
+      for (const name of nodesNeedingEngine(tk.directPrompt, {
+        runnerOn: runnerEnabled,
+        titleOf: workflowNodeTitles(tk.plainWorkflow, objectInfo.value),
+      })) needsSet.add(name)
+    }
+    const needs = [...needsSet]
     if (needs.length) {
       toast.error('This workflow needs the local engine', { description: needsEngineDescription(needs) })
       if (activeTab.value?.type === 'project') updateTabStatus(activeTab.value.id, 'idle')

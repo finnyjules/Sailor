@@ -392,7 +392,14 @@ export function useDirectExecution(): DirectExecution {
   function setEngineAvailable(up: boolean): void {
     if (engineAvailable === up) return
     engineAvailable = up
-    if (!up || !import.meta.client) return
+    if (!import.meta.client) return
+    if (!up) {
+      // Engine reported down: drop any armed reconnect so we don't fire one more
+      // doomed /ws attempt at boot. setEngineAvailable(true) reconnects fresh.
+      const s = socketFor(0)
+      if (s.reconnectTimer) { clearTimeout(s.reconnectTimer); s.reconnectTimer = null }
+      return
+    }
     // The engine is back: reconnect main now, from a fresh backoff.
     const s = socketFor(0)
     if (!s.wantConnected || s.ws) return

@@ -56,6 +56,10 @@ export function useBackendHealth(origin: string, opts: BackendHealthOpts = {}): 
   let sailorFailures = 0
   let engineFailures = 0
   let engineEverUp = false
+  // A down→up recovery whose onRecovered was suppressed (busy-engine false
+  // positive) isn't dropped — it's retried on every later poll until one finds
+  // suppressRecovery() false, so a genuine recovery is never silently lost.
+  let pendingRecovery = false
   let timer: ReturnType<typeof setTimeout> | null = null
   let stopped = true
 
@@ -94,7 +98,11 @@ export function useBackendHealth(origin: string, opts: BackendHealthOpts = {}): 
       engineEverUp = true
       const wasDown = !engineUp.value
       engineUp.value = true
-      if (wasDown && sailorAnsweredBefore && !opts.suppressRecovery?.()) opts.onRecovered?.()
+      if (wasDown && sailorAnsweredBefore) pendingRecovery = true
+      if (pendingRecovery && !opts.suppressRecovery?.()) {
+        pendingRecovery = false
+        opts.onRecovered?.()
+      }
     } else {
       engineFailures++
       // Debounced like Sailor — except Sailor's first word on an engine never
