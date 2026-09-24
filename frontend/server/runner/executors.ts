@@ -9,7 +9,8 @@
  * RemoveObjectNode, TextEditNode, RecolorObjectNode, SwapBackgroundNode,
  * SwapProductNode, PersonSwap, BlendSceneNode's Nano Banana mode, and the
  * ref-edits family: GenerateFromReferencesNode, RotateCameraNode,
- * ProductShotNode) closely enough that the same workflow gives the same result.
+ * ProductShotNode, and the restyle family: RestyleFromImageNode) closely
+ * enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiPrompt } from '#shared/runner/graph'
 import { resolveVideoModelId } from '#shared/runner/eligibility'
@@ -29,6 +30,9 @@ import {
   IMAGE_EDIT_MODELS, PRODUCT_SHOT_SLUG, QWEN_IMAGE_EDIT_PLUS_SLUG, REFERENCE_MODEL_IDS, REFERENCE_SLOTS,
   cameraToPhrase, imageEditCall, parseCamera, productShotInput, textSetting,
 } from './generators/refEdits'
+import {
+  checkStyleSource, isNanoBananaRestyle, isRestyleModel, isUnreadableFile, restyleCall, structureStrengthOf,
+} from './generators/restyle'
 import { moodboardFiles, parseInputFileRef } from './inputs'
 import type { OutputFile, RunnerProvider } from './types'
 
@@ -352,6 +356,40 @@ export async function planNode(ctx: PlanContext): Promise<NodePlan> {
         keepProductExact: flag('keep_product_exact', true),
         seed: asInt(inputs.seed, 0),
       }), 'product_shot', 'replicate')
+    }
+
+    // ── restyle family (nodes_replicate.py RestyleFromImageNode :3070) ──
+    // Moodboard pictures (style_refs, at most 3) win over the style picture;
+    // one that can't be read is skipped. The style-source guard runs before
+    // anything is handed off when it can already tell there is no source.
+    case 'RestyleFromImageNode': {
+      const model = String(inputs.model)
+      if (!isRestyleModel(model)) throw new Error(`The runner cannot restyle with ${model}`)
+      const guidance = pyStrip(textSetting(inputs, 'prompt', '', 'prompt'))
+      const taste = pyStrip(textSetting(inputs, 'style_in', '', 'style direction'))
+      const structureStrength = structureStrengthOf(inputs.structure_strength)
+      const boardFiles = moodboardFiles(inputs.style_refs)
+      const styleLinked = isLink(inputs.style_image)
+      checkStyleSource(model, { hasBoard: boardFiles.length > 0, hasStyleImage: styleLinked, taste })
+      const content = await pictureUrl('content_image', 'There is no picture to restyle')
+      const board: string[] = []
+      for (const f of boardFiles) {
+        // IP-Adapter takes one picture: the first one that can be read.
+        if (!isNanoBananaRestyle(model) && board.length) break
+        try { board.push(await ctx.toUrl(f)) }
+        catch (e) {
+          if (!isUnreadableFile(e)) throw e
+          console.warn(`[runner] moodboard picture unreadable, skipping: ${f.subfolder}/${f.filename}`)
+        }
+      }
+      const styleImage = !board.length && styleLinked ? await pictureUrl('style_image', 'There is no style picture') : null
+      const call = restyleCall({
+        model, content, board, styleImage, guidance, taste, structureStrength,
+        resolution: inputs.resolution === undefined ? '1K' : inputs.resolution,
+        outputFormat: inputs.output_format === undefined ? 'png' : inputs.output_format,
+        seed: asInt(inputs.seed, 0),
+      })
+      return still(call.endpoint, call.payload, 'restyle', call.provider)
     }
 
     case GATE_CLASS: {

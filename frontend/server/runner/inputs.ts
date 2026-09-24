@@ -1,6 +1,6 @@
 /**
  * Files a workflow reads before it makes anything: moodboard reference
- * pictures (GenerateImageNode.style_refs) and pictures/clips loaded into an
+ * pictures (GenerateImageNode.style_refs, RestyleFromImageNode.style_refs) and pictures/clips loaded into an
  * unwired Image or Video card. In hosted, every one must be the user's own.
  */
 import { isLink, type ApiPrompt } from '#shared/runner/graph'
@@ -53,7 +53,7 @@ export function collectInputFiles(prompt: ApiPrompt): OutputFile[] {
   const out: OutputFile[] = []
   for (const node of Object.values(prompt)) {
     const inputs = node.inputs ?? {}
-    if (node.class_type === 'GenerateImageNode') out.push(...moodboardFiles(inputs.style_refs))
+    if (node.class_type === 'GenerateImageNode' || node.class_type === 'RestyleFromImageNode') out.push(...moodboardFiles(inputs.style_refs))
     if (node.class_type === 'Image' && !isLink(inputs.images)) {
       const f = parseInputFileRef(inputs.image)
       if (f) out.push(f)

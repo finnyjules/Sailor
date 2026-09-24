@@ -12,7 +12,7 @@
  *     community model: the Replicate client finds its latest version)
  */
 import { pyStrip } from '#shared/runner/pyText'
-import { NANO_BANANA_2_EDIT_APP, falNanoBananaEdit } from './edit'
+import { NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP, falNanoBananaEdit } from './edit'
 import { pyFloatOf, pyTruthy } from './opts'
 
 // ── image_edit_models.py ─────────────────────────────────────────────────
@@ -78,9 +78,13 @@ export const REFERENCE_SLOTS = ['image_1', 'image_2', 'image_3', 'image_4', 'ima
 
 /**
  * Where _run_image_edit_prediction sends a slug first: the Nano Banana slugs
- * with a fal twin go to fal; every other slug runs on Replicate.
+ * with a fal twin (_NANO_BANANA_FAL_EDIT) go to fal; every other slug,
+ * google/nano-banana included, runs on Replicate. Pro is used by Restyle (B8).
  */
-const FAL_TWIN: Readonly<Record<string, string>> = { 'google/nano-banana-2': NANO_BANANA_2_EDIT_APP }
+const FAL_TWIN: Readonly<Record<string, string>> = {
+  'google/nano-banana-2': NANO_BANANA_2_EDIT_APP,
+  'google/nano-banana-pro': NANO_BANANA_PRO_EDIT_APP,
+}
 
 /**
  * The first call _run_image_edit_prediction makes for a Replicate-shaped

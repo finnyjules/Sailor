@@ -119,6 +119,17 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     mustLink: ['image'],
     mustNotLink: ['scene_prompt', 'aspect', 'product_size', 'keep_product_exact'],
   },
+  // ── restyle (Task B8): Nano Banana 2 / Pro on fal, Nano Banana and
+  // IP-Adapter Style Transfer on Replicate. The taste wire (style_in) comes
+  // from a Moodboard node, which the runner does not run, so a wired one
+  // goes to Python. Settings the runner reads must not be wired.
+  RestyleFromImageNode: {
+    models: {
+      'Nano Banana 2': 'restyle', 'Nano Banana Pro': 'restyle', 'Nano Banana': 'restyle', 'Style Transfer · IP-Adapter': 'restyle',
+    },
+    mustLink: ['content_image'],
+    mustNotLink: ['style_in', 'prompt', 'style_refs', 'structure_strength', 'resolution', 'output_format'],
+  },
   // ── replicate-image (Task B4): the Replicate-primary image models ──
   // Only ADDS these models; the fal ones stay as they are. The Idea socket
   // (prompt_in) and the taste wire (style_in) come from nodes the runner does

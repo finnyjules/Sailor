@@ -10,6 +10,7 @@
  */
 
 export const NANO_BANANA_2_EDIT_APP = 'fal-ai/nano-banana-2/edit'
+export const NANO_BANANA_PRO_EDIT_APP = 'fal-ai/nano-banana-pro/edit'
 export const FLUX_KONTEXT_APP = 'fal-ai/flux-pro/kontext'
 export const FLUX_2_EDIT_APP = 'fal-ai/flux-2-pro/edit'
 

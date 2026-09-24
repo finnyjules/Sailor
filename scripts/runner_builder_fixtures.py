@@ -122,6 +122,8 @@ EXTRAS_MODULES = [
     "comfy_extras.nodes_pose_mannequin",
 ]
 SAVE_HELPERS = ("save_live_preview", "save_generation_output", "save_image_to_input")
+# Moodboard files with this prefix are "unreadable" in a capture (see _capture).
+UNREADABLE_BOARD_PREFIX = "gone_"
 
 
 class _FirstCall(BaseException):
@@ -145,7 +147,7 @@ def capture_first_call(node_cls, **kwargs) -> dict:
     `{provider: 'fal'|'replicate', endpoint, payload}`, or `{passthrough: True}`
     when it makes none. Pictures are passed as their input name (the "tensor");
     `_image_tensor_to_data_url` turns that into `IMG:<name>`, and moodboard
-    files become `BOARD:<file>`."""
+    files become `BOARD:<file>` (a `gone_*` file is unreadable and skipped)."""
     return _capture(node_cls, **kwargs)[0]
 
 
@@ -186,8 +188,11 @@ def _capture(node_cls, **kwargs) -> tuple:
         mock.patch.object(nr, "download_url_to_image_tensor", fake_download),
         # Uploads to fal storage over aiohttp with the fal token: never reached.
         mock.patch.object(nr, "_upload_public_file", fake_upload),
+        # A board file named gone_* stands for one that can't be read: the
+        # real loader skips it (OSError), so it is left out here too.
         mock.patch.object(nr, "_moodboard_ref_data_urls",
-                          lambda folder, files, input_dir=None: [f"BOARD:{f}" for f in files]),
+                          lambda folder, files, input_dir=None: [f"BOARD:{f}" for f in files
+                                                                 if not f.startswith(UNREADABLE_BOARD_PREFIX)]),
     ]
     def fake_preview(image, *_a, **_k):
         previews.append(image)
@@ -743,6 +748,92 @@ def _ref_edits_cases() -> list:
     return cases
 
 
+# ── restyle (Task B8) ────────────────────────────────────────────────────
+
+def _board(files) -> str:
+    return json.dumps({"folder": "moodboard_1754000000000", "files": list(files)})
+
+
+# Moodboard states: none, two pictures, five (capped at three), every picture
+# unreadable, and the first one unreadable (so IP-Adapter takes the second).
+_RESTYLE_BOARDS = {
+    "none": None,
+    "two": _board(["00_a.png", "01_b.jpg"]),
+    "five": _board(["a.png", "b.png", "c.png", "d.png", "e.png"]),
+    "gone": _board([f"{UNREADABLE_BOARD_PREFIX}a.png", f"{UNREADABLE_BOARD_PREFIX}b.png"]),
+    "partial": _board([f"{UNREADABLE_BOARD_PREFIX}a.png", "b.png", "c.webp"]),
+}
+# style_refs payloads _parse_style_refs rejects: the node acts as if there were no board.
+_RESTYLE_BAD_REFS = ["{not json", "", "   ", "null", "[]",
+                     json.dumps({"folder": "lora_dataset_1", "files": ["a.png"]}),
+                     json.dumps({"folder": "moodboard_1", "files": ["../x.png", "a.gif", "sub/b.png"]})]
+_RESTYLE_STRENGTHS = [0, 0.2, 0.33, 0.34, 0.5, 0.65, 0.66, 0.8, 1]
+_RESTYLE_TEXTS = ["", "watercolor", "  padded direction  ", "﻿", "\x1f"]
+
+
+def _restyle_cases() -> list:
+    """Task B8 (restyle): RestyleFromImageNode, each model × board or none ×
+    style picture or none × taste or none, the structure strength across the
+    0.33 / 0.66 thresholds, output formats × resolutions, seeds, text
+    variants, malformed style_refs, and the style-source guards. A node whose
+    execute() raises records the exception as `error`."""
+    nr, _fal_refs, _extras = _node_modules()
+    cls = nr.RestyleFromImageNode
+    cases = []
+
+    def case(style: bool, widgets: dict):
+        links = ["content_image", "style_image"] if style else ["content_image"]
+        try:
+            cases.append(_node_case(cls, links, widgets))
+        except Exception as e:  # noqa: BLE001 — a raising node is a case too
+            cases.append({"class_type": "RestyleFromImageNode", "links": links,
+                          "widgets": widgets, "error": f"{type(e).__name__}: {e}"})
+
+    def widgets(model, **over):
+        w = {"model": model, "prompt": "", "structure_strength": 0.65, "resolution": "1K",
+             "seed": 0, "output_format": "png", **over}
+        return w
+
+    for model in nr._RESTYLE_MODELS:
+        # The core grid: board × style picture × taste.
+        for board in _RESTYLE_BOARDS.values():
+            for style in (True, False):
+                for taste in ("", "dusty pastel palette"):
+                    w = widgets(model)
+                    if board is not None:
+                        w["style_refs"] = board
+                    if taste:
+                        w["style_in"] = taste
+                    case(style, w)
+        # The structure dial at and either side of both thresholds.
+        for s in _RESTYLE_STRENGTHS:
+            case(True, widgets(model, prompt="watercolor", structure_strength=s))
+            case(False, widgets(model, structure_strength=s, style_refs=_RESTYLE_BOARDS["two"]))
+        # Output formats × resolutions.
+        for fmt in ("png", "jpg"):
+            for res in ("1K", "2K", "4K"):
+                case(True, widgets(model, output_format=fmt, resolution=res))
+        # Seeds: Nano Banana never sends one; IP-Adapter sends it when > 0, unmasked.
+        for seed in (0, 42, 2**32 - 1, 2**32 + 5):
+            case(True, widgets(model, seed=seed))
+        # Prompt and taste text.
+        for text in _RESTYLE_TEXTS:
+            for taste in ("", "  moody dusk  "):
+                w = widgets(model, prompt=text)
+                if taste:
+                    w["style_in"] = taste
+                case(True, w)
+            case(False, widgets(model, prompt=text, style_in="grainy film"))
+        # style_refs Python refuses: as if there were no board.
+        for bad in _RESTYLE_BAD_REFS:
+            case(True, widgets(model, style_refs=bad))
+            case(False, widgets(model, style_refs=bad))
+        # Only the required inputs: execute()'s own defaults.
+        case(True, {"model": model})
+        case(False, {"model": model})
+    return cases
+
+
 def family_cases() -> dict:
     out = {key: [] for key in FAMILY_KEYS}
     out["falEdit"] = _fal_edit_cases()
@@ -750,6 +841,7 @@ def family_cases() -> dict:
     out["replicateVideo"] = _replicate_video_cases()
     out["nanoActions"] = _nano_actions_cases()
     out["refEdits"] = _ref_edits_cases()
+    out["restyle"] = _restyle_cases()
     return out
 
 
