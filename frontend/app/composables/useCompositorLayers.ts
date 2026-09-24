@@ -25,7 +25,7 @@ export type LocalLayerKind = 'text' | 'rect' | 'ellipse' | 'line' | 'path' | 'im
 import type { LayerMotionState } from '~/lib/motion/evaluate'
 import type { FrameMotion } from '~/lib/motion/types'
 import { applyEffectDialTracks, type EffectDialTrack } from '~/lib/motion/effectTracks'
-import { applyMotionxTracks, applyTextBehaviours, applyRevealBehaviours, type TextMotion } from '~/lib/motionx/adapter/frame'
+import { applyMotionxTracks, applyTextBehaviours, applyRevealBehaviours, applyMorphBehaviours, type TextMotion } from '~/lib/motionx/adapter/frame'
 import type { StoredBehaviour, Track as MotionxTrack } from '~/lib/motionx'
 import { beginReveal, finishReveal, type RevealPass } from '~/lib/motionx/reveal/paint'
 import { drawRevealShaderStyle, revealShaderReady } from '~/lib/motionx/reveal/paintPixels'
@@ -5793,7 +5793,7 @@ export function paintLayerStack(
   // done when the bar is done) while position, opacity and letters still stagger. The main fold
   // leaves it defaulted to `clock`, so a frame without a stagger is byte-identical.
   const foldMotion = (ls: LocalLayer[], clock: number | undefined, revealClock: number | undefined = clock): LocalLayer[] =>
-    applyRevealBehaviours(applyTextBehaviours(applyMotionxTracks(
+    applyMorphBehaviours(applyRevealBehaviours(applyTextBehaviours(applyMotionxTracks(
       applyFillPhaseTracks(
         applyEffectDialTracks(ls, motion?.tracks, clock),
         motion?.tracks,
@@ -5801,7 +5801,7 @@ export function paintLayerStack(
       ),
       motion?.motionx,
       clock,
-    ), motion?.behaviours, clock), motion?.motionx, motion?.behaviours, revealClock)
+    ), motion?.behaviours, clock), motion?.motionx, motion?.behaviours, revealClock), motion?.motionx, motion?.behaviours, revealClock)
 
   const storedLocals = localLayers      // pre-fold, for the per-copy folds below
   const animatedLocals = foldMotion(localLayers, t)
@@ -5998,6 +5998,10 @@ export function paintLayerStack(
       }
 
       const opacityMul = gc ? gc.opacity : 1
+
+      // A morph target that has not arrived yet, or an element that has finished turning into
+      // its target: not drawn this frame (it stays in the stack so siblings can still read it).
+      if ((layer as unknown as { motionHidden?: boolean }).motionHidden) continue
 
       // A dither (reveal) bar mid-transition: nothing at all when fully hidden; otherwise keep
       // the backdrop so the hidden cells can be put back once the layer has drawn normally.

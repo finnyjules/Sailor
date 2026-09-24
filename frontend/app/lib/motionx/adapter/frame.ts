@@ -192,6 +192,61 @@ export function applyRevealBehaviours(
   return changed ? next : layers
 }
 
+/** A layer mid-morph: which element it is becoming, how, and how far. Transient, one frame. */
+export interface MotionMorph { target: string; style: 'letters' | 'shape'; amount: number }
+
+/**
+ * Fold morph transitions (spec 2026-09-23). For every layer with a tagged `morph` track whose
+ * WINNING bar is a `morph` with a live target (`l:<id>` naming a layer in `layers`):
+ *   amount ≤ 0 → A unchanged; the target hidden (it has not arrived yet);
+ *   between    → `motionMorph` on A; the target hidden;
+ *   amount ≥ 1 → A hidden; the target shown (unless another unfinished morph targets it).
+ * A bar with no target, or a target that is not in `layers`, does nothing at all — A leaves as
+ * if it had no Out transition. Hidden = a transient `motionHidden` the painter skips; the layer
+ * stays in the list so the sibling resolver can still read its outline and placement.
+ * Same-reference return when nothing is attached.
+ */
+export function applyMorphBehaviours(
+  layers: LocalLayer[], tracks: Track[] | undefined, behaviours: StoredBehaviour[] | undefined, t: number | undefined,
+): LocalLayer[] {
+  if (!tracks || tracks.length === 0 || !behaviours || behaviours.length === 0 || t == null) return layers
+  const byLayer = new Map<string, Track[]>()
+  for (const tr of tracks) {
+    if (!tr.behaviourId || tr.muted) continue
+    const m = tr.path.match(/^layers\.([^.]+)\.morph$/)
+    if (!m) continue
+    const list = byLayer.get(m[1]!)
+    if (list) list.push(tr); else byLayer.set(m[1]!, [tr])
+  }
+  if (byLayer.size === 0) return layers
+  const ids = new Set(layers.map(l => l.id))
+  const self = new Map<string, { hidden?: true; morph?: MotionMorph }>()
+  const hideTargets = new Set<string>()
+  for (const [id, list] of byLayer) {
+    const pick = pickTrack(list, t)
+    const bar = pick && behaviours.find(b => b.id === pick.behaviourId && b.kind === 'morph')
+    if (!pick || !bar) continue
+    const target = typeof bar.params?.target === 'string' ? bar.params.target : ''
+    const tid = target.startsWith('l:') ? target.slice(2) : ''
+    if (!tid || tid === id || !ids.has(tid)) continue
+    const v = evaluateTrack(pick, t)
+    const amount = typeof v === 'number' && Number.isFinite(v) ? v : 0
+    const style = bar.params?.style === 'shape' ? 'shape' : 'letters'
+    if (amount >= 1) self.set(id, { hidden: true })
+    else {
+      hideTargets.add(tid)
+      if (amount > 0) self.set(id, { morph: { target, style, amount } })
+    }
+  }
+  if (self.size === 0 && hideTargets.size === 0) return layers
+  return layers.map((layer) => {
+    const s = self.get(layer.id)
+    const hide = hideTargets.has(layer.id) || s?.hidden
+    if (!hide && !s?.morph) return layer
+    return { ...layer, ...(hide ? { motionHidden: true } : {}), ...(s?.morph ? { motionMorph: s.morph } : {}) } as unknown as LocalLayer
+  })
+}
+
 /** Builds a BehaviourTarget over a Frame/Compositor layer: reads current values by
  *  property path so a Behaviour can compile tracks relative to where the layer already is. */
 export function frameTarget(layer: LocalLayer): BehaviourTarget {
