@@ -35,6 +35,11 @@ export interface FalStatus {
   error: string | null
   /** A 5xx from fal, or no answer at all (network error): try again later, nothing is known. */
   transient: boolean
+  /**
+   * Replicate only: the request failed with a platform hiccup that is worth
+   * sending again (a failed prediction is not billed). Absent for fal.
+   */
+  retryable?: boolean
   raw: unknown
 }
 
@@ -187,6 +192,11 @@ export function falVideoUrl(result: unknown): string | null {
   return typeof url === 'string' && url ? url : null
 }
 
+/** The files a finished fal result points at: every image, or the one video. */
+export function falOutputUrls(result: unknown, media: 'image' | 'video'): string[] {
+  return media === 'image' ? falImageUrls(result) : [falVideoUrl(result)].filter((u): u is string => !!u)
+}
+
 export type FalClient = {
   submit: typeof falSubmit
   status: typeof falStatus
@@ -194,4 +204,14 @@ export type FalClient = {
   cancel: typeof falCancel
 }
 
-export const realFalClient: FalClient = { submit: falSubmit, status: falStatus, result: falResult, cancel: falCancel }
+/**
+ * One provider's queue, as the engine drives it: fal, or Replicate
+ * (replicateQueue.ts). The shape is fal's, plus where the result's files are.
+ */
+export type ProviderClient = FalClient & {
+  outputUrls(result: unknown, media: 'image' | 'video'): string[]
+}
+
+export const realFalClient: ProviderClient = {
+  submit: falSubmit, status: falStatus, result: falResult, cancel: falCancel, outputUrls: falOutputUrls,
+}

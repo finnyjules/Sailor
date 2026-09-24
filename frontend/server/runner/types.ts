@@ -29,6 +29,8 @@ export interface PendingRequest {
   cancelUrl: string
   submittedAt: number
   queuePosition: number | null
+  /** Replicate only: how many times this request was sent again after a platform hiccup (absent = 0). */
+  retries?: number
 }
 
 export type NodeStatus = 'waiting' | 'running' | 'done' | 'error' | 'skipped' | 'paused' | 'dropped' | 'stopped'

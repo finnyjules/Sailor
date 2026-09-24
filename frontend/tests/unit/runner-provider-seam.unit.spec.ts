@@ -1,8 +1,8 @@
 /**
  * The provider seam (Phase B, Task B1): a plan names its provider, a saved
- * request without one is fal, and a Replicate plan is refused plainly until
- * the Replicate client lands. Plus the runner-only moderation of the edit
- * nodes' own text inputs.
+ * request without one is fal, and a Replicate plan goes to Replicate (the
+ * client landed in B3; runner-replicate-engine covers it in depth). Plus the
+ * runner-only moderation of the edit nodes' own text inputs.
  */
 import { describe, expect, it, vi } from 'vitest'
 import { createFakeFal, createFakeLedger, makeKit, until } from './__runner__/kit'
@@ -38,15 +38,16 @@ describe('which provider', () => {
     expect(rec.request!.provider).toBe('fal')
   })
 
-  it('a Replicate plan fails the node plainly, sends nothing and charges nothing', async () => {
+  it('a Replicate plan is sent to Replicate, not fal, and its request says so', async () => {
     const k = makeKit({ hosted: true })
     const { runId } = await k.engine.startRun({ userId: k.userId, takes: [image('on replicate')], workflow: null, canvasId: null, projectUuid: null, projectName: null })
     await k.engine.settled(runId)
     const run = (await k.store.get(runId))!
-    expect(run.takes[0]!.nodes['1']!.status).toBe('error')
-    expect(run.takes[0]!.nodes['1']!.error).toBe('Replicate is not available yet')
+    expect(run.takes[0]!.nodes['1']!.status).toBe('done')
+    expect(run.takes[0]!.nodes['1']!.request!.provider).toBe('replicate')
     expect(k.fal.client.submit).not.toHaveBeenCalled()
-    expect([...k.ledger.holds.values()].map(h => h.state)).toEqual(['released'])
+    expect(k.replicate.client.submit).toHaveBeenCalledTimes(1)
+    expect([...k.ledger.holds.values()].map(h => h.state)).toEqual(['settled'])
   })
 
   it('a run saved before requests named their provider resumes on fal after a restart', async () => {

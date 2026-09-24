@@ -1,9 +1,10 @@
-/** Test helpers for the runner engine: a fake fal, a fake ledger, and an engine wired to real file storage in a temp folder. */
+/** Test helpers for the runner engine: a fake fal, a fake Replicate, a fake ledger, and an engine wired to real file storage in a temp folder. */
 import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { vi } from 'vitest'
-import type { FalClient } from '~~/server/runner/falQueue'
+import { falOutputUrls, type ProviderClient } from '~~/server/runner/falQueue'
+import { isTransientReplicateError, replicateOutputUrls } from '~~/server/runner/replicateQueue'
 import { createEngine, type EngineDeps } from '~~/server/runner/engine'
 import { createFileRunStore } from '~~/server/runner/store'
 import { createEngineResultStore } from '~~/server/runner/results'
@@ -28,7 +29,7 @@ export function createFakeFal() {
   let seq = 0
   const next = { hold: 0, fail: 0 }
   const idOf = (url: string) => /^fal:\/\/(req\d+)/.exec(url)![1]!
-  const client: FalClient = {
+  const client: ProviderClient = {
     submit: vi.fn(async (endpoint: string, payload: Record<string, unknown>) => {
       const id = `req${++seq}`
       const r: FakeRequest = { id, endpoint, payload, polls: 0, held: next.hold > 0, failWith: next.fail > 0 ? 'The provider refused this prompt' : null, cancelled: false }
@@ -55,6 +56,7 @@ export function createFakeFal() {
       reqs.get(idOf(url))!.cancelled = true
       return 'cancelled' as const
     }) as any,
+    outputUrls: vi.fn(falOutputUrls),
   }
   return {
     client,
@@ -62,6 +64,65 @@ export function createFakeFal() {
     /** The next n submitted requests stay "in progress" until released. */
     holdNext(n: number) { next.hold = n },
     failNext(n: number) { next.fail = n },
+    release(id?: string) { for (const r of reqs.values()) if (!id || r.id === id) r.held = false },
+    submitted: () => [...reqs.values()],
+  }
+}
+
+/** Replicate's words for a platform hiccup (a transient failure) and for a real one. */
+export const REPLICATE_HICCUP = 'Prediction interrupted; please retry (code: PA)'
+export const REPLICATE_REFUSAL = 'The input or output was flagged as sensitive'
+
+/**
+ * A fake Replicate in the shape the engine drives (replicateQueue.ts), with
+ * Replicate's own states mapped the way the real client maps them:
+ * starting → IN_QUEUE, processing → IN_PROGRESS, succeeded/failed/canceled → COMPLETED.
+ */
+export function createFakeReplicate() {
+  const reqs = new Map<string, FakeRequest & { transient: boolean }>()
+  let seq = 0
+  const next = { hold: 0, fail: 0, transient: 0 }
+  const idOf = (url: string) => /^replicate:\/\/(pred\d+)/.exec(url)![1]!
+  const client: ProviderClient = {
+    submit: vi.fn(async (slug: string, payload: Record<string, unknown>) => {
+      const id = `pred${++seq}`
+      const transient = next.transient > 0
+      const r = { id, endpoint: slug, payload, polls: 0, held: next.hold > 0, failWith: transient ? REPLICATE_HICCUP : next.fail > 0 ? REPLICATE_REFUSAL : null, cancelled: false, transient }
+      if (next.hold > 0) next.hold--
+      if (transient) next.transient--
+      else if (next.fail > 0) next.fail--
+      reqs.set(id, r)
+      return { requestId: id, statusUrl: `replicate://${id}`, responseUrl: `replicate://${id}`, cancelUrl: `replicate://${id}/cancel`, queuePosition: null }
+    }) as any,
+    status: vi.fn(async (url: string) => {
+      const r = reqs.get(idOf(url))!
+      r.polls++
+      const base = { queuePosition: null, logs: [], error: null, transient: false, retryable: false, raw: {} }
+      if (r.cancelled) return { ...base, status: 'COMPLETED', error: 'Replicate: prediction canceled' }
+      if (r.polls === 1) return { ...base, status: 'IN_QUEUE' }
+      if (r.held) return { ...base, status: 'IN_PROGRESS', logs: [{ message: ' 50%|█████     | 14/28' }] }
+      if (r.failWith) return { ...base, status: 'COMPLETED', error: `Replicate: ${r.failWith}`, retryable: isTransientReplicateError(r.failWith) }
+      return { ...base, status: 'COMPLETED' }
+    }) as any,
+    result: vi.fn(async (url: string) => {
+      const id = idOf(url)
+      return { id, status: 'succeeded', output: [`https://replicate.delivery/${id}.png`] }
+    }) as any,
+    cancel: vi.fn(async (url: string) => {
+      reqs.get(idOf(url))!.cancelled = true
+      return 'cancelled' as const
+    }) as any,
+    outputUrls: vi.fn(replicateOutputUrls),
+  }
+  return {
+    client,
+    reqs,
+    /** The next n submitted predictions stay "processing" until released. */
+    holdNext(n: number) { next.hold = n },
+    /** The next n submitted predictions fail for good (a model refusal). */
+    failNext(n: number) { next.fail = n },
+    /** The next n submitted predictions fail with a platform hiccup (worth sending again). */
+    hiccupNext(n: number) { next.transient = n },
     release(id?: string) { for (const r of reqs.values()) if (!id || r.id === id) r.held = false },
     submitted: () => [...reqs.values()],
   }
@@ -101,7 +162,7 @@ export function createFakeLedger(available = 1000) {
 let uuidSeq = 0
 export const testUuid = () => `00000000-0000-4000-8000-${String(++uuidSeq).padStart(12, '0')}`
 
-export function makeKit(opts: { hosted?: boolean; available?: number; dir?: string; root?: string; fal?: ReturnType<typeof createFakeFal>; ledger?: ReturnType<typeof createFakeLedger>; deps?: Partial<EngineDeps> } = {}) {
+export function makeKit(opts: { hosted?: boolean; available?: number; dir?: string; root?: string; fal?: ReturnType<typeof createFakeFal>; replicate?: ReturnType<typeof createFakeReplicate>; ledger?: ReturnType<typeof createFakeLedger>; deps?: Partial<EngineDeps> } = {}) {
   const hosted = !!opts.hosted
   const userId = hosted ? 'user_1' : null
   const root = opts.root ?? mkdtempSync(join(tmpdir(), 'runner-engine-root-'))
@@ -110,6 +171,7 @@ export function makeKit(opts: { hosted?: boolean; available?: number; dir?: stri
   const store = createFileRunStore(dir)
   const results = createEngineResultStore({ dirForType: t => join(root, t), hosted: () => hosted })
   const fal = opts.fal ?? createFakeFal()
+  const replicate = opts.replicate ?? createFakeReplicate()
   const ledger = opts.ledger ?? createFakeLedger(opts.available ?? 1000)
   const graphRuns = { create: vi.fn(async () => {}), appendOutput: vi.fn(async () => {}), resolve: vi.fn(async () => {}) }
   const metering = createMetering({ hosted: () => hosted, ledger: () => ledger, graphRuns, spendGuard: async () => {}, moderate: async () => ({ ok: true as const }) })
@@ -120,7 +182,7 @@ export function makeKit(opts: { hosted?: boolean; available?: number; dir?: stri
   const handoff = createHandoff({ read: f => results.read(f), upload })
   const records = { write: vi.fn(async () => {}) }
   const deps: EngineDeps = {
-    store, fal: fal.client, results, handoff, metering, events, records,
+    store, providers: { fal: fal.client, replicate: replicate.client }, results, handoff, metering, events, records,
     ownership: { ownsInput: async () => true, ownsOutput: async () => true },
     download: async (url: string) => ({ bytes: new TextEncoder().encode(url), contentType: url.endsWith('.mp4') ? 'video/mp4' : 'image/png' }),
     hosted: () => hosted,
@@ -139,7 +201,7 @@ export function makeKit(opts: { hosted?: boolean; available?: number; dir?: stri
     ...opts.deps,
   }
   const engine = createEngine(deps)
-  return { engine, deps, fal, ledger, graphRuns, seen, records, upload, root, dir, store, userId }
+  return { engine, deps, fal, replicate, ledger, graphRuns, seen, records, upload, root, dir, store, userId }
 }
 
 /** image(1) → Gate(2) → video(3) → Video card(4); image(1) → Image card(5) */

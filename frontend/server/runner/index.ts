@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { createEngine, type Engine } from './engine'
 import { getRunStore } from './store'
 import { downloadResult, realFalClient } from './falQueue'
+import { realReplicateClient } from './replicateQueue'
 import { createEngineResultStore } from './results'
 import { createHandoff } from './handoff'
 import { createMetering } from './metering'
@@ -36,7 +37,7 @@ export function getEngine(): Engine {
   const results = createEngineResultStore({ dirForType: t => engineDirForType(t), hosted: isHosted })
   const engine = createEngine({
     store: getRunStore(),
-    fal: realFalClient,
+    providers: { fal: realFalClient, replicate: realReplicateClient },
     results,
     handoff: createHandoff({ read: f => results.read(f), upload: uploadToFalStorage }),
     metering: createMetering({

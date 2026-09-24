@@ -16,7 +16,7 @@ import type { GateChoice, RunnerMessage } from '#shared/runner/messages'
 import { MeterRefusalError } from '../utils/requestMeter'
 import { BASE_RENDER_CREDITS, UnpricedGraphError } from '../utils/priceBook'
 import { extractGraphPromptText } from '../utils/graphPromptText'
-import { falImageUrls, falVideoUrl, isFalNetworkError, percentFromLogs, type FalClient, type FalStatus } from './falQueue'
+import { isFalNetworkError, percentFromLogs, type FalStatus, type ProviderClient } from './falQueue'
 import { planNode } from './executors'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, type OwnershipCheck } from './inputs'
@@ -92,7 +92,8 @@ export interface StageRecordSummary {
 
 export interface EngineDeps {
   store: RunStore
-  fal: FalClient
+  /** One queue client per provider; a plan or a saved request names which. */
+  providers: Record<RunnerProvider, ProviderClient>
   results: ResultStore
   handoff: Handoff
   metering: Metering
@@ -154,6 +155,16 @@ export const MAX_QUEUED_CALLS = 32
 const refuse = (message: string, status: number, data?: unknown) => new MeterRefusalError(message, status, data)
 /** A request saved before requests named their provider went to fal. */
 const providerOf = (req: PendingRequest): RunnerProvider => req.provider ?? 'fal'
+/**
+ * A Replicate prediction that failed with a platform hiccup is sent again at
+ * most this many more times, as nodes_replicate.py `_TRANSIENT_FAIL_RETRIES`
+ * does, waiting 2 s × the attempt first. A failed prediction is not billed,
+ * so the stage's charge is unchanged. fal failures are never sent again.
+ */
+export const REPLICATE_TRANSIENT_RETRIES = 2
+/** What a saved result is filed under: fal keeps its bare endpoint (results saved before 2026-09-24 still match). */
+const fingerprintEndpoint = (provider: RunnerProvider, endpoint: string): string =>
+  provider === 'fal' ? endpoint : `${provider}:${endpoint}`
 
 /** Larger than this, the workflow is not stored (Open workflow then falls back, with its toast). */
 export const MAX_STORED_WORKFLOW_CHARS = 2_000_000
@@ -291,10 +302,15 @@ export function createEngine(deps: EngineDeps) {
   const forCanvas = (run: RunRecord, m: RunnerMessage): RunnerMessage => ({ ...m, data: { ...m.data, canvas_id: run.canvasId } })
   const publish = (run: RunRecord, m: RunnerMessage) => deps.events.publish(userKeyOf(run.userId), forCanvas(run, m))
 
-  /** The queue client for a provider. Only fal exists so far. */
-  function clientFor(provider: RunnerProvider): FalClient {
-    if (provider === 'fal') return deps.fal
-    throw new Error('Replicate is not available yet')
+  /** The queue client for a provider. */
+  function clientFor(provider: RunnerProvider): ProviderClient {
+    const client = deps.providers[provider]
+    if (!client) throw new Error(`Unknown provider: ${String(provider)}`)
+    return client
+  }
+  /** fal calls /api/webhooks/fal back; there is no Replicate webhook route, so Replicate is polled only. */
+  function webhookFor(provider: RunnerProvider): string | null {
+    return provider === 'fal' ? deps.webhookUrl() : null
   }
   async function cancelRequest(req: PendingRequest): Promise<unknown> {
     return clientFor(providerOf(req)).cancel(req.cancelUrl)
@@ -570,7 +586,9 @@ export function createEngine(deps: EngineDeps) {
       rec.endpoint = plan.endpoint
       rec.payload = plan.payload
       rec.credits = nodeCredits(take.prompt[id]!)
-      const fp = isReusable(plan.payload) ? requestFingerprint(plan.endpoint, plan.payload, u => deps.handoff.hashOf(u)) : null
+      const fp = isReusable(plan.payload)
+        ? requestFingerprint(fingerprintEndpoint(plan.provider, plan.endpoint), plan.payload, u => deps.handoff.hashOf(u))
+        : null
       rec.fingerprint = fp
 
       if (fp && !rec.request) {
@@ -595,7 +613,7 @@ export function createEngine(deps: EngineDeps) {
         // A Stop can land while the slot is being handed over; nothing may go out after it.
         if (signal.aborted) throw new RunStopped()
         if (!rec.request) {
-          const sub = await clientFor(plan.provider).submit(plan.endpoint, plan.payload, { webhookUrl: deps.webhookUrl() })
+          const sub = await clientFor(plan.provider).submit(plan.endpoint, plan.payload, { webhookUrl: webhookFor(plan.provider) })
           rec.request = {
             provider: plan.provider,
             requestId: sub.requestId, statusUrl: sub.statusUrl, responseUrl: sub.responseUrl,
@@ -609,7 +627,7 @@ export function createEngine(deps: EngineDeps) {
         limiter.release(userKey)
       }
 
-      const urls = plan.media === 'image' ? falImageUrls(result) : [falVideoUrl(result)].filter((u): u is string => !!u)
+      const urls = clientFor(providerOf(rec.request!)).outputUrls(result, plan.media)
       if (!urls.length) throw new Error(plan.media === 'image' ? 'The provider returned no image' : 'The provider returned no video')
       const files: OutputFile[] = []
       for (const url of urls) {
@@ -645,9 +663,11 @@ export function createEngine(deps: EngineDeps) {
   }
 
   async function waitForResult(run: RunRecord, rec: NodeRecord, stageKey: string, nodeId: string, media: 'image' | 'video', signal: AbortSignal): Promise<unknown> {
-    const req = rec.request!
-    const client = clientFor(providerOf(req))
-    const deadline = req.submittedAt + (media === 'video' ? deps.timeouts.videoMs : deps.timeouts.imageMs)
+    let req = rec.request!
+    const provider = providerOf(req)
+    const client = clientFor(provider)
+    const limitMs = media === 'video' ? deps.timeouts.videoMs : deps.timeouts.imageMs
+    let deadline = req.submittedAt + limitMs
     let attempt = 0
     // Only a real answer from fal counts as having asked: a blip says nothing.
     let asked = false
@@ -705,7 +725,30 @@ export function createEngine(deps: EngineDeps) {
           }
         }
         else if (s.status === 'COMPLETED') {
-          if (s.error) throw new Error(s.error)
+          if (s.error) {
+            const retries = req.retries ?? 0
+            if (!(provider === 'replicate' && s.retryable && retries < REPLICATE_TRANSIENT_RETRIES && rec.endpoint && rec.payload)) {
+              throw new Error(s.error)
+            }
+            // A Replicate hiccup: wait, send the same request again, and write
+            // the new one down before waiting on it. Nothing more is charged.
+            await sleepOrWake(2000 * (retries + 1), req.requestId, signal)
+            if (signal.aborted) throw new RunStopped()
+            const sub = await client.submit(rec.endpoint, rec.payload, { webhookUrl: webhookFor(provider) })
+            req = {
+              provider, requestId: sub.requestId, statusUrl: sub.statusUrl, responseUrl: sub.responseUrl,
+              cancelUrl: sub.cancelUrl, submittedAt: deps.now(), queuePosition: sub.queuePosition, retries: retries + 1,
+            }
+            rec.request = req
+            await persist(run)
+            deadline = req.submittedAt + limitMs
+            attempt = 0
+            asked = false
+            lastPos = req.queuePosition
+            lastPct = -1
+            started = false
+            continue
+          }
           // fal has made (and billed) it: a network error fetching it is tried
           // again on the next turn, until the time limit.
           try { return await client.result(req.responseUrl) }
