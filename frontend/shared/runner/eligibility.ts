@@ -3,12 +3,48 @@
  * whole — a workflow is never split between the two.
  */
 import { isLink, type ApiPrompt } from './graph'
+import { NO_FAMILIES, type RunnerFamily } from './families'
 
 export const RUNNER_NODE_TYPES: ReadonlySet<string> = new Set([
   'GenerateImageNode', 'GenerateVideoNode', 'ComfyGateNode', 'Image', 'Video',
 ])
 
-export const GENERATOR_TYPES: ReadonlySet<string> = new Set(['GenerateImageNode', 'GenerateVideoNode'])
+/** One model's switch: its family, and any inputs that model alone needs linked. */
+export interface RunnerModelRule {
+  family: RunnerFamily
+  mustLink?: readonly string[]
+}
+
+/**
+ * How a family switches a node class on. Pure data. A row gives either the
+ * family for the whole class, or (for a class with a `model` widget) the
+ * family per model; a model not listed is not taken. `mustLink` inputs must
+ * be wired; `mustNotLink` inputs must not be (e.g. BlendScene `keep_subject`,
+ * Restyle `style_in`).
+ */
+export interface RunnerNodeRule {
+  family?: RunnerFamily
+  models?: Readonly<Record<string, RunnerFamily | RunnerModelRule>>
+  mustLink?: readonly string[]
+  mustNotLink?: readonly string[]
+}
+
+/**
+ * The node classes (or extra models of a runner class) the families add,
+ * keyed by class_type. Empty until a family's task adds its rows. For
+ * GenerateImageNode / GenerateVideoNode a row only ADDS models; the models
+ * the runner takes without any family stay as they are.
+ */
+export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {}
+
+/**
+ * The classes that make a provider call (and so are charged): the two
+ * generators, plus every class a family row adds. A workflow needs at least
+ * one of them to go to the runner.
+ */
+export const PROVIDER_TYPES: ReadonlySet<string> = new Set([
+  'GenerateImageNode', 'GenerateVideoNode', ...Object.keys(RUNNER_NODE_RULES),
+])
 
 /** The image models that default to fal AND have a price. krea-2-large,
  *  krea-2-medium and seedream-5-pro are left out until they are priced. */
@@ -69,24 +105,59 @@ function asksForSeveralImages(inputs: Record<string, unknown>): boolean {
     && optionInt(opts, 'max_images') > 1
 }
 
+/** The model widget as a rule looks it up (a legacy video label → its current id). */
+function modelKey(classType: string, model: unknown): string {
+  return classType === 'GenerateVideoNode' ? resolveVideoModelId(model) : (typeof model === 'string' ? model : '')
+}
+
+/** Whether a rule row lets this node through with these families switched on. */
+export function nodeRuleAllows(
+  classType: string,
+  rule: RunnerNodeRule,
+  inputs: Record<string, unknown>,
+  families: ReadonlySet<RunnerFamily>,
+): boolean {
+  const need: string[] = [...(rule.mustLink ?? [])]
+  let family: RunnerFamily | undefined = rule.family
+  if (rule.models) {
+    const key = modelKey(classType, inputs.model)
+    const m = Object.prototype.hasOwnProperty.call(rule.models, key) ? rule.models[key] : undefined
+    if (!m) return false
+    if (typeof m === 'string') family = m
+    else {
+      family = m.family
+      need.push(...(m.mustLink ?? []))
+    }
+  }
+  if (!family || !families.has(family)) return false
+  if (need.some(name => !isLink(inputs[name]))) return false
+  if ((rule.mustNotLink ?? []).some(name => isLink(inputs[name]))) return false
+  return true
+}
+
 /**
  * Whether the runner can take this one node of the prompt: a runner node type,
  * on a runner model, asking for one picture, with no sound wired into a
- * video, and reading only from nodes in the same prompt. A workflow goes to
- * the runner only when every node passes AND it has a generator
+ * video, and reading only from nodes in the same prompt — or a class (or
+ * model) a switched-on family's row lets through. A workflow goes to the
+ * runner only when every node passes AND it has a provider node
  * (isRunnerEligible). `nodesNeedingEngine` (app/lib/runner/needsEngine.ts)
- * names the nodes that fail this, so there is one rule, not two.
+ * names the nodes that fail this, so there is one rule, not two. With no
+ * families (the default) this is exactly the rule before families existed.
  */
-export function runnerTakesNode(prompt: ApiPrompt, id: string): boolean {
+export function runnerTakesNode(prompt: ApiPrompt, id: string, families: ReadonlySet<RunnerFamily> = NO_FAMILIES): boolean {
   const n = prompt[id]
-  if (!n || !RUNNER_NODE_TYPES.has(n.class_type)) return false
+  if (!n) return false
   const inputs = n.inputs ?? {}
+  const rule = families.size ? RUNNER_NODE_RULES[n.class_type] : undefined
+  const byRule = !!rule && nodeRuleAllows(n.class_type, rule, inputs, families)
+  if (!RUNNER_NODE_TYPES.has(n.class_type) && !byRule) return false
   if (n.class_type === 'GenerateImageNode') {
-    if (!IMAGE_IDS.has(String(inputs.model))) return false
+    if (!IMAGE_IDS.has(String(inputs.model)) && !byRule) return false
     if (asksForSeveralImages(inputs)) return false
   }
   else if (n.class_type === 'GenerateVideoNode') {
-    if (!VIDEO_IDS.has(resolveVideoModelId(inputs.model))) return false
+    if (!VIDEO_IDS.has(resolveVideoModelId(inputs.model)) && !byRule) return false
     if (isLink(inputs.audio)) return false
   }
   for (const v of Object.values(inputs)) {
@@ -95,14 +166,14 @@ export function runnerTakesNode(prompt: ApiPrompt, id: string): boolean {
   return true
 }
 
-export function isRunnerEligible(prompt: ApiPrompt | null | undefined): boolean {
+export function isRunnerEligible(prompt: ApiPrompt | null | undefined, families: ReadonlySet<RunnerFamily> = NO_FAMILIES): boolean {
   if (!prompt) return false
   const ids = Object.keys(prompt)
   if (!ids.length) return false
-  let generators = 0
+  let providers = 0
   for (const id of ids) {
-    if (!runnerTakesNode(prompt, id)) return false
-    if (GENERATOR_TYPES.has(prompt[id]!.class_type)) generators++
+    if (!runnerTakesNode(prompt, id, families)) return false
+    if (PROVIDER_TYPES.has(prompt[id]!.class_type)) providers++
   }
-  return generators > 0
+  return providers > 0
 }

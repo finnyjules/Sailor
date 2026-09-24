@@ -129,6 +129,10 @@ export function creditsForUsdServer(usd: number): number {
  * Coverage guard in price-graph.unit.spec.ts forces this table plus
  * MODEL_PRICED_NODE_CLASSES plus PROVIDER_NODE_EXEMPT to cover every
  * IO.ComfyNode class in the provider modules.
+ *
+ * Keys are NODE_IDS (the `node_id="…"` in each class's schema), which is what
+ * the canvas sends as class_type — not the Python class name. Where the two
+ * differ the class name is noted beside the row.
  */
 export const GRAPH_NODE_CREDITS: Record<string, number> = {
   // — spike-v3 hand-set rows: kept verbatim —
@@ -146,7 +150,7 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   // — image generation / editing —
   FluxProRemoteNode: 8,            // badge $0.04
   FluxKontextRemoteNode: 8,        // badge $0.04
-  IdeogramV3TurboNode: 6,          // badge $0.03
+  IdeogramV3TurboRemoteNode: 6,    // badge $0.03 (Python class IdeogramV3TurboNode; node_id below)
   DevelopImageNode: 10,            // badge $0.05
   GenerateFromReferencesNode: 12,  // badge $0.06
   BlendSceneNode: 8,               // badge $0.04
@@ -223,12 +227,12 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   RemoveObjectNode: 10,            // badge $0.05
   TextEditNode: 10,                // badge $0.05
   RecolorObjectNode: 10,           // badge $0.05
-  PersonSwapNode: 10,              // badge $0.05
-  PoseMannequinNode: 10,           // badge $0.05
+  PersonSwap: 10,                  // badge $0.05 (Python class PersonSwapNode)
+  PoseMannequin: 10,               // badge $0.05 (Python class PoseMannequinNode)
   SwapBackgroundNode: 10,          // badge $0.05
   SwapProductNode: 10,             // badge $0.05
   RelightNode: 10,                 // badge $0.05
-  LensReframeNode: 10,             // no badge — same nano-banana-2 edit call as its $0.05 siblings
+  LensReframe: 10,                 // no badge — same nano-banana-2 edit call as its $0.05 siblings (Python class LensReframeNode)
   TurntableNode: 75,               // badge $0.50
 }
 
@@ -254,14 +258,14 @@ export const PROVIDER_NODE_EXEMPT: Record<string, string> = {}
 /**
  * Runtime list of provider node classes. Checked in as a literal on purpose —
  * the pricer must never read the Python tree at runtime. A drift guard in
- * price-graph.unit.spec.ts asserts this equals the grep of nodes_replicate.py
- * plus the comfy_extras modules that import its dispatch helpers, so adding a
+ * price-graph.unit.spec.ts asserts this equals the node_ids grepped from
+ * nodes_replicate.py plus the comfy_extras modules that import its dispatch helpers, so adding a
  * Python node without pricing it fails tests rather than production.
  */
 export const PROVIDER_NODE_CLASSES: string[] = [
   'FluxLoRARemoteNode', 'FluxMultiLoRARemoteNode', 'FluxProRemoteNode',
   'FluxKontextRemoteNode', 'KlingVideoRemoteNode', 'ClarityUpscaleRemoteNode',
-  'IdeogramV3TurboNode', 'Veo3RemoteNode', 'Seedance2RemoteNode',
+  'IdeogramV3TurboRemoteNode', 'Veo3RemoteNode', 'Seedance2RemoteNode',
   'WhisperRemoteNode', 'MusicGenRemoteNode', 'MiniMaxSpeechRemoteNode',
   'Hunyuan3DRemoteNode', 'Hunyuan3DMultiViewNode', 'RemoveBackgroundRemoteNode',
   'RestorePhotoRemoteNode', 'CodeformerRemoteNode', 'DescribeImageRemoteNode',
@@ -278,8 +282,8 @@ export const PROVIDER_NODE_CLASSES: string[] = [
   'ImprovePromptNode', 'SummarizeTextNode', 'TranslateTextNode', 'RewriteToneNode',
   'BrainstormIdeasNode', 'ReasonStepByStepNode',
   // comfy_extras wrappers
-  'RemoveObjectNode', 'TextEditNode', 'RecolorObjectNode', 'LensReframeNode',
-  'PersonSwapNode', 'PoseMannequinNode', 'RelightNode', 'SwapBackgroundNode',
+  'RemoveObjectNode', 'TextEditNode', 'RecolorObjectNode', 'LensReframe',
+  'PersonSwap', 'PoseMannequin', 'RelightNode', 'SwapBackgroundNode',
   'SwapProductNode', 'TurntableNode',
 ]
 

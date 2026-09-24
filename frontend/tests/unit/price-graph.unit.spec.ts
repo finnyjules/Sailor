@@ -33,7 +33,23 @@ const REPO = fileURLToPath(new URL('../../../', import.meta.url))
 const PY = readFileSync(join(REPO, 'comfy_api_nodes/nodes_replicate.py'), 'utf8')
 const CLASS_RE = /class ([A-Za-z0-9_]+)\(IO\.ComfyNode\)/g
 
-const REPLICATE_CLASSES = [...PY.matchAll(CLASS_RE)].map(m => m[1]!)
+/**
+ * The node_id of every IO.ComfyNode class in a Python module — the name the
+ * canvas sends as class_type, and so the name priceGraph must key on. It can
+ * differ from the Python class name (PersonSwapNode → "PersonSwap"); keying
+ * the price book by class name once priced three nodes at 0 in hosted.
+ */
+function nodeIdsOf(src: string): string[] {
+  const heads = [...src.matchAll(CLASS_RE)]
+  return heads.map((m, i) => {
+    const body = src.slice(m.index! + m[0].length, heads[i + 1]?.index ?? src.length)
+    const id = /node_id\s*=\s*"([^"]+)"/.exec(body)?.[1]
+    if (!id) throw new Error(`class ${m[1]} has no node_id`)
+    return id
+  })
+}
+
+const REPLICATE_CLASSES = nodeIdsOf(PY)
 
 /** comfy_extras nodes that dispatch to a provider: the marker is the lazy
  *  `from comfy_api_nodes.nodes_replicate import ...` every one of them uses. */
@@ -44,7 +60,7 @@ function comfyExtrasProviderClasses(): string[] {
     if (!name.endsWith('.py')) continue
     const src = readFileSync(join(dir, name), 'utf8')
     if (!src.includes('from comfy_api_nodes.nodes_replicate import')) continue
-    for (const m of src.matchAll(CLASS_RE)) out.push(m[1]!)
+    out.push(...nodeIdsOf(src))
   }
   return out
 }
@@ -71,6 +87,20 @@ describe('graph price book coverage', () => {
 
   it('the checked-in provider-class list matches the Python surface (drift guard)', () => {
     expect([...PROVIDER_NODE_CLASSES].sort()).toEqual([...new Set(ALL_PROVIDER_CLASSES)].sort())
+  })
+
+  it('the guard reads node_ids, not Python class names', () => {
+    expect(EXTRAS_CLASSES).toContain('PersonSwap')
+    expect(EXTRAS_CLASSES).not.toContain('PersonSwapNode')
+  })
+
+  it('prices the nodes whose node_id differs from their class name, as the canvas sends them', () => {
+    const base = priceGraph({ 2: { class_type: 'SaveImage', inputs: {} } }).credits
+    expect(priceGraph({ 1: { class_type: 'PersonSwap', inputs: {} } }).credits).toBe(10)
+    expect(priceGraph({ 1: { class_type: 'PersonSwap', inputs: {} }, 2: { class_type: 'SaveImage', inputs: {} } }).credits).toBe(10 + base)
+    expect(priceGraph({ 1: { class_type: 'LensReframe', inputs: {} } }).credits).toBe(10)
+    expect(priceGraph({ 1: { class_type: 'PoseMannequin', inputs: {} } }).credits).toBe(10)
+    expect(priceGraph({ 1: { class_type: 'IdeogramV3TurboRemoteNode', inputs: {} } }).credits).toBe(6)
   })
 
   it('every exempt class carries a non-empty reason', () => {

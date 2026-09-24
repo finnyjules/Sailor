@@ -7,6 +7,7 @@
  */
 import type { ApiPrompt } from '#shared/runner/graph'
 import { isRunnerEligible, runnerTakesNode } from '#shared/runner/eligibility'
+import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 
 /** The fallback title for a node with neither a title nor a known display name. */
 export const UNNAMED_NODE = 'Unnamed node'
@@ -16,15 +17,17 @@ export const UNNAMED_NODE = 'Unnamed node'
  * Runner off → every node. Runner on → every node the runner refuses (a type it
  * doesn't take, a model it doesn't run, several pictures, wired sound, a link
  * out of the prompt); when no single node is at fault but the runner still
- * refuses the whole (no generator), every node. Empty = the runner takes it.
+ * refuses the whole (no provider node), every node. Empty = the runner takes it.
+ * `families`: the switched-on runner families (none by default).
  */
 export function nodesNeedingEngine(
   prompt: ApiPrompt,
-  opts: { runnerOn: boolean; titleOf: (id: string) => string },
+  opts: { runnerOn: boolean; families?: ReadonlySet<RunnerFamily>; titleOf: (id: string) => string },
 ): string[] {
   const ids = Object.keys(prompt)
-  let blocked = opts.runnerOn ? ids.filter(id => !runnerTakesNode(prompt, id)) : ids
-  if (opts.runnerOn && !blocked.length && !isRunnerEligible(prompt)) blocked = ids
+  const families = opts.families ?? NO_FAMILIES
+  let blocked = opts.runnerOn ? ids.filter(id => !runnerTakesNode(prompt, id, families)) : ids
+  if (opts.runnerOn && !blocked.length && !isRunnerEligible(prompt, families)) blocked = ids
   return [...new Set(blocked.map(id => opts.titleOf(id)))]
 }
 

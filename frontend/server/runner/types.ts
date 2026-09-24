@@ -17,7 +17,12 @@ export interface OutputFile {
   type: 'output' | 'input' | 'temp'
 }
 
+/** Who a request went to. */
+export type RunnerProvider = 'fal' | 'replicate'
+
 export interface PendingRequest {
+  /** Absent on requests saved before 2026-09-24: those went to fal. */
+  provider?: RunnerProvider
   requestId: string
   statusUrl: string
   responseUrl: string
@@ -33,9 +38,9 @@ export interface NodeRecord {
   classType: string
   /** Leg index this record was last run in. */
   leg: number | null
-  /** fal endpoint the request went to. */
+  /** Provider endpoint the request went to (a fal app, or a Replicate model). */
   endpoint: string | null
-  /** The exact request body sent to fal. */
+  /** The exact request body sent to the provider. */
   payload: Record<string, unknown> | null
   /** Set only when the request may be reused (explicit seed). */
   fingerprint: string | null

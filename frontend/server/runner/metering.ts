@@ -6,21 +6,59 @@
  *
  * Prices come from the one price table priceGraph already reads
  * (app/data/image-models.ts, app/data/video-prices.ts) — the runner cannot
- * run a model without a price because priceGraph throws for one.
+ * run a model without a price because priceGraph throws for one, and a
+ * provider node that prices at 0 is refused in hosted (unpricedProviderNode).
  */
 import type { ApiNode, ApiPrompt } from '#shared/runner/graph'
+import { PROVIDER_TYPES } from '#shared/runner/eligibility'
 import { BASE_RENDER_CREDITS, OUTPUT_CLASS_TYPES, priceGraph } from '../utils/priceBook'
 import { extractGraphPromptText } from '../utils/graphPromptText'
 import { MeterRefusalError } from '../utils/requestMeter'
 import { outputKey } from '../utils/graphRuns'
 import type { OutputFile, StageCharge } from './types'
 
-const PRICED = new Set(['GenerateImageNode', 'GenerateVideoNode'])
-
 export function nodeCredits(node: ApiNode): number {
-  if (!PRICED.has(node.class_type)) return 0
+  if (!PROVIDER_TYPES.has(node.class_type)) return 0
   const p = priceGraph({ n: { class_type: node.class_type, inputs: node.inputs } })
   return p.breakdown.filter(b => b.action !== 'base_render').reduce((s, b) => s + b.credits, 0)
+}
+
+/**
+ * The first provider node that prices at 0 or less, or null. The runner's
+ * copy of UnpricedGraphError: a class the price book misses by name prices at
+ * 0 (priceGraph only refuses the names it knows are providers), and such a
+ * node must be refused in hosted, never run free. An unpriced MODEL throws
+ * UnpricedGraphError from nodeCredits, as before.
+ */
+export function unpricedProviderNode(
+  prompt: ApiPrompt,
+  providers: ReadonlySet<string> = PROVIDER_TYPES,
+  price: (node: ApiNode) => number = nodeCredits,
+): string | null {
+  for (const [id, n] of Object.entries(prompt)) {
+    if (providers.has(n.class_type) && !(price(n) > 0)) return id
+  }
+  return null
+}
+
+/**
+ * Text inputs the edit nodes carry besides the prompt, moderated by the
+ * runner too. Runner only: extractGraphPromptText (the Python path's check)
+ * is left as it is (plan decision D8).
+ */
+export const RUNNER_EXTRA_TEXT_INPUTS: readonly string[] = ['target', 'find', 'replace', 'color', 'instructions', 'scene_prompt']
+
+function extraPromptText(prompt: ApiPrompt): string {
+  const parts: string[] = []
+  for (const node of Object.values(prompt ?? {})) {
+    const inputs = node?.inputs
+    if (!inputs || typeof inputs !== 'object') continue
+    for (const name of RUNNER_EXTRA_TEXT_INPUTS) {
+      const v = inputs[name]
+      if (typeof v === 'string' && v.trim()) parts.push(v)
+    }
+  }
+  return parts.join(' ')
 }
 
 export function hasOutputNode(prompt: ApiPrompt): boolean {
@@ -74,7 +112,7 @@ export function createMetering(d: {
     },
     async moderate(prompts) {
       if (!d.hosted()) return
-      const text = [...new Set(prompts.map(p => extractGraphPromptText(p)).filter(Boolean))].join(' ')
+      const text = [...new Set(prompts.flatMap(p => [extractGraphPromptText(p), extraPromptText(p)]).filter(Boolean))].join(' ')
       if (!text) return
       const mod = await d.moderate(text)
       if (!mod.ok) throw new MeterRefusalError('This prompt was blocked by content moderation', 400, { categories: mod.categories })

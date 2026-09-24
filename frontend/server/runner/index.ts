@@ -8,7 +8,7 @@ import { createHandoff } from './handoff'
 import { createMetering } from './metering'
 import { createRunEvents } from './events'
 import { createGenerationRecords } from './records'
-import { webhookBaseUrl, RUNNER_PER_USER_LIMIT } from './config'
+import { runnerFamilies, webhookBaseUrl, RUNNER_PER_USER_LIMIT } from './config'
 import { engineDirForType, uploadOwner, canonicalUploadKey } from '../utils/inputUploads'
 import { uploadToFalStorage } from '../utils/falStorage'
 import { getLiveLedger } from '../utils/ledgerLive'
@@ -69,6 +69,7 @@ export function getEngine(): Engine {
     // Network errors and 5xx are tried again (1s, 2s): fal has already billed the result.
     download: url => downloadResult(url),
     hosted: isHosted,
+    families: runnerFamilies,
     webhookUrl: () => {
       const base = webhookBaseUrl()
       return base ? `${base}/api/webhooks/fal` : null

@@ -62,6 +62,7 @@ import { useRunnerEvents, ensureRunnerEvents } from '~/composables/useRunnerEven
 import { createRunnerEventBuffer, ownerTabForCanvas, runnerRunIdsForTab } from '~/lib/runner/routing'
 import { nodesNeedingEngine, workflowNodeTitles, needsEngineDescription } from '~/lib/runner/needsEngine'
 import { RUNNER_WORKER, isRunnerPromptId } from '#shared/runner/messages'
+import { parseFamilies } from '#shared/runner/families'
 import { useDirectExecution } from '~/composables/useDirectExecution'
 import { useDirectExecutionEnabled } from '~/composables/useDirectExecutionEnabled'
 import { useVueNodes } from '~/composables/useVueNodes'
@@ -84,6 +85,7 @@ const hostedShell = hostedModeEnabled(useRuntimeConfig().public)
 // Sailor runner (docs/superpowers/specs/2026-09-22-sailor-runner-and-gate-design.md).
 // Off unless NUXT_PUBLIC_RUNNER_ENABLED=true; then eligible workflows go to /api/runs.
 const runnerEnabled = !!(useRuntimeConfig().public as { runnerEnabled?: boolean }).runnerEnabled
+const runnerFamilies = parseFamilies((useRuntimeConfig().public as { runnerFamilies?: unknown }).runnerFamilies)
 const runnerEvents = useRunnerEvents()
 const headsUp = useTabHeadsUp()
 
@@ -879,6 +881,7 @@ async function runVueWorkflow(
       if (!tk.directPrompt) continue
       for (const name of nodesNeedingEngine(tk.directPrompt, {
         runnerOn: runnerEnabled,
+        families: runnerFamilies,
         titleOf: workflowNodeTitles(tk.plainWorkflow, objectInfo.value),
       })) needsSet.add(name)
     }
@@ -922,7 +925,7 @@ async function runVueWorkflow(
       }
       const runnerPrompts = [firstTake, ...extraTakes].map(tk => tk.directPrompt)
       let sentToRunner = false
-      if (shouldUseRunner(runnerEnabled, runnerPrompts)) {
+      if (shouldUseRunner(runnerEnabled, runnerPrompts, runnerFamilies)) {
         // One run for all takes: with a Gate they pause once and you pick;
         // without one they simply all finish. The project is the run's own
         // tab (captured before the awaits above), not whichever tab is active now.

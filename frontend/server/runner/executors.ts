@@ -1,6 +1,6 @@
 /**
  * What each runner node does, as a plan the engine carries out:
- *   provider — send a request to fal, save what comes back
+ *   provider — send a request to a provider (fal or Replicate), save what comes back
  *   pass     — hand files on (result cards, an open Gate)
  *   pause    — a closed Gate: stop this branch and show what reached it
  * Mirrors the Python nodes (GenerateImageNode, GenerateVideoNode, Gate,
@@ -12,10 +12,10 @@ import { RUNNER_IMAGE_MODELS, composeImagePrompt, imageAppFor } from './generato
 import { RUNNER_VIDEO_MODELS, falVideoFn } from './generators/video'
 import { asInt, asText, parseJsonObject } from './generators/opts'
 import { moodboardFiles, parseInputFileRef } from './inputs'
-import type { OutputFile } from './types'
+import type { OutputFile, RunnerProvider } from './types'
 
 export type NodePlan =
-  | { kind: 'provider'; endpoint: string; payload: Record<string, unknown>; media: 'image' | 'video'; prefix: string; uiFor(files: OutputFile[]): Record<string, unknown> | null }
+  | { kind: 'provider'; provider: RunnerProvider; endpoint: string; payload: Record<string, unknown>; media: 'image' | 'video'; prefix: string; uiFor(files: OutputFile[]): Record<string, unknown> | null }
   | { kind: 'pass'; files: OutputFile[]; ui: Record<string, unknown> | null }
   | { kind: 'pause'; files: OutputFile[] }
 
@@ -38,6 +38,9 @@ export async function planNode(ctx: PlanContext): Promise<NodePlan> {
     const v = inputs[name]
     return isLink(v) ? ctx.filesFrom(v) : []
   }
+  // The first file of the linked node, or null. Python sends only the first
+  // frame of an IMAGE batch (_image_tensor_to_data_url); so does the runner.
+  const linkedFirstFile = (name: string): OutputFile | null => linked(name)[0] ?? null
 
   switch (node.class_type) {
     case 'GenerateImageNode': {
@@ -67,7 +70,7 @@ export async function planNode(ctx: PlanContext): Promise<NodePlan> {
         refs,
       })
       return {
-        kind: 'provider', endpoint: imageAppFor(desc, refs), payload, media: 'image', prefix: 'generate_image',
+        kind: 'provider', provider: 'fal', endpoint: imageAppFor(desc, refs), payload, media: 'image', prefix: 'generate_image',
         uiFor: files => ({ images: files, animated: [false] }),
       }
     }
@@ -76,7 +79,7 @@ export async function planNode(ctx: PlanContext): Promise<NodePlan> {
       const id = resolveVideoModelId(inputs.model)
       const desc = RUNNER_VIDEO_MODELS[id]
       if (!desc) throw new Error(`Unknown video model: ${String(inputs.model)}`)
-      const first = linked('image')[0]
+      const first = linkedFirstFile('image')
       const image = first ? await ctx.toUrl(first) : null
       const payload = desc.build({
         prompt: asText(inputs.prompt),
@@ -88,7 +91,7 @@ export async function planNode(ctx: PlanContext): Promise<NodePlan> {
       })
       const fn = falVideoFn(payload, desc.fnByMode)
       return {
-        kind: 'provider', endpoint: fn ? `${desc.app}/${fn}` : desc.app, payload, media: 'video', prefix: 'generate_video',
+        kind: 'provider', provider: 'fal', endpoint: fn ? `${desc.app}/${fn}` : desc.app, payload, media: 'video', prefix: 'generate_video',
         // GenerateVideoNode shows nothing itself; the Video card after it does.
         uiFor: () => null,
       }

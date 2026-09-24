@@ -6,7 +6,8 @@
  * failed or paused at a Gate. Money is held per take before a leg starts and
  * charged exactly when it ends. See docs/superpowers/specs/2026-09-22-sailor-runner-and-gate-design.md.
  */
-import { isRunnerEligible } from '#shared/runner/eligibility'
+import { PROVIDER_TYPES, isRunnerEligible } from '#shared/runner/eligibility'
+import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import {
   GATE_CLASS, dependenciesOf, downstreamNodes, legNodes, upstreamStage,
   type ApiPrompt, type TakeGateState,
@@ -19,15 +20,15 @@ import { falImageUrls, falVideoUrl, isFalNetworkError, percentFromLogs, type Fal
 import { planNode } from './executors'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, type OwnershipCheck } from './inputs'
-import { hasOutputNode, nodeCredits, stageEstimate, type Metering } from './metering'
+import { hasOutputNode, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
 import { ev, type RunEvents } from './events'
 import type { Handoff } from './handoff'
 import { extFor, type ResultStore } from './results'
 import { runIdOf, userKeyOf, type RunStore } from './store'
 import {
   emptyNodeRecord, stageKeyOf,
-  type LegAction, type LegRecord, type NodeRecord, type OutputFile, type RunRecord, type RunStatus,
-  type StageCharge, type TakeRecord,
+  type LegAction, type LegRecord, type NodeRecord, type OutputFile, type PendingRequest, type RunRecord, type RunStatus,
+  type RunnerProvider, type StageCharge, type TakeRecord,
 } from './types'
 
 export class RunStopped extends Error {
@@ -100,6 +101,8 @@ export interface EngineDeps {
   records: { write(s: StageRecordSummary): Promise<void> }
   download(url: string): Promise<{ bytes: Uint8Array; contentType: string | null }>
   hosted(): boolean
+  /** The runner families switched on, server side (the authority). None when absent. */
+  families?(): ReadonlySet<RunnerFamily>
   webhookUrl(): string | null
   now(): number
   sleep(ms: number, signal: AbortSignal): Promise<void>
@@ -146,10 +149,11 @@ interface LiveRun {
   saving: Promise<void>
 }
 
-const GENERATORS = new Set(['GenerateImageNode', 'GenerateVideoNode'])
 /** Provider calls one user may have queued or in flight across all their runs. */
 export const MAX_QUEUED_CALLS = 32
 const refuse = (message: string, status: number, data?: unknown) => new MeterRefusalError(message, status, data)
+/** A request saved before requests named their provider went to fal. */
+const providerOf = (req: PendingRequest): RunnerProvider => req.provider ?? 'fal'
 
 /** Larger than this, the workflow is not stored (Open workflow then falls back, with its toast). */
 export const MAX_STORED_WORKFLOW_CHARS = 2_000_000
@@ -286,6 +290,15 @@ export function createEngine(deps: EngineDeps) {
   // window only applies it to that canvas (and ignores other projects' runs).
   const forCanvas = (run: RunRecord, m: RunnerMessage): RunnerMessage => ({ ...m, data: { ...m.data, canvas_id: run.canvasId } })
   const publish = (run: RunRecord, m: RunnerMessage) => deps.events.publish(userKeyOf(run.userId), forCanvas(run, m))
+
+  /** The queue client for a provider. Only fal exists so far. */
+  function clientFor(provider: RunnerProvider): FalClient {
+    if (provider === 'fal') return deps.fal
+    throw new Error('Replicate is not available yet')
+  }
+  async function cancelRequest(req: PendingRequest): Promise<unknown> {
+    return clientFor(providerOf(req)).cancel(req.cancelUrl)
+  }
 
   function entryFor(run: RunRecord): LiveRun {
     let e = live.get(run.id)
@@ -501,7 +514,7 @@ export function createEngine(deps: EngineDeps) {
     const outputs: OutputFile[] = []
     for (const id of legIds) {
       const rec = take.nodes[id]!
-      if (rec.status === 'done' && !rec.reused && GENERATORS.has(rec.classType)) outputs.push(...rec.outputs.filter(f => f.type === 'output'))
+      if (rec.status === 'done' && !rec.reused && PROVIDER_TYPES.has(rec.classType)) outputs.push(...rec.outputs.filter(f => f.type === 'output'))
     }
     if (outputs.length) {
       const nodeTypes = [...new Set(legIds.filter(id => take.nodes[id]!.status === 'done').map(id => take.nodes[id]!.classType))]
@@ -582,8 +595,9 @@ export function createEngine(deps: EngineDeps) {
         // A Stop can land while the slot is being handed over; nothing may go out after it.
         if (signal.aborted) throw new RunStopped()
         if (!rec.request) {
-          const sub = await deps.fal.submit(plan.endpoint, plan.payload, { webhookUrl: deps.webhookUrl() })
+          const sub = await clientFor(plan.provider).submit(plan.endpoint, plan.payload, { webhookUrl: deps.webhookUrl() })
           rec.request = {
+            provider: plan.provider,
             requestId: sub.requestId, statusUrl: sub.statusUrl, responseUrl: sub.responseUrl,
             cancelUrl: sub.cancelUrl, submittedAt: deps.now(), queuePosition: sub.queuePosition,
           }
@@ -622,7 +636,7 @@ export function createEngine(deps: EngineDeps) {
         rec.error = null
         // Stop may have landed while this request was being sent, before
         // Stop could see its id: cancel it here so nothing is left at fal.
-        if (rec.request) await deps.fal.cancel(rec.request.cancelUrl).catch(() => {})
+        if (rec.request) await cancelRequest(rec.request).catch(() => {})
       }
       else { rec.status = 'error'; rec.error = plainError(e) }
       rec.endedAt = deps.now()
@@ -632,6 +646,7 @@ export function createEngine(deps: EngineDeps) {
 
   async function waitForResult(run: RunRecord, rec: NodeRecord, stageKey: string, nodeId: string, media: 'image' | 'video', signal: AbortSignal): Promise<unknown> {
     const req = rec.request!
+    const client = clientFor(providerOf(req))
     const deadline = req.submittedAt + (media === 'video' ? deps.timeouts.videoMs : deps.timeouts.imageMs)
     let attempt = 0
     // Only a real answer from fal counts as having asked: a blip says nothing.
@@ -645,7 +660,7 @@ export function createEngine(deps: EngineDeps) {
       // Ask fal at least once before giving up: after a restart the request
       // may already have finished while the server was down.
       if (asked && deps.now() > deadline) {
-        await deps.fal.cancel(req.cancelUrl).catch(() => {})
+        await client.cancel(req.cancelUrl).catch(() => {})
         throw new Error(media === 'video'
           ? 'The video took longer than 30 minutes, so it was cancelled'
           : 'The image took longer than 5 minutes, so it was cancelled')
@@ -658,11 +673,11 @@ export function createEngine(deps: EngineDeps) {
       // after a restart the deadline is measured from the original submit
       // time, and a real answer waiting at fal must still be fetched.
       if (attempt > 0 && deps.now() > deadline + GRACE_MS) {
-        await deps.fal.cancel(req.cancelUrl).catch(() => {})
+        await client.cancel(req.cancelUrl).catch(() => {})
         throw new Error('The provider did not answer, so the request was cancelled')
       }
       let s: FalStatus
-      try { s = await deps.fal.status(req.statusUrl, { logs: started }) }
+      try { s = await client.status(req.statusUrl, { logs: started }) }
       catch (e) {
         if (!isFalNetworkError(e)) throw e
         s = { status: 'UNKNOWN', queuePosition: null, logs: [], error: null, transient: true, raw: null }
@@ -693,7 +708,7 @@ export function createEngine(deps: EngineDeps) {
           if (s.error) throw new Error(s.error)
           // fal has made (and billed) it: a network error fetching it is tried
           // again on the next turn, until the time limit.
-          try { return await deps.fal.result(req.responseUrl) }
+          try { return await client.result(req.responseUrl) }
           catch (e) { if (!isFalNetworkError(e)) throw e }
         }
         else {
@@ -705,7 +720,7 @@ export function createEngine(deps: EngineDeps) {
   }
 
   // ── Public API ─────────────────────────────────────────────────────────
-  /** Generator calls this user has waiting or running, across the running legs of their runs. */
+  /** Provider calls this user has waiting or running, across the running legs of their runs. */
   function queuedCalls(userId: string | null): number {
     let n = 0
     for (const { run } of live.values()) {
@@ -719,7 +734,7 @@ export function createEngine(deps: EngineDeps) {
           for (const id of charge.nodeIds ?? stageNodeIds(take, charge, leg.index)) {
             const rec = take.nodes[id]
             if (!rec) continue
-            if (GENERATORS.has(rec.classType) && (rec.status === 'waiting' || rec.status === 'running')) n++
+            if (PROVIDER_TYPES.has(rec.classType) && (rec.status === 'waiting' || rec.status === 'running')) n++
           }
         }
       }
@@ -731,12 +746,27 @@ export function createEngine(deps: EngineDeps) {
     const takes = i.takes
     if (!Array.isArray(takes) || !takes.length) throw refuse('There is nothing to run', 400)
     if (takes.length > deps.maxTakes) throw refuse(`At most ${deps.maxTakes} versions can run at once`, 400)
+    // The server's families decide; a browser that disagrees is refused.
+    const families = deps.families?.() ?? NO_FAMILIES
     for (const p of takes) {
-      if (!p || typeof p !== 'object' || !isRunnerEligible(p as ApiPrompt)) throw refuse('This workflow can’t run on the Sailor runner', 400)
+      if (!p || typeof p !== 'object' || !isRunnerEligible(p as ApiPrompt, families)) throw refuse('This workflow can’t run on the Sailor runner', 400)
     }
     const prompts = takes as ApiPrompt[]
+    // Fail closed on price, before anything is held: a provider node that
+    // prices at 0 (a class the price book misses by name) never runs free.
+    if (deps.hosted()) {
+      for (const p of prompts) {
+        let unpriced: string | null
+        try { unpriced = unpricedProviderNode(p) }
+        catch (e) {
+          if (e instanceof UnpricedGraphError) throw refuse('A model in this workflow has no price yet', 500)
+          throw e
+        }
+        if (unpriced != null) throw refuse('This step has no price yet, so it can\'t run', 500, { nodeId: unpriced, classType: p[unpriced]!.class_type })
+      }
+    }
     const noGates: TakeGateState = { done: new Set(), open: new Set(), dropped: new Set() }
-    const wanted = prompts.reduce((n, p) => n + [...legNodes(p, noGates)].filter(id => GENERATORS.has(p[id]!.class_type)).length, 0)
+    const wanted = prompts.reduce((n, p) => n + [...legNodes(p, noGates)].filter(id => PROVIDER_TYPES.has(p[id]!.class_type)).length, 0)
     if (queuedCalls(i.userId) + wanted > MAX_QUEUED_CALLS) throw refuse('You have too many runs waiting. Try again when one finishes.', 429)
     await deps.metering.spendGuard(i.userId)
     const files = new Map<string, OutputFile>()
@@ -822,7 +852,7 @@ export function createEngine(deps: EngineDeps) {
       const cancels: Promise<unknown>[] = []
       for (const t of e.run.takes) {
         for (const n of Object.values(t.nodes)) {
-          if (n.status === 'running' && n.request) cancels.push(deps.fal.cancel(n.request.cancelUrl).catch(() => {}))
+          if (n.status === 'running' && n.request) cancels.push(cancelRequest(n.request).catch(() => {}))
         }
       }
       await Promise.all(cancels)
@@ -895,7 +925,7 @@ export function createEngine(deps: EngineDeps) {
     const legIndex = charge?.leg ?? 0
     const ran = Object.entries(take.nodes).filter(([, n]) => n.leg === legIndex)
     const texts = ran
-      .filter(([, n]) => GENERATORS.has(n.classType))
+      .filter(([, n]) => PROVIDER_TYPES.has(n.classType))
       .map(([id]) => extractGraphPromptText({ [id]: take.prompt[id]! }))
       .filter(Boolean)
     return {

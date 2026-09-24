@@ -7,7 +7,10 @@
  *   NUXT_RUNNER_ENABLED=true                 server side on (routes, engine, plugin)
  *   NUXT_PUBLIC_RUNNER_ENABLED=true          browser routing on (runtimeConfig.public)
  *   NUXT_RUNNER_WEBHOOK_BASE_URL=https://…   public origin fal can reach; unset locally
+ *   NUXT_RUNNER_FAMILIES=fal-edit,…          families the server takes (the authority)
  */
+import { NO_FAMILIES, parseFamilies, type RunnerFamily } from '#shared/runner/families'
+
 function truthy(v: string | undefined): boolean {
   if (typeof v !== 'string') return false
   const s = v.trim().toLowerCase()
@@ -16,6 +19,12 @@ function truthy(v: string | undefined): boolean {
 
 export function runnerEnabled(): boolean {
   return truthy(process.env.NUXT_RUNNER_ENABLED)
+}
+
+/** The families switched on, server side. None while the runner itself is off. */
+export function runnerFamilies(): ReadonlySet<RunnerFamily> {
+  if (!runnerEnabled()) return NO_FAMILIES
+  return parseFamilies(process.env.NUXT_RUNNER_FAMILIES)
 }
 
 export function webhookBaseUrl(): string | null {

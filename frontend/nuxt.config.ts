@@ -56,6 +56,10 @@ export default defineNuxtConfig({
       // Sailor runner routing (docs/superpowers/specs/2026-09-22-sailor-runner-and-gate-design.md).
       // Off by default; NUXT_PUBLIC_RUNNER_ENABLED=true turns it on at runtime.
       runnerEnabled: false,
+      // Runner families the browser routes to the runner: a comma list, e.g.
+      // NUXT_PUBLIC_RUNNER_FAMILIES=fal-edit. Empty = none. Works only with
+      // runnerEnabled on; the server's NUXT_RUNNER_FAMILIES is the authority.
+      runnerFamilies: '',
       // Client Sentry DSN — present ONLY when NUXT_PUBLIC_SENTRY_DSN is set
       // (hosted). Conditionally spread so local boot carries no sentry key and
       // stays byte-identical; sentry.client.config.ts reads it. See below.

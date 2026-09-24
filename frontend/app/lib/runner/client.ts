@@ -7,6 +7,7 @@ import type { ApiPrompt } from '#shared/runner/graph'
 import type { GateChoice } from '#shared/runner/messages'
 import { isRunnerPromptId } from '#shared/runner/messages'
 import { isRunnerEligible } from '#shared/runner/eligibility'
+import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 
 export interface PausedGateView { runId: string; promptId: string; nodeId: string; choices: GateChoice[]; picked: number[] }
 export interface RunnerRecordView {
@@ -23,8 +24,9 @@ export interface RunnerRecordView {
 }
 export interface LegStarted { runId: string; legId: string; promptIds: string[] }
 
-export function shouldUseRunner(enabled: boolean, prompts: Array<ApiPrompt | null | undefined>): boolean {
-  return enabled && prompts.length > 0 && prompts.every(p => !!p && isRunnerEligible(p))
+/** `families`: the browser's copy of the switched-on families (the server's list is the authority). */
+export function shouldUseRunner(enabled: boolean, prompts: Array<ApiPrompt | null | undefined>, families: ReadonlySet<RunnerFamily> = NO_FAMILIES): boolean {
+  return enabled && prompts.length > 0 && prompts.every(p => !!p && isRunnerEligible(p, families))
 }
 
 export function runIdOfPrompt(promptId: unknown): string | null {
