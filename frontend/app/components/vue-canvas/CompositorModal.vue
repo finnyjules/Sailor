@@ -1032,8 +1032,13 @@ const layoutVary = useLayoutVary({
 // Make a set (Stage 5): the set sheet — the Frame's layout planned at each ticked format, on open
 // and whenever the ticks change. Planning never writes the Frame.
 const layoutSet = useLayoutSet({ formats: () => layoutVary.setFormats.value, plan: f => layoutVary.planSet(f) })
-// TODO(Stage 5 Task 4): send this format's Frame to the canvas as a new Frame node.
-function onLayoutSetSend(_formatId: string) {}
+// Send to canvas (Stage 5 Task 4): this format's Frame as a new, independent Frame node beside this
+// one. The canvas owns the graph, so it is asked (`sailor:frameSendToCanvas`); this Frame is not written.
+function onLayoutSetSend(formatId: string) {
+  const entry = layoutSet.entries.value.find(e => e.formatId === formatId)
+  if (!entry?.plan || !entry.layers) return
+  window.dispatchEvent(new CustomEvent('sailor:frameSendToCanvas', { detail: { nodeId: props.nodeId, entry } }))
+}
 // Download the set (Stage 5 Task 3): each format something fits, rendered by the same static path
 // Download PNG takes, at the format's own size, zipped as `<frame-name>_set_<timestamp>.zip`.
 function onLayoutSetDownload() {

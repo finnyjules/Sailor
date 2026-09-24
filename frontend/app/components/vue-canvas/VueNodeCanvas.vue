@@ -8,6 +8,7 @@ import { ARTIFACT_NODE_COMPONENTS, ARTIFACT_NODE_FOR_OUTPUT, fetchObjectInfo, ge
 import { useSubgraphNavigation } from '~/composables/useSubgraphNavigation'
 import { matchStylesInText, type CanvasSnapshot, type StyleLite } from '~/lib/agent/surfaces/canvas'
 import { planFrameFromSelection, MAX_FRAME_LAYERS } from '~/lib/canvas/combineFrame'
+import { frameCardSize, placeRightOf, sentFrameData, sentFrameEdges, sentFrameToast } from '~/lib/frame/layoutSetSend'
 import { computeRunLeafIds } from '~/lib/canvas/runLeaves'
 import { edgeTopologyKey } from '~/lib/canvas/edgeTopologyKey'
 import type { Command } from '~/lib/agent/commandSurface'
@@ -3464,6 +3465,25 @@ function handleMoodboardUnwire(e: Event) {
  *  out with it — otherwise the backend keeps compositing pixels the editor no
  *  longer shows. The Frame surfaces dispatch this because only the canvas owns
  *  the graph's edges. `slot` is the 0-based input-port index. */
+/** Make a set (Stage 5): the Frame editor's set sheet sends one format of the set here as a NEW,
+ *  independent Frame node — the source's data copied (as ⌘D copies it), sized to the format with
+ *  its preset stored, the planned layers and layout remembered (`sentFrameData`); each wired slot
+ *  keeps its wire (`sentFrameEdges`); placed right of the source past any card already there
+ *  (`placeRightOf`). The source is not written. Node + edges land in one tick: one undo step. */
+function handleFrameSendToCanvas(e: Event) {
+  const detail = (e as CustomEvent<{ nodeId: string; entry: import('~/lib/frame/patterns/kit/set').SetEntry }>).detail
+  const src = (nodes.value as any[]).find(n => String(n.id) === String(detail?.nodeId))
+  if (!src || !detail?.entry) return
+  const data = sentFrameData(src.data, detail.entry)
+  if (!data) return
+  const id = mintNodeId()
+  const size = frameCardSize(data.properties?.sailor_frame?.displayEdge, detail.entry.w, detail.entry.h)
+  const position = placeRightOf(src, nodes.value as any[], size)
+  nodes.value.push({ id, type: src.type, position, selected: false, data } as any)
+  edges.value.push(...(sentFrameEdges(String(src.id), id, edges.value as any[]) as any[]))
+  toast(sentFrameToast(src.data, detail.entry))
+}
+
 function handleFrameUnwireSlot(e: Event) {
   const detail = (e as CustomEvent<{ nodeId: string; slot: number }>).detail
   if (!detail?.nodeId || !Number.isInteger(detail.slot)) return
@@ -5236,6 +5256,7 @@ onMounted(() => {
   window.addEventListener('sailor:moodboardWire', handleMoodboardWire)
   window.addEventListener('sailor:moodboardUnwire', handleMoodboardUnwire)
   window.addEventListener('sailor:frameUnwireSlot', handleFrameUnwireSlot)
+  window.addEventListener('sailor:frameSendToCanvas', handleFrameSendToCanvas)
   window.addEventListener('sailor:openTextureStudio', handleOpenTextureStudio)
   // Texture Studio output is generic (sourceNodeId/nodeType/widgetOverrides) — reuse the Space Type handler.
   window.addEventListener('sailor:textureStudioOutput', handleSpaceTypeOutput)
@@ -5314,6 +5335,7 @@ onUnmounted(() => {
   window.removeEventListener('sailor:moodboardWire', handleMoodboardWire)
   window.removeEventListener('sailor:moodboardUnwire', handleMoodboardUnwire)
   window.removeEventListener('sailor:frameUnwireSlot', handleFrameUnwireSlot)
+  window.removeEventListener('sailor:frameSendToCanvas', handleFrameSendToCanvas)
   window.removeEventListener('sailor:openTextureStudio', handleOpenTextureStudio)
   window.removeEventListener('sailor:textureStudioOutput', handleSpaceTypeOutput)
   window.removeEventListener('sailor:openShaderStudio', handleOpenShaderStudio)
