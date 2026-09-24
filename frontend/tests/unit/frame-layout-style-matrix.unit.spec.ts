@@ -182,6 +182,17 @@ describe('style matrix — each style\'s layouts through the real planner', () =
     if (process.env.STYLE_MATRIX_DUMP) writeFileSync(process.env.STYLE_MATRIX_DUMP, JSON.stringify({ checked, offered: Object.fromEntries(results) }, null, 1))
   })
 
+  it('300×250 with a logo and no action: the Stage 3 layouts\' own count is still 1 (Price tag)', () => {
+    // Task 4 fix round 1: Offer first (Stage 4, `needsContent`) lifted this combination to the floor;
+    // without the Stage 4 layouts it offers exactly what it did before.
+    const stage4 = new Set(CATALOG.filter(l => l.needsContent).map(l => l.id))
+    for (const kind of KINDS) {
+      const offered = results.get(keyOf({ style: 'performance', frame: 'ad-300x250', kind, image: true, action: false, logo: true }))
+      expect(offered, kind).toBeDefined()
+      expect(offered!.filter(id => !stage4.has(id)), kind).toEqual(['perfPriceTag'])
+    }
+  })
+
   it('every EXPECTED_THIN entry names a frame of the matrix', () => {
     for (const e of EXPECTED_THIN) expect(FRAMES.some(f => f.id === e.frame), e.frame).toBe(true)
   })

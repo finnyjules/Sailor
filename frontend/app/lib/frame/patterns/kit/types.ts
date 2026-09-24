@@ -20,8 +20,10 @@ export interface TextEl extends Base { k: 't'; s: string; x: number; w?: number;
   /** Set in capitals: measured upper-cased, and toOps writes `textTransform: 'uppercase'`. */
   upper?: boolean }
 export interface PhotoEl extends Base { k: 'p'; x: number; y: number; w: number; h: number; stand?: boolean; filter?: string; radius?: number }
-export interface CircleEl extends Base { k: 'c'; cx: number; cy: number; r: number; color?: Colour; photo?: boolean }
-export interface RectEl extends Base { k: 'r'; x: number; y: number; w: number; h: number; color?: Colour; rot?: number; radius?: number }
+/** `prefer` (ruling R12, Task 4 fix round 1): the role the contrast picker tries FIRST for an owned
+ *  piece that carries text — kept only if it passes the same thresholds, else the picker's own order. */
+export interface CircleEl extends Base { k: 'c'; cx: number; cy: number; r: number; color?: Colour; photo?: boolean; prefer?: Colour }
+export interface RectEl extends Base { k: 'r'; x: number; y: number; w: number; h: number; color?: Colour; rot?: number; radius?: number; prefer?: Colour }
 export interface RuleEl extends Base { k: 'l'; x: number; y: number; w: number }
 export interface RingEl extends Base { k: 'ring'; cx: number; cy: number; R: number; size: number; s: string }
 export interface MissingEl { k: 'missing'; why?: string }

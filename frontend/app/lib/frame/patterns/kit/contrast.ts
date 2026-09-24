@@ -223,7 +223,11 @@ export function pieceFills(els: El[], S: Sheet, ctx: FillCtx): PieceFills {
       : kind === 'shape' ? [color ?? 'accent', ...PANEL_ORDER.filter(r => r !== (color ?? 'accent'))]
         : PANEL_ORDER
     const standOut = kind === 'tag' || kind === 'sticker'
-    const fill = pickFill(order, colours, ctx.palette, standOut)
+    // Ruling R12 (Task 4 fix round 1): a piece's preferred role is tried first, under the same
+    // thresholds; failing, the picker's own order follows. No `prefer`: the order is unchanged.
+    const prefer = p.k === 'r' || p.k === 'c' ? p.prefer : undefined
+    const tryOrder = prefer ? [prefer, ...order.filter(r => r !== prefer)] : order
+    const fill = pickFill(tryOrder, colours, ctx.palette, standOut)
     // Ruling R12: a tag or a sticker tries plain paper before refusing. Bands, cards, panels and
     // Swiss shapes stay role-only.
     const plain = !fill && standOut ? pickPlain(colours, ctx.palette) : null

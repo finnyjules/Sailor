@@ -72,7 +72,11 @@ const strip = computed(() => {
 /** The lines not shown, quoted: the first 24 characters of each, cut with an ellipsis. The
  *  format's hidden levels, then the lines the current layout does not place (a style layout —
  *  Strip places no fine print). Only the format: Stage 2's words ("in this format"). */
-const quote = (t: string) => `“${t.length > 24 ? `${t.slice(0, 24).trimEnd()}…` : t}”`
+const quote = (t: string) => {
+  const s = t.length > 24 ? `${t.slice(0, 24).trimEnd()}…` : t
+  // A line that opens with its own quotation mark (a review's quote) is not wrapped in a second pair.
+  return /^[“"«‘']/.test(t) ? s : `“${s}”`
+}
 const fold = (t: string) => t.trim().split(/\s+/).join(' ')
 const notPlaced = computed(() => (current.value?.plan.notPlaced ?? []).map(n => fold(n.text)).filter(Boolean))
 const notShown = computed(() => {

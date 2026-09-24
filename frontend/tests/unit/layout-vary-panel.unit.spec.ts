@@ -95,6 +95,11 @@ describe('LayoutVaryPanel — lines not shown', () => {
     expect(wrap.get('[data-testid="layout-not-shown"]').text()).toBe('Not shown: “Offer ends 12 October.”.')
   })
 
+  it('a line that opens with its own quotation mark is not wrapped in a second pair', () => {
+    const wrap = mount(LayoutVaryPanel, { props: { ...base, format: null, candidates: [cand(['“Lightest shoe I have ever raced in.”', '"Fast"', 'Offer ends'])] }, global: { stubs } })
+    expect(wrap.get('[data-testid="layout-not-shown"]').text()).toBe('Not shown: “Lightest shoe I have ev…, "Fast", “Offer ends”.')
+  })
+
   it('nothing left out: no line', () => {
     const wrap = mount(LayoutVaryPanel, { props: { ...base, format: null, candidates: [cand([])] }, global: { stubs } })
     expect(wrap.find('[data-testid="layout-not-shown"]').exists()).toBe(false)

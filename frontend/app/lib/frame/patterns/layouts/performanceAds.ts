@@ -78,9 +78,9 @@ export const perfOfferFirst: LayoutDef = {
       ? { k: 'p', x: 0, y: blockB, w: W, h: H - blockB, stand: !ph, role: 'photo', ok: true, bleed: true }
       : noRoom
     return {
-      els: [photo, { k: 'r', x: 0, y: 0, w: W, h: blockB, color: 'accent', role: 'panel', ok: true, bleed: true }, ...blk,
+      els: [photo, { k: 'r', x: 0, y: 0, w: W, h: blockB, color: 'accent', prefer: 'accent', role: 'panel', ok: true, bleed: true }, ...blk,
         band('bottom', foot.top, H), ...foot.els],
-      did: 'The number leads on a solid panel of colour; the product fills the rest, with the button at the foot.',
+      did: 'The number leads on a solid panel at the top — in the accent colour when the text reads on it; the product fills the rest, with the button at the foot.',
     }
   },
 }
@@ -98,8 +98,8 @@ export const perfStat: LayoutDef = {
     const ss = Math.min(fitSize([st.value], SPAN(1, 12) * 0.8, inFace(DISPLAY, 'stat')), RH * 3.6 / CAP)
     // The prototype's optical nudge (0.03 × the size to the left) — only on the kit's own margin. A
     // wider one is a platform's side keep-clear (a story) or the Frame's grid: there the margin wins,
-    // as inside a panel (the nudge put "198 g" 1.2 under a story's side bar).
-    const nudge = S.M <= Math.min(4, S.H * 0.06) + 1e-6 ? 0.03 * ss : 0
+    // as inside a panel (the nudge put "198 g" under a story's side bar).
+    const nudge = S.defaultMargin ? 0.03 * ss : 0
     els.push(disp(st.value, { size: ss, x: X(1) - nudge, top: y, color: 'accent', role: 'stat' }))
     y += CAP * ss + gapBelow(ss) * 0.5
     // The stat's own line, else the headline (the prototype's `c.statLine || c.title`).

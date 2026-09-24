@@ -242,6 +242,20 @@ describe('what each layout places (rulings R4, R5, R10)', () => {
     expect(plan.notPlaced.map(n => n.role).sort()).toEqual(['by', 'list', 'quote', 'rating', 'stat', 'statline', 'them'])
   })
 
+  it('Offer first\'s panel prefers the accent (ruling R12): accent when the text reads on it, else the picker\'s own order', () => {
+    const panelFill = (pal: typeof palette) => {
+      const a = { ...argsFor('perfOfferFirst', square, fullAdLayers({ action: true })), palette: pal }
+      const cand = candidatesForFrame(a)[0]!
+      const plan = planLayout({ ...a, choice: cand.choice })!
+      return (plan.layers.find(l => (l as { owner?: { key: string } }).owner?.key === 'panel-0') as { fill?: unknown }).fill
+    }
+    // #111111 on #dd2200 reads (3.8:1): the preferred accent holds.
+    expect(panelFill(palette)).toBe(palette.accent)
+    // A dark accent does not carry #111111: the picker falls through to its own order (field first).
+    const dark = { ...palette, accent: '#2a2a2a' }
+    expect(panelFill(dark)).toBe(dark.field)
+  })
+
   it('Stat places the stat and its line; the number is left to the figure', () => {
     const { cand } = first('perfStat')
     expect(textOf(cand.out.els, 'stat').map(e => e.k === 't' && e.s)).toEqual(['198 g'])

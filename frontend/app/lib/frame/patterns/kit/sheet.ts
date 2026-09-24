@@ -36,6 +36,9 @@ export interface Sheet {
    *  cap-above/base-below metrics per role without re-deriving them. */
   measure: Measure
   W: number; H: number; M: number; G: number; NC: number; CW: number; RH: number; GAP: number; CAP: number; B: number
+  /** The margin is the kit's own (`min(4, 6% of H)`) — not the Frame's grid margin, and not widened
+   *  to a platform's side keep-clear (a story). Optical nudges past the margin apply only then. */
+  defaultMargin: boolean
   DISPLAY: Style; SECOND: Style & { size: number }; INFO: Style & { size: number }
   X(c: number): number; XR(c: number): number; SPAN(a: number, b: number): number; L(r: number): number; Xr(c: number): number
   w100(s: string, st?: Style): number
@@ -109,8 +112,10 @@ export function makeSheet(o: SheetOpts): Sheet {
   const H_full = 100 * o.frameH / o.frameW
   const H = o.composeH ?? H_full
   const B = Math.sqrt(W * H_full) / Math.sqrt(100 * 100 * 1280 / 895)   // size unit: 1 on the portrait poster — from the FULL height
-  let M = gridOn ? grid!.margin * 100 : Math.min(4, H * 0.06)
+  const kitM = Math.min(4, H * 0.06)
+  let M = gridOn ? grid!.margin * 100 : kitM
   if (o.format?.keepSide != null) M = Math.max(M, o.format.keepSide * 100)
+  const defaultMargin = !gridOn && M === kitM
   const NC = grid?.mode === 'explicit' ? grid.columns : (o.format?.nc ?? (H_full / W >= 0.7 ? 12 : W / H_full >= 2.5 ? 20 : 16))
   const G = gridOn ? grid!.gutter * 100 : 1.6 * B
   const CW = (W - 2 * M - (NC - 1) * G) / NC
@@ -307,7 +312,7 @@ export function makeSheet(o: SheetOpts): Sheet {
 
   return {
     measure,
-    W, H, M, G, NC, CW, RH, GAP, CAP, B,
+    W, H, M, G, NC, CW, RH, GAP, CAP, B, defaultMargin,
     DISPLAY, SECOND, INFO,
     X, XR, SPAN, L, Xr,
     w100, fitSize, sizeFor, blockH, countLines, breakLines, balance,
