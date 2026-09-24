@@ -15,7 +15,9 @@ import { clipPlayedSeconds, type ImageClip } from '~/lib/compositor/clip'
 import { deriveMasterClock } from '~/lib/compositor/masterClock'
 import type { FrameFit, FrameNotice, FrameVariant } from './types'
 
-export interface WiredSlotInfo { slot: number; layerId: string; label: string; animated: boolean }
+/** `fps`/`duration`: the slot's live frame source's clock, when it has one. An animated slot
+ *  with both plays as pre-rendered frames; one without stays a still. */
+export interface WiredSlotInfo { slot: number; layerId: string; label: string; animated: boolean; fps?: number; duration?: number }
 export interface FrameExportInput {
   variant: FrameVariant
   fit: FrameFit
@@ -41,6 +43,8 @@ export interface FramePlan {
   shaderIds: string[]
   depth: { ref: DepthRef; layerId: string; label: string }[]
   wiredStills: { slot: number; maxPx: number }[]
+  /** Animated wired slots, baked at export into `round(duration × fps)` frames. */
+  wiredClips: { slot: number; maxPx: number; fps: number; duration: number; label: string; layerId: string }[]
   notices: FrameNotice[]
 }
 
@@ -110,10 +114,14 @@ function collectStrings(value: unknown, out: Set<string>, depth = 0): void {
  *  motion; otherwise the nested loops' master clock — the editor's own `deriveMasterClock` over
  *  the image clips' played lengths (one clip: its length; several: the length they all complete
  *  whole cycles in, capped as the editor caps it). 4 s only when neither exists (a moving shader
- *  fill with no timeline of its own). */
-function loopSeconds(v: FrameVariant, clips: FramePlan['clips']): number {
+ *  fill with no timeline of its own). A wired clip is one of those nested loops, on its source's
+ *  own clock — as the editor's `liveMasterClock` counts it. */
+function loopSeconds(v: FrameVariant, clips: FramePlan['clips'], wiredClips: FramePlan['wiredClips']): number {
   if (v.motion && v.motion.duration > 0) return v.motion.duration
-  const clock = deriveMasterClock(clips.map(c => ({ duration: clipPlayedSeconds(c.clip), fps: c.clip.fps })))
+  const clock = deriveMasterClock([
+    ...clips.map(c => ({ duration: clipPlayedSeconds(c.clip), fps: c.clip.fps })),
+    ...wiredClips.map(c => ({ duration: c.duration, fps: c.fps })),
+  ])
   return clock && clock.duration > 0 ? clock.duration : 4
 }
 
@@ -140,6 +148,7 @@ export function planFrameExport(input: FrameExportInput): FramePlan {
   const clips: FramePlan['clips'] = []
   const depth: FramePlan['depth'] = []
   const wiredStills: FramePlan['wiredStills'] = []
+  const wiredClips: FramePlan['wiredClips'] = []
   const fontMap = new Map<string, FramePlan['fonts'][number]>()
 
   const addFont = (family: string | undefined, weight: number, text: string, outline: boolean) => {
@@ -171,9 +180,20 @@ export function planFrameExport(input: FrameExportInput): FramePlan {
       const wl = l as LocalLayer & { slot: number; w: number; lastAspect: number }
       const w = Number(wl.w) || 0
       const aspect = Number(wl.lastAspect) || 1
-      wiredStills.push({ slot: wl.slot, maxPx: Math.ceil(2 * Math.max(w, w * aspect) * v.width) })
+      const maxPx = Math.ceil(2 * Math.max(w, w * aspect) * v.width)
       const info = input.wiredSlots.find(s => s.layerId === l.id)
-      if (info?.animated) notices.push({ group: 'still', text: `${info.label} · shown as a still in this version`, layerId: l.id })
+      const fps = Number(info?.fps), duration = Number(info?.duration)
+      if (info?.animated && fps > 0 && duration > 0) {
+        // Baked from the slot's live frame source. A cloned wired layer shows one picture per slot
+        // per moment in the editor, so one clip per slot is what every copy draws.
+        const same = wiredClips.find(c => c.slot === wl.slot)
+        if (same) same.maxPx = Math.max(same.maxPx, maxPx)
+        else wiredClips.push({ slot: wl.slot, maxPx, fps, duration, label: info.label, layerId: l.id })
+        notices.push({ group: 'live', text: `${info.label} · plays as frames`, layerId: l.id })
+      } else {
+        wiredStills.push({ slot: wl.slot, maxPx })
+        if (info?.animated) notices.push({ group: 'still', text: `${info.label} · shown as a still in this version`, layerId: l.id })
+      }
     }
     const hasDof = effectStackOf(l as any).some(e => e.type === 'dof' && (e as { visible?: boolean }).visible !== false)
       || (l.kind === 'wired' && !!v.wiredTreatments[`l:${l.id}`]?.dof)
@@ -195,10 +215,10 @@ export function planFrameExport(input: FrameExportInput): FramePlan {
   }
   for (const id of revealEffectIdsFor(v.motion?.behaviours)) shaderIds.add(id)
 
-  const still = !input.hasMotion && !input.animatedFill && clips.length === 0
+  const still = !input.hasMotion && !input.animatedFill && clips.length === 0 && wiredClips.length === 0
   if (input.hasMotion) notices.push({ group: 'live', text: 'Everything you animated in the Motion tab' })
   if (input.animatedFill) notices.push({ group: 'live', text: 'Moving shader fills' })
-  const duration = still ? 1 : loopSeconds(v, clips)
+  const duration = still ? 1 : loopSeconds(v, clips, wiredClips)
   // A clip whose played length does not divide the Frame's loop jumps at the wrap. Said in the
   // sheet (spec, "Time"), not hidden behind an elapsed-time counter that would break scrubbing.
   if (!still) {
@@ -213,6 +233,13 @@ export function planFrameExport(input: FrameExportInput): FramePlan {
         text: `${label} loops every ${seconds(played)}, the Frame every ${seconds(duration)} — it restarts at the seam`,
       })
     }
+    for (const c of wiredClips) {
+      if (dividesEvenly(duration, c.duration)) continue
+      notices.push({
+        group: 'live', layerId: c.layerId,
+        text: `${c.label} loops every ${seconds(c.duration)}, the Frame every ${seconds(duration)} — it restarts at the seam`,
+      })
+    }
   }
 
   return {
@@ -220,6 +247,6 @@ export function planFrameExport(input: FrameExportInput): FramePlan {
     fillImages: collectFillImageSrcs(layers),
     fonts: [...fontMap.values()],
     shaderIds: [...shaderIds],
-    depth, wiredStills, notices,
+    depth, wiredStills, wiredClips, notices,
   }
 }

@@ -12,7 +12,8 @@ import { loadEmbedSurface } from '~/lib/embed/surfaces'
 import { exportEmbedHtml } from '~/lib/embed/export'
 import { fetchShaderFxCatalog } from '~/lib/shaderfx/catalog'
 import { effectReadsInput } from '~/lib/shaderfx/catalogStore'
-import { planFrameExport } from '~/lib/embed/frame/plan'
+import { planFrameExport, type WiredSlotInfo } from '~/lib/embed/frame/plan'
+import { createWiredLayer } from '~/lib/compositor/wiredLayer'
 import { buildFrameSnapshot } from '~/lib/embed/frame/gather'
 import { createAppFrameExportIO } from '~/lib/embed/frame/appIO'
 import type { FrameExportIO } from '~/lib/embed/frame/gather'
@@ -48,7 +49,7 @@ type Slot = 'a' | 'b'
 const handles: Partial<Record<Slot, EmbedHandle>> = {}
 /** The image fill's source, as the app stores one: a server URL the gatherer fetches. */
 const HARNESS_FILL_SRC = '/view?filename=harness-photo.png&type=input'
-const FIXTURES = ['vector', 'image', 'backdrop', 'still', 'fill', 'bleed', 'bleed-post', 'standin', 'shatter', 'boolean', 'outline', 'text-partner']
+const FIXTURES = ['vector', 'image', 'backdrop', 'still', 'fill', 'bleed', 'bleed-post', 'standin', 'shatter', 'boolean', 'outline', 'text-partner', 'wired-clip']
 /** The outline-font token the painter asks for when it draws 'Harness Font' from glyph outlines
  *  (compositorFontToken: not a system, curated or library family, so a Google-style token). */
 const HARNESS_OUTLINE_TOKEN = 'google:Harness Font@700'
@@ -137,6 +138,17 @@ onMounted(async () => {
       return real.fontSource(family, weight)
     },
     wiredStill: () => null,
+    // Task 7: a wired slot's loop, as the modal's pullSourceFrames would hand it over — here a
+    // disc going round, one position per frame, drawn at the size asked for.
+    async wiredFrames(_slot: number, count: number, maxPx: number) {
+      return Array.from({ length: count }, (_, i) => {
+        const [c, g] = canvasOf(maxPx, maxPx)
+        g.fillStyle = '#20183a'; g.fillRect(0, 0, maxPx, maxPx)
+        const a = (i / count) * Math.PI * 2, r = maxPx / 2
+        softDisc(g, r + Math.cos(a) * r * 0.55, r + Math.sin(a) * r * 0.55, r * 0.35, '#7ae0ff')
+        return c
+      })
+    },
   }
 
   // ── Fixtures ────────────────────────────────────────────────────────────────────────────────
@@ -147,7 +159,7 @@ onMounted(async () => {
     }
   }
 
-  function fixture(name: string): { variant: FrameVariant; hasMotion: boolean } {
+  function fixture(name: string): { variant: FrameVariant; hasMotion: boolean; wiredSlots?: WiredSlotInfo[] } {
     if (name === 'vector') {
       const rect = createRectLayer({ x: 0.3, y: 0.4, w: 0.3, h: 0.2 }) as any
       rect.fill = { ...DEFAULT_FILL, type: 'shader', shader: { effectId: fillEffect.id, params: {}, anchor: 'object', speed: 1, seed: 42, input: '#000000' } }
@@ -263,6 +275,16 @@ onMounted(async () => {
       rect.effects = [{ ...createEffect('boolean'), op: 'subtract', refLayerId: `l:${text.id}`, visible: true }]
       return { hasMotion: false, variant: variantOf(1000, 500, [text, rect], { background: '#1b4d3e' }) }
     }
+    if (name === 'wired-clip') {
+      // Task 7: an animated wired studio (a 3D scene, Space Type, Shader…) plays as frames baked
+      // from its live source — 6 frames over 1 s. Nothing else moves, so the Frame loops on it.
+      const w = createWiredLayer(0, { x: 0.5, y: 0.5, w: 0.4, lastAspect: 1 })
+      return {
+        hasMotion: false,
+        wiredSlots: [{ slot: 0, layerId: w.id, label: '3D scene', animated: true, fps: 6, duration: 1 }],
+        variant: variantOf(1000, 500, [w], { background: '#1b4d3e' }),
+      }
+    }
     if (name === 'bleed' || name === 'bleed-post') {
       // A rect half outside the artboard's right edge (artboard x 900..1100 of 1000): in a box
       // wider than the artboard, the part past x = 1000 must NOT paint into the bleed.
@@ -275,9 +297,9 @@ onMounted(async () => {
   }
 
   async function snapshot(name: string, over: { fit?: FrameFit } = {}): Promise<FrameSnapshot> {
-    const { variant, hasMotion } = fixture(name)
+    const { variant, hasMotion, wiredSlots } = fixture(name)
     const plan = planFrameExport({
-      variant, fit: over.fit ?? 'fit', wiredSlots: [], catalogIds, hasMotion, animatedFill: false,
+      variant, fit: over.fit ?? 'fit', wiredSlots: wiredSlots ?? [], catalogIds, hasMotion, animatedFill: false,
     })
     return await buildFrameSnapshot(plan, variant, io)
   }

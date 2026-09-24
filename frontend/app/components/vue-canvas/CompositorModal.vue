@@ -150,7 +150,7 @@ import MotionCopiesPanel from '~/components/vue-canvas/compositor/MotionCopiesPa
 import FrameWebExportSheet from '~/components/vue-canvas/compositor/FrameWebExportSheet.vue'
 import { planFrameExport, layerLabel } from '~/lib/embed/frame/plan'
 import { buildFrameSnapshot, isBlocked, formatBytes } from '~/lib/embed/frame/gather'
-import { createAppFrameExportIO } from '~/lib/embed/frame/appIO'
+import { createAppFrameExportIO, pullSourceFrames } from '~/lib/embed/frame/appIO'
 import type { FrameFit, FrameNotice, FrameVariant } from '~/lib/embed/frame/types'
 import { embedSnippet } from '~/lib/embed/snippet'
 import { exportEmbedHtml, downloadEmbed } from '~/lib/embed/export'
@@ -5056,6 +5056,9 @@ const webExport = reactive({
 })
 const webExportNotice = ref('')
 let webExportGen = 0
+/** Wired-clip pulls in flight: the live preview pulls from the same sources, so it is paused
+ *  while any runs (as bakeMotion pauses it) and resumed when the last one ends. */
+let webExportPulls = 0
 let webExportRebuildTimer: ReturnType<typeof setTimeout> | null = null
 let webExportCopiedTimer: ReturnType<typeof setTimeout> | null = null
 function clearWebExportTimers() {
@@ -5105,13 +5108,24 @@ async function buildWebExport() {
     const wiredSlots = variant.layers.filter(l => l.kind === 'wired').map((l) => {
       const slot = (l as { slot: number }).slot
       const live = layers.value.find(x => x.slot === slot + 1)?.live
-      return { slot, layerId: l.id, label: layerLabel(l), animated: !!live && live.duration > 0 }
+      return { slot, layerId: l.id, label: layerLabel(l), animated: !!live && live.duration > 0, fps: live?.fps, duration: live?.duration }
     })
     const plan = planFrameExport({
       variant, fit: webExport.fit, wiredSlots, catalogIds: new Set(cat.effects.map(e => e.id)),
       hasMotion: hasMotion.value, animatedFill: hasAnimatedShaderFill(buildStackItems(), background.value),
     })
-    const io = createAppFrameExportIO({ uploaded: uploadedFonts.value, wiredStill: wiredContentForSlot, catalog: cat.effects })
+    // An animated slot's loop is pre-rendered from its live frame source (`live` IS the slot's
+    // StudioFrameSource), frame by frame — see pullSourceFrames. A build a newer one overtook
+    // stops pulling at its next frame.
+    const io = createAppFrameExportIO({
+      uploaded: uploadedFonts.value, wiredStill: wiredContentForSlot, catalog: cat.effects,
+      wiredFrames: async (slot, count, maxPx) => {
+        if (webExportPulls++ === 0) stopLive()
+        try {
+          return await pullSourceFrames(layers.value.find(x => x.slot === slot + 1)?.live, count, maxPx, { stale: () => gen !== webExportGen })
+        } finally { if (--webExportPulls === 0 && !unmounted) startLive() }
+      },
+    })
     const snap = await buildFrameSnapshot(plan, variant, io)
     if (gen !== webExportGen) return
     webExport.notices = snap.notices

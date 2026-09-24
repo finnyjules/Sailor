@@ -45,6 +45,20 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   })
 }
 
+/**
+ * Which of a wired clip's frames shows at Frame time `tSec`: the clip loops on its OWN duration
+ * inside the Frame's loop (the editor's `slotPhase01`), frame `i` covering `[i, i + 1) / count` of
+ * it. The epsilon keeps a time computed as exactly a frame's start (0.1 × 3) from rounding down
+ * into the frame before.
+ */
+export function wiredClipFrameAt(entry: { frames: ArrayLike<unknown>; duration: number }, tSec: number): number {
+  const count = entry.frames.length
+  const d = entry.duration
+  if (!(count > 0) || !(d > 0) || !Number.isFinite(tSec)) return 0
+  const t = ((tSec % d) + d) % d
+  return Math.min(count - 1, Math.floor((t / d) * count + 1e-6))
+}
+
 /** The stack the painter draws, in the Frame's saved order. Only `l:` keys exist in a migrated
  *  Frame; the planner refuses a snapshot holding a legacy `w:` key. */
 export function stackItemsFor(v: FrameVariant): StackItem[] {
@@ -181,7 +195,14 @@ const frameSurface: EmbedSurface = {
       for (const d of snap.assets.depth) seedDepthImage(d.ref, await loadImage(d.dataUrl))
 
       const stills = new Map<number, HTMLImageElement>()
-      for (const [slot, entry] of Object.entries(snap.wired ?? {})) stills.set(Number(slot), await loadImage(entry.dataUrl))
+      const clips = new Map<number, { frames: HTMLImageElement[]; duration: number }>()
+      for (const [slot, entry] of Object.entries(snap.wired ?? {})) {
+        if (entry.kind === 'clip') {
+          const frames: HTMLImageElement[] = []
+          for (const f of entry.frames) frames.push(await loadImage(f))
+          clips.set(Number(slot), { frames, duration: entry.duration })
+        } else stills.set(Number(slot), await loadImage(entry.dataUrl))
+      }
 
       const layers = v.layers as LocalLayer[]
       await ensureLayerImages(layers, { keep: true })
@@ -202,7 +223,14 @@ const frameSurface: EmbedSurface = {
       if (!ctx) throw new Error('embed: no 2D context')
 
       const items = stackItemsFor(v)
-      const provider = (slot: number) => stills.get(slot) ?? null
+      // The Frame time (seconds) of the paint in progress: a wired clip's frame is picked from it,
+      // so every read inside one paint (box sizing and drawing) gets the same picture.
+      let paintSec = 0
+      const clipFrame = (slot: number) => {
+        const c = clips.get(slot)
+        return c ? c.frames[wiredClipFrameAt(c, paintSec)] ?? null : null
+      }
+      const provider = (slot: number) => stills.get(slot) ?? clipFrame(slot)
       let lastT = 0
 
       // The artboard-sized canvas the Frame is painted into (R11). One per handle, resized only
@@ -234,6 +262,7 @@ const frameSurface: EmbedSurface = {
       const paint = (t01: number) => {
         lastT = t01
         const tSec = t01 * snap.duration
+        paintSec = tSec
         const r = fitRect({ w: canvas.width, h: canvas.height }, { w: v.width, h: v.height }, snap.fit)
         const s = r.scale
         // Whole device pixels, so the blit below never resamples the Frame.

@@ -40,7 +40,13 @@ export interface FrameFontAsset {
   origin: FrameFontOrigin
 }
 
-export type WiredEntry = { kind: 'still'; dataUrl: string }
+/** A wired slot's pictures. `still`: one picture for every moment. `clip`: an animated studio's
+ *  loop pre-rendered at export — `frames[i]` is the source at `i / frames.length` of its own
+ *  `duration` (seconds); the adapter wraps the Frame's time on that duration, as the editor's
+ *  `slotPhase01` does. */
+export type WiredEntry =
+  | { kind: 'still'; dataUrl: string }
+  | { kind: 'clip'; frames: string[]; fps: number; duration: number }
 
 export interface FrameAssets {
   urls: Record<string, string>                 // assetKey(kind, key) → data URL

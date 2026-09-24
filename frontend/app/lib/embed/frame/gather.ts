@@ -31,6 +31,9 @@ export interface FrameExportIO {
   subsetFont(fontB64: string, text: string): Promise<string | null>
   fontSource(family: string, weight: number): FontSource | null
   wiredStill(slot: number): CanvasImageSource | null
+  /** `count` pictures of a wired slot's live source, frame `i` at `i / count` of its loop, each
+   *  at most `maxPx` on its long side. Each must stay valid after the next is pulled. */
+  wiredFrames(slot: number, count: number, maxPx: number): Promise<CanvasImageSource[]>
   depthImage(ref: DepthRef): CanvasImageSource | null
   shaderDefs(ids: string[]): EffectDef[]
 }
@@ -193,6 +196,19 @@ export async function buildFrameSnapshot(plan: FramePlan, variant: FrameVariant,
   for (const w of plan.wiredStills) {
     const src = io.wiredStill(w.slot)
     if (src) wired[w.slot] = { kind: 'still', dataUrl: await io.imageToDataUrl(src, w.maxPx, 'image/webp') }
+  }
+  // An animated wired slot: its loop, pre-rendered from the live source (the editor's
+  // `slotPhase01` timing — frame i at i / count). Frames that cannot be rendered BLOCK: a still in
+  // their place would be a plausible wrong picture.
+  for (const c of plan.wiredClips) {
+    const count = Math.max(1, Math.round(c.duration * c.fps))
+    try {
+      const imgs = await io.wiredFrames(c.slot, count, c.maxPx)
+      if (imgs.length !== count) throw new Error(`wired slot ${c.slot}: ${imgs.length} of ${count} frames`)
+      const frames: string[] = []
+      for (const img of imgs) frames.push(await io.imageToDataUrl(img, c.maxPx, 'image/webp'))
+      wired[c.slot] = { kind: 'clip', frames, fps: c.fps, duration: c.duration }
+    } catch { block(`${c.label} couldn't be rendered as frames.`, c.layerId) }
   }
 
   return {

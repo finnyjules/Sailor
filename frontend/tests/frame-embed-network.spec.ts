@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { openHarness, renderExported } from './_frameEmbedHelpers'
+import { openHarness, renderExported, pixelDiff } from './_frameEmbedHelpers'
 
 test.describe('Frame embed — zero network', () => {
   test.beforeEach(async ({ page }) => openHarness(page))
@@ -12,7 +12,8 @@ test.describe('Frame embed — zero network', () => {
   // never 'frame-lean' — see gather.ts's computeNeedsOutlines).
   // 'outline' / 'text-partner' (C1 / I1): outlined text and a text boolean partner — both reach
   // the outline-font loader, which must answer from the file, never /api/fonts/….
-  for (const name of ['vector', 'image', 'backdrop', 'still', 'fill', 'standin', 'shatter', 'boolean', 'outline', 'text-partner']) {
+  // 'wired-clip' (Task 7): an animated wired studio baked into frames inside the file.
+  for (const name of ['vector', 'image', 'backdrop', 'still', 'fill', 'standin', 'shatter', 'boolean', 'outline', 'text-partner', 'wired-clip']) {
     test(`the "${name}" export makes no request`, async ({ page, context }) => {
       const html = await page.evaluate(async (n) => {
         const H = (window as any).__frameEmbedHarness
@@ -22,6 +23,24 @@ test.describe('Frame embed — zero network', () => {
       expect(requests).toEqual([])
     })
   }
+
+  // Task 7: the wired clip PLAYS — the file's canvas differs between two moments — and it does so
+  // from the frames inside the file (the zero-request check above covers the same fixture).
+  test('an animated wired layer plays in the export instead of freezing', async ({ page, context }) => {
+    const html = await page.evaluate(async () => {
+      const H = (window as any).__frameEmbedHarness
+      const snap = await H.snapshot('wired-clip')
+      if (snap.wired[0]?.kind !== 'clip' || snap.wired[0].frames.length !== 6) throw new Error('the wired-clip fixture did not bake 6 frames')
+      if (snap.still) throw new Error('a Frame with a wired clip must not be a still')
+      return await H.exportHtml(snap)
+    })
+    const a = await renderExported(context, html, 0.1, { width: 1000, height: 500 })
+    const b = await renderExported(context, html, 0.6, { width: 1000, height: 500 })
+    expect(a.requests).toEqual([])
+    expect(b.requests).toEqual([])
+    const { differing } = await pixelDiff(page, a.png, b.png)
+    expect(differing).toBeGreaterThan(1000)
+  })
 
   // The gate on the gate: a snapshot with one inlined image removed must make the painter fall
   // back to the server URL, and this listener must see that request. Otherwise the tests above
