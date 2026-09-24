@@ -115,7 +115,17 @@ Spec `docs/superpowers/specs/2026-09-21-frame-web-export-design.md` (amended the
 
 **Final review wave (2026-09-23):** outline fonts are loaded before the first paint (a still with outlined text or a geometry effect on text used to draw plain text forever); a text layer used as a boolean/morph partner carries its outline font (it used to make a network request and lose the cut); the font subset holds the letters as drawn (uppercase etc.); a Frame whose only movement is an image clip loops on the clip's own length, and a clip that doesn't divide the loop says so in the sheet; the poster bake no longer swaps the editor's image cache to data URLs; editing while the sheet is open rebuilds the file; the canvas is capped at 16 M device pixels (Safari leaves a bigger one blank). Sheet: Escape closes only the sheet, Copy embed code waits for the file, confirms, and shows the code when the clipboard refuses, the sheet is a dialog, and Export embed is off while a video export runs. Measured per-frame cost of a moving shader-fill Frame: 8.6 ms at 1000×500, 10.8 ms at 2000×1000.
 
-**Next:** stage 2 (nesting — live Shader/Gradient/Space Type children inside an exported Frame); the Scene3D web-embed adapter (its own spec); Publish (a pasteable link instead of a download, needs the Fly deploy and a separate serving domain).
+**Next:** stage 2 (nesting — live Shader/Gradient/Space Type children inside an exported Frame); Publish (a pasteable link instead of a download, needs the Fly deploy and a separate serving domain).
+
+### 3D Studio on the web, Phase 1 — a scene exports as one self-contained HTML file, standalone and inside a Frame — LANDED 2026-09-23 (7 tasks + this check, subagent-driven, a review per task)
+
+Spec `docs/superpowers/specs/2026-09-23-scene3d-web-embed-design.md` (its own "Phase 1 as built" section has the full record); plan `docs/superpowers/plans/2026-09-23-scene3d-web-embed-phase1.md`; ledger `.superpowers/sdd/progress-scene3d-embed.md`.
+
+**What shipped:** **Export embed…** in 3D Studio's footer bakes the scene's loop into WebP frames (its own Output size, 2× Sharp option, 24/30 fps, optional cinematic) through a shared export renderer, then packs them into one HTML file that plays anywhere via a new generic `frames` embed player — matching the editor exactly, treatments, restyle and cinematic included, with named failures instead of silent placeholders. A wired 3D (or Shader/Gradient/Space Type) layer inside an exported Frame now **plays instead of freezing**, baked from its own live frame source at the size it's drawn at. Fixed along the way, confirmed by measurement rather than assumed: the floor grid was rendering into video exports and Frame previews (gone now); the Frame preview no longer blocks more than 4 seconds on a stalled asset; the editor keeps restyle across a reload.
+
+**Measured:** a Box scene, Output/30fps → 636 KB/120 frames; 2× Sharp → 1.8 MB; a 3D cube wired into a Frame → 1.9 MB/120 frames; a Space Type layer wired into a Frame → 28.5 MB/180 frames. Suites green end to end: `scene3d` 2027 tests, `embed` 643, `frame-embed` 130, `compositor` 1078, plus 26 Playwright network/parity specs — all first-run green.
+
+**Next:** Phase 2 (the live route + the size/route picker); Frame stage 2 nesting registers this player.
 
 ### Responsive Frames — slice 3, editing at a viewing size — LANDED 2026-09-23 (`7cdc586d5`..`95627c5cb`, 8 tasks + a final fix wave, 20 commits, subagent-driven, a review per task)
 

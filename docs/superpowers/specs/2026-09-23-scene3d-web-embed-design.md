@@ -281,3 +281,78 @@ interface Scene3DEmbedConfig { doc: SceneDoc; assets: Record<string, string>; sh
 - The WebP quality that keeps a 4-second 1024² loop near the 3–10 MB estimate.
 - For Frame stage 2: whether `drawImage` of the 3D player's WebGL canvas in the same tick as its
   synchronous render reads fresh pixels (the parent spec's open question — only matters for live nesting).
+
+## Phase 1 as built (2026-09-23)
+
+Landed via `docs/superpowers/plans/2026-09-23-scene3d-web-embed-phase1.md` — 7 implementation tasks
+plus this end-to-end check, subagent-driven, a review and a fix round on every task. Ledger:
+`.superpowers/sdd/progress-scene3d-embed.md`; per-task detail: `.superpowers/sdd/scene3d-embed/task-N-report.md`.
+
+**Where the plan departed from this spec** (found while building, not at design time):
+
+1. **Restyle only needed loading into the export engine and the Frame's 3D source, not video export.**
+   3D Studio's video export already renders on the editor's own engine, which already carries restyle
+   textures — so it already showed restyle. Task 3 loaded restyle into the fresh export engine and the
+   Frame's 3D source; video export only needed the grid fix (below).
+2. **A Frame export keeps a wired 3D (or Shader/Gradient/Space Type) layer wired**, not converted into
+   a synthetic image layer. The gatherer instead hands the layer a `{ kind: 'clip' }` wired entry, baked
+   from the wired slot's own live frame source (`lib/embed/frame/gather.ts`).
+3. **No cloner Phase for a wired layer.** A cloned wired layer already shows the same frame on every
+   copy in the editor; the export matches that instead of adding a new capability.
+4. **Every animated wired studio plays, not only 3D.** The clip is baked from `StudioFrameSource.getFrame`,
+   which every wired studio (Shader, Gradient, Space Type, 3D) already implements — restricting the fix
+   to 3D would have cost extra code for no benefit.
+5. **`sceneLoop` lives in `lib/scene3d/motion/render.ts`**, beside `sceneHasMotion`, instead of in
+   `exportRender.ts` — one clock, read by the node, the surface and the export, with no new import cycle.
+
+**What the tasks found and fixed, beyond the plan's own steps:**
+
+- The floor grid **was** rendering into video exports and Frame previews — confirmed by measurement
+  (edge-pixel share 0.0336 → 0 in a video-export bake, 0.031 → 0 in the Frame preview), not assumed.
+  `renderExportFrame` now hides it; the Frame preview shows restyle too, where it showed none before.
+- Restyle is keyed by **object id**, not by result ref — the engine only ever reads it that way.
+- Editor helpers (transform gizmo, light widgets, pivot) that `prepareExportEngine` hides for a clean
+  render are **restored after the frame**, so a video export on the editor's own engine no longer leaves
+  the selection gizmo hidden afterwards.
+- The **Frame preview never blocks longer than 4 seconds** on a stalled asset, restyle load or shader
+  catalog fetch — before, a stalled backend could freeze every animated Frame slot indefinitely.
+- The **editor now keeps its restyle results across a page reload** (a deliberate editor change, not
+  just export plumbing) — before, a reload showed the plain object until restyle was re-run, and a video
+  export taken right after a reload showed no restyle at all.
+- **Cinematic** bakes with `cinematicRefresh()`, not `cinematicReset()` (a plain reset kept the previous
+  frame's BVH — wrong once every frame moves the scene), and counts **real reported samples**, not raw
+  `render()` calls — the path tracer tiles 3×3, so one `render()` covers one tile, not one sample
+  (~8.9 calls per sample, measured). Cost: ~77 ms/frame at 256², ~104 ms/frame at 1024², for a real
+  64-sample frame.
+- A Frame export's 3D slot now bakes through its **own export session** (`openExport` on
+  `StudioFrameSource`, its own engine) instead of the shared preview path — the preview path carried a
+  4-second deadline and ignored failures, so a Frame export could silently bake placeholder frames.
+- The 3D export sheet ships an explicit **Render** button rather than baking on Download — the plan's
+  brief allowed either reading, and a slow 3D bake made "click Download and wait" the wrong default.
+- The **editor keeps restyle across a reload**, but the exported file only ever bakes what it can see at
+  render time — a scene edited after Render is caught by a stale check ("The scene changed after it was
+  rendered. Render it again.").
+
+**Measured sizes:**
+
+| Scene | Frames | Size |
+|---|---|---|
+| Box, standalone, Output/30fps | 120 | 636 KB |
+| Same, 2× Sharp (~14s to render) | 120 | 1.8 MB |
+| 3D cube wired into a Frame | 120 | 1.9 MB |
+| Space Type layer wired into a Frame | 180 | 28.5 MB |
+| This task's contact sheet — text, spin, built-in lighting (4s/24fps/384²) | 96 | 184 KB |
+| — GLB model, HDRI, bob loop | 96 | 214 KB |
+| — primitive, glow treatment, spin loop | 96 | 178 KB |
+| — primitive animated only by a `camera.fov` keyframe track | 96 | 215 KB |
+
+All four contact-sheet scenes baked with zero asset failures, and all four are confirmed to animate —
+their frames at t=0 and t=0.66 differ by measurement, including the keyframe-only scene (in fact its
+frames differ the most, consistent with a full-frame FOV sweep).
+
+**Suites, end to end (2026-09-23):** `scene3d` 104 files / 2027 tests, `embed` 18 files / 643 tests
+(+67 skipped), `frame-embed` 8/130, `compositor` 58/1078 — all green on the first run. Playwright
+`embed-frames.spec.ts` + `frame-embed-network.spec.ts` + `embed-network.spec.ts`: 26/26 green, no
+flakes to re-run.
+
+**Next:** Phase 2 (the live route + the picker); Frame stage 2 (nesting live children); Publish.
