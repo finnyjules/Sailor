@@ -315,6 +315,30 @@ describe('GET /sailor/projects — the index shows only the caller\'s projects',
     __setInputUploadsEngineRootForTests(null)
     expect((await call('/sailor/projects')).status).toBe(503)
   })
+
+  // A2 follow-up fix, item 7 (carried from A1): listOwnedProjects reads
+  // projectsRoot(userDir()) directly rather than going through
+  // dispatchNative/context() — the ONLY other place ensureBootMigrationsRan
+  // is called — so a volume that still has its pre-rebrand `user/comfynext`
+  // dir (never yet renamed to `user/sailor`) served an EMPTY list on the very
+  // first `GET /sailor/projects`, even though the data is right there.
+  it('runs the boot migration before reading, so a legacy comfynext user dir is found on the first list request', async () => {
+    // No `user/sailor` yet at all — only the pre-rename `user/comfynext`,
+    // exactly the shape of an old Fly volume that predates the rebrand.
+    const legacyProjectDir = path.join(engineRoot, 'user', 'comfynext', 'projects', 'p-legacy')
+    fs.mkdirSync(legacyProjectDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(legacyProjectDir, 'project.json'),
+      JSON.stringify({ uuid: 'p-legacy', name: 'Legacy', updatedAt: 1 }),
+    )
+    owners.set(key('project', 'p-legacy'), 'u1')
+
+    const { body } = await call('/sailor/projects')
+
+    expect(body.projects.map((p: any) => p.uuid)).toEqual(['p-legacy'])
+    expect(fs.existsSync(path.join(engineRoot, 'user', 'comfynext'))).toBe(false)
+    expect(fs.existsSync(path.join(root, 'p-legacy', 'project.json'))).toBe(true)
+  })
 })
 
 // ------------------------------------------------------- per-project reads

@@ -193,6 +193,52 @@ describe('the asset library file (user/timeline_assets.json)', () => {
   })
 })
 
+describe('timeline_assets.json writes are atomic and re-read just before writing (item 3)', () => {
+  it('saveAssets writes via a temp file + rename, leaving no stray temp file behind', () => {
+    M.saveAssets(user, [{ id: 'a' }])
+    const entries = fs.readdirSync(user)
+    expect(entries).toEqual(['timeline_assets.json'])
+  })
+
+  it('an assetDelete write leaves no stray temp file either', () => {
+    fs.writeFileSync(path.join(user, 'timeline_assets.json'), pyDumps([{ id: 'a' }], 2))
+    M.assetDeleteRoute(user, 'a')
+    expect(fs.readdirSync(user)).toEqual(['timeline_assets.json'])
+  })
+
+  it('asset_import re-reads the file right before writing, so a record another writer added in between survives', async () => {
+    await png(path.join(input, 'still.png'), 4, 4)
+    const before = [{ id: 'existing-1', path: '/elsewhere/other.png', kind: 'image' }]
+    const concurrent = { id: 'concurrent-1', path: '/elsewhere/new-from-elsewhere.png', kind: 'image' }
+    const after = [...before, concurrent]
+    fs.writeFileSync(path.join(user, 'timeline_assets.json'), pyDumps(before, 2))
+
+    const real = fs.readFileSync.bind(fs)
+    let assetsFileReads = 0
+    const spy = vi.spyOn(fs, 'readFileSync').mockImplementation((...args: any[]) => {
+      if (typeof args[0] === 'string' && args[0].endsWith('timeline_assets.json')) {
+        assetsFileReads++
+        // Simulate another writer landing its own change in the window
+        // between the "does this path already exist" read and the write:
+        // the FIRST read still sees the old file, every read after sees the
+        // concurrently-updated one.
+        return pyDumps(assetsFileReads === 1 ? before : after, 2)
+      }
+      return real(...(args as [any]))
+    })
+
+    const r = await M.assetImportRoute(user, input, { path: 'still.png' }, noEngine)
+    spy.mockRestore()
+
+    expect(assetsFileReads).toBeGreaterThanOrEqual(2) // proves a re-read actually happened
+    expect(r.status).toBe(200)
+    const saved = JSON.parse(fs.readFileSync(path.join(user, 'timeline_assets.json'), 'utf8'))
+    // The concurrently-added record must still be there — a write built off
+    // the STALE first read would have clobbered it.
+    expect(saved.map((a: any) => a.id)).toEqual(['existing-1', 'concurrent-1', (r.body as any).asset.id])
+  })
+})
+
 describe('POST /sailor/asset_import', () => {
   it('an image is probed with sharp, recorded once, and a second import returns the same record', async () => {
     await png(path.join(input, 'still.png'), 64, 30)
@@ -374,6 +420,17 @@ describe('GET /sailor/asset_thumbnails', () => {
     const r = await M.assetThumbnailsRoute(user, q('asset_id=../secret'), noEngine)
     expect(r).toEqual({ status: 404, body: { error: 'asset not found' } })
   })
+
+  // A2 follow-up fix, item 5: `field(asset, 'path')` replaces `String(asset.path)`
+  // so a stored record with no 'path' key fails the same way the Python does
+  // (`asset["path"]` raises KeyError, an uncaught 500) instead of silently
+  // reading as the string "undefined".
+  it('an asset record with no path key 500s like Python\'s KeyError, not a lookup for the literal string "undefined"', async () => {
+    fs.writeFileSync(path.join(user, 'timeline_assets.json'), pyDumps([{ id: 'no-path', kind: 'image' }], 2))
+    await expect(M.assetThumbnailsRoute(user, q('asset_id=no-path'), noEngine)).rejects.toThrow(/path/)
+    // And it must not have gone looking for a file literally named "undefined".
+    expect(fs.existsSync(path.join(input, 'undefined'))).toBe(false)
+  })
 })
 
 describe('GET /sailor/asset_waveform', () => {
@@ -394,6 +451,61 @@ describe('GET /sailor/asset_waveform', () => {
     expect(await M.assetWaveformRoute(user, q('asset_id=aud'), noEngine)).toEqual(M.NEEDS_ENGINE)
     const engine = async () => ({ status: 200, body: { peaks: [1], asset_id: 'aud', buckets: 256 } })
     expect((await M.assetWaveformRoute(user, q('asset_id=aud'), engine)).body).toEqual({ peaks: [1], asset_id: 'aud', buckets: 256 })
+  })
+})
+
+// -------------------------------------------------------------- the engine
+
+describe('forwardToEngine (item 1: a timed-out/aborted engine call is "engine down")', () => {
+  const fetchMock = vi.fn()
+  const event = { path: '/sailor/asset_thumbnails?asset_id=vid', method: 'GET' } as any
+
+  beforeEach(() => {
+    fetchMock.mockReset()
+    vi.stubGlobal('fetch', fetchMock)
+  })
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('exposes the timeouts the brief calls for: 30s for thumbnails/waveforms, 120s for asset_import', () => {
+    expect(M.ENGINE_FORWARD_TIMEOUT_MS).toBe(30_000)
+    expect(M.ENGINE_ASSET_IMPORT_TIMEOUT_MS).toBe(120_000)
+  })
+
+  it('passes an AbortSignal built from the given timeout', async () => {
+    fetchMock.mockResolvedValue(new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }))
+    const spy = vi.spyOn(AbortSignal, 'timeout')
+    await M.forwardToEngine(event, '/sailor/asset_thumbnails', undefined, M.ENGINE_FORWARD_TIMEOUT_MS)
+    expect(spy).toHaveBeenCalledWith(30_000)
+    const [, init] = fetchMock.mock.calls[0]!
+    expect(init.signal).toBeInstanceOf(AbortSignal)
+    spy.mockRestore()
+  })
+
+  it('a plain network failure is treated as "engine not reachable" (null)', async () => {
+    fetchMock.mockRejectedValue(new TypeError('fetch failed'))
+    expect(await M.forwardToEngine(event, '/sailor/asset_thumbnails', undefined, M.ENGINE_FORWARD_TIMEOUT_MS)).toBeNull()
+  })
+
+  it('an aborted (timed-out) call is also null, not an unhandled rejection', async () => {
+    fetchMock.mockRejectedValue(new DOMException('The operation was aborted', 'TimeoutError'))
+    expect(await M.forwardToEngine(event, '/sailor/asset_thumbnails', undefined, M.ENGINE_FORWARD_TIMEOUT_MS)).toBeNull()
+  })
+
+  it('an abort while reading the body (not just connecting) is also null', async () => {
+    // arrayBuffer() itself rejects — the abort landed mid-stream.
+    fetchMock.mockResolvedValue({
+      headers: { get: () => 'application/json' },
+      status: 200,
+      arrayBuffer: () => Promise.reject(new DOMException('The operation was aborted', 'TimeoutError')),
+    })
+    expect(await M.forwardToEngine(event, '/sailor/asset_thumbnails', undefined, M.ENGINE_FORWARD_TIMEOUT_MS)).toBeNull()
+  })
+
+  it('omitting the timeout omits the signal entirely (no behaviour change for untouched callers)', async () => {
+    fetchMock.mockResolvedValue(new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }))
+    await M.forwardToEngine(event, '/sailor/asset_thumbnails')
+    const [, init] = fetchMock.mock.calls[0]!
+    expect(init.signal).toBeUndefined()
   })
 })
 

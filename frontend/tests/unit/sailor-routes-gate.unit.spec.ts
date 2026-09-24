@@ -312,6 +312,20 @@ describe('sailorDataRoute — path/verb table with decoded query params', () => 
     expect(sailorDataRoute('/sailor/input_file', 'filename=a.png', 'GET').kind).toBe('reject')
     expect(sailorDataRoute('/sailor/asset_import', '', 'GET').kind).toBe('reject')
   })
+
+  // A2 follow-up fix, item 4: an id that DECODES to contain '/' or '\\' must
+  // be refused here the same way server/native/media.ts's matchMediaRoute
+  // refuses it — otherwise the gate could check ownership of one string while
+  // the native router resolves a different one for the same request.
+  it('refuses (404, same as any other miss) an asset id that decodes to contain a slash or backslash', () => {
+    for (const encoded of ['a%2Fb', 'a%2fb', 'a%5Cb', encodeURIComponent('../secret'), encodeURIComponent('a\\b')]) {
+      expect(sailorDataRoute(`/sailor/assets/${encoded}`, '', 'DELETE')).toEqual({ status: 404, kind: 'reject', message: 'Not found' })
+    }
+  })
+
+  it('still accepts a plain id with no separators', () => {
+    expect(sailorDataRoute('/sailor/assets/abc-123', '', 'DELETE')).toEqual({ kind: 'assetDelete', assetId: 'abc-123' })
+  })
 })
 
 // ============================================================ input listing

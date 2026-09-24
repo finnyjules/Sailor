@@ -246,9 +246,25 @@ export function loadAssets(userDirectory: string): Json {
   catch { return [] }
 }
 
-/** `_save_assets()` — `json.dump(assets, f, indent=2)`, written in place. */
+/**
+ * `_save_assets()` — `json.dump(assets, f, indent=2)`. Written atomically
+ * (temp file in the same dir + rename), like `projects.ts`'s
+ * `atomicWriteJson`, so a reader never observes a half-written file.
+ */
 export function saveAssets(userDirectory: string, assets: Json): void {
-  fs.writeFileSync(assetsFile(userDirectory), pyDumps(assets, 2))
+  const file = assetsFile(userDirectory)
+  const dir = path.dirname(file)
+  const tmp = path.join(dir, `tmp${randomUUID().replace(/-/g, '').slice(0, 8)}.tmp`)
+  try {
+    fs.writeFileSync(tmp, pyDumps(assets, 2), { mode: 0o600, flag: 'wx' })
+    fs.renameSync(tmp, file)
+  }
+  finally {
+    if (fs.existsSync(tmp)) {
+      try { fs.unlinkSync(tmp) }
+      catch {}
+    }
+  }
 }
 
 /** Python's `a[k]` on an asset record: a TypeError/KeyError (a 500) when it isn't there. */
@@ -343,13 +359,25 @@ export async function assetImportRoute(
     thumbnail_path: null,
     waveform_path: null,
   }
-  assets.push(asset)
-  saveAssets(userDirectory, assets)
+  // Re-read right before writing: `probeMediaNative`/`engine()` above awaited,
+  // so a record another request (or ComfyUI, when it is still in the loop)
+  // wrote to the SAME file in that window would otherwise be clobbered by
+  // writing out our now-stale snapshot. Re-checking `path` against the fresh
+  // read also catches a concurrent import of the same file.
+  const latest = loadAssets(userDirectory)
+  const latestExisting = records(latest).find((a: Json) => field(a, 'path') === p)
+  if (latestExisting) return { status: 200, body: { asset: latestExisting, created: false } }
+  latest.push(asset)
+  saveAssets(userDirectory, latest)
   return { status: 200, body: { asset, created: true } }
 }
 
 /** `_asset_delete_route` — always rewrites the file, even when nothing matched. */
 export function assetDeleteRoute(userDirectory: string, assetId: string): MediaResult {
+  // Re-read immediately before applying the change, same reasoning as
+  // assetImportRoute: nothing awaits between this read and the write below,
+  // but reloading here (rather than reusing an earlier read) keeps the two
+  // writers to this file to the same "read fresh, then write" discipline.
   const assets = loadAssets(userDirectory)
   const kept = records(assets).filter((a: Json) => field(a, 'id') !== assetId)
   saveAssets(userDirectory, kept)
@@ -465,8 +493,9 @@ export async function assetThumbnailsRoute(
   const asset = findAsset(loadAssets(userDirectory), assetId)
   if (!asset) return { status: 404, body: { error: 'asset not found' } }
 
-  if (!isImageFile(String(asset.path))) return (await engine()) ?? NEEDS_ENGINE
-  const png = await imageThumbnailPng(String(asset.path))
+  const assetPath = String(field(asset, 'path'))
+  if (!isImageFile(assetPath)) return (await engine()) ?? NEEDS_ENGINE
+  const png = await imageThumbnailPng(assetPath)
   const thumbs = png ? [`data:image/png;base64,${png.toString('base64')}`] : []
   const payload = { thumbnails: thumbs, asset_id: assetId, count }
   if (file) {
@@ -496,13 +525,20 @@ export async function assetWaveformRoute(
 
 // ---------------------------------------------------------------- the engine
 
+/** Thumbnails and waveforms are interactive UI calls; asset_import can transcode a whole file. */
+export const ENGINE_FORWARD_TIMEOUT_MS = 30_000
+export const ENGINE_ASSET_IMPORT_TIMEOUT_MS = 120_000
+
 /**
  * Hand the request to the local engine, exactly as the proxy would (same
  * worker via `?comfyWorker=N`, same path and query, same body). Null when the
- * engine is not reachable. JSON answers come back parsed, anything else as
- * bytes with its content type.
+ * engine is not reachable OR does not answer within `timeoutMs` — a timed-out
+ * abort is a network failure from this route's point of view, so it takes the
+ * same "engine down" path as a connection refusal (the caller's existing 503
+ * / null-field handling), never an unhandled rejection. JSON answers come
+ * back parsed, anything else as bytes with its content type.
  */
-export async function forwardToEngine(event: H3Event, canonicalPath: string, rawBody?: Buffer): Promise<MediaResult | null> {
+export async function forwardToEngine(event: H3Event, canonicalPath: string, rawBody?: Buffer, timeoutMs?: number): Promise<MediaResult | null> {
   const { port, cleanUrl } = resolveWorkerTarget(event.path)
   const q = cleanUrl.indexOf('?')
   const query = q === -1 ? '' : cleanUrl.slice(q)
@@ -511,14 +547,23 @@ export async function forwardToEngine(event: H3Event, canonicalPath: string, raw
   const headers: Record<string, string> = { origin: target }
   if (rawBody) headers['content-type'] = 'application/json'
   let res: Response
+  let bytes: Buffer
   try {
-    res = await fetch(`${target}${canonicalPath}${query}`, { method, headers, body: rawBody as any })
+    res = await fetch(`${target}${canonicalPath}${query}`, {
+      method,
+      headers,
+      body: rawBody as any,
+      ...(timeoutMs !== undefined ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
+    })
+    // Reading the body can itself abort mid-stream once the timeout fires, so
+    // it stays inside the same try as the fetch rather than getting its own
+    // (uncaught) await below.
+    bytes = Buffer.from(await res.arrayBuffer())
   }
   catch {
     return null
   }
   const type = res.headers.get('content-type') ?? ''
-  const bytes = Buffer.from(await res.arrayBuffer())
   if (type.includes('json')) {
     try { return { status: res.status, body: JSON.parse(bytes.toString('utf8')) } }
     catch {}
@@ -594,14 +639,17 @@ export function mediaContext(): MediaContext | null {
 export async function runMediaRoute(ctx: MediaContext, h: MediaHandler, event: H3Event, canonicalPath: string, body?: { value: unknown, raw: Buffer }): Promise<MediaResult> {
   const q = event.path.indexOf('?')
   const query = new URLSearchParams(q === -1 ? '' : event.path.slice(q + 1))
-  const engine = () => forwardToEngine(event, canonicalPath, body?.raw)
+  // Thumbnails/waveforms are a UI call waiting on the response; asset_import
+  // can be probing/transcoding a whole media file, so it gets a longer leash.
+  const engine = () => forwardToEngine(event, canonicalPath, body?.raw, ENGINE_FORWARD_TIMEOUT_MS)
+  const engineForImport = () => forwardToEngine(event, canonicalPath, body?.raw, ENGINE_ASSET_IMPORT_TIMEOUT_MS)
   switch (h.name) {
     case 'outputListing': return outputListing(ctx.outputDir)
     case 'inputListing': return inputListing(ctx.inputDir)
     case 'inputFileDelete': return deleteFile(ctx.inputDir, '', query.get('filename') ?? '')
     case 'outputFileDelete': return deleteFile(ctx.outputDir, query.get('subfolder') ?? '', query.get('filename') ?? '')
     case 'assetsList': return assetsListRoute(ctx.userDir)
-    case 'assetImport': return assetImportRoute(ctx.userDir, ctx.inputDir, body?.value, engine)
+    case 'assetImport': return assetImportRoute(ctx.userDir, ctx.inputDir, body?.value, engineForImport)
     case 'assetDelete': return assetDeleteRoute(ctx.userDir, h.assetId)
     case 'inputThumbnail': return inputThumbnailRoute(ctx.userDir, ctx.inputDir, query.get('filename') ?? '', engine)
     case 'assetThumbnails': return assetThumbnailsRoute(ctx.userDir, query, engine)

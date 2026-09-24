@@ -15,7 +15,7 @@ import { normalizeEnginePath } from './enginePath'
 import { hostedCanMutate, ownedIds, ownerOf, recordOwner, releaseOwner } from './resourceOwners'
 import { isSafeId, userDir } from '../native/paths'
 import { dispatchNative } from '../native/router'
-import { listProjects, projectsRoot } from '../native/projects'
+import { ensureBootMigrationsRan, listProjects, projectsRoot } from '../native/projects'
 
 /**
  * Review C2 — an exact mirror of ComfyUI's folder_paths.annotated_filepath().
@@ -660,6 +660,12 @@ export function sailorProjectsRoute(pathNoQuery: string, method: string): Sailor
 async function listOwnedProjects(userId: string): Promise<unknown> {
   const dir = userDir()
   if (!dir) throw createError({ statusCode: 503, message: 'Sailor can\'t find its data folder' })
+  // Carried from the A1 fix: this reads projectsRoot(dir) directly rather than
+  // going through dispatchNative/context() (which already calls this), so it
+  // needs its own boot-migration call — otherwise a still-comfynext-named user
+  // dir, or a project file with un-migrated comfynext_* keys, is read before
+  // either migration has ever run for this base.
+  ensureBootMigrationsRan(dir)
   const owned = await ownedIds('project', userId)
   const list = listProjects(projectsRoot(dir))
   return { projects: list.filter(e => owned.has(String(e.uuid))) }
@@ -773,6 +779,12 @@ export function sailorDataRoute(pathNoQuery: string, query: string, method: stri
     catch {
       return reject(400, 'Asset id is not addressable')
     }
+    // matchMediaRoute (server/native/media.ts) 404s a decoded id carrying a
+    // '/' or '\\' — an encoded separator that would otherwise let a DELETE
+    // reach a different file than the one this gate just checked ownership
+    // of. Refuse it here the same way, same status, so the two routers can
+    // never disagree about which id a request names.
+    if (assetId.includes('/') || assetId.includes('\\')) return reject(404, 'Not found')
     return verb === 'DELETE' ? { kind: 'assetDelete', assetId } : badVerb
   }
   if (pathNoQuery === '/sailor/asset_thumbnails') return verb === 'GET' ? { kind: 'assetThumbnails', assetId: q.get('asset_id') || '' } : badVerb

@@ -193,4 +193,33 @@ describe('video and audio need the local engine', () => {
     expect(init.method).toBe('POST')
     expect(Buffer.from(init.body).toString()).toBe(body)
   })
+
+  // A2 follow-up fix, item 1: the engine forward had no timeout at all —
+  // a stuck ComfyUI process would hang the request open indefinitely.
+  it('thumbnails/waveforms carry a 30s abort timeout; asset_import carries 120s', async () => {
+    const spy = vi.spyOn(AbortSignal, 'timeout')
+    engineAnswers({ thumbnails: [] })
+    await call('GET', '/sailor/asset_thumbnails?asset_id=vid')
+    await call('GET', '/sailor/asset_waveform?asset_id=vid')
+    await call('GET', '/sailor/input_thumbnail?filename=clip.mp4')
+    expect(spy.mock.calls.filter(c => c[0] === 30_000).length).toBeGreaterThanOrEqual(3)
+
+    spy.mockClear()
+    fs.writeFileSync(path.join(root, 'input', 'new2.webm'), 'x')
+    engineAnswers({ asset: { id: 'e2' }, created: true })
+    await call('POST', '/sailor/asset_import', JSON.stringify({ path: 'new2.webm' }))
+    expect(spy).toHaveBeenCalledWith(120_000)
+    spy.mockRestore()
+  })
+
+  it('an abort/timeout from the engine is treated exactly like the engine being down (503 / null-field)', async () => {
+    engineFetch.mockRejectedValue(new DOMException('The operation was aborted', 'TimeoutError'))
+    const r = await call('GET', '/sailor/asset_thumbnails?asset_id=vid')
+    expect([r.status, r.body]).toEqual([503, { error: 'This needs the local engine' }])
+
+    fs.writeFileSync(path.join(root, 'input', 'new3.webm'), 'x')
+    const imp = await call('POST', '/sailor/asset_import', JSON.stringify({ path: 'new3.webm' }))
+    expect(imp.status).toBe(200)
+    expect(imp.body.asset).toMatchObject({ kind: 'video', duration_sec: null })
+  })
 })

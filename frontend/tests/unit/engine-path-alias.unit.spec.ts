@@ -643,10 +643,16 @@ describe('local mode: projects and spend are answered by Sailor itself (engine-f
     const { join } = await import('node:path')
     root = mkdtempSync(join(tmpdir(), 'engine-path-alias-'))
     ;(await import('../../server/utils/inputUploads')).__setInputUploadsEngineRootForTests(root)
+    // These routes are native now — a test that leaks past the router into
+    // `forwardToEngine`'s real `fetch` would otherwise try to reach the real
+    // :8188. Stubbed to fail fast, same as "engine unreachable", so any such
+    // leak fails loudly here instead of silently hitting a live port.
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed')))
   })
   afterEach(async () => {
     ;(await import('../../server/utils/inputUploads')).__setInputUploadsEngineRootForTests(undefined)
     ;(await import('node:fs')).rmSync(root, { recursive: true, force: true })
+    vi.unstubAllGlobals()
   })
 
   it('never raw-proxies them and never enters the hosted projects gate, under any spelling', async () => {
