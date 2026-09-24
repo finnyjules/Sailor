@@ -1,19 +1,11 @@
 import { test, expect, type Page } from '@playwright/test'
-import { openBlankWorkflow, dropNode, waitForBackend } from './_helpers'
+import { openBlankWorkflow, dropNode, waitForBackend, dismissStartModal } from './_helpers'
 
 // Prompt-validation surfacing: a /prompt HTTP 400 (type mismatch, missing
 // input) used to be completely silent — ComfyUI's frontend swallows it into
 // its own hidden dialog. The bridge now forwards the structured node_errors
 // map via `queue_error`; the layout toasts a per-node summary and the canvas
 // paints the offending nodes red. Mirrors port-intent.spec.ts patterns.
-
-async function dismissStartModal(page: Page) {
-  const modal = page.locator('.fixed.inset-0.z-\\[100\\]')
-  if (await modal.isVisible().catch(() => false)) {
-    await page.keyboard.press('Escape')
-    await modal.waitFor({ state: 'hidden', timeout: 5000 })
-  }
-}
 
 async function dropNodeAndWait(page: Page, nodeType: string, existing = 0) {
   const nodes = page.locator('.vue-flow__node')

@@ -1,13 +1,5 @@
-import { test, expect, type Page } from '@playwright/test'
-import { openBlankWorkflow } from './_helpers'
-
-async function dismissStartModal(page: Page) {
-  const modal = page.locator('.fixed.inset-0.z-\\[100\\]')
-  if (await modal.isVisible().catch(() => false)) {
-    await page.keyboard.press('Escape')
-    await modal.waitFor({ state: 'hidden', timeout: 5000 })
-  }
-}
+import { test, expect } from '@playwright/test'
+import { openBlankWorkflow, dismissStartModal } from './_helpers'
 
 test('settings AI tab shows the Anthropic and Replicate token fields', async ({ page }) => {
   await openBlankWorkflow(page)

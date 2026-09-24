@@ -1,5 +1,5 @@
-import { test, expect, type Page } from '@playwright/test'
-import { dropNode, openBlankWorkflow, timelineEditorOverlay, waitForBackend } from './_helpers'
+import { test, expect } from '@playwright/test'
+import { dismissStartModal, dropNode, openBlankWorkflow, timelineEditorOverlay, waitForBackend } from './_helpers'
 
 // Stale-schema staleness simulation (PARENT layer): the browser's cached
 // /object_info predates a ComfyUI restart that added Timeline's `edit_state`
@@ -15,14 +15,6 @@ import { dropNode, openBlankWorkflow, timelineEditorOverlay, waitForBackend } fr
 // directly. Filtering the route by port doctors ONLY the parent's schema —
 // the iframe layer (its `bridge_warning` toast) is not exercised here, since
 // a live iframe loaded after the restart genuinely has the new definitions.
-
-async function dismissStartModal(page: Page) {
-  const modal = page.locator('.fixed.inset-0.z-\\[100\\]')
-  if (await modal.isVisible().catch(() => false)) {
-    await page.keyboard.press('Escape')
-    await modal.waitFor({ state: 'hidden', timeout: 5000 })
-  }
-}
 
 test.describe('stale /object_info schema', () => {
   test('Timeline run with edit_state missing from the cached schema toasts the reload remedy', async ({ page }) => {

@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { existsSync, statSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import * as path from 'node:path'
-import { openBlankWorkflow, waitForBackend } from './_helpers'
+import { openBlankWorkflow, waitForBackend, dismissStartModal } from './_helpers'
 
 // The user's journey, locked forever: two video assets → Timeline (2 clips) →
 // SaveVideo, built entirely through the real canvas UI, then RUN to a real
@@ -29,14 +29,6 @@ function fixturesPresent(): boolean {
     const p = path.join(inputDir, f)
     return existsSync(p) && statSync(p).size < 5_000_000
   })
-}
-
-async function dismissStartModal(page: Page) {
-  const modal = page.locator('.fixed.inset-0.z-\\[100\\]')
-  if (await modal.isVisible().catch(() => false)) {
-    await page.keyboard.press('Escape')
-    await modal.waitFor({ state: 'hidden', timeout: 5000 })
-  }
 }
 
 /** Right-click → Fit View, so every node + handle is on-screen for wiring. */
