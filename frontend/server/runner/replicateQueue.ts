@@ -115,7 +115,9 @@ export function createReplicateClient(opts: ReplicateClientOptions = {}): Provid
   const sleep = opts.sleep ?? (ms => new Promise<void>(r => setTimeout(r, ms)))
 
   function headers(): Record<string, string> {
-    const t = token()
+    // Settings-pasted / NUXT_REPLICATE_TOKEN wins; REPLICATE_API_TOKEN (Python's
+    // first choice) is the fallback. Never logged.
+    const t = token() || process.env.REPLICATE_API_TOKEN || null
     if (!t) throw new Error('Replicate is not set up (add NUXT_REPLICATE_TOKEN)')
     return { Authorization: `Token ${t}`, 'Content-Type': 'application/json' }
   }
@@ -127,7 +129,7 @@ export function createReplicateClient(opts: ReplicateClientOptions = {}): Provid
       if (r.status === 200 || r.status === 201) return await r.json() as Record<string, unknown>
       const text = await r.text().catch(() => '')
       if (r.status === 429 && attempt < 2) {
-        await sleep(Math.max(0, (retryAfterSeconds(text) + 0.5) * 1000))
+        await sleep(Math.max(0, (Math.min(retryAfterSeconds(text), 30) + 0.5) * 1000))
         continue
       }
       throw new ReplicateError(`Replicate predictions API HTTP ${r.status}: ${text}`, r.status)
@@ -161,13 +163,14 @@ export function createReplicateClient(opts: ReplicateClientOptions = {}): Provid
     }
     const id = str(pred.id)
     if (!id) throw new ReplicateError('Replicate returned no prediction id', null)
-    const urls = (pred.urls ?? {}) as Record<string, unknown>
-    const getUrl = str(urls.get) ?? `${REPLICATE_API_BASE}/predictions/${id}`
+    // Built from the id, as Python does — never trust `urls.get`/`urls.cancel`
+    // from the response body: the token must only ever go to api.replicate.com.
+    const getUrl = `${REPLICATE_API_BASE}/predictions/${id}`
     return {
       requestId: id,
       statusUrl: getUrl,
       responseUrl: getUrl,
-      cancelUrl: str(urls.cancel) ?? `${REPLICATE_API_BASE}/predictions/${id}/cancel`,
+      cancelUrl: `${getUrl}/cancel`,
       queuePosition: null,
     }
   }
@@ -187,7 +190,10 @@ export function createReplicateClient(opts: ReplicateClientOptions = {}): Provid
       return transientStatus()
     }
     const body = await r.json() as Record<string, unknown>
-    const raw = String(body.status ?? 'UNKNOWN')
+    // A 200 with no usable status is treated the same as a blip: keep polling
+    // rather than passing a made-up "UNKNOWN" through as if it were real.
+    if (typeof body.status !== 'string' || !body.status) return transientStatus()
+    const raw = body.status
     const mapped = STATUS_MAP[raw] ?? raw
     let error: string | null = null
     let retryable = false
@@ -208,13 +214,19 @@ export function createReplicateClient(opts: ReplicateClientOptions = {}): Provid
     }
   }
 
+  /** Only needed when the terminal status body had no output of its own; a 5xx here is tried up to twice more. */
   async function result<T = unknown>(responseUrl: string): Promise<T> {
-    const r = await fetch(responseUrl, { headers: headers() })
-    if (r.status !== 200) {
-      const t = await r.text().catch(() => '')
-      throw new ReplicateError(`Replicate result ${r.status}: ${t}`, r.status)
+    let status = 0
+    let text = ''
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const r = await fetch(responseUrl, { headers: headers() })
+      if (r.status === 200) return await r.json() as T
+      status = r.status
+      text = await r.text().catch(() => '')
+      if (status >= 500 && status < 600 && attempt < 2) { await sleep(500); continue }
+      break
     }
-    return await r.json() as T
+    throw new ReplicateError(`Replicate result ${status}: ${text}`, status)
   }
 
   async function cancel(cancelUrl: string): Promise<'cancelled' | 'already-done' | 'not-found'> {

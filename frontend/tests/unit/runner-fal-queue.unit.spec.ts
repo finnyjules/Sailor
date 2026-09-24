@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   falSubmit, falStatus, falResult, falCancel, percentFromLogs, falImageUrls, falVideoUrl, FalError,
-  isFalNetworkError, downloadResult,
+  isProviderNetworkError, downloadResult,
 } from '~~/server/runner/falQueue'
 
 const res = (body: unknown, status = 200) => ({
@@ -103,21 +103,21 @@ describe('helpers', () => {
 
 describe('network errors', () => {
   it('only a missing answer counts, never an HTTP status', () => {
-    expect(isFalNetworkError(new TypeError('fetch failed'))).toBe(true)
-    expect(isFalNetworkError(new FalError('fal result 500: x', 500))).toBe(false)
-    expect(isFalNetworkError(new FalError('fal result 404: x', 404))).toBe(false)
-    expect(isFalNetworkError(new SyntaxError('Unexpected token'))).toBe(false)
+    expect(isProviderNetworkError(new TypeError('fetch failed'))).toBe(true)
+    expect(isProviderNetworkError(new FalError('fal result 500: x', 500))).toBe(false)
+    expect(isProviderNetworkError(new FalError('fal result 404: x', 404))).toBe(false)
+    expect(isProviderNetworkError(new SyntaxError('Unexpected token'))).toBe(false)
   })
   it('a socket/DNS code on the cause counts too', () => {
-    expect(isFalNetworkError(Object.assign(new Error('x'), { cause: { code: 'ECONNRESET' } }))).toBe(true)
-    expect(isFalNetworkError(Object.assign(new Error('x'), { cause: { code: 'ENOTFOUND' } }))).toBe(true)
-    expect(isFalNetworkError(Object.assign(new Error('x'), { cause: { code: 'UND_ERR_CONNECT_TIMEOUT' } }))).toBe(true)
+    expect(isProviderNetworkError(Object.assign(new Error('x'), { cause: { code: 'ECONNRESET' } }))).toBe(true)
+    expect(isProviderNetworkError(Object.assign(new Error('x'), { cause: { code: 'ENOTFOUND' } }))).toBe(true)
+    expect(isProviderNetworkError(Object.assign(new Error('x'), { cause: { code: 'UND_ERR_CONNECT_TIMEOUT' } }))).toBe(true)
   })
   it('a plain Error — including "FAL_KEY is not set" — is never a blip: it must surface, not loop forever', () => {
-    expect(isFalNetworkError(new Error('FAL_KEY is not set (add it to frontend/.env)'))).toBe(false)
-    expect(isFalNetworkError(new Error('something else went wrong'))).toBe(false)
-    expect(isFalNetworkError(Object.assign(new Error('x'), { cause: { code: 123 } }))).toBe(false)
-    expect(isFalNetworkError(Object.assign(new Error('x'), { cause: 'not an object' }))).toBe(false)
+    expect(isProviderNetworkError(new Error('FAL_KEY is not set (add it to frontend/.env)'))).toBe(false)
+    expect(isProviderNetworkError(new Error('something else went wrong'))).toBe(false)
+    expect(isProviderNetworkError(Object.assign(new Error('x'), { cause: { code: 123 } }))).toBe(false)
+    expect(isProviderNetworkError(Object.assign(new Error('x'), { cause: 'not an object' }))).toBe(false)
   })
 })
 

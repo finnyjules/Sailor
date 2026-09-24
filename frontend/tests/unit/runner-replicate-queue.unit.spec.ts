@@ -9,7 +9,7 @@ import {
   REPLICATE_API_BASE, ReplicateError, TRANSIENT_REPLICATE_ERROR_MARKERS, allOutputUrls, createReplicateClient,
   firstOutputUrl, isTransientReplicateError, logLines, retryAfterSeconds,
 } from '~~/server/runner/replicateQueue'
-import { isFalNetworkError, percentFromLogs } from '~~/server/runner/falQueue'
+import { isProviderNetworkError, percentFromLogs } from '~~/server/runner/falQueue'
 
 const res = (body: unknown, status = 200) => ({
   ok: status >= 200 && status < 300, status, statusText: '',
@@ -70,6 +70,17 @@ describe('submit', () => {
     expect(s.cancelUrl).toBe(`${REPLICATE_API_BASE}/predictions/p9/cancel`)
   })
 
+  it('never trusts urls.get/urls.cancel from the response: the token always goes back to api.replicate.com', async () => {
+    fetchMock.mockResolvedValueOnce(res(pred({
+      id: 'p9',
+      urls: { get: 'https://evil.example/steal?token=', cancel: 'https://evil.example/steal-cancel?token=' },
+    }), 201))
+    const s = await client().submit('a/b', {})
+    expect(s.statusUrl).toBe(`${REPLICATE_API_BASE}/predictions/p9`)
+    expect(s.responseUrl).toBe(`${REPLICATE_API_BASE}/predictions/p9`)
+    expect(s.cancelUrl).toBe(`${REPLICATE_API_BASE}/predictions/p9/cancel`)
+  })
+
   it('a 404 on the official route looks up the latest version and posts to /v1/predictions', async () => {
     fetchMock
       .mockResolvedValueOnce(res({ detail: 'not found' }, 404))
@@ -107,6 +118,15 @@ describe('submit', () => {
     expect(sleep.mock.calls).toEqual([[3500]])
   })
 
+  it('caps the 429 wait at 30 s + 0.5 s, however large retry_after is', async () => {
+    fetchMock
+      .mockResolvedValueOnce(res({ detail: 'slow down', retry_after: 9999 }, 429))
+      .mockResolvedValueOnce(res(pred(), 201))
+    const s = await client().submit('a/b', { prompt: 'x' })
+    expect(s.requestId).toBe('p1')
+    expect(sleep.mock.calls).toEqual([[30_500]])
+  })
+
   it('a 429 with no retry_after waits the default 5 s; three 429s in all fail', async () => {
     fetchMock
       .mockResolvedValueOnce(res('busy', 429))
@@ -140,6 +160,20 @@ describe('submit', () => {
     await expect(client(null).submit('a/b', {})).rejects.toThrow('Replicate is not set up (add NUXT_REPLICATE_TOKEN)')
     await expect(client(null).status('S')).rejects.toThrow('Replicate is not set up (add NUXT_REPLICATE_TOKEN)')
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('falls back to REPLICATE_API_TOKEN when getReplicateToken() (settings/NUXT_REPLICATE_TOKEN) gives nothing', async () => {
+    const prev = process.env.REPLICATE_API_TOKEN
+    process.env.REPLICATE_API_TOKEN = 'r8_env_fallback'
+    try {
+      fetchMock.mockResolvedValueOnce(res(pred(), 201))
+      await client(null).submit('a/b', { prompt: 'x' })
+      expect(fetchMock.mock.calls[0]![1].headers.Authorization).toBe('Token r8_env_fallback')
+    }
+    finally {
+      if (prev === undefined) delete process.env.REPLICATE_API_TOKEN
+      else process.env.REPLICATE_API_TOKEN = prev
+    }
   })
 })
 
@@ -197,12 +231,21 @@ describe('status', () => {
     const e = await client().status('S').catch(x => x)
     expect(e).toBeInstanceOf(ReplicateError)
     expect(e.message).toMatch(/^Replicate status 404 \(not retryable\)/)
-    expect(isFalNetworkError(e)).toBe(false)
+    expect(isProviderNetworkError(e)).toBe(false)
   })
 
   it('a 429 while polling is a blip, not the end of a paid prediction', async () => {
     fetchMock.mockResolvedValueOnce(res({ detail: 'slow down' }, 429))
     expect((await client().status('S')).transient).toBe(true)
+  })
+
+  it('a 200 with a missing or non-string status is a blip too, not a raw pass-through', async () => {
+    fetchMock.mockResolvedValueOnce(res({ id: 'p1' }))
+    expect(await client().status('S')).toEqual(expect.objectContaining({ status: 'UNKNOWN', transient: true }))
+    fetchMock.mockResolvedValueOnce(res({ id: 'p1', status: 7 }))
+    expect(await client().status('S')).toEqual(expect.objectContaining({ status: 'UNKNOWN', transient: true }))
+    fetchMock.mockResolvedValueOnce(res({ id: 'p1', status: '' }))
+    expect(await client().status('S')).toEqual(expect.objectContaining({ status: 'UNKNOWN', transient: true }))
   })
 })
 
@@ -211,8 +254,22 @@ describe('result and output', () => {
     const body = pred({ status: 'succeeded', output: ['https://replicate.delivery/a.png'] })
     fetchMock.mockResolvedValueOnce(res(body))
     expect(await client().result('https://api.replicate.com/v1/predictions/p1')).toEqual(body)
-    fetchMock.mockResolvedValueOnce(res('boom', 500))
+    // A 4xx is final straight away, no retry.
+    fetchMock.mockResolvedValueOnce(res('boom', 404))
     await expect(client().result('R')).rejects.toBeInstanceOf(ReplicateError)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('a 5xx fetching the result is retried up to twice, then given up on', async () => {
+    fetchMock.mockResolvedValueOnce(res('boom', 502)).mockResolvedValueOnce(res(pred({ status: 'succeeded' })))
+    expect(await client().result('R')).toMatchObject({ status: 'succeeded' })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    fetchMock.mockReset()
+    fetchMock.mockResolvedValue(res('still down', 503))
+    const e = await client().result('R').catch(x => x)
+    expect(e).toBeInstanceOf(ReplicateError)
+    expect(e.message).toBe('Replicate result 503: still down')
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it('images: every string output; video: the first', () => {

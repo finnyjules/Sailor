@@ -71,12 +71,34 @@ describe('a Replicate request', () => {
     expect(rec.outputs).toHaveLength(1)
     expect(rec.outputs[0]).toMatchObject({ filename: 'generate_image_00001_.png', type: 'output' })
     expect(k.replicate.client.outputUrls).toHaveBeenCalledWith(expect.objectContaining({ output: ['https://replicate.delivery/pred1.png'] }), 'image')
+    // The terminal status body already carried the output: no second GET.
+    expect(k.replicate.client.result).not.toHaveBeenCalled()
     // flux-schnell (1) + the render credit (1), held and settled once
     expect(k.ledger.hold).toHaveBeenCalledTimes(1)
     expect(k.ledger.settle).toHaveBeenCalledTimes(1)
     expect(holds(k.ledger)).toEqual([['settled', 2]])
     expect(k.records.write).toHaveBeenCalledTimes(1)
     expect(ofType(k.seen, 'progress').some(m => m.data.value === 50)).toBe(true)
+  })
+
+  it('falls back to a second GET when the terminal status body carries no raw output', async () => {
+    const replicate = createFakeReplicate()
+    // A status body with no usable `raw` (e.g. an older/odd Replicate
+    // response): the engine must still fetch the result via a second GET.
+    const original = (replicate.client.status as any).getMockImplementation()!
+    ;(replicate.client.status as any).mockImplementation(async (url: string) => {
+      const s = await original(url)
+      return s.status === 'COMPLETED' && !s.error ? { ...s, raw: null } : s
+    })
+    const k = makeKit({ hosted: true, replicate })
+    const { runId } = await start(k, [onReplicate()])
+    await k.engine.settled(runId)
+
+    expect(k.replicate.client.result).toHaveBeenCalledTimes(1)
+    const run = (await k.store.get(runId))!
+    const rec = run.takes[0]!.nodes['1']!
+    expect(rec.status).toBe('done')
+    expect(rec.outputs).toHaveLength(1)
   })
 
   it('a fal and a Replicate request with the same body never share a saved result', async () => {

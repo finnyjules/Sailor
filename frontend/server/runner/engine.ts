@@ -16,7 +16,7 @@ import type { GateChoice, RunnerMessage } from '#shared/runner/messages'
 import { MeterRefusalError } from '../utils/requestMeter'
 import { BASE_RENDER_CREDITS, UnpricedGraphError } from '../utils/priceBook'
 import { extractGraphPromptText } from '../utils/graphPromptText'
-import { isFalNetworkError, percentFromLogs, type FalStatus, type ProviderClient } from './falQueue'
+import { isProviderNetworkError, percentFromLogs, type FalStatus, type ProviderClient } from './falQueue'
 import { planNode } from './executors'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, type OwnershipCheck } from './inputs'
@@ -653,7 +653,7 @@ export function createEngine(deps: EngineDeps) {
         rec.status = 'stopped'
         rec.error = null
         // Stop may have landed while this request was being sent, before
-        // Stop could see its id: cancel it here so nothing is left at fal.
+        // Stop could see its id: cancel it here so nothing is left running.
         if (rec.request) await cancelRequest(rec.request).catch(() => {})
       }
       else { rec.status = 'error'; rec.error = plainError(e) }
@@ -669,7 +669,7 @@ export function createEngine(deps: EngineDeps) {
     const limitMs = media === 'video' ? deps.timeouts.videoMs : deps.timeouts.imageMs
     let deadline = req.submittedAt + limitMs
     let attempt = 0
-    // Only a real answer from fal counts as having asked: a blip says nothing.
+    // Only a real answer from the provider counts as having asked: a blip says nothing.
     let asked = false
     let lastPos: number | null = req.queuePosition
     let lastPct = -1
@@ -677,21 +677,22 @@ export function createEngine(deps: EngineDeps) {
     if (lastPos != null && lastPos > 0) publish(run, ev.queuePosition(stageKey, nodeId, lastPos))
     for (;;) {
       if (signal.aborted) throw new RunStopped()
-      // Ask fal at least once before giving up: after a restart the request
-      // may already have finished while the server was down.
+      // Ask the provider at least once before giving up: after a restart the
+      // request may already have finished while the server was down.
       if (asked && deps.now() > deadline) {
         await client.cancel(req.cancelUrl).catch(() => {})
         throw new Error(media === 'video'
           ? 'The video took longer than 30 minutes, so it was cancelled'
           : 'The image took longer than 5 minutes, so it was cancelled')
       }
-      // Outer limit that applies even when fal never gave a real answer (a
-      // status URL stuck returning 5xx, or a network error on every poll): do
-      // not wait on `asked` forever, or the node — and its limiter slot and
-      // queued-call count — never frees up. `attempt > 0` still gives fal one
-      // chance to answer first, the same reasoning as the `asked` check above:
-      // after a restart the deadline is measured from the original submit
-      // time, and a real answer waiting at fal must still be fetched.
+      // Outer limit that applies even when the provider never gave a real
+      // answer (a status URL stuck returning 5xx, or a network error on every
+      // poll): do not wait on `asked` forever, or the node — and its limiter
+      // slot and queued-call count — never frees up. `attempt > 0` still gives
+      // the provider one chance to answer first, the same reasoning as the
+      // `asked` check above: after a restart the deadline is measured from
+      // the original submit time, and a real answer waiting at the provider
+      // must still be fetched.
       if (attempt > 0 && deps.now() > deadline + GRACE_MS) {
         await client.cancel(req.cancelUrl).catch(() => {})
         throw new Error('The provider did not answer, so the request was cancelled')
@@ -699,7 +700,7 @@ export function createEngine(deps: EngineDeps) {
       let s: FalStatus
       try { s = await client.status(req.statusUrl, { logs: started }) }
       catch (e) {
-        if (!isFalNetworkError(e)) throw e
+        if (!isProviderNetworkError(e)) throw e
         s = { status: 'UNKNOWN', queuePosition: null, logs: [], error: null, transient: true, raw: null }
       }
       if (!s.transient) {
@@ -749,10 +750,14 @@ export function createEngine(deps: EngineDeps) {
             started = false
             continue
           }
-          // fal has made (and billed) it: a network error fetching it is tried
-          // again on the next turn, until the time limit.
+          // Replicate's own status body already carries the finished
+          // prediction (Python never does a second GET): use it directly
+          // and skip the extra round trip when it is there.
+          if (provider === 'replicate' && s.raw != null) return s.raw
+          // The provider has made (and billed) it: a network error fetching
+          // it is tried again on the next turn, until the time limit.
           try { return await client.result(req.responseUrl) }
-          catch (e) { if (!isFalNetworkError(e)) throw e }
+          catch (e) { if (!isProviderNetworkError(e)) throw e }
         }
         else {
           throw new Error(`The provider stopped this request (${s.status})`)

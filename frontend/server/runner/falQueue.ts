@@ -57,8 +57,11 @@ const NETWORK_ERROR_CODES = new Set(['ECONNRESET', 'ENOTFOUND', 'ETIMEDOUT', 'EA
  * code. Everything else — a FalError (any HTTP status), a SyntaxError from a
  * garbled body, "FAL_KEY is not set", or any other Error — is NOT a blip: it
  * must surface, not be swallowed as "try again later" forever.
+ *
+ * Despite the name (kept for the FalError instanceof check above), this is
+ * used by the engine for any provider's status/result polling, not just fal's.
  */
-export function isFalNetworkError(e: unknown): boolean {
+export function isProviderNetworkError(e: unknown): boolean {
   if (e instanceof FalError || e instanceof SyntaxError) return false
   if (e instanceof TypeError) return true
   const code = (e as { cause?: { code?: unknown } } | null | undefined)?.cause?.code

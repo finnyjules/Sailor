@@ -102,7 +102,9 @@ export function createFakeReplicate() {
       if (r.polls === 1) return { ...base, status: 'IN_QUEUE' }
       if (r.held) return { ...base, status: 'IN_PROGRESS', logs: [{ message: ' 50%|█████     | 14/28' }] }
       if (r.failWith) return { ...base, status: 'COMPLETED', error: `Replicate: ${r.failWith}`, retryable: isTransientReplicateError(r.failWith) }
-      return { ...base, status: 'COMPLETED' }
+      // Matches the real client: the terminal status body already carries the
+      // output, so the engine reads it from `raw` and never calls `result`.
+      return { ...base, status: 'COMPLETED', raw: { id: r.id, status: 'succeeded', output: [`https://replicate.delivery/${r.id}.png`] } }
     }) as any,
     result: vi.fn(async (url: string) => {
       const id = idOf(url)
