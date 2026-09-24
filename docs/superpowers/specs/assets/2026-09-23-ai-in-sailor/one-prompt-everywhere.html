@@ -1,0 +1,381 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>One prompt everywhere</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  /* One dark world on purpose: it mimics Sailor. */
+  :root {
+    color-scheme: dark;
+    --ground: #0e0f11; --dots: #23252a; --panel: #17181b; --panel-2: #1e1f23; --line: #2a2c31;
+    --ink: #ebe8e1; --muted: #8e8a83; --ai: #e3a857; --ai-soft: rgba(227,168,87,.14); --good: #7fbf8a; --sel: #6ea8ff;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--ground); color: var(--ink); font: 13.5px/1.45 var(--sans); overflow: hidden; }
+  button { font: inherit; color: inherit; }
+  kbd { font-family: var(--mono); font-size: 11px; padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); background: var(--panel); }
+  :focus-visible { outline: 2px solid var(--ai); outline-offset: 2px; }
+
+  #app { height: 100%; display: grid; grid-template-rows: auto 1fr; }
+
+  /* prototype bar, deliberately not Sailor chrome */
+  .proto { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; padding-block: 8px; padding-inline: 16px; background: #1a1712; border-bottom: 1px solid #3a3122; font-size: 12.5px; color: #cdbf9f; }
+  .proto b { color: var(--ai); font-weight: 600; }
+  .seg { display: inline-flex; border: 1px solid #4a3e29; border-radius: 6px; overflow: hidden; }
+  .seg button { background: none; border: 0; padding: 3px 10px; cursor: pointer; color: #cdbf9f; }
+  .seg button[aria-pressed="true"] { background: #4a3e29; color: #fff3da; }
+  .proto .hint { color: #8a7a5b; }
+
+  .view { position: relative; overflow: hidden; min-height: 0; display: grid; }
+
+  /* ======================= THE ONE PROMPT =======================
+     Everything in this block is shared. Hosts only choose width and content. */
+  .sp { container-type: inline-size; width: 100%; min-width: 0; display: grid; gap: 8px; }
+  .sp-above { display: grid; gap: 8px; }
+  .sp-sugg { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+  .sp-sugg button { background: var(--panel-2); border: 1px solid var(--line); border-radius: 99px; padding: 3px 11px; font-size: 12.5px; cursor: pointer; color: #d6d2ca; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+  .sp-sugg button:hover { border-color: var(--ai); }
+  .sp-takes { background: #1b1c20; border: 1px solid var(--line); border-radius: 12px; padding: 8px; box-shadow: 0 12px 34px rgba(0,0,0,.5); display: grid; gap: 8px; }
+  .sp-takes-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); padding-inline: 4px; }
+  .sp-takes-head b { color: var(--ink); font-weight: 500; }
+  .sp-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 150px)); gap: 8px; justify-content: center; }
+  .sp-tile { position: relative; display: grid; gap: 4px; background: none; border: 1px solid transparent; border-radius: 8px; padding: 3px; cursor: pointer; text-align: left; }
+  .sp-tile i { display: block; aspect-ratio: 16/10; border-radius: 6px; }
+  .sp-tile span { font-size: 11.5px; padding-inline: 2px; }
+  .sp-tile:hover { border-color: var(--ai); }
+  .sp-tile .keep { position: absolute; top: 7px; right: 7px; background: var(--ai); color: #1b1408; border: 0; border-radius: 5px; padding: 1px 8px; font-size: 11.5px; font-weight: 600; display: none; }
+  .sp-tile:hover .keep { display: block; }
+  .lbtn { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 10px; cursor: pointer; font-size: 12px; }
+
+  .sp-row { height: 44px; display: flex; align-items: center; gap: 8px; padding-inline: 12px 8px; background: #1b1c20; border: 1px solid #3b3326; border-radius: 12px; box-shadow: 0 12px 34px rgba(0,0,0,.5), 0 0 0 1px rgba(227,168,87,.06); cursor: text; }
+  .sp.focused .sp-row { border-color: var(--ai); box-shadow: 0 12px 34px rgba(0,0,0,.5), 0 0 0 3px rgba(227,168,87,.16); }
+  .sp-spark { color: var(--ai); font-size: 15px; flex: none; }
+  .sp-chip { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; font-size: 12px; background: var(--ai-soft); color: #f0cf9c; border-radius: 99px; padding: 1px 3px 1px 9px; max-width: 40%; overflow: hidden; text-overflow: ellipsis; flex: none; }
+  .sp-chip.mode { background: #24303f; color: #bcd6ff; }
+  .sp-chip button { background: none; border: 0; cursor: pointer; color: inherit; opacity: .7; padding: 0 5px; }
+  .sp input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: var(--ink); font: 14px var(--sans); }
+  .sp input::placeholder { color: #6f6b64; }
+  .sp-send { flex: none; width: 28px; height: 28px; border-radius: 8px; border: 0; background: var(--ai); color: #1b1408; font-weight: 700; cursor: pointer; }
+  .sp-send:disabled { background: var(--panel-2); color: #5b5750; cursor: default; }
+  .sp-status { flex: 1; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #d6c3a0; min-width: 0; }
+  .sp-status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ai); animation: pulse 1s ease-in-out infinite; flex: none; }
+  .sp-status.done .dot { animation: none; background: var(--good); }
+  .sp-status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  @container (max-width: 380px) { .sp-hint { display: none; } }
+  /* ===================== end of the one prompt ===================== */
+
+  /* ---------- the bars the prompt sits on (host-owned) ---------- */
+  .dock { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: grid; gap: 8px; width: max-content; max-width: calc(100% - 32px); }
+  .dock > .sp { contain: inline-size; }  /* the bar sets the width, never the prompt */
+  .bar { display: flex; gap: 2px; padding: 5px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.45); overflow-x: auto; }
+  .bar button { display: grid; justify-items: center; gap: 1px; min-width: 56px; background: none; border: 0; border-radius: 8px; padding: 5px 8px 4px; cursor: pointer; color: #cfcbc3; font-size: 11px; white-space: nowrap; }
+  .bar button b { font-size: 15px; font-weight: 400; line-height: 1.2; }
+  .bar button:hover { background: var(--panel-2); }
+  .bar button.on { background: #262830; color: #fff; }
+  .bar .sep { width: 1px; background: var(--line); margin: 6px 4px; flex: none; }
+
+  /* width tags so the rule is visible */
+  .wtag { position: absolute; font: 10.5px var(--mono); color: #8a7a5b; white-space: nowrap; }
+  body.show-width .dock::before, body.show-width .sdock::before { content: attr(data-w); position: absolute; top: -18px; left: 0; right: 0; border-top: 1px dashed #8a7a5b; font: 10.5px var(--mono); color: #c7ad7e; text-align: center; padding-top: 1px; }
+  body.show-width .dock, body.show-width .sdock { margin-top: 18px; }
+
+  /* ---------- canvas ---------- */
+  .canvas { background-color: var(--ground); background-image: radial-gradient(var(--dots) 1px, transparent 1px); background-size: 22px 22px; position: relative; }
+  .topbar { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; justify-content: space-between; pointer-events: none; }
+  .pill { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 5px 12px; font-size: 12.5px; color: #cfcbc3; }
+  .node { position: absolute; width: 190px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+  .node header { display: flex; justify-content: space-between; padding: 8px 10px 6px; }
+  .node header span { font-size: 11.5px; color: var(--muted); }
+  .node .th { margin: 0 10px 10px; aspect-ratio: 4/3; border-radius: 6px; transition: background .2s; }
+  .node.sel { border-color: var(--sel); box-shadow: 0 0 0 1px var(--sel), 0 8px 24px rgba(0,0,0,.35); }
+  .node.glow { box-shadow: 0 0 0 1px var(--ai), 0 0 28px rgba(227,168,87,.35); border-color: var(--ai); }
+  svg.edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  svg.edges path { fill: none; stroke: #4a4d55; stroke-width: 1.6; }
+
+  /* ---------- studio shell (Frame, 3D) ---------- */
+  .studio { display: grid; grid-template-columns: 200px 1fr 250px; grid-template-rows: 44px 1fr; background: #121316; min-height: 0; }
+  .studio .shead { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; padding-inline: 16px; border-bottom: 1px solid var(--line); font-weight: 500; }
+  .studio .shead span { color: var(--muted); font-weight: 400; font-size: 12.5px; }
+  .side { border-right: 1px solid var(--line); padding: 12px; display: grid; align-content: start; gap: 4px; font-size: 12.5px; color: #cfcbc3; overflow: auto; }
+  .side.r { border-right: 0; border-left: 1px solid var(--line); }
+  .side h4 { margin: 8px 0 4px; font-size: 11px; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .side .li { padding: 4px 8px; border-radius: 6px; }
+  .side .li.on { background: #1f2a3a; color: #cfe0ff; }
+  .dial { display: grid; grid-template-columns: 80px 1fr; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); padding-block: 3px; }
+  .dial i { height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--ink) var(--v), #33353b var(--v)); }
+  .arow { display: flex; justify-content: space-between; align-items: center; background: var(--panel-2); border-radius: 7px; padding: 6px 9px; font-size: 12.5px; color: #dcd8d0; }
+  .arow small { color: var(--muted); font-size: 11px; }
+  .arow small::after { content: " ✦"; color: var(--ai); }
+  .stage { position: relative; display: grid; place-items: center; min-height: 0; background: #0b0c0e; }
+  .stage-inner { margin-bottom: 140px; }
+
+  .poster { width: 260px; aspect-ratio: 4/5; border-radius: 4px; position: relative; background: linear-gradient(160deg, #2c4a6b, #0f1c2c 60%, #0a0f18); box-shadow: 0 20px 60px rgba(0,0,0,.6); overflow: hidden; transition: background .2s; }
+  .poster .hl { position: absolute; left: 18px; right: 18px; bottom: 26px; font-weight: 600; font-size: 38px; line-height: .98; color: #fff; outline: 1.5px solid var(--sel); outline-offset: 4px; transition: all .2s; }
+  .poster .sub { position: absolute; left: 18px; top: 18px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #bcd; }
+
+  .ball { width: 200px; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff 0, #c9d6ff 8%, #5c6fb8 38%, #1a1f3d 75%); box-shadow: 0 40px 50px -20px rgba(0,0,0,.8); outline: 1.5px solid var(--sel); outline-offset: 10px; transition: background .2s; }
+  .floor { width: 420px; height: 60px; margin-top: -10px; border-radius: 50%; background: radial-gradient(ellipse, #22252c, transparent 70%); }
+
+  /* ---------- simple studios ---------- */
+  .simple { display: grid; grid-template-columns: 1fr 280px; grid-template-rows: 44px 1fr; background: #121316; min-height: 0; }
+  .simple .shead { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; padding-inline: 16px; border-bottom: 1px solid var(--line); font-weight: 500; }
+  .simple .shead span { color: var(--muted); font-weight: 400; font-size: 12.5px; }
+  .scol { display: grid; grid-template-rows: 1fr auto; gap: 10px; padding: 16px; min-height: 0; justify-items: center; }
+  .preview { width: 100%; max-width: 640px; border-radius: 10px; min-height: 0; transition: background .2s; }
+  .sdock { position: relative; width: 100%; max-width: 640px; display: grid; gap: 8px; }
+  .minibar { justify-self: center; }
+  .minibar button { min-width: 44px; }
+  .shader-prev { background: repeating-radial-gradient(circle at 40% 45%, #1d6f8f 0 10px, #0f3d57 10px 22px); }
+  .type-prev { background: #efe9dc; display: flex; align-items: center; justify-content: center; color: #151515; font: 600 clamp(48px, 10vw, 120px)/1 var(--sans); letter-spacing: -.03em; }
+  .type-prev span { display: inline-block; transition: transform .25s; }
+
+  /* ---------- compare ---------- */
+  .compare { overflow: auto; padding: 24px 16px 40px; display: grid; align-content: start; justify-items: center; gap: 26px; }
+  .compare section { width: 100%; max-width: 980px; display: grid; gap: 6px; }
+  .compare h3 { margin: 0; font-size: 12px; font-weight: 500; color: var(--muted); }
+  .compare h3 b { color: var(--ink); font-weight: 500; }
+  .cmp-dock { display: grid; gap: 8px; }
+  .cmp-dock.narrow { max-width: 640px; }
+  .intro { max-width: 980px; color: #bdb7ac; margin: 0; }
+  .intro b { color: var(--ink); font-weight: 500; }
+
+  @media (max-width: 860px) {
+    .studio { grid-template-columns: 1fr; }
+    .studio .side { display: none; }
+    .simple { grid-template-columns: 1fr; }
+    .simple .side { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { .sp-status .dot { animation: none; } }
+</style>
+
+<div id="app">
+  <div class="proto">
+    <span><b>Mockup</b> · one prompt component, five places</span>
+    <div class="seg" id="views" role="group" aria-label="Place"></div>
+    <div class="seg" id="states" role="group" aria-label="State"></div>
+    <label><input type="checkbox" id="showW"> Show width rule</label>
+    <span class="hint">Click a prompt or press <kbd>/</kbd>, then <kbd>Enter</kbd>. <kbd>Esc</kbd> leaves.</span>
+  </div>
+  <div class="view" id="view"></div>
+</div>
+
+<script>
+const h = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e }
+const G = {
+  rainA: 'linear-gradient(170deg,#6d8ea6,#23384a 55%,#141d27), repeating-linear-gradient(100deg,transparent 0 9px,rgba(255,255,255,.18) 9px 10px)',
+  rainB: 'repeating-linear-gradient(95deg,transparent 0 6px,rgba(220,235,255,.35) 6px 7px), linear-gradient(180deg,#314a60,#0d141c)',
+  rainC: 'radial-gradient(circle at 30% 40%,rgba(255,255,255,.4) 0 3px,transparent 4px) 0 0/18px 22px, linear-gradient(160deg,#48627a,#18222d)',
+  shop: 'linear-gradient(160deg,#b48a5a,#6a4a2e 55%,#2d2016)',
+}
+
+/* ---------- each place supplies only context: never markup or styles for the prompt ---------- */
+const PLACES = {
+  canvas: {
+    label: 'Canvas', chip: 'Rainy shop', verb: 'three new effects',
+    sugg: ['Make it rain on a window', 'Night-time, neon signs', 'What does this node do?'],
+    takes: [['Streaks', G.rainB], ['Droplets', G.rainC], ['Soft rain', G.rainA]],
+    target: () => document.querySelector('#rainy .th'),
+  },
+  frame: {
+    label: 'Frame', chip: 'Rainy season', verb: 'three headlines',
+    sugg: ['Shorter and punchier', 'Try three typefaces', 'Make it wet and glossy'],
+    takes: [['Wet season', null, 'Wet season'], ['Rain on', null, 'Rain on.'], ['Rainy days', null, 'Rainy days are here']],
+    target: () => document.querySelector('.poster .hl'), text: true,
+  },
+  scene3d: {
+    label: '3D', chip: 'Sphere', verb: 'three materials',
+    sugg: ['Make it glass', 'Softer studio light', 'Slow turntable'],
+    takes: [['Glass', 'radial-gradient(circle at 35% 30%,#fff 0,#e6f6ff 10%,rgba(120,180,220,.55) 40%,rgba(20,40,70,.9) 80%)'], ['Brushed gold', 'radial-gradient(circle at 35% 30%,#fff6d8 0,#e3b25a 20%,#7a5520 60%,#2a1b08 90%)'], ['Clay', 'radial-gradient(circle at 35% 30%,#f2d9c4 0,#c98e6a 35%,#6b4430 80%)']],
+    target: () => document.querySelector('.ball'),
+  },
+  shader: {
+    label: 'Shader studio', chip: 'Water ripple', verb: 'three new effects', simple: true,
+    sugg: ['Make it rain on a window', 'Slower and calmer', 'What does Warp do?'],
+    takes: [['Streaks', G.rainB], ['Droplets', G.rainC], ['Soft rain', G.rainA]],
+    target: () => document.querySelector('.preview'),
+  },
+  spacetype: {
+    label: 'Space type', chip: 'Sailor', verb: 'three motions', simple: true,
+    sugg: ['Letters fall and pile up', 'A slow wave', 'Bounce in one by one'],
+    takes: [['Pile up', 'linear-gradient(#efe9dc 60%,#d8cfbd)'], ['Wave', 'linear-gradient(90deg,#efe9dc,#e4dccb,#efe9dc)'], ['Bounce', 'radial-gradient(circle at 50% 80%,#e0d6c2,#efe9dc 60%)']],
+    target: () => document.querySelector('.type-prev'), wave: true,
+  },
+}
+
+let place = 'canvas', state = 'rest', typed = ''
+const STATES = [['rest', 'At rest'], ['focused', 'Focused'], ['working', 'Working'], ['takes', 'Takes']]
+
+/* ---------- THE component: one function, used by every place ---------- */
+function SailorPrompt(ctx) {
+  const root = h('div', 'sp' + (state === 'focused' ? ' focused' : ''))
+  const above = h('div', 'sp-above')
+  if (state === 'focused') {
+    const s = h('div', 'sp-sugg')
+    ctx.sugg.forEach(t => { const b = h('button', null, t); b.onclick = e => { e.stopPropagation(); typed = t; send() }; s.append(b) })
+    above.append(s)
+  }
+  if (state === 'takes') {
+    const box = h('div', 'sp-takes')
+    const head = h('div', 'sp-takes-head')
+    const l = h('span'); l.append('Three takes for “', h('b', null, typed || ctx.sugg[0]), '” · hover to preview')
+    const r = h('span'); const again = h('button', 'lbtn', 'Try again'); again.onclick = e => { e.stopPropagation(); send() }
+    const off = h('button', 'lbtn', 'Discard'); off.onclick = e => { e.stopPropagation(); setState('rest') }
+    r.append(again, ' ', off); head.append(l, r)
+    const strip = h('div', 'sp-strip')
+    ctx.takes.forEach(([name, bg, text]) => {
+      const t = h('button', 'sp-tile'); const sw = h('i')
+      sw.style.background = bg || '#1f2f44'
+      if (text) { sw.style.display = 'grid'; sw.style.placeItems = 'end start'; sw.style.padding = '6px'; sw.style.font = '600 13px/1 var(--sans)'; sw.style.color = '#fff'; sw.textContent = text }
+      t.append(sw, h('span', null, name), h('span', 'keep', 'Keep'))
+      t.onmouseenter = () => preview(ctx, bg, text)
+      t.onmouseleave = () => preview(ctx, null)
+      t.onclick = e => { e.stopPropagation(); preview(ctx, bg, text, true); setState('rest') }
+      strip.append(t)
+    })
+    box.append(head, strip); above.append(box)
+  }
+  root.append(above)
+
+  const row = h('div', 'sp-row')
+  row.append(h('span', 'sp-spark', '✦'))
+  if (state === 'working') {
+    const st = h('div', 'sp-status'); st.append(h('i', 'dot'), h('span', null, `Writing ${ctx.verb}…`))
+    const stop = h('button', 'lbtn', 'Stop'); stop.onclick = e => { e.stopPropagation(); clearTimeout(timer); setState('rest') }
+    row.append(st, stop)
+  } else {
+    const chip = h('span', 'sp-chip'); chip.append(ctx.chip); const x = h('button', null, '×'); x.setAttribute('aria-label', 'Clear selection'); chip.append(x)
+    const inp = h('input'); inp.placeholder = `Change or ask about ${ctx.chip}`; inp.value = state === 'focused' ? typed : ''
+    inp.setAttribute('aria-label', 'Ask Sailor')
+    inp.oninput = () => { typed = inp.value; sendBtn.disabled = !typed.trim() }
+    inp.onkeydown = e => { if (e.key === 'Enter' && typed.trim()) send(); if (e.key === 'Escape') { e.preventDefault(); typed = ''; setState('rest') } }
+    inp.onfocus = () => { if (state !== 'focused') setState('focused') }
+    const hint = h('kbd', 'sp-hint', '/')
+    const sendBtn = h('button', 'sp-send', '↑'); sendBtn.setAttribute('aria-label', 'Send'); sendBtn.disabled = !typed.trim() || state !== 'focused'
+    sendBtn.onclick = e => { e.stopPropagation(); send() }
+    row.append(chip, inp)
+    if (state !== 'focused') row.append(hint)
+    row.append(sendBtn)
+    row.onclick = () => inp.focus()
+  }
+  root.append(row)
+  return root
+}
+
+function preview(ctx, bg, text, keep) {
+  const el = ctx.target(); if (!el) return
+  if (!el.dataset.orig) el.dataset.orig = ctx.text ? el.textContent : el.style.background
+  if (ctx.text) el.textContent = text || el.dataset.orig
+  else if (ctx.wave) el.querySelectorAll('span').forEach((s, i) => s.style.transform = bg ? `translateY(${Math.sin(i * .9) * 14}px)` : '')
+  else el.style.background = bg || el.dataset.orig
+  if (keep) delete el.dataset.orig
+}
+
+/* ---------- places: host markup only ---------- */
+const bar = items => { const b = h('div', 'bar'); items.forEach(([ic, t, on]) => { if (ic === '|') return b.append(h('span', 'sep')); const x = h('button', on ? 'on' : null); x.append(h('b', null, ic), t); b.append(x) }); return b }
+function dock(ctx, barEl, w) { const d = h('div', 'dock'); d.dataset.w = w; d.append(SailorPrompt(ctx), barEl); return d }
+
+function canvasView(ctx) {
+  const v = h('div', 'canvas')
+  v.innerHTML = `<div class="topbar"><span class="pill">Rainy shop campaign ▾</span><span class="pill">Run · 12 credits</span></div>`
+  const node = (id, x, y, title, sub, bg) => { const n = h('div', 'node'); n.id = id; n.style.left = x; n.style.top = y; n.innerHTML = `<header><strong>${title}</strong><span>${sub}</span></header><div class="th"></div>`; n.querySelector('.th').style.background = bg; v.append(n); return n }
+  const rs = node('rainy', '14%', '14%', 'Rainy shop', 'Image', G.shop); rs.classList.add(state === 'working' || state === 'takes' ? 'glow' : 'sel')
+  node('poster', '42%', '10%', 'Poster', 'Frame', 'linear-gradient(160deg,#2c4a6b,#0a0f18)')
+  node('night', '70%', '14%', 'Night version', 'Generate', 'linear-gradient(160deg,#27204a,#0b0a18)')
+  v.append(dock(ctx, bar([['↖', 'Select', 1], ['✋', 'Hand'], ['＋', 'Add'], ['▦', 'Studios'], ['✦', 'Generate'], ['|'], ['▤', 'Assets'], ['⚡', 'Actions'], ['◐', 'Styles'], ['☺', 'Characters'], ['⚒', 'Toolbox'], ['⧉', 'Templates'], ['…', 'More']]), 'width = the toolbar'))
+  return v
+}
+
+function studioShell(title, sub, left, stageInner, right, barItems, ctx) {
+  const v = h('div', 'studio')
+  const head = h('div', 'shead'); head.innerHTML = `<span style="color:var(--ink);font-weight:500">${title}</span><span>${sub}</span>`
+  const L = h('div', 'side'); L.innerHTML = left
+  const S = h('div', 'stage'); S.innerHTML = `<div class="stage-inner">${stageInner}</div>`
+  S.append(dock(ctx, bar(barItems), 'width = the tool bar'))
+  const R = h('div', 'side r'); R.innerHTML = right
+  v.append(head, L, S, R); return v
+}
+
+const actions = (edit, dev) => `<h4>Edit</h4>${edit.map(([a, b]) => `<div class="arow">${a}<small>${b}</small></div>`).join('')}<h4>Develop</h4>${dev.map(([a, b]) => `<div class="arow">${a}<small>${b}</small></div>`).join('')}`
+const dials = d => `<h4>Dials</h4>${d.map(([n, v]) => `<div class="dial">${n}<i style="--v:${v}%"></i></div>`).join('')}`
+
+function frameView(ctx) {
+  return studioShell('Frame', 'Poster', `<h4>Layers</h4><div class="li on">T  Rainy season</div><div class="li">T  Spring collection</div><div class="li">▨  Background</div>`,
+    `<div class="poster"><div class="sub">Spring collection</div><div class="hl">Rainy season</div></div>`,
+    `<h4>Text</h4><div class="dial">Size<i style="--v:62%"></i></div><div class="dial">Tracking<i style="--v:40%"></i></div>${actions([['Rewrite', '3 takes']], [['Try typefaces', '3 takes']])}`,
+    [['↖', 'Select', 1], ['T', 'Text'], ['▣', 'Image'], ['◯', 'Shape'], ['✎', 'Draw'], ['|'], ['▦', 'Layout'], ['◈', 'Effects'], ['▶', 'Motion']], ctx)
+}
+function sceneView(ctx) {
+  return studioShell('3D', 'Hero object', `<h4>Scene</h4><div class="li on">◯  Sphere</div><div class="li">▭  Floor</div><div class="li">☀  Key light</div><div class="li">⌖  Camera</div>`,
+    `<div class="ball"></div><div class="floor"></div>`,
+    `<h4>Material</h4><div class="dial">Roughness<i style="--v:30%"></i></div><div class="dial">Metal<i style="--v:10%"></i></div>${actions([['New material', '3 takes']], [['Turntable', 'adds a step']])}`,
+    [['✥', 'Move', 1], ['⟳', 'Rotate'], ['⤢', 'Scale'], ['|'], ['＋', 'Add'], ['T', 'Text'], ['☀', 'Light'], ['⌖', 'Camera'], ['✋', 'Sculpt']], ctx)
+}
+function simpleView(ctx, title, previewHtml, prevCls, mini, right) {
+  const v = h('div', 'simple')
+  const head = h('div', 'shead'); head.innerHTML = `<span style="color:var(--ink);font-weight:500">${title}</span><span>Download · Render on canvas</span>`
+  const col = h('div', 'scol')
+  const p = h('div', 'preview ' + prevCls); p.innerHTML = previewHtml
+  const d = h('div', 'sdock'); d.dataset.w = 'width = the preview'
+  d.append(SailorPrompt(ctx), bar(mini)); d.lastChild.classList.add('minibar')
+  col.append(p, d)
+  const R = h('div', 'side r'); R.innerHTML = right
+  v.append(head, col, R); return v
+}
+function shaderView(ctx) {
+  return simpleView(ctx, 'Shader studio', '', 'shader-prev', [['❚❚', 'Pause'], ['1×', 'Speed'], ['⚄', 'Seed'], ['⤢', 'Fit']],
+    `<h4>Recipe</h4><div class="li on">Water ripple · Distort</div>${actions([['Remix', '3 takes'], ['Vary dials', '3 takes']], [['Animate', 'adds a step']])}${dials([['Scale', 45], ['Speed', 30], ['Warp', 70]])}`)
+}
+function typeView(ctx) {
+  return simpleView(ctx, 'Space type', [...'Sailor'].map(c => `<span>${c}</span>`).join(''), 'type-prev', [['❚❚', 'Pause'], ['⟷', 'Scrub'], ['↻', 'Loop'], ['⤢', 'Fit']],
+    `<h4>Text</h4><div class="li on">Sailor</div>${actions([['New motion', '3 takes']], [['Make a set', '3 takes']])}${dials([['Weight', 70], ['Speed', 40]])}`)
+}
+
+function compareView() {
+  const v = h('div', 'compare')
+  const intro = h('p', 'intro'); intro.innerHTML = '<b>The same component in every place.</b> Only two things change: how wide it is (the bar or preview it sits on) and what fills it (the chip, the placeholder, the suggestions and the takes). Switch the state above; every prompt follows.'
+  v.append(intro)
+  const saved = place
+  for (const [k, ctx] of Object.entries(PLACES)) {
+    place = k
+    const s = h('section'); const t = h('h3'); t.innerHTML = `<b>${ctx.label}</b> · ${ctx.simple ? 'width = the preview' : 'width = the tool bar'}`
+    const d = h('div', 'cmp-dock'); d.style.maxWidth = { canvas: 910, frame: 560, scene3d: 590, shader: 640, spacetype: 640 }[k] + 'px'; d.append(SailorPrompt(ctx))
+    s.append(t, d); v.append(s)
+  }
+  place = saved
+  return v
+}
+
+const VIEWS = { canvas: canvasView, frame: frameView, scene3d: sceneView, shader: shaderView, spacetype: typeView, compare: compareView }
+
+let timer
+function send() { if (!typed.trim()) typed = PLACES[place === 'compare' ? 'canvas' : place].sugg[0]; setState('working'); timer = setTimeout(() => setState('takes'), 1600) }
+function setState(s) { state = s; if (s === 'rest') typed = ''; render(); if (s === 'focused') document.querySelector('.sp input')?.focus() }
+
+function render() {
+  const view = document.getElementById('view'); view.replaceChildren()
+  view.append(VIEWS[place](PLACES[place]))
+  for (const b of document.querySelectorAll('#views button')) b.setAttribute('aria-pressed', b.dataset.k === place)
+  for (const b of document.querySelectorAll('#states button')) b.setAttribute('aria-pressed', b.dataset.k === state)
+}
+
+const vseg = document.getElementById('views')
+;[...Object.entries(PLACES).map(([k, c]) => [k, c.label]), ['compare', 'All five']].forEach(([k, l]) => { const b = h('button', null, l); b.dataset.k = k; b.onclick = () => { place = k; typed = ''; render() }; vseg.append(b) })
+const sseg = document.getElementById('states')
+STATES.forEach(([k, l]) => { const b = h('button', null, l); b.dataset.k = k; b.onclick = () => { if (k === 'takes' && !typed) typed = (PLACES[place] || PLACES.canvas).sugg[0]; clearTimeout(timer); state = k; render() }; sseg.append(b) })
+document.getElementById('showW').onchange = e => document.body.classList.toggle('show-width', e.target.checked)
+document.addEventListener('keydown', e => {
+  const inField = e.target.matches?.('input, textarea')
+  if ((e.key === '/' && !inField) || (e.key === 'k' && (e.metaKey || e.ctrlKey))) { e.preventDefault(); setState('focused') }
+  if (e.key === 'Escape' && !inField && state !== 'rest') setState('rest')
+})
+const qs = new URLSearchParams(location.search)
+if (qs.get('place') && VIEWS[qs.get('place')]) place = qs.get('place')
+if (qs.get('state')) state = qs.get('state')
+if (state === 'takes') typed = (PLACES[place] || PLACES.canvas).sugg[0]
+render()
+</script>
