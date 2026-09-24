@@ -56,6 +56,16 @@ function scratchCopier(): (surface: TexImageSource, w: number, h: number) => Can
  *  must not interleave on a source's shared canvas. */
 const pulling = new WeakMap<StudioFrameSource, Promise<unknown>>()
 
+/** Runs `run` once every earlier pull of `source` has ended, and holds later ones until it ends —
+ *  the lock frame pulls take, for anything else that reads the source's shared canvas (a live
+ *  layer's export-time check). */
+export async function withSourcePull<T>(source: StudioFrameSource, run: () => Promise<T>): Promise<T> {
+  const prev = pulling.get(source) ?? Promise.resolve()
+  const mine = prev.catch(() => {}).then(run)
+  pulling.set(source, mine)
+  try { return await mine } finally { if (pulling.get(source) === mine) pulling.delete(source) }
+}
+
 /**
  * `count` frames of a wired slot's live source — frame `i` at `t01 = i / count`, the editor's
  * `slotPhase01` timing — each rendered at the source's aspect to fit `maxPx` on its long side,
@@ -113,10 +123,7 @@ export async function pullSourceFrames(
     }
     return { frames, failures: [] }
   }
-  const prev = pulling.get(source) ?? Promise.resolve()
-  const mine = prev.catch(() => {}).then(run)
-  pulling.set(source, mine)
-  try { return await mine } finally { if (pulling.get(source) === mine) pulling.delete(source) }
+  return withSourcePull(source, run)
 }
 
 export function createAppFrameExportIO(opts: {
@@ -129,9 +136,24 @@ export function createAppFrameExportIO(opts: {
    *  Absent: no slot plays live — every animated slot takes the frames path. */
   wiredEmbed?: FrameExportIO['wiredEmbed']
   catalog: EffectDef[]
-}): FrameExportIO {
-  // One fetch per bundle per IO (one build): two live slots on one player measure it once.
-  const bundleSizes = new Map<string, Promise<number>>()
+}): FrameExportIO & { bundleText(bundle: string): Promise<string> } {
+  // One fetch per bundle per IO (one build): two live slots on one player, and a slot's
+  // export-time check and its size on the sheet, all read it once.
+  const bundleTexts = new Map<string, Promise<string>>()
+  const bundleText = (bundle: string): Promise<string> => {
+    let text = bundleTexts.get(bundle)
+    if (!text) {
+      text = (async () => {
+        const res = await fetch(`/embed/${bundle}.js`)
+        if (!res.ok) throw new Error(`/embed/${bundle}.js: HTTP ${res.status}`)
+        return res.text()
+      })()
+      bundleTexts.set(bundle, text)
+      // A failed fetch is not kept, so it is not remembered as a bundle.
+      text.catch(() => { if (bundleTexts.get(bundle) === text) bundleTexts.delete(bundle) })
+    }
+    return text
+  }
   return {
     async fetchBlob(url) {
       const res = await fetch(url)
@@ -160,18 +182,8 @@ export function createAppFrameExportIO(opts: {
     wiredEmbed: opts.wiredEmbed,
     // The bundle export.ts will inline (the same `/embed/{name}.js`), measured as the bytes it
     // adds to the file. A failed fetch is not kept, so it is not remembered as a size.
-    bundleBytes(bundle) {
-      let size = bundleSizes.get(bundle)
-      if (!size) {
-        size = (async () => {
-          const res = await fetch(`/embed/${bundle}.js`)
-          if (!res.ok) throw new Error(`/embed/${bundle}.js: HTTP ${res.status}`)
-          return new Blob([await res.text()]).size
-        })()
-        bundleSizes.set(bundle, size)
-        size.catch(() => { if (bundleSizes.get(bundle) === size) bundleSizes.delete(bundle) })
-      }
-      return size
-    },
+    bundleBytes: async bundle => new Blob([await bundleText(bundle)]).size,
+    /** The bundle's text — what a live layer's export-time check runs (liveCheck.ts). */
+    bundleText,
   }
 }

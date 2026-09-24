@@ -360,4 +360,15 @@ describe('createAppFrameExportIO — the live route', () => {
       expect(createAppFrameExportIO({ uploaded: [], wiredStill: () => null, catalog: [] }).wiredEmbed).toBeUndefined()
     } finally { vi.unstubAllGlobals() }
   })
+
+  it('a live layer\'s check (bundleText) and its size on the sheet share one fetch of the bundle', async () => {
+    const fetch = vi.fn(async () => new Response('window.__SAILOR_SURFACE__ = {}'))
+    vi.stubGlobal('fetch', fetch)
+    try {
+      const io = createAppFrameExportIO({ uploaded: [], wiredStill: () => null, catalog: [] })
+      expect(await io.bundleText('spacetype-field')).toBe('window.__SAILOR_SURFACE__ = {}')
+      expect(await io.bundleBytes!('spacetype-field')).toBe(30)
+      expect(fetch).toHaveBeenCalledTimes(1)
+    } finally { vi.unstubAllGlobals() }
+  })
 })

@@ -31,6 +31,8 @@ import { loadGoogleCatalog } from '~/data/google-fonts'
 import { gradientFx } from '~/lib/gradientfx/renderer'
 import { defaultConfig as gradientDefaultConfig } from '~/lib/gradientfx/randomize'
 import { makeGradientFrameSource } from '~/lib/gradientfx/frameSource'
+import { diffImages, matches, OVER } from '~/lib/embed/frame/compare'
+import { LIVE_CHECK_AT } from '~/lib/embed/frame/liveCheck'
 import type { EmbedHandle, EmbedSurface } from '~/lib/embed/contract'
 import type { StudioEmbed } from '~/lib/studio/frameSource'
 
@@ -38,9 +40,7 @@ definePageMeta({ layout: false })
 
 const WIDTH = 480
 /** Frame positions sampled, as fractions of the loop; each is snapped to a whole frame. */
-const AT = [0, 0.37, 0.71]
-/** A channel differing by more than this many levels counts the pixel as different. */
-const OVER = 24
+const AT = LIVE_CHECK_AT
 
 /** `content`: the share of the EDITOR's pixels that differ from its own top-left pixel by more
  *  than OVER — how much of the picture is not background. */
@@ -76,20 +76,17 @@ function pngOf(px: Uint8ClampedArray, w: number, h: number): string {
   return c.toDataURL('image/png')
 }
 
-/** Mean absolute difference per colour channel (R, G, B; 0–255), and the share of pixels any of
- *  whose channels (alpha included) differs by more than OVER. */
+/** The shared metric (lib/embed/frame/compare.ts — the one the export-time check uses): mean
+ *  absolute difference per colour channel (R, G, B; 0–255), and the share of pixels any of whose
+ *  channels (alpha included) differs by more than OVER. Plus `content`, the harness's own guard. */
 function compare(a: Uint8ClampedArray, b: Uint8ClampedArray): { mean: number; over: number; content: number } {
-  let sum = 0, over = 0, content = 0
-  const n = a.length / 4
+  const d = diffImages(a, b)
+  let content = 0
   for (let p = 0; p < a.length; p += 4) {
-    const dr = Math.abs(a[p]! - b[p]!), dg = Math.abs(a[p + 1]! - b[p + 1]!), db = Math.abs(a[p + 2]! - b[p + 2]!)
-    const da = Math.abs(a[p + 3]! - b[p + 3]!)
-    sum += dr + dg + db
-    if (dr > OVER || dg > OVER || db > OVER || da > OVER) over++
     if (Math.abs(a[p]! - a[0]!) > OVER || Math.abs(a[p + 1]! - a[1]!) > OVER || Math.abs(a[p + 2]! - a[2]!) > OVER
       || Math.abs(a[p + 3]! - a[3]!) > OVER) content++
   }
-  return { mean: sum / (3 * n), over: over / n, content: content / n }
+  return { mean: d.mean, over: d.shareOver, content: content / (a.length / 4) }
 }
 
 /** Under this share of non-background pixels at every moment, the editor drew nothing to check. */
@@ -99,7 +96,7 @@ function statusOf(times: TimeResult[]): 'measured' | 'empty' {
   return times.some(t => t.content >= MIN_CONTENT) ? 'measured' : 'empty'
 }
 
-const passes = (times: TimeResult[]) => statusOf(times) === 'measured' && times.every(t => t.mean < 2 && t.over < 0.005)
+const passes = (times: TimeResult[]) => statusOf(times) === 'measured' && times.every(t => matches({ mean: t.mean, shareOver: t.over }))
 
 /** Whole-frame sample times over `totalFrames`: frame i ↔ t01 = i / totalFrames. */
 function sampleFrames(totalFrames: number): { frame: number; t01: number }[] {

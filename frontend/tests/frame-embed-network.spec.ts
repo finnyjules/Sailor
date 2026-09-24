@@ -145,6 +145,8 @@ async function regionDiff(page: Page, a: string, b: string, box: { x: number; y:
 test.describe('Frame embed — a wired Gradient plays live', () => {
   test('the sheet says it plays live; the file carries its player, makes no request, animates, and keeps its shape', async ({ page, context }, testInfo) => {
     test.setTimeout(240_000)
+    // The export-time check's line (Task 5): it must have matched for the layer to play live.
+    page.on('console', (m) => { if (/^\[Frame\] .*checked in/.test(m.text())) console.log(`[live-gradient] ${m.text()}`) })
 
     // An animated Gradient config: the embed harness's own fixture (the studio's defaults plus a
     // full hue sweep over 4 s), made 16:9 so a stretched square would show.
@@ -239,6 +241,13 @@ test.describe('Frame embed — a wired Gradient plays live', () => {
 /** Builds a blank project with one Space Type node holding `state`, wires it into a new Frame,
  *  opens the Frame's export sheet and downloads the file. */
 async function exportWiredSpaceType(page: Page, state: unknown, shot: string): Promise<{ sheetText: string; html: string; bytes: number }> {
+  await openWiredSpaceTypeFrame(page, state)
+  return await exportOpenFrame(page, shot)
+}
+
+/** A blank project with one Space Type node holding `state`, wired into a new Frame whose editor
+ *  is left open. */
+async function openWiredSpaceTypeFrame(page: Page, state: unknown): Promise<void> {
   await openBlankWorkflow(page)
   await waitForBackend(page)
   const ids = async () => await page.locator('.vue-flow__node').evaluateAll(els => els.map(e => e.getAttribute('data-id')))
@@ -258,6 +267,10 @@ async function exportWiredSpaceType(page: Page, state: unknown, shot: string): P
   await page.evaluate((id) => window.dispatchEvent(new CustomEvent('sailor:openCompositor', { detail: { nodeId: id } })), frameId)
   await page.locator('[data-testid="compositor-stack-canvas"]').waitFor({ state: 'visible', timeout: 15_000 })
   await page.waitForTimeout(1_000)
+}
+
+/** The open Frame editor's export sheet, built and downloaded (the sheet closes on Download). */
+async function exportOpenFrame(page: Page, shot: string): Promise<{ sheetText: string; html: string; bytes: number }> {
   await page.locator('[data-testid="compositor-right-panel"]').getByRole('button', { name: /^Download/ }).click()
   await page.locator('[data-testid="frame-web-export"]').click()
   const sheet = page.locator('[data-testid="frame-web-export-sheet"]')
@@ -322,6 +335,68 @@ test.describe('Frame embed — a wired Space Type plays live', () => {
     console.log(`[live-spacetype] frame ${v.width}×${v.height}, canvas ${dims[0]}×${dims[1]}, box ${box.w.toFixed(0)}×${box.h.toFixed(0)}; t 0 vs 0.5: ${differing} of ${total} px differ`)
     expect(box.w).toBeGreaterThan(dims[0] * 0.95)   // the layer fills the Frame
     expect(differing).toBeGreaterThan(total * 0.2)
+  })
+
+  // Task 5: every live layer is checked against the editor's picture when it is exported. A
+  // verified effect in its default face (Inter 700) matches and plays live; the SAME Frame, after
+  // the Space Type's face is switched to Inter at 600 (an optical-size face the file's static
+  // instance does not match — Task 4 measured 6.5% of pixels off), is checked again, mismatches,
+  // and exports as frames. The check's own console lines give its diffs and the time it adds.
+  test('the export-time check: a verified effect plays live in its default face, and as frames in Inter 600', async ({ page, context }, testInfo) => {
+    test.setTimeout(480_000)
+    const EFFECT = 'field'
+    const checks: string[] = []
+    page.on('console', (m) => { if (/^\[Frame\] .*(plays live: |exports as frames: )/.test(m.text())) checks.push(m.text()) })
+    const { state, verified } = await spaceTypeDefaultState(page, EFFECT)
+    expect(verified).toContain(EFFECT)
+    expect(state.params.font).toBe('Inter')
+
+    // 1. Default face → the check matches → live.
+    await openWiredSpaceTypeFrame(page, state)
+    const t1 = Date.now()
+    const live = await exportOpenFrame(page, testInfo.outputPath('check-live-sheet.png'))
+    const liveMs = Date.now() - t1
+    const liveLine = live.sheetText.split('\n').find(l => / · plays live · adds \d/.test(l)) ?? ''
+    console.log(`[live-check] default face: sheet "${liveLine}", file ${live.bytes} bytes, export ${liveMs} ms`)
+    expect(liveLine).not.toBe('')
+    expect(live.sheetText).not.toMatch(/pre-rendered/)
+    expect(externalRefs(live.html)).toEqual([])
+    const liveEntry = snapshotOf(live.html).wired[0]
+    expect(liveEntry).toMatchObject({ kind: 'live', bundle: `spacetype-${EFFECT}` })
+    expect(liveEntry.config.font).toMatchObject({ family: 'Inter', weight: 700 })
+
+    // 2. The same Frame, the Space Type switched to Inter 600 → the check mismatches → frames.
+    const at600 = { ...state, params: { ...state.params, font: 'Inter', typeWeight: 600 } }
+    await page.evaluate((s) => {
+      window.dispatchEvent(new CustomEvent('sailor:test:setNodeData', { detail: { match: 'SpaceType', patch: { properties: { sailor_spaceType: s } } } }))
+    }, at600)
+    await page.waitForTimeout(3_000)   // the node rebuilds and its face loads, as a person's edit would
+    const t2 = Date.now()
+    const frames = await exportOpenFrame(page, testInfo.outputPath('check-frames-sheet.png'))
+    const framesMs = Date.now() - t2
+    const framesLine = frames.sheetText.split('\n').find(l => / · pre-rendered · /.test(l)) ?? ''
+    console.log(`[live-check] Inter 600: sheet "${framesLine}", file ${frames.bytes} bytes, export ${framesMs} ms`)
+    expect(framesLine).not.toBe('')
+    expect(frames.sheetText).not.toMatch(/plays live/)
+    expect(externalRefs(frames.html)).toEqual([])
+    expect(snapshotOf(frames.html).wired[0].kind).toBe('clip')
+    expect(frames.html).not.toContain(`m["spacetype-${EFFECT}"]`)
+
+    // The check's own lines: one match (default face), one mismatch (Inter 600), each timed.
+    for (const c of checks) console.log(`[live-check] ${c}`)
+    testInfo.annotations.push({ type: 'live-check', description: checks.join(' | ') })
+    expect(checks.length).toBe(2)
+    expect(checks[0]).toMatch(/plays live: its player matches the editor · checked in \d+ ms/)
+    expect(checks[1]).toMatch(/exports as frames: its live player does not match the editor .* · checked in \d+ ms/)
+
+    // Both files make zero requests when played.
+    for (const [name, html] of [['live', live.html], ['frames', frames.html]] as const) {
+      const v = snapshotOf(html).variants[0]
+      const vw = 1000, vh = Math.round(1000 * v.height / v.width)
+      const r = await renderExported(context, html, 0.3, { width: vw, height: vh })
+      expect(r.requests, name).toEqual([])
+      await writeFile(testInfo.outputPath(`check-${name}-export.png`), Buffer.from(r.png.split(',')[1]!, 'base64'))
+    }
   })
 
   test('an effect that is not verified still exports as frames', async ({ page }, testInfo) => {

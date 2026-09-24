@@ -150,8 +150,9 @@ import MotionCopiesPanel from '~/components/vue-canvas/compositor/MotionCopiesPa
 import FrameWebExportSheet from '~/components/vue-canvas/compositor/FrameWebExportSheet.vue'
 import { planFrameExport } from '~/lib/embed/frame/plan'
 import { buildFrameSnapshot, isBlocked, formatBytes } from '~/lib/embed/frame/gather'
-import { createAppFrameExportIO, pullSourceFrames } from '~/lib/embed/frame/appIO'
+import { createAppFrameExportIO, pullSourceFrames, withSourcePull } from '~/lib/embed/frame/appIO'
 import { createWiredClipCache } from '~/lib/embed/frame/clipCache'
+import { checkLiveEmbed, type LiveCheckResult } from '~/lib/embed/frame/liveCheck'
 import type { FrameFit, FrameNotice, FrameVariant } from '~/lib/embed/frame/types'
 import { embedSnippet } from '~/lib/embed/snippet'
 import { exportEmbedHtml, downloadEmbed } from '~/lib/embed/export'
@@ -5068,6 +5069,10 @@ let webExportPulls = 0
 /** The clips this sheet has pulled, kept while it is open: a rebuild that only changed Fit or
  *  Transparent (or anything a clip does not depend on) reuses them instead of re-rendering. */
 const webExportClips = createWiredClipCache()
+/** Each live slot's export-time check (checkLiveEmbed), kept while the sheet is open and cleared
+ *  with the clips: a rebuild that only changed Fit or Transparent does not re-check. Keyed by the
+ *  slot's source and its embed config, so any change to what the layer draws checks again. */
+const webExportLiveChecks = new Map<number, { source: object; key: string; ok: boolean }>()
 /** What a wired slot's source draws, as a string that changes when it does: the saved widget
  *  state of the node wired into that slot. A changed source misses the clip cache. */
 function wiredSourceSignal(slot: number): string {
@@ -5150,8 +5155,37 @@ async function buildWebExport() {
         })
       },
       // Tried first for an animated slot: a studio that can play live ships its own embed player
-      // instead of frames (StudioFrameSource.embed); null or absent → the frames above.
-      wiredEmbed: slot => layers.value.find(x => x.slot === slot + 1)?.live?.embed?.() ?? Promise.resolve(null),
+      // instead of frames (StudioFrameSource.embed) — only once the export-time check has seen
+      // that player draw what this editor draws (checkLiveEmbed). Null, absent or a mismatch →
+      // the frames above.
+      wiredEmbed: async (slot) => {
+        const live = layers.value.find(x => x.slot === slot + 1)?.live
+        const embed = live?.embed ? await live.embed() : null
+        if (!live || !embed) return null
+        const key = JSON.stringify(embed.config)
+        const hit = webExportLiveChecks.get(slot)
+        if (hit && hit.source === live && hit.key === key) return hit.ok ? embed : null
+        // The file's own player — the text export.ts inlines, fetched once with its size.
+        const bundleJs = await io.bundleText(embed.bundle)
+        const label = wiredSlots.find(s => s.slot === slot)?.label ?? `Layer ${slot + 1}`
+        // The check pulls the source as frame pulls do, under the same bracket: no preview render
+        // and no other build's pull may interleave with its reads of the source's canvas.
+        const shared = !live.openExport
+        if (shared && webExportPulls++ === 0) stopLive()
+        const t0 = performance.now()
+        let result: LiveCheckResult
+        try {
+          result = await withSourcePull(live, () => checkLiveEmbed(live, embed, bundleJs))
+        } finally { if (shared && --webExportPulls === 0 && !unmounted) startLive() }
+        const ms = Math.round(performance.now() - t0)
+        webExportLiveChecks.set(slot, { source: live, key, ok: result.ok })
+        if (!result.ok) {
+          console.info(`[Frame] ${label} exports as frames: its live player does not match the editor (${result.reason ?? 'no reason'}; ${result.diffs.map(d => `${d.mean.toFixed(2)}/${(d.shareOver * 100).toFixed(2)}%`).join(', ') || 'no diffs'}) · checked in ${ms} ms`)
+          return null
+        }
+        console.debug(`[Frame] ${label} plays live: its player matches the editor · checked in ${ms} ms`)
+        return embed
+      },
     })
     const snap = await buildFrameSnapshot(plan, variant, io)
     if (gen !== webExportGen) return
@@ -5180,7 +5214,7 @@ function openWebExport() {
   webExport.open = true; webExport.transparent = false; webExport.copyStatus = null; webExportNotice.value = ''
   void buildWebExport()
 }
-function closeWebExport() { webExport.open = false; webExportGen++; webExport.copyStatus = null; clearWebExportTimers(); webExportClips.clear() }
+function closeWebExport() { webExport.open = false; webExportGen++; webExport.copyStatus = null; clearWebExportTimers(); webExportClips.clear(); webExportLiveChecks.clear() }
 function setWebExportFit(f: FrameFit) { webExport.fit = f; void buildWebExport() }
 function setWebExportTransparent(on: boolean) { webExport.transparent = on; void buildWebExport() }
 function downloadWebExport() {
@@ -5190,6 +5224,7 @@ function downloadWebExport() {
   videoStatus.value = ''
   webExport.open = false
   webExportClips.clear()
+  webExportLiveChecks.clear()
   webExportNotice.value = `Downloaded · ${formatBytes(webExport.bytes)}`
 }
 async function copyWebExportSnippet() {
