@@ -43,6 +43,20 @@ Plan `docs/superpowers/plans/2026-09-23-frame-export-live-wired-layers.md` (its 
 
 **Open.** The Space Type font race (a pull can build with a fallback face) and Loft's unresolved `google:` font token — spun off as their own task. The check samples 3 moments at 480 px. A Gradient's "animated" rule differs between the node card and its frame source (pre-existing). Minors listed in `.superpowers/sdd/live-wired/final-review.md`.
 
+### Frame layouts, stage 5 — make a set — LANDED 2026-09-24 (plan `docs/superpowers/plans/2026-09-24-frame-layout-stage5-campaigns.md`; 4 tasks + a whole-stage review and its fix wave, subagent-driven)
+
+Julien answered the three design questions on a working mockup (output: both; when the layout doesn't fit: the best fit in the same style; hand edits: send one format to the canvas).
+
+**What shipped:** a **Make a set** section in the Layout tab — tick formats (Social / Display ads). **Open the set** shows the Frame's layout recomposed at every ticked format, side by side at true proportions, painted by the Frame's own renderer, each checked like a single Frame; a format where the layout doesn't fit gets the best-fitting layout of the same style (an amber note says so), and one where nothing fits says so. **Show covered areas** draws each format's app-covered bands. **Download N images** renders each format at its own size through the same path as Download PNG and zips them (`<frame>_set_<time>.zip`, one `<format>.png` each), with progress, Cancel and per-format errors. **Send to canvas** adds one format as its own Frame beside the source — its size and format, its layers and wired inputs, its Layout tab on that layout — as one undo step. The set never writes the source Frame; it stays current while its sheet is open (re-planned 300 ms after any change) and plans one format per idle slice. Stills only for now.
+
+**Proof:** unit specs for planning, the sheet, export and send; a real-canvas Playwright test (the zip holds a real PNG per format; Send adds a Frame); the Layout tab's 12 browser tests. Seen in the browser on the lab Frame.
+
+**Caught on the way:** the sheet showed "0 formats" in the browser (planning copied the editor's live data with a clone that refuses Vue proxies — the unit tests used plain objects); **Run-off on wide banners put its title's start under a left-hand image** (anchored at the page margin; the side image is exempt from collisions) — now it starts beside the image and the checker refuses a hidden start; a two-image Frame on 728×90 got no layouts (the smallest image tile was taller than the banner); the set went stale while open and Send could lose edits; idle planning could stall on a busy page.
+
+**Also in this pass (browser pass + known limits):** Street offers 4 of 5 on the lab Frame (the "only Drop" report is gone); an accent copy follows its line's new words; a size change brings back only what the format hid; an untagged line is never stranded; Not shown lists three and counts the rest.
+
+**Known:** tiles leave out post effects and final-quality shader fills (the sheet says the download adds them); a video set is not built (stills only); a Frame sent to the canvas starts unbaked; the set E2E is slow and once flaked under heavy machine load. **Staged for later (Julien, 09-24): retire Smart Layout** — first Frames in Collections (data rows), then a call on server-side rendering.
+
 ### Frame layouts — the 16 layout calls — BUILT 2026-09-24 (`d0404bf4d`..HEAD, non-contiguous — 7 tasks, subagent-driven, a review per task, a whole-batch review and its fix wave)
 
 Plan `docs/superpowers/plans/2026-09-24-frame-layout-decisions.md`. Julien picked all 16 open layout decisions on the "Layout calls" page; 4 keep today's behaviour (Review/Stat/Post-it hide the headline, plain "Automatic", Run-off stays off stories, Street Repeat stays solid), 12 were built:
