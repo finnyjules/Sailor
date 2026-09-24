@@ -203,6 +203,21 @@ Spec `docs/superpowers/specs/2026-09-23-scene3d-web-embed-design.md` (its own "P
 
 **Known limits for slice 2:** layer blur, torn edge, grain and `localLayerBox` still ride the unscaled device scale; members of a rigid unit share the unit's motion map (exact for edge and centre pins, drifts for a manually relative-pinned or Keep-size group); a re-wrapped text's reported box uses the design height when its vertical pin is centre or relative. The three review findings above all landed, so slice 2 inherits nothing new from them.
 
+### The Frame renders in Sailor — LANDED, ON LOCALLY — 2026-09-24 (`9997ce622`..`52fa0cd88`)
+
+**What:** the Frame (`Compositor` node) now renders in Sailor's runner instead of ComfyUI (`frontend/server/runner/compositor/`). It is a bit-for-bit port of the Python stacking: position, rotation, scale, opacity, the 10 blend modes, z order, masks, the text/shape overlay and clones. Frames therefore come out exactly as ComfyUI made them, with the same limits (effects, shaders and 3D are still missing from a run's Frame; the editor and exports paint those in the browser as before).
+- **Speed and safety:** it renders on a worker thread, one Frame at a time. The artboard is capped at 8192² (4096² in hosted), clones at 256, total work at 256 copies × 4 MP, and a watchdog stops a render after 120 s. Anything larger goes to ComfyUI.
+- **Price:** the Frame costs 0 credits, and the 1-credit base is kept, as the Python path charges.
+- **Still on ComfyUI:** baked motion, a Frame whose keep-exact mask or video output feeds another node, and layers wired from a video.
+- **The runner now drops invalid outputs the way ComfyUI does** (`shared/runner/validate.ts`) and runs the rest. A blank project's empty Frame no longer sends the whole workflow to ComfyUI.
+- **Switch:** `frame` in `NUXT_RUNNER_FAMILIES` / `NUXT_PUBLIC_RUNNER_FAMILIES`. It is ON in the local `.env`.
+
+**Proven:**
+- 78 fixture cases generated from the real Python match bit-exact.
+- Live on :3002, the same 768×1024 Frame through the runner and through ComfyUI: 2 of 786,432 pixels differ by 1/255, and the runner took 0.6 s.
+- A blank project with an Image card and a Frame goes to the runner (`POST /api/runs`) and renders into `temp/sailor_runner/`.
+- One bug was found live and fixed: runner and ComfyUI previews shared a file name in `temp/`, so the later one overwrote the other.
+
 ### Sailor without ComfyUI — Phase B BUILT, EVERY FAMILY SWITCHED OFF — 2026-09-24 (`040c48c0b`..`68a52f10d`, subagent-driven, a review per task, a whole-phase review and its fix wave)
 
 **What:** the runner (`frontend/server/runner/`) now handles six more groups of nodes ("families") without ComfyUI. Each group has its own switch: `NUXT_RUNNER_FAMILIES` on the server; the browser's list defaults to the same value. With a family off, nothing changes. A workflow the server's families don't take goes to ComfyUI as before, even when the browser thinks otherwise.
