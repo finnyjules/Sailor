@@ -184,7 +184,7 @@ The prompt's suggestions and results follow Frame's selection:
 - **Hovering or focusing a tile** previews it in place: on the node's own thumbnail, the studio preview or the artboard. Leaving the strip goes back to the clicked tile, or to the current version.
 - **Keep** applies the take. The other takes go into the node's existing take history (`TakesStrip`, the Light Table), so nothing is lost and any take can still be branched.
 - **Where the strip goes** (decided: open question 1, option D). The strip always sits **just above the prompt**, in the canvas and in studios alike. Nothing on the canvas moves, and nothing gets covered.
-  - **On the canvas,** the node the takes belong to **glows** in the accent colour, and the strip's header names it with a chip ("Rainy shop"). Hovering a tile previews the take **on that node's own thumbnail**, and on anything downstream that shows it, such as the Poster. So the result still shows up on the work, even though the tiles don't sit next to it.
+  - **On the canvas,** the node the takes belong to **carries the pastel ring** (the proposed-node ring, §2.1a), and the strip's header names it with a chip ("Rainy shop"). Hovering a tile previews the take **on that node's own thumbnail**, and on anything downstream that shows it, such as the Poster. So the result still shows up on the work, even though the tiles don't sit next to it.
   - **In a studio,** the preview or artboard shows the hovered take. The preview shrinks to `min(520px, 100vh − 400px)` so that the preview, the strip and the bar all fit.
   - If the target node is off screen when the takes arrive, the canvas pans just enough to bring it into view, so the preview can be seen. That's a view change, not a node move.
 - **The strip stays the same size on screen at any canvas zoom** (question 3, option B). Since it sits above the prompt, this comes for free.
@@ -230,9 +230,9 @@ The prompt's suggestions and results follow Frame's selection:
 | Today | Becomes |
 |---|---|
 | `CanvasPromptBar.vue` (canvas, above the toolbar) | The prompt in the canvas bottom bar |
-| `AgentBar.vue` + `TakeStrip.vue` under each studio preview (`StudioModalShell`) | The prompt in the studio bar; takes under the preview (`TakeStrip` reused) |
+| `AgentBar.vue` + `TakeStrip.vue` under each studio preview (`StudioModalShell`) | The one prompt above the studio's small tool bar; takes just above the prompt (`TakeStrip` reused) |
 | `VibeControlBar.vue` (Space type, a hand copy of AgentBar) | The prompt in Space type's bar; the file is deleted |
-| Frame's agent pill (`CompositorModal` + `useCompositorAgent`) | The prompt as the last item of Frame's bar |
+| Frame's agent pill (`CompositorModal` + `useCompositorAgent`) | The one prompt as a full row above Frame's tool bar (no pill) |
 | Template editor agent (`GridEditorShell` side panel + `useLayoutAgent`) | The prompt in a bottom bar in the template editor (same component) |
 | Copy assist textarea + Variations/Translate buttons (`GridPropertyPanel`) | **Write copy** / **Translate…** actions (Edit) → headline takes |
 | Font suggest in the font pickers | Unchanged. It's a search inside a picker, and its results already land where the work is. It uses the shared field's styling. |
@@ -356,15 +356,15 @@ Instructions can edit a content field (§1.5). The edit appears in the field, br
 
 1. **Engine run.** The spike's 6 requests through the real engine (§7.2) on Sonnet 5 and Haiku, shown next to the spike's takes on one page. It costs a few dollars, and needs **your OK before running**. It confirms the model tier and the checks.
 2. **Canvas layout.**
+   - The one prompt component (§2.1a), built once here and mounted on the canvas first.
    - The prompt row's new behaviour in place of `CanvasPromptBar` (selection chips, suggestions, progress with Stop), and Explain removed from the toolbar.
    - The node toolbar (Edit ▾ / Develop ▾, existing items regrouped by intent, landing hints).
    - The multi-selection toolbar, Run rows on nodes, and the fixes badge.
-   - Explain removed.
    - The prompt runs the existing agent flows at first; results still use today's shapes.
 3. **Results on the work.** Take strips above the prompt, with the target node glowing and previewing each take (§3.1), proposed nodes on the canvas, the answer card, and progress in the prompt. `CanvasPromptBar` is retired.
 4. **Studios.**
-   - A shared studio bottom bar in `StudioModalShell` with ✦ Ask.
-   - ✦ added at the end of Frame's and 3D's bars (takeover modes included).
+   - The one prompt (§2.1a) above a small shared tool bar in `StudioModalShell`.
+   - Frame's and 3D's existing prompt rows swapped for the one prompt, above whichever bar shows (takeover modes included); Frame's pill removed.
    - The simple studios' scattered controls moved into the bar.
    - Inspectors reordered: Recipe or the thing itself, Actions as light rows, then Dials.
    - `AgentBar`'s old place and `VibeControlBar` retired; the template editor moved to the same bar.
