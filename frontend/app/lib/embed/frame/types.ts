@@ -43,10 +43,14 @@ export interface FrameFontAsset {
 /** A wired slot's pictures. `still`: one picture for every moment. `clip`: an animated studio's
  *  loop pre-rendered at export — `frames[i]` is the source at `i / frames.length` of its own
  *  `duration` (seconds); the adapter wraps the Frame's time on that duration, as the editor's
- *  `slotPhase01` does. */
+ *  `slotPhase01` does. `live`: the studio's own embed player plays it — `surface` is its embed
+ *  kind, `bundle` the built file carrying it (`bundleNameFor(surface, config)`, checked again at
+ *  export), `config` what that player mounts, `width`/`height` the source's size (its aspect) and
+ *  `duration` its loop in seconds, wrapped on the Frame's time as clips are. */
 export type WiredEntry =
   | { kind: 'still'; dataUrl: string }
   | { kind: 'clip'; frames: string[]; fps: number; duration: number }
+  | { kind: 'live'; surface: string; bundle: string; config: unknown; width: number; height: number; duration: number }
 
 export interface FrameAssets {
   urls: Record<string, string>                 // assetKey(kind, key) → data URL

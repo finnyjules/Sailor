@@ -16,6 +16,10 @@
  * visible canvas gets the background across the whole box (the bleed), the offscreen blitted at
  * the Frame's whole-pixel position, then the doc-level post chain over everything, so it covers
  * the bleed as well.
+ *
+ * A wired slot's picture is a still, a pre-rendered clip, or — `live` — a studio's own embed
+ * player nested in this one (../nested.ts): mounted off-document here, timed and sized from the
+ * paint, its canvas handed to the painter through the same provider.
  */
 import type { EmbedHandle, EmbedSurface } from '../contract'
 import { assetKey, type FrameSnapshot, type FrameVariant } from '../frame/types'
@@ -35,6 +39,8 @@ import {
 } from '~/composables/useCompositorLayers'
 import { applyStackPost, chainActive } from '~/lib/compositor/postEffects'
 import '~/lib/motion/paint' // registers the per-layer animation painter paintLayerStack relies on
+import { slotPhase01 } from '~/lib/compositor/masterClock'
+import { resolveNestedSurface, nestedDeviceSize } from '../nested'
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((res, rej) => {
@@ -70,6 +76,37 @@ export function stackItemsFor(v: FrameVariant): StackItem[] {
     if (layer) out.push({ type: 'local', key, layer })
   }
   return out
+}
+
+/**
+ * The longest side, in Frame (artboard) pixels, any wired layer on each slot is drawn at — as the
+ * planner sizes a wired slot's pictures (plan.ts's wired branch): `w` is a fraction of the Frame's
+ * width, the height is `w × lastAspect`.
+ */
+export function wiredLongSides(v: FrameVariant): Map<number, number> {
+  const out = new Map<number, number>()
+  for (const l of v.layers) {
+    if (l.kind !== 'wired') continue
+    const wl = l as LocalLayer & { slot: number; w: number; lastAspect: number }
+    const w = Number(wl.w) || 0
+    const aspect = Number(wl.lastAspect) || 1
+    const long = Math.max(w, w * aspect) * v.width
+    out.set(wl.slot, Math.max(out.get(wl.slot) ?? 0, long))
+  }
+  return out
+}
+
+/** A live wired slot: a studio's own embed player, mounted in a detached container. */
+interface LiveSlot {
+  handle: EmbedHandle
+  canvas: HTMLCanvasElement
+  duration: number
+  srcW: number
+  srcH: number
+  /** The drawn long side in Frame pixels (wiredLongSides); times the fit scale → device px. */
+  longPx: number
+  /** The size last handed to the nested player's setSize — resized only when this changes. */
+  size: { w: number; h: number } | null
 }
 
 /** True when an image layer or a clip frame the painter will ask for has no inlined copy. */
@@ -127,7 +164,16 @@ const frameSurface: EmbedSurface = {
     // Declared outside the try so a mount that fails after the canvas went into the container
     // (the first paint throwing) takes it out again: a rejected mount leaves nothing behind.
     let appended: HTMLCanvasElement | null = null
-    const cleanup = () => { unregister(); for (const s of styles) s.remove() }
+    // Nested players mounted so far — destroyed with the handle, and by a mount that fails later
+    // (a later nested player rejecting included), so a rejected mount leaves no GL context behind.
+    const nested: EmbedHandle[] = []
+    const cleanup = () => {
+      for (const h of nested.splice(0)) {
+        try { h.destroy() } catch { /* one failing destroy must not keep the rest alive */ }
+      }
+      unregister()
+      for (const s of styles) s.remove()
+    }
 
     try {
       // R14c (fix round 1) / R14a second half (fix round 2): a Frame that needs paper.js must
@@ -196,11 +242,29 @@ const frameSurface: EmbedSurface = {
 
       const stills = new Map<number, HTMLImageElement>()
       const clips = new Map<number, { frames: HTMLImageElement[]; duration: number }>()
+      const lives = new Map<number, LiveSlot>()
+      const longSides = wiredLongSides(v)
       for (const [slot, entry] of Object.entries(snap.wired ?? {})) {
         if (entry.kind === 'clip') {
           // Every frame decodes at once (they are data URIs — no network), in order.
           const frames = await Promise.all(entry.frames.map(f => loadImage(f)))
           clips.set(Number(slot), { frames, duration: entry.duration })
+        } else if (entry.kind === 'live') {
+          // The studio's own player, found by bundle name (nested.ts): the exported file's
+          // concatenated bundle, or the app registry during the poster bake. Mounted one at a time
+          // into a container that never enters the document — only its canvas is read, as the
+          // slot's picture. Its rejection rejects this mount (the runtime keeps the poster).
+          const surface = await resolveNestedSurface(entry.bundle)
+          if (!surface) throw new Error('embed: a live layer\'s player is missing')
+          const holder = document.createElement('div')
+          const handle = await surface.mount(holder, entry.config)
+          nested.push(handle)
+          const nestedCanvas = holder.querySelector('canvas')
+          if (!nestedCanvas) throw new Error('embed: a live layer\'s player drew no canvas')
+          lives.set(Number(slot), {
+            handle, canvas: nestedCanvas, duration: entry.duration, srcW: entry.width, srcH: entry.height,
+            longPx: longSides.get(Number(slot)) ?? 0, size: null,
+          })
         } else stills.set(Number(slot), await loadImage(entry.dataUrl))
       }
 
@@ -230,7 +294,8 @@ const frameSurface: EmbedSurface = {
         const c = clips.get(slot)
         return c ? c.frames[wiredClipFrameAt(c, paintSec)] ?? null : null
       }
-      const provider = (slot: number) => stills.get(slot) ?? clipFrame(slot)
+      const liveCanvas = (slot: number) => lives.get(slot)?.canvas ?? null
+      const provider = (slot: number) => stills.get(slot) ?? clipFrame(slot) ?? liveCanvas(slot)
       let lastT = 0
 
       // The artboard-sized canvas the Frame is painted into (R11). One per handle, resized only
@@ -265,6 +330,18 @@ const frameSurface: EmbedSurface = {
         paintSec = tSec
         const r = fitRect({ w: canvas.width, h: canvas.height }, { w: v.width, h: v.height }, snap.fit)
         const s = r.scale
+        // 0. Live slots: each nested player draws the moment this paint shows, right before the
+        //    painter reads its canvas in this same task (a WebGL canvas is a valid source then).
+        //    Sized to the slot's drawn box in device px — only when that size changes (the Frame
+        //    handle's setSize, a new fit), never per frame.
+        for (const live of lives.values()) {
+          const d = nestedDeviceSize(live.longPx * s, live.srcW, live.srcH)
+          if (!live.size || live.size.w !== d.w || live.size.h !== d.h) {
+            live.handle.setSize(d.w, d.h)
+            live.size = d
+          }
+          live.handle.setTime(slotPhase01(tSec, live.duration))
+        }
         // Whole device pixels, so the blit below never resamples the Frame.
         const rx = Math.round(r.x), ry = Math.round(r.y)
         const aw = Math.max(1, Math.round(r.w)), ah = Math.max(1, Math.round(r.h))

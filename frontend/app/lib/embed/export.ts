@@ -1,6 +1,13 @@
 import { buildEmbedHtml, externalRefs } from './bundle'
-import { bundleNameFor, loadEmbedSurface } from './surfaces'
+import { bundleNamesFor, loadEmbedSurface } from './surfaces'
+import { nestedRegistrationJs, setNestedSurfaceLoader } from './nested'
 import type { EmbedSnapshot, EmbedSurface } from './contract'
+
+// The poster bake runs the Frame adapter INSIDE the app, where no exported file has filed its
+// nested players under __SAILOR_NESTED__ — so the Frame's live layers resolve from the app
+// registry instead. Every Space Type bundle name maps to the one app-side Space Type surface
+// (it carries every effect); every other bundle name is its surface kind.
+setNestedSurfaceLoader(name => loadEmbedSurface(name.startsWith('spacetype-') ? 'spacetype' : name))
 
 export interface ExportEmbedOptions {
   kind: string
@@ -74,22 +81,30 @@ export async function exportEmbedHtml(opts: ExportEmbedOptions): Promise<string>
 
   const transparent = !!opts.transparent && surface.caps.alpha
 
-  // bundleNameFor derives which built file this export needs — the identity
-  // mapping for most kinds, but e.g. 'spacetype-ball' for a Space Type piece
-  // using the 'ball' effect (see surfaces.ts's doc). Deliberately the only
-  // surface-specific fact in this function; everything else here is generic
-  // across every embeddable kind.
-  const bundle = bundleNameFor(opts.kind, opts.config)
+  // bundleNamesFor derives which built files this export needs — one for most kinds (the
+  // identity mapping, or e.g. 'spacetype-ball' for a Space Type piece using the 'ball' effect —
+  // see surfaces.ts's doc), and for a Frame with live wired layers, each nested studio player
+  // first and the Frame's own bundle last. Deliberately the only surface-specific fact in this
+  // function; everything else here is generic across every embeddable kind.
+  const bundles = bundleNamesFor(opts.kind, opts.config)
 
   // Fetched BEFORE the poster bake, deliberately. A missing bundle is a build
   // problem, not a render problem: failing here costs milliseconds, whereas
   // failing after the bake means the user waits out a full-resolution GL render
   // only to be told to run a build script.
-  const res = await fetch(`/embed/${bundle}.js`)
-  if (!res.ok) {
-    throw new Error(`embed: /embed/${bundle}.js missing — run \`npm run build:embed\``)
-  }
-  const adapterJs = await res.text()
+  const sources = await Promise.all(bundles.map(async (bundle) => {
+    const res = await fetch(`/embed/${bundle}.js`)
+    if (!res.ok) {
+      throw new Error(`embed: /embed/${bundle}.js missing — run \`npm run build:embed\``)
+    }
+    return res.text()
+  }))
+  // One inline script: each nested bundle (an IIFE that assigns __SAILOR_SURFACE__) followed by
+  // the JS that files it under its name and clears the global, then the main bundle, whose
+  // assignment is the one the runtime mounts. buildEmbedHtml's "</script" check runs on the
+  // whole joined string.
+  const last = sources.length - 1
+  const adapterJs = sources.map((js, i) => (i < last ? js + nestedRegistrationJs(bundles[i]!) : js)).join('')
 
   const posterDataUrl = await bakePoster(
     surface, opts.config, opts.width, opts.height, opts.posterT01 ?? 0,

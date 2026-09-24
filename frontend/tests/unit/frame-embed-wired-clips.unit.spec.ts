@@ -13,7 +13,7 @@
  * export by name instead of baking a hole. Adapter: picks the frame for the time being painted, wrapping on the
  * clip's own length.
  */
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { planFrameExport, type FrameExportInput, type WiredSlotInfo } from '~/lib/embed/frame/plan'
 import { buildFrameSnapshot, formatBytes, isBlocked, type FrameExportIO } from '~/lib/embed/frame/gather'
 import { pullSourceFrames, createAppFrameExportIO } from '~/lib/embed/frame/appIO'
@@ -23,6 +23,7 @@ import type { AssetFailure } from '~/lib/scene3d/assetTracker'
 import { StudioExportFailed } from '~/lib/studio/frameSource'
 import type { FrameSnapshot, FrameVariant } from '~/lib/embed/frame/types'
 import frameSurface, { wiredClipFrameAt } from '~/lib/embed/surfaces/frame'
+import { setNestedSurfaceLoader } from '~/lib/embed/nested'
 import * as compositorLayers from '~/composables/useCompositorLayers'
 import { createImageLayer, createRectLayer } from '~/composables/useCompositorLayers'
 import type { StudioFrameSource } from '~/lib/studio/frameSource'
@@ -438,5 +439,115 @@ describe('frame adapter — a wired clip', () => {
     handle.setTime(0.875)                            // 3.5 s → 1.5 s into the clip
     expect(seen.at(-1)).toBe(frames[3])
     handle.destroy()
+  })
+})
+
+/**
+ * Nested live players (the live route): a wired slot whose studio can play as code carries that
+ * studio's own embed player. The Frame adapter mounts it off-document, hands its canvas to the
+ * painter, drives its time from the Frame's (wrapped on the slot's own loop, as a clip is), sizes
+ * it to the slot's drawn box only when that box changes, and destroys it with the handle.
+ */
+describe('frame adapter — a live wired layer', () => {
+  type FakeHandle = { setTime: ReturnType<typeof vi.fn>; setSize: ReturnType<typeof vi.fn>; destroy: ReturnType<typeof vi.fn> }
+  const made: { canvas: HTMLCanvasElement; handle: FakeHandle; container: HTMLElement }[] = []
+  const fakeSurface = (opts: { reject?: boolean } = {}) => ({
+    kind: 'fake', caps: { alpha: true },
+    mount: vi.fn(async (container: HTMLElement) => {
+      if (opts.reject) throw new Error('nested mount failed')
+      const canvas = document.createElement('canvas')
+      container.appendChild(canvas)
+      const handle = { setTime: vi.fn(), setSize: vi.fn(), destroy: vi.fn() }
+      made.push({ canvas, handle, container })
+      return handle
+    }),
+  })
+  const live = (bundle: string, duration = 4) =>
+    ({ kind: 'live' as const, surface: 'gradient', bundle, config: { c: bundle }, width: 800, height: 450, duration })
+  const snapWith = (wiredEntries: FrameSnapshot['wired'], layers: any[], duration = 6): FrameSnapshot => ({
+    version: 1, fit: 'fit', duration, still: false, variants: [variant(layers)],
+    assets: { urls: {}, fonts: [], shaders: [], depth: [] },
+    wired: wiredEntries, notices: [], needsOutlines: false,
+  })
+  let seen: unknown[] = []
+
+  beforeEach(() => {
+    made.length = 0
+    seen = []
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(new Proxy({}, {
+      get: (_t, prop) => (prop === 'canvas' ? undefined : (() => undefined)), set: () => true,
+    }) as any)
+    vi.spyOn(compositorLayers, 'withWiredContent').mockImplementation(((provider: any) => {
+      seen.push(provider?.(3) ?? null)
+      return undefined
+    }) as any)
+  })
+  afterEach(() => {
+    setNestedSurfaceLoader(null)
+    vi.restoreAllMocks(); document.body.innerHTML = ''
+  })
+
+  const box = () => { const b = document.createElement('div'); document.body.appendChild(b); return b }
+
+  it('the provider hands back the nested player\'s canvas, mounted off-document with the entry\'s config', async () => {
+    const surface = fakeSurface()
+    setNestedSurfaceLoader(async name => (name === 'gradient' ? surface as any : null))
+    const handle = await frameSurface.mount(box(), snapWith({ 3: live('gradient') }, [wired('w1', 3)]))
+    expect(surface.mount).toHaveBeenCalledTimes(1)
+    expect(surface.mount.mock.calls[0]![1]).toEqual({ c: 'gradient' })
+    expect(made[0]!.container.isConnected).toBe(false)
+    expect(seen.at(-1)).toBe(made[0]!.canvas)
+    handle.destroy()
+  })
+
+  it('setTime gets the slot\'s own loop phase of the Frame time', async () => {
+    setNestedSurfaceLoader(async () => fakeSurface() as any)
+    const handle = await frameSurface.mount(box(), snapWith({ 3: live('gradient', 4) }, [wired('w1', 3)], 6))
+    const nestedTime = made[0]!.handle.setTime
+    expect(nestedTime).toHaveBeenLastCalledWith(0)
+    handle.setTime(0.75)                            // 4.5 s of a 6 s Frame → 0.5 s into a 4 s loop
+    expect(nestedTime.mock.calls.at(-1)![0]).toBeCloseTo(0.125, 10)
+    // Sized and timed BEFORE the painter reads the canvas.
+    const order = [made[0]!.handle.setTime.mock.invocationCallOrder.at(-1)!, (compositorLayers.withWiredContent as any).mock.invocationCallOrder.at(-1)!]
+    expect(order[0]).toBeLessThan(order[1]!)
+    handle.destroy()
+  })
+
+  it('is sized to the slot\'s drawn box once per size, and again after the Frame handle\'s setSize', async () => {
+    setNestedSurfaceLoader(async () => fakeSurface() as any)
+    // Two layers on the slot: the larger one (w 0.5 of a 1000 px Frame → 500 px long) wins.
+    const handle = await frameSurface.mount(box(), snapWith({ 3: live('gradient') }, [wired('w1', 3), wired('w2', 3, { w: 0.2 })]))
+    const setSize = made[0]!.handle.setSize
+    expect(setSize.mock.calls).toEqual([[500, 281]])  // 1000×500 canvas, scale 1; 800×450 source aspect
+    handle.setTime(0.1); handle.setTime(0.2); handle.setTime(0.3)
+    expect(setSize).toHaveBeenCalledTimes(1)
+    handle.setSize(2000, 1000)                       // scale 2
+    expect(setSize.mock.calls.at(-1)).toEqual([1000, 563])
+    handle.setTime(0.4)
+    expect(setSize).toHaveBeenCalledTimes(2)
+    handle.destroy()
+  })
+
+  it('destroy destroys the nested player', async () => {
+    setNestedSurfaceLoader(async () => fakeSurface() as any)
+    const handle = await frameSurface.mount(box(), snapWith({ 3: live('gradient') }, [wired('w1', 3)]))
+    handle.destroy()
+    expect(made[0]!.handle.destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it('a nested mount that rejects rejects the Frame mount and destroys the players already mounted', async () => {
+    const ok = fakeSurface(), bad = fakeSurface({ reject: true })
+    setNestedSurfaceLoader(async name => (name === 'gradient' ? ok : bad) as any)
+    const b = box()
+    await expect(frameSurface.mount(b, snapWith({ 1: live('gradient'), 2: live('spacetype-x') }, [wired('w1', 1), wired('w2', 2)])))
+      .rejects.toThrow('nested mount failed')
+    expect(made).toHaveLength(1)
+    expect(made[0]!.handle.destroy).toHaveBeenCalledTimes(1)
+    expect(b.querySelector('canvas')).toBeNull()
+  })
+
+  it('a live layer whose player cannot be found rejects the mount', async () => {
+    await expect(frameSurface.mount(box(), snapWith({ 3: live('gradient') }, [wired('w1', 3)])))
+      .rejects.toThrow('embed: a live layer\'s player is missing')
   })
 })

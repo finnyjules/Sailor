@@ -12,6 +12,7 @@ const toDataURL = vi.fn((mime?: string) => `data:${mime ?? 'image/png'};base64,A
 
 vi.mock('~/lib/embed/surfaces', () => ({
   bundleNameFor: (kind: string) => kind,
+  bundleNamesFor: (kind: string) => [kind],
   loadEmbedSurface: async (kind: string) => ({
     kind,
     caps: { alpha: alphaCap },

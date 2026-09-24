@@ -85,3 +85,35 @@ export function bundleNameFor(kind: string, config: unknown): string {
   }
   return `spacetype-${effect.id}`
 }
+
+/**
+ * Every bundle an export needs, nested players first, the main bundle last — export.ts
+ * concatenates them in this order. For a Frame: one entry per DISTINCT live bundle in
+ * `config.wired`, in slot order, each re-derived with bundleNameFor(entry.surface, entry.config) —
+ * throws if it differs from entry.bundle (the Frame player resolves the nested player by
+ * entry.bundle, so a mismatch would play the wrong effect or none). A live entry must name an
+ * embeddable studio other than a Frame: the name becomes a fetched path, and a Frame nested in a
+ * Frame would collide with the main bundle.
+ */
+export function bundleNamesFor(kind: string, config: unknown): string[] {
+  const main = bundleNameFor(kind, config)
+  if (kind !== 'frame') return [main]
+  const wired = (config as { wired?: unknown } | null | undefined)?.wired
+  if (!wired || typeof wired !== 'object') return [main]
+  const nested: string[] = []
+  const slots = Object.keys(wired).sort((a, b) => Number(a) - Number(b))
+  for (const slot of slots) {
+    const entry = (wired as Record<string, { kind?: unknown; surface?: unknown; bundle?: unknown; config?: unknown }>)[slot]
+    if (!entry || entry.kind !== 'live') continue
+    const surface = entry.surface
+    if (typeof surface !== 'string' || !isEmbeddable(surface) || surface === 'frame') {
+      throw new Error(`embed: a live layer names a player that cannot be nested ("${String(surface)}")`)
+    }
+    const derived = bundleNameFor(surface, entry.config)
+    if (derived !== entry.bundle) {
+      throw new Error(`embed: a live layer's bundle "${String(entry.bundle)}" is not its config's ("${derived}")`)
+    }
+    if (!nested.includes(derived)) nested.push(derived)
+  }
+  return [...nested, main]
+}
