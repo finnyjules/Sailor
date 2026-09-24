@@ -19,9 +19,9 @@ describe('PANEL_EFFECT_KINDS', () => {
     }
   })
 
-  it('is exactly the seven kinds the panel draws', () => {
+  it('is exactly the eight kinds the panel draws', () => {
     expect([...PANEL_EFFECT_KINDS].sort()).toEqual(
-      ['adjust', 'bloom', 'dof', 'duotone', 'gradientMap', 'grain', 'vignette'],
+      ['adjust', 'bloom', 'dof', 'duotone', 'gradientMap', 'grain', 'halation', 'vignette'],
     )
   })
 

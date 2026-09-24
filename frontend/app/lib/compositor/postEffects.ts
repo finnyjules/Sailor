@@ -5,7 +5,7 @@
  * width; `opts.W` is the logical width, `opts.scale` device px per logical px.
  *
  * Fixed chain order (applyEffectChain is the single source of truth):
- *   adjust → duotone → gradientMap → bloom → vignette → grain
+ *   adjust → duotone → gradientMap → bloom → halation → vignette → grain
  */
 import {
   applyRoughEdgeToData, applyInkBleedToData,
@@ -31,6 +31,13 @@ export interface BloomEffect {
   threshold: number   // 0..1 — luminance cutoff for the bright pass
   radius: number      // blur radius, normalized to canvas width
   intensity: number   // 0..2 — strength of the additive composite
+  visible: boolean
+}
+/** Film halation: bright areas bleed a warm red fringe (the film's red layer scatters widest). */
+export interface HalationEffect {
+  type: 'halation'
+  amount: number      // 0..1.5 — strength of the added glow
+  spread: number      // 0.3..2 — scales both glow widths
   visible: boolean
 }
 export interface GrainEffect {
@@ -262,11 +269,13 @@ export interface InkBleedEffect {
   softness: number    // 0..1 — feathered outer boundary width (0 = crisp)
   visible: boolean
 }
-export type PostEffect = AdjustEffect | BloomEffect | GrainEffect | VignetteEffect | DuotoneEffect | GradientMapEffect | DofEffect | OuterGlowEffect | InnerGlowEffect | DiffusedEdgeEffect | ColorOverlayEffect | GradientOverlayEffect | StrokeFromAlphaEffect | DirectionalBlurEffect | RadialBlurEffect | ZoomBlurEffect | LevelsEffect | PosteriseEffect | ThresholdEffect | InvertEffect | RoughEdgeEffect | InkBleedEffect
+export type PostEffect = AdjustEffect | BloomEffect | HalationEffect | GrainEffect | VignetteEffect | DuotoneEffect | GradientMapEffect | DofEffect | OuterGlowEffect | InnerGlowEffect | DiffusedEdgeEffect | ColorOverlayEffect | GradientOverlayEffect | StrokeFromAlphaEffect | DirectionalBlurEffect | RadialBlurEffect | ZoomBlurEffect | LevelsEffect | PosteriseEffect | ThresholdEffect | InvertEffect | RoughEdgeEffect | InkBleedEffect
 
 export const POST_EFFECT_DEFAULTS: Record<PostEffect['type'], PostEffect> = {
   adjust: { type: 'adjust', brightness: 1, contrast: 1, saturation: 1, hue: 0, visible: true },
   bloom: { type: 'bloom', threshold: 0.6, radius: 0.02, intensity: 0.8, visible: true },
+  // A visible warm fringe on anything bright the moment it is added (the prototype's look).
+  halation: { type: 'halation', amount: 0.6, spread: 1, visible: true },
   grain: { type: 'grain', amount: 0.25, size: 2, visible: true },
   vignette: { type: 'vignette', amount: 0.5, size: 0.5, softness: 0.5, visible: true },
   duotone: { type: 'duotone', shadows: '#1a1a40', highlights: '#ffe8d6', mix: 1, visible: true },
@@ -320,6 +329,7 @@ export function defaultPostEffect(type: PostEffect['type']): PostEffect {
 export const POST_FX_PARAM_CLAMP: Record<string, Record<string, [number, number]>> = {
   adjust: { brightness: [0, 2], contrast: [0, 2], saturation: [0, 2], hue: [-180, 180] },
   bloom: { threshold: [0, 1], radius: [0, 0.5], intensity: [0, 2] },
+  halation: { amount: [0, 1.5], spread: [0.3, 2] },
   grain: { amount: [0, 1], size: [1, 8] },
   vignette: { amount: [0, 1], size: [0, 1], softness: [0, 1] },
   duotone: { mix: [0, 1] },
@@ -355,7 +365,7 @@ export const POST_FX_PARAM_CLAMP: Record<string, Record<string, [number, number]
   ink_bleed: { amount: [0, 1], softness: [0, 1], seed: [0, 1e9] },
 }
 
-const CHAIN_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'diffused_edge', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'levels', 'posterise', 'threshold', 'invert', 'rough_edge', 'ink_bleed'])
+const CHAIN_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'halation', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'diffused_edge', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'levels', 'posterise', 'threshold', 'invert', 'rough_edge', 'ink_bleed'])
 export const isChainEffect = (e: { type: string }): e is PostEffect => CHAIN_TYPES.has(e.type)
 export const chainActive = (effects?: { type: string; visible?: boolean }[]): boolean =>
   !!effects?.some(e => e.visible !== false && CHAIN_TYPES.has(e.type))
@@ -414,6 +424,19 @@ export function brightPassInPlace(data: Uint8ClampedArray, threshold: number): v
   for (let i = 0; i < data.length; i += 4) {
     const lum = 0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!
     if (lum < t) data[i + 3] = 0
+  }
+}
+
+/** Halation bright pass: keep pixels at or above `threshold` luminance and recolour each to
+ *  luminance × tint (film halation is red whatever the source colour); the rest go clear. */
+export function halationTintInPlace(data: Uint8ClampedArray, threshold: number, tint: readonly [number, number, number]): void {
+  const t = clamp01(threshold) * 255
+  for (let i = 0; i < data.length; i += 4) {
+    const lum = 0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!
+    if (lum < t) { data[i + 3] = 0; continue }
+    data[i] = Math.round(lum * tint[0])
+    data[i + 1] = Math.round(lum * tint[1])
+    data[i + 2] = Math.round(lum * tint[2])
   }
 }
 
@@ -684,6 +707,43 @@ function passBloom(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: Blo
       ctx.restore()
     }
   }
+}
+
+// Look constants from the Finish proofs prototype: a wide red glow plus a tighter warm one.
+const HALATION_THRESHOLD = 0.7
+const HALATION_WIDE: readonly [number, number, number] = [1, 0.2, 0.05]
+const HALATION_NARROW: readonly [number, number, number] = [1, 0.6, 0.35]
+const HALATION_WIDE_RADIUS = 0.03    // × canvas width × spread
+const HALATION_NARROW_RADIUS = 0.008
+
+function passHalation(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: HalationEffect, opts: PassOpts): void {
+  const amount = Math.min(1.5, Math.max(0, e.amount))
+  if (!(amount > 0)) return
+  const scale = opts.scale ?? 1
+  const spread = Math.min(2, Math.max(0.3, e.spread))
+  const glow = (tint: readonly [number, number, number], radius: number, alpha: number) => {
+    const bp = cloneCanvas(off)
+    const bctx = bp.getContext('2d')
+    if (!bctx) return
+    const img = bctx.getImageData(0, 0, bp.width, bp.height)
+    halationTintInPlace(img.data, HALATION_THRESHOLD, tint)
+    bctx.putImageData(img, 0, 0)
+    const blurred = mkCanvas(off.width, off.height)
+    const blctx = blurred.getContext('2d')
+    if (!blctx) return
+    blctx.filter = `blur(${Math.max(0, radius * spread * opts.W * scale)}px)`
+    blctx.drawImage(bp, 0, 0)
+    blctx.filter = 'none'
+    ctx.save()
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.globalCompositeOperation = 'lighter'
+    ctx.globalAlpha = Math.min(1, alpha)
+    ctx.drawImage(blurred, 0, 0)
+    if (alpha > 1) { ctx.globalAlpha = alpha - 1; ctx.drawImage(blurred, 0, 0) }
+    ctx.restore()
+  }
+  glow(HALATION_WIDE, HALATION_WIDE_RADIUS, amount * 1.3)
+  glow(HALATION_NARROW, HALATION_NARROW_RADIUS, amount * 0.45)
 }
 
 function passVignette(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: VignetteEffect, _opts: PassOpts): void {
@@ -1109,7 +1169,7 @@ function passInkBleed(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e: 
 /** The kinds this module owns as 2D passes over a layer/document offscreen. Everything
  *  else in a layer's stack (inner shadow, torn edge, feather, layer blur, drop shadow,
  *  background blur, dof) is applied by the caller at its own structural position. */
-const PASS_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'diffused_edge', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'levels', 'posterise', 'threshold', 'invert', 'rough_edge', 'ink_bleed'])
+const PASS_TYPES = new Set<string>(['adjust', 'duotone', 'gradientMap', 'bloom', 'halation', 'vignette', 'grain', 'outer_glow', 'inner_glow', 'diffused_edge', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'levels', 'posterise', 'threshold', 'invert', 'rough_edge', 'ink_bleed'])
 
 /**
  * Apply passes in ARRAY ORDER — the per-layer entry point. Order is the caller's, so the
@@ -1131,6 +1191,7 @@ export function applyPasses(
       case 'duotone': passDuotone(ctx, off, e as unknown as DuotoneEffect, opts); break
       case 'gradientMap': passGradientMap(ctx, off, e as unknown as GradientMapEffect, opts); break
       case 'bloom': passBloom(ctx, off, e as unknown as BloomEffect, opts); break
+      case 'halation': passHalation(ctx, off, e as unknown as HalationEffect, opts); break
       case 'vignette': passVignette(ctx, off, e as unknown as VignetteEffect, opts); break
       case 'grain': passGrain(ctx, off, e as unknown as GrainEffect, opts); break
       case 'outer_glow': passOuterGlow(ctx, off, e as unknown as OuterGlowEffect, opts); break
@@ -1201,7 +1262,7 @@ export function applyBlurPass(off: HTMLCanvasElement, radiusPx: number): void {
 // silhouette, and every silhouette-derived pass after them — diffused_edge (which fades the
 // interior by distance from that edge) included — inner/outer glow, the alpha-clipped
 // overlays, stroke-from-alpha — must read the reshaped edge, not the clean one.
-const CHAIN_ORDER = ['rough_edge', 'ink_bleed', 'diffused_edge', 'inner_glow', 'adjust', 'levels', 'posterise', 'threshold', 'invert', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'bloom', 'vignette', 'grain', 'outer_glow']
+const CHAIN_ORDER = ['rough_edge', 'ink_bleed', 'diffused_edge', 'inner_glow', 'adjust', 'levels', 'posterise', 'threshold', 'invert', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'directional_blur', 'radial_blur', 'zoom_blur', 'bloom', 'halation', 'vignette', 'grain', 'outer_glow']
 
 /**
  * The FIXED-ORDER entry point, unchanged in behaviour: one instance per type (the first VISIBLE

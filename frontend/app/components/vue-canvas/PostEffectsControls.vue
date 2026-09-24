@@ -20,6 +20,10 @@ const SECTIONS: SectionSpec[] = [
     { key: 'radius', label: 'Radius', min: 0, max: 0.5, step: 0.005 },
     { key: 'intensity', label: 'Intensity', min: 0, max: 2, step: 0.01 },
   ] },
+  { type: 'halation', label: 'Halation', params: [
+    { key: 'amount', label: 'Amount', min: 0, max: 1.5, step: 0.01 },
+    { key: 'spread', label: 'Spread', min: 0.3, max: 2, step: 0.01 },
+  ] },
   { type: 'grain', label: 'Grain', params: [
     { key: 'amount', label: 'Amount', min: 0, max: 1, step: 0.01 },
     { key: 'size', label: 'Size', min: 1, max: 8, step: 0.5 },

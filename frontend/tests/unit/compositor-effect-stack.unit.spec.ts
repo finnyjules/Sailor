@@ -11,10 +11,10 @@ import { DEFAULT_FEATHER } from '~/lib/compositor/feather'
 import { canTakeGeometry, canWarpRaster } from '~/composables/useCompositorLayers'
 
 describe('effect kinds', () => {
-  it('has 43 kinds, 5 pinned and 38 orderable, all labelled in sentence case', () => {
-    expect(EFFECT_ORDER).toHaveLength(43)
+  it('has 44 kinds, 5 pinned and 39 orderable, all labelled in sentence case', () => {
+    expect(EFFECT_ORDER).toHaveLength(44)
     expect(PINNED_KINDS).toEqual(['background_blur', 'backdrop_shader', 'backdrop_luminance_mask', 'dof', 'drop_shadow'])
-    expect(ORDERABLE_KINDS).toHaveLength(38)
+    expect(ORDERABLE_KINDS).toHaveLength(39)
     expect(new Set([...PINNED_KINDS, ...ORDERABLE_KINDS])).toEqual(new Set(EFFECT_ORDER))
     for (const k of EFFECT_ORDER) expect(EFFECT_LABELS[k], k).toMatch(/^[A-Z][a-z]/)
     expect(EFFECT_LABELS.gradientMap).toBe('Gradient map')
@@ -48,6 +48,7 @@ describe('effect kinds', () => {
     expect(EFFECT_LABELS.shader).toBe('Shader')
     expect(EFFECT_LABELS.backdrop_shader).toBe('Backdrop shader')
     expect(EFFECT_LABELS.backdrop_luminance_mask).toBe('Backdrop luminance mask')
+    expect(EFFECT_LABELS.halation).toBe('Halation')
   })
   it('orders background blur first and drop shadow last', () => {
     expect(EFFECT_ORDER[0]).toBe('background_blur')
@@ -73,7 +74,7 @@ describe('effect kinds', () => {
       trim: 'geometry', offset: 'geometry', round_corners: 'geometry', roughen: 'geometry',
       boolean: 'geometry', morph: 'geometry', warp: 'geometry', shatter: 'geometry', long_shadow: 'geometry',
       inner_shadow: 'pixel', inner_glow: 'pixel', diffused_edge: 'pixel', adjust: 'pixel', duotone: 'pixel', gradientMap: 'pixel',
-      bloom: 'pixel', vignette: 'pixel', grain: 'pixel', torn_edge: 'pixel',
+      bloom: 'pixel', halation: 'pixel', vignette: 'pixel', grain: 'pixel', torn_edge: 'pixel',
       feather: 'pixel', layer_blur: 'pixel', outer_glow: 'pixel',
       color_overlay: 'pixel', gradient_overlay: 'pixel', stroke_from_alpha: 'pixel',
       directional_blur: 'pixel', radial_blur: 'pixel', zoom_blur: 'pixel',

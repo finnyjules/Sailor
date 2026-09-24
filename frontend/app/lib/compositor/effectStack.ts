@@ -193,7 +193,7 @@ export type EffectKind = LayerEffect['type']
 export const EFFECT_ORDER = [
   'background_blur', 'backdrop_shader', 'backdrop_luminance_mask', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'shatter', 'long_shadow', 'inner_shadow', 'inner_glow', 'diffused_edge',
   'adjust', 'levels', 'posterise', 'threshold', 'invert', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'shader',
-  'bloom', 'vignette', 'grain', 'torn_edge', 'feather', 'rough_edge', 'ink_bleed', 'risograph', 'photocopy', 'letterpress',
+  'bloom', 'halation', 'vignette', 'grain', 'torn_edge', 'feather', 'rough_edge', 'ink_bleed', 'risograph', 'photocopy', 'letterpress',
   'directional_blur', 'radial_blur', 'zoom_blur', 'layer_blur', 'outer_glow', 'drop_shadow',
 ] as const satisfies readonly EffectKind[]
 
@@ -266,6 +266,7 @@ export const EFFECT_LABELS: Record<EffectKind, string> = {
   radial_blur: 'Radial blur',
   zoom_blur: 'Zoom blur',
   bloom: 'Bloom',
+  halation: 'Halation',
   vignette: 'Vignette',
   grain: 'Grain',
   torn_edge: 'Torn edge',
