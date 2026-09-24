@@ -111,6 +111,37 @@ describe('C1 / R15: switching away from a Stage 4 layout names every line it lea
   })
 })
 
+// Re-review: a line an earlier layout hid that no longer holds a role (untagged, or tagged Not
+// used) is still named by its own text — never hidden in silence.
+describe('R15: a hidden line with no role left is named by its own text', () => {
+  const tagged = () => ({
+    sailor_localLayers: [tl('t', 'Run lighter.', 0.1), tl('d', 'Halden Trail 2', 0.045), tl('dt', '–30%', 0.04),
+      tl('x', 'Best shoe we have tested this year', 0.03), tl('y', 'Kim', 0.022), tl('z', 'Top pick', 0.021),
+      tl('c', 'Offer ends 12 October.', 0.02), tl('a', 'Shop now', 0.025), img('img')],
+    sailor_posterState: { tags: { x: 'quote', y: 'by', z: 'rating' } },
+  })
+  const LINES = ['Best shoe we have tested this year', 'Kim', 'Top pick']
+  for (const s4 of ['perfPostit', 'perfOfferFirst']) for (const [next, style] of [['runoff', 'swiss'], ['perfOffer', 'performance']] as const) {
+    it(`${s4}, untag, then ${next}: the three lines stay hidden and are named`, () => {
+      const first = apply(tagged(), s4, 'performance')
+      for (const id of ['x', 'y', 'z']) expect(layerOf(first.plan, id).visible, `${s4} hides ${id}`).toBe(false)
+      const untagged = { ...first.props, sailor_posterState: { ...(first.props.sailor_posterState as object), tags: undefined } }
+      const plan = apply(untagged, next, style).plan
+      for (const id of ['x', 'y', 'z']) expect(layerOf(plan, id).visible, id).toBe(false)
+      expect(named(plan)).toEqual(expect.arrayContaining(LINES))
+      for (const n of plan.notPlaced.filter(n => LINES.includes(n.text))) expect(n.role).toBe('unused')
+    })
+  }
+
+  it('tagged Not used after a layout hid it: still hidden, named by its text', () => {
+    const first = apply(tagged(), 'perfPostit', 'performance')
+    const st = { ...(first.props.sailor_posterState as object), tags: { x: 'unused' } }
+    const plan = apply({ ...first.props, sailor_posterState: st }, 'runoff', 'swiss').plan
+    expect(layerOf(plan, 'x').visible).toBe(false)
+    expect(plan.notPlaced).toContainEqual({ role: 'unused', text: 'Best shoe we have tested this year' })
+  })
+})
+
 describe('R14: a Stage 4 layout hides a second image it does not place, and names it', () => {
   it('Offer first hides the recognised second image, named "Image 2"; Run-off keeps it hidden and named', () => {
     const first = apply({ sailor_localLayers: [...reviewAd(), img('img2')] }, 'perfOfferFirst', 'performance')

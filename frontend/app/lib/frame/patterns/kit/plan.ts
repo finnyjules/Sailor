@@ -93,16 +93,18 @@ export interface LayoutPlan {
    *  - Stage 4 (ruling R14): a second image a Stage 4 layout does not place — named by its own name,
    *    else "Image 2" (`image: true`: the tab names it rather than quoting it);
    *  - ruling R15, in layer order: a line or image an EARLIER layout hid (tracked `visible`) that
-   *    this one does not place — it stays hidden and is named; and one a previous Stage 4 layout
-   *    placed that this one does not — hidden too, never left stranded over the new layout.
+   *    this one does not place — it stays hidden and is named by its own text, even when it holds
+   *    no role any more (untagged, or tagged Not used: role `'unused'`); and one a previous Stage 4
+   *    layout placed that this one does not — hidden too, never left stranded over the new layout.
    *  Hidden the way a format's levels are (a hidden-only op, tracked `visible`), so a later layout
    *  that places one shows it again. A Frame no Stage 4 layout has touched gets only the first kind. */
   notPlaced: NotPlaced[]
 }
 
-/** One entry of `LayoutPlan.notPlaced`: the role it held, its text (an image: its name, else
- *  "Image n"), and `image` for an image. */
-export interface NotPlaced { role: ContentRole; text: string; image?: true }
+/** One entry of `LayoutPlan.notPlaced`: the role it holds (`'unused'`: none any more — a line an
+ *  earlier layout hid that was since untagged or tagged Not used), its text (an image: its name,
+ *  else "Image n"), and `image` for an image. */
+export interface NotPlaced { role: ContentRole | 'unused'; text: string; image?: true }
 
 /** Which layer holds which role, as the last apply saw it (`sailor_posterState.roles`). */
 export type StoredRoles = Partial<Record<RoleKey, string>>
@@ -704,8 +706,9 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
  *    `needsContent` layout, and the layer holds a role in the content view) that is still showing
  *    is HIDDEN and named — never left where that layout put it, under this one;
  *  - R14: a Stage 4 layout hides the second image it does not place, and names it.
- *  The user's own hiding (untracked `visible`) is theirs: not named. A layer that holds no role in
- *  either view (nothing to call it) or is tagged Not used is left alone. */
+ *  The user's own hiding (untracked `visible`) is theirs: not named. A layer an earlier layout hid
+ *  that holds no role any more is named as `'unused'`; a SHOWING layer with no role in either view
+ *  (untagged, or tagged Not used) is left where it is. */
 function carriedOver(p: Prepared, a: LayoutPlanArgs, ops: LayerOp[], z: number): { hide: LayerOp[]; named: NotPlaced[] } {
   const placed = new Set(ops.filter(o => !o.hidden && !o.insert).map(o => o.target))
   const hiddenHere = new Set(ops.filter(o => o.hidden).map(o => o.target))
@@ -727,7 +730,11 @@ function carriedOver(p: Prepared, a: LayoutPlanArgs, ops: LayerOp[], z: number):
     const tracked = l as { visible?: boolean; layoutPrev?: Record<string, { set: unknown }> }
     const layoutHid = tracked.visible === false && tracked.layoutPrev?.visible?.set === false
     const showing = tracked.visible !== false
-    const role = l.kind === 'image' ? (l.id === p.contentRead.roles.image2 ? 'image2' : undefined) : roleOf.get(l.id)
+    // A line an earlier layout hid is named whether or not it still holds a role (an untag, or
+    // "Not used", can take it away): by its own text, as `'unused'` — never hidden in silence.
+    const role: NotPlaced['role'] | undefined = l.kind === 'image'
+      ? (l.id === p.contentRead.roles.image2 ? 'image2' : layoutHid ? 'unused' : undefined)
+      : roleOf.get(l.id) ?? (layoutHid ? 'unused' : undefined)
     if (!role) continue
     const strand = showing && (l.id === image2 || (prevWasStage4 && contentRole.has(l.id)))
     if (!layoutHid && !strand) continue
