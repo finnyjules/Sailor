@@ -203,6 +203,51 @@ Spec `docs/superpowers/specs/2026-09-23-scene3d-web-embed-design.md` (its own "P
 
 **Known limits for slice 2:** layer blur, torn edge, grain and `localLayerBox` still ride the unscaled device scale; members of a rigid unit share the unit's motion map (exact for edge and centre pins, drifts for a manually relative-pinned or Keep-size group); a re-wrapped text's reported box uses the design height when its vertical pin is centre or relative. The three review findings above all landed, so slice 2 inherits nothing new from them.
 
+### Sailor without ComfyUI — Phase A LANDED — 2026-09-24 (`b909e1249`..`dec8db18b`, 13 commits, subagent-driven, a review per task, a whole-phase review and its fix wave)
+
+**What:** Sailor's own server (`frontend/server/native/`) now answers every request the app makes of ComfyUI except running non-runner workflows. It reads and writes the same folders and the same file formats as the Python did (tested against the real Python handlers, which the tests lift out of the source and run), so going back is a code revert and no data moves.
+- **Projects and spend** (`projects.ts`), including the old `comfynext → sailor` folder rename.
+- **Media library** (`media.ts`): listings, deletes, the Timeline asset library and image thumbnails.
+- **Small routes** (`smallRoutes.ts` and friends): shader catalogue, Space Type presets and thumbnails, font subsetting, LoRA caption files, motion-frame cleanup, model-bundle status.
+- **`/view` and uploads** (`view.ts`, `uploads.ts`).
+- **Node definitions:** `/object_info` passes the live copy through and saves it when ComfyUI is up; when it is down, Sailor serves that copy or the committed `objectInfo.baseline.json.gz`, with file and model lists refreshed from disk.
+- **The app:** it now asks Sailor's own `/api/engine/health`. With ComfyUI off, a workflow the runner can't take is refused before queueing ("This workflow needs the local engine", naming the nodes); the queue and history panels stay quiet; routes that need Python answer 503 "This needs the local engine".
+
+**Checked live with ComfyUI stopped (A7):**
+- the app boots ("Ready to go");
+- projects open;
+- Assets lists;
+- upload → view → delete works;
+- every native route answers 200;
+- a non-runner workflow is refused with the plain toast.
+
+The runner was not re-run live, because the test project now holds an unrun paid node. Its code has no path to ComfyUI.
+
+**Safer than the Python in places:**
+- the LoRA folder guard refuses `..`, `.` and symlinked escapes, which the Python let `clear_dataset` delete;
+- `/view` serves any filename (CJK, emoji) and every response carries `CSP: sandbox` + `nosniff` (an uploaded SVG can't run script);
+- hosted `/upload/mask` is refused;
+- hosted node definitions no longer list anyone's input subfolders;
+- `start.sh` links `user/` and `temp/` onto the Fly volume.
+
+**Still needs ComfyUI** (answers 503 without it):
+- every node the runner doesn't take, **including a Frame render**;
+- the Timeline server render;
+- Space Type server encode;
+- video thumbnails and waveforms;
+- model downloads;
+- the LoRA trainer and the mini apps.
+
+`font_subset` returns the whole font when the engine is off (fontkit's subsetter makes unusable web fonts).
+
+**Open, for Julien:**
+- Phase B (Replicate + more runner families) not started.
+- A hosted re-upload of byte-identical content claims an unowned legacy input file (older than this work).
+- 26 empty "New Project" folders were made around 00:50 on 09-24 by a test run against :3002; they were not deleted.
+- Tests now always point the engine root at a temp folder (`tests/unit/__setup__/engine-root-safety-net.ts`).
+
+Spec: `docs/superpowers/specs/2026-09-24-engine-free-sailor-design.md`; plan: `docs/superpowers/plans/2026-09-24-engine-free-phase-a.md`.
+
 ### The Sailor runner and the Gate — BUILT, SWITCHED OFF — 2026-09-23 (`b0bc8f5b5`..`17bbc9917` + fix wave `431a93dce`, 27 commits)
 
 **What:** a generation runner inside Sailor's own server (`frontend/server/runner/`) that runs image → Gate → video workflows on fal without the Python engine. A run is written down after every step (Postgres `runner_runs` in hosted, `.data/runs/*.json` locally), so a restarted server asks fal again about every request it had sent instead of losing it. The browser still builds the same prompt; `isRunnerEligible` sends a workflow to `POST /api/runs` only when every node is one of Generate an image / Generate a video / Gate / Image / Video and every model is one of 9 image + 6 video fal models. Anything else goes to ComfyUI whole. Events use ComfyUI's shapes over one server-sent-events stream (`/api/runs/events`) into the same page pipe.
