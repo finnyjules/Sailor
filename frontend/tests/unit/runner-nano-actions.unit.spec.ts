@@ -143,6 +143,36 @@ describe('nano-actions payloads match the Python nodes', () => {
   })
 })
 
+// B5 review minor 6: a text setting holding something other than text (the
+// canvas always writes text) fails the node. It is not read as blank, so it
+// is never a pass-through, and nothing is handed off or sent.
+describe('nano-actions text settings that are not text', () => {
+  const cases: [string, Record<string, unknown>, string][] = [
+    ['RemoveObjectNode', { image: ['a', 0], target: 5 }, 'The object to change must be text'],
+    ['RemoveObjectNode', { image: ['a', 0], target: 'the cup', instructions: null }, 'The extra direction must be text'],
+    ['TextEditNode', { image: ['a', 0], find: '', replace: 7 }, 'The new text must be text'],
+    ['TextEditNode', { image: ['a', 0], find: true, replace: 'x' }, 'The text to find must be text'],
+    ['RecolorObjectNode', { image: ['a', 0], target: 'mug', color: 255 }, 'The new colour must be text'],
+    ['SwapBackgroundNode', { product: ['a', 0], scene_prompt: 0 }, 'The scene description must be text'],
+    ['SwapProductNode', { scene_reference: ['a', 0], instructions: 1 }, 'The extra direction must be text'],
+    ['PersonSwap', { scene: ['a', 0], person: ['b', 0], instructions: {} }, 'The extra direction must be text'],
+  ]
+  it.each(cases)('%s %j', async (ct, inputs, message) => {
+    const handedOff: OutputFile[] = []
+    await expect(planNode({
+      prompt: { n: { class_type: ct, inputs } }, nodeId: 'n', gateOpen: false,
+      toUrl: async (f) => { handedOff.push(f); return 'x' }, filesFrom: ([from]) => [fileOf(from)],
+    })).rejects.toThrow(message)
+    expect(handedOff).toEqual([])
+  })
+  it('a value that is not text is not blank: no pass-through, so its hold is taken (and released when the node fails)', () => {
+    expect(actionPassThrough('RemoveObjectNode', { image: ['a', 0], target: 5 })).toBeNull()
+    expect(actionPassThrough('SwapBackgroundNode', { product: ['a', 0], scene_prompt: 0 })).toBeNull()
+    // Missing is still blank, as `(value or "").strip()` reads None.
+    expect(actionPassThrough('RemoveObjectNode', { image: ['a', 0] })).toBe('image')
+  })
+})
+
 // ── Prompts (ports of tests-unit/comfy_extras_test/*_prompts_test.py) ─────
 
 describe('edit action prompts (edit_action_prompts_test.py)', () => {
@@ -478,6 +508,50 @@ describe('nano-actions on the engine (hosted, fake Replicate)', () => {
     expect(rec.outputs.map(f => f.filename)).toEqual(['generate_image_00001_.png'])
     const own = ofType(k.seen, 'executed').find(m => m.data.node === '2')!.data.output as { images: OutputFile[] }
     expect(own.images.map(f => f.filename)).toEqual(['generate_image_00001_.png'])
+  })
+
+  it('a text setting that is not text fails the node: no call, and the hold is released', async () => {
+    const k = kit()
+    const prompt = flow({ class_type: 'RemoveObjectNode', inputs: { image: ['1', 0], target: 5, instructions: '' } })
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [prompt], ...START })
+    await k.engine.settled(runId)
+    expect(k.replicate.client.submit).not.toHaveBeenCalled()
+    expect(k.upload).not.toHaveBeenCalled()
+    expect(ofType(k.seen, 'execution_error').some(m => m.data.exception_message === 'The object to change must be text')).toBe(true)
+    expect([...k.ledger.holds.values()].map(h => h.state)).toEqual(['released'])
+  })
+
+  // B5 review minor 1: a leg that runs only cards (an Image card after an open
+  // Gate) holds nothing, even when the render credit is still to be paid: no
+  // ledger hold, the charge is 'free', and the graph-run row has no hold.
+  it('a cards-only leg takes no hold: charge free, graph-run row with holdId null', async () => {
+    const k = kit()
+    const prompt: ApiPrompt = {
+      1: { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a cup', aspect_ratio: '1:1', seed: 7, model_options: '{}' } },
+      2: { class_type: 'ComfyGateNode', inputs: { data_in: ['1', 0], bypass: false } },
+      3: { class_type: 'Image', inputs: { image: '', export: false, images: ['2', 0], batch_index: -1 } },
+    }
+    const leg = async () => {
+      const { runId } = await k.engine.startRun({ userId: k.userId, takes: [prompt], ...START })
+      await k.engine.settled(runId)
+      await k.engine.gateAction({ userId: 'user_1', runId, gateId: '2', action: 'continue' })
+      await k.engine.settled(runId)
+      return runId
+    }
+    await leg()
+    // The same fixed-seed picture again is reused and charged nothing, so the
+    // render credit is still unpaid when the cards-only leg opens.
+    const holdsBefore = k.ledger.hold.mock.calls.length
+    const runId = await leg()
+    const run = (await k.store.get(runId))!
+    expect(run.status).toBe('done')
+    expect(run.baseCharged).toBeFalsy()
+    const cards = run.charges[1]!
+    expect(cards).toMatchObject({ leg: 1, includesBase: true, estimate: 0, holdId: null, state: 'free', actual: 0, finished: true })
+    // One hold only: the reused picture's leg (released). The cards-only leg took none.
+    expect(k.ledger.hold.mock.calls.length - holdsBefore).toBe(1)
+    expect(k.graphRuns.create).toHaveBeenLastCalledWith({ promptId: cards.stageKey, userId: 'user_1', credits: 0, holdId: null, target: 'runner' })
+    expect(k.fal.submitted()).toHaveLength(1)
   })
 
   it('with nano-actions off the server refuses the same workflow', async () => {

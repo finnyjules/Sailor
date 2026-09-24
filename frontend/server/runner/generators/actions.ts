@@ -13,7 +13,7 @@
  * nodes_swap_background.py, nodes_swap_product.py, nodes_person_swap.py).
  */
 import { isLink } from '#shared/runner/graph'
-import { asText, pyStrip } from './opts'
+import { pyStrip } from './opts'
 
 export const NANO_BANANA_2_SLUG = 'google/nano-banana-2'
 /** BlendSceneNode's `Nano Banana` mode (nodes_replicate.py BlendSceneNode.execute). */
@@ -172,8 +172,37 @@ export function personSwapInstruction(keepOutfit: boolean, instructions = ''): s
 
 // ── Pass-through ─────────────────────────────────────────────────────────
 
-/** `(value or "").strip()` is blank. */
-const blank = (v: unknown) => !pyStrip(asText(v))
+/**
+ * `(value or "").strip()` is blank. Missing is blank; a value that is not text
+ * is not (planNode fails the node on it first: checkActionText).
+ */
+const blank = (v: unknown) => v === undefined || (typeof v === 'string' && !pyStrip(v))
+
+/** The text settings each action reads, and how a node error names them. */
+const ACTION_TEXT_INPUTS: Readonly<Record<string, readonly string[]>> = {
+  RemoveObjectNode: ['target', 'instructions'],
+  TextEditNode: ['find', 'replace', 'instructions'],
+  RecolorObjectNode: ['target', 'color', 'instructions'],
+  SwapBackgroundNode: ['scene_prompt', 'instructions'],
+  SwapProductNode: ['instructions'],
+  PersonSwap: ['instructions'],
+}
+const TEXT_LABELS: Readonly<Record<string, string>> = {
+  target: 'object to change', find: 'text to find', replace: 'new text', color: 'new colour',
+  instructions: 'extra direction', scene_prompt: 'scene description',
+}
+
+/**
+ * Fails the node when a text setting an action reads holds something other
+ * than text (a number, say). The canvas always writes text; the runner will
+ * not guess what anything else meant, so it neither sends nor passes it on.
+ */
+export function checkActionText(classType: string, inputs: Record<string, unknown>): void {
+  for (const name of ACTION_TEXT_INPUTS[classType] ?? []) {
+    const v = inputs[name]
+    if (v !== undefined && typeof v !== 'string') throw new Error(`The ${TEXT_LABELS[name] ?? name} must be text`)
+  }
+}
 
 /**
  * The picture input an action hands on unchanged, with no call and no charge,

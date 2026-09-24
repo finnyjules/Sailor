@@ -4,6 +4,7 @@
  */
 import { isLink, type ApiPrompt } from './graph'
 import { NO_FAMILIES, type RunnerFamily } from './families'
+import { pyIntOf } from './pyText'
 
 export const RUNNER_NODE_TYPES: ReadonlySet<string> = new Set([
   'GenerateImageNode', 'GenerateVideoNode', 'ComfyGateNode', 'Image', 'Video',
@@ -102,6 +103,22 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   },
   SwapProductNode: { family: 'nano-actions', mustLink: ['scene_reference'], mustNotLink: ['instructions'] },
   PersonSwap: { family: 'nano-actions', mustLink: ['scene'], mustNotLink: ['keep_original_outfit', 'instructions'] },
+  // ── ref-edits (Task B7): references, camera and product shot ──
+  // Seedream on Replicate, Nano Banana 2 on fal (its Python primary), Qwen
+  // Image Edit Plus and the community sdxl-ad-inpaint on Replicate. The first
+  // picture must be linked: Python has no blank for these. Settings the
+  // runner reads must not be wired.
+  GenerateFromReferencesNode: {
+    models: { 'seedream-5-pro': 'ref-edits', 'seedream-5-lite': 'ref-edits', 'nano-banana-2': 'ref-edits' },
+    mustLink: ['image_1'],
+    mustNotLink: ['prompt', 'aspect_ratio', 'size'],
+  },
+  RotateCameraNode: { family: 'ref-edits', mustLink: ['image'], mustNotLink: ['camera'] },
+  ProductShotNode: {
+    family: 'ref-edits',
+    mustLink: ['image'],
+    mustNotLink: ['scene_prompt', 'aspect', 'product_size', 'keep_product_exact'],
+  },
   // ── replicate-image (Task B4): the Replicate-primary image models ──
   // Only ADDS these models; the fal ones stay as they are. The Idea socket
   // (prompt_in) and the taste wire (style_in) come from nodes the runner does
@@ -174,8 +191,8 @@ function optionInt(opts: Record<string, unknown>, key: string): number {
   const v = opts[key]
   if (typeof v === 'boolean') return v ? 1 : 0
   if (typeof v === 'number') return Number.isFinite(v) ? Math.trunc(v) : 1
-  // int() allows single underscores between digits ("1_0" is 10), in step with optInt.
-  if (typeof v === 'string' && /^\s*[+-]?\d(?:_?\d)*\s*$/.test(v)) return Number.parseInt(v.trim().replace(/_/g, ''), 10)
+  // Python int(str), one grammar with optInt: int()'s own blanks, underscores between digits.
+  if (typeof v === 'string') return pyIntOf(v) ?? 1
   return 1
 }
 

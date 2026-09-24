@@ -2,7 +2,8 @@
  * Guards on the image builders' readers (B4 review minors, folded into B5):
  * - `optInt` (generators/opts.ts) and `optionInt` (shared/runner/eligibility.ts,
  *   reached through isRunnerEligible) read an int the way Python's int() does,
- *   underscores included, and agree with each other;
+ *   underscores and int()'s own blanks included, through one shared grammar
+ *   (shared/runner/pyText.ts), and agree with each other;
  * - every `_X_AR = {...}` ratio set in comfy_api_nodes/image_models.py is the
  *   same set in generators/image.ts, or is named here as not ported, with why.
  */
@@ -18,6 +19,9 @@ describe('int readers follow Python int()', () => {
   const TABLE: [string, number | null][] = [
     ['7', 7], [' 7 ', 7], ['-2', -2], ['+3', 3], ['1_0', 10], ['1_000', 1000], ['-1_2', -12],
     ['_1', null], ['1_', null], ['1__0', null], ['2.5', null], ['abc', null], ['', null], ['1 0', null],
+    // int() strips its own blanks, not JS trim()'s: U+FEFF is not one, nor are
+    // U+001C–U+001F (though str.strip() takes those); U+0085 and U+3000 are.
+    ['\ufeff7', null], ['\x1c7', null], ['7\x1f', null], ['\x857', 7], ['\u30007\u3000', 7], ['\xa0-7', -7],
   ]
   it.each(TABLE)('optInt(%j)', (v, want) => {
     expect(optInt({ k: v }, 'k', -99)).toBe(want ?? -99)
@@ -44,6 +48,8 @@ describe('ratio sets match comfy_api_nodes/image_models.py', () => {
 
   it('the Python file has the sets (the parser works)', () => {
     expect(python.size).toBeGreaterThan(20)
+    // Every `_X_AR =` line was parsed: a set the parser skipped would go unchecked.
+    expect(python.size).toBe(src.match(/^_[A-Z0-9_]+_AR\s*=/gm)!.length)
     expect(python.get('_OPENAI_AR')).toEqual(new Set(['1:1', '3:2', '2:3']))
   })
   it('every Python set is ported the same, or named as not ported', () => {

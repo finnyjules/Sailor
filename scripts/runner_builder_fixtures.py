@@ -11,12 +11,12 @@ runner family (Phase B), the FIRST provider call a node's execute() makes,
 captured with the network patched out (capture_first_call). One top-level key
 per family; the families add their cases as they land.
 
-To prove no fixture came from a real provider, regenerate with --no-network:
-every outbound socket connect and DNS lookup raises, and the provider keys
-(FAL_KEY, FAL_API_KEY, NUXT_REPLICATE_TOKEN, REPLICATE_API_TOKEN) are removed
-from the environment before any node module is imported:
-
-    cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python scripts/runner_builder_fixtures.py --no-network
+The network is blocked by default, so no fixture can come from a real
+provider: every outbound socket connect and DNS lookup raises, and the
+provider keys (FAL_KEY, FAL_API_KEY, NUXT_REPLICATE_TOKEN, REPLICATE_API_TOKEN)
+are removed from the environment before any node module is imported. Pass
+--allow-network to skip that (never needed to write these files). The old
+--no-network flag is still accepted and changes nothing.
 
 Then check `git diff --stat -- frontend/tests/unit/fixtures/runner-builders.json`
 prints nothing.
@@ -34,9 +34,9 @@ PROVIDER_KEYS = ("FAL_KEY", "FAL_API_KEY", "NUXT_REPLICATE_TOKEN", "REPLICATE_AP
 
 
 def block_network() -> None:
-    """--no-network: refuse every outbound connection and DNS lookup, and drop
-    the provider keys, so a capture that slipped past a patch fails loudly
-    instead of reaching (and paying) a provider."""
+    """The default (unless --allow-network): refuse every outbound connection
+    and DNS lookup, and drop the provider keys, so a capture that slipped past
+    a patch fails loudly instead of reaching (and paying) a provider."""
     def refuse(*a, **_k):
         raise RuntimeError(f"NETWORK BLOCKED: {a!r}")
     socket.socket.connect = refuse
@@ -47,7 +47,8 @@ def block_network() -> None:
         os.environ.pop(key, None)
 
 
-if __name__ == "__main__" and "--no-network" in sys.argv[1:]:
+# --no-network is the old spelling of the default; it is accepted and ignored.
+if __name__ == "__main__" and "--allow-network" not in sys.argv[1:]:
     block_network()
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -636,12 +637,119 @@ def _replicate_video_cases() -> list:
     return cases
 
 
+# ── refEdits (Task B7) ───────────────────────────────────────────────────
+
+_REF_SLOTS = ["image_1", "image_2", "image_3", "image_4", "image_5", "image_6"]
+# Angles at and either side of every bucket edge, plus wrap-arounds.
+_YAWS = [0, 22.4, 22.5, -22.5, 45, 67.4, 67.5, -67.5, 90, 112.4, 112.5, -112.5, 157.5, 157.6, -157.6,
+         180, -180, 202.5, 360, -270, 540, -721.3]
+_PITCHES = [7.4, 7.5, -7.4, -7.5, 29.9, 30, -30, 59.9, 60, -60, 79.9, 80, -80, 90, -90, 120, -120]
+_ROLLS = [4.9, 5, -5, 19.9, 20, -20, 59.9, 60, -60, 180, -181, 400]
+# Camera JSON the node reads tolerantly (unreadable → the front view), and
+# values float() raises on (the node fails: recorded as `error`).
+_CAMERAS = ["", "{}", "not json", "[1, 2]", "null", '"text"', "7", "{bad",
+            '{"yaw": null, "pitch": null, "roll": null}',
+            '{"yaw": "95", "pitch": " 50 ", "roll": "1_0"}',
+            '{"yaw": "1e2", "pitch": "-.5e2", "roll": "\u00a07"}',
+            '{"yaw": true, "pitch": false, "roll": true}',
+            '{"yaw": [], "pitch": {}, "roll": ""}',
+            '{"yaw": -100}', '{"pitch": 45}', '{"roll": -30}',
+            '{"yaw": NaN, "pitch": NaN, "roll": NaN}',
+            '{"yaw": Infinity, "pitch": -Infinity, "roll": Infinity}',
+            '{"yaw": "nan", "pitch": "inf", "roll": "-infinity"}',
+            '{"yaw": 1e400}',
+            '{"yaw": 90, "yaw": -90}',
+            '{"yaw": "left"}', '{"pitch": [1]}', '{"roll": {"a": 1}}',
+            '{"yaw": "\u001c7"}',  # a raw U+001C inside the JSON: unreadable
+            '{"yaw": "\\u001c7"}']  # an escaped one: float('\x1c7') raises
+_PRODUCT_SCENES = ["a beach at golden hour", "  padded scene  ", "", "   ", "\ufeff", "\x1f"]
+
+
+def _ref_edits_cases() -> list:
+    """Task B7 (ref-edits): GenerateFromReferencesNode (each model × 1, 3 and
+    6 references × every aspect and size × seed 0 and > 0), RotateCameraNode
+    (angles at every bucket edge, malformed JSON) and ProductShotNode
+    (presets × fill × keep_exact). A node whose execute() raises records the
+    exception as `error` (the runner fails the node too)."""
+    nr, _fal_refs, _extras = _node_modules()
+    cases = []
+
+    def case(cls, links, widgets):
+        try:
+            cases.append(_node_case(cls, links, widgets))
+        except Exception as e:  # noqa: BLE001 — a raising node is a case too
+            cases.append({"class_type": cls.define_schema().node_id, "links": list(links),
+                          "widgets": widgets, "error": f"{type(e).__name__}: {e}"})
+
+    # Generate from references.
+    for model in nr._REFERENCE_MODEL_IDS:
+        for count in (1, 3, 6):
+            for ar in nr._REFERENCE_ASPECT_RATIOS:
+                for size in ("1K", "2K", "3K"):
+                    for seed in (0, 42):
+                        case(nr.GenerateFromReferencesNode, _REF_SLOTS[:count],
+                             {"model": model, "prompt": "put the mug on the table", "aspect_ratio": ar,
+                              "size": size, "seed": seed})
+        base = {"model": model, "prompt": "p", "aspect_ratio": "16:9", "size": "2K", "seed": 7}
+        # Empty slots between linked ones are skipped; the order stays the slot order.
+        case(nr.GenerateFromReferencesNode, ["image_1", "image_3", "image_6"], base)
+        case(nr.GenerateFromReferencesNode, ["image_1", "image_2", "image_5"], base)
+        # Seeds either side of 2^32 (Nano Banana masks after its > 0 check).
+        for seed in (2**32 - 1, 2**32, 2**32 + 5):
+            case(nr.GenerateFromReferencesNode, ["image_1"], {**base, "seed": seed})
+        # Sizes and ratios off the node's list, and a blank prompt.
+        for over in ({"size": "4K"}, {"size": "0.5K"}, {"aspect_ratio": ""}, {"aspect_ratio": "7:3"},
+                     {"prompt": ""}, {"prompt": "  padded  "}):
+            case(nr.GenerateFromReferencesNode, ["image_1", "image_2"], {**base, **over})
+        # Only the required inputs: execute()'s own defaults.
+        case(nr.GenerateFromReferencesNode, ["image_1"], {"model": model})
+
+    # Rotate camera.
+    def camera(cam, seed=0):
+        case(nr.RotateCameraNode, ["image"], {"camera": cam, "seed": seed})
+
+    for yaw in _YAWS:
+        camera(json.dumps({"yaw": yaw, "pitch": 0, "roll": 0}))
+    for pitch in _PITCHES:
+        camera(json.dumps({"yaw": 0, "pitch": pitch, "roll": 0}))
+    for roll in _ROLLS:
+        camera(json.dumps({"yaw": 0, "pitch": 0, "roll": roll}))
+    camera(json.dumps({"yaw": -45, "pitch": -30, "roll": 15}))
+    camera(json.dumps({"yaw": 180, "pitch": 30, "roll": -75}))
+    for cam in _CAMERAS:
+        camera(cam)
+    for seed in (5, 2**32 - 1):
+        camera('{"yaw":90,"pitch":0,"roll":0}', seed=seed)
+
+    # Product shot.
+    def shot(**over):
+        widgets = {"scene_prompt": "a beach at golden hour", "aspect": "Square", "product_size": "Original",
+                   "keep_product_exact": True, "seed": 0, **over}
+        case(nr.ProductShotNode, ["image"], widgets)
+
+    for aspect in [*nr._PRODUCT_SHOT_ASPECTS, "Wide"]:
+        for fill in nr._PRODUCT_FILL:
+            for keep in (True, False):
+                shot(aspect=aspect, product_size=fill, keep_product_exact=keep)
+    for scene in _PRODUCT_SCENES:
+        shot(scene_prompt=scene)
+    shot(scene_prompt=nr._PRODUCT_SHOT_DEFAULT_PROMPT)
+    for seed in (9, 2**32 - 1):
+        shot(seed=seed)
+    for keep in (0, 1, ""):
+        shot(keep_product_exact=keep)
+    # Only the required inputs.
+    case(nr.ProductShotNode, ["image"], {"scene_prompt": nr._PRODUCT_SHOT_DEFAULT_PROMPT})
+    return cases
+
+
 def family_cases() -> dict:
     out = {key: [] for key in FAMILY_KEYS}
     out["falEdit"] = _fal_edit_cases()
     out["replicateImage"] = _replicate_image_cases()
     out["replicateVideo"] = _replicate_video_cases()
     out["nanoActions"] = _nano_actions_cases()
+    out["refEdits"] = _ref_edits_cases()
     return out
 
 

@@ -7,8 +7,9 @@
  * Image, Video, the fal-edit family: EditImageNode, DevelopImageNode,
  * RelightNode, BlendSceneNode, and the nano-actions family on Replicate:
  * RemoveObjectNode, TextEditNode, RecolorObjectNode, SwapBackgroundNode,
- * SwapProductNode, PersonSwap, BlendSceneNode's Nano Banana mode) closely
- * enough that the same workflow gives the same result.
+ * SwapProductNode, PersonSwap, BlendSceneNode's Nano Banana mode, and the
+ * ref-edits family: GenerateFromReferencesNode, RotateCameraNode,
+ * ProductShotNode) closely enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiPrompt } from '#shared/runner/graph'
 import { resolveVideoModelId } from '#shared/runner/eligibility'
@@ -21,9 +22,13 @@ import {
 } from './generators/edit'
 import { parseLight, relightInstruction } from './generators/relight'
 import {
-  NANO_BANANA_2_SLUG, NANO_BANANA_SLUG, actionPassThrough, personSwapInstruction,
+  NANO_BANANA_2_SLUG, NANO_BANANA_SLUG, actionPassThrough, checkActionText, personSwapInstruction,
   recolorInstruction, removeObjectInstruction, swapBackgroundInstruction, swapProductInstruction, textEditInstruction,
 } from './generators/actions'
+import {
+  IMAGE_EDIT_MODELS, PRODUCT_SHOT_SLUG, QWEN_IMAGE_EDIT_PLUS_SLUG, REFERENCE_MODEL_IDS, REFERENCE_SLOTS,
+  cameraToPhrase, imageEditCall, parseCamera, productShotInput, textSetting,
+} from './generators/refEdits'
 import { moodboardFiles, parseInputFileRef } from './inputs'
 import type { OutputFile, RunnerProvider } from './types'
 
@@ -72,6 +77,7 @@ export async function planNode(ctx: PlanContext): Promise<NodePlan> {
 
   // A nano-actions node Python would return early from: its picture is handed
   // on as it is. No call, no hand-off, no charge (stageEstimate holds nothing for it).
+  checkActionText(node.class_type, inputs)
   const passName = actionPassThrough(node.class_type, inputs)
   if (passName) {
     const f = linkedFirstFile(passName)
@@ -300,6 +306,52 @@ export async function planNode(ctx: PlanContext): Promise<NodePlan> {
       const scene = await pictureUrl('scene', 'There is no scene picture')
       const person = await pictureUrl('person', 'There is no picture of the person')
       return nanoAction(personSwapInstruction(flag('keep_original_outfit', true), asText(inputs.instructions)), [scene, person], 'person_swap')
+    }
+
+    // ── ref-edits family (nodes_replicate.py :2851, :3453, :3604) ──
+    // GenerateFromReferencesNode: the linked references in slot order (empty
+    // slots skipped), the model's builder, then _run_image_edit_prediction's
+    // first call: Seedream on Replicate, Nano Banana 2 on fal.
+    case 'GenerateFromReferencesNode': {
+      const model = String(inputs.model)
+      const desc = (REFERENCE_MODEL_IDS as readonly string[]).includes(model) ? IMAGE_EDIT_MODELS[model] : undefined
+      if (!desc) throw new Error(`The runner cannot generate from references with ${model}`)
+      const prompt = textSetting(inputs, 'prompt', '', 'prompt')
+      const imageUrls: string[] = []
+      // One at a time, so the hand-offs happen in slot order too.
+      for (const slot of REFERENCE_SLOTS) {
+        if (isLink(inputs[slot])) imageUrls.push(await pictureUrl(slot, 'There is no reference picture'))
+      }
+      const input = desc.build(prompt, imageUrls, asInt(inputs.seed, 0), {
+        size: inputs.size === undefined ? '2K' : inputs.size,
+        aspect_ratio: inputs.aspect_ratio === undefined ? 'match_input_image' : inputs.aspect_ratio,
+      })
+      const call = imageEditCall(desc.slug, input)
+      return still(call.endpoint, call.payload, 'generate_from_references', call.provider)
+    }
+
+    // RotateCameraNode: the gimbal's angles as a director's phrase, Qwen Image Edit Plus on Replicate.
+    case 'RotateCameraNode': {
+      const cam = parseCamera(inputs.camera)
+      const image = await pictureUrl('image', 'There is no picture to turn')
+      const input = IMAGE_EDIT_MODELS['qwen-image-edit-plus']!.build(
+        cameraToPhrase(cam.yaw, cam.pitch, cam.roll), [image], asInt(inputs.seed, 0), {})
+      const call = imageEditCall(QWEN_IMAGE_EDIT_PLUS_SLUG, input)
+      return still(call.endpoint, call.payload, 'rotate_camera', call.provider)
+    }
+
+    // ProductShotNode: catacolabs/sdxl-ad-inpaint on Replicate (a community model).
+    case 'ProductShotNode': {
+      const scenePrompt = textSetting(inputs, 'scene_prompt', '', 'scene description')
+      const image = await pictureUrl('image', 'There is no product picture')
+      return still(PRODUCT_SHOT_SLUG, productShotInput({
+        image,
+        scenePrompt,
+        aspect: inputs.aspect === undefined ? 'Square' : inputs.aspect,
+        productSize: inputs.product_size === undefined ? 'Original' : inputs.product_size,
+        keepProductExact: flag('keep_product_exact', true),
+        seed: asInt(inputs.seed, 0),
+      }), 'product_shot', 'replicate')
     }
 
     case GATE_CLASS: {

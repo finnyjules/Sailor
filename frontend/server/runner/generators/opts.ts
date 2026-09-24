@@ -5,6 +5,8 @@
  * key is MISSING — a present-but-null value goes through the conversion,
  * which is why each reader checks own-property first.
  */
+import { pyIntOf, pyNumStrip, pyStrip } from '#shared/runner/pyText'
+
 const has = (adv: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(adv, key)
 
 function pyTruthy(v: unknown): boolean {
@@ -23,22 +25,20 @@ export function optInt(adv: Record<string, unknown>, key: string, def: number): 
   if (typeof v === 'number') return Number.isFinite(v) ? Math.trunc(v) : def
   // str(None), str([..]) and str({..}) never read as an int (JS String([1]) would be "1").
   if (typeof v !== 'string') return def
-  const s = v.trim()
-  // int() allows single underscores between digits ("1_0" is 10), as float() does.
-  return PY_INT_RE.test(s) ? Number.parseInt(s.replace(/_/g, ''), 10) : def
+  // int() strips its own blanks (not trim()'s) and allows single underscores
+  // between digits ("1_0" is 10). One grammar, shared with eligibility's optionInt.
+  return pyIntOf(v) ?? def
 }
 
 // Python float()'s string grammar: digits with single underscores between
 // them, an optional fraction and exponent, or inf / infinity / nan.
 const DIGITS = String.raw`\d(?:_?\d)*`
-/** Python int(str)'s grammar (base 10): a sign, then digits with single underscores between them. */
-export const PY_INT_RE = new RegExp(String.raw`^[+-]?${DIGITS}$`)
 const PY_FLOAT_RE = new RegExp(
   String.raw`^[+-]?(?:(?:${DIGITS}(?:\.(?:${DIGITS})?)?|\.${DIGITS})(?:[eE][+-]?${DIGITS})?|inf|infinity|nan)$`, 'i')
 
 /** Python float(str): the string as float() reads it, or null where float() raises. */
-function pyFloatOf(s: string): number | null {
-  const t = s.trim()
+export function pyFloatOf(s: string): number | null {
+  const t = pyNumStrip(s)
   if (!PY_FLOAT_RE.test(t)) return null
   const lower = t.toLowerCase()
   const neg = lower.startsWith('-')
@@ -103,10 +103,9 @@ export function asText(v: unknown): string {
 /**
  * Python str.strip() with no argument: strips what str.isspace() calls space.
  * JS trim() differs: it also strips U+FEFF, and keeps U+001C–U+001F and U+0085.
+ * It lives in #shared/runner/pyText, so the browser reads text the same way.
  */
-export function pyStrip(s: string): string {
-  return s.replace(/^[\t\n\v\f\r\x1c-\x1f \x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\t\n\v\f\r\x1c-\x1f \x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/g, '')
-}
+export { pyStrip }
 
 /** `int(value or 0)` for widget values that are numbers or numeric strings. */
 export function asInt(v: unknown, def: number): number {
