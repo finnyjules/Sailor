@@ -51,7 +51,7 @@ Plan `docs/superpowers/plans/2026-09-24-frame-layout-decisions.md`. Julien picke
 
 **Proof:** one-image Frames plan byte-identically (26,295 plans compared); Frames with no format plan exactly as in Stage 1; 12 Playwright tests; layout suites green (~2,590). Browser: Run-off placing the lab's second image, Performance Offer's corner inset, arrangement words.
 
-**Caught on the way:** the accent copy as first briefed sat invisibly under your line; a line marked Not used and set back to Automatic stayed hidden forever; the date break reached Frames with no format; the platform's button choice in a face refit could apply at a viewing size; wired images had no Content row, and images were numbered differently in two places; Fill's arrangement words lied on wide frames when the image side row was offered.
+**Caught on the way:** the accent copy as first briefed sat invisibly under your line; a line marked Not used and set back to Automatic stayed hidden forever; the date break reached Frames with no format; a suggested face's refit could apply at a viewing size; wired images had no Content row, and images were numbered differently in two places; Fill's arrangement words lied on wide frames when the image side row was offered.
 
 **Known:** the accent copy (and the title ring) keep the old words if you edit the copied line, until the next apply; on wide frames Fill's "Tilted tag" is reachable only through Vary; the automatic second image is chosen from local images only.
 
