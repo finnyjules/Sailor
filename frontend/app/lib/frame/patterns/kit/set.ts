@@ -57,7 +57,7 @@ export interface SetEntry {
 function copyProps(props: Record<string, unknown> | undefined): Record<string, unknown> {
   const out: Record<string, unknown> = { ...(props ?? {}) }
   for (const k of ['sailor_localLayers', 'sailor_localGroups', 'sailor_frame', 'sailor_posterState']) {
-    if (out[k] !== undefined) out[k] = structuredClone(out[k])
+    if (out[k] !== undefined) out[k] = JSON.parse(JSON.stringify(out[k])) // JSON, not structuredClone: the editor hands Vue proxies, which structuredClone refuses
   }
   return out
 }

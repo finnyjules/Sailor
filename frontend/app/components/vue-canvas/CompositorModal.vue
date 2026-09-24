@@ -45,6 +45,9 @@ import { useLocalLayerEditor, resizableKind, cornerResizableKind, aspectLockedRe
 import { useLayoutVary, faceTargets } from '~/composables/useLayoutVary'
 import LayoutVaryPanel from '~/components/vue-canvas/compositor/LayoutVaryPanel.vue'
 import KeepClearOverlay from '~/components/vue-canvas/compositor/KeepClearOverlay.vue'
+import LayoutSetSection from '~/components/vue-canvas/compositor/LayoutSetSection.vue'
+import LayoutSetSheet from '~/components/vue-canvas/compositor/LayoutSetSheet.vue'
+import { useLayoutSet } from '~/composables/useLayoutSet'
 import { layoutById } from '~/lib/frame/patterns/layouts/catalog'
 import type { Choice } from '~/lib/frame/patterns/kit/vary'
 import type { StyleId } from '~/lib/frame/patterns/kit/styles'
@@ -1024,6 +1027,13 @@ const layoutVary = useLayoutVary({
   // The suggested title face loads the way the Title face picker loads a Google family.
   loadFace: (family) => { ensureGoogleFont(family) },
 })
+// Make a set (Stage 5): the set sheet — the Frame's layout planned at each ticked format, on open
+// and whenever the ticks change. Planning never writes the Frame.
+const layoutSet = useLayoutSet({ formats: () => layoutVary.setFormats.value, plan: f => layoutVary.planSet(f) })
+// TODO(Stage 5 Task 4): send this format's Frame to the canvas as a new Frame node.
+function onLayoutSetSend(_formatId: string) {}
+// TODO(Stage 5 Task 3): download the set as a zip of PNGs.
+function onLayoutSetDownload() {}
 
 // Shape picker for the Layout tab: choose a library shape the engine may use
 // even without a placed shape layer (sets the sheet's shapeMode).
@@ -9437,6 +9447,13 @@ onUnmounted(() => {
       @update:fit="setWebExportFit" @update:transparent="setWebExportTransparent"
       @download="downloadWebExport" @copy="copyWebExportSnippet" @close="closeWebExport" />
 
+    <!-- Make a set (Stage 5): the set sheet, over the canvas area. -->
+    <LayoutSetSheet
+      v-if="layoutSet.open.value && panelsVisible"
+      :entries="layoutSet.entries.value" :layout-name="layoutName" :has-motion="hasMotion"
+      :background="background" :wired-content="wiredContentForSlot"
+      @send="onLayoutSetSend" @download="onLayoutSetDownload" @close="layoutSet.close" />
+
     <!-- Right sidebar: floating glass properties panel -->
     <div
       data-testid="compositor-right-panel"
@@ -9591,6 +9608,9 @@ onUnmounted(() => {
               :content="layoutVary.content.value" :hints="layoutVary.hints.value"
               @style="onLayoutStyle" @use-face="onLayoutUseFace" @tag="onLayoutTag"
             />
+          </div>
+          <div v-if="layoutVary.applied.value" class="px-4 pt-3">
+            <LayoutSetSection :formats="layoutVary.setFormats.value" @update:formats="layoutVary.setSetFormats" @open="layoutSet.openSet" />
           </div>
           <div v-if="posterFaceEls.titleId" class="px-4 pt-3 flex flex-col gap-2">
             <div class="flex items-center gap-2 text-[11px] text-white/55">

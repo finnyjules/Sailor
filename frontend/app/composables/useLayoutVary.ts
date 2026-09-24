@@ -22,7 +22,9 @@ import { paletteFromFrame } from '~/lib/frame/patterns/framePalette'
 import { rolesFromFamily } from '~/lib/frame/patterns/palette'
 import type { FrameElements } from '~/lib/frame/patterns/types'
 import { cssFontStack } from '~/composables/useCompositorLayers'
-import { formatFor, keepKind, keepNote } from '~/lib/frame/formats'
+import { FRAME_FORMATS, formatFor, keepKind, keepNote } from '~/lib/frame/formats'
+import { planSet as planSetKit } from '~/lib/frame/patterns/kit/set'
+import type { SetEntry } from '~/lib/frame/patterns/kit/set'
 import type { FrameFormat, KeepClear } from '~/lib/frame/formats'
 
 // ═══════════════════════ the Layout tab's state ═══════════════════════
@@ -325,6 +327,15 @@ export function useLayoutVary(src: LayoutVarySource): {
    *  accent copy of that line (ruling D2) and the copy no longer shows its words, the layout is
    *  applied again, folded into the edit's own history step. True when it re-applied or tried to. */
   textEdited(id: string): boolean
+  /** Stage 5, Make a set: the formats ticked for the set (`sailor_posterState.set.formats`), in
+   *  `FRAME_FORMATS` order; unknown ids left out. */
+  setFormats: ComputedRef<string[]>
+  /** Remember the ticked formats on the Frame — UI memory, NOT a history step (and not one of the
+   *  editor's `LAYOUT_KEYS`, so an undo leaves the selection as it is). */
+  setSetFormats(ids: readonly string[]): void
+  /** The Frame's applied layout planned at each format (`planSet`), with the same inputs the tab
+   *  plans with. Pure: the Frame is never written. [] when no layout is applied. */
+  planSet(formats: readonly string[]): SetEntry[]
 } {
   const stored = src.props()?.sailor_posterState as PosterState | undefined
 
@@ -887,10 +898,30 @@ export function useLayoutVary(src: LayoutVarySource): {
     return true
   }
 
+  // ── Make a set (Stage 5) ──
+  const setFormats = computed<string[]>(() => {
+    const st = src.props()?.sailor_posterState as { set?: { formats?: unknown } } | undefined
+    const ids = Array.isArray(st?.set?.formats) ? new Set(st.set.formats as unknown[]) : null
+    return ids ? FRAME_FORMATS.filter(f => ids.has(f.id)).map(f => f.id) : []
+  })
+  function setSetFormats(ids: readonly string[]) {
+    const p = src.props(); if (!p) return
+    const want = new Set(ids)
+    const formats = FRAME_FORMATS.filter(f => want.has(f.id)).map(f => f.id)
+    p.sailor_posterState = { ...(p.sailor_posterState as object | undefined), set: { formats } }
+  }
+  function planSet(formats: readonly string[]): SetEntry[] {
+    const st = src.props()?.sailor_posterState as PosterState | undefined
+    const id = st?.patternId
+    const s = styleOfLayout(id)
+    if (!id || !s || !formats.length) return []
+    return planSetKit({ ...baseArgs(), style: s, layoutId: id, choice: { ...DEFAULT_CHOICE, ...(st?.choice ?? {}) }, formats: [...formats] })
+  }
+
   return {
     layoutId, index, applied, candidates, library, choices, select, vary, jump, setChoice,
     shapeMode, setShapeMode, imageMode, setImageMode, paletteMode, setPaletteMode, format,
     style, setStyle, libraryDone, hasTitle, roleIds, titleId, suggestedFace, applySuggestedFace, brandLogo,
-    content, hints, setTag, textEdited,
+    content, hints, setTag, textEdited, setFormats, setSetFormats, planSet,
   }
 }

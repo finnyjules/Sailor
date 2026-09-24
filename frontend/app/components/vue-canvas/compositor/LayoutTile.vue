@@ -30,7 +30,10 @@ const props = withDefaults(defineProps<{
   /** The word shown before the label when `selected` ("Last applied" by default). Empty: the
    *  ring alone marks it (small tiles), and the tooltip says "Current". */
   selectedLabel?: string
-}>(), { selected: false, maxPx: 116, selectedLabel: 'Last applied' })
+  /** False: the tile only shows its picture (the set sheet) — no apply on click, the tooltip is
+   *  the label alone. */
+  pickable?: boolean
+}>(), { selected: false, maxPx: 116, selectedLabel: 'Last applied', pickable: true })
 const emit = defineEmits<{ (e: 'pick'): void }>()
 
 const canvas = ref<HTMLCanvasElement | null>(null)
@@ -76,7 +79,7 @@ watch(() => [props.plan, props.frameW, props.frameH, props.background], paint)
 // The ring only means "the tile last applied" — it stays lit after an undo of
 // that apply (`remember()` is UI memory outside the undo step, on purpose), so
 // the label says exactly that instead of implying "currently applied".
-const tileTitle = () => (props.selected ? `${props.selectedLabel || 'Current'} — ${props.label}` : `${props.label} — apply`)
+const tileTitle = () => (!props.pickable ? props.label : props.selected ? `${props.selectedLabel || 'Current'} — ${props.label}` : `${props.label} — apply`)
 </script>
 
 <template>
@@ -85,10 +88,10 @@ const tileTitle = () => (props.selected ? `${props.selectedLabel || 'Current'} �
       type="button" data-testid="layout-tile"
       :data-pattern="plan.posterState.patternId" :data-seed="plan.posterState.seed"
       :aria-label="tileTitle()" :title="tileTitle()"
-      class="relative rounded-md ring-1 transition-colors cursor-pointer overflow-hidden bg-[#1a1a1c]"
-      :class="selected ? 'ring-white' : 'ring-white/10 hover:ring-white/40'"
+      class="relative rounded-md ring-1 transition-colors overflow-hidden bg-[#1a1a1c]"
+      :class="[selected ? 'ring-white' : pickable ? 'ring-white/10 hover:ring-white/40' : 'ring-white/10', pickable ? 'cursor-pointer' : 'cursor-default']"
       :style="{ width: size.w + 'px', height: size.h + 'px' }"
-      @click="emit('pick')"
+      @click="pickable && emit('pick')"
     >
       <canvas ref="canvas" class="block" :style="{ width: size.w + 'px', height: size.h + 'px' }" />
     </button>

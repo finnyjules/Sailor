@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { reactive } from 'vue'
 import { candidatesForFrame, planLayout } from '~/lib/frame/patterns/kit/plan'
 import { planSet } from '~/lib/frame/patterns/kit/set'
 import { closestFirst, DEFAULT_CHOICE } from '~/lib/frame/patterns/kit/vary'
@@ -95,6 +96,14 @@ describe('planSet', () => {
     expect(sq!.choice).toEqual({ ...DEFAULT_CHOICE, lines: 1, arr: 1 })
     expect(tall!.choice).toEqual(three)
     expect(sq!.plan!.posterState.choice).toEqual(sq!.choice)
+  })
+
+  it('plans from the editor\'s live (reactive) layers — the modal hands planSet Vue proxies', () => {
+    // Found in the browser: structuredClone throws on a reactive proxy, so the sheet showed 0 formats.
+    const live = { ...src, props: reactive(structuredClone(src.props)) as Record<string, unknown> }
+    const entries = planSet(setArgs(live, 'runoff', runoff, ['meta-feed-1x1', 'meta-story']))
+    expect(entries.length).toBe(2)
+    expect(entries.every(e => e.layers !== null)).toBe(true)
   })
 
   it('writes what an apply at that size writes: resized, planned, pins of moved layers cleared', () => {
