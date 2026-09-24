@@ -17,6 +17,7 @@ import { createError, getRequestHeader, readRawBody, setResponseHeader, setRespo
 import { userDir } from './paths'
 import { MEDIA_PREFIXES, matchMediaRoute, mediaContext, runMediaRoute, type MediaResult } from './media'
 import {
+  ensureBootMigrationsRan,
   generationsListRoute,
   generationsPostRoute,
   projectDeleteRoute,
@@ -114,7 +115,12 @@ const text = (status: number, body: string): NativeResult => ({ status, body, te
 
 function context(): ProjectsContext | null {
   const dir = userDir()
-  return dir ? { userDir: dir, now: () => Date.now() } : null
+  if (!dir) return null
+  // Lazy, once-per-process, before the first native projects/spend read or
+  // write reaches `dir` (nodes_sailor_projects.py ran these at Python module
+  // import time; there is no equivalent import hook here).
+  ensureBootMigrationsRan(dir)
+  return { userDir: dir, now: () => Date.now() }
 }
 
 const NO_DATA_FOLDER: NativeResult = {

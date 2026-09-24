@@ -17,6 +17,31 @@
  * Storage functions take an explicit `root` (or ledger path) like the Python,
  * so tests point them at temp folders. The route handlers at the bottom take a
  * context with the user folder and the clock, and return `{ status, body }`.
+ *
+ * Known divergences from the Python (all edge cases, none fixed here):
+ *
+ * - A request body with integer-like string keys (e.g. `"2"`, `"10"`) comes
+ *   out of `JSON.parse` with those keys reordered first, ascending
+ *   numerically, ahead of every non-numeric key, regardless of the order
+ *   they appeared in the request — a JS object property-ordering rule with
+ *   no Python dict equivalent (dicts always keep insertion order). A record
+ *   built from such a body and written back out with `pyDumps` carries that
+ *   reordering into the file.
+ * - `readJson` treats ANY unparsable file as absent (`null`), including one
+ *   holding Python's `NaN` / `Infinity` / `-Infinity` tokens — valid input to
+ *   Python's `json.loads` (its non-standard default), invalid to
+ *   `JSON.parse`. A file that legitimately holds one of these (e.g. a spend
+ *   line whose `usd` was NaN) reads back as gone, not as that value.
+ * - Every JSON file is read as `'utf8'`, which replaces invalid byte
+ *   sequences with U+FFFD rather than raising — Python's default `open(...,
+ *   encoding='utf-8')` is strict and raises `UnicodeDecodeError`, which the
+ *   aiohttp route left uncaught (500). A file with invalid UTF-8 is read
+ *   here instead of failing the request.
+ * - `appendSpend`'s `usd <= 0` check coerces a string `usd` (e.g. `"5"`) to a
+ *   number for the comparison, so a spend entry with a string amount is
+ *   logged. Python's `usd <= 0` on a string raises `TypeError` (str vs int),
+ *   which aiohttp turned into a 500 — refusing the write rather than
+ *   accepting a stringly-typed amount.
  */
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
@@ -187,6 +212,119 @@ function isDir(p: string): boolean {
 
 function newHexId(prefix: string): string {
   return `${prefix}${randomUUID().replace(/-/g, '').slice(0, 12)}`
+}
+
+// ---------------------------------------------------------------- boot migrations
+
+// Ports of the two boot-time data migrations in nodes_sailor_projects.py's
+// `try: import folder_paths ...` block, both called unconditionally at
+// Python module import time. There is no module-import hook here (this is a
+// library, not a running server), so each is instead run lazily, the first
+// time a native projects/spend route needs `base` (the equivalent of
+// Python's `folder_paths.get_user_directory()`), guarded so a given `base`
+// only runs once per process. Both are pure file work, both are idempotent
+// on disk regardless of this in-memory guard (each checks the filesystem
+// before doing anything), and both swallow every error — a broken migration
+// must never fail a request, exactly like the Python's own `except Exception:
+// pass`.
+const migratedBases = new Set<string>()
+
+/** Test-only: forget which `base` dirs already ran, so a fresh temp root re-triggers them. */
+export function __resetBootMigrationsForTests(): void {
+  migratedBases.clear()
+}
+
+/** Run both boot migrations for `base` if they have not already run this process. */
+export function ensureBootMigrationsRan(base: string): void {
+  if (migratedBases.has(base)) return
+  migratedBases.add(base)
+  migrateLegacyUserDir(base)
+  migrateLegacyProjectKeys(base)
+}
+
+/**
+ * Port of `_migrate_legacy_user_dir`: one-time rename of the pre-rebrand user
+ * data dir (Sailor was formerly "ComfyNext"), `<base>/comfynext` ->
+ * `<base>/sailor`, so existing projects, assets, spend and timeline data on
+ * an environment that still holds the legacy dir (e.g. the Fly volume)
+ * survive the rename. No-ops once `sailor` exists; never overwrites it.
+ */
+function migrateLegacyUserDir(base: string): void {
+  try {
+    const legacy = path.join(base, 'comfynext')
+    const current = path.join(base, 'sailor')
+    if (isDir(legacy) && !fs.existsSync(current)) fs.renameSync(legacy, current)
+  }
+  catch {
+    // never let a data migration block a request
+  }
+}
+
+/**
+ * Port of `_migrate_legacy_project_keys`: one-time rebrand migration for
+ * saved project JSON. Pre-rename projects store node properties under
+ * `comfynext_*` keys and annotations under `workflow.extra.comfynext`; the
+ * renamed frontend reads `sailor_*` / `extra.sailor`, so that config is
+ * invisible until the KEYS are renamed. KEYS ONLY — values are preserved
+ * verbatim, since they legitimately reference on-disk files that keep legacy
+ * names (e.g. `input/comfynext_frame_*.png`). Guarded by a marker file so the
+ * walk runs once per volume (on top of the in-memory once-per-process guard,
+ * which only saves repeat filesystem walks within a process — the marker is
+ * what makes this idempotent across restarts).
+ */
+function migrateLegacyProjectKeys(base: string): void {
+  try {
+    const root = projectsRoot(base)
+    const marker = path.join(path.dirname(root), '.migrated-project-keys-v1')
+    if (fs.existsSync(marker) || !isDir(root)) return
+
+    const renameKey = (k: string): string => {
+      if (k === 'comfynext') return 'sailor'
+      if (k.startsWith('comfynext_')) return `sailor_${k.slice('comfynext_'.length)}`
+      return k
+    }
+    const walk = (obj: Json): Json => {
+      if (Array.isArray(obj)) return obj.map(walk)
+      if (isObject(obj)) {
+        const out: Record<string, Json> = {}
+        for (const [k, v] of Object.entries(obj)) {
+          const nk = renameKey(k)
+          if (nk in out) continue // half-migrated: keep existing sailor_* value
+          out[nk] = walk(v)
+        }
+        return out
+      }
+      return obj
+    }
+
+    for (const file of allJsonFiles(root)) {
+      try {
+        const raw = fs.readFileSync(file, 'utf8')
+        if (!raw.includes('"comfynext')) continue // keys always appear quote-prefixed in JSON
+        const migrated = walk(JSON.parse(raw))
+        const tmp = `${file}.migtmp`
+        fs.writeFileSync(tmp, pyDumps(migrated, undefined, { ensureAscii: false, separators: [',', ':'] }), 'utf8')
+        fs.renameSync(tmp, file)
+      }
+      catch {
+        // skip unreadable/unparsable file, migrate the rest
+      }
+    }
+    fs.writeFileSync(marker, '1\n', 'utf8')
+  }
+  catch {
+    // never let a data migration block a request
+  }
+}
+
+function allJsonFiles(dir: string): string[] {
+  const out: string[] = []
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, e.name)
+    if (e.isDirectory()) out.push(...allJsonFiles(full))
+    else if (e.name.endsWith('.json')) out.push(full)
+  }
+  return out
 }
 
 // ---------------------------------------------------------------- projects
