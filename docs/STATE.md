@@ -650,25 +650,27 @@ moving, dials not keyframes) is the declared bar for our timeline front door; th
 block ecosystem named a structural risk. **Elements queues behind this program by decision
 (2026-08-27)** — the door ships after the house stands. Next: implementation plan for the spec.
 
-### Start-modal image showcase — LANDED 2026-08-31 (the "Generate an image" pick seeds a sticky-noted tour)
+### Start modal rethink — LANDED 2026-09-24 (AI and studios side by side; every pick lands in a Frame)
 
-The Get Started modal's plain "Generate an image" pick no longer drops one bare node: it seeds a
-2×2 tour of ready-to-run ways to make an image — **describe it** (GenerateImageNode, sample
-prompt prefilled) · **give it a style** (FluxLoRARemoteNode) · **start from a sketch** (Image
-card wired → SketchToImageNode) · **start from references** (Image card wired →
-GenerateFromReferencesNode) — each captioned by a small sticky, plus an intro sticky ("pick one,
-delete the rest"). Owner feedback same day drove a quiet pass (`9ef827d0d`): one sticky yellow,
-zero rotation, caption-length copy that never wraps, labels left-aligned above their cards on an
-even grid — the seeded canvas reads as a curated welcome, not a brainstorm wall. (The homepage
-"Create an image" card is a different path — it seeds a single FluxLoRARemoteNode via
-seedNodeType and skips the tour.)
-Stickies are ordinary annotations (persist in `workflow.extra`, deletable). Ways missing from
-`object_info` are skipped, not fatal. Camera: `fitBounds` over the union of stickies + measured
-node dims (plain `fitView` ignores annotations and fires before ResizeObserver measures the
-cards). Single-source picks (Edit an image etc.) unchanged, now via shared `pushStartNode`/
-`wireStartPair` helpers. Browser-verified end-to-end (`595276aed`); verification note: the day's
-dev-server "IPC connection closed" 500s were a broken `v-else-if` committed mid-refactor in
-Scene3DStudioSurface.vue, not infra.
+The blank-project modal (`StartProjectModal.vue`) is now two equal halves: **Make it with AI**
+(Generate an image, An image in a style, Edit an image, Upscale an image, Generate a video) and
+**Make it by hand** (Expressive, Gradient, Shader, Pattern, Shape, Vector type, 3D, Moodboard).
+Audio, Shot Director and the 3D-model card left the modal (still in the + menu / Studios door).
+The lineup is its own list (`data/start-modal.ts`), separate from the Studios door.
+**Every pick lands wired into a Frame** (1024 × 1024 `Compositor`, `layer1`); skip / close / Esc
+leaves one empty Frame. Recipes are the pure `lib/startModal/plan.ts`; the canvas executes them in
+`materializeStart` (waits for the tab's own load, bails if the tab changes, frames the view once
+nodes are measured). Video lands beside the Frame, unwired (no video input). Shader starts from a
+bundled picture with a starter effect (Crystal Prism); 3D starts with one object; Moodboard feeds
+Generate an image as its style. Pattern and Shader now register live Frame sources, so their wires
+paint without a run. Studio tiles draw a real still with the studio's own renderer and defaults
+(`lib/startModal/stills.ts`); AI tiles expect shipped pictures under `public/start-modal/ai-*.webp`
+— **not made yet** (paid runs, owner's call); until then they show a plain placeholder.
+The 2×2 sticky-noted "Generate an image" tour (2026-08-31) is **retired**. Spec/plan:
+`superpowers/specs/2026-09-23-start-modal-rethink-design.md`. Verified on the live app
+(`tests/start-modal.spec.ts` 5/5; all 13 picks build the planned graph). Open: hover only visibly
+animates Expressive (Gradient/Pattern/Vector type defaults are stills); Shape and Vector type stills
+read faint on the dark tile.
 
 - **Sticky selected state (784d2a6c3, 2026-09-02):** press selects (action-blue ring, one at a time, mirrors arrows); Escape inside a note leaves editing but keeps the selection, second Escape deselects, Delete/Backspace removes, pane click clears.
 
