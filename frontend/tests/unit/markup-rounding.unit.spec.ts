@@ -55,4 +55,29 @@ describe('creditsForUsd rounding', () => {
       expect(c - 1, `usd=${usd}`).toBeLessThan(Math.max(1, usd * 100 * markup))
     }
   })
+
+  it('is exact for every price to 8 decimals (a sweep, plus each side of every whole credit)', () => {
+    // Exact integer maths: usd = k / 10^8 dollars. Credits = ceil(k × 200 / 10^8)
+    // up to $0.10 (k ≤ 10^7), ceil(k × 150 / 10^8) above, never below 1.
+    const want = (k: bigint): number => {
+      const [num, den] = k <= 10_000_000n ? [k * 200n, 100_000_000n] : [k * 150n, 100_000_000n]
+      const c = (num + den - 1n) / den
+      return Number(c < 1n ? 1n : c)
+    }
+    const ks: bigint[] = []
+    for (let k = 1n; k <= 300_000_000n; k += 9973n) ks.push(k)
+    // Each side of a whole credit: at 2× a credit is every 500,000 (k × 200 / 10^8 = k / 500,000);
+    // at 1.5× every 2,000,000 / 3, whole at k = 2,000,000 × j (3j credits).
+    for (let j = 1n; j <= 20n; j++) ks.push(j * 500_000n - 1n, j * 500_000n, j * 500_000n + 1n)
+    for (let j = 1n; j <= 150n; j++) ks.push(j * 2_000_000n - 1n, j * 2_000_000n, j * 2_000_000n + 1n)
+    ks.push(9_999_999n, 10_000_000n, 10_000_001n, 3_500_000n, 3_500_001n)
+    const off: string[] = []
+    for (const k of ks) {
+      const usd = Number(k) / 1e8
+      const got = creditsForUsd(usd)
+      if (got !== want(k)) off.push(`$${usd.toFixed(8)}: ${got}, exact ${want(k)}`)
+    }
+    expect(off.slice(0, 5)).toEqual([])
+    expect(ks.length).toBeGreaterThan(30000)
+  })
 })

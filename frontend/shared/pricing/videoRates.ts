@@ -165,7 +165,7 @@ export const VIDEO_RATES: Record<string, VideoRate> = {
   'ltx-video': {
     unit: 'per_clip', service: 'replicate', source: rep('lightricks/ltx-video'), read: READ, confidence: 'verified',
     byResolution: { '*': { '*': 0.1365 } },
-    note: 'ceiling: L40S $0.000975/s × 140 s (typical 84 s at 30 steps, scaled to 50 steps)',
+    note: 'ceiling: L40S $0.000975/s × 140 s (typical 84 s at 30 steps × 50/30)',
   },
   // "Billing is per output second, tiered by resolution and audio." The service
   // renders `quality` (default 540p) and `generate_audio_switch` (default off),

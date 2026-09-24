@@ -6,9 +6,12 @@
  *
  * Units, following the service:
  *  - `per_image`: dollars per output picture;
- *  - `per_megapixel`: dollars per output megapixel, plus a fixed part per
- *    picture where the service has one (Replicate's "per run"), and a floor
- *    where the service bills small pictures as 1 MP;
+ *  - `per_megapixel`: dollars per billed output megapixel, plus a fixed part
+ *    per picture where the service has one (Replicate's "per run"), and a
+ *    1 MP floor where the service normalises to 1 MP. Neither service says
+ *    how it rounds, so a picture's megapixels are its pixels / 1,000,000
+ *    rounded UP (controller ruling; imageSettings.ts billedMegapixels), with
+ *    the floor applied after the rounding;
  *  - `by_resolution`: dollars per picture by resolution tier (1K / 2K / 4K);
  *  - `by_quality`: dollars per picture by quality tier (low … high, auto).
  * `webSearch` is a flat extra per request when the search is switched on.
@@ -44,6 +47,8 @@ interface RateMeta {
   confidence: 'verified' | 'estimate'
   /** Extra per request when web search is switched on. */
   webSearch?: number
+  /** Where the figure comes from when it is not the builder's own endpoint page. */
+  note?: string
 }
 
 export type ImageRate =
@@ -68,14 +73,15 @@ const repImage = (slug: string, usd: number): ImageRate =>
  */
 export const IMAGE_RATES: Record<string, ImageRate> = {
   // ── fal ─────────────────────────────────────────────────────────────────
-  // "Price: $0.04 per megapixels". fal's pricing page: image prices are
-  // "normalized to 1MP … Higher resolutions will be priced proportionally",
-  // so a picture is charged its own megapixels, never less than 1.
+  // "Price: $0.04 per megapixels". fal's pricing page normalises image prices
+  // to 1MP but does not say how it rounds, so a picture is charged its pixels
+  // / 1,000,000 rounded up, never less than 1: square_hd (1024 × 1024) is
+  // 2 MP ($0.08), landscape_16_9 (1024 × 576) 1 MP ($0.04).
   'flux-1.1-pro': {
     unit: 'per_megapixel', perMegapixel: 0.04, minMegapixels: 1, maxMegapixels: FAL_MAX_MEGAPIXELS,
     service: 'fal', source: fal('fal-ai/flux-pro/v1.1'), read: READ, confidence: 'verified',
   },
-  // "Price: $0.003 per megapixels" (same 1 MP normalisation).
+  // "Price: $0.003 per megapixels" (same rounding up, same 1 MP floor).
   'flux-schnell': {
     unit: 'per_megapixel', perMegapixel: 0.003, minMegapixels: 1, maxMegapixels: FAL_MAX_MEGAPIXELS,
     service: 'fal', source: fal('fal-ai/flux/schnell'), read: READ, confidence: 'verified',
@@ -88,6 +94,7 @@ export const IMAGE_RATES: Record<string, ImageRate> = {
   'nano-banana-pro': {
     unit: 'by_resolution', byTier: { '1K': 0.15, '2K': 0.15, '4K': 0.30 },
     service: 'fal', source: fal('fal-ai/nano-banana-pro'), read: READ, confidence: 'verified',
+    note: 'priced from the sibling fal-ai/nano-banana-pro page: the builder\'s endpoint google/nano-banana-pro publishes no per-image price',
   },
   // "$0.08 per image … 2K and 4K outputs will be charged at 1.5 times and 2
   // times the standard rate … 0.5K (512px) … 0.75 times … If web search is
@@ -242,7 +249,9 @@ export function imageMaxUsd(modelId: string): number | null {
 
 /**
  * The most ONE picture can cost (the largest size, the dearest tier, the web
- * search), for the gallery's "up to" figure. Null for an unpriced id.
+ * search), for the gallery's per-image "up to" figure. Several pictures in one
+ * request (flux-dev ×4, a Seedream series) are not in it; the node badge
+ * prices those. Null for an unpriced id.
  */
 export function imageMaxPictureUsd(modelId: string): number | null {
   if (!imageRate(modelId)) return null
@@ -266,9 +275,9 @@ function dollars(usd: number): string {
 }
 
 /**
- * The gallery's price text for one picture: the default setting's price, and
- * "up to" the dearest setting's when the size or quality changes it —
- * "$0.08, up to $0.175". Hosted, in credits: "16 credits, up to 35".
+ * The gallery's price text PER IMAGE: one picture at the default settings,
+ * and "up to" the dearest single picture when the size or quality changes it
+ * — "$0.08, up to $0.175". Hosted, in credits: "16 credits, up to 27".
  */
 export function imageRateLabel(modelId: string, defaultAspectRatio: string, opts: { hosted?: boolean } = {}): string | null {
   const base = imageDefaultUsd(modelId, defaultAspectRatio)

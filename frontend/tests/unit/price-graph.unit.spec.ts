@@ -415,11 +415,15 @@ describe('one price calculation (guard)', () => {
     // one; any case and any name holding it (MARKUP, houseMarkup, markupRate)
     /[\w)\]][ \t]*\*[ \t]*\w*markup\w*\b/i,
     /Math\.ceil\(\s*usd\b/,
-    // rounding a plain product up by the markup's own factors: ×100 (cents),
-    // ×2 or ×1.5 — `Math.ceil(cost * 100 * 1.5)`. A sum (`w + pad * 2`) or a
-    // nested call (`Math.sqrt(n * 1.5)`) is layout maths, not a price.
-    /Math\.ceil\(\s*[\w.]+(?:\s*\*\s*[\w.]+)*\s*\*\s*(?:100|1\.5|2)\b/,
-    /\w+\s*<=\s*0\.10?\s*\?\s*2\b/,
+    // rounding a product up by the markup's own factors: ×100 (cents), ×2,
+    // ×1.5, or cents and markup folded together (×200, ×150) —
+    // `Math.ceil(cost * 100 * 1.5)`, `Math.ceil(usd * 200)`,
+    // `Math.ceil((cost) * 100)`. Operands are names, numbers or a bracketed
+    // group. A sum (`w + pad * 2`) or a nested call (`Math.sqrt(n * 1.5)`) is
+    // layout maths, not a price.
+    /Math\.ceil\(\s*(?:[\w.]+|\([^()\n]*\))(?:\s*\*\s*(?:[\w.]+|\([^()\n]*\)))*\s*\*\s*(?:100|150|200|1\.5|2)\b/,
+    // the $0.10 threshold choosing a factor, either way round
+    /[<>]=?\s*0\.10?\s*\?\s*(?:2|1\.5)\b/,
   ]
   /** Files allowed a markup of their own, each with the reason. */
   const ALLOWED: Record<string, string> = {
@@ -461,6 +465,15 @@ describe('one price calculation (guard)', () => {
     expect(offences('return Math.ceil(price*2)')).toHaveLength(1)
     expect(offences('return Math.ceil(2 * price * 100)')).toHaveLength(1)
     expect(offences('const m = price <= 0.1 ? 2 : 1.5')).toHaveLength(1)
+    // Fix round 1: the threshold either way round, and folded factors.
+    expect(offences('const m = cost > 0.10 ? 1.5 : 2')).toHaveLength(1)
+    expect(offences('const m = cost < 0.1 ? 2 : 1.5')).toHaveLength(1)
+    expect(offences('const m = cost >= 0.10 ? 1.5 : 2')).toHaveLength(1)
+    expect(offences('return Math.ceil(price * 200)')).toHaveLength(1)
+    expect(offences('return Math.ceil(price * 150)')).toHaveLength(1)
+    expect(offences('return Math.ceil(cost * 100 * m)')).toHaveLength(1)
+    expect(offences('return Math.ceil((cost) * 100)')).toHaveLength(1)
+    expect(offences('return Math.ceil((a + b) * 150)')).toHaveLength(1)
     // …and still not layout maths or prose.
     expect(offences('canvas.width = Math.max(2, Math.ceil(textW + pad * 2))')).toEqual([])
     expect(offences('const bands = Math.ceil(span / (pitch * 2)) + 2')).toEqual([])

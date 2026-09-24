@@ -7,7 +7,8 @@ const vid = (model: string) => ({ class_type: 'GenerateVideoNode', inputs: { mod
 
 describe('prices', () => {
   it('prices generators from the existing price table and nothing else', () => {
-    expect(nodeCredits(img('flux-schnell'))).toBe(1)
+    // P3 fix round 1: fal megapixels round up, so 1:1 (1024 × 1024) bills 2 MP: $0.006, 2 credits.
+    expect(nodeCredits(img('flux-schnell'))).toBe(2)
     // Task P3: Nano Banana 2 at fal's $0.08 (1K); Seedream 5 Lite's $0.035 is 7 credits (float noise fixed).
     expect(nodeCredits(img('nano-banana-2'))).toBe(16)
     expect(nodeCredits(img('seedream-5-lite'))).toBe(7)
@@ -19,7 +20,7 @@ describe('prices', () => {
   })
   it('adds the flat render credit only when asked', () => {
     const p = { '1': img('flux-schnell'), '2': { class_type: 'ComfyGateNode', inputs: {} }, '3': vid('hailuo-h3'), '4': { class_type: 'Video', inputs: {} } }
-    expect(stageEstimate(p, ['1', '2'], true)).toBe(2)
+    expect(stageEstimate(p, ['1', '2'], true)).toBe(3)
     expect(stageEstimate(p, ['3', '4'], false)).toBe(45)
     expect(hasOutputNode(p)).toBe(true)
     expect(hasOutputNode({ '1': img('flux-schnell') })).toBe(false)

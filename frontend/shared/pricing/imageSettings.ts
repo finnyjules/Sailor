@@ -23,7 +23,12 @@ export interface ImageSettings {
   images: number
   /** The priced tier the request carries: a resolution ('1K', '2K'…) or a quality ('high', 'auto'), else null. */
   tier: string | null
-  /** Output megapixels of one picture (1 MP = 1,000,000 pixels), for the per-megapixel models; else null. */
+  /**
+   * Billed megapixels of one picture, for the per-megapixel models; else null.
+   * Neither fal nor Replicate says how it rounds, so (controller ruling) a
+   * picture is counted as its pixels / 1,000,000 ROUNDED UP to a whole
+   * megapixel: 1024 × 1024 is 2 MP, 1024 × 576 is 1 MP.
+   */
   megapixels: number | null
   /** Nano Banana 2's web search (a flat extra per request on fal). */
   webSearch: boolean
@@ -93,24 +98,32 @@ const FAL_IMAGE_SIZE_BY_AR: Record<string, string> = {
 export function falSizeFor(aspectRatio: string): string {
   return Object.prototype.hasOwnProperty.call(FAL_IMAGE_SIZE_BY_AR, aspectRatio) ? FAL_IMAGE_SIZE_BY_AR[aspectRatio]! : 'square_hd'
 }
-/** Megapixels of a fal named size. */
+/** Pixels / 1,000,000, rounded up to a whole megapixel (the ruling above). */
+export function billedMegapixels(pixels: number): number {
+  return Math.ceil(pixels / 1_000_000)
+}
+
+/** Billed megapixels of a fal named size. */
 export function falSizeMegapixels(name: string): number {
-  return (FAL_SIZE_PIXELS[name] ?? FAL_SIZE_PIXELS.square_hd!) / 1e6
+  return billedMegapixels(FAL_SIZE_PIXELS[name] ?? FAL_SIZE_PIXELS.square_hd!)
 }
 
 /**
  * Black Forest Labs' megapixel labels ("1 MP", "4"): one label MP is 1024 ×
- * 1024 pixels (a 1:1 "1 MP" picture is 1024 × 1024), capped at 2048 × 2048,
- * the largest picture the service makes. Replicate bills output megapixels,
- * so a label is priced at the most pixels it can come back with. A label the
- * builder passes through but the service does not list is priced at the cap.
+ * 1024 pixels (a 1:1 "1 MP" picture is 1024 × 1024; other ratios keep about
+ * the same area), capped at 2048 × 2048, the largest picture the service
+ * makes. The cap applies to the pixels, then the count is rounded up: "1 MP"
+ * is 2 billed MP, "4 MP" is 2048² = 4,194,304 pixels, 5 billed MP. A ratio
+ * the model doesn't take (21:9 on Flux 2) is sent as 1:1, so "1 MP" there is
+ * 2 MP too. A label the builder passes through but the service does not list
+ * is priced at the cap.
  */
-const BFL_MP = 1024 * 1024 / 1e6
-const BFL_CAP_MP = 2048 * 2048 / 1e6
+const BFL_LABEL_PIXELS = 1024 * 1024
+const BFL_CAP_PIXELS = 2048 * 2048
 function bflMegapixels(label: string, allowed: readonly string[]): number {
   const n = Number.parseFloat(label)
-  if (!allowed.includes(label) || !(n > 0)) return BFL_CAP_MP
-  return Math.min(n * BFL_MP, BFL_CAP_MP)
+  const pixels = allowed.includes(label) && n > 0 ? n * BFL_LABEL_PIXELS : BFL_CAP_PIXELS
+  return billedMegapixels(Math.min(pixels, BFL_CAP_PIXELS))
 }
 export const FLUX_2_RESOLUTIONS = ['0.5 MP', '1 MP', '2 MP', '4 MP'] as const
 export const FLUX_KLEIN_MEGAPIXELS = ['0.25', '0.5', '1', '2', '4'] as const
@@ -150,9 +163,11 @@ const RULES: Record<string, Rule> = {
   'ideogram-v3-balanced': flat,
   'ideogram-v3-turbo': flat,
   // seedream5Lite: max_images 1, or 1–6 when sequential_image_generation is "auto".
+  // The ComfyUI path falls over to Replicate (_b_seedream_5_lite), which
+  // clamps max_images to 1–15, not fal's 1–6: the price covers the larger.
   'seedream-5-lite': adv => ({
     ...one(),
-    images: optStr(adv, 'sequential_image_generation', 'disabled') === 'auto' ? clamp(optInt(adv, 'max_images', 1), 1, 6) : 1,
+    images: optStr(adv, 'sequential_image_generation', 'disabled') === 'auto' ? clamp(optInt(adv, 'max_images', 1), 1, 15) : 1,
   }),
   'seedream-4': flat,
 
@@ -227,8 +242,12 @@ export function effectiveImageSettings(modelId: string, aspectRatio: unknown, mo
   return RULES[modelId]!(readModelOptions(modelOptions), ar)
 }
 
-/** The most pictures a builder can ask for in one request (flux-schnell / flux-dev: num_outputs up to 4; Seedream 5 Lite: max_images up to 6). */
-const MAX_IMAGES: Record<string, number> = { 'flux-schnell': 4, 'flux-dev': 4, 'seedream-5-lite': 6 }
+/**
+ * The most pictures a builder can ask for in one request (flux-schnell /
+ * flux-dev: num_outputs up to 4; Seedream 5 Lite: max_images up to 15 on its
+ * Python Replicate fallover, 6 on fal).
+ */
+const MAX_IMAGES: Record<string, number> = { 'flux-schnell': 4, 'flux-dev': 4, 'seedream-5-lite': 15 }
 export function maxImageCount(modelId: string): number {
   return has(MAX_IMAGES, modelId) ? MAX_IMAGES[modelId]! : 1
 }
@@ -240,7 +259,7 @@ export function maxImageCount(modelId: string): number {
  */
 export const LARGEST_RATIO = '1:1'
 
-/** The largest picture the fal per-megapixel models can be asked for (any ratio). */
-export const FAL_MAX_MEGAPIXELS = Math.max(...Object.values(FAL_SIZE_PIXELS)) / 1e6
-/** The largest picture a BFL megapixel label can come back as. */
-export const BFL_MAX_MEGAPIXELS = BFL_CAP_MP
+/** Billed megapixels of the largest picture the fal per-megapixel models can be asked for (any ratio): 2. */
+export const FAL_MAX_MEGAPIXELS = billedMegapixels(Math.max(...Object.values(FAL_SIZE_PIXELS)))
+/** Billed megapixels of the largest picture a BFL label can come back as (2048²): 5. */
+export const BFL_MAX_MEGAPIXELS = billedMegapixels(BFL_CAP_PIXELS)

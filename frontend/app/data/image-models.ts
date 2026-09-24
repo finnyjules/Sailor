@@ -151,7 +151,7 @@ export const IMAGE_MODELS: ImageModel[] = [
       'BFL\'s workhorse Pro tier — strong photoreal output, good prompt adherence, '
       + 'sane defaults. Use it when you don\'t know what else to pick.',
     tags: ['flagship', 'photoreal'],
-    pricePerImage: 0.04194304,
+    pricePerImage: 0.08,
     aspectRatios: FLUX_PRO_AR,
     defaultAspectRatio: '1:1',
     advanced: [
@@ -223,7 +223,7 @@ export const IMAGE_MODELS: ImageModel[] = [
     replicateSlug: 'black-forest-labs/flux-schnell',
     pitch: '4-step Flux for rapid iteration — 333 images per dollar.',
     tags: ['fast', 'cheap', 'open-source'],
-    pricePerImage: 0.00314573,
+    pricePerImage: 0.006,
     aspectRatios: FLUX_DEV_AR,
     defaultAspectRatio: '1:1',
     advanced: [
@@ -240,7 +240,7 @@ export const IMAGE_MODELS: ImageModel[] = [
     replicateSlug: 'black-forest-labs/flux-2-max',
     pitch: 'BFL\'s highest-fidelity model — product photography and character consistency.',
     tags: ['flagship', 'photoreal'],
-    pricePerImage: 0.07145728,
+    pricePerImage: 0.10,
     aspectRatios: FLUX_2_AR,
     defaultAspectRatio: '1:1',
     advanced: [
@@ -257,7 +257,7 @@ export const IMAGE_MODELS: ImageModel[] = [
     replicateSlug: 'black-forest-labs/flux-2-pro',
     pitch: 'Most of Flux 2 Max\'s quality at half the price — supports JSON prompts.',
     tags: ['flagship'],
-    pricePerImage: 0.03072864,
+    pricePerImage: 0.045,
     aspectRatios: FLUX_2_AR,
     defaultAspectRatio: '1:1',
     advanced: [
@@ -274,7 +274,7 @@ export const IMAGE_MODELS: ImageModel[] = [
     replicateSlug: 'black-forest-labs/flux-2-flex',
     pitch: 'Tunable Flux 2 — exposes steps and guidance to trade speed for fidelity.',
     tags: ['flagship', 'typography'],
-    pricePerImage: 0.06291456,
+    pricePerImage: 0.12,
     aspectRatios: FLUX_2_AR,
     defaultAspectRatio: '1:1',
     advanced: [
@@ -294,7 +294,7 @@ export const IMAGE_MODELS: ImageModel[] = [
     replicateSlug: 'black-forest-labs/flux-2-klein-4b',
     pitch: 'Sub-second 4B-parameter Flux 2 — cheapest, fastest in the family.',
     tags: ['fast', 'cheap'],
-    pricePerImage: 0.00104858,
+    pricePerImage: 0.002,
     aspectRatios: ['1:1', '16:9', '9:16', '3:2', '2:3', '4:3', '3:4', '5:4', '4:5', '21:9', '9:21'],
     defaultAspectRatio: '1:1',
     advanced: [
@@ -311,7 +311,7 @@ export const IMAGE_MODELS: ImageModel[] = [
     replicateSlug: 'black-forest-labs/flux-2-dev',
     pitch: 'Open-weight Flux 2 — tunable steps and guidance, self-hostable lineage.',
     tags: ['flagship', 'typography'],
-    pricePerImage: 0.01258291,
+    pricePerImage: 0.024,
     aspectRatios: FLUX_2_AR,
     defaultAspectRatio: '1:1',
     advanced: [
