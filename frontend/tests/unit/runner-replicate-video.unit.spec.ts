@@ -20,7 +20,7 @@ import {
 } from '#shared/runner/eligibility'
 import { NO_FAMILIES, RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import type { ApiPrompt } from '#shared/runner/graph'
-import { VIDEO_MODEL_USD } from '~~/app/data/video-prices'
+import { videoRate } from '#shared/pricing/videoRates'
 import { BASE_RENDER_CREDITS } from '~~/server/utils/priceBook'
 import type { OutputFile } from '~~/server/runner/types'
 import { createFakeLedger, createFakeReplicate, gatedFlow, makeKit } from './__runner__/kit'
@@ -192,7 +192,7 @@ describe('the Replicate video list', () => {
   it('every priced Replicate video model except fabric-1.0 is on the list', () => {
     const want = py
       .filter(m => m.provider === 'replicate')
-      .filter(m => (VIDEO_MODEL_USD[m.id]?.usd ?? 0) > 0)
+      .filter(m => videoRate(m.id) != null)
       .filter(m => m.id !== 'fabric-1.0')
       .map(m => m.id)
     expect([...RUNNER_REPLICATE_VIDEO_MODEL_IDS].sort()).toEqual(want.sort())

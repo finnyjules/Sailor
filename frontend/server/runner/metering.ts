@@ -5,7 +5,7 @@
  * run); the charge is exactly what was made. Nothing is held while paused.
  *
  * Prices come from the one price table priceGraph already reads
- * (app/data/image-models.ts, app/data/video-prices.ts) — the runner cannot
+ * (app/data/image-models.ts, shared/pricing/videoRates.ts) — the runner cannot
  * run a model without a price because priceGraph throws for one, and a
  * provider node that prices at 0 is refused in hosted (unpricedProviderNode).
  */

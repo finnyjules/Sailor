@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { CLIP_MODELS, clipModel, clipModelLabel, clipPriceCredits, clipPriceUsd } from '~/data/clip-models'
-import { VIDEO_MODEL_USD } from '~/data/video-prices'
+import { videoRate } from '#shared/pricing/videoRates'
 import { MODEL_COSTS } from '../../server/utils/priceBook'
 
 describe('clip models', () => {
@@ -45,11 +45,13 @@ describe('clip models', () => {
     }
     expect(clipPriceCredits('nope')).toBeNull()
   })
-  it('rows that also live in the shared video catalog quote the same price', () => {
-    for (const m of CLIP_MODELS) {
-      const shared = VIDEO_MODEL_USD[m.id]
-      if (shared) expect(m.usd, m.id).toBeCloseTo(shared.usd)
-    }
-    expect(CLIP_MODELS.filter(m => VIDEO_MODEL_USD[m.id]).length).toBe(3)   // Kling 3.0 Pro is clip-only
+  // The per-second rate card (shared/pricing/videoRates.ts) is where these rows'
+  // prices come from once Task P5 re-prices Animate per second; until then the
+  // rows stay flat (pinned to MODEL_COSTS above) and this pins that the shared
+  // ones have a verified card to be priced from.
+  it('rows that also live in the shared video catalog have a verified rate card', () => {
+    const shared = CLIP_MODELS.filter(m => videoRate(m.id))
+    for (const m of shared) expect(videoRate(m.id)!.confidence, m.id).toBe('verified')
+    expect(shared.map(m => m.id)).toEqual(['seedance-2.0', 'hailuo-h3', 'hailuo-h3-max'])   // Kling 3.0 Pro and FLUX 3 draft are clip-only
   })
 })

@@ -26,7 +26,7 @@ import { getGeneratorIcon } from '~/data/generator-icons'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 import { creditsForUsd } from '~/lib/pricing'
 import { MODEL_PRICED_BADGE_CLASSES, nodeCreditEstimate } from '~/lib/nodeCreditEstimate'
-import { widgetValueMap } from '~/lib/costEstimate'
+import { linkedInputNames, widgetValueMap } from '~/lib/costEstimate'
 import TakesStrip from '~/components/vue-canvas/TakesStrip.vue'
 import LightTableModal from '~/components/vue-canvas/LightTableModal.vue'
 import { projectTake, discardOthers, type Take } from '~/composables/useTakes'
@@ -134,10 +134,13 @@ const hostedBadges = hostedModeEnabled(useRuntimeConfig().public)
 
 // A picker node's whole widget map (name → value), the input the shared price
 // calculation takes. Read reactively off widgetsValues so changing ANY widget
-// (the model, and later the length, resolution or sound) re-prices the badge.
+// (the model, the length, resolution or sound) re-prices the badge. A linked
+// input is marked linked, as graphToPrompt sends it (injectedEdges is read
+// lazily, after setup, so its later declaration is safe).
 const pricedInputs = computed(() => {
   if (!MODEL_PRICED_BADGE_CLASSES.has(props.data.nodeType as string)) return null
-  return widgetValueMap(props.data.widgetDefs, props.data.widgetsValues)
+  return widgetValueMap(props.data.widgetDefs, props.data.widgetsValues,
+    linkedInputNames(props.id, props.data.inputs, injectedEdges?.value))
 })
 
 // Extract the minimum USD price from the price badge expression

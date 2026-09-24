@@ -6,7 +6,9 @@ import {
 } from '~/lib/nodeCreditEstimate'
 import { creditsForUsd } from '~/lib/pricing'
 import { IMAGE_MODELS } from '~/data/image-models'
-import { VIDEO_MODEL_USD, LEGACY_VIDEO_MODEL_IDS } from '~/data/video-prices'
+import { LEGACY_VIDEO_MODEL_IDS } from '~/data/video-prices'
+import { VIDEO_RATES, videoUsd } from '#shared/pricing/videoRates'
+import { effectiveVideoSettings } from '#shared/pricing/videoSettings'
 import { ENGINE_USD } from '~/data/engine-prices'
 import { MODEL_PRICED_NODE_CLASSES, UnpricedGraphError, priceGraph } from '../../server/utils/priceBook'
 
@@ -17,6 +19,9 @@ import { MODEL_PRICED_NODE_CLASSES, UnpricedGraphError, priceGraph } from '../..
 // catalogs, same legacy remaps, same markup policy, plus the 1cr base_render
 // the graph pricer adds for the render itself.
 const BASE_RENDER = 1
+
+/** A video model's price for a node that sets only its model: the builder's default clip. */
+const defaultClipUsd = (id: string) => videoUsd(id, effectiveVideoSettings(id, undefined, undefined, {})!)!
 
 describe('MODEL_PRICED_BADGE_CLASSES', () => {
   it('covers exactly the five picker classes the server prices by model', () => {
@@ -79,16 +84,16 @@ describe('modelPricedUsd — image models', () => {
 })
 
 describe('modelPricedUsd — video models', () => {
-  it('prices GenerateVideoNode and FilmShotNode off the same video table', () => {
-    expect(modelPricedUsd('GenerateVideoNode', { model: 'veo-3.1' })).toBe(VIDEO_MODEL_USD['veo-3.1']!.usd)
-    expect(modelPricedUsd('FilmShotNode', { model: 'ltx-video' })).toBe(VIDEO_MODEL_USD['ltx-video']!.usd)
+  it('prices GenerateVideoNode and FilmShotNode off the same rate card', () => {
+    expect(modelPricedUsd('GenerateVideoNode', { model: 'veo-3.1' })).toBe(defaultClipUsd('veo-3.1'))
+    expect(modelPricedUsd('FilmShotNode', { model: 'ltx-video' })).toBe(defaultClipUsd('ltx-video'))
   })
 
   it('honours the legacy model-label remap the node applies at execute time', () => {
-    expect(modelPricedUsd('GenerateVideoNode', { model: 'Seedance 2.0' })).toBe(VIDEO_MODEL_USD['seedance-2.0']!.usd)
-    expect(modelPricedUsd('GenerateVideoNode', { model: 'Veo 3' })).toBe(VIDEO_MODEL_USD['veo-3.1']!.usd)
+    expect(modelPricedUsd('GenerateVideoNode', { model: 'Seedance 2.0' })).toBe(defaultClipUsd('seedance-2.0'))
+    expect(modelPricedUsd('GenerateVideoNode', { model: 'Veo 3' })).toBe(defaultClipUsd('veo-3.1'))
     expect(modelPricedUsd('GenerateVideoNode', { model: 'Kling 2.1' }))
-      .toBe(VIDEO_MODEL_USD['kling-v2.5-turbo-pro']!.usd)
+      .toBe(defaultClipUsd('kling-v2.5-turbo-pro'))
   })
 
   it('returns null for an unknown video model id', () => {
@@ -122,7 +127,7 @@ describe('modelPricedUsd — non-picker classes and empty values', () => {
 
 describe('nodeCreditEstimate', () => {
   it('is the model USD through the markup policy plus base_render', () => {
-    const usd = VIDEO_MODEL_USD['veo-3.1']!.usd
+    const usd = defaultClipUsd('veo-3.1')
     expect(nodeCreditEstimate('GenerateVideoNode', { model: 'veo-3.1' })).toBe(creditsForUsd(usd) + BASE_RENDER)
   })
 
@@ -135,7 +140,7 @@ describe('nodeCreditEstimate', () => {
   })
 
   it('never returns less than the base render for a priced model', () => {
-    for (const id of Object.keys(VIDEO_MODEL_USD)) {
+    for (const id of Object.keys(VIDEO_RATES)) {
       expect(nodeCreditEstimate('GenerateVideoNode', { model: id })!).toBeGreaterThan(BASE_RENDER)
     }
   })
@@ -154,7 +159,7 @@ describe('nodeCreditEstimate', () => {
 describe('badge = charge, exhaustively', () => {
   const ids = [...new Set([
     ...IMAGE_MODELS.map(m => m.id),
-    ...Object.keys(VIDEO_MODEL_USD),
+    ...Object.keys(VIDEO_RATES),
     ...Object.keys(LEGACY_VIDEO_MODEL_IDS),
     ...Object.values(ENGINE_USD).flatMap(e => Object.keys(e)),
   ])]

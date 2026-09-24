@@ -17,7 +17,8 @@ export interface ClipModel {
   defaultDuration: number
   /** Flat price per attempt in USD — the same number the ledger holds (MODEL_COSTS row for
    *  the fal slug in server/utils/priceBook.ts). Kling is not in the shared video catalog,
-   *  so the clip catalog owns its prices; a test pins the shared ones to VIDEO_MODEL_USD. */
+   *  so the clip catalog owns its prices. The shared ones have a per-second rate card in
+   *  shared/pricing/videoRates.ts (pinned by test); Task P5 re-prices these flat rows from it. */
   usd: number
   /** The flat price in credits — MUST equal the server MODEL_COSTS row for the model's fal slug
    *  (pinned by clip-models.unit.spec), so the quote is exactly what the ledger holds. Hand-set

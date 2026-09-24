@@ -55,6 +55,8 @@ export interface EstimateInputNode {
   widgetDefs?: { name?: string }[] | null
   /** Widget values, positionally aligned with `widgetDefs`. */
   widgetsValues?: unknown[] | null
+  /** Names of the node's inputs fed by a link (see `linkedInputNames`). */
+  linkedInputs?: string[] | null
 }
 export interface CostBreakdownItem { id: string; label: string; usd: number; credits?: boolean }
 export interface CostEstimate {
@@ -73,6 +75,7 @@ export interface CostEstimate {
 export function widgetValueMap(
   widgetDefs: readonly ({ name?: string } | null | undefined)[] | null | undefined,
   widgetsValues: readonly unknown[] | null | undefined,
+  linkedInputs?: Iterable<string> | null,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   const defs = widgetDefs || []
@@ -81,7 +84,41 @@ export function widgetValueMap(
     if (!name || Object.prototype.hasOwnProperty.call(out, name)) continue
     out[name] = widgetsValues?.[i]
   }
+  // A linked input wins over its widget value, as graphToPrompt does: the API
+  // prompt carries a [nodeId, slot] reference there, whose value is known only
+  // at run time. The shared price reads such a reference as "linked" and
+  // prices it at its most expensive — so the badge marks it the same way.
+  for (const name of linkedInputs ?? []) out[name] = [LINKED_INPUT_SOURCE, 0]
   return out
+}
+
+/** Stand-in origin id for a linked input in the badge's map (only its array shape matters). */
+export const LINKED_INPUT_SOURCE = 'linked'
+
+/**
+ * Names of a canvas node's inputs that are fed by a link: those whose saved
+ * `.link` is set, or that a live Vue Flow edge targets (`input-<index>`; Vue
+ * Flow's connect only updates edges, never `.link`).
+ */
+export function linkedInputNames(
+  nodeId: string,
+  inputs: readonly ({ name?: string, link?: unknown } | null | undefined)[] | null | undefined,
+  edges?: readonly ({ target?: unknown, targetHandle?: string | null } | null | undefined)[] | null,
+): string[] {
+  const list = inputs || []
+  const idx = new Set<number>()
+  for (let i = 0; i < list.length; i++) if (list[i]?.link != null) idx.add(i)
+  for (const e of edges || []) {
+    if (String(e?.target) !== String(nodeId)) continue
+    const m = /^input-(\d+)$/.exec(e?.targetHandle ?? '')
+    if (m) idx.add(Number(m[1]))
+  }
+  const names: string[] = []
+  for (const i of [...idx].sort((a, b) => a - b)) {
+    const name = list[i]?.name
+    if (name && !names.includes(name)) names.push(name)
+  }
+  return names
 }
 
 /** A node bills the user in USD (Replicate BYOK) rather than Comfy credits.
@@ -128,7 +165,7 @@ export function estimateUsdForNodes(
     // Hosted: a model-priced picker is charged by the server whatever its
     // billing class, so price it even if the badge/category filter misses it.
     // Priced from the WHOLE widget map, the same way the server charges it.
-    const shared = hosted ? priceNode(n.type, widgetValueMap(n.widgetDefs, n.widgetsValues)) : null
+    const shared = hosted ? priceNode(n.type, widgetValueMap(n.widgetDefs, n.widgetsValues, n.linkedInputs)) : null
     const modelPrice = shared && !('refused' in shared) ? shared : null
     if (modelPrice == null && !isReplicateBilled(n) && !creditBilled) continue
     // The selected model's real price beats the static badge when we have it.
@@ -154,8 +191,9 @@ export function estimateUsdForNodes(
  *  The LiteGraph class name lives in data.nodeType (data.type is the Vue Flow
  *  renderer type). Disabled nodes (mode 2) are excluded — they don't run.
  *  widgetDefs/widgetsValues ride along so the hosted estimate can price the
- *  node from its widgets; local mode ignores them. */
-export function vueNodesToEstimateInput(nodes: any[]): EstimateInputNode[] {
+ *  node from its widgets; local mode ignores them. `edges` (the canvas's live
+ *  Vue Flow edges) mark the linked inputs, as the node badge does. */
+export function vueNodesToEstimateInput(nodes: any[], edges?: any[] | null): EstimateInputNode[] {
   return (nodes || [])
     .filter((n: any) => ((n?.data?.mode ?? 0) !== 2))
     .map((n: any) => ({
@@ -166,5 +204,6 @@ export function vueNodesToEstimateInput(nodes: any[]): EstimateInputNode[] {
       category: n?.data?.category ?? null,
       widgetDefs: n?.data?.widgetDefs ?? null,
       widgetsValues: n?.data?.widgetsValues ?? null,
+      linkedInputs: linkedInputNames(String(n.id), n?.data?.inputs, edges),
     }))
 }

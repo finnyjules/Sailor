@@ -20,6 +20,16 @@ import {
 } from '~/data/video-models'
 import { BRAND_COLORS, getBrandIcon } from '~/data/brand-icons'
 import { snapWidgetsToModel } from '~/lib/videoModelAdapt'
+import { hostedModeEnabled } from '~/lib/hostedMode'
+import { videoRateLabel } from '#shared/pricing/videoRates'
+
+// Price text from the rate card (what the model costs per second at its
+// default settings; credits per second in hosted mode). The catalogue's old
+// free-form price note is never shown as money.
+const hostedPrices = hostedModeEnabled(useRuntimeConfig().public)
+function priceLabel(m: VideoModel): string | null {
+  return videoRateLabel(m.id, { hosted: hostedPrices })
+}
 
 // -- Replicate cover image fetch + cache -----------------------------------
 // Same /api/replicate-cover endpoint as the image gallery. Video models
@@ -282,12 +292,11 @@ const focusedModel = computed<VideoModel | null>(() =>
           v-if="coverUrls[(item as VideoModel).replicateSlug]"
           class="absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-black/45 to-transparent pointer-events-none"
         />
-        <!-- Price hint badge. Video pricing varies wildly so this is a
-             free-form hint string rather than a normalized number. -->
+        <!-- Price badge: the rate card's per-second price at the default settings. -->
         <span
-          v-if="(item as VideoModel).priceHint"
+          v-if="priceLabel(item as VideoModel)"
           class="absolute top-2 right-2 text-[9px] tabular-nums leading-none px-1.5 py-1 rounded bg-black/55 text-amber-200 border border-amber-400/20 backdrop-blur-sm"
-        >{{ (item as VideoModel).priceHint }}</span>
+        >{{ priceLabel(item as VideoModel) }}</span>
         <!-- Mode pills: bottom-left so they don't fight the price. -->
         <div class="absolute bottom-2 left-2 flex gap-1">
           <span
@@ -399,10 +408,10 @@ const focusedModel = computed<VideoModel | null>(() =>
           <!-- Price + tag chips -->
           <div class="flex flex-wrap items-center gap-1.5">
             <span
-              v-if="(item as VideoModel).priceHint"
+              v-if="priceLabel(item as VideoModel)"
               class="inline-flex items-center gap-1 text-[10px] tabular-nums px-2 py-1 rounded bg-amber-500/10 text-amber-200 border border-amber-400/15"
             >
-              {{ (item as VideoModel).priceHint }}
+              {{ priceLabel(item as VideoModel) }}
             </span>
             <span
               v-for="t in (item as VideoModel).tags"

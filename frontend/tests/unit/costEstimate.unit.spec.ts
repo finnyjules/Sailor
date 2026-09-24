@@ -8,7 +8,11 @@ import {
 } from '~/lib/costEstimate'
 import { nodeCreditEstimate } from '~/lib/nodeCreditEstimate'
 import { creditsForUsd, formatCostLong, formatEstimateLong } from '~/lib/pricing'
-import { VIDEO_MODEL_USD } from '~/data/video-prices'
+import { videoUsd } from '#shared/pricing/videoRates'
+import { effectiveVideoSettings } from '#shared/pricing/videoSettings'
+
+/** A video model's price for a node that sets only its model: the builder's default clip. */
+const defaultClipUsd = (id: string) => videoUsd(id, effectiveVideoSettings(id, undefined, undefined, {})!)!
 
 const USD_05 = '{"type":"usd","usd":0.05,"format":{"approximate":true}}'
 const USD_04 = '{"type":"usd","usd":0.04}'
@@ -157,7 +161,7 @@ describe('estimateUsdForNodes — hosted prices the selected model', () => {
     const est = estimateUsdForNodes([videoNode('veo-3.1')], { hosted: true })!
     expect(est.hostedCredits).toBe(nodeCreditEstimate('GenerateVideoNode', { model: 'veo-3.1' }))
     // …and that is the model USD through the markup policy plus one base render.
-    expect(est.hostedCredits).toBe(creditsForUsd(VIDEO_MODEL_USD['veo-3.1']!.usd) + 1)
+    expect(est.hostedCredits).toBe(creditsForUsd(defaultClipUsd('veo-3.1')) + 1)
     expect(est.hostedCredits).toBe(481)
   })
 
@@ -178,8 +182,8 @@ describe('estimateUsdForNodes — hosted prices the selected model', () => {
       [videoNode('veo-3.1'), { ...videoNode('ltx-video'), id: '8' }],
       { hosted: true },
     )!
-    const a = creditsForUsd(VIDEO_MODEL_USD['veo-3.1']!.usd)
-    const b = creditsForUsd(VIDEO_MODEL_USD['ltx-video']!.usd)
+    const a = creditsForUsd(defaultClipUsd('veo-3.1'))
+    const b = creditsForUsd(defaultClipUsd('ltx-video'))
     expect(two.hostedCredits).toBe(a + b + 1)
   })
 

@@ -21,13 +21,19 @@ import {
   PROVIDER_NODE_CLASSES,
   PROVIDER_NODE_EXEMPT,
   UnpricedGraphError,
-  VIDEO_MODEL_USD,
+  VIDEO_RATES,
   creditsForUsdServer,
   priceGraph,
 } from '../../server/utils/priceBook'
 import { creditsForUsd } from '~/lib/pricing'
 import { IMAGE_MODELS } from '~~/app/data/image-models'
 import { VIDEO_MODELS } from '~~/app/data/video-models'
+import { videoUsd } from '#shared/pricing/videoRates'
+import { effectiveVideoSettings } from '#shared/pricing/videoSettings'
+
+/** Credits for a video node that sets only its model: the builder's default clip. */
+const defaultClipCredits = (id: string) =>
+  creditsForUsdServer(videoUsd(id, effectiveVideoSettings(id, undefined, undefined, {})!)!)
 
 const REPO = fileURLToPath(new URL('../../../', import.meta.url))
 const PY = readFileSync(join(REPO, 'comfy_api_nodes/nodes_replicate.py'), 'utf8')
@@ -245,35 +251,28 @@ describe('model-aware pricing: images', () => {
 })
 
 describe('model-aware pricing: video', () => {
-  it('the server video-price map covers the catalog exactly', () => {
-    expect(Object.keys(VIDEO_MODEL_USD).sort()).toEqual(VIDEO_MODELS.map(m => m.id).sort())
-  })
-
-  it('each video price is pinned to the catalog price hint (drift guard)', () => {
-    for (const m of VIDEO_MODELS) {
-      expect(VIDEO_MODEL_USD[m.id]!.hint, `${m.id} price hint drifted — re-derive the USD figure`)
-        .toBe(m.priceHint)
-    }
+  it('the video rate card covers the catalog exactly', () => {
+    expect(Object.keys(VIDEO_RATES).sort()).toEqual(VIDEO_MODELS.map(m => m.id).sort())
   })
 
   it('GenerateVideoNode prices by its model widget', () => {
     const cheap = priceGraph({ 1: { class_type: 'GenerateVideoNode', inputs: { model: 'ltx-video' } } })
     const rich = priceGraph({ 1: { class_type: 'GenerateVideoNode', inputs: { model: 'veo-3.1' } } })
-    expect(cheap.credits).toBe(creditsForUsdServer(VIDEO_MODEL_USD['ltx-video']!.usd))
-    expect(rich.credits).toBe(creditsForUsdServer(VIDEO_MODEL_USD['veo-3.1']!.usd))
+    expect(cheap.credits).toBe(defaultClipCredits('ltx-video'))
+    expect(rich.credits).toBe(defaultClipCredits('veo-3.1'))
     expect(rich.credits).toBeGreaterThan(cheap.credits * 10)
   })
 
   it('honours the legacy model labels the node still remaps', () => {
     expect(priceGraph({ 1: { class_type: 'GenerateVideoNode', inputs: { model: 'Veo 3' } } }).credits)
-      .toBe(creditsForUsdServer(VIDEO_MODEL_USD['veo-3.1']!.usd))
+      .toBe(defaultClipCredits('veo-3.1'))
     expect(priceGraph({ 1: { class_type: 'GenerateVideoNode', inputs: { model: 'Seedance 2.0' } } }).credits)
-      .toBe(creditsForUsdServer(VIDEO_MODEL_USD['seedance-2.0']!.usd))
+      .toBe(defaultClipCredits('seedance-2.0'))
   })
 
-  it('FilmShotNode prices from the same video registry', () => {
+  it('FilmShotNode prices from the same rate card', () => {
     expect(priceGraph({ 1: { class_type: 'FilmShotNode', inputs: { model: 'kling-v2.5-turbo-pro' } } }).credits)
-      .toBe(creditsForUsdServer(VIDEO_MODEL_USD['kling-v2.5-turbo-pro']!.usd))
+      .toBe(defaultClipCredits('kling-v2.5-turbo-pro'))
   })
 
   it('an unknown video model REFUSES on both video classes', () => {
@@ -355,12 +354,21 @@ describe('golden price table (no price changed by the shared pricing move)', () 
     expect(cells.filter(c => typeof c === 'number').length).toBeGreaterThan(50)
   })
 
+  // Task P2 re-priced video per second (shared/pricing/videoRates.ts), so the
+  // two video classes keep only their shape from the table: a model that
+  // refused still refuses and a model that priced still prices. Their figures
+  // are pinned by tests/unit/video-pricing.unit.spec.ts.
+  const REPRICED = new Set(['GenerateVideoNode', 'FilmShotNode'])
+
   it('every model id × model-priced class prices exactly as recorded', () => {
     const drift: string[] = []
     for (const [ct, row] of Object.entries(golden.modelPriced)) {
       for (const [model, want] of Object.entries(row)) {
         const got = priceOrRefused(ct, { model })
-        if (got !== want) drift.push(`${ct} @ ${model}: recorded ${want}, now ${got}`)
+        if (REPRICED.has(ct)) {
+          if ((got === 'refused') !== (want === 'refused')) drift.push(`${ct} @ ${model}: recorded ${want}, now ${got}`)
+        }
+        else if (got !== want) drift.push(`${ct} @ ${model}: recorded ${want}, now ${got}`)
       }
     }
     expect(drift).toEqual([])
@@ -375,7 +383,8 @@ describe('golden price table (no price changed by the shared pricing move)', () 
     expect(drift).toEqual([])
   })
 
-  it('other widgets in the input map do not move a price today', () => {
+  it('widgets that do not change what is sent do not move a price', () => {
+    // Veo 3.1's default clip is 8 s with sound; 720p and 1080p cost the same.
     const bare = priceGraph({ 1: { class_type: 'GenerateVideoNode', inputs: { model: 'veo-3.1' } } }).credits
     const full = priceGraph({ 1: { class_type: 'GenerateVideoNode', inputs: {
       model: 'veo-3.1', prompt: 'a shot', duration: 8, model_options: '{"resolution":"1080p"}',

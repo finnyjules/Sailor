@@ -9,11 +9,13 @@
  * to base_render — a real Flux 2 Pro run once went out at 1 credit because
  * GenerateImageNode was missing from the table.
  */
-import { VIDEO_MODEL_USD } from '~~/app/data/video-prices'
 import { creditsForUsd } from '../../shared/pricing/markup'
 import { MODEL_PRICED_NODE_CLASSES, MODEL_PRICED_CLASS_SET, priceNode } from '../../shared/pricing/nodePrice'
-export { VIDEO_MODEL_USD, MODEL_PRICED_NODE_CLASSES }
-export const PRICE_BOOK_VERSION = 'spike-v4'
+import { VIDEO_RATES } from '../../shared/pricing/videoRates'
+export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES }
+// lineup-p2 (model line-up Task P2): video priced per second of the clip
+// actually sent (shared/pricing/videoRates.ts), replacing one flat figure per model.
+export const PRICE_BOOK_VERSION = 'lineup-p2'
 
 export const BASE_RENDER_CREDITS = 1
 
@@ -274,13 +276,13 @@ export const PROVIDER_NODE_CLASSES: string[] = [
   'SwapProductNode', 'TurntableNode',
 ]
 
-// Per-clip video USD (VIDEO_MODEL_USD) and the legacy model-label remap
-// (LEGACY_VIDEO_MODEL_IDS) live in app/data/video-prices.ts, alongside
-// ENGINE_USD in app/data/engine-prices.ts. The calculation that reads them —
-// for the charge here, the node badge and the run estimate alike — is
-// priceNode in shared/pricing/nodePrice.ts. VIDEO_MODEL_USD is re-exported at
-// the top of this file so existing importers (and the catalog parity test)
-// keep their import path.
+// Video rates (VIDEO_RATES, per second or per clip) live in
+// shared/pricing/videoRates.ts; the legacy model-label remap
+// (LEGACY_VIDEO_MODEL_IDS) in app/data/video-prices.ts, alongside ENGINE_USD
+// in app/data/engine-prices.ts. The calculation that reads them — for the
+// charge here, the node badge and the run estimate alike — is priceNode in
+// shared/pricing/nodePrice.ts. VIDEO_RATES is re-exported at the top of this
+// file for server importers.
 
 // Lazily-built lookup. Never derive this at module top level: a top-level
 // const reading another module's const breaks on import reorder.
@@ -458,8 +460,9 @@ export const MODEL_COSTS: Record<string, ModelCost> = {
   'bytedance/seedance-2.0': { usd: 0.6, credits: 90, confidence: 'estimate', note: 'matches the GenerateVideoNode picker row range-top ($0.60); node price_badge quotes $0.50 — duration-aware pricing is a hardening rider' },
   'philz1337x/clarity-upscaler': { usd: 0.2, credits: 30, confidence: 'estimate', note: 'matches the UpscaleImageNode "Clarity" picker row range-top ($0.20); node price_badge quotes $0.10 — duration/scale-factor variance is a hardening rider' },
   // — Frame Animate (/api/frame/animate) — exact slugs runFal/runReplicate
-  // dispatch with, priced flat off the 5s row in app/data/video-prices.ts
-  // (VIDEO_MODEL_USD). Without these rows, preflightMeter's costForModel
+  // dispatch with, priced flat per 5 s clip (the old per-clip video table,
+  // since retired for shared/pricing/videoRates.ts; Task P5 re-prices these
+  // rows per second from that rate card). Without these rows, preflightMeter's costForModel
   // miss refuses every call ("unpriced model refused"). A duration-aware
   // hold (credits scaled by the chosen clip length) was investigated via
   // setMeterPriceHint but NOT wired — see the comment above the model

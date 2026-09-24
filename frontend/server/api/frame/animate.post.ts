@@ -103,7 +103,8 @@ export default defineEventHandler(async (event) => {
     //
     // Metering (review fix, finding 1): server/utils/priceBook.ts's
     // MODEL_COSTS now carries a flat row for each of the three exact slugs
-    // dispatched below, priced from the 5s row in app/data/video-prices.ts —
+    // dispatched below, priced flat per 5 s clip (Task P5 re-prices them per
+    // second from the rate card, shared/pricing/videoRates.ts) —
     // without those rows preflightMeter (inside runFal) refused
     // every call with "unpriced model refused" before any request could ever
     // resolve credits, let alone reach the model. A duration-aware hold

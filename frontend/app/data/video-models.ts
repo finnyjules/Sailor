@@ -74,8 +74,8 @@ export interface VideoModel {
   // builders call _maybe_set_seed in comfy_api_nodes/video_models.py — keep in
   // sync when adding models. false ⇒ the node hides its seed widget.
   supportsSeed: boolean
-  // Free-form price hint, since video pricing varies wildly by duration /
-  // resolution. The Python side enforces actual cost via Replicate.
+  // Old free-form price note. Not money: no price, badge or label reads it.
+  // Prices come from the rate card, shared/pricing/videoRates.ts.
   priceHint: string | null         // e.g. '$0.40 / 5s' or '~$0.10–0.60'
   aspectRatios: string[]
   defaultAspectRatio: string

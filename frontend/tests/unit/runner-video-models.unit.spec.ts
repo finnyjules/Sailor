@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { RUNNER_VIDEO_MODELS, falVideoFn, durOr } from '~~/server/runner/generators/video'
 import { RUNNER_VIDEO_MODEL_IDS } from '#shared/runner/eligibility'
-import { VIDEO_MODEL_USD } from '~~/app/data/video-prices'
+import { videoRate } from '#shared/pricing/videoRates'
 
 const fixtures = JSON.parse(readFileSync(
   fileURLToPath(new URL('./fixtures/runner-builders.json', import.meta.url)), 'utf8'))
@@ -21,7 +21,7 @@ describe('video request builders match Python', () => {
 describe('video model list', () => {
   it('describes exactly the runner models, each with a price', () => {
     expect(Object.keys(RUNNER_VIDEO_MODELS).sort()).toEqual([...RUNNER_VIDEO_MODEL_IDS].sort())
-    for (const id of RUNNER_VIDEO_MODEL_IDS) expect(typeof VIDEO_MODEL_USD[id]?.usd, id).toBe('number')
+    for (const id of RUNNER_VIDEO_MODEL_IDS) expect(videoRate(id)?.confidence, id).toBe('verified')
   })
 })
 

@@ -630,6 +630,7 @@ async function runVueWorkflow(
     // so the confirm dialog and the node badges read the same widget values.
     const estInput = vueNodesToEstimateInput(
       (vnodes as any[]).filter((v: any) => !targetSet || targetSet.has(String(v.id))),
+      vueCanvasRef.value!.getEdges?.() || [],
     )
     const single = estimateUsdForNodes(estInput, { hosted: hostedShell })
     if (single) {
@@ -2768,7 +2769,7 @@ function updateRunEstimate() {
     return
   }
   const nodes = vueCanvasRef.value?.getNodes?.() || []
-  runEstimate.value = estimateUsdForNodes(vueNodesToEstimateInput(nodes), { hosted: hostedShell })
+  runEstimate.value = estimateUsdForNodes(vueNodesToEstimateInput(nodes, vueCanvasRef.value?.getEdges?.() || []), { hosted: hostedShell })
 }
 
 /** Per-iteration line in the confirm dialog. Hosted divides the CREDITS figure

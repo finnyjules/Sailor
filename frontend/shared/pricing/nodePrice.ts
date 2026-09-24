@@ -10,18 +10,27 @@
  *
  * `inputs` is the node's WHOLE input map — widget name → value, as the API
  * prompt carries it (`model_options` may be the JSON text or the parsed
- * object). Today only `model` moves the price; later tasks price on the
- * resolution, clip length and sound setting read from the same map, so every
- * caller already passes all of it.
+ * object).
  *
- * Figures come from the same catalogues as before (IMAGE_MODELS.pricePerImage,
- * VIDEO_MODEL_USD with its legacy remap, ENGINE_USD). Relative imports on
- * purpose: this module is loaded by Nitro, the Vue app and vitest alike.
+ * Video (GenerateVideoNode, FilmShotNode) is the first service's rate × the
+ * seconds the request carries, at the resolution and sound setting it carries
+ * (videoRates.ts × videoSettings.ts). An input that is LINKED rather than set
+ * (the API prompt carries a `[nodeId, slot]` reference, whose value is only
+ * known at run time) is priced at its most expensive: a linked duration at the
+ * model's longest clip, linked `model_options` at the card's dearest rate.
+ * The badge marks linked widgets the same way (app/lib/costEstimate.ts), so
+ * the badge and the charge agree.
+ *
+ * Images and the engine pickers read IMAGE_MODELS.pricePerImage and
+ * ENGINE_USD. Relative imports on purpose: this module is loaded by Nitro,
+ * the Vue app and vitest alike.
  */
 import { IMAGE_MODELS } from '../../app/data/image-models'
-import { VIDEO_MODEL_USD, LEGACY_VIDEO_MODEL_IDS } from '../../app/data/video-prices'
+import { LEGACY_VIDEO_MODEL_IDS } from '../../app/data/video-prices'
 import { ENGINE_USD } from '../../app/data/engine-prices'
 import { creditsForUsd } from './markup'
+import { videoMaxUsd, videoRate, videoUsd } from './videoRates'
+import { effectiveVideoSettings, maxVideoSeconds } from './videoSettings'
 
 export type NodeInputs = Record<string, unknown>
 
@@ -50,6 +59,30 @@ function imagePriceFor(id: string): number | null | undefined {
   return _imagePrices.get(id)
 }
 
+const hasOwn = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k)
+
+/** An API-prompt link reference (`[nodeId, slot]`): the value arrives at run time. */
+export function isLinkedInput(v: unknown): boolean {
+  return Array.isArray(v)
+}
+
+/** The video model a node's `model` value runs: the legacy labels still remap. */
+export function videoModelIdFor(model: string): string {
+  return hasOwn(LEGACY_VIDEO_MODEL_IDS, model) ? LEGACY_VIDEO_MODEL_IDS[model]! : model
+}
+
+/** Dollars for a video node as configured, or null for an unknown model. */
+function videoNodeUsd(model: string, inputs: NodeInputs): number | null {
+  const id = videoModelIdFor(model)
+  if (!videoRate(id)) return null
+  const durationLinked = isLinkedInput(inputs.duration)
+  const s = effectiveVideoSettings(id, inputs.duration, inputs.aspect_ratio, isLinkedInput(inputs.model_options) ? {} : inputs.model_options)
+  if (!s) return null
+  if (durationLinked) s.seconds = maxVideoSeconds(id)!
+  if (isLinkedInput(inputs.model_options)) return videoMaxUsd(id, s.seconds)
+  return videoUsd(id, s)
+}
+
 /** A priced node, or the reason it can't be priced (the server refuses it). */
 export type NodePrice =
   | { usd: number; credits: number }
@@ -73,16 +106,16 @@ export function priceNode(classType: string, inputs: NodeInputs | null | undefin
     usd = price
   }
   else if (classType === 'GenerateVideoNode' || classType === 'FilmShotNode') {
-    const id = LEGACY_VIDEO_MODEL_IDS[model] ?? model
-    const row = VIDEO_MODEL_USD[id]
-    if (!row) return { refused: `unknown video model id ${model}` }
-    usd = row.usd
+    const price = videoNodeUsd(model, inputs!)
+    if (price == null) return { refused: `unknown video model id ${model}` }
+    usd = price
   }
   else {
     // Engine pickers (UpscaleImageNode / EnhanceDetailNode): the `model`
     // widget names an engine, not a catalogue id.
-    const price = ENGINE_USD[classType]?.[model]
-    if (price == null) return { refused: `unknown engine ${model}` }
+    const table = ENGINE_USD[classType]
+    const price = table && hasOwn(table, model) ? table[model] : undefined
+    if (typeof price !== 'number') return { refused: `unknown engine ${model}` }
     usd = price
   }
   return { usd, credits: creditsForUsd(usd) }
