@@ -194,8 +194,12 @@ const READ_SURFACE_FILES: Record<string, ReadFileEntry> = {
  * own file, so they never appear as an annotated reader: LoadImageOutput
  * inherits LoadImage.load_image, and Timeline reads image clips via
  * os.path.join(get_input_directory(), path) (nodes_timeline.py).
+ * GenerateImageNode / RestyleFromImageNode read their moodboard `style_refs`
+ * files via os.path.join(get_input_directory(), folder, name) in
+ * comfy_api_nodes/nodes_replicate.py (_moodboard_ref_data_urls) — outside the
+ * walked roots, so that read site is pinned by its own test below.
  */
-const NON_ANNOTATED_READERS = ['LoadImageOutput', 'Timeline']
+const NON_ANNOTATED_READERS = ['LoadImageOutput', 'Timeline', 'GenerateImageNode', 'RestyleFromImageNode']
 
 describe('coverage guard (A) — every engine file-READ site is accounted for', () => {
   it('the live get_annotated_filepath per-file counts match the annotated subset (drift → fail)', () => {
@@ -233,6 +237,15 @@ describe('coverage guard (A) — every engine file-READ site is accounted for', 
     for (const { readers } of Object.values(READ_SURFACE_FILES)) for (const n of readers) backed.add(n)
     for (const ct of Object.keys(GRAPH_FILE_READERS)) {
       expect(backed.has(ct), `${ct} is in GRAPH_FILE_READERS but has no documented read site`).toBe(true)
+    }
+  })
+
+  it('the moodboard read site the style_refs entries model still exists (nodes_replicate.py)', () => {
+    const src = readFileSync(join(REPO, 'comfy_api_nodes/nodes_replicate.py'), 'utf8')
+    expect(src).toMatch(/def _moodboard_ref_data_urls\(/)
+    expect(src).toMatch(/folder_paths\.get_input_directory\(\)/)
+    for (const ct of ['GenerateImageNode', 'RestyleFromImageNode']) {
+      expect(src, `${ct} must still parse style_refs`).toMatch(new RegExp(`node_id="${ct}"`))
     }
   })
 

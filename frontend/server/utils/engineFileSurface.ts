@@ -30,6 +30,7 @@
  * injection (injectOutputSubfolder in meterGraphRun.ts).
  */
 import { OUTPUT_CLASS_TYPES } from './priceBook'
+import { moodboardFiles } from '../runner/inputs'
 
 /** How a file input carries its filename(s). */
 export type FileRefSemantics = 'input' | 'output' | 'either'
@@ -42,7 +43,7 @@ export type FileRefSemantics = 'input' | 'output' | 'either'
 export type FileReaderSpec =
   | { input: string, shape: 'string', semantics: FileRefSemantics }
   | { input: string, shape: 'dict', keys: string[], semantics: FileRefSemantics }
-  | { input: string, shape: 'json', jsonPath: 'rendered' | 'timeline-clips', semantics: FileRefSemantics }
+  | { input: string, shape: 'json', jsonPath: 'rendered' | 'timeline-clips' | 'moodboard', semantics: FileRefSemantics }
 
 /**
  * class_type → the file-carrying inputs the engine reads on execute. Evidence
@@ -111,6 +112,13 @@ export const GRAPH_FILE_READERS: Record<string, FileReaderSpec[]> = {
   // routing, so semantics is `input` and the literal value is vetted (an
   // absolute path or a foreign subfolder is refused).
   Timeline: [{ input: 'edit_state', shape: 'json', jsonPath: 'timeline-clips', semantics: 'input' }],
+  // comfy_api_nodes/nodes_replicate.py — the hidden `style_refs` widget is a
+  // moodboard JSON {"folder": "moodboard_<ms>", "files": [...]}; the node reads
+  // ≤3 of those files from input/<folder>/ (_moodboard_ref_data_urls). The
+  // folder name is a timestamp, so it is guessable — every named file must be
+  // the caller's own upload, the same rule the runner applies (runner/inputs.ts).
+  GenerateImageNode: [{ input: 'style_refs', shape: 'json', jsonPath: 'moodboard', semantics: 'input' }],
+  RestyleFromImageNode: [{ input: 'style_refs', shape: 'json', jsonPath: 'moodboard', semantics: 'input' }],
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +226,15 @@ export function extractFileRefs(spec: FileReaderSpec, value: unknown): string[] 
   // json
   if (typeof value !== 'string') return null
   if (value === '') return []
+  // A moodboard payload goes through the runner's port of the engine's own
+  // parser (_parse_style_refs), so we vet exactly the files the node would
+  // read: a payload the engine would ignore (bad folder, no image files) reads
+  // nothing and names nothing. Each file is `<folder>/<name>`, which the
+  // caller's input-ownership check splits back into canonicalUploadKey's
+  // (subfolder, filename) — the key the moodboard upload route records.
+  if (spec.jsonPath === 'moodboard') {
+    return moodboardFiles(value).map(f => `${f.subfolder}/${f.filename}`)
+  }
   let parsed: unknown
   try {
     parsed = JSON.parse(value)
