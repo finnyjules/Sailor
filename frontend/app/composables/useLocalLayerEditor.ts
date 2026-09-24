@@ -34,6 +34,7 @@ import type { BrandKit } from '~~/shared/brand/types'
 import { readGrid, gridProperty } from '~/lib/frame/gridConfig'
 import { resolveGrid, type FrameGrid, type Rect } from '~/lib/frame/grid'
 import { readFrameSizeState, writeFrameSizeState, type FrameSizeState } from '~/lib/frame/frameSize'
+import { readFrameLight, sanitizeLight, type FrameLight } from '~/lib/compositor/frameLight'
 
 interface EditorOpts {
   node: () => any                       // the compositor node (reactive)
@@ -238,6 +239,17 @@ export function useLocalLayerEditor(opts: EditorOpts) {
   }
   function setPostEffects(fx: PostEffect[]) { recordHistory(); writeFx(fx) }
 
+  // Doc-level light for Gold foil / Spot UV. Absent key = the default light (readFrameLight).
+  const frameLight = computed<FrameLight>(() => readFrameLight(node()?.data?.properties))
+  function writeLight(l: FrameLight | undefined) {
+    const n = node(); if (!n) return
+    if (!n.data.properties) n.data.properties = {}
+    if (!l) delete (n.data.properties as any).sailor_localLight
+    else (n.data.properties as any).sailor_localLight = sanitizeLight(l)
+  }
+  /** `record: false` while a drag is under way — the caller records once at pointer-down. */
+  function setFrameLight(l: FrameLight, record = true) { if (record) recordHistory(); writeLight(l) }
+
   // Doc-level grid config (layout guide + snap source). Persisted like background/
   // postEffects: on node properties, absent-key defaulted via readGrid so old
   // frames (no sailor_localGrid at all) resolve to mode:'off'. Not part of the
@@ -315,11 +327,11 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     if (!n.data.properties) n.data.properties = {}
     ;(n.data.properties as any).sailor_posterState = next
   }
-  type Snapshot = { layers: LocalLayer[]; order: string[]; bg: Paint | undefined; fx: PostEffect[]; groups: LayerGroup[]; frameTemplates: unknown[]; motion?: MotionSnap; frameSize?: FrameSizeState; layout?: LayoutSnap }
+  type Snapshot = { layers: LocalLayer[]; order: string[]; bg: Paint | undefined; fx: PostEffect[]; groups: LayerGroup[]; frameTemplates: unknown[]; motion?: MotionSnap; frameSize?: FrameSizeState; layout?: LayoutSnap; light?: FrameLight }
   const HISTORY_CAP = 120
   const _past = ref<Snapshot[]>([])
   const _future = ref<Snapshot[]>([])
-  function snapshot(): Snapshot { return { layers: JSON.parse(JSON.stringify(localLayers.value)), order: [...readOrder()], bg: background.value, fx: JSON.parse(JSON.stringify(postEffects.value)), groups: JSON.parse(JSON.stringify(localGroups.value)), frameTemplates: JSON.parse(JSON.stringify((node()?.data?.properties as any)?.sailor_frametemplates ?? [])), motion: readMotionSnap(), frameSize: frameSizeSnap(), layout: readLayoutSnap() } }
+  function snapshot(): Snapshot { return { layers: JSON.parse(JSON.stringify(localLayers.value)), order: [...readOrder()], bg: background.value, fx: JSON.parse(JSON.stringify(postEffects.value)), groups: JSON.parse(JSON.stringify(localGroups.value)), frameTemplates: JSON.parse(JSON.stringify((node()?.data?.properties as any)?.sailor_frametemplates ?? [])), motion: readMotionSnap(), frameSize: frameSizeSnap(), layout: readLayoutSnap(), light: (node()?.data?.properties as any)?.sailor_localLight } }
   function restore(s: Snapshot) {
     commit(s.layers); writeOrder([...s.order]); writeBg(s.bg); writeFx(s.fx?.length ? s.fx : undefined); writeGroups([...s.groups])
     const n = node()
@@ -331,6 +343,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     if (s.layout) writeLayoutSnap(s.layout)
     const nd = node()?.data
     if (s.frameSize && nd) writeFrameSizeState(nd, s.frameSize)
+    writeLight(s.light)
   }
   function frameSizeSnap(): FrameSizeState | undefined { const nd = node()?.data; return nd ? readFrameSizeState(nd) : undefined }
   /** Bumped by every history change (record, undo, redo): a caller holding a value from before an
@@ -1255,6 +1268,7 @@ export function useLocalLayerEditor(opts: EditorOpts) {
     background, setBackground,
     writeBackground: writeBg, // non-recording: for callers that batch a layers write + background write under ONE recordHistory()
     postEffects, setPostEffects,
+    frameLight, setFrameLight,
     grid, setGrid,
     undo, redo, canUndo, canRedo, historyRev,
     selectedIds, selectedLayers, toggleSelect, applyBoolean, alignSelected, alignToFrame, nudgeSelection, duplicateSelection, handleEditorKey,
