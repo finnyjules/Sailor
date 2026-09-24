@@ -24,3 +24,22 @@ export function ringsBBoxOfD(d: string): { w: number; h: number } {
   for (const r of ringsFromD(d)) for (const p of r) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]) }
   return Number.isFinite(x0) ? { w: x1 - x0, h: y1 - y0 } : { w: 0, h: 0 }
 }
+
+export interface MorphPlacement { x: number; y: number; rotation?: number; skewX?: number; skewY?: number }
+
+/**
+ * A's placement → B's at `t`: x/y/skews linear (missing skew = 0), rotation along the SHORTEST
+ * turn (difference normalised into (−180, 180]). Exact at the ends: t ≤ 0 is A's, t ≥ 1 B's.
+ */
+export function lerpPlacement(a: MorphPlacement, b: MorphPlacement, t: number): Required<MorphPlacement> {
+  const ra = a.rotation ?? 0, rb = b.rotation ?? 0
+  if (t <= 0) return { x: a.x, y: a.y, rotation: ra, skewX: a.skewX ?? 0, skewY: a.skewY ?? 0 }
+  if (t >= 1) return { x: b.x, y: b.y, rotation: rb, skewX: b.skewX ?? 0, skewY: b.skewY ?? 0 }
+  let dr = (((rb - ra) % 360) + 540) % 360 - 180
+  if (dr === -180) dr = 180
+  const lin = (p: number, q: number) => p + (q - p) * t
+  return {
+    x: lin(a.x, b.x), y: lin(a.y, b.y), rotation: ra + dr * t,
+    skewX: lin(a.skewX ?? 0, b.skewX ?? 0), skewY: lin(a.skewY ?? 0, b.skewY ?? 0),
+  }
+}

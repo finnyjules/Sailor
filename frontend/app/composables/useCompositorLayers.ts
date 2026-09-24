@@ -27,7 +27,7 @@ import type { FrameMotion } from '~/lib/motion/types'
 import { applyEffectDialTracks, type EffectDialTrack } from '~/lib/motion/effectTracks'
 import { applyMotionxTracks, applyTextBehaviours, applyRevealBehaviours, applyMorphBehaviours, type TextMotion, type MotionMorph } from '~/lib/motionx/adapter/frame'
 import { prepareMorph } from '~/lib/vector/morphPieces'
-import { blendMorphPaint, morphFillOf, ringsBBoxOfD } from '~/lib/compositor/morphDraw'
+import { blendMorphPaint, lerpPlacement, morphFillOf, ringsBBoxOfD } from '~/lib/compositor/morphDraw'
 import type { StoredBehaviour, Track as MotionxTrack } from '~/lib/motionx'
 import { beginReveal, finishReveal, type RevealPass } from '~/lib/motionx/reveal/paint'
 import { drawRevealShaderStyle, revealShaderReady } from '~/lib/motionx/reveal/paintPixels'
@@ -282,7 +282,7 @@ import { applyGeometry, longShadowBody, type ResolvedSibling } from '~/lib/compo
 // referencing layer's frame. PRESENT-BUT-UNCONSUMED until F3 Task 2 (boolean) — no current
 // geometry kind carries a `refLayerId`, so the resolver is never invoked and every render stays
 // byte-identical. See `~/lib/compositor/siblingRef.ts`.
-import { makeSiblingOutlineResolver, type SiblingResolver } from '~/lib/compositor/siblingRef'
+import { makeSiblingOutlineResolver, transformPathD, type SiblingResolver } from '~/lib/compositor/siblingRef'
 
 // Layer effects (Figma-style) live in ~/lib/compositor/effectStack, which owns the whole
 // vocabulary (kinds, canonical order, the read-through that turns any layer into an ordered
@@ -1501,41 +1501,52 @@ function buildSiblingResolver(localLayers: LocalLayer[], W: number, H: number): 
 
 /**
  * Frame Morph (spec 2026-09-23): swap every layer carrying `motionMorph` for a transient PATH
- * clone whose outline is the morph, at that amount, between A's computed outline and its target's
- * outline resolved into A's frame (so it lands where B really is). A's placement, effects (minus
- * geometry ones — already inside its computed outline) and blend stay; fill and opacity blend
- * toward B's; strokes are dropped for the bar (fill + A's non-geometry effects only). Either
- * outline missing (photo, system font, decoration, font still loading) → cross-fade: A fades
- * out, the target fades in. Same references back when nothing morphs.
+ * clone that turns A into its target B over A's out bar.
+ *
+ * Model (fix round 1): the two SHAPES morph in their own local frames and PLACEMENT is
+ * interpolated separately. A's computed outline (in A-local px) morphs into B's computed outline
+ * (in B-local px, built with NO sibling resolver — the cycle guard), so the `prepareMorph` cache
+ * key stays stable across frames while only placements animate (transforming B into A's frame
+ * would re-key — and re-run the ~100–300 ms analysis — every frame either one moved). The clone
+ * draws that px-unit `d` at `scale = 1/W`, positioned by `lerpPlacement(A, B, amount)`.
+ *
+ * A's effects (minus geometry ones — already inside its computed outline) and blend stay; fill
+ * and opacity blend toward B's; strokes are dropped for the bar. Long shadows are geometry-region
+ * but painted separately, so they sit out the bar. Either side not outlineable (photo, decorated
+ * text, system font, font still loading) or an empty morph → cross-fade: A fades out, B fades in.
+ * Same references back when nothing morphs.
  *
  * Runs AFTER the copies-stagger expansion, so a staggered cloner's per-copy items all share one
  * layer id; each keeps its own `motionCopy` when swapped, or every copy item would redraw the
- * whole array.
+ * whole array. `resolver` is only for A's OWN geometry effects that reference a sibling.
  */
 function resolveMorphs(
   items: StackItem[], localLayers: LocalLayer[], W: number, resolver: SiblingResolver<LocalLayer>,
 ): { items: StackItem[]; localLayers: LocalLayer[] } {
   const swaps = new Map<string, LocalLayer>()
+  const toPx = (d: string, unit: number) => (unit === 1 ? d : transformPathD(d, [unit, 0, 0, unit, 0, 0]))
   for (const layer of localLayers) {
     const mm = (layer as unknown as { motionMorph?: MotionMorph }).motionMorph
     if (!mm) continue
     const target = localLayers.find(l => `l:${l.id}` === mm.target)
     if (!target) continue
-    const dA = computedOutlineD(layer, W, (key) => resolver(key, layer))
-    const sib = resolver(mm.target, layer)
+    const oA = canTakeGeometry(layer) ? computedOutlineD(layer, W, (key) => resolver(key, layer)) : null
+    const oB = canTakeGeometry(target) ? computedOutlineD(target, W) : null
+    const d = oA && oB
+      ? prepareMorph(toPx(oA, outlineUnitPx(layer, W)), toPx(oB, outlineUnitPx(target, W)), mm.style)(mm.amount)
+      : ''
     const bare = { ...layer, motionMorph: undefined } as unknown as LocalLayer
-    if (!dA || !sib) {
+    if (!d) {
       swaps.set(layer.id, { ...bare, opacity: (layer.opacity ?? 1) * (1 - mm.amount) } as LocalLayer)
       swaps.set(target.id, { ...target, motionHidden: undefined, opacity: (target.opacity ?? 1) * mm.amount } as unknown as LocalLayer)
       continue
     }
-    const d = prepareMorph(dA, sib.d, mm.style)(mm.amount)
-    const unit = outlineUnitPx(layer, W)
     const stack = effectStackOf(layer).filter(e => regionOf(e.type) !== 'geometry')
     swaps.set(layer.id, {
       ...bare,
       ...writeStackToLayer(stack),
-      kind: 'path', d, bbox: ringsBBoxOfD(d), scale: unit / W, fillRule: 'nonzero',
+      ...lerpPlacement(layer, target, mm.amount),
+      kind: 'path', d, bbox: ringsBBoxOfD(d), scale: 1 / W, fillRule: 'nonzero',
       fill: blendMorphPaint(morphFillOf(layer as never), morphFillOf(target as never), mm.amount),
       stroke: '', strokeWidth: 0, strokes: undefined,
       opacity: (layer.opacity ?? 1) + ((target.opacity ?? 1) - (layer.opacity ?? 1)) * mm.amount,
@@ -5995,10 +6006,10 @@ export function paintLayerStack(
   // today — no geometry kind carries a `refLayerId` — so this changes no pixels.
   const siblingResolver = buildSiblingResolver(localLayers, W, H)
   _siblingResolveFor = (self: LocalLayer) => (key: string) => siblingResolver(key, self)
-  // Frame Morph: swap morphing layers for their transient path clone. The resolver keeps the
-  // PRE-swap list, so the target's outline and placement are its own.
-  ;({ items, localLayers } = resolveMorphs(items, localLayers, W, siblingResolver))
   try {
+    // Frame Morph: swap morphing layers for their transient path clone — inside the try, so a
+    // throw still clears `_siblingResolveFor`. The resolver keeps the PRE-swap list.
+    ;({ items, localLayers } = resolveMorphs(items, localLayers, W, siblingResolver))
     return withFieldFrame(shaderRequests, (frozenCount, token) => {
       _fieldCtx.token = token   // resolveShaderFill reads this to pass into every resolveField call
 
