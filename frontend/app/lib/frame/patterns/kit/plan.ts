@@ -777,7 +777,11 @@ function accentCopyFor(def: LayoutDef, layers: LocalLayer[], targets: RoleTarget
  *  - R14: a Stage 4 layout hides the second image it does not place, and names it.
  *  The user's own hiding (untracked `visible`) is theirs: not named. A layer an earlier layout hid
  *  that holds no role any more is named as `'unused'`; a SHOWING layer with no role in either view
- *  (untagged, or tagged Not used) is left where it is. */
+ *  is left where it is — unless the user tagged it Not used:
+ *  - Ruling D3 ("Gone from the Frame"): a layer TAGGED Not used (`tags[id] === 'unused'`) that is
+ *    showing is HIDDEN by every layout (tracked, so a later layout that places it — after an
+ *    untag — shows it again) and named as `'unused'`. Only the explicit tag: a Frame with no tags
+ *    plans exactly as before. */
 function carriedOver(p: Prepared, a: LayoutPlanArgs, ops: LayerOp[], z: number): { hide: LayerOp[]; named: NotPlaced[] } {
   const placed = new Set(ops.filter(o => !o.hidden && !o.insert).map(o => o.target))
   const hiddenHere = new Set(ops.filter(o => o.hidden).map(o => o.target))
@@ -790,6 +794,7 @@ function carriedOver(p: Prepared, a: LayoutPlanArgs, ops: LayerOp[], z: number):
   const roleOf = new Map(contentRole)
   for (const r of ROLES) { const id = p.baseElements[r]?.id; if (id && !roleOf.has(id)) roleOf.set(id, r) }
   const images = p.layers.filter(l => l.kind === 'image' && !isOwned(l as { owner?: { by: string } }))
+  const tags = (a.props?.sailor_posterState as { tags?: Record<string, string> } | undefined)?.tags
   const hide: LayerOp[] = []
   const named: NotPlaced[] = []
   for (const l of p.layers) {
@@ -801,11 +806,14 @@ function carriedOver(p: Prepared, a: LayoutPlanArgs, ops: LayerOp[], z: number):
     const showing = tracked.visible !== false
     // A line an earlier layout hid is named whether or not it still holds a role (an untag, or
     // "Not used", can take it away): by its own text, as `'unused'` — never hidden in silence.
-    const role: NotPlaced['role'] | undefined = l.kind === 'image'
-      ? (l.id === p.contentRead.roles.image2 ? 'image2' : layoutHid ? 'unused' : undefined)
-      : roleOf.get(l.id) ?? (layoutHid ? 'unused' : undefined)
+    // Ruling D3: tagged Not used — gone from the Frame (a showing one is hidden below).
+    const tagUnused = tags?.[l.id] === 'unused'
+    const role: NotPlaced['role'] | undefined = tagUnused ? 'unused'
+      : l.kind === 'image'
+        ? (l.id === p.contentRead.roles.image2 ? 'image2' : layoutHid ? 'unused' : undefined)
+        : roleOf.get(l.id) ?? (layoutHid ? 'unused' : undefined)
     if (!role) continue
-    const strand = showing && (l.id === image2 || (prevWasStage4 && contentRole.has(l.id)))
+    const strand = showing && (tagUnused || l.id === image2 || (prevWasStage4 && contentRole.has(l.id)))
     if (!layoutHid && !strand) continue
     if (strand) hide.push({ target: l.id, kind: l.kind === 'image' ? 'image' : 'text', hidden: true, z })
     if (l.kind === 'image') {

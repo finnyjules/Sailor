@@ -124,7 +124,7 @@ describe('Content section — a tag changes the library', () => {
     expect(offeredIds(vary)).not.toContain('perfReview')
   })
 
-  it('Not used takes a line out of the layouts: it is left exactly where it is', async () => {
+  it('Not used takes a line out of the layouts: it is left where it is, hidden (ruling D3)', async () => {
     const { props, vary } = realHarness(reviewFrame())
     const original = JSON.parse(JSON.stringify((props.sailor_localLayers as LocalLayer[]).find(l => l.id === 'c')))
     await idle()
@@ -132,8 +132,12 @@ describe('Content section — a tag changes the library', () => {
     expect(placed).not.toEqual(original)   // placed by the layout while Automatic
     vary.setTag('c', 'unused')
     await idle()
-    const left = vary.library.value.find(it => it.id === 'statement')!.plan!.layers.find(l => l.id === 'c')
-    expect(left).toEqual(original)
+    const left = vary.library.value.find(it => it.id === 'statement')!.plan!.layers.find(l => l.id === 'c') as LocalLayer & { layoutPrev?: unknown }
+    // Not moved, not restyled: only hidden, and that tracked (a later layout that places it shows it).
+    const { visible, layoutPrev, ...rest } = left
+    expect(rest).toEqual(original)
+    expect(visible).toBe(false)
+    expect(layoutPrev).toEqual({ visible: { was: null, set: false } })          // it had no visibility of its own
   })
 })
 
@@ -379,18 +383,50 @@ describe('Task 6 — a tag change applies the Frame\'s layout again, in the same
     expect(props.sailor_posterState.roles.title).toBe('c')
   })
 
-  it('Not used: the layout is applied again without that line (it holds no role), in the same step', async () => {
+  it('Not used (ruling D3): the fine print is gone from the Frame at once and listed; one undo restores tag and visibility; untagging brings it back', async () => {
     const { props, ed, vary } = realHarness(reviewFrame())
     await idle()
     vary.select('statement'); await nextTick()
     expect(props.sailor_posterState.roles.caption).toBe('c')
+    expect(layerOf(props, 'c').visible).not.toBe(false)
     const applied = layersOf(props)
     vary.setTag('c', 'unused')
     expect(props.sailor_posterState.roles.caption).toBeUndefined()
+    expect(layerOf(props, 'c').visible).toBe(false)                                   // hidden at once
+    expect((layerOf(props, 'c') as { layoutPrev?: { visible?: { set: unknown } } }).layoutPrev?.visible?.set).toBe(false)   // tracked
+    await idle()
+    expect(vary.candidates.value[vary.index.value]!.plan.notPlaced).toContainEqual({ role: 'unused', text: (layerOf(props, 'c') as { text?: string }).text })
+    // One undo: the tag and the visibility together.
     ed.undo(); await nextTick()
     expect(props.sailor_posterState.roles.caption).toBe('c')
     expect(props.sailor_posterState.tags).toBeUndefined()
     expect(layersOf(props)).toBe(applied)
+    // Tag it again, then back to Automatic: the layout places it and shows it again.
+    ed.redo(); await nextTick()
+    expect(layerOf(props, 'c').visible).toBe(false)
+    vary.setTag('c', null)
+    expect(layerOf(props, 'c').visible).not.toBe(false)
+    expect(props.sailor_posterState.roles.caption).toBe('c')
+  })
+
+  it('D3: a Frame with no tags plans byte-identically (the same plans as a Frame whose only tag names no layer)', async () => {
+    const plain = realHarness(reviewFrame())
+    const other = realHarness(reviewFrame(), { sailor_posterState: { tags: { nope: 'unused' } } })
+    await idle()
+    expect(plain.vary.library.value.length).toBeGreaterThan(10)
+    expect(JSON.stringify(other.vary.library.value)).toBe(JSON.stringify(plain.vary.library.value))
+  })
+
+  it('D3 only takes an explicit tag: an untagged line with no role is left as it is (shown, not listed)', async () => {
+    const { props, vary } = realHarness(reviewFrame())
+    await idle()
+    vary.select('statement'); await nextTick()
+    expect(Object.values(props.sailor_posterState.roles)).not.toContain('q')           // no role
+    expect(layerOf(props, 'q').visible).not.toBe(false)
+    expect(vary.candidates.value[vary.index.value]!.plan.notPlaced.some(n => n.text.includes('Lightest'))).toBe(false)
+    // Tagged Not used, it goes; back to Automatic, it holds no role — it stays hidden, named (R15).
+    vary.setTag('q', 'unused')
+    expect(layerOf(props, 'q').visible).toBe(false)
   })
 
   it('the variation kept is the one on show when it is still offered', async () => {

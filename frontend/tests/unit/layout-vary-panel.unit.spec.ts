@@ -117,3 +117,22 @@ describe('LayoutVaryPanel — lines not shown', () => {
     expect(wrap.find('[data-testid="layout-not-shown"]').exists()).toBe(false)
   })
 })
+
+// Ruling D4: the applied layout has no variation left after a tag change.
+describe('LayoutVaryPanel — a layout that no longer fits (D4)', () => {
+  const SENTENCE = 'This layout no longer fits the Frame\'s lines.'
+  const at = (p: Record<string, unknown>) => mount(LayoutVaryPanel, { props: { ...base, libraryDone: true, ...p }, global: { stubs } })
+  it('applied, planned, and no variation: the sentence, where the count and description would be', () => {
+    const wrap = at({})
+    expect(wrap.get('[data-testid="layout-vary-no-longer-fits"]').text()).toBe(SENTENCE)
+    expect(wrap.find('[data-testid="layout-vary-count"]').exists()).toBe(false)
+    expect(wrap.find('[data-testid="layout-vary-did"]').exists()).toBe(false)
+    expect(wrap.get('[data-testid="layout-vary-name"]').text()).toBe('Offer')
+  })
+  it('not while it fits, not before an apply, not while the library is still planning', () => {
+    expect(at({ candidates: [cand([])] }).find('[data-testid="layout-vary-no-longer-fits"]').exists()).toBe(false)
+    expect(at({ candidates: [cand([])] }).text()).toContain('The product fills the page.')
+    expect(at({ applied: false }).find('[data-testid="layout-vary-no-longer-fits"]').exists()).toBe(false)
+    expect(at({ libraryDone: false }).find('[data-testid="layout-vary-no-longer-fits"]').exists()).toBe(false)
+  })
+})
