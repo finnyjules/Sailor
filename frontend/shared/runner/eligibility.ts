@@ -30,6 +30,29 @@ export interface RunnerNodeRule {
 }
 
 /**
+ * The image models whose Python primary is Replicate, that have a price and
+ * are not SVG (family `replicate-image`, Task B4). Left out: the three *-svg
+ * models (decision D4: Python cannot decode SVG either) and reve-create
+ * (unpriced). The flux-2-* models are here: Replicate is their Python
+ * primary, fal only their fallback (D5).
+ */
+export const RUNNER_REPLICATE_IMAGE_MODEL_IDS = [
+  'flux-1.1-pro-ultra', 'flux-pro', 'flux-dev',
+  'flux-2-max', 'flux-2-pro', 'flux-2-flex', 'flux-2-klein-4b', 'flux-2-dev',
+  'imagen-4-ultra', 'imagen-4', 'imagen-4-fast', 'imagen-3', 'imagen-3-fast',
+  'ideogram-v2', 'ideogram-v2a-turbo',
+  'seedream-4.5', 'seedream-3',
+  'recraft-v4-pro', 'recraft-v4', 'recraft-v3',
+  'stable-diffusion-3.5-large', 'stable-diffusion-3.5-large-turbo', 'stable-diffusion-3.5-medium',
+  'gpt-image-2', 'gpt-image-1.5',
+  'qwen-image', 'hunyuan-image-3', 'grok-imagine',
+  'flux-fast', 'p-image', 'wan-2.2-image-pruna',
+  'bria-fibo', 'bria-image-3.2',
+  'photon', 'photon-flash',
+  'minimax-image-01',
+] as const
+
+/**
  * The node classes (or extra models of a runner class) the families add,
  * keyed by class_type. For GenerateImageNode / GenerateVideoNode a row only
  * ADDS models; the models the runner takes without any family stay as they
@@ -37,19 +60,30 @@ export interface RunnerNodeRule {
  */
 export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // ── fal-edit (Task B2): fal only, at most two linked pictures ──
+  // Text widgets the runner reads as plain text must not be wired: a linked
+  // one would be read as blank.
   EditImageNode: {
     models: { 'Nano Banana 2': 'fal-edit', 'Flux Kontext Pro': 'fal-edit', 'Flux 2 Pro': 'fal-edit' },
     mustLink: ['input_image'],
+    mustNotLink: ['prompt'],
   },
   DevelopImageNode: { family: 'fal-edit', mustLink: ['input_image'] },
   // With no `image` Python makes a blank no-op; the runner leaves that to Python.
-  RelightNode: { family: 'fal-edit', mustLink: ['image'] },
+  RelightNode: { family: 'fal-edit', mustLink: ['image'], mustNotLink: ['light', 'instructions'] },
   // The Nano Banana mode is Replicate (Task B5). A linked keep_subject needs a
   // local mask composite after the call, which the runner does not do.
   BlendSceneNode: {
     models: { 'Flux Kontext Pro': 'fal-edit', 'Flux 2 Pro': 'fal-edit' },
     mustLink: ['image'],
-    mustNotLink: ['keep_subject'],
+    mustNotLink: ['keep_subject', 'prompt'],
+  },
+  // ── replicate-image (Task B4): the Replicate-primary image models ──
+  // Only ADDS these models; the fal ones stay as they are. The Idea socket
+  // (prompt_in) and the taste wire (style_in) come from nodes the runner does
+  // not run, so a wired one goes to Python.
+  GenerateImageNode: {
+    models: Object.fromEntries(RUNNER_REPLICATE_IMAGE_MODEL_IDS.map(id => [id, 'replicate-image' as const])),
+    mustNotLink: ['prompt', 'model_options', 'style_block', 'style_refs', 'prompt_in', 'style_in'],
   },
 }
 

@@ -3,14 +3,14 @@
  *   provider — send a request to a provider (fal or Replicate), save what comes back
  *   pass     — hand files on (result cards, an open Gate)
  *   pause    — a closed Gate: stop this branch and show what reached it
- * Mirrors the Python nodes (GenerateImageNode, GenerateVideoNode, Gate,
+ * Mirrors the Python nodes (GenerateImageNode on fal or Replicate, GenerateVideoNode, Gate,
  * Image, Video, and the fal-edit family: EditImageNode, DevelopImageNode,
  * RelightNode, BlendSceneNode) closely enough that the same workflow gives
  * the same result.
  */
 import { GATE_CLASS, isLink, type ApiPrompt } from '#shared/runner/graph'
 import { resolveVideoModelId } from '#shared/runner/eligibility'
-import { RUNNER_IMAGE_MODELS, composeImagePrompt, imageAppFor } from './generators/image'
+import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS, composeImagePrompt, imageAppFor } from './generators/image'
 import { RUNNER_VIDEO_MODELS, falVideoFn } from './generators/video'
 import { asInt, asText, parseJsonObject, pyTruthy } from './generators/opts'
 import {
@@ -63,6 +63,29 @@ export async function planNode(ctx: PlanContext): Promise<NodePlan> {
 
   switch (node.class_type) {
     case 'GenerateImageNode': {
+      // A model that isn't one of the fal ids goes to Replicate, its Python
+      // primary (family replicate-image). None of these takes moodboard
+      // pictures, so style_refs is ignored, as Python's _accepts_refs does.
+      const onReplicate = RUNNER_REPLICATE_IMAGE_MODELS[String(inputs.model)]
+      if (!RUNNER_IMAGE_MODELS[String(inputs.model)] && onReplicate) {
+        const payload = onReplicate.build({
+          prompt: composeImagePrompt({
+            prompt: asText(inputs.prompt),
+            promptIn: asText(inputs.prompt_in),
+            styleBlock: asText(inputs.style_block),
+            styleIn: asText(inputs.style_in),
+            hasRefs: false,
+          }),
+          aspectRatio: asText(inputs.aspect_ratio) || '1:1',
+          seed: asInt(inputs.seed, 0),
+          adv: parseJsonObject(inputs.model_options),
+          refs: null,
+        })
+        return {
+          kind: 'provider', provider: 'replicate', endpoint: onReplicate.slug, payload, media: 'image', prefix: 'generate_image',
+          uiFor: files => ({ images: files, animated: [false] }),
+        }
+      }
       const desc = RUNNER_IMAGE_MODELS[String(inputs.model)]
       if (!desc) throw new Error(`Unknown image model: ${String(inputs.model)}`)
       let refs: string[] | null = null

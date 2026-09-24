@@ -20,7 +20,7 @@ import { isFalNetworkError, percentFromLogs, type FalStatus, type ProviderClient
 import { planNode } from './executors'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, type OwnershipCheck } from './inputs'
-import { hasOutputNode, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
+import { extraPromptText, hasOutputNode, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
 import { ev, type RunEvents } from './events'
 import type { Handoff } from './handoff'
 import { extFor, type ResultStore } from './results'
@@ -958,6 +958,17 @@ export function createEngine(deps: EngineDeps) {
     return out
   }
 
+  /**
+   * The text a generation record shows for one provider node: its prompt
+   * widget; else the instruction the runner built and sent (Develop, Relight,
+   * a toggle-built Blend); else its other text fields (target, instructions…).
+   */
+  function recordText(one: ApiPrompt, payload: Record<string, unknown> | null): string {
+    const sent = payload?.prompt
+    const built = typeof sent === 'string' && sent.trim() ? sent : ''
+    return extractGraphPromptText(one) || built || extraPromptText(one)
+  }
+
   async function record(userId: string | null, promptId: string): Promise<RunnerRecordView | null> {
     const runId = runIdOf(promptId)
     if (!runId) return null
@@ -969,7 +980,7 @@ export function createEngine(deps: EngineDeps) {
     const ran = Object.entries(take.nodes).filter(([, n]) => n.leg === legIndex)
     const texts = ran
       .filter(([, n]) => PROVIDER_TYPES.has(n.classType))
-      .map(([id]) => extractGraphPromptText({ [id]: take.prompt[id]! }))
+      .map(([id, n]) => recordText({ [id]: take.prompt[id]! }, n.payload))
       .filter(Boolean)
     return {
       runId,

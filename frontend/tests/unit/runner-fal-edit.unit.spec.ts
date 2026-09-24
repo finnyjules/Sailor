@@ -13,10 +13,11 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { planNode } from '~~/server/runner/executors'
-import { nodeCredits, unpricedProviderNode } from '~~/server/runner/metering'
+import { extraPromptText, nodeCredits, unpricedProviderNode } from '~~/server/runner/metering'
 import { BASE_RENDER_CREDITS, GRAPH_NODE_CREDITS } from '~~/server/utils/priceBook'
 import { PRESETS, PRESET_PHRASES, lightToPhrase, parseLight, relightInstruction } from '~~/server/runner/generators/relight'
-import { PROVIDER_TYPES, RUNNER_NODE_RULES, isRunnerEligible, runnerTakesNode } from '#shared/runner/eligibility'
+import { DEVELOP_PROMPT } from '~~/server/runner/generators/edit'
+import { PROVIDER_TYPES, RUNNER_NODE_RULES, isRunnerEligible, runnerTakesNode, type RunnerNodeRule } from '#shared/runner/eligibility'
 import { NO_FAMILIES, RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { OutputFile } from '~~/server/runner/types'
@@ -73,6 +74,14 @@ describe('fal-edit payloads match the Python nodes', () => {
       expect(plan.payload).toEqual(c.call.payload)
       expect(plan.media).toBe('image')
     })
+
+  it('has a case per class with only the required inputs, so missing ones take execute()\'s defaults (B2 review M3)', () => {
+    const has = (ct: string, missing: string[]) => CASES.some(c => c.class_type === ct && missing.every(m => !(m in c.widgets)))
+    expect(has('RelightNode', ['keep_background', 'instructions'])).toBe(true)
+    expect(has('BlendSceneNode', ['prompt'])).toBe(true)
+    expect(CASES.some(c => c.class_type === 'EditImageNode' && c.widgets.prompt === '' && c.widgets.model === 'Nano Banana 2')).toBe(true)
+    expect(CASES.some(c => c.class_type === 'DevelopImageNode' && Object.keys(c.widgets).sort().join() === 'resolution,seed')).toBe(true)
+  })
 
   it('names each output with the Python asset tag and shows it as a still', async () => {
     const byClass = (ct: string) => CASES.find(c => c.class_type === ct)!
@@ -158,6 +167,9 @@ describe('relight prompts', () => {
 
 // ── Eligibility rows ─────────────────────────────────────────────────────
 
+const nodeRuleFamilies = (r: RunnerNodeRule): string[] =>
+  [r.family, ...Object.values(r.models ?? {}).map(m => typeof m === 'string' ? m : m.family)].filter((f): f is RunnerFamily => !!f)
+
 const card = { class_type: 'Image', inputs: { image: 'a.png' } }
 const withNode = (n: { class_type: string; inputs: Record<string, unknown> }): ApiPrompt => ({ 1: card, 2: n })
 const edit = (model: string, inputs: Record<string, unknown> = {}) => withNode({ class_type: 'EditImageNode', inputs: { model, input_image: ['1', 0], prompt: 'p', ...inputs } })
@@ -167,8 +179,9 @@ const blend = (model: string, inputs: Record<string, unknown> = {}) => withNode(
 
 describe('fal-edit eligibility', () => {
   it('the rows', () => {
-    expect(Object.keys(RUNNER_NODE_RULES).sort()).toEqual(['BlendSceneNode', 'DevelopImageNode', 'EditImageNode', 'RelightNode'])
-    for (const ct of Object.keys(RUNNER_NODE_RULES)) expect(PROVIDER_TYPES.has(ct)).toBe(true)
+    const falEdit = Object.keys(RUNNER_NODE_RULES).filter(ct => nodeRuleFamilies(RUNNER_NODE_RULES[ct]!).includes('fal-edit'))
+    expect(falEdit.sort()).toEqual(['BlendSceneNode', 'DevelopImageNode', 'EditImageNode', 'RelightNode'])
+    for (const ct of falEdit) expect(PROVIDER_TYPES.has(ct)).toBe(true)
   })
 
   const takes: [string, ApiPrompt][] = [
@@ -198,6 +211,11 @@ describe('fal-edit eligibility', () => {
     ['Blend with keep_subject linked', blend('Flux Kontext Pro', { keep_subject: ['1', 0] })],
     ['Blend with no picture linked', blend('Flux 2 Pro', { image: undefined })],
     ['Edit reading from a node outside the prompt', { 2: { class_type: 'EditImageNode', inputs: { model: 'Nano Banana 2', input_image: ['9', 0], prompt: 'p' } } }],
+    // Text the runner reads as plain text must not be wired (B2 review M4).
+    ['Edit with a wired prompt', edit('Nano Banana 2', { prompt: ['1', 0] })],
+    ['Blend with a wired prompt', blend('Flux 2 Pro', { prompt: ['1', 0] })],
+    ['Relight with a wired light', relight({ image: ['1', 0], light: ['1', 0] })],
+    ['Relight with wired instructions', relight({ image: ['1', 0], instructions: ['1', 0] })],
   ]
   it.each(refused)('%s: not taken', (_l, p) => {
     expect(isRunnerEligible(p, FAL_EDIT)).toBe(false)
@@ -273,6 +291,27 @@ describe('fal-edit on the engine (hosted, fake fal)', () => {
     expect(own.images.map(f => f.filename)).toEqual([`${prefix}_00001_.png`])
     const after = executed.find(m => m.data.node === '3')!.data.output as { images: OutputFile[] }
     expect(after.images).toEqual(own.images)
+  })
+
+  // B2 review M2: the record names what was asked for, not nothing.
+  it.each([
+    ['Develop records its built instruction', 1, DEVELOP_PROMPT],
+    ['Relight records its built instruction', 2, 'warmer'],
+    ['Blend with no custom prompt records the toggle-built instruction', 3, 'Blend'],
+    ['Edit records its prompt widget', 0, 'make it blue'],
+  ] as const)('%s', async (_l, i, want) => {
+    const k = makeKit({ hosted: true, deps: { families: () => FAL_EDIT } })
+    writeFileSync(join(k.root, 'input', 'a.png'), new Uint8Array([1, 2, 3]))
+    const { runId, promptIds } = await k.engine.startRun({ userId: k.userId, takes: [ENGINE_CASES[i]![1]], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    await k.engine.settled(runId)
+    const rec = await k.engine.record(k.userId, promptIds[0]!)
+    const sent = k.fal.submitted()[0]!.payload.prompt as string
+    expect(rec!.prompt).toContain(want)
+    if (i !== 0) expect(rec!.prompt).toBe(sent)
+  })
+
+  it('a record falls back to the node\'s own text fields when nothing was sent', () => {
+    expect(extraPromptText({ n: { class_type: 'RemoveObjectNode', inputs: { image: ['1', 0], target: 'the cup', instructions: ' ' } } })).toBe('the cup')
   })
 
   it('with fal-edit off the server refuses the same workflow', async () => {

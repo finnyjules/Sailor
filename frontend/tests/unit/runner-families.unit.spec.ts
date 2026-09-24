@@ -67,7 +67,7 @@ const CASES: Array<[string, ApiPrompt, boolean]> = [
     '4': { class_type: 'Video', inputs: { file: '', export: false, filename_prefix: 'v', source: ['3', 0] } },
   }, true],
   ['another node type', { '1': img(), '2': { class_type: 'ImageBlur', inputs: { image: ['1', 0] } } }, false],
-  ['an off-list image model (imagen-4)', one(img('imagen-4')), false],
+  ['an image model no family takes (recraft-v4-svg)', one(img('recraft-v4-svg')), false],
   ['an unpriced image model (krea-2-large)', one(img('krea-2-large')), false],
   ['no generator', one({ class_type: 'Image', inputs: { image: 'a.png' } }), false],
   ['empty', {}, false],
@@ -98,7 +98,7 @@ describe('eligibility with families', () => {
     }
   })
   it('the provider set is the two generators plus every rule row', () => {
-    expect([...PROVIDER_TYPES].sort()).toEqual(['GenerateImageNode', 'GenerateVideoNode', ...Object.keys(RUNNER_NODE_RULES)].sort())
+    expect([...PROVIDER_TYPES].sort()).toEqual([...new Set(['GenerateImageNode', 'GenerateVideoNode', ...Object.keys(RUNNER_NODE_RULES)])].sort())
   })
   it.each(CASES)('%s: the same answer with no families, the default and every family', (_label, prompt, want) => {
     expect(isRunnerEligible(prompt)).toBe(want)

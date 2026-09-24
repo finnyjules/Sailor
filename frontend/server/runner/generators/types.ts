@@ -17,6 +17,16 @@ export interface ImageModelDesc {
   build(a: ImageBuildArgs): Record<string, unknown>
 }
 
+/** A Generate-image model whose Python primary is Replicate. */
+export interface ReplicateImageModelDesc {
+  id: string
+  label: string
+  /** Replicate model slug (image_models.py replicate_slug). */
+  slug: string
+  /** Port of the model's Replicate build_input. None of these takes moodboard pictures: `refs` is ignored. */
+  build(a: ImageBuildArgs): Record<string, unknown>
+}
+
 export interface VideoBuildArgs {
   prompt: string
   aspectRatio: string

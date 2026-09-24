@@ -48,7 +48,8 @@ export function unpricedProviderNode(
  */
 export const RUNNER_EXTRA_TEXT_INPUTS: readonly string[] = ['target', 'find', 'replace', 'color', 'instructions', 'scene_prompt']
 
-function extraPromptText(prompt: ApiPrompt): string {
+/** The non-blank values of RUNNER_EXTRA_TEXT_INPUTS across the prompt, joined. */
+export function extraPromptText(prompt: ApiPrompt): string {
   const parts: string[] = []
   for (const node of Object.values(prompt ?? {})) {
     const inputs = node?.inputs

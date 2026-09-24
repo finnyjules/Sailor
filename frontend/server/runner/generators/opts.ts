@@ -21,9 +21,39 @@ export function optInt(adv: Record<string, unknown>, key: string, def: number): 
   const v = adv[key]
   if (typeof v === 'boolean') return v ? 1 : 0
   if (typeof v === 'number') return Number.isFinite(v) ? Math.trunc(v) : def
-  if (v === null || v === undefined) return def
-  const s = String(v).trim()
+  // str(None), str([..]) and str({..}) never read as an int (JS String([1]) would be "1").
+  if (typeof v !== 'string') return def
+  const s = v.trim()
   return /^[+-]?\d+$/.test(s) ? Number.parseInt(s, 10) : def
+}
+
+// Python float()'s string grammar: digits with single underscores between
+// them, an optional fraction and exponent, or inf / infinity / nan.
+const DIGITS = String.raw`\d(?:_?\d)*`
+const PY_FLOAT_RE = new RegExp(
+  String.raw`^[+-]?(?:(?:${DIGITS}(?:\.(?:${DIGITS})?)?|\.${DIGITS})(?:[eE][+-]?${DIGITS})?|inf|infinity|nan)$`, 'i')
+
+/** Python float(str): the string as float() reads it, or null where float() raises. */
+function pyFloatOf(s: string): number | null {
+  const t = s.trim()
+  if (!PY_FLOAT_RE.test(t)) return null
+  const lower = t.toLowerCase()
+  const neg = lower.startsWith('-')
+  const body = lower.replace(/^[+-]/, '')
+  if (body === 'nan') return Number.NaN
+  if (body === 'inf' || body === 'infinity') return neg ? -Infinity : Infinity
+  return Number(t.replace(/_/g, ''))
+}
+
+/** _opt_float: a bool is 1 or 0, a number is itself, anything else float(str(v)) or the default. */
+export function optFloat(adv: Record<string, unknown>, key: string, def: number): number {
+  if (!has(adv, key)) return def
+  const v = adv[key]
+  if (typeof v === 'boolean') return v ? 1 : 0
+  if (typeof v === 'number') return v
+  // str(None), str([..]) and str({..}) never read as a float.
+  if (typeof v !== 'string') return def
+  return pyFloatOf(v) ?? def
 }
 
 export function optBool(adv: Record<string, unknown>, key: string, def: boolean): boolean {

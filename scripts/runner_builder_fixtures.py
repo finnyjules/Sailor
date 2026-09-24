@@ -283,12 +283,145 @@ def _fal_edit_cases() -> list:
             blend(model=model, seed=seed, output_format="jpg")
         blend(model=model, prompt="  make it one cosy photo  ")
         blend(model=model, prompt="   ", unify_lighting=False)
+
+    # Only the required inputs, at the schema defaults (B2 review M3): the
+    # optional ones are left to execute()'s own defaults, which the runner
+    # must match when they are missing from the prompt.
+    cases.append(_node_case(nr.EditImageNode, ["input_image"], {
+        "model": "Nano Banana 2", "prompt": "", "aspect_ratio": "match_input_image", "resolution": "1K",
+        "seed": 0, "safety_tolerance": 2, "prompt_upsampling": False, "output_format": "png"}))
+    cases.append(_node_case(nr.DevelopImageNode, ["input_image"], {"resolution": "1K", "seed": 0}))
+    cases.append(_node_case(RelightNode, ["image"], {
+        "preset": "Custom", "light": '{"azimuth":-30,"elevation":20,"intensity":0.6}'}))
+    cases.append(_node_case(nr.BlendSceneNode, ["image"], {
+        "model": "Flux Kontext Pro", "unify_lighting": True, "contact_shadows": True, "match_camera_look": True,
+        "preserve_identity": True, "keep_feather": 2.0, "seed": 0, "output_format": "png"}))
+    return cases
+
+
+# ── replicateImage (Task B4) ─────────────────────────────────────────────
+
+# The Replicate-primary, priced, non-SVG image models the runner takes
+# (shared/runner/eligibility.ts RUNNER_REPLICATE_IMAGE_MODEL_IDS).
+REPLICATE_IMAGE_IDS = [
+    "flux-1.1-pro-ultra", "flux-pro", "flux-dev",
+    "flux-2-max", "flux-2-pro", "flux-2-flex", "flux-2-klein-4b", "flux-2-dev",
+    "imagen-4-ultra", "imagen-4", "imagen-4-fast", "imagen-3", "imagen-3-fast",
+    "ideogram-v2", "ideogram-v2a-turbo",
+    "seedream-4.5", "seedream-3",
+    "recraft-v4-pro", "recraft-v4", "recraft-v3",
+    "stable-diffusion-3.5-large", "stable-diffusion-3.5-large-turbo", "stable-diffusion-3.5-medium",
+    "gpt-image-2", "gpt-image-1.5",
+    "qwen-image", "hunyuan-image-3", "grok-imagine",
+    "flux-fast", "p-image", "wan-2.2-image-pruna",
+    "bria-fibo", "bria-image-3.2",
+    "photon", "photon-flash",
+    "minimax-image-01",
+]
+
+# Values for each kind of `model_options` reader, in range, out of range and of
+# the wrong type. Left out on purpose: whole-number floats and lists/dicts for
+# string keys (Python's str(1.0) is "1.0", but JSON.parse gives JS the number 1),
+# and inf/nan (not valid JSON for the fixture file).
+_INT_VALUES = [3, 9, -2, "0", " 7 ", "2.5", "abc", True, False, None, 3.7, [1]]
+_FLOAT_VALUES = [2.25, 99, -1, "4.2", " 3 ", "1e1", "1_0.5", ".5", "abc", True, None, [2]]
+_BOOL_VALUES = [True, False, "yes", "No", "TRUE", "off", 1, 0, None, [], ""]
+_STR_VALUES = ["png", "", 5, True, None, 0.25]
+
+# Each Replicate builder's `model_options` keys and how it reads them.
+_REPLICATE_ADV_KEYS = {
+    "flux-1.1-pro-ultra": {"raw": "bool", "safety_tolerance": "int", "output_format": "str"},
+    "flux-pro": {"guidance": "float", "safety_tolerance": "int", "prompt_upsampling": "bool", "output_format": "str"},
+    "flux-dev": {"num_inference_steps": "int", "guidance": "float", "megapixels": "str", "go_fast": "bool",
+                 "num_outputs": "int", "output_format": "str"},
+    "flux-2-max": {"resolution": "str", "safety_tolerance": "int", "output_format": "str"},
+    "flux-2-pro": {"resolution": "str", "safety_tolerance": "int", "output_format": "str"},
+    "flux-2-flex": {"resolution": "str", "steps": "int", "guidance": "float", "safety_tolerance": "int",
+                    "prompt_upsampling": "bool", "output_format": "str"},
+    "flux-2-klein-4b": {"output_megapixels": "str", "go_fast": "bool", "output_format": "str"},
+    "flux-2-dev": {"resolution": "str", "steps": "int", "guidance": "float", "safety_tolerance": "int",
+                   "prompt_upsampling": "bool", "output_format": "str"},
+    "imagen-4-ultra": {"output_format": "str", "safety_filter_level": "str"},
+    "imagen-4": {"output_format": "str", "safety_filter_level": "str"},
+    "imagen-4-fast": {"output_format": "str", "safety_filter_level": "str"},
+    "imagen-3": {"output_format": "str", "safety_filter_level": "str"},
+    "imagen-3-fast": {"output_format": "str", "safety_filter_level": "str"},
+    "ideogram-v2": {"style_type": "str", "magic_prompt": "str"},
+    "ideogram-v2a-turbo": {"style_type": "str", "magic_prompt": "str"},
+    "seedream-4.5": {"size": "str"},
+    "seedream-3": {"guidance_scale": "float"},
+    "recraft-v4-pro": {},
+    "recraft-v4": {},
+    "recraft-v3": {"style": "str"},
+    "stable-diffusion-3.5-large": {"cfg": "float", "output_format": "str", "negative_prompt": "str"},
+    "stable-diffusion-3.5-large-turbo": {"cfg": "float", "output_format": "str", "negative_prompt": "str"},
+    "stable-diffusion-3.5-medium": {"cfg": "float", "output_format": "str", "negative_prompt": "str"},
+    "gpt-image-2": {"quality": "str", "background": "str", "output_format": "str"},
+    "gpt-image-1.5": {"quality": "str", "background": "str", "input_fidelity": "str", "output_format": "str"},
+    "qwen-image": {"guidance": "float", "num_inference_steps": "int", "enhance_prompt": "bool",
+                   "output_format": "str", "negative_prompt": "str"},
+    "hunyuan-image-3": {"go_fast": "bool", "output_format": "str"},
+    "grok-imagine": {},
+    "flux-fast": {"guidance": "float", "num_inference_steps": "int", "speed_mode": "str", "output_format": "str"},
+    "p-image": {"prompt_upsampling": "bool"},
+    "wan-2.2-image-pruna": {"megapixels": "int", "juiced": "bool", "output_format": "str"},
+    "bria-fibo": {"guidance_scale": "int", "negative_prompt": "str"},
+    "bria-image-3.2": {"guidance_scale": "float", "prompt_enhancement": "bool", "enhance_image": "bool",
+                       "negative_prompt": "str"},
+    "photon": {},
+    "photon-flash": {},
+    "minimax-image-01": {"prompt_optimizer": "bool"},
+}
+_VALUES_BY_KIND = {"int": _INT_VALUES, "float": _FLOAT_VALUES, "bool": _BOOL_VALUES, "str": _STR_VALUES}
+# Keys that change the payload beyond their own value (negative_prompt is left out when blank).
+_STR_EXTRA = {"negative_prompt": ["a blur", "  "], "size": ["4K"], "resolution": ["2 MP"],
+              "megapixels": ["0.25"], "output_megapixels": ["0.25"], "style_type": ["Design", "None"]}
+_MOODBOARD = json.dumps({"folder": "moodboard_1727", "files": ["a.png", "b.jpg"]})
+
+
+def _replicate_image_cases() -> list:
+    """Task B4 (replicate-image): GenerateImageNode on every Replicate-primary
+    runner model — the four common cases, every model_options key the builder
+    reads (in range, out of range, wrong type), every ratio of the node's list,
+    and the moodboard / prompt-composition inputs (ignored or folded as Python
+    does)."""
+    nr, _fal_refs, _extras = _node_modules()
+    from comfy_api_nodes.image_models import ALL_ASPECT_RATIOS
+    cases = []
+
+    def gen(mid, prompt="a red fox", ar="1:1", seed=0, adv=None, options=None, **extra):
+        widgets = {"model": mid, "prompt": prompt, "aspect_ratio": ar, "seed": seed,
+                   "model_options": options if options is not None else json.dumps(adv or {}), **extra}
+        cases.append(_node_case(nr.GenerateImageNode, [], widgets))
+
+    for mid in REPLICATE_IMAGE_IDS:
+        for c in COMMON_IMAGE_CASES:
+            gen(mid, prompt=c["prompt"], ar=c["ar"], seed=c["seed"], adv=c["adv"])
+        for key, kind in _REPLICATE_ADV_KEYS[mid].items():
+            for v in _VALUES_BY_KIND[kind] + (_STR_EXTRA.get(key, []) if kind == "str" else []):
+                gen(mid, seed=7, adv={key: v})
+        # Every ratio the node offers: each model keeps its own and falls back to 1:1.
+        for ar in ALL_ASPECT_RATIOS:
+            gen(mid, prompt="p", ar=ar, seed=1)
+        gen(mid, seed=2**32 - 1)
+        # Moodboard pictures are ignored (no model here is 'multi-image'), and so is
+        # their style-only instruction; the style block and the Idea text fold in.
+        gen(mid, prompt="a fox", seed=3, style_refs=_MOODBOARD)
+        gen(mid, prompt="a fox", seed=3, style_block=" soft light ", prompt_in="idea", style_in="taste",
+            style_refs=_MOODBOARD)
+
+    # model_options Python can't read as an object are empty.
+    for options in ("", "{not json", "[1, 2]", "null", "7"):
+        gen("flux-2-pro", options=options)
+    gen("flux-dev", adv={"num_outputs": 3, "guidance": "2", "megapixels": "0.25", "go_fast": "false"})
+    gen("stable-diffusion-3.5-large", prompt="", adv={"negative_prompt": "blur", "cfg": 3})
     return cases
 
 
 def family_cases() -> dict:
     out = {key: [] for key in FAMILY_KEYS}
     out["falEdit"] = _fal_edit_cases()
+    out["replicateImage"] = _replicate_image_cases()
     return out
 
 
