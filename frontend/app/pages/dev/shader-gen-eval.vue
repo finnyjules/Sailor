@@ -19,14 +19,18 @@ type RowId = 'spike' | 'plan' | 'patch'
 interface Tile { take: GenTake; thumbnail: string; flags: string[]; compiled: boolean; calls: number | null; keep: boolean; log: string[] }
 interface Row { status: 'idle' | 'running' | 'done' | 'error'; tiles: Tile[]; failures: number; dropped: number; ms: number; tokensIn: number; tokensOut: number; error: string }
 
-type VariantId = 'A' | 'B' | 'C' | 'D'
+type VariantId = 'A' | 'B' | 'C' | 'D' | 'E'
 const VARIANT_LABELS: Record<VariantId, string> = {
   A: 'A · Sonnet, thinking high',
   B: 'B · Opus 5.5',
   C: 'C · Sonnet + photo + examples',
   D: 'D · Sonnet + look and revise',
+  E: 'E · Opus 5.5 + photo + examples + look and revise',
 }
-const VARIANT_KEYS = ['A', 'B', 'C', 'D'] as const
+const VARIANT_KEYS = ['A', 'B', 'C', 'D', 'E'] as const
+/** A and B were already run; C, D, E are the levers still worth trying. */
+const variantSelected = reactive<Record<VariantId, boolean>>({ A: false, B: false, C: true, D: true, E: true })
+const selectedVariants = computed(() => VARIANT_KEYS.filter(id => variantSelected[id]))
 /** Only the two requests the quality-variants section evaluates. */
 const VARIANT_REQUESTS = EVAL_REQUESTS.filter(r => r.key === 'rain' || r.key === 'ink')
 
@@ -41,7 +45,7 @@ const rows = reactive<Record<string, Record<RowId, Row>>>(
 )
 
 const variantRows = reactive<Record<string, Record<VariantId, Row>>>(
-  Object.fromEntries(VARIANT_REQUESTS.map(r => [r.key, { A: emptyRow(), B: emptyRow(), C: emptyRow(), D: emptyRow() }])),
+  Object.fromEntries(VARIANT_REQUESTS.map(r => [r.key, { A: emptyRow(), B: emptyRow(), C: emptyRow(), D: emptyRow(), E: emptyRow() }])),
 )
 
 const { getLocalSetting } = useLocalSettings()
@@ -161,7 +165,7 @@ async function run() {
   try { await Promise.all([runTier('plan'), runTier('patch')]) } finally { running.value = false }
 }
 
-/** deps/input for one quality-variant lever (spec follow-on: A–D). */
+/** deps/input for one quality-variant lever (spec follow-on: A–E). */
 function depsAndInputFor(id: VariantId, r: EvalRequest): { deps: { callModel: ReturnType<typeof makeCallModel>; review: ReturnType<typeof makeReview>; renderer: TakeRenderer }; input: EngineInput } {
   const references = (r.references ?? []).map(baseFor).filter((b): b is GenBase => !!b)
   const base: EngineInput = { request: r.prompt, base: baseFor(r.base), references }
@@ -169,7 +173,8 @@ function depsAndInputFor(id: VariantId, r: EvalRequest): { deps: { callModel: Re
   if (id === 'A') return { deps: { callModel: makeCallModel(apiKey.value, 'plan', { effort: 'high' }), review, renderer: renderer! }, input: base }
   if (id === 'B') return { deps: { callModel: makeCallModel(apiKey.value, 'plan', { model: 'opus', effort: 'high' }), review, renderer: renderer! }, input: base }
   if (id === 'C') return { deps: { callModel: makeCallModel(apiKey.value, 'plan'), review, renderer: renderer! }, input: { ...base, images: [photo.value], examples: examplesFor(r.key) } }
-  return { deps: { callModel: makeCallModel(apiKey.value, 'plan'), review, renderer: renderer! }, input: { ...base, revise: true } }
+  if (id === 'D') return { deps: { callModel: makeCallModel(apiKey.value, 'plan'), review, renderer: renderer! }, input: { ...base, revise: true } }
+  return { deps: { callModel: makeCallModel(apiKey.value, 'plan', { model: 'opus', effort: 'high' }), review, renderer: renderer! }, input: { ...base, images: [photo.value], examples: examplesFor(r.key), revise: true } }
 }
 
 async function runVariant(id: VariantId) {
@@ -188,13 +193,13 @@ async function runVariant(id: VariantId) {
 }
 
 async function runVariants() {
-  if (running.value || variantRunning.value) return
+  if (running.value || variantRunning.value || selectedVariants.value.length === 0) return
   if (!variantArmed.value) { variantArmed.value = true; armed.value = false; return }
   variantArmed.value = false
   variantRunning.value = true
   try {
-    // One at a time (not Promise.all), to stay well inside rate limits.
-    for (const id of VARIANT_KEYS) await runVariant(id)
+    // One at a time (not Promise.all), to stay well inside rate limits, in order A→E.
+    for (const id of selectedVariants.value) await runVariant(id)
   } finally {
     variantRunning.value = false
   }
@@ -296,10 +301,16 @@ async function copyResults() {
 
     <section data-section="variants">
       <h2>Quality variants</h2>
-      <p>Four ways to close the gap with the spike, on two requests. Same rules as above: click keepers, then copy results.</p>
+      <p>Five ways to close the gap with the spike, on two requests. Same rules as above: click keepers, then copy results.</p>
+      <div class="bar picks">
+        <label v-for="id in VARIANT_KEYS" :key="id" class="pick">
+          <input :id="`variant-pick-${id}`" v-model="variantSelected[id]" type="checkbox">
+          {{ VARIANT_LABELS[id] }}
+        </label>
+      </div>
       <div class="bar">
-        <button type="button" :disabled="!ready || running || variantRunning" @click="runVariants">
-          {{ variantRunning ? 'Running…' : variantArmed ? 'Confirm: this calls the paid API' : 'Run variants A–D on rain and ink' }}
+        <button type="button" :disabled="!ready || running || variantRunning || selectedVariants.length === 0" @click="runVariants">
+          {{ variantRunning ? 'Running…' : variantArmed ? 'Confirm: this calls the paid API' : `Run variants ${selectedVariants.join(', ')} on rain and ink` }}
         </button>
         <span v-for="id in VARIANT_KEYS" :key="id" class="tally">
           {{ VARIANT_LABELS[id] }}: {{ variantTally[id].keep }} of {{ variantTally[id].total }} kept · {{ variantTally[id].failures }} failed
@@ -357,6 +368,8 @@ header p { color: #8e8a83; margin: 0 0 12px; }
 .bar button { background: #1e1f23; color: inherit; border: 1px solid #34363c; border-radius: 6px; padding: 5px 12px; cursor: pointer; }
 .bar button:disabled { opacity: .5; cursor: default; }
 .note, .tally { color: #8e8a83; font-size: 12.5px; }
+.picks { margin-bottom: 4px; }
+.pick { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: #ebe8e1; }
 section { border-top: 1px solid #2a2c31; margin-top: 24px; padding-top: 16px; }
 h2 { font-size: 17px; font-weight: 500; margin: 0 0 10px; }
 h2 small { color: #8e8a83; font-weight: 400; font-size: 12.5px; }

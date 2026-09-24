@@ -14,7 +14,14 @@ test('shader-gen eval page renders all 24 spike takes', async ({ page }) => {
   // Quality variants section (rain + ink only): button present and enabled,
   // and both requests' reused spike row shows all 4 spike tiles. Never press
   // Run/Confirm here — this test makes no paid calls.
-  await expect(page.getByRole('button', { name: 'Run variants A–D on rain and ink' })).toBeEnabled()
+  const picks = ['A', 'B', 'C', 'D', 'E'] as const
+  for (const id of picks) await expect(page.locator(`#variant-pick-${id}`)).toBeVisible()
+  await expect(page.locator('#variant-pick-A')).not.toBeChecked()
+  await expect(page.locator('#variant-pick-B')).not.toBeChecked()
+  await expect(page.locator('#variant-pick-C')).toBeChecked()
+  await expect(page.locator('#variant-pick-D')).toBeChecked()
+  await expect(page.locator('#variant-pick-E')).toBeChecked()
+  await expect(page.getByRole('button', { name: 'Run variants C, D, E on rain and ink' })).toBeEnabled()
   const variantSpikeRows = page.locator('[data-section="variants"] [data-row="variant-spike"]')
   await expect(variantSpikeRows).toHaveCount(2)
   await expect(variantSpikeRows.nth(0).locator('[data-tile]')).toHaveCount(4)
