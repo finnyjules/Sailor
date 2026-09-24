@@ -38,6 +38,14 @@ export function planZip(items: DeliverableItem[]): ZipEntry[] {
   return dedupe(out)
 }
 
+/** Zip files made in the browser (no fetch): each `path` holds its `blob`. The caller saves the
+ *  result (e.g. `downloadBlobAsFile`). Used by the Frame's set download (Stage 5). */
+export async function zipBlobs(files: readonly { path: string; blob: Blob }[]): Promise<Blob> {
+  const zip = new JSZip()
+  for (const f of files) zip.file(f.path, f.blob)
+  return await zip.generateAsync({ type: 'blob' })
+}
+
 export async function downloadZip(entries: ZipEntry[], zipName: string): Promise<{ skipped: string[] }> {
   const zip = new JSZip()
   const skipped: string[] = []

@@ -3,8 +3,9 @@
 // The set sheet (Stage 5 — Make a set): the Frame's layout recomposed at each ticked format, side
 // by side at true proportions. Each tile is painted by the Frame's own renderer (`LayoutTile`), so
 // it is the real picture; its chip says which layout it got. Pure view: the host plans the set
-// (`useLayoutSet`), and answers `send` (one format to the canvas), `download` and `close`. Nothing
-// here writes the Frame.
+// (`useLayoutSet`), and answers `send` (one format to the canvas), `download`, `cancel` (the
+// download) and `close`. Nothing here writes the Frame. While a download runs the footer shows its
+// progress (`Rendering 3 of 7…`) and a Cancel; afterwards each format that failed is named.
 import { computed, ref } from 'vue'
 import { X } from 'lucide-vue-next'
 import LayoutTile from '~/components/vue-canvas/compositor/LayoutTile.vue'
@@ -16,6 +17,7 @@ import { tileSize } from '~/lib/frame/patterns/tileSize'
 import type { SetEntry } from '~/lib/frame/patterns/kit/set'
 import type { WiredContentProvider } from '~/composables/useCompositorLayers'
 import type { Paint } from '~/lib/compositor/paint'
+import type { SetExportFailure } from '~/lib/frame/layoutSetExport'
 
 const props = defineProps<{
   entries: SetEntry[]
@@ -25,10 +27,17 @@ const props = defineProps<{
   hasMotion?: boolean
   background?: Paint
   wiredContent?: WiredContentProvider | null
+  /** A download is running: its progress line (`Rendering 3 of 7…`); null/absent otherwise. */
+  progress?: string | null
+  /** The formats the last download could not render. */
+  failures?: SetExportFailure[]
+  /** The last download's outcome when nothing was saved (`Download cancelled.`). */
+  notice?: string
 }>()
 const emit = defineEmits<{
   (e: 'send', formatId: string): void
   (e: 'download'): void
+  (e: 'cancel'): void
   (e: 'close'): void
 }>()
 
@@ -68,6 +77,7 @@ const summary = computed(() => {
 /** Only the formats something fits are exported. */
 const exportable = computed(() => counts.value.kept + counts.value.swapped)
 const downloadLabel = computed(() => `Download ${exportable.value} ${exportable.value === 1 ? 'image' : 'images'}`)
+const downloading = computed(() => props.progress != null)
 
 // ── the covered areas: each format's keep-clear bands, over its tile ──
 const showCovered = ref(false)
@@ -141,12 +151,24 @@ const tilePlan = (e: SetEntry) => ({ ...e.plan!, layers: e.layers! })
 
     <div class="flex flex-wrap items-center gap-2 px-4 py-3 border-t border-white/10">
       <span v-if="hasMotion" class="text-[11px] text-white/45" data-testid="layout-set-stills">Stills only for now.</span>
+      <span v-if="notice && !downloading" class="text-[11px] text-white/55" data-testid="layout-set-notice">{{ notice }}</span>
+      <span
+        v-for="f in (downloading ? [] : failures ?? [])" :key="f.formatId"
+        class="text-[11px] text-red-300/90" :title="f.message" data-testid="layout-set-failure">Couldn't render {{ f.label }}.</span>
       <span class="flex-1" />
+      <template v-if="downloading">
+        <span class="text-[12px] text-white/70 tabular-nums" aria-live="polite" data-testid="layout-set-progress">{{ progress }}</span>
+        <button
+          type="button"
+          class="h-8 px-3 rounded text-[12px] font-medium cursor-pointer bg-white/[0.06] hover:bg-white/12 text-white/85"
+          data-testid="layout-set-cancel" @click="emit('cancel')">Cancel</button>
+      </template>
       <button
         type="button"
         class="h-8 px-3 rounded text-[12px] font-medium cursor-pointer bg-white/[0.06] hover:bg-white/12 text-white/85"
         @click="emit('close')">Close</button>
       <button
+        v-if="!downloading"
         type="button"
         class="h-8 px-3 rounded text-[12px] font-medium cursor-pointer disabled:opacity-50 bg-white hover:bg-white/90 text-neutral-900"
         data-testid="layout-set-download" :disabled="!exportable"

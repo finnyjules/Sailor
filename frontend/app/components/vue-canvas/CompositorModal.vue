@@ -48,6 +48,8 @@ import KeepClearOverlay from '~/components/vue-canvas/compositor/KeepClearOverla
 import LayoutSetSection from '~/components/vue-canvas/compositor/LayoutSetSection.vue'
 import LayoutSetSheet from '~/components/vue-canvas/compositor/LayoutSetSheet.vue'
 import { useLayoutSet } from '~/composables/useLayoutSet'
+import { mergeStackOrder } from '~/lib/frame/layoutSetExport'
+import type { LayerGroup } from '~/lib/compositor/layerGroups'
 import { layoutById } from '~/lib/frame/patterns/layouts/catalog'
 import type { Choice } from '~/lib/frame/patterns/kit/vary'
 import type { StyleId } from '~/lib/frame/patterns/kit/styles'
@@ -1032,8 +1034,15 @@ const layoutVary = useLayoutVary({
 const layoutSet = useLayoutSet({ formats: () => layoutVary.setFormats.value, plan: f => layoutVary.planSet(f) })
 // TODO(Stage 5 Task 4): send this format's Frame to the canvas as a new Frame node.
 function onLayoutSetSend(_formatId: string) {}
-// TODO(Stage 5 Task 3): download the set as a zip of PNGs.
-function onLayoutSetDownload() {}
+// Download the set (Stage 5 Task 3): each format something fits, rendered by the same static path
+// Download PNG takes, at the format's own size, zipped as `<frame-name>_set_<timestamp>.zip`.
+function onLayoutSetDownload() {
+  const d = compositor.value?.data as any
+  void layoutSet.download({
+    name: d?.title || d?.subgraphName,
+    render: e => renderStaticComposite(e.w, e.h, { layers: e.layers!, groups: e.groups ?? [], order: e.plan!.order }),
+  })
+}
 
 // Shape picker for the Layout tab: choose a library shape the engine may use
 // even without a placed shape layer (sets the sheet's shapeMode).
@@ -5015,17 +5024,34 @@ const videoStatus = ref('')
 function cancelVideoExport() { videoAbort?.abort() }
 
 // Render the static unified stack to a PNG blob at W×H (no motion, no preview skip).
-async function renderStaticComposite(W: number, H: number): Promise<Blob | null> {
+// `frame` (Make a set, Stage 5): paint THESE layers / groups / draw order instead of the Frame's
+// own — a planned format — with everything else unchanged (background, wired content per slot,
+// wired treatments, post effects, fonts and images ensured). Absent: exactly the Frame's own.
+async function renderStaticComposite(W: number, H: number, frame?: { layers: LocalLayer[]; groups: LayerGroup[]; order: readonly string[] }): Promise<Blob | null> {
   const off = document.createElement('canvas')
   off.width = Math.max(1, Math.round(W)); off.height = Math.max(1, Math.round(H))
   const ctx = off.getContext('2d'); if (!ctx) return null
-  await ensureLayerImages(localLayers.value as LocalLayer[])
-  await ensureLayerFonts(localLayers.value as LocalLayer[], W)
+  await ensureLayerImages(frame ? frame.layers : localLayers.value as LocalLayer[])
+  await ensureLayerFonts(frame ? frame.layers : localLayers.value as LocalLayer[], W)
   // bake=true (Task 10): the static Render/Export path — final output, not preview.
   withWiredContent(wiredContentForSlot, () =>
-    paintLayerStack(ctx, W, H, buildStackItems(), localLayers.value as LocalLayer[],
-      undefined, undefined, undefined, wiredTreatments.value, background.value, localGroups.value, postEffects.value, true))
+    paintLayerStack(ctx, W, H, frame ? stackItemsFor(frame.layers, frame.order) : buildStackItems(), frame ? frame.layers : localLayers.value as LocalLayer[],
+      undefined, undefined, undefined, wiredTreatments.value, background.value, frame ? frame.groups : localGroups.value, postEffects.value, true))
   return await new Promise<Blob | null>(resolve => off.toBlob(b => resolve(b), 'image/png'))
+}
+// Make a set (Stage 5): the stack items for GIVEN layers in a given stored order — what
+// buildStackItems gives once an apply has written them (`stackKeys` = the stored order over the
+// present keys; wired slots and hidden wired slots as the Frame has them).
+function stackItemsFor(lays: LocalLayer[], order: readonly string[]): StackItem[] {
+  const byKey = new Map(lays.map(l => [localKey(l.id), l]))
+  const present = framePresentKeys(layers.value.map(l => l.slot - 1), lays)
+  return mergeStackOrder(order, present).map((key): StackItem | null => {
+    const l = byKey.get(key)
+    if (l) return { type: 'local', key, layer: l }
+    const r = resolveStackKey(key)
+    if (r?.type !== 'wired' || hiddenWired.value.has(r.layer.slot)) return null
+    return { type: 'wired', key, draw: (c, w, h) => drawWiredLayer(c, r.layer, w, h) }
+  }).filter((x): x is StackItem => x != null)
 }
 
 // True when any local layer carries a motion window, a wired studio slot is
@@ -9452,7 +9478,8 @@ onUnmounted(() => {
       v-if="layoutSet.open.value && panelsVisible"
       :entries="layoutSet.entries.value" :layout-name="layoutName" :has-motion="hasMotion"
       :background="background" :wired-content="wiredContentForSlot"
-      @send="onLayoutSetSend" @download="onLayoutSetDownload" @close="layoutSet.close" />
+      :progress="layoutSet.progress.value" :failures="layoutSet.failures.value" :notice="layoutSet.notice.value"
+      @send="onLayoutSetSend" @download="onLayoutSetDownload" @cancel="layoutSet.cancelDownload" @close="layoutSet.close" />
 
     <!-- Right sidebar: floating glass properties panel -->
     <div
