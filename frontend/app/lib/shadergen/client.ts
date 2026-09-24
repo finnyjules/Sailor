@@ -4,11 +4,13 @@
 import type { EngineDeps, ModelUsage } from './engine'
 import { buildReviewPrompt, parseReview, REVIEW_SCHEMA } from './prompt'
 
-export function makeCallModel(apiKey: string, tier: 'patch' | 'plan'): EngineDeps['callModel'] {
-  return async (prompt: string) => {
+/** `variant` carries the dev-only shader-gen evaluation levers (effort/model
+ *  overrides) straight through to /api/shader-gen; production callers omit it. */
+export function makeCallModel(apiKey: string, tier: 'patch' | 'plan', variant?: { effort?: 'high'; model?: 'opus' }): EngineDeps['callModel'] {
+  return async (prompt: string, images?: string[]) => {
     const res = await $fetch<{ text: string; usage: ModelUsage | null; stop_reason?: string | null }>('/api/shader-gen', {
       method: 'POST',
-      body: { apiKey, tier, prompt },
+      body: { apiKey, tier, prompt, ...variant, ...(images?.length ? { images } : {}) },
       timeout: 120_000,
     })
     return { text: res.text, usage: res.usage ?? undefined, stop_reason: res.stop_reason ?? null }

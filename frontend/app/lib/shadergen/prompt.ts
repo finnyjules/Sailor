@@ -25,6 +25,9 @@ export interface GenRequest {
   takeIndex: number
   /** Why the previous attempt was thrown away, in plain words. */
   avoid?: string
+  /** Dev-only shader-gen evaluation lever (variant C): finished takes from
+   *  OTHER requests, shown as the quality bar to match — never as a look to copy. */
+  examples?: { name: string; request: string; take: GenTake }[]
 }
 
 /** The lines Sailor supplies itself; a catalog source carries them, a body must not. */
@@ -54,6 +57,10 @@ export function buildGenPrompt(r: GenRequest): string {
   for (const ref of r.references ?? []) {
     parts.push(`For reference only, a related existing effect, "${ref.name}":\n\`\`\`glsl\n${stripSuppliedLines(ref.source)}\n\`\`\`\n${HELPER_WARNING}`)
   }
+  if (r.examples?.length) {
+    const lines = r.examples.map(ex => `"${ex.request}" (${ex.name}) — "${ex.take.name}":\nDials: ${JSON.stringify(ex.take.params)}\n\`\`\`glsl\n${ex.take.body}\n\`\`\``)
+    parts.push(`Two effects that met the quality bar for other requests — match this level of craft (considered defaults, restraint, readable subject), not their look:\n\n${lines.join('\n\n')}`)
+  }
   parts.push(TAKE_ANGLES[r.takeIndex % TAKE_ANGLES.length]!)
   if (r.avoid) parts.push(`A previous attempt failed: ${r.avoid}. Do not repeat that.`)
   parts.push('Reply with the JSON object only.')
@@ -75,6 +82,12 @@ export function rewriteCompileLog(log: string): string {
 
 export function buildRepairPrompt(r: GenRequest, failed: GenTake, reason: string): string {
   return `${buildGenPrompt(r)}\n\nYour previous reply for this take was rejected: ${reason}\nPrevious body:\n\`\`\`glsl\n${failed.body}\n\`\`\`\nFix the problem and return the whole corrected JSON object.`
+}
+
+/** Dev-only shader-gen evaluation lever (variant D): shown a render of the
+ *  take's own default dials on the test photo, asked to improve it once. */
+export function buildRevisePrompt(r: GenRequest, take: GenTake): string {
+  return `${buildGenPrompt(r)}\n\nThe attached image is a render of your effect below, on the test photo, with its default dials. Look at it as a designer would. Improve it so it answers the request better: fix anything muddy, washed out, cluttered or weak, and tune the defaults; keep what already works. Return the whole improved JSON object.\n\`\`\`glsl\n${take.body}\n\`\`\`\nDials: ${JSON.stringify(take.params)}`
 }
 
 const HEX = /^#[0-9a-fA-F]{6}$/

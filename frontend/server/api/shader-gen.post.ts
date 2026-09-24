@@ -9,14 +9,17 @@ import { assertRateLimit } from '../lib/rateLimit'
 import { optionalApiKey, resolveAnthropicKey } from '../lib/agentRequest'
 import { buildShaderGenPayload, readShaderGenReply } from '../lib/shaderGenRequest'
 import { meterAssist } from '../utils/anthropicMeter'
+import { deployMode } from '../utils/deployMode'
 
 export default defineEventHandler(async (event) => {
   // A request is 4 parallel takes, each with up to 5 calls (repairs); two tiers
   // can run side by side on the eval page — 120/min leaves headroom for that.
   assertRateLimit(event, 'shader-gen', 120)
-  const body = await readBody<{ apiKey?: string; tier?: string; prompt?: string }>(event)
+  const body = await readBody<{ apiKey?: string; tier?: string; prompt?: string; effort?: string; model?: string; images?: string[] }>(event)
   const apiKey = resolveAnthropicKey(useRuntimeConfig(event).anthropicApiKey, optionalApiKey(body?.apiKey))
-  const payload = buildShaderGenPayload(body ?? {})
+  // Model overrides (the shader-gen evaluation's variant B) only ever run on a
+  // local dev server — never in a deployed/hosted instance.
+  const payload = buildShaderGenPayload(body ?? {}, { allowModelOverride: import.meta.dev && deployMode() === 'local' })
 
   await meterAssist(event)
 

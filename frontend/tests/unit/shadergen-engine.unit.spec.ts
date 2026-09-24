@@ -158,4 +158,76 @@ describe('generateTakes', () => {
     expect(r.takes.map(t => t.take.name)).toEqual(['Take 1', 'Take 3', 'Take 4', 'Better'])
     expect(m.prompts[1]![1]).toContain('a reviewer judged the previous attempt a miss')
   })
+
+  describe('images and examples', () => {
+    it('sends images with every generation/repair call of the request', async () => {
+      const seen: (string[] | undefined)[] = []
+      const r = await generateTakes({ request: 'rain', count: 1, images: ['data:image/png;base64,PHOTO'] }, {
+        callModel: async (prompt, images) => { seen.push(images); return { text: reply(), usage: { input_tokens: 1, output_tokens: 1 } } },
+        renderer,
+      })
+      expect(r.takes).toHaveLength(1)
+      expect(seen).toEqual([['data:image/png;base64,PHOTO']])
+    })
+
+    it('carries examples into the prompt', async () => {
+      const example: GenTake = { name: 'Suminagashi', animated: true, generative: true, params: [], body: 'EXAMPLE_BODY' }
+      let seenPrompt = ''
+      await generateTakes({ request: 'rain', count: 1, examples: [{ name: 'ink', request: 'Ink bleeding into wet paper', take: example }] }, {
+        callModel: async (prompt) => { seenPrompt = prompt; return { text: reply() } },
+        renderer,
+      })
+      expect(seenPrompt).toContain('EXAMPLE_BODY')
+      expect(seenPrompt).toContain('quality bar for other requests')
+    })
+  })
+
+  describe('revise', () => {
+    it('makes one extra call after a pass, and replaces the take when the revision also passes', async () => {
+      let calls = 0
+      const r = await generateTakes({ request: 'rain', count: 1, revise: true }, {
+        callModel: async () => { calls++; return { text: calls === 1 ? reply('', 'Original') : reply('', 'Revised') } },
+        renderer,
+      })
+      expect(calls).toBe(2)
+      expect(r.takes).toHaveLength(1)
+      expect(r.takes[0]!.take.name).toBe('Revised')
+      expect(r.takes[0]!.modelCalls).toBe(2)
+      expect(r.takes[0]!.log.some(l => l.includes('revised'))).toBe(true)
+    })
+
+    it('keeps the original take when the revision fails to compile', async () => {
+      let calls = 0
+      const r = await generateTakes({ request: 'rain', count: 1, revise: true }, {
+        callModel: async () => { calls++; return { text: calls === 1 ? reply('', 'Original') : reply('BROKEN', 'Revised') } },
+        renderer,
+      })
+      expect(calls).toBe(2)
+      expect(r.takes).toHaveLength(1)
+      expect(r.takes[0]!.take.name).toBe('Original')
+      expect(r.takes[0]!.log.some(l => l.includes('revision rejected'))).toBe(true)
+    })
+
+    it('does not attempt a revision when revise is false', async () => {
+      let calls = 0
+      const r = await generateTakes({ request: 'rain', count: 1 }, {
+        callModel: async () => { calls++; return { text: reply() } },
+        renderer,
+      })
+      expect(calls).toBe(1)
+      expect(r.takes[0]!.modelCalls).toBe(1)
+    })
+
+    it('lets a lost graphics context during revision propagate', async () => {
+      let calls = 0
+      const lostOnSecond: TakeRenderer = {
+        ...renderer,
+        judge: (t) => { if (calls >= 2) throw new ContextLostError('lost'); return renderer.judge(t) },
+      }
+      await expect(generateTakes({ request: 'rain', count: 1, revise: true }, {
+        callModel: async () => { calls++; return { text: reply() } },
+        renderer: lostOnSecond,
+      })).rejects.toBeInstanceOf(ContextLostError)
+    })
+  })
 })

@@ -11,7 +11,7 @@
  */
 import type { GenTake } from '~~/shared/shadergen/contract'
 import { staticCheck } from './staticCheck'
-import { buildGenPrompt, buildRepairPrompt, parseGenResponse, rewriteCompileLog, type GenBase, type GenRequest } from './prompt'
+import { buildGenPrompt, buildRepairPrompt, buildRevisePrompt, parseGenResponse, rewriteCompileLog, type GenBase, type GenRequest } from './prompt'
 import type { Flag } from './renderChecks'
 
 export interface Usage { input_tokens: number; output_tokens: number }
@@ -38,13 +38,27 @@ export interface TakeRenderer {
 }
 
 export interface EngineDeps {
-  callModel(prompt: string): Promise<{ text: string; usage?: ModelUsage; stop_reason?: string | null }>
+  callModel(prompt: string, images?: string[]): Promise<{ text: string; usage?: ModelUsage; stop_reason?: string | null }>
   review?(sheet: string, request: string, count: number): Promise<boolean[]>
   renderer: TakeRenderer
   now?: () => number
 }
 
-export interface EngineInput { request: string; base?: GenBase | null; references?: GenBase[]; count?: number }
+export interface EngineInput {
+  request: string
+  base?: GenBase | null
+  references?: GenBase[]
+  count?: number
+  /** Dev-only shader-gen evaluation lever (variant C): sent with EVERY
+   *  generation/repair call of this request. */
+  images?: string[]
+  /** Dev-only shader-gen evaluation lever (variant C): other requests' takes
+   *  shown as the quality bar. */
+  examples?: GenRequest['examples']
+  /** Dev-only shader-gen evaluation lever (variant D): one "look and revise"
+   *  pass after a take first passes every check. */
+  revise?: boolean
+}
 export interface EngineTake { take: GenTake; flags: Flag[]; thumbnail: string; modelCalls: number; log: string[] }
 export interface EngineFailure { index: number; modelCalls: number; log: string[] }
 export interface EngineResult { takes: EngineTake[]; failures: EngineFailure[]; dropped: number; usage: Usage; ms: number }
@@ -60,7 +74,7 @@ const REVIEW_MISS = 'a reviewer judged the previous attempt a miss (muddy, off-b
 const isTake = (r: EngineTake | EngineFailure): r is EngineTake => 'take' in r
 
 async function runTake(input: EngineInput, index: number, deps: EngineDeps, usage: Usage, avoid?: string): Promise<EngineTake | EngineFailure> {
-  const req: GenRequest = { request: input.request, base: input.base ?? null, references: input.references, takeIndex: index, avoid }
+  const req: GenRequest = { request: input.request, base: input.base ?? null, references: input.references, takeIndex: index, avoid, examples: input.examples }
   const log: string[] = []
   let prompt = buildGenPrompt(req)
   let compileRepairs = 0
@@ -72,7 +86,7 @@ async function runTake(input: EngineInput, index: number, deps: EngineDeps, usag
     calls++
     let res: Awaited<ReturnType<EngineDeps['callModel']>>
     try {
-      res = await deps.callModel(prompt)
+      res = await deps.callModel(prompt, input.images)
     } catch (e) {
       if (e instanceof ContextLostError) throw e
       log.push(`model error: ${String((e as Error)?.message ?? e).slice(0, 200)}`)
@@ -116,9 +130,52 @@ async function runTake(input: EngineInput, index: number, deps: EngineDeps, usag
       prompt = buildGenPrompt({ ...req, avoid: `the render was ${judged.flags.join(', ')}` })
       continue
     }
+    if (input.revise) {
+      const outcome = await tryRevise(req, take, judged.thumbnail, input, deps, usage)
+      if (outcome.ok) {
+        log.push('revised')
+        return { take: outcome.take, flags: outcome.flags, thumbnail: outcome.thumbnail, modelCalls: calls + 1, log }
+      }
+      log.push(`revision rejected: ${outcome.reason}`)
+      return { take, flags: judged.flags, thumbnail: judged.thumbnail, modelCalls: calls + 1, log }
+    }
     return { take, flags: judged.flags, thumbnail: judged.thumbnail, modelCalls: calls, log }
   }
   return { index, modelCalls: calls, log }
+}
+
+type ReviseOutcome = { ok: true; take: GenTake; flags: Flag[]; thumbnail: string } | { ok: false; reason: string }
+
+/** One extra call after a take has passed every check (spec: variant D). No
+ *  repairs — a single attempt, parsed and checked exactly like a fresh take.
+ *  A thrown ContextLostError propagates; anything else is a rejection. */
+async function tryRevise(
+  req: GenRequest,
+  take: GenTake,
+  thumbnail: string,
+  input: EngineInput,
+  deps: EngineDeps,
+  usage: Usage,
+): Promise<ReviseOutcome> {
+  try {
+    const res = await deps.callModel(buildRevisePrompt(req, take), [thumbnail, ...(input.images ?? [])])
+    if (res.usage) {
+      usage.input_tokens += res.usage.input_tokens + (res.usage.cache_read_input_tokens ?? 0) + (res.usage.cache_creation_input_tokens ?? 0)
+      usage.output_tokens += res.usage.output_tokens
+    }
+    const revised = parseGenResponse(res.text)
+    if (!revised) return { ok: false, reason: 'reply could not be read' }
+    const st = staticCheck(revised)
+    if (!st.ok) return { ok: false, reason: `static: ${st.reason}` }
+    const raw = deps.renderer.compile(revised)
+    if (raw) return { ok: false, reason: `compile: ${rewriteCompileLog(raw).slice(0, 300)}` }
+    const judged = deps.renderer.judge(revised)
+    if (!judged.pass) return { ok: false, reason: `checks: ${judged.flags.join(', ')}` }
+    return { ok: true, take: revised, flags: judged.flags, thumbnail: judged.thumbnail }
+  } catch (e) {
+    if (e instanceof ContextLostError) throw e
+    return { ok: false, reason: String((e as Error)?.message ?? e).slice(0, 200) }
+  }
 }
 
 export async function generateTakes(input: EngineInput, deps: EngineDeps): Promise<EngineResult> {

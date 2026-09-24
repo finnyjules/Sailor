@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { GenTake } from '~~/shared/shadergen/contract'
 import { SHADERGEN_HELPERS, SHADERGEN_PREAMBLE } from '~~/shared/shadergen/contract'
-import { buildGenPrompt, buildRepairPrompt, buildReviewPrompt, parseGenResponse, parseReview, rewriteCompileLog, TAKE_ANGLES } from '~/lib/shadergen/prompt'
+import { buildGenPrompt, buildRepairPrompt, buildReviewPrompt, buildRevisePrompt, parseGenResponse, parseReview, rewriteCompileLog, TAKE_ANGLES } from '~/lib/shadergen/prompt'
 
 const reply = (over: Record<string, unknown> = {}) => JSON.stringify({
   name: '  Fogged glass  ', animated: true, generative: false, body: 'void main(){}',
@@ -53,6 +53,50 @@ describe('buildGenPrompt', () => {
     const p = buildRepairPrompt({ request: 'rain', takeIndex: 0 }, failed, "it did not compile:\nERROR: 0:12: 'foo' : undeclared")
     expect(p).toContain('was rejected: it did not compile')
     expect(p).toContain('BROKEN_BODY')
+  })
+
+  it('includes examples of other requests that met the quality bar, after base/references and before the take angle', () => {
+    const example1: GenTake = { name: 'Suminagashi', animated: true, generative: true, params: [{ uniform: 'u_rings', label: 'Rings', type: 'float', min: 2, max: 30, step: 0.5, default: 12 }], body: 'EXAMPLE_ONE_BODY' }
+    const example2: GenTake = { name: '70s lamp', animated: true, generative: true, params: [{ uniform: 'u_speed', label: 'Speed', type: 'float', min: 0, max: 2, step: 0.01, default: 0.6 }], body: 'EXAMPLE_TWO_BODY' }
+    const p = buildGenPrompt({
+      request: 'rain',
+      takeIndex: 0,
+      base: { name: 'Water Ripple', source: 'void main(){ /*ripple*/ }', params: [] },
+      examples: [
+        { name: 'ink', request: 'Ink bleeding into wet paper', take: example1 },
+        { name: 'lava', request: 'Make it a slow lava lamp', take: example2 },
+      ],
+    })
+    expect(p).toContain('Two effects that met the quality bar for other requests — match this level of craft (considered defaults, restraint, readable subject), not their look:')
+    expect(p).toContain('Ink bleeding into wet paper')
+    expect(p).toContain('(ink)')
+    expect(p).toContain('Suminagashi')
+    expect(p).toContain('EXAMPLE_ONE_BODY')
+    expect(p).toContain(JSON.stringify(example1.params))
+    expect(p).toContain('Make it a slow lava lamp')
+    expect(p).toContain('70s lamp')
+    expect(p).toContain('EXAMPLE_TWO_BODY')
+    // ordering: after base, before the take angle
+    expect(p.indexOf('Start from this existing effect')).toBeLessThan(p.indexOf('quality bar for other requests'))
+    expect(p.indexOf('quality bar for other requests')).toBeLessThan(p.indexOf(TAKE_ANGLES[0]))
+  })
+})
+
+describe('buildRevisePrompt', () => {
+  it('shows the current take and asks for the whole improved JSON object', () => {
+    const take: GenTake = {
+      name: 'Droplets',
+      animated: true,
+      generative: false,
+      params: [{ uniform: 'u_density', label: 'Drop count', type: 'float', min: 3, max: 20, step: 0.5, default: 8 }],
+      body: 'CURRENT_BODY',
+    }
+    const p = buildRevisePrompt({ request: 'rain on a window', takeIndex: 0 }, take)
+    expect(p).toContain('Request: "rain on a window"')
+    expect(p).toContain('The attached image is a render of your effect below, on the test photo, with its default dials.')
+    expect(p).toContain('Return the whole improved JSON object.')
+    expect(p).toContain('CURRENT_BODY')
+    expect(p).toContain(JSON.stringify(take.params))
   })
 })
 
