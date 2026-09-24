@@ -308,6 +308,10 @@ async function seedStarterGraph(nodeType: string, tries = 0) {
 // Start modal → canvas. Every pick (including skip = null) builds through the
 // canvas's materializeStart, so every blank project gets its Frame.
 function onStartModalStart(pick: StartPickId | null) {
+  // The pick belongs to this tab. The canvas is shared by every tab, so a quick
+  // switch during the awaits below must not land the pick in the other tab.
+  const tabId = activeTabId.value
+  const isCurrent = () => activeTabId.value === tabId
   startModalTabId.value = null
   nextTick(async () => {
     const canvas = vueCanvasRef.value
@@ -320,7 +324,8 @@ function onStartModalStart(pick: StartPickId | null) {
       return
     }
     await canvas.refreshSchema?.()
-    await canvas.materializeStart(pick)
+    if (!isCurrent()) return
+    await canvas.materializeStart(pick, { isCurrent })
   })
 }
 
@@ -4505,8 +4510,8 @@ function dismissRunResult() {
     <!-- Node search dialog (Space key) -->
     <NodeSearchDialog />
 
-    <!-- "Get Started" modal: shows once per fresh blank project. Pre-builds
-         a runnable graph from the user's intent (output × input × model). -->
+    <!-- Start modal: shows once per fresh blank project. Every choice, skip
+         included, lands on the canvas in a Frame (canvas.materializeStart). -->
     <StartProjectModal
       v-if="startModalTabId && activeTabId === startModalTabId"
       @start="onStartModalStart"

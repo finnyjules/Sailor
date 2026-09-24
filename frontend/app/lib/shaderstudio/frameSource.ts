@@ -24,3 +24,11 @@ export function makeShaderFrameSource(deps: ShaderFrameDeps): StudioFrameSource 
     },
   }
 }
+
+/** The duration a wired Frame should see. A shader only animates when something in it
+ *  moves (its own tracks, a moving source, or an effect on the clock); a still shader
+ *  reports 0 so the Frame treats it as a picture — downloads stay stills and the live
+ *  loop stays off. The node's clock never drops below 0.1 s, so it can't be the test. */
+export function shaderFrameDuration(moving: boolean, clockSeconds: () => number): number {
+  return moving ? clockSeconds() : 0
+}

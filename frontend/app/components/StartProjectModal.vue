@@ -22,7 +22,11 @@ const AI_PICTURE: Record<string, string> = {
 const aiPictureOk = reactive<Record<string, boolean>>({})
 const stillOk = reactive<Record<string, boolean>>({})
 const canvases = new Map<StartPickId, HTMLCanvasElement>()
-const hover = useStartTileHover()
+// Set by teardown. Paints still in flight when the modal closes can build a
+// SpaceType engine after disposeSpaceTypeStill ran (the engine is only held once
+// its dynamic imports resolve), so every late finisher disposes again.
+let closed = false
+const hover = useStartTileHover({ afterStop: () => disposeSpaceTypeStill() })
 
 function setCanvas(id: StartPickId, el: Element | null) {
   if (el) canvases.set(id, el as HTMLCanvasElement)
@@ -30,20 +34,23 @@ function setCanvas(id: StartPickId, el: Element | null) {
 
 onMounted(async () => {
   await nextTick()
+  if (closed) return
   const dpr = Math.min(2, window.devicePixelRatio || 1)
   await Promise.all([...canvases].map(async ([id, c]) => {
+    if (closed) return
     const r = c.getBoundingClientRect()
     // A hidden or not-yet-laid-out box measures 0×0 — skip it rather than
     // drawing at a made-up fallback size that would look wrong once shown.
     if (r.width <= 0 || r.height <= 0) return
     c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr)
     stillOk[id] = await paintStill(id, c, 0)
-  }))
+  })).finally(() => { if (closed) disposeSpaceTypeStill() })
 })
 
 // Every exit path — a pick, skip, close or unmount — must stop the hover rAF
 // loop and free the SpaceType WebGL engines, or they leak past the modal's life.
 function teardown() {
+  closed = true
   hover.stopAll()
   disposeSpaceTypeStill()
 }
@@ -85,7 +92,7 @@ onUnmounted(() => { window.removeEventListener('keydown', onKey); teardown() })
               class="group/tile relative overflow-hidden rounded-xl border border-white/10 hover:border-white/25 bg-[#0c0c0d] text-left transition-colors cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#4f8cff] focus-visible:outline-offset-2"
               :class="half.key === 'ai' && i === 0 ? 'col-span-2' : ''"
               @click="pick(t)"
-              @pointerenter="canvases.get(t.id) && hover.enter(t.id, canvases.get(t.id)!)"
+              @pointerenter="!closed && canvases.get(t.id) && hover.enter(t.id, canvases.get(t.id)!)"
               @pointerleave="hover.leave(t.id)"
             >
               <img

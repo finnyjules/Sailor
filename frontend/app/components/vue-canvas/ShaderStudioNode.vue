@@ -11,7 +11,7 @@ import { migrateShaderConfig } from '~/lib/shaderstudio/migrate'
 import { applyMotion } from '~/lib/shaderstudio/motion'
 import { makeImageSource, makeLiveSource, motionConfigFor, resolveSourceKind, type ResolvedSource } from '~/lib/shaderstudio/resolve'
 import { frameSourceEpoch, registerStudioFrameSource, unregisterStudioFrameSource } from '~/lib/studio/frameSource'
-import { makeShaderFrameSource } from '~/lib/shaderstudio/frameSource'
+import { makeShaderFrameSource, shaderFrameDuration } from '~/lib/shaderstudio/frameSource'
 import { loadImage } from '~/lib/shaderstudio/source'
 import { hydrateConfig, outputDims, type ShaderStudioConfig } from '~/lib/shaderstudio/types'
 import { registerStudioBaker, unregisterStudioBaker } from '~/lib/studio/cascade'
@@ -68,7 +68,8 @@ const shouldLoop = computed(() => animated.value || sourceAnimated.value || effe
 // the blob. renderFrame bails on `baking` AFTER its await (before it touches the shared
 // canvas), so a suspended tick can't corrupt the blob even though the gated loop keeps
 // ticking through the bake.
-let baking = false
+// A counter, not a boolean: two overlapping bakes must both finish before previews resume.
+let baking = 0
 // IntersectionObserver + hover listeners for the shared gated/throttled preview loop
 // attach to this root. Declared before the immediate watch below, which resolves the
 // source during setup (TDZ-safe: `renderStill` is a hoisted function, not this const).
@@ -113,7 +114,7 @@ async function renderFrame(t01: number) {
     const base = await src.getFrame(t01, w, h)
     // A bake may have started while this frame was suspended at the await above —
     // bail before touching the shared canvas so we can't corrupt the baked blob.
-    if (baking) return
+    if (baking > 0) return
     // The clock is normalized, but motion tracks and u_time are in seconds.
     const dur = clockDuration()
     const t = t01 * dur
@@ -162,7 +163,7 @@ async function bakeOutput(): Promise<Blob | null> {
   // touches the shared shaderFx canvas — see `let baking`. The whole body is inside
   // try/finally so `baking` is always cleared and a fresh still repaints, even on the
   // no-input early return.
-  baking = true
+  baking++
   try {
     let src = resolved.value
     // Re-resolve so a cascade picks up an upstream studio's just-published output;
@@ -180,7 +181,7 @@ async function bakeOutput(): Promise<Blob | null> {
     const out = shaderFx.render(composePasses(config.value, effectDef, 0), base, w, h)
     return await new Promise<Blob | null>(res => out.toBlob(b => res(b), 'image/png'))
   } finally {
-    baking = false
+    baking--
     renderStill()
   }
 }
@@ -192,44 +193,40 @@ async function bakeOutput(): Promise<Blob | null> {
 // render into a per-call canvas SYNCHRONOUSLY (no await between render and copy)
 // so a consumer never captures a frame another render clobbered mid-flight.
 const frameSnaps: HTMLCanvasElement[] = []
+let lastResolved: ResolvedSource | null = null
+watch(resolved, (r) => { if (r) lastResolved = r })
 let frameSnapIdx = 0
 const FRAME_SNAP_POOL = 4
 
-/** Render one frame at an arbitrary size/time for a wired Frame — follows
- *  bakeOutput's pipeline (resolve the source fresh, composePasses, shaderFx.render)
- *  but at the requested t01/w/h instead of a fixed still at t=0, and returns a
- *  private snapshot instead of the shared canvas. Takes the same `baking` lock as
- *  bakeOutput so the two can't corrupt each other's read of the shared canvas. */
+/** Render one frame at an arbitrary size/time for a wired Frame — the card's pipeline
+ *  (composePasses, shaderFx.render) at the requested t01/w/h, returned as a private
+ *  snapshot instead of the shared canvas. Called up to 30×/s while a Frame is hovered,
+ *  so it stays light: it reads the already-resolved source (the source watch above keeps
+ *  it current; only bakeOutput re-resolves fresh), takes no lock and repaints nothing.
+ *  No lock is needed: the render → snapshot copy below is synchronous, so no other
+ *  render can clobber the shared canvas between them. It waits for the effect catalog
+ *  first, or a first pull right after mount would render without the effect. */
 async function renderForFrame(t01: number, w: number, h: number): Promise<TexImageSource | null> {
-  baking = true
-  try {
-    let src = resolved.value
-    const kind = sourceKind.value
-    if (kind?.kind === 'live') src = makeLiveSource(kind.source)
-    else {
-      const url = kind?.kind === 'url' ? kind.url : ownSourceUrl.value
-      if (url) { try { src = makeImageSource(await loadImage(url)) } catch { /* keep previous */ } }
-    }
-    if (!src) return null
-    const base = await src.getFrame(t01, w, h)
-    const dur = src.duration > 0 ? src.duration : Math.max(0.1, config.value.motion?.duration ?? 4)
-    const t = t01 * dur
-    const cfg = animated.value ? applyMotion(motionConfigFor(config.value, dur), t) : config.value
-    const passes = composePasses(cfg, effectDef, t)
-    const live = shaderFx.render(passes, base, w, h)
-    const snap = (frameSnaps[frameSnapIdx] ??= document.createElement('canvas'))
-    frameSnapIdx = (frameSnapIdx + 1) % FRAME_SNAP_POOL
-    if (snap.width !== w) snap.width = w
-    if (snap.height !== h) snap.height = h
-    const ctx = snap.getContext('2d')
-    if (!ctx) return live
-    ctx.clearRect(0, 0, w, h)
-    ctx.drawImage(live as CanvasImageSource, 0, 0, w, h)
-    return snap
-  } finally {
-    baking = false
-    renderStill()
-  }
+  await catalogReady
+  // The source watch nulls `resolved` while it reloads a file; keep pulling the last
+  // picture through that gap as long as the node still has a source at all.
+  const src = resolved.value ?? (sourceKind.value || ownSourceUrl.value ? lastResolved : null)
+  if (!src) return null
+  const base = await src.getFrame(t01, w, h)
+  const dur = clockDuration()
+  const t = t01 * dur
+  const cfg = animated.value ? applyMotion(motionConfigFor(config.value, dur), t) : config.value
+  const passes = composePasses(cfg, effectDef, t)
+  const live = shaderFx.render(passes, base, w, h)
+  const snap = (frameSnaps[frameSnapIdx] ??= document.createElement('canvas'))
+  frameSnapIdx = (frameSnapIdx + 1) % FRAME_SNAP_POOL
+  if (snap.width !== w) snap.width = w
+  if (snap.height !== h) snap.height = h
+  const ctx = snap.getContext('2d')
+  if (!ctx) return live
+  ctx.clearRect(0, 0, w, h)
+  ctx.drawImage(live as CanvasImageSource, 0, 0, w, h)
+  return snap
 }
 
 /** The size a wired Frame should pull us at: the resolved source's own size, upscaled/
@@ -241,14 +238,21 @@ function frameSourceSize(): { w: number; h: number } {
   return outputDims(src.width, src.height, config.value.resolution || 1536, { upscale: true })
 }
 
+// Resolves once the effect catalog has loaded (or failed) — renderForFrame waits on it,
+// since the frame source is registered before the fetch returns.
+let catalogLoaded: () => void = () => {}
+const catalogReady = new Promise<void>(r => { catalogLoaded = r })
+
 onMounted(async () => {
   registerStudioBaker(props.id, bakeOutput)   // register first, before the async catalog fetch
   registerStudioFrameSource(props.id, makeShaderFrameSource({
     getSize: frameSourceSize,
-    getDuration: clockDuration,
+    // A still shader reports 0, so its Frame downloads a still and doesn't loop.
+    getDuration: () => shaderFrameDuration(shouldLoop.value, clockDuration),
     render: renderForFrame,
   }))
   catalog.value = await fetchShaderFxCatalog().catch(() => null)
+  catalogLoaded()
   renderStill()   // initial static preview; the gated loop animates only while hovered/visible
 })
 onBeforeUnmount(() => { unregisterStudioBaker(props.id); unregisterStudioFrameSource(props.id) })

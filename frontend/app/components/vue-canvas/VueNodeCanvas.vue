@@ -7794,8 +7794,9 @@ function wireStartPair(sourceId: string, sourceData: StartNodeData, generatorId:
 }
 
 /**
- * Drop a "start graph" onto an empty canvas — used by the Get Started modal
- * after the user picks a (from, to, model) combo. When `sourceNodeType` is
+ * Drop a "start graph" onto an empty canvas — used by the homepage seed (a tab
+ * opened from a homepage medium card; see seedStarterGraph in layouts/default.vue).
+ * The start modal builds through materializeStart instead. When `sourceNodeType` is
  * given, a matching artifact card lands to the left of the generator and is
  * wired into it via the first input port whose type matches the source's
  * primary output. Otherwise just the generator is placed (prompt-only path).
@@ -7844,10 +7845,30 @@ function materializeStartGraph(opts: { sourceNodeType?: string; generatorNodeTyp
  * the pick lands to its left, wired into layer1 when it makes a picture. The
  * node/edge recipe is the pure planStart (unit-tested); this mints and wires.
  * Returns false (and toasts) when a node type is missing from object_info.
+ *
+ * One canvas serves every tab, so this must not write into a tab the user has
+ * since switched to, nor land before the tab's own load (which would wipe it).
+ * It waits out an in-flight load, pins the workflow identity (`lastWorkflowRef`,
+ * the object the props.workflow watcher last accepted), and after every await
+ * bails with false if that identity changed, a load started, or the caller's
+ * `isCurrent` says its tab is no longer showing. The nodes and edges are then
+ * pushed in one synchronous block, so nothing can interleave with the build.
  */
-async function materializeStart(pick: StartPickId | null): Promise<boolean> {
+async function materializeStart(pick: StartPickId | null, opts: { isCurrent?: () => boolean } = {}): Promise<boolean> {
+  // A tab's own load replaces nodes.value when it lands — wait it out (bounded).
+  for (let waited = 0; applyingWorkflow.value && waited < 5000; waited += 50) {
+    await new Promise<void>(r => setTimeout(r, 50))
+  }
+  if (applyingWorkflow.value) return false
+  const wf = lastWorkflowRef
+  const stale = () => lastWorkflowRef !== wf || applyingWorkflow.value || (opts.isCurrent ? !opts.isCurrent() : false)
+  if (stale()) return false
+
   const plan = planStart(pick)
-  if (!objectInfo.value['Compositor']) await fetchObjectInfo()
+  if (!objectInfo.value['Compositor']) {
+    await fetchObjectInfo()
+    if (stale()) return false
+  }
   // Frontend-only studios (GradientStudio, SpaceType, …) never appear in object_info;
   // everything else must, or the pick can't be built.
   const missing = plan.nodes.find(n => !FRONTEND_ONLY_START_TYPES.has(n.nodeType) && !objectInfo.value[n.nodeType])
@@ -7856,14 +7877,19 @@ async function materializeStart(pick: StartPickId | null): Promise<boolean> {
     return false
   }
 
+  // The one await the build needs, done up front so the build below is synchronous.
+  let starterPicture: string | null = null
+  if (plan.nodes.some(pn => pn.starter === 'shaderPicture')) {
+    starterPicture = await uploadStarterPicture('/start-modal/shader-starter.webp')
+    if (stale()) return false
+  }
+
+  // ── Synchronous from here to the edges: no await, so no tab switch or load can land mid-build.
   const COL_W = 320
   const minted = new Map<string, any>()
   for (const pn of plan.nodes) {
     const widgets: Record<string, unknown> = { ...(pn.widgets ?? {}) }
-    if (pn.starter === 'shaderPicture') {
-      const name = await uploadStarterPicture('/start-modal/shader-starter.webp')
-      if (name) widgets.image = name
-    }
+    if (pn.starter === 'shaderPicture' && starterPicture) widgets.image = starterPicture
     if (pn.starter === 'scene3dObject') widgets.scene_state = starterSceneState()
     // Same starter effect the start tile renders, so the tile and the node agree.
     const properties = pn.starter === 'shaderEffect' ? { sailor_shaderStudio: starterShaderConfig() } : undefined
@@ -7891,10 +7917,48 @@ async function materializeStart(pick: StartPickId | null): Promise<boolean> {
       data: { dataType: String(out.type).toUpperCase() === '*' ? 'IMAGE' : String(out.type).toUpperCase() },
     } as any)
   }
+  // ── End of the synchronous build.
 
-  await nextTick()
-  fitView({ padding: 0.3 })
+  await fitStartNodes([...minted.values()].map(n => String(n.id)), stale)
   return true
+}
+
+/**
+ * Frame just-minted nodes. Vue Flow measures new nodes via ResizeObserver AFTER
+ * they render, so at nextTick most have no size and a fitView frames almost
+ * nothing. Wait (≤1 s) until every one carries real dimensions — each step races
+ * rAF against a 50 ms timer, since rAF pauses in a hidden tab or pane — then fit
+ * their union. The prompt bar and toolbar float over the lower edge of the view,
+ * so the fit adds 180 px of bottom margin or the cards' bottoms hide behind them.
+ * Skips the fit if the tab changed meanwhile (it would move the other tab's view).
+ */
+async function fitStartNodes(ids: string[], stale: () => boolean) {
+  await nextTick()
+  const deadline = performance.now() + 1000
+  let picked: any[] = []
+  for (;;) {
+    picked = (nodes.value as any[]).filter((n: any) => ids.includes(String(n.id)))
+    if (picked.length === ids.length && picked.every((n: any) => (n.dimensions?.width ?? 0) > 0)) break
+    if (performance.now() >= deadline) break
+    await new Promise<void>((r) => {
+      let done = false
+      const fin = () => { if (!done) { done = true; r() } }
+      requestAnimationFrame(fin)
+      setTimeout(fin, 50)
+    })
+  }
+  if (stale() || !picked.length) return
+  const rects = picked.map((n: any) => ({
+    x: n.position.x,
+    y: n.position.y,
+    width: n.dimensions?.width || 240,
+    height: n.dimensions?.height || 280,
+  }))
+  const minX = Math.min(...rects.map(r => r.x))
+  const minY = Math.min(...rects.map(r => r.y))
+  const maxX = Math.max(...rects.map(r => r.x + r.width))
+  const maxY = Math.max(...rects.map(r => r.y + r.height)) + 180
+  fitBounds({ x: minX, y: minY, width: maxX - minX, height: maxY - minY }, { padding: 0.06 })
 }
 
 const FRONTEND_ONLY_START_TYPES = new Set(['GradientStudio', 'ShaderStudio', 'TextureStudio', 'ShapeStudio', 'VectorType', 'SpaceType'])
@@ -7902,7 +7966,9 @@ const FRONTEND_ONLY_START_TYPES = new Set(['GradientStudio', 'ShaderStudio', 'Te
 /** Upload a bundled picture to ComfyUI's input folder so an Image card can hold it. */
 async function uploadStarterPicture(url: string): Promise<string | null> {
   try {
-    const blob = await (await fetch(url)).blob()
+    const pic = await fetch(url)
+    if (!pic.ok) throw new Error(`starter picture ${pic.status}`)
+    const blob = await pic.blob()
     const fd = new FormData()
     fd.append('image', new File([blob], url.split('/').pop()!, { type: blob.type }))
     fd.append('overwrite', 'true')
