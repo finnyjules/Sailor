@@ -8,6 +8,7 @@
  */
 import { LOCAL_RENDER_TYPES, PROVIDER_TYPES, isRunnerEligible } from '#shared/runner/eligibility'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
+import { NO_VALID_OUTPUTS_MESSAGE, pruneInvalidOutputs, type ComfyNodeError } from '#shared/runner/validate'
 import {
   GATE_CLASS, dependenciesOf, downstreamNodes, legNodes, upstreamStage,
   type ApiPrompt, type TakeGateState,
@@ -140,7 +141,13 @@ export interface StartRunInput {
   projectName: string | null
 }
 
-export interface LegStarted { runId: string; legId: string; promptIds: string[] }
+export interface LegStarted {
+  runId: string
+  legId: string
+  promptIds: string[]
+  /** ComfyUI's node_errors for outputs dropped because they fail validation (present only then). */
+  nodeErrors?: Record<string, ComfyNodeError>
+}
 export type GateActionName = 'continue' | 'redo' | 'restart'
 export interface GateActionInput { userId: string | null; runId: string; gateId: string; action: GateActionName; takes?: number[] }
 export interface PausedGate { runId: string; promptId: string; nodeId: string; choices: GateChoice[]; picked: number[] }
@@ -834,12 +841,22 @@ export function createEngine(deps: EngineDeps) {
     // The server's families decide; a browser that disagrees is refused, with
     // a marker it reads as "run this on ComfyUI instead" (isRunnerDeclined).
     const families = deps.families?.() ?? NO_FAMILIES
+    // ComfyUI's validate_prompt first: outputs that fail validation are
+    // dropped with what only they need (shared/runner/validate.ts); the rest
+    // is what runs, is checked, priced and held. Nothing of a dropped node runs.
+    const prompts: ApiPrompt[] = []
+    let nodeErrors: Record<string, ComfyNodeError> | undefined
     for (const p of takes) {
-      if (!p || typeof p !== 'object' || !isRunnerEligible(p as ApiPrompt, families, { hosted: deps.hosted() })) {
+      if (!p || typeof p !== 'object') throw refuse('This workflow can’t run on the Sailor runner', 400, { reason: RUNNER_NOT_ELIGIBLE })
+      const pruned = pruneInvalidOutputs(p as ApiPrompt)
+      // ComfyUI: "Prompt outputs failed validation". No marker: ComfyUI would refuse it too.
+      if (pruned.failed) throw refuse(NO_VALID_OUTPUTS_MESSAGE, 400, { node_errors: pruned.nodeErrors })
+      if (!isRunnerEligible(pruned.prompt, families, { hosted: deps.hosted(), afterPruning: pruned.dropped.length > 0 })) {
         throw refuse('This workflow can’t run on the Sailor runner', 400, { reason: RUNNER_NOT_ELIGIBLE })
       }
+      if (pruned.dropped.length) nodeErrors ??= pruned.nodeErrors
+      prompts.push(pruned.prompt)
     }
-    const prompts = takes as ApiPrompt[]
     // Fail closed on price, before anything is held: a provider node that
     // prices at 0 (a class the price book misses by name) never runs free.
     if (deps.hosted()) {
@@ -893,7 +910,7 @@ export function createEngine(deps: EngineDeps) {
     const leg = await openLeg(run, 'run', null, run.takes.map(t => t.index))
     await persist(run)
     launch(run, leg)
-    return { runId: run.id, legId: leg.id, promptIds: leg.takes.map(t => stageKeyOf(leg.id, t)) }
+    return { runId: run.id, legId: leg.id, promptIds: leg.takes.map(t => stageKeyOf(leg.id, t)), ...(nodeErrors ? { nodeErrors } : {}) }
   }
 
   function nudge(requestId: string): boolean {

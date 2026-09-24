@@ -42,6 +42,11 @@ export interface RunnerNodeRule {
    * the whole prompt with its own message before running (and charging) a thing.
    */
   widgets?: Readonly<Record<string, RunnerWidgetSpec>>
+  /**
+   * Inputs (not widgets) ComfyUI's schema marks required: missing, the node
+   * fails validation (required_input_missing) and ComfyUI drops its output.
+   */
+  required?: readonly string[]
   /** Output slots no node in the prompt may read (e.g. the Compositor's protect_mask and video). */
   outputsNotLinked?: readonly number[]
   /** Every node reading this one must be one of these classes. */
@@ -80,6 +85,13 @@ export interface FrameLimits {
 export interface RunnerEligibilityOptions {
   /** Hosted: the Frame's artboard is capped lower. */
   hosted?: boolean
+  /**
+   * The prompt is what is left after ComfyUI's pruning dropped some outputs
+   * (shared/runner/validate.ts). What is left may be only cards (a blank
+   * project: an Image card beside an empty Frame): it runs, with nothing to
+   * call or charge, as ComfyUI runs it.
+   */
+  afterPruning?: boolean
 }
 
 /** A widget as ComfyUI's validation reads it. */
@@ -278,6 +290,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     family: 'frame',
     local: 'render',
     mustLink: ['layer1'],
+    required: ['layer1'],
     widgets: compositorWidgets(),
     outputsNotLinked: [1, 2],
     linkSources: Object.fromEntries([
@@ -479,12 +492,28 @@ function carriesImage(prompt: ApiPrompt, link: [string, number], depth = 0): boo
   return IMAGE_OUTPUT_CLASSES.has(from.class_type)
 }
 
-/** ComfyUI's validate_inputs for one widget (execution.py): present if required, converts, in range, in the options. */
-export function widgetValid(inputs: Record<string, unknown>, name: string, spec: RunnerWidgetSpec): boolean {
-  if (!Object.prototype.hasOwnProperty.call(inputs, name)) return !spec.required
+/** One of ComfyUI's validation errors (execution.py validate_inputs), in its own shape. */
+export interface ComfyValidationError {
+  type: string
+  message: string
+  details: string
+  extra_info: { input_name: string }
+}
+
+/**
+ * ComfyUI's validate_inputs for one widget (execution.py): present if
+ * required, converts to its type, in range, in the options. Returns the
+ * error ComfyUI would report, 'wired' for a wire into the widget (valid to
+ * ComfyUI when the types match; the runner leaves it to ComfyUI), or null.
+ */
+export function widgetError(inputs: Record<string, unknown>, name: string, spec: RunnerWidgetSpec): ComfyValidationError | 'wired' | null {
+  const err = (type: string, message: string, details = name): ComfyValidationError => ({ type, message, details, extra_info: { input_name: name } })
+  if (!Object.prototype.hasOwnProperty.call(inputs, name)) return spec.required ? err('required_input_missing', 'Required input is missing') : null
   const v = inputs[name]
-  // A wire into a widget, a list that is not a wire, or an object: left to ComfyUI.
-  if (Array.isArray(v) || (v !== null && typeof v === 'object')) return false
+  if (isLink(v)) return 'wired'
+  if (Array.isArray(v)) return err('bad_linked_input', 'Bad linked input, must be a length-2 list of [node_id, slot_index]')
+  // An object ({"__value__": …}) is unwrapped by ComfyUI; the runner leaves it to ComfyUI.
+  if (v !== null && typeof v === 'object') return 'wired'
   let n: number | null = null
   switch (spec.type) {
     case 'FLOAT':
@@ -496,15 +525,44 @@ export function widgetValid(inputs: Record<string, unknown>, name: string, spec:
       break
     case 'COMBO':
       return typeof v === 'string' && (spec.options ?? []).includes(v)
+        ? null
+        : err('value_not_in_list', 'Value not in list', `${name}: '${String(v)}' not in [${(spec.options ?? []).map(o => `'${o}'`).join(', ')}]`)
     default:
       // BOOLEAN is bool(v) and STRING is str(v): every plain value converts.
-      return true
+      return null
   }
-  if (n === null) return false
+  if (n === null) return err('invalid_input_type', `Failed to convert an input value to a ${spec.type} value`, `${name}, ${String(v)}`)
   // NaN passes both checks, as it does in Python.
-  if (spec.min !== undefined && n < spec.min) return false
-  if (spec.max !== undefined && n > spec.max) return false
-  return true
+  if (spec.min !== undefined && n < spec.min) return err('value_smaller_than_min', `Value ${n} smaller than min of ${spec.min}`)
+  if (spec.max !== undefined && n > spec.max) return err('value_bigger_than_max', `Value ${n} bigger than max of ${spec.max}`)
+  return null
+}
+
+/** Whether a widget passes ComfyUI's validation and is not wired (the runner reads its value). */
+export function widgetValid(inputs: Record<string, unknown>, name: string, spec: RunnerWidgetSpec): boolean {
+  return widgetError(inputs, name, spec) === null
+}
+
+/**
+ * The errors ComfyUI's validate_inputs gives this node on its own (not its
+ * upstream), for the part of validation the runner ports: required inputs
+ * present (`required` and required widgets), widget values valid. A class
+ * with no rule row has nothing ported and gives none.
+ */
+export function nodeValidationErrors(classType: string, inputs: Record<string, unknown>): ComfyValidationError[] {
+  const rule = RUNNER_NODE_RULES[classType]
+  if (!rule) return []
+  const out: ComfyValidationError[] = []
+  for (const name of rule.required ?? []) {
+    if (!Object.prototype.hasOwnProperty.call(inputs, name)) {
+      out.push({ type: 'required_input_missing', message: 'Required input is missing', details: name, extra_info: { input_name: name } })
+    }
+  }
+  for (const [name, spec] of Object.entries(rule.widgets ?? {})) {
+    const e = widgetError(inputs, name, spec)
+    if (e && e !== 'wired') out.push(e)
+  }
+  return out
 }
 
 /** Whether a JSON text input carries a non-empty list under `key` (as `json.loads(v or "{}")` reads it). */
@@ -587,5 +645,5 @@ export function isRunnerEligible(prompt: ApiPrompt | null | undefined, families:
     const ct = prompt[id]!.class_type
     if (PROVIDER_TYPES.has(ct) || LOCAL_RENDER_TYPES.has(ct)) work++
   }
-  return work > 0
+  return work > 0 || !!opts.afterPruning
 }

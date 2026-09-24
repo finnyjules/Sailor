@@ -133,12 +133,13 @@ describe('eligibility: family frame', () => {
   })
 })
 
-describe('the blank-project Frame (no layer 1) stays with ComfyUI', () => {
+describe('the blank-project Frame (no layer 1) is never rendered', () => {
   // ComfyUI's validation marks a missing required input — layer1 included —
   // required_input_missing, and validate_prompt drops that Frame (and what
-  // reads it): the prompt is refused, or, with another good output, succeeds
-  // without rendering the Frame. The runner does not render what ComfyUI drops.
-  it('an empty Frame, and a Frame on an empty Frame, are not taken', () => {
+  // reads it). The runner never renders it either: node by node it is not
+  // taken (below); whole-prompt, validate.ts drops it first and runs the rest
+  // (runner-validate-prompt.unit.spec.ts).
+  it('an empty Frame, and a Frame on an empty Frame, are not taken node by node', () => {
     const empty: ApiPrompt = { 3: frame({}) }
     const chained: ApiPrompt = { 3: frame({}), 5: frame({ layer1: ['3', 0] }) }
     const withCard: ApiPrompt = { 1: card('a.png'), 3: frame({}), 5: frame({ layer1: ['3', 0] }) }

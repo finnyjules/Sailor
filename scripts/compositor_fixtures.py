@@ -23,6 +23,7 @@ The network is blocked (as in runner_builder_fixtures.py): every outbound
 connect and DNS lookup raises and the provider keys are removed before any
 node module is imported. Nothing here needs the network.
 """
+import asyncio
 import base64
 import io
 import json
@@ -397,6 +398,80 @@ def run_case(c: dict) -> dict:
 LARGE = 200_000
 
 
+# ── ComfyUI's whole-prompt rule (execution.validate_prompt) ────────────────
+
+VALIDATE_OUT = os.path.join(ROOT, "frontend", "tests", "unit", "fixtures", "runner-validate-prompt.json")
+
+
+def _first_option(class_type: str, name: str):
+    it = nodes.NODE_CLASS_MAPPINGS[class_type].INPUT_TYPES()
+    spec = it.get("required", {}).get(name) or it.get("optional", {}).get(name)
+    opts = spec[0] if isinstance(spec[0], list) else spec[1].get("options")
+    return opts[0]
+
+
+def _frame(**over) -> dict:
+    w = {}
+    for i in range(1, 17):
+        w.update({f"layer{i}_x": 0.0, f"layer{i}_y": 0.0, f"layer{i}_rotation": 0.0, f"layer{i}_scale": 1.0,
+                  f"layer{i}_opacity": 1.0, f"layer{i}_blend": "normal", f"layer{i}_z": float(i),
+                  f"layer{i}_protect": False, f"layer{i}_cloner": ""})
+    w.update({"width": 0, "height": 0, "motion_params": ""})
+    w.update(over)
+    return {"class_type": "Compositor", "inputs": w}
+
+
+def _card(image="land.png", **links) -> dict:
+    return {"class_type": "Image", "inputs": {"image": image, "export": False, "filename_prefix": "ComfyUI", "format": "png",
+                                              "quality": 90, "lossless_webp": False, "png_compression": 4, "scale": 1.0,
+                                              "max_dimension": 0, "embed_metadata": True, "batch_index": -1, **links}}
+
+
+def validate_cases() -> list:
+    gen = {"class_type": "GenerateImageNode", "inputs": {"model": "flux-schnell", "prompt": "a fox", "aspect_ratio": "1:1", "seed": 0, "model_options": "{}"}}
+    vid = {"class_type": "GenerateVideoNode", "inputs": {"model": "veo-3.1", "prompt": "it runs", "aspect_ratio": "16:9",
+                                                         "duration": _first_option("GenerateVideoNode", "duration"), "seed": 0,
+                                                         "model_options": "{}", "image": ["2", 0]}}
+    gate = {"class_type": "ComfyGateNode", "inputs": {"data_in": ["1", 0], "bypass": False}}
+    video = {"class_type": "Video", "inputs": {"file": "", "export": False, "filename_prefix": "video/ComfyUI", "source": ["3", 0]}}
+    no_rot = _frame(layer1=["1", 0])
+    del no_rot["inputs"]["layer9_rotation"]
+    return [
+        ("the blank project: an empty Frame, a Frame on it, an Image card (history c7690393)",
+         {"1": _card(), "3": _frame(), "5": _frame(layer1=["3", 0])}),
+        ("image → Gate → video, and a stray empty Frame",
+         {"1": gen, "2": gate, "3": vid, "4": video, "9": _frame()}),
+        ("only an empty Frame", {"3": _frame()}),
+        ("an empty Frame and a Frame on it", {"3": _frame(), "5": _frame(layer1=["3", 0])}),
+        ("a Frame with a scale over its max, a good Frame, an Image card",
+         {"1": _card(), "3": _frame(layer1=["1", 0], layer1_scale=5.0), "4": _frame(layer1=["1", 0])}),
+        ("a Frame with a blend not in the list, read by an Image card",
+         {"1": _card(), "3": _frame(layer1=["1", 0], layer2_blend="lighter"), "6": _card("", images=["3", 0])}),
+        ("a Frame missing a required widget", {"1": _card(), "3": no_rot}),
+        ("everything valid: Image → Frame → Image",
+         {"1": _card(), "3": _frame(layer1=["1", 0]), "6": _card("", images=["3", 0])}),
+    ]
+
+
+def run_validate_cases() -> list:
+    import execution
+    # The whole node registry, as the server builds it (no custom nodes; the network is blocked).
+    asyncio.run(nodes.init_extra_nodes(init_custom_nodes=False, init_api_nodes=True))
+    out = []
+    for name, prompt in validate_cases():
+        ok, err, good, node_errors = asyncio.run(execution.validate_prompt("fixture", json.loads(json.dumps(prompt)), None))
+        out.append({
+            "name": name,
+            "prompt": prompt,
+            "ok": bool(ok),
+            "error": None if ok else err["type"],
+            "goodOutputs": sorted(good),
+            "nodeErrors": {k: {"types": [e["type"] for e in v["errors"]], "dependent_outputs": sorted(v["dependent_outputs"]),
+                               "class_type": v["class_type"]} for k, v in node_errors.items()},
+        })
+    return out
+
+
 def main() -> None:
     torch.set_num_threads(1)
     decoded = {}
@@ -425,6 +500,12 @@ def main() -> None:
         json.dump(doc, f, indent=1, sort_keys=True)
         f.write("\n")
     print(f"wrote {len(cases)} compositor cases, {len(decoded)} decoded pictures → {os.path.relpath(OUT, ROOT)}")
+    vcases = run_validate_cases()
+    with open(VALIDATE_OUT, "w") as f:
+        json.dump({"note": "Written by scripts/compositor_fixtures.py from the real execution.validate_prompt. Do not edit.",
+                   "cases": vcases}, f, indent=1, sort_keys=True)
+        f.write("\n")
+    print(f"wrote {len(vcases)} validate_prompt cases → {os.path.relpath(VALIDATE_OUT, ROOT)}")
 
 
 if __name__ == "__main__":
