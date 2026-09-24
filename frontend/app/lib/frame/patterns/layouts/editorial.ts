@@ -63,6 +63,7 @@ export const edCover: LayoutDef = {
 export const edFramed: LayoutDef = {
   id: 'edFramed', name: 'Framed', fits: [...ALL], style: 'editorial',
   needs: { image: true },
+  arrLabels: ['Larger image', 'Smaller image'],
   fn(S, { c, ph, lines, arr = 0 }) {
     const { X, SPAN, L, M, RH, GAP, INFO, DISPLAY, PHOTO_ASPECT, countLines, blockH, sizeFor, info, disp, logo, logoH, clear } = S
     const cx = centre(S), els: El[] = []
@@ -122,6 +123,7 @@ export const edQuiet: LayoutDef = {
 export const edDiptych: LayoutDef = {
   id: 'edDiptych', name: 'Diptych', fits: [...ALL], style: 'editorial',
   needs: { image: true },
+  arrLabels: ['Image left', 'Image right'],
   fn(S, { c, ph, lines, arr = 0 }) {
     const { W, H, M, L, RH, INFO, DISPLAY, countLines, blockH, sizeFor, info, disp, cover, logo, logoH, button, gapBelow, inset } = S
     const els: El[] = [cover(ph)], right = arr !== 1, pad = inset()

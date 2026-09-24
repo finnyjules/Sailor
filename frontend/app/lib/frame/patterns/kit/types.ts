@@ -105,6 +105,12 @@ export interface LayoutDef {
   /** One row for wide formats (the prototype's `wideOnly`): offered only when the sheet the
    *  layout composes on is wide (`H < 70` — the band a format leaves uncovered, if it has one). */
   wideOnly?: boolean
+  /** Frame layout decisions, Task 5: the Arrangement pills' words, indexed by `LayoutCtx.arr` —
+   *  what the user sees change (Run-off: "Right edge", "Left edge", "Lower"). Required, one per
+   *  arrangement, on every layout whose `fn` reads `arr` or the seeded `r` (the seed moves with
+   *  `arr`); absent on the rest, whose arrangement never varies. Sentence case, ≤ 14 characters,
+   *  distinct within the layout. There is no fallback to letters. */
+  arrLabels?: string[]
   /** Frame layout decisions, Task 4 (overlap accent, ruling D2): the role of the line this layout
    *  sets big, in the accent, to cross another (Overprint's details, Number behind's number). With
    *  recolour off the user's line keeps its own colour, so — when the accent differs visibly from

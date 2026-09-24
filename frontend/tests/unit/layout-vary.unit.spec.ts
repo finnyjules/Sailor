@@ -133,6 +133,17 @@ describe('useLayoutVary', () => {
     if (lines) expect(lines.options.map(o => o.label).sort()).toEqual(['Weather / Report', 'Weather Report'].sort())
   })
 
+  it('the Arrangement row names each arrangement in the layout\'s own words, never A / B / C', () => {
+    const { vary } = harness({ sailor_posterState: { patternId: 'runoff', seed: 1 } })
+    const arr = vary.choices.value.find(r => r.key === 'arr')!
+    expect(arr.label).toBe('Arrangement')
+    expect(arr.options.map(o => o.label)).toEqual(['Right edge', 'Left edge', 'Lower'])
+    vary.select('statement')
+    const st = vary.choices.value.find(r => r.key === 'arr')!
+    expect(st.options.map(o => o.label)).toEqual(['Title low', 'Title high'])
+    for (const o of [...arr.options, ...st.options]) expect(o.label).not.toMatch(/^[A-C]$/)
+  })
+
   it('jump(i) applies that variation; select(id) switches layout and applies its first variation', () => {
     const { vary, editor, remember } = harness({ sailor_posterState: { patternId: 'statement', seed: 1 } })
     vary.jump(2)

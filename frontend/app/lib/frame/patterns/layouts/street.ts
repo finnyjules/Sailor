@@ -88,6 +88,8 @@ function streetFoot(S: Sheet, c: Content, o: { color?: Colour; bg?: Colour; fg?:
 /** Fill — every line in capitals fitted to the full width, a rotated tag across the last one. */
 export const stFill: LayoutDef = {
   id: 'stFill', name: 'Fill', fits: [...ALL], style: 'street',
+  // arr 1 moves the image left; arr 2 turns the tag the other way (it tilts down, 6°, not up 7°).
+  arrLabels: ['Image right', 'Image left', 'Tilted tag'],
   fn(S, { c, ph, lines, arr = 0 }) {
     const { X, XR, SPAN, L, M, RH, GAP, PHOTO_ASPECT, tag } = S
     const side = sideLine(c)

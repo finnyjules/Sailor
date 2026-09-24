@@ -159,7 +159,8 @@ const sameChoice = (a: Choice, b: Choice) =>
 
 const AXES: { key: keyof Choice; label: string; values?: unknown[]; labels?: string[] }[] = [
   { key: 'lines', label: 'Line breaks' },
-  { key: 'arr', label: 'Arrangement', values: [0, 1, 2], labels: ['A', 'B', 'C'] },
+  // Frame layout decisions, Task 5: each layout names its own arrangements (`LayoutDef.arrLabels`).
+  { key: 'arr', label: 'Arrangement', values: [0, 1, 2] },
   { key: 'scale', label: 'Scale', values: ['full', 'quiet'], labels: ['Full', 'Quieter'] },
   { key: 'side', label: 'Image side', values: ['right', 'left'], labels: ['Right', 'Left'] },
   // Ruling R7: only a platform-button format with an action line offers it (Performance only).
@@ -512,17 +513,24 @@ export function useLayoutVary(src: LayoutVarySource): {
   const choices = computed<ChoiceRow[]>(() => {
     const list = candidates.value
     const cur = list[index.value]?.choice
+    const arrLabels = layoutById(layoutId.value)?.arrLabels
     const rows: ChoiceRow[] = []
     for (const ax of AXES) {
       const order = ax.key === 'lines' ? lineLabels.value.map(o => o.v) : ax.values!
       const present = new Set(list.map(c => axisValue(c.choice, ax.key)))
       const values = order.filter(v => present.has(v as never))
       if (values.length < 2) continue
+      const labelOf = (v: unknown): string | undefined => ax.key === 'lines' ? lineLabels.value[v as number]!.label
+        : ax.key === 'arr' ? arrLabels?.[v as number]
+          : ax.labels![ax.values!.indexOf(v)]!
+      // No fallback to letters: an arrangement the layout does not name is not offered as a pill
+      // (the catalog test holds every layout whose arrangement can vary to naming each one).
+      if (values.some(v => labelOf(v) == null)) continue
       rows.push({
         key: ax.key, label: ax.label,
         options: values.map(v => ({
           value: v,
-          label: ax.key === 'lines' ? lineLabels.value[v as number]!.label : ax.labels![ax.values!.indexOf(v)]!,
+          label: labelOf(v)!,
           on: cur != null && axisValue(cur, ax.key) === v,
         })),
       })

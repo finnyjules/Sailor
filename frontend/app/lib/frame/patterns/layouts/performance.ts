@@ -96,6 +96,7 @@ export function headStack(S: Sheet, c: Content, lines: string[], a: number, b: n
 export const perfOffer: LayoutDef = {
   id: 'perfOffer', name: 'Offer', fits: [...ALL], style: 'performance', oneLineFirst: true,
   needs: { image: true },
+  arrLabels: ['Two bands', 'One band'],
   fn(S, { c, ph, lines, arr = 0 }) {
     const { X, SPAN, RH, GAP, H, M, DISPLAY, sizeFor, blockH, disp, cover, band, logo, logoH } = S
     const foot = offerStack(S, c, 1, 12)
@@ -119,6 +120,7 @@ export const perfOffer: LayoutDef = {
 export const perfSticker: LayoutDef = {
   id: 'perfSticker', name: 'Sticker', fits: [...ALL], style: 'performance', oneLineFirst: true,
   needs: { image: true, number: true },
+  arrLabels: ['Sticker right', 'Sticker left'],
   fn(S, { c, ph, lines, arr = 0 }) {
     const { X, XR, SPAN, H, RH, GAP, CAP, INFO, fitSize, disp, cover, band, q } = S
     const head = headStack(S, c, lines, 1, 12, 'left', 2.8)
@@ -147,6 +149,7 @@ export const perfSticker: LayoutDef = {
 export const perfPriceTag: LayoutDef = {
   id: 'perfPriceTag', name: 'Price tag', fits: [...ALL], style: 'performance', oneLineFirst: true,
   needs: { image: true, number: true },
+  arrLabels: ['Image left', 'Image right'],
   fn(S, { c, ph, lines, arr = 0 }) {
     const { XR, G, W, H, M, RH, CAP, DISPLAY, SECOND, fitSize, disp, cover, logo, logoH, clear, gapBelow, groupGap, inset } = S
     const right = arr !== 1, split = XR(6) + G / 2
@@ -168,6 +171,7 @@ export const perfPriceTag: LayoutDef = {
 export const perfCard: LayoutDef = {
   id: 'perfCard', name: 'Card', fits: [...ALL], style: 'performance', oneLineFirst: true,
   needs: { image: true },
+  arrLabels: ['Card left', 'Card right'],
   fn(S, { c, ph, lines, arr = 0 }) {
     const { X, SPAN, L, M, INFO, cover, band } = S
     const head = headStack(S, c, lines, 1, 12)

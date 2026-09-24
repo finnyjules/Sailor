@@ -117,6 +117,8 @@ export const split: LayoutDef = {
 /** Scatter — letters dealt into a 4 × 7 module grid, still in reading order. */
 export const scatter: LayoutDef = {
   id: 'scatter', name: 'Scatter', fits: ['word', 'phrase'],
+  // Each arrangement is its own seeded deal of the letters into the cells.
+  arrLabels: ['Deal 1', 'Deal 2', 'Deal 3'],
   fn(S, { c, ph, r }) {
     const { X, SPAN, L, M, RH, GAP, CAP, fitSize, disp, infoRow, photoIn, FOOT3 } = S
     const letters = [...c.title.replace(/\s+/g, '')]

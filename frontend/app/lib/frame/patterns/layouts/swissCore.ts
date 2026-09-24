@@ -19,6 +19,7 @@ export const runoff: LayoutDef = {
   id: 'runoff', name: 'Run-off', fits: [...ALL],
   oneLineFirst: true, keepScale: true,
   premise: { bleed: ['title'] },
+  arrLabels: ['Right edge', 'Left edge', 'Lower'],
   fn(S, { c, ph, kind, lines, arr = 0 }) {
     const { X, XR, SPAN, L, M, GAP, CAP, DISPLAY, fitSize, w100, disp, sec, infoRow, photoIn, FOOT2 } = S
     const base = arr === 2 ? L(12) : L(10)                 // A: right edge · B: left edge · C: lower baseline
@@ -42,6 +43,8 @@ export const runoff: LayoutDef = {
 /** Statement — one line per word (or balanced lines), fitted to the margins, top or foot. */
 export const statement: LayoutDef = {
   id: 'statement', name: 'Statement', fits: [...ALL],
+  // Its seed (index 1) draws the title to the foot for arr 0 and 2 (the same run) and to the top for arr 1.
+  arrLabels: ['Title low', 'Title high'],
   fn(S, { c, ph, r, lines }) {
     const { X, SPAN, L, M, GAP, DISPLAY, sizeFor, blockH, disp, infoRow, photoIn, FOOT3 } = S
     const top = r() < 0.5

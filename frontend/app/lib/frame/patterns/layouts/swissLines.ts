@@ -48,6 +48,8 @@ export const spacedLines: LayoutDef = {
 /** Ragged — lines start on different columns, set on one baseline rhythm. */
 export const ragged: LayoutDef = {
   id: 'ragged', name: 'Ragged', fits: [...LINES],
+  // Its seed (index 10) starts the second line on column 4, 7 or 5 for arr 0, 1, 2.
+  arrLabels: ['Short indent', 'Long indent', 'Medium indent'],
   fn(S, { c, ph, r, words }) {
     const { X, SPAN, L, M, GAP, CAP, DISPLAY, w100, disp, infoRow, photoIn, pick, FOOT3 } = S
     const starts = words.map((_, i) => i === 0 ? 1 : pick(r, [1, 3, 4, 5, 7]))
@@ -128,6 +130,8 @@ export const block: LayoutDef = {
 export const diagonal: LayoutDef = {
   id: 'diagonal', name: 'Diagonal', fits: [...ALL],
   premise: { rotated: ['title'] },
+  // Its seed (index 18) turns the title 36° for arr 0 and 2 (the same run) and 26° for arr 1.
+  arrLabels: ['Steep', 'Gentle'],
   fn(S, { c, ph, r, lines }) {
     const { X, XR, SPAN, L, M, GAP, CAP, DISPLAY, SECOND, INFO, w100, blockH, countLines, disp, sec, info, photoIn, pick } = S
     const deg = pick(r, [-18, -26, -36]), a = Math.abs(deg) * Math.PI / 180
