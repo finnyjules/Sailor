@@ -306,7 +306,7 @@ test.describe('Frame Layout tab — layout calls', () => {
     await expect.poll(async () => (await frame(page)).poster?.patternId).toBe('runoff')
     const row = page.locator('[data-choice="arr"]')
     await expect(row).toBeVisible()
-    const names = await row.getByRole('radio').allTextContents()
+    const names = await row.locator('button').allTextContents()
     expect(names.map(n => n.trim())).toEqual(expect.arrayContaining(['Right edge']))
     for (const n of names) expect(n.trim()).not.toMatch(/^[ABC]$/)
   })
