@@ -95,4 +95,20 @@ describe('prepareMorph', () => {
   it('returns an empty path for an empty side', () => {
     expect(prepareMorph('', B, 'letters')(0.5)).toBe('')
   })
+  // USER 09-24: "letter by letter doesnt seem to work" — it paired letters but turned them all at
+  // once, so it looked like Whole shape. Letters now start one after another across the bar.
+  it('letters: turns one letter after another; shape turns them together', () => {
+    const a = sq(0, 0, 10) + sq(100, 0, 10), b = sq(0, 0, 30) + sq(100, 0, 30)
+    const width = (d: string, right: boolean) => {
+      const xs = ringsFromD(d).filter(r => (r[0]![0] > 50) === right).flat().map(p => p[0])
+      return Math.max(...xs) - Math.min(...xs)
+    }
+    const widthLeft = (d: string) => width(d, false), widthRight = (d: string) => width(d, true)
+    const L = prepareMorph(a, b, 'letters'), S = prepareMorph(a, b, 'shape')
+    expect(widthLeft(L(0.25))).toBeGreaterThan(12)            // the first letter is under way…
+    expect(widthRight(L(0.25))).toBeCloseTo(10, 0)            // …the last has not started
+    expect(widthLeft(L(0.75))).toBeCloseTo(30, 0)             // the first has landed…
+    expect(widthRight(L(0.75))).toBeLessThan(28)              // …the last is still turning
+    expect(widthRight(S(0.25))).toBeGreaterThan(12)           // whole shape: all at once
+  })
 })

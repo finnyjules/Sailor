@@ -172,7 +172,9 @@ const centroid = (rings: P[][]): P => {
   for (const p of rings[0] ?? []) { x += p[0]; y += p[1]; n++ }
   return n ? [x / n, y / n] : [0, 0]
 }
-const smooth01 = (e0: number, e1: number, x: number) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t) }
+/** Letter by letter: the share of the bar each letter takes to turn. */
+const LETTER_WINDOW = 0.5
+const smooth01 =(e0: number, e1: number, x: number) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t) }
 
 function build(dA: string, dB: string, style: MorphStyle): (t: number) => string {
   const rA = ringsFromD(dA), rB = ringsFromD(dB)
@@ -188,16 +190,29 @@ function build(dA: string, dB: string, style: MorphStyle): (t: number) => string
   }
   const links = alignPieces(pA.length, pB.length)
   const matched = links.map(l => (l.a != null && l.b != null ? pairGlyphs(pin(pA[l.a]!.rings), pin(pB[l.b]!.rings)) : null))
+  // Letter by letter means one AFTER another: each matched link turns in its own window of the
+  // bar, starting in reading order (half the bar each, starts spread evenly); an extra keeps its
+  // partner's clock. Without this, letters and whole shape looked the same (USER 09-24).
+  const nMatched = matched.filter(Boolean).length
+  const rank = new Map<number, number>()
+  links.forEach((_, k) => { if (matched[k]) rank.set(k, rank.size) })
+  const clock = (k: number, t: number) => {
+    const r = rank.get(k) ?? rank.get(links[k]!.partner!) ?? 0
+    if (nMatched < 2) return t
+    const w = LETTER_WINDOW, s = (r / (nMatched - 1)) * (1 - w)
+    return Math.max(0, Math.min(1, (t - s) / w))
+  }
   return (t) => {
     const out: P[][] = []
-    const now = links.map((l, k) => (matched[k] ? evalGlyph(matched[k]!, t, 'medial') : null))
+    const now = links.map((l, k) => (matched[k] ? evalGlyph(matched[k]!, clock(k, t), 'medial') : null))
     links.forEach((l, k) => {
       if (now[k]) { out.push(...now[k]!); return }
       const C = centroid(now[l.partner!] ?? [])
       const rings = l.a != null ? pA[l.a]!.rings : pB[l.b!]!.rings
       // An extra piece shrinks into its partner in the first half (A only) or grows out of it
       // in the second (B only), riding with the partner's centre so it never flies off.
-      const shut = smooth01(0, 0.5, l.a != null ? t : 1 - t)
+      const tk = clock(k, t)
+      const shut = smooth01(0, 0.5, l.a != null ? tk : 1 - tk)
       for (const r of rings) out.push(r.map(p => [p[0] + (C[0] - p[0]) * shut, p[1] + (C[1] - p[1]) * shut] as P))
     })
     return toD(out)
