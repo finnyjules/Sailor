@@ -10,7 +10,7 @@ describe('GALLERY_MOVES catalog', () => {
       expect(ids.has(m.id)).toBe(false)   // ids unique
       ids.add(m.id)
       expect([
-        'fade', 'slide', 'scale', 'spin', 'pulse', 'sway', 'float', 'gradientScroll', 'gradientMorph', 'dither', 'settle',
+        'fade', 'slide', 'scale', 'spin', 'pulse', 'sway', 'float', 'gradientScroll', 'gradientMorph', 'dither', 'settle', 'morph',
         'text.cascade', 'text.typewriter', 'text.maskSlide', 'text.scramble',
         'text.decode', 'text.slot', 'text.wave', 'text.bounce', 'text.jitter',
         'copies.build', 'copies.spread', 'copies.spin', 'copies.fan', 'copies.fade',
@@ -292,4 +292,11 @@ describe('Copies gallery tiles', () => {
     const { defaultDurationFor } = await import('~/lib/motionx/gallery')
     expect(defaultDurationFor('Copies')).toBe(1)
   })
+})
+
+it('offers both morph tiles as Out moves on any layer', () => {
+  const caps = { gradient: false, text: false, cloner: null }
+  const ids = movesForLayer(caps).filter(m => m.group === 'Out').map(m => m.id)
+  expect(ids).toContain('morph-letters')
+  expect(ids).toContain('morph-shape')
 })

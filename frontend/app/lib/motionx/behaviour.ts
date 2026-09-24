@@ -76,6 +76,12 @@ registerBehaviour('settle', (b) => {
   return [b.params?.dir === 'out' ? numTrack('reveal', 1, 0, w, 'linear') : numTrack('reveal', 0, 1, w, 'linear')]
 })
 
+// A MORPH transition (Frame, 2026-09-23): the bar drives ONE number, how far A has become its
+// target (0 → 1). The target and style stay on the bar's params; the fold
+// (adapter/frame.ts `applyMorphBehaviours`) and the painter read them. Always an OUT move —
+// A leaves by turning into B — so there is no direction.
+registerBehaviour('morph', (b) => [numTrack('morph', 0, 1, window(b.timing))])
+
 registerBehaviour('slide', (b, target) => {
   // Relative to the layer's CURRENT position (x/y are normalized 0..1), so the layer
   // slides IN to where it already sits — not to an absolute 0. `distance` is a fraction

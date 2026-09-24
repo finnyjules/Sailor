@@ -8,7 +8,7 @@ export type MoveGroup = 'Letters' | 'In' | 'Loop' | 'Out' | 'Copies' | 'Gradient
 export type PreviewKind =
   | 'fade' | 'slide-up' | 'slide-down' | 'slide-left' | 'slide-right'
   | 'grow' | 'shrink' | 'spin' | 'pulse' | 'sway' | 'float'
-  | 'scroll' | 'morph' | 'dither' | 'assemble' | 'settle'
+  | 'scroll' | 'morph' | 'shape-morph' | 'dither' | 'assemble' | 'settle'
   | 'letters-cascade' | 'letters-typewriter' | 'letters-mask' | 'letters-scramble'
   | 'letters-decode' | 'letters-slot' | 'letters-wave' | 'letters-bounce' | 'letters-jitter'
   | 'copies-build' | 'copies-spread' | 'copies-spin' | 'copies-fan' | 'copies-fade'
@@ -114,6 +114,10 @@ export const GALLERY_MOVES: GalleryMove[] = [
   { id: 'dither-out', kind: 'dither', label: 'Dither out', group: 'Out', preview: 'dither', params: { dir: 'out' } },
   { id: 'assemble-out', kind: 'dither', label: 'Assemble out', group: 'Out', preview: 'assemble', params: { dir: 'out', style: 'assemble' } },
   ...SETTLE_OUT_TILES,
+  // Morph (2026-09-23): A turns into another element over its out bar. Two styles, two tiles
+  // (Julien: whole-shape morph is its own transition style). No target yet — the inspector asks.
+  { id: 'morph-letters', kind: 'morph', label: 'Morph into', group: 'Out', preview: 'shape-morph', params: { style: 'letters' } },
+  { id: 'morph-shape', kind: 'morph', label: 'Shape morph into', group: 'Out', preview: 'shape-morph', params: { style: 'shape' } },
   // Copies — the Cloner's dials as motion (Task 7). `needs: 'cloner'` offers a tile on either
   // mode (the compiler itself picks the radial/linear dial via `cloner.mode`); `cloner-radial` /
   // `cloner-linear` offer a mode-specific tile — used where the two modes need DIFFERENT tiles,

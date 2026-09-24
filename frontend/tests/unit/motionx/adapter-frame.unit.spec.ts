@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
-import { applyResolvedValue, applyMotionxTracks, applyTextBehaviours, frameTarget, animatableProperties, CLONER_PROPERTIES } from '~/lib/motionx/adapter/frame'
+import { applyResolvedValue, applyMotionxTracks, applyTextBehaviours, frameTarget, animatableProperties, CLONER_PROPERTIES, isMotionOnlyPath, MOTION_ONLY_LABELS } from '~/lib/motionx/adapter/frame'
 import { DEFAULT_CLONER, expandClones, type Cloner } from '~/composables/useCloner'
 import type { GradientStop } from '~/lib/color/harmony'
 import type { StoredBehaviour, Track } from '~/lib/motionx'
@@ -308,5 +308,12 @@ describe('applyMotionxTracks folds a cloner.count band into expandClones', () =>
     expect(expandClones(mid.cloner, 1)).toHaveLength(3)
     const end = applyMotionxTracks([l], [track], 1)[0] as any
     expect(expandClones(end.cloner, 1)).toHaveLength(6)
+  })
+})
+
+describe('morph motion-only row', () => {
+  it('treats morph as a motion-only row named Morph', () => {
+    expect(MOTION_ONLY_LABELS.morph).toBe('Morph')
+    expect(isMotionOnlyPath('layers.a.morph')).toBe(true)
   })
 })

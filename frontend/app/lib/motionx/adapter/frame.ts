@@ -131,7 +131,7 @@ export function applyTextBehaviours(
 
 /** Properties a behaviour can drive that are NOT layer properties — never offered in Add
  *  property, but they still get a timeline row, which needs a name. */
-export const MOTION_ONLY_LABELS: Record<string, string> = { reveal: 'Reveal' }
+export const MOTION_ONLY_LABELS: Record<string, string> = { reveal: 'Reveal', morph: 'Morph' }
 
 /** A bar on a motion-only property cannot be opened into keyframes: its look lives on the BAR,
  *  so the bare band left behind would have nothing to draw with. */

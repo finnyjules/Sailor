@@ -79,6 +79,7 @@ export const BEHAVIOUR_LABELS: Record<string, string> = {
   float: 'Float',
   gradientScroll: 'Scroll',
   gradientMorph: 'Morph',
+  morph: 'Morph',
   dither: 'Dither',
   'text.cascade': 'Cascade',
   'text.typewriter': 'Typewriter',

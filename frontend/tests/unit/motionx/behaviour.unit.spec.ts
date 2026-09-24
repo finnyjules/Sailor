@@ -302,3 +302,13 @@ describe('copies.fade — stepOpacity 0->cur (in) / cur->0 (out)', () => {
     expect(evaluateTrack(outT, 1)).toBe(0)
   })
 })
+
+describe('morph behaviour', () => {
+  it('drives one motion-only morph track from 0 to 1 over the bar', () => {
+    const target = { get: () => undefined, has: () => false }
+    const tracks = compileBehaviour({ id: 'm1', kind: 'morph', timing: { start: 1, duration: 0.8 }, params: { style: 'letters', target: 'l:b' } }, target)
+    expect(tracks).toHaveLength(1)
+    expect(tracks[0]!.path).toBe('morph')
+    expect(tracks[0]!.keyframes.map(k => [k.t, k.value])).toEqual([[1, 0], [1.8, 1]])
+  })
+})

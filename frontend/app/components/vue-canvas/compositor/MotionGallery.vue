@@ -113,6 +113,7 @@ const SLOT_FILLERS: Record<number, [string, string]> = { 0: ['K', 'Q'], 1: ['9',
   background: linear-gradient(90deg, #1436ff, #ff2d2d);
   animation: prevMorph 2.6s ease-in-out infinite alternate;
 }
+.prev-shape-morph { animation: prevShapeMorph 1.8s ease-in-out infinite alternate; }
 @keyframes prevFade { 0%,100% { opacity: 0.15 } 50% { opacity: 1 } }
 @keyframes prevUp { 0% { transform: translateY(8px); opacity: 0 } 40%,100% { transform: translateY(0); opacity: 1 } }
 @keyframes prevDown { 0% { transform: translateY(-8px); opacity: 0 } 40%,100% { transform: translateY(0); opacity: 1 } }
@@ -126,6 +127,7 @@ const SLOT_FILLERS: Record<number, [string, string]> = { 0: ['K', 'Q'], 1: ['9',
 @keyframes prevFloat { 0%,100% { transform: translateY(5px) } 50% { transform: translateY(-5px) } }
 @keyframes prevScroll { 0% { background-position: 0% 0 } 100% { background-position: 200% 0 } }
 @keyframes prevMorph { 0% { filter: hue-rotate(0deg) } 100% { filter: hue-rotate(90deg) } }
+@keyframes prevShapeMorph { 0% { border-radius: 0 } 100% { border-radius: 50% } }
 
 /* Letters previews — the word "Type" as four spans, staggered per letter via --i. */
 .letter-piece { position: relative; display: inline-block; }
@@ -236,7 +238,7 @@ const SLOT_FILLERS: Record<number, [string, string]> = { 0: ['K', 'Q'], 1: ['9',
    ancestor-qualified rule and the preview would keep running — and answers that rule's resting
    opacity and transform too, or the word would stop somewhere off its own window. */
 @media (prefers-reduced-motion: reduce) {
-  .prev-mark, .prev-scroll, .prev-morph { animation: none; opacity: 1; }
+  .prev-mark, .prev-scroll, .prev-morph, .prev-shape-morph { animation: none; opacity: 1; border-radius: 0; }
   .letters-cascade .letter-inner,
   .letters-typewriter .letter-inner,
   .letters-mask .letter-inner,
