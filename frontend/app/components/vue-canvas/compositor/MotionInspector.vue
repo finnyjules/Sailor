@@ -39,7 +39,8 @@ const props = defineProps<{
   /** Letter/word/line counts of the selected TEXT layer — lets the Text section show how long
    *  each piece runs for. Undefined (non-text layer, or the modal hasn't computed it) hides that line. */
   pieceCounts?: { letters: number; words: number; lines: number }
-  /** Elements the selected layer can morph into (other local elements with an outline). */
+  /** Every element a morph can turn into (local elements with an outline, no active corner pin,
+   *  no cloner). The inspector leaves out the bar's own layer. */
   morphTargets?: { key: string; label: string }[]
 }>()
 const emit = defineEmits<{
@@ -211,8 +212,19 @@ const MORPH_SPACES = ['oklab', 'hybrid']
 const MORPH_SPACE_LABELS = ['OKLab', 'Hybrid']
 const MORPH_STYLES = ['letters', 'shape']
 const MORPH_STYLE_LABELS = ['Letter by letter', 'Whole shape']
-const morphTargetOptions = computed(() => ['', ...(props.morphTargets ?? []).map(t => t.key)])
-const morphTargetLabels = computed(() => ['Choose an element', ...(props.morphTargets ?? []).map(t => t.label)])
+// The candidates come for every eligible element; the bar's OWN layer is left out here, since a
+// bar can be opened from the timeline without selecting its layer on the canvas.
+const morphCandidates = computed(() => {
+  const self = behaviour.value?.layerId ? `l:${behaviour.value.layerId}` : ''
+  return (props.morphTargets ?? []).filter(t => t.key !== self)
+})
+const morphTargetOptions = computed(() => ['', ...morphCandidates.value.map(t => t.key)])
+const morphTargetLabels = computed(() => ['Choose an element', ...morphCandidates.value.map(t => t.label)])
+/** A target is set but is not a candidate any more (deleted, cloned, corner-pinned). */
+const morphTargetGone = computed(() => {
+  const target = behaviour.value?.kind === 'morph' ? behaviour.value.params?.target : undefined
+  return typeof target === 'string' && !!target && !morphCandidates.value.some(t => t.key === target)
+})
 // `REVEAL_STYLES` is `readonly RevealStyle[]` (the library's own list, Pixels first, Assemble
 // second); copied into a plain mutable string[] so it can feed a Studio control's `options` prop.
 const DITHER_STYLES: string[] = [...REVEAL_STYLES]
@@ -622,6 +634,10 @@ function onGradient(g: Gradient) {
         <div v-if="!behaviour.params?.target" data-testid="morph-no-target"
           class="px-2.5 text-[10px] leading-snug text-amber-300/80">
           Pick an element to morph into. Until then this bar does nothing.
+        </div>
+        <div v-else-if="morphTargetGone" data-testid="morph-target-gone"
+          class="px-2.5 text-[10px] leading-snug text-amber-300/80">
+          The element this morphs into is gone or can't morph. Pick another.
         </div>
         <StudioSegmentedRow data-testid="morph-style" label="Style"
           :model-value="enumParam('style', 'letters')" :options="MORPH_STYLES" :option-labels="MORPH_STYLE_LABELS"

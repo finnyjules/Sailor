@@ -31,37 +31,103 @@ export function ringsFromD(d: string): P[][] {
   return subs.map(s => flattenSubpath(s)).filter(r => r.length >= 3 && Math.abs(area(r)) > 1e-9)
 }
 
+const median = (xs: number[]) => {
+  if (!xs.length) return 0
+  const v = xs.slice().sort((a, b) => a - b), m = v.length >> 1
+  return v.length % 2 ? v[m]! : (v[m - 1]! + v[m]!) / 2
+}
+
+interface Span { p: Piece; y0: number; y1: number; x0: number; x1: number }
+interface Line { members: Span[]; top: number; bottom: number }
+/** A line's CORE span: the median top and median bottom of its pieces — not grown by an
+ *  outlier (a descender dipping into the next line, an accent above it). */
+const coreOf = (members: Span[]): Pick<Line, 'top' | 'bottom'> => ({ top: median(members.map(m => m.y0)), bottom: median(members.map(m => m.y1)) })
+/** A line's FULL height, tallest letter included — what a mark on it is small against. */
+const extentOf = (L: Line) => Math.max(...L.members.map(m => m.y1)) - Math.min(...L.members.map(m => m.y0))
+const gapTo = (s: Span, L: Line) => Math.max(0, L.top - s.y1, s.y0 - L.bottom)
+
 /** Outer rings (inside an even number of others) each take the holes directly inside them.
  *  Rings are ORIENTED (outer positive, hole negative) so a nonzero fill of the morph is right
- *  whatever winding the source used. Reading order: pieces are clustered into LINES by vertical
- *  overlap (not a fixed band from a line's first centre) — a dot, an accent or a descender can
- *  sit well outside half the median piece height of its own line's other pieces, so overlap of
- *  each piece's own [y0, y1] span is what actually tells lines apart — then sorted left to
- *  right, breaking centre-x ties by centre-y DESCENDING (a stem before its dot). */
+ *  whatever winding the source used.
+ *
+ *  Reading order (final review #5): pieces are grouped into LINES, then read line by line, left
+ *  to right, breaking centre-x ties by centre-y DESCENDING (a stem before its dot).
+ *  - Pieces at least half the median piece height, taken top edge first, join the CURRENT line
+ *    only when their vertical overlap with that line's CORE span (median top → median bottom of
+ *    its pieces, so one descender cannot stretch it) is at least half the smaller of the two
+ *    heights; otherwise they start the next line. Tight leading, where a line-1 descender dips
+ *    into line 2's capitals, therefore still reads as two lines.
+ *  - A line of ONE such piece that is under half the full height of the line beside it, sits over
+ *    (x-overlaps) one of that line's pieces and is within one median piece height of its core,
+ *    is a mark on that line (an `i`'s dot the size of a thin stem beside a much taller letter),
+ *    so it joins it. A line of several pieces is never merged.
+ *  - Smaller pieces (dots, accents, commas) join the nearest line whose core is within one median
+ *    piece height vertically; one with no such line starts a line of its own. */
 export function splitPieces(rings: P[][]): Piece[] {
   const depth = rings.map((r, i) => rings.reduce((n, o, j) => (j !== i && inside(r[0]!, o) ? n + 1 : n), 0))
   const pieces: Piece[] = []
+  const xSpan = new Map<Piece, [number, number]>()
   rings.forEach((r, i) => {
     if (depth[i]! % 2 !== 0) return
     const holes = rings.filter((h, j) => depth[j] === depth[i]! + 1 && inside(h[0]!, r)).map(h => oriented(h, false))
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
     for (const p of r) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]) }
-    pieces.push({ rings: [oriented(r, true), ...holes], cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, h: y1 - y0 })
+    const piece = { rings: [oriented(r, true), ...holes], cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, h: y1 - y0 }
+    pieces.push(piece)
+    xSpan.set(piece, [x0, x1])
   })
-  // Vertical-overlap clustering: sort by top edge (y0 = cy − h/2), walk them, and
-  // start a new line only when a piece's top sits below every line-so-far's
-  // bottom edge. This keeps an `i`'s dot and stem (and any accent/descender)
-  // on the SAME line as their neighbours, unlike a fixed band measured from
-  // the line's first centre, which can split them onto separate lines.
-  const withSpan = pieces.map(p => ({ p, y0: p.cy - p.h / 2, y1: p.cy + p.h / 2 }))
-  withSpan.sort((a, b) => a.y0 - b.y0)
-  const line = new Map<Piece, number>()
-  let li = -1, bottom = -Infinity
-  for (const s of withSpan) {
-    if (li < 0 || s.y0 > bottom) { li++; bottom = s.y1 }
-    else bottom = Math.max(bottom, s.y1)
-    line.set(s.p, li)
+  if (pieces.length < 2) return pieces
+  const med = median(pieces.map(p => p.h))
+  const spans: Span[] = pieces.map(p => ({ p, y0: p.cy - p.h / 2, y1: p.cy + p.h / 2, x0: xSpan.get(p)![0], x1: xSpan.get(p)![1] }))
+  const regular = spans.filter(s => s.p.h >= med / 2).sort((a, b) => a.y0 - b.y0 || a.p.cx - b.p.cx)
+  const small = spans.filter(s => s.p.h < med / 2)
+
+  let lines: Line[] = []
+  for (const s of regular) {
+    const L = lines[lines.length - 1]
+    const overlap = L ? Math.min(s.y1, L.bottom) - Math.max(s.y0, L.top) : -Infinity
+    if (L && overlap >= 0.5 * Math.min(s.p.h, L.bottom - L.top)) {
+      L.members.push(s)
+      Object.assign(L, coreOf(L.members))
+    } else lines.push({ members: [s], top: s.y0, bottom: s.y1 })
   }
+
+  // A lone piece beside a much taller line, sitting over one of its pieces, is a mark on it.
+  for (let k = 0; k < lines.length; k++) {
+    const L = lines[k]!
+    if (L.members.length !== 1) continue
+    const s = L.members[0]!
+    const host = [lines[k - 1], lines[k + 1]]
+      .filter((N): N is Line => !!N && N.members.length > 1 && s.p.h < extentOf(N) / 2 && gapTo(s, N) <= med
+        && N.members.some(m => m.x0 < s.x1 && s.x0 < m.x1))
+      .sort((a, b) => gapTo(s, a) - gapTo(s, b))[0]
+    if (!host) continue
+    host.members.push(s)   // its core stays the host's own (coreOf is not re-run: a mark never moves it)
+    lines.splice(k, 1); k--
+  }
+
+  const orphans: Span[] = []
+  for (const s of small) {
+    let best: Line | null = null, bestGap = Infinity
+    for (const L of lines) {
+      const g = gapTo(s, L)
+      const c = Math.abs((L.top + L.bottom) / 2 - s.p.cy)
+      const bc = best ? Math.abs((best.top + best.bottom) / 2 - s.p.cy) : Infinity
+      if (g < bestGap || (g === bestGap && c < bc)) { best = L; bestGap = g }
+    }
+    if (best && bestGap <= med) best.members.push(s)
+    else orphans.push(s)
+  }
+  orphans.sort((a, b) => a.y0 - b.y0)
+  for (const s of orphans) {
+    const L = lines.find(l => l.members.every(m => m.p.h < med / 2) && Math.min(s.y1, l.bottom) - Math.max(s.y0, l.top) >= 0)
+    if (L) { L.members.push(s); L.top = Math.min(L.top, s.y0); L.bottom = Math.max(L.bottom, s.y1) }
+    else lines.push({ members: [s], top: s.y0, bottom: s.y1 })
+  }
+
+  lines = lines.sort((a, b) => a.top - b.top || a.bottom - b.bottom)
+  const line = new Map<Piece, number>()
+  lines.forEach((L, i) => { for (const m of L.members) line.set(m.p, i) })
   return pieces.sort((a, b) => (line.get(a)! - line.get(b)!) || (a.cx - b.cx) || (b.cy - a.cy))
 }
 
@@ -150,3 +216,5 @@ export function prepareMorph(dA: string, dB: string, style: MorphStyle): (t: num
   return f
 }
 export function clearMorphCache(): void { cache.clear() }
+/** How many analysed outline pairs the cache holds — for tests that prove a frame did not re-analyse. */
+export function morphCacheSize(): number { return cache.size }

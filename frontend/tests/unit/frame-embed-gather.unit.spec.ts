@@ -237,6 +237,51 @@ describe('computeNeedsOutlines', () => {
     expect(computeNeedsOutlines(plan([r]), v([r]))).toBe(false)
   })
 
+  // Frame Morph (final review #1): a text layer at either end of a Motion "Morph into" is
+  // outlined by the painter's `resolveMorphs` even though it draws itself with fillText — without
+  // its outline font the lean bundle would turn the morph into a cross-fade.
+  describe('a Motion "Morph into" transition', () => {
+    const morphVariant = (layers: any[], behaviours: any[]): FrameVariant => ({
+      ...v(layers), motion: { fps: 30, duration: 3, behaviours } as any,
+    })
+    const planOf = (variant: FrameVariant) => planFrameExport({
+      variant, fit: 'fit', wiredSlots: [], catalogIds: new Set(), hasMotion: true, animatedFill: false,
+    })
+    const morph = (from: string, to?: string) => ({
+      id: 'b1', kind: 'morph', layerId: from, timing: { start: 1, duration: 0.8 },
+      params: { style: 'letters', ...(to ? { target: `l:${to}` } : {}) },
+    })
+
+    it('forces outlines when its SOURCE is a text layer (target a shape)', () => {
+      const t = createTextLayer({ text: 'Hi', fontFamily: 'Inter', fontWeight: 400 })
+      const r = createRectLayer({})
+      const variant = morphVariant([t, r], [morph(t.id, r.id)])
+      expect(computeNeedsOutlines(planOf(variant), variant)).toBe(true)
+      // …and through BOTH halves of the rule, not just the second check: the plan's own font
+      // carries `outline`, so its outline bytes ship.
+      expect(planOf(variant).fonts.find(f => f.family === 'Inter')?.outline).toBe(true)
+      // The layer-only half alone (no plan font flag) still says yes.
+      expect(computeNeedsOutlines({ fonts: [] }, variant)).toBe(true)
+    })
+
+    it('forces outlines when its TARGET is a text layer (source a shape)', () => {
+      const t = createTextLayer({ text: 'Yo', fontFamily: 'Inter', fontWeight: 700 })
+      const r = createRectLayer({})
+      const variant = morphVariant([r, t], [morph(r.id, t.id)])
+      expect(computeNeedsOutlines({ fonts: [] }, variant)).toBe(true)
+      expect(planOf(variant).fonts.find(f => f.family === 'Inter')?.outline).toBe(true)
+    })
+
+    it('does not force outlines for a shape-to-shape morph, or with no morph at all', () => {
+      const t = createTextLayer({ text: 'Hi', fontFamily: 'Inter', fontWeight: 400 })
+      const a = createRectLayer({}), b = createRectLayer({})
+      const shapes = morphVariant([t, a, b], [morph(a.id, b.id)])
+      expect(computeNeedsOutlines(planOf(shapes), shapes)).toBe(false)
+      const none = morphVariant([t, a], [])
+      expect(computeNeedsOutlines(planOf(none), none)).toBe(false)
+    })
+  })
+
   it('buildFrameSnapshot carries needsOutlines through onto the snapshot', async () => {
     const t = createTextLayer({ text: 'Out', fontFamily: 'Inter', fontWeight: 700 })
     ;(t as any).renderAsOutline = true

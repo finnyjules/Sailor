@@ -18,7 +18,7 @@ import { formatBytes } from '../formatBytes'
 import type { DepthRef } from '~/lib/compositor/depthRegistry'
 import type { EffectDef } from '~/lib/shaderfx/types'
 import type { FontWeightSpec } from '../fontFace'
-import type { FramePlan } from './plan'
+import { outlinePartnerIds, type FramePlan } from './plan'
 import type { StudioEmbed } from '~/lib/studio/frameSource'
 import { assetKey, type FrameFontAsset, type FrameFontOrigin, type FrameNotice, type FrameSnapshot, type FrameVariant, type WiredEntry } from './types'
 
@@ -117,7 +117,10 @@ export function isBlocked(snapshot: FrameSnapshot): boolean {
  * needs fontkit even though it never touches paper), regardless of `visible`, as a second, cheaper
  * safety net alongside `plan.fonts[].outline`.
  */
-export function computeNeedsOutlines(plan: Pick<FramePlan, 'fonts'>, variant: Pick<FrameVariant, 'layers'>): boolean {
+export function computeNeedsOutlines(
+  plan: Pick<FramePlan, 'fonts'>,
+  variant: Pick<FrameVariant, 'layers'> & { motion?: FrameVariant['motion'] },
+): boolean {
   if (plan.fonts.some(f => f.outline)) return true
   if (layersNeedPaper(variant.layers)) return true
   for (const l of variant.layers as ReadonlyArray<{ kind?: unknown }>) {
@@ -125,6 +128,11 @@ export function computeNeedsOutlines(plan: Pick<FramePlan, 'fonts'>, variant: Pi
       if (isGeometryKind(e.type) && l.kind === 'text') return true // needs fontkit's outline mode — any visibility
     }
   }
+  // A text layer another layer outlines — a geometry partner, or either end of a Motion
+  // "Morph into" — needs fontkit even when it draws itself with fillText (plan.ts's
+  // `outlinePartnerIds`, the same set the plan's per-font `outline` flag reads).
+  const partners = outlinePartnerIds(variant.layers, variant.motion?.behaviours)
+  if (partners.size && variant.layers.some(l => l.kind === 'text' && partners.has(l.id))) return true
   return false
 }
 

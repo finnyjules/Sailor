@@ -95,6 +95,26 @@ export function geometryPartnerIds(layers: readonly LocalLayer[]): Set<string> {
   return out
 }
 
+/** Every layer the painter outlines on another's behalf: the geometry-effect partners above
+ *  PLUS both ends of every Motion "Morph into" transition (the behaviour's own layer and its
+ *  `params.target`) — `resolveMorphs` outlines both, and a text end without its outline font
+ *  falls back to a cross-fade. The ONE statement of that set: `planFrameExport` (per-font
+ *  `outline`) and gather.ts's `computeNeedsOutlines` (which bundle) both read it. Muted
+ *  behaviours count too, for the same reason `visible` is ignored above. */
+export function outlinePartnerIds(
+  layers: readonly LocalLayer[],
+  behaviours?: ReadonlyArray<{ kind?: unknown; layerId?: unknown; params?: Record<string, unknown> }> | null,
+): Set<string> {
+  const out = geometryPartnerIds(layers)
+  for (const b of behaviours ?? []) {
+    if (b?.kind !== 'morph') continue
+    if (typeof b.layerId === 'string' && b.layerId) out.add(b.layerId)
+    const target = b.params?.target
+    if (typeof target === 'string' && target.startsWith('l:')) out.add(target.slice(2))
+  }
+  return out
+}
+
 /** The characters the font subset must hold for a text layer: the text as stored AND as the
  *  painter draws it (`transformCase` — "café" in uppercase draws "CAFÉ"). */
 export function subsetTextOf(t: { text?: string; textTransform?: string }): string {
@@ -170,7 +190,7 @@ export function planFrameExport(input: FrameExportInput): FramePlan {
     else fontMap.set(key, { family: fam, weight, text, outline })
   }
 
-  const partners = geometryPartnerIds(layers)
+  const partners = outlinePartnerIds(layers, v.motion?.behaviours)
   for (const l of layers) {
     if (l.kind === 'image') {
       const img = l as LocalLayer & { filename: string; standIn?: boolean; clip?: ImageClip; w: number; h: number }

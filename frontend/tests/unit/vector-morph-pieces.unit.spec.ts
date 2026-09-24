@@ -26,6 +26,33 @@ describe('pieces', () => {
   })
 })
 
+// A w×h box with its top-left at (x, y).
+const box = (x: number, y: number, w: number, h: number) => `M${x} ${y} L${x + w} ${y} L${x + w} ${y + h} L${x} ${y + h} Z`
+
+describe('pieces: lines (final review #5)', () => {
+  it('two lines with tight leading stay two lines when a line-1 letter hangs 30% into line 2', () => {
+    // Line 1: four letters 0..100; the last hangs to 130 (a descender dipping into line 2's
+    // capitals, beside them). Line 2: three letters 100..200, zero gap. Given scrambled.
+    const d = box(60, 100, 20, 100) + box(0, 0, 20, 100) + box(90, 0, 20, 130) + box(0, 100, 20, 100)
+      + box(60, 0, 20, 100) + box(30, 100, 20, 100) + box(30, 0, 20, 100)
+    const p = splitPieces(ringsFromD(d))
+    expect(p.map(x => [Math.round(x.cx), Math.round(x.cy)])).toEqual([
+      [10, 50], [40, 50], [70, 50], [100, 65], // line 1, left to right
+      [10, 150], [40, 150], [70, 150], //         line 2, left to right
+    ])
+  })
+  it('an `i` (stem + small dot above) stays on its own line, stem before dot', () => {
+    // A line above (y −120..−20), then "hil": h 0..100, i's stem 40..100 and dot 15..27, l 0..100.
+    const d = box(0, -120, 20, 100) + box(30, -120, 20, 100)
+      + box(30, 15, 10, 12) + box(0, 0, 20, 100) + box(30, 40, 10, 60) + box(50, 0, 10, 100)
+    const p = splitPieces(ringsFromD(d))
+    expect(p.map(x => [Math.round(x.cx), Math.round(x.cy)])).toEqual([
+      [10, -70], [40, -70],
+      [10, 50], [35, 70], [35, 21], [55, 50],
+    ])
+  })
+})
+
 describe('alignPieces', () => {
   it('pairs one to one when counts match', () => {
     expect(alignPieces(3, 3)).toEqual([{ a: 0, b: 0 }, { a: 1, b: 1 }, { a: 2, b: 2 }])

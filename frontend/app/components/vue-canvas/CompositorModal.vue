@@ -2622,16 +2622,14 @@ const geometrySiblingCandidates = computed<{ key: string; label: string }[]>(() 
       && !(l as any).cloner)
     .map(l => ({ key: localKey(l.id), label: layerLabelByKey(localKey(l.id)) }))
 })
-/** Elements the selected layer can morph into — the geometry-sibling rule (another local element
- *  with an outline, no active corner pin, no cloner), relative to the SELECTED layer (not
- *  `activeEffectLayer`, which tracks the geometry-effect picker rather than the Motion tab). */
-const morphTargets = computed<{ key: string; label: string }[]>(() => {
-  const self = selectedLocal.value
-  if (!self) return []
-  return (localLayers.value as LocalLayer[])
-    .filter(l => l.id !== self.id && canTakeGeometry(l) && !cornerPinActive((l as any).cornerPin) && !(l as any).cloner)
-    .map(l => ({ key: localKey(l.id), label: rowLabel({ layer: l }) }))
-})
+/** Every element a morph can turn into — the geometry-sibling rule (a local element with an
+ *  outline, no active corner pin, no cloner). NOT relative to the canvas selection: a morph bar
+ *  can be opened from the timeline without selecting its layer, so MotionInspector leaves out
+ *  the bar's own layer itself. */
+const morphTargets = computed<{ key: string; label: string }[]>(() =>
+  (localLayers.value as LocalLayer[])
+    .filter(l => canTakeGeometry(l) && !cornerPinActive((l as any).cornerPin) && !(l as any).cloner)
+    .map(l => ({ key: localKey(l.id), label: rowLabel({ layer: l }) })))
 /** The referenced layer, if the current ref points at a live, still-eligible vector partner. */
 function geometrySiblingRefResolvable(ref: string): boolean {
   if (!ref) return false

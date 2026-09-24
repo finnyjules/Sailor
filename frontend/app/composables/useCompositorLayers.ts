@@ -1499,28 +1499,47 @@ function buildSiblingResolver(localLayers: LocalLayer[], W: number, H: number): 
   })
 }
 
+/** Frame Morph: a layer's outline at UNIT size, in px — `outlineUnitPx` without a path's own
+ *  `scale` (path: local units × W; polygon/star: × W; rect/ellipse/text: already px) — and the
+ *  size factor that scale (and a transient motionx `motionScale`) contributes on top. Keeping
+ *  the size OUT of the outline keeps `prepareMorph`'s cache key still while Pulse/Grow/Shrink
+ *  animate it; `resolveMorphs` interpolates the factor with placement instead. */
+function morphUnitPx(layer: LocalLayer, W: number): number {
+  return layer.kind === 'path' || layer.kind === 'polygon' || layer.kind === 'star' ? W : 1
+}
+function morphSizeOf(layer: LocalLayer): number {
+  const native = layer.kind === 'path' ? ((layer as unknown as { scale?: number }).scale || 1) : 1
+  const ms = (layer as unknown as { motionScale?: number }).motionScale
+  // Same floor paintLayerStack's draw-time motionScale uses.
+  return native * (typeof ms === 'number' ? Math.max(0.001, ms) : 1)
+}
+
 /**
  * Frame Morph (spec 2026-09-23): swap every layer carrying `motionMorph` for a transient PATH
- * clone that turns A into its target B over A's out bar.
+ * clone that turns A into its target B over A's out bar. Exported for tests.
  *
- * Model (fix round 1): the two SHAPES morph in their own local frames and PLACEMENT is
- * interpolated separately. A's computed outline (in A-local px) morphs into B's computed outline
- * (in B-local px, built with NO sibling resolver — the cycle guard), so the `prepareMorph` cache
- * key stays stable across frames while only placements animate (transforming B into A's frame
- * would re-key — and re-run the ~100–300 ms analysis — every frame either one moved). The clone
- * draws that px-unit `d` at `scale = 1/W`, positioned by `lerpPlacement(A, B, amount)`.
+ * Model (fix round 1 + final review #2): the two SHAPES morph in their own local frames at UNIT
+ * size, and PLACEMENT and SIZE are interpolated separately. A's computed outline (A-local, unit
+ * px) morphs into B's computed outline (B-local, unit px, built with NO sibling resolver — the
+ * cycle guard), so the `prepareMorph` cache key stays stable across frames while placements and
+ * sizes animate (a path's `scale`, a Pulse's `motionScale`). The clone draws that `d` at
+ * `scale = lerp(sA, sB)/W` — so `drawPath`'s `ctx.scale(scale·W)` is exactly the side's own size
+ * at either end — positioned by `lerpPlacement(A, B, amount)`, with no `motionScale` of its own.
+ * (A geometry-effect dial animating on either side still re-keys: that is the shape really
+ * changing. So does a path's scale when the path carries a geometry effect, whose px-sized dials
+ * are computed in the path's own scaled units.)
  *
  * A's effects (minus geometry ones — already inside its computed outline) and blend stay; fill
  * and opacity blend toward B's; strokes are dropped for the bar. Long shadows are geometry-region
  * but painted separately, so they sit out the bar. Either side not outlineable (photo, decorated
- * text, system font, font still loading) or an empty morph → cross-fade: A fades out, B fades in.
- * Same references back when nothing morphs.
+ * text, system font, font still loading), an empty morph, or a morph that throws → cross-fade:
+ * A fades out, B fades in (spec rule 7: never an error). Same references back when nothing morphs.
  *
  * Runs AFTER the copies-stagger expansion, so a staggered cloner's per-copy items all share one
  * layer id; each keeps its own `motionCopy` when swapped, or every copy item would redraw the
  * whole array. `resolver` is only for A's OWN geometry effects that reference a sibling.
  */
-function resolveMorphs(
+export function resolveMorphs(
   items: StackItem[], localLayers: LocalLayer[], W: number, resolver: SiblingResolver<LocalLayer>,
 ): { items: StackItem[]; localLayers: LocalLayer[] } {
   const swaps = new Map<string, LocalLayer>()
@@ -1532,21 +1551,26 @@ function resolveMorphs(
     if (!target) continue
     const oA = canTakeGeometry(layer) ? computedOutlineD(layer, W, (key) => resolver(key, layer)) : null
     const oB = canTakeGeometry(target) ? computedOutlineD(target, W) : null
-    const d = oA && oB
-      ? prepareMorph(toPx(oA, outlineUnitPx(layer, W)), toPx(oB, outlineUnitPx(target, W)), mm.style)(mm.amount)
-      : ''
+    let d = ''
+    if (oA && oB) {
+      try {
+        d = prepareMorph(toPx(oA, morphUnitPx(layer, W)), toPx(oB, morphUnitPx(target, W)), mm.style)(mm.amount)
+      } catch { d = '' }
+    }
     const bare = { ...layer, motionMorph: undefined } as unknown as LocalLayer
     if (!d) {
       swaps.set(layer.id, { ...bare, opacity: (layer.opacity ?? 1) * (1 - mm.amount) } as LocalLayer)
       swaps.set(target.id, { ...target, motionHidden: undefined, opacity: (target.opacity ?? 1) * mm.amount } as unknown as LocalLayer)
       continue
     }
+    const sA = morphSizeOf(layer), sB = morphSizeOf(target)
     const stack = effectStackOf(layer).filter(e => regionOf(e.type) !== 'geometry')
     swaps.set(layer.id, {
       ...bare,
       ...writeStackToLayer(stack),
       ...lerpPlacement(layer, target, mm.amount),
-      kind: 'path', d, bbox: ringsBBoxOfD(d), scale: 1 / W, fillRule: 'nonzero',
+      kind: 'path', d, bbox: ringsBBoxOfD(d), scale: (sA + (sB - sA) * mm.amount) / W, fillRule: 'nonzero',
+      motionScale: undefined,
       fill: blendMorphPaint(morphFillOf(layer as never), morphFillOf(target as never), mm.amount),
       stroke: '', strokeWidth: 0, strokes: undefined,
       opacity: (layer.opacity ?? 1) + ((target.opacity ?? 1) - (layer.opacity ?? 1)) * mm.amount,

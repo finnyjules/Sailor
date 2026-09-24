@@ -22,12 +22,12 @@
  * What the pinning is FOR: correspondence and measurement. Two fonts' samples
  * pair by where they sit on the letter (`pairGlyphs`), and interpolating
  * (m, r, u) keeps a stroke's thickness while it turns (`evalPair`). Each
- * sample's stroke half-width `w` is what a weight change reads.
+ * sample also carries its stroke half-width `w`.
  *
  * What it is NOT for: reshaping. Moving points toward the centreline to thin a
  * letter made edges inherit the centreline's bends (Julien, 2026-09-23: "doesn't
- * respect the straight lines, the curves or the geometry"). Weight is a
- * parallel offset of the real outline — see `weightGlyph`.
+ * respect the straight lines, the curves or the geometry"). Changing a letter's
+ * weight is out of scope for this engine.
  *
  * Coordinates: whatever space the caller hands in (the lab uses canvas px).
  *
