@@ -139,6 +139,7 @@ export interface RestyleRequest {
 
 /** The first provider call RestyleFromImageNode makes. */
 export function restyleCall(r: RestyleRequest): { provider: 'fal' | 'replicate'; endpoint: string; payload: Record<string, unknown> } {
+  // Second run of the guard: planNode's early check can't know which board pictures are readable; this one sees what was read.
   checkStyleSource(r.model, { hasBoard: r.board.length > 0, hasStyleImage: r.styleImage !== null, taste: r.taste })
   const extraDirection = r.taste ? pyStrip(`${r.guidance} ${r.taste}`) : r.guidance
 

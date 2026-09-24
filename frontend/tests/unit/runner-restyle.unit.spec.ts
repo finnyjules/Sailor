@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import { planNode } from '~~/server/runner/executors'
-import { nodeCredits, stageEstimate, unpricedProviderNode } from '~~/server/runner/metering'
+import { createMetering, extraPromptText, nodeCredits, stageEstimate, unpricedProviderNode } from '~~/server/runner/metering'
 import { collectInputFiles } from '~~/server/runner/inputs'
 import { BASE_RENDER_CREDITS, GRAPH_NODE_CREDITS } from '~~/server/utils/priceBook'
 import {
@@ -27,7 +27,7 @@ import { PROVIDER_TYPES, RUNNER_NODE_RULES, isRunnerEligible, runnerTakesNode, t
 import { NO_FAMILIES, RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { OutputFile } from '~~/server/runner/types'
-import { createFakeFal, createFakeReplicate, makeKit, ofType } from './__runner__/kit'
+import { createFakeFal, createFakeLedger, createFakeReplicate, makeKit, ofType } from './__runner__/kit'
 
 interface RestyleCase {
   class_type: string
@@ -480,6 +480,75 @@ describe('restyle on the engine (hosted, fake providers)', () => {
     const k = makeKit({ hosted: true })
     await expect(k.engine.startRun({ userId: k.userId, takes: [restyleFlow({ model: 'Nano Banana 2', style: true })], ...START }))
       .rejects.toMatchObject({ statusCode: 400 })
+    expect(k.fal.client.submit).not.toHaveBeenCalled()
+  })
+})
+
+// ── Moderation of a typed-in taste (fix round 1) ─────────────────────────
+
+describe('a typed-in taste (literal style_in) is moderated', () => {
+  it('extraPromptText reads style_in on RestyleFromImageNode and GenerateImageNode only; every other class is unchanged', () => {
+    expect(extraPromptText({ 2: { class_type: 'RestyleFromImageNode', inputs: { model: 'Nano Banana 2', style_in: 'grainy film', prompt: 'p' } } }))
+      .toBe('grainy film')
+    expect(extraPromptText({ 2: { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', style_in: 'grainy film', prompt: 'p' } } }))
+      .toBe('grainy film')
+    expect(extraPromptText({ 2: { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', style_in: ['1', 0] } } })).toBe('')
+    // A wired or blank taste adds nothing.
+    expect(extraPromptText({ 2: { class_type: 'RestyleFromImageNode', inputs: { style_in: ['1', 0] } } })).toBe('')
+    expect(extraPromptText({ 2: { class_type: 'RestyleFromImageNode', inputs: { style_in: '   ' } } })).toBe('')
+    // Other classes: style_in is not read, the edit fields are read as before.
+    for (const ct of ['GenerateVideoNode', 'EditImageNode', 'RemoveObjectNode', 'RestyleWithLoRANode', 'SwapBackgroundNode']) {
+      expect(extraPromptText({ 2: { class_type: ct, inputs: { style_in: 'grainy film' } } }), ct).toBe('')
+      expect(extraPromptText({ 2: { class_type: ct, inputs: { style_in: 'grainy film', target: 'the car', instructions: 'x' } } }), ct)
+        .toBe('the car x')
+    }
+  })
+
+  function moderatedKit(moderate: (t: string) => Promise<{ ok: true } | { ok: false; categories: string[] }>) {
+    const ledger = createFakeLedger()
+    const metering = createMetering({
+      hosted: () => true, ledger: () => ledger,
+      graphRuns: { create: async () => {}, appendOutput: async () => {}, resolve: async () => {} },
+      spendGuard: async () => {}, moderate,
+    })
+    return kit({ deps: { metering } })
+  }
+
+  it('hosted: the literal taste reaches the moderation check with the prompt, and is sent in the instruction', async () => {
+    const moderate = vi.fn(async (_t: string) => ({ ok: true as const }))
+    const k = moderatedKit(moderate)
+    const flow = restyleFlow({ model: 'Nano Banana 2', style: true, prompt: 'watercolor' })
+    ;(flow[2]!.inputs as Record<string, unknown>).style_in = 'grainy film'
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [flow], ...START })
+    await k.engine.settled(runId)
+    expect(moderate).toHaveBeenCalledTimes(1)
+    const text = moderate.mock.calls[0]![0]
+    expect(text).toContain('watercolor')
+    expect(text).toContain('grainy film')
+    expect(String(k.fal.submitted()[0]!.payload.prompt)).toContain('Additional style direction: watercolor grainy film.')
+  })
+
+  it('hosted: Generate an image (fal, no family needed) moderates its typed-in taste too, and a blocked one refuses the run', async () => {
+    const moderate = vi.fn(async (t: string) => (t.includes('forbidden taste') ? { ok: false as const, categories: ['x'] } : { ok: true as const }))
+    const k = moderatedKit(moderate)
+    const flow: ApiPrompt = {
+      1: { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a red fox', aspect_ratio: '1:1', seed: 0, model_options: '{}', style_in: 'forbidden taste' } },
+      2: { class_type: 'Image', inputs: { image: '', export: false, images: ['1', 0], batch_index: -1 } },
+    }
+    await expect(k.engine.startRun({ userId: k.userId, takes: [flow], ...START }))
+      .rejects.toMatchObject({ statusCode: 400, message: 'This prompt was blocked by content moderation' })
+    expect(moderate.mock.calls[0]![0]).toContain('forbidden taste')
+    expect(k.fal.client.submit).not.toHaveBeenCalled()
+  })
+
+  it('hosted: a blocked taste refuses the run before anything is handed off, sent or held', async () => {
+    const moderate = vi.fn(async (t: string) => (t.includes('forbidden taste') ? { ok: false as const, categories: ['x'] } : { ok: true as const }))
+    const k = moderatedKit(moderate)
+    const flow = restyleFlow({ model: 'Nano Banana 2', style: true })
+    ;(flow[2]!.inputs as Record<string, unknown>).style_in = 'forbidden taste'
+    await expect(k.engine.startRun({ userId: k.userId, takes: [flow], ...START }))
+      .rejects.toMatchObject({ statusCode: 400, message: 'This prompt was blocked by content moderation' })
+    expect(k.upload).not.toHaveBeenCalled()
     expect(k.fal.client.submit).not.toHaveBeenCalled()
   })
 })

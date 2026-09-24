@@ -370,6 +370,7 @@ export async function planNode(ctx: PlanContext): Promise<NodePlan> {
       const structureStrength = structureStrengthOf(inputs.structure_strength)
       const boardFiles = moodboardFiles(inputs.style_refs)
       const styleLinked = isLink(inputs.style_image)
+      // First run of the guard (before any hand-off); restyleCall runs it again once the readable board pictures are known.
       checkStyleSource(model, { hasBoard: boardFiles.length > 0, hasStyleImage: styleLinked, taste })
       const content = await pictureUrl('content_image', 'There is no picture to restyle')
       const board: string[] = []

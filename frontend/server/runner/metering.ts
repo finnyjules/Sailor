@@ -49,13 +49,22 @@ export function unpricedProviderNode(
  */
 export const RUNNER_EXTRA_TEXT_INPUTS: readonly string[] = ['target', 'find', 'replace', 'color', 'instructions', 'scene_prompt']
 
-/** The non-blank values of RUNNER_EXTRA_TEXT_INPUTS across the prompt, joined. */
+/**
+ * A typed-in taste (a literal style_in, never a wire the runner takes) goes
+ * into the provider prompt of these classes, so it is moderated too. Every
+ * other class's moderation is unchanged.
+ */
+export const TASTE_TEXT_CLASSES: ReadonlySet<string> = new Set(['RestyleFromImageNode', 'GenerateImageNode'])
+export const TASTE_TEXT_INPUTS: readonly string[] = ['style_in']
+
+/** The non-blank values of RUNNER_EXTRA_TEXT_INPUTS (and a typed-in taste) across the prompt, joined. */
 export function extraPromptText(prompt: ApiPrompt): string {
   const parts: string[] = []
   for (const node of Object.values(prompt ?? {})) {
     const inputs = node?.inputs
     if (!inputs || typeof inputs !== 'object') continue
-    for (const name of RUNNER_EXTRA_TEXT_INPUTS) {
+    const names = TASTE_TEXT_CLASSES.has(node.class_type) ? [...RUNNER_EXTRA_TEXT_INPUTS, ...TASTE_TEXT_INPUTS] : RUNNER_EXTRA_TEXT_INPUTS
+    for (const name of names) {
       const v = inputs[name]
       if (typeof v === 'string' && v.trim()) parts.push(v)
     }
