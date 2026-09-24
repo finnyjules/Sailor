@@ -12,13 +12,21 @@
     --sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
     --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   }
+  /* Sailor's AI look, copied from frontend/app/assets/css/main.css + CanvasPromptBar.vue */
+  @property --pastel-angle { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+  @keyframes pastel-spin { to { --pastel-angle: 360deg; } }
+  .pastel-ring { position: relative; }
+  .pastel-ring::before { content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px; background: conic-gradient(from var(--pastel-angle), #ffd6e7, #cfe8ff, #d6ffe0, #fff4cc, #e7d6ff, #ffd6e7);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude;
+    opacity: .4; transition: opacity .4s ease; animation: pastel-spin 8s linear infinite; pointer-events: none; z-index: 2; }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   html, body { height: 100%; margin: 0; }
   body { background: var(--ground); color: var(--ink); font: 13.5px/1.45 var(--sans); overflow: hidden; }
   button { font: inherit; color: inherit; }
   kbd { font-family: var(--mono); font-size: 11px; padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); background: var(--panel); }
-  :focus-visible { outline: 2px solid var(--ai); outline-offset: 2px; }
+  :focus-visible { outline: 2px solid #cfe8ff; outline-offset: 2px; }
 
   #app { height: 100%; display: grid; grid-template-rows: auto 1fr; }
 
@@ -38,31 +46,31 @@
   .sp-above { display: grid; gap: 8px; }
   .sp-sugg { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
   .sp-sugg button { background: var(--panel-2); border: 1px solid var(--line); border-radius: 99px; padding: 3px 11px; font-size: 12.5px; cursor: pointer; color: #d6d2ca; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
-  .sp-sugg button:hover { border-color: var(--ai); }
-  .sp-takes { background: #1b1c20; border: 1px solid var(--line); border-radius: 12px; padding: 8px; box-shadow: 0 12px 34px rgba(0,0,0,.5); display: grid; gap: 8px; }
+  .sp-sugg button:hover { border-color: rgba(255,255,255,.3); color: #fff; }
+  .sp-takes { position: relative; overflow: hidden; background: rgba(26,26,26,.95); border: 1px solid #2a2a2a; border-radius: 12px; padding: 8px; box-shadow: 0 12px 34px rgba(0,0,0,.5); display: grid; gap: 8px; }
   .sp-takes-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); padding-inline: 4px; }
   .sp-takes-head b { color: var(--ink); font-weight: 500; }
   .sp-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 150px)); gap: 8px; justify-content: center; }
   .sp-tile { position: relative; display: grid; gap: 4px; background: none; border: 1px solid transparent; border-radius: 8px; padding: 3px; cursor: pointer; text-align: left; }
   .sp-tile i { display: block; aspect-ratio: 16/10; border-radius: 6px; }
   .sp-tile span { font-size: 11.5px; padding-inline: 2px; }
-  .sp-tile:hover { border-color: var(--ai); }
-  .sp-tile .keep { position: absolute; top: 7px; right: 7px; background: var(--ai); color: #1b1408; border: 0; border-radius: 5px; padding: 1px 8px; font-size: 11.5px; font-weight: 600; display: none; }
+  .sp-tile:hover { border-color: rgba(255,255,255,.35); }
+  .sp-tile .keep { position: absolute; top: 7px; right: 7px; background: #fff; color: #171717; border: 0; border-radius: 5px; padding: 1px 8px; font-size: 11.5px; font-weight: 600; display: none; }
   .sp-tile:hover .keep { display: block; }
   .lbtn { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 10px; cursor: pointer; font-size: 12px; }
 
-  .sp-row { height: 44px; display: flex; align-items: center; gap: 8px; padding-inline: 12px 8px; background: #1b1c20; border: 1px solid #3b3326; border-radius: 12px; box-shadow: 0 12px 34px rgba(0,0,0,.5), 0 0 0 1px rgba(227,168,87,.06); cursor: text; }
-  .sp.focused .sp-row { border-color: var(--ai); box-shadow: 0 12px 34px rgba(0,0,0,.5), 0 0 0 3px rgba(227,168,87,.16); }
-  .sp-spark { color: var(--ai); font-size: 15px; flex: none; }
-  .sp-chip { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; font-size: 12px; background: var(--ai-soft); color: #f0cf9c; border-radius: 99px; padding: 1px 3px 1px 9px; max-width: 40%; overflow: hidden; text-overflow: ellipsis; flex: none; }
+  .sp-row { position: relative; overflow: hidden; height: 48px; display: flex; align-items: center; gap: 10px; padding-inline: 14px 10px; background: #1a1a1a; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.45); cursor: text; }
+  .sp.focused .sp-row::before, .sp.working .sp-row::before { opacity: 1; }   /* ring blooms when active */
+  .sp-spark { width: 16px; height: 16px; flex: none; color: rgba(255,255,255,.45); }
+  .sp-glimm { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; mix-blend-mode: screen; z-index: 1; }
+  .sp-chip { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; font-size: 12px; background: rgba(255,255,255,.08); color: rgba(255,255,255,.8); border-radius: 99px; padding: 1px 3px 1px 9px; max-width: 40%; overflow: hidden; text-overflow: ellipsis; flex: none; }
   .sp-chip.mode { background: #24303f; color: #bcd6ff; }
   .sp-chip button { background: none; border: 0; cursor: pointer; color: inherit; opacity: .7; padding: 0 5px; }
   .sp input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: var(--ink); font: 14px var(--sans); }
   .sp input::placeholder { color: #6f6b64; }
-  .sp-send { flex: none; width: 28px; height: 28px; border-radius: 8px; border: 0; background: var(--ai); color: #1b1408; font-weight: 700; cursor: pointer; }
-  .sp-send:disabled { background: var(--panel-2); color: #5b5750; cursor: default; }
-  .sp-status { flex: 1; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #d6c3a0; min-width: 0; }
-  .sp-status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ai); animation: pulse 1s ease-in-out infinite; flex: none; }
+  .sp-send { flex: none; width: 28px; height: 28px; border-radius: 8px; border: 0; background: #fff; color: #171717; font-weight: 700; cursor: pointer; }
+  .sp-send:disabled { opacity: .4; cursor: default; }
+  .sp-status { position: relative; z-index: 3; flex: 1; display: flex; align-items: center; gap: 8px; font-size: 13px; color: rgba(255,255,255,.75); min-width: 0; }
   .sp-status.done .dot { animation: none; background: var(--good); }
   .sp-status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @keyframes pulse { 50% { opacity: .25; } }
@@ -93,7 +101,11 @@
   .node header span { font-size: 11.5px; color: var(--muted); }
   .node .th { margin: 0 10px 10px; aspect-ratio: 4/3; border-radius: 6px; transition: background .2s; }
   .node.sel { border-color: var(--sel); box-shadow: 0 0 0 1px var(--sel), 0 8px 24px rgba(0,0,0,.35); }
-  .node.glow { box-shadow: 0 0 0 1px var(--ai), 0 0 28px rgba(227,168,87,.35); border-color: var(--ai); }
+  .node.glow { border-color: transparent; }
+  .node.glow::after { content: ''; position: absolute; inset: -4px; border-radius: 14px; padding: 2px; background: conic-gradient(from var(--pastel-angle), #ffd6e7, #cfe8ff, #d6ffe0, #fff4cc, #e7d6ff, #ffd6e7);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude; animation: pastel-spin 7s linear infinite; pointer-events: none; }
+  .th, .preview, .ball, .poster { position: relative; overflow: hidden; }
   svg.edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   svg.edges path { fill: none; stroke: #4a4d55; stroke-width: 1.6; }
 
@@ -110,7 +122,7 @@
   .dial i { height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--ink) var(--v), #33353b var(--v)); }
   .arow { display: flex; justify-content: space-between; align-items: center; background: var(--panel-2); border-radius: 7px; padding: 6px 9px; font-size: 12.5px; color: #dcd8d0; }
   .arow small { color: var(--muted); font-size: 11px; }
-  .arow small::after { content: " ✦"; color: var(--ai); }
+  .arow small::after { content: " ✦"; color: rgba(255,255,255,.45); }
   .stage { position: relative; display: grid; place-items: center; min-height: 0; background: #0b0c0e; }
   .stage-inner { margin-bottom: 140px; }
 
@@ -150,7 +162,7 @@
     .simple { grid-template-columns: 1fr; }
     .simple .side { display: none; }
   }
-  @media (prefers-reduced-motion: reduce) { .sp-status .dot { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .pastel-ring::before, .node.glow::after { animation: none; } }
 </style>
 
 <div id="app">
@@ -185,7 +197,7 @@ const PLACES = {
     label: 'Frame', chip: 'Rainy season', verb: 'three headlines',
     sugg: ['Shorter and punchier', 'Try three typefaces', 'Make it wet and glossy'],
     takes: [['Wet season', null, 'Wet season'], ['Rain on', null, 'Rain on.'], ['Rainy days', null, 'Rainy days are here']],
-    target: () => document.querySelector('.poster .hl'), text: true,
+    target: () => document.querySelector('.poster .hl'), sweep: () => document.querySelector('.poster'), text: true,
   },
   scene3d: {
     label: '3D', chip: 'Sphere', verb: 'three materials',
@@ -208,11 +220,38 @@ const PLACES = {
 }
 
 let place = 'canvas', state = 'rest', typed = ''
+// lucide "sparkles", the icon the canvas prompt uses today
+const SPARKLES = '<svg class="sp-spark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>'
+
+/* The glimm sweep, exactly as AgentSweep.vue runs it: lagoon palette, 3 s period,
+   peak alpha 0.5, brightness 0.85, swell 0.7, screen-blended. Real library, from npm. */
+let glimmLib = null
+const glimmReady = import('https://cdn.jsdelivr.net/npm/glimm@0.1.4/dist/index.js').then(m => (glimmLib = m)).catch(() => null)
+const sweeps = new Set()
+function glimm() {
+  const c = h('canvas', 'sp-glimm'); c.setAttribute('aria-hidden', 'true')
+  requestAnimationFrame(async () => {
+    await glimmReady
+    if (!glimmLib || !c.isConnected) return
+    const ctrl = glimmLib.createShader({ canvas: c, palette: glimmLib.resolvePalette('lagoon'), brightness: 0.85, swellAmount: 0.7 })
+    if (!ctrl) return
+    const t0 = performance.now(); let a = 0
+    const s = { c, ctrl }; sweeps.add(s)
+    const loop = () => {
+      if (!c.isConnected) { ctrl.destroy?.(); sweeps.delete(s); return }
+      ctrl.setProgress(((performance.now() - t0) / 1000 % 3) / 3)
+      a += (0.5 - a) * 0.12; ctrl.setAlpha(a)
+      requestAnimationFrame(loop)
+    }
+    loop()
+  })
+  return c
+}
 const STATES = [['rest', 'At rest'], ['focused', 'Focused'], ['working', 'Working'], ['takes', 'Takes']]
 
 /* ---------- THE component: one function, used by every place ---------- */
 function SailorPrompt(ctx) {
-  const root = h('div', 'sp' + (state === 'focused' ? ' focused' : ''))
+  const root = h('div', 'sp' + (state === 'focused' ? ' focused' : '') + (state === 'working' ? ' working' : ''))
   const above = h('div', 'sp-above')
   if (state === 'focused') {
     const s = h('div', 'sp-sugg')
@@ -241,11 +280,12 @@ function SailorPrompt(ctx) {
   }
   root.append(above)
 
-  const row = h('div', 'sp-row')
-  row.append(h('span', 'sp-spark', '✦'))
+  const row = h('div', 'sp-row pastel-ring')
+  row.insertAdjacentHTML('beforeend', SPARKLES)
+  if (state === 'working') row.append(glimm())
   if (state === 'working') {
-    const st = h('div', 'sp-status'); st.append(h('i', 'dot'), h('span', null, `Writing ${ctx.verb}…`))
-    const stop = h('button', 'lbtn', 'Stop'); stop.onclick = e => { e.stopPropagation(); clearTimeout(timer); setState('rest') }
+    const st = h('div', 'sp-status'); st.append(h('span', null, `Writing ${ctx.verb}…`))
+    const stop = h('button', 'lbtn', 'Stop'); stop.style.position = 'relative'; stop.style.zIndex = 3; stop.onclick = e => { e.stopPropagation(); clearTimeout(timer); setState('rest') }
     row.append(st, stop)
   } else {
     const chip = h('span', 'sp-chip'); chip.append(ctx.chip); const x = h('button', null, '×'); x.setAttribute('aria-label', 'Clear selection'); chip.append(x)
@@ -359,6 +399,9 @@ function setState(s) { state = s; if (s === 'rest') typed = ''; render(); if (s 
 function render() {
   const view = document.getElementById('view'); view.replaceChildren()
   view.append(VIEWS[place](PLACES[place]))
+  // while working, the same glimm also sweeps the thing being changed
+  const ctx = PLACES[place]
+  if (state === 'working' && ctx) (ctx.sweep?.() || ctx.target())?.append(glimm())
   for (const b of document.querySelectorAll('#views button')) b.setAttribute('aria-pressed', b.dataset.k === place)
   for (const b of document.querySelectorAll('#states button')) b.setAttribute('aria-pressed', b.dataset.k === state)
 }

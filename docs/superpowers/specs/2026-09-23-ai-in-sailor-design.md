@@ -121,6 +121,11 @@ The arrangement is today's: a prompt row directly above the toolbar at the botto
 The canvas, every studio, Frame, 3D and the template editor render **the same prompt component** (one Vue component; working name `SailorPrompt`), not look-alikes. It replaces `CanvasPromptBar`, `AgentBar` and `VibeControlBar`.
 
 - **Identical in every place:** height, corner radius, colours and border, the ✦ mark, chip style (selection and mode), placeholder wording pattern, the suggestion row above it, the progress-with-Stop state, the takes strip above it, keyboard behaviour (/ and ⌘K to focus, Esc, Enter), and its answer and approval cards.
+- **The look is Sailor's existing AI look, not a new one** (confirmed 2026-09-24):
+  - the dark field (`#1a1a1a`, 12px corners) with the **pastel ring**: the rotating conic (`#ffd6e7 → #cfe8ff → #d6ffe0 → #fff4cc → #e7d6ff`, `--pastel-angle`, `main.css`), faint at rest and full when focused or working;
+  - the Sparkles icon at 45% white and the white send button, as in today's `CanvasPromptBar`;
+  - **while working, the glimm sweep** (`AgentSweep`, lagoon palette, 3 s period) runs over the prompt row *and* over the thing being changed (the node, the artboard, the preview); the target node carries the pastel ring, as proposed nodes already do.
+  - Pastel stays reserved for AI. Selection chips and suggestions are neutral.
 - **Allowed to differ, and only these:**
   - **width:** the toolbar's width on the canvas; the preview's or tool bar's width in a studio;
   - **what fills it:** the selection chip, the suggestions, and the placeholder, which follow what's selected where you are.
