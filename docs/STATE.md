@@ -47,7 +47,9 @@ From a Threads post (@nono_ai_archive, cut-out fruit whose colour holds at the s
 
 **Proven.** 9 unit tests (fade, strength, alpha untouched, all-or-nothing grain at the right share, field evenness/determinism/smoothness, registration); a Playwright case (centre = fill, edge = own colour, hidden byte-identical, strength 0 a no-op, grain a different picture); in the frame lab the inspector card drove the render and each grain value re-renders identically.
 
-**Open.** The agent can set it (colour whitelisted, numbers clamp generically) but the setLayerEffect hint does not name it — about 30 characters over `COMPOSITOR_HINT_CEILING` (27,700). The grain field is fixed to the canvas, not the layer, so a moving layer slides under its grain.
+**Agent.** Named in the setLayerEffect hint after the `mosaic` hint was trimmed 11,072 → 4,544 chars (`28d919f0d`: the ~60 ", default X" values and per-style prose; every style word, dial, range, preset and look kept, checked token by token). The compositor menu is 21,243 of 27,700.
+
+**Open.** The grain field is fixed to the canvas, not the layer, so a moving layer slides under its grain.
 
 ### Frame web export — wired Space Type and Gradient play live — LANDED 2026-09-23 (`4cec9128b`..`3efb2bfb0`, non-contiguous — 5 tasks + a final fix wave, subagent-driven, a review per task, a whole-change review, its fix wave and a re-review)
 
