@@ -4,9 +4,11 @@
 // non-seamless piece, (2) seamless `loops`/duration, (3) every reason a state is kept on the
 // pre-rendered route, and (4) what the node's frame source offers as its live player.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   spaceTypeEmbedConfig, spaceTypeEmbedDuration, liveEmbedBlocker, LIVE_VERIFIED_EFFECTS,
-  spaceTypeEmbedFont, spaceTypeWiredEmbed,
+  spaceTypeEmbedFont, spaceTypeWiredEmbed, spaceTypeSubsetText, spaceTypeEmbedFace, DEFAULT_WEIGHT_EFFECTS,
 } from '~/lib/spacetype/embedConfig'
 import { defaultSpaceTypeState, type SpaceTypeState } from '~/lib/spacetype/state'
 import { getEffect } from '~/lib/spacetype/effects'
@@ -171,10 +173,20 @@ describe('liveEmbedBlocker', () => {
     expect(liveEmbedBlocker(variable, verifiedFor(variable))).toBeNull()
   })
 
+  it('Pile and the default-weight effects ask the same weight in the app and the player, so a static family is fine', () => {
+    setFontCatalog([{ family: 'Satisfy', weights: [400], axes: [] }])
+    const pile = stateFor('pile', { font: 'Satisfy', typeWeight: 700 })
+    expect(liveEmbedBlocker(pile, verifiedFor(pile))).toBeNull()
+    const contour = stateFor('contour', { font: 'Satisfy', typeWeight: 700 })
+    expect(liveEmbedBlocker(contour, verifiedFor(contour))).toBeNull()
+  })
+
   it('an unset text case on an effect whose own default is not capitals', () => {
     const s = stateFor('stripes')
     delete (s.params as Record<string, unknown>).textCase
     expect(liveEmbedBlocker(s, verifiedFor(s))).toMatch(/capitalise/)
+    const stored = stateFor('stripes', { textCase: null })
+    expect(liveEmbedBlocker(stored, verifiedFor(stored))).toMatch(/capitalise/)
     const set = stateFor('stripes', { textCase: 'asis' })
     expect(liveEmbedBlocker(set, verifiedFor(set))).toBeNull()
   })
@@ -226,18 +238,39 @@ describe('spaceTypeEmbedFont', () => {
   const realFetch = globalThis.fetch
   afterEach(() => { globalThis.fetch = realFetch; vi.restoreAllMocks() })
 
-  it('fetches the face, subsets it to the text, and inlines it as a data URL', async () => {
+  it('fetches the face (with a timeout), subsets it to everything the effect draws, and inlines it as a data URL', async () => {
     const calls: string[] = []
+    let subsetText = ''
+    let fontSignal: AbortSignal | undefined
     globalThis.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
       calls.push(String(url))
-      if (String(url).startsWith('/api/scene3d/google-font-file')) return new Response(new Uint8Array([1, 2, 3]))
-      expect(JSON.parse(String(init!.body)).text).toBe('Hi')
+      if (String(url).startsWith('/api/scene3d/google-font-file')) {
+        fontSignal = init?.signal ?? undefined
+        return new Response(new Uint8Array([1, 2, 3]))
+      }
+      subsetText = JSON.parse(String(init!.body)).text
       return new Response(JSON.stringify({ font: 'U1VCU0VU' }))
     }) as typeof fetch
-    const s = stateFor('ribbon', { font: 'Embed Test Face', typeWeight: 500, text: 'Hi' })
+    const s = stateFor('ribbon', { font: 'Embed Test Face', typeWeight: 500, text: 'crème' })
     expect(await spaceTypeEmbedFont(s)).toEqual({ family: 'Embed Test Face', weight: 500, dataUrl: 'data:font/ttf;base64,U1VCU0VU' })
     expect(calls[0]).toBe('/api/scene3d/google-font-file?family=Embed+Test+Face&weight=500')
     expect(calls[1]).toBe('/sailor/font_subset')
+    expect(subsetText).toBe(spaceTypeSubsetText(s))
+    expect(subsetText).toContain('È')
+    expect(fontSignal).toBeInstanceOf(AbortSignal)
+  })
+
+  it('a default-weight effect inlines the 400 face even on a multi-weight family', async () => {
+    setFontCatalog([{ family: 'Work Sans', weights: [100, 900], axes: [{ tag: 'wght' }] }])
+    const calls: string[] = []
+    globalThis.fetch = vi.fn(async (url: RequestInfo | URL) => {
+      calls.push(String(url))
+      if (String(url).startsWith('/api/scene3d/google-font-file')) return new Response(new Uint8Array([4, 5, 6]))
+      return new Response(JSON.stringify({ font: 'U1VCU0VU' }))
+    }) as typeof fetch
+    const s = stateFor('contour', { font: 'Work Sans', typeWeight: 700 })
+    expect(await spaceTypeEmbedFont(s)).toMatchObject({ family: 'Work Sans', weight: 400 })
+    expect(calls[0]).toBe('/api/scene3d/google-font-file?family=Work+Sans&weight=400')
   })
 
   it('null when the face cannot be fetched, and a later try fetches again', async () => {
@@ -266,5 +299,89 @@ describe('makeSpaceTypeFrameSource — embed passthrough', () => {
     const src = makeSpaceTypeFrameSource(deps)
     expect(src.embed).toBeUndefined()
     expect(src.duration).toBe(6)
+  })
+})
+
+describe('spaceTypeSubsetText — every character the player can draw', () => {
+  const has = (t: string, ...chars: string[]) => chars.every(c => t.includes(c))
+
+  it('"crème" in capitals keeps "È" as well as "è"', () => {
+    const t = spaceTypeSubsetText(stateFor('ribbon', { text: 'crème', textCase: 'upper' }))
+    expect(has(t, 'è', 'È')).toBe(true)
+  })
+
+  it('an effect with no Case control is capitalised; an unset case on one that has it too', () => {
+    expect(spaceTypeSubsetText(stateFor('elastic', { text: 'brûlée' }))).toContain('Û')
+    const unset = stateFor('stripes', { text: 'éte' })
+    delete (unset.params as Record<string, unknown>).textCase
+    expect(spaceTypeSubsetText(unset)).toContain('É')
+  })
+
+  it('as typed leaves the capitals out', () => {
+    const t = spaceTypeSubsetText(stateFor('stripes', { text: 'crème', textCase: 'asis' }))
+    expect(t).toContain('è')
+    expect(t).not.toContain('È')
+  })
+
+  it("Slot's filler tokens and every message line", () => {
+    const t = spaceTypeSubsetText(stateFor('slot', { text: 'ÇA VA\nÑU', fillerSource: 'custom', fillerTokens: '★ Ø' }))
+    expect(has(t, 'Ç', 'Ñ', '★', 'Ø')).toBe(true)
+  })
+
+  it("Showcase's word cards (their text lives in the content list)", () => {
+    const content = JSON.stringify([
+      { id: 'w', kind: 'word', text: 'Straße', resolution: 'whole' },
+      { id: 'c', kind: 'card', fillKind: 'solid', fill: { type: 'solid', a: '#fff' } },
+    ])
+    const t = spaceTypeSubsetText(stateFor('showfan', { content }))
+    expect(has(t, 'ß', 'S')).toBe(true)
+  })
+
+  it("Loft's word", () => {
+    expect(spaceTypeSubsetText(stateFor('loft', { shape: 'word', text: 'Ωmega' }))).toContain('Ω')
+  })
+
+  it('always holds basic Latin, and each character once', () => {
+    const t = spaceTypeSubsetText(stateFor('ribbon', { text: 'aaa' }))
+    for (let cp = 0x20; cp <= 0x7e; cp++) expect(t).toContain(String.fromCharCode(cp))
+    expect(new Set(t).size).toBe([...t].length)
+  })
+})
+
+describe('spaceTypeEmbedFace — the weight the effect draws', () => {
+  beforeEach(() => setFontCatalog([
+    { family: 'Work Sans', weights: [100, 900], axes: [{ tag: 'wght' }] },
+    { family: 'Satisfy', weights: [400], axes: [] },
+  ]))
+
+  it('the Type weight on a multi-weight family, 400 on a single-weight one', () => {
+    expect(spaceTypeEmbedFace(stateFor('ribbon', { font: 'Work Sans', typeWeight: 700 }))).toEqual({ family: 'Work Sans', weight: 700 })
+    expect(spaceTypeEmbedFace(stateFor('ribbon', { font: 'Satisfy', typeWeight: 700 }))).toEqual({ family: 'Satisfy', weight: 400 })
+  })
+
+  it('400 for the effects that draw at the default weight, whatever the Type weight', () => {
+    for (const id of DEFAULT_WEIGHT_EFFECTS) {
+      expect(spaceTypeEmbedFace(stateFor(id, { font: 'Work Sans', typeWeight: 700 }))).toEqual({ family: 'Work Sans', weight: 400 })
+    }
+  })
+
+  it('an unset font is Inter, as in the app', () => {
+    const s = stateFor('ribbon')
+    delete (s.params as Record<string, unknown>).font
+    expect(spaceTypeEmbedFace(s).family).toBe('Inter')
+  })
+
+  it('DEFAULT_WEIGHT_EFFECTS is exactly the effects whose own canvas text names no weight', () => {
+    const dir = join(process.cwd(), 'app/lib/spacetype/effects')
+    const found = new Set<string>()
+    for (const f of readdirSync(dir).filter(n => n.endsWith('.ts'))) {
+      const src = readFileSync(join(dir, f), 'utf8')
+      // `x.font = \`${size}px "…"` — a size first, so the weight is the CSS default.
+      if (!/\.font\s*=\s*`\$\{[^}]*\}px/.test(src)) continue
+      const id = /\bid:\s*'([^']+)'/.exec(src)?.[1]
+      expect(id, f).toBeTruthy()
+      found.add(id!)
+    }
+    expect(found).toEqual(new Set(DEFAULT_WEIGHT_EFFECTS))
   })
 })

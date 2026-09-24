@@ -12,6 +12,7 @@ import { loopMultiplier } from './loop'
 import { dimsFromState, type SpaceTypeState } from './state'
 import { DEFAULT_POST } from './postSettings'
 import { resolveShape } from './effects/loft'
+import { parseContent } from './tile'
 import { effectiveLoopSeconds } from '~/lib/compositor/loopReconcile'
 import { resolveFontFamily, fontHasWeightAxis } from '~/lib/font/resolveFamily'
 import { fontSourceUrl, parseLibraryFontValue } from '~/lib/scene3d/outlines'
@@ -58,13 +59,70 @@ export function spaceTypeEmbedConfig(state: SpaceTypeState, font: SpaceTypeEmbed
   return config
 }
 
-/** The face the embed inlines for a state: the family and weight resolved exactly as
- *  texOptsFromState / the embed's buildTexOpts resolve them (a static family pins to 400 so a
- *  single cut is never faux-bolded). */
+/** Effects that draw every glyph themselves at the CSS default weight — their own canvas
+ *  text names no weight (ctx.font = '<px>px "<family>", …') — and never show the shared
+ *  text atlas (their buildScene ignores it). They have no Type weight control. Whatever the
+ *  family, the one weight they draw is 400, so 400 is the face the embed must carry.
+ *  tests/unit/spacetype-embed-config.unit.spec.ts scans the effect sources to keep this list
+ *  complete. */
+export const DEFAULT_WEIGHT_EFFECTS: ReadonlySet<string> = new Set(['contour', 'spiral', 'tunnel', 'streamer'])
+
+/** The weight the effects' own glyph code asks for on a family with a weight axis. */
+function requestedWeight(p: SpaceTypeState['params']): number {
+  return Number(p.typeWeight ?? 700)
+}
+
+/** The family a state's font value names, resolved the way the app does (an unset font is
+ *  Inter, as texOptsFromState's familyFromValue and the embed's buildTexOpts both default). */
+function familyOf(p: SpaceTypeState['params']): string {
+  return resolveFontFamily(String(p.font ?? ''))
+}
+
+/** The face the embed inlines for a state: the family, and the one weight the effect draws.
+ *  That is the weight texOptsFromState / the embed's buildTexOpts resolve (a static family
+ *  pins to 400 so a single cut is never faux-bolded), except for DEFAULT_WEIGHT_EFFECTS,
+ *  which draw at 400 whatever the Type weight says. The proxy serves one STATIC instance
+ *  per weight (never the variable file), so the inlined face covers exactly this weight. */
 export function spaceTypeEmbedFace(state: SpaceTypeState): { family: string; weight: number } {
-  const family = resolveFontFamily(String(state.params.font))
-  const weight = fontHasWeightAxis(family) ? Number(state.params.typeWeight ?? 700) : 400
+  const family = familyOf(state.params)
+  if (DEFAULT_WEIGHT_EFFECTS.has(getEffect(state.effectId).id)) return { family, weight: 400 }
+  const weight = fontHasWeightAxis(family) ? requestedWeight(state.params) : 400
   return { family, weight }
+}
+
+/** Every character the chosen effect can draw for this state, for the font subset: each
+ *  text the effect's Type controls hold (the text, Slot's filler tokens, Loft's word, …) as
+ *  typed; the words of Showcase's content list; the upper-cased form of all of those when
+ *  the text case is capitals ("crème" is drawn "CRÈME", and "È" is not "è"); and basic
+ *  Latin (U+0020–U+007E, which covers Slot's built-in glyph sets). Each character once, in
+ *  first-seen order. Pure. */
+export function spaceTypeSubsetText(state: SpaceTypeState): string {
+  const effect = getEffect(state.effectId)
+  const p = state.params
+  const texts: string[] = []
+  for (const c of effect.controls) {
+    if (c.kind === 'text' || c.kind === 'textList') {
+      texts.push(String(p[c.key] ?? c.default ?? ''))
+    } else if (c.kind === 'contentList') {
+      for (const item of parseContent(String(p[c.key] ?? c.default ?? '[]'))) {
+        if (item.kind === 'word') texts.push(String(item.text ?? ''))
+      }
+    }
+  }
+  // Capitals unless the piece says as-typed on an effect that honours it. An effect with no
+  // Case control capitalises (the app and the player agree), and so does an unset case
+  // (the player's default), so the only as-typed-only case is an explicit 'asis' that the
+  // effect's own Case control reads.
+  const honoursCase = effect.controls.some(c => c.key === 'textCase')
+  const upper = !(honoursCase && String(p.textCase ?? 'upper') === 'asis')
+  const chars = new Set<string>()
+  const add = (t: string) => { for (const ch of t) chars.add(ch) }
+  for (const t of texts) {
+    add(t)
+    if (upper) add(t.toUpperCase())
+  }
+  for (let cp = 0x20; cp <= 0x7e; cp++) chars.add(String.fromCharCode(cp))
+  return [...chars].join('')
 }
 
 // Raw font bytes by family+weight, so re-exporting (or several wired layers on one face)
@@ -83,7 +141,9 @@ async function fetchFontBytes(family: string, weight: number): Promise<ArrayBuff
   const hit = fontBytesCache.get(key)
   if (hit) return hit
   try {
-    const res = await fetch(fontSourceUrl(`google:${family}@${weight}`))
+    // Bounded: once wired layers take the live route, a stalled proxy would otherwise stall
+    // the whole Frame export here. A timeout is a failure like any other (frames).
+    const res = await fetch(fontSourceUrl(`google:${family}@${weight}`), { signal: AbortSignal.timeout(10_000) })
     if (!res.ok) return null
     const buf = await res.arrayBuffer()
     fontBytesCache.set(key, buf)
@@ -95,7 +155,8 @@ async function fetchFontBytes(family: string, weight: number): Promise<ArrayBuff
 }
 
 /** Fetch and subset the state's font as a data URL (moved from SpaceTypeSurface.vue).
- *  Subsetted to the piece's text plus basic Latin via `/sailor/font_subset`; a subsetting
+ *  Subsetted to every character the effect can draw (spaceTypeSubsetText, basic Latin
+ *  included) via `/sailor/font_subset`; a subsetting
  *  failure alone falls back to the full font. Null only when the font could not be fetched
  *  at all — the caller decides what that means (the studio export degrades to the viewer's
  *  system font and says so; the Frame's live route falls back to frames). */
@@ -104,8 +165,7 @@ export async function spaceTypeEmbedFont(state: SpaceTypeState): Promise<SpaceTy
   const buf = await fetchFontBytes(family, weight)
   if (!buf) return null
   const fullB64 = bufferToBase64(buf)
-  const text = String(state.params.text ?? '')
-  const subsetB64 = await subsetFontBase64(fullB64, text, '[space-type] embed export:')
+  const subsetB64 = await subsetFontBase64(fullB64, spaceTypeSubsetText(state), '[space-type] embed export:')
   return { family, weight, dataUrl: `data:font/ttf;base64,${subsetB64 ?? fullB64}` }
 }
 
@@ -172,13 +232,15 @@ export function liveEmbedBlocker(
   if (parseLibraryFontValue(String(p.font ?? ''))) return 'it uses a font from your library'
   // A single-weight family is pinned to 400 in the app (the catalog knows it is static).
   // The player has no catalog: effects that build their own glyph textures would ask for
-  // the chosen weight and the browser would thicken the one cut it has.
-  const family = resolveFontFamily(String(p.font))
-  if (!fontHasWeightAxis(family) && Number(p.typeWeight ?? 700) !== 400) return 'the player would thicken its single-weight font'
+  // the chosen weight and the browser would thicken the one cut it has. Two kinds of effect
+  // ask the same weight in both places, so they are fine: Pile never pins (it asks the Type
+  // weight in the app too), and DEFAULT_WEIGHT_EFFECTS always ask 400.
+  const pinsWeight = effect.id !== 'pile' && !DEFAULT_WEIGHT_EFFECTS.has(effect.id)
+  if (pinsWeight && !fontHasWeightAxis(familyOf(p)) && requestedWeight(p) !== 400) return 'the player would thicken its single-weight font'
   // An unset text case falls back to the effect's own default in the app (texOptsFromState)
   // but to capitals in the player (buildTexOpts).
   const caseDefault = String(effect.controls.find(c => c.key === 'textCase')?.default ?? 'upper')
-  if (p.textCase === undefined && caseDefault !== 'upper') return 'the player would capitalise its text'
+  if (p.textCase == null && caseDefault !== 'upper') return 'the player would capitalise its text'
   if (!verified.has(effect.id)) return NOT_VERIFIED
   return null
 }
@@ -193,12 +255,14 @@ export async function spaceTypeWiredEmbed(
 ): Promise<StudioEmbed | null> {
   const blocker = liveEmbedBlocker(state, opts.verified ?? LIVE_VERIFIED_EFFECTS)
   if (blocker) {
-    console.info(`[space-type] wired layer exports as frames: ${blocker}`)
+    // debug, not info: a fallback is not an error, and until the verified list fills most
+    // wired layers take it on every export.
+    console.debug(`[space-type] wired layer exports as frames: ${blocker}`)
     return null
   }
   const font = await (opts.loadFont ?? spaceTypeEmbedFont)(state)
   if (!font && !SYSTEM_FAMILIES.has(spaceTypeEmbedFace(state).family.toLowerCase())) {
-    console.info('[space-type] wired layer exports as frames: its font could not be inlined')
+    console.debug('[space-type] wired layer exports as frames: its font could not be inlined')
     return null
   }
   const config = spaceTypeEmbedConfig(state, font)
