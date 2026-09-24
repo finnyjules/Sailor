@@ -28,6 +28,7 @@ import { contrastRatio } from '../palette'
 import type { AccentCopy, RoleTargets } from './toOps'
 import { hexToOklab } from '~/lib/color/convert'
 import { isOwned, mergeOwned } from './owned'
+import { imageLabel, isFromLayout, isImageKind } from '../userImages'
 import { enumerate, lineOptions } from './vary'
 import type { Candidate, Choice, LineOption } from './vary'
 import type { BrandLogo, Content, El, FaceKey, Kind, LayoutDef, LayoutOut, Measure, PhotoEl, RoleKey } from './types'
@@ -99,9 +100,11 @@ export interface LayoutPlan {
    *    layout placed that this one does not — hidden too, never left stranded over the new layout.
    *  Hidden the way a format's levels are (a hidden-only op, tracked `visible`), so a later layout
    *  that places one shows it again. A Frame no Stage 4 layout has touched gets only the first kind.
-   *  A showing image is never listed: since Task 7 of the layout decisions every layout places the
-   *  Frame's extra images (`placeExtras`) or is refused — this replaces Stage 4's ruling R14, which
-   *  hid and named a second image a Stage 4 layout did not place. */
+   *  A showing image is listed only when it is tagged Not used (rulings D3, D7: hidden by this plan
+   *  and named, `'unused'`); otherwise never — since Task 7 of the layout decisions every layout
+   *  places the Frame's extra images (`placeExtras`) or is refused. This replaces Stage 4's ruling
+   *  R14, which hid and named a second image a Stage 4 layout did not place. An image is named as
+   *  its Content row names it (`imageLabel`). */
   notPlaced: NotPlaced[]
 }
 
@@ -267,10 +270,8 @@ type FrameArgs = Pick<LayoutPlanArgs, 'props' | 'frameW' | 'frameH' | 'shapeMode
 
 interface View { elements: FrameElements; read: ReadContent }
 
-/** A layer the user moved after a layout set it as its own words (Reasons why's "1"): no longer the
- *  layout's piece (a user edit clears `owner`), but not the user's content either (final review
- *  I3) — left out of role inference, content recognition and the Content section. */
-export const isFromLayout = (l: { fromLayout?: unknown }): boolean => l.fromLayout != null
+// `isFromLayout` lives with the user-image helpers (`../userImages`); re-exported for its callers.
+export { isFromLayout }
 
 /** Which of the Frame's layers holds which role: size inference over the user's own layers, then
  *  the roles the last apply stored. A layout's own pieces (bands, rules, dots) are not the user's
@@ -915,10 +916,14 @@ const oklabDistance = (a: string, b: string): number => {
 }
 
 /** The accent copy an overlap layout draws (`LayoutDef.accentCopy`, ruling D2), or undefined when
- *  it draws none and runs as before: recolour is on (the user's line takes the accent itself); the
- *  Frame has no text layer for that role; or the copy would not differ visibly from the user's
- *  line — its colour is not a plain colour (none at all reads as the renderer's black), or it is the palette's accent already, or all but
- *  (`ACCENT_COPY_MIN_DIFF`). Both overlap layouts set that line in the accent. The face is the user's
+ *  it draws none and the layout runs as before. It draws none when:
+ *  - recolour is on (the user's line takes the accent itself);
+ *  - the Frame has no text layer for that role;
+ *  - the user's line colour is not a plain colour; or
+ *  - that colour is within `ACCENT_COPY_MIN_DIFF` of the palette's accent (the same colour, or
+ *    nearly), so a copy would not show. A line with no colour at all counts as the renderer's
+ *    black.
+ *  Otherwise both overlap layouts set the big line in the accent. The copy's face is the user's
  *  layer's, with its own letter case as this apply leaves it (a case an earlier layout set and the
  *  user kept goes back to theirs). */
 function accentCopyFor(def: LayoutDef, layers: LocalLayer[], targets: RoleTargets, palette: ResolvedPalette, recolour: boolean | undefined): AccentCopy | undefined {
@@ -965,9 +970,9 @@ function carriedOver(p: Prepared, a: LayoutPlanArgs, ops: LayerOp[], z: number):
   for (const [r, id] of Object.entries(p.contentRead.roles) as [ContentRole, string | undefined][]) if (id) contentRole.set(id, r)
   const roleOf = new Map(contentRole)
   for (const r of ROLES) { const id = p.baseElements[r]?.id; if (id && !roleOf.has(id)) roleOf.set(id, r) }
-  // Ruling D7: a wired image is an image here too (hidden, tracked and named like one).
-  const isImage = (l: LocalLayer) => l.kind === 'image' || l.kind === 'wired'
-  const images = p.layers.filter(l => isImage(l) && !isOwned(l as { owner?: { by: string } }))
+  // Ruling D7: a wired image is an image here too (hidden, tracked and named like one). Owned and
+  // layout-moved layers are skipped below, so every image reaching the naming is a user image.
+  const isImage = isImageKind
   const tags = (a.props?.sailor_posterState as { tags?: Record<string, string> } | undefined)?.tags
   const hide: LayerOp[] = []
   const named: NotPlaced[] = []
@@ -1001,8 +1006,9 @@ function carriedOver(p: Prepared, a: LayoutPlanArgs, ops: LayerOp[], z: number):
     if (!layoutHid && !strand) continue
     if (strand) hide.push({ target: l.id, kind: isImage(l) ? 'image' : 'text', hidden: true, z, ...(tagUnused ? { hiddenBy: 'unused' as const } : {}) })
     if (isImage(l)) {
-      const name = (l as { name?: string }).name?.trim()
-      named.push({ role, text: name || `Image ${images.indexOf(l) + 1}`, image: true })
+      // Named as its Content row names it (`imageLabel`: its own name, else "Image n" among the
+      // user's images, wired ones included).
+      named.push({ role, text: imageLabel(p.layers, l), image: true })
     } else named.push({ role, text: (l as TextLayer).text ?? '' })
   }
   return { hide, named }

@@ -845,3 +845,38 @@ describe('useLayoutVary — fix round 1', () => {
     expect(vi.mocked(planLayout).mock.calls.at(-1)![0].palette.accent).toBe('#e1251b')
   })
 })
+
+// Final fix wave (L): Fill's arrangements 0 and 1 only put its image right or left. On a wide Frame
+// the planner sets its own side image instead, and the Image side row moves it — so an Arrangement
+// pill saying "Image right" could sit next to an image on the left. A layout whose arrangements are
+// image sides (`arrMirrorsSide`) leaves the Arrangement row out wherever the Image side row is offered.
+describe('Choices — arrangements that are image sides (arrMirrorsSide)', () => {
+  const sized = (w: number, h: number) => {
+    const props: Record<string, unknown> = { sailor_localLayers: frameLayers() }
+    const editor = { recordHistory: vi.fn(), commit: vi.fn(), writeOrder: vi.fn(), writeGroups: vi.fn() }
+    const vary = useLayoutVary({
+      props: () => props, frameW: () => w, frameH: () => h, connectedSlots: () => [],
+      editor: () => editor, remember: vi.fn(), measure: makeStubMeasure(),
+    })
+    vary.setStyle('street')
+    vary.select('stFill')
+    return vary
+  }
+  it('Fill declares it', () => {
+    expect(layoutsForStyle('street').find(d => d.id === 'stFill')!.arrMirrorsSide).toBe(true)
+  })
+  for (const [w, h] of [[1920, 1080], [1200, 628], [970, 250], [728, 90]] as const) {
+    it(`${w}×${h}: the Image side row is offered and the Arrangement row is not`, () => {
+      const vary = sized(w, h)
+      expect(vary.layoutId.value).toBe('stFill')
+      const keys = vary.choices.value.map(r => r.key)
+      expect(keys).toContain('side')
+      expect(keys).not.toContain('arr')
+    })
+  }
+  it('a portrait Frame (no Image side row): the Arrangement row names all three', () => {
+    const vary = sized(895, 1280)
+    expect(vary.choices.value.some(r => r.key === 'side')).toBe(false)
+    expect(vary.choices.value.find(r => r.key === 'arr')!.options.map(o => o.label)).toEqual(['Image right', 'Image left', 'Tilted tag'])
+  })
+})

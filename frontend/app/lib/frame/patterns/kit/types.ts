@@ -114,6 +114,12 @@ export interface LayoutDef {
    *  `arr`); absent on the rest, whose arrangement never varies. Sentence case, ≤ 14 characters,
    *  distinct within the layout. There is no fallback to letters. */
   arrLabels?: string[]
+  /** Final fix wave: this layout's arrangements are (in part) image sides — Fill's arr 0 and 1 put
+   *  its image right and left. Where the Image side axis is offered (a wide Frame: the planner sets
+   *  its own side image and the side choice moves it), an arrangement's side words could name the
+   *  wrong side, so the Choices leave the Arrangement row out there (Vary still reaches every
+   *  variation). */
+  arrMirrorsSide?: true
   /** Frame layout decisions, Task 4 (overlap accent, ruling D2): the role of the line this layout
    *  sets big, in the accent, to cross another (Overprint's details, Number behind's number). With
    *  recolour off the user's line keeps its own colour, so — when the accent differs visibly from

@@ -643,3 +643,42 @@ describe('Task 6 — waitForFont (the default loader)', () => {
     expect(await waitForFont('400 16px "Anton"', 150)).toBe(false)
   })
 })
+
+// Final fix wave (M): a wired image is a user image everywhere — it has a Content row, Not used
+// (ruling D7) is reachable from it, and an image's number is the same in its row and under
+// "Not shown" (counted in document order among the user's images, wired ones included).
+describe('Content section — wired images (final fix wave)', () => {
+  const wired = (id: string, name?: string): LocalLayer => ({ id, kind: 'wired', slot: 0, w: 0.4, lastAspect: 1.25, x: 0.7, y: 0.7, rotation: 0, opacity: 1, ...(name ? { name } : {}) } as unknown as LocalLayer)
+  const img = (id: string) => createImageLayer('b.png', 1, { id, w: 0.3, h: 0.3 }) as LocalLayer
+
+  it('a wired image beyond the first gets a Content row (its own name when it has one)', () => {
+    const { vary } = realHarness([...reviewFrame(), wired('w1'), wired('w2', 'Product shot')])
+    expect(vary.content.value.filter(r => r.kind === 'image')).toEqual([
+      { id: 'w1', kind: 'image', text: '', n: 2, tag: null },
+      { id: 'w2', kind: 'image', text: '', n: 3, name: 'Product shot', tag: null },
+    ])
+  })
+
+  it('tagging it Not used through setTag hides it and names it under Not shown', async () => {
+    const { props, vary } = realHarness([...reviewFrame(), wired('w1')])
+    await idle()
+    vary.select('statement'); await nextTick(); await idle()
+    expect(vary.applied.value).toBe(true)
+    expect(vary.setTag('w1', 'unused')).toBe(true)
+    await nextTick(); await idle()
+    const w = (props.sailor_localLayers as LocalLayer[]).find(l => l.id === 'w1') as { visible?: boolean }
+    expect(w.visible).toBe(false)
+    expect(vary.candidates.value[vary.index.value]!.plan.notPlaced).toContainEqual({ role: 'unused', text: 'Image 2', image: true })
+  })
+
+  it('[image, wired, image]: the third is "Image 3" in its row and under Not shown', async () => {
+    const { props, vary } = realHarness([...reviewFrame(), wired('w1'), img('img3')])
+    expect(vary.content.value.filter(r => r.kind === 'image').map(r => [r.id, r.n])).toEqual([['w1', 2], ['img3', 3]])
+    await idle()
+    vary.select('statement'); await nextTick(); await idle()
+    expect(vary.setTag('img3', 'unused')).toBe(true)
+    await nextTick(); await idle()
+    expect(((props.sailor_localLayers as LocalLayer[]).find(l => l.id === 'img3') as { visible?: boolean }).visible).toBe(false)
+    expect(vary.candidates.value[vary.index.value]!.plan.notPlaced).toContainEqual({ role: 'unused', text: 'Image 3', image: true })
+  })
+})

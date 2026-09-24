@@ -8,6 +8,7 @@ import type { BrandLogo, Measure } from '~/lib/frame/patterns/kit/types'
 import { contentHints } from '~/lib/frame/patterns/kit/content'
 import type { ContentTag, ContentTags } from '~/lib/frame/patterns/kit/content'
 import { isOwned } from '~/lib/frame/patterns/kit/owned'
+import { ownImageName, userImages } from '~/lib/frame/patterns/userImages'
 import { layoutById, layoutsForStyle } from '~/lib/frame/patterns/layouts/catalog'
 import { STYLES } from '~/lib/frame/patterns/kit/styles'
 import type { StyleId } from '~/lib/frame/patterns/kit/styles'
@@ -193,7 +194,8 @@ const AXES: { key: keyof Choice; label: string; values?: unknown[]; labels?: str
   { key: 'arr', label: 'Arrangement', values: [0, 1, 2] },
   { key: 'scale', label: 'Scale', values: ['full', 'quiet'], labels: ['Full', 'Quieter'] },
   { key: 'side', label: 'Image side', values: ['right', 'left'], labels: ['Right', 'Left'] },
-  // Ruling R7: only a platform-button format with an action line offers it (Performance only).
+  // Ruling R7: only a platform-button format with an action line offers it — in every style that
+  // draws a button (`STYLES[style].button`; Frame layout decisions, Task 2).
   { key: 'cta', label: 'Button', values: ['drawn', 'native'], labels: ['In the image', 'Platform\'s own'] },
 ]
 
@@ -546,9 +548,14 @@ export function useLayoutVary(src: LayoutVarySource): {
   const choices = computed<ChoiceRow[]>(() => {
     const list = candidates.value
     const cur = list[index.value]?.choice
-    const arrLabels = layoutById(layoutId.value)?.arrLabels
+    const def = layoutById(layoutId.value)
+    const arrLabels = def?.arrLabels
+    // A layout whose arrangements are image sides (`arrMirrorsSide`, Fill) leaves the Arrangement
+    // row out where the Image side row is offered: its side words could name the wrong side there.
+    const sideOffered = new Set(list.map(c => axisValue(c.choice, 'side'))).size > 1
     const rows: ChoiceRow[] = []
     for (const ax of AXES) {
+      if (ax.key === 'arr' && def?.arrMirrorsSide && sideOffered) continue
       const order = ax.key === 'lines' ? lineLabels.value.map(o => o.v) : ax.values!
       const present = new Set(list.map(c => axisValue(c.choice, ax.key)))
       const values = order.filter(v => present.has(v as never))
@@ -816,10 +823,12 @@ export function useLayoutVary(src: LayoutVarySource): {
       if (!text.trim()) continue
       rows.push({ id: l.id, kind: 'text', text, tag: tags[l.id] ?? null })
     }
-    // Each image beyond the first may be the second image (before / after), in document order.
-    layers.filter(l => l.kind === 'image').forEach((l, i) => {
+    // Each image beyond the first may be the second image (before / after), in document order. A
+    // wired image is one of the user's images too (`isUserImage`), so Not used (ruling D7) is
+    // reachable from its row; `n` is the number "Not shown" names it by (`imageLabel`).
+    userImages(layers).forEach((l, i) => {
       if (i === 0) return
-      const name = (l as { name?: string }).name?.trim()
+      const name = ownImageName(l)
       rows.push({ id: l.id, kind: 'image', text: '', n: i + 1, ...(name ? { name } : {}), tag: tags[l.id] ?? null })
     })
     return rows

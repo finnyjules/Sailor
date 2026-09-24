@@ -2,6 +2,7 @@ import type { PatternPlacement, LayerOp, FrameElements, Role } from './types'
 import type { ResolvedPalette } from './palette'
 import { roleToPaint } from './palette'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
+import { isImageKind } from './userImages'
 
 const ROLES: Role[] = ['title', 'details', 'caption', 'date']
 
@@ -45,7 +46,7 @@ export function applyPlacement(
     const id = targetId(op, elements); if (id) byId.set(id, op)
   }
   return layers.map(layer => {
-    const textOrImage = layer.kind === 'text' || layer.kind === 'image' || layer.kind === 'wired'
+    const textOrImage = layer.kind === 'text' || isImageKind(layer)
     // A shape a layout placed remembers its own place and size (Knockout's band), so a layout
     // that does not place the shape at all gives it back: it is applied as an op that sets
     // nothing, and every field the earlier layout set comes back (unless the user changed it
@@ -147,7 +148,7 @@ export function applyPlacement(
       if (op.w != null) next.w = op.w
       if (op.h != null) next.h = op.h
     }
-    if (layer.kind === 'image' || layer.kind === 'wired') {
+    if (isImageKind(layer)) {
       track('crop', op.crop ?? undefined)
       track('mask', op.mask ?? undefined)
     }

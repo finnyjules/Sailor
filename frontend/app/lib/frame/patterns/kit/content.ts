@@ -1,6 +1,7 @@
 import type { LocalLayer, TextLayer } from '~/composables/useCompositorLayers'
 import type { FrameElements } from '../types'
 import { isNumberish } from '../hierarchy'
+import { isImageKind } from '../userImages'
 
 // ═══════════════════════ the content model (Stage 4) ═══════════════════════
 // What each of the Frame's lines IS, beyond the four text levels and the action: a review
@@ -160,7 +161,8 @@ export function readContent(userLayers: LocalLayer[], inferred: FrameElements, t
     if (tag === 'unused') { taken.add(id); continue }
     if (!CONTENT_ROLES.includes(tag)) continue
     if (base && !isBaseRole(tag)) continue
-    if (tag === 'image2' ? l.kind !== 'image' : textOf(l) == null) continue
+    // A wired image is an image here too (final fix wave): its Content row offers "Second image".
+    if (tag === 'image2' ? !isImageKind(l) : textOf(l) == null) continue
     if (roles[tag] != null) continue   // the first tag of a role (in tag order) holds it
     roles[tag] = id
     taken.add(id)
@@ -249,6 +251,8 @@ export function readContent(userLayers: LocalLayer[], inferred: FrameElements, t
 function finish(roles: Partial<Record<ContentRole, string>>, byId: Map<string, LocalLayer>, taken: Set<string>): ReadContent {
   const userLayers = [...byId.values()]
   // The second image (document order), when no tag named one. `'unused'` images do not count.
+  // Local images only: a wired image is the second image only when tagged (a Frame with a wired
+  // image plans as before — it is an extra image the planner tiles).
   if (roles.image2 == null) {
     const images = userLayers.filter(l => l.kind === 'image' && !taken.has(l.id))
     if (images.length >= 2) roles.image2 = images[1]!.id

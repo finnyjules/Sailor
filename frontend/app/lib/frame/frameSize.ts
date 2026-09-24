@@ -103,7 +103,9 @@ type HideTracked = { id: string; visible?: boolean; layoutPrev?: Record<string, 
  *  The lines are read the way the layout that hid them read the Frame (`posterState.patternId`: a
  *  Stage 4 layout reads the content view, ruling C2 — final review I1). Only a level (title,
  *  details, date, action, caption in that view) can be a format's: a content line or an image a
- *  layout hid stays hidden (rulings R14, R15). */
+ *  layout hid stays hidden here (ruling R15). An image hidden that way is placed — and shown —
+ *  again by the next apply (every layout places the Frame's extra images since Task 7 of the
+ *  layout decisions), unless it is tagged Not used (rulings D3, D7). */
 export function restoreFormatHiddenLines(data: FrameSizeNodeData) {
   const props = data.properties
   const layers = props?.sailor_localLayers as HideTracked[] | undefined

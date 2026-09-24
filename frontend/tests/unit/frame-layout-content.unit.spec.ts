@@ -173,6 +173,11 @@ describe('readContent — on a Frame', () => {
     const im = [tl('t', 'Before and after', 0.12), img('i1'), img('i2'), img('i3')]
     expect(read(im, { i2: 'unused' }).roles.image2).toBe('i3')
   })
+  it('final fix wave: a wired image\'s Content row offers "Second image", and the tag holds', () => {
+    const w = { id: 'w1', kind: 'wired', slot: 0, w: 0.4, lastAspect: 1.25, x: 0.7, y: 0.7, rotation: 0, opacity: 1 } as unknown as LocalLayer
+    const layers = [tl('t', 'Before and after', 0.12), img('i1'), w]
+    expect(read(layers, { w1: 'image2' }).roles.image2).toBe('w1')
+  })
   it('a tag that does not fit its layer is ignored (image2 on text, a text role on an image)', () => {
     const layers = [tl('t', 'Before and after', 0.12), tl('c', 'Free returns', 0.02), img('i1'), img('i2')]
     const got = read(layers, { c: 'image2', i1: 'quote' })
