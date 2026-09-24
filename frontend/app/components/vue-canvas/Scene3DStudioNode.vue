@@ -11,7 +11,7 @@ import { parseDoc } from '~/lib/scene3d/config'
 import { SceneEngine } from '~/lib/scene3d/engine'
 import { renderPasses } from '~/lib/scene3d/passes'
 import { sceneHasMotion, renderMotionFrameSettled, sceneFrameClock } from '~/lib/scene3d/motion/render'
-import { appExportIO, createRestyleLoader, ensureShaderCatalog, renderExportFrameSettled } from '~/lib/scene3d/exportRender'
+import { appExportIO, createRestyleLoader, renderExportFrameSettled, PREVIEW_TIMEOUT_MS } from '~/lib/scene3d/exportRender'
 import { makeScene3DFrameSource } from '~/lib/scene3d/motion/frameSource'
 import { registerStudioFrameSource, unregisterStudioFrameSource } from '~/lib/studio/frameSource'
 import { registerScene3DRebaker, unregisterScene3DRebaker } from '~/lib/scene3d/rebake'
@@ -101,7 +101,9 @@ let inFlight = 0
 let releaseTimer: ReturnType<typeof setTimeout> | null = null
 // The Frame's 3D source renders through the shared export renderer, which needs the scene's
 // restyle results loaded — kept across frames (and across engine re-creation) by this loader.
-const frameRestyle = createRestyleLoader(appExportIO)
+// The card thumbnail (renderPreview) applies it too, so the card shows restyle whether or not a
+// Frame has pulled first. A result that lands after the card stopped waiting redraws the card.
+const frameRestyle = createRestyleLoader(appExportIO, { onLate: () => schedulePreview() })
 
 function scheduleEngineRelease(): void {
   if (releaseTimer) clearTimeout(releaseTimer)
@@ -133,19 +135,19 @@ function syncRegistration() {
       // Still scenes report duration 0 (see sceneFrameClock) so the Frame pulls
       // them once and runs no rAF; animated scenes report their real clock.
       getClock: () => sceneFrameClock(sceneDoc.value),
-      // The shared export renderer: restyle results loaded, the shader catalog in hand,
-      // every asset waited for (decal meshes attach on a microtask after syncFromDoc, and a
-      // Frame pulls each frame exactly once), editor helpers hidden. A short deadline, and
-      // failures are ignored — the preview draws what it has. getFrame already awaits.
+      // The shared export renderer: restyle results, the shader catalog and every asset waited
+      // for (decal meshes attach on a microtask after syncFromDoc, and a Frame pulls each frame
+      // exactly once), editor helpers hidden. ONE short deadline over all of it — the Frame
+      // pulls every animated slot together, so a slow backend must not freeze it — and failures
+      // are ignored: the preview draws what it has. getFrame already awaits.
       renderAt: async (t01, w, h) => {
         const eng = ensureHeadless(w, h)
         if (!eng) return null
         inFlight++
         try {
-          const doc = sceneDoc.value
-          await frameRestyle.apply(eng, doc)
-          await ensureShaderCatalog(doc, appExportIO)
-          return await renderExportFrameSettled(eng, doc, t01, { timeoutMs: 4000 })
+          return await renderExportFrameSettled(eng, sceneDoc.value, t01, {
+            timeoutMs: PREVIEW_TIMEOUT_MS, restyle: frameRestyle, io: appExportIO,
+          })
         } finally {
           inFlight--
           // Release AFTER the consumer copies (pullLiveFrame drawImages once our
@@ -190,6 +192,9 @@ async function renderPreview(): Promise<void> {
   if (!eng) return
   inFlight++
   try {
+    // Restyle through the same loader as the Frame's source (the engine is shared), under the
+    // same short deadline — the card still draws the grid, as it always has.
+    await frameRestyle.apply(eng, doc, { deadline: Date.now() + PREVIEW_TIMEOUT_MS })
     const url = (await renderMotionFrameSettled(eng, doc, 0)).toDataURL('image/png')
     if (gen === previewGen) livePreviewUrl.value = url
   }

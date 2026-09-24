@@ -19,7 +19,18 @@ import { renderMotionFrame, sceneLoop } from '~/lib/scene3d/motion/render'
 import { objectRestylePlan } from '~/lib/scene3d/treatments'
 import { restyleViewUrl } from '~/lib/scene3d/restyleCache'
 import { fetchShaderFxCatalog } from '~/lib/shaderfx/catalog'
-import type { AssetFailure } from '~/lib/scene3d/assetTracker'
+import { type AssetFailure, beforeDeadline, REASON_DIDNT_FINISH } from '~/lib/scene3d/assetTracker'
+
+/** The export's one deadline: restyle results, the shader catalog and every engine asset all
+ *  have to arrive inside it (models can be large). */
+export const EXPORT_TIMEOUT_MS = 60_000
+/** The Frame preview's one deadline. A Frame pulls every animated slot together and skips ticks
+ *  while a pull is out, so one stalled 3D slot must never hold the whole Frame longer than this:
+ *  past it the preview draws what it has, and a late load shows on a later frame. */
+export const PREVIEW_TIMEOUT_MS = 4000
+/** How long a long-lived engine leaves a failed restyle load or catalog fetch before trying it
+ *  again — not every frame, not never. */
+export const RETRY_AFTER_MS = 10_000
 
 /** Where an export gets what is not in the doc. The app loads over its own proxy (`appExportIO`);
  *  a test or another host can hand in its own. */
@@ -70,24 +81,55 @@ function reasonOf(err: unknown): string {
   return err instanceof Error && err.message ? err.message : "couldn't load"
 }
 
-/** Load each restyle result; every one that fails is named. */
+/** Load each restyle result; every one that fails is named. With a `deadline` (epoch ms), a
+ *  result still loading at it is named as "didn't finish loading" (and released if it lands). */
 export async function loadRestyleTextures(
-  refs: readonly string[], io: ExportIO,
+  refs: readonly string[], io: ExportIO, opts: { deadline?: number } = {},
 ): Promise<{ textures: Map<string, THREE.Texture>; failures: AssetFailure[] }> {
   const textures = new Map<string, THREE.Texture>()
   const failures: AssetFailure[] = []
   await Promise.all(refs.map(async (ref) => {
-    try { textures.set(ref, await io.loadRestyle(ref)) }
-    catch (err) { failures.push({ kind: 'restyle', name: ref, reason: reasonOf(err) }) }
+    try {
+      const load = io.loadRestyle(ref)
+      if (!(await beforeDeadline(load, opts.deadline))) {
+        failures.push({ kind: 'restyle', name: ref, reason: REASON_DIDNT_FINISH })
+        load.then((tex) => tex.dispose(), () => {})
+        return
+      }
+      textures.set(ref, await load)
+    } catch (err) { failures.push({ kind: 'restyle', name: ref, reason: reasonOf(err) }) }
   }))
   return { textures, failures }
 }
 
-/** Load the shader-effect catalog when the scene needs it (a shader fill or shader relief). */
-export async function ensureShaderCatalog(doc: SceneDoc, io: ExportIO): Promise<AssetFailure[]> {
+const SHADER_CATALOG = 'Shader effects'
+/** The last failed catalog fetch per io, for `retryAfterMs`. */
+const catalogFailedAt = new WeakMap<ExportIO, { at: number; reason: string }>()
+
+/** Load the shader-effect catalog when the scene needs it (a shader fill or shader relief).
+ *  `deadline` (epoch ms): stop waiting at it (the fetch keeps going). `retryAfterMs`: a long-lived
+ *  caller's back-off — within that long of a failed fetch, report the failure without fetching
+ *  again. An export passes neither back-off nor skip: it always tries. */
+export async function ensureShaderCatalog(
+  doc: SceneDoc, io: ExportIO, opts: { deadline?: number; retryAfterMs?: number } = {},
+): Promise<AssetFailure[]> {
   if (!io.loadShaderCatalog || !sceneHasShaderFill(doc)) return []
-  try { await io.loadShaderCatalog(); return [] }
-  catch (err) { return [{ kind: 'texture', name: 'Shader effects', reason: reasonOf(err) }] }
+  const last = catalogFailedAt.get(io)
+  if (last && opts.retryAfterMs !== undefined && Date.now() - last.at < opts.retryAfterMs) {
+    return [{ kind: 'shader', name: SHADER_CATALOG, reason: last.reason }]
+  }
+  try {
+    const load = io.loadShaderCatalog()
+    // A late fetch that later fails is still recorded, so the back-off sees it.
+    load.catch((err) => { catalogFailedAt.set(io, { at: Date.now(), reason: reasonOf(err) }) })
+    if (!(await beforeDeadline(load, opts.deadline))) return [{ kind: 'shader', name: SHADER_CATALOG, reason: REASON_DIDNT_FINISH }]
+    catalogFailedAt.delete(io)
+    return []
+  } catch (err) {
+    const reason = reasonOf(err)
+    catalogFailedAt.set(io, { at: Date.now(), reason })
+    return [{ kind: 'shader', name: SHADER_CATALOG, reason }]
+  }
 }
 
 /** Hide the floor grid and every visible gizmo helper. Returns what it hid so the caller can
@@ -99,27 +141,38 @@ export function hideEditorHelpers(engine: SceneEngine): THREE.Object3D[] {
   return hidden
 }
 
-/** A fresh engine for one export: the scene synced at t=0, restyle results loaded, the shader
- *  catalog in hand, and every asset settled (or named in `failures`). The caller owns the engine
- *  and disposes it. */
+/** A fresh engine for one export: restyle results and the shader catalog in hand, the scene
+ *  synced at t=0 with both, the shader fields warmed, and every asset that sync started settled
+ *  (or named in `failures`) — all inside one deadline (`EXPORT_TIMEOUT_MS`). The caller owns the
+ *  engine and disposes it; if preparing it throws, it is disposed here. */
 export async function prepareExportEngine(
   doc: SceneDoc, opts: { width: number; height: number; io: ExportIO },
 ): Promise<{ engine: SceneEngine; failures: AssetFailure[] }> {
+  const deadline = Date.now() + EXPORT_TIMEOUT_MS
   const canvas = document.createElement('canvas')
   const engine = new SceneEngine(canvas, opts.width, opts.height)
-  engine.renderer.setPixelRatio(1)              // export pixels are device pixels (spec)
-  engine.setSize(opts.width, opts.height)
-  // Sync first so the engine's own loads start while the restyle results and catalog load.
-  engine.syncFromDoc(applyMotionToDoc(doc, 0).doc)
-  const [restyle, catalogFailures] = await Promise.all([
-    loadRestyleTextures(restyleRefs(doc), opts.io),
-    ensureShaderCatalog(doc, opts.io),
-  ])
-  // Restyle is applied by the material on the next sync (every export frame syncs).
-  engine.setRestyleTextures(restyleTextureMap(doc, restyle.textures))
-  // Models can be large: a long deadline. A fresh engine, so no stale failures from earlier syncs.
-  const assetFailures = await engine.settleAllAssets({ timeoutMs: 60_000 })
-  return { engine, failures: [...assetFailures, ...restyle.failures, ...catalogFailures] }
+  try {
+    engine.renderer.setPixelRatio(1)              // export pixels are device pixels (spec)
+    engine.setSize(opts.width, opts.height)
+    // Restyle and the catalog FIRST: the material reads the restyle map at sync time, and a
+    // shader fill resolves against the catalog — so the sync below builds the frame-0 materials
+    // with both, and whatever that sync starts loading is inside the settle.
+    const [restyle, catalogFailures] = await Promise.all([
+      loadRestyleTextures(restyleRefs(doc), opts.io, { deadline }),
+      ensureShaderCatalog(doc, opts.io, { deadline }),
+    ])
+    engine.setRestyleTextures(restyleTextureMap(doc, restyle.textures))
+    engine.syncFromDoc(applyMotionToDoc(doc, 0).doc)
+    // Warm the shader fields once, as `renderMotionFrame` does at t=0, so the images they start
+    // (a shader relief's source) are loading before the settle, not after it.
+    if (sceneHasShaderFill(doc)) engine.refreshShaderFields(0, false)
+    // A fresh engine, so no stale failures from earlier syncs.
+    const assetFailures = await engine.settleAllAssets({ timeoutMs: Math.max(0, deadline - Date.now()) })
+    return { engine, failures: [...assetFailures, ...restyle.failures, ...catalogFailures] }
+  } catch (err) {
+    engine.dispose()                              // no leaked WebGL context
+    throw err
+  }
 }
 
 /** The exact frame at `t01`, drawn once and synchronously: editor helpers hidden after the sync
@@ -137,41 +190,75 @@ export function renderExportFrame(engine: SceneEngine, doc: SceneDoc, t01: numbe
 }
 
 /** `renderExportFrame` for a long-lived engine drawing one frame per call (the Frame's 3D
- *  source): sync the frame's own pose, wait for its assets up to `timeoutMs`, then render.
- *  Failures are not returned — a preview draws what it has. */
+ *  source). ONE deadline, `timeoutMs` from now, covers everything it waits for: the restyle
+ *  results (`restyle`) and the shader catalog (`io`), then the frame's own assets after the
+ *  sync. Past it, it renders with what is in hand — a restyle or catalog still loading shows on a
+ *  later frame, as a placeholder always has. Failures are not returned — a preview draws what it
+ *  has; a failed restyle or catalog is retried after `RETRY_AFTER_MS`, not every frame. */
 export async function renderExportFrameSettled(
-  engine: SceneEngine, doc: SceneDoc, t01: number, opts: { timeoutMs: number },
+  engine: SceneEngine, doc: SceneDoc, t01: number,
+  opts: { timeoutMs: number; restyle?: RestyleLoader; io?: ExportIO },
 ): Promise<HTMLCanvasElement> {
+  const deadline = Date.now() + opts.timeoutMs
+  await Promise.all([
+    opts.restyle?.apply(engine, doc, { deadline }),
+    opts.io ? ensureShaderCatalog(doc, opts.io, { deadline, retryAfterMs: RETRY_AFTER_MS }) : null,
+  ])
   engine.syncFromDoc(applyMotionToDoc(doc, t01).doc)
-  await engine.settleAllAssets({ timeoutMs: opts.timeoutMs })
+  await engine.settleAllAssets({ timeoutMs: Math.max(0, deadline - Date.now()) })
   return renderExportFrame(engine, doc, t01)
 }
 
 /** Restyle results for a long-lived engine: each result is loaded once and kept across frames
  *  (and across engine re-creation — a texture uploads to whichever renderer draws it); a result
- *  the scene no longer points at is released; a result that failed is not retried every frame. */
+ *  the scene no longer points at is released; a result that failed is tried again after
+ *  `RETRY_AFTER_MS`, not every frame. `apply` waits for the scene's results until `deadline`
+ *  (epoch ms; none = until they settle) and hands the engine every result in hand by then.
+ *  `onLate` is called when a result an `apply` stopped waiting for lands after all — a caller
+ *  that draws once (a card thumbnail) redraws then. */
 export interface RestyleLoader {
-  apply(engine: SceneEngine, doc: SceneDoc): Promise<void>
+  apply(engine: SceneEngine, doc: SceneDoc, opts?: { deadline?: number }): Promise<void>
   dispose(): void
 }
 
-export function createRestyleLoader(io: ExportIO): RestyleLoader {
-  const byRef = new Map<string, Promise<THREE.Texture | null>>()
+export function createRestyleLoader(io: ExportIO, opts: { onLate?: () => void } = {}): RestyleLoader {
+  interface Entry { settled: Promise<unknown>; tex: THREE.Texture | null; failedAt: number | null; late: boolean }
+  const byRef = new Map<string, Entry>()
+  const load = (ref: string) => {
+    const entry: Entry = { settled: Promise.resolve(), tex: null, failedAt: null, late: false }
+    // Deferred a microtask so a load that throws synchronously is a failure, not a throw from apply.
+    entry.settled = Promise.resolve().then(() => io.loadRestyle(ref)).then(
+      (tex) => {
+        if (byRef.get(ref) !== entry) { tex.dispose(); return }   // released meanwhile
+        entry.tex = tex
+        if (entry.late) opts.onLate?.()
+      },
+      () => { entry.failedAt = Date.now() },
+    )
+    byRef.set(ref, entry)
+  }
   const release = (ref: string) => {
-    void byRef.get(ref)?.then((t) => t?.dispose())
+    byRef.get(ref)?.tex?.dispose()
     byRef.delete(ref)
   }
   return {
-    async apply(engine, doc) {
+    async apply(engine, doc, applyOpts = {}) {
       const refs = restyleRefs(doc)
       const wanted = new Set(refs)
       for (const ref of [...byRef.keys()]) if (!wanted.has(ref)) release(ref)
-      for (const ref of refs) if (!byRef.has(ref)) byRef.set(ref, io.loadRestyle(ref).catch(() => null))
+      for (const ref of refs) {
+        const e = byRef.get(ref)
+        if (!e || (e.failedAt !== null && Date.now() - e.failedAt >= RETRY_AFTER_MS)) load(ref)
+      }
+      const pending = refs.map((ref) => byRef.get(ref)!)
+      if (!(await beforeDeadline(Promise.all(pending.map((e) => e.settled)), applyOpts.deadline))) {
+        for (const e of pending) if (!e.tex && e.failedAt === null) e.late = true
+      }
       const loaded = new Map<string, THREE.Texture>()
-      await Promise.all(refs.map(async (ref) => {
-        const tex = await byRef.get(ref)
+      for (const ref of refs) {
+        const tex = byRef.get(ref)?.tex
         if (tex) loaded.set(ref, tex)
-      }))
+      }
       engine.setRestyleTextures(restyleTextureMap(doc, loaded))
     },
     dispose() { for (const ref of [...byRef.keys()]) release(ref) },

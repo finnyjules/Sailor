@@ -89,7 +89,7 @@ import { buildSvgObjects, SVG_SPLIT_THRESHOLD } from '~/lib/scene3d/svgImport'
 import { renderPasses, renderObjectPasses, screenRectOfBox } from '~/lib/scene3d/passes'
 import { cinematicScopeWarning } from '~/lib/scene3d/pathtrace/scope'
 import { restyleInputHash, restyleStyleSig, shouldRunRestyle, restyleViewUrl } from '~/lib/scene3d/restyleCache'
-import { renderExportFrame } from '~/lib/scene3d/exportRender'
+import { renderExportFrame, restyleRefs, loadRestyleTextures, appExportIO } from '~/lib/scene3d/exportRender'
 import { RESTYLE_MODELS } from '~/data/scene3d-restyle-models'
 import { useMoodboards } from '~/composables/useMoodboards'
 import { moodboardStyleBlock } from '~/lib/taste/styleBlock'
@@ -2113,8 +2113,10 @@ let ro: ResizeObserver | null = null
 // ── S7 AI restyle: client-side result-texture cache ───────────────────────────
 // Decoded restyle result textures keyed by their stable `resultRef` filename. Pixels live HERE,
 // never in the doc — the treatment stores only the small `resultRef`/`inputHash` strings. This
-// map is populated by an explicit re-run (Task 3) or the `__scene3dRestyleInject` test hook; a
-// pure lookup per frame, never a fetch or a model call. Empty this task (no re-run wired yet).
+// map is populated by an explicit re-run, the `__scene3dRestyleInject` test hook, and — so a
+// restyle survives a reload — the stored results the scene points at, loaded when the scene opens
+// and whenever its results change (the watch below). The per-frame push is a pure lookup, never a
+// fetch or a model call.
 const restyleTexCache = new Map<string, THREE.Texture>()
 /** Build the per-frame objectId → texture map the stage reads (StageContext.restyles): for each
  *  restyle host with a stored `resultRef` already decoded in the cache, map its object id to the
@@ -2131,6 +2133,33 @@ function collectRestyleTextures(d: SceneDoc, cache: Map<string, THREE.Texture>):
   }
   return out
 }
+// Load every stored result the scene points at that is not cached yet (a free /view read of the
+// input dir — no model call), then push the map the way runRestyle does. A result that fails to
+// load draws plain, as before; it is tried again when the scene's results change.
+const restyleLoading = new Set<string>()
+// The engine is disposed (not nulled) on unmount, so a load that lands after the editor closed
+// must not sync it.
+let restyleWatchAlive = true
+onBeforeUnmount(() => { restyleWatchAlive = false })
+watch(() => restyleRefs(doc).join('\n'), async () => {
+  const missing = restyleRefs(doc).filter((r) => !restyleTexCache.has(r) && !restyleLoading.has(r))
+  if (!missing.length) return
+  for (const r of missing) restyleLoading.add(r)
+  try {
+    const { textures } = await loadRestyleTextures(missing, appExportIO)
+    for (const [ref, tex] of textures) {
+      if (restyleTexCache.has(ref)) tex.dispose()        // a re-run landed it first
+      else restyleTexCache.set(ref, tex)
+    }
+  } finally {
+    for (const r of missing) restyleLoading.delete(r)
+  }
+  if (!engine || !restyleWatchAlive) return            // no WebGL, or closed (a load always lands after onMounted)
+  engine.setRestyleTextures(collectRestyleTextures(doc, restyleTexCache))
+  // The material takes its restyle at sync time, and nothing in the doc changed to trigger one —
+  // so sync now, exactly as the doc watcher does (never mid multi-selection drag).
+  if (!interaction?.pivotDragActive) { engine.syncFromDoc(doc); engine.cinematicRefresh() }
+}, { immediate: true })
 // Transient per-treatment run status for the restyle re-run button (idle / running / error). NOT in
 // the doc — a UI-only ref, like texGenerating. 'error' keeps the last good resultRef so the object
 // still shows its previous restyle.

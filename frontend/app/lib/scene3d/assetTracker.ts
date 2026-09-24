@@ -2,7 +2,7 @@
 // draws a placeholder meanwhile; an export must instead wait for all of them, and must say which
 // one failed rather than bake a placeholder. Pure — no three.js — so it is unit-tested alone.
 
-export type AssetKind = 'model' | 'font' | 'mesh' | 'hdri' | 'texture' | 'decal' | 'restyle'
+export type AssetKind = 'model' | 'font' | 'mesh' | 'hdri' | 'texture' | 'decal' | 'restyle' | 'shader'
 export interface AssetFailure { kind: AssetKind; name: string; reason: string }
 /** An asset by what a person recognises — a load still in flight has no reason yet. */
 export interface AssetRef { kind: AssetKind; name: string }
