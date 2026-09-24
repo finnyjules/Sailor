@@ -331,6 +331,40 @@ export async function releaseRecordedHold(
 }
 
 /**
+ * Reserve `credits` on the user's wallet or refuse with a 402 — the one hold
+ * step every hold-based meter shares (preflightForUser here, and
+ * anthropicMeter's holdForModelCall), so the refusal semantics can't drift.
+ * Returns the hold id.
+ */
+export async function holdOrRefuse(
+  ledger: LedgerLike, userId: string, credits: number, idempotencyKey: string, model: string,
+): Promise<number> {
+  let res: Awaited<ReturnType<LedgerLike['hold']>>
+  try {
+    res = await ledger.hold(userId, credits, idempotencyKey)
+  } catch (e) {
+    // Review fix (Stage 5 Task 2): ledger.hold THROWS a plain Error for a
+    // user with no wallet row ("no wallet for <id> — call ensureUser
+    // first"). A non-h3 error escaping here is stripped by Nitro's prod
+    // handler to an opaque 500, so a user who simply has no wallet saw
+    // "Server Error" instead of a credits refusal. No wallet means zero
+    // credits: that is a refusal, not a server fault. Fail closed — the
+    // spend never happens either way — but say so honestly. `available: 0`
+    // is asserted rather than read back, because getAvailable would throw
+    // for exactly the same reason.
+    console.error('[meter] HOLD FAILED — refusing as insufficient credits', { userId, model, credits, error: e })
+    throw new MeterRefusalError('insufficient credits', 402, { required: credits, available: 0 })
+  }
+  if (!res.ok) {
+    // The refusal body still quotes a real number for the UI, read after
+    // the refused hold (which reserved nothing, so this is the true figure).
+    const available = await ledger.getAvailable(userId)
+    throw new MeterRefusalError('insufficient credits', 402, { required: credits, available })
+  }
+  return res.holdId
+}
+
+/**
  * Shared core for both preflightMeter (ALS-bound userId) and preflightMeterFor
  * (explicit userId, for callers with no request/ALS context). Local mode →
  * null (no-op ticket, no ledger touched at all). Hosted mode fails closed at
@@ -356,29 +390,7 @@ async function preflightForUser(userId: string, model: string, priceHintCredits?
   if (credits === null) throw new MeterRefusalError(`unpriced model refused: ${model}`, 500)
 
   const ledger = getLedger()
-  let res: Awaited<ReturnType<LedgerLike['hold']>>
-  try {
-    res = await ledger.hold(userId, credits, `meter:${randomUUID()}`)
-  } catch (e) {
-    // Review fix (Stage 5 Task 2): ledger.hold THROWS a plain Error for a
-    // user with no wallet row ("no wallet for <id> — call ensureUser
-    // first"). A non-h3 error escaping here is stripped by Nitro's prod
-    // handler to an opaque 500, so a user who simply has no wallet saw
-    // "Server Error" instead of a credits refusal. No wallet means zero
-    // credits: that is a refusal, not a server fault. Fail closed — the
-    // spend never happens either way — but say so honestly. `available: 0`
-    // is asserted rather than read back, because getAvailable would throw
-    // for exactly the same reason.
-    console.error('[meter] HOLD FAILED — refusing as insufficient credits', { userId, model, credits, error: e })
-    throw new MeterRefusalError('insufficient credits', 402, { required: credits, available: 0 })
-  }
-  if (!res.ok) {
-    // The refusal body still quotes a real number for the UI, read after
-    // the refused hold (which reserved nothing, so this is the true figure).
-    const available = await ledger.getAvailable(userId)
-    throw new MeterRefusalError('insufficient credits', 402, { required: credits, available })
-  }
-  const holdId = res.holdId
+  const holdId = await holdOrRefuse(ledger, userId, credits, `meter:${randomUUID()}`, model)
 
   return {
     holdId,

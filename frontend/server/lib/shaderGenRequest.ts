@@ -8,6 +8,10 @@ import { SHADERGEN_SYSTEM } from '~~/shared/shadergen/system'
 import { DEV_MODEL_OVERRIDES, effortForTier, modelForTier, type AiEffort } from './aiModels'
 import { badRequest, MAX_IMAGE_CHARS, optionalTier, requireString } from './agentRequest'
 import { extractModelText } from './modelText'
+import { holdForModelCall } from '../utils/anthropicMeter'
+import { maxCreditsForCall } from '../utils/anthropicPrices'
+import { MeterRefusalError } from '../utils/requestMeter'
+import { captureError } from '../utils/observe'
 
 /** One take: ~1–3k tokens of GLSL + dials, with generous headroom so a long
  *  body isn't cut off mid-JSON. */
@@ -77,8 +81,69 @@ export function buildShaderGenPayload(
   }
 }
 
+export interface ShaderGenReply { text: string; usage: Record<string, number> | null; stop_reason: string | null }
+
 /** What the route returns: the reply text, the raw usage (cache counts included)
  *  and why the model stopped ('max_tokens' means the reply was cut off). */
-export function readShaderGenReply(json: any): { text: string; usage: Record<string, number> | null; stop_reason: string | null } {
+export function readShaderGenReply(json: any): ShaderGenReply {
   return { text: extractModelText(json), usage: json?.usage ?? null, stop_reason: json?.stop_reason ?? null }
+}
+
+/** The prompt's characters and image count, read back from a built payload so
+ *  the hold is sized from exactly what is sent. */
+function payloadSize(payload: Record<string, unknown>): { promptChars: number; imageCount: number } {
+  const content = (payload.messages as Array<{ content: unknown }> | undefined)?.[0]?.content
+  if (typeof content === 'string') return { promptChars: content.length, imageCount: 0 }
+  const blocks = Array.isArray(content) ? content as Array<{ type?: string; text?: string }> : []
+  return {
+    promptChars: blocks.reduce((n, b) => n + (b.type === 'text' && typeof b.text === 'string' ? b.text.length : 0), 0),
+    imageCount: blocks.filter(b => b.type === 'image').length,
+  }
+}
+
+/**
+ * Meters one /api/shader-gen call by its real token usage (hosted only):
+ *  1. refuse a model with no token price (500) — BEFORE any hold (fail closed);
+ *  2. hold the call's worst case (anthropicPrices.maxCreditsForCall);
+ *  3. `call` — the Anthropic fetch, returning the raw response body; a thrown
+ *     error (non-OK response or failed fetch) releases the hold and is
+ *     rethrown unchanged. An OK body that isn't JSON was still billed: it is
+ *     charged the full hold, logged, and the parse error rethrown;
+ *  4. settle the hold to the reply's usage BEFORE returning. An empty reply
+ *     (502 from readShaderGenReply) was still paid for, so it is settled too.
+ * Returns the route's reply plus `credits` charged (null in local mode).
+ */
+export async function meterShaderGenCall(
+  payload: Record<string, unknown>,
+  call: () => Promise<string>,
+): Promise<ShaderGenReply & { credits: number | null }> {
+  const model = String(payload.model)
+  const { promptChars, imageCount } = payloadSize(payload)
+  const maxCredits = maxCreditsForCall(model, promptChars, imageCount, SHADERGEN_MAX_TOKENS)
+  if (maxCredits === null) throw new MeterRefusalError(`unpriced model refused: ${model}`, 500)
+
+  const ticket = await holdForModelCall(model, maxCredits)
+
+  let body: string
+  try {
+    body = await call()
+  } catch (e) {
+    await ticket?.release()
+    throw e
+  }
+
+  let json: any
+  try {
+    json = JSON.parse(body)
+  } catch (e) {
+    // Anthropic answered OK, so it billed the call — but with no readable
+    // usage the only honest charge is the full hold. Never free.
+    console.error('[meter] /api/shader-gen: OK reply is not JSON — charging the full hold', { model, credits: maxCredits, error: e })
+    captureError(e, { site: 'api/shader-gen', model, credits: maxCredits })
+    await ticket?.settleUsage(null)
+    throw e
+  }
+
+  const credits = ticket ? await ticket.settleUsage(json?.usage) : null
+  return { ...readShaderGenReply(json), credits }
 }

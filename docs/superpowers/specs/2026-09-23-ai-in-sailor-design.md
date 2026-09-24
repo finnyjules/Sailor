@@ -309,7 +309,7 @@ Instructions can edit a content field (§1.5). The edit appears in the field, br
   - Opus 5.5 was best. It was equally good with and without the extras.
   - Opus 5.5 is not one of today's `AI_TIERS`; stage 5 adds a dedicated shader-generation model setting rather than changing the `campaign` tier that other features use.
   - Dial-only takes (Tune…, Vary) stay on Haiku, as before.
-  - **Cost estimate** (list prices, $4 / $20 per million tokens in/out; not yet measured): about 2¢ input and 4–8¢ output (thinking included) per take at medium effort; ×3 takes and about 1.3× for repairs gives **about 25–40¢ per request**. Sailor's current flat charge (2 credits per AI call, `ANTHROPIC_ASSIST_CREDITS`) underprices this route: shader generation needs its own price before it ships. Measure the real figure at the start of stage 5 by running one request.
+  - **Cost estimate** (list prices, $4 / $20 per million tokens in/out; not yet measured): about 2¢ input and 4–8¢ output (thinking included) per take at medium effort; ×3 takes and about 1.3× for repairs gives **about 25–40¢ per request**. Metered per call from actual token usage (hold at the call's worst case, settle to real cost × 2, 1 credit = $0.01) — see server/utils/anthropicPrices.ts. The UI should show an estimate before a request runs (stage 5). Measure the real figure at the start of stage 5 by running one request.
 - **Latency:** not yet measured for Opus 5.5 at medium effort (the takes run in parallel, so a request takes about as long as its slowest take); tiles appear as each passes.
 
 ### 7.3 Where it's used

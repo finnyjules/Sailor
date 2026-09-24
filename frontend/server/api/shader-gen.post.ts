@@ -2,13 +2,13 @@
  * Writes ONE shader take (AI in Sailor spec §7.2). The browser engine calls this
  * four times in parallel (one per take angle) plus repair calls, then compiles,
  * checks and reviews the results itself. Returns the raw JSON text, token usage
- * (so the evaluation page can report cost) and the stop reason.
+ * (so the evaluation page can report cost), the stop reason, and the credits
+ * charged for the call (null in local mode).
  */
 import { createError, defineEventHandler, readBody } from 'h3'
 import { assertRateLimit } from '../lib/rateLimit'
 import { optionalApiKey, resolveAnthropicKey } from '../lib/agentRequest'
-import { buildShaderGenPayload, readShaderGenReply } from '../lib/shaderGenRequest'
-import { meterAssist } from '../utils/anthropicMeter'
+import { buildShaderGenPayload, meterShaderGenCall } from '../lib/shaderGenRequest'
 import { deployMode } from '../utils/deployMode'
 
 export default defineEventHandler(async (event) => {
@@ -21,21 +21,24 @@ export default defineEventHandler(async (event) => {
   // local dev server — never in a deployed/hosted instance.
   const payload = buildShaderGenPayload(body ?? {}, { allowModelOverride: import.meta.dev && deployMode() === 'local' })
 
-  await meterAssist(event)
-
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(payload),
+  // Metered by the call's real token usage: hold the worst case, settle to
+  // real cost × 2 (1 credit = $0.01) — see meterShaderGenCall.
+  return meterShaderGenCall(payload, async () => {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '')
+      throw createError({ statusCode: res.status, statusMessage: `model error: ${detail.slice(0, 200)}` })
+    }
+    // Raw body: meterShaderGenCall parses it, so an OK-but-unparseable reply
+    // (still billed by Anthropic) is charged rather than released.
+    return res.text()
   })
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '')
-    throw createError({ statusCode: res.status, statusMessage: `model error: ${detail.slice(0, 200)}` })
-  }
-  const json = await res.json()
-  return readShaderGenReply(json)
 })

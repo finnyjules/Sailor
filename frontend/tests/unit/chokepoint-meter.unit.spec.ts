@@ -524,14 +524,21 @@ describe('every preflight call site has a release path', () => {
     return acc
   }
 
+  // holdForModelCall (anthropicMeter.ts — per-call Anthropic token metering)
+  // takes the same kind of ledger hold, so its callers owe the same release.
   const callers = walk(serverRoot).filter((file) => {
     if (file.endsWith('requestMeter.ts')) return false // defines the ticket
+    if (file.endsWith('anthropicMeter.ts')) return false // defines holdForModelCall's ticket
     const src = stripNonCode(readFileSync(file, 'utf8'))
-    return /\bpreflightMeter(For)?\s*\(/.test(src)
+    return /\bpreflightMeter(For)?\s*\(/.test(src) || /\bholdForModelCall\s*\(/.test(src)
   })
 
   it('sanity: the scan finds the known preflight call sites', () => {
     expect(callers.length).toBeGreaterThan(5)
+  })
+
+  it('sanity: the scan finds the holdForModelCall call site (shader-gen)', () => {
+    expect(callers.some(f => f.endsWith(join('lib', 'shaderGenRequest.ts')))).toBe(true)
   })
 
   for (const file of callers) {
