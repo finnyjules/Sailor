@@ -48,6 +48,7 @@ import KeepClearOverlay from '~/components/vue-canvas/compositor/KeepClearOverla
 import { layoutById } from '~/lib/frame/patterns/layouts/catalog'
 import type { Choice } from '~/lib/frame/patterns/kit/vary'
 import type { StyleId } from '~/lib/frame/patterns/kit/styles'
+import type { ContentTag } from '~/lib/frame/patterns/kit/content'
 import { layoutKeyAction } from '~/lib/frame/layoutKeys'
 import { snapshotFrameAsTemplate, addSlot } from '~/lib/frametemplate/author'
 import { placeTemplate, setInstanceSlot, freezeInstance, staleInstances, updateInstance, applySlotToLayer } from '~/lib/frametemplate/apply'
@@ -1064,6 +1065,8 @@ function onLayoutChoice(key: keyof Choice, value: unknown) { if (!viewOnlyGuard(
 // Title face picker's (one undo step), so neither needs the design size.
 function onLayoutStyle(s: StyleId) { layoutVary.setStyle(s) }
 function onLayoutUseFace() { layoutVary.applySuggestedFace() }
+/** The Content section: tag a line (null: Automatic) — its own undo step, then a re-plan. */
+function onLayoutTag(id: string, tag: ContentTag | null) { if (!viewOnlyGuard()) layoutVary.setTag(id, tag) }
 const layoutName = computed(() => layoutById(layoutVary.layoutId.value)?.name ?? '')
 /** The Layout tab's keys (`layoutKeyAction`): V → next variation; ← / → step only with nothing
  *  selected (with a selection they nudge). True when the Layout tab took the key. */
@@ -9499,7 +9502,8 @@ onUnmounted(() => {
               :format="layoutVary.format.value"
               :style-id="layoutVary.style.value" :suggested-face="layoutVary.suggestedFace.value" :library-done="layoutVary.libraryDone.value"
               @vary="onLayoutVary" @jump="onLayoutJump" @select="onLayoutSelect" @choice="onLayoutChoice"
-              @style="onLayoutStyle" @use-face="onLayoutUseFace"
+              :content="layoutVary.content.value" :hints="layoutVary.hints.value"
+              @style="onLayoutStyle" @use-face="onLayoutUseFace" @tag="onLayoutTag"
             />
           </div>
           <div v-if="posterFaceEls.titleId" class="px-4 pt-3 flex flex-col gap-2">

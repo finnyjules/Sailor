@@ -1,10 +1,13 @@
 import { ref, computed, shallowRef, watch, toRaw, getCurrentScope, onScopeDispose } from 'vue'
 import type { Ref, ComputedRef } from 'vue'
-import { applyLayoutToFrame, candidatesForFrame, hiddenLinesForFrame, lineOptionsForFrame, planLayout, roleIdsForFrame } from '~/lib/frame/patterns/kit/plan'
+import { applyLayoutToFrame, candidatesForFrame, contentForFrame, hiddenLinesForFrame, lineOptionsForFrame, planLayout, roleIdsForFrame } from '~/lib/frame/patterns/kit/plan'
 import type { LayoutEditor, LayoutPlan, LayoutPlanArgs, StoredRoles } from '~/lib/frame/patterns/kit/plan'
 import { DEFAULT_CHOICE } from '~/lib/frame/patterns/kit/vary'
 import type { Candidate, Choice } from '~/lib/frame/patterns/kit/vary'
 import type { BrandLogo, Measure } from '~/lib/frame/patterns/kit/types'
+import { contentHints } from '~/lib/frame/patterns/kit/content'
+import type { ContentTag, ContentTags } from '~/lib/frame/patterns/kit/content'
+import { isOwned } from '~/lib/frame/patterns/kit/owned'
 import { layoutById, layoutsForStyle } from '~/lib/frame/patterns/layouts/catalog'
 import { STYLES } from '~/lib/frame/patterns/kit/styles'
 import type { StyleId } from '~/lib/frame/patterns/kit/styles'
@@ -49,6 +52,11 @@ export interface LibraryItem { id: string; name: string; plan: LayoutPlan | null
  *  (the stage hatches it), and `keepKind` which of the two it is. */
 export interface LayoutFormatInfo { label: string; notes: string[]; hidden: string[]; keep?: KeepClear; keepKind?: 'app' | 'crop' }
 export interface ChoiceRow { key: keyof Choice; label: string; options: { value: unknown; label: string; on: boolean }[] }
+/** One row of the Layout tab's Content section (Stage 4, ruling R1): a text layer (its text, for
+ *  the row to quote), or an image layer beyond the first (`n`: its place among the images, 2 for
+ *  the second; `name`: its user-set name). `tag`: what the user said it is (null: Automatic —
+ *  recognition decides). */
+export interface ContentRow { id: string; kind: 'text' | 'image'; text: string; n?: number; name?: string; tag: ContentTag | null }
 /** The style's suggested title face, offered while the title is in another face: the family, its
  *  note, the weight it sets, and the title's own text (quoted by the button). */
 export interface SuggestedFace { family: string; wt: number; note: string; title: string }
@@ -131,9 +139,16 @@ function contentKey(props: Record<string, unknown> | undefined, w: number, h: nu
     return o
   })
   // The roles the last apply stored decide which text is the title as much as the sizes do.
-  const roles = (props?.sailor_posterState as { roles?: unknown } | undefined)?.roles ?? null
-  return JSON.stringify([w, h, formatFor(props, w, h)?.id ?? '', slots, rank, rows, props?.sailor_localGrid ?? null, roles])
+  const st = props?.sailor_posterState as { roles?: unknown; tags?: ContentTags } | undefined
+  const roles = st?.roles ?? null
+  // The user's content tags (Stage 4, ruling R1) decide what each line is: a tag change (and its
+  // undo) is a content change.
+  const tags = st?.tags && Object.keys(st.tags).length ? st.tags : null
+  return JSON.stringify([w, h, formatFor(props, w, h)?.id ?? '', slots, rank, rows, props?.sailor_localGrid ?? null, roles, ...(tags ? [tags] : [])])
 }
+
+/** A choice's value on one axis. `cta` absent reads as `'drawn'` (ruling R7's default). */
+const axisValue = (c: Choice, key: keyof Choice): unknown => (key === 'cta' ? (c.cta ?? 'drawn') : c[key])
 
 const sameChoice = (a: Choice, b: Choice) =>
   a.lines === b.lines && a.arr === b.arr && a.scale === b.scale && a.side === b.side
@@ -144,6 +159,8 @@ const AXES: { key: keyof Choice; label: string; values?: unknown[]; labels?: str
   { key: 'arr', label: 'Arrangement', values: [0, 1, 2], labels: ['A', 'B', 'C'] },
   { key: 'scale', label: 'Scale', values: ['full', 'quiet'], labels: ['Full', 'Quieter'] },
   { key: 'side', label: 'Image side', values: ['right', 'left'], labels: ['Right', 'Left'] },
+  // Ruling R7: only a platform-button format with an action line offers it (Performance only).
+  { key: 'cta', label: 'Button', values: ['drawn', 'native'], labels: ['In the image', 'Platform\'s own'] },
 ]
 
 /** A format's rules, as the sentences the tab shows (Stage 2, spec §6). */
@@ -228,6 +245,15 @@ const styleOfLayout = (id: string | undefined): StyleId | undefined => {
   return def ? (def.style ?? 'swiss') : undefined
 }
 
+/** A line as the Layout tab quotes it: whitespace folded, the first 24 characters cut with an
+ *  ellipsis, in quotation marks — unless it opens with its own (a review's quote), so no doubled
+ *  marks. ("Not shown", and the Content section's rows.) */
+export function quoteLine(t: string): string {
+  const f = t.trim().split(/\s+/).join(' ')
+  const s = f.length > 24 ? `${f.slice(0, 24).trimEnd()}…` : f
+  return /^[“"«‘']/.test(f) ? s : `“${s}”`
+}
+
 /** The first 20 characters of a line, whitespace folded, cut with an ellipsis. */
 const quoteStart = (t: string) => {
   const s = t.trim().split(/\s+/).join(' ')
@@ -255,6 +281,12 @@ export function useLayoutVary(src: LayoutVarySource): {
   suggestedFace: ComputedRef<SuggestedFace | null>; applySuggestedFace(): boolean
   /** The brand kit's logo as the planner takes it, once resolved (undefined: none, or not yet). */
   brandLogo: Ref<BrandLogo | undefined>
+  /** The Content section's rows: every text layer of the user's, then each image beyond the first. */
+  content: ComputedRef<ContentRow[]>
+  /** The content hints (ruling R9) — advice under the Content section, never enforced. */
+  hints: ComputedRef<string[]>
+  /** Tag a layer (null: back to Automatic) as ONE undo step, and re-plan. False when nothing changed. */
+  setTag(id: string, tag: ContentTag | null): boolean
 } {
   const stored = src.props()?.sailor_posterState as PosterState | undefined
 
@@ -480,7 +512,7 @@ export function useLayoutVary(src: LayoutVarySource): {
     const rows: ChoiceRow[] = []
     for (const ax of AXES) {
       const order = ax.key === 'lines' ? lineLabels.value.map(o => o.v) : ax.values!
-      const present = new Set(list.map(c => c.choice[ax.key]))
+      const present = new Set(list.map(c => axisValue(c.choice, ax.key)))
       const values = order.filter(v => present.has(v as never))
       if (values.length < 2) continue
       rows.push({
@@ -488,7 +520,7 @@ export function useLayoutVary(src: LayoutVarySource): {
         options: values.map(v => ({
           value: v,
           label: ax.key === 'lines' ? lineLabels.value[v as number]!.label : ax.labels![ax.values!.indexOf(v)]!,
-          on: cur != null && cur[ax.key] === v,
+          on: cur != null && axisValue(cur, ax.key) === v,
         })),
       })
     }
@@ -605,8 +637,8 @@ export function useLayoutVary(src: LayoutVarySource): {
     const now = list[index.value]?.choice ?? choice.value
     let best = -1, bestSame = -1
     list.forEach((c, i) => {
-      if (c.choice[key] !== value) return
-      const same = (Object.keys(now) as (keyof Choice)[]).filter(k => k !== key && c.choice[k] === now[k]).length
+      if (axisValue(c.choice, key) !== value) return
+      const same = (Object.keys(now) as (keyof Choice)[]).filter(k => k !== key && axisValue(c.choice, k) === axisValue(now, k)).length
       if (same > bestSame) { bestSame = same; best = i }
     })
     if (best >= 0) applyAt(best)
@@ -654,9 +686,68 @@ export function useLayoutVary(src: LayoutVarySource): {
     return true
   }
 
+  // ── the Content section (Stage 4, ruling R1) and its hints (ruling R9) ──
+  // Read like the format: raw layers, re-read on the settled content key (which holds the tags)
+  // and `rev` only.
+  const userLayers = (): LocalLayer[] => ((toRaw(src.props())?.sailor_localLayers as LocalLayer[] | undefined) ?? [])
+    .filter(l => !isOwned(l as { owner?: { by: string } }))
+  const storedTags = (): ContentTags => ((toRaw(src.props())?.sailor_posterState as { tags?: ContentTags } | undefined)?.tags ?? {})
+  const content = computed<ContentRow[]>(() => {
+    if (!isActive()) return []
+    void settledKey.value; void rev.value
+    const tags = storedTags()
+    const layers = userLayers()
+    const rows: ContentRow[] = []
+    for (const l of layers) {
+      if (l.kind !== 'text') continue
+      const text = String((l as TextLayer).text ?? '')
+      if (!text.trim()) continue
+      rows.push({ id: l.id, kind: 'text', text, tag: tags[l.id] ?? null })
+    }
+    // Each image beyond the first may be the second image (before / after), in document order.
+    layers.filter(l => l.kind === 'image').forEach((l, i) => {
+      if (i === 0) return
+      const name = (l as { name?: string }).name?.trim()
+      rows.push({ id: l.id, kind: 'image', text: '', n: i + 1, ...(name ? { name } : {}), tag: tags[l.id] ?? null })
+    })
+    return rows
+  })
+  const hints = computed<string[]>(() => {
+    if (!isActive()) return []
+    void settledKey.value; void rev.value
+    const read = contentForFrame({
+      props: toRaw(src.props()), frameW: src.frameW(), frameH: src.frameH(),
+      shapeMode: toRaw(shapeMode.value) ?? undefined, imageMode: imageMode.value, style: style.value,
+    })
+    return contentHints(read, userLayers())
+  })
+  /** Write the layer's tag into `sailor_posterState.tags` (an empty set removes the key) as ONE
+   *  undo step — the editor's snapshot holds the tags (`LAYOUT_KEYS`), so undo and redo restore
+   *  them — then re-plan at once: the content key holds the tags, so the variations and the
+   *  library follow. The Frame's layers are not touched; the next pick applies the new reading. */
+  function setTag(id: string, tag: ContentTag | null): boolean {
+    const p = src.props(); if (!p) return false
+    const st = p.sailor_posterState as (PosterState & { tags?: ContentTags }) | undefined
+    const was = st?.tags ?? {}
+    if ((was[id] ?? null) === tag) return false
+    if (!userLayers().some(l => l.id === id)) return false
+    const tags: ContentTags = { ...was }
+    if (tag) tags[id] = tag
+    else delete tags[id]
+    src.editor().recordHistory()
+    const next: Record<string, unknown> = { ...(st ?? {}) }
+    if (Object.keys(tags).length) next.tags = tags
+    else delete next.tags
+    p.sailor_posterState = next
+    settle()
+    rev.value++
+    return true
+  }
+
   return {
     layoutId, index, applied, candidates, library, choices, select, vary, jump, setChoice,
     shapeMode, setShapeMode, imageMode, setImageMode, paletteMode, setPaletteMode, format,
     style, setStyle, libraryDone, hasTitle, roleIds, titleId, suggestedFace, applySuggestedFace, brandLogo,
+    content, hints, setTag,
   }
 }

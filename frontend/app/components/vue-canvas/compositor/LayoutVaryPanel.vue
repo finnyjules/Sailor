@@ -3,14 +3,18 @@
 // The Layout tab's Vary panel: the style, its suggested title face, the current layout and its
 // variation count, ‹ Vary ›, the choices that actually change something, the best variations,
 // and every layout of the style that fits. Every pick is emitted; the host applies it (one undo
-// step each, via `useLayoutVary`). Picking a style applies nothing.
+// step each, via `useLayoutVary`). Picking a style applies nothing. Under the style, the Content
+// section (Stage 4): what each line is, and the content hints.
 import { computed } from 'vue'
 import { ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
 import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
 import StudioSegmentedRow from '~/components/vue-canvas/studio/StudioSegmentedRow.vue'
 import LayoutTile from '~/components/vue-canvas/compositor/LayoutTile.vue'
-import type { ChoiceRow, LayoutFormatInfo, LibraryItem, SuggestedFace, VaryCandidate } from '~/composables/useLayoutVary'
+import LayoutContentList from '~/components/vue-canvas/compositor/LayoutContentList.vue'
+import { quoteLine } from '~/composables/useLayoutVary'
+import type { ChoiceRow, ContentRow, LayoutFormatInfo, LibraryItem, SuggestedFace, VaryCandidate } from '~/composables/useLayoutVary'
+import type { ContentTag } from '~/lib/frame/patterns/kit/content'
 import { STYLES } from '~/lib/frame/patterns/kit/styles'
 import type { StyleId } from '~/lib/frame/patterns/kit/styles'
 import type { Choice } from '~/lib/frame/patterns/kit/vary'
@@ -41,6 +45,10 @@ const props = defineProps<{
   suggestedFace?: SuggestedFace | null
   /** The style's library is complete: an empty one then means none of its layouts fit. */
   libraryDone?: boolean
+  /** The Content section's rows (absent or empty: no section). */
+  content?: ContentRow[]
+  /** The content hints (ruling R9), shown under the Content section. */
+  hints?: string[]
 }>()
 const emit = defineEmits<{
   (e: 'vary', step: 1 | -1): void
@@ -49,6 +57,7 @@ const emit = defineEmits<{
   (e: 'choice', key: keyof Choice, value: unknown): void
   (e: 'style', style: StyleId): void
   (e: 'use-face'): void
+  (e: 'tag', id: string, tag: ContentTag | null): void
 }>()
 
 const STYLE_IDS: StyleId[] = ['swiss', 'performance', 'editorial', 'street']
@@ -72,11 +81,8 @@ const strip = computed(() => {
 /** The lines not shown, quoted: the first 24 characters of each, cut with an ellipsis. The
  *  format's hidden levels, then the lines the current layout does not place (a style layout —
  *  Strip places no fine print). Only the format: Stage 2's words ("in this format"). */
-const quote = (t: string) => {
-  const s = t.length > 24 ? `${t.slice(0, 24).trimEnd()}…` : t
-  // A line that opens with its own quotation mark (a review's quote) is not wrapped in a second pair.
-  return /^[“"«‘']/.test(t) ? s : `“${s}”`
-}
+// A line that opens with its own quotation mark (a review's quote) is not wrapped in a second pair.
+const quote = quoteLine
 const fold = (t: string) => t.trim().split(/\s+/).join(' ')
 const notPlaced = computed(() => (current.value?.plan.notPlaced ?? []).map(n => fold(n.text)).filter(Boolean))
 const notShown = computed(() => {
@@ -116,6 +122,10 @@ function pick(row: ChoiceRow, k: string) {
         <span class="block truncate">Use {{ suggestedFace.family }} for “{{ suggestedFace.title }}”</span>
       </StudioButton>
     </div>
+
+    <!-- 0c. What each line is (tags win over recognition), and the content hints. -->
+    <LayoutContentList v-if="content?.length || hints?.length" :rows="content ?? []" :hints="hints"
+      @tag="(id, tag) => emit('tag', id, tag)" />
 
     <!-- 1. The current layout, what it did, and where this variation sits. -->
     <div v-if="name" class="flex flex-col gap-1">
