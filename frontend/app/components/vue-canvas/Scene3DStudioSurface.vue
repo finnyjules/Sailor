@@ -90,6 +90,11 @@ import { renderPasses, renderObjectPasses, screenRectOfBox } from '~/lib/scene3d
 import { cinematicScopeWarning } from '~/lib/scene3d/pathtrace/scope'
 import { restyleInputHash, restyleStyleSig, shouldRunRestyle, restyleViewUrl } from '~/lib/scene3d/restyleCache'
 import { renderExportFrame, restyleRefs, loadRestyleTextures, appExportIO } from '~/lib/scene3d/exportRender'
+import { bakeSceneFrames } from '~/lib/scene3d/bakeFrames'
+import type { AssetFailure } from '~/lib/scene3d/assetTracker'
+import { exportEmbedHtml, downloadEmbed } from '~/lib/embed/export'
+import { embedSnippet } from '~/lib/embed/snippet'
+import Scene3DWebExportSheet from '~/components/vue-canvas/Scene3DWebExportSheet.vue'
 import { RESTYLE_MODELS } from '~/data/scene3d-restyle-models'
 import { useMoodboards } from '~/composables/useMoodboards'
 import { moodboardStyleBlock } from '~/lib/taste/styleBlock'
@@ -97,7 +102,7 @@ import { MOODBOARD_MAX_REFS } from '~~/shared/taste/moodboard'
 import { encodeFrames } from '~/lib/engine/encodeVideo'
 import { SCENE_TEMPLATES, animateSceneDefaults } from '~/lib/scene3d/motion/defaults'
 import { LOOP_OPTIONS, IN_OPTIONS, OUT_OPTIONS, CAMERA_OPTIONS, LOOP_USES_AMOUNT, CAMERA_USES_CYCLES, CAMERA_USES_AMOUNT, setObjectLoop, setObjectTransition, setObjectDirection } from '~/lib/scene3d/motion/panel'
-import { sceneHasMotion, renderMotionFrame } from '~/lib/scene3d/motion/render'
+import { sceneHasMotion, sceneLoop, renderMotionFrame } from '~/lib/scene3d/motion/render'
 import { applyMotionToDoc } from '~/lib/scene3d/motion/apply'
 import { EASE_PRESETS, presetKeyForEaseRef, easeRefForPresetKey, easeRefToCurveString, curveStringToEaseRef } from '~/lib/scene3d/motion/easePresets'
 import type { LoopKind, TransitionPreset, CameraMotion, Direction } from '~/lib/scene3d/motion/types'
@@ -690,6 +695,122 @@ const bakeError = ref('')       // last export failure message (inline "retry")
 let videoAbort: AbortController | null = null
 const videoNotice = ref('')
 function cancelVideoExport() { videoAbort?.abort() }
+
+// ── Export embed (3D Studio on the web) ──────────────────────────────────────
+// Bakes the scene's loop into WebP frames through the shared export renderer (its own fresh
+// engine — the editor's is untouched) and wraps them in ONE self-contained HTML file that
+// plays anywhere. Scene3DWebExportSheet is a pure view; this owns the options, the bake, the
+// file and the clipboard. Playback is paused for the bake, like bakeSceneVideo, and restored.
+// Any option change, Cancel, Close or a scene edit after the render makes the file stale.
+const WEB_EXPORT_FILE = 'sailor-3d.html'
+const webExport = reactive({
+  open: false,
+  state: 'idle' as 'idle' | 'working' | 'ready' | 'blocked' | 'error',
+  progress: null as { done: number; total: number } | null,
+  size: 'output' as 'output' | 'sharp',
+  fps: 30 as 24 | 30,
+  cinematic: false,
+  transparent: false,
+  bytes: 0,
+  failures: [] as AssetFailure[],
+  errorText: '',
+  copyStatus: null as 'copied' | 'failed' | null,
+  snippet: '',
+})
+let webExportHtml = ''
+let webExportSig = ''     // the scene as it was rendered — a later edit makes the file stale
+let webExportGen = 0      // bumped on every reset, so a superseded bake's result is dropped
+let webExportAbort: AbortController | null = null
+let webExportCopiedTimer: ReturnType<typeof setTimeout> | null = null
+const webExportStill = computed(() => !sceneLoop(doc).animated)
+const webExportWarning = computed(() => (webExport.open && webExport.cinematic ? cinematicScopeWarning(doc) ?? undefined : undefined))
+function resetWebExport() {
+  webExportGen++
+  webExportAbort?.abort(); webExportAbort = null
+  webExportHtml = ''; webExportSig = ''
+  if (webExportCopiedTimer) { clearTimeout(webExportCopiedTimer); webExportCopiedTimer = null }
+  Object.assign(webExport, { state: 'idle', progress: null, bytes: 0, failures: [], errorText: '', copyStatus: null, snippet: '' })
+}
+function openWebExport() {
+  resetWebExport()
+  webExport.transparent = doc.background === 'transparent'
+  webExport.open = true
+}
+function closeWebExport() { resetWebExport(); webExport.open = false }
+function setWebExportOption<K extends 'size' | 'fps' | 'cinematic' | 'transparent'>(key: K, value: (typeof webExport)[K]) {
+  if (webExport[key] === value) return
+  webExport[key] = value
+  resetWebExport()
+}
+async function buildWebExport() {
+  if (webExport.state === 'working' || videoBaking.value) return
+  resetWebExport()
+  const gen = webExportGen
+  const abort = new AbortController(); webExportAbort = abort
+  webExport.state = 'working'
+  const wasPlaying = playing.value; playing.value = false
+  try {
+    // As bakeSceneVideo: render from the live view (while playing, doc.camera already holds the
+    // base captured at play start). The bake reads a COPY, so an edit mid-bake can't leak in.
+    if (!wasPlaying) syncDocCamera()
+    const sig = serializeDoc(doc)
+    const bakeDoc = JSON.parse(sig) as SceneDoc
+    const k = webExport.size === 'sharp' ? 2 : 1
+    const width = bakeDoc.output.width * k, height = bakeDoc.output.height * k
+    const { fps, transparent, cinematic } = webExport
+    const loop = sceneLoop(bakeDoc)
+    const made = await bakeSceneFrames(bakeDoc, {
+      width, height, fps, transparent,
+      cinematic: cinematic ? { samples: 64 } : undefined,
+      onProgress: (done, total) => { if (gen === webExportGen) webExport.progress = { done, total } },
+      signal: abort.signal,
+    })
+    if (gen !== webExportGen) return
+    if (made.failures.length) { webExport.failures = made.failures; webExport.state = 'blocked'; return }
+    const html = await exportEmbedHtml({
+      kind: 'frames', config: { frames: made.frames, fps: made.fps, width, height },
+      duration: loop.animated ? loop.duration : 1, width, height, transparent, still: !loop.animated,
+    })
+    if (gen !== webExportGen) return
+    webExportHtml = html; webExportSig = sig
+    webExport.bytes = new Blob([html]).size
+    webExport.state = 'ready'
+  } catch (err) {
+    if (gen !== webExportGen || isAbortError(err)) return
+    console.error('[Scene3D] web export failed:', err)
+    webExport.state = 'error'
+    webExport.errorText = "The file couldn't be made. Try again, or reload 3D Studio."
+  } finally {
+    if (gen === webExportGen) { webExport.progress = null; webExportAbort = null }
+    playing.value = wasPlaying
+  }
+}
+/** The built file still shows the scene; otherwise say so and ask for a new render. */
+function webExportCurrent(): boolean {
+  if (webExportHtml && serializeDoc(doc) === webExportSig) return true
+  resetWebExport()
+  webExport.state = 'error'
+  webExport.errorText = 'The scene changed after it was rendered. Render it again.'
+  return false
+}
+function downloadWebExport() {
+  if (webExport.state !== 'ready' || !webExportCurrent()) return
+  downloadEmbed(WEB_EXPORT_FILE, webExportHtml)
+}
+async function copyWebExportSnippet() {
+  if (webExport.state !== 'ready' || !webExportCurrent()) return
+  webExport.snippet = embedSnippet(WEB_EXPORT_FILE, doc.output.width, doc.output.height)
+  if (webExportCopiedTimer) { clearTimeout(webExportCopiedTimer); webExportCopiedTimer = null }
+  try {
+    await navigator.clipboard.writeText(webExport.snippet)
+    webExport.copyStatus = 'copied'
+    webExportCopiedTimer = setTimeout(() => { webExportCopiedTimer = null; if (webExport.copyStatus === 'copied') webExport.copyStatus = null }, 2000)
+  } catch {
+    // No clipboard permission (or no clipboard at all): the sheet shows the code to copy by hand.
+    webExport.copyStatus = 'failed'
+  }
+}
+onBeforeUnmount(() => { resetWebExport() })   // closing the studio stops its bake
 const glbError = reactive<Record<string, boolean>>({})
 const webglOk = ref(true)
 const uploading = ref(false)    // GLB file upload in flight
@@ -5110,6 +5231,21 @@ async function onClose() {
           </div>
         </div>
       </div>
+      <!-- Export embed: outside the viewport element, so its clicks and scrolls never reach
+           the orbit controls. -->
+      <Scene3DWebExportSheet
+        v-if="webExport.open"
+        :state="webExport.state" :progress="webExport.progress"
+        :size="webExport.size" :fps="webExport.fps" :cinematic="webExport.cinematic" :transparent="webExport.transparent"
+        :still="webExportStill" :bytes="webExport.bytes" :failures="webExport.failures"
+        :cinematic-warning="webExportWarning" :output-size="{ width: doc.output.width, height: doc.output.height }"
+        :error-text="webExport.errorText" :copy-status="webExport.copyStatus" :snippet="webExport.snippet"
+        @update:size="(v: 'output' | 'sharp') => setWebExportOption('size', v)"
+        @update:fps="(v: 24 | 30) => setWebExportOption('fps', v)"
+        @update:cinematic="(v: boolean) => setWebExportOption('cinematic', v)"
+        @update:transparent="(v: boolean) => setWebExportOption('transparent', v)"
+        @build="buildWebExport" @cancel="resetWebExport" @download="downloadWebExport"
+        @copy="copyWebExportSnippet" @close="closeWebExport" />
     </template>
 
     <!-- Object list: its own dedicated panel (like Smart Layout / Frame), separate
@@ -5950,6 +6086,7 @@ async function onClose() {
         downloads: [
           { label: 'Download PNG', onClick: downloadPng, busy: baking, disabled: !doc.objects.length },
           { label: 'Download video', onClick: exportVideo, busy: videoBaking },
+          { label: 'Export embed…', onClick: openWebExport, busy: webExport.state === 'working', disabled: !doc.objects.length },
         ],
         canvas: [
           { label: 'As image', onClick: exportToCanvas, busy: baking, disabled: committing || !doc.objects.length },
