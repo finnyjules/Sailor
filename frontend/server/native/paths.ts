@@ -102,3 +102,12 @@ export function annotatedFilepath(name: string): { name: string, type: 'output' 
   if (name.endsWith('[temp]')) return { name: name.slice(0, -7), type: 'temp' }
   return { name, type: null }
 }
+
+/**
+ * `os.path.basename` on POSIX: everything after the last `/` (so `a/` is ''
+ * and a backslash is an ordinary character). The one rule both the native
+ * /view resolver and the hosted /view gate use, so they name the same file.
+ */
+export function pyBasename(p: string): string {
+  return p.slice(p.lastIndexOf('/') + 1)
+}

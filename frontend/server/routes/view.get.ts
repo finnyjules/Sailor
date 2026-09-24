@@ -6,7 +6,7 @@ import { getRequestHeaders, setResponseStatus } from 'h3'
 import { deployMode } from '../utils/deployMode'
 import { ownedOutputKeys } from '../utils/graphRuns'
 import { harvestPendingOutputs, viewGateDecision } from '../utils/engineGate'
-import { resolveViewTarget, viewFileResponse, type ViewQuery } from '../native/view'
+import { VIEW_SECURITY_HEADERS, resolveViewTarget, viewFileResponse, type ViewQuery } from '../native/view'
 
 const CACHE_DIR = join(process.cwd(), '.cache', 'images')
 
@@ -18,6 +18,8 @@ function cacheKey(filename: string, type: string, subfolder: string): string {
 }
 
 export default defineEventHandler(async (event) => {
+  // On every answer — files, 206/304/416, the cache fallback and errors.
+  setResponseHeaders(event, VIEW_SECURITY_HEADERS)
   const query = getQuery(event)
   const filename = query.filename as string
   const type = query.type as string || 'output'
@@ -65,8 +67,8 @@ export default defineEventHandler(async (event) => {
   // Engine-free Phase A: the bytes come straight off disk, resolved exactly as
   // ComfyUI's view_image resolved them (server/native/view.ts).
   const target = resolveViewTarget(query as ViewQuery)
-  if (target.kind === 'file') {
-    const res = viewFileResponse(target, getRequestHeaders(event))
+  const res = target.kind === 'file' ? viewFileResponse(target, getRequestHeaders(event)) : null
+  if (target.kind === 'file' && res) {
     setResponseStatus(event, res.status)
     setResponseHeaders(event, { ...res.headers, 'cache-control': 'public, max-age=86400' })
     // temp/ is emptied every time the engine starts, so a copy is kept for
@@ -89,7 +91,8 @@ export default defineEventHandler(async (event) => {
     stream.on('error', (e) => { console.error('[view] read failed', target.file, e) })
     return stream
   }
-  if (target.status !== 404) throw createError({ statusCode: target.status, message: 'Invalid image request' })
+  // (A file that vanished between resolve and stat is a plain 404.)
+  if (target.kind === 'status' && target.status !== 404) throw createError({ statusCode: target.status, message: 'Invalid image request' })
 
   // Fallback: a copy kept by the cache above (or by the proxy this route used
   // to be), for a file that is no longer on disk.

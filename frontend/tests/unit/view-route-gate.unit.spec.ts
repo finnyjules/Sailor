@@ -135,6 +135,18 @@ describe('hosted /view — annotation resolves the EFFECTIVE type', () => {
     expect(await code({ type: 'temp', filename: 'a/b/mine.png [output]' })).toBe('served')
   })
 
+  it('treats a backslash as part of the name, as the served file does (POSIX basename)', async () => {
+    // `x\mine.png` is its own file in output/, not `mine.png`: owning
+    // mine.png must not unlock it.
+    fs.writeFileSync(path.join(root, 'output', 'x\\mine.png'), 'SOMEONE ELSE')
+    owned = new Set(['output::mine.png'])
+    expect(await code({ filename: 'x\\mine.png' })).toBe(404)
+    expect(await code({ type: 'temp', filename: 'x\\mine.png [output]' })).toBe(404)
+    expect(fetchMock, 'the unowned file is never opened').not.toHaveBeenCalled()
+    owned = new Set(['output::x\\mine.png'])
+    expect(await code({ filename: 'x\\mine.png' })).toBe('served')
+  })
+
   it('still gates plain type=output reads (no regression)', async () => {
     expect(await code({ type: 'output', filename: 'victim.png' })).toBe(404)
     expect(harvestPendingOutputs, 'race-window harvest still runs').toHaveBeenCalled()

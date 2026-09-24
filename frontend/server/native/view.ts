@@ -24,7 +24,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { annotatedFilepath, engineFolder } from './paths'
+import { annotatedFilepath, engineFolder, pyBasename } from './paths'
 
 /**
  * `mimetypes.guess_type` as the engine's Python answers it on the dev machine
@@ -109,11 +109,6 @@ export function resolveViewTarget(query: ViewQuery): ViewTarget {
   return { kind: 'file', file, filename, type, subfolder: subfolder ?? '' }
 }
 
-/** `os.path.basename`: everything after the last `/` (so `a/` → ''). */
-function pyBasename(p: string): string {
-  return p.slice(p.lastIndexOf('/') + 1)
-}
-
 /** `os.path.isfile`: follows symlinks; any error is False. */
 function isFile(p: string): boolean {
   try { return fs.statSync(p).isFile() }
@@ -121,6 +116,27 @@ function isFile(p: string): boolean {
 }
 
 // ------------------------------------------------------------ the response
+
+/**
+ * aiohttp wrote `filename="<name>"` as UTF-8 bytes on the wire. Node only
+ * takes header strings of code units ≤ U+00FF (anything above throws
+ * ERR_INVALID_CHAR), so the UTF-8 bytes are handed over as latin-1 code
+ * units — the same bytes go out.
+ */
+export function contentDisposition(filename: string): string {
+  return Buffer.from(`filename="${filename}"`, 'utf8').toString('latin1')
+}
+
+/**
+ * Sent on every /view answer: a file from the engine folders is never a page
+ * of Sailor's (an uploaded .html or .svg opened directly runs sandboxed, with
+ * nothing loaded), and its type is never sniffed. `<img>`, `<video>`,
+ * `<audio>` and fetch() of the bytes are unaffected by either.
+ */
+export const VIEW_SECURITY_HEADERS: Record<string, string> = {
+  'content-security-policy': 'sandbox; default-src \'none\'',
+  'x-content-type-options': 'nosniff',
+}
 
 export interface ViewResponse {
   status: number
@@ -164,15 +180,17 @@ function parseRange(v: string): { start: number | null, end: number | null } | '
  * aiohttp FileResponse for a resolved file, given the request headers
  * (lower-cased names). Pure apart from one stat.
  */
-export function viewFileResponse(target: { file: string, filename: string }, req: Record<string, string | undefined>): ViewResponse {
-  const st = fs.statSync(target.file, { bigint: true })
+export function viewFileResponse(target: { file: string, filename: string }, req: Record<string, string | undefined>): ViewResponse | null {
+  let st: fs.BigIntStats
+  try { st = fs.statSync(target.file, { bigint: true }) }
+  catch { return null }
   const size = Number(st.size)
   const mtimeSec = Number(st.mtimeNs) / 1e9
   const etag = `${st.mtimeNs.toString(16)}-${st.size.toString(16)}`
   // aiohttp's last_modified setter rounds a float mtime UP to the second.
   const lastModified = httpDate(Math.ceil(mtimeSec) * 1000)
   const base: Record<string, string> = {
-    'content-disposition': `filename="${target.filename}"`,
+    'content-disposition': contentDisposition(target.filename),
     'content-type': viewContentType(target.filename),
   }
 

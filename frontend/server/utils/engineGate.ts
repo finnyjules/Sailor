@@ -13,7 +13,7 @@ import { parseUploadForm } from './multipart'
 import { canonicalUploadKey, ownedInputFilenames, recordUpload, releaseUpload, unsafeUploadTarget, uploadExistsOnDisk, uploadOwner } from './inputUploads'
 import { normalizeEnginePath } from './enginePath'
 import { hostedCanMutate, ownedIds, ownerOf, recordOwner, releaseOwner } from './resourceOwners'
-import { annotatedFilepath, isSafeId, userDir } from '../native/paths'
+import { annotatedFilepath, isSafeId, pyBasename, userDir } from '../native/paths'
 import { dispatchNative, dispatchUpload, nativeEnginePath } from '../native/router'
 import { ensureBootMigrationsRan, listProjects, projectsRoot } from '../native/projects'
 
@@ -43,7 +43,9 @@ export function viewGateDecision(q: { filename: string, type?: string, subfolder
   // type=temp / type=input stay ungated this stage (documented gap) — but
   // only when that is what the engine will ACTUALLY read.
   if (effective !== 'output') return { kind: 'ungated' }
-  const basename = name.split(/[\\/]/).pop() || ''
+  // The native resolver's own basename rule (POSIX: `/` only), so the key
+  // checked is the file served — `x\mine.png` is its own file, not `mine.png`.
+  const basename = pyBasename(name)
   return { kind: 'check', key: outputKey({ filename: basename, subfolder: q.subfolder || '', type: 'output' }) }
 }
 
@@ -370,6 +372,13 @@ export function decideOverwrite(userId: string, owner: string | null, existsOnDi
 export async function handleHostedUpload(event: H3Event): Promise<unknown> {
   const userId = event.context.userId
   if (!userId) throw createError({ statusCode: 401, message: 'Sign in required' })
+
+  // Controller ruling (A4 fix 1): a mask upload copies whatever file its
+  // `original_ref` names — any tenant's output — under the caller's name. The
+  // app never uses it, so hosted refuses it outright, before the body is read.
+  if (nativeEnginePath(event.path) === '/upload/mask') {
+    throw createError({ statusCode: 403, message: 'Mask uploads are not available in hosted mode' })
+  }
 
   // Refuse an over-cap upload from its declared length, BEFORE buffering it.
   // A lying Content-Length is caught again on the buffer below.

@@ -257,6 +257,16 @@ describe('/upload/mask', () => {
     expect((await upload({ name: 'm.png', bytes: fixture('mask-rgba.png') }, { original_ref: '{nope' }, '/upload/mask')).status).toBe(500)
   })
 
+  it('two masks uploaded at once under one name get two names, both written', async () => {
+    fs.copyFileSync(path.join(FIXTURES, 'original-grey.png'), path.join(root, 'output', 'g.png'))
+    const [a, b] = await Promise.all([
+      upload({ name: 'm.png', bytes: fixture('mask-rgba.png') }, ref({ filename: 'g.png' }), '/upload/mask'),
+      upload({ name: 'm.png', bytes: fixture('mask-la.png') }, ref({ filename: 'g.png' }), '/upload/mask'),
+    ])
+    expect([a.body.name, b.body.name].sort()).toEqual(['m (1).png', 'm.png'])
+    expect(fs.readdirSync(path.join(root, 'input')).sort()).toEqual(['m (1).png', 'm.png'])
+  })
+
   it('numbers a clashing mask name like an image upload', async () => {
     fs.copyFileSync(path.join(FIXTURES, 'original-grey.png'), path.join(root, 'output', 'g.png'))
     fs.writeFileSync(path.join(root, 'input', 'm.png'), 'taken')

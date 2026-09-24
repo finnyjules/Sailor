@@ -223,6 +223,7 @@ describe.skipIf(!hasPython)('parity with server.py', () => {
       fs.writeFileSync(path.join(r, 'output', 'page.html'), '<b>x</b>')
       fs.writeFileSync(path.join(r, 'output', 'ü ñ.WAV'), 'W')
       fs.mkdirSync(path.join(r, 'output', 'adir'))
+      fs.writeFileSync(path.join(r, 'output', '写真 😀.png'), 'CJK')
     })
     // (`blake3:` is left out: the lifted handler has no user manager. The live
     // engine answers it 404 without --enable-assets, as native-view checks.)
@@ -244,6 +245,7 @@ describe.skipIf(!hasPython)('parity with server.py', () => {
       ['filename=missing.png'],
       ['filename=../input/a.png'],
       ['filename=%2Fetc%2Fpasswd'],
+      [`filename=${encodeURIComponent('写真 😀.png')}`],
       ['filename=a.png&type=bogus'],
       ['filename=a.png&type='],
       ['filename=a.png&subfolder=../input'],
@@ -261,10 +263,13 @@ describe.skipIf(!hasPython)('parity with server.py', () => {
         expect(target.status, q).toBe(p.status)
         continue
       }
-      const res = viewFileResponse(target, h ?? {})
+      const res = viewFileResponse(target, h ?? {})!
       expect(res.status, q).toBe(p.status)
       for (const k of ['content-type', 'content-disposition', 'content-range', 'accept-ranges', 'content-length']) {
-        expect(res.headers[k], `${q} ${k}`).toBe(p.headers[k])
+        // Header strings carry the wire bytes as latin-1 code units; the
+        // oracle's client decoded aiohttp's UTF-8 bytes.
+        const mine = res.headers[k] === undefined ? undefined : Buffer.from(res.headers[k]!, 'latin1').toString('utf8')
+        expect(mine, `${q} ${k}`).toBe(p.headers[k])
       }
       const bytes = res.range ? fs.readFileSync(target.file).subarray(res.range.start, res.range.end + 1) : Buffer.alloc(0)
       expect(bytes.equals(p.body), `${q} body`).toBe(true)

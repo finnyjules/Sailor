@@ -9,7 +9,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createApp, createError, eventHandler, getQuery, setResponseHeaders, toWebHandler } from 'h3'
 import { __setInputUploadsEngineRootForTests } from '../../server/utils/inputUploads'
-import { resolveViewTarget, viewContentType } from '../../server/native/view'
+import { resolveViewTarget, viewContentType, viewFileResponse } from '../../server/native/view'
 
 // Nitro auto-imports the route uses.
 const g = globalThis as any
@@ -166,6 +166,47 @@ describe('GET /view — the response', () => {
     expect((await view('filename=x.png&type=bogus')).status).toBe(400)
     expect((await view('filename=x.png&subfolder=../input')).status).toBe(403)
     expect((await view('filename=missing.png')).status).toBe(404)
+  })
+
+  it('serves non-latin names through the route, Content-Disposition as aiohttp\'s UTF-8 bytes', async () => {
+    for (const name of ['写真.png', '😀 party.webp', 'café ü.mp4', 'スクリーン ショット 2026.png']) {
+      put(`output/${name}`, `bytes of ${name}`)
+      const res = await view(`filename=${encodeURIComponent(name)}`)
+      expect(res.status, name).toBe(200)
+      expect(await res.text()).toBe(`bytes of ${name}`)
+      // Header strings carry the raw bytes as latin-1 code units.
+      const wire = Buffer.from(res.headers.get('content-disposition')!, 'latin1')
+      expect(wire.equals(Buffer.from(`filename="${name}"`, 'utf8')), name).toBe(true)
+    }
+    put('input/レイヤー/マスク.png', 'M')
+    const sub = await view(`filename=${encodeURIComponent('マスク.png')}&type=input&subfolder=${encodeURIComponent('レイヤー')}`)
+    expect([sub.status, await sub.text()]).toEqual([200, 'M'])
+  })
+
+  it('sends the sandbox CSP and nosniff on every answer', async () => {
+    put('output/v.mp4', '0123456789')
+    const answers = [
+      await view('filename=v.mp4'),
+      await view('filename=v.mp4', { range: 'bytes=2-5' }),
+      await view('filename=v.mp4', { range: 'bytes=50-' }),
+      await view('filename=missing.png'),
+      await view('filename=../x.png'),
+    ]
+    const etag = answers[0]!.headers.get('etag')!
+    answers.push(await view('filename=v.mp4', { 'if-none-match': etag }))
+    expect(answers.map(a => a.status)).toEqual([200, 206, 416, 404, 400, 304])
+    for (const a of answers) {
+      expect(a.headers.get('content-security-policy'), String(a.status)).toBe('sandbox; default-src \'none\'')
+      expect(a.headers.get('x-content-type-options'), String(a.status)).toBe('nosniff')
+    }
+  })
+
+  it('answers 404 for a file that disappears between resolve and read', async () => {
+    const f = put('output/gone.png', 'G')
+    const target = resolveViewTarget({ filename: 'gone.png' })
+    expect(target.kind).toBe('file')
+    fs.rmSync(f)
+    expect(viewFileResponse(target as any, {})).toBeNull()
   })
 
   it('keeps a copy of temp images only', async () => {

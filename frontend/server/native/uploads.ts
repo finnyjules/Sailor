@@ -120,6 +120,17 @@ export async function runUpload(kind: UploadKind, form: UploadForm, folders: Fol
 
   fs.mkdirSync(fullOutputFolder, { recursive: true })
 
+  // A mask's bytes are worked out BEFORE a name is chosen, so choosing the
+  // name and writing the file happen with no await in between — two uploads
+  // at once can't both pick the same free name. A failure is held until we
+  // know the write is really needed (the Python never ran the save function
+  // for a same-bytes duplicate).
+  let masked: { bytes: Buffer | null } | { error: unknown } = { bytes: image.data }
+  if (kind === 'mask') {
+    try { masked = { bytes: await maskedOriginal(form, image.data, folders) } }
+    catch (error) { masked = { error } }
+  }
+
   const overwrite = firstText(form, 'overwrite')
   let duplicate = false
   if (overwrite !== 'true' && overwrite !== '1') {
@@ -135,8 +146,8 @@ export async function runUpload(kind: UploadKind, form: UploadForm, folders: Fol
   }
 
   if (!duplicate) {
-    if (kind === 'mask') await saveMaskedOriginal(form, image.data, filepath, folders)
-    else fs.writeFileSync(filepath, image.data)
+    if ('error' in masked) throw masked.error
+    if (masked.bytes) fs.writeFileSync(filepath, masked.bytes)
   }
   return { status: 200, body: { name: filename, subfolder, type } }
 }
@@ -145,29 +156,30 @@ export async function runUpload(kind: UploadKind, form: UploadForm, folders: Fol
 
 /**
  * `upload_mask`'s `image_save_function`: find the original named by
- * `original_ref` with /view's own checks, and write it to `dest` with the
- * mask's alpha. A ref that fails a check writes nothing (the Python returned a
- * 400/403 from inside the save function, which image_upload ignored).
+ * `original_ref` with /view's own checks, and give back its PNG with the
+ * mask's alpha. A ref that fails a check gives null: nothing is written (the
+ * Python returned a 400/403 from inside the save function, which
+ * image_upload ignored).
  */
-async function saveMaskedOriginal(form: UploadForm, mask: Buffer, dest: string, folders: Folders): Promise<void> {
+async function maskedOriginal(form: UploadForm, mask: Buffer, folders: Folders): Promise<Buffer | null> {
   const refRaw = firstText(form, 'original_ref')
   if (refRaw === undefined) throw new Error('original_ref is missing')
   const ref = JSON.parse(refRaw) as Record<string, unknown>
   if (!ref || typeof ref !== 'object' || typeof ref.filename !== 'string') throw new Error('original_ref.filename must be a string')
 
   const { name, type: annotated } = annotatedFilepath(ref.filename)
-  if (!name) return
-  if (name[0] === '/' || name.includes('..')) return
+  if (!name) return null
+  if (name[0] === '/' || name.includes('..')) return null
 
   const refType = annotated ?? ('type' in ref ? ref.type : 'output')
   let dir: string | null = refType === 'input' || refType === 'output' || refType === 'temp' ? folders[refType] : null
-  if (!dir) return
+  if (!dir) return null
 
   const sub = 'subfolder' in ref ? ref.subfolder : ''
   if (sub !== '') {
     if (typeof sub !== 'string') throw new Error('original_ref.subfolder must be a string')
     const inside = resolveInside(dir, sub)
-    if (!inside) return
+    if (!inside) return null
     dir = inside
   }
 
@@ -175,9 +187,9 @@ async function saveMaskedOriginal(form: UploadForm, mask: Buffer, dest: string, 
   let isFile = false
   try { isFile = fs.statSync(file).isFile() }
   catch { isFile = false }
-  if (!isFile) return
+  if (!isFile) return null
 
-  fs.writeFileSync(dest, await maskOriginal(fs.readFileSync(file), mask))
+  return maskOriginal(fs.readFileSync(file), mask)
 }
 
 /** Decode to 8-bit RGBA the way PIL's `convert('RGBA')` sees the pixels: no ICC transform, no EXIF rotation. */

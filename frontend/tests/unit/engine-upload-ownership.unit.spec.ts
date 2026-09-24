@@ -557,17 +557,26 @@ describe('the parser decides, and the parsed form is what gets written', () => {
     }
     expect(written()).toEqual(['input/w0.png', 'input/w1.png', 'input/w2.png', 'input/w3.png'])
 
-    // A mask with no original_ref crashed aiohttp's handler: 500, nothing written.
-    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
-    rawBody.mockResolvedValue(upload({ filename: 'm.png' }))
-    await handleHostedUpload(ev('/comfyui/upload/mask'))
-    expect(lastStatus).toBe(500)
-    quiet.mockRestore()
-
     rawBody.mockResolvedValue(upload({ filename: 'x.png' }))
     expect(await handleHostedUpload(ev('/upload/elsewhere'))).toBe('404: Not Found')
     expect(lastStatus).toBe(404)
     expect(written()).toHaveLength(4)
+  })
+
+  it('refuses /upload/mask in hosted mode with a 403, before the body is read (controller ruling)', async () => {
+    // original_ref can name any tenant's output; the masked copy would be
+    // written under the caller's name.
+    for (const p of ['/upload/mask', '/api/upload/mask', '/comfyui/upload/mask?comfyWorker=1', '/comfyui/api/upload/mask']) {
+      rawBody.mockClear()
+      rawBody.mockResolvedValue(raw([
+        { disposition: 'name="image"; filename="m.png"', value: 'PIXELS' },
+        { disposition: 'name="original_ref"', value: '{"filename":"victim.png","type":"output"}' },
+      ]))
+      await expect(handleHostedUpload(ev(p)), p).rejects.toMatchObject({ statusCode: 403, message: 'Mask uploads are not available in hosted mode' })
+      expect(rawBody, `${p}: refused before the body is read`).not.toHaveBeenCalled()
+    }
+    expect(written()).toEqual([])
+    expect(queries).toEqual([])
   })
 
   it('returns the write\'s status and body', async () => {
