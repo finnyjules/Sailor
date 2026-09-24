@@ -14,6 +14,7 @@ import { shaderTextureUrl, shaderTextureKey } from '~/lib/shaderfill/field'
 import { compositorFontToken } from '~/lib/compositor/textOutline'
 import { effectStackOf, isGeometryKind } from '~/lib/compositor/effectStack'
 import { layersNeedPaper } from './needs'
+import { formatBytes } from '../formatBytes'
 import type { DepthRef } from '~/lib/compositor/depthRegistry'
 import type { EffectDef } from '~/lib/shaderfx/types'
 import type { FontWeightSpec } from '../fontFace'
@@ -23,13 +24,21 @@ import { assetKey, type FrameFontAsset, type FrameFontOrigin, type FrameNotice, 
 export interface FontSource { url: string; origin: FrameFontOrigin; weight: FontWeightSpec }
 
 /** A wired clip's pull: the encoded frames, or — when the source's export session named assets
- *  that could not load (`name`: what a person calls it, `model "Sneaker"`) — none and those. */
-export interface WiredFrames { frames: string[]; failures: { name: string; reason: string }[] }
+ *  that could not load (`name`: what a person calls it, `model "Sneaker"`; `text`: the whole
+ *  clause when the source words it itself, `model "Sneaker" couldn't load — re-generate or
+ *  re-upload it`) — none and those. */
+export interface WiredFrames { frames: string[]; failures: { name: string; reason: string; text?: string }[] }
+
+/** The pre-rendered route's one WebP quality (the 3D web export plan's Global Constraints:
+ *  "one WebP quality (0.82)" — `WEBP_QUALITY` in lib/scene3d/bakeFrames). Repeated here rather
+ *  than imported so the Frame gatherer does not pull 3D Studio's renderer into its imports. */
+export const WIRED_CLIP_WEBP_QUALITY = 0.82
 
 export interface FrameExportIO {
   fetchBlob(url: string): Promise<Blob>
   blobToImage(blob: Blob): Promise<CanvasImageSource>
-  imageToDataUrl(img: CanvasImageSource, maxPx: number, mime: 'image/webp' | 'image/png'): Promise<string>
+  /** `quality`: the lossy encoder's quality (0–1); absent, the IO's own default. */
+  imageToDataUrl(img: CanvasImageSource, maxPx: number, mime: 'image/webp' | 'image/png', quality?: number): Promise<string>
   blobToDataUrl(blob: Blob): Promise<string>
   blobToBase64(blob: Blob): Promise<string>
   subsetFont(fontB64: string, text: string): Promise<string | null>
@@ -55,10 +64,8 @@ function dataUrlBytes(u: string): number {
   return i < 0 ? u.length : Math.floor((u.length - i - 1) * 3 / 4)
 }
 
-export function formatBytes(n: number): string {
-  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`
-}
+// Kept importable from here: the Frame editor and its sheet read it from the gatherer.
+export { formatBytes }
 
 export function isBlocked(snapshot: FrameSnapshot): boolean {
   return snapshot.notices.some(n => n.group === 'blocked')
@@ -208,22 +215,23 @@ export async function buildFrameSnapshot(plan: FramePlan, variant: FrameVariant,
   // their place would be a plausible wrong picture.
   // An asset the source could not load BLOCKS too, named: the frames would show a hole (an
   // unloaded model) or a stand-in (a grey box for a failed font) where it belongs.
+  // The size is counted from the frames handed back, not inside `encode`: the app may hand back
+  // frames it pulled for an earlier build (the Frame editor keeps them while the sheet is open).
   for (const c of plan.wiredClips) {
     const count = Math.max(1, Math.round(c.duration * c.fps))
-    let bytes = 0
     try {
-      const got = await io.wiredFrames(c.slot, count, c.maxPx, async (img) => {
-        const u = await io.imageToDataUrl(img, c.maxPx, 'image/webp')
-        bytes += dataUrlBytes(u)
-        return u
-      })
+      const got = await io.wiredFrames(c.slot, count, c.maxPx,
+        img => io.imageToDataUrl(img, c.maxPx, 'image/webp', WIRED_CLIP_WEBP_QUALITY))
       if (got.failures.length) {
-        for (const f of got.failures) block(`${c.label} · ${f.name} couldn't load — re-generate or re-upload it`, c.layerId)
+        // The source words the clause itself when it can (3D: what to do depends on the kind —
+        // `failureClause`); otherwise the plain fact. Mid-sentence, so the subject is lower case.
+        for (const f of got.failures) block(`${c.label} · ${f.text ?? `${f.name} couldn't load`}`, c.layerId)
         continue
       }
       if (got.frames.length !== count) throw new Error(`wired slot ${c.slot}: ${got.frames.length} of ${count} frames`)
       wired[c.slot] = { kind: 'clip', frames: got.frames, fps: c.fps, duration: c.duration }
-      liveNotices.push({ group: 'live', text: `${c.label} · adds ${formatBytes(bytes)}`, layerId: c.layerId, bytes })
+      const bytes = got.frames.reduce((n, u) => n + dataUrlBytes(u), 0)
+      liveNotices.push({ group: 'live', text: `${c.label} · pre-rendered · ${count} frames · adds ${formatBytes(bytes)}`, layerId: c.layerId, bytes })
     } catch { block(`${c.label} couldn't be rendered as frames.`, c.layerId) }
   }
 

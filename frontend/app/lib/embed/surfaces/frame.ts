@@ -198,8 +198,8 @@ const frameSurface: EmbedSurface = {
       const clips = new Map<number, { frames: HTMLImageElement[]; duration: number }>()
       for (const [slot, entry] of Object.entries(snap.wired ?? {})) {
         if (entry.kind === 'clip') {
-          const frames: HTMLImageElement[] = []
-          for (const f of entry.frames) frames.push(await loadImage(f))
+          // Every frame decodes at once (they are data URIs — no network), in order.
+          const frames = await Promise.all(entry.frames.map(f => loadImage(f)))
           clips.set(Number(slot), { frames, duration: entry.duration })
         } else stills.set(Number(slot), await loadImage(entry.dataUrl))
       }

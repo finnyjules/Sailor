@@ -5,7 +5,7 @@ import { VARIABLE_FONTS_BY_ID } from '~/data/variable-fonts'
 import { depthImageFor } from '~/lib/compositor/depthRegistry'
 import type { UploadedFontEntry } from '~/composables/useUploadedFonts'
 import type { EffectDef } from '~/lib/shaderfx/types'
-import type { StudioFrameSource } from '~/lib/studio/frameSource'
+import { StudioExportFailed, type StudioFrameSource } from '~/lib/studio/frameSource'
 import { bufferToBase64, subsetFontBase64 } from '../fontBytes'
 import type { FontSource, FrameExportIO, WiredFrames } from './gather'
 
@@ -64,8 +64,9 @@ const pulling = new WeakMap<StudioFrameSource, Promise<unknown>>()
  *
  * A source with `openExport` (3D) is pulled through an export session of its own at the pull
  * size — its own engine, every asset waited for — and the session is ALWAYS closed. A session
- * that names failures is not pulled at all: its failures come back for the gatherer to block
- * with. A source without one is pulled through `getFrame`.
+ * that names failures is not pulled at all, and a frame that finds one (`StudioExportFailed`)
+ * stops the pull: either way its failures come back for the gatherer to block with. A source
+ * without one is pulled through `getFrame`.
  *
  * The source's surface is only valid until its next render, so each is copied (`copy`) and
  * encoded before the next is asked for. `stale` is asked before every frame and abandons a pull
@@ -98,6 +99,11 @@ export async function pullSourceFrames(
           checkStale()
           frames.push(await opts.encode(copy(await session.frame(i / count), w, h)))
         }
+      } catch (err) {
+        // A frame whose sync started a load that failed (a decal rebuilt on that frame): named,
+        // like a failure found before the first frame.
+        if (err instanceof StudioExportFailed) return { frames: [], failures: err.failures }
+        throw err
       } finally { session.close() }
       return { frames, failures: [] }
     }
@@ -128,13 +134,13 @@ export function createAppFrameExportIO(opts: {
       return res.blob()
     },
     blobToImage: blob => createImageBitmap(blob),
-    async imageToDataUrl(img, maxPx, mime) {
+    async imageToDataUrl(img, maxPx, mime, quality) {
       const { w, h } = sizeOf(img)
       const k = Math.min(1, maxPx / Math.max(w, h))
       const c = document.createElement('canvas')
       c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k))
       c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height)
-      return c.toDataURL(mime, 0.9)
+      return c.toDataURL(mime, quality ?? 0.9)
     },
     blobToDataUrl: blob => new Promise((res, rej) => {
       const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = () => rej(r.error); r.readAsDataURL(blob)

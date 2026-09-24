@@ -4,8 +4,9 @@
  * or Gradient wired into the Frame — plays in the Frame's web export as frames pre-rendered from
  * the slot's live frame source, instead of freezing to a still.
  *
- * Planner: an animated slot with a known clock goes to `wiredClips`, says "plays as frames" in the
- * "Plays live" group, and counts towards the Frame's loop exactly as an image clip does.
+ * Planner: an animated slot with a known clock goes to `wiredClips` and counts towards the Frame's
+ * loop exactly as an image clip does; the gatherer says it once in the "Plays live" group
+ * ("{label} · pre-rendered · {n} frames · adds {size}").
  * Gatherer: asks the IO for round(duration × fps) frames at the planned size and inlines each as
  * WebP in `snap.wired[slot]`, as each frame arrives. A source with its own export session
  * (`openExport`, 3D) is pulled through it — and a session that could not load an asset blocks the
@@ -15,7 +16,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { planFrameExport, type FrameExportInput, type WiredSlotInfo } from '~/lib/embed/frame/plan'
 import { buildFrameSnapshot, formatBytes, isBlocked, type FrameExportIO } from '~/lib/embed/frame/gather'
-import { pullSourceFrames } from '~/lib/embed/frame/appIO'
+import { pullSourceFrames, createAppFrameExportIO } from '~/lib/embed/frame/appIO'
+import { makeScene3DFrameSource } from '~/lib/scene3d/motion/frameSource'
+import { failureSentence } from '~/lib/scene3d/assetNames'
+import type { AssetFailure } from '~/lib/scene3d/assetTracker'
+import { StudioExportFailed } from '~/lib/studio/frameSource'
 import type { FrameSnapshot, FrameVariant } from '~/lib/embed/frame/types'
 import frameSurface, { wiredClipFrameAt } from '~/lib/embed/surfaces/frame'
 import * as compositorLayers from '~/composables/useCompositorLayers'
@@ -46,7 +51,8 @@ describe('planFrameExport — animated wired slots', () => {
     const p = planFrameExport(input(variant([w]), [{ slot: 0, layerId: 'w1', label: '3D scene', animated: true, fps: 24, duration: 2 }]))
     expect(p.wiredClips).toEqual([{ slot: 0, maxPx: 1000, fps: 24, duration: 2, label: '3D scene', layerId: 'w1' }])
     expect(p.wiredStills).toEqual([])
-    expect(p.notices).toContainEqual({ group: 'live', text: '3D scene · plays as frames', layerId: 'w1' })
+    // Said once, by the gatherer, with the frame count and the size — not twice.
+    expect(p.notices.some(n => n.layerId === 'w1')).toBe(false)
     expect(p.notices.some(n => n.group === 'still')).toBe(false)
     expect(p.still).toBe(false)
   })
@@ -139,7 +145,37 @@ describe('buildFrameSnapshot — wired clips', () => {
     expect(entry.frames[47]).toBe('data:image/webp;base64,F47-1000')
     for (const f of entry.frames) expect(f).toMatch(/^data:image\/webp/)
     expect(isBlocked(snap)).toBe(false)
-    expect(snap.notices).toContainEqual(expect.objectContaining({ group: 'live', text: '3D scene · plays as frames', layerId: 'w1' }))
+    const lines = snap.notices.filter(n => n.layerId === 'w1')
+    expect(lines).toHaveLength(1)
+    expect(lines[0]!.text).toMatch(/^3D scene · pre-rendered · 48 frames · adds \d+(\.\d)? (KB|MB)$/)
+  })
+
+  it('encodes a wired clip at the pre-rendered route\'s one WebP quality (0.82)', async () => {
+    const v = variant([wired('w1', 0)])
+    const plan = planFrameExport(input(v, [{ slot: 0, layerId: 'w1', label: '3D scene', animated: true, fps: 2, duration: 1 }]))
+    const io = fakeIO()
+    await buildFrameSnapshot(plan, v, io)
+    expect(io.imageToDataUrl).toHaveBeenCalledTimes(2)
+    for (const call of (io.imageToDataUrl as ReturnType<typeof vi.fn>).mock.calls) expect(call.slice(1)).toEqual([1000, 'image/webp', 0.82])
+  })
+
+  it('the app IO hands the quality to the encoder, and keeps its own default for every other caller', async () => {
+    const toDataURL = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/webp;base64,X')
+    const ctx = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage: () => {} } as any)
+    try {
+      const io = createAppFrameExportIO({ uploaded: [], wiredStill: () => null, catalog: [] })
+      await io.imageToDataUrl({ width: 10, height: 10 } as any, 10, 'image/webp', 0.82)
+      await io.imageToDataUrl({ width: 10, height: 10 } as any, 10, 'image/webp')
+      expect(toDataURL.mock.calls).toEqual([['image/webp', 0.82], ['image/webp', 0.9]])
+    } finally { toDataURL.mockRestore(); ctx.mockRestore() }
+  })
+
+  it('counts the size from the frames handed back, so kept frames (no encode) still say what they add', async () => {
+    const v = variant([wired('w1', 0)])
+    const plan = planFrameExport(input(v, [{ slot: 0, layerId: 'w1', label: 'Layer 1', animated: true, fps: 2, duration: 1 }]))
+    const kept = ['data:image/webp;base64,AAAAAAAA', 'data:image/webp;base64,BBBBBBBB']
+    const snap = await buildFrameSnapshot(plan, v, fakeIO({ wiredFrames: vi.fn(async () => ({ frames: kept, failures: [] })) }))
+    expect(snap.notices).toContainEqual({ group: 'live', text: `Layer 1 · pre-rendered · 2 frames · adds ${formatBytes(12)}`, layerId: 'w1', bytes: 12 })
   })
 
   it('a clip whose clock rounds to no frames still asks for one', async () => {
@@ -167,7 +203,7 @@ describe('buildFrameSnapshot — wired clips', () => {
     const entry = snap.wired[0]!
     if (entry.kind !== 'clip') throw new Error('expected a clip')
     const bytes = entry.frames.reduce((n, u) => n + Math.floor((u.length - u.indexOf(',') - 1) * 3 / 4), 0)
-    expect(snap.notices).toContainEqual({ group: 'live', text: `Layer 1 · adds ${formatBytes(bytes)}`, layerId: 'w1', bytes })
+    expect(snap.notices).toContainEqual({ group: 'live', text: `Layer 1 · pre-rendered · 4 frames · adds ${formatBytes(bytes)}`, layerId: 'w1', bytes })
   })
 })
 
@@ -190,8 +226,9 @@ describe('a source with its own export session (3D)', () => {
     const v = variant([wired('w1', 0)])
     const snap = await buildFrameSnapshot(plan3d(v), v, ioOverSource(src))
     expect(isBlocked(snap)).toBe(true)
+    // A source that does not word the clause itself: the plain fact, no advice guessed.
     expect(snap.notices.filter(n => n.group === 'blocked')).toEqual([
-      { group: 'blocked', layerId: 'w1', text: 'Layer 1 · model "Sneaker" couldn\'t load — re-generate or re-upload it' },
+      { group: 'blocked', layerId: 'w1', text: 'Layer 1 · model "Sneaker" couldn\'t load' },
     ])
     expect(frame).not.toHaveBeenCalled()
     expect(src.getFrame).not.toHaveBeenCalled()
@@ -229,6 +266,53 @@ describe('a source with its own export session (3D)', () => {
     const snap = await buildFrameSnapshot(plan3d(v), v, ioOverSource(src))
     expect(snap.notices.find(n => n.group === 'blocked')?.text).toBe('Layer 1 couldn\'t be rendered as frames.')
     expect(close).toHaveBeenCalledTimes(2)
+  })
+
+  it('a 3D slot\'s failures read as 3D Studio\'s own sheet words them — advice by kind, lower case after the layer', async () => {
+    const failures: AssetFailure[] = [
+      { kind: 'model', name: '/view?filename=Sneaker.glb&type=input', reason: 'glb fetch failed: 404' },
+      { kind: 'hdri', name: 'studio_small', reason: 'HTTP 404' },
+      { kind: 'shader', name: 'Shader effects', reason: 'offline' },
+      { kind: 'font', name: '/fonts/Inter-Bold.ttf', reason: "didn't finish loading" },
+    ]
+    const close = vi.fn()
+    const src = makeScene3DFrameSource({
+      getClock: () => ({ duration: 2, fps: 2, width: 1000, height: 500 }), renderAt: () => null,
+      openExport: vi.fn(async () => ({ failures, frame: () => ({}) as any, close })),
+    })
+    const v = variant([wired('w1', 0)])
+    const snap = await buildFrameSnapshot(plan3d(v), v, ioOverSource(src))
+    const lines = snap.notices.filter(n => n.group === 'blocked').map(n => n.text)
+    expect(lines).toEqual([
+      'Layer 1 · model "Sneaker" couldn\'t load — re-generate or re-upload it',
+      'Layer 1 · lighting "studio_small" couldn\'t load',
+      'Layer 1 · shader effects couldn\'t load',
+      'Layer 1 · font "Inter-Bold" didn\'t finish loading — try again',
+    ])
+    // The same clause as the 3D sheet's sentence, but mid-sentence.
+    lines.forEach((l, i) => {
+      const sentence = failureSentence(failures[i]!)
+      expect(l.slice('Layer 1 · '.length)).toBe(sentence.charAt(0).toLowerCase() + sentence.slice(1, -1))
+    })
+  })
+
+  it('a frame that finds a failed load stops the pull and blocks by name', async () => {
+    const close = vi.fn()
+    const frame = vi.fn(async (t01: number) => {
+      if (t01 >= 0.5) throw Object.assign(new Error('late'), { assetFailures: [{ kind: 'decal', name: 'Logo', reason: 'HTTP 404' }] })
+      return {} as any
+    })
+    const src = makeScene3DFrameSource({
+      getClock: () => ({ duration: 2, fps: 2, width: 1000, height: 500 }), renderAt: () => null,
+      openExport: vi.fn(async () => ({ failures: [], frame, close })),
+    })
+    const session = await src.openExport!({ width: 10, height: 10 })
+    await expect(session.frame(0.5)).rejects.toBeInstanceOf(StudioExportFailed)
+    const v = variant([wired('w1', 0)])
+    const snap = await buildFrameSnapshot(plan3d(v), v, ioOverSource(src))
+    expect(snap.notices.filter(n => n.group === 'blocked').map(n => n.text)).toEqual(['Layer 1 · sticker "Logo" couldn\'t load'])
+    expect(frame).toHaveBeenCalledTimes(4)          // 0, 0.25, 0.5 of this pull (+ the direct call above); never 0.75
+    expect(close).toHaveBeenCalledTimes(1)
   })
 
   it('a superseded pull closes its session before its next frame', async () => {

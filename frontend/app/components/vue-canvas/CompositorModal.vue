@@ -151,6 +151,7 @@ import FrameWebExportSheet from '~/components/vue-canvas/compositor/FrameWebExpo
 import { planFrameExport } from '~/lib/embed/frame/plan'
 import { buildFrameSnapshot, isBlocked, formatBytes } from '~/lib/embed/frame/gather'
 import { createAppFrameExportIO, pullSourceFrames } from '~/lib/embed/frame/appIO'
+import { createWiredClipCache } from '~/lib/embed/frame/clipCache'
 import type { FrameFit, FrameNotice, FrameVariant } from '~/lib/embed/frame/types'
 import { embedSnippet } from '~/lib/embed/snippet'
 import { exportEmbedHtml, downloadEmbed } from '~/lib/embed/export'
@@ -5060,9 +5061,20 @@ const webExport = reactive({
 })
 const webExportNotice = ref('')
 let webExportGen = 0
-/** Wired-clip pulls in flight: the live preview pulls from the same sources, so it is paused
- *  while any runs (as bakeMotion pauses it) and resumed when the last one ends. */
+/** Wired-clip pulls in flight that share a renderer with the live preview: it is paused while
+ *  any runs (as bakeMotion pauses it) and resumed when the last one ends. A source with its own
+ *  export session (`openExport`, 3D) renders on an engine of its own, so it pauses nothing. */
 let webExportPulls = 0
+/** The clips this sheet has pulled, kept while it is open: a rebuild that only changed Fit or
+ *  Transparent (or anything a clip does not depend on) reuses them instead of re-rendering. */
+const webExportClips = createWiredClipCache()
+/** What a wired slot's source draws, as a string that changes when it does: the saved widget
+ *  state of the node wired into that slot. A changed source misses the clip cache. */
+function wiredSourceSignal(slot: number): string {
+  const e = (props.edges as any[]).find(x => String(x.target) === String(props.nodeId) && x.targetHandle === `input-${slot}`)
+  const n = e ? (props.nodes as any[]).find(x => String(x.id) === String(e.source)) : null
+  return n ? `${n.id}|${JSON.stringify(n.data?.widgetsValues ?? null)}` : ''
+}
 let webExportRebuildTimer: ReturnType<typeof setTimeout> | null = null
 let webExportCopiedTimer: ReturnType<typeof setTimeout> | null = null
 function clearWebExportTimers() {
@@ -5127,11 +5139,15 @@ async function buildWebExport() {
     // stops pulling at its next frame.
     const io = createAppFrameExportIO({
       uploaded: uploadedFonts.value, wiredStill: wiredContentForSlot, catalog: cat.effects,
-      wiredFrames: async (slot, count, maxPx, encode) => {
-        if (webExportPulls++ === 0) stopLive()
-        try {
-          return await pullSourceFrames(layers.value.find(x => x.slot === slot + 1)?.live, count, maxPx, { encode, stale: () => gen !== webExportGen })
-        } finally { if (--webExportPulls === 0 && !unmounted) startLive() }
+      wiredFrames: (slot, count, maxPx, encode) => {
+        const live = layers.value.find(x => x.slot === slot + 1)?.live
+        return webExportClips.get({ slot, count, maxPx, source: live, signal: wiredSourceSignal(slot) }, async () => {
+          const shared = !live?.openExport
+          if (shared && webExportPulls++ === 0) stopLive()
+          try {
+            return await pullSourceFrames(live, count, maxPx, { encode, stale: () => gen !== webExportGen })
+          } finally { if (shared && --webExportPulls === 0 && !unmounted) startLive() }
+        })
       },
     })
     const snap = await buildFrameSnapshot(plan, variant, io)
@@ -5161,7 +5177,7 @@ function openWebExport() {
   webExport.open = true; webExport.transparent = false; webExport.copyStatus = null; webExportNotice.value = ''
   void buildWebExport()
 }
-function closeWebExport() { webExport.open = false; webExportGen++; webExport.copyStatus = null; clearWebExportTimers() }
+function closeWebExport() { webExport.open = false; webExportGen++; webExport.copyStatus = null; clearWebExportTimers(); webExportClips.clear() }
 function setWebExportFit(f: FrameFit) { webExport.fit = f; void buildWebExport() }
 function setWebExportTransparent(on: boolean) { webExport.transparent = on; void buildWebExport() }
 function downloadWebExport() {
@@ -5170,6 +5186,7 @@ function downloadWebExport() {
   renderError.value = ''
   videoStatus.value = ''
   webExport.open = false
+  webExportClips.clear()
   webExportNotice.value = `Downloaded · ${formatBytes(webExport.bytes)}`
 }
 async function copyWebExportSnippet() {

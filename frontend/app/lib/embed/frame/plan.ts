@@ -193,7 +193,8 @@ export function planFrameExport(input: FrameExportInput): FramePlan {
         const same = wiredClips.find(c => c.slot === wl.slot)
         if (same) same.maxPx = Math.max(same.maxPx, maxPx)
         else wiredClips.push({ slot: wl.slot, maxPx, fps, duration, label: info.label, layerId: l.id })
-        notices.push({ group: 'live', text: `${info.label} · plays as frames`, layerId: l.id })
+        // No notice here: the gatherer says it once, with the frame count and what it adds
+        // ("{label} · pre-rendered · {n} frames · adds {size}").
       } else {
         wiredStills.push({ slot: wl.slot, maxPx })
         if (info?.animated) notices.push({ group: 'still', text: `${info.label} · shown as a still in this version`, layerId: l.id })
