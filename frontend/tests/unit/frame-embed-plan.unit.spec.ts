@@ -250,4 +250,10 @@ describe('embedSnippet', () => {
   it('escapes the file name', () => {
     expect(embedSnippet('a"b.html', 1, 1)).toContain('src="a&quot;b.html"')
   })
+
+  it('takes an optional title, escaped like the file name, defaulting to the Frame wording', () => {
+    expect(embedSnippet('sailor-3d.html', 1, 1, 'Sailor 3D scene')).toContain('title="Sailor 3D scene"')
+    expect(embedSnippet('sailor-frame.html', 1, 1)).toContain('title="Sailor frame"')
+    expect(embedSnippet('a.html', 1, 1, 'A "quoted" scene')).toContain('title="A &quot;quoted&quot; scene"')
+  })
 })

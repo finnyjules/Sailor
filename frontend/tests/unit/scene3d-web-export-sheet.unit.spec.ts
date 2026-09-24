@@ -144,4 +144,28 @@ describe('Scene3DWebExportSheet', () => {
     const w = mountWith({ state: 'error', errorText: 'The export couldn\'t be built. Try again.' })
     expect(w.text()).toContain('The export couldn\'t be built. Try again.')
   })
+
+  it('locks the transparent switch on, with a hint, when the scene background is already transparent', () => {
+    const w = mountWith({ transparent: true, transparentLocked: true })
+    expect(w.find('[role="switch"][aria-label="Transparent background"]').attributes('aria-checked')).toBe('true')
+    expect(byTestId(w, 'scene3d-web-export-transparent-lock').classes()).toEqual(
+      expect.arrayContaining(['pointer-events-none', 'opacity-60']))
+    expect(w.text()).toContain('This scene\'s background is already transparent.')
+  })
+
+  it('leaves the transparent switch free to toggle when the background is not transparent', () => {
+    const w = mountWith()
+    expect(byTestId(w, 'scene3d-web-export-transparent-lock').classes()).not.toContain('pointer-events-none')
+    expect(byTestId(w, 'scene3d-web-export-transparent-hint').exists()).toBe(false)
+  })
+
+  it('shows the download confirmation without hiding Copy embed code', () => {
+    const w = mountWith({ state: 'ready', bytes: 636_000, downloadNotice: 'Downloaded · 636 KB' })
+    expect(byTestId(w, 'scene3d-web-export-downloaded').text()).toBe('Downloaded · 636 KB')
+    expect(byTestId(w, 'scene3d-web-export-copy').exists()).toBe(true)
+  })
+
+  it('shows no download confirmation until one is set', () => {
+    expect(byTestId(mountWith({ state: 'ready' }), 'scene3d-web-export-downloaded').exists()).toBe(false)
+  })
 })

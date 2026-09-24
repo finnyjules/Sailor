@@ -24,6 +24,10 @@ const props = defineProps<{
   fps: 24 | 30
   cinematic: boolean
   transparent: boolean
+  /** True when the scene's own background is already transparent: `bakeSceneFrames` bakes
+   *  transparent frames regardless of the switch in that case, so the switch shows on and
+   *  locked rather than lying about what turning it off would do. */
+  transparentLocked?: boolean
   still: boolean
   bytes: number
   failures: AssetFailure[]
@@ -34,6 +38,9 @@ const props = defineProps<{
    *  then `snippet` is shown so it can be copied by hand. */
   copyStatus?: 'copied' | 'failed' | null
   snippet?: string
+  /** A short confirmation shown by Download after it succeeds, e.g. "Downloaded · 636 KB".
+   *  The sheet stays open (unlike the Frame sheet) so Copy embed code can follow. */
+  downloadNotice?: string
 }>()
 const emit = defineEmits<{
   'update:size': [size: 'output' | 'sharp']
@@ -81,7 +88,10 @@ const lines = computed(() => props.failures.map(f => ({ text: failureSentence(f)
         <StudioSwitch label="Cinematic" :model-value="cinematic" @update:model-value="(v: boolean) => emit('update:cinematic', v)" />
         <p class="-mt-1 text-[11px] leading-snug text-white/50">Path-traced, like the Cinematic view. Much slower to export.</p>
         <p v-if="cinematic && cinematicWarning" class="text-[11px] leading-snug text-amber-200/90" data-testid="scene3d-web-export-cinematic-warning">{{ cinematicWarning }}</p>
-        <StudioSwitch label="Transparent background" :model-value="transparent" @update:model-value="(v: boolean) => emit('update:transparent', v)" />
+        <div data-testid="scene3d-web-export-transparent-lock" class="flex flex-col gap-1" :class="transparentLocked ? 'pointer-events-none opacity-60' : ''">
+          <StudioSwitch label="Transparent background" :model-value="transparent" @update:model-value="(v: boolean) => emit('update:transparent', v)" />
+          <p v-if="transparentLocked" class="text-[11px] leading-snug text-white/50" data-testid="scene3d-web-export-transparent-hint">This scene's background is already transparent.</p>
+        </div>
       </div>
 
       <!-- Right: what is happening, and what stops the file -->
@@ -108,6 +118,7 @@ const lines = computed(() => props.failures.map(f => ({ text: failureSentence(f)
       <span class="text-[11px] text-white/45">Upload this file to your site, then embed it</span>
       <StudioButton data-testid="scene3d-web-export-copy" :disabled="state !== 'ready'" @click="emit('copy')">Copy embed code</StudioButton>
       <span v-if="copyStatus === 'copied'" class="text-[11px] text-white/60" role="status" data-testid="scene3d-web-export-copied">Copied</span>
+      <span v-if="downloadNotice" class="text-[11px] text-white/60" role="status" data-testid="scene3d-web-export-downloaded">{{ downloadNotice }}</span>
       <span class="flex-1" />
       <StudioButton data-testid="scene3d-web-export-close" @click="emit('close')">Close</StudioButton>
       <StudioButton v-if="working" data-testid="scene3d-web-export-cancel" @click="emit('cancel')">Cancel</StudioButton>

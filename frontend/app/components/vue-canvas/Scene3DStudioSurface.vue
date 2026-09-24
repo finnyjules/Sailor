@@ -94,6 +94,7 @@ import { bakeSceneFrames } from '~/lib/scene3d/bakeFrames'
 import type { AssetFailure } from '~/lib/scene3d/assetTracker'
 import { exportEmbedHtml, downloadEmbed } from '~/lib/embed/export'
 import { embedSnippet } from '~/lib/embed/snippet'
+import { formatBytes } from '~/lib/embed/frame/gather'
 import Scene3DWebExportSheet from '~/components/vue-canvas/Scene3DWebExportSheet.vue'
 import { RESTYLE_MODELS } from '~/data/scene3d-restyle-models'
 import { useMoodboards } from '~/composables/useMoodboards'
@@ -716,6 +717,7 @@ const webExport = reactive({
   errorText: '',
   copyStatus: null as 'copied' | 'failed' | null,
   snippet: '',
+  downloadNotice: '',   // "Downloaded · 636 KB" after Download succeeds; the sheet stays open
 })
 let webExportHtml = ''
 let webExportSig = ''     // the scene as it was rendered — a later edit makes the file stale
@@ -724,12 +726,18 @@ let webExportAbort: AbortController | null = null
 let webExportCopiedTimer: ReturnType<typeof setTimeout> | null = null
 const webExportStill = computed(() => !sceneLoop(doc).animated)
 const webExportWarning = computed(() => (webExport.open && webExport.cinematic ? cinematicScopeWarning(doc) ?? undefined : undefined))
+// `bakeSceneFrames` only ever forces transparency ON — with the doc's own background already
+// `'transparent'` it stays transparent no matter what this switch says (bakeFrames.ts:72), so
+// the switch can't actually turn transparency off here. Show it on and locked instead of
+// offering a control that silently does nothing.
+const webExportTransparentLocked = computed(() => doc.background === 'transparent')
+const webExportTransparent = computed(() => webExportTransparentLocked.value || webExport.transparent)
 function resetWebExport() {
   webExportGen++
   webExportAbort?.abort(); webExportAbort = null
   webExportHtml = ''; webExportSig = ''
   if (webExportCopiedTimer) { clearTimeout(webExportCopiedTimer); webExportCopiedTimer = null }
-  Object.assign(webExport, { state: 'idle', progress: null, bytes: 0, failures: [], errorText: '', copyStatus: null, snippet: '' })
+  Object.assign(webExport, { state: 'idle', progress: null, bytes: 0, failures: [], errorText: '', copyStatus: null, snippet: '', downloadNotice: '' })
 }
 function openWebExport() {
   resetWebExport()
@@ -738,6 +746,7 @@ function openWebExport() {
 }
 function closeWebExport() { resetWebExport(); webExport.open = false }
 function setWebExportOption<K extends 'size' | 'fps' | 'cinematic' | 'transparent'>(key: K, value: (typeof webExport)[K]) {
+  if (key === 'transparent' && webExportTransparentLocked.value) return   // locked on; nothing to change
   if (webExport[key] === value) return
   webExport[key] = value
   resetWebExport()
@@ -757,7 +766,8 @@ async function buildWebExport() {
     const bakeDoc = JSON.parse(sig) as SceneDoc
     const k = webExport.size === 'sharp' ? 2 : 1
     const width = bakeDoc.output.width * k, height = bakeDoc.output.height * k
-    const { fps, transparent, cinematic } = webExport
+    const { fps, cinematic } = webExport
+    const transparent = webExportTransparent.value
     const loop = sceneLoop(bakeDoc)
     const made = await bakeSceneFrames(bakeDoc, {
       width, height, fps, transparent,
@@ -796,10 +806,11 @@ function webExportCurrent(): boolean {
 function downloadWebExport() {
   if (webExport.state !== 'ready' || !webExportCurrent()) return
   downloadEmbed(WEB_EXPORT_FILE, webExportHtml)
+  webExport.downloadNotice = `Downloaded · ${formatBytes(webExport.bytes)}`
 }
 async function copyWebExportSnippet() {
   if (webExport.state !== 'ready' || !webExportCurrent()) return
-  webExport.snippet = embedSnippet(WEB_EXPORT_FILE, doc.output.width, doc.output.height)
+  webExport.snippet = embedSnippet(WEB_EXPORT_FILE, doc.output.width, doc.output.height, 'Sailor 3D scene')
   if (webExportCopiedTimer) { clearTimeout(webExportCopiedTimer); webExportCopiedTimer = null }
   try {
     await navigator.clipboard.writeText(webExport.snippet)
@@ -2848,6 +2859,11 @@ watch(doc, () => {
   // (the pivot moves the roots directly), and onPivotDragEnd runs the sync.
   if (!interaction?.pivotDragActive) { engine?.syncFromDoc(doc); engine?.cinematicRefresh() }
   scheduleHistory()
+  // A rendered web-export file describes THIS moment of the doc; once it changes, the file is
+  // stale. Flip back to the same not-rendered state an option change produces, proactively —
+  // rather than waiting for Download/Copy to discover it — so the size line and the enabled
+  // buttons never go on describing a file that no longer matches the scene.
+  if (webExport.state === 'ready') resetWebExport()
 }, { deep: true })
 // An environment switch — or an ambient/preset change (both feed the baked ambient fill floor) —
 // must re-bake the equirect the path-tracer lights from (the deep watch above only rebuilds the
@@ -5236,10 +5252,12 @@ async function onClose() {
       <Scene3DWebExportSheet
         v-if="webExport.open"
         :state="webExport.state" :progress="webExport.progress"
-        :size="webExport.size" :fps="webExport.fps" :cinematic="webExport.cinematic" :transparent="webExport.transparent"
+        :size="webExport.size" :fps="webExport.fps" :cinematic="webExport.cinematic" :transparent="webExportTransparent"
+        :transparent-locked="webExportTransparentLocked"
         :still="webExportStill" :bytes="webExport.bytes" :failures="webExport.failures"
         :cinematic-warning="webExportWarning" :output-size="{ width: doc.output.width, height: doc.output.height }"
         :error-text="webExport.errorText" :copy-status="webExport.copyStatus" :snippet="webExport.snippet"
+        :download-notice="webExport.downloadNotice"
         @update:size="(v: 'output' | 'sharp') => setWebExportOption('size', v)"
         @update:fps="(v: 24 | 30) => setWebExportOption('fps', v)"
         @update:cinematic="(v: boolean) => setWebExportOption('cinematic', v)"
