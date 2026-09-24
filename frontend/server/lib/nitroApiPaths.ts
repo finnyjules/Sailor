@@ -20,7 +20,7 @@ export const NITRO_API_PATHS = [
   '/api/render-template', '/api/lora-preview', '/api/replicate-cover', '/api/google-fonts',
   '/api/loras-local', '/api/lora-cover', '/api/community-workflow', '/api/voices-local',
   '/api/voice-preview-file', '/api/vibe', '/api/vibe-review', '/api/vibe-recipes',
-  '/api/vibe-pick', '/api/agent-plan', '/api/agent-review', '/api/image-search',
+  '/api/vibe-pick', '/api/agent-plan', '/api/agent-review', '/api/shader-gen', '/api/image-search',
   '/api/image-fetch', '/api/copy-assist', '/api/ai-status', '/api/dataset-match',
   '/api/training-image', '/api/wallet',
   // Engine-free Phase A: whether the local engine answers (Sailor serves it).
