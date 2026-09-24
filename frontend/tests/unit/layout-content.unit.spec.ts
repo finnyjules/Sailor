@@ -484,6 +484,28 @@ describe('Task 6 — a tag change applies the Frame\'s layout again, in the same
     expect(layersOf(props)).toBe(json)
   })
 
+  it('layout limits, fix 3: a line Review placed only by its tag, then untagged, is not left where Review put it', async () => {
+    const img = createImageLayer('img.png', 1.25, { id: 'img', w: 0.5, h: 0.625 }) as LocalLayer
+    const layers = [tl('t', 'Run lighter.', 0.1), tl('d', 'Halden Trail 2', 0.045), tl('dt', '–30%', 0.04),
+      tl('x', 'Best shoe we have tested this year', 0.03), tl('y', 'Kim', 0.022), tl('z', 'Top pick', 0.021),
+      tl('c', 'Offer ends 12 October.', 0.02), img]
+    const { props, ed, vary } = realHarness(layers, { sailor_posterState: { tags: { x: 'quote', y: 'by', z: 'rating' } } })
+    vary.setStyle('performance'); await idle()
+    vary.select('perfReview'); await nextTick()
+    expect(props.sailor_posterState.patternId).toBe('perfReview')
+    expect(layerOf(props, 'y').visible).not.toBe(false)                               // Review places the byline
+    const placed = layersOf(props)
+    expect(vary.setTag('y', null)).toBe(true)                                          // Review is applied again…
+    expect(props.sailor_posterState.patternId).toBe('perfReview')
+    expect(layerOf(props, 'y').visible).toBe(false)                                    // …and the byline goes
+    await idle()
+    expect(vary.candidates.value[vary.index.value]!.plan.notPlaced).toContainEqual({ role: 'unused', text: 'Kim' })
+    // One undo: the tag and the line together.
+    ed.undo(); await nextTick()
+    expect(props.sailor_posterState.tags).toEqual({ x: 'quote', y: 'by', z: 'rating' })
+    expect(layersOf(props)).toBe(placed)
+  })
+
   it('no layout applied: a tag touches no layer', () => {
     const { props, vary } = realHarness(reviewFrame())
     const layers = props.sailor_localLayers
@@ -680,5 +702,77 @@ describe('Content section — wired images (final fix wave)', () => {
     await nextTick(); await idle()
     expect(((props.sailor_localLayers as LocalLayer[]).find(l => l.id === 'img3') as { visible?: boolean }).visible).toBe(false)
     expect(vary.candidates.value[vary.index.value]!.plan.notPlaced).toContainEqual({ role: 'unused', text: 'Image 3', image: true })
+  })
+})
+
+// Layout limits, fix 1: the accent copy (ruling D2) follows an edit of the line it copies — the
+// layout is applied again when the edit is committed, folded into the edit's own history step.
+describe('the accent copy follows an edit of its line (layout limits, fix 1)', () => {
+  const poster = (): LocalLayer[] => [
+    tl('t', 'Weather Report', 0.12), tl('d', 'Ines Vollmer', 0.04), tl('dt', '19.09.–15.11.2026', 0.03), tl('c', 'Kunstraum Lenz', 0.02),
+  ]
+  const copyOf = (props: Record<string, any>) => (props.sailor_localLayers as any[]).find(l => l.owner?.by === 'layout' && /^copy-/.test(l.owner.key))
+  const letters = (t: string) => t.replace(/\s+/g, '')
+  async function overprinted(id = 'overprint') {
+    const h = realHarness(poster())
+    await idle()
+    h.vary.select(id); await nextTick()
+    expect(h.props.sailor_posterState.patternId).toBe(id)
+    expect(copyOf(h.props)).toBeTruthy()
+    return h
+  }
+
+  it('typing into the copied line, then committing: the copy draws the new words; no history step is added', async () => {
+    const { props, ed, vary } = await overprinted()
+    ed.setLocal('d', { text: 'Ines Vollmer an' })                        // one step per change while typing
+    ed.setLocal('d', { text: 'Ines Vollmer and Kai' })
+    const typed = layersOf(props)
+    expect(letters(copyOf(props).text)).toBe('InesVollmer')              // stale until the edit ends
+    const rev = ed.historyRev()
+    expect(vary.textEdited('d')).toBe(true)
+    expect(ed.historyRev()).toBe(rev)                                     // folded: no new step
+    expect(letters(copyOf(props).text)).toBe('InesVollmerandKai')
+    expect(props.sailor_posterState.patternId).toBe('overprint')
+    // One undo takes back the last change and the re-apply together.
+    ed.undo(); await nextTick()
+    expect((layerOf(props, 'd') as { text?: string }).text).toBe('Ines Vollmer an')
+    expect(layersOf(props)).not.toBe(typed)
+  })
+
+  it('Number behind: an edit of the number updates its copy', async () => {
+    const { props, vary, ed } = await overprinted('dateBehind')
+    ed.setLocal('dt', { text: '20.09.–16.11.2026' })
+    expect(vary.textEdited('dt')).toBe(true)
+    expect(letters(copyOf(props).text)).toBe('20.09.–16.11.2026')
+  })
+
+  it('any other edit behaves as today: another line, an unchanged line, or no copy', async () => {
+    const { props, ed, vary } = await overprinted()
+    ed.setLocal('c', { text: 'Kunstraum Lenz, Basel' })
+    const other = props.sailor_localLayers
+    expect(vary.textEdited('c')).toBe(false)
+    expect(props.sailor_localLayers).toBe(other)
+    // The copied line, its words unchanged (a click in and out): nothing.
+    expect(vary.textEdited('d')).toBe(false)
+    expect(props.sailor_localLayers).toBe(other)
+    // Recolour on: no copy is drawn, so an edit of the details applies nothing.
+    const rc = realHarness(poster())
+    await idle()
+    rc.vary.setPaletteMode(['#101010', '#f5f5f5', '#dd2200'])
+    rc.vary.select('overprint'); await nextTick()
+    expect(copyOf(rc.props)).toBeUndefined()
+    rc.ed.setLocal('d', { text: 'Someone else' })
+    const same = rc.props.sailor_localLayers
+    expect(rc.vary.textEdited('d')).toBe(false)
+    expect(rc.props.sailor_localLayers).toBe(same)
+  })
+
+  it('a layout that no longer fits: the layers are left as they are', async () => {
+    const { props, vary, ed } = await overprinted('dateBehind')
+    ed.setLocal('dt', { text: 'Soon' })                                   // no longer a number
+    const layers = props.sailor_localLayers
+    expect(vary.textEdited('dt')).toBe(true)
+    expect(props.sailor_localLayers).toBe(layers)
+    expect(props.sailor_posterState.patternId).toBe('dateBehind')
   })
 })

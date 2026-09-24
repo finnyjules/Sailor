@@ -20,7 +20,7 @@ import { planLayout } from '~/lib/frame/patterns/kit/plan'
 import { layoutsForStyle } from '~/lib/frame/patterns/layouts/catalog'
 import { makeStubMeasure } from '~/lib/frame/patterns/kit/measure'
 import { DEFAULT_CHOICE } from '~/lib/frame/patterns/kit/vary'
-import { createTextLayer } from '~/composables/useCompositorLayers'
+import { createImageLayer, createTextLayer } from '~/composables/useCompositorLayers'
 import type { LocalLayer } from '~/composables/useCompositorLayers'
 import { useLocalLayerEditor } from '~/composables/useLocalLayerEditor'
 
@@ -311,5 +311,77 @@ describe('leaving a format restores the lines by the style that hid them (Stage 
     applyFramePreset(d, '4:5')
     expect(layer(d.properties!, 'd')).not.toHaveProperty('visible')
     expect(layer(d.properties!, 'c')).not.toHaveProperty('visible')
+  })
+})
+
+// ── Known limit 2: a size change restores only what the OLD format hid ─────────────────────────
+// A line a layout left out (Review's headline, Strip's details) is not the format's: leaving or
+// changing the format keeps it hidden, and the layout still names it.
+describe('a format change shows again only the lines the old format hid (layout limits, fix 2)', () => {
+  const pal = { field: '#f2f0ef', ink: '#121212', accent: '#dd2200' }
+  const t = (id: string, text: string, fontSize: number) =>
+    createTextLayer({ id, text, fontSize, fontFamily: 'Inter', fontWeight: 600, color: '#111111' }) as LocalLayer
+  const reviewAd = (): LocalLayer[] => [
+    t('t', 'Run lighter.', 0.1), t('d', 'Halden Trail 2', 0.045), t('q', '“Lightest shoe I have ever raced in.”', 0.035),
+    t('dt', '–30%', 0.04), t('a', 'Shop now', 0.025), t('r', '4.7 ★', 0.022), t('c', 'Offer ends 12 October.', 0.02),
+    t('b', '— Maya R., verified buyer', 0.018), img(),
+  ]
+  const img = () => createImageLayer('img.png', 1.25, { id: 'img', w: 0.5, h: 0.625 }) as LocalLayer
+  const layer = (props: Record<string, any>, id: string) => (props.sailor_localLayers as any[]).find(l => l.id === id)
+  /** Apply `layoutId` (Performance) at w×h, as the Layout tab does; the Frame's size widgets and preset set. */
+  function applied(layers: LocalLayer[], layoutId: string, w: number, h: number, preset?: string) {
+    const props: Record<string, any> = { sailor_localLayers: layers, ...(preset ? { sailor_frame: { preset } } : {}) }
+    const plan = planLayout({ props, frameW: w, frameH: h, layoutId, choice: { ...DEFAULT_CHOICE }, palette: pal, connectedSlots: [], measure: makeStubMeasure(), style: 'performance' })!
+    expect(plan, layoutId).toBeTruthy()
+    props.sailor_localLayers = plan.layers
+    props.sailor_posterState = { ...plan.posterState, style: 'performance' }
+    return { plan, data: frameData(w, h, props) }
+  }
+  const replan = (d: FrameSizeNodeData, layoutId: string) => {
+    const { w, h } = readFrameSize(d)
+    return planLayout({ props: d.properties!, frameW: w, frameH: h, layoutId, choice: { ...DEFAULT_CHOICE }, palette: pal, connectedSlots: [], measure: makeStubMeasure(), style: 'performance' })!
+  }
+
+  it('Review, then a format: the headline Review left out stays hidden, and is named', () => {
+    const { plan, data } = applied(reviewAd(), 'perfReview', 895, 1280)
+    expect(layer(data.properties!, 't').visible).toBe(false)                 // Review hides the headline
+    expect(plan.notPlaced).toContainEqual({ role: 'title', text: 'Run lighter.' })
+    applyFramePreset(data, 'ad-300x600')
+    expect(formatFor(data.properties!, 300, 600)?.id).toBe('ad-300x600')
+    expect(layer(data.properties!, 't').visible).toBe(false)
+    expect(layer(data.properties!, 't').layoutPrev.visible).toEqual({ was: null, set: false })
+    expect(replan(data, 'perfReview').notPlaced.map(n => n.text)).toContain('Run lighter.')
+  })
+
+  it('Review on a format, then leaving it: the format\'s lines come back; the headline and the number Review left out stay hidden', () => {
+    const { plan, data } = applied(reviewAd(), 'perfReview', 1280, 720, 'video-thumb')
+    // Performance keeps the title and the number on a video thumbnail; the format hides the rest.
+    expect(plan.format!.hidden).toEqual(['details', 'action', 'caption'])
+    const hidden = (data.properties!.sailor_localLayers as any[]).filter(l => l.visible === false).map(l => l.id)
+    expect(hidden).toEqual(['t', 'd', 'dt', 'a', 'c'])                        // Review leaves out the headline and the number
+    applyFramePreset(data, '4:5')                                            // no format
+    for (const id of ['d', 'a', 'c']) expect(layer(data.properties!, id), id).not.toHaveProperty('visible')
+    for (const id of ['t', 'dt']) expect(layer(data.properties!, id).visible, id).toBe(false)
+  })
+
+  it('Strip, then a format: the details Strip left out stay hidden', () => {
+    const layers = [t('t', 'Run lighter.', 0.12), t('d', 'Halden Trail 2', 0.04), t('dt', '–30%', 0.03), t('c', 'Offer ends 12 October.', 0.02), img()]
+    const { plan, data } = applied(layers, 'perfStrip', 1200, 628, 'link-preview')
+    expect(plan.notPlaced.map(n => n.role)).toContain('details')
+    const ids = plan.notPlaced.map(n => (plan.layers as any[]).find(l => l.text === n.text)!.id)
+    applyFramePreset(data, 'ad-970x250')                                     // carries 3: hides only the fine print
+    for (const id of ids) expect(layer(data.properties!, id).visible, id).toBe(false)
+  })
+
+  it('a format-hidden date still comes back when leaving the format (as before)', () => {
+    const lines = [t('t', 'Weather Report', 0.12), t('d', 'Ines Vollmer', 0.04), t('dt', '19.09.–15.11.2026', 0.03), t('c', 'Kunstraum Lenz', 0.02)]
+    const props: Record<string, any> = { sailor_localLayers: lines, sailor_frame: { preset: 'video-thumb' } }
+    const plan = planLayout({ props, frameW: 1280, frameH: 720, layoutId: 'statement', choice: { ...DEFAULT_CHOICE }, palette: pal, connectedSlots: [], measure: makeStubMeasure() })!
+    props.sailor_localLayers = plan.layers
+    props.sailor_posterState = plan.posterState
+    const d = frameData(1280, 720, props)
+    expect(layer(d.properties!, 'dt').visible).toBe(false)
+    applyFramePreset(d, '4:5')
+    expect(layer(d.properties!, 'dt')).not.toHaveProperty('visible')
   })
 })

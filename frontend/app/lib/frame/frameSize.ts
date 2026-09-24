@@ -89,9 +89,14 @@ function formatIdOf(data: FrameSizeNodeData): string {
 /** Run a size write; when it changed the Frame's format, show again the lines the old one hid. */
 function sizeWrite(data: FrameSizeNodeData, write: () => void) {
   const before = formatIdOf(data)
+  // The Frame as it was sized (and named) before the write: what the old format hid is read from it.
+  const from: FormatOrigin = { ...readFrameSize(data), frame: data.properties?.sailor_frame }
   write()
-  if (formatIdOf(data) !== before) restoreFormatHiddenLines(data)
+  if (formatIdOf(data) !== before) restoreFormatHiddenLines(data, from)
 }
+
+/** The size and `sailor_frame` a Frame had before a size write — the format it had then. */
+export interface FormatOrigin { w: number; h: number; frame?: unknown }
 
 type HideTracked = { id: string; visible?: boolean; layoutPrev?: Record<string, { was: unknown; set: unknown }> }
 
@@ -105,8 +110,14 @@ type HideTracked = { id: string; visible?: boolean; layoutPrev?: Record<string, 
  *  details, date, action, caption in that view) can be a format's: a content line or an image a
  *  layout hid stays hidden here (ruling R15). An image hidden that way is placed — and shown —
  *  again by the next apply (every layout places the Frame's extra images since Task 7 of the
- *  layout decisions), unless it is tagged Not used (rulings D3, D7). */
-export function restoreFormatHiddenLines(data: FrameSizeNodeData) {
+ *  layout decisions), unless it is tagged Not used (rulings D3, D7).
+ *
+ *  `from` (every size write passes it): the Frame's size and `sailor_frame` before the write. Then
+ *  only a line the OLD format hid comes back (read in the same view, from the same layers): a level
+ *  the layout left out — Review's headline, Strip's details — stays hidden. Without it (a caller
+ *  that no longer knows the old size), every tracked-hidden level the new format carries comes back,
+ *  as before. */
+export function restoreFormatHiddenLines(data: FrameSizeNodeData, from?: FormatOrigin) {
   const props = data.properties
   const layers = props?.sailor_localLayers as HideTracked[] | undefined
   if (!props || !Array.isArray(layers)) return
@@ -117,10 +128,18 @@ export function restoreFormatHiddenLines(data: FrameSizeNodeData) {
   const args = { props, frameW: w, frameH: h, shapeMode: st?.shapeMode ?? undefined, imageMode: st?.imageMode, style: st?.style ?? 'swiss', ...(st?.patternId ? { layoutId: st.patternId } : {}) }
   const still = new Set(hiddenLayerIdsForFrame(args))
   const levels = new Set(levelLayerIdsForFrame(args))
+  // Layout limits, fix 2: with the Frame's old size known, only the lines its OLD format hid can be
+  // the format's. A level the layout itself left out (Review's headline, Strip's details) was hidden
+  // for the layout, not the format — it stays hidden, and the layout keeps naming it.
+  const old = from ? new Set(hiddenLayerIdsForFrame({
+    ...args, frameW: from.w, frameH: from.h,
+    props: { ...props, sailor_frame: from.frame } as Record<string, unknown>,
+  })) : null
   let changed = false
   const next = layers.map((l) => {
     const e = l.layoutPrev?.visible
     if (!e || e.set !== false || l.visible !== false || still.has(l.id) || !levels.has(l.id)) return l
+    if (old && !old.has(l.id)) return l
     changed = true
     const out: HideTracked = { ...l }
     if (e.was == null) delete out.visible; else out.visible = e.was as boolean

@@ -134,6 +134,29 @@ describe('R15: a hidden line with no role left is named by its own text', () => 
     })
   }
 
+  // Layout limits, fix 3: a line a Stage 4 layout PLACED only because it was tagged, then untagged,
+  // holds no role; the next plan (the same layout re-applied, or another) must not leave it where
+  // the old layout put it.
+  it('a line Review placed, then untagged: hidden and named by its own text as unused (same layout, and the next)', () => {
+    const review = apply(tagged(), 'perfReview', 'performance')
+    expect(layerOf(review.plan, 'y').visible).not.toBe(false)                // Review places the byline
+    const st = { ...(review.props.sailor_posterState as object), tags: { x: 'quote', z: 'rating' } }
+    for (const [next, style] of [['perfReview', 'performance'], ['runoff', 'swiss']] as const) {
+      const plan = apply({ ...review.props, sailor_posterState: st }, next, style).plan
+      expect(layerOf(plan, 'y').visible, next).toBe(false)
+      expect(plan.notPlaced, next).toContainEqual({ role: 'unused', text: 'Kim' })
+    }
+  })
+
+  it('a line tagged Not used after Review placed it follows D3 (hidden, named as unused, marked by the tag)', () => {
+    const review = apply(tagged(), 'perfReview', 'performance')
+    const st = { ...(review.props.sailor_posterState as object), tags: { x: 'quote', z: 'rating', y: 'unused' } }
+    const plan = apply({ ...review.props, sailor_posterState: st }, 'perfReview', 'performance').plan
+    expect(layerOf(plan, 'y').visible).toBe(false)
+    expect((layerOf(plan, 'y') as { layoutPrev?: { visible?: { by?: string } } }).layoutPrev?.visible?.by).toBe('unused')
+    expect(plan.notPlaced).toContainEqual({ role: 'unused', text: 'Kim' })
+  })
+
   it('tagged Not used after a layout hid it: still hidden, named by its text', () => {
     const first = apply(tagged(), 'perfPostit', 'performance')
     const st = { ...(first.props.sailor_posterState as object), tags: { x: 'unused' } }

@@ -112,6 +112,29 @@ describe('LayoutVaryPanel — lines not shown', () => {
     expect(wrap.get('[data-testid="layout-not-shown"]').text()).toBe('Not shown: “Fast shoe”, Image 2.')
   })
 
+  it('a long list: the first three quoted, then how many more', () => {
+    const wrap = mount(LayoutVaryPanel, { props: { ...base, format: null, candidates: [cand(['A', 'B', 'C', 'D', 'E'])] }, global: { stubs } })
+    expect(wrap.get('[data-testid="layout-not-shown"]').text()).toBe('Not shown: “A”, “B”, “C” and 2 more.')
+  })
+
+  it('exactly three: all quoted, no count', () => {
+    const wrap = mount(LayoutVaryPanel, { props: { ...base, format: null, candidates: [cand(['A', 'B', 'C'])] }, global: { stubs } })
+    expect(wrap.get('[data-testid="layout-not-shown"]').text()).toBe('Not shown: “A”, “B”, “C”.')
+  })
+
+  it('four: "and 1 more"; the format\'s own list is capped the same way', () => {
+    const four = mount(LayoutVaryPanel, { props: { ...base, format: fmt, candidates: [cand(['B', 'C', 'D'])] }, global: { stubs } })
+    expect(four.get('[data-testid="layout-format-hidden"]').text()).toBe('Not shown: “Halden Trail 2”, “B”, “C” and 1 more.')
+    const onlyFormat = mount(LayoutVaryPanel, { props: { ...base, format: { ...fmt, hidden: ['A', 'B', 'C', 'D', 'E', 'F'] }, candidates: [cand([])] }, global: { stubs } })
+    expect(onlyFormat.get('[data-testid="layout-format-hidden"]').text()).toBe('Not shown in this format: “A”, “B”, “C” and 3 more.')
+  })
+
+  it('an image past the first three is counted, not named', () => {
+    const c = { ...(cand([]) as object), plan: { notPlaced: [{ role: 'quote', text: 'A' }, { role: 'quote', text: 'B' }, { role: 'quote', text: 'C' }, { role: 'image2', text: 'Image 2', image: true }] } } as never
+    const wrap = mount(LayoutVaryPanel, { props: { ...base, format: null, candidates: [c] }, global: { stubs } })
+    expect(wrap.get('[data-testid="layout-not-shown"]').text()).toBe('Not shown: “A”, “B”, “C” and 1 more.')
+  })
+
   it('nothing left out: no line', () => {
     const wrap = mount(LayoutVaryPanel, { props: { ...base, format: null, candidates: [cand([])] }, global: { stubs } })
     expect(wrap.find('[data-testid="layout-not-shown"]').exists()).toBe(false)

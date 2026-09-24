@@ -1,6 +1,6 @@
 import { ref, computed, shallowRef, watch, toRaw, getCurrentScope, onScopeDispose } from 'vue'
 import type { Ref, ComputedRef } from 'vue'
-import { applyLayoutToFrame, candidatesForFrame, contentForFrame, hiddenLinesForFrame, isFromLayout, lineOptionsForFrame, planLayout, roleIdsForFrame } from '~/lib/frame/patterns/kit/plan'
+import { applyLayoutToFrame, candidatesForFrame, contentForFrame, hiddenLinesForFrame, isFromLayout, lineOptionsForFrame, planLayout, roleIdsForFrame, staleAccentCopySource } from '~/lib/frame/patterns/kit/plan'
 import type { LayoutEditor, LayoutPlan, LayoutPlanArgs, StoredRoles } from '~/lib/frame/patterns/kit/plan'
 import { DEFAULT_CHOICE } from '~/lib/frame/patterns/kit/vary'
 import type { Candidate, Choice } from '~/lib/frame/patterns/kit/vary'
@@ -73,8 +73,10 @@ export interface LayoutVarySource {
    *  a late re-apply (after a suggested face loads) folds into the face's step only while it has
    *  not moved. */
   editor: () => LayoutEditor & { historyRev?: () => number }
-  /** Persist the applied state (UI memory, outside the undo step). */
-  remember(s: { patternId: string; seed: number; choice: Choice; index: number; roles?: StoredRoles; style?: StyleId }): void
+  /** Persist the applied state (UI memory, outside the undo step). `placed` is the plan's own
+   *  (layout limits, fix 3): passed on every apply, undefined for a layout that is not Stage 4, so a
+   *  merging host drops the previous one. */
+  remember(s: { patternId: string; seed: number; choice: Choice; index: number; roles?: StoredRoles; style?: StyleId; placed?: string[] }): void
   /** Whether the Layout tab is showing. The library plans only while it is. Default: always. */
   active?: () => boolean
   /** A text layer is being edited on the canvas: content re-plans wait until the edit ends. */
@@ -326,6 +328,10 @@ export function useLayoutVary(src: LayoutVarySource): {
   hints: ComputedRef<string[]>
   /** Tag a layer (null: back to Automatic) as ONE undo step, and re-plan. False when nothing changed. */
   setTag(id: string, tag: ContentTag | null): boolean
+  /** A text edit of layer `id` has been committed (the edit ended). When the Frame's layout drew an
+   *  accent copy of that line (ruling D2) and the copy no longer shows its words, the layout is
+   *  applied again, folded into the edit's own history step. True when it re-applied or tried to. */
+  textEdited(id: string): boolean
 } {
   const stored = src.props()?.sailor_posterState as PosterState | undefined
 
@@ -452,10 +458,12 @@ export function useLayoutVary(src: LayoutVarySource): {
     return effectiveBrand(undefined, src.brandKit())?.accent || undefined
   })
 
-  function baseArgs(): Omit<LayoutPlanArgs, 'choice' | 'layoutId'> {
+  /** `accent`: the brand accent to use when given (a re-apply while the tab is hidden, where
+   *  `brandAccent` reads nothing) — absent, the tab's own. */
+  function baseArgs(o: { accent?: string } = {}): Omit<LayoutPlanArgs, 'choice' | 'layoutId'> {
     const raw = toRaw(src.props())
     const props = raw ? { ...raw } : undefined
-    const palette = paletteMode.value ? rolesFromFamily({ hexes: [...paletteMode.value] }) : paletteFromFrame(props, brandAccent.value)
+    const palette = paletteMode.value ? rolesFromFamily({ hexes: [...paletteMode.value] }) : paletteFromFrame(props, 'accent' in o ? o.accent : brandAccent.value)
     const logo = brandLogo.value
     return {
       props, frameW: src.frameW(), frameH: src.frameH(), palette, recolour: paletteMode.value != null,
@@ -659,7 +667,7 @@ export function useLayoutVary(src: LayoutVarySource): {
     applied.value = true
     settle()
     rev.value++
-    src.remember({ patternId: out.posterState.patternId, seed: out.posterState.seed, choice: { ...c.choice }, index: i, roles: out.posterState.roles, style: style.value })
+    src.remember({ patternId: out.posterState.patternId, seed: out.posterState.seed, choice: { ...c.choice }, index: i, roles: out.posterState.roles, style: style.value, placed: out.posterState.placed })
     return true
   }
   const applyAt = (i: number) => applyChoice(layoutId.value, candidates.value, i)
@@ -779,12 +787,12 @@ export function useLayoutVary(src: LayoutVarySource): {
    *  else the first — any the apply refuses is passed over, in that order. Planned in the layout's
    *  own style. The tab follows only when that style is on show. 'none': no layout applied;
    *  'not-offered': no variation of it passes now — the Frame is left exactly as it is. */
-  function reapplyFrameLayout(ed: LayoutEditor): 'applied' | 'not-offered' | 'none' {
+  function reapplyFrameLayout(ed: LayoutEditor, o: { accent?: string } = {}): 'applied' | 'not-offered' | 'none' {
     const st = src.props()?.sailor_posterState as PosterState | undefined
     const id = st?.patternId
     const s = styleOfLayout(id)
     if (!id || !s) return 'none'
-    const a = { ...baseArgs(), style: s, layoutId: id }
+    const a = { ...baseArgs(o), style: s, layoutId: id }
     const list = candidatesForFrame(a)
     if (!list.length) return 'not-offered'
     const now: Choice = { ...DEFAULT_CHOICE, ...(st?.choice ?? {}) }
@@ -798,7 +806,7 @@ export function useLayoutVary(src: LayoutVarySource): {
       if (s === style.value) { layoutId.value = id; choice.value = { ...c.choice }; applied.value = true }
       settle()
       rev.value++
-      src.remember({ patternId: out.posterState.patternId, seed: out.posterState.seed, choice: { ...c.choice }, index: i, roles: out.posterState.roles, style: s })
+      src.remember({ patternId: out.posterState.patternId, seed: out.posterState.seed, choice: { ...c.choice }, index: i, roles: out.posterState.roles, style: s, placed: out.posterState.placed })
       return 'applied'
     }
     return 'not-offered'
@@ -871,10 +879,28 @@ export function useLayoutVary(src: LayoutVarySource): {
     return true
   }
 
+  /** Layout limits, fix 1: the end of a text edit. Only a line the applied layout's owned accent copy
+   *  was made from, and only when the copy is stale (`staleAccentCopySource`): every other edit —
+   *  another line, or no change to the words — does nothing here. The layout is applied again like a
+   *  tag change (`reapplyFrameLayout`: the same layout, the same or the closest variation), folded
+   *  into the history step the edit recorded last (typing records one per change; the re-apply joins
+   *  the last, so no step is added). Planned in the layout's own style and palette whether or not the
+   *  tab is showing (the brand accent is read directly). No longer offered: the layers are left as
+   *  they are, and the tab says so (ruling D4). */
+  function textEdited(id: string): boolean {
+    const raw = toRaw(src.props())
+    if (!raw) return false
+    const accent = src.brandKit ? effectiveBrand(undefined, src.brandKit())?.accent || undefined : undefined
+    const probe = { props: raw, frameW: src.frameW(), frameH: src.frameH(), shapeMode: toRaw(shapeMode.value) ?? undefined, imageMode: imageMode.value }
+    if (staleAccentCopySource(probe) !== id) return false
+    if (reapplyFrameLayout(folded(src.editor()), { accent }) !== 'applied') { settle(); rev.value++ }
+    return true
+  }
+
   return {
     layoutId, index, applied, candidates, library, choices, select, vary, jump, setChoice,
     shapeMode, setShapeMode, imageMode, setImageMode, paletteMode, setPaletteMode, format,
     style, setStyle, libraryDone, hasTitle, roleIds, titleId, suggestedFace, applySuggestedFace, brandLogo,
-    content, hints, setTag,
+    content, hints, setTag, textEdited,
   }
 }

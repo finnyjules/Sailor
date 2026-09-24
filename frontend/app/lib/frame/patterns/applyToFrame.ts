@@ -25,6 +25,11 @@ export interface PosterState {
   /** The style of the layout last applied (Stage 3, ruling S4). Absent: `'swiss'`. A format's
    *  hidden levels follow it (`frameSize.ts`), so it is written with each apply, never on its own. */
   style?: StyleId
+  /** Layout limits, fix 3: the user's text lines a Stage 4 layout (`needsContent`) read as content
+   *  when it was applied (each held a role in the content view). A line in it that holds no role any
+   *  more (untagged) is hidden and named by the next plan, never left where that layout put it.
+   *  Written by Stage 4 applies only; absent otherwise. */
+  placed?: string[]
 }
 
 export interface PlanArgs {

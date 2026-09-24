@@ -1069,6 +1069,13 @@ function onLayoutStyle(s: StyleId) { layoutVary.setStyle(s) }
 function onLayoutUseFace() { if (!viewOnlyGuard()) layoutVary.applySuggestedFace({ canReapply: () => atDesign.value }) }
 /** The Content section: tag a line (null: Automatic) — its own undo step, then a re-plan. */
 function onLayoutTag(id: string, tag: ContentTag | null) { if (!viewOnlyGuard()) layoutVary.setTag(id, tag) }
+/** A text edit is committed — the inline editor closes, or the inspector's Text field loses focus
+ *  after a change. Not on every keystroke (typing records a step per change): once, at the end.
+ *  When the Frame's layout drew an accent copy of that line (ruling D2), the layout is applied
+ *  again so the copy shows the new words, in the edit's own step (layout limits, fix 1). Only at
+ *  the design size, where every apply runs; at a viewing size the copy waits for the next apply. */
+function onLayoutTextCommitted(id: string) { if (atDesign.value) layoutVary.textEdited(id) }
+watch(editingId, (now, was) => { if (was && was !== now) onLayoutTextCommitted(was) })
 const layoutName = computed(() => layoutById(layoutVary.layoutId.value)?.name ?? '')
 /** The Layout tab's keys (`layoutKeyAction`): V → next variation; ← / → step only with nothing
  *  selected (with a selection they nudge). True when the Layout tab took the key. */
@@ -10844,6 +10851,7 @@ onUnmounted(() => {
                   :value="(selectedLocal as any).text" rows="2"
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none resize-none"
                   @input="setLocal(selectedLocal!.id, { text: ($event.target as HTMLTextAreaElement).value })"
+                  @change="onLayoutTextCommitted(selectedLocal!.id)"
                 />
               </div>
               <div>

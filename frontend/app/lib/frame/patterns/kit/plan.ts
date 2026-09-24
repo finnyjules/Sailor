@@ -83,7 +83,9 @@ export interface LayoutPlan {
   order: string[]
   did: string
   issues: string[]
-  posterState: { patternId: string; seed: number; choice: Choice; roles: StoredRoles }
+  /** `placed` (layout limits, fix 3): a Stage 4 layout's content lines (`PosterState.placed`); only
+   *  on a Stage 4 layout's plan. */
+  posterState: { patternId: string; seed: number; choice: Choice; roles: StoredRoles; placed?: string[] }
   /** The format the Frame is sized for (ruling P5), the roles it hid because the format carries
    *  fewer levels, and their text in the same order (`lines`, what the Layout tab quotes — read in
    *  the view this layout reads, final review I1). Null: no format, the Stage 1 plan. */
@@ -909,10 +911,20 @@ export function planLayout(a: LayoutPlanArgs): LayoutPlan | null {
   const order = nextOrderFor(saved, present, ops, p.elements, ins.inserted)
   return {
     layers: next, order, did: out.did, issues,
-    posterState: { patternId: p.def.id, seed: seedFor(p.index, a.choice), choice: { ...a.choice }, roles: rolesOf(p.baseElements) },
+    posterState: {
+      patternId: p.def.id, seed: seedFor(p.index, a.choice), choice: { ...a.choice }, roles: rolesOf(p.baseElements),
+      ...(p.def.needsContent ? { placed: contentLinesOf(p) } : {}),
+    },
     format: p.fmt ? { id: p.fmt.id, label: p.fmt.label, hidden: [...p.hidden], lines: p.hidden.map(r => p.elements[r]?.text ?? '') } : null,
     notPlaced: [...notPlaced.map(role => ({ role, text: lineText(p, role) })), ...carried.named],
   }
+}
+
+/** Layout limits, fix 3: the user's text lines holding a role in the content view (what a Stage 4
+ *  layout read as the Frame's content), in layer order — stored with its apply (`posterState.placed`). */
+function contentLinesOf(p: Prepared): string[] {
+  const held = new Set(Object.values(p.contentRead.roles).filter((id): id is string => !!id))
+  return p.layers.filter(l => l.kind === 'text' && held.has(l.id)).map(l => l.id)
 }
 
 /** How far apart (Oklab distance) the accent and the user's line colour must be for the accent
@@ -958,6 +970,27 @@ function accentCopyFor(def: LayoutDef, layers: LocalLayer[], targets: RoleTarget
   }
 }
 
+/** Layout limits, fix 1: the id of the user's line whose words the Frame's accent copy (ruling D2)
+ *  no longer draws — the layer the applied layout's owned copy was made from, when its text has
+ *  changed since that apply. Undefined when the Frame has no owned copy, its layout draws none, or
+ *  the copy still draws the line's words (whitespace aside: the layout re-breaks them, so a copy is
+ *  compared by its letters). The copy's source is the layer that held the copied role when it was
+ *  applied (`posterState.roles`), else the one holding it now in the layout's own view. */
+export function staleAccentCopySource(a: FrameArgs): string | undefined {
+  const layers = (a.props?.sailor_localLayers as LocalLayer[] | undefined) ?? []
+  const copy = layers.find(l => l.kind === 'text' && isOwned(l as { owner?: { by: string } })
+    && /^copy-\d+$/.test((l as { owner?: { key?: string } }).owner?.key ?? '')) as TextLayer | undefined
+  if (!copy) return undefined
+  const st = a.props?.sailor_posterState as { patternId?: string; roles?: StoredRoles } | undefined
+  const role = st?.patternId ? layoutEntry(st.patternId)?.def.accentCopy : undefined
+  if (!role) return undefined
+  const id = st?.roles?.[role] ?? viewElements({ ...a, layoutId: st!.patternId }, layers)[role as FaceKey]?.id
+  const line = id ? layers.find(l => l.id === id && l.kind === 'text') as TextLayer | undefined : undefined
+  if (!line) return undefined
+  const letters = (t: string | undefined) => (t ?? '').replace(/\s+/g, '')
+  return letters(line.text) === letters(copy.text) ? undefined : line.id
+}
+
 /** Rulings R15 and D3, over the layers this plan does not place or hide itself:
  *  - a layer an earlier layout hid (`visible` false, tracked as the layout's) stays hidden — apply
  *    leaves an untargeted layer as it is — and is NAMED;
@@ -969,6 +1002,9 @@ function accentCopyFor(def: LayoutDef, layers: LocalLayer[], targets: RoleTarget
  *  The user's own hiding (untracked `visible`) is theirs: not named. A layer an earlier layout hid
  *  that holds no role any more is named as `'unused'`; a SHOWING layer with no role in either view
  *  is left where it is — unless the user tagged it Not used:
+ *  - Layout limits, fix 3: a SHOWING line the previous Stage 4 layout read as content
+ *    (`posterState.placed`) that holds no role now (it was untagged) is a line that layout moved:
+ *    hidden and named by its own text as `'unused'`, like the others.
  *  - Ruling D3 ("Gone from the Frame"): a layer TAGGED Not used (`tags[id] === 'unused'`) that is
  *    showing is HIDDEN by every layout (tracked, so a later layout that places it — after an
  *    untag — shows it again) and named as `'unused'`. Only the explicit tag: a Frame with no tags
@@ -976,8 +1012,12 @@ function accentCopyFor(def: LayoutDef, layers: LocalLayer[], targets: RoleTarget
 function carriedOver(p: Prepared, a: LayoutPlanArgs, ops: LayerOp[], z: number): { hide: LayerOp[]; named: NotPlaced[] } {
   const placed = new Set(ops.filter(o => !o.hidden && !o.insert).map(o => o.target))
   const hiddenHere = new Set(ops.filter(o => o.hidden).map(o => o.target))
-  const prev = (a.props?.sailor_posterState as { patternId?: string } | undefined)?.patternId
+  const prevSt = a.props?.sailor_posterState as { patternId?: string; placed?: string[] } | undefined
+  const prev = prevSt?.patternId
   const prevWasStage4 = !!prev && layoutEntry(prev)?.def.needsContent != null
+  // Layout limits, fix 3: the lines that previous Stage 4 layout read as content (and so placed or
+  // hid) — one of them that holds no role now (untagged) is still a line it moved.
+  const prevContent = new Set(prevWasStage4 && Array.isArray(prevSt?.placed) ? prevSt!.placed : [])
   // The role a layer holds in the content view (what a previous Stage 4 layout read), else in the base view.
   const contentRole = new Map<string, ContentRole>()
   for (const [r, id] of Object.entries(p.contentRead.roles) as [ContentRole, string | undefined][]) if (id) contentRole.set(id, r)
@@ -1003,7 +1043,7 @@ function carriedOver(p: Prepared, a: LayoutPlanArgs, ops: LayerOp[], z: number):
     const role: NotPlaced['role'] | undefined = tagUnused ? 'unused'
       : isImage(l)
         ? (l.id === p.contentRead.roles.image2 ? 'image2' : layoutHid ? 'unused' : undefined)
-        : roleOf.get(l.id) ?? (layoutHid ? 'unused' : undefined)
+        : roleOf.get(l.id) ?? (layoutHid || prevContent.has(l.id) ? 'unused' : undefined)
     // Task 6 fix round 2: a line hidden BECAUSE it was tagged Not used (D3's hide, marked
     // `by: 'unused'`), now untagged and holding no role, that was showing before, comes back — a
     // tracked show op — rather than staying hidden and named as `'unused'` for ever. A line a
@@ -1015,7 +1055,7 @@ function carriedOver(p: Prepared, a: LayoutPlanArgs, ops: LayerOp[], z: number):
       continue
     }
     if (!role) continue
-    const strand = showing && (tagUnused || (prevWasStage4 && contentRole.has(l.id)))
+    const strand = showing && (tagUnused || (prevWasStage4 && (contentRole.has(l.id) || prevContent.has(l.id))))
     if (!layoutHid && !strand) continue
     if (strand) hide.push({ target: l.id, kind: isImage(l) ? 'image' : 'text', hidden: true, z, ...(tagUnused ? { hiddenBy: 'unused' as const } : {}) })
     if (isImage(l)) {

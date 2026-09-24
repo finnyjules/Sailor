@@ -97,6 +97,8 @@ const formatLines = computed(() => {
   const planned = current.value?.plan.format?.lines
   return planned ? planned.map(fold).filter(Boolean) : (props.format?.hidden ?? [])
 })
+/** How many lines "Not shown" quotes before it counts the rest. */
+const NOT_SHOWN_MAX = 3
 const notShown = computed(() => {
   const seen = new Set<string>()
   const items: string[] = []
@@ -107,7 +109,10 @@ const notShown = computed(() => {
   }
   if (!items.length) return ''
   const label = notPlaced.value.length ? 'Not shown' : 'Not shown in this format'
-  return `${label}: ${items.join(', ')}.`
+  // A long list names the first few and counts the rest ("… and 2 more").
+  const named = items.slice(0, NOT_SHOWN_MAX).join(', ')
+  const more = items.length - NOT_SHOWN_MAX
+  return `${label}: ${named}${more > 0 ? ` and ${more} more` : ''}.`
 })
 
 const offered = computed(() => props.library.filter(it => it.plan))
