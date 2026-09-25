@@ -623,6 +623,18 @@ describe('setLayerEffect writes through the effect stack', () => {
     }
   })
 
+  it('rejects a print finish by name, and never lists the finishes as valid effect types', () => {
+    for (const type of ['gold_foil', 'spot_uv']) {
+      const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type } } })
+      expect(r.ok).toBe(false); if (r.ok) return
+      expect(r.detail).toContain(type)
+      expect(r.detail).not.toMatch(/must be one of/)
+    }
+    const bad = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'nope' } } })
+    expect(bad.ok).toBe(false); if (bad.ok) return
+    expect(bad.detail).not.toMatch(/gold_foil|spot_uv/)
+  })
+
   it('clamps out-of-range recipe numbers, falls back a bad colour, and drops unknown fields', () => {
     const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'risograph', levels: 99, ink: 'not-a-colour', bogus: 'x' } } })
     expect(r.ok).toBe(true); if (!r.ok) return

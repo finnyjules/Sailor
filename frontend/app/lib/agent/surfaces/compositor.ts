@@ -1318,7 +1318,10 @@ function applyCommand(input: CompositorState, cmd: Command): CommandResult<Compo
       if (!layer) return { ok: false, reason: 'invalid', detail: `no layer '${String(cmd.target)}'` }
       const raw = cmd.args?.effect as Record<string, unknown> | undefined
       const type = raw?.type as string | undefined
-      if (!type || !isEffectKind(type)) return { ok: false, reason: 'invalid', detail: `effect.type must be one of ${EFFECT_ORDER.join('|')}` }
+      // Print finishes are picker-only (the Frame's light is a person's call, and the hint budget
+      // is full): refuse them by name rather than letting them fall through as "invalid effect".
+      if (type === 'gold_foil' || type === 'spot_uv') return { ok: false, reason: 'invalid', detail: `${type} is a print finish the person adds themselves (Add effect); the agent cannot set it` }
+      if (!type || !isEffectKind(type)) return { ok: false, reason: 'invalid', detail: `effect.type must be one of ${EFFECT_ORDER.filter(k => k !== 'gold_foil' && k !== 'spot_uv').join('|')}` }
       const stack = effectStackOf(layer)
       if (cmd.args?.remove === true) {
         Object.assign(layer, writeStackToLayer(stack.filter(e => e.type !== type)))
