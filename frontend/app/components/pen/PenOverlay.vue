@@ -12,6 +12,11 @@
 // (Escape with nothing pending) leaves the drawing as is — call pen.revert()
 // if cancel means discard. `active: false` makes the overlay ignore every key
 // and pointer event (it still draws), so a host can park it without unmounting.
+// `keyboard` is read ONCE too, into `keyboardMode` below — like `pen`, it is
+// fixed for the overlay's lifetime (re-key the overlay to switch modes): a
+// reactive `props.keyboard` read separately in onMounted/onUnmounted could
+// change between them and skip the removeEventListener, leaking the window
+// listeners permanently.
 //
 // - Drawing geometry (outline, construction, hit paths, selection highlights,
 //   the live draw preview) is rendered in DRAWING space under
@@ -33,9 +38,10 @@
 //   preventDefault-ed and stopPropagation-ed.
 // - Keyboard, `keyboard="host"`: the overlay registers NO window listeners.
 //   The host owns the keyboard (its own capture-phase window listener) and
-//   feeds keys in via the exposed `onHostKeydown(e): boolean` / `onHostKeyup(e)`.
-//   `onHostKeydown` runs the same typing guard and focused-control rule
-//   before touching the pen, and returns whether it consumed the key.
+//   feeds keys in via the exposed `onHostKeydown(e): boolean` / `onHostKeyup(e)`
+//   / `onHostBlur()`. `onHostKeydown` runs the same typing guard and
+//   focused-control rule before touching the pen, and returns whether it
+//   consumed the key.
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import type { SketchDoc, EntityId, ConstraintKind, SegmentSpec } from '~/lib/sketch/model'
 import { addPoint } from '~/lib/sketch/edit'
@@ -58,6 +64,8 @@ const props = withDefaults(defineProps<{
   // (see the block above the keyboard section below).
   keyboard?: 'window' | 'host'
 }>(), { cursor: 'crosshair', active: true, keyboard: 'window' })
+// read ONCE — see the HOST CONTRACT note above (`pen` gets the same treatment)
+const keyboardMode = props.keyboard
 const emit = defineEmits<{
   (e: 'commit'): void   // Enter with nothing left to finish — pen.finishSession() has run
   (e: 'cancel'): void   // Escape with nothing pending — the host decides (pen.revert() to discard)
@@ -674,13 +682,13 @@ function onKeyup(ev: KeyboardEvent) { if (props.active) props.pen.onKeyup(ev) }
 function onBlur() { props.pen.onBlur() }
 
 onMounted(() => {
-  if (props.keyboard === 'host') return
+  if (keyboardMode === 'host') return
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('keyup', onKeyup)
   window.addEventListener('blur', onBlur)
 })
 onUnmounted(() => {
-  if (props.keyboard === 'host') return
+  if (keyboardMode === 'host') return
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('keyup', onKeyup)
   window.removeEventListener('blur', onBlur)
@@ -688,11 +696,13 @@ onUnmounted(() => {
 
 // HOST CONTRACT (keyboard="host"): the host must call onHostKeydown from its
 // OWN capture-phase window keydown listener and stop propagation when it
-// returns true; onHostKeyup similarly for keyup. The overlay does not touch
-// window listeners itself in this mode (see onMounted above).
+// returns true; onHostKeyup similarly for keyup, and onHostBlur for blur. The
+// overlay does not touch window listeners itself in this mode (see onMounted
+// above).
 defineExpose({
   onHostKeydown: handleKeydownEvent,
   onHostKeyup: onKeyup,
+  onHostBlur: onBlur,
 })
 </script>
 
