@@ -78,6 +78,18 @@ describe('MyEffectRecipe (spec §7.4)', () => {
     expect(remove).not.toHaveBeenCalled()
   })
 
+  it('a set opening mid-confirm turns the confirm’s Remove off, visibly', async () => {
+    const w = mount(MyEffectRecipe, { props: { effectId: 'mine_aaaaaaaaaaaa', values: {} } })
+    await w.get('[data-testid="my-effect-remove"]').trigger('click')
+    expect(w.get('[data-testid="my-effect-remove-yes"]').attributes('disabled')).toBeUndefined()
+    await w.setProps({ disabled: true })
+    const yes = w.get('[data-testid="my-effect-remove-yes"]')
+    expect(yes.attributes('disabled')).toBeDefined()
+    expect(yes.classes()).toContain('disabled:opacity-40')
+    await yes.trigger('click')
+    expect(remove).not.toHaveBeenCalled()
+  })
+
   // Fix round 1, #3: a rejected rename/remove shows useMyEffects' plain-sentence error
   // inline, rather than a silently swallowed rejection.
   it('a rename failure shows the plain-sentence error inline', async () => {

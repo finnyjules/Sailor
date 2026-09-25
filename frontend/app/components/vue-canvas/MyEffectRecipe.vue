@@ -107,7 +107,8 @@ function onRemove() {
       >Remove from My effects…</button>
       <div v-else data-testid="my-effect-remove-confirm" class="text-[11px] text-white/70">
         Remove &ldquo;{{ rec.name }}&rdquo; from My effects?
-        <button type="button" class="ml-1 text-white/90 underline" @click="onRemove">Remove</button>
+        <!-- A set opening mid-confirm (the lock) turns Remove off, visibly; "Keep it" changes nothing. -->
+        <button type="button" data-testid="my-effect-remove-yes" class="ml-1 text-white/90 underline disabled:cursor-not-allowed disabled:opacity-40" :disabled="disabled" @click="onRemove">Remove</button>
         <button type="button" class="ml-1 text-white/50 underline" @click="confirming = false">Keep it</button>
       </div>
     </div>

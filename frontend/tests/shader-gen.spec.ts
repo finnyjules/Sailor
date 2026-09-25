@@ -34,7 +34,11 @@ const GUARDED = /^\/(prompt|api\/(prompt-route|vibe|vibe-review|vibe-recipes|vib
 
 /** Registered FIRST so every specific mock below takes precedence (Playwright runs the most
  *  recently registered matching handler first). The engine's visual review answers 503, which
- *  it degrades on (a failed review keeps every take). */
+ *  it degrades on (a failed review keeps every take).
+ *  GETs pass through on purpose, except /api/my-effects: a GET on the other guarded paths is a
+ *  read (a run's status, a saved recipe list) that spends nothing, and the app makes some on load.
+ *  An unmocked My effects read is the one GET that must not reach the dev server: its real
+ *  route isn't there until the owed restart, and it would read the developer's own library. */
 async function guardModelRoutes(page: Page) {
   const leaked: string[] = []
   await page.route(url => GUARDED.test(url.pathname), async (r) => {
@@ -63,10 +67,11 @@ async function mockShaderGen(page: Page, delays = [300, 900, 1500]) {
     const body = r.request().postDataJSON()
     calls.push(body)
     const slot = (Number(ANGLE.exec(String(body.prompt ?? ''))?.[1] ?? 1) - 1) % TAKES.length
-    const replies = TAKES[slot]!
-    const take = replies[perSlot[slot]!++ % replies.length]!
+    // Each call gets a take of its own: a slot that has used up its replies gets a reply that
+    // isn't a take (the engine fails that slot), never an earlier take again.
+    const take = TAKES[slot]![perSlot[slot]!++]
     await new Promise(res => setTimeout(res, delays[slot] ?? 0))
-    await settle(r, { json: { text: JSON.stringify(take), usage: { input_tokens: 5000, output_tokens: 3000 }, stop_reason: 'end_turn', credits: null } })
+    await settle(r, { json: { text: take ? JSON.stringify(take) : 'No more takes in this mock.', usage: { input_tokens: 5000, output_tokens: 3000 }, stop_reason: 'end_turn', credits: null } })
   })
   return calls
 }
@@ -128,6 +133,17 @@ test.describe('shader generation (stage 5)', () => {
     await expect(tileIn(page, 'pending')).toHaveCount(0, { timeout: 60_000 })
     expect(await tileIn(page, 'ready').count()).toBeGreaterThanOrEqual(1)
     expect(routed).toHaveLength(0) // the chip decided the kind
+    // "Three more" is another paid set: its price shows on the button before the click.
+    await expect(strip.getByRole('button', { name: /^Three more/ })).toHaveText(`Three more · ${PRICE}`)
+    // While the set is open, nothing on screen is exported or put on the canvas (a take is a draft).
+    await page.getByRole('button', { name: /Render on canvas/ }).click()
+    await expect(page.getByRole('button', { name: 'As image', exact: true })).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'As video', exact: true })).toBeDisabled()
+    const downloads = page.getByRole('button', { name: /^Download\b/ }).first()
+    await downloads.click()
+    await expect(page.getByRole('button', { name: 'Export embed', exact: true })).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'Download PNG', exact: true })).toBeDisabled()
+    await downloads.click() // closes the menu (Escape would close the studio)
     // The shader-generation setting: no tier or model is sent, and at most one picture per call.
     expect(gen.length).toBeGreaterThanOrEqual(3)
     expect(gen.every(b => !('tier' in b) && !('model' in b))).toBe(true)
@@ -215,9 +231,26 @@ test.describe('shader generation (stage 5)', () => {
     const node = page.locator('.vue-flow__node').last()
     await node.waitFor({ state: 'attached', timeout: 15_000 })
     await node.click()
-    await page.getByRole('toolbar', { name: 'Node actions' }).getByRole('button', { name: /Develop/ }).click()
+    const develop = page.getByRole('toolbar', { name: 'Node actions' }).getByRole('button', { name: /Develop/ })
     const menu = page.getByRole('menu', { name: 'Develop' })
+    // No effect picked yet: nothing to remix, so New effect… only; the chip says "Shader effect".
+    await expect(page.getByTestId('prompt-selection-chip')).toContainText('Shader effect')
+    await develop.click()
     await expect(menu.getByRole('menuitem', { name: /New effect…/ })).toContainText(`3 takes · ${PRICE}`)
+    await expect(menu.getByRole('menuitem', { name: /Remix…/ })).toHaveCount(0)
+    await page.keyboard.press('Escape')
+    // Pick Water ripple on the node: its chip and the strip then name the node by that effect.
+    // (The node's picker row sits under the prompt at this size, so it is clicked by event: this
+    // is setup — picking an effect — not what the test is about.)
+    await node.getByTestId('shader-effect-picker').dispatchEvent('click')
+    const gallery = page.getByTestId('effect-gallery')
+    await gallery.locator('[data-effect-id="water_ripple"]').click()
+    await gallery.getByRole('button', { name: 'Use effect' }).click()
+    await expect(gallery).toHaveCount(0)
+    await node.click()
+    const effectName = /^\s*Water ripple\s*$/i // the catalog's own name, whatever its case
+    await expect(page.getByTestId('prompt-selection-chip')).toHaveText(effectName)
+    await develop.click()
     await expect(menu.getByRole('menuitem', { name: /Remix…/ })).toContainText(`3 takes · ${PRICE}`)
     await menu.getByRole('menuitem', { name: /Remix…/ }).click()
     const box = page.getByRole('textbox', { name: 'Ask Sailor' })
@@ -231,8 +264,8 @@ test.describe('shader generation (stage 5)', () => {
     expect(await tileIn(page, 'ready').count()).toBeGreaterThanOrEqual(1)
     expect(routed).toHaveLength(0)
     expect(gen.length).toBeGreaterThanOrEqual(3)
-    // The strip names its target by the node's own title.
-    await expect(page.getByTestId('prompt-takes-target')).toHaveText('Shader Effect')
+    // The strip names its target by the node's own shown name: its chosen effect's.
+    await expect(page.getByTestId('prompt-takes-target')).toHaveText(effectName)
   })
 
   test('a routed new effect with no chip shows the price in the working label', async ({ page }) => {

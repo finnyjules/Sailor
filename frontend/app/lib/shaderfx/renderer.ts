@@ -571,6 +571,9 @@ export class ShaderFxRenderer {
   dispose(): void {
     this.detachWatch?.()
     this.detachWatch = null
+    // A disposed renderer never reports a loss or restore again: drop its subscribers, so a
+    // take renderer (one per set) doesn't keep the set's closures alive.
+    this.listeners.clear()
     const gl = this.gl
     if (!gl) return
 

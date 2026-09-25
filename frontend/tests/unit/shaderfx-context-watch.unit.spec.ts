@@ -27,6 +27,15 @@ describe('ShaderFxRenderer wiring (source guard: the renderer needs real WebGL)'
     expect(src).toMatch(/throw new ShaderFxContextLostError/)
     expect(src).toMatch(/onContextChange\(/)
   })
+  it('dispose() stops watching and drops its context subscribers', () => {
+    const body = src.slice(src.indexOf('  dispose(): void {'))
+    expect(body.slice(0, body.indexOf('if (!gl) return'))).toMatch(/this\.listeners\.clear\(\)/)
+  })
+  it('the Shader studio canvas node redraws after a restore, and lets go on unmount', () => {
+    const node = readFileSync(fileURLToPath(new URL('../../app/components/vue-canvas/ShaderStudioNode.vue', import.meta.url)), 'utf8')
+    expect(node).toMatch(/const offContextChange = shaderFx\.onContextChange\(\(s\) => \{ if \(s === 'restored'\) renderStill\(\) \}\)/)
+    expect(node).toMatch(/onBeforeUnmount\(\(\) => \{[^}]*offContextChange\(\)/)
+  })
   it('drops every GL handle on loss so the next render rebuilds them', () => {
     const drop = src.slice(src.indexOf('private dropHandles'), src.indexOf('}', src.indexOf('this.liveTex = new Map')) )
     for (const f of ['programs', 'blit', 'composite', 'mask', 'fboTex', 'fbos', 'holdTex', 'layerSrcTex', 'baseTex', 'extraTexCache', 'liveTex']) expect(drop).toContain(f)

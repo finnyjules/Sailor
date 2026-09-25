@@ -45,7 +45,9 @@ const props = defineProps<{
   sections?: CatalogSection[]
   sectionOf?: (item: T) => string
   /** The section whose grid shows the `#lead` slot first (shown even with no items).
-   *  With no sections, the lead is first in the flat grid. */
+   *  With no sections, the lead is first in the flat grid. Show or hide the lead by setting
+   *  or clearing `leadIn` together with the `#lead` slot (as ShaderEffectGallery does): slots
+   *  aren't reactive, so a slot that comes or goes while `leadIn` stays the same isn't seen. */
   leadIn?: string
   /** data-testid for the panel. */
   testid?: string
@@ -96,6 +98,7 @@ const focusedItem = computed<T | null>(() =>
 // template only has a single per-group loop to maintain (no duplicated card
 // markup between "flat" and "sectioned" rendering paths).
 const slots = useSlots()
+// Re-read when `leadIn` changes (slots themselves aren't reactive — see the prop's note).
 const hasLead = computed(() => !!props.leadIn && !!slots.lead)
 const grouped = computed(() => {
   if (props.sections?.length && props.sectionOf) {
