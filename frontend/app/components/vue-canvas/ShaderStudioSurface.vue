@@ -818,6 +818,11 @@ const clockLabel = computed(() => {
 })
 
 let maskRO: ResizeObserver | null = null
+// WebGL context loss (AI in Sailor spec §7.5): the renderer drops every GL
+// handle and refuses to render until restored. The playing loop already
+// re-renders every frame regardless (and just clears glError once it can draw
+// again); when paused, nothing else would redraw, so force one frame.
+const offContextChange = shaderFx.onContextChange((s) => { if (s === 'restored' && !shouldLoop.value) void renderFrame(0) })
 onMounted(async () => {
   loadConfig(); await fetchShaderFxCatalog().catch(() => null); startPreview()
   registerStudioParamBaker(props.nodeId, renderBlobWithOverrides)
@@ -827,7 +832,7 @@ onMounted(async () => {
   if (canvas.value) { maskRO = new ResizeObserver(() => measureMaskBox()); maskRO.observe(canvas.value); measureMaskBox() }
 })
 // Closing the studio cancels its video export first.
-onBeforeUnmount(() => { videoAbort?.abort(); saveConfig(); stopPreview(); unregisterStudioParamBaker(props.nodeId); maskRO?.disconnect() })
+onBeforeUnmount(() => { videoAbort?.abort(); saveConfig(); stopPreview(); unregisterStudioParamBaker(props.nodeId); maskRO?.disconnect(); offContextChange() })
 
 function setParam(uniform: string, value: ParamValue) { const e = activeEffectCfg.value; if (e) e.params = { ...e.params, [uniform]: value } }
 

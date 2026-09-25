@@ -309,6 +309,10 @@ watch(() => chain.value.nodeIds, (ids) => { lastChainIds = ids; if (!animating.v
 // Keep the picker-trigger badge showing the current effect's thumbnail.
 watch(effectDef, def => ensureThumb(def))
 
+// WebGL context loss (AI in Sailor spec §7.5): the renderer drops every GL
+// handle and refuses to render until restored; redraw once it comes back.
+const offContextChange = shaderFx.onContextChange((s) => { if (s === 'restored') renderOnce() })
+
 onMounted(async () => {
   await fetchShaderFxCatalog().catch(() => null)
   lastChainIds = chain.value.nodeIds
@@ -319,6 +323,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   cancelAnimationFrame(raf)
   window.removeEventListener('sailor:shaderfx-changed', onUpstreamChange)
+  offContextChange()
 })
 </script>
 

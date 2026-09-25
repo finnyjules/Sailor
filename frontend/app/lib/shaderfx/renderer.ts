@@ -2,6 +2,12 @@
 // One GL context app-wide (browsers cap ~8-16); callers drawImage() the returned canvas.
 
 import { BLEND_LAYERS_GLSL } from '~/lib/studio/blend'
+import { attachContextWatch } from '~/lib/shaderfx/contextWatch'
+
+/** Thrown by `render()` while the WebGL context is lost — see `onContextChange`. */
+export class ShaderFxContextLostError extends Error {
+  override name = 'ShaderFxContextLostError'
+}
 
 /** A 3-tuple value is uploaded as a vec3 (colour params); everything else as a float. */
 export type Uniforms = Record<string, number | [number, number, number]>
@@ -186,12 +192,61 @@ export class ShaderFxRenderer {
   // lens). One GL texture per uniform NAME, re-uploaded every render, LINEAR filtered.
   private liveTex = new Map<string, WebGLTexture>()
 
+  // WebGL context-loss recovery (AI in Sailor spec §7.5).
+  private lost = false
+  private listeners = new Set<(s: 'lost' | 'restored') => void>()
+  private detachWatch: (() => void) | null = null
+
+  /** True while the GL context is lost — `render()` throws instead of drawing garbage. */
+  isContextLost(): boolean { return this.lost }
+
+  /** Subscribe to context loss/restore. Returns an unsubscribe fn. */
+  onContextChange(fn: (state: 'lost' | 'restored') => void): () => void {
+    this.listeners.add(fn)
+    return () => { this.listeners.delete(fn) }
+  }
+
+  private emit(state: 'lost' | 'restored'): void {
+    for (const fn of this.listeners) {
+      try { fn(state) } catch { /* a listener's own error must not break the others */ }
+    }
+  }
+
+  /**
+   * Drop every GL handle field on context loss, WITHOUT calling gl.delete* — the
+   * context is already gone, so those calls would be no-ops at best. `this.gl` and
+   * `this.canvas` are kept: after `webglcontextrestored`, the SAME context object
+   * becomes usable again, and `ensure()` / `program()` rebuild whatever is null (or
+   * whatever cache lookup misses) on the next render.
+   */
+  private dropHandles(): void {
+    this.programs.clear()
+    this.blit = null
+    this.composite = null
+    this.mask = null
+    this.fboTex = [null, null]
+    this.fbos = [null, null]
+    this.holdTex = null
+    this.holdFbo = null
+    this.layerSrcTex = null
+    this.layerSrcFbo = null
+    this.baseTex = null
+    this.baseSize = [0, 0]
+    this.fboSize = [0, 0]
+    this.extraTexCache = new Map()
+    this.liveTex = new Map()
+  }
+
   private ensure(width: number, height: number): WebGL2RenderingContext {
     if (!this.gl) {
       this.canvas = document.createElement('canvas')
       // preserveDrawingBuffer so toDataURL/drawImage after render is always safe
       this.gl = this.canvas.getContext('webgl2', { preserveDrawingBuffer: true, premultipliedAlpha: false })
       if (!this.gl) throw new Error('WebGL2 unavailable')
+      this.detachWatch = attachContextWatch(this.canvas, {
+        onLost: () => { this.lost = true; this.dropHandles(); this.emit('lost') },
+        onRestored: () => { this.lost = false; this.emit('restored') },
+      })
     }
     const gl = this.gl
     if (this.canvas!.width !== width || this.canvas!.height !== height) {
@@ -309,6 +364,7 @@ export class ShaderFxRenderer {
   get outputCanvas(): HTMLCanvasElement | null { return this.canvas }
 
   render(passes: ShaderPass[], base: TexImageSource, width: number, height: number, live?: Record<string, TexImageSource>): HTMLCanvasElement {
+    if (this.lost) throw new ShaderFxContextLostError('The graphics context was lost')
     const gl = this.ensure(width, height)
     // Upload the live textures once per render (not per pass); bound below by name.
     const liveUnits: Array<[string, WebGLTexture]> = []
@@ -513,6 +569,8 @@ export class ShaderFxRenderer {
    * this when done, since browsers cap live WebGL contexts per page.
    */
   dispose(): void {
+    this.detachWatch?.()
+    this.detachWatch = null
     const gl = this.gl
     if (!gl) return
 
