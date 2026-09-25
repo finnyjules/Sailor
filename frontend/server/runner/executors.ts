@@ -80,7 +80,7 @@ import { isKrea2Model, krea2Generate, krea2OnReplicate } from './generators/krea
 import { isSeedream5ProEdit, seedream5ProEdit } from './generators/seedream5ProEdit'
 import { qwen2511Angles } from './generators/qwen2511Angles'
 import { briaProductShot } from './generators/briaProductShot'
-import { checkRequest, seedanceReferenceProblem } from './requestRules'
+import { backupInputProblem, checkRequest, seedanceReferenceProblem } from './requestRules'
 import type { OutputFile, RunnerProvider } from './types'
 
 /**
@@ -120,6 +120,12 @@ export interface PlanContext {
    * 2511; Product shot on Bria Product Shot); absent, none.
    */
   families?: ReadonlySet<RunnerFamily>
+  /**
+   * The size in bytes of the input file the engine read before planning
+   * (requestRules.ts linkedFileCheck: HappyHorse 1.1's first frame); absent
+   * when it read none. A backup that can't take it is dropped.
+   */
+  inputBytes?: number
 }
 
 /**
@@ -136,6 +142,8 @@ export async function planNode(ctx: PlanContext): Promise<NodePlan> {
       try { checkRequest(plan.backup.provider, plan.backup.endpoint, plan.backup.payload) }
       catch { delete plan.backup }
     }
+    // Nor is one that can't take the measured input file (HappyHorse 1.1's picture over Replicate's 10 MB).
+    if (plan.backup && backupInputProblem(plan.backup, ctx.inputBytes)) delete plan.backup
   }
   return plan
 }

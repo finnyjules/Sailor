@@ -22,7 +22,7 @@ import { FalError, isProviderNetworkError, percentFromLogs, type FalStatus, type
 import { ReplicateError } from './replicateQueue'
 import { planNode, type ProviderBackup } from './executors'
 import type { BackupSettings } from './config'
-import { linkedFileProblem, measuredInputProblem, requestProblems } from './requestRules'
+import { linkedFileCheck, measuredInputProblem, requestProblems } from './requestRules'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
 import { extraPromptText, hasOutputNode, measuredInputPixels, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
@@ -661,10 +661,11 @@ export function createEngine(deps: EngineDeps) {
       const tooLarge = measuredInputProblem(take.prompt[id]!.class_type, inputPixels, families)
       if (tooLarge) throw new Error(tooLarge)
       // A file its model refuses (Product shot on Bria: over 12 MB, or not
-      // JPEG, PNG or WebP; requestRules.ts), before the hand-off. Reads
-      // nothing for any other node.
-      const badFile = await linkedFileProblem(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], f => deps.results.read(f), families)
-      if (badFile) throw new Error(badFile)
+      // JPEG, PNG or WebP; HappyHorse 1.1: over 20 MB; requestRules.ts),
+      // before the hand-off. Reads nothing for any other node. The size read
+      // goes to planNode, which drops a backup that can't take it.
+      const fileCheck = await linkedFileCheck(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], f => deps.results.read(f), families)
+      if (fileCheck.problem) throw new Error(fileCheck.problem)
 
       const plan = await planNode({
         prompt: take.prompt,
@@ -675,6 +676,7 @@ export function createEngine(deps: EngineDeps) {
         readFile: f => deps.results.read(f),
         hosted: deps.hosted(),
         families,
+        ...(fileCheck.bytes !== undefined ? { inputBytes: fileCheck.bytes } : {}),
       })
       // Rendered here (the Frame): no provider, no charge, not an asset.
       if (plan.kind === 'local') {

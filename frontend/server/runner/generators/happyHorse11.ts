@@ -24,7 +24,9 @@
  * It sends fal, from "Generate a video":
  *   prompt        as typed; text-to-video's schema asks for at least 1
  *                 character (refused before sending: requestRules.ts), and
- *                 image-to-video's is optional
+ *                 image-to-video's is optional. Both schemas' descriptions say
+ *                 "Max 2500 characters" (no maxLength): a longer prompt is
+ *                 refused before sending (controller ruling, F18 fix round 1)
  *   aspect_ratio  text-to-video only (the first frame sets the shape): one of
  *                 the node's six (fal's schema also lists 9:21, 5:4 and 4:5,
  *                 which the node's ratio list lacks); anything else 16:9
@@ -49,6 +51,12 @@
  * 9:16, 1:1, 4:3 and 3:4, so a 21:9 request has no backup. A picture over
  * Replicate's 10 MB can't be seen from the request; the backup refuses it
  * like any other failed job.
+ *
+ * The picture's size (F18 fix round 1, controller ruling): the engine reads
+ * the linked picture's bytes before anything is uploaded (requestRules.ts
+ * linkedFileCheck). Over fal's 20 MB the node is refused; over Replicate's
+ * 10 MB it runs on fal with no backup for that run. Both limits are read as
+ * the smaller number (20,000,000 and 10,000,000 bytes), as Product shot's.
  */
 import { arOr, maybeSetSeed, optEnum, optStr } from './opts'
 import { durOr } from './video'
@@ -81,6 +89,14 @@ const SEED_MAX = 2147483647
 export const HAPPYHORSE_11_ONE_PICTURE
   = 'HappyHorse 1.1 starts from one picture at most and takes no sound. Remove the last frame and any reference pictures, videos or sounds, or pick another model.'
 export const HAPPYHORSE_11_NEEDS_PROMPT = 'HappyHorse 1.1 needs a prompt. Describe the clip, or link a picture to start from it.'
+/** Both fal schemas' prompt descriptions: "Max 2500 characters." (no maxLength; a ruling). */
+export const HAPPYHORSE_11_PROMPT_MAX = 2500
+export const HAPPYHORSE_11_LONG_PROMPT = 'HappyHorse 1.1 takes a prompt of at most 2,500 characters. Shorten it.'
+/** fal image-to-video `image_url`: "Max 20 MB." */
+export const HAPPYHORSE_11_MAX_PICTURE_BYTES = 20_000_000
+/** Replicate `images`: "<=10MB each". A larger picture runs with no backup. */
+export const HAPPYHORSE_11_BACKUP_MAX_PICTURE_BYTES = 10_000_000
+export const HAPPYHORSE_11_PICTURE_TOO_LARGE = 'HappyHorse 1.1 takes pictures up to 20 MB. Make this one smaller first.'
 
 /** The first frame: the linked picture, else `image_url` in the options, else ''. */
 export function happyHorse11FirstFrame(image: string | null, adv: Record<string, unknown>): string {

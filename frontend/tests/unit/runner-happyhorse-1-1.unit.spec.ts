@@ -19,8 +19,13 @@
  *    goes to the engine;
  *  - the gallery hides the model while the family is off;
  *  - the price is verified and non-zero, covers the backup, and badge = charge;
- *  - the engine, end to end: the family's own endpoint, and the hold.
+ *  - the engine, end to end: the family's own endpoint, and the hold;
+ *  - fix round 1 (controller rulings): a prompt over the descriptions'
+ *    2,500 characters is refused; the linked picture is measured before the
+ *    hand-off (over 20 MB refused, over 10 MB no backup).
  */
+import fs from 'node:fs'
+import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { RUNNER_FAMILIES, NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
@@ -47,13 +52,19 @@ import {
   HAPPYHORSE_11, HAPPYHORSE_11_ENDPOINTS, HAPPYHORSE_11_IMAGE_TO_VIDEO, HAPPYHORSE_11_NEEDS_PROMPT, HAPPYHORSE_11_ONE_PICTURE,
   HAPPYHORSE_11_REPLICATE_RATIOS, HAPPYHORSE_11_REPLICATE_SLUG, HAPPYHORSE_11_SECONDS, HAPPYHORSE_11_TEXT_TO_VIDEO,
   RUNNER_HAPPYHORSE_11_MODELS, happyHorse11OnReplicate,
+  HAPPYHORSE_11_BACKUP_MAX_PICTURE_BYTES, HAPPYHORSE_11_LONG_PROMPT, HAPPYHORSE_11_MAX_PICTURE_BYTES, HAPPYHORSE_11_PICTURE_TOO_LARGE, HAPPYHORSE_11_PROMPT_MAX,
 } from '~~/server/runner/generators/happyHorse11'
-import { PROMPT_MAX_LENGTH, PROMPT_MIN_LENGTH, PROMPT_MIN_LENGTH_RULINGS, requestProblems } from '~~/server/runner/requestRules'
+import {
+  PROMPT_MAX_LENGTH, PROMPT_MAX_LENGTH_RULINGS, PROMPT_MIN_LENGTH, PROMPT_MIN_LENGTH_RULINGS, backupInputProblem, checkedInputFile, inputFileProblem,
+  linkedFileCheck, linkedFileProblem, requestProblem, requestProblems,
+} from '~~/server/runner/requestRules'
+import { DEFAULT_BACKUP_STALL_MS } from '~~/server/runner/config'
+import { FalError } from '~~/server/runner/falQueue'
 import { blockedPromptRefusal } from '~~/server/utils/blockedModels'
 import { priceGraph } from '~~/server/utils/priceBook'
 import type { OutputFile } from '~~/server/runner/types'
 import { checkPayload, loadProviderSchema, type ProviderSchemaFixture } from './helpers/providerSchema'
-import { makeKit } from './__runner__/kit'
+import { makeKit, ofType } from './__runner__/kit'
 
 const ID = 'happyhorse-1.1'
 const FAMILY: RunnerFamily = 'happyhorse-1.1'
@@ -155,7 +166,7 @@ describe('the saved schemas', () => {
     expect(VIDEO_BACKUPS[ID]).toBe(happyHorse11OnReplicate)
   })
 
-  it('the prompt rule is text-to-video\'s own minLength 1; no maximum row (no schema sets a maxLength)', () => {
+  it('the prompt minimum is text-to-video\'s own minLength 1', () => {
     const t2v = inputOf(falSchema(HAPPYHORSE_11_TEXT_TO_VIDEO)).properties.prompt
     expect(t2v.minLength).toBe(1)
     expect(PROMPT_MIN_LENGTH[`fal ${HAPPYHORSE_11_TEXT_TO_VIDEO}`]).toEqual({ min: 1, message: HAPPYHORSE_11_NEEDS_PROMPT })
@@ -163,10 +174,22 @@ describe('the saved schemas', () => {
     expect(inputOf(falSchema(HAPPYHORSE_11_IMAGE_TO_VIDEO)).required).not.toContain('prompt')
     expect(PROMPT_MIN_LENGTH[`fal ${HAPPYHORSE_11_IMAGE_TO_VIDEO}`]).toBeUndefined()
     expect(PROMPT_MIN_LENGTH[`replicate ${HAPPYHORSE_11_REPLICATE_SLUG}`]).toBeUndefined()
-    for (const f of [falSchema(HAPPYHORSE_11_TEXT_TO_VIDEO), falSchema(HAPPYHORSE_11_IMAGE_TO_VIDEO), REPLICATE]) {
-      expect(JSON.stringify(inputOf(f).properties.prompt), f.endpoint).not.toContain('maxLength')
+  })
+
+  it('the prompt maximum (fix round 1): a ruling on each fal endpoint, tied to "Max 2500 characters" in its saved description', () => {
+    expect(HAPPYHORSE_11_PROMPT_MAX).toBe(2500)
+    expect(PROMPT_MAX_LENGTH_RULINGS).toEqual(HAPPYHORSE_11_ENDPOINTS.map(e => `fal ${e}`))
+    for (const e of HAPPYHORSE_11_ENDPOINTS) {
+      const prompt = inputOf(falSchema(e)).properties.prompt
+      // No schema maxLength (else the row would be the schema's, not a ruling), and the limit in the description.
+      expect(JSON.stringify(prompt), e).not.toContain('maxLength')
+      expect(prompt.description, e).toMatch(/Max 2500 characters\./)
+      expect(PROMPT_MAX_LENGTH[`fal ${e}`], e).toEqual({ max: 2500, message: HAPPYHORSE_11_LONG_PROMPT })
     }
-    for (const e of [...HAPPYHORSE_11_ENDPOINTS.map(x => `fal ${x}`), `replicate ${HAPPYHORSE_11_REPLICATE_SLUG}`]) expect(PROMPT_MAX_LENGTH[e], e).toBeUndefined()
+    // Replicate states no limit: no row (the backup is built from a request that passed fal's).
+    expect(JSON.stringify(inputOf(REPLICATE).properties.prompt)).not.toMatch(/maxLength|2500/)
+    expect(PROMPT_MAX_LENGTH[`replicate ${HAPPYHORSE_11_REPLICATE_SLUG}`]).toBeUndefined()
+    expect(HAPPYHORSE_11_LONG_PROMPT).toBe('HappyHorse 1.1 takes a prompt of at most 2,500 characters. Shorten it.')
   })
 })
 
@@ -347,6 +370,179 @@ describe('what HappyHorse 1.1 can\'t take is refused in plain words, never dropp
     expect(isRunnerEligible(p, ON)).toBe(false)
     expect(blockedModelUses(p, { families: ON })).toEqual([{ nodeId: '1', classType: 'GenerateVideoNode', value: ID, reason: 'runner-only' }])
     expect(blockedPromptRefusal(p)).not.toBeNull()
+  })
+})
+
+// ── Fix round 1: the prompt's 2,500 characters ─────────────────────────────
+
+describe('a prompt over 2,500 characters is refused at planning and before the hold, in either mode (fix round 1)', () => {
+  // Code points, as JSON Schema and the other rows count: 2,500 emoji are 5,000 UTF-16 units and still fit.
+  const atMax = ['a'.repeat(2500), '🐴'.repeat(2500)]
+  const over = ['a'.repeat(2501), '🐴'.repeat(2501)]
+
+  it('the payload check (planNode\'s): 2,500 fit, 2,501 don\'t, on both fal endpoints', () => {
+    for (const e of HAPPYHORSE_11_ENDPOINTS) {
+      for (const prompt of atMax) expect(requestProblem('fal', e, { prompt }), e).toBeNull()
+      for (const prompt of over) expect(requestProblem('fal', e, { prompt }), e).toBe(HAPPYHORSE_11_LONG_PROMPT)
+    }
+  })
+
+  it('planNode refuses it, text- or image-to-video', async () => {
+    for (const image of [false, true]) {
+      for (const prompt of atMax) await expect(providerPlan(vid({ prompt, image }))).resolves.toBeTruthy()
+      for (const prompt of over) await expect(plan(vid({ prompt, image }))).rejects.toThrow(HAPPYHORSE_11_LONG_PROMPT)
+    }
+  })
+
+  it('requestProblems (before the hold; the gate) refuses it in either mode, and with the options wired', () => {
+    const long = 'a'.repeat(2501)
+    const wiredOpts = vid({ prompt: long })
+    wiredOpts.inputs.model_options = ['9', 0]
+    for (const n of [vid({ prompt: long }), vid({ prompt: long, image: true }), vid({ prompt: long, opts: { image_url: 'https://pics.test/a.png' } }), wiredOpts]) {
+      expect(requestProblems({ 1: n })).toEqual([{ nodeId: '1', classType: 'GenerateVideoNode', input: 'prompt', message: HAPPYHORSE_11_LONG_PROMPT }])
+    }
+    for (const prompt of atMax) expect(requestProblems({ 1: vid({ prompt }) })).toEqual([])
+    // A wired prompt can't be read before the run.
+    const wiredPrompt = vid()
+    wiredPrompt.inputs.prompt = ['9', 0]
+    expect(requestProblems({ 1: wiredPrompt })).toEqual([])
+  })
+
+  it('the engine: refused before the hold, nothing sent', async () => {
+    const k = makeKit({ hosted: true, deps: { families: () => ON } })
+    const take: ApiPrompt = { 1: vid({ prompt: 'a'.repeat(2501) }), 2: { class_type: 'Video', inputs: { source: ['1', 0] } } }
+    await expect(k.engine.startRun({ userId: k.userId, takes: [take], workflow: null, canvasId: null, projectUuid: null, projectName: null }))
+      .rejects.toThrow(HAPPYHORSE_11_LONG_PROMPT)
+    expect(k.fal.reqs.size).toBe(0)
+    expect(k.ledger.holds.size).toBe(0)
+  })
+})
+
+// ── Fix round 1: the picture's size ────────────────────────────────────────
+
+describe('the linked picture is measured before the hand-off (fix round 1)', () => {
+  const MB10 = HAPPYHORSE_11_BACKUP_MAX_PICTURE_BYTES
+  const MB20 = HAPPYHORSE_11_MAX_PICTURE_BYTES
+  const node = (o: { model?: string } = {}) => vid({ image: true, ...o })
+
+  it('the limits are the schemas\', read as the smaller number of bytes', () => {
+    expect(MB20).toBe(20_000_000)
+    expect(MB10).toBe(10_000_000)
+    expect(inputOf(falSchema(HAPPYHORSE_11_IMAGE_TO_VIDEO)).properties.image_url.description).toContain('Max 20 MB.')
+    expect(inputOf(REPLICATE).properties.images.description).toContain('<=10MB each')
+    expect(HAPPYHORSE_11_PICTURE_TOO_LARGE).toBe('HappyHorse 1.1 takes pictures up to 20 MB. Make this one smaller first.')
+  })
+
+  it('only HappyHorse 1.1 with its switch on reads the file', () => {
+    expect(checkedInputFile('GenerateVideoNode', ON, ID)).toBe('image')
+    expect(checkedInputFile('GenerateVideoNode', ALL, ID)).toBe('image')
+    expect(checkedInputFile('GenerateVideoNode', ALL_BUT, ID)).toBeNull()
+    expect(checkedInputFile('GenerateVideoNode', ALL, 'veo-3.1-lite')).toBeNull()
+    expect(checkedInputFile('GenerateVideoNode', ALL)).toBeNull()
+    expect(checkedInputFile('FilmShotNode', ALL, ID)).toBeNull()
+  })
+
+  it('over 20 MB is refused; 20 MB is not; nothing else is judged (fal checks the format)', () => {
+    expect(inputFileProblem('GenerateVideoNode', new Uint8Array(MB20), ON, ID)).toBeNull()
+    expect(inputFileProblem('GenerateVideoNode', new Uint8Array(MB20 + 1), ON, ID)).toBe(HAPPYHORSE_11_PICTURE_TOO_LARGE)
+    expect(inputFileProblem('GenerateVideoNode', new Uint8Array(MB20 + 1), ALL_BUT, ID)).toBeNull()
+    expect(inputFileProblem('GenerateVideoNode', new Uint8Array(MB20 + 1), ALL, 'veo-3.1-lite')).toBeNull()
+  })
+
+  it('linkedFileCheck reads the linked file once and hands back its size; nothing is read without a link or the switch', async () => {
+    const reads: string[] = []
+    const read = (size: number) => async (f: { filename: string }) => { reads.push(f.filename); return new Uint8Array(size) }
+    const files = () => [{ filename: 'first.png' }]
+    expect(await linkedFileCheck(node(), files, read(MB10 + 1), ON)).toEqual({ problem: null, bytes: MB10 + 1 })
+    expect(await linkedFileCheck(node(), files, read(MB20 + 1), ON)).toEqual({ problem: HAPPYHORSE_11_PICTURE_TOO_LARGE, bytes: MB20 + 1 })
+    expect(await linkedFileProblem(node(), files, read(MB20 + 1), ON)).toBe(HAPPYHORSE_11_PICTURE_TOO_LARGE)
+    expect(reads).toEqual(['first.png', 'first.png', 'first.png'])
+    reads.length = 0
+    expect(await linkedFileCheck(vid(), files, read(MB20 + 1), ON)).toEqual({ problem: null })
+    expect(await linkedFileCheck(node(), files, read(MB20 + 1), ALL_BUT)).toEqual({ problem: null })
+    expect(await linkedFileCheck(node({ model: 'veo-3.1-lite' }), files, read(MB20 + 1), ALL)).toEqual({ problem: null })
+    expect(reads).toEqual([])
+    // A file that can't be read is left to the hand-off, which reads it too.
+    expect(await linkedFileCheck(node(), files, async () => { throw new Error('gone') }, ON)).toEqual({ problem: null })
+  })
+
+  it('over 10 MB the plan carries no backup (Replicate takes 10 MB); up to 10 MB, or unmeasured, it keeps it', async () => {
+    const withBytes = async (inputBytes?: number) => {
+      const p = await planNode({
+        prompt: { 9: { class_type: 'Image', inputs: { image: 'first.png' } }, n: node() },
+        nodeId: 'n',
+        filesFrom: () => [{ filename: 'first.png', subfolder: '', type: 'input' }],
+        toUrl: async (f: OutputFile) => `https://pics.test/${f.filename}`,
+        gateOpen: false,
+        ...(inputBytes !== undefined ? { inputBytes } : {}),
+      })
+      if (p.kind !== 'provider') throw new Error('no call')
+      return p
+    }
+    for (const b of [undefined, 1, MB10]) expect((await withBytes(b)).backup?.endpoint, String(b)).toBe(HAPPYHORSE_11_REPLICATE_SLUG)
+    for (const b of [MB10 + 1, MB20]) {
+      const p = await withBytes(b)
+      expect(p.endpoint).toBe(HAPPYHORSE_11_IMAGE_TO_VIDEO)
+      expect(p.backup, String(b)).toBeUndefined()
+    }
+    // Only a backup that carries the picture is judged.
+    expect(backupInputProblem({ provider: 'replicate', endpoint: HAPPYHORSE_11_REPLICATE_SLUG, payload: { prompt: 'p', aspect_ratio: '16:9' } }, MB20)).toBeNull()
+    expect(backupInputProblem({ provider: 'replicate', endpoint: 'black-forest-labs/flux-3', payload: { images: ['x'] } }, MB20)).toBeNull()
+  })
+
+  describe('the engine', () => {
+    const take: ApiPrompt = {
+      11: { class_type: 'Image', inputs: { image: 'first.png' } },
+      1: vid({ image: false }),
+      2: { class_type: 'Video', inputs: { source: ['1', 0] } },
+    }
+    take[1]!.inputs.image = ['11', 0]
+    const kit = (bytes: number) => {
+      const k = makeKit({ hosted: true, deps: { families: () => ON, backup: () => ({ enabled: true, stallMs: DEFAULT_BACKUP_STALL_MS }) } })
+      const b = Buffer.alloc(bytes)
+      Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]).copy(b)
+      fs.writeFileSync(path.join(k.root, 'input', 'first.png'), b)
+      return k
+    }
+    const start = (k: ReturnType<typeof makeKit>) => k.engine.startRun({ userId: k.userId, takes: [take], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    /** fal's submit fails with no job (a 503): the engine goes to the backup, if the plan has one. */
+    const falDown = (k: ReturnType<typeof makeKit>) => k.fal.client.submit.mockRejectedValueOnce(new FalError('fal submit 503: unavailable', 503))
+
+    it('over 20 MB: the node fails in plain words before the hand-off; nothing uploaded or sent, the hold released', async () => {
+      const k = kit(HAPPYHORSE_11_MAX_PICTURE_BYTES + 1)
+      const { runId } = await start(k)
+      await k.engine.settled(runId)
+      // The call count, not toHaveBeenCalled: a failing matcher would print the 20 MB it was called with (out of memory).
+      expect(k.upload.mock.calls.length).toBe(0)
+      expect(k.fal.reqs.size).toBe(0)
+      expect(k.replicate.reqs.size).toBe(0)
+      expect(ofType(k.seen, 'execution_error').map(m => m.data.exception_message)).toEqual([HAPPYHORSE_11_PICTURE_TOO_LARGE])
+      expect([...k.ledger.holds.values()].map(h => h.state)).toEqual(['released'])
+    })
+
+    it('10–20 MB: runs on fal with no backup; fal down → the node fails, Replicate never called, nothing charged', async () => {
+      const k = kit(HAPPYHORSE_11_BACKUP_MAX_PICTURE_BYTES + 1)
+      falDown(k)
+      const { runId } = await start(k)
+      await k.engine.settled(runId)
+      expect(k.fal.client.submit).toHaveBeenCalledTimes(1)
+      expect(k.fal.client.submit.mock.calls[0]![0]).toBe(HAPPYHORSE_11_IMAGE_TO_VIDEO)
+      expect(k.replicate.client.submit).not.toHaveBeenCalled()
+      expect([...k.ledger.holds.values()].map(h => h.state)).toEqual(['released'])
+    })
+
+    it('up to 10 MB: fal down → the backup on Replicate carries the same picture and serves it, charged once', async () => {
+      const k = kit(1024)
+      falDown(k)
+      const { runId } = await start(k)
+      await k.engine.settled(runId)
+      const sent = k.replicate.submitted()
+      expect(sent.map(r => r.endpoint)).toEqual([HAPPYHORSE_11_REPLICATE_SLUG])
+      expect(sent[0]!.payload).toEqual({ prompt: 'a fox says hello', images: ['https://fal.storage/first.png'], resolution: '720p', duration: 5 })
+      const credits = creditsForUsd(0.70) + 1
+      expect([...k.ledger.holds.values()].map(h => [h.state, h.actual])).toEqual([['settled', credits]])
+      expect((await k.store.get(runId))!.status).toBe('done')
+    })
   })
 })
 

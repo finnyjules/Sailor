@@ -13,7 +13,9 @@
  *    text-to-video 1), and a transparent JPEG from GPT Image 2.5;
  *  - a prompt longer than the schema's `maxLength` where the table
  *    PROMPT_MAX_LENGTH names the endpoint (Reve 2.1 4,000, F15; Recraft V4.1
- *    10,000, F16; Krea 2 5,000, F17);
+ *    10,000, F16; Krea 2 5,000, F17), or than a limit the schema states only
+ *    in its prompt's description (HappyHorse 1.1 2,500, F18 fix round 1:
+ *    PROMPT_MAX_LENGTH_RULINGS);
  *  - Krea 2 Large and Medium (F17) with an empty prompt (the schema's
  *    minLength 1) or one over 5,000 characters, as sent: on a runner run
  *    ONLY (`requestProblems(prompt, { runner: true })`). They are not
@@ -74,8 +76,11 @@
  *  - Product shot on Bria Product Shot (F12 fix round 1, controller ruling)
  *    with a picture over 12 MB, or not JPEG, PNG or WebP (read from its first
  *    bytes): the engine reads that one file (`linkedFileProblem`) before the
- *    hand-off; the node fails and its hold is released. No other node's file
- *    is read.
+ *    hand-off; the node fails and its hold is released. HappyHorse 1.1's
+ *    linked first frame too, while its switch is on (F18 fix round 1): over
+ *    fal's 20 MB the node fails the same way; over Replicate's 10 MB it runs
+ *    on fal with no backup (`backupInputProblem`, read by planNode). No other
+ *    node's file is read.
  * References are never dropped, to make a request fit or otherwise.
  */
 import { isLink, type ApiNode, type ApiPrompt } from '#shared/runner/graph'
@@ -89,7 +94,9 @@ import {
   GEMINI_OMNI_FLASH_ID, GEMINI_OMNI_FLASH_ONE_PICTURE, GEMINI_OMNI_FLASH_TEXT_TO_VIDEO, geminiOmniFlashFirstFrame, geminiOmniFlashHasExtras,
 } from './generators/geminiOmniFlash'
 import {
-  HAPPYHORSE_11_ID, HAPPYHORSE_11_NEEDS_PROMPT, HAPPYHORSE_11_ONE_PICTURE, HAPPYHORSE_11_TEXT_TO_VIDEO, happyHorse11FirstFrame, happyHorse11HasExtras,
+  HAPPYHORSE_11_BACKUP_MAX_PICTURE_BYTES, HAPPYHORSE_11_ENDPOINTS, HAPPYHORSE_11_ID, HAPPYHORSE_11_IMAGE_TO_VIDEO, HAPPYHORSE_11_LONG_PROMPT,
+  HAPPYHORSE_11_MAX_PICTURE_BYTES, HAPPYHORSE_11_NEEDS_PROMPT, HAPPYHORSE_11_ONE_PICTURE, HAPPYHORSE_11_PICTURE_TOO_LARGE, HAPPYHORSE_11_PROMPT_MAX,
+  HAPPYHORSE_11_REPLICATE_SLUG, HAPPYHORSE_11_TEXT_TO_VIDEO, happyHorse11FirstFrame, happyHorse11HasExtras,
 } from './generators/happyHorse11'
 import { asText, parseJsonObject } from './generators/opts'
 import { moodboardFiles } from './inputs'
@@ -180,7 +187,18 @@ export const PROMPT_MAX_LENGTH: Readonly<Record<string, { max: number, message: 
   [`fal ${RECRAFT_V41_FAL_APP}`]: { max: RECRAFT_V41_PROMPT_MAX, message: RECRAFT_V41_LONG_PROMPT },
   // Krea 2 Large and Medium on fal (krea2.ts, Task F17).
   ...Object.fromEntries(KREA_2_IDS.map(id => [`fal ${KREA_2_FAL_APPS[id]}`, { max: KREA_2_PROMPT_MAX, message: KREA_2_LONG_PROMPT }])),
+  // HappyHorse 1.1 on fal (happyHorse11.ts, F18 fix round 1): a ruling (PROMPT_MAX_LENGTH_RULINGS). The
+  // Replicate backup (no stated limit) is built from a request that passed this.
+  ...Object.fromEntries(HAPPYHORSE_11_ENDPOINTS.map(e => [`fal ${e}`, { max: HAPPYHORSE_11_PROMPT_MAX, message: HAPPYHORSE_11_LONG_PROMPT }])),
 }
+
+/**
+ * The rows of PROMPT_MAX_LENGTH that come from a controller ruling rather
+ * than the schema's `maxLength`: the schema states the limit only in the
+ * prompt's description (a test ties each row to that text). Counted as sent,
+ * like every other row.
+ */
+export const PROMPT_MAX_LENGTH_RULINGS: readonly string[] = HAPPYHORSE_11_ENDPOINTS.map(e => `fal ${e}`)
 
 /**
  * The rows of PROMPT_MIN_LENGTH that come from a controller ruling rather
@@ -317,8 +335,14 @@ export function pictureFormat(bytes: Uint8Array): 'jpeg' | 'png' | 'webp' | null
  * on (F12 fix round 1). Every other node, and Product shot with the switch
  * off, reads nothing.
  */
-export function checkedInputFile(classType: string, families: ReadonlySet<RunnerFamily>): string | null {
-  return classType === 'ProductShotNode' && classUpgradeOn(classType, families) ? 'image' : null
+export function checkedInputFile(classType: string, families: ReadonlySet<RunnerFamily>, model?: unknown): string | null {
+  if (classType === 'ProductShotNode') return classUpgradeOn(classType, families) ? 'image' : null
+  return isHappyHorse11Picture(classType, families, model) ? 'image' : null
+}
+
+/** Generate a video on HappyHorse 1.1 with its switch on: its linked first frame is read (F18 fix round 1). */
+function isHappyHorse11Picture(classType: string, families: ReadonlySet<RunnerFamily>, model: unknown): boolean {
+  return classType === 'GenerateVideoNode' && resolveVideoModelId(model) === HAPPYHORSE_11_ID && families.has('happyhorse-1.1')
 }
 
 /**
@@ -328,8 +352,10 @@ export function checkedInputFile(classType: string, families: ReadonlySet<Runner
  * format only after the call, so it is refused here. 12 MB is read as
  * 12,000,000 bytes, the smaller reading. Null while the switch is off.
  */
-export function inputFileProblem(classType: string, bytes: Uint8Array, families: ReadonlySet<RunnerFamily>): string | null {
-  if (!checkedInputFile(classType, families)) return null
+export function inputFileProblem(classType: string, bytes: Uint8Array, families: ReadonlySet<RunnerFamily>, model?: unknown): string | null {
+  if (!checkedInputFile(classType, families, model)) return null
+  // HappyHorse 1.1 (fal image-to-video, "Max 20 MB"; its format is left to fal, which takes BMP too).
+  if (classType === 'GenerateVideoNode') return bytes.byteLength > HAPPYHORSE_11_MAX_PICTURE_BYTES ? HAPPYHORSE_11_PICTURE_TOO_LARGE : null
   if (bytes.byteLength > PRODUCT_SHOT_MAX_BYTES) return PRODUCT_SHOT_TOO_LARGE
   return pictureFormat(bytes) ? null : PRODUCT_SHOT_WRONG_FORMAT
 }
@@ -346,15 +372,43 @@ export async function linkedFileProblem<F>(
   read: (f: F) => Promise<Uint8Array>,
   families: ReadonlySet<RunnerFamily>,
 ): Promise<string | null> {
-  const name = checkedInputFile(node.class_type, families)
+  return (await linkedFileCheck(node, filesFrom, read, families)).problem
+}
+
+/**
+ * linkedFileProblem, and the size of the file it read (undefined when it read
+ * none): the engine hands the size to planNode (`inputBytes`), which drops a
+ * backup that can't take it (backupInputProblem).
+ */
+export async function linkedFileCheck<F>(
+  node: ApiNode,
+  filesFrom: (link: [string, number]) => F[],
+  read: (f: F) => Promise<Uint8Array>,
+  families: ReadonlySet<RunnerFamily>,
+): Promise<{ problem: string | null, bytes?: number }> {
+  const name = checkedInputFile(node.class_type, families, node.inputs?.model)
   const link = name ? node.inputs?.[name] : undefined
-  if (!isLink(link)) return null
+  if (!isLink(link)) return { problem: null }
   const f = filesFrom(link as [string, number])[0]
-  if (f === undefined) return null
+  if (f === undefined) return { problem: null }
   let bytes: Uint8Array
   try { bytes = await read(f) }
-  catch { return null }
-  return inputFileProblem(node.class_type, bytes, families)
+  catch { return { problem: null } }
+  return { problem: inputFileProblem(node.class_type, bytes, families, node.inputs?.model), bytes: bytes.byteLength }
+}
+
+/**
+ * Why a planned backup can't take the measured input file, or null. HappyHorse
+ * 1.1's Replicate backup takes pictures up to 10 MB (fal up to 20 MB): a larger
+ * first frame runs on fal alone (F18 fix round 1).
+ */
+export function backupInputProblem(backup: { provider: string, endpoint: string, payload: Record<string, unknown> }, inputBytes: number | undefined): string | null {
+  if (inputBytes === undefined) return null
+  if (backup.provider === 'replicate' && backup.endpoint === HAPPYHORSE_11_REPLICATE_SLUG && Array.isArray(backup.payload.images)
+    && inputBytes > HAPPYHORSE_11_BACKUP_MAX_PICTURE_BYTES) {
+    return 'Replicate\'s HappyHorse 1.1 takes pictures up to 10 MB'
+  }
+  return null
 }
 
 /** planNode's check: throws the plain message for a request no provider takes. */
@@ -401,13 +455,13 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
   for (const [nodeId, node] of Object.entries(prompt ?? {})) {
     const inputs = node?.inputs ?? {}
     const ct = node?.class_type
-    /** The prompt `text` against the rule of `<provider> <endpoint>` (fal unless named). */
+    /** The prompt `text` against the rules of `<provider> <endpoint>` (fal unless named): its minimum, its maximum, or both. */
     const judge = (endpoint: string, text: string, provider = 'fal') => {
       const key = `${provider} ${endpoint}`
       const rule = PROMPT_MIN_LENGTH[key]
-      if (!rule) throw new Error(`No prompt rule for ${key}`)
       const max = PROMPT_MAX_LENGTH[key]
-      if (promptLength(key, text) < rule.min) out.push({ nodeId, classType: ct, input: 'prompt', message: rule.message })
+      if (!rule && !max) throw new Error(`No prompt rule for ${key}`)
+      if (rule && promptLength(key, text) < rule.min) out.push({ nodeId, classType: ct, input: 'prompt', message: rule.message })
       else if (max && chars(text) > max.max) out.push({ nodeId, classType: ct, input: 'prompt', message: max.message })
     }
     const nb = ct === 'GenerateImageNode' && Object.prototype.hasOwnProperty.call(NANO_BANANA_IMAGE_APPS, String(inputs.model))
@@ -518,12 +572,16 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
         && !geminiOmniFlashFirstFrame(null, parseJsonObject(inputs.model_options))) {
         judge(GEMINI_OMNI_FLASH_TEXT_TO_VIDEO, asText(inputs.prompt))
       }
-      // HappyHorse 1.1: one first frame at most, no sound (its builder refuses the same at planning); and
-      // text-to-video (no linked picture, no `image_url`) needs a prompt. With the options wired, not judged.
-      if (id === HAPPYHORSE_11_ID && !isLink(inputs.model_options)) {
-        const adv = parseJsonObject(inputs.model_options)
-        if (happyHorse11HasExtras(adv)) out.push({ nodeId, classType: ct, input: 'model_options', message: HAPPYHORSE_11_ONE_PICTURE })
-        else if (!isLink(inputs.prompt) && !isLink(inputs.image) && !happyHorse11FirstFrame(null, adv)) judge(HAPPYHORSE_11_TEXT_TO_VIDEO, asText(inputs.prompt))
+      // HappyHorse 1.1: one first frame at most, no sound (its builder refuses the same at planning);
+      // text-to-video (no linked picture, no `image_url`) needs a prompt; and either mode takes at most
+      // 2,500 characters (a ruling). With the options wired the mode can't be read: only the maximum is judged.
+      if (id === HAPPYHORSE_11_ID) {
+        const adv = isLink(inputs.model_options) ? null : parseJsonObject(inputs.model_options)
+        if (adv && happyHorse11HasExtras(adv)) out.push({ nodeId, classType: ct, input: 'model_options', message: HAPPYHORSE_11_ONE_PICTURE })
+        else if (!isLink(inputs.prompt)) {
+          const textToVideo = !!adv && !isLink(inputs.image) && !happyHorse11FirstFrame(null, adv)
+          judge(textToVideo ? HAPPYHORSE_11_TEXT_TO_VIDEO : HAPPYHORSE_11_IMAGE_TO_VIDEO, asText(inputs.prompt))
+        }
       }
     }
     // Film a shot on Seedance 2.0 (ComfyUI path only): a first frame beside references is refused,

@@ -39,7 +39,7 @@ import {
   REVE_21_FAL_APP, REVE_21_FORMAT, REVE_21_LONG_PROMPT, REVE_21_NEEDS_PROMPT, REVE_21_PROMPT_MAX, REVE_21_RATIOS,
 } from '~~/server/runner/generators/reve21'
 import {
-  PROMPT_MAX_LENGTH, PROMPT_MIN_LENGTH, PROMPT_MIN_LENGTH_RULINGS, requestProblem, requestProblems,
+  PROMPT_MAX_LENGTH, PROMPT_MAX_LENGTH_RULINGS, PROMPT_MIN_LENGTH, PROMPT_MIN_LENGTH_RULINGS, requestProblem, requestProblems,
 } from '~~/server/runner/requestRules'
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
 import { PRICE_BOOK_VERSION, priceGraph } from '~~/server/utils/priceBook'
@@ -119,8 +119,9 @@ describe('the saved schema', () => {
     expect(PROMPT_MAX_LENGTH[`fal ${REVE_21_FAL_APP}`]).toEqual({ max: 4000, message: REVE_21_LONG_PROMPT })
   })
 
-  it('every prompt maximum is its saved schema\'s own maxLength', () => {
+  it('every prompt maximum is its saved schema\'s own maxLength (the ruled rows aside: runner-happyhorse-1-1.unit.spec.ts ties them to their descriptions)', () => {
     for (const [key, rule] of Object.entries(PROMPT_MAX_LENGTH)) {
+      if (PROMPT_MAX_LENGTH_RULINGS.includes(key)) continue
       const [provider, endpoint] = key.split(' ') as ['fal' | 'replicate', string]
       const f = loadProviderSchema(provider, endpoint)
       let input = f.input as Record<string, any>
