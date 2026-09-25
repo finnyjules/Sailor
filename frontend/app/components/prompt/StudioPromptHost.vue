@@ -19,10 +19,14 @@ const promptRef = ref<InstanceType<typeof SailorPrompt> | null>(null)
 function focus() { promptRef.value?.focus() }
 watch(() => p.focusTick.value, () => focus())
 
-// Only a field that is in the document claims the key (null while working):
-// a host that isn't on screen must leave `/` to whoever is.
+// Only a field that is on screen claims the key (null while working): a host
+// that isn't — unmounted, or hidden by a v-show / display:none ancestor, like
+// Frame's prompt during a pen session — must leave `/` to whoever is.
+function isOnScreen(el: HTMLElement | null | undefined): el is HTMLElement {
+  return !!el?.isConnected && el.getClientRects().length > 0
+}
 function onKey(e: KeyboardEvent) {
-  if (!shouldFocusPrompt(e) || !promptRef.value?.inputElement()?.isConnected) return
+  if (!shouldFocusPrompt(e) || !isOnScreen(promptRef.value?.inputElement())) return
   e.preventDefault()
   e.stopImmediatePropagation()
   focus()

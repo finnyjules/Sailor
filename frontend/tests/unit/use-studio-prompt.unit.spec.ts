@@ -66,10 +66,12 @@ describe('useStudioPrompt', () => {
     expect(api.answerCard.value).toMatchObject({ kind: 'notice', text: STUDIO_MESSAGES.newEffect })
   })
 
-  it('3D with no worker answers with its message', async () => {
-    const { api } = setup({ worker: null, place: 'scene3d' })
+  it('3D with no worker answers with its message, without paying for a route call', async () => {
+    const { api, route } = setup({ worker: null, place: 'scene3d' })
     await api.submit('make it glass')
+    expect(route).not.toHaveBeenCalled()
     expect(api.answerCard.value).toMatchObject({ kind: 'notice', text: STUDIO_MESSAGES.noWorker3d })
+    expect(api.working.value).toBe(false)
   })
 
   it('working quotes the request while the worker is busy', async () => {
@@ -298,5 +300,24 @@ describe('useStudioPrompt', () => {
     toastInfo.mockClear()
     api.setMode('Tune')
     expect(toastInfo).toHaveBeenCalledWith(BUSY_NOTICE)
+  })
+
+  it('editing is locked while a run is out and while a stopped reply is awaited, with a note quoting the request', async () => {
+    const { api, worker } = setup()
+    expect(api.editLocked.value).toBe(false)
+    let finish!: () => void
+    ;(worker!.ask as any).mockImplementation(() => { worker!.busy.value = true; return new Promise<void>(r => { finish = () => { worker!.busy.value = false; r() } }) })
+    const sent = api.submit('tighten   the layout')
+    expect(api.editLocked.value).toBe(true) // routing
+    await nextTick()
+    expect(api.working.value).toBe(true)
+    expect(api.editLocked.value).toBe(true) // worker busy
+    expect(api.lockedNote.value).toBe('Sailor is working on “tighten the layout”…')
+    api.stop()
+    expect(api.working.value).toBe(false)
+    expect(api.disabled.value).toBe(true)
+    expect(api.editLocked.value).toBe(true) // the late reply would push the old snapshot back
+    finish(); await sent; await nextTick()
+    expect(api.editLocked.value).toBe(false)
   })
 })

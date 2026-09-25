@@ -57,4 +57,22 @@ describe('StudioPromptHost', () => {
     window.removeEventListener('keydown', below)
     w.unmount()
   })
+
+  it('a hidden prompt (v-show / display:none) leaves / and ⌘K to whoever is on screen', async () => {
+    const w = mount(StudioPromptHost, { props: { prompt: api() }, attachTo: document.body })
+    const input = w.find('input').element as HTMLInputElement
+    // What a display:none ancestor gives a real browser: no boxes.
+    input.getClientRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as any
+    const below = vi.fn()
+    window.addEventListener('keydown', below)
+    for (const init of [{ key: '/' }, { key: 'k', metaKey: true }]) {
+      const e = new KeyboardEvent('keydown', { ...init, bubbles: true, cancelable: true })
+      window.dispatchEvent(e)
+      expect(e.defaultPrevented).toBe(false)
+    }
+    expect(below).toHaveBeenCalledTimes(2)
+    expect(document.activeElement).not.toBe(input)
+    window.removeEventListener('keydown', below)
+    w.unmount()
+  })
 })

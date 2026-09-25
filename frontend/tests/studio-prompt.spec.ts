@@ -209,7 +209,8 @@ test.describe('the one prompt in studios', () => {
     await prompt(page).fill('make it glass')
     await prompt(page).press('Enter')
     await expect(page.getByTestId('prompt-answer')).toContainText('3D can’t take instructions yet')
-    expect(routed[0]).toMatchObject({ request: 'make it glass', host: 'studio' })
+    // 3D has no worker, so the answer is fixed: no router call is paid for it.
+    expect(routed).toHaveLength(0)
   })
 
   test('Template editor: the one prompt routes, and its answer shows above it', async ({ page }) => {

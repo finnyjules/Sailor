@@ -42,3 +42,20 @@ export function studioTakesSession<T>(v: {
     chosen: sel >= 0 && sel < TAKES_PER_SET ? studioTakeId(sel) : CURRENT,
   }
 }
+
+/**
+ * Render-then-close (Render, Send to canvas, Export): the studio closes itself
+ * after a render, without going through the shell's ✕/Esc (which abandons an
+ * open strip first). What was rendered is what was on screen, so settle the
+ * strip the same way: a take the user picked is kept (committed and logged as
+ * kept); with none picked the original is on screen, so the strip is abandoned.
+ * Call it before the surface's own close, so its save sees the settled config.
+ */
+export function settleTakesOnRender(w: {
+  hasTakes?: { value: boolean }; selectedTake?: { value: unknown }
+  keepTake?: () => void; abandonTakes?: () => void
+} | null | undefined): void {
+  if (!w?.hasTakes?.value) return
+  if (w.selectedTake?.value) w.keepTake?.()
+  else w.abandonTakes?.()
+}

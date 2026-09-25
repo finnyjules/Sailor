@@ -37,16 +37,28 @@ export function studioDispatch(
 const LABEL_MAX = 24
 const sentence = (s: string) => (s ? s[0]!.toUpperCase() + s.slice(1).toLowerCase() : s)
 
-/** Frame's prompt chip (plan ruling 19): the layer's own words, never a guessed role. */
+/** The user's own words for a chip or head: whitespace collapsed, cut to 24
+ *  characters (the `…` included). '' when there are none. One rule for every
+ *  prompt chip (spec §2.1a: chip style is identical everywhere). */
+export function cutWords(text: string | null | undefined): string {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim()
+  return t.length > LABEL_MAX ? `${t.slice(0, LABEL_MAX - 1).trimEnd()}…` : t
+}
+/** The chip form of the user's words: quoted, so they read as content, not a
+ *  name. '' when there are none. */
+export function quoteWords(text: string | null | undefined): string {
+  const c = cutWords(text)
+  return c ? `“${c}”` : ''
+}
+
+/** Frame's prompt chip (plan ruling 19): the layer's own words, never a guessed role.
+ *  The template editor uses it too (its elements are text, image or shape layers). */
 export function frameSelectionLabel(layers: { kind: string; text?: string | null; name?: string | null }[]): string | null {
   if (!layers.length) return null
   if (layers.length > 1) return `${layers.length} layers`
   const l = layers[0]!
-  const text = (l.text ?? '').replace(/\s+/g, ' ').trim()
-  if (l.kind === 'text' && text) {
-    const cut = text.length > LABEL_MAX ? `${text.slice(0, LABEL_MAX - 1)}…` : text
-    return `“${cut}” · text`
-  }
+  const quoted = l.kind === 'text' ? quoteWords(l.text) : ''
+  if (quoted) return `${quoted} · text`
   const name = (l.name ?? '').trim()
   return name || sentence(l.kind)
 }

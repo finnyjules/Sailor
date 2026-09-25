@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-import { describe, it, expect } from 'vitest'
-import { studioTakeId, studioTakeIndex, studioTakesSession, thumbSrc } from '~/lib/prompt/studioTakes'
+import { describe, it, expect, vi } from 'vitest'
+import { settleTakesOnRender, studioTakeId, studioTakeIndex, studioTakesSession, thumbSrc } from '~/lib/prompt/studioTakes'
 import { CURRENT } from '~/lib/prompt/takesSession'
 
 const a = { label: 'Warm' }, b = { label: 'Cool' }, c = { label: 'Dusk' }
@@ -50,5 +50,31 @@ describe('studio takes adapter', () => {
     expect(thumbSrc('')).toBeNull()
     expect(thumbSrc(null)).toBeNull()
     expect(thumbSrc(undefined)).toBeNull()
+  })
+})
+
+describe('settleTakesOnRender', () => {
+  const agent = (open: boolean, picked: unknown) => ({
+    hasTakes: { value: open }, selectedTake: { value: picked }, keepTake: vi.fn(), abandonTakes: vi.fn(),
+  })
+  it('keeps the picked take (what was rendered)', () => {
+    const a = agent(true, { label: 'b' })
+    settleTakesOnRender(a)
+    expect(a.keepTake).toHaveBeenCalledTimes(1)
+    expect(a.abandonTakes).not.toHaveBeenCalled()
+  })
+  it('abandons an open strip when the original was on screen', () => {
+    const a = agent(true, null)
+    settleTakesOnRender(a)
+    expect(a.abandonTakes).toHaveBeenCalledTimes(1)
+    expect(a.keepTake).not.toHaveBeenCalled()
+  })
+  it('does nothing with no strip, or no take support', () => {
+    const a = agent(false, null)
+    settleTakesOnRender(a)
+    settleTakesOnRender({})
+    settleTakesOnRender(null)
+    expect(a.keepTake).not.toHaveBeenCalled()
+    expect(a.abandonTakes).not.toHaveBeenCalled()
   })
 })

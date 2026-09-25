@@ -100,6 +100,18 @@ export function useStudioPrompt(
     return promptWorkingLabel({ request: request.value, takesOf: takesOf.value })
   })
 
+  /** Frame and the template editor snapshot the whole document when a request
+   *  starts and push that snapshot back when the reply lands (or is thrown away
+   *  after Stop). Edits made meanwhile would be lost, so those hosts make their
+   *  editing surfaces inert while this is true: a run in flight, or a stopped
+   *  run whose reply hasn't landed yet. */
+  const editLocked = computed(() => working.value || disabled.value)
+  /** The neutral note shown over an inert editing surface; quotes the request. */
+  const lockedNote = computed(() => {
+    const r = (takes.value && !busy.value ? takes.value.request : request.value).replace(/\s+/g, ' ').trim()
+    return r ? `Sailor is working on “${r}”…` : 'Sailor is working…'
+  })
+
   const card = computed<'takes' | 'changes' | 'answer' | null>(() => {
     if (busy.value || disabled.value) return null
     if (takes.value) return 'takes'
@@ -159,6 +171,9 @@ export function useStudioPrompt(
     const seq = beginRun(t)
     const m = mode.value
     mode.value = null
+    // No worker here (3D): the answer is fixed whatever the request is, so don't
+    // pay for a routing call to reach it.
+    if (!worker()) { await dispatch(m?.kind ?? 'tweak', t, false); return }
     const ctrl = routeCtrl = new AbortController()
     routing.value = true
     let kind: RouterKind
@@ -251,7 +266,7 @@ export function useStudioPrompt(
   })
 
   return {
-    chipLabel, suggestions, mode, working, workingLabel, disabled, focusTick,
+    chipLabel, suggestions, mode, working, workingLabel, disabled, editLocked, lockedNote, focusTick,
     card, takes, answerCard, worker,
     submit, runKind, setMode, clearMode, stop, requestFocus,
     previewTake, chooseTake, keepTake, moreTakes, closeTakes,
