@@ -106,6 +106,13 @@
  *                                                  $0.13 / $0.30 a second against $0.03 / $0.06 / $0.24) and makes no
  *                                                  2–5 s clip; covering it at cost would double the price of every
  *                                                  clip of 6 s or more for a rare stall (ltx25Fast.ts)
+ * luma-ray-3.2              Replicate  fal         runner-only (F21): luma/agent/ray/v3.2/image-to-video (Luma's
+ *                                                  Agents API, the same Ray 3.2), for image-to-video ONLY: the same
+ *                                                  prompt, frames, 5 s, resolution, ratio and loop, at the same price
+ *                                                  ($0.15 / $0.30 / $1.20 a 5 s clip). fal's text-to-video costs
+ *                                                  1.7–3.3 times Replicate's ($0.50 / $1 / $2 for 5 s against $0.15 /
+ *                                                  $0.30 / $1.20); covered at cost it would raise the price of every
+ *                                                  text clip but 10 s at 1080p, so text has no backup (lumaRay32.ts)
  * sora-2 / -pro             Replicate  —           discontinued; fal's Sora 2 endpoints are deprecated
  * hidden: kling-v2.5-turbo-pro, hailuo-2.3, wan-2.7-t2v, wan-2.5-i2v-fast, luma-ray-2-720p, ltx-video — no backup
  *
@@ -246,6 +253,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'video:happyhorse-1.1': r('fal', 'replicate'),
   'video:grok-imagine-video-1.5': r('fal', 'replicate', 'image-to-video at 480p or 720p only: Replicate\'s Grok Imagine Video 1.5 takes no text-to-video and no 1080p'),
   'video:ltx-2.5-fast': r('replicate', null, 'fal\'s LTX-2.5 Fast costs 2–3 times as much; covering it would double the price'),
+  'video:luma-ray-3.2': r('replicate', 'fal', 'image-to-video only: fal\'s text-to-video costs 1.7–3.3 times as much, so covering it would raise the price'),
   'video:sora-2': r('replicate', null, 'discontinued; fal\'s Sora 2 is deprecated'),
   'video:sora-2-pro': r('replicate', null, 'discontinued; fal\'s Sora 2 is deprecated'),
   'video:kling-v2.5-turbo-pro': r('replicate', null, HIDDEN),

@@ -474,6 +474,21 @@ const FLOWS: FamilyFlow[] = [
     endpoint: 'lightricks/ltx-2.5-fast',
     body: { prompt: 'a fox runs through snow', duration: 2, resolution: '720p', aspect_ratio: '16:9', generate_audio: true },
   },
+  // Task F21: Luma Ray 3.2 has no Python builder; the body is written from its
+  // saved schema (runner-luma-ray-3-2.unit.spec.ts). Replicate first; text-to-video
+  // has no backup (fal's image-to-video backs up a clip from a picture only).
+  {
+    family: 'luma-ray-3.2',
+    label: 'GenerateVideoNode luma-ray-3.2',
+    prompt: {
+      1: { class_type: 'GenerateVideoNode', inputs: { model: 'luma-ray-3.2', prompt: 'a fox runs through snow', aspect_ratio: '16:9', duration: '5', seed: 0, model_options: '{"resolution":"720p"}' } },
+      2: outVideo('1'),
+    },
+    files: [],
+    provider: 'replicate',
+    endpoint: 'luma/ray-3.2',
+    body: { prompt: 'a fox runs through snow', duration: 5, resolution: '720p', aspect_ratio: '16:9', loop: false },
+  },
 ]
 
 // ── The routes ───────────────────────────────────────────────────────────

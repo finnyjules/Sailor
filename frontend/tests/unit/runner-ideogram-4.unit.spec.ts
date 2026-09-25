@@ -46,6 +46,7 @@ import { QWEN_IMAGE_3_SLUG } from '~~/server/runner/generators/qwenImage3'
 import { NANO_BANANA_2_LITE_NEEDS_PROMPT, NANO_BANANA_2_LITE_SLUG } from '~~/server/runner/generators/nanoBanana2Lite'
 import { GROK_IMAGINE_VIDEO_15_ENDPOINTS, GROK_IMAGINE_VIDEO_15_NEEDS_PROMPT } from '~~/server/runner/generators/grokImagineVideo15'
 import { LTX_25_FAST_NEEDS_PROMPT, LTX_25_FAST_REPLICATE_SLUG } from '~~/server/runner/generators/ltx25Fast'
+import { LUMA_RAY_32_NEEDS_PROMPT, LUMA_RAY_32_REPLICATE_SLUG } from '~~/server/runner/generators/lumaRay32'
 import {
   GEMINI_OMNI_FLASH_NEEDS_PROMPT, GROK_IMAGINE_2_NEEDS_PROMPT, PROMPT_MIN_LENGTH, PROMPT_MIN_LENGTH_RULINGS, QWEN_IMAGE_3_NEEDS_PROMPT,
   requestProblem, requestProblems,
@@ -351,6 +352,8 @@ describe('ruled prompt rows trim whitespace; schema rows count exactly what is s
     ...Object.fromEntries(GROK_IMAGINE_VIDEO_15_ENDPOINTS.map(e => [`fal ${e}`, GROK_IMAGINE_VIDEO_15_NEEDS_PROMPT])),
     // Task F20: LTX-2.5 Fast on Replicate (a ruling).
     [`replicate ${LTX_25_FAST_REPLICATE_SLUG}`]: LTX_25_FAST_NEEDS_PROMPT,
+    // Task F21: Luma Ray 3.2 on Replicate (a ruling).
+    [`replicate ${LUMA_RAY_32_REPLICATE_SLUG}`]: LUMA_RAY_32_NEEDS_PROMPT,
   }
 
   it('every ruled row refuses a prompt of only spaces and passes a padded real one', () => {

@@ -716,6 +716,40 @@ export const VIDEO_MODELS: VideoModel[] = [
         default: false, description: 'Match the last frame to the first.' },
     ],
   },
+  // Luma Ray 3.2 replaces the hidden Luma Ray 2 above in the gallery. It runs
+  // only in Sailor's runner (family luma-ray-3.2), on Replicate, with fal the
+  // backup for a clip from a picture (server/runner/generators/lumaRay32.ts).
+  // Its schemas (luma/ray-3.2 and luma/agent/ray/v3.2/image-to-video, read
+  // 2026-09-25) take 5 or 10 s (10 s from a prompt alone), six ratios, 540p to
+  // 1080p and a seamless loop (5 s only); no seed, no sound. HDR is left out.
+  {
+    id: 'luma-ray-3.2',
+    runnerOnly: true,
+    family: 'luma-ray-3.2',
+    label: 'Luma Ray 3.2',
+    brand: 'Luma',
+    // The gallery's cover art, and the first service's model (lumaRay32.ts).
+    replicateSlug: 'luma/ray-3.2',
+    pitch: 'Luma\'s newest: cinematic motion and lighting, up to 1080p.',
+    description:
+      'Luma Ray 3.2 makes silent 5 or 10 second clips at 540p, 720p or 1080p, in six shapes '
+      + 'from tall to wide. Describe the clip, or link a picture to start from it; clips that '
+      + 'start from a picture are 5 seconds. Turn on the seamless loop for a 5-second clip that repeats smoothly.',
+    tags: ['flagship', 'cinematic', 'long', '4k'],
+    modes: ['t2v', 'i2v'],
+    supportsSeed: false,
+    priceHint: null,
+    aspectRatios: FULL_AR,
+    defaultAspectRatio: '16:9',
+    durations: [5, 10],
+    defaultDuration: 5,
+    resolutions: ['540p', '720p', '1080p'],
+    defaultResolution: '720p',
+    advanced: [
+      { name: 'loop', type: 'boolean', label: 'Seamless loop', default: false,
+        description: 'Ends where it starts, for a clip that repeats smoothly. 5-second clips only.' },
+    ],
+  },
 
   // ===== Lightricks =======================================================
   {

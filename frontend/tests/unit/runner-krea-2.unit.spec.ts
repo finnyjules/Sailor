@@ -393,7 +393,7 @@ describe('the price', () => {
       })
     }
     // Adding the backup cards moves no price, so the book's version stays F16's.
-    expect(PRICE_BOOK_VERSION).toBe('lineup-f20-fix1')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-f21')
   })
 
   it('the basis: fal\'s price, since the backup covered at cost is less; one price covers either service and either path', () => {

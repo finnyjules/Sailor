@@ -85,8 +85,10 @@ function nodeFor(key: string): [string, Record<string, unknown>] {
   }
   if (key.startsWith('video:')) {
     const id = key.slice(6)
-    // A first frame for the image-to-video-only model, and for Grok Imagine Video 1.5, whose backup is image-to-video only (F19).
-    return ['GenerateVideoNode', { model: id, prompt: 'a fox runs', aspect_ratio: '16:9', ...(id === 'wan-2.5-i2v-fast' || id === 'grok-imagine-video-1.5' ? { image: LINK } : {}) }]
+    // A first frame for the image-to-video-only model, and for Grok Imagine Video 1.5 (F19) and Luma Ray 3.2 (F21),
+    // whose backups are image-to-video only.
+    const i2v = ['wan-2.5-i2v-fast', 'grok-imagine-video-1.5', 'luma-ray-3.2'].includes(id)
+    return ['GenerateVideoNode', { model: id, prompt: 'a fox runs', aspect_ratio: '16:9', ...(i2v ? { image: LINK } : {}) }]
   }
   const [ct, model] = key.split(':') as [string, string | undefined]
   return [ct, { ...EDIT_BASE[ct], ...(model ? { model } : {}) }]
@@ -148,12 +150,13 @@ describe('the first and backup services are the table\'s', () => {
     expect(keys.has('image:krea-2-large')).toBe(true)
     expect(keys.has('image:krea-2-medium')).toBe(true)
     expect(image).toBe(Object.keys(RUNNER_IMAGE_MODELS).length + Object.keys(RUNNER_REPLICATE_IMAGE_MODELS).length + 10)
-    // + HappyHorse 1.1 (Task F18), Grok Imagine Video 1.5 (Task F19) and LTX-2.5 Fast (Task F20), runner-only video models
-    // outside the two builder tables.
+    // + HappyHorse 1.1 (Task F18), Grok Imagine Video 1.5 (Task F19), LTX-2.5 Fast (Task F20) and Luma Ray 3.2
+    // (Task F21), runner-only video models outside the two builder tables.
     expect(keys.has('video:happyhorse-1.1')).toBe(true)
     expect(keys.has('video:grok-imagine-video-1.5')).toBe(true)
     expect(keys.has('video:ltx-2.5-fast')).toBe(true)
-    expect(video).toBe(Object.keys(RUNNER_VIDEO_MODELS).length + Object.keys(RUNNER_REPLICATE_VIDEO_MODELS).length + 3)
+    expect(keys.has('video:luma-ray-3.2')).toBe(true)
+    expect(video).toBe(Object.keys(RUNNER_VIDEO_MODELS).length + Object.keys(RUNNER_REPLICATE_VIDEO_MODELS).length + 4)
   })
 
   for (const [key, route] of Object.entries(RUNNER_ROUTES)) {

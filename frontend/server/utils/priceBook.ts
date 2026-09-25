@@ -114,7 +114,12 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // lineup-f20-fix1 (F20 fix round 1, controller ruling): LTX-2.5 Fast has no
 // backup; its price is Replicate's card with the markup alone (6 s at 1080p
 // 78 → 54 credits). No other price moves.
-export const PRICE_BOOK_VERSION = 'lineup-f20-fix1'
+// lineup-f21 (Task F21): Luma Ray 3.2, Replicate per clip by resolution and
+// length ($0.15 / $0.30 / $1.20 for 5 s, $0.45 / $0.90 / $3.60 for 10 s at
+// 540p / 720p / 1080p) first; fal's image-to-video the backup for a 5 s clip
+// from a picture, at the same price, covered at cost (it never raises the
+// price). Runner-only, family luma-ray-3.2. No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-f21'
 
 export const BASE_RENDER_CREDITS = 1
 

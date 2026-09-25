@@ -53,6 +53,13 @@
  *    (ltx25Fast.ts ltx25FastProblem); and an empty or spaces-only prompt
  *    (Replicate requires one but sets no minimum: ruled). Replicate states
  *    no maximum;
+ *  - Luma Ray 3.2 (F21) with reference pictures, videos or sounds in its
+ *    options, a last frame with no first frame, a 10 s clip from a picture,
+ *    or a loop at 10 s or ending on a last frame (lumaRay32.ts
+ *    lumaRay32Problem); and an empty or spaces-only prompt (Replicate, its
+ *    first service, requires one but sets no minimum: ruled). Its fal
+ *    backup's own minimum and 6,000-character maximum only drop the backup
+ *    (planNode), as Replicate states no maximum;
  *  - Gemini Omni Flash text-to-video with an empty prompt (controller ruling
  *    after F4: the schema requires a prompt but sets no minimum, so an empty
  *    one would fail only at the result). It is the one row of the prompt table
@@ -116,6 +123,10 @@ import {
 import {
   LTX_25_FAST_DEFAULT_SECONDS, LTX_25_FAST_ID, LTX_25_FAST_NEEDS_PROMPT, LTX_25_FAST_REPLICATE_SLUG, LTX_25_FAST_TOO_LONG_AT_4K, ltx25FastFirstFrame, ltx25FastProblem,
 } from './generators/ltx25Fast'
+import {
+  LUMA_RAY_32_DEFAULT_SECONDS, LUMA_RAY_32_FAL_IMAGE_TO_VIDEO, LUMA_RAY_32_FAL_PROMPT_MAX, LUMA_RAY_32_ID, LUMA_RAY_32_LONG_FROM_PICTURE,
+  LUMA_RAY_32_LONG_PROMPT, LUMA_RAY_32_LOOP_TOO_LONG, LUMA_RAY_32_NEEDS_PROMPT, LUMA_RAY_32_REPLICATE_SLUG, lumaRay32FirstFrame, lumaRay32Problem,
+} from './generators/lumaRay32'
 import { asInt, asText, parseJsonObject } from './generators/opts'
 import { moodboardFiles } from './inputs'
 import {
@@ -195,6 +206,10 @@ export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: 
   ...Object.fromEntries(GROK_IMAGINE_VIDEO_15_ENDPOINTS.map(e => [`fal ${e}`, { min: 1, message: GROK_IMAGINE_VIDEO_15_NEEDS_PROMPT }])),
   // LTX-2.5 Fast on Replicate (ltx25Fast.ts, F20): a ruling, not the schema (required, no minimum).
   [`replicate ${LTX_25_FAST_REPLICATE_SLUG}`]: { min: 1, message: LTX_25_FAST_NEEDS_PROMPT },
+  // Luma Ray 3.2 (lumaRay32.ts, F21): on Replicate (first) a ruling, not the schema (required, no minimum);
+  // on fal's image-to-video (the backup, built from a request that passed Replicate's) the schema's own minLength 1.
+  [`replicate ${LUMA_RAY_32_REPLICATE_SLUG}`]: { min: 1, message: LUMA_RAY_32_NEEDS_PROMPT },
+  [`fal ${LUMA_RAY_32_FAL_IMAGE_TO_VIDEO}`]: { min: 1, message: LUMA_RAY_32_NEEDS_PROMPT },
 }
 
 /**
@@ -216,6 +231,9 @@ export const PROMPT_MAX_LENGTH: Readonly<Record<string, { max: number, message: 
   // Grok Imagine Video 1.5 on fal (grokImagineVideo15.ts, F19): the schemas' own maxLength. The Replicate
   // backup (no stated limit) is built from a request that passed this.
   ...Object.fromEntries(GROK_IMAGINE_VIDEO_15_ENDPOINTS.map(e => [`fal ${e}`, { max: GROK_IMAGINE_VIDEO_15_PROMPT_MAX, message: GROK_IMAGINE_VIDEO_15_LONG_PROMPT }])),
+  // Luma Ray 3.2's fal backup (lumaRay32.ts, F21): the schema's own maxLength. Replicate (first) states none,
+  // so a longer prompt runs there with no backup (planNode drops a backup its own service refuses).
+  [`fal ${LUMA_RAY_32_FAL_IMAGE_TO_VIDEO}`]: { max: LUMA_RAY_32_FAL_PROMPT_MAX, message: LUMA_RAY_32_LONG_PROMPT },
 }
 
 /**
@@ -240,6 +258,7 @@ export const PROMPT_MIN_LENGTH_RULINGS: readonly string[] = [
   `replicate ${NANO_BANANA_2_LITE_SLUG}`,
   ...GROK_IMAGINE_VIDEO_15_ENDPOINTS.map(e => `fal ${e}`),
   `replicate ${LTX_25_FAST_REPLICATE_SLUG}`,
+  `replicate ${LUMA_RAY_32_REPLICATE_SLUG}`,
 ]
 
 /** JSON Schema counts characters as code points. */
@@ -631,6 +650,17 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
         const p = adv && ltx25FastProblem(adv, duration, isLink(inputs.image) || !!ltx25FastFirstFrame(null, adv))
         if (p) out.push({ nodeId, classType: ct, input: p === LTX_25_FAST_TOO_LONG_AT_4K ? 'duration' : 'model_options', message: p })
         else if (!isLink(inputs.prompt)) judge(LTX_25_FAST_REPLICATE_SLUG, asText(inputs.prompt), 'replicate')
+      }
+      // Luma Ray 3.2: what it doesn't take (references, a last frame alone, 10 s from a picture, a loop it
+      // can't make; its builder refuses the same at planning), then the prompt on Replicate, its first
+      // service. A wired length can't be read: that node's length is judged at planning only.
+      if (id === LUMA_RAY_32_ID) {
+        const adv = isLink(inputs.model_options) ? null : parseJsonObject(inputs.model_options)
+        const duration = isLink(inputs.duration) ? LUMA_RAY_32_DEFAULT_SECONDS : asInt(inputs.duration, LUMA_RAY_32_DEFAULT_SECONDS)
+        const p = adv && lumaRay32Problem(adv, duration, isLink(inputs.image) || !!lumaRay32FirstFrame(null, adv))
+        const onLength = p === LUMA_RAY_32_LONG_FROM_PICTURE || p === LUMA_RAY_32_LOOP_TOO_LONG
+        if (p) out.push({ nodeId, classType: ct, input: onLength ? 'duration' : 'model_options', message: p })
+        else if (!isLink(inputs.prompt)) judge(LUMA_RAY_32_REPLICATE_SLUG, asText(inputs.prompt), 'replicate')
       }
     }
     // Film a shot on Seedance 2.0 (ComfyUI path only): a first frame beside references is refused,

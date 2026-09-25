@@ -34,6 +34,7 @@ import { VEO_31_LITE_ENDPOINTS } from '~~/server/runner/generators/veo31Lite'
 import { HAPPYHORSE_11_ENDPOINTS, HAPPYHORSE_11_REPLICATE_SLUG } from '~~/server/runner/generators/happyHorse11'
 import { GROK_IMAGINE_VIDEO_15_ENDPOINTS, GROK_IMAGINE_VIDEO_15_REPLICATE_SLUG } from '~~/server/runner/generators/grokImagineVideo15'
 import { LTX_25_FAST_REPLICATE_SLUG } from '~~/server/runner/generators/ltx25Fast'
+import { LUMA_RAY_32_FAL_IMAGE_TO_VIDEO, LUMA_RAY_32_REPLICATE_SLUG } from '~~/server/runner/generators/lumaRay32'
 import { GPT_IMAGE_25_FAL_ENDPOINTS, GPT_IMAGE_25_REPLICATE_SLUGS } from '~~/server/runner/generators/gptImage25'
 import { QWEN_IMAGE_3_SLUG } from '~~/server/runner/generators/qwenImage3'
 import { GROK_IMAGINE_2_SLUG } from '~~/server/runner/generators/grokImagine2'
@@ -268,6 +269,10 @@ function runnerEndpoints(): string[] {
   out.add(`replicate ${GROK_IMAGINE_VIDEO_15_REPLICATE_SLUG}`)
   // Task F20: LTX-2.5 Fast on Replicate, no backup (ltx25Fast.ts; its grid is runner-ltx-2-5-fast.unit.spec.ts).
   out.add(`replicate ${LTX_25_FAST_REPLICATE_SLUG}`)
+  // Task F21: Luma Ray 3.2 on Replicate, fal's image-to-video the backup (lumaRay32.ts; its grid is
+  // runner-luma-ray-3-2.unit.spec.ts). fal's text-to-video is never called, so it isn't saved.
+  out.add(`replicate ${LUMA_RAY_32_REPLICATE_SLUG}`)
+  out.add(`fal ${LUMA_RAY_32_FAL_IMAGE_TO_VIDEO}`)
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)
@@ -328,11 +333,11 @@ describe('refusals', () => {
     // Ruled rows: a saved schema without a minLength on that endpoint, the prompt required (controller rulings
     // after F4: Gemini Omni Flash; after F6: Qwen Image 3, and Grok Imagine 2 in F7; Ideogram 4 on fal in F8;
     // Nano Banana 2 Lite on Replicate in F14; Grok Imagine Video 1.5's two fal endpoints in F19; LTX-2.5 Fast on
-    // Replicate in F20).
+    // Replicate in F20; Luma Ray 3.2 on Replicate in F21).
     expect(PROMPT_MIN_LENGTH_RULINGS).toEqual([
       'fal google/gemini-omni-flash', 'replicate alibaba/qwen-image-3', 'replicate xai/grok-imagine-image-2', 'fal ideogram/v4',
       'replicate google/nano-banana-2-lite', 'fal xai/grok-imagine-video/v1.5/text-to-video', 'fal xai/grok-imagine-video/v1.5/image-to-video',
-      'replicate lightricks/ltx-2.5-fast',
+      'replicate lightricks/ltx-2.5-fast', 'replicate luma/ray-3.2',
     ])
     const fromSchemas: Record<string, number> = {}
     for (const key of PROMPT_MIN_LENGTH_RULINGS) {

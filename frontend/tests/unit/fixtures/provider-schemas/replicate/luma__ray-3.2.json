@@ -1,0 +1,139 @@
+{
+  "endpoint": "luma/ray-3.2",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/luma/ray-3.2"
+  },
+  "versionId": "6e0a55010a0a28e18fca6fca8774b6791dde643648f6ac3e98209f5a96ca3c6c",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "hdr": {
+            "type": "boolean",
+            "title": "Hdr",
+            "default": false,
+            "x-order": 4,
+            "description": "Generate HDR-encoded MP4. Requires 720p or 1080p, 5s duration, and no loop."
+          },
+          "loop": {
+            "type": "boolean",
+            "title": "Loop",
+            "default": false,
+            "x-order": 6,
+            "description": "Generate a seamlessly looping video. Not supported with 10s duration, hdr, or end_image."
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "x-order": 0,
+            "description": "Text prompt describing the video. Be specific about subject, motion, camera movement, lighting, and pacing."
+          },
+          "duration": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/duration"
+              }
+            ],
+            "default": 5,
+            "x-order": 3,
+            "description": "Video duration in seconds. 10s is not supported with hdr, start_image, end_image, or loop."
+          },
+          "end_image": {
+            "type": "string",
+            "title": "End Image",
+            "format": "uri",
+            "default": null,
+            "x-order": 8,
+            "nullable": true,
+            "description": "Optional last frame of the video. Only valid with 5s duration; not supported with loop."
+          },
+          "exr_export": {
+            "type": "boolean",
+            "title": "Exr Export",
+            "default": false,
+            "x-order": 5,
+            "description": "Export an EXR file alongside the MP4 for professional colour-grading workflows. Requires hdr=true."
+          },
+          "resolution": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/resolution"
+              }
+            ],
+            "default": "720p",
+            "x-order": 2,
+            "description": "Output resolution. 540p is not available when hdr is true."
+          },
+          "start_image": {
+            "type": "string",
+            "title": "Start Image",
+            "format": "uri",
+            "default": null,
+            "x-order": 7,
+            "nullable": true,
+            "description": "Optional first frame of the video. Only valid with 5s duration."
+          },
+          "aspect_ratio": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/aspect_ratio"
+              }
+            ],
+            "default": "16:9",
+            "x-order": 1,
+            "description": "Aspect ratio of the generated video. Ignored when start_image or end_image is set — the model derives the ratio from the anchor frame(s)."
+          }
+        }
+      },
+      "duration": {
+        "enum": [
+          5,
+          10
+        ],
+        "type": "integer",
+        "title": "duration",
+        "description": "An enumeration."
+      },
+      "resolution": {
+        "enum": [
+          "540p",
+          "720p",
+          "1080p"
+        ],
+        "type": "string",
+        "title": "resolution",
+        "description": "An enumeration."
+      },
+      "aspect_ratio": {
+        "enum": [
+          "9:16",
+          "3:4",
+          "1:1",
+          "4:3",
+          "16:9",
+          "21:9"
+        ],
+        "type": "string",
+        "title": "aspect_ratio",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "string",
+        "title": "Output",
+        "format": "uri"
+      }
+    }
+  }
+}

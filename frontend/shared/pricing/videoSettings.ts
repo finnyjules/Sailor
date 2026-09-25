@@ -5,7 +5,7 @@
  *
  * The price multiplies a rate by these, so it must never read a setting the
  * builder would send differently ("priced on what is sent"). The builders are
- * server/runner/generators/video.ts (fal and Replicate), wan3.ts (Wan 3.0), geminiOmniFlash.ts, veo31Lite.ts, happyHorse11.ts, grokImagineVideo15.ts, ltx25Fast.ts and twins.ts (the
+ * server/runner/generators/video.ts (fal and Replicate), wan3.ts (Wan 3.0), geminiOmniFlash.ts, veo31Lite.ts, happyHorse11.ts, grokImagineVideo15.ts, ltx25Fast.ts, lumaRay32.ts and twins.ts (the
  * first-service builders of Kling 3.0 and PixVerse v6, and the backups) and, for the one model
  * the runner does not build (Fabric), comfy_api_nodes/video_models.py. The
  * settings-parity test (tests/unit/video-pricing.unit.spec.ts) runs every
@@ -235,6 +235,9 @@ const RULES: Record<string, Rule> = {
   // ltx25Fast.ts (Replicate, no backup): `duration` the closest of 2–6, 8, …, 20 (default 6), `resolution`
   // 720p/1080p/4k else 1080p, `generate_audio` the sound option (default on; the price is the same either way).
   'ltx-2.5-fast': { durations: LTX_25_FAST_SECONDS, defaultDuration: 6, resolution: resIn(['720p', '1080p', '4k'], '1080p'), audio: audioOpt(true) },
+  // lumaRay32.ts (Replicate, and the fal backup built from it): `duration` the closer of 5 and 10 (default 5),
+  // `resolution` 540p/720p/1080p else 720p; the clip never has sound. The loop doesn't change the price.
+  'luma-ray-3.2': { durations: [5, 10], defaultDuration: 5, resolution: resIn(['540p', '720p', '1080p'], '720p'), audio: fixed(false) },
   // twins.ts pixverseV6Fal (first) sends `resolution`, video.ts pixverseV6
   // (the Replicate backup) `quality`: the resolution option, 360p–1080p,
   // anything else 720p; both send `generate_audio_switch` (the sound option,

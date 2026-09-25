@@ -56,6 +56,12 @@ interface RateMeta {
    * Imagine Video 1.5 image-to-video on fal): × the settings' `inputImages`.
    */
   inputImageUsd?: number
+  /**
+   * A backup card only: the longest clip the backup makes. A longer clip has
+   * no backup (Luma Ray 3.2 on fal's image-to-video, 5 s), so its price is
+   * the first service's alone.
+   */
+  maxSeconds?: number
 }
 
 export type VideoRate =
@@ -258,6 +264,16 @@ export const VIDEO_RATES: Record<string, VideoRate> = {
     unit: 'per_second', service: 'replicate', source: rep('lightricks/ltx-2.5-fast'), read: '2026-09-25', confidence: 'verified',
     byResolution: { '720p': 0.03, '1080p': 0.06, '4k': 0.24 },
   },
+  // Luma Ray 3.2 (family luma-ray-3.2, runner-only; fal the backup for
+  // image-to-video, VIDEO_BACKUP_RATES). Billing tiers "per output video" by
+  // model variant, target resolution and seconds (the model page's
+  // billingConfig), variant "sdr" (the builder never sends hdr): 540p $0.15 /
+  // $0.45, 720p $0.30 / $0.90, 1080p $1.20 / $3.60 for 5 s / 10 s. The same
+  // in both modes.
+  'luma-ray-3.2': {
+    unit: 'per_clip', service: 'replicate', source: rep('luma/ray-3.2'), read: '2026-09-25', confidence: 'verified',
+    byResolution: { '540p': { 5: 0.15, 10: 0.45 }, '720p': { 5: 0.30, 10: 0.90 }, '1080p': { 5: 1.20, 10: 3.60 } },
+  },
   // First service fal since Task S3 (half Replicate's rate): "For 360p … $0.025
   // per second without audio and $0.035 per second with audio. For 540p … $0.035
   // … $0.045 … For 720p … $0.045 … $0.060 … For 1080p … $0.090 … $0.115". The
@@ -322,6 +338,18 @@ export const VIDEO_BACKUP_RATES: Record<string, VideoRate> = {
     unit: 'per_second', service: 'replicate', source: rep('xai/grok-imagine-video-1.5'), read: '2026-09-25', confidence: 'verified',
     byResolution: { '*': 0.08 },
   },
+  // fal's image-to-video, the backup for a clip from a picture only: "For 5s
+  // video your request will cost $0.15 for 540p, $0.30 for 720p and $1.20 for
+  // 1080p. 10s is not available for image-to-video (start-frame
+  // requirement)." The same as Replicate, so Replicate's marked-up price
+  // stands. It makes no 10 s clip (maxSeconds), so a 10 s clip, which only
+  // text-to-video makes, is priced on Replicate alone. Text-to-video has no
+  // backup; this card, read at a 5 s text clip's settings, never raises it.
+  'luma-ray-3.2': {
+    unit: 'per_clip', service: 'fal', source: fal('luma/agent/ray/v3.2/image-to-video'), read: '2026-09-25', confidence: 'verified',
+    byResolution: { '540p': { 5: 0.15 }, '720p': { 5: 0.30 }, '1080p': { 5: 1.20 } },
+    maxSeconds: 5,
+  },
 }
 
 /** The rate card for `modelId`, or null. Own keys only: "constructor" is not a model. */
@@ -379,7 +407,7 @@ export function videoUsd(modelId: string, s: VideoSettings): number | null {
 /** Dollars the backup service charges for the same clip, or null when the model has no backup. */
 export function videoBackupUsd(modelId: string, s: VideoSettings): number | null {
   const rate = videoBackupRate(modelId)
-  return rate ? clipUsd(rate, s) : null
+  return rate && s.seconds <= (rate.maxSeconds ?? Infinity) ? clipUsd(rate, s) : null
 }
 
 /**
@@ -420,7 +448,7 @@ export function videoPriceMaxUsd(modelId: string, seconds: number): number | nul
   const first = videoMaxUsd(modelId, seconds)
   if (first == null) return null
   const rate = videoBackupRate(modelId)
-  return rate ? Math.max(first, usdChargedAtCost(clipMaxUsd(rate, seconds))) : first
+  return rate && seconds <= (rate.maxSeconds ?? Infinity) ? Math.max(first, usdChargedAtCost(clipMaxUsd(rate, seconds))) : first
 }
 
 /** The most a clip of `seconds` can cost on one card. */

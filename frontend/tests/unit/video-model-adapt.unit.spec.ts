@@ -19,6 +19,8 @@ const NO_SEED_IDS = [
   'grok-imagine-video-1.5',
   // Task F20: LTX-2.5 Fast (Replicate's model and fal's two endpoints) has no seed field.
   'ltx-2.5-fast',
+  // Task F21: Luma Ray 3.2 (Replicate's model and fal's image-to-video) has no seed field.
+  'luma-ray-3.2',
 ]
 
 describe('video-models supportsSeed flag', () => {
