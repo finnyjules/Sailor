@@ -226,11 +226,12 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   DevelopImageNode: { family: 'fal-edit', mustLink: ['input_image'] },
   // With no `image` Python makes a blank no-op; the runner leaves that to Python.
   RelightNode: { family: 'fal-edit', mustLink: ['image'], mustNotLink: ['light', 'instructions'] },
-  // The Nano Banana mode is Replicate (nano-actions, Task B5). A linked
-  // keep_subject needs a local mask composite after the call, which the
-  // runner does not do.
+  // The Nano Banana mode is Replicate (nano-actions, Task B5). Nano Banana 2
+  // (model line-up F11) is runner-only, its own family: the nano actions'
+  // call. A linked keep_subject needs a local mask composite after the call,
+  // which the runner does not do.
   BlendSceneNode: {
-    models: { 'Flux Kontext Pro': 'fal-edit', 'Flux 2 Pro': 'fal-edit', 'Nano Banana': 'nano-actions' },
+    models: { 'Flux Kontext Pro': 'fal-edit', 'Flux 2 Pro': 'fal-edit', 'Nano Banana': 'nano-actions', 'Nano Banana 2': 'nano-banana-2-blend' },
     mustLink: ['image'],
     mustNotLink: ['keep_subject', 'prompt'],
   },

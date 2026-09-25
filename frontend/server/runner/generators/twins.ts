@@ -110,6 +110,8 @@
  *                                                  the multiple-angles LoRA and takes no angles (qwen2511Angles.ts)
  * Edit image / Blend scene, Flux Kontext Pro
  *                           fal        —           hidden (line-up decision 6)
+ * Blend scene, Nano Banana 2
+ *                           Replicate  fal         runner-only (F11, family nano-banana-2-blend): the nano actions' call
  * Blend scene / Restyle, Nano Banana (the first one)
  *                           Replicate  —           the line-up retires it (Nano Banana 2 replaces it)
  * Product shot, Restyle IP-Adapter
@@ -222,6 +224,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'RestyleFromImageNode:Nano Banana Pro': r('fal', 'replicate'),
   'EditImageNode:Flux 2 Pro': r('fal', 'replicate'),
   'BlendSceneNode:Flux 2 Pro': r('fal', 'replicate'),
+  'BlendSceneNode:Nano Banana 2': r('replicate', 'fal'),
   'EditImageNode:Nano Banana 2': r('fal', null, 'Replicate\'s Nano Banana 2 takes no seed'),
   'EditImageNode:GPT Image 2.5': r('fal', 'replicate'),
   'EditImageNode:Seedream 5 Pro': r('replicate', null, 'fal publishes only tentative pricing'),

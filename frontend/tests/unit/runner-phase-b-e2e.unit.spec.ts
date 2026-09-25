@@ -315,6 +315,27 @@ const FLOWS: FamilyFlow[] = [
     alsoOff: ['ref-edits'],
     body: { image_urls: [storageUrl('image')], horizontal_angle: 315, vertical_angle: -30, additional_prompt: 'with the camera tilted slightly clockwise', seed: 3, output_format: 'png', num_images: 1 },
   },
+  // Task F11: Nano Banana 2 in Blend scene, no Python builder; the nano
+  // actions' Replicate call, the instruction from the toggles
+  // (runner-blend-nano-banana-2.unit.spec.ts).
+  {
+    family: 'nano-banana-2-blend',
+    label: 'BlendSceneNode Nano Banana 2',
+    prompt: {
+      11: imageCard('image.png'),
+      1: { class_type: 'BlendSceneNode', inputs: { model: 'Nano Banana 2', image: ['11', 0], unify_lighting: true, contact_shadows: false, match_camera_look: false, preserve_identity: true, keep_feather: 2, prompt: '', seed: 0, output_format: 'jpg' } },
+      2: outImage('1'),
+    },
+    files: ['image.png'],
+    provider: 'replicate',
+    endpoint: 'google/nano-banana-2',
+    body: {
+      prompt: 'Blend all elements into a single cohesive, photorealistic image. '
+        + 'Unify the lighting direction, color temperature and ambient tone across the whole scene. '
+        + 'Keep each element\'s shape, position, proportions and identity unchanged. Do not move, rotate, rescale or reflow any element.',
+      image_input: [storageUrl('image')], resolution: '1K', output_format: 'jpg',
+    },
+  },
 ]
 
 // ── The routes ───────────────────────────────────────────────────────────

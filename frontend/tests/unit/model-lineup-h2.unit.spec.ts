@@ -39,17 +39,20 @@ const HIDDEN_IMAGES = [
 ]
 const HIDDEN_VIDEOS = ['hailuo-2.3', 'wan-2.5-i2v-fast', 'wan-2.7-t2v', 'luma-ray-2-720p', 'ltx-video', 'kling-v2.5-turbo-pro']
 const DISCONTINUED_VIDEOS = ['sora-2', 'sora-2-pro']
-/** Retired dropdown values (Restyle's two engines; open question 6: Kontext and Real-ESRGAN). */
+/** Retired dropdown values (Restyle's two engines; open question 6: Kontext and Real-ESRGAN; F11: Blend's first Nano Banana). */
 const HIDDEN_DROPDOWN: Record<string, string[]> = {
   'EditImageNode.model': ['Flux Kontext Pro'],
-  'BlendSceneNode.model': ['Flux Kontext Pro'],
+  'BlendSceneNode.model': ['Flux Kontext Pro', 'Nano Banana'],
   'RestyleFromImageNode.model': ['Nano Banana', 'Style Transfer · IP-Adapter'],
   'GenerateFromReferencesNode.model': [],
   'UpscaleImageNode.model': ['Real-ESRGAN'],
 }
 /** Runner-only models the line-up's F-tasks added (no Python builder; left out while their switch is off). */
 const RUNNER_ONLY_IMAGES = ['ideogram-4', 'gpt-image-2.5', 'qwen-image-3', 'grok-imagine-2']
-const RUNNER_ONLY_DROPDOWN: Record<string, string[]> = { 'EditImageNode.model': ['GPT Image 2.5', 'Seedream 5 Pro'] }
+const RUNNER_ONLY_DROPDOWN: Record<string, string[]> = {
+  'EditImageNode.model': ['GPT Image 2.5', 'Seedream 5 Pro'],
+  'BlendSceneNode.model': ['Nano Banana 2'],
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -206,11 +209,15 @@ describe('a new node gets the new default (the overlay on the committed baseline
       expect(cfg(b, 'FilmShotNode').default).toBe('kling-v2.5-turbo-pro')
       expect(cfg(b, 'BlendSceneNode').default).toBe('Flux Kontext Pro')
       const served = applyModelOverlay(b, families)
-      for (const [cls, want] of Object.entries(WANT)) {
+      // Blend scene starts on Nano Banana 2 while its switch is on (F11).
+      const wants = families === ALL ? { ...WANT, BlendSceneNode: 'Nano Banana 2' } : WANT
+      for (const [cls, want] of Object.entries(wants)) {
         expect(cfg(served, cls).default, cls).toBe(want)
         // The default is a value the node offers, and runs.
         expect(cfg(served, cls).options, cls).toContain(want)
-        expect(blockedModelUses(one({ class_type: cls, inputs: { model: want } }))).toEqual([])
+        // A runner-only default (Blend's Nano Banana 2) runs on the runner, with its switch on.
+        const runnerOnly = !!modelMenu(cls)!.entries.find(e => e.value === want)!.runnerOnly
+        expect(blockedModelUses(one({ class_type: cls, inputs: { model: want } }), runnerOnly ? { families, runnerTakes: true } : {})).toEqual([])
       }
       for (const [key, hidden] of Object.entries(HIDDEN_DROPDOWN)) {
         // A runner-only value is left out while its switch is off.

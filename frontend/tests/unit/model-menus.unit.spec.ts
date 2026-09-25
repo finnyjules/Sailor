@@ -41,7 +41,8 @@ import { FILM_SHOT_MODEL_PREFERENCE, VIDEO_MODELS, VIDEO_MODELS_BY_ID, VIDEO_MOD
 import { EDIT_MODEL_MENUS } from '../../app/data/edit-model-options'
 
 /**
- * The runner-only dropdown values (GPT Image 2.5 and Seedream 5 Pro in Edit an image, Tasks F2 and F9):
+ * The runner-only dropdown values (GPT Image 2.5 and Seedream 5 Pro in Edit an image, Tasks F2 and F9;
+ * Nano Banana 2 in Blend scene, Task F11):
  * no Python list has them, so the overlay adds them after Python's values.
  * Read at import, before the tests clear the flags.
  */
@@ -159,7 +160,7 @@ function expectOverlaid(body: any, on: boolean) {
   ])
   // An untouched dropdown still gets an (empty) hidden list and its default.
   expect(cfg(body, 'BlendSceneNode')).toMatchObject({ default: 'Flux Kontext Pro', hidden_options: [] })
-  expect(opts(body, 'BlendSceneNode')).toEqual(opts(fixture, 'BlendSceneNode'))
+  expect(opts(body, 'BlendSceneNode')).toEqual([...opts(fixture, 'BlendSceneNode'), ...runnerOnlyValues('BlendSceneNode')])
   // Galleries: the default only; the engine's list and everything else are as they were.
   expect(cfg(body, 'GenerateImageNode').default).toBe(on ? 'flux-schnell' : 'flux-2-pro')
   expect(cfg(body, 'GenerateVideoNode').default).toBe(on ? 'veo-3.1-fast' : 'veo-3.1')
@@ -211,6 +212,7 @@ describe('applyModelOverlay', () => {
   it('the dropdown lists match the Python lists exactly (plus the runner-only values, last), and a value only the engine lists is kept', () => {
     const fixture = engineFixture()
     expect(RUNNER_ONLY_VALUES.EditImageNode).toEqual(['GPT Image 2.5', 'Seedream 5 Pro'])
+    expect(RUNNER_ONLY_VALUES.BlendSceneNode).toEqual(['Nano Banana 2'])
     for (const [key, menu] of Object.entries(EDIT_MODEL_MENUS)) {
       const cls = key.split('.')[0]!
       expect(menu.options.map(o => o.value), key).toEqual([...opts(fixture, cls), ...runnerOnlyValues(cls)])

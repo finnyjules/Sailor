@@ -22,7 +22,8 @@
  * Ideogram 4 in GenerateImageNode, family ideogram-4;
  * Seedream 5 Pro in EditImageNode, family seedream-5-pro-edit;
  * RotateCameraNode on Qwen Image Edit 2511 multiple angles, family
- * qwen-2511-angles, which moves the whole node while it is on)
+ * qwen-2511-angles, which moves the whole node while it is on;
+ * Nano Banana 2 in BlendSceneNode, family nano-banana-2-blend)
  * closely enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiPrompt } from '#shared/runner/graph'
@@ -152,8 +153,9 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     still(call.endpoint, call.payload, prefix, call.provider, backup)
   // A nano-actions call: google/nano-banana-2 on Replicate, the pictures in
   // the node's order; fal's Nano Banana 2 edit is the backup (twins.ts).
-  const nanoAction = (prompt: string, imageInput: string[], prefix: string): NodePlan => {
-    const payload = { prompt, image_input: imageInput, resolution: '1K', output_format: 'png' }
+  // Always png, except Blend scene, which has a format widget (png or jpg).
+  const nanoAction = (prompt: string, imageInput: string[], prefix: string, outputFormat: 'png' | 'jpg' = 'png'): NodePlan => {
+    const payload = { prompt, image_input: imageInput, resolution: '1K', output_format: outputFormat }
     return still(NANO_BANANA_2_SLUG, payload, prefix, 'replicate', nanoBananaOnFal(NANO_BANANA_2_REPLICATE, payload))
   }
   // FLUX.2 [pro] edit on fal, Replicate's FLUX.2 [pro] the backup (twins.ts).
@@ -435,7 +437,8 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       return stillCall(nanoBananaOnReplicate(NANO_BANANA_2_REPLICATE, onFal), 'relight', { provider: 'fal', endpoint: NANO_BANANA_2_EDIT_APP, payload: onFal })
     }
 
-    // BlendSceneNode (:2940), the two Flux modes. A custom prompt wins over the toggles.
+    // BlendSceneNode (:2940), the two Flux modes, the first Nano Banana, and
+    // Nano Banana 2 (runner-only, F11). A custom prompt wins over the toggles.
     case 'BlendSceneNode': {
       const image = await pictureUrl('image', 'There is no picture to blend')
       const model = String(inputs.model)
@@ -457,6 +460,11 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       if (model === 'Nano Banana') {
         // Replicate google/nano-banana with only {prompt, image_input} (nano-actions).
         return still(NANO_BANANA_SLUG, { prompt, image_input: [image] }, 'blend_scene', 'replicate')
+      }
+      if (model === 'Nano Banana 2') {
+        // The nano actions' call (family nano-banana-2-blend): Replicate at 1K, fal the backup.
+        // Replicate's Nano Banana 2 takes no seed; the format is png or jpg, as the node's widget.
+        return nanoAction(prompt, [image], 'blend_scene', outputFormat === 'jpg' || outputFormat === 'jpeg' ? 'jpg' : 'png')
       }
       throw new Error(`The runner cannot blend with ${model}`)
     }

@@ -82,7 +82,11 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // multiple-angles LoRA, fal's $0.035 a megapixel of the picture made (the
 // input's size), while its switch is on (family qwen-2511-angles, no
 // backup). With the switch off it keeps its $0.03 2509 price. No other price moves.
-export const PRICE_BOOK_VERSION = 'lineup-f10'
+// lineup-f11 (Task F11): Nano Banana 2 in Blend scene, the nano actions' call
+// and price (Replicate's $0.067 at 1K, fal's $0.08 backup covered at cost;
+// runner-only, family nano-banana-2-blend). The first Nano Banana is hidden,
+// its $0.039 unchanged. No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-f11'
 
 export const BASE_RENDER_CREDITS = 1
 

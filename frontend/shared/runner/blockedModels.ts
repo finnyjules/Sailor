@@ -106,9 +106,10 @@ export function classDefaultLabel(classType: string, families: ReadonlySet<Runne
 export const SWITCH_OFF_REASON = 'Its switch is off.'
 
 /**
- * Why a node on its newer model (an upgrade, switched on) didn't go to the
- * runner when no other node is to blame: the node itself is set up in a way
- * the runner doesn't take (no picture linked, a wired setting).
+ * Why a node on its newer model (an upgrade), or on a runner-only model, didn't
+ * go to the runner while its switch is on and no other node is to blame: the
+ * node itself is set up in a way the runner doesn't take (no picture linked, a
+ * wired setting).
  */
 export const NOT_TAKEN_AS_SET_UP_REASON = 'Sailor can’t run it as it is set up here.'
 
@@ -145,9 +146,11 @@ export function blockedModelRefusal(
     }
   }
   const switchedOn = !!entry?.family && families.has(entry.family) && runnerTakesClass(use.classType)
+  // Switched on, with no other node to blame: the node itself is set up in a
+  // way the runner doesn't take (a Blend scene's keep_subject wired, Task F11).
   return {
     title: `“${opts.title}” uses ${label}, which only runs in Sailor`,
-    description: switchedOn && opts.engineReason ? opts.engineReason : SWITCH_OFF_REASON,
+    description: switchedOn ? opts.engineReason ?? NOT_TAKEN_AS_SET_UP_REASON : SWITCH_OFF_REASON,
   }
 }
 

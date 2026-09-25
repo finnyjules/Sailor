@@ -200,6 +200,8 @@ const BLEND_SCENE_MODELS: ModelCalls = {
   'Flux 2 Pro': flux2Edit,
   'Flux Kontext Pro': () => call(FAL_KONTEXT),
   'Nano Banana': () => call(REP_NB),
+  // Runner-only (model line-up F11): the nano actions' call, whatever the format.
+  'Nano Banana 2': nanoAction,
 }
 
 /** GenerateFromReferencesNode's `size`: missing is '2K'; each model clamps it (image_edit_models.py). */

@@ -54,10 +54,14 @@ export const EDIT_MODEL_MENUS: Readonly<Record<string, EditModelMenu>> = {
     options: [
       { value: 'Flux Kontext Pro', label: 'Flux Kontext Pro', hidden: true },
       { value: 'Flux 2 Pro', label: 'Flux 2 Pro' },
-      { value: 'Nano Banana', label: 'Nano Banana' },
+      // Retired (model line-up F11): Nano Banana 2 replaces it. Hidden, still runs and prices for saved projects.
+      { value: 'Nano Banana', label: 'Nano Banana', hidden: true },
+      // Runner-only (model line-up F11): the nano actions' Nano Banana 2 call, offered while its switch is on.
+      { value: 'Nano Banana 2', label: 'Nano Banana 2', runnerOnly: true, family: 'nano-banana-2-blend' },
     ],
-    // Python's default, Flux Kontext Pro, is hidden (model line-up H2).
-    preference: ['Flux 2 Pro'],
+    // Python's default, Flux Kontext Pro, is hidden (model line-up H2). A new
+    // node starts on Nano Banana 2 while its switch is on (F11), else Flux 2 Pro.
+    preference: ['Nano Banana 2', 'Flux 2 Pro'],
   },
   // _RESTYLE_MODELS (nodes_replicate.py:3055)
   'RestyleFromImageNode.model': {

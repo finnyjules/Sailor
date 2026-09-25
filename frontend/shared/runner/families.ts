@@ -39,9 +39,14 @@ export type RunnerFamily =
    * Rotate camera runs only in the runner (Ruling 10); off, the ref-edits 2509 call is unchanged.
    */
   | 'qwen-2511-angles'
+  /**
+   * Nano Banana 2 in Blend scene (model line-up F11): the nano actions' call, google/nano-banana-2
+   * on Replicate at 1K with fal's edit the backup. A runner-only option, and the class default while on.
+   */
+  | 'nano-banana-2-blend'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
-  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2', 'ideogram-4', 'seedream-5-pro-edit', 'qwen-2511-angles',
+  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2', 'ideogram-4', 'seedream-5-pro-edit', 'qwen-2511-angles', 'nano-banana-2-blend',
 ]
 
 const KNOWN: ReadonlySet<string> = new Set(RUNNER_FAMILIES)
