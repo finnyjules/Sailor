@@ -682,7 +682,7 @@ function branchFromTake(takeId: string) {
 const lightTableOpen = ref(false)
 
 // --- AI critique fixes (surfaced in the node toolbar's Edit ▾) --------------
-// A paid render triggers a quiet critique pass (gate lives in CanvasPromptBar);
+// A paid render triggers a quiet critique pass (gate lives in useCanvasPrompt);
 // any fixes it finds land on this node's `fixes` channel and lead the toolbar's
 // Edit ▾ menu (NodeActionToolbar). Baseline is taken at mount so restoring a saved canvas
 // never re-triggers reviews.

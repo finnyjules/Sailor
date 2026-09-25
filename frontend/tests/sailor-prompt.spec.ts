@@ -26,7 +26,13 @@ async function dismissStartModal(page: Page) {
 }
 
 test.describe('Sailor prompt on the canvas', () => {
-  test.beforeEach(async ({ page }) => { await seedKey(page); await waitForBackend(page); await openBlankWorkflow(page) })
+  test.beforeEach(async ({ page }) => {
+    await seedKey(page)
+    await waitForBackend(page)
+    // Stage 3: every prompt request is routed first. Mock it (no model calls in tests).
+    await page.route('**/api/prompt-route', r => r.fulfill({ json: { kind: 'plan', followUps: [], credits: null } }))
+    await openBlankWorkflow(page)
+  })
 
   test('/ focuses it, Esc leaves it, suggestions show while focused', async ({ page }) => {
     await prompt(page).waitFor({ state: 'visible', timeout: 20_000 })

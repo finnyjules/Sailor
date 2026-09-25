@@ -4381,7 +4381,7 @@ function onSketchSelect(i: number): void { sketchReview.selected = i }
 // property check in the `executed` handler (never materializes cards) and the
 // matching exclusions in materializeAutoImageSinks (never wires an auto-sink)
 // and getWorkflow (never rides a full-canvas Run or a saved doc). The
-// call site (CanvasPromptBar) gates this behind a local setting that
+// call site (useCanvasPrompt) gates this behind a local setting that
 // defaults OFF, so this cooldown is the only thing stopping a caller from
 // re-firing it — it does NOT re-check that setting itself.
 let warmPadNodeId: string | number | null = null

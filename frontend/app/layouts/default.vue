@@ -29,7 +29,7 @@ import LoraTrainerSurface from '~/components/LoraTrainerSurface.vue'
 import AllProjectsView from '~/components/AllProjectsView.vue'
 import StartProjectModal from '~/components/StartProjectModal.vue'
 import CanvasStatusBar, { type RunResult } from '~/components/CanvasStatusBar.vue'
-import AgentCanvasPromptBar from '~/components/agent/CanvasPromptBar.vue'
+import CanvasPromptHost from '~/components/prompt/CanvasPromptHost.vue'
 import { shouldFocusPrompt } from '~/lib/prompt/sailorPrompt'
 import { runVariationsLoop } from '~/lib/canvas/variationsRun'
 import type { StartPickId } from '~/data/start-modal'
@@ -2095,8 +2095,8 @@ onUnmounted(() => {
   if (autosaveDebounceTimer) { clearTimeout(autosaveDebounceTimer); autosaveDebounceTimer = null }
 })
 const vueCanvasRef = ref<any>(null)
-// The canvas prompt (CanvasPromptBar → SailorPrompt); `/` and ⌘K focus it.
-const canvasPromptRef = ref<InstanceType<typeof AgentCanvasPromptBar> | null>(null)
+// The canvas prompt (CanvasPromptHost → SailorPrompt); `/` and ⌘K focus it.
+const canvasPromptRef = ref<InstanceType<typeof CanvasPromptHost> | null>(null)
 let currentProjectTabId: string | null = null // tracks which project tab's workflow is loaded
 
 // Public origin the ComfyUI canvas iframe loads from. In local mode this is the
@@ -4238,7 +4238,7 @@ function dismissRunResult() {
           data-testid="canvas-bottom-bar-stack"
           class="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-3"
         >
-          <AgentCanvasPromptBar v-if="vueNodesEnabled" ref="canvasPromptRef" :vue-canvas="vueCanvasRef" class="w-0 min-w-full" />
+          <CanvasPromptHost v-if="vueNodesEnabled" ref="canvasPromptRef" :vue-canvas="vueCanvasRef" class="w-0 min-w-full" />
 
           <!-- Floating toolbar -->
           <div

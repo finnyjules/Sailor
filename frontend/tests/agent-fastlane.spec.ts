@@ -44,6 +44,8 @@ test.describe('Agent fast-lane', () => {
   test.beforeEach(async ({ page }) => {
     await seedAgentKey(page)
     await waitForBackend(page)
+    // Stage 3: every prompt request is routed first. Mock it (no model calls in tests).
+    await page.route('**/api/prompt-route', r => r.fulfill({ json: { kind: 'plan', followUps: [], credits: null } }))
     await openBlankWorkflow(page)
   })
 
@@ -83,6 +85,8 @@ test.describe('Agent fast-lane', () => {
     await bar.press('Enter')
 
     // Proposal card appears as today — the fast lane must NOT swallow multi-command plans.
-    await expect(page.getByRole('button', { name: /Keep all|Keep & Run/ }).first()).toBeVisible({ timeout: 15_000 })
+    // (Stage 3: the changes card above the prompt — Approve / Approve and run.)
+    await expect(page.getByTestId('prompt-changes')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeVisible()
   })
 })
