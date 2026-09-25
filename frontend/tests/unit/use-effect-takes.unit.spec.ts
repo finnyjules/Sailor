@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from 'vitest'
-import { defineComponent, h } from 'vue'
+import { defineComponent, effectScope, h } from 'vue'
 import { mount } from '@vue/test-utils'
 import { useEffectTakes, EFFECT_MESSAGES, type EffectTarget } from '~/composables/useEffectTakes'
 import { generateTakes, type TakeRenderer } from '~/lib/shadergen/engine'
@@ -41,7 +41,7 @@ function setup(extra: Record<string, any> = {}) {
   const register = vi.fn(), unregister = vi.fn()
   let ctxListener: ((s: 'lost' | 'restored') => void) | null = null
   let api!: ReturnType<typeof useEffectTakes>
-  mount(defineComponent({ setup() {
+  const wrapper = mount(defineComponent({ setup() {
     api = useEffectTakes({
       generate: generateTakes, callModel, renderer: () => renderer,
       input: async (o) => ({ request: o.request, count: 3, signal: o.signal }),
@@ -51,7 +51,7 @@ function setup(extra: Record<string, any> = {}) {
     })
     return () => h('div')
   } }))
-  return { api, release, callModel, library, register, unregister, lose: () => ctxListener?.('lost') }
+  return { api, release, callModel, library, register, unregister, wrapper, lose: () => ctxListener?.('lost') }
 }
 const tick = () => new Promise(r => setTimeout(r, 0))
 
@@ -186,7 +186,7 @@ describe('useEffectTakes', () => {
   })
 
   it('context loss while a take is on screen drops THAT take and restores', async () => {
-    const { api, release, lose } = setup()
+    const { api, release, lose, unregister } = setup()
     const tg = target()
     const run = api.start('rain', tg); release(0); release(1); release(2); await run
     const id = api.session.value!.tiles[2]!.takeId!
@@ -195,6 +195,9 @@ describe('useEffectTakes', () => {
     expect(api.session.value!.tiles[2]!.state).toBe('failed')
     expect(tg.preview).toHaveBeenLastCalledWith(null)
     expect(api.notice.value).toBe(EFFECT_MESSAGES.droppedTake)
+    expect(unregister).toHaveBeenCalledWith([id])
+    // Only that one: the other drafts stay registered until the strip closes.
+    expect(unregister.mock.calls.flat(2)).toEqual([id])
   })
 
   it('an engine context loss ends the run with a plain message and nothing changed', async () => {
@@ -224,5 +227,139 @@ describe('useEffectTakes', () => {
     release(0, 1); release(1, 1); release(2, 1); await again
     expect(api.session.value!.tiles.every(t => t.state === 'ready')).toBe(true)
     expect(api.session.value!.tiles.some(t => drafts.includes(t.takeId))).toBe(false)
+  })
+
+  // --- fix round 1 -------------------------------------------------------------
+
+  it('a second Keep while the first is saving is ignored: one save, and `saving` says so', async () => {
+    const { api, release, library } = setup()
+    let finish!: (r: any) => void
+    library.saveTake.mockImplementationOnce((take: any) => new Promise(r => { finish = () => r({ id: 'mine_aaaaaaaaaaaa', name: take.name, versions: [{ label: 'v1', body: take.body, params: take.params, values: {} }] }) }))
+    const tg = target()
+    const run = api.start('rain', tg); release(0); release(1); release(2); await run
+    const [a, b] = api.session.value!.tiles.map(t => t.takeId!)
+    const first = api.keep(a!)
+    expect(api.saving.value).toBe(true)
+    expect(await api.keep(a!)).toBe(false) // double-click
+    expect(await api.keep(b!)).toBe(false) // Keep on another tile
+    finish(null)
+    expect(await first).toBe(true)
+    expect(library.saveTake).toHaveBeenCalledTimes(1)
+    expect(tg.apply).toHaveBeenCalledTimes(1)
+    expect(api.saving.value).toBe(false)
+  })
+
+  it('a run that ends on an error aborts its other slots, so their model calls stop', async () => {
+    const { ContextLostError } = await import('~/lib/shadergen/engine')
+    const lostOnFirst: TakeRenderer = { ...renderer, compile: () => { throw new ContextLostError('gone') } }
+    const { api, release, callModel } = setup({ renderer: () => lostOnFirst })
+    const run = api.start('rain', target()); await tick()
+    expect(callModel).toHaveBeenCalledTimes(3)
+    release(0); await run
+    expect(api.error.value).toBe(EFFECT_MESSAGES.contextLost)
+    for (const call of callModel.mock.calls) expect((call[2] as AbortSignal).aborted).toBe(true)
+  })
+
+  it('a slot that gives up shows failed at once, not at the end of the set', async () => {
+    const { callModel: gated, release } = cannedModel()
+    const callModel = vi.fn(async (prompt: string, i?: string[], signal?: AbortSignal) => {
+      if (slotOf(prompt) === 1) throw new Error('[POST] "/api/shader-gen": 500 Internal Server Error')
+      return gated(prompt, i, signal)
+    })
+    const { api } = setup({ callModel })
+    const run = api.start('rain', target()); await tick(); await tick()
+    expect(api.session.value!.tiles.map(t => t.state)).toEqual(['pending', 'pending', 'failed'])
+    release(0); await tick(); await tick()
+    expect(api.session.value!.tiles.map(t => t.state)).toEqual(['ready', 'pending', 'failed'])
+    release(2); await run
+    expect(api.session.value!.tiles.map(t => t.state)).toEqual(['ready', 'ready', 'failed'])
+    expect(api.error.value).toBe('') // two takes came back: the strip says the rest
+  })
+
+  it('a take that lands after Stop is ignored and never registered', async () => {
+    // A model call that ignores the abort signal and answers anyway.
+    let answer!: () => void
+    const late = new Promise<void>(r => { answer = r })
+    const callModel = vi.fn(async (prompt: string) => { await late; return { text: JSON.stringify(SPIKE_TAKES.rain![slotOf(prompt)]) } })
+    const { api, register } = setup({ callModel })
+    const tg = target()
+    const run = api.start('rain', tg); await tick()
+    api.stop()
+    answer(); await run; await tick(); await tick()
+    expect(register).not.toHaveBeenCalled()
+    expect(api.session.value).toBeNull()
+    expect(api.working.value).toBe(false)
+  })
+
+  it('Keep before the set finishes saves and applies it, stops the rest, and later takes are ignored', async () => {
+    const { api, release, register, callModel, library } = setup()
+    const tg = target()
+    const run = api.start('rain', tg); release(0); await tick(); await tick()
+    const id = api.session.value!.tiles[0]!.takeId!
+    expect(await api.keep(id)).toBe(true)
+    expect(library.saveTake).toHaveBeenCalledTimes(1)
+    expect(tg.apply).toHaveBeenCalledWith('mine_aaaaaaaaaaaa', expect.any(Object))
+    expect(api.session.value).toBeNull()
+    for (const call of callModel.mock.calls) expect((call[2] as AbortSignal).aborted).toBe(true)
+    release(1); release(2); await run; await tick()
+    expect(register).toHaveBeenCalledTimes(1)
+    expect(api.working.value).toBe(false)
+  })
+
+  it('Keep racing ×: the save stands and says so, but the target is left as × restored it', async () => {
+    const { api, release, library } = setup()
+    let finish!: () => void
+    library.saveTake.mockImplementationOnce((take: any) => new Promise(r => { finish = () => r({ id: 'mine_aaaaaaaaaaaa', name: take.name, versions: [{ label: 'v1', body: take.body, params: take.params, values: {} }] }) }))
+    const tg = target()
+    const run = api.start('rain', tg); release(0); release(1); release(2); await run
+    const kept = api.keep(api.session.value!.tiles[0]!.takeId!)
+    api.close()
+    finish()
+    expect(await kept).toBe(true)
+    expect(tg.apply).not.toHaveBeenCalled()
+    expect(tg.preview).toHaveBeenLastCalledWith(null)
+    expect(api.notice.value).toBe(EFFECT_MESSAGES.savedNew(SPIKE_TAKES.rain![0]!.name))
+  })
+
+  it('a replaced set releases its take renderer before the new one is made', async () => {
+    let live = 0
+    const renderers = () => { live++; let gone = false; return { ...renderer, dispose: () => { if (!gone) { gone = true; live-- } } } }
+    const { api } = setup({ renderer: renderers })
+    const tg = target()
+    const one = api.start('rain', tg); await tick(); await tick()
+    expect(live).toBe(1)
+    const two = api.start('snow', tg)
+    expect(live).toBe(0) // synchronously, before the new set builds its own
+    await tick(); await tick()
+    expect(live).toBe(1)
+    api.close()
+    expect(live).toBe(0)
+    await one; await two
+  })
+
+  it('the strip quotes the trimmed request', async () => {
+    const { api, release } = setup()
+    const run = api.start('  rain on a window  ', target()); release(0); release(1); release(2); await run
+    expect(api.session.value!.request).toBe('rain on a window')
+    expect(api.request.value).toBe('rain on a window')
+  })
+
+  it('unmount closes the strip, restores the target and releases the context listener', async () => {
+    const { api, release, wrapper, unregister } = setup()
+    const tg = target()
+    const run = api.start('rain', tg); release(0); release(1); release(2); await run
+    wrapper.unmount()
+    expect(tg.preview).toHaveBeenLastCalledWith(null)
+    expect(unregister).toHaveBeenCalled()
+    expect(api.session.value).toBeNull()
+  })
+
+  it('outside a component, stopping its effect scope releases the context listener', () => {
+    const off = vi.fn()
+    const scope = effectScope()
+    scope.run(() => useEffectTakes({ onContextChange: () => off, library: {} as any }))
+    expect(off).not.toHaveBeenCalled()
+    scope.stop()
+    expect(off).toHaveBeenCalledTimes(1)
   })
 })

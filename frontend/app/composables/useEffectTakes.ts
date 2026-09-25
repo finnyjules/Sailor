@@ -7,7 +7,7 @@
  * remixed) and applies it; × and Stop restore the target and drop the drafts.
  * A lost graphics context drops the take that was on screen.
  */
-import { computed, getCurrentInstance, onBeforeUnmount, ref, shallowRef, type ComputedRef, type Ref, type ShallowRef } from 'vue'
+import { computed, getCurrentScope, onScopeDispose, readonly, ref, shallowRef, type ComputedRef, type Ref, type ShallowRef } from 'vue'
 import { ContextLostError, generateTakes, isAbortError, type EngineDeps, type EngineTake, type TakeRenderer } from '~/lib/shadergen/engine'
 import { createBrowserTakeRenderer } from '~/lib/shadergen/browserRenderer'
 import { makeCallModel } from '~/lib/shadergen/client'
@@ -70,6 +70,8 @@ export interface EffectTakes {
   working: ComputedRef<boolean>
   error: Ref<string>
   notice: Ref<string>
+  /** A Keep is saving: further Keeps are ignored until it settles (a host can disable its button). */
+  saving: Readonly<Ref<boolean>>
   start(request: string, target: EffectTarget): Promise<void>
   preview(id: string | null): void
   choose(id: string): void
@@ -118,9 +120,14 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
   const running = ref(false)
   const error = ref('')
   const notice = ref('')
+  const saving = ref(false)
   const taken = new Map<string, EngineTake>() // draft id → take
   let ctrl: AbortController | null = null
   let seq = 0
+  // The running set's take renderer. Released synchronously whenever the set is replaced, stopped,
+  // closed or kept, so two never overlap; the run's own `finally` is the backstop.
+  let liveRenderer: TakeRenderer | null = null
+  const releaseRenderer = () => { liveRenderer?.dispose?.(); liveRenderer = null }
 
   const working = computed(() => running.value)
   const show = () => { const s = session.value; if (s) target.value?.preview(shownTakeId(s)) }
@@ -130,6 +137,7 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
 
   async function start(text: string, t: EffectTarget) {
     ctrl?.abort()
+    releaseRenderer()
     if (session.value) end()
     clearMessages()
     const run = ++seq
@@ -137,14 +145,14 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
     const c = ctrl = new AbortController()
     target.value = t
     request.value = text.trim()
-    session.value = { ...openTakes({ nodeId: t.key, nodeLabel: t.label, request: text, takes: [] }), loopDone: false }
+    session.value = { ...openTakes({ nodeId: t.key, nodeLabel: t.label, request: request.value, takes: [] }), loopDone: false }
     running.value = true
     let renderer: TakeRenderer | null = null
     try {
       const src = t.image()
       const input = await buildInput({ request: request.value, base: t.base, image: imageForModel(src), signal: c.signal })
       if (run !== seq) return
-      renderer = makeRenderer(src ?? placeholderSource())
+      renderer = liveRenderer = makeRenderer(src ?? placeholderSource())
       const result = await generate(input, {
         callModel,
         renderer,
@@ -160,6 +168,17 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
           tiles[i] = { state: 'ready', takeId: id, promptId: null, thumb: et.thumbnail }
           session.value = { ...s, tiles }
         },
+        // A slot gave up: a tile shows failed at once rather than waiting for the set to end. The
+        // last pending one, so takes still arriving keep filling the strip from the left.
+        onFailure: () => {
+          const s = session.value
+          if (run !== seq || !s) return
+          const i = s.tiles.map(x => x.state).lastIndexOf('pending')
+          if (i < 0) return
+          const tiles = s.tiles.slice()
+          tiles[i] = { ...tiles[i]!, state: 'failed' }
+          session.value = { ...s, tiles }
+        },
       })
       if (run !== seq || !session.value) return
       session.value = { ...failPending(session.value), loopDone: true }
@@ -169,12 +188,14 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
       if (!result.takes.length && modelErrors.length) error.value = failureMessage(modelErrors.find(l => CREDITS_RE.test(l)) ?? modelErrors[0])
     } catch (e) {
       if (run !== seq || isAbortError(e)) return // Stop / × / a newer start already ended this one
+      c.abort() // the other slots' model calls stop here rather than run on (and be billed)
       error.value = e instanceof ContextLostError ? EFFECT_MESSAGES.contextLost : failureMessage(e)
       end()
     } finally {
       // The take renderer is only needed while the set is written: its context goes as soon as the
       // set settles, is replaced, stopped, closed or kept (each aborts the run, which lands here).
       renderer?.dispose?.()
+      if (liveRenderer === renderer) liveRenderer = null
       if (run === seq) running.value = false
     }
   }
@@ -184,7 +205,8 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
 
   async function keep(id: string): Promise<boolean> {
     const s = session.value, t = target.value, et = taken.get(id)
-    if (!s || !t || !et || id === CURRENT) return false
+    if (!s || !t || !et || id === CURRENT || saving.value) return false
+    saving.value = true
     const base = t.base
     const mineId = mineIdOf(base)
     error.value = ''
@@ -198,6 +220,7 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
       if (run === seq) {
         // Drafts go first, then apply: the target swaps the draft it was previewing for the saved id.
         ctrl?.abort(); ctrl = null; seq++
+        releaseRenderer()
         dropDrafts()
         session.value = null
         running.value = false
@@ -208,10 +231,12 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
     } catch (e) {
       error.value = EFFECT_MESSAGES.saveFailed(String((e as Error)?.message ?? ''))
       return false
+    } finally {
+      saving.value = false
     }
   }
 
-  function close() { ctrl?.abort(); ctrl = null; seq++; end() }
+  function close() { ctrl?.abort(); ctrl = null; seq++; releaseRenderer(); end() }
   const stop = close
   async function more() {
     const s = session.value, t = target.value
@@ -235,7 +260,8 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
     }
     notice.value = EFFECT_MESSAGES.droppedTake
   })
-  if (getCurrentInstance()) onBeforeUnmount(() => { offCtx(); if (session.value || running.value) close() })
+  // Released with the owning scope: a component's unmount, or an effectScope/store being stopped.
+  if (getCurrentScope()) onScopeDispose(() => { offCtx(); if (session.value || running.value) close() })
 
-  return { session, target, request, working, error, notice, start, preview, choose, keep, close, more, stop, clearMessages }
+  return { session, target, request, working, error, notice, saving: readonly(saving), start, preview, choose, keep, close, more, stop, clearMessages }
 }
