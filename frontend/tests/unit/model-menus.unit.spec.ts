@@ -41,7 +41,7 @@ import { FILM_SHOT_MODEL_PREFERENCE, VIDEO_MODELS, VIDEO_MODELS_BY_ID, VIDEO_MOD
 import { EDIT_MODEL_MENUS } from '../../app/data/edit-model-options'
 
 /**
- * The runner-only dropdown values (GPT Image 2.5 in Edit an image, Task F2):
+ * The runner-only dropdown values (GPT Image 2.5 and Seedream 5 Pro in Edit an image, Tasks F2 and F9):
  * no Python list has them, so the overlay adds them after Python's values.
  * Read at import, before the tests clear the flags.
  */
@@ -149,7 +149,7 @@ function flagScenario() {
 function expectOverlaid(body: any, on: boolean) {
   const fixture = engineFixture()
   // Options kept, every one: hidden and runner-only values stay valid.
-  expect(opts(body, 'EditImageNode')).toEqual(['Nano Banana 2', 'Flux Kontext Pro', 'Flux 2 Pro', 'GPT Image 2.5'])
+  expect(opts(body, 'EditImageNode')).toEqual(['Nano Banana 2', 'Flux Kontext Pro', 'Flux 2 Pro', 'GPT Image 2.5', 'Seedream 5 Pro'])
   expect(cfg(body, 'EditImageNode').hidden_options).toEqual(on ? ['Flux Kontext Pro'] : ['Flux Kontext Pro', 'Flux 2 Pro'])
   expect(cfg(body, 'EditImageNode').default).toBe(on ? 'Flux 2 Pro' : 'Nano Banana 2')
   // Legacy shape, same rules.
@@ -210,14 +210,14 @@ describe('applyModelOverlay', () => {
 
   it('the dropdown lists match the Python lists exactly (plus the runner-only values, last), and a value only the engine lists is kept', () => {
     const fixture = engineFixture()
-    expect(RUNNER_ONLY_VALUES.EditImageNode).toEqual(['GPT Image 2.5'])
+    expect(RUNNER_ONLY_VALUES.EditImageNode).toEqual(['GPT Image 2.5', 'Seedream 5 Pro'])
     for (const [key, menu] of Object.entries(EDIT_MODEL_MENUS)) {
       const cls = key.split('.')[0]!
       expect(menu.options.map(o => o.value), key).toEqual([...opts(fixture, cls), ...runnerOnlyValues(cls)])
       expect(menu.preference[0], key).toBe(cfg(fixture, cls).default)
     }
     fixture.EditImageNode.input.required.model[1].options.push('Engine Only')
-    expect(opts(applyModelOverlay(fixture, NO_FAMILIES), 'EditImageNode')).toEqual(['Nano Banana 2', 'Flux Kontext Pro', 'Flux 2 Pro', 'GPT Image 2.5', 'Engine Only'])
+    expect(opts(applyModelOverlay(fixture, NO_FAMILIES), 'EditImageNode')).toEqual(['Nano Banana 2', 'Flux Kontext Pro', 'Flux 2 Pro', 'GPT Image 2.5', 'Seedream 5 Pro', 'Engine Only'])
   })
 
   it('the default falls back to the first runnable value when no preference can run', () => {

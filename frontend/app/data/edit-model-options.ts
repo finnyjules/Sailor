@@ -44,6 +44,8 @@ export const EDIT_MODEL_MENUS: Readonly<Record<string, EditModelMenu>> = {
       { value: 'Flux 2 Pro', label: 'Flux 2 Pro' },
       // Runner-only (model line-up F2): no Python builder; offered while its switch is on.
       { value: 'GPT Image 2.5', label: 'GPT Image 2.5', runnerOnly: true, family: 'gpt-image-2.5' },
+      // Runner-only (model line-up F9): Seedream 5 Pro on Replicate, offered while its switch is on.
+      { value: 'Seedream 5 Pro', label: 'Seedream 5 Pro', runnerOnly: true, family: 'seedream-5-pro-edit' },
     ],
     preference: ['Nano Banana 2'],
   },

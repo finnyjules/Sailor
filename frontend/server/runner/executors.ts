@@ -19,7 +19,8 @@
  * GPT Image 2.5 in GenerateImageNode and EditImageNode, family gpt-image-2.5;
  * Qwen Image 3 in GenerateImageNode, family qwen-image-3;
  * Grok Imagine 2 in GenerateImageNode, family grok-imagine-2;
- * Ideogram 4 in GenerateImageNode, family ideogram-4)
+ * Ideogram 4 in GenerateImageNode, family ideogram-4;
+ * Seedream 5 Pro in EditImageNode, family seedream-5-pro-edit)
  * closely enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiPrompt } from '#shared/runner/graph'
@@ -57,6 +58,7 @@ import { GPT_IMAGE_25_EDIT_OPTION, gptImage25Edit, gptImage25Generate, gptImage2
 import { isQwenImage3Model, qwenImage3Generate } from './generators/qwenImage3'
 import { grokImagine2Generate, isGrokImagine2Model } from './generators/grokImagine2'
 import { ideogram4Generate, ideogram4OnReplicate, isIdeogram4Model } from './generators/ideogram4'
+import { isSeedream5ProEdit, seedream5ProEdit } from './generators/seedream5ProEdit'
 import { checkRequest, seedanceReferenceProblem } from './requestRules'
 import type { OutputFile, RunnerProvider } from './types'
 
@@ -377,6 +379,12 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       if (model === GPT_IMAGE_25_EDIT_OPTION) {
         const call = gptImage25Edit({ image, prompt, outputFormat })
         return stillCall(call, 'edit_image', gptImage25OnReplicate(call))
+      }
+      // Seedream 5 Pro (family seedream-5-pro-edit): Replicate only, the references builder with one picture; no seed.
+      if (isSeedream5ProEdit(model)) {
+        return stillCall(seedream5ProEdit({
+          image, prompt, resolution: inputs.resolution, aspectRatio: inputs.aspect_ratio, outputFormat: inputs.output_format,
+        }), 'edit_image')
       }
       if (model === 'Flux Kontext Pro') {
         return still(FLUX_KONTEXT_APP, falKontext({

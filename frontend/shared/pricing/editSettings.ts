@@ -145,11 +145,33 @@ const REP_GPT_25_FLARE = 'openai/gpt-image-2.5-flare'
 const GPT_25_EDIT_QUALITY = 'medium'
 const gptImage25Edit = () => call(FAL_GPT_25_EDIT, GPT_25_EDIT_QUALITY, {}, [call(REP_GPT_25_FLARE, GPT_25_EDIT_QUALITY)])
 
+/**
+ * Seedream 5 Pro on Edit an image (runner-only, Task F9): bytedance/seedream-5-pro
+ * on Replicate, no backup. Its schema's `size` takes 1K or 2K for an edit
+ * ("Standard mode supports 1K and 2K"; 1.5K and auto are for layer
+ * decomposition only), and Replicate bills by that size ($0.045 / $0.09).
+ * The node's resolution widget (1K / 2K / 4K, default 1K) picks it: 1K and
+ * 2K as they are, empty or missing is the widget's 1K, and anything else
+ * (4K included) the largest Seedream makes, 2K. The builder
+ * (server/runner/generators/seedream5ProEdit.ts) sends this, so the price
+ * reads what is sent.
+ */
+export const SEEDREAM_5_PRO_EDIT_OPTION = 'Seedream 5 Pro'
+export const SEEDREAM_5_PRO_SLUG = 'bytedance/seedream-5-pro'
+export const SEEDREAM_5_PRO_EDIT_SIZES = ['1K', '2K'] as const
+export function seedream5ProEditSize(resolution: unknown): typeof SEEDREAM_5_PRO_EDIT_SIZES[number] {
+  const r = typeof resolution === 'string' && resolution ? resolution : '1K'
+  return r === '1K' ? '1K' : '2K'
+}
+const seedream5ProEdit = (inputs: NodeInputs) =>
+  call(SEEDREAM_5_PRO_SLUG, isLinked(inputs.resolution) ? null : seedream5ProEditSize(inputs.resolution))
+
 const EDIT_IMAGE_MODELS: ModelCalls = {
   'Nano Banana 2': i => nanoBananaEdit(REP_NB2, nb2Tier(i)),
   'Flux Kontext Pro': () => call(FAL_KONTEXT),
   'Flux 2 Pro': flux2Edit,
   'GPT Image 2.5': gptImage25Edit,
+  [SEEDREAM_5_PRO_EDIT_OPTION]: seedream5ProEdit,
 }
 
 const BLEND_SCENE_MODELS: ModelCalls = {

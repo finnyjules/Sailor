@@ -74,7 +74,10 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // $0.015 / $0.025), Replicate's $0.03 / $0.06 / $0.10 the backup for a 2K
 // picture (runner-only, family ideogram-4). Ideogram V3 and the old Grok
 // Imagine are hidden, their prices unchanged. No other price moves.
-export const PRICE_BOOK_VERSION = 'lineup-f8'
+// lineup-f9 (Task F9): Seedream 5 Pro in Edit an image, Replicate's $0.045 /
+// $0.09 an image at 1K / 2K, the card References already uses (runner-only,
+// family seedream-5-pro-edit, no backup). No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-f9'
 
 export const BASE_RENDER_CREDITS = 1
 

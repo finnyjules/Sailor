@@ -279,6 +279,21 @@ const FLOWS: FamilyFlow[] = [
     endpoint: 'ideogram/v4',
     body: { prompt: 'a poster that says HELLO', image_size: { width: 992, height: 992 }, rendering_speed: 'TURBO', expansion_model: 'None', output_format: 'png', num_images: 1 },
   },
+  // Task F9: Seedream 5 Pro in Edit an image, no Python builder; Replicate
+  // only, the body written from its saved schema (runner-seedream-5-pro-edit.unit.spec.ts).
+  {
+    family: 'seedream-5-pro-edit',
+    label: 'EditImageNode Seedream 5 Pro',
+    prompt: {
+      11: imageCard('image.png'),
+      1: { class_type: 'EditImageNode', inputs: { model: 'Seedream 5 Pro', input_image: ['11', 0], prompt: 'make the sky pink', aspect_ratio: 'match_input_image', resolution: '1K', seed: 0, safety_tolerance: 2, prompt_upsampling: false, output_format: 'png' } },
+      2: outImage('1'),
+    },
+    files: ['image.png'],
+    provider: 'replicate',
+    endpoint: 'bytedance/seedream-5-pro',
+    body: { prompt: 'make the sky pink', image_input: [storageUrl('image')], size: '1K', aspect_ratio: 'match_input_image', output_format: 'png' },
+  },
 ]
 
 // ── The routes ───────────────────────────────────────────────────────────

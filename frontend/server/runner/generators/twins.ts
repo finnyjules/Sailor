@@ -93,6 +93,9 @@
  * Edit image, Nano Banana 2 fal        —           Replicate's takes no seed
  * Edit image, GPT Image 2.5 fal        Replicate   runner-only (F2): Flare's edit; openai/gpt-image-2.5-flare with the
  *                                                  picture, the size from the picture on both (gptImage25.ts)
+ * Edit image, Seedream 5 Pro
+ *                           Replicate  —           runner-only (F9): fal publishes only tentative pricing, dearer than
+ *                                                  Replicate's (seedream5ProEdit.ts)
  * Develop                   fal        —           Replicate's takes no seed
  * Generate from references, Nano Banana 2
  *                           fal        —           Replicate's takes no seed
@@ -215,6 +218,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'BlendSceneNode:Flux 2 Pro': r('fal', 'replicate'),
   'EditImageNode:Nano Banana 2': r('fal', null, 'Replicate\'s Nano Banana 2 takes no seed'),
   'EditImageNode:GPT Image 2.5': r('fal', 'replicate'),
+  'EditImageNode:Seedream 5 Pro': r('replicate', null, 'fal publishes only tentative pricing'),
   'DevelopImageNode': r('fal', null, 'Replicate\'s Nano Banana 2 takes no seed'),
   'GenerateFromReferencesNode:nano-banana-2': r('fal', null, 'Replicate\'s Nano Banana 2 takes no seed'),
   'GenerateFromReferencesNode:seedream-5-pro': r('replicate', null, 'fal publishes only tentative pricing'),

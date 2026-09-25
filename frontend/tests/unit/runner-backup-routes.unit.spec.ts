@@ -107,7 +107,7 @@ describe('the first and backup services are the table\'s', () => {
     const keys = new Set(Object.keys(RUNNER_ROUTES))
     for (const id of [...Object.keys(RUNNER_IMAGE_MODELS), ...Object.keys(RUNNER_REPLICATE_IMAGE_MODELS)]) expect(keys.has(`image:${id}`), id).toBe(true)
     for (const id of [...Object.keys(RUNNER_VIDEO_MODELS), ...Object.keys(RUNNER_REPLICATE_VIDEO_MODELS)]) expect(keys.has(`video:${id}`), id).toBe(true)
-    for (const m of ['Nano Banana 2', 'Flux 2 Pro', 'Flux Kontext Pro', 'GPT Image 2.5']) expect(keys.has(`EditImageNode:${m}`), m).toBe(true)
+    for (const m of ['Nano Banana 2', 'Flux 2 Pro', 'Flux Kontext Pro', 'GPT Image 2.5', 'Seedream 5 Pro']) expect(keys.has(`EditImageNode:${m}`), m).toBe(true)
     for (const m of ['Flux 2 Pro', 'Flux Kontext Pro', 'Nano Banana']) expect(keys.has(`BlendSceneNode:${m}`), m).toBe(true)
     for (const m of RESTYLE_MODELS) expect(keys.has(`RestyleFromImageNode:${m}`), m).toBe(true)
     for (const m of REFERENCE_MODEL_IDS) expect(keys.has(`GenerateFromReferencesNode:${m}`), m).toBe(true)

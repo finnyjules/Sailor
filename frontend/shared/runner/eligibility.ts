@@ -199,9 +199,12 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // ── fal-edit (Task B2): fal only, at most two linked pictures ──
   // Text widgets the runner reads as plain text must not be wired: a linked
   // one would be read as blank.
-  // GPT Image 2.5 (model line-up F2): runner-only, its own family.
+  // GPT Image 2.5 (model line-up F2) and Seedream 5 Pro (F9): runner-only, each its own family.
   EditImageNode: {
-    models: { 'Nano Banana 2': 'fal-edit', 'Flux Kontext Pro': 'fal-edit', 'Flux 2 Pro': 'fal-edit', 'GPT Image 2.5': 'gpt-image-2.5' },
+    models: {
+      'Nano Banana 2': 'fal-edit', 'Flux Kontext Pro': 'fal-edit', 'Flux 2 Pro': 'fal-edit', 'GPT Image 2.5': 'gpt-image-2.5',
+      'Seedream 5 Pro': 'seedream-5-pro-edit',
+    },
     mustLink: ['input_image'],
     mustNotLink: ['prompt'],
   },

@@ -193,7 +193,7 @@ describe('hand-written payloads', () => {
     expect(IMAGE_BACKUP_RATES[ID]).toBeUndefined()
   })
 
-  it('the older Grok Imagine is untouched: its own endpoint and price', () => {
+  it('the older Grok Imagine keeps its own endpoint, price and runner row (hidden since F8, not runner-only)', () => {
     expect(IMAGE_MODELS_BY_ID['grok-imagine']).toMatchObject({ replicateSlug: 'xai/grok-imagine-image', pricePerImage: 0.02 })
     expect(IMAGE_MODELS_BY_ID['grok-imagine']!.runnerOnly).toBeUndefined()
     expect(IMAGE_RATES['grok-imagine']!.usd).toBe(0.02)

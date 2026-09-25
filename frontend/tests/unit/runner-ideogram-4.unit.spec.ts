@@ -515,7 +515,7 @@ describe('the price', () => {
     ['Quality 1K 2:1 (1408 × 704, 1 MP)', '2:1', { rendering_speed: 'QUALITY', resolution: '1K' }, 0.025, null, 0.025],
     // 2048² is 4,194,304 pixels: 5 MP by the ruling (fal's own example bills it as 4). max($0.0375, $0.03 at cost).
     ['Turbo 2K 1:1', '1:1', { rendering_speed: 'TURBO', resolution: '2K' }, 0.0375, 0.03, 0.0375],
-    // 2560 × 1440 = 3,686,400 pixels: 4 MP. max($0.06, $0.06 at cost = $0.03).
+    // 2560 × 1440 = 3,686,400 pixels: 4 MP. max($0.06, Replicate $0.06 charged at cost → $0.03) = $0.06.
     ['Balanced 2K 16:9', '16:9', { resolution: '2K' }, 0.06, 0.06, 0.06],
     // 5 MP × $0.025 = $0.125; Replicate $0.10 at cost = $0.05.
     ['Quality 2K 1:1 (the dearest)', '1:1', { rendering_speed: 'QUALITY', resolution: '2K' }, 0.125, 0.10, 0.125],
