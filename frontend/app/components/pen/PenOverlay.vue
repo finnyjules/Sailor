@@ -10,7 +10,8 @@
 //   the SVG transform and strokes stay crisp at any zoom.
 // - Points, badges, chips, sparkles and the live preview stay in screen space
 //   (applyView). The preview's arcs are computed in drawing space; their sweep
-//   flips only when the view is mirrored.
+//   flips only when the view is mirrored. A cubic's control points map
+//   affinely, so the preview's Bézier curves need no mirror correction.
 // - Pan and wheel zoom are the HOST's: it intercepts them in the capture phase
 //   on its own wrapper, before they reach this SVG.
 // - Keyboard: window keydown / keyup / blur while mounted (bubble phase). A
@@ -43,6 +44,7 @@ const {
   cursor: penCursor, dimBuffer, sparkles, sparkleClock,
   pick, clearSel, pickSegment, clearSegSel, marqueeSelectScreen,
   place, pathDown, pathMove, pathUp, getPathDrag, jointInfoForSegment,
+  curveDown, curveMove, curveUp, getCurveDrag, getHeldHandles, handleIds,
   runSolve, applyRepeat, applyMirror, cancelPendingOp,
   onArcDimClick, onConstraintMarkClick, commitHistory,
 } = props.pen
@@ -90,8 +92,68 @@ function segmentPathDrawing(pathId: EntityId, segIndex: number): string {
   return entityPath(subDoc, '__seg_hit__')
 }
 
-const pts = computed(() => (doc.value.entities.filter(e => e.kind === 'point') as any[])
-  .map(p => ({ p, s: toScreen(p) })))
+// Bézier handles are only worth drawing while their path is being worked on —
+// the pending draw, or a committed path that is selected (whole, a segment of
+// it, or one of its points/handles); otherwise they are stray dots.
+const visibleHandleIds = computed(() => {
+  const d = doc.value
+  const out = new Set<EntityId>()
+  const addHandles = (segments: SegmentSpec[]) => {
+    for (const seg of segments) {
+      if (seg.kind !== 'cubic') continue
+      if (seg.h1) out.add(seg.h1)
+      if (seg.h2) out.add(seg.h2)
+    }
+  }
+  const sel = new Set(selection.value)
+  const segPaths = new Set(selectedSegments.value.map(s => s.pathId))
+  for (const e of d.entities) {
+    if (e.kind !== 'path') continue
+    const active = sel.has(e.id) || segPaths.has(e.id) || e.anchors.some(a => sel.has(a)) ||
+      e.segments.some(s => s.kind === 'cubic' && ((s.h1 && sel.has(s.h1)) || (s.h2 && sel.has(s.h2))))
+    if (active) addHandles(e.segments)
+  }
+  if (pendingPath.value) {
+    addHandles(pendingPath.value.segments)
+    const held = getHeldHandles()
+    if (held.lastHOut) out.add(held.lastHOut)
+    if (held.firstHIn) out.add(held.firstHIn)
+  }
+  return out
+})
+const allHandleIds = computed(() => handleIds())
+const pts = computed(() => (doc.value.entities.filter(e =>
+  e.kind === 'point' && (!allHandleIds.value.has(e.id) || visibleHandleIds.value.has(e.id))) as any[])
+  .map(p => ({ p, s: toScreen(p), handle: allHandleIds.value.has(p.id) })))
+
+// screen-space arms (point → handle) for the handles on show
+const handleArms = computed(() => {
+  const d = doc.value
+  const visible = visibleHandleIds.value
+  const out: { x1: number; y1: number; x2: number; y2: number }[] = []
+  const arm = (fromId: EntityId | undefined, hId: EntityId | null) => {
+    if (!fromId || !hId || !visible.has(hId)) return
+    const a = screenPt(fromId), h = screenPt(hId)
+    if (a && h) out.push({ x1: a.x, y1: a.y, x2: h.x, y2: h.y })
+  }
+  const addArms = (anchors: EntityId[], segments: SegmentSpec[]) => {
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i]!
+      if (seg.kind !== 'cubic') continue
+      arm(anchors[i], seg.h1)
+      arm(anchors[(i + 1) % anchors.length], seg.h2)
+    }
+  }
+  for (const e of d.entities) if (e.kind === 'path') addArms(e.anchors, e.segments)
+  const pp = pendingPath.value
+  if (pp && pp.anchors.length) {
+    addArms(pp.anchors, pp.segments)
+    const held = getHeldHandles()
+    arm(pp.anchors[pp.anchors.length - 1], held.lastHOut)
+    arm(pp.anchors[0], held.firstHIn)
+  }
+  return out
+})
 const marks = computed(() => constraintMarks(doc.value))
 // STRUCTURAL/auto constraint kinds — internal copy-rule bookkeeping (Repeat's
 // rotatedFrom, Mirror's mirroredFrom) and arc-integrity plumbing (equalDist,
@@ -110,6 +172,8 @@ const arcDims = computed(() => arcDimensionMarks(doc.value).map(m => ({ m, s: to
 // point-handle rendering: selection (orange, filled, r6) always wins; a
 // construction point renders as a small grey hollow dot, distinct from both
 // the orange selection fill and the normal solid blue / fixed-grey dots.
+// a Bézier handle: a small hollow violet dot, matching its arm
+const HANDLE_COLOR = '#7c3aed'
 function pointRadius(p: { id: EntityId; construction?: boolean }): number {
   if (selection.value.includes(p.id)) return 6
   return p.construction ? 4 : 6
@@ -119,8 +183,9 @@ function pointFill(p: { id: EntityId; construction?: boolean; fixed?: boolean })
   if (p.construction) return 'none'
   return p.fixed ? '#9ca3af' : '#2563eb'
 }
-function pointStroke(p: { id: EntityId; construction?: boolean }): string {
+function pointStroke(p: { id: EntityId; construction?: boolean }, handle = false): string {
   if (selection.value.includes(p.id)) return 'none'
+  if (handle) return HANDLE_COLOR
   return p.construction ? '#9ca3af' : 'none'
 }
 
@@ -140,7 +205,7 @@ function screenPt(id: EntityId): { x: number; y: number } | null {
 // Arcs are solved in drawing space; a screen arc's radius is r·pxPerUnit and
 // its sweep flips only for a mirrored view. Pure read; never mutates the doc.
 const previewD = computed(() => {
-  if (tool.value !== 'path') return ''
+  if (tool.value !== 'path' && tool.value !== 'curve') return ''
   const pp = pendingPath.value
   if (!pp || pp.anchors.length === 0) return ''
   const first = screenPt(pp.anchors[0]!)
@@ -151,8 +216,10 @@ const previewD = computed(() => {
   let d = `M ${first.x} ${first.y}`
   const segCount = pp.segments.length
   const lastAnchorId = pp.anchors[pp.anchors.length - 1]!
-  const pathDrag = getPathDrag()
+  const pathDrag = tool.value === 'path' ? getPathDrag() : null
   const bowing = !!pathDrag && pathDrag.bowed && pathDrag.anchor === lastAnchorId && !!penCursor.value
+  const curveDrag = tool.value === 'curve' ? getCurveDrag() : null
+  const dragging = !!curveDrag && curveDrag.anchor === lastAnchorId
   for (let i = 0; i < segCount; i++) {
     const seg = pp.segments[i]!
     const fromId = pp.anchors[i]!
@@ -187,9 +254,34 @@ const previewD = computed(() => {
         const sweepScreen = (mirrored ? 1 - seg.sweep : seg.sweep) as 0 | 1
         d += ` A ${r * k} ${r * k} 0 ${large} ${sweepScreen} ${to.x} ${to.y}`
       } else d += ` L ${to.x} ${to.y}`
+    } else if (seg.kind === 'cubic') {
+      const c1 = (seg.h1 && screenPt(seg.h1)) || screenPt(fromId) || to
+      if (dragging && curveDrag!.smooth && i === segCount - 1 && penCursor.value) {
+        // bending live: c2 is the pointer mirrored through the point being
+        // placed (what addSmoothHandles will make of it on release)
+        const ptr = toScreen(penCursor.value)
+        d += ` C ${c1.x} ${c1.y} ${2 * to.x - ptr.x} ${2 * to.y - ptr.y} ${to.x} ${to.y}`
+      } else {
+        const c2 = (seg.h2 && screenPt(seg.h2)) || to
+        d += ` C ${c1.x} ${c1.y} ${c2.x} ${c2.y} ${to.x} ${to.y}`
+      }
     } else {
       d += ` L ${to.x} ${to.y}`
     }
+  }
+  if (tool.value === 'curve') {
+    // rubber band: a curve out of the last point's held out-handle, if any
+    if (!dragging && penCursor.value) {
+      const last = screenPt(lastAnchorId)
+      if (last) {
+        const ptr = toScreen(penCursor.value)
+        const hId = getHeldHandles().lastHOut
+        const h = hId ? screenPt(hId) : null
+        d += h ? ` M ${last.x} ${last.y} C ${h.x} ${h.y} ${ptr.x} ${ptr.y} ${ptr.x} ${ptr.y}`
+               : ` M ${last.x} ${last.y} L ${ptr.x} ${ptr.y}`
+      }
+    }
+    return d
   }
   if (!bowing && penCursor.value) {
     const last = screenPt(lastAnchorId)
@@ -203,6 +295,16 @@ const previewD = computed(() => {
     }
   }
   return d
+})
+
+// the two handles a Curve drag is pulling out: point→pointer and its mirror
+const previewDragHandles = computed(() => {
+  const curveDrag = getCurveDrag()
+  if (tool.value !== 'curve' || !curveDrag || !curveDrag.smooth || !penCursor.value) return null
+  const anchor = screenPt(curveDrag.anchor)
+  if (!anchor) return null
+  const ptr = toScreen(penCursor.value)
+  return { anchor, ptr, mirror: { x: 2 * anchor.x - ptr.x, y: 2 * anchor.y - ptr.y } }
 })
 
 // live radius chip near the bowed arc's midpoint while the path tool drags a
@@ -386,6 +488,7 @@ function onPointerDownSvg(ev: PointerEvent) {
   const w = drawingXY(ev)
   if (!w) return
   if (tool.value === 'path') { pathDown(w.x, w.y, ev.shiftKey); return }
+  if (tool.value === 'curve') { curveDown(w.x, w.y); return }
   const { x, y } = w
   place(x, y)
 }
@@ -407,6 +510,11 @@ function onPointerMove(ev: PointerEvent) {
     if (w) pathMove(w.x, w.y, ev.shiftKey)
     return
   }
+  if (tool.value === 'curve') {
+    const w = drawingXY(ev)
+    if (w) curveMove(w.x, w.y)
+    return
+  }
   if (!dragId || ev.buttons === 0) return
   const w = drawingXY(ev)
   if (!w) return
@@ -426,6 +534,11 @@ function onPointerUp(ev: PointerEvent) {
   if (tool.value === 'path' && getPathDrag()) {
     const w = drawingXY(ev)
     if (w) pathUp(w.x, w.y)
+    return
+  }
+  if (tool.value === 'curve' && getCurveDrag()) {
+    const w = drawingXY(ev)
+    if (w) curveUp(w.x, w.y)
     return
   }
   if (marqueeStart) {
@@ -520,13 +633,23 @@ onUnmounted(() => {
       </template>
     </g>
     <!-- screen space -->
+    <line v-for="(a, i) in handleArms" :key="'arm-' + i" :x1="a.x1" :y1="a.y1" :x2="a.x2" :y2="a.y2"
+          :stroke="HANDLE_COLOR" stroke-width="1" pointer-events="none" data-handle-arm />
     <path v-if="previewD" :d="previewD" fill="none" stroke="#6366f1" stroke-width="1.5" stroke-dasharray="5 3"
           pointer-events="none" data-path-preview />
-    <circle v-for="{ p, s } in pts" :key="p.id" :cx="s.x" :cy="s.y" :r="pointRadius(p)"
-            :fill="pointFill(p)" :stroke="pointStroke(p)" stroke-width="1.5"
+    <g v-if="previewDragHandles" pointer-events="none" data-drag-handles>
+      <line :x1="previewDragHandles.anchor.x" :y1="previewDragHandles.anchor.y" :x2="previewDragHandles.ptr.x" :y2="previewDragHandles.ptr.y"
+            :stroke="HANDLE_COLOR" stroke-width="1" />
+      <line :x1="previewDragHandles.anchor.x" :y1="previewDragHandles.anchor.y" :x2="previewDragHandles.mirror.x" :y2="previewDragHandles.mirror.y"
+            :stroke="HANDLE_COLOR" stroke-width="1" />
+      <circle :cx="previewDragHandles.ptr.x" :cy="previewDragHandles.ptr.y" r="3" :fill="HANDLE_COLOR" />
+      <circle :cx="previewDragHandles.mirror.x" :cy="previewDragHandles.mirror.y" r="3" :fill="HANDLE_COLOR" />
+    </g>
+    <circle v-for="{ p, s, handle } in pts" :key="p.id" :cx="s.x" :cy="s.y" :r="pointRadius(p)"
+            :fill="pointFill(p)" :stroke="pointStroke(p, handle)" stroke-width="1.5"
             :style="{ cursor: tool === 'select' ? 'grab' : 'crosshair' }"
             @pointerdown="(ev) => onPointerDownPoint(p.id, ev)" @pointerup="(ev) => onPointerUpPoint(p.id, ev)"
-            :data-point="p.id" :data-construction="p.construction ? '' : null" />
+            :data-point="p.id" :data-construction="p.construction ? '' : null" :data-handle="handle ? '' : null" />
     <template v-if="showLabels">
       <g v-for="{ m, s } in visibleMarks" :key="m.id" class="constraint-badge" pointer-events="auto" style="cursor: pointer"
          :data-constraint="m.id" :data-constraint-kind="m.kind"

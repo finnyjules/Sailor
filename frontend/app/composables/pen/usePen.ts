@@ -10,7 +10,7 @@
 // sparkle loop starts lazily inside sparkle(); dispose() cancels it.
 import { ref, computed, toRaw, type Ref } from 'vue'
 import type { SketchDoc, SketchConstraint, EntityId, ConstraintKind, SegmentSpec } from '~/lib/sketch/model'
-import { addPoint, addLine, addCircle, addConstraint, removeConstraint, deleteEntity, addPath, repeatEntities, mirrorEntities, pointClosure, isPointReferenced } from '~/lib/sketch/edit'
+import { addPoint, addLine, addCircle, addConstraint, removeConstraint, deleteEntity, addPath, repeatEntities, mirrorEntities, pointClosure, isPointReferenced, addSmoothHandles } from '~/lib/sketch/edit'
 import { snapPoint, inferCircleTangents, tangentJointArc } from '~/lib/sketch/infer'
 import { solve, type DragTarget } from '~/lib/sketch/solve'
 import { dist, type Vec2 } from '~/lib/sketch/geom'
@@ -25,7 +25,9 @@ import {
   type RuleOption,
 } from './penRules'
 
-export type PenTool = 'select' | 'point' | 'line' | 'circle' | 'path'   // 'curve' added in Task 6
+// 'path' is the arc Pen; 'curve' is the Bézier Curve tool. Both add to the
+// same pending path (see selectTool / curveDown).
+export type PenTool = 'select' | 'point' | 'line' | 'circle' | 'path' | 'curve'
 export interface PenOptions { openOnly?: boolean; tools?: PenTool[] }
 
 export const SPARKLE_LIFETIME_MS = 380
@@ -84,6 +86,10 @@ export type PendingPath = { anchors: EntityId[]; segments: SegmentSpec[] } | nul
 // the path tool's live down→(bow)→up gesture — plain (non-reactive) state, as
 // it always was on the page; hosts read it through getPathDrag().
 export type PathDrag = { anchor: EntityId; prevAnchor: EntityId; startX: number; startY: number; bowed: boolean } | null
+// the Curve tool's live down→(drag)→up gesture: past the bow threshold the
+// point being placed turns smooth and the pointer pulls out its handles.
+export type CurveDrag = { anchor: EntityId; startX: number; startY: number; smooth: boolean } | null
+const isDrawTool = (t: PenTool) => t === 'path' || t === 'curve'
 
 // Arrow-key nudge, in screen pixels: 0.25 / 2.5 drawing units at the dev
 // page's default 34 px/unit, so the default view moves exactly as before.
@@ -227,6 +233,7 @@ export function usePen(opts: {
     pending.value = null
     pendingPath.value = null
     pathDrag = null
+    resetCurveState()
     cursor.value = null
     dimBuffer.value = ''
     status.value = 'undo'
@@ -241,6 +248,7 @@ export function usePen(opts: {
     pending.value = null
     pendingPath.value = null
     pathDrag = null
+    resetCurveState()
     cursor.value = null
     dimBuffer.value = ''
     status.value = 'redo'
@@ -551,7 +559,11 @@ export function usePen(opts: {
   // fresh pointOnLine/pointOnCircle) sparkles at the snapped location — see
   // sparkle() above.
   function placePoint(x: number, y: number, exclude: EntityId[] = [], construction = false): EntityId {
-    const snapped = snapPoint(doc.value, x, y, { exclude, tol: pxToUnits(SNAP_PX, opts.view.value) })
+    // Bézier handles are construction points that belong to their anchor —
+    // never a snap target (08-29 build note)
+    const handles = handleIds()
+    const ex = handles.size ? [...exclude, ...handles] : exclude
+    const snapped = snapPoint(doc.value, x, y, { exclude: ex, tol: pxToUnits(SNAP_PX, opts.view.value) })
     if (snapped.snap?.kind === 'coincident') { sparkle(snapped.x, snapped.y); return snapped.snap.targetId }
     const id = addPoint(doc.value, snapped.x, snapped.y, { construction })
     if (snapped.snap?.kind === 'pointOnLine') { addConstraint(doc.value, 'pointOnLine', [id, snapped.snap.targetId]); sparkle(snapped.x, snapped.y) }
@@ -661,6 +673,7 @@ export function usePen(opts: {
     const prev = doc.value.entities.find(e => e.id === pp.anchors[pp.anchors.length - 1]) as any
     if (id === pp.anchors[0] && pp.anchors.length >= 2) { finishPath(true); return }  // clicked first anchor → close (finishPath commits)
     if (id === pp.anchors[pp.anchors.length - 1]) return                               // ignore double-click same point
+    dropLastHOut()
     if (nextSegment.value === 'arc') {
       const cur = doc.value.entities.find(e => e.id === id) as any
       // center: midpoint pushed perpendicular by half the chord
@@ -722,6 +735,7 @@ export function usePen(opts: {
     if (id === pp.anchors[0] && pp.anchors.length >= 2) { finishPath(true); pathDrag = null; return }  // clicked first anchor → close (finishPath commits)
     if (id === pp.anchors[pp.anchors.length - 1]) { pathDrag = null; return }                            // ignore double-click same point
     const prevAnchor = pp.anchors[pp.anchors.length - 1]!
+    dropLastHOut()   // a line/arc segment has no use for a Curve point's out-handle
     pp.segments.push({ kind: 'line' })
     pp.anchors.push(id)
     if (shift) captureAxisConstraint(prevAnchor, id)
@@ -835,8 +849,16 @@ export function usePen(opts: {
     else if (pendingPath.value) applyLineDimension(value)
   }
 
-  // closing segment between last and first anchors — the path tool always closes with a line.
+  // closing segment between last and first anchors — the Pen closes with a
+  // line; the Curve tool closes with a cubic that carries the last point's
+  // out-handle and the first point's in-handle (so a smooth first point stays
+  // smooth instead of landing as a cusp).
   function closingSegment(): SegmentSpec {
+    if (tool.value === 'curve') {
+      const seg: SegmentSpec = { kind: 'cubic', h1: lastHOut, h2: firstHIn }
+      lastHOut = null; firstHIn = null   // consumed by the path now
+      return seg
+    }
     return { kind: 'line' }
   }
 
@@ -844,10 +866,11 @@ export function usePen(opts: {
     const pp = pendingPath.value
     pendingPath.value = null
     dimBuffer.value = ''
-    if (!pp || pp.anchors.length < 2) return
+    curveDrag = null
+    if (!pp || pp.anchors.length < 2) { dropUnusedHandles(); return }
     if (close) {
       // closing segment of the current kind between last and first anchors
-      if (nextSegment.value === 'arc') {
+      if (tool.value !== 'curve' && nextSegment.value === 'arc') {
         const a = doc.value.entities.find(e => e.id === pp.anchors[pp.anchors.length - 1]) as any
         const b = doc.value.entities.find(e => e.id === pp.anchors[0]) as any
         const c = addPoint(doc.value, (a.x + b.x) / 2 - (b.y - a.y) / 2, (a.y + b.y) / 2 + (b.x - a.x) / 2)
@@ -855,9 +878,98 @@ export function usePen(opts: {
       } else pp.segments.push(closingSegment())
     }
     addPath(doc.value, pp.anchors, pp.segments, close, { construction: guideMode.value })
+    dropUnusedHandles()   // an open end's out-handle / a first in-handle the path never used
     runSolve()
     commitHistory()
   }
+
+  // --- curve tool (Bézier): click places a sharp point; click-and-drag places
+  // a smooth point and pulls out its handles (the opposite one mirrors, held
+  // by a collinear rule — addSmoothHandles). Each new segment's kind is the
+  // tool active when its END point is placed, so Pen and Curve build one path.
+  let curveDrag: CurveDrag = null
+  // the previous smooth point's out-handle — the next cubic's h1. Cleared on
+  // every sharp point, or the next segment inherits a stale handle.
+  let lastHOut: EntityId | null = null
+  // the first point's in-handle, if it was drawn smooth — the closing cubic's h2
+  let firstHIn: EntityId | null = null
+
+  function resetCurveState() { curveDrag = null; lastHOut = null; firstHIn = null }
+
+  // a handle point nothing uses any more: delete it (its collinear rule goes
+  // with it). Never touches a point a line/circle/path still references.
+  function dropHandle(id: EntityId | null) {
+    if (!id) return
+    const p = doc.value.entities.find(e => e.id === id) as any
+    if (p && p.kind === 'point' && !isPointReferenced(doc.value, id)) deleteEntity(doc.value, id)
+  }
+  function dropLastHOut() { dropHandle(lastHOut); lastHOut = null }
+  function dropUnusedHandles() { dropHandle(lastHOut); dropHandle(firstHIn); lastHOut = null; firstHIn = null }
+
+  // every Bézier handle id in play: committed paths' cubic handles, the
+  // pending path's, and the two held between clicks
+  function handleIds(): Set<EntityId> {
+    const out = new Set<EntityId>()
+    const add = (segs: SegmentSpec[]) => {
+      for (const s of segs) if (s.kind === 'cubic') { if (s.h1) out.add(s.h1); if (s.h2) out.add(s.h2) }
+    }
+    for (const e of doc.value.entities) if (e.kind === 'path') add(e.segments)
+    if (pendingPath.value) add(pendingPath.value.segments)
+    if (lastHOut) out.add(lastHOut)
+    if (firstHIn) out.add(firstHIn)
+    return out
+  }
+
+  function curveDown(x: number, y: number) {
+    const id = placePoint(x, y, [], guideMode.value)
+    if (!pendingPath.value) {
+      pendingPath.value = { anchors: [id], segments: [] }
+      lastHOut = null
+      firstHIn = null
+      // no commit yet: the first point (and its handles, if dragged) settle as
+      // one history entry in curveUp
+      curveDrag = { anchor: id, startX: x, startY: y, smooth: false }
+      return
+    }
+    const pp = pendingPath.value
+    if (id === pp.anchors[0] && pp.anchors.length >= 2) { finishPath(true); curveDrag = null; return }  // clicked first point → close (finishPath commits)
+    if (id === pp.anchors[pp.anchors.length - 1]) { curveDrag = null; return }                            // ignore double-click same point
+    pp.segments.push({ kind: 'cubic', h1: lastHOut, h2: null })
+    pp.anchors.push(id)
+    curveDrag = { anchor: id, startX: x, startY: y, smooth: false }
+  }
+
+  function curveMove(x: number, y: number) {
+    // reactive — drives the overlay's live preview and drag handles
+    cursor.value = { x, y, shift: false }
+    if (!curveDrag) return
+    if (dist({ x, y }, { x: curveDrag.startX, y: curveDrag.startY }) > pxToUnits(BOW_PX, opts.view.value)) curveDrag.smooth = true
+  }
+
+  function curveUp(x: number, y: number) {
+    if (!curveDrag) return
+    const { anchor, smooth } = curveDrag
+    curveDrag = null
+    const pp = pendingPath.value
+    if (smooth) {
+      const { hOut, hIn } = addSmoothHandles(doc.value, anchor, x, y)
+      if (pp && pp.segments.length > 0) {
+        const segIn = pp.segments[pp.segments.length - 1]
+        if (segIn && segIn.kind === 'cubic') segIn.h2 = hIn
+        else dropHandle(hIn)   // (unreachable today: the segment into a Curve point is always cubic)
+      }
+      if (pp && pp.anchors[0] === anchor) firstHIn = hIn   // this point IS the path's first point
+      lastHOut = hOut
+    } else {
+      // sharp point — no out-handle; must NOT carry the previous smooth point's
+      lastHOut = null
+    }
+    runSolve()
+    commitHistory()   // one entry for the whole down→(drag)→up gesture
+  }
+  function getCurveDrag(): CurveDrag { return curveDrag }
+  // the handles held between clicks (not yet in any segment) — for the overlay's arms
+  function getHeldHandles(): { lastHOut: EntityId | null; firstHIn: EntityId | null } { return { lastHOut, firstHIn } }
 
   // low-level applies — used by both the fast path (center/axis already in the
   // selection) and the guided pick. clearSel first so the center-point click
@@ -992,6 +1104,8 @@ export function usePen(opts: {
       if (s.kind === 'cubic') { if (s.h1) candidates.add(s.h1); if (s.h2) candidates.add(s.h2) }
       else if (s.kind === 'arc') candidates.add(s.center)
     }
+    if (lastHOut) candidates.add(lastHOut)
+    if (firstHIn) candidates.add(firstHIn)
     for (const id of candidates) {
       const p = doc.value.entities.find(e => e.id === id) as any
       if (!p || p.kind !== 'point' || p.fixed) continue
@@ -1030,6 +1144,7 @@ export function usePen(opts: {
     cleanupPendingAndCommit()
     pendingPath.value = null
     pathDrag = null
+    resetCurveState()
     cursor.value = null
     dimBuffer.value = ''
   }
@@ -1054,6 +1169,12 @@ export function usePen(opts: {
     const lastSeg = pp.segments.length ? pp.segments.pop() : undefined
     const candidates: EntityId[] = [lastAnchor]
     if (lastSeg && lastSeg.kind === 'arc') candidates.push(lastSeg.center)
+    // a Curve point: its in-handle (the popped segment's h2) and its out-handle
+    // go with it; the previous point's out-handle (h1) is held again
+    if (lastSeg && lastSeg.kind === 'cubic' && lastSeg.h2) candidates.push(lastSeg.h2)
+    if (lastHOut) candidates.push(lastHOut)
+    lastHOut = lastSeg && lastSeg.kind === 'cubic' ? lastSeg.h1 : null
+    curveDrag = null
     for (const id of candidates) {
       const p = doc.value.entities.find(e => e.id === id) as any
       if (p && p.kind === 'point' && !p.fixed && !isPointReferenced(doc.value, id)) deleteEntity(doc.value, id)
@@ -1062,12 +1183,22 @@ export function usePen(opts: {
       cleanupPendingPath()
       pendingPath.value = null
       pathDrag = null
+      resetCurveState()
       cursor.value = null
     }
     if (doc.value.entities.length !== before) commitHistory()
   }
 
   function selectTool(t: Tool) {
+    // Pen ↔ Curve mid-path keeps drawing the same path: the next segment's kind
+    // follows whichever of the two is active when its end point is placed
+    if (pendingPath.value && isDrawTool(tool.value) && isDrawTool(t)) {
+      tool.value = t
+      pathDrag = null
+      curveDrag = null
+      dimBuffer.value = ''
+      return
+    }
     cleanupPendingAndCommit()
     cancelPendingOp()   // a half-armed Repeat/Mirror never survives a tool switch
     // switching to a draw tool must not carry a stale entity/segment
@@ -1084,6 +1215,7 @@ export function usePen(opts: {
     pending.value = null
     pendingPath.value = null
     pathDrag = null
+    resetCurveState()
     cursor.value = null
     dimBuffer.value = ''
   }
@@ -1096,6 +1228,7 @@ export function usePen(opts: {
     pending.value = null
     pendingPath.value = null
     pathDrag = null
+    resetCurveState()
     cursor.value = null
     dimBuffer.value = ''
     status.value = 'ready'
@@ -1133,6 +1266,7 @@ export function usePen(opts: {
     pick, clearSel, pickSegment, clearSegSel, marqueeSelect, marqueeSelectScreen, isPointId,
     // drawing
     place, pathDown, pathMove, pathUp, finishPath, cancelPath, removeLastAnchor, getPathDrag, jointInfoForSegment,
+    curveDown, curveMove, curveUp, getCurveDrag, getHeldHandles, handleIds,
     // verbs
     runSolve, apply, applyWithValue, availableConstraints, orderRefs, del, nudge, fixSelected, makeConstruction, flip,
     repeatPrompt, armRepeat, doRepeat, applyRepeat, doMirror, applyMirror, cancelPendingOp,

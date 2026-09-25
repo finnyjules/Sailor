@@ -82,7 +82,25 @@ export function availableConstraints(doc: SketchDoc, selection: EntityId[], segm
       out.push({ kind: 'perpendicular', label: 'Perpendicular' }, { kind: 'parallel', label: 'Parallel' }, { kind: 'equalDist', label: 'Equal' })
     }
   }
+  // rules that need exact geometry (arcs, lines, circles) do nothing on a
+  // Bézier curve — hide them rather than offer a dead button (spec 2b)
+  if (touchesCurve(doc, selection, segments)) return out.filter(r => !EXACT_GEOMETRY_RULES.includes(r.kind))
   return out
+}
+
+const EXACT_GEOMETRY_RULES: ConstraintKind[] = ['tangentLineCircle', 'tangentCircleCircle', 'radius', 'concentric', 'equalRadius']
+
+// a selected segment is a cubic, or a selected path contains one
+function touchesCurve(doc: SketchDoc, selection: EntityId[], segments: SegRef[]): boolean {
+  for (const s of segments) {
+    const path = doc.entities.find(e => e.id === s.pathId) as any
+    if (path?.kind === 'path' && path.segments[s.segIndex]?.kind === 'cubic') return true
+  }
+  for (const id of selection) {
+    const e = doc.entities.find(x => x.id === id) as any
+    if (e?.kind === 'path' && e.segments.some((seg: any) => seg.kind === 'cubic')) return true
+  }
+  return false
 }
 
 // a segment's own two anchor ids, [anchors[i], anchors[(i+1)%n]] — the same

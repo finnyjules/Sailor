@@ -154,6 +154,98 @@ test('path: click-and-drag bows a segment into a circular arc', async ({ page })
   expect(result.pathData).toContain(' A ')
 })
 
+// Restored from the retired Bézier pen (78788db4a^), renamed pen → curve.
+test('curve: smooth blob stays smooth under handle and anchor drags', async ({ page }) => {
+  await page.goto('/dev/sketch-draw')
+  await page.waitForSelector('[data-ready]')
+  await page.waitForFunction(() => !!(window as any).__sketchDraw)
+
+  const out = await page.evaluate(async () => {
+    const D = (window as any).__sketchDraw
+    D.reset()
+    D.setTool('curve')
+    // sharp point, then two smooth points (down→move→up), then close
+    D.curveDown(2, 2); D.curveUp(2, 2)                        // sharp
+    D.curveDown(8, 2); D.curveMove(9.5, 3)                    // smooth — bending mid-drag
+    // the live preview updates through the same reactive state curveMove
+    // always touches, so this checks the real preview path, not a stand-in
+    await new Promise(r => setTimeout(r, 0))                  // let Vue flush the DOM patch
+    const previewEl = document.querySelector('[data-path-preview]')
+    const previewExists = !!previewEl
+    const previewHasCubic = (previewEl?.getAttribute('d') || '').includes(' C ')
+    const dragHandlesShown = !!document.querySelector('[data-drag-handles]')
+    D.curveUp(9.5, 3)
+    D.curveDown(6, 7); D.curveMove(4.5, 7.5); D.curveUp(4.5, 7.5) // smooth
+    D.curveDown(2, 2); D.curveUp(2, 2)                        // click first point → close
+    const path = D.doc.entities.find((e: any) => e.kind === 'path')
+    const col = D.doc.constraints.filter((c: any) => c.kind === 'collinear')
+    // drag a handle: find the collinear rule of point 1 and drag its hOut
+    const rule = col[0]
+    D.drag(rule.refs[2], 10, 4)
+    // smoothness invariant: cross((anchor−hIn),(hOut−hIn)) ≈ 0 for every collinear rule
+    const P = (id: string) => D.doc.entities.find((e: any) => e.id === id)
+    let maxCross = 0
+    for (const c of col) {
+      const hi = P(c.refs[0]), an = P(c.refs[1]), ho = P(c.refs[2])
+      maxCross = Math.max(maxCross, Math.abs((an.x - hi.x) * (ho.y - hi.y) - (an.y - hi.y) * (ho.x - hi.x)))
+    }
+    // and an anchor drag keeps it solvable (the drag hook reports through status)
+    D.drag(path.anchors[0], 1.5, 1.5)
+    return { closed: path.closed, anchors: path.anchors.length, smoothRules: col.length,
+             cubics: path.segments.filter((s: any) => s.kind === 'cubic').length,
+             maxCross, status: D.status(), d: D.pathData(), previewExists, previewHasCubic, dragHandlesShown }
+  })
+
+  expect(out.previewExists).toBe(true)      // live curve preview rendered mid-drag
+  expect(out.previewHasCubic).toBe(true)    // ...and it was bending, not just a straight stand-in
+  expect(out.dragHandlesShown).toBe(true)   // the handles being pulled out are drawn
+  expect(out.closed).toBe(true)
+  expect(out.anchors).toBe(3)
+  expect(out.smoothRules).toBe(2)
+  expect(out.cubics).toBeGreaterThanOrEqual(3)
+  expect(out.maxCross).toBeLessThan(0.01)   // smooth after the handle drag
+  expect(out.status).toMatch(/^solved/)
+  expect(out.d).toContain(' C ')            // real bezier output
+})
+
+test('curve: Pen and Curve build one path — line segment then curve segment', async ({ page }) => {
+  await page.goto('/dev/sketch-draw')
+  await page.waitForSelector('[data-ready]')
+  await page.waitForFunction(() => !!(window as any).__sketchDraw)
+
+  const out = await page.evaluate(() => {
+    const D = (window as any).__sketchDraw
+    D.reset()
+    D.setTool('path')
+    D.pathDown(2, 2); D.pathUp(2, 2)
+    D.pathDown(6, 2); D.pathUp(6, 2)                          // line segment
+    D.setTool('curve')                                        // switching does not end the path
+    D.curveDown(10, 4); D.curveMove(11, 5); D.curveUp(11, 5)  // curve segment
+    D.finishPath(false)
+    const paths = D.doc.entities.filter((e: any) => e.kind === 'path')
+    return { paths: paths.length, kinds: paths[0]?.segments.map((s: any) => s.kind), d: D.pathData() }
+  })
+
+  expect(out.paths).toBe(1)
+  expect(out.kinds).toEqual(['line', 'cubic'])
+  expect(out.d).toContain(' C ')
+})
+
+test('curve: the toolbar offers Curve after Pen, with its own hint', async ({ page }) => {
+  await page.goto('/dev/sketch-draw')
+  await page.waitForSelector('[data-ready]')
+  await page.waitForFunction(() => !!(window as any).__sketchDraw)
+
+  const order = await page.locator('[data-tool]').evaluateAll(els => els.map(e => e.getAttribute('data-tool')))
+  expect(order.slice(0, 3)).toEqual(['select', 'path', 'curve'])
+  const btn = page.locator('[data-tool="curve"]')
+  await expect(btn).toHaveAttribute('title', 'Bézier curve — drag to pull out handles')
+  await btn.click()
+  await expect(btn).toHaveAttribute('aria-pressed', 'true')
+  expect(await page.evaluate(() => (window as any).__sketchDraw.tool)).toBe('curve')
+  await expect(page.getByText('Click for a sharp point, drag to pull out handles')).toBeVisible()
+})
+
 test('tangent joint: arc snaps tangent to the previous line and stays smooth', async ({ page }) => {
   await page.goto('/dev/sketch-draw')
   await page.waitForSelector('[data-ready]')

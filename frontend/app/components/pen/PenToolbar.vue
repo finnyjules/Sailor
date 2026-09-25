@@ -13,7 +13,7 @@ import { computed, type Component } from 'vue'
 import type { Pen, PenTool } from '~/composables/pen/usePen'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
 import {
-  MousePointer2, Spline, Minus, Circle, Dot,
+  MousePointer2, Spline, PenTool as PenNib, Minus, Circle, Dot,
   CircleDashed, Tag, Undo2, Redo2,
 } from 'lucide-vue-next'
 
@@ -33,12 +33,13 @@ const {
   undo, redo, canUndo, canRedo,
 } = props.pen
 
-// Tool row: Select, Pen (arcs), Line, Circle, Point — the Curve tool arrives
-// in Task 6 (no placeholder here). Order and tooltip copy match the spec's
+// Tool row: Select, Pen (arcs), Curve (Bézier), Line, Circle, Point. Pen and
+// Curve add to the same path. Order and tooltip copy match the spec's
 // approved layout (sentence case, "Name — what it does").
 const TOOLS: { id: PenTool; icon: Component; label: string }[] = [
   { id: 'select', icon: MousePointer2, label: 'Select — click a shape to select it, drag a point to move it' },
   { id: 'path', icon: Spline, label: 'Pen — click to add a point, drag to bend it into an arc' },
+  { id: 'curve', icon: PenNib, label: 'Bézier curve — drag to pull out handles' },
   { id: 'line', icon: Minus, label: 'Line — click two points to draw a line' },
   { id: 'circle', icon: Circle, label: 'Circle — click the centre, then click again to set the size' },
   { id: 'point', icon: Dot, label: 'Point — click to place a point' },
@@ -49,6 +50,7 @@ const TOOLS: { id: PenTool; icon: Component; label: string }[] = [
 const TOOL_HINTS: Record<PenTool, string> = {
   select: 'Drag a point to move it · click a shape to select it · Option-click an edge for one segment',
   path: 'Click to add a point, drag to bend it into an arc, click the first point to close',
+  curve: 'Click for a sharp point, drag to pull out handles',
   line: 'Click two points to draw a line',
   circle: 'Click the centre, then click again to set the size',
   point: 'Click to place a point',
@@ -103,7 +105,7 @@ const isSelectIdle = computed(() => tool.value === 'select' && !hasAnySelection.
       <button class="tbtn icon" data-act="redo" :disabled="!canRedo()" title="Redo" aria-label="Redo" @click="redo()">
         <Redo2 :size="16" />
       </button>
-      <template v-if="tool === 'path'">
+      <template v-if="tool === 'path' || tool === 'curve'">
         <span class="sep" />
         <button class="tbtn" data-act="close" title="Close the path back to its first point" @click="finishPath(true)">Close</button>
         <button class="tbtn" data-act="finish" title="Finish the path as an open line" @click="finishPath(false)">Finish</button>

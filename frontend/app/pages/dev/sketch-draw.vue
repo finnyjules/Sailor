@@ -105,7 +105,7 @@ const {
   dimBuffer, nextSegment,
   selectTool, setGuideMode, setShowLabels,
   pick, clearSel, pickSegment, clearSegSel, marqueeSelect, isPointId,
-  place, pathDown, pathMove, pathUp, finishPath, cancelPath, removeLastAnchor,
+  place, pathDown, pathMove, pathUp, curveDown, curveMove, curveUp, finishPath, cancelPath, removeLastAnchor,
   runSolve, apply, availableConstraints, del, nudge, makeConstruction, flip,
   armRepeat, doMirror, cancelPendingOp, pendingOp,
   setArcRadius, setConstraintValue, removeConstraintById,
@@ -196,6 +196,10 @@ onMounted(() => {
     pathDown: (x: number, y: number) => pathDown(x, y),
     pathMove: (x: number, y: number) => pathMove(x, y),
     pathUp: (x: number, y: number) => pathUp(x, y),
+    // the Curve (Bézier) tool's gesture — same calls a real down→drag→up makes
+    curveDown: (x: number, y: number) => curveDown(x, y),
+    curveMove: (x: number, y: number) => curveMove(x, y),
+    curveUp: (x: number, y: number) => curveUp(x, y),
     // test-only hook: same code path as a real shift-click pointerdown on the
     // path tool (pathDown with shift=true) — real pointer events carry
     // shiftKey directly, but the __sketchDraw API otherwise has no way to
