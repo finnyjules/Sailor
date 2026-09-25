@@ -31,6 +31,20 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
 
+### Shared pen — Plan C (Shape Studio) — LANDED 2026-09-25 (spec `docs/superpowers/specs/2026-09-24-shared-pen-design.md`, plan `docs/superpowers/plans/2026-09-25-shared-pen-c-shape-studio.md`)
+
+Shape Studio's Shape picker gains **Drawn**. Picking it opens the shared pen over the preview (its toolbar replaces the prompt dock while open); you draw one unit — arcs, curves, lines, circles, rules — and Enter makes it the layer's shape; "Edit the shape" reopens it. Everything Shape Studio does applies to the drawn unit: copies and arrangements (radial, grid, linear), overlaps, folds, fills, colour order, layers, background. The Size row scales it (it fits like a library shape: larger side = Size). An open drawing switches the layer to outline if it was filled. While the pen is open: the preview framing holds still, the other copies show faintly and update when you finish a gesture (the fold runs then, never mid-drag), Escape belongs to the pen (the studio doesn't close), the layer rail and the AI actions (Tune, Vary, Re-roll) are locked, and a right-click never places a point (that last fix is in the shared pen, so the Frame and the test page have it too).
+
+Drawn is yours only: re-roll never picks it (the same seed rolls the same as before), Blend's second shape can't be Drawn, and the assistant can't choose it.
+
+**Known limits.** A Collection row bound to Shape can still set Drawn on a layer with no drawing (renders empty); curves fit to their flattened outline (a hair under Size); Escape typed in a Placement field closes the studio and cancels the drawing.
+
+**Proof.** Unit suites for the model, the fit, the pen geometry and the session; `tests/shape-pen.spec.ts` with the real mouse and keyboard (draw → radial ×12 fills 10 of 12 sectors; Escape keeps the studio open; right-click adds nothing; resize keeps the pen aligned).
+
+Commits: `dae467c51`, `5b6b664e4`, `3f4708552`, `041922b91`, `d74b2e2f7`.
+
+The shared-pen programme (Plans A, B, C) is complete.
+
 ### Shared pen — Plan B (the Frame) — LANDED 2026-09-25 (spec `docs/superpowers/specs/2026-09-24-shared-pen-design.md`, plan `docs/superpowers/plans/2026-09-25-shared-pen-b-frame.md`)
 
 The Frame's toolbar pen now draws with the shared pen — arcs, Curve, lines, circles, points, rules — with its own two-row toolbar replacing the Frame's while it is open. A finished drawing becomes a path layer that remembers its drawing: closed shapes get a blue fill, open ones a blue outline. Double-clicking such a path reopens the pen on it, live on the layer, at any rotation, skew or scale — Enter saves one undo step, Esc puts it back, and opening the pen and leaving without an edit adds nothing to undo. Paths without a drawing (imported, library shapes, old ones) and corner-pinned paths still open the point editor.

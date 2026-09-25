@@ -1,6 +1,6 @@
 # One pen for every tool
 
-**Date:** 2026-09-24 · **Status:** approved · Plans A and B built (`docs/superpowers/plans/2026-09-24-shared-pen-a.md`, `docs/superpowers/plans/2026-09-25-shared-pen-b-frame.md`); C (Shape Studio) next
+**Date:** 2026-09-24 · **Status:** approved · Plans A, B and C built (`docs/superpowers/plans/2026-09-24-shared-pen-a.md`, `docs/superpowers/plans/2026-09-25-shared-pen-b-frame.md`, `docs/superpowers/plans/2026-09-25-shared-pen-c-shape-studio.md`)
 
 ## Why
 
