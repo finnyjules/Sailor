@@ -27,7 +27,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { GRAPH_FILE_READERS, GRAPH_FOLDER_READERS, GRAPH_OUTPUT_WRITERS } from '../../server/utils/engineFileSurface'
+import { GRAPH_FILE_READERS, GRAPH_FOLDER_READERS, GRAPH_OUTPUT_WRITERS, VIDEO_REF_LIST_KEYS, VIDEO_REF_STR_KEYS } from '../../server/utils/engineFileSurface'
 import { OUTPUT_CLASS_TYPES } from '../../server/utils/priceBook'
 
 const REPO = fileURLToPath(new URL('../../../', import.meta.url))
@@ -199,7 +199,7 @@ const READ_SURFACE_FILES: Record<string, ReadFileEntry> = {
  * comfy_api_nodes/nodes_replicate.py (_moodboard_ref_data_urls) — outside the
  * walked roots, so that read site is pinned by its own test below.
  */
-const NON_ANNOTATED_READERS = ['LoadImageOutput', 'Timeline', 'GenerateImageNode', 'RestyleFromImageNode', 'LipSyncNode']
+const NON_ANNOTATED_READERS = ['LoadImageOutput', 'Timeline', 'GenerateImageNode', 'RestyleFromImageNode', 'LipSyncNode', 'FilmShotNode', 'GenerateVideoNode']
 
 describe('coverage guard (A) — every engine file-READ site is accounted for', () => {
   it('the live get_annotated_filepath per-file counts match the annotated subset (drift → fail)', () => {
@@ -261,6 +261,22 @@ describe('coverage guard (A) — every engine file-READ site is accounted for', 
     expect(src).toContain('video_src = opts.get("face_video")')
     expect(src).toContain('audio_src = opts.get("audio")')
     expect(src).toContain('path = os.path.join(folder_paths.get_input_directory(), name)')
+  })
+
+  // FilmShotNode's model_options `/view?filename=X&type=input` links are read from the
+  // input folder by _resolve_local_refs over two key lists; the gate walks the same lists.
+  it('the view-ref read site the FilmShotNode / GenerateVideoNode entries model still exists, with the same keys', () => {
+    const src = readFileSync(join(REPO, 'comfy_api_nodes/nodes_replicate.py'), 'utf8')
+    const tuple = (name: string) => {
+      const body = new RegExp(`^${name} = \\(([\\s\\S]*?)^\\)`, 'm').exec(src)?.[1] ?? ''
+      return [...body.matchAll(/"([a-z_]+)"/g)].map(m => m[1])
+    }
+    expect(tuple('_LOCAL_REF_LIST_KEYS')).toEqual([...VIDEO_REF_LIST_KEYS])
+    expect(tuple('_LOCAL_REF_STR_KEYS')).toEqual([...VIDEO_REF_STR_KEYS])
+    expect(src).toMatch(/def _resolve_local_refs\(/)
+    expect(src).toContain('path = os.path.join(folder_paths.get_input_directory(), filename)')
+    expect(src).toContain('advanced = _resolve_local_refs(advanced)')
+    for (const ct of ['FilmShotNode', 'GenerateVideoNode']) expect(src).toMatch(new RegExp(`node_id="${ct}"`))
   })
 
   it('every GRAPH_FOLDER_READERS class is backed by a documented folder-read site (no orphan map entry)', () => {

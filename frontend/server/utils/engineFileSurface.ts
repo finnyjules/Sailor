@@ -44,7 +44,7 @@ export type FileRefSemantics = 'input' | 'output' | 'either'
 export type FileReaderSpec =
   | { input: string, shape: 'string', semantics: FileRefSemantics }
   | { input: string, shape: 'dict', keys: string[], semantics: FileRefSemantics }
-  | { input: string, shape: 'json', jsonPath: 'rendered' | 'timeline-clips' | 'moodboard' | 'view-refs', semantics: FileRefSemantics }
+  | { input: string, shape: 'json', jsonPath: 'rendered' | 'timeline-clips' | 'moodboard' | 'view-refs' | 'video-refs', semantics: FileRefSemantics }
 
 /**
  * class_type → the file-carrying inputs the engine reads on execute. Evidence
@@ -127,6 +127,16 @@ export const GRAPH_FILE_READERS: Record<string, FileReaderSpec[]> = {
   // Every named file must be the caller's own. P5 fix round 1: the gate also
   // measures the sound and video lengths from these files to price the run.
   LipSyncNode: [{ input: 'model_options', shape: 'json', jsonPath: 'view-refs', semantics: 'input' }],
+  // comfy_api_nodes/nodes_replicate.py FilmShotNode — `model_options` is the
+  // Shot Director's JSON; _resolve_local_refs reads every `/view?filename=X&
+  // type=input` link under its reference-list and first/last-frame keys
+  // (VIDEO_REF_LIST_KEYS / VIDEO_REF_STR_KEYS) from the input folder into a
+  // data URL. GenerateVideoNode takes the same `model_options` bag and the
+  // same builders; it does not resolve the links today, but it is vetted the
+  // same way so a graph cannot name another tenant's file through it either.
+  // External https links name no file and pass.
+  FilmShotNode: [{ input: 'model_options', shape: 'json', jsonPath: 'video-refs', semantics: 'input' }],
+  GenerateVideoNode: [{ input: 'model_options', shape: 'json', jsonPath: 'video-refs', semantics: 'input' }],
 }
 
 // ---------------------------------------------------------------------------
@@ -244,6 +254,7 @@ export function extractFileRefs(spec: FileReaderSpec, value: unknown): string[] 
     return moodboardFiles(value).map(f => `${f.subfolder}/${f.filename}`)
   }
   if (spec.jsonPath === 'view-refs') return lipSyncViewRefs(value)
+  if (spec.jsonPath === 'video-refs') return videoModelViewRefs(value)
   let parsed: unknown
   try {
     parsed = JSON.parse(value)
@@ -353,6 +364,40 @@ function lipSyncViewRefs(value: string): string[] | null {
   const out: string[] = []
   for (const k of ['face_image', 'face_video', 'audio']) {
     const name = parseViewRef((parsed as Record<string, unknown>)[k])
+    if (name) out.push(name)
+  }
+  return out
+}
+
+/** nodes_replicate._LOCAL_REF_LIST_KEYS / _LOCAL_REF_STR_KEYS (Replicate, then fal). */
+export const VIDEO_REF_LIST_KEYS = ['reference_images', 'reference_videos', 'reference_audios', 'image_urls', 'video_urls', 'audio_urls'] as const
+export const VIDEO_REF_STR_KEYS = ['image', 'last_frame_image', 'image_url', 'end_image_url'] as const
+
+/**
+ * The input files a video model's `model_options` JSON makes the engine read,
+ * as _resolve_local_refs walks it: each list key's elements and each string
+ * key's value that is a `/view?…&type=input` link (parse_view_ref). A list key
+ * that is not a list, or an element that is not a link, is passed through
+ * untouched by the engine and names no file. Not a JSON object: nothing.
+ * Unparseable: null, refused — we cannot vet what we cannot read.
+ */
+function videoModelViewRefs(value: string): string[] | null {
+  let parsed: unknown
+  try { parsed = JSON.parse(value) }
+  catch { return null }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return []
+  const opts = parsed as Record<string, unknown>
+  const out: string[] = []
+  for (const k of VIDEO_REF_LIST_KEYS) {
+    const vals = opts[k]
+    if (!Array.isArray(vals)) continue
+    for (const v of vals) {
+      const name = parseViewRef(v)
+      if (name) out.push(name)
+    }
+  }
+  for (const k of VIDEO_REF_STR_KEYS) {
+    const name = parseViewRef(opts[k])
     if (name) out.push(name)
   }
   return out
