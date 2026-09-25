@@ -13,6 +13,7 @@
  * ProductShotNode, the restyle family: RestyleFromImageNode, and the frame
  * family: Compositor, fed by the LoadImage nodes the Frame editor injects;
  * and the runner-only models no Python node builds: Wan 3.0, family wan-3;
+ * Hailuo H3 Max Turbo, family h3-max-turbo;
  * GPT Image 2.5 in GenerateImageNode and EditImageNode, family gpt-image-2.5)
  * closely enough that the same workflow gives the same result.
  */
@@ -44,6 +45,7 @@ import {
   flux2ProEditOnReplicate, nanoBananaOnFal, nanoBananaOnReplicate, type ServiceCall,
 } from './generators/twins'
 import { RUNNER_WAN3_MODELS, isWan3Model, wan3Call } from './generators/wan3'
+import { RUNNER_ONLY_FAL_VIDEO_MODELS } from './generators/h3MaxTurbo'
 import { GPT_IMAGE_25_EDIT_OPTION, gptImage25Edit, gptImage25Generate, gptImage25OnReplicate, isGptImage25Model } from './generators/gptImage25'
 import { checkRequest, seedanceReferenceProblem } from './requestRules'
 import type { OutputFile, RunnerProvider } from './types'
@@ -270,7 +272,8 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
           uiFor: () => null,
         }
       }
-      const desc = RUNNER_VIDEO_MODELS[id]
+      // Hailuo H3 Max Turbo (family h3-max-turbo): H3 Max's builder on its own fal app (h3MaxTurbo.ts); no backup.
+      const desc = RUNNER_VIDEO_MODELS[id] ?? RUNNER_ONLY_FAL_VIDEO_MODELS[id]
       if (!desc) throw new Error(`Unknown video model: ${String(inputs.model)}`)
       const first = linkedFirstFile('image')
       // Seedance 2.0: a first frame beside references is refused, not sent with them dropped (requestRules.ts).

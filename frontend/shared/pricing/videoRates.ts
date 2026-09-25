@@ -113,6 +113,16 @@ export const VIDEO_RATES: Record<string, VideoRate> = {
     byResolution: { '480p': 0.05, '768p': 0.08, '1080p': 0.16 },
     note: 'list price after the launch promotion (ends 2026-09-30)',
   },
+  // Hailuo H3 Max Turbo (family h3-max-turbo, runner-only; no backup). The
+  // same kind of text on both endpoints: today's $0.0125 / $0.02 / $0.04 are a
+  // 50%-off launch promotion that ends 30 Sep; the list prices after it, used
+  // here as H3 Max's are: "480p is $0.025/second, 768p is $0.04/second, and
+  // 1080p is $0.08/second." H3 always renders sound.
+  'hailuo-h3-max-turbo': {
+    unit: 'per_second', service: 'fal', source: fal('minimax/h3-max-turbo/text-to-video'), read: READ, confidence: 'verified',
+    byResolution: { '480p': 0.025, '768p': 0.04, '1080p': 0.08 },
+    note: 'list price after the launch promotion (ends 2026-09-30)',
+  },
   // Wan 3.0 (family wan-3, runner-only; no backup). Text-, image- and
   // reference-to-video share one card: "For every second of video you
   // generate, you will be charged $0.05 480p, $0.10 720p, or $0.20 1080p."

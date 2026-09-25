@@ -28,6 +28,7 @@ import type { OutputFile } from '~~/server/runner/types'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
 import { NANO_BANANA_SHORT_PROMPT, PROMPT_MIN_LENGTH, SEEDANCE_REFERENCE_LIMITS, requestProblem } from '~~/server/runner/requestRules'
 import { WAN_3_ENDPOINTS } from '~~/server/runner/generators/wan3'
+import { H3_MAX_TURBO_ENDPOINTS } from '~~/server/runner/generators/h3MaxTurbo'
 import { GPT_IMAGE_25_FAL_ENDPOINTS, GPT_IMAGE_25_REPLICATE_SLUGS } from '~~/server/runner/generators/gptImage25'
 
 const readJson = (rel: string) => JSON.parse(readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8'))
@@ -215,6 +216,8 @@ function runnerEndpoints(): string[] {
   // Task F2: GPT Image 2.5, fal first and Replicate the backup (gptImage25.ts; its grid is runner-gpt-image-25.unit.spec.ts).
   for (const e of GPT_IMAGE_25_FAL_ENDPOINTS) out.add(`fal ${e}`)
   for (const slug of GPT_IMAGE_25_REPLICATE_SLUGS) out.add(`replicate ${slug}`)
+  // Task F3: Hailuo H3 Max Turbo's two fal endpoints (h3MaxTurbo.ts; its payload grid is runner-h3-max-turbo.unit.spec.ts).
+  for (const e of H3_MAX_TURBO_ENDPOINTS) out.add(`fal ${e}`)
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)

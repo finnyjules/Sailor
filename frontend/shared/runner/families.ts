@@ -19,9 +19,11 @@ export type RunnerFamily =
   | 'wan-3'
   /** GPT Image 2.5 on fal, Replicate the backup (model line-up F2): runner-only, in Generate an image and Edit an image. */
   | 'gpt-image-2.5'
+  /** Hailuo H3 Max Turbo on fal, no backup (model line-up F3): a runner-only video model. */
+  | 'h3-max-turbo'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
-  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5',
+  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo',
 ]
 
 const KNOWN: ReadonlySet<string> = new Set(RUNNER_FAMILIES)

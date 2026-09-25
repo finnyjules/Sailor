@@ -57,7 +57,10 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // dearest canonical size) and Edit an image (medium, fal's largest size),
 // Replicate the backup at cost (runner-only, family gpt-image-2.5). No other
 // price moves.
-export const PRICE_BOOK_VERSION = 'lineup-f2'
+// lineup-f3 (Task F3): Hailuo H3 Max Turbo, fal per second by resolution at
+// the list price after the launch promotion (runner-only, family
+// h3-max-turbo). No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-f3'
 
 export const BASE_RENDER_CREDITS = 1
 

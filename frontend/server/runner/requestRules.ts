@@ -28,6 +28,7 @@ import { isLink, type ApiPrompt } from '#shared/runner/graph'
 import { resolveVideoModelId } from '#shared/runner/eligibility'
 import { composeImagePrompt } from './generators/image'
 import { RUNNER_VIDEO_MODELS } from './generators/video'
+import { H3_MAX_TURBO_APP, H3_MAX_TURBO_ENDPOINTS, H3_MAX_TURBO_ID } from './generators/h3MaxTurbo'
 import { asText, parseJsonObject } from './generators/opts'
 import { moodboardFiles } from './inputs'
 import {
@@ -59,6 +60,8 @@ export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: 
   'fal minimax/h3/reference-to-video': { min: 1, message: H3_SHORT_PROMPT },
   'fal minimax/h3-max/text-to-video': { min: 1, message: H3_SHORT_PROMPT },
   'fal minimax/h3-max/image-to-video': { min: 1, message: H3_SHORT_PROMPT },
+  // Hailuo H3 Max Turbo (h3MaxTurbo.ts): H3 Max's schema, so the same rule.
+  ...Object.fromEntries(H3_MAX_TURBO_ENDPOINTS.map(e => [`fal ${e}`, { min: 1, message: H3_SHORT_PROMPT }])),
   // Wan 3.0: only text-to-video requires a prompt (image- and reference-to-video take none).
   [`fal ${WAN_30_TEXT_TO_VIDEO}`]: { min: 1, message: WAN_3_NEEDS_PROMPT },
   // GPT Image 2.5 (gptImage25.ts): every fal endpoint requires a prompt; Replicate's (the backup) states no minimum.
@@ -159,10 +162,11 @@ const NANO_BANANA_IMAGE_APPS: Readonly<Record<string, { text: string, refs: stri
   'nano-banana-2': { text: 'fal-ai/nano-banana-2', refs: 'fal-ai/nano-banana-2/edit' },
   'nano-banana-pro': { text: 'fal-ai/nano-banana-pro', refs: 'fal-ai/nano-banana-pro/edit' },
 }
-/** GenerateVideoNode's Hailuo H3 models → their fal apps (from the video table). */
-const H3_VIDEO_APPS: Readonly<Record<string, string>> = Object.fromEntries(
-  ['hailuo-h3', 'hailuo-h3-max'].map(id => [id, RUNNER_VIDEO_MODELS[id]!.app]),
-)
+/** GenerateVideoNode's Hailuo H3 models → their fal apps (from the video table, and H3 Max Turbo's). */
+const H3_VIDEO_APPS: Readonly<Record<string, string>> = Object.fromEntries([
+  ...['hailuo-h3', 'hailuo-h3-max'].map(id => [id, RUNNER_VIDEO_MODELS[id]!.app]),
+  [H3_MAX_TURBO_ID, H3_MAX_TURBO_APP],
+])
 
 /**
  * Every node of a prompt whose request no provider would take, read from its

@@ -177,6 +177,20 @@ const FLOWS: FamilyFlow[] = [
     endpoint: 'alibaba/wan-3.0/image-to-video',
     body: { prompt: 'a fox in the snow', resolution: '480p', duration: 5, audio: true, enable_prompt_expansion: true, start_image_url: storageUrl('image') },
   },
+  // Task F3: Hailuo H3 Max Turbo has no Python builder either; H3 Max's body
+  // on Turbo's app, from its saved schema (runner-h3-max-turbo.unit.spec.ts).
+  {
+    family: 'h3-max-turbo',
+    label: 'GenerateVideoNode hailuo-h3-max-turbo',
+    prompt: {
+      1: { class_type: 'GenerateVideoNode', inputs: { model: 'hailuo-h3-max-turbo', prompt: 'a fox in the snow', aspect_ratio: '16:9', duration: '5', seed: 0, model_options: '{}' } },
+      2: outVideo('1'),
+    },
+    files: [],
+    provider: 'fal',
+    endpoint: 'minimax/h3-max-turbo/text-to-video',
+    body: { prompt: 'a fox in the snow', duration: 5, resolution: '768P', prompt_expansion_mode: 'balanced', aspect_ratio: '16:9' },
+  },
   // Task F2: GPT Image 2.5 has no Python builder either; the body is written
   // from its saved schema (runner-gpt-image-25.unit.spec.ts). fal first, so
   // Replicate (the backup) is never called.

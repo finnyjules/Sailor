@@ -173,6 +173,8 @@ const RULES: Record<string, Rule> = {
   // hailuoH3Core: the model's own resolution table of the lower-cased option, else 768P. H3 always renders sound.
   'hailuo-h3': { durations: [5, 6, 10], defaultDuration: 5, resolution: h3Res(H3_RES), audio: fixed(true) },
   'hailuo-h3-max': { durations: [5, 6, 10], defaultDuration: 5, resolution: h3Res(H3_MAX_RES), audio: fixed(true) },
+  // h3MaxTurbo.ts: H3 Max's builder on Turbo's app (the schemas match field for field).
+  'hailuo-h3-max-turbo': { durations: [5, 6, 10], defaultDuration: 5, resolution: h3Res(H3_MAX_RES), audio: fixed(true) },
   // wan3.ts (every endpoint): `duration` the closest whole second from 2 to 30,
   // `resolution` 480p/720p/1080p else 720p, `audio` from generate_audio (default on).
   'wan-3.0': { durations: WAN_3_SECONDS, defaultDuration: 5, resolution: resIn(WAN_3_RESOLUTIONS, '720p'), audio: audioOpt(true) },

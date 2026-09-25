@@ -427,6 +427,35 @@ export const VIDEO_MODELS: VideoModel[] = [
     defaultResolution: '768p',
     advanced: [],
   },
+  // Hailuo H3 Max Turbo runs only in Sailor's runner (family h3-max-turbo), on
+  // fal (server/runner/generators/h3MaxTurbo.ts). Its schemas
+  // (minimax/h3-max-turbo/*, read 2026-09-24) match H3 Max's field for field,
+  // so its settings are H3 Max's.
+  {
+    id: 'hailuo-h3-max-turbo',
+    runnerOnly: true,
+    family: 'h3-max-turbo',
+    label: 'Hailuo H3 Max Turbo',
+    brand: 'MiniMax',
+    // The gallery's cover art only (Replicate has no H3 Max Turbo, nor H3 Max; minimax/h3 has a page).
+    replicateSlug: 'minimax/h3',
+    pitch: 'A faster H3 Max at half the price, with sound.',
+    description:
+      'Hailuo H3 Max Turbo is fal\'s faster build of H3 Max: the same kind of clip, ' +
+      'with sound, for half the price. Describe the clip, or link a picture to start ' +
+      'from it. Rendered at 768p; sound is always on.',
+    tags: ['fast', 'audio'],
+    modes: ['t2v', 'i2v'],
+    supportsSeed: true,
+    priceHint: null,
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+    defaultAspectRatio: '16:9',
+    durations: [5, 6, 10],
+    defaultDuration: 5,
+    resolutions: ['768p'],
+    defaultResolution: '768p',
+    advanced: [],
+  },
 
   // ===== Wan (open-source) ================================================
   // Wan 3.0 runs only in Sailor's runner (family wan-3), on fal
