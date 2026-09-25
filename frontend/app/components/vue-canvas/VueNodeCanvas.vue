@@ -7946,11 +7946,18 @@ function materializeStartGraph(opts: { sourceNodeType?: string; generatorNodeTyp
  * pushed in one synchronous block, so nothing can interleave with the build.
  */
 async function materializeStart(pick: StartPickId | null, opts: { isCurrent?: () => boolean } = {}): Promise<boolean> {
-  // A tab's own load replaces nodes.value when it lands — wait it out (bounded).
-  for (let waited = 0; applyingWorkflow.value && waited < 5000; waited += 50) {
+  // A tab's own load replaces nodes.value when it lands — wait it out. The load
+  // itself waits on /object_info, the same schema this build needs, and on a cold
+  // page under load that takes well over 5 s: giving up early dropped the pick
+  // silently. A late build is harmless (it lands clear of the user's nodes), so
+  // the bound only catches a load that never finishes — and says so.
+  for (let waited = 0; applyingWorkflow.value && waited < 60_000; waited += 50) {
     await new Promise<void>(r => setTimeout(r, 50))
   }
-  if (applyingWorkflow.value) return false
+  if (applyingWorkflow.value) {
+    toast.error('Couldn’t set up the project', { description: 'The canvas didn’t finish loading. Refresh the page and try again.' })
+    return false
+  }
   const wf = lastWorkflowRef
   const stale = () => lastWorkflowRef !== wf || applyingWorkflow.value || (opts.isCurrent ? !opts.isCurrent() : false)
   if (stale()) return false

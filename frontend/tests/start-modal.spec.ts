@@ -27,7 +27,10 @@ async function openToModal(page: Page) {
   await expect(page.getByText('What do you want to make?')).toBeVisible({ timeout: 5_000 })
 }
 
-/** Wait for the canvas node count to settle: the canvas finishes loading its
+/** The build waits for the tab's own load, which waits on /object_info (multi-MB;
+ *  over 10 s on this machine under parallel-session load), so polls allow 30 s.
+ *
+ *  Wait for the canvas node count to settle: the canvas finishes loading its
  *  empty workflow asynchronously after mount and can wipe/replace `nodes`
  *  once that lands (see dropNodeAndWait's comment in port-intent.spec.ts), so
  *  a single read right after a pick can catch a value mid-flight. */
@@ -79,28 +82,28 @@ test.describe('Start modal — the blank-project rewrite', () => {
   test('picking Gradient closes the modal and lands a 2-node, 1-edge graph', async ({ page }) => {
     await page.getByTestId('start-tile-gradient').click()
     await expect(page.getByText('What do you want to make?')).toHaveCount(0)
-    await expect.poll(() => settledNodeCount(page), { timeout: 10_000 }).toBe(2)
+    await expect.poll(() => settledNodeCount(page), { timeout: 30_000 }).toBe(2)
     await expect(page.locator('.vue-flow__edge')).toHaveCount(1)
   })
 
   test('"Start with an empty Frame" leaves exactly one Frame and no edges', async ({ page }) => {
     await page.getByTestId('start-empty-frame').click()
     await expect(page.getByText('What do you want to make?')).toHaveCount(0)
-    await expect.poll(() => settledNodeCount(page), { timeout: 10_000 }).toBe(1)
+    await expect.poll(() => settledNodeCount(page), { timeout: 30_000 }).toBe(1)
     await expect(page.locator('.vue-flow__edge')).toHaveCount(0)
   })
 
   test('Esc does the same as "Start with an empty Frame"', async ({ page }) => {
     await page.keyboard.press('Escape')
     await expect(page.getByText('What do you want to make?')).toHaveCount(0)
-    await expect.poll(() => settledNodeCount(page), { timeout: 10_000 }).toBe(1)
+    await expect.poll(() => settledNodeCount(page), { timeout: 30_000 }).toBe(1)
     await expect(page.locator('.vue-flow__edge')).toHaveCount(0)
   })
 
   test('picking "Generate a video" lands 2 nodes but leaves it unwired', async ({ page }) => {
     await page.getByTestId('start-tile-video').click()
     await expect(page.getByText('What do you want to make?')).toHaveCount(0)
-    await expect.poll(() => settledNodeCount(page), { timeout: 10_000 }).toBe(2)
+    await expect.poll(() => settledNodeCount(page), { timeout: 30_000 }).toBe(2)
     await expect(page.locator('.vue-flow__edge')).toHaveCount(0)
   })
 
@@ -131,7 +134,7 @@ test.describe('Start modal — the blank-project rewrite', () => {
     // The build lands: Image → Shader → Frame, wired as before.
     const frame = page.locator('.vue-flow__node-artifact-frame')
     await expect(frame).toHaveCount(1, { timeout: 20_000 })
-    await expect.poll(() => settledNodeCount(page), { timeout: 10_000 }).toBe(4)
+    await expect.poll(() => settledNodeCount(page), { timeout: 30_000 }).toBe(4)
     await expect(page.locator('.vue-flow__edge')).toHaveCount(2)
 
     // The user's node keeps the selection, and the view did not move off it.

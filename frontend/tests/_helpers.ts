@@ -26,12 +26,16 @@ export async function setStudioRow(page: Page, testid: string, value: number | s
  * The Frame is built from the cached /object_info, but on a cold page that
  * schema may still be downloading (multi-MB, seconds under load), so wait for
  * it generously rather than for a fixed few seconds: returning before it lands
- * hands the spec a canvas the Frame will drop into later. Returns once the
- * canvas is empty again.
+ * hands the spec a canvas the Frame will drop into later. Waits for the
+ * backend first (see waitForBackend). Returns once the canvas is empty again.
  */
 export async function dismissStartModal(page: Page) {
   const emptyFrame = page.getByTestId('start-empty-frame')
   if (!(await emptyFrame.isVisible({ timeout: 2_000 }).catch(() => false))) return
+  // The Frame is built from /object_info (Compositor); with no schema the build
+  // toasts and lands nothing. Every caller gets the backend, not just those that
+  // remembered waitForBackend.
+  await waitForBackend(page)
   await emptyFrame.click()
   await emptyFrame.waitFor({ state: 'hidden', timeout: 5_000 })
   const frame = page.locator('.vue-flow__node-artifact-frame')
