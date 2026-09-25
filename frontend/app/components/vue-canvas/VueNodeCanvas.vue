@@ -17,6 +17,7 @@ import { frameCardSize, placeRightOf, sendFailedToast, sentFrameData, sentFrameE
 import { computeRunLeafIds } from '~/lib/canvas/runLeaves'
 import { edgeTopologyKey } from '~/lib/canvas/edgeTopologyKey'
 import type { Command } from '~/lib/agent/commandSurface'
+import type { PromptNode } from '~/lib/prompt/canvasPromptContext'
 import { buildCatalog, type CatalogEntry } from '~/lib/portIntentCatalog'
 import { isTypeCompatible, linkInputPorts, outputPorts, type NodeTypeLite } from '~/lib/portIntent'
 import { NODE_BOOST, NODE_KEYWORDS } from '~/lib/nodeKeywords'
@@ -1173,6 +1174,22 @@ function selectNode(id: string) {
 function getSelectedEdgeIds(): string[] {
   return (edges.value as any[]).filter(e => e.selected).map(e => e.id)
 }
+
+// The one prompt's selection chip + suggestions (spec §1.2). Title is the node's
+// own title (custom → catalog display_name → type), exactly as the card shows it.
+// A generic Comfy node's Vue Flow type is 'comfy' (see getVueFlowType); its real
+// backend class is n.data.nodeType, not n.data.type (createNodeData never sets
+// data.type). Artifact/config nodes (Image, GradientStudio, …) keep their Vue
+// Flow type, e.g. 'artifact-image', since that IS their meaningful "kind" here.
+const agentSelection = computed<PromptNode[]>(() => (nodes.value as any[])
+  .filter(n => n.selected)
+  .map(n => ({
+    id: String(n.id),
+    title: String(n.data?.subgraphName || n.data?.title || ''),
+    type: String(n.type === 'comfy' ? (n.data?.nodeType ?? n.type ?? '') : (n.type ?? '')),
+    hasImages: Array.isArray(n.data?.images) && n.data.images.length > 0,
+  })))
+function agentClearSelection() { for (const n of nodes.value as any[]) n.selected = false }
 
 const nodeClipboard = useNodeClipboard()
 
@@ -7993,6 +8010,8 @@ function starterSceneState(): string {
 defineExpose({
   materializeStartGraph,
   materializeStart,
+  agentSelection,
+  agentClearSelection,
   // Orphan-glow reaper: clears every run visual (node shimmer, edge glow,
   // progress) and the per-prompt bookkeeping. Called by the layout when the
   // run registry drains to zero — glow state orphaned by an HMR mid-run or a
