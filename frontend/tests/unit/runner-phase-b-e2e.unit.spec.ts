@@ -400,6 +400,20 @@ const FLOWS: FamilyFlow[] = [
     endpoint: 'reve/2.1/text-to-image',
     body: { prompt: 'a poster that says HELLO', aspect_ratio: '1:1', num_images: 1, output_format: 'png' },
   },
+  // Task F16: Recraft V4.1, no Python builder; fal first, the body written
+  // from its saved schema (runner-recraft-v4-1.unit.spec.ts).
+  {
+    family: 'recraft-v4.1',
+    label: 'GenerateImageNode recraft-v4.1',
+    prompt: {
+      1: { class_type: 'GenerateImageNode', inputs: { model: 'recraft-v4.1', prompt: 'a poster that says HELLO', aspect_ratio: '1:1', seed: 0, model_options: '{}' } },
+      2: outImage('1'),
+    },
+    files: [],
+    provider: 'fal',
+    endpoint: 'fal-ai/recraft/v4.1/text-to-image',
+    body: { prompt: 'a poster that says HELLO', image_size: 'square_hd' },
+  },
 ]
 
 // ── The routes ───────────────────────────────────────────────────────────

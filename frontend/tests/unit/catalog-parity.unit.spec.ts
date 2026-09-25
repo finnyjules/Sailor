@@ -61,7 +61,7 @@ describe('image catalog TS ↔ Python parity', () => {
   const withPython = IMAGE_MODELS.filter(m => !m.runnerOnly)
 
   it('both catalogs list the same model ids (the runner-only ones are not in Python)', () => {
-    expect(IMAGE_MODELS.filter(m => m.runnerOnly).map(m => m.id)).toEqual(['nano-banana-2-lite', 'ideogram-4', 'gpt-image-2.5', 'qwen-image-3', 'grok-imagine-2', 'muse-image', 'reve-2.1'])
+    expect(IMAGE_MODELS.filter(m => m.runnerOnly).map(m => m.id)).toEqual(['nano-banana-2-lite', 'ideogram-4', 'recraft-v4.1', 'gpt-image-2.5', 'qwen-image-3', 'grok-imagine-2', 'muse-image', 'reve-2.1'])
     expect(pyTags['gpt-image-2.5']).toBeUndefined()
     expect(pyTags['ideogram-4']).toBeUndefined()
     expect(pyTags['qwen-image-3']).toBeUndefined()
@@ -69,6 +69,7 @@ describe('image catalog TS ↔ Python parity', () => {
     expect(pyTags['muse-image']).toBeUndefined()
     expect(pyTags['nano-banana-2-lite']).toBeUndefined()
     expect(pyTags['reve-2.1']).toBeUndefined()
+    expect(pyTags['recraft-v4.1']).toBeUndefined()
     const tsIds = withPython.map(m => m.id).sort()
     const pyIds = Object.keys(pyTags).sort()
     expect(pyIds).toEqual(tsIds)

@@ -9,9 +9,11 @@
  * The rules come from the providers' saved schemas
  * (tests/unit/fixtures/provider-schemas/; a test holds this table to them):
  *  - a prompt shorter than the schema's `minLength` (Nano Banana 3, Hailuo H3 1,
- *    GPT Image 2.5 1, Muse Image 1, Reve 2.1 1), and a transparent JPEG from GPT Image 2.5;
+ *    GPT Image 2.5 1, Muse Image 1, Reve 2.1 1, Recraft V4.1 1), and a transparent JPEG
+ *    from GPT Image 2.5;
  *  - a prompt longer than the schema's `maxLength` where the table
- *    PROMPT_MAX_LENGTH names the endpoint (Reve 2.1 4,000, F15);
+ *    PROMPT_MAX_LENGTH names the endpoint (Reve 2.1 4,000, F15; Recraft V4.1
+ *    10,000, F16);
  *  - Wan 3.0 reference pictures over its schema's 10, and reference videos or
  *    sounds, which the runner doesn't send it yet (wan3.ts);
  *  - Seedance 2.0 references over the schema's counts (9 pictures, 3 videos,
@@ -93,6 +95,9 @@ import { IDEOGRAM_4_FAL_APP, IDEOGRAM_4_NEEDS_PROMPT, isIdeogram4Model } from '.
 import { MUSE_IMAGE_FAL_APP, MUSE_IMAGE_NEEDS_PROMPT, isMuseImageModel } from './generators/museImage'
 import { NANO_BANANA_2_LITE_NEEDS_PROMPT, NANO_BANANA_2_LITE_SLUG, isNanoBanana2LiteModel } from './generators/nanoBanana2Lite'
 import { REVE_21_FAL_APP, REVE_21_LONG_PROMPT, REVE_21_NEEDS_PROMPT, REVE_21_PROMPT_MAX, isReve21Model } from './generators/reve21'
+import {
+  RECRAFT_V41_FAL_APP, RECRAFT_V41_LONG_PROMPT, RECRAFT_V41_NEEDS_PROMPT, RECRAFT_V41_PROMPT_MAX, isRecraftV41Model,
+} from './generators/recraftV41'
 import { isSeedream5ProEdit, seedream5ProEditProblems } from './generators/seedream5ProEdit'
 
 export { FIRST_FRAME_AND_REFERENCES }
@@ -137,6 +142,9 @@ export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: 
   [`replicate ${NANO_BANANA_2_LITE_SLUG}`]: { min: 1, message: NANO_BANANA_2_LITE_NEEDS_PROMPT },
   // Reve 2.1 on fal (reve21.ts): the schema's own minLength 1.
   [`fal ${REVE_21_FAL_APP}`]: { min: 1, message: REVE_21_NEEDS_PROMPT },
+  // Recraft V4.1 on fal (recraftV41.ts): the schema's own minLength 1. Its
+  // Replicate backup is built from a request that passed this.
+  [`fal ${RECRAFT_V41_FAL_APP}`]: { min: 1, message: RECRAFT_V41_NEEDS_PROMPT },
 }
 
 /**
@@ -148,6 +156,8 @@ export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: 
 export const PROMPT_MAX_LENGTH: Readonly<Record<string, { max: number, message: string }>> = {
   // Reve 2.1 on fal (reve21.ts, Task F15).
   [`fal ${REVE_21_FAL_APP}`]: { max: REVE_21_PROMPT_MAX, message: REVE_21_LONG_PROMPT },
+  // Recraft V4.1 on fal (recraftV41.ts, Task F16).
+  [`fal ${RECRAFT_V41_FAL_APP}`]: { max: RECRAFT_V41_PROMPT_MAX, message: RECRAFT_V41_LONG_PROMPT },
 }
 
 /**
@@ -416,11 +426,13 @@ export function requestProblems(prompt: ApiPrompt): RequestProblem[] {
         hasRefs: false,
       }), 'replicate')
     }
-    // Ideogram 4, Muse Image and Reve 2.1 (fal, text-to-image): the prompt as sent must not be empty
-    // (and, for Reve 2.1, not over its schema's 4,000 characters).
-    else if (ct === 'GenerateImageNode' && (isIdeogram4Model(inputs.model) || isMuseImageModel(inputs.model) || isReve21Model(inputs.model))) {
+    // Ideogram 4, Muse Image, Reve 2.1 and Recraft V4.1 (fal, text-to-image): the prompt as sent must
+    // not be empty (and, for Reve 2.1 and Recraft V4.1, not over its schema's maxLength).
+    else if (ct === 'GenerateImageNode' && (isIdeogram4Model(inputs.model) || isMuseImageModel(inputs.model) || isReve21Model(inputs.model) || isRecraftV41Model(inputs.model))) {
       if (['prompt', 'prompt_in', 'style_block', 'style_in'].some(k => isLink(inputs[k]))) continue
-      const app = isIdeogram4Model(inputs.model) ? IDEOGRAM_4_FAL_APP : isMuseImageModel(inputs.model) ? MUSE_IMAGE_FAL_APP : REVE_21_FAL_APP
+      const app = isIdeogram4Model(inputs.model) ? IDEOGRAM_4_FAL_APP
+        : isMuseImageModel(inputs.model) ? MUSE_IMAGE_FAL_APP
+          : isReve21Model(inputs.model) ? REVE_21_FAL_APP : RECRAFT_V41_FAL_APP
       judge(app, composeImagePrompt({
         prompt: asText(inputs.prompt),
         promptIn: asText(inputs.prompt_in),

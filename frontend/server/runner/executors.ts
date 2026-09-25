@@ -23,6 +23,7 @@
  * Muse Image in GenerateImageNode, family muse-image;
  * Nano Banana 2 Lite in GenerateImageNode, family nano-banana-2-lite;
  * Reve 2.1 in GenerateImageNode, family reve-2.1;
+ * Recraft V4.1 in GenerateImageNode, family recraft-v4.1;
  * Seedream 5 Pro in EditImageNode, family seedream-5-pro-edit;
  * RotateCameraNode on Qwen Image Edit 2511 multiple angles, family
  * qwen-2511-angles, which moves the whole node while it is on;
@@ -70,6 +71,7 @@ import { ideogram4Generate, ideogram4OnReplicate, isIdeogram4Model } from './gen
 import { isMuseImageModel, museImageGenerate } from './generators/museImage'
 import { isNanoBanana2LiteModel, nanoBanana2LiteGenerate } from './generators/nanoBanana2Lite'
 import { isReve21Model, reve21Generate } from './generators/reve21'
+import { isRecraftV41Model, recraftV41Generate, recraftV41OnReplicate } from './generators/recraftV41'
 import { isSeedream5ProEdit, seedream5ProEdit } from './generators/seedream5ProEdit'
 import { qwen2511Angles } from './generators/qwen2511Angles'
 import { briaProductShot } from './generators/briaProductShot'
@@ -283,6 +285,21 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
           }),
           aspectRatio: asText(inputs.aspect_ratio) || '1:1',
         }), 'generate_image')
+      }
+      // Recraft V4.1 (family recraft-v4.1): fal first, Replicate the backup
+      // (recraftV41.ts). No moodboard pictures, no seed.
+      if (isRecraftV41Model(inputs.model)) {
+        const call = recraftV41Generate({
+          prompt: composeImagePrompt({
+            prompt: asText(inputs.prompt),
+            promptIn: asText(inputs.prompt_in),
+            styleBlock: asText(inputs.style_block),
+            styleIn: asText(inputs.style_in),
+            hasRefs: false,
+          }),
+          aspectRatio: asText(inputs.aspect_ratio) || '1:1',
+        })
+        return stillCall(call, 'generate_image', recraftV41OnReplicate(call))
       }
       // A model that isn't one of the fal ids goes to Replicate, its Python
       // primary (family replicate-image). None of these takes moodboard

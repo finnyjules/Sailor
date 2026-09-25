@@ -62,6 +62,9 @@
  * nano-banana-2-lite        Replicate  —           runner-only (F14): fal's google/nano-banana-2-lite bills by tokens and
  *                                                  publishes no price a picture (nanoBanana2Lite.ts)
  * reve-2.1                  fal        —           runner-only (F15): Reve 2.1 is not on Replicate (reve21.ts)
+ * recraft-v4.1              fal        Replicate   runner-only (F16): recraft-ai/recraft-v4.1, the same prompt, fal's
+ *                                                  named size sent as its ratio; fal is cheaper ($0.035 against
+ *                                                  $0.04 a picture); neither takes a seed (recraftV41.ts)
  * flux-fast, p-image        Replicate  —           Pruna models: not on fal (fal catalogue, 2026-09-24)
  * bria-fibo                 Replicate  —           fal's Fibo has no guidance setting
  * bria-image-3.2            Replicate  —           not on fal
@@ -162,6 +165,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'image:muse-image': r('fal', null, 'Muse Image is not on Replicate'),
   'image:nano-banana-2-lite': r('replicate', null, 'fal bills Nano Banana 2 Lite by tokens and publishes no price a picture'),
   'image:reve-2.1': r('fal', null, 'Reve 2.1 is not on Replicate'),
+  'image:recraft-v4.1': r('fal', 'replicate'),
   'image:flux-1.1-pro': r('fal', null, HIDDEN),
   'image:seedream-4': r('fal', null, HIDDEN),
   // Generate image, Replicate

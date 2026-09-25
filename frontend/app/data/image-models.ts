@@ -688,6 +688,25 @@ export const IMAGE_MODELS: ImageModel[] = [
 
   // ===== Recraft ============================================================
   {
+    // Runner-only (model line-up F16): fal first, Replicate the backup
+    // (server/runner/generators/recraftV41.ts). No Python builder. The ratios
+    // are that file's RECRAFT_V41_RATIOS, the ones fal's named sizes cover;
+    // no vector model (its SVG can't feed the nodes a picture goes to).
+    id: 'recraft-v4.1',
+    runnerOnly: true,
+    family: 'recraft-v4.1',
+    label: 'Recraft V4.1',
+    brand: 'Recraft',
+    replicateSlug: 'recraft-ai/recraft-v4.1',
+    pitch: 'Designed-looking pictures with a strong layout and clean lettering.',
+    description: 'Recraft\'s latest image model, built around design taste. Follows the prompt closely, composes like an art director and writes text into the picture. Quick, at a standard size, one price whatever its shape.',
+    tags: ['design', 'typography'],
+    pricePerImage: 0.035,
+    aspectRatios: ['1:1', '4:3', '3:4', '16:9', '9:16'],
+    defaultAspectRatio: '1:1',
+    advanced: [],
+  },
+  {
     id: 'recraft-v4-pro',
     label: 'Recraft V4 Pro',
     brand: 'Recraft',

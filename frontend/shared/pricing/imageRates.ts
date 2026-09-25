@@ -3,7 +3,8 @@
  * request builder sends it to today: fal for the RUNNER_IMAGE_MODELS ids and
  * the Python `primary="fal"` models (Krea 2), and the runner-only GPT Image
  * 2.5 (server/runner/generators/gptImage25.ts), Ideogram 4 (ideogram4.ts),
- * Muse Image (museImage.ts) and Reve 2.1 (reve21.ts), Replicate for the rest,
+ * Muse Image (museImage.ts), Reve 2.1 (reve21.ts) and Recraft V4.1
+ * (recraftV41.ts), Replicate for the rest,
  * the runner-only Qwen Image 3, Grok Imagine 2 and Nano Banana 2 Lite among
  * them (qwenImage3.ts, grokImagine2.ts, nanoBanana2Lite.ts)
  * (comfy_api_nodes/image_models.py `primary`, default "replicate").
@@ -152,6 +153,11 @@ export const IMAGE_RATES: Record<string, ImageRate> = {
   // makes its own large picture, fal's example 5376 × 3072) and no paid
   // extra, so one price. No backup (Replicate has no Reve 2.1, reve21.ts).
   'reve-2.1': falImage('reve/2.1/text-to-image', 0.25),
+  // Recraft V4.1 (runner-only, Task F16), fal first: "Price: $0.035 per
+  // images" (llms.txt, read 2026-09-24; the page's billing: unit "images",
+  // price 0.035, one tier), whatever the named size. The builder sends no
+  // paid extra (the schema has none). Replicate the backup (below).
+  'recraft-v4.1': falImage('fal-ai/recraft/v4.1/text-to-image', 0.035),
   // "Price: $0.035 per images" (text-to-image and /edit alike).
   'seedream-5-lite': falImage('fal-ai/bytedance/seedream/v5/lite/text-to-image', 0.035),
   // "Price: $0.03 per images" (text-to-image and /edit alike).
@@ -301,6 +307,11 @@ export const IMAGE_BACKUP_RATES: Record<string, ImageRate> = {
   // "Price: $0.04 per images" / "$0.25 per images": Replicate's prices.
   'recraft-v4': falImage('fal-ai/recraft/v4/text-to-image', 0.04),
   'recraft-v4-pro': falImage('fal-ai/recraft/v4/pro/text-to-image', 0.25),
+  // Recraft V4.1 on Replicate (recraft-ai/recraft-v4.1, Recraft's own):
+  // "$0.04 per output image" (billing, image_output_count, one tier; read
+  // 2026-09-24), whatever the ratio. Covered at cost it is $0.02, under fal's
+  // $0.035, so the node is priced at fal's.
+  'recraft-v4.1': repImage('recraft-ai/recraft-v4.1', 0.04),
   // openai/gpt-image-2.5-flare and -sunburst (billingConfig, the same tiers on
   // both): "low $0.012, medium $0.047, high $0.128" per output image, whatever
   // the size. Output pictures only.

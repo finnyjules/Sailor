@@ -135,7 +135,7 @@ describe('the first and backup services are the table\'s', () => {
     const image = Object.keys(RUNNER_ROUTES).filter(k => k.startsWith('image:')).length
     const video = Object.keys(RUNNER_ROUTES).filter(k => k.startsWith('video:')).length
     // + GPT Image 2.5 (Task F2), Qwen Image 3 (Task F6), Grok Imagine 2 (Task F7), Ideogram 4 (Task F8), Muse Image (Task F13),
-    // Nano Banana 2 Lite (Task F14) and Reve 2.1 (Task F15), runner-only models outside the two builder tables.
+    // Nano Banana 2 Lite (Task F14), Reve 2.1 (Task F15) and Recraft V4.1 (Task F16), runner-only models outside the two builder tables.
     expect(keys.has('image:gpt-image-2.5')).toBe(true)
     expect(keys.has('image:qwen-image-3')).toBe(true)
     expect(keys.has('image:grok-imagine-2')).toBe(true)
@@ -143,7 +143,8 @@ describe('the first and backup services are the table\'s', () => {
     expect(keys.has('image:muse-image')).toBe(true)
     expect(keys.has('image:nano-banana-2-lite')).toBe(true)
     expect(keys.has('image:reve-2.1')).toBe(true)
-    expect(image).toBe(Object.keys(RUNNER_IMAGE_MODELS).length + Object.keys(RUNNER_REPLICATE_IMAGE_MODELS).length + 7)
+    expect(keys.has('image:recraft-v4.1')).toBe(true)
+    expect(image).toBe(Object.keys(RUNNER_IMAGE_MODELS).length + Object.keys(RUNNER_REPLICATE_IMAGE_MODELS).length + 8)
     expect(video).toBe(Object.keys(RUNNER_VIDEO_MODELS).length + Object.keys(RUNNER_REPLICATE_VIDEO_MODELS).length)
   })
 
