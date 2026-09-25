@@ -360,3 +360,111 @@ test.describe('Frame pen — reopen a drawn path', () => {
     await expect(penToolbar(page)).toHaveCount(0)
   })
 })
+
+// ── Task 9: a text layer's "Drawn path" guide, drawn and edited with the shared pen ──
+
+test.describe('Frame pen — a text layer\'s drawn path', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/dev/frame-lab')
+    await page.waitForSelector('[data-ready]')
+    await expect(penButton(page)).toBeVisible()
+  })
+
+  const guideButton = (page: Page) => page.locator('button:has-text("Draw a path"), button:has-text("Edit the path")').first()
+  const textByName = async (page: Page, text: string) => (await layers(page)).find((l: any) => l.kind === 'text' && l.text === text)
+  /** The guide's start point on screen, as the text layer renders it (the real
+   *  textPath engine, loaded from the dev server), with W = the artboard's on-screen width. */
+  const guideStartOnScreen = (page: Page, t: any, box: Box) => page.evaluate(async ({ t, box }) => {
+    const mod: any = await import(/* @vite-ignore */ '/_nuxt/lib/compositor/textPath.ts')
+    const W = box.width, H = box.height
+    const g = mod.guideFromSpec(t.path, W, 100).at(0)
+    const tx = Math.tan(((t.skewX || 0) * Math.PI) / 180), ty = Math.tan(((t.skewY || 0) * Math.PI) / 180)
+    const vx = g.x + tx * g.y, vy = ty * g.x + g.y
+    const r = ((t.rotation || 0) * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r)
+    return { x: box.x + t.x * W + c * vx - s * vy, y: box.y + t.y * H + s * vx + c * vy }
+  }, { t, box })
+  const anchorsOf = (t: any): string[] => t.path.sketch.entities.find((e: any) => e.kind === 'path').anchors
+  async function commitWithEnter(page: Page) {
+    for (let i = 0; i < 3 && await penToolbar(page).isVisible(); i++) await page.keyboard.press('Enter')
+    await expect(penToolbar(page)).toBeHidden()
+  }
+
+  test('draw a guide live, edit it, resize it, edit again; Escape restores', async ({ page }) => {
+    // ── select "Plain text", Follow a path → Drawn path ──
+    await page.locator('[title="Double-click to rename"]', { hasText: /Plain text/ }).first().click()
+    const follow = page.locator('div:has(> .panel-label:text-is("Follow a path")) > select').first()
+    await follow.selectOption('custom')
+    await expect(guideButton(page)).toHaveText(/Draw a path/)
+    const t0 = await textByName(page, 'Plain text')
+    expect(t0.path.follow).toBe('custom')
+    expect(t0.path.d).toBeFalsy()
+
+    // ── "Draw a path": the open-only pen ──
+    await guideButton(page).click()
+    await expect(penToolbar(page)).toBeVisible()
+    await expect(page.locator('[data-act="close"]')).toHaveCount(0)
+    await expect(page.locator('[data-tool="circle"]')).toHaveCount(0)
+    await expect(page.locator('[data-tool="curve"]')).toHaveCount(1)
+    const box = (await overlay(page).boundingBox())!
+
+    // click, then click-drag to bow; mid-drag the guide is already live
+    const p0 = { x: box.x + box.width * 0.3, y: box.y + box.height * 0.3 }
+    const p1 = { x: box.x + box.width * 0.62, y: box.y + box.height * 0.34 }
+    await page.mouse.move(p0.x, p0.y); await page.mouse.down(); await page.mouse.up()
+    await page.mouse.move(p1.x, p1.y); await page.mouse.down()
+    for (let i = 1; i <= 8; i++) await page.mouse.move(p1.x + 5 * i, p1.y + 6 * i)
+    const live = await textByName(page, 'Plain text')
+    expect(typeof live.path.d).toBe('string')
+    expect(live.path.d.length).toBeGreaterThan(0)
+    await page.mouse.up()
+    await commitWithEnter(page)
+
+    const t1 = await textByName(page, 'Plain text')
+    expect(t1.path.follow).toBe('custom')
+    expect(t1.path.sketch).toBeTruthy()
+    expect(t1.path.d.length).toBeGreaterThan(0)
+    const expectD = await page.evaluate(async (sk) => {
+      const mod: any = await import(/* @vite-ignore */ '/_nuxt/lib/compositor/penFrame.ts')
+      return mod.sketchToLocalD(sk)
+    }, t1.path.sketch)
+    expect(t1.path.d).toBe(expectD)
+    await expect(guideButton(page)).toHaveText(/Edit the path/)
+    // what you see is what you get: the type's guide starts where the first click landed
+    expect(near(await guideStartOnScreen(page, t1, box), p0)).toBe(true)
+
+    // ── "Edit the path": the first dot sits where the first click landed; drag the end point ──
+    await guideButton(page).click()
+    await expect(penToolbar(page)).toBeVisible()
+    const ids = anchorsOf(t1)
+    expect(near(await dotCentre(page, ids[0]), p0)).toBe(true)
+    const end = await dotCentre(page, ids[ids.length - 1])
+    await drag(page, end, { x: end.x + 30, y: end.y + 40 })
+    await commitWithEnter(page)
+    const t2 = await textByName(page, 'Plain text')
+    expect(t2.path.d).not.toBe(t1.path.d)
+    expect(near(await guideStartOnScreen(page, t2, box), p0)).toBe(true)   // the start stayed put
+
+    // ── change Path size in the panel, then edit again: the dots sit on the resized guide ──
+    const sizeInput = page.locator('div:has(> .panel-label:text-is("Path size")) input').first()
+    const cur = parseFloat(await sizeInput.inputValue())
+    await sizeInput.fill(String(Math.round(cur * 1.6)))
+    await expect.poll(async () => (await textByName(page, 'Plain text')).path.size).not.toBe(t2.path.size)
+    const t3 = await textByName(page, 'Plain text')
+    await guideButton(page).click()
+    await expect(penToolbar(page)).toBeVisible()
+    const start3 = await guideStartOnScreen(page, t3, box)
+    expect(near(start3, p0, 3)).toBe(false)   // the resize really moved the guide's start
+    expect(near(await dotCentre(page, ids[0]), start3)).toBe(true)
+
+    // ── Escape while editing: path (and position) restored exactly ──
+    const mid = await dotCentre(page, ids[1])
+    await drag(page, mid, { x: mid.x - 25, y: mid.y + 35 })
+    expect((await textByName(page, 'Plain text')).path.d).not.toBe(t3.path.d)
+    for (let i = 0; i < 4 && await penToolbar(page).isVisible(); i++) await page.keyboard.press('Escape')
+    await expect(penToolbar(page)).toBeHidden()
+    await expect(page.locator('[data-testid="compositor-stage"]')).toBeVisible()
+    const back = await textByName(page, 'Plain text')
+    expect(JSON.stringify(back.path)).toBe(JSON.stringify(t3.path))
+    expect(back.x).toBe(t3.x); expect(back.y).toBe(t3.y)
+  })
+})

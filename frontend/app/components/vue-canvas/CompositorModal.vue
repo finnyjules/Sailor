@@ -83,6 +83,7 @@ import { frameSelectionLabel } from '~/lib/prompt/studioDispatch'
 import { studioActions } from '~/lib/studio/studioActions'
 import AgentSweep from '~/components/agent/AgentSweep.vue'
 import { useFramePenSession } from '~/composables/frame/useFramePenSession'
+import { cloneDoc } from '~/lib/sketch/clone'
 import { isTypingInField } from '~/composables/pen/usePen'
 import PenOverlay from '~/components/pen/PenOverlay.vue'
 import PenToolbar from '~/components/pen/PenToolbar.vue'
@@ -2029,60 +2030,34 @@ function clientToView(e: { clientX: number; clientY: number }): { x: number; y: 
 }
 /** One-shot: swallow the click that closed a pen path (see onCanvasClick). */
 let penJustFinished = false
-/** The text layer waiting for a drawn guide, if any. Cleared when the pen is
- *  cancelled, so leaving the tool never silently rewires a layer later.
- *  (Interim until the guide gets its own pen session: the new drawing's
- *  outline becomes the text's guide instead of a layer — see penAddPathLayers.) */
-const penGuideTargetId = ref<string | null>(null)
 // The shared pen (Plan B): one drawing session at a time. A new drawing
-// becomes a path layer that remembers its drawing (see useFramePenSession).
+// becomes a path layer that remembers its drawing; a text layer's "Drawn path"
+// guide is drawn and edited live on the text itself (see useFramePenSession).
 const { session: penSession, open: openPenSession, commitSession: commitPenSession, cancelSession: cancelPenSessionRaw } = useFramePenSession({
   layers: () => localLayers.value,
   size: () => ({ W: canvasDisplay.w, H: canvasDisplay.h }),
   recordHistory: () => recordHistory(),
   commit: (next) => commit(next as any),
-  addPathLayers: (ls) => penAddPathLayers(ls),
-  selectLocal: (id) => { if (!penGuideTargetId.value) selectLocal(id) },
+  addPathLayers: (ls) => addPathLayers(ls),
+  selectLocal: (id) => selectLocal(id),
 })
 /** The overlay (keyboard="host"): the Frame's capture key handler feeds it keys. */
 const penOverlayRef = ref<InstanceType<typeof PenOverlay> | null>(null)
-function penAddPathLayers(ls: any[]) {
-  const layer = ls[0]
-  const guideFor = penGuideTargetId.value   // cleared by commitPenSessionAndSwallowClick, AFTER the session's selectLocal
-  // Drawing FOR a text layer: the path becomes that layer's guide and never
-  // becomes a layer of its own. Same ownership rule as every other follow mode —
-  // nothing extra in the layer list, and it dies with the text.
-  if (guideFor && layer) {
-    const target = localLayers.value.find(l => l.id === guideFor && l.kind === 'text')
-    if (target) {
-      setLocal(guideFor, {
-        path: {
-          ...((target as any).path ?? {}),
-          follow: 'custom',
-          d: layer.d,
-          size: layer.bbox.w * (layer.scale ?? 1),
-        },
-      } as any)
-      selectLocal(guideFor)
-      return
-    }
-  }
-  addPathLayers(ls)
-}
 function commitPenSessionAndSwallowClick() {
   commitPenSession()
-  penGuideTargetId.value = null
   penJustFinished = true
 }
 function cancelPenSession() {
   if (penSession.value) cancelPenSessionRaw()
-  penGuideTargetId.value = null
 }
+/** "Draw a path" / "Edit the path" on a text layer: the shared pen draws the
+ *  text's guide itself (open paths only), and the type re-lays as you draw. */
 function drawGuideForSelectedText() {
   const l = selectedLocal.value
   if (!l || l.kind !== 'text') return
-  penGuideTargetId.value = l.id
-  if (!penSession.value) togglePen()
+  if (!enterPenMode()) return
+  cancelPenSession()
+  openPenSession({ kind: 'guide', textId: l.id })
 }
 /** The one way into the pen (a new drawing or a reopened one): the view-only
  *  and smart-mode guards, then every other tool steps aside. false = not now. */
@@ -2094,11 +2069,9 @@ function enterPenMode(): boolean {
   return true
 }
 function togglePen() {
-  const guideFor = penGuideTargetId.value
   if (!enterPenMode()) return
   if (penSession.value) { cancelPenSession(); return }
   selectLocal(null)
-  penGuideTargetId.value = guideFor
   openPenSession({ kind: 'new' })
 }
 /** A path layer the shared pen can reopen: it remembers its drawing (`sketch`)
@@ -6192,7 +6165,8 @@ function useFramePathAsGuide(l: any, pathLayerId: string) {
   if (!l || !pathLayerId) return
   const src = (localLayers.value as any[]).find(x => x.id === pathLayerId)
   if (!src?.d) return
-  setTextPath(l, { follow: 'custom', d: src.d, size: (src.bbox?.w ?? 0.3) * (src.scale ?? 1) })
+  // always set `sketch` (the source's drawing, or none) so a stale guide drawing never survives
+  setTextPath(l, { follow: 'custom', d: src.d, size: (src.bbox?.w ?? 0.3) * (src.scale ?? 1), sketch: src.sketch ? cloneDoc(src.sketch) : undefined })
 }
 const TEXT_FOLLOW_OPTIONS: { v: TextPathFollow | 'off'; label: string }[] = [
   { v: 'off', label: 'Off' },
@@ -11246,10 +11220,10 @@ onUnmounted(() => {
                   <div v-if="textPath.follow === 'custom'" class="space-y-2">
                     <button
                       class="w-full flex items-center justify-center gap-1.5 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] rounded py-1.5 text-xs text-white/80 hover:text-white cursor-pointer transition-colors"
-                      :title="textPath.d ? 'Draw a new path for this type to follow' : 'Draw the path this type will follow'"
+                      :title="textPath.sketch ? 'Edit the path this type follows' : 'Draw the path this type will follow'"
                       @click="drawGuideForSelectedText"
                     >
-                      <PenTool class="size-3.5" /> {{ textPath.d ? 'Redraw the path' : 'Draw a path' }}
+                      <PenTool class="size-3.5" /> {{ textPath.sketch ? 'Edit the path' : 'Draw a path' }}
                     </button>
                     <div v-if="framePathLayers.length" class="flex items-center gap-2">
                       <span class="text-[10px] text-white/40 shrink-0">Or use</span>

@@ -24,8 +24,17 @@
  *     and writes `d`/`sketch`/`bbox`/`x`/`y` (not re-centred when the layer's
  *     cloner would make copies jump — `clonerBlocksRecentre`); cancel, and
  *     tearing the host down mid-session, write the original layer back exactly.
- *   - `{ kind: 'guide' }` — drawing a text guide; arrives in Task 9. Until then
- *     `open` ignores it.
+ *   - `{ kind: 'guide', textId }` — drawing (or re-editing) a text layer's
+ *     "Drawn path" guide (Task 9). Open paths only (`openOnly`, Select/Pen/
+ *     Curve). The view is FIXED at open: `guideView` of the guide when it
+ *     already remembers a drawing, else `layerView` of the text's placement at
+ *     scale 1 (you draw at true size around the text's origin). Every change
+ *     re-lays the type live (same lazy history as a layer). What you see is
+ *     what you get: `guideFromPathD` re-centres the guide on its own bbox
+ *     midpoint and refits it to `size`, so each write keeps the refit factor at
+ *     the opening `k` (`size = k × x-extent`) and moves the text's `x`/`y` by
+ *     the midpoint's drift (`guideWrite`) — the type stays on the line being
+ *     drawn. Cancel puts the text's `path`, `x` and `y` back exactly.
  *
  * Construction is side-effect free (no DOM, no lifecycle hooks) so vitest can
  * run it in `node`; the pen is disposed whenever a session closes and, when
@@ -34,14 +43,16 @@
 import { ref, shallowRef, computed, getCurrentScope, onScopeDispose, type Ref, type ComputedRef } from 'vue'
 import type { SketchDoc } from '~/lib/sketch/model'
 import { cloneDoc } from '~/lib/sketch/clone'
+import { addPath } from '~/lib/sketch/edit'
 import { layoutScaleOf } from '~/lib/frame/responsive/layoutScale'
 import type { ViewMatrix } from '~/lib/sketch/view'
 import { usePen, type Pen, type PenTool } from '~/composables/pen/usePen'
 import { createPathLayer } from '~/composables/useCompositorLayers'
 import {
-  sketchToLocalD, localOutlineBounds, recentreSketch, newDrawingView, placementAfterRecentre, layerView,
+  sketchToLocalD, localOutlineBounds, recentreSketch, newDrawingView, placementAfterRecentre, layerView, guideView,
   type LayerPlacement,
 } from '~/lib/compositor/penFrame'
+import { customGuideMapping, guideSizeToTargetWidthPx } from '~/lib/compositor/textPath'
 
 export type FramePenTarget = { kind: 'new' } | { kind: 'layer'; id: string } | { kind: 'guide'; textId: string }
 
@@ -111,6 +122,58 @@ export function clonerBlocksRecentre(l: any): boolean {
     || (c.mode === 'radial' && !!c.faceCenter)
 }
 
+/** The tools a text guide offers: open paths only (no Line/Circle/Point). */
+export const GUIDE_PEN_TOOLS: PenTool[] = ['select', 'path', 'curve']
+
+/**
+ * What a guide session fixes at open (see the header): the text's placement,
+ * the guide's refit factor `k` and its bbox midpoint `mid` (LOCAL units), as
+ * `customGuideMapping` reports them for the opening guide. A fresh guide (no
+ * drawing yet) is `k = 1`, `mid = (0,0)`.
+ */
+export interface GuideAnchor {
+  x: number
+  y: number
+  rotation: number
+  skewX: number
+  skewY: number
+  k: number
+  mid: { x: number; y: number }
+}
+
+/**
+ * The text layer after writing drawing `sk` as its guide, so the type sits
+ * exactly where the drawing is under the session's fixed view: `size` keeps the
+ * refit factor at `a.k`, and `x`/`y` move by the guide midpoint's drift so the
+ * re-centred guide lands back under the drawing. `null` when the drawing has no
+ * usable outline (nothing to write).
+ */
+export function guideWrite(text: any, sk: SketchDoc, a: GuideAnchor, W: number, H: number): any | null {
+  const d = sketchToLocalD(sk)
+  const m0 = customGuideMapping(d, W, 0)
+  if (!m0) return null
+  let lo = Infinity, hi = -Infinity
+  for (const p of m0.sub.pts) { if (p.x < lo) lo = p.x; if (p.x > hi) hi = p.x }
+  const size = a.k * (hi - lo)
+  const m = customGuideMapping(d, W, guideSizeToTargetWidthPx(size, W)) ?? m0
+  const { x, y } = placementAfterRecentre(
+    { x: a.x, y: a.y, rotation: a.rotation, skewX: a.skewX, skewY: a.skewY, scale: a.k },
+    { x: m.mid.x - a.mid.x, y: m.mid.y - a.mid.y }, W, H)
+  return { ...text, x, y, path: { ...(text.path ?? {}), follow: 'custom', d, sketch: cloneDoc(sk), size } }
+}
+
+/**
+ * The drawing with the pen's in-progress path (`pen.pendingPath`, not yet in
+ * the doc until the path is finished) added as an open path, so a live preview
+ * shows what is being drawn. The doc itself when nothing is pending.
+ */
+export function withPendingPath(doc: SketchDoc, pp: Pen['pendingPath']['value']): SketchDoc {
+  if (!pp || pp.anchors.length < 2 || pp.segments.length !== pp.anchors.length - 1) return doc
+  const out = cloneDoc(doc)
+  addPath(out, pp.anchors, pp.segments, false)
+  return out
+}
+
 export function useFramePenSession(host: FramePenHost) {
   const session = shallowRef<FramePenSession | null>(null)
   let seq = 0
@@ -127,6 +190,7 @@ export function useFramePenSession(host: FramePenHost) {
   function close() {
     const s = session.value
     original = null
+    guideAnchor = null
     recorded = false
     if (!s) return
     session.value = null
@@ -165,9 +229,54 @@ export function useFramePenSession(host: FramePenHost) {
     session.value = { target: { kind: 'layer', id }, pen, doc, view, key: ++seq }
   }
 
+  // `{ kind: 'guide' }`: what the session fixed at open (see GuideAnchor)
+  let guideAnchor: GuideAnchor | null = null
+
+  function openGuide(textId: string): void {
+    const text = host.layers().find(l => l.id === textId)
+    if (!text || text.kind !== 'text') return
+    close()
+    original = text
+    const { W, H } = host.size()
+    const a: GuideAnchor = {
+      x: text.x, y: text.y,
+      rotation: text.rotation || 0, skewX: text.skewX || 0, skewY: text.skewY || 0,
+      k: 1, mid: { x: 0, y: 0 },
+    }
+    const spec = text.path
+    let fixed: ViewMatrix | null = null
+    let start: SketchDoc = { entities: [], constraints: [] }
+    if (spec?.sketch && spec.d) {
+      const m = customGuideMapping(spec.d, W, guideSizeToTargetWidthPx(spec.size, W))
+      const gv = guideView(text, spec, W, H)
+      if (m && gv) { a.k = m.k; a.mid = m.mid; fixed = gv; start = cloneDoc(spec.sketch) }
+    }
+    // a fresh guide (or one without a drawing): draw at true size around the text's origin
+    if (!fixed) fixed = layerView({ x: a.x, y: a.y, rotation: a.rotation, skewX: a.skewX, skewY: a.skewY, scale: 1 }, W, H)
+    guideAnchor = a
+    const editing = start.entities.length > 0
+    let written = JSON.stringify(start)
+    const doc = ref<SketchDoc>(start)
+    const view = computed(() => fixed!)   // FIXED for the session: the guide re-centres itself, the drawing must not jump
+    const preview = () => {
+      // the path still being drawn counts too, so the type follows it as you draw
+      const shown = withPendingPath(doc.value, pen.pendingPath.value)
+      const json = JSON.stringify(shown)
+      if (json === written) return
+      const { W, H } = host.size()
+      if (!guideWrite(text, shown, a, W, H)) return   // no outline yet (a lone first point): keep what the type shows
+      written = json
+      ensureRecorded()
+      writeLayer(textId, l => guideWrite(l, shown, a, W, H))
+    }
+    const pen = usePen({ doc, view, options: { openOnly: true, tools: GUIDE_PEN_TOOLS }, onChange: preview, onLiveChange: preview })
+    pen.selectTool(editing ? 'select' : 'path')
+    session.value = { target: { kind: 'guide', textId }, pen, doc, view, key: ++seq }
+  }
+
   function open(target: FramePenTarget): void {
     if (target.kind === 'layer') { openLayer(target.id); return }
-    if (target.kind !== 'new') return   // 'guide' (Task 9)
+    if (target.kind === 'guide') { openGuide(target.textId); return }
     close()
     const doc = ref<SketchDoc>({ entities: [], constraints: [] })
     const view = computed(() => { const { W, H } = host.size(); return newDrawingView(W, H) })
@@ -198,6 +307,20 @@ export function useFramePenSession(host: FramePenHost) {
         }
       }
     }
+    if (s.target.kind === 'guide') {
+      const id = s.target.textId, a = guideAnchor!
+      const startSketch = original?.path?.sketch
+      const unchanged = JSON.stringify(s.doc.value) === JSON.stringify(startSketch ?? { entities: [], constraints: [] })
+      if (!recorded && unchanged) { close(); host.selectLocal(id); return }   // never changed: nothing written, nothing recorded
+      const { W, H } = host.size()
+      const sk = cloneDoc(s.doc.value)
+      if (!guideWrite(original, sk, a, W, H)) { cancelSession(); return }   // no outline: treat as cancel
+      ensureRecorded()
+      close()
+      writeLayer(id, l => guideWrite(l, sk, a, W, H))
+      host.selectLocal(id)
+      return
+    }
     if (s.target.kind === 'layer') {
       const id = s.target.id
       // never changed: write nothing, record nothing
@@ -225,6 +348,13 @@ export function useFramePenSession(host: FramePenHost) {
 
   function cancelSession(): void {
     const s = session.value
+    if (s?.target.kind === 'guide' && original) {
+      const id = s.target.textId, orig = original, wrote = recorded
+      close()
+      // the guide and the text's position exactly as they were (other edits survive)
+      if (wrote) writeLayer(id, l => ({ ...l, path: orig.path, x: orig.x, y: orig.y }))
+      return
+    }
     if (s?.target.kind === 'layer' && original) {
       const id = s.target.id, orig = original, wrote = recorded
       close()
