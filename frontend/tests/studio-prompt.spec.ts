@@ -178,10 +178,22 @@ test.describe('the one prompt in studios', () => {
     for (const n of [1, 2, 3]) expect(written.some(w => w.includes(`Take ${n}:`))).toBe(true)
     expect(written.every(w => w.includes('ink on paper'))).toBe(true)
     await expect(page.getByTestId('prompt-mode-chip')).toHaveCount(0)
-    // × puts the effect back and saves nothing.
+    // While the set is open the layer it previews on is read-only: its dials, the effect
+    // picker, and the stack's shape (× puts back the layer as it was).
+    const layerControls = page.getByTestId('shader-studio-layer-controls')
+    const changeEffect = page.getByTestId('studio-inspector-head').getByRole('button', { name: 'Change effect' })
+    await expect(layerControls).toHaveAttribute('inert', /.*/)
+    await expect(changeEffect).toBeDisabled()
+    const layerRows = () => page.getByRole('button', { name: 'Toggle layer' }).count()
+    const before = await layerRows()
+    await page.getByRole('button', { name: 'Add layer' }).click()
+    expect(await layerRows()).toBe(before)
+    // × puts the effect back, saves nothing, and hands the controls back.
     await strip.getByRole('button', { name: 'Close takes' }).click()
     await expect(strip).toHaveCount(0)
     expect(saved).toEqual([])
+    await expect(layerControls).not.toHaveAttribute('inert', /.*/)
+    await expect(changeEffect).toBeEnabled()
   })
 
   test('Shader: inspector reads the thing, then Edit and Develop rows', async ({ page }) => {

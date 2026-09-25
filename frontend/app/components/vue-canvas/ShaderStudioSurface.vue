@@ -63,6 +63,7 @@ import type { EffectTarget } from '~/composables/useEffectTakes'
 import { useMyEffects } from '~/composables/useMyEffects'
 import { myEffectIdOf } from '~/lib/myEffects/defs'
 import { getEffectSync } from '~/lib/shaderfx/catalogStore'
+import { takeLayerLocked, takeStackLocked } from '~/lib/shaderstudio/takeLock'
 
 const props = defineProps<{ nodeId: string; nodes: any[]; edges?: any[]; wiredUrl?: string | null }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -374,8 +375,9 @@ function renderThumb(def: EffectDef): string {
   } catch { return '' }
 }
 function ensureThumb(def: EffectDef | null | undefined) { if (!def || thumbCache[def.id]) return; const t = renderThumb(def); if (t) { thumbCache[def.id] = t; thumbs.value = { ...thumbCache } } }
-function openPicker() { pickerSearch.value = ''; pickerFilter.value = 'all'; pickerOpen.value = true; for (const def of catalog.value?.effects ?? []) ensureThumb(def) }
+function openPicker() { if (layerReadOnly.value) return; pickerSearch.value = ''; pickerFilter.value = 'all'; pickerOpen.value = true; for (const def of catalog.value?.effects ?? []) ensureThumb(def) }
 function pickEffect(id: string) {
+  if (layerReadOnly.value) return
   // TWIN of `switchStudioEffect` in ~/lib/shaderstudio/types.ts (the agent's
   // effect macro goes through that one). The reset-field set below is pinned
   // equal to its EFFECT_SWITCH_RESET_FIELDS by tests/unit/shader-agent-vocab —
@@ -433,6 +435,7 @@ function lookParamMatches(k: string, v: ParamValue): boolean {
 const currentLook = computed(() =>
   effectLooks.value.find(l => Object.entries(l.params).every(([k, v]) => lookParamMatches(k, v)))?.name ?? CUSTOM_LOOK)
 function pickEffectLook(name: string) {
+  if (layerReadOnly.value) return
   const look = effectLooks.value.find(l => l.name === name)
   if (!look) return
   for (const [k, v] of Object.entries(look.params)) setParam(k, v)
@@ -478,6 +481,7 @@ function maskNormFromEvent(ev: PointerEvent): { x: number; y: number } {
 let maskDrag: null | 'center' | 'size' = null
 function onMaskDown(kind: 'center' | 'size', ev: PointerEvent) {
   ev.stopPropagation()
+  if (layerReadOnly.value) return
   maskDrag = kind;(ev.target as HTMLElement).setPointerCapture(ev.pointerId); onMaskMove(ev)
 }
 function onMaskMove(ev: PointerEvent) {
@@ -847,7 +851,7 @@ onMounted(async () => {
 // Closing the studio cancels its video export first.
 onBeforeUnmount(() => { videoAbort?.abort(); saveConfig(); stopPreview(); unregisterStudioParamBaker(props.nodeId); maskRO?.disconnect(); offContextChange() })
 
-function setParam(uniform: string, value: ParamValue) { const e = activeEffectCfg.value; if (e) e.params = { ...e.params, [uniform]: value } }
+function setParam(uniform: string, value: ParamValue) { if (layerReadOnly.value) return; const e = activeEffectCfg.value; if (e) e.params = { ...e.params, [uniform]: value } }
 
 // ── per-effect mask (spatial region confining the active effect) ─────────────
 const MASK_SHAPE_LABELS: Record<MaskShape, string> = { radius: 'Radius', band: 'Band', linear: 'Linear' }
@@ -858,7 +862,7 @@ function ensureMask(): EffectMask {
   if (!e.mask) e.mask = defaultMask()
   return e.mask
 }
-function setMask<K extends keyof EffectMask>(k: K, v: EffectMask[K]) { ensureMask()[k] = v }
+function setMask<K extends keyof EffectMask>(k: K, v: EffectMask[K]) { if (layerReadOnly.value) return; ensureMask()[k] = v }
 const maskOn = computed({
   get: () => !!activeEffectCfg.value?.mask?.enabled,
   set: (v: boolean) => { ensureMask().enabled = v },
@@ -880,16 +884,28 @@ function stopsValue(uniform: string): GradientStop[] { const v = effectValues.va
 // stack has no room for a new layer: the takes go on the active layer instead, and
 // the strip names it.
 let effectPreviewing = false
+// The prompt (the shell's) and the layer an open set previews on. The lock is derived from
+// the prompt's session each time (takeLayerLocked), so this id going stale is harmless.
+const shellRef = ref<InstanceType<typeof StudioModalShell> | null>(null)
+const effectSetOpen = computed(() => !!shellRef.value?.prompt.effectsOpen.value)
+const takeLayerId = ref<string | null>(null)
+/** The active layer's dials, centre handle and effect picker are read-only while a set previews on it. */
+const layerReadOnly = computed(() => takeLayerLocked({ setOpen: effectSetOpen.value, activeLayerId: activeEffectCfg.value?.layerId, takeLayerId: takeLayerId.value }))
+const stackLocked = computed(() => takeStackLocked({ setOpen: effectSetOpen.value }))
+// A set opening mid-gesture: drop the drag and close the picker, so nothing writes under it.
+watch(layerReadOnly, (ro) => { if (ro) { maskDrag = null; pickerOpen.value = false } })
 function shaderStudioEffectTarget(o: { add: boolean; base: EffectDef | null; fresh: boolean }): EffectTarget {
   const index = activeEffect.value
   const add = o.add && config.value.effects.length < LAYER_MAX
   const original = { ...config.value.effects[index]! }
+  const tempLayerId = newLayerId()
+  takeLayerId.value = add ? tempLayerId : original.layerId
   let tempIndex: number | null = null
   const set = (id: string, params: Record<string, ParamValue>) => {
     effectPreviewing = true
     if (add) {
       if (tempIndex == null) {
-        config.value.effects.push({ layerId: newLayerId(), id, params, enabled: true, blend: 'normal', opacity: 1 })
+        config.value.effects.push({ layerId: tempLayerId, id, params, enabled: true, blend: 'normal', opacity: 1 })
         tempIndex = config.value.effects.length - 1
       } else config.value.effects[tempIndex] = { ...config.value.effects[tempIndex]!, id, params }
     } else config.value.effects[index] = { ...original, id, params, customChars: '' }
@@ -942,17 +958,19 @@ function onTuneKept(request: string) {
 
 // ── effect stack (aside StudioLayerStack) ───────────────────────────────────
 function addEffect() {
-  if (config.value.effects.length >= LAYER_MAX) return
+  if (stackLocked.value || config.value.effects.length >= LAYER_MAX) return
   config.value.effects.push({ layerId: newLayerId(), id: '', params: {}, enabled: true, blend: 'normal', opacity: 1 })
   activeEffect.value = config.value.effects.length - 1
 }
 function removeEffect(i: number) {
+  if (stackLocked.value) return
   if (config.value.effects.length <= 1) return
   config.value.effects.splice(i, 1)
   remapEffectTracks('remove', i)
   activeEffect.value = Math.min(activeEffect.value, config.value.effects.length - 1)
 }
 function duplicateEffect(i: number) {
+  if (stackLocked.value) return
   if (config.value.effects.length >= LAYER_MAX) return
   const clone = { ...structuredClone(toRaw(config.value.effects[i]!)), layerId: newLayerId() }
   config.value.effects.splice(i + 1, 0, clone)
@@ -960,6 +978,7 @@ function duplicateEffect(i: number) {
   activeEffect.value = i + 1
 }
 function reorderEffect(from: number, to: number) {
+  if (stackLocked.value) return
   const [m] = config.value.effects.splice(from, 1)
   config.value.effects.splice(to, 0, m!)
   remapEffectTracks('move', from, to)
@@ -986,6 +1005,7 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
 
 <template>
   <StudioModalShell
+    ref="shellRef"
     title="Shader studio" :breadcrumb="effectDef?.name"
     :agent="shaderAgent"
     prompt-place="shader-studio" :prompt-label="promptLabel"
@@ -1014,7 +1034,7 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
         <!-- Mask region overlay: outline + draggable centre/size handles, sized to
              cover the letterboxed canvas exactly. Root is pointer-events-none so it
              never blocks the canvas; only the handles opt back in. -->
-        <svg v-if="showMaskHandles" class="nopan nodrag pointer-events-none absolute overflow-visible"
+        <svg v-if="showMaskHandles && !layerReadOnly" class="nopan nodrag pointer-events-none absolute overflow-visible"
           :style="{ left: `${maskBox.left}px`, top: `${maskBox.top}px`, width: `${maskBox.w}px`, height: `${maskBox.h}px` }"
           :viewBox="`0 0 ${maskBox.w} ${maskBox.h}`"
           @pointermove="onMaskMove" @pointerup="onMaskUp">
@@ -1059,7 +1079,7 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
 
     <template #controls>
       <StudioInspectorHead :title="promptLabel" :subtitle="effectCategory">
-        <StudioButton @click="openPicker">Change effect</StudioButton>
+        <StudioButton :disabled="layerReadOnly" @click="openPicker">Change effect</StudioButton>
         <StudioActionRows bare :actions="[REMIX_ACTION]" />
       </StudioInspectorHead>
       <StudioActionRows :actions="inspectorActions" />
@@ -1076,7 +1096,13 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
 
       <!-- Stylized Effects -->
       <StudioSection title="Stylized Effects">
-        <template #badge><StudioSwitch v-model="activeEffectCfg.enabled" /></template>
+        <template #badge><span :inert="layerReadOnly || undefined" :class="{ 'opacity-40 pointer-events-none': layerReadOnly }"><StudioSwitch v-model="activeEffectCfg.enabled" /></span></template>
+        <!-- Read-only while an effect-take set previews on this layer (× puts back what was there). -->
+        <div
+          data-testid="shader-studio-layer-controls" class="transition-opacity"
+          :class="{ 'opacity-40 pointer-events-none': layerReadOnly }"
+          :inert="layerReadOnly || undefined" :aria-disabled="layerReadOnly || undefined"
+        >
         <div v-if="effectLooks.length" class="mb-1.5">
           <StudioSelect
             label="Look"
@@ -1190,6 +1216,7 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
             </div>
           </div>
         </template>
+        </div>
       </StudioSection>
 
       <!-- Duotone -->

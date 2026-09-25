@@ -13,6 +13,19 @@ describe('studio effect targets', () => {
     expect(s).toContain(':after-take-keep=')
     expect(s).toMatch(/addValuesVersion\(/)
   })
+  it('the Shader studio makes the previewed layer read-only while a set is open, derived from the prompt’s session', () => {
+    const s = src('components/vue-canvas/ShaderStudioSurface.vue')
+    expect(s).toMatch(/shellRef\.value\?\.prompt\.effectsOpen\.value/)
+    expect(s).toMatch(/const layerReadOnly = computed\(\(\) => takeLayerLocked\(/)
+    // dials (the whole layer section), the centre handle and the effect picker
+    expect(s).toMatch(/data-testid="shader-studio-layer-controls"[\s\S]{0,200}:inert="layerReadOnly/)
+    expect(s).toMatch(/v-if="showMaskHandles && !layerReadOnly"/)
+    expect(s).toMatch(/<StudioButton :disabled="layerReadOnly" @click="openPicker">/)
+    for (const fn of ['setParam', 'setMask', 'openPicker', 'pickEffect', 'pickEffectLook', 'onMaskDown'])
+      expect(s).toMatch(new RegExp(`function ${fn}[^{]*\\{[\\s\\S]{0,80}if \\(layerReadOnly\\.value\\) return`))
+    for (const fn of ['addEffect', 'removeEffect', 'duplicateEffect', 'reorderEffect'])
+      expect(s).toMatch(new RegExp(`function ${fn}[^{]*\\{\\s*if \\(stackLocked\\.value`))
+  })
   it('Frame passes a background target to its own prompt', () => {
     const s = src('components/vue-canvas/CompositorModal.vue')
     expect(s).toMatch(/function frameBackgroundTarget\(/)

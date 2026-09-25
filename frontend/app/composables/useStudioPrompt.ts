@@ -333,6 +333,8 @@ export function useStudioPrompt(
   /** End an open effect set, putting the target back (the owner calls this before it
    *  closes or saves, so a previewed draft never persists — preflight C9). */
   function endEffects() { if (fx.session.value || fx.working.value) fx.close() }
+  /** An effect-take set is open: the owner makes what it previews on read-only (derived, never stuck). */
+  const effectsOpen = computed(() => !!fx.session.value)
   /** An effect Keep is saving: the strip's Keep buttons are off until it settles. */
   const takesSaving = computed(() => !!fx.session.value && !!fx.saving?.value)
   /** The price of what a new-effect chip will do (spec §7.2), shown before anything runs. */
@@ -353,7 +355,7 @@ export function useStudioPrompt(
 
   return {
     chipLabel, suggestions, mode, modeNote, working, workingLabel, disabled, editLocked, lockedNote, focusTick,
-    card, takes, takesSaving, answerCard, worker,
+    card, takes, takesSaving, effectsOpen, answerCard, worker,
     submit, runKind, setMode, clearMode, stop, requestFocus,
     previewTake, chooseTake, keepTake, moreTakes, closeTakes, endEffects,
     approve, rejectAll, dismissAnswer, runFollowUp,

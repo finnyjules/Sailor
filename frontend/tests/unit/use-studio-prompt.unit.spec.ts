@@ -515,6 +515,21 @@ describe('useStudioPrompt', () => {
     expect(toastInfo).toHaveBeenCalledWith(BUSY_NOTICE)
     expect(api.card.value).toBe('changes')
   })
+  it('effectsOpen follows the session: on while a set is open, off however it ends', async () => {
+    const effects = fakeEffects()
+    const { api } = setup({ effectTarget: vi.fn(shaderTarget), effects })
+    expect(api.effectsOpen.value).toBe(false)
+    api.setMode('Remix'); await api.submit('rain')
+    expect(api.effectsOpen.value).toBe(true)
+    api.closeTakes()
+    expect(api.effectsOpen.value).toBe(false)
+    api.setMode('Remix'); await api.submit('rain')
+    api.stop()
+    expect(api.effectsOpen.value).toBe(false)
+    api.setMode('Remix'); await api.submit('rain')
+    await api.submit('warmer') // a new request closes the set
+    expect(api.effectsOpen.value).toBe(false)
+  })
   it('unmounting closes an open effect set', async () => {
     const effects = fakeEffects()
     const { api, wrapper } = setup({ effectTarget: vi.fn(shaderTarget), effects })
