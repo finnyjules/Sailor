@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { __setResourceOwnersDbForTests } from '../../server/utils/resourceOwners'
 import { SPIKE_TAKES } from '../../app/lib/shadergen/__eval__/spikeTakes'
-import { MY_EFFECT_LIMITS } from '../../shared/myEffects/record'
+import { MY_EFFECT_LIMITS, MY_EFFECT_MAX_BYTES } from '../../shared/myEffects/record'
 import { NITRO_API_PREFIXES, isNitroApiPath } from '../../server/lib/nitroApiPaths'
 
 const g = globalThis as any
@@ -97,7 +97,12 @@ afterEach(() => {
   else process.env[CLERK_KEY] = savedClerk
 })
 
-const ev = (o: { id?: string, body?: any, userId?: string | null } = {}) => ({ params: o.id ? { id: o.id } : {}, body: o.body, context: { userId: o.userId ?? null } })
+const ev = (o: { id?: string, body?: any, userId?: string | null, contentLength?: number } = {}) => ({
+  params: o.id ? { id: o.id } : {},
+  body: o.body,
+  context: { userId: o.userId ?? null },
+  node: { req: { headers: o.contentLength === undefined ? {} : { 'content-length': String(o.contentLength) } } },
+})
 
 describe('/api/my-effects (local)', () => {
   it('is a Nitro route', () => {
@@ -133,6 +138,43 @@ describe('/api/my-effects (local)', () => {
     await expect(put(ev({ id: A, body: rec(A) }))).rejects.toMatchObject({ statusCode: 409 })
     await expect(put(ev({ id: 'mine_000000000000', body: rec('mine_000000000000', 'Renamed') }))).resolves.toBeTruthy()
   })
+
+  it('refuses an over-cap PUT/PATCH from Content-Length before parsing (review #1)', async () => {
+    await expect(put(ev({ id: A, body: rec(A), contentLength: MY_EFFECT_MAX_BYTES + 1 }))).rejects.toMatchObject({ statusCode: 413 })
+    await expect(patch(ev({ id: A, body: { name: 'x' }, contentLength: MY_EFFECT_MAX_BYTES + 1 }))).rejects.toMatchObject({ statusCode: 413 })
+  })
+
+  it('refuses an oversize dial name, option list, or values entry with 400 (review #1)', async () => {
+    const v = rec(A).versions[0]!
+    const longName = 'x'.repeat(65)
+    await expect(put(ev({ id: A, body: { ...rec(A), versions: [{ ...v, params: [{ ...v.params[0], uniform: longName }, v.params[1], v.params[2]] }] } }))).rejects.toMatchObject({ statusCode: 400 })
+    const manyOptions = Array.from({ length: 65 }, (_, i) => ({ label: `o${i}`, value: i }))
+    await expect(put(ev({ id: A, body: { ...rec(A), versions: [{ ...v, params: [{ ...v.params[0], options: manyOptions }, v.params[1], v.params[2]] }] } }))).rejects.toMatchObject({ statusCode: 400 })
+    await expect(put(ev({ id: A, body: { ...rec(A), versions: [{ ...v, values: { u_a: 'x'.repeat(65) } }] } }))).rejects.toMatchObject({ statusCode: 400 })
+  })
+
+  it('refuses path traversal in :id on GET and DELETE (review #7)', async () => {
+    await expect(get(ev({ id: '../../etc/passwd' }))).rejects.toMatchObject({ statusCode: 400 })
+    await expect(del(ev({ id: '..%2F..%2Fetc%2Fpasswd' }))).rejects.toMatchObject({ statusCode: 400 })
+  })
+
+  it('checks the id matches the file name on a single get, same as list (review #5)', async () => {
+    const dir = join(dataDir, 'my-effects'); mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, `${A}.json`), JSON.stringify(rec(B))) // body id drifted from the file name
+    await expect(get(ev({ id: A }))).rejects.toMatchObject({ statusCode: 404 })
+  })
+
+  it('refuses a non-string name on rename with 400 (review #6)', async () => {
+    await put(ev({ id: A, body: rec(A) }))
+    await expect(patch(ev({ id: A, body: { name: 123 } }))).rejects.toMatchObject({ statusCode: 400 })
+    await expect(patch(ev({ id: A, body: { name: { x: 1 } } }))).rejects.toMatchObject({ statusCode: 400 })
+  })
+
+  it('keeps the stored createdAt on overwrite (review #8)', async () => {
+    const first = await put(ev({ id: A, body: { ...rec(A), createdAt: '2020-01-01T00:00:00.000Z' } }))
+    const second = await put(ev({ id: A, body: { ...rec(A, 'Renamed'), createdAt: '2099-01-01T00:00:00.000Z' } }))
+    expect(second.createdAt).toBe(first.createdAt)
+  })
 })
 
 describe('/api/my-effects (hosted): strictly your own', () => {
@@ -158,5 +200,33 @@ describe('/api/my-effects (hosted): strictly your own', () => {
   it('a signed-out request sees nothing', async () => {
     await put(ev({ id: A, body: rec(A), userId: 'u1' }))
     expect((await list(ev({ userId: null }))).effects).toEqual([])
+  })
+
+  it('a signed-out caller cannot rename or delete (review #7)', async () => {
+    await put(ev({ id: A, body: rec(A), userId: 'u1' }))
+    await expect(patch(ev({ id: A, body: { name: 'x' }, userId: null }))).rejects.toMatchObject({ statusCode: 404 })
+    await expect(del(ev({ id: A, userId: null }))).rejects.toMatchObject({ statusCode: 404 })
+  })
+
+  it('the 500 cap is counted per caller, not across all hosted users (review #7)', async () => {
+    const dir = join(dataDir, 'my-effects'); mkdirSync(dir, { recursive: true })
+    for (let i = 0; i < MY_EFFECT_LIMITS.maxEffects; i++) {
+      const id = `mine_${String(i).padStart(12, '0')}`
+      writeFileSync(join(dir, `${id}.json`), JSON.stringify(rec(id)))
+      owners.set(`my-effect:${id}`, 'u1')
+    }
+    // u1 is at the cap.
+    await expect(put(ev({ id: A, body: rec(A), userId: 'u1' }))).rejects.toMatchObject({ statusCode: 409 })
+    // u2 has none yet, so u2 can still create.
+    await expect(put(ev({ id: B, body: rec(B), userId: 'u2' }))).resolves.toBeTruthy()
+  })
+
+  it('an id becomes claimable again after its owner deletes it (review #7)', async () => {
+    await put(ev({ id: A, body: rec(A), userId: 'u1' }))
+    await del(ev({ id: A, userId: 'u1' }))
+    const claimed = await put(ev({ id: A, body: rec(A, 'u2’s take'), userId: 'u2' }))
+    expect(claimed.id).toBe(A)
+    expect((await list(ev({ userId: 'u2' }))).effects.map((e: any) => e.id)).toEqual([A])
+    expect((await list(ev({ userId: 'u1' }))).effects).toEqual([])
   })
 })

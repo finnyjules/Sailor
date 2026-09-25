@@ -12,7 +12,41 @@
 import { LIMITS, type GenParam } from '../shadergen/contract'
 
 export const MY_EFFECT_ID_RE = /^mine_[a-z0-9]{12}$/
-export const MY_EFFECT_LIMITS = { maxEffects: 500, maxVersions: 50, maxNameChars: 60, maxNoteChars: 300 } as const
+export const MY_EFFECT_LIMITS = {
+  maxEffects: 500, maxVersions: 50, maxNameChars: 60, maxNoteChars: 300,
+  // Ruling (fix round 1, review #1): a dial's own uniform/label/string-default,
+  // and an option's label, are UI-sized text — 64 chars is generous for any of
+  // them (the spike's longest dial label is under 20). maxDialOptions bounds an
+  // enum's choice list the same way LIMITS.maxParams bounds the dial count.
+  maxDialNameChars: 64, maxDialOptions: 64, maxOptionLabelChars: 64,
+  // A version's `values` map holds one entry per dial it can reach, so its key
+  // count is bounded by LIMITS.maxParams (the most dials any single code
+  // version can declare) even for a values-only version with no params of its
+  // own. maxValueChars matches maxDialNameChars — a string value is a color or
+  // an enum choice, never prose.
+  maxValueChars: 64,
+} as const
+
+/**
+ * Ruling (fix round 1, review #1): the total serialized-record byte cap,
+ * computed from the constants above rather than guessed. It must clear the
+ * worst case a fully-legal record can produce: maxVersions versions, each
+ * with a body at LIMITS.maxBodyChars, a full LIMITS.maxParams dials (each at
+ * maxDialNameChars for its uniform+label, plus its full maxDialOptions option
+ * list each at maxOptionLabelChars), a full values map, and a full note — so
+ * a record over this size can only be padding, not legal content. This
+ * replaces the unbounded shape a probe pushed to 40 MB (values/dial strings
+ * had no length cap at all); 500 effects at this cap is a few hundred MB per
+ * hosted user at the true worst case, which is the accepted cost of raising
+ * it no further than the legal shape requires.
+ */
+const PER_DIAL_BYTES = MY_EFFECT_LIMITS.maxDialNameChars * 2 + MY_EFFECT_LIMITS.maxDialOptions * MY_EFFECT_LIMITS.maxOptionLabelChars + 40
+const PER_VERSION_BYTES = LIMITS.maxBodyChars + LIMITS.maxParams * (PER_DIAL_BYTES + MY_EFFECT_LIMITS.maxValueChars) + MY_EFFECT_LIMITS.maxNoteChars + 100
+export const MY_EFFECT_MAX_BYTES = MY_EFFECT_LIMITS.maxVersions * PER_VERSION_BYTES + MY_EFFECT_LIMITS.maxNameChars + 1_000
+
+export function recordByteSize(rec: unknown): number {
+  return Buffer.byteLength(JSON.stringify(rec), 'utf8')
+}
 
 export type MyEffectValue = number | string
 export interface MyEffectVersion {
@@ -54,19 +88,32 @@ function cleanParams(x: unknown): GenParam[] {
   if (!Array.isArray(x) || x.length < LIMITS.minParams || x.length > LIMITS.maxParams) throw new Error(`a code version needs ${LIMITS.minParams}–${LIMITS.maxParams} dials`)
   return x.map((p) => {
     if (!isObj(p) || typeof p.uniform !== 'string' || typeof p.label !== 'string' || !PARAM_TYPES.has(p.type)) throw new Error('a dial is malformed')
+    if (p.uniform.length > MY_EFFECT_LIMITS.maxDialNameChars || p.label.length > MY_EFFECT_LIMITS.maxDialNameChars) throw new Error('a dial name is too long')
     if (typeof p.default !== 'number' && typeof p.default !== 'string') throw new Error('a dial is malformed')
+    if (typeof p.default === 'string' && p.default.length > MY_EFFECT_LIMITS.maxDialNameChars) throw new Error('a dial default is too long')
     const out: GenParam = { uniform: p.uniform, label: p.label, type: p.type, default: p.default }
     for (const k of ['min', 'max', 'step'] as const) if (typeof p[k] === 'number') out[k] = p[k]
-    if (Array.isArray(p.options)) out.options = p.options.filter((o: any) => isObj(o) && typeof o.label === 'string' && typeof o.value === 'number').map((o: any) => ({ label: o.label, value: o.value }))
+    if (p.options !== undefined) {
+      if (!Array.isArray(p.options) || p.options.length > MY_EFFECT_LIMITS.maxDialOptions) throw new Error('too many dial options')
+      out.options = p.options.map((o: unknown) => {
+        if (!isObj(o) || typeof o.label !== 'string' || typeof o.value !== 'number') throw new Error('a dial option is malformed')
+        if (o.label.length > MY_EFFECT_LIMITS.maxOptionLabelChars) throw new Error('a dial option label is too long')
+        return { label: o.label, value: o.value }
+      })
+    }
     return out
   })
 }
 
 function cleanValues(x: unknown): Record<string, MyEffectValue> {
   if (!isObj(x)) throw new Error('values must be an object')
+  const entries = Object.entries(x)
+  if (entries.length > LIMITS.maxParams) throw new Error(`values holds at most ${LIMITS.maxParams} dials`)
   const out: Record<string, MyEffectValue> = {}
-  for (const [k, v] of Object.entries(x)) {
+  for (const [k, v] of entries) {
+    if (k.length > MY_EFFECT_LIMITS.maxDialNameChars) throw new Error(`value key ${k.slice(0, 20)}… is too long`)
     if (typeof v !== 'number' && typeof v !== 'string') throw new Error(`value ${k} must be a number or text`)
+    if (typeof v === 'string' && v.length > MY_EFFECT_LIMITS.maxValueChars) throw new Error(`value ${k} is too long`)
     out[k] = v
   }
   return out
