@@ -40,6 +40,18 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 - **Behaviour changes:** Variations makes 3 takes, not 4. Background auto-reviews no longer take over the prompt.
 - **Owed:** the real-mouse browser pass (plan Task 11 step 3). `node-capsule.spec.ts` is red because its setup doesn't wait for the late starter Frame; that race predates this work.
 
+### Shared pen — Plan A — LANDED 2026-09-24 (spec `docs/superpowers/specs/2026-09-24-shared-pen-design.md`, plan `docs/superpowers/plans/2026-09-24-shared-pen-a.md`)
+
+The arc pen left the test page and became a shared pen any tool can host. `frontend/app/composables/pen/usePen.ts` holds the state and actions, with `penRules.ts` deciding which rules apply to a selection. `frontend/app/components/pen/PenOverlay.vue` draws and takes input over any canvas through one drawing-to-screen matrix, so rotation, uneven scale and mirroring need no special cases — the outline is drawn in drawing space under an SVG transform with non-scaling strokes. `frontend/app/components/pen/PenToolbar.vue` lays out a tool row, a rules row above it when something is selected, and a hint line. The Bézier Curve tool is back beside the arc pen, and both build one path.
+
+Snapping and gesture distances are now screen pixels (20.4 / 5.1 / 6.8 px, replacing the old 0.6 / 0.15 / 0.2 units measured at the test page's 34 px per unit), so they feel the same at any zoom. `/dev/sketch-draw` is now just a host — pan/zoom, test hooks, Copy SVG — and `?view=rotated` shows the pen under a 30° view.
+
+**Proof.** 43 browser tests on the test page; real-mouse checks of drawing, tangent snap, drag re-solve, undo, zoom, the rotated view, toolbar rules, and curve handle drag/delete.
+
+Commits: `24a1845ad` (view matrix), `e8cad0ec2` (usePen), `35ef4a213` + `2ee1c1c20` (overlay), `723201e1f` + `dd2de2a93` (toolbar), `9f2645ac1` + `1804a32cc` (Curve tool).
+
+**Next.** Plan B — the Frame's own pen tool and the text "Drawn path" — then Plan C — Shape Studio's "Drawn" shape.
+
 ### Print finishes — Gold foil, Spot UV, one Frame light, Halation — LANDED 2026-09-24 (Plan A; `ae2e31ca7`..`3fb6d5896`, 13 commits — spec `docs/superpowers/specs/2026-09-24-print-finishes-design.md`, plan `docs/superpowers/plans/2026-09-24-print-finishes-plan-a.md`)
 
 From a browser prototype Julien loved ("that is so cool", https://claude.ai/artifact/ARWNKLm4DiKuwEjij4bjhq). Three print/film finishes in the Frame editor, drawn on the GPU.
