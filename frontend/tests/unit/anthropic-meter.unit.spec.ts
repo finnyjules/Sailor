@@ -64,8 +64,10 @@ describe('anthropic-meter coverage guard', () => {
 
   // Two ways to be metered: the flat-rate meterAssist, or a per-call token
   // meter (holdForModelCall — /api/shader-gen reaches it through
-  // meterShaderGenCall in server/lib/shaderGenRequest.ts, checked below).
-  const TOKEN_METERED = ['holdForModelCall', 'meterShaderGenCall']
+  // meterShaderGenCall in server/lib/shaderGenRequest.ts, checked below;
+  // /api/prompt-route reaches it the same way through meterRouterCall in
+  // server/lib/promptRouterRequest.ts).
+  const TOKEN_METERED = ['holdForModelCall', 'meterShaderGenCall', 'meterRouterCall']
 
   for (const file of anthropicFiles) {
     const rel = relative(serverRoot, file)
