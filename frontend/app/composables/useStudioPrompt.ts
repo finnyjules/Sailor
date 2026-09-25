@@ -31,7 +31,8 @@ import { studioDispatch, type StudioPromptPlace } from '~/lib/prompt/studioDispa
 import { studioTakeIndex, studioTakesSession } from '~/lib/prompt/studioTakes'
 import { CURRENT, isTakesWorking, type TakesSession } from '~/lib/prompt/takesSession'
 import { useEffectTakes, type EffectTarget } from '~/composables/useEffectTakes'
-import { shaderGenEstimateText } from '~/lib/shadergen/estimate'
+import { shaderGenPriceText } from '~/lib/shadergen/estimate'
+import { REFERENCE_ONLY_REQUEST } from '~/lib/prompt/referencePicture'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 import { kindForMode, type RouterHost, type RouterKind } from '~~/shared/promptRouter/router'
 
@@ -71,6 +72,9 @@ export function useStudioPrompt(
     /** Called after a worker take is kept, with the request that made it — only for a request
      *  with words (Tune, or a typed tweak), never for Vary's fixed directions. */
     afterKeep?: (request: string) => void
+    /** This studio makes new effects, so a pasted or dropped picture is taken as the look to aim
+     *  for (stage 5 follow-up). Default: whenever `effectTarget` is given. */
+    takesReference?: () => boolean
   },
   deps: { route?: typeof routeRequest; apiKey?: () => string; effects?: ReturnType<typeof useEffectTakes> } = {},
 ) {
@@ -83,6 +87,10 @@ export function useStudioPrompt(
   const worker = o.worker
 
   const mode = ref<StudioPromptMode | null>(null)
+  /** A pasted or dropped picture: the look to aim for (a JPEG data URL, long edge ≤ 512 px). It
+   *  belongs to the take set it is sent with: Keep, × and the owner closing clear it. */
+  const reference = ref<string | null>(null)
+  const acceptsReference = computed(() => (o.takesReference ? o.takesReference() : !!o.effectTarget))
   const focusTick = ref(0)
   const routing = ref(false)
   const request = ref('')
@@ -123,7 +131,7 @@ export function useStudioPrompt(
   const jobBusy = () => working.value || disabled.value || !!fx.saving?.value
   const workingLabel = computed(() => {
     // Effect takes quote the request and carry the estimate (plan ruling 14), as on the canvas.
-    if (fx.working.value) return `${promptWorkingLabel({ request: fx.request.value })} · ${shaderGenEstimateText(hosted())}`
+    if (fx.working.value) return `${promptWorkingLabel({ request: fx.request.value })} · ${shaderGenPriceText(hosted(), !!fx.reference?.value)}`
     if (!busy.value && takesWorking.value) {
       return promptWorkingLabel({ request: workerTakes.value!.request, takesOf: workerTakes.value!.nodeLabel })
     }
@@ -212,7 +220,8 @@ export function useStudioPrompt(
       const w = worker()
       if (w?.hasProposal.value || w?.reviewing.value) { toast.info(BUSY_NOTICE); return }
       w?.abandonTakes?.()
-      void fx.start(d.text, target!)
+      const pic = reference.value
+      void (pic ? fx.start(d.text, target!, { reference: pic }) : fx.start(d.text, target!))
       return
     }
     const w = worker()!
@@ -222,7 +231,8 @@ export function useStudioPrompt(
 
   function beginRun(text: string) {
     // An open effect set goes first: its preview must not be what the next run starts from.
-    endEffects()
+    // (The prompt's reference picture stays: it goes with this run.)
+    closeEffects()
     fx.clearMessages()
     answerRef.value = null
     request.value = text
@@ -232,7 +242,8 @@ export function useStudioPrompt(
   }
 
   async function submit(text: string) {
-    const t = text.trim()
+    // A picture with no words asks to match its look.
+    const t = text.trim() || (reference.value ? REFERENCE_ONLY_REQUEST : '')
     if (!t || jobBusy()) return
     const seq = beginRun(t)
     const m = mode.value
@@ -283,6 +294,18 @@ export function useStudioPrompt(
   function clearMode() { mode.value = null }
   function requestFocus() { focusTick.value++ }
 
+  /** A picture pasted or dropped on the prompt. A second one replaces the first. With no mode
+   *  chip it sets New effect (the price shows before anything runs, no router call); a Remix
+   *  chip stays. A studio that makes no effects ignores it. */
+  function attachReference(dataUrl: string) {
+    if (!acceptsReference.value || !dataUrl) return
+    if (jobBusy()) { toast.info(BUSY_NOTICE); return }
+    reference.value = dataUrl
+    if (mode.value?.kind !== 'new-effect') mode.value = { label: 'New effect', kind: 'new-effect', effectId: null, add: false }
+    focusTick.value++
+  }
+  function clearReference() { reference.value = null }
+
   /** Stop everything this prompt started: the route call, the worker's run (its
    *  reply is thrown away when it lands) and takes still arriving. */
   function stop() {
@@ -313,7 +336,7 @@ export function useStudioPrompt(
     worker()?.selectTake?.(takeAt(id))
   }
   function keepTake(id: string) {
-    if (fx.session.value) { void fx.keep(id); return }
+    if (fx.session.value) { return fx.keep(id).then((kept) => { if (kept) reference.value = null }) }
     const w = worker()
     const t = takeAt(id)
     if (!w || !t) return
@@ -331,12 +354,13 @@ export function useStudioPrompt(
     if (w?.moreDirections) void track(w.moreDirections()).catch(() => {})
   }
   function closeTakes() {
-    if (fx.session.value) { fx.close(); return }
+    if (fx.session.value) { fx.close(); reference.value = null; return }
     dropLateReply(); worker()?.dismissTakes?.()
   }
   /** End an open effect set, putting the target back (the owner calls this before it
    *  closes or saves, so a previewed draft never persists — preflight C9). */
-  function endEffects() { if (fx.session.value || fx.working.value) fx.close() }
+  function closeEffects() { if (fx.session.value || fx.working.value) fx.close() }
+  function endEffects() { closeEffects(); reference.value = null }
   /** An effect-take set is open: the owner makes what it previews on read-only (derived, never stuck). */
   const effectsOpen = computed(() => !!fx.session.value)
   /** A failed Keep while the set is still open: the strip shows it (the card is the strip). */
@@ -348,9 +372,9 @@ export function useStudioPrompt(
   /** An effect Keep is saving: the strip's Keep buttons are off until it settles. */
   const takesSaving = computed(() => !!fx.session.value && !!fx.saving?.value)
   /** The price of what a new-effect chip will do (spec §7.2), shown before anything runs. */
-  const modeNote = computed<string | null>(() => (mode.value?.kind === 'new-effect' ? shaderGenEstimateText(hosted()) : null))
+  const modeNote = computed<string | null>(() => (mode.value?.kind === 'new-effect' ? shaderGenPriceText(hosted(), !!reference.value) : null))
   /** "Three more" on an effect set starts another paid set: its price shows on the button first. */
-  const takesMoreNote = computed<string | null>(() => (fx.session.value ? shaderGenEstimateText(hosted()) : null))
+  const takesMoreNote = computed<string | null>(() => (fx.session.value ? shaderGenPriceText(hosted(), !!fx.reference?.value) : null))
 
   // --- changes and answers ----------------------------------------------------
   function approve() { worker()?.keep() }
@@ -368,6 +392,7 @@ export function useStudioPrompt(
   return {
     chipLabel, suggestions, mode, modeNote, working, workingLabel, disabled, editLocked, lockedNote, focusTick,
     card, takes, takesSaving, takesError, takesMoreNote, effectsOpen, answerCard, worker, notify,
+    reference, acceptsReference, attachReference, clearReference,
     submit, runKind, setMode, clearMode, stop, requestFocus,
     previewTake, chooseTake, keepTake, moreTakes, closeTakes, endEffects,
     approve, rejectAll, dismissAnswer, runFollowUp,

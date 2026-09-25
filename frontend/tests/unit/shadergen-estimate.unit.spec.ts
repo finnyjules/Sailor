@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { SHADER_GEN_MODEL, SHADER_GEN_TAKES } from '~~/shared/shadergen/model'
 import { ANTHROPIC_USD_PER_MTOK, anthropicCallCredits } from '~~/shared/pricing/anthropicTokens'
-import { estimateShaderGen, SHADER_GEN_ENVELOPE } from '~~/shared/pricing/shaderGenEstimate'
+import { estimateShaderGen, REFERENCE_IMAGE_TOKENS, SHADER_GEN_ENVELOPE } from '~~/shared/pricing/shaderGenEstimate'
 import { shaderGenEstimateText } from '~/lib/shadergen/estimate'
 import * as serverPrices from '../../server/utils/anthropicPrices'
 
@@ -33,9 +33,26 @@ describe('estimateShaderGen', () => {
   })
 })
 
+describe('estimateShaderGen with a reference picture', () => {
+  it('a 512 px picture is 350 input tokens by the image-token rule (w × h / 750)', () => {
+    expect(REFERENCE_IMAGE_TOKENS).toBe(350)
+  })
+  it('adds the picture to every call', () => {
+    const e = estimateShaderGen(SHADER_GEN_TAKES, { reference: true })
+    expect(e.usd[0]).toBeCloseTo(3 * (5350 * 4 + 3000 * 20) / 1e6, 6)
+    expect(e.usd[1]).toBeCloseTo(3 * 1.3 * (7350 * 4 + 4000 * 20) / 1e6, 6)
+    expect(e.credits).toEqual([51, 88])
+    expect(estimateShaderGen(SHADER_GEN_TAKES, { reference: false })).toEqual(estimateShaderGen())
+  })
+})
+
 describe('shaderGenEstimateText', () => {
   it('dollars locally, credits hosted', () => {
     expect(shaderGenEstimateText(false)).toBe('~$0.24–0.42')
     expect(shaderGenEstimateText(true)).toBe('~48–88 cr')
+  })
+  it('higher with a reference picture', () => {
+    expect(shaderGenEstimateText(false, estimateShaderGen(SHADER_GEN_TAKES, { reference: true }))).toBe('~$0.24–0.43')
+    expect(shaderGenEstimateText(true, estimateShaderGen(SHADER_GEN_TAKES, { reference: true }))).toBe('~51–88 cr')
   })
 })

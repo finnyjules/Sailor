@@ -62,6 +62,8 @@ export interface EngineInput {
    *  input as well as the dev-only shader-gen evaluation's (variant C): sent
    *  with EVERY generation/repair call of this request. */
   images?: string[]
+  /** Which of `images` is a reference picture (the look to aim for), 1-based; the prompt names it. */
+  referencePicture?: 1 | 2
   /** Other requests' takes shown as the quality bar; the product's own input
    *  as well as the dev-only shader-gen evaluation's (variant C). */
   examples?: GenRequest['examples']
@@ -89,7 +91,7 @@ export const isAbortError = (e: unknown): boolean => (e as { name?: string } | n
 const aborted = () => new DOMException('Stopped', 'AbortError')
 
 async function runTake(input: EngineInput, index: number, deps: EngineDeps, usage: Usage, avoid?: string): Promise<EngineTake | EngineFailure> {
-  const req: GenRequest = { request: input.request, base: input.base ?? null, references: input.references, takeIndex: index, avoid, examples: input.examples }
+  const req: GenRequest = { request: input.request, base: input.base ?? null, references: input.references, takeIndex: index, avoid, examples: input.examples, referencePicture: input.referencePicture ?? null }
   const log: string[] = []
   let prompt = buildGenPrompt(req)
   let compileRepairs = 0

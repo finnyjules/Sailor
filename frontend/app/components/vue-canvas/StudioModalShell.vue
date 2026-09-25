@@ -93,6 +93,8 @@ const prompt = useStudioPrompt({
   label: () => props.promptLabel ?? null,
   suggestions: () => props.promptSuggestions ?? [],
   effectTarget: m => props.effectTarget?.(m) ?? null,
+  // Only a studio that makes new effects (the Shader studio) takes a pasted reference picture.
+  takesReference: () => !!props.effectTarget,
   afterKeep: r => props.afterTakeKeep?.(r),
 })
 provide(STUDIO_PROMPT_KEY, prompt)

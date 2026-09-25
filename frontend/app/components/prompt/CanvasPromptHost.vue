@@ -10,6 +10,7 @@ import PromptAnswerCard from '~/components/prompt/PromptAnswerCard.vue'
 import ImageSearchPickerModal from '~/components/agent/ImageSearchPickerModal.vue'
 import { useCanvasPrompt } from '~/composables/useCanvasPrompt'
 import { useAiStatus } from '~/composables/useAiStatus'
+import { referenceFromFile } from '~/lib/prompt/referencePicture'
 
 const props = defineProps<{ vueCanvas?: any }>()
 const { aiAvailable } = useAiStatus()
@@ -18,6 +19,7 @@ const ready = computed(() => typeof props.vueCanvas?.agentSnapshot === 'function
 const {
   agent, chipLabel, suggestions, mode, modeNote, focusTick, working, workingLabel, card, answerCard, takes, takesSaving, takesError, takesMoreNote, showSketchInstead,
   searchOpen, searchQuery, onSearchDone, submit, stop, clearMode, clearSelection, onPromptFocus,
+  reference, acceptsReference, attachReference, clearReference,
   previewTake, chooseTake, keepTake, closeTakes, moreTakes, dismissAnswer, runFollowUp, sketchInstead,
 } = useCanvasPrompt(() => props.vueCanvas ?? null)
 const { changes, issues, review, reviewing, busy: agentBusy, hovered, acceptChange, rejectChange, reroll, keep, keepAndRun, dismiss } = agent
@@ -38,6 +40,12 @@ function isFocusable(): boolean {
   return !!hit && (hit === input || !!input.closest('.sailor-prompt')?.contains(hit))
 }
 defineExpose({ focus: () => promptRef.value?.focus(), isFocusable })
+
+// A pasted or dropped picture (only while a shader node is selected), shrunk to what the model sees.
+async function onAttachImage(file: File) {
+  const url = await referenceFromFile(file)
+  if (url) attachReference(url)
+}
 </script>
 
 <template>
@@ -56,7 +64,11 @@ defineExpose({ focus: () => promptRef.value?.focus(), isFocusable })
       :working-label="workingLabel"
       :stoppable="working"
       :disabled="!aiAvailable"
+      :reference="reference"
+      :accepts-image="acceptsReference"
       @submit="submit"
+      @attach-image="onAttachImage"
+      @clear-reference="clearReference"
       @stop="stop"
       @clear-selection="clearSelection"
       @clear-mode="clearMode"

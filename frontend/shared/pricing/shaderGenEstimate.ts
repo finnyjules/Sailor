@@ -15,11 +15,19 @@ export const SHADER_GEN_ENVELOPE = {
   callsPerTake: [1, 1.3],
 } as const
 
+/** A reference picture (the look to aim for) is one more image on EVERY call of the set,
+ *  sent at the product's picture size: long edge ≤ 512 px (productRequest's imageForModel).
+ *  Anthropic's image-token rule (vision docs): tokens ≈ width × height / 750, so a
+ *  512 × 512 picture is 349.5 → 350 input tokens at most; a non-square one is fewer. */
+const REFERENCE_IMAGE_EDGE = 512
+export const REFERENCE_IMAGE_TOKENS = Math.ceil((REFERENCE_IMAGE_EDGE * REFERENCE_IMAGE_EDGE) / 750)
+
 export interface ShaderGenEstimate { usd: [number, number]; credits: [number, number] }
 
-export function estimateShaderGen(takes: number = SHADER_GEN_TAKES): ShaderGenEstimate {
+export function estimateShaderGen(takes: number = SHADER_GEN_TAKES, o: { reference?: boolean } = {}): ShaderGenEstimate {
   const p = ANTHROPIC_USD_PER_MTOK[SHADER_GEN_MODEL.model]!
-  const perCall = (i: 0 | 1) => (SHADER_GEN_ENVELOPE.inputTokens[i] * p.input + SHADER_GEN_ENVELOPE.outputTokens[i] * p.output) / 1_000_000
+  const extra = o.reference ? REFERENCE_IMAGE_TOKENS : 0
+  const perCall = (i: 0 | 1) => ((SHADER_GEN_ENVELOPE.inputTokens[i] + extra) * p.input + SHADER_GEN_ENVELOPE.outputTokens[i] * p.output) / 1_000_000
   const calls = (i: 0 | 1) => takes * SHADER_GEN_ENVELOPE.callsPerTake[i]
   return {
     usd: [perCall(0) * calls(0), perCall(1) * calls(1)],

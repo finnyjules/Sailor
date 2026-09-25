@@ -8,6 +8,7 @@ import { TAKE_ANGLES } from '~/lib/shadergen/prompt'
 import { SPIKE_TAKES } from '~/lib/shadergen/__eval__/spikeTakes'
 import { CURRENT } from '~/lib/prompt/takesSession'
 import { MY_EFFECTS_ERRORS } from '~/lib/myEffects/client'
+import { REFERENCE_ONLY_REQUEST } from '~/lib/prompt/referencePicture'
 
 ;(globalThis as any).useLocalSettings = () => ({ getLocalSetting: () => 'k' })
 const renderer: TakeRenderer = { compile: () => null, judge: () => ({ pass: true, flags: [], thumbnail: 'data:thumb' }), sheet: () => '' }
@@ -443,5 +444,36 @@ describe('useEffectTakes', () => {
     expect(off).not.toHaveBeenCalled()
     scope.stop()
     expect(off).toHaveBeenCalledTimes(1)
+  })
+  describe('a reference picture (the look to aim for)', () => {
+    it('goes to the request with the target’s own picture, and Three more reuses it', async () => {
+      const input = vi.fn(async (o: any) => ({ request: o.request, count: 3, signal: o.signal }))
+      const { api, release } = setup({ input })
+      const run = api.start('like this, but slower', target(), { reference: 'data:image/jpeg;base64,REF' })
+      release(0); release(1); release(2); await run
+      expect(input).toHaveBeenLastCalledWith(expect.objectContaining({ request: 'like this, but slower', reference: 'data:image/jpeg;base64,REF' }))
+      expect(api.reference.value).toBe('data:image/jpeg;base64,REF')
+      const again = api.more(); await tick(); await tick()
+      expect(input).toHaveBeenCalledTimes(2)
+      expect(input).toHaveBeenLastCalledWith(expect.objectContaining({ reference: 'data:image/jpeg;base64,REF' }))
+      release(0, 1); release(1, 1); release(2, 1); await again
+    })
+    it('a picture with no words asks to match its look', async () => {
+      const input = vi.fn(async (o: any) => ({ request: o.request, count: 3, signal: o.signal }))
+      const { api, release } = setup({ input })
+      const run = api.start('  ', target(), { reference: 'data:image/jpeg;base64,REF' })
+      release(0); release(1); release(2); await run
+      expect(api.request.value).toBe(REFERENCE_ONLY_REQUEST)
+      expect(input).toHaveBeenLastCalledWith(expect.objectContaining({ request: REFERENCE_ONLY_REQUEST }))
+    })
+    it('no reference: none is sent, and closing the set forgets it', async () => {
+      const input = vi.fn(async (o: any) => ({ request: o.request, count: 3, signal: o.signal }))
+      const { api, release } = setup({ input })
+      let run = api.start('rain', target(), { reference: 'data:image/jpeg;base64,REF' }); release(0); release(1); release(2); await run
+      api.close()
+      expect(api.reference.value).toBeNull()
+      run = api.start('rain', target()); release(0, 1); release(1, 1); release(2, 1); await run
+      expect(input.mock.calls.at(-1)![0].reference ?? null).toBeNull()
+    })
   })
 })

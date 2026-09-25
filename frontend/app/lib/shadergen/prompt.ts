@@ -28,6 +28,17 @@ export interface GenRequest {
   /** Dev-only shader-gen evaluation lever (variant C): finished takes from
    *  OTHER requests, shown as the quality bar to match — never as a look to copy. */
   examples?: { name: string; request: string; take: GenTake }[]
+  /** Which attached picture is the reference (the look to aim for): 2 after the picture the
+   *  effect runs over, 1 when it is the only one; absent when there is none. */
+  referencePicture?: 1 | 2 | null
+}
+
+const MATCH_THE_LOOK = 'Match its look — colour, light, texture, pattern, movement and mood — and let the request’s words steer; do not copy its subject or content into the effect.'
+/** How the attached pictures are told apart when one is a reference picture. */
+function picturesNote(n: 1 | 2): string {
+  return n === 2
+    ? `Two pictures are attached. Picture 1 is the image the effect runs over. Picture 2 is the reference picture: the look to aim for, as an effect over picture 1. ${MATCH_THE_LOOK}`
+    : `The one attached picture is the reference picture: the look to aim for. It is not the image the effect runs over. ${MATCH_THE_LOOK}`
 }
 
 /** The lines Sailor supplies itself; a catalog source carries them, a body must not. */
@@ -51,6 +62,7 @@ const HELPER_WARNING = 'Sailor already provides the preamble and the helpers h21
 
 export function buildGenPrompt(r: GenRequest): string {
   const parts: string[] = [`Request: "${r.request}"`]
+  if (r.referencePicture) parts.push(picturesNote(r.referencePicture))
   if (r.base) {
     parts.push(`Start from this existing effect, "${r.base.name}". Keep what serves the request and change whatever you need to. Its source and dials:\n\`\`\`glsl\n${stripSuppliedLines(r.base.source)}\n\`\`\`\nDials: ${JSON.stringify(r.base.params)}\n${HELPER_WARNING}`)
   }

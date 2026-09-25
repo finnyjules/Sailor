@@ -10,6 +10,7 @@ import PromptTakes from '~/components/prompt/PromptTakes.vue'
 import PromptChangesCard from '~/components/prompt/PromptChangesCard.vue'
 import PromptAnswerCard from '~/components/prompt/PromptAnswerCard.vue'
 import { shouldFocusPrompt } from '~/lib/prompt/sailorPrompt'
+import { referenceFromFile } from '~/lib/prompt/referencePicture'
 import type { StudioPromptApi } from '~/composables/useStudioPrompt'
 
 const props = defineProps<{ prompt: StudioPromptApi }>()
@@ -34,6 +35,13 @@ function onKey(e: KeyboardEvent) {
 onMounted(() => window.addEventListener('keydown', onKey, true))
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true))
 defineExpose({ focus })
+
+// A pasted or dropped picture, shrunk to what the model sees, then offered to the prompt api
+// (which takes it only where new effects are made).
+async function onAttachImage(file: File) {
+  const url = await referenceFromFile(file)
+  if (url) p.attachReference(url)
+}
 </script>
 
 <template>
@@ -49,7 +57,11 @@ defineExpose({ focus })
       :working="p.working.value"
       :working-label="p.workingLabel.value"
       :disabled="p.disabled.value"
+      :reference="p.reference.value"
+      :accepts-image="p.acceptsReference.value"
       @submit="p.submit"
+      @attach-image="onAttachImage"
+      @clear-reference="p.clearReference"
       @stop="p.stop"
       @clear-mode="p.clearMode"
       @clear-selection="p.clearMode"

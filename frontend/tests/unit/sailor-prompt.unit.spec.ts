@@ -110,3 +110,84 @@ describe('SailorPrompt', () => {
     expect(w.findComponent(SweepProbe).props('active')).toBe(true)
   })
 })
+
+describe('SailorPrompt: a reference picture (paste or drop)', () => {
+  const png = () => new File([new Uint8Array([1, 2, 3])], 'look.png', { type: 'image/png' })
+  /** A clipboard or drag payload: happy-dom's own DataTransfer is incomplete, so a plain stand-in. */
+  const transfer = (o: { files?: File[]; text?: string } = {}) => ({
+    types: [...(o.text != null ? ['text/plain'] : []), ...(o.files?.length ? ['Files'] : [])],
+    items: (o.files ?? []).map(f => ({ kind: 'file', type: f.type, getAsFile: () => f })),
+    files: o.files ?? [],
+    getData: (t: string) => (t === 'text/plain' ? o.text ?? '' : ''),
+  })
+
+  it('shows the picture as a neutral chip whose × asks to remove it', async () => {
+    const w = mount(SailorPrompt, { props: { reference: 'data:image/jpeg;base64,AAA' }, global: { stubs } })
+    const chip = w.get('[data-testid="prompt-reference-chip"]')
+    expect(chip.attributes('aria-label')).toBe('Reference picture')
+    expect(chip.get('img').attributes('src')).toBe('data:image/jpeg;base64,AAA')
+    expect(chip.classes().join(' ')).toContain('bg-white/[0.08]')
+    await chip.get('button[aria-label="Remove reference picture"]').trigger('click')
+    expect(w.emitted('clearReference')).toHaveLength(1)
+  })
+
+  it('no reference, no chip', () => {
+    const w = mount(SailorPrompt, { global: { stubs } })
+    expect(w.find('[data-testid="prompt-reference-chip"]').exists()).toBe(false)
+  })
+
+  it('pasting an image reports it when the host takes pictures, and keeps it out of the field', async () => {
+    const w = mount(SailorPrompt, { props: { acceptsImage: true }, global: { stubs } })
+    const f = png()
+    const ev = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(ev, 'clipboardData', { value: transfer({ files: [f] }) })
+    input(w).element.dispatchEvent(ev)
+    expect(w.emitted('attachImage')).toEqual([[f]])
+    expect(ev.defaultPrevented).toBe(true)
+  })
+
+  it('a host that doesn’t take pictures leaves a paste alone', async () => {
+    const w = mount(SailorPrompt, { global: { stubs } })
+    const ev = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(ev, 'clipboardData', { value: transfer({ files: [png()] }) })
+    input(w).element.dispatchEvent(ev)
+    expect(w.emitted('attachImage')).toBeUndefined()
+    expect(ev.defaultPrevented).toBe(false)
+  })
+
+  it('a text paste keeps working as today', async () => {
+    const w = mount(SailorPrompt, { props: { acceptsImage: true }, global: { stubs } })
+    const ev = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(ev, 'clipboardData', { value: transfer({ text: 'slow rain' }) })
+    input(w).element.dispatchEvent(ev)
+    expect(w.emitted('attachImage')).toBeUndefined()
+    expect(ev.defaultPrevented).toBe(false)
+  })
+
+  it('dropping an image file on the prompt reports it; a drop elsewhere-bound is left alone when not taken', async () => {
+    const w = mount(SailorPrompt, { props: { acceptsImage: true }, global: { stubs } })
+    const row = w.get('.sp-row')
+    const f = png()
+    const over = new Event('dragover', { bubbles: true, cancelable: true })
+    Object.defineProperty(over, 'dataTransfer', { value: transfer({ files: [f] }) })
+    row.element.dispatchEvent(over)
+    expect(over.defaultPrevented).toBe(true)
+    const drop = new Event('drop', { bubbles: true, cancelable: true })
+    Object.defineProperty(drop, 'dataTransfer', { value: transfer({ files: [f] }) })
+    row.element.dispatchEvent(drop)
+    expect(w.emitted('attachImage')).toEqual([[f]])
+
+    const plain = mount(SailorPrompt, { global: { stubs } })
+    const over2 = new Event('dragover', { bubbles: true, cancelable: true })
+    Object.defineProperty(over2, 'dataTransfer', { value: transfer({ files: [f] }) })
+    plain.get('.sp-row').element.dispatchEvent(over2)
+    expect(over2.defaultPrevented).toBe(false)
+  })
+
+  it('with a reference, an empty field can be sent (the picture is the request)', async () => {
+    const w = mount(SailorPrompt, { props: { reference: 'data:image/jpeg;base64,AAA' }, global: { stubs } })
+    expect(w.get('button[aria-label="Send"]').attributes('disabled')).toBeUndefined()
+    await input(w).trigger('keydown', { key: 'Enter' })
+    expect(w.emitted('submit')).toEqual([['']])
+  })
+})

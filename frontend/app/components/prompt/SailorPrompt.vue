@@ -7,6 +7,7 @@ import { ArrowUp, X } from 'lucide-vue-next'
 import AiMark from '~/components/prompt/AiMark.vue'
 import AgentSweep from '~/components/agent/AgentSweep.vue'
 import { escapeStep, promptPlaceholder } from '~/lib/prompt/sailorPrompt'
+import { carriesImage, imageFileFrom } from '~/lib/prompt/referencePicture'
 
 const props = withDefaults(defineProps<{
   selectionLabel?: string | null
@@ -18,9 +19,14 @@ const props = withDefaults(defineProps<{
   disabled?: boolean
   /** The price of what the mode chip will do (spec §7.2), shown before anything runs. */
   note?: string | null
-}>(), { selectionLabel: null, mode: null, suggestions: () => [], working: false, workingLabel: 'Working…', stoppable: true, disabled: false, note: null })
+  /** A reference picture (a data URL) shown as a chip; with one, an empty field can be sent. */
+  reference?: string | null
+  /** The host takes a pasted or dropped picture: only then does the prompt intercept one
+   *  (anywhere else a paste or drop behaves as it always has). */
+  acceptsImage?: boolean
+}>(), { selectionLabel: null, mode: null, suggestions: () => [], working: false, workingLabel: 'Working…', stoppable: true, disabled: false, note: null, reference: null, acceptsImage: false })
 
-const emit = defineEmits<{ submit: [text: string]; stop: []; clearSelection: []; clearMode: []; focus: []; blur: [] }>()
+const emit = defineEmits<{ submit: [text: string]; stop: []; clearSelection: []; clearMode: []; focus: []; blur: []; attachImage: [file: File]; clearReference: [] }>()
 
 const text = ref('')
 const focused = ref(false)
@@ -28,9 +34,10 @@ const inputEl = ref<HTMLInputElement | null>(null)
 const placeholder = computed(() => promptPlaceholder(props.selectionLabel))
 const showSuggestions = computed(() => focused.value && !props.working && props.suggestions.length > 0)
 
+const canSend = computed(() => !!text.value.trim() || !!props.reference)
 function submit(value = text.value) {
   const t = value.trim()
-  if (!t || props.working || props.disabled) return
+  if ((!t && !props.reference) || props.working || props.disabled) return
   emit('submit', t)
   text.value = ''
 }
@@ -41,6 +48,30 @@ function onKeydown(e: KeyboardEvent) {
     if (escapeStep({ text: text.value, mode: props.mode }) === 'clearMode') emit('clearMode')
     else { focused.value = false; emit('blur'); inputEl.value?.blur() }
   }
+}
+// A picture pasted (⌘V) or dropped: reported to the host, which decides what it means. Only
+// intercepted when the host takes pictures and nothing is running; a text paste is untouched.
+function takesImageNow() { return props.acceptsImage && !props.working && !props.disabled }
+function onPaste(e: ClipboardEvent) {
+  if (!takesImageNow()) return
+  const f = imageFileFrom(e.clipboardData)
+  if (!f) return
+  e.preventDefault()
+  emit('attachImage', f)
+}
+function onDragOver(e: DragEvent) {
+  if (!takesImageNow() || !carriesImage(e.dataTransfer)) return
+  e.preventDefault()
+  e.stopPropagation()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+}
+function onDrop(e: DragEvent) {
+  if (!takesImageNow()) return
+  const f = imageFileFrom(e.dataTransfer)
+  if (!f) return
+  e.preventDefault()
+  e.stopPropagation()
+  emit('attachImage', f)
 }
 function onFocus() { focused.value = true; emit('focus') }
 function onBlur() { if (!focused.value) return; focused.value = false; emit('blur') } // Esc already emitted when it set focused=false
@@ -68,7 +99,7 @@ defineExpose({ focus, inputElement })
     <div
       class="sp-row pointer-events-auto relative flex h-12 items-center gap-2.5 overflow-hidden rounded-[12px] pl-3.5 pr-2.5 shadow-lg"
       :class="{ 'is-active': focused || working }"
-      @click="focus"
+      @click="focus" @dragover="onDragOver" @drop="onDrop"
     >
       <!-- Always mounted: AgentSweep's watcher runs immediately at setup, before its
            canvas exists, so mounting it already-active (v-if) never starts the glimm.
@@ -87,6 +118,10 @@ defineExpose({ focus, inputElement })
         <span v-if="mode" data-testid="prompt-mode-chip" class="relative inline-flex max-w-[40%] shrink-0 items-center truncate rounded-full bg-white/[0.08] py-0.5 pl-2.5 pr-1 text-[12px] text-white/80">
           {{ mode }}<button type="button" class="px-1 text-white/50 hover:text-white" aria-label="Clear mode" @click.stop="emit('clearMode')"><X class="size-3" /></button>
         </span>
+        <!-- The look to aim for: a neutral chip like the others, never pastel. -->
+        <span v-if="reference" data-testid="prompt-reference-chip" role="group" aria-label="Reference picture" class="relative inline-flex shrink-0 items-center gap-1 rounded-full bg-white/[0.08] py-0.5 pl-0.5 pr-1">
+          <img :src="reference" alt="" class="size-5 rounded-full object-cover"><button type="button" class="px-0.5 text-white/50 hover:text-white" aria-label="Remove reference picture" @click.stop="emit('clearReference')"><X class="size-3" /></button>
+        </span>
         <span v-if="selectionLabel" data-testid="prompt-selection-chip" class="relative inline-flex max-w-[40%] shrink-0 items-center truncate rounded-full bg-white/[0.08] py-0.5 pl-2.5 pr-1 text-[12px] text-white/80">
           {{ selectionLabel }}<button type="button" class="px-1 text-white/50 hover:text-white" aria-label="Clear selection" @click.stop="emit('clearSelection')"><X class="size-3" /></button>
         </span>
@@ -94,7 +129,7 @@ defineExpose({ focus, inputElement })
           ref="inputEl" v-model="text" type="text" aria-label="Ask Sailor"
           :placeholder="placeholder" :disabled="disabled"
           class="relative min-w-0 flex-1 bg-transparent text-[13px] text-white/90 outline-none placeholder:text-white/30"
-          @keydown="onKeydown" @focus="onFocus" @blur="onBlur"
+          @keydown="onKeydown" @focus="onFocus" @blur="onBlur" @paste="onPaste"
         >
         <!-- The price of what the mode chip will do (spec §7.2), shown before anything runs. Neutral grey, never pastel. -->
         <span v-if="note && !working" data-testid="prompt-note" class="relative shrink-0 text-[11px] tabular-nums text-white/40">{{ note }}</span>
@@ -102,7 +137,7 @@ defineExpose({ focus, inputElement })
         <button
           type="button" aria-label="Send"
           class="relative grid size-7 place-items-center rounded-[8px] bg-white text-neutral-900 transition hover:bg-white/90 disabled:opacity-40"
-          :disabled="disabled || !text.trim()" @click.stop="submit()"
+          :disabled="disabled || !canSend" @click.stop="submit()"
         ><ArrowUp class="size-4" /></button>
       </template>
     </div>

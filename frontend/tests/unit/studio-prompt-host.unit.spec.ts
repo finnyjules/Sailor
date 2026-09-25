@@ -8,6 +8,7 @@ function api(over: Record<string, unknown> = {}) {
   return {
     chipLabel: ref('Water ripple'), suggestions: ref(['Warmer']), mode: ref(null), modeNote: ref(null), working: ref(false),
     workingLabel: ref('Working on “x”'), disabled: ref(false), focusTick: ref(0),
+    reference: ref(null), acceptsReference: ref(false), attachReference: vi.fn(), clearReference: vi.fn(),
     card: ref(null), takes: ref(null), takesSaving: ref(false), takesError: ref(null), answerCard: ref(null),
     worker: () => ({ changes: ref([]), busy: ref(false), issues: ref([]), review: ref(null), reviewing: ref(false), hovered: ref(null), acceptChange: vi.fn(), rejectChange: vi.fn(), reroll: vi.fn() }),
     submit: vi.fn(), runKind: vi.fn(), setMode: vi.fn(), clearMode: vi.fn(), stop: vi.fn(), requestFocus: vi.fn(),
@@ -18,6 +19,17 @@ function api(over: Record<string, unknown> = {}) {
 }
 
 describe('StudioPromptHost', () => {
+  it('shows the api’s reference picture as a chip, takes pictures only where the api does, and × clears it', async () => {
+    const p = api({ reference: ref('data:image/jpeg;base64,AAA'), acceptsReference: ref(true) })
+    const w = mount(StudioPromptHost, { props: { prompt: p } })
+    const sp = w.findComponent({ name: 'SailorPrompt' })
+    expect(sp.props('reference')).toBe('data:image/jpeg;base64,AAA')
+    expect(sp.props('acceptsImage')).toBe(true)
+    await w.get('[data-testid="prompt-reference-chip"] button').trigger('click')
+    expect(p.clearReference).toHaveBeenCalled()
+    expect(mount(StudioPromptHost, { props: { prompt: api() } }).findComponent({ name: 'SailorPrompt' }).props('acceptsImage')).toBe(false)
+  })
+
   it('renders the one prompt with the thing’s own name as the chip', () => {
     const w = mount(StudioPromptHost, { props: { prompt: api() } })
     expect(w.find('[data-testid="prompt-selection-chip"]').text()).toContain('Water ripple')

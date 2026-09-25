@@ -16,7 +16,8 @@ import { useAgentActivity } from '~/composables/useAgentActivity'
 import { paidProducerFor } from '~/lib/artifact/nextSteps'
 import { looksLikeImageIdea } from '~/lib/sketch/sketchIntent'
 import { canvasSuggestions, promptNodeLabel, promptWorkingLabel, selectionLabel, type PromptNode } from '~/lib/prompt/canvasPromptContext'
-import { canvasDispatch, DISPATCH_MESSAGES, isPlainVaryRequest, type DispatchTarget } from '~/lib/prompt/canvasDispatch'
+import { canvasDispatch, DISPATCH_MESSAGES, isPlainVaryRequest, SHADER_NODE_TYPES, type DispatchTarget } from '~/lib/prompt/canvasDispatch'
+import { REFERENCE_ONLY_REQUEST } from '~/lib/prompt/referencePicture'
 import { routeRequest } from '~/lib/prompt/routeRequest'
 import { BUSY_NOTICE } from '~/lib/prompt/notices'
 import {
@@ -24,7 +25,7 @@ import {
   setRunIds, settleUnqueued, shownTakeId, TAKES_PER_SET, wantedActiveTakeId, type TakesSession,
 } from '~/lib/prompt/takesSession'
 import { useEffectTakes, type EffectTarget } from '~/composables/useEffectTakes'
-import { shaderGenEstimateText } from '~/lib/shadergen/estimate'
+import { shaderGenPriceText } from '~/lib/shadergen/estimate'
 import { getEffectSync } from '~/lib/shaderfx/catalogStore'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 import type { RouterKind } from '~~/shared/promptRouter/router'
@@ -203,6 +204,11 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
 
   // --- state ------------------------------------------------------------------
   const mode = ref<PromptMode | null>(null)
+  /** A pasted or dropped picture: the look to aim for (a JPEG data URL, long edge ≤ 512 px), taken
+   *  only while one shader effect node is selected. It belongs to the take set it is sent with:
+   *  Keep and × clear it, and so does selecting something else (as with the mode). */
+  const reference = ref<string | null>(null)
+  const acceptsReference = computed(() => selection.value.length === 1 && SHADER_NODE_TYPES.has(selection.value[0]!.type))
   const focusTick = ref(0)
   const routing = ref(false)
   let routeCtrl: AbortController | null = null
@@ -388,11 +394,11 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     const s = takes.value; if (!s) return; takes.value = chooseTile(s, id); show(takes.value)
   }
   async function keepTake(id: string) {
-    if (fx.session.value) { await fx.keep(id); return }
+    if (fx.session.value) { if (await fx.keep(id)) reference.value = null; return }
     endTakes(id)
   }
   function closeTakes() {
-    if (fx.session.value) return fx.close()
+    if (fx.session.value) { reference.value = null; return fx.close() }
     endTakes(null)
   }
   function moreTakes() {
@@ -440,7 +446,8 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
       if (o.newEffect) t.base = null
       // Only the Remix chip adds a version to a My effect; a routed request makes a new one (Ruling #2).
       t.remix = !!o.remix
-      void fx.start(text, t)
+      const pic = reference.value
+      void (pic ? fx.start(text, t, { reference: pic }) : fx.start(text, t))
       return
     }
     if (d.worker === 'variations') { startTakes(target!, o.fromMenu ? '' : text); return }
@@ -473,7 +480,8 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   const menuBusy = () => jobBusy() || agent.reviewingManual.value
 
   async function submit(text: string) {
-    const p = text.trim()
+    // A picture with no words asks to match its look.
+    const p = text.trim() || (reference.value ? REFERENCE_ONLY_REQUEST : '')
     if (!p || jobBusy() || agent.reviewingManual.value) return
     clearResults()
     lastSubmitted.value = p
@@ -492,7 +500,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     // still runs; its sketchIdea handler consumes fastPathFired so a `sketch`
     // for the same submit doesn't double-dispatch. A plain "vary it" / "more"
     // passes looksLikeImageIdea but asks for takes, so it always goes to the router.
-    if (ready() && !m && !isPlainVaryRequest(p) && looksLikeImageIdea(p, (c?.getNodes?.() ?? []).length === 0)) {
+    if (ready() && !m && !reference.value && !isPlainVaryRequest(p) && looksLikeImageIdea(p, (c?.getNodes?.() ?? []).length === 0)) {
       fastPathFired.value = true
       c.startSketch?.(p)
       agent.ask(p)
@@ -555,11 +563,24 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     focusTick.value++
   }
   function clearMode() { mode.value = null }
-  // Plan ruling 18: a mode belongs to the node it was set on.
+  // Plan ruling 18: a mode belongs to the node it was set on. So does a reference picture.
   watch(() => selection.value.map(s => s.id).join(','), () => {
     const m = mode.value
     if (m?.nodeId && !selection.value.some(s => s.id === m.nodeId)) mode.value = null
+    if (!acceptsReference.value) reference.value = null
   })
+
+  /** A picture pasted or dropped on the prompt while a shader node is selected. A second one
+   *  replaces the first. With no new-effect chip it sets New effect on that node (the price shows
+   *  before anything runs, no router call); a Remix chip stays. Anywhere else it is ignored. */
+  function attachReference(dataUrl: string) {
+    if (!acceptsReference.value || !dataUrl) return
+    if (jobBusy()) { toast.info(BUSY_NOTICE); return }
+    reference.value = dataUrl
+    if (mode.value?.kind !== 'new-effect') mode.value = { label: 'New effect', kind: 'new-effect', nodeId: selection.value[0]!.id, effectId: null }
+    focusTick.value++
+  }
+  function clearReference() { reference.value = null }
 
   // --- what the prompt shows ------------------------------------------------------
   // Only work the user started takes over the prompt row. A background
@@ -567,7 +588,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   const working = computed(() => busy.value || agent.reviewingManual.value || takesWorking.value || fx.working.value)
   const workingLabel = computed(() => {
     // Effect takes quote the request and carry the estimate (plan ruling 14).
-    if (fx.working.value) return `${promptWorkingLabel({ request: fx.request.value })} · ${shaderGenEstimateText(hosted())}`
+    if (fx.working.value) return `${promptWorkingLabel({ request: fx.request.value })} · ${shaderGenPriceText(hosted(), !!fx.reference?.value)}`
     if (takesWorking.value) return promptWorkingLabel({ request: takes.value!.request, takesOf: takes.value!.nodeLabel })
     if (busy.value) return promptWorkingLabel({ request: lastSubmitted.value })
     return promptWorkingLabel({ reviewing: reviewTargetLabel.value })
@@ -598,7 +619,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   const showSketchInstead = computed(() => agent.hasProposal.value && !!lastSubmitted.value)
   function dismissAnswer() { notice.value = ''; followUps.value = []; fx.clearMessages(); agent.dismiss() }
   // The price of what a new-effect chip will do (spec §7.2), shown before anything runs.
-  const modeNote: ComputedRef<string | null> = computed(() => (mode.value?.kind === 'new-effect' ? shaderGenEstimateText(hosted()) : null))
+  const modeNote: ComputedRef<string | null> = computed(() => (mode.value?.kind === 'new-effect' ? shaderGenPriceText(hosted(), !!reference.value) : null))
   // The strip shows the effect set while one is open, else the Variations set.
   const shownTakes = computed<TakesSession | null>(() => fx.session.value ?? takes.value)
   // An effect Keep is saving: the strip's Keep buttons are off until it settles.
@@ -606,7 +627,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   // A failed Keep leaves the set open, and the card is the strip: the strip shows why.
   const takesError = computed(() => (fx.session.value ? fx.error.value || null : null))
   // "Three more" on an effect set starts another paid set: its price shows on the button first.
-  const takesMoreNote = computed<string | null>(() => (fx.session.value ? shaderGenEstimateText(hosted()) : null))
+  const takesMoreNote = computed<string | null>(() => (fx.session.value ? shaderGenPriceText(hosted(), !!fx.reference?.value) : null))
   // While a node's effect-take strip is open, the node's own controls are read-only, so
   // closing the strip can put back exactly what was there: tell it when the strip opens and closes.
   let lockedNode: string | null = null
@@ -686,7 +707,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   })
 
   return {
-    agent, selection, chipLabel, suggestions, mode, focusTick, working, workingLabel, lastSubmitted,
+    agent, selection, chipLabel, suggestions, mode, focusTick, reference, acceptsReference, attachReference, clearReference, working, workingLabel, lastSubmitted,
     card, answerCard, takes: shownTakes, takesSaving, takesError, takesMoreNote, modeNote, showSketchInstead, searchOpen, searchQuery, onSearchDone,
     submit, stop, clearMode, clearSelection, onPromptFocus, previewTake, chooseTake, keepTake, closeTakes,
     moreTakes, dismissAnswer, runFollowUp, sketchInstead,

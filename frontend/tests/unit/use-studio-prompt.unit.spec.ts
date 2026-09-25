@@ -12,6 +12,7 @@ vi.mock('vue-sonner', () => ({ toast: { info: toastInfo } }))
 import { useStudioPrompt, type StudioPromptWorker } from '~/composables/useStudioPrompt'
 import { STUDIO_MESSAGES, VARY_REQUEST } from '~/lib/prompt/studioDispatch'
 import { BUSY_NOTICE } from '~/lib/prompt/notices'
+import { REFERENCE_ONLY_REQUEST } from '~/lib/prompt/referencePicture'
 
 function makeWorker(withTakes = true) {
   const takes = shallowRef<any[]>([])
@@ -35,9 +36,10 @@ function fakeEffects() {
   const session = shallowRef<any>(null)
   const running = ref(false)
   const request = ref('')
+  const reference = ref<string | null>(null)
   return {
-    session, target: shallowRef<any>(null), request, working: computed(() => running.value), running, error: ref(''), notice: ref(''), saving: ref(false),
-    start: vi.fn(async (r: string, t: any) => { request.value = r; session.value = { nodeId: t.key, nodeLabel: t.label, request: r, tiles: [], known: [], hovered: null, chosen: null, currentThumb: null } }),
+    session, target: shallowRef<any>(null), request, reference, working: computed(() => running.value), running, error: ref(''), notice: ref(''), saving: ref(false),
+    start: vi.fn(async (r: string, t: any, o?: { reference?: string | null }) => { request.value = r; reference.value = o?.reference ?? null; session.value = { nodeId: t.key, nodeLabel: t.label, request: r, tiles: [], known: [], hovered: null, chosen: null, currentThumb: null } }),
     preview: vi.fn(), choose: vi.fn(), keep: vi.fn(async () => true), close: vi.fn(() => { session.value = null; running.value = false }),
     more: vi.fn(), stop: vi.fn(() => { session.value = null; running.value = false }), clearMessages: vi.fn(),
   }
@@ -45,7 +47,7 @@ function fakeEffects() {
 
 function setup(o: {
   worker?: StudioPromptWorker | null; place?: any; route?: any; label?: string
-  effectTarget?: any; effects?: ReturnType<typeof fakeEffects>; afterKeep?: (r: string) => void
+  effectTarget?: any; effects?: ReturnType<typeof fakeEffects>; afterKeep?: (r: string) => void; takesReference?: () => boolean
 } = {}) {
   const worker = o.worker === undefined ? makeWorker() : o.worker
   const route = o.route ?? vi.fn(async () => ({ kind: 'tweak', followUps: [], routed: true }))
@@ -54,7 +56,7 @@ function setup(o: {
   const wrapper = mount(defineComponent({ setup() {
     api = useStudioPrompt({
       worker: () => worker, place: o.place ?? 'studio', selectionKind: 'shader-studio', label: () => o.label ?? 'Water ripple', suggestions: () => ['Warmer'],
-      effectTarget: o.effectTarget, afterKeep: o.afterKeep,
+      effectTarget: o.effectTarget, afterKeep: o.afterKeep, takesReference: o.takesReference,
     }, { route, apiKey: () => 'k', effects: effects as any })
     return () => h('div')
   } }))
@@ -564,5 +566,82 @@ describe('useStudioPrompt', () => {
     await api.submit('rain')
     wrapper.unmount()
     expect(effects.close).toHaveBeenCalled()
+  })
+  // --- a reference picture (stage 5 follow-up) ----------------------------------
+  describe('a reference picture', () => {
+    const REF = 'data:image/jpeg;base64,REF'
+    const shaderTarget2 = () => ({ key: 'shader-studio', label: 'Water ripple', base: null, image: () => null, preview: vi.fn(), apply: vi.fn() })
+    it('attaching one with no mode sets New effect, and the note shows the higher price', () => {
+      const { api } = setup({ effectTarget: vi.fn(shaderTarget2) })
+      expect(api.acceptsReference.value).toBe(true)
+      api.attachReference(REF)
+      expect(api.reference.value).toBe(REF)
+      expect(api.mode.value).toMatchObject({ label: 'New effect', kind: 'new-effect' })
+      expect(api.modeNote.value).toBe('~$0.24–0.43')
+    })
+    it('Remix already set stays Remix', () => {
+      const { api } = setup({ effectTarget: vi.fn(shaderTarget2) })
+      api.setMode('Remix')
+      api.attachReference(REF)
+      expect(api.mode.value?.label).toBe('Remix')
+    })
+    it('clearing the mode keeps the picture; clearing the picture keeps the mode', () => {
+      const { api } = setup({ effectTarget: vi.fn(shaderTarget2) })
+      api.attachReference(REF)
+      api.clearMode()
+      expect(api.reference.value).toBe(REF)
+      api.setMode('Remix')
+      api.clearReference()
+      expect(api.reference.value).toBeNull()
+      expect(api.mode.value?.label).toBe('Remix')
+    })
+    it('a second picture replaces the first', () => {
+      const { api } = setup({ effectTarget: vi.fn(shaderTarget2) })
+      api.attachReference(REF); api.attachReference('data:image/jpeg;base64,TWO')
+      expect(api.reference.value).toBe('data:image/jpeg;base64,TWO')
+    })
+    it('sending runs the effect set with the picture, and no words ask to match its look', async () => {
+      const effects = fakeEffects()
+      const { api, route } = setup({ effectTarget: vi.fn(shaderTarget2), effects })
+      api.attachReference(REF)
+      await api.submit('')
+      expect(route).not.toHaveBeenCalled()
+      expect(effects.start).toHaveBeenCalledWith(REFERENCE_ONLY_REQUEST, expect.objectContaining({ key: 'shader-studio' }), { reference: REF })
+      // The set owns it now: the working label and Three more carry the higher price.
+      effects.running.value = true
+      expect(api.workingLabel.value).toContain('~$0.24–0.43')
+      effects.running.value = false
+      expect(api.takesMoreNote.value).toBe('~$0.24–0.43')
+      expect(api.reference.value).toBe(REF) // still in the prompt while the set is open
+    })
+    it('× on the set clears it from the prompt; so does a Keep', async () => {
+      const effects = fakeEffects()
+      const { api } = setup({ effectTarget: vi.fn(shaderTarget2), effects })
+      api.attachReference(REF); await api.submit('slower')
+      api.closeTakes()
+      expect(api.reference.value).toBeNull()
+      api.attachReference(REF); await api.submit('slower')
+      await api.keepTake('draft_1_0')
+      expect(api.reference.value).toBeNull()
+    })
+    it('the owner closing ends the set and clears it', async () => {
+      const { api } = setup({ effectTarget: vi.fn(shaderTarget2) })
+      api.attachReference(REF); await api.submit('slower')
+      api.endEffects()
+      expect(api.reference.value).toBeNull()
+    })
+    it('a studio that can’t make effects ignores a picture', () => {
+      const { api } = setup({ effectTarget: vi.fn(shaderTarget2), takesReference: () => false })
+      expect(api.acceptsReference.value).toBe(false)
+      api.attachReference(REF)
+      expect(api.reference.value).toBeNull()
+      expect(api.mode.value).toBeNull()
+    })
+    it('without a picture the send is unchanged (two arguments)', async () => {
+      const effects = fakeEffects()
+      const { api } = setup({ effectTarget: vi.fn(shaderTarget2), effects })
+      api.setMode('New effect'); await api.submit('rain')
+      expect(effects.start.mock.calls[0]).toHaveLength(2)
+    })
   })
 })

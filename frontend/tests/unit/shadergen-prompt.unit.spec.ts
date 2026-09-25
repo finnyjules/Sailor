@@ -82,6 +82,25 @@ describe('buildGenPrompt', () => {
   })
 })
 
+describe('buildGenPrompt: a reference picture', () => {
+  it('two pictures: picture 1 is what the effect runs over, picture 2 the look to aim for', () => {
+    const p = buildGenPrompt({ request: 'like this, but slower', takeIndex: 0, referencePicture: 2 })
+    expect(p).toContain('Picture 1 is the image the effect runs over')
+    expect(p).toContain('Picture 2 is the reference picture: the look to aim for')
+    expect(p.indexOf('Picture 2')).toBeGreaterThan(p.indexOf('Request:'))
+    expect(p.indexOf('Picture 2')).toBeLessThan(p.indexOf('Take 1:'))
+  })
+  it('no source picture: the reference is the only picture, and says it isn’t what the effect runs over', () => {
+    const p = buildGenPrompt({ request: 'x', takeIndex: 0, referencePicture: 1 })
+    expect(p).toContain('The one attached picture is the reference picture: the look to aim for')
+    expect(p).toContain('not the image the effect runs over')
+    expect(p).not.toContain('Picture 2')
+  })
+  it('no reference: nothing about pictures is added', () => {
+    expect(buildGenPrompt({ request: 'x', takeIndex: 0 })).not.toMatch(/reference picture/i)
+  })
+})
+
 describe('buildRevisePrompt', () => {
   it('shows the current take and asks for the whole improved JSON object', () => {
     const take: GenTake = {

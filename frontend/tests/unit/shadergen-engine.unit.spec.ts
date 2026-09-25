@@ -42,6 +42,16 @@ describe('generateTakes', () => {
     expect(r.usage).toEqual({ input_tokens: 40, output_tokens: 20 })
   })
 
+  it('names the reference picture in every take’s prompt and sends both pictures', async () => {
+    const seen: { prompt: string; images?: string[] }[] = []
+    const m = scripted({})
+    await generateTakes({ request: 'rain', images: ['a', 'b'], referencePicture: 2, count: 2 }, {
+      callModel: async (prompt: string, images?: string[]) => { seen.push({ prompt, images }); return m.callModel(prompt) }, renderer,
+    })
+    expect(seen).toHaveLength(2)
+    expect(seen.every(s => s.prompt.includes('Picture 2 is the reference picture') && s.images?.length === 2)).toBe(true)
+  })
+
   it('repairs a compile error by sending the error back', async () => {
     const m = scripted({ 0: [reply('BROKEN'), reply('fixed')] })
     const r = await generateTakes({ request: 'rain' }, { callModel: m.callModel, renderer })

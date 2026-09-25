@@ -18,6 +18,7 @@ import { registerEffects, unregisterEffects } from '~/lib/shaderfx/catalog'
 import { shaderFx } from '~/lib/shaderfx/renderer'
 import { useMyEffects } from '~/composables/useMyEffects'
 import { MY_EFFECTS_ERRORS } from '~/lib/myEffects/client'
+import { REFERENCE_ONLY_REQUEST } from '~/lib/prompt/referencePicture'
 import { chooseTile, CURRENT, failPending, hoverTile, markCreditRefusals, openTakes, shownTakeId, type TakesSession } from '~/lib/prompt/takesSession'
 import type { EffectDef, ParamValue } from '~/lib/shaderfx/types'
 
@@ -77,7 +78,9 @@ export interface EffectTakes {
   notice: Ref<string>
   /** A Keep is saving: further Keeps are ignored until it settles (a host can disable its button). */
   saving: Readonly<Ref<boolean>>
-  start(request: string, target: EffectTarget): Promise<void>
+  /** The set's reference picture (the look to aim for), a data URL; Three more reuses it. */
+  reference: Readonly<Ref<string | null>>
+  start(request: string, target: EffectTarget, o?: EffectStartOptions): Promise<void>
   preview(id: string | null): void
   choose(id: string): void
   keep(id: string): Promise<boolean>
@@ -86,6 +89,9 @@ export interface EffectTakes {
   stop(): void
   clearMessages(): void
 }
+
+/** `reference`: a picture of the look to aim for (long edge ≤ 512 px), sent as a second picture. */
+export interface EffectStartOptions { reference?: string | null }
 
 /** A refusal for want of credits (HTTP 402, or the hosted meter's "credits" wording), as the
  *  error itself or as the engine's failure log line. */
@@ -135,6 +141,7 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
   const error = ref('')
   const notice = ref('')
   const saving = ref(false)
+  const reference = ref<string | null>(null)
   const taken = new Map<string, EngineTake>() // draft id → take
   let ctrl: AbortController | null = null
   let seq = 0
@@ -146,10 +153,10 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
   const working = computed(() => running.value)
   const show = () => { const s = session.value; if (s) target.value?.preview(shownTakeId(s)) }
   function dropDrafts() { if (taken.size) unregister([...taken.keys()]); taken.clear() }
-  function end() { target.value?.preview(null); dropDrafts(); session.value = null; running.value = false }
+  function end() { target.value?.preview(null); dropDrafts(); session.value = null; running.value = false; reference.value = null }
   const clearMessages = () => { error.value = ''; notice.value = '' }
 
-  async function start(text: string, t: EffectTarget) {
+  async function start(text: string, t: EffectTarget, o: EffectStartOptions = {}) {
     ctrl?.abort()
     releaseRenderer()
     if (session.value) end()
@@ -158,13 +165,15 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
     const runId = ++runs
     const c = ctrl = new AbortController()
     target.value = t
-    request.value = text.trim()
+    reference.value = o.reference ?? null
+    // A picture sent with no words asks to match its look.
+    request.value = text.trim() || (reference.value ? REFERENCE_ONLY_REQUEST : '')
     session.value = { ...openTakes({ nodeId: t.key, nodeLabel: t.label, request: request.value, takes: [] }), loopDone: false }
     running.value = true
     let renderer: TakeRenderer | null = null
     try {
       const src = t.image()
-      const input = await buildInput({ request: request.value, base: t.base, image: imageForModel(src), signal: c.signal })
+      const input = await buildInput({ request: request.value, base: t.base, image: imageForModel(src), ...(reference.value ? { reference: reference.value } : {}), signal: c.signal })
       if (run !== seq) return
       renderer = liveRenderer = makeRenderer(src ?? placeholderSource())
       const result = await generate(input, {
@@ -257,6 +266,7 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
         dropDrafts()
         session.value = null
         running.value = false
+        reference.value = null
         t.apply(effectIdForVersion(rec, last), valuesForVersion(rec, last))
       }
       notice.value = mineId ? EFFECT_MESSAGES.savedVersion(rec.versions[last]!.label, rec.name) : EFFECT_MESSAGES.savedNew(rec.name)
@@ -275,8 +285,9 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
     const s = session.value, t = target.value
     if (!s || !t || !s.loopDone) return
     const text = request.value
+    const pic = reference.value
     close()
-    await start(text, t)
+    await start(text, t, pic ? { reference: pic } : {})
   }
 
   // Spec §7.5: a take that hangs the GPU while previewed is dropped, and the target restored.
@@ -296,5 +307,5 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
   // Released with the owning scope: a component's unmount, or an effectScope/store being stopped.
   if (getCurrentScope()) onScopeDispose(() => { offCtx(); if (session.value || running.value) close() })
 
-  return { session, target, request, working, error, notice, saving: readonly(saving), start, preview, choose, keep, close, more, stop, clearMessages }
+  return { session, target, request, working, error, notice, saving: readonly(saving), reference: readonly(reference), start, preview, choose, keep, close, more, stop, clearMessages }
 }

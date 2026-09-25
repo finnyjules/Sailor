@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
-import { dropNode, openBlankWorkflow, openStudio, waitForBackend } from './_helpers'
+import { dropNode, openBlankWorkflow, openCompositor, openStudio, waitForBackend } from './_helpers'
 import { SPIKE_TAKES } from '../app/lib/shadergen/__eval__/spikeTakes'
 
 /**
@@ -28,6 +28,8 @@ const TAKES = [
   [S.oil![1]!, S.lava![2]!, S.ink![1]!],
 ]
 const PRICE = '~$0.24–0.42'
+/** One more picture on every call (a reference, ≤ 512 px: 350 input tokens). */
+const PRICE_WITH_REFERENCE = '~$0.24–0.43'
 
 /** Non-GET calls to a route that spends model money, queues an engine run, or writes My effects. */
 const GUARDED = /^\/(prompt|api\/(prompt-route|vibe|vibe-review|vibe-recipes|vibe-pick|agent-plan|agent-review|shader-gen|my-effects|pipeline-suggest|font-suggest|copy-assist|image-search|style-profile|frame\/animate|scene3d\/(gen-[a-z0-9-]+|restyle)|inpaint|krea|vector|depth|lipsync|cloud-train|voice-clone|runs)(\/.*)?)$/
@@ -100,6 +102,21 @@ async function mockRouter(page: Page, kind = 'new-effect') {
 
 async function seedKey(page: Page) {
   await page.addInitScript(() => { try { localStorage.setItem('sailor:Sailor.AI.AnthropicApiKey', 'sk-ant-test-shadergen') } catch {} })
+}
+
+/** Paste a small real PNG into the studio prompt. A real ⌘V needs OS clipboard permission
+ *  headless; this paste event carries a real PNG File in a real DataTransfer — what the browser
+ *  hands the field on ⌘V. */
+async function pastePicture(page: Page) {
+  const box = prompt(page)
+  await box.click()
+  await box.evaluate(async (el) => {
+    const c = document.createElement('canvas'); c.width = 64; c.height = 48
+    const ctx = c.getContext('2d')!; ctx.fillStyle = '#e0457b'; ctx.fillRect(0, 0, 64, 48)
+    const blob: Blob = await new Promise(res => c.toBlob(b => res(b!), 'image/png'))
+    const dt = new DataTransfer(); dt.items.add(new File([blob], 'look.png', { type: 'image/png' }))
+    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+  })
 }
 
 const openShaderStudio = (page: Page) => openStudio(page, 'ShaderStudio', 'sailor:openShaderStudio')
@@ -274,5 +291,53 @@ test.describe('shader generation (stage 5)', () => {
     await prompt(page).fill('make it rain'); await prompt(page).press('Enter')
     await expect(page.getByTestId('studio-prompt')).toContainText(`Working on “make it rain” · ${PRICE}`)
     expect(routed[0]).toMatchObject({ request: 'make it rain', host: 'studio' })
+  })
+  test('Shader studio: a pasted picture becomes the reference chip, sets New effect, and goes to the model named as the look to aim for', async ({ page }) => {
+    const gen = await mockShaderGen(page, [100, 200, 300]); await mockMyEffects(page); const routed = await mockRouter(page)
+    await openShaderStudio(page)
+    const box = prompt(page)
+    await pastePicture(page)
+    const chip = page.getByTestId('studio-prompt').getByTestId('prompt-reference-chip')
+    await expect(chip).toBeVisible()
+    await expect(chip).toHaveAttribute('aria-label', 'Reference picture')
+    expect(await chip.locator('img').getAttribute('src')).toMatch(/^data:image\/jpeg;base64,/)
+    await expect(page.getByTestId('prompt-mode-chip')).toContainText('New effect')
+    await expect(page.getByTestId('studio-prompt').getByTestId('prompt-note')).toHaveText(PRICE_WITH_REFERENCE)
+    await expect(box).toHaveValue('') // the picture never lands in the field as text
+    await box.fill('like this, but slower'); await box.press('Enter')
+    await expect(page.getByTestId('prompt-takes')).toBeVisible({ timeout: 20_000 })
+    await expect.poll(() => gen.length).toBeGreaterThanOrEqual(3)
+    expect(routed).toHaveLength(0) // New effect decided the kind
+    // A Shader studio with nothing wired in has no picture to run over (it previews its own
+    // generative base): the reference is the only picture on every call, and is named so.
+    // (Frame's background, below, sends both.)
+    expect(gen.every(b => Array.isArray(b.images) && b.images.length === 1)).toBe(true)
+    expect(gen.every(b => b.images[0] === gen[0].images[0] && /^data:image\/jpeg;base64,/.test(b.images[0]))).toBe(true)
+    expect(gen.every(b => String(b.prompt).includes('The one attached picture is the reference picture: the look to aim for'))).toBe(true)
+    expect(gen.every(b => String(b.prompt).includes('like this, but slower'))).toBe(true)
+    // "Three more" carries the higher price; × on the set clears the chip.
+    await expect(tileIn(page, 'pending')).toHaveCount(0, { timeout: 60_000 })
+    await expect(page.getByTestId('prompt-takes').getByRole('button', { name: /^Three more/ })).toHaveText(`Three more · ${PRICE_WITH_REFERENCE}`)
+    await expect(chip).toBeVisible()
+    await page.getByTestId('prompt-takes').getByRole('button', { name: 'Close takes' }).click()
+    await expect(page.getByTestId('prompt-takes')).toHaveCount(0)
+    await expect(chip).toHaveCount(0)
+  })
+  test('Frame background: a pasted picture goes second, after the Frame the effect runs over', async ({ page }) => {
+    const gen = await mockShaderGen(page, [100, 200, 300]); await mockMyEffects(page); const routed = await mockRouter(page)
+    await openCompositor(page)
+    await pastePicture(page)
+    await expect(page.getByTestId('studio-prompt').getByTestId('prompt-reference-chip')).toBeVisible()
+    await expect(page.getByTestId('prompt-mode-chip')).toContainText('New effect')
+    // No words: the picture is the request.
+    await page.getByTestId('studio-prompt').getByRole('button', { name: 'Send' }).click()
+    await expect.poll(() => gen.length, { timeout: 20_000 }).toBeGreaterThanOrEqual(3)
+    expect(routed).toHaveLength(0)
+    expect(gen.every(b => Array.isArray(b.images) && b.images.length === 2)).toBe(true)
+    expect(gen.every(b => b.images[1] === gen[0].images[1] && b.images[0] !== b.images[1])).toBe(true)
+    expect(gen.every(b => String(b.prompt).includes('Picture 1 is the image the effect runs over. Picture 2 is the reference picture: the look to aim for'))).toBe(true)
+    expect(gen.every(b => String(b.prompt).includes('Request: "Match the look of the reference picture"'))).toBe(true)
+    await page.getByTestId('prompt-stop').click()
+    await expect(page.getByTestId('prompt-takes')).toHaveCount(0)
   })
 })

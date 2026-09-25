@@ -29,12 +29,13 @@ vi.mock('~/lib/shaderfx/catalogStore', async orig => ({
 import { useCanvasPrompt } from '~/composables/useCanvasPrompt'
 import { DISPATCH_MESSAGES } from '~/lib/prompt/canvasDispatch'
 import { BUSY_NOTICE } from '~/lib/prompt/notices'
+import { REFERENCE_ONLY_REQUEST } from '~/lib/prompt/referencePicture'
 
 function fakeEffects() {
   const session = shallowRef<any>(null)
   const running = ref(false)
   return {
-    session, target: shallowRef(null), request: ref(''), working: computed(() => running.value), running, error: ref(''), notice: ref(''), saving: ref(false),
+    session, target: shallowRef(null), request: ref(''), reference: ref<string | null>(null), working: computed(() => running.value), running, error: ref(''), notice: ref(''), saving: ref(false),
     start: vi.fn(async (_r: string, t: any) => { session.value = { nodeId: t.key, nodeLabel: t.label, request: _r, tiles: [], known: [], hovered: null, chosen: null, currentThumb: null } }),
     preview: vi.fn(), choose: vi.fn(), keep: vi.fn(async () => true), close: vi.fn(() => { session.value = null }), more: vi.fn(), stop: vi.fn(), clearMessages: vi.fn(),
   }
@@ -43,9 +44,11 @@ function fakeCanvas() {
   const node = { id: 's1', type: 'shader-effect', data: { title: 'Water ripple' } }
   // Reactive, as VueNodeCanvas's getNodes() (its Vue Flow nodes ref) is.
   const nodes = ref<any[]>([node, { id: 'other', type: 'artifact-image', data: {} }])
+  const sel = ref<any[]>([{ id: 's1', title: 'Water ripple', type: 'shader-effect', hasImages: false }])
   return {
-    agentSnapshot: vi.fn(), agentPreview: vi.fn(), agentSelection: [{ id: 's1', title: 'Water ripple', type: 'shader-effect', hasImages: false }],
-    getNodes: () => nodes.value, getEdges: () => [], nodes,
+    agentSnapshot: vi.fn(), agentPreview: vi.fn(),
+    get agentSelection() { return sel.value },
+    getNodes: () => nodes.value, getEdges: () => [], nodes, sel,
   }
 }
 
@@ -249,5 +252,46 @@ describe('useCanvasPrompt: new effects on a shader node', () => {
     setMode({ label: 'New effect', kind: 'new-effect', nodeId: 's1' })
     expect(toast.info).toHaveBeenCalledWith(BUSY_NOTICE)
     expect(api.mode.value).toBeNull()
+  })
+  describe('a reference picture', () => {
+    const REF = 'data:image/jpeg;base64,REF'
+    it('a selected shader node takes one: New effect on that node, the higher price, and the picture goes with the request', async () => {
+      const { api, effects, route } = setup()
+      expect(api.acceptsReference.value).toBe(true)
+      api.attachReference(REF)
+      expect(api.mode.value).toMatchObject({ label: 'New effect', kind: 'new-effect', nodeId: 's1' })
+      expect(api.modeNote.value).toBe('~$0.24–0.43')
+      await api.submit('')
+      expect(route).not.toHaveBeenCalled()
+      expect(effects.start).toHaveBeenCalledWith(REFERENCE_ONLY_REQUEST, expect.objectContaining({ key: 's1', base: null }), { reference: REF })
+    })
+    it('Remix already set stays Remix', () => {
+      const { api } = setup()
+      setMode({ label: 'Remix', kind: 'new-effect', nodeId: 's1' })
+      api.attachReference(REF)
+      expect(api.mode.value?.label).toBe('Remix')
+    })
+    it('anything but one shader node ignores a picture (a plain image node stays as today)', async () => {
+      const { api, canvas } = setup()
+      canvas.sel.value = [{ id: 'other', title: 'Image', type: 'artifact-image', hasImages: true }]
+      await nextTick()
+      expect(api.acceptsReference.value).toBe(false)
+      api.attachReference(REF)
+      expect(api.reference.value).toBeNull()
+      expect(api.mode.value).toBeNull()
+    })
+    it('selecting something else drops the picture, as it drops the mode', async () => {
+      const { api, canvas } = setup()
+      api.attachReference(REF)
+      canvas.sel.value = [{ id: 'other', title: 'Image', type: 'artifact-image', hasImages: true }]
+      await nextTick()
+      expect(api.reference.value).toBeNull()
+    })
+    it('× on the set clears it from the prompt', async () => {
+      const { api } = setup()
+      api.attachReference(REF); await api.submit('slower')
+      api.closeTakes()
+      expect(api.reference.value).toBeNull()
+    })
   })
 })

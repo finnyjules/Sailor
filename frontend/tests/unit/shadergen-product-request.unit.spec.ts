@@ -24,6 +24,19 @@ describe('product request (spec §7.2 decision)', () => {
   it('no picture → no images', async () => {
     expect((await productEngineInput({ request: 'rain', base: null, image: null })).images).toBeUndefined()
   })
+  it('a reference picture goes second, after the picture the effect runs over, and the prompt is told so', async () => {
+    const input = await productEngineInput({ request: 'rain', base: null, image: 'data:image/jpeg;base64,SRC', reference: 'data:image/jpeg;base64,REF' })
+    expect(input.images).toEqual(['data:image/jpeg;base64,SRC', 'data:image/jpeg;base64,REF'])
+    expect(input.referencePicture).toBe(2)
+  })
+  it('a reference with no source picture is the only picture', async () => {
+    const input = await productEngineInput({ request: 'rain', base: null, image: null, reference: 'data:image/jpeg;base64,REF' })
+    expect(input.images).toEqual(['data:image/jpeg;base64,REF'])
+    expect(input.referencePicture).toBe(1)
+  })
+  it('no reference: no reference picture', async () => {
+    expect((await productEngineInput({ request: 'rain', base: null, image: 'data:image/jpeg;base64,SRC' })).referencePicture).toBeUndefined()
+  })
   it('examples are rain take 3 and ink take 4', async () => {
     const ex = await productExamples()
     expect(ex.map(e => e.take)).toEqual([SPIKE_TAKES.rain![2], SPIKE_TAKES.ink![3]])
