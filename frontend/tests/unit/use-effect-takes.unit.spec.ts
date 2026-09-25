@@ -122,6 +122,17 @@ describe('useEffectTakes', () => {
     expect(api.notice.value).toBe(EFFECT_MESSAGES.savedNew(SPIKE_TAKES.rain![0]!.name))
   })
 
+  it('a new effect made from an older version says it came from the effect’s own name, never “Name · v1”', async () => {
+    const { api, release, library } = setup()
+    const base = { id: 'mine_aaaaaaaaaaaa~v1', name: 'Ink bloom · v1', mine: true, versionOf: 'mine_aaaaaaaaaaaa',
+      versions: [{ label: 'v1', effectId: 'mine_aaaaaaaaaaaa~v1' }, { label: 'v2', effectId: 'mine_aaaaaaaaaaaa~v2' }] }
+    for (const [round, b] of [base, { ...base, id: 'mine_aaaaaaaaaaaa' }].entries()) { // the stored bare id's alias is named like v1
+      const run = api.start('make it rain', target({ base: b as any })); release(0, round); release(1, round); release(2, round); await run
+      await api.keep(api.session.value!.tiles[0]!.takeId!)
+      expect(library.saveTake).toHaveBeenLastCalledWith(expect.any(Object), { request: 'make it rain', from: 'Ink bloom' })
+    }
+  })
+
   it('a Remix of a My effect the library doesn’t hold (a shared copy, or a library that won’t load) saves a new one (Ruling #1)', async () => {
     const { api, release, library } = setup()
     library.has.mockReturnValue(false)

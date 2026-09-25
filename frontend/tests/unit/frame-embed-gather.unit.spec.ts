@@ -144,6 +144,29 @@ describe('buildFrameSnapshot', () => {
     const p = plan([]); p.shaderIds = ['nope']
     const snap = await buildFrameSnapshot(p, v([]), fakeIO())
     expect(isBlocked(snap)).toBe(true)
+    expect(snap.notices.find(n => n.group === 'blocked')?.text).toBe('A shader this Frame uses isn’t available. Open Shader studio once, then export again.')
+  })
+
+  it('a missing My effect says it is gone (by its own name when known), not "open a studio"', async () => {
+    const p = plan([]); p.shaderIds = ['mine_aaaaaaaaaaaa~v2']
+    const named = await buildFrameSnapshot(p, v([]), fakeIO({ shaderName: () => 'Ink bloom' }))
+    expect(isBlocked(named)).toBe(true)
+    expect(named.notices.find(n => n.group === 'blocked')?.text)
+      .toBe('“Ink bloom” isn’t in My effects any more, so it can’t be exported. Pick another effect for this layer.')
+    const p2 = plan([]); p2.shaderIds = ['mine_aaaaaaaaaaaa']
+    const unnamed = await buildFrameSnapshot(p2, v([]), fakeIO())
+    expect(unnamed.notices.find(n => n.group === 'blocked')?.text)
+      .toBe('One of the effects this Frame uses isn’t in My effects any more, so it can’t be exported. Pick another effect for this layer.')
+    for (const snap of [named, unnamed]) expect(snap.notices.find(n => n.group === 'blocked')!.text).not.toMatch(/mine_|Shader Studio/)
+  })
+
+  it('the app’s IO names a My effect from the library by any of its ids', async () => {
+    const lib = await import('~/lib/myEffects/library')
+    lib.setMyEffectRecord({ id: 'mine_aaaaaaaaaaaa', name: 'Ink bloom' } as any)
+    const io = createAppFrameExportIO({ catalog: [] } as any)
+    expect(io.shaderName!('mine_aaaaaaaaaaaa~v1')).toBe('Ink bloom')
+    expect(io.shaderName!('water_ripple')).toBeNull()
+    lib.setMyEffectRecord(null, 'mine_aaaaaaaaaaaa')
   })
 })
 

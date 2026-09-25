@@ -47,6 +47,13 @@ const showLead = computed(() => props.canMake && (filter.value === 'all' || filt
 // A target is pinned to one version (`mine_x~vN`, or a stored bare `mine_x`); the Current
 // badge/initial focus must match that effect's one pickable entry, its newest version.
 const baseSelectedId = computed(() => (props.selectedId ? pickableIdFor(props.selectedId, props.effects) : props.selectedId))
+// Confirming the Current card keeps the target as it is. A target pinned to an older version
+// shows Current on its effect's one card (the newest version); "Use effect" there must not
+// silently move it to the newest code and reset its dials — the Recipe's version chips do that.
+function onConfirm(id: string) {
+  if (id === baseSelectedId.value && id !== props.selectedId) emit('close')
+  else emit('confirm', id)
+}
 
 const hosted = (): boolean => { try { return hostedModeEnabled(useRuntimeConfig().public) } catch { return false } }
 const estimate = computed(() => shaderGenEstimateText(hosted()))
@@ -59,7 +66,7 @@ const asDef = (item: unknown) => item as EffectDef
     :filters="filters" :active-filter-id="filter" :search-query="query" search-placeholder="Search effects…"
     :confirm-label="confirmLabel" empty-message="No effects match your search."
     :sections="SHADER_GALLERY_SECTIONS" :section-of="sectionOfEffect" :lead-in="showLead ? 'mine' : undefined"
-    @close="emit('close')" @confirm="emit('confirm', asDef($event).id)"
+    @close="emit('close')" @confirm="onConfirm(asDef($event).id)"
     @update:active-filter-id="filter = $event" @update:search-query="query = $event"
   >
     <template v-if="showLead" #lead>

@@ -13,7 +13,7 @@ import { createBrowserTakeRenderer } from '~/lib/shadergen/browserRenderer'
 import { makeCallModel } from '~/lib/shadergen/client'
 import { toEffectDef } from '~/lib/shadergen/effectDef'
 import { imageForModel, placeholderSource, productEngineInput } from '~/lib/shadergen/productRequest'
-import { effectIdForVersion, myEffectIdOf, valuesForVersion } from '~/lib/myEffects/defs'
+import { effectIdForVersion, myEffectIdOf, storedEffectId, valuesForVersion } from '~/lib/myEffects/defs'
 import { registerEffects, unregisterEffects } from '~/lib/shaderfx/catalog'
 import { shaderFx } from '~/lib/shaderfx/renderer'
 import { useMyEffects } from '~/composables/useMyEffects'
@@ -102,6 +102,15 @@ function mineIdOf(base: EffectDef | null): string | null {
   if (!base || base.draft) return null
   if (base.versionOf) return base.versionOf
   return base.mine ? (myEffectIdOf(base.id) ?? base.id) : null
+}
+
+/** The effect's own name, for a new effect's "from": an older version's def is named
+ *  "Name · v1" (and so is a stored bare id's alias); the user named it "Name". */
+function ownName(base: EffectDef): string {
+  if (!base.versionOf) return base.name
+  const label = base.versions?.find(v => v.effectId === storedEffectId(base.id))?.label
+  const tail = label ? ` · ${label}` : ''
+  return tail && base.name.endsWith(tail) ? base.name.slice(0, -tail.length) : base.name
 }
 
 // Draft ids are unique across every session on the page (two targets can hold drafts at once).
@@ -238,7 +247,7 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
       }
       const rec = mineId
         ? await lib.addCodeVersion(mineId, et.take, request.value)
-        : await lib.saveTake(et.take, { request: request.value, from: base && !base.draft ? base.name : null })
+        : await lib.saveTake(et.take, { request: request.value, from: base && !base.draft ? ownName(base) : null })
       const last = rec.versions.length - 1
       // Closed (or restarted) while saving: it is saved, but the target has moved on — leave it be.
       if (run === seq) {

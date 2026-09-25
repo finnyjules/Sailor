@@ -5,6 +5,8 @@ import { VARIABLE_FONTS_BY_ID } from '~/data/variable-fonts'
 import { depthImageFor } from '~/lib/compositor/depthRegistry'
 import type { UploadedFontEntry } from '~/composables/useUploadedFonts'
 import type { EffectDef } from '~/lib/shaderfx/types'
+import { myEffectIdOf } from '~/lib/myEffects/defs'
+import { myEffectRecordById } from '~/lib/myEffects/library'
 import { StudioExportFailed, type StudioFrameSource } from '~/lib/studio/frameSource'
 import { bufferToBase64, subsetFontBase64 } from '../fontBytes'
 import type { FontSource, FrameExportIO, WiredFrames } from './gather'
@@ -196,6 +198,7 @@ export function createAppFrameExportIO(opts: {
     wiredFrames: opts.wiredFrames ?? (async () => { throw new Error('no wired frame source') }),
     depthImage: ref => depthImageFor(ref),
     shaderDefs: ids => opts.catalog.filter(d => ids.includes(d.id)),
+    shaderName: id => myEffectRecordById(myEffectIdOf(id) ?? '')?.name ?? null,
     wiredEmbed: opts.wiredEmbed,
     // The bundle export.ts will inline (the same `/embed/{name}.js`), measured as the bytes it
     // adds to the file. A failed fetch is not kept, so it is not remembered as a size.

@@ -17,6 +17,7 @@ import { layersNeedPaper } from './needs'
 import { formatBytes } from '../formatBytes'
 import type { DepthRef } from '~/lib/compositor/depthRegistry'
 import type { EffectDef } from '~/lib/shaderfx/types'
+import { MY_EFFECT_ID_BODY } from '~~/shared/myEffects/record'
 import type { FontWeightSpec } from '../fontFace'
 import { outlinePartnerIds, type FramePlan } from './plan'
 import type { StudioEmbed } from '~/lib/studio/frameSource'
@@ -35,6 +36,18 @@ export interface WiredFrames { frames: string[]; failures: { name: string; reaso
  *  than imported so the Frame gatherer does not pull 3D Studio's renderer into its imports. */
 export const WIRED_CLIP_WEBP_QUALITY = 0.82
 
+const MY_EFFECT_REF = new RegExp(`^${MY_EFFECT_ID_BODY}(?:~v\\d+)?$`)
+
+/** Why a shader the Frame uses can't be exported, in a plain sentence. A My effect that isn't
+ *  registered is gone (removed, or a shared copy that never loaded): opening a studio won't
+ *  bring it back, so say so and name it when its name is known. */
+export function missingShaderMessage(id: string, name: string | null): string {
+  if (MY_EFFECT_REF.test(id)) {
+    return `${name ? `“${name}”` : 'One of the effects this Frame uses'} isn’t in My effects any more, so it can’t be exported. Pick another effect for this layer.`
+  }
+  return 'A shader this Frame uses isn’t available. Open Shader studio once, then export again.'
+}
+
 export interface FrameExportIO {
   fetchBlob(url: string): Promise<Blob>
   blobToImage(blob: Blob): Promise<CanvasImageSource>
@@ -52,6 +65,8 @@ export interface FrameExportIO {
   wiredFrames(slot: number, count: number, maxPx: number, encode: (frame: CanvasImageSource) => Promise<string>): Promise<WiredFrames>
   depthImage(ref: DepthRef): CanvasImageSource | null
   shaderDefs(ids: string[]): EffectDef[]
+  /** A My effect's own name by any of its ids, when the user's library still knows it. */
+  shaderName?(id: string): string | null
   /** An animated wired slot's studio embed player (StudioFrameSource.embed), or null when the
    *  source cannot play live faithfully. With `bundleBytes`, the live route; either absent, none. */
   wiredEmbed?(slot: number): Promise<StudioEmbed | null>
@@ -177,7 +192,7 @@ export async function buildFrameSnapshot(plan: FramePlan, variant: FrameVariant,
 
   const shaders = io.shaderDefs(plan.shaderIds)
   for (const id of plan.shaderIds) {
-    if (!shaders.some(d => d.id === id)) block('A shader this Frame uses isn\'t available. Open Shader Studio once, then export again.')
+    if (!shaders.some(d => d.id === id)) block(missingShaderMessage(id, io.shaderName?.(id) ?? null))
   }
   for (const def of shaders) {
     for (const t of def.textures ?? []) {

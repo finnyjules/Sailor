@@ -115,10 +115,26 @@ describe('ShaderEffectGallery (spec §7.3)', () => {
       expect(body().querySelector('[data-effect-id="mine_aaaaaaaaaaaa~v2"]')!.closest('button')!.textContent).toContain('Current')
       w.unmount(); w = null
     }
-    // A pick writes the newest version's own id, never the bare alias.
+    // Use effect on that Current card keeps the target where it is (pinned to v1, dials kept):
+    // it closes rather than silently moving the target to the newest code.
     w = mount(ShaderEffectGallery, { props: { open: true, effects: pinned, selectedId: 'mine_aaaaaaaaaaaa~v1', thumbs: {} }, attachTo: document.body })
-    const use = [...body().querySelectorAll('button')].find(b => b.textContent?.trim() === 'Use effect')!
-    use.click(); await w.vm.$nextTick()
+    const use = () => [...body().querySelectorAll('button')].find(b => b.textContent?.trim() === 'Use effect')!
+    use().click(); await w.vm.$nextTick()
+    expect(w.emitted('confirm')).toBeUndefined()
+    expect(w.emitted('close')).toHaveLength(1)
+    w.unmount(); w = null
+    // Another effect's card is a real pick, and writes that effect's newest version's own id.
+    w = mount(ShaderEffectGallery, { props: { open: true, effects: pinned, selectedId: 'water_ripple', thumbs: {} }, attachTo: document.body })
+    ;(body().querySelector('[data-effect-id="mine_aaaaaaaaaaaa~v2"]')!.closest('button') as HTMLButtonElement).click()
+    await w.vm.$nextTick()
+    use().click(); await w.vm.$nextTick()
+    expect(w.emitted('confirm')![0]).toEqual(['mine_aaaaaaaaaaaa~v2'])
+  })
+  it('Use effect on the Current card of a target already on the newest version confirms as before', async () => {
+    const pinned = [d('mine_aaaaaaaaaaaa~v2', 'mine', { mine: true, name: 'Rain on glass' }), d('water_ripple', 'distortion')]
+    w = mount(ShaderEffectGallery, { props: { open: true, effects: pinned, selectedId: 'mine_aaaaaaaaaaaa~v2', thumbs: {} }, attachTo: document.body })
+    ;[...body().querySelectorAll('button')].find(b => b.textContent?.trim() === 'Use effect')!.click()
+    await w.vm.$nextTick()
     expect(w.emitted('confirm')![0]).toEqual(['mine_aaaaaaaaaaaa~v2'])
   })
 })
