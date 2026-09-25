@@ -499,6 +499,26 @@ const matOverride = computed<boolean>({
 })
 const selectedDecal = computed<DecalObject | null>(() => (selected.value?.kind === 'decal' ? selected.value : null))
 const activeTab = ref<'build' | 'motion'>('build')  // inspector tab: Build (existing sections) vs Motion (Task 5)
+// The selected object's own name, as the object list shows it (spec §1.2 — the
+// prompt's chip quotes the user's own content, never a guessed role).
+const promptLabel = computed<string | null>(() => selected.value?.name ?? null)
+// The prompt sits directly above whichever bottom bar is showing — the add bar,
+// the sculpt bar or the Motion timeline (spec §2.4 "takeover modes"; plan ruling 1).
+// One ref, because exactly one of the three is mounted at a time.
+const bottomBarEl = ref<HTMLElement | null>(null)
+const bottomBarHeight = ref(0)
+let bottomBarObserver: ResizeObserver | null = null
+watch(bottomBarEl, (el) => {
+  bottomBarObserver?.disconnect()
+  bottomBarHeight.value = el?.offsetHeight ?? 0
+  if (el && typeof ResizeObserver !== 'undefined') {
+    bottomBarObserver = new ResizeObserver(() => { bottomBarHeight.value = el.offsetHeight })
+    bottomBarObserver.observe(el)
+  }
+}, { flush: 'post' })
+onBeforeUnmount(() => bottomBarObserver?.disconnect())
+/** bottom-3 (12px) + the bar + an 8px gap; 16 when no bar shows (WebGL off). */
+const promptOffset = computed(() => (bottomBarHeight.value ? 12 + bottomBarHeight.value + 8 : 16))
 
 // ── Motion panel state (Task 5) ──────────────────────────────────────────────
 const motionOn = computed({
@@ -4806,7 +4826,8 @@ async function onClose() {
        lifts the shell's agent/takes cluster clear of the add-pill below.
        `panelsVisible` comes down as a slot prop so the in-viewport overlays that
        sit in a panel's corner can step inside it — and step back when it hides. -->
-  <StudioModalShell title="3D Studio" full-bleed :full-bleed-bottom-offset="72" @close="onClose">
+  <StudioModalShell title="3D Studio" full-bleed prompt-place="scene3d-studio" prompt-host="scene3d"
+    :prompt-label="promptLabel" :full-bleed-bottom-offset="promptOffset" @close="onClose">
     <template #preview="{ panelsVisible = true }">
       <div ref="viewportEl" class="relative h-full w-full min-h-0" :class="placingDecal ? 'cursor-crosshair' : ''">
         <!-- NOTHING may be inserted between these two: they are one v-if/v-else pair
@@ -4923,7 +4944,7 @@ async function onClose() {
         <!-- Motion timeline panel: docks full-width over the add-toolbar's spot in
              Motion mode (a timeline wants horizontal room — the narrow right panel
              cramped it). Transport header + the band tracks, video-editor style. -->
-        <div v-if="webglOk && activeTab === 'motion'"
+        <div v-if="webglOk && activeTab === 'motion'" ref="bottomBarEl"
              class="absolute bottom-3 z-10 rounded-[12px] border border-[#2a2a2a] bg-[#1a1a1a]/95 p-2.5 shadow-lg"
              :class="panelsVisible ? 'left-[var(--studio-panel-inset)] right-[var(--studio-panel-inset)]' : 'left-3 right-3'" @pointerdown.stop>
           <div class="mb-2 flex items-center gap-2 text-[11px] text-white/60">
@@ -4944,7 +4965,7 @@ async function onClose() {
              toolbar's face+caret grammar — the face repeats the last-used entry
              in one click, the slim caret beside it opens the unchanged menu.
              Hidden in Motion mode — the timeline panel above takes its place. -->
-        <div v-if="webglOk && activeTab !== 'motion' && !sculpting" class="absolute bottom-3 left-1/2 -translate-x-1/2 z-10" data-prim-menu @pointerdown.stop>
+        <div v-if="webglOk && activeTab !== 'motion' && !sculpting" ref="bottomBarEl" class="absolute bottom-3 left-1/2 -translate-x-1/2 z-10" data-prim-menu @pointerdown.stop>
           <p v-if="uploadError" class="mb-2 text-center text-[11px] text-red-400/90">{{ uploadError }}</p>
           <div class="relative flex items-center gap-1 rounded-[12px] border border-[#2a2a2a] bg-[#1a1a1a]/95 p-1.5 shadow-lg">
             <!-- Two real buttons rather than hit-test zones inside one, so the
@@ -5222,7 +5243,7 @@ async function onClose() {
              add-toolbar while a sculpt session is open (add-toolbar is gated off by
              `!sculpting` above). @pointerdown.stop so brush clicks don't reach
              OrbitControls; the pill itself is pointer-events-auto. -->
-        <div v-if="webglOk && sculpting" class="absolute bottom-3 left-1/2 -translate-x-1/2 z-10" @pointerdown.stop>
+        <div v-if="webglOk && sculpting" ref="bottomBarEl" class="absolute bottom-3 left-1/2 -translate-x-1/2 z-10" @pointerdown.stop>
           <Scene3DSculptToolbar
             v-model:brush="sculptBrush"
             v-model:size="sculptSize"

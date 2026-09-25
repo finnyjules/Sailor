@@ -79,3 +79,14 @@ describe('Texture and Space type', () => {
     expect(preview).not.toContain('onScrub(')
   })
 })
+
+describe('3D', () => {
+  it('mounts the prompt with no worker, and lifts it above whichever bar shows', () => {
+    const s = src('Scene3DStudioSurface.vue')
+    expect(s).toContain('prompt-place="scene3d-studio"')
+    expect(s).toContain('prompt-host="scene3d"')
+    expect(s).toContain(':full-bleed-bottom-offset="promptOffset"')
+    expect(s).not.toMatch(/:full-bleed-bottom-offset="72"/)
+    expect(s).toMatch(/bottomBarEl/)
+  })
+})
