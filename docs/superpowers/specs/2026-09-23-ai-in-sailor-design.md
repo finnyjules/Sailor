@@ -153,7 +153,7 @@ The earlier design's left rail existed only to free room in the bar for a prompt
 
 The same stack applies everywhere: **the prompt row above the studio's tool bar, and results just above the prompt.**
 
-- **Frame** (`CompositorModal.vue`) and **3D** (`Scene3DStudioSurface.vue`) already stack their prompt above their tool bar. They keep that arrangement and get the new prompt behaviour. Frame's prompt no longer collapses to an "Ask…" pill; it stays a full row, like the canvas.
+- **Frame** (`CompositorModal.vue`) already stacks its prompt above its tool bar. It keeps that arrangement and gets the new prompt behaviour. **3D** (`Scene3DStudioSurface.vue`) had no prompt row (corrected 2026-09-25, stage 4 Ruling 1): it gains the one prompt above whichever bar shows, with no worker yet, so it answers plainly. Frame's prompt no longer collapses to an "Ask…" pill; it stays a full row, like the canvas.
 - **Simple studios** (Shader, Gradient, Shape, Texture, Vector type, Space type): the prompt row sits under the preview, as today. Their scattered viewport controls (Gradient's zoom at the top, Texture's 1×/2×/3× repeat under the canvas, Vector and Space type's play/pause and scrub) move into a small tool bar below the prompt, so every studio has the same stack.
 - **Modes that take over the bottom** (3D sculpting, the Motion timeline in Frame and 3D, the Timeline editor): the prompt row stays above whichever bar is showing, so it's always in the same spot.
 - **The output footer** (`StudioActionsFooter`: Download, Render on canvas) is unchanged. It's output, not making.
@@ -361,14 +361,14 @@ Instructions can edit a content field (§1.5). The edit appears in the field, br
    - The node toolbar (Edit ▾ / Develop ▾, existing items regrouped by intent, landing hints).
    - The multi-selection toolbar, Run rows on nodes, and the fixes badge.
    - The prompt runs the existing agent flows at first; results still use today's shapes.
-3. **Results on the work.** Take strips above the prompt, with the target node glowing and previewing each take (§3.1), proposed nodes on the canvas, the answer card, and progress in the prompt. `CanvasPromptBar` is retired.
-4. **Studios.**
+3. **Results on the work.** *(BUILT 2026-09-25, see `docs/STATE.md`; real-mouse pass owed.)* Take strips above the prompt, with the target node glowing and previewing each take (§3.1), proposed nodes on the canvas, the answer card, and progress in the prompt. `CanvasPromptBar` is retired.
+4. **Studios.** *(BUILT 2026-09-25, see `docs/STATE.md`; real-mouse pass owed. 3D had no prompt row before this stage, so it gained one rather than swapping one.)*
    - The one prompt (§2.1a) above a small shared tool bar in `StudioModalShell`.
    - Frame's and 3D's existing prompt rows swapped for the one prompt, above whichever bar shows (takeover modes included); Frame's pill removed.
    - The simple studios' scattered controls moved into the bar.
    - Inspectors reordered: Recipe or the thing itself, Actions as light rows, then Dials.
    - `AgentBar`'s old place and `VibeControlBar` retired; the template editor moved to the same bar.
-5. **Shader generation and My effects:** the engine, the store, gallery entry points, versions, and pickers everywhere.
+5. **Shader generation and My effects:** *(BUILT 2026-09-25, see `docs/STATE.md`; the paid measurement and a real-mouse pass are owed.)* The engine, the store, gallery entry points, versions, and pickers everywhere.
 6. **The shared content prompt field** across the ~16 fields. Copy assist becomes actions.
 7. **Cleanup:** delete `NextStepsStrip`, the Explain code and routes, and the retired prompt components.
 
