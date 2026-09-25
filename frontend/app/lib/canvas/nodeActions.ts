@@ -3,14 +3,41 @@
 // fires exactly the window event the old per-node menus fired, so the canvas
 // handlers are unchanged. `lands` is the grey hint: '3 takes' on this node, or
 // 'adds a step' (a new node after it); null for actions that open an editor.
+// Actions that spend money add their price to that hint ("adds a step · ~$0.14"):
+// `priceHint` is the fixed estimate the old image menu showed (ACTION_HINTS);
+// otherwise `priceNodeType`'s own price_badge, the figure the node itself shows.
+import { ACTION_HINTS } from '~/lib/artifact/nextSteps'
+import { parseBadgeUsd } from '~/lib/costEstimate'
+import { formatCostBadge } from '~/lib/pricing'
 
 export type ActionGroup = 'edit' | 'develop'
 export type ActionLands = 'takes' | 'step' | null
 export interface NodeActionCtx { nodeId: string; type: string; hasImages: boolean; hasUpstream: boolean }
-export interface NodeAction { id: string; label: string; group: ActionGroup; ai: boolean; lands: ActionLands; enabled?: (c: NodeActionCtx) => boolean; run: (c: NodeActionCtx) => void }
+export interface NodeAction {
+  id: string; label: string; group: ActionGroup; ai: boolean; lands: ActionLands
+  /** Fixed price estimate for a paid action (wins over the badge). */
+  priceHint?: string | null
+  /** The paid node this action adds — its price_badge prices the action. */
+  priceNodeType?: string
+  enabled?: (c: NodeActionCtx) => boolean; run: (c: NodeActionCtx) => void
+}
 
 export function landsHint(l: ActionLands): string | null {
   return l === 'takes' ? '3 takes' : l === 'step' ? 'adds a step' : null
+}
+
+/** An action's price, or null when it doesn't spend money (or has no known price).
+ *  `objectInfo` is /object_info; `hosted` shows credits instead of dollars. */
+export function actionPrice(a: NodeAction, objectInfo: Record<string, any> | null | undefined, hosted: boolean): string | null {
+  if (a.priceHint) return a.priceHint
+  if (!a.priceNodeType) return null
+  const cost = parseBadgeUsd(objectInfo?.[a.priceNodeType]?.price_badge?.expr)
+  return cost ? formatCostBadge(cost.usd, cost.approximate, hosted) : null
+}
+
+/** The grey hint on a menu row: where it lands, plus the price when it spends money. */
+export function actionHint(a: NodeAction, price: string | null): string | null {
+  return [landsHint(a.lands), price].filter(Boolean).join(' · ') || null
 }
 
 const fire = (name: string, detail: Record<string, unknown>) => window.dispatchEvent(new CustomEvent(name, { detail }))
@@ -28,26 +55,26 @@ const IMAGE: NodeAction[] = [
   { id: 'remove-object', label: 'Remove object', group: 'edit', ai: true, lands: null, run: c => fire('sailor:openInpaint', { nodeId: c.nodeId, intent: 'remove' }) },
   { id: 'recolor', label: 'Recolor…', group: 'edit', ai: true, lands: null, run: c => fire('sailor:openInpaint', { nodeId: c.nodeId, intent: 'recolor' }) },
   { id: 'edit-text', label: 'Edit text…', group: 'edit', ai: true, lands: null, run: c => fire('sailor:openTextEdit', { nodeId: c.nodeId }) },
-  { id: 'nano-banana', label: 'Edit with Nano Banana', group: 'edit', ai: true, lands: 'step', run: c => fire('sailor:applyEffect', { nodeId: c.nodeId, nodeType: 'EditImageNode', output: 'IMAGE', widgetOverrides: { model: 'Nano Banana 2' } }) },
-  { id: 'enhance-detail', label: 'Enhance detail', group: 'edit', ai: true, lands: 'step', run: c => splice(c, 'EnhanceDetailNode', { focus: true, branch: true }) },
-  { id: 'upscale', label: 'Upscale', group: 'edit', ai: true, lands: 'step', run: c => splice(c, 'UpscaleImageNode', { run: true, branch: true }) },
-  { id: 'relight', label: 'Relight', group: 'edit', ai: true, lands: 'step', run: c => splice(c, 'RelightNode', { focus: true, branch: true }) },
+  { id: 'nano-banana', label: 'Edit with Nano Banana', group: 'edit', ai: true, lands: 'step', priceHint: ACTION_HINTS['nano-banana'], run: c => fire('sailor:applyEffect', { nodeId: c.nodeId, nodeType: 'EditImageNode', output: 'IMAGE', widgetOverrides: { model: 'Nano Banana 2' } }) },
+  { id: 'enhance-detail', label: 'Enhance detail', group: 'edit', ai: true, lands: 'step', priceHint: ACTION_HINTS.enhance, run: c => splice(c, 'EnhanceDetailNode', { focus: true, branch: true }) },
+  { id: 'upscale', label: 'Upscale', group: 'edit', ai: true, lands: 'step', priceHint: ACTION_HINTS.upscale, run: c => splice(c, 'UpscaleImageNode', { run: true, branch: true }) },
+  { id: 'relight', label: 'Relight', group: 'edit', ai: true, lands: 'step', priceHint: ACTION_HINTS.relight, run: c => splice(c, 'RelightNode', { focus: true, branch: true }) },
   { id: 'variations', label: 'Variations', group: 'develop', ai: true, lands: 'takes', enabled: c => c.hasUpstream, run: c => fire('sailor:runVariations', { nodeId: c.nodeId, count: 3 }) },
-  { id: 'restyle', label: 'Restyle…', group: 'develop', ai: true, lands: 'step', run: c => splice(c, 'RestyleWithLoRANode', { focus: true, branch: true }) },
-  { id: 'reframe', label: 'Reframe', group: 'develop', ai: true, lands: 'step', run: c => splice(c, 'LensReframe', { focus: true, branch: true }) },
-  { id: 'animate', label: 'Animate', group: 'develop', ai: true, lands: 'step', run: c => fire('sailor:animateArtifact', { nodeId: c.nodeId }) },
+  { id: 'restyle', label: 'Restyle…', group: 'develop', ai: true, lands: 'step', priceNodeType: 'RestyleWithLoRANode', run: c => splice(c, 'RestyleWithLoRANode', { focus: true, branch: true }) },
+  { id: 'reframe', label: 'Reframe', group: 'develop', ai: true, lands: 'step', priceHint: ACTION_HINTS.lens, run: c => splice(c, 'LensReframe', { focus: true, branch: true }) },
+  { id: 'animate', label: 'Animate', group: 'develop', ai: true, lands: 'step', priceHint: ACTION_HINTS.animate, run: c => fire('sailor:animateArtifact', { nodeId: c.nodeId }) },
 ]
 
 const VIDEO: NodeAction[] = [
-  { id: 'lipsync', label: 'Sync lips', group: 'edit', ai: true, lands: 'step', run: c => branchAction(c, 'LipsyncNode', 'VIDEO') },
-  { id: 'enhance-video', label: 'Enhance', group: 'edit', ai: true, lands: 'step', run: c => branchAction(c, 'EnhanceVideoNode', 'VIDEO') },
-  { id: 'describe-video', label: 'Describe', group: 'develop', ai: true, lands: 'step', run: c => branchAction(c, 'DescribeVideoNode', 'VIDEO') },
+  { id: 'lipsync', label: 'Sync lips', group: 'edit', ai: true, lands: 'step', priceNodeType: 'LipsyncNode', run: c => branchAction(c, 'LipsyncNode', 'VIDEO') },
+  { id: 'enhance-video', label: 'Enhance', group: 'edit', ai: true, lands: 'step', priceNodeType: 'EnhanceVideoNode', run: c => branchAction(c, 'EnhanceVideoNode', 'VIDEO') },
+  { id: 'describe-video', label: 'Describe', group: 'develop', ai: true, lands: 'step', priceNodeType: 'DescribeVideoNode', run: c => branchAction(c, 'DescribeVideoNode', 'VIDEO') },
   { id: 'all-video', label: 'All actions…', group: 'develop', ai: false, lands: null, run: () => fire('sailor:openActions', { domain: 'video' }) },
 ]
 
 const AUDIO: NodeAction[] = [
-  { id: 'transcribe', label: 'Transcribe', group: 'develop', ai: true, lands: 'step', run: c => branchAction(c, 'TranscribeAudioNode', 'AUDIO') },
-  { id: 'speakers', label: 'Speakers', group: 'develop', ai: true, lands: 'step', run: c => branchAction(c, 'IdentifySpeakersNode', 'AUDIO') },
+  { id: 'transcribe', label: 'Transcribe', group: 'develop', ai: true, lands: 'step', priceNodeType: 'TranscribeAudioNode', run: c => branchAction(c, 'TranscribeAudioNode', 'AUDIO') },
+  { id: 'speakers', label: 'Speakers', group: 'develop', ai: true, lands: 'step', priceNodeType: 'IdentifySpeakersNode', run: c => branchAction(c, 'IdentifySpeakersNode', 'AUDIO') },
   { id: 'all-audio', label: 'All actions…', group: 'develop', ai: false, lands: null, run: () => fire('sailor:openActions', { domain: 'audio' }) },
 ]
 

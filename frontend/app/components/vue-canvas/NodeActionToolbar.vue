@@ -9,9 +9,11 @@
 // Multi mode (Task 9): when `multiIds.length > 1` the bar shows three plain
 // buttons instead — Run N / Group / Combine into Frame (only when
 // `canCombine`) — with no dropdowns and no ✦, since none of these is AI.
-import { ChevronDown } from 'lucide-vue-next'
+import { ChevronDown, Play } from 'lucide-vue-next'
 import { onClickOutside } from '@vueuse/core'
-import { actionsFor, landsHint, type NodeAction, type NodeActionCtx } from '~/lib/canvas/nodeActions'
+import { actionHint, actionPrice, actionsFor, type NodeAction, type NodeActionCtx } from '~/lib/canvas/nodeActions'
+import { fetchObjectInfo } from '~/composables/useVueNodes'
+import { hostedModeEnabled } from '~/lib/hostedMode'
 import { useNextStepsStrip, type FixChip } from '~/composables/useNextStepsStrip'
 
 const props = defineProps<{
@@ -95,6 +97,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true))
 
 const rows = computed<NodeAction[]>(() => (open.value ? groups.value[open.value] : []))
 
+// Paid rows carry their price in the grey hint. Badge prices come from
+// /object_info (cached app-wide), read once the first time a menu opens.
+const objectInfo = shallowRef<Record<string, any> | null>(null)
+const hosted = hostedModeEnabled(useRuntimeConfig().public)
+watch(open, async (v) => {
+  if (!v || objectInfo.value) return
+  const info: Record<string, any> = await fetchObjectInfo()
+  objectInfo.value = info
+})
+function hintFor(a: NodeAction): string | null {
+  return actionHint(a, actionPrice(a, objectInfo.value, hosted))
+}
+
 function isDisabled(a: NodeAction): boolean {
   return !!props.ctx && a.enabled?.(props.ctx) === false
 }
@@ -143,6 +158,7 @@ defineExpose({ openMenu })
       :aria-label="`Run ${multiIds.length} nodes`"
       @click.stop="emit('runSelection')"
     >
+      <Play class="size-3" aria-hidden="true" />
       Run {{ multiIds.length }}
     </button>
     <button
@@ -245,7 +261,7 @@ defineExpose({ openMenu })
         >
           <span class="truncate">{{ a.label }}</span>
           <span v-if="a.ai" class="ai-mark" aria-hidden="true">✦</span>
-          <span v-if="landsHint(a.lands)" class="menu-hint">{{ landsHint(a.lands) }}</span>
+          <span v-if="hintFor(a)" class="menu-hint">{{ hintFor(a) }}</span>
         </button>
       </div>
     </Teleport>

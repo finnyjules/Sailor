@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach } from 'vitest'
-import { actionsFor, landsHint, type NodeActionCtx } from '~/lib/canvas/nodeActions'
+import { actionHint, actionPrice, actionsFor, landsHint, type NodeActionCtx } from '~/lib/canvas/nodeActions'
 
 const ctx = (type: string, o: Partial<NodeActionCtx> = {}): NodeActionCtx => ({ nodeId: 'n1', type, hasImages: false, hasUpstream: true, ...o })
 function capture(run: () => void) {
@@ -73,5 +73,33 @@ describe('any other node', () => {
     expect(actionsFor(ctx('KSampler')).edit).toEqual([])
     expect(actionsFor(ctx('KSampler', { hasImages: true })).edit.map(a => a.label)).toEqual(['Fix'])
     expect(actionsFor(ctx('KSampler', { hasImages: true })).develop).toEqual([])
+  })
+})
+
+describe('price in the grey hint', () => {
+  const info = {
+    EnhanceVideoNode: { price_badge: { expr: '{"usd": 0.25}' } },
+    TranscribeAudioNode: { price_badge: { expr: '{"usd": 0.02, "format": {"approximate": true}}' } },
+    UpscaleImageNode: { price_badge: { expr: '{"usd": 9.99}' } },
+  }
+  const img = ctx('artifact-image', { hasImages: true })
+  const hint = (c: NodeActionCtx, label: string, hosted = false) => { const a = find(c, label); return actionHint(a, actionPrice(a, info, hosted)) }
+
+  it('image actions carry the fixed estimate the old menu showed', () => {
+    expect(hint(img, 'Upscale')).toBe('adds a step · ~$0.14') // the fixed estimate wins over the badge
+    expect(hint(img, 'Edit with Nano Banana')).toBe('adds a step · ~$0.12')
+    expect(hint(img, 'Animate')).toBe('adds a step · from $1.60')
+  })
+  it('video and audio actions are priced from their node’s price_badge', () => {
+    expect(hint(ctx('artifact-video'), 'Enhance')).toBe('adds a step · $0.25')
+    expect(hint(ctx('artifact-audio'), 'Transcribe')).toBe('adds a step · ~$0.02')
+    expect(hint(ctx('artifact-audio'), 'Transcribe', true)).toMatch(/^adds a step · ~\d+ cr$/)
+  })
+  it('free actions, and paid ones with no known price, show just the landing hint', () => {
+    expect(hint(img, 'Remove background')).toBe('adds a step')
+    expect(hint(img, 'Variations')).toBe('3 takes')
+    expect(hint(img, 'Inpaint')).toBeNull()
+    expect(hint(ctx('artifact-video'), 'Sync lips')).toBe('adds a step') // no badge in this catalog
+    expect(actionPrice(find(ctx('artifact-video'), 'Enhance'), null, false)).toBeNull() // catalog not loaded yet
   })
 })

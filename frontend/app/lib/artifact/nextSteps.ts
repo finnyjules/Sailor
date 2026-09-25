@@ -22,7 +22,7 @@ export const ACTION_HINTS: Record<ArtifactActionId, string | null> = {
   'upscale': '~$0.14',
   'relight': '~$0.12',
   'lens': '~$0.12',
-  'variations': '4 runs',
+  'variations': '3 runs',
   'animate': 'from $1.60',
 }
 
