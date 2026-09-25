@@ -78,8 +78,9 @@ import { commandsToPathData, type VectorCommand } from '~/lib/vector/svg'
 import { shapeStrokeMarkMatrices, pathOutlineFlattenTolerance, offsetPolyline, resamplePolyline, type WobbleSpec } from '~/lib/compositor/strokeShapes'
 import {
   followFrame, bandTriangles, triangleAffine, followStripPlan, fadeStops, paintCanFollow, FOLLOW_MAX_REACH,
+  type FollowFrame,
 } from '~/lib/compositor/strokeFollow'
-import { DEFAULT_FLATTEN_TOLERANCE, longestSubpath } from '~/lib/compositor/pathFlatten'
+import { DEFAULT_FLATTEN_TOLERANCE, flattenPath, longestSubpath, type FlatSubpath } from '~/lib/compositor/pathFlatten'
 import { shapeById } from '~/lib/shapes/catalog'
 import { shapePath2D } from '~/lib/shapes/path2d'
 import { resolveGroupCascade, type LayerGroup } from '~/lib/compositor/layerGroups'
@@ -4078,55 +4079,26 @@ const FOLLOW_STRIP_MAX_AREA = 16_000_000
 const FOLLOW_STRIP_WRAP = 4
 
 /**
- * A band whose paint FOLLOWS THE LINE. Returns `false` when it painted nothing (no outline,
- * no scratch, a paint with nothing to bend) so the caller paints the ordinary band instead —
- * a follow the geometry cannot express must not cost the stroke its ink.
- *
- * 1. The band's centreline is the SAME line `paintWobbledBand` strokes (same `centre` offset,
- *    same wobble), resampled evenly and given smoothed normals (`followFrame`).
- * 2. The paint is drawn into a straight strip, `length × width` in this ctx's units, rastered
- *    at device resolution (`followStripPlan` says how).
- * 3. The strip is bent onto a scratch, two triangles per centreline segment, each clipped
- *    (grown 0.6 device px so neighbours overlap instead of leaving hairline seams) and drawn
- *    under the affine map from strip to band.
- * 4. The band itself — painted by `mask`, i.e. the ordinary band painter in solid ink — is
- *    applied with `destination-in`, so distance, alignment, dash and wobble cut the result
- *    exactly as they cut a plain band. On its OWN scratch: `strokeAligned`'s inside arm draws
- *    under a clip, and a `destination-in` confined to a clip would leave the bent paint
- *    outside it untouched.
- * 5. Ombre: the bent strip is a FADE map (black = A, white = B); every device pixel becomes A
- *    or B through `ombreHash`, the same hash the flat ombre tile uses, so the grain stays crisp
- *    however far the strip was bent.
+ * Steps 1–3 of `paintFollowedBand` for ONE subpath: its centreline, its own straight strip (its
+ * own length, so its own tile count / mirror / fade), bent onto `bent`. Returns the line's
+ * frame (for the grain pass's bounds), or `null` when this subpath has nothing to bend.
  */
-export function paintFollowedBand(ctx: CanvasRenderingContext2D, o: {
-  pathData: string
-  tolerance?: number
+function bendFollowedLine(bent: CanvasRenderingContext2D, sub: FlatSubpath, o: {
   width: number
-  distance?: number
-  align?: StrokeAlign
   wobble?: WobbleSpec | null
   paint: Paint
   paintBox: { w: number; h: number }
   fade: 'across' | 'along'
   fadeRepeats: number
-  /** Paint the band in solid ink on `c` — the ordinary band painter with `style: () => ink`. */
-  mask: (c: CanvasRenderingContext2D) => void
-}): boolean {
-  if (!(o.width > 0) || !paintCanFollow(o.paint)) return false
-  const d = typeof o.distance === 'number' && Number.isFinite(o.distance) ? o.distance : 0
-  const align = strokeAlignOf(o.align)
-  const centre = align === 'outside' ? d + o.width / 2 : align === 'inside' ? d - o.width / 2 : d
-  const sub = longestSubpath(o.pathData, o.tolerance ? { tolerance: o.tolerance } : undefined)
-  if (!sub) return false
+}, centre: number, sx: number): FollowFrame | null {
+  if (sub.pts.length < 2) return null
   const line = offsetPolyline(sub.pts, sub.closed, centre, o.wobble ?? undefined)
-  const m = ctx.getTransform()
-  const sx = Math.hypot(m.a, m.b) || 1                      // device px per ctx unit
   const pts = resamplePolyline(line, sub.closed, Math.max(2 / sx, o.width / 24))
   const h = o.width / 2
   const frame = followFrame(pts, sub.closed, h)
-  if (!frame) return false
+  if (!frame) return null
   const plan = followStripPlan(o.paint, o.paintBox, frame.length, sub.closed)
-  if (!plan) return false
+  if (!plan) return null
 
   // ── 2. the straight strip ──
   // The mesh OVER-REACHES the band (see `bandTriangles` / `FOLLOW_MAX_REACH`): strip y runs
@@ -4137,7 +4109,7 @@ export function paintFollowedBand(ctx: CanvasRenderingContext2D, o: {
   const k = Math.min(1, FOLLOW_STRIP_MAX_W / Lpx, Math.sqrt(FOLLOW_STRIP_MAX_AREA / Math.max(1, Lpx * Hpx)))
   // Under a device pixel long there is nothing to bend — and `px` below would blow the strip's
   // height up to reach its two-pixel minimum length.
-  if (typeof document === 'undefined' || !(Lpx >= 1)) return false
+  if (!(Lpx >= 1)) return null
   // The line's length is a WHOLE, even number of strip px (even: the mirror splits it in half),
   // and `px` is nudged to match, so every fill below starts and ends on a pixel edge. A fill
   // ending mid-pixel leaves a half-inked column, and at the mirror line or the loop's seam that
@@ -4149,7 +4121,7 @@ export function paintFollowedBand(ctx: CanvasRenderingContext2D, o: {
   strip.width = main + 2 * wrap
   strip.height = Math.max(1, Math.ceil(Hpx / sx * px))
   const sc = strip.getContext('2d')
-  if (!sc) return false
+  if (!sc) return null
   sc.setTransform(px, 0, 0, px, wrap, ext * px)   // strip unit (0, −ext) lands on pixel (wrap, 0)
   const L = frame.length, W = o.width
   if (plan.kind === 'fade') {
@@ -4188,9 +4160,6 @@ export function paintFollowedBand(ctx: CanvasRenderingContext2D, o: {
   }
 
   // ── 3. bend it ──
-  const bent = scratchLike(ctx)
-  const maskS = scratchLike(ctx)
-  if (!bent || !maskS) return false
   const grow = 0.6 / sx
   for (const t of bandTriangles(frame, h)) {
     const aff = triangleAffine(t.src[0], t.src[1], t.src[2], t.dst[0], t.dst[1], t.dst[2])
@@ -4212,6 +4181,76 @@ export function paintFollowedBand(ctx: CanvasRenderingContext2D, o: {
     bent.restore()
   }
 
+  return frame
+}
+
+/**
+ * A band whose paint FOLLOWS THE LINE. Returns `false` when it painted nothing (no outline,
+ * no scratch, a paint with nothing to bend) so the caller paints the ordinary band instead —
+ * a follow the geometry cannot express must not cost the stroke its ink.
+ *
+ * 1. The band's centreline is the SAME line `paintWobbledBand` strokes (same `centre` offset,
+ *    same wobble), resampled evenly and given smoothed normals (`followFrame`) — for EVERY
+ *    subpath (`bendFollowedLine`, each with its own strip), or the longest alone when asked.
+ * 2. The paint is drawn into a straight strip, `length × width` in this ctx's units, rastered
+ *    at device resolution (`followStripPlan` says how).
+ * 3. The strip is bent onto a scratch, two triangles per centreline segment, each clipped
+ *    (grown 0.6 device px so neighbours overlap instead of leaving hairline seams) and drawn
+ *    under the affine map from strip to band.
+ * 4. The band itself — painted by `mask`, i.e. the ordinary band painter in solid ink — is
+ *    applied with `destination-in`, so distance, alignment, dash and wobble cut the result
+ *    exactly as they cut a plain band. On its OWN scratch: `strokeAligned`'s inside arm draws
+ *    under a clip, and a `destination-in` confined to a clip would leave the bent paint
+ *    outside it untouched.
+ * 5. Ombre: the bent strip is a FADE map (black = A, white = B); every device pixel becomes A
+ *    or B through `ombreHash`, the same hash the flat ombre tile uses, so the grain stays crisp
+ *    however far the strip was bent. Hashed in layer-local coordinates, so the dots ride the
+ *    layer when it moves.
+ */
+export function paintFollowedBand(ctx: CanvasRenderingContext2D, o: {
+  pathData: string
+  tolerance?: number
+  width: number
+  distance?: number
+  align?: StrokeAlign
+  wobble?: WobbleSpec | null
+  paint: Paint
+  paintBox: { w: number; h: number }
+  fade: 'across' | 'along'
+  fadeRepeats: number
+  /** Paint the band in solid ink on `c` — the ordinary band painter with `style: () => ink`. */
+  mask: (c: CanvasRenderingContext2D) => void
+  /** Which rings to bend. 'all' (default): every subpath, as the straight band's mask covers
+   *  them all. 'longest': the one ring a wobbled band draws. */
+  subpaths?: 'all' | 'longest'
+}): boolean {
+  if (!(o.width > 0) || !paintCanFollow(o.paint)) return false
+  const d = typeof o.distance === 'number' && Number.isFinite(o.distance) ? o.distance : 0
+  const align = strokeAlignOf(o.align)
+  const centre = align === 'outside' ? d + o.width / 2 : align === 'inside' ? d - o.width / 2 : d
+  if (typeof document === 'undefined') return false
+  const m = ctx.getTransform()
+  const sx = Math.hypot(m.a, m.b) || 1                      // device px per ctx unit
+  const tol = o.tolerance ? { tolerance: o.tolerance } : undefined
+  // EVERY subpath is bent: the straight band's mask covers every ring of a compound path (a
+  // shape with a hole, several contours), so bending only one would let `destination-in` wipe
+  // the rest. The wobble route asks for the longest alone, the one ring `paintWobbledBand` —
+  // its mask — draws.
+  const subs = o.subpaths === 'longest'
+    ? [longestSubpath(o.pathData, tol)].filter((x): x is FlatSubpath => !!x)
+    : flattenPath(o.pathData, tol)
+  if (!subs.length) return false
+  const bent = scratchLike(ctx)
+  const maskS = scratchLike(ctx)
+  if (!bent || !maskS) return false
+  const frames: FollowFrame[] = []
+  for (const sub of subs) {
+    const f = bendFollowedLine(bent, sub, o, centre, sx)
+    if (f) frames.push(f)
+  }
+  if (!frames.length) return false
+  const h = o.width / 2
+
   // ── 4. cut it to the band ──
   o.mask(maskS)
   bent.save()
@@ -4221,10 +4260,10 @@ export function paintFollowedBand(ctx: CanvasRenderingContext2D, o: {
   bent.restore()
 
   // ── 5. ombre grain ──
-  if (plan.kind === 'fade' && isFill(o.paint)) {
-    // Only the band's device-space bounds, not the whole canvas.
+  if (isFill(o.paint) && o.paint.type === 'ombre') {
+    // Only the bands' device-space bounds (every bent ring's), not the whole canvas.
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-    for (const p of frame.pts) {
+    for (const frame of frames) for (const p of frame.pts) {
       const X = m.a * p.x + m.c * p.y + m.e, Y = m.b * p.x + m.d * p.y + m.f
       if (X < minX) minX = X; if (X > maxX) maxX = X; if (Y < minY) minY = Y; if (Y > maxY) maxY = Y
     }
@@ -4235,10 +4274,15 @@ export function paintFollowedBand(ctx: CanvasRenderingContext2D, o: {
     if (bw > 0 && bh > 0) {
       const img = bent.getImageData(bx, by, bw, bh), dd = img.data
       const A = hexBytes(o.paint.a), B = hexBytes(o.paint.b)
+      // The grain is hashed in LAYER-LOCAL coordinates at device density — each device pixel's
+      // centre mapped back through the ctx transform — so a layer that moves or turns carries
+      // its dots with it instead of sliding its fade under a grain fixed to the screen.
+      const iv = m.inverse()
       for (let i = 0; i < dd.length; i += 4) {
         if (!dd[i + 3]) continue
-        const q = i / 4, x = bx + (q % bw), y = by + Math.floor(q / bw)
-        const C = ombreHash(x, y) < dd[i]! / 255 ? B : A
+        const q = i / 4, X = bx + (q % bw) + 0.5, Y = by + Math.floor(q / bw) + 0.5
+        const lx = iv.a * X + iv.c * Y + iv.e, ly = iv.b * X + iv.d * Y + iv.f
+        const C = ombreHash(Math.floor(lx * sx), Math.floor(ly * sx)) < dd[i]! / 255 ? B : A
         dd[i] = C[0]; dd[i + 1] = C[1]; dd[i + 2] = C[2]
       }
       bent.putImageData(img, bx, by)
@@ -4365,6 +4409,7 @@ function paintStrokeStack(
           paintBox,
           fade: strokeFadeOf(st),
           fadeRepeats: strokeFadeRepeatsOf(st),
+          subpaths: 'longest',
           mask: (c) => paintWobbledBand(c, {
             pathData: outline, width: st.width * o.widthScale, distance: (st.distance ?? 0) * o.widthScale,
             wobble, align: st.align, join: 'round', dash: strokeDashSegments(st.dash, o.widthScale),

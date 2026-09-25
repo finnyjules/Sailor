@@ -154,3 +154,69 @@ test('a followed stroke on a RECT, a STAR and a WOBBLED band inks its whole band
     expect(follow / still, `${name}: followed ${follow} vs still ${still}`).toBeLessThan(1.15)
   }
 })
+
+test('a COMPOUND path bends every ring: the inner ring of a square-with-a-hole keeps its band', async ({ page }) => {
+  // Two closed subpaths (outer square ±0.2, inner square ±0.1, evenodd). The band mask covers
+  // BOTH rings, so a followed fill bent along only the longest one would leave the inner band
+  // empty. Counted in the inner ring's own region: Chebyshev distance from the centre within
+  // 0.1 ± 0.03 of the canvas width.
+  const red = { type: 'stripes', a: '#ff0000', b: '#e00000', textColor: '#fff', angle: 0, density: 8 }
+  const layer = (s: Record<string, unknown>) => [{
+    id: 'p', kind: 'path', x: 0.5, y: 0.5, rotation: 0, opacity: 1, visible: true, scale: 1,
+    d: 'M -0.2 -0.2 L 0.2 -0.2 L 0.2 0.2 L -0.2 0.2 Z M -0.1 -0.1 L 0.1 -0.1 L 0.1 0.1 L -0.1 0.1 Z',
+    bbox: { w: 0.4, h: 0.4 }, fill: 'none', fillRule: 'evenodd',
+    strokes: [{ id: 's1', width: 0.02, distance: 0, align: 'center', join: 'round', paint: red, ...s }],
+  }]
+  const count = async (layers: unknown[]) => {
+    await render(page, layers)
+    return page.evaluate(() => {
+      const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+      const d = cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data
+      const cx = cv.width / 2, cy = cv.height / 2
+      let inner = 0, outer = 0
+      for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) {
+        const i = (y * cv.width + x) * 4
+        if (!(d[i]! > 150 && d[i + 1]! < 90 && d[i + 3]! > 200)) continue
+        const r = Math.max(Math.abs(x + 0.5 - cx), Math.abs(y + 0.5 - cy)) / cv.width
+        if (Math.abs(r - 0.1) < 0.03) inner++
+        else if (Math.abs(r - 0.2) < 0.03) outer++
+      }
+      return { inner, outer }
+    })
+  }
+  const still = await count(layer({}))
+  const follow = await count(layer({ follow: true }))
+  expect(still.inner, 'control inks the inner ring').toBeGreaterThan(500)
+  expect(follow.inner / still.inner, `inner ring: followed ${follow.inner} vs still ${still.inner}`).toBeGreaterThan(0.85)
+  expect(follow.outer / still.outer, `outer ring: followed ${follow.outer} vs still ${still.outer}`).toBeGreaterThan(0.85)
+})
+
+test('followed ombre grain rides the layer: moved by whole pixels, the dots move with it', async ({ page }) => {
+  // Hashed in layer-local coordinates, a shift of 7 device px moves every dot 7 px. Hashed on
+  // the screen, the dots would stay put while the fade slid under them: in the grainy middle of
+  // the band barely more than half the pixels would still match.
+  const w = await page.evaluate(() => (document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement).width)
+  const dx = 7 / w
+  const ombreRing = (x: number) => [{ ...ring({ paint: OMBRE, follow: true })[0], x }]
+  const px = async (x: number) => {
+    await render(page, ombreRing(x))
+    return page.evaluate(() => {
+      const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+      return Array.from(cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data)
+    })
+  }
+  const a = await px(0.5)
+  const b = await px(0.5 + dx)
+  const h = a.length / 4 / w
+  let same = 0, n = 0
+  for (let y = 0; y < h; y++) for (let x = 0; x < w - 7; x++) {
+    const r = Math.hypot(x + 0.5 - w / 2, y + 0.5 - h / 2) / w
+    if (Math.abs(r - 0.2) > 0.01) continue          // the grainy middle of the band
+    const i = (y * w + x) * 4, j = (y * w + x + 7) * 4
+    if (a[i + 3]! < 250 || b[j + 3]! < 250) continue
+    n++
+    if (Math.abs(a[i]! - b[j]!) < 40) same++
+  }
+  expect(n).toBeGreaterThan(2000)
+  expect(same / n, `dots that moved with the layer: ${same}/${n}`).toBeGreaterThan(0.97)
+})
