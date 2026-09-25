@@ -12,6 +12,7 @@
 import { creditsForUsd } from '../../shared/pricing/markup'
 import { MODEL_PRICED_NODE_CLASSES, REMOTE_VIDEO_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, SHARED_PRICED_CLASS_SET, priceNode } from '../../shared/pricing/nodePrice'
 import { VIDEO_RATES } from '../../shared/pricing/videoRates'
+import type { InputSeconds } from '../../shared/pricing/clipSettings'
 export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, REMOTE_VIDEO_NODE_CLASSES }
 // lineup-p2 (model line-up Task P2): video priced per second of the clip
 // actually sent (shared/pricing/videoRates.ts), replacing one flat figure per model.
@@ -32,7 +33,11 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // request it sends (a per-request price now wins over a flat MODEL_COSTS row);
 // the older Veo 3 / Kling 2.1 / Seedance 2.0 nodes priced per second of what
 // they send; lip-sync at the longest clip it can make (shared/pricing/clipRates.ts).
-export const PRICE_BOOK_VERSION = 'lineup-p5'
+// lineup-p5b (P5 fix round 1): lip-sync billed by the measured clip (the
+// gate reads the sound file; Kling lip-sync its source video), the 60 s cap
+// only when it can't; sync.so "silence" mode refused; the input-picture cap
+// raised to 12288 × 1536, the widest Nano Banana 4K picture.
+export const PRICE_BOOK_VERSION = 'lineup-p5b'
 
 export const BASE_RENDER_CREDITS = 1
 
@@ -57,7 +62,7 @@ export const BASE_RENDER_CREDITS = 1
 export const LORA_SLUG_OWNERS = ['finnyjules']
 
 export const LORA_RENDER_CREDITS = 8      // ~$0.04 observed median — 2× markup
-export const RESTYLE_LORA_CREDITS = 18    // RETIRED from the graph table at lineup-p4c: RestyleWithLoRANode is priced by its calls now
+// (RESTYLE_LORA_CREDITS, 18, is gone: RestyleWithLoRANode is priced by its calls since lineup-p4c.)
 
 // Terminal output nodes that mean "the GPU produced a deliverable" → base
 // render. Exported (Stage 6 Task 7) so the hosted forward path injects a
@@ -306,9 +311,9 @@ function isProviderClass(ct: string): boolean {
  * calculation (the same one the node badge and the run estimate read), given
  * the node's WHOLE input map.
  */
-function graphNodeModelCredits(ct: string, inputs: unknown, inputPixels: number | undefined): number {
+function graphNodeModelCredits(ct: string, inputs: unknown, inputPixels: number | undefined, inputSeconds: InputSeconds | undefined): number {
   const map = inputs && typeof inputs === 'object' ? inputs as Record<string, unknown> : {}
-  const price = priceNode(ct, map, { inputPixels })
+  const price = priceNode(ct, map, { inputPixels, inputSeconds })
   if ('refused' in price) throw new UnpricedGraphError(ct, price.refused)
   return price.credits
 }
@@ -324,8 +329,12 @@ export interface GraphPrice {
  * size-priced node (Upscale, Enhance detail, FLUX.2 edit) is sent, where the
  * caller could read it (graphInputPixels.ts on the hosted gate, the runner
  * before it submits). A node with no entry is priced at the input cap.
+ *
+ * `opts.inputSeconds`: node id → the measured length of a lip-sync node's
+ * sound clip (and Kling lip-sync's source video) — graphInputSeconds.ts on
+ * the hosted gate. A node with no entry is priced at the 60 s cap.
  */
-export function priceGraph(prompt: Record<string, { class_type: string; inputs?: unknown }>, opts: { inputPixels?: Record<string, number> } = {}): GraphPrice {
+export function priceGraph(prompt: Record<string, { class_type: string; inputs?: unknown }>, opts: { inputPixels?: Record<string, number>, inputSeconds?: Record<string, InputSeconds> } = {}): GraphPrice {
   const breakdown: { action: string; credits: number }[] = []
   let hasOutput = false
 
@@ -338,7 +347,8 @@ export function priceGraph(prompt: Record<string, { class_type: string; inputs?:
     if (SHARED_PRICED_CLASS_SET.has(ct)) {
       const inputs = prompt[id]?.inputs
       const px = opts.inputPixels && Object.prototype.hasOwnProperty.call(opts.inputPixels, id) ? opts.inputPixels[id] : undefined
-      const credits = graphNodeModelCredits(ct, inputs, px)
+      const secs = opts.inputSeconds && Object.prototype.hasOwnProperty.call(opts.inputSeconds, id) ? opts.inputSeconds[id] : undefined
+      const credits = graphNodeModelCredits(ct, inputs, px, secs)
       const model = (inputs as { model?: unknown } | undefined)?.model
       // A class with no model widget (Develop, Relight…) is named alone, as its flat row was.
       breakdown.push({ action: model === undefined ? ct : `${ct}:${String(model)}`, credits })

@@ -28,6 +28,7 @@ import { BASE_RENDER_CREDITS } from '~/lib/nodeCreditEstimate'
 import { creditsForUsd } from '~/lib/pricing'
 import { priceNode } from '#shared/pricing/nodePrice'
 import { sizePricedInput, sourceOutputPixels } from '#shared/pricing/editSettings'
+import { secondsPricedMedia, sourceAudioSeconds, type InputSeconds } from '#shared/pricing/clipSettings'
 
 export interface BadgeCost { usd: number; approximate: boolean }
 
@@ -60,6 +61,8 @@ export interface EstimateInputNode {
   linkedInputs?: string[] | null
   /** Size-priced nodes: the picture size the canvas can see upstream (upstreamInputPixels), else absent (the cap). */
   inputPixels?: number | null
+  /** Lip-sync nodes: the media lengths the canvas knows (upstreamInputSeconds), else absent (the 60 s cap). */
+  inputSeconds?: InputSeconds | null
 }
 export interface CostBreakdownItem { id: string; label: string; usd: number; credits?: boolean }
 export interface CostEstimate {
@@ -168,7 +171,7 @@ export function estimateUsdForNodes(
     // Hosted: a model-priced picker is charged by the server whatever its
     // billing class, so price it even if the badge/category filter misses it.
     // Priced from the WHOLE widget map, the same way the server charges it.
-    const shared = hosted ? priceNode(n.type, widgetValueMap(n.widgetDefs, n.widgetsValues, n.linkedInputs), { inputPixels: n.inputPixels }) : null
+    const shared = hosted ? priceNode(n.type, widgetValueMap(n.widgetDefs, n.widgetsValues, n.linkedInputs), { inputPixels: n.inputPixels, inputSeconds: n.inputSeconds }) : null
     const modelPrice = shared && !('refused' in shared) ? shared : null
     if (modelPrice == null && !isReplicateBilled(n) && !creditBilled) continue
     // The selected model's real price beats the static badge when we have it.
@@ -209,6 +212,7 @@ export function vueNodesToEstimateInput(nodes: any[], edges?: any[] | null): Est
       widgetsValues: n?.data?.widgetsValues ?? null,
       linkedInputs: linkedInputNames(String(n.id), n?.data?.inputs, edges),
       inputPixels: upstreamInputPixels(n, nodes, edges),
+      inputSeconds: upstreamInputSeconds(n, nodes, edges)?.seconds ?? null,
     }))
 }
 
@@ -231,4 +235,61 @@ export function upstreamInputPixels(node: any, nodes?: readonly any[] | null, ed
   if (!src?.data) return null
   const srcInputs = widgetValueMap(src.data.widgetDefs, src.data.widgetsValues, linkedInputNames(String(src.id), src.data.inputs, edges))
   return sourceOutputPixels(String(src.data.nodeType || ''), srcInputs)
+}
+
+/**
+ * The media lengths a lip-sync canvas node's price depends on, as far as the
+ * canvas knows them (P5 fix round 1), and whether the price is still a ceiling:
+ *  - the sound wired from an Audio card: the length the card read from its own
+ *    file (`data.audioSeconds`, recorded by ArtifactAudioNode for that file),
+ *    or its source followed on; an empty card is 1 s of silence;
+ *  - from MusicGen / Generate music: its duration widget (sourceAudioSeconds —
+ *    the hosted gate reads the same);
+ *  - anything else (a loaded file the canvas hasn't read, text to speech, the
+ *    Lip-Sync Studio's `/view` links): not known.
+ * `upTo` is true when an unknown length changes the price — the badge then
+ * shows the 60 s figure as "up to", never below the charge. Null for a class
+ * with no such media.
+ */
+export function upstreamInputSeconds(node: any, nodes?: readonly any[] | null, edges?: readonly any[] | null): { seconds: InputSeconds, upTo: boolean } | null {
+  const data = node?.data
+  if (!data) return null
+  const ct = String(data.nodeType || '')
+  const own = widgetValueMap(data.widgetDefs, data.widgetsValues, linkedInputNames(String(node.id), data.inputs, edges ?? []))
+  const media = secondsPricedMedia(ct, own)
+  if (!media) return null
+  const seconds: InputSeconds = {}
+  if (media.audio && 'link' in media.audio) {
+    const audio = upstreamAudioSeconds(node, 'audio', nodes, edges)
+    if (audio != null) seconds.audio = audio
+  }
+  // Would a short clip lower the price? Then an unknown length is in it.
+  const at = (s: InputSeconds) => { const p = priceNode(ct, own, { inputSeconds: s }); return 'refused' in p ? null : p.credits }
+  const known = at(seconds)
+  const shortest = at({ audio: seconds.audio ?? 1, video: seconds.video ?? 1 })
+  return { seconds, upTo: known != null && shortest != null && shortest < known }
+}
+
+/** Seconds of the sound on `node`'s input `port`, followed through Audio cards; null when not known. */
+function upstreamAudioSeconds(node: any, port: string, nodes?: readonly any[] | null, edges?: readonly any[] | null): number | null {
+  let cur = node
+  let name = port
+  for (let hop = 0; hop < 8 && cur?.data && nodes && edges; hop++) {
+    const idx = (cur.data.inputs || []).findIndex((i: any) => i?.name === name)
+    if (idx < 0) return null
+    const edge = edges.find((e: any) => String(e?.target) === String(cur.id) && e?.targetHandle === `input-${idx}`)
+    const src = edge ? nodes.find((m: any) => String(m?.id) === String(edge.source)) : null
+    if (!src?.data) return null
+    const sct = String(src.data.nodeType || '')
+    const si = widgetValueMap(src.data.widgetDefs, src.data.widgetsValues, linkedInputNames(String(src.id), src.data.inputs, edges))
+    if (sct === 'Audio') {
+      if (Array.isArray(si.source)) { cur = src; name = 'source'; continue }
+      const file = typeof si.audio === 'string' ? si.audio : ''
+      if (!file) return 1
+      const meta = src.data.audioSeconds
+      return meta && meta.file === file && Number.isFinite(meta.seconds) && meta.seconds > 0 ? meta.seconds : null
+    }
+    return sourceAudioSeconds(sct, si)
+  }
+  return null
 }

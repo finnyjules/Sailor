@@ -82,7 +82,13 @@ function fmtDuration(s: number): string | null {
 const meta = ref<string | null>(null)
 watch(audioUrl, () => { meta.value = null })
 function onAudioMeta(e: Event) {
-  meta.value = fmtDuration((e.target as HTMLAudioElement).duration)
+  const seconds = (e.target as HTMLAudioElement).duration
+  meta.value = fmtDuration(seconds)
+  // The file's length, keyed to the file, for a downstream lip-sync price
+  // (costEstimate.ts upstreamInputSeconds). Only when the card plays its own file.
+  if (!hasUpstream.value && widgetFilename.value && Number.isFinite(seconds) && seconds > 0) {
+    (props.data as any).audioSeconds = { file: widgetFilename.value, seconds }
+  }
 }
 
 const filenameLabel = computed<string | null>(() => {

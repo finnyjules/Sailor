@@ -23,7 +23,8 @@
  *
  * The older one-model video nodes (Veo 3, Kling 2.1, Seedance 2.0) and the
  * lip-sync nodes are their endpoint's per-second rate × the seconds they send
- * (clipRates.ts × clipSettings.ts); lip-sync at the longest clip it can make.
+ * (clipRates.ts × clipSettings.ts); lip-sync by the measured clip
+ * (`opts.inputSeconds`), else the 60 s cap.
  *
  * Images (GenerateImageNode) are the first service's rate for the size,
  * quality and picture count the request carries (imageRates.ts ×
@@ -57,7 +58,7 @@ import { SETTING_PRICED_NODE_CLASSES, editCalls, editSteps } from './editSetting
 import { imageMaxUsd, imageRate, imageUsd } from './imageRates'
 import { LARGEST_RATIO, effectiveImageSettings } from './imageSettings'
 import { videoMaxUsd, videoRate, videoUsd } from './videoRates'
-import { REMOTE_VIDEO_NODE_CLASSES, remoteVideoNodeUsd } from './clipSettings'
+import { REMOTE_VIDEO_NODE_CLASSES, remoteVideoNodeUsd, type InputSeconds } from './clipSettings'
 import { effectiveVideoSettings, maxVideoSeconds } from './videoSettings'
 
 export type NodeInputs = Record<string, unknown>
@@ -160,6 +161,12 @@ function editNodeUsd(classType: string, inputs: NodeInputs, opts: PriceOptions):
 export interface PriceOptions {
   /** Pixels of the picture a size-priced node is sent (see editSettings.ts sizePricedInput). */
   inputPixels?: number | null
+  /**
+   * Seconds of a lip-sync node's sound clip (and Kling lip-sync's source
+   * video), where the caller measured them (clipSettings.ts InputSeconds);
+   * unmeasured, the 60 s cap.
+   */
+  inputSeconds?: InputSeconds | null
 }
 
 /**
@@ -188,8 +195,9 @@ export function priceNode(classType: string, inputs: NodeInputs | null | undefin
     return typeof usd === 'number' ? { usd, credits: creditsForUsd(usd) } : usd
   }
   if (REMOTE_VIDEO_CLASS_SET.has(classType)) {
-    const usd = remoteVideoNodeUsd(classType, inputs ?? {})
-    return usd == null ? { refused: `${classType} has a call with no listed price` } : { usd, credits: creditsForUsd(usd) }
+    const usd = remoteVideoNodeUsd(classType, inputs ?? {}, opts.inputSeconds ?? {})
+    if (usd == null) return { refused: `${classType} has a call with no listed price` }
+    return typeof usd === 'number' ? { usd, credits: creditsForUsd(usd) } : usd
   }
   if (!MODEL_PRICED_CLASS_SET.has(classType)) return { refused: 'not a model-priced class' }
   const picked = inputs?.model

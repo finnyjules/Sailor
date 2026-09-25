@@ -15,6 +15,7 @@ import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import StudioRow from '~/components/vue-canvas/studio/StudioRow.vue'
 import { Lock, Shuffle } from 'lucide-vue-next'
+import { comboMenu, modelMenu } from '#shared/runner/modelMenus'
 
 const props = defineProps<{
   widgetDef: {
@@ -38,6 +39,10 @@ const props = defineProps<{
     sailor_widget?: string
     // For sailor_widget === 'gradient_editor': 'duotone' | 'stops'.
     gradient_mode?: string
+    // Options the menu leaves out (hidden or switched-off models), set by
+    // Sailor's model overlay (shared/runner/modelMenus.ts). The node's own
+    // value still shows, labelled "(hidden)".
+    hidden_options?: string[]
   }
   modelValue: any
   nodeType?: string
@@ -72,6 +77,13 @@ const emit = defineEmits<{
 }>()
 
 const isCombo = computed(() => Array.isArray(props.widgetDef.options) || props.widgetDef.type === 'COMBO')
+/** The combo's menu: hidden options left out except the node's own value, and
+ *  the model's own name for a dropdown Sailor decides. */
+const comboView = computed(() => {
+  const menu = props.nodeType ? modelMenu(props.nodeType, props.widgetDef.name) : undefined
+  const labels = menu?.kind === 'dropdown' ? new Map(menu.entries.map(e => [e.value, e.label])) : null
+  return comboMenu(props.widgetDef.options ?? [], props.widgetDef.hidden_options, props.modelValue, labels ? v => labels.get(v) : undefined)
+})
 const isNumber = computed(() => ['INT', 'FLOAT'].includes(props.widgetDef.type))
 const isToggle = computed(() => props.widgetDef.type === 'BOOLEAN')
 const isSeed = computed(() => props.widgetDef.name.toLowerCase().includes('seed'))
@@ -605,7 +617,8 @@ function formatLabel(name: string): string {
       <div class="nodrag nopan nowheel">
         <StudioSelect
           v-if="isCombo"
-          :options="widgetDef.options || []"
+          :options="comboView.options"
+          :option-labels="comboView.labels"
           :label="formatLabel(widgetDef.name)"
           :hint="rowHint"
           :model-value="modelValue"

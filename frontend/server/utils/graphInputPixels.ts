@@ -26,8 +26,33 @@ const MAX_HOPS = 8
 /**
  * At most this many files are read per /prompt; any further size-priced
  * picture is priced at the cap. Each file value is read once (memoised).
+ * The budget is shared with the lip-sync sound and video lengths
+ * (graphInputSeconds.ts): pass one `createGateReads()` to both.
  */
 export const MAX_MEASURED_FILES = 8
+
+/**
+ * One /prompt's file reads: memoised by what is read (`key`, e.g. the kind and
+ * the file value) and at most MAX_MEASURED_FILES of them, whatever the kind.
+ * A read past the budget, or one that throws, is null (priced at the cap).
+ */
+export interface GateReads {
+  measure(key: string, read: () => Promise<number | null>): Promise<number | null>
+}
+
+export function createGateReads(max: number = MAX_MEASURED_FILES): GateReads {
+  const seen = new Map<string, Promise<number | null>>()
+  return {
+    measure(key, read) {
+      const hit = seen.get(key)
+      if (hit) return hit
+      if (seen.size >= max) return Promise.resolve(null)
+      const p = read().catch(() => null)
+      seen.set(key, p)
+      return p
+    },
+  }
+}
 
 /** The raster formats measured, by their first bytes: PNG, JPEG, WebP. Anything else prices at the cap. */
 export function isMeasurableRaster(head: Uint8Array): boolean {
@@ -74,19 +99,13 @@ const inputsOf = (n: { inputs?: unknown } | undefined): Record<string, unknown> 
 export async function graphInputPixels(
   prompt: Prompt,
   readFile: (value: string) => Promise<number | null> = engineFilePixels,
+  reads: GateReads = createGateReads(),
 ): Promise<Record<string, number>> {
   const out: Record<string, number> = {}
   if (!prompt || typeof prompt !== 'object') return out
-  // One read per file value, and at most MAX_MEASURED_FILES reads per prompt.
-  const seen = new Map<string, Promise<number | null>>()
-  const measure = (value: string): Promise<number | null> => {
-    const hit = seen.get(value)
-    if (hit) return hit
-    if (seen.size >= MAX_MEASURED_FILES) return Promise.resolve(null)
-    const p = readFile(value).catch(() => null)
-    seen.set(value, p)
-    return p
-  }
+  // One read per file value, and at most MAX_MEASURED_FILES reads per prompt
+  // (shared with graphInputSeconds when the caller passes the same `reads`).
+  const measure = (value: string): Promise<number | null> => reads.measure(`pixels:${value}`, () => readFile(value))
   for (const [id, node] of Object.entries(prompt)) {
     const ct = node?.class_type
     if (typeof ct !== 'string') continue

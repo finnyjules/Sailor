@@ -21,6 +21,8 @@ import {
 } from '~/data/image-models'
 import { BRAND_COLORS, getBrandIcon } from '~/data/brand-icons'
 import { hostedModeEnabled } from '~/lib/hostedMode'
+import { galleryEntries } from '#shared/runner/modelMenus'
+import { NO_FAMILIES, parseFamilies } from '#shared/runner/families'
 import { imageRateLabel } from '#shared/pricing/imageRates'
 
 // -- Replicate cover image fetch + cache -----------------------------------
@@ -171,22 +173,36 @@ watch(() => props.nodeId, () => loadDraftFor(currentModelId.value))
 
 // -- Filtering + search ------------------------------------------------------
 
+// What this gallery offers (shared/runner/modelMenus.ts): no hidden or
+// discontinued model, no model of a family switched off, and a runner-only
+// model only on a class the runner takes. The node's current model always
+// shows, tagged "Hidden" when it is otherwise left out, and still works.
+const runtimePublic = useRuntimeConfig().public as { runnerEnabled?: boolean, runnerFamilies?: unknown }
+const runnerFamilies = runtimePublic.runnerEnabled ? parseFamilies(runtimePublic.runnerFamilies) : NO_FAMILIES
+const offered = computed(() => galleryEntries(IMAGE_MODELS, {
+  classType: String(node.value?.data?.nodeType ?? 'GenerateImageNode'),
+  families: runnerFamilies,
+  current: currentModelId.value,
+}))
+const offeredModels = computed<ImageModel[]>(() => offered.value.map(e => e.model))
+const hiddenTagged = computed(() => new Set(offered.value.filter(e => e.hiddenTag).map(e => e.model.id)))
+
 const searchQuery = ref('')
 const activeFilterId = ref<string>('all')
 
 const filters = computed(() => {
   const tags = activeTagsInCatalog()
   const counts = new Map<ImageModelTag, number>()
-  for (const m of IMAGE_MODELS) for (const t of m.tags) counts.set(t, (counts.get(t) ?? 0) + 1)
+  for (const m of offeredModels.value) for (const t of m.tags) counts.set(t, (counts.get(t) ?? 0) + 1)
   return [
-    { id: 'all', label: 'All', count: IMAGE_MODELS.length },
-    ...tags.map(t => ({ id: t, label: TAG_LABELS[t], count: counts.get(t) ?? 0 })),
+    { id: 'all', label: 'All', count: offeredModels.value.length },
+    ...tags.filter(t => counts.get(t)).map(t => ({ id: t, label: TAG_LABELS[t], count: counts.get(t) ?? 0 })),
   ]
 })
 
 const visibleItems = computed<ImageModel[]>(() => {
   const q = searchQuery.value.trim().toLowerCase()
-  return IMAGE_MODELS.filter((m) => {
+  return offeredModels.value.filter((m) => {
     if (activeFilterId.value !== 'all' && !m.tags.includes(activeFilterId.value as ImageModelTag)) return false
     if (!q) return true
     return [m.label, m.brand, m.pitch, m.description ?? '', m.replicateSlug, ...m.tags]
@@ -318,7 +334,14 @@ const focusedModel = computed<ImageModel | null>(() =>
       <!-- Body -->
       <div class="px-3 pt-2.5 pb-3 flex flex-col gap-1.5">
         <div class="flex flex-col gap-1 min-w-0">
-          <span class="text-[13px] font-semibold text-white/90 truncate leading-tight">{{ (item as ImageModel).label }}</span>
+          <span class="flex items-center gap-1.5 min-w-0">
+            <span class="text-[13px] font-semibold text-white/90 truncate leading-tight">{{ (item as ImageModel).label }}</span>
+            <span
+              v-if="hiddenTagged.has((item as ImageModel).id)"
+              class="shrink-0 text-[9px] leading-none px-1.5 py-0.5 rounded bg-white/[0.08] text-white/60"
+              data-testid="model-hidden-tag"
+            >Hidden</span>
+          </span>
           <!-- Brand chip: neutral pill with the brand icon as a leading bullet.
                Color icons keep their baked-in gradients; mono icons fall in
                with the muted text tone so the chip reads as one unit. -->

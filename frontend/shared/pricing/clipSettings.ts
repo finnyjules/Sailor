@@ -16,13 +16,15 @@
  *    priceNode (nodePrice.ts) prices it for the charge, the badge and the run
  *    estimate alike.
  *
- * Lip-sync length (ruling on open question 1): the price depends on the sound
- * clip's length, which the ComfyUI path can't see before the run. It charges
- * the longest clip the call can make: 60 s, the audio cap the nodes encode
- * with (`_audio_dict_to_wav_data_url(audio, max_seconds=60)`) and Fabric's
- * longest output, or the service's own shorter limit (Kling lip-sync: a 2–10 s
- * source video). The badge shows the same figure, so it is never below the
- * charge.
+ * Lip-sync length (ruling on open question 1, P5 fix round 1): the price is
+ * the clip's own length, rounded up to whole seconds, where the caller
+ * measured it (`InputSeconds`: the hosted /prompt gate reads the sound file,
+ * and for Kling lip-sync the source video; the badge uses what the canvas
+ * knows). What can't be measured is priced at 60 s, the audio cap the nodes
+ * encode with (`_audio_dict_to_wav_data_url(audio, max_seconds=60)`) and
+ * Fabric's longest output — and 60 s is the most any clip is billed. The badge
+ * says "up to" when it shows that ceiling, so it is never below the charge.
+ * sync.so's "silence" mode (and a linked sync mode) is refused.
  *
  * Fail-safe: a linked setting, or a value the service doesn't list, is priced
  * at its dearest; an unreadable length at the longest the service accepts.
@@ -133,20 +135,96 @@ export const REMOTE_VIDEO_NODE_CLASSES: readonly string[] = [
 ]
 
 /**
- * The longest sound clip a lip-sync node sends: every lip-sync `execute`
+ * The longest sound clip a lip-sync node bills: every lip-sync `execute`
  * encodes a wired clip with `_audio_dict_to_wav_data_url(audio, max_seconds=60)`
  * (nodes_replicate.py LipsyncRemoteNode, LipsyncNode, LipSyncNode), and 60 s
  * is Fabric's longest output ("60s cap matches Fabric's max output length",
- * GenerateVideoNode.execute).
+ * GenerateVideoNode.execute). A clip the caller couldn't measure is priced at it.
  */
 export const LIPSYNC_MAX_SECONDS = 60
 
 /**
- * kwaivgi/kling-lip-sync relips a source video "with a duration of 2-10
- * seconds" (its schema's video_url, read 2026-09-24), and bills seconds of
- * output video: never more than 10.
+ * What the caller measured about a lip-sync node's media before the run, in
+ * seconds (P5 fix round 1): the sound clip (`audio`) and, for the Kling
+ * engine, the source video (`video`). The hosted /prompt gate reads the files
+ * (server/utils/graphInputSeconds.ts); the canvas badge passes what the card
+ * knows. Absent or null = not measured.
  */
-export const KLING_LIPSYNC_MAX_SECONDS = 10
+export interface InputSeconds {
+  audio?: number | null
+  video?: number | null
+}
+
+/**
+ * Seconds billed for a measured clip: whole seconds rounded up (the services
+ * bill by the second), never above the 60 s cap. Not measured: the cap.
+ */
+export function billedSeconds(measured: number | null | undefined): number {
+  if (typeof measured !== 'number' || !Number.isFinite(measured) || !(measured > 0)) return LIPSYNC_MAX_SECONDS
+  return Math.min(Math.ceil(Math.round(measured * 1e6) / 1e6), LIPSYNC_MAX_SECONDS)
+}
+
+/**
+ * sync.so's modes that never bill more than the sound clip: `loop`, `bounce`
+ * and `remap` fit the video to the sound, `cut_off` stops at the shorter one.
+ * `silence` pads the sound to the VIDEO's length — a URL whose length the
+ * price can't see — so it is refused, as is a mode that is linked (unknown
+ * until the run) or one the node doesn't offer.
+ */
+const SYNC_MODES_PRICED = ['loop', 'bounce', 'cut_off', 'remap']
+
+/** Why a sync.so node can't be priced, or null when its sync mode is fine. */
+function syncModeRefusal(v: unknown): string | null {
+  if (linked(v)) return 'the lip-sync mode must be set on the node, not linked: the price depends on it'
+  if (v === undefined || (typeof v === 'string' && SYNC_MODES_PRICED.includes(v))) return null
+  if (v === 'silence') return 'the lip-sync mode "silence" can\'t be priced: it bills the whole source video, whose length is unknown. Choose loop, bounce, cut off or remap'
+  return 'the lip-sync mode is not one Sailor can price. Choose loop, bounce, cut off or remap'
+}
+
+/** The name in a `/view?filename=X&type=input` link (video_models.py parse_view_ref), or null for anything else. */
+export function parseViewRef(src: unknown): string | null {
+  if (typeof src !== 'string' || !src.startsWith('/view?')) return null
+  const q = new URLSearchParams(src.slice('/view?'.length).split('#')[0])
+  if ((q.get('type') ?? '') !== 'input') return null
+  const name = q.get('filename') ?? ''
+  if (!name || name.includes('/') || name.includes('\\') || name.includes('..')) return null
+  return name
+}
+
+/** Where a lip-sync node's media comes from: a link to follow, an input file, or nothing the price can read. */
+export type MediaSource = { link: unknown[] } | { inputFile: string } | null
+
+/**
+ * The media a lip-sync node's price depends on, as its `execute` resolves it:
+ *  - `audio`: a wired `audio` port wins (all three nodes); otherwise
+ *    LipSyncNode's `model_options.audio` — a `/view?…&type=input` link names an
+ *    input file; anything else (an external URL, a data URL) isn't measured;
+ *  - `video`: LipSyncNode's `model_options.face_video`, the same way (the
+ *    Kling engine bills the source video's length).
+ * Null for a class with no such media. A linked `model_options` names nothing.
+ */
+export function secondsPricedMedia(classType: string, inputs: Inputs): { audio: MediaSource, video: MediaSource } | null {
+  if (classType !== 'LipSyncNode' && classType !== 'LipsyncNode' && classType !== 'LipsyncRemoteNode') return null
+  const wired = linked(inputs.audio) ? { link: inputs.audio as unknown[] } : null
+  if (classType !== 'LipSyncNode') return { audio: wired, video: null }
+  const opts = linked(inputs.model_options) ? {} : readModelOptions(inputs.model_options)
+  const file = (v: unknown): MediaSource => { const n = parseViewRef(v); return n ? { inputFile: n } : null }
+  // execute: `audio_url = … if audio is not None else _resolve(audio_src)`.
+  return { audio: wired ?? file(opts.audio), video: file(opts.face_video) }
+}
+
+/**
+ * Seconds of sound an upstream node makes, where its settings say so:
+ * MusicGen / Generate music render their `duration` widget (1–30 s,
+ * MusicGenRemoteNode's IO.Int bounds; a linked or unreadable one prices at
+ * 30). Null for anything else (a file is measured; text to speech is not
+ * known, so it prices at the 60 s cap). The gate and the badge both read this.
+ */
+export function sourceAudioSeconds(classType: string, inputs: Inputs): number | null {
+  if (classType !== 'MusicGenRemoteNode' && classType !== 'GenerateMusicNode') return null
+  const n = linked(inputs.duration) ? null : pyInt(inputs.duration)
+  return n == null ? 30 : Math.min(Math.max(n, 1), 30)
+}
 
 /**
  * Python int(v) for a widget value: a number truncated, integer text as int()
@@ -171,9 +249,10 @@ function sentAsIs(v: unknown): string {
   return typeof v === 'string' ? v : UNLISTED
 }
 
-function lipSyncCalls(inputs: Inputs): ClipCall[] {
-  const fabric = (resolution: string): ClipCall => ({ endpoint: 'veed/fabric-1.0', seconds: LIPSYNC_MAX_SECONDS, resolution, audio: false })
-  const kling: ClipCall = { endpoint: 'kwaivgi/kling-lip-sync', seconds: KLING_LIPSYNC_MAX_SECONDS, resolution: null, audio: false }
+function lipSyncCalls(inputs: Inputs, measured: InputSeconds): ClipCall[] {
+  // Fabric bills the sound clip; Kling lip-sync bills the source video (its output).
+  const fabric = (resolution: string): ClipCall => ({ endpoint: 'veed/fabric-1.0', seconds: billedSeconds(measured.audio), resolution, audio: false })
+  const kling: ClipCall = { endpoint: 'kwaivgi/kling-lip-sync', seconds: billedSeconds(measured.video), resolution: null, audio: false }
   // model_options linked: the engine and resolution can't be read — both engines, Fabric at its dearest.
   if (linked(inputs.model_options)) return [fabric(UNLISTED), kling]
   // LipSyncNode.execute: `opts = json.loads(model_options or "{}")` (non-dict → {}),
@@ -192,7 +271,7 @@ function lipSyncCalls(inputs: Inputs): ClipCall[] {
  * The call(s) a node's widgets can make. More than one when a linked setting
  * leaves the choice open; the price is the dearest.
  */
-export function remoteVideoCalls(classType: string, inputs: Inputs): ClipCall[] | null {
+export function remoteVideoCalls(classType: string, inputs: Inputs, measured: InputSeconds = {}): ClipCall[] | { refused: string } | null {
   switch (classType) {
     // Veo3RemoteNode.execute sends prompt, aspect_ratio, image, negative_prompt
     // and seed — no duration, no generate_audio. google/veo-3's schema defaults:
@@ -212,21 +291,29 @@ export function remoteVideoCalls(classType: string, inputs: Inputs): ClipCall[] 
         resolution: linked(inputs.resolution) ? UNLISTED : sentAsIs(inputs.resolution),
         audio: true,
       }]
-    // Both call sync/lipsync-2-pro with the sound clip capped at 60 s.
+    // Both call sync/lipsync-2-pro with the sound clip capped at 60 s: billed
+    // for the clip, in the sync modes that never run past it.
     case 'LipsyncRemoteNode':
-    case 'LipsyncNode':
-      return [{ endpoint: 'sync/lipsync-2-pro', seconds: LIPSYNC_MAX_SECONDS, resolution: null, audio: false }]
+    case 'LipsyncNode': {
+      const refused = syncModeRefusal(inputs.sync_mode)
+      if (refused) return { refused }
+      return [{ endpoint: 'sync/lipsync-2-pro', seconds: billedSeconds(measured.audio), resolution: null, audio: false }]
+    }
     case 'LipSyncNode':
-      return lipSyncCalls(inputs)
+      return lipSyncCalls(inputs, measured)
     default:
       return null
   }
 }
 
-/** Dollars for a node in REMOTE_VIDEO_NODE_CLASSES as configured (the dearest call it can make), or null. */
-export function remoteVideoNodeUsd(classType: string, inputs: Inputs): number | null {
-  const calls = remoteVideoCalls(classType, inputs)
-  if (!calls) return null
+/**
+ * Dollars for a node in REMOTE_VIDEO_NODE_CLASSES as configured (the dearest
+ * call it can make), the refusal for a setting that can't be priced, or null
+ * for a class not priced here. `measured`: the media lengths the caller read.
+ */
+export function remoteVideoNodeUsd(classType: string, inputs: Inputs, measured: InputSeconds = {}): number | { refused: string } | null {
+  const calls = remoteVideoCalls(classType, inputs, measured)
+  if (!calls || 'refused' in calls) return calls
   let usd = 0
   for (const c of calls) {
     const one = clipUsd(c.endpoint, c)

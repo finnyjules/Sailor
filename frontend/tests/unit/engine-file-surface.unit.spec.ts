@@ -199,7 +199,7 @@ const READ_SURFACE_FILES: Record<string, ReadFileEntry> = {
  * comfy_api_nodes/nodes_replicate.py (_moodboard_ref_data_urls) — outside the
  * walked roots, so that read site is pinned by its own test below.
  */
-const NON_ANNOTATED_READERS = ['LoadImageOutput', 'Timeline', 'GenerateImageNode', 'RestyleFromImageNode']
+const NON_ANNOTATED_READERS = ['LoadImageOutput', 'Timeline', 'GenerateImageNode', 'RestyleFromImageNode', 'LipSyncNode']
 
 describe('coverage guard (A) — every engine file-READ site is accounted for', () => {
   it('the live get_annotated_filepath per-file counts match the annotated subset (drift → fail)', () => {
@@ -247,6 +247,20 @@ describe('coverage guard (A) — every engine file-READ site is accounted for', 
     for (const ct of ['GenerateImageNode', 'RestyleFromImageNode']) {
       expect(src, `${ct} must still parse style_refs`).toMatch(new RegExp(`node_id="${ct}"`))
     }
+  })
+
+  // P5 fix round 1: LipSyncNode's model_options `/view?filename=X&type=input` links are
+  // read from the input folder by name (parse_view_ref → _local_ref_to_data_url /
+  // _lipsync_hosted_media_url), not through get_annotated_filepath.
+  it('the view-ref read site the LipSyncNode entry models still exists (nodes_replicate.py, video_models.py)', () => {
+    const src = readFileSync(join(REPO, 'comfy_api_nodes/nodes_replicate.py'), 'utf8')
+    const vm = readFileSync(join(REPO, 'comfy_api_nodes/video_models.py'), 'utf8')
+    expect(vm).toMatch(/def parse_view_ref\(/)
+    expect(vm).toContain('if q.get("type", [""])[0] != "input":')
+    expect(src).toMatch(/node_id="LipSyncNode"/)
+    expect(src).toContain('video_src = opts.get("face_video")')
+    expect(src).toContain('audio_src = opts.get("audio")')
+    expect(src).toContain('path = os.path.join(folder_paths.get_input_directory(), name)')
   })
 
   it('every GRAPH_FOLDER_READERS class is backed by a documented folder-read site (no orphan map entry)', () => {

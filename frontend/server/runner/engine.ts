@@ -9,6 +9,7 @@
 import { LOCAL_RENDER_TYPES, PROVIDER_TYPES, isRunnerEligible } from '#shared/runner/eligibility'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { NO_VALID_OUTPUTS_MESSAGE, pruneInvalidOutputs, type ComfyNodeError } from '#shared/runner/validate'
+import { blockedModelUses, blockedModelsResponse } from '#shared/runner/blockedModels'
 import {
   GATE_CLASS, dependenciesOf, downstreamNodes, legNodes, upstreamStage,
   type ApiPrompt, type TakeGateState,
@@ -857,6 +858,15 @@ export function createEngine(deps: EngineDeps) {
       }
       if (pruned.dropped.length) nodeErrors ??= pruned.nodeErrors
       prompts.push(pruned.prompt)
+    }
+    // A discontinued model is refused before anything is priced or held,
+    // with the same words as the browser (shared/runner/blockedModels.ts).
+    // Sailor never swaps in another model.
+    for (const p of prompts) {
+      const uses = blockedModelUses(p, { families, runnerTakes: true })
+      if (!uses.length) continue
+      const body = blockedModelsResponse(p, uses, { families })
+      throw refuse(body.error.message, 400, { node_errors: body.node_errors })
     }
     // Fail closed on price, before anything is held: a provider node that
     // prices at 0 (a class the price book misses by name) never runs free.

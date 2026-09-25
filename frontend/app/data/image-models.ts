@@ -14,6 +14,8 @@
  * different node-side aspect-ratio control which we'll add later.
  */
 
+import type { ModelFlags } from '../../shared/runner/families'
+
 export type ImageModelTag =
   | 'flagship'      // best-in-class generalist
   | 'fast'          // optimized for speed
@@ -60,7 +62,7 @@ export interface ImageModelAdvancedField {
   step?: number
 }
 
-export interface ImageModel {
+export interface ImageModel extends ModelFlags {
   id: string                       // dispatch key — matches Python side
   label: string                    // 'Flux 1.1 Pro'
   brand: ImageModelBrand
@@ -1004,6 +1006,13 @@ export const IMAGE_MODELS: ImageModel[] = [
     ],
   },
 ]
+
+/**
+ * The default for a new "Generate an image" node: the first of these that can
+ * run now (not hidden or discontinued; a runner-only one only while its family
+ * is on). Served as the model input's `default` (shared/runner/modelMenus.ts).
+ */
+export const IMAGE_MODEL_PREFERENCE: readonly string[] = ['flux-2-pro']
 
 export const IMAGE_MODELS_BY_ID: Record<string, ImageModel> = Object.fromEntries(
   IMAGE_MODELS.map(m => [m.id, m]),

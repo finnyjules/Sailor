@@ -26,7 +26,7 @@ import { getGeneratorIcon } from '~/data/generator-icons'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 import { creditsForUsd } from '~/lib/pricing'
 import { MODEL_PRICED_BADGE_CLASSES, nodeCreditEstimate } from '~/lib/nodeCreditEstimate'
-import { linkedInputNames, upstreamInputPixels, widgetValueMap } from '~/lib/costEstimate'
+import { linkedInputNames, upstreamInputPixels, upstreamInputSeconds, widgetValueMap } from '~/lib/costEstimate'
 import TakesStrip from '~/components/vue-canvas/TakesStrip.vue'
 import LightTableModal from '~/components/vue-canvas/LightTableModal.vue'
 import { projectTake, discardOthers, type Take } from '~/composables/useTakes'
@@ -150,8 +150,9 @@ const priceLabel = computed(() => {
   // hosted mode quote what the server will actually charge for the node as it
   // is set right now (the one shared calculation server/utils/priceBook uses).
   if (hostedBadges) {
-    const est = nodeCreditEstimate(props.data.nodeType as string, pricedInputs.value, { inputPixels: upstreamInputPixels(props, injectedNodes?.value, injectedEdges?.value) })
-    if (est != null) return `~${est} cr`
+    const secs = upstreamInputSeconds(props, injectedNodes?.value, injectedEdges?.value) // lip-sync: "up to" while a length is unknown
+    const est = nodeCreditEstimate(props.data.nodeType as string, pricedInputs.value, { inputPixels: upstreamInputPixels(props, injectedNodes?.value, injectedEdges?.value), inputSeconds: secs?.seconds })
+    if (est != null) return `${secs?.upTo ? 'up to ' : '~'}${est} cr`
     // Unknown/missing model → fall through to the static estimate below.
   }
   const badge = props.data.priceBadge

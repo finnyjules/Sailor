@@ -15,7 +15,7 @@ import { normalizeEnginePath } from './enginePath'
 import { hostedCanMutate, ownedIds, ownerOf, recordOwner, releaseOwner } from './resourceOwners'
 import { annotatedFilepath, isSafeId, pyBasename, userDir } from '../native/paths'
 import { decodeSegment, dispatchNative, dispatchUpload, nativeEnginePath } from '../native/router'
-import { INPUT_FOLDER_INPUTS, findSpec, matchObjectInfoRoute, objectInfoBody, setComboOptions, storedObjectInfoBody } from '../native/objectInfo'
+import { INPUT_FOLDER_INPUTS, findSpec, matchObjectInfoRoute, objectInfoBody, setComboOptions, storedObjectInfoBody, withModelOverlay } from '../native/objectInfo'
 import { ensureBootMigrationsRan, listProjects, projectsRoot } from '../native/projects'
 
 // Review C2's exact mirror of folder_paths.annotated_filepath() lives in
@@ -294,7 +294,8 @@ export async function handleHostedObjectInfo(event: H3Event): Promise<unknown> {
   // alphabetically-first directory entry — this mirrors that ordering scoped
   // to the caller's own files) and for deterministic tests.
   const ownedFilenames = Array.from(owned).sort()
-  return scrubObjectInfo(served.body, ownedFilenames)
+  // Sailor's model menus go on after the scrub, which still applies.
+  return withModelOverlay(scrubObjectInfo(served.body, ownedFilenames) as Record<string, any>)
 }
 
 // ---------------------------------------------------------------------------

@@ -21,8 +21,8 @@ import { __setModerationFetchForTests } from '~~/server/utils/moderation'
 import { GRAPH_NODE_CREDITS, MODEL_COSTS, PROVIDER_NODE_CLASSES, priceGraph } from '~~/server/utils/priceBook'
 import { CLIP_RATES, clipRate, clipUsd } from '#shared/pricing/clipRates'
 import {
-  KLING_LIPSYNC_MAX_SECONDS, LIPSYNC_MAX_SECONDS, REMOTE_VIDEO_NODE_CLASSES, REQUEST_PRICED_ENDPOINTS,
-  remoteVideoCalls, requestPrice, requestSettings,
+  LIPSYNC_MAX_SECONDS, REMOTE_VIDEO_NODE_CLASSES, REQUEST_PRICED_ENDPOINTS,
+  billedSeconds, parseViewRef, remoteVideoCalls, remoteVideoNodeUsd, requestPrice, requestSettings, secondsPricedMedia, sourceAudioSeconds,
 } from '#shared/pricing/clipSettings'
 import { creditsForUsd } from '#shared/pricing/markup'
 import { SHARED_PRICED_CLASS_SET, priceNode } from '#shared/pricing/nodePrice'
@@ -77,7 +77,7 @@ describe('clip rate cards', () => {
     for (const e of REQUEST_PRICED_ENDPOINTS) expect(clipRate(e), e).not.toBeNull()
     const reached = new Set<string>()
     for (const ct of REMOTE_VIDEO_NODE_CLASSES) {
-      for (const inputs of [{}, { engine: 'sync' }, { engine: 'fabric' }]) for (const c of remoteVideoCalls(ct, inputs)!) reached.add(c.endpoint)
+      for (const inputs of [{}, { engine: 'sync' }, { engine: 'fabric' }]) for (const c of remoteVideoCalls(ct, inputs) as any[]) reached.add(c.endpoint)
     }
     for (const e of reached) expect(clipRate(e), e).not.toBeNull()
     expect([...reached].sort()).toEqual(['bytedance/seedance-2.0', 'google/veo-3', 'kwaivgi/kling-lip-sync', 'kwaivgi/kling-v2.1', 'sync/lipsync-2-pro', 'veed/fabric-1.0'])
@@ -346,12 +346,11 @@ describe('older video nodes: priced on what Python sends', () => {
 
 // ── Lip-sync ──────────────────────────────────────────────────────────────
 
-describe('lip-sync: the longest clip the call can make', () => {
+describe('lip-sync: unmeasured, the 60 s cap', () => {
   it('every lip-sync node caps the sound clip at 60 s (the length the price assumes)', () => {
     for (const ct of ['LipsyncRemoteNode', 'LipsyncNode', 'LipSyncNode']) expect(pyClass(ct), ct).toContain('_audio_dict_to_wav_data_url(audio, max_seconds=60)')
     expect(PY).toContain('# 60s cap matches Fabric\'s max output length')
     expect(LIPSYNC_MAX_SECONDS).toBe(60)
-    expect(KLING_LIPSYNC_MAX_SECONDS).toBe(10)
     expect(pyClass('LipsyncRemoteNode')).toContain('"sync/lipsync-2-pro"')
     expect(pyClass('LipsyncNode')).toContain('"sync/lipsync-2-pro"')
     // LipSyncNode's engine choice and the two endpoints.
@@ -368,7 +367,7 @@ describe('lip-sync: the longest clip the call can make', () => {
 
   it('sync.so 2-pro nodes: 60 s × $0.08325', () => {
     for (const ct of ['LipsyncRemoteNode', 'LipsyncNode']) {
-      for (const inputs of [{}, { sync_mode: 'loop', model: 'sync.so 2-pro' }, { audio: LINK }]) {
+      for (const inputs of [{}, { sync_mode: 'loop', model: 'sync.so 2-pro' }, { sync_mode: 'cut_off' }, { sync_mode: 'bounce' }, { sync_mode: 'remap' }, { audio: LINK }]) {
         expect(priceNode(ct, inputs), ct).toEqual({ usd: 4.995, credits: 750 })
       }
     }
@@ -376,14 +375,14 @@ describe('lip-sync: the longest clip the call can make', () => {
 
   const FABRIC_720 = { usd: 9, credits: 1350 }
   const FABRIC_480 = { usd: 4.8, credits: 720 }
-  const KLING = { usd: 0.14, credits: 21 }
+  const KLING = { usd: 0.84, credits: 126 }          // P5 fix round 1: an unmeasured source video is 60 s
   const mo = (o: Record<string, unknown>) => JSON.stringify(o)
   const CASES: Array<[string, Record<string, unknown>, { usd: number, credits: number }]> = [
     ['defaults: auto, 720p, no video → Fabric 720p', {}, FABRIC_720],
     ['auto, 480p → Fabric 480p', { engine: 'auto', resolution: '480p' }, FABRIC_480],
     ['auto, 1080p (not on the schema) → Fabric at the top rate', { resolution: '1080p' }, FABRIC_720],
     ['explicit fabric', { engine: 'fabric', resolution: '480p' }, FABRIC_480],
-    ['explicit sync → Kling lip-sync 10 s', { engine: 'sync' }, KLING],
+    ['explicit sync → Kling lip-sync, 60 s unmeasured', { engine: 'sync' }, KLING],
     ['auto with a face video → sync', { engine: 'auto', model_options: mo({ face_video: 'v.mp4', audio: 'a.mp3' }) }, KLING],
     ['auto with an image AND a video → sync (the video wins)', { model_options: mo({ face_image: 'f.png', face_video: 'v.mp4' }) }, KLING],
     ['auto with an empty face video → fabric', { model_options: mo({ face_video: '' }) }, FABRIC_720],
@@ -456,7 +455,10 @@ describe('loss table: every call is charged at or above what it costs', () => {
       ['Seedance 2.0 10 s 1080p', (priceNode('Seedance2RemoteNode', { duration: '10', resolution: '1080p' }) as any).credits, 10 * 0.45],
       ['Fabric 60 s 720p', (priceNode('LipSyncNode', {}) as any).credits, 60 * 0.15],
       ['sync.so 2-pro 60 s', (priceNode('LipsyncNode', {}) as any).credits, 60 * 0.08325],
-      ['Kling lip-sync 10 s', (priceNode('LipSyncNode', { engine: 'sync' }) as any).credits, 10 * 0.014],
+      ['Kling lip-sync 60 s', (priceNode('LipSyncNode', { engine: 'sync' }) as any).credits, 60 * 0.014],
+      ['Fabric 7.3 s measured (billed 8)', (priceNode('LipSyncNode', {}, { inputSeconds: { audio: 7.3 } }) as any).credits, 8 * 0.15],
+      ['sync.so 59.01 s measured (billed 60)', (priceNode('LipsyncNode', {}, { inputSeconds: { audio: 59.01 } }) as any).credits, 60 * 0.08325],
+      ['Kling lip-sync 2.1 s measured (billed 3)', (priceNode('LipSyncNode', { engine: 'sync' }, { inputSeconds: { video: 2.1 } }) as any).credits, 3 * 0.014],
     ]
     for (const [name, credits, cost] of rows) expect(credits / 100, name).toBeGreaterThanOrEqual(cost)
   })

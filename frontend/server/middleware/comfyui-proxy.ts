@@ -11,7 +11,8 @@ import { normalizeEnginePath, hostedEngineDecision } from '../utils/enginePath'
 import { NITRO_API_PATHS, NITRO_API_PREFIXES } from '../lib/nitroApiPaths'
 import { nativeEngineRoute } from '../native/router'
 import { ENGINE_MAIN_PORT, engineHealth } from '../native/engineHealth'
-import { setResponseStatus } from 'h3'
+import { readRawBody, setResponseStatus } from 'h3'
+import { blockedPromptRefusal } from '../utils/blockedModels'
 
 // Paths under PROXY_PREFIXES that should be handled by Nitro routes, not proxied
 // — the lists live in their own module so the reachability guard can import the
@@ -119,6 +120,20 @@ export default defineEventHandler(async (event) => {
     if (decision.kind === 'proxy') {
       const native = await nativeEngineRoute(event)
       if (native !== undefined) return native
+    }
+  }
+
+  // Local /prompt (any spelling): a discontinued or runner-only model can't
+  // run on ComfyUI, so it is refused here in ComfyUI's own 400 shape
+  // (server/utils/blockedModels.ts). Hosted checks the same in meterGraphSubmit.
+  if (deployMode() !== 'hosted' && hostedEngineDecision(normalizeEnginePath(path), event.method).kind === 'meterPrompt') {
+    let prompt: unknown
+    try { prompt = JSON.parse((await readRawBody(event, 'utf8')) ?? '')?.prompt }
+    catch { prompt = undefined }
+    const blocked = blockedPromptRefusal(prompt)
+    if (blocked) {
+      setResponseStatus(event, 400)
+      return blocked
     }
   }
 

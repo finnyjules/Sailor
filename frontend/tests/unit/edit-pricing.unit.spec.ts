@@ -215,7 +215,9 @@ describe('settings parity: the price reads what each runner builder sends', () =
       const huge = editCalls(ct, { model: 'Flux 2 Pro' }, { inputPixels: 50e6 })
       expect(huge).toEqual({ calls: [{ endpoint: 'fal-ai/flux-2-pro/edit', tier: null, inputPixels: LARGEST_INPUT_PIXELS, outputPixels: 2048 * 2048 }] })
     }
-    expect(LARGEST_INPUT_PIXELS).toBe(4096 * 4096)
+    // P5 fix round 1: the cap is the widest Nano Banana 4K picture, NB_SIZES' largest entry.
+    expect(LARGEST_INPUT_PIXELS).toBe(12288 * 1536)
+    expect(LARGEST_INPUT_PIXELS).toBe(nanoBananaPixels('4K', null))
   })
 
   it('the Nano Banana edits carry the ComfyUI path\'s fallback chain, read from _run_nano_banana_edit', () => {
@@ -329,8 +331,8 @@ const EXAMPLES: [string, Record<string, unknown>, number, number, number?][] = [
   // Nano Banana 2 4K: the fal Nano Banana Pro fallback, covered at cost only ($0.30 → $0.20), beats the $0.16 first call.
   ['EditImageNode', { model: 'Nano Banana 2', resolution: '4K' }, 0.20, 30],
   ['EditImageNode', { model: 'Flux Kontext Pro', resolution: '4K' }, 0.04, 8],
-  // Unmeasured: 16 MP in (4096², in fal's 1024² megapixels) + 4 MP out (2048²) = 20: $0.03 + 19 × $0.015.
-  ['EditImageNode', { model: 'Flux 2 Pro' }, 0.315, 48],
+  // Unmeasured: 18 MP in (the 12288 × 1536 cap, in fal's 1024² megapixels) + 4 MP out (2048²) = 22: $0.03 + 21 × $0.015.
+  ['EditImageNode', { model: 'Flux 2 Pro' }, 0.345, 52],
   // Measured 1024²: 1 + 1 MP.
   ['EditImageNode', { model: 'Flux 2 Pro' }, 0.045, 9, 1024 * 1024],
   // Measured 2048²: 4 + 4 MP.
@@ -340,7 +342,7 @@ const EXAMPLES: [string, Record<string, unknown>, number, number, number?][] = [
   // Develop 4K: same fallback-at-cost step as Edit image's Nano Banana 2 4K.
   ['DevelopImageNode', { resolution: '4K' }, 0.20, 30],
   ['RelightNode', {}, 0.08, 16],
-  ['BlendSceneNode', { model: 'Flux 2 Pro' }, 0.315, 48],
+  ['BlendSceneNode', { model: 'Flux 2 Pro' }, 0.345, 52],
   ['BlendSceneNode', { model: 'Flux 2 Pro' }, 0.045, 9, 1024 * 1024],
   ['BlendSceneNode', { model: 'Flux Kontext Pro' }, 0.04, 8],
   ['BlendSceneNode', { model: 'Nano Banana' }, 0.039, 8],
@@ -364,25 +366,25 @@ const EXAMPLES: [string, Record<string, unknown>, number, number, number?][] = [
   ['RestyleFromImageNode', { model: 'Nano Banana Pro', resolution: '4K' }, 0.30, 45],
   ['RestyleFromImageNode', { model: 'Nano Banana', resolution: '4K' }, 0.039, 8],
   ['RestyleFromImageNode', { model: 'Style Transfer · IP-Adapter' }, 0.05, 10],
-  // Upscale: the input (the 4096² cap unmeasured) × scale² out.
-  ['UpscaleImageNode', { model: 'Clarity' }, 0.85, 128], // 67.1 M px → 68 MP × $0.0125
+  // Upscale: the input (the 12288 × 1536 cap unmeasured) × scale² out.
+  ['UpscaleImageNode', { model: 'Clarity' }, 0.95, 143], // 75.5 M px → 76 MP × $0.0125
   ['UpscaleImageNode', { model: 'Clarity' }, 0.20, 30, MP1], // 4 MP → the $0.20 floor
   ['UpscaleImageNode', { model: 'Clarity', scale_factor: 4 }, 0.20, 30, MP1], // 16 MP
-  ['UpscaleImageNode', { model: 'Crystal', scale_factor: 1 }, 0.20, 30], // 16.8 M px ≤ 17.6 M
-  ['UpscaleImageNode', { model: 'Crystal' }, 1.60, 240], // 67.1 M px ≤ 110 M
+  ['UpscaleImageNode', { model: 'Crystal', scale_factor: 1 }, 0.40, 60], // 18.9 M px ≤ 27.5 M
+  ['UpscaleImageNode', { model: 'Crystal' }, 1.60, 240], // 75.5 M px ≤ 110 M
   ['UpscaleImageNode', { model: 'Crystal' }, 0.05, 10, MP1], // 4 M px ≤ 4.4 M
   ['UpscaleImageNode', { model: 'Crystal', scale_factor: 10 }, 3.20, 480],
   ['UpscaleImageNode', { model: 'Real-ESRGAN', scale_factor: 10 }, 0.002, 1],
   ['UpscaleImageNode', { model: 'Recraft Crisp' }, 0.006, 2],
-  ['UpscaleImageNode', { model: 'Topaz' }, 0.32, 48], // 67.1 MP ≤ 96: 4 units
+  ['UpscaleImageNode', { model: 'Topaz' }, 0.32, 48], // 75.5 MP ≤ 96: 4 units
   ['UpscaleImageNode', { model: 'Topaz' }, 0.08, 16, MP1],
   ['UpscaleImageNode', { model: 'Topaz', topaz_upscale_factor: '4x' }, 0.32, 48, MP1 * 4],
-  // 604 MP: past the table's 512 MP row, 17 units per 512 MP carried on.
-  ['UpscaleImageNode', { model: 'Topaz', topaz_upscale_factor: '6x' }, 1.60432128, 241],
-  ['EnhanceDetailNode', { model: 'Creative' }, 0.2125, 32], // 17 MP × $0.0125
+  // 679 MP: past the table's 512 MP row, 17 units per 512 MP carried on.
+  ['UpscaleImageNode', { model: 'Topaz', topaz_upscale_factor: '6x' }, 1.80486144, 271],
+  ['EnhanceDetailNode', { model: 'Creative' }, 0.2375, 36], // 19 MP × $0.0125
   ['EnhanceDetailNode', { model: 'Creative' }, 0.20, 30, MP1],
   ['EnhanceDetailNode', { model: 'Faithful' }, 0.08, 16],
-  ['EnhanceDetailNode', { model: 'Diffusion Refine' }, 0.527, 80], // 17 MP × $0.031
+  ['EnhanceDetailNode', { model: 'Diffusion Refine' }, 0.589, 89], // 19 MP × $0.031
   ['EnhanceDetailNode', { model: 'Diffusion Refine' }, 0.10, 20, MP1], // the $0.10 floor
 ]
 
@@ -411,15 +413,15 @@ describe('worked examples', () => {
     expect(priceNode('DevelopImageNode', { resolution: LINK })).toEqual({ usd: expect.closeTo(0.20, 8), credits: 30 })
     expect(priceNode('RestyleFromImageNode', { model: 'Nano Banana Pro', resolution: LINK })).toEqual({ usd: 0.30, credits: 45 })
     expect(priceNode('GenerateFromReferencesNode', { model: 'seedream-5-pro', size: LINK })).toEqual({ usd: 0.09, credits: 18 })
-    // Linked model, 1K: the dearest of NB2's chain ($0.08), Kontext ($0.04), FLUX.2 at the cap ($0.315).
-    expect(priceNode('EditImageNode', { model: LINK, resolution: '1K' })).toEqual({ usd: 0.315, credits: 48 })
+    // Linked model, 1K: the dearest of NB2's chain ($0.08), Kontext ($0.04), FLUX.2 at the cap ($0.345).
+    expect(priceNode('EditImageNode', { model: LINK, resolution: '1K' })).toEqual({ usd: 0.345, credits: 52 })
     // …and with the picture measured at 1024², FLUX.2 drops to $0.045 (see the worked example above);
     // NB2's chain is now the dearest at $0.08.
     expect(priceNode('EditImageNode', { model: LINK, resolution: '1K' }, { inputPixels: 1024 * 1024 })).toEqual({ usd: 0.08, credits: 16 })
-    expect(priceNode('EditImageNode', { resolution: '4K' })).toEqual({ usd: 0.315, credits: 48 })
+    expect(priceNode('EditImageNode', { resolution: '4K' })).toEqual({ usd: 0.345, credits: 52 })
     expect(priceNode('RestyleFromImageNode', { model: LINK, resolution: '4K' })).toEqual({ usd: 0.30, credits: 45 })
     expect(priceNode('UpscaleImageNode', { model: 'Crystal', scale_factor: LINK })).toEqual({ usd: 3.20, credits: 480 })
-    expect(priceNode('UpscaleImageNode', { model: 'Topaz', topaz_upscale_factor: LINK })).toEqual({ usd: 1.60432128, credits: 241 })
+    expect(priceNode('UpscaleImageNode', { model: 'Topaz', topaz_upscale_factor: LINK })).toEqual({ usd: 1.80486144, credits: 271 })
   })
 
   it('a model the node does not offer is refused; so is an Upscale with no engine', () => {
@@ -500,7 +502,7 @@ const LOSS_ROWS: [string, string, Record<string, unknown>, number][] = [
   // The ComfyUI path's fallbacks: fal Nano Banana Pro when fal NB2 fails.
   ['Develop 4K on its Nano Banana Pro fallback', 'DevelopImageNode', { resolution: '4K' }, 0.30],
   ['Relight on its Nano Banana Pro fallback', 'RelightNode', {}, 0.15],
-  // The largest picture an unmeasured Upscale can be sent (the 4096² cap) at 2×.
+  // The largest picture an unmeasured Upscale can be sent (the 12288 × 1536 cap) at 2×.
   ['Upscale: Crystal 2× at the cap', 'UpscaleImageNode', { model: 'Crystal' }, 1.60],
   // The legacy engines, priced above cost until they are hidden.
   ['Restyle, plain Nano Banana', 'RestyleFromImageNode', { model: 'Nano Banana' }, 0.039],
@@ -593,7 +595,7 @@ describe('priced on the size of the picture sent in', () => {
     expect(px).toBe(1024 * 1024)
     expect(nodeCredits(node, px)).toBe(9)
     // The stage hold is the cap (an upper bound); the charge is never above it.
-    expect(stageEstimate({ 2: node }, ['2'], false)).toBe(48)
+    expect(stageEstimate({ 2: node }, ['2'], false)).toBe(52)
     // Not size-priced, or unreadable: undefined (the cap).
     expect(await measuredInputPixels({ class_type: 'EditImageNode', inputs: { model: 'Nano Banana 2', input_image: ['1', 0] } }, () => [file], async () => bytes)).toBeUndefined()
     expect(await measuredInputPixels(node, () => [file], async () => { throw new Error('gone') })).toBeUndefined()

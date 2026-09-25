@@ -55,13 +55,14 @@ import { graphToPrompt } from '~/lib/graph/graphToPrompt'
 import { UnknownNodeTypeError } from '~/lib/graph/widgetOrder'
 import { registerRun, markRunning, finishRun, inFlight, perRun, dropRunState, getRun, inFlightCount } from '~/lib/graph/runRegistry'
 import { CostConfirmQueue } from '~/lib/graph/costConfirmQueue'
+import { COST_CONFIRM_EVENT, type CostConfirmRequestDetail } from '~/lib/costConfirmRequest'
 import { resolveCreditDelta, type CreditWatchCandidate } from '~/lib/graph/creditAttribution'
 import { resolveEventTab } from '~/lib/graph/resolveEventTab'
 import { withKeyedLock } from '~/lib/graph/keyedLock'
 import { shouldUseRunner, startRunnerRun, runnerGateAction, stopRunnerRuns, fetchRunnerRecord, runIdOfPrompt, isRunnerDeclined, type LegStarted } from '~/lib/runner/client'
 import { useRunnerEvents, ensureRunnerEvents } from '~/composables/useRunnerEvents'
 import { createRunnerEventBuffer, ownerTabForCanvas, runnerRunIdsForTab } from '~/lib/runner/routing'
-import { nodesNeedingEngine, workflowNodeTitles, needsEngineDescription } from '~/lib/runner/needsEngine'
+import { nodesNeedingEngine, workflowNodeTitles, needsEngineDescription, blockedRunRefusal } from '~/lib/runner/needsEngine'
 import { RUNNER_WORKER, isRunnerPromptId } from '#shared/runner/messages'
 import { parseFamilies } from '#shared/runner/families'
 import { useDirectExecution } from '~/composables/useDirectExecution'
@@ -941,6 +942,18 @@ async function runVueWorkflow(
           console.warn('[Run] the Sailor runner is off on the server or does not take this workflow; running on ComfyUI')
         }
       }
+      // Going to ComfyUI: a discontinued or runner-only model is refused here,
+      // naming the node, before any /prompt (shared/runner/blockedModels.ts).
+      const blocked = sentToRunner ? null : blockedRunRefusal(
+        [firstTake, ...extraTakes].map(tk => ({ prompt: tk.directPrompt, titleOf: workflowNodeTitles(tk.plainWorkflow, objectInfo.value) })),
+        { runnerOn: runnerEnabled, families: runnerFamilies },
+      )
+      if (blocked) {
+        toast.error(blocked.title, { description: blocked.description })
+        if (activeTab.value?.type === 'project') updateTabStatus(activeTab.value.id, 'idle')
+        currentRunSilent.value = false
+        return false
+      }
       if (sentToRunner) {
         // Registered as the POST returned (sendRunnerPost), before its early events were replayed.
       } else if (takeCount > 1) {
@@ -1333,6 +1346,7 @@ onMounted(() => {
   window.addEventListener('sailor:markReady', handleMarkReady)
   window.addEventListener('sailor:stopRun', handleStopRun)
   window.addEventListener('sailor:runnerGateAction', handleRunnerGateAction)
+  window.addEventListener(COST_CONFIRM_EVENT, handleConfirmCost)
   runEstimateTimer = setInterval(updateRunEstimate, 2000)
   // Escape hatch: force-reload the embedded ComfyUI canvas from the console
   // (`__reloadCanvas()`) when its node schema goes stale after a backend change.
@@ -1341,6 +1355,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('sailor:runFiltered', handleRunFiltered)
+  window.removeEventListener(COST_CONFIRM_EVENT, handleConfirmCost)
   window.removeEventListener('sailor:runAll', handleRunAll)
   window.removeEventListener('sailor:openInspector', handleOpenInspector)
   window.removeEventListener('sailor:runTextIterator', handleRunTextIterator)
@@ -2745,6 +2760,11 @@ function confirmRunCost(estimate: CostEstimate, iterations = 1): Promise<boolean
 }
 function resolveCostConfirm(ok: boolean) {
   costConfirmQueue.resolveHead(ok)
+}
+// A spend that isn't a graph run (Frame Animate) asks the same gate: lib/costConfirmRequest.ts.
+function handleConfirmCost(e: Event) {
+  const d = (e as CustomEvent<CostConfirmRequestDetail>).detail
+  d?.answer(d.estimate.usd >= costConfirmThresholdUsd() ? confirmRunCost(d.estimate) : Promise.resolve(true))
 }
 function costConfirmThresholdUsd(): number {
   const raw = useLocalSettings().getLocalSetting('Sailor.Cost.ConfirmThresholdUsd')

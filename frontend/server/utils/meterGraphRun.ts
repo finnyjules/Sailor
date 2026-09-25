@@ -12,7 +12,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { H3Event } from 'h3'
 import { readBody, setResponseStatus } from 'h3'
 import { priceGraph, UnpricedGraphError } from './priceBook'
-import { graphInputPixels } from './graphInputPixels'
+import { createGateReads, graphInputPixels } from './graphInputPixels'
+import { graphInputSeconds } from './graphInputSeconds'
 import { MeterRefusalError } from './requestMeter'
 import { createGraphRun, resolveGraphRun, outputKey, ownedOutputKeys } from './graphRuns'
 import { settleOnCompletion } from './settleWatcher'
@@ -26,6 +27,7 @@ import { GRAPH_FILE_READERS, GRAPH_FOLDER_READERS, GRAPH_OUTPUT_WRITERS, extract
 import { extractGraphPromptText } from './graphPromptText'
 import { moderatePrompt } from './moderation'
 import { assertSpendAllowed } from './systemControls'
+import { blockedPromptRefusal } from './blockedModels'
 
 export function isPromptPath(path: string): boolean {
   return path === '/prompt' || path.startsWith('/prompt?')
@@ -320,6 +322,12 @@ export interface GraphRunDeps {
    */
   measureInputPixels?(prompt: any): Promise<Record<string, number>>
   /**
+   * Node id → the measured length of each lip-sync node's sound clip (and
+   * Kling lip-sync's source video) — graphInputSeconds. Runs after the
+   * file-ownership check. Absent, every lip-sync is priced at the 60 s cap.
+   */
+  measureInputSeconds?(prompt: any): Promise<Record<string, import('../../shared/pricing/clipSettings').InputSeconds>>
+  /**
    * Operator safety valves (Stage 7 final review C1) — the global kill-switch,
    * the per-user disable set, and the daily spend ceiling. Runs FIRST, before
    * file-ref validation / moderation / pricing / hold, so a paused or
@@ -381,13 +389,21 @@ export async function meterGraphSubmit(userId: string | null, body: any, deps: G
     throw new MeterRefusalError('This prompt was blocked by content moderation', 400, { categories: mod.categories })
   }
 
+  // A discontinued or runner-only model can't run on ComfyUI: refused in
+  // ComfyUI's own 400 shape before pricing and any hold (blockedModels.ts).
+  const blocked = blockedPromptRefusal(body.prompt)
+  if (blocked) return { status: 400, body: blocked }
+
   // The size of the pictures a size-priced node is sent, where the gate can
   // read it; the rest price at the input cap (never below what runs).
   const inputPixels = deps.measureInputPixels ? await deps.measureInputPixels(body.prompt).catch(() => ({})) : undefined
+  // The length of each lip-sync node's sound (and Kling's source video), where
+  // it can read it; the rest price at the 60 s cap.
+  const inputSeconds = deps.measureInputSeconds ? await deps.measureInputSeconds(body.prompt).catch(() => ({})) : undefined
 
   let price
   try {
-    price = deps.priceGraph(body.prompt, inputPixels ? { inputPixels } : undefined)
+    price = deps.priceGraph(body.prompt, inputPixels || inputSeconds ? { inputPixels, inputSeconds } : undefined)
   } catch (e) {
     if (e instanceof UnpricedGraphError) throw new MeterRefusalError(e.message, 500)
     throw e
@@ -459,9 +475,12 @@ export async function handleMeteredPrompt(event: H3Event): Promise<any> {
   const target = `http://127.0.0.1:${port}`
   const ledger = getLiveLedger()
 
+  // One read budget for the prompt: pictures and media lengths share it.
+  const reads = createGateReads()
   const result = await meterGraphSubmit(userId, body, {
     priceGraph,
-    measureInputPixels: prompt => graphInputPixels(prompt),
+    measureInputPixels: prompt => graphInputPixels(prompt, undefined, reads),
+    measureInputSeconds: prompt => graphInputSeconds(prompt, undefined, reads),
     // Stage 7 final review C1: the operator kill-switch + daily ceiling. Wired
     // the SAME way moderatePrompt (Task 3) is — the real implementation passed
     // in here, stubbed in the unit tests. Local mode is a no-op inside

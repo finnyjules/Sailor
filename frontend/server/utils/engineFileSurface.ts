@@ -31,6 +31,7 @@
  */
 import { OUTPUT_CLASS_TYPES } from './priceBook'
 import { moodboardFiles } from '../runner/inputs'
+import { parseViewRef } from '../../shared/pricing/clipSettings'
 
 /** How a file input carries its filename(s). */
 export type FileRefSemantics = 'input' | 'output' | 'either'
@@ -43,7 +44,7 @@ export type FileRefSemantics = 'input' | 'output' | 'either'
 export type FileReaderSpec =
   | { input: string, shape: 'string', semantics: FileRefSemantics }
   | { input: string, shape: 'dict', keys: string[], semantics: FileRefSemantics }
-  | { input: string, shape: 'json', jsonPath: 'rendered' | 'timeline-clips' | 'moodboard', semantics: FileRefSemantics }
+  | { input: string, shape: 'json', jsonPath: 'rendered' | 'timeline-clips' | 'moodboard' | 'view-refs', semantics: FileRefSemantics }
 
 /**
  * class_type → the file-carrying inputs the engine reads on execute. Evidence
@@ -119,6 +120,13 @@ export const GRAPH_FILE_READERS: Record<string, FileReaderSpec[]> = {
   // the caller's own upload, the same rule the runner applies (runner/inputs.ts).
   GenerateImageNode: [{ input: 'style_refs', shape: 'json', jsonPath: 'moodboard', semantics: 'input' }],
   RestyleFromImageNode: [{ input: 'style_refs', shape: 'json', jsonPath: 'moodboard', semantics: 'input' }],
+  // comfy_api_nodes/nodes_replicate.py LipSyncNode — `model_options` is the
+  // Lip-Sync Studio's JSON; its face_image / face_video / audio values that are
+  // `/view?filename=X&type=input` links are read from the input folder
+  // (parse_view_ref, then _local_ref_to_data_url or _lipsync_hosted_media_url).
+  // Every named file must be the caller's own. P5 fix round 1: the gate also
+  // measures the sound and video lengths from these files to price the run.
+  LipSyncNode: [{ input: 'model_options', shape: 'json', jsonPath: 'view-refs', semantics: 'input' }],
 }
 
 // ---------------------------------------------------------------------------
@@ -235,6 +243,7 @@ export function extractFileRefs(spec: FileReaderSpec, value: unknown): string[] 
   if (spec.jsonPath === 'moodboard') {
     return moodboardFiles(value).map(f => `${f.subfolder}/${f.filename}`)
   }
+  if (spec.jsonPath === 'view-refs') return lipSyncViewRefs(value)
   let parsed: unknown
   try {
     parsed = JSON.parse(value)
@@ -326,6 +335,25 @@ function collectTimelineClips(parsed: unknown): string[] | null {
         out.push(v)
       }
     }
+  }
+  return out
+}
+
+/**
+ * The input files a LipSyncNode `model_options` JSON makes the engine read:
+ * each of face_image / face_video / audio that is a `/view?…&type=input` link
+ * (parse_view_ref). Not a JSON object: nothing (the node reads `{}`).
+ * Unparseable: null, refused — we cannot vet what we cannot read.
+ */
+function lipSyncViewRefs(value: string): string[] | null {
+  let parsed: unknown
+  try { parsed = JSON.parse(value) }
+  catch { return null }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return []
+  const out: string[] = []
+  for (const k of ['face_image', 'face_video', 'audio']) {
+    const name = parseViewRef((parsed as Record<string, unknown>)[k])
+    if (name) out.push(name)
   }
   return out
 }

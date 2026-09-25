@@ -14,38 +14,51 @@
  * What each call sends (the seconds, resolution and sound) is read in
  * clipSettings.ts. Pure data; relative imports only.
  */
-import { perSecondUsd, type VideoRate } from './videoRates'
+import { VIDEO_RATES, perSecondUsd, type VideoRate } from './videoRates'
 import type { VideoSettings } from './videoSettings'
 
 export type ClipRate = VideoRate & { unit: 'per_second' }
 
 const READ = '2026-09-24'
+
+/**
+ * The per-second figures of a Generate-a-video card (videoRates.ts), for an
+ * Animate endpoint the same service prices the same way — so each rate lives
+ * in one place (P5 fix round 1, review M2). Read once, at load: videoRates.ts
+ * imports nothing from here, so the order is fixed.
+ */
+function sameAsVideo(modelId: string): ClipRate['byResolution'] {
+  const r = VIDEO_RATES[modelId]
+  if (!r || r.unit !== 'per_second') throw new Error(`clipRates: ${modelId} has no per-second video card`)
+  return r.byResolution
+}
 const fal = (endpoint: string) => `https://fal.ai/models/${endpoint}/llms.txt`
 const rep = (slug: string) => `https://replicate.com/${slug}`
 
 export const CLIP_RATES: Record<string, ClipRate> = {
   // ── Frame Animate (server/api/frame/animate.post.ts, fal) ────────────────
-  // "For every second of 720p video you generated, you will be charged
-  // $0.3034/second and for 1080p … $0.682/second"; 480p and 4k by the same
-  // token formula as text-to-video (videoRates.ts 'seedance-2.0'). "The cost of
-  // video generation is the same regardless of whether audio is generated."
+  // The image-to-video pages quote the same figures as the text-to-video cards
+  // in videoRates.ts, so the figures are taken from there:
+  //  - Seedance: "For every second of 720p video … $0.3034/second and for 1080p
+  //    … $0.682/second"; 480p and 4k by the same token formula. "The cost of
+  //    video generation is the same regardless of whether audio is generated."
   'bytedance/seedance-2.0/image-to-video': {
     unit: 'per_second', service: 'fal', source: fal('bytedance/seedance-2.0/image-to-video'), read: READ, confidence: 'verified',
-    byResolution: { '480p': 0.1406, '720p': 0.3034, '1080p': 0.682, '4k': 2.0412 },
-    note: '480p and 4k from the token formula, as on text-to-video',
+    byResolution: sameAsVideo('seedance-2.0'),
+    note: 'figures from videoRates.ts seedance-2.0 (480p and 4k from the token formula)',
   },
-  // "Video costs $0.05 per second at 480p, $0.06 per second at 768p, $0.13 per
-  // second at 2K and $0.16 per second at 4K."
+  //  - H3: "Video costs $0.05 per second at 480p, $0.06 per second at 768p,
+  //    $0.13 per second at 2K and $0.16 per second at 4K."
   'minimax/h3/image-to-video': {
     unit: 'per_second', service: 'fal', source: fal('minimax/h3/image-to-video'), read: READ, confidence: 'verified',
-    byResolution: { '480p': 0.05, '768p': 0.06, '2k': 0.13, '4k': 0.16 },
+    byResolution: sameAsVideo('hailuo-h3'),
   },
-  // Today's $0.025 / $0.04 / $0.08 are a 50%-off launch promotion: "The
-  // discount ends September 30, after which 480p is $0.05/second, 768p is
-  // $0.08/second, and 1080p is $0.16/second." List price, as videoRates.ts.
+  //  - H3 Max: today's $0.025 / $0.04 / $0.08 are a 50%-off launch promotion:
+  //    "The discount ends September 30, after which 480p is $0.05/second, 768p
+  //    is $0.08/second, and 1080p is $0.16/second." List price, as videoRates.ts.
   'minimax/h3-max/image-to-video': {
     unit: 'per_second', service: 'fal', source: fal('minimax/h3-max/image-to-video'), read: READ, confidence: 'verified',
-    byResolution: { '480p': 0.05, '768p': 0.08, '1080p': 0.16 },
+    byResolution: sameAsVideo('hailuo-h3-max'),
     note: 'list price after the launch promotion (ends 2026-09-30)',
   },
   // "For every second of video you generated, you will be charged $0.112

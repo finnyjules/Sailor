@@ -9,6 +9,7 @@ import type { ApiPrompt } from '#shared/runner/graph'
 import { isRunnerEligible, runnerTakesNode } from '#shared/runner/eligibility'
 import { pruneInvalidOutputs } from '#shared/runner/validate'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
+import { blockedModelRefusal, blockedModelUses, blockedModelsResponse, promptNodeTitle } from '#shared/runner/blockedModels'
 
 /** The fallback title for a node with neither a title nor a known display name. */
 export const UNNAMED_NODE = 'Unnamed node'
@@ -78,4 +79,55 @@ export function needsEngineDescription(titles: string[]): string {
     ? (quoted[0] ?? 'this workflow')
     : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`
   return `Only the engine can run ${list}.`
+}
+
+/**
+ * The refusal for a run about to go to ComfyUI (the runner declined or was
+ * skipped) that uses a model ComfyUI can't run: a discontinued one, or a
+ * runner-only one. Null when every take is fine. Names the first such node
+ * by its title. A runner-only model whose switch is on was left out because
+ * other nodes need the engine: the reason names them (needsEngineDescription);
+ * with its switch off, the reason says so.
+ */
+export function blockedRunRefusal(
+  takes: { prompt: ApiPrompt | null | undefined; titleOf: (id: string) => string }[],
+  opts: { runnerOn: boolean; families?: ReadonlySet<RunnerFamily> },
+): { title: string; description: string } | null {
+  const families = opts.runnerOn ? (opts.families ?? NO_FAMILIES) : NO_FAMILIES
+  for (const take of takes) {
+    const prompt = take.prompt
+    if (!prompt) continue
+    const use = blockedModelUses(prompt, { families })[0]
+    if (!use) continue
+    const title = take.titleOf(use.nodeId)
+    const needs = nodesNeedingEngine(prompt, { runnerOn: opts.runnerOn, families, titleOf: take.titleOf }).filter(t => t !== title)
+    return blockedModelRefusal(use, {
+      title,
+      families,
+      ...(needs.length ? { engineReason: needsEngineDescription(needs) } : {}),
+    })
+  }
+  return null
+}
+
+/**
+ * The server's refusal body for a prompt about to be forwarded to ComfyUI
+ * that uses a discontinued or runner-only model (shared/runner/blockedModels.ts
+ * `blockedModelsResponse`: ComfyUI's `{ error, node_errors }`), or null when
+ * none does. The prompt carries no node titles, so nodes are named by their
+ * `_meta.title` or their class's plain name.
+ */
+export function blockedPromptBody(
+  prompt: ApiPrompt | null | undefined,
+  opts: { families?: ReadonlySet<RunnerFamily> } = {},
+): ReturnType<typeof blockedModelsResponse> | null {
+  if (!prompt || typeof prompt !== 'object' || Array.isArray(prompt)) return null
+  const families = opts.families ?? NO_FAMILIES
+  const uses = blockedModelUses(prompt, { families })
+  if (!uses.length) return null
+  const titleOf = (id: string) => promptNodeTitle(prompt, id)
+  const title = titleOf(uses[0]!.nodeId)
+  // Only read when the first model's switch is on (the runner is on): why the runner left it.
+  const needs = families.size ? nodesNeedingEngine(prompt, { runnerOn: true, families, titleOf }).filter(t => t !== title) : []
+  return blockedModelsResponse(prompt, uses, { families, titleOf, ...(needs.length ? { engineReason: needsEngineDescription(needs) } : {}) })
 }

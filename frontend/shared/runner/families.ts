@@ -42,3 +42,19 @@ export function parseFamilies(raw: unknown): ReadonlySet<RunnerFamily> {
   }
   return out
 }
+
+/**
+ * How a model sits in Sailor's menus (the image and video catalogues and the
+ * plain model dropdowns, app/data/edit-model-options.ts). Pure data; the
+ * rules that read it are in ./modelMenus.ts and ./blockedModels.ts.
+ *   hidden        left out of the menus; still runs, prices and remaps
+ *   discontinued  the ISO date its service stopped it: hidden, and a run using it is refused
+ *   runnerOnly    no engine (ComfyUI) builder: runs only in Sailor's runner
+ *   family        the runner switch that turns a runner-only model on
+ */
+export interface ModelFlags {
+  hidden?: true
+  discontinued?: string
+  runnerOnly?: true
+  family?: RunnerFamily
+}

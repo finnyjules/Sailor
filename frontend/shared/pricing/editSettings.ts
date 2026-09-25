@@ -40,13 +40,16 @@ import { effectiveImageSettings } from './imageSettings'
 export type NodeInputs = Record<string, unknown>
 
 /**
- * THE input-size cap, in pixels: the largest picture Sailor makes (Nano
- * Banana 2 at 4K, 4096 × 4096 ≈ 16.8 MP). An input the price can't measure is
- * priced as this large, and a measured one is priced at no more than this
- * (controller ruling, P4 fix round 1). Under the rounding ruling
- * (ceil(pixels / 1e6)) it is 17 MP; 2048² would count as 5.
+ * THE input-size cap, in pixels: the largest picture Sailor makes — the
+ * largest entry in NB_SIZES below, Nano Banana at 4K in 8:1 / 1:8, 12288 ×
+ * 1536 = 18,874,368 (P5 fix round 1; it was 4096², which a wide 4K picture
+ * exceeds). An input the price can't measure is priced as this large, and a
+ * measured one is priced at no more than this (controller ruling, P4 fix
+ * round 1). Under the rounding ruling (ceil(pixels / 1e6)) it is 19 MP. A
+ * literal, not derived, because NB_SIZES is declared further down; a test
+ * pins it to the table's largest entry.
  */
-export const LARGEST_INPUT_PIXELS = 4096 * 4096
+export const LARGEST_INPUT_PIXELS = 12288 * 1536
 
 /**
  * FLUX.2 [pro] never returns more than 2048 × 2048 (the BFL cap P3's image

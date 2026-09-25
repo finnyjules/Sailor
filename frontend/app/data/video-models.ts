@@ -16,6 +16,8 @@
  * (specialty avatars — better as separate "talking head" node later).
  */
 
+import type { ModelFlags } from '../../shared/runner/families'
+
 export type VideoModelMode = 't2v' | 'i2v'
 
 export type VideoModelTag =
@@ -61,7 +63,7 @@ export interface VideoModelAdvancedField {
   step?: number
 }
 
-export interface VideoModel {
+export interface VideoModel extends ModelFlags {
   id: string                       // dispatch key — matches Python side
   label: string                    // 'Veo 3.1'
   brand: VideoModelBrand
@@ -552,6 +554,16 @@ export const VIDEO_MODELS: VideoModel[] = [
     advanced: [],
   },
 ]
+
+/**
+ * The defaults for a new "Generate a video" and "Film a shot" node: the first
+ * of each list that can run now (not hidden or discontinued; a runner-only
+ * one only while its family is on, and never on Film a shot, which the
+ * runner doesn't take). Served as the model input's `default`
+ * (shared/runner/modelMenus.ts).
+ */
+export const VIDEO_MODEL_PREFERENCE: readonly string[] = ['veo-3.1']
+export const FILM_SHOT_MODEL_PREFERENCE: readonly string[] = ['kling-v2.5-turbo-pro']
 
 export const VIDEO_MODELS_BY_ID: Record<string, VideoModel> = Object.fromEntries(
   VIDEO_MODELS.map(m => [m.id, m]),

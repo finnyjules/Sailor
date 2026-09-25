@@ -1,7 +1,7 @@
 /**
  * `/object_info` — the node definitions — served by Sailor itself.
  *
- * While ComfyUI answers (within 3 s) its body is passed through untouched and
+ * While ComfyUI answers (within 3 s) its body is passed through and
  * a copy of the full catalog — file lists blanked — is kept at
  * `<storeDir('data')>/object_info.json`. While it does not (a failure is
  * remembered for 3 s), the saved copy is served — or, before one exists, the
@@ -15,7 +15,8 @@
  *     over `models/*` plus `extra_model_paths.yaml`, with the same extensions,
  *     the legacy folder names, the recursive walk and the sort.
  *
- * Every other byte of the served catalog is left as it was saved.
+ * Every other byte of the served catalog is left as it was saved, except
+ * Sailor's model menus, laid over every body served (`withModelOverlay`).
  */
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
@@ -28,6 +29,8 @@ import { resolveWorkerTarget } from '../utils/workerRoute'
 import { PY_ENCODING_SUFFIXES, PY_MIME_TOP, PY_SUFFIX_MAP } from './pyMimeTypes'
 import { isDir, isFile } from './paths'
 import { ENGINE_MAIN_PORT, engineHealth } from './engineHealth'
+import { applyModelOverlay } from '../../shared/runner/modelMenus'
+import { runnerFamilies } from '../runner/config'
 
 type Catalog = Record<string, any>
 
@@ -866,10 +869,28 @@ export const NO_NODE_DEFINITIONS = {
   body: { error: 'Sailor can\'t load the node list: the engine is not answering and no saved copy was found.' },
 }
 
-/** The local route: the engine's own bytes, else the stored catalog, else 503. */
+/**
+ * Sailor's model menus laid over a body about to be served
+ * (shared/runner/modelMenus.ts): each covered dropdown's options, hidden list
+ * and default, each gallery's default, for the runner families switched on
+ * now. Copy on write: the saved copy and the memoised catalogs stay as they were.
+ */
+export function withModelOverlay(body: Catalog): Catalog {
+  return applyModelOverlay(body, runnerFamilies())
+}
+
+/**
+ * The local route: the engine's catalog (parsed, overlaid, re-serialised),
+ * else the stored catalog (overlaid), else 503. An engine answer JSON.parse
+ * refuses (Python's NaN/Infinity) can't be overlaid and is passed through as
+ * its own bytes, as before.
+ */
 export async function runObjectInfo(rawPath: string, canonicalPath: string, node: string | null): Promise<{ status: number, body: unknown, headers?: Record<string, string> }> {
   const got = await objectInfoBody(rawPath, canonicalPath, node)
   if (!got) return NO_NODE_DEFINITIONS
-  if (got.source === 'engine') return { status: 200, body: got.text, headers: { 'content-type': 'application/json; charset=utf-8' } }
-  return { status: 200, body: got.body }
+  if (got.source === 'engine') {
+    const text = got.body ? JSON.stringify(withModelOverlay(got.body)) : got.text
+    return { status: 200, body: text, headers: { 'content-type': 'application/json; charset=utf-8' } }
+  }
+  return { status: 200, body: withModelOverlay(got.body) }
 }
