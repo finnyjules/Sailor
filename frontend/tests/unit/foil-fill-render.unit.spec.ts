@@ -9,6 +9,7 @@ vi.mock('~/lib/compositor/finishPass', async (importOriginal) => {
 
 import { paintLayerStack, type StackItem, type LocalLayer } from '~/composables/useCompositorLayers'
 import { applyFinish, METALS } from '~/lib/compositor/finishPass'
+import { createEffect } from '~/lib/compositor/effectStack'
 
 const FOIL = { type: 'foil', metal: 'gold', brushed: 0.3, pressed: 0.6, grain: 0.7 } as const
 
@@ -103,9 +104,15 @@ describe('foil as a fill', () => {
 
   it('a second foil region does not reuse the first one\'s pixels', () => {
     paint(rect({ fill: FOIL }))
+    // The scratch (and its stub ctx) is module-level and outlives each paint: forget the
+    // first use's calls so only the SECOND use can satisfy the assertion below.
+    const sctx = (vi.mocked(applyFinish).mock.calls[0]![0] as any).getContext()
+    sctx.clearRect.mockClear()
+    sctx._fillStyles.length = 0
     paint(rect({ fill: FOIL }))
-    const off = vi.mocked(applyFinish).mock.calls[1]![0] as any
-    expect(off.getContext().clearRect).toHaveBeenCalled()
+    expect(vi.mocked(applyFinish).mock.calls[1]![0]).toBe(vi.mocked(applyFinish).mock.calls[0]![0])
+    expect(sctx.clearRect).toHaveBeenCalledWith(0, 0, 20, 20)
+    expect(sctx._fillStyles).toContain('#ffffff')
   })
 
   it('a layer without foil never calls the finish', () => {
@@ -129,6 +136,31 @@ describe('foil as a fill', () => {
     expect(off.getContext().fillText).toHaveBeenCalled()
     // The frame's own glyph pass paints no flat metal under the foil.
     expect(main._fillStyles).not.toContain(METALS.gold[2])
+  })
+})
+
+describe('foil and the silhouette cache', () => {
+  // A feathered layer is normally baked once into a box-sized raster and restamped. Foil is
+  // lit over the whole Frame by the Frame's light, so it must never be baked: every paint
+  // re-runs the finish, on a frame-sized canvas.
+  const feathered = (extra: Record<string, unknown>) => rect({ effects: [createEffect('feather')], ...extra })
+
+  it('a foil fill with a feather re-lights on every paint, over the frame', () => {
+    const layer = feathered({ fill: FOIL })
+    paint(layer)
+    paint(layer)
+    expect(applyFinish).toHaveBeenCalledTimes(2)
+    for (const [off] of vi.mocked(applyFinish).mock.calls) {
+      expect((off as any).width).toBe(20)
+      expect((off as any).height).toBe(20)
+    }
+  })
+
+  it('a foil OUTLINE with a feather is not baked either', () => {
+    const layer = feathered({ strokes: [{ id: 's1', paint: FOIL, width: 0.02, distance: 0, style: 'band' }] })
+    paint(layer)
+    paint(layer)
+    expect(applyFinish).toHaveBeenCalledTimes(2)
   })
 })
 

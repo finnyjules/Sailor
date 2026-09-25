@@ -2856,6 +2856,7 @@ function paintLayer(
     && !(layer.kind === 'text' && layer.expressive)                 // expressive layout places words outside localLayerBox
     && !(layer as unknown as { textMotion?: unknown }).textMotion   // letters move every frame — the raster is never twice the same
     && !layerPaints(layer).some(p => isFill(p) && fillIsShader(p))  // shader fills are live / frame-anchored
+    && !layerHasFoil(layer)                                         // foil is lit by the Frame's light over the frame — never bake it
     && !isClipLayer                                                 // a living image changes every frame — never bake it
     && silhouetteContentReady(layer, W)
   // Memoized like `dofContent` below: identical for every clone of the SAME tint.
@@ -3358,6 +3359,9 @@ let _foilScratch: HTMLCanvasElement | null = null
  * Never blank: no WebGL2 / lost context / oversize ⇒ `applyFinish` returns false and the
  * region is flooded with the metal's mid colour; no DOM at all ⇒ the shape is drawn in that
  * colour straight onto `ctx`.
+ *
+ * KNOWN GAP: box-sized flows (DOF source, corner-pin / raster warp, layer thumbnail) call this
+ * on a layer-box canvas, so there the light is computed over the box with a dpr-less scale.
  */
 function paintFoilRegion(
   ctx: CanvasRenderingContext2D,
@@ -5889,6 +5893,14 @@ export function layerPaints(layer: LocalLayer): Paint[] {
     case 'scatter': return []
     default: return [layer.fill, layer.stroke] // rect / ellipse / polygon / star / path
   }
+}
+
+/** True when any of the layer's paints — its `layerPaints` slots OR any stroke-stack entry —
+ *  is foil. Foil is lit by the Frame's light across the whole frame, so a raster of it is
+ *  never a stable, box-local thing to bake (see `silhouetteCacheable`). */
+function layerHasFoil(layer: LocalLayer): boolean {
+  if (layerPaints(layer).some(p => isFoilFill(p))) return true
+  return strokeStackOf(layer as unknown as Parameters<typeof strokeStackOf>[0]).some(st => isFoilFill(st.paint))
 }
 
 /** A layer's primary fill — the slot `layerPaints` lists first for its kind (`fill` for
