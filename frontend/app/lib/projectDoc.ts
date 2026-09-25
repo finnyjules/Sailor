@@ -30,6 +30,9 @@ export interface ProjectDoc {
    *  silently diverge (quota-failed session writes, parallel windows).
    *  Absent ⇒ legacy doc of unknown age. */
   savedAt?: number
+  /** Copies of the My effects this project uses (AI in Sailor spec §7.4), so it renders
+   *  without the owner's library. Written on save, registered on load. Absent ⇒ none. */
+  myEffects?: import('~~/shared/myEffects/record').MyEffectRecord[]
 }
 
 export const BLANK_WORKFLOW = { last_node_id: 0, last_link_id: 0, nodes: [], links: [], groups: [], config: {}, extra: {}, version: 0.4 }

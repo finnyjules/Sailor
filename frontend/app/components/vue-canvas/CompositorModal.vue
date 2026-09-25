@@ -148,7 +148,7 @@ import { LIVE_FIELD_CEILING } from '~/lib/shaderfill/descriptor'
 // to fall back to if the picked effect is purely generative.
 import ShaderEffectGallery from '~/components/vue-canvas/ShaderEffectGallery.vue'
 import { fetchShaderFxCatalog, resolveEffectId, useShaderCatalog } from '~/lib/shaderfx/catalog'
-import { effectReadsInput, getEffectSync } from '~/lib/shaderfx/catalogStore'
+import { currentShaderEffects, effectReadsInput, getEffectSync } from '~/lib/shaderfx/catalogStore'
 import type { EffectTarget } from '~/composables/useEffectTakes'
 import { makeBackgroundTarget } from '~/lib/shadergen/studioTargets'
 import type { EffectDef, ParamValue } from '~/lib/shaderfx/types'
@@ -5349,7 +5349,10 @@ async function buildWebExport() {
   const gen = ++webExportGen
   webExport.state = 'working'
   try {
-    const cat = await fetchShaderFxCatalog()
+    // Awaited so the built-ins are loaded; the effects themselves are read from the LIVE list
+    // (currentShaderEffects) below, not from this promise's result: that is a snapshot from the
+    // first fetch and misses every My effect and project copy registered since (spec §7.4).
+    await fetchShaderFxCatalog()
     const variant = webExportVariant()
     webExport.artAspect = variant.width / variant.height
     // A wired layer's `slot` is 0-based; the modal's per-slot records (`layers`) number from 1 —
@@ -5361,7 +5364,7 @@ async function buildWebExport() {
       return { slot, layerId: l.id, label: rowLabel({ layer: l }), animated: !!live && live.duration > 0, fps: live?.fps, duration: live?.duration }
     })
     const plan = planFrameExport({
-      variant, fit: webExport.fit, wiredSlots, catalogIds: new Set(cat.effects.map(e => e.id)),
+      variant, fit: webExport.fit, wiredSlots, catalogIds: new Set(currentShaderEffects().map(e => e.id)),
       hasMotion: hasMotion.value, ownMotion: hasOwnMotion.value,
       animatedFill: hasAnimatedShaderFill(buildStackItems(), background.value),
     })
@@ -5370,7 +5373,7 @@ async function buildWebExport() {
     // slot through its own export session). A build a newer one overtook, or a closed modal,
     // stops pulling at its next frame.
     const io = createAppFrameExportIO({
-      uploaded: uploadedFonts.value, wiredStill: wiredContentForSlot, catalog: cat.effects,
+      uploaded: uploadedFonts.value, wiredStill: wiredContentForSlot, catalog: currentShaderEffects(),
       wiredFrames: (slot, count, maxPx, encode) => {
         const live = layers.value.find(x => x.slot === slot + 1)?.live
         return webExportClips.get({ slot, count, maxPx, source: live, signal: wiredSourceSignal(slot) }, async () => {

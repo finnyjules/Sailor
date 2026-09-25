@@ -52,6 +52,9 @@ import {
 } from '~/lib/projectDoc'
 import { shouldOfferStartPicker } from '~/lib/startPicker'
 import { setRef, type RefRegistry } from '~/lib/refs/registry'
+import { adoptMyEffects, attachMyEffects } from '~/lib/myEffects/projectCopy'
+import { myEffectRecordById, myEffectRecords } from '~/lib/myEffects/library'
+import { useMyEffects } from '~/composables/useMyEffects'
 import { graphToPrompt } from '~/lib/graph/graphToPrompt'
 import { UnknownNodeTypeError } from '~/lib/graph/widgetOrder'
 import { registerRun, markRunning, finishRun, inFlight, perRun, dropRunState, getRun, inFlightCount } from '~/lib/graph/runRegistry'
@@ -1496,6 +1499,17 @@ async function stopVueWorkflow() {
 // Single shared ComfyUI iframe — all project tabs share one iframe
 const WORKFLOWS_STORAGE_KEY = 'sailor:workflows'
 
+// A project doc carries copies of the My effects it uses (AI in Sailor spec §7.4), so a shared
+// project renders without its owner's library. EVERY place a doc from storage enters
+// savedWorkflows goes through loadedDoc, which registers those copies for rendering (never
+// into the user's library); snapshotActiveCanvasIntoDoc writes them on save.
+const myEffectsApi = useMyEffects()
+function loadedDoc(body: any): ProjectDoc {
+  const doc = toProjectDoc(body)
+  adoptMyEffects(doc, myEffectsApi.adopt)
+  return doc
+}
+
 // Restore persisted workflows from sessionStorage. Older sessions stored a
 // bare workflow per tab — wrap those into one-canvas docs on the way in.
 function loadPersistedWorkflows(): Record<string, any> {
@@ -1503,7 +1517,7 @@ function loadPersistedWorkflows(): Record<string, any> {
   try {
     const saved = sessionStorage.getItem(WORKFLOWS_STORAGE_KEY)
     const parsed = saved ? JSON.parse(saved) : {}
-    for (const key of Object.keys(parsed)) parsed[key] = toProjectDoc(parsed[key])
+    for (const key of Object.keys(parsed)) parsed[key] = loadedDoc(parsed[key])
     return parsed
   }
   catch { return {} }
@@ -1665,7 +1679,7 @@ async function refreshDocFromDurable(uuid: string) {
   const loaded = await useProjects().loadProject(uuid)
   const body = loaded?.currentVersion?.workflow || null
   if (!docHasContent(body)) return
-  savedWorkflows[tab.id] = toProjectDoc(body)
+  savedWorkflows[tab.id] = loadedDoc(body)
   persistWorkflows()
 }
 
@@ -1736,6 +1750,9 @@ function snapshotActiveCanvasIntoDoc(tabId: string): ProjectDoc | null {
   // so a stale window can't launder old content as newest. Runs outside the
   // hasSnapshot branch: doc-only mutations (refs, deliverables, brand kit)
   // deserve the stamp even when the canvas snapshot was refused/empty.
+  // Copies of the My effects the doc uses go with it (spec §7.4) — skipped outright while the
+  // library is empty and the doc carries none.
+  attachMyEffects(toRaw(doc), myEffectRecordById, { libraryEmpty: myEffectRecords.value.length === 0 })
   stampDocForSave(toRaw(doc), docEditedAt[tabId])
   return doc
 }
@@ -1768,7 +1785,7 @@ function closeProjectTab(tab: any) {
 function onRestoreVersion(body: any) {
   const tab = activeTab.value
   if (!tab || !docHasContent(body)) return
-  const doc = toProjectDoc(body)
+  const doc = loadedDoc(body)
   doc.savedAt = Date.now() // an explicit restore becomes the newest state
   markDocEdited(tab.id) // keep docEditedAt coherent with the explicit stamp
   savedWorkflows[tab.id] = doc
@@ -2366,7 +2383,7 @@ async function loadWorkflowForTab(tab: any) {
       // canvas snapshot), that state is newer than what we fetched. toRaw:
       // savedWorkflows is reactive, so reading back yields a proxy.
       if (docHasContent(body) && toRaw(savedWorkflows[tab.id]) === placeholder) {
-        savedWorkflows[tab.id] = toProjectDoc(body)
+        savedWorkflows[tab.id] = loadedDoc(body)
       }
     }
     else if (tab.projectUuid) {
@@ -2384,7 +2401,7 @@ async function loadWorkflowForTab(tab: any) {
       const durableDoc = durableBody ? toProjectDoc(durableBody) : null
       if (durableDoc && toRaw(savedWorkflows[tab.id]) === before) {
         if (pickNewerDoc(saved, durableDoc).source === 'durable') {
-          savedWorkflows[tab.id] = durableDoc
+          savedWorkflows[tab.id] = loadedDoc(durableDoc)
         }
       }
     }
@@ -2402,7 +2419,7 @@ async function loadWorkflowForTab(tab: any) {
 // Handle workflow loaded from community template
 function handleLoadTabWorkflow(e: Event) {
   const { tabId, workflow } = (e as CustomEvent).detail
-  savedWorkflows[tabId] = toProjectDoc(workflow)
+  savedWorkflows[tabId] = loadedDoc(workflow)
   markDocEdited(tabId) // user loaded fresh content into this tab
   persistWorkflows()
   // This tab now has real content — never treat it as a "fresh blank project"

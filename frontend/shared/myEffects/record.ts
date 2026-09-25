@@ -11,7 +11,10 @@
  */
 import { LIMITS, type GenParam } from '../shadergen/contract'
 
-export const MY_EFFECT_ID_RE = /^mine_[a-z0-9]{12}$/
+/** A My effect id's pattern, unanchored — the ONE place it is spelled (preflight C12);
+ *  `MY_EFFECT_ID_RE` and the project-copy scan (`MY_EFFECT_REF_RE`) are built from it. */
+export const MY_EFFECT_ID_BODY = 'mine_[a-z0-9]{12}'
+export const MY_EFFECT_ID_RE = new RegExp(`^${MY_EFFECT_ID_BODY}$`)
 export const MY_EFFECT_LIMITS = {
   maxEffects: 500, maxVersions: 50, maxNameChars: 60, maxNoteChars: 300,
   // Ruling (fix round 1, review #1): a dial's own uniform/label/string-default,
