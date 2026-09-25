@@ -34,6 +34,7 @@ import { blockedRunRefusal } from '#shared/runner/needsEngine'
 import { pruneInvalidOutputs, runnerTakesWorkflow } from '#shared/runner/validate'
 import {
   TOPAZ_VIDEO_ENDPOINT, TOPAZ_VIDEO_FPS, TOPAZ_VIDEO_MAX_SECONDS, TOPAZ_VIDEO_TARGETS, TOPAZ_VIDEO_TOO_LARGE, TOPAZ_VIDEO_TOO_LONG,
+  TOPAZ_VIDEO_OUTPUT_TOO_LARGE, TOPAZ_VIDEO_SWITCHED_OFF, TOPAZ_VIDEO_TARGET_LONG_SIDES,
   TOPAZ_VIDEO_UNKNOWN_SETTING, TOPAZ_VIDEO_UNMEASURED, topazVideoBand, topazVideoPlan, topazVideoRateKey, topazVideoTooSmall,
   type TopazVideoPlan,
 } from '#shared/runner/topazVideo'
@@ -51,7 +52,7 @@ import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
 import {
   TOPAZ_VIDEO_CHANGED, TOPAZ_VIDEO_FILE_MISSING, TOPAZ_VIDEO_MAX_BYTES, TOPAZ_VIDEO_RULE, topazInputFiles, topazMediaCheck,
 } from '~~/server/runner/topazMedia'
-import { mediaNodeKind, nodeMediaChangedWords, nodeMediaFiles } from '~~/server/runner/nodeMedia'
+import { mediaNodeKind, mediaNodeSwitchedOff, nodeMediaChangedWords, nodeMediaFiles } from '~~/server/runner/nodeMedia'
 import { mediaFacts, measuredMediaChanged } from '~~/server/runner/mediaInputs'
 import { requestProblem, requestProblems } from '~~/server/runner/requestRules'
 import { createEngineResultStore } from '~~/server/runner/results'
@@ -60,7 +61,7 @@ import { GRAPH_NODE_CREDITS, PRICE_BOOK_VERSION, priceGraph } from '~~/server/ut
 import { blockedPromptRefusal } from '~~/server/utils/blockedModels'
 import type { MeasuredMedia, OutputFile } from '~~/server/runner/types'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
-import { makeKit, ofType, until } from './__runner__/kit'
+import { createFakeFal, createFakeLedger, makeKit, ofType, until } from './__runner__/kit'
 
 const FAMILY: RunnerFamily = 'topaz-video'
 const ON: ReadonlySet<RunnerFamily> = new Set([FAMILY])
@@ -667,5 +668,140 @@ describe('the engine', () => {
     await expect(start(k, { 1: enhance(), 2: videoCard() })).rejects.toThrow('This workflow uses a file that isn’t one of yours')
     expect(owned).toContain('clip.mp4')
     expect(k.ledger.holds.size).toBe(0)
+  })
+})
+
+// ── Fix round 1 (review of 6e26cd464; controller rulings 1–5) ───────────────
+
+describe('fix round 1: the factor fits the target\'s box; the band from the longer side', () => {
+  const at = (target: string, w: number, h: number, fps = 'original', rate: number | null = 24) =>
+    topazVideoPlan(enhance({ target_resolution: target, fps }).inputs, { width: w, height: h, fps: rate }) as TopazVideoPlan
+
+  it('the target boxes (720 × 1280, 1080 × 1920, 2160 × 3840)', () => {
+    expect(TOPAZ_VIDEO_TARGET_LONG_SIDES).toEqual({ '720p': 1280, '1080p': 1920, '4k': 3840 })
+  })
+
+  it('854 × 480 lands in the band it asks for: 720p → 1280 × 720, 1080p → 1920 × 1080 (not one pixel over)', () => {
+    expect(at('720p', 854, 480)).toEqual({ factor: 1.4988, width: 1280, height: 720, targetFps: null, band: '720p', highFps: false })
+    expect(at('1080p', 854, 480)).toEqual({ factor: 2.2482, width: 1920, height: 1080, targetFps: null, band: '1080p', highFps: false })
+    expect(priceNode('EnhanceVideoNode', enhance({ target_resolution: '720p' }).inputs, { inputSeconds: measured(2, 854, 480, 24), families: ON })).toEqual({ usd: 0.02, credits: 4 })
+    expect(priceNode('EnhanceVideoNode', enhance().inputs, { inputSeconds: measured(2, 854, 480, 24), families: ON })).toEqual({ usd: 0.04, credits: 8 })
+  })
+
+  it('portrait: 720 × 1280 → 1080 × 1920 is 1080p by its longer side; 1080 × 1920 asking 720p stays 1080p (already larger)', () => {
+    expect(at('1080p', 720, 1280)).toMatchObject({ factor: 1.5, width: 1080, height: 1920, band: '1080p' })
+    expect(at('720p', 1080, 1920)).toMatchObject({ factor: 1, width: 1080, height: 1920, band: '1080p' })
+    expect(at('4k', 1080, 1920)).toMatchObject({ factor: 2, width: 2160, height: 3840, band: '4k' })
+  })
+
+  it('square: never banded under its own height (720 × 720 asking 1080p makes 1080 × 1080: 1080p)', () => {
+    expect(at('1080p', 720, 720)).toMatchObject({ factor: 1.5, width: 1080, height: 1080, band: '1080p' })
+    expect(at('720p', 540, 540)).toMatchObject({ factor: 1.3333, width: 720, height: 720, band: '720p' })
+    expect(topazVideoBand(1000, 1000)).toBe('1080p')
+  })
+
+  it('ultra-wide: fitted inside the box by its long side (1680 × 720 asking 1080p → 1920 × 823); 2560 × 1080 asking 4K makes 3840 × 1620, not a refusal', () => {
+    expect(at('1080p', 1680, 720)).toMatchObject({ factor: 1.1428, width: 1920, height: 823, band: '1080p' })
+    expect(at('4k', 2560, 1080)).toMatchObject({ factor: 1.5, width: 3840, height: 1620, band: '4k' })
+    expect(topazVideoTooSmall(480, 100)).toBe('Topaz can make a video at most 4 times larger, and this one is 480 × 100. Choose 1080p or lower.')
+  })
+
+  it('the output never passes the target\'s box, and the band is never above the target\'s, over a grid of sizes', () => {
+    const rank = { '720p': 0, '1080p': 1, '4k': 2 } as const
+    for (const target of Object.keys(TOPAZ_VIDEO_TARGETS)) {
+      for (let w = 160; w <= 4096; w += 97) {
+        for (let h = 120; h <= 2304; h += 89) {
+          const p = topazVideoPlan(enhance({ target_resolution: target }).inputs, { width: w, height: h, fps: 24 })
+          if ('refused' in p) continue
+          if (p.factor > 1) {
+            expect(Math.min(p.width, p.height), `${target} ${w}x${h}`).toBeLessThanOrEqual(TOPAZ_VIDEO_TARGETS[target]!)
+            expect(Math.max(p.width, p.height), `${target} ${w}x${h}`).toBeLessThanOrEqual(TOPAZ_VIDEO_TARGET_LONG_SIDES[target]!)
+            expect(rank[p.band]).toBeLessThanOrEqual(rank[target as keyof typeof rank])
+          }
+        }
+      }
+    }
+  })
+
+  it('the words: a video already above 4K, and (separately) an output that would be', () => {
+    expect(TOPAZ_VIDEO_TOO_LARGE).toContain('already larger')
+    expect(TOPAZ_VIDEO_OUTPUT_TOO_LARGE).toBe('At this size the upscaled video would be larger than 4K (4096 × 2160). Choose a smaller size.')
+    expect(at('4k', 4097, 2000) as unknown).toEqual({ refused: TOPAZ_VIDEO_TOO_LARGE })
+  })
+})
+
+describe('fix round 1: a length without a size prices at the whole ceiling', () => {
+  it('60 s at 4K and 60 fps whatever the length, so it is never below any charge', () => {
+    for (const seconds of [0.5, 3, 42, 60]) {
+      expect(priceNode('EnhanceVideoNode', enhance().inputs, { inputSeconds: { video: seconds }, families: ON })).toEqual({ usd: 9.6, credits: 1440 })
+      expect(topazVideoCalls(enhance().inputs, { video: seconds, videoWidth: 1280 })).toEqual([{ endpoint: TOPAZ_VIDEO_APP, seconds: 60, resolution: '4k/60fps', audio: false }])
+    }
+  })
+})
+
+describe('fix round 1: the engine', () => {
+  const run = (k: ReturnType<typeof makeKit>, take: ApiPrompt) =>
+    k.engine.startRun({ userId: k.userId, takes: [take], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+  const rootWith = async (entries: Record<string, Buffer>) => {
+    const root = mkdtempSync(join(tmpdir(), 'topaz-fix1-'))
+    for (const t of ['input', 'output', 'temp']) mkdirSync(join(root, t), { recursive: true })
+    for (const [name, bytes] of Object.entries(entries)) writeFileSync(join(root, 'input', name), bytes)
+    return root
+  }
+
+  it('resuming a Topaz node whose request was sent before a restart: planned from the recorded measurement, the request and credits kept, one job', async () => {
+    const root = await rootWith({ 'clip.mp4': await mp4(3, 1280, 720, 24) })
+    const fal = createFakeFal()
+    const ledger = createFakeLedger(5000)
+    const state = { crashed: false }
+    const k1 = makeKit({
+      hosted: true, fal, ledger, root, deps: {
+        families: () => ON,
+        sleep: () => (state.crashed ? new Promise<void>(() => {}) : new Promise<void>(r => setTimeout(r, 1))),
+      },
+    })
+    fal.holdNext(1)
+    const { runId } = await run(k1, { 1: enhance(), 2: videoCard() })
+    await until(() => (fal.submitted()[0]?.polls ?? 0) >= 2)
+    state.crashed = true
+    await new Promise(r => setTimeout(r, 20))
+    // While the server is down the video is replaced (larger, other bytes): the running job is not re-checked.
+    writeFileSync(join(root, 'input', 'clip.mp4'), await mp4(9, 1920, 1080, 60))
+    const k2 = makeKit({ hosted: true, dir: k1.dir, root, fal, ledger, deps: { families: () => ON } })
+    expect(await k2.engine.reattach()).toBe(1)
+    fal.release()
+    await k2.engine.settled(runId)
+    expect(ofType(k2.seen, 'execution_error')).toEqual([])
+    expect(fal.submitted()).toHaveLength(1)
+    const stored = (await k2.store.get(runId))!
+    expect(stored.status).toBe('done')
+    expect(stored.takes[0]!.nodes['1']!.payload).toEqual(fal.submitted()[0]!.payload)
+    expect(stored.takes[0]!.nodes['1']!.payload).toMatchObject({ upscale_factor: 1.5 })
+    // The credits written at submit: 3 s at 1080p ($0.06, 12) + the render credit.
+    expect(stored.takes[0]!.nodes['1']!.credits).toBe(12)
+    expect([...ledger.holds.values()].map(h => [h.credits, h.state, h.actual])).toEqual([[13, 'settled', 13]])
+  })
+
+  it('the switch turned off after Run: the node is refused before anything is read at its turn or sent; the hold is released', async () => {
+    const root = await rootWith({ 'clip.mp4': await mp4(3, 1280, 720, 24) })
+    const store = createEngineResultStore({ dirForType: t => join(root, t), hosted: () => true })
+    let families: ReadonlySet<RunnerFamily> = ON
+    let reads = 0
+    const results = { ...store, read: async (f: OutputFile) => { reads++; return store.read(f) } }
+    // The switch goes off right after the hold (taken at the Topaz price).
+    const ledger = createFakeLedger(5000)
+    const hold = ledger.hold
+    ledger.hold = (async (...a: Parameters<typeof hold>) => { const res = await hold(...a); families = ALL_BUT; return res }) as typeof hold
+    const k = makeKit({ hosted: true, ledger, root, deps: { families: () => families, results } })
+    await run(k, { 1: enhance(), 2: videoCard() })
+    await until(() => ofType(k.seen, 'execution_error').length + ofType(k.seen, 'execution_success').length >= 1)
+    expect(JSON.stringify(ofType(k.seen, 'execution_error'))).toContain(TOPAZ_VIDEO_SWITCHED_OFF)
+    expect(reads).toBe(1)
+    expect(k.fal.reqs.size).toBe(0)
+    expect(k.upload.mock.calls.length).toBe(0)
+    expect([...k.ledger.holds.values()].map(h => [h.credits, h.state])).toEqual([[13, 'released']])
+    expect(mediaNodeSwitchedOff(enhance(), ON)).toBeNull()
+    expect(mediaNodeSwitchedOff(enhance(), NO_FAMILIES)).toBe(TOPAZ_VIDEO_SWITCHED_OFF)
+    expect(mediaNodeSwitchedOff({ class_type: 'LipSyncNode', inputs: {} }, NO_FAMILIES)).toBeNull()
   })
 })

@@ -27,7 +27,7 @@ import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
 import { extraPromptText, hasOutputNode, measuredInputPixels, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
 import { ev, type RunEvents, type SwitchReason } from './events'
-import { nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles, mediaNodeKind } from './nodeMedia'
+import { mediaNodeKind, mediaNodeSwitchedOff, nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles } from './nodeMedia'
 import { measuredMediaChanged } from './mediaInputs'
 import type { InputSeconds } from '#shared/pricing/clipSettings'
 import type { Handoff } from './handoff'
@@ -690,6 +690,13 @@ export function createEngine(deps: EngineDeps) {
       // hand-off. A file that no longer fits fails the node here (its hold is
       // released); what is measured is what it is planned and charged on.
       let inputSeconds: InputSeconds | undefined
+      // A Topaz node whose switch was turned off since Run is never sent (it
+      // would be charged the ComfyUI path's flat price for a fal call): it
+      // fails here, before anything is read or handed off, and its hold is
+      // released (F23 fix round 1). A resumed node's job is already sent and
+      // priced at submit, so it carries on.
+      const switchedOff = resuming ? null : mediaNodeSwitchedOff(take.prompt[id], families)
+      if (switchedOff) throw new Error(switchedOff)
       const media = resuming ? null : await nodeMediaCheck(take.prompt, id, {
         read: readOnce, size: f => deps.results.size?.(f) ?? Promise.resolve(null), strict: deps.hosted(), filesFrom: ([from]) => take.nodes[from]?.outputs ?? [],
       })
@@ -704,6 +711,12 @@ export function createEngine(deps: EngineDeps) {
         }
         inputSeconds = media.measured.seconds
       }
+      // What planning reads of the media (Topaz sets its factor from the video's
+      // size): this turn's measurement, or on resume the one recorded at the
+      // start of the run, so the resumed plan (kept only for its backup) can be
+      // rebuilt and the node keeps its request and credits (F23 fix round 1).
+      const planMeasured = inputSeconds
+        ?? (resuming && take.measured && Object.prototype.hasOwnProperty.call(take.measured, id) ? take.measured[id]!.seconds : undefined)
 
       const planWith = (toUrl: (f: OutputFile) => Promise<string>) => planNode({
         prompt: take.prompt,
@@ -715,7 +728,7 @@ export function createEngine(deps: EngineDeps) {
         hosted: deps.hosted(),
         families,
         ...(fileCheck.bytes !== undefined ? { inputBytes: fileCheck.bytes } : {}),
-        ...(inputSeconds ? { measured: inputSeconds } : {}),
+        ...(planMeasured ? { measured: planMeasured } : {}),
       })
       const handOff = async (f: OutputFile) => deps.handoff.toUrlBytes(f, await readOnce(f))
       // Resuming: the request written down is kept (and its price); the plan is

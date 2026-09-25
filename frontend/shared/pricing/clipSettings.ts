@@ -536,13 +536,14 @@ export { TOPAZ_VIDEO_ENDPOINT }
  * words the runner refuses it with.
  */
 export function topazVideoCalls(inputs: Inputs, measured: InputSeconds = {}): ClipCall[] | { refused: string } {
-  const seconds = billedSeconds(measured.video, TOPAZ_VIDEO_MAX_SECONDS)
   const sized = typeof measured.videoWidth === 'number' && typeof measured.videoHeight === 'number'
   if (!sized) {
-    // Unmeasured: the top band, doubled — unless the node's own settings can't be read.
+    // No size (with or without a length): the whole ceiling, 60 s at the top band, doubled — so
+    // "unmeasured" is never below any charge (F23 fix round 1) — unless the node's own settings can't be read.
     if (topazVideoTarget(inputs) == null || topazVideoTargetFps(inputs) === undefined) return { refused: TOPAZ_VIDEO_UNKNOWN_SETTING }
-    return [{ endpoint: TOPAZ_VIDEO_ENDPOINT, seconds, resolution: topazVideoRateKey('4k', true), audio: false }]
+    return [{ endpoint: TOPAZ_VIDEO_ENDPOINT, seconds: TOPAZ_VIDEO_MAX_SECONDS, resolution: topazVideoRateKey('4k', true), audio: false }]
   }
+  const seconds = billedSeconds(measured.video, TOPAZ_VIDEO_MAX_SECONDS)
   const p = topazVideoPlan(inputs, { width: measured.videoWidth, height: measured.videoHeight, fps: measured.videoFps })
   if ('refused' in p) return p
   return [{ endpoint: TOPAZ_VIDEO_ENDPOINT, seconds, resolution: topazVideoRateKey(p.band, p.highFps), audio: false }]
