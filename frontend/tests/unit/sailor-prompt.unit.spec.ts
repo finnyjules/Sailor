@@ -3,11 +3,17 @@ import { describe, it, expect } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, h, onMounted } from 'vue'
 import SailorPrompt from '~/components/prompt/SailorPrompt.vue'
+import AiMark from '~/components/prompt/AiMark.vue'
 
 const stubs = { AgentSweep: true }
 const input = (w: any) => w.get('input[aria-label="Ask Sailor"]')
 
 describe('SailorPrompt', () => {
+  it('marks itself with the pastel ✦, the same mark as AI menu rows', () => {
+    const w = mount(SailorPrompt, { global: { stubs } })
+    expect(w.findComponent(AiMark).props('kind')).toBe('star')
+  })
+
   it('shows the selection as a chip and in the placeholder', () => {
     const w = mount(SailorPrompt, { props: { selectionLabel: 'Rainy shop' }, global: { stubs } })
     expect(w.get('[data-testid="prompt-selection-chip"]').text()).toContain('Rainy shop')
