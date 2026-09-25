@@ -1769,3 +1769,68 @@ test('badge declutter: structural constraint kinds hidden; Labels toggle hides/r
   expect(kindsRestored).not.toContain('rotatedFrom')
   expect(kindsRestored).not.toContain('equalDist')
 })
+
+// Shared-pen host contract: the live preview is drawn in drawing space, so
+// under a view that is NOT a similarity (uneven scale + skew + mirror) the
+// bowing preview still lands exactly on the arc that gets committed.
+test('pen: under an uneven, skewed view the bow preview coincides with the committed arc', async ({ page }) => {
+  await page.goto('/dev/sketch-draw?view=uneven')
+  await page.waitForSelector('[data-ready]')
+  await page.waitForFunction(() => !!(window as any).__sketchDraw)
+  // screen points at 1/4, 1/2, 3/4 of a path element's length
+  const sample = (sel: string) => page.evaluate((s) => {
+    const el = document.querySelector(s) as SVGPathElement | null
+    if (!el) return null
+    const m = el.getScreenCTM()!
+    const len = el.getTotalLength()
+    return [0.25, 0.5, 0.75].map(t => {
+      const p = el.getPointAtLength(len * t)
+      const q = new DOMPoint(p.x, p.y).matrixTransform(m)
+      return { x: q.x, y: q.y }
+    })
+  }, sel)
+  await page.evaluate(() => {
+    const D = (window as any).__sketchDraw
+    D.reset(); D.setTool('path')
+    D.pathDown(2, 2); D.pathUp(2, 2)
+  })
+  await page.evaluate(() => (window as any).__sketchDraw.pathDown(8, 2))
+  await page.evaluate(() => (window as any).__sketchDraw.pathMove(5, 4.5))   // bowed
+  const preview = await sample('[data-path-preview]')
+  expect(preview).not.toBeNull()
+  await page.evaluate(() => {
+    const D = (window as any).__sketchDraw
+    D.pathUp(5, 4.5); D.finishPath(false)
+  })
+  const committed = await sample('svg[width="680"][height="460"] > g > path[stroke="#3730a3"]')
+  expect(committed).not.toBeNull()
+  for (let i = 0; i < 3; i++) {
+    expect(Math.hypot(preview![i]!.x - committed![i]!.x, preview![i]!.y - committed![i]!.y)).toBeLessThan(0.5)
+  }
+})
+
+// Shared-pen host contract: a host may zoom the overlay with a CSS transform
+// on an ancestor (the Frame editor's scale() wrapper) — a click must still
+// place the point under the cursor.
+test('pen: inside a CSS scale(1.5) wrapper a click places the point under the cursor', async ({ page }) => {
+  await page.goto('/dev/sketch-draw')
+  await page.waitForSelector('[data-ready]')
+  await page.waitForFunction(() => !!(window as any).__sketchDraw)
+  await page.evaluate(() => {
+    const D = (window as any).__sketchDraw
+    D.reset(); D.setTool('point')
+    const svg = document.querySelector('svg[width="680"][height="460"]') as SVGSVGElement
+    const wrap = svg.parentElement as HTMLElement
+    wrap.style.transformOrigin = '0 0'
+    wrap.style.transform = 'scale(1.5)'
+  })
+  const svg = page.locator('svg[width="680"][height="460"]')
+  const box = (await svg.boundingBox())!
+  expect(box.width).toBeCloseTo(680 * 1.5, 0)   // the wrapper really is scaled
+  const clickX = box.x + 600, clickY = box.y + 300
+  await page.mouse.click(clickX, clickY)
+  expect(await page.evaluate(() => (window as any).__sketchDraw.entityCount())).toBe(1)
+  const dot = (await page.locator('[data-point]').first().boundingBox())!
+  expect(Math.abs(dot.x + dot.width / 2 - clickX)).toBeLessThan(1)
+  expect(Math.abs(dot.y + dot.height / 2 - clickY)).toBeLessThan(1)
+})

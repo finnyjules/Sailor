@@ -1,9 +1,40 @@
 // app/composables/pen/usePen.ts
 // The arc pen's state and actions, hostable by any surface that owns a
 // SketchDoc ref and a view matrix (the dev page today; the Frame editor and
-// Shape Studio later). Moved verbatim out of pages/dev/sketch-draw.vue — the
-// host keeps its viewport, rendering and pointer handlers, and registers the
-// window key listeners itself (delegating to onKeydown/onKeyup/onBlur).
+// Shape Studio later). PenOverlay draws it and turns pointer/keys into its
+// actions; PenToolbar is its tool bar.
+//
+// ─── HOST CONTRACT ──────────────────────────────────────────────────────────
+// 1. One pen per editing session. Create the pen when the session opens and
+//    drop it (call dispose()) when it closes.
+// 2. Pass a CLONE of the stored drawing, never the stored object:
+//      const doc = ref(cloneDoc(stored))        // ~/lib/sketch/clone
+//      const pen = usePen({ doc, view, onChange })
+//    The pen mutates doc.value in place and replaces it on undo/redo/revert, so
+//    handing it the stored object would write half-finished edits into storage.
+// 3. To open a DIFFERENT drawing, create a new pen and re-key the overlay and
+//    toolbar (`:key`). Both read `props.pen` once, at setup; swapping the prop
+//    on a live component does nothing.
+// 4. Persist on commit (or in onChange, for settled steps) with
+//    cloneDoc(doc.value) — never keep a reference to the pen's doc.
+// 5. Any host-side re-normalisation of the drawing (e.g. the Frame's
+//    re-centring) happens on commit, never while the pen is open: the pen's
+//    history and pending state hold entity ids and positions it expects to
+//    still be there.
+// 6. Ending the session: call finishSession() first (PenOverlay's Enter-commit
+//    and PenToolbar's Done already do, before emitting `commit`) — it finishes
+//    or cleans up anything half-drawn so no orphan points are stored. On
+//    `cancel`, the host decides: revert() puts the drawing back exactly as it
+//    was when the pen was created; the overlay and toolbar never call it.
+// 7. Signals: onChange fires after each SETTLED step (a committed history
+//    step, undo, redo, reset, revert). onLiveChange fires for UNSETTLED doc
+//    mutations mid-gesture (each solve during a drag, a point placed at the
+//    start of a path or curve gesture) — use it to re-lay text or copies live.
+// 8. Keys: a key the pen acts on is preventDefault-ed and stopPropagation-ed
+//    (see onKeydown), so a host checking `defaultPrevented` leaves it alone.
+//    PenOverlay listens on window in the bubble phase; a host listener in the
+//    capture phase runs FIRST and must yield the pen's keys while it is open.
+// ────────────────────────────────────────────────────────────────────────────
 //
 // Construction must stay side-effect free (vitest runs this in `node`): no
 // onMounted/onUnmounted, no window.*, no requestAnimationFrame here. The
@@ -79,8 +110,10 @@ export type JointInfo =
 
 // in-progress multi-click draws
 export type Pending =
-  | { kind: 'line'; p1: EntityId }
-  | { kind: 'circle'; center: EntityId; cx: number; cy: number }
+  // `own`: the start point was created by this draw (not a snap onto an
+  // existing point), so finishSession may delete it if the draw is abandoned
+  | { kind: 'line'; p1: EntityId; own?: boolean }
+  | { kind: 'circle'; center: EntityId; cx: number; cy: number; own?: boolean }
   | null
 export type PendingPath = { anchors: EntityId[]; segments: SegmentSpec[] } | null
 // the path tool's live down→(bow)→up gesture — plain (non-reactive) state, as
@@ -106,10 +139,11 @@ export function screenDeltaToDrawing(m: ViewMatrix, sx: number, sy: number): { x
 }
 
 export function usePen(opts: {
-  doc: Ref<SketchDoc>          // the host owns the ref; the pen mutates doc.value in place and replaces it on undo/redo/reset
-  view: Ref<ViewMatrix>        // for tolerances only (Task 3); rendering uses it in Task 4
+  doc: Ref<SketchDoc>          // a CLONE of the host's drawing (see HOST CONTRACT); the pen mutates doc.value in place and replaces it on undo/redo/reset/revert
+  view: Ref<ViewMatrix>        // drawing → screen: screen-pixel tolerances, arrow-nudge steps and the screen marquee
   options?: PenOptions
-  onChange?: () => void        // after every committed history step, undo, redo and reset
+  onChange?: () => void        // after every SETTLED step: committed history step, undo, redo, reset, revert
+  onLiveChange?: () => void    // after every UNSETTLED doc mutation mid-gesture (drag solves, a gesture's first point)
   // the host's own live pointer gesture (the dev page's pan): Escape offers
   // it the chance to abort — return true if one was aborted (the key stops
   // there). PenOverlay's marquee is offered first, through onKeydown's
@@ -196,7 +230,7 @@ export function usePen(opts: {
   const opHint = computed(() => {
     const op = pendingOp.value
     if (!op) return null
-    if (op.kind === 'repeat') return `Click the center of the ring — an existing point, or empty space to drop one (×${op.count})`
+    if (op.kind === 'repeat') return `Click the centre of the ring — an existing point, or empty space to drop one (×${op.count})`
     return 'Click the mirror axis — a line to reflect across'
   })
   function isPointId(id: EntityId) {
@@ -208,6 +242,9 @@ export function usePen(opts: {
   // current `doc.value`; undo/redo just move it and restore that snapshot.
   const history = ref<SketchDoc[]>([])
   const histPtr = ref(-1)
+  // the drawing as the pen received it — revert()'s target. Separate from
+  // `history`, which is capped at 200 entries and so can lose its first one.
+  const opening = cloneDoc(doc.value)
   function initHistory() { history.value = [cloneDoc(doc.value)]; histPtr.value = 0 }
   function commitHistory() {
     // no-op guard: a settle that left `doc` structurally identical to the
@@ -263,12 +300,21 @@ export function usePen(opts: {
   // caller's (PenOverlay's window listener runs isTypingInField once).
   // `local.cancelGesture` is the caller's own live gesture (the overlay's
   // marquee); it is offered Escape before the host's opts.cancelGesture.
+  // A key the pen acts on is the pen's: preventDefault (so a host checking
+  // `defaultPrevented` — e.g. a modal that closes on Escape or deletes its
+  // selection on Delete — leaves it alone) and stopPropagation. A key it does
+  // not act on is left untouched.
   function onKeydown(ev: KeyboardEvent, local?: { cancelGesture?: () => boolean }): boolean {
+    const handled = handleKey(ev, local)
+    if (handled) { ev.preventDefault(); ev.stopPropagation() }
+    return handled
+  }
+  function handleKey(ev: KeyboardEvent, local?: { cancelGesture?: () => boolean }): boolean {
     const meta = ev.metaKey || ev.ctrlKey
     if (meta) {
       const key = ev.key.toLowerCase()
-      if (key === 'z' && !ev.shiftKey) { ev.preventDefault(); undo(); return true }
-      if ((key === 'z' && ev.shiftKey) || key === 'y') { ev.preventDefault(); redo(); return true }
+      if (key === 'z' && !ev.shiftKey) { undo(); return true }
+      if ((key === 'z' && ev.shiftKey) || key === 'y') { redo(); return true }
       return false
     }
     // (viewport keys — ⌘0 fit, Space pan — are the host's; it handles them
@@ -281,8 +327,8 @@ export function usePen(opts: {
     // anything else; meta-combos already returned above, so this never steals
     // a Cmd/Ctrl+digit shortcut.
     const gestureActive = tool.value === 'path' && !!pendingPath.value
-    if (gestureActive && /^[0-9]$/.test(ev.key)) { ev.preventDefault(); dimBuffer.value += ev.key; return true }
-    if (gestureActive && ev.key === '.' && !dimBuffer.value.includes('.')) { ev.preventDefault(); dimBuffer.value += '.'; return true }
+    if (gestureActive && /^[0-9]$/.test(ev.key)) { dimBuffer.value += ev.key; return true }
+    if (gestureActive && ev.key === '.' && !dimBuffer.value.includes('.')) { dimBuffer.value += '.'; return true }
 
     if (ev.key === 'Escape') {
       if (pendingOp.value) { cancelPendingOp(); status.value = 'cancelled'; return true }
@@ -300,24 +346,23 @@ export function usePen(opts: {
       return true
     }
     if (ev.key === 'Enter') {
-      if (gestureActive && dimBuffer.value) { ev.preventDefault(); commitDimension(); return true }
-      if (pendingPath.value && pendingPath.value.anchors.length >= 2) { ev.preventDefault(); finishPath(false); return true }
+      if (gestureActive && dimBuffer.value) { commitDimension(); return true }
+      if (pendingPath.value && pendingPath.value.anchors.length >= 2) { finishPath(false); return true }
       return false
     }
     if (ev.key === 'Backspace' || ev.key === 'Delete') {
       if (gestureActive && dimBuffer.value) {
-        ev.preventDefault()
         dimBuffer.value = dimBuffer.value.slice(0, -1)
         return true
       }
-      ev.preventDefault()   // don't let the browser interpret Backspace as back-nav
+      // preventDefault only when the key acts (onKeydown does it): with
+      // nothing to delete, Delete/Backspace belong to the host
       if (pendingPath.value) { removeLastAnchor(); return true }
       if (selection.value.length) { del(); return true }
       return false
     }
     if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight' || ev.key === 'ArrowUp' || ev.key === 'ArrowDown') {
       if (!selection.value.length) return false   // nothing selected: no-op, let the browser handle the key normally
-      ev.preventDefault()
       // the step is in SCREEN pixels, so ↑ is screen-up under any view
       const step = ev.shiftKey ? NUDGE_PX_SHIFT : NUDGE_PX
       const sx = ev.key === 'ArrowLeft' ? -step : ev.key === 'ArrowRight' ? step : 0
@@ -513,6 +558,9 @@ export function usePen(opts: {
       else if (e.kind === 'circle' && s.kind === 'circle') { e.r = s.r }
     }
     status.value = res.converged ? `solved · ${doc.value.entities.length} ent · ${doc.value.constraints.length} con` : `NOT converged (${res.residualNorm.toFixed(2)})`
+    // a drag solve is a live, unsettled change — the settle (commitHistory on
+    // release) reports through onChange
+    if (drag) opts.onLiveChange?.()
     return res
   }
 
@@ -581,8 +629,9 @@ export function usePen(opts: {
       commitHistory()
     } else if (tool.value === 'line') {
       if (!pending.value || pending.value.kind !== 'line') {
+        const before = doc.value.entities.length
         const p1 = placePoint(x, y, [], guideMode.value)
-        pending.value = { kind: 'line', p1 }
+        pending.value = { kind: 'line', p1, own: doc.value.entities.length !== before }
         commitHistory()
       } else {
         const p2 = placePoint(x, y, [pending.value.p1], guideMode.value)
@@ -593,9 +642,10 @@ export function usePen(opts: {
       }
     } else if (tool.value === 'circle') {
       if (!pending.value || pending.value.kind !== 'circle') {
+        const before = doc.value.entities.length
         const center = placePoint(x, y, [], guideMode.value)
         const c = doc.value.entities.find(e => e.id === center) as any
-        pending.value = { kind: 'circle', center, cx: c.x, cy: c.y }
+        pending.value = { kind: 'circle', center, cx: c.x, cy: c.y, own: doc.value.entities.length !== before }
         commitHistory()
       } else {
         const r = Math.max(pxToUnits(MIN_RADIUS_PX, opts.view.value), dist({ x, y }, { x: pending.value.cx, y: pending.value.cy }))
@@ -743,6 +793,7 @@ export function usePen(opts: {
     // constraint) settle as ONE history entry together with whatever pathUp
     // does next (a plain click, or bowing the segment into an arc)
     pathDrag = { anchor: id, prevAnchor, startX: x, startY: y, bowed: false }
+    opts.onLiveChange?.()
   }
 
   function pathMove(x: number, y: number, shift = false) {
@@ -938,6 +989,7 @@ export function usePen(opts: {
       // no commit yet: the first point (and its handles, if dragged) settle as
       // one history entry in curveUp
       curveDrag.value = { anchor: id, startX: x, startY: y, smooth: false }
+      opts.onLiveChange?.()
       return
     }
     const pp = pendingPath.value
@@ -946,6 +998,7 @@ export function usePen(opts: {
     pp.segments.push({ kind: 'cubic', h1: lastHOut, h2: null })
     pp.anchors.push(id)
     curveDrag.value = { anchor: id, startX: x, startY: y, smooth: false }
+    opts.onLiveChange?.()
   }
 
   function curveMove(x: number, y: number) {
@@ -1244,6 +1297,61 @@ export function usePen(opts: {
     opts.onChange?.()
   }
 
+  // every transient (non-doc) draw/selection state back to rest — shared by
+  // finishSession and revert
+  function clearTransient() {
+    clearSel()
+    clearSegSel()
+    pending.value = null
+    pendingPath.value = null
+    pendingOp.value = null
+    pathDrag = null
+    resetCurveState()
+    cursor.value = null
+    dimBuffer.value = ''
+  }
+
+  // Settle the session before the host stores the drawing (Enter-commit and
+  // Done both call this, then emit `commit`): a pending path with ≥2 anchors
+  // is finished as an open path; a lone pending anchor, or a Line/Circle's
+  // placed start point, is removed (only if this draw created it — a snap
+  // onto an existing point is left alone), so no orphan points are stored.
+  // A half-armed Repeat/Mirror is dropped. Commits one history step iff the
+  // doc changed.
+  function finishSession(): void {
+    pendingOp.value = null
+    if (pendingPath.value && pendingPath.value.anchors.length >= 2) {
+      finishPath(false)
+    } else if (pendingPath.value) {
+      cleanupPendingPath()
+    }
+    const pd = pending.value
+    if (pd && pd.own) {
+      const id = pd.kind === 'line' ? pd.p1 : pd.center
+      const p = doc.value.entities.find(e => e.id === id) as any
+      if (p && p.kind === 'point' && !p.fixed && !isPointReferenced(doc.value, id)) deleteEntity(doc.value, id)
+    }
+    const sel = selection.value.slice(), segs = selectedSegments.value.slice()
+    clearTransient()
+    // keep the user's selection — settling is not deselecting (but drop ids
+    // the cleanup just deleted)
+    selection.value = sel.filter(id => doc.value.entities.some(e => e.id === id))
+    selectedSegments.value = segs
+    commitHistory()   // no-op when nothing changed (its own guard)
+  }
+
+  // Put the drawing back exactly as it was when this pen was created (not
+  // the capped undo history's oldest entry) and start history afresh. Never
+  // called by the overlay or toolbar — a host calls it on `cancel` if its
+  // cancel means "discard".
+  function revert(): void {
+    doc.value = cloneDoc(opening)
+    clearTransient()
+    status.value = 'ready'
+    initHistory()
+    opts.onChange?.()
+  }
+
   // which verbs apply to the current selection (order = display order) — the
   // pure rules in penRules.ts, fed this pen's doc + selections
   function availableConstraints(): RuleOption[] {
@@ -1281,7 +1389,9 @@ export function usePen(opts: {
     setArcRadius, setConstraintValue, removeConstraintById, onArcDimClick, onConstraintMarkClick,
     commitDimension,
     // history
-    undo, redo, canUndo, canRedo, reset, commitHistory, initHistory,
+    undo, redo, canUndo, canRedo, reset, revert, commitHistory, initHistory,
+    // session
+    finishSession,
     // keys
     onKeydown, onKeyup, onBlur,
     // delight

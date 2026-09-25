@@ -50,7 +50,7 @@ describe('usePen', () => {
   })
   it('Escape and Enter report whether they did anything, so a host can take them', () => {
     const { pen } = host()
-    const key = (k: string) => ({ key: k, metaKey: false, ctrlKey: false, shiftKey: false, preventDefault() {} }) as unknown as KeyboardEvent
+    const key = (k: string) => ({ key: k, metaKey: false, ctrlKey: false, shiftKey: false, preventDefault() {}, stopPropagation() {} }) as unknown as KeyboardEvent
     expect(pen.onKeydown(key('Escape'))).toBe(false)   // nothing pending → the host's cancel
     expect(pen.onKeydown(key('Enter'))).toBe(false)    // nothing to finish → the host's commit
     let aborted = 0
@@ -91,7 +91,7 @@ describe('usePen', () => {
     expect(pen.selection.value.slice().sort()).not.toEqual(target)
   })
   it('arrow nudge moves in screen space: exact 0.25 steps at the default view, screen-up under rotation', () => {
-    const key = (k: string, shift = false) => ({ key: k, metaKey: false, ctrlKey: false, shiftKey: shift, preventDefault() {} }) as unknown as KeyboardEvent
+    const key = (k: string, shift = false) => ({ key: k, metaKey: false, ctrlKey: false, shiftKey: shift, preventDefault() {}, stopPropagation() {} }) as unknown as KeyboardEvent
     const { doc, pen } = host()
     pen.selectTool('point'); pen.place(3, 3)
     const p = doc.value.entities[0] as any
@@ -119,5 +119,146 @@ describe('usePen', () => {
     pen.sparkle(0, 0)
     expect(pen.sparkleCount()).toBe(1)
     pen.dispose()
+  })
+})
+
+// a fake keydown that records whether the pen claimed it
+function fakeKey(k: string) {
+  const ev = {
+    key: k, metaKey: false, ctrlKey: false, shiftKey: false,
+    defaultPrevented: false, propagationStopped: false,
+    preventDefault() { ev.defaultPrevented = true },
+    stopPropagation() { ev.propagationStopped = true },
+  }
+  return ev
+}
+
+describe('usePen host contract', () => {
+  it('Delete/Backspace claim the key only when they act', () => {
+    const { pen } = host()
+    for (const k of ['Delete', 'Backspace']) {
+      const idle = fakeKey(k)
+      expect(pen.onKeydown(idle as unknown as KeyboardEvent)).toBe(false)
+      expect(idle.defaultPrevented).toBe(false)     // nothing selected, nothing pending: the host's key
+      expect(idle.propagationStopped).toBe(false)
+    }
+    pen.selectTool('point'); pen.place(1, 1)
+    const p = pen.doc.value.entities[0]!
+    pen.selectTool('select'); pen.pick(p.id)
+    const del = fakeKey('Delete')
+    expect(pen.onKeydown(del as unknown as KeyboardEvent)).toBe(true)
+    expect(del.defaultPrevented).toBe(true)
+    expect(del.propagationStopped).toBe(true)
+    expect(pen.doc.value.entities.length).toBe(0)
+  })
+  it('an Escape the pen consumes is preventDefault-ed; one it ignores is not', () => {
+    const { pen } = host()
+    const idle = fakeKey('Escape')
+    expect(pen.onKeydown(idle as unknown as KeyboardEvent)).toBe(false)
+    expect(idle.defaultPrevented).toBe(false)
+    pen.selectTool('path'); pen.pathDown(1, 1); pen.pathUp(1, 1)
+    const esc = fakeKey('Escape')
+    expect(pen.onKeydown(esc as unknown as KeyboardEvent)).toBe(true)   // cancels the path
+    expect(esc.defaultPrevented).toBe(true)
+    expect(esc.propagationStopped).toBe(true)
+  })
+  it('finishSession finishes a pending path of 2+ anchors as one step', () => {
+    const { doc, pen, changes } = host()
+    pen.selectTool('path')
+    pen.pathDown(1, 1); pen.pathUp(1, 1)
+    pen.pathDown(4, 1); pen.pathUp(4, 1)
+    const c0 = changes()
+    pen.finishSession()
+    expect(pen.pendingPath.value).toBe(null)
+    expect(doc.value.entities.filter(e => e.kind === 'path').length).toBe(1)
+    expect(changes()).toBe(c0 + 1)
+  })
+  it('finishSession leaves no orphan point from a lone anchor or a Line/Circle start', () => {
+    for (const t of ['path', 'curve', 'line', 'circle'] as const) {
+      const { doc, pen } = host()
+      pen.selectTool(t)
+      if (t === 'path') { pen.pathDown(2, 2); pen.pathUp(2, 2) }
+      else if (t === 'curve') { pen.curveDown(2, 2); pen.curveMove(3, 3); pen.curveUp(3, 3) }   // smooth: handles too
+      else pen.place(2, 2)
+      expect(doc.value.entities.length).toBeGreaterThan(0)
+      pen.finishSession()
+      expect(doc.value.entities, t).toEqual([])
+      expect(pen.pending.value).toBe(null)
+      expect(pen.pendingPath.value).toBe(null)
+      // settled: undo must not bring the orphan back, and redo lands on empty
+      pen.undo(); pen.redo()
+      expect(doc.value.entities, t).toEqual([])
+    }
+  })
+  it('finishSession keeps a Line start that snapped onto an existing point', () => {
+    const { doc, pen } = host()
+    pen.selectTool('point'); pen.place(2, 2)
+    pen.selectTool('line'); pen.place(2, 2)          // snaps onto the existing point
+    pen.finishSession()
+    expect(doc.value.entities.map(e => e.kind)).toEqual(['point'])
+  })
+  it('finishSession drops an armed Repeat/Mirror and, with nothing to settle, adds no step', () => {
+    const { pen, changes } = host()
+    pen.selectTool('line'); pen.place(1, 1); pen.place(4, 1)
+    const line = pen.doc.value.entities.find(e => e.kind === 'line')!
+    pen.selectTool('select'); pen.pick(line.id)
+    pen.armRepeat([line.id], 4)
+    expect(pen.pendingOp.value).not.toBe(null)
+    const c0 = changes()
+    pen.finishSession()
+    expect(pen.pendingOp.value).toBe(null)
+    expect(changes()).toBe(c0)
+  })
+  it('revert restores the drawing the pen was opened with and resets history', () => {
+    const doc = ref<SketchDoc>({ entities: [{ id: 'p0', kind: 'point', x: 5, y: 5 } as any], constraints: [] })
+    const opened = JSON.stringify(doc.value)
+    const view = ref<ViewMatrix>({ a: 34, b: 0, c: 0, d: -34, e: 40, f: 400 })
+    let changes = 0
+    const pen = usePen({ doc, view, onChange: () => { changes++ } })
+    pen.selectTool('point')
+    for (let i = 0; i < 205; i++) pen.place(i * 2, 20)   // more steps than the 200-entry history holds
+    ;(doc.value.entities[0] as any).x = 99               // and an in-place mutation
+    const c0 = changes
+    pen.revert()
+    expect(JSON.stringify(doc.value)).toBe(opened)
+    expect(pen.canUndo()).toBe(false)
+    expect(pen.canRedo()).toBe(false)
+    expect(changes).toBe(c0 + 1)
+    // the opening snapshot is the pen's own copy: reverting twice still works
+    pen.place(1, 1); pen.revert()
+    expect(JSON.stringify(doc.value)).toBe(opened)
+  })
+  it('a drag reports each solve through onLiveChange, and onChange only on release', () => {
+    const doc = ref<SketchDoc>({ entities: [], constraints: [] })
+    const view = ref<ViewMatrix>({ a: 34, b: 0, c: 0, d: -34, e: 40, f: 400 })
+    let live = 0, settled = 0
+    const pen = usePen({ doc, view, onChange: () => { settled++ }, onLiveChange: () => { live++ } })
+    pen.selectTool('line'); pen.place(1, 1); pen.place(4, 1)
+    const p2 = (doc.value.entities.find(e => e.kind === 'line') as any).p2
+    const s0 = settled, l0 = live
+    // what PenOverlay does on each pointermove of a select-tool point drag…
+    pen.selectTool('select')
+    pen.runSolve({ point: p2, x: 5, y: 2 })
+    pen.runSolve({ point: p2, x: 6, y: 3 })
+    pen.runSolve({ point: p2, x: 7, y: 4 })
+    expect(live - l0).toBe(3)
+    expect(settled).toBe(s0)
+    // …and on release
+    pen.commitHistory()
+    expect(settled).toBe(s0 + 1)
+    expect(live - l0).toBe(3)
+  })
+  it('a path gesture\'s first point is a live change until it settles', () => {
+    const doc = ref<SketchDoc>({ entities: [], constraints: [] })
+    const view = ref<ViewMatrix>({ a: 34, b: 0, c: 0, d: -34, e: 40, f: 400 })
+    let live = 0, settled = 0
+    const pen = usePen({ doc, view, onChange: () => { settled++ }, onLiveChange: () => { live++ } })
+    pen.selectTool('path'); pen.pathDown(1, 1); pen.pathUp(1, 1)
+    const s0 = settled
+    pen.pathDown(4, 1)
+    expect(live).toBe(1)
+    expect(settled).toBe(s0)
+    pen.pathMove(5, 2); pen.pathUp(5, 2)
+    expect(settled).toBe(s0 + 1)
   })
 })

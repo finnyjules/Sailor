@@ -4,25 +4,38 @@
 // and keyboard input into its actions, over any host, through ONE affine view
 // matrix (drawing → host-canvas pixels).
 //
-// - Drawing geometry (outline, construction, hit paths, selection highlights)
-//   is rendered in DRAWING space under `<g :transform="viewToSvg(view)">`
-//   with a non-scaling stroke, so scale, rotation and mirroring all come from
-//   the SVG transform and strokes stay crisp at any zoom.
-// - Points, badges, chips, sparkles and the live preview stay in screen space
-//   (applyView). The preview's arcs are computed in drawing space; their sweep
-//   flips only when the view is mirrored. A cubic's control points map
-//   affinely, so the preview's Bézier curves need no mirror correction.
+// HOST CONTRACT: see the block at the top of composables/pen/usePen.ts. In
+// short — `pen` is read ONCE at setup: to open a different drawing, create a
+// new pen and re-key this component (`:key`). Pass the pen a clone of the
+// stored drawing; persist with cloneDoc on `commit`. `commit` (Enter with
+// nothing left to finish) has already run pen.finishSession(); `cancel`
+// (Escape with nothing pending) leaves the drawing as is — call pen.revert()
+// if cancel means discard. `active: false` makes the overlay ignore every key
+// and pointer event (it still draws), so a host can park it without unmounting.
+//
+// - Drawing geometry (outline, construction, hit paths, selection highlights,
+//   the live draw preview) is rendered in DRAWING space under
+//   `<g :transform="viewToSvg(view)">` with a non-scaling stroke, so scale
+//   (even or uneven), rotation, skew and mirroring all come from the SVG
+//   transform and strokes stay crisp at any zoom.
+// - Points, handle arms, badges, chips and sparkles stay in screen space
+//   (applyView) so they keep a constant pixel size.
+// - Pointer positions are mapped client → SVG-local through the SVG's screen
+//   CTM, so the overlay still lands points under the cursor inside a
+//   CSS-transformed (e.g. scale()) ancestor.
 // - Pan and wheel zoom are the HOST's: it intercepts them in the capture phase
 //   on its own wrapper, before they reach this SVG.
 // - Keyboard: window keydown / keyup / blur while mounted (bubble phase). A
 //   host that owns viewport keys registers its listener in the capture phase,
-//   so it runs first, and stops propagation only for keys it consumed.
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+//   so it runs first, and stops propagation only for keys it consumed. Every
+//   key the overlay acts on — including an Escape/Enter it turns into
+//   `cancel`/`commit` — is preventDefault-ed and stopPropagation-ed.
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import type { SketchDoc, EntityId, ConstraintKind, SegmentSpec } from '~/lib/sketch/model'
 import { addPoint } from '~/lib/sketch/edit'
 import { sketchPathData, entityPath } from '~/lib/sketch/sketchPath'
 import { constraintMarks, arcDimensionMarks } from '~/lib/sketch/annotate'
-import { applyView, invertView, pxPerUnit, isMirrored, viewToSvg, type ViewMatrix } from '~/lib/sketch/view'
+import { applyView, invertView, viewToSvg, type ViewMatrix } from '~/lib/sketch/view'
 import { snapAngle, bowArc, SPARKLE_LIFETIME_MS, isTypingInField, type Pen } from '~/composables/pen/usePen'
 
 const props = withDefaults(defineProps<{
@@ -31,14 +44,16 @@ const props = withDefaults(defineProps<{
   width: number
   height: number
   cursor?: string
-}>(), { cursor: 'crosshair' })
+  // false: ignore every key and pointer event (still draws)
+  active?: boolean
+}>(), { cursor: 'crosshair', active: true })
 const emit = defineEmits<{
-  (e: 'commit'): void   // Enter with nothing left to finish
-  (e: 'cancel'): void   // Escape with nothing pending
+  (e: 'commit'): void   // Enter with nothing left to finish — pen.finishSession() has run
+  (e: 'cancel'): void   // Escape with nothing pending — the host decides (pen.revert() to discard)
 }>()
 
-// the pen is fixed for the overlay's lifetime; its refs are unwrapped here so
-// the template reads them bare
+// the pen is read ONCE — fixed for the overlay's lifetime (re-key the overlay
+// to swap it); its refs are unwrapped here so the template reads them bare
 const {
   doc, tool, showLabels, status, selection, selectedSegments, pendingPath, pendingOp,
   cursor: penCursor, dimBuffer, sparkles, sparkleClock,
@@ -46,7 +61,7 @@ const {
   place, pathDown, pathMove, pathUp, getPathDrag, jointInfoForSegment,
   curveDown, curveMove, curveUp, getCurveDrag, getHeldHandles, handleIds,
   runSolve, applyRepeat, applyMirror, cancelPendingOp,
-  onArcDimClick, onConstraintMarkClick, commitHistory,
+  onArcDimClick, onConstraintMarkClick, commitHistory, finishSession,
 } = props.pen
 
 const svgEl = ref<SVGSVGElement | null>(null)
@@ -210,20 +225,19 @@ function screenPt(id: EntityId): { x: number; y: number } | null {
   return w ? toScreen(w) : null
 }
 
-// live path draw preview (screen space): the already-placed pending segments,
-// plus either a rubber band out to the cursor (hovering) or — mid drag past
-// the bow threshold — the just-placed segment bending live under the pointer.
-// Arcs are solved in drawing space; a screen arc's radius is r·pxPerUnit and
-// its sweep flips only for a mirrored view. Pure read; never mutates the doc.
+// live path draw preview, in DRAWING space (rendered under svgTransform like
+// the outline, so it coincides with what gets committed under any view —
+// uneven scale, skew and mirroring included): the already-placed pending
+// segments, plus either a rubber band out to the cursor (hovering) or — mid
+// drag past the bow threshold — the just-placed segment bending live under
+// the pointer. Arcs use the same sweep/large convention as sketchPath's
+// committed outline. Pure read; never mutates the doc.
 const previewD = computed(() => {
   if (tool.value !== 'path' && tool.value !== 'curve') return ''
   const pp = pendingPath.value
   if (!pp || pp.anchors.length === 0) return ''
-  const first = screenPt(pp.anchors[0]!)
+  const first = worldPt(pp.anchors[0]!)
   if (!first) return ''
-  const view = props.view
-  const k = pxPerUnit(view)
-  const mirrored = isMirrored(view)
   let d = `M ${first.x} ${first.y}`
   const segCount = pp.segments.length
   const lastAnchorId = pp.anchors[pp.anchors.length - 1]!
@@ -235,75 +249,60 @@ const previewD = computed(() => {
     const seg = pp.segments[i]!
     const fromId = pp.anchors[i]!
     const toId = pp.anchors[i + 1]!
-    const to = screenPt(toId)
+    const to = worldPt(toId)
     if (!to) break
     if (bowing && i === segCount - 1) {
       // just-placed segment bowing live under the pointer
       const p0 = worldPt(fromId)
-      const p1 = worldPt(toId)
       const joint = jointInfoForSegment(pp, i)
-      const arc = (p0 && p1 && penCursor.value) ? bowArc(p0, p1, penCursor.value, joint?.tangentDir ?? null) : null
-      if (arc) {
-        const rScreen = arc.r * k
-        const sweepScreen = (mirrored ? 1 - arc.sweep : arc.sweep) as 0 | 1
-        d += ` A ${rScreen} ${rScreen} 0 ${arc.large} ${sweepScreen} ${to.x} ${to.y}`
-      } else {
-        d += ` L ${to.x} ${to.y}`
-      }
+      const arc = (p0 && penCursor.value) ? bowArc(p0, to, penCursor.value, joint?.tangentDir ?? null) : null
+      if (arc) d += ` A ${arc.r} ${arc.r} 0 ${arc.large} ${arc.sweep} ${to.x} ${to.y}`
+      else d += ` L ${to.x} ${to.y}`
     } else if (seg.kind === 'arc') {
       const from = worldPt(fromId)
       const c = worldPt(seg.center)
-      const tw = worldPt(toId)
-      if (from && c && tw) {
+      if (from && c) {
         const r = Math.hypot(from.x - c.x, from.y - c.y)
         const a0 = Math.atan2(from.y - c.y, from.x - c.x)
-        const a1 = Math.atan2(tw.y - c.y, tw.x - c.x)
+        const a1 = Math.atan2(to.y - c.y, to.x - c.x)
         const TAU = Math.PI * 2
         const ccw = ((a1 - a0) % TAU + TAU) % TAU
         const span = seg.sweep === 1 ? ccw : TAU - ccw
         const large = span > Math.PI ? 1 : 0
-        const sweepScreen = (mirrored ? 1 - seg.sweep : seg.sweep) as 0 | 1
-        d += ` A ${r * k} ${r * k} 0 ${large} ${sweepScreen} ${to.x} ${to.y}`
+        d += ` A ${r} ${r} 0 ${large} ${seg.sweep} ${to.x} ${to.y}`
       } else d += ` L ${to.x} ${to.y}`
     } else if (seg.kind === 'cubic') {
-      const c1 = (seg.h1 && screenPt(seg.h1)) || screenPt(fromId) || to
+      const c1 = (seg.h1 && worldPt(seg.h1)) || worldPt(fromId) || to
       if (dragging && curveDrag!.smooth && i === segCount - 1 && penCursor.value) {
         // bending live: c2 is the pointer mirrored through the point being
         // placed (what addSmoothHandles will make of it on release)
-        const ptr = toScreen(penCursor.value)
+        const ptr = penCursor.value
         d += ` C ${c1.x} ${c1.y} ${2 * to.x - ptr.x} ${2 * to.y - ptr.y} ${to.x} ${to.y}`
       } else {
-        const c2 = (seg.h2 && screenPt(seg.h2)) || to
+        const c2 = (seg.h2 && worldPt(seg.h2)) || to
         d += ` C ${c1.x} ${c1.y} ${c2.x} ${c2.y} ${to.x} ${to.y}`
       }
     } else {
       d += ` L ${to.x} ${to.y}`
     }
   }
+  const last = worldPt(lastAnchorId)
   if (tool.value === 'curve') {
     // rubber band: a curve out of the last point's held out-handle, if any
-    if (!dragging && penCursor.value) {
-      const last = screenPt(lastAnchorId)
-      if (last) {
-        const ptr = toScreen(penCursor.value)
-        const hId = getHeldHandles().lastHOut
-        const h = hId ? screenPt(hId) : null
-        d += h ? ` M ${last.x} ${last.y} C ${h.x} ${h.y} ${ptr.x} ${ptr.y} ${ptr.x} ${ptr.y}`
-               : ` M ${last.x} ${last.y} L ${ptr.x} ${ptr.y}`
-      }
+    if (!dragging && penCursor.value && last) {
+      const ptr = penCursor.value
+      const hId = getHeldHandles().lastHOut
+      const h = hId ? worldPt(hId) : null
+      d += h ? ` M ${last.x} ${last.y} C ${h.x} ${h.y} ${ptr.x} ${ptr.y} ${ptr.x} ${ptr.y}`
+             : ` M ${last.x} ${last.y} L ${ptr.x} ${ptr.y}`
     }
     return d
   }
-  if (!bowing && penCursor.value) {
-    const last = screenPt(lastAnchorId)
-    const lastWorld = worldPt(lastAnchorId)
-    if (last) {
-      // Shift held → show the 45°-snapped cursor position, not the raw one,
-      // so the rubber band matches where pathDown will place the anchor.
-      const cursorWorld = penCursor.value.shift && lastWorld ? snapAngle(lastWorld, penCursor.value) : penCursor.value
-      const ptr = toScreen(cursorWorld)
-      d += ` M ${last.x} ${last.y} L ${ptr.x} ${ptr.y}`
-    }
+  if (!bowing && penCursor.value && last) {
+    // Shift held → show the 45°-snapped cursor position, not the raw one,
+    // so the rubber band matches where pathDown will place the anchor.
+    const ptr = penCursor.value.shift ? snapAngle(last, penCursor.value) : penCursor.value
+    d += ` M ${last.x} ${last.y} L ${ptr.x} ${ptr.y}`
   }
   return d
 })
@@ -421,11 +420,22 @@ function handleIdsForAnchor(id: EntityId): EntityId[] {
   return out
 }
 
-// svg-local pixels — the frame the view matrix maps drawing space into
+// svg-local pixels — the frame the view matrix maps drawing space into.
+// Mapped through the inverse screen CTM, so a CSS transform on an ancestor
+// (a host's scale() zoom wrapper) is undone too; the bounding-rect fallback
+// still corrects for a uniform/uneven scale.
 function localXY(ev: PointerEvent) {
   const el = svgEl.value ?? (ev.currentTarget as SVGSVGElement)
+  const ctm = el.getScreenCTM?.()
+  const inv = ctm && typeof DOMPoint !== 'undefined' ? ctm.inverse() : null
+  if (inv && Number.isFinite(inv.a)) {
+    const p = new DOMPoint(ev.clientX, ev.clientY).matrixTransform(inv)
+    return { x: p.x, y: p.y }
+  }
   const r = el.getBoundingClientRect()
-  return { x: ev.clientX - r.left, y: ev.clientY - r.top }
+  const kx = r.width > 0 ? props.width / r.width : 1
+  const ky = r.height > 0 ? props.height / r.height : 1
+  return { x: (ev.clientX - r.left) * kx, y: (ev.clientY - r.top) * ky }
 }
 // null for a singular view: the event is ignored rather than mapped anywhere
 function toDrawing(p: { x: number; y: number }): { x: number; y: number } | null {
@@ -437,6 +447,7 @@ function drawingXY(ev: PointerEvent) {
 }
 
 function onEntityPointerDown(id: EntityId, ev: PointerEvent) {
+  if (!props.active) return
   // guided Mirror: a line click supplies the axis
   if (tool.value === 'select' && pendingOp.value?.kind === 'mirror' && (doc.value.entities.find(e => e.id === id) as any)?.kind === 'line') {
     applyMirror(pendingOp.value.units, id)
@@ -447,7 +458,7 @@ function onEntityPointerDown(id: EntityId, ev: PointerEvent) {
   if (tool.value === 'select') { pick(id, ev.shiftKey); ev.stopPropagation() }
 }
 function onPointerDownPoint(id: EntityId, ev: PointerEvent) {
-  if (tool.value !== 'select') return
+  if (!props.active || tool.value !== 'select') return
   // guided Repeat: this point is the ring center
   if (pendingOp.value?.kind === 'repeat') {
     applyRepeat(pendingOp.value.units, id, pendingOp.value.count)
@@ -460,13 +471,14 @@ function onPointerDownPoint(id: EntityId, ev: PointerEvent) {
   ev.stopPropagation()
 }
 function onPointerUpPoint(id: EntityId, ev: PointerEvent) {
+  if (!props.active) return
   // a click without a drag replaces the selection (or shift-toggles this
   // point); the selection only changes here, once we know it was a click.
   if (tool.value === 'select' && dragId === id && !moved) { pick(id, ev.shiftKey); ev.stopPropagation() }
   dragId = null; dragHandleIds = []; dragLast = null
 }
 function onSegmentPointerDown(pathId: EntityId, segIndex: number, ev: PointerEvent) {
-  if (tool.value !== 'select') return
+  if (!props.active || tool.value !== 'select') return
   // guided ops treat a path-body click as picking the whole path (the unit)
   if (pendingOp.value) { pick(pathId, ev.shiftKey); ev.stopPropagation(); return }
   // a plain click selects the WHOLE path; Alt/Option-click drills in to the
@@ -476,6 +488,7 @@ function onSegmentPointerDown(pathId: EntityId, segIndex: number, ev: PointerEve
   ev.stopPropagation()
 }
 function onPointerDownSvg(ev: PointerEvent) {
+  if (!props.active) return
   if (tool.value === 'select') {
     // guided Repeat with an empty-canvas click: drop a fresh FIXED center
     // where they clicked and repeat around it. Mirror needs a real line, so
@@ -504,6 +517,7 @@ function onPointerDownSvg(ev: PointerEvent) {
   place(x, y)
 }
 function onPointerMove(ev: PointerEvent) {
+  if (!props.active) return
   if (marqueeStart) {
     if (ev.buttons === 0) return   // button released off-canvas — pointerup/leave settles it
     const { x, y } = localXY(ev)
@@ -542,6 +556,7 @@ function onPointerMove(ev: PointerEvent) {
   runSolve({ point: dragId, x, y })
 }
 function onPointerUp(ev: PointerEvent) {
+  if (!props.active) return
   if (tool.value === 'path' && getPathDrag()) {
     const w = drawingXY(ev)
     if (w) pathUp(w.x, w.y)
@@ -573,9 +588,27 @@ function onPointerUp(ev: PointerEvent) {
   moved = false
 }
 function onPointerLeave(ev: PointerEvent) {
+  if (!props.active) return
   onPointerUp(ev)
   penCursor.value = null
 }
+
+// badge / chip clicks, gated like every other input
+function onMarkClick(m: Parameters<typeof onConstraintMarkClick>[0], ev: MouseEvent) {
+  if (props.active) onConstraintMarkClick(m, ev)
+}
+function onDimClick(m: Parameters<typeof onArcDimClick>[0]) {
+  if (props.active) onArcDimClick(m)
+}
+
+// parked mid-gesture: drop the overlay's own live gesture state (a marquee or
+// a point drag) so nothing resumes when it becomes active again
+watch(() => props.active, (on) => {
+  if (on) return
+  cancelMarquee()
+  if (moved && tool.value === 'select') commitHistory()
+  dragId = null; dragHandleIds = []; dragLast = null; moved = false
+})
 
 // ---------- keyboard ----------
 
@@ -589,16 +622,26 @@ function focusedControl(ev: KeyboardEvent): boolean {
   const a = typeof document !== 'undefined' ? document.activeElement : null
   return !!(t?.closest?.(CONTROLS) || a?.closest?.(CONTROLS))
 }
+// Key ownership: a key the pen acts on is preventDefault-ed and
+// stopPropagation-ed inside pen.onKeydown; an Escape/Enter the overlay turns
+// into `cancel`/`commit` is too, so a host that closes on Escape (unless
+// defaultPrevented) does not also close. Keys nobody acts on pass untouched.
 function onKeydown(ev: KeyboardEvent) {
-  if (isTypingInField()) return
+  if (!props.active || isTypingInField()) return
   const onControl = (ev.key === 'Enter' || ev.key === 'Escape') && focusedControl(ev)
   if (onControl && ev.key === 'Enter') return
   const handled = props.pen.onKeydown(ev, { cancelGesture: cancelMarquee })
   if (handled || onControl) return
-  if (ev.key === 'Escape') emit('cancel')
-  else if (ev.key === 'Enter' && !(ev.metaKey || ev.ctrlKey)) emit('commit')
+  if (ev.key === 'Escape') {
+    ev.preventDefault(); ev.stopPropagation()
+    emit('cancel')
+  } else if (ev.key === 'Enter' && !(ev.metaKey || ev.ctrlKey)) {
+    ev.preventDefault(); ev.stopPropagation()
+    finishSession()   // no orphan start point / lone anchor reaches the host
+    emit('commit')
+  }
 }
-function onKeyup(ev: KeyboardEvent) { props.pen.onKeyup(ev) }
+function onKeyup(ev: KeyboardEvent) { if (props.active) props.pen.onKeyup(ev) }
 function onBlur() { props.pen.onBlur() }
 
 onMounted(() => {
@@ -615,7 +658,7 @@ onUnmounted(() => {
 
 <template>
   <svg ref="svgEl" :width="width" :height="height"
-       :style="{ position: 'absolute', left: 0, top: 0, display: 'block', touchAction: 'none', cursor }"
+       :style="{ position: 'absolute', left: 0, top: 0, display: 'block', touchAction: 'none', cursor, pointerEvents: active ? undefined : 'none' }"
        @pointerdown="onPointerDownSvg" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointerleave="onPointerLeave">
     <!-- drawing space: the view matrix does scale, rotation and mirroring -->
     <g :transform="svgTransform">
@@ -646,8 +689,11 @@ onUnmounted(() => {
     <!-- screen space -->
     <line v-for="(a, i) in handleArms" :key="'arm-' + i" :x1="a.x1" :y1="a.y1" :x2="a.x2" :y2="a.y2"
           :stroke="HANDLE_COLOR" stroke-width="1" pointer-events="none" data-handle-arm />
-    <path v-if="previewD" :d="previewD" fill="none" stroke="#6366f1" stroke-width="1.5" stroke-dasharray="5 3"
-          pointer-events="none" data-path-preview />
+    <!-- live draw preview: drawing space, like the outline it previews -->
+    <g v-if="previewD" :transform="svgTransform" pointer-events="none">
+      <path :d="previewD" fill="none" stroke="#6366f1" stroke-width="1.5" stroke-dasharray="5 3"
+            vector-effect="non-scaling-stroke" data-path-preview />
+    </g>
     <g v-if="previewDragHandles" pointer-events="none" data-drag-handles>
       <line :x1="previewDragHandles.anchor.x" :y1="previewDragHandles.anchor.y" :x2="previewDragHandles.ptr.x" :y2="previewDragHandles.ptr.y"
             :stroke="HANDLE_COLOR" stroke-width="1" />
@@ -660,18 +706,18 @@ onUnmounted(() => {
             :fill="pointFill(p)" :stroke="pointStroke(p, handle)" stroke-width="1.5"
             :style="{ cursor: tool === 'select' ? 'grab' : 'crosshair' }"
             @pointerdown="(ev) => onPointerDownPoint(p.id, ev)" @pointerup="(ev) => onPointerUpPoint(p.id, ev)"
-:pointer-events="handle ? 'all' : null"
+            :pointer-events="active ? (handle ? 'all' : undefined) : 'none'"
             :data-point="p.id" :data-construction="p.construction ? '' : null" :data-handle="handle ? '' : null" />
     <template v-if="showLabels">
-      <g v-for="{ m, s } in visibleMarks" :key="m.id" class="constraint-badge" pointer-events="auto" style="cursor: pointer"
+      <g v-for="{ m, s } in visibleMarks" :key="m.id" class="constraint-badge" :pointer-events="active ? 'auto' : 'none'" style="cursor: pointer"
          :data-constraint="m.id" :data-constraint-kind="m.kind"
-         @pointerdown.stop @click.stop="onConstraintMarkClick(m, $event)">
+         @pointerdown.stop @click.stop="onMarkClick(m, $event)">
         <title>{{ m.text != null ? 'click to edit · shift+click to remove' : 'click to remove' }}</title>
         <rect :x="s.x + 6" :y="s.y - 16" :width="m.text ? 30 : 16" height="14" rx="3" fill="#111827" opacity="0.85" />
         <text :x="s.x + 9" :y="s.y - 5" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">{{ m.glyph }}{{ m.text ? ' ' + m.text : '' }}</text>
       </g>
-      <g v-for="{ m, s } in arcDims" :key="m.id" pointer-events="auto" style="cursor: pointer"
-         @pointerdown.stop @click.stop="onArcDimClick(m)">
+      <g v-for="{ m, s } in arcDims" :key="m.id" :pointer-events="active ? 'auto' : 'none'" style="cursor: pointer"
+         @pointerdown.stop @click.stop="onDimClick(m)">
         <rect :x="s.x + 6" :y="s.y - 16" width="34" height="14" rx="3" fill="#111827" opacity="0.85" />
         <text :x="s.x + 9" :y="s.y - 5" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">{{ m.text }}</text>
       </g>

@@ -18,20 +18,26 @@ import {
 } from 'lucide-vue-next'
 
 const props = defineProps<{ pen: Pen }>()
+// Same event vocabulary as PenOverlay (see the HOST CONTRACT in usePen.ts).
 const emit = defineEmits<{
-  done: []     // Done — the host finishes/commits the pen session
-  cancel: []   // Cancel — the host discards it
+  commit: []   // Done — pen.finishSession() has run; the host stores the drawing
+  cancel: []   // Cancel — the host decides (pen.revert() to discard)
 }>()
 
-// the pen is fixed for this component's lifetime; unwrap its refs for the
-// template, same convention as PenOverlay.
+// the pen is read ONCE — fixed for this component's lifetime (re-key it to
+// swap pens); unwrap its refs for the template, same convention as PenOverlay.
 const {
   tool, guideMode, showLabels, selection, selectedSegments, opHint,
   selectTool, toggleGuideMode, toggleShowLabels,
   availableConstraints, applyWithValue, fixSelected, repeatPrompt, doMirror,
   flip, makeConstruction, del, finishPath, cancelPendingOp,
-  undo, redo, canUndo, canRedo,
+  undo, redo, canUndo, canRedo, finishSession,
 } = props.pen
+
+function done() {
+  finishSession()
+  emit('commit')
+}
 
 // Tool row: Select, Pen (arcs), Curve (Bézier), Line, Circle, Point. Pen and
 // Curve add to the same path. Order and tooltip copy match the spec's
@@ -112,7 +118,7 @@ const isSelectIdle = computed(() => tool.value === 'select' && !hasAnySelection.
       </template>
       <span class="sep" />
       <StudioButton variant="secondary" data-act="cancel" @click="emit('cancel')">Cancel</StudioButton>
-      <StudioButton variant="primary" data-act="done" @click="emit('done')">Done</StudioButton>
+      <StudioButton variant="primary" data-act="done" @click="done()">Done</StudioButton>
     </div>
 
     <div class="hint-wrap">

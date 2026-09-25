@@ -25,12 +25,18 @@ const ready = ref(false)
 // (34px/unit, origin lower-left of a 680x460 board) or, with the dev flag
 // ?view=rotated, a 30° rotation with no y-flip (proves the pen draws through
 // any similarity view, mirrored or not).
+// ?view=uneven is an uneven-scale, skewed, mirrored view (34 px/unit across,
+// 20 px/unit up, y leaning right) — not a similarity, so it proves the live
+// preview is drawn in drawing space like the outline.
 const route = useRoute()
 const ROTATED = route.query.view === 'rotated'
+const UNEVEN = route.query.view === 'uneven'
 const ROT = Math.PI / 6
 const BASE = ROTATED
   ? { a: Math.cos(ROT), b: Math.sin(ROT), c: -Math.sin(ROT), d: Math.cos(ROT) }
-  : { a: 1, b: 0, c: 0, d: -1 }
+  : UNEVEN
+    ? { a: 1, b: 0, c: 0.25, d: -20 / 34 }
+    : { a: 1, b: 0, c: 0, d: -1 }
 // the rotated default keeps the board's middle (world 9, 6.5) at the canvas middle
 const DEFAULT_PAN = ROTATED
   ? { x: 340 - 34 * (BASE.a * 9 + BASE.c * 6.5), y: 230 - 34 * (BASE.b * 9 + BASE.d * 6.5) }
@@ -112,11 +118,12 @@ const {
   commitDimension, undo, redo, canUndo, canRedo, reset, commitHistory, sparkle, sparkleCount,
 } = pen
 
-// PenToolbar's Done/Cancel just log into `status` here — the dev page has no
+// The pen's `commit` / `cancel` (from the overlay's Enter/Escape and the
+// toolbar's Done/Cancel) just log into `status` here — the dev page has no
 // "finished session" concept of its own (unlike the Frame editor, which will
-// actually commit/discard the drawing).
-function handleToolbarDone() { status.value = 'done' }
-function handleToolbarCancel() { status.value = 'cancelled' }
+// store the drawing on commit and may pen.revert() on cancel).
+function handlePenCommit() { status.value = 'done' }
+function handlePenCancel() { status.value = 'cancelled' }
 
 // keyboard: the viewport keys (⌘0 fit, Space pan) are the page's. This
 // listener is registered on window in the CAPTURE phase, so it runs before
@@ -297,10 +304,11 @@ onUnmounted(() => {
     <div :style="{ position: 'relative', width: CANVAS_W + 'px', height: CANVAS_H + 'px', background: '#fafafa', borderRadius: '8px', overflow: 'hidden', touchAction: 'none' }"
          @pointerdown.capture="onCanvasPointerDown" @pointermove.capture="onCanvasPointerMove"
          @pointerup.capture="onCanvasPointerUp" @pointerleave="onCanvasPointerLeave" @wheel="onWheel">
-      <PenOverlay :pen="pen" :view="view" :width="CANVAS_W" :height="CANVAS_H" :cursor="svgCursor" />
+      <PenOverlay :pen="pen" :view="view" :width="CANVAS_W" :height="CANVAS_H" :cursor="svgCursor"
+                  @commit="handlePenCommit" @cancel="handlePenCancel" />
     </div>
     <!-- the dev page has no overlay dock, so it places the toolbar below the
          canvas — a host with one (the Frame editor) puts it there instead. -->
-    <PenToolbar :pen="pen" style="margin-top: 12px" @done="handleToolbarDone" @cancel="handleToolbarCancel" />
+    <PenToolbar :pen="pen" style="margin-top: 12px" @commit="handlePenCommit" @cancel="handlePenCancel" />
   </div>
 </template>
