@@ -7,8 +7,9 @@ import { X } from 'lucide-vue-next'
 import { CURRENT, isTakesWorking, takesStatus, type TakesSession } from '~/lib/prompt/takesSession'
 
 // `saving`: a Keep is being saved (effect takes, stage 5) — Keep is off until it settles.
-// `error`: why the last Keep failed, shown on the strip while it stays open.
-const props = withDefaults(defineProps<{ session: TakesSession; saving?: boolean; error?: string | null }>(), { saving: false, error: null })
+// `error`: why the last Keep failed (or why takes were refused), shown on the strip while it stays open.
+// `moreNote`: what "Three more" will cost (a paid effect set), shown on the button before the click.
+const props = withDefaults(defineProps<{ session: TakesSession; saving?: boolean; error?: string | null; moreNote?: string | null }>(), { saving: false, error: null, moreNote: null })
 const emit = defineEmits<{ hover: [id: string | null]; choose: [id: string]; keep: [id: string]; more: []; close: [] }>()
 
 const working = computed(() => isTakesWorking(props.session))
@@ -32,7 +33,7 @@ function onFocusOut(e: FocusEvent) {
           type="button" :disabled="working || session.loopDone === false"
           class="rounded-md border border-[#2a2a2a] bg-[#1e1f23] px-2.5 py-0.5 text-white/75 transition hover:text-white disabled:opacity-40"
           @click="emit('more')"
-        >Three more</button>
+        >Three more<template v-if="moreNote"> · <span data-testid="prompt-takes-more-note" class="tabular-nums">{{ moreNote }}</span></template></button>
         <button
           type="button" aria-label="Close takes"
           class="grid size-6 place-items-center rounded-md text-white/45 transition hover:bg-white/10 hover:text-white/85"
@@ -72,7 +73,7 @@ function onFocusOut(e: FocusEvent) {
           <span class="label text-white/35">Working…</span>
         </template>
         <template v-else>
-          <span class="thumb grid place-items-center bg-white/[0.03] text-[11px] text-white/40">Didn’t come back</span>
+          <span class="thumb grid place-items-center bg-white/[0.03] px-1 text-center text-[11px] text-white/40">{{ t.reason === 'credits' ? 'Not enough credits' : 'Didn’t come back' }}</span>
           <span class="label text-white/35">Take {{ i + 1 }}</span>
         </template>
       </div>

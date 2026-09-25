@@ -5,6 +5,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { defineComponent, h, shallowRef, ref, computed } from 'vue'
 import { mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
+import { toast } from 'vue-sonner'
 
 ;(globalThis as any).useLocalSettings = () => ({ getLocalSetting: () => 'k' })
 ;(globalThis as any).useRuntimeConfig = () => ({ public: { hostedMode: false } })
@@ -26,6 +28,7 @@ vi.mock('~/lib/shaderfx/catalogStore', async orig => ({
 
 import { useCanvasPrompt } from '~/composables/useCanvasPrompt'
 import { DISPATCH_MESSAGES } from '~/lib/prompt/canvasDispatch'
+import { BUSY_NOTICE } from '~/lib/prompt/notices'
 
 function fakeEffects() {
   const session = shallowRef<any>(null)
@@ -38,9 +41,11 @@ function fakeEffects() {
 }
 function fakeCanvas() {
   const node = { id: 's1', type: 'shader-effect', data: { title: 'Water ripple' } }
+  // Reactive, as VueNodeCanvas's getNodes() (its Vue Flow nodes ref) is.
+  const nodes = ref<any[]>([node, { id: 'other', type: 'artifact-image', data: {} }])
   return {
     agentSnapshot: vi.fn(), agentPreview: vi.fn(), agentSelection: [{ id: 's1', title: 'Water ripple', type: 'shader-effect', hasImages: false }],
-    getNodes: () => [node], getEdges: () => [],
+    getNodes: () => nodes.value, getEdges: () => [], nodes,
   }
 }
 
@@ -57,7 +62,7 @@ function setup(o: { route?: any; reply?: boolean } = {}) {
   let api!: ReturnType<typeof useCanvasPrompt>
   const c = fakeCanvas()
   mounted.push(mount(defineComponent({ setup() { api = useCanvasPrompt(() => c, { route, effects: effects as any }); return () => h('div') } })))
-  return { api, effects, route, replies }
+  return { api, effects, route, replies, canvas: c }
 }
 const setMode = (detail: object) => window.dispatchEvent(new CustomEvent('sailor:promptMode', { detail }))
 
@@ -208,5 +213,37 @@ describe('useCanvasPrompt: new effects on a shader node', () => {
     await api.submit('what does this do?')
     expect(effects.close).toHaveBeenCalled()
     expect(api.takes.value).toBeNull()
+  })
+
+  it('deleting the node an effect set previews on ends the set (nothing more is billed, no Keep lands nowhere)', async () => {
+    const { api, effects, canvas } = setup()
+    setMode({ label: 'Remix', kind: 'new-effect', nodeId: 's1' })
+    await api.submit('rain')
+    effects.running.value = true
+    // Another node going leaves the set alone.
+    canvas.nodes.value = canvas.nodes.value.filter((n: any) => n.id !== 'other'); await nextTick()
+    expect(effects.close).not.toHaveBeenCalled()
+    canvas.nodes.value = []; await nextTick()
+    expect(effects.close).toHaveBeenCalledTimes(1)
+    expect(api.takes.value).toBeNull()
+  })
+
+  it('"Three more" on an effect set carries the price; nothing when no effect set is open', async () => {
+    const { api } = setup()
+    expect(api.takesMoreNote.value).toBeNull()
+    setMode({ label: 'Remix', kind: 'new-effect', nodeId: 's1' })
+    await api.submit('rain')
+    expect(api.takesMoreNote.value).toBe('~$0.24–0.42')
+  })
+
+  it('Make one / Remix mid-job says why nothing happens (the studios’ busy toast)', async () => {
+    const { api, effects } = setup()
+    setMode({ label: 'Remix', kind: 'new-effect', nodeId: 's1' })
+    await api.submit('rain')
+    effects.running.value = true
+    vi.mocked(toast.info).mockClear()
+    setMode({ label: 'New effect', kind: 'new-effect', nodeId: 's1' })
+    expect(toast.info).toHaveBeenCalledWith(BUSY_NOTICE)
+    expect(api.mode.value).toBeNull()
   })
 })

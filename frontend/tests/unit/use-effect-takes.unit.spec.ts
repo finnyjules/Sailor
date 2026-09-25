@@ -142,6 +142,32 @@ describe('useEffectTakes', () => {
     expect(visible).not.toMatch(/402|\/api|Payment Required|model error/)
   })
 
+  it('some slots refused for credits (the hold): their tiles say so and the strip gives the credits sentence', async () => {
+    const refusal = Object.assign(new Error('[POST] "/api/shader-gen": 402 Payment Required'), { statusCode: 402 })
+    // Slot 0 comes back; slots 1 and 2 are refused by the hosted meter.
+    const callModel = vi.fn(async (prompt: string) => {
+      const s = slotOf(prompt)
+      if (s === 0) return { text: JSON.stringify(SPIKE_TAKES.rain![0]) }
+      throw refusal
+    })
+    const { api } = setup({ callModel })
+    await api.start('rain', target())
+    const tiles = api.session.value!.tiles
+    expect(tiles.filter(t => t.state === 'ready')).toHaveLength(1)
+    expect(tiles.filter(t => t.state === 'failed').map(t => t.reason)).toEqual(['credits', 'credits'])
+    expect(api.error.value).toBe(EFFECT_MESSAGES.noCredits)
+  })
+
+  it('takes that fail their checks are not called credits refusals', async () => {
+    const judge = vi.fn(() => ({ pass: false, flags: ['blank'], thumbnail: '' }))
+    const { api, release } = setup({ renderer: () => ({ ...renderer, judge }) })
+    const run = api.start('rain', target())
+    for (let r = 0; r < 3; r++) for (let s = 0; s < 3; s++) release(s, r)
+    await run
+    expect(api.session.value!.tiles.every(t => t.state === 'failed' && !t.reason)).toBe(true)
+    expect(api.error.value).toBe('')
+  })
+
   it('each set\'s take renderer is released: one live at most, none once a set ends', async () => {
     let live = 0, made = 0
     const renderers = () => { made++; live++; let gone = false; return { ...renderer, dispose: () => { if (!gone) { gone = true; live-- } } } }

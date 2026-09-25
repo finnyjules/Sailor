@@ -58,6 +58,24 @@ describe('PromptTakes', () => {
     expect(done.emitted('close')).toHaveLength(1)
     expect(done.text()).toContain('Three takes · hover to preview, Keep one')
   })
+  it('an effect set\'s "Three more" shows its price before the click; a Variations set shows none', () => {
+    const paid = mount(PromptTakes, { props: { session: session(3), moreNote: '~$0.24–0.42' } })
+    const more = paid.findAll('button').find(b => b.text().startsWith('Three more'))!
+    expect(more.text()).toBe('Three more · ~$0.24–0.42')
+    expect(more.get('[data-testid="prompt-takes-more-note"]').text()).toBe('~$0.24–0.42')
+    const free = mount(PromptTakes, { props: { session: session(3) } })
+    expect(free.find('[data-testid="prompt-takes-more-note"]').exists()).toBe(false)
+  })
+  it('a tile refused for want of credits says so, not "Didn’t come back"', () => {
+    const s = session(1)
+    const tiles = s.tiles.map((x, i) => (i === 0 ? x : { ...x, state: 'failed' as const }))
+    tiles[2] = { ...tiles[2]!, reason: 'credits' as const }
+    const w = mount(PromptTakes, { props: { session: { ...s, tiles } } })
+    const shown = w.findAll('[data-testid="prompt-take-tile"]').map(x => x.text())
+    expect(shown[1]).toContain('Didn’t come back')
+    expect(shown[2]).toContain('Not enough credits')
+    expect(shown[2]).not.toContain('Didn’t come back')
+  })
   it('tabbing out of the strip goes back to the version at open; moving within it does not', async () => {
     const w = mount(PromptTakes, { props: { session: session(3) }, attachTo: document.body })
     const root = w.get('[data-testid="prompt-takes"]')

@@ -348,6 +348,8 @@ export function useStudioPrompt(
   const takesSaving = computed(() => !!fx.session.value && !!fx.saving?.value)
   /** The price of what a new-effect chip will do (spec §7.2), shown before anything runs. */
   const modeNote = computed<string | null>(() => (mode.value?.kind === 'new-effect' ? shaderGenEstimateText(hosted()) : null))
+  /** "Three more" on an effect set starts another paid set: its price shows on the button first. */
+  const takesMoreNote = computed<string | null>(() => (fx.session.value ? shaderGenEstimateText(hosted()) : null))
 
   // --- changes and answers ----------------------------------------------------
   function approve() { worker()?.keep() }
@@ -364,7 +366,7 @@ export function useStudioPrompt(
 
   return {
     chipLabel, suggestions, mode, modeNote, working, workingLabel, disabled, editLocked, lockedNote, focusTick,
-    card, takes, takesSaving, takesError, effectsOpen, answerCard, worker, notify,
+    card, takes, takesSaving, takesError, takesMoreNote, effectsOpen, answerCard, worker, notify,
     submit, runKind, setMode, clearMode, stop, requestFocus,
     previewTake, chooseTake, keepTake, moreTakes, closeTakes, endEffects,
     approve, rejectAll, dismissAnswer, runFollowUp,

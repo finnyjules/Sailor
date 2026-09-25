@@ -57,7 +57,7 @@ defineExpose({ focus })
       <template v-if="p.card.value" #above>
         <PromptTakes
           v-if="p.card.value === 'takes' && p.takes.value"
-          :session="p.takes.value" :saving="p.takesSaving.value" :error="p.takesError.value"
+          :session="p.takes.value" :saving="p.takesSaving.value" :error="p.takesError.value" :more-note="p.takesMoreNote?.value ?? null"
           @hover="p.previewTake" @choose="p.chooseTake" @keep="p.keepTake" @more="p.moreTakes" @close="p.closeTakes"
         />
         <PromptChangesCard

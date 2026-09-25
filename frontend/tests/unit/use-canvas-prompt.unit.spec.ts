@@ -316,7 +316,7 @@ describe('useCanvasPrompt', () => {
     expect(runs.seen).toEqual([])
     expect(stops.seen).toEqual([])
     expect(reviews).not.toHaveBeenCalled()
-    expect(toastInfo).toHaveBeenCalledTimes(2)
+    expect(toastInfo).toHaveBeenCalledTimes(3) // the menu item, Critique, and the Tune chip each say why
     expect(toastInfo).toHaveBeenCalledWith(BUSY_NOTICE)
     expect(api.mode.value).toBeNull()
     expect(api.takes.value?.tiles.map(t => t.state)).toEqual(['pending', 'pending', 'pending'])

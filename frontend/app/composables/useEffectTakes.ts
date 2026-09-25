@@ -18,7 +18,7 @@ import { registerEffects, unregisterEffects } from '~/lib/shaderfx/catalog'
 import { shaderFx } from '~/lib/shaderfx/renderer'
 import { useMyEffects } from '~/composables/useMyEffects'
 import { MY_EFFECTS_ERRORS } from '~/lib/myEffects/client'
-import { chooseTile, CURRENT, failPending, hoverTile, openTakes, shownTakeId, type TakesSession } from '~/lib/prompt/takesSession'
+import { chooseTile, CURRENT, failPending, hoverTile, markCreditRefusals, openTakes, shownTakeId, type TakesSession } from '~/lib/prompt/takesSession'
 import type { EffectDef, ParamValue } from '~/lib/shaderfx/types'
 
 export interface EffectTarget {
@@ -181,11 +181,15 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
         },
       })
       if (run !== seq || !session.value) return
-      session.value = { ...failPending(session.value), loopDone: true }
+      // Takes refused for want of credits say so on their tiles, and the strip gives the plain
+      // credits sentence, even when others came back (Ruling 10: the hold can refuse some slots).
+      const refused = result.failures.filter(f => f.log.some(l => l.startsWith('model error') && CREDITS_RE.test(l))).length
+      session.value = { ...markCreditRefusals(failPending(session.value), refused), loopDone: true }
       // Nothing came back because the model couldn't be reached (not because the takes failed
       // their checks, which the strip already says): say why, plainly.
       const modelErrors = result.failures.flatMap(f => f.log).filter(l => l.startsWith('model error'))
-      if (!result.takes.length && modelErrors.length) error.value = failureMessage(modelErrors.find(l => CREDITS_RE.test(l)) ?? modelErrors[0])
+      if (refused) error.value = EFFECT_MESSAGES.noCredits
+      else if (!result.takes.length && modelErrors.length) error.value = failureMessage(modelErrors[0])
     } catch (e) {
       if (run !== seq || isAbortError(e)) return // Stop / × / a newer start already ended this one
       c.abort() // the other slots' model calls stop here rather than run on (and be billed)

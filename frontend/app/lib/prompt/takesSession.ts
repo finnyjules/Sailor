@@ -12,7 +12,9 @@ export const TAKES_PER_SET = 3
 export const CURRENT = '__current__'
 
 export type TileState = 'pending' | 'ready' | 'failed'
-export interface TakeTile { state: TileState; takeId: string | null; promptId: string | null; thumb: string | null }
+/** `reason` (a failed tile only): 'credits' when it was refused for want of credits — the tile
+ *  says so plainly (and the strip gives the credits sentence) instead of "Didn't come back". */
+export interface TakeTile { state: TileState; takeId: string | null; promptId: string | null; thumb: string | null; reason?: 'credits' }
 export interface TakesSession {
   nodeId: string
   nodeLabel: string
@@ -102,6 +104,21 @@ export function settleUnqueued(s: TakesSession): TakesSession {
 
 export function failPending(s: TakesSession): TakesSession {
   return { ...s, tiles: s.tiles.map(t => (t.state === 'pending' ? { ...t, state: 'failed' as const } : t)) }
+}
+
+/** `count` failed tiles were refused for want of credits: mark that many (the last ones not
+ *  already marked), so they say so instead of "Didn't come back". A set's slots don't map to
+ *  its tiles (takes fill them in arrival order), so which failed tiles is by position. */
+export function markCreditRefusals(s: TakesSession, count: number): TakesSession {
+  let left = count
+  if (left <= 0) return s
+  const tiles = s.tiles.slice()
+  for (let i = tiles.length - 1; i >= 0 && left > 0; i--) {
+    if (tiles[i]!.state !== 'failed' || tiles[i]!.reason) continue
+    tiles[i] = { ...tiles[i]!, reason: 'credits' }
+    left--
+  }
+  return { ...s, tiles }
 }
 
 export const isTakesWorking = (s: TakesSession): boolean => s.tiles.some(t => t.state === 'pending')

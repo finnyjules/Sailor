@@ -542,7 +542,9 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   }
   function onPromptMode(e: Event) {
     const d = (e as CustomEvent).detail ?? {}
-    if (!d.label || !d.kind || jobBusy()) return
+    if (!d.label || !d.kind) return
+    // Make one / Remix / New effect… / Tune… mid-job: say why nothing happens, as the studios do.
+    if (jobBusy()) { toast.info(BUSY_NOTICE); return }
     clearResults()
     mode.value = {
       label: String(d.label), kind: d.kind as RouterKind, nodeId: d.nodeId != null ? String(d.nodeId) : null,
@@ -601,6 +603,8 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   const takesSaving = computed(() => !!fx.session.value && !!fx.saving?.value)
   // A failed Keep leaves the set open, and the card is the strip: the strip shows why.
   const takesError = computed(() => (fx.session.value ? fx.error.value || null : null))
+  // "Three more" on an effect set starts another paid set: its price shows on the button first.
+  const takesMoreNote = computed<string | null>(() => (fx.session.value ? shaderGenEstimateText(hosted()) : null))
   // While a node's effect-take strip is open, the node's own controls are read-only, so
   // closing the strip can put back exactly what was there: tell it when the strip opens and closes.
   let lockedNode: string | null = null
@@ -612,6 +616,16 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     if (id) tell(id, true)
   }
   watch(() => fx.session.value?.nodeId ?? null, lockNode, { flush: 'sync' })
+  // The node an effect set previews on was deleted (or cut) while the set is open or running:
+  // end it, so no more calls are made (or billed) for it and no Keep lands on a node that isn't
+  // there. An undo that brings the node back finds it unlocked and showing its own effect.
+  const effectNodePresent = (): boolean => {
+    const id = fx.session.value?.nodeId
+    if (!id) return true
+    const nodes = canvas()?.getNodes?.()
+    return !Array.isArray(nodes) || nodes.some((n: any) => String(n.id) === id)
+  }
+  watch(effectNodePresent, (present) => { if (!present && (fx.session.value || fx.working.value)) fx.close() })
 
   // The card above the prompt must not cover what it is about: once it has
   // rendered (its height is known), pan just enough that the takes' node, or the
@@ -671,7 +685,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
 
   return {
     agent, selection, chipLabel, suggestions, mode, focusTick, working, workingLabel, lastSubmitted,
-    card, answerCard, takes: shownTakes, takesSaving, takesError, modeNote, showSketchInstead, searchOpen, searchQuery, onSearchDone,
+    card, answerCard, takes: shownTakes, takesSaving, takesError, takesMoreNote, modeNote, showSketchInstead, searchOpen, searchQuery, onSearchDone,
     submit, stop, clearMode, clearSelection, onPromptFocus, previewTake, chooseTake, keepTake, closeTakes,
     moreTakes, dismissAnswer, runFollowUp, sketchInstead,
   }
