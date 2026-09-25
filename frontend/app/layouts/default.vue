@@ -31,6 +31,7 @@ import StartProjectModal from '~/components/StartProjectModal.vue'
 import CanvasStatusBar, { type RunResult } from '~/components/CanvasStatusBar.vue'
 import AgentCanvasPromptBar from '~/components/agent/CanvasPromptBar.vue'
 import { shouldFocusPrompt } from '~/lib/prompt/sailorPrompt'
+import { runVariationsLoop } from '~/lib/canvas/variationsRun'
 import type { StartPickId } from '~/data/start-modal'
 import { estimateUsdForNodes, vueNodesToEstimateInput, type CostEstimate } from '~/lib/costEstimate'
 import { formatCostBadge, formatEstimateBadge, formatEstimateLong } from '~/lib/pricing'
@@ -1293,6 +1294,7 @@ async function handleRunTextIterator(e: Event) {
 // seeds; each result lands as a Take on the artifact. Sequential like the text
 // iterator — runVueWorkflow reads live canvas state (and rolls seeds) per call.
 let variationsRunning = false
+let variationsCancelled = false
 async function handleRunVariations(e: Event) {
   if (variationsRunning) {
     console.warn('[Variations] already running, ignoring re-entry')
@@ -1303,19 +1305,32 @@ async function handleRunVariations(e: Event) {
   const count = Math.min(Math.max(1, detail?.count ?? 4), 8)
   if (!nodeId) return
   variationsRunning = true
+  variationsCancelled = false
+  let result = { queued: 0, cancelled: false }
   try {
-    for (let i = 0; i < count; i++) {
-      const expanded = vueCanvasRef.value?.materializeAutoImageSinks?.([nodeId]) ?? [nodeId]
-      const queued = await runVueWorkflow(expanded, i === 0
-        ? { rerollScope: 'variation', costConfirmIterations: count }
-        : { rerollScope: 'variation', skipCostConfirm: true })
-      if (queued === false) break // user declined the cost confirm
-      // Small breather so the bridge / queue settles before the next.
-      await new Promise(r => setTimeout(r, 250))
-    }
+    result = await runVariationsLoop({
+      count,
+      cancelled: () => variationsCancelled,
+      runOne: async (i) => {
+        const expanded = vueCanvasRef.value?.materializeAutoImageSinks?.([nodeId]) ?? [nodeId]
+        const queued = await runVueWorkflow(expanded, i === 0
+          ? { rerollScope: 'variation', costConfirmIterations: count }
+          : { rerollScope: 'variation', skipCostConfirm: true })
+        return queued !== false
+      },
+    })
   } finally {
     variationsRunning = false
+    // The takes strip (useCanvasPrompt) marks tiles past `queued` as not coming back.
+    window.dispatchEvent(new CustomEvent('sailor:variationsDone', { detail: { nodeId, ...result } }))
   }
+}
+
+// Stop from the takes strip (spec §3.4): no more re-runs, and interrupt what is
+// rendering — the same stop path as the top bar's Stop (plan ruling 9).
+function handleStopVariations() {
+  variationsCancelled = true
+  stopVueWorkflow()
 }
 
 // `@` promote button (ArtifactImageNode) → name the currently-displayed image
@@ -1347,6 +1362,7 @@ onMounted(() => {
   window.addEventListener('sailor:openInspector', handleOpenInspector)
   window.addEventListener('sailor:runTextIterator', handleRunTextIterator)
   window.addEventListener('sailor:runVariations', handleRunVariations)
+  window.addEventListener('sailor:stopVariations', handleStopVariations)
   window.addEventListener('sailor:reloadCanvas', forceReloadCanvas)
   window.addEventListener('sailor:openActions', handleOpenActions)
   window.addEventListener('sailor:createRef', onCreateRef)
@@ -1367,6 +1383,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('sailor:openInspector', handleOpenInspector)
   window.removeEventListener('sailor:runTextIterator', handleRunTextIterator)
   window.removeEventListener('sailor:runVariations', handleRunVariations)
+  window.removeEventListener('sailor:stopVariations', handleStopVariations)
   window.removeEventListener('sailor:reloadCanvas', forceReloadCanvas)
   window.removeEventListener('sailor:openActions', handleOpenActions)
   window.removeEventListener('sailor:createRef', onCreateRef)

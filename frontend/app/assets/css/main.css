@@ -358,7 +358,9 @@ input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 4px rgba
    dash. Both are set via node.class/edge.class while a proposal is pending. */
 .vue-flow__node.agent-ghost { opacity: 0.6; transition: opacity 0.35s ease; }
 .vue-flow__node.agent-ghost.agent-ghost-hidden { opacity: 0; } /* hidden during the blueprint draw-in */
-.vue-flow__node.agent-ghost::after {
+/* …and the node a takes strip belongs to (spec §3.1) carries the same ring, at full opacity (it is real, not proposed). */
+.vue-flow__node.agent-ghost::after,
+.vue-flow__node.agent-takes-target::after {
   content: '';
   position: absolute;
   inset: -4px;

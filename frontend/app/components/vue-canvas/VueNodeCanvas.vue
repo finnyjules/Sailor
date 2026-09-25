@@ -61,6 +61,9 @@ import type { SpaceTypeState } from '~/lib/spacetype/state'
 import { useNodeSearch } from '~/composables/useNodeSearch'
 import { useNodeClipboard } from '~/composables/useNodeClipboard'
 import { buildTake, appendTake, refreshTakeDisplay, takeHasContent, tagTakeFromRunMeta } from '~/composables/useTakes'
+import type { Take } from '~/composables/useTakes'
+import { displaySnapshot, showOnData, type DisplaySnapshot } from '~/lib/prompt/takesSession'
+import { revealDelta } from '~/lib/canvas/revealPan'
 import { LIVE_PREVIEW_NODE_TYPES } from '~/lib/livePreviewNodes'
 import { draftMetaFor, consumePendingPromote } from '~/lib/draft/runMeta'
 import { getRun } from '~/lib/graph/runRegistry'
@@ -993,6 +996,59 @@ function agentHighlight(command: { op?: string; target?: unknown; args?: any } |
   hoverRects.value = cardRects(ids)
 }
 
+// --- Takes above the prompt (spec §3.1) --------------------------------------
+// The prompt's takes strip previews each take ON this node. Begin snapshots
+// what the node shows and rings it (pastel, like a proposed node); Show projects
+// a take or restores the snapshot; End keeps a take (or restores) and un-rings.
+// Nodes never move here — only agentRevealNode pans the VIEW, and only as much
+// as needed.
+const takesSnapshots = new Map<string, DisplaySnapshot>()
+const nodeById = (id: string): any => (nodes.value as any[]).find(n => String(n.id) === id)
+
+function agentNodeTakes(id: string) {
+  const n = nodeById(id)
+  if (!n) return null
+  return {
+    takes: (n.data?.takes ?? []) as Take[],
+    activeTakeId: (n.data?.activeTakeId ?? null) as string | null,
+    images: (n.data?.images ?? null) as string[] | null,
+    error: !!n.data?.error,
+  }
+}
+function agentTakesBegin(id: string) {
+  const n = nodeById(id)
+  if (!n) return
+  takesSnapshots.set(id, displaySnapshot(n.data ?? {}))
+  const cls = String(n.class ?? '').split(' ').filter(Boolean)
+  if (!cls.includes('agent-takes-target')) n.class = [...cls, 'agent-takes-target'].join(' ')
+}
+function agentShowTake(id: string, takeId: string | null) {
+  const n = nodeById(id)
+  const snap = takesSnapshots.get(id)
+  if (!n || !snap) return
+  n.data = showOnData({ ...n.data }, takeId, snap)
+}
+function agentTakesEnd(id: string, keepTakeId: string | null) {
+  agentShowTake(id, keepTakeId)
+  takesSnapshots.delete(id)
+  const n = nodeById(id)
+  if (!n) return
+  const rest = String(n.class ?? '').split(' ').filter(c => c && c !== 'agent-takes-target')
+  n.class = rest.length ? rest.join(' ') : undefined
+}
+function agentRevealNode(id: string) {
+  const box = graphBox(id)
+  const w = vfDimensions.value.width, h = vfDimensions.value.height
+  if (!box || !w || !h) return
+  const { x: vx, y: vy, zoom } = vfViewport.value
+  const node = { left: box.x * zoom + vx, top: box.y * zoom + vy, right: (box.x + box.width) * zoom + vx, bottom: (box.y + box.height) * zoom + vy }
+  // Keep it clear of the prompt stack floating over the canvas bottom.
+  // bottomStackRect() is in canvas-root pixels; the VueFlow pane fills the root, so they coincide.
+  const view = { left: 0, top: 0, right: w, bottom: Math.min(h, bottomStackRect()?.top ?? h) }
+  const { dx, dy } = revealDelta(node, view)
+  if (dx || dy) setViewport({ x: vx + dx, y: vy + dy, zoom }, { duration: 250 })
+}
+
 const {
   groups,
   createGroupFromSelection,
@@ -1049,7 +1105,7 @@ provide('runLeafNodeIds', runLeafNodeIds)
 const {
   onConnect, addEdges, fitView, fitBounds, zoomIn: vfZoomIn, zoomOut: vfZoomOut,
   project, removeNodes, removeEdges, viewport: vfViewport, onNodeDragStart, onNodeDragStop, onNodeDrag,
-  onConnectStart, onConnectEnd, onEdgesChange, findNode, dimensions: vfDimensions,
+  onConnectStart, onConnectEnd, onEdgesChange, findNode, dimensions: vfDimensions, setViewport,
 } = useVueFlow()
 
 // Ports label themselves while a compatible wire is being dragged. Bound once,
@@ -8194,6 +8250,11 @@ defineExpose({
   agentFrameNodes,
   agentDiscard,
   agentHighlight,
+  agentNodeTakes,
+  agentTakesBegin,
+  agentShowTake,
+  agentTakesEnd,
+  agentRevealNode,
   agentTune,
   agentTuneRevert,
   agentRunOutputImage,
