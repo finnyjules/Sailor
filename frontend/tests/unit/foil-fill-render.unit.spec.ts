@@ -110,8 +110,9 @@ describe('foil as a fill', () => {
     sctx.clearRect.mockClear()
     sctx._fillStyles.length = 0
     paint(rect({ fill: FOIL }))
-    expect(vi.mocked(applyFinish).mock.calls[1]![0]).toBe(vi.mocked(applyFinish).mock.calls[0]![0])
-    expect(sctx.clearRect).toHaveBeenCalledWith(0, 0, 20, 20)
+    const off = vi.mocked(applyFinish).mock.calls[1]![0] as any
+    expect(off).toBe(vi.mocked(applyFinish).mock.calls[0]![0])
+    expect(sctx.clearRect).toHaveBeenCalledWith(0, 0, off.width, off.height)
     expect(sctx._fillStyles).toContain('#ffffff')
   })
 
@@ -141,19 +142,14 @@ describe('foil as a fill', () => {
 
 describe('foil and the silhouette cache', () => {
   // A feathered layer is normally baked once into a box-sized raster and restamped. Foil is
-  // lit over the whole Frame by the Frame's light, so it must never be baked: every paint
-  // re-runs the finish, on a frame-sized canvas.
+  // lit by the Frame's light, so it must never be baked: every paint re-runs the finish.
   const feathered = (extra: Record<string, unknown>) => rect({ effects: [createEffect('feather')], ...extra })
 
-  it('a foil fill with a feather re-lights on every paint, over the frame', () => {
+  it('a foil fill with a feather re-lights on every paint', () => {
     const layer = feathered({ fill: FOIL })
     paint(layer)
     paint(layer)
     expect(applyFinish).toHaveBeenCalledTimes(2)
-    for (const [off] of vi.mocked(applyFinish).mock.calls) {
-      expect((off as any).width).toBe(20)
-      expect((off as any).height).toBe(20)
-    }
   })
 
   it('a foil OUTLINE with a feather is not baked either', () => {

@@ -276,7 +276,7 @@ import { type Paint, type FoilFill, isFill, isImageFill, isFoilFill, paintTileBo
 import { buildDisplacementField, resampleBilinear, type DisplaceMapSpec } from '~/lib/compositor/displace'
 import { effectStackOf, orderablePasses, pinnedEffect, rasterablePasses, splitTrailingBlurs, isGeometryKind, regionOf, writeStackToLayer } from '~/lib/compositor/effectStack'
 import { expandRecipe } from '~/lib/compositor/recipes'
-import { applyFinish, METALS } from '~/lib/compositor/finishPass'
+import { applyFinish, finishRegionRect, METALS, type DeviceRect } from '~/lib/compositor/finishPass'
 // Frame slice F2: the pure outline transform (trim / offset / round corners / roughen).
 // `applyGeometry(d, effects, {W})` is identity (same reference) when no geometry effect
 // is enabled, so the no-effect draw stays byte-identical below.
@@ -3343,22 +3343,86 @@ function stampScratch(ctx: CanvasRenderingContext2D, scratch: CanvasRenderingCon
   ctx.restore()
 }
 
-/** One device-sized scratch shared by every foil region; cleared on each use. */
+/** One scratch shared by every foil region, sized to the region's device box; cleared on each use. */
 let _foilScratch: HTMLCanvasElement | null = null
+
+/** Device px of room around a foil region's box, per device px per logical px: the bevel reads
+ *  alpha 3 logical px out, so 8 keeps the pass's texture edge transparent — the same pixels a
+ *  whole-frame pass sees. */
+const FOIL_REGION_MARGIN = 8
+
+/**
+ * Where the foil of the layer being drawn can land, in DEVICE px — set by `drawLayerContent`
+ * for a layer that carries foil, read by `paintFoilRegion`. `null` ⇒ unknown ⇒ the whole
+ * canvas (the pre-clip behaviour); `{ rect: null }` ⇒ the layer is wholly off the canvas.
+ */
+let _foilBox: { rect: DeviceRect | null } | null = null
+
+/** Hit-testing only needs a foil region's alpha: while set, every foil region draws as the flat
+ *  mid metal and never runs the GPU pass. See `withFlatFoil`. */
+let _foilFlat = false
+
+/** Run `fn` with foil drawn flat (no GPU pass) — for alpha-only reads like a click hit-test. */
+export function withFlatFoil<T>(fn: () => T): T {
+  const prev = _foilFlat
+  _foilFlat = true
+  try { return fn() } finally { _foilFlat = prev }
+}
+
+/** Run `fn` with `light` as the Frame's light — for draws outside `paintLayerStack` (the
+ *  copy-as-PNG composite, the click hit-test), which would otherwise read whatever light the
+ *  last paint left behind. */
+export function withFrameLight<T>(light: FrameLight | null | undefined, fn: () => T): T {
+  const prev = _frameLight
+  _frameLight = light ?? DEFAULT_FRAME_LIGHT
+  try { return fn() } finally { _frameLight = prev }
+}
+
+/** The device box `layer`'s ink can reach under `ctx`'s CURRENT transform (the layer-local,
+ *  origin-centred one `drawLayerContent` is entered with): `localLayerBox` grown by the same pad
+ *  a baked silhouette gets (strokes, geometry growth, glyph overhang), mapped and clamped by
+ *  `finishRegionRect`. `null` where the box cannot be trusted — expressive text and moving
+ *  letters place ink outside it (the silhouette cache refuses them for the same reason), and
+ *  morph letter pieces ride their letters' motion. */
+function foilBoxFor(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: number): { rect: DeviceRect | null } | null {
+  const l = layer as unknown as { expressive?: unknown; textMotion?: unknown; motionPieces?: unknown }
+  if ((layer.kind === 'text' && l.expressive) || l.textMotion || l.motionPieces) return null
+  if (typeof ctx.getTransform !== 'function') return null
+  const cw = ctx.canvas?.width || 0, ch = ctx.canvas?.height || 0
+  if (!(cw > 0) || !(ch > 0)) return null
+  try {
+    const m = ctx.getTransform()
+    const s = Math.hypot(m.a, m.b) || 1
+    const box = localLayerBox(measureCtx(), layer, W, W)
+    const pad = silhouettePadPx(layer, W, s, box)
+    const base = _fieldCtx.base
+    const scale = base ? Math.hypot(base.a, base.b) || 1 : 1
+    return {
+      rect: finishRegionRect(
+        { x: -box.w / 2 - pad, y: -box.h / 2 - pad, w: box.w + pad * 2, h: box.h + pad * 2 },
+        m, FOIL_REGION_MARGIN * Math.max(scale, s), cw, ch,
+      ),
+    }
+  } catch { return null }
+}
 
 /**
  * Paint a FOIL region where a fill or an outline would have gone.
  *
  * `drawShape(c, ink)` lays the region down in `ink` — the same statements the site would
- * have run on `ctx`, only with a flat colour. Here that happens on a device-sized scratch
- * under `ctx`'s current transform, in opaque white; the finish pass then lights that white
- * region with the Frame's light (its alpha is the mask), and the result is stamped 1:1 in
- * device space. The stamp runs under `ctx`'s own alpha, blend, shadow and clip, so the foil
- * composites exactly as the plain fill would have.
+ * have run on `ctx`, only with a flat colour. Here that happens on a scratch the size of the
+ * layer's DEVICE box (`_foilBox`, or the whole canvas when it is unknown) under `ctx`'s current
+ * transform shifted to that box, in opaque white; the finish pass then lights that white
+ * region with the Frame's light (its alpha is the mask), told where the box sits in the frame
+ * so the light, grain and edge wear are laid out over the FRAME exactly as a whole-canvas pass
+ * would lay them — a region looks the same clipped or not. The result is stamped 1:1 at the
+ * box's device position, under `ctx`'s own alpha, blend, shadow and clip, so the foil
+ * composites exactly as the plain fill would have. Cost therefore scales with the layer's
+ * area, not the canvas's, however many copies, clones or regions a Frame carries.
  *
  * Never blank: no WebGL2 / lost context / oversize ⇒ `applyFinish` returns false and the
  * region is flooded with the metal's mid colour; no DOM at all ⇒ the shape is drawn in that
- * colour straight onto `ctx`.
+ * colour straight onto `ctx`. `withFlatFoil` takes the flat route on purpose (hit-testing).
  *
  * KNOWN GAP: box-sized flows (DOF source, corner-pin / raster warp, layer thumbnail) call this
  * on a layer-box canvas, so there the light is computed over the box with a dpr-less scale.
@@ -3369,11 +3433,15 @@ function paintFoilRegion(
   drawShape: (c: CanvasRenderingContext2D, ink: string) => void,
 ): void {
   const mid = (METALS[paint.metal] ?? METALS.gold)[2]
-  const w = Math.max(1, ctx.canvas?.width || 1), h = Math.max(1, ctx.canvas?.height || 1)
+  if (_foilFlat) { drawShape(ctx, mid); return }
+  const W = Math.max(1, ctx.canvas?.width || 1), H = Math.max(1, ctx.canvas?.height || 1)
+  const r = _foilBox ? _foilBox.rect : { x: 0, y: 0, w: W, h: H }
+  if (!r) return   // wholly off the canvas: nothing of it would land
   if (!_foilScratch && typeof document !== 'undefined') _foilScratch = document.createElement('canvas')
   const s = _foilScratch
   const c = s ? s.getContext('2d') : null
   if (!s || !c) { drawShape(ctx, mid); return }
+  const w = r.w, h = r.h
   if (s.width !== w) s.width = w
   if (s.height !== h) s.height = h
   c.save()
@@ -3381,7 +3449,8 @@ function paintFoilRegion(
   c.globalAlpha = 1
   c.globalCompositeOperation = 'source-over'
   c.clearRect(0, 0, w, h)   // shared scratch: never let a previous region's pixels through
-  c.setTransform(ctx.getTransform())
+  const m = ctx.getTransform()
+  c.setTransform(m.a, m.b, m.c, m.d, m.e - r.x, m.f - r.y)
   c.lineJoin = ctx.lineJoin
   c.lineCap = ctx.lineCap
   c.miterLimit = ctx.miterLimit
@@ -3389,9 +3458,10 @@ function paintFoilRegion(
   c.restore()
   const base = _fieldCtx.base
   const scale = base ? Math.hypot(base.a, base.b) || 1 : 1
+  const whole = r.x === 0 && r.y === 0 && w === W && h === H
   const ok = applyFinish(s, 'gold_foil', {
     metal: paint.metal, brushed: paint.brushed, pressed: paint.pressed, grain: paint.grain,
-  }, _frameLight, scale)
+  }, _frameLight, scale, whole ? undefined : { x: r.x, y: r.y, frameW: W, frameH: H })
   if (!ok) {
     c.save()
     c.setTransform(1, 0, 0, 1, 0, 0)
@@ -3402,7 +3472,7 @@ function paintFoilRegion(
   }
   ctx.save()
   ctx.setTransform(1, 0, 0, 1, 0, 0)
-  ctx.drawImage(s, 0, 0)
+  ctx.drawImage(s, r.x, r.y)
   ctx.restore()
 }
 
@@ -4176,6 +4246,14 @@ function maybePaintLongShadow(ctx: CanvasRenderingContext2D, layer: LocalLayer, 
 }
 
 function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: number, wiredLive?: WiredLive | null) {
+  // Foil regions are clipped to this layer's device box (see `paintFoilRegion`). Scoped per
+  // call and restored, so a nested draw can never leave its box behind for the next layer.
+  const prevFoilBox = _foilBox
+  _foilBox = layerHasFoil(layer) ? foilBoxFor(ctx, layer, W) : null
+  try { drawLayerContentBody(ctx, layer, W, wiredLive) } finally { _foilBox = prevFoilBox }
+}
+
+function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: number, wiredLive?: WiredLive | null) {
   // F3 seam: the sibling-outline resolver for THIS layer, bound to the live stack (or undefined
   // outside a paint). Threaded into every geometry `applyGeometry`/`computedOutlineD` call below.
   // Inert until a geometry kind carries a `refLayerId` (F3 Task 2) — no current kind does, so the
@@ -4207,6 +4285,17 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       const anyDash = passes.some(p => p.dash)
       if (passes.length) ctx.lineJoin = 'round'
       for (const p of passes) {
+        if (p.foil) {
+          // A foil outline: the same stroke, laid down white on the foil scratch and lit there.
+          paintFoilRegion(ctx, p.foil, (c, ink) => {
+            c.lineJoin = 'round'
+            c.lineWidth = p.lineWidth
+            c.strokeStyle = ink
+            if (p.dash) c.setLineDash([p.dash[0], p.dash[1]])
+            c.stroke(path)
+          })
+          continue
+        }
         ctx.lineWidth = p.lineWidth
         ctx.strokeStyle = p.style
         if (anyDash) ctx.setLineDash(p.dash ? [p.dash[0], p.dash[1]] : [])
@@ -4219,15 +4308,33 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
         ctx.fillStyle = resolvePaint(ctx, layer.color, oc.box, _fieldCtx)
         ctx.fill(path)
       }
-    } else if (isFoilFill(layer.color)) {
-      // Foil text on the fillText route: the strokes go down as usual with the glyph ink made
-      // clear, then the glyphs themselves (and any underline) are drawn white on the foil
-      // scratch and stamped on top — strokes under, foil over, like the outline route above.
-      drawText(ctx, { ...layer, color: 'rgba(0,0,0,0)' } as TextLayer, W)
-      const bare = { ...layer, color: '#ffffff', strokes: [], strokeWidth: 0 } as unknown as TextLayer
-      paintFoilRegion(ctx, layer.color, (c, ink) => drawText(c, { ...bare, color: ink } as TextLayer, W))
     } else {
-      drawText(ctx, layer, W)
+      // The fillText route. Foil outlines (on the edge or at a distance) are drawn one at a time,
+      // ALONE, white on the foil scratch with clear glyph ink, and lit there; then the rest of the
+      // layer draws as usual without them. So a foil outline sits under every other outline —
+      // the one ordering this route cannot keep, stated in the spec. A foil text COLOUR then
+      // draws the glyphs themselves (and any underline) white on the scratch, stamped on top —
+      // strokes under, foil over, like the outline route above.
+      const stack = strokeStackOf(layer as unknown as Parameters<typeof strokeStackOf>[0])
+      const foilStrokes = stack.filter(st => st.visible !== false && isFoilFill(st.paint) && st.width > 0)
+      const foilColor = isFoilFill(layer.color) ? layer.color : null
+      if (!foilStrokes.length && !foilColor) {
+        drawText(ctx, layer, W)
+      } else {
+        const clear = 'rgba(0,0,0,0)'
+        for (let i = foilStrokes.length - 1; i >= 0; i--) {
+          const st = foilStrokes[i]!
+          paintFoilRegion(ctx, st.paint as FoilFill, (c, ink) => drawText(c, textWithStrokes(layer, [{ ...st, paint: ink }], clear), W))
+        }
+        const glyphInk: Paint = foilColor ? clear : layer.color
+        drawText(ctx, foilStrokes.length
+          ? textWithStrokes(layer, stack.filter(st => !foilStrokes.includes(st)), glyphInk)
+          : { ...layer, color: glyphInk } as TextLayer, W)
+        if (foilColor) {
+          const bare = { ...layer, color: '#ffffff', strokes: [], strokeWidth: 0 } as unknown as TextLayer
+          paintFoilRegion(ctx, foilColor, (c, ink) => drawText(c, { ...bare, color: ink } as TextLayer, W))
+        }
+      }
     }
   } else if (layer.kind === 'rect') {
     const w = layer.w * W, h = layer.h * W
@@ -4628,6 +4735,9 @@ interface TextStrokePass {
   lineWidth: number
   style: string | CanvasGradient | CanvasPattern
   dash: [number, number] | null
+  /** A foil outline: the glyph-outline route strokes it white on the foil scratch and lights it
+   *  there (`paintFoilRegion`) instead of stroking `style` (the flat mid-metal fallback). */
+  foil?: FoilFill
 }
 
 /** One run of text exactly as it gets drawn: the string, the anchor `fillText` is given,
@@ -4672,9 +4782,21 @@ function textStrokePasses(
       // a glyph outline's outer half falls outside the text box its paint is anchored to.
       style: resolvePaint(ctx, st.paint, box, _fieldCtx, 'extend'),
       dash: strokeDashSegments(st.dash, W),
+      ...(isFoilFill(st.paint) ? { foil: st.paint } : {}),
     })
   }
   return out
+}
+
+/** A copy of a text layer that strokes ONLY `strokes` (legacy single-stroke fields cleared so
+ *  they cannot come back through `strokeStackOf`), with glyph ink `color`. The foil text route
+ *  draws each foil outline alone through this, and the rest of the layer without them. */
+function textWithStrokes(layer: TextLayer, strokes: StrokeInstance[], color: Paint): TextLayer {
+  return {
+    ...layer, color,
+    strokes: strokes.map(st => ({ ...st, id: st.id || 'foil' })),
+    strokeWidth: 0, strokeColor: undefined,
+  } as unknown as TextLayer
 }
 
 /**

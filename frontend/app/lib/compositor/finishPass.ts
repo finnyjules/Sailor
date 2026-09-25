@@ -31,9 +31,11 @@ precision highp float;
 in vec2 vUv;
 out vec4 fragColor;
 uniform sampler2D uColor;
-uniform vec2 uSize;     // device px
+uniform vec2 uSize;     // device px of THIS texture (a region's box, or the whole frame)
+uniform vec2 uOrigin;   // the texture's bottom-left inside the frame, device px (y up)
+uniform vec2 uFull;     // the whole frame, device px
 uniform float uScale;   // device px per logical px
-uniform float uAspect;  // h / w
+uniform float uAspect;  // frame h / frame w
 uniform vec3 uLight;    // world space, see lightWorld()
 const vec3 CAMERA = vec3(0.0, 0.0, 2.6);
 float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
@@ -51,6 +53,10 @@ vec2 alphaGrad(vec2 uv, float rPx) {
   }
   return g / 12.0;
 }
+// Texture uv -> FRAME uv: lighting, grain and the foil's edge wear are laid out over the whole
+// frame, so a region rendered in its own box looks exactly as it would in a full-frame pass.
+// (uOrigin 0, uFull = uSize: the identity.) frameUvOf() in TS mirrors this for the tests.
+vec2 frameUv(vec2 uv) { return (uv * uSize + uOrigin) / uFull; }
 vec3 worldPos(vec2 uv) { return vec3(uv.x - 0.5, (uv.y - 0.5) * uAspect, 0.0); }
 `
 
@@ -71,13 +77,13 @@ vec3 ramp(float t) {
 void main() {
   vec4 src = texture(uColor, vUv);
   if (src.a <= 0.0) { fragColor = vec4(0.0); return; }
-  vec2 px = vUv * uSize / uScale;                       // logical px: grain size is resolution-free
+  vec2 px = (vUv * uSize + uOrigin) / uScale;           // frame logical px: grain size is resolution-free
   vec2 g = alphaGrad(vUv, 3.0 * uScale);
   float st = vnoise(vec2(px.x * 0.004, px.y * 0.9)) - 0.5;
   float st2 = vnoise(vec2(px.x * 0.02, px.y * 2.3) + 3.0) - 0.5;
   // Pressed in: the surface slopes DOWN into the shape, so the normal leans along +g.
   vec3 N = normalize(vec3(g * uPressed * 1.2 + vec2(0.0, (st * 0.10 + st2 * 0.05) * uBrushed) + (vec2(hash(floor(px*1.5)), hash(floor(px*1.5) + 7.0)) - 0.5) * uGrain * 0.5, 1.0));
-  vec3 P = worldPos(vUv);
+  vec3 P = worldPos(frameUv(vUv));
   vec3 V = normalize(CAMERA - P);
   vec3 L = normalize(uLight - P);
   vec3 R = reflect(-V, N);
@@ -101,7 +107,7 @@ void main() {
   vec2 g = alphaGrad(vUv, 2.0 * uScale);
   // Raised: the surface slopes UP into the shape, so the normal leans along -g.
   vec3 N = normalize(vec3(-g * uRaised, 1.0));
-  vec3 P = worldPos(vUv);
+  vec3 P = worldPos(frameUv(vUv));
   vec3 V = normalize(CAMERA - P);
   vec3 L = normalize(uLight - P);
   vec3 R = reflect(-V, N);
@@ -129,22 +135,78 @@ function hexVec3(hex: string): { vec3: [number, number, number] } {
   const n = parseInt(hex.slice(1), 16)
   return { vec3: [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255] }
 }
-function shared(light: FrameLight, w: number, h: number, scale: number): Record<string, GpuUniform> {
-  const aspect = h / Math.max(1, w)
-  return { uSize: new Float32Array([w, h]), uScale: scale, uAspect: aspect, uLight: { vec3: lightWorld(light, aspect) } }
+/**
+ * Where a finish's texture sits inside the Frame, in device px: `x`/`y` are the texture's
+ * TOP-LEFT (canvas convention, y down) and `frameW`/`frameH` the whole frame. Absent ⇒ the
+ * texture IS the frame. Lets a foil region run its GPU pass over its own box while the light,
+ * grain and edge wear stay laid out over the frame.
+ */
+export interface FinishFrame { x: number; y: number; frameW: number; frameH: number }
+
+/** The shader's `uOrigin` / `uFull` for a `w`×`h` texture placed by `frame`. GL's y runs UP, so
+ *  the origin is the texture's BOTTOM edge measured from the frame's bottom. */
+export function finishFrameUniforms(w: number, h: number, frame?: FinishFrame | null): { origin: [number, number]; full: [number, number] } {
+  if (!frame) return { origin: [0, 0], full: [w, h] }
+  return { origin: [frame.x, frame.frameH - (frame.y + h)], full: [frame.frameW, frame.frameH] }
 }
 
-export function foilUniforms(d: FoilDials, light: FrameLight, w: number, h: number, scale: number): Record<string, GpuUniform> {
+/** TS mirror of the shader's `frameUv` (texture uv, y up → frame uv, y up). Pure; for the tests. */
+export function frameUvOf(uv: readonly [number, number], w: number, h: number, frame?: FinishFrame | null): [number, number] {
+  const { origin, full } = finishFrameUniforms(w, h, frame)
+  return [(uv[0] * w + origin[0]) / full[0], (uv[1] * h + origin[1]) / full[1]]
+}
+
+/** A 2D affine, as `CanvasRenderingContext2D.getTransform()` returns it. */
+export interface Affine2D { a: number; b: number; c: number; d: number; e: number; f: number }
+export interface DeviceRect { x: number; y: number; w: number; h: number }
+
+/**
+ * The DEVICE box a foil region needs its pass over: `box` (in the drawing's current user units)
+ * mapped through `m`, grown by `marginPx` (room for the bevel's alpha ring and the edge wear, so
+ * the texture edge is transparent exactly where a full-frame pass would be), snapped OUT to whole
+ * pixels and clamped to the `cw`×`ch` canvas.
+ *
+ * `null` ⇒ the region lies wholly off the canvas (nothing to draw). A box or matrix that is not
+ * finite answers the whole canvas — unknown bounds never cut ink off.
+ */
+export function finishRegionRect(box: DeviceRect, m: Affine2D, marginPx: number, cw: number, ch: number): DeviceRect | null {
+  const full: DeviceRect = { x: 0, y: 0, w: cw, h: ch }
+  const vals = [box.x, box.y, box.w, box.h, m.a, m.b, m.c, m.d, m.e, m.f, marginPx]
+  if (vals.some(v => !Number.isFinite(v))) return full
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+  for (const [u, v] of [[box.x, box.y], [box.x + box.w, box.y], [box.x, box.y + box.h], [box.x + box.w, box.y + box.h]] as const) {
+    const X = m.a * u + m.c * v + m.e, Y = m.b * u + m.d * v + m.f
+    if (X < x0) x0 = X
+    if (X > x1) x1 = X
+    if (Y < y0) y0 = Y
+    if (Y > y1) y1 = Y
+  }
+  const mg = Math.max(0, marginPx)
+  const l = Math.max(0, Math.floor(x0 - mg)), t = Math.max(0, Math.floor(y0 - mg))
+  const r = Math.min(cw, Math.ceil(x1 + mg)), b = Math.min(ch, Math.ceil(y1 + mg))
+  return r > l && b > t ? { x: l, y: t, w: r - l, h: b - t } : null
+}
+
+function shared(light: FrameLight, w: number, h: number, scale: number, frame?: FinishFrame | null): Record<string, GpuUniform> {
+  const { origin, full } = finishFrameUniforms(w, h, frame)
+  const aspect = full[1] / Math.max(1, full[0])
+  return {
+    uSize: new Float32Array([w, h]), uOrigin: new Float32Array(origin), uFull: new Float32Array(full),
+    uScale: scale, uAspect: aspect, uLight: { vec3: lightWorld(light, aspect) },
+  }
+}
+
+export function foilUniforms(d: FoilDials, light: FrameLight, w: number, h: number, scale: number, frame?: FinishFrame | null): Record<string, GpuUniform> {
   const m = METALS[d.metal] ?? METALS.gold
   return {
-    ...shared(light, w, h, scale),
+    ...shared(light, w, h, scale, frame),
     uM0: hexVec3(m[0]), uM1: hexVec3(m[1]), uM2: hexVec3(m[2]), uM3: hexVec3(m[3]),
     uBrushed: clamp01(d.brushed), uPressed: clamp01(d.pressed), uGrain: clamp01(d.grain ?? 0),
   }
 }
 
-export function spotUvUniforms(d: SpotUvDials, light: FrameLight, w: number, h: number, scale: number): Record<string, GpuUniform> {
-  return { ...shared(light, w, h, scale), uGloss: clamp01(d.gloss), uRaised: clamp01(d.raised), uVarnishOnly: d.varnishOnly ? 1 : 0 }
+export function spotUvUniforms(d: SpotUvDials, light: FrameLight, w: number, h: number, scale: number, frame?: FinishFrame | null): Record<string, GpuUniform> {
+  return { ...shared(light, w, h, scale, frame), uGloss: clamp01(d.gloss), uRaised: clamp01(d.raised), uVarnishOnly: d.varnishOnly ? 1 : 0 }
 }
 
 let foilPass: GpuPost | null = null
@@ -172,15 +234,18 @@ function unusedDepth(): HTMLCanvasElement {
 }
 
 /** Run a finish over `off` in place. False = did not run (no WebGL2 / empty) and `off` is untouched,
- *  so the layer draws plain. The result canvas is GpuPost's and is reused, so it is copied now. */
+ *  so the layer draws plain. The result canvas is GpuPost's and is reused, so it is copied now.
+ *  `frame`: where `off` sits in the Frame when it is only a region's box (see `FinishFrame`);
+ *  absent ⇒ `off` is the whole frame. */
 export function applyFinish(
   off: HTMLCanvasElement, kind: FinishKind, dials: FoilDials | SpotUvDials, light: FrameLight, scale: number,
+  frame?: FinishFrame | null,
 ): boolean {
   const w = off.width, h = off.height
   if (w < 1 || h < 1) return false
   const out = kind === 'gold_foil'
-    ? getFoil().render(off, unusedDepth(), w, h, foilUniforms(dials as FoilDials, light, w, h, scale))
-    : getUv().render(off, unusedDepth(), w, h, spotUvUniforms(dials as SpotUvDials, light, w, h, scale))
+    ? getFoil().render(off, unusedDepth(), w, h, foilUniforms(dials as FoilDials, light, w, h, scale, frame))
+    : getUv().render(off, unusedDepth(), w, h, spotUvUniforms(dials as SpotUvDials, light, w, h, scale, frame))
   if (!out) return false
   const ctx = off.getContext('2d')
   if (!ctx) return false

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { FOIL_FRAG, SPOT_UV_FRAG, METALS, METAL_LABELS, foilUniforms, spotUvUniforms } from '~/lib/compositor/finishPass'
+import { FOIL_FRAG, SPOT_UV_FRAG, METALS, METAL_LABELS, foilUniforms, spotUvUniforms, frameUvOf, finishFrameUniforms, finishRegionRect } from '~/lib/compositor/finishPass'
 
 const light = { x: 0.15, y: 0.1, height: 0.6 }
 
@@ -67,5 +67,71 @@ describe('metals', () => {
   it('offers four, labelled in sentence case', () => {
     expect(Object.keys(METALS)).toEqual(['gold', 'silver', 'rose', 'copper'])
     expect(Object.values(METAL_LABELS)).toEqual(['Gold', 'Silver', 'Rose gold', 'Copper'])
+  })
+})
+
+// A foil region runs its pass over its own device box; the shader maps the box's texture uv back
+// to FRAME uv so the light, grain and edge wear land exactly where a whole-frame pass puts them.
+describe('frame uv of a region box (frameUvOf mirrors the shader\'s frameUv)', () => {
+  // A device pixel (px, py) — canvas convention, y DOWN — sampled at its centre, as the texture
+  // uv (y UP, GpuPost flips on upload) of a w×h texture whose top-left sits at (x, y).
+  const texUv = (px: number, py: number, x: number, y: number, w: number, h: number): [number, number] =>
+    [(px + 0.5 - x) / w, 1 - (py + 0.5 - y) / h]
+
+  it('is the identity when there is no box (the texture is the frame)', () => {
+    for (const uv of [[0, 0], [1, 1], [0.25, 0.8], [0.5, 0.5]] as const) {
+      expect(frameUvOf(uv, 300, 200)).toEqual([uv[0], uv[1]])
+      expect(frameUvOf(uv, 300, 200, { x: 0, y: 0, frameW: 300, frameH: 200 })).toEqual([uv[0], uv[1]])
+    }
+  })
+  it('gives every device pixel of a box the frame uv the whole-frame pass gives it', () => {
+    const FW = 400, FH = 300, box = { x: 37, y: 120, w: 90, h: 64 }
+    for (const [px, py] of [[37, 120], [126, 183], [80, 150], [100, 121]] as const) {
+      const whole = texUv(px, py, 0, 0, FW, FH)
+      const local = frameUvOf(texUv(px, py, box.x, box.y, box.w, box.h), box.w, box.h, { x: box.x, y: box.y, frameW: FW, frameH: FH })
+      expect(local[0]).toBeCloseTo(whole[0], 10)
+      expect(local[1]).toBeCloseTo(whole[1], 10)
+    }
+  })
+  it('measures the origin from the frame\'s BOTTOM (GL y up)', () => {
+    expect(finishFrameUniforms(90, 64, { x: 37, y: 120, frameW: 400, frameH: 300 })).toEqual({ origin: [37, 300 - 184], full: [400, 300] })
+    expect(finishFrameUniforms(90, 64)).toEqual({ origin: [0, 0], full: [90, 64] })
+  })
+  it('lights a box with the FRAME\'s aspect and light, not the box\'s', () => {
+    const dials = { metal: 'gold' as const, brushed: 0.5, pressed: 0.5, grain: 0 }
+    const whole = foilUniforms(dials, light, 400, 300, 2)
+    const boxed = foilUniforms(dials, light, 90, 64, 2, { x: 37, y: 120, frameW: 400, frameH: 300 })
+    expect(boxed.uAspect).toBe(whole.uAspect)
+    expect(boxed.uLight).toEqual(whole.uLight)
+    expect(Array.from(boxed.uSize as Float32Array)).toEqual([90, 64])
+    expect(Array.from(boxed.uFull as Float32Array)).toEqual([400, 300])
+    expect(Array.from(whole.uOrigin as Float32Array)).toEqual([0, 0])
+    expect(Array.from(whole.uFull as Float32Array)).toEqual([400, 300])
+  })
+  it('both shaders place lighting and foil grain through the frame mapping', () => {
+    for (const f of [FOIL_FRAG, SPOT_UV_FRAG]) expect(f).toContain('worldPos(frameUv(vUv))')
+    expect(FOIL_FRAG).toContain('vec2 px = (vUv * uSize + uOrigin) / uScale;')
+  })
+})
+
+describe('finishRegionRect', () => {
+  const I = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }
+  it('maps the box through the transform, grows it by the margin and snaps out to whole px', () => {
+    expect(finishRegionRect({ x: -10, y: -5, w: 20, h: 10 }, { ...I, e: 100.4, f: 50.6 }, 8, 400, 300))
+      .toEqual({ x: 82, y: 37, w: 37, h: 27 })
+  })
+  it('takes the axis-aligned hull of a turned box', () => {
+    const r = Math.SQRT1_2
+    const out = finishRegionRect({ x: -10, y: -10, w: 20, h: 20 }, { a: r, b: r, c: -r, d: r, e: 100, f: 100 }, 0, 400, 300)!
+    expect(out.x).toBe(Math.floor(100 - 10 * Math.SQRT2))
+    expect(out.x + out.w).toBe(Math.ceil(100 + 10 * Math.SQRT2))
+  })
+  it('clamps to the canvas, and is null wholly off it', () => {
+    expect(finishRegionRect({ x: -50, y: -50, w: 100, h: 100 }, I, 8, 400, 300)).toEqual({ x: 0, y: 0, w: 58, h: 58 })
+    expect(finishRegionRect({ x: 500, y: 10, w: 20, h: 20 }, I, 8, 400, 300)).toBeNull()
+  })
+  it('answers the whole canvas when the box or the transform is not finite', () => {
+    expect(finishRegionRect({ x: 0, y: 0, w: NaN, h: 10 }, I, 8, 400, 300)).toEqual({ x: 0, y: 0, w: 400, h: 300 })
+    expect(finishRegionRect({ x: 0, y: 0, w: 10, h: 10 }, { ...I, a: Infinity }, 8, 400, 300)).toEqual({ x: 0, y: 0, w: 400, h: 300 })
   })
 })
