@@ -20,11 +20,11 @@
  *    the charge is the clip measured;
  *  - the engine, end to end: the family's own endpoint, the hold and charge.
  */
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, truncateSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BufferTarget, EncodedPacket, EncodedVideoPacketSource, Mp4OutputFormat, Output } from 'mediabunny'
+import { BufferTarget, EncodedAudioPacketSource, EncodedPacket, EncodedVideoPacketSource, Mp4OutputFormat, Output } from 'mediabunny'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { NO_FAMILIES, RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { PROVIDER_TYPES, isRunnerEligible, runnerTakesNode } from '#shared/runner/eligibility'
@@ -67,7 +67,7 @@ import { PRICE_BOOK_VERSION, priceGraph } from '~~/server/utils/priceBook'
 import { blockedPromptRefusal } from '~~/server/utils/blockedModels'
 import type { OutputFile } from '~~/server/runner/types'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
-import { makeKit, ofType, until } from './__runner__/kit'
+import { createFakeFal, createFakeLedger, makeKit, ofType, until } from './__runner__/kit'
 
 const FAMILY: RunnerFamily = 'sync-3'
 const ON: ReadonlySet<RunnerFamily> = new Set([FAMILY])
@@ -867,5 +867,139 @@ describe('fix round 1: the Audio card and the switch-off path', () => {
     const on = pruneInvalidOutputs(p, ALL)
     expect(on.dropped).toEqual(['1'])
     expect(Object.keys(on.prompt).sort()).toEqual(['2', '3', '4'])
+  })
+})
+
+// ── Fix round 2 (re-review of f49a37424) ────────────────────────────────────
+
+/** An MP4 holding only a sound track (AAC) of `seconds`, muxed without an encoder: a Safari/iOS recording's shape. */
+async function mp4Sound(seconds: number): Promise<Buffer> {
+  const out = new Output({ format: new Mp4OutputFormat(), target: new BufferTarget() })
+  const src = new EncodedAudioPacketSource('aac')
+  out.addAudioTrack(src)
+  await out.start()
+  const frame = 1024 / 44100
+  const n = Math.ceil(seconds / frame)
+  for (let i = 0; i < n; i++) {
+    await src.add(new EncodedPacket(new Uint8Array([0x21, 0x10, 0x04, 0x60, 0x8C, 0x1C]), 'key', i * frame, frame),
+      i === 0 ? { decoderConfig: { codec: 'mp4a.40.2', sampleRate: 44100, numberOfChannels: 1, description: new Uint8Array([0x12, 0x08]) } } : undefined)
+  }
+  await out.finalize()
+  return Buffer.from((out.target as BufferTarget).buffer!)
+}
+
+describe('fix round 2', () => {
+  const run = (k: ReturnType<typeof makeKit>, take: ApiPrompt) =>
+    k.engine.startRun({ userId: k.userId, takes: [take], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+
+  it('an MP4 sound with a sound track is accepted and measured (Safari/iOS recordings)', async () => {
+    const bytes = await mp4Sound(3)
+    expect(mediaFormat(bytes)).toBe('mp4')
+    const facts = await mediaFacts(bytes, SYNC_3_SOUND_RULE)
+    expect(facts.seconds).toBeGreaterThan(2.9)
+    expect(facts.seconds).toBeLessThan(3.1)
+    expect(mediaRuleProblem(facts, SYNC_3_SOUND_RULE, true)).toBeNull()
+  })
+
+  it('an over-limit file is refused from its size alone, never read (unit and engine)', async () => {
+    const reads: string[] = []
+    const r = await sync3MediaCheck({ 1: lip() }, '1', {
+      read: async (f) => { reads.push(f.filename); return new Uint8Array(f.filename === 'face.mp4' ? await mp4(2) : wav(1)) },
+      size: async f => (f.filename === 'voice.wav' ? SYNC_3_MAX_SOUND_BYTES + 1 : 1000),
+      strict: true,
+    })
+    expect(r).toEqual({ problem: SYNC_3_SOUND_RULE.words.tooLarge })
+    expect(reads).not.toContain('voice.wav')
+    // The engine: a sparse 50 MB + 1 sound on disk, stat'd by the result store and never loaded.
+    const root = mkdtempSync(join(tmpdir(), 'sync3-fix2-'))
+    for (const t of ['input', 'output', 'temp']) mkdirSync(join(root, t), { recursive: true })
+    writeFileSync(join(root, 'input', 'face.mp4'), await mp4(5))
+    writeFileSync(join(root, 'input', 'voice.wav'), wav(1))
+    truncateSync(join(root, 'input', 'voice.wav'), SYNC_3_MAX_SOUND_BYTES + 1)
+    const store = createEngineResultStore({ dirForType: t => join(root, t), hosted: () => true })
+    const engineReads: string[] = []
+    const results = { ...store, read: async (f: OutputFile) => { engineReads.push(f.filename); return store.read(f) } }
+    const k = makeKit({ hosted: true, available: 5000, root, deps: { families: () => ON, results } })
+    await expect(run(k, { 1: lip(), 2: videoCard() })).rejects.toThrow(SYNC_3_SOUND_RULE.words.tooLarge)
+    expect(engineReads).not.toContain('voice.wav')
+    expect(k.ledger.holds.size).toBe(0)
+  })
+
+  /** A kit whose engine "crashes" (never wakes from its next sleep) once `crashed` is set. */
+  const crashingKit = (root: string, fal: ReturnType<typeof createFakeFal>, ledger: ReturnType<typeof createFakeLedger>) => {
+    const state = { crashed: false }
+    const k = makeKit({
+      hosted: true, fal, ledger, root, deps: {
+        families: () => ON,
+        sleep: () => (state.crashed ? new Promise<void>(() => {}) : new Promise<void>(r => setTimeout(r, 1))),
+      },
+    })
+    return { k, state }
+  }
+  const media = async () => {
+    const root = mkdtempSync(join(tmpdir(), 'sync3-resume-'))
+    for (const t of ['input', 'output', 'temp']) mkdirSync(join(root, t), { recursive: true })
+    writeFileSync(join(root, 'input', 'face.mp4'), await mp4(5))
+    writeFileSync(join(root, 'input', 'voice.wav'), wav(3.4))
+    return root
+  }
+
+  it('resuming a node whose request was sent before a restart: no re-check, the request and the credits written at submit', async () => {
+    const root = await media()
+    const fal = createFakeFal()
+    const ledger = createFakeLedger(5000)
+    const { k: k1, state } = crashingKit(root, fal, ledger)
+    fal.holdNext(1)
+    const { runId } = await run(k1, { 1: lip({ mode: 'loop' }), 2: videoCard() })
+    await until(() => (fal.submitted()[0]?.polls ?? 0) >= 2)
+    state.crashed = true
+    await new Promise(r => setTimeout(r, 20))
+    // While the server is down the sound is replaced: longer, other bytes.
+    writeFileSync(join(root, 'input', 'voice.wav'), wav(9))
+    const k2 = makeKit({ hosted: true, dir: k1.dir, root, fal, ledger, deps: { families: () => ON } })
+    expect(await k2.engine.reattach()).toBe(1)
+    fal.release()
+    await k2.engine.settled(runId)
+    expect(ofType(k2.seen, 'execution_error')).toEqual([])
+    // One job, the one sent before the restart; the request written down is unchanged.
+    expect(fal.submitted()).toHaveLength(1)
+    const stored = (await k2.store.get(runId))!
+    expect(stored.status).toBe('done')
+    expect(stored.takes[0]!.nodes['1']!.payload).toEqual(fal.submitted()[0]!.payload)
+    // Charged what was written down at submit (the 3.4 s sound: 80), + the render credit.
+    expect(stored.takes[0]!.nodes['1']!.credits).toBe(80)
+    expect([...ledger.holds.values()].map(h => [h.credits, h.state, h.actual])).toEqual([[81, 'settled', 81]])
+  })
+
+  it('a stored run with no measured record (saved before the tight hold): a new leg holds the 60 s cap, runs, and charges the clip', async () => {
+    const root = await media()
+    const fal = createFakeFal()
+    const ledger = createFakeLedger(5000)
+    const take: ApiPrompt = {
+      1: lip({ mode: 'loop' }),
+      2: videoCard(),
+      3: { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a red fox', aspect_ratio: '1:1', seed: 0, model_options: '{}' } },
+      4: { class_type: 'ComfyGateNode', inputs: { data_in: ['3', 0], bypass: false } },
+      5: { class_type: 'Image', inputs: { image: '', export: false, images: ['4', 0], batch_index: -1 } },
+    }
+    const k1 = makeKit({ hosted: true, fal, ledger, root, deps: { families: () => ON } })
+    const { runId } = await run(k1, take)
+    await k1.engine.settled(runId)
+    expect((await k1.store.get(runId))!.status).toBe('paused')
+    // As a run stored before the fix: no record on the take.
+    const stored = (await k1.store.get(runId))!
+    delete stored.takes[0]!.measured
+    await k1.store.save(stored)
+    const k2 = makeKit({ hosted: true, dir: k1.dir, root, fal, ledger, deps: { families: () => ON } })
+    const imagePrice = nodeCredits(take['3']!, undefined, ON)
+    const holdsBefore = ledger.holds.size
+    await k2.engine.gateAction({ userId: k2.userId, runId, gateId: '4', action: 'restart' })
+    await k2.engine.settled(runId)
+    const restartHold = [...ledger.holds.values()].slice(holdsBefore)
+    // The lip-sync's 60 s cap (1200) + the picture; the render credit was paid in the first leg.
+    expect(restartHold.map(h => h.credits)).toEqual([1200 + imagePrice])
+    expect(ofType(k2.seen, 'execution_error')).toEqual([])
+    // Charged the clip it measured at its turn (80) + the picture again.
+    expect(restartHold.map(h => h.actual)).toEqual([80 + imagePrice])
   })
 })

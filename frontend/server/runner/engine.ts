@@ -672,20 +672,24 @@ export function createEngine(deps: EngineDeps) {
         if (!p) { p = deps.results.read(f); reads.set(key, p) }
         return p
       }
-      const inputPixels = await measuredInputPixels(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], readOnce, families)
+      // Resuming a request already sent before a restart (F22 fix round 2):
+      // nothing is measured, checked or handed off again, and the credits
+      // written down at submit stand. The job is running (and billing) at the
+      // service; a file changed since can't refuse it now.
+      const inputPixels = resuming ? undefined : await measuredInputPixels(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], readOnce, families)
       const tooLarge = measuredInputProblem(take.prompt[id]!.class_type, inputPixels, families)
       if (tooLarge) throw new Error(tooLarge)
       // A file its model refuses (Product shot on Bria: over 12 MB, or not
       // JPEG, PNG or WebP; HappyHorse 1.1: over 20 MB; requestRules.ts),
       // before the hand-off. Reads nothing for any other node. The size read
       // goes to planNode, which drops a backup that can't take it.
-      const fileCheck = await linkedFileCheck(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], readOnce, families)
+      const fileCheck = resuming ? { problem: null } as Awaited<ReturnType<typeof linkedFileCheck>> : await linkedFileCheck(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], readOnce, families)
       if (fileCheck.problem) throw new Error(fileCheck.problem)
       // sync-3 lip-sync (F22): its face video and sound read and measured again
       // now, before the hand-off. A file that no longer fits fails the node here
       // (its hold is released); the lengths measured are what it is charged.
       let inputSeconds: InputSeconds | undefined
-      if (take.prompt[id]!.class_type === 'LipSyncNode' && isSync3LipSync(take.prompt[id]!.inputs ?? {})) {
+      if (!resuming && take.prompt[id]!.class_type === 'LipSyncNode' && isSync3LipSync(take.prompt[id]!.inputs ?? {})) {
         const media = await sync3MediaCheck(take.prompt, id, {
           read: readOnce, size: f => deps.results.size?.(f) ?? Promise.resolve(null), strict: deps.hosted(), filesFrom: ([from]) => take.nodes[from]?.outputs ?? [],
         })
@@ -700,17 +704,33 @@ export function createEngine(deps: EngineDeps) {
         inputSeconds = media.seconds
       }
 
-      const plan = await planNode({
+      const planWith = (toUrl: (f: OutputFile) => Promise<string>) => planNode({
         prompt: take.prompt,
         nodeId: id,
         filesFrom: ([from]) => take.nodes[from]?.outputs ?? [],
-        toUrl: async f => deps.handoff.toUrlBytes(f, await readOnce(f)),
+        toUrl,
         gateOpen: take.openGates.includes(id),
         readFile: readOnce,
         hosted: deps.hosted(),
         families,
         ...(fileCheck.bytes !== undefined ? { inputBytes: fileCheck.bytes } : {}),
       })
+      const handOff = async (f: OutputFile) => deps.handoff.toUrlBytes(f, await readOnce(f))
+      // Resuming: the request written down is kept (and its price); the plan is
+      // rebuilt only for its backup. If it can't be rebuilt now (a file gone),
+      // the node carries on waiting for its job, with no backup.
+      let resumedWithoutBackup = false
+      let plan: Awaited<ReturnType<typeof planNode>>
+      if (!resuming) plan = await planWith(handOff)
+      else {
+        try { plan = await planWith(handOff) }
+        catch {
+          resumedWithoutBackup = true
+          plan = await planWith(async () => '')
+        }
+      }
+      // The files' bytes are not kept for the provider wait (up to 30 minutes).
+      reads.clear()
       // Rendered here (the Frame): no provider, no charge, not an asset.
       if (plan.kind === 'local') {
         const bytes = await plan.render(signal)
@@ -740,20 +760,23 @@ export function createEngine(deps: EngineDeps) {
         return
       }
 
-      // A node already moved to its backup keeps the backup's request as written down.
-      if (!rec.switchedFrom) {
+      // A node already moved to its backup keeps the backup's request as written down;
+      // a resumed one keeps the request it was sent.
+      if (!rec.switchedFrom && !resuming) {
         rec.endpoint = plan.endpoint
         rec.payload = plan.payload
       }
       const backupSettings = deps.backup?.() ?? { enabled: false, stallMs: 0 }
-      const backup = backupSettings.enabled && plan.backup ? plan.backup : null
+      const backup = backupSettings.enabled && plan.backup && !resumedWithoutBackup ? plan.backup : null
       // Priced on the measured picture where the price depends on its size
       // (FLUX.2 edit; Rotate camera on 2511), and on the measured clip where it
       // depends on its length (sync-3 lip-sync), measured before planning.
-      rec.credits = nodeCredits(take.prompt[id]!, inputPixels, families, inputSeconds)
-      const fp = isReusable(plan.payload)
-        ? requestFingerprint(fingerprintEndpoint(plan.provider, plan.endpoint), plan.payload, u => deps.handoff.hashOf(u))
-        : null
+      if (!resuming) rec.credits = nodeCredits(take.prompt[id]!, inputPixels, families, inputSeconds)
+      const fp = resuming
+        ? rec.fingerprint
+        : isReusable(plan.payload)
+          ? requestFingerprint(fingerprintEndpoint(plan.provider, plan.endpoint), plan.payload, u => deps.handoff.hashOf(u))
+          : null
       rec.fingerprint = fp
 
       if (fp && !rec.request) {
