@@ -372,6 +372,20 @@ const FLOWS: FamilyFlow[] = [
     endpoint: 'meta/muse-image/text-to-image',
     body: { prompt: 'a poster that says HELLO', aspect_ratio: '1:1', num_images: 1, output_format: 'png' },
   },
+  // Task F14: Nano Banana 2 Lite (Google), no Python builder; Replicate only,
+  // the body written from its saved schema (runner-nano-banana-2-lite.unit.spec.ts).
+  {
+    family: 'nano-banana-2-lite',
+    label: 'GenerateImageNode nano-banana-2-lite',
+    prompt: {
+      1: { class_type: 'GenerateImageNode', inputs: { model: 'nano-banana-2-lite', prompt: 'a poster that says HELLO', aspect_ratio: '1:1', seed: 0, model_options: '{}' } },
+      2: outImage('1'),
+    },
+    files: [],
+    provider: 'replicate',
+    endpoint: 'google/nano-banana-2-lite',
+    body: { prompt: 'a poster that says HELLO', aspect_ratio: '1:1', output_format: 'png' },
+  },
 ]
 
 // ── The routes ───────────────────────────────────────────────────────────

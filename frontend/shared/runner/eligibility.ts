@@ -311,6 +311,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // ── grok-imagine-2 (model line-up F7): Grok Imagine 2 on Replicate, runner-only ──
   // ── ideogram-4 (model line-up F8): Ideogram 4 on fal, runner-only ──
   // ── muse-image (model line-up F13): Muse Image (Meta) on fal, runner-only ──
+  // ── nano-banana-2-lite (model line-up F14): Nano Banana 2 Lite on Replicate, runner-only ──
   GenerateImageNode: {
     models: {
       ...Object.fromEntries(RUNNER_REPLICATE_IMAGE_MODEL_IDS.map(id => [id, 'replicate-image' as const])),
@@ -319,6 +320,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       'grok-imagine-2': 'grok-imagine-2',
       'ideogram-4': 'ideogram-4',
       'muse-image': 'muse-image',
+      'nano-banana-2-lite': 'nano-banana-2-lite',
     },
     mustNotLink: ['prompt', 'model_options', 'style_block', 'style_refs', 'prompt_in', 'style_in'],
   },

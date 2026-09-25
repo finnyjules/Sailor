@@ -36,6 +36,7 @@ import { QWEN_IMAGE_3_SLUG } from '~~/server/runner/generators/qwenImage3'
 import { GROK_IMAGINE_2_SLUG } from '~~/server/runner/generators/grokImagine2'
 import { IDEOGRAM_4_FAL_APP, IDEOGRAM_4_REPLICATE_SLUGS } from '~~/server/runner/generators/ideogram4'
 import { MUSE_IMAGE_FAL_APP } from '~~/server/runner/generators/museImage'
+import { NANO_BANANA_2_LITE_SLUG } from '~~/server/runner/generators/nanoBanana2Lite'
 import { QWEN_2511_ANGLES_APP } from '~~/server/runner/generators/qwen2511Angles'
 import { BRIA_PRODUCT_SHOT_APP } from '~~/server/runner/generators/briaProductShot'
 
@@ -242,6 +243,8 @@ function runnerEndpoints(): string[] {
   out.add(`fal ${BRIA_PRODUCT_SHOT_APP}`)
   // Task F13: Muse Image on fal, no backup (museImage.ts; its grid is runner-muse-image.unit.spec.ts).
   out.add(`fal ${MUSE_IMAGE_FAL_APP}`)
+  // Task F14: Nano Banana 2 Lite on Replicate, no backup (nanoBanana2Lite.ts; its grid is runner-nano-banana-2-lite.unit.spec.ts).
+  out.add(`replicate ${NANO_BANANA_2_LITE_SLUG}`)
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)
@@ -300,9 +303,11 @@ describe('refusals', () => {
 
   it('the prompt length rules are exactly the saved schemas\' prompt minLength, plus the controller\'s rulings', () => {
     // Ruled rows: a saved schema without a minLength on that endpoint, the prompt required (controller rulings
-    // after F4: Gemini Omni Flash; after F6: Qwen Image 3, and Grok Imagine 2 in F7; Ideogram 4 on fal in F8).
+    // after F4: Gemini Omni Flash; after F6: Qwen Image 3, and Grok Imagine 2 in F7; Ideogram 4 on fal in F8;
+    // Nano Banana 2 Lite on Replicate in F14).
     expect(PROMPT_MIN_LENGTH_RULINGS).toEqual([
       'fal google/gemini-omni-flash', 'replicate alibaba/qwen-image-3', 'replicate xai/grok-imagine-image-2', 'fal ideogram/v4',
+      'replicate google/nano-banana-2-lite',
     ])
     const fromSchemas: Record<string, number> = {}
     for (const key of PROMPT_MIN_LENGTH_RULINGS) {

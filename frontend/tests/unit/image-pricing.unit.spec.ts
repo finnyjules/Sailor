@@ -68,8 +68,8 @@ describe('the image rate card', () => {
     expect(falPrimary).toEqual(expect.arrayContaining([...RUNNER_IMAGE_MODEL_IDS, 'krea-2-large', 'krea-2-medium']))
     // Runner-only models have no Python entry: their builder's service (GPT Image 2.5: fal, gptImage25.ts;
     // Qwen Image 3: Replicate, qwenImage3.ts; Grok Imagine 2: Replicate, grokImagine2.ts; Ideogram 4: fal, ideogram4.ts;
-    // Muse Image: fal, museImage.ts).
-    expect(IMAGE_MODELS.filter(m => m.runnerOnly).map(m => m.id)).toEqual(['ideogram-4', 'gpt-image-2.5', 'qwen-image-3', 'grok-imagine-2', 'muse-image'])
+    // Muse Image: fal, museImage.ts; Nano Banana 2 Lite: Replicate, nanoBanana2Lite.ts).
+    expect(IMAGE_MODELS.filter(m => m.runnerOnly).map(m => m.id)).toEqual(['nano-banana-2-lite', 'ideogram-4', 'gpt-image-2.5', 'qwen-image-3', 'grok-imagine-2', 'muse-image'])
     const runnerOnlyFal = ['gpt-image-2.5', 'ideogram-4', 'muse-image']
     for (const [id, r] of Object.entries(IMAGE_RATES)) {
       expect(r.service, id).toBe(falPrimary.includes(id) || runnerOnlyFal.includes(id) ? 'fal' : 'replicate')

@@ -59,6 +59,8 @@
  * grok-imagine-2            Replicate  —           runner-only (F7): fal's xai/grok-imagine-image/v2 publishes no price
  *                                                  and no OpenAPI yet (grokImagine2.ts)
  * muse-image                fal        —           runner-only (F13): Meta's Muse Image is not on Replicate (museImage.ts)
+ * nano-banana-2-lite        Replicate  —           runner-only (F14): fal's google/nano-banana-2-lite bills by tokens and
+ *                                                  publishes no price a picture (nanoBanana2Lite.ts)
  * flux-fast, p-image        Replicate  —           Pruna models: not on fal (fal catalogue, 2026-09-24)
  * bria-fibo                 Replicate  —           fal's Fibo has no guidance setting
  * bria-image-3.2            Replicate  —           not on fal
@@ -157,6 +159,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'image:seedream-5-lite': r('fal', null, 'fal sizes by named sizes, Replicate only 2K or 3K'),
   'image:ideogram-4': r('fal', 'replicate', '2K only: Replicate makes only its ~4 MP sizes, so a 1K request has no backup; Replicate takes no seed and always expands the prompt'),
   'image:muse-image': r('fal', null, 'Muse Image is not on Replicate'),
+  'image:nano-banana-2-lite': r('replicate', null, 'fal bills Nano Banana 2 Lite by tokens and publishes no price a picture'),
   'image:flux-1.1-pro': r('fal', null, HIDDEN),
   'image:seedream-4': r('fal', null, HIDDEN),
   // Generate image, Replicate

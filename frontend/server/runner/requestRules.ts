@@ -89,6 +89,7 @@ import { QWEN_IMAGE_3_SLUG, isQwenImage3Model } from './generators/qwenImage3'
 import { GROK_IMAGINE_2_SLUG, isGrokImagine2Model } from './generators/grokImagine2'
 import { IDEOGRAM_4_FAL_APP, IDEOGRAM_4_NEEDS_PROMPT, isIdeogram4Model } from './generators/ideogram4'
 import { MUSE_IMAGE_FAL_APP, MUSE_IMAGE_NEEDS_PROMPT, isMuseImageModel } from './generators/museImage'
+import { NANO_BANANA_2_LITE_NEEDS_PROMPT, NANO_BANANA_2_LITE_SLUG, isNanoBanana2LiteModel } from './generators/nanoBanana2Lite'
 import { isSeedream5ProEdit, seedream5ProEditProblems } from './generators/seedream5ProEdit'
 
 export { FIRST_FRAME_AND_REFERENCES }
@@ -128,6 +129,9 @@ export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: 
   [`fal ${IDEOGRAM_4_FAL_APP}`]: { min: 1, message: IDEOGRAM_4_NEEDS_PROMPT },
   // Muse Image on fal (museImage.ts): the schema's own minLength 1.
   [`fal ${MUSE_IMAGE_FAL_APP}`]: { min: 1, message: MUSE_IMAGE_NEEDS_PROMPT },
+  // Nano Banana 2 Lite on Replicate (nanoBanana2Lite.ts): a ruling, not the schema
+  // (Replicate's sets no minimum; fal's schema for the same model asks for 3 characters).
+  [`replicate ${NANO_BANANA_2_LITE_SLUG}`]: { min: 1, message: NANO_BANANA_2_LITE_NEEDS_PROMPT },
 }
 
 /**
@@ -141,6 +145,7 @@ export const PROMPT_MIN_LENGTH_RULINGS: readonly string[] = [
   `replicate ${QWEN_IMAGE_3_SLUG}`,
   `replicate ${GROK_IMAGINE_2_SLUG}`,
   `fal ${IDEOGRAM_4_FAL_APP}`,
+  `replicate ${NANO_BANANA_2_LITE_SLUG}`,
 ]
 
 /** JSON Schema counts characters as code points. */
@@ -379,10 +384,11 @@ export function requestProblems(prompt: ApiPrompt): RequestProblem[] {
         hasRefs: false,
       }))
     }
-    // Qwen Image 3 and Grok Imagine 2 (Replicate, text-to-image): the prompt as sent must not be empty.
-    else if (ct === 'GenerateImageNode' && (isQwenImage3Model(inputs.model) || isGrokImagine2Model(inputs.model))) {
+    // Qwen Image 3, Grok Imagine 2 and Nano Banana 2 Lite (Replicate, text-to-image): the prompt as sent must not be empty.
+    else if (ct === 'GenerateImageNode' && (isQwenImage3Model(inputs.model) || isGrokImagine2Model(inputs.model) || isNanoBanana2LiteModel(inputs.model))) {
       if (['prompt', 'prompt_in', 'style_block', 'style_in'].some(k => isLink(inputs[k]))) continue
-      judge(isQwenImage3Model(inputs.model) ? QWEN_IMAGE_3_SLUG : GROK_IMAGINE_2_SLUG, composeImagePrompt({
+      const slug = isQwenImage3Model(inputs.model) ? QWEN_IMAGE_3_SLUG : isGrokImagine2Model(inputs.model) ? GROK_IMAGINE_2_SLUG : NANO_BANANA_2_LITE_SLUG
+      judge(slug, composeImagePrompt({
         prompt: asText(inputs.prompt),
         promptIn: asText(inputs.prompt_in),
         styleBlock: asText(inputs.style_block),

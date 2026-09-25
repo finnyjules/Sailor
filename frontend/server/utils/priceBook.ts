@@ -91,7 +91,10 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // With the switch off it keeps its SDXL price. No other price moves.
 // lineup-f13 (Task F13): Muse Image (Meta), fal's flat $0.01 an image
 // (runner-only, family muse-image, no backup). No other price moves.
-export const PRICE_BOOK_VERSION = 'lineup-f13'
+// lineup-f14 (Task F14): Nano Banana 2 Lite (Google), Replicate's flat $0.034
+// an image, always 1K (runner-only, family nano-banana-2-lite, no backup).
+// No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-f14'
 
 export const BASE_RENDER_CREDITS = 1
 

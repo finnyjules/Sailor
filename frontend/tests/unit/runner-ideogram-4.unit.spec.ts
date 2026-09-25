@@ -43,6 +43,7 @@ import {
 } from '~~/server/runner/generators/ideogram4'
 import { GROK_IMAGINE_2_SLUG } from '~~/server/runner/generators/grokImagine2'
 import { QWEN_IMAGE_3_SLUG } from '~~/server/runner/generators/qwenImage3'
+import { NANO_BANANA_2_LITE_NEEDS_PROMPT, NANO_BANANA_2_LITE_SLUG } from '~~/server/runner/generators/nanoBanana2Lite'
 import {
   GEMINI_OMNI_FLASH_NEEDS_PROMPT, GROK_IMAGINE_2_NEEDS_PROMPT, PROMPT_MIN_LENGTH, PROMPT_MIN_LENGTH_RULINGS, QWEN_IMAGE_3_NEEDS_PROMPT,
   requestProblem, requestProblems,
@@ -342,6 +343,8 @@ describe('ruled prompt rows trim whitespace; schema rows count exactly what is s
     [`replicate ${QWEN_IMAGE_3_SLUG}`]: QWEN_IMAGE_3_NEEDS_PROMPT,
     [`replicate ${GROK_IMAGINE_2_SLUG}`]: GROK_IMAGINE_2_NEEDS_PROMPT,
     [`fal ${IDEOGRAM_4_FAL_APP}`]: IDEOGRAM_4_NEEDS_PROMPT,
+    // Task F14: Nano Banana 2 Lite on Replicate (a ruling).
+    [`replicate ${NANO_BANANA_2_LITE_SLUG}`]: NANO_BANANA_2_LITE_NEEDS_PROMPT,
   }
 
   it('every ruled row refuses a prompt of only spaces and passes a padded real one', () => {

@@ -405,6 +405,26 @@ export const IMAGE_MODELS: ImageModel[] = [
     ],
   },
   {
+    // Runner-only (model line-up F14): Replicate, no backup
+    // (server/runner/generators/nanoBanana2Lite.ts). No Python builder. The
+    // ratios are that file's NANO_BANANA_2_LITE_RATIOS; it always makes a 1K
+    // picture and its schema has no other setting worth a control, so there
+    // are none.
+    id: 'nano-banana-2-lite',
+    runnerOnly: true,
+    family: 'nano-banana-2-lite',
+    label: 'Nano Banana 2 Lite',
+    brand: 'Google',
+    replicateSlug: 'google/nano-banana-2-lite',
+    pitch: 'The quick, low-cost Nano Banana 2, for trying ideas fast.',
+    description: 'Google\'s lightest Nano Banana. Makes a picture in a few seconds, for less than half the price of Nano Banana 2. Every picture is about 1 million pixels, whatever its shape.',
+    tags: ['fast'],
+    pricePerImage: 0.034,
+    aspectRatios: ['1:1', '1:4', '1:8', '2:3', '3:2', '3:4', '4:1', '4:3', '4:5', '5:4', '8:1', '9:16', '16:9', '21:9'],
+    defaultAspectRatio: '1:1',
+    advanced: [],
+  },
+  {
     id: 'imagen-4-ultra',
     label: 'Imagen 4 Ultra',
     brand: 'Google',

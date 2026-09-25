@@ -4,8 +4,8 @@
  * the Python `primary="fal"` models (Krea 2), and the runner-only GPT Image
  * 2.5 (server/runner/generators/gptImage25.ts), Ideogram 4 (ideogram4.ts)
  * and Muse Image (museImage.ts), Replicate for the rest,
- * the runner-only Qwen Image 3 and Grok Imagine 2 among them (qwenImage3.ts,
- * grokImagine2.ts)
+ * the runner-only Qwen Image 3, Grok Imagine 2 and Nano Banana 2 Lite among
+ * them (qwenImage3.ts, grokImagine2.ts, nanoBanana2Lite.ts)
  * (comfy_api_nodes/image_models.py `primary`, default "replicate").
  *
  * Units, following the service:
@@ -244,6 +244,13 @@ export const IMAGE_RATES: Record<string, ImageRate> = {
   // same), whatever the ratio, size or quality. No backup (fal publishes no
   // price for its Grok Imagine 2, grokImagine2.ts).
   'grok-imagine-2': repImage('xai/grok-imagine-image-2', 0.04),
+  // Nano Banana 2 Lite (runner-only, Task F14), Replicate only: "$0.034 per
+  // output image" (billingConfig, image_output_count, one tier; read
+  // 2026-09-24), always a 1K picture (its README), whatever the ratio. Google's
+  // own list price is the same ($0.0336 a 1K picture, ai.google.dev pricing).
+  // No web search or other paid extra. No backup (fal bills it by tokens and
+  // publishes no price a picture, nanoBanana2Lite.ts).
+  'nano-banana-2-lite': repImage('google/nano-banana-2-lite', 0.034),
   // "$5 per thousand output images".
   'flux-fast': repImage('prunaai/flux-fast', 0.005),
   'p-image': repImage('prunaai/p-image', 0.005),
