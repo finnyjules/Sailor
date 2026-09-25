@@ -9,6 +9,7 @@
 // Multi mode (Task 9): when `multiIds.length > 1` the bar shows three plain
 // buttons instead — Run N / Group / Combine into Frame (only when
 // `canCombine`) — with no dropdowns and no ✦, since none of these is AI.
+import AiMark from '~/components/prompt/AiMark.vue'
 import { ChevronDown, Play } from 'lucide-vue-next'
 import { onClickOutside } from '@vueuse/core'
 import { actionHint, actionPrice, actionsFor, type NodeAction, type NodeActionCtx } from '~/lib/canvas/nodeActions'
@@ -247,7 +248,7 @@ defineExpose({ openMenu })
             @click.stop="applyFix(chip)"
           >
             <span class="truncate">{{ chip.label }}</span>
-            <span class="ai-mark" aria-hidden="true">✦</span>
+            <AiMark kind="star" class="ai-mark" />
             <span v-if="chip.hint" class="menu-hint">{{ chip.hint }}</span>
           </button>
         </div>
@@ -263,7 +264,7 @@ defineExpose({ openMenu })
           @click.stop="run(a)"
         >
           <span class="truncate">{{ a.label }}</span>
-          <span v-if="a.ai" class="ai-mark" aria-hidden="true">✦</span>
+          <AiMark v-if="a.ai" kind="star" class="ai-mark" />
           <span v-if="hintFor(a)" class="menu-hint">{{ hintFor(a) }}</span>
         </button>
       </div>
@@ -320,8 +321,9 @@ defineExpose({ openMenu })
   cursor: default;
 }
 .ai-mark {
-  font-size: 11px;
-  color: rgb(255 255 255 / 0.45);
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
 }
 .menu-hint {
   margin-left: auto;

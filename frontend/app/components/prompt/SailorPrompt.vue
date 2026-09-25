@@ -3,7 +3,8 @@
 // (selection label, mode, suggestions, working state) and put result cards in
 // the `above` slot. Never restyle this from a host — change it here.
 import { computed, ref } from 'vue'
-import { ArrowUp, Sparkles, X } from 'lucide-vue-next'
+import { ArrowUp, X } from 'lucide-vue-next'
+import AiMark from '~/components/prompt/AiMark.vue'
 import AgentSweep from '~/components/agent/AgentSweep.vue'
 import { escapeStep, promptPlaceholder } from '~/lib/prompt/sailorPrompt'
 
@@ -71,7 +72,7 @@ defineExpose({ focus, inputElement })
            canvas exists, so mounting it already-active (v-if) never starts the glimm.
            It hides its own canvas while inactive. -->
       <div class="pointer-events-none absolute inset-0"><AgentSweep :active="working" :period="3" palette="lagoon" /></div>
-      <Sparkles class="relative size-4 shrink-0 text-white/45" />
+      <AiMark class="relative size-4 shrink-0" />
       <template v-if="working">
         <span class="relative min-w-0 flex-1 truncate text-[13px] text-white/75">{{ workingLabel }}</span>
         <button
