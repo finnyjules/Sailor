@@ -11,6 +11,7 @@ vi.mock('vue-sonner', () => ({ toast: { info: toastInfo } }))
 
 import { useStudioPrompt, type StudioPromptWorker } from '~/composables/useStudioPrompt'
 import { STUDIO_MESSAGES, VARY_REQUEST } from '~/lib/prompt/studioDispatch'
+import { BUSY_NOTICE } from '~/lib/prompt/notices'
 
 function makeWorker(withTakes = true) {
   const takes = shallowRef<any[]>([])
@@ -249,5 +250,53 @@ describe('useStudioPrompt', () => {
     await sent
     expect(seen?.aborted).toBe(true)
     expect(worker!.ask).not.toHaveBeenCalled()
+  })
+  it('Stop waits out a visual review still running: revert only after it ends, and no card comes back', async () => {
+    const { api, worker } = setup({ worker: makeWorker(false) })
+    let finish!: () => void
+    ;(worker!.ask as any).mockImplementation(() => { worker!.busy.value = true; return new Promise<void>(r => { finish = () => { worker!.changes.value = [{} as any]; worker!.reviewing.value = true; worker!.busy.value = false; r() } }) })
+    const sent = api.submit('warmer')
+    await nextTick()
+    api.stop()
+    finish(); await sent; await nextTick()
+    expect(worker!.revert).not.toHaveBeenCalled() // the review is still out
+    expect(api.disabled.value).toBe(true)
+    expect(api.card.value).toBeNull()
+    worker!.changes.value = [{} as any, {} as any] // the late review appends its fixes
+    worker!.reviewing.value = false
+    await nextTick()
+    expect(worker!.revert).toHaveBeenCalledTimes(1)
+    worker!.changes.value = [] // what revert() does in the workers
+    await nextTick()
+    expect(api.card.value).toBeNull()
+    expect(api.disabled.value).toBe(false)
+  })
+
+  it('Stop during a re-roll holds until its call settles, even if busy flips off and on in one tick', async () => {
+    const { api, worker } = setup()
+    worker!.takes!.value = [{ label: 'a' }, { label: 'b' }, { label: 'c' }]
+    worker!.takeThumbs!.value = new Map(worker!.takes!.value.map(t => [t, 'data:x']))
+    let finish!: () => void
+    ;(worker!.moreDirections as any).mockImplementation(() => { worker!.busy.value = true; return new Promise<void>(r => { finish = () => { worker!.busy.value = false; r() } }) })
+    api.moreTakes()
+    await nextTick()
+    api.stop()
+    ;(worker!.abandonTakes as any).mockClear()
+    worker!.busy.value = false; worker!.busy.value = true // compose fell back to the direct path
+    await nextTick()
+    expect(worker!.abandonTakes).not.toHaveBeenCalled()
+    expect(api.disabled.value).toBe(true)
+    worker!.takes!.value = [{ label: 'late' }]
+    finish(); await Promise.resolve(); await nextTick()
+    expect(worker!.abandonTakes).toHaveBeenCalledTimes(1)
+    expect(api.disabled.value).toBe(false)
+  })
+
+  it('the busy notice is the shared one', async () => {
+    const { api, worker } = setup()
+    worker!.busy.value = true
+    toastInfo.mockClear()
+    api.setMode('Tune')
+    expect(toastInfo).toHaveBeenCalledWith(BUSY_NOTICE)
   })
 })

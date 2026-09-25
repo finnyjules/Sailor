@@ -18,6 +18,7 @@
 import { computed, inject, onBeforeUnmount, ref, watch, type ComputedRef, type InjectionKey, type Ref } from 'vue'
 import { toast } from 'vue-sonner'
 import type { ProposedChange, VisualReview } from '~/composables/useLayoutAgent'
+import { BUSY_NOTICE } from '~/lib/prompt/notices'
 import { routeRequest } from '~/lib/prompt/routeRequest'
 import { promptWorkingLabel } from '~/lib/prompt/canvasPromptContext'
 import { studioDispatch, type StudioPromptPlace } from '~/lib/prompt/studioDispatch'
@@ -43,9 +44,9 @@ export interface StudioPromptWorker {
 export interface StudioPromptMode { label: string; kind: RouterKind }
 export interface StudioAnswerCard { kind: 'answer' | 'notice' | 'error'; text: string; reasoning: string; followUps: string[] }
 
-/** Same caps and wording as the canvas prompt (useCanvasPrompt). */
+/** Same cap as the canvas prompt (useCanvasPrompt). */
 const ROUTER_NAME_MAX = 120
-export const STUDIO_BUSY_NOTICE = 'Sailor is busy with another request — stop it or wait'
+
 
 export function useStudioPrompt(
   o: { worker: () => StudioPromptWorker | null; place: StudioPromptPlace; host?: RouterHost; selectionKind: string; label: () => string | null; suggestions?: () => string[] },
@@ -62,6 +63,7 @@ export function useStudioPrompt(
   const request = ref('')
   const answerCard = ref<StudioAnswerCard | null>(null)
   const stopped = ref(false) // a stopped run whose reply hasn't landed yet
+  const calls = ref(0) // worker calls (ask, moreDirections) whose promise hasn't settled
   let routeCtrl: AbortController | null = null
   let lastKind: RouterKind | null = null
   let lastFollowUps: string[] = []
@@ -70,6 +72,10 @@ export function useStudioPrompt(
   const chipLabel = computed(() => o.label())
   const suggestions = computed(() => o.suggestions?.() ?? [])
   const workerBusy = computed(() => !!worker()?.busy.value)
+  // A run is everything the worker does for one request: its call, its busy spell,
+  // and the visual review it fires without waiting (every worker does this, and
+  // the review writes fixes into the studio when it lands).
+  const runLive = computed(() => calls.value > 0 || workerBusy.value || !!worker()?.reviewing.value)
   // Vary from the inspector has no words: name the thing instead (stage 3's takesOf).
   const takesOf = ref<string | null>(null)
 
@@ -84,7 +90,7 @@ export function useStudioPrompt(
   const takesWorking = computed(() => !!takes.value && isTakesWorking(takes.value))
   const busy = computed(() => routing.value || (workerBusy.value && !stopped.value))
   const working = computed(() => busy.value || takesWorking.value)
-  const disabled = computed(() => stopped.value && workerBusy.value)
+  const disabled = computed(() => stopped.value && runLive.value)
   /** One job at a time: nothing new starts while anything is in flight. */
   const jobBusy = () => working.value || disabled.value
   const workingLabel = computed(() => {
@@ -95,17 +101,18 @@ export function useStudioPrompt(
   })
 
   const card = computed<'takes' | 'changes' | 'answer' | null>(() => {
-    if (busy.value) return null
+    if (busy.value || disabled.value) return null
     if (takes.value) return 'takes'
     if (worker()?.hasProposal.value) return 'changes'
     return answerCard.value ? 'answer' : null
   })
 
-  // A run ends when the worker goes idle. A stopped run is thrown away; a live one
-  // that made nothing shows its words (plan ruling 5). Sync, so a run that starts
-  // and ends inside one tick is still seen ending (a pre-flush watcher misses it).
-  watch(workerBusy, (isBusy, was) => {
-    if (isBusy || !was) return
+  // A run ends when its call has settled and the worker is neither busy nor
+  // reviewing. A stopped run is thrown away only then (so a late review can't
+  // write after the revert); a live one that made nothing shows its words (plan
+  // ruling 5). Sync, so a run that starts and ends inside one tick is still seen.
+  watch(runLive, (live, was) => {
+    if (live || !was) return
     const w = worker()
     if (!w) return
     if (stopped.value) {
@@ -123,13 +130,19 @@ export function useStudioPrompt(
   }, { flush: 'sync' })
 
   const canTakes = () => !!worker()?.takes
+  /** Hold the run open until the worker's own promise settles: a worker can drop
+   *  `busy` and raise it again in one tick (moreDirections' compose fallback). */
+  function track(p: unknown): Promise<unknown> {
+    calls.value++
+    return Promise.resolve(p).finally(() => { calls.value-- })
+  }
 
   async function dispatch(kind: RouterKind, text: string, fromMenu: boolean) {
     const d = studioDispatch(kind, text, { place: o.place, hasWorker: !!worker(), canTakes: canTakes(), fromMenu })
     if (d.worker === 'message') { answerCard.value = { kind: 'notice', text: d.message, reasoning: '', followUps: [] }; return }
     const w = worker()!
     w.abandonTakes?.()
-    await w.ask(d.text)
+    await track(w.ask(d.text))
   }
 
   function beginRun(text: string) {
@@ -169,7 +182,7 @@ export function useStudioPrompt(
 
   /** An inspector action that decides its own kind (Vary): no router call. */
   async function runKind(kind: RouterKind, a: { text?: string; fromMenu?: boolean } = {}) {
-    if (jobBusy()) { toast.info(STUDIO_BUSY_NOTICE); return }
+    if (jobBusy()) { toast.info(BUSY_NOTICE); return }
     mode.value = null
     beginRun(a.text?.trim() ?? '')
     if (kind === 'tweak' && a.fromMenu && !a.text?.trim()) takesOf.value = chipLabel.value ?? ''
@@ -179,7 +192,7 @@ export function useStudioPrompt(
   }
 
   function setMode(label: string) {
-    if (jobBusy()) { toast.info(STUDIO_BUSY_NOTICE); return }
+    if (jobBusy()) { toast.info(BUSY_NOTICE); return }
     const kind = kindForMode(label)
     mode.value = kind ? { label, kind } : null
     focusTick.value++
@@ -194,7 +207,7 @@ export function useStudioPrompt(
     routeCtrl = null
     routing.value = false
     runSeq++
-    if (workerBusy.value) stopped.value = true
+    if (runLive.value) stopped.value = true
     else if (takesWorking.value) worker()?.abandonTakes?.()
   }
 
@@ -203,8 +216,9 @@ export function useStudioPrompt(
     const i = studioTakeIndex(id)
     return i == null ? null : worker()?.takes?.value[i] ?? null
   }
-  // A re-roll still out when the strip is closed or kept must not reopen it.
-  const dropLateReply = () => { if (workerBusy.value) stopped.value = true }
+  // Defensive: the strip is hidden while the worker is busy, so this only matters
+  // if × or Keep reaches us another way mid-run; any late reply is then dropped.
+  const dropLateReply = () => { if (runLive.value) stopped.value = true }
   function previewTake(id: string | null) { worker()?.previewTake?.(id === CURRENT ? null : takeAt(id)) }
   function chooseTake(id: string) { worker()?.selectTake?.(takeAt(id)) }
   function keepTake(id: string) {
@@ -218,8 +232,9 @@ export function useStudioPrompt(
   // The strip's own "more" button: the worker restarts the set, so only a run
   // in flight (not thumbnails still drawing) blocks it.
   function moreTakes() {
-    if (busy.value || disabled.value) { toast.info(STUDIO_BUSY_NOTICE); return }
-    void worker()?.moreDirections?.()
+    if (busy.value || disabled.value) { toast.info(BUSY_NOTICE); return }
+    const w = worker()
+    if (w?.moreDirections) void track(w.moreDirections()).catch(() => {})
   }
   function closeTakes() { dropLateReply(); worker()?.dismissTakes?.() }
 
