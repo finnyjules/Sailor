@@ -1,6 +1,6 @@
 # One pen for every tool
 
-**Date:** 2026-09-24 · **Status:** approved · Plan A built 2026-09-24 (`docs/superpowers/plans/2026-09-24-shared-pen-a.md`); B (Frame) and C (Shape Studio) to follow
+**Date:** 2026-09-24 · **Status:** approved · Plans A and B built (`docs/superpowers/plans/2026-09-24-shared-pen-a.md`, `docs/superpowers/plans/2026-09-25-shared-pen-b-frame.md`); C (Shape Studio) next
 
 ## Why
 
@@ -301,3 +301,6 @@ the Frame hosts the pen:
   the next press; (c) switching tools mid Line/Circle leaves its start point behind.
 - **Scale check.** The solver's convergence and some rule residuals are absolute; the Frame's drawings
   live within about ±0.5 units ("1 unit = frame width"). Verify, or store Frame drawings in larger units.
+
+Done in Plan B (2026-09-25): keys, inline values, options, toolbar placement, the usePen split (history,
+keys and copies), the three small pen fixes, and the scale check (100 units per local unit).

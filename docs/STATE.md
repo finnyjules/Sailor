@@ -31,6 +31,22 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
 
+### Shared pen — Plan B (the Frame) — LANDED 2026-09-25 (spec `docs/superpowers/specs/2026-09-24-shared-pen-design.md`, plan `docs/superpowers/plans/2026-09-25-shared-pen-b-frame.md`)
+
+The Frame's toolbar pen now draws with the shared pen — arcs, Curve, lines, circles, points, rules — with its own two-row toolbar replacing the Frame's while it is open. A finished drawing becomes a path layer that remembers its drawing: closed shapes get a blue fill, open ones a blue outline. Double-clicking such a path reopens the pen on it, live on the layer, at any rotation, skew or scale — Enter saves one undo step, Esc puts it back, and opening the pen and leaving without an edit adds nothing to undo. Paths without a drawing (imported, library shapes, old ones) and corner-pinned paths still open the point editor.
+
+The text tool's "Follow a path → Drawn path" now shares the same pen: "Draw a path" and "Edit the path" open it (open paths only — Select, Pen, Curve), the type re-lays as you draw and stays on the line you drew, and "Or use" copies a path's drawing too. While the pen is open, Escape, Delete and ⌘Z belong to the pen — the editor doesn't close and the layer isn't deleted — the Motion tab closes the pen, and the text's placement controls are disabled with "Finish the pen first". Typed values (Distance, Radius, Copies) are entered in a row in the toolbar, not a browser prompt. The old handles pen is deleted.
+
+**Under the hood.** Drawings are stored at 100 units per local unit; the stored drawing and the outline always agree (the outline is derived from the drawing); re-centring happens only on save; and a text guide keeps its refit factor and moves the text so the type stays on the drawn line.
+
+**Known limits.** With a radial cloner the pen's points sit at the layer's own centre, not on a copy. A cloner with per-copy rotation or scale saves without re-centring. A perfectly vertical guide shows at its unresized length. The viewing-size routes (double-click, Draw a path) have no browser test.
+
+**Proof.** Unit suites for the pen, geometry and session; `tests/frame-pen.spec.ts` with real mouse and keyboard.
+
+Commits: `006824859`, `9eb75250c`, `b652be159`, `2337a5fee`, `0f278efb2`, `c4dcef4e3`, `28c930250`, `038e52336`, `678c6d054`, `41b13fd34`, `861f0f5d3`, `0c8804076`, `2898e990d`, `dfdfc7202`, `dbe3786cf`, `b7bfdc135`, `058899be7`.
+
+**Next.** Plan C — Shape Studio's "Drawn" shape.
+
 ### AI in Sailor, stage 2 — one prompt on the canvas, and the node toolbar — BUILT 2026-09-24 (`9e8f9b39d`..`cacd0be87`, non-contiguous — 21 commits across 10 tasks + a final fix wave, subagent-driven, a review per task, a whole-stage review and its fix wave; spec `docs/superpowers/specs/2026-09-23-ai-in-sailor-design.md` §2, plan `docs/superpowers/plans/2026-09-24-ai-in-sailor-stage2-canvas.md`)
 
 - **One prompt component** (`components/prompt/SailorPrompt.vue`): the canvas prompt now runs on it. The selection shows as a chip with the node's own title, 2–3 suggestions appear while focused, `/` and ⌘K focus it (never from behind a studio, Frame or Settings), and Esc leaves. The look is Sailor's existing AI look: the pastel ring, plus the glimm while working. Stop aborts the request, and a reply that arrives late is ignored; the same holds for reroll.
