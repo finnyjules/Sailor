@@ -27,7 +27,7 @@
  * vets LipSyncNode's `/view` links too) before pricing.
  */
 import { stat } from 'node:fs/promises'
-import { ALL_FORMATS, FilePathSource, Input } from 'mediabunny'
+import { ALL_FORMATS, BufferSource, FilePathSource, Input } from 'mediabunny'
 import { annotatedFilepath, engineFolder, resolveInside } from '../native/paths'
 import {
   allotMediaFiles, gateNodeOrder, mediaFileKey, secondsPricedMedia, sourceAudioSeconds,
@@ -37,7 +37,7 @@ import { createGateReads, type GateReads } from './graphInputPixels'
 import { readModelOptions } from '../../shared/pricing/videoSettings'
 import { readViewRef } from '../../shared/pricing/clipSettings'
 import { resolveVideoModelId } from '../../shared/runner/eligibility'
-import { SEEDANCE_REFERENCE_MAX_SECONDS, SEEDANCE_TOO_MUCH_SOUND, SEEDANCE_TOO_MUCH_VIDEO, type RequestProblem } from '../runner/requestRules'
+import { SEEDANCE_REFERENCE_MAX_SECONDS, SEEDANCE_TOO_MUCH_SOUND, SEEDANCE_TOO_MUCH_VIDEO, SEEDANCE_UNMEASURED_REFERENCE, type RequestProblem } from '../runner/requestRules'
 
 type Prompt = Record<string, { class_type?: unknown; inputs?: unknown } | undefined>
 export type MediaKind = 'audio' | 'video'
@@ -63,7 +63,24 @@ export async function mediaSeconds(
     if (!st.isFile() || st.size > (opts.maxBytes ?? MAX_MEDIA_BYTES)) return null
   }
   catch { return null }
-  const input = new Input({ source: new FilePathSource(path), formats: ALL_FORMATS })
+  return trackSeconds(new Input({ source: new FilePathSource(path), formats: ALL_FORMATS }), kind, opts.timeoutMs)
+}
+
+/**
+ * Seconds of the primary audio (or video) track of media already in memory
+ * (the runner's result store reads whole files), or null when it is over
+ * `maxBytes`, too slow, has no such track, or can't be read.
+ */
+export async function mediaSecondsOfBytes(
+  bytes: Uint8Array, kind: MediaKind,
+  opts: { maxBytes?: number, timeoutMs?: number } = {},
+): Promise<number | null> {
+  if (bytes.byteLength > (opts.maxBytes ?? MAX_MEDIA_BYTES)) return null
+  const copy = bytes.slice()
+  return trackSeconds(new Input({ source: new BufferSource(copy.buffer), formats: ALL_FORMATS }), kind, opts.timeoutMs)
+}
+
+async function trackSeconds(input: Input, kind: MediaKind, timeoutMs?: number): Promise<number | null> {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     const work = (async () => {
@@ -72,7 +89,7 @@ export async function mediaSeconds(
       const d = await track.computeDuration()
       return Number.isFinite(d) && d > 0 ? d : null
     })().catch(() => null)
-    const late = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), opts.timeoutMs ?? MEDIA_READ_TIMEOUT_MS) })
+    const late = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs ?? MEDIA_READ_TIMEOUT_MS) })
     return await Promise.race([work, late])
   }
   finally {
@@ -170,38 +187,119 @@ export async function graphInputSeconds(
 
 /**
  * Seedance 2.0 reference-to-video takes at most 15 s of reference video in
- * all, and 15 s of reference sound (its schema; S1b fix round 1, ruling d).
+ * all, and 15 s of reference sound (its schema; S1b fix rounds 1–2, ruling d).
  * Each GenerateVideoNode on seedance-2.0 whose options send references (no
  * first frame) has its `/view?…&type=input` references measured; a total over
- * 15 s is refused in plain words. A reference this can't read (an external
- * link, a file mediabunny can't read) isn't counted: the price already bills
- * the 15 s maximum. Never drops a reference.
+ * 15 s is refused in plain words. Never drops a reference.
+ *
+ * A reference this can't measure (an external link, a file over the size
+ * limit, one mediabunny can't read or that is too slow): `strict` (hosted —
+ * the /prompt meter and the runner) refuses it, since its length can't be
+ * checked; otherwise it isn't counted (the price already bills the 15 s
+ * maximum, and fal refuses an over-long one).
+ *
+ * The /prompt gate reads engine input files (engineMediaSeconds); the runner
+ * reads through its result store (runnerMediaReader).
  */
 export async function seedanceReferenceSeconds(
   prompt: Prompt,
   read: (file: MediaFile, kind: MediaKind) => Promise<number | null> = engineMediaSeconds,
+  opts: { strict?: boolean } = {},
 ): Promise<RequestProblem[]> {
   const out: RequestProblem[] = []
+  for (const list of seedanceReferenceLists(prompt)) {
+    const lengths = await Promise.all(list.names.map(name =>
+      name ? read({ value: name, literalInput: true }, list.kind).catch(() => null) : Promise.resolve(null)))
+    const problem = (message: string): RequestProblem => ({ nodeId: list.nodeId, classType: 'GenerateVideoNode', input: 'model_options', message })
+    if (opts.strict && lengths.some(s => s == null)) { out.push(problem(SEEDANCE_UNMEASURED_REFERENCE)); continue }
+    const total = lengths.reduce<number>((n, s) => n + (s ?? 0), 0)
+    if (total > SEEDANCE_REFERENCE_MAX_SECONDS) out.push(problem(list.tooMuch))
+  }
+  return out
+}
+
+/**
+ * Each Seedance 2.0 node's reference videos and sounds that would be sent
+ * (no first frame, options not wired): per list, each element's `/view` input
+ * name, or null where it isn't one (an external link, a refused path).
+ */
+function seedanceReferenceLists(prompt: Prompt): { nodeId: string, kind: MediaKind, tooMuch: string, names: (string | null)[] }[] {
+  const out: { nodeId: string, kind: MediaKind, tooMuch: string, names: (string | null)[] }[] = []
   if (!prompt || typeof prompt !== 'object') return out
   for (const [nodeId, node] of Object.entries(prompt)) {
     if (node?.class_type !== 'GenerateVideoNode') continue
     const inputs = inputsOf(node)
     if (resolveVideoModelId(inputs.model) !== 'seedance-2.0' || Array.isArray(inputs.model_options) || Array.isArray(inputs.image)) continue
-    const opts = readModelOptions(inputs.model_options)
-    if (typeof opts.image_url === 'string' && opts.image_url) continue
-    for (const [key, kind, message] of [
+    const options = readModelOptions(inputs.model_options)
+    if (typeof options.image_url === 'string' && options.image_url) continue
+    for (const [key, kind, tooMuch] of [
       ['video_urls', 'video', SEEDANCE_TOO_MUCH_VIDEO],
       ['audio_urls', 'audio', SEEDANCE_TOO_MUCH_SOUND],
     ] as const) {
-      const list = opts[key]
-      if (!Array.isArray(list)) continue
-      const lengths = await Promise.all(list.map((v) => {
-        const r = readViewRef(v)
-        return r?.name && !r.refused ? read({ value: r.name, literalInput: true }, kind) : Promise.resolve(null)
-      }))
-      const total = lengths.reduce<number>((n, s) => n + (s ?? 0), 0)
-      if (total > SEEDANCE_REFERENCE_MAX_SECONDS) out.push({ nodeId, classType: 'GenerateVideoNode', input: 'model_options', message })
+      const list = options[key]
+      if (!Array.isArray(list) || !list.length) continue
+      out.push({
+        nodeId, kind, tooMuch,
+        names: list.map((v) => {
+          let r: ReturnType<typeof readViewRef> = null
+          try { r = readViewRef(v) }
+          catch { r = null }
+          return r?.name && !r.refused ? r.name : null
+        }),
+      })
     }
   }
   return out
+}
+
+/** An input file name ("a.mp4", "sub/a.mp4") as the runner's store names it, or null if unsafe. */
+function inputFileOf(name: string): { filename: string, subfolder: string, type: 'input' } | null {
+  const parts = name.replace(/\\/g, '/').split('/')
+  if (parts.some(p => !p || p === '.' || p === '..')) return null
+  const filename = parts.pop()!
+  return { filename, subfolder: parts.join('/'), type: 'input' }
+}
+
+/** The largest Seedance reference the runner reads to measure (fal's own limit is 50 MB of video in all). */
+export const RUNNER_REFERENCE_MAX_BYTES = 64 * 1024 * 1024
+
+/**
+ * seedanceReferenceSeconds' reader for the runner: an input file (a `/view`
+ * name, "sub/a.mp4" allowed) read through the runner's result store and
+ * measured in memory, under RUNNER_REFERENCE_MAX_BYTES and the read timeout.
+ */
+export function runnerMediaReader(readFile: (f: { filename: string, subfolder: string, type: 'input' }) => Promise<Uint8Array>) {
+  return async (file: MediaFile, kind: MediaKind): Promise<number | null> => {
+    const f = inputFileOf(file.value)
+    if (!f) return null
+    let bytes: Uint8Array
+    try { bytes = await readFile(f) }
+    catch { return null }
+    return mediaSecondsOfBytes(bytes, kind, { maxBytes: RUNNER_REFERENCE_MAX_BYTES })
+  }
+}
+
+/**
+ * The runner's check at the start of a run (engine.ts startRun, after the
+ * ownership check and before any hold): every Seedance 2.0 reference file
+ * must be the caller's own (`assertOwned`, hosted), and the references must
+ * fit seedanceReferenceSeconds. The first problem, or null.
+ */
+export async function runnerReferenceProblems(
+  prompts: Prompt[],
+  o: {
+    readFile: (f: { filename: string, subfolder: string, type: 'input' }) => Promise<Uint8Array>
+    strict: boolean
+    assertOwned: (files: { filename: string, subfolder: string, type: 'input' }[]) => Promise<void>
+  },
+): Promise<RequestProblem | null> {
+  for (const p of prompts) {
+    const files = seedanceReferenceLists(p).flatMap(l => l.names)
+      .map(n => (n ? inputFileOf(n) : null))
+      .filter((f): f is NonNullable<typeof f> => f != null)
+    if (files.length) await o.assertOwned(files)
+    const problems = await seedanceReferenceSeconds(p, runnerMediaReader(o.readFile), { strict: o.strict })
+    if (problems.length) return problems[0]!
+  }
+  return null
 }

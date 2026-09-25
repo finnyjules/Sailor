@@ -896,6 +896,15 @@ export function createEngine(deps: EngineDeps) {
     const files = new Map<string, OutputFile>()
     for (const p of prompts) for (const f of collectInputFiles(p)) files.set(`${f.type}:${f.subfolder}:${f.filename}`, f)
     await assertFilesOwned([...files.values()], i.userId, deps.hosted(), deps.ownership)
+    // Seedance 2.0 references: at most 15 s of video and 15 s of sound in all,
+    // measured from their input files; hosted refuses one it can't measure
+    // (S1b fix round 2). Loaded here so this change stays in one place.
+    const { runnerReferenceProblems } = await import('../utils/graphInputSeconds')
+    const tooLong = await runnerReferenceProblems(prompts, {
+      readFile: f => deps.results.read(f), strict: deps.hosted(),
+      assertOwned: fs => assertFilesOwned(fs, i.userId, deps.hosted(), deps.ownership),
+    })
+    if (tooLong) throw refuse(tooLong.message, 400, { nodeId: tooLong.nodeId, classType: tooLong.classType })
     // A Frame's baked layers and masks are files the browser uploaded just
     // before: one that is gone fails now, before anything runs or is charged.
     for (const f of loadImageFiles(prompts)) {

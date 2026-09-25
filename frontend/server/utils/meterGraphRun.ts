@@ -494,7 +494,8 @@ export async function handleMeteredPrompt(event: H3Event): Promise<any> {
     priceGraph,
     measureInputPixels: prompt => graphInputPixels(prompt, undefined, reads),
     measureInputSeconds: prompt => graphInputSeconds(prompt, undefined, reads),
-    referenceSecondsProblems: prompt => seedanceReferenceSeconds(prompt),
+    // Hosted: a Seedance reference whose length can't be read is refused, not counted as 0 (S1b fix round 2).
+    referenceSecondsProblems: prompt => seedanceReferenceSeconds(prompt, undefined, { strict: true }),
     // Stage 7 final review C1: the operator kill-switch + daily ceiling. Wired
     // the SAME way moderatePrompt (Task 3) is — the real implementation passed
     // in here, stubbed in the unit tests. Local mode is a no-op inside

@@ -18,6 +18,7 @@
 import { isLink, type ApiPrompt } from '#shared/runner/graph'
 import { resolveVideoModelId } from '#shared/runner/eligibility'
 import { composeImagePrompt } from './generators/image'
+import { RUNNER_VIDEO_MODELS } from './generators/video'
 import { asText, parseJsonObject } from './generators/opts'
 import { moodboardFiles } from './inputs'
 
@@ -50,6 +51,8 @@ export const SEEDANCE_REFERENCE_LIMITS = [
 export const SEEDANCE_REFERENCE_MAX_SECONDS = 15
 export const SEEDANCE_TOO_MUCH_VIDEO = 'Seedance 2.0 takes at most 15 s of reference video in all.'
 export const SEEDANCE_TOO_MUCH_SOUND = 'Seedance 2.0 takes at most 15 s of reference sound in all.'
+/** Hosted: a reference whose length can't be read (an external link, say) can't be checked, so it isn't sent. */
+export const SEEDANCE_UNMEASURED_REFERENCE = 'Seedance 2.0 can’t check how long a reference video or sound is. Use one uploaded to Sailor.'
 
 /**
  * What is wrong with Seedance 2.0's reference lists in these options, or null.
@@ -91,42 +94,58 @@ export interface RequestProblem {
   message: string
 }
 
-const NANO_BANANA_IMAGE_MODELS: ReadonlySet<string> = new Set(['nano-banana-2', 'nano-banana-pro'])
-const H3_VIDEO_MODELS: ReadonlySet<string> = new Set(['hailuo-h3', 'hailuo-h3-max'])
+/** GenerateImageNode's Nano Banana models → their fal apps (text-to-image, and edit when moodboard pictures ride along). */
+const NANO_BANANA_IMAGE_APPS: Readonly<Record<string, { text: string, refs: string }>> = {
+  'nano-banana-2': { text: 'fal-ai/nano-banana-2', refs: 'fal-ai/nano-banana-2/edit' },
+  'nano-banana-pro': { text: 'fal-ai/nano-banana-pro', refs: 'fal-ai/nano-banana-pro/edit' },
+}
+/** GenerateVideoNode's Hailuo H3 models → their fal apps (from the video table). */
+const H3_VIDEO_APPS: Readonly<Record<string, string>> = Object.fromEntries(
+  ['hailuo-h3', 'hailuo-h3-max'].map(id => [id, RUNNER_VIDEO_MODELS[id]!.app]),
+)
 
 /**
  * Every node of a prompt whose request no provider would take, read from its
  * widgets the way the node composes its request (Python and the runner alike):
- * the prompt as sent, after any style text is added. A prompt part that is
- * wired in can't be read before the run, so that node is not judged here.
+ * the prompt as sent, after any style text is added, judged by the endpoint's
+ * rule in PROMPT_MIN_LENGTH. A prompt part that is wired in can't be read
+ * before the run, so that node is not judged here.
  */
 export function requestProblems(prompt: ApiPrompt): RequestProblem[] {
   const out: RequestProblem[] = []
   for (const [nodeId, node] of Object.entries(prompt ?? {})) {
     const inputs = node?.inputs ?? {}
     const ct = node?.class_type
-    const short = (text: string, min: number, message: string) => {
-      if (chars(text) < min) out.push({ nodeId, classType: ct, input: 'prompt', message })
+    /** The prompt `text` against the rule of `fal <endpoint>`. */
+    const judge = (endpoint: string, text: string) => {
+      const rule = PROMPT_MIN_LENGTH[`fal ${endpoint}`]
+      if (!rule) throw new Error(`No prompt rule for fal ${endpoint}`)
+      if (chars(text) < rule.min) out.push({ nodeId, classType: ct, input: 'prompt', message: rule.message })
     }
-    if (ct === 'GenerateImageNode' && NANO_BANANA_IMAGE_MODELS.has(String(inputs.model))) {
+    const nb = ct === 'GenerateImageNode' && Object.prototype.hasOwnProperty.call(NANO_BANANA_IMAGE_APPS, String(inputs.model))
+      ? NANO_BANANA_IMAGE_APPS[String(inputs.model)]!
+      : null
+    if (nb) {
       if (['prompt', 'prompt_in', 'style_block', 'style_in'].some(k => isLink(inputs[k]))) continue
-      short(composeImagePrompt({
+      const hasRefs = moodboardFiles(inputs.style_refs).length > 0
+      judge(hasRefs ? nb.refs : nb.text, composeImagePrompt({
         prompt: asText(inputs.prompt),
         promptIn: asText(inputs.prompt_in),
         styleBlock: asText(inputs.style_block),
         styleIn: asText(inputs.style_in),
-        hasRefs: moodboardFiles(inputs.style_refs).length > 0,
-      }), 3, NANO_BANANA_SHORT_PROMPT)
+        hasRefs,
+      }))
     }
     else if (ct === 'EditImageNode' && inputs.model === 'Nano Banana 2') {
-      if (!isLink(inputs.prompt)) short(asText(inputs.prompt), 3, NANO_BANANA_SHORT_PROMPT)
+      if (!isLink(inputs.prompt)) judge('fal-ai/nano-banana-2/edit', asText(inputs.prompt))
     }
     else if (ct === 'GenerateFromReferencesNode' && inputs.model === 'nano-banana-2') {
-      if (!isLink(inputs.prompt) && (inputs.prompt === undefined || typeof inputs.prompt === 'string')) short(asText(inputs.prompt), 3, NANO_BANANA_SHORT_PROMPT)
+      if (!isLink(inputs.prompt) && (inputs.prompt === undefined || typeof inputs.prompt === 'string')) judge('fal-ai/nano-banana-2/edit', asText(inputs.prompt))
     }
     else if (ct === 'GenerateVideoNode') {
       const id = resolveVideoModelId(inputs.model)
-      if (H3_VIDEO_MODELS.has(id) && !isLink(inputs.prompt)) short(asText(inputs.prompt), 1, H3_SHORT_PROMPT)
+      const h3 = Object.prototype.hasOwnProperty.call(H3_VIDEO_APPS, id) ? H3_VIDEO_APPS[id]! : null
+      if (h3 && !isLink(inputs.prompt)) judge(`${h3}/${isLink(inputs.image) ? 'image-to-video' : 'text-to-video'}`, asText(inputs.prompt))
       if (id === 'seedance-2.0' && !isLink(inputs.model_options)) {
         const p = seedanceReferenceProblem(parseJsonObject(inputs.model_options), isLink(inputs.image))
         if (p) out.push({ nodeId, classType: ct, input: 'model_options', message: p.message })

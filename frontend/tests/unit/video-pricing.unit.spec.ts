@@ -325,6 +325,22 @@ describe('Seedance 2.0 reference videos are priced on input + output seconds', (
   })
 })
 
+describe('Seedance 2.0 takes 14 s (its schema\'s "4"…"15"; S1b fix round 1, M3)', () => {
+  it('14 s is sent as "14" and priced at 14 s, on both classes; the badge equals the charge', () => {
+    expect(RUNNER_VIDEO_MODELS['seedance-2.0']!.build({ prompt: 'p', aspectRatio: '16:9', duration: 14, seed: 0, image: null, adv: {} }).duration).toBe('14')
+    expect(effectiveVideoSettings('seedance-2.0', '14', '16:9', '{}')!.seconds).toBe(14)
+    for (const ct of VIDEO_CLASSES) {
+      const inputs = { model: 'seedance-2.0', duration: '14' }
+      expect(providerUsd(ct, inputs), ct).toBeCloseTo(0.3034 * 14, 6)
+      expect(providerUsd(ct, { ...inputs, model_options: '{"resolution":"1080p"}' }), ct).toBeCloseTo(0.682 * 14, 6)
+      expect(nodeCreditEstimate(ct, inputs), ct).toBe(charge(ct, inputs))
+    }
+    // Between 13 and 15, not rounded to either.
+    expect(providerUsd('GenerateVideoNode', { model: 'seedance-2.0', duration: '13' })).toBeCloseTo(0.3034 * 13, 6)
+    expect(providerUsd('GenerateVideoNode', { model: 'seedance-2.0', duration: '15' })).toBeCloseTo(0.3034 * 15, 6)
+  })
+})
+
 describe('PixVerse v6 is priced as the service renders it', () => {
   // Since Task S1b the builder sends `quality` and `generate_audio_switch`, so
   // the service renders the node's resolution and sound.

@@ -9,10 +9,14 @@
  * node; the ComfyUI path's /prompt gate (local proxy and hosted meter)
  * refuses the same nodes.
  */
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { isRunnerEligible } from '#shared/runner/eligibility'
+import { RUNNER_FAMILIES } from '#shared/runner/families'
 import { planNode } from '~~/server/runner/executors'
 import {
-  H3_SHORT_PROMPT, NANO_BANANA_SHORT_PROMPT, SEEDANCE_TOO_MUCH_SOUND, SEEDANCE_TOO_MUCH_VIDEO, requestProblems,
+  H3_SHORT_PROMPT, NANO_BANANA_SHORT_PROMPT, SEEDANCE_TOO_MUCH_SOUND, SEEDANCE_TOO_MUCH_VIDEO, SEEDANCE_UNMEASURED_REFERENCE, requestProblems,
 } from '~~/server/runner/requestRules'
 import { blockedPromptRefusal } from '~~/server/utils/blockedModels'
 import { seedanceReferenceSeconds } from '~~/server/utils/graphInputSeconds'
@@ -162,3 +166,89 @@ function meterDeps() {
     releaseHold: vi.fn(async () => {}),
   }
 }
+
+// ── S1b fix round 2 ─────────────────────────────────────────────────────
+
+/** A mono 8-bit 8 kHz WAV of `seconds` of silence: a real file mediabunny measures. */
+function wav(seconds: number): Uint8Array {
+  const rate = 8000
+  const n = rate * seconds
+  const b = Buffer.alloc(44 + n, 0x80)
+  b.write('RIFF', 0); b.writeUInt32LE(36 + n, 4); b.write('WAVE', 8)
+  b.write('fmt ', 12); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22)
+  b.writeUInt32LE(rate, 24); b.writeUInt32LE(rate, 28); b.writeUInt16LE(1, 32); b.writeUInt16LE(8, 34)
+  b.write('data', 36); b.writeUInt32LE(n, 40)
+  return new Uint8Array(b)
+}
+
+describe('Seedance 2.0 references on the runner: measured at the start of the run (fix round 2)', () => {
+  const view = (name: string) => `/view?filename=${name}&type=input`
+  const seedance = (opts: Record<string, unknown>) => vid({ model: 'seedance-2.0', model_options: JSON.stringify(opts) })
+  const start = (k: ReturnType<typeof makeKit>, p: ApiPrompt) =>
+    k.engine.startRun({ userId: k.userId, takes: [p], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+
+  it('a 16 s reference sound is refused before any hold or call; 15 s runs and is sent whole', async () => {
+    const k = makeKit({ hosted: true })
+    writeFileSync(join(k.root, 'input', 'ref16.wav'), wav(16))
+    writeFileSync(join(k.root, 'input', 'ref15.wav'), wav(15))
+    await expect(start(k, seedance({ image_urls: ['https://x/a.png'], audio_urls: [view('ref16.wav')] })))
+      .rejects.toMatchObject({ statusCode: 400, message: SEEDANCE_TOO_MUCH_SOUND })
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    expect(k.fal.client.submit).not.toHaveBeenCalled()
+
+    const { runId } = await start(k, seedance({ image_urls: ['https://x/a.png'], audio_urls: [view('ref15.wav')] }))
+    await k.engine.settled(runId)
+    expect(k.fal.submitted().map(r => r.payload.audio_urls)).toEqual([[view('ref15.wav')]])
+  })
+
+  it('two references adding up to 16 s are refused too', async () => {
+    const k = makeKit({ hosted: true })
+    writeFileSync(join(k.root, 'input', 'a8.wav'), wav(8))
+    await expect(start(k, seedance({ image_urls: ['https://x/a.png'], audio_urls: [view('a8.wav'), view('a8.wav')] })))
+      .rejects.toMatchObject({ statusCode: 400, message: SEEDANCE_TOO_MUCH_SOUND })
+  })
+
+  it('hosted refuses a reference it can\'t measure (an external link, a missing file); local sends it', async () => {
+    const hosted = makeKit({ hosted: true })
+    for (const ref of ['https://elsewhere/x.wav', view('missing.wav')]) {
+      await expect(start(hosted, seedance({ image_urls: ['https://x/a.png'], audio_urls: [ref] })))
+        .rejects.toMatchObject({ statusCode: 400, message: SEEDANCE_UNMEASURED_REFERENCE })
+    }
+    expect(hosted.ledger.hold).not.toHaveBeenCalled()
+    const local = makeKit()
+    const { runId } = await start(local, seedance({ image_urls: ['https://x/a.png'], audio_urls: ['https://elsewhere/x.wav'] }))
+    await local.engine.settled(runId)
+    expect(local.fal.submitted()).toHaveLength(1)
+  })
+
+  it('the hosted /prompt gate is strict too: an unmeasurable reference is refused', async () => {
+    const read = vi.fn(async () => null)
+    const p = seedance({ video_urls: ['https://elsewhere/x.mp4'] })
+    expect((await seedanceReferenceSeconds(p, read, { strict: true })).map(x => x.message)).toEqual([SEEDANCE_UNMEASURED_REFERENCE])
+    expect(await seedanceReferenceSeconds(p, read)).toEqual([])
+  })
+})
+
+describe('a node refused at plan time, after the hold, is not charged (fix round 2, item 5)', () => {
+  it('moodboard pictures that can\'t be read leave a 2-character prompt: the node fails, the hold is released, nothing is sent', async () => {
+    const k = makeKit({ hosted: true })
+    // The start-of-run check sees the moodboard (so the style instruction), and lets it through…
+    const p = img({ prompt: 'ab', style_refs: JSON.stringify({ folder: 'moodboard_3', files: ['gone.png'] }) })
+    expect(requestProblems(p)).toEqual([])
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [p], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+    await k.engine.settled(runId)
+    // …but the picture is gone, so the plan's prompt is 2 characters and is refused.
+    const rec = (await k.store.get(runId))!.takes[0]!.nodes['1']!
+    expect(rec).toMatchObject({ status: 'error', error: NANO_BANANA_SHORT_PROMPT })
+    expect(k.fal.client.submit).not.toHaveBeenCalled()
+    const holds = [...k.ledger.holds.values()]
+    expect(holds).toHaveLength(1)
+    expect(holds[0]!.state === 'released' || (holds[0]!.state === 'settled' && holds[0]!.actual === 0)).toBe(true)
+    expect(k.ledger.settle).not.toHaveBeenCalledWith(expect.anything(), expect.any(Number), expect.anything())
+  })
+
+  it('a wired prompt never reaches the runner plan: the workflow is left to ComfyUI, so nothing is held by the runner', () => {
+    const p: ApiPrompt = { ...img({ prompt: '', prompt_in: ['3', 0] }), 3: { class_type: 'IdeaNode', inputs: { text: 'x' } } }
+    expect(isRunnerEligible(p, new Set(RUNNER_FAMILIES))).toBe(false)
+  })
+})
