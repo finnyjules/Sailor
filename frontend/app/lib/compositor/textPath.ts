@@ -107,6 +107,18 @@ export interface TextPathSpec {
   /** Set the text this many times along the path, each followed by `REPEAT_SEPARATOR` (a
    *  ring then reads "WORD — WORD — WORD — " all the way round). Absent or < 2 ⇒ once. */
   repeat?: number
+  /**
+   * The pen drawing behind `d`, when this guide came from the shared pen (Plan B).
+   * INVARIANT: whenever this is present, `d === sketchToLocalD(sketch)` — see
+   * `app/lib/compositor/penFrame.ts`. A writer that changes `d` without going
+   * through the pen must drop `sketch` rather than let it go stale.
+   *
+   * Typed via an inline `import(...)` rather than a top-level import: this
+   * module's own purity test pins its exact runtime import list, and a
+   * `sketch/model` dependency here is type-only (erased at build) — a plain
+   * `import type` statement would still show up in that list.
+   */
+  sketch?: import('~/lib/sketch/model').SketchDoc
 }
 
 /** What follows each repeat of a path's text (`TextPathSpec.repeat`) — the layout prototype's
@@ -321,6 +333,50 @@ export function guideFromTable(table: VtCurveTable, rotation = 0, closed = false
 }
 
 /**
+ * The exact mapping `guideFromPathD` uses from a LOCAL-unit point on `d`'s
+ * longest subpath to the guide's pixel space, factored out so a host (the
+ * Frame pen, `app/lib/compositor/penFrame.ts`) can place a drawing point on the
+ * SAME guide the text layer renders, without re-deriving the refit math.
+ *
+ * `guide px = W·k·(p_local − mid)`. `k` is the refit factor (1 when
+ * `targetWidthPx` is 0 or the outline has zero width) and `mid` is the bbox
+ * midpoint of the refit outline, given back in LOCAL units so a caller can
+ * apply it before its own `·W`.
+ *
+ * `null` exactly when `guideFromPathD` would return `null` for the same `d`.
+ */
+export function customGuideMapping(
+  d: string,
+  W: number,
+  targetWidthPx = 0,
+): { k: number; mid: { x: number; y: number } } | null {
+  const sub = longestSubpath(d)
+  if (!sub || sub.pts.length < 2) return null
+  const wSafe = Number.isFinite(W) && W > 0 ? W : 1
+  let pts = sub.pts.map(p => ({ x: p.x * wSafe, y: p.y * wSafe }))
+  let k = 1
+  if (targetWidthPx > 0) {
+    let lo = Infinity, hi = -Infinity
+    for (const p of pts) { if (p.x < lo) lo = p.x; if (p.x > hi) hi = p.x }
+    const w = hi - lo
+    if (w > 0) k = targetWidthPx / w
+  }
+  if (k !== 1) pts = pts.map(p => ({ x: p.x * k, y: p.y * k }))
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  for (const p of pts) {
+    if (p.x < minX) minX = p.x
+    if (p.x > maxX) maxX = p.x
+    if (p.y < minY) minY = p.y
+    if (p.y > maxY) maxY = p.y
+  }
+  const midPxX = (minX + maxX) / 2
+  const midPxY = (minY + maxY) / 2
+  const denom = wSafe * k
+  return { k, mid: { x: midPxX / denom, y: midPxY / denom } }
+}
+
+/**
  * A guide from an SVG path `d` in LOCAL units — the shape library and the pen
  * both speak this.
  *
@@ -330,21 +386,21 @@ export function guideFromTable(table: VtCurveTable, rotation = 0, closed = false
  * an interior fragment would look like a bug.
  *
  * `targetWidthPx > 0` refits the outline to that width, preserving aspect.
+ *
+ * Built on `customGuideMapping` — the single source of truth for the refit —
+ * so this and a host's `guideView` agree pixel for pixel. `guideFromPolyline`'s
+ * own re-centring is a no-op here since the points below are already centred.
  */
 export function guideFromPathD(d: string, W: number, targetWidthPx = 0): Guide | null {
+  const m = customGuideMapping(d, W, targetWidthPx)
+  if (!m) return null
   const sub = longestSubpath(d)
-  if (!sub || sub.pts.length < 2) return null
-  const k = Number.isFinite(W) && W > 0 ? W : 1
-  let pts = sub.pts.map(p => ({ x: p.x * k, y: p.y * k }))
-  if (targetWidthPx > 0) {
-    let lo = Infinity, hi = -Infinity
-    for (const p of pts) { if (p.x < lo) lo = p.x; if (p.x > hi) hi = p.x }
-    const w = hi - lo
-    if (w > 0) {
-      const f = targetWidthPx / w
-      pts = pts.map(p => ({ x: p.x * f, y: p.y * f }))
-    }
-  }
+  if (!sub) return null
+  const wSafe = Number.isFinite(W) && W > 0 ? W : 1
+  const pts = sub.pts.map(p => ({
+    x: wSafe * m.k * (p.x - m.mid.x),
+    y: wSafe * m.k * (p.y - m.mid.y),
+  }))
   return guideFromPolyline(pts, sub.closed)
 }
 
