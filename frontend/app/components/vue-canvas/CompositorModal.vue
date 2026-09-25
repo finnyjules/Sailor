@@ -76,9 +76,11 @@ import { rotatedUnionBoxPx } from '~/lib/compositor/groupResize'
 import { insertStackKeyAbove, pruneWiredSlotFlags, pruneSlotKeyedRecord } from '~/lib/compositor/wiredSlots'
 import { defaultExpressiveBoxParams, type ExpressiveBoxParams } from '~~/shared/text-layout/boxes'
 import { useCompositorAgent } from '~/composables/useCompositorAgent'
-import AgentBar from '~/components/agent/AgentBar.vue'
-import AgentProposal from '~/components/agent/AgentProposal.vue'
-import AgentProgress from '~/components/agent/AgentProgress.vue'
+import StudioPromptHost from '~/components/prompt/StudioPromptHost.vue'
+import StudioActionRows from '~/components/vue-canvas/studio/StudioActionRows.vue'
+import { useStudioPrompt, STUDIO_PROMPT_KEY } from '~/composables/useStudioPrompt'
+import { frameSelectionLabel } from '~/lib/prompt/studioDispatch'
+import { studioActions } from '~/lib/studio/studioActions'
 import AgentSweep from '~/components/agent/AgentSweep.vue'
 import { useFramePenSession } from '~/composables/frame/useFramePenSession'
 import { isTypingInField } from '~/composables/pen/usePen'
@@ -239,6 +241,7 @@ import { shapeById, SHAPE_NONE, SHAPE_FAMILIES } from '~/lib/shapes/catalog'
 import { suggestTextFace } from '~/lib/frame/patterns/pairings'
 import { createShapeLayer, swapShapeLayer } from '~/lib/shapes/pathLayer'
 import { SHAPE_PICKER_WIDTH, anchorAbove } from '~/lib/shapes/pickerLayout'
+import { provide } from 'vue'
 import type { Component, ComputedRef } from 'vue'
 import type { BrandKit } from '~~/shared/brand/types'
 import { brandSwatches } from '~~/shared/brand/resolve'
@@ -570,13 +573,17 @@ onBeforeUnmount(() => { stageRO?.disconnect(); stageRO = null })
 // control row) instead of a hard-coded number that drifts.
 const MOTION_TIMELINE_INSET = 32   // `bottom-8` on the docked timeline
 const MOTION_TIMELINE_GAP = 12     // breathing room between artboard and timeline
+// The one prompt sits directly above the timeline in Motion: its row (h-12) plus the
+// column's gap-2. A fixed row, not a measure — result cards float over the artboard
+// as they do everywhere else, instead of re-fitting it each time one shows.
+const MOTION_PROMPT_ROW = 48 + 8
 const motionTimelineRef = ref<HTMLElement | null>(null)
 let motionRO: ResizeObserver | null = null
 watch(motionTimelineRef, (el) => {
   motionRO?.disconnect(); motionRO = null
   if (!el) { stageBottomReserve.value = 0; return }
   const measure = () => {
-    stageBottomReserve.value = Math.round(el.getBoundingClientRect().height) + MOTION_TIMELINE_INSET + MOTION_TIMELINE_GAP
+    stageBottomReserve.value = Math.round(el.getBoundingClientRect().height) + MOTION_PROMPT_ROW + MOTION_TIMELINE_INSET + MOTION_TIMELINE_GAP
   }
   measure()
   if (typeof ResizeObserver !== 'undefined') { motionRO = new ResizeObserver(measure); motionRO.observe(el) }
@@ -1558,11 +1565,7 @@ watch(
 // command surface. Bridges to the local-layer editor: read layers + background;
 // write via commit (+ setBackground when it changes).
 const { getLocalSetting } = useLocalSettings()
-const {
-  busy: caBusy, error: caError, notice: caNotice,
-  changes: caChanges, issues: caIssues, review: caReview, reviewing: caReviewing, hasProposal: caHasProposal, hovered: caHovered,
-  ask: caAsk, acceptChange: caAccept, rejectChange: caReject, reroll: caReroll, keep: caKeep, revert: caRevert,
-} = useCompositorAgent({
+const compositorAgent = useCompositorAgent({
   getState: () => ({
     layers: localLayers.value,
     background: background.value,
@@ -1594,6 +1597,7 @@ const {
   dims: editorDims,
   getLight: () => frameLight.value,
 })
+const { ask: caAsk } = compositorAgent
 // The agent writes layer geometry, so an ask snaps back to the design size first. It then goes on
 // (after the artboard has re-fitted) instead of returning, because the bar has already cleared the
 // typed request.
@@ -1601,8 +1605,10 @@ async function onAgentAsk(phrase: string) {
   if (viewOnlyGuard()) await nextTick()
   return caAsk(phrase)
 }
-// The agent's progress / proposed changes take over the right inspector while active.
-const caPanelActive = computed(() => caBusy.value || caReviewing.value || caHasProposal.value)
+// The prompt's worker: Frame's own agent, with the snap-to-design-size step
+// onAgentAsk has always done before an ask. Its progress, proposed changes and
+// answers show above the prompt (StudioPromptHost), not in the inspector.
+const frameWorker = { ...compositorAgent, ask: (phrase: string) => onAgentAsk(phrase) }
 
 // ── Frame templates: save / place / fill slots / freeze ─────────────────────
 // A template is a frozen snapshot of this frame's layers+groups with a subset
@@ -1820,35 +1826,27 @@ async function onTemplateSlotImageFile(e: Event) {
   }
 }
 
-// ── Prompt bar: collapsed pill until it's wanted ────────────────────────────
-// The AgentBar stays MOUNTED at all times — collapsing is width/opacity only —
-// so focusing it works and the half-typed phrase it owns internally survives.
-// The draft is mirrored here (from the bubbling `input` event, no prop drilling)
-// for one decision: a bar with text in it does NOT collapse on blur. Losing
-// sight of a phrase you were still writing is worse than a slightly wider bar.
-const promptFocused = ref(false)
-const promptDraft = ref('')
-const promptExpanded = computed(() => promptFocused.value || promptDraft.value.trim().length > 0)
-const promptDockRef = ref<HTMLElement | null>(null)
-function onPromptInput(e: Event) {
-  const t = e.target as HTMLInputElement | null
-  if (t && 'value' in t) promptDraft.value = t.value
-}
-function onPromptFocusOut() {
-  // `relatedTarget` is not enough: the collapsed pill is a BUTTON inside the
-  // dock, and hiding it (v-show) fires a focusout with relatedTarget null even
-  // though focus is on its way to the input. Settle a frame, then ask where
-  // focus actually landed — inside the dock (input ⇄ send button) is not a blur.
-  requestAnimationFrame(() => {
-    const el = document.activeElement
-    if (el && promptDockRef.value?.contains(el)) return
-    promptFocused.value = false
-  })
-}
-function focusPrompt() {
-  promptFocused.value = true
-  nextTick(() => promptDockRef.value?.querySelector('input')?.focus())
-}
+// ── The one prompt (spec §2.1a, §2.4, §2.5) ─────────────────────────────────
+// Always a full row above the tool bar (and above the timeline in Motion); what
+// it brings back shows above it. The chip quotes the selected layer's own words
+// (spec §1.2; plan ruling 19).
+const frameChip = computed(() => frameSelectionLabel(
+  (selectedLayers.value ?? []).map((l: any) => ({ kind: String(l.kind), text: l.text ?? null, name: l.name ?? null })),
+))
+// Frame has no background layer (the background is the frame's own fill), so a
+// lone layer gets suggestions only when it is text.
+const frameSuggestions = computed(() => {
+  const one = selectedLayers.value?.length === 1 ? selectedLayers.value[0] : null
+  if (!one) return ['Tighten the layout', 'Warm the palette']
+  if (one.kind === 'text') return ['Shorter', 'Bolder']
+  return []
+})
+const framePrompt = useStudioPrompt({ worker: () => frameWorker, place: 'frame', selectionKind: 'frame-layer', label: () => frameChip.value, suggestions: () => frameSuggestions.value })
+provide(STUDIO_PROMPT_KEY, framePrompt)
+// Inspector actions, under the thing itself: the layer, or the Frame when nothing is selected.
+const frameActions = computed(() => studioActions({ place: 'frame', canTakes: false, local: [
+  { id: 'layouts', label: 'Try layouts', group: 'develop', ai: false, lands: null, run: { call: () => { inspectorTab.value = 'layout' } } },
+] }))
 
 const selectedCount = computed(() => selectedLayers.value.length)
 // Distribute a seed-engine palette across the multi-selection, one hex per
@@ -8267,7 +8265,7 @@ onUnmounted(() => {
     <div class="glass-panel absolute top-4 left-4 z-30 rounded-lg border border-white/10 bg-[#0e0e10]/75 backdrop-blur-md shadow-lg px-2.5 py-1 text-sm font-semibold tracking-tight text-white truncate max-w-[260px]" :title="frameName">{{ frameName }}</div>
 
     <!-- Glimm sweep over the frame while the agent works. -->
-    <AgentSweep :active="caBusy" />
+    <AgentSweep :active="framePrompt.working.value" />
 
     <!-- Left sidebar: floating glass layer panel.
          ⌘\ slides it out instead of unmounting it: the list keeps its scroll
@@ -9150,7 +9148,7 @@ onUnmounted(() => {
            nothing to the toolbar, and there is no floating bar over the image. -->
 
       <!-- Edit PROMPT bar: while in inpaint mode the prompt sits just above the
-           (swapped) main toolbar. The agent bar is hidden meanwhile, so this
+           (swapped) main toolbar. The one prompt is hidden meanwhile, so this
            space is clear. -->
       <div v-if="editMode !== 'none' && !editResult"
         class="pointer-events-auto absolute bottom-[92px] left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-1.5"
@@ -9190,16 +9188,20 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Bottom cluster: agent command bar + toolbar. The column is bottom-anchored
-           and shrink-wraps to the toolbar's width (its widest child), so the bare
-           prompt above stretches to exactly match the toolbar. -->
-      <div v-if="inspectorTab !== 'motion'" class="absolute bottom-8 flex flex-col items-stretch gap-2 pointer-events-none">
-      <!-- Agent command bar — bare prompt; its progress + proposal render in the
-           right inspector (see the Assistant takeover branch).
-           Collapsed to a pill until it's wanted: the AgentBar is never unmounted,
-           only clipped and faded, so focus lands in the real input and a draft
-           phrase survives (and in fact keeps the bar open — see promptExpanded). -->
-      <!-- The pen's own toolbar takes the dock's and the tool row's place while a
+      <!-- Bottom cluster: the one prompt, then the tool bar (or, in Motion, the
+           timeline). Outside Motion the column is bottom-anchored and shrink-wraps
+           to the tool bar's width (its widest child), so the prompt above stretches
+           to match it. In Motion it spans the panel gap, as the timeline always has:
+           pinned by hand (the stage behind it is full-bleed), panel gutter + 16px. -->
+      <div class="absolute bottom-8 flex flex-col items-stretch gap-2 pointer-events-none"
+        :class="inspectorTab === 'motion' ? 'z-20' : ''"
+        :style="inspectorTab === 'motion' ? { left: (gapLeft + 16) + 'px', right: (gapRight + 16) + 'px' } : undefined">
+      <!-- The one prompt (StudioPromptHost): always here, Motion included. What it
+           brings back (changes, answers) shows above it, never in the inspector.
+           Hidden while the edit-image prompt or the pen's own bar takes its place. -->
+      <div v-show="editMode === 'none' && !penSession" data-testid="compositor-prompt-dock" class="pointer-events-auto w-full" :class="inspectorTab === 'motion' ? 'mx-auto max-w-[720px]' : ''"><StudioPromptHost :prompt="framePrompt" /></div>
+      <div v-if="inspectorTab !== 'motion'" data-testid="compositor-toolbar" class="flex flex-col items-stretch gap-2">
+      <!-- The pen's own toolbar takes the prompt's and the tool row's place while a
            session is open (both stay mounted — v-show — so a prompt draft survives). -->
       <PenToolbar
         v-if="penSession"
@@ -9209,35 +9211,6 @@ onUnmounted(() => {
         @commit="commitPenSessionAndSwallowClick"
         @cancel="cancelPenSession"
       />
-      <div
-        v-show="editMode === 'none' && !penSession"
-        ref="promptDockRef"
-        data-testid="compositor-prompt-dock"
-        :data-expanded="promptExpanded ? '1' : '0'"
-        class="pointer-events-auto relative self-start overflow-hidden transition-all duration-200 ease-out"
-        :style="{ width: promptExpanded ? '100%' : '164px' }"
-        @focusin="promptFocused = true"
-        @focusout="onPromptFocusOut"
-        @input="onPromptInput"
-      >
-        <div class="transition-opacity duration-150" :class="promptExpanded ? 'opacity-100' : 'opacity-0'">
-          <AgentBar :busy="caBusy" :error="caError" :notice="caNotice" :chips="[]" @submit="onAgentAsk" @chip="onAgentAsk" />
-        </div>
-        <!-- The collapsed face. Not a replacement for the bar — it sits ON it and
-             hands focus straight to the input underneath. -->
-        <button
-          v-show="!promptExpanded"
-          type="button"
-          data-testid="compositor-prompt-pill"
-          class="absolute inset-0 flex items-center gap-2 rounded-md border border-white/[0.12] bg-[#141416] px-2.5 text-left text-[12px] text-white/45 hover:text-white/75 hover:border-white/20 cursor-pointer"
-          title="Ask the assistant"
-          @mousedown.prevent="focusPrompt"
-          @click="focusPrompt"
-        >
-          <span class="text-[13px] text-white/80">✦</span>
-          <span class="truncate">Ask…</span>
-        </button>
-      </div>
       <!-- Toolbar -->
       <div v-show="!penSession" class="pointer-events-auto flex items-center gap-1 bg-[#1a1a1a]/95 rounded-[12px] p-1.5 border border-[#2a2a2a] shadow-lg">
         <!-- Zoom cluster: −, the % (opens the menu), +. The menu carries the
@@ -9566,11 +9539,9 @@ onUnmounted(() => {
       </div>
       </div>
 
-      <!-- Docked motion timeline (replaces the agent bar + toolbar in Motion mode) -->
-      <!-- Full-width chrome, so it is pinned to the panel gap by hand (the stage
-           behind it is full-bleed): panel gutter + the same 16px inset as before. -->
-      <div v-if="inspectorTab === 'motion'" ref="motionTimelineRef" class="absolute bottom-8 z-20 pointer-events-auto"
-        :style="{ left: (gapLeft + 16) + 'px', right: (gapRight + 16) + 'px' }"
+      <!-- Docked motion timeline (takes the tool bar's place in Motion mode, under
+           the prompt). The column above spans the panel gap, so it fills it. -->
+      <div v-if="inspectorTab === 'motion'" ref="motionTimelineRef" class="pointer-events-auto"
         @pointerdown.stop @click.stop @dblclick.stop>
         <!-- The Motion tab is ONE DialKit-style dock (MotionBandTimeline): transport +
              Add behaviour + Bake in its header, the gallery inside it, ruler, grouped rows. -->
@@ -9601,6 +9572,7 @@ onUnmounted(() => {
               @add="addProperty" @close="propertyPickerOpen = false" />
           </template>
         </MotionBandTimeline>
+      </div>
       </div>
     </div>
 
@@ -9658,8 +9630,8 @@ onUnmounted(() => {
       :data-hidden="panelsVisible ? '0' : '1'"
       class="glass-panel absolute top-16 right-4 bottom-4 z-20 w-72 flex flex-col rounded-xl border border-white/10 bg-[#0e0e10]/80 backdrop-blur-md shadow-2xl overflow-hidden transition-all duration-200 ease-out"
       :class="panelsVisible ? 'translate-x-0 opacity-100' : 'translate-x-[130%] opacity-0 pointer-events-none'">
-      <!-- Design | Motion tabs (hidden while the Assistant takes the panel over) -->
-      <div v-if="!caPanelActive" class="shrink-0 px-3 pt-3">
+      <!-- Design | Motion | Layout tabs -->
+      <div class="shrink-0 px-3 pt-3">
         <div class="flex gap-1 rounded-lg bg-white/[0.04] p-1 text-[11px]">
           <button type="button" class="flex-1 rounded px-2 py-1 cursor-pointer"
                   :class="inspectorTab === 'design' ? 'bg-white/15 text-white' : 'text-white/55 hover:text-white/80'"
@@ -9672,28 +9644,8 @@ onUnmounted(() => {
                   @click="inspectorTab = 'layout'">Layout</button>
         </div>
       </div>
-      <!-- Assistant: the agent's progress / proposed changes take over the inspector. -->
-      <template v-if="caPanelActive">
-        <div class="px-4 py-3 border-b border-white/10 flex items-center gap-2">
-          <Sparkles class="size-3.5 text-white/70" />
-          <span class="text-sm font-medium">Assistant</span>
-        </div>
-        <div class="p-4 flex-1 min-h-0 overflow-y-auto">
-          <AgentProgress v-if="caBusy" :active="caBusy" />
-          <div v-else-if="caReviewing && !caHasProposal" class="flex items-center gap-1.5 text-[11.5px] text-white/55">
-            <span class="text-white/75">✦</span> Analyzing the result for imperfections<span class="animate-pulse">…</span>
-          </div>
-          <AgentProposal
-            v-else-if="caHasProposal"
-            :changes="caChanges" :busy="caBusy" :issues="caIssues" :review="caReview" :reviewing="caReviewing"
-            @accept="caAccept" @reject="caReject" @reroll="caReroll"
-            @keep="caKeep" @revert="caRevert" @hover="(i: number | null) => caHovered = i"
-          />
-        </div>
-      </template>
-
       <!-- Brand kits (opening the palette takes over the inspector) -->
-      <template v-else-if="brandOpen">
+      <template v-if="brandOpen">
         <div class="px-4 py-3 border-b border-white/10 flex items-center gap-2">
           <Palette class="size-3.5 text-white/70" />
           <span class="text-sm font-medium">Brand kits</span>
@@ -11119,6 +11071,7 @@ onUnmounted(() => {
             <button class="text-white/40 hover:text-red-400 p-1" title="Delete" @click="deleteLocal(selectedLocal.id)"><Trash2 class="size-3.5" /></button>
           </div>
         </div>
+        <div class="px-4 pt-3"><StudioActionRows :actions="frameActions" /></div>
         <div class="inspector-body p-4 flex flex-col gap-4 flex-1 min-h-0 overflow-y-auto">
           <!-- Text controls -->
           <template v-if="selectedLocal.kind === 'text'">
@@ -12348,6 +12301,9 @@ onUnmounted(() => {
           <ImageIcon class="size-3.5 text-white/60" />
           <span class="text-sm font-medium">No selection</span>
         </div>
+        <!-- Nothing selected: the thing is the Frame, so its actions come first and
+             its sections (Frame, Background, …) follow. -->
+        <div class="px-4 pt-3"><StudioActionRows :actions="frameActions" /></div>
         <!-- Scrolls like every layer-selected panel does — without this, the frame
              properties (Background → Post-processing → Grid → templates)
              overflow the window and the lower controls become unreachable. -->

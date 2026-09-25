@@ -10,7 +10,7 @@ import { expect, test, type Page } from '@playwright/test'
  * → applyCompositorCommand → the local-layer editor → persisted node props —
  * actually lands each new-vocab command on a real frame.
  *
- * The planner (/api/agent-plan) is MOCKED with page.route() exactly like
+ * The router (/api/prompt-route) and the planner (/api/agent-plan) are MOCKED with page.route() exactly like
  * agent-fastlane.spec.ts (returns { text: <json-string> } that parseAgentResponse
  * decodes into { reasoning, commands[], message }), so these are deterministic
  * and cost nothing. The visual self-review (/api/agent-review, fire-and-forget)
@@ -41,10 +41,9 @@ async function seedSingleLayer(page: Page, layer: Record<string, unknown>) {
     .toEqual([layer.id])
 }
 
-/** Expand the collapsed prompt pill, type a phrase, submit. */
+/** Type a phrase into Frame's one prompt (always a full row) and submit. */
 async function askAgent(page: Page, phrase: string) {
-  await page.locator('[data-testid="compositor-prompt-pill"]').click()
-  const input = page.getByPlaceholder(/Tighten the layout/i)
+  const input = page.getByTestId('compositor-prompt-dock').getByRole('textbox', { name: 'Ask Sailor' })
   await input.waitFor({ state: 'visible', timeout: 10_000 })
   await input.fill(phrase)
   await input.press('Enter')
@@ -62,6 +61,8 @@ test.describe('Compositor agent vocabulary (F-cap)', () => {
     await page.route('**/api/agent-review', async (route) => {
       await route.fulfill({ json: { text: JSON.stringify({ assessment: '', issues: [], fixes: [] }) } })
     })
+    // The one prompt routes first; a plan goes to Frame's own agent (/api/agent-plan).
+    await page.route('**/api/prompt-route', r => r.fulfill({ json: { kind: 'plan', followUps: [], credits: null } }))
     await page.goto('/dev/frame-lab')
     await page.waitForSelector('[data-ready]', { timeout: 30_000 })
     await page.locator('[data-testid="compositor-stack-canvas"]').waitFor({ state: 'visible', timeout: 15_000 })
@@ -149,7 +150,7 @@ test.describe('Compositor agent vocabulary (F-cap)', () => {
     // Finalize the proposal, then round-trip through the harness's save + reload
     // (persists node props to localStorage, reloads, restores) and re-read the
     // persisted sailor_motion — the authored band must come back intact.
-    await page.getByRole('button', { name: 'Keep all' }).click()
+    await page.getByTestId('compositor-prompt-dock').getByRole('button', { name: 'Approve', exact: true }).click()
     await page.evaluate(() => (window as any).__frameLab.save())
     await page.reload()
     await page.waitForSelector('[data-ready]', { timeout: 30_000 })
