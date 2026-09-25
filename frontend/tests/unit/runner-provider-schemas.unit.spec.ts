@@ -33,7 +33,7 @@ import { GEMINI_OMNI_FLASH_ENDPOINTS } from '~~/server/runner/generators/geminiO
 import { VEO_31_LITE_ENDPOINTS } from '~~/server/runner/generators/veo31Lite'
 import { HAPPYHORSE_11_ENDPOINTS, HAPPYHORSE_11_REPLICATE_SLUG } from '~~/server/runner/generators/happyHorse11'
 import { GROK_IMAGINE_VIDEO_15_ENDPOINTS, GROK_IMAGINE_VIDEO_15_REPLICATE_SLUG } from '~~/server/runner/generators/grokImagineVideo15'
-import { LTX_25_FAST_FAL_ENDPOINTS, LTX_25_FAST_REPLICATE_SLUG } from '~~/server/runner/generators/ltx25Fast'
+import { LTX_25_FAST_REPLICATE_SLUG } from '~~/server/runner/generators/ltx25Fast'
 import { GPT_IMAGE_25_FAL_ENDPOINTS, GPT_IMAGE_25_REPLICATE_SLUGS } from '~~/server/runner/generators/gptImage25'
 import { QWEN_IMAGE_3_SLUG } from '~~/server/runner/generators/qwenImage3'
 import { GROK_IMAGINE_2_SLUG } from '~~/server/runner/generators/grokImagine2'
@@ -266,10 +266,8 @@ function runnerEndpoints(): string[] {
   // its grid is runner-grok-imagine-video-1-5.unit.spec.ts).
   for (const e of GROK_IMAGINE_VIDEO_15_ENDPOINTS) out.add(`fal ${e}`)
   out.add(`replicate ${GROK_IMAGINE_VIDEO_15_REPLICATE_SLUG}`)
-  // Task F20: LTX-2.5 Fast on Replicate, fal the backup for clips of 6 s or more (ltx25Fast.ts; its grid is
-  // runner-ltx-2-5-fast.unit.spec.ts).
+  // Task F20: LTX-2.5 Fast on Replicate, no backup (ltx25Fast.ts; its grid is runner-ltx-2-5-fast.unit.spec.ts).
   out.add(`replicate ${LTX_25_FAST_REPLICATE_SLUG}`)
-  for (const e of LTX_25_FAST_FAL_ENDPOINTS) out.add(`fal ${e}`)
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)

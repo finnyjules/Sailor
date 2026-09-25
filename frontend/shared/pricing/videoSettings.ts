@@ -232,9 +232,8 @@ const RULES: Record<string, Rule> = {
   'luma-ray-2-720p': { durations: [5, 9], defaultDuration: 5, resolution: fixed('720p'), audio: fixed(false) },
   // ltxVideo sends no length or resolution; priced per clip at the 50-step ceiling.
   'ltx-video': { durations: null, defaultDuration: 5, fixedSeconds: 5, resolution: fixed(null), audio: fixed(false) },
-  // ltx25Fast.ts (Replicate first, and the fal backup built from it): `duration` the closest of 2–6, 8, …, 20
-  // (default 6), `resolution` 720p/1080p/4k else 1080p (the backup sends 4k as 2160p), `generate_audio` the
-  // sound option (default on; the price is the same either way).
+  // ltx25Fast.ts (Replicate, no backup): `duration` the closest of 2–6, 8, …, 20 (default 6), `resolution`
+  // 720p/1080p/4k else 1080p, `generate_audio` the sound option (default on; the price is the same either way).
   'ltx-2.5-fast': { durations: LTX_25_FAST_SECONDS, defaultDuration: 6, resolution: resIn(['720p', '1080p', '4k'], '1080p'), audio: audioOpt(true) },
   // twins.ts pixverseV6Fal (first) sends `resolution`, video.ts pixverseV6
   // (the Replicate backup) `quality`: the resolution option, 360p–1080p,

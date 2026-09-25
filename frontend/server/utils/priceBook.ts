@@ -111,7 +111,10 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // ($0.03/s at 720p, $0.06/s at 1080p, $0.24/s at 4k) first, fal's $0.09 /
 // $0.13 / $0.30 a second the backup for clips of 6 s or more, covered at cost
 // (runner-only, family ltx-2.5-fast). No other price moves.
-export const PRICE_BOOK_VERSION = 'lineup-f20'
+// lineup-f20-fix1 (F20 fix round 1, controller ruling): LTX-2.5 Fast has no
+// backup; its price is Replicate's card with the markup alone (6 s at 1080p
+// 78 → 54 credits). No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-f20-fix1'
 
 export const BASE_RENDER_CREDITS = 1
 

@@ -742,12 +742,11 @@ export const VIDEO_MODELS: VideoModel[] = [
     ],
   },
   // LTX-2.5 Fast replaces the hidden LTX-Video above in the gallery. It runs
-  // only in Sailor's runner (family ltx-2.5-fast), on Replicate, with fal the
-  // backup for clips of 6 s or more (server/runner/generators/ltx25Fast.ts).
-  // Its schemas (lightricks/ltx-2.5-fast; lightricks/ltx-2.5/text-to-video/fast
-  // and /image-to-video/fast, read 2026-09-25) take 2–6, 8, …, 20 s, 16:9 or
+  // only in Sailor's runner (family ltx-2.5-fast), on Replicate, with no
+  // backup (server/runner/generators/ltx25Fast.ts). Its schema
+  // (lightricks/ltx-2.5-fast, read 2026-09-25) takes 2–6, 8, …, 20 s, 16:9 or
   // 9:16, and 720p to 4k (over 10 s only at 720p or 1080p); no seed. 2k is
-  // left out: fal names its sizes differently, so it could have no backup.
+  // left out: its pixel size isn't stated.
   {
     id: 'ltx-2.5-fast',
     runnerOnly: true,

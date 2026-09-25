@@ -71,7 +71,7 @@ import { RUNNER_GEMINI_OMNI_FLASH_MODELS } from './generators/geminiOmniFlash'
 import { RUNNER_VEO_31_LITE_MODELS } from './generators/veo31Lite'
 import { RUNNER_HAPPYHORSE_11_MODELS } from './generators/happyHorse11'
 import { RUNNER_GROK_IMAGINE_VIDEO_15_MODELS } from './generators/grokImagineVideo15'
-import { LTX_25_FAST_DEFAULT_SECONDS, isLtx25FastModel, ltx25FastCall } from './generators/ltx25Fast'
+import { LTX_25_FAST_DEFAULT_SECONDS, LTX_25_FAST_REPLICATE_SLUG, isLtx25FastModel, ltx25Fast } from './generators/ltx25Fast'
 import { GPT_IMAGE_25_EDIT_OPTION, gptImage25Edit, gptImage25Generate, gptImage25OnReplicate, isGptImage25Model } from './generators/gptImage25'
 import { isQwenImage3Model, qwenImage3Generate } from './generators/qwenImage3'
 import { grokImagine2Generate, isGrokImagine2Model } from './generators/grokImagine2'
@@ -411,10 +411,10 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
           uiFor: () => null,
         }
       }
-      // LTX-2.5 Fast (family ltx-2.5-fast): Replicate first, fal the backup for clips of 6 s or more (ltx25Fast.ts).
+      // LTX-2.5 Fast (family ltx-2.5-fast): Replicate only, its own builder (ltx25Fast.ts); no backup.
       if (isLtx25FastModel(id)) {
         const first = linkedFirstFile('image')
-        const { call, backup } = ltx25FastCall({
+        const payload = ltx25Fast({
           prompt: asText(inputs.prompt),
           aspectRatio: asText(inputs.aspect_ratio) || '16:9',
           duration: asInt(inputs.duration, LTX_25_FAST_DEFAULT_SECONDS),
@@ -423,9 +423,8 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
           adv: parseJsonObject(inputs.model_options),
         })
         return {
-          kind: 'provider', provider: call.provider, endpoint: call.endpoint, payload: call.payload, media: 'video', prefix: 'generate_video',
+          kind: 'provider', provider: 'replicate', endpoint: LTX_25_FAST_REPLICATE_SLUG, payload, media: 'video', prefix: 'generate_video',
           uiFor: () => null,
-          ...(backup ? { backup } : {}),
         }
       }
       // A model that isn't one of the fal ids goes to Replicate, its Python

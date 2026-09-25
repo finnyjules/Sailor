@@ -181,7 +181,8 @@ describe('the first and backup services are the table\'s', () => {
 
 describe('the models with no twin (or one whose settings can\'t all be carried) have no backup', () => {
   const NO_TWIN: [string, Record<string, unknown>][] = [
-    ...['sora-2', 'sora-2-pro'].map(id => nodeFor(`video:${id}`)),
+    // + LTX-2.5 Fast (F20 fix round 1, controller ruling: fal's is 2–3 times dearer).
+    ...['sora-2', 'sora-2-pro', 'ltx-2.5-fast'].map(id => nodeFor(`video:${id}`)),
     ...['gpt-image-2', 'imagen-3', 'imagen-3-fast', 'seedream-4.5', 'hunyuan-image-3', 'grok-imagine',
       'flux-fast', 'p-image', 'wan-2.2-image-pruna', 'flux-2-flex'].map(id => nodeFor(`image:${id}`)),
     // Flux 2 Pro and Max making webp (their default): fal makes no webp.

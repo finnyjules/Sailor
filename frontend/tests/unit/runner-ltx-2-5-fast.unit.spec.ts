@@ -1,29 +1,26 @@
 /**
  * Task F20 (model line-up): LTX-2.5 Fast (Lightricks), runner-only, family
- * `ltx-2.5-fast` (server/runner/generators/ltx25Fast.ts): Replicate first
- * (lightricks/ltx-2.5-fast: a third to a half of fal's rate, and the only one
- * with 2–5 s clips), fal's lightricks/ltx-2.5/{text,image}-to-video/fast the
- * backup for clips of 6 s or more. It replaces the hidden LTX-Video, which
- * stays hidden and priced as before.
+ * `ltx-2.5-fast` (server/runner/generators/ltx25Fast.ts): Replicate's
+ * lightricks/ltx-2.5-fast, with no backup (F20 fix round 1, controller ruling:
+ * fal's copy costs 2–3 times as much, and covering it would double the price
+ * of every clip of 6 s or more). It replaces the hidden LTX-Video, which stays
+ * hidden and priced as before.
  *
  * The family contract:
  *  - the saved schemas: the endpoint ids, fal's pricing text, Replicate's version;
  *  - every payload over the settings grid fits Replicate's saved schema
- *    (fixtures/provider-schemas/replicate/lightricks__ltx-2.5-fast.json), its
- *    backup, where there is one, fits fal's (fixtures/provider-schemas/fal/
- *    lightricks__ltx-2.5__*__fast.json) and asks for the same clip, and both
- *    carry the seconds, resolution and sound the price reads;
- *  - hand-written expected payloads: plain (fal's example prompt), every
- *    option set, a picture linked (fal's example picture);
- *  - the prompt rules (a ruled minimum on Replicate; fal's own limits drop
- *    only the backup) and the plain refusals (references, a last frame alone,
- *    over 10 s at 4k, sound);
+ *    (fixtures/provider-schemas/replicate/lightricks__ltx-2.5-fast.json), has
+ *    no backup, and carries the seconds, resolution and sound the price reads;
+ *  - hand-written expected payloads: plain (Replicate's own example), every
+ *    option set, a picture linked with a last frame;
+ *  - the prompt rule (a ruled minimum) and the plain refusals (references, a
+ *    last frame alone, over 10 s at 4k, sound);
  *  - eligibility with the family on and off;
  *  - blockedModelUses refuses the model when the family is off or the run
  *    goes to the engine;
  *  - the gallery hides the model while the family is off; LTX-Video stays hidden;
- *  - the price is verified and non-zero, covers the backup, and badge = charge;
- *  - the engine, end to end: the family's own endpoint, the hold, the backup.
+ *  - the price is Replicate's verified card with the markup alone, and badge = charge;
+ *  - the engine, end to end: the family's own endpoint and the hold; no backup.
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -34,7 +31,7 @@ import { isRunnerEligible } from '#shared/runner/eligibility'
 import { blockedModelUses } from '#shared/runner/blockedModels'
 import { blockedRunRefusal } from '#shared/runner/needsEngine'
 import { __resetModelMenusForTests, galleryEntries, menuDefault, modelMenu } from '#shared/runner/modelMenus'
-import { creditsForUsd, usdChargedAtCost } from '#shared/pricing/markup'
+import { creditsForUsd } from '#shared/pricing/markup'
 import { nodeCredits, providerUsd } from '#shared/pricing/nodePrice'
 import { videoBackupRate, videoBackupUsd, videoPriceUsd, videoRate, videoRateLabel, videoUsd } from '#shared/pricing/videoRates'
 import { effectiveVideoSettings, maxVideoSeconds } from '#shared/pricing/videoSettings'
@@ -46,13 +43,13 @@ import { planNode } from '~~/server/runner/executors'
 import { asInt, parseJsonObject } from '~~/server/runner/generators/opts'
 import { RUNNER_REPLICATE_VIDEO_MODELS, RUNNER_VIDEO_MODELS } from '~~/server/runner/generators/video'
 import { RUNNER_ROUTES, VIDEO_BACKUPS } from '~~/server/runner/generators/twins'
+import * as Ltx from '~~/server/runner/generators/ltx25Fast'
 import {
-  LTX_25_FAST_DEFAULT_SECONDS, LTX_25_FAST_EXTRAS, LTX_25_FAST_FAL_ENDPOINTS, LTX_25_FAST_FAL_PROMPT_MAX, LTX_25_FAST_FAL_RESOLUTION,
-  LTX_25_FAST_FAL_SECONDS, LTX_25_FAST_IMAGE_TO_VIDEO, LTX_25_FAST_LAST_NEEDS_FIRST, LTX_25_FAST_LONG_PROMPT, LTX_25_FAST_NEEDS_PROMPT,
-  LTX_25_FAST_REPLICATE_SLUG, LTX_25_FAST_SECONDS, LTX_25_FAST_TEXT_TO_VIDEO, LTX_25_FAST_TOO_LONG_AT_4K, ltx25Fast, ltx25FastOnFal,
+  LTX_25_FAST_DEFAULT_SECONDS, LTX_25_FAST_EXTRAS, LTX_25_FAST_LAST_NEEDS_FIRST, LTX_25_FAST_NEEDS_PROMPT,
+  LTX_25_FAST_REPLICATE_SLUG, LTX_25_FAST_SECONDS, LTX_25_FAST_TOO_LONG_AT_4K, ltx25Fast,
 } from '~~/server/runner/generators/ltx25Fast'
 import {
-  PROMPT_MAX_LENGTH, PROMPT_MAX_LENGTH_RULINGS, PROMPT_MIN_LENGTH, PROMPT_MIN_LENGTH_RULINGS, checkedInputFile, requestProblem, requestProblems,
+  PROMPT_MAX_LENGTH, PROMPT_MIN_LENGTH, PROMPT_MIN_LENGTH_RULINGS, checkedInputFile, requestProblems,
 } from '~~/server/runner/requestRules'
 import { DEFAULT_BACKUP_STALL_MS } from '~~/server/runner/config'
 import { ReplicateError } from '~~/server/runner/replicateQueue'
@@ -60,6 +57,7 @@ import { blockedPromptRefusal } from '~~/server/utils/blockedModels'
 import { priceGraph } from '~~/server/utils/priceBook'
 import type { OutputFile } from '~~/server/runner/types'
 import { checkPayload, loadProviderSchema, type ProviderSchemaFixture } from './helpers/providerSchema'
+import { FIXTURE_DIR, fixtureFileName } from '../../scripts/snapshot_provider_schemas.mjs'
 import { makeKit, ofType } from './__runner__/kit'
 
 const ID = 'ltx-2.5-fast'
@@ -69,11 +67,6 @@ const ALL: ReadonlySet<RunnerFamily> = new Set(RUNNER_FAMILIES)
 const ALL_BUT: ReadonlySet<RunnerFamily> = new Set(RUNNER_FAMILIES.filter(f => f !== FAMILY))
 const SINK = { class_type: 'SaveImage', inputs: {} }
 
-const falSchema = (endpoint: string) => {
-  const f = loadProviderSchema('fal', endpoint)
-  expect(f.endpoint).toBe(endpoint)
-  return f
-}
 const REPLICATE = loadProviderSchema('replicate', LTX_25_FAST_REPLICATE_SLUG)
 /** The fixture's input schema, its $ref followed. */
 function inputOf(f: ProviderSchemaFixture): Record<string, any> {
@@ -138,69 +131,38 @@ describe('the saved schemas', () => {
     expect(JSON.stringify(input.properties.prompt)).not.toMatch(/maxLength|minLength/)
   })
 
-  it('fal: one per endpoint the family calls, each its own endpoint id, with fal\'s pricing text', () => {
-    expect([...LTX_25_FAST_FAL_ENDPOINTS].sort()).toEqual(['lightricks/ltx-2.5/image-to-video/fast', 'lightricks/ltx-2.5/text-to-video/fast'])
-    for (const e of LTX_25_FAST_FAL_ENDPOINTS) {
-      const f = falSchema(e)
-      expect(f.fetchedAt, e).toBe('2026-09-25')
-      expect(f.sources?.schema, e).toBe(`https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=${e}`)
-      expect(f.pricingText!.replaceAll('**', ''), e)
-        .toContain('For 720p, your request will cost $0.09 per second; for 1080p, $0.13 per second; for 1440p, $0.19 per second; and for 4K, $0.30 per second.')
-    }
+  it('no seed and no sound input', () => {
+    expect(Object.keys(inputOf(REPLICATE).properties).filter(k => /seed|audio_url|audio_file|^audio$/i.test(k))).toEqual([])
   })
 
-  it('fal: 6–20 s, 720p to 2160p, 16:9 or 9:16, a prompt of 1 to 5,000 characters; image-to-video takes a last frame', () => {
-    for (const e of LTX_25_FAST_FAL_ENDPOINTS) {
-      const input = inputOf(falSchema(e))
-      expect(input.properties.duration.enum, e).toEqual([6, 8, 10, 12, 14, 16, 18, 20, 'auto'])
-      expect([...LTX_25_FAST_FAL_SECONDS], e).toEqual([6, 8, 10, 12, 14, 16, 18, 20])
-      expect(input.properties.duration.description, e).toContain('At 1440p and 2160p, all frame rates support up to 10 seconds.')
-      expect(input.properties.resolution.enum, e).toEqual(['720p', '1080p', '1440p', '2160p'])
-      expect(input.properties.fps.default, e).toBe(25)
-      expect(input.properties.prompt.minLength, e).toBe(1)
-      expect(input.properties.prompt.maxLength, e).toBe(LTX_25_FAST_FAL_PROMPT_MAX)
-      expect(input.properties.generate_audio.default, e).toBe(true)
+  it('no fal schema is kept: the runner calls no fal endpoint for this model', () => {
+    for (const e of ['lightricks/ltx-2.5/text-to-video/fast', 'lightricks/ltx-2.5/image-to-video/fast']) {
+      expect(fs.existsSync(path.join(FIXTURE_DIR, 'fal', fixtureFileName(e))), e).toBe(false)
     }
-    expect(inputOf(falSchema(LTX_25_FAST_TEXT_TO_VIDEO)).properties.aspect_ratio.enum).toEqual(['16:9', '9:16'])
-    expect(inputOf(falSchema(LTX_25_FAST_IMAGE_TO_VIDEO)).properties.aspect_ratio.enum).toEqual(['auto', '16:9', '9:16'])
-    expect(inputOf(falSchema(LTX_25_FAST_IMAGE_TO_VIDEO)).required).toEqual(['prompt', 'image_url'])
-    expect(inputOf(falSchema(LTX_25_FAST_IMAGE_TO_VIDEO)).properties.end_image_url).toBeTruthy()
-    expect(inputOf(falSchema(LTX_25_FAST_TEXT_TO_VIDEO)).properties.end_image_url).toBeUndefined()
-    // Replicate's 4k is fal's 2160p; 2k (fal's 1440p?) is never sent.
-    expect(LTX_25_FAST_FAL_RESOLUTION).toEqual({ '720p': '720p', '1080p': '1080p', '4k': '2160p' })
+    // Nothing in the builder names fal or a fal size (4k is never sent as 2160p).
+    expect(Object.keys(Ltx).filter(k => /FAL|OnFal|Call$/i.test(k))).toEqual([])
+    expect(fs.readFileSync(path.resolve(__dirname, '../../server/runner/generators/ltx25Fast.ts'), 'utf8')).not.toMatch(/2160p|image_url:|end_image_url:/)
   })
 
-  it('no seed and no sound input on any endpoint', () => {
-    for (const f of [falSchema(LTX_25_FAST_TEXT_TO_VIDEO), falSchema(LTX_25_FAST_IMAGE_TO_VIDEO), REPLICATE]) {
-      expect(Object.keys(inputOf(f).properties).filter(k => /seed|audio_url|audio_file|^audio$/i.test(k)), f.endpoint).toEqual([])
-    }
-  })
-
-  it('its own builder, Replicate first with fal behind; it is in no other table', () => {
+  it('its own builder, on Replicate with no backup; it is in no other table', () => {
     expect(RUNNER_VIDEO_MODELS[ID]).toBeUndefined()
     expect(RUNNER_REPLICATE_VIDEO_MODELS[ID]).toBeUndefined()
     expect(VIDEO_BACKUPS[ID]).toBeUndefined()
-    expect(RUNNER_ROUTES[`video:${ID}`]).toMatchObject({ first: 'replicate', backup: 'fal' })
-    expect(RUNNER_ROUTES[`video:${ID}`]!.why).toMatch(/clips of 6 s or more only/)
+    expect(RUNNER_ROUTES[`video:${ID}`]).toMatchObject({ first: 'replicate', backup: null })
+    expect(RUNNER_ROUTES[`video:${ID}`]!.why).toMatch(/costs 2–3 times as much/)
     // The older model stays hidden, on its own route, with no backup.
     expect(VIDEO_MODELS_BY_ID['ltx-video']!.hidden).toBe(true)
     expect(RUNNER_ROUTES['video:ltx-video']).toMatchObject({ first: 'replicate', backup: null })
   })
 
-  it('the prompt: a ruled minimum on Replicate (required, no minLength); fal\'s own minLength 1 and maxLength 5,000 on the backup', () => {
+  it('the prompt: a ruled minimum on Replicate (required, no minLength); no maximum (Replicate states none), no fal rows', () => {
     expect(PROMPT_MIN_LENGTH[`replicate ${LTX_25_FAST_REPLICATE_SLUG}`]).toEqual({ min: 1, message: LTX_25_FAST_NEEDS_PROMPT })
     expect(PROMPT_MIN_LENGTH_RULINGS).toContain(`replicate ${LTX_25_FAST_REPLICATE_SLUG}`)
     expect(PROMPT_MAX_LENGTH[`replicate ${LTX_25_FAST_REPLICATE_SLUG}`]).toBeUndefined()
-    for (const e of LTX_25_FAST_FAL_ENDPOINTS) {
-      expect(PROMPT_MIN_LENGTH[`fal ${e}`], e).toEqual({ min: 1, message: LTX_25_FAST_NEEDS_PROMPT })
-      expect(PROMPT_MIN_LENGTH_RULINGS, e).not.toContain(`fal ${e}`)
-      expect(PROMPT_MAX_LENGTH[`fal ${e}`], e).toEqual({ max: 5000, message: LTX_25_FAST_LONG_PROMPT })
-      expect(PROMPT_MAX_LENGTH_RULINGS, e).not.toContain(`fal ${e}`)
-    }
+    for (const key of [...Object.keys(PROMPT_MIN_LENGTH), ...Object.keys(PROMPT_MAX_LENGTH)]) expect(key).not.toMatch(/^fal lightricks\/ltx-2\.5/)
   })
 
-  it('no picture is read before the hand-off: neither schema states a size limit', () => {
-    expect(JSON.stringify(inputOf(falSchema(LTX_25_FAST_IMAGE_TO_VIDEO)).properties.image_url)).not.toMatch(/MB/)
+  it('no picture is read before the hand-off: the schema states no size limit', () => {
     expect(JSON.stringify(inputOf(REPLICATE).properties.image)).not.toMatch(/MB/)
     expect(checkedInputFile('GenerateVideoNode', ALL, ID)).toBeNull()
   })
@@ -215,7 +177,7 @@ const MODES = [
   { name: 'first and last frames', image: 'https://pics.test/first.png', opts: { end_image_url: 'https://pics.test/last.png' }, first: 'https://pics.test/first.png', last: 'https://pics.test/last.png' },
 ]
 
-describe('every payload over the settings grid fits Replicate\'s schema, its backup fits fal\'s, and both carry what the price reads', () => {
+describe('every payload over the settings grid fits Replicate\'s schema, has no backup, and carries what the price reads', () => {
   for (const m of MODES) {
     it(`${m.name}: durations × resolutions × ratios × sound`, () => {
       const cat = VIDEO_MODELS_BY_ID[ID]!
@@ -224,7 +186,6 @@ describe('every payload over the settings grid fits Replicate\'s schema, its bac
       const ratios = [...cat.aspectRatios, '1:1', '4:3', '21:9', 'auto', '']
       const sounds = [true, false, undefined]
       let cases = 0
-      let backups = 0
       let refused = 0
       const bad: string[] = []
       for (const dur of durations) for (const res of resolutions) for (const ar of ratios) for (const sound of sounds) {
@@ -245,6 +206,7 @@ describe('every payload over the settings grid fits Replicate\'s schema, its bac
         }
         for (const e of checkPayload(REPLICATE, payload)) bad.push(`${label}: ${e}`)
         if ('seed' in payload || 'fps' in payload) bad.push(`${label}: a seed or frame rate`)
+        if (!['720p', '1080p', '4k'].includes(String(payload.resolution))) bad.push(`${label}: resolution ${String(payload.resolution)}`)
         if ((payload.image ?? null) !== m.first || (payload.last_frame_image ?? null) !== m.last) bad.push(`${label}: frames ${JSON.stringify(payload)}`)
         if (Number(payload.duration) > 10 && !['720p', '1080p'].includes(String(payload.resolution))) bad.push(`${label}: over 10 s at ${String(payload.resolution)}`)
         // Priced on what is sent: the node's picture input as nodePrice passes it (a link, or none).
@@ -253,30 +215,12 @@ describe('every payload over the settings grid fits Replicate\'s schema, its bac
         if (priced.seconds !== sent.seconds || priced.resolution !== sent.resolution || priced.audio !== sent.audio) {
           bad.push(`${label}: sent ${JSON.stringify(sent)}, priced ${JSON.stringify(priced)}`)
         }
-        // The backup: the same clip on fal for 6 s or more; none for a shorter clip.
-        const backup = ltx25FastOnFal(payload)
-        const priceHasBackup = videoBackupUsd(ID, priced) != null
-        if (Number(payload.duration) >= 6) {
-          if (!backup || !priceHasBackup) {
-            bad.push(`${label}: no backup (priced with one: ${priceHasBackup})`)
-            continue
-          }
-          backups++
-          const endpoint = m.first ? LTX_25_FAST_IMAGE_TO_VIDEO : LTX_25_FAST_TEXT_TO_VIDEO
-          if (backup.provider !== 'fal' || backup.endpoint !== endpoint) bad.push(`${label}: backup to ${backup.endpoint}`)
-          for (const e of checkPayload(falSchema(endpoint), backup.payload)) bad.push(`${label} backup: ${e}`)
-          const b = backup.payload
-          if (b.prompt !== payload.prompt || b.duration !== payload.duration || b.resolution !== LTX_25_FAST_FAL_RESOLUTION[String(payload.resolution)]
-            || b.aspect_ratio !== payload.aspect_ratio || b.generate_audio !== payload.generate_audio
-            || (b.image_url ?? null) !== m.first || (b.end_image_url ?? null) !== m.last) {
-            bad.push(`${label}: backup ${JSON.stringify(b)} is not ${JSON.stringify(payload)}`)
-          }
-        }
-        else if (backup || priceHasBackup) bad.push(`${label}: a backup for ${String(payload.duration)} s`)
+        // No backup, so the price is Replicate's alone.
+        if (videoBackupUsd(ID, priced) != null) bad.push(`${label}: priced with a backup`)
+        if (Math.abs(videoPriceUsd(ID, priced)! - videoUsd(ID, priced)!) > 1e-9) bad.push(`${label}: price is not Replicate's`)
       }
       expect(bad.slice(0, 5)).toEqual([])
       expect(cases).toBeGreaterThan(3000)
-      expect(backups).toBeGreaterThan(1000)
       expect(refused).toBeGreaterThan(100)
     })
   }
@@ -285,59 +229,46 @@ describe('every payload over the settings grid fits Replicate\'s schema, its bac
 // ── Expected payloads (through planNode) ───────────────────────────────────
 
 describe('expected payloads', () => {
-  it('plain: text-to-video with fal\'s own example prompt, at the node\'s defaults (6 s, 1080p); fal\'s text-to-video behind', async () => {
-    const example = inputOf(falSchema(LTX_25_FAST_TEXT_TO_VIDEO)).properties.prompt.examples[0] as string
-    expect(example).toMatch(/^Through-the-veil shot of a bride's face/)
-    const p = await providerPlan(vid({ prompt: example }))
+  it('plain: text-to-video at the node\'s defaults (6 s, 1080p); no backup', async () => {
+    const prompt = 'A red fox trots through fresh snow at dawn, breath steaming. Birds chirp in the background.'
+    const p = await providerPlan(vid({ prompt }))
     expect(p.provider).toBe('replicate')
     expect(p.endpoint).toBe('lightricks/ltx-2.5-fast')
-    expect(p.payload).toEqual({ prompt: example, duration: 6, resolution: '1080p', aspect_ratio: '16:9', generate_audio: true })
+    expect(p.payload).toEqual({ prompt, duration: 6, resolution: '1080p', aspect_ratio: '16:9', generate_audio: true })
     expect(checkPayload(REPLICATE, p.payload)).toEqual([])
-    expect(p.backup).toEqual({
-      provider: 'fal', endpoint: 'lightricks/ltx-2.5/text-to-video/fast',
-      payload: { prompt: example, duration: 6, resolution: '1080p', aspect_ratio: '16:9', generate_audio: true },
-    })
-    expect(checkPayload(falSchema(p.backup!.endpoint), p.backup!.payload)).toEqual([])
+    expect(p.backup).toBeUndefined()
   })
 
-  it('every option set: 4k, portrait, 10 s, silent; a seed on the node is not sent (neither service takes one)', async () => {
+  it('every option set: 4k, portrait, 10 s, silent; a seed on the node is not sent (the schema has none); 4k is sent as 4k', async () => {
     const prompt = 'A lighthouse in a storm, waves crashing, the beam sweeping through rain.'
     const node = vid({ prompt, duration: '10', ar: '9:16', opts: { resolution: '4k', generate_audio: false } })
     node.inputs.seed = 42
     const p = await providerPlan(node)
     expect(p.payload).toEqual({ prompt, duration: 10, resolution: '4k', aspect_ratio: '9:16', generate_audio: false })
     expect(checkPayload(REPLICATE, p.payload)).toEqual([])
-    expect(p.backup).toEqual({
-      provider: 'fal', endpoint: 'lightricks/ltx-2.5/text-to-video/fast',
-      payload: { prompt, duration: 10, resolution: '2160p', aspect_ratio: '9:16', generate_audio: false },
-    })
-    expect(checkPayload(falSchema(p.backup!.endpoint), p.backup!.payload)).toEqual([])
+    expect(p.backup).toBeUndefined()
   })
 
-  it('a picture linked, with a last frame: fal\'s example prompt and picture on Replicate, the same frames on fal\'s image-to-video', async () => {
-    const props = inputOf(falSchema(LTX_25_FAST_IMAGE_TO_VIDEO)).properties
-    const prompt = props.prompt.examples[0] as string
-    const picture = props.image_url.examples[0] as string
-    expect(prompt).toMatch(/^Periscope-level shot from behind tall grass/)
+  it('a picture linked, with a last frame: both frames on Replicate; no backup', async () => {
+    const prompt = 'the giant looks down at the people and the people look up at him'
+    const picture = 'https://pics.test/giant.png'
     const p = await providerPlan(vid({ prompt, image: true, duration: '8', opts: { resolution: '720p', end_image_url: 'https://pics.test/last.png' } }), picture)
     expect(p.endpoint).toBe('lightricks/ltx-2.5-fast')
     expect(p.payload).toEqual({
       prompt, image: picture, last_frame_image: 'https://pics.test/last.png', duration: 8, resolution: '720p', aspect_ratio: '16:9', generate_audio: true,
     })
     expect(checkPayload(REPLICATE, p.payload)).toEqual([])
-    expect(p.backup).toEqual({
-      provider: 'fal', endpoint: 'lightricks/ltx-2.5/image-to-video/fast',
-      payload: { image_url: picture, end_image_url: 'https://pics.test/last.png', prompt, duration: 8, resolution: '720p', aspect_ratio: '16:9', generate_audio: true },
-    })
-    expect(checkPayload(falSchema(p.backup!.endpoint), p.backup!.payload)).toEqual([])
+    expect(p.backup).toBeUndefined()
   })
 
-  it('a clip under 6 s: Replicate only (fal\'s shortest is 6 s)', async () => {
-    for (const d of ['2', '3', '4', '5']) {
-      const p = await providerPlan(vid({ duration: d, image: d === '3' }))
-      expect(p.provider).toBe('replicate')
-      expect(p.payload.duration).toBe(Number(d))
-      expect(p.backup, d).toBeUndefined()
+  it('every length, with or without a picture: Replicate only, never a backup', async () => {
+    for (const d of LTX_25_FAST_SECONDS) {
+      for (const image of [false, true]) {
+        const p = await providerPlan(vid({ duration: String(d), image, opts: { resolution: '720p' } }))
+        expect(p.provider).toBe('replicate')
+        expect(p.payload.duration).toBe(d)
+        expect(p.backup, `${d} ${image}`).toBeUndefined()
+      }
     }
   })
 
@@ -348,17 +279,15 @@ describe('expected payloads', () => {
     expect((await providerPlan(vid({ duration: '45' }))).payload.duration).toBe(20)
     expect((await providerPlan(vid({ ar: '1:1' }))).payload.aspect_ratio).toBe('16:9')
     expect((await providerPlan(vid({ opts: { resolution: '2k' } }))).payload.resolution).toBe('1080p')
+    expect((await providerPlan(vid({ opts: { resolution: '2160p' } }))).payload.resolution).toBe('1080p')
     expect((await providerPlan(vid({ opts: { resolution: '4K' } }))).payload.resolution).toBe('4k')
   })
 
-  it('a prompt over fal\'s 5,000 characters runs on Replicate with no backup (Replicate states no limit)', async () => {
-    const at = await providerPlan(vid({ prompt: 'a'.repeat(5000) }))
-    expect(at.backup?.provider).toBe('fal')
-    const over = await providerPlan(vid({ prompt: '🦊'.repeat(5001) }))
-    expect(over.provider).toBe('replicate')
-    expect(over.backup).toBeUndefined()
-    expect(requestProblems({ 1: vid({ prompt: 'a'.repeat(5001) }) })).toEqual([])
-    for (const e of LTX_25_FAST_FAL_ENDPOINTS) expect(requestProblem('fal', e, { prompt: 'a'.repeat(5001) })).toBe(LTX_25_FAST_LONG_PROMPT)
+  it('a long prompt runs on Replicate as is (Replicate states no limit)', async () => {
+    const p = await providerPlan(vid({ prompt: '🦊'.repeat(6000) }))
+    expect(p.provider).toBe('replicate')
+    expect(p.backup).toBeUndefined()
+    expect(requestProblems({ 1: vid({ prompt: 'a'.repeat(6000) }) })).toEqual([])
   })
 })
 
@@ -412,8 +341,7 @@ describe('what LTX-2.5 Fast can\'t take is refused in plain words, never dropped
     expect(LTX_25_FAST_LAST_NEEDS_FIRST).toBe('LTX-2.5 Fast needs a first picture to end on a last one. Link a first picture, or remove the last one.')
     expect(LTX_25_FAST_TOO_LONG_AT_4K).toBe('LTX-2.5 Fast makes clips over 10 seconds only at 720p or 1080p. Pick a shorter clip or a lower resolution.')
     expect(LTX_25_FAST_NEEDS_PROMPT).toBe('LTX-2.5 Fast needs a prompt. Describe the clip, or how the picture should move.')
-    expect(LTX_25_FAST_LONG_PROMPT).toBe('LTX-2.5 Fast takes a prompt of at most 5,000 characters. Shorten it.')
-    for (const m of [LTX_25_FAST_EXTRAS, LTX_25_FAST_LAST_NEEDS_FIRST, LTX_25_FAST_TOO_LONG_AT_4K, LTX_25_FAST_NEEDS_PROMPT, LTX_25_FAST_LONG_PROMPT]) {
+    for (const m of [LTX_25_FAST_EXTRAS, LTX_25_FAST_LAST_NEEDS_FIRST, LTX_25_FAST_TOO_LONG_AT_4K, LTX_25_FAST_NEEDS_PROMPT]) {
       expect(m).not.toMatch(/_|ltx-2|lightricks\//)
     }
   })
@@ -564,49 +492,38 @@ describe('the price', () => {
   /** What priceGraph charges for one node plus an output node. */
   const charge = (inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: 'GenerateVideoNode', inputs }, 2: SINK }).credits
 
-  it('Replicate\'s rate per second by resolution, verified; fal\'s the backup card, from 6 s', () => {
+  it('Replicate\'s rate per second by resolution, verified; no backup card', () => {
     expect(videoRate(ID)).toMatchObject({
       unit: 'per_second', service: 'replicate', confidence: 'verified', read: '2026-09-25',
       source: 'https://replicate.com/lightricks/ltx-2.5-fast',
       byResolution: { '720p': 0.03, '1080p': 0.06, '4k': 0.24 },
     })
-    expect(videoBackupRate(ID)).toMatchObject({
-      unit: 'per_second', service: 'fal', confidence: 'verified', read: '2026-09-25',
-      source: 'https://fal.ai/models/lightricks/ltx-2.5/text-to-video/fast/llms.txt',
-      byResolution: { '720p': 0.09, '1080p': 0.13, '4k': 0.30 },
-      minSeconds: 6,
-    })
+    expect(videoBackupRate(ID)).toBeNull()
     // The older LTX-Video keeps its flat 50-step ceiling (controller ruling, S1b fix round 1).
     expect(videoRate('ltx-video')).toMatchObject({ unit: 'per_clip', byResolution: { '*': { '*': 0.1365 } } })
   })
 
-  // [name, inputs, Replicate USD, fal USD (null: no backup), basis USD]
-  const examples: { name: string, inputs: Record<string, unknown>, usd: number, backupUsd: number | null, basis: number }[] = [
-    { name: '2 s at 720p (the shortest, cheapest clip: the live check), no backup', inputs: { model: ID, duration: '2', model_options: '{"resolution":"720p"}' }, usd: 0.06, backupUsd: null, basis: 0.06 },
-    { name: '5 s at 720p, no backup', inputs: { model: ID, duration: '5', model_options: '{"resolution":"720p"}' }, usd: 0.15, backupUsd: null, basis: 0.15 },
-    { name: '6 s at 720p: fal at cost sets it', inputs: { model: ID, duration: '6', model_options: '{"resolution":"720p"}' }, usd: 0.18, backupUsd: 0.54, basis: 0.36 },
-    { name: '6 s at 1080p (the node\'s defaults): fal at cost sets it', inputs: { model: ID, duration: '6', model_options: '{}' }, usd: 0.36, backupUsd: 0.78, basis: 0.52 },
-    { name: '6 s at 1080p, a picture linked, silent (the same)', inputs: { model: ID, duration: '6', model_options: '{"generate_audio":false}', image: ['9', 0] }, usd: 0.36, backupUsd: 0.78, basis: 0.52 },
-    { name: '10 s at 4k: Replicate marked up sets it', inputs: { model: ID, duration: '10', model_options: '{"resolution":"4k"}' }, usd: 2.4, backupUsd: 3.0, basis: 2.4 },
-    { name: '20 s at 1080p (the longest)', inputs: { model: ID, duration: '20', model_options: '{"resolution":"1080p"}' }, usd: 1.2, backupUsd: 2.6, basis: 2.6 / 1.5 },
+  // Replicate's card with the markup alone: credits = creditsForUsd(Replicate USD).
+  const examples: { name: string, inputs: Record<string, unknown>, usd: number, credits: number }[] = [
+    { name: '2 s at 720p (the shortest, cheapest clip: the live check)', inputs: { model: ID, duration: '2', model_options: '{"resolution":"720p"}' }, usd: 0.06, credits: 12 },
+    { name: '5 s at 720p', inputs: { model: ID, duration: '5', model_options: '{"resolution":"720p"}' }, usd: 0.15, credits: 23 },
+    { name: '6 s at 720p', inputs: { model: ID, duration: '6', model_options: '{"resolution":"720p"}' }, usd: 0.18, credits: 27 },
+    { name: '6 s at 1080p (the node\'s defaults)', inputs: { model: ID, duration: '6', model_options: '{}' }, usd: 0.36, credits: 54 },
+    { name: '6 s at 1080p, a picture linked, silent (the same)', inputs: { model: ID, duration: '6', model_options: '{"generate_audio":false}', image: ['9', 0] }, usd: 0.36, credits: 54 },
+    { name: '10 s at 4k', inputs: { model: ID, duration: '10', model_options: '{"resolution":"4k"}' }, usd: 2.4, credits: 360 },
+    { name: '20 s at 1080p (the longest)', inputs: { model: ID, duration: '20', model_options: '{"resolution":"1080p"}' }, usd: 1.2, credits: 180 },
   ]
   for (const ex of examples) {
-    it(`${ex.name}: basis $${ex.basis.toFixed(4)}; covers the backup; badge = charge = run estimate`, () => {
+    it(`${ex.name}: $${ex.usd.toFixed(2)}, ${ex.credits} credits; badge = charge = run estimate`, () => {
       const s = effectiveVideoSettings(ID, ex.inputs.duration, ex.inputs.aspect_ratio ?? '16:9', ex.inputs.model_options, ex.inputs.image)!
       expect(videoUsd(ID, s)).toBeCloseTo(ex.usd, 9)
-      const b = videoBackupUsd(ID, s)
-      if (ex.backupUsd == null) expect(b).toBeNull()
-      else expect(b).toBeCloseTo(ex.backupUsd, 9)
-      expect(videoPriceUsd(ID, s)).toBeCloseTo(Math.max(ex.usd, ex.backupUsd == null ? 0 : usdChargedAtCost(ex.backupUsd)), 9)
-      expect(videoPriceUsd(ID, s)).toBeCloseTo(ex.basis, 6)
-      expect(providerUsd('GenerateVideoNode', ex.inputs)).toBeCloseTo(videoPriceUsd(ID, s)!, 9)
-      const credits = creditsForUsd(videoPriceUsd(ID, s)!)
-      expect(credits).toBeGreaterThan(0)
-      // Never below either service's cost (1 credit = $0.01).
-      expect(credits).toBeGreaterThanOrEqual(Math.round(Math.max(ex.usd, ex.backupUsd ?? 0) * 100))
-      expect(nodeCredits('GenerateVideoNode', ex.inputs)).toBe(credits)
+      expect(videoBackupUsd(ID, s)).toBeNull()
+      expect(videoPriceUsd(ID, s)).toBeCloseTo(ex.usd, 9)
+      expect(providerUsd('GenerateVideoNode', ex.inputs)).toBeCloseTo(ex.usd, 9)
+      expect(creditsForUsd(ex.usd)).toBe(ex.credits)
+      expect(nodeCredits('GenerateVideoNode', ex.inputs)).toBe(ex.credits)
       const c = charge(ex.inputs)
-      expect(c).toBe(credits + 1) // + base render
+      expect(c).toBe(ex.credits + 1) // + base render
       expect(nodeCreditEstimate('GenerateVideoNode', ex.inputs)).toBe(c)
       const names = Object.keys(ex.inputs)
       const est = estimateUsdForNodes([{ id: '1', type: 'GenerateVideoNode', widgetDefs: names.map(name => ({ name })), widgetsValues: names.map(n => ex.inputs[n]) }], { hosted: true })!
@@ -614,40 +531,27 @@ describe('the price', () => {
     })
   }
 
-  it('the credits: 12 for the live check (13 held), 54 at 6 s 720p, 78 at the defaults, 360 at 10 s 4k', () => {
+  it('the live check holds 13 credits (12 + the base render)', () => {
     expect(charge({ model: ID, duration: '2', model_options: '{"resolution":"720p"}' })).toBe(13)
-    expect(nodeCredits('GenerateVideoNode', { model: ID, duration: '6', model_options: '{"resolution":"720p"}' })).toBe(54)
-    expect(nodeCredits('GenerateVideoNode', { model: ID, duration: '6', model_options: '{}' })).toBe(78)
-    expect(nodeCredits('GenerateVideoNode', { model: ID, duration: '10', model_options: '{"resolution":"4k"}' })).toBe(360)
   })
 
-  it('a linked length prices at the longest (20 s); linked options at the top rate, with the backup covered from 6 s', () => {
+  it('a linked length prices at the longest (20 s); linked options at the top rate (4k)', () => {
     expect(maxVideoSeconds(ID)).toBe(20)
-    // 20 s at 1080p: fal's $2.60 at cost.
-    expect(providerUsd('GenerateVideoNode', { model: ID, duration: ['7', 0], model_options: '{}' })).toBeCloseTo(usdChargedAtCost(2.6), 9)
-    // Linked options, 6 s: Replicate's top $0.24 × 6 = $1.44 against fal's $1.80 at cost ($1.20).
-    expect(providerUsd('GenerateVideoNode', { model: ID, duration: '6', model_options: ['7', 0] })).toBeCloseTo(1.44, 9)
-    // Linked options, 4 s: no backup, Replicate's top rate alone.
-    expect(providerUsd('GenerateVideoNode', { model: ID, duration: '4', model_options: ['7', 0] })).toBeCloseTo(0.96, 9)
+    expect(providerUsd('GenerateVideoNode', { model: ID, duration: ['7', 0], model_options: '{}' })).toBeCloseTo(0.06 * 20, 9)
+    expect(providerUsd('GenerateVideoNode', { model: ID, duration: '6', model_options: ['7', 0] })).toBeCloseTo(0.24 * 6, 9)
     for (const inputs of [
       { model: ID, duration: ['7', 0], model_options: '{}' },
-      { model: ID, duration: '4', model_options: ['7', 0] },
+      { model: ID, duration: '6', model_options: ['7', 0] },
     ]) expect(nodeCreditEstimate('GenerateVideoNode', inputs)).toBe(charge(inputs))
   })
 
-  it('priced on what is sent: the planned payload\'s seconds and resolution give the price, and the backup is covered when planned', async () => {
+  it('priced on what is sent: the planned payload\'s seconds and resolution give the price', async () => {
     for (const image of [false, true]) {
       for (const [dur, res] of [['2', '720p'], ['7', '1080p'], ['9', '4k'], ['45', 'nope'], ['15', '1080P'], ['0', '720P'], ['5', '4K']] as const) {
         const node = vid({ image, duration: dur, opts: { resolution: res } })
         const p = await providerPlan(node)
         const rate = videoRate(ID)!.byResolution[String(p.payload.resolution)] as number
-        const first = rate * Number(p.payload.duration)
-        const usd = providerUsd('GenerateVideoNode', node.inputs)!
-        if (p.backup) {
-          const falRate = videoBackupRate(ID)!.byResolution[String(p.payload.resolution)] as number
-          expect(usd, `${image} ${dur} ${res}`).toBeCloseTo(Math.max(first, usdChargedAtCost(falRate * Number(p.backup.payload.duration))), 9)
-        }
-        else expect(usd, `${image} ${dur} ${res}`).toBeCloseTo(first, 9)
+        expect(providerUsd('GenerateVideoNode', node.inputs), `${image} ${dur} ${res}`).toBeCloseTo(rate * Number(p.payload.duration), 9)
       }
     }
   })
@@ -663,7 +567,7 @@ describe('the runner engine', () => {
   const take: ApiPrompt = { 1: vid({ duration: '2', opts: { resolution: '720p' } }), 2: { class_type: 'Video', inputs: { source: ['1', 0] } } }
   const start = (k: ReturnType<typeof makeKit>, t: ApiPrompt = take) => k.engine.startRun({ userId: k.userId, takes: [t], workflow: null, canvasId: null, projectUuid: null, projectName: null })
 
-  it('with the family on: the family\'s own Replicate model, held at the node\'s price, a real output; fal not called', async () => {
+  it('with the family on: the family\'s own Replicate model, held at the node\'s price (13), a real output; fal not called', async () => {
     const k = makeKit({ hosted: true, deps: { families: () => ON } })
     const { runId } = await start(k)
     await k.engine.settled(runId)
@@ -692,7 +596,7 @@ describe('the runner engine', () => {
     }
   })
 
-  it('a picture linked, Replicate down: the backup on fal carries the same picture and serves it, charged once', async () => {
+  it('Replicate down, backup switched on: no backup to send, so the node fails and nothing is charged', async () => {
     const k = makeKit({ hosted: true, deps: { families: () => ON, backup: () => ({ enabled: true, stallMs: DEFAULT_BACKUP_STALL_MS }) } })
     fs.writeFileSync(path.join(k.root, 'input', 'first.png'), Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0]))
     const i2v: ApiPrompt = {
@@ -701,20 +605,14 @@ describe('the runner engine', () => {
       2: { class_type: 'Video', inputs: { source: ['1', 0] } },
     }
     i2v[1]!.inputs.image = ['11', 0]
-    ;(k.replicate.client.submit as any).mockRejectedValueOnce(new ReplicateError('replicate submit 503: unavailable', 503))
+    ;(k.replicate.client.submit as any).mockRejectedValue(new ReplicateError('replicate submit 503: unavailable', 503))
     const { runId } = await start(k, i2v)
     await k.engine.settled(runId)
     const repCalls = (k.replicate.client.submit as any).mock.calls as unknown[][]
-    expect(repCalls.length).toBe(1)
-    expect(repCalls[0]![0]).toBe(LTX_25_FAST_REPLICATE_SLUG)
-    const sent = [...k.fal.reqs.values()]
-    expect(sent.map(r => r.endpoint)).toEqual([LTX_25_FAST_IMAGE_TO_VIDEO])
-    expect(sent[0]!.payload).toEqual({
-      image_url: 'https://fal.storage/first.png', prompt: 'a fox runs through snow', duration: 6, resolution: '1080p', aspect_ratio: '16:9', generate_audio: true,
-    })
-    expect(ofType(k.seen, 'execution_error')).toEqual([])
-    // 6 s at 1080p: fal's $0.78 at cost is the price that covers either service.
-    expect([...k.ledger.holds.values()].map(h => [h.state, h.actual])).toEqual([['settled', creditsForUsd(usdChargedAtCost(0.78)) + 1]])
-    expect((await k.store.get(runId))!.status).toBe('done')
+    expect(repCalls.length).toBeGreaterThanOrEqual(1)
+    expect(repCalls.every(c => c[0] === LTX_25_FAST_REPLICATE_SLUG)).toBe(true)
+    expect(k.fal.reqs.size).toBe(0)
+    expect(ofType(k.seen, 'execution_error').length).toBeGreaterThan(0)
+    expect([...k.ledger.holds.values()].map(h => h.state)).toEqual(['released'])
   })
 })

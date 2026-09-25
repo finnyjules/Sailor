@@ -343,7 +343,7 @@ describe('the price', () => {
     expect(EDIT_RATES['fal-ai/nano-banana-2/edit']).toMatchObject({ unit: 'by_resolution', confidence: 'verified', service: 'fal' })
     expect(USD).toBe(Math.max(0.067, usdChargedAtCost(0.08)))
     expect(USD).toBeGreaterThan(0)
-    expect(PRICE_BOOK_VERSION).toBe('lineup-f20')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-f20-fix1')
   })
 
   const examples: { name: string, inputs: Record<string, unknown> }[] = [
