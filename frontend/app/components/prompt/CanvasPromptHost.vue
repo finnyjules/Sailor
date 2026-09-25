@@ -16,7 +16,7 @@ const { aiAvailable } = useAiStatus()
 const ready = computed(() => typeof props.vueCanvas?.agentSnapshot === 'function' && typeof props.vueCanvas?.agentPreview === 'function')
 
 const {
-  agent, chipLabel, suggestions, mode, focusTick, working, workingLabel, card, answerCard, takes, showSketchInstead,
+  agent, chipLabel, suggestions, mode, modeNote, focusTick, working, workingLabel, card, answerCard, takes, takesSaving, showSketchInstead,
   searchOpen, searchQuery, onSearchDone, submit, stop, clearMode, clearSelection, onPromptFocus,
   previewTake, chooseTake, keepTake, closeTakes, moreTakes, dismissAnswer, runFollowUp, sketchInstead,
 } = useCanvasPrompt(() => props.vueCanvas ?? null)
@@ -50,6 +50,7 @@ defineExpose({ focus: () => promptRef.value?.focus(), isFocusable })
       ref="promptRef"
       :selection-label="chipLabel"
       :mode="mode?.label ?? null"
+      :note="modeNote"
       :suggestions="suggestions"
       :working="working"
       :working-label="workingLabel"
@@ -63,7 +64,7 @@ defineExpose({ focus: () => promptRef.value?.focus(), isFocusable })
     >
       <template v-if="card" #above>
         <PromptTakes
-          v-if="card === 'takes' && takes" :session="takes"
+          v-if="card === 'takes' && takes" :session="takes" :saving="takesSaving"
           @hover="previewTake" @choose="chooseTake" @keep="keepTake" @more="moreTakes" @close="closeTakes"
         />
         <PromptChangesCard

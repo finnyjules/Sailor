@@ -20,6 +20,17 @@ describe('SailorPrompt', () => {
     expect(input(w).attributes('placeholder')).toBe('Change or ask about Rainy shop')
   })
 
+  it('shows the mode’s price note in neutral grey, and hides it while working', async () => {
+    const w = mount(SailorPrompt, { props: { mode: 'Remix', note: '~$0.24–0.42' }, global: { stubs } })
+    const note = w.get('[data-testid="prompt-note"]')
+    expect(note.text()).toBe('~$0.24–0.42')
+    expect(note.classes()).toContain('text-white/40')
+    await w.setProps({ working: true })
+    expect(w.find('[data-testid="prompt-note"]').exists()).toBe(false)
+    await w.setProps({ working: false, note: null })
+    expect(w.find('[data-testid="prompt-note"]').exists()).toBe(false)
+  })
+
   it('submits trimmed text on Enter and clears the field', async () => {
     const w = mount(SailorPrompt, { global: { stubs } })
     await input(w).setValue('  make it rain  ')

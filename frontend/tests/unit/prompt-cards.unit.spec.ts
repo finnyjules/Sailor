@@ -34,6 +34,14 @@ describe('PromptTakes', () => {
     expect(w.emitted('choose')).toEqual([['1']])
     expect(w.emitted('keep')).toEqual([['1']])
   })
+  it('while a Keep is saving, every Keep is off', async () => {
+    const w = mount(PromptTakes, { props: { session: session(3), saving: true } })
+    const keeps = w.findAll('button').filter(b => b.text() === 'Keep')
+    expect(keeps).toHaveLength(3)
+    for (const k of keeps) expect(k.attributes('disabled')).toBeDefined()
+    await keeps[0]!.trigger('click')
+    expect(w.emitted('keep')).toBeUndefined()
+  })
   it('"Three more" waits until the takes are in; × closes', async () => {
     const busy = mount(PromptTakes, { props: { session: session(1) } })
     expect(busy.findAll('button').find(b => b.text() === 'Three more')!.attributes('disabled')).toBeDefined()

@@ -63,12 +63,17 @@ function setWidget(name: string, value: any) {
   if (i >= 0) props.data.widgetsValues[i] = value
 }
 
-const effectId = computed<string>(() => String(widgetVal('effect') ?? ''))
+// Shader generation (stage 5): the prompt asks this node for its picture and
+// effect, previews takes on it, and applies the kept one. A previewed take
+// renders at its defaults and is never written to the widgets.
+const previewEffectId = ref<string | null>(null)
+const effectId = computed<string>(() => previewEffectId.value ?? String(widgetVal('effect') ?? ''))
 const effectDef = computed<EffectDef | null>(
   () => catalog.value?.effects.find(e => e.id === resolveEffectId(effectId.value)) ?? null,
 )
+const paramsJson = computed(() => (previewEffectId.value ? '{}' : String(widgetVal('params') ?? '{}')))
 const uniforms = computed<Record<string, number>>(() =>
-  effectDef.value ? resolveUniforms(effectDef.value, parseParams(String(widgetVal('params') ?? '{}'))) : {},
+  effectDef.value ? resolveUniforms(effectDef.value, parseParams(paramsJson.value)) : {},
 )
 
 // Generative effects synthesize from scratch (no source image), so their output
@@ -130,7 +135,10 @@ function buildPasses(t: number) {
   if (!catalog.value) return []
   // Each effect expands into N ping-pong passes (multi-pass blur/bloom); chained
   // effects concatenate, so the renderer ping-pongs the whole flattened list.
-  return chain.value.passes
+  const passes = chain.value.passes
+  const own = passes.length - 1 // the node itself is always the last pass
+  return passes
+    .map((p, i) => (i === own && previewEffectId.value ? { ...p, effectId: previewEffectId.value, params: {} } : p))
     .flatMap((p) => {
       const def = catalog.value!.effects.find(e => e.id === resolveEffectId(p.effectId))
       if (!def) return []
@@ -309,11 +317,40 @@ watch(() => chain.value.nodeIds, (ids) => { lastChainIds = ids; if (!animating.v
 // Keep the picker-trigger badge showing the current effect's thumbnail.
 watch(effectDef, def => ensureThumb(def))
 
+// ---- shader generation (stage 5): the canvas prompt's effect takes ------------
+function onEffectTarget(e: Event) {
+  const d = (e as CustomEvent).detail
+  if (String(d?.nodeId) !== props.id || typeof d?.reply !== 'function') return
+  // The saved effect (never a previewed take) and the name the header shows for it.
+  const own = String(widgetVal('effect') ?? '')
+  const def = catalog.value?.effects.find(x => x.id === resolveEffectId(own)) ?? null
+  d.reply({ image: baseImage.value ?? null, effectId: own, title: def?.name ?? '' })
+}
+function onEffectPreview(e: Event) {
+  const d = (e as CustomEvent).detail
+  if (String(d?.nodeId) !== props.id) return
+  previewEffectId.value = d.effectId ?? null
+  if (!animating.value) renderOnce()
+}
+function onEffectApply(e: Event) {
+  const d = (e as CustomEvent).detail
+  if (String(d?.nodeId) !== props.id || !d.effectId) return
+  previewEffectId.value = null
+  setWidget('effect', String(d.effectId))
+  setWidget('params', JSON.stringify(d.values ?? {}))
+  window.dispatchEvent(new CustomEvent('sailor:shaderfx-changed', { detail: { id: props.id } }))
+  if (!animating.value) renderOnce()
+}
+
 // WebGL context loss (AI in Sailor spec §7.5): the renderer drops every GL
 // handle and refuses to render until restored; redraw once it comes back.
 const offContextChange = shaderFx.onContextChange((s) => { if (s === 'restored') renderOnce() })
 
 onMounted(async () => {
+  // Before the catalog fetch: the prompt may ask as soon as the node is on screen.
+  window.addEventListener('sailor:shaderEffectTarget', onEffectTarget)
+  window.addEventListener('sailor:shaderEffectPreview', onEffectPreview)
+  window.addEventListener('sailor:shaderEffectApply', onEffectApply)
   await fetchShaderFxCatalog().catch(() => null)
   lastChainIds = chain.value.nodeIds
   window.addEventListener('sailor:shaderfx-changed', onUpstreamChange)
@@ -323,6 +360,9 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   cancelAnimationFrame(raf)
   window.removeEventListener('sailor:shaderfx-changed', onUpstreamChange)
+  window.removeEventListener('sailor:shaderEffectTarget', onEffectTarget)
+  window.removeEventListener('sailor:shaderEffectPreview', onEffectPreview)
+  window.removeEventListener('sailor:shaderEffectApply', onEffectApply)
   offContextChange()
 })
 </script>

@@ -1,7 +1,7 @@
 // Which canvas worker runs a routed request (spec §4; plan rulings 6 and 17).
-// The canvas has four today: the planner (useCanvasAgent.ask), Variations
-// (three takes), the review (Fix), or a plain message for kinds whose worker
-// arrives in a later stage.
+// The canvas has five today: the planner (useCanvasAgent.ask), Variations
+// (three takes), the review (Fix), new effects on a shader effect node (three
+// effect takes, stage 5), or a plain message when nothing fits the selection.
 import type { RouterKind } from '~~/shared/promptRouter/router'
 
 export interface DispatchTarget { nodeId: string; type: string; hasImages: boolean; hasUpstream: boolean; label: string }
@@ -9,13 +9,16 @@ export type CanvasDispatch =
   | { worker: 'ask' }
   | { worker: 'variations'; nodeId: string }
   | { worker: 'fix'; nodeId: string }
+  | { worker: 'effect'; nodeId: string }
   | { worker: 'message'; message: string }
 
 /** Node types whose text and layout the planner can change in place (tuneNode). */
 export const FRAME_TYPES = new Set(['artifact-frame'])
+/** Node types that hold one shader effect — where new effects are written (stage 5). */
+export const SHADER_NODE_TYPES = new Set(['shader-effect'])
 
 export const DISPATCH_MESSAGES = {
-  newEffect: 'Making new effects isn’t available yet. Try Variations on an image, or change an effect in its studio.',
+  newEffect: 'New effects are made on a shader effect. Select a shader effect node, or open the Shader studio.',
   copy: 'Select a Frame to write its copy.',
   layout: 'Select a Frame to try other layouts.',
   noImageToVary: 'Select an image made on this canvas to get three takes.',
@@ -46,6 +49,7 @@ export function canvasDispatch(kind: RouterKind, text: string, target: DispatchT
       if (target && FRAME_TYPES.has(target.type)) return { worker: 'ask' }
       return { worker: 'message', message: kind === 'copy' ? DISPATCH_MESSAGES.copy : DISPATCH_MESSAGES.layout }
     case 'new-effect':
+      if (target && SHADER_NODE_TYPES.has(target.type)) return { worker: 'effect', nodeId: target.nodeId }
       return { worker: 'message', message: DISPATCH_MESSAGES.newEffect }
     default:
       return { worker: 'ask' }

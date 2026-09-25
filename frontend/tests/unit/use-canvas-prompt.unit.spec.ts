@@ -38,10 +38,17 @@ function makeCanvas() {
 }
 const routeTo = (kind: string, followUps: string[] = []) => vi.fn(async () => ({ kind, followUps, routed: true })) as any
 
+// An idle effect session (stage 5): these specs cover the canvas's own workers (preflight C8).
+function idleEffects(): any {
+  return {
+    session: ref(null), target: ref(null), request: ref(''), working: ref(false), error: ref(''), notice: ref(''), saving: ref(false),
+    start: vi.fn(), preview: vi.fn(), choose: vi.fn(), keep: vi.fn(), close: vi.fn(), more: vi.fn(), stop: vi.fn(), clearMessages: vi.fn(),
+  }
+}
 function setup(route = routeTo('plan')) {
   const { c, nodes } = makeCanvas()
   let api!: ReturnType<typeof useCanvasPrompt>
-  const w = mount(defineComponent({ setup() { api = useCanvasPrompt(() => c, { route }); return () => h('div') } }))
+  const w = mount(defineComponent({ setup() { api = useCanvasPrompt(() => c, { route, effects: idleEffects() }); return () => h('div') } }))
   mounted.push(w)
   return { api, c, nodes, route, w }
 }
@@ -250,7 +257,7 @@ describe('useCanvasPrompt', () => {
   it('a mode chip is set by the menu, focuses the prompt, is sent with the request, then cleared', async () => {
     const { api, route } = setup()
     window.dispatchEvent(new CustomEvent('sailor:promptMode', { detail: { label: 'Tune', kind: 'tweak', nodeId: 'img' } }))
-    expect(api.mode.value).toEqual({ label: 'Tune', kind: 'tweak', nodeId: 'img' })
+    expect(api.mode.value).toEqual({ label: 'Tune', kind: 'tweak', nodeId: 'img', effectId: null })
     expect(api.focusTick.value).toBe(1)
     await api.submit('more orange')
     expect(route).toHaveBeenCalledWith(expect.objectContaining({ mode: 'Tune' }), expect.anything())

@@ -11,6 +11,7 @@
 import { ACTION_HINTS } from '~/lib/artifact/nextSteps'
 import { parseBadgeUsd } from '~/lib/costEstimate'
 import { formatCostBadge } from '~/lib/pricing'
+import { shaderGenEstimateText } from '~/lib/shadergen/estimate'
 
 export type ActionGroup = 'edit' | 'develop'
 export type ActionLands = 'takes' | 'step' | null
@@ -86,6 +87,16 @@ const TUNE: NodeAction = {
   run: c => fire('sailor:promptMode', { label: 'Tune', kind: 'tweak', nodeId: c.nodeId }),
 }
 
+/** Remix / New effect cost (spec §7.2 estimate), shown like every other fixed priceHint. */
+export const SHADER_GEN_ACTION_HINT = shaderGenEstimateText(false)
+// Both need words: each puts a chip in the prompt (the chip decides the kind, so
+// no router call) and the three effect takes land above it (spec §7.3).
+const effectMode = (c: NodeActionCtx, label: string) => fire('sailor:promptMode', { label, kind: 'new-effect', nodeId: c.nodeId })
+const SHADER: NodeAction[] = [
+  { id: 'remix-effect', label: 'Remix…', group: 'develop', ai: true, lands: 'takes', priceHint: SHADER_GEN_ACTION_HINT, run: c => effectMode(c, 'Remix') },
+  { id: 'new-effect', label: 'New effect…', group: 'develop', ai: true, lands: 'takes', priceHint: SHADER_GEN_ACTION_HINT, run: c => effectMode(c, 'New effect') },
+]
+
 /** Studio nodes the planner can change in place (tuneNode) — where Tune… has a worker. */
 export const TUNABLE_TYPES = new Set(['artifact-frame', 'gradient-studio', 'shader-studio', 'texture-studio', 'shape-studio', 'vector-type', 'scene3d-studio'])
 
@@ -93,6 +104,7 @@ function listFor(type: string): NodeAction[] {
   if (type === 'artifact-image') return IMAGE
   if (type === 'artifact-video') return VIDEO
   if (type === 'artifact-audio') return AUDIO
+  if (type === 'shader-effect') return SHADER
   if (TUNABLE_TYPES.has(type)) return [FIX, TUNE]
   return [FIX]
 }

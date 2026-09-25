@@ -39,8 +39,12 @@ describe('canvasDispatch', () => {
     expect(canvasDispatch('copy', 'a headline', img())).toEqual({ worker: 'message', message: DISPATCH_MESSAGES.copy })
     expect(canvasDispatch('layout', 'x', null)).toEqual({ worker: 'message', message: DISPATCH_MESSAGES.layout })
   })
-  it('new-effect has no canvas worker yet', () => {
-    expect(canvasDispatch('new-effect', 'rain on a window', img())).toEqual({ worker: 'message', message: DISPATCH_MESSAGES.newEffect })
+  it('new-effect runs on a selected shader effect node, and points elsewhere otherwise', () => {
+    expect(canvasDispatch('new-effect', 'rain', { nodeId: 's1', type: 'shader-effect', hasImages: false, hasUpstream: true, label: 'Water ripple' }))
+      .toEqual({ worker: 'effect', nodeId: 's1' })
+    expect(canvasDispatch('new-effect', 'rain', img())).toEqual({ worker: 'message', message: DISPATCH_MESSAGES.newEffect })
+    expect(canvasDispatch('new-effect', 'rain', null)).toEqual({ worker: 'message', message: DISPATCH_MESSAGES.newEffect })
+    expect(DISPATCH_MESSAGES.newEffect).toBe('New effects are made on a shader effect. Select a shader effect node, or open the Shader studio.')
   })
   it('messages are plain sentence-case copy with no kind names', () => {
     for (const m of Object.values(DISPATCH_MESSAGES)) {

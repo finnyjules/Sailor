@@ -6,7 +6,8 @@ import { computed } from 'vue'
 import { X } from 'lucide-vue-next'
 import { CURRENT, isTakesWorking, takesStatus, type TakesSession } from '~/lib/prompt/takesSession'
 
-const props = defineProps<{ session: TakesSession }>()
+// `saving`: a Keep is being saved (effect takes, stage 5) — Keep is off until it settles.
+const props = withDefaults(defineProps<{ session: TakesSession; saving?: boolean }>(), { saving: false })
 const emit = defineEmits<{ hover: [id: string | null]; choose: [id: string]; keep: [id: string]; more: []; close: [] }>()
 
 const working = computed(() => isTakesWorking(props.session))
@@ -62,7 +63,7 @@ function onFocusOut(e: FocusEvent) {
             <img :src="t.thumb ?? ''" alt="" class="thumb">
             <span class="label">Take {{ i + 1 }}</span>
           </button>
-          <button type="button" class="keep" @click="emit('keep', t.takeId)">Keep</button>
+          <button type="button" class="keep" :disabled="saving" @click="emit('keep', t.takeId)">Keep</button>
         </template>
         <template v-else-if="t.state === 'pending'">
           <span class="thumb block animate-pulse bg-white/[0.06]" />
@@ -85,4 +86,5 @@ function onFocusOut(e: FocusEvent) {
 .label { padding-inline: 2px; font-size: 11.5px; color: rgba(255, 255, 255, 0.7); }
 .keep { position: absolute; top: 7px; right: 7px; display: none; border-radius: 5px; background: #fff; padding: 1px 8px; font-size: 11.5px; font-weight: 600; color: #171717; }
 .tile:hover .keep, .tile:focus-within .keep, .tile.is-chosen .keep { display: block; }
+.keep:disabled { opacity: 0.5; cursor: default; }
 </style>

@@ -16,7 +16,9 @@ const props = withDefaults(defineProps<{
   workingLabel?: string
   stoppable?: boolean
   disabled?: boolean
-}>(), { selectionLabel: null, mode: null, suggestions: () => [], working: false, workingLabel: 'Working…', stoppable: true, disabled: false })
+  /** The price of what the mode chip will do (spec §7.2), shown before anything runs. */
+  note?: string | null
+}>(), { selectionLabel: null, mode: null, suggestions: () => [], working: false, workingLabel: 'Working…', stoppable: true, disabled: false, note: null })
 
 const emit = defineEmits<{ submit: [text: string]; stop: []; clearSelection: []; clearMode: []; focus: []; blur: [] }>()
 
@@ -94,6 +96,8 @@ defineExpose({ focus, inputElement })
           class="relative min-w-0 flex-1 bg-transparent text-[13px] text-white/90 outline-none placeholder:text-white/30"
           @keydown="onKeydown" @focus="onFocus" @blur="onBlur"
         >
+        <!-- The price of what the mode chip will do (spec §7.2), shown before anything runs. Neutral grey, never pastel. -->
+        <span v-if="note && !working" data-testid="prompt-note" class="relative shrink-0 text-[11px] tabular-nums text-white/40">{{ note }}</span>
         <kbd v-if="!focused" class="relative rounded border border-white/10 px-1.5 font-mono text-[11px] text-white/35">/</kbd>
         <button
           type="button" aria-label="Send"

@@ -6,24 +6,31 @@
  * prompt, a proposed change, or an answer. CanvasPromptHost.vue only renders
  * it. `canvas` returns VueNodeCanvas's exposed API (null until it mounts).
  * Formerly CanvasPromptBar.vue's script (stage 2), plus the router and results.
+ * Stage 5: new effects on a shader effect node run in an effect-takes session
+ * (useEffectTakes); while one is open, the takes, working row, Stop and cards are its.
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type ComputedRef } from 'vue'
 import { toast } from 'vue-sonner'
 import { useCanvasAgent } from '~/composables/useCanvasAgent'
 import { useAgentActivity } from '~/composables/useAgentActivity'
 import { paidProducerFor } from '~/lib/artifact/nextSteps'
 import { looksLikeImageIdea } from '~/lib/sketch/sketchIntent'
 import { canvasSuggestions, promptNodeLabel, promptWorkingLabel, selectionLabel, type PromptNode } from '~/lib/prompt/canvasPromptContext'
-import { canvasDispatch, isPlainVaryRequest, type DispatchTarget } from '~/lib/prompt/canvasDispatch'
+import { canvasDispatch, DISPATCH_MESSAGES, isPlainVaryRequest, type DispatchTarget } from '~/lib/prompt/canvasDispatch'
 import { routeRequest } from '~/lib/prompt/routeRequest'
 import { BUSY_NOTICE } from '~/lib/prompt/notices'
 import {
   assignRun, chooseTile, failRun, hoverTile, ingestTakes, isTakesWorking, openTakes, pendingRunIds, readyCount,
   setRunIds, settleUnqueued, shownTakeId, TAKES_PER_SET, wantedActiveTakeId, type TakesSession,
 } from '~/lib/prompt/takesSession'
+import { useEffectTakes, type EffectTarget } from '~/composables/useEffectTakes'
+import { shaderGenEstimateText } from '~/lib/shadergen/estimate'
+import { getEffectSync } from '~/lib/shaderfx/catalogStore'
+import { hostedModeEnabled } from '~/lib/hostedMode'
 import type { RouterKind } from '~~/shared/promptRouter/router'
 
-export interface PromptMode { label: string; kind: RouterKind; nodeId: string | null }
+/** `effectId`: the effect a gallery Remix starts from (null: the node's own). */
+export interface PromptMode { label: string; kind: RouterKind; nodeId: string | null; effectId: string | null }
 export type PromptCard = 'takes' | 'changes' | 'answer' | null
 export interface AnswerCard { kind: 'answer' | 'notice' | 'error'; text: string; reasoning: string; followUps: string[] }
 
@@ -37,8 +44,11 @@ export const ROUTER_SELECTION_MAX = 8
 export const ROUTER_NAME_MAX = 120
 export { BUSY_NOTICE }
 
-export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeRequest } = {}) {
+export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeRequest; effects?: ReturnType<typeof useEffectTakes> } = {}) {
   const route = deps.route ?? routeRequest
+  const fx = deps.effects ?? useEffectTakes()
+  // Read lazily and guarded (preflight C8): unit hosts have no Nuxt runtime config.
+  const hosted = (): boolean => { try { return hostedModeEnabled(useRuntimeConfig().public) } catch { return false } }
   const { getLocalSetting } = useLocalSettings()
   const apiKey = () => getLocalSetting('Sailor.AI.AnthropicApiKey') ?? ''
   const ready = () => {
@@ -368,11 +378,25 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     // Someone else's run (or a set we stopped) finished: ours can start now.
     if (waitingSid === sessionSid) { waitingSid = null; dispatchRun(sessionSid, s.nodeId) }
   }
-  function previewTake(id: string | null) { const s = takes.value; if (!s) return; takes.value = hoverTile(s, id); show(takes.value) }
-  function chooseTake(id: string) { const s = takes.value; if (!s) return; takes.value = chooseTile(s, id); show(takes.value) }
-  function keepTake(id: string) { endTakes(id) }
-  function closeTakes() { endTakes(null) }
+  // An open effect set (stage 5) owns the strip: each call goes to it instead.
+  function previewTake(id: string | null) {
+    if (fx.session.value) return fx.preview(id)
+    const s = takes.value; if (!s) return; takes.value = hoverTile(s, id); show(takes.value)
+  }
+  function chooseTake(id: string) {
+    if (fx.session.value) return fx.choose(id)
+    const s = takes.value; if (!s) return; takes.value = chooseTile(s, id); show(takes.value)
+  }
+  async function keepTake(id: string) {
+    if (fx.session.value) { await fx.keep(id); return }
+    endTakes(id)
+  }
+  function closeTakes() {
+    if (fx.session.value) return fx.close()
+    endTakes(null)
+  }
   function moreTakes() {
+    if (fx.session.value) return void fx.more()
     const s = takes.value
     // Only once this set's run has reported done: until then the layout would drop a new one.
     if (!s || isTakesWorking(s) || !s.loopDone) return
@@ -382,11 +406,41 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     if (t) startTakes(t, request)
   }
 
+  // --- new effects on a shader node (stage 5, spec §7.3) -----------------------
+  // The node answers synchronously with its picture, its effect and its shown
+  // name; previews and the kept effect go back to it by window event.
+  function effectTargetFor(nodeId: string, baseEffectId: string | null): EffectTarget | null {
+    type Info = { image: CanvasImageSource | null; effectId: string; title: string }
+    let info: Info | null = null
+    window.dispatchEvent(new CustomEvent('sailor:shaderEffectTarget', { detail: { nodeId, reply: (o: Info) => { info = o } } }))
+    if (!info) return null
+    const i: Info = info
+    const fire = (name: string, detail: object) => window.dispatchEvent(new CustomEvent(name, { detail: { nodeId, ...detail } }))
+    return {
+      key: nodeId,
+      // The node's own shown name (its effect's name) — the card header's, not the class's.
+      label: i.title || targetFor(nodeId)?.label || '',
+      base: getEffectSync(baseEffectId ?? i.effectId),
+      image: () => i.image,
+      preview: effectId => fire('sailor:shaderEffectPreview', { effectId }),
+      apply: (effectId, values) => fire('sailor:shaderEffectApply', { effectId, values }),
+    }
+  }
+
   // --- dispatch (spec §4) -----------------------------------------------------
-  function run(kind: RouterKind, text: string, o: { nodeId?: string | null; fromMenu?: boolean; followUps?: string[] } = {}) {
+  type RunOpts = { nodeId?: string | null; fromMenu?: boolean; followUps?: string[]; effectId?: string | null; newEffect?: boolean }
+  function run(kind: RouterKind, text: string, o: RunOpts = {}) {
     const target = targetFor(o.nodeId)
     const d = canvasDispatch(kind, text, target, { fromMenu: o.fromMenu })
     if (d.worker === 'message') { notice.value = d.message; return }
+    if (d.worker === 'effect') {
+      // "New effect" starts from nothing; Remix (chip or routed) from the gallery's pick or the node's own effect.
+      const t = effectTargetFor(d.nodeId, o.effectId ?? null)
+      if (!t) { notice.value = DISPATCH_MESSAGES.newEffect; return }
+      if (o.newEffect) t.base = null
+      void fx.start(text, t)
+      return
+    }
     if (d.worker === 'variations') { startTakes(target!, o.fromMenu ? '' : text); return }
     if (d.worker === 'fix') {
       reviewTargetLabel.value = target?.label ?? ''
@@ -398,6 +452,8 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   }
   function clearResults(o: { detached?: boolean } = {}) {
     if (takes.value) endTakes(null, o)
+    if (fx.session.value) fx.close()
+    fx.clearMessages()
     notice.value = ''
     followUps.value = []
     fastPathFired.value = false
@@ -409,7 +465,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   const busy = computed(() => routing.value || agent.busy.value)
   const takesWorking = computed(() => !!takes.value && isTakesWorking(takes.value))
   // One job at a time (Ruling 9): nothing new starts while takes are arriving.
-  const jobBusy = () => busy.value || takesWorking.value
+  const jobBusy = () => busy.value || takesWorking.value || fx.working.value
   // A menu item (Variations, Critique…) arriving mid-job says why nothing happens.
   const menuBusy = () => jobBusy() || agent.reviewingManual.value
 
@@ -422,6 +478,12 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     const m = mode.value
     mode.value = null
     const c = canvas()
+    // A new-effect chip (Remix / New effect) decides the kind itself (spec §4):
+    // no router call, so no credit and no wait.
+    if (m?.kind === 'new-effect') {
+      run('new-effect', p, { nodeId: m.nodeId, effectId: m.effectId, newEffect: m.label === 'New effect' })
+      return
+    }
     // Sketch fast path (unchanged from stage 2): a high-confidence image idea
     // fires the pad at once and skips the router (plan ruling 5). The planner
     // still runs; its sketchIdea handler consumes fastPathFired so a `sketch`
@@ -459,6 +521,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
 
   function stop() {
     if (routing.value) { routeSeq++; routeCtrl?.abort(); routeCtrl = null; routing.value = false; return }
+    if (fx.working.value || fx.session.value) { fx.stop(); return }
     if (takes.value && isTakesWorking(takes.value)) { endTakes(null); return }
     agent.stop()
   }
@@ -471,13 +534,19 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     clearResults()
     mode.value = null
     lastSubmitted.value = String(d.text ?? '')
-    run(d.kind as RouterKind, String(d.text ?? ''), { nodeId: d.nodeId != null ? String(d.nodeId) : null, fromMenu: true })
+    run(d.kind as RouterKind, String(d.text ?? ''), {
+      nodeId: d.nodeId != null ? String(d.nodeId) : null, fromMenu: true,
+      effectId: d.effectId != null ? String(d.effectId) : null, newEffect: !!d.newEffect,
+    })
   }
   function onPromptMode(e: Event) {
     const d = (e as CustomEvent).detail ?? {}
     if (!d.label || !d.kind || jobBusy()) return
     clearResults()
-    mode.value = { label: String(d.label), kind: d.kind as RouterKind, nodeId: d.nodeId != null ? String(d.nodeId) : null }
+    mode.value = {
+      label: String(d.label), kind: d.kind as RouterKind, nodeId: d.nodeId != null ? String(d.nodeId) : null,
+      effectId: d.effectId != null ? String(d.effectId) : null,
+    }
     focusTick.value++
   }
   function clearMode() { mode.value = null }
@@ -490,13 +559,17 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   // --- what the prompt shows ------------------------------------------------------
   // Only work the user started takes over the prompt row. A background
   // auto-review (after a paid render) runs quietly and leaves the prompt usable.
-  const working = computed(() => busy.value || agent.reviewingManual.value || takesWorking.value)
+  const working = computed(() => busy.value || agent.reviewingManual.value || takesWorking.value || fx.working.value)
   const workingLabel = computed(() => {
+    // Effect takes quote the request and carry the estimate (plan ruling 14).
+    if (fx.working.value) return `${promptWorkingLabel({ request: fx.request.value })} · ${shaderGenEstimateText(hosted())}`
     if (takesWorking.value) return promptWorkingLabel({ request: takes.value!.request, takesOf: takes.value!.nodeLabel })
     if (busy.value) return promptWorkingLabel({ request: lastSubmitted.value })
     return promptWorkingLabel({ reviewing: reviewTargetLabel.value })
   })
   const answerCard = computed<AnswerCard | null>(() => {
+    if (fx.error.value) return { kind: 'error', text: fx.error.value, reasoning: '', followUps: [] }
+    if (fx.notice.value) return { kind: 'notice', text: fx.notice.value, reasoning: '', followUps: [] }
     if (agent.error.value) return { kind: 'error', text: agent.error.value, reasoning: '', followUps: [] }
     if (notice.value) return { kind: 'notice', text: notice.value, reasoning: '', followUps: [] }
     if (agent.answer.value) return { kind: 'answer', text: agent.answer.value, reasoning: agent.reasoning.value, followUps: followUps.value }
@@ -512,13 +585,19 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   // While planning or reviewing, the prompt's own row shows the progress label
   // and Stop — the card never repeats it.
   const card = computed<PromptCard>(() => {
-    if (takes.value) return 'takes'
+    if (fx.session.value || takes.value) return 'takes'
     if (busy.value) return null
     if (agent.hasProposal.value) return 'changes'
     return answerCard.value ? 'answer' : null
   })
   const showSketchInstead = computed(() => agent.hasProposal.value && !!lastSubmitted.value)
-  function dismissAnswer() { notice.value = ''; followUps.value = []; agent.dismiss() }
+  function dismissAnswer() { notice.value = ''; followUps.value = []; fx.clearMessages(); agent.dismiss() }
+  // The price of what a new-effect chip will do (spec §7.2), shown before anything runs.
+  const modeNote: ComputedRef<string | null> = computed(() => (mode.value?.kind === 'new-effect' ? shaderGenEstimateText(hosted()) : null))
+  // The strip shows the effect set while one is open, else the Variations set.
+  const shownTakes = computed<TakesSession | null>(() => fx.session.value ?? takes.value)
+  // An effect Keep is saving: the strip's Keep buttons are off until it settles.
+  const takesSaving = computed(() => !!fx.session.value && !!fx.saving?.value)
 
   // The card above the prompt must not cover what it is about: once it has
   // rendered (its height is known), pan just enough that the takes' node, or the
@@ -527,7 +606,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     if (c !== 'takes' && c !== 'changes') return
     await nextTick()
     const cv = canvas()
-    if (c === 'takes' && takes.value) cv?.agentRevealNode?.(takes.value.nodeId)
+    if (c === 'takes' && shownTakes.value) cv?.agentRevealNode?.(shownTakes.value.nodeId)
     else if (c === 'changes') cv?.agentRevealProposal?.()
   })
 
@@ -577,7 +656,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
 
   return {
     agent, selection, chipLabel, suggestions, mode, focusTick, working, workingLabel, lastSubmitted,
-    card, answerCard, takes, showSketchInstead, searchOpen, searchQuery, onSearchDone,
+    card, answerCard, takes: shownTakes, takesSaving, modeNote, showSketchInstead, searchOpen, searchQuery, onSearchDone,
     submit, stop, clearMode, clearSelection, onPromptFocus, previewTake, chooseTake, keepTake, closeTakes,
     moreTakes, dismissAnswer, runFollowUp, sketchInstead,
   }

@@ -19,8 +19,8 @@ const { api, stop } = vi.hoisted(() => {
   const api = {
     agent: { changes: ref([]), issues: ref([]), review: ref(null), reviewing: ref(false), busy: ref(false), hovered: ref(null),
       acceptChange: vi.fn(), rejectChange: vi.fn(), reroll: vi.fn(), keep: vi.fn(), keepAndRun: vi.fn(), dismiss: vi.fn() },
-    selection: ref([]), chipLabel: ref(null), suggestions: ref([]), mode: ref(null), focusTick: ref(0),
-    working: ref(false), workingLabel: ref('Looking at the result…'), lastSubmitted: ref(''), card: ref(null), answerCard: ref(null), takes: ref(null),
+    selection: ref([]), chipLabel: ref(null), suggestions: ref([]), mode: ref(null), modeNote: ref(null), focusTick: ref(0),
+    working: ref(false), workingLabel: ref('Looking at the result…'), lastSubmitted: ref(''), card: ref(null), answerCard: ref(null), takes: ref(null), takesSaving: ref(false),
     showSketchInstead: ref(false), searchOpen: ref(false), searchQuery: ref(''), onSearchDone: vi.fn(),
     submit: vi.fn(), stop, clearMode: vi.fn(), clearSelection: vi.fn(), onPromptFocus: vi.fn(), previewTake: vi.fn(), chooseTake: vi.fn(),
     keepTake: vi.fn(), closeTakes: vi.fn(), moreTakes: vi.fn(), dismissAnswer: vi.fn(), runFollowUp: vi.fn(), sketchInstead: vi.fn(),

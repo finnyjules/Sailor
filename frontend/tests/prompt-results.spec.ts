@@ -146,14 +146,19 @@ test.describe('Results on the work', () => {
     await expect(card).toHaveCount(0)
   })
 
-  test('a kind with no canvas worker says so plainly and calls no planner', async ({ page }) => {
+  test('new effects with no shader effect node selected point to one plainly, and call no planner', async ({ page }) => {
     await mockRouter(page, () => ({ kind: 'new-effect' }))
     let planned = 0
+    let written = 0
     await page.route('**/api/agent-plan', async (r) => { planned++; await r.fulfill({ json: { text: planText([]) } }) })
+    // Nothing may write effects here; every model route is mocked regardless.
+    await page.route('**/api/shader-gen', async (r) => { written++; await r.fulfill({ status: 500, json: {} }) })
+    await page.route('**/api/my-effects**', r => r.fulfill({ json: { effects: [] } }))
     await prompt(page).fill('make it rain on a window')
     await prompt(page).press('Enter')
-    await expect(page.getByTestId('prompt-answer')).toContainText('Making new effects isn’t available yet.')
+    await expect(page.getByTestId('prompt-answer')).toContainText('New effects are made on a shader effect. Select a shader effect node, or open the Shader studio.')
     expect(planned).toBe(0)
+    expect(written).toBe(0)
   })
 
   test('proposed nodes show on the canvas with a Proposed pill; Reject removes them, Approve keeps them', async ({ page }) => {
