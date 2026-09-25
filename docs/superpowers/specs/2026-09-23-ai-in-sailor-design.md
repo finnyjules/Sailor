@@ -138,7 +138,7 @@ The earlier design's left rail existed only to free room in the bar for a prompt
 
 ### 2.3 The node toolbar
 
-- **A single selected node** shows a compact toolbar centred above it, containing **Edit ▾** and **Develop ▾** and nothing else. There's no AI button, because typing always goes to the prompt.
+- **A single selected node** shows a toolbar centred **under** it (decided 2026-09-24; it flips above only when the screen bottom or the prompt stack would cover it), containing **Edit ▾** and **Develop ▾** and nothing else. Its menus open away from the node. There's no AI button, because typing always goes to the prompt.
   - The toolbar stays the same size on screen at any canvas zoom. That's the main reason for a floating toolbar over node footers.
   - It generalises the audio node's `SelectionActionChips`, which is the only selection toolbar in the app today.
 - **Several selected nodes** show ▶ Run N · Group · Combine into Frame. These come from today's right-click menu. The prompt's chip reads "N nodes".
