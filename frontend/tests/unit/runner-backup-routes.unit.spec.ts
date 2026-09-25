@@ -134,12 +134,14 @@ describe('the first and backup services are the table\'s', () => {
     // And no row for something the runner doesn't run.
     const image = Object.keys(RUNNER_ROUTES).filter(k => k.startsWith('image:')).length
     const video = Object.keys(RUNNER_ROUTES).filter(k => k.startsWith('video:')).length
-    // + GPT Image 2.5 (Task F2), Qwen Image 3 (Task F6), Grok Imagine 2 (Task F7) and Ideogram 4 (Task F8), runner-only models outside the two builder tables.
+    // + GPT Image 2.5 (Task F2), Qwen Image 3 (Task F6), Grok Imagine 2 (Task F7), Ideogram 4 (Task F8) and Muse Image (Task F13),
+    // runner-only models outside the two builder tables.
     expect(keys.has('image:gpt-image-2.5')).toBe(true)
     expect(keys.has('image:qwen-image-3')).toBe(true)
     expect(keys.has('image:grok-imagine-2')).toBe(true)
     expect(keys.has('image:ideogram-4')).toBe(true)
-    expect(image).toBe(Object.keys(RUNNER_IMAGE_MODELS).length + Object.keys(RUNNER_REPLICATE_IMAGE_MODELS).length + 4)
+    expect(keys.has('image:muse-image')).toBe(true)
+    expect(image).toBe(Object.keys(RUNNER_IMAGE_MODELS).length + Object.keys(RUNNER_REPLICATE_IMAGE_MODELS).length + 5)
     expect(video).toBe(Object.keys(RUNNER_VIDEO_MODELS).length + Object.keys(RUNNER_REPLICATE_VIDEO_MODELS).length)
   })
 

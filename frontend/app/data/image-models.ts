@@ -986,6 +986,29 @@ export const IMAGE_MODELS: ImageModel[] = [
     ],
   },
 
+  // ===== Meta ===============================================================
+  {
+    // Runner-only (model line-up F13): fal, no backup
+    // (server/runner/generators/museImage.ts). No Python builder. The ratios
+    // are that file's MUSE_IMAGE_RATIOS; its fal schema has no other setting
+    // worth a control, so there are none.
+    id: 'muse-image',
+    runnerOnly: true,
+    family: 'muse-image',
+    label: 'Muse Image',
+    brand: 'Meta',
+    // Cover art only, and Replicate has no Muse: the lookup answers "not
+    // found" and the card keeps its brand wordmark. The runner sends fal.
+    replicateSlug: 'meta/muse-image',
+    pitch: 'Follows the prompt closely, with sharp text, charts and fine detail.',
+    description: 'Meta\'s image model. Does what the prompt says, and draws small details well, including lettering, charts and codes. Every picture is about 2.5 million pixels, whatever its shape.',
+    tags: ['cheap', 'typography', 'photoreal'],
+    pricePerImage: 0.01,
+    aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9', '9:21'],
+    defaultAspectRatio: '1:1',
+    advanced: [],
+  },
+
   // ===== Pruna ==============================================================
   {
     id: 'flux-fast',

@@ -48,7 +48,7 @@ const HIDDEN_DROPDOWN: Record<string, string[]> = {
   'UpscaleImageNode.model': ['Real-ESRGAN'],
 }
 /** Runner-only models the line-up's F-tasks added (no Python builder; left out while their switch is off). */
-const RUNNER_ONLY_IMAGES = ['ideogram-4', 'gpt-image-2.5', 'qwen-image-3', 'grok-imagine-2']
+const RUNNER_ONLY_IMAGES = ['ideogram-4', 'gpt-image-2.5', 'qwen-image-3', 'grok-imagine-2', 'muse-image']
 const RUNNER_ONLY_DROPDOWN: Record<string, string[]> = {
   'EditImageNode.model': ['GPT Image 2.5', 'Seedream 5 Pro'],
   'BlendSceneNode.model': ['Nano Banana 2'],

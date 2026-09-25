@@ -467,7 +467,7 @@ describe('review I2, M2, M3', () => {
   })
   it('M3: RESTYLE_LORA_CREDITS is gone', () => {
     expect('RESTYLE_LORA_CREDITS' in PriceBook).toBe(false)
-    expect(PriceBook.PRICE_BOOK_VERSION).toBe('lineup-f12')
+    expect(PriceBook.PRICE_BOOK_VERSION).toBe('lineup-f13')
   })
 })
 

@@ -343,6 +343,8 @@ const RULES: Record<string, Rule> = {
   'grok-imagine': flat,
   // grokImagine2Generate (runner-only, Replicate): one picture, one price for every ratio, size and quality.
   'grok-imagine-2': flat,
+  // museImageGenerate (runner-only, fal): one picture, one price for every ratio.
+  'muse-image': flat,
   // ideogram4Generate (runner-only, fal first): the speed is the tier, the
   // size's picture the megapixels; one picture. Only a 2K picture has the
   // Replicate backup (ideogram4OnReplicate), so a 1K one doesn't cover it.

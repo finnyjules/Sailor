@@ -2,8 +2,8 @@
  * What each image model's FIRST service charges us — the service Sailor's
  * request builder sends it to today: fal for the RUNNER_IMAGE_MODELS ids and
  * the Python `primary="fal"` models (Krea 2), and the runner-only GPT Image
- * 2.5 (server/runner/generators/gptImage25.ts) and Ideogram 4 (ideogram4.ts),
- * Replicate for the rest,
+ * 2.5 (server/runner/generators/gptImage25.ts), Ideogram 4 (ideogram4.ts)
+ * and Muse Image (museImage.ts), Replicate for the rest,
  * the runner-only Qwen Image 3 and Grok Imagine 2 among them (qwenImage3.ts,
  * grokImagine2.ts)
  * (comfy_api_nodes/image_models.py `primary`, default "replicate").
@@ -141,6 +141,11 @@ export const IMAGE_RATES: Record<string, ImageRate> = {
     minMegapixels: 1, maxMegapixels: IDEOGRAM_4_MAX_MEGAPIXELS,
     service: 'fal', source: fal('ideogram/v4'), read: READ, confidence: 'verified',
   },
+  // Muse Image (Meta; runner-only, Task F13), fal only: "Price: $0.01 per
+  // images" (llms.txt, read 2026-09-24), one picture at Muse's own ~2.5 MP
+  // whatever the ratio. The schema has no web search or other paid extra.
+  // No backup (Replicate has no Muse, museImage.ts).
+  'muse-image': falImage('meta/muse-image/text-to-image', 0.01),
   // "Price: $0.035 per images" (text-to-image and /edit alike).
   'seedream-5-lite': falImage('fal-ai/bytedance/seedream/v5/lite/text-to-image', 0.035),
   // "Price: $0.03 per images" (text-to-image and /edit alike).

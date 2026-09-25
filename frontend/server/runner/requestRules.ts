@@ -9,7 +9,7 @@
  * The rules come from the providers' saved schemas
  * (tests/unit/fixtures/provider-schemas/; a test holds this table to them):
  *  - a prompt shorter than the schema's `minLength` (Nano Banana 3, Hailuo H3 1,
- *    GPT Image 2.5 1), and a transparent JPEG from GPT Image 2.5;
+ *    GPT Image 2.5 1, Muse Image 1), and a transparent JPEG from GPT Image 2.5;
  *  - Wan 3.0 reference pictures over its schema's 10, and reference videos or
  *    sounds, which the runner doesn't send it yet (wan3.ts);
  *  - Seedance 2.0 references over the schema's counts (9 pictures, 3 videos,
@@ -83,6 +83,7 @@ import {
 import { QWEN_IMAGE_3_SLUG, isQwenImage3Model } from './generators/qwenImage3'
 import { GROK_IMAGINE_2_SLUG, isGrokImagine2Model } from './generators/grokImagine2'
 import { IDEOGRAM_4_FAL_APP, IDEOGRAM_4_NEEDS_PROMPT, isIdeogram4Model } from './generators/ideogram4'
+import { MUSE_IMAGE_FAL_APP, MUSE_IMAGE_NEEDS_PROMPT, isMuseImageModel } from './generators/museImage'
 import { isSeedream5ProEdit, seedream5ProEditProblems } from './generators/seedream5ProEdit'
 
 export { FIRST_FRAME_AND_REFERENCES }
@@ -120,6 +121,8 @@ export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: 
   [`replicate ${GROK_IMAGINE_2_SLUG}`]: { min: 1, message: GROK_IMAGINE_2_NEEDS_PROMPT },
   // Ideogram 4 on fal (ideogram4.ts): a ruling, not the schema. Its Replicate backup's prompt is optional.
   [`fal ${IDEOGRAM_4_FAL_APP}`]: { min: 1, message: IDEOGRAM_4_NEEDS_PROMPT },
+  // Muse Image on fal (museImage.ts): the schema's own minLength 1.
+  [`fal ${MUSE_IMAGE_FAL_APP}`]: { min: 1, message: MUSE_IMAGE_NEEDS_PROMPT },
 }
 
 /**
@@ -320,10 +323,10 @@ export function requestProblems(prompt: ApiPrompt): RequestProblem[] {
         hasRefs: false,
       }), 'replicate')
     }
-    // Ideogram 4 (fal, text-to-image): the prompt as sent must not be empty.
-    else if (ct === 'GenerateImageNode' && isIdeogram4Model(inputs.model)) {
+    // Ideogram 4 and Muse Image (fal, text-to-image): the prompt as sent must not be empty.
+    else if (ct === 'GenerateImageNode' && (isIdeogram4Model(inputs.model) || isMuseImageModel(inputs.model))) {
       if (['prompt', 'prompt_in', 'style_block', 'style_in'].some(k => isLink(inputs[k]))) continue
-      judge(IDEOGRAM_4_FAL_APP, composeImagePrompt({
+      judge(isIdeogram4Model(inputs.model) ? IDEOGRAM_4_FAL_APP : MUSE_IMAGE_FAL_APP, composeImagePrompt({
         prompt: asText(inputs.prompt),
         promptIn: asText(inputs.prompt_in),
         styleBlock: asText(inputs.style_block),

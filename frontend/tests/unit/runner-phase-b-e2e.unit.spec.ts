@@ -355,6 +355,20 @@ const FLOWS: FamilyFlow[] = [
       manual_placement_selection: 'bottom_center', shot_size: [832, 1216], num_results: 1,
     },
   },
+  // Task F13: Muse Image (Meta), no Python builder; fal only, the body
+  // written from its saved schema (runner-muse-image.unit.spec.ts).
+  {
+    family: 'muse-image',
+    label: 'GenerateImageNode muse-image',
+    prompt: {
+      1: { class_type: 'GenerateImageNode', inputs: { model: 'muse-image', prompt: 'a poster that says HELLO', aspect_ratio: '1:1', seed: 0, model_options: '{}' } },
+      2: outImage('1'),
+    },
+    files: [],
+    provider: 'fal',
+    endpoint: 'meta/muse-image/text-to-image',
+    body: { prompt: 'a poster that says HELLO', aspect_ratio: '1:1', num_images: 1, output_format: 'png' },
+  },
 ]
 
 // ── The routes ───────────────────────────────────────────────────────────

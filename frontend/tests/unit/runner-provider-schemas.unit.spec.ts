@@ -35,6 +35,7 @@ import { GPT_IMAGE_25_FAL_ENDPOINTS, GPT_IMAGE_25_REPLICATE_SLUGS } from '~~/ser
 import { QWEN_IMAGE_3_SLUG } from '~~/server/runner/generators/qwenImage3'
 import { GROK_IMAGINE_2_SLUG } from '~~/server/runner/generators/grokImagine2'
 import { IDEOGRAM_4_FAL_APP, IDEOGRAM_4_REPLICATE_SLUGS } from '~~/server/runner/generators/ideogram4'
+import { MUSE_IMAGE_FAL_APP } from '~~/server/runner/generators/museImage'
 import { QWEN_2511_ANGLES_APP } from '~~/server/runner/generators/qwen2511Angles'
 import { BRIA_PRODUCT_SHOT_APP } from '~~/server/runner/generators/briaProductShot'
 
@@ -239,6 +240,8 @@ function runnerEndpoints(): string[] {
   // Task F10: Rotate camera on Qwen Image Edit 2511 multiple angles, fal, no backup (qwen2511Angles.ts; its grid is runner-qwen-2511-angles.unit.spec.ts).
   out.add(`fal ${QWEN_2511_ANGLES_APP}`)
   out.add(`fal ${BRIA_PRODUCT_SHOT_APP}`)
+  // Task F13: Muse Image on fal, no backup (museImage.ts; its grid is runner-muse-image.unit.spec.ts).
+  out.add(`fal ${MUSE_IMAGE_FAL_APP}`)
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)
