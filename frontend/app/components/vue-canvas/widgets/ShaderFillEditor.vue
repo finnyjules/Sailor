@@ -24,6 +24,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { ChevronRight, RefreshCw, Sparkles, Plus, Trash2, Palette } from 'lucide-vue-next'
 import ShaderEffectGallery from '~/components/vue-canvas/ShaderEffectGallery.vue'
+import MyEffectRecipe from '~/components/vue-canvas/MyEffectRecipe.vue'
 import FillControl from '~/components/vue-canvas/compositor/FillControl.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
@@ -39,6 +40,7 @@ import { effectReadsInput } from '~/lib/shaderfx/catalogStore'
 import type { EffectDef, GradientStop, ParamValue } from '~/lib/shaderfx/types'
 import { cleanStops } from '~/lib/shaderfx/params'
 import { buildShaderParamRows, type ShaderParamRow } from '~/lib/shaderfill/controls'
+import { unprefixedKey } from '~/lib/shaderfill/descriptor'
 import { retryFieldCatalog } from '~/lib/shaderfill/field'
 
 const props = withDefaults(defineProps<{
@@ -89,6 +91,18 @@ const emit = defineEmits<{ 'update:modelValue': [ShaderSpec] }>()
  *  (see fillTile.ts / FillControl.vue's own notes on the same trap). */
 function patch(partial: Partial<ShaderSpec>) {
   emit('update:modelValue', { ...props.modelValue, ...partial })
+}
+
+// ── The Recipe (My effects) ──────────────────────────────────────────────────
+// `ShaderSpec.params` drops the `u_` prefix; a My effect's own values (and what
+// `MyEffectRecipe` emits) keep it (preflight C2). Re-prefix on the way in so the
+// Recipe's `activeVersionIndex` compares against the record's own uniform-keyed
+// values; strip it back off on the way out before patching `modelValue.params`.
+const recipeValues = computed<Record<string, ParamValue>>(() =>
+  Object.fromEntries(Object.entries(props.modelValue.params).map(([k, v]) => [k.startsWith('u_') ? k : `u_${k}`, v])),
+)
+function onPickVersion(v: { effectId: string; values: Record<string, ParamValue> }) {
+  patch({ effectId: v.effectId, params: Object.fromEntries(Object.entries(v.values).map(([k, val]) => [unprefixedKey(k), val])) })
 }
 
 // ── Catalog ──────────────────────────────────────────────────────────────────
@@ -373,6 +387,7 @@ watch(eligible, (ok) => {
         </span>
         <ChevronRight class="size-3.5 shrink-0 text-white/30" />
       </button>
+      <MyEffectRecipe class="mt-2" :effect-id="modelValue.effectId" :values="recipeValues" @pick-version="onPickVersion" />
     </div>
 
     <!-- Effect params (derived per catalog effect). A hairline rules the colour

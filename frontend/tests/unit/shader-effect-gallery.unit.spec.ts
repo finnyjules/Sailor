@@ -92,4 +92,10 @@ describe('ShaderEffectGallery (spec §7.3)', () => {
     use.click(); await w.vm.$nextTick()
     expect(w.emitted('confirm')![0]).toEqual(['water_ripple'])
   })
+  it('a version-chip id (`mine_x~v2`) still shows Current on its base card', () => {
+    w = mount(ShaderEffectGallery, { props: { open: true, effects, selectedId: 'mine_aaaaaaaaaaaa~v2', thumbs: {} }, attachTo: document.body })
+    const card = body().querySelector('[data-effect-id="mine_aaaaaaaaaaaa"]')!
+    expect(card.closest('button')!.querySelector('span')!.textContent).toContain('Current')
+    expect(body().querySelector('[data-effect-id="water_ripple"]')!.closest('button')!.textContent).not.toContain('Current')
+  })
 })

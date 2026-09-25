@@ -9,6 +9,7 @@ import StudioLayerStack from '~/components/vue-canvas/StudioLayerStack.vue'
 import StudioActionsFooter from '~/components/vue-canvas/studio/StudioActionsFooter.vue'
 import StudioActionRows from '~/components/vue-canvas/studio/StudioActionRows.vue'
 import StudioInspectorHead from '~/components/vue-canvas/studio/StudioInspectorHead.vue'
+import MyEffectRecipe from '~/components/vue-canvas/MyEffectRecipe.vue'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 // Explicit paths: Nuxt auto-import silently no-ops these row adapters here (the known
@@ -1060,6 +1061,10 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
         <StudioButton :disabled="layerReadOnly" @click="openPicker">Change effect</StudioButton>
         <StudioActionRows bare :actions="[REMIX_ACTION]" />
       </StudioInspectorHead>
+      <MyEffectRecipe
+        :effect-id="activeEffectCfg.id" :values="activeEffectCfg.params"
+        @pick-version="(v) => { config.effects[activeEffect] = { ...activeEffectCfg, id: v.effectId, params: { ...v.values }, customChars: '' }; renderFrame(0) }"
+      />
       <StudioActionRows :actions="inspectorActions" />
       <!-- Source -->
       <StudioSection title="Source">

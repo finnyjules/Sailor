@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  activeVersionIndex, effectIdForVersion, expandMyEffect, isPickable, myEffectIdOf, recordFromTake,
+  activeVersionIndex, baseEffectId, effectIdForVersion, expandMyEffect, isPickable, myEffectIdOf, recordFromTake,
   valuesForVersion, withCodeVersion, withValuesVersion,
 } from '~/lib/myEffects/defs'
 import { assembleSource } from '~~/shared/shadergen/contract'
@@ -67,5 +67,11 @@ describe('My effects: records and versions (spec §7.4)', () => {
     expect(myEffectIdOf('mine_aaaaaaaaaaaa')).toBe('mine_aaaaaaaaaaaa')
     expect(myEffectIdOf('mine_aaaaaaaaaaaa~v3')).toBe('mine_aaaaaaaaaaaa')
     expect(myEffectIdOf('water_ripple')).toBeNull()
+  })
+
+  it('strips a version suffix for a picker to match the pickable base entry', () => {
+    expect(baseEffectId('mine_aaaaaaaaaaaa~v3')).toBe('mine_aaaaaaaaaaaa')
+    expect(baseEffectId('mine_aaaaaaaaaaaa')).toBe('mine_aaaaaaaaaaaa')
+    expect(baseEffectId('water_ripple')).toBe('water_ripple')
   })
 })

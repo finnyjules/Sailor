@@ -9,6 +9,14 @@ export function myEffectIdOf(effectId: string): string | null {
   return MY_EFFECT_ID_RE.test(id) ? id : null
 }
 
+/** `effectId` with any `~vN` version suffix stripped, so a picker can match a version chip's
+ *  id (`mine_xxx~v2`) against the catalog's PICKABLE entry for that My effect (`mine_xxx`) —
+ *  older versions aren't pickable on their own (see `isPickable`), so nothing else in the
+ *  gallery would ever equal the versioned id. A non-My-effect id passes through unchanged. */
+export function baseEffectId(effectId: string): string {
+  return myEffectIdOf(effectId) ?? effectId
+}
+
 export function codeIndexFor(rec: MyEffectRecord, i: number): number {
   for (let k = Math.min(i, rec.versions.length - 1); k >= 0; k--) if (rec.versions[k]!.body !== undefined) return k
   return 0
