@@ -46,24 +46,27 @@ describe('useNextStepsStrip fixes channel', () => {
   const chip = { id: 0, label: 'Fix hands', hint: '~$0.12', apply: () => {} }
   it('announceFixes publishes; clearFixes(nodeId) clears only that node', () => {
     const s = useNextStepsStrip()
+    s.clearFixes()
     s.announceFixes('n1', [chip])
-    expect(s.fixes.value?.nodeId).toBe('n1')
+    expect(s.fixesFor('n1')).toEqual([chip])
     s.clearFixes('other') // wrong node — no-op
-    expect(s.fixes.value?.nodeId).toBe('n1')
+    expect(s.fixesFor('n1')).toEqual([chip])
     s.clearFixes('n1')
-    expect(s.fixes.value).toBeNull()
+    expect(s.fixesFor('n1')).toEqual([])
   })
   it('a fresh take on the same node clears stale fixes', () => {
     const s = useNextStepsStrip()
+    s.clearFixes()
     s.announceFixes('n1', [chip])
     s.announceFreshTake('n1')
-    expect(s.fixes.value).toBeNull()
+    expect(s.fixesFor('n1')).toEqual([])
   })
   it('a fresh take on ANOTHER node leaves fixes alone', () => {
     const s = useNextStepsStrip()
+    s.clearFixes()
     s.announceFixes('n1', [chip])
     s.announceFreshTake('n2')
-    expect(s.fixes.value?.nodeId).toBe('n1')
+    expect(s.fixesFor('n1')).toEqual([chip])
   })
 })
 

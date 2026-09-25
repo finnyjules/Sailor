@@ -769,7 +769,7 @@ watch(() => props.data.takes?.length ?? 0, (now, before) => {
     }
   }
 })
-const fixChipsForMe = computed(() => nextSteps.fixes.value?.nodeId === props.id ? nextSteps.fixes.value.chips : [])
+const fixChipsForMe = computed(() => nextSteps.fixesFor(props.id))
 function applyFix(chip: FixChip) {
   editMenuOpen.value = false
   chip.apply()

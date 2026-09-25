@@ -1,9 +1,7 @@
 // frontend/app/composables/useNextStepsStrip.ts
-// Singleton coordination for the post-render "next steps" chip strip: exactly
-// one artifact (the most recently rendered) shows it, and any new render or
-// dismissal replaces/clears it. Module-scoped refs = shared across components.
-// Two channels: `active` (generic suggestion chips, 12s TTL in the component)
-// and `fixes` (reviewer-found paid fixes — sticky until clicked/dismissed/stale).
+// Post-render coordination. `active` = the generic suggestion channel (one node
+// at a time). Fixes are PER NODE now (spec §2.3's "N fixes" badge): reviewer-found
+// fixes stay on their node until applied, dismissed, or a fresh take replaces them.
 import { ref } from 'vue'
 
 export interface FixChip {
@@ -14,22 +12,23 @@ export interface FixChip {
 }
 
 const active = ref<{ nodeId: string; shownAt: number } | null>(null)
-const fixes = ref<{ nodeId: string; chips: FixChip[] } | null>(null)
+const fixesByNode = ref<Record<string, FixChip[]>>({})
 
 export function useNextStepsStrip() {
+  function clearFixes(nodeId?: string) {
+    if (!nodeId) { fixesByNode.value = {}; return }
+    if (!(nodeId in fixesByNode.value)) return
+    const { [nodeId]: _gone, ...rest } = fixesByNode.value
+    fixesByNode.value = rest
+  }
   function announceFreshTake(nodeId: string) {
     active.value = { nodeId, shownAt: Date.now() }
-    // A new render invalidates fixes found on the previous one.
-    if (fixes.value?.nodeId === nodeId) fixes.value = null
+    clearFixes(nodeId) // a new render invalidates fixes found on the previous one
   }
   function announceFixes(nodeId: string, chips: FixChip[]) {
-    fixes.value = { nodeId, chips }
+    fixesByNode.value = { ...fixesByNode.value, [nodeId]: chips }
   }
-  function clearFixes(nodeId?: string) {
-    if (!nodeId || fixes.value?.nodeId === nodeId) fixes.value = null
-  }
-  function dismiss() {
-    active.value = null
-  }
-  return { active, fixes, announceFreshTake, announceFixes, clearFixes, dismiss }
+  function fixesFor(nodeId: string): FixChip[] { return fixesByNode.value[nodeId] ?? [] }
+  function dismiss() { active.value = null }
+  return { active, fixesByNode, fixesFor, announceFreshTake, announceFixes, clearFixes, dismiss }
 }
