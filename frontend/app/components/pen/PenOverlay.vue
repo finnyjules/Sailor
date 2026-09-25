@@ -466,7 +466,7 @@ function drawingXY(ev: PointerEvent) {
 }
 
 function onEntityPointerDown(id: EntityId, ev: PointerEvent) {
-  if (!props.active) return
+  if (!props.active || ev.button !== 0) return
   // guided Mirror: a line click supplies the axis
   if (tool.value === 'select' && pendingOp.value?.kind === 'mirror' && (doc.value.entities.find(e => e.id === id) as any)?.kind === 'line') {
     applyMirror(pendingOp.value.units, id)
@@ -477,7 +477,7 @@ function onEntityPointerDown(id: EntityId, ev: PointerEvent) {
   if (tool.value === 'select') { pick(id, ev.shiftKey); ev.stopPropagation() }
 }
 function onPointerDownPoint(id: EntityId, ev: PointerEvent) {
-  if (!props.active || tool.value !== 'select') return
+  if (!props.active || ev.button !== 0 || tool.value !== 'select') return
   // guided Repeat: this point is the ring center
   if (pendingOp.value?.kind === 'repeat') {
     applyRepeat(pendingOp.value.units, id, pendingOp.value.count)
@@ -497,7 +497,7 @@ function onPointerUpPoint(id: EntityId, ev: PointerEvent) {
   dragId = null; dragHandleIds = []; dragLast = null
 }
 function onSegmentPointerDown(pathId: EntityId, segIndex: number, ev: PointerEvent) {
-  if (!props.active || tool.value !== 'select') return
+  if (!props.active || ev.button !== 0 || tool.value !== 'select') return
   // guided ops treat a path-body click as picking the whole path (the unit)
   if (pendingOp.value) { pick(pathId, ev.shiftKey); ev.stopPropagation(); return }
   // a plain click selects the WHOLE path; Alt/Option-click drills in to the
@@ -507,7 +507,7 @@ function onSegmentPointerDown(pathId: EntityId, segIndex: number, ev: PointerEve
   ev.stopPropagation()
 }
 function onPointerDownSvg(ev: PointerEvent) {
-  if (!props.active) return
+  if (!props.active || ev.button !== 0) return
   if (tool.value === 'select') {
     // guided Repeat with an empty-canvas click: drop a fresh FIXED center
     // where they clicked and repeat around it. Mirror needs a real line, so
@@ -709,7 +709,8 @@ defineExpose({
 <template>
   <svg ref="svgEl" :width="width" :height="height"
        :style="{ position: 'absolute', left: 0, top: 0, display: 'block', touchAction: 'none', cursor, pointerEvents: active ? undefined : 'none' }"
-       @pointerdown="onPointerDownSvg" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointerleave="onPointerLeave">
+       @pointerdown="onPointerDownSvg" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointerleave="onPointerLeave"
+       @contextmenu.prevent>
     <!-- drawing space: the view matrix does scale, rotation and mirroring -->
     <g :transform="svgTransform">
       <path :d="pathDrawing" fill="none" stroke="#3730a3" stroke-width="1.5" vector-effect="non-scaling-stroke" />

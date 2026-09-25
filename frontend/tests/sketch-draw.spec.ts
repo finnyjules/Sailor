@@ -1864,3 +1864,21 @@ test('pen: inside a CSS scale(1.5) wrapper a click places the point under the cu
   expect(Math.abs(dot.x + dot.width / 2 - clickX)).toBeLessThan(1)
   expect(Math.abs(dot.y + dot.height / 2 - clickY)).toBeLessThan(1)
 })
+
+// Task 1 (shared pen — Plan C): a right-click must never place a point (and
+// must not pop the browser's context menu over the pen).
+test('pen: a right-click on the path tool places nothing', async ({ page }) => {
+  await page.goto('/dev/sketch-draw')
+  await page.waitForSelector('[data-ready]')
+  await page.waitForFunction(() => !!(window as any).__sketchDraw)
+  await page.evaluate(() => {
+    const D = (window as any).__sketchDraw
+    D.reset(); D.setTool('path')
+  })
+  const svg = page.locator('svg[width="680"][height="460"]')
+  const box = (await svg.boundingBox())!
+  const before = await page.evaluate(() => (window as any).__sketchDraw.entityCount())
+  await page.mouse.click(box.x + 300, box.y + 200, { button: 'right' })
+  const after = await page.evaluate(() => (window as any).__sketchDraw.entityCount())
+  expect(after).toBe(before)
+})
