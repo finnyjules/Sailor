@@ -448,8 +448,12 @@ const initialAspects = computed<string>(() => {
 const projectBrand = inject<{ activeKit: ComputedRef<BrandKit | undefined> } | null>('sailor:brand', null)
 const activeKit = computed(() => projectBrand?.activeKit.value)
 
-// Close on Escape.
-function onKey(e: KeyboardEvent) { if (e.key === 'Escape') emit('close') }
+// Close on Escape — unless something inside already used it (the prompt's Esc
+// clears its mode chip or leaves the field and calls preventDefault).
+function onKey(e: KeyboardEvent) {
+  if (e.defaultPrevented) return
+  if (e.key === 'Escape') emit('close')
+}
 onMounted(() => window.addEventListener('keydown', onKey))
 onUnmounted(() => window.removeEventListener('keydown', onKey))
 

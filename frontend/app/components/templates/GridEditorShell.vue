@@ -19,6 +19,7 @@ import { useLayoutAgent } from '~/composables/useLayoutAgent'
 import AgentSweep from '~/components/agent/AgentSweep.vue'
 import StudioPromptHost from '~/components/prompt/StudioPromptHost.vue'
 import { useStudioPrompt, STUDIO_PROMPT_KEY } from '~/composables/useStudioPrompt'
+import { frameSelectionLabel } from '~/lib/prompt/studioDispatch'
 
 const props = defineProps<{
   initial: AnyGridTemplate
@@ -68,18 +69,14 @@ const rightPanelOpen = computed(() => true)
 
 // The one prompt (spec §2.1a, §2.4): the template editor's agent, routed as a
 // template so copy/layout requests go straight to it (studioDispatch only
-// bounces copy/layout to Frame for place:'studio'). The chip quotes the
-// selected element's own text (headline copy, etc.), trimmed to 24 chars —
-// same rule as Frame's chip (frameSelectionLabel) — else its Layers-panel
-// name, else null. The grid editor has no multi-select today, so "N elements"
-// has no live path yet; kept out until multi-select exists (YAGNI).
-const TEMPLATE_LABEL_MAX = 24
+// bounces copy/layout to Frame for place:'studio'). The chip is Frame's chip
+// (frameSelectionLabel): a text element's own words, quoted and cut
+// (“Open late” · text), else its Layers-panel name. The grid editor has no
+// multi-select today, so "N layers" has no live path yet.
 const templateChip = computed<string | null>(() => {
   const el = selectedElement.value
   if (!el) return null
-  const trimmed = el.type === 'text' ? el.content.replace(/\s+/g, ' ').trim() : ''
-  if (trimmed) return trimmed.length > TEMPLATE_LABEL_MAX ? `${trimmed.slice(0, TEMPLATE_LABEL_MAX - 1)}…` : trimmed
-  return el.name ?? null
+  return frameSelectionLabel([{ kind: el.type, text: el.type === 'text' ? el.content : '', name: el.name }])
 })
 const templatePrompt = useStudioPrompt({
   worker: () => layoutAgent,
@@ -202,6 +199,10 @@ function onKeydown(e: KeyboardEvent) {
     }
     return
   }
+
+  // A request is out (or a stopped one's reply is due): its reply puts the
+  // pre-request template back, so no edits meanwhile (see editLocked).
+  if (templatePrompt.editLocked.value) return
 
   if (mod && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); e.shiftKey ? ctx.redo() : ctx.undo(); return }
   if (mod && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); ctx.redo(); return }
@@ -362,7 +363,7 @@ function onPickImage(url: string) {
         @change="(e: any) => { template.name = e.target.value; dirty = true }"
       >
 
-      <div class="flex items-center gap-0.5 shrink-0">
+      <div class="flex items-center gap-0.5 shrink-0" :inert="templatePrompt.editLocked.value">
         <button
           class="size-8 rounded-md flex items-center justify-center transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed text-white/65 hover:text-white hover:bg-white/[0.08]"
           title="Undo (⌘Z)"
@@ -437,11 +438,25 @@ function onPickImage(url: string) {
 
     <!-- Body: canvas fills; panels float over it; tools in a bottom toolbar. -->
     <div class="flex-1 relative min-h-0 overflow-hidden bg-[#121212]">
-      <div class="absolute transition-all duration-150" :style="canvasArea">
+      <!-- While the prompt works (or a stopped reply is due) the template is
+           inert: the reply restores the pre-request template, so edits made
+           meanwhile would be lost. -->
+      <div
+        class="absolute transition-all duration-150" :style="canvasArea"
+        data-testid="template-edit-surface"
+        :inert="templatePrompt.editLocked.value" :aria-busy="templatePrompt.editLocked.value"
+      >
         <TemplatesGridEditorCanvas />
         <!-- Glimm "citrus" sweep over the artboard while the agent is working. -->
         <AgentSweep :active="templatePrompt.working.value" />
       </div>
+      <p
+        v-if="started && templatePrompt.editLocked.value"
+        data-testid="template-locked-note"
+        class="pointer-events-none absolute top-4 z-40 -translate-x-1/2 rounded-full border border-white/10 bg-[#1a1a1a]/95 px-3 py-1.5 text-[12px] text-white/70 shadow-lg"
+        :style="bottomBarStyle"
+        role="status"
+      >{{ templatePrompt.lockedNote.value }}</p>
       <TemplatesFormatPicker v-if="!started" @confirm="onFormatsChosen" />
       <TemplatesExportPanel v-if="exportOpen" @close="exportOpen = false" />
       <TemplatesImagePicker
@@ -454,6 +469,7 @@ function onPickImage(url: string) {
       <!-- Left floating panel: formats + elements (only once designing) -->
       <div
         v-if="started"
+        :inert="templatePrompt.editLocked.value" :aria-busy="templatePrompt.editLocked.value"
         class="absolute top-4 left-4 bottom-4 z-20 w-60 flex flex-col rounded-xl border border-white/10 bg-[#0e0e10]/80 backdrop-blur-md shadow-2xl overflow-hidden"
       >
         <div class="flex-1 min-h-0 overflow-y-auto">
@@ -469,6 +485,8 @@ function onPickImage(url: string) {
            cluster, above the toolbar; it no longer takes this panel over. -->
       <div
         v-if="started && rightPanelOpen"
+        data-testid="template-inspector"
+        :inert="templatePrompt.editLocked.value" :aria-busy="templatePrompt.editLocked.value"
         class="absolute top-4 right-4 bottom-4 z-30 flex w-80 flex-col overflow-hidden rounded-xl border border-white/10 bg-[#0e0e10]/80 shadow-2xl backdrop-blur-md"
       >
         <template v-if="selectedElement || selectedSection">
@@ -603,7 +621,7 @@ function onPickImage(url: string) {
         <div v-if="isV3(template)" class="w-full">
           <StudioPromptHost :prompt="templatePrompt" />
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2" :inert="templatePrompt.editLocked.value" :aria-busy="templatePrompt.editLocked.value">
         <div class="flex items-center gap-1 bg-[#1a1a1a]/95 rounded-[12px] p-1.5 border border-[#2a2a2a] shadow-lg">
 
         <!-- Mode toggle: Layout (generatable) vs Freeform (manual) -->
