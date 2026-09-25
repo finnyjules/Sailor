@@ -67,6 +67,10 @@ function setWidget(name: string, value: any) {
 // effect, previews takes on it, and applies the kept one. A previewed take
 // renders at its defaults and is never written to the widgets.
 const previewEffectId = ref<string | null>(null)
+// The node's take strip is open (sailor:shaderEffectLock): its own dials, centre handle and
+// effect picker are read-only until it closes, so closing can put back exactly what was there.
+const stripOpen = ref(false)
+const readOnly = computed(() => stripOpen.value || previewEffectId.value != null)
 const effectId = computed<string>(() => previewEffectId.value ?? String(widgetVal('effect') ?? ''))
 const effectDef = computed<EffectDef | null>(
   () => catalog.value?.effects.find(e => e.id === resolveEffectId(effectId.value)) ?? null,
@@ -88,13 +92,14 @@ function aspectRatio(a: string): number {
   return w && h ? w / h : 1
 }
 function setSize(name: 'resolution' | 'aspect', value: number | string) {
+  if (readOnly.value) return
   setWidget(name, value)
   window.dispatchEvent(new CustomEvent('sailor:shaderfx-changed', { detail: { id: props.id } }))
   if (!animating.value) renderOnce()
 }
 
 function setParam(uniform: string, value: number) {
-  if (!effectDef.value) return
+  if (!effectDef.value || readOnly.value) return
   const next = { ...uniforms.value, [uniform]: value }
   setWidget('params', serializeParams(effectDef.value, next))
   window.dispatchEvent(new CustomEvent('sailor:shaderfx-changed', { detail: { id: props.id } }))
@@ -237,7 +242,8 @@ function renderThumb(def: EffectDef): string {
 }
 
 function ensureThumb(def: EffectDef | null | undefined) {
-  if (!def || thumbCache[def.id]) return
+  // Drafts (unkept takes) are never thumbnailed: the ids are one-off and the code is untrusted.
+  if (!def || def.draft || thumbCache[def.id]) return
   const t = renderThumb(def)
   if (t) { thumbCache[def.id] = t; thumbs.value = { ...thumbCache } }
 }
@@ -245,6 +251,7 @@ function ensureThumb(def: EffectDef | null | undefined) {
 const currentThumb = computed(() => (effectDef.value ? thumbs.value[effectDef.value.id] ?? '' : ''))
 
 async function openPicker() {
+  if (readOnly.value) return
   pickerSearch.value = ''
   pickerFilter.value = 'all'
   pickerOpen.value = true
@@ -253,6 +260,7 @@ async function openPicker() {
 }
 
 function pickEffect(id: string) {
+  if (readOnly.value) return
   setWidget('effect', id)
   setWidget('params', '{}') // params are per-effect; reset on switch
   pickerOpen.value = false
@@ -272,12 +280,13 @@ const centerStyle = computed(() => {
 
 let draggingCenter = false
 function onCenterDown(ev: PointerEvent) {
+  if (readOnly.value) return
   draggingCenter = true
   ;(ev.target as HTMLElement).setPointerCapture(ev.pointerId)
   ev.stopPropagation() // don't drag the node
 }
 function onCenterMove(ev: PointerEvent) {
-  if (!draggingCenter || !hasCenter.value || !previewCanvas.value) return
+  if (!draggingCenter || !hasCenter.value || !previewCanvas.value || readOnly.value) return
   const r = previewCanvas.value.getBoundingClientRect()
   const x = Math.min(Math.max((ev.clientX - r.left) / r.width, 0), 1)
   const y = 1 - Math.min(Math.max((ev.clientY - r.top) / r.height, 0), 1)
@@ -336,10 +345,23 @@ function onEffectApply(e: Event) {
   const d = (e as CustomEvent).detail
   if (String(d?.nodeId) !== props.id || !d.effectId) return
   previewEffectId.value = null
-  setWidget('effect', String(d.effectId))
-  setWidget('params', JSON.stringify(d.values ?? {}))
+  stripOpen.value = false
+  const id = String(d.effectId)
+  const values = d.values ?? {}
+  // Only non-default values are stored, as everywhere else on the node (the kept def is
+  // registered before Keep applies it; the raw values are the fallback).
+  const def = catalog.value?.effects.find(x => x.id === resolveEffectId(id)) ?? null
+  setWidget('effect', id)
+  setWidget('params', def ? serializeParams(def, values) : JSON.stringify(values))
   window.dispatchEvent(new CustomEvent('sailor:shaderfx-changed', { detail: { id: props.id } }))
   if (!animating.value) renderOnce()
+}
+
+function onEffectLock(e: Event) {
+  const d = (e as CustomEvent).detail
+  if (String(d?.nodeId) !== props.id) return
+  stripOpen.value = !!d.locked
+  if (stripOpen.value) { draggingCenter = false; pickerOpen.value = false }
 }
 
 // WebGL context loss (AI in Sailor spec §7.5): the renderer drops every GL
@@ -351,6 +373,7 @@ onMounted(async () => {
   window.addEventListener('sailor:shaderEffectTarget', onEffectTarget)
   window.addEventListener('sailor:shaderEffectPreview', onEffectPreview)
   window.addEventListener('sailor:shaderEffectApply', onEffectApply)
+  window.addEventListener('sailor:shaderEffectLock', onEffectLock)
   await fetchShaderFxCatalog().catch(() => null)
   lastChainIds = chain.value.nodeIds
   window.addEventListener('sailor:shaderfx-changed', onUpstreamChange)
@@ -363,6 +386,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('sailor:shaderEffectTarget', onEffectTarget)
   window.removeEventListener('sailor:shaderEffectPreview', onEffectPreview)
   window.removeEventListener('sailor:shaderEffectApply', onEffectApply)
+  window.removeEventListener('sailor:shaderEffectLock', onEffectLock)
   offContextChange()
 })
 </script>
@@ -406,7 +430,7 @@ onBeforeUnmount(() => {
       <canvas ref="previewCanvas" class="w-full block bg-checker" />
       <!-- Draggable center handle (only for effects with centerParam) -->
       <div
-        v-if="hasCenter"
+        v-if="hasCenter && !readOnly"
         class="nopan nodrag absolute size-3 -ml-1.5 -mt-1.5 rounded-full border-2 border-white bg-black/30 shadow-[0_0_0_1px_rgba(0,0,0,0.45)] cursor-move"
         :style="centerStyle"
         @pointerdown="onCenterDown"
@@ -417,12 +441,17 @@ onBeforeUnmount(() => {
     <div v-if="glError" class="border-t border-[#2a2a2a] text-[10px] text-red-300/90 px-3 py-1 truncate" :title="glError">{{ glError }}</div>
 
     <!-- Controls -->
-    <div class="border-t border-[#2a2a2a] px-3 py-2.5 flex flex-col gap-2.5">
+    <div
+      class="border-t border-[#2a2a2a] px-3 py-2.5 flex flex-col gap-2.5 transition-opacity"
+      :class="{ 'opacity-40 pointer-events-none': readOnly }"
+      :inert="readOnly || undefined" :aria-disabled="readOnly || undefined" data-testid="shader-effect-controls"
+    >
       <!-- Effect picker — mirrors the model-picker row -->
       <div>
         <label class="text-[9px] text-muted-foreground tracking-normal mb-0.5 block">Effect</label>
         <button
           class="nopan nodrag w-full flex items-center gap-2 px-2 py-1.5 rounded border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] hover:border-white/20 transition-colors cursor-pointer text-left group"
+          :disabled="readOnly" data-testid="shader-effect-picker"
           @click="openPicker"
         >
           <span class="size-5 rounded-md shrink-0 flex items-center justify-center bg-white/[0.06] overflow-hidden relative">
@@ -442,6 +471,7 @@ onBeforeUnmount(() => {
         <div>
           <label class="text-[9px] text-muted-foreground tracking-normal mb-0.5 block">Resolution</label>
           <select
+            :disabled="readOnly"
             class="nopan nodrag w-full px-2 py-1 rounded border border-white/10 bg-white/[0.04] hover:border-white/20 text-[11px] text-white/85 outline-none cursor-pointer"
             :value="resolutionVal" @change="setSize('resolution', Number(($event.target as HTMLSelectElement).value))"
           >
@@ -451,6 +481,7 @@ onBeforeUnmount(() => {
         <div>
           <label class="text-[9px] text-muted-foreground tracking-normal mb-0.5 block">Aspect</label>
           <select
+            :disabled="readOnly"
             class="nopan nodrag w-full px-2 py-1 rounded border border-white/10 bg-white/[0.04] hover:border-white/20 text-[11px] text-white/85 outline-none cursor-pointer"
             :value="aspectVal" @change="setSize('aspect', ($event.target as HTMLSelectElement).value)"
           >
@@ -463,6 +494,7 @@ onBeforeUnmount(() => {
       <div v-for="p in effectDef?.params ?? []" :key="p.uniform">
         <label class="text-[9px] text-muted-foreground tracking-normal mb-0.5 block">{{ p.label }}</label>
         <select
+            :disabled="readOnly"
           v-if="p.type === 'enum'"
           class="nopan nodrag w-full px-2 py-1 rounded border border-white/10 bg-white/[0.04] hover:border-white/20 text-[11px] text-white/85 outline-none cursor-pointer"
           :value="uniforms[p.uniform]"

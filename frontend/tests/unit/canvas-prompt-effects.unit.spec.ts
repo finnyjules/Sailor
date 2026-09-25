@@ -155,6 +155,46 @@ describe('useCanvasPrompt: new effects on a shader node', () => {
     expect(effects.clearMessages).toHaveBeenCalled()
   })
 
+  it('the node is told its strip is open (controls read-only) and when it closes', async () => {
+    const locks: any[] = []
+    listen('sailor:shaderEffectLock', e => locks.push(e.detail))
+    const { api, effects } = setup()
+    setMode({ label: 'Remix', kind: 'new-effect', nodeId: 's1' })
+    await api.submit('rain')
+    expect(locks).toEqual([{ nodeId: 's1', locked: true }])
+    api.closeTakes()
+    expect(effects.close).toHaveBeenCalled()
+    expect(locks).toEqual([{ nodeId: 's1', locked: true }, { nodeId: 's1', locked: false }])
+  })
+
+  it('an open strip is let go when the prompt unmounts', async () => {
+    const locks: any[] = []
+    listen('sailor:shaderEffectLock', e => locks.push(e.detail))
+    const { api } = setup()
+    setMode({ label: 'Remix', kind: 'new-effect', nodeId: 's1' })
+    await api.submit('rain')
+    mounted.pop().unmount()
+    expect(locks.at(-1)).toEqual({ nodeId: 's1', locked: false })
+  })
+
+  it('while a Keep is saving, a new request or chip waits: the strip is not closed, so the kept effect is still applied', async () => {
+    const route = vi.fn(async () => ({ kind: 'answer', followUps: [], routed: true }))
+    const { api, effects } = setup({ route })
+    setMode({ label: 'Remix', kind: 'new-effect', nodeId: 's1' })
+    await api.submit('rain')
+    effects.saving.value = true
+    const cleared = effects.clearMessages.mock.calls.length
+    await api.submit('what does this do?')
+    setMode({ label: 'New effect', kind: 'new-effect', nodeId: 's1' })
+    expect(route).not.toHaveBeenCalled()
+    expect(effects.close).not.toHaveBeenCalled()
+    expect(effects.clearMessages).toHaveBeenCalledTimes(cleared) // nothing was cleared either
+    expect(api.mode.value).toBeNull()
+    effects.saving.value = false
+    await api.submit('what does this do?')
+    expect(route).toHaveBeenCalled()
+  })
+
   it('a new request closes an open effect set', async () => {
     const route = vi.fn(async () => ({ kind: 'answer', followUps: [], routed: true }))
     const { api, effects } = setup({ route })

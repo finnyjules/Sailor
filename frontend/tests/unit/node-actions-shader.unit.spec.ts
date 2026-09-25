@@ -2,6 +2,7 @@
 // frontend/tests/unit/node-actions-shader.unit.spec.ts
 import { describe, it, expect } from 'vitest'
 import { actionHint, actionPrice, actionsFor, SHADER_GEN_ACTION_HINT } from '~/lib/canvas/nodeActions'
+import { shaderGenEstimateText } from '~/lib/shadergen/estimate'
 
 describe('shader effect node actions (spec §7.3)', () => {
   const ctx = { nodeId: 's1', type: 'shader-effect', hasImages: false, hasUpstream: true } as any
@@ -12,6 +13,10 @@ describe('shader effect node actions (spec §7.3)', () => {
     expect(develop.map(a => a.id)).toEqual(['remix-effect', 'new-effect'])
     expect(SHADER_GEN_ACTION_HINT).toBe('~$0.24–0.42')
     for (const a of develop) expect(actionHint(a, actionPrice(a, null, false))).toBe('3 takes · ~$0.24–0.42')
+  })
+  it('hosted, the menu shows the same credits text as the prompt note', () => {
+    for (const a of actionsFor(ctx).develop) expect(actionPrice(a, null, true)).toBe(shaderGenEstimateText(true))
+    expect(shaderGenEstimateText(true)).toMatch(/^~\d+–\d+ cr$/)
   })
   it('each sets a mode chip on the node, with no request sent', () => {
     const seen: any[] = []

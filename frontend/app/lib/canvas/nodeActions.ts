@@ -20,6 +20,8 @@ export interface NodeAction {
   id: string; label: string; group: ActionGroup; ai: boolean; lands: ActionLands
   /** Fixed price estimate for a paid action (wins over the badge). */
   priceHint?: string | null
+  /** A price that follows the hosted switch (dollars locally, credits hosted); wins over both. */
+  priceFor?: (hosted: boolean) => string
   /** The paid node this action adds — its price_badge prices the action. */
   priceNodeType?: string
   enabled?: (c: NodeActionCtx) => boolean; run: (c: NodeActionCtx) => void
@@ -32,6 +34,7 @@ export function landsHint(l: ActionLands): string | null {
 /** An action's price, or null when it doesn't spend money (or has no known price).
  *  `objectInfo` is /object_info; `hosted` shows credits instead of dollars. */
 export function actionPrice(a: NodeAction, objectInfo: Record<string, any> | null | undefined, hosted: boolean): string | null {
+  if (a.priceFor) return a.priceFor(hosted)
   if (a.priceHint) return a.priceHint
   if (!a.priceNodeType) return null
   const cost = parseBadgeUsd(objectInfo?.[a.priceNodeType]?.price_badge?.expr)
@@ -87,14 +90,15 @@ const TUNE: NodeAction = {
   run: c => fire('sailor:promptMode', { label: 'Tune', kind: 'tweak', nodeId: c.nodeId }),
 }
 
-/** Remix / New effect cost (spec §7.2 estimate), shown like every other fixed priceHint. */
+/** Remix / New effect cost (spec §7.2 estimate) in dollars. The menu shows
+ *  `shaderGenEstimateText(hosted)` — the same text as the prompt's note and working row. */
 export const SHADER_GEN_ACTION_HINT = shaderGenEstimateText(false)
 // Both need words: each puts a chip in the prompt (the chip decides the kind, so
 // no router call) and the three effect takes land above it (spec §7.3).
 const effectMode = (c: NodeActionCtx, label: string) => fire('sailor:promptMode', { label, kind: 'new-effect', nodeId: c.nodeId })
 const SHADER: NodeAction[] = [
-  { id: 'remix-effect', label: 'Remix…', group: 'develop', ai: true, lands: 'takes', priceHint: SHADER_GEN_ACTION_HINT, run: c => effectMode(c, 'Remix') },
-  { id: 'new-effect', label: 'New effect…', group: 'develop', ai: true, lands: 'takes', priceHint: SHADER_GEN_ACTION_HINT, run: c => effectMode(c, 'New effect') },
+  { id: 'remix-effect', label: 'Remix…', group: 'develop', ai: true, lands: 'takes', priceFor: shaderGenEstimateText, run: c => effectMode(c, 'Remix') },
+  { id: 'new-effect', label: 'New effect…', group: 'develop', ai: true, lands: 'takes', priceFor: shaderGenEstimateText, run: c => effectMode(c, 'New effect') },
 ]
 
 /** Studio nodes the planner can change in place (tuneNode) — where Tune… has a worker. */

@@ -465,7 +465,8 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   const busy = computed(() => routing.value || agent.busy.value)
   const takesWorking = computed(() => !!takes.value && isTakesWorking(takes.value))
   // One job at a time (Ruling 9): nothing new starts while takes are arriving.
-  const jobBusy = () => busy.value || takesWorking.value || fx.working.value
+  // A Keep still saving counts too: closing the strip mid-save would skip applying the kept effect.
+  const jobBusy = () => busy.value || takesWorking.value || fx.working.value || !!fx.saving?.value
   // A menu item (Variations, Critique…) arriving mid-job says why nothing happens.
   const menuBusy = () => jobBusy() || agent.reviewingManual.value
 
@@ -598,6 +599,17 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   const shownTakes = computed<TakesSession | null>(() => fx.session.value ?? takes.value)
   // An effect Keep is saving: the strip's Keep buttons are off until it settles.
   const takesSaving = computed(() => !!fx.session.value && !!fx.saving?.value)
+  // While a node's effect-take strip is open, the node's own controls are read-only, so
+  // closing the strip can put back exactly what was there: tell it when the strip opens and closes.
+  let lockedNode: string | null = null
+  function lockNode(id: string | null) {
+    if (id === lockedNode) return
+    const tell = (nodeId: string, locked: boolean) => window.dispatchEvent(new CustomEvent('sailor:shaderEffectLock', { detail: { nodeId, locked } }))
+    if (lockedNode) tell(lockedNode, false)
+    lockedNode = id
+    if (id) tell(id, true)
+  }
+  watch(() => fx.session.value?.nodeId ?? null, lockNode, { flush: 'sync' })
 
   // The card above the prompt must not cover what it is about: once it has
   // rendered (its height is known), pan just enough that the takes' node, or the
@@ -652,6 +664,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     routeCtrl?.abort()
     routeCtrl = null
     if (takes.value) endTakes(null)
+    lockNode(null)
   })
 
   return {
