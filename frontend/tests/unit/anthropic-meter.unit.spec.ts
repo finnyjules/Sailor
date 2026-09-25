@@ -90,6 +90,11 @@ describe('anthropic-meter coverage guard', () => {
     const src = readFileSync(join(serverRoot, 'lib/shaderGenRequest.ts'), 'utf8')
     expect(src).toMatch(/\bholdForModelCall\s*\(/)
   })
+
+  it('meterRouterCall itself takes a holdForModelCall hold', () => {
+    const src = readFileSync(join(serverRoot, 'lib/promptRouterRequest.ts'), 'utf8')
+    expect(src).toMatch(/\bholdForModelCall\s*\(/)
+  })
 })
 
 const KEY = 'NUXT_CLERK_SECRET_KEY'
