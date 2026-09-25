@@ -279,3 +279,25 @@ Each stage lands on its own and leaves the app working.
 - Agent drawing verbs.
 - Turning imported / library / handle paths into drawings (fitting arcs and rules to arbitrary curves).
 - Automatic tangent joints between a Curve segment and an arc (the handle lining up with the arc).
+
+## Carried into Plan B (from Plan A's final review, 2026-09-25)
+
+The pen's host contract is written at the top of `frontend/app/composables/pen/usePen.ts`. Before or while
+the Frame hosts the pen:
+
+- **Keys.** The Frame editor's capture-phase keydown runs before the pen overlay. While the pen is open it
+  must leave the pen's keys alone (Escape, Enter, Delete/Backspace, arrows, digits), or Escape closes the
+  editor and Delete deletes the layer.
+- **No prompt dialogs.** Distance…, Radius…, Repeat… and the size-chip edits still use `window.prompt`
+  (fine on the test page). Replace them with inline inputs before the Frame hosts the pen.
+- **Options.** `PenOptions` (`tools`, `openOnly`) is accepted but not applied. It must work before the text
+  "Drawn path" stage: no Close, no closing by clicking the first point, no Circle.
+- **Toolbar placement.** Anchor the toolbar to the bottom of the host so the rules row grows upward.
+- **Split `usePen.ts`** (~1,450 lines) at the start of Plan B: history/session, the key map, and
+  Repeat/Mirror/Flip out; Pen and Curve gestures stay together.
+- **Small pen fixes:** (a) a pending path anchor that snapped onto an existing standalone point is
+  deleted when the path is abandoned (Escape, tool switch, Enter/Done) — track ownership per anchor, as
+  Line/Circle starts now do; (b) deactivating the overlay mid Pen/Curve gesture leaves the gesture live until
+  the next press; (c) switching tools mid Line/Circle leaves its start point behind.
+- **Scale check.** The solver's convergence and some rule residuals are absolute; the Frame's drawings
+  live within about ±0.5 units ("1 unit = frame width"). Verify, or store Frame drawings in larger units.
