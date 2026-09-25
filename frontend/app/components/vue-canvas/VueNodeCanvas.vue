@@ -1180,8 +1180,9 @@ function getSelectedEdgeIds(): string[] {
   return (edges.value as any[]).filter(e => e.selected).map(e => e.id)
 }
 
-// The one prompt's selection chip + suggestions (spec §1.2). Title is the node's
-// own title (custom → catalog display_name → type), exactly as the card shows it.
+// The one prompt's selection chip + suggestions (spec §1.2). The chip's name is
+// resolved by promptNodeLabel (custom title → the card header's name → a plain
+// kind word), never a raw type.
 // A generic Comfy node's Vue Flow type is 'comfy' (see getVueFlowType); its real
 // backend class is n.data.nodeType, not n.data.type (createNodeData never sets
 // data.type). Artifact/config nodes (Image, GradientStudio, …) keep their Vue
@@ -1193,6 +1194,9 @@ const agentSelection = computed<PromptNode[]>(() => (nodes.value as any[])
     title: String(n.data?.subgraphName || n.data?.title || ''),
     type: String(n.type === 'comfy' ? (n.data?.nodeType ?? n.type ?? '') : (n.type ?? '')),
     hasImages: Array.isArray(n.data?.images) && n.data.images.length > 0,
+    // For the chip's name (never an identifier): the class and its catalog name.
+    nodeType: n.data?.nodeType ? String(n.data.nodeType) : undefined,
+    defaultTitle: (objectInfo.value as Record<string, any> | undefined)?.[n.data?.nodeType]?.display_name,
   })))
 function agentClearSelection() { for (const n of nodes.value as any[]) n.selected = false }
 

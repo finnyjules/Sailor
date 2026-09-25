@@ -1,12 +1,30 @@
 import { describe, it, expect } from 'vitest'
-import { selectionLabel, canvasSuggestions, type PromptNode } from '~/lib/prompt/canvasPromptContext'
+import { selectionLabel, promptNodeLabel, canvasSuggestions, type PromptNode } from '~/lib/prompt/canvasPromptContext'
 
 const n = (title: string, type = 'ComfyNode', hasImages = false): PromptNode => ({ id: title || type, title, type, hasImages })
 
 describe('selectionLabel', () => {
   it('is null with nothing selected', () => expect(selectionLabel([])).toBeNull())
   it('uses the node’s own title', () => expect(selectionLabel([n('Rainy shop')])).toBe('Rainy shop'))
-  it('falls back to the type when the title is blank', () => expect(selectionLabel([n('  ', 'GradientStudio')])).toBe('GradientStudio'))
+  it('never shows an identifier', () => {
+    expect(selectionLabel([n('  ', 'GradientStudio')])).toBe('Gradient Studio')
+    expect(selectionLabel([n('', 'artifact-image')])).toBe('Image')
+    expect(selectionLabel([n('KSampler', 'KSampler')])).toBe('Selected node')
+  })
+  it('names result cards by what they hold', () => {
+    for (const [t, w] of [['artifact-video', 'Video'], ['artifact-audio', 'Audio'], ['artifact-frame', 'Frame']]) {
+      expect(selectionLabel([{ id: '1', title: 'Save Video', type: t!, hasImages: false, nodeType: 'SaveVideo', defaultTitle: 'Save Video' }])).toBe(w)
+    }
+  })
+  it('uses the card header’s name: override, then catalog name, then capability title', () => {
+    expect(promptNodeLabel({ id: '1', title: 'Flux Dev + LoRA (Replicate)', type: 'FluxLoRARemoteNode', hasImages: false, defaultTitle: 'Flux Dev + LoRA (Replicate)' })).toBe('Generate an image with a style')
+    expect(promptNodeLabel({ id: '1', title: 'EmptyLatentImage', type: 'EmptyLatentImage', hasImages: false, defaultTitle: 'Empty Latent Image' })).toBe('Empty Latent Image')
+    expect(promptNodeLabel({ id: '1', title: 'GenerateImageNode', type: 'GenerateImageNode', hasImages: false })).toBe('Generate an image')
+  })
+  it('keeps a title the user gave the node first', () => {
+    expect(promptNodeLabel({ id: '1', title: 'Hero shot', type: 'FluxLoRARemoteNode', hasImages: false, defaultTitle: 'Flux Dev + LoRA (Replicate)' })).toBe('Hero shot')
+    expect(promptNodeLabel({ id: '1', title: 'Rainy shop', type: 'artifact-image', hasImages: true, nodeType: 'SaveImage', defaultTitle: 'Save Image' })).toBe('Rainy shop')
+  })
   it('counts several nodes', () => expect(selectionLabel([n('A'), n('B'), n('C')])).toBe('3 nodes'))
 })
 

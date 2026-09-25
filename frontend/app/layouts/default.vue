@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import {
   House, X, Plus, Play, Check, Minus, ExternalLink, AlertCircle,
-  MousePointer2, Hand, LayoutGrid, GitFork, Image, Workflow, AppWindow, LayoutTemplate, Sparkles, Toolbox, WandSparkles, Boxes,
+  MousePointer2, Hand, LayoutGrid, GitFork, Image, Workflow, AppWindow, LayoutTemplate, Toolbox, WandSparkles, Boxes,
   ZoomIn, ZoomOut, Maximize2, Map, Globe, Square, PanelRight, Wand, Library,
   AudioWaveform, Film, Box, Type, Frame,
   StickyNote, ListChecks, ArrowRight, MessageSquareDashed, Drama, Ellipsis, Table2,

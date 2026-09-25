@@ -32,7 +32,7 @@ const shortcuts: { keys: string; does: string }[] = [
           <li>3. Your result lands on the canvas and is saved to Assets. Select it to see one-click follow-ups.</li>
         </ol>
         <p class="mt-3 text-[12px] leading-relaxed text-white/40">
-          Stuck on a graph? Select some nodes and hit <span class="text-white/60">Explain</span> in the toolbar — it describes what the graph does in plain language.
+          Stuck on a graph? Select some nodes and ask <span class="text-white/60">"What does this do?"</span> in the prompt at the bottom — Sailor describes it in plain language.
         </p>
       </section>
 
