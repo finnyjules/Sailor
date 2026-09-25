@@ -34,6 +34,12 @@
  *  - Qwen Image 3 and Grok Imagine 2 with an empty prompt, as sent (controller
  *    ruling after F6: their Replicate schemas require a prompt but set no
  *    minimum). Two more ruled rows of the prompt table;
+ *  - Ideogram 4 with an empty prompt, as sent (F8: fal's ideogram/v4 schema
+ *    requires a prompt but sets no minimum, as Qwen's and Grok's). Ruled too.
+ *    Every ruled row judges the prompt with its surrounding whitespace
+ *    trimmed (controller ruling after F7), so a prompt of spaces is refused;
+ *    the rows from a schema's `minLength` count exactly what is sent, as the
+ *    provider does;
  *  - Film a shot on Seedance 2.0 with a first frame AND references (parked
  *    minor M5): Film a shot runs only on the ComfyUI path, whose Python
  *    builder would send the first frame and drop the references, so the
@@ -61,6 +67,7 @@ import {
 } from './generators/gptImage25'
 import { QWEN_IMAGE_3_SLUG, isQwenImage3Model } from './generators/qwenImage3'
 import { GROK_IMAGINE_2_SLUG, isGrokImagine2Model } from './generators/grokImagine2'
+import { IDEOGRAM_4_FAL_APP, IDEOGRAM_4_NEEDS_PROMPT, isIdeogram4Model } from './generators/ideogram4'
 
 export { FIRST_FRAME_AND_REFERENCES }
 
@@ -95,20 +102,33 @@ export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: 
   // Qwen Image 3 (qwenImage3.ts) and Grok Imagine 2 (grokImagine2.ts) on Replicate: rulings, not the schemas.
   [`replicate ${QWEN_IMAGE_3_SLUG}`]: { min: 1, message: QWEN_IMAGE_3_NEEDS_PROMPT },
   [`replicate ${GROK_IMAGINE_2_SLUG}`]: { min: 1, message: GROK_IMAGINE_2_NEEDS_PROMPT },
+  // Ideogram 4 on fal (ideogram4.ts): a ruling, not the schema. Its Replicate backup's prompt is optional.
+  [`fal ${IDEOGRAM_4_FAL_APP}`]: { min: 1, message: IDEOGRAM_4_NEEDS_PROMPT },
 }
 
 /**
  * The rows of PROMPT_MIN_LENGTH that come from a controller ruling rather
  * than the schema's `minLength` (a test holds every other row to the schemas).
+ * These judge the prompt with its surrounding whitespace trimmed (ruling after
+ * F7): a prompt of spaces says nothing.
  */
 export const PROMPT_MIN_LENGTH_RULINGS: readonly string[] = [
   `fal ${GEMINI_OMNI_FLASH_TEXT_TO_VIDEO}`,
   `replicate ${QWEN_IMAGE_3_SLUG}`,
   `replicate ${GROK_IMAGINE_2_SLUG}`,
+  `fal ${IDEOGRAM_4_FAL_APP}`,
 ]
 
 /** JSON Schema counts characters as code points. */
 const chars = (s: string) => [...s].length
+
+/**
+ * The prompt's length as the rule of `key` (`<provider> <endpoint>`) counts it:
+ * trimmed for a ruled row, exactly as sent for a schema's `minLength`.
+ */
+function promptLength(key: string, text: string): number {
+  return chars(PROMPT_MIN_LENGTH_RULINGS.includes(key) ? text.trim() : text)
+}
 
 /** Seedance 2.0 reference-to-video limits (its schema: image_urls ≤ 9, video_urls ≤ 3, audio_urls ≤ 3). */
 export const SEEDANCE_REFERENCE_LIMITS = [
@@ -142,8 +162,9 @@ export function seedanceReferenceProblem(adv: Record<string, unknown>, firstFram
 
 /** The payload's problem for this endpoint, or null (the runner, after building it). */
 export function requestProblem(provider: string, endpoint: string, payload: Record<string, unknown>): string | null {
-  const rule = PROMPT_MIN_LENGTH[`${provider} ${endpoint}`]
-  if (rule && chars(typeof payload.prompt === 'string' ? payload.prompt : '') < rule.min) return rule.message
+  const key = `${provider} ${endpoint}`
+  const rule = PROMPT_MIN_LENGTH[key]
+  if (rule && promptLength(key, typeof payload.prompt === 'string' ? payload.prompt : '') < rule.min) return rule.message
   // GPT Image 2.5 makes no transparent JPEG (either service); the request is refused, never sent.
   if ((GPT_IMAGE_25_FAL_ENDPOINTS as readonly string[]).includes(endpoint) || endpoint.startsWith('openai/gpt-image-2.5-')) {
     if (payload.background === 'transparent' && payload.output_format === 'jpeg') return GPT_IMAGE_25_TRANSPARENT_JPEG
@@ -224,9 +245,10 @@ export function requestProblems(prompt: ApiPrompt): RequestProblem[] {
     const ct = node?.class_type
     /** The prompt `text` against the rule of `<provider> <endpoint>` (fal unless named). */
     const judge = (endpoint: string, text: string, provider = 'fal') => {
-      const rule = PROMPT_MIN_LENGTH[`${provider} ${endpoint}`]
-      if (!rule) throw new Error(`No prompt rule for ${provider} ${endpoint}`)
-      if (chars(text) < rule.min) out.push({ nodeId, classType: ct, input: 'prompt', message: rule.message })
+      const key = `${provider} ${endpoint}`
+      const rule = PROMPT_MIN_LENGTH[key]
+      if (!rule) throw new Error(`No prompt rule for ${key}`)
+      if (promptLength(key, text) < rule.min) out.push({ nodeId, classType: ct, input: 'prompt', message: rule.message })
     }
     const nb = ct === 'GenerateImageNode' && Object.prototype.hasOwnProperty.call(NANO_BANANA_IMAGE_APPS, String(inputs.model))
       ? NANO_BANANA_IMAGE_APPS[String(inputs.model)]!
@@ -268,6 +290,17 @@ export function requestProblems(prompt: ApiPrompt): RequestProblem[] {
         styleIn: asText(inputs.style_in),
         hasRefs: false,
       }), 'replicate')
+    }
+    // Ideogram 4 (fal, text-to-image): the prompt as sent must not be empty.
+    else if (ct === 'GenerateImageNode' && isIdeogram4Model(inputs.model)) {
+      if (['prompt', 'prompt_in', 'style_block', 'style_in'].some(k => isLink(inputs[k]))) continue
+      judge(IDEOGRAM_4_FAL_APP, composeImagePrompt({
+        prompt: asText(inputs.prompt),
+        promptIn: asText(inputs.prompt_in),
+        styleBlock: asText(inputs.style_block),
+        styleIn: asText(inputs.style_in),
+        hasRefs: false,
+      }))
     }
     else if (ct === 'EditImageNode' && inputs.model === GPT_IMAGE_25_EDIT_OPTION) {
       if (!isLink(inputs.prompt)) judge(GPT_IMAGE_25_EDIT_APP, asText(inputs.prompt))

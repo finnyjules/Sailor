@@ -34,6 +34,8 @@ const HIDDEN_IMAGES = [
   'flux-1.1-pro', 'flux-1.1-pro-ultra', 'gpt-image-1.5', 'stable-diffusion-3.5-large',
   'stable-diffusion-3.5-large-turbo', 'stable-diffusion-3.5-medium', 'hunyuan-image-3', 'minimax-image-01',
   'photon', 'photon-flash', 'wan-2.2-image-pruna', 'recraft-v3', 'recraft-v3-svg',
+  // Model line-up F8: Ideogram 4 covers every Ideogram V3 speed; Grok Imagine 2 (F7) replaces Grok Imagine.
+  'ideogram-v3-quality', 'ideogram-v3-balanced', 'ideogram-v3-turbo', 'grok-imagine',
 ]
 const HIDDEN_VIDEOS = ['hailuo-2.3', 'wan-2.5-i2v-fast', 'wan-2.7-t2v', 'luma-ray-2-720p', 'ltx-video', 'kling-v2.5-turbo-pro']
 const DISCONTINUED_VIDEOS = ['sora-2', 'sora-2-pro']
@@ -46,7 +48,7 @@ const HIDDEN_DROPDOWN: Record<string, string[]> = {
   'UpscaleImageNode.model': ['Real-ESRGAN'],
 }
 /** Runner-only models the line-up's F-tasks added (no Python builder; left out while their switch is off). */
-const RUNNER_ONLY_IMAGES = ['gpt-image-2.5', 'qwen-image-3', 'grok-imagine-2']
+const RUNNER_ONLY_IMAGES = ['ideogram-4', 'gpt-image-2.5', 'qwen-image-3', 'grok-imagine-2']
 const RUNNER_ONLY_DROPDOWN: Record<string, string[]> = { 'EditImageNode.model': ['GPT Image 2.5'] }
 
 // ── Helpers ──────────────────────────────────────────────────────────────

@@ -74,8 +74,11 @@ async function plan(classType: string, inputs: Record<string, unknown>): Promise
 function nodeFor(key: string): [string, Record<string, unknown>] {
   if (key.startsWith('image:')) {
     const id = key.slice(6)
-    // Flux 2 Pro and Max have a backup for a jpg or png picture only (webp, their default, has none).
-    const adv = id === 'flux-2-pro' || id === 'flux-2-max' ? { model_options: JSON.stringify({ output_format: 'png' }) } : {}
+    // Flux 2 Pro and Max have a backup for a jpg or png picture only (webp, their default, has none);
+    // Ideogram 4 for a 2K picture only (1K, its default, has none).
+    const adv = id === 'flux-2-pro' || id === 'flux-2-max' ? { model_options: JSON.stringify({ output_format: 'png' }) }
+      : id === 'ideogram-4' ? { model_options: JSON.stringify({ resolution: '2K' }) }
+        : {}
     return ['GenerateImageNode', { model: id, prompt: 'a red fox', aspect_ratio: '1:1', seed: 7, ...adv }]
   }
   if (key.startsWith('video:')) {
@@ -114,11 +117,12 @@ describe('the first and backup services are the table\'s', () => {
     // And no row for something the runner doesn't run.
     const image = Object.keys(RUNNER_ROUTES).filter(k => k.startsWith('image:')).length
     const video = Object.keys(RUNNER_ROUTES).filter(k => k.startsWith('video:')).length
-    // + GPT Image 2.5 (Task F2), Qwen Image 3 (Task F6) and Grok Imagine 2 (Task F7), runner-only models outside the two builder tables.
+    // + GPT Image 2.5 (Task F2), Qwen Image 3 (Task F6), Grok Imagine 2 (Task F7) and Ideogram 4 (Task F8), runner-only models outside the two builder tables.
     expect(keys.has('image:gpt-image-2.5')).toBe(true)
     expect(keys.has('image:qwen-image-3')).toBe(true)
     expect(keys.has('image:grok-imagine-2')).toBe(true)
-    expect(image).toBe(Object.keys(RUNNER_IMAGE_MODELS).length + Object.keys(RUNNER_REPLICATE_IMAGE_MODELS).length + 3)
+    expect(keys.has('image:ideogram-4')).toBe(true)
+    expect(image).toBe(Object.keys(RUNNER_IMAGE_MODELS).length + Object.keys(RUNNER_REPLICATE_IMAGE_MODELS).length + 4)
     expect(video).toBe(Object.keys(RUNNER_VIDEO_MODELS).length + Object.keys(RUNNER_REPLICATE_VIDEO_MODELS).length)
   })
 
@@ -153,6 +157,9 @@ describe('the models with no twin (or one whose settings can\'t all be carried) 
     // Flux 2 Pro and Max making webp (their default): fal makes no webp.
     ...['flux-2-pro', 'flux-2-max'].flatMap(model => [{}, { output_format: 'webp' }].map(adv =>
       ['GenerateImageNode', { model, prompt: 'a red fox', aspect_ratio: '16:9', seed: 7, model_options: JSON.stringify(adv) }] as [string, Record<string, unknown>])),
+    // Ideogram 4 at 1K (its default): Replicate makes only its 2K sizes.
+    ...[{}, { resolution: '1K' }].map(adv =>
+      ['GenerateImageNode', { model: 'ideogram-4', prompt: 'a red fox', aspect_ratio: '16:9', seed: 7, model_options: JSON.stringify(adv) }] as [string, Record<string, unknown>]),
     nodeFor('ProductShotNode'),
     nodeFor('RestyleFromImageNode:Style Transfer · IP-Adapter'),
   ]

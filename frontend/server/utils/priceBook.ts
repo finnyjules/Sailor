@@ -70,7 +70,11 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // (runner-only, family qwen-image-3, no backup). No other price moves.
 // lineup-f7 (Task F7): Grok Imagine 2, Replicate's flat $0.04 an image
 // (runner-only, family grok-imagine-2, no backup). No other price moves.
-export const PRICE_BOOK_VERSION = 'lineup-f7'
+// lineup-f8 (Task F8): Ideogram 4, fal per megapixel by speed ($0.0075 /
+// $0.015 / $0.025), Replicate's $0.03 / $0.06 / $0.10 the backup for a 2K
+// picture (runner-only, family ideogram-4). Ideogram V3 and the old Grok
+// Imagine are hidden, their prices unchanged. No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-f8'
 
 export const BASE_RENDER_CREDITS = 1
 

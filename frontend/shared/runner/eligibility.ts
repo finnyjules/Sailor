@@ -263,12 +263,14 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // ── gpt-image-2.5 (model line-up F2): GPT Image 2.5 on fal, runner-only ──
   // ── qwen-image-3 (model line-up F6): Qwen Image 3 on Replicate, runner-only ──
   // ── grok-imagine-2 (model line-up F7): Grok Imagine 2 on Replicate, runner-only ──
+  // ── ideogram-4 (model line-up F8): Ideogram 4 on fal, runner-only ──
   GenerateImageNode: {
     models: {
       ...Object.fromEntries(RUNNER_REPLICATE_IMAGE_MODEL_IDS.map(id => [id, 'replicate-image' as const])),
       'gpt-image-2.5': 'gpt-image-2.5',
       'qwen-image-3': 'qwen-image-3',
       'grok-imagine-2': 'grok-imagine-2',
+      'ideogram-4': 'ideogram-4',
     },
     mustNotLink: ['prompt', 'model_options', 'style_block', 'style_refs', 'prompt_in', 'style_in'],
   },

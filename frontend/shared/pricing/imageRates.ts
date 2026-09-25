@@ -2,7 +2,8 @@
  * What each image model's FIRST service charges us — the service Sailor's
  * request builder sends it to today: fal for the RUNNER_IMAGE_MODELS ids and
  * the Python `primary="fal"` models (Krea 2), and the runner-only GPT Image
- * 2.5 (server/runner/generators/gptImage25.ts), Replicate for the rest,
+ * 2.5 (server/runner/generators/gptImage25.ts) and Ideogram 4 (ideogram4.ts),
+ * Replicate for the rest,
  * the runner-only Qwen Image 3 and Grok Imagine 2 among them (qwenImage3.ts,
  * grokImagine2.ts)
  * (comfy_api_nodes/image_models.py `primary`, default "replicate").
@@ -14,7 +15,9 @@
  *    1 MP floor where the service normalises to 1 MP. Neither service says
  *    how it rounds, so a picture's megapixels are its pixels / 1,000,000
  *    rounded UP (controller ruling; imageSettings.ts billedMegapixels), with
- *    the floor applied after the rounding;
+ *    the floor applied after the rounding. A card whose per-megapixel price
+ *    depends on a tier (Ideogram 4's speed) lists it in `perMegapixelByTier`,
+ *    and `perMegapixel` is its dearest tier (a tier it doesn't list);
  *  - `by_resolution`: dollars per picture by resolution tier (1K / 2K / 4K);
  *  - `by_quality`: dollars per picture by quality tier (low … high, auto).
  * `webSearch` is a flat extra per request when the search is switched on.
@@ -38,13 +41,17 @@
  * in IMAGE_BACKUP_RATES) is priced at the first service's price, or the
  * backup's covered at cost, whichever is higher (`imagePriceUsd`; the P4 rule,
  * markup.ts usdChargedAtCost), so a job the backup serves never costs Sailor
- * more than it charged.
+ * more than it charged. Settings that go without the backup (ImageSettings
+ * `noBackup`: Ideogram 4 at 1K) are priced at the first service alone.
  *
  * Pure data and pure functions; relative imports only (Nitro, the app and
  * vitest all load it).
  */
 import { creditsForUsd, usdChargedAtCost } from './markup'
-import { BFL_MAX_MEGAPIXELS, FAL_MAX_MEGAPIXELS, FLUX_2_DEV_MAX_MEGAPIXELS, effectiveImageSettings, maxImageCount, type ImageSettings } from './imageSettings'
+import {
+  BFL_MAX_MEGAPIXELS, FAL_MAX_MEGAPIXELS, FLUX_2_DEV_MAX_MEGAPIXELS, IDEOGRAM_4_MAX_MEGAPIXELS, effectiveImageSettings, maxImageCount,
+  type ImageSettings,
+} from './imageSettings'
 
 interface RateMeta {
   /** The first service: who the builder sends this model to. */
@@ -62,7 +69,11 @@ interface RateMeta {
 
 export type ImageRate =
   | (RateMeta & { unit: 'per_image', usd: number })
-  | (RateMeta & { unit: 'per_megapixel', perMegapixel: number, perImage?: number, minMegapixels?: number, maxMegapixels: number })
+  | (RateMeta & {
+    unit: 'per_megapixel', perMegapixel: number, perImage?: number, minMegapixels?: number, maxMegapixels: number
+    /** Dollars per megapixel by tier, where the tier sets it; `perMegapixel` is the dearest. */
+    perMegapixelByTier?: Record<string, number>
+  })
   | (RateMeta & { unit: 'by_resolution' | 'by_quality', byTier: Record<string, number> })
 
 const READ = '2026-09-24'
@@ -116,6 +127,20 @@ export const IMAGE_RATES: Record<string, ImageRate> = {
   'ideogram-v3-quality': falImage('fal-ai/ideogram/v3', 0.09),
   'ideogram-v3-balanced': falImage('fal-ai/ideogram/v3', 0.06),
   'ideogram-v3-turbo': falImage('fal-ai/ideogram/v3', 0.03),
+  // Ideogram 4 (runner-only, Task F8), fal first: "$0.0075 per megapixel in
+  // TURBO mode, $0.015 per megapixel in BALANCED mode, or $0.025 per
+  // megapixel in QUALITY mode" (llms.txt, read 2026-09-24). Its worked example
+  // ("a 2048 x 2048 image will cost $0.03, $0.06 or $0.10") bills 2048² as
+  // 4 MP, but the MP ruling rounds pixels / 1,000,000 up, so 2048² is priced
+  // at 5 MP: never under. The builder sends expansion_model "None", which
+  // "skips its fee" (the expansion fee isn't published). The 1K sizes are at
+  // most 1,000,000 pixels (1 MP); the 2K ones 4 or 5 MP (imageSettings.ts
+  // IDEOGRAM_4_SIZES).
+  'ideogram-4': {
+    unit: 'per_megapixel', perMegapixel: 0.025, perMegapixelByTier: { TURBO: 0.0075, BALANCED: 0.015, QUALITY: 0.025 },
+    minMegapixels: 1, maxMegapixels: IDEOGRAM_4_MAX_MEGAPIXELS,
+    service: 'fal', source: fal('ideogram/v4'), read: READ, confidence: 'verified',
+  },
   // "Price: $0.035 per images" (text-to-image and /edit alike).
   'seedream-5-lite': falImage('fal-ai/bytedance/seedream/v5/lite/text-to-image', 0.035),
   // "Price: $0.03 per images" (text-to-image and /edit alike).
@@ -266,6 +291,16 @@ export const IMAGE_BACKUP_RATES: Record<string, ImageRate> = {
     service: 'replicate', source: rep('openai/gpt-image-2.5-flare'), read: READ, confidence: 'verified',
     note: 'the same tiers on openai/gpt-image-2.5-sunburst',
   },
+  // Ideogram 4 on Replicate, one model per speed, 2K pictures only (so a 1K
+  // request has no backup; imageSettings.ts `noBackup`): "$0.03 per output
+  // image" (ideogram-ai/ideogram-v4-turbo), "$0.06" (-balanced), "$0.10"
+  // (-quality), whatever the size (billingConfig, image_output_count, one
+  // tier each; the README lists the same three).
+  'ideogram-4': {
+    unit: 'by_quality', byTier: { TURBO: 0.03, BALANCED: 0.06, QUALITY: 0.10 },
+    service: 'replicate', source: rep('ideogram-ai/ideogram-v4-balanced'), read: READ, confidence: 'verified',
+    note: 'one model per speed: ideogram-ai/ideogram-v4-turbo, -balanced, -quality',
+  },
 }
 
 const own = <T>(o: Record<string, T>, k: string): T | undefined =>
@@ -290,7 +325,8 @@ function perPicture(rate: ImageRate, s: ImageSettings): number {
     case 'per_image': return rate.usd
     case 'per_megapixel': {
       const mp = Math.max(rate.minMegapixels ?? 0, Math.min(s.megapixels ?? rate.maxMegapixels, rate.maxMegapixels))
-      return (rate.perImage ?? 0) + rate.perMegapixel * mp
+      const tiered = rate.perMegapixelByTier && s.tier != null ? own(rate.perMegapixelByTier, s.tier) : undefined
+      return (rate.perImage ?? 0) + (tiered ?? rate.perMegapixel) * mp
     }
     default: {
       const p = s.tier == null ? undefined : own(rate.byTier, s.tier)
@@ -319,16 +355,17 @@ export function imagePriceUsd(modelId: string, s: ImageSettings): number | null 
   const first = imageUsd(modelId, s)
   if (first == null) return null
   const backup = imageBackupRate(modelId)
-  return backup ? Math.max(first, usdChargedAtCost(requestUsd(backup, s))) : first
+  return backup && !s.noBackup ? Math.max(first, usdChargedAtCost(requestUsd(backup, s))) : first
 }
 
 /** The most one picture's request can cost on this card: the largest size, the dearest tier, the web search. */
 function maxSettings(modelId: string): ImageSettings {
   const rate = imageRate(modelId)!
   const images = maxImageCount(modelId)
-  const tier = rate.unit === 'by_resolution' || rate.unit === 'by_quality'
-    ? Object.entries(rate.byTier).sort((a, b) => b[1] - a[1])[0]![0]
-    : null
+  const tiers = rate.unit === 'by_resolution' || rate.unit === 'by_quality' ? rate.byTier
+    : rate.unit === 'per_megapixel' ? rate.perMegapixelByTier
+      : undefined
+  const tier = tiers ? Object.entries(tiers).sort((a, b) => b[1] - a[1])[0]![0] : null
   const megapixels = rate.unit === 'per_megapixel' ? rate.maxMegapixels : null
   return { images, tier, megapixels, webSearch: !!rate.webSearch }
 }

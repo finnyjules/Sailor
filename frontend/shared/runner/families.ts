@@ -29,9 +29,11 @@ export type RunnerFamily =
   | 'qwen-image-3'
   /** Grok Imagine 2 on Replicate, no backup (model line-up F7): a runner-only image model. */
   | 'grok-imagine-2'
+  /** Ideogram 4 on fal, Replicate the backup at 2K (model line-up F8): a runner-only image model. */
+  | 'ideogram-4'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
-  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2',
+  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2', 'ideogram-4',
 ]
 
 const KNOWN: ReadonlySet<string> = new Set(RUNNER_FAMILIES)

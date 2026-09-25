@@ -264,6 +264,21 @@ const FLOWS: FamilyFlow[] = [
     endpoint: 'xai/grok-imagine-image-2',
     body: { prompt: 'a poster that says HELLO', aspect_ratio: '1:1', resolution: '2k', quality: 'medium' },
   },
+  // Task F8: Ideogram 4, no Python builder; fal first, the body written from
+  // its saved schema (runner-ideogram-4.unit.spec.ts). At 1K there is no
+  // Replicate backup, and fal answers, so Replicate is never called.
+  {
+    family: 'ideogram-4',
+    label: 'GenerateImageNode ideogram-4',
+    prompt: {
+      1: { class_type: 'GenerateImageNode', inputs: { model: 'ideogram-4', prompt: 'a poster that says HELLO', aspect_ratio: '1:1', seed: 0, model_options: '{"rendering_speed":"TURBO"}' } },
+      2: outImage('1'),
+    },
+    files: [],
+    provider: 'fal',
+    endpoint: 'ideogram/v4',
+    body: { prompt: 'a poster that says HELLO', image_size: { width: 992, height: 992 }, rendering_speed: 'TURBO', expansion_model: 'None', output_format: 'png', num_images: 1 },
+  },
 ]
 
 // ── The routes ───────────────────────────────────────────────────────────

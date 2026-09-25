@@ -32,6 +32,12 @@ export interface ImageSettings {
   megapixels: number | null
   /** Nano Banana 2's web search (a flat extra per request on fal). */
   webSearch: boolean
+  /**
+   * Set when a model that has a backup service goes WITHOUT one at these
+   * settings, so the price doesn't cover it (Ideogram 4 at 1K: Replicate
+   * makes only its 2K sizes). Absent everywhere else.
+   */
+  noBackup?: true
 }
 
 type Adv = Record<string, unknown>
@@ -160,6 +166,82 @@ export const FLUX_2_DEV_PYTHON_PATH_MEGAPIXELS = 2
 /** Billed megapixels of the largest Flux 2 Dev picture (1440 × 1440): 3. */
 export const FLUX_2_DEV_MAX_MEGAPIXELS = billedMegapixels(FLUX_2_DEV_MAX_SIDE * FLUX_2_DEV_MAX_SIDE)
 
+/**
+ * Ideogram 4 (runner-only, server/runner/generators/ideogram4.ts): the
+ * picture size per size choice and ratio, width × height, sent to fal as
+ * `image_size` and read here for the price, so the two can't drift.
+ *
+ *  - 2K: each is one of Replicate's `resolution` values (its saved schema,
+ *    ideogram-ai/ideogram-v4-*), so the backup makes the same picture. 3.7 to
+ *    4.2 million pixels: 4 or 5 billed MP.
+ *  - 1K: the largest size at the exact ratio with both sides multiples of 16
+ *    and at most 1,000,000 pixels, so each bills 1 MP (the ruling rounds
+ *    1024 × 1024 up to 2). Replicate has no 1K size, so a 1K picture has no
+ *    backup.
+ * Every size fits fal's rule (x-fal: multiples of 16, 512 to 3840 a side).
+ * Any other ratio is 1:1.
+ */
+export const IDEOGRAM_4_SIZES: Readonly<Record<'1K' | '2K', Readonly<Record<string, readonly [number, number]>>>> = {
+  '1K': {
+    '1:1': [992, 992],
+    '16:9': [1280, 720],
+    '9:16': [720, 1280],
+    '4:3': [1152, 864],
+    '3:4': [864, 1152],
+    '3:2': [1200, 800],
+    '2:3': [800, 1200],
+    '16:10': [1152, 720],
+    '10:16': [720, 1152],
+    '5:4': [1040, 832],
+    '4:5': [832, 1040],
+    '2:1': [1408, 704],
+    '1:2': [704, 1408],
+  },
+  '2K': {
+    '1:1': [2048, 2048],
+    '16:9': [2560, 1440],
+    '9:16': [1440, 2560],
+    '4:3': [2304, 1728],
+    '3:4': [1728, 2304],
+    '3:2': [2496, 1664],
+    '2:3': [1664, 2496],
+    '16:10': [2560, 1600],
+    '10:16': [1600, 2560],
+    '5:4': [2240, 1792],
+    '4:5': [1792, 2240],
+    '2:1': [2880, 1440],
+    '1:2': [1440, 2880],
+  },
+}
+/** The ratios Ideogram 4 offers (the same at both sizes). */
+export const IDEOGRAM_4_RATIOS: readonly string[] = Object.keys(IDEOGRAM_4_SIZES['1K'])
+/** fal's `rendering_speed` enum; the schema's default is BALANCED. */
+export const IDEOGRAM_4_SPEEDS = ['TURBO', 'BALANCED', 'QUALITY'] as const
+export type Ideogram4Speed = typeof IDEOGRAM_4_SPEEDS[number]
+export const IDEOGRAM_4_DEFAULT_SPEED: Ideogram4Speed = 'BALANCED'
+export const IDEOGRAM_4_RESOLUTIONS = ['1K', '2K'] as const
+export type Ideogram4Resolution = typeof IDEOGRAM_4_RESOLUTIONS[number]
+export const IDEOGRAM_4_DEFAULT_RESOLUTION: Ideogram4Resolution = '1K'
+
+/** The speed the options pick (`rendering_speed`), anything else BALANCED. */
+export function ideogram4Speed(adv: Adv): Ideogram4Speed {
+  const v = optStr(adv, 'rendering_speed', IDEOGRAM_4_DEFAULT_SPEED)
+  return (IDEOGRAM_4_SPEEDS as readonly string[]).includes(v) ? v as Ideogram4Speed : IDEOGRAM_4_DEFAULT_SPEED
+}
+/** The size the options pick (`resolution`), anything else 1K. */
+export function ideogram4Resolution(adv: Adv): Ideogram4Resolution {
+  const v = optStr(adv, 'resolution', IDEOGRAM_4_DEFAULT_RESOLUTION)
+  return (IDEOGRAM_4_RESOLUTIONS as readonly string[]).includes(v) ? v as Ideogram4Resolution : IDEOGRAM_4_DEFAULT_RESOLUTION
+}
+/** The picture sent for a size and ratio (a ratio not offered is 1:1). */
+export function ideogram4Size(resolution: Ideogram4Resolution, aspectRatio: string): { width: number, height: number } {
+  const table = IDEOGRAM_4_SIZES[resolution]
+  const wh = Object.prototype.hasOwnProperty.call(table, aspectRatio) ? table[aspectRatio]! : table['1:1']!
+  return { width: wh[0], height: wh[1] }
+}
+/** Billed megapixels of the largest Ideogram 4 picture (2K 1:1, 2048 × 2048): 5. */
+export const IDEOGRAM_4_MAX_MEGAPIXELS = billedMegapixels(Math.max(...Object.values(IDEOGRAM_4_SIZES['2K']).map(([w, h]) => w * h)))
+
 type Rule = (adv: Adv, aspectRatio: string) => ImageSettings
 
 const GPT_QUALITIES = ['low', 'medium', 'high', 'auto']
@@ -261,6 +343,14 @@ const RULES: Record<string, Rule> = {
   'grok-imagine': flat,
   // grokImagine2Generate (runner-only, Replicate): one picture, one price for every ratio, size and quality.
   'grok-imagine-2': flat,
+  // ideogram4Generate (runner-only, fal first): the speed is the tier, the
+  // size's picture the megapixels; one picture. Only a 2K picture has the
+  // Replicate backup (ideogram4OnReplicate), so a 1K one doesn't cover it.
+  'ideogram-4': (adv, ar) => {
+    const resolution = ideogram4Resolution(adv)
+    const { width, height } = ideogram4Size(resolution, ar)
+    return { ...one(ideogram4Speed(adv)), megapixels: billedMegapixels(width * height), ...(resolution === '2K' ? {} : { noBackup: true as const }) }
+  },
   'flux-fast': flat,
   'p-image': flat,
   // rWan22Pruna sends megapixels 1/2; Replicate charges one price for both.

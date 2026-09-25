@@ -28,6 +28,11 @@
  *                                                  $0.067 against $0.08, but can't carry the seed)
  * nano-banana-pro           fal        —           Replicate's Nano Banana Pro takes no seed
  * ideogram-v3-* (3)         fal        —           Replicate's Ideogram V3 seed stops at 2³¹−1; the node's goes higher
+ *                                                  (hidden since F8: Ideogram 4 covers every speed)
+ * ideogram-4                fal        Replicate   runner-only (F8): ideogram-ai/ideogram-v4-turbo / -balanced / -quality,
+ *                                                  for a 2K picture ONLY (Replicate makes only its ~4 MP sizes, so a 1K
+ *                                                  request has no backup); the same size as WIDTHxHEIGHT; Replicate
+ *                                                  takes no seed and always expands the prompt (ideogram4.ts)
  * seedream-5-lite           fal        —           fal sizes the picture by named sizes, Replicate only 2K or 3K
  * flux-dev                  Replicate  —           fal's Flux Dev has no webp, no guidance below 1 and no go-fast switch
  * flux-2-max / -pro         Replicate  fal         fal-ai/flux-2-max / -pro, for a jpg or png picture ONLY: fal makes no
@@ -50,6 +55,7 @@
  * qwen-image-3              Replicate  —           runner-only (F6): fal's alibaba/qwen-image-3 is Qwen Image 3 Pro, a
  *                                                  different model at a different price (qwenImage3.ts)
  * grok-imagine              Replicate  —           fal hosts it (xai/grok-imagine-image); its settings aren't checked yet
+ *                                                  (hidden since F8: Grok Imagine 2 replaces it)
  * grok-imagine-2            Replicate  —           runner-only (F7): fal's xai/grok-imagine-image/v2 publishes no price
  *                                                  and no OpenAPI yet (grokImagine2.ts)
  * flux-fast, p-image        Replicate  —           Pruna models: not on fal (fal catalogue, 2026-09-24)
@@ -133,6 +139,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'image:ideogram-v3-balanced': r('fal', null, 'Replicate\'s seed stops at 2^31 - 1'),
   'image:ideogram-v3-turbo': r('fal', null, 'Replicate\'s seed stops at 2^31 - 1'),
   'image:seedream-5-lite': r('fal', null, 'fal sizes by named sizes, Replicate only 2K or 3K'),
+  'image:ideogram-4': r('fal', 'replicate', '2K only: Replicate makes only its ~4 MP sizes, so a 1K request has no backup; Replicate takes no seed and always expands the prompt'),
   'image:flux-1.1-pro': r('fal', null, HIDDEN),
   'image:seedream-4': r('fal', null, HIDDEN),
   // Generate image, Replicate

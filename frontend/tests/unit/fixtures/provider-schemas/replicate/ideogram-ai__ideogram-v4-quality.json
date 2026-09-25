@@ -1,0 +1,91 @@
+{
+  "endpoint": "ideogram-ai/ideogram-v4-quality",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/ideogram-ai/ideogram-v4-quality"
+  },
+  "versionId": "dfb2da5be029b469e7cd6a5efcf705478bd152d4e5ca5493d1621eec5ebed569",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "default": null,
+            "x-order": 0,
+            "nullable": true,
+            "description": "Natural-language prompt. Enables Ideogram 4.0 Magic Prompt automatically."
+          },
+          "resolution": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/resolution"
+              }
+            ],
+            "default": "None",
+            "x-order": 2,
+            "description": "Output resolution. Omit to let Ideogram 4.0 choose the aspect ratio."
+          },
+          "json_prompt": {
+            "type": "string",
+            "title": "Json Prompt",
+            "default": null,
+            "x-order": 1,
+            "nullable": true,
+            "description": "Structured Ideogram 4.0 prompt as a JSON object. Use either prompt or json_prompt, not both."
+          },
+          "enable_copyright_detection": {
+            "type": "boolean",
+            "title": "Enable Copyright Detection",
+            "default": false,
+            "x-order": 3,
+            "description": "Opt into Ideogram 4.0 post-generation copyright detection."
+          }
+        }
+      },
+      "resolution": {
+        "enum": [
+          "None",
+          "2048x2048",
+          "1440x2880",
+          "2880x1440",
+          "1664x2496",
+          "2496x1664",
+          "1792x2240",
+          "2240x1792",
+          "1440x2560",
+          "2560x1440",
+          "1600x2560",
+          "2560x1600",
+          "1728x2304",
+          "2304x1728",
+          "1296x3168",
+          "3168x1296",
+          "1152x2944",
+          "2944x1152",
+          "1248x3328",
+          "3328x1248",
+          "1280x3072",
+          "3072x1280"
+        ],
+        "type": "string",
+        "title": "resolution",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "string",
+        "title": "Output",
+        "format": "uri"
+      }
+    }
+  }
+}

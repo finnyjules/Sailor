@@ -34,6 +34,7 @@ import { VEO_31_LITE_ENDPOINTS } from '~~/server/runner/generators/veo31Lite'
 import { GPT_IMAGE_25_FAL_ENDPOINTS, GPT_IMAGE_25_REPLICATE_SLUGS } from '~~/server/runner/generators/gptImage25'
 import { QWEN_IMAGE_3_SLUG } from '~~/server/runner/generators/qwenImage3'
 import { GROK_IMAGINE_2_SLUG } from '~~/server/runner/generators/grokImagine2'
+import { IDEOGRAM_4_FAL_APP, IDEOGRAM_4_REPLICATE_SLUGS } from '~~/server/runner/generators/ideogram4'
 
 const readJson = (rel: string) => JSON.parse(readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8'))
 const BUILDERS = readJson('./fixtures/runner-builders.json')
@@ -230,6 +231,9 @@ function runnerEndpoints(): string[] {
   out.add(`replicate ${QWEN_IMAGE_3_SLUG}`)
   // Task F7: Grok Imagine 2 on Replicate, no backup (grokImagine2.ts; its payload grid is runner-grok-imagine-2.unit.spec.ts).
   out.add(`replicate ${GROK_IMAGINE_2_SLUG}`)
+  // Task F8: Ideogram 4, fal first and Replicate (one model per speed) the backup at 2K (ideogram4.ts; its grid is runner-ideogram-4.unit.spec.ts).
+  out.add(`fal ${IDEOGRAM_4_FAL_APP}`)
+  for (const slug of Object.values(IDEOGRAM_4_REPLICATE_SLUGS)) out.add(`replicate ${slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)
@@ -288,8 +292,10 @@ describe('refusals', () => {
 
   it('the prompt length rules are exactly the saved schemas\' prompt minLength, plus the controller\'s rulings', () => {
     // Ruled rows: a saved schema without a minLength on that endpoint, the prompt required (controller rulings
-    // after F4: Gemini Omni Flash; after F6: Qwen Image 3, and Grok Imagine 2 in F7).
-    expect(PROMPT_MIN_LENGTH_RULINGS).toEqual(['fal google/gemini-omni-flash', 'replicate alibaba/qwen-image-3', 'replicate xai/grok-imagine-image-2'])
+    // after F4: Gemini Omni Flash; after F6: Qwen Image 3, and Grok Imagine 2 in F7; Ideogram 4 on fal in F8).
+    expect(PROMPT_MIN_LENGTH_RULINGS).toEqual([
+      'fal google/gemini-omni-flash', 'replicate alibaba/qwen-image-3', 'replicate xai/grok-imagine-image-2', 'fal ideogram/v4',
+    ])
     const fromSchemas: Record<string, number> = {}
     for (const key of PROMPT_MIN_LENGTH_RULINGS) {
       const [provider, endpoint] = key.split(' ') as [Provider, string]

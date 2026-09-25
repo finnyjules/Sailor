@@ -485,6 +485,8 @@ export const IMAGE_MODELS: ImageModel[] = [
   // ===== Ideogram ===========================================================
   {
     id: 'ideogram-v3-quality',
+    // Hidden (model line-up F8): Ideogram 4 covers every speed. Saved nodes still run.
+    hidden: true,
     label: 'Ideogram V3 Quality',
     brand: 'Ideogram',
     replicateSlug: 'ideogram-ai/ideogram-v3-quality',
@@ -497,6 +499,8 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'ideogram-v3-balanced',
+    // Hidden (model line-up F8): Ideogram 4 covers every speed. Saved nodes still run.
+    hidden: true,
     label: 'Ideogram V3 Balanced',
     brand: 'Ideogram',
     replicateSlug: 'ideogram-ai/ideogram-v3-balanced',
@@ -509,6 +513,8 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'ideogram-v3-turbo',
+    // Hidden (model line-up F8): Ideogram 4 covers every speed. Saved nodes still run.
+    hidden: true,
     label: 'Ideogram V3 Turbo',
     brand: 'Ideogram',
     replicateSlug: 'ideogram-ai/ideogram-v3-turbo',
@@ -518,6 +524,31 @@ export const IMAGE_MODELS: ImageModel[] = [
     aspectRatios: IDEOGRAM_V3_AR,
     defaultAspectRatio: '1:1',
     advanced: [IDEOGRAM_V3_STYLE, IDEOGRAM_MAGIC_PROMPT],
+  },
+  {
+    // Runner-only (model line-up F8): fal first, Replicate the backup for a
+    // 2K picture (server/runner/generators/ideogram4.ts). No Python builder.
+    // The sizes are #shared/pricing/imageSettings IDEOGRAM_4_SIZES.
+    id: 'ideogram-4',
+    runnerOnly: true,
+    family: 'ideogram-4',
+    label: 'Ideogram 4',
+    brand: 'Ideogram',
+    replicateSlug: 'ideogram-ai/ideogram-v4-balanced',
+    pitch: 'Crisp lettering for posters, logos and packaging, and lifelike photos.',
+    description: 'Ideogram\'s newest model. Spells words in the picture reliably, follows detailed prompts, and makes realistic photos as well as graphic designs. Pick a faster or finer speed, and a 1K or 2K picture.',
+    tags: ['flagship', 'typography', 'design'],
+    pricePerImage: 0.015,
+    aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '16:10', '10:16', '5:4', '4:5', '2:1', '1:2'],
+    defaultAspectRatio: '1:1',
+    advanced: [
+      { name: 'rendering_speed', type: 'select', label: 'Speed', default: 'BALANCED',
+        options: ['TURBO', 'BALANCED', 'QUALITY'], optionLabels: ['Fast', 'Balanced', 'Finest'],
+        description: 'Fast is cheapest and good for trying ideas. Finest takes longest and costs over three times as much as Fast.' },
+      { name: 'resolution', type: 'select', label: 'Size', default: '1K',
+        options: ['1K', '2K'], optionLabels: ['1K', '2K, sharper'],
+        description: '1K is about one million pixels, 2K about four million. 2K costs four to five times as much.' },
+    ],
   },
   {
     id: 'ideogram-v2',
@@ -918,6 +949,8 @@ export const IMAGE_MODELS: ImageModel[] = [
   // ===== xAI ================================================================
   {
     id: 'grok-imagine',
+    // Hidden (model line-up F8): Grok Imagine 2 replaces it. Saved nodes still run.
+    hidden: true,
     label: 'Grok Imagine',
     brand: 'xAI',
     replicateSlug: 'xai/grok-imagine-image',
