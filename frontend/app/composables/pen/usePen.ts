@@ -122,7 +122,11 @@ export type Pending =
   | { kind: 'line'; p1: EntityId; own?: boolean }
   | { kind: 'circle'; center: EntityId; cx: number; cy: number; own?: boolean }
   | null
-export type PendingPath = { anchors: EntityId[]; segments: SegmentSpec[] } | null
+// `ownAnchors[i]` mirrors `Pending.own` (see above) for anchors[i]: true when
+// this draw CREATED that anchor (placePoint made a fresh point), false when it
+// snapped onto a point that already existed before the gesture. Fix (a):
+// cleanupPendingPath only ever deletes an anchor this draw owns.
+export type PendingPath = { anchors: EntityId[]; segments: SegmentSpec[]; ownAnchors: boolean[] } | null
 // the path tool's live down→(bow)→up gesture — plain (non-reactive) state, as
 // it always was on the page; hosts read it through getPathDrag().
 export type PathDrag = { anchor: EntityId; prevAnchor: EntityId; startX: number; startY: number; bowed: boolean } | null
@@ -145,6 +149,24 @@ export function usePen(opts: {
 }) {
   const doc = opts.doc
   type Tool = PenTool
+
+  // --- PenOptions: resolved once at construction (opts.options is read-only
+  // config, not a live ref — the HOST CONTRACT already says a new pen is
+  // created to change anything fixed at setup). `tools` defaults to every
+  // tool; Select is always included (there is no drawing without a way back
+  // to it); openOnly drops Circle even if the host listed it — an open-path
+  // guide has no use for a closed shape. See PenToolbar for how `tools` gates
+  // the toolbar's own buttons.
+  const ALL_PEN_TOOLS: PenTool[] = ['select', 'point', 'line', 'circle', 'path', 'curve']
+  const openOnly = !!opts.options?.openOnly
+  const resolvedTools: PenTool[] = (() => {
+    let list = opts.options?.tools ? opts.options.tools.filter(t => ALL_PEN_TOOLS.includes(t)) : [...ALL_PEN_TOOLS]
+    if (!list.includes('select')) list = ['select', ...list]
+    if (openOnly) list = list.filter(t => t !== 'circle')
+    return list
+  })()
+  const options = { openOnly, tools: resolvedTools }
+  function isToolAllowed(t: Tool): boolean { return resolvedTools.includes(t) }
 
   const tool = ref<Tool>('select')
   const status = ref('ready')
@@ -543,6 +565,16 @@ export function usePen(opts: {
   // Every snap kind that actually captures a constraint (coincident reuse, or a
   // fresh pointOnLine/pointOnCircle) sparkles at the snapped location — see
   // sparkle() above.
+  // placePoint, plus whether it created a fresh point (vs. snapping onto one
+  // that already existed) — the same before/after entity-count check
+  // Line/Circle starts use for `Pending.own`, reused here for a path/curve
+  // anchor's `ownAnchors` entry (fix a).
+  function placePointOwn(x: number, y: number, exclude: EntityId[] = [], construction = false): { id: EntityId; own: boolean } {
+    const before = doc.value.entities.length
+    const id = placePoint(x, y, exclude, construction)
+    return { id, own: doc.value.entities.length !== before }
+  }
+
   function placePoint(x: number, y: number, exclude: EntityId[] = [], construction = false): EntityId {
     // Bézier handles are construction points that belong to their anchor —
     // never a snap target (08-29 build note)
@@ -654,11 +686,14 @@ export function usePen(opts: {
 
   function pathClick(x: number, y: number, shift = false) {
     const p = pathPlacementXY(x, y, shift)
-    const id = placePoint(p.x, p.y, [], guideMode.value)
-    if (!pendingPath.value) { pendingPath.value = { anchors: [id], segments: [] }; commitHistory(); return }
+    const { id, own } = placePointOwn(p.x, p.y, [], guideMode.value)
+    if (!pendingPath.value) { pendingPath.value = { anchors: [id], segments: [], ownAnchors: [own] }; commitHistory(); return }
     const pp = pendingPath.value
     const prev = doc.value.entities.find(e => e.id === pp.anchors[pp.anchors.length - 1]) as any
-    if (id === pp.anchors[0] && pp.anchors.length >= 2) { finishPath(true); return }  // clicked first anchor → close (finishPath commits)
+    if (id === pp.anchors[0] && pp.anchors.length >= 2) {
+      if (openOnly) return   // open-only: clicking the first anchor is a click on an existing anchor, not a close
+      finishPath(true); return   // clicked first anchor → close (finishPath commits)
+    }
     if (id === pp.anchors[pp.anchors.length - 1]) return                               // ignore double-click same point
     dropLastHOut()
     if (nextSegment.value === 'arc') {
@@ -672,6 +707,7 @@ export function usePen(opts: {
       pp.segments.push({ kind: 'line' })
     }
     pp.anchors.push(id)
+    pp.ownAnchors.push(own)
     commitHistory()
   }
 
@@ -711,20 +747,24 @@ export function usePen(opts: {
 
   function pathDown(x: number, y: number, shift = false) {
     const p = pathPlacementXY(x, y, shift)
-    const id = placePoint(p.x, p.y, [], guideMode.value)
+    const { id, own } = placePointOwn(p.x, p.y, [], guideMode.value)
     if (!pendingPath.value) {
-      pendingPath.value = { anchors: [id], segments: [] }
+      pendingPath.value = { anchors: [id], segments: [], ownAnchors: [own] }
       pathDrag = null
       commitHistory()   // first anchor of a fresh path — a complete, standalone placement
       return
     }
     const pp = pendingPath.value
-    if (id === pp.anchors[0] && pp.anchors.length >= 2) { finishPath(true); pathDrag = null; return }  // clicked first anchor → close (finishPath commits)
+    if (id === pp.anchors[0] && pp.anchors.length >= 2) {
+      if (openOnly) { pathDrag = null; return }   // open-only: clicking the first anchor is a click on an existing anchor, not a close
+      finishPath(true); pathDrag = null; return   // clicked first anchor → close (finishPath commits)
+    }
     if (id === pp.anchors[pp.anchors.length - 1]) { pathDrag = null; return }                            // ignore double-click same point
     const prevAnchor = pp.anchors[pp.anchors.length - 1]!
     dropLastHOut()   // a line/arc segment has no use for a Curve point's out-handle
     pp.segments.push({ kind: 'line' })
     pp.anchors.push(id)
+    pp.ownAnchors.push(own)
     if (shift) captureAxisConstraint(prevAnchor, id)
     // don't commit here — this anchor+segment (and any shift-captured axis
     // constraint) settle as ONE history entry together with whatever pathUp
@@ -815,9 +855,10 @@ export function usePen(opts: {
     const dx = cursor.value.x - prev.x, dy = cursor.value.y - prev.y
     const d = Math.hypot(dx, dy)
     const dir = d > 1e-9 ? { x: dx / d, y: dy / d } : { x: 1, y: 0 }   // cursor sitting on the anchor: fall back to +x
-    const id = placePoint(prev.x + dir.x * value, prev.y + dir.y * value, [prevId], guideMode.value)
+    const { id, own } = placePointOwn(prev.x + dir.x * value, prev.y + dir.y * value, [prevId], guideMode.value)
     pp.segments.push({ kind: 'line' })
     pp.anchors.push(id)
+    pp.ownAnchors.push(own)
     const existing = findRadiusPin(prevId, id)
     if (existing) existing.value = value
     else addConstraint(doc.value, 'distance', [prevId, id], value)
@@ -851,6 +892,7 @@ export function usePen(opts: {
   }
 
   function finishPath(close = false) {
+    if (openOnly) close = false   // open-only: a "close" request finishes the path open instead
     const pp = pendingPath.value
     pendingPath.value = null
     dimBuffer.value = ''
@@ -918,9 +960,9 @@ export function usePen(opts: {
   }
 
   function curveDown(x: number, y: number) {
-    const id = placePoint(x, y, [], guideMode.value)
+    const { id, own } = placePointOwn(x, y, [], guideMode.value)
     if (!pendingPath.value) {
-      pendingPath.value = { anchors: [id], segments: [] }
+      pendingPath.value = { anchors: [id], segments: [], ownAnchors: [own] }
       lastHOut = null
       firstHIn = null
       // no commit yet: the first point (and its handles, if dragged) settle as
@@ -930,10 +972,14 @@ export function usePen(opts: {
       return
     }
     const pp = pendingPath.value
-    if (id === pp.anchors[0] && pp.anchors.length >= 2) { finishPath(true); curveDrag.value = null; return }  // clicked first point → close (finishPath commits)
+    if (id === pp.anchors[0] && pp.anchors.length >= 2) {
+      if (openOnly) { curveDrag.value = null; return }   // open-only: clicking the first point is a click on an existing point, not a close
+      finishPath(true); curveDrag.value = null; return   // clicked first point → close (finishPath commits)
+    }
     if (id === pp.anchors[pp.anchors.length - 1]) { curveDrag.value = null; return }                            // ignore double-click same point
     pp.segments.push({ kind: 'cubic', h1: lastHOut, h2: null })
     pp.anchors.push(id)
+    pp.ownAnchors.push(own)
     curveDrag.value = { anchor: id, startX: x, startY: y, smooth: false }
     opts.onLiveChange?.()
   }
@@ -1055,10 +1101,13 @@ export function usePen(opts: {
   // whichever of them nothing committed ends up referencing — an anchor reused
   // via snap-coincidence with existing geometry stays (deleteEntity would
   // otherwise cascade into whatever committed line/circle/path shares it).
+  // Fix (a): an anchor this draw did NOT create (ownAnchors[i] === false, it
+  // snapped onto a pre-existing point) is never a deletion candidate at all —
+  // same rule Pending.own already applies to a Line/Circle start point.
   function cleanupPendingPath() {
     const pp = pendingPath.value
     if (!pp) return
-    const candidates = new Set<EntityId>(pp.anchors)
+    const candidates = new Set<EntityId>(pp.anchors.filter((_, i) => pp.ownAnchors[i]))
     for (const s of pp.segments) {
       if (s.kind === 'cubic') { if (s.h1) candidates.add(s.h1); if (s.h2) candidates.add(s.h2) }
       else if (s.kind === 'arc') candidates.add(s.center)
@@ -1125,8 +1174,9 @@ export function usePen(opts: {
     if (!pp || pp.anchors.length === 0) return
     const before = doc.value.entities.length
     const lastAnchor = pp.anchors.pop()!
+    const lastOwn = pp.ownAnchors.pop()
     const lastSeg = pp.segments.length ? pp.segments.pop() : undefined
-    const candidates: EntityId[] = [lastAnchor]
+    const candidates: EntityId[] = lastOwn ? [lastAnchor] : []
     if (lastSeg && lastSeg.kind === 'arc') candidates.push(lastSeg.center)
     // a Curve point: its in-handle (the popped segment's h2) and its out-handle
     // go with it; the previous point's out-handle (h1) is held again
@@ -1149,6 +1199,7 @@ export function usePen(opts: {
   }
 
   function selectTool(t: Tool) {
+    if (!isToolAllowed(t)) return   // PenOptions.tools / openOnly: not a tool this host offers — no-op
     // Pen ↔ Curve mid-path keeps drawing the same path: the next segment's kind
     // follows whichever of the two is active when its end point is placed
     if (pendingPath.value && isDrawTool(tool.value) && isDrawTool(t)) {
@@ -1158,7 +1209,22 @@ export function usePen(opts: {
       dimBuffer.value = ''
       return
     }
-    cleanupPendingAndCommit()
+    // Fix (c): switching tools mid Line/Circle must delete its owned start
+    // point (placePoint created it fresh — Pending.own), same rule
+    // finishSession already applies when the session ends instead of the tool
+    // changing. Folded into ONE before/after check + commit with the pending
+    // PATH cleanup right below, so a switch that touches both never lands two
+    // history entries (or, worse, an uncommitted one — see cleanupPendingPath's
+    // own ghost-anchor warning).
+    const before = doc.value.entities.length
+    cleanupPendingPath()
+    const pd = pending.value
+    if (pd && pd.own) {
+      const id = pd.kind === 'line' ? pd.p1 : pd.center
+      const p = doc.value.entities.find(e => e.id === id) as any
+      if (p && p.kind === 'point' && !p.fixed && !isPointReferenced(doc.value, id)) deleteEntity(doc.value, id)
+    }
+    if (doc.value.entities.length !== before) commitHistory()
     cancelPendingOp()   // a half-armed Repeat/Mirror never survives a tool switch
     cancelValue()       // a pending value request (Distance/Radius/Copies) never survives a tool switch
     // switching to a draw tool must not carry a stale entity/segment
@@ -1262,6 +1328,16 @@ export function usePen(opts: {
   }
   function getPathDrag(): PathDrag { return pathDrag }
 
+  // Fix (b): end the pen's own live down→drag→up gesture without touching the
+  // pending path itself — the host calls this when it parks the pen (e.g.
+  // PenOverlay's `active` turning false) so a drag that never got a pointerup
+  // doesn't resume mid-air once the overlay reactivates. Mirrors what the
+  // overlay's own watcher already does for its point-drag/marquee state.
+  function endGesture(): void {
+    pathDrag = null
+    curveDrag.value = null
+  }
+
   // stop the sparkle loop — the host calls this when it unmounts
   function dispose() {
     cancelValue()   // a pending value request never outlives the pen
@@ -1274,6 +1350,8 @@ export function usePen(opts: {
   return {
     // the host's doc ref, handed back so a renderer (PenOverlay) needs only the pen
     doc,
+    // resolved PenOptions (tools defaults to all tools; openOnly excludes circle)
+    options,
     // state
     tool, guideMode, showLabels, status, selection, selectedSegments, pending, pendingPath,
     pendingOp, opHint, cursor, dimBuffer, nextSegment, sparkles, sparkleClock,
@@ -1284,7 +1362,7 @@ export function usePen(opts: {
     pick, clearSel, pickSegment, clearSegSel, marqueeSelect, marqueeSelectScreen, isPointId,
     // drawing
     place, pathDown, pathMove, pathUp, finishPath, cancelPath, removeLastAnchor, getPathDrag, jointInfoForSegment,
-    curveDown, curveMove, curveUp, getCurveDrag, getHeldHandles, handleIds,
+    curveDown, curveMove, curveUp, getCurveDrag, getHeldHandles, handleIds, endGesture,
     // verbs
     runSolve, apply, applyWithValue, availableConstraints, orderRefs, del, nudge, fixSelected, makeConstruction, flip,
     repeatPrompt, armRepeat, doRepeat, applyRepeat, doMirror, applyMirror, cancelPendingOp,

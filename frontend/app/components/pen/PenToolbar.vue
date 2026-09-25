@@ -28,7 +28,7 @@ const emit = defineEmits<{
 // the pen is read ONCE — fixed for this component's lifetime (re-key it to
 // swap pens); unwrap its refs for the template, same convention as PenOverlay.
 const {
-  tool, guideMode, showLabels, selection, selectedSegments, opHint,
+  tool, guideMode, showLabels, selection, selectedSegments, opHint, options,
   selectTool, toggleGuideMode, toggleShowLabels,
   availableConstraints, applyWithValue, fixSelected, repeatPrompt, doMirror,
   flip, makeConstruction, del, finishPath, cancelPendingOp,
@@ -43,7 +43,7 @@ function done() {
 // Tool row: Select, Pen (arcs), Curve (Bézier), Line, Circle, Point. Pen and
 // Curve add to the same path. Order and tooltip copy match the spec's
 // approved layout (sentence case, "Name — what it does").
-const TOOLS: { id: PenTool; icon: Component; label: string }[] = [
+const ALL_TOOLS: { id: PenTool; icon: Component; label: string }[] = [
   { id: 'select', icon: MousePointer2, label: 'Select — click a shape to select it, drag a point to move it' },
   { id: 'path', icon: Spline, label: 'Pen — click to add a point, drag to bend it into an arc' },
   { id: 'curve', icon: PenNib, label: 'Bézier curve — drag to pull out handles' },
@@ -51,6 +51,9 @@ const TOOLS: { id: PenTool; icon: Component; label: string }[] = [
   { id: 'circle', icon: Circle, label: 'Circle — click the centre, then click again to set the size' },
   { id: 'point', icon: Dot, label: 'Point — click to place a point' },
 ]
+// only the tools this host offers (PenOptions.tools, resolved by usePen —
+// always includes Select, and openOnly already drops Circle there)
+const TOOLS = computed(() => ALL_TOOLS.filter(t => options.tools.includes(t.id)))
 
 // idle per-tool hints (sentence case, no identifiers) — shown while nothing
 // is pending and (for select) nothing is selected.
@@ -115,7 +118,7 @@ const isSelectIdle = computed(() => tool.value === 'select' && !hasAnySelection.
       </button>
       <template v-if="tool === 'path' || tool === 'curve'">
         <span class="sep" />
-        <button class="tbtn" data-act="close" title="Close the path back to its first point" @click="finishPath(true)">Close</button>
+        <button v-if="!options.openOnly" class="tbtn" data-act="close" title="Close the path back to its first point" @click="finishPath(true)">Close</button>
         <button class="tbtn" data-act="finish" title="Finish the path as an open line" @click="finishPath(false)">Finish</button>
       </template>
       <span class="sep" />

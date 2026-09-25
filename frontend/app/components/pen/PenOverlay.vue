@@ -61,7 +61,7 @@ const {
   place, pathDown, pathMove, pathUp, getPathDrag, jointInfoForSegment,
   curveDown, curveMove, curveUp, getCurveDrag, getHeldHandles, handleIds,
   runSolve, applyRepeat, applyMirror, cancelPendingOp,
-  onArcDimClick, onConstraintMarkClick, commitHistory, finishSession,
+  onArcDimClick, onConstraintMarkClick, commitHistory, finishSession, endGesture,
 } = props.pen
 
 const svgEl = ref<SVGSVGElement | null>(null)
@@ -602,12 +602,15 @@ function onDimClick(m: Parameters<typeof onArcDimClick>[0]) {
 }
 
 // parked mid-gesture: drop the overlay's own live gesture state (a marquee or
-// a point drag) so nothing resumes when it becomes active again
+// a point drag) so nothing resumes when it becomes active again — and end the
+// PEN's own live gesture too (fix b: a path/curve down→drag never left
+// hanging without a pointerup would otherwise resume mid-air on reactivation)
 watch(() => props.active, (on) => {
   if (on) return
   cancelMarquee()
   if (moved && tool.value === 'select') commitHistory()
   dragId = null; dragHandleIds = []; dragLast = null; moved = false
+  endGesture()
 })
 
 // ---------- keyboard ----------
