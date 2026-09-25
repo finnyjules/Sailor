@@ -1,0 +1,564 @@
+[
+ {
+  "src": "/view?filename=voice.mp3&type=input",
+  "python": "voice.mp3",
+  "lists": {
+   "filename": [
+    "voice.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=&filename=secret.mp4&type=input",
+  "python": "secret.mp4",
+  "lists": {
+   "filename": [
+    "secret.mp4"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=a.mp3&type=&type=input",
+  "python": "a.mp3",
+  "lists": {
+   "filename": [
+    "a.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?type=&type=input&filename=&filename=b.mp3",
+  "python": "b.mp3",
+  "lists": {
+   "filename": [
+    "b.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=a.mp3&amp;type=input",
+  "python": null,
+  "lists": {
+   "filename": [
+    "a.mp3"
+   ],
+   "type": [],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=a.mp3&amp;filename=b.mp3&type=input",
+  "python": "a.mp3",
+  "lists": {
+   "filename": [
+    "a.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=a+b.mp3&type=input",
+  "python": "a b.mp3",
+  "lists": {
+   "filename": [
+    "a b.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=a%20b.mp3&type=input",
+  "python": "a b.mp3",
+  "lists": {
+   "filename": [
+    "a b.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=a%2Bb.mp3&type=input",
+  "python": "a+b.mp3",
+  "lists": {
+   "filename": [
+    "a+b.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?fil%65name=x.mp3&type=input",
+  "python": "x.mp3",
+  "lists": {
+   "filename": [
+    "x.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=x.mp3;type=input",
+  "python": null,
+  "lists": {
+   "filename": [
+    "x.mp3;type=input"
+   ],
+   "type": [],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=x.mp3&type=input#frag",
+  "python": "x.mp3",
+  "lists": {
+   "filename": [
+    "x.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=x.mp3#&type=input",
+  "python": null,
+  "lists": {
+   "filename": [
+    "x.mp3"
+   ],
+   "type": [],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=x.mp3&type=in\tput",
+  "python": "x.mp3",
+  "lists": {
+   "filename": [
+    "x.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=x.mp3&ty\npe=input",
+  "python": "x.mp3",
+  "lists": {
+   "filename": [
+    "x.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?file\rname=x.mp3&type=input",
+  "python": "x.mp3",
+  "lists": {
+   "filename": [
+    "x.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=%C3%A9.mp3&type=input",
+  "python": "é.mp3",
+  "lists": {
+   "filename": [
+    "é.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=%C3.mp3&type=input",
+  "python": "�.mp3",
+  "lists": {
+   "filename": [
+    "�.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=%zz.mp3&type=input",
+  "python": "%zz.mp3",
+  "lists": {
+   "filename": [
+    "%zz.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=%4.mp3&type=input",
+  "python": "%4.mp3",
+  "lists": {
+   "filename": [
+    "%4.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename&type=input&filename=y.mp3",
+  "python": "y.mp3",
+  "lists": {
+   "filename": [
+    "y.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?type=input&filename=a.mp3&filename=b.mp3",
+  "python": "a.mp3",
+  "lists": {
+   "filename": [
+    "a.mp3",
+    "b.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?type=input&type=output&filename=a.mp3",
+  "python": "a.mp3",
+  "lists": {
+   "filename": [
+    "a.mp3"
+   ],
+   "type": [
+    "input",
+    "output"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?type=input&filename=a.mp3&subfolder=x&subfolder=y",
+  "python": "a.mp3",
+  "lists": {
+   "filename": [
+    "a.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": [
+    "x",
+    "y"
+   ]
+  }
+ },
+ {
+  "src": "/view?type=input&filename=a.mp3&subfolder=&subfolder=y",
+  "python": "a.mp3",
+  "lists": {
+   "filename": [
+    "a.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": [
+    "y"
+   ]
+  }
+ },
+ {
+  "src": "/view?filename=..%2Fx&type=input",
+  "python": null,
+  "lists": {
+   "filename": [
+    "../x"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=x%2Fy&type=input",
+  "python": null,
+  "lists": {
+   "filename": [
+    "x/y"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=x%5Cy&type=input",
+  "python": null,
+  "lists": {
+   "filename": [
+    "x\\y"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=%2e%2e&type=input",
+  "python": null,
+  "lists": {
+   "filename": [
+    ".."
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?=x&filename=q.mp3&type=input",
+  "python": "q.mp3",
+  "lists": {
+   "filename": [
+    "q.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=x.mp3&type=INPUT",
+  "python": null,
+  "lists": {
+   "filename": [
+    "x.mp3"
+   ],
+   "type": [
+    "INPUT"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=x.mp3?y&type=input",
+  "python": "x.mp3?y",
+  "lists": {
+   "filename": [
+    "x.mp3?y"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=x.mp3&&type=input",
+  "python": "x.mp3",
+  "lists": {
+   "filename": [
+    "x.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename==x.mp3&type=input",
+  "python": "=x.mp3",
+  "lists": {
+   "filename": [
+    "=x.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=%26.mp3&type=input",
+  "python": "&.mp3",
+  "lists": {
+   "filename": [
+    "&.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=%3D.mp3&type=%69nput",
+  "python": "=.mp3",
+  "lists": {
+   "filename": [
+    "=.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=é.mp3&type=input",
+  "python": "é.mp3",
+  "lists": {
+   "filename": [
+    "é.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=%EF%BF%BD.mp3&type=input",
+  "python": "�.mp3",
+  "lists": {
+   "filename": [
+    "�.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=a.mp3&type=input&type=input",
+  "python": "a.mp3",
+  "lists": {
+   "filename": [
+    "a.mp3"
+   ],
+   "type": [
+    "input",
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename= x.mp3 &type=input",
+  "python": " x.mp3 ",
+  "lists": {
+   "filename": [
+    " x.mp3 "
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=%00x.mp3&type=input",
+  "python": "\u0000x.mp3",
+  "lists": {
+   "filename": [
+    "\u0000x.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/views?filename=x.mp3&type=input",
+  "python": null,
+  "lists": {
+   "filename": [],
+   "type": [],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view/?filename=x.mp3&type=input",
+  "python": null,
+  "lists": {
+   "filename": [],
+   "type": [],
+   "subfolder": []
+  }
+ },
+ {
+  "src": " /view?filename=x.mp3&type=input",
+  "python": null,
+  "lists": {
+   "filename": [],
+   "type": [],
+   "subfolder": []
+  }
+ }
+]

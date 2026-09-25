@@ -25,7 +25,10 @@ import { RUNNER_NODE_RULES } from '#shared/runner/eligibility'
 import { CLIP_RATES } from '#shared/pricing/clipRates'
 import { VIDEO_RATES } from '#shared/pricing/videoRates'
 import { LARGEST_INPUT_PIXELS, nanoBananaPixels } from '#shared/pricing/editSettings'
-import { billedSeconds, parseViewRef, secondsPricedMedia, sourceAudioSeconds } from '#shared/pricing/clipSettings'
+import {
+  LIPSYNC_MEDIA_READS, VIEW_REF_REFUSED, ViewRefRefusedError, allotMediaFiles, billedSeconds, gateNodeOrder, parseViewRef, pyParseQs,
+  readViewRef, secondsPricedMedia, sourceAudioSeconds,
+} from '#shared/pricing/clipSettings'
 import { creditsForUsd } from '#shared/pricing/markup'
 import { priceNode } from '#shared/pricing/nodePrice'
 import { nodeCreditEstimate } from '~/lib/nodeCreditEstimate'
@@ -215,24 +218,43 @@ describe('the /prompt gate measures lip-sync media', () => {
       .toEqual([creditsForUsd(6 * 0.014), creditsForUsd(1 * 0.15), creditsForUsd(60 * 0.15), creditsForUsd(60 * 0.15)])   // Kling 5.2 s video, the 1 s placeholder, 75 s capped, a URL
   })
 
-  it('pictures and media lengths share one memo and one 8-read budget per prompt', async () => {
+  it('lip-sync media have their own reserved slots: a graph full of pictures can\'t use them up (fix round 2)', async () => {
     const reads = createGateReads()
-    let calls = 0
-    const countRead = async () => { calls++; return 3 }
+    const calls = { pictures: 0, media: 0 }
     const nodes: Record<string, any> = {}
-    for (let i = 0; i < 6; i++) {
-      nodes[`a${i}`] = { class_type: 'LoadAudio', inputs: { audio: `v${i}.wav` } }
-      nodes[`l${i}`] = { class_type: 'LipsyncNode', inputs: { audio: [`a${i}`, 0], sync_mode: 'cut_off' } }
+    for (let i = 0; i < 12; i++) {                       // more pictures than the picture budget, and read FIRST
+      nodes[`${100 + i}`] = { class_type: 'LoadImage', inputs: { image: `p${i}.png` } }
+      nodes[`${200 + i}`] = { class_type: 'UpscaleImageNode', inputs: { model: 'Crystal', image: [`${100 + i}`, 0] } }
     }
-    nodes.dup = { class_type: 'LipsyncNode', inputs: { audio: ['a0', 0], sync_mode: 'cut_off' } }  // same file: memoised
-    for (let i = 0; i < 4; i++) {
-      nodes[`i${i}`] = { class_type: 'LoadImage', inputs: { image: `p${i}.png` } }
-      nodes[`u${i}`] = { class_type: 'UpscaleImageNode', inputs: { model: 'Crystal', image: [`i${i}`, 0] } }
+    for (let i = 0; i < 3; i++) {
+      nodes[`${300 + i}`] = { class_type: 'LoadAudio', inputs: { audio: `v${i}.wav` } }
+      nodes[`${400 + i}`] = { class_type: 'LipsyncNode', inputs: { audio: [`${300 + i}`, 0], sync_mode: 'cut_off' } }
     }
-    const secs = await graphInputSeconds(nodes, countRead, reads)
-    const px = await graphInputPixels(nodes, countRead, reads)
-    expect(calls).toBe(MAX_MEASURED_FILES)
-    expect(Object.keys(secs).length + Object.keys(px).length).toBe(MAX_MEASURED_FILES + 1)   // + the memoised duplicate
+    nodes['403'] = { class_type: 'LipsyncNode', inputs: { audio: ['300', 0], sync_mode: 'cut_off' } }  // same file: memoised
+    const px = await graphInputPixels(nodes, async () => { calls.pictures++; return 1e6 }, reads)
+    const secs = await graphInputSeconds(nodes, async () => { calls.media++; return 3 }, reads)
+    expect(calls).toEqual({ pictures: MAX_MEASURED_FILES, media: 3 })
+    expect(Object.keys(px)).toHaveLength(MAX_MEASURED_FILES)
+    expect(Object.keys(secs).sort()).toEqual(['400', '401', '402', '403'])
+    expect(LIPSYNC_MEDIA_READS).toBe(8)
+  })
+
+  it('past the media budget, the first files in gate order get a read and the rest price at 60 s', async () => {
+    const nodes: Record<string, any> = {}
+    for (let i = 0; i < 10; i++) {
+      nodes[`${10 + i}`] = { class_type: 'LoadAudio', inputs: { audio: `v${i}.wav` } }
+      nodes[`${30 + i}`] = { class_type: 'LipsyncNode', inputs: { audio: [`${10 + i}`, 0], sync_mode: 'cut_off' } }
+    }
+    const read = vi.fn(async () => 5)
+    const secs = await graphInputSeconds(nodes, read)
+    expect(read).toHaveBeenCalledTimes(LIPSYNC_MEDIA_READS)
+    expect(Object.keys(secs).sort()).toEqual(['30', '31', '32', '33', '34', '35', '36', '37'])
+    const p = priceGraph(nodes, { inputSeconds: secs })
+    expect(p.breakdown.filter(b => b.action.startsWith('LipsyncNode')).map(b => b.credits))
+      .toEqual([...Array(8).fill(creditsForUsd(5 * 0.08325)), creditsForUsd(60 * 0.08325), creditsForUsd(60 * 0.08325)])
+    // The order: integer ids ascending, then the rest in string order.
+    expect(gateNodeOrder(['10', '9', 'b', '12:3', 'a', '100'])).toEqual(['9', '10', '100', '12:3', 'a', 'b'])
+    expect([...allotMediaFiles(['x', 'y', 'x', 'z'], 2)]).toEqual(['x', 'y'])
   })
 
   it('meterGraphSubmit holds on the measured length, and on 60 s without it', async () => {
@@ -326,6 +348,46 @@ describe('badge: the same figure where the canvas knows the length, else "up to"
     expect(upstreamInputSeconds(node, [empty, node], [edge('e', 'n')])).toEqual({ seconds: { audio: 1 }, upTo: false })
   })
 
+  it('more measurable files on the canvas than the gate reads: the ones past the budget say "up to" the capped figure', () => {
+    const nodes: any[] = []
+    const edges: any[] = []
+    for (let i = 0; i < 10; i++) {
+      nodes.push(audioCard(`${10 + i}`, `v${i}.wav`, { file: `v${i}.wav`, seconds: 5 }))
+      nodes.push({ id: `${30 + i}`, data: { nodeType: 'LipsyncNode', widgetDefs: def(['sync_mode']), widgetsValues: ['cut_off'], inputs: [{ name: 'audio' }] } })
+      edges.push(edge(`${10 + i}`, `${30 + i}`))
+    }
+    const at = (id: string) => upstreamInputSeconds(nodes.find(n => n.id === id), nodes, edges)!
+    expect(at('37')).toEqual({ seconds: { audio: 5 }, upTo: false })     // the 8th file: read by the gate
+    expect(at('38')).toEqual({ seconds: {}, upTo: true })                // the 9th: priced at the cap
+    // Mirror the gate: the same graph, measured there, charges exactly what each badge shows (or less, for "up to").
+    const prompt: Record<string, any> = {}
+    for (let i = 0; i < 10; i++) {
+      prompt[`${10 + i}`] = { class_type: 'Audio', inputs: { audio: `v${i}.wav` } }
+      prompt[`${30 + i}`] = { class_type: 'LipsyncNode', inputs: { audio: [`${10 + i}`, 0], sync_mode: 'cut_off' } }
+    }
+    return graphInputSeconds(prompt, async () => 5).then((secs) => {
+      for (let i = 0; i < 10; i++) {
+        const id = `${30 + i}`
+        const s = at(id)
+        const badge = nodeCreditEstimate('LipsyncNode', { sync_mode: 'cut_off', audio: LINK }, { inputSeconds: s.seconds })!
+        const gate = nodeCreditEstimate('LipsyncNode', { sync_mode: 'cut_off', audio: LINK }, { inputSeconds: secs[id] })!
+        expect(badge, id).toBe(gate)
+      }
+    })
+  })
+
+  it('a muted lip-sync node on the canvas takes no slot; a subgraph’s inner nodes sort after every canvas id', () => {
+    const nodes: any[] = []
+    const edges: any[] = []
+    for (let i = 0; i < 9; i++) {
+      nodes.push(audioCard(`${10 + i}`, `v${i}.wav`, { file: `v${i}.wav`, seconds: 5 }))
+      nodes.push({ id: `${30 + i}`, data: { nodeType: 'LipsyncNode', mode: i === 0 ? 2 : 0, widgetDefs: def(['sync_mode']), widgetsValues: ['cut_off'], inputs: [{ name: 'audio' }] } })
+      edges.push(edge(`${10 + i}`, `${30 + i}`))
+    }
+    expect(upstreamInputSeconds(nodes.find(n => n.id === '38'), nodes, edges)!.upTo).toBe(false)
+    expect(gateNodeOrder(['38', '5:1', '1000'])).toEqual(['38', '1000', '5:1'])
+  })
+
   it('Kling lip-sync: the source video is never known on the canvas → "up to"', () => {
     const card = audioCard('c', 'voice.wav', { file: 'voice.wav', seconds: 7.3 })
     const node = lipsync('n', { engine: 'sync' })
@@ -406,5 +468,82 @@ describe('review I2, M2, M3', () => {
   it('M3: RESTYLE_LORA_CREDITS is gone', () => {
     expect('RESTYLE_LORA_CREDITS' in PriceBook).toBe(false)
     expect(PriceBook.PRICE_BOOK_VERSION).toBe('lineup-p5b')
+  })
+})
+
+// ── Fix round 2, CRITICAL 1: the one `/view?` parser, Python's exactly ─────
+
+describe('the /view? link parser reads links exactly as the engine does', () => {
+  type Case = { src: string, python: string | null, lists: Record<'filename' | 'type' | 'subfolder', string[]> }
+  // Recorded from .venv/bin/python: video_models.parse_view_ref and
+  // parse_qs(urlsplit(src).query) for each case (tab/CR/LF, "#", "&amp;", "+",
+  // %20, %2B, blank values, duplicate keys, bad percent escapes, bad UTF-8, …).
+  const CASES = JSON.parse(readFileSync(fileURLToPath(new URL('./fixtures/pricing/view-ref-python.json', import.meta.url)), 'utf8')) as Case[]
+  /** Refused: a key named more than once with a value, or bytes Python would replace with U+FFFD. */
+  const shouldRefuse = (c: Case) => Object.values(c.lists).some(l => l.length > 1) || c.src.includes('%C3.mp3')
+
+  it('the fixture covers the cases the review named', () => {
+    const srcs = CASES.map(c => c.src)
+    for (const s of ['/view?filename=&filename=secret.mp4&type=input', '/view?filename=a.mp3&type=&type=input', '/view?filename=a.mp3&amp;type=input',
+      '/view?filename=a+b.mp3&type=input', '/view?filename=a%20b.mp3&type=input', '/view?type=input&filename=a.mp3&filename=b.mp3']) expect(srcs).toContain(s)
+    expect(CASES.length).toBeGreaterThan(40)
+  })
+
+  it('every case: the name is Python’s, or the link is refused', () => {
+    for (const c of CASES) {
+      const r = readViewRef(c.src)
+      if (!c.src.startsWith('/view?')) { expect(r, c.src).toBeNull(); continue }
+      if (shouldRefuse(c)) {
+        expect(r!.refused, JSON.stringify(c.src)).toBe(VIEW_REF_REFUSED)
+        expect(() => parseViewRef(c.src), JSON.stringify(c.src)).toThrow(ViewRefRefusedError)
+      }
+      else {
+        expect(r, JSON.stringify(c.src)).toEqual({ name: c.python, refused: null })
+        expect(parseViewRef(c.src), JSON.stringify(c.src)).toBe(c.python)
+      }
+    }
+  })
+
+  it('the bypass the review found now vets the file Python opens', () => {
+    expect(parseViewRef('/view?filename=&filename=secret.mp4&type=input')).toBe('secret.mp4')
+    expect(parseViewRef('/view?filename=secret.mp4&type=&type=input')).toBe('secret.mp4')
+    // URLSearchParams (the old reader) saw nothing here:
+    expect(new URLSearchParams('filename=&filename=secret.mp4&type=input').get('filename')).toBe('')
+  })
+
+  it('parse_qs: blank values dropped, "+" is a space, keys decoded, ";" is not a separator', () => {
+    const q = pyParseQs('a=&a=1&b&c=x+y&%64=z&e=1;f=2&&g=%2B')!
+    expect(Object.fromEntries(q)).toEqual({ a: ['1'], c: ['x y'], d: ['z'], e: ['1;f=2'], g: ['+'] })
+    expect(pyParseQs('filename=%C3')).toBeNull()
+    expect(pyParseQs('filename=%zz%4')!.get('filename')).toEqual(['%zz%4'])
+  })
+
+  it('live parity with the engine’s own parser, when the repo venv is here', async () => {
+    const py = `${REPO}.venv/bin/python`
+    const { existsSync } = await import('node:fs')
+    if (!existsSync(py)) return
+    const { execFileSync } = await import('node:child_process')
+    const script = 'import json,sys\nfrom comfy_api_nodes.video_models import parse_view_ref\nprint(json.dumps([parse_view_ref(s) for s in json.load(sys.stdin)]))'
+    const got = JSON.parse(execFileSync(py, ['-c', script], { cwd: REPO, input: JSON.stringify(CASES.map(c => c.src)), encoding: 'utf8' })) as (string | null)[]
+    expect(got).toEqual(CASES.map(c => c.python))
+  })
+
+  it('the gate refuses a refused link with a plain 403 — no hold, nothing read', async () => {
+    const ctx = { uploadFlagged: new Set<string>(), callerHash: 'h', ownsInput: async () => true, ownsOutput: async () => false }
+    const bad = '/view?type=input&filename=mine.mp3&filename=secret.mp3'
+    for (const [ct, mo] of [['LipSyncNode', { audio: bad }], ['LipSyncNode', { face_video: bad }]] as const) {
+      const err = await validateGraphFileRefs({ 1: { class_type: ct, inputs: { model_options: JSON.stringify(mo) } } }, ctx).catch(e => e)
+      expect(err, ct).toBeInstanceOf(ViewRefRefusedError)
+      expect(err.statusCode).toBe(403)
+      expect(err.message).toBe(VIEW_REF_REFUSED)
+      expect((err.constructor as any).__h3_error__).toBe(true)
+    }
+    // The shared price never measures a refused link.
+    expect(secondsPricedMedia('LipSyncNode', { model_options: JSON.stringify({ audio: bad }) })).toEqual({ audio: null, video: null })
+    // Every /view parser the gate, the measurer and the price use is this one.
+    for (const f of ['server/utils/engineFileSurface.ts', 'server/utils/graphInputSeconds.ts', 'server/utils/graphInputPixels.ts', 'shared/pricing/clipSettings.ts']) {
+      const src = readFileSync(`${REPO}frontend/${f}`, 'utf8')
+      expect(src, f).not.toMatch(/new URLSearchParams/)
+    }
   })
 })

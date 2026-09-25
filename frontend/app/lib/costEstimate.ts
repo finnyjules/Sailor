@@ -28,7 +28,7 @@ import { BASE_RENDER_CREDITS } from '~/lib/nodeCreditEstimate'
 import { creditsForUsd } from '~/lib/pricing'
 import { priceNode } from '#shared/pricing/nodePrice'
 import { sizePricedInput, sourceOutputPixels } from '#shared/pricing/editSettings'
-import { secondsPricedMedia, sourceAudioSeconds, type InputSeconds } from '#shared/pricing/clipSettings'
+import { allotMediaFiles, gateNodeOrder, mediaFileKey, secondsPricedMedia, sourceAudioSeconds, type InputSeconds, type MediaFileRef, type MediaSource } from '#shared/pricing/clipSettings'
 
 export interface BadgeCost { usd: number; approximate: boolean }
 
@@ -239,14 +239,18 @@ export function upstreamInputPixels(node: any, nodes?: readonly any[] | null, ed
 
 /**
  * The media lengths a lip-sync canvas node's price depends on, as far as the
- * canvas knows them (P5 fix round 1), and whether the price is still a ceiling:
+ * canvas knows them (P5 fix rounds 1–2), and whether the price is still a ceiling:
  *  - the sound wired from an Audio card: the length the card read from its own
  *    file (`data.audioSeconds`, recorded by ArtifactAudioNode for that file),
  *    or its source followed on; an empty card is 1 s of silence;
  *  - from MusicGen / Generate music: its duration widget (sourceAudioSeconds —
  *    the hosted gate reads the same);
  *  - anything else (a loaded file the canvas hasn't read, text to speech, the
- *    Lip-Sync Studio's `/view` links): not known.
+ *    Lip-Sync Studio's `/view` links, Kling's source video): not known.
+ * A file counts as known only if the gate will also read it: the gate reads at
+ * most LIPSYNC_MEDIA_READS media files per run, handed out in a fixed order
+ * (canvasMediaAllotment mirrors it over the whole canvas, a superset of any
+ * run's graph), and prices the rest at the cap.
  * `upTo` is true when an unknown length changes the price — the badge then
  * shows the 60 s figure as "up to", never below the charge. Null for a class
  * with no such media.
@@ -259,10 +263,9 @@ export function upstreamInputSeconds(node: any, nodes?: readonly any[] | null, e
   const media = secondsPricedMedia(ct, own)
   if (!media) return null
   const seconds: InputSeconds = {}
-  if (media.audio && 'link' in media.audio) {
-    const audio = upstreamAudioSeconds(node, 'audio', nodes, edges)
-    if (audio != null) seconds.audio = audio
-  }
+  const origin = canvasMediaOrigin(node, media.audio, nodes, edges)
+  if (origin && 'seconds' in origin) seconds.audio = origin.seconds
+  else if (origin && origin.known != null && canvasMediaAllotment(nodes, edges).has(mediaFileKey('audio', origin.file))) seconds.audio = origin.known
   // Would a short clip lower the price? Then an unknown length is in it.
   const at = (s: InputSeconds) => { const p = priceNode(ct, own, { inputSeconds: s }); return 'refused' in p ? null : p.credits }
   const known = at(seconds)
@@ -270,26 +273,55 @@ export function upstreamInputSeconds(node: any, nodes?: readonly any[] | null, e
   return { seconds, upTo: known != null && shortest != null && shortest < known }
 }
 
-/** Seconds of the sound on `node`'s input `port`, followed through Audio cards; null when not known. */
-function upstreamAudioSeconds(node: any, port: string, nodes?: readonly any[] | null, edges?: readonly any[] | null): number | null {
+type CanvasOrigin = { file: MediaFileRef, known: number | null } | { seconds: number } | null
+
+/** Where a canvas lip-sync node's sound comes from (the gate's mediaOrigin, over canvas nodes and edges). */
+function canvasMediaOrigin(node: any, src: MediaSource, nodes?: readonly any[] | null, edges?: readonly any[] | null): CanvasOrigin {
+  if (!src) return null
+  if ('inputFile' in src) return { file: { value: src.inputFile, literalInput: true }, known: null }
   let cur = node
-  let name = port
+  let name = 'audio'
   for (let hop = 0; hop < 8 && cur?.data && nodes && edges; hop++) {
     const idx = (cur.data.inputs || []).findIndex((i: any) => i?.name === name)
     if (idx < 0) return null
     const edge = edges.find((e: any) => String(e?.target) === String(cur.id) && e?.targetHandle === `input-${idx}`)
-    const src = edge ? nodes.find((m: any) => String(m?.id) === String(edge.source)) : null
-    if (!src?.data) return null
-    const sct = String(src.data.nodeType || '')
-    const si = widgetValueMap(src.data.widgetDefs, src.data.widgetsValues, linkedInputNames(String(src.id), src.data.inputs, edges))
-    if (sct === 'Audio') {
-      if (Array.isArray(si.source)) { cur = src; name = 'source'; continue }
+    const from = edge ? nodes.find((m: any) => String(m?.id) === String(edge.source)) : null
+    if (!from?.data) return null
+    const sct = String(from.data.nodeType || '')
+    const si = widgetValueMap(from.data.widgetDefs, from.data.widgetsValues, linkedInputNames(String(from.id), from.data.inputs, edges))
+    if (sct === 'Audio' || sct === 'LoadAudio') {
+      if (sct === 'Audio' && Array.isArray(si.source)) { cur = from; name = 'source'; continue }
       const file = typeof si.audio === 'string' ? si.audio : ''
-      if (!file) return 1
-      const meta = src.data.audioSeconds
-      return meta && meta.file === file && Number.isFinite(meta.seconds) && meta.seconds > 0 ? meta.seconds : null
+      if (!file) return sct === 'Audio' ? { seconds: 1 } : null
+      const meta = from.data.audioSeconds
+      const known = meta && meta.file === file && Number.isFinite(meta.seconds) && meta.seconds > 0 ? meta.seconds : null
+      return { file: { value: file, literalInput: false }, known }
     }
-    return sourceAudioSeconds(sct, si)
+    const n = sourceAudioSeconds(sct, si)
+    return n == null ? null : { seconds: n }
   }
   return null
+}
+
+/**
+ * The media files the gate would read if the whole canvas ran: every lip-sync
+ * node that runs (not muted), in the gate's order, its sound then its video,
+ * the first LIPSYNC_MEDIA_READS distinct files (allotMediaFiles). A run of part
+ * of the canvas holds fewer files, so a file allotted here is allotted there too.
+ */
+export function canvasMediaAllotment(nodes?: readonly any[] | null, edges?: readonly any[] | null): Set<string> {
+  const byId = new Map<string, any>()
+  for (const n of nodes ?? []) if (n?.data && (n.data.mode ?? 0) !== 2) byId.set(String(n.id), n)
+  const keys: string[] = []
+  for (const id of gateNodeOrder(byId.keys())) {
+    const n = byId.get(id)
+    const own = widgetValueMap(n.data.widgetDefs, n.data.widgetsValues, linkedInputNames(id, n.data.inputs, edges ?? []))
+    const media = secondsPricedMedia(String(n.data.nodeType || ''), own)
+    if (!media) continue
+    const audio = canvasMediaOrigin(n, media.audio, nodes, edges)
+    if (audio && 'file' in audio) keys.push(mediaFileKey('audio', audio.file))
+    const video = media.video && 'inputFile' in media.video ? { value: media.video.inputFile, literalInput: true } : null
+    if (video) keys.push(mediaFileKey('video', video))
+  }
+  return allotMediaFiles(keys)
 }

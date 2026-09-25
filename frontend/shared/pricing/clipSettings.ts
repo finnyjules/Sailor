@@ -181,14 +181,127 @@ function syncModeRefusal(v: unknown): string | null {
   return 'the lip-sync mode is not one Sailor can price. Choose loop, bounce, cut off or remap'
 }
 
-/** The name in a `/view?filename=X&type=input` link (video_models.py parse_view_ref), or null for anything else. */
-export function parseViewRef(src: unknown): string | null {
+/**
+ * Python's `urllib.parse.parse_qs(qs)` (3.12, keep_blank_values=False,
+ * separator "&"), for reading `/view?` links exactly as the engine does:
+ *  - split on "&" only (";" is not a separator);
+ *  - a piece with no "=" is dropped, and so is one whose RAW value is empty
+ *    ("filename=" — the blank-value rule that `URLSearchParams` does not have);
+ *  - name and value: "+" → space, then percent-decoded (`unquote`).
+ * Returns key → its non-blank values in order, or null when a name or value
+ * can't be decoded the way Python would (invalid UTF-8 after percent-decoding:
+ * Python substitutes U+FFFD, which is refused here rather than guessed).
+ */
+export function pyParseQs(qs: string): Map<string, string[]> | null {
+  const out = new Map<string, string[]>()
+  for (const piece of qs.split('&')) {
+    if (!piece) continue
+    const eq = piece.indexOf('=')
+    if (eq < 0) continue
+    const rawValue = piece.slice(eq + 1)
+    if (!rawValue.length) continue
+    const name = pyUnquote(piece.slice(0, eq))
+    const value = pyUnquote(rawValue)
+    if (name == null || value == null) return null
+    const list = out.get(name)
+    if (list) list.push(value)
+    else out.set(name, [value])
+  }
+  return out
+}
+
+/** `unquote(s.replace('+', ' '))`: each run of %XX bytes decoded as UTF-8; a malformed %… kept as-is; invalid UTF-8 → null. */
+function pyUnquote(s: string): string | null {
+  const t = s.replace(/\+/g, ' ')
+  const decoder = new TextDecoder('utf-8', { fatal: true })
+  let out = ''
+  let i = 0
+  while (i < t.length) {
+    const bytes: number[] = []
+    while (i + 2 < t.length && t[i] === '%' && /^[0-9A-Fa-f]{2}$/.test(t.slice(i + 1, i + 3))) {
+      bytes.push(Number.parseInt(t.slice(i + 1, i + 3), 16))
+      i += 3
+    }
+    if (bytes.length) {
+      try { out += decoder.decode(new Uint8Array(bytes)) }
+      catch { return null }
+      continue
+    }
+    out += t[i]
+    i++
+  }
+  return out
+}
+
+/** A `/view?` link read the way the engine reads it, and whether it is safe to vet. */
+export interface ViewRefRead {
+  /** The input-folder file the engine opens (parse_view_ref), or null when it opens none. */
+  name: string | null
+  /**
+   * Why the link is refused outright, or null: it names `filename`, `type` or
+   * `subfolder` more than once (with a value), or can't be decoded as Python
+   * would — two parsers could then disagree about which file it means.
+   */
+  refused: string | null
+}
+
+export const VIEW_REF_REFUSED = 'A file link (/view?…) names its file, folder or type more than once, or can\'t be read, so Sailor can\'t check which file it opens. Remove the extra filename=, type= or subfolder=.'
+
+/**
+ * THE `/view?` link parser for the engine's input files — every ownership
+ * check, measurement and price reads links through this, so they all agree
+ * with video_models.py `parse_view_ref`:
+ *   `urlsplit(src).query` (tab, CR and LF removed; "#…" dropped) →
+ *   `parse_qs` → `type` must be "input" → `filename`, its first value, with
+ *   no "/", "\" or "..".
+ * Null for anything that isn't a string starting "/view?".
+ */
+export function readViewRef(src: unknown): ViewRefRead | null {
   if (typeof src !== 'string' || !src.startsWith('/view?')) return null
-  const q = new URLSearchParams(src.slice('/view?'.length).split('#')[0])
-  if ((q.get('type') ?? '') !== 'input') return null
-  const name = q.get('filename') ?? ''
-  if (!name || name.includes('/') || name.includes('\\') || name.includes('..')) return null
-  return name
+  // urlsplit removes these three characters anywhere in the URL, then splits "#", then "?".
+  const url = src.replace(/[\t\r\n]/g, '')
+  const noFragment = url.split('#')[0]!
+  const q = pyParseQs(noFragment.slice(noFragment.indexOf('?') + 1))
+  if (!q) return { name: null, refused: VIEW_REF_REFUSED }
+  const refused = ['filename', 'type', 'subfolder'].some(k => (q.get(k)?.length ?? 0) > 1) ? VIEW_REF_REFUSED : null
+  const first = (k: string) => q.get(k)?.[0] ?? ''
+  if (first('type') !== 'input') return { name: null, refused }
+  const name = first('filename')
+  if (!name || name.includes('/') || name.includes('\\') || name.includes('..')) return { name: null, refused }
+  return { name, refused }
+}
+
+/**
+ * Thrown by parseViewRef for a link that must be refused (see
+ * ViewRefRead.refused). Shaped like server/utils/requestMeter.ts's
+ * MeterRefusalError (h3 recognises an error by `constructor.__h3_error__`, not
+ * by class), so when it escapes the /prompt gate's ownership check
+ * (validateGraphFileRefs → extractFileRefs) the caller gets a 403 with this
+ * plain message — fail closed, no hold taken, the engine never touched.
+ */
+export class ViewRefRefusedError extends Error {
+  static __h3_error__ = true
+  statusCode = 403
+  statusMessage: string
+  fatal = false
+  unhandled = false
+  constructor(message: string) {
+    super(message)
+    this.name = 'ViewRefRefusedError'
+    this.statusMessage = message
+  }
+}
+
+/**
+ * The input file a `/view?` link makes the engine open, or null — for the
+ * ownership check. A link that must be refused THROWS ViewRefRefusedError, so
+ * no caller can quietly vet nothing (the gate turns it into a plain 403).
+ */
+export function parseViewRef(src: unknown): string | null {
+  const r = readViewRef(src)
+  if (!r) return null
+  if (r.refused) throw new ViewRefRefusedError(r.refused)
+  return r.name
 }
 
 /** Where a lip-sync node's media comes from: a link to follow, an input file, or nothing the price can read. */
@@ -208,9 +321,51 @@ export function secondsPricedMedia(classType: string, inputs: Inputs): { audio: 
   const wired = linked(inputs.audio) ? { link: inputs.audio as unknown[] } : null
   if (classType !== 'LipSyncNode') return { audio: wired, video: null }
   const opts = linked(inputs.model_options) ? {} : readModelOptions(inputs.model_options)
-  const file = (v: unknown): MediaSource => { const n = parseViewRef(v); return n ? { inputFile: n } : null }
+  // A link the gate refuses is never measured (the run is refused before pricing matters).
+  const file = (v: unknown): MediaSource => { const r = readViewRef(v); return r?.name && !r.refused ? { inputFile: r.name } : null }
   // execute: `audio_url = … if audio is not None else _resolve(audio_src)`.
   return { audio: wired ?? file(opts.audio), video: file(opts.face_video) }
+}
+
+/**
+ * Lip-sync media files the /prompt gate reads per prompt: their OWN reserved
+ * slots, apart from the pictures' (graphInputPixels.ts MAX_MEASURED_FILES), so
+ * a graph full of pictures can't use them up. Files past the budget are priced
+ * at the 60 s cap; which files get a slot is fixed by `allotMediaFiles`, so the
+ * canvas badge can tell (and say "up to").
+ */
+export const LIPSYNC_MEDIA_READS = 8
+
+/** A media file the gate reads: an annotated engine value (LoadAudio, the Audio card), or a `/view` input name read literally. */
+export interface MediaFileRef { value: string, literalInput: boolean }
+
+/** The one key for a media file read — the gate's memo and slot, and the badge's prediction of it. */
+export function mediaFileKey(kind: 'audio' | 'video', f: MediaFileRef): string {
+  return `${kind}:${f.literalInput ? 'view' : 'engine'}:${f.value}`
+}
+
+/**
+ * The order the gate walks a graph's lip-sync nodes in, and so hands out
+ * media slots: integer ids ascending, then any other id in string order.
+ */
+export function gateNodeOrder(ids: Iterable<string>): string[] {
+  const isInt = (s: string) => /^\d+$/.test(s)
+  return [...ids].sort((a, b) => {
+    const ia = isInt(a); const ib = isInt(b)
+    if (ia && ib) return Number(a) - Number(b) || (a < b ? -1 : a > b ? 1 : 0)
+    if (ia !== ib) return ia ? -1 : 1
+    return a < b ? -1 : a > b ? 1 : 0
+  })
+}
+
+/** The media file keys that get a read: the first LIPSYNC_MEDIA_READS distinct ones, in gate order. */
+export function allotMediaFiles(orderedKeys: Iterable<string>, max: number = LIPSYNC_MEDIA_READS): Set<string> {
+  const out = new Set<string>()
+  for (const k of orderedKeys) {
+    if (out.size >= max) break
+    out.add(k)
+  }
+  return out
 }
 
 /**

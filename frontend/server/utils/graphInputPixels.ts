@@ -18,37 +18,45 @@ import { open } from 'node:fs/promises'
 import sharp from 'sharp'
 import { annotatedFilepath, engineFolder, resolveInside } from '../native/paths'
 import { sizePricedInput, sourceOutputPixels } from '../../shared/pricing/editSettings'
+import { LIPSYNC_MEDIA_READS } from '../../shared/pricing/clipSettings'
 
 type Prompt = Record<string, { class_type?: unknown; inputs?: unknown } | undefined>
 
 const MAX_HOPS = 8
 
 /**
- * At most this many files are read per /prompt; any further size-priced
- * picture is priced at the cap. Each file value is read once (memoised).
- * The budget is shared with the lip-sync sound and video lengths
- * (graphInputSeconds.ts): pass one `createGateReads()` to both.
+ * At most this many picture files are read per /prompt; any further
+ * size-priced picture is priced at the cap. Each file value is read once
+ * (memoised). Lip-sync media have their own reserved slots
+ * (LIPSYNC_MEDIA_READS, graphInputSeconds.ts), so a graph full of pictures
+ * can't use them up — and pictures already fail safe to the cap.
  */
 export const MAX_MEASURED_FILES = 8
 
+/** The two read pools of a /prompt: pictures, and lip-sync sound / video. */
+export type GatePool = 'pictures' | 'media'
+
 /**
  * One /prompt's file reads: memoised by what is read (`key`, e.g. the kind and
- * the file value) and at most MAX_MEASURED_FILES of them, whatever the kind.
- * A read past the budget, or one that throws, is null (priced at the cap).
+ * the file value), and at most `max[pool]` distinct reads in each pool. A
+ * read past its pool's budget, or one that throws, is null (priced at the cap).
  */
 export interface GateReads {
-  measure(key: string, read: () => Promise<number | null>): Promise<number | null>
+  measure(key: string, read: () => Promise<number | null>, pool?: GatePool): Promise<number | null>
 }
 
-export function createGateReads(max: number = MAX_MEASURED_FILES): GateReads {
+export function createGateReads(max: Partial<Record<GatePool, number>> = {}): GateReads {
+  const limit: Record<GatePool, number> = { pictures: MAX_MEASURED_FILES, media: LIPSYNC_MEDIA_READS, ...max }
   const seen = new Map<string, Promise<number | null>>()
+  const used: Record<GatePool, number> = { pictures: 0, media: 0 }
   return {
-    measure(key, read) {
-      const hit = seen.get(key)
+    measure(key, read, pool = 'pictures') {
+      const hit = seen.get(`${pool}|${key}`)
       if (hit) return hit
-      if (seen.size >= max) return Promise.resolve(null)
+      if (used[pool] >= limit[pool]) return Promise.resolve(null)
+      used[pool]++
       const p = read().catch(() => null)
-      seen.set(key, p)
+      seen.set(`${pool}|${key}`, p)
       return p
     },
   }
@@ -103,9 +111,9 @@ export async function graphInputPixels(
 ): Promise<Record<string, number>> {
   const out: Record<string, number> = {}
   if (!prompt || typeof prompt !== 'object') return out
-  // One read per file value, and at most MAX_MEASURED_FILES reads per prompt
-  // (shared with graphInputSeconds when the caller passes the same `reads`).
-  const measure = (value: string): Promise<number | null> => reads.measure(`pixels:${value}`, () => readFile(value))
+  // One read per file value, and at most MAX_MEASURED_FILES picture reads per
+  // prompt (lip-sync media read from their own pool of the same `reads`).
+  const measure = (value: string): Promise<number | null> => reads.measure(`pixels:${value}`, () => readFile(value), 'pictures')
   for (const [id, node] of Object.entries(prompt)) {
     const ct = node?.class_type
     if (typeof ct !== 'string') continue
