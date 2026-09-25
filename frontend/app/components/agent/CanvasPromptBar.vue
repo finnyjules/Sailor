@@ -1,20 +1,22 @@
 <script setup lang="ts">
 // The canvas agent's home — a persistent prompt box that sits just above the
 // canvas toolbar (Phase 3, Slice 1). Ask about the graph or tell it to edit
-// nodes; results (answer / proposal / progress) expand UPWARD above the input,
-// which stays anchored just above the toolbar. Owns useCanvasAgent; the parent
-// supplies the VueNodeCanvas ref (agentSnapshot + applyCanvasOps).
-import { computed, nextTick, ref, watch, onMounted, onBeforeUnmount } from 'vue'
-import { Sparkles, ArrowUp, X } from 'lucide-vue-next'
-import AgentProgress from '~/components/agent/AgentProgress.vue'
+// nodes; results (answer / proposal) expand UPWARD above the input, which stays
+// anchored just above the toolbar. The input itself is the one prompt,
+// SailorPrompt (selection chip, suggestions, progress + Stop). Owns
+// useCanvasAgent; the parent supplies the VueNodeCanvas ref (agentSnapshot +
+// applyCanvasOps) and focuses it via the exposed focus() for `/` and ⌘K.
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { X } from 'lucide-vue-next'
 import AgentProposal from '~/components/agent/AgentProposal.vue'
-import AgentSweep from '~/components/agent/AgentSweep.vue'
+import SailorPrompt from '~/components/prompt/SailorPrompt.vue'
 import ImageSearchPickerModal from '~/components/agent/ImageSearchPickerModal.vue'
 import { useCanvasAgent } from '~/composables/useCanvasAgent'
 import { useAgentActivity } from '~/composables/useAgentActivity'
 import { useAiStatus } from '~/composables/useAiStatus'
 import { paidProducerFor } from '~/lib/artifact/nextSteps'
 import { looksLikeImageIdea } from '~/lib/sketch/sketchIntent'
+import { canvasSuggestions, selectionLabel, type PromptNode } from '~/lib/prompt/canvasPromptContext'
 
 const props = defineProps<{ vueCanvas?: any }>()
 const { getLocalSetting } = useLocalSettings()
@@ -39,7 +41,7 @@ const fastPathFired = ref(false)
 
 const {
   busy, error, reasoning, answer, changes, issues, review, reviewing, hasProposal, hovered,
-  ask, acceptChange, rejectChange, reroll, keep, keepAndRun, reviewLastRun, reviewNode, autoReviewNode, dismiss,
+  ask, stop, acceptChange, rejectChange, reroll, keep, keepAndRun, reviewLastRun, reviewNode, autoReviewNode, dismiss,
 } = useCanvasAgent({
   getSnapshot: (phrase?: string) => props.vueCanvas.agentSnapshot(phrase),
   preview: (cmds, animate) => props.vueCanvas.agentPreview(cmds, animate),
@@ -143,17 +145,8 @@ watch(hovered, (i) => {
   props.vueCanvas.agentHighlight(i != null ? changes.value[i]?.command ?? null : null)
 })
 
-// Slow glimm over the thinking card. Flip active false→true a tick AFTER the card
-// mounts so AgentSweep measures a sized canvas (an immediate true-at-mount never
-// starts the sweep — same gotcha as the on-canvas glimm).
-const glimmActive = ref(false)
-// Active while the agent is planning (busy) AND while it critiques the result
-// (reviewing) — so the sweep runs across the whole generate→look→fix pass.
-watch(() => busy.value || reviewing.value, async (v) => { if (v) { await nextTick(); glimmActive.value = true } else { glimmActive.value = false } })
-
-const phrase = ref('')
-function go() {
-  const p = phrase.value.trim()
+function go(text: string) {
+  const p = text.trim()
   if (!p || busy.value) return
   lastSubmitted.value = p
   fastPathFired.value = false // clear the fast-path dedupe latch for this new submit
@@ -168,9 +161,19 @@ function go() {
     props.vueCanvas.startSketch?.(p)
   }
   ask(p)
-  phrase.value = ''
 }
-const hasResult = computed(() => busy.value || reviewing.value || hasProposal.value || !!answer.value || !!error.value)
+
+// The one prompt's context (spec §2.1): the canvas selection names the chip and
+// placeholder; suggestions follow what's selected (or an empty graph).
+const selection = computed(() => (props.vueCanvas?.agentSelection ?? []) as PromptNode[])
+const chipLabel = computed(() => selectionLabel(selection.value))
+const suggestions = computed(() => canvasSuggestions(selection.value, (props.vueCanvas?.getNodes?.() ?? []).length === 0))
+const workingLabel = computed(() => busy.value ? 'Planning the change…' : 'Looking at the result…')
+// The result card rides above the prompt once there is something to show.
+// While planning, SailorPrompt's own row shows the progress label and Stop.
+const showCard = computed(() => !busy.value && (reviewing.value || hasProposal.value || !!answer.value || !!error.value))
+const promptRef = ref<InstanceType<typeof SailorPrompt> | null>(null)
+defineExpose({ focus: () => promptRef.value?.focus() })
 
 // Misfire correction handler.
 // "…or sketch it?": hand the last submitted text straight to the sketch pad
@@ -207,23 +210,28 @@ function onPromptFocus() {
   <div v-if="ready" class="pointer-events-none flex flex-col gap-2">
     <!-- (Teleports to body — unaffected by the root's pointer-events-none.) -->
     <ImageSearchPickerModal :open="searchOpen" :query="searchQuery" @close="searchOpen = false" @done="onSearchDone" />
-    <!-- Results expand upward, above the input -->
-    <div v-if="hasResult" class="pointer-events-auto relative max-h-[52vh] overflow-y-auto rounded-[12px] border border-[#2a2a2a] bg-[#1a1a1a]/95 p-3 shadow-xl backdrop-blur-md">
-      <!-- Slow glimm sweep over the thinking card while the agent works. Persistently
-           mounted (active gated reactively) and painted ON TOP via z-10 so the screen
-           blend reads over the card. -->
-      <div class="pointer-events-none absolute inset-0 z-10" style="clip-path: inset(0 round 12px)">
-        <AgentSweep :active="glimmActive" :period="3" palette="lagoon" />
-      </div>
-      <!-- Dismiss the card for the answer / error states (no proposal → no
-           keep/revert controls, so this is the only way to close it). -->
-      <button
-        v-if="!busy && !reviewing && !hasProposal && (answer || error)"
-        class="absolute right-2 top-2 z-20 grid size-6 place-items-center rounded-md text-white/40 transition hover:bg-white/10 hover:text-white/80"
-        title="Dismiss" @click="dismiss"
-      ><X class="size-3.5" /></button>
-      <div v-if="busy"><AgentProgress :active="busy" /></div>
-      <template v-else>
+    <SailorPrompt
+      ref="promptRef"
+      :selection-label="chipLabel"
+      :suggestions="suggestions"
+      :working="busy || reviewing"
+      :working-label="workingLabel"
+      :stoppable="busy"
+      :disabled="!aiAvailable"
+      @submit="go"
+      @stop="stop"
+      @clear-selection="props.vueCanvas?.agentClearSelection?.()"
+      @focus="onPromptFocus"
+    >
+      <!-- Results expand upward, above the input (SailorPrompt owns the card chrome). -->
+      <template v-if="showCard" #above>
+        <!-- Dismiss the card for the answer / error states (no proposal → no
+             keep/revert controls, so this is the only way to close it). -->
+        <button
+          v-if="!busy && !reviewing && !hasProposal && (answer || error)"
+          class="absolute right-2 top-2 z-20 grid size-6 place-items-center rounded-md text-white/40 transition hover:bg-white/10 hover:text-white/80"
+          title="Dismiss" @click="dismiss"
+        ><X class="size-3.5" /></button>
         <p v-if="error" class="pr-6 text-[12px] leading-snug text-red-400/90">{{ error }}</p>
         <div v-else-if="answer" class="pr-6">
           <p v-if="reasoning" class="mb-1 text-[11px] leading-snug text-white/40">{{ reasoning }}</p>
@@ -240,7 +248,7 @@ function onPromptFocus() {
           @keep="keep" @keep-run="keepAndRun" @revert="dismiss" @hover="(i: number | null) => hovered = i"
         />
       </template>
-    </div>
+    </SailorPrompt>
 
     <!-- Misfire correction chip — auto-detect guessed the wrong intent.
          Dashed NEUTRAL affordance (draft/sketch token; never pastel — pastel
@@ -256,59 +264,5 @@ function onPromptFocus() {
     <p v-if="!aiAvailable" class="px-1 text-[11px] leading-snug text-white/40">
       AI assist isn’t set up — start the app with NUXT_ANTHROPIC_API_KEY, or paste your own key in Settings → AI.
     </p>
-
-    <!-- Input bar — dark box with a pastel ring that fades in when active -->
-    <div class="prompt-field pointer-events-auto flex items-center gap-2.5 rounded-[12px] px-3.5 py-3.5 shadow-lg">
-      <Sparkles class="size-4 shrink-0 text-white/45" />
-      <input
-        v-model="phrase" :disabled="busy" type="text"
-        placeholder="Ask about the graph, or tell me to change a node…"
-        class="min-w-0 flex-1 bg-transparent text-[13px] text-white/90 placeholder:text-white/30 outline-none"
-        @keydown.enter="go" @focus="onPromptFocus"
-      >
-      <button
-        class="grid size-7 place-items-center rounded-[8px] bg-white text-neutral-900 transition hover:bg-white/90 disabled:opacity-40"
-        :disabled="busy || !phrase.trim()" @click="go"
-      ><ArrowUp class="size-4" /></button>
-    </div>
   </div>
 </template>
-
-<style scoped>
-/* Dark prompt box with a pastel gradient ring that is INVISIBLE at rest and fades
-   to full when the field is active (focused), muted (~40%) at rest. The ring is a masked pseudo-element
-   so its opacity can transition — you can't fade a background-image gradient — and
-   a full-pixel `padding` keeps it even on all sides despite the centred (fractional
-   x) position. It slowly drifts regardless (paused for reduced-motion). */
-.prompt-field {
-  position: relative;
-  background: #1a1a1a;
-}
-/* Animate the gradient by ROTATING a conic via the registered --pastel-angle
-   custom property (declared globally in main.css). background-position animation
-   is cached/frozen on masked elements in Chromium; animating the angle
-   re-rasterizes the conic each frame, so the colours flow around the ring. */
-.prompt-field::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;                       /* ring thickness */
-  background: conic-gradient(from var(--pastel-angle), #ffd6e7, #cfe8ff, #d6ffe0, #fff4cc, #e7d6ff, #ffd6e7);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  opacity: 0.4;                       /* muted at rest */
-  transition: opacity 0.4s ease;
-  animation: prompt-pastel-spin 8s linear infinite;
-  pointer-events: none;
-}
-.prompt-field:focus-within::before { opacity: 1; }   /* fade to full when active */
-@keyframes prompt-pastel-spin {
-  to { --pastel-angle: 360deg; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .prompt-field::before { animation: none; }
-}
-</style>

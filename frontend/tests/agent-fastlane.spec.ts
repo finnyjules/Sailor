@@ -13,7 +13,7 @@ import { openBlankWorkflow, waitForBackend } from './_helpers'
  *  - agent key gate: opts.apiKey() reads localStorage 'sailor:Sailor.AI.AnthropicApiKey'.
  *  - proposal card's primary buttons are "Keep all" / "Keep & Run" (a per-row
  *    check button has title "Keep" — assert on the card-level labels only).
- *  - bar placeholder: "Ask about the graph, or tell me to change a node…".
+ *  - bar: the one prompt, a textbox named "Ask Sailor" (SailorPrompt).
  *  - We use frontend-only STUDIO nodeTypes (GradientStudio/ShaderStudio): they
  *    are synthesized into the agent catalog from AGENT_CAPABILITIES regardless
  *    of /object_info, so applyCanvasCommand accepts them deterministically. A
@@ -34,7 +34,7 @@ async function seedAgentKey(page: Page) {
 
 /** The prompt bar, ready and past the /object_info catalog-load race. */
 async function readyBar(page: Page) {
-  const bar = page.getByPlaceholder(/Ask about the graph/i)
+  const bar = page.getByRole('textbox', { name: 'Ask Sailor' })
   await bar.waitFor({ state: 'visible', timeout: 20_000 })
   await page.waitForTimeout(5_000) // let /object_info populate the agent catalog
   return bar

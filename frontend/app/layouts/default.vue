@@ -30,6 +30,7 @@ import AllProjectsView from '~/components/AllProjectsView.vue'
 import StartProjectModal from '~/components/StartProjectModal.vue'
 import CanvasStatusBar, { type RunResult } from '~/components/CanvasStatusBar.vue'
 import AgentCanvasPromptBar from '~/components/agent/CanvasPromptBar.vue'
+import { shouldFocusPrompt } from '~/lib/prompt/sailorPrompt'
 import type { StartPickId } from '~/data/start-modal'
 import { estimateUsdForNodes, vueNodesToEstimateInput, type CostEstimate } from '~/lib/costEstimate'
 import { formatCostBadge, formatEstimateBadge, formatEstimateLong } from '~/lib/pricing'
@@ -2061,6 +2062,8 @@ onUnmounted(() => {
   if (autosaveDebounceTimer) { clearTimeout(autosaveDebounceTimer); autosaveDebounceTimer = null }
 })
 const vueCanvasRef = ref<any>(null)
+// The canvas prompt (CanvasPromptBar → SailorPrompt); `/` and ⌘K focus it.
+const canvasPromptRef = ref<InstanceType<typeof AgentCanvasPromptBar> | null>(null)
 let currentProjectTabId: string | null = null // tracks which project tab's workflow is loaded
 
 // Public origin the ComfyUI canvas iframe loads from. In local mode this is the
@@ -3007,6 +3010,13 @@ function handleGlobalKeydown(e: KeyboardEvent) {
     else if (userPopupOpen.value) userPopupOpen.value = false
   }
 
+  // `/` and ⌘K: focus the canvas prompt — never from behind a studio, Frame or Settings.
+  if (activeTab.value.type === 'project' && shouldFocusPrompt(e) && !isStudioOrModalOpen()) {
+    e.preventDefault()
+    canvasPromptRef.value?.focus()
+    return
+  }
+
   // Space key: open Vue node search dialog
   if (e.code === 'Space' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
     if (activeTab.value.type !== 'project') return
@@ -3016,6 +3026,25 @@ function handleGlobalKeydown(e: KeyboardEvent) {
     e.preventDefault()
     openNodeSearch()
   }
+}
+
+// True when something owns the screen above the canvas prompt. There is no single
+// "a modal is open" flag: Settings and Credits have flags here, studio shells and a
+// few surfaces carry role="dialog", but Frame, Timeline and most other full-screen
+// modals are plain `fixed inset-0` overlays. So besides the flags and the dialog
+// role, ask the page what sits on top of the prompt's input: if it isn't the
+// prompt, an overlay covers it. No prompt input (not ready, or working) → treat
+// as blocked so the key falls through untouched.
+function isStudioOrModalOpen(): boolean {
+  if (settingsOpen.value || creditsModalOpen.value) return true
+  if (document.querySelector('[role="dialog"], [aria-modal="true"]')) return true
+  const root = (canvasPromptRef.value as any)?.$el as Element | undefined
+  const input = root?.querySelector?.('input[aria-label="Ask Sailor"]')
+  if (!root || !input) return true
+  const r = input.getBoundingClientRect()
+  if (!r.width || !r.height) return true
+  const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+  return !hit || !root.contains(hit)
 }
 
 function handleSignOut() {
@@ -4179,7 +4208,7 @@ function dismissRunResult() {
           data-testid="canvas-bottom-bar-stack"
           class="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-3"
         >
-          <AgentCanvasPromptBar v-if="vueNodesEnabled" :vue-canvas="vueCanvasRef" class="w-0 min-w-full" />
+          <AgentCanvasPromptBar v-if="vueNodesEnabled" ref="canvasPromptRef" :vue-canvas="vueCanvasRef" class="w-0 min-w-full" />
 
           <!-- Floating toolbar -->
           <div
