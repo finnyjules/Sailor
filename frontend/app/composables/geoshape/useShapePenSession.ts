@@ -20,7 +20,7 @@
  * Shape Studio has no undo of its own: the pen's history is the only undo, and it
  * lives as long as the session. Construction is side-effect free (vitest, node env).
  */
-import { ref, shallowRef, computed, getCurrentScope, onScopeDispose, type Ref, type ComputedRef } from 'vue'
+import { ref, shallowRef, computed, getCurrentScope, onScopeDispose, type Ref, type ComputedRef, type ShallowRef } from 'vue'
 import type { SketchDoc } from '~/lib/sketch/model'
 import type { ViewMatrix } from '~/lib/sketch/view'
 import { cloneDoc } from '~/lib/sketch/clone'
@@ -45,8 +45,21 @@ export interface ShapePenSession {
   view: ComputedRef<ViewMatrix>
   key: number
   layerId: string
-  /** The frozen preview framing (CSS px per doc unit, see PreviewFrame). */
-  frame: PreviewFrame
+  /** The frozen preview framing (CSS px per doc unit, see PreviewFrame). Frozen against
+   *  the drawing, not against the window: `resize` re-fits it to a new preview size. */
+  frame: ShallowRef<PreviewFrame>
+}
+
+/**
+ * The same frozen framing for a preview resized to `cssW × cssH` CSS px. The preview keeps
+ * the canvas's aspect and pads in DOC units, so its normal fit scales in proportion to the
+ * box: the doc point at the centre stays the centre and the scale follows the box (the
+ * tighter axis, should rounding make the two ratios differ). Resizing back returns the original framing (up to rounding).
+ */
+export function resizedFrame(frame: PreviewFrame, cssW: number, cssH: number): PreviewFrame {
+  if (!(cssW > 0) || !(cssH > 0) || !(frame.cssW > 0) || !(frame.cssH > 0)) return frame
+  const r = Math.min(cssW / frame.cssW, cssH / frame.cssH)
+  return { cx: frame.cx, cy: frame.cy, scale: frame.scale * r, cssW, cssH }
 }
 
 /** The tools a Drawn shape offers (Select is always added by the pen). */
@@ -78,7 +91,7 @@ export function useShapePenSession(host: ShapePenHost) {
   }
 
   function open(): void {
-    close()
+    cancelSession()   // a session still open puts its layer back first
     const layer = host.doc().layers[host.layerIndex()]
     if (!layer) return
     const mark = layer.mark
@@ -90,11 +103,11 @@ export function useShapePenSession(host: ShapePenHost) {
     k = refitFactor(start, mark.size)
     const b = sketchOutlineBounds(start)
     const centre = b ? { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 } : { x: 0, y: 0 }
-    const frame = host.frameFor(layer)
+    const frame = shallowRef(host.frameFor(layer))
     const layerId = layer.layerId
     const doc = ref<SketchDoc>(start)
     // The frame, k and centre are fixed; the placement is read live (it is not locked).
-    const view = computed(() => shapePenView(frame, (layerOf(layerId) ?? layer).offset, k, centre))
+    const view = computed(() => shapePenView(frame.value, (layerOf(layerId) ?? layer).offset, k, centre))
     const settle = () => {
       const m = layerOf(layerId)?.mark
       if (!m) return
@@ -138,7 +151,17 @@ export function useShapePenSession(host: ShapePenHost) {
     else delete m.sketch
   }
 
+  /** The preview is now `cssW × cssH` CSS px: re-fit the frozen frame (view, overlay and
+   *  composite stay aligned). No-op without a session or when the size is unchanged. */
+  function resize(cssW: number, cssH: number): void {
+    const s = session.value
+    if (!s) return
+    const f = s.frame.value
+    if (f.cssW === cssW && f.cssH === cssH) return
+    s.frame.value = resizedFrame(f, cssW, cssH)
+  }
+
   if (getCurrentScope()) onScopeDispose(cancelSession)
 
-  return { session, open, commitSession, cancelSession }
+  return { session, open, commitSession, cancelSession, resize }
 }

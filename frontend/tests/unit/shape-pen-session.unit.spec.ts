@@ -4,7 +4,8 @@ import { addPoint, addPath } from '~/lib/sketch/edit'
 import { mergeLayer, type GeoStudioDoc } from '~/lib/geoshape/studio'
 import { sketchOutlineBounds } from '~/lib/geoshape/shapes'
 import { naturalExtent, type PreviewFrame } from '~/lib/geoshape/penShape'
-import { useShapePenSession } from '~/composables/geoshape/useShapePenSession'
+import { useShapePenSession, resizedFrame } from '~/composables/geoshape/useShapePenSession'
+import { applyView } from '~/lib/sketch/view'
 import type { SketchDoc } from '~/lib/sketch/model'
 
 const FRAME: PreviewFrame = { cx: 0, cy: 0, scale: 1, cssW: 600, cssH: 600 }
@@ -158,5 +159,59 @@ describe('useShapePenSession', () => {
     expect(s.session.value).toBeNull()
     expect(m.shape).toBe(shape)
     expect('sketch' in m).toBe(false)
+  })
+
+  it('opening over an open session restores the first one (cancel, not close)', () => {
+    const doc = makeDoc()
+    const m = doc.layers[0]!.mark
+    const shape = m.shape
+    const s = makeSession(doc)
+    s.open()
+    triangle(s.session.value!.doc.value)
+    s.session.value!.pen.commitHistory()
+    expect(m.sketch).toBeDefined()
+    const firstKey = s.session.value!.key
+    s.open()
+    // the first session's writes are gone: the second one opened on the restored mark
+    expect(s.session.value!.key).toBeGreaterThan(firstKey)
+    expect(s.session.value!.doc.value.entities).toEqual([])
+    s.cancelSession()
+    expect(m.shape).toBe(shape)
+    expect('sketch' in m).toBe(false)
+  })
+})
+
+describe('resizing the preview while the pen is open', () => {
+  const F: PreviewFrame = { cx: 12, cy: -8, scale: 1.5, cssW: 600, cssH: 400 }
+
+  it('resizedFrame keeps the centre, scales with the box, and round-trips', () => {
+    const r = resizedFrame(F, 300, 200)
+    expect(r).toEqual({ cx: 12, cy: -8, scale: 0.75, cssW: 300, cssH: 200 })
+    // rounding makes the ratios differ: the tighter axis governs, so nothing is cropped
+    expect(resizedFrame(F, 300, 201).scale).toBeCloseTo(0.75, 12)
+    expect(resizedFrame(F, 301, 200).scale).toBeCloseTo(0.75, 12)
+    const back = resizedFrame(r, 600, 400)
+    expect(back.cx).toBe(12); expect(back.cy).toBe(-8)
+    expect(back.scale).toBeCloseTo(1.5, 12)
+    // degenerate sizes leave the frame alone
+    expect(resizedFrame(F, 0, 200)).toBe(F)
+  })
+
+  it('a drawing point stays at the same fraction of the preview after resize()', () => {
+    const doc = makeDoc()
+    const s = useShapePenSession({ doc: () => doc, layerIndex: () => 0, frameFor: () => F })
+    s.open()
+    const sess = s.session.value!
+    const p = { x: 30, y: -20 }
+    const a = applyView(sess.view.value, p)
+    s.resize(300, 200)
+    expect(sess.frame.value.cssW).toBe(300)
+    const b = applyView(sess.view.value, p)
+    expect(b.x / 300).toBeCloseTo(a.x / 600, 12)
+    expect(b.y / 200).toBeCloseTo(a.y / 400, 12)
+    // same size again: the frame object is not replaced
+    const f = sess.frame.value
+    s.resize(300, 200)
+    expect(sess.frame.value).toBe(f)
   })
 })

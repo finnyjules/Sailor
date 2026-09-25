@@ -231,10 +231,12 @@ const railLayers = computed(() => doc.value.layers.map((l, i) => ({ label: layer
 // The prompt's chip and the inspector head both name the selected layer, as the
 // rail labels it. Re-roll re-seeds that layer's mark, so it needs a selection.
 const promptLabel = computed(() => (isSelected.value ? layerLabel(activeLayer.value) : 'Shape'))
-const inspectorActions = computed(() => studioActions({
+// Nothing else edits the layer while the pen is open: no Tune, Vary (a paid agent call
+// whose takes would patch the mark mid-session) or Re-roll.
+const inspectorActions = computed(() => (penSession.value ? [] : studioActions({
   place: 'shape', canTakes: true,
-  local: isSelected.value && !penSession.value ? [{ id: 'reroll', label: 'Re-roll', group: 'develop', ai: false, lands: null, run: { call: rerollConfig } }] : [],
-}))
+  local: isSelected.value ? [{ id: 'reroll', label: 'Re-roll', group: 'develop', ai: false, lands: null, run: { call: rerollConfig } }] : [],
+})))
 
 // Click a row to select it; click the ALREADY-active row again to deselect → the
 // right panel flips to the composite (Frame/Intersections) properties.
@@ -416,7 +418,9 @@ async function renderPreview() {
     const pad = studioFramePad(doc.value)
     // While the pen is open the framing is FROZEN (so the drawing never rescales under
     // the pen) and the composite is faint; otherwise the historical call, unchanged.
-    const pf = penSession.value?.frame
+    // A resized preview re-fits the frozen frame first, so view, overlay and composite agree.
+    if (penSession.value) penResize(cssW, cssH)
+    const pf = penSession.value?.frame.value
     const opts = pf ? { frame: { cx: pf.cx, cy: pf.cy, scale: pf.scale * (el.width / cssW) }, alpha: 0.3 } : undefined
     if (!pf) {
       lastShapes = shapes
@@ -461,7 +465,7 @@ watch([canvasW, canvasH], scheduleRender)
 // The frame is frozen at open from the framing the preview last showed: the normal
 // padding (doc units) becomes CSS px through the live fit, so opening the pen does not
 // shift the view; the unit's square is `size × scale × √2` so a rotated unit still fits.
-const { session: penSession, open: penOpen, commitSession: penCommit, cancelSession: penCancel } = useShapePenSession({
+const { session: penSession, open: penOpen, commitSession: penCommit, cancelSession: penCancel, resize: penResize } = useShapePenSession({
   doc: () => doc.value,
   layerIndex: () => activeLayerIdx.value,
   frameFor: (layer) => {
@@ -507,6 +511,7 @@ function onPenKeydown(e: KeyboardEvent) {
 }
 function onPenKeyup(e: KeyboardEvent) {
   if (!penSession.value) return
+  if (isTypingInField()) return
   penOverlayRef.value?.onHostKeyup(e)
   e.stopPropagation()
 }
@@ -609,20 +614,23 @@ async function exportSvg() {
   >
     <!-- Left rail: the stack of shape layers (same component the other studios use). -->
     <template #aside>
-      <!-- Locked while the pen is open: the session belongs to one layer. -->
-      <div class="relative flex min-h-0 w-full" :class="penSession ? 'opacity-50' : ''">
-      <StudioLayerStack
-        :layers="railLayers"
-        :active-index="activeLayer"
-        :max="LAYER_MAX"
-        @select="onSelectLayer"
-        @add="addLayer"
-        @remove="removeLayer"
-        @duplicate="duplicateLayer"
-        @reorder="reorderLayer"
-        @toggle="toggleLayer"
-      />
-      <div v-if="penSession" class="absolute inset-0 z-10 cursor-not-allowed" :title="LOCKED_TITLE" data-testid="shape-rail-lock" />
+      <!-- Locked while the pen is open: the session belongs to one layer. `inert` shuts the
+           keyboard out too; the cover (outside it, so its title still shows) takes the pointer. -->
+      <div class="relative flex min-h-0 w-full">
+        <div class="flex min-h-0 w-full" :class="penSession ? 'opacity-50' : ''" :inert="!!penSession" data-testid="shape-rail">
+          <StudioLayerStack
+            :layers="railLayers"
+            :active-index="activeLayer"
+            :max="LAYER_MAX"
+            @select="onSelectLayer"
+            @add="addLayer"
+            @remove="removeLayer"
+            @duplicate="duplicateLayer"
+            @reorder="reorderLayer"
+            @toggle="toggleLayer"
+          />
+        </div>
+        <div v-if="penSession" class="absolute inset-0 z-10 cursor-not-allowed" :title="LOCKED_TITLE" data-testid="shape-rail-lock" />
       </div>
     </template>
 

@@ -92,11 +92,29 @@ test('a Drawn shape is drawn with the shared pen, arranged by the studio, and th
   await expect.poll(async () => (await sectorCoverage(page, 12)).filter(n => n > 20).length, { timeout: 10_000 })
     .toBeGreaterThanOrEqual(10)
   const before = JSON.stringify((await markOf(page)).sketch)
+  const actionRows = page.locator('[data-testid="studio-action-row"]')
+  expect(await actionRows.count()).toBeGreaterThan(0)   // Tune…, Vary, Re-roll when the pen is closed
 
-  // Edit it again. The rail and the Shape rows are locked while the pen is open.
+  // Edit it again. Nothing else edits the layer while the pen is open: no action rows
+  // (Tune…, Vary, Re-roll), the rail shut to pointer AND keyboard, the Shape rows locked.
   await page.getByTestId('shape-draw').click()
   await expect(page.locator('[data-tool="path"]')).toBeVisible()
   await expect(page.getByTestId('shape-rail-lock')).toBeVisible()
+  await expect(actionRows).toHaveCount(0)
+  await expect(page.getByTestId('shape-rail')).toHaveAttribute('inert', /.*/)
+
+  // A resized preview keeps the pen on the canvas: the overlay follows the canvas box.
+  const misalign = async () => {
+    const [o, c] = [await overlay.boundingBox(), await page.getByTestId('shape-preview').boundingBox()]
+    return o && c ? Math.max(Math.abs(o.x - c.x), Math.abs(o.y - c.y), Math.abs(o.width - c.width), Math.abs(o.height - c.height)) : 99
+  }
+  expect(await misalign()).toBeLessThan(1.5)
+  const w0 = (await overlay.boundingBox())!.width
+  await page.setViewportSize({ width: 1300, height: 700 })
+  await expect.poll(async () => (await overlay.boundingBox())!.width).not.toBeCloseTo(w0, 0)
+  await expect.poll(misalign).toBeLessThan(1.5)
+  await page.setViewportSize({ width: 1600, height: 1000 })
+  await expect.poll(misalign).toBeLessThan(1.5)
 
   // A right-click on the preview adds no point.
   const n0 = await overlayPointCount(page)
@@ -116,8 +134,8 @@ test('a Drawn shape is drawn with the shared pen, arranged by the studio, and th
   await expect(page.locator('[data-tool="path"]')).toHaveCount(0)  // the pen is closed
   expect(await closesOf(page)).toBe(0)                             // the studio is not
   // Leaving without a change puts the drawing back exactly.
-  await page.waitForTimeout(800)
-  expect(JSON.stringify((await markOf(page)).sketch)).toBe(before)
+  await expect.poll(async () => JSON.stringify((await markOf(page)).sketch)).toBe(before)
+  await expect(actionRows.first()).toBeVisible()   // and the actions are back
   // Control: with the pen closed, Escape is the studio's again — so the check above can fail.
   await page.keyboard.press('Escape')
   await expect.poll(() => closesOf(page)).toBe(1)
