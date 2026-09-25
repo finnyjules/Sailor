@@ -212,28 +212,34 @@ started, restarted or killed.
   `sanitizeLight((props as Record<string, unknown> | undefined)?.sailor_localLight)` — an optional,
   trailing, `undefined`-safe read with no independent default that would otherwise change a Frame.
   No new required field or reordering was found in the diff.
-- **Cost** (1080×1350-equivalent Frame carrying three `gold_foil` text layers; canvas measured at
-  542×542 device px under Playwright's default viewport scale — see caveat below; 60 repaints via
-  `__compositorSetLayers` moving an unrelated layer, two `requestAnimationFrame`s awaited per
-  repaint as a proxy for one settled paint): **median 16.60 ms, p95 17.60 ms** — well under the
-  33 ms budget in the brief. No at-rest cache is needed; none was added.
-  Caveat: the measured canvas was 542×542 physical px, not literally 1080×1350 — the Frame's CSS
-  size was set to the 1080×1350 preset but the compositor's stack canvas renders at the page's
-  device pixel ratio times its on-screen size in the test viewport, not the export resolution. The
-  three-foil-layer *load* is real; the resolution is smaller than a true 1080×1350 export would be,
-  so treat 16.6/17.6 ms as an optimistic bound, not a guarantee at full export resolution.
+- **Cost** (re-measured at the final review; the first measurement was invalid — rAF-to-rAF wall
+  clock is vsync-quantised, and its canvas was 542×542). Method (`tests/print-finishes.spec.ts`,
+  `cost`): `paintLayerStack` imported in-page from the running dev server, called synchronously and
+  timed with `performance.now()` on an offscreen canvas for a 1080×1350 Frame carrying three
+  `gold_foil` text layers, ctx scaled by the device pixel ratio as the editor does; 2 warm-up paints,
+  then 30 timed, each ending with a 1×1 `getImageData` so the 2D canvas has really finished. The
+  test also proves the foil pass ran (gold pixels present). Headless Chromium on this Mac, dev server
+  shared with other sessions; three runs:
+  - **1× (1080×1350 device px):** median 10.2–12.4 ms, p95 11.7–19.4 ms. Within budget.
+  - **2× (2160×2700 device px, the retina editor):** median 34.4–37.0 ms, **p95 50.5–51.6 ms — over
+    the 33 ms budget.** A retina editor repainting a Frame with three foil layers will drop below
+    30 fps on every repaint. Not fixed here: the at-rest cache is the controller's call.
 - **Export inventory** (which Frame export paths paint in the browser, and so carry finishes and
   the placed light, vs. which don't):
-  - **Browser-painted (finishes + light apply):** the editor's live render (`CompositorModal.vue`'s
-    stack canvas), Render/PNG export, Harmonize render, motion bake, web export
-    (`app/lib/embed/surfaces/frame.ts` and its `frame/plan.ts` / `frame/gather.ts` / `frame/needs.ts`
-    — confirmed by grep: these reference the same `renderStack`/`effectStack` path), and canvas
-    Frame cards (`ArtifactFrameNode.vue`, same confirmation).
-  - **NOT painted in the browser (no finishes, and no other layer effects either):** queued runs of
-    a graph with a Compositor node — the ComfyUI Python node
-    `comfy_extras/nodes_compositor.py` and its Nitro port `frontend/server/runner/compositor/*`
-    (`plan.ts`, `render.ts`, …). Grepped both for `gold_foil` / `finishPass` / `renderStack` /
-    `effectStack`: zero hits in either, confirming neither path runs the shared browser painter.
+  - **Browser-painted (finishes + the placed light apply):** the editor's live render
+    (`CompositorModal.vue`'s stack canvas), Render/PNG export, Harmonize render, motion bake and
+    browser video export (both through `prepareMotionFramePainter`, which now receives the light in
+    `FrameDocPaint.light` — final-review fix), web export (`app/lib/embed/surfaces/frame.ts` and its
+    `frame/plan.ts` / `frame/gather.ts` / `frame/needs.ts`), and canvas Frame cards
+    (`ArtifactFrameNode.vue`, which now also repaints when the light moves).
+  - **Queued graph runs:** the local layers are baked in the browser before queueing
+    (`VueNodeCanvas.vue` `injectCompositorOverlays` → `bakeOverlay` → `drawLocalLayers` →
+    `paintLayerStack`), so they DO carry finishes — and, since the final-review fix, with the Frame's
+    own light (`readFrameLight(comp.properties)`), not the default.
+  - **Not browser-painted:** only the server-side Compositor itself — the ComfyUI Python node
+    `comfy_extras/nodes_compositor.py` and its Nitro port `frontend/server/runner/compositor/*`.
+    Neither runs the shared painter, so anything they draw themselves (wired layers, their own
+    effects) has no finishes; the local layers they receive are already-baked pixels.
   - **Preview-only sites on the default light** (not re-verified beyond the plan's own research —
     no grep run against these for this task): agent preview, `LayoutTile`, layer thumbnails, dev
     harness.
@@ -249,3 +255,25 @@ started, restarted or killed.
   navigation of a run; retrying the same test alone always passed immediately after, and
   `curl -w "%{time_total}"` against `127.0.0.1:3002/` showed an 8s response once versus sub-250ms
   moments later — consistent with load from other sessions sharing this dev server, not a bug.
+
+## Decisions made while building
+
+Divergences from the design above, ratified at the final review (2026-09-24):
+
+- **GpuPost vec3 uniforms use a `{ vec3 }` wrapper**, not "a 3-long array is a vec3". DOF's tap
+  offsets are a `Float32Array` of 96 floats read as vec2s; guessing by length would misread them.
+- **`applyFinish` replaces the layer's alpha** rather than recombining it with the original: foil
+  erodes its own edge on purpose (stamped foil never has a perfect edge); Spot UV writes the layer's
+  alpha back unchanged.
+- **The no-WebGL2 message shows in the inspector**, not on the effect row. It is a plain sentence
+  ("Finishes need WebGL 2, which this browser can't provide right now."); the raw cause goes to the
+  console. Availability is per finish (`finishAvailable(kind)`), so one shader failing does not
+  disable the other.
+- **A lost WebGL context, or a layer larger than the GPU's texture limit, draws the layer plain**
+  for that paint; the pass rebuilds its context on the next paint instead of drawing blank.
+- **Halation is also a per-layer effect** (like Bloom), and its dials are animatable.
+- **Halation's "weaker on the bright core" is not implemented:** both glows add with `lighter`.
+  Tune by eye if it reads too hot.
+- **Motion bake and browser video export carry the placed light**, as do queued graph runs (see the
+  export inventory in Findings).
+

@@ -8,7 +8,7 @@ import { openCompositor, stackPixels, setStudioRow } from './_helpers'
  * layer and document Halation, then checks the things a screenshot can't prove on its
  * own: the light preset actually moves the highlight, the on-canvas handle only shows
  * while a finish effect is selected, a drag + one undo round-trips cleanly, and Halation
- * changes the composite. A `cost` describe block times repaints with three foils on a
+ * changes the composite. A `cost` describe block times a synchronous paint of three foils on a
  * Frame — see its own comment for why it doesn't assert a hard threshold.
  */
 
@@ -209,64 +209,71 @@ test.describe('Print finishes — look, handle and halation', () => {
 })
 
 /**
- * Cost (brief Step 5). Not a webServer-timed `renderStack` wrap — that function isn't
- * exposed to the page, and this task doesn't add a hook or touch product code for it.
- * Instead this times, from the page, the wall-clock between committing a layer change
- * through `__compositorSetLayers` and two rAFs later — a close proxy for one repaint,
- * taken 60 times. Tagged in its own `describe` so it can be skipped independently; it
- * reports median/p95 via `test.info()` annotations rather than asserting a threshold —
- * per the brief, going over 33ms p95 is a finding to report, not a reason to add a cache
- * speculatively or fail the run.
+ * Cost (final review item 5). Times a SYNCHRONOUS `paintLayerStack` call with
+ * `performance.now()` — not rAF-to-rAF wall clock, which vsync quantises to ~16.7 ms steps.
+ * The module is imported in-page from the running dev server, so it is the real painter
+ * with the real GpuPost finish passes. Offscreen canvas at a 1080×1350 Frame, painted the
+ * way the editor paints it: ctx scaled by the device pixel ratio, once at 1× (1080×1350
+ * device px) and once at 2× (2160×2700 — the retina editor). Three Gold foil text layers,
+ * 2 warm-up paints then 30 timed. Each timed paint ends with a 1×1 getImageData so the 2D
+ * canvas has really finished (a GPU-backed 2D canvas otherwise defers its work past the
+ * timer). Reports median/p95; over 33 ms p95 is a finding to report, not a failure.
  */
 test.describe('cost', () => {
-  test('60 repaints with three gold_foil text layers — median/p95', async ({ page }) => {
+  test('synchronous paintLayerStack with three gold_foil text layers at 1x and 2x — median/p95', async ({ page }) => {
     await openCompositor(page)
-    await page.evaluate(() => {
-      const foil = (id: string, x: number, y: number) => ({
-        id, kind: 'text', x, y, rotation: 0, opacity: 1,
+    const result = await page.evaluate(async () => {
+      const mod = await import('/_nuxt/@fs/Users/julien/Documents/GitHub/Sailor/frontend/app/composables/useCompositorLayers.ts' as string)
+      const foil = (id: string, y: number) => ({
+        id, kind: 'text', x: 0.5, y, rotation: 0, opacity: 1,
         text: 'FOIL', fontFamily: 'Georgia', fontWeight: 700, fontSize: 0.14, color: '#ffffff',
         align: 'center', lineHeight: 1.1,
         effects: [{ id: `gf-${id}`, type: 'gold_foil', visible: true, metal: 'gold', brushed: 0.5, pressed: 0.5 }],
       })
-      const mover = { id: 'mover', kind: 'rect', x: 0.15, y: 0.9, w: 0.06, h: 0.06, radius: 0, rotation: 0, opacity: 1, fill: '#888888', effects: [] }
-      ;(window as any).__compositorSetLayers([foil('f1', 0.5, 0.2), foil('f2', 0.5, 0.5), foil('f3', 0.5, 0.8), mover])
-    })
-    await expect.poll(() => page.evaluate(() => (window as any).__compositorLayers().length),
-      { timeout: 10_000 }).toBe(4)
-    // Let the initial paint (including the foil GPU passes) settle before timing.
-    await stackPixels(page)
-
-    const canvasSize = await page.evaluate(() => {
-      const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
-      return { w: cv.width, h: cv.height }
-    })
-
-    const durations: number[] = await page.evaluate(async () => {
-      const results: number[] = []
-      for (let i = 0; i < 60; i++) {
-        const layers = (window as any).__compositorLayers()
-        const idx = layers.findIndex((l: any) => l.id === 'mover')
-        layers[idx].x = 0.1 + (i % 2) * 0.1
-        const t0 = performance.now()
-        ;(window as any).__compositorSetLayers(layers)
-        await new Promise(r => requestAnimationFrame(r))
-        await new Promise(r => requestAnimationFrame(r))
-        results.push(performance.now() - t0)
+      const layers = [foil('f1', 0.2), foil('f2', 0.5), foil('f3', 0.8)]
+      const items = layers.map(l => ({ type: 'local', key: `l:${l.id}`, layer: l }))
+      const W = 1080, H = 1350
+      const out: Record<string, { w: number; h: number; ms: number[]; goldPx: number }> = {}
+      for (const dpr of [1, 2]) {
+        const cv = document.createElement('canvas')
+        cv.width = W * dpr; cv.height = H * dpr
+        const ctx = cv.getContext('2d')!
+        const paintOnce = () => {
+          ctx.setTransform(1, 0, 0, 1, 0, 0)
+          ctx.clearRect(0, 0, cv.width, cv.height)
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+          mod.paintLayerStack(ctx, W, H, items, layers)
+          ctx.getImageData(0, 0, 1, 1)
+        }
+        paintOnce(); paintOnce() // warm-up: shader compile, texture alloc, font raster
+        const ms: number[] = []
+        for (let i = 0; i < 30; i++) {
+          const t0 = performance.now()
+          paintOnce()
+          ms.push(performance.now() - t0)
+        }
+        // Proof the foil pass ran: white text turns gold (r well above b) only through the finish.
+        const d = ctx.getImageData(0, 0, cv.width, cv.height).data
+        let goldPx = 0
+        for (let p = 0; p < d.length; p += 16) if (d[p + 3]! > 128 && d[p]! - d[p + 2]! > 60) goldPx++
+        out[`${dpr}x`] = { w: cv.width, h: cv.height, ms, goldPx }
       }
-      return results
+      return out
     })
 
-    const sorted = [...durations].sort((a, b) => a - b)
-    const median = sorted[Math.floor(sorted.length / 2)]!
-    const p95 = sorted[Math.floor(sorted.length * 0.95)]!
-    test.info().annotations.push(
-      { type: 'canvas-size', description: `${canvasSize.w}x${canvasSize.h}` },
-      { type: 'median-ms', description: median.toFixed(2) },
-      { type: 'p95-ms', description: p95.toFixed(2) },
-      { type: 'all-ms', description: durations.map(d => d.toFixed(1)).join(',') },
-    )
-    console.log(`[print-finishes cost] canvas=${canvasSize.w}x${canvasSize.h} median=${median.toFixed(2)}ms p95=${p95.toFixed(2)}ms`)
-
-    expect(sorted.length).toBe(60)
+    for (const [k, r] of Object.entries(result)) {
+      const sorted = [...r.ms].sort((a, b) => a - b)
+      const median = sorted[Math.floor(sorted.length / 2)]!
+      const p95 = sorted[Math.ceil(sorted.length * 0.95) - 1]!
+      test.info().annotations.push(
+        { type: `${k}-canvas`, description: `${r.w}x${r.h}` },
+        { type: `${k}-median-ms`, description: median.toFixed(2) },
+        { type: `${k}-p95-ms`, description: p95.toFixed(2) },
+        { type: `${k}-all-ms`, description: r.ms.map(d => d.toFixed(1)).join(',') },
+      )
+      console.log(`[print-finishes cost] ${k} canvas=${r.w}x${r.h} median=${median.toFixed(2)}ms p95=${p95.toFixed(2)}ms max=${sorted.at(-1)!.toFixed(2)}ms goldPx=${r.goldPx}`)
+      expect(r.ms.length).toBe(30)
+      expect(r.goldPx).toBeGreaterThan(100) // the finish really ran — not a plain-text timing
+    }
   })
 })
