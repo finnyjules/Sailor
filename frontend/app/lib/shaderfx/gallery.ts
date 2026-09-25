@@ -73,7 +73,10 @@ export function shaderGalleryFilters(effects: EffectDef[], include?: Include, li
     ...ids.map(id => ({ id, label: labelOf(id), count: counts.get(id)! })),
   ]
 }
-/** The effects a picker lists for a chip and a search (name, category or origin; any case). */
+/** The effects a picker lists for a chip and a search (name, category or origin; any case).
+ *  Call it (and shaderGalleryFilters) inside a `computed`: both read the My effects library
+ *  refs, so a rename, a removal or the library landing re-runs the picker with no catalog
+ *  change at all. */
 export function shaderGalleryItems(
   effects: EffectDef[],
   o: { filter: string; query: string; include?: Include; listed?: Listed },

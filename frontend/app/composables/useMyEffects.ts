@@ -3,8 +3,9 @@
  *  /api/my-effects first, then registered with the live shader catalog so every picker and
  *  renderer sees it at once. A failed write changes nothing on the page. */
 import type { GenTake } from '~~/shared/shadergen/contract'
-import { cleanName, newMyEffectId, type MyEffectRecord } from '~~/shared/myEffects/record'
+import { cleanName, newMyEffectId, validateMyEffect, type MyEffectRecord } from '~~/shared/myEffects/record'
 import * as client from '~/lib/myEffects/client'
+import { MY_EFFECTS_ERRORS } from '~/lib/myEffects/client'
 import { expandMyEffect, recordFromTake, withCodeVersion, withValuesVersion } from '~/lib/myEffects/defs'
 import { loadMyEffectRecords, myEffectRecordById, myEffectRecords, setMyEffectRecord } from '~/lib/myEffects/library'
 import { registerEffects, unregisterEffects } from '~/lib/shaderfx/catalog'
@@ -33,7 +34,7 @@ export function useMyEffects(deps: MyEffectsDeps = {}) {
   const commit = async (r: MyEffectRecord): Promise<MyEffectRecord> => stored(await api.putMyEffect(r))
   const need = (id: string): MyEffectRecord => {
     const r = myEffectRecordById(id)
-    if (!r) throw new Error('That effect isn’t in My effects any more.')
+    if (!r) throw new Error(MY_EFFECTS_ERRORS.gone)
     return r
   }
 
@@ -56,11 +57,16 @@ export function useMyEffects(deps: MyEffectsDeps = {}) {
       setMyEffectRecord(null, id)
     },
     /** Register a project's own copies of My effects so it renders — unless the library already
-     *  has that effect with at least as many versions. Never written into the library. */
+     *  has that effect with at least as many versions (plan ruling 17; if the library loads
+     *  later, the live catalog applies the same rule then). A copy comes from a project doc,
+     *  possibly someone else's, so each is validated first and a malformed one is skipped.
+     *  Never written into the library. */
     adopt(recs: MyEffectRecord[]): void {
-      const take = recs.filter((r) => {
+      const take = recs.flatMap((raw) => {
+        let r: MyEffectRecord
+        try { r = validateMyEffect(raw) } catch { return [] }
         const lib = myEffectRecordById(r.id)
-        return !lib || lib.versions.length < r.versions.length
+        return !lib || lib.versions.length < r.versions.length ? [r] : []
       })
       if (take.length) register(take.flatMap(expandMyEffect))
     },

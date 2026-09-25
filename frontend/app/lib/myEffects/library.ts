@@ -5,6 +5,7 @@
 import { shallowRef } from 'vue'
 import type { MyEffectRecord } from '~~/shared/myEffects/record'
 import * as client from './client'
+import { MY_EFFECTS_ERRORS } from './client'
 
 /** Newest first. */
 export const myEffectRecords = shallowRef<MyEffectRecord[]>([])
@@ -13,12 +14,25 @@ export const myEffectsLoaded = shallowRef(false)
 
 let loaded: Promise<MyEffectRecord[]> | null = null
 
-/** Load the library, once per page unless `force`. A failure is not cached: the next call retries. */
-export function loadMyEffectRecords(api: Pick<typeof client, 'listMyEffects'> = client, force = false): Promise<MyEffectRecord[]> {
+/** How long a list call may take before the page gives up on it for now (and retries later). */
+export const MY_EFFECTS_LOAD_TIMEOUT_MS = 8_000
+
+/** Load the library, once per page unless `force`. A failure — or no answer within
+ *  `timeoutMs` — is not cached and leaves the library "not loaded": the next call retries. */
+export function loadMyEffectRecords(
+  api: Pick<typeof client, 'listMyEffects'> = client,
+  force = false,
+  timeoutMs = MY_EFFECTS_LOAD_TIMEOUT_MS,
+): Promise<MyEffectRecord[]> {
   if (!loaded || force) {
-    const p: Promise<MyEffectRecord[]> = api.listMyEffects()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(MY_EFFECTS_ERRORS.unreachable)), timeoutMs)
+    })
+    const p: Promise<MyEffectRecord[]> = Promise.race([api.listMyEffects(), timeout])
       .then((r) => { myEffectRecords.value = r; myEffectsLoaded.value = true; return r })
       .catch((e) => { if (loaded === p) loaded = null; throw e })
+      .finally(() => clearTimeout(timer))
     loaded = p
   }
   return loaded
