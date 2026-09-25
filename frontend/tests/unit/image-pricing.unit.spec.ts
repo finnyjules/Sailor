@@ -431,7 +431,7 @@ describe('worked examples', () => {
     expect(providerUsd('GenerateImageNode', { model: 'flux-2-dev', model_options: ['9', 0] })).toBeCloseTo(0.012 * 3, 9)
   })
 
-  it('Krea 2 is priced (fal text-to-image) and stays off the runner lists until its family lands', () => {
+  it('Krea 2 is priced (fal text-to-image) and stays off the two runner lists: its own family krea-2 takes it (F17)', () => {
     expect(providerUsd('GenerateImageNode', { model: 'krea-2-large' })).toBeCloseTo(0.06, 9)
     expect(providerUsd('GenerateImageNode', { model: 'krea-2-medium' })).toBeCloseTo(0.03, 9)
     expect(charge({ model: 'krea-2-large' })).toBe(12 + 1)

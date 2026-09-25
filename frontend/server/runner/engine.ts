@@ -1048,9 +1048,10 @@ export function createEngine(deps: EngineDeps) {
     }
     // A request no provider takes (a Nano Banana prompt under 3 characters,
     // too many Seedance references) is refused before anything is held
-    // (requestRules.ts; planNode checks the built request again).
+    // (requestRules.ts; planNode checks the built request again). `runner`
+    // adds the rules only a runner run has (Krea 2's prompt, F17).
     for (const p of prompts) {
-      const problem = requestProblems(p)[0]
+      const problem = requestProblems(p, { runner: true })[0]
       if (problem) throw refuse(problem.message, 400, { nodeId: problem.nodeId, classType: problem.classType })
     }
     // Fail closed on price, before anything is held: a provider node that

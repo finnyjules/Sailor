@@ -164,6 +164,8 @@ export const IMAGE_RATES: Record<string, ImageRate> = {
   'seedream-4': falImage('fal-ai/bytedance/seedream/v4/text-to-image', 0.03),
   // "charged $0.060 (text-to-image) or $0.065 (using image_style_references)".
   // The builder sends no style pictures. Replicate's krea/krea-2-large: the same $0.06.
+  // Both paths send fal first (Python's _fal_krea2; the runner's krea2.ts,
+  // family krea-2, Task F17) with Replicate behind it, at the same price.
   'krea-2-large': falImage('krea/v2/large/text-to-image', 0.06),
   // "charged $0.030 (text-to-image) or $0.035 (using image_style_references)".
   'krea-2-medium': falImage('krea/v2/medium/text-to-image', 0.03),
@@ -312,6 +314,14 @@ export const IMAGE_BACKUP_RATES: Record<string, ImageRate> = {
   // 2026-09-24), whatever the ratio. Covered at cost it is $0.02, under fal's
   // $0.035, so the node is priced at fal's.
   'recraft-v4.1': repImage('recraft-ai/recraft-v4.1', 0.04),
+  // Krea 2 on Replicate (krea/krea-2-large, krea/krea-2-medium, Krea's own,
+  // official; the runner's backup, family krea-2, Task F17, and Python's
+  // fallover): billing "Text to image" "$0.06" / "$0.03 per output image"
+  // (image_output_count; read 2026-09-25). Its dearer tiers, "With style
+  // references" and "With moodboards", are never sent. The same as fal's,
+  // so covered at cost it is under fal's price, and the node stays at fal's.
+  'krea-2-large': { ...repImage('krea/krea-2-large', 0.06), read: '2026-09-25' },
+  'krea-2-medium': { ...repImage('krea/krea-2-medium', 0.03), read: '2026-09-25' },
   // openai/gpt-image-2.5-flare and -sunburst (billingConfig, the same tiers on
   // both): "low $0.012, medium $0.047, high $0.128" per output image, whatever
   // the size. Output pictures only.

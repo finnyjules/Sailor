@@ -135,7 +135,8 @@ describe('the first and backup services are the table\'s', () => {
     const image = Object.keys(RUNNER_ROUTES).filter(k => k.startsWith('image:')).length
     const video = Object.keys(RUNNER_ROUTES).filter(k => k.startsWith('video:')).length
     // + GPT Image 2.5 (Task F2), Qwen Image 3 (Task F6), Grok Imagine 2 (Task F7), Ideogram 4 (Task F8), Muse Image (Task F13),
-    // Nano Banana 2 Lite (Task F14), Reve 2.1 (Task F15) and Recraft V4.1 (Task F16), runner-only models outside the two builder tables.
+    // Nano Banana 2 Lite (Task F14), Reve 2.1 (Task F15) and Recraft V4.1 (Task F16), runner-only models outside the two builder tables,
+    // and Krea 2 Large and Medium (Task F17, family krea-2, not runner-only), outside them too.
     expect(keys.has('image:gpt-image-2.5')).toBe(true)
     expect(keys.has('image:qwen-image-3')).toBe(true)
     expect(keys.has('image:grok-imagine-2')).toBe(true)
@@ -144,7 +145,9 @@ describe('the first and backup services are the table\'s', () => {
     expect(keys.has('image:nano-banana-2-lite')).toBe(true)
     expect(keys.has('image:reve-2.1')).toBe(true)
     expect(keys.has('image:recraft-v4.1')).toBe(true)
-    expect(image).toBe(Object.keys(RUNNER_IMAGE_MODELS).length + Object.keys(RUNNER_REPLICATE_IMAGE_MODELS).length + 8)
+    expect(keys.has('image:krea-2-large')).toBe(true)
+    expect(keys.has('image:krea-2-medium')).toBe(true)
+    expect(image).toBe(Object.keys(RUNNER_IMAGE_MODELS).length + Object.keys(RUNNER_REPLICATE_IMAGE_MODELS).length + 10)
     expect(video).toBe(Object.keys(RUNNER_VIDEO_MODELS).length + Object.keys(RUNNER_REPLICATE_VIDEO_MODELS).length)
   })
 
@@ -475,7 +478,8 @@ describe('the price reads the first service\'s rate and covers the backup at cos
   it('backup cards carry a source, the date read and are verified', () => {
     for (const card of [...Object.values(VIDEO_BACKUP_RATES), ...Object.values(IMAGE_BACKUP_RATES)]) {
       expect(card.confidence).toBe('verified')
-      expect(card.read).toBe('2026-09-24')
+      // Read during the programme: the S3 cards on 24 Sep, Krea 2's Replicate billing (F17) on 25 Sep.
+      expect(['2026-09-24', '2026-09-25']).toContain(card.read)
       expect(card.source).toMatch(card.service === 'fal' ? /^https:\/\/fal\.ai\/models\/.+\/llms\.txt$/ : /^https:\/\/replicate\.com\//)
     }
   })

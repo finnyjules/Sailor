@@ -13,7 +13,12 @@
  *    from GPT Image 2.5;
  *  - a prompt longer than the schema's `maxLength` where the table
  *    PROMPT_MAX_LENGTH names the endpoint (Reve 2.1 4,000, F15; Recraft V4.1
- *    10,000, F16);
+ *    10,000, F16; Krea 2 5,000, F17);
+ *  - Krea 2 Large and Medium (F17) with an empty prompt (the schema's
+ *    minLength 1) or one over 5,000 characters, as sent: on a runner run
+ *    ONLY (`requestProblems(prompt, { runner: true })`). They are not
+ *    runner-only, and the ComfyUI path keeps sending what it sent before
+ *    (Python falls over to Replicate, whose schema sets no limit);
  *  - Wan 3.0 reference pictures over its schema's 10, and reference videos or
  *    sounds, which the runner doesn't send it yet (wan3.ts);
  *  - Seedance 2.0 references over the schema's counts (9 pictures, 3 videos,
@@ -98,6 +103,7 @@ import { REVE_21_FAL_APP, REVE_21_LONG_PROMPT, REVE_21_NEEDS_PROMPT, REVE_21_PRO
 import {
   RECRAFT_V41_FAL_APP, RECRAFT_V41_LONG_PROMPT, RECRAFT_V41_NEEDS_PROMPT, RECRAFT_V41_PROMPT_MAX, isRecraftV41Model,
 } from './generators/recraftV41'
+import { KREA_2_FAL_APPS, KREA_2_IDS, KREA_2_LONG_PROMPT, KREA_2_NEEDS_PROMPT, KREA_2_PROMPT_MAX, isKrea2Model } from './generators/krea2'
 import { isSeedream5ProEdit, seedream5ProEditProblems } from './generators/seedream5ProEdit'
 
 export { FIRST_FRAME_AND_REFERENCES }
@@ -145,6 +151,9 @@ export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: 
   // Recraft V4.1 on fal (recraftV41.ts): the schema's own minLength 1. Its
   // Replicate backup is built from a request that passed this.
   [`fal ${RECRAFT_V41_FAL_APP}`]: { min: 1, message: RECRAFT_V41_NEEDS_PROMPT },
+  // Krea 2 Large and Medium on fal (krea2.ts, F17): the schemas' own minLength 1.
+  // Judged before the run only on a runner run (requestProblems' `runner`).
+  ...Object.fromEntries(KREA_2_IDS.map(id => [`fal ${KREA_2_FAL_APPS[id]}`, { min: 1, message: KREA_2_NEEDS_PROMPT }])),
 }
 
 /**
@@ -158,6 +167,8 @@ export const PROMPT_MAX_LENGTH: Readonly<Record<string, { max: number, message: 
   [`fal ${REVE_21_FAL_APP}`]: { max: REVE_21_PROMPT_MAX, message: REVE_21_LONG_PROMPT },
   // Recraft V4.1 on fal (recraftV41.ts, Task F16).
   [`fal ${RECRAFT_V41_FAL_APP}`]: { max: RECRAFT_V41_PROMPT_MAX, message: RECRAFT_V41_LONG_PROMPT },
+  // Krea 2 Large and Medium on fal (krea2.ts, Task F17).
+  ...Object.fromEntries(KREA_2_IDS.map(id => [`fal ${KREA_2_FAL_APPS[id]}`, { max: KREA_2_PROMPT_MAX, message: KREA_2_LONG_PROMPT }])),
 }
 
 /**
@@ -369,8 +380,12 @@ const H3_VIDEO_APPS: Readonly<Record<string, string>> = Object.fromEntries([
  * the prompt as sent, after any style text is added, judged by the endpoint's
  * rule in PROMPT_MIN_LENGTH. A prompt part that is wired in can't be read
  * before the run, so that node is not judged here.
+ *
+ * `runner`: the prompt runs on the Sailor runner (the engine's check). A
+ * model that runs on both paths but whose rules are the runner's alone
+ * (Krea 2, F17) is judged only then; the ComfyUI path's gate leaves it out.
  */
-export function requestProblems(prompt: ApiPrompt): RequestProblem[] {
+export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = {}): RequestProblem[] {
   const out: RequestProblem[] = []
   for (const [nodeId, node] of Object.entries(prompt ?? {})) {
     const inputs = node?.inputs ?? {}
@@ -434,6 +449,19 @@ export function requestProblems(prompt: ApiPrompt): RequestProblem[] {
         : isMuseImageModel(inputs.model) ? MUSE_IMAGE_FAL_APP
           : isReve21Model(inputs.model) ? REVE_21_FAL_APP : RECRAFT_V41_FAL_APP
       judge(app, composeImagePrompt({
+        prompt: asText(inputs.prompt),
+        promptIn: asText(inputs.prompt_in),
+        styleBlock: asText(inputs.style_block),
+        styleIn: asText(inputs.style_in),
+        hasRefs: false,
+      }))
+    }
+    // Krea 2 Large and Medium (fal, text-to-image, F17), on a runner run only: the
+    // prompt as sent must not be empty nor over its schema's 5,000 characters.
+    else if (ct === 'GenerateImageNode' && isKrea2Model(inputs.model)) {
+      if (!opts.runner) continue
+      if (['prompt', 'prompt_in', 'style_block', 'style_in'].some(k => isLink(inputs[k]))) continue
+      judge(KREA_2_FAL_APPS[inputs.model], composeImagePrompt({
         prompt: asText(inputs.prompt),
         promptIn: asText(inputs.prompt_in),
         styleBlock: asText(inputs.style_block),

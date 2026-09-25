@@ -211,12 +211,13 @@ describe('the Replicate image list', () => {
     }
   })
 
-  it('keeps out Krea 2: priced (Task P3), but fal-first and waiting for its own family', () => {
+  it('keeps out Krea 2: priced (Task P3), fal-first, taken under its own family krea-2 (Task F17), not this one', () => {
     for (const id of ['krea-2-large', 'krea-2-medium']) {
       expect(IMAGE_MODELS_BY_ID[id]!.pricePerImage, id).toBeGreaterThan(0)
       expect(byId.get(id)!.primary, id).toBe('fal')
       expect((RUNNER_REPLICATE_IMAGE_MODEL_IDS as readonly string[]).includes(id), id).toBe(false)
-      expect(isRunnerEligible(one(img(id)), ALL), id).toBe(false)
+      expect(isRunnerEligible(one(img(id)), REPLICATE_IMAGE), id).toBe(false)
+      expect(isRunnerEligible(one(img(id)), new Set<RunnerFamily>(['krea-2'])), id).toBe(true)
     }
   })
 
@@ -240,8 +241,11 @@ const one = (n: ApiPrompt[string]): ApiPrompt => ({ 1: n })
 const withCard = (n: ApiPrompt[string]): ApiPrompt => ({ 1: n, 2: { class_type: 'Image', inputs: { image: '', export: false, images: ['1', 0], batch_index: -1 } } })
 
 describe('replicate-image eligibility', () => {
-  it('the row adds only the Replicate models to GenerateImageNode (and GPT Image 2.5, Qwen Image 3, Grok Imagine 2, Ideogram 4, Muse Image, Nano Banana 2 Lite, Reve 2.1 and Recraft V4.1 under their own families, Tasks F2, F6, F7, F8, F13, F14, F15 and F16)', () => {
-    const { 'gpt-image-2.5': gpt25, 'qwen-image-3': qwen3, 'grok-imagine-2': grok2, 'ideogram-4': ideogram4, 'muse-image': muse, 'nano-banana-2-lite': nb2Lite, 'reve-2.1': reve21, 'recraft-v4.1': recraft41, ...models } = RUNNER_NODE_RULES.GenerateImageNode!.models!
+  it('the row adds only the Replicate models to GenerateImageNode (and GPT Image 2.5, Qwen Image 3, Grok Imagine 2, Ideogram 4, Muse Image, Nano Banana 2 Lite, Reve 2.1 and Recraft V4.1 under their own families, Tasks F2, F6, F7, F8, F13, F14, F15 and F16; Krea 2 under krea-2, F17)', () => {
+    const {
+      'gpt-image-2.5': gpt25, 'qwen-image-3': qwen3, 'grok-imagine-2': grok2, 'ideogram-4': ideogram4, 'muse-image': muse, 'nano-banana-2-lite': nb2Lite, 'reve-2.1': reve21, 'recraft-v4.1': recraft41,
+      'krea-2-large': krea2Large, 'krea-2-medium': krea2Medium, ...models
+    } = RUNNER_NODE_RULES.GenerateImageNode!.models!
     expect(gpt25).toBe('gpt-image-2.5')
     expect(qwen3).toBe('qwen-image-3')
     expect(grok2).toBe('grok-imagine-2')
@@ -250,6 +254,8 @@ describe('replicate-image eligibility', () => {
     expect(nb2Lite).toBe('nano-banana-2-lite')
     expect(reve21).toBe('reve-2.1')
     expect(recraft41).toBe('recraft-v4.1')
+    expect(krea2Large).toBe('krea-2')
+    expect(krea2Medium).toBe('krea-2')
     expect(Object.keys(models).sort()).toEqual([...RUNNER_REPLICATE_IMAGE_MODEL_IDS].sort())
     expect(new Set(Object.values(models))).toEqual(new Set(['replicate-image']))
     expect(PROVIDER_TYPES.has('GenerateImageNode')).toBe(true)

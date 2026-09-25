@@ -314,6 +314,8 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // ── nano-banana-2-lite (model line-up F14): Nano Banana 2 Lite on Replicate, runner-only ──
   // ── reve-2.1 (model line-up F15): Reve 2.1 on fal, runner-only ──
   // ── recraft-v4.1 (model line-up F16): Recraft V4.1 on fal, Replicate the backup, runner-only ──
+  // ── krea-2 (model line-up F17): Krea 2 Large and Medium on fal, Replicate the backup. NOT
+  //    runner-only: with the family off they run on ComfyUI through their Python builders as before ──
   GenerateImageNode: {
     models: {
       ...Object.fromEntries(RUNNER_REPLICATE_IMAGE_MODEL_IDS.map(id => [id, 'replicate-image' as const])),
@@ -325,6 +327,8 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       'nano-banana-2-lite': 'nano-banana-2-lite',
       'reve-2.1': 'reve-2.1',
       'recraft-v4.1': 'recraft-v4.1',
+      'krea-2-large': 'krea-2',
+      'krea-2-medium': 'krea-2',
     },
     mustNotLink: ['prompt', 'model_options', 'style_block', 'style_refs', 'prompt_in', 'style_in'],
   },
@@ -431,9 +435,9 @@ export function upgradeHidesWidget(classType: string, widgetName: string, famili
   return classUpgradeOn(classType, families)?.hiddenWidgets?.includes(widgetName) ?? false
 }
 
-/** The image models that default to fal AND have a price. seedream-5-pro is
- *  left out until it is priced. krea-2-large and krea-2-medium are priced
- *  (shared/pricing/imageRates.ts) and join with their own family. */
+/** The image models that default to fal AND have a price, taken with no
+ *  family. seedream-5-pro is left out until it is priced. krea-2-large and
+ *  krea-2-medium are taken only under their own family, krea-2 (F17). */
 export const RUNNER_IMAGE_MODEL_IDS = [
   'flux-1.1-pro', 'flux-schnell', 'nano-banana-pro', 'nano-banana-2',
   'ideogram-v3-quality', 'ideogram-v3-balanced', 'ideogram-v3-turbo',

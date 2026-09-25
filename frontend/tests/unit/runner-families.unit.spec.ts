@@ -35,7 +35,7 @@ describe('parseFamilies', () => {
     expect([...parseFamilies(['fal-edit', 7, 'nope', 'ref-edits'])].sort()).toEqual(['fal-edit', 'ref-edits'])
   })
   it('knows the nine families', () => {
-    expect([...RUNNER_FAMILIES].sort()).toEqual(['bria-product-shot', 'fal-edit', 'frame', 'gemini-omni-flash', 'gpt-image-2.5', 'grok-imagine-2', 'h3-max-turbo', 'ideogram-4', 'muse-image', 'nano-actions', 'nano-banana-2-blend', 'nano-banana-2-lite', 'qwen-2511-angles', 'qwen-image-3', 'recraft-v4.1', 'ref-edits', 'replicate-image', 'replicate-video', 'restyle', 'reve-2.1', 'seedream-5-pro-edit', 'veo-3.1-lite', 'wan-3'])
+    expect([...RUNNER_FAMILIES].sort()).toEqual(['bria-product-shot', 'fal-edit', 'frame', 'gemini-omni-flash', 'gpt-image-2.5', 'grok-imagine-2', 'h3-max-turbo', 'ideogram-4', 'krea-2', 'muse-image', 'nano-actions', 'nano-banana-2-blend', 'nano-banana-2-lite', 'qwen-2511-angles', 'qwen-image-3', 'recraft-v4.1', 'ref-edits', 'replicate-image', 'replicate-video', 'restyle', 'reve-2.1', 'seedream-5-pro-edit', 'veo-3.1-lite', 'wan-3'])
   })
 })
 
@@ -69,7 +69,7 @@ const CASES: Array<[string, ApiPrompt, boolean]> = [
   ['another node type', { '1': img(), '2': { class_type: 'ImageBlur', inputs: { image: ['1', 0] } } }, false],
   ['an image model no family takes (recraft-v4-svg)', one(img('recraft-v4-svg')), false],
   ['an unpriced image model (reve-create)', one(img('reve-create')), false],
-  ['a priced image model whose family is not built yet (krea-2-large)', one(img('krea-2-large')), false],
+  // Krea 2 (priced in P3) is taken under its own family since F17: runner-krea-2.unit.spec.ts.
   ['no generator', one({ class_type: 'Image', inputs: { image: 'a.png' } }), false],
   ['empty', {}, false],
   ['a dangling link', { '1': { class_type: 'Image', inputs: { images: ['9', 0] } }, '2': img() }, false],

@@ -39,6 +39,7 @@ import { MUSE_IMAGE_FAL_APP } from '~~/server/runner/generators/museImage'
 import { NANO_BANANA_2_LITE_SLUG } from '~~/server/runner/generators/nanoBanana2Lite'
 import { REVE_21_FAL_APP } from '~~/server/runner/generators/reve21'
 import { RECRAFT_V41_FAL_APP, RECRAFT_V41_REPLICATE_SLUG } from '~~/server/runner/generators/recraftV41'
+import { KREA_2_FAL_APPS, KREA_2_REPLICATE_SLUGS } from '~~/server/runner/generators/krea2'
 import { QWEN_2511_ANGLES_APP } from '~~/server/runner/generators/qwen2511Angles'
 import { BRIA_PRODUCT_SHOT_APP } from '~~/server/runner/generators/briaProductShot'
 
@@ -252,6 +253,9 @@ function runnerEndpoints(): string[] {
   // Task F16: Recraft V4.1 on fal, Replicate the backup (recraftV41.ts; its grid is runner-recraft-v4-1.unit.spec.ts).
   out.add(`fal ${RECRAFT_V41_FAL_APP}`)
   out.add(`replicate ${RECRAFT_V41_REPLICATE_SLUG}`)
+  // Task F17: Krea 2 Large and Medium on fal, Replicate the backup (krea2.ts; its grid is runner-krea-2.unit.spec.ts).
+  for (const app of Object.values(KREA_2_FAL_APPS)) out.add(`fal ${app}`)
+  for (const slug of Object.values(KREA_2_REPLICATE_SLUGS)) out.add(`replicate ${slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)

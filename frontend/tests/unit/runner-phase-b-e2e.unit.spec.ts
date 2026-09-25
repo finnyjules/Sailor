@@ -414,6 +414,21 @@ const FLOWS: FamilyFlow[] = [
     endpoint: 'fal-ai/recraft/v4.1/text-to-image',
     body: { prompt: 'a poster that says HELLO', image_size: 'square_hd' },
   },
+  // Task F17: Krea 2 Medium, which also runs on ComfyUI (Python _fal_krea2);
+  // fal first, the body its saved schema and the Python builder agree on
+  // (runner-krea-2.unit.spec.ts).
+  {
+    family: 'krea-2',
+    label: 'GenerateImageNode krea-2-medium',
+    prompt: {
+      1: { class_type: 'GenerateImageNode', inputs: { model: 'krea-2-medium', prompt: 'a red fox in the snow', aspect_ratio: '1:1', seed: 0, model_options: '{}' } },
+      2: outImage('1'),
+    },
+    files: [],
+    provider: 'fal',
+    endpoint: 'krea/v2/medium/text-to-image',
+    body: { prompt: 'a red fox in the snow', aspect_ratio: '1:1', creativity: 'medium' },
+  },
 ]
 
 // ── The routes ───────────────────────────────────────────────────────────
