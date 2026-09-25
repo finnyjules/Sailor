@@ -32,4 +32,28 @@ describe('Frame’s prompt', () => {
   it('the chip never names a layer by its kind: every layer goes through frameChipLayer', () => {
     expect(s).toMatch(/frameSelectionLabel\(\s*\(selectedLayers\.value \?\? \[\]\)\.map\(\(l: any\) => frameChipLayer\(/)
   })
+  it('the layer header names the layer as the chip does, never by its kind', () => {
+    expect(s).not.toMatch(/selectedLocal\.kind === 'deal' \? 'Mosaic' : selectedLocal\.kind/)
+    const head = s.indexOf('data-testid="frame-layer-head"')
+    expect(head).toBeGreaterThan(-1)
+    expect(s.slice(head, s.indexOf('</span>', head))).toContain('selectedLayerHead')
+    expect(s).toMatch(/const selectedLayerHead = computed\([\s\S]{0,200}frameSelectionLabel\(\[frameChipLayer\(/)
+  })
+  it('while the prompt works (or a stopped reply is due) the Frame can’t be edited', () => {
+    // The reply restores the pre-request Frame (useCompositorAgent), so edits made
+    // meanwhile would be lost: both panels, the artboard, the tools go inert.
+    const L = ':inert="framePrompt.editLocked.value"'
+    for (const id of ['compositor-left-panel', 'compositor-right-panel', 'frame-edit-surface']) {
+      const at = s.indexOf(`data-testid="${id}"`)
+      expect(at, id).toBeGreaterThan(-1)
+      const open = s.lastIndexOf('<div', at)
+      expect(s.slice(open, s.indexOf('>', at)), id).toContain(L)
+    }
+    expect(s).toContain('framePrompt.lockedNote.value')
+    expect(s).toMatch(/if \(framePrompt\.editLocked\.value && isViewDragEditKey\(e\)/)
+    // the prompt dock (Stop lives there) is never inside an inert box
+    const dock = s.indexOf('data-testid="compositor-prompt-dock"')
+    const dockTag = s.slice(s.lastIndexOf('<div', dock), s.indexOf('>', dock))
+    expect(dockTag).not.toContain(':inert=')
+  })
 })

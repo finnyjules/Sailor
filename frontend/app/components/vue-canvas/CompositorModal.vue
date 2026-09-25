@@ -1856,6 +1856,10 @@ const frameSuggestions = computed(() => {
   if (one.kind === 'text') return ['Shorter', 'Bolder']
   return []
 })
+// The layer inspector's header names the layer exactly as the chip does.
+const selectedLayerHead = computed(() => (selectedLocal.value
+  ? frameSelectionLabel([frameChipLayer(selectedLocal.value as any, { wiredName: wiredChipName })]) ?? ''
+  : ''))
 const framePrompt = useStudioPrompt({ worker: () => frameWorker, place: 'frame', selectionKind: 'frame-layer', label: () => frameChip.value, suggestions: () => frameSuggestions.value })
 provide(STUDIO_PROMPT_KEY, framePrompt)
 // Inspector actions, under the thing itself: the layer, or the Frame when nothing is selected.
@@ -2326,6 +2330,9 @@ function viewportKey(e: KeyboardEvent): boolean {
 }
 // Esc cancels an in-progress pen draft (before it bubbles to modal-close).
 function onKeydown(e: KeyboardEvent) {
+  // A request is out (or a stopped one's reply is due): the reply puts the
+  // pre-request Frame back, so the edit keys do nothing meanwhile (editLocked).
+  if (framePrompt.editLocked.value && isViewDragEditKey(e) && !isTypingInField()) { e.preventDefault(); e.stopPropagation(); return }
   // Escape during a move drag at a viewing size settles the drop where the last frame drew it
   // (so no held pin is left stored) and ends the drag. It must not also close the modal.
   if (e.key === 'Escape' && viewDrag.value) { e.preventDefault(); e.stopPropagation(); onViewPointerUp(); return }
@@ -8291,12 +8298,21 @@ onUnmounted(() => {
 
     <!-- Glimm sweep over the frame while the agent works. -->
     <AgentSweep :active="framePrompt.working.value" />
+    <!-- While the prompt works (or a stopped reply is due) the Frame is inert: the
+         reply restores the pre-request Frame (useCompositorAgent), so edits made
+         meanwhile would be lost. The prompt itself (and its Stop) stays live. -->
+    <p
+      v-if="framePrompt.editLocked.value"
+      data-testid="frame-locked-note" role="status"
+      class="glass-panel pointer-events-none absolute top-4 left-1/2 z-30 -translate-x-1/2 rounded-full border border-white/10 bg-[#0e0e10]/75 px-3 py-1 text-[12px] text-white/70 shadow-lg backdrop-blur-md"
+    >{{ framePrompt.lockedNote.value }}</p>
 
     <!-- Left sidebar: floating glass layer panel.
          ⌘\ slides it out instead of unmounting it: the list keeps its scroll
          position, expanded groups and in-flight renames across a hide/show. -->
     <div
       data-testid="compositor-left-panel"
+      :inert="framePrompt.editLocked.value" :aria-busy="framePrompt.editLocked.value"
       :data-hidden="panelsVisible ? '0' : '1'"
       class="glass-panel absolute top-16 left-4 bottom-4 z-20 w-60 flex flex-col rounded-xl border border-white/10 bg-[#0e0e10]/80 backdrop-blur-md shadow-2xl overflow-hidden transition-all duration-200 ease-out"
       :class="panelsVisible ? 'translate-x-0 opacity-100' : '-translate-x-[130%] opacity-0 pointer-events-none'">
@@ -8555,7 +8571,7 @@ onUnmounted(() => {
       <!-- Stage wrapper (overflow-visible): the artboard clips rendered layers,
            but selection controls live here so their handles can spill into the gutter.
            The pan/zoom view transform is applied here. -->
-      <div ref="stageWrapRef" class="relative" :style="viewStyle">
+      <div ref="stageWrapRef" data-testid="frame-edit-surface" class="relative" :style="viewStyle" :inert="framePrompt.editLocked.value" :aria-busy="framePrompt.editLocked.value">
       <div
         ref="canvasRef"
         class="absolute inset-0 bg-[#1a1a1a] rounded-md overflow-hidden ring-1 ring-white/5 transition-shadow"
@@ -9121,6 +9137,7 @@ onUnmounted(() => {
       <!-- Multi-select bar: align/distribute (any ≥2) + booleans (≥2 paths) -->
       <div
         v-if="selectedCount >= 2 && !nodeEdit.active.value"
+        :inert="framePrompt.editLocked.value" :aria-busy="framePrompt.editLocked.value"
         class="absolute top-[124px] left-1/2 -translate-x-1/2 flex items-center gap-1 bg-[#1a1a1a]/95 rounded-[10px] p-1 border border-[#2a2a2a] shadow-lg"
         @pointerdown.stop
       >
@@ -9237,7 +9254,7 @@ onUnmounted(() => {
         @cancel="cancelPenSession"
       />
       <!-- Toolbar -->
-      <div v-show="!penSession" class="pointer-events-auto flex items-center gap-1 bg-[#1a1a1a]/95 rounded-[12px] p-1.5 border border-[#2a2a2a] shadow-lg">
+      <div v-show="!penSession" :inert="framePrompt.editLocked.value" :aria-busy="framePrompt.editLocked.value" class="pointer-events-auto flex items-center gap-1 bg-[#1a1a1a]/95 rounded-[12px] p-1.5 border border-[#2a2a2a] shadow-lg">
         <!-- Zoom cluster: −, the % (opens the menu), +. The menu carries the
              navigation shortcuts, which had no home when the pill floated. -->
         <!-- .stop: the toolbar lives INSIDE the full-bleed stage, whose click
@@ -9566,7 +9583,7 @@ onUnmounted(() => {
 
       <!-- Docked motion timeline (takes the tool bar's place in Motion mode, under
            the prompt). The column above spans the panel gap, so it fills it. -->
-      <div v-if="inspectorTab === 'motion'" ref="motionTimelineRef" class="pointer-events-auto"
+      <div v-if="inspectorTab === 'motion'" ref="motionTimelineRef" :inert="framePrompt.editLocked.value" :aria-busy="framePrompt.editLocked.value" class="pointer-events-auto"
         @pointerdown.stop @click.stop @dblclick.stop>
         <!-- The Motion tab is ONE DialKit-style dock (MotionBandTimeline): transport +
              Add behaviour + Bake in its header, the gallery inside it, ruler, grouped rows. -->
@@ -9652,6 +9669,7 @@ onUnmounted(() => {
     <!-- Right sidebar: floating glass properties panel -->
     <div
       data-testid="compositor-right-panel"
+      :inert="framePrompt.editLocked.value" :aria-busy="framePrompt.editLocked.value"
       :data-hidden="panelsVisible ? '0' : '1'"
       class="glass-panel absolute top-16 right-4 bottom-4 z-20 w-72 flex flex-col rounded-xl border border-white/10 bg-[#0e0e10]/80 backdrop-blur-md shadow-2xl overflow-hidden transition-all duration-200 ease-out"
       :class="panelsVisible ? 'translate-x-0 opacity-100' : 'translate-x-[130%] opacity-0 pointer-events-none'">
@@ -11088,7 +11106,7 @@ onUnmounted(() => {
       <template v-else-if="selectedLocal && !activeEffect && !activeStroke">
         <div class="px-4 py-3 border-b border-white/10 flex items-center gap-2">
           <component :is="kindIcon(selectedLocal.kind)" class="size-3.5 text-white/60" />
-          <span class="text-sm font-medium capitalize">{{ selectedLocal.kind === 'deal' ? 'Mosaic' : selectedLocal.kind }}</span>
+          <span class="text-sm font-medium truncate" data-testid="frame-layer-head">{{ selectedLayerHead }}</span>
           <div class="ml-auto flex items-center gap-1">
             <button v-if="gridConfig.mode !== 'off'" class="text-white/40 hover:text-white/80 p-1" title="Re-snap to grid" @click="resnapSelected"><LayoutGrid class="size-3.5" /></button>
             <button class="text-white/40 hover:text-white/80 p-1" title="Bring forward" @click="moveStackZ(localKey(selectedLocal.id), 1)"><ArrowUp class="size-3.5" /></button>
