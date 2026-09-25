@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { selectionLabel, promptNodeLabel, canvasSuggestions, type PromptNode } from '~/lib/prompt/canvasPromptContext'
+import { selectionLabel, promptNodeLabel, canvasSuggestions, promptWorkingLabel, type PromptNode } from '~/lib/prompt/canvasPromptContext'
 
 const n = (title: string, type = 'ComfyNode', hasImages = false): PromptNode => ({ id: title || type, title, type, hasImages })
 
@@ -46,5 +46,23 @@ describe('canvasSuggestions', () => {
   })
   it('never offers more than three', () => {
     for (const sel of [[], [n('A', 'artifact-image', true)], [n('A'), n('B')]]) expect(canvasSuggestions(sel, false).length).toBeLessThanOrEqual(3)
+  })
+})
+
+describe('promptWorkingLabel', () => {
+  it('quotes the request being worked on', () => {
+    expect(promptWorkingLabel({ request: 'make it rain on a window' })).toBe('Working on “make it rain on a window”')
+  })
+  it('trims and collapses whitespace in the request', () => {
+    expect(promptWorkingLabel({ request: '  make it\n  warmer ' })).toBe('Working on “make it warmer”')
+  })
+  it('names the node a review is looking at', () => {
+    expect(promptWorkingLabel({ reviewing: 'Rainy shop' })).toBe('Looking at Rainy shop…')
+  })
+  it('falls back to the result when the reviewed node has no name', () => {
+    expect(promptWorkingLabel({ reviewing: '' })).toBe('Looking at the result…')
+  })
+  it('prefers the request when both are set', () => {
+    expect(promptWorkingLabel({ request: 'upscale it', reviewing: 'Rainy shop' })).toBe('Working on “upscale it”')
   })
 })

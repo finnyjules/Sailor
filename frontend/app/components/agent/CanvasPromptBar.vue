@@ -16,7 +16,7 @@ import { useAgentActivity } from '~/composables/useAgentActivity'
 import { useAiStatus } from '~/composables/useAiStatus'
 import { paidProducerFor } from '~/lib/artifact/nextSteps'
 import { looksLikeImageIdea } from '~/lib/sketch/sketchIntent'
-import { canvasSuggestions, selectionLabel, type PromptNode } from '~/lib/prompt/canvasPromptContext'
+import { canvasSuggestions, promptNodeLabel, promptWorkingLabel, selectionLabel, type PromptNode } from '~/lib/prompt/canvasPromptContext'
 
 const props = defineProps<{ vueCanvas?: any }>()
 const { getLocalSetting } = useLocalSettings()
@@ -94,6 +94,8 @@ function onRunComplete() { reviewLastRun() }
 function onCritiqueNode(e: Event) {
   const id = (e as CustomEvent).detail?.nodeId
   if (!id || !ready.value) return
+  const target = selection.value.find(n => n.id === String(id))
+  reviewTargetLabel.value = target ? promptNodeLabel(target) : ''
   reviewNode(String(id), props.vueCanvas.agentNodeIntent?.(String(id)) ?? '')
 }
 // Auto-critique: a fresh take landed on an image artifact. Gate hard —
@@ -168,7 +170,12 @@ function go(text: string) {
 const selection = computed(() => (props.vueCanvas?.agentSelection ?? []) as PromptNode[])
 const chipLabel = computed(() => selectionLabel(selection.value))
 const suggestions = computed(() => canvasSuggestions(selection.value, (props.vueCanvas?.getNodes?.() ?? []).length === 0))
-const workingLabel = computed(() => busy.value ? 'Planning the change…' : 'Looking at the result…')
+// The working row quotes what the user asked (or names the node a Fix is
+// looking at) so it always corresponds to the request, never a generic phase.
+const reviewTargetLabel = ref('')
+const workingLabel = computed(() => promptWorkingLabel(
+  busy.value ? { request: lastSubmitted.value } : { reviewing: reviewTargetLabel.value },
+))
 // The result card rides above the prompt once there is something to show.
 // While planning or reviewing, SailorPrompt's own row shows the progress label
 // and Stop — the card never repeats it.

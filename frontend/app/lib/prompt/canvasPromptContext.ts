@@ -51,3 +51,12 @@ export function canvasSuggestions(sel: PromptNode[], graphEmpty: boolean): strin
   if (sel.length > 1) return ['What do these do?', 'Connect these']
   return sel[0]!.hasImages ? ['What does this do?', 'Make it warmer', 'Upscale it'] : ['What does this do?', 'What can I connect to this?']
 }
+
+/** What the prompt row says while it works: the user's own request, quoted, or
+ *  the name of the node a Fix is looking at — never a generic phase. */
+export function promptWorkingLabel(s: { request?: string | null; reviewing?: string | null }): string {
+  const request = s.request?.replace(/\s+/g, ' ').trim()
+  if (request) return `Working on “${request}”`
+  const target = s.reviewing?.trim()
+  return target ? `Looking at ${target}…` : 'Looking at the result…'
+}

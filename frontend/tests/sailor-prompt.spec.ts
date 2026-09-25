@@ -58,7 +58,7 @@ test.describe('Sailor prompt on the canvas', () => {
     await page.waitForTimeout(5_000) // /object_info catalog race, as in agent-fastlane.spec.ts
     await prompt(page).fill('what does this graph do?')
     await prompt(page).press('Enter')
-    await expect(page.getByText('Planning the change…')).toBeVisible()
+    await expect(page.getByText('Working on “what does this graph do?”')).toBeVisible()
     await page.getByTestId('prompt-stop').click()
     await expect(prompt(page)).toBeVisible()
     await replied
