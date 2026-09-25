@@ -114,6 +114,7 @@ const {
   place, pathDown, pathMove, pathUp, curveDown, curveMove, curveUp, finishPath, cancelPath, removeLastAnchor,
   runSolve, apply, availableConstraints, del, nudge, makeConstruction, flip,
   armRepeat, doMirror, cancelPendingOp, pendingOp,
+  valueRequest, submitValue, cancelValue,
   setArcRadius, setConstraintValue, removeConstraintById,
   commitDimension, undo, redo, canUndo, canRedo, reset, commitHistory, sparkle, sparkleCount,
 } = pen
@@ -237,6 +238,13 @@ onMounted(() => {
       armRepeat(entSel, count)
     },
     armMirror: () => doMirror(),
+    // Task 2 test hooks — the inline value request that replaced
+    // window.prompt (Distance/Radius/Copies): valueRequest mirrors the armed
+    // state, submitValue/cancelValue resolve it exactly as PenValueRow's
+    // ✓/Enter and Escape/Cancel do.
+    get valueRequest() { return valueRequest.value ? { ...valueRequest.value } : null },
+    submitValue: (v: number) => submitValue(v),
+    cancelValue: () => cancelValue(),
     pendingOp: () => (pendingOp.value ? { kind: pendingOp.value.kind, units: [...pendingOp.value.units] } : null),
     cancelOp: () => cancelPendingOp(),
     flipH: () => flip('h'),

@@ -2,8 +2,9 @@
 // Repeat / Mirror / Flip — split out of usePen.ts verbatim (see usePen.ts's
 // HOST CONTRACT comment for the pen's overall contract). armRepeat/doMirror
 // arm `pendingOp` (the guided center/axis pick); usePen.ts's own doRepeat and
-// repeatPrompt (the window.prompt-driven entry points) stay behind and call
-// into this module's applyRepeat/armRepeat.
+// repeatPrompt (which asks for the count via usePen.ts's inline
+// requestValue, not a browser prompt) stay behind and call into this
+// module's applyRepeat/armRepeat.
 import type { Ref } from 'vue'
 import type { SketchDoc, EntityId } from '~/lib/sketch/model'
 import { repeatEntities, mirrorEntities, pointClosure } from '~/lib/sketch/edit'

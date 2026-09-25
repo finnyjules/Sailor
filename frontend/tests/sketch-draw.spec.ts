@@ -1364,6 +1364,36 @@ test('guided Repeat: arm via Repeat verb, then a center-point click builds the r
   await expect(page.locator('[data-op-hint]')).toHaveCount(0)
 })
 
+test('inline value request: the real Repeat… button shows a toolbar input; typing a count and Enter arms the ring (no window.prompt)', async ({ page }) => {
+  await page.goto('/dev/sketch-draw')
+  await page.waitForSelector('[data-ready]')
+  await page.waitForFunction(() => !!(window as any).__sketchDraw)
+
+  await page.evaluate(() => {
+    const D = (window as any).__sketchDraw
+    D.reset()
+    D.setTool('circle'); D.place(11, 6); D.place(12, 6)
+    const circle = D.doc.entities.find((e: any) => e.kind === 'circle')
+    D.setTool('select')
+    D.pick(circle.id)
+  })
+
+  // the real toolbar button — no window.prompt dialog to auto-dismiss
+  await page.locator('[data-verb="repeat"]').click()
+  const input = page.locator('[data-testid="pen-value-input"]')
+  await expect(input).toBeVisible()
+  await expect(input).toBeFocused()
+
+  // real keystrokes: select the seeded default, type 5, commit with Enter
+  await page.keyboard.press('ControlOrMeta+A')
+  await page.keyboard.type('5')
+  await page.keyboard.press('Enter')
+
+  await expect(input).toHaveCount(0)   // the value row closes once resolved
+  const op = await page.evaluate(() => (window as any).__sketchDraw.pendingOp())
+  expect(op?.kind).toBe('repeat')
+})
+
 test('segment verbs: reject arc segments at the mutation layer (no constraint added)', async ({ page }) => {
   await page.goto('/dev/sketch-draw')
   await page.waitForSelector('[data-ready]')

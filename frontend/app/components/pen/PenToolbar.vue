@@ -12,6 +12,7 @@
 import { computed, type Component } from 'vue'
 import type { Pen, PenTool } from '~/composables/pen/usePen'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
+import PenValueRow from '~/components/pen/PenValueRow.vue'
 import {
   MousePointer2, Spline, PenTool as PenNib, Minus, Circle, Dot,
   CircleDashed, Tag, Undo2, Redo2,
@@ -71,6 +72,7 @@ const isSelectIdle = computed(() => tool.value === 'select' && !hasAnySelection.
 
 <template>
   <div class="pen-toolbar">
+    <PenValueRow :pen="pen" />
     <div v-if="hasAnySelection" class="tb" role="toolbar" aria-label="Rules">
       <span class="count">{{ selectedCount }} selected</span>
       <button v-for="v in rules" :key="v.kind" class="tbtn" :data-verb="v.kind" @click="applyWithValue(v)">{{ v.label }}</button>

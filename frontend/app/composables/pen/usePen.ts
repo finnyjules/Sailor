@@ -216,6 +216,37 @@ export function usePen(opts: {
   // piece and applies. Escape / tool-switch cancels it. opHint drives the banner.
   const pendingOp = ref<PendingOp>(null)
   function cancelPendingOp() { pendingOp.value = null }
+
+  // --- inline value request: replaces the browser-native prompt dialog so
+  // the pen can live inside a host (the Frame editor) that has none.
+  // requestValue arms `valueRequest` (read by PenValueRow) and returns a
+  // Promise the caller awaits; submitValue/cancelValue (PenValueRow's ✓/Enter
+  // and Escape/Cancel, plus the four call sites below) resolve it. A second
+  // requestValue while one is still pending cancels the first (resolves null)
+  // — only one request is ever live.
+  const valueRequest = ref<{ label: string; initial: number; min?: number } | null>(null)
+  let resolveValueRequest: ((v: number | null) => void) | null = null
+  function requestValue(label: string, initial: number, min?: number): Promise<number | null> {
+    if (resolveValueRequest) { const prev = resolveValueRequest; resolveValueRequest = null; prev(null) }
+    return new Promise<number | null>((resolve) => {
+      resolveValueRequest = resolve
+      valueRequest.value = { label, initial, min }
+    })
+  }
+  function submitValue(v: number): void {
+    if (!resolveValueRequest) return
+    const resolve = resolveValueRequest
+    resolveValueRequest = null
+    valueRequest.value = null
+    resolve(v)
+  }
+  function cancelValue(): void {
+    valueRequest.value = null
+    if (!resolveValueRequest) return
+    const resolve = resolveValueRequest
+    resolveValueRequest = null
+    resolve(null)
+  }
   const opHint = computed(() => {
     const op = pendingOp.value
     if (!op) return null
@@ -306,12 +337,11 @@ export function usePen(opts: {
     commitHistory()
   }
 
-  function applyWithValue(v: { kind: ConstraintKind; label: string; value?: boolean }) {
+  async function applyWithValue(v: { kind: ConstraintKind; label: string; value?: boolean }) {
     if (!v.value) { apply(v.kind); return }
-    const raw = window.prompt(v.label + ' value?', '3')
-    if (raw == null) return                 // cancelled → no constraint (Bug 3)
-    const n = Number(raw)
-    if (!Number.isFinite(n)) return          // invalid → no constraint (Bug 3)
+    const n = await requestValue(v.label, 3)
+    if (n == null) return                    // cancelled → no constraint (Bug 3)
+    if (!Number.isFinite(n)) return           // invalid → no constraint (Bug 3)
     apply(v.kind, n)
   }
 
@@ -379,7 +409,7 @@ export function usePen(opts: {
     commitHistory()
   }
 
-  function onArcDimClick(m: ArcDimensionMark): void {
+  async function onArcDimClick(m: ArcDimensionMark): Promise<void> {
     const sep = m.id.lastIndexOf(':')
     if (sep < 0) return
     const pathId = m.id.slice(0, sep)
@@ -390,10 +420,9 @@ export function usePen(opts: {
     const start = doc.value.entities.find(e => e.id === resolved.startAnchorId) as any
     if (!center || !start) return
     const current = dist({ x: center.x, y: center.y }, { x: start.x, y: start.y })
-    const raw = window.prompt('Radius?', current.toFixed(2))
-    if (raw == null) return                  // cancelled → no change (Bug 3 pattern)
-    const n = Number(raw)
-    if (!Number.isFinite(n) || n <= 0) return // invalid → no change
+    const n = await requestValue('Radius', current)
+    if (n == null) return                     // cancelled → no change (Bug 3 pattern)
+    if (!Number.isFinite(n) || n <= 0) return  // invalid → no change
     setArcRadius(pathId, segIndex, n)
   }
 
@@ -415,14 +444,13 @@ export function usePen(opts: {
   // rotatedFrom/mirroredFrom/pointOn…) removes the constraint on a plain
   // click. A value-bearing chip (distance/radius, m.text set) keeps M4's
   // plain-click-to-edit; shift+click removes it instead.
-  function onConstraintMarkClick(m: ConstraintMark, ev: MouseEvent): void {
+  async function onConstraintMarkClick(m: ConstraintMark, ev: MouseEvent): Promise<void> {
     if (m.text == null) { removeConstraintById(m.id); return }
     if (ev.shiftKey) { removeConstraintById(m.id); return }
     const c = doc.value.constraints.find(x => x.id === m.id)
     if (!c || c.value == null) return
-    const raw = window.prompt((c.kind === 'radius' ? 'Radius' : 'Distance') + ' value?', c.value.toFixed(2))
-    if (raw == null) return
-    const n = Number(raw)
+    const n = await requestValue(c.kind === 'radius' ? 'Radius' : 'Distance', c.value)
+    if (n == null) return
     if (!Number.isFinite(n) || n <= 0) return
     setConstraintValue(m.id, n)
   }
@@ -942,7 +970,8 @@ export function usePen(opts: {
   function getHeldHandles(): { lastHOut: EntityId | null; firstHIn: EntityId | null } { return { lastHOut, firstHIn } }
 
   // --- Repeat / Mirror / Flip: see penCopies.ts. doRepeat and repeatPrompt
-  // (the window.prompt-driven entry points) stay here and call into it.
+  // (the inline-value-request entry points — requestValue, above) stay here
+  // and call into it.
   const penCopies = createPenCopies({ doc, selection, pendingOp, status, clearSel, runSolve, commitHistory })
   const { applyRepeat, applyMirror, armRepeat, doMirror, flip } = penCopies
   // kept for the test hook / fast path: exact-selection repeat (1 point + units)
@@ -952,13 +981,12 @@ export function usePen(opts: {
     if (ptSel.length !== 1 || entSel.length === 0) return
     applyRepeat(entSel, ptSel[0]!, count)
   }
-  function repeatPrompt() {
+  async function repeatPrompt() {
     const ptSel = selection.value.filter(id => isPointId(id))
     const entSel = selection.value.filter(id => !ptSel.includes(id))
     if (entSel.length === 0) { status.value = 'Select a shape first, then Repeat…'; return }
-    const raw = window.prompt('How many copies around the ring?', '6')
-    if (raw == null) return
-    const count = Number(raw)
+    const count = await requestValue('Copies around the ring', 6, 2)
+    if (count == null) return
     if (!Number.isFinite(count) || count < 2) { status.value = 'Repeat needs a count of 2 or more'; return }
     // fast path: a center point is already part of the selection
     if (ptSel.length === 1) { applyRepeat(entSel, ptSel[0]!, count); return }
@@ -1245,6 +1273,7 @@ export function usePen(opts: {
     // state
     tool, guideMode, showLabels, status, selection, selectedSegments, pending, pendingPath,
     pendingOp, opHint, cursor, dimBuffer, nextSegment, sparkles, sparkleClock,
+    valueRequest, submitValue, cancelValue,
     // tools + view toggles
     selectTool, setGuideMode, toggleGuideMode, setShowLabels, toggleShowLabels,
     // selection
