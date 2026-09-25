@@ -31,6 +31,18 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
 
+### Print finishes — Gold foil, Spot UV, one Frame light, Halation — LANDED 2026-09-24 (Plan A; `ae2e31ca7`..`3fb6d5896`, 13 commits — spec `docs/superpowers/specs/2026-09-24-print-finishes-design.md`, plan `docs/superpowers/plans/2026-09-24-print-finishes-plan-a.md`)
+
+From a browser prototype Julien loved ("that is so cool", https://claude.ai/artifact/ARWNKLm4DiKuwEjij4bjhq). Three print/film finishes in the Frame editor, drawn on the GPU.
+
+**What shipped.** **Gold foil** and **Spot UV** as per-layer effects (layer's own row → plus menu, next to Risograph/Letterpress) — the layer's own shape is where the finish goes. Gold foil: Metal (Gold, Silver, Rose gold, Copper), Brushed, Pressed in. Spot UV: Gloss, Raised, Varnish only (hides the layer's own colours, leaves only the clear coat — a tone-on-tone ghost). **One light per Frame** lights every finish on it: presets (Top left / Top right / Overhead / Raking) in the finish inspector, plus a draggable light handle on the canvas while a finish is selected, one undo step per drag; carried by PNG render, video export, motion bake, web export, canvas Frame cards and queued runs. **Halation** — bright areas bleed a warm red fringe — sits in the Frame's Post-processing list next to Bloom (and per layer), with Amount and Spread.
+
+**Proof.** Unit tests; 5 Playwright checks on the real editor (foil changes between presets, the light handle shows only while a finish is selected, a real drag plus one undo restores it, halation changes pixels); both shaders confirmed compiling in real WebGL2; losing the WebGL context or an oversize layer falls back to drawing the layer plain rather than failing.
+
+**Open for Julien.** (1) The look, by eye: the foil highlight burns near-white at Top left and the brushed streaks read strong at small sizes; Spot UV and varnish-only read subtle. (2) Cost: three foil layers on a retina editor (2160×2700 device px) measure ~35 ms median / ~51 ms p95 per paint, over the 33 ms budget — a result cache (rebuilt only when the dials, light or layer change) would fix dragging other layers while foil is present; his call whether to build it now. At 1× it's ~11 ms. (3) Next is Plan B: *Shine* (a light sweep authored in the Motion tab) and *Light follows the pointer* in web exports.
+
+**Known debt.** Moving the light does not mark a baked motion out of date — a drag changes the light immediately but an already-baked motion keeps its old light position until re-baked. Server-side queued Frame renders (the ComfyUI Compositor node / Nitro port) carry no finishes, same as every other layer effect.
+
 ### Frame Morph transition — an element turns into another element over its out bar — LANDED 2026-09-24 (`37404fab8`..`ea303d17a`, non-contiguous — 11 commits across 6 tasks, subagent-driven, a review per task, a whole-feature review and its fix wave)
 
 Motion tab → Out: **Morph into** (letter by letter) and **Shape morph into** (whole shape). Pick the element it becomes in the inspector; that element stays hidden until the bar ends, then carries on. Engine = the 2026-09-23 medial-pinning spike (`lib/vector/medial.ts`: the real outline pinned to its centreline; samples pair by where they sit on the letter; centreline, thickness and facing interpolate apart) + `lib/vector/morphPieces.ts` (pieces in reading order, extras shrink into / grow out of their neighbour, `prepareMorph` cached per outline pair). Fold `applyMorphBehaviours` (`motionMorph` on A, `motionHidden` on the target); draw `resolveMorphs` swaps A for a path clone — scale-free shapes morph, placement and size interpolate apart, fill blends solid↔solid. No outline on either side (photo, system font, decorated text) or an engine error → cross-fade. Web export loads outline fonts for both ends.
@@ -2050,6 +2062,7 @@ Loop shape is right (perceive → plan → invertible commands → ghost preview
 
 ## Known debt
 
+- **Print finishes: moving the Frame light doesn't mark a baked motion stale.** A drag on the light handle changes the finish immediately but an already-baked motion keeps its old light position until re-baked; server-side queued Frame renders (the ComfyUI Compositor node / Nitro port) carry no finishes at all, same as every other layer effect.
 - **Export:** 4 independent paths; JSZip ×2; ~40 ad-hoc `a.download`; deliverables shelf re-packages, never renders. (Act 3)
 - **Motion:** 6 parallel motion modules wired through 3 registries + DOM CustomEvents; only one preset↔keyframe bridge. (Act 1 absorbs numeric tracks; sequencing models stay per-surface)
 - **Agent-invisible depth:** Scene3D is the largest surface with zero agent access. (Act 3, or free via factory retrofit)
