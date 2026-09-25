@@ -162,15 +162,29 @@ export async function downloadResult(
   }
 }
 
-export async function falCancel(cancelUrl: string): Promise<'cancelled' | 'already-done' | 'not-found'> {
-  const r = await fetch(cancelUrl, { method: 'PUT', headers: headers() })
+/**
+ * What a cancel answer says:
+ *   'cancelled'    — the provider says the job is now cancelled.
+ *   'requested'    — the cancel was accepted, but the job is not (yet) seen
+ *                    cancelled: look at its status before believing it.
+ *   'already-done' — it had already finished.
+ *   'not-found'    — the provider does not know the job.
+ */
+export type CancelOutcome = 'cancelled' | 'requested' | 'already-done' | 'not-found'
+
+/** A cancel that hangs must not hold up the node: it is tried again (cancelCheck.ts). */
+export const CANCEL_TIMEOUT_MS = 30_000
+
+/** fal's 202 is CANCELLATION_REQUESTED, never a confirmation: cancelCheck.ts looks at the status after it. */
+export async function falCancel(cancelUrl: string): Promise<CancelOutcome> {
+  const r = await fetch(cancelUrl, { method: 'PUT', headers: headers(), signal: AbortSignal.timeout(CANCEL_TIMEOUT_MS) })
   if (r.status === 400) return 'already-done'
   if (r.status === 404) return 'not-found'
   if (!r.ok) {
     const t = await r.text().catch(() => '')
     throw new FalError(`fal cancel ${r.status}: ${t}`, r.status)
   }
-  return 'cancelled'
+  return 'requested'
 }
 
 export function percentFromLogs(logs: { message: string }[]): number | null {

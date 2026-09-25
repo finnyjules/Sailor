@@ -76,8 +76,9 @@ describe('falResult and falCancel', () => {
     await expect(falResult('R')).rejects.toThrow(/^fal result 500/)
   })
   it('maps cancel answers', async () => {
+    // A 202 is fal's CANCELLATION_REQUESTED: a request, never a confirmation (cancelCheck.ts looks at the status).
     fetchMock.mockResolvedValueOnce(res({ status: 'CANCELLATION_REQUESTED' }, 202))
-    expect(await falCancel('C')).toBe('cancelled')
+    expect(await falCancel('C')).toBe('requested')
     expect(fetchMock.mock.calls[0]![1].method).toBe('PUT')
     fetchMock.mockResolvedValueOnce(res({ status: 'ALREADY_COMPLETED' }, 400))
     expect(await falCancel('C')).toBe('already-done')

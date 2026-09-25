@@ -32,12 +32,16 @@ export interface RunStore {
   save(run: RunRecord): Promise<void>
   get(runId: string): Promise<RunRecord | null>
   listActive(): Promise<RunRecord[]>
+  /** Runs holding a cancel still waiting for the provider's confirmation (checked again at server start). */
+  listUnconfirmedCancels(): Promise<RunRecord[]>
   listForUser(userId: string | null, opts?: { canvasId?: string | null; statuses?: RunStatus[] }): Promise<RunRecord[]>
   getResult(userKey: string, fingerprint: string): Promise<OutputFile[] | null>
   putResult(userKey: string, fingerprint: string, files: OutputFile[]): Promise<void>
 }
 
 const ACTIVE: RunStatus[] = ['running', 'paused']
+
+const hasOpenCancel = (r: RunRecord) => !!r.unconfirmedCancels?.some(c => c.gaveUpAt == null)
 
 function matches(r: RunRecord, userId: string | null, opts: { canvasId?: string | null; statuses?: RunStatus[] } = {}): boolean {
   if (r.userId !== userId) return false
@@ -92,6 +96,9 @@ export function createFileRunStore(dir: string): RunStore {
     async listActive() {
       return (await readAll()).filter(r => ACTIVE.includes(r.status))
     },
+    async listUnconfirmedCancels() {
+      return (await readAll()).filter(hasOpenCancel)
+    },
     async listForUser(userId, opts) {
       return (await readAll()).filter(r => matches(r, userId, opts))
     },
@@ -129,6 +136,11 @@ export function createPgRunStore(db: DbLike): RunStore {
       const { rows } = await db.query(
         `SELECT doc FROM runner_runs WHERE status IN ('running', 'paused') ORDER BY (doc->>'createdAt')::bigint`)
       return rows.map(r => parse(r.doc))
+    },
+    async listUnconfirmedCancels() {
+      const { rows } = await db.query(
+        `SELECT doc FROM runner_runs WHERE jsonb_array_length(COALESCE(doc->'unconfirmedCancels', '[]'::jsonb)) > 0 ORDER BY (doc->>'createdAt')::bigint`)
+      return rows.map(r => parse(r.doc) as RunRecord).filter(hasOpenCancel)
     },
     async listForUser(userId, opts = {}) {
       // The filters go into the query, so a user with many runs is not read whole.

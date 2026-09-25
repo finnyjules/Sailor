@@ -318,4 +318,19 @@ describe('cancel', () => {
     fetchMock.mockResolvedValueOnce(res(pred({ status: 'canceled', started_at: null })))
     expect(await client().cancel('C')).toBe('cancelled')
   })
+
+  it('a 200 whose prediction still reads starting or processing was accepted, not applied: requested (24 Sep 2026)', async () => {
+    fetchMock.mockResolvedValueOnce(res(pred({ status: 'starting' })))
+    expect(await client().cancel('C')).toBe('requested')
+    fetchMock.mockResolvedValueOnce(res(pred({ status: 'processing' })))
+    expect(await client().cancel('C')).toBe('requested')
+    fetchMock.mockResolvedValueOnce(res('not json'))
+    expect(await client().cancel('C')).toBe('requested')
+  })
+
+  it('a cancel that hangs is given up on (its fetch carries a time-out signal)', async () => {
+    fetchMock.mockResolvedValueOnce(res(pred({ status: 'canceled' })))
+    await client().cancel('C')
+    expect(fetchMock.mock.calls[0]![1].signal).toBeInstanceOf(AbortSignal)
+  })
 })

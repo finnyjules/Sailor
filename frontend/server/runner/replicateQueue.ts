@@ -16,7 +16,7 @@
  * engine's job: it sees `retryable` on the status and sends the request again.
  */
 import { getReplicateToken } from '../utils/secrets'
-import type { FalStatus, FalSubmitted, ProviderClient } from './falQueue'
+import { CANCEL_TIMEOUT_MS, type CancelOutcome, type FalStatus, type FalSubmitted, type ProviderClient } from './falQueue'
 
 export const REPLICATE_API_BASE = 'https://api.replicate.com/v1'
 
@@ -229,8 +229,8 @@ export function createReplicateClient(opts: ReplicateClientOptions = {}): Provid
     throw new ReplicateError(`Replicate result ${status}: ${text}`, status)
   }
 
-  async function cancel(cancelUrl: string): Promise<'cancelled' | 'already-done' | 'not-found'> {
-    const r = await fetch(cancelUrl, { method: 'POST', headers: headers() })
+  async function cancel(cancelUrl: string): Promise<CancelOutcome> {
+    const r = await fetch(cancelUrl, { method: 'POST', headers: headers(), signal: AbortSignal.timeout(CANCEL_TIMEOUT_MS) })
     if (r.status === 404) return 'not-found'
     if (!r.ok) {
       const t = await r.text().catch(() => '')
@@ -241,8 +241,14 @@ export function createReplicateClient(opts: ReplicateClientOptions = {}): Provid
     // keeping it would only leave the user an error, so it counts as
     // cancelled and the engine moves the job to its backup. Sailor absorbs
     // the partial run; the user is still charged once.
+    // Only `canceled` is a cancel. A 2xx whose prediction still reads
+    // `starting`/`processing` (seen while Replicate was degraded, 24 Sep 2026:
+    // the prediction then sat in `starting` for 20 hours) was accepted, not
+    // applied — cancelCheck.ts keeps asking until the status reads finished.
     const body = await r.json().catch(() => null) as { status?: unknown } | null
-    return body?.status === 'succeeded' || body?.status === 'failed' ? 'already-done' : 'cancelled'
+    if (body?.status === 'canceled') return 'cancelled'
+    if (body?.status === 'succeeded' || body?.status === 'failed') return 'already-done'
+    return 'requested'
   }
 
   return { submit, status, result, cancel, outputUrls: replicateOutputUrls }

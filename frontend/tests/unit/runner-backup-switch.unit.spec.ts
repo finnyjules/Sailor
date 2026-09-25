@@ -67,7 +67,7 @@ interface Job {
   id: string; endpoint: string; payload: Record<string, unknown>; submittedAt: number
   startsAt: number; runsFor: number; hiccup: boolean; startOnPoll: number | null; cancelled: boolean; finishedEarly: boolean; polls: number
 }
-type CancelOutcome = 'cancelled' | 'already-done' | 'not-found' | 'throw' | 'throw-started'
+type CancelOutcome = 'cancelled' | 'requested' | 'already-done' | 'not-found' | 'throw' | 'throw-started'
 
 function fakeService(name: RunnerProvider, clock: { t: number }) {
   const jobs: Job[] = []
@@ -111,6 +111,8 @@ function fakeService(name: RunnerProvider, clock: { t: number }) {
       if (o === 'throw-started') { j.startsAt = 0; throw new Error('cancel failed') }
       if (o === 'already-done') { j.finishedEarly = true; return 'already-done' }
       if (o === 'not-found') return 'not-found'
+      // Accepted, not applied (Replicate degraded, 24 Sep 2026): the job still waits.
+      if (o === 'requested') return 'requested'
       j.cancelled = true
       return 'cancelled'
     }) as any,
@@ -605,6 +607,23 @@ describe('fix round 1: unconfirmed cancels, Stop mid-switch, a failing backup se
     expect((k.repSvc.client.cancel as any).mock.calls.map((c: unknown[]) => c[0])).toEqual(['replicate://replicate1/cancel', 'replicate://replicate1/cancel'])
     // The retry answered: nothing is left to cancel.
     expect(rec.switchedFrom).toEqual({ provider: 'replicate', requestId: 'replicate1' })
+    expect(holds(k.ledger)).toEqual([['settled', 3]])
+  })
+
+  it('a cancel the first service accepts but does not apply is not believed: switched, and asked again until it is', async () => {
+    const k = setup()
+    k.repSvc.script.jobs.push({ startsAt: NEVER })
+    k.repSvc.script.cancels.push('requested', 'requested', 'cancelled')
+    const { runId } = await start(k)
+    await k.engine.settled(runId)
+    await k.engine.cancelChecksSettled()
+    const rec = await node(k, runId)
+    expect(rec.servedBy).toBe('fal')
+    expect(k.repSvc.client.cancel).toHaveBeenCalledTimes(3)
+    expect(k.repSvc.jobs[0]!.cancelled).toBe(true)
+    // Confirmed in the end: nothing is left to cancel.
+    expect(rec.switchedFrom).toEqual({ provider: 'replicate', requestId: 'replicate1' })
+    expect((await k.store.get(runId))!.unconfirmedCancels).toBeUndefined()
     expect(holds(k.ledger)).toEqual([['settled', 3]])
   })
 

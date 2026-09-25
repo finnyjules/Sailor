@@ -20,6 +20,7 @@ import { BASE_RENDER_CREDITS, UnpricedGraphError } from '../utils/priceBook'
 import { extractGraphPromptText } from '../utils/graphPromptText'
 import { FalError, isProviderNetworkError, percentFromLogs, type FalStatus, type ProviderClient } from './falQueue'
 import { ReplicateError } from './replicateQueue'
+import { cancelAndConfirm, type CancelCheck } from './cancelCheck'
 import { planNode, type ProviderBackup } from './executors'
 import type { BackupSettings } from './config'
 import { linkedFileCheck, measuredInputProblem, requestProblems } from './requestRules'
@@ -37,7 +38,7 @@ import { runIdOf, userKeyOf, type RunStore } from './store'
 import {
   emptyNodeRecord, stageKeyOf,
   type LegAction, type LegRecord, type NodeRecord, type OutputFile, type PendingRequest, type RunRecord, type RunStatus,
-  type RunnerProvider, type StageCharge, type TakeRecord, type MeasuredMedia,
+  type RunnerProvider, type StageCharge, type TakeRecord, type MeasuredMedia, type UnconfirmedCancel,
 } from './types'
 
 export class RunStopped extends Error {
@@ -226,6 +227,19 @@ export const MAX_STORED_WORKFLOW_CHARS = 2_000_000
  */
 const GRACE_MS = 5 * 60_000
 
+/**
+ * A cancel is only believed once the provider confirms it (cancelCheck.ts).
+ * While the node waits, it is tried this many times more, these waits apart;
+ * after that it is written down on the run and left to the background.
+ */
+export const INLINE_CANCEL_WAITS_MS = [2_000, 5_000]
+/** Background tries of an unconfirmed cancel: these waits, then the last one again and again. */
+export const CANCEL_WATCH_WAITS_MS = [30_000, 60_000, 2 * 60_000, 5 * 60_000, 10 * 60_000, 15 * 60_000]
+/** The background tries stop, and say so, after this long without a confirmation. */
+export const CANCEL_WATCH_GIVE_UP_MS = 48 * 60 * 60_000
+/** What a node says when its job's cancel is not confirmed: it never claims "cancelled". */
+const NOT_CONFIRMED = 'Sailor asked the service to stop it and is checking that it has'
+
 function storableWorkflow(workflow: unknown): unknown {
   if (workflow == null) return null
   let text: string | undefined
@@ -362,8 +376,116 @@ export function createEngine(deps: EngineDeps) {
   function webhookFor(provider: RunnerProvider): string | null {
     return provider === 'fal' ? deps.webhookUrl() : null
   }
-  async function cancelRequest(req: PendingRequest): Promise<unknown> {
-    return clientFor(providerOf(req)).cancel(req.cancelUrl)
+  // ── Cancels the provider must confirm ─────────────────────────────────
+  // Background re-tries of unconfirmed cancels, by request id.
+  const watchers = new Map<string, Promise<void>>()
+  const cancelSleep = (ms: number) => deps.sleep(ms, new AbortController().signal)
+  const cancelMeta = (runId: string, c: Pick<UnconfirmedCancel, 'provider' | 'requestId'>) => ({ runId, provider: c.provider, requestId: c.requestId })
+
+  /**
+   * Cancel a job and wait (briefly) for the provider to confirm it is over.
+   * Unconfirmed, the job is written down on the run and asked about again in
+   * the background until it is (watchCancel): the caller must then not say
+   * it was cancelled. A job that runs after an unconfirmed cancel would bill
+   * Sailor with nothing charged to the user.
+   */
+  async function confirmCancel(run: RunRecord, req: Pick<PendingRequest, 'provider' | 'requestId' | 'statusUrl' | 'cancelUrl'>, o: { tries?: number } = {}): Promise<CancelCheck> {
+    const provider = providerOf(req as PendingRequest)
+    let check: CancelCheck
+    try {
+      check = await cancelAndConfirm(clientFor(provider), req, {
+        tries: o.tries ?? INLINE_CANCEL_WAITS_MS.length + 1,
+        waitMs: i => INLINE_CANCEL_WAITS_MS[Math.min(i, INLINE_CANCEL_WAITS_MS.length - 1)]!,
+        sleep: cancelSleep,
+      })
+    }
+    catch (e) { check = { confirmed: false, lastStatus: null, lastError: plainError(e) } }
+    if (!check.confirmed) {
+      await watchCancel(run, { provider, requestId: req.requestId, statusUrl: req.statusUrl, cancelUrl: req.cancelUrl }, check, o.tries ?? INLINE_CANCEL_WAITS_MS.length + 1)
+    }
+    return check
+  }
+
+  /** Write an unconfirmed cancel down on the run (so a restart picks it up) and start asking again in the background. */
+  async function watchCancel(
+    run: RunRecord, job: Pick<UnconfirmedCancel, 'provider' | 'requestId' | 'statusUrl' | 'cancelUrl'>,
+    check: { lastStatus: string | null; lastError: string | null }, tries: number,
+  ): Promise<void> {
+    const list = run.unconfirmedCancels ??= []
+    const entry = list.find(c => c.requestId === job.requestId)
+    if (entry) Object.assign(entry, { tries: entry.tries + tries, lastStatus: check.lastStatus, lastError: check.lastError })
+    else list.push({ ...job, since: deps.now(), tries, lastStatus: check.lastStatus, lastError: check.lastError })
+    deps.reportError(new Error(`${job.provider} has not confirmed the cancel of ${job.requestId}; checking again in the background`), {
+      site: 'runner.cancel.unconfirmed', ...cancelMeta(run.id, job), lastStatus: check.lastStatus, lastError: check.lastError,
+    })
+    await persist(run).catch(e => deps.reportError(e, { site: 'runner.cancel.save', ...cancelMeta(run.id, job) }))
+    startCancelWatch(run.id, job.requestId)
+  }
+
+  /** Change a run's unconfirmed cancel on the freshest copy of the run (live, or the store's), under the run's lock. */
+  async function updateCancel(runId: string, requestId: string, fn: (run: RunRecord, c: UnconfirmedCancel) => void): Promise<void> {
+    await withRunLock(runId, async () => {
+      const e = live.get(runId)
+      const run = e?.run ?? await deps.store.get(runId)
+      const c = run?.unconfirmedCancels?.find(x => x.requestId === requestId)
+      if (!run || !c) return
+      fn(run, c)
+      if (e) await persist(run)
+      else { run.updatedAt = deps.now(); await deps.store.save(run) }
+    }).catch(e => deps.reportError(e, { site: 'runner.cancel.save', runId, requestId }))
+  }
+
+  function startCancelWatch(runId: string, requestId: string): void {
+    if (watchers.has(requestId)) return
+    const p = watchLoop(runId, requestId)
+      .catch(e => deps.reportError(e, { site: 'runner.cancel.watch', runId, requestId }))
+      .finally(() => watchers.delete(requestId))
+    watchers.set(requestId, p)
+  }
+
+  /** Ask again, with growing waits, until the provider confirms the job is over or CANCEL_WATCH_GIVE_UP_MS passes. */
+  async function watchLoop(runId: string, requestId: string): Promise<void> {
+    for (let round = 0; ; round++) {
+      await cancelSleep(CANCEL_WATCH_WAITS_MS[Math.min(round, CANCEL_WATCH_WAITS_MS.length - 1)]!)
+      const run = live.get(runId)?.run ?? await deps.store.get(runId)
+      const c = run?.unconfirmedCancels?.find(x => x.requestId === requestId)
+      if (!c || c.gaveUpAt != null) return
+      let check: CancelCheck
+      try { check = await cancelAndConfirm(clientFor(c.provider), c, { tries: 1, waitMs: () => 0, sleep: cancelSleep }) }
+      catch (e) { check = { confirmed: false, lastStatus: null, lastError: plainError(e) } }
+      if (check.confirmed) {
+        if (check.ended === 'finished') {
+          // It ran after all: the provider billed Sailor for a result nobody was charged for.
+          deps.reportError(new Error(`${c.provider} job ${requestId} finished after Sailor cancelled it; the provider billed it`), { site: 'runner.cancel.ran-anyway', ...cancelMeta(runId, c) })
+        }
+        await updateCancel(runId, requestId, (r) => {
+          r.unconfirmedCancels = r.unconfirmedCancels!.filter(x => x.requestId !== requestId)
+          if (!r.unconfirmedCancels.length) delete r.unconfirmedCancels
+          // A first job left behind by a backup switch: its cancel is confirmed now.
+          for (const t of r.takes) for (const n of Object.values(t.nodes)) if (n.switchedFrom?.requestId === requestId) delete n.switchedFrom.cancelUrl
+        })
+        return
+      }
+      const giveUp = deps.now() - c.since >= CANCEL_WATCH_GIVE_UP_MS
+      console.warn(`[runner] ${c.provider} has still not confirmed the cancel of ${requestId} (status ${check.lastStatus ?? 'unknown'}${check.lastError ? `, ${check.lastError}` : ''})`)
+      await updateCancel(runId, requestId, (_r, x) => {
+        x.tries++
+        x.lastStatus = check.lastStatus
+        x.lastError = check.lastError
+        if (giveUp) x.gaveUpAt = deps.now()
+      })
+      if (giveUp) {
+        deps.reportError(new Error(`Gave up checking the cancel of ${c.provider} job ${requestId}: it may still run and bill Sailor`), {
+          site: 'runner.cancel.gave-up', ...cancelMeta(runId, c), lastStatus: check.lastStatus, lastError: check.lastError,
+        })
+        return
+      }
+    }
+  }
+
+  /** Tests: wait until every background cancel check has ended. */
+  async function cancelChecksSettled(): Promise<void> {
+    while (watchers.size) await Promise.all([...watchers.values()])
   }
 
   /** Send the node's written-down request (rec.endpoint, rec.payload) to `provider`, and write the request down. */
@@ -755,7 +877,7 @@ export function createEngine(deps: EngineDeps) {
             // job sent before the restart is cancelled before the node fails,
             // so no provider job is left running and billing (F23 re-review
             // minor 1; final fix F12). The node's hold is released.
-            if (rec.request) await cancelRequest(rec.request).catch(() => {})
+            if (rec.request) await confirmCancel(run, rec.request)
             throw e
           }
         }
@@ -891,7 +1013,7 @@ export function createEngine(deps: EngineDeps) {
         rec.error = null
         // Stop may have landed while this request was being sent, before
         // Stop could see its id: cancel it here so nothing is left running.
-        if (rec.request) await cancelRequest(rec.request).catch(() => {})
+        if (rec.request) await confirmCancel(run, rec.request, { tries: 1 })
       }
       else { rec.status = 'error'; rec.error = plainError(e) }
       rec.endedAt = deps.now()
@@ -905,13 +1027,15 @@ export function createEngine(deps: EngineDeps) {
    * cancel, so a job that has just started is kept (this narrows the race;
    * a job that starts between that look and the cancel is cancelled and
    * switched all the same — Sailor absorbs the partial run).
-   *   'cancelled'   — the cancel went through: switch.
+   * After the cancel it is looked at again: only the provider saying the job
+   * is over counts as cancelled (an accepted cancel is only a request).
+   *   'cancelled'   — the provider confirmed it: switch.
    *   'keep'        — the job had already finished or started: keep it, no switch.
-   *   'unconfirmed' — the cancel failed or the job was unknown, and one more
-   *                   look still finds it waiting: switch anyway (ruling 2).
-   *                   The first job may still run and bill Sailor — never the
-   *                   user, who is charged once. Its cancel is tried again
-   *                   after the switch, and Stop cancels it too.
+   *   'unconfirmed' — the cancel failed or is not applied, and the job is
+   *                   still waiting: switch anyway (ruling 2). The first job
+   *                   may still run and bill Sailor — never the user, who is
+   *                   charged once. Its cancel is asked about again in the
+   *                   background until the provider confirms it (watchCancel).
    */
   async function cancelledForSwitch(client: ProviderClient, req: PendingRequest): Promise<'cancelled' | 'keep' | 'unconfirmed'> {
     try {
@@ -922,23 +1046,20 @@ export function createEngine(deps: EngineDeps) {
     let outcome: unknown
     try { outcome = await client.cancel(req.cancelUrl) }
     catch { outcome = null }
-    if (outcome === 'cancelled') return 'cancelled'
     if (outcome === 'already-done') return 'keep'
     try {
       const again = await client.status(req.statusUrl, { logs: false })
-      return !again.transient && again.status === 'IN_QUEUE' ? 'unconfirmed' : 'keep'
+      if (!again.transient) {
+        if (again.status === 'IN_QUEUE') return 'unconfirmed'
+        if (again.status === 'COMPLETED' && again.error) return 'cancelled'
+        return 'keep' // started, or finished with a result
+      }
     }
-    catch { return 'keep' }
-  }
-
-  /** After a switch whose cancel was not confirmed: try that cancel once more. Any answer means nothing is left to cancel. */
-  async function retryFirstCancel(run: RunRecord, rec: NodeRecord): Promise<void> {
-    const from = rec.switchedFrom
-    if (!from?.cancelUrl) return
-    try { await clientFor(from.provider).cancel(from.cancelUrl) }
-    catch { return }
-    delete from.cancelUrl
-    await persist(run).catch(() => {})
+    catch { /* no answer */ }
+    // No real answer to the look: the cancel's own answer decides. Replicate's
+    // 'cancelled' is the prediction reading canceled; anything else is not known.
+    if (outcome === 'cancelled') return 'cancelled'
+    return outcome === 'requested' ? 'unconfirmed' : 'keep'
   }
 
   async function waitForResult(
@@ -967,10 +1088,17 @@ export function createEngine(deps: EngineDeps) {
       // backup it starts again, so a node's total wait can reach the stall
       // time plus the limit. The message speaks of the service, so it stays true.
       if (asked && deps.now() > deadline) {
-        await client.cancel(req.cancelUrl).catch(() => {})
-        throw new Error(media === 'video'
-          ? 'The service took more than 30 minutes to make this video, so it was cancelled'
-          : 'The service took more than 5 minutes to make this image, so it was cancelled')
+        const check = await confirmCancel(run, req)
+        // It finished just as it was cancelled: the result is made and billed, so it is kept.
+        if (check.confirmed && check.ended === 'finished' && check.status) {
+          if (provider === 'replicate' && check.status.raw != null) return check.status.raw
+          try { return await client.result(req.responseUrl) }
+          catch { /* not fetchable: fail as a time-out */ }
+        }
+        const late = media === 'video'
+          ? 'The service took more than 30 minutes to make this video'
+          : 'The service took more than 5 minutes to make this image'
+        throw new Error(check.confirmed ? `${late}, so it was cancelled` : `${late}. ${NOT_CONFIRMED}`)
       }
       // Outer limit that applies even when the provider never gave a real
       // answer (a status URL stuck returning 5xx, or a network error on every
@@ -981,8 +1109,10 @@ export function createEngine(deps: EngineDeps) {
       // the original submit time, and a real answer waiting at the provider
       // must still be fetched.
       if (attempt > 0 && deps.now() > deadline + GRACE_MS) {
-        await client.cancel(req.cancelUrl).catch(() => {})
-        throw new Error('The provider did not answer, so the request was cancelled')
+        const check = await confirmCancel(run, req)
+        throw new Error(check.confirmed
+          ? 'The provider did not answer, so the request was cancelled'
+          : `The provider did not answer. ${NOT_CONFIRMED}`)
       }
       let s: FalStatus
       try { s = await client.status(req.statusUrl, { logs: started }) }
@@ -1006,8 +1136,9 @@ export function createEngine(deps: EngineDeps) {
             const cancel = await cancelledForSwitch(client, req)
             if (cancel !== 'keep') {
               const from = { provider, requestId: req.requestId, ...(cancel === 'unconfirmed' ? { cancelUrl: req.cancelUrl } : {}) }
+              const first = req
               req = await sendToBackup(run, rec, backup, from, 'slow-start', stageKey, nodeId, signal)
-              await retryFirstCancel(run, rec)
+              if (cancel === 'unconfirmed') await watchCancel(run, { provider: from.provider, requestId: first.requestId, statusUrl: first.statusUrl, cancelUrl: first.cancelUrl }, { lastStatus: 'IN_QUEUE', lastError: null }, 1)
               provider = backup.provider
               client = clientFor(provider)
               deadline = req.submittedAt + limitMs
@@ -1278,10 +1409,14 @@ export function createEngine(deps: EngineDeps) {
       const cancels: Promise<unknown>[] = []
       for (const t of e.run.takes) {
         for (const n of Object.values(t.nodes)) {
-          if (n.status === 'running' && n.request) cancels.push(cancelRequest(n.request).catch(() => {}))
+          // One try each here, so Stop is quick; one not confirmed is asked about again in the background.
+          if (n.status === 'running' && n.request) cancels.push(confirmCancel(e.run, n.request, { tries: 1 }))
           // A first job whose cancel was never confirmed after a switch is cancelled too.
           const first = n.status === 'running' ? n.switchedFrom : undefined
-          if (first?.cancelUrl) cancels.push(clientFor(first.provider).cancel(first.cancelUrl).catch(() => {}))
+          if (first?.cancelUrl && first.requestId) {
+            const id = first.requestId
+            cancels.push(clientFor(first.provider).cancel(first.cancelUrl).catch(() => {}).then(() => startCancelWatch(e.run.id, id)))
+          }
         }
       }
       await Promise.all(cancels)
@@ -1292,6 +1427,13 @@ export function createEngine(deps: EngineDeps) {
 
   /** Server start: pick up every run that was mid-leg. Paused runs need nothing. */
   async function reattach(): Promise<number> {
+    // Cancels still waiting for a confirmation are asked about again.
+    try {
+      for (const run of await deps.store.listUnconfirmedCancels()) {
+        for (const c of run.unconfirmedCancels ?? []) if (c.gaveUpAt == null) startCancelWatch(run.id, c.requestId)
+      }
+    }
+    catch (e) { deps.reportError(e, { site: 'runner.cancel.reattach' }) }
     let n = 0
     for (const run of await deps.store.listActive()) {
       if (live.has(run.id)) continue
@@ -1386,7 +1528,7 @@ export function createEngine(deps: EngineDeps) {
     }
   }
 
-  return { startRun, gateAction, stop, reattach, nudge, pausedGates, snapshot, record, settled, events: deps.events }
+  return { startRun, gateAction, stop, reattach, nudge, pausedGates, snapshot, record, settled, cancelChecksSettled, events: deps.events }
 }
 
 export type Engine = ReturnType<typeof createEngine>

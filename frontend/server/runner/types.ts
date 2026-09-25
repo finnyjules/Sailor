@@ -34,6 +34,29 @@ export interface PendingRequest {
   retries?: number
 }
 
+/**
+ * A provider job Sailor asked to cancel whose cancel the provider has not
+ * confirmed yet (cancelCheck.ts). It is kept on the run and asked about again
+ * in the background — across restarts — until the provider says the job is
+ * over, because a job that runs anyway bills Sailor with nothing charged to
+ * the user. Removed once confirmed; kept with `gaveUpAt` if it never is.
+ */
+export interface UnconfirmedCancel {
+  provider: RunnerProvider
+  requestId: string
+  statusUrl: string
+  cancelUrl: string
+  /** When the first cancel was tried. */
+  since: number
+  /** Cancel-and-look rounds tried so far. */
+  tries: number
+  /** The job's status at the last real answer (IN_QUEUE / IN_PROGRESS), if any. */
+  lastStatus: string | null
+  lastError: string | null
+  /** Set when the background retries stopped without a confirmation (reported). */
+  gaveUpAt?: number
+}
+
 export type NodeStatus = 'waiting' | 'running' | 'done' | 'error' | 'skipped' | 'paused' | 'dropped' | 'stopped'
 
 export interface NodeRecord {
@@ -164,6 +187,8 @@ export interface RunRecord {
   baseCharged: boolean
   /** Stop was pressed while this run was going. */
   stopRequested: boolean
+  /** Provider jobs whose cancel is not confirmed yet (absent: none). */
+  unconfirmedCancels?: UnconfirmedCancel[]
 }
 
 export function stageKeyOf(legId: string, take: number): string {
