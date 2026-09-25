@@ -45,7 +45,7 @@ import { expandClones, type Cloner, type CloneTransform } from '~/composables/us
 import { copyClock, staggerOf } from '~/lib/motionx/copies'
 import { clipFrameIndex, clipFrameUrl, clipPlayedSeconds, type ImageClip } from '~/lib/compositor/clip'
 import { resolveAssetUrl } from '~/lib/compositor/assetScope'
-import { fillIsShader, type ShaderSpec } from '~/lib/spacetype/fillTile'
+import { fillIsShader, hexBytes, ombreHash, type ShaderSpec } from '~/lib/spacetype/fillTile'
 import { effectReadsInput, getEffectSync } from '~/lib/shaderfx/catalogStore'
 import { dealShaderFill } from '~/lib/compositor/mosaic'
 import { paintScatter, SCATTER_STYLES, DEFAULT_SCATTER_STYLE, DEFAULT_SCATTER_SEED, type ScatterStyle } from '~/lib/compositor/scatter'
@@ -59,7 +59,7 @@ import { warpPoint, type WarpField } from '~/lib/compositor/meshWarp'
 // this file (see below), so it is NOT re-imported from there to avoid a second import
 // path for the same idea.
 import {
-  strokeStackOf, strokeSupportsStack, wobbleSpecOf,
+  strokeStackOf, strokeSupportsStack, wobbleSpecOf, strokeFollowsOf, strokeFadeOf, strokeFadeRepeatsOf,
   type StrokeJoin, type StrokeInstance, type ShapeStrokeSpec,
 } from '~/lib/compositor/strokeStack'
 // The repo's one hex-alpha stripper — the same helper the 3D vary path uses before
@@ -75,7 +75,10 @@ import { getCompositorFont, runToCommands } from '~/lib/compositor/textOutline'
 import type { VtFont } from '~/lib/compositor/textOutline'
 import { commandsToPathData, type VectorCommand } from '~/lib/vector/svg'
 // Task 5's pure geometry for a SHAPES stroke, and the shape library it marches.
-import { shapeStrokeMarkMatrices, pathOutlineFlattenTolerance, offsetPolyline, type WobbleSpec } from '~/lib/compositor/strokeShapes'
+import { shapeStrokeMarkMatrices, pathOutlineFlattenTolerance, offsetPolyline, resamplePolyline, type WobbleSpec } from '~/lib/compositor/strokeShapes'
+import {
+  followFrame, bandTriangles, triangleAffine, followStripPlan, fadeStops, paintCanFollow, FOLLOW_MAX_REACH,
+} from '~/lib/compositor/strokeFollow'
 import { DEFAULT_FLATTEN_TOLERANCE, longestSubpath } from '~/lib/compositor/pathFlatten'
 import { shapeById } from '~/lib/shapes/catalog'
 import { shapePath2D } from '~/lib/shapes/path2d'
@@ -4067,6 +4070,184 @@ export function paintWobbledBand(ctx: CanvasRenderingContext2D, o: {
   ctx.restore()
 }
 
+/** Longest side of the straight strip a followed fill is drawn into, and its total pixels. */
+const FOLLOW_STRIP_MAX_W = 16384
+const FOLLOW_STRIP_MAX_AREA = 16_000_000
+/** Strip px copied round each end of a CLOSED line's strip (its end before its start, its start
+ *  after its end), so the triangles either side of the loop's seam sample real paint past it. */
+const FOLLOW_STRIP_WRAP = 4
+
+/**
+ * A band whose paint FOLLOWS THE LINE. Returns `false` when it painted nothing (no outline,
+ * no scratch, a paint with nothing to bend) so the caller paints the ordinary band instead —
+ * a follow the geometry cannot express must not cost the stroke its ink.
+ *
+ * 1. The band's centreline is the SAME line `paintWobbledBand` strokes (same `centre` offset,
+ *    same wobble), resampled evenly and given smoothed normals (`followFrame`).
+ * 2. The paint is drawn into a straight strip, `length × width` in this ctx's units, rastered
+ *    at device resolution (`followStripPlan` says how).
+ * 3. The strip is bent onto a scratch, two triangles per centreline segment, each clipped
+ *    (grown 0.6 device px so neighbours overlap instead of leaving hairline seams) and drawn
+ *    under the affine map from strip to band.
+ * 4. The band itself — painted by `mask`, i.e. the ordinary band painter in solid ink — is
+ *    applied with `destination-in`, so distance, alignment, dash and wobble cut the result
+ *    exactly as they cut a plain band. On its OWN scratch: `strokeAligned`'s inside arm draws
+ *    under a clip, and a `destination-in` confined to a clip would leave the bent paint
+ *    outside it untouched.
+ * 5. Ombre: the bent strip is a FADE map (black = A, white = B); every device pixel becomes A
+ *    or B through `ombreHash`, the same hash the flat ombre tile uses, so the grain stays crisp
+ *    however far the strip was bent.
+ */
+export function paintFollowedBand(ctx: CanvasRenderingContext2D, o: {
+  pathData: string
+  tolerance?: number
+  width: number
+  distance?: number
+  align?: StrokeAlign
+  wobble?: WobbleSpec | null
+  paint: Paint
+  paintBox: { w: number; h: number }
+  fade: 'across' | 'along'
+  fadeRepeats: number
+  /** Paint the band in solid ink on `c` — the ordinary band painter with `style: () => ink`. */
+  mask: (c: CanvasRenderingContext2D) => void
+}): boolean {
+  if (!(o.width > 0) || !paintCanFollow(o.paint)) return false
+  const d = typeof o.distance === 'number' && Number.isFinite(o.distance) ? o.distance : 0
+  const align = strokeAlignOf(o.align)
+  const centre = align === 'outside' ? d + o.width / 2 : align === 'inside' ? d - o.width / 2 : d
+  const sub = longestSubpath(o.pathData, o.tolerance ? { tolerance: o.tolerance } : undefined)
+  if (!sub) return false
+  const line = offsetPolyline(sub.pts, sub.closed, centre, o.wobble ?? undefined)
+  const m = ctx.getTransform()
+  const sx = Math.hypot(m.a, m.b) || 1                      // device px per ctx unit
+  const pts = resamplePolyline(line, sub.closed, Math.max(2 / sx, o.width / 24))
+  const h = o.width / 2
+  const frame = followFrame(pts, sub.closed, h)
+  if (!frame) return false
+  const plan = followStripPlan(o.paint, o.paintBox, frame.length, sub.closed)
+  if (!plan) return false
+
+  // ── 2. the straight strip ──
+  // The mesh OVER-REACHES the band (see `bandTriangles` / `FOLLOW_MAX_REACH`): strip y runs
+  // from −ext to W + ext, where ext = h·(FOLLOW_MAX_REACH − 1). The band proper is y ∈ [0, W];
+  // the overhang is there so corners are fully inked, and the band mask trims it.
+  const ext = h * (FOLLOW_MAX_REACH - 1)
+  const Lpx = frame.length * sx, Hpx = (o.width + 2 * ext) * sx
+  const k = Math.min(1, FOLLOW_STRIP_MAX_W / Lpx, Math.sqrt(FOLLOW_STRIP_MAX_AREA / Math.max(1, Lpx * Hpx)))
+  // Under a device pixel long there is nothing to bend — and `px` below would blow the strip's
+  // height up to reach its two-pixel minimum length.
+  if (typeof document === 'undefined' || !(Lpx >= 1)) return false
+  // The line's length is a WHOLE, even number of strip px (even: the mirror splits it in half),
+  // and `px` is nudged to match, so every fill below starts and ends on a pixel edge. A fill
+  // ending mid-pixel leaves a half-inked column, and at the mirror line or the loop's seam that
+  // column shows as a hairline across the band.
+  const main = Math.max(2, Math.ceil(Lpx * k / 2) * 2)
+  const px = main / frame.length                             // strip px per ctx unit
+  const wrap = sub.closed ? FOLLOW_STRIP_WRAP : 0
+  const strip = document.createElement('canvas')
+  strip.width = main + 2 * wrap
+  strip.height = Math.max(1, Math.ceil(Hpx / sx * px))
+  const sc = strip.getContext('2d')
+  if (!sc) return false
+  sc.setTransform(px, 0, 0, px, wrap, ext * px)   // strip unit (0, −ext) lands on pixel (wrap, 0)
+  const L = frame.length, W = o.width
+  if (plan.kind === 'fade') {
+    const f = fadeStops(o.fade, o.fadeRepeats)
+    const g = f.axis === 'across' ? sc.createLinearGradient(0, 0, 0, W) : sc.createLinearGradient(0, 0, L, 0)
+    for (const s of f.stops) { const v = Math.round(s.t * 255); g.addColorStop(s.offset, `rgb(${v},${v},${v})`) }
+    sc.fillStyle = g; sc.fillRect(0, -ext, L, W + 2 * ext)   // the gradient pads past 0 and W
+  } else if (plan.kind === 'stretch') {
+    const len = plan.mirror ? L / 2 : L
+    // Filled the WHOLE length (the ramp pads past `len`) so the column at the mirror line is
+    // fully inked; the mirrored copy then lands over the right half.
+    sc.save(); sc.translate(len / 2, W / 2)
+    sc.fillStyle = resolvePaint(sc, o.paint, { w: len, h: W }, _fieldCtx, 'extend')
+    sc.fillRect(-len / 2, -W / 2 - ext, L, W + 2 * ext)
+    sc.restore()
+    if (plan.mirror) {
+      const half = main / 2
+      sc.save(); sc.setTransform(-1, 0, 0, 1, 2 * wrap + main, 0)
+      sc.drawImage(strip, wrap, 0, half, strip.height, wrap, 0, half, strip.height)
+      sc.restore()
+    }
+  } else {
+    // The layer's own tile, scaled so `plan.tiles` of them span the strip; its left edge at 0.
+    sc.save(); sc.translate(plan.box.w / 2, W / 2)
+    sc.fillStyle = resolvePaint(sc, o.paint, plan.box, _fieldCtx, 'extend')
+    sc.fillRect(-plan.box.w / 2, -W / 2 - ext, L, W + 2 * ext)
+    sc.restore()
+  }
+  if (wrap) {
+    // A closed line's strip is periodic (whole tiles, a mirrored ramp, a fade that starts and
+    // ends on A), so its two ends are each other's neighbours.
+    sc.save(); sc.setTransform(1, 0, 0, 1, 0, 0)
+    sc.drawImage(strip, main, 0, wrap, strip.height, 0, 0, wrap, strip.height)
+    sc.drawImage(strip, wrap, 0, wrap, strip.height, wrap + main, 0, wrap, strip.height)
+    sc.restore()
+  }
+
+  // ── 3. bend it ──
+  const bent = scratchLike(ctx)
+  const maskS = scratchLike(ctx)
+  if (!bent || !maskS) return false
+  const grow = 0.6 / sx
+  for (const t of bandTriangles(frame, h)) {
+    const aff = triangleAffine(t.src[0], t.src[1], t.src[2], t.dst[0], t.dst[1], t.dst[2])
+    if (!aff) continue
+    const gx = (t.dst[0].x + t.dst[1].x + t.dst[2].x) / 3, gy = (t.dst[0].y + t.dst[1].y + t.dst[2].y) / 3
+    bent.save()
+    bent.beginPath()
+    t.dst.forEach((p, i) => {
+      const dx = p.x - gx, dy = p.y - gy, l = Math.hypot(dx, dy) || 1
+      const x = p.x + (dx / l) * grow, y = p.y + (dy / l) * grow
+      if (i) bent.lineTo(x, y); else bent.moveTo(x, y)
+    })
+    bent.closePath()
+    bent.clip()
+    bent.transform(aff[0], aff[1], aff[2], aff[3], aff[4], aff[5])
+    const x0 = Math.max(-wrap / px, Math.min(t.src[0].x, t.src[1].x, t.src[2].x) - 2 / px)
+    const x1 = Math.min(L + wrap / px, Math.max(t.src[0].x, t.src[1].x, t.src[2].x) + 2 / px)
+    if (x1 > x0) bent.drawImage(strip, wrap + x0 * px, 0, (x1 - x0) * px, (W + 2 * ext) * px, x0, -ext, x1 - x0, W + 2 * ext)
+    bent.restore()
+  }
+
+  // ── 4. cut it to the band ──
+  o.mask(maskS)
+  bent.save()
+  bent.setTransform(1, 0, 0, 1, 0, 0)
+  bent.globalCompositeOperation = 'destination-in'
+  bent.drawImage(maskS.canvas, 0, 0)
+  bent.restore()
+
+  // ── 5. ombre grain ──
+  if (plan.kind === 'fade' && isFill(o.paint)) {
+    // Only the band's device-space bounds, not the whole canvas.
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    for (const p of frame.pts) {
+      const X = m.a * p.x + m.c * p.y + m.e, Y = m.b * p.x + m.d * p.y + m.f
+      if (X < minX) minX = X; if (X > maxX) maxX = X; if (Y < minY) minY = Y; if (Y > maxY) maxY = Y
+    }
+    const pad = Math.ceil(h * sx) + 2
+    const bx = Math.max(0, Math.floor(minX) - pad), by = Math.max(0, Math.floor(minY) - pad)
+    const bw = Math.min(bent.canvas.width, Math.ceil(maxX) + pad) - bx
+    const bh = Math.min(bent.canvas.height, Math.ceil(maxY) + pad) - by
+    if (bw > 0 && bh > 0) {
+      const img = bent.getImageData(bx, by, bw, bh), dd = img.data
+      const A = hexBytes(o.paint.a), B = hexBytes(o.paint.b)
+      for (let i = 0; i < dd.length; i += 4) {
+        if (!dd[i + 3]) continue
+        const q = i / 4, x = bx + (q % bw), y = by + Math.floor(q / bw)
+        const C = ombreHash(x, y) < dd[i]! / 255 ? B : A
+        dd[i] = C[0]; dd[i + 1] = C[1]; dd[i + 2] = C[2]
+      }
+      bent.putImageData(img, bx, by)
+    }
+  }
+  stampScratch(ctx, bent)
+  return true
+}
+
 /**
  * Paint a layer's WHOLE stroke stack over a shape that is already on `ctx` (or handed in
  * as a `path`). THE single place a stroked kind's outlines are drawn, so rect, ellipse,
@@ -4171,6 +4352,26 @@ function paintStrokeStack(
     if (wobble) {
       const outline = outlineData()
       if (outline) {
+        // FOLLOWS THE LINE — the same wobbled centreline, bent paint; the mask is this arm's own
+        // band in ink with round corners (a bent fill cannot turn a sharp point).
+        if (strokeFollowsOf(st) && !foil && paintFollowedBand(ctx, {
+          pathData: outline,
+          tolerance: o.outlineTolerance ?? DEFAULT_FLATTEN_TOLERANCE * o.widthScale,
+          width: st.width * o.widthScale,
+          distance: (st.distance ?? 0) * o.widthScale,
+          align: st.align,
+          wobble,
+          paint: st.paint,
+          paintBox,
+          fade: strokeFadeOf(st),
+          fadeRepeats: strokeFadeRepeatsOf(st),
+          mask: (c) => paintWobbledBand(c, {
+            pathData: outline, width: st.width * o.widthScale, distance: (st.distance ?? 0) * o.widthScale,
+            wobble, align: st.align, join: 'round', dash: strokeDashSegments(st.dash, o.widthScale),
+            style: () => '#000',
+            tolerance: o.outlineTolerance ?? DEFAULT_FLATTEN_TOLERANCE * o.widthScale,
+          }),
+        })) continue
         const band = (c: CanvasRenderingContext2D, ink?: string) => paintWobbledBand(c, {
           pathData: outline,
           width: st.width * o.widthScale,
@@ -4224,6 +4425,33 @@ function paintStrokeStack(
       fillRule: o.fillRule,
       build: o.build,
     })
+    // FOLLOWS THE LINE. Needs the outline to bend along; without one (or with a paint that has
+    // nothing to bend) it paints the ordinary band below. The mask is this very band in ink,
+    // with round corners — at distance 0 `strokeAligned` strokes with the scratch's own
+    // `lineJoin`, so it is set here as well as passed.
+    if (strokeFollowsOf(st) && !foil) {
+      const outline = outlineData()
+      if (outline && paintFollowedBand(ctx, {
+        pathData: outline,
+        tolerance: o.outlineTolerance ?? DEFAULT_FLATTEN_TOLERANCE * o.widthScale,
+        width: st.width * o.widthScale,
+        distance: (st.distance ?? 0) * o.widthScale,
+        align: st.align,
+        paint: st.paint,
+        paintBox,
+        fade: strokeFadeOf(st),
+        fadeRepeats: strokeFadeRepeatsOf(st),
+        mask: (c) => {
+          if (o.build && !o.path) o.build(c)
+          c.lineJoin = 'round'
+          paintStrokeBand(c, {
+            width: st.width * o.widthScale, distance: (st.distance ?? 0) * o.widthScale,
+            style: () => '#000', align: st.align, join: 'round',
+            dash: strokeDashSegments(st.dash, o.widthScale), path: o.path, fillRule: o.fillRule, build: o.build,
+          })
+        },
+      })) continue
+    }
     // The scratch starts with no path: `build` lays the shape's own path (or, for a path
     // layer that hands its Path2D in, its joins/caps) on it first, as it does on ctx above.
     if (foil) paintFoilRegion(ctx, foil, (c, ink) => { if (o.build) o.build(c); band(c, ink) })
