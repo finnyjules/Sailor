@@ -56,4 +56,17 @@ describe('Frame’s prompt', () => {
     const dockTag = s.slice(s.lastIndexOf('<div', dock), s.indexOf('>', dock))
     expect(dockTag).not.toContain(':inert=')
   })
+  it('a paste or a dropped file does nothing while the prompt works (or a stopped reply is due)', () => {
+    for (const fn of ['async function onModalPaste(', 'async function onCanvasDrop(']) {
+      const at = s.indexOf(fn)
+      expect(at, fn).toBeGreaterThan(-1)
+      const body = s.slice(at, s.indexOf('\n}\n', at))
+      const guard = body.search(/if \(framePrompt\.editLocked\.value\)/)
+      expect(guard, fn).toBeGreaterThan(-1)
+      // before the handler reads the clipboard / the dropped files
+      const reads = body.search(/clipboardData|dataTransfer\?\.files/)
+      expect(reads, fn).toBeGreaterThan(guard)
+    }
+  })
 })
+

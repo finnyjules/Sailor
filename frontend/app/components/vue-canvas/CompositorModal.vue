@@ -2291,6 +2291,9 @@ async function onCanvasDrop(e: DragEvent) {
   // an open drawing. (The modal root's @drop.prevent keeps the browser from
   // opening the file.)
   if (penSession.value) { e.preventDefault(); return }
+  // A request is out (or a stopped one's reply is due): its reply puts the
+  // pre-request Frame back, so a dropped file would be lost (editLocked).
+  if (framePrompt.editLocked.value) { e.preventDefault(); return }
   const files = Array.from(e.dataTransfer?.files || [])
   if (!files.length) return
   e.preventDefault()
@@ -8216,6 +8219,9 @@ async function onModalPaste(e: ClipboardEvent) {
   if (penSession.value) return
   // Never hijack a real text paste (agent prompt bar, layer rename, text edit).
   if (isEditablePasteTarget(e.target) || isEditablePasteTarget(document.activeElement)) return
+  // A request is out (or a stopped one's reply is due): its reply puts the
+  // pre-request Frame back, so a pasted layer would be lost (editLocked).
+  if (framePrompt.editLocked.value) return
 
   // Sailor layer JSON on the OS clipboard wins over everything: it is how copy
   // reaches across frames, projects and sessions. Read it straight off the paste
