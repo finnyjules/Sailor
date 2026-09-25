@@ -64,6 +64,8 @@ export interface EngineInput {
   images?: string[]
   /** Which of `images` is a reference picture (the look to aim for), 1-based; the prompt names it. */
   referencePicture?: 1 | 2
+  /** The target has no picture of its own; the prompt asks for a standalone (generative) effect. */
+  noSourcePicture?: boolean
   /** Other requests' takes shown as the quality bar; the product's own input
    *  as well as the dev-only shader-gen evaluation's (variant C). */
   examples?: GenRequest['examples']
@@ -91,7 +93,7 @@ export const isAbortError = (e: unknown): boolean => (e as { name?: string } | n
 const aborted = () => new DOMException('Stopped', 'AbortError')
 
 async function runTake(input: EngineInput, index: number, deps: EngineDeps, usage: Usage, avoid?: string): Promise<EngineTake | EngineFailure> {
-  const req: GenRequest = { request: input.request, base: input.base ?? null, references: input.references, takeIndex: index, avoid, examples: input.examples, referencePicture: input.referencePicture ?? null }
+  const req: GenRequest = { request: input.request, base: input.base ?? null, references: input.references, takeIndex: index, avoid, examples: input.examples, referencePicture: input.referencePicture ?? null, noSourcePicture: input.noSourcePicture }
   const log: string[] = []
   let prompt = buildGenPrompt(req)
   let compileRepairs = 0

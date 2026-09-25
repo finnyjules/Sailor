@@ -101,6 +101,30 @@ describe('buildGenPrompt: a reference picture', () => {
   })
 })
 
+describe('buildGenPrompt: no source picture (fix: a kept take that showed nothing)', () => {
+  it('with no picture to run over, asks for a standalone effect that sets generative and never reads the input', () => {
+    const p = buildGenPrompt({ request: 'prism light', takeIndex: 0, noSourcePicture: true })
+    expect(p).toContain('There is no picture for the effect to run over')
+    expect(p).toContain('"generative": true')
+    expect(p).toMatch(/do not read the input image/i)
+    expect(p).toContain('u_image0')
+    expect(p.indexOf('no picture for the effect')).toBeGreaterThan(p.indexOf('Request:'))
+    expect(p.indexOf('no picture for the effect')).toBeLessThan(p.indexOf('Take 1:'))
+  })
+  it('a source picture: unchanged — nothing about a missing picture or generative', () => {
+    const p = buildGenPrompt({ request: 'prism light', takeIndex: 0 })
+    expect(p).not.toContain('no picture for the effect')
+    expect(p).not.toContain('"generative": true')
+    expect(buildGenPrompt({ request: 'x', takeIndex: 0, noSourcePicture: false })).toBe(buildGenPrompt({ request: 'x', takeIndex: 0 }))
+  })
+  it('a reference as the only picture: the reference note is kept word for word, and the effect is still standalone', () => {
+    const withRef = buildGenPrompt({ request: 'x', takeIndex: 0, referencePicture: 1, noSourcePicture: true })
+    expect(withRef).toContain('The one attached picture is the reference picture: the look to aim for')
+    expect(withRef).toContain('There is no picture for the effect to run over')
+    expect(withRef).toContain('"generative": true')
+  })
+})
+
 describe('buildRevisePrompt', () => {
   it('shows the current take and asks for the whole improved JSON object', () => {
     const take: GenTake = {

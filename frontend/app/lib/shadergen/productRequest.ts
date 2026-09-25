@@ -53,7 +53,9 @@ export async function productExamples(): Promise<NonNullable<GenRequest['example
   ]
 }
 
-/** `reference`: a picture of the look to aim for (the prompt's paste or drop), sent after the
+/** `image` null: the target has no picture, so the prompt asks for a standalone (generative)
+ *  effect — takes are still judged over `placeholderSource()`.
+ *  `reference`: a picture of the look to aim for (the prompt's paste or drop), sent after the
  *  picture the effect runs over, and named as such in the prompt. */
 export async function productEngineInput(o: { request: string; base: EffectDef | null; image: string | null; reference?: string | null; signal?: AbortSignal }): Promise<EngineInput> {
   const images = [o.image, o.reference].filter((x): x is string => !!x)
@@ -63,6 +65,8 @@ export async function productEngineInput(o: { request: string; base: EffectDef |
     count: SHADER_GEN_TAKES,
     images: images.length ? images : undefined,
     ...(o.reference ? { referencePicture: (o.image ? 2 : 1) as 1 | 2 } : {}),
+    // No picture to run over (a reference, if any, is only the look): ask for a standalone effect.
+    ...(o.image ? {} : { noSourcePicture: true }),
     examples: await productExamples(),
     signal: o.signal,
   }

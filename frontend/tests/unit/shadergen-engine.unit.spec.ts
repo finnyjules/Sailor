@@ -52,6 +52,13 @@ describe('generateTakes', () => {
     expect(seen.every(s => s.prompt.includes('Picture 2 is the reference picture') && s.images?.length === 2)).toBe(true)
   })
 
+  it('no source picture: every take’s prompt (repairs included) asks for a standalone effect', async () => {
+    const m = scripted({})
+    await generateTakes({ request: 'rain', noSourcePicture: true, count: 2 }, { callModel: m.callModel, renderer })
+    expect(m.prompts.flat().length).toBeGreaterThan(0)
+    expect(m.prompts.flat().every(p => p.includes('There is no picture for the effect to run over'))).toBe(true)
+  })
+
   it('repairs a compile error by sending the error back', async () => {
     const m = scripted({ 0: [reply('BROKEN'), reply('fixed')] })
     const r = await generateTakes({ request: 'rain' }, { callModel: m.callModel, renderer })

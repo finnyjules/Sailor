@@ -31,6 +31,9 @@ export interface GenRequest {
   /** Which attached picture is the reference (the look to aim for): 2 after the picture the
    *  effect runs over, 1 when it is the only one; absent when there is none. */
   referencePicture?: 1 | 2 | null
+  /** The target has no picture of its own: ask for a standalone (generative) effect. A reference
+   *  picture, when there is one, is still only the look to aim for. */
+  noSourcePicture?: boolean
 }
 
 const MATCH_THE_LOOK = 'Match its look — colour, light, texture, pattern, movement and mood — and let the request’s words steer; do not copy its subject or content into the effect.'
@@ -40,6 +43,8 @@ function picturesNote(n: 1 | 2): string {
     ? `Two pictures are attached. Picture 1 is the image the effect runs over. Picture 2 is the reference picture: the look to aim for, as an effect over picture 1. ${MATCH_THE_LOOK}`
     : `The one attached picture is the reference picture: the look to aim for. It is not the image the effect runs over. ${MATCH_THE_LOOK}`
 }
+
+const NO_SOURCE_NOTE = 'There is no picture for the effect to run over: the input image is blank. Make a standalone effect that creates its whole picture itself — set "generative": true and do not read the input image (no u_image0, tex or blur9).'
 
 /** The lines Sailor supplies itself; a catalog source carries them, a body must not. */
 const SUPPLIED_LINES = [
@@ -63,6 +68,7 @@ const HELPER_WARNING = 'Sailor already provides the preamble and the helpers h21
 export function buildGenPrompt(r: GenRequest): string {
   const parts: string[] = [`Request: "${r.request}"`]
   if (r.referencePicture) parts.push(picturesNote(r.referencePicture))
+  if (r.noSourcePicture) parts.push(NO_SOURCE_NOTE)
   if (r.base) {
     parts.push(`Start from this existing effect, "${r.base.name}". Keep what serves the request and change whatever you need to. Its source and dials:\n\`\`\`glsl\n${stripSuppliedLines(r.base.source)}\n\`\`\`\nDials: ${JSON.stringify(r.base.params)}\n${HELPER_WARNING}`)
   }

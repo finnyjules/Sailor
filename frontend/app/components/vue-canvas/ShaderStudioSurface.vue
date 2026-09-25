@@ -66,6 +66,7 @@ import { makeLayerTarget, recordTuneVersion } from '~/lib/shadergen/studioTarget
 import { useMyEffects } from '~/composables/useMyEffects'
 import { getEffectSync } from '~/lib/shaderfx/catalogStore'
 import { takeLayerLocked, takeOutputsLocked, takeStackLocked } from '~/lib/shaderstudio/takeLock'
+import { noSourceBase, noSourceMode, SAMPLE_PICTURE_HINT } from '~/lib/shaderstudio/noSource'
 
 const props = defineProps<{ nodeId: string; nodes: any[]; edges?: any[]; wiredUrl?: string | null }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -129,6 +130,12 @@ const effectDef = computed<EffectDef | null>(() => defForId(activeEffectCfg.valu
 // Generative effects synthesize their own output and don't require a source
 // image — see ShaderEffectNode's `isGenerative`, which this mirrors.
 const isGenerative = computed(() => !!effectDef.value?.generative)
+// No source image: an effect that reads its input (a kept take that adds light over the picture)
+// renders over the sample picture its takes were judged on, with a quiet hint, instead of nothing.
+// Only with no effect at all is there nothing to show.
+const noSource = computed(() => noSourceMode([effectDef.value, ...config.value.effects.filter(e => e.enabled && e.id).map(e => defForId(e.id))]))
+const needsSource = computed(() => !resolved.value && noSource.value === 'none')
+const showsSample = computed(() => !resolved.value && noSource.value === 'sample')
 // The inspector reads the resolved VALUES (a number, a hex string, or a stop
 // list) — not `resolveUniforms`, whose colour/gradient output is already expanded
 // into vec3s and indexed arrays for GL and has no control to bind to.
@@ -242,13 +249,13 @@ async function renderFrame(t01: number) {
   const el = canvas.value
   if (!el) return
   const src = resolved.value
-  if (!src && !isGenerative.value) return
+  if (!src && needsSource.value) return
   const { w, h } = src
     ? outputDims(src.width, src.height, PREVIEW_MAX_W)
     : { w: GENERATIVE_DIM, h: GENERATIVE_DIM }
   if (el.width !== w || el.height !== h) { el.width = w; el.height = h }
   try {
-    const base = src ? await src.getFrame(t01, w, h) : GENERATIVE_BASE
+    const base = src ? await src.getFrame(t01, w, h) : noSourceBase(noSource.value, GENERATIVE_BASE)
     lastSourceFrame = src ? base : null
     // A bake (generateImage/generateVideo) may have started while this frame was
     // suspended at the await above — bail before touching the shared shaderFx
@@ -562,7 +569,7 @@ async function renderShaderFrame(t01: number, into?: CanvasRenderingContext2D): 
   const dur = clockDuration()
   const t = t01 * dur
   const cfg = animated.value ? applyMotion(motionConfigFor(config.value, dur), t) : config.value
-  const base = src ? await src.getFrame(t01, w, h) : GENERATIVE_BASE
+  const base = src ? await src.getFrame(t01, w, h) : noSourceBase(noSource.value, GENERATIVE_BASE)
   shaderFx.render(composePasses(cfg, defForId, t, (def, layer) => texBundle(def, layer)), base, w, h)
   const c = shaderFx.outputCanvas!
   into?.drawImage(c, 0, 0, w, h)
@@ -614,7 +621,7 @@ async function renderBlobWithOverrides(overrides: Record<string, string | number
 
 async function generateImage() {
   if (outputsLocked.value) return
-  if (!resolved.value && !isGenerative.value) { bakeMsg.value = 'Add a source first'; return }
+  if (needsSource.value) { bakeMsg.value = 'Add a source first'; return }
   baking.value = true; bakeMsg.value = 'Rendering…'; stopPreview()
   try {
     const blob = await renderBlob(0)
@@ -693,7 +700,7 @@ async function bakeShaderVideo(publish: boolean): Promise<StudioVideoResult | nu
 
 async function generateVideo() {
   if (outputsLocked.value) return
-  if (!resolved.value && !isGenerative.value) { bakeMsg.value = 'Add a source first'; return }
+  if (needsSource.value) { bakeMsg.value = 'Add a source first'; return }
   baking.value = true; stopPreview()
   try {
     const made = await bakeShaderVideo(true)
@@ -714,7 +721,7 @@ async function generateVideo() {
  *  shared shaderFx canvas this capture reads from (see renderFrame's comment). */
 async function downloadPng() {
   if (outputsLocked.value) return
-  if (!resolved.value && !isGenerative.value) { bakeMsg.value = 'Add a source first'; return }
+  if (needsSource.value) { bakeMsg.value = 'Add a source first'; return }
   baking.value = true; bakeMsg.value = 'Rendering…'; stopPreview()
   try {
     const blob = await renderBlob(0)
@@ -728,7 +735,7 @@ async function downloadPng() {
  *  modal stays open, so bakeMsg must end on the result, not "Rendering…". */
 async function downloadVideoFile() {
   if (outputsLocked.value) return
-  if (!resolved.value && !isGenerative.value) { bakeMsg.value = 'Add a source first'; return }
+  if (needsSource.value) { bakeMsg.value = 'Add a source first'; return }
   baking.value = true; stopPreview()
   try {
     const made = await bakeShaderVideo(false)
@@ -742,7 +749,7 @@ async function downloadVideoFile() {
 async function exportWebEmbed() {
   if (outputsLocked.value) return
   if (embedding.value) return
-  if (!resolved.value && !isGenerative.value) { embedErr.value = true; embedMsg.value = 'Add a source first'; return }
+  if (needsSource.value) { embedErr.value = true; embedMsg.value = 'Add a source first'; return }
   embedding.value = true
   embedErr.value = false
   embedMsg.value = 'Building…'
@@ -767,7 +774,7 @@ async function exportWebEmbed() {
     // a 2D canvas gives a data: URI regardless of whether the frame arrived as
     // an <img>, a canvas, or a bitmap. No source → the same neutral
     // GENERATIVE_BASE canvas the preview/renderBlob paths use.
-    const frame = src ? await src.getFrame(0, w, h) : GENERATIVE_BASE
+    const frame = src ? await src.getFrame(0, w, h) : noSourceBase(noSource.value, GENERATIVE_BASE)
     const flat = document.createElement('canvas')
     flat.width = w
     flat.height = h
@@ -1018,7 +1025,7 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
 
     <template #preview>
       <div class="relative flex h-full w-full items-center justify-center">
-        <canvas ref="canvas" class="max-h-full max-w-full rounded-lg shadow-2xl" />
+        <canvas ref="canvas" data-testid="shader-studio-preview" class="max-h-full max-w-full rounded-lg shadow-2xl" />
         <!-- Focus point overlay when lens blur is on -->
         <div v-if="config.post.blur.enabled"
           class="nopan nodrag absolute size-3 -ml-1.5 -mt-1.5 cursor-move rounded-full border-2 border-white bg-black/30"
@@ -1046,7 +1053,8 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
           <circle class="cursor-move" style="pointer-events:auto" :cx="maskCenterPx.x" :cy="maskCenterPx.y" r="7"
             fill="rgba(0,0,0,0.35)" stroke="#fff" stroke-width="2" @pointerdown="onMaskDown('center', $event)" />
         </svg>
-        <span v-if="!resolved && !isGenerative" class="absolute text-xs text-white/40">Add a source image to begin</span>
+        <span v-if="needsSource" class="absolute text-xs text-white/40">Add a source image to begin</span>
+        <span v-if="showsSample" data-testid="shader-studio-sample-hint" class="pointer-events-none absolute bottom-2 left-2 text-[11px] text-white/45">{{ SAMPLE_PICTURE_HINT }}</span>
       </div>
     </template>
 
@@ -1059,13 +1067,13 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
         },
         utilities: exportingVideo ? [{ label: 'Cancel', onClick: cancelVideoExport }] : [],
         downloads: [
-          { label: 'Download PNG', onClick: downloadPng, disabled: outputsLocked || (!resolved && !isGenerative) },
-          { label: 'Download video', onClick: downloadVideoFile, busy: baking, disabled: outputsLocked || (!resolved && !isGenerative) },
+          { label: 'Download PNG', onClick: downloadPng, disabled: outputsLocked || needsSource },
+          { label: 'Download video', onClick: downloadVideoFile, busy: baking, disabled: outputsLocked || needsSource },
           { label: 'Export embed', onClick: exportWebEmbed, busy: embedding, disabled: outputsLocked },
         ],
         canvas: [
-          { label: 'As image', onClick: generateImage, busy: baking, disabled: outputsLocked || (!resolved && !isGenerative) },
-          { label: 'As video', onClick: generateVideo, busy: baking, disabled: outputsLocked || (!resolved && !isGenerative) },
+          { label: 'As image', onClick: generateImage, busy: baking, disabled: outputsLocked || needsSource },
+          { label: 'As video', onClick: generateVideo, busy: baking, disabled: outputsLocked || needsSource },
         ],
       }" />
     </template>

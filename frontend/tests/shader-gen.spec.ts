@@ -27,6 +27,12 @@ const TAKES = [
   [S.rain![3]!, S.lava![1]!, S.popart![1]!],
   [S.oil![1]!, S.lava![2]!, S.ink![1]!],
 ]
+/** Only takes that read their input (`generative: false`) — what a kept take over no picture was. */
+const READS_INPUT_TAKES = [
+  [S.rain![0]!, S.popart![0]!, S.rain![3]!],
+  [S.popart![1]!, S.oil![1]!, S.ink![1]!],
+  [S.lava![3]!, S.oil![0]!, S.popart![3]!],
+]
 const PRICE = '~$0.24–0.42'
 /** One more picture on every call (a reference, ≤ 512 px: 350 input tokens). */
 const PRICE_WITH_REFERENCE = '~$0.24–0.43'
@@ -62,16 +68,16 @@ const settle = (r: Route, reply: Parameters<Route['fulfill']>[0]) => r.fulfill(r
 const ANGLE = /Take (\d):/
 /** /api/shader-gen, shaped like the real route: `{ text, usage, stop_reason, credits }`.
  *  Each call answers its take angle's slot after that slot's delay. */
-async function mockShaderGen(page: Page, delays = [300, 900, 1500]) {
+async function mockShaderGen(page: Page, delays = [300, 900, 1500], takes = TAKES) {
   const calls: any[] = []
   const perSlot = [0, 0, 0]
   await page.route('**/api/shader-gen', async (r) => {
     const body = r.request().postDataJSON()
     calls.push(body)
-    const slot = (Number(ANGLE.exec(String(body.prompt ?? ''))?.[1] ?? 1) - 1) % TAKES.length
+    const slot = (Number(ANGLE.exec(String(body.prompt ?? ''))?.[1] ?? 1) - 1) % takes.length
     // Each call gets a take of its own: a slot that has used up its replies gets a reply that
     // isn't a take (the engine fails that slot), never an earlier take again.
-    const take = TAKES[slot]![perSlot[slot]!++]
+    const take = takes[slot]![perSlot[slot]!++]
     await new Promise(res => setTimeout(res, delays[slot] ?? 0))
     await settle(r, { json: { text: take ? JSON.stringify(take) : 'No more takes in this mock.', usage: { input_tokens: 5000, output_tokens: 3000 }, stop_reason: 'end_turn', credits: null } })
   })
@@ -182,6 +188,39 @@ test.describe('shader generation (stage 5)', () => {
     expect(saved.versions).toHaveLength(1)
     await expect(page.getByTestId('my-effect-recipe')).toBeVisible()
     await expect(page.getByTestId('my-effect-version')).toHaveText(['v1'])
+  })
+
+  test('no source picture: the request asks for a standalone effect, and a kept take that reads its input still shows, over the sample picture', async ({ page }) => {
+    const gen = await mockShaderGen(page, [100, 200, 300], READS_INPUT_TAKES); const store = await mockMyEffects(page); await mockRouter(page)
+    await openShaderStudio(page)
+    await page.getByTestId('studio-actions').getByTestId('studio-action-row').filter({ hasText: 'New layer from a description' }).click()
+    await expect(page.getByTestId('prompt-mode-chip')).toContainText('New effect')
+    await prompt(page).fill('prism light'); await prompt(page).press('Enter')
+    const strip = page.getByTestId('prompt-takes')
+    await expect(strip).toBeVisible({ timeout: 20_000 })
+    await expect(tileIn(page, 'pending')).toHaveCount(0, { timeout: 60_000 })
+    // Nothing is wired in: no picture goes to the model, and the prompt asks for a standalone effect.
+    expect(gen.length).toBeGreaterThanOrEqual(3)
+    expect(gen.every(b => !b.images?.length)).toBe(true)
+    expect(gen.every(b => String(b.prompt).includes('There is no picture for the effect to run over'))).toBe(true)
+    const ready = tileIn(page, 'ready').first()
+    // Hover-preview already draws it over the sample picture (before the fix: "Add a source image to begin").
+    await ready.getByRole('button', { name: /Preview take/ }).hover()
+    await expect(page.getByTestId('shader-studio-sample-hint')).toBeVisible()
+    await ready.getByRole('button', { name: 'Keep', exact: true }).click()
+    await expect(page.getByTestId('prompt-answer')).toContainText('Saved to My effects as')
+    expect([...store.values()][0]?.generative).toBe(false) // the case Julien hit: the kept take reads its input
+    // The preview is not empty: it draws the effect over the sample picture, and says so quietly.
+    await expect(page.getByText('Add a source image to begin')).toHaveCount(0)
+    await expect(page.getByTestId('shader-studio-sample-hint')).toHaveText('Shown over a sample picture. Upload an image to see it on yours.')
+    const preview = page.getByTestId('shader-studio-preview')
+    await expect.poll(() => preview.evaluate((c: HTMLCanvasElement) => {
+      if (c.width < 100 || c.height < 100) return 0
+      const px = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data
+      let lit = 0
+      for (let i = 0; i < px.length; i += 4 * 97) if (px[i + 3]! > 0 && px[i]! + px[i + 1]! + px[i + 2]! > 30) lit++
+      return lit
+    }), { timeout: 15_000 }).toBeGreaterThan(50)
   })
 
   test('Stop mid-run clears partial takes and puts the layer stack back', async ({ page }) => {
@@ -308,12 +347,13 @@ test.describe('shader generation (stage 5)', () => {
     await expect(page.getByTestId('prompt-takes')).toBeVisible({ timeout: 20_000 })
     await expect.poll(() => gen.length).toBeGreaterThanOrEqual(3)
     expect(routed).toHaveLength(0) // New effect decided the kind
-    // A Shader studio with nothing wired in has no picture to run over (it previews its own
-    // generative base): the reference is the only picture on every call, and is named so.
+    // A Shader studio with nothing wired in has no picture to run over: the reference is the only
+    // picture on every call, is named so, and the effect is still asked to stand alone.
     // (Frame's background, below, sends both.)
     expect(gen.every(b => Array.isArray(b.images) && b.images.length === 1)).toBe(true)
     expect(gen.every(b => b.images[0] === gen[0].images[0] && /^data:image\/jpeg;base64,/.test(b.images[0]))).toBe(true)
     expect(gen.every(b => String(b.prompt).includes('The one attached picture is the reference picture: the look to aim for'))).toBe(true)
+    expect(gen.every(b => String(b.prompt).includes('There is no picture for the effect to run over'))).toBe(true)
     expect(gen.every(b => String(b.prompt).includes('like this, but slower'))).toBe(true)
     // "Three more" carries the higher price; × on the set clears the chip.
     await expect(tileIn(page, 'pending')).toHaveCount(0, { timeout: 60_000 })
@@ -337,6 +377,7 @@ test.describe('shader generation (stage 5)', () => {
     expect(gen.every(b => b.images[1] === gen[0].images[1] && b.images[0] !== b.images[1])).toBe(true)
     expect(gen.every(b => String(b.prompt).includes('Picture 1 is the image the effect runs over. Picture 2 is the reference picture: the look to aim for'))).toBe(true)
     expect(gen.every(b => String(b.prompt).includes('Request: "Match the look of the reference picture"'))).toBe(true)
+    expect(gen.some(b => String(b.prompt).includes('There is no picture for the effect to run over'))).toBe(false)
     await page.getByTestId('prompt-stop').click()
     await expect(page.getByTestId('prompt-takes')).toHaveCount(0)
   })
