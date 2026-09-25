@@ -182,7 +182,11 @@ const isSelectIdle = computed(() => tool.value === 'select' && !hasAnySelection.
   white-space: nowrap;
 }
 .tbtn.icon { padding: 0; width: 32px; }
-.tbtn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); }
+/* :not([aria-pressed='true']) keeps this below the pressed rules' specificity
+   so hovering a selected tool (or an on toggle) never masks its highlight —
+   e.g. the tool row sliding under the pointer when the rules row above it
+   closes. */
+.tbtn:hover:not(:disabled):not([aria-pressed='true']) { background: rgba(255, 255, 255, 0.08); }
 .tbtn[aria-pressed='true'] { background: #fff; color: #111; }
 .tbtn.toggle[aria-pressed='true'] { background: rgba(47, 107, 255, 0.18); color: #b9ccff; }
 .tbtn:disabled { color: rgba(255, 255, 255, 0.32); cursor: default; background: transparent; }
