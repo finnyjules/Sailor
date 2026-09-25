@@ -147,20 +147,35 @@ let uvPass: GpuPost | null = null
 const getFoil = () => (foilPass ??= new GpuPost(FOIL_FRAG))
 const getUv = () => (uvPass ??= new GpuPost(SPOT_UV_FRAG))
 
-export function finishAvailable(): boolean { return getFoil().available() && getUv().available() }
-/** Why finishes cannot draw here — shown in the inspector, never silently substituted. */
-export function finishUnavailableReason(): string { return getFoil().unavailableReason() || getUv().unavailableReason() }
+export type FinishKind = 'gold_foil' | 'spot_uv'
+const passFor = (kind: FinishKind) => (kind === 'gold_foil' ? getFoil() : getUv())
+
+/** Per kind: one finish's shader failing must not take the other down with it. */
+export function finishAvailable(kind: FinishKind): boolean { return passFor(kind).available() }
+/** What the inspector tells the person when this finish cannot draw here ('' when it can). A plain
+ *  sentence: the raw cause (a GLSL log, a missing context) is already console.error'd by GpuPost. */
+export function finishUnavailableReason(kind: FinishKind): string {
+  return finishAvailable(kind) ? '' : "Finishes need WebGL 2, which this browser can't provide right now."
+}
+
+// GpuPost always binds a second texture (DOF's depth). Finishes never read it, so hand it one
+// transparent pixel rather than uploading the whole layer a second time.
+let noDepth: HTMLCanvasElement | null = null
+function unusedDepth(): HTMLCanvasElement {
+  if (!noDepth) { noDepth = document.createElement('canvas'); noDepth.width = 1; noDepth.height = 1 }
+  return noDepth
+}
 
 /** Run a finish over `off` in place. False = did not run (no WebGL2 / empty) and `off` is untouched,
  *  so the layer draws plain. The result canvas is GpuPost's and is reused, so it is copied now. */
 export function applyFinish(
-  off: HTMLCanvasElement, kind: 'gold_foil' | 'spot_uv', dials: FoilDials | SpotUvDials, light: FrameLight, scale: number,
+  off: HTMLCanvasElement, kind: FinishKind, dials: FoilDials | SpotUvDials, light: FrameLight, scale: number,
 ): boolean {
   const w = off.width, h = off.height
   if (w < 1 || h < 1) return false
   const out = kind === 'gold_foil'
-    ? getFoil().render(off, off, w, h, foilUniforms(dials as FoilDials, light, w, h, scale))
-    : getUv().render(off, off, w, h, spotUvUniforms(dials as SpotUvDials, light, w, h, scale))
+    ? getFoil().render(off, unusedDepth(), w, h, foilUniforms(dials as FoilDials, light, w, h, scale))
+    : getUv().render(off, unusedDepth(), w, h, spotUvUniforms(dials as SpotUvDials, light, w, h, scale))
   if (!out) return false
   const ctx = off.getContext('2d')
   if (!ctx) return false

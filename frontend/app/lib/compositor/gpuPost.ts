@@ -46,6 +46,7 @@ export class GpuPost {
   constructor(private frag: string) {}
 
   available(): boolean {
+    if (this.gl?.isContextLost()) this.drop()
     this.init()
     return !this.failed && !!this.gl
   }
@@ -54,6 +55,16 @@ export class GpuPost {
   unavailableReason(): string {
     this.init()
     return this.reason
+  }
+
+  /** Forget the context (and everything made on it) so the next call builds a fresh one. A lost
+   *  context is transient — not `failed` — or one GPU reset would disable the pass for the session. */
+  private drop() {
+    this.canvas = null
+    this.gl = null
+    this.program = null
+    this.texColor = null
+    this.texDepth = null
   }
 
   private die(reason: string) {
@@ -72,6 +83,9 @@ export class GpuPost {
       preserveDrawingBuffer: true,
     })
     if (!gl) { this.die('WebGL2 is not available in this browser'); return }
+    // The browser may take the context back (GPU reset, too many contexts). Drop ours so the next
+    // render re-inits instead of drawing into a dead context and returning a blank canvas.
+    canvas.addEventListener('webglcontextlost', () => { if (this.canvas === canvas) this.drop() })
 
     const compile = (type: number, src: string) => {
       const s = gl.createShader(type)!
@@ -129,9 +143,15 @@ export class GpuPost {
     h: number,
     uniforms: Record<string, GpuUniform>,
   ): HTMLCanvasElement | null {
+    if (this.gl?.isContextLost()) this.drop()
     this.init()
     const { gl, program, canvas } = this
     if (this.failed || !gl || !program || !canvas) return null
+    // A lost context draws nothing — say so (null ⇒ the caller draws the plain layer).
+    if (gl.isContextLost()) { this.drop(); return null }
+    // Larger than the GPU can hold as a texture: the upload would fail silently. Draw plain.
+    const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number
+    if (Math.round(w) > maxTex || Math.round(h) > maxTex) return null
 
     canvas.width = Math.max(1, Math.round(w))
     canvas.height = Math.max(1, Math.round(h))

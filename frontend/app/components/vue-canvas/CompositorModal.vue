@@ -10588,7 +10588,7 @@ onUnmounted(() => {
           <!-- Print finish · Gold foil: metal stamped into the card, lit by the Frame's light. -->
           <div v-else-if="activeEffect!.type === 'gold_foil'" class="space-y-1.5">
             <p class="text-xs text-white/50">Metal foil stamped into the card. It catches the Frame's light.</p>
-            <p v-if="!finishAvailable()" class="text-xs text-amber-300/80">{{ finishUnavailableReason() }}</p>
+            <p v-if="!finishAvailable('gold_foil')" class="text-xs text-amber-300/80">{{ finishUnavailableReason('gold_foil') }}</p>
             <StudioSegmented
               data-testid="foil-metal"
               :model-value="(activeEffect as any).metal ?? 'gold'"
@@ -10608,7 +10608,7 @@ onUnmounted(() => {
           <!-- Print finish · Spot UV: a clear gloss coat; shows only where the light reflects. -->
           <div v-else-if="activeEffect!.type === 'spot_uv'" class="space-y-1.5">
             <p class="text-xs text-white/50">A clear gloss varnish. It shows where the light reflects off it.</p>
-            <p v-if="!finishAvailable()" class="text-xs text-amber-300/80">{{ finishUnavailableReason() }}</p>
+            <p v-if="!finishAvailable('spot_uv')" class="text-xs text-amber-300/80">{{ finishUnavailableReason('spot_uv') }}</p>
             <StudioSlider data-testid="uv-gloss" label="Gloss" :min="0" :max="1" :step="0.01" :default="0.75"
               :model-value="(activeEffect as any).gloss ?? 0.75"
               @update:model-value="(v: number) => updateActiveEffect({ gloss: v })" />
