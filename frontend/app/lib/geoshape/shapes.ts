@@ -1,16 +1,24 @@
 import { polygonVertices, starVertices, roundedPolygonPath, type Pt } from '~/lib/compositor/polygonGeometry'
 import { SHAPES, shapeById } from '~/lib/shapes/catalog'
 import { fitShapePath } from '~/lib/shapes/geometry'
+import type { SketchDoc } from '~/lib/sketch/model'
+import { sketchPathData } from '~/lib/sketch/sketchPath'
+import { flattenPath } from '~/lib/compositor/pathFlatten'
 
 export type BaseShapeKind =
   | 'circle' | 'square' | 'triangle' | 'diamond' | 'pentagon' | 'hexagon'
-  | 'octagon' | 'star' | 'semicircle' | 'cross' | 'leaf' | 'irregular' | 'library'
+  | 'octagon' | 'star' | 'semicircle' | 'cross' | 'leaf' | 'irregular' | 'library' | 'drawn'
 
 /** Canonical order for menus/validation — append, don't reorder. */
 export const BASE_SHAPES: BaseShapeKind[] = [
   'circle', 'square', 'triangle', 'diamond', 'pentagon', 'hexagon',
-  'octagon', 'star', 'semicircle', 'cross', 'leaf', 'irregular', 'library',
+  'octagon', 'star', 'semicircle', 'cross', 'leaf', 'irregular', 'library', 'drawn',
 ]
+
+/** The kinds anything automatic may choose — re-roll, Blend's shape B, the agent.
+ *  `drawn` is the user's own drawing, so nothing picks it for them. This is exactly
+ *  the list BASE_SHAPES was before `drawn` existed, so every seed rolls as before. */
+export const PICKABLE_SHAPES: BaseShapeKind[] = BASE_SHAPES.filter(k => k !== 'drawn')
 
 /** The library shape a fresh Library base shape shows, and the fallback for an id the catalog no longer has. */
 export const DEFAULT_LIBRARY_SHAPE = 'sparkle'
@@ -20,6 +28,8 @@ export interface BaseShapeOpts {
   size: number; roundCorners: number; roundRadius: number
   /** `library` only: a shape-library id. */
   libraryShape?: string
+  /** `drawn` only: the user's drawing, in mark units. */
+  sketch?: SketchDoc
 }
 
 /** A library shape fitted so its larger ink side spans `size`, centred like every other base shape. */
@@ -31,6 +41,53 @@ function libraryPath(id: string | undefined, size: number): string {
   const shape = (id ? shapeById(id) : undefined) ?? shapeById(DEFAULT_LIBRARY_SHAPE) ?? SHAPES[0]
   if (!shape) return ''
   return fitShapePath(shape, size).d
+}
+
+const r5 = (v: number) => { const n = Math.round(v * 1e5) / 1e5; return Object.is(n, -0) ? 0 : n }
+
+/**
+ * The user's drawing fitted like a library shape: its larger side spans `size`
+ * and its bbox centre sits on the origin. `''` for a missing or empty drawing.
+ * A straight line (zero width or height) scales by its non-zero side; never throws.
+ *
+ * The transform is exact on the drawing's own path data (absolute M/L/C/A/Z from
+ * `sketchPathData`): points map through scale-about-centre, and an `A` arc keeps
+ * its rotation and flags while its radii scale by `k`.
+ */
+export function drawnPath(sketch: SketchDoc | undefined, size: number): string {
+  if (!sketch || !Array.isArray(sketch.entities)) return ''
+  const d0 = sketchPathData(sketch)
+  if (!d0) return ''
+  const pts = flattenPath(d0).flatMap(s => s.pts)
+  if (!pts.length) return ''
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  for (const p of pts) {
+    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x
+    if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y
+  }
+  const ext = Math.max(maxX - minX, maxY - minY)
+  if (!(ext > 0) || !(size > 0)) return ''
+  const k = size / ext, cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
+  const tokens = d0.trim().split(/[\s,]+/)
+  const out: string[] = []
+  let i = 0
+  const next = () => Number(tokens[i++])
+  const pt = () => `${r5((next() - cx) * k)} ${r5((next() - cy) * k)}`
+  while (i < tokens.length) {
+    const cmd = tokens[i++]
+    switch (cmd) {
+      case 'M': case 'L': out.push(`${cmd} ${pt()}`); break
+      case 'C': out.push(`C ${pt()} ${pt()} ${pt()}`); break
+      case 'A': {
+        const rx = r5(next() * k), ry = r5(next() * k), rot = next(), large = next(), sweep = next()
+        out.push(`A ${rx} ${ry} ${rot} ${large} ${sweep} ${pt()}`)
+        break
+      }
+      case 'Z': out.push('Z'); break
+      default: return '' // not sketchPathData's grammar — render nothing rather than garbage
+    }
+  }
+  return out.join(' ')
 }
 
 // Small seeded RNG (mulberry32 over an xmur3 hash) — self-contained.
@@ -108,5 +165,6 @@ export function baseShapePath(kind: BaseShapeKind, o: BaseShapeOpts): string {
     case 'leaf':       return leafPath(o.size)
     case 'irregular':  return roundedPolygonPath(irregularVertices(o.sides, o.size, o.irregularSeed), cr)
     case 'library':    return libraryPath(o.libraryShape, o.size)
+    case 'drawn':      return drawnPath(o.sketch, o.size)
   }
 }

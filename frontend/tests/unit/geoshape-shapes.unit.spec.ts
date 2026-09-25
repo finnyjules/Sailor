@@ -6,17 +6,18 @@ const base = { sides: 6, starInner: 0.45, irregularSeed: 1, size: 180, roundCorn
 
 describe('geoshape base shapes', () => {
   it('every base shape produces a closed path d', () => {
-    for (const kind of BASE_SHAPES) {
+    // `drawn` is the user's own drawing — empty without one; covered by geoshape-drawn.unit.spec.ts.
+    for (const kind of BASE_SHAPES.filter(k => k !== 'drawn')) {
       const d = baseShapePath(kind, base)
       expect(d, kind).toMatch(/^M/)
       expect(d.trim().endsWith('Z'), kind).toBe(true)
       expect(d.length, kind).toBeGreaterThan(10)
     }
   })
-  it('the 13 named shapes are all present', () => {
+  it('the 14 named shapes are all present', () => {
     expect(BASE_SHAPES).toEqual([
       'circle', 'square', 'triangle', 'diamond', 'pentagon', 'hexagon',
-      'octagon', 'star', 'semicircle', 'cross', 'leaf', 'irregular', 'library',
+      'octagon', 'star', 'semicircle', 'cross', 'leaf', 'irregular', 'library', 'drawn',
     ])
   })
   it('curved shapes (circle/semicircle/leaf) use arc/curve commands', () => {
@@ -38,9 +39,10 @@ describe('geoshape base shapes', () => {
 })
 
 describe('library base shape', () => {
-  it('BASE_SHAPES ends with library', () => {
-    expect(BASE_SHAPES[BASE_SHAPES.length - 1]).toBe('library')
-    expect(BASE_SHAPES.length).toBe(13)
+  it('library is second to last, drawn last', () => {
+    expect(BASE_SHAPES[BASE_SHAPES.length - 2]).toBe('library')
+    expect(BASE_SHAPES[BASE_SHAPES.length - 1]).toBe('drawn')
+    expect(BASE_SHAPES.length).toBe(14)
   })
   it('renders a library shape fitted to size', () => {
     const d = baseShapePath('library', { ...base, libraryShape: 'circle' })

@@ -5,7 +5,9 @@
  * sits under Shape Studio's dynamic-import chain, same posture as
  * `shapefx/config.ts`, and must not drag in `three` or `paper`.
  */
-import { BASE_SHAPES, DEFAULT_LIBRARY_SHAPE, type BaseShapeKind } from './shapes'
+import { BASE_SHAPES, PICKABLE_SHAPES, DEFAULT_LIBRARY_SHAPE, type BaseShapeKind } from './shapes'
+import type { SketchDoc } from '~/lib/sketch/model'
+import { mergeSketchDoc } from '~/lib/sketch/merge'
 import type { Paint } from '~/lib/compositor/paint'
 import { isShapeId } from '~/lib/shapes/catalog'
 
@@ -41,6 +43,10 @@ export interface GeoShapeConfig {
   shape: BaseShapeKind
   /** `shape === 'library'` only: a shape-library id. */
   libraryShape: string
+  /** `shape === 'drawn'` only: the user's drawing, in mark units (drawing units = mark
+   *  units). Deliberately absent from DEFAULT_CONFIG, so a document without a drawing
+   *  stays byte-identical. */
+  sketch?: SketchDoc
   sides: number
   starInner: number
   irregularSeed: number
@@ -303,7 +309,8 @@ export function mergeConfig(raw: unknown): GeoShapeConfig {
     fills: paintList(o.fills, d.fills),
     gridCols: clampNum(o.gridCols, d.gridCols, 1, 24),
     gridRows: clampNum(o.gridRows, d.gridRows, 1, 24),
-    blendShape: oneOf(o.blendShape, SHAPES, d.blendShape),
+    // Shape B is never the user's drawing (there is only one sketch per mark).
+    blendShape: oneOf(o.blendShape, PICKABLE_SHAPES, d.blendShape),
     blendLibraryShape: isShapeId(o.blendLibraryShape) ? o.blendLibraryShape : d.blendLibraryShape,
     blendSides: clampNum(o.blendSides, d.blendSides, 3, 24),
     blendStarInner: Math.min(0.99, Math.max(0.01, num(o.blendStarInner, d.blendStarInner))),
@@ -317,5 +324,8 @@ export function mergeConfig(raw: unknown): GeoShapeConfig {
     fillCycle: oneOf(o.fillCycle, FILL_CYCLES, d.fillCycle),
     paintTarget: oneOf(o.paintTarget, PAINT_TARGETS, d.paintTarget),
     locks,
+    // Only present when the input had one, so a config without a drawing keeps
+    // exactly the key set it always had.
+    ...(o.sketch === undefined ? {} : { sketch: mergeSketchDoc(o.sketch) }),
   }
 }

@@ -13,7 +13,7 @@ import {
   PAINT_TARGETS,
   LAYOUTS as CONFIG_LAYOUTS,
 } from './config'
-import { BASE_SHAPES, type BaseShapeKind } from './shapes'
+import { BASE_SHAPES, PICKABLE_SHAPES, type BaseShapeKind } from './shapes'
 import type { Paint } from '~/lib/compositor/paint'
 
 /**
@@ -45,6 +45,8 @@ export const GEO_SECTIONS = ['Shape', 'Layout', 'Blend', 'Transform', 'Composite
 // Exported so randomize.ts (and any other geoshape module) shares this one
 // copy instead of keeping its own verbatim duplicate.
 export const SHAPES: BaseShapeKind[] = BASE_SHAPES
+/** What re-roll and Blend's shape B may choose — every kind but the user's own drawing. */
+export { PICKABLE_SHAPES }
 export const LAYOUTS: GeoLayout[] = [...CONFIG_LAYOUTS]
 export const FILLMODES: GeoFillMode[] = ['evenodd', 'unite', 'subtract', 'intersect', 'exclude']
 export const OVERLAPMODES: GeoOverlapMode[] = ['hole', 'shape']
@@ -61,6 +63,8 @@ const isIrregular = (c: GeoShapeConfig) => c.shape === 'irregular'
 const hasRoundCorners = (c: GeoShapeConfig) => c.roundCorners > 0
 const isLibrary = (c: GeoShapeConfig) => c.shape === 'library'
 const notLibrary = (c: GeoShapeConfig) => c.shape !== 'library'
+/** Corner rounding is a polygon knob: neither a library shape nor the user's drawing has it. */
+const takesRounding = (c: GeoShapeConfig) => notLibrary(c) && c.shape !== 'drawn'
 const isGrid = (c: GeoShapeConfig) => c.layout === 'grid'
 const isRadial = (c: GeoShapeConfig) => c.layout === 'radial'
 const isGridOrLinear = (c: GeoShapeConfig) => c.layout === 'grid' || c.layout === 'linear'
@@ -114,10 +118,19 @@ const shapeC = (
 ): GeoControl =>
   ({ key, label, kind: 'shape', allowNone: false, default: def, group, ...(hint ? { hint } : {}), ...extra } as GeoControl)
 
+/** Sentence-case names for the Shape menu, one per BASE_SHAPES entry, in order. */
+const SHAPE_LABEL: Record<BaseShapeKind, string> = {
+  circle: 'Circle', square: 'Square', triangle: 'Triangle', diamond: 'Diamond', pentagon: 'Pentagon',
+  hexagon: 'Hexagon', octagon: 'Octagon', star: 'Star', semicircle: 'Semicircle', cross: 'Cross',
+  leaf: 'Leaf', irregular: 'Irregular', library: 'Library shape', drawn: 'Drawn',
+}
+const SHAPE_OPTION_LABELS = SHAPES.map(k => SHAPE_LABEL[k])
+
 export const GEO_CONTROLS: GeoControl[] = [
   // --- Shape (baseShapePath's BaseShapeOpts) --------------------------------
   select('shape', 'Shape', SHAPES, DEFAULT_CONFIG.shape, 'Shape',
-    'Polygon, star and irregular use Sides; Hexagon is a fixed 6-gon; Library clones one of the 100 drawn shapes (Library shape)'),
+    'Polygon, star and irregular use Sides; Hexagon is a fixed 6-gon; Library clones one of the 100 drawn shapes (Library shape)',
+    { optionLabels: SHAPE_OPTION_LABELS }),
   shapeC('libraryShape', 'Library shape', DEFAULT_CONFIG.libraryShape, 'Shape',
     'Library only: which of the 100 drawn shapes is cloned (sparkle, sun-rays, leaf, heart, swirl…)', { when: isLibrary }),
   slider('sides', 'Sides', 3, 24, 1, 'Shape', DEFAULT_CONFIG.sides, undefined, { when: usesSides }),
@@ -128,8 +141,8 @@ export const GEO_CONTROLS: GeoControl[] = [
   slider('irregularSeed', 'Irregular seed', 1, 9999, 1, 'Shape', DEFAULT_CONFIG.irregularSeed, undefined, { when: isIrregular }),
   slider('size', 'Size', 20, 600, 1, 'Shape', DEFAULT_CONFIG.size),
   slider('roundCorners', 'Round corners', 0, 100, 1, 'Shape', DEFAULT_CONFIG.roundCorners,
-    '0 = sharp corners; above 0 rounds by Round radius', { when: notLibrary }),
-  slider('roundRadius', 'Round radius', 0, 100, 1, 'Shape', DEFAULT_CONFIG.roundRadius, undefined, { when: (c) => hasRoundCorners(c) && notLibrary(c) }),
+    '0 = sharp corners; above 0 rounds by Round radius', { when: takesRounding }),
+  slider('roundRadius', 'Round radius', 0, 100, 1, 'Shape', DEFAULT_CONFIG.roundRadius, undefined, { when: (c) => hasRoundCorners(c) && takesRounding(c) }),
 
   // --- Layout (arrange.ts) --------------------------------------------------
   select('layout', 'Layout', LAYOUTS, DEFAULT_CONFIG.layout, 'Layout'),
@@ -150,8 +163,9 @@ export const GEO_CONTROLS: GeoControl[] = [
     { when: hasStaggerGrid }),
 
   // --- Blend (layout 'blend': the steps between shape A and shape B) --------
-  select('blendShape', 'Blend to', SHAPES, DEFAULT_CONFIG.blendShape, 'Blend',
-    'The shape the steps run toward. Same choices as Shape; Count is the number of steps. Detailed library shapes blend with fewer points per outline, so a many-piece shape stays fast.', { when: isBlend }),
+  select('blendShape', 'Blend to', PICKABLE_SHAPES, DEFAULT_CONFIG.blendShape, 'Blend',
+    'The shape the steps run toward. Same choices as Shape, except a drawing; Count is the number of steps. Detailed library shapes blend with fewer points per outline, so a many-piece shape stays fast.',
+    { when: isBlend, optionLabels: PICKABLE_SHAPES.map(k => SHAPE_LABEL[k]) }),
   shapeC('blendLibraryShape', 'Blend to library shape', DEFAULT_CONFIG.blendLibraryShape, 'Blend',
     'Library only: which of the 100 drawn shapes the steps run toward', { when: blendIsLibrary }),
   slider('blendSides', 'Blend to sides', 3, 24, 1, 'Blend', DEFAULT_CONFIG.blendSides, undefined, { when: blendUsesSides }),
@@ -254,7 +268,7 @@ export function visibleGeoControls(cfg: GeoShapeConfig): GeoControl[] {
  */
 export const GEO_GUIDANCE = `This is a PROCEDURAL 2D-VECTOR "clone and arrange" LOGO generator — one base shape, repeated and folded into a single flat mark, not a raster illustration.
 
-BASE SHAPE: "shape" picks the family — polygon (regular N-gon via sides), star (N points via sides + starInner, the inner-vertex radius as a fraction of the outer radius, 0.01=needle-thin points, 0.99=almost a polygon), hexagon (fixed 6-gon, ignores sides), irregular (a polygon jittered per-vertex by irregularSeed — same seed always gives the same silhouette), library (one of the 100 drawn library shapes, chosen by libraryShape — sparkle, sun-rays, leaf, heart, swirl…; sides and corner rounding do not apply). size is the shape's full width/height (its larger side) before any clone spread. roundCorners (0=off) gates roundRadius, the corner-rounding fraction.
+BASE SHAPE: "shape" picks the family — polygon (regular N-gon via sides), star (N points via sides + starInner, the inner-vertex radius as a fraction of the outer radius, 0.01=needle-thin points, 0.99=almost a polygon), hexagon (fixed 6-gon, ignores sides), irregular (a polygon jittered per-vertex by irregularSeed — same seed always gives the same silhouette), library (one of the 100 drawn library shapes, chosen by libraryShape — sparkle, sun-rays, leaf, heart, swirl…; sides and corner rounding do not apply), drawn — the user's own drawing (you cannot draw; never set shape to drawn). size is the shape's full width/height (its larger side) before any clone spread. roundCorners (0=off) gates roundRadius, the corner-rounding fraction.
 
 LAYOUT: count is how many clones to place (grid layout instead uses gridCols × gridRows and ignores count). layout picks the placement curve: "radial" rings the clones around the center at radius; by default (evenAngle) they spread evenly (360/count) so any count forms a clean ring, and turning evenAngle off spaces them by angleStep degrees instead (for fans/spirals). spin is the ring's starting angle offset. "grid" tiles gridCols × gridRows clones spacing apart. "linear" strings count clones in a row, spacing apart. "blend" draws the steps between the base shape and a second shape (see BLEND). For grid/linear, stagger (incremental|alternate) shifts successive columns/rows by (stepX, stepY) — incremental cascades progressively (a diagonal shear), alternate offsets every other one (a brick/zigzag); stepAxis chooses whether a grid steps by column or row.
 

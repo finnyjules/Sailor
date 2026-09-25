@@ -16,7 +16,7 @@
  * stack and for this module's own test.
  */
 import type { GeoShapeConfig } from './config'
-import { SHAPES, LAYOUTS, FILLMODES, OVERLAPMODES, SYMMETRY_AXES, CLIP_MASKS } from './controls'
+import { PICKABLE_SHAPES, LAYOUTS, FILLMODES, OVERLAPMODES, SYMMETRY_AXES, CLIP_MASKS } from './controls'
 import { SHAPES as LIBRARY_SHAPES } from '~/lib/shapes/catalog'
 
 const LIBRARY_IDS = LIBRARY_SHAPES.map(s => s.id)
@@ -74,7 +74,7 @@ function nextSeed(prevSeed: number): number {
   return 1 + Math.floor(r.next() * 999998)
 }
 
-// SHAPES/LAYOUTS/FILLMODES/OVERLAPMODES/SYMMETRY_AXES/CLIP_MASKS come from
+// PICKABLE_SHAPES/LAYOUTS/FILLMODES/OVERLAPMODES/SYMMETRY_AXES/CLIP_MASKS come from
 // controls.ts (the one shared copy — see that file's note on config.ts).
 
 // One roll group per GEO_SECTIONS entry (controls.ts), minus 'Paint' — colour
@@ -89,7 +89,9 @@ type SymmetryGroup = Pick<GeoShapeConfig, 'symmetry' | 'symmetryAxis' | 'symmetr
 type ClipGroup = Pick<GeoShapeConfig, 'clipMask' | 'clipMaskSize' | 'invert'>
 type StyleGroup = Pick<GeoShapeConfig, 'padding' | 'strokeWidth'>
 
-function rollShape(seed: string): ShapeGroup {
+/** Exported for the re-roll snapshot test. Picks from PICKABLE_SHAPES — the exact
+ *  pre-`drawn` list — so a seed rolls the same mark it always did. */
+export function rollShape(seed: string): ShapeGroup {
   const r = makeRng(seed, 'shape')
   // Draw in the SAME order as before and blank afterwards, rather than branching
   // inside the literal: every draw here shares one stream, so skipping one would
@@ -100,7 +102,7 @@ function rollShape(seed: string): ShapeGroup {
   // moment the user switched shape family. `roundRadius` stays as rolled: it is
   // gated behind roundCorners > 0 anyway, so it is inert.
   const g: ShapeGroup = {
-    shape: r.pick(SHAPES),
+    shape: r.pick(PICKABLE_SHAPES),
     sides: r.int(3, 24),
     starInner: +r.range(0.01, 0.99).toFixed(2),
     irregularSeed: r.int(1, 9999),
@@ -129,7 +131,7 @@ function rollLayout(seed: string): LayoutGroup {
 function rollBlend(seed: string): BlendGroup {
   const r = makeRng(seed, 'blend')
   return {
-    blendShape: r.pick(SHAPES),
+    blendShape: r.pick(PICKABLE_SHAPES),
     blendLibraryShape: r.pick(LIBRARY_IDS),
     blendSides: r.int(3, 24),
     blendStarInner: +r.range(0.01, 0.99).toFixed(2),

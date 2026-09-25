@@ -41,7 +41,7 @@ import { buildShaderGuidance, shaderAgentControls, SHADER_EFFECT_MACRO_KEY } fro
 import type { EffectDef as ShaderEffectDef } from '~/lib/shaderfx/types'
 import { studioDocFromPersisted } from '~/lib/geoshape/studio'
 import { geoAgentControls as shapeAgentControls, GEO_GUIDANCE as SHAPE_GUIDANCE } from '~/lib/geoshape/agentControls'
-import { BASE_SHAPES, type BaseShapeKind } from '~/lib/geoshape/shapes'
+import { PICKABLE_SHAPES, type BaseShapeKind } from '~/lib/geoshape/shapes'
 import type { GeoShapeConfig } from '~/lib/geoshape/config'
 // Vector Type's config + control schema are fontkit-free (controls.ts imports
 // VtAxis TYPE-only, on purpose); only ./font.ts loads the parser, and that one is
@@ -672,7 +672,8 @@ const shapeAdapter: PatchAdapter = {
   // shape the renderer cannot draw. validatePatch already snaps `shape` to the
   // select's options; this is the floor for a future caller that does not.
   applyPreset: (value: string, config: GeoShapeConfig) =>
-    (BASE_SHAPES as string[]).includes(value)
+    // PICKABLE_SHAPES, not BASE_SHAPES: `drawn` is the user's own drawing — the agent cannot draw.
+    (PICKABLE_SHAPES as string[]).includes(value)
       ? { ...config, shape: value as BaseShapeKind }
       : null,
   // Re-describe against the SWAPPED config so the same patch's family-specific

@@ -12,7 +12,8 @@ import { isShapeId } from '../../app/lib/shapes/catalog'
 // edited by a bespoke list editor (ShapeStudioSurface's fills-list block,
 // mirroring SpaceTypeSurface's fillList pattern) rather than a single-value
 // control row, so neither has a GEO_CONTROLS entry.
-const NON_CONTROL_FIELDS = new Set(['locks', 'fills', 'overlapFills'])
+// `sketch` is the Drawn shape's drawing, edited by the pen, not a control row.
+const NON_CONTROL_FIELDS = new Set(['locks', 'fills', 'overlapFills', 'sketch'])
 
 const expectedKeys = Object.keys(DEFAULT_CONFIG).filter((k) => !NON_CONTROL_FIELDS.has(k))
 
