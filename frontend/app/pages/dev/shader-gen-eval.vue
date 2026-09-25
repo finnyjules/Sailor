@@ -22,10 +22,10 @@ interface Row { status: 'idle' | 'running' | 'done' | 'error'; tiles: Tile[]; fa
 type VariantId = 'A' | 'B' | 'C' | 'D' | 'E'
 const VARIANT_LABELS: Record<VariantId, string> = {
   A: 'A · Sonnet, thinking high',
-  B: 'B · Opus 5.5',
+  B: 'B · Opus 5.5 (the product setting), effort high',
   C: 'C · Sonnet + photo + examples',
   D: 'D · Sonnet + look and revise',
-  E: 'E · Opus 5.5 + photo + examples + look and revise',
+  E: 'E · Opus 5.5 (the product setting), effort high + photo + examples + look and revise',
 }
 const VARIANT_KEYS = ['A', 'B', 'C', 'D', 'E'] as const
 /** A and B were already run; C, D, E are the levers still worth trying. */
@@ -171,10 +171,10 @@ function depsAndInputFor(id: VariantId, r: EvalRequest): { deps: { callModel: Re
   const base: EngineInput = { request: r.prompt, base: baseFor(r.base), references }
   const review = makeReview(apiKey.value)
   if (id === 'A') return { deps: { callModel: makeCallModel(apiKey.value, 'plan', { effort: 'high' }), review, renderer: renderer! }, input: base }
-  if (id === 'B') return { deps: { callModel: makeCallModel(apiKey.value, 'plan', { model: 'opus', effort: 'high' }), review, renderer: renderer! }, input: base }
+  if (id === 'B') return { deps: { callModel: makeCallModel(apiKey.value, 'shader', { effort: 'high' }), review, renderer: renderer! }, input: base }
   if (id === 'C') return { deps: { callModel: makeCallModel(apiKey.value, 'plan'), review, renderer: renderer! }, input: { ...base, images: [photo.value], examples: examplesFor(r.key) } }
   if (id === 'D') return { deps: { callModel: makeCallModel(apiKey.value, 'plan'), review, renderer: renderer! }, input: { ...base, revise: true } }
-  return { deps: { callModel: makeCallModel(apiKey.value, 'plan', { model: 'opus', effort: 'high' }), review, renderer: renderer! }, input: { ...base, images: [photo.value], examples: examplesFor(r.key), revise: true } }
+  return { deps: { callModel: makeCallModel(apiKey.value, 'shader', { effort: 'high' }), review, renderer: renderer! }, input: { ...base, images: [photo.value], examples: examplesFor(r.key), revise: true } }
 }
 
 async function runVariant(id: VariantId) {

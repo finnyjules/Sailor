@@ -3,19 +3,34 @@ import { buildShaderGenPayload, meterShaderGenCall, readShaderGenReply, SHADERGE
 import { __resetMeterContextForTests, __setLedgerForTests, bindMeterContext, MeterRefusalError } from '../../server/utils/requestMeter'
 import { __setSystemControlsDbForTests } from '../../server/utils/systemControls'
 import { creditsForUsd, maxCreditsForCall, usdForUsage } from '../../server/utils/anthropicPrices'
-import { AI_TIERS, DEV_MODEL_OVERRIDES } from '../../server/lib/aiModels'
+import { AI_TIERS } from '../../server/lib/aiModels'
+import { SHADER_GEN_MODEL } from '../../shared/shadergen/model'
 import { MAX_IMAGE_CHARS } from '../../server/lib/agentRequest'
 import { SHADERGEN_TAKE_SCHEMA } from '~~/shared/shadergen/contract'
 import { SHADERGEN_SYSTEM } from '~~/shared/shadergen/system'
 
 describe('buildShaderGenPayload', () => {
-  it('defaults to the plan tier with capped effort, the cached system prompt and the take schema', () => {
+  it('with no tier, uses the shader-generation setting (Opus 5.5, effort medium)', () => {
+    const p = buildShaderGenPayload({ prompt: 'x' }) as any
+    expect(p.model).toBe(SHADER_GEN_MODEL.model)
+    expect(p.output_config.effort).toBe('medium')
+  })
+
+  it('with no tier, still sends the cached system prompt and the take schema', () => {
     const p = buildShaderGenPayload({ prompt: 'Request: "rain"' }) as any
-    expect(p.model).toBe(AI_TIERS.plan)
     expect(p.max_tokens).toBe(SHADERGEN_MAX_TOKENS)
-    expect(p.output_config).toEqual({ format: { type: 'json_schema', schema: SHADERGEN_TAKE_SCHEMA }, effort: 'low' })
+    expect(p.output_config).toEqual({ format: { type: 'json_schema', schema: SHADERGEN_TAKE_SCHEMA }, effort: 'medium' })
     expect(p.system).toEqual([{ type: 'text', text: SHADERGEN_SYSTEM, cache_control: { type: 'ephemeral' } }])
     expect(p.messages).toEqual([{ role: 'user', content: 'Request: "rain"' }])
+  })
+
+  it('an explicit tier still picks that tier (the eval page’s comparisons)', () => {
+    expect((buildShaderGenPayload({ prompt: 'x', tier: 'plan' }) as any).model).toBe(AI_TIERS.plan)
+    expect((buildShaderGenPayload({ prompt: 'x', tier: 'patch' }) as any).output_config.effort).toBeUndefined()
+  })
+
+  it('effort high is the one dev lever, on the shader setting too', () => {
+    expect((buildShaderGenPayload({ prompt: 'x', effort: 'high' }) as any).output_config.effort).toBe('high')
   })
 
   it('patch tier uses Haiku and sends no effort (Haiku rejects it with a 400)', () => {
@@ -58,24 +73,9 @@ describe('buildShaderGenPayload', () => {
     })
   })
 
-  describe('model override', () => {
-    it('is used only when allowModelOverride is true', () => {
-      const p = buildShaderGenPayload({ prompt: 'x', model: 'opus' }, { allowModelOverride: true }) as any
-      expect(p.model).toBe(DEV_MODEL_OVERRIDES.opus)
-    })
-
-    it('throws a 403 when overrides are not allowed', () => {
-      expect(() => buildShaderGenPayload({ prompt: 'x', model: 'opus' })).toThrow('Model overrides are only available on a local dev server')
-      try {
-        buildShaderGenPayload({ prompt: 'x', model: 'opus' })
-        throw new Error('should have thrown')
-      } catch (e) {
-        expect((e as any).statusCode).toBe(403)
-      }
-    })
-
-    it('rejects an unknown model value', () => {
-      expect(() => buildShaderGenPayload({ prompt: 'x', model: 'gpt5' }, { allowModelOverride: true })).toThrow()
+  describe('model', () => {
+    it('a client can never choose a model', () => {
+      expect(() => buildShaderGenPayload({ prompt: 'x', model: 'opus' })).toThrowError(/model/)
     })
   })
 

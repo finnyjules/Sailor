@@ -14,8 +14,8 @@ export const AI_TIERS = {
 
 export type AiTier = keyof typeof AI_TIERS
 
-/** Dev-only model overrides for the shader-gen evaluation; not a product tier. */
-export const DEV_MODEL_OVERRIDES = { opus: 'claude-opus-5-5' } as const
+/** The shader-generation setting (not an altitude tier); see shared/shadergen/model.ts. */
+export { SHADER_GEN_MODEL } from '../../shared/shadergen/model'
 
 export type AiEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 

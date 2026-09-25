@@ -1,25 +1,22 @@
 /**
  * Writes ONE shader take (AI in Sailor spec §7.2). The browser engine calls this
- * four times in parallel (one per take angle) plus repair calls, then compiles,
- * checks and reviews the results itself. Returns the raw JSON text, token usage
- * (so the evaluation page can report cost), the stop reason, and the credits
- * charged for the call (null in local mode).
+ * three times in parallel (the shader-generation setting) plus repair calls,
+ * then compiles, checks and reviews the results itself. Returns the raw JSON
+ * text, token usage (so the evaluation page can report cost), the stop reason,
+ * and the credits charged for the call (null in local mode).
  */
 import { createError, defineEventHandler, readBody } from 'h3'
 import { assertRateLimit } from '../lib/rateLimit'
 import { optionalApiKey, resolveAnthropicKey } from '../lib/agentRequest'
 import { buildShaderGenPayload, meterShaderGenCall } from '../lib/shaderGenRequest'
-import { deployMode } from '../utils/deployMode'
 
 export default defineEventHandler(async (event) => {
-  // A request is 4 parallel takes, each with up to 5 calls (repairs); two tiers
+  // A request is 3 parallel takes, each with up to 5 calls (repairs); two tiers
   // can run side by side on the eval page — 120/min leaves headroom for that.
   assertRateLimit(event, 'shader-gen', 120)
   const body = await readBody<{ apiKey?: string; tier?: string; prompt?: string; effort?: string; model?: string; images?: string[] }>(event)
   const apiKey = resolveAnthropicKey(useRuntimeConfig(event).anthropicApiKey, optionalApiKey(body?.apiKey))
-  // Model overrides (the shader-gen evaluation's variant B) only ever run on a
-  // local dev server — never in a deployed/hosted instance.
-  const payload = buildShaderGenPayload(body ?? {}, { allowModelOverride: import.meta.dev && deployMode() === 'local' })
+  const payload = buildShaderGenPayload(body ?? {})
 
   // Metered by the call's real token usage: hold the worst case, settle to
   // real cost × 2 (1 credit = $0.01) — see meterShaderGenCall.

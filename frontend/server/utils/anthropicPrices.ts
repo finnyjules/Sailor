@@ -3,26 +3,15 @@
  * (today: /api/shader-gen — one take is up to 10,000 output tokens, far past
  * what anthropicMeter's flat 2-credit assist charge was sized for).
  *
- * Source: Anthropic list prices (USD per million tokens), cached 2026-06-24;
- * Opus 5.5 at its launch price. `cacheWrite` is the 5-minute ephemeral
- * cache-write rate (1.25× input) — the only cache TTL these routes use.
- *
- * Policy (same as priceBook.ts / anthropicMeter.ts): 1 credit = $0.01,
- * charge 2× Sailor's cost.
+ * The table, markup and per-call credit function live in
+ * shared/pricing/anthropicTokens.ts so the client's shader-generation
+ * estimate reads the exact numbers this server settles with. Re-exported here
+ * so every existing caller of this module keeps working unchanged.
  */
-// NOTE: no commas in trailing comments on `export const` lines — mlly's regex
-// export scanner splits declarations on commas (see priceBook.ts).
+import { ANTHROPIC_USD_PER_MTOK, ASSIST_MARKUP, anthropicCallCredits, type AnthropicTokenPrice } from '../../shared/pricing/anthropicTokens'
 
-export interface AnthropicTokenPrice { input: number; output: number; cacheRead: number; cacheWrite: number }
-
-export const ANTHROPIC_USD_PER_MTOK: Record<string, AnthropicTokenPrice> = {
-  'claude-opus-5-5': { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 },
-  'claude-opus-5': { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
-  'claude-sonnet-5': { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
-  'claude-haiku-4-5': { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
-}
-
-export const ASSIST_MARKUP = 2 // Sailor charges 2× its own cost (priceBook policy)
+export { ANTHROPIC_USD_PER_MTOK, ASSIST_MARKUP, type AnthropicTokenPrice }
+export const creditsForUsd = anthropicCallCredits
 
 export interface AnthropicUsage {
   input_tokens?: number
@@ -53,12 +42,6 @@ export function usdForUsage(model: string, usage: AnthropicUsage): number | null
     + count(usage?.cache_read_input_tokens) * p.cacheRead
     + count(usage?.cache_creation_input_tokens) * p.cacheWrite
   ) / 1_000_000
-}
-
-/** USD cost → integer credits at the markup. Never zero for a real call; the
- *  epsilon keeps an exact number of cents from rounding up on float noise. */
-export function creditsForUsd(usd: number): number {
-  return Math.max(1, Math.ceil(usd * ASSIST_MARKUP * 100 - 1e-9))
 }
 
 /**

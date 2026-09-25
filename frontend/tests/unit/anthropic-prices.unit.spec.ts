@@ -4,11 +4,11 @@
  */
 import { describe, expect, it } from 'vitest'
 import { ANTHROPIC_USD_PER_MTOK, ASSIST_MARKUP, creditsForUsd, maxCreditsForCall, usdForUsage } from '../../server/utils/anthropicPrices'
-import { AI_TIERS, DEV_MODEL_OVERRIDES } from '../../server/lib/aiModels'
+import { AI_TIERS, SHADER_GEN_MODEL } from '../../server/lib/aiModels'
 
 describe('ANTHROPIC_USD_PER_MTOK', () => {
   it('prices every model /api/shader-gen can call', () => {
-    for (const model of [...Object.values(AI_TIERS), ...Object.values(DEV_MODEL_OVERRIDES)]) {
+    for (const model of [...Object.values(AI_TIERS), SHADER_GEN_MODEL.model]) {
       expect(ANTHROPIC_USD_PER_MTOK[model], model).toBeDefined()
     }
   })

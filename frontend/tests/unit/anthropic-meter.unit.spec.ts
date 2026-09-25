@@ -91,6 +91,13 @@ describe('anthropic-meter coverage guard', () => {
     expect(src).toMatch(/\bholdForModelCall\s*\(/)
   })
 
+  it('shader-gen’s default model is the priced shader-generation setting', async () => {
+    const { buildShaderGenPayload } = await import('../../server/lib/shaderGenRequest')
+    const { maxCreditsForCall } = await import('../../server/utils/anthropicPrices')
+    const p = buildShaderGenPayload({ prompt: 'x' }) as any
+    expect(maxCreditsForCall(p.model, 1, 1, 10_000)).not.toBeNull()
+  })
+
   it('meterRouterCall itself takes a holdForModelCall hold', () => {
     const src = readFileSync(join(serverRoot, 'lib/promptRouterRequest.ts'), 'utf8')
     expect(src).toMatch(/\bholdForModelCall\s*\(/)
