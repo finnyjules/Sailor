@@ -18,6 +18,55 @@ const rect = (w: number, h: number, cw = true): P[] => {
   const c = [{ x: -w / 2, y: -h / 2 }, { x: w / 2, y: -h / 2 }, { x: w / 2, y: h / 2 }, { x: -w / 2, y: h / 2 }]
   return resamplePolyline(cw ? c : c.slice().reverse(), true, 1)
 }
+// A 5-point star: sharp convex points AND sharp concave notches between them.
+const star5 = (rOuter: number, rInner: number): P[] =>
+  Array.from({ length: 10 }, (_, i) => {
+    const t = -Math.PI / 2 + (i * Math.PI) / 5, r = i % 2 ? rInner : rOuter
+    return { x: r * Math.cos(t), y: r * Math.sin(t) }
+  })
+// An L-shape: one genuinely concave corner (at 40, 40), the rest convex right angles.
+const lShape: P[] = [{ x: 0, y: 0 }, { x: 80, y: 0 }, { x: 80, y: 40 }, { x: 40, y: 40 }, { x: 40, y: 100 }, { x: 0, y: 100 }]
+
+const pointToSegment = (p: P, a: P, b: P): number => {
+  const abx = b.x - a.x, aby = b.y - a.y
+  const den = abx * abx + aby * aby || 1
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * abx + (p.y - a.y) * aby) / den))
+  return Math.hypot(p.x - (a.x + t * abx), p.y - (a.y + t * aby))
+}
+const polylineDistance = (p: P, pts: readonly P[], closed: boolean): number => {
+  const n = pts.length, segs = closed ? n : n - 1
+  let best = Infinity
+  for (let i = 0; i < segs; i++) best = Math.min(best, pointToSegment(p, pts[i]!, pts[(i + 1) % n]!))
+  return best
+}
+const triOrient = (a: P, b: P, c: P) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+const pointInTriangle = (p: P, a: P, b: P, c: P): boolean => {
+  const d1 = triOrient(p, a, b), d2 = triOrient(p, b, c), d3 = triOrient(p, c, a)
+  const hasNeg = d1 < 0 || d2 < 0 || d3 < 0, hasPos = d1 > 0 || d2 > 0 || d3 > 0
+  return !(hasNeg && hasPos)
+}
+const distToTriangle = (p: P, tri: readonly [P, P, P]): number => {
+  if (pointInTriangle(p, tri[0], tri[1], tri[2])) return 0
+  return Math.min(pointToSegment(p, tri[0], tri[1]), pointToSegment(p, tri[1], tri[2]), pointToSegment(p, tri[2], tri[0]))
+}
+/** Every point closer than 0.97·halfWidth to the outline must land inside (or within 0.3 units
+ *  of the edge of) at least one kept triangle's dst — the coverage the crescent-gap bug broke. */
+function assertBandCoverage(outline: readonly P[], halfWidth: number, gridStep = 2): void {
+  const f = followFrame(outline, true, halfWidth)!
+  const tris = bandTriangles(f, halfWidth)
+  const xs = outline.map(p => p.x), ys = outline.map(p => p.y)
+  const x0 = Math.min(...xs) - halfWidth - 2, x1 = Math.max(...xs) + halfWidth + 2
+  const y0 = Math.min(...ys) - halfWidth - 2, y1 = Math.max(...ys) + halfWidth + 2
+  const misses: P[] = []
+  for (let x = x0; x <= x1; x += gridStep) {
+    for (let y = y0; y <= y1; y += gridStep) {
+      const p = { x, y }
+      if (polylineDistance(p, outline, true) >= 0.97 * halfWidth) continue
+      if (!tris.some(t => distToTriangle(p, t.dst) <= 0.3)) misses.push(p)
+    }
+  }
+  expect(misses.length, `${misses.length} uncovered points; examples: ${JSON.stringify(misses.slice(0, 5))}`).toBe(0)
+}
 
 describe('followFrame', () => {
   it('measures the loop, closing chord included', () => {
@@ -70,28 +119,44 @@ describe('triangleAffine', () => {
 })
 
 describe('bandTriangles', () => {
-  it('two per segment round a circle, none dropped, strip spans the band', () => {
+  it('four per segment round a circle, none dropped, strip spans the band', () => {
     const f = followFrame(circle(100, 200), true, 10)!
     const tris = bandTriangles(f, 10)
-    expect(tris.length).toBe(400)
+    expect(tris.length).toBe(800)
     const ys = tris.flatMap(t => t.src.map(p => p.y))
-    expect(Math.min(...ys)).toBe(0); expect(Math.max(...ys)).toBe(20)
-    // strip y = 0 is the INNER edge: its band point is closer to the centre
-    const t0 = tris[0]!
-    expect(Math.hypot(t0.dst[0].x, t0.dst[0].y)).toBeCloseTo(90, 0)
-    expect(Math.hypot(t0.dst[2].x, t0.dst[2].y)).toBeCloseTo(110, 0)
+    // reach ≈ 1 all round a circle (no corner to undershoot), so the strip still spans ≈[0, 20]
+    expect(Math.min(...ys)).toBeCloseTo(0, 0); expect(Math.max(...ys)).toBeCloseTo(20, 0)
+    // strip y = 0 is the INNER edge: its band point is closer to the centre; y = 2h is the outer
+    const inner = tris[0]!.dst[0]!   // inner-half triangle 1: [inP, inQ, p]
+    const outer = tris[2]!.dst[2]!   // outer-half triangle 1: [p, q, outP]
+    expect(Math.hypot(inner.x, inner.y)).toBeCloseTo(90, 0)
+    expect(Math.hypot(outer.x, outer.y)).toBeCloseTo(110, 0)
   })
-  it('drops the triangles that fold over at a tight inner corner', () => {
+  it('drops the triangles that fold over at a tight inner corner, without losing coverage', () => {
     // a thin star: inner corners much tighter than the band is wide
     const star: P[] = Array.from({ length: 10 }, (_, i) => {
       const t = -Math.PI / 2 + (i * Math.PI) / 5, r = i % 2 ? 20 : 100
       return { x: r * Math.cos(t), y: r * Math.sin(t) }
     })
-    const f = followFrame(resamplePolyline(star, true, 1), true, 15)!
+    const outline = resamplePolyline(star, true, 1)
+    const f = followFrame(outline, true, 15)!
     const segs = f.pts.length
     const tris = bandTriangles(f, 15)
-    expect(tris.length).toBeLessThan(segs * 2)
-    expect(tris.length).toBeGreaterThan(segs)   // most of the band survives
+    expect(tris.length).toBeLessThan(segs * 4)
+    expect(tris.length).toBeGreaterThan(segs * 2)   // most of the band survives
+    assertBandCoverage(outline, 15)
+  })
+  it('covers the band fully round a rect corner, half-width 10', () => {
+    assertBandCoverage(rect(300, 200), 10)
+  })
+  it('covers the band fully round a rect corner, half-width 40', () => {
+    assertBandCoverage(rect(300, 200), 40)
+  })
+  it('covers the band fully round a 5-point star', () => {
+    assertBandCoverage(resamplePolyline(star5(150, 60), true, 1), 15)
+  })
+  it('covers the band fully round a concave L-shape corner', () => {
+    assertBandCoverage(resamplePolyline(lShape, true, 1), 10)
   })
 })
 

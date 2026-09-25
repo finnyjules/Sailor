@@ -16,11 +16,19 @@ export function paintCanFollow(paint: Paint | undefined): boolean {
   return false
 }
 
+/** Cap on `FollowFrame.reach`: how far past ±halfWidth the band mesh is allowed to stretch to
+ *  cover a convex corner. */
+export const FOLLOW_MAX_REACH = 2
+
 /** The centreline, measured and given a normal at every sample. */
 export interface FollowFrame {
   pts: FlatPoint[]
   /** Unit normals. Closed: pointing OUT of the shape. Open: the left-hand side of travel. */
   normals: FlatPoint[]
+  /** How far past ±halfWidth the band mesh must reach at this sample so its edge does not fall
+   *  short of the true offset curve near a convex corner (the smoothed normal undershoots a
+   *  sharp turn); 1 = no extra reach needed, capped at `FOLLOW_MAX_REACH`. */
+  reach: number[]
   /** `arc[i]` = distance along the line to `pts[i]`; one extra entry, the full length. */
   arc: number[]
   length: number
@@ -35,6 +43,11 @@ export interface FollowFrame {
  * neighbour normal would snap through 90° in one sample and the strip would tear open on the
  * outside and fold on the inside. The window is clamped to a quarter of the loop so a tiny
  * outline cannot average its normals away.
+ *
+ * That same smoothing is why the SMOOTHED normal undershoots a convex corner: the true offset
+ * edge there is further out than `p + n·h` reaches. `reach` measures the shortfall (via the
+ * angle between the smoothed and the raw, immediate-neighbour normal) so `bandTriangles` can
+ * stretch the mesh out to cover it.
  */
 export function followFrame(pts: readonly FlatPoint[], closed: boolean, halfWidth: number): FollowFrame | null {
   const n = pts.length
@@ -56,14 +69,20 @@ export function followFrame(pts: readonly FlatPoint[], closed: boolean, halfWidt
     sign = area > 0 ? 1 : -1
   }
   const at = (i: number) => (closed ? pts[((i % n) + n) % n]! : pts[Math.max(0, Math.min(n - 1, i))]!)
-  const normals = pts.map((_, i) => {
-    const a = at(i - k), b = at(i + k)
+  const normalAt = (i: number, kk: number) => {
+    const a = at(i - kk), b = at(i + kk)
     let tx = b.x - a.x, ty = b.y - a.y
     const l = Math.hypot(tx, ty) || 1
     tx /= l; ty /= l
     return { x: ty * sign, y: -tx * sign }
+  }
+  const normals = pts.map((_, i) => normalAt(i, k))
+  const rawNormals = pts.map((_, i) => normalAt(i, 1))
+  const reach = pts.map((_, i) => {
+    const dot = normals[i]!.x * rawNormals[i]!.x + normals[i]!.y * rawNormals[i]!.y
+    return Math.min(FOLLOW_MAX_REACH, 1 / Math.max(0.5, dot))
   })
-  return { pts: pts.slice(), normals, arc, length, closed }
+  return { pts: pts.slice(), normals, reach, arc, length, closed }
 }
 
 export type Affine = [number, number, number, number, number, number]
@@ -87,16 +106,25 @@ export interface StripTriangle { src: [FlatPoint, FlatPoint, FlatPoint]; dst: [F
 const orient = (a: FlatPoint, b: FlatPoint, c: FlatPoint) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
 
 /**
- * The strip → band mesh: two triangles per centreline segment. Strip `x` is arc length, strip
- * `y` runs 0 (inner edge, `p − n·h`) to `2h` (outer edge, `p + n·h`).
+ * The strip → band mesh: FOUR triangles per centreline segment, split at the centreline into an
+ * inner half (centre → inner edge) and an outer half (centre → outer edge). Strip `x` is arc
+ * length, strip `y` stays 1:1 with distance from the centreline — `h` at the centre, `h − h·reach`
+ * at the inner edge, `h + h·reach` at the outer edge — so it ranges over
+ * `[h − h·FOLLOW_MAX_REACH, h + h·FOLLOW_MAX_REACH]` = `[−h, 3h]`. The mesh deliberately
+ * OVER-reaches past the true band (`y ∈ [0, 2h]`) by up to `FOLLOW_MAX_REACH − 1` half-widths on
+ * each side, because the smoothed normal undershoots a convex corner (see `followFrame`'s
+ * `reach`); the painter must paint the strip over that wider range, `y ∈
+ * [−h·(FOLLOW_MAX_REACH−1), 2h + h·(FOLLOW_MAX_REACH−1)]`, and the later band mask trims the
+ * excess back to the true band.
  *
- * On the inside of a corner tighter than the band is deep, the inner edge runs BACKWARDS and
- * its triangles turn inside out. Those are dropped — found as the ones whose orientation
- * (relative to their source) disagrees with the majority, which is the right test whichever
- * way the outline is drawn. The band mask trims what remains.
+ * On the inside of a corner tighter than a half is deep, that half's edge runs BACKWARDS and its
+ * triangles turn inside out. Those are dropped — found as the ones whose orientation (relative to
+ * their source) disagrees with the majority, which is the right test whichever way the outline is
+ * drawn. Splitting at the centreline means a fold on the concave side only drops that side's
+ * triangles — the other half of the same segment survives untouched.
  */
 export function bandTriangles(f: FollowFrame, halfWidth: number): StripTriangle[] {
-  const n = f.pts.length, segs = f.closed ? n : n - 1, W = 2 * halfWidth
+  const n = f.pts.length, segs = f.closed ? n : n - 1, h = halfWidth
   const all: { t: StripTriangle; s: number }[] = []
   const push = (t: StripTriangle) => {
     const o = orient(t.dst[0], t.dst[1], t.dst[2]) * Math.sign(orient(t.src[0], t.src[1], t.src[2]))
@@ -105,13 +133,19 @@ export function bandTriangles(f: FollowFrame, halfWidth: number): StripTriangle[
   for (let i = 0; i < segs; i++) {
     const j = (i + 1) % n
     const p = f.pts[i]!, q = f.pts[j]!, np = f.normals[i]!, nq = f.normals[j]!
-    const inP = { x: p.x - np.x * halfWidth, y: p.y - np.y * halfWidth }
-    const outP = { x: p.x + np.x * halfWidth, y: p.y + np.y * halfWidth }
-    const inQ = { x: q.x - nq.x * halfWidth, y: q.y - nq.y * halfWidth }
-    const outQ = { x: q.x + nq.x * halfWidth, y: q.y + nq.y * halfWidth }
+    const rp = f.reach[i]!, rq = f.reach[j]!
+    const inP = { x: p.x - np.x * h * rp, y: p.y - np.y * h * rp }
+    const outP = { x: p.x + np.x * h * rp, y: p.y + np.y * h * rp }
+    const inQ = { x: q.x - nq.x * h * rq, y: q.y - nq.y * h * rq }
+    const outQ = { x: q.x + nq.x * h * rq, y: q.y + nq.y * h * rq }
     const s0 = f.arc[i]!, s1 = f.arc[i + 1]!
-    push({ src: [{ x: s0, y: 0 }, { x: s1, y: 0 }, { x: s0, y: W }], dst: [inP, inQ, outP] })
-    push({ src: [{ x: s1, y: 0 }, { x: s1, y: W }, { x: s0, y: W }], dst: [inQ, outQ, outP] })
+    const yInP = h - h * rp, yInQ = h - h * rq, yOutP = h + h * rp, yOutQ = h + h * rq
+    // inner half: centre p/q → inner edge
+    push({ src: [{ x: s0, y: yInP }, { x: s1, y: yInQ }, { x: s0, y: h }], dst: [inP, inQ, p] })
+    push({ src: [{ x: s1, y: yInQ }, { x: s1, y: h }, { x: s0, y: h }], dst: [inQ, q, p] })
+    // outer half: centre p/q → outer edge
+    push({ src: [{ x: s0, y: h }, { x: s1, y: h }, { x: s0, y: yOutP }], dst: [p, q, outP] })
+    push({ src: [{ x: s1, y: h }, { x: s1, y: yOutQ }, { x: s0, y: yOutP }], dst: [q, outQ, outP] })
   }
   let vote = 0
   for (const e of all) vote += e.s
