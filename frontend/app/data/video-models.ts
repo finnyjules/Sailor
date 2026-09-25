@@ -180,6 +180,40 @@ export const VIDEO_MODELS: VideoModel[] = [
       NEG_PROMPT,
     ],
   },
+  // Veo 3.1 Lite runs only in Sailor's runner (family veo-3.1-lite), on fal
+  // (server/runner/generators/veo31Lite.ts). Its schemas (fal-ai/veo3.1/lite
+  // and /image-to-video, read 2026-09-24) are Veo 3.1's without 4k, so its
+  // settings are Veo 3.1's, at 720p or 1080p.
+  {
+    id: 'veo-3.1-lite',
+    runnerOnly: true,
+    family: 'veo-3.1-lite',
+    label: 'Veo 3.1 Lite',
+    brand: 'Google',
+    // The gallery's cover art only (Replicate's google/veo-3.1-lite is not a backup).
+    replicateSlug: 'google/veo-3.1-lite',
+    pitch: 'Veo at its lowest price, with sound, at 720p or 1080p.',
+    description:
+      'Veo 3.1 Lite makes 4, 6 or 8 second clips with sound, at 720p or 1080p, in ' +
+      'landscape or portrait. Describe the clip, or link a picture to start from it. ' +
+      'Turn sound off for a cheaper silent clip.',
+    tags: ['cheap', 'audio'],
+    modes: ['t2v', 'i2v'],
+    supportsSeed: true,
+    priceHint: null,
+    aspectRatios: ['16:9', '9:16'],
+    defaultAspectRatio: '16:9',
+    durations: [4, 6, 8],
+    defaultDuration: 8,
+    resolutions: ['720p', '1080p'],
+    defaultResolution: '720p',
+    advanced: [
+      AUDIO_GENERATION,
+      NEG_PROMPT,
+      { name: 'enhance_prompt', type: 'boolean', label: 'Fix refused prompts',
+        default: true, description: 'Lets Veo rewrite a prompt it would otherwise refuse.' },
+    ],
+  },
   // Gemini Omni Flash runs only in Sailor's runner (family gemini-omni-flash),
   // on fal (server/runner/generators/geminiOmniFlash.ts). Its schemas
   // (google/gemini-omni-flash and /image-to-video, read 2026-09-24) take a

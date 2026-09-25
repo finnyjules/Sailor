@@ -206,6 +206,21 @@ const FLOWS: FamilyFlow[] = [
     endpoint: 'google/gemini-omni-flash',
     body: { prompt: 'a fox in the snow', aspect_ratio: '9:16', duration: 4 },
   },
+  // Task F5: Veo 3.1 Lite has no Python builder either; Veo 3.1's body on
+  // Lite's app, from its saved schema (runner-veo-31-lite.unit.spec.ts).
+  // Text-to-video is the bare app id.
+  {
+    family: 'veo-3.1-lite',
+    label: 'GenerateVideoNode veo-3.1-lite',
+    prompt: {
+      1: { class_type: 'GenerateVideoNode', inputs: { model: 'veo-3.1-lite', prompt: 'a fox in the snow', aspect_ratio: '16:9', duration: '4', seed: 0, model_options: '{"generate_audio":false}' } },
+      2: outVideo('1'),
+    },
+    files: [],
+    provider: 'fal',
+    endpoint: 'fal-ai/veo3.1/lite',
+    body: { prompt: 'a fox in the snow', duration: '4s', resolution: '720p', generate_audio: false, auto_fix: true, aspect_ratio: '16:9' },
+  },
   // Task F2: GPT Image 2.5 has no Python builder either; the body is written
   // from its saved schema (runner-gpt-image-25.unit.spec.ts). fal first, so
   // Replicate (the backup) is never called.

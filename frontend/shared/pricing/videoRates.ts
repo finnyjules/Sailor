@@ -78,6 +78,15 @@ export const VIDEO_RATES: Record<string, VideoRate> = {
     unit: 'per_second', service: 'fal', source: fal('fal-ai/veo3.1/fast'), read: READ, confidence: 'verified',
     byResolution: { '720p': { audio: 0.15, silent: 0.10 }, '1080p': { audio: 0.15, silent: 0.10 }, '4k': { audio: 0.35, silent: 0.30 } },
   },
+  // Veo 3.1 Lite (family veo-3.1-lite, runner-only; no backup). The same text
+  // on text- and image-to-video: "$0.05 for 720p with audio, $0.03 for 720p
+  // without audio, $0.08 for 1080p with audio or $0.05 for 1080p without audio"
+  // per second. (Replicate's google/veo-3.1-lite, not a backup: $0.05 / $0.08
+  // a second, always with sound.)
+  'veo-3.1-lite': {
+    unit: 'per_second', service: 'fal', source: fal('fal-ai/veo3.1/lite'), read: READ, confidence: 'verified',
+    byResolution: { '720p': { audio: 0.05, silent: 0.03 }, '1080p': { audio: 0.08, silent: 0.05 } },
+  },
   // "0.17 $ per second of generated video at 720p, and 0.29 $ per second at 1080p." Sound doesn't change it.
   'flux-3': {
     unit: 'per_second', service: 'fal', source: fal('blackforestlabs/flux-3/text-to-video'), read: READ, confidence: 'verified',

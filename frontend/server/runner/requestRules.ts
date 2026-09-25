@@ -22,17 +22,25 @@
  *    the node is refused instead (FIRST_FRAME_AND_REFERENCES);
  *  - Gemini Omni Flash with a last frame, or reference pictures, videos or
  *    sounds, in its options: its endpoints take one first frame at most, so
- *    the node is refused (geminiOmniFlash.ts GEMINI_OMNI_FLASH_ONE_PICTURE).
- * References are never dropped, to make a request fit or otherwise. (Film a
- * shot, which the runner doesn't take and this file doesn't judge, still
- * drops them on the ComfyUI path, as its Python builder does.)
+ *    the node is refused (geminiOmniFlash.ts GEMINI_OMNI_FLASH_ONE_PICTURE);
+ *  - Gemini Omni Flash text-to-video with an empty prompt (controller ruling
+ *    after F4: the schema requires a prompt but sets no minimum, so an empty
+ *    one would fail only at the result). It is the one row of the prompt table
+ *    that comes from a ruling, not a schema (PROMPT_MIN_LENGTH_RULINGS);
+ *  - Film a shot on Seedance 2.0 with a first frame AND references (parked
+ *    minor M5): Film a shot runs only on the ComfyUI path, whose Python
+ *    builder would send the first frame and drop the references, so the
+ *    /prompt gate refuses it with the same words as Generate a video.
+ * References are never dropped, to make a request fit or otherwise.
  */
 import { isLink, type ApiPrompt } from '#shared/runner/graph'
 import { resolveVideoModelId } from '#shared/runner/eligibility'
 import { composeImagePrompt } from './generators/image'
 import { RUNNER_VIDEO_MODELS } from './generators/video'
 import { H3_MAX_TURBO_APP, H3_MAX_TURBO_ENDPOINTS, H3_MAX_TURBO_ID } from './generators/h3MaxTurbo'
-import { GEMINI_OMNI_FLASH_ID, GEMINI_OMNI_FLASH_ONE_PICTURE, geminiOmniFlashHasExtras } from './generators/geminiOmniFlash'
+import {
+  GEMINI_OMNI_FLASH_ID, GEMINI_OMNI_FLASH_ONE_PICTURE, GEMINI_OMNI_FLASH_TEXT_TO_VIDEO, geminiOmniFlashFirstFrame, geminiOmniFlashHasExtras,
+} from './generators/geminiOmniFlash'
 import { asText, parseJsonObject } from './generators/opts'
 import { moodboardFiles } from './inputs'
 import {
@@ -49,6 +57,7 @@ export { FIRST_FRAME_AND_REFERENCES }
 
 export const NANO_BANANA_SHORT_PROMPT = 'Nano Banana needs a prompt of at least 3 characters.'
 export const H3_SHORT_PROMPT = 'Hailuo H3 needs a prompt.'
+export const GEMINI_OMNI_FLASH_NEEDS_PROMPT = 'Gemini Omni Flash needs a prompt. Describe the clip, or link a picture to start from it.'
 
 /** `<provider> <endpoint>` → the prompt's minimum length in characters (the schema's `minLength`), and what to say. */
 export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: string }>> = {
@@ -70,7 +79,15 @@ export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: 
   [`fal ${WAN_30_TEXT_TO_VIDEO}`]: { min: 1, message: WAN_3_NEEDS_PROMPT },
   // GPT Image 2.5 (gptImage25.ts): every fal endpoint requires a prompt; Replicate's (the backup) states no minimum.
   ...Object.fromEntries(GPT_IMAGE_25_FAL_ENDPOINTS.map(e => [`fal ${e}`, { min: 1, message: GPT_IMAGE_25_NEEDS_PROMPT }])),
+  // Gemini Omni Flash text-to-video (geminiOmniFlash.ts): a ruling, not the schema (see PROMPT_MIN_LENGTH_RULINGS).
+  [`fal ${GEMINI_OMNI_FLASH_TEXT_TO_VIDEO}`]: { min: 1, message: GEMINI_OMNI_FLASH_NEEDS_PROMPT },
 }
+
+/**
+ * The rows of PROMPT_MIN_LENGTH that come from a controller ruling rather
+ * than the schema's `minLength` (a test holds every other row to the schemas).
+ */
+export const PROMPT_MIN_LENGTH_RULINGS: readonly string[] = [`fal ${GEMINI_OMNI_FLASH_TEXT_TO_VIDEO}`]
 
 /** JSON Schema counts characters as code points. */
 const chars = (s: string) => [...s].length
@@ -242,6 +259,18 @@ export function requestProblems(prompt: ApiPrompt): RequestProblem[] {
       if (id === GEMINI_OMNI_FLASH_ID && !isLink(inputs.model_options) && geminiOmniFlashHasExtras(parseJsonObject(inputs.model_options))) {
         out.push({ nodeId, classType: ct, input: 'model_options', message: GEMINI_OMNI_FLASH_ONE_PICTURE })
       }
+      // Gemini Omni Flash text-to-video (no linked picture, no `image_url`): an empty prompt is refused.
+      // With the options wired in, the first frame can't be read, so the node isn't judged here.
+      if (id === GEMINI_OMNI_FLASH_ID && !isLink(inputs.prompt) && !isLink(inputs.image) && !isLink(inputs.model_options)
+        && !geminiOmniFlashFirstFrame(null, parseJsonObject(inputs.model_options))) {
+        judge(GEMINI_OMNI_FLASH_TEXT_TO_VIDEO, asText(inputs.prompt))
+      }
+    }
+    // Film a shot on Seedance 2.0 (ComfyUI path only): a first frame beside references is refused,
+    // never sent with the references dropped; the counts too (the same check as Generate a video's).
+    else if (ct === 'FilmShotNode' && inputs.model === 'seedance-2.0' && !isLink(inputs.model_options)) {
+      const p = seedanceReferenceProblem(parseJsonObject(inputs.model_options), isLink(inputs.image))
+      if (p) out.push({ nodeId, classType: ct, input: 'model_options', message: p.message })
     }
   }
   return out

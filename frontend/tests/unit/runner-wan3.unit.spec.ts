@@ -35,7 +35,7 @@ import { asInt, parseJsonObject } from '~~/server/runner/generators/opts'
 import {
   WAN_30_IMAGE_TO_VIDEO, WAN_30_PRIME_IMAGE_TO_VIDEO, WAN_30_REFERENCE_TO_VIDEO, WAN_30_TEXT_TO_VIDEO, WAN_3_ENDPOINTS,
   FIRST_FRAME_AND_REFERENCES, WAN_3_NEEDS_PROMPT, WAN_3_PICTURES_ONLY, WAN_3_PRIME_NEEDS_FIRST_FRAME, WAN_3_SECONDS, WAN_3_TOO_MANY_REFERENCES,
-  wan3Call, type Wan3Id,
+  wan3Call, wan3PromptTags, type Wan3Id,
 } from '~~/server/runner/generators/wan3'
 import { requestProblems } from '~~/server/runner/requestRules'
 import { priceGraph } from '~~/server/utils/priceBook'
@@ -239,6 +239,18 @@ describe('expected payloads', () => {
     expect(checkPayload(schema(p.endpoint), p.payload)).toEqual([])
     // Other endpoints send the prompt as written.
     expect((await providerPlan(vid('wan-3.0', { prompt: 'see @Image1' }))).payload.prompt).toBe('see @Image1')
+  })
+
+  it('a tag inside an email address or a word is left alone (parked minor M3)', () => {
+    for (const kept of ['mail me@Image1.com', 'write to first.last@Video2.org', 'a+b@Audio3', 'x-y@Image4', 'id_@Image5', 'mail@Image1', '@Image1a', '@Images2']) {
+      expect(wan3PromptTags(kept), kept).toBe(kept)
+    }
+    expect(wan3PromptTags('@Image1, (@Video2) and "@Audio3". Then @Image10!')).toBe('Image 1, (Video 2) and "Audio 3". Then Image 10!')
+    expect(wan3PromptTags('ask me@Image1.com about @Image2')).toBe('ask me@Image1.com about Image 2')
+  })
+
+  it('the first-frame-and-references refusal reads in plain words (parked minor M4)', () => {
+    expect(FIRST_FRAME_AND_REFERENCES).toBe('Pick either a first frame or references, not both.')
   })
 
   it('Prime: its own image-to-video endpoint, with the linked picture', async () => {

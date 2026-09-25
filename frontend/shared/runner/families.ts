@@ -23,9 +23,11 @@ export type RunnerFamily =
   | 'h3-max-turbo'
   /** Gemini Omni Flash on fal, no backup (model line-up F4): a runner-only video model. */
   | 'gemini-omni-flash'
+  /** Veo 3.1 Lite on fal, no backup (model line-up F5): a runner-only video model. */
+  | 'veo-3.1-lite'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
-  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash',
+  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite',
 ]
 
 const KNOWN: ReadonlySet<string> = new Set(RUNNER_FAMILIES)

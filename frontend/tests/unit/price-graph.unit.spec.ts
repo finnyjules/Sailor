@@ -31,7 +31,7 @@ import { creditsForUsd } from '~/lib/pricing'
 import { IMAGE_MODELS } from '~~/app/data/image-models'
 import { VIDEO_MODELS } from '~~/app/data/video-models'
 import { videoUsd } from '#shared/pricing/videoRates'
-import { imagePriceUsd } from '#shared/pricing/imageRates'
+import { IMAGE_BACKUP_RATES, imagePriceUsd } from '#shared/pricing/imageRates'
 import { effectiveImageSettings } from '#shared/pricing/imageSettings'
 import { effectiveVideoSettings } from '#shared/pricing/videoSettings'
 
@@ -239,10 +239,16 @@ describe('model-aware pricing: images', () => {
     for (const m of IMAGE_MODELS) {
       if (m.pricePerImage == null) continue
       const p = priceGraph({ 1: { class_type: 'GenerateImageNode', inputs: { model: m.id } } })
-      // pricePerImage is the first service's; a backup's cost, covered at cost, can set the charge above it (Task S3).
-      const basis = imagePriceUsd(m.id, effectiveImageSettings(m.id, m.defaultAspectRatio, {})!)!
-      expect(basis, m.id).toBeGreaterThanOrEqual(m.pricePerImage)
-      expect(p.credits, m.id).toBe(creditsForUsdServer(basis))
+      // pricePerImage is the first service's, and the charge is exactly it, except where a backup
+      // rate is the basis: its cost, covered at cost, can set the charge above it (Task S3).
+      if (IMAGE_BACKUP_RATES[m.id]) {
+        const basis = imagePriceUsd(m.id, effectiveImageSettings(m.id, m.defaultAspectRatio, {})!)!
+        expect(basis, m.id).toBeGreaterThanOrEqual(m.pricePerImage)
+        expect(p.credits, m.id).toBe(creditsForUsdServer(basis))
+      }
+      else {
+        expect(p.credits, m.id).toBe(creditsForUsdServer(m.pricePerImage))
+      }
     }
   })
 

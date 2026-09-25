@@ -278,6 +278,8 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // H3 Max's modes: a prompt alone, or a linked first frame.
   // ── gemini-omni-flash (model line-up F4): Gemini Omni Flash on fal, runner-only ──
   // A prompt alone, or a linked first frame (no last frame or references).
+  // ── veo-3.1-lite (model line-up F5): Veo 3.1 Lite on fal, runner-only ──
+  // Veo 3.1's modes: a prompt alone, or a linked first frame.
   GenerateVideoNode: {
     models: {
       ...Object.fromEntries(RUNNER_REPLICATE_VIDEO_MODEL_IDS.map(id => [id, id === 'wan-2.5-i2v-fast'
@@ -287,6 +289,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       'wan-3.0-prime': { family: 'wan-3', mustLink: ['image'] },
       'hailuo-h3-max-turbo': 'h3-max-turbo',
       'gemini-omni-flash': 'gemini-omni-flash',
+      'veo-3.1-lite': 'veo-3.1-lite',
     },
     mustNotLink: ['prompt', 'model_options'],
   },

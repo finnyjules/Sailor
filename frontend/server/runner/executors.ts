@@ -15,6 +15,7 @@
  * and the runner-only models no Python node builds: Wan 3.0, family wan-3;
  * Hailuo H3 Max Turbo, family h3-max-turbo;
  * Gemini Omni Flash, family gemini-omni-flash;
+ * Veo 3.1 Lite, family veo-3.1-lite;
  * GPT Image 2.5 in GenerateImageNode and EditImageNode, family gpt-image-2.5)
  * closely enough that the same workflow gives the same result.
  */
@@ -48,6 +49,7 @@ import {
 import { RUNNER_WAN3_MODELS, isWan3Model, wan3Call } from './generators/wan3'
 import { RUNNER_ONLY_FAL_VIDEO_MODELS } from './generators/h3MaxTurbo'
 import { RUNNER_GEMINI_OMNI_FLASH_MODELS } from './generators/geminiOmniFlash'
+import { RUNNER_VEO_31_LITE_MODELS } from './generators/veo31Lite'
 import { GPT_IMAGE_25_EDIT_OPTION, gptImage25Edit, gptImage25Generate, gptImage25OnReplicate, isGptImage25Model } from './generators/gptImage25'
 import { checkRequest, seedanceReferenceProblem } from './requestRules'
 import type { OutputFile, RunnerProvider } from './types'
@@ -276,7 +278,8 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       }
       // Hailuo H3 Max Turbo (family h3-max-turbo): H3 Max's builder on its own fal app (h3MaxTurbo.ts); no backup.
       // Gemini Omni Flash (family gemini-omni-flash): its own builder on fal (geminiOmniFlash.ts); no backup.
-      const desc = RUNNER_VIDEO_MODELS[id] ?? RUNNER_ONLY_FAL_VIDEO_MODELS[id] ?? RUNNER_GEMINI_OMNI_FLASH_MODELS[id]
+      // Veo 3.1 Lite (family veo-3.1-lite): Veo 3.1's builder on its own fal app (veo31Lite.ts); no backup.
+      const desc = RUNNER_VIDEO_MODELS[id] ?? RUNNER_ONLY_FAL_VIDEO_MODELS[id] ?? RUNNER_GEMINI_OMNI_FLASH_MODELS[id] ?? RUNNER_VEO_31_LITE_MODELS[id]
       if (!desc) throw new Error(`Unknown video model: ${String(inputs.model)}`)
       const first = linkedFirstFile('image')
       // Seedance 2.0: a first frame beside references is refused, not sent with them dropped (requestRules.ts).

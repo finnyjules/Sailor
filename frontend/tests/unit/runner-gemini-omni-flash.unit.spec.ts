@@ -125,10 +125,13 @@ describe('the saved schemas', () => {
     for (const s of [t2v, i2v]) {
       expect(s.properties.aspect_ratio.enum).toEqual(['16:9', '9:16'])
       expect(s.properties.duration).toMatchObject({ type: 'integer', minimum: 3, maximum: 10, default: 8 })
-      // No minLength: an empty prompt is the service's to judge, so no prompt rule is added.
+      // No minLength in either schema.
       expect(s.properties.prompt.minLength).toBeUndefined()
     }
-    for (const e of GEMINI_OMNI_FLASH_ENDPOINTS) expect(PROMPT_MIN_LENGTH[`fal ${e}`], e).toBeUndefined()
+    // Controller ruling after F4: text-to-video refuses an empty prompt up front all the same
+    // (request-refusals.unit.spec.ts); image-to-video takes one.
+    expect(PROMPT_MIN_LENGTH[`fal ${GEMINI_OMNI_FLASH_TEXT_TO_VIDEO}`]).toMatchObject({ min: 1 })
+    expect(PROMPT_MIN_LENGTH[`fal ${GEMINI_OMNI_FLASH_IMAGE_TO_VIDEO}`]).toBeUndefined()
     expect(GEMINI_OMNI_FLASH_SECONDS.every(s => s >= 3 && s <= 10)).toBe(true)
     expect(GEMINI_OMNI_FLASH.defaultDuration).toBe(t2v.properties.duration.default)
   })

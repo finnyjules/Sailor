@@ -26,10 +26,11 @@ import {
 } from '~~/server/runner/generators/twins'
 import type { OutputFile } from '~~/server/runner/types'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
-import { NANO_BANANA_SHORT_PROMPT, PROMPT_MIN_LENGTH, SEEDANCE_REFERENCE_LIMITS, requestProblem } from '~~/server/runner/requestRules'
+import { NANO_BANANA_SHORT_PROMPT, PROMPT_MIN_LENGTH, PROMPT_MIN_LENGTH_RULINGS, SEEDANCE_REFERENCE_LIMITS, requestProblem } from '~~/server/runner/requestRules'
 import { WAN_3_ENDPOINTS } from '~~/server/runner/generators/wan3'
 import { H3_MAX_TURBO_ENDPOINTS } from '~~/server/runner/generators/h3MaxTurbo'
 import { GEMINI_OMNI_FLASH_ENDPOINTS } from '~~/server/runner/generators/geminiOmniFlash'
+import { VEO_31_LITE_ENDPOINTS } from '~~/server/runner/generators/veo31Lite'
 import { GPT_IMAGE_25_FAL_ENDPOINTS, GPT_IMAGE_25_REPLICATE_SLUGS } from '~~/server/runner/generators/gptImage25'
 
 const readJson = (rel: string) => JSON.parse(readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8'))
@@ -221,6 +222,8 @@ function runnerEndpoints(): string[] {
   for (const e of H3_MAX_TURBO_ENDPOINTS) out.add(`fal ${e}`)
   // Task F4: Gemini Omni Flash's two fal endpoints (geminiOmniFlash.ts; its payload grid is runner-gemini-omni-flash.unit.spec.ts).
   for (const e of GEMINI_OMNI_FLASH_ENDPOINTS) out.add(`fal ${e}`)
+  // Task F5: Veo 3.1 Lite's two fal endpoints (veo31Lite.ts; its payload grid is runner-veo-31-lite.unit.spec.ts).
+  for (const e of VEO_31_LITE_ENDPOINTS) out.add(`fal ${e}`)
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)
@@ -277,8 +280,19 @@ describe('refusals', () => {
     ])
   })
 
-  it('the prompt length rules are exactly the saved schemas\' prompt minLength', () => {
+  it('the prompt length rules are exactly the saved schemas\' prompt minLength, plus the controller\'s rulings', () => {
+    // Ruled rows: a saved schema without a minLength on that endpoint, the prompt required (controller ruling after F4).
+    expect(PROMPT_MIN_LENGTH_RULINGS).toEqual(['fal google/gemini-omni-flash'])
     const fromSchemas: Record<string, number> = {}
+    for (const key of PROMPT_MIN_LENGTH_RULINGS) {
+      const [provider, endpoint] = key.split(' ') as [Provider, string]
+      const f = schemaFor(provider, endpoint)
+      let input = f.input as Record<string, any>
+      while (input.$ref) input = f.components.schemas[String(input.$ref).split('/').pop()!] as Record<string, any>
+      expect(input.properties.prompt.minLength, key).toBeUndefined()
+      expect(input.required, key).toContain('prompt')
+      fromSchemas[key] = 1
+    }
     for (const e of savedEndpoints()) {
       const [provider, endpoint] = e.split(' ') as [Provider, string]
       const f = schemaFor(provider, endpoint)

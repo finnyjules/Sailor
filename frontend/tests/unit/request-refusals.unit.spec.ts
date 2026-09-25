@@ -16,7 +16,8 @@ import { isRunnerEligible } from '#shared/runner/eligibility'
 import { RUNNER_FAMILIES } from '#shared/runner/families'
 import { planNode } from '~~/server/runner/executors'
 import {
-  FIRST_FRAME_AND_REFERENCES, H3_SHORT_PROMPT, NANO_BANANA_SHORT_PROMPT, SEEDANCE_TOO_MUCH_SOUND, SEEDANCE_TOO_MUCH_VIDEO, SEEDANCE_UNMEASURED_REFERENCE, requestProblems,
+  FIRST_FRAME_AND_REFERENCES, GEMINI_OMNI_FLASH_NEEDS_PROMPT, H3_SHORT_PROMPT, NANO_BANANA_SHORT_PROMPT, SEEDANCE_TOO_MUCH_SOUND, SEEDANCE_TOO_MUCH_VIDEO,
+  SEEDANCE_UNMEASURED_REFERENCE, requestProblems,
 } from '~~/server/runner/requestRules'
 import { blockedPromptRefusal } from '~~/server/utils/blockedModels'
 import { seedanceReferenceSeconds } from '~~/server/utils/graphInputSeconds'
@@ -250,5 +251,78 @@ describe('a node refused at plan time, after the hold, is not charged (fix round
   it('a wired prompt never reaches the runner plan: the workflow is left to ComfyUI, so nothing is held by the runner', () => {
     const p: ApiPrompt = { ...img({ prompt: '', prompt_in: ['3', 0] }), 3: { class_type: 'IdeaNode', inputs: { text: 'x' } } }
     expect(isRunnerEligible(p, new Set(RUNNER_FAMILIES))).toBe(false)
+  })
+})
+
+describe('Film a shot on Seedance 2.0: a first frame beside references is refused at the /prompt gate (parked minor M5)', () => {
+  // Film a shot runs only on the ComfyUI path; its Python builder would send the
+  // first frame and drop the references without a word.
+  const shot = (inputs: Record<string, unknown>): ApiPrompt => ({
+    1: { class_type: 'FilmShotNode', inputs: { preset: 'slow_push_in', model: 'seedance-2.0', prompt: 'a wave', aspect_ratio: '16:9', duration: '5', seed: 0, model_options: '{}', ...inputs } },
+    2: { class_type: 'Video', inputs: { file: '', export: false, filename_prefix: 'v', source: ['1', 0] } },
+  })
+
+  it('a linked first frame, or `image_url`, beside reference pictures, videos or sounds: refused in plain words', () => {
+    for (const key of ['image_urls', 'video_urls', 'audio_urls']) {
+      for (const p of [
+        shot({ image: ['9', 0], model_options: refs(key, 1) }),
+        shot({ model_options: JSON.stringify({ image_url: 'https://x/f.png', [key]: ['https://x/r'] }) }),
+      ]) {
+        expect(requestProblems(p), key).toEqual([{ nodeId: '1', classType: 'FilmShotNode', input: 'model_options', message: FIRST_FRAME_AND_REFERENCES }])
+        expect(blockedPromptRefusal(p)!.error.message, key).toBe(FIRST_FRAME_AND_REFERENCES)
+        expect((blockedPromptRefusal(p)!.node_errors as any)[1].class_type).toBe('FilmShotNode')
+      }
+    }
+  })
+
+  it('still runs: a first frame alone (with a last frame), references alone, empty lists beside a frame, and other models', () => {
+    for (const p of [
+      shot({ image: ['9', 0] }),
+      shot({ model_options: JSON.stringify({ image_url: 'https://x/f.png', end_image_url: 'https://x/l.png' }) }),
+      shot({ model_options: refs('image_urls', 3) }),
+      shot({ image: ['9', 0], model_options: JSON.stringify({ image_urls: [], video_urls: [] }) }),
+      // Wired options can't be read before the run.
+      shot({ image: ['9', 0], model_options: ['5', 0] }),
+      // Not Seedance: not judged by this rule.
+      shot({ model: 'kling-v2.5-turbo-pro', image: ['9', 0], model_options: refs('image_urls', 1) }),
+    ]) {
+      expect(requestProblems(p)).toEqual([])
+      expect(blockedPromptRefusal(p)).toBeNull()
+    }
+  })
+
+  it('over-limit references are refused with Generate a video\'s words', () => {
+    expect(messages(shot({ model_options: refs('image_urls', 10) }))).toEqual(['Seedance 2.0 takes at most 9 reference pictures.'])
+  })
+})
+
+describe('Gemini Omni Flash text-to-video: an empty prompt is refused up front (controller ruling after F4)', () => {
+  const gem = (inputs: Record<string, unknown>) => vid({ model: 'gemini-omni-flash', duration: '4', ...inputs })
+
+  it('is refused before the run\'s hold and at the plan, in plain words; one character passes', async () => {
+    expect(GEMINI_OMNI_FLASH_NEEDS_PROMPT).toBe('Gemini Omni Flash needs a prompt. Describe the clip, or link a picture to start from it.')
+    expect(requestProblems(gem({ prompt: '' }))).toEqual([{ nodeId: '1', classType: 'GenerateVideoNode', input: 'prompt', message: GEMINI_OMNI_FLASH_NEEDS_PROMPT }])
+    // The /prompt gate refuses the node before this rule: the model is runner-only, so it never reaches ComfyUI.
+    expect(blockedPromptRefusal(gem({ prompt: '' }))).not.toBeNull()
+    await expect(plan(gem({ prompt: '' }))).rejects.toThrow(GEMINI_OMNI_FLASH_NEEDS_PROMPT)
+    expect(messages(gem({ prompt: 'a' }))).toEqual([])
+    await expect(plan(gem({ prompt: 'a' }))).resolves.toMatchObject({ kind: 'provider', endpoint: 'google/gemini-omni-flash' })
+
+    const k = makeKit({ hosted: true, deps: { families: () => new Set(RUNNER_FAMILIES) } })
+    await expect(k.engine.startRun({ userId: k.userId, takes: [gem({ prompt: '' })], workflow: null, canvasId: null, projectUuid: null, projectName: null }))
+      .rejects.toMatchObject({ statusCode: 400, message: GEMINI_OMNI_FLASH_NEEDS_PROMPT })
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    expect(k.fal.client.submit).not.toHaveBeenCalled()
+  })
+
+  it('image-to-video (a linked picture, or `image_url`) may have an empty prompt; a wired prompt or wired options are left to the run', async () => {
+    const withPicture = gem({ prompt: '', image: ['9', 0] })
+    expect(messages(withPicture)).toEqual([])
+    await expect(plan(withPicture)).resolves.toMatchObject({ kind: 'provider', endpoint: 'google/gemini-omni-flash/image-to-video' })
+    const fromOptions = gem({ prompt: '', model_options: JSON.stringify({ image_url: 'https://x/f.png' }) })
+    expect(messages(fromOptions)).toEqual([])
+    await expect(plan(fromOptions)).resolves.toMatchObject({ kind: 'provider', endpoint: 'google/gemini-omni-flash/image-to-video' })
+    expect(messages(gem({ prompt: ['5', 0] }))).toEqual([])
+    expect(messages(gem({ prompt: '', model_options: ['5', 0] }))).toEqual([])
   })
 })

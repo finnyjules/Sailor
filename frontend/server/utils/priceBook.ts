@@ -63,7 +63,10 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // lineup-f4 (Task F4): Gemini Omni Flash, fal's own per-second figure at 720p
 // (it bills tokens), $0.13/s (runner-only, family gemini-omni-flash). No other
 // price moves.
-export const PRICE_BOOK_VERSION = 'lineup-f4'
+// lineup-f5 (Task F5): Veo 3.1 Lite, fal per second by resolution and sound
+// ($0.05/s at 720p with sound; runner-only, family veo-3.1-lite). No other
+// price moves.
+export const PRICE_BOOK_VERSION = 'lineup-f5'
 
 export const BASE_RENDER_CREDITS = 1
 

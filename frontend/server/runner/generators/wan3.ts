@@ -70,7 +70,7 @@ export const WAN_3_TOO_MANY_REFERENCES = `Wan 3.0 takes at most ${WAN_3_MAX_REFE
 export const WAN_3_PICTURES_ONLY = 'Wan 3.0 takes reference pictures only for now, not reference videos or sounds.'
 export const WAN_3_PRIME_NEEDS_FIRST_FRAME = 'Wan 3.0 Prime needs a first frame: link a picture.'
 /** A first frame and references together (Wan 3.0 and Seedance 2.0): refused, never a silent drop. */
-export const FIRST_FRAME_AND_REFERENCES = 'Pick either a first frame or reference pictures, not both.'
+export const FIRST_FRAME_AND_REFERENCES = 'Pick either a first frame or references, not both.'
 
 export type Wan3Id = 'wan-3.0' | 'wan-3.0-prime'
 export type Wan3Mode = 'text' | 'image' | 'reference'
@@ -94,9 +94,11 @@ export function wan3HasAnyReferences(adv: Record<string, unknown>): boolean {
 /**
  * Shot Director's reference tags (`@Image1`, `@Video2`, `@Audio1`) as the
  * positional words Wan 3.0's schema reads ("the subject in Image 1").
+ * A tag inside a word or an email address ("me@Image1.com", "a.b@Video2")
+ * is left alone: the `@` must not follow a letter, digit, `_`, `.`, `+` or `-`.
  */
 export function wan3PromptTags(prompt: string): string {
-  return prompt.replace(/@(Image|Video|Audio)(\d+)/g, '$1 $2')
+  return prompt.replace(/(?<![\w.+-])@(Image|Video|Audio)(\d+)\b/g, '$1 $2')
 }
 
 /** Whether the options carry reference videos or sounds (a later task; refused). */

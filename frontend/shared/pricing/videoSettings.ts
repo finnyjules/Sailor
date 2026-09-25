@@ -5,7 +5,7 @@
  *
  * The price multiplies a rate by these, so it must never read a setting the
  * builder would send differently ("priced on what is sent"). The builders are
- * server/runner/generators/video.ts (fal and Replicate), wan3.ts (Wan 3.0), geminiOmniFlash.ts and twins.ts (the
+ * server/runner/generators/video.ts (fal and Replicate), wan3.ts (Wan 3.0), geminiOmniFlash.ts, veo31Lite.ts and twins.ts (the
  * first-service builders of Kling 3.0 and PixVerse v6, and the backups) and, for the one model
  * the runner does not build (Fabric), comfy_api_nodes/video_models.py. The
  * settings-parity test (tests/unit/video-pricing.unit.spec.ts) runs every
@@ -156,6 +156,8 @@ const RULES: Record<string, Rule> = {
   // veo31: durOr([4,6,8]), resolution default 720p, generate_audio default true.
   'veo-3.1': { durations: [4, 6, 8], defaultDuration: 8, resolution: resIn(['720p', '1080p', '4k'], '720p'), audio: audioOpt(true) },
   'veo-3.1-fast': { durations: [4, 6, 8], defaultDuration: 8, resolution: resIn(['720p', '1080p', '4k'], '720p'), audio: audioOpt(true) },
+  // veo31Lite.ts: veo31 on Lite's app, a resolution outside 720p/1080p (4k) sent as 720p.
+  'veo-3.1-lite': { durations: [4, 6, 8], defaultDuration: 8, resolution: resIn(['720p', '1080p'], '720p'), audio: audioOpt(true) },
   // flux3: durOr([5,10,15,20]), resolution 720p, generate_audio true.
   'flux-3': { durations: [5, 10, 15, 20], defaultDuration: 10, resolution: resIn(['720p', '1080p'], '720p'), audio: audioOpt(true) },
   // seedance20: sends generate_audio only when set; fal's default is true.
