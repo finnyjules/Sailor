@@ -1221,6 +1221,9 @@ const toolbarPos = computed(() => {
   const box = unionBox(selectedIds.value.map(graphBox).filter(Boolean) as Box[])
   return box ? toolbarAnchor(box, vfViewport.value) : null
 })
+// Same expression `selectionMenuItems()` uses to build `sel` for
+// `planFrameFromSelection` (Task 9 multi-select bar's Combine into Frame gate).
+const selectedNodesForPlan = computed(() => (nodes.value as any[]).filter((n: any) => selectedIds.value.includes(n.id)))
 // `sailor:openNodeEdit` { nodeId } — select that node and open its Edit ▾ (the
 // fixes badge uses this).
 async function handleOpenNodeEdit(e: Event) {
@@ -8210,8 +8213,13 @@ defineExpose({
     <NodeActionToolbar
       v-if="toolbarPos && (toolbarCtx || selectedIds.length > 1)"
       ref="toolbarRef"
-      :ctx="toolbarCtx" :multi-ids="[]" :can-combine="false"
+      :ctx="toolbarCtx"
+      :multi-ids="selectedIds.length > 1 ? selectedIds : []"
+      :can-combine="selectedIds.length > 1 && planFrameFromSelection(selectedNodesForPlan).canCombine"
       :left="toolbarPos.left" :top="toolbarPos.top" :placement="toolbarPos.placement"
+      @run-selection="emitRunFiltered(selectedIds)"
+      @group="actionGroupSelection()"
+      @combine="combineIntoFrame(selectedIds)"
     />
 
     <VueFlow

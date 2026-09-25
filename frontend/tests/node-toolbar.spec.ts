@@ -109,4 +109,31 @@ test.describe('Node toolbar', () => {
     await expect(menu).toHaveCount(0)
     await expect(bar).toBeVisible()
   })
+
+  test('multi-select bar: Run N shows for two nodes, Group creates a group', async ({ page }) => {
+    // Two GradientStudio nodes (frontend-only, no /object_info dependency) —
+    // dropNode is simpler than mocking an agent plan for this.
+    await dropNode(page, 'GradientStudio')
+    await dropNode(page, 'GradientStudio')
+    const gradientNodes = page.locator('.vue-flow__node-gradient-studio')
+    await expect(gradientNodes).toHaveCount(2)
+
+    // Both land at the same viewport-center spawn point, so a shift-click would
+    // only ever hit the topmost one — draw a rubber-band box around them
+    // instead (the canvas defaults to select mode: panOnDrag=false,
+    // selectionKeyCode=true, so a plain drag on the pane draws the box).
+    const bb = (await gradientNodes.first().boundingBox())!
+    await page.mouse.move(bb.x - 60, bb.y - 60)
+    await page.mouse.down()
+    await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2, { steps: 5 })
+    await page.mouse.move(bb.x + bb.width + 60, bb.y + bb.height + 60, { steps: 5 })
+    await page.mouse.up()
+
+    const bar = toolbar(page)
+    await expect(bar).toBeVisible()
+    await expect(bar.getByRole('button', { name: 'Run 2 nodes' })).toBeVisible()
+
+    await bar.getByRole('button', { name: 'Group' }).click()
+    await expect(page.locator('.canvas-group')).toHaveCount(1)
+  })
 })

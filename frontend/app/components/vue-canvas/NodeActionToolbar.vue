@@ -6,8 +6,9 @@
 // computes `left`/`top` in pane pixels from the node box and the viewport
 // (toolbarAnchor.ts), so it stays the same size on screen at any zoom.
 //
-// Multi-select props (`multiIds`, `canCombine`, the emits) are declared for
-// Task 9; until then the canvas passes `multiIds=[]` and only single mode renders.
+// Multi mode (Task 9): when `multiIds.length > 1` the bar shows three plain
+// buttons instead — Run N / Group / Combine into Frame (only when
+// `canCombine`) — with no dropdowns and no ✦, since none of these is AI.
 import { ChevronDown } from 'lucide-vue-next'
 import { onClickOutside } from '@vueuse/core'
 import { actionsFor, landsHint, type NodeAction, type NodeActionCtx } from '~/lib/canvas/nodeActions'
@@ -22,7 +23,7 @@ const props = defineProps<{
   placement: 'above' | 'below'
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   runSelection: []
   group: []
   combine: []
@@ -33,6 +34,7 @@ type Which = 'edit' | 'develop'
 const nextSteps = useNextStepsStrip()
 
 const single = computed(() => !!props.ctx && props.multiIds.length === 0)
+const multi = computed(() => props.multiIds.length > 1)
 const groups = computed(() => (props.ctx ? actionsFor(props.ctx) : { edit: [], develop: [] }))
 const fixes = computed<FixChip[]>(() => (props.ctx ? nextSteps.fixesFor(props.ctx.nodeId) : []))
 const showEdit = computed(() => groups.value.edit.length > 0 || fixes.value.length > 0)
@@ -121,7 +123,47 @@ defineExpose({ openMenu })
 
 <template>
   <div
-    v-if="single && (showEdit || showDevelop)"
+    v-if="multi"
+    ref="barRef"
+    class="node-action-toolbar nopan nodrag pointer-events-auto absolute z-40 flex items-center gap-0.5 rounded-[10px] border border-[#2a2a2a] bg-[#1a1a1a] p-0.5 shadow-lg"
+    :style="{
+      left: left + 'px',
+      top: top + 'px',
+      transform: placement === 'above' ? 'translate(-50%, -100%)' : 'translate(-50%, 0)',
+    }"
+    role="toolbar"
+    aria-label="Node actions"
+    @pointerdown.stop
+    @dblclick.stop
+    @contextmenu.stop
+  >
+    <button
+      type="button"
+      class="toolbar-btn"
+      :aria-label="`Run ${multiIds.length} nodes`"
+      @click.stop="emit('runSelection')"
+    >
+      Run {{ multiIds.length }}
+    </button>
+    <button
+      type="button"
+      class="toolbar-btn"
+      @click.stop="emit('group')"
+    >
+      Group
+    </button>
+    <button
+      v-if="canCombine"
+      type="button"
+      class="toolbar-btn"
+      @click.stop="emit('combine')"
+    >
+      Combine into Frame
+    </button>
+  </div>
+
+  <div
+    v-else-if="single && (showEdit || showDevelop)"
     ref="barRef"
     class="node-action-toolbar nopan nodrag pointer-events-auto absolute z-40 flex items-center gap-0.5 rounded-[10px] border border-[#2a2a2a] bg-[#1a1a1a] p-0.5 shadow-lg"
     :style="{
