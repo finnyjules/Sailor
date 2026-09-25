@@ -38,11 +38,13 @@ export function createShapeLayer(shape: LibraryShape, o: CreateShapeLayerOpts = 
   }
 }
 
-/** Same layer, new shape: layout and paint kept, geometry regenerated at the current ink width. */
+/** Same layer, new shape: layout and paint kept, geometry regenerated at the current ink width.
+ *  Replaces `d`, so a `sketch` from the shared pen (`PathLayer.sketch`) would go stale — dropped
+ *  explicitly rather than left to rot, per the invariant on `PathLayer.sketch`. */
 export function swapShapeLayer(layer: PathLayer, shape: LibraryShape): PathLayer {
   // A persisted layer with a zero/NaN bbox (e.g. hand-edited JSON) falls back to the
   // default width instead of feeding shapeGeometry a non-positive targetWidth, which
   // would otherwise throw or produce degenerate geometry.
   const g = shapeGeometry(shape, layer.bbox.w > 0 ? layer.bbox.w : SHAPE_LAYER_DEFAULT_WIDTH)
-  return { ...layer, d: g.d, bbox: g.bbox, fillRule: shape.fillRule, shapeId: shape.id }
+  return { ...layer, d: g.d, bbox: g.bbox, fillRule: shape.fillRule, shapeId: shape.id, sketch: undefined }
 }

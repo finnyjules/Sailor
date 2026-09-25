@@ -630,6 +630,15 @@ export interface PathLayer extends LayerCommon, StrokeStyleFields {
    *  layer through createPathLayer, which never sets it — so hand-edited geometry
    *  drops the id by construction. */
   shapeId?: string
+  /** The pen's drawing, when this layer's outline came from the shared pen
+   *  (`app/lib/sketch/*`) rather than the library, an import or a boolean op.
+   *  INVARIANT: whenever this is present, `d === sketchToLocalD(sketch)` (see
+   *  `penFrame.ts`) — anything that writes a new `d` into an existing layer
+   *  without going through the pen must drop `sketch` rather than let it go
+   *  stale (`swapShapeLayer` does; node editing and every other writer either
+   *  build a fresh layer or copy the whole one, so they never see this field).
+   *  The `sketch/model` dependency here is type-only (erased at build). */
+  sketch?: import('~/lib/sketch/model').SketchDoc
 }
 
 export interface LineLayer extends LayerCommon {
