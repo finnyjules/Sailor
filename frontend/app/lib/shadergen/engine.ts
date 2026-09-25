@@ -1,13 +1,15 @@
 /**
- * The shader-generation engine (AI in Sailor spec §7.2). Four takes run in
- * parallel, one per take angle. Each take: model reply → parse → static checks →
- * compile (repair up to twice with the compiler's error) → render checks
- * (regenerate once, naming the flags) → done. A static failure or an unreadable
- * reply is sent back once; a failed model call ends the take (no retry, so a
- * rate-limit storm doesn't multiply spend). Then one visual review of all
- * survivors; each rejected take is regenerated once. A lost graphics context
- * aborts the whole request. The renderer and the model are injected, so this
- * file never touches WebGL or the network.
+ * The shader-generation engine (AI in Sailor spec §7.2). Takes run in parallel,
+ * one per take angle — the product always asks for three (`input.count`); the
+ * default of four is the evaluation page's. Each take: model reply → parse →
+ * static checks → compile (repair up to twice with the compiler's error) →
+ * render checks (regenerate once, naming the flags) → done. A static failure or
+ * an unreadable reply is sent back once; a failed model call ends the take (no
+ * retry, so a rate-limit storm doesn't multiply spend). An optional visual
+ * review of the survivors (`deps.review`, evaluation only — the product runs
+ * none) regenerates each rejected take once. A lost graphics context aborts the
+ * whole request. The renderer and the model are injected, so this file never
+ * touches WebGL or the network.
  */
 import type { GenTake } from '~~/shared/shadergen/contract'
 import { staticCheck } from './staticCheck'
@@ -201,6 +203,8 @@ export async function generateTakes(input: EngineInput, deps: EngineDeps): Promi
   const count = input.count ?? 4
   const usage: Usage = { input_tokens: 0, output_tokens: 0 }
 
+  // Tells the caller as each slot settles. Under `deps.review` (evaluation only) a rejected
+  // slot is regenerated and reported again, so `onTake`/`onFailure` may fire twice for one slot.
   const report = (r: EngineTake | EngineFailure, slot: number) => {
     if (isTake(r)) deps.onTake?.(r, slot)
     else deps.onFailure?.(slot)

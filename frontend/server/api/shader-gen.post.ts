@@ -1,7 +1,7 @@
 /**
  * Writes ONE shader take (AI in Sailor spec §7.2). The browser engine calls this
  * three times in parallel (the shader-generation setting) plus repair calls,
- * then compiles, checks and reviews the results itself. Returns the raw JSON
+ * then compiles and checks the results itself. Returns the raw JSON
  * text, token usage (so the evaluation page can report cost), the stop reason,
  * and the credits charged for the call (null in local mode).
  */

@@ -14,6 +14,9 @@
  *
  * A guard in price-graph.unit.spec.ts fails if the markup is re-implemented
  * anywhere outside frontend/shared/pricing/.
+ *
+ * Model calls metered by the token (Anthropic) use their own flat markup instead:
+ * `anthropicCallCredits` in shared/pricing/anthropicTokens.ts.
  */
 export function creditsForUsd(usd: number): number {
   if (!(usd > 0)) return 0
