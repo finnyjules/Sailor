@@ -300,14 +300,14 @@ import type {
   TornEdgeEffect, FeatherEffect, LayerEffect, EffectInstance, EffectKind, WarpEffect,
   ShaderPixelEffect, BackdropShaderEffect, BackdropLuminanceMaskEffect,
   RisographEffect, PhotocopyEffect, LetterpressEffect,
-  GoldFoilEffect, SpotUvEffect,
+  SpotUvEffect,
 } from '~/lib/compositor/effectStack'
 export type {
   DropShadowEffect, LayerBlurEffect, InnerShadowEffect, BackgroundBlurEffect,
   TornEdgeEffect, FeatherEffect, LayerEffect, EffectInstance, EffectKind,
   ShaderPixelEffect, BackdropShaderEffect, BackdropLuminanceMaskEffect,
   RisographEffect, PhotocopyEffect, LetterpressEffect,
-  GoldFoilEffect, SpotUvEffect,
+  SpotUvEffect,
 }
 export type { AdjustEffect, BloomEffect, DofEffect, DuotoneEffect, GradientMapEffect, GrainEffect, PostEffect, VignetteEffect }
 
@@ -3237,7 +3237,7 @@ function paintLayer(
               // No WebGL2 ⇒ applyFinish returns false and off stays the plain layer (the inspector
               // says why). Needs its own case: applyPasses silently skips unknown kinds.
               case 'spot_uv':
-                applyFinish(off, e.type, e as unknown as GoldFoilEffect | SpotUvEffect, _frameLight, s); break
+                applyFinish(off, e.type, e as unknown as SpotUvEffect, _frameLight, s); break
               default:
                 applyPasses(off, [e], { W, scale: s })
             }
@@ -5898,7 +5898,7 @@ export function layerPaints(layer: LocalLayer): Paint[] {
 /** True when any of the layer's paints — its `layerPaints` slots OR any stroke-stack entry —
  *  is foil. Foil is lit by the Frame's light across the whole frame, so a raster of it is
  *  never a stable, box-local thing to bake (see `silhouetteCacheable`). */
-function layerHasFoil(layer: LocalLayer): boolean {
+export function layerHasFoil(layer: LocalLayer): boolean {
   if (layerPaints(layer).some(p => isFoilFill(p))) return true
   return strokeStackOf(layer as unknown as Parameters<typeof strokeStackOf>[0]).some(st => isFoilFill(st.paint))
 }

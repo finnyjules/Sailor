@@ -11,7 +11,7 @@ describe('finish shaders', () => {
     }
   })
   it('declare every uniform their builders send', () => {
-    for (const k of Object.keys(foilUniforms({ metal: 'gold', brushed: 0.5, pressed: 0.5 }, light, 100, 125, 2))) expect(FOIL_FRAG).toContain(k)
+    for (const k of Object.keys(foilUniforms({ metal: 'gold', brushed: 0.5, pressed: 0.5, grain: 0 }, light, 100, 125, 2))) expect(FOIL_FRAG).toContain(k)
     for (const k of Object.keys(spotUvUniforms({ gloss: 0.75, raised: 0.5, varnishOnly: false }, light, 100, 125, 2))) expect(SPOT_UV_FRAG).toContain(k)
   })
   it('never use a descending smoothstep (undefined in GLSL ES 3.00)', () => {
@@ -28,18 +28,18 @@ describe('finish shaders', () => {
 
 describe('foilUniforms', () => {
   it('sends the metal ramp as four vec3s, dark to bright', () => {
-    const u = foilUniforms({ metal: 'gold', brushed: 0.5, pressed: 0.5 }, light, 100, 125, 2) as any
+    const u = foilUniforms({ metal: 'gold', brushed: 0.5, pressed: 0.5, grain: 0 }, light, 100, 125, 2) as any
     expect(u.uM0.vec3).toEqual([0x24 / 255, 0x15 / 255, 0x03 / 255])
     expect(u.uM3.vec3).toEqual([1, 0xf1 / 255, 0xc6 / 255])
   })
   it('sends the light in world space with y up, and the Frame aspect', () => {
-    const u = foilUniforms({ metal: 'gold', brushed: 0, pressed: 0 }, { x: 0.5, y: 0, height: 0 }, 100, 125, 2) as any
+    const u = foilUniforms({ metal: 'gold', brushed: 0, pressed: 0, grain: 0 }, { x: 0.5, y: 0, height: 0 }, 100, 125, 2) as any
     expect(u.uAspect).toBeCloseTo(1.25)
     expect(u.uLight.vec3[1]).toBeCloseTo(0.625)
     expect(u.uScale).toBe(2)
   })
   it('clamps dials to 0..1', () => {
-    const u = foilUniforms({ metal: 'silver', brushed: 5, pressed: -1 }, light, 100, 100, 1) as any
+    const u = foilUniforms({ metal: 'silver', brushed: 5, pressed: -1, grain: 0 }, light, 100, 100, 1) as any
     expect(u.uBrushed).toBe(1); expect(u.uPressed).toBe(0)
   })
   it('sends grain clamped to 0..1', () => {
@@ -50,7 +50,7 @@ describe('foilUniforms', () => {
     const u3 = foilUniforms({ metal: 'gold', brushed: 0.5, pressed: 0.5, grain: 0.4 }, light, 100, 100, 1) as any
     expect(u3.uGrain).toBe(0.4)
   })
-  it('defaults grain to 0 when absent (the retiring GoldFoilEffect never had one — "absent means unchanged")', () => {
+  it('reads a malformed stored foil with no grain as grain 0', () => {
     const u = foilUniforms({ metal: 'gold', brushed: 0.5, pressed: 0.5 } as any, light, 100, 100, 1) as any
     expect(u.uGrain).toBe(0)
   })

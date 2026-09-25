@@ -17,7 +17,6 @@ import { DEFAULT_TORN_EDGE, tornEdgeActive, type TornEdgeSpec } from './tornEdge
 import { DEFAULT_FEATHER, featherActive, type FeatherSpec } from './feather'
 import { POST_EFFECT_DEFAULTS, type PostEffect } from './postEffects'
 import type { ParamValue } from '~/lib/shaderfx/types'
-import type { FoilMetal } from './finishPass'
 
 // ── the four layer-local effects (moved verbatim from useCompositorLayers.ts) ──────────
 // All distances normalized to canvas width, like every other dimension in the Compositor,
@@ -172,7 +171,7 @@ export interface PhotocopyEffect   { type: 'photocopy';   visible: boolean; thre
 export interface LetterpressEffect { type: 'letterpress'; visible: boolean; depth: number; ink: string; paper: number }
 
 // ── Print finishes: lit by the Frame's one light (frameLight.ts); the layer is the mask ──
-export interface GoldFoilEffect { type: 'gold_foil'; visible: boolean; metal: FoilMetal; brushed: number; pressed: number }
+// (Gold foil was an effect here until 2026-09-25; it is now a fill — `FoilFill` in paint.ts.)
 export interface SpotUvEffect   { type: 'spot_uv';   visible: boolean; gloss: number; raised: number; varnishOnly: boolean }
 
 export type LayerEffect =
@@ -183,7 +182,7 @@ export type LayerEffect =
   | TrimEffect | OffsetEffect | RoundCornersEffect | RoughenEffect | BooleanEffect | MorphEffect | WarpEffect | LongShadowEffect | ShatterEffect
   | ShaderPixelEffect
   | RisographEffect | PhotocopyEffect | LetterpressEffect
-  | GoldFoilEffect | SpotUvEffect
+  | SpotUvEffect
   | PostEffect
 
 /** A stored effect, addressed by a stable id. */
@@ -200,7 +199,7 @@ export const EFFECT_ORDER = [
   'background_blur', 'backdrop_shader', 'backdrop_luminance_mask', 'dof', 'trim', 'offset', 'round_corners', 'roughen', 'boolean', 'morph', 'warp', 'shatter', 'long_shadow', 'inner_shadow', 'inner_glow', 'diffused_edge',
   'adjust', 'levels', 'posterise', 'threshold', 'invert', 'duotone', 'gradientMap', 'color_overlay', 'gradient_overlay', 'stroke_from_alpha', 'shader',
   'bloom', 'halation', 'vignette', 'grain', 'torn_edge', 'feather', 'rough_edge', 'ink_bleed', 'risograph', 'photocopy', 'letterpress',
-  'gold_foil', 'spot_uv',
+  'spot_uv',
   'directional_blur', 'radial_blur', 'zoom_blur', 'layer_blur', 'outer_glow', 'drop_shadow',
 ] as const satisfies readonly EffectKind[]
 
@@ -283,7 +282,6 @@ export const EFFECT_LABELS: Record<EffectKind, string> = {
   risograph: 'Risograph',
   photocopy: 'Photocopy',
   letterpress: 'Letterpress',
-  gold_foil: 'Gold foil',
   spot_uv: 'Spot UV',
   layer_blur: 'Layer blur',
   drop_shadow: 'Drop shadow',
@@ -347,7 +345,6 @@ const LOCAL_DEFAULTS: Record<string, Omit<LayerEffect, 'type'> & Record<string, 
   photocopy:   { threshold: 0.5, dirt: 0.2, contrast: 1.4, visible: true },
   letterpress: { depth: 0.5, ink: '#2a2a2a', paper: 0.3, visible: true },
   // Print finishes: the Finish proofs prototype's opening look.
-  gold_foil: { metal: 'gold', brushed: 0.5, pressed: 0.5, visible: true },
   spot_uv:   { gloss: 0.75, raised: 0.5, varnishOnly: false, visible: true },
 }
 

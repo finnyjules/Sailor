@@ -138,7 +138,7 @@ describe('applyFinish', () => {
     const off = document.createElement('canvas') as unknown as FakeCanvas
     off.width = 40; off.height = 30
     stub.uploads.length = 0
-    const ok = f.applyFinish(off as unknown as HTMLCanvasElement, 'gold_foil', { metal: 'gold', brushed: 0.5, pressed: 0.5 }, { x: 0.2, y: 0.1, height: 0.6 }, 1)
+    const ok = f.applyFinish(off as unknown as HTMLCanvasElement, 'gold_foil', { metal: 'gold', brushed: 0.5, pressed: 0.5, grain: 0.4 }, { x: 0.2, y: 0.1, height: 0.6 }, 1)
     expect(ok).toBe(true)
     expect(stub.uploads.filter(u => u === off).length).toBe(1)
     const depth = stub.uploads.find(u => u !== off) as FakeCanvas

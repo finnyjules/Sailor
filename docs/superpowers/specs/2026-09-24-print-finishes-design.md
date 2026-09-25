@@ -277,3 +277,20 @@ Divergences from the design above, ratified at the final review (2026-09-24):
 - **Motion bake and browser video export carry the placed light**, as do queued graph runs (see the
   export inventory in Findings).
 
+**2026-09-25 — Gold foil is a fill, not an effect.** This supersedes the design above wherever it
+treats Gold foil as a per-layer effect.
+
+- **Foil is a paint** (`FoilFill = { type: 'foil'; metal; brushed; pressed; grain }`), picked in
+  the Frame's fill picker as "Foil", right after Holographic. It works as a shape fill, a text
+  colour and an outline paint. Only the Frame offers it (`FillControl`'s `allowFoil`); Space
+  Type, Shape Studio, Vector Type and the Frame background do not.
+- **Why:** in print, foil is chosen *instead of* ink. Picking it is choosing what the letters are
+  made of, so it belongs where colour is chosen. Spot UV stays an effect, because it coats what is
+  already printed.
+- **Grain:** a new dial, "Grain", 0 to 1, default 0.4. The user asked for more grain; the probe
+  sheet showed 0 / 0.4 / 0.7 / 1, and 0.4 was ruled the default (one constant to change).
+- **The `gold_foil` effect kind is removed.** It landed on 2026-09-24, so no saved Frame holds
+  it; nothing is migrated. A stored effect of an unknown kind is dropped when the stack is read.
+- **The light handle** shows while a Spot UV effect is selected, or while the selected layer has
+  foil in any fill or outline. The foil picker carries the same light presets.
+

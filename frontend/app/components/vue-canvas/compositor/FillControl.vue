@@ -25,6 +25,10 @@ import ShapePicker from '~/components/vue-canvas/studio/ShapePicker.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
 import { shapeById } from '~/lib/shapes/catalog'
+import FinishLightControl from '~/components/vue-canvas/compositor/FinishLightControl.vue'
+import { type FoilFill, DEFAULT_FOIL_FILL, isFoilFill } from '~/lib/compositor/paint'
+import { METALS, METAL_LABELS, finishUnavailableReason, type FoilMetal } from '~/lib/compositor/finishPass'
+import type { FrameLight } from '~/lib/compositor/frameLight'
 import { anchorAbove } from '~/lib/shapes/pickerLayout'
 
 const props = withDefaults(defineProps<{
@@ -45,8 +49,15 @@ const props = withDefaults(defineProps<{
   /** Pass-through to ShaderFillEditor's own `otherLayers` (see its doc) — the candidate
    *  list for its "A specific layer" picker. Only meaningful alongside `allowReadsBackdrop`. */
   otherLayers?: { key: string; label: string }[]
-}>(), { allowNone: false, nested: false, allowImage: false, allowReadsBackdrop: false, otherLayers: () => [] })
-const emit = defineEmits<{ 'update:modelValue': [Paint] }>()
+  /** Offer Foil (a print-finish paint, lit by the Frame's light). Frame-only: only the
+   *  Compositor passes it, on its layer fill / text colour / outline pickers — never the
+   *  background, and never Space Type, Shape Studio or Vector Type. */
+  allowFoil?: boolean
+  /** The Frame's one light, shown by the Foil panel's light control. Changes go back out
+   *  as `update:light`; the host owns the light. */
+  light?: FrameLight
+}>(), { allowNone: false, nested: false, allowImage: false, allowReadsBackdrop: false, otherLayers: () => [], allowFoil: false })
+const emit = defineEmits<{ 'update:modelValue': [Paint]; 'update:light': [FrameLight] }>()
 
 /** The type list this instance offers. `nested` is set on the fill editor that
  *  ShaderFillEditor mounts for `spec.input` — excluding 'shader' there is the
@@ -89,16 +100,31 @@ const fill = reactive<Fill>(toFill(props.modelValue))
 const grad = ref<Gradient>(toGrad(props.modelValue, fill))
 watch(() => props.modelValue, (v) => { Object.assign(fill, toFill(v)); grad.value = toGrad(v, fill); drawPreview() })
 
-// The type dropdown offers synthetic 'image' and 'holographic' entries on top of the
+// The type dropdown offers synthetic 'image', 'holographic' and 'foil' entries on top of the
 // Fill types. 'holographic' is a PRESET (see HOLOGRAPHIC_FILL_PRESET's doc in fillTile.ts),
-// not a FILL_TYPES member — picking it assigns a whole `shader` fill in one step.
-type UiType = FillType | 'image' | 'holographic'
+// not a FILL_TYPES member — picking it assigns a whole `shader` fill in one step. 'foil' is
+// its own Paint (`FoilFill`, paint.ts), offered only behind `allowFoil`.
+type UiType = FillType | 'image' | 'holographic' | 'foil'
 const imageFill = ref<ImageFill | null>(isImageFill(props.modelValue) ? { ...props.modelValue } : null)
 const pickerOpen = ref(false)
 const currentType = computed<UiType>(() => {
   if (isImageFill(props.modelValue)) return 'image'
+  if (isFoilFill(props.modelValue)) return 'foil'
   return fillPickerType(fill)
 })
+/** Option text for the type dropdown — the synthetic 'foil' reads as its label, the rest
+ *  keep the existing `capitalize` treatment of their type name. */
+const uiTypeLabel = (t: UiType) => (t === 'foil' ? 'Foil' : t)
+
+// ── Foil: metal + three dials, each edit emits the whole FoilFill ──
+const foil = computed<FoilFill | null>(() => (isFoilFill(props.modelValue) ? props.modelValue : null))
+const METAL_KEYS = Object.keys(METALS) as FoilMetal[]
+/** No WebGL 2 ⇒ foil paints as flat mid-metal; say why, the way the finish effects did. */
+const foilUnavailable = computed(() => (foil.value ? finishUnavailableReason('gold_foil') : ''))
+const METAL_OPTION_LABELS = METAL_KEYS.map(k => METAL_LABELS[k])
+function pushFoil(patch: Partial<Omit<FoilFill, 'type'>>) {
+  emit('update:modelValue', { ...structuredClone(DEFAULT_FOIL_FILL), ...foil.value, ...patch, type: 'foil' })
+}
 
 watch(() => props.modelValue, (v) => {
   if (isImageFill(v)) { imageFill.value = { ...v }; pickerOpen.value = false }
@@ -108,6 +134,11 @@ function setUiType(t: UiType) {
   if (t === 'image') {
     if (!imageFill.value) { imageFill.value = { type: 'image', src: '', fit: 'cover', scale: 1, offset: { x: 0, y: 0 } }; pickerOpen.value = true }
     emit('update:modelValue', { ...imageFill.value })
+    return
+  }
+  if (t === 'foil') {
+    imageFill.value = null
+    emit('update:modelValue', structuredClone(DEFAULT_FOIL_FILL))
     return
   }
   if (t === 'holographic') {
@@ -138,7 +169,7 @@ function onPick(src: string) { pickerOpen.value = false; pushImage({ src }) }
 const uiTypes = computed<UiType[]>(() => {
   // 'holographic' is a shader fill under the hood (see setUiType/currentType), so it
   // gets the same depth-1 nesting exclusion as 'shader' itself in availableTypes.
-  const types: UiType[] = props.nested ? [...availableTypes.value] : [...availableTypes.value, 'holographic']
+  const types: UiType[] = props.nested ? [...availableTypes.value] : [...availableTypes.value, 'holographic', ...(props.allowFoil ? ['foil' as const] : [])]
   return (props.allowImage && !props.nested) ? [...types, 'image'] : types
 })
 
@@ -283,6 +314,11 @@ function drawPreview() {
     }
     return
   }
+  if (foil.value) {
+    // The swatch shows the flat mid-metal — the same colour the no-WebGL fallback paints.
+    ctx.fillStyle = (METALS[foil.value.metal] ?? METALS.gold)[2]; ctx.fillRect(0, 0, cv.width, cv.height)
+    return
+  }
   if (isNone.value) {
     ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1
     ctx.beginPath(); ctx.moveTo(1, cv.height - 1); ctx.lineTo(cv.width - 1, 1); ctx.stroke()
@@ -295,6 +331,7 @@ onMounted(drawPreview)
 watch(fill, drawPreview, { deep: true })
 watch(grad, drawPreview, { deep: true })
 watch(imageFill, drawPreview, { deep: true })
+watch(foil, drawPreview, { deep: true })
 </script>
 
 <template>
@@ -327,7 +364,7 @@ watch(imageFill, drawPreview, { deep: true })
 
       <select :value="currentType" class="w-full rounded bg-white/10 px-2 py-1.5 text-xs text-white/90 outline-none capitalize cursor-pointer"
         @change="setUiType(($event.target as HTMLSelectElement).value as any)">
-        <option v-for="t in uiTypes" :key="t" :value="t">{{ t }}</option>
+        <option v-for="t in uiTypes" :key="t" :value="t">{{ uiTypeLabel(t) }}</option>
       </select>
 
       <template v-if="currentType === 'image'">
@@ -349,6 +386,25 @@ watch(imageFill, drawPreview, { deep: true })
           <StudioSlider label="Offset Y" :model-value="imageFill.offset?.y ?? 0" :min="-0.5" :max="0.5" :step="0.01" :default="0"
             @update:model-value="(v: number) => pushImage({ offset: { x: imageFill?.offset?.x ?? 0, y: v } })" />
         </template>
+      </template>
+
+      <template v-else-if="currentType === 'foil' && foil">
+        <div class="space-y-2.5" data-testid="foil-fill-controls">
+          <p class="text-[11px] text-white/45">Metal foil stamped into the card. It catches the Frame's light.</p>
+          <p v-if="foilUnavailable" class="text-xs text-amber-300/80">{{ foilUnavailable }}</p>
+          <div>
+            <div class="panel-sublabel mb-1">Metal</div>
+            <StudioSegmented data-testid="foil-metal" :model-value="foil.metal" :options="METAL_KEYS" :option-labels="METAL_OPTION_LABELS"
+              @update:model-value="(v: string) => pushFoil({ metal: v as FoilMetal })" />
+          </div>
+          <StudioSlider data-testid="foil-brushed" label="Brushed" :model-value="foil.brushed" :min="0" :max="1" :step="0.01" :default="DEFAULT_FOIL_FILL.brushed"
+            @update:model-value="(v: number) => pushFoil({ brushed: v })" />
+          <StudioSlider data-testid="foil-pressed" label="Pressed in" :model-value="foil.pressed" :min="0" :max="1" :step="0.01" :default="DEFAULT_FOIL_FILL.pressed"
+            @update:model-value="(v: number) => pushFoil({ pressed: v })" />
+          <StudioSlider data-testid="foil-grain" label="Grain" :model-value="foil.grain" :min="0" :max="1" :step="0.01" :default="DEFAULT_FOIL_FILL.grain"
+            @update:model-value="(v: number) => pushFoil({ grain: v })" />
+          <FinishLightControl v-if="light" :light="light" @update="(l: FrameLight) => emit('update:light', l)" />
+        </div>
       </template>
 
       <GradientEditor v-else-if="fill.type === 'gradient'" :model-value="grad" @update:model-value="onGrad" />

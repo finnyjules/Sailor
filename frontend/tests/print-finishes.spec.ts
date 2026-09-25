@@ -2,17 +2,19 @@ import { test, expect, type Page } from '@playwright/test'
 import { openCompositor, stackPixels, setStudioRow } from './_helpers'
 
 /**
- * Print finishes Plan A — browser verification (Task 8).
+ * Print finishes — browser verification.
  *
- * Seeds a Frame with a Gold foil text layer, a Spot UV layer, a varnish-only Spot UV
- * layer and document Halation, then checks the things a screenshot can't prove on its
- * own: the light preset actually moves the highlight, the on-canvas handle only shows
- * while a finish effect is selected, a drag + one undo round-trips cleanly, and Halation
+ * Seeds a Frame with a foil text layer (foil is a FILL since 2026-09-25: the text's `color`
+ * is a `FoilFill`), a Spot UV layer, a varnish-only Spot UV layer and document Halation,
+ * then checks the things a screenshot can't prove on its own: the light preset actually
+ * moves the highlight, the on-canvas handle only shows while the selected layer has foil
+ * or a Spot UV effect is selected, a drag + one undo round-trips cleanly, and Halation
  * changes the composite. A `cost` describe block times a synchronous paint of three foils on a
  * Frame — see its own comment for why it doesn't assert a hard threshold.
  */
 
-const SHOTS_DIR = '/private/tmp/claude-501/-Users-julien-Documents-GitHub-Sailor/2ba127bf-7c10-49a0-baf2-54531bd87c59/scratchpad/finish-shots'
+const SHOTS_DIR = '/private/tmp/claude-501/-Users-julien-Documents-GitHub-Sailor/2ba127bf-7c10-49a0-baf2-54531bd87c59/scratchpad/foil-fill-shots'
+const FOIL = { type: 'foil', metal: 'gold', brushed: 0.5, pressed: 0.5, grain: 0.4 }
 
 async function colorAt(page: Page, nx: number, ny: number) {
   return page.evaluate(([x, y]) => {
@@ -25,10 +27,10 @@ async function colorAt(page: Page, nx: number, ny: number) {
 
 /** Seeds: a dark-green background rect inset from the edges (so a canvas corner stays
  *  empty — clicking it deselects, the way `compositor-post-effects.spec.ts` does), a big
- *  serif "GOLD" text layer carrying `gold_foil`, an ellipse carrying `spot_uv`, and a
- *  stroked ring ellipse carrying `spot_uv` + `varnishOnly`. */
+ *  serif "GOLD" text layer whose colour is a gold foil fill, an ellipse carrying `spot_uv`,
+ *  and a stroked ring ellipse carrying `spot_uv` + `varnishOnly`. */
 async function seedFinishScene(page: Page): Promise<void> {
-  await page.evaluate(() => {
+  await page.evaluate((foil) => {
     const layers = [
       {
         id: 'bg', kind: 'rect', x: 0.5, y: 0.5, w: 0.96, h: 0.96, radius: 0.01,
@@ -36,9 +38,8 @@ async function seedFinishScene(page: Page): Promise<void> {
       },
       {
         id: 'foil', kind: 'text', x: 0.5, y: 0.32, rotation: 0, opacity: 1,
-        text: 'GOLD', fontFamily: 'Georgia', fontWeight: 700, fontSize: 0.2, color: '#ffffff',
-        align: 'center', lineHeight: 1.1,
-        effects: [{ id: 'gf1', type: 'gold_foil', visible: true, metal: 'gold', brushed: 0.5, pressed: 0.5 }],
+        text: 'GOLD', fontFamily: 'Georgia', fontWeight: 700, fontSize: 0.2, color: foil,
+        align: 'center', lineHeight: 1.1, effects: [],
       },
       {
         id: 'uv', kind: 'ellipse', x: 0.3, y: 0.72, w: 0.3, h: 0.2, rotation: 0, opacity: 1,
@@ -52,28 +53,40 @@ async function seedFinishScene(page: Page): Promise<void> {
       },
     ]
     ;(window as any).__compositorSetLayers(layers)
-  })
+  }, FOIL)
   await expect.poll(() => page.evaluate(() => (window as any).__compositorLayers().length),
     { timeout: 10_000 }).toBe(4)
 }
 
 /** Expands every layer's effect disclosure so every `effect-row` is on screen — there are
- *  three (foil, uv, ring), each with exactly one effect, so `data-effect-kind` alone finds
- *  the right row without also keying on `data-layer-id`. */
+ *  two (uv, ring), each with exactly one `spot_uv` effect. */
 async function expandAllLayerEffects(page: Page): Promise<void> {
   const toggles = page.locator('[data-testid="layer-fx-toggle"]')
   await toggles.first().waitFor({ state: 'visible', timeout: 10_000 })
   const n = await toggles.count()
   for (let i = 0; i < n; i++) await toggles.nth(i).click()
-  await expect(page.locator('[data-testid="effect-row"]')).toHaveCount(3)
+  await expect(page.locator('[data-testid="effect-row"]')).toHaveCount(2)
 }
 
-function effectRow(page: Page, kind: 'gold_foil' | 'spot_uv') {
+function effectRow(page: Page, kind: 'spot_uv') {
   return page.locator(`[data-testid="effect-row"][data-effect-kind="${kind}"]`)
 }
 
 /** Click a light preset button by its label, inside the `finish-light-preset` control
  *  (`FinishLightControl.vue`'s `StudioSegmented`, whose button text IS the label). */
+/** Select a layer by its left-panel row label ('GOLD' is the foil text, 'rect' the background). */
+async function selectLayerRow(page: Page, label: string) {
+  await page.locator('[data-testid="compositor-left-panel"]').getByText(label, { exact: true }).click()
+}
+
+/** Select the foil text layer and open its colour picker, where the Foil dials and the
+ *  light presets live. */
+async function openFoilPicker(page: Page) {
+  await selectLayerRow(page, 'GOLD')
+  await page.getByRole('button', { name: /^foil$/i }).click()
+  await expect(page.getByTestId('foil-fill-controls')).toBeVisible()
+}
+
 async function clickPreset(page: Page, label: 'Top left' | 'Top right' | 'Overhead' | 'Raking') {
   await page.locator('[data-testid="finish-light-preset"]').getByRole('button', { name: label, exact: true }).click()
 }
@@ -88,10 +101,7 @@ test.describe('Print finishes — look, handle and halation', () => {
     expect(gl2).toBe(true)
 
     await seedFinishScene(page)
-    await expandAllLayerEffects(page)
-
-    await effectRow(page, 'gold_foil').click()
-    await expect(page.getByTestId('effect-breadcrumb')).toBeVisible()
+    await openFoilPicker(page)
     await expect(page.getByTestId('frame-light-handle')).toBeVisible()
     await expect(page.getByTestId('finish-light-preset')).toBeVisible()
 
@@ -148,19 +158,25 @@ test.describe('Print finishes — look, handle and halation', () => {
     expect(after).not.toBe(before)
   })
 
-  test('frame-light-handle shows only while a Gold foil or Spot UV effect is selected', async ({ page }) => {
+  test('frame-light-handle shows only while a foil layer or a Spot UV effect is selected', async ({ page }) => {
     await openCompositor(page)
     await seedFinishScene(page)
     const handle = page.getByTestId('frame-light-handle')
 
-    // Nothing selected: hidden.
+    // Nothing with foil selected (seeding leaves the ring selected — Spot UV layer, but no
+    // Spot UV EFFECT selected): hidden.
     await expect(handle).toBeHidden()
 
-    await expandAllLayerEffects(page)
-
-    // A finish effect selected: visible — both kinds.
-    await effectRow(page, 'gold_foil').click()
+    // The foil text layer selected: visible.
+    await selectLayerRow(page, 'GOLD')
     await expect(handle).toBeVisible()
+
+    // A plain layer selected: hidden.
+    await selectLayerRow(page, 'rect')
+    await expect(handle).toBeHidden()
+
+    // A Spot UV effect selected: visible.
+    await expandAllLayerEffects(page)
     await effectRow(page, 'spot_uv').first().click()
     await expect(handle).toBeVisible()
 
@@ -177,8 +193,7 @@ test.describe('Print finishes — look, handle and halation', () => {
   test('dragging the light handle moves the highlight; one undo restores the prior light', async ({ page }) => {
     await openCompositor(page)
     await seedFinishScene(page)
-    await expandAllLayerEffects(page)
-    await effectRow(page, 'gold_foil').click()
+    await selectLayerRow(page, 'GOLD')
 
     const handle = page.getByTestId('frame-light-handle')
     await expect(handle).toBeVisible()
@@ -214,21 +229,20 @@ test.describe('Print finishes — look, handle and halation', () => {
  * The module is imported in-page from the running dev server, so it is the real painter
  * with the real GpuPost finish passes. Offscreen canvas at a 1080×1350 Frame, painted the
  * way the editor paints it: ctx scaled by the device pixel ratio, once at 1× (1080×1350
- * device px) and once at 2× (2160×2700 — the retina editor). Three Gold foil text layers,
+ * device px) and once at 2× (2160×2700 — the retina editor). Three gold foil-fill text layers,
  * 2 warm-up paints then 30 timed. Each timed paint ends with a 1×1 getImageData so the 2D
  * canvas has really finished (a GPU-backed 2D canvas otherwise defers its work past the
  * timer). Reports median/p95; over 33 ms p95 is a finding to report, not a failure.
  */
 test.describe('cost', () => {
-  test('synchronous paintLayerStack with three gold_foil text layers at 1x and 2x — median/p95', async ({ page }) => {
+  test('synchronous paintLayerStack with three foil-fill text layers at 1x and 2x — median/p95', async ({ page }) => {
     await openCompositor(page)
-    const result = await page.evaluate(async () => {
+    const result = await page.evaluate(async (FOIL) => {
       const mod = await import('/_nuxt/@fs/Users/julien/Documents/GitHub/Sailor/frontend/app/composables/useCompositorLayers.ts' as string)
       const foil = (id: string, y: number) => ({
         id, kind: 'text', x: 0.5, y, rotation: 0, opacity: 1,
-        text: 'FOIL', fontFamily: 'Georgia', fontWeight: 700, fontSize: 0.14, color: '#ffffff',
-        align: 'center', lineHeight: 1.1,
-        effects: [{ id: `gf-${id}`, type: 'gold_foil', visible: true, metal: 'gold', brushed: 0.5, pressed: 0.5 }],
+        text: 'FOIL', fontFamily: 'Georgia', fontWeight: 700, fontSize: 0.14, color: { ...FOIL },
+        align: 'center', lineHeight: 1.1, effects: [],
       })
       const layers = [foil('f1', 0.2), foil('f2', 0.5), foil('f3', 0.8)]
       const items = layers.map(l => ({ type: 'local', key: `l:${l.id}`, layer: l }))
@@ -252,14 +266,16 @@ test.describe('cost', () => {
           paintOnce()
           ms.push(performance.now() - t0)
         }
-        // Proof the foil pass ran: white text turns gold (r well above b) only through the finish.
+        // Proof the foil pass ran: gold (r well above b) only through the finish — the no-WebGL
+        // fallback is a flat mid-gold too, so goldPx alone can't tell them apart; the look
+        // test's preset comparison is what proves the lit pass.
         const d = ctx.getImageData(0, 0, cv.width, cv.height).data
         let goldPx = 0
         for (let p = 0; p < d.length; p += 16) if (d[p + 3]! > 128 && d[p]! - d[p + 2]! > 60) goldPx++
         out[`${dpr}x`] = { w: cv.width, h: cv.height, ms, goldPx }
       }
       return out
-    })
+    }, FOIL)
 
     for (const [k, r] of Object.entries(result)) {
       const sorted = [...r.ms].sort((a, b) => a - b)

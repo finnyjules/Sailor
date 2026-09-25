@@ -16,6 +16,7 @@ import {
   hasAnimatedShaderFill, withWiredContent, _registerWiredContent, renderLayerThumbnail,
   outlinePathData, canTakeGeometry, canWarpRaster, cornerPinActive,
   applyShaderPixelEffect, shaderSpecFromEffect, type ShaderPixelEffect, textVAlignCenterOffset,
+  layerHasFoil,
 } from '~/composables/useCompositorLayers'
 import { onPaperBooleanReady, warmPaperBoolean } from '~/lib/compositor/booleanGeometry'
 import { DEAL_VOCABS, dealVocabDrivesLook, type DealVocab } from '~/lib/compositor/dealVocab'
@@ -87,7 +88,7 @@ import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vu
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
 import StudioSegmented from '~/components/vue-canvas/studio/StudioSegmented.vue'
 import FinishLightControl from '~/components/vue-canvas/compositor/FinishLightControl.vue'
-import { METALS, METAL_LABELS, finishAvailable, finishUnavailableReason, type FoilMetal } from '~/lib/compositor/finishPass'
+import { finishAvailable, finishUnavailableReason } from '~/lib/compositor/finishPass'
 import type { FrameLight } from '~/lib/compositor/frameLight'
 import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
@@ -2178,8 +2179,10 @@ function onDistortPointerDown(cornerKey: 'tl' | 'tr' | 'br' | 'bl', e: PointerEv
   window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
 }
 
-/** The Frame light's on-canvas handle — shown while a Gold foil or Spot UV effect is selected. */
-const finishEffectSelected = computed(() => activeEffect.value?.type === 'gold_foil' || activeEffect.value?.type === 'spot_uv')
+/** The Frame light's on-canvas handle — shown while a Spot UV effect is selected, or while the
+ *  selected layer carries foil anywhere (a foil fill, text colour or outline paint). */
+const finishEffectSelected = computed(() => activeEffect.value?.type === 'spot_uv'
+  || (!!selectedLocal.value && layerHasFoil(selectedLocal.value as LocalLayer)))
 const lightHandlePos = computed(() => ({ x: frameLight.value.x * canvasDisplay.w, y: frameLight.value.y * canvasDisplay.h }))
 function onLightPointerDown(e: PointerEvent) {
   if (viewOnlyGuard()) return
@@ -8987,7 +8990,7 @@ onUnmounted(() => {
           />
         </template>
 
-        <!-- The Frame light's handle — draggable while a Gold foil or Spot UV effect is selected. -->
+        <!-- The Frame light's handle — draggable while a Spot UV effect is selected or the selected layer has foil. -->
         <div
           v-if="finishEffectSelected && !editingId && !genActive"
           data-handle
@@ -10585,26 +10588,6 @@ onUnmounted(() => {
             />
           </div>
 
-          <!-- Print finish · Gold foil: metal stamped into the card, lit by the Frame's light. -->
-          <div v-else-if="activeEffect!.type === 'gold_foil'" class="space-y-1.5">
-            <p class="text-xs text-white/50">Metal foil stamped into the card. It catches the Frame's light.</p>
-            <p v-if="!finishAvailable('gold_foil')" class="text-xs text-amber-300/80">{{ finishUnavailableReason('gold_foil') }}</p>
-            <StudioSegmented
-              data-testid="foil-metal"
-              :model-value="(activeEffect as any).metal ?? 'gold'"
-              :options="Object.keys(METALS)"
-              :option-labels="Object.keys(METALS).map(k => METAL_LABELS[k as FoilMetal])"
-              @update:model-value="(v: string) => updateActiveEffect({ metal: v })"
-            />
-            <StudioSlider data-testid="foil-brushed" label="Brushed" :min="0" :max="1" :step="0.01" :default="0.5"
-              :model-value="(activeEffect as any).brushed ?? 0.5"
-              @update:model-value="(v: number) => updateActiveEffect({ brushed: v })" />
-            <StudioSlider data-testid="foil-pressed" label="Pressed in" :min="0" :max="1" :step="0.01" :default="0.5"
-              :model-value="(activeEffect as any).pressed ?? 0.5"
-              @update:model-value="(v: number) => updateActiveEffect({ pressed: v })" />
-            <FinishLightControl :light="frameLight" @update="(l: FrameLight) => setFrameLight(l)" />
-          </div>
-
           <!-- Print finish · Spot UV: a clear gloss coat; shows only where the light reflects. -->
           <div v-else-if="activeEffect!.type === 'spot_uv'" class="space-y-1.5">
             <p class="text-xs text-white/50">A clear gloss varnish. It shows where the light reflects off it.</p>
@@ -10981,7 +10964,7 @@ onUnmounted(() => {
         <div class="inspector-body p-4 flex flex-col gap-4 flex-1 min-h-0 overflow-y-auto" data-testid="stroke-inspector">
           <div>
             <div class="panel-label mb-1.5">Colour</div>
-            <FillControl allow-none :model-value="activeStroke!.paint"
+            <FillControl allow-none allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="activeStroke!.paint"
               @update:model-value="(v: any) => updateActiveStroke({ paint: v })" />
             <div v-if="hasStrokeRow('width')" class="mt-1.5">
               <div class="panel-label mb-1">Width</div>
@@ -11387,12 +11370,12 @@ onUnmounted(() => {
               <div class="space-y-3">
                 <div>
                   <div class="panel-label mb-1.5">Color</div>
-                  <FillControl :model-value="(selectedLocal as any).color"
+                  <FillControl allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="(selectedLocal as any).color"
                     @update:model-value="(v: any) => setLocal(selectedLocal!.id, { color: v })" />
                 </div>
                 <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
                   <div class="panel-label mb-1.5">Outline</div>
-                  <FillControl allow-none :model-value="(selectedLocal as any).strokeColor"
+                  <FillControl allow-none allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="(selectedLocal as any).strokeColor"
                     @update:model-value="(v: any) => setLocal(selectedLocal!.id, { strokeColor: v })" />
                   <input v-if="hasStroke(selectedLocal)" v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Outline width"
                     class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
@@ -11411,12 +11394,12 @@ onUnmounted(() => {
             <StudioSection title="Fill and outline">
               <div>
                 <div class="panel-label mb-1.5">Fill</div>
-                <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
+                <FillControl allow-none allow-image allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
                   @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
               </div>
               <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
                 <div class="panel-label mb-1.5">Stroke</div>
-                <FillControl allow-none :model-value="(selectedLocal as any).stroke"
+                <FillControl allow-none allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="(selectedLocal as any).stroke"
                   @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
                 <input v-if="hasStroke(selectedLocal)" v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Stroke width"
                   class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
@@ -11459,12 +11442,12 @@ onUnmounted(() => {
             <StudioSection title="Fill and outline">
               <div>
                 <div class="panel-label mb-1.5">Fill</div>
-                <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
+                <FillControl allow-none allow-image allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
                   @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
               </div>
               <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
                 <div class="panel-label mb-1.5">Stroke</div>
-                <FillControl allow-none :model-value="(selectedLocal as any).stroke"
+                <FillControl allow-none allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="(selectedLocal as any).stroke"
                   @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
                 <input v-if="hasStroke(selectedLocal)" v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Stroke width"
                   class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
@@ -11491,12 +11474,12 @@ onUnmounted(() => {
             <StudioSection title="Fill and outline">
               <div>
                 <div class="panel-label mb-1.5">Fill</div>
-                <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
+                <FillControl allow-none allow-image allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
                   @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
               </div>
               <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
                 <div class="panel-label mb-1.5">Stroke</div>
-                <FillControl allow-none :model-value="(selectedLocal as any).stroke"
+                <FillControl allow-none allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="(selectedLocal as any).stroke"
                   @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
                 <input v-if="hasStroke(selectedLocal)" v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Stroke width"
                   class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
@@ -11569,12 +11552,12 @@ onUnmounted(() => {
               </div>
               <div>
                 <div class="panel-label mb-1.5">Fill</div>
-                <FillControl allow-none allow-image :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
+                <FillControl allow-none allow-image allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="(selectedLocal as any).fill" allow-reads-backdrop :other-layers="glassCandidates"
                   @update:model-value="(v: any) => setLocal(selectedLocal!.id, { fill: v })" />
               </div>
               <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
                 <div class="panel-label mb-1.5">Stroke</div>
-                <FillControl allow-none :model-value="(selectedLocal as any).stroke"
+                <FillControl allow-none allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="(selectedLocal as any).stroke"
                   @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
                 <StrokeStyleRow v-if="hasStroke(selectedLocal)" class="mt-1.5" :align="(selectedLocal as any).strokeAlign" :dash="(selectedLocal as any).strokeDash"
                   show-align :out-width="outWidth" :scale="(selectedLocal as any).scale || 1"

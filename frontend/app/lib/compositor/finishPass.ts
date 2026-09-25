@@ -20,11 +20,10 @@ export const METALS: Record<FoilMetal, readonly [string, string, string, string]
 }
 export const METAL_LABELS: Record<FoilMetal, string> = { gold: 'Gold', silver: 'Silver', rose: 'Rose gold', copper: 'Copper' }
 
-// `grain` is optional so the retiring `GoldFoilEffect` (effectStack.ts, removed in Task 3) — which
-// never had a grain dial — keeps satisfying this interface without a matching field: an absent
-// `grain` clamps to 0 below, which is byte-identical to before this dial existed ("Absent means
-// unchanged"). The new foil PAINT (paint.ts's `FoilFill`) always sends one explicitly.
-export interface FoilDials { metal: FoilMetal; brushed: number; pressed: number; grain?: number }
+// The dials of a foil paint (paint.ts's `FoilFill`). `grain` is required: the only caller is the
+// foil paint, which always carries one. `foilUniforms` still reads a malformed stored value
+// (missing / NaN) as 0 rather than trusting it.
+export interface FoilDials { metal: FoilMetal; brushed: number; pressed: number; grain: number }
 export interface SpotUvDials { gloss: number; raised: number; varnishOnly: boolean }
 
 const COMMON = `#version 300 es

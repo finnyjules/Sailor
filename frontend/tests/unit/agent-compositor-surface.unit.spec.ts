@@ -624,12 +624,13 @@ describe('setLayerEffect writes through the effect stack', () => {
   })
 
   it('rejects a print finish by name, and never lists the finishes as valid effect types', () => {
-    for (const type of ['gold_foil', 'spot_uv']) {
-      const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type } } })
-      expect(r.ok).toBe(false); if (r.ok) return
-      expect(r.detail).toContain(type)
-      expect(r.detail).not.toMatch(/must be one of/)
-    }
+    const r = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'spot_uv' } } })
+    expect(r.ok).toBe(false); if (r.ok) return
+    expect(r.detail).toContain('spot_uv')
+    expect(r.detail).not.toMatch(/must be one of/)
+    // Gold foil is a fill now, not an effect kind: it is simply not a valid effect type.
+    const foil = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'gold_foil' } } })
+    expect(foil.ok).toBe(false)
     const bad = applyCompositorCommand(rectState(), { op: 'setLayerEffect', target: 'L1', args: { effect: { type: 'nope' } } })
     expect(bad.ok).toBe(false); if (bad.ok) return
     expect(bad.detail).not.toMatch(/gold_foil|spot_uv/)

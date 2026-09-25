@@ -11,10 +11,10 @@ import { DEFAULT_FEATHER } from '~/lib/compositor/feather'
 import { canTakeGeometry, canWarpRaster } from '~/composables/useCompositorLayers'
 
 describe('effect kinds', () => {
-  it('has 46 kinds, 5 pinned and 41 orderable, all labelled in sentence case', () => {
-    expect(EFFECT_ORDER).toHaveLength(46)
+  it('has 45 kinds, 5 pinned and 40 orderable, all labelled in sentence case', () => {
+    expect(EFFECT_ORDER).toHaveLength(45)
     expect(PINNED_KINDS).toEqual(['background_blur', 'backdrop_shader', 'backdrop_luminance_mask', 'dof', 'drop_shadow'])
-    expect(ORDERABLE_KINDS).toHaveLength(41)
+    expect(ORDERABLE_KINDS).toHaveLength(40)
     expect(new Set([...PINNED_KINDS, ...ORDERABLE_KINDS])).toEqual(new Set(EFFECT_ORDER))
     for (const k of EFFECT_ORDER) expect(EFFECT_LABELS[k], k).toMatch(/^[A-Z][a-z]/)
     expect(EFFECT_LABELS.gradientMap).toBe('Gradient map')
@@ -45,7 +45,6 @@ describe('effect kinds', () => {
     expect(EFFECT_LABELS.risograph).toBe('Risograph')
     expect(EFFECT_LABELS.photocopy).toBe('Photocopy')
     expect(EFFECT_LABELS.letterpress).toBe('Letterpress')
-    expect(EFFECT_LABELS.gold_foil).toBe('Gold foil')
     expect(EFFECT_LABELS.spot_uv).toBe('Spot UV')
     expect(EFFECT_LABELS.shader).toBe('Shader')
     expect(EFFECT_LABELS.backdrop_shader).toBe('Backdrop shader')
@@ -83,7 +82,7 @@ describe('effect kinds', () => {
       levels: 'pixel', posterise: 'pixel', threshold: 'pixel', invert: 'pixel',
       rough_edge: 'pixel', ink_bleed: 'pixel', shader: 'pixel',
       risograph: 'pixel', photocopy: 'pixel', letterpress: 'pixel',
-      gold_foil: 'pixel', spot_uv: 'pixel',
+      spot_uv: 'pixel',
       drop_shadow: 'stamp',
     }
     for (const k of EFFECT_ORDER) expect(regionOf(k), k).toBe(expected[k])
