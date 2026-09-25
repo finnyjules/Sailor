@@ -8,7 +8,7 @@
  *
  * Decoupled from the editor: it takes the template ref + an api-key getter, so
  * it stays portable to other surfaces. Display strings come from the surface's
- * summarizeSmartLayoutChange; the proposal is a list the AgentProposal renders.
+ * summarizeSmartLayoutChange; the proposal is a list `StudioPromptHost` renders.
  */
 import { computed, ref, type Ref } from 'vue'
 import { $fetch } from 'ofetch'

@@ -16,6 +16,7 @@ import { looksLikeImageIdea } from '~/lib/sketch/sketchIntent'
 import { canvasSuggestions, promptNodeLabel, promptWorkingLabel, selectionLabel, type PromptNode } from '~/lib/prompt/canvasPromptContext'
 import { canvasDispatch, isPlainVaryRequest, type DispatchTarget } from '~/lib/prompt/canvasDispatch'
 import { routeRequest } from '~/lib/prompt/routeRequest'
+import { BUSY_NOTICE } from '~/lib/prompt/notices'
 import {
   assignRun, chooseTile, failRun, hoverTile, ingestTakes, isTakesWorking, openTakes, pendingRunIds, readyCount,
   setRunIds, settleUnqueued, shownTakeId, TAKES_PER_SET, wantedActiveTakeId, type TakesSession,
@@ -34,7 +35,7 @@ export const TAKE_SETTLE_GRACE_MS = 1_500
  *  (the route itself refuses more than 20). */
 export const ROUTER_SELECTION_MAX = 8
 export const ROUTER_NAME_MAX = 120
-export const BUSY_NOTICE = 'Sailor is busy with another request — stop it or wait'
+export { BUSY_NOTICE }
 
 export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeRequest } = {}) {
   const route = deps.route ?? routeRequest

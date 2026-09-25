@@ -6,13 +6,13 @@
  * Type, …) — reusing describeControls + validatePatch inside requestPatch.
  *
  * Tuning is single-op (set a control's value), so changes are param patches, not
- * structural commands — but they ride the same AgentBar/AgentProposal UI.
+ * structural commands — but they ride the same one-prompt UI (`StudioPromptHost`).
  *
  * ## Three takes
  *
  * A studio that passes `opts.takes` gets the OTHER answer shape: instead of one
  * guess shown as a proposal list, the ask comes back as three genuinely different
- * readings, shown as a filmstrip (`TakeStrip.vue`, mounted once in
+ * readings, shown as a filmstrip (`PromptTakes.vue`, mounted once in
  * `StudioModalShell.vue` — so every studio wired here gets it without its own
  * template). This composable owns the session: capture the original ONCE, preview
  * a take by writing it into the live params, restore exactly on unhover/dismiss,

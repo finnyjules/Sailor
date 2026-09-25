@@ -1,10 +1,11 @@
 /**
  * Four Takes (Task 3) — per-studio thumbnail adapters.
  *
- * `TakeStrip.vue` (Task 2) shows four proposed takes as small tiles; each tile
- * needs a picture of what the take's config actually LOOKS like. This module
- * is the registry `TakeStrip`'s host wires up: one function per studio that
- * renders a take's config through THAT STUDIO'S OWN renderer, at thumbnail
+ * `PromptTakes.vue` (the one prompt's takes strip, spec §3.1) shows proposed
+ * takes as small tiles; each tile needs a picture of what the take's config
+ * actually LOOKS like. This module is the registry the host wires up: one
+ * function per studio that renders a take's config through THAT STUDIO'S OWN
+ * renderer, at thumbnail
  * size. Nothing here is a new renderer — every adapter is a thin wrapper
  * around the exact function the studio's own node-card preview or headless
  * bake already calls (named in each adapter's own comment, the house "source
@@ -56,7 +57,7 @@ export const TAKE_THUMB_STUDIO_IDS = ['gradient', 'texture', 'shader', 'shape', 
 export type TakeThumbStudioId = typeof TAKE_THUMB_STUDIO_IDS[number]
 
 /** What a tile can be handed: a live canvas, a serialised data URL (either is
- *  accepted by `TakeStrip.vue`'s thumb prop, per Task 2's interface), or
+ *  accepted by `PromptTakes.vue`'s thumb handling), or
  *  `null` for the error tile. */
 export type TakeThumb = HTMLCanvasElement | string | null
 /**

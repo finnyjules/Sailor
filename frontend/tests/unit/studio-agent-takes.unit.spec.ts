@@ -140,7 +140,7 @@ describe('useStudioAgent — asking for takes', () => {
 
     await agent.ask('dreamier')
     // The strip is up with nothing drawn yet: every tile is PENDING (no map
-    // entry), which is what lets TakeStrip tell "still drawing" from "failed".
+    // entry), which is what lets the strip tell "still drawing" from "failed".
     expect(agent.takes.value).toHaveLength(3)
     expect(agent.takeThumbs.value.size).toBe(0)
 
