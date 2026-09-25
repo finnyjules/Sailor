@@ -163,6 +163,13 @@ describe('mapWsEvent', () => {
     expect(mapWsEvent({ type: 'queue_position', data: { prompt_id: 'run_a.0.t0', node: '1', position: 3 } }, CID))
       .toEqual({ event: 'queue_position', prompt_id: 'run_a.0.t0', node_id: '1', position: 3 })
   })
+  it('maps the runner’s switch to a backup service, with its status line and canvas', () => {
+    const data = { prompt_id: 'run_a.0.t0', node: '1', from: 'replicate', to: 'fal', message: 'Slow to start on Replicate, trying fal.', canvas_id: 'c1' }
+    expect(mapWsEvent({ type: 'provider-switch', data }, CID)).toEqual({
+      event: 'provider_switch', prompt_id: 'run_a.0.t0', node_id: '1', from: 'replicate', to: 'fal',
+      message: 'Slow to start on Replicate, trying fal.', canvas_id: 'c1',
+    })
+  })
   it('carries the runner’s exact cost on completion, and nothing extra for ComfyUI', () => {
     expect(mapWsEvent({ type: 'execution_success', data: { prompt_id: 'run_a.0.t0', run_id: 'run_a', credits: 47, recorded: true, stopped: false } }, CID))
       .toEqual({ event: 'execution_complete', prompt_id: 'run_a.0.t0', run_id: 'run_a', credits: 47, recorded: true, stopped: false })

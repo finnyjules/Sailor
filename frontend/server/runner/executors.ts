@@ -40,8 +40,16 @@ import { planCompositor } from './compositor/plan'
 import { checkRequest } from './requestRules'
 import type { OutputFile, RunnerProvider } from './types'
 
+/**
+ * The same job on the other service, with its own request built to that
+ * service's published schema. The engine sends it only when the first
+ * service never started the job (or the send failed); it is charged once, at
+ * the node's own price.
+ */
+export interface ProviderBackup { provider: RunnerProvider; endpoint: string; payload: Record<string, unknown> }
+
 export type NodePlan =
-  | { kind: 'provider'; provider: RunnerProvider; endpoint: string; payload: Record<string, unknown>; media: 'image' | 'video'; prefix: string; uiFor(files: OutputFile[]): Record<string, unknown> | null }
+  | { kind: 'provider'; provider: RunnerProvider; endpoint: string; payload: Record<string, unknown>; media: 'image' | 'video'; prefix: string; uiFor(files: OutputFile[]): Record<string, unknown> | null; backup?: ProviderBackup }
   | { kind: 'pass'; files: OutputFile[]; ui: Record<string, unknown> | null }
   | { kind: 'pause'; files: OutputFile[] }
   /** Computed on this server: `render` makes the PNG, saved as a temp live preview (as Python's save_live_preview). */
@@ -72,7 +80,14 @@ export interface PlanContext {
  */
 export async function planNode(ctx: PlanContext): Promise<NodePlan> {
   const plan = await planNodeRequest(ctx)
-  if (plan.kind === 'provider') checkRequest(plan.provider, plan.endpoint, plan.payload)
+  if (plan.kind === 'provider') {
+    checkRequest(plan.provider, plan.endpoint, plan.payload)
+    // A backup its own service would refuse is no backup: the node runs on its first service only.
+    if (plan.backup) {
+      try { checkRequest(plan.backup.provider, plan.backup.endpoint, plan.backup.payload) }
+      catch { delete plan.backup }
+    }
+  }
   return plan
 }
 

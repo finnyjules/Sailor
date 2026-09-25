@@ -18,13 +18,15 @@ import { RUNNER_NOT_ELIGIBLE, type GateChoice, type RunnerMessage } from '#share
 import { MeterRefusalError } from '../utils/requestMeter'
 import { BASE_RENDER_CREDITS, UnpricedGraphError } from '../utils/priceBook'
 import { extractGraphPromptText } from '../utils/graphPromptText'
-import { isProviderNetworkError, percentFromLogs, type FalStatus, type ProviderClient } from './falQueue'
-import { planNode } from './executors'
+import { FalError, isProviderNetworkError, percentFromLogs, type FalStatus, type ProviderClient } from './falQueue'
+import { ReplicateError } from './replicateQueue'
+import { planNode, type ProviderBackup } from './executors'
+import type { BackupSettings } from './config'
 import { requestProblems } from './requestRules'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
 import { extraPromptText, hasOutputNode, measuredInputPixels, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
-import { ev, type RunEvents } from './events'
+import { ev, type RunEvents, type SwitchReason } from './events'
 import type { Handoff } from './handoff'
 import { extFor, type ResultStore } from './results'
 import { runIdOf, userKeyOf, type RunStore } from './store'
@@ -107,6 +109,8 @@ export interface StageRecordSummary {
   outputs: OutputFile[]
   nodeTypes: string[]
   ts: number
+  /** Which service made each provider node's new result (present when any did). */
+  servedBy?: Record<string, RunnerProvider>
 }
 
 export interface EngineDeps {
@@ -123,6 +127,8 @@ export interface EngineDeps {
   hosted(): boolean
   /** The runner families switched on, server side (the authority). None when absent. */
   families?(): ReadonlySet<RunnerFamily>
+  /** The backup-service switch (config.ts runnerBackup). Absent: never switch. */
+  backup?(): BackupSettings
   webhookUrl(): string | null
   now(): number
   sleep(ms: number, signal: AbortSignal): Promise<void>
@@ -187,6 +193,16 @@ const providerOf = (req: PendingRequest): RunnerProvider => req.provider ?? 'fal
  * so the stage's charge is unchanged. fal failures are never sent again.
  */
 export const REPLICATE_TRANSIENT_RETRIES = 2
+/**
+ * A send that failed with no job created at the service: no answer at all,
+ * or a 5xx or 429 on submit. Such a send goes straight to the backup. A 4xx
+ * refusal (a bad request) is the request's fault and is not switched.
+ */
+export function isSubmitOutage(e: unknown): boolean {
+  if (isProviderNetworkError(e)) return true
+  if (!(e instanceof FalError || e instanceof ReplicateError) || e.status == null) return false
+  return e.status >= 500 || e.status === 429
+}
 /** What a saved result is filed under: fal keeps its bare endpoint (results saved before 2026-09-24 still match). */
 const fingerprintEndpoint = (provider: RunnerProvider, endpoint: string): string =>
   provider === 'fal' ? endpoint : `${provider}:${endpoint}`
@@ -340,6 +356,40 @@ export function createEngine(deps: EngineDeps) {
   }
   async function cancelRequest(req: PendingRequest): Promise<unknown> {
     return clientFor(providerOf(req)).cancel(req.cancelUrl)
+  }
+
+  /** Send the node's written-down request (rec.endpoint, rec.payload) to `provider`, and write the request down. */
+  async function submitRequest(run: RunRecord, rec: NodeRecord, provider: RunnerProvider, signal: AbortSignal): Promise<PendingRequest> {
+    // A Stop can land while a switch is under way; nothing may go out after it.
+    if (signal.aborted) throw new RunStopped()
+    const sub = await clientFor(provider).submit(rec.endpoint!, rec.payload!, { webhookUrl: webhookFor(provider) })
+    const req: PendingRequest = {
+      provider,
+      requestId: sub.requestId, statusUrl: sub.statusUrl, responseUrl: sub.responseUrl,
+      cancelUrl: sub.cancelUrl, submittedAt: deps.now(), queuePosition: sub.queuePosition,
+    }
+    rec.request = req
+    await persist(run)
+    return req
+  }
+
+  /**
+   * Move a node to its backup service, once. The switch is written down
+   * before the backup is sent (request null, switchedFrom set), so a restart
+   * in between sends the backup, never the first service again. The node's
+   * price and the stage's hold are untouched: it is charged once.
+   */
+  async function sendToBackup(
+    run: RunRecord, rec: NodeRecord, backup: ProviderBackup, from: { provider: RunnerProvider; requestId: string | null },
+    reason: SwitchReason, stageKey: string, nodeId: string, signal: AbortSignal,
+  ): Promise<PendingRequest> {
+    rec.switchedFrom = from
+    rec.endpoint = backup.endpoint
+    rec.payload = backup.payload
+    rec.request = null
+    await persist(run)
+    publish(run, ev.providerSwitch(stageKey, nodeId, from.provider, backup.provider, reason))
+    return submitRequest(run, rec, backup.provider, signal)
   }
 
   function entryFor(run: RunRecord): LiveRun {
@@ -556,14 +606,19 @@ export function createEngine(deps: EngineDeps) {
     // Only what this stage newly made: a reused result is an earlier run's
     // file, already recorded then. Nothing new → no record at all.
     const outputs: OutputFile[] = []
+    // Which service made each result, so a switched job's cost can be checked later.
+    const servedBy: Record<string, RunnerProvider> = {}
     for (const id of legIds) {
       const rec = take.nodes[id]!
       // A node that handed its picture on (no call, so no endpoint) made nothing new.
-      if (rec.status === 'done' && !rec.reused && rec.endpoint !== null && PROVIDER_TYPES.has(rec.classType)) outputs.push(...rec.outputs.filter(f => f.type === 'output'))
+      if (rec.status === 'done' && !rec.reused && rec.endpoint !== null && PROVIDER_TYPES.has(rec.classType)) {
+        outputs.push(...rec.outputs.filter(f => f.type === 'output'))
+        if (rec.servedBy) servedBy[id] = rec.servedBy
+      }
     }
     if (outputs.length) {
       const nodeTypes = [...new Set(legIds.filter(id => take.nodes[id]!.status === 'done').map(id => take.nodes[id]!.classType))]
-      await deps.records.write({ run, take, leg, charge, outputs, nodeTypes, ts: deps.now() })
+      await deps.records.write({ run, take, leg, charge, outputs, nodeTypes, ts: deps.now(), ...(Object.keys(servedBy).length ? { servedBy } : {}) })
         .catch(e => deps.reportError(e, { site: 'runner.record', stageKey }))
     }
     if (outcome === 'error') {
@@ -627,8 +682,13 @@ export function createEngine(deps: EngineDeps) {
         return
       }
 
-      rec.endpoint = plan.endpoint
-      rec.payload = plan.payload
+      // A node already moved to its backup keeps the backup's request as written down.
+      if (!rec.switchedFrom) {
+        rec.endpoint = plan.endpoint
+        rec.payload = plan.payload
+      }
+      const backupSettings = deps.backup?.() ?? { enabled: false, stallMs: 0 }
+      const backup = backupSettings.enabled && plan.backup ? plan.backup : null
       // Priced on the measured picture where the price depends on its size (FLUX.2 edit).
       rec.credits = nodeCredits(take.prompt[id]!, await measuredInputPixels(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], f => deps.results.read(f)))
       const fp = isReusable(plan.payload)
@@ -658,15 +718,25 @@ export function createEngine(deps: EngineDeps) {
         // A Stop can land while the slot is being handed over; nothing may go out after it.
         if (signal.aborted) throw new RunStopped()
         if (!rec.request) {
-          const sub = await clientFor(plan.provider).submit(plan.endpoint, plan.payload, { webhookUrl: webhookFor(plan.provider) })
-          rec.request = {
-            provider: plan.provider,
-            requestId: sub.requestId, statusUrl: sub.statusUrl, responseUrl: sub.responseUrl,
-            cancelUrl: sub.cancelUrl, submittedAt: deps.now(), queuePosition: sub.queuePosition,
+          if (rec.switchedFrom && backup) {
+            // A restart landed between writing the switch down and sending the backup.
+            await submitRequest(run, rec, backup.provider, signal)
           }
-          await persist(run)
+          else {
+            if (rec.switchedFrom) {
+              // Switched, but the backup is gone now (switched off): back to the first service.
+              delete rec.switchedFrom
+              rec.endpoint = plan.endpoint
+              rec.payload = plan.payload
+            }
+            try { await submitRequest(run, rec, plan.provider, signal) }
+            catch (e) {
+              if (!backup || signal.aborted || !isSubmitOutage(e)) throw e
+              await sendToBackup(run, rec, backup, { provider: plan.provider, requestId: null }, 'send-failed', stageKey, id, signal)
+            }
+          }
         }
-        result = await waitForResult(run, rec, stageKey, id, plan.media, signal)
+        result = await waitForResult(run, rec, stageKey, id, plan.media, signal, backup, backupSettings.stallMs)
       }
       finally {
         limiter.release(userKey)
@@ -685,8 +755,14 @@ export function createEngine(deps: EngineDeps) {
       }
       rec.outputs = files
       rec.status = 'done'
+      rec.servedBy = providerOf(rec.request!)
       rec.endedAt = deps.now()
       if (fp) await deps.store.putResult(userKey, fp, files).catch(e => deps.reportError(e, { site: 'runner.putResult' }))
+      // Made on the backup: also filed under the backup's own request, so the same settings reuse it either way.
+      if (rec.switchedFrom && rec.payload && isReusable(rec.payload)) {
+        const backupFp = requestFingerprint(fingerprintEndpoint(rec.servedBy, rec.endpoint!), rec.payload, u => deps.handoff.hashOf(u))
+        if (backupFp !== fp) await deps.store.putResult(userKey, backupFp, files).catch(e => deps.reportError(e, { site: 'runner.putResult' }))
+      }
       // The result is made, kept and billed: a failed save here must not turn
       // the node into an error. The stage's closing save writes it down again.
       await persist(run).catch(e => deps.reportError(e, { site: 'runner.node.save', stageKey, node: id }))
@@ -707,10 +783,35 @@ export function createEngine(deps: EngineDeps) {
     }
   }
 
-  async function waitForResult(run: RunRecord, rec: NodeRecord, stageKey: string, nodeId: string, media: 'image' | 'video', signal: AbortSignal): Promise<unknown> {
+  /**
+   * The first service was asked to cancel a job that never started, before
+   * it is sent to the backup. True only when the job is known not to run
+   * there: the cancel went through, or (the cancel failed or the job was
+   * unknown) one more look still finds it waiting to start. A job the cancel
+   * finds already finished is kept.
+   */
+  async function cancelledForSwitch(client: ProviderClient, req: PendingRequest): Promise<boolean> {
+    let outcome: unknown
+    try { outcome = await client.cancel(req.cancelUrl) }
+    catch { outcome = null }
+    if (outcome === 'cancelled') return true
+    if (outcome === 'already-done') return false
+    try {
+      const again = await client.status(req.statusUrl, { logs: false })
+      return !again.transient && again.status === 'IN_QUEUE'
+    }
+    catch { return false }
+  }
+
+  async function waitForResult(
+    run: RunRecord, rec: NodeRecord, stageKey: string, nodeId: string, media: 'image' | 'video', signal: AbortSignal,
+    backup: ProviderBackup | null = null, stallMs = 0,
+  ): Promise<unknown> {
     let req = rec.request!
-    const provider = providerOf(req)
-    const client = clientFor(provider)
+    let provider = providerOf(req)
+    let client = clientFor(provider)
+    // Set once the first service has been asked to give the job up and kept it: no second try.
+    let keepFirst = false
     const limitMs = media === 'video' ? deps.timeouts.videoMs : deps.timeouts.imageMs
     let deadline = req.submittedAt + limitMs
     let attempt = 0
@@ -756,6 +857,28 @@ export function createEngine(deps: EngineDeps) {
             req.queuePosition = lastPos
             publish(run, ev.queuePosition(stageKey, nodeId, lastPos))
           }
+          // Still waiting to start after the stall time (measured from the
+          // saved send time, so it survives a restart): move it to the
+          // backup, once. A job that has started is never moved — it may
+          // already be billed.
+          if (backup && stallMs > 0 && !rec.switchedFrom && !started && !keepFirst && deps.now() - req.submittedAt >= stallMs) {
+            if (await cancelledForSwitch(client, req)) {
+              req = await sendToBackup(run, rec, backup, { provider, requestId: req.requestId }, 'slow-start', stageKey, nodeId, signal)
+              provider = backup.provider
+              client = clientFor(provider)
+              deadline = req.submittedAt + limitMs
+              attempt = 0
+              asked = false
+              lastPos = req.queuePosition
+              lastPct = -1
+              started = false
+              if (lastPos != null && lastPos > 0) publish(run, ev.queuePosition(stageKey, nodeId, lastPos))
+              continue
+            }
+            keepFirst = true
+            // The job there may have finished meanwhile: ask again straight away.
+            continue
+          }
         }
         else if (s.status === 'IN_PROGRESS') {
           if (!started) {
@@ -795,6 +918,7 @@ export function createEngine(deps: EngineDeps) {
             lastPos = req.queuePosition
             lastPct = -1
             started = false
+            keepFirst = false
             continue
           }
           // Replicate's own status body already carries the finished
@@ -1041,6 +1165,10 @@ export function createEngine(deps: EngineDeps) {
           for (const [id, n] of Object.entries(run.takes[t]!.nodes)) {
             if (n.status !== 'running') continue
             out.push(ev.executing(stageKey, id))
+            // A tab that connects after a switch still shows the node's note.
+            if (n.switchedFrom && n.request) {
+              out.push(ev.providerSwitch(stageKey, id, n.switchedFrom.provider, providerOf(n.request), n.switchedFrom.requestId ? 'slow-start' : 'send-failed'))
+            }
             if (n.request?.queuePosition) out.push(ev.queuePosition(stageKey, id, n.request.queuePosition))
           }
         }

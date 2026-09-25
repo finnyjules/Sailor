@@ -9,7 +9,7 @@ import { createHandoff } from './handoff'
 import { createMetering } from './metering'
 import { createRunEvents } from './events'
 import { createGenerationRecords } from './records'
-import { runnerFamilies, webhookBaseUrl, RUNNER_PER_USER_LIMIT } from './config'
+import { runnerBackup, runnerFamilies, webhookBaseUrl, RUNNER_PER_USER_LIMIT } from './config'
 import { engineDirForType, uploadOwner, canonicalUploadKey } from '../utils/inputUploads'
 import { uploadToFalStorage } from '../utils/falStorage'
 import { getLiveLedger } from '../utils/ledgerLive'
@@ -71,6 +71,7 @@ export function getEngine(): Engine {
     download: url => downloadResult(url),
     hosted: isHosted,
     families: runnerFamilies,
+    backup: runnerBackup,
     webhookUrl: () => {
       const base = webhookBaseUrl()
       return base ? `${base}/api/webhooks/fal` : null

@@ -43,6 +43,8 @@ type BridgeShapedEventBody =
     }
   | { event: 'gate_paused'; node_id: string | undefined; prompt_id: string | undefined; run_id?: string; choices?: GateChoice[]; picked?: number[] }
   | { event: 'queue_position'; prompt_id: string | null; node_id: string | null; position: number }
+  /** Runner only: the node's job moved to its backup service; `message` is the node's status line. */
+  | { event: 'provider_switch'; prompt_id: string | null; node_id: string | null; from: string; to: string; message: string }
 
 function isPlainObject(v: unknown): v is Record<string, any> {
   return !!v && typeof v === 'object' && !Array.isArray(v)
@@ -136,6 +138,12 @@ function mapBody(msg: { type: string; data: any } | null | undefined, myClientId
 
     case 'queue_position':
       return { event: 'queue_position', prompt_id: data.prompt_id ?? null, node_id: data.node ?? null, position: Number(data.position) || 0 }
+
+    case 'provider-switch':
+      return {
+        event: 'provider_switch', prompt_id: data.prompt_id ?? null, node_id: data.node ?? null,
+        from: String(data.from ?? ''), to: String(data.to ?? ''), message: String(data.message ?? ''),
+      }
 
     // Queue-length/exec-info heartbeat — not consumed by the bridge's event
     // switch today. Ignored in v1 per brief.

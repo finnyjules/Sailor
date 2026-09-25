@@ -7,6 +7,12 @@ const base = { running: false, hasRun: false, now }
 
 describe('runRowStatus', () => {
   it('running wins', () => expect(runRowStatus({ ...base, running: true, hasRun: true })).toEqual({ tone: 'running', text: 'Running…' }))
+  it('a runner note replaces "Running…" while it runs, and only then', () => {
+    const note = 'Slow to start on Replicate, trying fal.'
+    expect(runRowStatus({ ...base, running: true, note })).toEqual({ tone: 'running', text: note })
+    expect(runRowStatus({ ...base, running: true, note: null }).text).toBe('Running…')
+    expect(runRowStatus({ ...base, hasRun: true, note })).toEqual({ tone: 'done', text: 'Rendered' })
+  })
   it('an error asks to run again', () => expect(runRowStatus({ ...base, error: true })).toEqual({ tone: 'error', text: 'Failed · run again' }))
   it('live preview nodes say so', () => expect(runRowStatus({ ...base, live: true })).toEqual({ tone: 'live', text: 'Live preview' }))
   it('not run yet shows the cost when known', () => {

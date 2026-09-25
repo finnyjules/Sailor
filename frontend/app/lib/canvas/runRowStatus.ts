@@ -11,8 +11,9 @@ function ago(ms: number): string {
   return `${Math.floor(h / 24)} d ago`
 }
 
-export function runRowStatus(s: { running: boolean; error?: boolean; live?: boolean; hasRun: boolean; costLabel?: string | null; lastRunAt?: number | null; now: number }): { tone: RunTone; text: string } {
-  if (s.running) return { tone: 'running', text: 'Running…' }
+// `note`: a short line from the runner about this run (e.g. "Slow to start on Replicate, trying fal."), shown while it runs.
+export function runRowStatus(s: { running: boolean; error?: boolean; live?: boolean; hasRun: boolean; costLabel?: string | null; lastRunAt?: number | null; note?: string | null; now: number }): { tone: RunTone; text: string } {
+  if (s.running) return { tone: 'running', text: s.note || 'Running…' }
   if (s.error) return { tone: 'error', text: 'Failed · run again' }
   if (s.live) return { tone: 'live', text: 'Live preview' }
   if (s.hasRun) return { tone: 'done', text: s.lastRunAt ? `Rendered ${ago(s.now - s.lastRunAt)}` : 'Rendered' }

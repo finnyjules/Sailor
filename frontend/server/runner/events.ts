@@ -5,6 +5,19 @@
  * One server process is assumed (see the plan's Global Constraints).
  */
 import type { GateChoice, RunnerMessage } from '#shared/runner/messages'
+import type { RunnerProvider } from './types'
+
+/** Each service by its own brand name, as the node's status line shows it. */
+export const PROVIDER_NAMES: Record<RunnerProvider, string> = { fal: 'fal', replicate: 'Replicate' }
+
+/** Why a node moved to its backup service: its job never started, or the send itself failed. */
+export type SwitchReason = 'slow-start' | 'send-failed'
+
+export function providerSwitchMessage(from: RunnerProvider, to: RunnerProvider, reason: SwitchReason): string {
+  return reason === 'slow-start'
+    ? `Slow to start on ${PROVIDER_NAMES[from]}, trying ${PROVIDER_NAMES[to]}.`
+    : `Couldn’t reach ${PROVIDER_NAMES[from]}, trying ${PROVIDER_NAMES[to]}.`
+}
 
 export interface RunEvents {
   publish(userKey: string, m: RunnerMessage): void
@@ -50,6 +63,8 @@ export const ev = {
       exception_type: 'RunnerError', traceback: [], run_id: x.runId, credits: x.credits, recorded: true,
     },
   }),
+  providerSwitch: (promptId: string, nodeId: string, from: RunnerProvider, to: RunnerProvider, reason: SwitchReason): RunnerMessage =>
+    ({ type: 'provider-switch', data: { prompt_id: promptId, node: nodeId, from, to, message: providerSwitchMessage(from, to, reason) } }),
   gatePaused: (legId: string, runId: string, nodeId: string, choices: GateChoice[], picked: number[]): RunnerMessage =>
     ({ type: 'gate_paused', data: { prompt_id: legId, run_id: runId, node_id: nodeId, choices, picked } }),
 }

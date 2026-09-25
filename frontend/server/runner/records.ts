@@ -21,6 +21,8 @@ export function toGenerationRecord(s: StageRecordSummary, hosted: boolean): Reco
     usdApproximate: false,
     credits: hosted ? (s.charge.actual ?? null) : null,
     nodes: s.nodeTypes,
+    // Which service made each node's result (a job moved to its backup is charged at the node's own price).
+    ...(s.servedBy ? { servedBy: s.servedBy } : {}),
   }
 }
 

@@ -55,6 +55,14 @@ export interface NodeRecord {
   startedAt: number | null
   endedAt: number | null
   error: string | null
+  /**
+   * Set once this node was moved to the backup service (at most once): the
+   * service it was first sent to, and that request's id (null when the send
+   * itself failed, so no job existed there). `request` is then the backup's.
+   */
+  switchedFrom?: { provider: RunnerProvider; requestId: string | null }
+  /** The service that made this node's result (absent: nothing made yet, or a reused result). */
+  servedBy?: RunnerProvider
 }
 
 export interface TakeRecord {

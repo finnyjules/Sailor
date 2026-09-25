@@ -24,6 +24,7 @@ import { clearMoodboardFromGenerateNode, revertMoodboardSwitch } from '~/lib/gra
 import WidgetMoodboardChip from '~/components/vue-canvas/widgets/WidgetMoodboardChip.vue'
 import type { CapsuleAction, CapsuleState } from '~/lib/canvas/capsuleAction'
 import { LIVE_PREVIEW_NODE_TYPES } from '~/lib/livePreviewNodes'
+import { NODE_TITLE_OVERRIDES } from '~/lib/nodeTitleOverrides'
 import { allowedAspectRatios, allowedDurations, modelSupportsSeed } from '~/lib/videoModelAdapt'
 import { TOOLBOX_NODE_ICONS } from '~/data/toolbox-items'
 import { getGeneratorIcon } from '~/data/generator-icons'
@@ -62,6 +63,8 @@ const props = defineProps<{
     error?: boolean
     progress?: number
     queuePosition?: number | null
+    /** The runner's note on this run (a switch to the backup service), shown on the Run row while it runs. */
+    runNote?: string | null
     images?: string[]
     audios?: string[]
     animated?: boolean
@@ -120,15 +123,8 @@ const toolboxIcon = computed(() => TOOLBOX_NODE_ICONS[props.data.nodeType as str
 // what the node does, not just who runs it.
 const generatorIcon = computed(() => getGeneratorIcon(props.data.nodeType as string))
 
-// Frontend overrides for node title-bar names. The backend display_name (e.g.
-// "Flux Dev + LoRA (Replicate)") describes the model; here we relabel a node in
-// terms of what the user is doing with it. Per CLAUDE.md, UI naming lives in Vue.
-const NODE_TITLE_OVERRIDES: Record<string, string> = {
-  FluxLoRARemoteNode: 'Generate an image with a style',
-  FluxMultiLoRARemoteNode: 'Mix styles together',
-  LayerizeGraphicNode: 'Separate text from image',
-  SplitPhotoLayersNode: 'Separate background and foreground',
-}
+// Frontend title-bar overrides (what the user is doing, not the model) — shared
+// with the prompt's selection chip so both name a node the same way.
 const displayTitle = computed(
   () => NODE_TITLE_OVERRIDES[props.data.nodeType as string] || props.data.title,
 )
@@ -241,6 +237,7 @@ const runStatus = computed(() => runRowStatus({
   hasRun: hasRun.value,
   costLabel: priceLabel.value,
   lastRunAt: props.data.lastRunAt ?? null,
+  note: props.data.runNote ?? null,
   now: runRowNow.value,
 }))
 // Variant (direct-execution only): re-roll THIS node 4× in parallel across the
