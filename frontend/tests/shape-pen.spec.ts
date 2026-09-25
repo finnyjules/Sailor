@@ -39,6 +39,16 @@ async function overlayPointCount(page: Page): Promise<number> {
   return page.locator('[data-testid="shape-pen-overlay"] circle').count()
 }
 
+/** |buffer aspect - rendered aspect|: 0 when the canvas draws at its own intrinsic
+ *  ratio; a squashed canvas (e.g. clamped by max-h-full under a taller dock) diverges. */
+async function canvasAspectMismatch(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const c = document.querySelector('[data-testid="shape-preview"]') as HTMLCanvasElement
+    const r = c.getBoundingClientRect()
+    return Math.abs(c.width / c.height - r.width / r.height)
+  })
+}
+
 test('a Drawn shape is drawn with the shared pen, arranged by the studio, and the pen owns Escape', async ({ page }) => {
   await page.goto('/dev/shape-studio-lab')
   await page.locator('[data-ready]').waitFor()
@@ -103,11 +113,34 @@ test('a Drawn shape is drawn with the shared pen, arranged by the studio, and th
   await expect(actionRows).toHaveCount(0)
   await expect(page.getByTestId('shape-rail')).toHaveAttribute('inert', /.*/)
 
-  // A resized preview keeps the pen on the canvas: the overlay follows the canvas box.
   const misalign = async () => {
     const [o, c] = [await overlay.boundingBox(), await page.getByTestId('shape-preview').boundingBox()]
     return o && c ? Math.max(Math.abs(o.x - c.x), Math.abs(o.y - c.y), Math.abs(o.width - c.width), Math.abs(o.height - c.height)) : 99
   }
+
+  // I1: selecting a point shows the Rules row, which grows the dock under the
+  // preview — the preview wrapper's ResizeObserver must re-fit the canvas and the
+  // overlay together, so neither drifts and the canvas never draws squashed. Click the
+  // point element itself (not stale mouse coordinates) — Layout/Count changed the
+  // composite's bounds since the drawing was first placed, reframing the reopened pen.
+  await page.locator('[data-tool="select"]').click()
+  await page.locator('[data-testid="shape-pen-overlay"] circle').first().click()
+  await expect(page.getByRole('toolbar', { name: 'Rules' })).toBeVisible()
+  await expect.poll(misalign, { timeout: 5_000 }).toBeLessThan(1.5)
+  await expect.poll(() => canvasAspectMismatch(page), { timeout: 5_000 }).toBeLessThan(0.02)
+
+  // I2: at a common laptop width, with the pen open and a point selected, the
+  // inspector (controls column) must stay inside the dialog — not pushed past its
+  // right edge by the pen toolbar forcing the preview column wider than it has room for.
+  await page.setViewportSize({ width: 1280, height: 800 })
+  const controlsPanel = page.locator('div.w-72.overflow-y-auto')
+  await expect.poll(async () => {
+    const [panel, dialogBox] = [await controlsPanel.boundingBox(), await dialog.boundingBox()]
+    return panel && dialogBox ? panel.x + panel.width <= dialogBox.x + dialogBox.width + 1 : false
+  }, { timeout: 5_000 }).toBe(true)
+
+  // A resized preview keeps the pen on the canvas: the overlay follows the canvas box.
+  await page.setViewportSize({ width: 1600, height: 1000 })
   expect(await misalign()).toBeLessThan(1.5)
   const w0 = (await overlay.boundingBox())!.width
   await page.setViewportSize({ width: 1300, height: 700 })

@@ -228,8 +228,9 @@ layer stack, background. (The old spec's own principle: repeating a shape is Sha
 - With **Drawn** selected, a **"Draw the shape"** button opens the shared pen over the preview. Picking
   Drawn with no drawing yet opens the pen straight away.
 - You draw **one unit**, centred, in the layer's own units at its **Size**.
-- While the pen is open, the other copies show faintly behind and follow along. **During a drag** they
-  update as plain outlines; **the fold** (holes, pieces, crossings — O(N²)) runs **when you let go**.
+- While the pen is open, the other copies show faintly behind and follow along, but only **once a
+  gesture finishes** — a drag in progress leaves them as they were; **the fold** (holes, pieces,
+  crossings — O(N²)) also runs then, on the settled outline.
 - Done / Enter closes the pen and the full result renders.
 - An empty drawing renders nothing (like a zero Size), never an error.
 

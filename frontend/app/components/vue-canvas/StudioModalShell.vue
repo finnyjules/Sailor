@@ -168,7 +168,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
              :class="fullBleed
                ? [PANEL_BASE, 'left-4 flex overflow-hidden', panelsVisible ? SHOWN : HIDE_LEFT]
                : 'flex w-72 shrink-0 min-h-0'"><slot name="aside" /></div>
-        <div :class="fullBleed ? 'absolute inset-0' : 'flex min-h-0 flex-1 flex-col'">
+        <div :class="fullBleed ? 'absolute inset-0' : 'flex min-h-0 min-w-0 flex-1 flex-col'">
           <div :data-testid="fullBleed ? 'studio-shell-preview-ground' : undefined"
                :class="fullBleed ? 'absolute inset-0 flex items-center justify-center' : 'relative flex min-h-0 flex-1 items-center justify-center'">
             <slot name="preview" :panels-visible="panelsVisible" />

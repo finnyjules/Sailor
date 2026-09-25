@@ -71,6 +71,13 @@ const emit = defineEmits<{
   (e: 'cancel'): void   // Escape with nothing pending — the host decides (pen.revert() to discard)
 }>()
 
+// A Mac ctrl-click is `button === 0` plus a suppressed `contextmenu` — not a
+// real primary click. Treat it like any other button, so it opens the (now
+// suppressed) context menu instead of placing/picking/dragging a point.
+const isMacPlatform = typeof navigator !== 'undefined'
+  && (/Mac|iPhone|iPad|iPod/.test((navigator as any).userAgentData?.platform || navigator.platform || ''))
+function isCtrlContextClick(ev: PointerEvent) { return ev.ctrlKey && isMacPlatform }
+
 // the pen is read ONCE — fixed for the overlay's lifetime (re-key the overlay
 // to swap it); its refs are unwrapped here so the template reads them bare
 const {
@@ -466,7 +473,7 @@ function drawingXY(ev: PointerEvent) {
 }
 
 function onEntityPointerDown(id: EntityId, ev: PointerEvent) {
-  if (!props.active || ev.button !== 0) return
+  if (!props.active || ev.button !== 0 || isCtrlContextClick(ev)) return
   // guided Mirror: a line click supplies the axis
   if (tool.value === 'select' && pendingOp.value?.kind === 'mirror' && (doc.value.entities.find(e => e.id === id) as any)?.kind === 'line') {
     applyMirror(pendingOp.value.units, id)
@@ -477,7 +484,7 @@ function onEntityPointerDown(id: EntityId, ev: PointerEvent) {
   if (tool.value === 'select') { pick(id, ev.shiftKey); ev.stopPropagation() }
 }
 function onPointerDownPoint(id: EntityId, ev: PointerEvent) {
-  if (!props.active || ev.button !== 0 || tool.value !== 'select') return
+  if (!props.active || ev.button !== 0 || isCtrlContextClick(ev) || tool.value !== 'select') return
   // guided Repeat: this point is the ring center
   if (pendingOp.value?.kind === 'repeat') {
     applyRepeat(pendingOp.value.units, id, pendingOp.value.count)
@@ -497,7 +504,7 @@ function onPointerUpPoint(id: EntityId, ev: PointerEvent) {
   dragId = null; dragHandleIds = []; dragLast = null
 }
 function onSegmentPointerDown(pathId: EntityId, segIndex: number, ev: PointerEvent) {
-  if (!props.active || ev.button !== 0 || tool.value !== 'select') return
+  if (!props.active || ev.button !== 0 || isCtrlContextClick(ev) || tool.value !== 'select') return
   // guided ops treat a path-body click as picking the whole path (the unit)
   if (pendingOp.value) { pick(pathId, ev.shiftKey); ev.stopPropagation(); return }
   // a plain click selects the WHOLE path; Alt/Option-click drills in to the
@@ -507,7 +514,7 @@ function onSegmentPointerDown(pathId: EntityId, segIndex: number, ev: PointerEve
   ev.stopPropagation()
 }
 function onPointerDownSvg(ev: PointerEvent) {
-  if (!props.active || ev.button !== 0) return
+  if (!props.active || ev.button !== 0 || isCtrlContextClick(ev)) return
   if (tool.value === 'select') {
     // guided Repeat with an empty-canvas click: drop a fresh FIXED center
     // where they clicked and repeat around it. Mirror needs a real line, so

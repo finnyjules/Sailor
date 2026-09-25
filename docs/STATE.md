@@ -37,7 +37,7 @@ Shape Studio's Shape picker gains **Drawn**. Picking it opens the shared pen ove
 
 Drawn is yours only: re-roll never picks it (the same seed rolls the same as before), Blend's second shape can't be Drawn, and the assistant can't choose it.
 
-**Known limits.** A Collection row bound to Shape can still set Drawn on a layer with no drawing (renders empty); curves fit to their flattened outline (a hair under Size); Escape typed in a Placement field closes the studio and cancels the drawing.
+**Known limits.** A Collection row bound to Shape can still set Drawn on a layer with no drawing (renders empty); curves fit to their flattened outline (a hair under Size); Escape typed in a Placement field closes the studio and cancels the drawing; an open (unclosed) drawing is closed by the boolean fold — Unite/Subtract/Intersect gain a closing chord across the open ends — and by Blend, which always resamples to a closed loop; only Even-odd/Exclude keep it open.
 
 **Proof.** Unit suites for the model, the fit, the pen geometry and the session; `tests/shape-pen.spec.ts` with the real mouse and keyboard (draw → radial ×12 fills 10 of 12 sectors; Escape keeps the studio open; right-click adds nothing; resize keeps the pen aligned).
 

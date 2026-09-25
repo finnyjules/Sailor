@@ -2,11 +2,14 @@
  * Shape Studio's shared-pen SESSION (Plan C, Task 4): the active layer's Drawn
  * unit is drawn and edited with the pen over the preview.
  *
- * - `open()` works on the ACTIVE layer. It remembers the mark's `shape`, `sketch`,
- *   `size` and `paintTarget` exactly (cancel puts them back), fixes the refit
- *   factor `k` and the drawing's outline centre (Decision 3), asks the host for the
- *   frozen preview frame (Decision 5), and switches the mark to `drawn` if it was
- *   something else.
+ * - `open()` works on the ACTIVE layer. It remembers the mark's `shape`, `sketch` and
+ *   `size` exactly (cancel puts them back — these are the only fields the session
+ *   itself writes, via `settle`/`open`), fixes the refit factor `k` and the drawing's
+ *   outline centre (Decision 3), asks the host for the frozen preview frame
+ *   (Decision 5), and switches the mark to `drawn` if it was something else.
+ *   `paintTarget` is NOT remembered: the Paint section stays live and editable while
+ *   the pen is open, so a "Colour applies to" change the user makes mid-session is
+ *   their own and survives Cancel — only Decision 6, at commit, ever flips it.
  * - Settled pen changes (`onChange`: a finished gesture, undo, redo) write the
  *   drawing into the mark WITHOUT re-centring, with `size = k × extent`, so the
  *   composite behind the pen follows and the frozen view stays valid. Mid-gesture
@@ -14,7 +17,7 @@
  *   write triggers the surface's full re-render.
  * - `commitSession()` re-centres (`commitDrawn`) and writes the result; an open
  *   drawing on a filled mark becomes an outline (Decision 6). No outline → cancel.
- * - `cancelSession()` restores the four remembered fields. Tearing down the host's
+ * - `cancelSession()` restores the three remembered fields. Tearing down the host's
  *   scope mid-session cancels too.
  *
  * Shape Studio has no undo of its own: the pen's history is the only undo, and it
@@ -70,7 +73,7 @@ export function hasClosedOutline(doc: SketchDoc): boolean {
   return doc.entities.some(e => !e.construction && ((e.kind === 'path' && e.closed) || e.kind === 'circle'))
 }
 
-type Original = Pick<GeoShapeConfig, 'shape' | 'size' | 'paintTarget'> & { sketch: SketchDoc | undefined }
+type Original = Pick<GeoShapeConfig, 'shape' | 'size'> & { sketch: SketchDoc | undefined }
 
 export function useShapePenSession(host: ShapePenHost) {
   const session = shallowRef<ShapePenSession | null>(null)
@@ -96,7 +99,7 @@ export function useShapePenSession(host: ShapePenHost) {
     if (!layer) return
     const mark = layer.mark
     original = {
-      shape: mark.shape, size: mark.size, paintTarget: mark.paintTarget,
+      shape: mark.shape, size: mark.size,
       sketch: mark.sketch ? cloneDoc(mark.sketch) : undefined,
     }
     const start: SketchDoc = mark.sketch ? cloneDoc(mark.sketch) : { entities: [], constraints: [] }
@@ -146,7 +149,9 @@ export function useShapePenSession(host: ShapePenHost) {
     if (!m) return
     m.shape = orig.shape
     m.size = orig.size
-    m.paintTarget = orig.paintTarget
+    // paintTarget is deliberately left as the user set it (M3): the session never
+    // writes it itself (only commitSession's Decision 6 does), so cancel has nothing
+    // of its own to undo there.
     if (orig.sketch) m.sketch = orig.sketch
     else delete m.sketch
   }

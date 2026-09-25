@@ -148,10 +148,14 @@ const isSelectIdle = computed(() => tool.value === 'select' && !hasAnySelection.
   flex-direction: column;
   align-items: center;
   gap: 6px;
+  width: 100%;
+  min-width: 0;
 }
 .tb {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: center;
   gap: 2px;
   padding: 4px;
   background: color-mix(in srgb, #1a1a1a 97%, transparent);

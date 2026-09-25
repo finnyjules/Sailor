@@ -129,10 +129,10 @@ const SHAPE_OPTION_LABELS = SHAPES.map(k => SHAPE_LABEL[k])
 export const GEO_CONTROLS: GeoControl[] = [
   // --- Shape (baseShapePath's BaseShapeOpts) --------------------------------
   select('shape', 'Shape', SHAPES, DEFAULT_CONFIG.shape, 'Shape',
-    'Polygon, star and irregular use Sides; Hexagon is a fixed 6-gon; Library clones one of the 100 drawn shapes (Library shape)',
+    'Star and irregular use Sides; Hexagon is a fixed 6-gon; Library clones one of the 100 library shapes (Library shape)',
     { optionLabels: SHAPE_OPTION_LABELS }),
   shapeC('libraryShape', 'Library shape', DEFAULT_CONFIG.libraryShape, 'Shape',
-    'Library only: which of the 100 drawn shapes is cloned (sparkle, sun-rays, leaf, heart, swirl…)', { when: isLibrary }),
+    'Library only: which of the 100 library shapes is cloned (sparkle, sun-rays, leaf, heart, swirl…)', { when: isLibrary }),
   slider('sides', 'Sides', 3, 24, 1, 'Shape', DEFAULT_CONFIG.sides, undefined, { when: usesSides }),
   // DEFAULT_CONFIG.starInner is 0.45, already inside starVertices' own
   // [0.01, 0.99] clamp (polygonGeometry.ts), so this control's default sits
@@ -167,7 +167,7 @@ export const GEO_CONTROLS: GeoControl[] = [
     'The shape the steps run toward. Same choices as Shape, except a drawing; Count is the number of steps. Detailed library shapes blend with fewer points per outline, so a many-piece shape stays fast.',
     { when: isBlend, optionLabels: PICKABLE_SHAPES.map(k => SHAPE_LABEL[k]) }),
   shapeC('blendLibraryShape', 'Blend to library shape', DEFAULT_CONFIG.blendLibraryShape, 'Blend',
-    'Library only: which of the 100 drawn shapes the steps run toward', { when: blendIsLibrary }),
+    'Library only: which of the 100 library shapes the steps run toward', { when: blendIsLibrary }),
   slider('blendSides', 'Blend to sides', 3, 24, 1, 'Blend', DEFAULT_CONFIG.blendSides, undefined, { when: blendUsesSides }),
   slider('blendStarInner', 'Blend to star inner', 0.01, 0.99, 0.01, 'Blend', DEFAULT_CONFIG.blendStarInner, undefined, { when: blendIsStar }),
   slider('blendIrregularSeed', 'Blend to irregular seed', 1, 9999, 1, 'Blend', DEFAULT_CONFIG.blendIrregularSeed, undefined, { when: blendIsIrregular }),

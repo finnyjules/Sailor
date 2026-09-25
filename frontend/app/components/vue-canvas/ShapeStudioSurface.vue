@@ -23,6 +23,7 @@ import {
 import type { VectorShape } from '~/lib/vector/svg'
 import { isTypingInField } from '~/composables/pen/usePen'
 import { frozenPreviewFrame } from '~/lib/geoshape/penShape'
+import { sketchOutlineBounds } from '~/lib/geoshape/shapes'
 import { useShapePenSession } from '~/composables/geoshape/useShapePenSession'
 import PenOverlay from '~/components/pen/PenOverlay.vue'
 import PenToolbar from '~/components/pen/PenToolbar.vue'
@@ -155,10 +156,15 @@ const visibleControlSet = computed(() => new Set<GeoControl>(visibleGeoControls(
 function controlVisible(c: ControlSpec): boolean {
   return visibleControlSet.value.has(c as GeoControl)
 }
+// Whether the active mark's sketch actually has an outline to show/edit — a
+// damaged save or a sketch with every entity deleted still HAS a `sketch`
+// object, but nothing to draw, so it counts as empty (same rule the pen and
+// the renderer use via sketchOutlineBounds).
+const hasDrawnOutline = computed(() => !!sketchOutlineBounds(activeMark.value.sketch))
 function setGeoControl(key: string, value: string | number | boolean | Paint | Paint[]) {
-  // Choosing Drawn with nothing drawn yet opens the pen straight away; the session
+  // Choosing Drawn with no OUTLINE yet opens the pen straight away; the session
   // switches the shape itself, so Cancel puts the previous shape back.
-  if (key === 'shape' && value === 'drawn' && !activeMark.value.sketch) { openPen(); return }
+  if (key === 'shape' && value === 'drawn' && !sketchOutlineBounds(activeMark.value.sketch)) { openPen(); return }
   paramsProxy[key] = value as string | number
 }
 function paramValue(key: string): string | number | boolean {
@@ -371,6 +377,7 @@ function updateOverlapFill(i: number, p: Paint) {
 
 // ── preview: a plain 2D canvas, event-driven (rAF-coalesced demand drain) ─────────
 const canvas = ref<HTMLCanvasElement | null>(null)
+const previewWrapper = ref<HTMLDivElement | null>(null)
 const exporting = ref(false)
 const svgExporting = ref(false)
 const actionError = ref('')
@@ -519,12 +526,27 @@ function onPenBlur() { if (penSession.value) penOverlayRef.value?.onHostBlur() }
 
 function onWindowResize() { scheduleRender() }
 
+// The dock (prompt/toolbar) sits in the flow under the preview in the boxed
+// shell, so ANYTHING that changes its height — a selection showing the Rules
+// row, switching pen tools, the window itself — resizes the preview wrapper.
+// `window`'s resize event alone misses all of those (I1): watch the wrapper's
+// own box instead, and re-run updatePenBox() immediately (not just after the
+// next render's `await`), so the overlay never sits a stale frame behind it.
+let previewResizeObserver: ResizeObserver | null = null
+
 onMounted(() => {
   void renderPreview()
   window.addEventListener('resize', onWindowResize)
   window.addEventListener('keydown', onPenKeydown, true)
   window.addEventListener('keyup', onPenKeyup, true)
   window.addEventListener('blur', onPenBlur)
+  if (previewWrapper.value && typeof ResizeObserver !== 'undefined') {
+    previewResizeObserver = new ResizeObserver(() => {
+      updatePenBox()
+      scheduleRender()
+    })
+    previewResizeObserver.observe(previewWrapper.value)
+  }
 })
 onBeforeUnmount(() => {
   penCancel()   // before the save: an open pen never leaves a half-drawn shape behind
@@ -533,6 +555,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('keyup', onPenKeyup, true)
   window.removeEventListener('blur', onPenBlur)
   window.removeEventListener('resize', onWindowResize)
+  previewResizeObserver?.disconnect()
+  previewResizeObserver = null
   if (rafId != null) cancelAnimationFrame(rafId)
   if (actionErrorTimer) clearTimeout(actionErrorTimer)
 })
@@ -635,7 +659,7 @@ async function exportSvg() {
     </template>
 
     <template #preview>
-      <div class="relative flex h-full w-full items-center justify-center">
+      <div ref="previewWrapper" class="relative flex h-full w-full items-center justify-center">
         <!-- Checkered backdrop (cosmetic only — the exported PNG/SVG stay transparent). -->
         <canvas
           ref="canvas"
@@ -723,8 +747,10 @@ async function exportSvg() {
         >
           <!-- The pen: draw or edit a Drawn layer's unit over the preview. -->
           <template #section-Shape>
-            <StudioButton v-if="activeMark.shape === 'drawn' && !penSession" data-testid="shape-draw" class="w-full" @click="openPen">
-              {{ activeMark.sketch ? 'Edit the shape' : 'Draw the shape' }}
+            <StudioButton v-if="activeMark.shape === 'drawn' && !penSession" data-testid="shape-draw" class="w-full"
+              :disabled="!activeLayerObj.enabled" :title="!activeLayerObj.enabled ? 'Show this layer to draw on it' : undefined"
+              @click="openPen">
+              {{ hasDrawnOutline ? 'Edit the shape' : 'Draw the shape' }}
             </StudioButton>
           </template>
           <!-- While the pen is open the Shape rows are shown but locked. -->

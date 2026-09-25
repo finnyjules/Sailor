@@ -145,6 +145,25 @@ describe('useShapePenSession', () => {
     expect(m.shape).toBe('drawn')
   })
 
+  it('cancel keeps a paintTarget the user changed mid-session (M3) — only shape/sketch/size are reverted', () => {
+    const doc = makeDoc()
+    const m = doc.layers[0]!.mark
+    expect(m.paintTarget).toBe('fill')   // starting point: Paint is not locked while the pen is open
+    const s = makeSession(doc)
+    s.open()
+    triangle(s.session.value!.doc.value, 0, 0, false)   // an OPEN outline
+    s.session.value!.pen.commitHistory()
+    // the user switches "Colour applies to" themselves, mid-session, same as any
+    // other Paint-section edit — the pen never locks that row
+    m.paintTarget = 'outline'
+    s.cancelSession()
+    expect(s.session.value).toBeNull()
+    // shape/sketch/size go back to what they were before the session opened...
+    expect('sketch' in m).toBe(false)
+    // ...but the user's own Paint choice survives Cancel
+    expect(m.paintTarget).toBe('outline')
+  })
+
   it('tearing the scope down mid-session cancels', () => {
     const doc = makeDoc()
     const m = doc.layers[0]!.mark

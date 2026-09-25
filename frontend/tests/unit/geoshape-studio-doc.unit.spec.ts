@@ -4,6 +4,9 @@ import {
   studioDocFromPersisted,
 } from '~/lib/geoshape/studio'
 import { DEFAULT_CONFIG, mergeConfig } from '~/lib/geoshape/config'
+import { renderStudio } from '~/lib/geoshape/render'
+import { addPoint, addPath } from '~/lib/sketch/edit'
+import type { SketchDoc } from '~/lib/sketch/model'
 
 describe('geoshape studio doc', () => {
   it('defaultDoc is a single enabled layer, overlap off', () => {
@@ -110,5 +113,46 @@ describe('GeoStudioDoc background', () => {
   it('migrates a legacy single-mark blob with a null background', () => {
     // studioDocFromPersisted is already imported by this suite for other tests.
     expect(studioDocFromPersisted({ config: { shape: 'hexagon' } }).background).toBeNull()
+  })
+})
+
+// ── M10: spec §5 stage 5's named checks — "save, reload, same picture" and
+//    "a damaged save loads as empty" — exercised through the real persisted-blob
+//    path (studioDocFromPersisted) into the real renderer (renderStudio), not
+//    mergeConfig alone. ──
+describe('a Drawn layer round-trips through persistence and renders', () => {
+  function triangleSketch(): SketchDoc {
+    const d: SketchDoc = { entities: [], constraints: [] }
+    const a = addPoint(d, 10, 10), b = addPoint(d, 70, 10), c = addPoint(d, 40, 50)
+    addPath(d, [a, b, c], [{ kind: 'line' }, { kind: 'line' }, { kind: 'line' }], true)
+    return d
+  }
+  const totalCommands = (shapes: Awaited<ReturnType<typeof renderStudio>>) =>
+    shapes.reduce((n, s) => n + s.commands.length, 0)
+
+  it('save, reload, same picture: a JSON round trip renders the same command count', async () => {
+    const doc0 = mergeStudioDoc({ layers: [mergeLayer({ mark: { shape: 'drawn', sketch: triangleSketch() } })] })
+    const before = await renderStudio(doc0)
+    // the exact persistence path: JSON.stringify → JSON.parse → studioDocFromPersisted
+    const persisted = JSON.parse(JSON.stringify({ doc: doc0 }))
+    const doc1 = studioDocFromPersisted(persisted)
+    const after = await renderStudio(doc1)
+    expect(totalCommands(after)).toBe(totalCommands(before))
+    expect(totalCommands(before)).toBeGreaterThan(0)
+  })
+
+  it('a damaged save loads as an empty drawing and never throws — at load or at render', async () => {
+    // `sketch` present but with junk instead of an entities array
+    const damaged1 = { doc: { layers: [{ mark: { shape: 'drawn', sketch: { entities: 'nonsense', constraints: [] } } }] } }
+    expect(() => studioDocFromPersisted(damaged1)).not.toThrow()
+    const doc1 = studioDocFromPersisted(damaged1)
+    expect(doc1.layers[0]!.mark.sketch?.entities ?? []).toEqual([])
+    await expect(renderStudio(doc1)).resolves.not.toThrow()
+
+    // `sketch` entirely the wrong type
+    const damaged2 = { doc: { layers: [{ mark: { shape: 'drawn', sketch: 'not-an-object' } }] } }
+    expect(() => studioDocFromPersisted(damaged2)).not.toThrow()
+    const doc2 = studioDocFromPersisted(damaged2)
+    await expect(renderStudio(doc2)).resolves.not.toThrow()
   })
 })

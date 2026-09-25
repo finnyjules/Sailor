@@ -233,7 +233,10 @@ describe('StudioModalShell — studios without a take session are untouched', ()
 // — the cluster is exercised here, with an agent, instead of on that surface.)
 const BOXED_BODY = 'flex min-h-0 flex-1 gap-4 p-4'
 const BOXED_ASIDE = 'flex w-72 shrink-0 min-h-0'
-const BOXED_PREVIEW_COL = 'flex min-h-0 flex-1 flex-col'
+// min-w-0 added for the shared-pen Plan C final review (I2): without it this column's
+// intrinsic content width (the dock/toolbar) can push the controls column past the
+// dialog's right edge at common laptop widths — see ShapeStudioSurface's pen toolbar.
+const BOXED_PREVIEW_COL = 'flex min-h-0 min-w-0 flex-1 flex-col'
 const BOXED_PREVIEW = 'relative flex min-h-0 flex-1 items-center justify-center'
 const BOXED_CONTROLS = 'flex w-72 shrink-0 flex-col gap-2 overflow-y-auto pr-1 min-h-0'
 
