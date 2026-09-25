@@ -60,6 +60,16 @@ export interface EffectDef {
   generative?: boolean
   /** A lens that takes the Frame layer's silhouette (u_shape + u_hasShape/u_shapeCX/u_shapeCY/u_shapeSize). */
   followsShape?: boolean
+  /** A My effect. */
+  mine?: boolean
+  /** The base effect's name. */
+  from?: string | null
+  /** Version chips for the Recipe. */
+  versions?: { label: string; note: string; effectId: string; values: Record<string, ParamValue> }[]
+  /** An older code version of this My effect id; hidden from pickers. */
+  versionOf?: string
+  /** A take being previewed; never listed, never saved. */
+  draft?: boolean
 }
 
 export interface ShaderFxCatalog {
