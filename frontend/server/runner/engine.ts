@@ -15,6 +15,7 @@ import {
   type ApiPrompt, type TakeGateState,
 } from '#shared/runner/graph'
 import { RUNNER_NOT_ELIGIBLE, type GateChoice, type RunnerMessage } from '#shared/runner/messages'
+import { RUNNER_TIMEOUTS, type RunnerTimeouts } from '#shared/runner/timeouts'
 import { MeterRefusalError } from '../utils/requestMeter'
 import { BASE_RENDER_CREDITS, UnpricedGraphError } from '../utils/priceBook'
 import { extractGraphPromptText } from '../utils/graphPromptText'
@@ -226,28 +227,7 @@ const fingerprintEndpoint = (provider: RunnerProvider, endpoint: string): string
 /** Larger than this, the workflow is not stored (Open workflow then falls back, with its toast). */
 export const MAX_STORED_WORKFLOW_CHARS = 2_000_000
 
-export interface RunnerTimeouts {
-  imageMs: number
-  videoMs: number
-  imageQueueMs?: number
-  videoQueueMs?: number
-}
-
-/**
- * The runner's limits (index.ts). A video gets 30 minutes to make, and a
- * video the service hasn't started yet may wait up to 2 hours in its queue
- * (Task C, 2026-09-25: a Wan 3.0 job sat ~25 minutes in fal's queue at
- * position 138 and finished at ~28 of the 30, so a busier moment would have
- * cancelled a job fal was about to run). Once it starts, it gets the 30
- * minutes from the start. So a video waits at most 2 h 30 min, well inside
- * the runner hold's 24 hours (holdSweep.ts RUNNER_HOLD_TTL_MS). Pictures keep
- * their 5 minutes, queued or not.
- */
-export const RUNNER_TIMEOUTS: Readonly<Required<Pick<RunnerTimeouts, 'imageMs' | 'videoMs' | 'videoQueueMs'>>> = {
-  imageMs: 5 * 60_000,
-  videoMs: 30 * 60_000,
-  videoQueueMs: 2 * 60 * 60_000,
-}
+export { RUNNER_TIMEOUTS, type RunnerTimeouts }
 
 /** "30 minutes", "2 hours", "1 hour" — a limit in words for a node's message. */
 function limitWords(ms: number): string {
@@ -1111,15 +1091,15 @@ export function createEngine(deps: EngineDeps) {
     const limitMs = media === 'video' ? deps.timeouts.videoMs : deps.timeouts.imageMs
     // A job the service says is still waiting to start may wait this long
     // from its send (never less than the run limit); once it starts, it gets
-    // the run limit from the start (the time it was first seen started, taken
-    // no later than the queue allowance, so the whole wait is bounded by
-    // queue + run limit, even after a restart).
+    // the run limit from the start (`req.startedAt`: the time it was first
+    // seen started, saved on the request so a restart keeps it, and taken no
+    // later than the queue allowance, so the whole wait is bounded by queue +
+    // run limit).
     const queueMs = Math.max(limitMs, (media === 'video' ? deps.timeouts.videoQueueMs : deps.timeouts.imageQueueMs) ?? 0)
     // The provider's last real answer said the job is waiting to start.
     let queued = false
-    let startedAt: number | null = null
-    const deadline = () => startedAt != null
-      ? Math.min(startedAt, req.submittedAt + queueMs) + limitMs
+    const deadline = () => req.startedAt != null
+      ? Math.min(req.startedAt, req.submittedAt + queueMs) + limitMs
       : req.submittedAt + (queued ? queueMs : limitMs)
     let attempt = 0
     // Only a real answer from the provider counts as having asked: a blip says nothing.
@@ -1138,7 +1118,7 @@ export function createEngine(deps: EngineDeps) {
       // message speaks of the service, so it stays true.
       if (asked && deps.now() > deadline()) {
         // Past a queue allowance longer than the run limit: say so. Otherwise the run limit's words.
-        const stillQueued = queued && startedAt == null && queueMs > limitMs
+        const stillQueued = queued && req.startedAt == null && queueMs > limitMs
         const check = await confirmCancel(run, req)
         // It finished just as it was cancelled: the result is made and billed, so it is kept.
         if (check.confirmed && check.ended === 'finished' && check.status) {
@@ -1159,6 +1139,12 @@ export function createEngine(deps: EngineDeps) {
       // `asked` check above: after a restart the deadline is measured from
       // the original submit time, and a real answer waiting at the provider
       // must still be fetched.
+      // A provider that answered "still queued" once and then only fails
+      // transiently keeps the queue allowance (`queued` is its last real
+      // answer): the check above, not this one, cancels it at the send + the
+      // queue allowance (2 h for a video), so it is bounded at 2 h, not 30
+      // minutes + the grace. This outer limit only ever meets a provider that
+      // has never answered, whose deadline is the run limit.
       if (attempt > 0 && deps.now() > deadline() + GRACE_MS) {
         const check = await confirmCancel(run, req)
         throw new Error(check.confirmed
@@ -1194,7 +1180,6 @@ export function createEngine(deps: EngineDeps) {
               provider = backup.provider
               client = clientFor(provider)
               queued = false
-              startedAt = null
               attempt = 0
               asked = false
               lastPos = req.queuePosition
@@ -1211,7 +1196,12 @@ export function createEngine(deps: EngineDeps) {
         else if (s.status === 'IN_PROGRESS') {
           if (!started) {
             started = true
-            startedAt ??= deps.now()
+            if (req.startedAt == null) {
+              req.startedAt = deps.now()
+              // Saved in the background: persist snapshots the run now and
+              // queues its saves in order, so the wait isn't held up by it.
+              void persist(run).catch(e => deps.reportError(e, { site: 'runner.node.started', stageKey, node: nodeId }))
+            }
             req.queuePosition = null
             if (lastPos != null) publish(run, ev.queuePosition(stageKey, nodeId, 0)) // 0 = started
             lastPos = null
@@ -1242,7 +1232,6 @@ export function createEngine(deps: EngineDeps) {
             rec.request = req
             await persist(run)
             queued = false
-            startedAt = null
             attempt = 0
             asked = false
             lastPos = req.queuePosition

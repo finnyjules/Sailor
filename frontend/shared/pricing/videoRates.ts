@@ -272,8 +272,8 @@ export const VIDEO_RATES: Record<string, VideoRate> = {
   // Replicate bills the seconds the clip really runs, not the length sent
   // (Task C live check 2026-09-25, prediction anwn72rv01rmw0d0va3ax3h62g: 2 s
   // at 720p made 57 frames at 25 fps, `video_output_duration_seconds` 2.28).
-  // The builder sends no `fps`, so the schema default 25 applies; LTX makes
-  // 8k + 1 frames. So 2 s bills 2.28 s, 3 s 3.24, 4 s 4.2, 5 s 5.16, 6 s 6.12,
+  // The builder always sends `fps` 25 (ltx25Fast.ts LTX_25_FAST_FPS, the
+  // schema default); LTX makes 8k + 1 frames. So 2 s bills 2.28 s, 3 s 3.24, 4 s 4.2, 5 s 5.16, 6 s 6.12,
   // 8 s 8.04, 10 s 10.28, 12 s 12.2, 14 s 14.12, 16 s 16.04, 18 s 18.28 and
   // 20 s 20.2 (outputFrames).
   'ltx-2.5-fast': {

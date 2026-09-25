@@ -31,8 +31,12 @@
  *                     default, sent rather than relied on). 2k is not offered
  *   aspect_ratio      16:9 or 9:16, in both modes; anything else 16:9
  *   generate_audio    the node's "Generate audio" option (default on)
- * No seed (the schema has none). No frame-rate setting: the default is 25
- * fps, a rate that allows clips over 10 s.
+ *   fps               25, always: the schema's default (24, 25, 48 or 50),
+ *                     sent so the price reads what is sent. Replicate bills
+ *                     the frames made (8k + 1 at this rate: 2 s bills 2.28 s,
+ *                     videoRates.ts `outputFrames`), and 25 allows clips over
+ *                     10 s. The node offers no frame-rate setting.
+ * No seed (the schema has none).
  *
  * Reference pictures, videos or sounds left in the node's options are
  * refused in plain words, never dropped (LTX_25_FAST_EXTRAS; requestRules.ts
@@ -46,6 +50,8 @@ import type { VideoBuildArgs } from './types'
 export const LTX_25_FAST_ID = 'ltx-2.5-fast'
 export const LTX_25_FAST_REPLICATE_SLUG = 'lightricks/ltx-2.5-fast'
 
+/** Replicate `fps`, always sent: its default, the rate the price's frame count reads (videoRates.ts outputFrames). */
+export const LTX_25_FAST_FPS = 25
 /** Replicate `duration` (its enum). */
 export const LTX_25_FAST_SECONDS: readonly number[] = [2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20]
 /** Replicate's own default length (always sent). */
@@ -104,6 +110,7 @@ export function ltx25Fast(a: VideoBuildArgs): Record<string, unknown> {
   inp.resolution = ltx25FastResolution(adv)
   inp.aspect_ratio = AR.has(aspectRatio) ? aspectRatio : '16:9'
   inp.generate_audio = optBool(adv, 'generate_audio', true)
+  inp.fps = LTX_25_FAST_FPS
   return inp
 }
 

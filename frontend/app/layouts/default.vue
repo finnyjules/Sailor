@@ -70,6 +70,7 @@ import { createRunnerEventBuffer, ownerTabForCanvas, runnerRunIdsForTab } from '
 import { nodesNeedingEngine, workflowNodeTitles, needsEngineDescription, blockedRunRefusal } from '~/lib/runner/needsEngine'
 import { RUNNER_WORKER, isRunnerPromptId } from '#shared/runner/messages'
 import { NO_FAMILIES, parseFamilies } from '#shared/runner/families'
+import { RUNNER_STAGE_STALL_MS } from '#shared/runner/timeouts'
 import { useDirectExecution } from '~/composables/useDirectExecution'
 import { useDirectExecutionEnabled } from '~/composables/useDirectExecutionEnabled'
 import { useVueNodes } from '~/composables/useVueNodes'
@@ -2056,9 +2057,10 @@ let pendingLiveRunsResetTimer: ReturnType<typeof setTimeout> | null = null
 // NB: `Map` here would resolve to the lucide-vue-next icon imported above,
 // not the global constructor — use globalThis.Map explicitly.
 const DIRECT_RUN_STALL_MS = 120_000
-// Runner stages: longer than the 30-minute video limit, so only a stage that
-// ended without any closing event (a lost stream, a crashed server) trips it.
-const RUNNER_STAGE_STALL_MS = 35 * 60_000
+// Runner stages: RUNNER_STAGE_STALL_MS (#shared/runner/timeouts), sized from
+// the server's own limits: longer than the longest wait on one job (2 h in a
+// queue, then 30 minutes) plus 10 minutes, so a queued video that sends no
+// news isn't called stalled while the server still waits and may charge it.
 const directRunWatchdogs = new globalThis.Map<string, ReturnType<typeof setTimeout>>()
 const directRunWatchdogMs = new globalThis.Map<string, number>()
 // prompt_id → its originating tab, so a re-arm (which only carries the id) can

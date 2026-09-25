@@ -29,6 +29,12 @@ export interface PendingRequest {
   responseUrl: string
   cancelUrl: string
   submittedAt: number
+  /**
+   * When the runner first saw the service start the job (absent: not seen
+   * started yet). Saved so a restart doesn't give a started job a fresh run
+   * limit (engine.ts waitForResult).
+   */
+  startedAt?: number
   queuePosition: number | null
   /** Replicate only: how many times this request was sent again after a platform hiccup (absent = 0). */
   retries?: number

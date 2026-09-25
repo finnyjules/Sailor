@@ -205,7 +205,9 @@ describe('every payload over the settings grid fits Replicate\'s schema, has no 
           continue
         }
         for (const e of checkPayload(REPLICATE, payload)) bad.push(`${label}: ${e}`)
-        if ('seed' in payload || 'fps' in payload) bad.push(`${label}: a seed or frame rate`)
+        if ('seed' in payload) bad.push(`${label}: a seed`)
+        // The frame rate the price's frame count reads (Task C fix round 1): always 25, sent.
+        if (payload.fps !== 25 || payload.fps !== videoRate(ID)!.outputFrames!.fps) bad.push(`${label}: fps ${String(payload.fps)}`)
         if (!['720p', '1080p', '4k'].includes(String(payload.resolution))) bad.push(`${label}: resolution ${String(payload.resolution)}`)
         if ((payload.image ?? null) !== m.first || (payload.last_frame_image ?? null) !== m.last) bad.push(`${label}: frames ${JSON.stringify(payload)}`)
         if (Number(payload.duration) > 10 && !['720p', '1080p'].includes(String(payload.resolution))) bad.push(`${label}: over 10 s at ${String(payload.resolution)}`)
@@ -234,7 +236,7 @@ describe('expected payloads', () => {
     const p = await providerPlan(vid({ prompt }))
     expect(p.provider).toBe('replicate')
     expect(p.endpoint).toBe('lightricks/ltx-2.5-fast')
-    expect(p.payload).toEqual({ prompt, duration: 6, resolution: '1080p', aspect_ratio: '16:9', generate_audio: true })
+    expect(p.payload).toEqual({ prompt, duration: 6, resolution: '1080p', aspect_ratio: '16:9', generate_audio: true, fps: 25 })
     expect(checkPayload(REPLICATE, p.payload)).toEqual([])
     expect(p.backup).toBeUndefined()
   })
@@ -244,7 +246,7 @@ describe('expected payloads', () => {
     const node = vid({ prompt, duration: '10', ar: '9:16', opts: { resolution: '4k', generate_audio: false } })
     node.inputs.seed = 42
     const p = await providerPlan(node)
-    expect(p.payload).toEqual({ prompt, duration: 10, resolution: '4k', aspect_ratio: '9:16', generate_audio: false })
+    expect(p.payload).toEqual({ prompt, duration: 10, resolution: '4k', aspect_ratio: '9:16', generate_audio: false, fps: 25 })
     expect(checkPayload(REPLICATE, p.payload)).toEqual([])
     expect(p.backup).toBeUndefined()
   })
@@ -255,7 +257,7 @@ describe('expected payloads', () => {
     const p = await providerPlan(vid({ prompt, image: true, duration: '8', opts: { resolution: '720p', end_image_url: 'https://pics.test/last.png' } }), picture)
     expect(p.endpoint).toBe('lightricks/ltx-2.5-fast')
     expect(p.payload).toEqual({
-      prompt, image: picture, last_frame_image: 'https://pics.test/last.png', duration: 8, resolution: '720p', aspect_ratio: '16:9', generate_audio: true,
+      prompt, image: picture, last_frame_image: 'https://pics.test/last.png', duration: 8, resolution: '720p', aspect_ratio: '16:9', generate_audio: true, fps: 25,
     })
     expect(checkPayload(REPLICATE, p.payload)).toEqual([])
     expect(p.backup).toBeUndefined()
@@ -602,7 +604,7 @@ describe('the runner engine', () => {
     await k.engine.settled(runId)
     const submitted = k.replicate.submitted()
     expect(submitted.map(r => r.endpoint)).toEqual(['lightricks/ltx-2.5-fast'])
-    expect(submitted[0]!.payload).toEqual({ prompt: 'a fox runs through snow', duration: 2, resolution: '720p', aspect_ratio: '16:9', generate_audio: true })
+    expect(submitted[0]!.payload).toEqual({ prompt: 'a fox runs through snow', duration: 2, resolution: '720p', aspect_ratio: '16:9', generate_audio: true, fps: 25 })
     expect(k.fal.reqs.size).toBe(0)
     expect([...k.ledger.holds.values()].map(h => h.credits)).toEqual([creditsForUsd(2.28 * 0.03) + 1])
     expect((await k.store.get(runId))!.status).toBe('done')

@@ -472,7 +472,7 @@ const FLOWS: FamilyFlow[] = [
     files: [],
     provider: 'replicate',
     endpoint: 'lightricks/ltx-2.5-fast',
-    body: { prompt: 'a fox runs through snow', duration: 2, resolution: '720p', aspect_ratio: '16:9', generate_audio: true },
+    body: { prompt: 'a fox runs through snow', duration: 2, resolution: '720p', aspect_ratio: '16:9', generate_audio: true, fps: 25 },
   },
   // Task F21: Luma Ray 3.2 has no Python builder; the body is written from its
   // saved schema (runner-luma-ray-3-2.unit.spec.ts). Replicate first; text-to-video
