@@ -51,8 +51,13 @@ const MODE_LABEL: Record<number, string> = { 0: 'normal', 2: 'muted', 4: 'bypass
 
 function clone<T>(v: T): T { return v === undefined ? v : (JSON.parse(JSON.stringify(v)) as T) }
 
+// For text the MODEL reads: the raw type suffix gives the planner context.
 function nodeName(n: NodeLite): string {
   return n.title && n.title !== n.nodeType ? `${n.title} (${n.nodeType})` : n.nodeType
+}
+// For text the USER reads: the node's own title, never its internal type.
+function displayNodeName(n: NodeLite): string {
+  return n.title || n.nodeType
 }
 function findNode(s: CanvasSnapshot, id?: string): NodeLite | undefined {
   return s.nodes.find(n => n.id === id)
@@ -309,7 +314,8 @@ export function applyCanvasCommand(input: CanvasSnapshot, cmd: Command): Command
 }
 
 /** Graph-health postconditions: required inputs left unconnected, isolated
- *  nodes. Pure; warnings only. (Skips muted/bypassed nodes — they don't run.) */
+ *  nodes. Pure; warnings only. (Skips muted/bypassed nodes — they don't run.)
+ *  Messages are shown to the user (changes card), so they name nodes by title. */
 export function verifyCanvas(s: CanvasSnapshot): LayoutIssue[] {
   const issues: LayoutIssue[] = []
   const linked = new Set<string>()
@@ -318,12 +324,12 @@ export function verifyCanvas(s: CanvasSnapshot): LayoutIssue[] {
     if (n.mode === 2 || n.mode === 4) continue
     const conn = connectedInputs(s, n.id)
     for (const p of n.inputs) {
-      if (!effectivelyOptional(p) && !conn.has(p.name)) issues.push({ level: 'warn', target: n.id, message: `${nodeName(n)} has no “${p.name}” connected (required input)` })
+      if (!effectivelyOptional(p) && !conn.has(p.name)) issues.push({ level: 'warn', target: n.id, message: `${displayNodeName(n)} has no “${p.name}” connected (required input)` })
     }
     // Only flag isolation for genuine CONSUMERS — a node with at least one
     // effectively-REQUIRED input. A generator whose only input is optional (e.g.
     // FluxLoRA's img2img image) is a valid standalone root, not an error.
-    if (s.nodes.length > 1 && n.inputs.some(p => !effectivelyOptional(p)) && !linked.has(n.id)) issues.push({ level: 'warn', target: n.id, message: `${nodeName(n)} is not connected to anything` })
+    if (s.nodes.length > 1 && n.inputs.some(p => !effectivelyOptional(p)) && !linked.has(n.id)) issues.push({ level: 'warn', target: n.id, message: `${displayNodeName(n)} is not connected to anything` })
   }
   return issues
 }

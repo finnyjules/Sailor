@@ -202,6 +202,18 @@ describe('verifyCanvas', () => {
     ], edges: [] }
     expect(verifyCanvas(g).some(i => /Generate.*not connected/.test(i.message))).toBe(false)
   })
+  it('issue messages name a node by its own title, never its internal type (shown to the user)', () => {
+    const g: CanvasSnapshot = { nodes: [
+      { id: 'grad', nodeType: 'GradientStudio', title: 'Gradient Studio', widgets: {}, inputs: [], outputs: [{ name: 'image', type: 'IMAGE' }] },
+      { id: 'sh', nodeType: 'ShaderStudio', title: 'Shader Studio', widgets: {}, inputs: [{ name: 'image', type: 'IMAGE' }], outputs: [{ name: 'image', type: 'IMAGE' }] },
+    ], edges: [] }
+    const msgs = verifyCanvas(g).map(i => i.message)
+    expect(msgs.length).toBeGreaterThan(0)
+    for (const m of msgs) {
+      expect(m).toContain('Shader Studio')
+      expect(m).not.toContain('(ShaderStudio)')
+    }
+  })
 })
 
 describe('numeric sanity on widget writes', () => {

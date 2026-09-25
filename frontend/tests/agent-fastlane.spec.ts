@@ -11,8 +11,8 @@ import { openBlankWorkflow, waitForBackend } from './_helpers'
  *  - /api/agent-plan returns { text: <json-string> }; parseAgentResponse decodes
  *    that inner JSON: { reasoning, commands[], message } (+ per-command rationale).
  *  - agent key gate: opts.apiKey() reads localStorage 'sailor:Sailor.AI.AnthropicApiKey'.
- *  - proposal card's primary buttons are "Keep all" / "Keep & Run" (a per-row
- *    check button has title "Keep" — assert on the card-level labels only).
+ *  - the proposal is the changes card above the prompt (testid "prompt-changes",
+ *    buttons Reject / Approve and run / Approve) — assert on the card itself.
  *  - bar: the one prompt, a textbox named "Ask Sailor" (SailorPrompt).
  *  - We use frontend-only STUDIO nodeTypes (GradientStudio/ShaderStudio): they
  *    are synthesized into the agent catalog from AGENT_CAPABILITIES regardless
@@ -64,8 +64,8 @@ test.describe('Agent fast-lane', () => {
     // The node was placed (empirical timing check — commit after an immediate
     // preview must actually promote the ghost).
     await expect.poll(async () => page.locator('.vue-flow__node').count(), { timeout: 15_000 }).toBe(before + 1)
-    // No proposal card: the card-level Keep affordances are absent.
-    await expect(page.getByRole('button', { name: /Keep all|Keep & Run/ })).toHaveCount(0)
+    // No proposal card above the prompt.
+    await expect(page.getByTestId('prompt-changes')).toHaveCount(0)
     // One-line confirmation shown.
     await expect(page.getByText(/press Run when you're ready/i)).toBeVisible()
     // Nothing running — the header run pill stays at 0.
