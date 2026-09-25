@@ -79,8 +79,6 @@ const TAKES = [
   { label: 'warmer', changes: [{ key: 'hue', value: 40 }], rationale: 'pushes amber' },
   { label: 'softer', changes: [{ key: 'softness', value: 0.8 }], rationale: 'softer edges' },
   { label: 'grainy', changes: [{ key: 'grain', value: 0.6 }], rationale: 'adds tooth' },
-  // Changes nothing numeric — an enum-only take.
-  { label: 'loud', changes: [{ key: 'mood', value: 'loud' }], rationale: 'turns it up' },
 ]
 
 function startConfig() {
@@ -119,7 +117,7 @@ beforeEach(() => {
 })
 
 describe('useStudioAgent — asking for takes', () => {
-  it('asks /api/vibe for four variants and populates the strip', async () => {
+  it('asks /api/vibe for three variants and populates the strip', async () => {
     fetchMock.mockResolvedValue({ takes: TAKES })
     const { agent } = makeAgent()
 
@@ -127,10 +125,10 @@ describe('useStudioAgent — asking for takes', () => {
 
     const [url, opts] = fetchMock.mock.calls[0]!
     expect(url).toBe('/api/vibe')
-    expect((opts as any).body.variants).toBe(4)
+    expect((opts as any).body.variants).toBe(3)
     expect((opts as any).body.phrase).toBe('make it dreamier')
     expect(agent.hasTakes.value).toBe(true)
-    expect(agent.takes.value.map((t: StudioTake) => t.label)).toEqual(['warmer', 'softer', 'grainy', 'loud'])
+    expect(agent.takes.value.map((t: StudioTake) => t.label)).toEqual(['warmer', 'softer', 'grainy'])
     // Multi-take REPLACES the single proposal UI.
     expect(agent.hasProposal.value).toBe(false)
     expect(agent.selectedTake.value).toBeNull()
@@ -143,13 +141,13 @@ describe('useStudioAgent — asking for takes', () => {
     await agent.ask('dreamier')
     // The strip is up with nothing drawn yet: every tile is PENDING (no map
     // entry), which is what lets TakeStrip tell "still drawing" from "failed".
-    expect(agent.takes.value).toHaveLength(4)
+    expect(agent.takes.value).toHaveLength(3)
     expect(agent.takeThumbs.value.size).toBe(0)
 
     await settle()
     // happy-dom has no WebGL, so each adapter resolves null through its own
     // catch — the entry EXISTS (resolved), and its value is the error tile.
-    expect(agent.takeThumbs.value.size).toBe(4)
+    expect(agent.takeThumbs.value.size).toBe(3)
     for (const t of agent.takes.value) {
       expect(agent.takeThumbs.value.has(t)).toBe(true)
       expect(agent.takeThumbs.value.get(t)).toBeNull()
@@ -297,7 +295,7 @@ describe('useStudioAgent — ↻ different directions', () => {
 
     expect(fetchMock.mock.calls).toHaveLength(2)
     const second = (fetchMock.mock.calls[1]![1] as any).body
-    expect(second.variants).toBe(4)
+    expect(second.variants).toBe(3)
     expect(second.phrase).not.toBe(first)
     expect(second.phrase).toContain('dreamier')
   })

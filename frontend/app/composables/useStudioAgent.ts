@@ -8,10 +8,10 @@
  * Tuning is single-op (set a control's value), so changes are param patches, not
  * structural commands — but they ride the same AgentBar/AgentProposal UI.
  *
- * ## Four Takes
+ * ## Three takes
  *
  * A studio that passes `opts.takes` gets the OTHER answer shape: instead of one
- * guess shown as a proposal list, the ask comes back as four genuinely different
+ * guess shown as a proposal list, the ask comes back as three genuinely different
  * readings, shown as a filmstrip (`TakeStrip.vue`, mounted once in
  * `StudioModalShell.vue` — so every studio wired here gets it without its own
  * template). This composable owns the session: capture the original ONCE, preview
@@ -44,10 +44,11 @@ import type { TakeReviewEntry, TakeVerdict } from '~/lib/vibeReview'
 import type { GradientRecipe } from '~/lib/gradientfx/recipes'
 import { fillPicks, type EyePick } from '~/lib/gradientfx/eyePick'
 import { takeThumbFor, type TakeThumb } from '~/lib/agent/takeThumbs'
+import { TAKES_PER_SET } from '~/lib/prompt/takesSession'
 
-/** How many readings to ask for. The API accepts 2–4 and rejects anything else
- *  loudly (Task 1's `optionalVariants`), so this is a constant, not a knob. */
-const TAKE_COUNT = 4
+/** How many readings to ask for: always three (AI in Sailor spec §3.1). The API
+ *  accepts 2–4 and rejects anything else loudly, so this is a constant. */
+const TAKE_COUNT = TAKES_PER_SET
 const THUMB_SIZE = 160
 /** Tile-resolution JPEG for the see-first review — a few KB per picture, which
  *  is plenty for judging colour, direction and contrast. */
@@ -1385,7 +1386,7 @@ export function useStudioAgent(opts: { controls: () => ControlSpec[]; params: Pa
           const patch = reply.patch ?? Object.fromEntries(leaves.map(c => [c.key, c.value]))
           showProposal(patch, lostMacro ? '' : (reply.rationale ?? only?.rationale ?? ''), p)
           if (lostMacro) {
-            notice.value = 'Only part of that could be applied: the overall style change needs the four-takes view, so just the adjustments were kept.'
+            notice.value = 'Only part of that could be applied: the overall style change needs the takes view, so just the adjustments were kept.'
           }
           return
         }

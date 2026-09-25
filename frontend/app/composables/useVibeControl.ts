@@ -6,6 +6,7 @@ import type { TakePromise } from '~/lib/vibePrompt'
 import { parseTakeReview, type TakeReviewEntry } from '~/lib/vibeReview'
 import { salvageRecipes, type GradientRecipe } from '~/lib/gradientfx/recipes'
 import { salvageEyePicks, type EyePick } from '~/lib/gradientfx/eyePick'
+import { TAKES_PER_SET } from '~/lib/prompt/takesSession'
 
 /** What a multi-take ask came back with. Exactly one of `takes` (two or more
  *  survived validation) or `patch` is useful — `patch` is set when the server
@@ -65,7 +66,7 @@ export function useVibeControl() {
   }
 
   /**
-   * The same ask, in `variants` genuinely different readings (Four Takes). The
+   * The same ask, in `variants` genuinely different readings (three takes). The
    * ONLY difference on the wire is the `variants` field — everything else, the
    * controls description and the clamping on the way back, is the single-patch
    * path's own machinery, so a take can never carry a value the studio could not
@@ -81,7 +82,7 @@ export function useVibeControl() {
     effectLabel: string,
     phrase: string,
     guidance?: string,
-    variants = 4,
+    variants = TAKES_PER_SET,
   ): Promise<VibeTakesReply> {
     const apiKey = getLocalSetting('Sailor.AI.AnthropicApiKey')
 
