@@ -16,7 +16,7 @@
 
 /** Exact paths Nitro owns. */
 export const NITRO_API_PATHS = [
-  '/api/explain', '/api/pipeline-suggest', '/api/font-suggest', '/api/secrets',
+  '/api/pipeline-suggest', '/api/font-suggest', '/api/secrets',
   '/api/render-template', '/api/lora-preview', '/api/replicate-cover', '/api/google-fonts',
   '/api/loras-local', '/api/lora-cover', '/api/community-workflow', '/api/voices-local',
   '/api/voice-preview-file', '/api/vibe', '/api/vibe-review', '/api/vibe-recipes',

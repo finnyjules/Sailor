@@ -128,7 +128,6 @@ function finishRenaming() {
 function cancelRenaming() {
   editingTabId.value = null
 }
-const { explainActive, activateExplain, deactivateExplain } = useExplain()
 const { openNodeSearch } = useNodeSearch()
 
 // Ordered roughly along a typical session:
@@ -154,8 +153,6 @@ const sidebarItems = [
   // Hidden for now. Re-add to restore.
   // { label: 'Apps', icon: AppWindow, tabId: 'apps' },
   { label: 'Templates', icon: LayoutTemplate, panel: 'templates' },
-  // Help
-  { label: 'Explain', icon: Sparkles, tool: 'explain', dividerBefore: true },
 ]
 
 // Add menu — starting points only (spec §1: inert scaffolding). Two groups:
@@ -422,14 +419,7 @@ function toggleSidebarItem(label: string) {
 function runSidebarItem(item: any) {
   openSubmenu.value = null
   if (item?.tool) {
-    // Deactivate explain if switching away
-    if (activeTool.value === 'explain' && item.tool !== 'explain') {
-      deactivateExplain()
-    }
     activeTool.value = item.tool
-    if (item.tool === 'explain') {
-      activateExplain()
-    }
     // Select/Hand work natively via Vue Flow
   }
   else if (item?.panel === 'toolbox' || item?.panel === 'generators' || item?.panel === 'loras' || item?.panel === 'characters' || item?.panel === 'blocks' || item?.panel === 'assets' || item?.panel === 'templates') {
@@ -3942,7 +3932,6 @@ function dismissRunResult() {
               :displayed-canvas-id="activeProjectDoc?.activeCanvasId ?? null"
               :running-canvas-id="runningCanvasByWorker[activeWorker] ?? null"
             />
-            <ExplainOverlay :vue-canvas="vueCanvasRef" />
           </div>
           <!-- Ready to deliver: pinned project view, swapped in over the
                canvas (see ProjectMenu's pinned entry / projectView ref). -->
@@ -4560,9 +4549,6 @@ function dismissRunResult() {
             </div>
           </div>
         </Transition>
-
-        <!-- Explain panel -->
-        <ExplainPanel />
       </main>
     </div>
 
