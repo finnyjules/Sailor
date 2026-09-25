@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { dropNode, openBlankWorkflow, openCompositor, waitForBackend } from './_helpers'
+import { openCompositor, openStudio } from './_helpers'
 import { SPIKE_TAKES } from '../app/lib/shadergen/__eval__/spikeTakes'
 
 /**
@@ -72,19 +72,6 @@ async function mockVibe(page: Page) {
 }
 
 const planReply = (message: string) => ({ json: { text: JSON.stringify({ reasoning: '', commands: [], message }) } })
-
-async function openStudio(page: Page, nodeType: string, event: string) {
-  await openBlankWorkflow(page)
-  await waitForBackend(page)
-  await dropNode(page, nodeType)
-  const node = page.locator('.vue-flow__node').last()
-  await node.waitFor({ state: 'attached', timeout: 15_000 })
-  const id = await node.getAttribute('data-id')
-  expect(id).toBeTruthy()
-  await page.evaluate(([ev, nodeId]) => window.dispatchEvent(new CustomEvent(ev!, { detail: { nodeId } })), [event, id])
-  await expect(page.getByTestId('studio-shell-dock')).toBeVisible({ timeout: 20_000 })
-  await expect(prompt(page)).toBeVisible()
-}
 
 /** Every node's saved data, as the canvas (its undo history and autosave) sees it. Walks up from
  *  `.vue-flow` to VueNodeCanvas's exposed surface (tests/character-sheet.spec.ts's recipe). */

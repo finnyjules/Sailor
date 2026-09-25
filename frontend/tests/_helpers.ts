@@ -157,3 +157,21 @@ export async function openCompositor(page: Page): Promise<void> {
   await expect.poll(() => page.evaluate(() => typeof (window as any).__compositorSetLayers === 'function'),
     { timeout: 10_000 }).toBe(true)
 }
+
+/**
+ * Open a studio the way the canvas does: drop its node, then fire the studio's own open event
+ * (`sailor:openShaderStudio`, `sailor:openSpaceType`, …) with that node's id, and wait for the
+ * studio shell and its one prompt. Shared by studio-prompt.spec and shader-gen.spec.
+ */
+export async function openStudio(page: Page, nodeType: string, event: string) {
+  await openBlankWorkflow(page)
+  await waitForBackend(page)
+  await dropNode(page, nodeType)
+  const node = page.locator('.vue-flow__node').last()
+  await node.waitFor({ state: 'attached', timeout: 15_000 })
+  const id = await node.getAttribute('data-id')
+  expect(id).toBeTruthy()
+  await page.evaluate(([ev, nodeId]) => window.dispatchEvent(new CustomEvent(ev!, { detail: { nodeId } })), [event, id])
+  await expect(page.getByTestId('studio-shell-dock')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByTestId('studio-prompt').getByRole('textbox', { name: 'Ask Sailor' })).toBeVisible()
+}
