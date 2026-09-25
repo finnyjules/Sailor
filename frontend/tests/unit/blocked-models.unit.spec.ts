@@ -118,7 +118,7 @@ describe('browser: refused before any /prompt', () => {
     expect(blockedRunRefusal(takes, { runnerOn: true, families: NO_FAMILIES })).toEqual(r)
     // The runner itself off counts as every switch off.
     expect(blockedRunRefusal(takes, { runnerOn: false, families: fams('replicate-image') })).toEqual(r)
-    expect(SWITCH_OFF_REASON).toBe('Its switch is off')
+    expect(SWITCH_OFF_REASON).toBe('Its switch is off.')
   })
 
   it('runner-only with an engine-only node beside it: the reason names that node', () => {

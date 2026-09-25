@@ -61,6 +61,24 @@ describe('local /prompt proxy', () => {
     expect(proxyRequest).not.toHaveBeenCalled()
   })
 
+  it('a body over the 8 MB cap is forwarded unchecked (the browser checked first); at the cap it is checked', async () => {
+    sora.discontinued = '2026-09-24'
+    __resetModelMenusForTests()
+    const { PROMPT_CHECK_MAX_BYTES } = await import('../../server/middleware/comfyui-proxy')
+    expect(PROMPT_CHECK_MAX_BYTES).toBe(8 * 1024 * 1024)
+    const sized = (bytes: number) => {
+      const base = JSON.stringify({ ...prompt('sora-2'), pad: '' })
+      return Buffer.from(JSON.stringify({ ...prompt('sora-2'), pad: 'x'.repeat(bytes - base.length) }))
+    }
+    expect(sized(PROMPT_CHECK_MAX_BYTES).length).toBe(PROMPT_CHECK_MAX_BYTES)
+    const atCap = ev('/prompt', sized(PROMPT_CHECK_MAX_BYTES))
+    expect((await middleware(atCap)).error.type).toBe('value_not_in_list')
+    expect(proxyRequest).not.toHaveBeenCalled()
+    const over = ev('/prompt', sized(PROMPT_CHECK_MAX_BYTES + 1))
+    expect(await middleware(over)).toEqual({ proxiedTo: 'http://127.0.0.1:8188/prompt' })
+    expect(proxyRequest).toHaveBeenCalledTimes(1)
+  })
+
   it('proxies every other prompt as before', async () => {
     const e = ev('/prompt', prompt('veo-3.1'))
     expect(await middleware(e)).toEqual({ proxiedTo: 'http://127.0.0.1:8188/prompt' })

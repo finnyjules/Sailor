@@ -5,7 +5,7 @@
  * any hold, or the engine. Used by the hosted meter (`meterGraphSubmit`) and
  * the local `/prompt` proxy (server/middleware/comfyui-proxy.ts).
  */
-import { blockedPromptBody } from '../../app/lib/runner/needsEngine'
+import { blockedPromptBody } from '../../shared/runner/needsEngine'
 import { runnerFamilies } from '../runner/config'
 
 /** The 400 body for `prompt`, or null when every model in it can run on ComfyUI. */

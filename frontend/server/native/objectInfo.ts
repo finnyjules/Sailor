@@ -882,15 +882,17 @@ export function withModelOverlay(body: Catalog): Catalog {
 /**
  * The local route: the engine's catalog (parsed, overlaid, re-serialised),
  * else the stored catalog (overlaid), else 503. An engine answer JSON.parse
- * refuses (Python's NaN/Infinity) can't be overlaid and is passed through as
- * its own bytes, as before.
+ * refuses (Python's NaN/Infinity) can't be overlaid, so the stored catalog is
+ * served instead, overlaid, as hosted does; the engine's own bytes pass
+ * through only when nothing is stored.
  */
 export async function runObjectInfo(rawPath: string, canonicalPath: string, node: string | null): Promise<{ status: number, body: unknown, headers?: Record<string, string> }> {
   const got = await objectInfoBody(rawPath, canonicalPath, node)
   if (!got) return NO_NODE_DEFINITIONS
-  if (got.source === 'engine') {
-    const text = got.body ? JSON.stringify(withModelOverlay(got.body)) : got.text
-    return { status: 200, body: text, headers: { 'content-type': 'application/json; charset=utf-8' } }
-  }
-  return { status: 200, body: withModelOverlay(got.body) }
+  if (got.source !== 'engine') return { status: 200, body: withModelOverlay(got.body) }
+  const json = { 'content-type': 'application/json; charset=utf-8' }
+  if (got.body) return { status: 200, body: JSON.stringify(withModelOverlay(got.body)), headers: json }
+  const stored = storedObjectInfoBody(node)
+  if (stored?.body) return { status: 200, body: withModelOverlay(stored.body) }
+  return { status: 200, body: got.text, headers: json }
 }

@@ -253,6 +253,14 @@ describe('every /object_info source is overlaid', () => {
     expect(one.EditImageNode.input.required.model[1]).toMatchObject({ default: 'Nano Banana 2', hidden_options: ['Flux Kontext Pro', 'Flux 2 Pro'] })
   })
 
+  it('engine answers unparseable text: the stored catalog, overlaid (hidden models never shown)', async () => {
+    const file = path.join(tmp, 'baseline.json.gz')
+    fs.writeFileSync(file, zlib.gzipSync(JSON.stringify(engineFixture())))
+    __setObjectInfoBaselineFileForTests(file)
+    engineFetch.mockImplementation(async () => new Response('{"KSampler": NaN}', { status: 200 }))
+    expectOverlaid((await get('/object_info')).body, false)
+  })
+
   it('saved copy (engine down)', async () => {
     fs.mkdirSync(path.join(tmp, 'data'))
     fs.writeFileSync(path.join(tmp, 'data', 'object_info.json'), JSON.stringify(engineFixture()))

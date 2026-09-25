@@ -28,6 +28,9 @@ const NITRO_ROUTE_PREFIXES = ['/view', '/history']
 /** Spec ruling 4: an engine-only route asked for while the engine is down. */
 const NEEDS_LOCAL_ENGINE_MESSAGE = 'This needs the local engine'
 
+/** The largest local /prompt body parsed for the model check (bytes); a larger one is forwarded unchecked. */
+export const PROMPT_CHECK_MAX_BYTES = 8 * 1024 * 1024
+
 /** `/ws` in any of its spellings (`/comfyui/ws`, `/api/ws`, …) — the socket keeps its own handling. */
 function isWsPath(p: string): boolean {
   let bare = p.split('?')[0] ?? p
@@ -127,8 +130,15 @@ export default defineEventHandler(async (event) => {
   // run on ComfyUI, so it is refused here in ComfyUI's own 400 shape
   // (server/utils/blockedModels.ts). Hosted checks the same in meterGraphSubmit.
   if (deployMode() !== 'hosted' && hostedEngineDecision(normalizeEnginePath(path), event.method).kind === 'meterPrompt') {
+    // The proxy below buffers the same body (h3 caches it), so reading it here
+    // costs no second copy; only parsing it does. Over the cap the check is
+    // skipped: the browser has already checked, and ComfyUI's own "Value not
+    // in list" is still the last net.
     let prompt: unknown
-    try { prompt = JSON.parse((await readRawBody(event, 'utf8')) ?? '')?.prompt }
+    try {
+      const raw = await readRawBody(event, false)
+      if (raw && raw.length <= PROMPT_CHECK_MAX_BYTES) prompt = JSON.parse(raw.toString('utf8'))?.prompt
+    }
     catch { prompt = undefined }
     const blocked = blockedPromptRefusal(prompt)
     if (blocked) {

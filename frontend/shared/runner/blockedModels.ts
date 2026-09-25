@@ -77,7 +77,7 @@ export function blockedModelLabel(use: Pick<BlockedModelUse, 'classType' | 'valu
 }
 
 /** Why a runner-only model didn't go to the runner, when its switch is off. */
-export const SWITCH_OFF_REASON = 'Its switch is off'
+export const SWITCH_OFF_REASON = 'Its switch is off.'
 
 /**
  * The refusal for one blocked use, as a toast: a title and a description.
@@ -121,8 +121,7 @@ const CLASS_TITLES: Readonly<Record<string, string>> = {
 
 /**
  * A node's title where only the prompt is known: its `_meta.title`, else its
- * class's plain name, else "Unnamed node" (as app/lib/runner/needsEngine.ts
- * names it), never a class name.
+ * class's plain name, else "Unnamed node" (as ./needsEngine.ts names it), never a class name.
  */
 export function promptNodeTitle(prompt: ApiPrompt, nodeId: string): string {
   const node = prompt[nodeId] as { class_type?: string, _meta?: { title?: unknown } } | undefined

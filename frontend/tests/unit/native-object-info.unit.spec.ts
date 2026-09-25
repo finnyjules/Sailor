@@ -264,8 +264,8 @@ describe('engine up: pass-through and a saved copy', () => {
 })
 
 describe('engine up: exact bytes, Python JSON, and a remembered outage', () => {
-  it('passes the engine\'s exact text through as JSON, NaN and all', async () => {
-    writeBaseline(staleCatalog())
+  it('passes the engine\'s exact text through as JSON, NaN and all, when nothing is stored', async () => {
+    __setObjectInfoBaselineFileForTests(path.join(tmp, 'missing.gz'))
     const text = '{"KSampler": {"input": {"required": {"cfg": ["FLOAT", {"default": NaN}]}}}}'
     engineFetch.mockImplementation(async () => new Response(text, { status: 200, headers: { 'content-type': 'application/json' } }))
     const res = await handler(new Request('http://x/object_info'))
@@ -274,6 +274,13 @@ describe('engine up: exact bytes, Python JSON, and a remembered outage', () => {
     expect(await res.text()).toBe(text)
     await __objectInfoSaveSettledForTests()
     expect(fs.existsSync(path.join(tmp, 'data', 'object_info.json'))).toBe(false) // nothing parseable to save
+  })
+
+  it('an unparseable engine answer with a stored catalog: the stored one is served (overlaid), as hosted does', async () => {
+    writeBaseline(staleCatalog())
+    engineFetch.mockImplementation(async () => new Response('{"KSampler": NaN}', { status: 200 }))
+    const b = (await call('GET', '/object_info')).body
+    expect(Object.keys(b)).toEqual(Object.keys(staleCatalog()))
   })
 
   it('remembers a failed engine for 3 s, then asks again', async () => {
