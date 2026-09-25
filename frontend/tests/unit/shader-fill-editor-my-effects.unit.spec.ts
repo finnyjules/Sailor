@@ -9,8 +9,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick, ref } from 'vue'
-import { recordFromTake } from '~/lib/myEffects/defs'
-import { myEffectRecords, setMyEffectRecord } from '~/lib/myEffects/library'
+import { expandMyEffect, recordFromTake, withCodeVersion } from '~/lib/myEffects/defs'
+import { myEffectRecords, myEffectsLoaded, setMyEffectRecord } from '~/lib/myEffects/library'
 import { unprefixedKey } from '~/lib/shaderfill/descriptor'
 import { DEFAULT_SHADER_SPEC } from '~/lib/spacetype/fillTile'
 import { SPIKE_TAKES } from '~/lib/shadergen/__eval__/spikeTakes'
@@ -69,5 +69,39 @@ describe('ShaderFillEditor ⇄ MyEffectRecipe: the u_ ↔ unprefixed round-trip 
     expect(emitted.effectId).toBe('mine_aaaaaaaaaaaa')
     expect(emitted.params).toEqual({ [bare]: 0.42 })
     expect(Object.keys(emitted.params)).not.toContain(u) // never left `u_`-prefixed
+  })
+})
+
+// Ruling #2 follow-up: every target stores a pinned `mine_x~vN` (the newest included), so the
+// picker button must name the effect from that id, and the gallery must show Current on the
+// effect's one card whichever version the fill is pinned to.
+describe('ShaderFillEditor: a fill pinned to a My effect version', () => {
+  const two = withCodeVersion(rec, SPIKE_TAKES.rain![0]!, { request: 'heavier', now: 'y' })
+  beforeEach(() => {
+    myEffectRecords.value = []; setMyEffectRecord(two); myEffectsLoaded.value = true
+    catalog.value = { effects: expandMyEffect(two) }
+  })
+  const mountPinned = (effectId: string) => mount(ShaderFillEditor, {
+    props: { modelValue: { ...DEFAULT_SHADER_SPEC, effectId, params: {} }, showAnchor: false, showSpeed: false, showSeed: false, showInput: false },
+    attachTo: document.body,
+  })
+  const pickerButton = (w: ReturnType<typeof mountPinned>) => w.findAll('button').find(b => b.text().includes(t.name))!
+  const currentCard = () => [...document.body.querySelectorAll('[data-effect-id]')]
+    .find(e => e.closest('button')?.textContent?.includes('Current'))?.getAttribute('data-effect-id')
+
+  it('the newest version: the button reads the effect’s own name, and its card is Current', async () => {
+    const w = mountPinned('mine_aaaaaaaaaaaa~v2')
+    expect(pickerButton(w).text()).toContain(t.name)
+    expect(pickerButton(w).text()).not.toContain('· v')
+    await pickerButton(w).trigger('click'); await nextTick()
+    expect(currentCard()).toBe('mine_aaaaaaaaaaaa~v2')
+    w.unmount()
+  })
+  it('an older version: the button says which (“· v1”), and the effect’s one card is still Current', async () => {
+    const w = mountPinned('mine_aaaaaaaaaaaa~v1')
+    expect(pickerButton(w).text()).toContain(`${t.name} · v1`)
+    await pickerButton(w).trigger('click'); await nextTick()
+    expect(currentCard()).toBe('mine_aaaaaaaaaaaa~v2')
+    w.unmount()
   })
 })
