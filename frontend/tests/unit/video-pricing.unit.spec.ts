@@ -19,9 +19,10 @@ import { asInt, parseJsonObject } from '~~/server/runner/generators/opts'
 import { RUNNER_REPLICATE_VIDEO_MODEL_IDS, RUNNER_VIDEO_MODEL_IDS } from '#shared/runner/eligibility'
 import { MODEL_COSTS, UnpricedGraphError, priceGraph } from '~~/server/utils/priceBook'
 import { PACKS, PACK_VIDEO_CLIP, packClipCredits } from '~~/server/utils/packs'
-import { creditsForUsd } from '#shared/pricing/markup'
+import { creditsForUsd, usdChargedAtCost } from '#shared/pricing/markup'
+import { FAL_FIRST_VIDEO } from '~~/server/runner/generators/twins'
 import { nodeCredits, priceNode, providerUsd } from '#shared/pricing/nodePrice'
-import { VIDEO_RATES, videoRate, videoRateLabel, videoUsd } from '#shared/pricing/videoRates'
+import { VIDEO_RATES, videoBackupUsd, videoRate, videoRateLabel, videoUsd } from '#shared/pricing/videoRates'
 import { effectiveVideoSettings, hasVideoSettings, maxVideoSeconds } from '#shared/pricing/videoSettings'
 import { nodeCreditEstimate } from '~/lib/nodeCreditEstimate'
 import { estimateUsdForNodes, linkedInputNames, widgetValueMap } from '~/lib/costEstimate'
@@ -55,9 +56,10 @@ describe('the video rate card', () => {
     }
   })
 
-  it('the first service is the one the builder sends to: fal for the fal list, Replicate for the rest', () => {
+  it('the first service is the one the builder sends to: fal for the fal list (and Kling 3.0 and PixVerse v6 since Task S3), Replicate for the rest', () => {
     for (const id of RUNNER_VIDEO_MODEL_IDS) expect(VIDEO_RATES[id]!.service, id).toBe('fal')
-    for (const id of RUNNER_REPLICATE_VIDEO_MODEL_IDS) expect(VIDEO_RATES[id]!.service, id).toBe('replicate')
+    for (const id of RUNNER_REPLICATE_VIDEO_MODEL_IDS) expect(VIDEO_RATES[id]!.service, id).toBe(FAL_FIRST_VIDEO[id] ? 'fal' : 'replicate')
+    expect(Object.keys(FAL_FIRST_VIDEO).sort()).toEqual(['kling-v3', 'pixverse-v6'])
     expect(VIDEO_RATES['fabric-1.0']!.service).toBe('replicate')
   })
 
@@ -215,11 +217,15 @@ describe('settings parity: the price reads what the builder sends', () => {
 
 // ── Worked examples, one per unit type ──────────────────────────────────────
 describe('worked examples', () => {
-  const examples: { name: string, inputs: Record<string, unknown>, rate: number, seconds: number, usd: number, credits: number }[] = [
+  // `backup`: the backup service's price for the same clip (Task S3). The
+  // charge is the first service's price with the markup, or the backup's at
+  // cost, whichever is higher.
+  const examples: { name: string, inputs: Record<string, unknown>, rate: number, seconds: number, usd: number, credits: number, backup?: number }[] = [
     // fal, per second, split by sound: $0.40/s with audio.
     { name: 'Veo 3.1, 8 s with sound', inputs: { model: 'veo-3.1', duration: '8', model_options: '{"generate_audio":true}' }, rate: 0.40, seconds: 8, usd: 3.20, credits: 480 },
-    // Replicate, per second, split by sound; the builder sends no mode, so "pro" (1080p): $0.336/s with audio.
-    { name: 'Kling 3.0, 15 s with sound', inputs: { model: 'kling-v3', duration: '15', model_options: '{"generate_audio":true}' }, rate: 0.336, seconds: 15, usd: 5.04, credits: 756 },
+    // fal first since Task S3, per second, split by sound: pro (1080p) $0.168/s with audio. Its
+    // Replicate backup ($0.336/s, $5.04) costs more: covered at cost, 504 credits.
+    { name: 'Kling 3.0, 15 s with sound', inputs: { model: 'kling-v3', duration: '15', model_options: '{"generate_audio":true}' }, rate: 0.168, seconds: 15, usd: 2.52, credits: 504, backup: 5.04 },
     // fal, per second by resolution: $0.3034/s at 720p.
     { name: 'Seedance 2.0, 15 s at 720p', inputs: { model: 'seedance-2.0', duration: '15', model_options: '{"resolution":"720p"}' }, rate: 0.3034, seconds: 15, usd: 4.551, credits: 683 },
     // fal, per second, one resolution: $0.08/s at 768p (list price after the promotion).
@@ -230,9 +236,13 @@ describe('worked examples', () => {
 
   for (const ex of examples) {
     it(`${ex.name}: rate × seconds, through the markup`, () => {
-      expect(providerUsd('GenerateVideoNode', ex.inputs)).toBeCloseTo(ex.usd, 9)
-      expect(providerUsd('GenerateVideoNode', ex.inputs)).toBeCloseTo(ex.rate * ex.seconds, 9)
-      expect(nodeCredits('GenerateVideoNode', ex.inputs)).toBe(creditsForUsd(ex.rate * ex.seconds))
+      const s = effectiveVideoSettings(String(ex.inputs.model), ex.inputs.duration, '16:9', ex.inputs.model_options)!
+      expect(videoUsd(String(ex.inputs.model), s)).toBeCloseTo(ex.usd, 9)
+      expect(videoUsd(String(ex.inputs.model), s)).toBeCloseTo(ex.rate * ex.seconds, 9)
+      const basis = ex.backup ? Math.max(ex.usd, usdChargedAtCost(ex.backup)) : ex.usd
+      if (ex.backup) expect(videoBackupUsd(String(ex.inputs.model), s)).toBeCloseTo(ex.backup, 9)
+      expect(providerUsd('GenerateVideoNode', ex.inputs)).toBeCloseTo(basis, 9)
+      expect(nodeCredits('GenerateVideoNode', ex.inputs)).toBe(creditsForUsd(basis))
       expect(nodeCredits('GenerateVideoNode', ex.inputs)).toBe(ex.credits)
     })
 
@@ -343,16 +353,29 @@ describe('Seedance 2.0 takes 14 s (its schema\'s "4"…"15"; S1b fix round 1, M3
 
 describe('PixVerse v6 is priced as the service renders it', () => {
   // Since Task S1b the builder sends `quality` and `generate_audio_switch`, so
-  // the service renders the node's resolution and sound.
+  // the service renders the node's resolution and sound. Since Task S3 fal is
+  // the first service (half Replicate's rate) and Replicate the backup, so the
+  // charge is Replicate's price at cost.
   it('at the quality and sound sent (sound on by default), never below the ComfyUI path\'s 540p', () => {
     // Python still sends `resolution`, so that path renders 540p: 360p is priced at 540p (S1b fix round 1).
     expect(effectiveVideoSettings('pixverse-v6', '5', '16:9', '{"resolution":"360p","generate_audio":true}'))
       .toEqual({ seconds: 5, resolution: '540p', audio: true, inputVideoSeconds: 0 })
-    expect(providerUsd('GenerateVideoNode', { model: 'pixverse-v6', duration: '5', model_options: '{"resolution":"1080p"}' })).toBeCloseTo(0.23 * 5, 6)
-    expect(providerUsd('GenerateVideoNode', { model: 'pixverse-v6', duration: '5', model_options: '{"resolution":"1080p","generate_audio":false}' })).toBeCloseTo(0.18 * 5, 6)
-    expect(providerUsd('GenerateVideoNode', { model: 'pixverse-v6', duration: '8' })).toBeCloseTo(0.12 * 8, 6)
-    // A resolution outside the schema is sent as the 720p default.
-    expect(providerUsd('GenerateVideoNode', { model: 'pixverse-v6', duration: '8', model_options: '{"resolution":"4k"}' })).toBeCloseTo(0.12 * 8, 6)
+    // [options, seconds, fal $/s, Replicate $/s]
+    const rows: [string, string, number, number][] = [
+      ['{"resolution":"1080p"}', '5', 0.115, 0.23],
+      ['{"resolution":"1080p","generate_audio":false}', '5', 0.09, 0.18],
+      ['{}', '8', 0.06, 0.12],
+      // A resolution outside the schema is sent as the 720p default.
+      ['{"resolution":"4k"}', '8', 0.06, 0.12],
+    ]
+    for (const [model_options, duration, fal, rep] of rows) {
+      const inputs = { model: 'pixverse-v6', duration, model_options }
+      const s = effectiveVideoSettings('pixverse-v6', duration, '16:9', model_options)!
+      expect(videoUsd('pixverse-v6', s), model_options).toBeCloseTo(fal * s.seconds, 6)
+      expect(videoBackupUsd('pixverse-v6', s), model_options).toBeCloseTo(rep * s.seconds, 6)
+      expect(providerUsd('GenerateVideoNode', inputs), model_options).toBeCloseTo(usdChargedAtCost(rep * s.seconds), 6)
+      expect(nodeCredits('GenerateVideoNode', inputs), model_options).toBe(Math.round(rep * s.seconds * 100))
+    }
   })
 })
 
@@ -377,8 +400,9 @@ describe('the line-up page\'s loss table: no video row is below cost', () => {
   ]
   for (const r of rows) {
     it(`${r.what}: charged at or above $${r.costs.toFixed(2)}`, () => {
-      const usd = providerUsd('GenerateVideoNode', r.inputs)!
-      expect(usd).toBeGreaterThanOrEqual(r.costs - 1e-9)
+      // In credits (1 credit = $0.01): the price basis of a model with a backup
+      // (Task S3) sits below the backup's cost, and its credits cover it.
+      expect(nodeCredits('GenerateVideoNode', r.inputs)! / 100).toBeGreaterThanOrEqual(r.costs - 1e-9)
       expect(charge('GenerateVideoNode', r.inputs) / 100).toBeGreaterThanOrEqual(r.costs)
     })
   }
@@ -440,9 +464,12 @@ describe('a linked pricing widget: badge = charge', () => {
       expect(est.hostedCredits).toBe(chargeCredits)
 
       // …at the most expensive the link could turn out: 15 s, and for linked
-      // options the card's dearest rate (4k, $0.42/s).
+      // options the card's dearest rate. Kling 3.0's Replicate backup (Task S3)
+      // costs more than fal, so it is covered at cost: $0.224/s silent at 1080p,
+      // and its dearest rate (4k, $0.42/s).
       const worst = linked === 'duration' ? 0.224 * 15 : 0.42 * 5
-      expect(chargeCredits).toBe(creditsForUsd(worst) + 1)
+      expect(chargeCredits).toBe(creditsForUsd(usdChargedAtCost(worst)) + 1)
+      expect(chargeCredits).toBe(Math.round(worst * 100) + 1)
     })
   }
 
@@ -528,7 +555,9 @@ describe('the video gallery price label', () => {
     expect(videoRateLabel('seedance-2.0')).toBe('$0.3034/s at 720p')
     expect(videoRateLabel('wan-2.5-i2v-fast')).toBe('$0.068/s at 720p')
     expect(videoRateLabel('runway-gen-4.5')).toBe('$0.12/s')
-    expect(videoRateLabel('kling-v3')).toBe('$0.336/s at 1080p')
+    // fal first since Task S3: the dollar label is the first service's rate.
+    expect(videoRateLabel('kling-v3')).toBe('$0.168/s at 1080p')
+    expect(videoRateLabel('pixverse-v6')).toBe('$0.06/s at 720p')
   })
   it('per-clip models show the clip price', () => {
     expect(videoRateLabel('hailuo-2.3')).toBe('$0.28 for 6 s at 768p')
@@ -539,6 +568,9 @@ describe('the video gallery price label', () => {
     expect(videoRateLabel('veo-3.1', { hosted: true })).toBe('60 credits/s at 720p')
     // creditsForUsd(0.28) is 43, not 42: see the float-noise note on MODEL_COSTS below.
     expect(videoRateLabel('hailuo-2.3', { hosted: true })).toBe(`${creditsForUsd(0.28)} credits for 6 s at 768p`)
+    // Credits are the charge, which covers the backup at cost (Task S3):
+    // Kling 3.0's default 5 s with sound is Replicate's $1.68, 168 credits.
+    expect(videoRateLabel('kling-v3', { hosted: true })).toBe('33.6 credits/s at 1080p')
   })
   it('every catalogue model has a label, and the gallery no longer shows priceHint', () => {
     for (const m of VIDEO_MODELS) expect(videoRateLabel(m.id), m.id).toBeTruthy()

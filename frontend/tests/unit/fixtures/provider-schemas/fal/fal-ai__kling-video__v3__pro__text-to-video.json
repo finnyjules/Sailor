@@ -1,0 +1,261 @@
+{
+  "endpoint": "fal-ai/kling-video/v3/pro/text-to-video",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/kling-video/v3/pro/text-to-video",
+    "pricing": "https://fal.ai/models/fal-ai/kling-video/v3/pro/text-to-video/llms.txt"
+  },
+  "input": {
+    "$ref": "#/components/schemas/KlingVideoV3ProTextToVideoInput"
+  },
+  "output": {
+    "$ref": "#/components/schemas/KlingVideoV3ProTextToVideoOutput"
+  },
+  "components": {
+    "schemas": {
+      "KlingVideoV3ProTextToVideoInput": {
+        "properties": {
+          "cfg_scale": {
+            "default": 0.5,
+            "maximum": 1,
+            "description": "\n            The CFG (Classifier Free Guidance) scale is a measure of how close you want\n            the model to stick to your prompt.\n        ",
+            "title": "Cfg Scale",
+            "minimum": 0,
+            "type": "number"
+          },
+          "aspect_ratio": {
+            "default": "16:9",
+            "enum": [
+              "16:9",
+              "9:16",
+              "1:1"
+            ],
+            "description": "The aspect ratio of the generated video frame",
+            "title": "Aspect Ratio",
+            "type": "string"
+          },
+          "negative_prompt": {
+            "default": "blur, distort, and low quality",
+            "maxLength": 2500,
+            "title": "Negative Prompt",
+            "type": "string"
+          },
+          "duration": {
+            "default": "5",
+            "enum": [
+              "3",
+              "4",
+              "5",
+              "6",
+              "7",
+              "8",
+              "9",
+              "10",
+              "11",
+              "12",
+              "13",
+              "14",
+              "15"
+            ],
+            "description": "The duration of the generated video in seconds",
+            "title": "Duration",
+            "type": "string"
+          },
+          "prompt": {
+            "examples": [
+              "Close-up of glowing fireflies dancing in a dark forest at twilight. Soft bioluminescent particles float through the air. Shallow depth of field, bokeh lights in background. Magical atmosphere, gentle movement."
+            ],
+            "description": "Text prompt for video generation. Either prompt or multi_prompt must be provided, but not both.",
+            "anyOf": [
+              {
+                "maxLength": 2500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "multi_prompt": {
+            "examples": [
+              null
+            ],
+            "description": "List of prompts for multi-shot video generation. If provided, overrides the single prompt and divides the video into multiple shots with specified prompts and durations.",
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/KlingV3MultiPromptElement"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Multi Prompt"
+          },
+          "generate_audio": {
+            "default": true,
+            "description": "Whether to generate native audio for the video. Supports Chinese and English voice output. Other languages are automatically translated to English. For English speech, use lowercase letters; for acronyms or proper nouns, use uppercase.",
+            "title": "Generate Audio",
+            "type": "boolean"
+          },
+          "shot_type": {
+            "default": "customize",
+            "enum": [
+              "customize",
+              "intelligent"
+            ],
+            "description": "The type of multi-shot video generation. 'intelligent' lets the model automatically determine shot structure.",
+            "title": "Shot Type",
+            "type": "string"
+          }
+        },
+        "x-fal-order-properties": [
+          "prompt",
+          "duration",
+          "multi_prompt",
+          "generate_audio",
+          "shot_type",
+          "aspect_ratio",
+          "negative_prompt",
+          "cfg_scale"
+        ],
+        "title": "TextToVideoV3ProRequest",
+        "type": "object"
+      },
+      "KlingV3MultiPromptElement": {
+        "required": [
+          "prompt"
+        ],
+        "x-fal-order-properties": [
+          "prompt",
+          "duration"
+        ],
+        "title": "KlingV3MultiPromptElement",
+        "properties": {
+          "duration": {
+            "default": "5",
+            "enum": [
+              "1",
+              "2",
+              "3",
+              "4",
+              "5",
+              "6",
+              "7",
+              "8",
+              "9",
+              "10",
+              "11",
+              "12",
+              "13",
+              "14",
+              "15"
+            ],
+            "description": "The duration of this shot in seconds",
+            "title": "Duration",
+            "type": "string"
+          },
+          "prompt": {
+            "description": "The prompt for this shot.",
+            "title": "Prompt",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "KlingVideoV3ProTextToVideoOutput": {
+        "required": [
+          "video"
+        ],
+        "x-fal-order-properties": [
+          "video"
+        ],
+        "title": "TextToVideoV3ProOutput",
+        "properties": {
+          "video": {
+            "examples": [
+              {
+                "file_size": 8062911,
+                "file_name": "output.mp4",
+                "content_type": "video/mp4",
+                "url": "https://storage.googleapis.com/falserverless/example_outputs/kling-v3/pro-t2v/out.mp4"
+              }
+            ],
+            "description": "The generated video",
+            "$ref": "#/components/schemas/File"
+          }
+        },
+        "type": "object"
+      },
+      "File": {
+        "required": [
+          "url"
+        ],
+        "x-fal-order-properties": [
+          "url",
+          "content_type",
+          "file_name",
+          "file_size"
+        ],
+        "title": "File",
+        "properties": {
+          "file_size": {
+            "examples": [
+              4404019
+            ],
+            "description": "The size of the file in bytes.",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size"
+          },
+          "file_name": {
+            "examples": [
+              "z9RV14K95DvU.png"
+            ],
+            "description": "The name of the file. It will be auto-generated if not provided.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Name"
+          },
+          "content_type": {
+            "examples": [
+              "image/png"
+            ],
+            "description": "The mime type of the file.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Type"
+          },
+          "url": {
+            "description": "The URL where the file can be downloaded from.",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  "pricingText": "For every second of video you generated, you will be charged **$0.112** (audio off) or **$0.168** (audio on), if voice control is used while generating audio you will be charged **$0.196**. For example, a 5s video with audio on and voice control will cost **$0.98**\n\nFor more details, see [fal.ai pricing](https://fal.ai/pricing)."
+}

@@ -78,9 +78,19 @@ describe('fal-edit payloads match the Python nodes', () => {
       const plan = await planCase(c)
       expect(plan.kind).toBe('provider')
       if (plan.kind !== 'provider') return
-      expect(plan.provider).toBe(c.call.provider)
-      expect(plan.endpoint).toBe(c.call.endpoint)
-      expect(plan.payload).toEqual(c.call.payload)
+      // Relight goes to Replicate's Nano Banana 2 first since Task S3
+      // (server/runner/generators/twins.ts): Python's fal call is its backup,
+      // and the first request carries the same prompt, pictures and settings.
+      const moved = c.class_type === 'RelightNode'
+      const python = moved ? plan.backup! : plan
+      if (moved) {
+        expect(plan.provider).toBe('replicate')
+        expect(plan.endpoint).toBe('google/nano-banana-2')
+        expect(plan.payload).toEqual({ prompt: c.call.payload.prompt, image_input: c.call.payload.image_urls, resolution: '1K', output_format: 'png' })
+      }
+      expect(python.provider).toBe(c.call.provider)
+      expect(python.endpoint).toBe(c.call.endpoint)
+      expect(python.payload).toEqual(c.call.payload)
       expect(plan.media).toBe('image')
     })
 
@@ -282,15 +292,16 @@ function flow(node: { class_type: string; inputs: Record<string, unknown> }): Ap
   }
 }
 
-const ENGINE_CASES: [string, ApiPrompt, string, string][] = [
+/** [class, workflow, endpoint, output prefix, service] — Relight goes to Replicate first since Task S3. */
+const ENGINE_CASES: [string, ApiPrompt, string, string, ('fal' | 'replicate')?][] = [
   ['EditImageNode', flow({ class_type: 'EditImageNode', inputs: { model: 'Nano Banana 2', input_image: ['1', 0], prompt: 'make it blue', aspect_ratio: 'match_input_image', resolution: '1K', seed: 0, safety_tolerance: 2, prompt_upsampling: false, output_format: 'png' } }), 'fal-ai/nano-banana-2/edit', 'edit_image'],
   ['DevelopImageNode', flow({ class_type: 'DevelopImageNode', inputs: { input_image: ['1', 0], resolution: '2K', seed: 0 } }), 'fal-ai/nano-banana-2/edit', 'edit_image'],
-  ['RelightNode', flow({ class_type: 'RelightNode', inputs: { image: ['1', 0], preset: 'Golden hour', light: '{"azimuth":-30,"elevation":20,"intensity":0.6}', keep_background: true, instructions: 'warmer' } }), 'fal-ai/nano-banana-2/edit', 'relight'],
+  ['RelightNode', flow({ class_type: 'RelightNode', inputs: { image: ['1', 0], preset: 'Golden hour', light: '{"azimuth":-30,"elevation":20,"intensity":0.6}', keep_background: true, instructions: 'warmer' } }), 'google/nano-banana-2', 'relight', 'replicate'],
   ['BlendSceneNode', flow({ class_type: 'BlendSceneNode', inputs: { model: 'Flux Kontext Pro', image: ['1', 0], unify_lighting: true, contact_shadows: true, match_camera_look: true, preserve_identity: true, keep_feather: 2, prompt: '', seed: 0, output_format: 'png' } }), 'fal-ai/flux-pro/kontext', 'blend_scene'],
 ]
 
 describe('fal-edit on the engine (hosted, fake fal)', () => {
-  it.each(ENGINE_CASES)('%s: Image card → node → Image card', async (ct, prompt, endpoint, prefix) => {
+  it.each(ENGINE_CASES)('%s: Image card → node → Image card', async (ct, prompt, endpoint, prefix, service = 'fal') => {
     const k = makeKit({ hosted: true, deps: { families: () => FAL_EDIT } })
     writeFileSync(join(k.root, 'input', 'a.png'), new Uint8Array([1, 2, 3]))
     const { runId, promptIds } = await k.engine.startRun({ userId: k.userId, takes: [prompt], workflow: null, canvasId: null, projectUuid: null, projectName: null })
@@ -301,7 +312,7 @@ describe('fal-edit on the engine (hosted, fake fal)', () => {
     // The picture is handed off once, and the request carries that link.
     expect(k.upload).toHaveBeenCalledTimes(1)
     expect(k.upload).toHaveBeenCalledWith(new Uint8Array([1, 2, 3]), 'a.png', 'image/png')
-    const sent = k.fal.submitted()
+    const sent = service === 'fal' ? k.fal.submitted() : k.replicate.submitted()
     expect(sent.map(r => r.endpoint)).toEqual([endpoint])
     expect(JSON.stringify(sent[0]!.payload)).toContain('https://fal.storage/a.png')
     // The charge is the node's price for its settings (+ the render credit the output card brings).
@@ -333,7 +344,7 @@ describe('fal-edit on the engine (hosted, fake fal)', () => {
     const { runId, promptIds } = await k.engine.startRun({ userId: k.userId, takes: [ENGINE_CASES[i]![1]], workflow: null, canvasId: null, projectUuid: null, projectName: null })
     await k.engine.settled(runId)
     const rec = await k.engine.record(k.userId, promptIds[0]!)
-    const sent = k.fal.submitted()[0]!.payload.prompt as string
+    const sent = (ENGINE_CASES[i]![4] === 'replicate' ? k.replicate.submitted() : k.fal.submitted())[0]!.payload.prompt as string
     expect(rec!.prompt).toContain(want)
     if (i !== 0) expect(rec!.prompt).toBe(sent)
   })

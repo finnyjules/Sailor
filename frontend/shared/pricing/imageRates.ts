@@ -31,10 +31,16 @@
  * the service does not list) is priced at the card's highest tier, so an odd
  * setting is never under-priced.
  *
+ * A model with a BACKUP service (server/runner/generators/twins.ts; its card
+ * in IMAGE_BACKUP_RATES) is priced at the first service's price, or the
+ * backup's covered at cost, whichever is higher (`imagePriceUsd`; the P4 rule,
+ * markup.ts usdChargedAtCost), so a job the backup serves never costs Sailor
+ * more than it charged.
+ *
  * Pure data and pure functions; relative imports only (Nitro, the app and
  * vitest all load it).
  */
-import { creditsForUsd } from './markup'
+import { creditsForUsd, usdChargedAtCost } from './markup'
 import { BFL_MAX_MEGAPIXELS, FAL_MAX_MEGAPIXELS, FLUX_2_DEV_MAX_MEGAPIXELS, effectiveImageSettings, maxImageCount, type ImageSettings } from './imageSettings'
 
 interface RateMeta {
@@ -195,12 +201,31 @@ export const IMAGE_RATES: Record<string, ImageRate> = {
   'minimax-image-01': repImage('minimax/image-01', 0.01),
 }
 
+/**
+ * What the BACKUP service charges, for each model that has one. The backup
+ * renders the same picture (the same width × height), so it reads the same
+ * ImageSettings.
+ */
+export const IMAGE_BACKUP_RATES: Record<string, ImageRate> = {
+  // fal-ai/flux-2 (FLUX.2 [dev]): "$0.012 per megapixels". fal doesn't say how
+  // it rounds, so a picture is its pixels / 1,000,000 rounded up.
+  'flux-2-dev': {
+    unit: 'per_megapixel', perMegapixel: 0.012, maxMegapixels: FLUX_2_DEV_MAX_MEGAPIXELS,
+    service: 'fal', source: fal('fal-ai/flux-2'), read: READ, confidence: 'verified',
+  },
+}
+
 const own = <T>(o: Record<string, T>, k: string): T | undefined =>
   (Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined)
 
 /** The rate card for an id (own keys only), or undefined. */
 export function imageRate(modelId: string): ImageRate | undefined {
   return own(IMAGE_RATES, modelId)
+}
+
+/** The backup service's card for an id, or undefined when it has no backup. */
+export function imageBackupRate(modelId: string): ImageRate | undefined {
+  return own(IMAGE_BACKUP_RATES, modelId)
 }
 
 /** Round away binary float noise (a tenth of a micro-dollar). */
@@ -221,11 +246,27 @@ function perPicture(rate: ImageRate, s: ImageSettings): number {
   }
 }
 
+/** Dollars on one card for one request with these settings. */
+function requestUsd(rate: ImageRate, s: ImageSettings): number {
+  return tidy(perPicture(rate, s) * s.images + (s.webSearch && rate.webSearch ? rate.webSearch : 0))
+}
+
 /** Dollars the first service charges for one request with these settings, or null for an unpriced id. */
 export function imageUsd(modelId: string, s: ImageSettings): number | null {
   const rate = imageRate(modelId)
-  if (!rate) return null
-  return tidy(perPicture(rate, s) * s.images + (s.webSearch && rate.webSearch ? rate.webSearch : 0))
+  return rate ? requestUsd(rate, s) : null
+}
+
+/**
+ * The price basis for one request: the first service's price, or the
+ * backup's covered at cost, whichever is higher (see the header). `credits =
+ * creditsForUsd(basis)`. Null for an unpriced id.
+ */
+export function imagePriceUsd(modelId: string, s: ImageSettings): number | null {
+  const first = imageUsd(modelId, s)
+  if (first == null) return null
+  const backup = imageBackupRate(modelId)
+  return backup ? Math.max(first, usdChargedAtCost(requestUsd(backup, s))) : first
 }
 
 /** The most one picture's request can cost on this card: the largest size, the dearest tier, the web search. */
@@ -247,6 +288,12 @@ function maxSettings(modelId: string): ImageSettings {
 export function imageMaxUsd(modelId: string): number | null {
   if (!imageRate(modelId)) return null
   return imageUsd(modelId, maxSettings(modelId))
+}
+
+/** imageMaxUsd as a price basis (imagePriceUsd's rule): a linked `model_options`. */
+export function imagePriceMaxUsd(modelId: string): number | null {
+  if (!imageRate(modelId)) return null
+  return imagePriceUsd(modelId, maxSettings(modelId))
 }
 
 /**
@@ -286,8 +333,10 @@ export function imageRateLabel(modelId: string, defaultAspectRatio: string, opts
   const top = imageMaxPictureUsd(modelId)
   if (base == null || top == null) return null
   if (opts.hosted) {
-    const b = creditsForUsd(base)
-    const t = creditsForUsd(top)
+    // Credits: the charge, which covers the backup (imagePriceUsd); dollars stay the first service's.
+    const defaults = effectiveImageSettings(modelId, defaultAspectRatio, {})!
+    const b = creditsForUsd(imagePriceUsd(modelId, defaults)!)
+    const t = creditsForUsd(imagePriceUsd(modelId, { ...maxSettings(modelId), images: 1 })!)
     const unit = b === 1 ? 'credit' : 'credits'
     return t > b ? `${b} ${unit}, up to ${t}` : `${b} ${unit}`
   }

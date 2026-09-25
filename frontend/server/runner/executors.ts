@@ -37,6 +37,10 @@ import {
 } from './generators/restyle'
 import { moodboardFiles, parseInputFileRef } from './inputs'
 import { planCompositor } from './compositor/plan'
+import {
+  FAL_FIRST_VIDEO, IMAGE_BACKUPS, NANO_BANANA_2_REPLICATE, VIDEO_BACKUPS,
+  flux2ProEditOnReplicate, nanoBananaOnFal, nanoBananaOnReplicate, type ServiceCall,
+} from './generators/twins'
 import { checkRequest } from './requestRules'
 import type { OutputFile, RunnerProvider } from './types'
 
@@ -110,13 +114,23 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
   }
   // A widget toggle as Python reads it: missing is the node's default.
   const flag = (name: string, def: boolean): boolean => inputs[name] === undefined ? def : pyTruthy(inputs[name])
-  const still = (endpoint: string, payload: Record<string, unknown>, prefix: string, provider: RunnerProvider = 'fal'): NodePlan => ({
+  const still = (endpoint: string, payload: Record<string, unknown>, prefix: string, provider: RunnerProvider = 'fal', backup?: ServiceCall): NodePlan => ({
     kind: 'provider', provider, endpoint, payload, media: 'image', prefix,
     uiFor: files => ({ images: files, animated: [false] }),
+    ...(backup ? { backup } : {}),
   })
-  // A nano-actions call: google/nano-banana-2 on Replicate, the pictures in the node's order.
-  const nanoAction = (prompt: string, imageInput: string[], prefix: string): NodePlan =>
-    still(NANO_BANANA_2_SLUG, { prompt, image_input: imageInput, resolution: '1K', output_format: 'png' }, prefix, 'replicate')
+  /** A planned call and its backup (twins.ts), as a still-image plan. */
+  const stillCall = (call: ServiceCall, prefix: string, backup?: ServiceCall): NodePlan =>
+    still(call.endpoint, call.payload, prefix, call.provider, backup)
+  // A nano-actions call: google/nano-banana-2 on Replicate, the pictures in
+  // the node's order; fal's Nano Banana 2 edit is the backup (twins.ts).
+  const nanoAction = (prompt: string, imageInput: string[], prefix: string): NodePlan => {
+    const payload = { prompt, image_input: imageInput, resolution: '1K', output_format: 'png' }
+    return still(NANO_BANANA_2_SLUG, payload, prefix, 'replicate', nanoBananaOnFal(NANO_BANANA_2_REPLICATE, payload))
+  }
+  // FLUX.2 [pro] edit on fal, Replicate's FLUX.2 [pro] the backup (twins.ts).
+  const flux2Edit = (payload: Record<string, unknown>, prefix: string): NodePlan =>
+    still(FLUX_2_EDIT_APP, payload, prefix, 'fal', flux2ProEditOnReplicate(payload))
 
   // A nano-actions node Python would return early from: its picture is handed
   // on as it is. No call, no hand-off, no charge (stageEstimate holds nothing for it).
@@ -148,9 +162,11 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
           adv: parseJsonObject(inputs.model_options),
           refs: null,
         })
+        const backup = IMAGE_BACKUPS[String(inputs.model)]?.(payload)
         return {
           kind: 'provider', provider: 'replicate', endpoint: onReplicate.slug, payload, media: 'image', prefix: 'generate_image',
           uiFor: files => ({ images: files, animated: [false] }),
+          ...(backup ? { backup } : {}),
         }
       }
       const desc = RUNNER_IMAGE_MODELS[String(inputs.model)]
@@ -194,14 +210,25 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       const onReplicate = RUNNER_REPLICATE_VIDEO_MODELS[id]
       if (!RUNNER_VIDEO_MODELS[id] && onReplicate) {
         const first = onReplicate.modes.includes('i2v') ? linkedFirstFile('image') : null
-        const payload = onReplicate.build({
+        const args = {
           prompt: asText(inputs.prompt),
           aspectRatio: asText(inputs.aspect_ratio) || '16:9',
           duration: asInt(inputs.duration, onReplicate.defaultDuration),
           seed: asInt(inputs.seed, 0),
           image: first ? await ctx.toUrl(first) : null,
           adv: parseJsonObject(inputs.model_options),
-        })
+        }
+        const payload = onReplicate.build(args)
+        // Kling 3.0 and PixVerse v6 go to fal first; this Replicate request is their backup (twins.ts).
+        const falFirst = FAL_FIRST_VIDEO[id]
+        if (falFirst) {
+          const call = falFirst(args)
+          return {
+            kind: 'provider', provider: 'fal', endpoint: call.endpoint, payload: call.payload, media: 'video', prefix: 'generate_video',
+            uiFor: () => null,
+            backup: { provider: 'replicate', endpoint: onReplicate.slug, payload },
+          }
+        }
         return {
           kind: 'provider', provider: 'replicate', endpoint: onReplicate.slug, payload, media: 'video', prefix: 'generate_video',
           uiFor: () => null,
@@ -220,10 +247,12 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
         adv: parseJsonObject(inputs.model_options),
       })
       const fn = falVideoFn(payload, desc.fnByMode)
+      const backup = VIDEO_BACKUPS[id]?.(payload)
       return {
         kind: 'provider', provider: 'fal', endpoint: fn ? `${desc.app}/${fn}` : desc.app, payload, media: 'video', prefix: 'generate_video',
         // GenerateVideoNode shows nothing itself; the Video card after it does.
         uiFor: () => null,
+        ...(backup ? { backup } : {}),
       }
     }
 
@@ -240,7 +269,7 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
         }), 'edit_image')
       }
       if (model === 'Flux 2 Pro') {
-        return still(FLUX_2_EDIT_APP, falFlux2Edit({ imageUrls: [image], prompt, outputFormat, seed }), 'edit_image')
+        return flux2Edit(falFlux2Edit({ imageUrls: [image], prompt, outputFormat, seed }), 'edit_image')
       }
       if (model === 'Flux Kontext Pro') {
         return still(FLUX_KONTEXT_APP, falKontext({
@@ -264,6 +293,8 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     }
 
     // RelightNode (comfy_extras/nodes_relight.py): image, then the reference; 1K, png, no seed.
+    // Replicate's Nano Banana 2 first (cheaper), fal's the backup (twins.ts);
+    // the ComfyUI path still tries fal first.
     case 'RelightNode': {
       const image = await pictureUrl('image', 'There is no picture to relight')
       const hasReference = isLink(inputs.reference)
@@ -275,9 +306,8 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
         light.azimuth, light.elevation, light.intensity,
         flag('keep_background', true), hasReference, asText(inputs.instructions),
       )
-      return still(NANO_BANANA_2_EDIT_APP, falNanoBananaEdit({
-        imageUrls, prompt, resolution: '1K', outputFormat: 'png', seed: 0,
-      }), 'relight')
+      const onFal = falNanoBananaEdit({ imageUrls, prompt, resolution: '1K', outputFormat: 'png', seed: 0 })
+      return stillCall(nanoBananaOnReplicate(NANO_BANANA_2_REPLICATE, onFal), 'relight', { provider: 'fal', endpoint: NANO_BANANA_2_EDIT_APP, payload: onFal })
     }
 
     // BlendSceneNode (:2940), the two Flux modes. A custom prompt wins over the toggles.
@@ -293,7 +323,7 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       const outputFormat = asText(inputs.output_format) || 'png'
       const seed = asInt(inputs.seed, 0)
       if (model === 'Flux 2 Pro') {
-        return still(FLUX_2_EDIT_APP, falFlux2Edit({ imageUrls: [image], prompt, outputFormat, seed }), 'blend_scene')
+        return flux2Edit(falFlux2Edit({ imageUrls: [image], prompt, outputFormat, seed }), 'blend_scene')
       }
       if (model === 'Flux Kontext Pro') {
         // Kontext here gets only output_format and seed: no aspect, safety or upsampling.
@@ -429,7 +459,7 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
         outputFormat: inputs.output_format === undefined ? 'png' : inputs.output_format,
         seed: asInt(inputs.seed, 0),
       })
-      return still(call.endpoint, call.payload, 'restyle', call.provider)
+      return stillCall(call, 'restyle', call.backup)
     }
 
     // ── frame family (comfy_extras/nodes_compositor.py) ──

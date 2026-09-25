@@ -15,6 +15,10 @@
  * its schema lacks (Kling's cfg_scale, Runway's motion, stray seeds…).
  * helpers/pythonParity.ts compares every other field; the fixture is kept
  * for those.
+ *
+ * Since Task S3 Kling 3.0 and PixVerse v6 go to fal first
+ * (server/runner/generators/twins.ts); their Replicate request, still built
+ * here, is the plan's backup.
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -22,6 +26,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { planNode } from '~~/server/runner/executors'
 import { nodeCredits, unpricedProviderNode } from '~~/server/runner/metering'
 import { RUNNER_REPLICATE_VIDEO_MODELS, RUNNER_VIDEO_MODELS } from '~~/server/runner/generators/video'
+import { FAL_FIRST_VIDEO } from '~~/server/runner/generators/twins'
 import {
   LEGACY_VIDEO_MODEL_REMAP, PROVIDER_TYPES, RUNNER_NODE_RULES, RUNNER_REPLICATE_VIDEO_MODEL_IDS, RUNNER_VIDEO_MODEL_IDS,
   isRunnerEligible, runnerTakesNode,
@@ -103,9 +108,12 @@ describe('replicate-video payloads match the Python builders (where Python keeps
     const { plan, toUrl } = await planCase(c)
     expect(plan.kind).toBe('provider')
     if (plan.kind !== 'provider') return
-    expect(plan.provider).toBe('replicate')
-    expect(plan.endpoint).toBe(c.slug)
-    expect(plan.payload).toEqual(built)
+    // A model that moved to fal first (Task S3) carries this request as its backup.
+    const onReplicate = FAL_FIRST_VIDEO[c.model] ? plan.backup! : plan
+    if (FAL_FIRST_VIDEO[c.model]) expect(plan.provider).toBe('fal')
+    expect(onReplicate.provider).toBe('replicate')
+    expect(onReplicate.endpoint).toBe(c.slug)
+    expect(onReplicate.payload).toEqual(built)
     expect(plan.media).toBe('video')
     // A text-to-video-only model ignores a linked first frame: it is not even handed off.
     expect(toUrl).toHaveBeenCalledTimes(c.args.image && c.modes.includes('i2v') ? 1 : 0)
@@ -135,11 +143,17 @@ describe('replicate-video plans', () => {
       'hailuo-2.3': 'first_frame_image', 'luma-ray-2-720p': 'start_image_url',
     }
     expect(Object.keys(field).sort()).toEqual([...RUNNER_REPLICATE_VIDEO_MODEL_IDS].sort())
+    // Kling 3.0 and PixVerse v6 go to fal first (Task S3): fal's own field there, the Replicate one in the backup.
+    const onFal: Record<string, string> = { 'kling-v3': 'start_image_url', 'pixverse-v6': 'image_url' }
     for (const [id, name] of Object.entries(field)) {
       const p = await plan(node(id, { image: ['src', 0] }))
       if (p.kind !== 'provider') throw new Error('expected a provider plan')
-      const carrying = Object.entries(p.payload).filter(([, v]) => v === 'https://fal.storage/first.png').map(([k]) => k)
-      expect(carrying, id).toEqual(name ? [name] : [])
+      const carrying = (payload: Record<string, unknown>) => Object.entries(payload).filter(([, v]) => v === 'https://fal.storage/first.png').map(([k]) => k)
+      if (onFal[id]) {
+        expect(carrying(p.payload), id).toEqual([onFal[id]])
+        expect(carrying(p.backup!.payload), id).toEqual([name])
+      }
+      else expect(carrying(p.payload), id).toEqual(name ? [name] : [])
     }
   })
 
@@ -319,7 +333,8 @@ const start = (k: ReturnType<typeof makeKit>, takes: ApiPrompt[]) =>
 describe('replicate-video on the engine (hosted, fake fal and Replicate)', () => {
   it('four fal pictures pause at a Gate; Continue with two ticked makes two Replicate videos and charges for two', async () => {
     const k = makeKit({ hosted: true, deps: { families: () => REPLICATE_VIDEO } })
-    const takes = [1, 2, 3, 4].map(s => gatedFlow({ imageSeed: s, videoModel: 'kling-v3' }))
+    // A model whose first service is Replicate (Kling 3.0 moved to fal in Task S3).
+    const takes = [1, 2, 3, 4].map(s => gatedFlow({ imageSeed: s, videoModel: 'runway-gen-4.5' }))
     const { runId } = await start(k, takes)
     await k.engine.settled(runId)
     expect((await k.store.get(runId))!.status).toBe('paused')
@@ -334,15 +349,15 @@ describe('replicate-video on the engine (hosted, fake fal and Replicate)', () =>
     const videos = k.replicate.submitted()
     expect(videos).toHaveLength(2)
     for (const v of videos) {
-      expect(v.endpoint).toBe('kwaivgi/kling-v3-video')
-      // No cfg_scale: kwaivgi/kling-v3-video's schema has none (Task S1b).
+      expect(v.endpoint).toBe('runwayml/gen-4.5')
+      // No motion: runwayml/gen-4.5's schema has none (Task S1b); seed 0 is no seed.
       expect(v.payload).toEqual({
-        prompt: 'the fox runs', aspect_ratio: '16:9', duration: 5, generate_audio: true,
-        start_image: v.payload.start_image,
+        prompt: 'the fox runs', aspect_ratio: '16:9', duration: 5,
+        image: v.payload.image,
       })
-      expect(v.payload.start_image).toMatch(/^https:\/\/fal\.storage\/generate_image_\d{5}_\.png$/)
+      expect(v.payload.image).toMatch(/^https:\/\/fal\.storage\/generate_image_\d{5}_\.png$/)
     }
-    expect(new Set(videos.map(v => v.payload.start_image)).size).toBe(2)
+    expect(new Set(videos.map(v => v.payload.image)).size).toBe(2)
 
     const run = (await k.store.get(runId))!
     expect(run.status).toBe('done')
@@ -376,8 +391,8 @@ describe('replicate-video on the engine (hosted, fake fal and Replicate)', () =>
       return orig(url, opts)
     })
     const k = makeKit({ replicate, deps: { families: () => REPLICATE_VIDEO, now: () => clock } })
-    // Any Replicate video model; Sora (discontinued in H2) is refused before it starts.
-    const { runId } = await start(k, [withCard(vid('kling-v3'))])
+    // Any Replicate-first video model; Sora (discontinued in H2) is refused before it starts.
+    const { runId } = await start(k, [withCard(vid('runway-gen-4.5'))])
     await k.engine.settled(runId)
     const rec = (await k.store.get(runId))!.takes[0]!.nodes['1']!
     expect(rec).toMatchObject({ status: 'error', error: 'The service took more than 30 minutes to make this video, so it was cancelled' })

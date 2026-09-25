@@ -46,7 +46,12 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // below what its request costs — PixVerse at least 540p, Wan 2.7 at least 5 s,
 // Flux 2 Dev at least 2 MP; LTX-Video back to its flat 50-step ceiling;
 // Seedance 2.0 takes (and prices) 14 s.
-export const PRICE_BOOK_VERSION = 'lineup-s1b-fix1'
+// lineup-s3 (Task S3): first and backup services. Kling 3.0 and PixVerse v6
+// priced at fal (their new first service), Relight and Restyle on Nano Banana
+// 2 at Replicate; a model with a backup is priced at the first service with
+// the markup, or the backup at cost, whichever is higher (so Kling 3.0 and
+// PixVerse v6 charge Replicate's cost, their ComfyUI path's service).
+export const PRICE_BOOK_VERSION = 'lineup-s3'
 
 export const BASE_RENDER_CREDITS = 1
 

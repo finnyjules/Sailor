@@ -149,14 +149,19 @@ function videoFlow(c: VideoCase): FamilyFlow {
 
 const hasCall = (c: NodeCase) => 'endpoint' in c.call && !c.error
 
-/** One workflow per family, each a Python fixture case (see the labels). */
+/**
+ * One workflow per family, each a Python fixture case (see the labels). Since
+ * Task S3 Kling 3.0 and Restyle's Nano Banana 2 go to a different first
+ * service than Python's (server/runner/generators/twins.ts), so those two
+ * families take a model whose first service is still Python's.
+ */
 const FLOWS: FamilyFlow[] = [
   nodeFlow('fal-edit', pick(FIX.falEdit, 'fal-edit Edit', c => c.class_type === 'EditImageNode' && hasCall(c) && c.links.length === 1)),
   nodeFlow('replicate-image', pick(FIX.replicateImage, 'flux-2-pro seed 42', c => c.widgets.model === 'flux-2-pro' && c.widgets.seed === 42 && hasCall(c))),
   nodeFlow('nano-actions', pick(FIX.nanoActions, 'Remove object', c => c.class_type === 'RemoveObjectNode' && hasCall(c))),
-  videoFlow(pick(FIX.replicateVideo, 'kling-v3 with a frame', c => c.model === 'kling-v3' && !!c.args.image && !c.error)),
+  videoFlow(pick(FIX.replicateVideo, 'runway-gen-4.5 with a frame', c => c.model === 'runway-gen-4.5' && !!c.args.image && !c.error)),
   nodeFlow('ref-edits', pick(FIX.refEdits, 'references ×3', c => c.class_type === 'GenerateFromReferencesNode' && c.links.length === 3 && hasCall(c))),
-  nodeFlow('restyle', pick(FIX.restyle, 'restyle with a style picture', c => c.class_type === 'RestyleFromImageNode' && hasCall(c) && c.links.includes('style_image'))),
+  nodeFlow('restyle', pick(FIX.restyle, 'restyle on Nano Banana Pro with a style picture', c => c.class_type === 'RestyleFromImageNode' && c.widgets.model === 'Nano Banana Pro' && hasCall(c) && c.links.includes('style_image'))),
 ]
 
 // ── The routes ───────────────────────────────────────────────────────────
@@ -356,7 +361,7 @@ describe('B10 · a Replicate image feeds a Gate, which feeds a Replicate video',
       for (const [j, t] of [1, 3].entries()) {
         const frame = run.takes[t]!.nodes['1']!.outputs[0]!.filename
         expect(videos[j]!.endpoint).toBe(vid.endpoint)
-        expect(videos[j]!.payload).toEqual({ ...vid.body, start_image: `https://fal.storage/${frame}` })
+        expect(videos[j]!.payload).toEqual({ ...vid.body, image: `https://fal.storage/${frame}` })
         expect(run.takes[t]!.nodes['3']!.request!.provider).toBe('replicate')
       }
       for (const t of [0, 2]) expect(run.takes[t]!.nodes['3']!.request ?? null).toBeNull()

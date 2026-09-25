@@ -1,0 +1,159 @@
+{
+  "endpoint": "black-forest-labs/flux-3",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/black-forest-labs/flux-3"
+  },
+  "versionId": "93515f53aad737958ca158c96e36e7f48f0197f9ba1f28fadbfb62437dcbb5ed",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "draft": {
+            "type": "boolean",
+            "title": "Draft",
+            "default": false,
+            "x-order": 7,
+            "description": "Generate a fast, low-cost draft preview instead of a full-quality clip. Drafts are 720p."
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "title": "Images",
+            "default": [],
+            "x-order": 1,
+            "description": "Optional images to drive the video, placed on screen pixel for pixel. One image opens the clip (image-to-video). Two images start and end it. Three or more (up to 10) become a storyboard — the first starts it, the last ends it, and the rest fall evenly in between (needs a duration). Leave empty for text-to-video. Must be PNG, JPEG, or WebP."
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "x-order": 0,
+            "description": "Text description of the video to generate. Plain language works — the prompt is interpreted and expanded before generation. Describe the scene, action, camera moves, and any audio you want."
+          },
+          "duration": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/duration"
+              }
+            ],
+            "default": "auto",
+            "x-order": 5,
+            "description": "Length of the generated clip in seconds. 'auto' lets the model pick to fit the content. Three or more images need an explicit duration."
+          },
+          "resolution": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/resolution"
+              }
+            ],
+            "default": "720p",
+            "x-order": 4,
+            "description": "Output resolution."
+          },
+          "start_video": {
+            "type": "string",
+            "title": "Start Video",
+            "format": "uri",
+            "default": null,
+            "x-order": 2,
+            "nullable": true,
+            "description": "A video to continue from its final frames. Use this to extend a shot or chain generations into a longer sequence. Must be an mp4, at most 50MB and 15 seconds. Can't be combined with images."
+          },
+          "aspect_ratio": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/aspect_ratio"
+              }
+            ],
+            "default": "auto",
+            "x-order": 3,
+            "description": "Aspect ratio of the generated video. 'auto' picks a ratio from your prompt and any inputs."
+          },
+          "generate_audio": {
+            "type": "boolean",
+            "title": "Generate Audio",
+            "default": true,
+            "x-order": 6,
+            "description": "Generate synchronized audio (ambient sound, speech, effects). Set to false for a silent clip."
+          },
+          "safety_tolerance": {
+            "type": "integer",
+            "title": "Safety Tolerance",
+            "default": 2,
+            "maximum": 4,
+            "minimum": 0,
+            "x-order": 8,
+            "description": "Moderation tolerance for input and output, 0 (strictest) to 4 (most permissive). Requests with image or video inputs are limited to 2."
+          }
+        }
+      },
+      "duration": {
+        "enum": [
+          "auto",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20"
+        ],
+        "type": "string",
+        "title": "duration",
+        "description": "An enumeration."
+      },
+      "resolution": {
+        "enum": [
+          "720p",
+          "1080p"
+        ],
+        "type": "string",
+        "title": "resolution",
+        "description": "An enumeration."
+      },
+      "aspect_ratio": {
+        "enum": [
+          "auto",
+          "21:9",
+          "2:1",
+          "16:9",
+          "4:3",
+          "1:1",
+          "3:4",
+          "9:16"
+        ],
+        "type": "string",
+        "title": "aspect_ratio",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "string",
+        "title": "Output",
+        "format": "uri"
+      }
+    }
+  }
+}

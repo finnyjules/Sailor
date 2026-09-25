@@ -34,6 +34,8 @@ type Schema = Record<string, unknown>
 const ANNOTATIONS = new Set([
   'title', 'description', 'default', 'examples', 'example', 'format', 'deprecated',
   'readOnly', 'writeOnly', 'nullable', '_fal_ui_field',
+  // fal's note on a file field ("Max file size: 50.0MB, Min width: 300px …"): prose, not a rule on the link.
+  'limit_description',
 ])
 /** Keywords this checker applies. */
 const VALIDATORS = new Set([

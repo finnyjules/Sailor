@@ -5,7 +5,10 @@
  * existing builder tests use: the Python-parity fixtures' settings
  * (runner-builders.json, runner-families.json) run through the same
  * builders and planNode those tests use. Since Task S1b the builders follow
- * these schemas, not Python, wherever the two disagree.
+ * these schemas, not Python, wherever the two disagree. Since Task S3 a plan
+ * may carry a backup on the other service (server/runner/generators/twins.ts):
+ * it fits its own schema too, and where the runner's first service moved
+ * (Relight, Restyle on Nano Banana 2) the backup is Python's call.
  */
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -17,6 +20,9 @@ import { FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_
 import { NANO_BANANA_2_SLUG, NANO_BANANA_SLUG } from '~~/server/runner/generators/actions'
 import { IMAGE_EDIT_MODELS, PRODUCT_SHOT_SLUG, imageEditCall } from '~~/server/runner/generators/refEdits'
 import { RESTYLE_NANO_BANANA_SLUGS, STYLE_TRANSFER_SLUG } from '~~/server/runner/generators/restyle'
+import {
+  FLUX_2_DEV_FAL_APP, FLUX_2_PRO_REPLICATE, FLUX_3_REPLICATE_SLUG, KLING_V3_FAL_APP, NANO_BANANA_PRO_REPLICATE, PIXVERSE_V6_FAL_APP,
+} from '~~/server/runner/generators/twins'
 import type { OutputFile } from '~~/server/runner/types'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
 import { NANO_BANANA_SHORT_PROMPT, PROMPT_MIN_LENGTH, SEEDANCE_REFERENCE_LIMITS, requestProblem } from '~~/server/runner/requestRules'
@@ -179,8 +185,12 @@ for (const key of FAMILY_KEYS) {
         const plan = planned
         if (plan.kind !== 'provider') throw new Error(`expected a provider call, got ${plan.kind}`)
         // The parity specs prove this is the Python call; here it meets the provider's own format.
-        expect(`${plan.provider} ${plan.endpoint}`).toBe(`${c.call!.provider} ${c.call!.endpoint}`)
+        // Where the runner's first service moved (Task S3), Python's call is the backup.
+        const python = `${c.call!.provider} ${c.call!.endpoint}`
+        const same = `${plan.provider} ${plan.endpoint}` === python ? plan : plan.backup
+        expect(same && `${same.provider} ${same.endpoint}`).toBe(python)
         expectFits(plan.provider as Provider, plan.endpoint, plan.payload)
+        if (plan.backup) expectFits(plan.backup.provider as Provider, plan.backup.endpoint, plan.backup.payload)
       })
     }
   })
@@ -205,6 +215,10 @@ function runnerEndpoints(): string[] {
     const call = imageEditCall(slug, { prompt: 'p', image_input: ['u'] })
     out.add(`${call.provider} ${call.endpoint}`)
   }
+  // Task S3: the first services that moved, and the backups (twins.ts).
+  for (const app of [KLING_V3_FAL_APP, PIXVERSE_V6_FAL_APP]) for (const fn of ['text-to-video', 'image-to-video']) out.add(`fal ${app}/${fn}`)
+  out.add(`fal ${FLUX_2_DEV_FAL_APP}`)
+  for (const slug of [FLUX_3_REPLICATE_SLUG, NANO_BANANA_PRO_REPLICATE, FLUX_2_PRO_REPLICATE]) out.add(`replicate ${slug}`)
   return [...out].sort()
 }
 

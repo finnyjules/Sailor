@@ -11,12 +11,19 @@
  * define is ignored, a field not sent is the schema's default, and a request
  * the schema refuses outright costs nothing (the provider rejects it). The
  * price Sailor charges for the same node must be at or above that cost.
+ *
+ * Since Task S3 a model's first service may not be the one Python sends to
+ * (Kling 3.0 and PixVerse v6 go to fal first; Python still sends Replicate),
+ * so the cost is read from the Replicate card, whichever of the two it is, and
+ * compared with the charge in credits: the price basis of a model with a
+ * backup covers that backup at cost, below its dollar figure.
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { providerUsd } from '#shared/pricing/nodePrice'
-import { videoUsd } from '#shared/pricing/videoRates'
+import { nodeCredits, providerUsd } from '#shared/pricing/nodePrice'
+import { usdChargedAtCost } from '#shared/pricing/markup'
+import { videoBackupRate, videoBackupUsd, videoRate, videoUsd } from '#shared/pricing/videoRates'
 import { imageUsd } from '#shared/pricing/imageRates'
 import { FLUX_2_DEV_PYTHON_PATH_MEGAPIXELS, billedMegapixels } from '#shared/pricing/imageSettings'
 import { RUNNER_IMAGE_MODELS } from '~~/server/runner/generators/image'
@@ -59,7 +66,24 @@ function videoCost(id: string, r: Record<string, unknown>): number | null {
     default: resolution = String(r.resolution).toLowerCase()
   }
   const audio = r.generate_audio_switch ?? r.generate_audio ?? id.startsWith('sora')
-  return videoUsd(id, { seconds, resolution, audio: audio === true, inputVideoSeconds: 0 })
+  const s = { seconds, resolution, audio: audio === true, inputVideoSeconds: 0 }
+  // Python sends Replicate: its card is the first or, since Task S3, the backup.
+  if (videoRate(id)?.service === 'replicate') return videoUsd(id, s)
+  expect(videoBackupRate(id)?.service, `${id}: Replicate's card`).toBe('replicate')
+  return videoBackupUsd(id, s)
+}
+
+/** The charge for a node, in dollars (1 credit = $0.01): never below a cost. */
+const chargedUsd = (ct: string, inputs: Record<string, unknown>) => nodeCredits(ct, inputs)! / 100
+
+/**
+ * The price covers `cost`, the Python request's: the price basis is at or
+ * above it, or, where that request goes to the model's backup service (Task
+ * S3), at or above it covered at cost, and the charge in credits at or above it.
+ */
+function expectCovered(ct: string, inputs: Record<string, unknown>, cost: number, onBackup: boolean, label: string) {
+  expect(providerUsd(ct, inputs)!, label).toBeGreaterThanOrEqual((onBackup ? usdChargedAtCost(cost) : cost) - 1e-9)
+  expect(chargedUsd(ct, inputs), label).toBeGreaterThanOrEqual(cost - 1e-9)
 }
 
 const BFL = (label: unknown) => billedMegapixels(Math.min(Number.parseFloat(String(label)) * 1024 * 1024, 2048 * 2048))
@@ -107,7 +131,7 @@ describe('the price never falls below what the Python path\'s request costs', ()
       if (c.args.image) inputs.image = ['src', 0]
       const cost = videoCost(c.model, r)
       expect(cost, c.model).not.toBeNull()
-      expect(providerUsd('GenerateVideoNode', inputs)!, `${c.model} ${JSON.stringify(c.args)} renders ${JSON.stringify(r)}`).toBeGreaterThanOrEqual(cost! - 1e-9)
+      expectCovered('GenerateVideoNode', inputs, cost!, videoRate(c.model)?.service !== 'replicate', `${c.model} ${JSON.stringify(c.args)} renders ${JSON.stringify(r)}`)
       priced++
     }
     expect(priced).toBeGreaterThan(300)
@@ -120,7 +144,7 @@ describe('the price never falls below what the Python path\'s request costs', ()
       if (!r) continue
       const cost = imageCost(String(c.widgets.model), r)
       expect(cost, String(c.widgets.model)).not.toBeNull()
-      expect(providerUsd('GenerateImageNode', c.widgets)!, `${JSON.stringify(c.widgets)} renders ${JSON.stringify(r)}`).toBeGreaterThanOrEqual(cost! - 1e-9)
+      expectCovered('GenerateImageNode', c.widgets, cost!, false, `${JSON.stringify(c.widgets)} renders ${JSON.stringify(r)}`)
       priced++
     }
     expect(priced).toBeGreaterThan(1000)
@@ -130,8 +154,9 @@ describe('the price never falls below what the Python path\'s request costs', ()
     const cases = (FAMILIES.replicateVideo as any[]).filter(c => !c.error)
     const pix = cases.find(c => c.model === 'pixverse-v6' && asRendered('replicate', c.slug, c.payload))
     expect(asRendered('replicate', pix.slug, pix.payload)).toMatchObject({ quality: '540p', generate_audio_switch: false })
-    // A PixVerse node set to 360p is still priced at the 540p Python renders.
-    expect(providerUsd('GenerateVideoNode', { model: 'pixverse-v6', duration: '5', model_options: '{"resolution":"360p","generate_audio":false}' })).toBeCloseTo(0.07 * 5, 9)
+    // A PixVerse node set to 360p is still priced at the 540p Python renders
+    // (on Replicate, $0.07/s silent; covered at cost since fal went first in Task S3).
+    expect(chargedUsd('GenerateVideoNode', { model: 'pixverse-v6', duration: '5', model_options: '{"resolution":"360p","generate_audio":false}' })).toBeCloseTo(0.07 * 5, 9)
     const wan = cases.find(c => c.model === 'wan-2.7-t2v' && asRendered('replicate', c.slug, c.payload))
     expect(asRendered('replicate', wan.slug, wan.payload)).toMatchObject({ duration: 5 })
     // A Wan 2.7 node set to 2 s is still priced at the 5 s Python renders.

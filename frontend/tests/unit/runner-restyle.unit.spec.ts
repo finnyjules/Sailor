@@ -46,11 +46,21 @@ const OTHERS: ReadonlySet<RunnerFamily> = new Set(RUNNER_FAMILIES.filter(f => f 
 const IP = 'Style Transfer · IP-Adapter'
 /** The models the restyle family takes. IP-Adapter left the runner in H2 (retired; its price is only an estimate). */
 const TAKEN = RESTYLE_MODELS.filter(m => m !== IP)
+/**
+ * Python's first call per model. Since Task S3 the runner sends Nano Banana 2
+ * to Replicate first (server/runner/generators/twins.ts) with this fal call as
+ * its backup, carrying the same prompt, pictures, resolution and format.
+ */
 const ENDPOINTS: Record<string, string> = {
   'Nano Banana 2': 'fal fal-ai/nano-banana-2/edit',
   'Nano Banana Pro': 'fal fal-ai/nano-banana-pro/edit',
   'Nano Banana': 'replicate google/nano-banana',
   [IP]: 'replicate fofr/style-transfer',
+}
+
+/** The request Python makes: the plan itself, or its backup where the runner's first service moved (Nano Banana 2). */
+function pythonCall<P extends { provider: string, endpoint: string, payload: Record<string, unknown>, backup?: { provider: string, endpoint: string, payload: Record<string, unknown> } }>(plan: P) {
+  return plan.provider === 'replicate' && plan.endpoint === 'google/nano-banana-2' ? plan.backup! : plan
 }
 
 // ── Parity with the Python node ──────────────────────────────────────────
@@ -126,9 +136,16 @@ describe('restyle payloads match the Python node', () => {
       const plan = await planCase(c, handedOff)
       expect(plan.kind).toBe('provider')
       if (plan.kind !== 'provider') return
-      expect(plan.provider).toBe(c.call!.provider)
-      expect(plan.endpoint).toBe(c.call!.endpoint)
-      expect(plan.payload).toEqual(c.call!.payload)
+      const python = pythonCall(plan)
+      if (c.widgets.model === 'Nano Banana 2') {
+        // Replicate first (Task S3): the same request under Replicate's names.
+        expect(`${plan.provider} ${plan.endpoint}`).toBe('replicate google/nano-banana-2')
+        const f = c.call!.payload
+        expect(plan.payload).toEqual({ prompt: f.prompt, image_input: f.image_urls, resolution: f.resolution, output_format: f.output_format === 'jpeg' ? 'jpg' : f.output_format })
+      }
+      expect(python.provider).toBe(c.call!.provider)
+      expect(python.endpoint).toBe(c.call!.endpoint)
+      expect(python.payload).toEqual(c.call!.payload)
       expect(plan.media).toBe('image')
       // The content first; the style picture only when it is sent, and last.
       const sent = JSON.stringify(c.call!.payload)
@@ -141,19 +158,22 @@ describe('restyle payloads match the Python node', () => {
   it('restyle_moodboard_test.py: content first, then the board; the style picture is ignored', async () => {
     const c = CASES.find(x => x.widgets.model === 'Nano Banana 2' && String(x.widgets.style_refs).includes('00_a.png')
       && x.links.includes('style_image') && x.widgets.style_in === 'dusty pastel palette')!
-    const plan = await planCase(c)
-    if (plan.kind !== 'provider') throw new Error('expected a provider plan')
+    const planned = await planCase(c)
+    if (planned.kind !== 'provider') throw new Error('expected a provider plan')
+    const plan = pythonCall(planned)
     expect(plan.payload.image_urls).toEqual(['IMG:content_image', 'BOARD:00_a.png', 'BOARD:01_b.jpg'])
     expect(plan.payload.prompt).toContain('STYLE references')
     expect(plan.payload.prompt).toContain('dusty pastel palette')
     expect(plan.payload).not.toHaveProperty('seed')
+    expect(planned.payload).not.toHaveProperty('seed')
   })
 
   it('restyle_moodboard_test.py: the board is capped at three; IP-Adapter takes the first board picture it can read', async () => {
     const five = CASES.find(x => x.widgets.model === 'Nano Banana 2' && String(x.widgets.style_refs).includes('e.png') && !x.links.includes('style_image'))!
     const p5 = await planCase(five)
     if (p5.kind !== 'provider') throw new Error('expected a provider plan')
-    expect(p5.payload.image_urls).toHaveLength(1 + 3)
+    expect(pythonCall(p5).payload.image_urls).toHaveLength(1 + 3)
+    expect(p5.payload.image_input).toHaveLength(1 + 3)
 
     const handedOff: string[] = []
     const partial = CASES.find(x => x.widgets.model === IP && String(x.widgets.style_refs).includes('c.webp') && !x.links.includes('style_image') && !x.widgets.style_in)!
@@ -167,8 +187,9 @@ describe('restyle payloads match the Python node', () => {
 
   it('restyle_moodboard_test.py: a board whose pictures are gone restyles on the taste alone (Nano Banana), and fails IP-Adapter', async () => {
     const nb = CASES.find(x => x.widgets.model === 'Nano Banana 2' && String(x.widgets.style_refs).includes('gone_b.png') && !x.links.includes('style_image') && x.widgets.style_in)!
-    const plan = await planCase(nb)
-    if (plan.kind !== 'provider') throw new Error('expected a provider plan')
+    const planned = await planCase(nb)
+    if (planned.kind !== 'provider') throw new Error('expected a provider plan')
+    const plan = pythonCall(planned)
     expect(plan.payload.image_urls).toEqual(['IMG:content_image'])
     expect(plan.payload.prompt).toContain('dusty pastel palette')
     const ip = CASES.find(x => x.widgets.model === IP && String(x.widgets.style_refs).includes('gone_b.png') && !x.links.includes('style_image') && x.widgets.style_in)!
@@ -401,7 +422,7 @@ const uploadedNames = (k: ReturnType<typeof kit>) => k.upload.mock.calls.map(c =
 const link = (name: string) => `https://fal.storage/${name}`
 
 describe('restyle on the engine (hosted, fake providers)', () => {
-  it('a moodboard in the input folder: content then the board pictures, handed off in order, one fal call', async () => {
+  it('a moodboard in the input folder: content then the board pictures, handed off in order, one Replicate call (Nano Banana 2 goes there first since Task S3)', async () => {
     const ownsInput = vi.fn(async () => true)
     const k = kit({ deps: { ownership: { ownsInput, ownsOutput: async () => true } } })
     const { runId, promptIds } = await k.engine.startRun({
@@ -415,14 +436,14 @@ describe('restyle on the engine (hosted, fake providers)', () => {
     expect(ownsInput).toHaveBeenCalledWith('user_1', { filename: '01_b.jpg', subfolder: FOLDER, type: 'input' })
     // The style picture is ignored when the board is there, so it is not handed off.
     expect(uploadedNames(k)).toEqual(['content.png', '00_a.png', '01_b.jpg'])
-    const sent = k.fal.submitted()
-    expect(sent.map(r => r.endpoint)).toEqual(['fal-ai/nano-banana-2/edit'])
+    const sent = k.replicate.submitted()
+    expect(sent.map(r => r.endpoint)).toEqual(['google/nano-banana-2'])
     expect(sent[0]!.payload).toEqual({
       prompt: `${buildRestyleInstruction(0.8, 'watercolor')} ${STYLE_REFS_INSTRUCTION}`,
-      image_urls: [link('content.png'), link('00_a.png'), link('01_b.jpg')],
-      output_format: 'jpeg', resolution: '2K', num_images: 1,
+      image_input: [link('content.png'), link('00_a.png'), link('01_b.jpg')],
+      output_format: 'jpg', resolution: '2K',
     })
-    expect(k.replicate.client.submit).not.toHaveBeenCalled()
+    expect(k.fal.client.submit).not.toHaveBeenCalled()
     const price = restylePrice('Nano Banana 2', '2K')
     expect(k.ledger.hold).toHaveBeenCalledWith('user_1', price + BASE_RENDER_CREDITS, `runner:${promptIds[0]}`)
     expect(k.ledger.settle).toHaveBeenCalledWith(1, price + BASE_RENDER_CREDITS, `runner:${promptIds[0]}`)
@@ -536,7 +557,7 @@ describe('a typed-in taste (literal style_in) is moderated', () => {
     const text = moderate.mock.calls[0]![0]
     expect(text).toContain('watercolor')
     expect(text).toContain('grainy film')
-    expect(String(k.fal.submitted()[0]!.payload.prompt)).toContain('Additional style direction: watercolor grainy film.')
+    expect(String(k.replicate.submitted()[0]!.payload.prompt)).toContain('Additional style direction: watercolor grainy film.')
   })
 
   it('hosted: Generate an image (fal, no family needed) moderates its typed-in taste too, and a blocked one refuses the run', async () => {

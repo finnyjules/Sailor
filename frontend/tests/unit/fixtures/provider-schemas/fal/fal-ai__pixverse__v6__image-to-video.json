@@ -1,0 +1,235 @@
+{
+  "endpoint": "fal-ai/pixverse/v6/image-to-video",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/pixverse/v6/image-to-video",
+    "pricing": "https://fal.ai/models/fal-ai/pixverse/v6/image-to-video/llms.txt"
+  },
+  "input": {
+    "$ref": "#/components/schemas/PixverseV6ImageToVideoInput"
+  },
+  "output": {
+    "$ref": "#/components/schemas/PixverseV6ImageToVideoOutput"
+  },
+  "components": {
+    "schemas": {
+      "PixverseV6ImageToVideoInput": {
+        "type": "object",
+        "properties": {
+          "generate_audio_switch": {
+            "type": "boolean",
+            "default": false,
+            "description": "Enable audio generation (BGM, SFX, dialogue)",
+            "title": "Generate Audio Switch"
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "360p",
+              "540p",
+              "720p",
+              "1080p"
+            ],
+            "default": "720p",
+            "description": "The resolution of the generated video",
+            "title": "Resolution"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "examples": [
+              "A woman warrior with her hammer walking with his glacier wolf."
+            ],
+            "description": "Text prompt for the video generation. Limited to 2048 UTF-8 encoded bytes. Because the limit counts bytes rather than characters, emoji and non-Latin or accented characters (which use multiple bytes each) can push a visually short prompt over the cap."
+          },
+          "seed": {
+            "title": "Seed",
+            "description": "\n            The same seed and the same prompt given to the same version of the model\n            will output the same video every time.\n        ",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "thinking_type": {
+            "title": "Thinking Type",
+            "description": "Prompt optimization mode: 'enabled' to optimize, 'disabled' to turn off, 'auto' for model decision",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "enabled",
+                  "disabled",
+                  "auto"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "duration": {
+            "minimum": 1,
+            "type": "integer",
+            "maximum": 15,
+            "default": 5,
+            "description": "The duration of the generated video in seconds. v6 supports values from 1 to 15 seconds",
+            "title": "Duration"
+          },
+          "generate_multi_clip_switch": {
+            "type": "boolean",
+            "default": false,
+            "description": "Enable multi-clip generation with dynamic camera changes",
+            "title": "Generate Multi Clip Switch"
+          },
+          "style": {
+            "title": "Style",
+            "description": "The style of the generated video",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "anime",
+                  "3d_animation",
+                  "clay",
+                  "comic",
+                  "cyberpunk"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "negative_prompt": {
+            "type": "string",
+            "title": "Negative Prompt",
+            "examples": [
+              "blurry, low quality, low resolution, pixelated, noisy, grainy, out of focus, poorly lit, poorly exposed, poorly composed, poorly framed, poorly cropped, poorly color corrected, poorly color graded"
+            ],
+            "description": "Negative prompt to be used for the generation. Limited to 2048 UTF-8 encoded bytes. Because the limit counts bytes rather than characters, emoji and non-Latin or accented characters (which use multiple bytes each) can push a visually short prompt over the cap.",
+            "default": ""
+          },
+          "image_url": {
+            "type": "string",
+            "title": "Image Url",
+            "examples": [
+              "https://v3.fal.media/files/zebra/qL93Je8ezvzQgDOEzTjKF_KhGKZTEebZcDw6T5rwQPK_output.png"
+            ],
+            "description": "URL of the image to use as the first frame"
+          }
+        },
+        "title": "ImageToVideoRequestV6",
+        "x-fal-order-properties": [
+          "prompt",
+          "resolution",
+          "duration",
+          "negative_prompt",
+          "style",
+          "seed",
+          "generate_audio_switch",
+          "generate_multi_clip_switch",
+          "thinking_type",
+          "image_url"
+        ],
+        "required": [
+          "prompt",
+          "image_url"
+        ]
+      },
+      "PixverseV6ImageToVideoOutput": {
+        "type": "object",
+        "properties": {
+          "video": {
+            "examples": [
+              {
+                "content_type": "video/mp4",
+                "file_name": "output.mp4",
+                "file_size": 6420765,
+                "url": "https://storage.googleapis.com/falserverless/model_tests/video_models/output-3.mp4"
+              }
+            ],
+            "description": "The generated video",
+            "$ref": "#/components/schemas/File"
+          }
+        },
+        "title": "I2VOutputV5_5",
+        "x-fal-order-properties": [
+          "video"
+        ],
+        "required": [
+          "video"
+        ]
+      },
+      "File": {
+        "type": "object",
+        "properties": {
+          "content_type": {
+            "title": "Content Type",
+            "examples": [
+              "image/png"
+            ],
+            "description": "The mime type of the file.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "file_name": {
+            "title": "File Name",
+            "examples": [
+              "z9RV14K95DvU.png"
+            ],
+            "description": "The name of the file. It will be auto-generated if not provided.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "file_size": {
+            "title": "File Size",
+            "examples": [
+              4404019
+            ],
+            "description": "The size of the file in bytes.",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "The URL where the file can be downloaded from."
+          }
+        },
+        "title": "File",
+        "x-fal-order-properties": [
+          "url",
+          "content_type",
+          "file_name",
+          "file_size"
+        ],
+        "required": [
+          "url"
+        ]
+      }
+    }
+  },
+  "pricingText": "Billing is calculated per second of video generated. For 360p, your request will cost **$0.025** per second without audio and **$0.035** per second with audio. For 540p, it will cost **$0.035** per second without audio and **$0.045** per second with audio. For 720p, it will cost **$0.045** per second without audio and **$0.060** per second with audio. For 1080p, it will cost **$0.090** per second without audio and **$0.115** per second with audio. For **$1** you can run this model for approximately **40 seconds** at 360p (no audio) or about **11 seconds** at 1080p (no audio).\n\nFor more details, see [fal.ai pricing](https://fal.ai/pricing)."
+}

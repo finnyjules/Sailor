@@ -221,14 +221,19 @@ describe('settings parity: the price reads what each runner builder sends', () =
   }
 
   it('FLUX.2 edit is priced on the picture sent in, the cap when unmeasured (the builder sends the picture as it is)', () => {
+    // The runner's backup, Replicate's FLUX.2 [pro] (Task S3), bills the same pictures.
+    const flux2 = (input: number, output: number) => ({
+      endpoint: 'fal-ai/flux-2-pro/edit', tier: null, inputPixels: input, outputPixels: output,
+      fallbacks: [{ endpoint: 'black-forest-labs/flux-2-pro', tier: null, inputPixels: input, outputPixels: output }],
+    })
     for (const ct of ['EditImageNode', 'BlendSceneNode']) {
       // Unmeasured: the cap in, the 2048² FLUX.2 output cap out.
-      expect(only(ct, { model: 'Flux 2 Pro' })).toEqual({ endpoint: 'fal-ai/flux-2-pro/edit', tier: null, inputPixels: LARGEST_INPUT_PIXELS, outputPixels: 2048 * 2048 })
+      expect(only(ct, { model: 'Flux 2 Pro' })).toEqual(flux2(LARGEST_INPUT_PIXELS, 2048 * 2048))
       // Measured: that size in and out; above the cap, the cap.
       const measured = editCalls(ct, { model: 'Flux 2 Pro' }, { inputPixels: 1024 * 1024 })
-      expect(measured).toEqual({ calls: [{ endpoint: 'fal-ai/flux-2-pro/edit', tier: null, inputPixels: 1024 * 1024, outputPixels: 1024 * 1024 }] })
+      expect(measured).toEqual({ calls: [flux2(1024 * 1024, 1024 * 1024)] })
       const huge = editCalls(ct, { model: 'Flux 2 Pro' }, { inputPixels: 50e6 })
-      expect(huge).toEqual({ calls: [{ endpoint: 'fal-ai/flux-2-pro/edit', tier: null, inputPixels: LARGEST_INPUT_PIXELS, outputPixels: 2048 * 2048 }] })
+      expect(huge).toEqual({ calls: [flux2(LARGEST_INPUT_PIXELS, 2048 * 2048)] })
     }
     // P5 fix round 1: the cap is the widest Nano Banana 4K picture, NB_SIZES' largest entry.
     expect(LARGEST_INPUT_PIXELS).toBe(12288 * 1536)
@@ -268,16 +273,24 @@ describe('settings parity: the price reads what each runner builder sends', () =
       ['RestyleFromImageNode', { model: 'Nano Banana 2', resolution: '2K' }, 'google/nano-banana-2'],
       ['RestyleFromImageNode', { model: 'Nano Banana Pro', resolution: '2K' }, 'google/nano-banana-pro'],
     ]
+    // Relight and Restyle on Nano Banana 2 go to Replicate first on the runner
+    // since Task S3 (fal the backup): the call is that first step, and every
+    // step of Python's chain is still covered, in any order.
+    const RUNNER_REPLICATE_FIRST = new Set(['RelightNode', 'RestyleFromImageNode:Nano Banana 2'])
     for (const [ct, w, slug] of cases) {
       const c = only(ct, w)
-      expect(chainOf(c), ct).toEqual(pyChain(slug))
+      if (RUNNER_REPLICATE_FIRST.has(ct) || RUNNER_REPLICATE_FIRST.has(`${ct}:${String(w.model)}`)) {
+        expect(c.endpoint, ct).toBe('google/nano-banana-2')
+        expect([...chainOf(c)].sort(), ct).toEqual([...pyChain(slug)].sort())
+      }
+      else expect(chainOf(c), ct).toEqual(pyChain(slug))
       for (const step of [c, ...c.fallbacks!]) expect(step.tier, ct).toBe(c.tier)
     }
     // The callers: Edit image, Develop, Relight call it; References and Restyle via _run_image_edit_prediction.
     expect(PY).toMatch(/if replicate_slug in _NANO_BANANA_FAL_EDIT:\s*\n\s*return await _run_nano_banana_edit\(/)
     expect(readFileSync(`${REPO}comfy_extras/nodes_relight.py`, 'utf8')).toContain('await _run_nano_banana_edit(')
-    // The Nano Banana actions call Replicate directly: no chain.
-    expect(only('RemoveObjectNode', {}).fallbacks).toBeUndefined()
+    // The Nano Banana actions call Replicate directly: no chain; fal's edit is the runner's backup (Task S3).
+    expect(only('RemoveObjectNode', {}).fallbacks).toEqual([{ endpoint: 'fal-ai/nano-banana-2/edit', tier: '1K', inputPixels: null, outputPixels: null }])
   })
 
   it('Upscale and Enhance detail: the engines and what they send match the Python nodes', () => {
@@ -307,7 +320,9 @@ describe('settings parity: the price reads what each runner builder sends', () =
     const src = readFileSync(`${REPO}comfy_extras/nodes_lens_reframe.py`, 'utf8')
     expect(src).toContain('_run_prediction("google/nano-banana-2", {')
     expect(src).toContain('"resolution": "1K"')
-    expect(only('LensReframe', {})).toEqual(only('RemoveObjectNode', {}))
+    // The same call as the actions, with no backup: Lens reframe runs only on the ComfyUI path.
+    const { fallbacks: _backup, ...action } = only('RemoveObjectNode', {})
+    expect(only('LensReframe', {})).toEqual(action)
   })
 })
 
@@ -356,7 +371,9 @@ const EXAMPLES: [string, Record<string, unknown>, number, number, number?][] = [
   ['DevelopImageNode', { resolution: '2K' }, 0.12, 18],
   // Develop 4K: same fallback-at-cost step as Edit image's Nano Banana 2 4K.
   ['DevelopImageNode', { resolution: '4K' }, 0.20, 30],
-  ['RelightNode', {}, 0.08, 16],
+  // Replicate's Nano Banana 2 first since Task S3 ($0.067, 14 credits); the
+  // ComfyUI path's fal NB Pro step ($0.15) at cost ($0.075) is dearer.
+  ['RelightNode', {}, 0.075, 15],
   ['BlendSceneNode', { model: 'Flux 2 Pro' }, 0.345, 52],
   ['BlendSceneNode', { model: 'Flux 2 Pro' }, 0.045, 9, 1024 * 1024],
   ['BlendSceneNode', { model: 'Flux Kontext Pro' }, 0.04, 8],
@@ -374,7 +391,8 @@ const EXAMPLES: [string, Record<string, unknown>, number, number, number?][] = [
   ['GenerateFromReferencesNode', { model: 'nano-banana-2', size: '4K' }, 0.20, 30],
   ['RotateCameraNode', {}, 0.03, 6],
   ['ProductShotNode', {}, 0.16, 24],
-  ['RestyleFromImageNode', { model: 'Nano Banana 2', resolution: '1K' }, 0.08, 16],
+  // Replicate first since Task S3, as Relight: the NB Pro step at cost.
+  ['RestyleFromImageNode', { model: 'Nano Banana 2', resolution: '1K' }, 0.075, 15],
   // Restyle Nano Banana 2 4K: the fallback-at-cost step, same as Edit image's.
   ['RestyleFromImageNode', { model: 'Nano Banana 2', resolution: '4K' }, 0.20, 30],
   ['RestyleFromImageNode', { model: 'Nano Banana Pro', resolution: '2K' }, 0.15, 23],

@@ -5,7 +5,8 @@
  *
  * The price multiplies a rate by these, so it must never read a setting the
  * builder would send differently ("priced on what is sent"). The builders are
- * server/runner/generators/video.ts (fal and Replicate) and, for the one model
+ * server/runner/generators/video.ts (fal and Replicate) and twins.ts (the
+ * first-service builders of Kling 3.0 and PixVerse v6, and the backups) and, for the one model
  * the runner does not build (Fabric), comfy_api_nodes/video_models.py. The
  * settings-parity test (tests/unit/video-pricing.unit.spec.ts) runs every
  * builder over every setting and checks it sends what this module says.
@@ -177,7 +178,8 @@ const RULES: Record<string, Rule> = {
   'sora-2-pro': { durations: [4, 8, 12], defaultDuration: 5, resolution: fixed('720p'), audio: fixed(true) },
   // runwayGen45: no resolution, no sound.
   'runway-gen-4.5': { durations: [5, 10], defaultDuration: 5, resolution: fixed(null), audio: fixed(false) },
-  // klingV3 sends no `mode`; the schema default is "pro", which it documents as 1080p.
+  // twins.ts klingV3Fal (first) sends fal's pro endpoints; video.ts klingV3
+  // (the Replicate backup) sends no `mode`, whose default "pro" is documented as 1080p.
   'kling-v3': { durations: [5, 10, 15], defaultDuration: 5, resolution: fixed('1080p'), audio: audioOpt(true) },
   'kling-v2.5-turbo-pro': { durations: [5, 10], defaultDuration: 5, resolution: fixed(null), audio: fixed(false) },
   // seedance20Fast sends no generate_audio; the schema default is true. Resolution 480p or 720p, anything else 720p.
@@ -192,9 +194,10 @@ const RULES: Record<string, Rule> = {
   'luma-ray-2-720p': { durations: [5, 9], defaultDuration: 5, resolution: fixed('720p'), audio: fixed(false) },
   // ltxVideo sends no length or resolution; priced per clip at the 50-step ceiling.
   'ltx-video': { durations: null, defaultDuration: 5, fixedSeconds: 5, resolution: fixed(null), audio: fixed(false) },
-  // pixverseV6 sends `quality` (the resolution option: 360p–1080p, anything
-  // else 720p) and `generate_audio_switch` (the sound option, default on);
-  // priced never below the ComfyUI path's 540p (pixverseResolution).
+  // twins.ts pixverseV6Fal (first) sends `resolution`, video.ts pixverseV6
+  // (the Replicate backup) `quality`: the resolution option, 360p–1080p,
+  // anything else 720p; both send `generate_audio_switch` (the sound option,
+  // default on). Priced never below the ComfyUI path's 540p (pixverseResolution).
   'pixverse-v6': { durations: [5, 8], defaultDuration: 5, resolution: pixverseResolution, audio: audioOpt(true) },
 
   // ── ComfyUI only ──

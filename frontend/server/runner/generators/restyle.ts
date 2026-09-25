@@ -8,14 +8,18 @@
  *     _RESTYLE_MODELS / _NANO_BANANA_SLUGS (:3055–3068) and
  *     RestyleFromImageNode.execute's request (:3140–3221)
  *
- * Only the first call of _run_image_edit_prediction is made: Nano Banana 2
- * and Pro go to their fal edit endpoint (no fal Pro step, no Replicate
- * fallback), the original Nano Banana and IP-Adapter Style Transfer go to
- * Replicate. Python never sends a seed to the Nano Banana models here.
+ * Python's first call of _run_image_edit_prediction goes to fal for Nano
+ * Banana 2 and Pro; the original Nano Banana and IP-Adapter Style Transfer go
+ * to Replicate. Python never sends a seed to the Nano Banana models here.
+ * Since Task S3 the runner sends Nano Banana 2 to Replicate first (cheaper)
+ * with fal's edit as the backup, and Nano Banana Pro to fal first with
+ * Replicate's as the backup (twins.ts); the request carries the same prompt,
+ * pictures, resolution and format on both.
  */
 import { pyStrip } from '#shared/runner/pyText'
 import { pyFloatOf } from './opts'
 import { imageEditCall } from './refEdits'
+import { NANO_BANANA_2_REPLICATE, NANO_BANANA_PRO_REPLICATE, nanoBananaOnReplicate, type ServiceCall } from './twins'
 
 // ── replicate_refs.py ────────────────────────────────────────────────────
 
@@ -137,8 +141,8 @@ export interface RestyleRequest {
   seed: number
 }
 
-/** The first provider call RestyleFromImageNode makes. */
-export function restyleCall(r: RestyleRequest): { provider: 'fal' | 'replicate'; endpoint: string; payload: Record<string, unknown> } {
+/** The first provider call RestyleFromImageNode makes, and its backup where it has one (twins.ts). */
+export function restyleCall(r: RestyleRequest): ServiceCall & { backup?: ServiceCall } {
   // Second run of the guard: planNode's early check can't know which board pictures are readable; this one sees what was read.
   checkStyleSource(r.model, { hasBoard: r.board.length > 0, hasStyleImage: r.styleImage !== null, taste: r.taste })
   const extraDirection = r.taste ? pyStrip(`${r.guidance} ${r.taste}`) : r.guidance
@@ -163,7 +167,11 @@ export function restyleCall(r: RestyleRequest): { provider: 'fal' | 'replicate';
     const input: Record<string, unknown> = { prompt, image_input: imageInput, output_format: r.outputFormat }
     // Only the newer two take a resolution; google/nano-banana would 422.
     if (r.model !== 'Nano Banana') input.resolution = r.resolution
-    return imageEditCall(RESTYLE_NANO_BANANA_SLUGS[r.model]!, input)
+    const onFirst = imageEditCall(RESTYLE_NANO_BANANA_SLUGS[r.model]!, input)
+    // Nano Banana 2: Replicate first, this fal request the backup. Pro: fal first, Replicate the backup.
+    if (r.model === 'Nano Banana 2') return { ...nanoBananaOnReplicate(NANO_BANANA_2_REPLICATE, onFirst.payload), backup: onFirst }
+    if (r.model === 'Nano Banana Pro') return { ...onFirst, backup: nanoBananaOnReplicate(NANO_BANANA_PRO_REPLICATE, onFirst.payload) }
+    return onFirst
   }
 
   // Style Transfer · IP-Adapter: one style picture (the first board picture wins).

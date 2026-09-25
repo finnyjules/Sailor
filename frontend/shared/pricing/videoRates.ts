@@ -1,7 +1,16 @@
 /**
  * What each video model's FIRST service charges us — the service Sailor's
- * request builder sends it to today (fal for the RUNNER_VIDEO_MODELS ids,
- * Replicate for the rest; comfy_api_nodes/video_models.py `provider`).
+ * request builder sends it to first (fal for the RUNNER_VIDEO_MODELS ids and,
+ * since Task S3, Kling 3.0 and PixVerse v6; Replicate for the rest;
+ * server/runner/generators/twins.ts has the table) — and, for a model with a
+ * BACKUP service, what the backup charges (VIDEO_BACKUP_RATES).
+ *
+ * The price basis is the first service's price, or the backup's covered at
+ * cost, whichever is higher (`videoPriceUsd`; the P4 rule, markup.ts
+ * usdChargedAtCost): the node is charged once, and a job the backup serves
+ * never costs Sailor more than it charged. The ComfyUI path of a model whose
+ * first service moved still sends the old one, which is now the backup, so
+ * that path is covered at cost too.
  *
  * Units:
  *  - `per_second`: dollars per second of output, by resolution, and split by
@@ -22,7 +31,7 @@
  * Pure data and pure functions; relative imports only (Nitro, the app and
  * vitest all load it).
  */
-import { creditsForUsd } from './markup'
+import { creditsForUsd, usdChargedAtCost } from './markup'
 import { SEEDANCE_MAX_INPUT_VIDEO_SECONDS, effectiveVideoSettings, type VideoSettings } from './videoSettings'
 
 export type PerSecondPrice = number | { audio: number, silent: number }
@@ -120,11 +129,12 @@ export const VIDEO_RATES: Record<string, VideoRate> = {
     unit: 'per_second', service: 'replicate', source: rep('runwayml/gen-4.5'), read: READ, confidence: 'verified',
     byResolution: { '*': 0.12 },
   },
-  // mode standard (720p) $0.168 / $0.252 with audio; pro (1080p) $0.224 / $0.336;
-  // 4k $0.42 either way. The builder sends no mode, so the schema default "pro" applies.
+  // First service fal since Task S3 (the pro endpoints, 1080p): "$0.112 (audio
+  // off) or $0.168 (audio on)" a second; voice control ($0.196) is never sent.
+  // Replicate is the backup (VIDEO_BACKUP_RATES).
   'kling-v3': {
-    unit: 'per_second', service: 'replicate', source: rep('kwaivgi/kling-v3-video'), read: READ, confidence: 'verified',
-    byResolution: { '720p': { audio: 0.252, silent: 0.168 }, '1080p': { audio: 0.336, silent: 0.224 }, '4k': { audio: 0.42, silent: 0.42 } },
+    unit: 'per_second', service: 'fal', source: fal('fal-ai/kling-video/v3/pro/text-to-video'), read: READ, confidence: 'verified',
+    byResolution: { '1080p': { audio: 0.168, silent: 0.112 } },
   },
   'kling-v2.5-turbo-pro': {
     unit: 'per_second', service: 'replicate', source: rep('kwaivgi/kling-v2.5-turbo-pro'), read: READ, confidence: 'verified',
@@ -167,6 +177,39 @@ export const VIDEO_RATES: Record<string, VideoRate> = {
     byResolution: { '*': { '*': 0.1365 } },
     note: 'ceiling: L40S $0.000975/s × 140 s (typical 84 s at 30 steps × 50/30)',
   },
+  // First service fal since Task S3 (half Replicate's rate): "For 360p … $0.025
+  // per second without audio and $0.035 per second with audio. For 540p … $0.035
+  // … $0.045 … For 720p … $0.045 … $0.060 … For 1080p … $0.090 … $0.115". The
+  // builder sends `resolution` and `generate_audio_switch`. Replicate is the
+  // backup (VIDEO_BACKUP_RATES).
+  'pixverse-v6': {
+    unit: 'per_second', service: 'fal', source: fal('fal-ai/pixverse/v6/text-to-video'), read: READ, confidence: 'verified',
+    byResolution: {
+      '360p': { audio: 0.035, silent: 0.025 },
+      '540p': { audio: 0.045, silent: 0.035 },
+      '720p': { audio: 0.06, silent: 0.045 },
+      '1080p': { audio: 0.115, silent: 0.09 },
+    },
+  },
+  // 480p $0.08/s, 720p $0.15/s.
+  'fabric-1.0': {
+    unit: 'per_second', service: 'replicate', source: rep('veed/fabric-1.0'), read: READ, confidence: 'verified',
+    byResolution: { '480p': 0.08, '720p': 0.15 },
+  },
+}
+
+/**
+ * What the BACKUP service charges, for each model that has one
+ * (server/runner/generators/twins.ts). The backup renders the same settings,
+ * so it reads the same VideoSettings.
+ */
+export const VIDEO_BACKUP_RATES: Record<string, VideoRate> = {
+  // mode standard (720p) $0.168 / $0.252 with audio; pro (1080p) $0.224 / $0.336;
+  // 4k $0.42 either way. The builder sends no mode, so the schema default "pro" applies.
+  'kling-v3': {
+    unit: 'per_second', service: 'replicate', source: rep('kwaivgi/kling-v3-video'), read: READ, confidence: 'verified',
+    byResolution: { '720p': { audio: 0.252, silent: 0.168 }, '1080p': { audio: 0.336, silent: 0.224 }, '4k': { audio: 0.42, silent: 0.42 } },
+  },
   // "Billing is per output second, tiered by resolution and audio." The builder
   // sends `quality` (the node's resolution) and `generate_audio_switch` (its
   // sound option), so the price reads both (Task S1b).
@@ -179,16 +222,22 @@ export const VIDEO_RATES: Record<string, VideoRate> = {
       '1080p': { audio: 0.23, silent: 0.18 },
     },
   },
-  // 480p $0.08/s, 720p $0.15/s.
-  'fabric-1.0': {
-    unit: 'per_second', service: 'replicate', source: rep('veed/fabric-1.0'), read: READ, confidence: 'verified',
-    byResolution: { '480p': 0.08, '720p': 0.15 },
+  // Billing tiers "t2v_i2v": 720p $0.17, 1080p $0.29 per second of output video
+  // (the same as fal). The backup sends neither `draft` nor a start video.
+  'flux-3': {
+    unit: 'per_second', service: 'replicate', source: rep('black-forest-labs/flux-3'), read: READ, confidence: 'verified',
+    byResolution: { '720p': 0.17, '1080p': 0.29 },
   },
 }
 
 /** The rate card for `modelId`, or null. Own keys only: "constructor" is not a model. */
 export function videoRate(modelId: string): VideoRate | null {
   return Object.prototype.hasOwnProperty.call(VIDEO_RATES, modelId) ? VIDEO_RATES[modelId]! : null
+}
+
+/** The backup service's card for `modelId`, or null when it has no backup. */
+export function videoBackupRate(modelId: string): VideoRate | null {
+  return Object.prototype.hasOwnProperty.call(VIDEO_BACKUP_RATES, modelId) ? VIDEO_BACKUP_RATES[modelId]! : null
 }
 
 const own = <T>(o: Record<string, T>, k: string): T | undefined =>
@@ -230,7 +279,29 @@ export function perSecondUsd(rate: VideoRate & { unit: 'per_second' }, s: VideoS
 /** Dollars the first service charges for one clip with these settings, or null for an unknown id. */
 export function videoUsd(modelId: string, s: VideoSettings): number | null {
   const rate = videoRate(modelId)
-  if (!rate) return null
+  return rate ? clipUsd(rate, s) : null
+}
+
+/** Dollars the backup service charges for the same clip, or null when the model has no backup. */
+export function videoBackupUsd(modelId: string, s: VideoSettings): number | null {
+  const rate = videoBackupRate(modelId)
+  return rate ? clipUsd(rate, s) : null
+}
+
+/**
+ * The price basis for one clip: the first service's price, or the backup's
+ * covered at cost, whichever is higher (see the header). `credits =
+ * creditsForUsd(basis)`. Null for an unknown id.
+ */
+export function videoPriceUsd(modelId: string, s: VideoSettings): number | null {
+  const first = videoUsd(modelId, s)
+  if (first == null) return null
+  const backup = videoBackupUsd(modelId, s)
+  return backup == null ? first : Math.max(first, usdChargedAtCost(backup))
+}
+
+/** Dollars on one card for one clip with these settings. */
+function clipUsd(rate: VideoRate, s: VideoSettings): number {
   const key = s.resolution ?? '*'
   if (rate.unit === 'per_second') return perSecondUsd(rate, s)
   const row = own(rate.byResolution, key) ?? own(rate.byResolution, '*')
@@ -247,7 +318,19 @@ export function videoUsd(modelId: string, s: VideoSettings): number | null {
  */
 export function videoMaxUsd(modelId: string, seconds: number): number | null {
   const rate = videoRate(modelId)
-  if (!rate) return null
+  return rate ? clipMaxUsd(rate, seconds) : null
+}
+
+/** videoMaxUsd with the backup covered at cost (videoPriceUsd's rule): the price basis of a linked `model_options`. */
+export function videoPriceMaxUsd(modelId: string, seconds: number): number | null {
+  const first = videoMaxUsd(modelId, seconds)
+  if (first == null) return null
+  const rate = videoBackupRate(modelId)
+  return rate ? Math.max(first, usdChargedAtCost(clipMaxUsd(rate, seconds))) : first
+}
+
+/** The most a clip of `seconds` can cost on one card. */
+function clipMaxUsd(rate: VideoRate, seconds: number): number {
   if (rate.unit === 'per_clip') {
     const flat = own(rate.byResolution, '*')
     const clip = flat && own(flat, '*')
@@ -279,7 +362,8 @@ export function videoRateLabel(modelId: string, opts: { hosted?: boolean } = {})
   const rate = videoRate(modelId)
   const s = effectiveVideoSettings(modelId, undefined, undefined, {})
   if (!rate || !s) return null
-  const usd = videoUsd(modelId, s)
+  // Dollars: the first service's rate. Credits: the charge, which covers the backup (videoPriceUsd).
+  const usd = opts.hosted ? videoPriceUsd(modelId, s) : videoUsd(modelId, s)
   if (usd == null) return null
   const at = s.resolution ? ` at ${s.resolution}` : ''
   if (rate.unit === 'per_clip') {

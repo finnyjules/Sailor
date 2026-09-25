@@ -14,7 +14,10 @@
  *
  * Video (GenerateVideoNode, FilmShotNode) is the first service's rate × the
  * seconds the request carries, at the resolution and sound setting it carries
- * (videoRates.ts × videoSettings.ts). An input that is LINKED rather than set
+ * (videoRates.ts × videoSettings.ts). A model with a backup service
+ * (server/runner/generators/twins.ts) is priced at the first service with the
+ * markup, or the backup at cost, whichever is higher; the same for images and
+ * edits (their cards' `videoPriceUsd`, `imagePriceUsd`, `editMaxUsd`). An input that is LINKED rather than set
  * (the API prompt carries a `[nodeId, slot]` reference, whose value is only
  * known at run time) is priced at its most expensive: a linked duration at the
  * model's longest clip, linked `model_options` at the card's dearest rate.
@@ -55,9 +58,9 @@ import { LEGACY_VIDEO_MODEL_IDS } from '../../app/data/video-prices'
 import { creditsForUsd } from './markup'
 import { editMaxUsd, editStepsUsd } from './editRates'
 import { SETTING_PRICED_NODE_CLASSES, editCalls, editSteps } from './editSettings'
-import { imageMaxUsd, imageRate, imageUsd } from './imageRates'
+import { imagePriceMaxUsd, imagePriceUsd, imageRate } from './imageRates'
 import { LARGEST_RATIO, effectiveImageSettings } from './imageSettings'
-import { videoMaxUsd, videoRate, videoUsd } from './videoRates'
+import { videoPriceMaxUsd, videoPriceUsd, videoRate } from './videoRates'
 import { REMOTE_VIDEO_NODE_CLASSES, remoteVideoNodeUsd, type InputSeconds } from './clipSettings'
 import { effectiveVideoSettings, maxVideoSeconds } from './videoSettings'
 
@@ -122,8 +125,8 @@ function videoNodeUsd(model: string, inputs: NodeInputs): number | null {
   const s = effectiveVideoSettings(id, inputs.duration, inputs.aspect_ratio, isLinkedInput(inputs.model_options) ? {} : inputs.model_options, inputs.image)
   if (!s) return null
   if (durationLinked) s.seconds = maxVideoSeconds(id)!
-  if (isLinkedInput(inputs.model_options)) return videoMaxUsd(id, s.seconds)
-  return videoUsd(id, s)
+  if (isLinkedInput(inputs.model_options)) return videoPriceMaxUsd(id, s.seconds)
+  return videoPriceUsd(id, s)
 }
 
 /**
@@ -132,9 +135,9 @@ function videoNodeUsd(model: string, inputs: NodeInputs): number | null {
  * the ratio with the largest picture.
  */
 function imageNodeUsd(model: string, inputs: NodeInputs): number {
-  if (isLinkedInput(inputs.model_options)) return imageMaxUsd(model)!
+  if (isLinkedInput(inputs.model_options)) return imagePriceMaxUsd(model)!
   const ratio = isLinkedInput(inputs.aspect_ratio) ? LARGEST_RATIO : inputs.aspect_ratio
-  return imageUsd(model, effectiveImageSettings(model, ratio, inputs.model_options)!)!
+  return imagePriceUsd(model, effectiveImageSettings(model, ratio, inputs.model_options)!)!
 }
 
 /**

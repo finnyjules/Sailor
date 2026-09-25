@@ -14,10 +14,13 @@
  * Fallback chains: the ComfyUI path's Nano Banana edits
  * (_run_nano_banana_edit, nodes_replicate.py) try the fal endpoint first, then
  * fal Nano Banana Pro, then the model on Replicate, at the same resolution.
- * The runner sends only the first. Both paths are charged the same price, so
- * the call carries its chain as `fallbacks` and the price is the most
- * expensive entry (controller ruling, P4 fix round 1). A test reads the chain
- * from the Python, so a new step there fails it.
+ * The runner sends one call, and its backup service when the first never
+ * starts the job (server/runner/generators/twins.ts, Task S3). Both paths are
+ * charged the same price, so the call is the runner's first call and carries
+ * every other call either path may make as `fallbacks`; the price is the
+ * first call with the markup, or the dearest fallback at cost (controller
+ * ruling, P4 fix round 1). A test reads the chain from the Python, so a new
+ * step there fails it.
  *
  * Picture size: Upscale, Enhance detail and FLUX.2 edit are billed by the size
  * of the picture sent in. Where the caller has measured it (`inputPixels`:
@@ -104,9 +107,27 @@ const nanoBananaEdit = (replicateSlug: typeof REP_NB2 | typeof REP_NB_PRO, tier:
   return call(first, tier, {}, [...chain, call(replicateSlug, tier)])
 }
 
-/** FLUX.2 edit keeps the input's size (up to its 2048² output cap): billed on both. */
-const flux2Edit = (_i: NodeInputs, px: number) =>
-  call(FAL_FLUX_2_EDIT, null, { input: px, output: Math.min(px, FLUX_2_MAX_OUTPUT_PIXELS) })
+/**
+ * FLUX.2 edit keeps the input's size (up to its 2048² output cap): billed on
+ * both. The runner's backup, Replicate's FLUX.2 [pro] with the picture, makes
+ * the same size (its largest, "4 MP", is 2048²).
+ */
+const REP_FLUX_2_PRO = 'black-forest-labs/flux-2-pro'
+const flux2Edit = (_i: NodeInputs, px: number) => {
+  const pixels = { input: px, output: Math.min(px, FLUX_2_MAX_OUTPUT_PIXELS) }
+  return call(FAL_FLUX_2_EDIT, null, pixels, [call(REP_FLUX_2_PRO, null, pixels)])
+}
+
+/**
+ * A Nano Banana 2 edit the runner sends to Replicate first (cheaper), with
+ * fal's edit as its backup (twins.ts): Relight, Restyle on Nano Banana 2. The
+ * ComfyUI path's chain (fal NB2, fal NB Pro, then Replicate) is covered too.
+ */
+const nanoBanana2ReplicateFirst = (tier: string | null): EditCall =>
+  call(REP_NB2, tier, {}, [call(FAL_NB2_EDIT, tier), call(FAL_NB_PRO_EDIT, tier)])
+
+/** The Nano Banana actions: google/nano-banana-2 on Replicate at 1K, fal's edit the runner's backup. */
+const nanoAction = (): EditCall => call(REP_NB2, '1K', {}, [call(FAL_NB2_EDIT, '1K')])
 
 /** EditImageNode / DevelopImageNode's Nano Banana 2 tier: `asText(resolution) || '1K'`. */
 const nb2Tier = (inputs: NodeInputs) => (isLinked(inputs.resolution) ? null : textOr(inputs.resolution, '1K'))
@@ -149,7 +170,7 @@ const restyleTier = (inputs: NodeInputs) => {
 }
 
 const RESTYLE_MODELS: ModelCalls = {
-  'Nano Banana 2': i => nanoBananaEdit(REP_NB2, restyleTier(i)),
+  'Nano Banana 2': i => nanoBanana2ReplicateFirst(restyleTier(i)),
   'Nano Banana Pro': i => nanoBananaEdit(REP_NB_PRO, restyleTier(i)),
   // google/nano-banana takes no resolution; Replicate, one price.
   'Nano Banana': () => call(REP_NB),
@@ -168,16 +189,17 @@ const BY_MODEL: Record<string, ModelCalls> = {
 const FIXED: Record<string, (inputs: NodeInputs) => EditCall> = {
   // Nano Banana 2 with the fixed polish instruction, at the node's resolution.
   DevelopImageNode: i => nanoBananaEdit(REP_NB2, nb2Tier(i)),
-  // Nano Banana 2 on fal, always 1K (comfy_extras/nodes_relight.py, the same chain).
-  RelightNode: () => nanoBananaEdit(REP_NB2, '1K'),
+  // Nano Banana 2, always 1K: Replicate first on the runner, the ComfyUI
+  // path's fal chain (comfy_extras/nodes_relight.py) covered.
+  RelightNode: () => nanoBanana2ReplicateFirst('1K'),
   // The Nano Banana actions: google/nano-banana-2 on Replicate, always 1K
-  // (_run_prediction directly: no fal chain).
-  RemoveObjectNode: () => call(REP_NB2, '1K'),
-  TextEditNode: () => call(REP_NB2, '1K'),
-  RecolorObjectNode: () => call(REP_NB2, '1K'),
-  SwapBackgroundNode: () => call(REP_NB2, '1K'),
-  SwapProductNode: () => call(REP_NB2, '1K'),
-  PersonSwap: () => call(REP_NB2, '1K'),
+  // (_run_prediction directly: no fal chain); fal the runner's backup.
+  RemoveObjectNode: nanoAction,
+  TextEditNode: nanoAction,
+  RecolorObjectNode: nanoAction,
+  SwapBackgroundNode: nanoAction,
+  SwapProductNode: nanoAction,
+  PersonSwap: nanoAction,
   // comfy_extras/nodes_lens_reframe.py: the same Replicate call, 1K (ComfyUI path only).
   LensReframe: () => call(REP_NB2, '1K'),
   RotateCameraNode: () => call('qwen/qwen-image-edit-plus'),

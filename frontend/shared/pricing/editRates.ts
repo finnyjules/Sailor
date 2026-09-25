@@ -18,7 +18,10 @@
  *    carried on (`beyondPerPixel`);
  *  - `per_output_megapixel`: a model billed by GPU time, priced per output
  *    megapixel with a floor (an estimate: the service publishes no per-unit
- *    figure).
+ *    figure);
+ *  - `per_run_megapixels`: Replicate's FLUX.2 — a price per run, plus one per
+ *    megapixel of the picture sent in and one per megapixel of the picture
+ *    that comes back (each rounded up, see below).
  *
  * Megapixels: where the service does not say how it counts them, a picture is
  * its pixels / 1,000,000 ROUNDED UP (controller ruling, fail-safe).
@@ -47,6 +50,7 @@ export type EditRate =
   | (RateMeta & { unit: 'flux2_megapixels', firstMegapixel: number, extraMegapixel: number, megapixelPixels: number })
   | (RateMeta & { unit: 'by_output_pixels', steps: readonly (readonly [maxPixels: number, usd: number])[], beyondPerPixel?: number })
   | (RateMeta & { unit: 'per_output_megapixel', perMegapixel: number, minUsd: number })
+  | (RateMeta & { unit: 'per_run_megapixels', perRun: number, perInputMegapixel: number, perOutputMegapixel: number })
 
 /** One priced provider call: the endpoint and the settings it is billed by. */
 export interface EditCall {
@@ -59,9 +63,13 @@ export interface EditCall {
   /** Pixels of the picture that comes back, where the price depends on it. */
   outputPixels: number | null
   /**
-   * The calls the ComfyUI path makes next when this one fails (Python's
-   * fallback chain, _run_nano_banana_edit). The node is priced at the most
-   * expensive entry, so the charge covers whichever one runs.
+   * Every other call this node may make instead of `endpoint`, on either
+   * path: the ComfyUI path's fallback chain (_run_nano_banana_edit, Python),
+   * the runner's backup service (server/runner/generators/twins.ts, Task
+   * S3), and, where the runner's first service moved, the ComfyUI path's own
+   * first call. `endpoint` is the runner's first call and carries the markup;
+   * each of these is covered at cost (editMaxUsd), so the charge covers
+   * whichever one runs.
    */
   fallbacks?: EditCall[]
 }
@@ -102,10 +110,17 @@ export const EDIT_RATES: Record<string, EditRate> = {
     ...verified('replicate', rep('google/nano-banana-2')),
   },
   // By "target resolution": 1K $0.15, 2K $0.15, 4K $0.30 — the last step of
-  // Restyle Pro's chain (fal Nano Banana Pro, then this).
+  // Restyle Pro's chain (fal Nano Banana Pro, then this), and its runner backup.
   'google/nano-banana-pro': {
     unit: 'by_resolution', byTier: { '1K': 0.15, '2K': 0.15, '4K': 0.30 },
     ...verified('replicate', rep('google/nano-banana-pro')),
+  },
+  // "$0.015 per run, $0.015 per input image megapixel, $0.015 per output image
+  // megapixel" — the runner's backup for FLUX.2 [pro] edit (Task S3): the
+  // picture sent in, and one the same size back (`match_input_image`).
+  'black-forest-labs/flux-2-pro': {
+    unit: 'per_run_megapixels', perRun: 0.015, perInputMegapixel: 0.015, perOutputMegapixel: 0.015,
+    ...verified('replicate', rep('black-forest-labs/flux-2-pro')),
   },
   // "$0.039 per output image" (the original Nano Banana takes no resolution).
   'google/nano-banana': { unit: 'per_image', usd: 0.039, ...verified('replicate', rep('google/nano-banana')) },
@@ -216,6 +231,8 @@ export function editUsd(call: EditCall): number | null {
     }
     case 'per_output_megapixel':
       return tidy(Math.max(rate.minUsd, rate.perMegapixel * megapixelsOf(call.outputPixels ?? 0)))
+    case 'per_run_megapixels':
+      return tidy(rate.perRun + rate.perInputMegapixel * megapixelsOf(call.inputPixels ?? 0) + rate.perOutputMegapixel * megapixelsOf(call.outputPixels ?? 0))
   }
 }
 
