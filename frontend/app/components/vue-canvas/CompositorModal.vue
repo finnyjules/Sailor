@@ -1902,7 +1902,12 @@ function snapshotCanvas(cv: HTMLCanvasElement | null): HTMLCanvasElement | null 
 const framePrompt = useStudioPrompt({
   worker: () => frameWorker, place: 'frame', selectionKind: 'frame-layer', label: () => frameChip.value, suggestions: () => frameSuggestions.value,
   // "New effect" starts from nothing; Remix (chip or routed) from the gallery's pick or the shader background.
-  effectTarget: (m) => frameBackgroundTarget(m?.fresh ? null : (m?.effectId ? getEffectSync(m.effectId) : backgroundShaderDef())),
+  // Only the Remix chip adds a version to a My effect; a routed request makes a new one (Ruling #2).
+  effectTarget: (m) => {
+    const t = frameBackgroundTarget(m?.fresh ? null : (m?.effectId ? getEffectSync(m.effectId) : backgroundShaderDef()))
+    t.remix = !!m?.remix
+    return t
+  },
 })
 provide(STUDIO_PROMPT_KEY, framePrompt)
 // Every close path (✕, Esc, backdrop, after an export) ends an open effect set first, so a

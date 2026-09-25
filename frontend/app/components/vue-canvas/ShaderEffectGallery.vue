@@ -7,7 +7,7 @@ import { computed, ref, watch } from 'vue'
 import CatalogModal from '~/components/CatalogModal.vue'
 import AiMark from '~/components/prompt/AiMark.vue'
 import { effectCardSubtitle, SHADER_GALLERY_SECTIONS, sectionOfEffect, shaderGalleryFilters, shaderGalleryItems } from '~/lib/shaderfx/gallery'
-import { baseEffectId } from '~/lib/myEffects/defs'
+import { pickableIdFor } from '~/lib/myEffects/defs'
 import { shaderGenEstimateText } from '~/lib/shadergen/estimate'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 import type { EffectDef } from '~/lib/shaderfx/types'
@@ -44,9 +44,9 @@ const filters = computed(() => shaderGalleryFilters(props.effects, props.include
 // On opening and on every change while open (a chip, a search, the catalog or library landing).
 watch([items, () => props.open], ([v, o]) => { if (o) emit('visible', v) }, { immediate: true })
 const showLead = computed(() => props.canMake && (filter.value === 'all' || filter.value === 'mine') && !query.value.trim())
-// A version chip's id carries `~vN`; the Current badge/initial focus must match the
-// catalog's pickable base entry (old versions are never pickable — see `isPickable`).
-const baseSelectedId = computed(() => (props.selectedId ? baseEffectId(props.selectedId) : props.selectedId))
+// A target is pinned to one version (`mine_x~vN`, or a stored bare `mine_x`); the Current
+// badge/initial focus must match that effect's one pickable entry, its newest version.
+const baseSelectedId = computed(() => (props.selectedId ? pickableIdFor(props.selectedId, props.effects) : props.selectedId))
 
 const hosted = (): boolean => { try { return hostedModeEnabled(useRuntimeConfig().public) } catch { return false } }
 const estimate = computed(() => shaderGenEstimateText(hosted()))

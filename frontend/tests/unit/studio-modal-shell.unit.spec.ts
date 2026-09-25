@@ -136,7 +136,7 @@ describe('StudioModalShell — closing with a take strip open', () => {
     expect(typeof prompt.setMode).toBe('function')
     prompt.setMode('Remix')
     await prompt.submit('rain')
-    expect(effectTarget).toHaveBeenCalledWith({ effectId: null, add: false, fresh: false })
+    expect(effectTarget).toHaveBeenCalledWith({ effectId: null, add: false, fresh: false, remix: true })
     expect(fx.api.start).toHaveBeenCalledWith('rain', target)
   })
 

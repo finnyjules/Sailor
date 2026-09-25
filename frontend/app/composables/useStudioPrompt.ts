@@ -53,8 +53,9 @@ export interface StudioPromptWorker {
 /** `effectId`: the effect a gallery Remix starts from; `add`: the takes land on a new layer. */
 export interface StudioPromptMode { label: string; kind: RouterKind; effectId?: string | null; add?: boolean }
 /** What a new-effect request asks the owner for: null for a routed request with no chip.
- *  `fresh` is true for "New effect" (start from nothing, not from the current effect). */
-export type StudioEffectTargetRequest = { effectId: string | null; add: boolean; fresh: boolean } | null
+ *  `fresh` is true for "New effect" (start from nothing, not from the current effect); `remix`
+ *  for the Remix chip, the only ask that adds a version to a My effect (Ruling #2). */
+export type StudioEffectTargetRequest = { effectId: string | null; add: boolean; fresh: boolean; remix: boolean } | null
 export interface StudioAnswerCard { kind: 'answer' | 'notice' | 'error'; text: string; reasoning: string; followUps: string[] }
 
 /** Same cap as the canvas prompt (useCanvasPrompt). */
@@ -200,7 +201,7 @@ export function useStudioPrompt(
   async function dispatch(kind: RouterKind, text: string, fromMenu: boolean, m?: StudioPromptMode | null) {
     // A new effect asks the owner where it shows: the chip's own ask, or (routed) the default.
     const target = kind === 'new-effect'
-      ? o.effectTarget?.(m ? { effectId: m.effectId ?? null, add: !!m.add, fresh: m.label === 'New effect' } : null) ?? null
+      ? o.effectTarget?.(m ? { effectId: m.effectId ?? null, add: !!m.add, fresh: m.label === 'New effect', remix: m.label === 'Remix' } : null) ?? null
       : null
     if (typeof target === 'string') { answerRef.value = { kind: 'notice', text: target, reasoning: '', followUps: [] }; return }
     const d = studioDispatch(kind, text, { place: o.place, hasWorker: !!worker(), canTakes: canTakes(), fromMenu, hasEffectTarget: !!target })

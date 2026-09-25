@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { deleteMyEffect, listMyEffects, myEffectsError, putMyEffect, renameMyEffect } from '~/lib/myEffects/client'
+import { deleteMyEffect, listMyEffects, MY_EFFECTS_ERRORS, myEffectsError, putMyEffect, renameMyEffect } from '~/lib/myEffects/client'
 
 const fetchErr = (status?: number) => Object.assign(
   new Error(`[PUT] "/api/my-effects/mine_abc123def456": ${status ?? '<no response>'} Invalid id`),
@@ -40,10 +40,26 @@ describe('My effects errors are plain sentences, never a URL, id or status', () 
     expect(await listMyEffects()).toEqual([{ id: 'mine_abc123def456' }])
     expect($f).toHaveBeenLastCalledWith('/api/my-effects')
     await putMyEffect({ id: 'mine_abc123def456' } as any)
-    expect($f).toHaveBeenLastCalledWith('/api/my-effects/mine_abc123def456', { method: 'PUT', body: { id: 'mine_abc123def456' } })
+    expect($f).toHaveBeenLastCalledWith('/api/my-effects/mine_abc123def456', { method: 'PUT', body: { id: 'mine_abc123def456' }, signal: expect.any(AbortSignal) })
     await renameMyEffect('mine_abc123def456', 'Rain')
-    expect($f).toHaveBeenLastCalledWith('/api/my-effects/mine_abc123def456', { method: 'PATCH', body: { name: 'Rain' } })
+    expect($f).toHaveBeenLastCalledWith('/api/my-effects/mine_abc123def456', { method: 'PATCH', body: { name: 'Rain' }, signal: expect.any(AbortSignal) })
     await deleteMyEffect('mine_abc123def456')
-    expect($f).toHaveBeenLastCalledWith('/api/my-effects/mine_abc123def456', { method: 'DELETE' })
+    expect($f).toHaveBeenLastCalledWith('/api/my-effects/mine_abc123def456', { method: 'DELETE', signal: expect.any(AbortSignal) })
+  })
+
+  it('a save that never answers gives up after its timeout with the plain sentence, and is cancelled (final review #11)', async () => {
+    const $f = (globalThis as any).$fetch
+    let signal: AbortSignal | undefined
+    $f.mockImplementation((_u: string, o: { signal: AbortSignal }) => { signal = o.signal; return new Promise(() => {}) })
+    for (const run of [
+      () => putMyEffect({ id: 'mine_abc123def456' } as any, 20),
+      () => renameMyEffect('mine_abc123def456', 'x', 20),
+    ]) {
+      const err = await run().then(() => null, (e: Error) => e)
+      expect(err?.message).toBe(MY_EFFECTS_ERRORS.unreachable)
+      expect(signal?.aborted).toBe(true)
+    }
+    const err = await deleteMyEffect('mine_abc123def456', 20).then(() => null, (e: Error) => e)
+    expect(err?.message).toBe(MY_EFFECTS_ERRORS.unreachable)
   })
 })

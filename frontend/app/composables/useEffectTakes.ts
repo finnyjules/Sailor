@@ -28,6 +28,11 @@ export interface EffectTarget {
   label: string
   /** The effect being remixed; null makes a new one. A version def resolves to its My effect. */
   base: EffectDef | null
+  /** An explicit Remix (the Remix chip) of a My effect: Keep adds a code version to it. Anything
+   *  else — a routed request, New effect, a built-in base — saves a NEW My effect "from" the base
+   *  (Ruling #2). A base the user's library doesn't hold (a shared project's copy, or a library
+   *  that still won't load) also saves a new one (Ruling #1). */
+  remix?: boolean
   /** The picture under the effect; null → a neutral placeholder (and no image to the model). */
   image: () => CanvasImageSource | null
   /** Show a take (a registered draft id) on the target; null restores what was there. */
@@ -50,7 +55,7 @@ export const EFFECT_MESSAGES = {
   savedVersion: (label: string, name: string) => `Saved as ${label} of “${name}”. Earlier versions are kept.`,
 }
 
-type Library = Pick<ReturnType<typeof useMyEffects>, 'saveTake' | 'addCodeVersion'>
+type Library = Pick<ReturnType<typeof useMyEffects>, 'saveTake' | 'addCodeVersion' | 'ready' | 'has'>
 
 export interface EffectTakesDeps {
   generate?: typeof generateTakes
@@ -212,13 +217,28 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
     if (!s || !t || !et || id === CURRENT || saving.value) return false
     saving.value = true
     const base = t.base
-    const mineId = mineIdOf(base)
     error.value = ''
     const run = seq
+    // Keep settles the set at once: the other slots' model calls stop now, not after the save
+    // lands (final review #11). Tiles still pending say so; the strip stays for a retry.
+    if (running.value) {
+      ctrl?.abort()
+      releaseRenderer()
+      running.value = false
+      session.value = { ...failPending(s), loopDone: true }
+    }
     try {
+      const lib = library()
+      let mineId = t.remix ? mineIdOf(base) : null
+      if (mineId) {
+        // Ruling #1: only a My effect the user's own library holds takes a new version; a
+        // library that hasn't loaded gets one more try first.
+        await lib.ready()
+        if (!lib.has(mineId)) mineId = null
+      }
       const rec = mineId
-        ? await library().addCodeVersion(mineId, et.take, request.value)
-        : await library().saveTake(et.take, { request: request.value, from: base && !base.draft ? base.name : null })
+        ? await lib.addCodeVersion(mineId, et.take, request.value)
+        : await lib.saveTake(et.take, { request: request.value, from: base && !base.draft ? base.name : null })
       const last = rec.versions.length - 1
       // Closed (or restarted) while saving: it is saved, but the target has moved on — leave it be.
       if (run === seq) {

@@ -2,7 +2,7 @@
  *  My effects first, then the built-in sections. Pure data — no thumbnails, no DOM — so a host
  *  with no thumbnail renderer (the fill editor, Frame's effect stack) uses it as-is. */
 import type { CatalogSection } from '~/lib/catalogSections'
-import { isPickable } from '~/lib/myEffects/defs'
+import { isPickable, myEffectIdOf } from '~/lib/myEffects/defs'
 import { myEffectRecordById, myEffectRecords } from '~/lib/myEffects/library'
 import type { EffectDef } from './types'
 
@@ -37,7 +37,8 @@ type Include = (d: EffectDef) => boolean
 type Listed = (id: string) => boolean
 
 function pickable(effects: EffectDef[], include?: Include, listed: Listed = defaultListed): EffectDef[] {
-  return effects.filter(d => isPickable(d) && (!d.mine || listed(d.id)) && (!include || include(d)))
+  // A My effect's pickable def is its newest version (`mine_x~vN`); the library knows it by `mine_x`.
+  return effects.filter(d => isPickable(d) && (!d.mine || listed(myEffectIdOf(d.id) ?? d.id)) && (!include || include(d)))
 }
 
 const titleCase = (s: string): string =>
@@ -57,7 +58,8 @@ function rank(category: string): number {
  *  then any other category. Array.sort is stable, so ties keep the incoming order. */
 function rankOf(d: EffectDef): number {
   if (d.mine) {
-    const i = myEffectRecords.value.findIndex(r => r.id === d.id)
+    const id = myEffectIdOf(d.id) ?? d.id
+    const i = myEffectRecords.value.findIndex(r => r.id === id)
     return i < 0 ? -1 : -1_000_000 + i // library order first; a project's copy after them
   }
   return rank(d.category)

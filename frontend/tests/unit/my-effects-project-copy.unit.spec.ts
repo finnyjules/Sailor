@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { adoptMyEffects, attachMyEffects, myEffectIdsIn } from '~/lib/myEffects/projectCopy'
-import { recordFromTake, withValuesVersion } from '~/lib/myEffects/defs'
+import { expandMyEffect, recordFromTake, withCodeVersion, withValuesVersion } from '~/lib/myEffects/defs'
 import { SPIKE_TAKES } from '~/lib/shadergen/__eval__/spikeTakes'
 
 const rec = (id: string) => recordFromTake(SPIKE_TAKES.rain![2]!, { id, request: 'rain', from: null, now: 'x' })
@@ -39,6 +39,31 @@ describe('projects keep a copy of the My effects they use (spec §7.4)', () => {
     const e = doc([A]); e.myEffects = [lib]
     attachMyEffects(e, () => richer)
     expect(e.myEffects[0]).toBe(richer)
+  })
+  it('a project pinned to v1 keeps a copy that still renders v1 after v2 is added elsewhere (Ruling #2)', () => {
+    const v1 = rec(A)
+    const pinned = expandMyEffect(v1)[0]!.id // what a pick or a Keep wrote
+    expect(pinned).toBe(`${A}~v1`)
+    const v2 = withCodeVersion(v1, SPIKE_TAKES.rain![0]!, { request: 'heavier', now: 'y' })
+    const d = doc([pinned]); d.myEffects = [v1]
+    attachMyEffects(d, () => v2)
+    const copy = d.myEffects[0]
+    expect(copy.versions[0].body).toBe(SPIKE_TAKES.rain![2]!.body)
+    expect(expandMyEffect(copy).find(x => x.id === pinned)!.source).toContain(SPIKE_TAKES.rain![2]!.body.slice(0, 40))
+  })
+  it('the copy kept holds every code version the doc uses', () => {
+    const v1 = rec(A)
+    const v2 = withCodeVersion(v1, SPIKE_TAKES.rain![0]!, { request: 'heavier', now: 'y' })
+    // As many versions, but its v2 only moved dials: it has no code version 2 for `~v2` to render.
+    const dials = withValuesVersion(v1, { u_speed: 0.123 }, { request: 'slower', now: 'y' })!
+    expect(dials.versions.length).toBe(v2.versions.length)
+    const d = doc([`${A}~v2`]); d.myEffects = [v2]
+    attachMyEffects(d, () => dials)
+    expect(d.myEffects[0]).toBe(v2)
+    // Used only at v1, both hold it: ruling 17 (the library's, at as many versions) as before.
+    const e = doc([`${A}~v1`]); e.myEffects = [v2]
+    attachMyEffects(e, () => dials)
+    expect(e.myEffects[0]).toBe(dials)
   })
   it('skips the scan entirely when the library is empty and the doc has no copies', () => {
     const d = doc([A]); const lookup = vi.fn(() => null)

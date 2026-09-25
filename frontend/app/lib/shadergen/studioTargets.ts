@@ -119,21 +119,22 @@ export function makeLayerTarget(o: {
 
 /**
  * Ruling 8: a kept Tune take on a My effect becomes a dial version, said in a plain sentence
- * either way. Skipped for anything but a My effect on its newest code (an old version's
- * `…~vN` would bind to the wrong code, preflight C11); a take that changes no dial adds
- * nothing (`add` returns null). The caller only asks for Tune (a request with words), not Vary.
+ * either way. `add` gets the target's own effect id (pinned, `…~vN`) and decides: it adds
+ * nothing (returns null) unless that is the effect's newest code version in the user's library
+ * (an old version's dials would bind to the wrong code, preflight C11; a shared project's copy
+ * has no library record to add to), or when the take changes no dial. The caller only asks for
+ * Tune (a request with words), not Vary.
  */
 export async function recordTuneVersion(o: {
   effectId: string
   params: Record<string, ParamValue>
   request: string
-  add: (id: string, values: Record<string, ParamValue>, request: string) => Promise<MyEffectRecord | null>
+  add: (effectId: string, values: Record<string, ParamValue>, request: string) => Promise<MyEffectRecord | null>
   notify: (kind: 'notice' | 'error', text: string) => void
 }): Promise<void> {
-  const id = myEffectIdOf(o.effectId)
-  if (!id || o.effectId !== id) return
+  if (!myEffectIdOf(o.effectId)) return
   try {
-    const rec = await o.add(id, { ...o.params }, o.request)
+    const rec = await o.add(o.effectId, { ...o.params }, o.request)
     if (rec) o.notify('notice', EFFECT_MESSAGES.savedVersion(rec.versions.at(-1)!.label, rec.name))
   } catch (e) {
     o.notify('error', EFFECT_MESSAGES.saveFailed(String((e as Error)?.message ?? '')))

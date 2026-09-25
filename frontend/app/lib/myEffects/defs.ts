@@ -9,12 +9,27 @@ export function myEffectIdOf(effectId: string): string | null {
   return MY_EFFECT_ID_RE.test(id) ? id : null
 }
 
-/** `effectId` with any `~vN` version suffix stripped, so a picker can match a version chip's
- *  id (`mine_xxx~v2`) against the catalog's PICKABLE entry for that My effect (`mine_xxx`) —
- *  older versions aren't pickable on their own (see `isPickable`), so nothing else in the
- *  gallery would ever equal the versioned id. A non-My-effect id passes through unchanged. */
-export function baseEffectId(effectId: string): string {
-  return myEffectIdOf(effectId) ?? effectId
+/** Every code version has its own explicit id, `<id>~vN` — the newest included (final review
+ *  #2, Ruling #2): a target stores the version it was given, so adding a version to a My effect
+ *  never changes what any other node, layer, background, project copy or export renders. The
+ *  bare id is only a picker alias for the newest version (the gallery lists that version's def,
+ *  so a pick writes its explicit id); a STORED bare id, from before versions were pinned, reads
+ *  as version 1 — `expandMyEffect` registers it as a hidden copy of v1. */
+export const versionEffectId = (id: string, codeIndex: number): string => `${id}~v${codeIndex + 1}`
+
+/** The version a stored effect id renders: a bare My effect id is version 1; anything else as is. */
+export function storedEffectId(effectId: string): string {
+  const id = myEffectIdOf(effectId)
+  return id && id === effectId ? versionEffectId(id, 0) : effectId
+}
+
+/** The picker's entry for `effectId` among `effects`: for a My effect (any version, or the bare
+ *  id) its one pickable def — the newest version — so the gallery's Current badge and initial
+ *  focus find the effect whichever version the target is pinned to. Anything else as is. */
+export function pickableIdFor(effectId: string, effects: readonly EffectDef[]): string {
+  const id = myEffectIdOf(effectId)
+  if (!id) return effectId
+  return effects.find(d => isPickable(d) && myEffectIdOf(d.id) === id)?.id ?? effectId
 }
 
 export function codeIndexFor(rec: MyEffectRecord, i: number): number {
@@ -23,10 +38,13 @@ export function codeIndexFor(rec: MyEffectRecord, i: number): number {
 }
 const latestCode = (rec: MyEffectRecord) => codeIndexFor(rec, rec.versions.length - 1)
 
+/** The explicit id of the code version that version `i` (a code or a dial version) renders with. */
 export function effectIdForVersion(rec: MyEffectRecord, i: number): string {
-  const c = codeIndexFor(rec, i)
-  return c === latestCode(rec) ? rec.id : `${rec.id}~v${c + 1}`
+  return versionEffectId(rec.id, codeIndexFor(rec, i))
 }
+
+/** The newest code version's id: what the bare id stands for in a picker. */
+export const newestEffectId = (rec: MyEffectRecord): string => versionEffectId(rec.id, latestCode(rec))
 
 const defaultsOf = (params: { uniform: string; default: unknown }[]) =>
   Object.fromEntries(params.map(p => [p.uniform, p.default])) as Record<string, ParamValue>
@@ -36,6 +54,9 @@ export function valuesForVersion(rec: MyEffectRecord, i: number): Record<string,
   return { ...defaultsOf(code.params ?? []), ...(rec.versions[i]?.values ?? {}) }
 }
 
+/** One EffectDef per code version, each under its own `~vN` id. The newest is the pickable one
+ *  (the effect's own name, no `versionOf`); older ones carry `versionOf` and a "· vN" name. Last,
+ *  the bare id: a hidden copy of v1, so a target stored before pinning keeps what it showed. */
 export function expandMyEffect(rec: MyEffectRecord): EffectDef[] {
   const newest = latestCode(rec)
   const chips = rec.versions.map((v, i) => ({ label: v.label, note: v.note, effectId: effectIdForVersion(rec, i), values: valuesForVersion(rec, i) }))
@@ -44,7 +65,7 @@ export function expandMyEffect(rec: MyEffectRecord): EffectDef[] {
     if (v.body === undefined) return
     const main = i === newest
     out.push({
-      id: main ? rec.id : `${rec.id}~v${i + 1}`,
+      id: versionEffectId(rec.id, i),
       name: main ? rec.name : `${rec.name} · ${v.label}`,
       category: 'mine', animated: rec.animated, generative: rec.generative, passes: 1, centerParam: null, textures: [],
       source: assembleSource(v.body),
@@ -53,7 +74,9 @@ export function expandMyEffect(rec: MyEffectRecord): EffectDef[] {
       ...(main ? {} : { versionOf: rec.id }),
     })
   })
-  return [out.find(d => d.id === rec.id)!, ...out.filter(d => d.id !== rec.id).reverse()]
+  const main = out.find(d => !d.versionOf)!
+  const legacy: EffectDef = { ...out[0]!, id: rec.id, params: out[0]!.params.map(p => ({ ...p })), versionOf: rec.id }
+  return [main, ...out.filter(d => d !== main).reverse(), legacy]
 }
 
 const same = (a: Record<string, unknown>, b: Record<string, unknown>) => {
@@ -70,7 +93,8 @@ const same = (a: Record<string, unknown>, b: Record<string, unknown>) => {
  * only the dials it changed, only matches a version whose OTHER dials still
  * sit at their defaults — it can't fall through to "newest" by default.
  */
-export function activeVersionIndex(rec: MyEffectRecord, effectId: string, values: Record<string, ParamValue>): number | null {
+export function activeVersionIndex(rec: MyEffectRecord, stored: string, values: Record<string, ParamValue>): number | null {
+  const effectId = storedEffectId(stored)
   let codeIdx = -1
   for (let i = rec.versions.length - 1; i >= 0; i--) {
     if (effectIdForVersion(rec, i) === effectId) { codeIdx = codeIndexFor(rec, i); break }

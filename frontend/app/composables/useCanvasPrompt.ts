@@ -428,7 +428,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   }
 
   // --- dispatch (spec §4) -----------------------------------------------------
-  type RunOpts = { nodeId?: string | null; fromMenu?: boolean; followUps?: string[]; effectId?: string | null; newEffect?: boolean }
+  type RunOpts = { nodeId?: string | null; fromMenu?: boolean; followUps?: string[]; effectId?: string | null; newEffect?: boolean; remix?: boolean }
   function run(kind: RouterKind, text: string, o: RunOpts = {}) {
     const target = targetFor(o.nodeId)
     const d = canvasDispatch(kind, text, target, { fromMenu: o.fromMenu })
@@ -438,6 +438,8 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
       const t = effectTargetFor(d.nodeId, o.effectId ?? null)
       if (!t) { notice.value = DISPATCH_MESSAGES.newEffect; return }
       if (o.newEffect) t.base = null
+      // Only the Remix chip adds a version to a My effect; a routed request makes a new one (Ruling #2).
+      t.remix = !!o.remix
       void fx.start(text, t)
       return
     }
@@ -482,7 +484,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     // A new-effect chip (Remix / New effect) decides the kind itself (spec §4):
     // no router call, so no credit and no wait.
     if (m?.kind === 'new-effect') {
-      run('new-effect', p, { nodeId: m.nodeId, effectId: m.effectId, newEffect: m.label === 'New effect' })
+      run('new-effect', p, { nodeId: m.nodeId, effectId: m.effectId, newEffect: m.label === 'New effect', remix: m.label === 'Remix' })
       return
     }
     // Sketch fast path (unchanged from stage 2): a high-confidence image idea

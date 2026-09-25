@@ -20,9 +20,9 @@ describe('one live catalog', () => {
     await c.fetchShaderFxCatalog()
     const lib = await import('~/lib/myEffects/library')
     await lib.loadMyEffectRecords()
-    expect(live.value!.effects.map(e => e.id)).toEqual(['water_ripple', 'mine_aaaaaaaaaaaa'])
+    expect(live.value!.effects.map(e => e.id)).toEqual(['water_ripple', 'mine_aaaaaaaaaaaa~v1', 'mine_aaaaaaaaaaaa'])
     const store = await import('~/lib/shaderfx/catalogStore')
-    expect(store.getEffectSync('mine_aaaaaaaaaaaa')?.mine).toBe(true)
+    expect(store.getEffectSync('mine_aaaaaaaaaaaa~v1')?.mine).toBe(true)
     expect(lib.myEffectsLoaded.value).toBe(true)
     expect(lib.myEffectRecordById('mine_aaaaaaaaaaaa')?.id).toBe('mine_aaaaaaaaaaaa')
   })
@@ -131,6 +131,9 @@ describe('a project copy and the library copy of one My effect (plan ruling 17)'
     return () => release()
   }
   const nameOf = async (id: string) => (await import('~/lib/shaderfx/catalogStore')).getEffectSync(id)?.name
+  /** The name of the effect's one pickable def (its newest version, `mine_…~vN`). */
+  const mainName = async () => (await import('~/lib/shaderfx/catalogStore')).currentShaderEffects()
+    .find(d => d.id.startsWith('mine_aaaaaaaaaaaa~') && !d.versionOf)?.name
 
   it('adopt, then the library loads: the library wins when it has as many versions or more', async () => {
     const { one, two } = await recs()
@@ -139,14 +142,14 @@ describe('a project copy and the library copy of one My effect (plan ruling 17)'
     const { useMyEffects } = await import('~/composables/useMyEffects')
     useMyEffects().adopt([{ ...one, name: 'Project copy' }])
     await c.fetchShaderFxCatalog()
-    expect(await nameOf('mine_aaaaaaaaaaaa')).toBe('Project copy') // renders before the library lands
+    expect(await mainName()).toBe('Project copy') // renders before the library lands
     release()
     await (await import('~/lib/myEffects/library')).loadMyEffectRecords()
-    expect(await nameOf('mine_aaaaaaaaaaaa')).toBe('Library copy')
-    expect(c.useShaderCatalog().value!.effects.filter(e => e.id === 'mine_aaaaaaaaaaaa').map(e => e.name)).toEqual(['Library copy'])
+    expect(await mainName()).toBe('Library copy')
+    expect(c.useShaderCatalog().value!.effects.filter(e => e.id.startsWith('mine_aaaaaaaaaaaa~') && !e.versionOf).map(e => e.name)).toEqual(['Library copy'])
     // …and it stays that way through the render path's forced refetch
     await c.fetchShaderFxCatalog(true)
-    expect(await nameOf('mine_aaaaaaaaaaaa')).toBe('Library copy')
+    expect(await mainName()).toBe('Library copy')
   })
 
   it('adopt, then the library loads: a project copy with MORE versions stands', async () => {
@@ -158,7 +161,7 @@ describe('a project copy and the library copy of one My effect (plan ruling 17)'
     await c.fetchShaderFxCatalog()
     release()
     await (await import('~/lib/myEffects/library')).loadMyEffectRecords()
-    expect(await nameOf('mine_aaaaaaaaaaaa')).toBe('Project copy')
+    expect(await mainName()).toBe('Project copy')
     expect(await nameOf('mine_aaaaaaaaaaaa~v1')).toBeTruthy()
   })
 
@@ -171,10 +174,10 @@ describe('a project copy and the library copy of one My effect (plan ruling 17)'
     await (await import('~/lib/myEffects/library')).loadMyEffectRecords()
     const { useMyEffects } = await import('~/composables/useMyEffects')
     useMyEffects().adopt([{ ...one, name: 'Older project copy' }])
-    expect(await nameOf('mine_aaaaaaaaaaaa')).toBe('Library copy')
+    expect(await mainName()).toBe('Library copy')
     const three = { ...two, name: 'Newer project copy', versions: [...two.versions, { ...two.versions[1]!, label: 'v3' }] }
     useMyEffects().adopt([three])
-    expect(await nameOf('mine_aaaaaaaaaaaa')).toBe('Newer project copy')
+    expect(await mainName()).toBe('Newer project copy')
   })
 
   it('adopt skips a malformed copy (a project doc is untrusted)', async () => {

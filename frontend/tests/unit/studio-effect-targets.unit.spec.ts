@@ -33,11 +33,17 @@ describe('studio effect targets', () => {
     for (const fn of ['addEffect', 'removeEffect', 'duplicateEffect', 'reorderEffect'])
       expect(s).toMatch(new RegExp(`function ${fn}[^{]*\\{\\s*if \\(stackLocked\\.value`))
   })
+  it('the Shader studio passes the Remix flag on: only the chip adds a version (Ruling #2)', () => {
+    const s = src('components/vue-canvas/ShaderStudioSurface.vue')
+    expect(s).toMatch(/function effectTargetFor\(m: StudioEffectTargetRequest\)[\s\S]{0,500}t\.remix = !!m\?\.remix/)
+  })
   it('Frame passes a background target to its own prompt', () => {
     const s = src('components/vue-canvas/CompositorModal.vue')
     expect(s).toMatch(/function frameBackgroundTarget\(/)
     // Preflight C13: the option itself is wired to the background target, not just any `effectTarget:`.
-    expect(s).toMatch(/effectTarget:\s*\(m\)\s*=>\s*frameBackgroundTarget\(/)
+    expect(s).toMatch(/effectTarget:\s*\(m\)\s*=>\s*\{\s*const t = frameBackgroundTarget\(/)
+    // Only the Remix chip adds a version to a My effect (Ruling #2): every host passes the flag on.
+    expect(s).toMatch(/const t = frameBackgroundTarget\([^\n]*\n\s*t\.remix = !!m\?\.remix/)
     // Previews are a local overlay the artboard paints; the saved node is written only on Keep
     // (behaviour, and the C2 key mapping, are unit-tested in studio-targets.unit.spec.ts).
     expect(s).toMatch(/return makeBackgroundTarget\(\{/)

@@ -103,4 +103,22 @@ describe('ShaderEffectGallery (spec §7.3)', () => {
     expect(card.closest('button')!.querySelector('span')!.textContent).toContain('Current')
     expect(body().querySelector('[data-effect-id="water_ripple"]')!.closest('button')!.textContent).not.toContain('Current')
   })
+  it('a target pinned to an older version (or a stored bare id) shows Current on the effect’s one card, its newest version (Ruling #2)', async () => {
+    const pinned = [d('water_ripple', 'distortion'),
+      d('mine_aaaaaaaaaaaa~v2', 'mine', { mine: true, name: 'Rain on glass' }),
+      d('mine_aaaaaaaaaaaa~v1', 'mine', { mine: true, versionOf: 'mine_aaaaaaaaaaaa' }),
+      d('mine_aaaaaaaaaaaa', 'mine', { mine: true, versionOf: 'mine_aaaaaaaaaaaa' })]
+    for (const selectedId of ['mine_aaaaaaaaaaaa~v1', 'mine_aaaaaaaaaaaa']) {
+      w = mount(ShaderEffectGallery, { props: { open: true, effects: pinned, selectedId, thumbs: {} }, attachTo: document.body })
+      const ids = [...body().querySelectorAll('[data-effect-id]')].map(e => e.getAttribute('data-effect-id'))
+      expect(ids).toEqual(['mine_aaaaaaaaaaaa~v2', 'water_ripple'])
+      expect(body().querySelector('[data-effect-id="mine_aaaaaaaaaaaa~v2"]')!.closest('button')!.textContent).toContain('Current')
+      w.unmount(); w = null
+    }
+    // A pick writes the newest version's own id, never the bare alias.
+    w = mount(ShaderEffectGallery, { props: { open: true, effects: pinned, selectedId: 'mine_aaaaaaaaaaaa~v1', thumbs: {} }, attachTo: document.body })
+    const use = [...body().querySelectorAll('button')].find(b => b.textContent?.trim() === 'Use effect')!
+    use.click(); await w.vm.$nextTick()
+    expect(w.emitted('confirm')![0]).toEqual(['mine_aaaaaaaaaaaa~v2'])
+  })
 })

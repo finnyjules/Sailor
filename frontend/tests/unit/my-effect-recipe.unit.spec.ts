@@ -34,7 +34,7 @@ describe('MyEffectRecipe (spec §7.4)', () => {
   it('a chip switches the target to that version', async () => {
     const w = mount(MyEffectRecipe, { props: { effectId: 'mine_aaaaaaaaaaaa', values: valuesForVersion(rec, 1) } })
     await w.findAll('[data-testid="my-effect-version"]')[0]!.trigger('click')
-    expect(w.emitted('pick-version')![0]![0]).toEqual({ effectId: 'mine_aaaaaaaaaaaa', values: valuesForVersion(rec, 0) })
+    expect(w.emitted('pick-version')![0]![0]).toEqual({ effectId: 'mine_aaaaaaaaaaaa~v1', values: valuesForVersion(rec, 0) })
   })
   it('renames on change (trimmed), never to empty', async () => {
     const w = mount(MyEffectRecipe, { props: { effectId: 'mine_aaaaaaaaaaaa', values: {} } })

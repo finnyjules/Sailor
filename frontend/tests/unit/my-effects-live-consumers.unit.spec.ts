@@ -57,9 +57,11 @@ describe('consumers read the live catalog, so a late My effect is found', () => 
     const paths = body.controls.map(x => x.path)
     for (const p of take.params) expect(paths).toContain(`effects.0.params.${p.uniform}`)
     const options = body.controls.find(x => x.path === 'effect')!.options!
-    expect(options).toContain(A)
-    expect(options).toContain('mine_bbbbbbbbbbbb')
-    expect(options.some(o => o.includes('~v') || o.startsWith('draft_'))).toBe(false)
+    // Each My effect is offered once, as its newest version's own id (Ruling #2: targets pin a version).
+    expect(options).toContain(`${A}~v1`)
+    expect(options).toContain('mine_bbbbbbbbbbbb~v2')
+    expect(options.filter(o => o.startsWith('mine_bbbbbbbbbbbb'))).toEqual(['mine_bbbbbbbbbbbb~v2'])
+    expect(options.some(o => o.startsWith('draft_'))).toBe(false)
   })
 
   it('Tune/Vary take thumbnails for a Shader studio node', async () => {

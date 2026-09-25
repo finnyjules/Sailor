@@ -136,8 +136,9 @@ describe('a kept Tune take on a My effect', () => {
   const rec = (n: number) => ({ id: 'mine_abcdefabcdef', name: 'Rain', versions: Array.from({ length: n }, (_, i) => ({ label: `v${i + 1}` })) }) as any
   it('becomes a dial version, and says so plainly', async () => {
     const add = vi.fn(async () => rec(2)); const notify = vi.fn()
-    await recordTuneVersion({ effectId: 'mine_abcdefabcdef', params: { u_density: 3 }, request: 'denser', add, notify })
-    expect(add).toHaveBeenCalledWith('mine_abcdefabcdef', { u_density: 3 }, 'denser')
+    await recordTuneVersion({ effectId: 'mine_abcdefabcdef~v1', params: { u_density: 3 }, request: 'denser', add, notify })
+    // The target's own pinned id: My effects decides whether it is the newest code (use-my-effects spec).
+    expect(add).toHaveBeenCalledWith('mine_abcdefabcdef~v1', { u_density: 3 }, 'denser')
     expect(notify).toHaveBeenCalledWith('notice', 'Saved as v2 of “Rain”. Earlier versions are kept.')
   })
   it('a take that changes no dial adds nothing and says nothing', async () => {
@@ -152,10 +153,9 @@ describe('a kept Tune take on a My effect', () => {
     await recordTuneVersion({ effectId: 'mine_abcdefabcdef', params: {}, request: 'x', add: vi.fn(async () => { throw new Error('ECONNRESET 10.0.0.1') }), notify })
     expect(notify).toHaveBeenLastCalledWith('error', `${MY_EFFECTS_ERRORS.save} Try again in a moment.`)
   })
-  it('built-in effects and old versions (…~vN) are left alone', async () => {
+  it('built-in effects are left alone', async () => {
     const add = vi.fn(async () => rec(2))
     await recordTuneVersion({ effectId: 'glow_soft', params: {}, request: 'x', add, notify: vi.fn() })
-    await recordTuneVersion({ effectId: 'mine_abcdefabcdef~v1', params: {}, request: 'x', add, notify: vi.fn() })
     expect(add).not.toHaveBeenCalled()
   })
 })

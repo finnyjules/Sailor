@@ -36,6 +36,21 @@ async function call<T>(fallback: Fallback, run: () => Promise<T>): Promise<T> {
   try { return await run() } catch (e) { throw myEffectsError(e, fallback) }
 }
 
+/** How long a save, rename or remove may take before it gives up (final review #11): a hung
+ *  call would otherwise leave Keep "saving" — and every later prompt refused — until a reload. */
+export const MY_EFFECTS_SAVE_TIMEOUT_MS = 15_000
+
+/** `run` with an abort signal that fires after `ms`; a call that hasn't answered by then is
+ *  cancelled and rejects as "no answer" (so it reads as `MY_EFFECTS_ERRORS.unreachable`). */
+async function timed<T>(ms: number, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const ctrl = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => { ctrl.abort(); reject(new Error('timed out')) }, ms)
+  })
+  try { return await Promise.race([run(ctrl.signal), timeout]) } finally { clearTimeout(timer) }
+}
+
 const url = (id: string) => `/api/my-effects/${encodeURIComponent(id)}`
 
 export function listMyEffects(): Promise<MyEffectRecord[]> {
@@ -45,14 +60,14 @@ export function listMyEffects(): Promise<MyEffectRecord[]> {
   })
 }
 
-export function putMyEffect(r: MyEffectRecord): Promise<MyEffectRecord> {
-  return call('save', () => $fetch<MyEffectRecord>(url(r.id), { method: 'PUT', body: r }))
+export function putMyEffect(r: MyEffectRecord, timeoutMs = MY_EFFECTS_SAVE_TIMEOUT_MS): Promise<MyEffectRecord> {
+  return call('save', () => timed(timeoutMs, signal => $fetch<MyEffectRecord>(url(r.id), { method: 'PUT', body: r, signal })))
 }
 
-export function renameMyEffect(id: string, name: string): Promise<MyEffectRecord> {
-  return call('save', () => $fetch<MyEffectRecord>(url(id), { method: 'PATCH', body: { name } }))
+export function renameMyEffect(id: string, name: string, timeoutMs = MY_EFFECTS_SAVE_TIMEOUT_MS): Promise<MyEffectRecord> {
+  return call('save', () => timed(timeoutMs, signal => $fetch<MyEffectRecord>(url(id), { method: 'PATCH', body: { name }, signal })))
 }
 
-export function deleteMyEffect(id: string): Promise<void> {
-  return call('remove', async () => { await $fetch(url(id), { method: 'DELETE' }) })
+export function deleteMyEffect(id: string, timeoutMs = MY_EFFECTS_SAVE_TIMEOUT_MS): Promise<void> {
+  return call('remove', () => timed(timeoutMs, async (signal) => { await $fetch(url(id), { method: 'DELETE', signal }) }))
 }

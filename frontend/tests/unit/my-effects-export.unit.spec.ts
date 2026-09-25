@@ -45,6 +45,23 @@ describe('exports inline My effects like built-ins (spec §7.4)', () => {
     expect(shipped.map(d => d.id)).toEqual([old])
     expect(shipped[0]!.source).toContain(SPIKE_TAKES.rain![2]!.body.slice(0, 40))
   })
+  it('a Frame pinned to v1 exports v1 after v2 is added; a stored bare id exports v1 too (Ruling #2)', () => {
+    setShaderFxCatalog({ version: 1, effects: [] })
+    const first = recordFromTake(SPIKE_TAKES.rain![2]!, { id: A, request: 'r', from: null, now: 'x' })
+    const pinned = expandMyEffect(first)[0]!.id
+    putShaderFxEffects(expandMyEffect(withCodeVersion(first, SPIKE_TAKES.rain![0]!, { request: 'r2', now: 'y' })))
+    for (const id of [pinned, A]) {
+      const plan = planFrameExport({
+        variant: { width: 100, height: 100, layers: [], stackOrder: [], groups: [], post: [], motion: null, wiredTreatments: {},
+          background: { kind: 'shader', shader: { effectId: id, params: {} } } } as any,
+        fit: 'fit', wiredSlots: [], hasMotion: false, animatedFill: false,
+        catalogIds: new Set(currentShaderEffects().map(e => e.id)),
+      })
+      const shipped = currentShaderEffects().filter(d => plan.shaderIds.includes(d.id))
+      expect(shipped.map(d => d.id)).toEqual([id])
+      expect(shipped[0]!.source).toContain(SPIKE_TAKES.rain![2]!.body.slice(0, 40))
+    }
+  })
   it('Frame’s web export reads the live list, not a stale fetch', () => {
     const s = readFileSync(fileURLToPath(new URL('../../app/components/vue-canvas/CompositorModal.vue', import.meta.url)), 'utf8')
     const block = s.slice(s.indexOf('catalogIds:') - 400, s.indexOf('createAppFrameExportIO({') + 400)

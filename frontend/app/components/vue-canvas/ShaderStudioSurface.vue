@@ -61,6 +61,7 @@ import { prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
 import { isAbortError, throwIfAborted } from '~/lib/engine/videoRecorder'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 import type { EffectTarget } from '~/composables/useEffectTakes'
+import type { StudioEffectTargetRequest } from '~/composables/useStudioPrompt'
 import { makeLayerTarget, recordTuneVersion } from '~/lib/shadergen/studioTargets'
 import { useMyEffects } from '~/composables/useMyEffects'
 import { getEffectSync } from '~/lib/shaderfx/catalogStore'
@@ -929,10 +930,13 @@ function snapshotSource(src: TexImageSource | null): CanvasImageSource | null {
   }
   return src as CanvasImageSource
 }
-function effectTargetFor(m: { effectId: string | null; add: boolean; fresh: boolean } | null): EffectTarget | string {
+function effectTargetFor(m: StudioEffectTargetRequest): EffectTarget | string {
   // A full stack has no room for a new layer: say so rather than retarget the takes.
   if (m?.add && layersFull.value) return LAYERS_FULL
-  return shaderStudioEffectTarget({ add: !!m?.add, fresh: !!m?.fresh, base: m?.effectId ? getEffectSync(m.effectId) : null })
+  const t = shaderStudioEffectTarget({ add: !!m?.add, fresh: !!m?.fresh, base: m?.effectId ? getEffectSync(m.effectId) : null })
+  // Only the Remix chip adds a version to a My effect; a routed request makes a new one (Ruling #2).
+  t.remix = !!m?.remix
+  return t
 }
 
 // Ruling 8: a kept Tune take on a My effect becomes a dial version (recordTuneVersion).

@@ -70,11 +70,15 @@ function publish(version = live.value?.version ?? 1): ShaderFxCatalog {
 
 /** Start (or reuse) the My effects load; merge and publish when it lands. Never awaited by the
  *  built-ins: a slow or hung /api/my-effects must not hold up a single shader render. The
- *  library load times out on its own and stays "not loaded", so the next fetch retries it. */
-function loadOwn(): void {
+ *  library load times out on its own and stays "not loaded", so the next call retries it.
+ *  Also the retry a save makes when the library isn't loaded yet (useMyEffects `ready`). */
+export function loadOwnEffects(api?: Parameters<typeof loadMyEffectRecords>[0], force = false): Promise<void> {
   let p: Promise<unknown>
-  try { p = loadMyEffectRecords() } catch { return }
-  p.then(() => { if (!live.value) return; mergeOwn(); publish() }, () => { /* pickers fall back; retried next fetch */ })
+  try { p = loadMyEffectRecords(api, force) } catch (e) { return Promise.reject(e) }
+  return p.then(() => { if (!live.value) return; mergeOwn(); publish() })
+}
+function loadOwn(): void {
+  loadOwnEffects().catch(() => { /* pickers fall back; retried next fetch or save */ })
 }
 
 /** Fetch the built-in catalog from the backend (proxied /sailor route). Cached per page load.

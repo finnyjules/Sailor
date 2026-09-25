@@ -82,6 +82,7 @@ describe('useCanvasPrompt: new effects on a shader node', () => {
     expect(effects.start).toHaveBeenCalledWith('rain on a window', expect.objectContaining({ key: 's1', label: 'Water ripple' }))
     const t = effects.start.mock.calls[0]![1]
     expect(t.base?.id).toBe('water_ripple') // the node's own effect is the base
+    expect(t.remix).toBe(true) // the Remix chip: Keep may add a version to a My effect
     expect(t.image()).toBeNull()
     t.preview('draft_1_0')
     expect(replies.at(-1)).toEqual(['preview', { nodeId: 's1', effectId: 'draft_1_0' }])
@@ -121,15 +122,18 @@ describe('useCanvasPrompt: new effects on a shader node', () => {
     expect(api.modeNote.value).toBe('~$0.24–0.42')
     await api.submit('rain on a window')
     expect(effects.start.mock.calls[0]![1].base).toBeNull()
+    expect(effects.start.mock.calls[0]![1].remix).toBe(false)
   })
 
-  it('a routed new-effect on a selected shader node remixes its own effect', async () => {
+  it('a routed new-effect on a selected shader node starts from its own effect, but makes a NEW one (Ruling #2)', async () => {
     const route = vi.fn(async () => ({ kind: 'new-effect', followUps: [], routed: true }))
     const { api, effects } = setup({ route })
     await api.submit('make it rain')
     expect(route).toHaveBeenCalled()
     expect(effects.start).toHaveBeenCalledWith('make it rain', expect.objectContaining({ key: 's1' }))
     expect(effects.start.mock.calls[0]![1].base?.id).toBe('water_ripple')
+    // No Remix chip: Keep saves a new My effect "from" it, never a version of it (useEffectTakes).
+    expect(effects.start.mock.calls[0]![1].remix).toBe(false)
   })
 
   it('a node that does not answer gets the plain message instead', async () => {

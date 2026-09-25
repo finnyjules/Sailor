@@ -37,6 +37,8 @@ function setup(extra: Record<string, any> = {}) {
   const library = {
     saveTake: vi.fn(async (take: any) => ({ id: 'mine_aaaaaaaaaaaa', name: take.name, versions: [{ label: 'v1', body: take.body, params: take.params, values: {}, note: '', createdAt: '' }] })),
     addCodeVersion: vi.fn(async (id: string, take: any) => ({ id, name: 'Rain', versions: [{ label: 'v1', body: 'a', params: take.params, values: {} }, { label: 'v2', body: take.body, params: take.params, values: {} }] })),
+    ready: vi.fn(async () => {}),
+    has: vi.fn((_id: string) => true),
   }
   const register = vi.fn(), unregister = vi.fn()
   let ctxListener: ((s: 'lost' | 'restored') => void) | null = null
@@ -92,7 +94,7 @@ describe('useEffectTakes', () => {
     const id = api.session.value!.tiles[0]!.takeId!
     expect(await api.keep(id)).toBe(true)
     expect(library.saveTake).toHaveBeenCalledWith(expect.objectContaining({ body: expect.any(String) }), { request: 'rain', from: 'Water ripple' })
-    expect(tg.apply).toHaveBeenCalledWith('mine_aaaaaaaaaaaa', expect.any(Object))
+    expect(tg.apply).toHaveBeenCalledWith('mine_aaaaaaaaaaaa~v1', expect.any(Object))
     expect(unregister).toHaveBeenCalledWith(expect.arrayContaining([id]))
     expect(api.session.value).toBeNull()
     expect(api.notice.value).toBe(EFFECT_MESSAGES.savedNew(SPIKE_TAKES.rain![0]!.name))
@@ -100,11 +102,54 @@ describe('useEffectTakes', () => {
 
   it('Keep on a Remix of a My effect adds a version to it (an old-version def resolves to its effect)', async () => {
     const { api, release, library } = setup()
-    const tg = target({ base: { id: 'mine_aaaaaaaaaaaa~v1', name: 'Rain · v1', mine: true, versionOf: 'mine_aaaaaaaaaaaa' } as any })
+    const tg = target({ remix: true, base: { id: 'mine_aaaaaaaaaaaa~v1', name: 'Rain · v1', mine: true, versionOf: 'mine_aaaaaaaaaaaa' } as any })
     const run = api.start('heavier', tg); release(0); release(1); release(2); await run
     await api.keep(api.session.value!.tiles[0]!.takeId!)
+    expect(library.ready).toHaveBeenCalled()
     expect(library.addCodeVersion).toHaveBeenCalledWith('mine_aaaaaaaaaaaa', expect.any(Object), 'heavier')
+    // The target is pinned to the new version's own id.
+    expect(tg.apply).toHaveBeenCalledWith('mine_aaaaaaaaaaaa~v2', expect.any(Object))
     expect(api.notice.value).toBe(EFFECT_MESSAGES.savedVersion('v2', 'Rain'))
+  })
+
+  it('a routed request (no Remix chip) on a My effect makes a NEW effect from it (Ruling #2)', async () => {
+    const { api, release, library } = setup()
+    const tg = target({ base: { id: 'mine_aaaaaaaaaaaa~v1', name: 'Ink bloom', mine: true } as any })
+    const run = api.start('make it rain', tg); release(0); release(1); release(2); await run
+    expect(await api.keep(api.session.value!.tiles[0]!.takeId!)).toBe(true)
+    expect(library.addCodeVersion).not.toHaveBeenCalled()
+    expect(library.saveTake).toHaveBeenCalledWith(expect.any(Object), { request: 'make it rain', from: 'Ink bloom' })
+    expect(api.notice.value).toBe(EFFECT_MESSAGES.savedNew(SPIKE_TAKES.rain![0]!.name))
+  })
+
+  it('a Remix of a My effect the library doesn’t hold (a shared copy, or a library that won’t load) saves a new one (Ruling #1)', async () => {
+    const { api, release, library } = setup()
+    library.has.mockReturnValue(false)
+    const tg = target({ remix: true, base: { id: 'mine_bbbbbbbbbbbb~v1', name: 'Their bloom', mine: true } as any })
+    const run = api.start('heavier', tg); release(0); release(1); release(2); await run
+    expect(await api.keep(api.session.value!.tiles[0]!.takeId!)).toBe(true)
+    expect(library.ready).toHaveBeenCalledBefore(library.has)
+    expect(library.has).toHaveBeenCalledWith('mine_bbbbbbbbbbbb')
+    expect(library.addCodeVersion).not.toHaveBeenCalled()
+    expect(library.saveTake).toHaveBeenCalledWith(expect.any(Object), { request: 'heavier', from: 'Their bloom' })
+    expect(tg.apply).toHaveBeenCalledWith('mine_aaaaaaaaaaaa~v1', expect.any(Object))
+    expect(api.error.value).toBe('')
+  })
+
+  it('Keep stops the other takes when pressed, not when the save lands (final review #11)', async () => {
+    const { api, release, library, callModel } = setup()
+    let finish!: () => void
+    library.saveTake.mockImplementationOnce((take: any) => new Promise(r => { finish = () => r({ id: 'mine_aaaaaaaaaaaa', name: take.name, versions: [{ label: 'v1', body: take.body, params: take.params, values: {} }] }) }))
+    const tg = target()
+    const run = api.start('rain', tg); release(0); await tick(); await tick()
+    const kept = api.keep(api.session.value!.tiles[0]!.takeId!)
+    for (const call of callModel.mock.calls) expect((call[2] as AbortSignal).aborted).toBe(true)
+    expect(api.working.value).toBe(false)
+    expect(api.session.value!.tiles.map(t => t.state)).toEqual(['ready', 'failed', 'failed'])
+    finish()
+    expect(await kept).toBe(true)
+    await run
+    expect(tg.apply).toHaveBeenCalledWith('mine_aaaaaaaaaaaa~v1', expect.any(Object))
   })
 
   it('a failed save keeps the strip open and says so in a plain sentence, never the raw error', async () => {
@@ -324,7 +369,7 @@ describe('useEffectTakes', () => {
     const id = api.session.value!.tiles[0]!.takeId!
     expect(await api.keep(id)).toBe(true)
     expect(library.saveTake).toHaveBeenCalledTimes(1)
-    expect(tg.apply).toHaveBeenCalledWith('mine_aaaaaaaaaaaa', expect.any(Object))
+    expect(tg.apply).toHaveBeenCalledWith('mine_aaaaaaaaaaaa~v1', expect.any(Object))
     expect(api.session.value).toBeNull()
     for (const call of callModel.mock.calls) expect((call[2] as AbortSignal).aborted).toBe(true)
     release(1); release(2); await run; await tick()
