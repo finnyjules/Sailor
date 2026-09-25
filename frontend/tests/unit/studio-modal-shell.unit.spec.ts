@@ -56,7 +56,7 @@ function mountShell(agent: unknown, calls: string[], slots: Record<string, strin
     props: { title: 'Test studio', agent },
     attrs: { onClose: () => calls.push('surface-close') },
     slots: { preview: '<div>preview</div>', ...slots },
-    global: { stubs: { AgentBar: true, AgentProgress: true, AgentProposal: true } },
+    global: { stubs: { StudioPromptHost: true, AgentSweep: true } },
   })
 }
 
@@ -89,11 +89,39 @@ describe('StudioModalShell — closing with a take strip open', () => {
     expect(w.emitted('close')).toHaveLength(1)
   })
 
-  it('mounts the strip for a take-capable agent, and only then', () => {
+  it('mounts the prompt for an agent, and for a promptPlace with no agent', () => {
     const calls: string[] = []
-    expect(mountShell(takeAgent(calls), calls).find('[data-testid="take-strip"]').exists()).toBe(true)
-    const quiet = takeAgent(calls, { hasTakes: ref(false) })
-    expect(mountShell(quiet, calls).find('[data-testid="take-strip"]').exists()).toBe(false)
+    expect(mountShell(takeAgent(calls), calls).findComponent({ name: 'StudioPromptHost' }).exists()).toBe(true)
+    const bare = mount(StudioModalShell, {
+      props: { title: 'Studio' }, slots: { preview: '<div>preview</div>' },
+      global: { stubs: { StudioPromptHost: true, AgentSweep: true } },
+    })
+    expect(bare.findComponent({ name: 'StudioPromptHost' }).exists()).toBe(false)
+    bare.unmount()
+    const scene = mount(StudioModalShell, {
+      props: { title: '3D Studio', promptPlace: 'scene3d-studio', promptHost: 'scene3d' }, slots: { preview: '<div>preview</div>' },
+      global: { stubs: { StudioPromptHost: true, AgentSweep: true } },
+    })
+    expect(scene.findComponent({ name: 'StudioPromptHost' }).exists()).toBe(true)
+    scene.unmount()
+  })
+
+  it('renders #tools under the prompt, in the shared bar', () => {
+    const calls: string[] = []
+    const w = mountShell(takeAgent(calls), calls, { tools: '<button data-testid="zoom-in">+</button>' })
+    const dock = w.get('[data-testid="studio-shell-dock"]')
+    expect(dock.find('[data-testid="studio-tool-bar"] [data-testid="zoom-in"]').exists()).toBe(true)
+    const host = dock.findComponent({ name: 'StudioPromptHost' }).element
+    const bar = dock.get('[data-testid="studio-tool-bar"]').element
+    expect(host.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    w.unmount()
+  })
+
+  it('never replaces the controls column', () => {
+    const calls: string[] = []
+    const w = mountShell(takeAgent(calls, { busy: ref(true), hasProposal: ref(true) }), calls, { controls: '<div data-testid="ctl">controls</div>' })
+    expect(w.find('[data-testid="ctl"]').exists()).toBe(true)
+    w.unmount()
   })
 })
 
@@ -101,7 +129,6 @@ describe('StudioModalShell — studios without a take session are untouched', ()
   it('Texture (structural agent, no take session) closes byte-identically on ✕', async () => {
     const calls: string[] = []
     const w = mountShell(structuralAgent(calls), calls)
-    expect(w.find('[data-testid="take-strip"]').exists()).toBe(false)
     await closeBtn(w).trigger('click')
     expect(calls).toEqual(['surface-close'])
     expect(w.emitted('close')).toHaveLength(1)
@@ -114,15 +141,14 @@ describe('StudioModalShell — studios without a take session are untouched', ()
     expect(calls).toEqual(['surface-close'])
   })
 
-  it('Space Type (no `agent` at all, own #agentBar) closes byte-identically', async () => {
+  it('no agent and no promptPlace: no dock, closes byte-identically', async () => {
     const calls: string[] = []
     const w = mount(StudioModalShell, {
       props: { title: 'Expressive Studio' },
       attrs: { onClose: () => calls.push('surface-close') },
-      slots: { preview: '<div>preview</div>', agentBar: '<div data-testid="own-bar" />' },
+      slots: { preview: '<div>preview</div>' },
     })
-    expect(w.find('[data-testid="own-bar"]').exists()).toBe(true)
-    expect(w.find('[data-testid="take-strip"]').exists()).toBe(false)
+    expect(w.find('[data-testid="studio-shell-dock"]').exists()).toBe(false)
     await closeBtn(w).trigger('click')
     await pressEscape(w)
     expect(calls).toEqual(['surface-close', 'surface-close'])
@@ -143,7 +169,7 @@ describe('StudioModalShell — studios without a take session are untouched', ()
 const BOXED_BODY = 'flex min-h-0 flex-1 gap-4 p-4'
 const BOXED_ASIDE = 'flex w-72 shrink-0 min-h-0'
 const BOXED_PREVIEW_COL = 'flex min-h-0 flex-1 flex-col'
-const BOXED_PREVIEW = 'flex min-h-0 flex-1 items-center justify-center'
+const BOXED_PREVIEW = 'relative flex min-h-0 flex-1 items-center justify-center'
 const BOXED_CONTROLS = 'flex w-72 shrink-0 flex-col gap-2 overflow-y-auto pr-1 min-h-0'
 
 /** `dialog > *` in order: header band, body, (actions footer). */
@@ -163,7 +189,7 @@ function mountVariant(props: Record<string, unknown>, agent?: unknown) {
       aside: '<div data-testid="objects">objects</div>',
       controls: '<div data-testid="ctl">controls</div>',
     },
-    global: { stubs: { AgentBar: true, AgentProgress: true, AgentProposal: true } },
+    global: { stubs: { StudioPromptHost: true, AgentSweep: true } },
   })
   live.push(w)
   return w
@@ -233,9 +259,8 @@ describe('StudioModalShell — full-bleed variant', () => {
     const cluster = w.get('[data-testid="studio-shell-bottom-cluster"]')
     expect(cluster.attributes('style')).toContain('bottom: 72px')
     expect(classOf(cluster.element)).toContain('left-1/2')
-    // Both members ride in it, not in the flow under the preview.
-    expect(cluster.find('[data-testid="take-strip"]').exists()).toBe(true)
-    expect(cluster.findComponent({ name: 'AgentBar' }).exists()).toBe(true)
+    // The prompt rides in it, not in the flow under the preview.
+    expect(cluster.findComponent({ name: 'StudioPromptHost' }).exists()).toBe(true)
   })
 
   it('defaults the offset to 16px', () => {

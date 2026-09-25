@@ -3,16 +3,19 @@
 // (title · breadcrumb · esc/close, separated from the body by spacing — no divider rule)
 // + big preview/actions on the left and a scrollable controls column on the right. No
 // vertical rail seam. Change the chrome here and all three editors update.
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import AgentBar from '~/components/agent/AgentBar.vue'
-import AgentProgress from '~/components/agent/AgentProgress.vue'
-import AgentProposal from '~/components/agent/AgentProposal.vue'
-import TakeStrip from '~/components/vue-canvas/studio/TakeStrip.vue'
+import { ref, computed, onMounted, onBeforeUnmount, provide } from 'vue'
+import StudioPromptHost from '~/components/prompt/StudioPromptHost.vue'
+import StudioToolBar from '~/components/vue-canvas/studio/StudioToolBar.vue'
+import AgentSweep from '~/components/agent/AgentSweep.vue'
+import { STUDIO_PROMPT_KEY, useStudioPrompt, type StudioPromptWorker } from '~/composables/useStudioPrompt'
 
-// `agent` is the useStudioAgent() return (an object of refs + actions). When
-// provided, the shell renders a bare prompt docked under the preview and lets the
-// agent's progress / proposal take over the controls column — the same layout the
-// Compositor uses, so every studio behaves consistently.
+// The dock (spec §2.4): under the preview sit the one prompt (StudioPromptHost,
+// driven by useStudioPrompt over the studio's own `agent`) and, below it, the
+// small shared tool bar (#tools: viewport controls only). Results — three takes,
+// a proposed change, an answer — show ABOVE the prompt, never over the controls
+// column, which always renders. The prompt api is provided under
+// STUDIO_PROMPT_KEY so inspector action rows can reach it. A studio with no
+// agent (3D) still gets the prompt by naming its `promptPlace`.
 //
 // Sizing is uniform across every studio. The frame started at 1400×820 (an opt-in
 // for 3D Studio's object list that graduated to the default), then grew to 1600×900
@@ -24,13 +27,18 @@ import TakeStrip from '~/components/vue-canvas/studio/TakeStrip.vue'
 // the aside / controls columns float over it as glass panels, Compositor-style.
 // Every studio that does NOT pass it renders the exact same DOM as before —
 // the off path below is untouched, branch by branch, on purpose.
-// `fullBleedBottomOffset` lifts the takes+agent cluster clear of a surface's own
+// `fullBleedBottomOffset` lifts the dock cluster clear of a surface's own
 // bottom overlay (3D Studio's add-pill), in px.
 const props = defineProps<{
   title?: string
   breadcrumb?: string
-  agent?: any
-  agentPlaceholder?: string
+  agent?: StudioPromptWorker | null
+  /** The chip: the thing's own name or text (spec §1.2). */
+  promptLabel?: string | null
+  promptSuggestions?: string[]
+  /** Router selection kind, e.g. 'shader-studio'. With no agent (3D), still mounts the prompt. */
+  promptPlace?: string
+  promptHost?: 'studio' | 'scene3d'
   fullBleed?: boolean
   fullBleedBottomOffset?: number
   /** Stack above another full-screen overlay (e.g. the Timeline editor at z-100)
@@ -61,17 +69,15 @@ const HIDE_LEFT = '-translate-x-[130%] opacity-0 pointer-events-none'
 const HIDE_RIGHT = 'translate-x-[130%] opacity-0 pointer-events-none'
 const SHOWN = 'translate-x-0 opacity-100'
 
-const agentActive = computed(() => {
-  const a = props.agent
-  return !!a && (a.busy.value || a.reviewing?.value || a.hasProposal.value)
+const hasPrompt = computed(() => !!props.agent || !!props.promptPlace)
+const prompt = useStudioPrompt({
+  worker: () => props.agent ?? null,
+  place: props.promptHost === 'scene3d' ? 'scene3d' : 'studio',
+  selectionKind: props.promptPlace ?? 'studio',
+  label: () => props.promptLabel ?? null,
+  suggestions: () => props.promptSuggestions ?? [],
 })
-
-// Four Takes: the filmstrip is mounted ONCE, here, so every studio that hands the
-// shell a `useStudioAgent` gets it — there is no per-studio strip to drift. An
-// agent without the take session (Space Type's bespoke vibe flow, which supplies
-// its own #agentBar and no `agent` at all; Texture's structural command agent)
-// simply reports false and the shell is unchanged for it.
-const hasTakes = computed(() => !!props.agent?.hasTakes?.value)
+provide(STUDIO_PROMPT_KEY, prompt)
 
 /** Closing with a take strip open must put the original back FIRST — a studio
  *  saves on close, so leaving a previewed take applied would persist it as if
@@ -94,6 +100,8 @@ function onKeydown(e: KeyboardEvent) {
     setPanelsVisible(!panelsVisible.value)
     return
   }
+  // Esc inside the prompt is prevented there (SailorPrompt), so it leaves the
+  // prompt without closing the studio — the early return above.
   if (e.key === 'Escape') { e.stopPropagation(); requestClose() }
 }
 onMounted(() => {
@@ -123,7 +131,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
       </div>
       <!-- Body. Boxed (default): three columns in a row. Full-bleed (opt-in): one
            positioned area, the preview underneath everything and the columns
-           floating over it. Every class string on the OFF side is the original.
+           floating over it. Every class string on the OFF side is the original, plus
+           `relative` on the preview so the working sweep stays inside it.
            --studio-panel-inset is the ONE source for "clear of a floating panel":
            left-4 (16) + w-72 (288) + 12 gap — surfaces position overlays with it
            (left-[var(--studio-panel-inset)]) so a panel resize can't desync them. -->
@@ -139,101 +148,37 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                : 'flex w-72 shrink-0 min-h-0'"><slot name="aside" /></div>
         <div :class="fullBleed ? 'absolute inset-0' : 'flex min-h-0 flex-1 flex-col'">
           <div :data-testid="fullBleed ? 'studio-shell-preview-ground' : undefined"
-               :class="fullBleed ? 'absolute inset-0 flex items-center justify-center' : 'flex min-h-0 flex-1 items-center justify-center'">
+               :class="fullBleed ? 'absolute inset-0 flex items-center justify-center' : 'relative flex min-h-0 flex-1 items-center justify-center'">
             <slot name="preview" :panels-visible="panelsVisible" />
+            <!-- The sweep over the preview while the prompt works (Ruling 10).
+                 Always mounted: AgentSweep only starts if it exists before `active`. -->
+            <div v-if="hasPrompt" class="pointer-events-none absolute inset-0 z-10"><AgentSweep :active="prompt.working.value" :period="3" palette="lagoon" /></div>
           </div>
-          <!-- Full-bleed: the takes strip + agent bar float bottom-centre over the
-               viewport as one cluster, lifted by `fullBleedBottomOffset` so a
-               surface with its own bottom overlay can clear it. Same components,
-               same capped width as the boxed path below — written out separately
-               rather than class-switched because the boxed path stacks them as
-               flow siblings and this one stacks them inside one absolute box. -->
+          <!-- The dock: the one prompt, and the shared tool bar under it. Full-bleed
+               floats it bottom-centre over the viewport, lifted by
+               `fullBleedBottomOffset` so a surface's own bottom overlay stays clear;
+               boxed stacks it as a flow sibling under the preview. Same capped width. -->
           <template v-if="fullBleed">
-            <div v-if="hasTakes || agent || $slots.agentBar"
-                 data-testid="studio-shell-bottom-cluster"
+            <div v-if="hasPrompt || $slots.tools" data-testid="studio-shell-bottom-cluster"
                  class="pointer-events-none absolute left-1/2 z-20 w-full max-w-[640px] -translate-x-1/2 px-4"
                  :style="{ bottom: bottomOffset + 'px' }">
-              <div v-if="hasTakes" class="pointer-events-auto mb-2">
-                <TakeStrip
-                  :takes="agent.takes.value" :thumbs="agent.takeThumbs.value"
-                  :current="agent.takeCurrentThumb.value" :selected="agent.selectedTake.value"
-                  :busy="agent.busy.value"
-                  :reviewing="agent.reviewingTakes?.value"
-                  @hover="agent.previewTake" @select="agent.selectTake"
-                  @keep="agent.keepTake" @dismiss="agent.dismissTakes"
-                  @more-directions="agent.moreDirections"
-                />
-              </div>
-              <div v-if="agent || $slots.agentBar" class="pointer-events-auto">
-                <slot name="agentBar">
-                  <AgentBar
-                    :busy="agent.busy.value" :error="agent.error.value" :notice="agent.notice.value"
-                    :chips="[]" :placeholder="agentPlaceholder"
-                    @submit="agent.ask" @chip="agent.ask"
-                  />
-                </slot>
+              <div data-testid="studio-shell-dock" class="pointer-events-auto flex flex-col gap-2">
+                <StudioPromptHost v-if="hasPrompt" :prompt="prompt" />
+                <StudioToolBar v-if="$slots.tools"><slot name="tools" /></StudioToolBar>
               </div>
             </div>
           </template>
-          <template v-else>
-          <!-- Agent prompt: bare (no container), docked under the preview — mirrors
-               the Compositor. Its output renders in the controls column at right.
-               A studio with a bespoke agent (Space Type's vibe flow) provides its own
-               bar via the #agentBar slot, so it lands in this SAME centred position
-               instead of floating in the controls column. -->
-          <!-- Capped width + centred, matching the canvas prompt bar's proportions rather
-               than stretching the full preview column, and `mb-3` so it lifts off the very
-               bottom edge. Applies to every studio's bar, the default AgentBar included. -->
-          <!-- The take filmstrip sits directly under the preview, above the bar
-               that produced it: four readings of the last request, with the
-               current look pinned first. Same capped width as the bar. -->
-          <div v-if="hasTakes" class="mt-3 w-full max-w-[640px] self-center shrink-0">
-            <TakeStrip
-              :takes="agent.takes.value" :thumbs="agent.takeThumbs.value"
-              :current="agent.takeCurrentThumb.value" :selected="agent.selectedTake.value"
-              :busy="agent.busy.value"
-              :reviewing="agent.reviewingTakes?.value"
-              @hover="agent.previewTake" @select="agent.selectTake"
-              @keep="agent.keepTake" @dismiss="agent.dismissTakes"
-              @more-directions="agent.moreDirections"
-            />
+          <div v-else-if="hasPrompt || $slots.tools" data-testid="studio-shell-dock" class="mt-3 mb-3 flex w-full max-w-[640px] shrink-0 flex-col gap-2 self-center">
+            <StudioPromptHost v-if="hasPrompt" :prompt="prompt" />
+            <StudioToolBar v-if="$slots.tools"><slot name="tools" /></StudioToolBar>
           </div>
-          <div v-if="agent || $slots.agentBar" class="mt-3 mb-3 w-full max-w-[640px] self-center shrink-0">
-            <slot name="agentBar">
-              <AgentBar
-                :busy="agent.busy.value" :error="agent.error.value" :notice="agent.notice.value"
-                :chips="[]" :placeholder="agentPlaceholder"
-                @submit="agent.ask" @chip="agent.ask"
-              />
-            </slot>
-          </div>
-          </template>
         </div>
         <div :data-testid="fullBleed ? 'studio-shell-controls-panel' : undefined"
              :data-hidden="fullBleed ? (panelsVisible ? '0' : '1') : undefined"
              :class="fullBleed
                ? [PANEL_BASE, 'right-4 flex flex-col gap-2 overflow-y-auto p-3', panelsVisible ? SHOWN : HIDE_RIGHT]
                : 'flex w-72 shrink-0 flex-col gap-2 overflow-y-auto pr-1 min-h-0'">
-          <!-- Assistant takeover: the agent's progress / proposal replace the controls
-               while it's working, then hand back the controls when done. -->
-          <template v-if="agentActive">
-            <div class="flex items-center gap-2 pb-1">
-              <span class="text-white/70">✦</span>
-              <span class="text-sm font-medium">Assistant</span>
-            </div>
-            <AgentProgress v-if="agent.busy.value" :active="agent.busy.value" />
-            <div v-else-if="agent.reviewing?.value && !agent.hasProposal.value" class="flex items-center gap-1.5 text-[11.5px] text-white/55">
-              <span class="text-white/75">✦</span> Analyzing the result for imperfections<span class="animate-pulse">…</span>
-            </div>
-            <AgentProposal
-              v-else-if="agent.hasProposal.value"
-              :changes="agent.changes.value" :busy="agent.busy.value" :issues="agent.issues?.value"
-              :review="agent.review.value" :reviewing="agent.reviewing?.value"
-              @accept="agent.acceptChange" @reject="agent.rejectChange" @reroll="agent.reroll"
-              @keep="agent.keep" @revert="agent.revert" @hover="(i: number | null) => agent.hovered.value = i"
-            />
-          </template>
-          <slot v-else name="controls" />
+          <slot name="controls" />
         </div>
       </div>
       <!-- The modal's bottom is reserved for actions: a full-width footer, hairline-topped,
