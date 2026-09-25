@@ -1,6 +1,6 @@
 # One pen for every tool
 
-**Date:** 2026-09-24 · **Status:** design approved in chat, awaiting spec review
+**Date:** 2026-09-24 · **Status:** approved. Plans: A `docs/superpowers/plans/2026-09-24-shared-pen-a.md` (the pen); B (Frame) and C (Shape Studio) to follow
 
 ## Why
 
@@ -41,11 +41,8 @@ Three pieces.
 The drawing model (points, lines, circles, arc paths, rules), the solver, snapping, tangent joints,
 and `sketchPath` (drawing → SVG `d`). Already free of any screen code.
 
-Two known fixes go in first (both recorded as owed in the sketch notes):
-
-- **The solver never stops early.** Its in-loop check compares hard residual *plus* regularisation
-  against `1e-6`, so it burns every iteration on every solve. Break on the hard residual alone.
-- **The `n === 0` early return skips restoring positions** after a failed solve. Same three lines.
+The two solver fixes the sketch notes listed as owed (stop early on the hard residual; restore after a
+failed `n === 0` solve) are **already in `solve.ts` at HEAD** — checked 2026-09-24. No work.
 
 ### 1b. The pen's state — `composables/usePen.ts` (new)
 
@@ -75,7 +72,7 @@ A see-through layer placed exactly over the host's canvas. It:
 | Input | Meaning |
 |---|---|
 | `doc` (`v-model`) | The drawing to edit. Handed back on every change. |
-| `toScreen(p)` / `toDrawing(p)` | Position mapping between screen pixels and drawing units. The Frame maps through the layer's position, scale and rotation. |
+| `view` | One affine matrix, drawing → screen (`{a,b,c,d,e,f}`, SVG order). It may translate, scale unevenly, rotate and mirror. The Frame builds it from the layer's position, scale and rotation. The pen inverts it for pointer input. |
 | `options` | Which tools to show; `openOnly` (text guides); `closedOnly` (if a host ever needs it); starting tool. |
 | `commit` / `cancel` events | Fired on Enter / Done and Escape / Cancel. The host decides what happens. |
 
@@ -86,16 +83,20 @@ tool it is in.
 
 ### Snapping measured on screen
 
-Snapping tolerances today are in drawing units (`infer.ts` default `tol 0.6`), which only feels right at
-the test page's fixed 34 px per unit. The pen converts a **screen distance (≈12 px)** into drawing
-units through the mapping on every use, so snapping feels the same in a small Frame and a zoomed-in
+Snapping tolerances today are in drawing units (`infer.ts` default `tol 0.6`, bow threshold 0.15, minimum
+radius 0.2), which only feel right at the test page's default 34 px per unit. The pen holds them as
+**screen distances — 20.4 px, 5.1 px, 6.8 px**, exactly today's feel at that zoom — and converts them
+into drawing units through the view matrix on every use, so snapping feels the same in a small Frame and a zoomed-in
 Shape Studio. The tangent-joint angle tolerance (12°) is already scale-free and stays.
 
 ### Orientation
 
-The drawing is stored in the **host's own units and axis direction**. `sketchPath` emits `d` in the same
-space, so an arc's sweep flag is correct without flipping. Only the test page, which shows y-up,
-flips for display (it already does).
+The drawing is stored in the **host's own units and axis direction**, and `sketchPath` emits `d` in the
+same space. The overlay draws that outline **in drawing space inside `<g transform="matrix(…)">`** with
+non-scaling strokes, so rotation, uneven scale and mirroring (the test page's y-up view) need no arc
+correction. Today's trick — rebuilding a screen-space copy and flipping each arc's sweep — only works
+without rotation or uneven scale, and goes. Only live screen-space previews of an arc check whether
+the matrix mirrors.
 
 ## 2. The pen toolbar
 
@@ -245,8 +246,7 @@ stays the lab. Its `window.__sketchDraw` API keeps working for the existing brow
 
 Each stage lands on its own and leaves the app working.
 
-0. **Solver fixes.** Check: sketch unit tests green; a new test shows a drag solve stops in a few
-   iterations instead of the full count.
+0. ~~Solver fixes~~ — already done at HEAD.
 1. **Pen toolbar prototype, then pull the pen out.** A clickable prototype of the toolbar is reviewed
    first. Then `usePen` + `PenOverlay` (with the toolbar), the mapping and screen-pixel snapping, and
    the test page rehosted. Check: the existing sketch browser tests pass unchanged; drawing, snapping,
