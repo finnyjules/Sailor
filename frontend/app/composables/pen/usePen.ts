@@ -165,7 +165,8 @@ export function usePen(opts: {
     if (openOnly) list = list.filter(t => t !== 'circle')
     return list
   })()
-  const options = { openOnly, tools: resolvedTools }
+  // frozen: fixed for the pen's lifetime, same as resolvedTools/openOnly above
+  const options = Object.freeze({ openOnly, tools: Object.freeze(resolvedTools) })
   function isToolAllowed(t: Tool): boolean { return resolvedTools.includes(t) }
 
   const tool = ref<Tool>('select')
@@ -1198,6 +1199,24 @@ export function usePen(opts: {
     if (doc.value.entities.length !== before) commitHistory()
   }
 
+  // A pending Line/Circle's start point is deleted iff this draw created it
+  // fresh (Pending.own — placePoint's own before/after entity-count check) and
+  // nothing else references it; a snap onto a pre-existing point is always
+  // left alone. Shared by finishSession (session ends before the shape is
+  // completed) and selectTool's fix (c) (the tool changes instead) — same
+  // rule, two different moments a Line/Circle draw can be abandoned. Returns
+  // whether it actually deleted something, for a caller that folds this into
+  // its own before/after commit check.
+  function deletePendingOwnPoint(): boolean {
+    const pd = pending.value
+    if (!pd || !pd.own) return false
+    const id = pd.kind === 'line' ? pd.p1 : pd.center
+    const p = doc.value.entities.find(e => e.id === id) as any
+    if (!p || p.kind !== 'point' || p.fixed || isPointReferenced(doc.value, id)) return false
+    deleteEntity(doc.value, id)
+    return true
+  }
+
   function selectTool(t: Tool) {
     if (!isToolAllowed(t)) return   // PenOptions.tools / openOnly: not a tool this host offers — no-op
     // Pen ↔ Curve mid-path keeps drawing the same path: the next segment's kind
@@ -1210,20 +1229,13 @@ export function usePen(opts: {
       return
     }
     // Fix (c): switching tools mid Line/Circle must delete its owned start
-    // point (placePoint created it fresh — Pending.own), same rule
-    // finishSession already applies when the session ends instead of the tool
-    // changing. Folded into ONE before/after check + commit with the pending
-    // PATH cleanup right below, so a switch that touches both never lands two
-    // history entries (or, worse, an uncommitted one — see cleanupPendingPath's
-    // own ghost-anchor warning).
+    // point too (deletePendingOwnPoint, above). Folded into ONE before/after
+    // check + commit with the pending PATH cleanup right below, so a switch
+    // that touches both never lands two history entries (or, worse, an
+    // uncommitted one — see cleanupPendingPath's own ghost-anchor warning).
     const before = doc.value.entities.length
     cleanupPendingPath()
-    const pd = pending.value
-    if (pd && pd.own) {
-      const id = pd.kind === 'line' ? pd.p1 : pd.center
-      const p = doc.value.entities.find(e => e.id === id) as any
-      if (p && p.kind === 'point' && !p.fixed && !isPointReferenced(doc.value, id)) deleteEntity(doc.value, id)
-    }
+    deletePendingOwnPoint()
     if (doc.value.entities.length !== before) commitHistory()
     cancelPendingOp()   // a half-armed Repeat/Mirror never survives a tool switch
     cancelValue()       // a pending value request (Distance/Radius/Copies) never survives a tool switch
@@ -1292,12 +1304,7 @@ export function usePen(opts: {
     } else if (pendingPath.value) {
       cleanupPendingPath()
     }
-    const pd = pending.value
-    if (pd && pd.own) {
-      const id = pd.kind === 'line' ? pd.p1 : pd.center
-      const p = doc.value.entities.find(e => e.id === id) as any
-      if (p && p.kind === 'point' && !p.fixed && !isPointReferenced(doc.value, id)) deleteEntity(doc.value, id)
-    }
+    deletePendingOwnPoint()
     const sel = selection.value.slice(), segs = selectedSegments.value.slice()
     clearTransient()
     // keep the user's selection — settling is not deselecting (but drop ids
