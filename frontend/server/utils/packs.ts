@@ -4,8 +4,8 @@
  * $0.01, always; discounts exist ONLY as bonus credits so the rate is never
  * negotiable. Captions denominate work, not arithmetic (framing rules).
  */
-import { MODEL_COSTS } from './priceBook'
 import { nodeCredits } from '../../shared/pricing/nodePrice'
+import { IMAGE_MODEL_PREFERENCE } from '../../app/data/image-models'
 
 export interface CreditPack {
   id: 'starter' | 'creator' | 'studio'
@@ -20,11 +20,20 @@ export interface CreditPack {
 
 // The covers line translates a pack into concrete work, priced from the SAME
 // tables the meter charges from — restating "5 cr" here would drift the day
-// the book changes. Units: a standard image render (flux-dev tier) and a
-// typical video clip: Seedance 2.0, 5 s at 720p, priced by the same shared
-// calculation the charge uses (per second, so the unit follows the rate card).
+// the book changes. Units: an image render on the "Generate an image" class
+// default (IMAGE_MODEL_PREFERENCE[0], model line-up H2) at its default
+// settings, and a typical video clip: Seedance 2.0, 5 s at 720p. Both are
+// priced by the same shared calculation the charge uses, so the units follow
+// the rate cards and the default.
 // "Covers ~" hedges deliberately: premium image models and long-form video cost more.
-const IMAGE_RENDER_CREDITS = MODEL_COSTS['black-forest-labs/flux-dev']!.credits
+export const PACK_IMAGE_RENDER = { model: IMAGE_MODEL_PREFERENCE[0]!, model_options: '{}' }
+const IMAGE_RENDER_CREDITS = packImageCredits()
+/** The pack's image render in credits. Throws at load if the price refuses it. */
+export function packImageCredits(render: Record<string, unknown> = PACK_IMAGE_RENDER): number {
+  const credits = nodeCredits('GenerateImageNode', render)
+  if (credits == null || !(credits > 0)) throw new Error(`credit packs: the image render ${JSON.stringify(render)} has no price`)
+  return credits
+}
 export const PACK_VIDEO_CLIP = { model: 'seedance-2.0', duration: '5', model_options: '{"resolution":"720p"}' }
 const VIDEO_CLIP_CREDITS = packClipCredits()
 /** The pack's video clip in credits. Throws at load if the price refuses it: a covers line must never read "~NaN". */

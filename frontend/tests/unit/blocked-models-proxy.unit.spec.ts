@@ -54,7 +54,7 @@ describe('local /prompt proxy', () => {
       expect(e.node.res, p).toMatchObject({ statusCode: 400 })
       expect(res.error, p).toMatchObject({
         type: 'value_not_in_list',
-        message: 'Sora 2 was discontinued by its service on 24 Sep 2026. Pick another model in “Generate a video”.',
+        message: 'Sora 2 was discontinued by its service on 24 Sep 2026. Pick another model in “Generate a video”, such as Hailuo H3 Max.',
       })
       expect(res.node_errors['1'].class_type, p).toBe('GenerateVideoNode')
     }

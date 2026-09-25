@@ -15,7 +15,7 @@
  */
 import type { ApiPrompt } from './graph'
 import { NO_FAMILIES, type RunnerFamily } from './families'
-import { modelEntryFor, modelMenus, runnerTakesClass } from './modelMenus'
+import { menuDefault, modelEntryFor, modelMenu, modelMenus, runnerTakesClass } from './modelMenus'
 
 export interface BlockedModelUse {
   nodeId: string
@@ -76,12 +76,26 @@ export function blockedModelLabel(use: Pick<BlockedModelUse, 'classType' | 'valu
   return modelEntryFor(use.classType, use.value)?.label ?? use.value
 }
 
+/**
+ * The class default a refusal suggests, by its catalogue name (never an id):
+ * the menu's first preference that can run now. Undefined when the class has
+ * no menu or its default can't run either.
+ */
+export function classDefaultLabel(classType: string, families: ReadonlySet<RunnerFamily>): string | undefined {
+  const menu = modelMenu(classType)
+  if (!menu) return undefined
+  const def = menuDefault(menu, families)
+  const e = menu.entries.find(x => x.value === def)
+  return e && !e.hidden && !e.discontinued ? e.label : undefined
+}
+
 /** Why a runner-only model didn't go to the runner, when its switch is off. */
 export const SWITCH_OFF_REASON = 'Its switch is off.'
 
 /**
  * The refusal for one blocked use, as a toast: a title and a description.
- *   discontinued  "Sora 2 was discontinued by its service on 24 Sep 2026" / "Pick another model in “Title”."
+ *   discontinued  "Sora 2 was discontinued by its service on 24 Sep 2026" /
+ *                 "Pick another model in “Title”, such as Hailuo H3 Max." (the class default, by name)
  *   runner-only   "“Title” uses Model, which only runs in Sailor" / the reason
  * `engineReason` is why the runner didn't take the workflow when the model's
  * switch is on (needsEngineDescription); with the switch off it is
@@ -93,13 +107,16 @@ export function blockedModelRefusal(
 ): { title: string, description: string } {
   const entry = modelEntryFor(use.classType, use.value)
   const label = entry?.label ?? use.value
+  const families = opts.families ?? NO_FAMILIES
   if (use.reason === 'discontinued') {
+    const suggestion = classDefaultLabel(use.classType, families)
     return {
       title: `${label} was discontinued by its service on ${serviceDate(entry?.discontinued ?? '')}`,
-      description: `Pick another model in “${opts.title}”.`,
+      description: suggestion
+        ? `Pick another model in “${opts.title}”, such as ${suggestion}.`
+        : `Pick another model in “${opts.title}”.`,
     }
   }
-  const families = opts.families ?? NO_FAMILIES
   const switchedOn = !!entry?.family && families.has(entry.family) && runnerTakesClass(use.classType)
   return {
     title: `“${opts.title}” uses ${label}, which only runs in Sailor`,

@@ -7,15 +7,18 @@
  *                    BackgroundRemove) and you drag / resize the cutout onto
  *                    the backdrop.
  *   3. Lighting    — describe the light; we flatten the composite + a keep-mask
- *                    client-side and run BlendScene (Flux Kontext / Nano Banana)
- *                    to relight and add contact shadows, keeping the product
- *                    pixel-exact via ImageToMask → keep_subject.
+ *                    client-side and run BlendScene (Flux 2 Pro / Nano Banana)
+ *                    to relight and add contact shadows. "Keep the product
+ *                    exact" switches to Flux Kontext Pro, which edits in place,
+ *                    and keeps the product pixel-exact via ImageToMask →
+ *                    keep_subject.
  *
  * Each step submits its own tiny prompt graph to /prompt and polls /history.
  */
 import { ArrowRight, Bookmark, Check, Copy, Download, Image as ImageIcon, Loader2, RefreshCcw, Sparkles, Upload, X } from 'lucide-vue-next'
 import TakesStrip from '~/components/vue-canvas/TakesStrip.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
+import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 
 type Step = 1 | 2 | 3
 const step = ref<Step>(1)
@@ -327,7 +330,14 @@ function onPointerUp() { drag = null }
 // =========================================================================
 
 const lighting = ref('')
-const blendModel = ref<'Flux Kontext Pro' | 'Nano Banana'>('Flux Kontext Pro')
+/** The engines offered for a relight. Flux Kontext Pro (hidden in the node's
+ *  menu, model line-up H2) is used only while "Keep the product exact" is on:
+ *  the keep-mask needs an engine that edits in place (see runBlend). */
+type BlendEngine = 'Flux 2 Pro' | 'Nano Banana'
+const BLEND_ENGINES: readonly BlendEngine[] = ['Flux 2 Pro', 'Nano Banana']
+const PRESERVE_MODEL = 'Flux Kontext Pro'
+const blendModel = ref<BlendEngine>('Flux 2 Pro')
+const keepExact = ref(false)
 // Each re-create stacks as a take; the displayed result is the active take.
 const { takes, activeTakeId, activeTake, addTake, selectTake, pinTake, discardTake, reset: resetTakes } = useAppTakes()
 const finalUrl = computed<string | null>(() => activeTake.value?.images?.[0] ?? null)
@@ -386,9 +396,11 @@ async function runBlend() {
   try {
     // The keep-mask cross-fades the *original* product pixels back over the result,
     // which only lines up when the engine edits in place. Flux Kontext Pro does;
-    // Nano Banana regenerates the whole scene and relocates the product, so the
-    // preserved pixels land off-register and ghost. Only wire the mask for Kontext.
-    const usePreserve = blendModel.value === 'Flux Kontext Pro'
+    // Nano Banana regenerates the whole scene and relocates the product, and
+    // Flux 2 Pro's edit isn't known to keep registration, so the preserved
+    // pixels could land off-register and ghost. Only wire the mask for Kontext,
+    // which is used only while "Keep the product exact" is on.
+    const usePreserve = keepExact.value
 
     const { composite, mask } = await buildComposite()
     progress.value = 'Uploading…'
@@ -407,7 +419,7 @@ async function runBlend() {
       '1': { class_type: 'LoadImage', inputs: { image: compositeName } },
     }
     const blendInputs: Record<string, any> = {
-      model: blendModel.value,
+      model: usePreserve ? PRESERVE_MODEL : blendModel.value,
       image: ['1', 0],
       prompt: blendPrompt,
       // keep_feather isn't optional in the node schema, so always send it — the
@@ -488,7 +500,9 @@ interface LookPreset {
   lighting: string
   preserve: number
   edgeBlend: number
-  blendModel: 'Flux Kontext Pro' | 'Nano Banana'
+  /** 'Flux Kontext Pro' in looks saved before model line-up H2: read as keepExact. */
+  blendModel: BlendEngine | 'Flux Kontext Pro'
+  keepExact?: boolean
 }
 
 const LOOKS_KEY = 'sailor-packshot-looks'
@@ -520,6 +534,7 @@ function saveLook() {
     bgRef: { ...bgRef.value },
     placement: rel,
     lighting: lighting.value, preserve: preserve.value, edgeBlend: edgeBlend.value, blendModel: blendModel.value,
+    keepExact: keepExact.value,
   })
   persistLooks()
   lookName.value = ''
@@ -527,7 +542,9 @@ function saveLook() {
 
 async function applyLook(p: LookPreset) {
   bgMode.value = p.bgMode; bgPrompt.value = p.bgPrompt; bgAspect.value = p.bgAspect
-  lighting.value = p.lighting; preserve.value = p.preserve; edgeBlend.value = p.edgeBlend; blendModel.value = p.blendModel
+  lighting.value = p.lighting; preserve.value = p.preserve; edgeBlend.value = p.edgeBlend
+  keepExact.value = p.blendModel === PRESERVE_MODEL || !!p.keepExact
+  blendModel.value = p.blendModel === PRESERVE_MODEL ? 'Flux 2 Pro' : p.blendModel
   pendingPlacement.value = p.placement
   cutoutUrl.value = null; cutoutDims.value = null; resetTakes(); error.value = null
   busy.value = true; progress.value = 'Loading look…'
@@ -769,23 +786,26 @@ function deleteLook(id: string) {
             </div>
           </div>
 
+          <!-- Keep the product exact: the keep-mask needs an engine that edits
+               in place, Flux Kontext Pro, so it is the engine while this is on. -->
+          <StudioSwitch v-model="keepExact" label="Keep the product exact" />
+
           <!-- Engine -->
           <div class="flex items-center gap-2">
             <span class="text-[12px] text-white/55">Engine</span>
-            <div class="inline-flex rounded-lg bg-white/[0.04] p-0.5 gap-0.5">
+            <div v-if="!keepExact" class="inline-flex rounded-lg bg-white/[0.04] p-0.5 gap-0.5">
               <button
-                v-for="m in (['Flux Kontext Pro','Nano Banana'] as const)" :key="m"
+                v-for="m in BLEND_ENGINES" :key="m"
                 class="px-2.5 py-1.5 rounded-md text-[11.5px] font-medium transition-colors cursor-pointer"
                 :class="blendModel === m ? 'bg-white/[0.12] text-white' : 'text-white/50 hover:text-white/80'"
                 @click="blendModel = m"
               >{{ m }}</button>
             </div>
+            <span v-else class="text-[11.5px] text-white/70">{{ PRESERVE_MODEL }}</span>
           </div>
 
-          <!-- Preserve controls: only Flux Kontext Pro edits in place, so the
-               pixel-exact keep-mask only makes sense there. Nano Banana relights
-               by regenerating the whole scene, which moves the product. -->
-          <div v-if="blendModel === 'Flux Kontext Pro'" class="space-y-4">
+          <!-- Preserve controls: only while the product is kept exact. -->
+          <div v-if="keepExact" class="space-y-4">
             <div>
               <StudioSlider v-model="preserve" label="Preserve product" :min="0" :max="1" :step="0.05" :bindable="false" />
               <p class="text-[10.5px] text-white/35 mt-1 leading-snug">
@@ -798,7 +818,7 @@ function deleteLook(id: string) {
             </div>
           </div>
           <p v-else class="text-[10.5px] text-white/35 leading-snug">
-            Nano Banana reimagines the whole scene for the most natural relight, so it can subtly restyle the product. For pixel-exact labels, switch to Flux Kontext Pro.
+            {{ blendModel }} reimagines the scene for a natural relight, so it can subtly restyle the product. For pixel-exact labels, turn on “Keep the product exact”.
           </p>
 
           <!-- Run -->

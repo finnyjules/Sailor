@@ -27,7 +27,7 @@ import { GRAPH_FILE_READERS, GRAPH_FOLDER_READERS, GRAPH_OUTPUT_WRITERS, extract
 import { extractGraphPromptText } from './graphPromptText'
 import { moderatePrompt } from './moderation'
 import { assertSpendAllowed } from './systemControls'
-import { blockedPromptRefusal } from './blockedModels'
+import { blockedPromptRefusal, retiredEngineRefusal } from './blockedModels'
 
 export function isPromptPath(path: string): boolean {
   return path === '/prompt' || path.startsWith('/prompt?')
@@ -393,6 +393,9 @@ export async function meterGraphSubmit(userId: string | null, body: any, deps: G
   // ComfyUI's own 400 shape before pricing and any hold (blockedModels.ts).
   const blocked = blockedPromptRefusal(body.prompt)
   if (blocked) return { status: 400, body: blocked }
+  // Hosted, until F12: the two estimate-priced edit engines are refused too.
+  const retired = retiredEngineRefusal(body.prompt)
+  if (retired) return { status: 400, body: retired }
 
   // The size of the pictures a size-priced node is sent, where the gate can
   // read it; the rest price at the input cap (never below what runs).

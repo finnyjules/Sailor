@@ -16,11 +16,12 @@ import type { ApiPrompt } from '#shared/runner/graph'
 import { RUNNER_FAMILIES, NO_FAMILIES, type RunnerFamily } from '../../shared/runner/families'
 import { isRunnerEligible, resolveVideoModelId } from '../../shared/runner/eligibility'
 import { applyModelOverlay, galleryEntries, modelMenu } from '../../shared/runner/modelMenus'
-import { blockedModelUses } from '../../shared/runner/blockedModels'
+import { blockedModelUses, classDefaultLabel } from '../../shared/runner/blockedModels'
 import { IMAGE_MODELS, IMAGE_MODELS_BY_ID, IMAGE_MODEL_PREFERENCE } from '../../app/data/image-models'
 import { FILM_SHOT_MODEL_PREFERENCE, VIDEO_MODELS, VIDEO_MODELS_BY_ID, VIDEO_MODEL_PREFERENCE } from '../../app/data/video-models'
 import { EDIT_MODEL_MENUS } from '../../app/data/edit-model-options'
-import { MOODBOARD_DEFAULT_MODEL } from '../../app/lib/graph/moodboardApply'
+import { MOODBOARD_DEFAULT_MODEL, moodboardDefaultModel } from '../../app/lib/graph/moodboardApply'
+import { blockedPromptRefusal, retiredEngineRefusal } from '../../server/utils/blockedModels'
 import { blockedRunRefusal } from '../../app/lib/runner/needsEngine'
 import { meterGraphSubmit } from '../../server/utils/meterGraphRun'
 import { priceGraph } from '../../server/utils/priceBook'
@@ -60,6 +61,22 @@ function baseline(): Record<string, any> {
 }
 const modelSpec = (body: any, cls: string) => body[cls].input.required.model
 const cfg = (body: any, cls: string) => modelSpec(body, cls)[1]
+
+/** The hosted meter's dependencies, faked: records every price, hold and forward. */
+function meterDeps() {
+  return {
+    priceGraph: vi.fn(() => ({ credits: 5, version: 'test', breakdown: [] })),
+    spendGuard: vi.fn(async () => {}),
+    validateFileRefs: vi.fn(async () => {}),
+    moderatePrompt: vi.fn(async () => ({ ok: true as const })),
+    hold: vi.fn(async () => ({ ok: true as const, holdId: 7 })),
+    getAvailable: vi.fn(async () => 3),
+    forward: vi.fn(async () => ({ status: 200, body: { prompt_id: 'p1', number: 1, node_errors: {} } })),
+    registerRun: vi.fn(async () => {}),
+    startSettle: vi.fn(),
+    releaseHold: vi.fn(async () => {}),
+  }
+}
 
 // ── The flags ────────────────────────────────────────────────────────────
 
@@ -221,7 +238,7 @@ describe('a Sora node is refused by all three checks, before any call', () => {
         for (const opts of [{ runnerOn: false }, { runnerOn: true, families: ALL }]) {
           expect(blockedRunRefusal([{ prompt: one(vid(id, cls)), titleOf }], opts), cls).toEqual({
             title: `${label} was discontinued by its service on 24 Sep 2026`,
-            description: 'Pick another model in “Trailer”.',
+            description: 'Pick another model in “Trailer”, such as Hailuo H3 Max.',
           })
         }
       }
@@ -229,18 +246,7 @@ describe('a Sora node is refused by all three checks, before any call', () => {
 
     it(`${id}: the server meter answers 400 with no price, hold or forward`, async () => {
       for (const cls of ['GenerateVideoNode', 'FilmShotNode']) {
-        const d = {
-          priceGraph: vi.fn(() => ({ credits: 5, version: 'test', breakdown: [] })),
-          spendGuard: vi.fn(async () => {}),
-          validateFileRefs: vi.fn(async () => {}),
-          moderatePrompt: vi.fn(async () => ({ ok: true as const })),
-          hold: vi.fn(async () => ({ ok: true as const, holdId: 7 })),
-          getAvailable: vi.fn(async () => 3),
-          forward: vi.fn(async () => ({ status: 200, body: { prompt_id: 'p1', number: 1, node_errors: {} } })),
-          registerRun: vi.fn(async () => {}),
-          startSettle: vi.fn(),
-          releaseHold: vi.fn(async () => {}),
-        }
+        const d = meterDeps()
         const r = await meterGraphSubmit('u1', { prompt: one(vid(id, cls)) }, d as any)
         expect(r.status, cls).toBe(400)
         expect((r.body as any).error.message, cls).toMatch(new RegExp(`^${label} was discontinued by its service on 24 Sep 2026\\.`))
@@ -256,7 +262,7 @@ describe('a Sora node is refused by all three checks, before any call', () => {
       await expect(k.engine.startRun({ userId: k.userId, takes: [one(vid(id))], workflow: null, canvasId: null, projectUuid: null, projectName: null }))
         .rejects.toMatchObject({
           statusCode: 400,
-          message: `${label} was discontinued by its service on 24 Sep 2026. Pick another model in “Generate a video”.`,
+          message: `${label} was discontinued by its service on 24 Sep 2026. Pick another model in “Generate a video”, such as Hailuo H3 Max.`,
         })
       expect(k.ledger.hold).not.toHaveBeenCalled()
       expect(k.graphRuns.create).not.toHaveBeenCalled()
@@ -291,7 +297,12 @@ describe('grep guard: no node is created with a hard-coded model outside dev/', 
     'app/lib/sketch/sketchPadPrompt.ts': ['flux-schnell'],
     'app/lib/draft/overrides.ts': ['flux-schnell'],
     'app/components/vue-canvas/VueNodeCanvas.vue': ['Nano Banana 2', 'flux-schnell'], // agent repair edits use Nano Banana; the sketch warm-up
-    'app/components/apps/ProductShotApp.vue': ['flux-schnell'],
+    // The Product shot app: its backdrop draft (flux-schnell); its relight engine,
+    // Flux 2 Pro by default (fix round 1 ruling); and Flux Kontext Pro, used only
+    // while "Keep the product exact" is on — the keep-mask needs an in-place edit.
+    'app/components/apps/ProductShotApp.vue': ['Flux 2 Pro', 'Flux Kontext Pro', 'flux-schnell'],
+    // Which Upscale engine a widget belongs to (a widget → model map), not a default.
+    'app/components/vue-canvas/ComfyNode.vue': ['Topaz'],
     // "Edit with Nano Banana": the action names its model.
     'app/lib/canvas/nodeActions.ts': ['Nano Banana 2'],
     // Display text of the action catalogue (the model a tool uses), not a node's widget.
@@ -306,7 +317,9 @@ describe('grep guard: no node is created with a hard-coded model outside dev/', 
 
   it('every model literal outside dev/ is on the list, and none of them is hidden or discontinued', () => {
     const found: Record<string, Set<string>> = {}
-    const literal = /\bmodel\s*[:=]\s*(['"`])([^'"`\n]+)\1|(?:\?\?|\|\|)\s*(['"`])([^'"`\n]+)\3/g
+    // Any `…model… = / :` literal (blendModel, PRESERVE_MODEL, a `ref('…')` or
+    // `ref<T>('…')` default), and any `?? '…'` / `|| '…'` fallback.
+    const literal = /\b\w*(?:[mM]odel|MODEL)\w*\s*[:=]\s*(?:ref(?:<[^>]*>)?\()?(['"`])([^'"`\n]+)\1|(?:\?\?|\|\|)\s*(['"`])([^'"`\n]+)\3/g
     for (const file of ['app', 'shared', 'server'].flatMap(d => walk(path.join(FRONTEND, d)))) {
       const src = fs.readFileSync(file, 'utf8')
       for (const m of src.matchAll(literal)) {
@@ -319,12 +332,154 @@ describe('grep guard: no node is created with a hard-coded model outside dev/', 
     const got = Object.fromEntries(Object.entries(found).map(([f, s]) => [f, [...s].sort()]).sort())
     const want = Object.fromEntries(Object.entries(ALLOWED).map(([f, v]) => [f, [...v].sort()]).sort())
     expect(got).toEqual(want)
+    // Hidden or discontinued everywhere it is listed: a gallery id, or a dropdown
+    // value hidden in every menu that has it (Flux Kontext Pro, IP-Adapter, Real-ESRGAN).
+    const dropdown = Object.values(EDIT_MODEL_MENUS).flatMap(m => m.options)
     const flagged = new Set([
       ...[...IMAGE_MODELS, ...VIDEO_MODELS].filter(m => m.hidden || m.discontinued).map(m => m.id),
+      ...dropdown.filter(o => dropdown.filter(x => x.value === o.value).every(x => x.hidden)).map(o => o.value),
     ])
+    expect(flagged.has('Flux Kontext Pro')).toBe(true)
+    /** A flagged literal allowed on purpose, with its reason above. */
+    const FLAGGED_ON_PURPOSE = new Set(['app/components/apps/ProductShotApp.vue Flux Kontext Pro'])
     for (const [file, values] of Object.entries(ALLOWED)) {
       if (file === 'app/data/action-catalog.ts') continue // display text; 'Nano Banana' there is Sketch to image's engine
-      for (const v of values) expect(flagged.has(v), `${file} ${v}`).toBe(false)
+      for (const v of values) expect(flagged.has(v) && !FLAGGED_ON_PURPOSE.has(`${file} ${v}`), `${file} ${v}`).toBe(false)
     }
+  })
+})
+
+// ── Fix round 1 ──────────────────────────────────────────────────────────
+
+const src = (rel: string) => fs.readFileSync(path.join(__dirname, '../..', rel), 'utf8')
+
+describe('fix round 1', () => {
+  it('I1: the Product shot app relights on Flux 2 Pro; Kontext only while "Keep the product exact" is on', () => {
+    const app = src('app/components/apps/ProductShotApp.vue')
+    expect(app).toMatch(/const blendModel = ref<BlendEngine>\('Flux 2 Pro'\)/)
+    expect(app).toContain("const BLEND_ENGINES: readonly BlendEngine[] = ['Flux 2 Pro', 'Nano Banana']")
+    expect(app).toContain('const keepExact = ref(false)')
+    // The keep-mask and Kontext go together, and only while the switch is on.
+    expect(app).toContain('const usePreserve = keepExact.value')
+    expect(app).toContain('model: usePreserve ? PRESERVE_MODEL : blendModel.value,')
+    const uses = [...app.matchAll(/PRESERVE_MODEL/g)].length
+    // Declared once; sent once (above); shown once, as the engine, under v-else of `!keepExact`; two look-migration reads.
+    expect(uses).toBe(5)
+    expect(app).toContain('<div v-if="!keepExact" class="inline-flex')
+    expect(app).toContain('<span v-else class="text-[11.5px] text-white/70">{{ PRESERVE_MODEL }}</span>')
+    // A look saved on Kontext before H2 comes back with the switch on.
+    expect(app).toContain('keepExact.value = p.blendModel === PRESERVE_MODEL || !!p.keepExact')
+  })
+
+  it('I2: the packs\' image unit is the image class default (packs.unit.spec.ts has the figures)', () => {
+    const packs = src('server/utils/packs.ts')
+    expect(packs).toContain('IMAGE_MODEL_PREFERENCE[0]')
+    expect(packs).not.toContain('flux-dev')
+  })
+
+  describe('hosted: the two estimate-priced edit engines are refused before any price or hold, until F12', () => {
+    const shot: ApiPrompt = { 1: { class_type: 'LoadImage', inputs: { image: 'p.png' } }, 2: { class_type: 'ProductShotNode', inputs: { image: ['1', 0], scene_prompt: 'a beach' } }, 3: { class_type: 'SaveImage', inputs: { images: ['2', 0] } } }
+    const restyle = (model: string): ApiPrompt => ({
+      1: { class_type: 'LoadImage', inputs: { image: 'p.png' } },
+      2: { class_type: 'RestyleFromImageNode', inputs: { model, content_image: ['1', 0], style_image: ['1', 0] } },
+      3: { class_type: 'SaveImage', inputs: { images: ['2', 0] } },
+    })
+
+    it('Product shot on SDXL', async () => {
+      const d = meterDeps()
+      const r = await meterGraphSubmit('u1', { prompt: shot }, d as any)
+      expect(r.status).toBe(400)
+      expect(r.body.error.message).toBe('Product shot is being upgraded — try Swap background for now.')
+      expect(r.body.node_errors[2].class_type).toBe('ProductShotNode')
+      expect(d.priceGraph).not.toHaveBeenCalled()
+      expect(d.hold).not.toHaveBeenCalled()
+      expect(d.forward).not.toHaveBeenCalled()
+    })
+
+    it('Restyle on IP-Adapter (fofr/style-transfer), naming the default by its name', async () => {
+      const d = meterDeps()
+      const r = await meterGraphSubmit('u1', { prompt: restyle('Style Transfer · IP-Adapter') }, d as any)
+      expect(r.status).toBe(400)
+      expect(r.body.error.message).toBe('Restyle’s Style Transfer engine has been retired. Pick another model in “Restyle from image”, such as Nano Banana 2.')
+      expect(r.body.node_errors[2].errors[0].extra_info).toEqual({ input_name: 'model', input_value: 'Style Transfer · IP-Adapter' })
+      expect(d.priceGraph).not.toHaveBeenCalled()
+      expect(d.hold).not.toHaveBeenCalled()
+      expect(d.forward).not.toHaveBeenCalled()
+    })
+
+    it('control: Restyle on another engine (hidden plain Nano Banana too) is priced, held and forwarded', async () => {
+      for (const model of ['Nano Banana 2', 'Nano Banana']) {
+        const d = meterDeps()
+        const r = await meterGraphSubmit('u1', { prompt: restyle(model) }, d as any)
+        expect(r.status, model).toBe(200)
+        expect(d.hold, model).toHaveBeenCalledTimes(1)
+      }
+    })
+
+    it('local mode is unchanged: the local proxy check lets both through', () => {
+      expect(blockedPromptRefusal(shot)).toBeNull()
+      expect(blockedPromptRefusal(restyle('Style Transfer · IP-Adapter'))).toBeNull()
+      expect(src('server/middleware/comfyui-proxy.ts')).not.toContain('retiredEngineRefusal')
+      expect(retiredEngineRefusal(shot)).not.toBeNull()
+    })
+  })
+
+  it('M1: the agent copy names the engine editImage and Edit an image really call, never Kontext', () => {
+    expect(src('server/api/inpaint/kontext.post.ts')).toContain("const APP = 'fal-ai/flux-2-pro/edit'")
+    for (const f of ['app/lib/agent/capabilities.ts', 'app/lib/agent/surfaces/smartLayout.ts', 'app/lib/agent/surfaces/compositor.ts']) {
+      expect(src(f), f).not.toMatch(/\(Flux Kontext\)|\/ Flux Kontext \//)
+    }
+    expect(src('app/lib/agent/surfaces/smartLayout.ts')).toContain('from an instruction (Flux 2 Pro)')
+    expect(src('app/lib/agent/surfaces/compositor.ts')).toContain('from an instruction (Flux 2 Pro)')
+  })
+
+  it('M2: a node\'s own discontinued model is tagged "Discontinued", a hidden one "Hidden"', () => {
+    const sora = galleryEntries(VIDEO_MODELS, { classType: 'GenerateVideoNode', families: NO_FAMILIES, current: 'sora-2' })
+    expect(sora.find(e => e.model.id === 'sora-2')).toMatchObject({ hiddenTag: true, tag: 'Discontinued' })
+    const kling = galleryEntries(VIDEO_MODELS, { classType: 'FilmShotNode', families: NO_FAMILIES, current: 'kling-v2.5-turbo-pro' })
+    expect(kling.find(e => e.model.id === 'kling-v2.5-turbo-pro')).toMatchObject({ hiddenTag: true, tag: 'Hidden' })
+    expect(kling.filter(e => e.tag)).toHaveLength(1)
+    for (const f of ['ModelGalleryModal.vue', 'VideoModelGalleryModal.vue']) {
+      expect(src(`app/components/vue-canvas/${f}`), f).toMatch(/\{\{ hiddenTagged\.get\(\(item as \w+\)\.id\) \}\}<\/span>/)
+    }
+  })
+
+  it('M3: the Sora refusal suggests the class default by its catalogue name, never an id', () => {
+    for (const cls of ['GenerateVideoNode', 'FilmShotNode', 'GenerateImageNode']) {
+      for (const families of [NO_FAMILIES, ALL]) {
+        const label = classDefaultLabel(cls, families)!
+        expect(label, cls).toBeTruthy()
+        expect([...IMAGE_MODELS, ...VIDEO_MODELS].some(m => m.label === label), cls).toBe(true)
+        expect([...IMAGE_MODELS, ...VIDEO_MODELS].some(m => m.id === label), cls).toBe(false)
+      }
+    }
+    expect(classDefaultLabel('GenerateVideoNode', NO_FAMILIES)).toBe('Hailuo H3 Max')
+  })
+
+  it('M4: the moodboard switch never lands on a model that can\'t take references', () => {
+    const nb2 = IMAGE_MODELS_BY_ID['nano-banana-2']!
+    const pro = IMAGE_MODELS_BY_ID['nano-banana-pro']!
+    const plain = IMAGE_MODELS_BY_ID['flux-2-pro']!
+    expect(plain.tags).not.toContain('multi-image')
+    // The preference list first…
+    expect(moodboardDefaultModel(IMAGE_MODELS, ['flux-2-pro', 'nano-banana-2'])).toBe('nano-banana-2')
+    // …then the first catalogue model that takes references, not the list's head.
+    expect(moodboardDefaultModel([plain, pro, nb2], ['flux-2-pro'])).toBe('nano-banana-pro')
+    // A hidden reference model is skipped.
+    expect(moodboardDefaultModel([plain, { ...pro, hidden: true }, nb2], ['flux-2-pro'])).toBe('nano-banana-2')
+    // None at all: it throws rather than pick one.
+    expect(() => moodboardDefaultModel([plain], ['flux-2-pro'])).toThrow('no image model in the catalogue takes reference pictures')
+  })
+
+  it('M5: the gallery subtitle counts what it shows, in plain words that fit both services', () => {
+    for (const f of ['ModelGalleryModal.vue', 'VideoModelGalleryModal.vue']) {
+      const vue = src(`app/components/vue-canvas/${f}`)
+      expect(vue, f).toContain(':subtitle="`${offeredModels.length} models`"')
+      expect(vue, f).not.toContain('models · Replicate')
+    }
+  })
+
+  it('M6: the Blend scene icon comment names its default', () => {
+    expect(src('app/data/generator-icons.ts')).toMatch(/BlendSceneNode:\s+'BFL',\s+\/\/ Flux 2 Pro \(default/)
   })
 })

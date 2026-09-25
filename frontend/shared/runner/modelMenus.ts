@@ -235,21 +235,25 @@ export function comboMenu(
   return { options: shown, labels }
 }
 
+/** The tag a gallery puts on a model it would otherwise leave out: sentence case. */
+export type GalleryTag = 'Hidden' | 'Discontinued'
+
 /**
  * The models a gallery shows on a node of `classType`, in catalogue order:
  * the offerable ones, plus the node's current model whatever its flags,
- * tagged `hiddenTag` when the menu would otherwise leave it out.
+ * tagged when the menu would otherwise leave it out (`hiddenTag`), with
+ * `tag` saying why: "Discontinued" for a discontinued model, else "Hidden".
  */
 export function galleryEntries<M extends ModelFlags & { id: string }>(
   models: readonly M[],
   opts: { classType: string, families: ReadonlySet<RunnerFamily>, current: string | null | undefined },
-): { model: M, hiddenTag: boolean }[] {
+): { model: M, hiddenTag: boolean, tag: GalleryTag | null }[] {
   const current = typeof opts.current === 'string' ? menuKey(opts.classType, opts.current) : null
-  const out: { model: M, hiddenTag: boolean }[] = []
+  const out: { model: M, hiddenTag: boolean, tag: GalleryTag | null }[] = []
   for (const m of models) {
     const shown = offerable(m, opts.classType, opts.families)
-    if (shown) out.push({ model: m, hiddenTag: false })
-    else if (m.id === current) out.push({ model: m, hiddenTag: true })
+    if (shown) out.push({ model: m, hiddenTag: false, tag: null })
+    else if (m.id === current) out.push({ model: m, hiddenTag: true, tag: m.discontinued ? 'Discontinued' : 'Hidden' })
   }
   return out
 }

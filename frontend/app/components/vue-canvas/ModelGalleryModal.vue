@@ -176,7 +176,7 @@ watch(() => props.nodeId, () => loadDraftFor(currentModelId.value))
 // What this gallery offers (shared/runner/modelMenus.ts): no hidden or
 // discontinued model, no model of a family switched off, and a runner-only
 // model only on a class the runner takes. The node's current model always
-// shows, tagged "Hidden" when it is otherwise left out, and still works.
+// shows, tagged "Hidden" (or "Discontinued") when it is otherwise left out.
 const runtimePublic = useRuntimeConfig().public as { runnerEnabled?: boolean, runnerFamilies?: unknown }
 const runnerFamilies = runtimePublic.runnerEnabled ? parseFamilies(runtimePublic.runnerFamilies) : NO_FAMILIES
 const offered = computed(() => galleryEntries(IMAGE_MODELS, {
@@ -185,7 +185,7 @@ const offered = computed(() => galleryEntries(IMAGE_MODELS, {
   current: currentModelId.value,
 }))
 const offeredModels = computed<ImageModel[]>(() => offered.value.map(e => e.model))
-const hiddenTagged = computed(() => new Set(offered.value.filter(e => e.hiddenTag).map(e => e.model.id)))
+const hiddenTagged = computed(() => new Map(offered.value.filter(e => e.tag).map(e => [e.model.id, e.tag!] as const)))
 
 const searchQuery = ref('')
 const activeFilterId = ref<string>('all')
@@ -280,7 +280,7 @@ const focusedModel = computed<ImageModel | null>(() =>
   <CatalogModal
     :open="true"
     :title="`Pick a model for &quot;Generate an image&quot;`"
-    :subtitle="`${offeredModels.length} models · Replicate`"
+    :subtitle="`${offeredModels.length} models`"
     :items="visibleItems"
     :selected-id="currentModelId"
     :filters="filters"
@@ -340,7 +340,7 @@ const focusedModel = computed<ImageModel | null>(() =>
               v-if="hiddenTagged.has((item as ImageModel).id)"
               class="shrink-0 text-[9px] leading-none px-1.5 py-0.5 rounded bg-white/[0.08] text-white/60"
               data-testid="model-hidden-tag"
-            >Hidden</span>
+            >{{ hiddenTagged.get((item as ImageModel).id) }}</span>
           </span>
           <!-- Brand chip: neutral pill with the brand icon as a leading bullet.
                Color icons keep their baked-in gradients; mono icons fall in

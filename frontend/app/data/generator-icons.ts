@@ -135,7 +135,7 @@ export const NODE_MODEL_BRAND: Record<string, string | null> = {
 
   // ----- Image · manipulation -----
   EditImageNode:        'BFL',                // Flux Kontext Pro
-  BlendSceneNode:       'BFL',                // Flux Kontext Pro (default; Nano Banana optional)
+  BlendSceneNode:       'BFL',                // Flux 2 Pro (default since model line-up H2; Nano Banana optional)
   UpscaleImageNode:     null,                 // Clarity — no brand
   RemoveBackgroundNode: null,                 // 851-labs/bg-remover
   RestorePhotoNode:     'BFL',                // Flux Kontext · Restore

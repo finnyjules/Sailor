@@ -109,7 +109,7 @@ describe('browser: refused before any /prompt', () => {
     const r = blockedRunRefusal([{ prompt: { 1: vid('sora-2'), 2: card('1') }, titleOf }], { runnerOn: true, families: fams('replicate-video') })
     expect(r).toEqual({
       title: 'Sora 2 was discontinued by its service on 24 Sep 2026',
-      description: 'Pick another model in “Hero shot”.',
+      description: 'Pick another model in “Hero shot”, such as Hailuo H3 Max.',
     })
   })
 
@@ -184,8 +184,8 @@ describe('server: refused before pricing and any hold', () => {
     expect(r.body).toEqual({
       error: {
         type: 'value_not_in_list',
-        message: 'Sora 2 was discontinued by its service on 24 Sep 2026. Pick another model in “Generate a video”.',
-        details: 'Pick another model in “Generate a video”.',
+        message: 'Sora 2 was discontinued by its service on 24 Sep 2026. Pick another model in “Generate a video”, such as Hailuo H3 Max.',
+        details: 'Pick another model in “Generate a video”, such as Hailuo H3 Max.',
         extra_info: {},
       },
       node_errors: {
@@ -193,7 +193,7 @@ describe('server: refused before pricing and any hold', () => {
           errors: [{
             type: 'value_not_in_list',
             message: 'Sora 2 was discontinued by its service on 24 Sep 2026.',
-            details: 'Pick another model in “Generate a video”.',
+            details: 'Pick another model in “Generate a video”, such as Hailuo H3 Max.',
             extra_info: { input_name: 'model', input_value: 'sora-2' },
           }],
           dependent_outputs: [],
@@ -237,7 +237,7 @@ describe('runner: a discontinued model is refused before any hold', () => {
     const k = makeKit({ hosted: true })
     await expect(start(k, [{ 1: img('nano-banana-2'), 2: card('1') }])).rejects.toMatchObject({
       statusCode: 400,
-      message: 'Nano Banana 2 was discontinued by its service on 24 Sep 2026. Pick another model in “Generate an image”.',
+      message: 'Nano Banana 2 was discontinued by its service on 24 Sep 2026. Pick another model in “Generate an image”, such as Flux 2 Pro.',
     })
     expect(k.ledger.hold).not.toHaveBeenCalled()
     expect(k.graphRuns.create).not.toHaveBeenCalled()
