@@ -13,7 +13,8 @@ const effects = [
 
 describe('the shared shader gallery helper (spec §7.3, §7.4)', () => {
   const reset = () => { myEffectRecords.value = []; myEffectsLoaded.value = false }
-  beforeEach(reset)
+  // The user's library holds the one My effect (a My effect is listed only while it does).
+  beforeEach(() => { reset(); setMyEffectRecord({ id: 'mine_aaaaaaaaaaaa' } as any) })
   afterEach(reset)
 
   it('My effects first, then the built-in sections; drafts and old versions never listed', () => {
@@ -49,5 +50,13 @@ describe('the shared shader gallery helper (spec §7.3, §7.4)', () => {
     setMyEffectRecord(null, 'mine_aaaaaaaaaaaa')
     expect(shaderGalleryItems(effects, { filter: 'all', query: '' }).map(e => e.id)).toEqual(['water_ripple', 'glow_soft'])
     expect(shaderGalleryFilters(effects)[1]).toEqual({ id: 'mine', label: 'My effects', count: 0 })
+  })
+  it('a shared project’s copy that isn’t in the library is never listed, loaded or not (Task 10 ruling)', () => {
+    const copy = [d('mine_dddddddddddd', 'mine', { mine: true, name: 'Their effect' }), d('water_ripple', 'distortion')]
+    expect(shaderGalleryItems(copy, { filter: 'all', query: '' }).map(e => e.id)).toEqual(['water_ripple'])
+    myEffectsLoaded.value = true
+    expect(shaderGalleryItems(copy, { filter: 'all', query: '' }).map(e => e.id)).toEqual(['water_ripple'])
+    setMyEffectRecord({ id: 'mine_dddddddddddd' } as any) // saved to the library: listed
+    expect(shaderGalleryItems(copy, { filter: 'all', query: '' }).map(e => e.id)).toEqual(['mine_dddddddddddd', 'water_ripple'])
   })
 })

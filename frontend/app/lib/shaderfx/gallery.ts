@@ -3,7 +3,7 @@
  *  with no thumbnail renderer (the fill editor, Frame's effect stack) uses it as-is. */
 import type { CatalogSection } from '~/lib/catalogSections'
 import { isPickable } from '~/lib/myEffects/defs'
-import { myEffectRecordById, myEffectRecords, myEffectsLoaded } from '~/lib/myEffects/library'
+import { myEffectRecordById, myEffectRecords } from '~/lib/myEffects/library'
 import type { EffectDef } from './types'
 
 /** Built-in picker sections: image-transforming families first, generators last as their own
@@ -26,9 +26,12 @@ export function sectionOfEffect(d: EffectDef): string {
   return d.mine ? MINE.id : d.category
 }
 
-/** A My effect is listed while the library holds it. Until the library has loaded (or if it
- *  never does) every registered My effect is listed. */
-const defaultListed = (id: string): boolean => !myEffectsLoaded.value || !!myEffectRecordById(id)
+/** A My effect is listed only while the library holds it: the user's own saved effects. A
+ *  shared project's copy (adopted, so the project renders) that isn't in the library is never
+ *  listed, and neither is anything before the library loads (the takes kept this session are
+ *  in it already). So a picker never lists an effect and then drops it, and a failed list
+ *  call never leaves someone else's copies listed. */
+const defaultListed = (id: string): boolean => !!myEffectRecordById(id)
 
 type Include = (d: EffectDef) => boolean
 type Listed = (id: string) => boolean

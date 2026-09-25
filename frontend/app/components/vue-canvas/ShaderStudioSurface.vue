@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRaw, watch } from 'vue'
 import { Plus, Trash2 } from 'lucide-vue-next'
-import CatalogModal from '~/components/CatalogModal.vue'
+import ShaderEffectGallery from '~/components/vue-canvas/ShaderEffectGallery.vue'
 import StudioModalShell from '~/components/vue-canvas/StudioModalShell.vue'
 import StudioSection from '~/components/vue-canvas/StudioSection.vue'
 import StudioLayerStack from '~/components/vue-canvas/StudioLayerStack.vue'
@@ -326,13 +326,12 @@ function rerollSeed() {
   config.value.seed = Math.floor(Math.random() * 9999) + 1
 }
 
-// ── effect picker (CatalogModal) ───────────────────────────────────────────────
+// ── effect picker (ShaderEffectGallery) ────────────────────────────────────────
 const pickerOpen = ref(false)
-const pickerSearch = ref('')
-const pickerFilter = ref('all')
 const thumbs = ref<Record<string, string>>({})
+let pickerShown: EffectDef[] = []  // what the gallery lists now (its `visible` event)
+function onPickerVisible(defs: EffectDef[]) { pickerShown = defs; if (pickerOpen.value) for (const def of defs) ensureThumb(def) }
 const thumbCache: Record<string, string> = ((globalThis as any).__shaderStudioThumbs ??= {})
-function titleCase(s: string): string { return s.replace(/(^|[_\s])(\w)/g, (_, sep, c) => (sep ? ' ' : '') + c.toUpperCase()).trim() }
 // Base image every gallery thumbnail is rendered over. Starts as a gradient and
 // is replaced with the finn_shader sample once it loads (see below).
 const placeholder = (() => { const c = document.createElement('canvas'); c.width = 192; c.height = 108; const g = c.getContext('2d')!; const lg = g.createLinearGradient(0, 0, 192, 108); lg.addColorStop(0, '#444'); lg.addColorStop(1, '#999'); g.fillStyle = lg; g.fillRect(0, 0, 192, 108); return c })()
@@ -345,27 +344,12 @@ const placeholder = (() => { const c = document.createElement('canvas'); c.width
     g.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, 0, 0, 192, 108)
     for (const k of Object.keys(thumbCache)) delete thumbCache[k]  // bust stale gradient thumbs
     thumbs.value = {}
-    if (pickerOpen.value) for (const def of catalog.value?.effects ?? []) ensureThumb(def)
+    if (pickerOpen.value) for (const def of pickerShown) ensureThumb(def)
     if (effectDef.value) ensureThumb(effectDef.value)
   }
   img.src = '/finn_shader.png'
 })()
-// Picker sections (SHADER_SECTIONS) live in ~/lib/shaderfx/gallery.
-const pickerFilters = computed(() => {
-  const counts = new Map<string, number>()
-  for (const e of catalog.value?.effects ?? []) counts.set(e.category, (counts.get(e.category) ?? 0) + 1)
-  const total = (catalog.value?.effects ?? []).length
-  return [{ id: 'all', label: 'All', count: total }, ...[...counts].map(([id, count]) => ({ id, label: titleCase(id), count }))]
-})
-const pickerItems = computed<EffectDef[]>(() => {
-  const q = pickerSearch.value.trim().toLowerCase()
-  return (catalog.value?.effects ?? []).filter(e =>
-    (pickerFilter.value === 'all' || e.category === pickerFilter.value)
-    && (!q || e.name.toLowerCase().includes(q) || e.category.toLowerCase().includes(q)))
-    .sort((a, b) =>
-      SHADER_SECTIONS.findIndex(s => s.id === a.category)
-      - SHADER_SECTIONS.findIndex(s => s.id === b.category))
-})
+// Filters, sections and order come from the shared gallery helper (~/lib/shaderfx/gallery).
 function renderThumb(def: EffectDef): string {
   const b = texBundle(def)
   if (def.textures.length && Object.keys(b.sources).length < def.textures.length) return ''
@@ -374,8 +358,12 @@ function renderThumb(def: EffectDef): string {
     return out.toDataURL('image/jpeg', 0.82)
   } catch { return '' }
 }
-function ensureThumb(def: EffectDef | null | undefined) { if (!def || thumbCache[def.id]) return; const t = renderThumb(def); if (t) { thumbCache[def.id] = t; thumbs.value = { ...thumbCache } } }
-function openPicker() { if (layerReadOnly.value) return; pickerSearch.value = ''; pickerFilter.value = 'all'; pickerOpen.value = true; for (const def of catalog.value?.effects ?? []) ensureThumb(def) }
+function ensureThumb(def: EffectDef | null | undefined) { if (!def || def.draft || thumbCache[def.id]) return; const t = renderThumb(def); if (t) { thumbCache[def.id] = t; thumbs.value = { ...thumbCache } } }
+function openPicker() { if (layerReadOnly.value) return; pickerOpen.value = true }
+// Make one / Remix start the studio's own effect-take session (the same chip the
+// inspector's rows set): a new effect on this layer, or a remix of the card's effect.
+function makeFromGallery() { pickerOpen.value = false; shellRef.value?.prompt.setMode('New effect') }
+function remixFromGallery(d: EffectDef) { pickerOpen.value = false; shellRef.value?.prompt.setMode('Remix', { effectId: d.id }) }
 function pickEffect(id: string) {
   if (layerReadOnly.value) return
   // TWIN of `switchStudioEffect` in ~/lib/shaderstudio/types.ts (the agent's
@@ -1325,16 +1313,8 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
     </template>
   </StudioModalShell>
 
-  <CatalogModal :open="pickerOpen" title="Shader Effects" subtitle="Pick an effect to apply"
-    :items="pickerItems" :selected-id="activeEffectCfg.id" :filters="pickerFilters" :active-filter-id="pickerFilter" :search-query="pickerSearch"
-    :sections="SHADER_SECTIONS" :section-of="(e: any) => e.category"
-    search-placeholder="Search effects…" confirm-label="Use effect" empty-message="No effects match your search."
-    @close="pickerOpen = false" @confirm="pickEffect(($event as EffectDef).id)" @update:active-filter-id="pickerFilter = $event" @update:search-query="pickerSearch = $event">
-    <template #card="{ item }">
-      <div class="aspect-video overflow-hidden bg-black/20"><img v-if="thumbs[(item as EffectDef).id]" :src="thumbs[(item as EffectDef).id]" class="h-full w-full object-cover" /></div>
-      <div class="px-2 py-1.5"><div class="truncate text-[11px] text-white/85">{{ (item as EffectDef).name }}</div><div class="text-[10px] capitalize text-white/35">{{ (item as EffectDef).category }}</div></div>
-    </template>
-  </CatalogModal>
+  <ShaderEffectGallery :open="pickerOpen" :effects="catalog?.effects ?? []" :selected-id="activeEffectCfg.id" :thumbs="thumbs" can-make
+    @close="pickerOpen = false" @confirm="pickEffect" @make="makeFromGallery" @remix="remixFromGallery" @visible="onPickerVisible" />
   <CanvasContextMenu
     v-if="varMenu"
     :x="varMenu.x"

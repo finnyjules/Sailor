@@ -141,12 +141,12 @@ import { getByIdPath } from '~/lib/studio/idPath'
 import { paintStopsToColor } from '~/lib/compositor/gradientPaint'
 import { isFill, isGradient } from '~/lib/compositor/paint'
 import { LIVE_FIELD_CEILING } from '~/lib/shaderfill/descriptor'
-// F5 Task 3: the shader-catalog-as-a-pass effect inspector — reuses the app's canonical
-// CatalogModal (the same picker ShaderFillEditor.vue mounts for a shader FILL) and the shared
+// F5 Task 3: the shader-catalog-as-a-pass effect inspector — reuses the shared
+// ShaderEffectGallery (the same picker ShaderFillEditor.vue mounts for a shader FILL) and the shared
 // buildShaderParamRows/derivedShaderFillControls dial walk, filtered to input-sampling effects
 // only (effectReadsInput) since a PASS over the layer's own pixels has no separate Input paint
 // to fall back to if the picked effect is purely generative.
-import CatalogModal from '~/components/CatalogModal.vue'
+import ShaderEffectGallery from '~/components/vue-canvas/ShaderEffectGallery.vue'
 import { fetchShaderFxCatalog, resolveEffectId, useShaderCatalog } from '~/lib/shaderfx/catalog'
 import { effectReadsInput, getEffectSync } from '~/lib/shaderfx/catalogStore'
 import type { EffectTarget } from '~/composables/useEffectTakes'
@@ -2814,7 +2814,7 @@ const geometrySiblingReason = computed<string>(() => {
 })
 
 // ── F5 Task 3: the shader-pass effect inspector (picker + derived param dials) ──────────
-// Mirrors ShaderFillEditor.vue's picker/dials shape (CatalogModal + derivedShaderFillControls,
+// Mirrors ShaderFillEditor.vue's picker/dials shape (ShaderEffectGallery + derivedShaderFillControls,
 // via the shared buildShaderParamRows walk) but trimmed to what a PASS over the layer's own
 // pixels needs: no anchor toggle, no nested input-fill editor, no Reads/glass picker — there is
 // no separate `input` Paint here to anchor or read a backdrop through (ShaderPixelEffect's own
@@ -2838,29 +2838,11 @@ function shaderFxTitleCase(s: string): string {
 
 // Picker filtered to input-sampling effects only — a purely generative effect would overwrite
 // the layer's pixels rather than process them (the F5 plan's picker-eligibility gate, same rule
-// the glass lens's Reads picker applies to what it may read).
-const shaderFxAllItems = computed<EffectDef[]>(() =>
-  (shaderFxCatalog.value?.effects ?? []).filter((e) => effectReadsInput(e.id)))
+// the glass lens's Reads picker applies to what it may read). The gallery lists My effects that
+// pass it too; no Make one / Remix here (plan Ruling 10: Frame's new effects land on its background).
+const shaderFxPickerInclude = (e: EffectDef): boolean => effectReadsInput(e.id)
 const shaderFxPickerOpen = ref(false)
-const shaderFxPickerSearch = ref('')
-const shaderFxPickerFilter = ref('all')
-const shaderFxPickerFilters = computed(() => {
-  const counts = new Map<string, number>()
-  for (const e of shaderFxAllItems.value) counts.set(e.category, (counts.get(e.category) ?? 0) + 1)
-  return [
-    { id: 'all', label: 'All', count: shaderFxAllItems.value.length },
-    ...[...counts].map(([id, count]) => ({ id, label: shaderFxTitleCase(id), count })),
-  ]
-})
-const shaderFxPickerItems = computed<EffectDef[]>(() => {
-  const q = shaderFxPickerSearch.value.trim().toLowerCase()
-  return shaderFxAllItems.value.filter((e) =>
-    (shaderFxPickerFilter.value === 'all' || e.category === shaderFxPickerFilter.value)
-    && (!q || e.name.toLowerCase().includes(q) || e.category.toLowerCase().includes(q)))
-})
 function openShaderFxPicker() {
-  shaderFxPickerSearch.value = ''
-  shaderFxPickerFilter.value = 'all'
   shaderFxPickerOpen.value = true
 }
 function pickShaderFxEffect(id: string) {
@@ -10478,7 +10460,7 @@ onUnmounted(() => {
           <!-- Shader (F5) + Backdrop shader (F6): ONE inspector serves both, because they carry
                the identical effectId/params/speed/seed shape and every helper this block uses
                (activeShaderEffectId, activeShaderEffectDef, shaderFxParamRows, setShaderFxParam,
-               shaderFxParamValue, shaderFxPickerItems — filtered to effectReadsInput —
+               shaderFxParamValue, the gallery (shaderFxPickerInclude = effectReadsInput) —
                updateActiveEffect, the Speed slider) reads `activeEffect` generically. They differ
                only in WHAT the picked catalog effect processes:
                  • `shader` (F5) runs the effect over this layer's OWN already-rendered pixels —
@@ -10592,33 +10574,16 @@ onUnmounted(() => {
               @update:model-value="(v: number) => updateActiveEffect({ speed: v })"
             />
 
-            <CatalogModal
+            <ShaderEffectGallery
               :open="shaderFxPickerOpen"
-              title="Shader effects"
+              :effects="shaderFxCatalog?.effects ?? []"
+              :include="shaderFxPickerInclude"
               :subtitle="activeEffect!.type === 'backdrop_shader' ? 'Pick an effect to treat the layers behind this one' : 'Pick an effect to process this layer\'s pixels'"
-              :items="shaderFxPickerItems"
               :selected-id="resolveEffectId(activeShaderEffectId)"
-              :filters="shaderFxPickerFilters"
-              :active-filter-id="shaderFxPickerFilter"
-              :search-query="shaderFxPickerSearch"
-              search-placeholder="Search effects…"
-              confirm-label="Use effect"
-              empty-message="No effects match your search."
+              :thumbs="{}"
               @close="shaderFxPickerOpen = false"
-              @confirm="pickShaderFxEffect(($event as EffectDef).id)"
-              @update:active-filter-id="shaderFxPickerFilter = $event"
-              @update:search-query="shaderFxPickerSearch = $event"
-            >
-              <template #card="{ item }">
-                <div class="flex aspect-video items-center justify-center bg-white/[0.03]">
-                  <Sparkles class="size-5 text-white/25" :stroke-width="1.5" />
-                </div>
-                <div class="px-2 py-1.5">
-                  <div class="truncate text-[11px] text-white/85">{{ (item as EffectDef).name }}</div>
-                  <div class="truncate text-[10px] capitalize text-white/35">{{ (item as EffectDef).category }}</div>
-                </div>
-              </template>
-            </CatalogModal>
+              @confirm="pickShaderFxEffect"
+            />
           </div>
 
           <!-- Backdrop luminance mask (F6): masks the layer's OWN content by the luminance of the

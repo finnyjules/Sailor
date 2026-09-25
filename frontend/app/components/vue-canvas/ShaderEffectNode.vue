@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ChevronRight, Pause, Play, Sparkles } from 'lucide-vue-next'
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import CatalogModal from '~/components/CatalogModal.vue'
+import ShaderEffectGallery from '~/components/vue-canvas/ShaderEffectGallery.vue'
 import { getTypeColor } from '~/composables/useVueNodes'
 import { assetUrl, fetchShaderFxCatalog, resolveEffectId, useShaderCatalog } from '~/lib/shaderfx/catalog'
 import { walkShaderChain } from '~/lib/shaderfx/chain'
@@ -198,33 +198,14 @@ function renderFrame(t: number) {
 
 function renderOnce() { renderFrame(frozenTime) }
 
-// ---- gallery picker (CatalogModal) -------------------------------------------
+// ---- gallery picker (ShaderEffectGallery) ------------------------------------
 const pickerOpen = ref(false)
-const pickerSearch = ref('')
-const pickerFilter = ref('all')
 const thumbs = ref<Record<string, string>>({})
 const thumbCache: Record<string, string> = ((globalThis as any).__shaderFxThumbs ??= {})
 
 function titleCase(s: string): string {
   return s.replace(/(^|[_\s])(\w)/g, (_, sep, c) => (sep ? ' ' : '') + c.toUpperCase()).trim()
 }
-
-const pickerFilters = computed(() => {
-  const counts = new Map<string, number>()
-  for (const e of catalog.value?.effects ?? []) counts.set(e.category, (counts.get(e.category) ?? 0) + 1)
-  return [
-    { id: 'all', label: 'All', count: catalog.value?.effects.length ?? 0 },
-    ...[...counts].map(([id, count]) => ({ id, label: titleCase(id), count })),
-  ]
-})
-
-const pickerItems = computed<EffectDef[]>(() => {
-  const q = pickerSearch.value.trim().toLowerCase()
-  return (catalog.value?.effects ?? []).filter(e =>
-    (pickerFilter.value === 'all' || e.category === pickerFilter.value)
-    && (!q || e.name.toLowerCase().includes(q) || e.category.toLowerCase().includes(q)),
-  )
-})
 
 // Render a small still of an effect (on the placeholder gradient) for the
 // gallery cards and the picker-trigger badge. Returns '' if textures aren't
@@ -250,13 +231,18 @@ function ensureThumb(def: EffectDef | null | undefined) {
 
 const currentThumb = computed(() => (effectDef.value ? thumbs.value[effectDef.value.id] ?? '' : ''))
 
-async function openPicker() {
+function openPicker() {
   if (readOnly.value) return
-  pickerSearch.value = ''
-  pickerFilter.value = 'all'
   pickerOpen.value = true
-  if (!catalog.value) return
-  for (const def of catalog.value.effects) ensureThumb(def)
+}
+// Thumbnails for just what the gallery lists (its `visible` event).
+function onPickerVisible(defs: EffectDef[]) { if (pickerOpen.value) for (const def of defs) ensureThumb(def) }
+
+// Make one / Remix start the canvas prompt's effect takes on this node — the same chip the
+// node toolbar's New effect… / Remix… set (nodeActions), Remix starting from the card's effect.
+function effectModeFromGallery(label: 'New effect' | 'Remix', effectId?: string) {
+  pickerOpen.value = false
+  window.dispatchEvent(new CustomEvent('sailor:promptMode', { detail: { label, kind: 'new-effect', nodeId: props.id, ...(effectId ? { effectId } : {}) } }))
 }
 
 function pickEffect(id: string) {
@@ -517,35 +503,19 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Effect gallery picker — the app's canonical CatalogModal -->
-    <CatalogModal
+    <!-- Effect gallery picker: My effects, Make one and Remix (spec §7.3) -->
+    <ShaderEffectGallery
       :open="pickerOpen"
-      title="Shader Effects"
-      subtitle="Pick an effect to apply"
-      :items="pickerItems"
+      :effects="catalog?.effects ?? []"
       :selected-id="effectId"
-      :filters="pickerFilters"
-      :active-filter-id="pickerFilter"
-      :search-query="pickerSearch"
-      search-placeholder="Search effects…"
-      confirm-label="Use effect"
-      empty-message="No effects match your search."
+      :thumbs="thumbs"
+      can-make
       @close="pickerOpen = false"
-      @confirm="pickEffect(($event as EffectDef).id)"
-      @update:active-filter-id="pickerFilter = $event"
-      @update:search-query="pickerSearch = $event"
-    >
-      <template #card="{ item }">
-        <div class="aspect-video bg-checker overflow-hidden">
-          <img v-if="thumbs[(item as EffectDef).id]" :src="thumbs[(item as EffectDef).id]" class="w-full h-full object-cover" />
-          <div v-else class="w-full h-full bg-white/[0.03]" />
-        </div>
-        <div class="px-2 py-1.5">
-          <div class="text-[11px] text-white/85 truncate">{{ (item as EffectDef).name }}</div>
-          <div class="text-[10px] text-white/35 capitalize">{{ (item as EffectDef).category }}</div>
-        </div>
-      </template>
-    </CatalogModal>
+      @confirm="pickEffect"
+      @make="effectModeFromGallery('New effect')"
+      @remix="effectModeFromGallery('Remix', $event.id)"
+      @visible="onPickerVisible"
+    />
   </div>
   </div>
 </template>

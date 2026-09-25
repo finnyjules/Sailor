@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * ShaderFillEditor — the authoring UI for a `ShaderSpec` (a `Fill` of type
- * 'shader'). Four sections: an effect picker (the app's canonical CatalogModal,
+ * 'shader'). Four sections: an effect picker (the shared ShaderEffectGallery,
  * merging the live 63-effect catalog), the selected effect's own derived params
  * (`derivedShaderFillControls`), an anchor toggle, a speed slider — then the one
  * genuinely new piece, the NESTED INPUT FILL EDITOR: the same `FillControl` used
@@ -23,7 +23,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { ChevronRight, RefreshCw, Sparkles, Plus, Trash2, Palette } from 'lucide-vue-next'
-import CatalogModal from '~/components/CatalogModal.vue'
+import ShaderEffectGallery from '~/components/vue-canvas/ShaderEffectGallery.vue'
 import FillControl from '~/components/vue-canvas/compositor/FillControl.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
@@ -116,32 +116,14 @@ function titleCase(s: string): string {
   return s.replace(/(^|[_\s])(\w)/g, (_, sep, c) => (sep ? ' ' : '') + c.toUpperCase()).trim()
 }
 
-// ── Effect picker (CatalogModal, merged with the live catalog — SHADER_FILL_
+// ── Effect picker (ShaderEffectGallery over the live catalog — SHADER_FILL_
 // CONTROLS.effectId declares options:[] on purpose; this is the caller that
-// merges in the live ids, per that control's own doc) ──────────────────────
+// merges in the live ids, per that control's own doc). My effects are listed;
+// Make one / Remix are not offered here (plan Ruling 10: a new effect lands in
+// the Shader studio, on a shader node or on Frame's background). ─────────────
 const pickerOpen = ref(false)
-const pickerSearch = ref('')
-const pickerFilter = ref('all')
-
-const pickerFilters = computed(() => {
-  const counts = new Map<string, number>()
-  for (const e of catalog.value?.effects ?? []) counts.set(e.category, (counts.get(e.category) ?? 0) + 1)
-  return [
-    { id: 'all', label: 'All', count: catalog.value?.effects.length ?? 0 },
-    ...[...counts].map(([id, count]) => ({ id, label: titleCase(id), count })),
-  ]
-})
-
-const pickerItems = computed<EffectDef[]>(() => {
-  const q = pickerSearch.value.trim().toLowerCase()
-  return (catalog.value?.effects ?? []).filter((e) =>
-    (pickerFilter.value === 'all' || e.category === pickerFilter.value)
-    && (!q || e.name.toLowerCase().includes(q) || e.category.toLowerCase().includes(q)))
-})
 
 function openPicker() {
-  pickerSearch.value = ''
-  pickerFilter.value = 'all'
   pickerOpen.value = true
 }
 
@@ -488,32 +470,14 @@ watch(eligible, (ok) => {
       <FillControl nested :model-value="modelValue.input" @update:model-value="onInputChange" />
     </div>
 
-    <CatalogModal
+    <ShaderEffectGallery
       :open="pickerOpen"
-      title="Shader Effects"
+      :effects="catalog?.effects ?? []"
       subtitle="Pick an effect for this fill"
-      :items="pickerItems"
       :selected-id="modelValue.effectId"
-      :filters="pickerFilters"
-      :active-filter-id="pickerFilter"
-      :search-query="pickerSearch"
-      search-placeholder="Search effects…"
-      confirm-label="Use effect"
-      empty-message="No effects match your search."
+      :thumbs="{}"
       @close="pickerOpen = false"
-      @confirm="pickEffect(($event as EffectDef).id)"
-      @update:active-filter-id="pickerFilter = $event"
-      @update:search-query="pickerSearch = $event"
-    >
-      <template #card="{ item }">
-        <div class="flex aspect-video items-center justify-center bg-white/[0.03]">
-          <Sparkles class="size-5 text-white/25" :stroke-width="1.5" />
-        </div>
-        <div class="px-2 py-1.5">
-          <div class="truncate text-[11px] text-white/85">{{ (item as EffectDef).name }}</div>
-          <div class="truncate text-[10px] capitalize text-white/35">{{ (item as EffectDef).category }}</div>
-        </div>
-      </template>
-    </CatalogModal>
+      @confirm="pickEffect"
+    />
   </div>
 </template>
