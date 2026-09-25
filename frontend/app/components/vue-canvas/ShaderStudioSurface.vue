@@ -20,11 +20,12 @@ import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vu
 import BindableRow from '~/components/vue-canvas/studio/BindableRow.vue'
 import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
 import CanvasContextMenu from '~/components/vue-canvas/CanvasContextMenu.vue'
-import { assetUrl, fetchShaderFxCatalog, resolveEffectId } from '~/lib/shaderfx/catalog'
+import { assetUrl, fetchShaderFxCatalog, resolveEffectId, useShaderCatalog } from '~/lib/shaderfx/catalog'
+import { SHADER_SECTIONS } from '~/lib/shaderfx/gallery'
 import { buildCustomAtlas } from '~/lib/shaderfx/customGlyphs'
 import { resolveValues, resolveUniforms } from '~/lib/shaderfx/params'
 import { shaderFx } from '~/lib/shaderfx/renderer'
-import type { EffectDef, GradientStop, ParamValue, ShaderFxCatalog } from '~/lib/shaderfx/types'
+import type { EffectDef, GradientStop, ParamValue } from '~/lib/shaderfx/types'
 import { matchesShowWhen } from '~/lib/shaderfx/showWhen'
 import { composePasses, type EffectTextureBundle } from '~/lib/shaderstudio/passes'
 import { stackWantsClock } from '~/lib/shaderstudio/clock'
@@ -67,7 +68,8 @@ const { activeTab } = useTabs()
 function currentNode() { return props.nodes.find((n: any) => n.id === props.nodeId) }
 
 const config = ref<ShaderStudioConfig>(defaultConfig())
-const catalog = ref<ShaderFxCatalog | null>(null)
+// The live catalog: a new My effect or a draft take shows up here without a refetch.
+const catalog = useShaderCatalog()
 const resolved = ref<ResolvedSource | null>(null)
 const canvas = ref<HTMLCanvasElement | null>(null)
 const glError = ref<string | null>(null)
@@ -339,19 +341,7 @@ const placeholder = (() => { const c = document.createElement('canvas'); c.width
   }
   img.src = '/finn_shader.png'
 })()
-// Picker sections: image-transforming families first, generators last as
-// their own shelf. Items are sorted in this order so keyboard nav follows
-// the visual grouping.
-const SHADER_SECTIONS = [
-  { id: 'distortion', label: 'Distortion' },
-  { id: 'material', label: 'Material' },
-  { id: 'stylize', label: 'Stylize' },
-  { id: 'color', label: 'Color' },
-  { id: 'lens', label: 'Lens' },
-  { id: 'blur', label: 'Blur' },
-  { id: 'glow', label: 'Glow' },
-  { id: 'generative', label: 'Generative' },
-]
+// Picker sections (SHADER_SECTIONS) live in ~/lib/shaderfx/gallery.
 const pickerFilters = computed(() => {
   const counts = new Map<string, number>()
   for (const e of catalog.value?.effects ?? []) counts.set(e.category, (counts.get(e.category) ?? 0) + 1)
@@ -829,7 +819,7 @@ const clockLabel = computed(() => {
 
 let maskRO: ResizeObserver | null = null
 onMounted(async () => {
-  loadConfig(); catalog.value = await fetchShaderFxCatalog().catch(() => null); startPreview()
+  loadConfig(); await fetchShaderFxCatalog().catch(() => null); startPreview()
   registerStudioParamBaker(props.nodeId, renderBlobWithOverrides)
   // Keep the mask overlay aligned with the letterboxed canvas as the modal resizes
   // (the canvas is max-w/h-full, so a container resize moves its box without a re-render).

@@ -34,9 +34,9 @@ import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vu
 import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
 import { type ShaderSpec, DEFAULT_SHADER_SPEC } from '~/lib/spacetype/fillTile'
 import { type Paint, isFill } from '~/composables/useCompositorLayers'
-import { fetchShaderFxCatalog, resolveEffectId } from '~/lib/shaderfx/catalog'
+import { fetchShaderFxCatalog, resolveEffectId, useShaderCatalog } from '~/lib/shaderfx/catalog'
 import { effectReadsInput } from '~/lib/shaderfx/catalogStore'
-import type { EffectDef, GradientStop, ParamValue, ShaderFxCatalog } from '~/lib/shaderfx/types'
+import type { EffectDef, GradientStop, ParamValue } from '~/lib/shaderfx/types'
 import { cleanStops } from '~/lib/shaderfx/params'
 import { buildShaderParamRows, type ShaderParamRow } from '~/lib/shaderfill/controls'
 import { retryFieldCatalog } from '~/lib/shaderfill/field'
@@ -92,7 +92,8 @@ function patch(partial: Partial<ShaderSpec>) {
 }
 
 // ── Catalog ──────────────────────────────────────────────────────────────────
-const catalog = ref<ShaderFxCatalog | null>(null)
+// The live catalog: a new My effect or a draft take shows up here without a refetch.
+const catalog = useShaderCatalog()
 // Item 4 fix (final review): field.ts's own `retryFieldCatalog` had NO production caller —
 // once `kickCatalogFetch` gives up after CATALOG_RETRY_MAX attempts (~15.5s total), nothing
 // ever retries, and every shader fill on the page is stuck showing its input fill until a
@@ -103,7 +104,7 @@ const catalog = ref<ShaderFxCatalog | null>(null)
 // explicitly), and via the manual "Retry" affordance below.
 function loadCatalog() {
   retryFieldCatalog()
-  fetchShaderFxCatalog().then((c) => { catalog.value = c }).catch(() => { /* picker falls back to the raw id */ })
+  fetchShaderFxCatalog().catch(() => { /* picker falls back to the raw id; `catalog` fills in when it lands */ })
 }
 onMounted(loadCatalog)
 

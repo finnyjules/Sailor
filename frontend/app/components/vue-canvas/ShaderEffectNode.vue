@@ -3,11 +3,11 @@ import { ChevronRight, Pause, Play, Sparkles } from 'lucide-vue-next'
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import CatalogModal from '~/components/CatalogModal.vue'
 import { getTypeColor } from '~/composables/useVueNodes'
-import { assetUrl, fetchShaderFxCatalog, resolveEffectId } from '~/lib/shaderfx/catalog'
+import { assetUrl, fetchShaderFxCatalog, resolveEffectId, useShaderCatalog } from '~/lib/shaderfx/catalog'
 import { walkShaderChain } from '~/lib/shaderfx/chain'
 import { parseParams, resolveUniforms, serializeParams } from '~/lib/shaderfx/params'
 import { expandPasses, shaderFx } from '~/lib/shaderfx/renderer'
-import type { EffectDef, ShaderFxCatalog } from '~/lib/shaderfx/types'
+import type { EffectDef } from '~/lib/shaderfx/types'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
 
 // ShaderEffect artifact node: live WebGL preview (shared singleton renderer)
@@ -43,7 +43,8 @@ const imageOutIdx = computed(() => outputIdx('image'))
 const injectedEdges = inject<any>('vueFlowEdges', null)
 const injectedNodes = inject<any>('vueFlowNodes', null)
 
-const catalog = ref<ShaderFxCatalog | null>(null)
+// The live catalog: a new My effect or a draft take shows up here without a refetch.
+const catalog = useShaderCatalog()
 const hovered = ref(false)
 const playing = ref(true)
 const previewCanvas = ref<HTMLCanvasElement | null>(null)
@@ -309,7 +310,7 @@ watch(() => chain.value.nodeIds, (ids) => { lastChainIds = ids; if (!animating.v
 watch(effectDef, def => ensureThumb(def))
 
 onMounted(async () => {
-  catalog.value = await fetchShaderFxCatalog().catch(() => null)
+  await fetchShaderFxCatalog().catch(() => null)
   lastChainIds = chain.value.nodeIds
   window.addEventListener('sailor:shaderfx-changed', onUpstreamChange)
   ensureThumb(effectDef.value)

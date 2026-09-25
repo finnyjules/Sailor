@@ -147,9 +147,9 @@ import { LIVE_FIELD_CEILING } from '~/lib/shaderfill/descriptor'
 // only (effectReadsInput) since a PASS over the layer's own pixels has no separate Input paint
 // to fall back to if the picked effect is purely generative.
 import CatalogModal from '~/components/CatalogModal.vue'
-import { fetchShaderFxCatalog, resolveEffectId } from '~/lib/shaderfx/catalog'
+import { fetchShaderFxCatalog, resolveEffectId, useShaderCatalog } from '~/lib/shaderfx/catalog'
 import { effectReadsInput } from '~/lib/shaderfx/catalogStore'
-import type { EffectDef, ParamValue, ShaderFxCatalog } from '~/lib/shaderfx/types'
+import type { EffectDef, ParamValue } from '~/lib/shaderfx/types'
 import { cleanStops } from '~/lib/shaderfx/params'
 import { buildShaderParamRows, type ShaderParamRow } from '~/lib/shaderfill/controls'
 import '~/lib/motion/paint' // registers the motion painter for paintLayerStack(t)
@@ -2775,10 +2775,11 @@ const geometrySiblingReason = computed<string>(() => {
 // pixels needs: no anchor toggle, no nested input-fill editor, no Reads/glass picker — there is
 // no separate `input` Paint here to anchor or read a backdrop through (ShaderPixelEffect's own
 // doc in effectStack.ts). `activeEffect` is the single read/write source, via updateActiveEffect.
-const shaderFxCatalog = ref<ShaderFxCatalog | null>(null)
+// The live catalog: a new My effect or a draft take shows up here without a refetch.
+const shaderFxCatalog = useShaderCatalog()
 function loadShaderFxCatalog() {
   retryFieldCatalog()
-  fetchShaderFxCatalog().then((c) => { shaderFxCatalog.value = c }).catch(() => { /* picker falls back to the raw id */ })
+  fetchShaderFxCatalog().catch(() => { /* picker falls back to the raw id; `shaderFxCatalog` fills in when it lands */ })
 }
 onMounted(loadShaderFxCatalog)
 

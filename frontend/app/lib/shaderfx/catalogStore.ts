@@ -33,6 +33,26 @@ export function addShaderFxEffects(defs: EffectDef[]): void {
   cached = { version: cached?.version ?? 1, effects: [...byId.values()] }
 }
 
+/** Replace-or-add by id — unlike addShaderFxEffects, the incoming def wins. For effects that
+ *  change while the page is open: a My effect renamed or given a new version, a draft take. */
+export function putShaderFxEffects(defs: EffectDef[]): void {
+  const byId = new Map((cached?.effects ?? []).map(e => [e.id, e]))
+  for (const d of defs) byId.set(d.id, d)
+  cached = { version: cached?.version ?? 1, effects: [...byId.values()] }
+}
+
+/** Drop effects by id (a closed draft take). Built-ins are never removed this way in practice. */
+export function removeShaderFxEffects(ids: string[]): void {
+  if (!cached || !ids.length) return
+  const drop = new Set(ids)
+  cached = { ...cached, effects: cached.effects.filter(e => !drop.has(e.id)) }
+}
+
+/** Every effect the page knows right now: built-ins, My effects, project copies, drafts. */
+export function currentShaderEffects(): EffectDef[] {
+  return cached?.effects ?? []
+}
+
 /**
  * Synchronous read of whatever catalog has already resolved elsewhere (a page's
  * `onMounted`, a preload call, etc). Never triggers a fetch and never awaits —
