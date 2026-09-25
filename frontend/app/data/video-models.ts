@@ -741,6 +741,41 @@ export const VIDEO_MODELS: VideoModel[] = [
         default: 30, min: 10, max: 50 },
     ],
   },
+  // LTX-2.5 Fast replaces the hidden LTX-Video above in the gallery. It runs
+  // only in Sailor's runner (family ltx-2.5-fast), on Replicate, with fal the
+  // backup for clips of 6 s or more (server/runner/generators/ltx25Fast.ts).
+  // Its schemas (lightricks/ltx-2.5-fast; lightricks/ltx-2.5/text-to-video/fast
+  // and /image-to-video/fast, read 2026-09-25) take 2–6, 8, …, 20 s, 16:9 or
+  // 9:16, and 720p to 4k (over 10 s only at 720p or 1080p); no seed. 2k is
+  // left out: fal names its sizes differently, so it could have no backup.
+  {
+    id: 'ltx-2.5-fast',
+    runnerOnly: true,
+    family: 'ltx-2.5-fast',
+    label: 'LTX-2.5 Fast',
+    brand: 'Lightricks',
+    // The gallery's cover art, and the first service's model (ltx25Fast.ts).
+    replicateSlug: 'lightricks/ltx-2.5-fast',
+    pitch: 'Quick, low-cost clips with sound, from 2 to 20 seconds, up to 4K.',
+    description:
+      'LTX-2.5 Fast makes 2 to 20 second clips with sound, at 720p, 1080p or 4K, in landscape '
+      + 'or portrait. Describe the clip, or link a picture to start from it. Clips over 10 seconds '
+      + 'are made at 720p or 1080p only.',
+    tags: ['fast', 'cheap', 'audio', 'long', '4k'],
+    modes: ['t2v', 'i2v'],
+    supportsSeed: false,
+    priceHint: null,
+    aspectRatios: ['16:9', '9:16'],
+    defaultAspectRatio: '16:9',
+    durations: [2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20],
+    defaultDuration: 6,
+    resolutions: ['720p', '1080p', '4k'],
+    defaultResolution: '1080p',
+    advanced: [
+      { name: 'generate_audio', type: 'boolean', label: 'Generate audio', default: true,
+        description: 'Off makes a silent clip. The price is the same.' },
+    ],
+  },
 
   // ===== PixVerse =========================================================
   {

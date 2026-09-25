@@ -107,7 +107,11 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // image-to-video picture) first, Replicate's flat $0.08/s the backup for
 // image-to-video at 480p/720p (runner-only, family grok-imagine-video-1.5).
 // No other price moves.
-export const PRICE_BOOK_VERSION = 'lineup-f19'
+// lineup-f20 (Task F20): LTX-2.5 Fast, Replicate per second by resolution
+// ($0.03/s at 720p, $0.06/s at 1080p, $0.24/s at 4k) first, fal's $0.09 /
+// $0.13 / $0.30 a second the backup for clips of 6 s or more, covered at cost
+// (runner-only, family ltx-2.5-fast). No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-f20'
 
 export const BASE_RENDER_CREDITS = 1
 

@@ -1,0 +1,153 @@
+{
+  "endpoint": "lightricks/ltx-2.5-fast",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/lightricks/ltx-2.5-fast"
+  },
+  "versionId": "52475fac89a8e8a3e524418ac6875a988057a668e54302399dd19f09fcffa8d4",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "fps": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/fps"
+              }
+            ],
+            "default": 25,
+            "x-order": 6,
+            "description": "Frame rate in frames per second"
+          },
+          "image": {
+            "type": "string",
+            "title": "Image",
+            "format": "uri",
+            "default": null,
+            "x-order": 1,
+            "nullable": true,
+            "description": "First frame image for image-to-video generation"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "x-order": 0,
+            "description": "Text prompt describing the video to generate"
+          },
+          "duration": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/duration"
+              }
+            ],
+            "default": 6,
+            "x-order": 4,
+            "description": "Duration of the video in seconds. Durations longer than 10 seconds are only available at 720p or 1080p resolution with 24 or 25 FPS. 48/50 FPS caps at 10 seconds."
+          },
+          "resolution": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/resolution"
+              }
+            ],
+            "default": "1080p",
+            "x-order": 3,
+            "description": "Resolution quality of the generated video. Higher resolutions cap the maximum duration."
+          },
+          "aspect_ratio": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/aspect_ratio"
+              }
+            ],
+            "default": "16:9",
+            "x-order": 5,
+            "description": "Aspect ratio of the generated video"
+          },
+          "generate_audio": {
+            "type": "boolean",
+            "title": "Generate Audio",
+            "default": true,
+            "x-order": 7,
+            "description": "Generate audio for the video. Used for text_to_video and image_to_video tasks."
+          },
+          "last_frame_image": {
+            "type": "string",
+            "title": "Last Frame Image",
+            "format": "uri",
+            "default": null,
+            "x-order": 2,
+            "nullable": true,
+            "description": "Last frame image for image-to-video generation. When provided, the video interpolates between the first frame and this last frame."
+          }
+        }
+      },
+      "fps": {
+        "enum": [
+          24,
+          25,
+          48,
+          50
+        ],
+        "type": "integer",
+        "title": "fps",
+        "description": "An enumeration."
+      },
+      "duration": {
+        "enum": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          8,
+          10,
+          12,
+          14,
+          16,
+          18,
+          20
+        ],
+        "type": "integer",
+        "title": "duration",
+        "description": "An enumeration."
+      },
+      "resolution": {
+        "enum": [
+          "720p",
+          "1080p",
+          "2k",
+          "4k"
+        ],
+        "type": "string",
+        "title": "resolution",
+        "description": "An enumeration."
+      },
+      "aspect_ratio": {
+        "enum": [
+          "16:9",
+          "9:16"
+        ],
+        "type": "string",
+        "title": "aspect_ratio",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "string",
+        "title": "Output",
+        "format": "uri"
+      }
+    }
+  }
+}

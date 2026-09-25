@@ -349,6 +349,8 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // sound is never taken (runnerTakesNode refuses a linked `audio`).
   // ── grok-imagine-video-1.5 (model line-up F19): Grok Imagine Video 1.5 on fal, runner-only ──
   // HappyHorse 1.1's modes: a prompt alone, or a linked first frame; no sound in.
+  // ── ltx-2.5-fast (model line-up F20): LTX-2.5 Fast on Replicate, runner-only ──
+  // The same modes: a prompt alone, or a linked first frame; no sound in.
   GenerateVideoNode: {
     models: {
       ...Object.fromEntries(RUNNER_REPLICATE_VIDEO_MODEL_IDS.map(id => [id, id === 'wan-2.5-i2v-fast'
@@ -361,6 +363,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       'veo-3.1-lite': 'veo-3.1-lite',
       'happyhorse-1.1': 'happyhorse-1.1',
       'grok-imagine-video-1.5': 'grok-imagine-video-1.5',
+      'ltx-2.5-fast': 'ltx-2.5-fast',
     },
     mustNotLink: ['prompt', 'model_options'],
   },

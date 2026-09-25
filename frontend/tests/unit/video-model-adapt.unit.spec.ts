@@ -17,6 +17,8 @@ const NO_SEED_IDS = [
   'gemini-omni-flash',
   // Task F19: Grok Imagine Video 1.5 (fal's two endpoints and Replicate's) has no seed field.
   'grok-imagine-video-1.5',
+  // Task F20: LTX-2.5 Fast (Replicate's model and fal's two endpoints) has no seed field.
+  'ltx-2.5-fast',
 ]
 
 describe('video-models supportsSeed flag', () => {

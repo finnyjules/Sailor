@@ -101,6 +101,12 @@
  *                                                  and 1080p have none. Replicate is cheaper there ($0.08 a second
  *                                                  against fal's $0.08 / $0.14), but can't be first: it lacks
  *                                                  text-to-video and 1080p (grokImagineVideo15.ts)
+ * ltx-2.5-fast              Replicate  fal         runner-only (F20): lightricks/ltx-2.5/text-to-video/fast and
+ *                                                  /image-to-video/fast, the same prompt, frames, length, resolution
+ *                                                  (4k as 2160p), ratio and sound. Replicate is first: a third to a
+ *                                                  half of fal's rate ($0.03 / $0.06 / $0.24 a second against $0.09 /
+ *                                                  $0.13 / $0.30), and it alone makes 2–5 s clips, which have no
+ *                                                  backup (ltx25Fast.ts)
  * sora-2 / -pro             Replicate  —           discontinued; fal's Sora 2 endpoints are deprecated
  * hidden: kling-v2.5-turbo-pro, hailuo-2.3, wan-2.7-t2v, wan-2.5-i2v-fast, luma-ray-2-720p, ltx-video — no backup
  *
@@ -240,6 +246,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'video:runway-gen-4.5': r('replicate', null, 'not on fal'),
   'video:happyhorse-1.1': r('fal', 'replicate'),
   'video:grok-imagine-video-1.5': r('fal', 'replicate', 'image-to-video at 480p or 720p only: Replicate\'s Grok Imagine Video 1.5 takes no text-to-video and no 1080p'),
+  'video:ltx-2.5-fast': r('replicate', 'fal', 'clips of 6 s or more only: fal\'s LTX-2.5 Fast makes no 2–5 s clip'),
   'video:sora-2': r('replicate', null, 'discontinued; fal\'s Sora 2 is deprecated'),
   'video:sora-2-pro': r('replicate', null, 'discontinued; fal\'s Sora 2 is deprecated'),
   'video:kling-v2.5-turbo-pro': r('replicate', null, HIDDEN),

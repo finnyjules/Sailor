@@ -459,6 +459,21 @@ const FLOWS: FamilyFlow[] = [
     endpoint: 'xai/grok-imagine-video/v1.5/text-to-video',
     body: { prompt: 'a fox runs through snow', aspect_ratio: '16:9', resolution: '480p', duration: 1 },
   },
+  // Task F20: LTX-2.5 Fast has no Python builder; the body is written from its
+  // saved schema (runner-ltx-2-5-fast.unit.spec.ts). Replicate first; a 2 s
+  // clip has no backup (fal's shortest is 6 s).
+  {
+    family: 'ltx-2.5-fast',
+    label: 'GenerateVideoNode ltx-2.5-fast',
+    prompt: {
+      1: { class_type: 'GenerateVideoNode', inputs: { model: 'ltx-2.5-fast', prompt: 'a fox runs through snow', aspect_ratio: '16:9', duration: '2', seed: 0, model_options: '{"resolution":"720p"}' } },
+      2: outVideo('1'),
+    },
+    files: [],
+    provider: 'replicate',
+    endpoint: 'lightricks/ltx-2.5-fast',
+    body: { prompt: 'a fox runs through snow', duration: 2, resolution: '720p', aspect_ratio: '16:9', generate_audio: true },
+  },
 ]
 
 // ── The routes ───────────────────────────────────────────────────────────

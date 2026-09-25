@@ -56,6 +56,12 @@ interface RateMeta {
    * Imagine Video 1.5 image-to-video on fal): × the settings' `inputImages`.
    */
   inputImageUsd?: number
+  /**
+   * A backup card only: the shortest clip the backup makes. A shorter clip
+   * has no backup (LTX-2.5 Fast on fal, 6 s), so its price is the first
+   * service's alone.
+   */
+  minSeconds?: number
 }
 
 export type VideoRate =
@@ -248,6 +254,15 @@ export const VIDEO_RATES: Record<string, VideoRate> = {
     byResolution: { '*': { '*': 0.1365 } },
     note: 'ceiling: L40S $0.000975/s × 140 s (typical 84 s at 30 steps × 50/30)',
   },
+  // LTX-2.5 Fast (family ltx-2.5-fast, runner-only; fal the backup for clips of
+  // 6 s or more, VIDEO_BACKUP_RATES). Billing tiers by "target resolution", "per
+  // second of output video": 720p $0.03, 1080p $0.06, 2k $0.12, 4k $0.24 (the
+  // model page's billingConfig; the sound and frame rate don't change it). The
+  // builder sends 720p, 1080p or 4k (2k is not offered, and is sent as 1080p).
+  'ltx-2.5-fast': {
+    unit: 'per_second', service: 'replicate', source: rep('lightricks/ltx-2.5-fast'), read: '2026-09-25', confidence: 'verified',
+    byResolution: { '720p': 0.03, '1080p': 0.06, '4k': 0.24 },
+  },
   // First service fal since Task S3 (half Replicate's rate): "For 360p … $0.025
   // per second without audio and $0.035 per second with audio. For 540p … $0.035
   // … $0.045 … For 720p … $0.045 … $0.060 … For 1080p … $0.090 … $0.115". The
@@ -312,6 +327,17 @@ export const VIDEO_BACKUP_RATES: Record<string, VideoRate> = {
     unit: 'per_second', service: 'replicate', source: rep('xai/grok-imagine-video-1.5'), read: '2026-09-25', confidence: 'verified',
     byResolution: { '*': 0.08 },
   },
+  // Both endpoints: "For 720p, your request will cost $0.09 per second; for
+  // 1080p, $0.13 per second; for 1440p, $0.19 per second; and for 4K, $0.30 per
+  // second. Native audio is included at every resolution." Keyed by the
+  // resolution the first request carries: its 4k goes to fal as 2160p. fal's
+  // shortest clip is 6 s, so a 2–5 s clip has no backup (minSeconds). Dearer
+  // than Replicate at 720p and 1080p, so there the backup at cost sets the price.
+  'ltx-2.5-fast': {
+    unit: 'per_second', service: 'fal', source: fal('lightricks/ltx-2.5/text-to-video/fast'), read: '2026-09-25', confidence: 'verified',
+    byResolution: { '720p': 0.09, '1080p': 0.13, '4k': 0.30 },
+    minSeconds: 6,
+  },
 }
 
 /** The rate card for `modelId`, or null. Own keys only: "constructor" is not a model. */
@@ -369,7 +395,7 @@ export function videoUsd(modelId: string, s: VideoSettings): number | null {
 /** Dollars the backup service charges for the same clip, or null when the model has no backup. */
 export function videoBackupUsd(modelId: string, s: VideoSettings): number | null {
   const rate = videoBackupRate(modelId)
-  return rate ? clipUsd(rate, s) : null
+  return rate && s.seconds >= (rate.minSeconds ?? 0) ? clipUsd(rate, s) : null
 }
 
 /**
@@ -410,7 +436,7 @@ export function videoPriceMaxUsd(modelId: string, seconds: number): number | nul
   const first = videoMaxUsd(modelId, seconds)
   if (first == null) return null
   const rate = videoBackupRate(modelId)
-  return rate ? Math.max(first, usdChargedAtCost(clipMaxUsd(rate, seconds))) : first
+  return rate && seconds >= (rate.minSeconds ?? 0) ? Math.max(first, usdChargedAtCost(clipMaxUsd(rate, seconds))) : first
 }
 
 /** The most a clip of `seconds` can cost on one card. */

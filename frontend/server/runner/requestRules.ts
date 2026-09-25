@@ -48,6 +48,12 @@
  *    GROK_IMAGINE_VIDEO_15_ONE_PICTURE); and, in either mode, an empty or
  *    spaces-only prompt (both schemas require one but set no minimum: ruled,
  *    as Grok Imagine 2's) or one over the schemas' 4,096 characters;
+ *  - LTX-2.5 Fast (F20) with reference pictures, videos or sounds in its
+ *    options, a last frame with no first frame, or a clip over 10 s at 4k
+ *    (ltx25Fast.ts ltx25FastProblem); and an empty or spaces-only prompt
+ *    (Replicate, its first service, requires one but sets no minimum:
+ *    ruled). Its fal backup's 5,000-character maximum only drops the backup
+ *    (planNode), as Replicate states no maximum;
  *  - Gemini Omni Flash text-to-video with an empty prompt (controller ruling
  *    after F4: the schema requires a prompt but sets no minimum, so an empty
  *    one would fail only at the result). It is the one row of the prompt table
@@ -108,7 +114,11 @@ import {
   GROK_IMAGINE_VIDEO_15_NEEDS_PROMPT, GROK_IMAGINE_VIDEO_15_ONE_PICTURE, GROK_IMAGINE_VIDEO_15_PROMPT_MAX, GROK_IMAGINE_VIDEO_15_TEXT_TO_VIDEO,
   grokImagineVideo15FirstFrame, grokImagineVideo15HasExtras,
 } from './generators/grokImagineVideo15'
-import { asText, parseJsonObject } from './generators/opts'
+import {
+  LTX_25_FAST_DEFAULT_SECONDS, LTX_25_FAST_FAL_ENDPOINTS, LTX_25_FAST_FAL_PROMPT_MAX, LTX_25_FAST_ID, LTX_25_FAST_LONG_PROMPT,
+  LTX_25_FAST_NEEDS_PROMPT, LTX_25_FAST_REPLICATE_SLUG, LTX_25_FAST_TOO_LONG_AT_4K, ltx25FastFirstFrame, ltx25FastProblem,
+} from './generators/ltx25Fast'
+import { asInt, asText, parseJsonObject } from './generators/opts'
 import { moodboardFiles } from './inputs'
 import {
   WAN_30_REFERENCE_TO_VIDEO, WAN_30_TEXT_TO_VIDEO, WAN_3_MAX_REFERENCE_PICTURES, WAN_3_NEEDS_PROMPT, WAN_3_PICTURES_ONLY,
@@ -185,6 +195,10 @@ export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: 
   // Grok Imagine Video 1.5 on fal (grokImagineVideo15.ts, F19): rulings, not the schemas (both require a
   // prompt and set no minimum). The Replicate backup is built from a request that passed this.
   ...Object.fromEntries(GROK_IMAGINE_VIDEO_15_ENDPOINTS.map(e => [`fal ${e}`, { min: 1, message: GROK_IMAGINE_VIDEO_15_NEEDS_PROMPT }])),
+  // LTX-2.5 Fast (ltx25Fast.ts, F20): on Replicate (first) a ruling, not the schema (required, no minimum);
+  // on fal (the backup, built from a request that passed Replicate's) the schemas' own minLength 1.
+  [`replicate ${LTX_25_FAST_REPLICATE_SLUG}`]: { min: 1, message: LTX_25_FAST_NEEDS_PROMPT },
+  ...Object.fromEntries(LTX_25_FAST_FAL_ENDPOINTS.map(e => [`fal ${e}`, { min: 1, message: LTX_25_FAST_NEEDS_PROMPT }])),
 }
 
 /**
@@ -206,6 +220,9 @@ export const PROMPT_MAX_LENGTH: Readonly<Record<string, { max: number, message: 
   // Grok Imagine Video 1.5 on fal (grokImagineVideo15.ts, F19): the schemas' own maxLength. The Replicate
   // backup (no stated limit) is built from a request that passed this.
   ...Object.fromEntries(GROK_IMAGINE_VIDEO_15_ENDPOINTS.map(e => [`fal ${e}`, { max: GROK_IMAGINE_VIDEO_15_PROMPT_MAX, message: GROK_IMAGINE_VIDEO_15_LONG_PROMPT }])),
+  // LTX-2.5 Fast's fal backup (ltx25Fast.ts, F20): the schemas' own maxLength. Replicate (first) states none,
+  // so a longer prompt runs there with no backup (planNode drops a backup its own service refuses).
+  ...Object.fromEntries(LTX_25_FAST_FAL_ENDPOINTS.map(e => [`fal ${e}`, { max: LTX_25_FAST_FAL_PROMPT_MAX, message: LTX_25_FAST_LONG_PROMPT }])),
 }
 
 /**
@@ -229,6 +246,7 @@ export const PROMPT_MIN_LENGTH_RULINGS: readonly string[] = [
   `fal ${IDEOGRAM_4_FAL_APP}`,
   `replicate ${NANO_BANANA_2_LITE_SLUG}`,
   ...GROK_IMAGINE_VIDEO_15_ENDPOINTS.map(e => `fal ${e}`),
+  `replicate ${LTX_25_FAST_REPLICATE_SLUG}`,
 ]
 
 /** JSON Schema counts characters as code points. */
@@ -610,6 +628,16 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
           const textToVideo = !!adv && !isLink(inputs.image) && !grokImagineVideo15FirstFrame(null, adv)
           judge(textToVideo ? GROK_IMAGINE_VIDEO_15_TEXT_TO_VIDEO : GROK_IMAGINE_VIDEO_15_IMAGE_TO_VIDEO, asText(inputs.prompt))
         }
+      }
+      // LTX-2.5 Fast: what neither service takes (references, a last frame alone, over 10 s at 4k; its
+      // builder refuses the same at planning), then a prompt on Replicate, its first service. A wired
+      // length can't be read: that node's length is judged at planning only.
+      if (id === LTX_25_FAST_ID) {
+        const adv = isLink(inputs.model_options) ? null : parseJsonObject(inputs.model_options)
+        const duration = isLink(inputs.duration) ? LTX_25_FAST_DEFAULT_SECONDS : asInt(inputs.duration, LTX_25_FAST_DEFAULT_SECONDS)
+        const p = adv && ltx25FastProblem(adv, duration, isLink(inputs.image) || !!ltx25FastFirstFrame(null, adv))
+        if (p) out.push({ nodeId, classType: ct, input: p === LTX_25_FAST_TOO_LONG_AT_4K ? 'duration' : 'model_options', message: p })
+        else if (!isLink(inputs.prompt)) judge(LTX_25_FAST_REPLICATE_SLUG, asText(inputs.prompt), 'replicate')
       }
     }
     // Film a shot on Seedance 2.0 (ComfyUI path only): a first frame beside references is refused,

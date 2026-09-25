@@ -405,8 +405,8 @@ describe('the gallery and the defaults', () => {
   })
 
   it('"Generate a video" offers Wan 3.0\'s lengths the engine lacks (12, 25 and 30 s), in order, copy on write', () => {
-    // + Grok Imagine Video 1.5's 1 and 2 s (Task F19).
-    expect(runnerOnlyVideoDurations().filter(d => !['3', '4', '5', '6', '8', '10', '15', '20'].includes(d)).sort()).toEqual(['1', '12', '2', '25', '30'])
+    // + Grok Imagine Video 1.5's 1 and 2 s (Task F19), and LTX-2.5 Fast's 14, 16 and 18 s (Task F20).
+    expect(runnerOnlyVideoDurations().filter(d => !['3', '4', '5', '6', '8', '10', '15', '20'].includes(d)).sort()).toEqual(['1', '12', '14', '16', '18', '2', '25', '30'])
     const engine = ['3', '4', '5', '6', '8', '9', '10', '15', '20', '60']
     const body = {
       GenerateVideoNode: { input: { required: { model: ['COMBO', { options: ['veo-3.1'] }], duration: ['COMBO', { options: engine, default: '5' }] } } },
@@ -415,7 +415,7 @@ describe('the gallery and the defaults', () => {
     const before = JSON.stringify(body)
     const out = applyModelOverlay(body, NO_FAMILIES) as any
     expect(JSON.stringify(body)).toBe(before)
-    expect(out.GenerateVideoNode.input.required.duration).toEqual(['COMBO', { options: ['1', '2', '3', '4', '5', '6', '8', '9', '10', '12', '15', '20', '25', '30', '60'], default: '5' }])
+    expect(out.GenerateVideoNode.input.required.duration).toEqual(['COMBO', { options: ['1', '2', '3', '4', '5', '6', '8', '9', '10', '12', '14', '15', '16', '18', '20', '25', '30', '60'], default: '5' }])
     expect(out.FilmShotNode.input.required.duration).toEqual(['COMBO', { options: engine }])
     // The legacy shape too.
     const legacy = applyModelOverlay({ GenerateVideoNode: { input: { required: { duration: [engine, { default: '5' }] } } } }, NO_FAMILIES) as any

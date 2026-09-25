@@ -5,7 +5,7 @@
  *
  * The price multiplies a rate by these, so it must never read a setting the
  * builder would send differently ("priced on what is sent"). The builders are
- * server/runner/generators/video.ts (fal and Replicate), wan3.ts (Wan 3.0), geminiOmniFlash.ts, veo31Lite.ts, happyHorse11.ts, grokImagineVideo15.ts and twins.ts (the
+ * server/runner/generators/video.ts (fal and Replicate), wan3.ts (Wan 3.0), geminiOmniFlash.ts, veo31Lite.ts, happyHorse11.ts, grokImagineVideo15.ts, ltx25Fast.ts and twins.ts (the
  * first-service builders of Kling 3.0 and PixVerse v6, and the backups) and, for the one model
  * the runner does not build (Fabric), comfy_api_nodes/video_models.py. The
  * settings-parity test (tests/unit/video-pricing.unit.spec.ts) runs every
@@ -156,6 +156,8 @@ const WAN_3_RESOLUTIONS = ['480p', '720p', '1080p']
 const HAPPYHORSE_11_SECONDS = Array.from({ length: 13 }, (_, i) => i + 3)
 /** xai/grok-imagine-video/v1.5 and xai/grok-imagine-video-1.5: any whole second from 1 to 15 (grokImagineVideo15.ts). */
 const GROK_IMAGINE_VIDEO_15_SECONDS = Array.from({ length: 15 }, (_, i) => i + 1)
+/** lightricks/ltx-2.5-fast's `duration` enum (ltx25Fast.ts LTX_25_FAST_SECONDS). */
+const LTX_25_FAST_SECONDS = [2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20]
 /** wan-video/wan-2.7-t2v: any whole second from 2 to 15 (video.ts WAN_27_SECONDS). */
 const WAN_27_SECONDS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 
@@ -230,6 +232,10 @@ const RULES: Record<string, Rule> = {
   'luma-ray-2-720p': { durations: [5, 9], defaultDuration: 5, resolution: fixed('720p'), audio: fixed(false) },
   // ltxVideo sends no length or resolution; priced per clip at the 50-step ceiling.
   'ltx-video': { durations: null, defaultDuration: 5, fixedSeconds: 5, resolution: fixed(null), audio: fixed(false) },
+  // ltx25Fast.ts (Replicate first, and the fal backup built from it): `duration` the closest of 2–6, 8, …, 20
+  // (default 6), `resolution` 720p/1080p/4k else 1080p (the backup sends 4k as 2160p), `generate_audio` the
+  // sound option (default on; the price is the same either way).
+  'ltx-2.5-fast': { durations: LTX_25_FAST_SECONDS, defaultDuration: 6, resolution: resIn(['720p', '1080p', '4k'], '1080p'), audio: audioOpt(true) },
   // twins.ts pixverseV6Fal (first) sends `resolution`, video.ts pixverseV6
   // (the Replicate backup) `quality`: the resolution option, 360p–1080p,
   // anything else 720p; both send `generate_audio_switch` (the sound option,

@@ -273,10 +273,11 @@ describe('replicate-video eligibility', () => {
     // and the gemini-omni-flash family's one (Task F4, runner-gemini-omni-flash.unit.spec.ts)
     // and the veo-3.1-lite family's one (Task F5, runner-veo-31-lite.unit.spec.ts)
     // and the happyhorse-1.1 family's one (Task F18, runner-happyhorse-1-1.unit.spec.ts)
-    // and the grok-imagine-video-1.5 family's one (Task F19, runner-grok-imagine-video-1-5.unit.spec.ts).
+    // and the grok-imagine-video-1.5 family's one (Task F19, runner-grok-imagine-video-1-5.unit.spec.ts)
+    // and the ltx-2.5-fast family's one (Task F20, runner-ltx-2-5-fast.unit.spec.ts).
     const models = Object.fromEntries(Object.entries(RUNNER_NODE_RULES.GenerateVideoNode!.models!)
-      .filter(([, m]) => !['wan-3', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'happyhorse-1.1', 'grok-imagine-video-1.5'].includes(typeof m === 'string' ? m : m.family)))
-    expect(Object.keys(RUNNER_NODE_RULES.GenerateVideoNode!.models!).filter(id => !(id in models)).sort()).toEqual(['gemini-omni-flash', 'grok-imagine-video-1.5', 'hailuo-h3-max-turbo', 'happyhorse-1.1', 'veo-3.1-lite', 'wan-3.0', 'wan-3.0-prime'])
+      .filter(([, m]) => !['wan-3', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'happyhorse-1.1', 'grok-imagine-video-1.5', 'ltx-2.5-fast'].includes(typeof m === 'string' ? m : m.family)))
+    expect(Object.keys(RUNNER_NODE_RULES.GenerateVideoNode!.models!).filter(id => !(id in models)).sort()).toEqual(['gemini-omni-flash', 'grok-imagine-video-1.5', 'hailuo-h3-max-turbo', 'happyhorse-1.1', 'ltx-2.5-fast', 'veo-3.1-lite', 'wan-3.0', 'wan-3.0-prime'])
     expect(Object.keys(models).sort()).toEqual([...RUNNER_REPLICATE_VIDEO_MODEL_IDS].sort())
     for (const [id, m] of Object.entries(models)) {
       if (id === 'wan-2.5-i2v-fast') expect(m).toEqual({ family: 'replicate-video', mustLink: ['image'] })
