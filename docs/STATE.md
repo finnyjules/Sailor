@@ -49,6 +49,8 @@ From a Threads post (@nono_ai_archive, cut-out fruit whose colour holds at the s
 
 **Agent.** Named in the setLayerEffect hint after the `mosaic` hint was trimmed 11,072 → 4,544 chars (`28d919f0d`: the ~60 ", default X" values and per-style prose; every style word, dial, range, preset and look kept, checked token by token). The compositor menu is 21,243 of 27,700.
 
+**Width follows each shape** (`49e4625b6`, on Julien's go): Width is a share (0..1, default 0.35) of the layer's own depth — outline to deepest point, `layerDepthPx`, an exact distance transform over the alpha within its bounding box (≤ 262k cells) — not of the frame width, so a thin shape no longer goes pale all over. 0.35 = the prototype's approved apple fade (60 px) over its measured depth (165 px). A layer with several pieces follows its thickest one. Frame lab: a fat square and a thin bar at 35% both turn white 20–22% of the way in.
+
 **Open.** The grain field is fixed to the canvas, not the layer, so a moving layer slides under its grain.
 
 ### Frame web export — wired Space Type and Gradient play live — LANDED 2026-09-23 (`4cec9128b`..`3efb2bfb0`, non-contiguous — 5 tasks + a final fix wave, subagent-driven, a review per task, a whole-change review, its fix wave and a re-review)
