@@ -38,10 +38,14 @@ export interface TakeRenderer {
 }
 
 export interface EngineDeps {
-  callModel(prompt: string, images?: string[]): Promise<{ text: string; usage?: ModelUsage; stop_reason?: string | null }>
+  callModel(prompt: string, images?: string[], signal?: AbortSignal): Promise<{ text: string; usage?: ModelUsage; stop_reason?: string | null }>
   review?(sheet: string, request: string, count: number): Promise<boolean[]>
   renderer: TakeRenderer
   now?: () => number
+  /** A take passed every check — in arrival order; `slot` is its take angle (0-based). */
+  onTake?: (t: EngineTake, slot: number) => void
+  /** A slot gave up (no take is coming from it). */
+  onFailure?: (slot: number) => void
 }
 
 export interface EngineInput {
@@ -49,15 +53,18 @@ export interface EngineInput {
   base?: GenBase | null
   references?: GenBase[]
   count?: number
-  /** Dev-only shader-gen evaluation lever (variant C): sent with EVERY
-   *  generation/repair call of this request. */
+  /** The picture to render on and judge takes against; the product's own
+   *  input as well as the dev-only shader-gen evaluation's (variant C): sent
+   *  with EVERY generation/repair call of this request. */
   images?: string[]
-  /** Dev-only shader-gen evaluation lever (variant C): other requests' takes
-   *  shown as the quality bar. */
+  /** Other requests' takes shown as the quality bar; the product's own input
+   *  as well as the dev-only shader-gen evaluation's (variant C). */
   examples?: GenRequest['examples']
   /** Dev-only shader-gen evaluation lever (variant D): one "look and revise"
    *  pass after a take first passes every check. */
   revise?: boolean
+  /** Stop: in-flight calls are aborted and generateTakes rejects with an AbortError. */
+  signal?: AbortSignal
 }
 export interface EngineTake { take: GenTake; flags: Flag[]; thumbnail: string; modelCalls: number; log: string[] }
 export interface EngineFailure { index: number; modelCalls: number; log: string[] }
@@ -73,6 +80,9 @@ const REVIEW_MISS = 'a reviewer judged the previous attempt a miss (muddy, off-b
 
 const isTake = (r: EngineTake | EngineFailure): r is EngineTake => 'take' in r
 
+export const isAbortError = (e: unknown): boolean => (e as { name?: string } | null)?.name === 'AbortError'
+const aborted = () => new DOMException('Stopped', 'AbortError')
+
 async function runTake(input: EngineInput, index: number, deps: EngineDeps, usage: Usage, avoid?: string): Promise<EngineTake | EngineFailure> {
   const req: GenRequest = { request: input.request, base: input.base ?? null, references: input.references, takeIndex: index, avoid, examples: input.examples }
   const log: string[] = []
@@ -83,11 +93,13 @@ async function runTake(input: EngineInput, index: number, deps: EngineDeps, usag
   let regenerated = false
   let calls = 0
   while (calls < MAX_MODEL_CALLS_PER_TAKE) {
+    if (input.signal?.aborted) throw aborted()
     calls++
     let res: Awaited<ReturnType<EngineDeps['callModel']>>
     try {
-      res = await deps.callModel(prompt, input.images)
+      res = await deps.callModel(prompt, input.images, input.signal)
     } catch (e) {
+      if (input.signal?.aborted || isAbortError(e)) throw aborted()
       if (e instanceof ContextLostError) throw e
       log.push(`model error: ${String((e as Error)?.message ?? e).slice(0, 200)}`)
       break
@@ -158,7 +170,7 @@ async function tryRevise(
   usage: Usage,
 ): Promise<ReviseOutcome> {
   try {
-    const res = await deps.callModel(buildRevisePrompt(req, take), [thumbnail, ...(input.images ?? [])])
+    const res = await deps.callModel(buildRevisePrompt(req, take), [thumbnail, ...(input.images ?? [])], input.signal)
     if (res.usage) {
       usage.input_tokens += res.usage.input_tokens + (res.usage.cache_read_input_tokens ?? 0) + (res.usage.cache_creation_input_tokens ?? 0)
       usage.output_tokens += res.usage.output_tokens
@@ -173,18 +185,26 @@ async function tryRevise(
     if (!judged.pass) return { ok: false, reason: `checks: ${judged.flags.join(', ')}` }
     return { ok: true, take: revised, flags: judged.flags, thumbnail: judged.thumbnail }
   } catch (e) {
+    if (input.signal?.aborted || isAbortError(e)) throw aborted()
     if (e instanceof ContextLostError) throw e
     return { ok: false, reason: String((e as Error)?.message ?? e).slice(0, 200) }
   }
 }
 
 export async function generateTakes(input: EngineInput, deps: EngineDeps): Promise<EngineResult> {
+  if (input.signal?.aborted) throw aborted()
   const now = deps.now ?? (() => Date.now())
   const t0 = now()
   const count = input.count ?? 4
   const usage: Usage = { input_tokens: 0, output_tokens: 0 }
 
-  const first = await Promise.all(Array.from({ length: count }, (_, i) => runTake(input, i, deps, usage)))
+  const report = (r: EngineTake | EngineFailure, slot: number) => {
+    if (isTake(r)) deps.onTake?.(r, slot)
+    else deps.onFailure?.(slot)
+    return r
+  }
+
+  const first = await Promise.all(Array.from({ length: count }, (_, i) => runTake(input, i, deps, usage).then(r => report(r, i))))
   let takes = first.filter(isTake)
   const failures = first.filter((r): r is EngineFailure => !isTake(r))
   let dropped = 0
@@ -201,7 +221,7 @@ export async function generateTakes(input: EngineInput, deps: EngineDeps): Promi
     const indexOf = new Map(takes.map((t, i) => [t, first.indexOf(t)] as const))
     const rejected = takes.filter((_, i) => keep[i] === false)
     dropped = rejected.length
-    const replacements = await Promise.all(rejected.map(t => runTake(input, indexOf.get(t)!, deps, usage, REVIEW_MISS)))
+    const replacements = await Promise.all(rejected.map(t => runTake(input, indexOf.get(t)!, deps, usage, REVIEW_MISS).then(r => report(r, indexOf.get(t)!))))
     takes = [...takes.filter((_, i) => keep[i] !== false), ...replacements.filter(isTake)]
     failures.push(...replacements.filter((r): r is EngineFailure => !isTake(r)))
   }

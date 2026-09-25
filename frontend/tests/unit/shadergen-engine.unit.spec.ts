@@ -15,7 +15,7 @@ function scripted(byTake: Record<number, string[]>) {
   return {
     prompts,
     callModel: async (prompt: string) => {
-      const i = Number(/Take (\d) of 4/.exec(prompt)![1]) - 1
+      const i = Number(/Take (\d):/.exec(prompt)![1]) - 1
       prompts[i]!.push(prompt)
       const list = byTake[i] ?? [reply('', `Take ${i + 1}`)]
       const text = list[Math.min(used[i]!, list.length - 1)]!
@@ -94,7 +94,7 @@ describe('generateTakes', () => {
     const r = await generateTakes({ request: 'rain' }, {
       callModel: async (prompt) => {
         calls++
-        if (prompt.includes('Take 2 of 4')) throw new Error('429 Too Many Requests: rate limited')
+        if (prompt.includes('Take 2:')) throw new Error('429 Too Many Requests: rate limited')
         return m.callModel(prompt)
       },
       renderer,

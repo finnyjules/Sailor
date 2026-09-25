@@ -8,10 +8,10 @@ import { SHADERGEN_HELPERS, SHADERGEN_PREAMBLE, type GenParam, type GenTake } fr
 
 /** One angle per take, so four parallel calls don't return four near-copies. */
 export const TAKE_ANGLES = [
-  'Take 1 of 4: the most direct, literal reading of the request.',
-  'Take 2 of 4: a bolder, more stylised reading.',
-  'Take 3 of 4: a restrained reading that keeps the image easy to read.',
-  'Take 4 of 4: an unexpected interpretation that still clearly answers the request.',
+  'Take 1: the most direct, literal reading of the request.',
+  'Take 2: a bolder, more stylised reading.',
+  'Take 3: a restrained reading that keeps the image easy to read.',
+  'Take 4: an unexpected interpretation that still clearly answers the request.',
 ] as const
 
 export interface GenBase { name: string; source: string; params: GenParam[] }
