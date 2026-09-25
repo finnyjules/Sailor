@@ -38,6 +38,11 @@ export function loadMyEffectRecords(
   return loaded
 }
 
+/** True only when the library HAS loaded and holds nothing — the one case a save may skip
+ *  scanning a project for My effects. Before the load lands (or while it keeps failing) the
+ *  library is unknown, not empty, so a save must still scan. */
+export const myEffectLibraryKnownEmpty = (): boolean => myEffectsLoaded.value && myEffectRecords.value.length === 0
+
 export const myEffectRecordById = (id: string): MyEffectRecord | null =>
   myEffectRecords.value.find(r => r.id === id) ?? null
 

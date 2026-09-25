@@ -55,21 +55,71 @@ describe('projects keep a copy of the My effects they use (spec §7.4)', () => {
   })
 })
 
+/** Every way a doc can enter tab state in default.vue, and whether it went through loadedDoc.
+ *  STRUCTURAL: it looks at every write into `savedWorkflows` (and the one bulk load), not at
+ *  argument names — so a new load path fails however its variable is called. */
+function unadoptedDocWrites(src: string): string[] {
+  const bad: string[] = []
+  // Any write: `savedWorkflows[k] = …`, `??=`, `||=`; plus bulk writes by other means.
+  for (const m of src.matchAll(/savedWorkflows\[[^\]]*\]\s*(\?\?=|\|\|=|=(?!=))\s*([^\n]*)/g)) {
+    const rhs = m[2]!.trim()
+    const at = m.index!
+    if (m[1] !== '=') { bad.push(m[0]); continue }
+    if (/^loadedDoc\(/.test(rhs)) continue
+    const id = /^([A-Za-z_$][\w$]*)\s*$/.exec(rhs)?.[1]
+    if (!id) { bad.push(m[0]); continue }
+    // A bare name must be bound, in the nearest preceding `const <id> =`, to a doc that is either
+    // adopted (loadedDoc), already in savedWorkflows (re-normalised), or the blank placeholder.
+    const decls = [...src.slice(0, at).matchAll(new RegExp(`const ${id}\\s*=\\s*([^\\n]*)`, 'g'))]
+    const init = decls.at(-1)?.[1]?.trim() ?? ''
+    if (/^loadedDoc\(/.test(init) || /^toProjectDoc\(savedWorkflows\[[^\]]*\]\)$/.test(init) || init === 'toProjectDoc(makeBlankWorkflow())') continue
+    bad.push(m[0])
+  }
+  for (const m of src.matchAll(/Object\.assign\(savedWorkflows|Reflect\.set\(savedWorkflows|(?<!const )\bsavedWorkflows\s*=(?!=)/g)) bad.push(m[0])
+  // The bulk session restore: its per-key write must adopt, and savedWorkflows must be born from it.
+  for (const m of src.matchAll(/parsed\[key\]\s*=\s*([^\n]*)/g)) if (!/^loadedDoc\(/.test(m[1]!.trim())) bad.push(m[0])
+  if (!/reactive<Record<string, any>>\(loadPersistedWorkflows\(\)\)/.test(src)) bad.push('savedWorkflows is not born from loadPersistedWorkflows')
+  return bad
+}
+
 describe('default.vue: every doc from storage adopts its copies (wiring guard, preflight C10)', () => {
   const src = readFileSync(fileURLToPath(new URL('../../app/layouts/default.vue', import.meta.url)), 'utf8')
-  it('the one helper adopts, and the six load paths call it', () => {
+  it('the one helper adopts', () => {
     expect(src).toMatch(/function loadedDoc\(body: any\): ProjectDoc \{\s*const doc = toProjectDoc\(body\)\s*adoptMyEffects\(doc, myEffectsApi\.adopt\)/)
+  })
+  it('every write of a doc into tab state goes through it (or keeps a doc already there)', () => {
+    expect(unadoptedDocWrites(src)).toEqual([])
     expect(src.match(/\bloadedDoc\(/g)!.length - 1).toBe(6)
   })
-  it('nothing else turns stored content into a doc behind the helper’s back', () => {
-    // Allowed: the helper itself, re-normalising a doc already in savedWorkflows, a blank
-    // placeholder, and the durable copy that only enters savedWorkflows through loadedDoc.
-    const args = [...src.matchAll(/toProjectDoc\(([^)]*)\)/g)].map(m => m[1])
-    const allowed = new Set(['body', 'savedWorkflows[tabId]', 'savedWorkflows[tab.id]', 'makeBlankWorkflow(', 'durableBody'])
-    expect(args.filter(a => !allowed.has(a!))).toEqual([])
-    expect(src).toMatch(/savedWorkflows\[tab\.id\] = loadedDoc\(durableDoc\)/)
+  it('the guard catches a seventh path, whatever it is called (the review’s examples)', () => {
+    const sabotage = [
+      'function seventhPath(body: any) { savedWorkflows[x] = toProjectDoc(body) }',
+      'function eighth(d: any) { savedWorkflows[y] = d }',
+      'function ninth(w: any) { const doc = toProjectDoc(w); savedWorkflows[z] = doc }',
+      'function tenth(w: any) { savedWorkflows[z] ??= w }',
+      'function eleventh(w: any) { Object.assign(savedWorkflows, w) }',
+      'function twelfth(w: any) { savedWorkflows = w }',
+    ]
+    for (const s of sabotage) expect(unadoptedDocWrites(`${src}\n${s}\n`).length, s).toBeGreaterThan(0)
   })
-  it('the save snapshot attaches the copies before stamping', () => {
-    expect(src).toMatch(/attachMyEffects\(toRaw\(doc\), myEffectRecordById, \{ libraryEmpty: myEffectRecords\.value\.length === 0 \}\)\s*stampDocForSave\(/)
+  it('the save snapshot attaches the copies before stamping, skipping only a library known to be empty', () => {
+    expect(src).toMatch(/attachMyEffects\(toRaw\(doc\), myEffectRecordById, \{ libraryEmpty: myEffectLibraryKnownEmpty\(\) \}\)\s*stampDocForSave\(/)
+  })
+})
+
+describe('a save before the library loads still scans (review #4)', () => {
+  it('the library is "known empty" only once it has loaded', async () => {
+    const lib = await import('~/lib/myEffects/library')
+    lib.myEffectRecords.value = []
+    lib.myEffectsLoaded.value = false
+    expect(lib.myEffectLibraryKnownEmpty()).toBe(false)
+    const d = doc([A]); const lookup = vi.fn(() => null)
+    attachMyEffects(d, lookup, { libraryEmpty: lib.myEffectLibraryKnownEmpty() })
+    expect(lookup).toHaveBeenCalledWith(A)
+    lib.myEffectsLoaded.value = true
+    expect(lib.myEffectLibraryKnownEmpty()).toBe(true)
+    lib.myEffectRecords.value = [rec(A)]
+    expect(lib.myEffectLibraryKnownEmpty()).toBe(false)
+    lib.myEffectsLoaded.value = false; lib.myEffectRecords.value = []
   })
 })

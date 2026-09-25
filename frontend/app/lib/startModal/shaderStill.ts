@@ -26,16 +26,17 @@ export function starterShaderConfig(): ShaderStudioConfig {
 }
 
 export async function renderShaderStill(canvas: HTMLCanvasElement, pictureUrl: string): Promise<void> {
-  const [{ fetchShaderFxCatalog, resolveEffectId }, { shaderFx }, { composePasses }, { loadImage }, { outputDims }] = await Promise.all([
+  const [{ fetchShaderFxCatalog, getEffectSync }, { shaderFx }, { composePasses }, { loadImage }, { outputDims }] = await Promise.all([
     import('~/lib/shaderfx/catalog'),
     import('~/lib/shaderfx/renderer'),
     import('~/lib/shaderstudio/passes'),
     import('~/lib/shaderstudio/source'),
     import('~/lib/shaderstudio/types'),
   ])
-  const [img, catalog] = await Promise.all([loadImage(pictureUrl), fetchShaderFxCatalog()])
+  // Awaited for the built-ins; defs are read from the live store, never the fetch's first snapshot.
+  const [img] = await Promise.all([loadImage(pictureUrl), fetchShaderFxCatalog()])
   const cfg = starterShaderConfig()
-  const effectDef = (id: string) => catalog.effects.find(e => e.id === resolveEffectId(id)) ?? null
+  const effectDef = getEffectSync
   // composePasses silently skips an unknown effect — that would draw the plain
   // picture and hide the failure, so refuse instead.
   if (!effectDef(STARTER_SHADER_EFFECT)) throw new Error(`shader catalog has no "${STARTER_SHADER_EFFECT}"`)

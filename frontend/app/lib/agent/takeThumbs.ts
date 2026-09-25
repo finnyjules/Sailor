@@ -37,7 +37,7 @@ import { textureDefaults } from '~/lib/texturefx/controls'
 import type { Params as TextureParams } from '~/lib/spacetype/effect'
 
 import { shaderFx } from '~/lib/shaderfx/renderer'
-import { fetchShaderFxCatalog, resolveEffectId } from '~/lib/shaderfx/catalog'
+import { fetchShaderFxCatalog, getEffectSync } from '~/lib/shaderfx/catalog'
 import { composePasses } from '~/lib/shaderstudio/passes'
 import { hydrateConfig as hydrateShaderConfig, type ShaderStudioConfig } from '~/lib/shaderstudio/types'
 import { migrateShaderConfig } from '~/lib/shaderstudio/migrate'
@@ -212,9 +212,10 @@ async function shaderThumb(config: unknown, size = DEFAULT_SIZE): Promise<TakeTh
   // frame (hence the neutral placeholder base below). There is no document
   // shape to be truer to.
   const cfg: ShaderStudioConfig = hydrateShaderConfig(migrateShaderConfig(config))
-  const catalog = await fetchShaderFxCatalog()
-  const resolveDef = (id: string) => catalog.effects.find(e => e.id === resolveEffectId(id)) ?? null
-  const passes = composePasses(cfg, resolveDef, 0)
+  // Awaited for the built-ins; defs come from the LIVE store (getEffectSync), which also holds
+  // My effects and project copies — the fetch promise's own result predates them.
+  await fetchShaderFxCatalog()
+  const passes = composePasses(cfg, getEffectSync, 0)
   const gpu = shaderFx.render(passes, shaderPlaceholderBase(), size, size)
   const out = freshCanvas(size)
   out.getContext('2d')!.drawImage(gpu, 0, 0)

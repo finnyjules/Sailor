@@ -2,9 +2,9 @@
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Pencil, Sparkles } from 'lucide-vue-next'
-import { fetchShaderFxCatalog, resolveEffectId } from '~/lib/shaderfx/catalog'
+import { fetchShaderFxCatalog, resolveEffectId, useShaderCatalog } from '~/lib/shaderfx/catalog'
 import { shaderFx } from '~/lib/shaderfx/renderer'
-import type { ShaderFxCatalog, EffectDef } from '~/lib/shaderfx/types'
+import type { EffectDef } from '~/lib/shaderfx/types'
 import { composePasses } from '~/lib/shaderstudio/passes'
 import { stackWantsClock } from '~/lib/shaderstudio/clock'
 import { migrateShaderConfig } from '~/lib/shaderstudio/migrate'
@@ -34,7 +34,9 @@ const animated = computed(() => (config.value.motion?.tracks?.length ?? 0) > 0)
 
 const canvasEl = ref<HTMLCanvasElement | null>(null)
 const glError = ref<string | null>(null)
-const catalog = ref<ShaderFxCatalog | null>(null)
+// The LIVE catalog: built-ins plus My effects, project copies and new versions as they land
+// (the fetch promise's own result is only the built-ins' first snapshot).
+const catalog = useShaderCatalog()
 const resolved = ref<ResolvedSource | null>(null)
 // Template-compat alias: the card's placeholder text still keys off a single
 // "do we have something to show" value. Kept as a computed (not a ref) purely
@@ -251,11 +253,17 @@ onMounted(async () => {
     getDuration: () => shaderFrameDuration(shouldLoop.value, clockDuration),
     render: renderForFrame,
   }))
-  catalog.value = await fetchShaderFxCatalog().catch(() => null)
+  await fetchShaderFxCatalog().catch(() => null)
   catalogLoaded()
   renderStill()   // initial static preview; the gated loop animates only while hovered/visible
 })
 onBeforeUnmount(() => { unregisterStudioBaker(props.id); unregisterStudioFrameSource(props.id) })
+
+// A def this node's layers use arrived or changed after the first paint — the library's My
+// effects land after the built-ins, a project's copies on load, a new version on Keep: repaint.
+watch(() => config.value.effects.map(e => effectDef(e.id)), (now, before) => {
+  if (now.length !== before.length || now.some((d, i) => d !== before[i])) renderStill()
+})
 
 let timer: ReturnType<typeof setTimeout> | null = null
 // Re-render on config change. While the loop is actively animating it picks up the new

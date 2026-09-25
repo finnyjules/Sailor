@@ -53,7 +53,7 @@ import {
 import { shouldOfferStartPicker } from '~/lib/startPicker'
 import { setRef, type RefRegistry } from '~/lib/refs/registry'
 import { adoptMyEffects, attachMyEffects } from '~/lib/myEffects/projectCopy'
-import { myEffectRecordById, myEffectRecords } from '~/lib/myEffects/library'
+import { myEffectLibraryKnownEmpty, myEffectRecordById } from '~/lib/myEffects/library'
 import { useMyEffects } from '~/composables/useMyEffects'
 import { graphToPrompt } from '~/lib/graph/graphToPrompt'
 import { UnknownNodeTypeError } from '~/lib/graph/widgetOrder'
@@ -1750,9 +1750,9 @@ function snapshotActiveCanvasIntoDoc(tabId: string): ProjectDoc | null {
   // so a stale window can't launder old content as newest. Runs outside the
   // hasSnapshot branch: doc-only mutations (refs, deliverables, brand kit)
   // deserve the stamp even when the canvas snapshot was refused/empty.
-  // Copies of the My effects the doc uses go with it (spec §7.4) — skipped outright while the
-  // library is empty and the doc carries none.
-  attachMyEffects(toRaw(doc), myEffectRecordById, { libraryEmpty: myEffectRecords.value.length === 0 })
+  // Copies of the My effects the doc uses go with it (spec §7.4) — skipped outright only when
+  // the library has LOADED empty and the doc carries none (before the load, still scan).
+  attachMyEffects(toRaw(doc), myEffectRecordById, { libraryEmpty: myEffectLibraryKnownEmpty() })
   stampDocForSave(toRaw(doc), docEditedAt[tabId])
   return doc
 }

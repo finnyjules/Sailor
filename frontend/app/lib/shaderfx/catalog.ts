@@ -137,9 +137,12 @@ export function unregisterEffects(ids: string[]): void {
 // one — field.ts's self-heal degrades to a no-op there, same as it always has.
 setShaderFxRefetcher(fetchShaderFxCatalog)
 
+/** One effect by id, from the LIVE catalog once the built-ins have loaded. Not from the fetch
+ *  promise's own result: that is the list as the built-ins first landed, without the My effects,
+ *  project copies and new versions merged in since. */
 export async function getEffect(id: string): Promise<EffectDef | null> {
-  const cat = await fetchShaderFxCatalog()
-  return cat.effects.find(e => e.id === resolveEffectId(id)) ?? null
+  await fetchShaderFxCatalog()
+  return getEffectSync(id)
 }
 
 export function assetUrl(file: string, v?: string | number): string {

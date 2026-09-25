@@ -49,7 +49,9 @@ import type { GeoShapeConfig } from '~/lib/geoshape/config'
 import { mergeConfig as mergeVtConfig } from '~/lib/vectortype/config'
 import { VT_GUIDANCE, vtAgentControls } from '~/lib/vectortype/agentControls'
 import type { VtAxis as VtAxisLike } from '~/lib/vectortype/font'
-import { fetchShaderFxCatalog, getEffect, getEffectSync } from '~/lib/shaderfx/catalog'
+import { fetchShaderFxCatalog, getEffectSync } from '~/lib/shaderfx/catalog'
+import { currentShaderEffects } from '~/lib/shaderfx/catalogStore'
+import { isPickable } from '~/lib/myEffects/defs'
 import { isResolvedTexture, resolveTexturePhrase } from '~/lib/scene3d/textures'
 // Scene3D (3D Studio): config.ts/agentControls.ts are three-free by construction (same
 // constraint controls.ts documents), so — like Gradient/Shape — these import statically
@@ -552,7 +554,10 @@ export async function tuneGradientNode(node: any, request: string, apiKey: strin
  * cannot be changed this turn instead of an empty effect index.
  */
 async function shaderCatalogEffects(): Promise<ShaderEffectDef[] | null> {
-  try { return (await fetchShaderFxCatalog()).effects } catch { return null }
+  try { await fetchShaderFxCatalog() } catch { return null }
+  // The LIVE list (My effects and project copies included), not the fetch's first snapshot;
+  // pickable effects only — a draft take or an older version is never a switch target.
+  return currentShaderEffects().filter(isPickable)
 }
 
 /**
@@ -584,9 +589,9 @@ const shaderAdapter: PatchAdapter = {
     ensureEffectMasks(config)
     const catalog = await shaderCatalogEffects()
     const activeId = config.effects[0]?.id ?? ''
-    // Prefer the list we already have; fall back to the by-id fetch (which is the
-    // same cached promise) so a null catalog still resolves the CURRENT effect.
-    const effectDef = activeId ? (catalog?.find(e => e.id === activeId) ?? await getEffect(activeId).catch(() => null)) : null
+    // By id from the live store, so the CURRENT effect resolves even when it is not a switch
+    // target (an older version of a My effect) or the catalog list is null.
+    const effectDef = activeId ? getEffectSync(activeId) : null
     return {
       config,
       controls: shaderAgentControls(config, effectDef, 0, { catalog }),
