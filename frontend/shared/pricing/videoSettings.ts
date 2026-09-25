@@ -32,6 +32,11 @@ export interface VideoSettings {
    * input (SEEDANCE_MAX_INPUT_VIDEO_SECONDS).
    */
   inputVideoSeconds: number
+  /**
+   * Denoising steps, for the one model billed by GPU time whose run length
+   * follows them (LTX-Video's `steps`); absent for every other model.
+   */
+  steps?: number
 }
 
 /**
@@ -54,6 +59,14 @@ function optStr(adv: Adv, key: string, def: string): string {
   if (v === null || v === undefined) return def
   if (typeof v === 'boolean') return v ? 'True' : 'False'
   return String(v)
+}
+function optInt(adv: Adv, key: string, def: number): number {
+  if (!has(adv, key)) return def
+  const v = adv[key]
+  if (typeof v === 'boolean') return v ? 1 : 0
+  if (typeof v === 'number') return Number.isFinite(v) ? Math.trunc(v) : def
+  if (typeof v !== 'string') return def
+  return pyIntOf(v) ?? def
 }
 function optBool(adv: Adv, key: string, def: boolean): boolean {
   if (!has(adv, key)) return def
@@ -90,6 +103,12 @@ export function readModelOptions(raw: unknown): Adv {
 }
 
 const H3_RES: Record<string, string> = { '480p': '480p', '768p': '768p', '2k': '2k', '4k': '4k' }
+/** minimax/h3-max renders 480P, 768P or 1080P (its schema; video.ts H3_MAX_RES). */
+const H3_MAX_RES: Record<string, string> = { '480p': '480p', '768p': '768p', '1080p': '1080p' }
+const h3Res = (table: Record<string, string>) => (adv: Adv) => {
+  const r = lower(optStr(adv, 'resolution', '768p'))
+  return has(table, r) ? table[r]! : '768p'
+}
 
 interface Rule {
   /** The builder's durOr list, or null when it sends no length. */
@@ -102,23 +121,27 @@ interface Rule {
   audio(adv: Adv): boolean
   /** Billed seconds of reference video, given whether a first frame is sent. Absent = 0. */
   inputVideo?(adv: Adv, firstFrame: boolean): number
+  /** The denoising steps sent, for a model priced on them. Absent = not priced on steps. */
+  steps?(adv: Adv): number
 }
 
 const lower = (s: string) => s.toLowerCase()
 const res = (key: string, def: string) => (adv: Adv) => lower(optStr(adv, key, def))
 const fixed = <T>(v: T) => () => v
 const audioOpt = (def: boolean) => (adv: Adv) => optBool(adv, 'generate_audio', def)
-
-// PixVerse v6 on Replicate renders `quality` (default 540p) and
-// `generate_audio_switch` (default false); the builder sends `resolution` and
-// `generate_audio`, which the schema doesn't have. Until it sends `quality`,
-// the price reads the higher of what is sent and 540p, and no sound.
-const PIXVERSE_ORDER = ['360p', '540p', '720p', '1080p']
-function pixverseResolution(adv: Adv): string {
-  const sent = lower(optStr(adv, 'resolution', '720p'))
-  const i = PIXVERSE_ORDER.indexOf(sent)
-  return i >= 0 && i < PIXVERSE_ORDER.indexOf('540p') ? '540p' : sent
+/**
+ * A resolution the builder keeps only when the model's schema lists it
+ * (video.ts lowerEnum): the option lower-cased, else the builder's default.
+ */
+const resIn = (allowed: readonly string[], def: string) => (adv: Adv) => {
+  const r = lower(optStr(adv, 'resolution', def))
+  return allowed.includes(r) ? r : def
 }
+const WAN_RESOLUTIONS = ['720p', '1080p']
+/** wan-video/wan-2.7-t2v: any whole second from 2 to 15 (video.ts WAN_27_SECONDS). */
+const WAN_27_SECONDS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+/** lightricks/ltx-video `steps`, 1–50, default 30 (video.ts LTX_STEPS). */
+const ltxSteps = (adv: Adv) => Math.max(1, Math.min(50, optInt(adv, 'num_inference_steps', 30)))
 
 /**
  * One rule per video model id, mirroring its builder (video.ts line refs are
@@ -127,13 +150,13 @@ function pixverseResolution(adv: Adv): string {
 const RULES: Record<string, Rule> = {
   // ── fal (RUNNER_VIDEO_MODELS) ──
   // veo31: durOr([4,6,8]), resolution default 720p, generate_audio default true.
-  'veo-3.1': { durations: [4, 6, 8], defaultDuration: 8, resolution: res('resolution', '720p'), audio: audioOpt(true) },
-  'veo-3.1-fast': { durations: [4, 6, 8], defaultDuration: 8, resolution: res('resolution', '720p'), audio: audioOpt(true) },
+  'veo-3.1': { durations: [4, 6, 8], defaultDuration: 8, resolution: resIn(['720p', '1080p', '4k'], '720p'), audio: audioOpt(true) },
+  'veo-3.1-fast': { durations: [4, 6, 8], defaultDuration: 8, resolution: resIn(['720p', '1080p', '4k'], '720p'), audio: audioOpt(true) },
   // flux3: durOr([5,10,15,20]), resolution 720p, generate_audio true.
-  'flux-3': { durations: [5, 10, 15, 20], defaultDuration: 10, resolution: res('resolution', '720p'), audio: audioOpt(true) },
+  'flux-3': { durations: [5, 10, 15, 20], defaultDuration: 10, resolution: resIn(['720p', '1080p'], '720p'), audio: audioOpt(true) },
   // seedance20: sends generate_audio only when set; fal's default is true.
   'seedance-2.0': {
-    durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15], defaultDuration: 5, resolution: res('resolution', '720p'),
+    durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15], defaultDuration: 5, resolution: resIn(['480p', '720p', '1080p', '4k'], '720p'),
     audio: adv => (has(adv, 'generate_audio') ? pyTruthy(adv.generate_audio) : true),
     // seedance20: with no first frame (the linked image or image_url), a
     // non-empty video_urls goes to reference-to-video, billed on input seconds too.
@@ -143,30 +166,34 @@ const RULES: Record<string, Rule> = {
       return Array.isArray(v) && v.length ? SEEDANCE_MAX_INPUT_VIDEO_SECONDS : 0
     },
   },
-  // hailuoH3Core: H3_RES of the lower-cased option, else 768P. H3 always renders sound.
-  'hailuo-h3': { durations: [5, 6, 10], defaultDuration: 5, resolution: adv => H3_RES[lower(optStr(adv, 'resolution', '768p'))] ?? '768p', audio: fixed(true) },
-  'hailuo-h3-max': { durations: [5, 6, 10], defaultDuration: 5, resolution: adv => H3_RES[lower(optStr(adv, 'resolution', '768p'))] ?? '768p', audio: fixed(true) },
+  // hailuoH3Core: the model's own resolution table of the lower-cased option, else 768P. H3 always renders sound.
+  'hailuo-h3': { durations: [5, 6, 10], defaultDuration: 5, resolution: h3Res(H3_RES), audio: fixed(true) },
+  'hailuo-h3-max': { durations: [5, 6, 10], defaultDuration: 5, resolution: h3Res(H3_MAX_RES), audio: fixed(true) },
 
   // ── Replicate (RUNNER_REPLICATE_VIDEO_MODELS) ──
-  // sora2 / sora2Pro send no resolution: Sora 2 has none, Sora 2 Pro's schema default is "standard" (720p). Sora renders sound.
-  'sora-2': { durations: [5, 10], defaultDuration: 5, resolution: fixed(null), audio: fixed(true) },
-  'sora-2-pro': { durations: [5, 10], defaultDuration: 5, resolution: fixed('720p'), audio: fixed(true) },
+  // sora2 / sora2Pro send `seconds` 4/8/12 (video.ts SORA_SECONDS) and no
+  // resolution: Sora 2 has none, Sora 2 Pro's schema default is "standard" (720p). Sora renders sound.
+  'sora-2': { durations: [4, 8, 12], defaultDuration: 5, resolution: fixed(null), audio: fixed(true) },
+  'sora-2-pro': { durations: [4, 8, 12], defaultDuration: 5, resolution: fixed('720p'), audio: fixed(true) },
   // runwayGen45: no resolution, no sound.
   'runway-gen-4.5': { durations: [5, 10], defaultDuration: 5, resolution: fixed(null), audio: fixed(false) },
   // klingV3 sends no `mode`; the schema default is "pro", which it documents as 1080p.
   'kling-v3': { durations: [5, 10, 15], defaultDuration: 5, resolution: fixed('1080p'), audio: audioOpt(true) },
   'kling-v2.5-turbo-pro': { durations: [5, 10], defaultDuration: 5, resolution: fixed(null), audio: fixed(false) },
-  // seedance20Fast sends no generate_audio; the schema default is true.
-  'seedance-2.0-fast': { durations: [3, 5, 10], defaultDuration: 5, resolution: res('resolution', '720p'), audio: fixed(true) },
-  'hailuo-2.3': { durations: [6, 10], defaultDuration: 6, resolution: res('resolution', '768p'), audio: fixed(false) },
-  // wan27T2v / wan25I2vFast send no length: the schema default is 5 s on both.
-  'wan-2.7-t2v': { durations: null, defaultDuration: 5, fixedSeconds: 5, resolution: res('resolution', '720p'), audio: fixed(false) },
-  'wan-2.5-i2v-fast': { durations: null, defaultDuration: 5, fixedSeconds: 5, resolution: res('resolution', '480p'), audio: fixed(false) },
+  // seedance20Fast sends no generate_audio; the schema default is true. Resolution 480p or 720p, anything else 720p.
+  'seedance-2.0-fast': { durations: [3, 5, 10], defaultDuration: 5, resolution: resIn(['480p', '720p'], '720p'), audio: fixed(true) },
+  // hailuo23: 768p or 1080p, anything else 768p.
+  'hailuo-2.3': { durations: [6, 10], defaultDuration: 6, resolution: resIn(['768p', '1080p'], '768p'), audio: fixed(false) },
+  // wan27T2v sends `duration` 2–15; wan25I2vFast `duration` 5 or 10. Both 720p or 1080p, anything else 720p.
+  'wan-2.7-t2v': { durations: WAN_27_SECONDS, defaultDuration: 5, resolution: resIn(WAN_RESOLUTIONS, '720p'), audio: fixed(false) },
+  'wan-2.5-i2v-fast': { durations: [5, 10], defaultDuration: 5, resolution: resIn(WAN_RESOLUTIONS, '720p'), audio: fixed(false) },
   // lumaRay2720p: the model is 720p only.
   'luma-ray-2-720p': { durations: [5, 9], defaultDuration: 5, resolution: fixed('720p'), audio: fixed(false) },
-  // ltxVideo sends no length or resolution; priced per clip.
-  'ltx-video': { durations: null, defaultDuration: 5, fixedSeconds: 5, resolution: fixed(null), audio: fixed(false) },
-  'pixverse-v6': { durations: [5, 8], defaultDuration: 5, resolution: pixverseResolution, audio: fixed(false) },
+  // ltxVideo sends no length or resolution; priced per clip on the `steps` it sends.
+  'ltx-video': { durations: null, defaultDuration: 5, fixedSeconds: 5, resolution: fixed(null), audio: fixed(false), steps: ltxSteps },
+  // pixverseV6 sends `quality` (the resolution option: 360p–1080p, anything
+  // else 720p) and `generate_audio_switch` (the sound option, default on).
+  'pixverse-v6': { durations: [5, 8], defaultDuration: 5, resolution: resIn(['360p', '540p', '720p', '1080p'], '720p'), audio: audioOpt(true) },
 
   // ── ComfyUI only ──
   // _b_fabric_1_0 (comfy_api_nodes/video_models.py:465-477) ignores the duration
@@ -209,5 +236,7 @@ export function effectiveVideoSettings(
   const adv = readModelOptions(modelOptions)
   const seconds = r.durations ? durOr(r.durations, durationInt(duration, r.defaultDuration)) : r.fixedSeconds!
   const inputVideoSeconds = r.inputVideo ? r.inputVideo(adv, pyTruthy(firstFrame)) : 0
-  return { seconds, resolution: r.resolution(adv), audio: r.audio(adv), inputVideoSeconds }
+  const out: VideoSettings = { seconds, resolution: r.resolution(adv), audio: r.audio(adv), inputVideoSeconds }
+  if (r.steps) out.steps = r.steps(adv)
+  return out
 }

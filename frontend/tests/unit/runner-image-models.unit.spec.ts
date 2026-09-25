@@ -6,16 +6,21 @@ import {
 } from '~~/server/runner/generators/image'
 import { RUNNER_IMAGE_MODEL_IDS } from '#shared/runner/eligibility'
 import { IMAGE_MODELS_BY_ID } from '~~/app/data/image-models'
+import { expectPythonParity } from './helpers/pythonParity'
 
 const fixtures = JSON.parse(readFileSync(
   fileURLToPath(new URL('./fixtures/runner-builders.json', import.meta.url)), 'utf8'))
 
-describe('image request builders match Python', () => {
+// The fixture is Python's payload. Since Task S1b the runner deliberately
+// differs where Python breaks fal's published schema (Flux 1.1 Pro and
+// Schnell send "jpeg", not "jpg"); helpers/pythonParity.ts compares every
+// other field.
+describe('image request builders match Python (where Python keeps to fal\'s schema)', () => {
   for (const c of fixtures.image as any[]) {
     it(`${c.model} ${JSON.stringify(c.args)}`, () => {
       const desc = RUNNER_IMAGE_MODELS[c.model]!
       const got = desc.build({ prompt: c.args.prompt, aspectRatio: c.args.ar, seed: c.args.seed, adv: c.args.adv, refs: null })
-      expect(got).toEqual(c.payload)
+      expectPythonParity('fal', desc.app, got, c.payload)
     })
   }
 })

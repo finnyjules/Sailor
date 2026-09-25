@@ -7,6 +7,14 @@
  * `replicateVideo`, written by scripts/runner_builder_fixtures.py
  * --no-network). Engine tests use the fake Replicate and the fake fal only:
  * nothing here reaches a provider.
+ *
+ * Since Task S1b the runner deliberately differs from that Python oracle
+ * where Python breaks the model's published schema: PixVerse gets `quality`
+ * and `generate_audio_switch`, Wan `duration` (and 720p, not 480p), LTX `cfg`
+ * and `steps`, Sora `seconds` and an orientation, and no model gets a field
+ * its schema lacks (Kling's cfg_scale, Runway's motion, stray seeds…).
+ * helpers/pythonParity.ts compares every other field; the fixture is kept
+ * for those.
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -24,6 +32,7 @@ import { videoRate } from '#shared/pricing/videoRates'
 import { BASE_RENDER_CREDITS } from '~~/server/utils/priceBook'
 import type { OutputFile } from '~~/server/runner/types'
 import { createFakeLedger, createFakeReplicate, gatedFlow, makeKit } from './__runner__/kit'
+import { expectPythonParity } from './helpers/pythonParity'
 
 interface VideoArgs { prompt: string; ar: string; dur: number; seed: number; image: string | null; adv: Record<string, unknown> }
 interface ReplicateVideoCase {
@@ -62,7 +71,7 @@ async function planCase(c: ReplicateVideoCase) {
   return { plan, toUrl }
 }
 
-describe('replicate-video payloads match the Python builders', () => {
+describe('replicate-video payloads match the Python builders (where Python keeps to the schema)', () => {
   it('the fixture covers every model, each on Replicate with its Python slug, modes and default duration', () => {
     const byModel = new Map<string, number>()
     for (const c of CASES) byModel.set(c.model, (byModel.get(c.model) ?? 0) + 1)
@@ -88,14 +97,15 @@ describe('replicate-video payloads match the Python builders', () => {
       expect(build).toThrow(c.error)
       return
     }
-    expect(build()).toEqual(c.payload)
+    const built = build()
+    expectPythonParity('replicate', c.slug, built, c.payload!)
     // The same through planNode, as the canvas sends the node.
     const { plan, toUrl } = await planCase(c)
     expect(plan.kind).toBe('provider')
     if (plan.kind !== 'provider') return
     expect(plan.provider).toBe('replicate')
     expect(plan.endpoint).toBe(c.slug)
-    expect(plan.payload).toEqual(c.payload)
+    expect(plan.payload).toEqual(built)
     expect(plan.media).toBe('video')
     // A text-to-video-only model ignores a linked first frame: it is not even handed off.
     expect(toUrl).toHaveBeenCalledTimes(c.args.image && c.modes.includes('i2v') ? 1 : 0)
@@ -325,8 +335,9 @@ describe('replicate-video on the engine (hosted, fake fal and Replicate)', () =>
     expect(videos).toHaveLength(2)
     for (const v of videos) {
       expect(v.endpoint).toBe('kwaivgi/kling-v3-video')
+      // No cfg_scale: kwaivgi/kling-v3-video's schema has none (Task S1b).
       expect(v.payload).toEqual({
-        prompt: 'the fox runs', aspect_ratio: '16:9', duration: 5, generate_audio: true, cfg_scale: 0.5,
+        prompt: 'the fox runs', aspect_ratio: '16:9', duration: 5, generate_audio: true,
         start_image: v.payload.start_image,
       })
       expect(v.payload.start_image).toMatch(/^https:\/\/fal\.storage\/generate_image_\d{5}_\.png$/)

@@ -14,7 +14,10 @@
  *
  * Request bodies are checked against the Python fixtures
  * (fixtures/runner-families.json), with each `IMG:<input>` placeholder
- * replaced by the fal storage link the kit's hand-off gives that card's file.
+ * replaced by the fal storage link the kit's hand-off gives that card's file,
+ * and without the fields the provider's schema doesn't define (the runner
+ * follows the schema since Task S1b: no seed or cfg_scale on Kling 3, no seed
+ * on Seedream 5).
  * Charges are checked against `priceGraph` for the nodes that ran.
  */
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -38,6 +41,7 @@ import type { RunnerMessage } from '#shared/runner/messages'
 import { nodesNeedingEngine } from '~~/app/lib/runner/needsEngine'
 import { isRunnerDeclined } from '~~/app/lib/runner/client'
 import { createFakeFal, createFakeLedger, createFakeReplicate, makeKit, until } from './__runner__/kit'
+import { withoutUnknownFields } from './helpers/pythonParity'
 
 // ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -115,7 +119,7 @@ function nodeFlow(family: RunnerFamily, c: NodeCase, o: { output?: boolean } = {
     files: c.links.map(n => `${n}.png`),
     provider: call.provider,
     endpoint: call.endpoint,
-    body: call.payload ? expectedBody(call.payload, swaps) : {},
+    body: call.payload ? expectedBody(withoutUnknownFields(call.provider, call.endpoint, call.payload), swaps) : {},
   }
 }
 
@@ -139,7 +143,7 @@ function videoFlow(c: VideoCase): FamilyFlow {
     files: c.args.image ? ['image.png'] : [],
     provider: 'replicate',
     endpoint: c.slug,
-    body: expectedBody(c.payload!, c.args.image ? { [c.args.image]: storageUrl('image') } : {}),
+    body: expectedBody(withoutUnknownFields('replicate', c.slug, c.payload!), c.args.image ? { [c.args.image]: storageUrl('image') } : {}),
   }
 }
 

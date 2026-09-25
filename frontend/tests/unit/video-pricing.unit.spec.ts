@@ -45,11 +45,13 @@ describe('the video rate card', () => {
     for (const [id, r] of Object.entries(VIDEO_RATES)) {
       expect(r.source, id).toMatch(/^https:\/\/(fal\.ai|replicate\.com)\//)
       expect(r.read, id).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-      expect(['per_second', 'per_clip'], id).toContain(r.unit)
+      expect(['per_second', 'per_clip', 'gpu_time'], id).toContain(r.unit)
       expect(['verified', 'estimate'], id).toContain(r.confidence)
       expect(r.source.includes('fal.ai') ? 'fal' : 'replicate', id).toBe(r.service)
-      const figures = Object.values(r.byResolution).flatMap(v =>
-        typeof v === 'number' ? [v] : Object.values(v as Record<string, number>))
+      const figures = r.unit === 'gpu_time'
+        ? [r.usdPerGpuSecond, r.typicalSeconds, r.typicalSteps, r.maxSteps]
+        : Object.values(r.byResolution as Record<string, unknown>).flatMap(v =>
+          typeof v === 'number' ? [v] : Object.values(v as Record<string, number>))
       expect(figures.length, id).toBeGreaterThan(0)
       for (const f of figures) expect(f, id).toBeGreaterThan(0)
     }
@@ -107,26 +109,30 @@ const PIXVERSE_TIERS = ['360p', '540p', '720p', '1080p']
 /** The seconds, resolution and sound a built payload carries (or the service's default for one it doesn't). */
 function sentSettings(id: string, payload: Record<string, unknown>) {
   const def = SERVICE_DEFAULT[id] ?? {}
-  const d = payload.duration
+  // Sora's clip length is `seconds` (Task S1b); every other model's `duration`.
+  const d = payload.duration ?? payload.seconds
   const seconds = d === undefined ? def.seconds : (typeof d === 'number' ? d : Number.parseInt(String(d), 10))
   const r = payload.resolution
   let resolution = r === undefined ? def.resolution : String(r).toLowerCase()
   const a = payload.generate_audio
   let audio = a === undefined ? def.audio : a
   if (id === 'pixverse-v6') {
-    // pixverse/pixverse-v6 renders `quality` (default 540p) and
-    // `generate_audio_switch` (default false); `resolution` and `generate_audio`
-    // are not in its schema. Priced at the higher of what is sent and what renders.
-    const rendered = String(payload.quality ?? '540p').toLowerCase()
-    const sent = resolution ?? rendered
-    resolution = PIXVERSE_TIERS.indexOf(sent) >= 0 && PIXVERSE_TIERS.indexOf(sent) < PIXVERSE_TIERS.indexOf(rendered) ? rendered : sent
+    // pixverse/pixverse-v6 renders `quality` (default 540p) and makes sound
+    // when `generate_audio_switch` is on (default off); the builder sends both.
+    expect(payload).not.toHaveProperty('resolution')
+    const q = String(payload.quality ?? '540p').toLowerCase()
+    expect(PIXVERSE_TIERS).toContain(q)
+    resolution = q
     audio = payload.generate_audio_switch === undefined ? false : payload.generate_audio_switch
   }
   // A reference video sent (fal reference-to-video) is billed on its seconds
   // too: fal's maximum total input, 15 s, until the run can measure it.
   const refs = payload.video_urls
   const inputVideoSeconds = Array.isArray(refs) && refs.length ? 15 : 0
-  return { seconds, resolution, audio, inputVideoSeconds }
+  const out: Record<string, unknown> = { seconds, resolution, audio, inputVideoSeconds }
+  // LTX-Video's GPU time follows the `steps` it sends (schema default 30).
+  if (id === 'ltx-video') out.steps = payload.steps ?? 30
+  return out
 }
 
 describe('settings parity: the price reads what the builder sends', () => {
@@ -257,20 +263,32 @@ describe('worked examples', () => {
     expect(providerUsd('GenerateVideoNode', { ...base, duration: '7' })).toBeCloseTo(0.40 * 6)
   })
 
-  it('per-clip models: Hailuo 2.3 by resolution × length, LTX-Video flat', () => {
+  it('per-clip models: Hailuo 2.3 by resolution × length; LTX-Video by the steps it sends', () => {
     expect(providerUsd('GenerateVideoNode', { model: 'hailuo-2.3', duration: '6' })).toBeCloseTo(0.28)
     expect(providerUsd('GenerateVideoNode', { model: 'hailuo-2.3', duration: '10' })).toBeCloseTo(0.56)
     expect(providerUsd('GenerateVideoNode', { model: 'hailuo-2.3', duration: '6', model_options: '{"resolution":"1080p"}' })).toBeCloseTo(0.49)
     // 1080p at 10 s has no clip price: the card's dearest second × 10.
     expect(providerUsd('GenerateVideoNode', { model: 'hailuo-2.3', duration: '10', model_options: '{"resolution":"1080p"}' })).toBeCloseTo(0.49 / 6 * 10, 6)
-    // LTX-Video: the GPU-time ceiling, L40S $0.000975/s × 140 s.
-    expect(providerUsd('GenerateVideoNode', { model: 'ltx-video', duration: '5' })).toBeCloseTo(0.000975 * 140, 9)
+    // LTX-Video: L40S $0.000975/s × the typical 84 s at 30 steps, scaled by the steps sent (Task S1b).
+    expect(providerUsd('GenerateVideoNode', { model: 'ltx-video', duration: '5' })).toBeCloseTo(0.000975 * 84, 9)
+    expect(providerUsd('GenerateVideoNode', { model: 'ltx-video', model_options: '{"num_inference_steps":50}' })).toBeCloseTo(0.000975 * 140, 9)
+    expect(providerUsd('GenerateVideoNode', { model: 'ltx-video', model_options: '{"num_inference_steps":40}' })).toBeCloseTo(0.000975 * 84 * 40 / 30, 9)
+    // Fewer steps than the typical run is still the typical run (never under); more than 50 is sent as 50.
+    expect(providerUsd('GenerateVideoNode', { model: 'ltx-video', model_options: '{"num_inference_steps":10}' })).toBeCloseTo(0.000975 * 84, 9)
+    expect(providerUsd('GenerateVideoNode', { model: 'ltx-video', model_options: '{"num_inference_steps":99}' })).toBeCloseTo(0.000975 * 140, 9)
+    // Linked options: the most steps the builder can send.
+    expect(providerUsd('GenerateVideoNode', { model: 'ltx-video', model_options: ['9', 0] })).toBeCloseTo(0.000975 * 140, 9)
   })
 
-  it('a resolution the card has no price for is priced at the card\'s highest rate', () => {
-    // Wan 2.5 I2V Fast's builder default "480p" has no tier on Replicate's page.
-    expect(providerUsd('GenerateVideoNode', { model: 'wan-2.5-i2v-fast' })).toBeCloseTo(0.102 * 5)
-    expect(providerUsd('GenerateVideoNode', { model: 'hailuo-h3-max', model_options: '{"resolution":"4k"}' })).toBeCloseTo(0.16 * 5)
+  it('every resolution a builder sends is on its card; one that isn\'t would be priced at the card\'s highest rate', () => {
+    // Wan 2.5 I2V Fast: the old default 480p is outside the schema and is sent as 720p (Task S1b).
+    expect(providerUsd('GenerateVideoNode', { model: 'wan-2.5-i2v-fast' })).toBeCloseTo(0.068 * 5)
+    expect(providerUsd('GenerateVideoNode', { model: 'wan-2.5-i2v-fast', model_options: '{"resolution":"480p"}' })).toBeCloseTo(0.068 * 5)
+    // H3 Max takes 480P, 768P or 1080P: 4k is sent as 768P, 1080p as 1080P.
+    expect(providerUsd('GenerateVideoNode', { model: 'hailuo-h3-max', model_options: '{"resolution":"4k"}' })).toBeCloseTo(0.08 * 5)
+    expect(providerUsd('GenerateVideoNode', { model: 'hailuo-h3-max', model_options: '{"resolution":"1080p"}' })).toBeCloseTo(0.16 * 5)
+    // The card's own fallback, for a resolution it doesn't list.
+    expect(videoUsd('wan-2.5-i2v-fast', { seconds: 5, resolution: '480p', audio: false, inputVideoSeconds: 0 })).toBeCloseTo(0.102 * 5)
   })
 
   it('legacy labels price at the model they run', () => {
@@ -315,11 +333,16 @@ describe('Seedance 2.0 reference videos are priced on input + output seconds', (
 })
 
 describe('PixVerse v6 is priced as the service renders it', () => {
-  it('at the higher of the sent resolution and 540p, silent', () => {
+  // Since Task S1b the builder sends `quality` and `generate_audio_switch`, so
+  // the service renders the node's resolution and sound.
+  it('at the quality and sound sent (sound on by default)', () => {
     expect(effectiveVideoSettings('pixverse-v6', '5', '16:9', '{"resolution":"360p","generate_audio":true}'))
-      .toEqual({ seconds: 5, resolution: '540p', audio: false, inputVideoSeconds: 0 })
-    expect(providerUsd('GenerateVideoNode', { model: 'pixverse-v6', duration: '5', model_options: '{"resolution":"1080p"}' })).toBeCloseTo(0.18 * 5, 6)
-    expect(providerUsd('GenerateVideoNode', { model: 'pixverse-v6', duration: '8' })).toBeCloseTo(0.09 * 8, 6)
+      .toEqual({ seconds: 5, resolution: '360p', audio: true, inputVideoSeconds: 0 })
+    expect(providerUsd('GenerateVideoNode', { model: 'pixverse-v6', duration: '5', model_options: '{"resolution":"1080p"}' })).toBeCloseTo(0.23 * 5, 6)
+    expect(providerUsd('GenerateVideoNode', { model: 'pixverse-v6', duration: '5', model_options: '{"resolution":"1080p","generate_audio":false}' })).toBeCloseTo(0.18 * 5, 6)
+    expect(providerUsd('GenerateVideoNode', { model: 'pixverse-v6', duration: '8' })).toBeCloseTo(0.12 * 8, 6)
+    // A resolution outside the schema is sent as the 720p default.
+    expect(providerUsd('GenerateVideoNode', { model: 'pixverse-v6', duration: '8', model_options: '{"resolution":"4k"}' })).toBeCloseTo(0.12 * 8, 6)
   })
 })
 
@@ -334,10 +357,9 @@ describe('the line-up page\'s loss table: no video row is below cost', () => {
     { what: 'Kling 3.0, 15 s with sound', inputs: { model: 'kling-v3', duration: '15' }, costs: 3.78 },
     { what: 'Luma Ray 2, 9 s', inputs: { model: 'luma-ray-2-720p', duration: '9' }, costs: 1.62 },
     { what: 'Seedance 2.0 fast, 10 s', inputs: { model: 'seedance-2.0-fast', duration: '10' }, costs: 1.50 },
-    // The page's $0.96 was 720p with sound; the service renders what its schema
-    // defaults to (quality 540p, sound off, since the builder sends neither
-    // field it reads): 8 × $0.07. Priced at 720p silent, 8 × $0.09.
-    { what: 'PixVerse v6, 8 s (as rendered)', inputs: { model: 'pixverse-v6', duration: '8' }, costs: 0.56 },
+    // The page's $0.96: 720p with sound, 8 × $0.12. Since Task S1b the builder
+    // sends `quality` 720p and `generate_audio_switch` on, so that is what renders.
+    { what: 'PixVerse v6, 8 s at 720p with sound', inputs: { model: 'pixverse-v6', duration: '8' }, costs: 0.96 },
     // Seedance 2.0 reference-to-video: 4 s out with 15 s of reference video at
     // 720p is (4 + 15) × $0.3034 × 0.6 = $3.46 on fal (the review's $3.45).
     { what: 'Seedance 2.0 with reference videos, 4 s at 720p', inputs: { model: 'seedance-2.0', duration: '4', model_options: '{"video_urls":["https://x/ref.mp4"]}' }, costs: 3.45 },
@@ -494,13 +516,13 @@ describe('the video gallery price label', () => {
     expect(videoRateLabel('hailuo-h3-max')).toBe('$0.08/s at 768p')
     expect(videoRateLabel('veo-3.1')).toBe('$0.40/s at 720p')
     expect(videoRateLabel('seedance-2.0')).toBe('$0.3034/s at 720p')
-    expect(videoRateLabel('wan-2.5-i2v-fast')).toBe('$0.102/s at 480p')
+    expect(videoRateLabel('wan-2.5-i2v-fast')).toBe('$0.068/s at 720p')
     expect(videoRateLabel('runway-gen-4.5')).toBe('$0.12/s')
     expect(videoRateLabel('kling-v3')).toBe('$0.336/s at 1080p')
   })
   it('per-clip models show the clip price', () => {
     expect(videoRateLabel('hailuo-2.3')).toBe('$0.28 for 6 s at 768p')
-    expect(videoRateLabel('ltx-video')).toBe('$0.1365 a clip')
+    expect(videoRateLabel('ltx-video')).toBe('$0.0819 a clip')
   })
   it('in hosted mode, credits per second of the default clip', () => {
     expect(videoRateLabel('hailuo-h3-max', { hosted: true })).toBe('12 credits/s at 768p')

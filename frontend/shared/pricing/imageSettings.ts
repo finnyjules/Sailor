@@ -115,20 +115,50 @@ export function falSizeMegapixels(name: string): number {
  * makes. The cap applies to the pixels, then the count is rounded up: "1 MP"
  * is 2 billed MP, "4 MP" is 2048² = 4,194,304 pixels, 5 billed MP. A ratio
  * the model doesn't take (21:9 on Flux 2) is sent as 1:1, so "1 MP" there is
- * 2 MP too. A label the builder passes through but the service does not list
- * is priced at the cap.
+ * 2 MP too. The builders send a label the service doesn't list as their
+ * default ("1 MP", "1"), and the price reads it the same way (Task S1b).
  */
 const BFL_LABEL_PIXELS = 1024 * 1024
 const BFL_CAP_PIXELS = 2048 * 2048
-function bflMegapixels(label: string, allowed: readonly string[]): number {
-  const n = Number.parseFloat(label)
-  const pixels = allowed.includes(label) && n > 0 ? n * BFL_LABEL_PIXELS : BFL_CAP_PIXELS
-  return billedMegapixels(Math.min(pixels, BFL_CAP_PIXELS))
+function bflMegapixels(label: string, allowed: readonly string[], def: string): number {
+  const n = Number.parseFloat(allowed.includes(label) ? label : def)
+  return billedMegapixels(Math.min(n * BFL_LABEL_PIXELS, BFL_CAP_PIXELS))
 }
-export const FLUX_2_RESOLUTIONS = ['0.5 MP', '1 MP', '2 MP', '4 MP'] as const
-export const FLUX_KLEIN_MEGAPIXELS = ['0.25', '0.5', '1', '2', '4'] as const
+export const FLUX_2_RESOLUTIONS: readonly string[] = ['0.5 MP', '1 MP', '2 MP', '4 MP']
+export const FLUX_KLEIN_MEGAPIXELS: readonly string[] = ['0.25', '0.5', '1', '2', '4']
+
+/**
+ * black-forest-labs/flux-2-dev is sized by `width` × `height` (aspect_ratio
+ * "custom"): each a multiple of 32 from 256 to 1440 (its saved schema, read
+ * 2026-09-24). The runner's builder (image.ts rFlux2Dev) sends the node's
+ * resolution label as that many BFL megapixels at the node's ratio, scaled
+ * down so neither side passes 1440, each side rounded to a multiple of 32.
+ * A ratio Flux 2 doesn't take is 1:1. The price reads the same pixels.
+ */
+const FLUX_2_DEV_RATIOS = ['1:1', '16:9', '3:2', '2:3', '4:5', '5:4', '9:16', '3:4', '4:3']
+const FLUX_2_DEV_MAX_SIDE = 1440
+export function flux2DevSize(label: string, aspectRatio: string): { width: number, height: number } {
+  const mp = FLUX_2_RESOLUTIONS.includes(label) ? Number.parseFloat(label) : 1
+  const [a, b] = (FLUX_2_DEV_RATIOS.includes(aspectRatio) ? aspectRatio : '1:1').split(':').map(Number) as [number, number]
+  const pixels = mp * BFL_LABEL_PIXELS
+  let w = Math.sqrt(pixels * a / b)
+  let h = Math.sqrt(pixels * b / a)
+  const scale = Math.min(1, FLUX_2_DEV_MAX_SIDE / Math.max(w, h))
+  w *= scale
+  h *= scale
+  const snap = (x: number) => Math.max(256, Math.min(FLUX_2_DEV_MAX_SIDE, Math.round(x / 32) * 32))
+  return { width: snap(w), height: snap(h) }
+}
+/** Billed megapixels of the largest Flux 2 Dev picture (1440 × 1440): 3. */
+export const FLUX_2_DEV_MAX_MEGAPIXELS = billedMegapixels(FLUX_2_DEV_MAX_SIDE * FLUX_2_DEV_MAX_SIDE)
 
 type Rule = (adv: Adv, aspectRatio: string) => ImageSettings
+
+const GPT_QUALITIES = ['low', 'medium', 'high', 'auto']
+const gptQuality = (adv: Adv) => {
+  const q = optStr(adv, 'quality', 'auto')
+  return GPT_QUALITIES.includes(q) ? q : 'auto'
+}
 
 const one = (tier: string | null = null): ImageSettings => ({ images: 1, tier, megapixels: null, webSearch: false })
 const flat: Rule = () => one()
@@ -176,13 +206,17 @@ const RULES: Record<string, Rule> = {
   'flux-pro': flat,
   // rFluxDev: num_outputs clamped 1–4 (billed per output picture; megapixels don't change it).
   'flux-dev': adv => ({ ...one(), images: clamp(optInt(adv, 'num_outputs', 1), 1, 4) }),
-  // rFlux2Basic / rFlux2Tunable: resolution label, default "1 MP".
-  'flux-2-max': adv => ({ ...one(), megapixels: bflMegapixels(optStr(adv, 'resolution', '1 MP'), FLUX_2_RESOLUTIONS) }),
-  'flux-2-pro': adv => ({ ...one(), megapixels: bflMegapixels(optStr(adv, 'resolution', '1 MP'), FLUX_2_RESOLUTIONS) }),
-  'flux-2-flex': adv => ({ ...one(), megapixels: bflMegapixels(optStr(adv, 'resolution', '1 MP'), FLUX_2_RESOLUTIONS) }),
-  'flux-2-dev': adv => ({ ...one(), megapixels: bflMegapixels(optStr(adv, 'resolution', '1 MP'), FLUX_2_RESOLUTIONS) }),
-  // rFluxKlein: output_megapixels label, default "1".
-  'flux-2-klein-4b': adv => ({ ...one(), megapixels: bflMegapixels(optStr(adv, 'output_megapixels', '1'), FLUX_KLEIN_MEGAPIXELS) }),
+  // rFlux2Basic / rFlux2Flex: resolution label, default (and anything unlisted) "1 MP".
+  'flux-2-max': adv => ({ ...one(), megapixels: bflMegapixels(optStr(adv, 'resolution', '1 MP'), FLUX_2_RESOLUTIONS, '1 MP') }),
+  'flux-2-pro': adv => ({ ...one(), megapixels: bflMegapixels(optStr(adv, 'resolution', '1 MP'), FLUX_2_RESOLUTIONS, '1 MP') }),
+  'flux-2-flex': adv => ({ ...one(), megapixels: bflMegapixels(optStr(adv, 'resolution', '1 MP'), FLUX_2_RESOLUTIONS, '1 MP') }),
+  // rFlux2Dev: width × height from the label and the ratio (flux2DevSize).
+  'flux-2-dev': (adv, ar) => {
+    const { width, height } = flux2DevSize(optStr(adv, 'resolution', '1 MP'), ar)
+    return { ...one(), megapixels: billedMegapixels(width * height) }
+  },
+  // rFluxKlein: output_megapixels label, default (and anything unlisted) "1".
+  'flux-2-klein-4b': adv => ({ ...one(), megapixels: bflMegapixels(optStr(adv, 'output_megapixels', '1'), FLUX_KLEIN_MEGAPIXELS, '1') }),
   'imagen-4-ultra': flat,
   'imagen-4': flat,
   'imagen-4-fast': flat,
@@ -199,9 +233,9 @@ const RULES: Record<string, Rule> = {
   'stable-diffusion-3.5-large': flat,
   'stable-diffusion-3.5-large-turbo': flat,
   'stable-diffusion-3.5-medium': flat,
-  // rGptImage2 / rGptImage15: quality as given, default "auto"; one picture.
-  'gpt-image-2': adv => one(optStr(adv, 'quality', 'auto')),
-  'gpt-image-1.5': adv => one(optStr(adv, 'quality', 'auto')),
+  // rGptImage2 / rGptImage15: quality low/medium/high/auto, anything else "auto"; one picture.
+  'gpt-image-2': adv => one(gptQuality(adv)),
+  'gpt-image-1.5': adv => one(gptQuality(adv)),
   'qwen-image': flat,
   'hunyuan-image-3': flat,
   'grok-imagine': flat,

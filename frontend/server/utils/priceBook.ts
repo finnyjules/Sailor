@@ -37,7 +37,12 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // gate reads the sound file; Kling lip-sync its source video), the 60 s cap
 // only when it can't; sync.so "silence" mode refused; the input-picture cap
 // raised to 12288 × 1536, the widest Nano Banana 4K picture.
-export const PRICE_BOOK_VERSION = 'lineup-p5b'
+// lineup-s1b (Task S1b): the runner's builders follow the providers' schemas,
+// and the prices read what they now send: PixVerse v6 its quality and sound,
+// Wan 2.5/2.7 their duration and 720p/1080p, LTX-Video its steps, Flux 2 Dev
+// its width × height (≤ 1440²), H3 Max 1080p, Sora its 4/8/12 s; an option
+// outside a schema is priced as the default it is sent as.
+export const PRICE_BOOK_VERSION = 'lineup-s1b'
 
 export const BASE_RENDER_CREDITS = 1
 

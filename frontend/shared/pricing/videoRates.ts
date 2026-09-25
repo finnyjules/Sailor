@@ -6,7 +6,9 @@
  * Units:
  *  - `per_second`: dollars per second of output, by resolution, and split by
  *    sound on/off where the service prices it that way;
- *  - `per_clip`: dollars per clip, by resolution and clip length.
+ *  - `per_clip`: dollars per clip, by resolution and clip length;
+ *  - `gpu_time`: billed by GPU seconds, estimated from the page's typical run
+ *    time at its default step count, scaled up by the steps sent.
  * A resolution key of '*' means the service has one price whatever the
  * resolution (or the model has no resolution setting).
  *
@@ -47,6 +49,16 @@ interface RateMeta {
 export type VideoRate =
   | (RateMeta & { unit: 'per_second', byResolution: Record<string, PerSecondPrice> })
   | (RateMeta & { unit: 'per_clip', byResolution: Record<string, Record<string, number>> })
+  | (RateMeta & {
+    unit: 'gpu_time'
+    /** Dollars per second of the GPU the model runs on. */
+    usdPerGpuSecond: number
+    /** The page's typical run time, in seconds, at `typicalSteps`. */
+    typicalSeconds: number
+    typicalSteps: number
+    /** The most steps the builder can send. */
+    maxSteps: number
+  })
 
 const READ = '2026-09-24'
 const fal = (endpoint: string) => `https://fal.ai/models/${endpoint}/llms.txt`
@@ -145,8 +157,8 @@ export const VIDEO_RATES: Record<string, VideoRate> = {
     unit: 'per_second', service: 'replicate', source: rep('wan-video/wan-2.7-t2v'), read: READ, confidence: 'verified',
     byResolution: { '*': 0.10 },
   },
-  // 720p $0.068, 1080p $0.102. The builder's default "480p" has no tier on the
-  // page, so it prices at the highest (the card's fallback).
+  // 720p $0.068, 1080p $0.102. The builder sends 720p or 1080p only (480p, the
+  // old default, is outside the schema and is sent as 720p since Task S1b).
   'wan-2.5-i2v-fast': {
     unit: 'per_second', service: 'replicate', source: rep('wan-video/wan-2.5-i2v-fast'), read: READ, confidence: 'verified',
     byResolution: { '720p': 0.068, '1080p': 0.102 },
@@ -158,18 +170,18 @@ export const VIDEO_RATES: Record<string, VideoRate> = {
   // Billed by GPU time: "This model runs on Nvidia L40S GPU hardware", and
   // Replicate's L40S rate is $0.000975 per second (the page's billing line).
   // "Predictions typically complete within 84 seconds" at the schema default of
-  // 30 steps; the ceiling scales that to the 50-step maximum: 84 × 50/30 = 140 s
-  // × $0.000975 = $0.1365 a clip. (The builder sends `num_inference_steps`, which
-  // the schema doesn't have, so the service runs its 30-step default today; the
-  // ceiling still holds if the builder is fixed to send `steps` up to 50.)
+  // 30 steps. The builder sends `steps` (1–50, Task S1b), so the clip is priced
+  // 84 s × steps/30 × $0.000975: $0.0819 at 30 steps, $0.1365 at 50. Fewer than
+  // 30 steps is still priced at the typical 84 s (part of the run is fixed
+  // overhead the page doesn't split out), so a short run is never under-priced.
   'ltx-video': {
-    unit: 'per_clip', service: 'replicate', source: rep('lightricks/ltx-video'), read: READ, confidence: 'verified',
-    byResolution: { '*': { '*': 0.1365 } },
-    note: 'ceiling: L40S $0.000975/s × 140 s (typical 84 s at 30 steps × 50/30)',
+    unit: 'gpu_time', service: 'replicate', source: rep('lightricks/ltx-video'), read: READ, confidence: 'verified',
+    usdPerGpuSecond: 0.000975, typicalSeconds: 84, typicalSteps: 30, maxSteps: 50,
+    note: 'L40S $0.000975/s × typical 84 s at 30 steps, scaled up by the steps sent',
   },
-  // "Billing is per output second, tiered by resolution and audio." The service
-  // renders `quality` (default 540p) and `generate_audio_switch` (default off),
-  // which the builder doesn't send; videoSettings prices max(sent, 540p), silent.
+  // "Billing is per output second, tiered by resolution and audio." The builder
+  // sends `quality` (the node's resolution) and `generate_audio_switch` (its
+  // sound option), so the price reads both (Task S1b).
   'pixverse-v6': {
     unit: 'per_second', service: 'replicate', source: rep('pixverse/pixverse-v6'), read: READ, confidence: 'verified',
     byResolution: {
@@ -201,8 +213,15 @@ function perSecond(p: PerSecondPrice, audio: boolean): number {
   return typeof p === 'number' ? p : (audio ? p.audio : p.silent)
 }
 
+/** Dollars for one run on a GPU-time card at `steps` (never below the typical run). */
+function gpuTimeUsd(rate: VideoRate & { unit: 'gpu_time' }, steps: number): number {
+  const s = Math.min(rate.maxSteps, Math.max(rate.typicalSteps, steps))
+  return tidy(rate.usdPerGpuSecond * rate.typicalSeconds * s / rate.typicalSteps)
+}
+
 /** The highest per-second figure anywhere on the card (a per-clip card by its dearest second). */
 function topPerSecond(rate: VideoRate): number {
+  if (rate.unit === 'gpu_time') return gpuTimeUsd(rate, rate.maxSteps)
   if (rate.unit === 'per_second') {
     return Math.max(...Object.values(rate.byResolution).map(p => (typeof p === 'number' ? p : Math.max(p.audio, p.silent))))
   }
@@ -232,6 +251,7 @@ export function videoUsd(modelId: string, s: VideoSettings): number | null {
   const rate = videoRate(modelId)
   if (!rate) return null
   const key = s.resolution ?? '*'
+  if (rate.unit === 'gpu_time') return gpuTimeUsd(rate, s.steps ?? rate.maxSteps)
   if (rate.unit === 'per_second') return perSecondUsd(rate, s)
   const row = own(rate.byResolution, key) ?? own(rate.byResolution, '*')
   const clip = row && (own(row, String(s.seconds)) ?? own(row, '*'))
@@ -248,6 +268,8 @@ export function videoUsd(modelId: string, s: VideoSettings): number | null {
 export function videoMaxUsd(modelId: string, seconds: number): number | null {
   const rate = videoRate(modelId)
   if (!rate) return null
+  // One run at the most steps the builder can send, whatever the length.
+  if (rate.unit === 'gpu_time') return gpuTimeUsd(rate, rate.maxSteps)
   if (rate.unit === 'per_clip') {
     const flat = own(rate.byResolution, '*')
     const clip = flat && own(flat, '*')
@@ -282,6 +304,7 @@ export function videoRateLabel(modelId: string, opts: { hosted?: boolean } = {})
   const usd = videoUsd(modelId, s)
   if (usd == null) return null
   const at = s.resolution ? ` at ${s.resolution}` : ''
+  if (rate.unit === 'gpu_time') return opts.hosted ? `${creditsForUsd(usd)} credits a clip` : `${dollars(usd)} a clip`
   if (rate.unit === 'per_clip') {
     const flat = Object.keys(rate.byResolution).length === 1 && own(rate.byResolution, '*') && own(rate.byResolution['*']!, '*') !== undefined
     const what = flat ? ' a clip' : ` for ${s.seconds} s`

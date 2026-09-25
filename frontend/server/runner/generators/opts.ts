@@ -62,6 +62,38 @@ export function optStr(adv: Record<string, unknown>, key: string, def: string): 
   return String(v)
 }
 
+// ── Schema-bound readers (Task S1b) ──────────────────────────────────────
+// The runner's builders follow each provider's published schema (the saved
+// copies in tests/unit/fixtures/provider-schemas/), not Python parity: a
+// value the schema doesn't allow is never sent. An enum value outside the
+// list falls back to the builder's default; a number outside the range is
+// clamped to it, the way safety_tolerance and num_outputs always were.
+
+/** optStr, kept only when it is one of `allowed`; otherwise `def`. */
+export function optEnum(adv: Record<string, unknown>, key: string, allowed: readonly string[], def: string): string {
+  const v = optStr(adv, key, def)
+  return allowed.includes(v) ? v : def
+}
+
+/** optInt clamped to [lo, hi]. */
+export function optIntIn(adv: Record<string, unknown>, key: string, def: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, optInt(adv, key, def)))
+}
+
+/** optFloat clamped to [lo, hi]; a value that isn't a finite number is `def`. */
+export function optFloatIn(adv: Record<string, unknown>, key: string, def: number, lo: number, hi: number): number {
+  const v = optFloat(adv, key, def)
+  return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : def
+}
+
+/** Replicate's output formats as its schemas spell them; "jpeg" and "jpg" name the same thing. */
+export function outputFormatIn(adv: Record<string, unknown>, allowed: readonly string[], def: string): string {
+  let v = optStr(adv, 'output_format', def)
+  if (v === 'jpg' && !allowed.includes('jpg') && allowed.includes('jpeg')) v = 'jpeg'
+  if (v === 'jpeg' && !allowed.includes('jpeg') && allowed.includes('jpg')) v = 'jpg'
+  return allowed.includes(v) ? v : def
+}
+
 export function maybeSetSeed(inp: Record<string, unknown>, seed: number): void {
   if (seed && seed > 0) inp.seed = seed
 }

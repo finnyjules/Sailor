@@ -5,6 +5,11 @@
  * The payloads are checked against the first provider call the Python
  * GenerateImageNode makes (fixtures/runner-families.json `replicateImage`,
  * written by scripts/runner_builder_fixtures.py with the network patched out).
+ * Since Task S1b the runner deliberately differs from that Python oracle
+ * where Python breaks the model's published schema (a seed Imagen, GPT Image,
+ * Recraft, Seedream 4.5, MiniMax and Grok don't take; an option outside its
+ * list; Flux 2 Dev's size): helpers/pythonParity.ts compares every other
+ * field, and the fixture is kept for those.
  * Engine tests use the fake Replicate and the fake fal only: nothing here
  * reaches a provider.
  */
@@ -25,6 +30,7 @@ import { IMAGE_MODELS_BY_ID } from '~~/app/data/image-models'
 import { BASE_RENDER_CREDITS } from '~~/server/utils/priceBook'
 import type { OutputFile } from '~~/server/runner/types'
 import { createFakeLedger, makeKit } from './__runner__/kit'
+import { expectPythonParity } from './helpers/pythonParity'
 
 interface ReplicateImageCase {
   class_type: string
@@ -64,7 +70,7 @@ describe('replicate-image payloads match the Python node', () => {
     if (plan.kind !== 'provider') return
     expect(plan.provider).toBe('replicate')
     expect(plan.endpoint).toBe(c.call.endpoint)
-    expect(plan.payload).toEqual(c.call.payload)
+    expectPythonParity('replicate', c.call.endpoint, plan.payload, c.call.payload)
     expect(plan.media).toBe('image')
   })
 
@@ -80,7 +86,7 @@ describe('replicate-image payloads match the Python node', () => {
         adv: parseJsonObject(c.widgets.model_options),
         refs: ['https://fal.storage/board.png'],
       })
-      expect(got, JSON.stringify(c.widgets)).toEqual(c.call.payload)
+      expectPythonParity('replicate', c.call.endpoint, got, c.call.payload, JSON.stringify(c.widgets))
     }
   })
 

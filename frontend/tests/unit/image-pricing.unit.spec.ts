@@ -116,11 +116,12 @@ const FLUX_2_RES = ['0.5 MP', '1 MP', '2 MP', '4 MP']
 const KLEIN_MP = ['0.25', '0.5', '1', '2', '4']
 /** Controller ruling: a picture bills its pixels / 1,000,000 rounded up to a whole megapixel. */
 const billed = (pixels: number) => Math.ceil(pixels / 1_000_000)
-/** A BFL label as billed: label × 1024² pixels, capped at 2048², then rounded up; an unlisted label at the cap. */
+/** A BFL label as billed: label × 1024² pixels, capped at 2048², then rounded up. The builders send listed labels only (Task S1b). */
 function bflMp(label: unknown, allowed: string[]): number {
   const cap = 2048 * 2048
   const s = String(label)
-  return billed(allowed.includes(s) ? Math.min(Number.parseFloat(s) * 1024 * 1024, cap) : cap)
+  expect(allowed).toContain(s)
+  return billed(Math.min(Number.parseFloat(s) * 1024 * 1024, cap))
 }
 
 /**
@@ -164,6 +165,16 @@ function sentSettings(id: string, payload: Record<string, unknown>) {
       megapixels = billed(w * h)
     }
     else if ('output_megapixels' in payload) megapixels = bflMp(payload.output_megapixels, KLEIN_MP)
+    // Flux 2 Dev: its own width × height (aspect_ratio "custom"), each a multiple of 32 up to 1440.
+    else if (typeof payload.width === 'number' && typeof payload.height === 'number') {
+      expect(payload.aspect_ratio).toBe('custom')
+      for (const side of [payload.width, payload.height]) {
+        expect(side % 32).toBe(0)
+        expect(side).toBeGreaterThanOrEqual(256)
+        expect(side).toBeLessThanOrEqual(1440)
+      }
+      megapixels = billed(payload.width * payload.height)
+    }
     else megapixels = bflMp(payload.resolution, FLUX_2_RES)
   }
   return { images, tier, megapixels, webSearch: payload.enable_web_search === true }
@@ -395,10 +406,21 @@ describe('worked examples', () => {
     expect(providerUsd('GenerateImageNode', { model: 'flux-1.1-pro', aspect_ratio: '1:1' })).toBeCloseTo(0.08, 9)
   })
 
-  it('a quality or size the card does not list is priced at its highest tier', () => {
+  it('a quality or size outside the model\'s schema is sent, and priced, as the default (Task S1b)', () => {
+    // GPT Image: "auto", billed as the top tier it may pick.
     expect(providerUsd('GenerateImageNode', { model: 'gpt-image-2', model_options: '{"quality":"High"}' })).toBeCloseTo(0.128, 9)
     expect(providerUsd('GenerateImageNode', { model: 'gpt-image-1.5', model_options: '{"quality":"ultra"}' })).toBeCloseTo(0.136, 9)
-    expect(providerUsd('GenerateImageNode', { model: 'flux-2-pro', model_options: '{"resolution":"3 MP"}' })).toBeCloseTo(0.09, 9)
+    // Flux 2 Pro: "1 MP" (2 billed MP), $0.015 + 2 × $0.015.
+    expect(providerUsd('GenerateImageNode', { model: 'flux-2-pro', model_options: '{"resolution":"3 MP"}' })).toBeCloseTo(0.045, 9)
+  })
+
+  it('Flux 2 Dev is priced on the width × height it sends, at most 1440 × 1440', () => {
+    // 1:1 "1 MP" is 1024 × 1024 (2 MP); 16:9 is 1376 × 768 (2 MP); "4 MP" is capped at 1440 × 1440 (3 MP).
+    expect(effectiveImageSettings('flux-2-dev', '16:9', '{"resolution":"1 MP"}')!.megapixels).toBe(2)
+    expect(effectiveImageSettings('flux-2-dev', '1:1', '{"resolution":"4 MP"}')!.megapixels).toBe(3)
+    expect(providerUsd('GenerateImageNode', { model: 'flux-2-dev', model_options: '{"resolution":"4 MP"}' })).toBeCloseTo(0.012 * 3, 9)
+    // Linked options: the largest picture it can send.
+    expect(providerUsd('GenerateImageNode', { model: 'flux-2-dev', model_options: ['9', 0] })).toBeCloseTo(0.012 * 3, 9)
   })
 
   it('Krea 2 is priced (fal text-to-image) and stays off the runner lists until its family lands', () => {

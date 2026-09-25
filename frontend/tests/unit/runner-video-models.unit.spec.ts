@@ -4,16 +4,22 @@ import { describe, expect, it } from 'vitest'
 import { RUNNER_VIDEO_MODELS, falVideoFn, durOr } from '~~/server/runner/generators/video'
 import { RUNNER_VIDEO_MODEL_IDS } from '#shared/runner/eligibility'
 import { videoRate } from '#shared/pricing/videoRates'
+import { expectPythonParity } from './helpers/pythonParity'
 
 const fixtures = JSON.parse(readFileSync(
   fileURLToPath(new URL('./fixtures/runner-builders.json', import.meta.url)), 'utf8'))
 
-describe('video request builders match Python', () => {
+// The fixture is Python's payload. Since Task S1b the runner deliberately
+// differs where Python breaks fal's published schema (no seed on FLUX 3, a
+// resolution outside the model's list sent as its default);
+// helpers/pythonParity.ts compares every other field.
+describe('video request builders match Python (where Python keeps to fal\'s schema)', () => {
   for (const c of fixtures.video as any[]) {
     it(`${c.model} ${JSON.stringify(c.args)}`, () => {
       const d = RUNNER_VIDEO_MODELS[c.model]!
       const got = d.build({ prompt: c.args.prompt, aspectRatio: c.args.ar, duration: c.args.dur, seed: c.args.seed, image: c.args.image, adv: c.args.adv })
-      expect(got).toEqual(c.payload)
+      const fn = falVideoFn(got, d.fnByMode)
+      expectPythonParity('fal', fn ? `${d.app}/${fn}` : d.app, got, c.payload)
     })
   }
 })

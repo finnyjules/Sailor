@@ -37,12 +37,19 @@ function qwenImageEditPlus(prompt: string, imageUrls: string[], seed: number, _a
   return inp
 }
 
+/**
+ * bytedance/seedream-5-pro and seedream-5-lite: the ratios their schemas
+ * list. Since Task S1b the runner sends no seed (neither schema has one;
+ * Python sends it) and no ratio outside this list (the schema's default,
+ * "match_input_image", applies instead).
+ */
+const SEEDREAM_EDIT_AR: ReadonlySet<string> = new Set(['match_input_image', '1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'])
+
 function seedreamEdit(sizes: ReadonlySet<string>) {
-  return (prompt: string, imageUrls: string[], seed: number, adv: EditAdv): Record<string, unknown> => {
+  return (prompt: string, imageUrls: string[], _seed: number, adv: EditAdv): Record<string, unknown> => {
     const inp: Record<string, unknown> = { prompt, image_input: [...imageUrls], size: clampSize(adv.size, sizes, '2K') }
     const ar = adv.aspect_ratio
-    if (pyTruthy(ar)) inp.aspect_ratio = ar // supports "match_input_image"
-    maybeSetSeed(inp, seed)
+    if (pyTruthy(ar) && typeof ar === 'string' && SEEDREAM_EDIT_AR.has(ar)) inp.aspect_ratio = ar // supports "match_input_image"
     return inp
   }
 }

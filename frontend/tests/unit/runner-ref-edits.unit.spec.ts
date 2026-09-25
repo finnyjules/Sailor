@@ -11,6 +11,12 @@
  * use the fake fal and the fake Replicate (for the community model, the real
  * Replicate client over a fetch that answers as Replicate would): nothing here
  * reaches a provider.
+ *
+ * Since Task S1b the runner deliberately differs from that Python oracle
+ * where Python breaks the model's published schema: Seedream 5 Pro and Lite
+ * get no seed (their schemas have none) and no ratio outside their list.
+ * helpers/pythonParity.ts compares every other field; the fixture is kept
+ * for those.
  */
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -28,6 +34,7 @@ import { PROVIDER_TYPES, RUNNER_NODE_RULES, isRunnerEligible, runnerTakesNode, t
 import { NO_FAMILIES, RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { OutputFile } from '~~/server/runner/types'
+import { expectPythonParity } from './helpers/pythonParity'
 import { createFakeFal, createFakeReplicate, makeKit, ofType } from './__runner__/kit'
 
 interface RefCase {
@@ -112,7 +119,7 @@ describe('ref-edits payloads match the Python nodes', () => {
       if (plan.kind !== 'provider') return
       expect(plan.provider).toBe(c.call!.provider)
       expect(plan.endpoint).toBe(c.call!.endpoint)
-      expect(plan.payload).toEqual(c.call!.payload)
+      expectPythonParity(c.call!.provider as 'fal' | 'replicate', c.call!.endpoint, plan.payload, c.call!.payload)
       expect(plan.media).toBe('image')
       // Every linked picture is handed off once, in slot order.
       expect(handedOff).toEqual(c.class_type === 'GenerateFromReferencesNode' ? SLOTS.filter(s => c.links.includes(s)) : ['image'])
@@ -335,8 +342,9 @@ describe('ref-edits on the engine (hosted, fake providers)', () => {
     expect(uploadedNames(k)).toEqual(['ref1.png', 'ref2.png', 'ref3.png', 'ref4.png', 'ref5.png', 'ref6.png'])
     const sent = k.replicate.submitted()
     expect(sent.map(r => r.endpoint)).toEqual(['bytedance/seedream-5-pro'])
+    // No seed: bytedance/seedream-5-pro's schema has none (Task S1b).
     expect(sent[0]!.payload).toEqual({
-      prompt: 'the mug on the table', image_input: storage([1, 2, 3, 4, 5, 6]), size: '2K', aspect_ratio: '4:3', seed: 5,
+      prompt: 'the mug on the table', image_input: storage([1, 2, 3, 4, 5, 6]), size: '2K', aspect_ratio: '4:3',
     })
     expect(k.fal.client.submit).not.toHaveBeenCalled()
     // Seedream 5 Pro at 2K: $0.09 → 18 credits (Task P4).

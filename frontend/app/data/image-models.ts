@@ -93,6 +93,9 @@ const OUTPUT_FORMAT_WPJ: ImageModelAdvancedField = {
   name: 'output_format', type: 'select', label: 'Output format',
   default: 'png', options: ['png', 'jpg', 'webp'],
 }
+// fal's Flux 1.1 Pro and Schnell make jpeg or png only (their saved schemas);
+// a saved "webp" is sent as png (server/runner/generators/image.ts).
+const OUTPUT_FORMAT_FAL_FLUX: ImageModelAdvancedField = { ...OUTPUT_FORMAT_WPJ, options: ['png', 'jpg'] }
 const OUTPUT_QUALITY: ImageModelAdvancedField = {
   name: 'output_quality', type: 'integer', label: 'Output quality',
   default: 90, min: 1, max: 100,
@@ -160,7 +163,7 @@ export const IMAGE_MODELS: ImageModel[] = [
     advanced: [
       SAFETY_TOLERANCE_FLUX,
       PROMPT_UPSAMPLING_FLUX,
-      OUTPUT_FORMAT_WPJ,
+      OUTPUT_FORMAT_FAL_FLUX,
     ],
   },
   {
@@ -235,7 +238,7 @@ export const IMAGE_MODELS: ImageModel[] = [
       { name: 'num_inference_steps', type: 'integer', label: 'Inference steps', default: 4, min: 1, max: 4 },
       { name: 'megapixels', type: 'select', label: 'Megapixels', default: '1', options: ['1', '0.25'] },
       { name: 'go_fast', type: 'boolean', label: 'Go fast', default: true },
-      OUTPUT_FORMAT_WPJ,
+      OUTPUT_FORMAT_FAL_FLUX,
     ],
   },
   {

@@ -35,7 +35,7 @@
  * vitest all load it).
  */
 import { creditsForUsd } from './markup'
-import { BFL_MAX_MEGAPIXELS, FAL_MAX_MEGAPIXELS, effectiveImageSettings, maxImageCount, type ImageSettings } from './imageSettings'
+import { BFL_MAX_MEGAPIXELS, FAL_MAX_MEGAPIXELS, FLUX_2_DEV_MAX_MEGAPIXELS, effectiveImageSettings, maxImageCount, type ImageSettings } from './imageSettings'
 
 interface RateMeta {
   /** The first service: who the builder sends this model to. */
@@ -86,15 +86,15 @@ export const IMAGE_RATES: Record<string, ImageRate> = {
     unit: 'per_megapixel', perMegapixel: 0.003, minMegapixels: 1, maxMegapixels: FAL_MAX_MEGAPIXELS,
     service: 'fal', source: fal('fal-ai/flux/schnell'), read: READ, confidence: 'verified',
   },
-  // "$0.15 per image … 4K outputs will be charged at double the standard rate.
-  // If web search is used, an additional $0.015" (same text on /edit). The
-  // builder's endpoint, google/nano-banana-pro, lists only "$0 per compute
-  // seconds" (no published figure), so this is fal's own Nano Banana Pro page;
+  // "Your request will cost $0.15 per image … 4K outputs will be charged at
+  // double the standard rate. If web search is used, an additional $0.015"
+  // (same text on /edit). The builder's endpoint since Task S1b is
+  // fal-ai/nano-banana-pro itself (it was google/nano-banana-pro, whose page
+  // lists only "$0 per compute seconds"). The builder sends no web search.
   // Replicate's google/nano-banana-pro charges the same ($0.15 / $0.15 / $0.30).
   'nano-banana-pro': {
     unit: 'by_resolution', byTier: { '1K': 0.15, '2K': 0.15, '4K': 0.30 },
     service: 'fal', source: fal('fal-ai/nano-banana-pro'), read: READ, confidence: 'verified',
-    note: 'priced from the sibling fal-ai/nano-banana-pro page: the builder\'s endpoint google/nano-banana-pro publishes no per-image price',
   },
   // "$0.08 per image … 2K and 4K outputs will be charged at 1.5 times and 2
   // times the standard rate … 0.5K (512px) … 0.75 times … If web search is
@@ -143,9 +143,11 @@ export const IMAGE_RATES: Record<string, ImageRate> = {
     service: 'replicate', source: rep('black-forest-labs/flux-2-klein-4b'), read: READ, confidence: 'verified',
   },
   // "go_fast=true: $0.012 per output image megapixel" ($0.014 with go_fast
-  // false). The builder sends no go_fast and the schema default is true.
+  // false). The builder sends no go_fast and the schema default is true. It
+  // sends width × height (at most 1440 × 1440, 3 billed MP; imageSettings.ts
+  // flux2DevSize), no longer a resolution label (Task S1b).
   'flux-2-dev': {
-    unit: 'per_megapixel', perMegapixel: 0.012, maxMegapixels: BFL_MAX_MEGAPIXELS,
+    unit: 'per_megapixel', perMegapixel: 0.012, maxMegapixels: FLUX_2_DEV_MAX_MEGAPIXELS,
     service: 'replicate', source: rep('black-forest-labs/flux-2-dev'), read: READ, confidence: 'verified',
   },
   'imagen-4-ultra': repImage('google/imagen-4-ultra', 0.06),

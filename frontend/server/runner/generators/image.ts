@@ -1,14 +1,21 @@
 /**
- * The runner's image models — one description each. Request builders are
- * ports of the fal builders in comfy_api_nodes/image_models.py and must
- * produce identical payloads (tests/unit/runner-image-models.unit.spec.ts
- * compares against fixtures generated from Python). Reference-picture
- * endpoints are Sailor's own: Python only ever sent moodboard pictures to
- * Replicate. The Replicate table (family `replicate-image`) ports the
- * Replicate builders (tests/unit/runner-replicate-image.unit.spec.ts).
+ * The runner's image models — one description each. Request builders began
+ * as ports of the fal builders in comfy_api_nodes/image_models.py
+ * (tests/unit/runner-image-models.unit.spec.ts compares against fixtures
+ * generated from Python). Reference-picture endpoints are Sailor's own:
+ * Python only ever sent moodboard pictures to Replicate. The Replicate table
+ * (family `replicate-image`) ports the Replicate builders
+ * (tests/unit/runner-replicate-image.unit.spec.ts).
+ *
+ * Since Task S1b the builders follow each provider's published schema, not
+ * Python (tests/unit/runner-provider-schemas.unit.spec.ts): no field the
+ * schema doesn't define (a seed where there is none), and no value outside
+ * it (an option outside its list falls back to the default; a number
+ * outside its range is clamped). The Python path is legacy and unchanged.
  */
 import { RUNNER_IMAGE_MODEL_IDS, RUNNER_REPLICATE_IMAGE_MODEL_IDS } from '#shared/runner/eligibility'
-import { arOr, maybeSetSeed, optBool, optFloat, optInt, optStr } from './opts'
+import { FLUX_2_RESOLUTIONS, FLUX_KLEIN_MEGAPIXELS, flux2DevSize } from '#shared/pricing/imageSettings'
+import { arOr, maybeSetSeed, optBool, optEnum, optFloat, optFloatIn, optInt, optIntIn, optStr, outputFormatIn } from './opts'
 import type { ImageBuildArgs, ImageModelDesc, ReplicateImageModelDesc } from './types'
 
 const NANO_BANANA_AR = new Set(['1:1', '1:4', '1:8', '2:3', '3:2', '3:4', '4:1', '4:3', '4:5', '5:4', '8:1', '9:16', '16:9', '21:9'])
@@ -36,10 +43,13 @@ export function falImageSize(ar: string): string {
   return FAL_IMAGE_SIZE_BY_AR[ar] ?? 'square_hd'
 }
 
+/** Nano Banana on fal: jpeg, png or webp ("jpg" is jpeg); anything else png. */
 function falOutputFormat(adv: Record<string, unknown>, def = 'png'): string {
-  const v = optStr(adv, 'output_format', def)
-  return v === 'jpg' ? 'jpeg' : v
+  return outputFormatIn(adv, ['jpeg', 'png', 'webp'], def)
 }
+
+/** fal-ai/flux-pro/v1.1 and fal-ai/flux/schnell: jpeg or png only ("jpg" is jpeg; webp and anything else png). */
+export const FAL_FLUX_OUTPUT_FORMATS = ['jpeg', 'png']
 
 function withRefs(inp: Record<string, unknown>, refs: string[] | null): Record<string, unknown> {
   if (refs?.length) inp.image_urls = [...refs]
@@ -47,12 +57,12 @@ function withRefs(inp: Record<string, unknown>, refs: string[] | null): Record<s
 }
 
 function fluxProV11({ prompt, aspectRatio, seed, adv }: ImageBuildArgs) {
-  const tol = Math.min(6, Math.max(1, optInt(adv, 'safety_tolerance', 2)))
+  const tol = optIntIn(adv, 'safety_tolerance', 2, 1, 6)
   const inp: Record<string, unknown> = {
     prompt,
     image_size: falImageSize(aspectRatio),
     num_images: 1,
-    output_format: optStr(adv, 'output_format', 'png'),
+    output_format: outputFormatIn(adv, FAL_FLUX_OUTPUT_FORMATS, 'png'),
     safety_tolerance: String(tol),
   }
   maybeSetSeed(inp, seed)
@@ -63,9 +73,9 @@ function fluxSchnell({ prompt, aspectRatio, seed, adv }: ImageBuildArgs) {
   const inp: Record<string, unknown> = {
     prompt,
     image_size: falImageSize(aspectRatio),
-    num_inference_steps: optInt(adv, 'num_inference_steps', 4),
-    num_images: Math.max(1, Math.min(4, optInt(adv, 'num_outputs', 1))),
-    output_format: optStr(adv, 'output_format', 'png'),
+    num_inference_steps: optIntIn(adv, 'num_inference_steps', 4, 1, 12),
+    num_images: optIntIn(adv, 'num_outputs', 1, 1, 4),
+    output_format: outputFormatIn(adv, FAL_FLUX_OUTPUT_FORMATS, 'png'),
   }
   maybeSetSeed(inp, seed)
   return inp
@@ -128,7 +138,7 @@ function seedream5Lite({ prompt, aspectRatio, adv, refs }: ImageBuildArgs) {
     max_images: 1,
   }
   if (optStr(adv, 'sequential_image_generation', 'disabled') === 'auto') {
-    inp.max_images = Math.max(1, Math.min(6, optInt(adv, 'max_images', 1)))
+    inp.max_images = optIntIn(adv, 'max_images', 1, 1, 6)
   }
   return withRefs(inp, refs)
 }
@@ -150,7 +160,9 @@ const D = (id: string, label: string, app: string, refsApp: string | null, build
 export const RUNNER_IMAGE_MODELS: Record<string, ImageModelDesc> = {
   'flux-1.1-pro': D('flux-1.1-pro', 'Flux 1.1 Pro', 'fal-ai/flux-pro/v1.1', null, fluxProV11),
   'flux-schnell': D('flux-schnell', 'Flux Schnell', 'fal-ai/flux/schnell', null, fluxSchnell),
-  'nano-banana-pro': D('nano-banana-pro', 'Nano Banana Pro', 'google/nano-banana-pro', 'fal-ai/nano-banana-pro/edit', nanoBananaPro),
+  // fal-ai/nano-banana-pro, fal's documented text-to-image app ($0.15 an image);
+  // google/nano-banana-pro, the same model under Google's name, publishes no price.
+  'nano-banana-pro': D('nano-banana-pro', 'Nano Banana Pro', 'fal-ai/nano-banana-pro', 'fal-ai/nano-banana-pro/edit', nanoBananaPro),
   'nano-banana-2': D('nano-banana-2', 'Nano Banana 2', 'fal-ai/nano-banana-2', 'fal-ai/nano-banana-2/edit', nanoBanana2),
   'ideogram-v3-quality': D('ideogram-v3-quality', 'Ideogram V3 Quality', 'fal-ai/ideogram/v3', null, ideogramV3('QUALITY')),
   'ideogram-v3-balanced': D('ideogram-v3-balanced', 'Ideogram V3 Balanced', 'fal-ai/ideogram/v3', null, ideogramV3('BALANCED')),
@@ -207,12 +219,18 @@ export const IMAGE_RATIO_SETS: Readonly<Record<string, ReadonlySet<string>>> = {
 
 type Builder = (a: ImageBuildArgs) => Record<string, unknown>
 
-/** Every builder ends with _maybe_set_seed. */
+/** Every Python builder ends with _maybe_set_seed; the runner's only where the model's schema has a seed. */
 const seeded = (build: (a: ImageBuildArgs) => Record<string, unknown>): Builder => (a) => {
   const inp = build(a)
   maybeSetSeed(inp, a.seed)
   return inp
 }
+/** The schema has no seed (Python sends one anyway). */
+const unseeded = (build: (a: ImageBuildArgs) => Record<string, unknown>): Builder => build
+
+/** Replicate's BFL / Stability / Qwen / Hunyuan output formats. */
+const WEBP_JPG_PNG = ['webp', 'jpg', 'png']
+const JPG_PNG = ['jpg', 'png']
 
 /** `negp = _opt_str(adv, "negative_prompt", ""); if negp: inp["negative_prompt"] = negp` */
 function withNegative(inp: Record<string, unknown>, adv: Record<string, unknown>): Record<string, unknown> {
@@ -225,133 +243,175 @@ const rFluxUltra = seeded(({ prompt, aspectRatio, adv }) => ({
   prompt,
   aspect_ratio: arOr(FLUX_ULTRA_AR, aspectRatio, '1:1'),
   raw: optBool(adv, 'raw', false),
-  safety_tolerance: optInt(adv, 'safety_tolerance', 2),
-  output_format: optStr(adv, 'output_format', 'jpg'),
+  safety_tolerance: optIntIn(adv, 'safety_tolerance', 2, 1, 6),
+  output_format: outputFormatIn(adv, JPG_PNG, 'jpg'),
 }))
 
 const rFluxPro = seeded(({ prompt, aspectRatio, adv }) => ({
   prompt,
   aspect_ratio: arOr(FLUX_PRO_AR, aspectRatio, '1:1'),
-  guidance: optFloat(adv, 'guidance', 3.0),
-  safety_tolerance: optInt(adv, 'safety_tolerance', 2),
+  guidance: optFloatIn(adv, 'guidance', 3.0, 2, 5),
+  safety_tolerance: optIntIn(adv, 'safety_tolerance', 2, 1, 6),
   prompt_upsampling: optBool(adv, 'prompt_upsampling', false),
-  output_format: optStr(adv, 'output_format', 'png'),
+  output_format: outputFormatIn(adv, WEBP_JPG_PNG, 'png'),
 }))
 
 const rFluxDev = seeded(({ prompt, aspectRatio, adv }) => ({
   prompt,
   aspect_ratio: arOr(FLUX_DEV_AR, aspectRatio, '1:1'),
-  num_inference_steps: optInt(adv, 'num_inference_steps', 28),
-  guidance: optFloat(adv, 'guidance', 3.5),
-  megapixels: optStr(adv, 'megapixels', '1'),
+  num_inference_steps: optIntIn(adv, 'num_inference_steps', 28, 1, 50),
+  guidance: optFloatIn(adv, 'guidance', 3.5, 0, 10),
+  megapixels: optEnum(adv, 'megapixels', ['1', '0.25'], '1'),
   go_fast: optBool(adv, 'go_fast', true),
-  num_outputs: Math.max(1, Math.min(4, optInt(adv, 'num_outputs', 1))),
-  output_format: optStr(adv, 'output_format', 'png'),
+  num_outputs: optIntIn(adv, 'num_outputs', 1, 1, 4),
+  output_format: outputFormatIn(adv, WEBP_JPG_PNG, 'png'),
   output_quality: 95,
 }))
+
+/** A Flux 2 megapixel label the schema lists ("0.5 MP" … "4 MP"); anything else "1 MP". */
+const flux2Resolution = (adv: Record<string, unknown>) => optEnum(adv, 'resolution', FLUX_2_RESOLUTIONS, '1 MP')
 
 /** _b_flux_2_max and _b_flux_2_pro (identical). */
 const rFlux2Basic = seeded(({ prompt, aspectRatio, adv }) => ({
   prompt,
   aspect_ratio: arOr(FLUX_2_AR, aspectRatio, '1:1'),
-  resolution: optStr(adv, 'resolution', '1 MP'),
-  safety_tolerance: optInt(adv, 'safety_tolerance', 2),
-  output_format: optStr(adv, 'output_format', 'webp'),
+  resolution: flux2Resolution(adv),
+  safety_tolerance: optIntIn(adv, 'safety_tolerance', 2, 1, 5),
+  output_format: outputFormatIn(adv, WEBP_JPG_PNG, 'webp'),
   output_quality: 90,
 }))
 
-/** _b_flux_2_flex (30 steps, guidance 4.5) and _b_flux_2_dev (28, 3.5). */
-const rFlux2Tunable = (steps: number, guidance: number) => seeded(({ prompt, aspectRatio, adv }) => ({
+/** _b_flux_2_flex (30 steps, guidance 4.5). */
+const rFlux2Flex = seeded(({ prompt, aspectRatio, adv }) => ({
   prompt,
   aspect_ratio: arOr(FLUX_2_AR, aspectRatio, '1:1'),
-  resolution: optStr(adv, 'resolution', '1 MP'),
-  steps: optInt(adv, 'steps', steps),
-  guidance: optFloat(adv, 'guidance', guidance),
-  safety_tolerance: optInt(adv, 'safety_tolerance', 2),
+  resolution: flux2Resolution(adv),
+  steps: optIntIn(adv, 'steps', 30, 1, 50),
+  guidance: optFloatIn(adv, 'guidance', 4.5, 1.5, 10),
+  safety_tolerance: optIntIn(adv, 'safety_tolerance', 2, 1, 5),
   prompt_upsampling: optBool(adv, 'prompt_upsampling', true),
-  output_format: optStr(adv, 'output_format', 'webp'),
+  output_format: outputFormatIn(adv, WEBP_JPG_PNG, 'webp'),
   output_quality: 90,
 }))
+
+/**
+ * black-forest-labs/flux-2-dev has no resolution, steps, guidance,
+ * safety_tolerance or prompt_upsampling (Python's _b_flux_2_dev sends all
+ * five, so its picture is always the 1:1-ish default). It is sized by
+ * `width` × `height` with aspect_ratio "custom": the node's resolution label
+ * and ratio, capped at 1440 a side (imageSettings.ts flux2DevSize, which the
+ * price reads too).
+ */
+const rFlux2Dev = seeded(({ prompt, aspectRatio, adv }) => {
+  const { width, height } = flux2DevSize(flux2Resolution(adv), arOr(FLUX_2_AR, aspectRatio, '1:1'))
+  return {
+    prompt,
+    aspect_ratio: 'custom',
+    width,
+    height,
+    output_format: outputFormatIn(adv, WEBP_JPG_PNG, 'webp'),
+    output_quality: 90,
+  }
+})
 
 const rFluxKlein = seeded(({ prompt, aspectRatio, adv }) => ({
   prompt,
   aspect_ratio: arOr(FLUX_KLEIN_AR, aspectRatio, '1:1'),
-  output_megapixels: optStr(adv, 'output_megapixels', '1'),
+  output_megapixels: optEnum(adv, 'output_megapixels', FLUX_KLEIN_MEGAPIXELS, '1'),
   go_fast: optBool(adv, 'go_fast', false),
-  output_format: optStr(adv, 'output_format', 'jpg'),
+  output_format: outputFormatIn(adv, WEBP_JPG_PNG, 'jpg'),
   output_quality: 90,
 }))
 
-const rImagen = seeded(({ prompt, aspectRatio, adv }) => ({
+const IMAGEN_SAFETY = ['block_low_and_above', 'block_medium_and_above', 'block_only_high']
+const rImagen = unseeded(({ prompt, aspectRatio, adv }) => ({
   prompt,
   aspect_ratio: arOr(GOOGLE_AR, aspectRatio, '1:1'),
-  output_format: optStr(adv, 'output_format', 'jpg'),
-  safety_filter_level: optStr(adv, 'safety_filter_level', 'block_only_high'),
+  output_format: outputFormatIn(adv, JPG_PNG, 'jpg'),
+  safety_filter_level: optEnum(adv, 'safety_filter_level', IMAGEN_SAFETY, 'block_only_high'),
 }))
 
-const rIdeogramV2 = seeded(({ prompt, aspectRatio, adv }) => ({
-  prompt,
-  aspect_ratio: arOr(IDEOGRAM_V2_AR, aspectRatio, '1:1'),
-  style_type: optStr(adv, 'style_type', 'Auto'),
-  magic_prompt_option: optStr(adv, 'magic_prompt', 'Auto'),
-}))
+/** ideogram-ai's seed is at most 2^31 − 1: a larger one wraps into 1 … 2^31 − 1 (still repeatable). */
+const IDEOGRAM_SEED_MAX = 2147483647
+const IDEOGRAM_STYLES = ['None', 'Auto', 'General', 'Realistic', 'Design', 'Render 3D', 'Anime']
+const rIdeogramV2: Builder = ({ prompt, aspectRatio, seed, adv }) => {
+  const inp: Record<string, unknown> = {
+    prompt,
+    aspect_ratio: arOr(IDEOGRAM_V2_AR, aspectRatio, '1:1'),
+    style_type: optEnum(adv, 'style_type', IDEOGRAM_STYLES, 'Auto'),
+    magic_prompt_option: optEnum(adv, 'magic_prompt', ['Auto', 'On', 'Off'], 'Auto'),
+  }
+  maybeSetSeed(inp, seed > IDEOGRAM_SEED_MAX ? ((seed - 1) % IDEOGRAM_SEED_MAX) + 1 : seed)
+  return inp
+}
 
-const rSeedream45 = seeded(({ prompt, aspectRatio, adv }) => ({
+const rSeedream45 = unseeded(({ prompt, aspectRatio, adv }) => ({
   prompt,
   aspect_ratio: arOr(SEEDREAM_AR, aspectRatio, '1:1'),
-  size: optStr(adv, 'size', '2K'),
+  size: optEnum(adv, 'size', ['2K', '4K'], '2K'),
 }))
 
 const rSeedream3 = seeded(({ prompt, aspectRatio, adv }) => ({
   prompt,
   aspect_ratio: arOr(SEEDREAM_AR, aspectRatio, '1:1'),
-  guidance_scale: optFloat(adv, 'guidance_scale', 2.5),
+  guidance_scale: optFloatIn(adv, 'guidance_scale', 2.5, 1, 10),
 }))
 
-const rRecraftV4 = seeded(({ prompt, aspectRatio }) => ({
+const rRecraftV4 = unseeded(({ prompt, aspectRatio }) => ({
   prompt,
   aspect_ratio: arOr(RECRAFT_AR, aspectRatio, '1:1'),
 }))
 
-const rRecraftV3 = seeded(({ prompt, aspectRatio, adv }) => ({
+const RECRAFT_V3_STYLES = [
+  'any', 'realistic_image', 'digital_illustration', 'digital_illustration/pixel_art', 'digital_illustration/hand_drawn',
+  'digital_illustration/grain', 'digital_illustration/infantile_sketch', 'digital_illustration/2d_art_poster',
+  'digital_illustration/handmade_3d', 'digital_illustration/hand_drawn_outline', 'digital_illustration/engraving_color',
+  'digital_illustration/2d_art_poster_2', 'realistic_image/b_and_w', 'realistic_image/hard_flash', 'realistic_image/hdr',
+  'realistic_image/natural_light', 'realistic_image/studio_portrait', 'realistic_image/enterprise', 'realistic_image/motion_blur',
+]
+const rRecraftV3 = unseeded(({ prompt, aspectRatio, adv }) => ({
   prompt,
   aspect_ratio: arOr(RECRAFT_AR, aspectRatio, '1:1'),
-  style: optStr(adv, 'style', 'any'),
+  style: optEnum(adv, 'style', RECRAFT_V3_STYLES, 'any'),
 }))
 
 const rSd35 = (cfgDefault: number) => seeded(({ prompt, aspectRatio, adv }) => withNegative({
   prompt,
   aspect_ratio: arOr(SD35_AR, aspectRatio, '1:1'),
-  cfg: optFloat(adv, 'cfg', cfgDefault),
-  output_format: optStr(adv, 'output_format', 'webp'),
+  cfg: optFloatIn(adv, 'cfg', cfgDefault, 1, 10),
+  output_format: outputFormatIn(adv, WEBP_JPG_PNG, 'webp'),
 }, adv))
 
-const rGptImage2 = seeded(({ prompt, aspectRatio, adv }) => ({
+/** openai/gpt-image-*: quality, background and format as the schema lists them ("jpg" is jpeg). */
+const GPT_QUALITIES = ['low', 'medium', 'high', 'auto']
+const GPT_BACKGROUNDS = ['auto', 'transparent', 'opaque']
+const GPT_FORMATS = ['png', 'jpeg', 'webp']
+const rGptImage2 = unseeded(({ prompt, aspectRatio, adv }) => ({
   prompt,
   aspect_ratio: arOr(OPENAI_AR, aspectRatio, '1:1'),
-  quality: optStr(adv, 'quality', 'auto'),
-  background: optStr(adv, 'background', 'auto'),
-  output_format: optStr(adv, 'output_format', 'webp'),
+  quality: optEnum(adv, 'quality', GPT_QUALITIES, 'auto'),
+  background: optEnum(adv, 'background', GPT_BACKGROUNDS, 'auto'),
+  output_format: outputFormatIn(adv, GPT_FORMATS, 'webp'),
   number_of_images: 1,
 }))
 
-const rGptImage15 = seeded(({ prompt, aspectRatio, adv }) => ({
+const rGptImage15 = unseeded(({ prompt, aspectRatio, adv }) => ({
   prompt,
   aspect_ratio: arOr(OPENAI_AR, aspectRatio, '1:1'),
-  quality: optStr(adv, 'quality', 'auto'),
-  background: optStr(adv, 'background', 'auto'),
-  input_fidelity: optStr(adv, 'input_fidelity', 'low'),
-  output_format: optStr(adv, 'output_format', 'webp'),
+  quality: optEnum(adv, 'quality', GPT_QUALITIES, 'auto'),
+  background: optEnum(adv, 'background', GPT_BACKGROUNDS, 'auto'),
+  input_fidelity: optEnum(adv, 'input_fidelity', ['low', 'high'], 'low'),
+  output_format: outputFormatIn(adv, GPT_FORMATS, 'webp'),
   number_of_images: 1,
 }))
 
 const rQwenImage = seeded(({ prompt, aspectRatio, adv }) => withNegative({
   prompt,
   aspect_ratio: arOr(QWEN_AR, aspectRatio, '1:1'),
-  guidance: optFloat(adv, 'guidance', 3.0),
-  num_inference_steps: optInt(adv, 'num_inference_steps', 30),
+  guidance: optFloatIn(adv, 'guidance', 3.0, 0, 10),
+  num_inference_steps: optIntIn(adv, 'num_inference_steps', 30, 1, 50),
   enhance_prompt: optBool(adv, 'enhance_prompt', false),
-  output_format: optStr(adv, 'output_format', 'webp'),
+  output_format: outputFormatIn(adv, WEBP_JPG_PNG, 'webp'),
   go_fast: true,
 }, adv))
 
@@ -359,22 +419,40 @@ const rHunyuan3 = seeded(({ prompt, aspectRatio, adv }) => ({
   prompt,
   aspect_ratio: arOr(HUNYUAN_AR, aspectRatio, '1:1'),
   go_fast: optBool(adv, 'go_fast', true),
-  output_format: optStr(adv, 'output_format', 'webp'),
+  output_format: outputFormatIn(adv, WEBP_JPG_PNG, 'webp'),
   output_quality: 95,
 }))
 
-const rGrokImagine = seeded(({ prompt, aspectRatio }) => ({
+const rGrokImagine = unseeded(({ prompt, aspectRatio }) => ({
   prompt,
   aspect_ratio: arOr(GROK_AR, aspectRatio, '1:1'),
 }))
 
+/**
+ * prunaai/flux-fast's speed modes carry their emoji and a note
+ * ("Extra Juiced 🔥 (more speed)"); the node's menu and Python use the short
+ * names. A short name is sent as its full value; anything else the default.
+ */
+export const FLUX_FAST_SPEED_MODES: Readonly<Record<string, string>> = {
+  'Lightly Juiced': 'Lightly Juiced 🍊 (more consistent)',
+  'Juiced': 'Juiced 🔥 (default)',
+  'Extra Juiced': 'Extra Juiced 🔥 (more speed)',
+  'Blink of an eye': 'Blink of an eye 👁️',
+}
+function fluxFastSpeedMode(adv: Record<string, unknown>): string {
+  const v = optStr(adv, 'speed_mode', 'Extra Juiced')
+  if (Object.values(FLUX_FAST_SPEED_MODES).includes(v)) return v
+  return Object.prototype.hasOwnProperty.call(FLUX_FAST_SPEED_MODES, v) ? FLUX_FAST_SPEED_MODES[v]! : FLUX_FAST_SPEED_MODES['Extra Juiced']!
+}
+
 const rFluxFast = seeded(({ prompt, aspectRatio, adv }) => ({
   prompt,
   aspect_ratio: arOr(FLUX_DEV_AR, aspectRatio, '1:1'),
+  // The schema sets no range on guidance or steps: passed as read, as Python does.
   guidance: optFloat(adv, 'guidance', 3.5),
   num_inference_steps: optInt(adv, 'num_inference_steps', 28),
-  speed_mode: optStr(adv, 'speed_mode', 'Extra Juiced'),
-  output_format: optStr(adv, 'output_format', 'jpg'),
+  speed_mode: fluxFastSpeedMode(adv),
+  output_format: outputFormatIn(adv, ['png', 'jpg', 'webp'], 'jpg'),
   output_quality: 90,
 }))
 
@@ -387,22 +465,22 @@ const rPImage = seeded(({ prompt, aspectRatio, adv }) => ({
 const rWan22Pruna = seeded(({ prompt, aspectRatio, adv }) => ({
   prompt,
   aspect_ratio: arOr(WAN22_AR, aspectRatio, '1:1'),
-  megapixels: optInt(adv, 'megapixels', 2),
+  megapixels: optIntIn(adv, 'megapixels', 2, 1, 2),
   juiced: optBool(adv, 'juiced', false),
-  output_format: optStr(adv, 'output_format', 'jpg'),
+  output_format: outputFormatIn(adv, ['png', 'jpg', 'webp'], 'jpg'),
   output_quality: 90,
 }))
 
 const rBriaFibo = seeded(({ prompt, aspectRatio, adv }) => withNegative({
   prompt,
   aspect_ratio: arOr(BRIA_AR, aspectRatio, '1:1'),
-  guidance_scale: optInt(adv, 'guidance_scale', 4),
+  guidance_scale: optIntIn(adv, 'guidance_scale', 4, 3, 5),
 }, adv))
 
 const rBriaImage32 = seeded(({ prompt, aspectRatio, adv }) => withNegative({
   prompt,
   aspect_ratio: arOr(BRIA_AR, aspectRatio, '1:1'),
-  guidance_scale: optFloat(adv, 'guidance_scale', 4.0),
+  guidance_scale: optFloatIn(adv, 'guidance_scale', 4.0, 3, 5),
   prompt_enhancement: optBool(adv, 'prompt_enhancement', false),
   enhance_image: optBool(adv, 'enhance_image', false),
 }, adv))
@@ -412,7 +490,7 @@ const rPhoton = seeded(({ prompt, aspectRatio }) => ({
   aspect_ratio: arOr(PHOTON_AR, aspectRatio, '1:1'),
 }))
 
-const rMinimaxImage01 = seeded(({ prompt, aspectRatio, adv }) => ({
+const rMinimaxImage01 = unseeded(({ prompt, aspectRatio, adv }) => ({
   prompt,
   aspect_ratio: arOr(MINIMAX_AR, aspectRatio, '1:1'),
   prompt_optimizer: optBool(adv, 'prompt_optimizer', true),
@@ -427,9 +505,9 @@ export const RUNNER_REPLICATE_IMAGE_MODELS: Record<string, ReplicateImageModelDe
   'flux-dev': R('flux-dev', 'Flux Dev', 'black-forest-labs/flux-dev', rFluxDev),
   'flux-2-max': R('flux-2-max', 'Flux 2 Max', 'black-forest-labs/flux-2-max', rFlux2Basic),
   'flux-2-pro': R('flux-2-pro', 'Flux 2 Pro', 'black-forest-labs/flux-2-pro', rFlux2Basic),
-  'flux-2-flex': R('flux-2-flex', 'Flux 2 Flex', 'black-forest-labs/flux-2-flex', rFlux2Tunable(30, 4.5)),
+  'flux-2-flex': R('flux-2-flex', 'Flux 2 Flex', 'black-forest-labs/flux-2-flex', rFlux2Flex),
   'flux-2-klein-4b': R('flux-2-klein-4b', 'Flux 2 Klein 4B', 'black-forest-labs/flux-2-klein-4b', rFluxKlein),
-  'flux-2-dev': R('flux-2-dev', 'Flux 2 Dev', 'black-forest-labs/flux-2-dev', rFlux2Tunable(28, 3.5)),
+  'flux-2-dev': R('flux-2-dev', 'Flux 2 Dev', 'black-forest-labs/flux-2-dev', rFlux2Dev),
   'imagen-4-ultra': R('imagen-4-ultra', 'Imagen 4 Ultra', 'google/imagen-4-ultra', rImagen),
   'imagen-4': R('imagen-4', 'Imagen 4', 'google/imagen-4', rImagen),
   'imagen-4-fast': R('imagen-4-fast', 'Imagen 4 Fast', 'google/imagen-4-fast', rImagen),

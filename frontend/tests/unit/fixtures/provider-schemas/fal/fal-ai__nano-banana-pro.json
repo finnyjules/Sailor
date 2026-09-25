@@ -1,9 +1,9 @@
 {
-  "endpoint": "google/nano-banana-pro",
+  "endpoint": "fal-ai/nano-banana-pro",
   "fetchedAt": "2026-09-25",
   "sources": {
-    "schema": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=google/nano-banana-pro",
-    "pricing": "https://fal.ai/models/google/nano-banana-pro/llms.txt"
+    "schema": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/nano-banana-pro",
+    "pricing": "https://fal.ai/models/fal-ai/nano-banana-pro/llms.txt"
   },
   "input": {
     "$ref": "#/components/schemas/NanoBananaProInput"
@@ -281,5 +281,5 @@
       }
     }
   },
-  "pricingText": "- **Price**: $0 per compute seconds\n\nFor more details, see [fal.ai pricing](https://fal.ai/pricing)."
+  "pricingText": "Your request will cost **$0.15** per image. For **$1.00**, you can run this model **7** times. 4K outputs will be charged at double the standard rate. If web search is used, an additional $0.015 will be charged. Note: Pricing may change in the future.\n\nFor more details, see [fal.ai pricing](https://fal.ai/pricing)."
 }

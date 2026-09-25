@@ -453,7 +453,8 @@ export const VIDEO_MODELS: VideoModel[] = [
     durations: [5],
     defaultDuration: 5,
     resolutions: ['480p', '720p'],
-    defaultResolution: '480p',
+    // wan-video/wan-2.5-i2v-fast renders 720p or 1080p; 480p is sent as 720p.
+    defaultResolution: '720p',
     advanced: [
       NEG_PROMPT,
     ],

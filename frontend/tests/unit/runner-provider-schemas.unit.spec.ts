@@ -1,10 +1,11 @@
 /**
- * Every request the runner's builders make today, checked against the
- * provider's own saved schema (Task S1: fixtures/provider-schemas/, written by
- * scripts/snapshot_provider_schemas.mjs). The payloads are the ones the
- * existing builder tests produce: the Python-parity fixtures
+ * Every request the runner's builders make, checked against the provider's
+ * own saved schema (Task S1: fixtures/provider-schemas/, written by
+ * scripts/snapshot_provider_schemas.mjs). The inputs are the ones the
+ * existing builder tests use: the Python-parity fixtures' settings
  * (runner-builders.json, runner-families.json) run through the same
- * builders and planNode those tests use.
+ * builders and planNode those tests use. Since Task S1b the builders follow
+ * these schemas, not Python, wherever the two disagree.
  */
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -32,141 +33,33 @@ function schemaFor(provider: Provider, endpoint: string) {
   return f
 }
 
-// ── Known gaps: requests the runner makes today that the provider's own schema refuses ──
+// ── Known gaps: requests the runner makes that the provider's own schema refuses ──
 //
 // Each entry is `<provider> <endpoint> | <field> | <kind>`. A gap listed here
 // is tolerated (and must still happen: the last test fails once it is fixed,
-// so the entry is removed); anything not listed fails its test. These are
-// findings for the builders' owners, not accepted behaviour. See the S1 report.
+// so the entry is removed); anything not listed fails its test.
+//
+// Task S1b fixed every builder to its schema (the runner no longer follows
+// Python where Python breaks the schema). What is left can't be fixed in a
+// builder:
 
 /** Hit by ordinary settings: the defaults, a seed, an empty prompt, a menu value. */
 const GAPS_ON_ORDINARY_SETTINGS: readonly string[] = [
-  'fal blackforestlabs/flux-3/image-to-video | seed | unknown key',
-  'fal fal-ai/flux-pro/v1.1 | output_format | enum',
-  'fal fal-ai/flux/schnell | output_format | enum',
+  // Nano Banana's prompt has minLength 3. The prompt is the person's own
+  // text (empty, or one or two characters, in the fixtures); the runner won't
+  // invent words to pad it. fal refuses the request and nothing is charged.
   'fal fal-ai/nano-banana-2 | prompt | minLength',
   'fal fal-ai/nano-banana-2/edit | prompt | minLength',
+  'fal fal-ai/nano-banana-pro | prompt | minLength',
   'fal fal-ai/nano-banana-pro/edit | prompt | minLength',
-  'fal google/nano-banana-pro | prompt | minLength',
-  'replicate black-forest-labs/flux-2-dev | guidance | unknown key',
-  'replicate black-forest-labs/flux-2-dev | prompt_upsampling | unknown key',
-  'replicate black-forest-labs/flux-2-dev | resolution | unknown key',
-  'replicate black-forest-labs/flux-2-dev | safety_tolerance | unknown key',
-  'replicate black-forest-labs/flux-2-dev | steps | unknown key',
-  'replicate bytedance/seedance-2.0-fast | camera_fixed | unknown key',
-  'replicate bytedance/seedance-2.0-fast | resolution | enum',
-  'replicate bytedance/seedream-4.5 | seed | unknown key',
-  'replicate bytedance/seedream-5-lite | seed | unknown key',
-  'replicate bytedance/seedream-5-pro | seed | unknown key',
-  'replicate google/imagen-3 | seed | unknown key',
-  'replicate google/imagen-3-fast | seed | unknown key',
-  'replicate google/imagen-4 | seed | unknown key',
-  'replicate google/imagen-4-fast | seed | unknown key',
-  'replicate google/imagen-4-ultra | seed | unknown key',
-  'replicate ideogram-ai/ideogram-v2 | seed | range',
-  'replicate ideogram-ai/ideogram-v2a-turbo | seed | range',
-  'replicate kwaivgi/kling-v3-video | cfg_scale | unknown key',
-  'replicate kwaivgi/kling-v3-video | seed | unknown key',
-  'replicate lightricks/ltx-video | guidance_scale | unknown key',
-  'replicate lightricks/ltx-video | num_inference_steps | unknown key',
-  'replicate luma/ray-2-720p | seed | unknown key',
-  'replicate minimax/hailuo-2.3 | aspect_ratio | unknown key',
-  'replicate minimax/hailuo-2.3 | seed | unknown key',
-  'replicate minimax/image-01 | seed | unknown key',
-  'replicate openai/gpt-image-1.5 | seed | unknown key',
-  'replicate openai/gpt-image-2 | seed | unknown key',
-  'replicate openai/sora-2 | aspect_ratio | enum',
-  'replicate openai/sora-2 | duration | unknown key',
-  'replicate openai/sora-2 | seed | unknown key',
-  'replicate openai/sora-2-pro | aspect_ratio | enum',
-  'replicate openai/sora-2-pro | duration | unknown key',
-  'replicate openai/sora-2-pro | seed | unknown key',
-  'replicate pixverse/pixverse-v6 | generate_audio | unknown key',
-  'replicate pixverse/pixverse-v6 | resolution | unknown key',
-  'replicate pixverse/pixverse-v6 | style | unknown key',
-  'replicate prunaai/flux-fast | speed_mode | enum',
-  'replicate recraft-ai/recraft-v3 | seed | unknown key',
-  'replicate recraft-ai/recraft-v4 | seed | unknown key',
-  'replicate recraft-ai/recraft-v4-pro | seed | unknown key',
-  'replicate runwayml/gen-4.5 | motion | unknown key',
-  'replicate wan-video/wan-2.5-i2v-fast | aspect_ratio | unknown key',
-  'replicate wan-video/wan-2.5-i2v-fast | resolution | enum',
-  'replicate wan-video/wan-2.7-t2v | num_frames | unknown key',
-  'replicate xai/grok-imagine-image | seed | unknown key',
 ]
 
 /**
  * Hit only by the parity fixtures' out-of-range model options ("True", "",
- * "0.25", 99, -2…), which the builders pass through unchecked, as Python does.
+ * "0.25", 99, -2…). Since S1b every builder clamps them to a valid option, so
+ * none is left.
  */
-const GAPS_FROM_UNCHECKED_OPTIONS: readonly string[] = [
-  'replicate black-forest-labs/flux-1.1-pro-ultra | output_format | enum',
-  'replicate black-forest-labs/flux-1.1-pro-ultra | safety_tolerance | range',
-  'replicate black-forest-labs/flux-2-dev | output_format | enum',
-  'replicate black-forest-labs/flux-2-flex | guidance | range',
-  'replicate black-forest-labs/flux-2-flex | output_format | enum',
-  'replicate black-forest-labs/flux-2-flex | resolution | enum',
-  'replicate black-forest-labs/flux-2-flex | safety_tolerance | range',
-  'replicate black-forest-labs/flux-2-flex | steps | range',
-  'replicate black-forest-labs/flux-2-klein-4b | output_format | enum',
-  'replicate black-forest-labs/flux-2-klein-4b | output_megapixels | enum',
-  'replicate black-forest-labs/flux-2-max | output_format | enum',
-  'replicate black-forest-labs/flux-2-max | resolution | enum',
-  'replicate black-forest-labs/flux-2-max | safety_tolerance | range',
-  'replicate black-forest-labs/flux-2-pro | output_format | enum',
-  'replicate black-forest-labs/flux-2-pro | resolution | enum',
-  'replicate black-forest-labs/flux-2-pro | safety_tolerance | range',
-  'replicate black-forest-labs/flux-dev | guidance | range',
-  'replicate black-forest-labs/flux-dev | megapixels | enum',
-  'replicate black-forest-labs/flux-dev | num_inference_steps | range',
-  'replicate black-forest-labs/flux-dev | output_format | enum',
-  'replicate black-forest-labs/flux-pro | guidance | range',
-  'replicate black-forest-labs/flux-pro | output_format | enum',
-  'replicate black-forest-labs/flux-pro | safety_tolerance | range',
-  'replicate bria/fibo | guidance_scale | range',
-  'replicate bria/image-3.2 | guidance_scale | range',
-  'replicate bytedance/seedream-3 | guidance_scale | range',
-  'replicate bytedance/seedream-4.5 | size | enum',
-  'replicate bytedance/seedream-5-lite | aspect_ratio | enum',
-  'replicate bytedance/seedream-5-pro | aspect_ratio | enum',
-  'replicate google/imagen-3 | output_format | enum',
-  'replicate google/imagen-3 | safety_filter_level | enum',
-  'replicate google/imagen-3-fast | output_format | enum',
-  'replicate google/imagen-3-fast | safety_filter_level | enum',
-  'replicate google/imagen-4 | output_format | enum',
-  'replicate google/imagen-4 | safety_filter_level | enum',
-  'replicate google/imagen-4-fast | output_format | enum',
-  'replicate google/imagen-4-fast | safety_filter_level | enum',
-  'replicate google/imagen-4-ultra | output_format | enum',
-  'replicate google/imagen-4-ultra | safety_filter_level | enum',
-  'replicate ideogram-ai/ideogram-v2 | magic_prompt_option | enum',
-  'replicate ideogram-ai/ideogram-v2 | style_type | enum',
-  'replicate ideogram-ai/ideogram-v2a-turbo | magic_prompt_option | enum',
-  'replicate ideogram-ai/ideogram-v2a-turbo | style_type | enum',
-  'replicate minimax/hailuo-2.3 | resolution | enum',
-  'replicate openai/gpt-image-1.5 | background | enum',
-  'replicate openai/gpt-image-1.5 | input_fidelity | enum',
-  'replicate openai/gpt-image-1.5 | output_format | enum',
-  'replicate openai/gpt-image-1.5 | quality | enum',
-  'replicate openai/gpt-image-2 | background | enum',
-  'replicate openai/gpt-image-2 | output_format | enum',
-  'replicate openai/gpt-image-2 | quality | enum',
-  'replicate prunaai/flux-fast | output_format | enum',
-  'replicate prunaai/wan-2.2-image | megapixels | enum',
-  'replicate prunaai/wan-2.2-image | output_format | enum',
-  'replicate qwen/qwen-image | guidance | range',
-  'replicate qwen/qwen-image | num_inference_steps | range',
-  'replicate qwen/qwen-image | output_format | enum',
-  'replicate recraft-ai/recraft-v3 | style | enum',
-  'replicate stability-ai/stable-diffusion-3.5-large | cfg | range',
-  'replicate stability-ai/stable-diffusion-3.5-large | output_format | enum',
-  'replicate stability-ai/stable-diffusion-3.5-large-turbo | cfg | range',
-  'replicate stability-ai/stable-diffusion-3.5-large-turbo | output_format | enum',
-  'replicate stability-ai/stable-diffusion-3.5-medium | cfg | range',
-  'replicate stability-ai/stable-diffusion-3.5-medium | output_format | enum',
-  'replicate tencent/hunyuan-image-3 | output_format | enum',
-  'replicate wan-video/wan-2.7-t2v | resolution | enum',
-]
+const GAPS_FROM_UNCHECKED_OPTIONS: readonly string[] = []
 
 const KNOWN_GAPS = new Set([...GAPS_ON_ORDINARY_SETTINGS, ...GAPS_FROM_UNCHECKED_OPTIONS])
 const seenGaps = new Set<string>()
