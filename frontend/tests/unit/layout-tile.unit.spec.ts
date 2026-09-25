@@ -69,3 +69,12 @@ describe('LayoutTile — wired content span (Fix 1 / Fix 3)', () => {
     expect(calls.indexOf('wired')).toBeLessThan(calls.indexOf('paint'))
   })
 })
+
+describe('LayoutTile — the Frame light', () => {
+  it('paints with the light it is handed, so a tile never resets the painter to the default light', async () => {
+    const light = { x: 0.8, y: 0.2, height: 0.4 }
+    mount(LayoutTile, { props: { plan: basePlan, frameW: 100, frameH: 100, label: 'Test', light } })
+    await flushPromises()
+    expect((paintMock.mock.calls[0] as unknown[]).at(-1)).toEqual(light)
+  })
+})

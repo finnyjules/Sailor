@@ -16,7 +16,7 @@ import {
   hasAnimatedShaderFill, withWiredContent, _registerWiredContent, renderLayerThumbnail,
   outlinePathData, canTakeGeometry, canWarpRaster, cornerPinActive,
   applyShaderPixelEffect, shaderSpecFromEffect, type ShaderPixelEffect, textVAlignCenterOffset,
-  layerHasFoil,
+  layerHasFoil, withFlatFoil, withFrameLight, isFoilFill,
 } from '~/composables/useCompositorLayers'
 import { onPaperBooleanReady, warmPaperBoolean } from '~/lib/compositor/booleanGeometry'
 import { DEAL_VOCABS, dealVocabDrivesLook, type DealVocab } from '~/lib/compositor/dealVocab'
@@ -1589,6 +1589,7 @@ const {
   },
   apiKey: () => getLocalSetting('Sailor.AI.AnthropicApiKey') ?? '',
   dims: editorDims,
+  getLight: () => frameLight.value,
 })
 // The agent writes layer geometry, so an ask snaps back to the design size first. It then goes on
 // (after the artboard has re-fitted) instead of returning, because the bar has already cleared the
@@ -2181,8 +2182,14 @@ function onDistortPointerDown(cornerKey: 'tl' | 'tr' | 'br' | 'bl', e: PointerEv
 
 /** The Frame light's on-canvas handle — shown while a Spot UV effect is selected, or while the
  *  selected layer carries foil anywhere (a foil fill, text colour or outline paint). */
-const finishEffectSelected = computed(() => activeEffect.value?.type === 'spot_uv'
-  || (!!selectedLocal.value && layerHasFoil(selectedLocal.value as LocalLayer)))
+const finishEffectSelected = computed(() => (activeEffect.value?.type === 'spot_uv' && finishAvailable('spot_uv'))
+  || (!!selectedLocal.value && layerHasFoil(selectedLocal.value as LocalLayer) && finishAvailable('gold_foil')))
+/** The light control rides the FILL picker (or text colour) when that is foil, so a layer whose
+ *  fill and outline are both foil shows it once, not twice. */
+const outlineLight = computed<FrameLight | undefined>(() => {
+  const l = selectedLocal.value as { fill?: unknown; color?: unknown } | null
+  return l && (isFoilFill(l.fill as Paint) || isFoilFill(l.color as Paint)) ? undefined : frameLight.value
+})
 const lightHandlePos = computed(() => ({ x: frameLight.value.x * canvasDisplay.w, y: frameLight.value.y * canvasDisplay.h }))
 function onLightPointerDown(e: PointerEvent) {
   if (viewOnlyGuard()) return
@@ -3403,7 +3410,10 @@ function layerHitAt(res: { type: 'local'; layer: any }, px: number, py: number, 
     // have no selection state any more. A migrated wired layer arrives as a local
     // item and needs this frame's slot resolver installed, or it would draw
     // nothing and every click would fall through to whatever is underneath.
-    withWiredContent(wiredContentForSlot, () => drawLocalLayer(ctx, res.layer as LocalLayer, W, H))
+    // Only alpha is read back, so foil draws flat (no GPU pass per click), under the Frame's own
+    // light so the module light is never left pointing at another paint's.
+    withFrameLight(frameLight.value, () => withFlatFoil(() =>
+      withWiredContent(wiredContentForSlot, () => drawLocalLayer(ctx, res.layer as LocalLayer, W, H))))
   } catch { return true }
   try {
     const R = 2
@@ -7988,9 +7998,10 @@ async function compositeSelectionBlob(payload: ClipboardPayload): Promise<Blob |
     await ensureLayerFonts(sel, W)
     // Paint bottom-up over a transparent ground. Wired kinds never reach the
     // payload, so no wired content provider is needed.
-    withWiredContent(wiredContentForSlot, () => {
+    // Named light: the last paint may have been a layout tile or the agent's review render.
+    withFrameLight(frameLight.value, () => withWiredContent(wiredContentForSlot, () => {
       for (const l of sel) drawLocalLayer(ctx, l, W, H)
-    })
+    }))
     return await new Promise<Blob | null>(resolve => off.toBlob(b => resolve(b), 'image/png'))
   } catch (err) {
     console.debug('[Compositor] selection PNG composite skipped', err)
@@ -9550,7 +9561,7 @@ onUnmounted(() => {
     <LayoutSetSheet
       v-if="layoutSet.open.value && panelsVisible"
       :entries="layoutSet.entries.value" :layout-name="layoutName" :has-motion="hasMotion"
-      :background="background" :wired-content="wiredContentForSlot"
+      :background="background" :wired-content="wiredContentForSlot" :light="frameLight"
       :progress="layoutSet.progress.value" :failures="layoutSet.failures.value" :notice="layoutSet.notice.value" :effects-in-download="layoutSetEffects"
       @send="onLayoutSetSend" @download="onLayoutSetDownload" @cancel="layoutSet.cancelDownload" @close="layoutSet.close" />
 
@@ -9701,7 +9712,7 @@ onUnmounted(() => {
               :candidates="layoutVary.candidates.value" :index="layoutVary.index.value"
               :choices="layoutVary.choices.value" :library="layoutVary.library.value"
               :frame-w="editorDims().w" :frame-h="editorDims().h"
-              :background="background" :groups="localGroups" :wired-content="wiredContentForSlot"
+              :background="background" :groups="localGroups" :wired-content="wiredContentForSlot" :light="frameLight"
               :format="layoutVary.format.value"
               :style-id="layoutVary.style.value" :suggested-face="layoutVary.suggestedFace.value" :library-done="layoutVary.libraryDone.value"
               @vary="onLayoutVary" @jump="onLayoutJump" @select="onLayoutSelect" @choice="onLayoutChoice"
@@ -11375,7 +11386,7 @@ onUnmounted(() => {
                 </div>
                 <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
                   <div class="panel-label mb-1.5">Outline</div>
-                  <FillControl allow-none allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="(selectedLocal as any).strokeColor"
+                  <FillControl allow-none allow-foil :light="outlineLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="(selectedLocal as any).strokeColor"
                     @update:model-value="(v: any) => setLocal(selectedLocal!.id, { strokeColor: v })" />
                   <input v-if="hasStroke(selectedLocal)" v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Outline width"
                     class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
@@ -11399,7 +11410,7 @@ onUnmounted(() => {
               </div>
               <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
                 <div class="panel-label mb-1.5">Stroke</div>
-                <FillControl allow-none allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="(selectedLocal as any).stroke"
+                <FillControl allow-none allow-foil :light="outlineLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="(selectedLocal as any).stroke"
                   @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
                 <input v-if="hasStroke(selectedLocal)" v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Stroke width"
                   class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
@@ -11447,7 +11458,7 @@ onUnmounted(() => {
               </div>
               <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
                 <div class="panel-label mb-1.5">Stroke</div>
-                <FillControl allow-none allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="(selectedLocal as any).stroke"
+                <FillControl allow-none allow-foil :light="outlineLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="(selectedLocal as any).stroke"
                   @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
                 <input v-if="hasStroke(selectedLocal)" v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Stroke width"
                   class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
@@ -11479,7 +11490,7 @@ onUnmounted(() => {
               </div>
               <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
                 <div class="panel-label mb-1.5">Stroke</div>
-                <FillControl allow-none allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="(selectedLocal as any).stroke"
+                <FillControl allow-none allow-foil :light="outlineLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="(selectedLocal as any).stroke"
                   @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
                 <input v-if="hasStroke(selectedLocal)" v-scrubnum type="number" min="0" step="1" :value="pxW((selectedLocal as any).strokeWidth)" placeholder="Stroke width"
                   class="mt-1.5 w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
@@ -11557,7 +11568,7 @@ onUnmounted(() => {
               </div>
               <div v-if="showsLegacyStrokeSection(selectedLocal)" data-testid="legacy-stroke-section">
                 <div class="panel-label mb-1.5">Stroke</div>
-                <FillControl allow-none allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="(selectedLocal as any).stroke"
+                <FillControl allow-none allow-foil :light="outlineLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="(selectedLocal as any).stroke"
                   @update:model-value="(v: any) => setStroke(selectedLocal!.id, v)" />
                 <StrokeStyleRow v-if="hasStroke(selectedLocal)" class="mt-1.5" :align="(selectedLocal as any).strokeAlign" :dash="(selectedLocal as any).strokeDash"
                   show-align :out-width="outWidth" :scale="(selectedLocal as any).scale || 1"

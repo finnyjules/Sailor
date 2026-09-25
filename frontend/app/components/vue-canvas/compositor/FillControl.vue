@@ -75,6 +75,8 @@ const previewRef = ref<HTMLCanvasElement | null>(null)
 /** Normalize whatever Paint we were handed into an editable Fill. */
 function toFill(p: Paint | undefined): Fill {
   if (isImageFill(p)) return { ...DEFAULT_FILL, type: 'solid', a: '#3b82f6' }  // parked; image UI reads imageFill ref, not this
+  // Foil → Solid keeps the metal's own mid colour rather than an unrelated default blue.
+  if (isFoilFill(p)) return { ...DEFAULT_FILL, type: 'solid', a: (METALS[p.metal] ?? METALS.gold)[2] }
   if (isFill(p)) return { ...DEFAULT_FILL, ...p }
   if (isGradient(p)) {
     const stops = p.stops ?? []
@@ -403,7 +405,7 @@ watch(foil, drawPreview, { deep: true })
             @update:model-value="(v: number) => pushFoil({ pressed: v })" />
           <StudioSlider data-testid="foil-grain" label="Grain" :model-value="foil.grain" :min="0" :max="1" :step="0.01" :default="DEFAULT_FOIL_FILL.grain"
             @update:model-value="(v: number) => pushFoil({ grain: v })" />
-          <FinishLightControl v-if="light" :light="light" @update="(l: FrameLight) => emit('update:light', l)" />
+          <FinishLightControl v-if="light && !foilUnavailable" :light="light" @update="(l: FrameLight) => emit('update:light', l)" />
         </div>
       </template>
 

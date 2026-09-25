@@ -22,6 +22,7 @@ import type { LayoutPlan } from '~/lib/frame/patterns/kit/plan'
 import type { SheetEntry } from '~/composables/useLayoutSet'
 import type { WiredContentProvider } from '~/composables/useCompositorLayers'
 import type { Paint } from '~/lib/compositor/paint'
+import type { FrameLight } from '~/lib/compositor/frameLight'
 import type { SetExportFailure } from '~/lib/frame/layoutSetExport'
 
 const props = defineProps<{
@@ -32,6 +33,8 @@ const props = defineProps<{
   hasMotion?: boolean
   background?: Paint
   wiredContent?: WiredContentProvider | null
+  /** The Frame's light, so foil / Spot UV in a tile are lit as on the canvas (absent: default). */
+  light?: FrameLight
   /** A download is running: its progress line (`Rendering 3 of 7…`); null/absent otherwise. */
   progress?: string | null
   /** The formats the last download could not render. */
@@ -145,7 +148,7 @@ function tilePlan(e: SetEntry): LayoutPlan {
             <LayoutTile
               v-else-if="t.kind !== 'none'"
               :plan="tilePlan(t.e)" :frame-w="t.e.w" :frame-h="t.e.h" :max-px="t.max"
-              :background="background" :groups="t.e.groups ?? undefined" :wired-content="wiredContent"
+              :background="background" :groups="t.e.groups ?? undefined" :wired-content="wiredContent" :light="light"
               :label="t.e.label" :pickable="false"
             />
             <template v-else>

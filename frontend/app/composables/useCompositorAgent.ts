@@ -17,6 +17,7 @@ import { buildAgentPrompt, buildCommandSchema, buildReviewPrompt, buildReviewSch
 import type { LayoutIssue } from '~/lib/agent/verify'
 import { ensureLayerImages, paintLayerStack, type LocalLayer } from '~/composables/useCompositorLayers'
 import { mergeCompositorState } from '~/lib/agent/mergeCompositorState'
+import type { FrameLight } from '~/lib/compositor/frameLight'
 
 const REROLLABLE = new Set(['setText', 'setTextStyle', 'setFill', 'setStroke', 'setBackground'])
 const clone = (s: CompositorState): CompositorState => JSON.parse(JSON.stringify(s)) as CompositorState
@@ -47,7 +48,12 @@ async function uploadDataUrl(dataUrl: string): Promise<string> {
   return up?.name ?? name
 }
 
-export function useCompositorAgent(opts: { getState: () => CompositorState; setState: (s: CompositorState) => void; apiKey: () => string; tier?: string; dims?: () => { w: number; h: number } }) {
+export function useCompositorAgent(opts: {
+  getState: () => CompositorState; setState: (s: CompositorState) => void; apiKey: () => string; tier?: string; dims?: () => { w: number; h: number }
+  /** The Frame's light, so the review render lights foil / Spot UV as the canvas does (and does
+   *  not reset the painter's module light to the default behind the canvas's back). */
+  getLight?: () => FrameLight
+}) {
   const busy = ref(false)
   const error = ref('')
   const notice = ref('')
@@ -167,7 +173,7 @@ export function useCompositorAgent(opts: { getState: () => CompositorState; setS
       const ctx = canvas.getContext('2d')
       if (!ctx) return null
       const items = (state.layers as LocalLayer[]).map(l => ({ type: 'local' as const, key: `l:${l.id}`, layer: l }))
-      paintLayerStack(ctx, W, H, items, state.layers as LocalLayer[], undefined, undefined, undefined, undefined, state.background, undefined, state.postEffects)
+      paintLayerStack(ctx, W, H, items, state.layers as LocalLayer[], undefined, undefined, undefined, undefined, state.background, undefined, state.postEffects, false, opts.getLight?.())
       return canvas.toDataURL('image/png')
     } catch { return null }
   }

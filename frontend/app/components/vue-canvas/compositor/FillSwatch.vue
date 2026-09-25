@@ -6,7 +6,8 @@ import { ref, watch, onMounted } from 'vue'
 import { fillTileCanvas } from '~/lib/spacetype/fillTile'
 import { type Paint, isFill, isGradient, isImageFill } from '~/composables/useCompositorLayers'
 import { getFillBitmap, ensureFillBitmaps } from '~/lib/paint/imageFillCache'
-import { imageFillRect } from '~/lib/compositor/paint'
+import { imageFillRect, isFoilFill } from '~/lib/compositor/paint'
+import { METALS } from '~/lib/compositor/finishPass'
 
 const props = withDefaults(defineProps<{ paint: Paint | undefined; size?: number }>(), { size: 14 })
 const cv = ref<HTMLCanvasElement | null>(null)
@@ -43,6 +44,8 @@ function draw() {
     }
     return
   }
+  // Foil: the metal's mid colour — the same flat stand-in the painter uses without WebGL 2.
+  if (isFoilFill(p)) { ctx.fillStyle = (METALS[p.metal] ?? METALS.gold)[2]; ctx.fillRect(0, 0, w, h); return }
   if (isGradient(p)) { drawGradient(ctx, p, w, h); return }
   if (isFill(p)) { try { ctx.drawImage(fillTileCanvas(p, Math.max(w, h)), 0, 0, w, h) } catch { /* no canvas */ } return }
   const solid = typeof p === 'string' && p && p !== 'none' && p !== 'transparent' ? p : null
