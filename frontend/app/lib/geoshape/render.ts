@@ -430,9 +430,20 @@ const STILL_FIELD: ShaderFieldFrameCtx = { frameW: 1, frameH: 1, t: 0, fps: 30, 
  * the CALLER's job: `warmPaints` below, then call this again. That degrades
  * gracefully either way; it never throws.
  */
+/** Optional overrides for `drawToCanvas`. Absent → the historical fit, byte-identical. */
+export interface DrawToCanvasOpts {
+  /** A fixed framing instead of fitting to the content: the doc point `(cx, cy)` (doc units)
+   *  lands at the canvas centre, at `scale` CANVAS px per doc unit (the backing store's px —
+   *  a CSS-px `PreviewFrame.scale` times dpr). `pad` is ignored when this is given. */
+  frame?: { cx: number; cy: number; scale: number }
+  /** `globalAlpha` for the shapes (0–1); the background stays opaque. */
+  alpha?: number
+}
+
 export function drawToCanvas(
   shapes: VectorShape[], ctx: CanvasRenderingContext2D,
   w: number, h: number, pad = 0, background: Paint | null = null,
+  opts?: DrawToCanvasOpts,
 ): void {
   ctx.clearRect(0, 0, w, h)
   // Document background: a full-output rect behind the padding frame and every
@@ -449,12 +460,21 @@ export function drawToCanvas(
       ctx.fillRect(0, 0, w, h)
     }
   }
-  const b = contentBounds(shapes)
-  const scale = fitScale(b, w, h, pad)
+  const frame = opts?.frame
+  let scale: number, fcx: number, fcy: number
+  if (frame) {
+    scale = frame.scale; fcx = frame.cx; fcy = frame.cy
+  } else {
+    const b = contentBounds(shapes)
+    scale = fitScale(b, w, h, pad)
+    fcx = b.minX + b.w / 2; fcy = b.minY + b.h / 2
+  }
   ctx.save()
+  // Inside the save so `restore` puts it back, and after the background so that stays opaque.
+  if (opts?.alpha !== undefined) ctx.globalAlpha = opts.alpha
   ctx.translate(w / 2, h / 2)
   ctx.scale(scale, scale)
-  ctx.translate(-(b.minX + b.w / 2), -(b.minY + b.h / 2))
+  ctx.translate(-fcx, -fcy)
   for (const s of shapes) {
     const path = new Path2D(commandsToPathData(s.commands))
     const rule: CanvasFillRule = s.fillRule === 'evenodd' ? 'evenodd' : 'nonzero'

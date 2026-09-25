@@ -46,6 +46,29 @@ function libraryPath(id: string | undefined, size: number): string {
 const r5 = (v: number) => { const n = Math.round(v * 1e5) / 1e5; return Object.is(n, -0) ? 0 : n }
 
 /**
+ * The drawing's outline and its bounding box in drawing units — the ONE extent
+ * measure the Drawn base shape uses. The box is of the FLATTENED outline
+ * (`flattenPath` over `sketchPathData`), so arcs and curves count by their ink,
+ * not their control points. `drawnPath`'s fit and the pen's view/commit rule
+ * (`penShape.ts`) all read it from here, so they can never disagree.
+ * `null` for a missing drawing or one with no outline.
+ */
+export function sketchOutlineBounds(sketch: SketchDoc | undefined):
+  { d: string; minX: number; minY: number; maxX: number; maxY: number } | null {
+  if (!sketch || !Array.isArray(sketch.entities)) return null
+  const d = sketchPathData(sketch)
+  if (!d) return null
+  const pts = flattenPath(d).flatMap(s => s.pts)
+  if (!pts.length) return null
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  for (const p of pts) {
+    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x
+    if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y
+  }
+  return { d, minX, minY, maxX, maxY }
+}
+
+/**
  * The user's drawing fitted like a library shape: its larger side spans `size`
  * and its bbox centre sits on the origin. `''` for a missing or empty drawing.
  * A straight line (zero width or height) scales by its non-zero side; never throws.
@@ -55,16 +78,9 @@ const r5 = (v: number) => { const n = Math.round(v * 1e5) / 1e5; return Object.i
  * its rotation and flags while its radii scale by `k`.
  */
 export function drawnPath(sketch: SketchDoc | undefined, size: number): string {
-  if (!sketch || !Array.isArray(sketch.entities)) return ''
-  const d0 = sketchPathData(sketch)
-  if (!d0) return ''
-  const pts = flattenPath(d0).flatMap(s => s.pts)
-  if (!pts.length) return ''
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
-  for (const p of pts) {
-    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x
-    if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y
-  }
+  const ob = sketchOutlineBounds(sketch)
+  if (!ob) return ''
+  const { d: d0, minX, minY, maxX, maxY } = ob
   const ext = Math.max(maxX - minX, maxY - minY)
   if (!(ext > 0) || !(size > 0)) return ''
   const k = size / ext, cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
