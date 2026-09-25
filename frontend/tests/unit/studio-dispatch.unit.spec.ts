@@ -15,8 +15,10 @@ describe('studioDispatch', () => {
     expect(studioDispatch('copy', 'a headline', { ...studio, place: 'frame' })).toEqual({ worker: 'ask', text: 'a headline' })
     expect(studioDispatch('layout', 'tighter', { ...studio, place: 'template' })).toEqual({ worker: 'ask', text: 'tighter' })
   })
-  it('new-effect is stage 5: the canvas message, word for word', () => {
+  it('new-effect runs the effect session where the studio has a target, and points elsewhere otherwise', () => {
+    expect(studioDispatch('new-effect', 'rain', { ...studio, hasEffectTarget: true })).toEqual({ worker: 'effect', text: 'rain' })
     expect(studioDispatch('new-effect', 'rain', studio)).toEqual({ worker: 'message', message: DISPATCH_MESSAGES.newEffect })
+    expect(studioDispatch('new-effect', 'rain', { place: 'frame', hasWorker: true, canTakes: false, hasEffectTarget: true })).toEqual({ worker: 'effect', text: 'rain' })
     expect(STUDIO_MESSAGES.newEffect).toBe(DISPATCH_MESSAGES.newEffect)
   })
   it('3D (no worker) answers every kind with its message', () => {

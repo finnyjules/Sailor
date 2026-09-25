@@ -6,9 +6,9 @@ import StudioPromptHost from '~/components/prompt/StudioPromptHost.vue'
 
 function api(over: Record<string, unknown> = {}) {
   return {
-    chipLabel: ref('Water ripple'), suggestions: ref(['Warmer']), mode: ref(null), working: ref(false),
+    chipLabel: ref('Water ripple'), suggestions: ref(['Warmer']), mode: ref(null), modeNote: ref(null), working: ref(false),
     workingLabel: ref('Working on “x”'), disabled: ref(false), focusTick: ref(0),
-    card: ref(null), takes: ref(null), answerCard: ref(null),
+    card: ref(null), takes: ref(null), takesSaving: ref(false), answerCard: ref(null),
     worker: () => ({ changes: ref([]), busy: ref(false), issues: ref([]), review: ref(null), reviewing: ref(false), hovered: ref(null), acceptChange: vi.fn(), rejectChange: vi.fn(), reroll: vi.fn() }),
     submit: vi.fn(), runKind: vi.fn(), setMode: vi.fn(), clearMode: vi.fn(), stop: vi.fn(), requestFocus: vi.fn(),
     previewTake: vi.fn(), chooseTake: vi.fn(), keepTake: vi.fn(), moreTakes: vi.fn(), closeTakes: vi.fn(),
@@ -32,6 +32,15 @@ describe('StudioPromptHost', () => {
     expect(w.find('[data-testid="prompt-changes"]').exists()).toBe(false)
     const w2 = mount(StudioPromptHost, { props: { prompt: api({ card: ref('answer'), answerCard: ref({ kind: 'notice', text: 'Hi', reasoning: '', followUps: [] }) }) } })
     expect(w2.find('[data-testid="prompt-answer"]').text()).toContain('Hi')
+  })
+
+  it('a new-effect chip shows its price, and a saving effect Keep turns the strip’s Keep off', () => {
+    const takes = { nodeId: 'shader-studio', nodeLabel: 'Water ripple', request: 'rain', currentThumb: null, known: [], hovered: null, chosen: null,
+      tiles: [0, 1, 2].map(i => ({ state: 'ready', takeId: `draft_1_${i}`, promptId: null, thumb: 'data:x' })) }
+    const w = mount(StudioPromptHost, { props: { prompt: api({ mode: ref({ label: 'Remix', kind: 'new-effect' }), modeNote: ref('~$0.24–0.42') }) } })
+    expect(w.find('[data-testid="prompt-note"]').text()).toBe('~$0.24–0.42')
+    const saving = mount(StudioPromptHost, { props: { prompt: api({ card: ref('takes'), takes: ref(takes), takesSaving: ref(true) }) } })
+    expect(saving.findAll('button.keep').every(b => b.attributes('disabled') !== undefined)).toBe(true)
   })
 
   it('sends on Enter and stops on Stop', async () => {

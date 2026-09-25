@@ -59,6 +59,10 @@ import { exportStudioVideo, resultBlob, videoErrorText, type StudioVideoResult }
 import { prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
 import { isAbortError, throwIfAborted } from '~/lib/engine/videoRecorder'
 import { hostedModeEnabled } from '~/lib/hostedMode'
+import type { EffectTarget } from '~/composables/useEffectTakes'
+import { useMyEffects } from '~/composables/useMyEffects'
+import { myEffectIdOf } from '~/lib/myEffects/defs'
+import { getEffectSync } from '~/lib/shaderfx/catalogStore'
 
 const props = defineProps<{ nodeId: string; nodes: any[]; edges?: any[]; wiredUrl?: string | null }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -228,6 +232,9 @@ function clockDuration(): number {
   return Math.max(0.1, config.value.motion.duration)
 }
 
+// The picture the last preview frame was drawn over (null: generative, no source) —
+// what new effects are written against (shaderStudioEffectTarget's `image`).
+let lastSourceFrame: TexImageSource | null = null
 async function renderFrame(t01: number) {
   const el = canvas.value
   if (!el) return
@@ -239,6 +246,7 @@ async function renderFrame(t01: number) {
   if (el.width !== w || el.height !== h) { el.width = w; el.height = h }
   try {
     const base = src ? await src.getFrame(t01, w, h) : GENERATIVE_BASE
+    lastSourceFrame = src ? base : null
     // A bake (generateImage/generateVideo) may have started while this frame was
     // suspended at the await above — bail before touching the shared shaderFx
     // canvas so a resumed preview frame can't corrupt the export's toBlob read.
@@ -525,7 +533,12 @@ function loadConfig() {
   for (const e of hydrated.effects) e.id = resolveEffectId(e.id)
   config.value = hydrated
 }
-function saveConfig() { const n = currentNode(); if (!n) return; n.data ||= {}; n.data.properties ||= {}; n.data.properties.sailor_shaderStudio = cloneConfig(config.value) }
+function saveConfig() {
+  // A new-effect take on screen is a draft, not an edit: never save it (preflight C9).
+  // The restore (×, Stop, close) or the Keep changes `config` again, and that saves.
+  if (effectPreviewing) return
+  const n = currentNode(); if (!n) return; n.data ||= {}; n.data.properties ||= {}; n.data.properties.sailor_shaderStudio = cloneConfig(config.value)
+}
 function closeEditor() { try { saveConfig() } catch (e) { console.error('[shader-studio] saveConfig failed', e) } emit('close') }
 
 // Sticky footer status (StudioActionsFooter): real Saving…/Saved ✓ driven by
@@ -861,6 +874,72 @@ const maskAngleDeg = computed({
 function numValue(uniform: string): number { const v = effectValues.value[uniform]; return typeof v === 'number' ? v : 0 }
 function stopsValue(uniform: string): GradientStop[] { const v = effectValues.value[uniform]; return Array.isArray(v) ? v : [] }
 
+// ── new effects (stage 5, Ruling 10) ──────────────────────────────────────────
+// Takes preview on the active layer, or on a temporary new layer at the END of the
+// stack (so motion tracks, which address effects by index, never shift). A full
+// stack has no room for a new layer: the takes go on the active layer instead, and
+// the strip names it.
+let effectPreviewing = false
+function shaderStudioEffectTarget(o: { add: boolean; base: EffectDef | null; fresh: boolean }): EffectTarget {
+  const index = activeEffect.value
+  const add = o.add && config.value.effects.length < LAYER_MAX
+  const original = { ...config.value.effects[index]! }
+  let tempIndex: number | null = null
+  const set = (id: string, params: Record<string, ParamValue>) => {
+    effectPreviewing = true
+    if (add) {
+      if (tempIndex == null) {
+        config.value.effects.push({ layerId: newLayerId(), id, params, enabled: true, blend: 'normal', opacity: 1 })
+        tempIndex = config.value.effects.length - 1
+      } else config.value.effects[tempIndex] = { ...config.value.effects[tempIndex]!, id, params }
+    } else config.value.effects[index] = { ...original, id, params, customChars: '' }
+    void renderFrame(0)
+  }
+  return {
+    key: 'shader-studio',
+    label: add ? 'New layer' : (o.base?.name ?? effectDef.value?.name ?? 'Shader'),
+    base: o.fresh ? null : (o.base ?? effectDef.value),
+    image: () => snapshotSource(lastSourceFrame),
+    preview: (id) => {
+      if (id) return set(id, {})
+      if (add) { if (tempIndex != null) { config.value.effects.splice(tempIndex, 1); tempIndex = null } }
+      else config.value.effects[index] = original
+      effectPreviewing = false
+      void renderFrame(0)
+    },
+    apply: (id, values) => {
+      set(id, { ...values })
+      if (add) activeEffect.value = tempIndex!
+      tempIndex = null
+      effectPreviewing = false // the kept effect is an edit: the autosave that follows saves it
+    },
+  }
+}
+/** A still copy of a canvas source (a live upstream frame is redrawn in place). */
+function snapshotSource(src: TexImageSource | null): CanvasImageSource | null {
+  if (!src) return null
+  if (src instanceof HTMLCanvasElement) {
+    const c = document.createElement('canvas')
+    c.width = src.width; c.height = src.height
+    c.getContext('2d')?.drawImage(src, 0, 0)
+    return c
+  }
+  return src as CanvasImageSource
+}
+function effectTargetFor(m: { effectId: string | null; add: boolean; fresh: boolean } | null): EffectTarget {
+  return shaderStudioEffectTarget({ add: !!m?.add, fresh: !!m?.fresh, base: m?.effectId ? getEffectSync(m.effectId) : null })
+}
+
+// Ruling 8: a kept Tune take on a My effect becomes a dial version. An old version's
+// code (`…~vN`) is skipped: a dial version is always on the newest code (preflight C11).
+const myEffects = useMyEffects()
+function onTuneKept(request: string) {
+  const cfgId = activeEffectCfg.value.id
+  const id = myEffectIdOf(cfgId)
+  if (!id || cfgId !== id) return
+  void myEffects.addValuesVersion(id, { ...activeEffectCfg.value.params }, request).catch(() => {})
+}
+
 // ── effect stack (aside StudioLayerStack) ───────────────────────────────────
 function addEffect() {
   if (config.value.effects.length >= LAYER_MAX) return
@@ -911,6 +990,8 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
     :agent="shaderAgent"
     prompt-place="shader-studio" :prompt-label="promptLabel"
     :prompt-suggestions="['Warmer', 'Calmer', 'More contrast']"
+    :effect-target="effectTargetFor"
+    :after-take-keep="onTuneKept"
     @close="closeEditor"
   >
     <template #aside>

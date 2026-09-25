@@ -1,12 +1,13 @@
 <script setup lang="ts">
 // Inspector actions as light rows (spec §2.4): Edit, then Develop, under the
 // thing itself and above the dials. Each row: the label, and on the right the
-// landing hint ("3 takes") plus the ✦ on AI rows. No primary button.
+// landing hint ("3 takes", plus the price on a paid row) and the ✦ on AI rows. No primary button.
 import { computed } from 'vue'
 import AiMark from '~/components/prompt/AiMark.vue'
 import { landsHint, type ActionGroup } from '~/lib/canvas/nodeActions'
 import { runStudioAction, type StudioAction } from '~/lib/studio/studioActions'
 import { useStudioPromptApi, type StudioPromptApi } from '~/composables/useStudioPrompt'
+import { hostedModeEnabled } from '~/lib/hostedMode'
 
 const props = defineProps<{ actions: StudioAction[]; prompt?: StudioPromptApi; bare?: boolean }>()
 
@@ -24,6 +25,9 @@ const sections = computed(() =>
 )
 
 function run(a: StudioAction) { runStudioAction(a, api.value) }
+// Guarded: unit hosts have no Nuxt runtime config.
+const hosted = (): boolean => { try { return hostedModeEnabled(useRuntimeConfig().public) } catch { return false } }
+const hint = (a: StudioAction) => [landsHint(a.lands), a.priceFor ? a.priceFor(hosted()) : a.priceHint].filter(Boolean).join(' · ')
 </script>
 
 <template>
@@ -36,7 +40,7 @@ function run(a: StudioAction) { runStudioAction(a, api.value) }
               @click="run(a)">
         <span class="min-w-0 truncate">{{ a.label }}</span>
         <span class="flex shrink-0 items-center gap-1.5">
-          <span v-if="landsHint(a.lands)" class="text-[11px] text-white/45">{{ landsHint(a.lands) }}</span>
+          <span v-if="hint(a)" class="text-[11px] text-white/45">{{ hint(a) }}</span>
           <AiMark v-if="a.ai" kind="star" class="size-3" />
         </span>
       </button>

@@ -82,7 +82,9 @@ function onFocusOut(e: FocusEvent) {
 .tile { display: grid; gap: 4px; border: 1px solid transparent; border-radius: 8px; padding: 3px; text-align: left; transition: border-color 0.15s ease; }
 .tile:hover, .tile:focus-within { border-color: rgba(255, 255, 255, 0.35); }
 .tile.is-chosen { border-color: rgba(255, 255, 255, 0.6); }
-.thumb { display: block; width: 100%; aspect-ratio: 16 / 10; border-radius: 6px; object-fit: cover; }
+/* width 0 + min-width 100%: a thumbnail's own pixel size never widens the strip (a host whose
+   width comes from its content, like Frame's dock, would otherwise grow past its panels). */
+.thumb { display: block; width: 0; min-width: 100%; aspect-ratio: 16 / 10; border-radius: 6px; object-fit: cover; }
 .label { padding-inline: 2px; font-size: 11.5px; color: rgba(255, 255, 255, 0.7); }
 .keep { position: absolute; top: 7px; right: 7px; display: none; border-radius: 5px; background: #fff; padding: 1px 8px; font-size: 11.5px; font-weight: 600; color: #171717; }
 .tile:hover .keep, .tile:focus-within .keep, .tile.is-chosen .keep { display: block; }

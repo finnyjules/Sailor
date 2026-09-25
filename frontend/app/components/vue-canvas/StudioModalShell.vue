@@ -7,7 +7,8 @@ import { Comment, Fragment, ref, computed, onMounted, onBeforeUnmount, provide, 
 import StudioPromptHost from '~/components/prompt/StudioPromptHost.vue'
 import StudioToolBar from '~/components/vue-canvas/studio/StudioToolBar.vue'
 import AgentSweep from '~/components/agent/AgentSweep.vue'
-import { STUDIO_PROMPT_KEY, useStudioPrompt, type StudioPromptWorker } from '~/composables/useStudioPrompt'
+import { STUDIO_PROMPT_KEY, useStudioPrompt, type StudioEffectTargetRequest, type StudioPromptWorker } from '~/composables/useStudioPrompt'
+import type { EffectTarget } from '~/composables/useEffectTakes'
 
 // The dock (spec §2.4): under the preview sit the one prompt (StudioPromptHost,
 // driven by useStudioPrompt over the studio's own `agent`) and, below it, the
@@ -44,6 +45,10 @@ const props = defineProps<{
   /** Stack above another full-screen overlay (e.g. the Timeline editor at z-100)
    *  when this studio is opened OVER it — the clip-in-place editor. Default z-50. */
   elevated?: boolean
+  /** Where new effects show in this studio (stage 5: the Shader studio's layer). */
+  effectTarget?: (m: StudioEffectTargetRequest) => EffectTarget | null
+  /** Called after a worker take is kept, with its request (the Shader studio records a My-effect version). */
+  afterTakeKeep?: (request: string) => void
 }>()
 const emit = defineEmits<{ close: [] }>()
 
@@ -84,15 +89,21 @@ const prompt = useStudioPrompt({
   selectionKind: props.promptPlace ?? 'studio',
   label: () => props.promptLabel ?? null,
   suggestions: () => props.promptSuggestions ?? [],
+  effectTarget: m => props.effectTarget?.(m) ?? null,
+  afterKeep: r => props.afterTakeKeep?.(r),
 })
 provide(STUDIO_PROMPT_KEY, prompt)
+// The surface reaches the prompt too: its gallery (outside the shell) starts Make one / Remix.
+defineExpose({ prompt })
 
 /** Closing with a take strip open must put the original back FIRST — a studio
  *  saves on close, so leaving a previewed take applied would persist it as if
  *  the user had pressed Keep. Runs before the close emit, and therefore before
- *  the surface's own save. */
+ *  the surface's own save. An open effect set (stage 5) is ended the same way,
+ *  so a previewed draft effect is never saved (preflight C9). */
 function requestClose() {
   props.agent?.abandonTakes?.()
+  prompt.endEffects()
   emit('close')
 }
 

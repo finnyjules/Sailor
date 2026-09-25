@@ -13,6 +13,27 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { ref } from 'vue'
+import { shallowRef } from 'vue'
+
+// The shell's prompt builds an effect-takes session (stage 5). A controllable fake:
+// `fx.open()` puts a set on screen; its close records where it falls in the order.
+const fx = vi.hoisted(() => ({ calls: null as string[] | null, api: null as any }))
+vi.mock('~/composables/useEffectTakes', async () => {
+  const { ref, shallowRef: sr, computed } = await import('vue')
+  return {
+    useEffectTakes: () => {
+      const session = sr<any>(null)
+      fx.api = {
+        session, target: sr(null), request: ref(''), working: computed(() => false), error: ref(''), notice: ref(''), saving: ref(false),
+        start: vi.fn(), preview: vi.fn(), choose: vi.fn(), keep: vi.fn(), more: vi.fn(), stop: vi.fn(), clearMessages: vi.fn(),
+        close: vi.fn(() => { fx.calls?.push('effects-close'); session.value = null }),
+        open: () => { session.value = { nodeId: 'shader-studio', nodeLabel: 'Water ripple', request: 'rain', tiles: [], known: [], hovered: null, chosen: null, currentThumb: null } },
+      }
+      return fx.api
+    },
+  }
+})
+
 import StudioModalShell from '~/components/vue-canvas/StudioModalShell.vue'
 
 /** The shape the shell actually reads off a `useStudioAgent` return. */
@@ -80,6 +101,43 @@ describe('StudioModalShell — closing with a take strip open', () => {
     const w = mountShell(takeAgent(calls), calls)
     await pressEscape(w)
     expect(calls).toEqual(['abandon', 'surface-close'])
+  })
+
+  it('an open effect set is ended before the surface is told to close, so a previewed draft is never saved', async () => {
+    const calls: string[] = []
+    fx.calls = calls
+    const w = mountShell(takeAgent(calls), calls)
+    fx.api.open()
+    await closeBtn(w).trigger('click')
+    expect(calls).toEqual(['abandon', 'effects-close', 'surface-close'])
+    fx.calls = null
+  })
+
+  it('no effect set open: closing never touches the effect session', async () => {
+    const calls: string[] = []
+    fx.calls = calls
+    const w = mountShell(takeAgent(calls), calls)
+    await pressEscape(w)
+    expect(calls).toEqual(['abandon', 'surface-close'])
+    fx.calls = null
+  })
+
+  it('exposes its prompt, with the effect target passed through', async () => {
+    const calls: string[] = []
+    const target = { key: 'shader-studio', label: 'Water ripple', base: null, image: () => null, preview: vi.fn(), apply: vi.fn() }
+    const effectTarget = vi.fn(() => target)
+    const w = mount(StudioModalShell, {
+      // No take strip open (so nothing is busy).
+      props: { title: 'Shader studio', agent: takeAgent(calls, { takes: undefined, hasTakes: undefined }), effectTarget },
+      slots: { preview: '<div>preview</div>' },
+      global: { stubs: { StudioPromptHost: true, AgentSweep: true } },
+    })
+    const prompt = (w.vm as any).prompt
+    expect(typeof prompt.setMode).toBe('function')
+    prompt.setMode('Remix')
+    await prompt.submit('rain')
+    expect(effectTarget).toHaveBeenCalledWith({ effectId: null, add: false, fresh: false })
+    expect(fx.api.start).toHaveBeenCalledWith('rain', target)
   })
 
   it('closes exactly once per press', async () => {

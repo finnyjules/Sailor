@@ -139,7 +139,7 @@ import type { AnimatableProperty } from '~/lib/motionx/adapter/frame'
 import MotionPropertyPicker from '~/components/vue-canvas/compositor/MotionPropertyPicker.vue'
 import { getByIdPath } from '~/lib/studio/idPath'
 import { paintStopsToColor } from '~/lib/compositor/gradientPaint'
-import { isGradient } from '~/lib/compositor/paint'
+import { isFill, isGradient } from '~/lib/compositor/paint'
 import { LIVE_FIELD_CEILING } from '~/lib/shaderfill/descriptor'
 // F5 Task 3: the shader-catalog-as-a-pass effect inspector — reuses the app's canonical
 // CatalogModal (the same picker ShaderFillEditor.vue mounts for a shader FILL) and the shared
@@ -148,7 +148,10 @@ import { LIVE_FIELD_CEILING } from '~/lib/shaderfill/descriptor'
 // to fall back to if the picked effect is purely generative.
 import CatalogModal from '~/components/CatalogModal.vue'
 import { fetchShaderFxCatalog, resolveEffectId, useShaderCatalog } from '~/lib/shaderfx/catalog'
-import { effectReadsInput } from '~/lib/shaderfx/catalogStore'
+import { effectReadsInput, getEffectSync } from '~/lib/shaderfx/catalogStore'
+import { DEFAULT_FILL, DEFAULT_SHADER_SPEC } from '~/lib/spacetype/fillTile'
+import { unprefixedKey } from '~/lib/shaderfill/descriptor'
+import type { EffectTarget } from '~/composables/useEffectTakes'
 import type { EffectDef, ParamValue } from '~/lib/shaderfx/types'
 import { cleanStops } from '~/lib/shaderfx/params'
 import { buildShaderParamRows, type ShaderParamRow } from '~/lib/shaderfill/controls'
@@ -261,7 +264,7 @@ const props = defineProps<{
   edges: any[]
 }>()
 
-const emit = defineEmits<{ close: [] }>()
+const emitRaw = defineEmits<{ close: [] }>()
 
 // Closing on a backdrop click must not fire when a DRAG ends over the backdrop. The layer
 // resize/scale/rotate handles track their drag with window pointer listeners (no pointer
@@ -1864,10 +1867,59 @@ const frameSuggestions = computed(() => {
 const selectedLayerHead = computed(() => (selectedLocal.value
   ? frameSelectionLabel([frameChipLayer(selectedLocal.value as any, { wiredName: wiredChipName })]) ?? ''
   : ''))
-const framePrompt = useStudioPrompt({ worker: () => frameWorker, place: 'frame', selectionKind: 'frame-layer', label: () => frameChip.value, suggestions: () => frameSuggestions.value })
+// ── new effects on Frame's background (stage 5, Ruling 10) ──────────────────
+// The background is where new effects show in Frame. Takes preview on it without an
+// undo step; Keep records ONE (so a single undo puts the old background back). The
+// Frame is inert while a set is open (editLocked), since × restores what was there.
+const backgroundIsShader = computed(() => isFill(background.value) && background.value.type === 'shader' && !!background.value.shader)
+const backgroundShaderDef = (): EffectDef | null => {
+  const bg = background.value
+  return isFill(bg) && bg.type === 'shader' && bg.shader ? getEffectSync(bg.shader.effectId) : null
+}
+function frameBackgroundTarget(base: EffectDef | null): EffectTarget {
+  const original = background.value
+  const shaderBg = isFill(original) && original.type === 'shader' && original.shader ? original : null
+  // A plain background (a colour, a gradient, a pattern fill) becomes the new shader's input,
+  // so the effect runs over what was there; anything else starts from the default input.
+  const plainInput = typeof original === 'string' ? (original && original !== 'none' ? original : null)
+    : isGradient(original) || (isFill(original) && original.type !== 'shader') ? structuredClone(original) : null
+  const asShader = (effectId: string, params: Record<string, ParamValue>): Paint => (shaderBg
+    ? { ...shaderBg, shader: { ...shaderBg.shader!, effectId, params } }
+    : { ...DEFAULT_FILL, type: 'shader', shader: { ...structuredClone(DEFAULT_SHADER_SPEC), effectId, params, input: plainInput ?? structuredClone(DEFAULT_SHADER_SPEC.input) } })
+  return {
+    key: 'frame-background', label: 'Background', base,
+    image: () => snapshotCanvas(overlayCanvas.value),
+    preview: id => editor.writeBackground(id ? asShader(id, {}) : original),
+    apply: (id, values) => {
+      // The undo step must hold the old background, not the draft on screen.
+      editor.writeBackground(original)
+      // My-effect values are `u_` keys; ShaderSpec.params drops the prefix (preflight C2).
+      setBackground(asShader(id, Object.fromEntries(Object.entries(values).map(([k, v]) => [unprefixedKey(k), v]))))
+    },
+  }
+}
+/** A still copy of the artboard (the live canvas repaints under every preview). */
+function snapshotCanvas(cv: HTMLCanvasElement | null): HTMLCanvasElement | null {
+  if (!cv || !cv.width || !cv.height) return null
+  const c = document.createElement('canvas')
+  c.width = cv.width; c.height = cv.height
+  c.getContext('2d')?.drawImage(cv, 0, 0)
+  return c
+}
+const framePrompt = useStudioPrompt({
+  worker: () => frameWorker, place: 'frame', selectionKind: 'frame-layer', label: () => frameChip.value, suggestions: () => frameSuggestions.value,
+  // "New effect" starts from nothing; Remix (chip or routed) from the gallery's pick or the shader background.
+  effectTarget: (m) => frameBackgroundTarget(m?.fresh ? null : (m?.effectId ? getEffectSync(m.effectId) : backgroundShaderDef())),
+})
 provide(STUDIO_PROMPT_KEY, framePrompt)
+// Every close path (✕, Esc, backdrop, after an export) ends an open effect set first, so a
+// previewed draft background is put back before anything saves it (preflight C9).
+function emit(e: 'close') {
+  framePrompt.endEffects()
+  emitRaw(e)
+}
 // Inspector actions, under the thing itself: the layer, or the Frame when nothing is selected.
-const frameActions = computed(() => studioActions({ place: 'frame', canTakes: false, local: [
+const frameActions = computed(() => studioActions({ place: 'frame', canTakes: false, backgroundIsShader: backgroundIsShader.value, local: [
   { id: 'layouts', label: 'Try layouts', group: 'develop', ai: false, lands: null, run: { call: () => { inspectorTab.value = 'layout' } } },
 ] }))
 

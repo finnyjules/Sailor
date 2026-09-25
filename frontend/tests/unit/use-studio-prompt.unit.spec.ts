@@ -29,15 +29,36 @@ function makeWorker(withTakes = true) {
   return w
 }
 
-function setup(o: { worker?: StudioPromptWorker | null; place?: any; route?: any; label?: string } = {}) {
+/** The effect-takes session (Task 7's useEffectTakes), idle until started — the same shape as
+ *  canvas-prompt-effects' fake. Every setup gets one (preflight C8: never build the real one here). */
+function fakeEffects() {
+  const session = shallowRef<any>(null)
+  const running = ref(false)
+  const request = ref('')
+  return {
+    session, target: shallowRef<any>(null), request, working: computed(() => running.value), running, error: ref(''), notice: ref(''), saving: ref(false),
+    start: vi.fn(async (r: string, t: any) => { request.value = r; session.value = { nodeId: t.key, nodeLabel: t.label, request: r, tiles: [], known: [], hovered: null, chosen: null, currentThumb: null } }),
+    preview: vi.fn(), choose: vi.fn(), keep: vi.fn(async () => true), close: vi.fn(() => { session.value = null; running.value = false }),
+    more: vi.fn(), stop: vi.fn(() => { session.value = null; running.value = false }), clearMessages: vi.fn(),
+  }
+}
+
+function setup(o: {
+  worker?: StudioPromptWorker | null; place?: any; route?: any; label?: string
+  effectTarget?: any; effects?: ReturnType<typeof fakeEffects>; afterKeep?: (r: string) => void
+} = {}) {
   const worker = o.worker === undefined ? makeWorker() : o.worker
   const route = o.route ?? vi.fn(async () => ({ kind: 'tweak', followUps: [], routed: true }))
+  const effects = o.effects ?? fakeEffects()
   let api!: ReturnType<typeof useStudioPrompt>
   const wrapper = mount(defineComponent({ setup() {
-    api = useStudioPrompt({ worker: () => worker, place: o.place ?? 'studio', selectionKind: 'shader-studio', label: () => o.label ?? 'Water ripple', suggestions: () => ['Warmer'] }, { route, apiKey: () => 'k' })
+    api = useStudioPrompt({
+      worker: () => worker, place: o.place ?? 'studio', selectionKind: 'shader-studio', label: () => o.label ?? 'Water ripple', suggestions: () => ['Warmer'],
+      effectTarget: o.effectTarget, afterKeep: o.afterKeep,
+    }, { route, apiKey: () => 'k', effects: effects as any })
     return () => h('div')
   } }))
-  return { api, worker, route, wrapper }
+  return { api, worker, route, wrapper, effects }
 }
 
 describe('useStudioPrompt', () => {
@@ -130,7 +151,7 @@ describe('useStudioPrompt', () => {
   it('a mode chip decides the kind without routing; Tune goes to the worker', async () => {
     const { api, worker, route } = setup()
     api.setMode('Tune')
-    expect(api.mode.value).toEqual({ label: 'Tune', kind: 'tweak' })
+    expect(api.mode.value).toEqual({ label: 'Tune', kind: 'tweak', effectId: null, add: false })
     await api.submit('slower')
     expect(route).toHaveBeenCalledWith(expect.objectContaining({ mode: 'Tune' }), expect.anything())
     expect(worker!.ask).toHaveBeenCalledWith('slower')
@@ -345,5 +366,161 @@ describe('useStudioPrompt', () => {
     api.rejectAll()
     expect(api.editLocked.value).toBe(false)
   })
-})
 
+  // --- effect takes (stage 5 Task 9) -------------------------------------------
+  const shaderTarget = () => ({ key: 'shader-studio', label: 'Water ripple', base: null, image: () => null, preview: vi.fn(), apply: vi.fn() })
+
+  it('Remix sets a chip with its price; sending runs the effect session with the studio’s target, no router', async () => {
+    const effects = fakeEffects()
+    const targetFn = vi.fn(() => ({ key: 'shader-studio', label: 'Water ripple', base: null, image: () => null, preview: vi.fn(), apply: vi.fn() }))
+    const { api, route } = setup({ effectTarget: targetFn, effects })
+    api.setMode('Remix')
+    expect(api.modeNote.value).toBe('~$0.24–0.42')
+    await api.submit('rain on a window')
+    expect(route).not.toHaveBeenCalled()
+    expect(targetFn).toHaveBeenCalledWith({ effectId: null, add: false, fresh: false })
+    expect(effects.start).toHaveBeenCalledWith('rain on a window', expect.objectContaining({ key: 'shader-studio' }))
+    expect(api.card.value).toBe('takes')
+  })
+  it('New layer from a description: add, fresh', async () => {
+    const effects = fakeEffects(); const targetFn = vi.fn(() => null as any)
+    const { api } = setup({ effectTarget: targetFn, effects })
+    api.setMode('New effect', { add: true })
+    await api.submit('rain')
+    expect(targetFn).toHaveBeenCalledWith({ effectId: null, add: true, fresh: true })
+  })
+  it('a gallery Remix passes the effect it starts from', async () => {
+    const effects = fakeEffects(); const targetFn = vi.fn(shaderTarget)
+    const { api } = setup({ effectTarget: targetFn, effects })
+    api.setMode('Remix', { effectId: 'glow_soft' })
+    await api.submit('rain')
+    expect(targetFn).toHaveBeenCalledWith({ effectId: 'glow_soft', add: false, fresh: false })
+  })
+  it('a routed new-effect (no chip) asks for the default target', async () => {
+    const effects = fakeEffects(); const targetFn = vi.fn(() => ({ key: 'k', label: 'x', base: null, image: () => null, preview: vi.fn(), apply: vi.fn() }))
+    const { api } = setup({ effectTarget: targetFn, effects, route: vi.fn(async () => ({ kind: 'new-effect', followUps: [], routed: true })) })
+    await api.submit('make it rain')
+    expect(targetFn).toHaveBeenCalledWith(null)
+    expect(effects.start).toHaveBeenCalled()
+  })
+  it('a studio with no target still answers new-effect with the plain message', async () => {
+    const effects = fakeEffects()
+    const { api } = setup({ effectTarget: vi.fn(() => null), effects })
+    api.setMode('Remix')
+    await api.submit('rain')
+    expect(effects.start).not.toHaveBeenCalled()
+    expect(api.answerCard.value).toMatchObject({ kind: 'notice', text: STUDIO_MESSAGES.newEffect })
+  })
+  it('keeping a worker take calls afterKeep with the request', async () => {
+    const afterKeep = vi.fn()
+    const { api, worker } = setup({ afterKeep })
+    await api.submit('warmer')
+    ;(worker!.takes as any).value = [{ label: 'a' }]
+    api.keepTake('take-0')
+    expect(afterKeep).toHaveBeenCalledWith('warmer')
+  })
+  it('effect takes own the strip, Stop and the working label while they run', async () => {
+    const effects = fakeEffects()
+    const { api, worker } = setup({ effectTarget: vi.fn(shaderTarget), effects })
+    api.setMode('Remix')
+    await api.submit('rain')
+    effects.running.value = true
+    expect(api.working.value).toBe(true)
+    expect(api.workingLabel.value).toContain('“rain”')
+    expect(api.workingLabel.value).toContain('~$0.24–0.42')
+    // one job at a time: a new request waits
+    await api.submit('warmer')
+    expect(worker!.ask).not.toHaveBeenCalled()
+    api.stop()
+    expect(effects.stop).toHaveBeenCalled()
+    expect(api.working.value).toBe(false)
+  })
+  it('tile events go to the open effect set, not the worker', async () => {
+    const effects = fakeEffects()
+    const { api, worker } = setup({ effectTarget: vi.fn(shaderTarget), effects })
+    api.setMode('Remix')
+    await api.submit('rain')
+    api.previewTake('draft_1_0'); expect(effects.preview).toHaveBeenCalledWith('draft_1_0')
+    api.chooseTake('draft_1_0'); expect(effects.choose).toHaveBeenCalledWith('draft_1_0')
+    api.moreTakes(); expect(effects.more).toHaveBeenCalled()
+    await api.keepTake('draft_1_0'); expect(effects.keep).toHaveBeenCalledWith('draft_1_0')
+    api.closeTakes(); expect(effects.close).toHaveBeenCalled()
+    expect(worker!.previewTake).not.toHaveBeenCalled()
+    expect(worker!.keepTake).not.toHaveBeenCalled()
+  })
+  it('an effect Keep that is saving turns the strip’s Keep off', async () => {
+    const effects = fakeEffects()
+    const { api } = setup({ effectTarget: vi.fn(shaderTarget), effects })
+    api.setMode('Remix')
+    await api.submit('rain')
+    expect(api.takesSaving.value).toBe(false)
+    effects.saving.value = true
+    expect(api.takesSaving.value).toBe(true)
+    // A new request waits for the save (closing the strip first would skip applying it).
+    const worker = api.worker()!
+    await api.submit('warmer')
+    expect(worker.ask).not.toHaveBeenCalled()
+  })
+  it('effect errors and notices are cards; dismissing clears them', async () => {
+    const effects = fakeEffects()
+    const { api } = setup({ effects })
+    effects.notice.value = 'Saved to My effects as “Rain”.'
+    expect(api.card.value).toBe('answer')
+    expect(api.answerCard.value).toMatchObject({ kind: 'notice', text: 'Saved to My effects as “Rain”.' })
+    effects.error.value = 'Sailor couldn’t write new effects just now. Try again in a moment.'
+    expect(api.answerCard.value).toMatchObject({ kind: 'error' })
+    api.dismissAnswer()
+    expect(effects.clearMessages).toHaveBeenCalled()
+  })
+  it('a new request closes an open effect set first (its preview never reaches the worker)', async () => {
+    const effects = fakeEffects()
+    const { api, worker } = setup({ effectTarget: vi.fn(shaderTarget), effects })
+    api.setMode('Remix')
+    await api.submit('rain')
+    expect(api.card.value).toBe('takes')
+    await api.submit('warmer')
+    expect(effects.close).toHaveBeenCalled()
+    expect(worker!.ask).toHaveBeenCalledWith('warmer')
+  })
+  it('closing the studio ends the effect set (endEffects), so a previewed draft is never saved', async () => {
+    const effects = fakeEffects()
+    const { api } = setup({ effectTarget: vi.fn(shaderTarget), effects })
+    api.setMode('Remix')
+    await api.submit('rain')
+    api.endEffects()
+    expect(effects.close).toHaveBeenCalled()
+    expect(api.card.value).toBe(null)
+  })
+  it('an open effect set locks Frame’s editing until it is kept or closed', async () => {
+    const effects = fakeEffects()
+    const { api } = setup({ place: 'frame', effectTarget: vi.fn(shaderTarget), effects })
+    api.setMode('Remix')
+    await api.submit('rain')
+    expect(api.working.value).toBe(false)
+    expect(api.editLocked.value).toBe(true)
+    expect(api.lockedNote.value).toBe('Keep a take or close the takes to keep editing')
+    api.closeTakes()
+    expect(api.editLocked.value).toBe(false)
+  })
+  it('new effects wait while a proposal is open (Reject would rebuild over the kept effect)', async () => {
+    const effects = fakeEffects()
+    const { api, worker } = setup({ worker: makeWorker(false), place: 'frame', effectTarget: vi.fn(shaderTarget), effects })
+    ;(worker!.ask as any).mockImplementation(async () => { worker!.changes.value = [{ label: 'Tighter' } as any] })
+    await api.submit('tighten')
+    expect(api.card.value).toBe('changes')
+    toastInfo.mockClear()
+    api.setMode('Remix')
+    await api.submit('rain')
+    expect(effects.start).not.toHaveBeenCalled()
+    expect(toastInfo).toHaveBeenCalledWith(BUSY_NOTICE)
+    expect(api.card.value).toBe('changes')
+  })
+  it('unmounting closes an open effect set', async () => {
+    const effects = fakeEffects()
+    const { api, wrapper } = setup({ effectTarget: vi.fn(shaderTarget), effects })
+    api.setMode('Remix')
+    await api.submit('rain')
+    wrapper.unmount()
+    expect(effects.close).toHaveBeenCalled()
+  })
+})

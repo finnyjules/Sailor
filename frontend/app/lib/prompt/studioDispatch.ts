@@ -5,7 +5,8 @@ import type { RouterKind } from '~~/shared/promptRouter/router'
 import { DISPATCH_MESSAGES } from '~/lib/prompt/canvasDispatch'
 
 export type StudioPromptPlace = 'studio' | 'frame' | 'template' | 'scene3d'
-export type StudioDispatch = { worker: 'ask'; text: string } | { worker: 'message'; message: string }
+/** `effect`: a new effect (stage 5) — the studio's effect-takes session runs it, not its agent. */
+export type StudioDispatch = { worker: 'ask'; text: string } | { worker: 'effect'; text: string } | { worker: 'message'; message: string }
 
 export const VARY_REQUEST = 'Three different directions'
 
@@ -20,11 +21,13 @@ export const STUDIO_MESSAGES = {
 export function studioDispatch(
   kind: RouterKind,
   text: string,
-  o: { place: StudioPromptPlace; hasWorker: boolean; canTakes: boolean; fromMenu?: boolean },
+  /** `hasEffectTarget`: the studio can show new effects on something (the Shader studio's
+   *  layer, Frame's background). Elsewhere a new effect points to where it can be made. */
+  o: { place: StudioPromptPlace; hasWorker: boolean; canTakes: boolean; fromMenu?: boolean; hasEffectTarget?: boolean },
 ): StudioDispatch {
   const t = text.trim()
   if (!o.hasWorker) return { worker: 'message', message: STUDIO_MESSAGES.noWorker3d }
-  if (kind === 'new-effect') return { worker: 'message', message: STUDIO_MESSAGES.newEffect }
+  if (kind === 'new-effect') return o.hasEffectTarget ? { worker: 'effect', text: t } : { worker: 'message', message: STUDIO_MESSAGES.newEffect }
   if ((kind === 'copy' || kind === 'layout') && o.place === 'studio')
     return { worker: 'message', message: kind === 'copy' ? STUDIO_MESSAGES.copyInFrame : STUDIO_MESSAGES.layoutInFrame }
   if (!t) {

@@ -44,6 +44,7 @@ defineExpose({ focus })
       ref="promptRef"
       :selection-label="p.chipLabel.value"
       :mode="p.mode.value?.label ?? null"
+      :note="p.modeNote.value"
       :suggestions="p.suggestions.value"
       :working="p.working.value"
       :working-label="p.workingLabel.value"
@@ -56,7 +57,7 @@ defineExpose({ focus })
       <template v-if="p.card.value" #above>
         <PromptTakes
           v-if="p.card.value === 'takes' && p.takes.value"
-          :session="p.takes.value"
+          :session="p.takes.value" :saving="p.takesSaving.value"
           @hover="p.previewTake" @choose="p.chooseTake" @keep="p.keepTake" @more="p.moreTakes" @close="p.closeTakes"
         />
         <PromptChangesCard

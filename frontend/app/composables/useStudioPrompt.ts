@@ -14,6 +14,12 @@
  *
  * The owner (StudioModalShell, CompositorModal, GridEditorShell) calls this and
  * provides it under STUDIO_PROMPT_KEY, so inspector action rows can reach it.
+ *
+ * Stage 5: a new effect (Remix, New effect, or a routed new-effect) runs in an
+ * effect-takes session (useEffectTakes) on the target the owner gives
+ * (`effectTarget`: the Shader studio's layer, Frame's background). While a set is
+ * open, the strip, the working row, Stop and the cards are its; the owner calls
+ * `endEffects()` before it closes, so a previewed draft is never saved.
  */
 import { computed, inject, onBeforeUnmount, ref, watch, type ComputedRef, type InjectionKey, type Ref } from 'vue'
 import { toast } from 'vue-sonner'
@@ -24,6 +30,9 @@ import { promptWorkingLabel } from '~/lib/prompt/canvasPromptContext'
 import { studioDispatch, type StudioPromptPlace } from '~/lib/prompt/studioDispatch'
 import { studioTakeIndex, studioTakesSession } from '~/lib/prompt/studioTakes'
 import { CURRENT, isTakesWorking, type TakesSession } from '~/lib/prompt/takesSession'
+import { useEffectTakes, type EffectTarget } from '~/composables/useEffectTakes'
+import { shaderGenEstimateText } from '~/lib/shadergen/estimate'
+import { hostedModeEnabled } from '~/lib/hostedMode'
 import { kindForMode, type RouterHost, type RouterKind } from '~~/shared/promptRouter/router'
 
 /** What every studio agent already returns (useStudioAgent, useTextureAgent,
@@ -41,7 +50,11 @@ export interface StudioPromptWorker {
   previewTake?: (t: any | null) => void; selectTake?: (t: any | null) => void; keepTake?: () => void
   dismissTakes?: () => void; abandonTakes?: () => void; moreDirections?: () => unknown
 }
-export interface StudioPromptMode { label: string; kind: RouterKind }
+/** `effectId`: the effect a gallery Remix starts from; `add`: the takes land on a new layer. */
+export interface StudioPromptMode { label: string; kind: RouterKind; effectId?: string | null; add?: boolean }
+/** What a new-effect request asks the owner for: null for a routed request with no chip.
+ *  `fresh` is true for "New effect" (start from nothing, not from the current effect). */
+export type StudioEffectTargetRequest = { effectId: string | null; add: boolean; fresh: boolean } | null
 export interface StudioAnswerCard { kind: 'answer' | 'notice' | 'error'; text: string; reasoning: string; followUps: string[] }
 
 /** Same cap as the canvas prompt (useCanvasPrompt). */
@@ -49,10 +62,19 @@ const ROUTER_NAME_MAX = 120
 
 
 export function useStudioPrompt(
-  o: { worker: () => StudioPromptWorker | null; place: StudioPromptPlace; host?: RouterHost; selectionKind: string; label: () => string | null; suggestions?: () => string[] },
-  deps: { route?: typeof routeRequest; apiKey?: () => string } = {},
+  o: {
+    worker: () => StudioPromptWorker | null; place: StudioPromptPlace; host?: RouterHost; selectionKind: string; label: () => string | null; suggestions?: () => string[]
+    /** Where new effects show (stage 5); null or absent: this studio can't take them. */
+    effectTarget?: (m: StudioEffectTargetRequest) => EffectTarget | null
+    /** Called after a worker take is kept, with the request that made it. */
+    afterKeep?: (request: string) => void
+  },
+  deps: { route?: typeof routeRequest; apiKey?: () => string; effects?: ReturnType<typeof useEffectTakes> } = {},
 ) {
   const route = deps.route ?? routeRequest
+  const fx = deps.effects ?? useEffectTakes()
+  // Read lazily and guarded (preflight C8): unit hosts have no Nuxt runtime config.
+  const hosted = (): boolean => { try { return hostedModeEnabled(useRuntimeConfig().public) } catch { return false } }
   const apiKey = deps.apiKey ?? (() => useLocalSettings().getLocalSetting('Sailor.AI.AnthropicApiKey') ?? '')
   const host: RouterHost = o.host ?? (o.place === 'frame' ? 'frame' : 'studio')
   const worker = o.worker
@@ -61,7 +83,7 @@ export function useStudioPrompt(
   const focusTick = ref(0)
   const routing = ref(false)
   const request = ref('')
-  const answerCard = ref<StudioAnswerCard | null>(null)
+  const answerRef = ref<StudioAnswerCard | null>(null)
   const stopped = ref(false) // a stopped run whose reply hasn't landed yet
   const calls = ref(0) // worker calls (ask, moreDirections) whose promise hasn't settled
   let routeCtrl: AbortController | null = null
@@ -79,7 +101,7 @@ export function useStudioPrompt(
   // Vary from the inspector has no words: name the thing instead (stage 3's takesOf).
   const takesOf = ref<string | null>(null)
 
-  const takes = computed<TakesSession | null>(() => {
+  const workerTakes = computed<TakesSession | null>(() => {
     const w = worker()
     if (!w?.takes || !w.takeThumbs) return null
     return studioTakesSession({
@@ -87,15 +109,20 @@ export function useStudioPrompt(
       thumbs: w.takeThumbs.value, current: w.takeCurrentThumb?.value ?? null, selected: w.selectedTake?.value ?? null,
     })
   })
-  const takesWorking = computed(() => !!takes.value && isTakesWorking(takes.value))
+  // The strip shows an open effect set (stage 5), else the worker's takes.
+  const takes = computed<TakesSession | null>(() => fx.session.value ?? workerTakes.value)
+  const takesWorking = computed(() => !!workerTakes.value && isTakesWorking(workerTakes.value))
   const busy = computed(() => routing.value || (workerBusy.value && !stopped.value))
-  const working = computed(() => busy.value || takesWorking.value)
+  const working = computed(() => busy.value || takesWorking.value || fx.working.value)
   const disabled = computed(() => stopped.value && runLive.value)
-  /** One job at a time: nothing new starts while anything is in flight. */
-  const jobBusy = () => working.value || disabled.value
+  /** One job at a time: nothing new starts while anything is in flight. An effect Keep
+   *  still saving counts too (a new request would close the strip before it applies). */
+  const jobBusy = () => working.value || disabled.value || !!fx.saving?.value
   const workingLabel = computed(() => {
+    // Effect takes quote the request and carry the estimate (plan ruling 14), as on the canvas.
+    if (fx.working.value) return `${promptWorkingLabel({ request: fx.request.value })} · ${shaderGenEstimateText(hosted())}`
     if (!busy.value && takesWorking.value) {
-      return promptWorkingLabel({ request: takes.value!.request, takesOf: takes.value!.nodeLabel })
+      return promptWorkingLabel({ request: workerTakes.value!.request, takesOf: workerTakes.value!.nodeLabel })
     }
     return promptWorkingLabel({ request: request.value, takesOf: takesOf.value })
   })
@@ -107,9 +134,11 @@ export function useStudioPrompt(
    *  meanwhile would be lost, so those hosts make their editing surfaces inert
    *  while this is true — the old right-panel takeover's guarantee (busy,
    *  reviewing, proposal open). The proposal card and the prompt (Stop, Esc) live
-   *  outside the locked region; Approve or Reject ends the lock. */
+   *  outside the locked region; Approve or Reject ends the lock.
+   *  An open effect set (stage 5) locks too: its previews write the target, and ×
+   *  puts back what was there before — an edit made meanwhile would be undone. */
   const editLocked = computed(() => working.value || disabled.value
-    || !!worker()?.reviewing.value || !!worker()?.hasProposal.value)
+    || !!worker()?.reviewing.value || !!worker()?.hasProposal.value || !!fx.session.value)
   /** The neutral note shown over an inert editing surface. */
   const lockedNote = computed(() => {
     if (working.value || disabled.value) {
@@ -117,10 +146,19 @@ export function useStudioPrompt(
       return r ? `Sailor is working on “${r}”…` : 'Sailor is working…'
     }
     if (worker()?.reviewing.value) return 'Sailor is looking at the result…'
+    if (fx.session.value) return 'Keep a take or close the takes to keep editing'
     return 'Approve or reject the changes to keep editing'
   })
 
+  // Effect errors and notices (a failed set, "Saved to My effects…") come first.
+  const answerCard = computed<StudioAnswerCard | null>(() => {
+    if (fx.error.value) return { kind: 'error', text: fx.error.value, reasoning: '', followUps: [] }
+    if (fx.notice.value) return { kind: 'notice', text: fx.notice.value, reasoning: '', followUps: [] }
+    return answerRef.value
+  })
+
   const card = computed<'takes' | 'changes' | 'answer' | null>(() => {
+    if (fx.session.value) return 'takes'
     if (busy.value || disabled.value) return null
     if (takes.value) return 'takes'
     if (worker()?.hasProposal.value) return 'changes'
@@ -142,8 +180,8 @@ export function useStudioPrompt(
       return
     }
     if (w.hasTakes?.value || w.hasProposal.value) return
-    if (w.error.value) answerCard.value = { kind: 'error', text: w.error.value, reasoning: '', followUps: [] }
-    else if (w.notice.value) answerCard.value = {
+    if (w.error.value) answerRef.value = { kind: 'error', text: w.error.value, reasoning: '', followUps: [] }
+    else if (w.notice.value) answerRef.value = {
       kind: lastKind === 'answer' ? 'answer' : 'notice', text: w.notice.value, reasoning: '',
       followUps: lastKind === 'answer' ? lastFollowUps : [],
     }
@@ -157,16 +195,32 @@ export function useStudioPrompt(
     return Promise.resolve(p).finally(() => { calls.value-- })
   }
 
-  async function dispatch(kind: RouterKind, text: string, fromMenu: boolean) {
-    const d = studioDispatch(kind, text, { place: o.place, hasWorker: !!worker(), canTakes: canTakes(), fromMenu })
-    if (d.worker === 'message') { answerCard.value = { kind: 'notice', text: d.message, reasoning: '', followUps: [] }; return }
+  async function dispatch(kind: RouterKind, text: string, fromMenu: boolean, m?: StudioPromptMode | null) {
+    // A new effect asks the owner where it shows: the chip's own ask, or (routed) the default.
+    const target = kind === 'new-effect'
+      ? o.effectTarget?.(m ? { effectId: m.effectId ?? null, add: !!m.add, fresh: m.label === 'New effect' } : null) ?? null
+      : null
+    const d = studioDispatch(kind, text, { place: o.place, hasWorker: !!worker(), canTakes: canTakes(), fromMenu, hasEffectTarget: !!target })
+    if (d.worker === 'message') { answerRef.value = { kind: 'notice', text: d.message, reasoning: '', followUps: [] }; return }
+    if (d.worker === 'effect') {
+      // A proposal still open (or its review still out) would rebuild over the kept
+      // effect on Reject: it is settled first, like any other job.
+      const w = worker()
+      if (w?.hasProposal.value || w?.reviewing.value) { toast.info(BUSY_NOTICE); return }
+      w?.abandonTakes?.()
+      void fx.start(d.text, target!)
+      return
+    }
     const w = worker()!
     w.abandonTakes?.()
     await track(w.ask(d.text))
   }
 
   function beginRun(text: string) {
-    answerCard.value = null
+    // An open effect set goes first: its preview must not be what the next run starts from.
+    endEffects()
+    fx.clearMessages()
+    answerRef.value = null
     request.value = text
     takesOf.value = null
     stopped.value = false
@@ -179,6 +233,8 @@ export function useStudioPrompt(
     const seq = beginRun(t)
     const m = mode.value
     mode.value = null
+    // A new-effect chip (Remix, New effect) decides the kind itself: no router call.
+    if (m?.kind === 'new-effect') { lastKind = 'new-effect'; await dispatch('new-effect', t, false, m); return }
     // No worker here (3D): the answer is fixed whatever the request is, so don't
     // pay for a routing call to reach it.
     if (!worker()) { await dispatch(m?.kind ?? 'tweak', t, false); return }
@@ -214,10 +270,10 @@ export function useStudioPrompt(
     await dispatch(kind, a.text ?? '', !!a.fromMenu)
   }
 
-  function setMode(label: string) {
+  function setMode(label: string, m: { effectId?: string | null; add?: boolean } = {}) {
     if (jobBusy()) { toast.info(BUSY_NOTICE); return }
     const kind = kindForMode(label)
-    mode.value = kind ? { label, kind } : null
+    mode.value = kind ? { label, kind, effectId: m.effectId ?? null, add: !!m.add } : null
     focusTick.value++
   }
   function clearMode() { mode.value = null }
@@ -230,6 +286,7 @@ export function useStudioPrompt(
     routeCtrl = null
     routing.value = false
     runSeq++
+    if (fx.working.value || fx.session.value) { fx.stop(); return }
     if (runLive.value) stopped.value = true
     else if (takesWorking.value) worker()?.abandonTakes?.()
   }
@@ -242,42 +299,63 @@ export function useStudioPrompt(
   // Defensive: the strip is hidden while the worker is busy, so this only matters
   // if × or Keep reaches us another way mid-run; any late reply is then dropped.
   const dropLateReply = () => { if (runLive.value) stopped.value = true }
-  function previewTake(id: string | null) { worker()?.previewTake?.(id === CURRENT ? null : takeAt(id)) }
-  function chooseTake(id: string) { worker()?.selectTake?.(takeAt(id)) }
+  // An open effect set owns the strip (stage 5): each call goes to it instead.
+  function previewTake(id: string | null) {
+    if (fx.session.value) { fx.preview(id); return }
+    worker()?.previewTake?.(id === CURRENT ? null : takeAt(id))
+  }
+  function chooseTake(id: string) {
+    if (fx.session.value) { fx.choose(id); return }
+    worker()?.selectTake?.(takeAt(id))
+  }
   function keepTake(id: string) {
+    if (fx.session.value) { void fx.keep(id); return }
     const w = worker()
     const t = takeAt(id)
     if (!w || !t) return
     dropLateReply()
     w.selectTake?.(t)
     w.keepTake?.()
+    o.afterKeep?.(request.value)
   }
   // The strip's own "more" button: the worker restarts the set, so only a run
   // in flight (not thumbnails still drawing) blocks it.
   function moreTakes() {
+    if (fx.session.value) { void fx.more(); return }
     if (busy.value || disabled.value) { toast.info(BUSY_NOTICE); return }
     const w = worker()
     if (w?.moreDirections) void track(w.moreDirections()).catch(() => {})
   }
-  function closeTakes() { dropLateReply(); worker()?.dismissTakes?.() }
+  function closeTakes() {
+    if (fx.session.value) { fx.close(); return }
+    dropLateReply(); worker()?.dismissTakes?.()
+  }
+  /** End an open effect set, putting the target back (the owner calls this before it
+   *  closes or saves, so a previewed draft never persists — preflight C9). */
+  function endEffects() { if (fx.session.value || fx.working.value) fx.close() }
+  /** An effect Keep is saving: the strip's Keep buttons are off until it settles. */
+  const takesSaving = computed(() => !!fx.session.value && !!fx.saving?.value)
+  /** The price of what a new-effect chip will do (spec §7.2), shown before anything runs. */
+  const modeNote = computed<string | null>(() => (mode.value?.kind === 'new-effect' ? shaderGenEstimateText(hosted()) : null))
 
   // --- changes and answers ----------------------------------------------------
   function approve() { worker()?.keep() }
   function rejectAll() { worker()?.revert() }
-  function dismissAnswer() { answerCard.value = null }
+  function dismissAnswer() { answerRef.value = null; fx.clearMessages() }
   function runFollowUp(text: string) { return submit(text) }
 
   onBeforeUnmount(() => {
     runSeq++
     routeCtrl?.abort()
     routeCtrl = null
+    endEffects()
   })
 
   return {
-    chipLabel, suggestions, mode, working, workingLabel, disabled, editLocked, lockedNote, focusTick,
-    card, takes, answerCard, worker,
+    chipLabel, suggestions, mode, modeNote, working, workingLabel, disabled, editLocked, lockedNote, focusTick,
+    card, takes, takesSaving, answerCard, worker,
     submit, runKind, setMode, clearMode, stop, requestFocus,
-    previewTake, chooseTake, keepTake, moreTakes, closeTakes,
+    previewTake, chooseTake, keepTake, moreTakes, closeTakes, endEffects,
     approve, rejectAll, dismissAnswer, runFollowUp,
   }
 }

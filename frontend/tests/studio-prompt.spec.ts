@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { dropNode, openBlankWorkflow, openCompositor, waitForBackend } from './_helpers'
+import { SPIKE_TAKES } from '../app/lib/shadergen/__eval__/spikeTakes'
 
 /**
  * AI in Sailor stage 4: the one prompt in the studios, Frame and the template
@@ -136,20 +137,51 @@ test.describe('the one prompt in studios', () => {
     await expect(page.getByTestId('prompt-takes')).toHaveCount(0)
   })
 
-  test('Shader: Remix… sets a mode chip, and sending gives the plain "not yet" message', async ({ page }) => {
+  test('Shader: Remix… sets a priced mode chip, and sending writes three effect takes above the prompt, with no router call', async ({ page }) => {
     const routed = await mockRouter(page, 'tweak')
     const vibe = await mockVibe(page)
+    // /api/shader-gen answers each take with the spike's hand-written rain take (no model is reached).
+    const written: string[] = []
+    await page.route('**/api/shader-gen', async (r) => {
+      const body = r.request().postDataJSON()
+      written.push(String(body.prompt ?? ''))
+      const slot = Number(/Take (\d):/.exec(String(body.prompt ?? ''))?.[1] ?? 1) - 1
+      await r.fulfill({ json: { text: JSON.stringify(SPIKE_TAKES.rain![slot % SPIKE_TAKES.rain!.length]), usage: null, stop_reason: 'end_turn' } })
+    })
+    const saved: string[] = []
+    await page.route('**/api/my-effects**', async (r) => {
+      if (r.request().method() !== 'GET') saved.push(r.request().method())
+      await r.fulfill({ json: { effects: [] } })
+    })
     await openStudio(page, 'ShaderStudio', 'sailor:openShaderStudio')
-    await page.getByTestId('studio-inspector-head').locator('[data-testid="studio-action-row"][data-action-id="remix"]').click()
+    const remix = page.getByTestId('studio-inspector-head').locator('[data-testid="studio-action-row"][data-action-id="remix"]')
+    await expect(remix).toContainText('3 takes · ~$0.24–0.42')
+    await remix.click()
     await expect(page.getByTestId('prompt-mode-chip')).toContainText('Remix')
+    // The chip carries the price before anything runs.
+    await expect(page.getByTestId('studio-prompt').getByTestId('prompt-note')).toHaveText('~$0.24–0.42')
     await expect(prompt(page)).toBeFocused()
     await prompt(page).fill('ink on paper')
     await prompt(page).press('Enter')
-    await expect(page.getByTestId('prompt-answer')).toContainText('isn’t available yet')
+    const strip = page.getByTestId('prompt-takes')
+    await expect(strip).toBeVisible({ timeout: 20_000 })
+    await expectAbove(strip, prompt(page))
+    const tiles = page.getByTestId('prompt-take-tile')
+    await expect(tiles).toHaveCount(3)
+    // Every tile settles (a take either passes the checks or shows it didn't come back).
+    await expect(page.locator('[data-testid="prompt-take-tile"][data-state="pending"]')).toHaveCount(0, { timeout: 60_000 })
     // A mode chip decides the kind itself: no router call, and the studio's tune never runs.
     expect(routed).toHaveLength(0)
     expect(vibe).toHaveLength(0)
+    // One call per take (a take that fails its checks may be asked again), each carrying the request.
+    expect(written.length).toBeGreaterThanOrEqual(3)
+    for (const n of [1, 2, 3]) expect(written.some(w => w.includes(`Take ${n}:`))).toBe(true)
+    expect(written.every(w => w.includes('ink on paper'))).toBe(true)
     await expect(page.getByTestId('prompt-mode-chip')).toHaveCount(0)
+    // × puts the effect back and saves nothing.
+    await strip.getByRole('button', { name: 'Close takes' }).click()
+    await expect(strip).toHaveCount(0)
+    expect(saved).toEqual([])
   })
 
   test('Shader: inspector reads the thing, then Edit and Develop rows', async ({ page }) => {
@@ -198,6 +230,34 @@ test.describe('the one prompt in studios', () => {
     await expectAbove(dock.getByTestId('prompt-answer'), box)
     await page.getByRole('button', { name: 'Motion', exact: true }).first().click()
     await expect(box).toBeVisible()
+  })
+
+  test('Frame: a routed new effect writes three takes for the background, the Frame is inert while they are open, and × ends it', async ({ page }) => {
+    const routed = await mockRouter(page, 'new-effect')
+    const written: string[] = []
+    await page.route('**/api/shader-gen', async (r) => {
+      const body = r.request().postDataJSON()
+      written.push(String(body.prompt ?? ''))
+      const slot = Number(/Take (\d):/.exec(String(body.prompt ?? ''))?.[1] ?? 1) - 1
+      await r.fulfill({ json: { text: JSON.stringify(SPIKE_TAKES.rain![slot % SPIKE_TAKES.rain!.length]), usage: null, stop_reason: 'end_turn' } })
+    })
+    await page.route('**/api/my-effects**', r => r.fulfill({ json: { effects: [] } }))
+    await openCompositor(page)
+    const dock = page.getByTestId('compositor-prompt-dock')
+    const box = dock.getByRole('textbox', { name: 'Ask Sailor' })
+    await box.fill('rain on a window')
+    await box.press('Enter')
+    const strip = dock.getByTestId('prompt-takes')
+    await expect(strip).toBeVisible({ timeout: 20_000 })
+    await expect(strip).toContainText('Background')
+    expect(routed[0]).toMatchObject({ request: 'rain on a window', host: 'frame' })
+    await expect(dock.locator('[data-testid="prompt-take-tile"][data-state="pending"]')).toHaveCount(0, { timeout: 60_000 })
+    expect(written.length).toBeGreaterThanOrEqual(3)
+    // × would put back what was there, so nothing else may be edited meanwhile.
+    await expect(page.getByTestId('frame-edit-surface')).toHaveAttribute('inert', /.*/)
+    await strip.getByRole('button', { name: 'Close takes' }).click()
+    await expect(strip).toHaveCount(0)
+    await expect(page.getByTestId('frame-edit-surface')).not.toHaveAttribute('inert', /.*/)
   })
 
   test('3D: the prompt sits above the add bar and answers plainly', async ({ page }) => {
