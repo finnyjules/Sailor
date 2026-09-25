@@ -15,6 +15,7 @@ export const RESOURCE_KINDS = [
   'project', 'brand-kit', 'moodboard', 'template', 'template-font',
   'frame-template',
   'character', 'lora', 'voice', 'timeline-asset', 'cloud-training',
+  'my-effect',
 ] as const
 
 export type ResourceKind = typeof RESOURCE_KINDS[number]

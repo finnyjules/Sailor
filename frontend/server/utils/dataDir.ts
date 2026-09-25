@@ -9,7 +9,7 @@
 import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
 
-export type StoreName = 'brand-kits' | 'moodboards' | 'templates-layouts' | 'templates-fonts-user' | 'frame-templates' | 'data'
+export type StoreName = 'brand-kits' | 'moodboards' | 'templates-layouts' | 'templates-fonts-user' | 'frame-templates' | 'data' | 'my-effects'
 
 const LOCAL_PATHS: Record<StoreName, string[]> = {
   'brand-kits': ['server', 'brand-kits'],
@@ -18,6 +18,7 @@ const LOCAL_PATHS: Record<StoreName, string[]> = {
   'templates-fonts-user': ['server', 'templates', 'fonts', 'user'],
   'frame-templates': ['server', 'frame-templates'],
   'data': ['.data'],
+  'my-effects': ['.data', 'my-effects'],
 }
 
 export function storeDir(name: StoreName): string {
