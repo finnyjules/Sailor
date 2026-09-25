@@ -17,6 +17,7 @@ import { effectIdForVersion, myEffectIdOf, valuesForVersion } from '~/lib/myEffe
 import { registerEffects, unregisterEffects } from '~/lib/shaderfx/catalog'
 import { shaderFx } from '~/lib/shaderfx/renderer'
 import { useMyEffects } from '~/composables/useMyEffects'
+import { MY_EFFECTS_ERRORS } from '~/lib/myEffects/client'
 import { chooseTile, CURRENT, failPending, hoverTile, openTakes, shownTakeId, type TakesSession } from '~/lib/prompt/takesSession'
 import type { EffectDef, ParamValue } from '~/lib/shaderfx/types'
 
@@ -35,10 +36,16 @@ export interface EffectTarget {
   apply: (effectId: string, values: Record<string, ParamValue>) => void
 }
 
+const PLAIN_SAVE_ERRORS = new Set<string>(Object.values(MY_EFFECTS_ERRORS))
+
 export const EFFECT_MESSAGES = {
   contextLost: 'The graphics card stopped responding while the new effects were being tested. Nothing was changed.',
   droppedTake: 'That take stopped the graphics card, so it was dropped.',
-  saveFailed: (why: string) => `Couldn’t save to My effects: ${why}`,
+  failed: 'Sailor couldn’t write new effects just now. Try again in a moment.',
+  noCredits: 'You don’t have enough credits to write new effects. Add credits, then try again.',
+  /** My effects' own plain sentences pass through; anything else (a validation or network
+   *  detail) becomes one plain sentence — raw error text never reaches the screen. */
+  saveFailed: (why: string) => (PLAIN_SAVE_ERRORS.has(why) ? why : `${MY_EFFECTS_ERRORS.save} Try again in a moment.`),
   savedNew: (name: string) => `Saved to My effects as “${name}”.`,
   savedVersion: (label: string, name: string) => `Saved as ${label} of “${name}”. Earlier versions are kept.`,
 }
@@ -72,6 +79,16 @@ export interface EffectTakes {
   stop(): void
   clearMessages(): void
 }
+
+/** A refusal for want of credits (HTTP 402, or the hosted meter's "credits" wording), as the
+ *  error itself or as the engine's failure log line. */
+const CREDITS_RE = /\b402\b|credits/i
+function isCreditsRefusal(e: unknown): boolean {
+  const x = e as { statusCode?: unknown; status?: unknown; message?: unknown } | null
+  return x?.statusCode === 402 || x?.status === 402 || CREDITS_RE.test(String(x?.message ?? e ?? ''))
+}
+/** The plain sentence for a run that failed for a reason other than Stop or a lost graphics card. */
+const failureMessage = (e: unknown): string => (isCreditsRefusal(e) ? EFFECT_MESSAGES.noCredits : EFFECT_MESSAGES.failed)
 
 /** The My effect a remix adds a version to: its own id, or (an old-version def) the effect it belongs to. */
 function mineIdOf(base: EffectDef | null): string | null {
@@ -122,12 +139,13 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
     request.value = text.trim()
     session.value = { ...openTakes({ nodeId: t.key, nodeLabel: t.label, request: text, takes: [] }), loopDone: false }
     running.value = true
+    let renderer: TakeRenderer | null = null
     try {
       const src = t.image()
       const input = await buildInput({ request: request.value, base: t.base, image: imageForModel(src), signal: c.signal })
       if (run !== seq) return
-      const renderer = makeRenderer(src ?? placeholderSource())
-      await generate(input, {
+      renderer = makeRenderer(src ?? placeholderSource())
+      const result = await generate(input, {
         callModel,
         renderer,
         onTake: (et, slot) => {
@@ -145,11 +163,18 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
       })
       if (run !== seq || !session.value) return
       session.value = { ...failPending(session.value), loopDone: true }
+      // Nothing came back because the model couldn't be reached (not because the takes failed
+      // their checks, which the strip already says): say why, plainly.
+      const modelErrors = result.failures.flatMap(f => f.log).filter(l => l.startsWith('model error'))
+      if (!result.takes.length && modelErrors.length) error.value = failureMessage(modelErrors.find(l => CREDITS_RE.test(l)) ?? modelErrors[0])
     } catch (e) {
       if (run !== seq || isAbortError(e)) return // Stop / × / a newer start already ended this one
-      error.value = e instanceof ContextLostError ? EFFECT_MESSAGES.contextLost : String((e as Error)?.message ?? e)
+      error.value = e instanceof ContextLostError ? EFFECT_MESSAGES.contextLost : failureMessage(e)
       end()
     } finally {
+      // The take renderer is only needed while the set is written: its context goes as soon as the
+      // set settles, is replaced, stopped, closed or kept (each aborts the run, which lands here).
+      renderer?.dispose?.()
       if (run === seq) running.value = false
     }
   }
@@ -181,7 +206,7 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
       notice.value = mineId ? EFFECT_MESSAGES.savedVersion(rec.versions[last]!.label, rec.name) : EFFECT_MESSAGES.savedNew(rec.name)
       return true
     } catch (e) {
-      error.value = EFFECT_MESSAGES.saveFailed(String((e as Error)?.message ?? e))
+      error.value = EFFECT_MESSAGES.saveFailed(String((e as Error)?.message ?? ''))
       return false
     }
   }

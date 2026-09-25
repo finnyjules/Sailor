@@ -7,6 +7,7 @@ import { generateTakes, type TakeRenderer } from '~/lib/shadergen/engine'
 import { TAKE_ANGLES } from '~/lib/shadergen/prompt'
 import { SPIKE_TAKES } from '~/lib/shadergen/__eval__/spikeTakes'
 import { CURRENT } from '~/lib/prompt/takesSession'
+import { MY_EFFECTS_ERRORS } from '~/lib/myEffects/client'
 
 ;(globalThis as any).useLocalSettings = () => ({ getLocalSetting: () => 'k' })
 const renderer: TakeRenderer = { compile: () => null, judge: () => ({ pass: true, flags: [], thumbnail: 'data:thumb' }), sheet: () => '' }
@@ -106,15 +107,62 @@ describe('useEffectTakes', () => {
     expect(api.notice.value).toBe(EFFECT_MESSAGES.savedVersion('v2', 'Rain'))
   })
 
-  it('a failed save keeps the strip open and shows why', async () => {
+  it('a failed save keeps the strip open and says so in a plain sentence, never the raw error', async () => {
     const { api, release, library } = setup()
-    library.saveTake.mockRejectedValueOnce(new Error('409'))
+    library.saveTake.mockRejectedValueOnce(new Error('[PUT] "/api/my-effects/mine_aaaaaaaaaaaa": 409 Conflict'))
     const tg = target()
     const run = api.start('rain', tg); release(0); release(1); release(2); await run
     expect(await api.keep(api.session.value!.tiles[0]!.takeId!)).toBe(false)
     expect(api.session.value).not.toBeNull()
-    expect(api.error.value).toContain('409')
+    expect(api.error.value).toBe('Couldn’t save to My effects. Try again in a moment.')
+    expect(api.error.value).not.toMatch(/409|\/api|mine_/)
     expect(tg.apply).not.toHaveBeenCalled()
+    // My effects' own plain sentences pass through as they are.
+    library.saveTake.mockRejectedValueOnce(new Error(MY_EFFECTS_ERRORS.tooLarge))
+    expect(await api.keep(api.session.value!.tiles[0]!.takeId!)).toBe(false)
+    expect(api.error.value).toBe(MY_EFFECTS_ERRORS.tooLarge)
+  })
+
+  it('a general failure ends the run with a plain sentence, not the raw error', async () => {
+    const { api } = setup({ generate: vi.fn(async () => { throw new Error('[POST] "/api/shader-gen": 500 Internal Server Error') }) })
+    const tg = target()
+    await api.start('rain', tg)
+    expect(api.session.value).toBeNull()
+    expect(api.error.value).toBe(EFFECT_MESSAGES.failed)
+    expect(tg.apply).not.toHaveBeenCalled()
+  })
+
+  it('a credits refusal on every call says so plainly; no status code or route reaches the strip', async () => {
+    const refusal = Object.assign(new Error('[POST] "/api/shader-gen": 402 Payment Required'), { statusCode: 402 })
+    const { api } = setup({ callModel: vi.fn(async () => { throw refusal }) })
+    await api.start('rain', target())
+    expect(api.error.value).toBe(EFFECT_MESSAGES.noCredits)
+    expect(api.session.value!.tiles.every(t => t.state === 'failed')).toBe(true)
+    const visible = JSON.stringify({ session: api.session.value, error: api.error.value, notice: api.notice.value })
+    expect(visible).not.toMatch(/402|\/api|Payment Required|model error/)
+  })
+
+  it('each set\'s take renderer is released: one live at most, none once a set ends', async () => {
+    let live = 0, made = 0
+    const renderers = () => { made++; live++; let gone = false; return { ...renderer, dispose: () => { if (!gone) { gone = true; live-- } } } }
+    const { api, release } = setup({ renderer: renderers })
+    const run = api.start('rain', target()); await tick(); await tick()
+    expect(live).toBe(1) // in use while the set is written
+    release(0); release(1); release(2); await run
+    expect(live).toBe(0) // settled
+    const again = api.more(); await tick(); await tick()
+    expect(live).toBe(1)
+    const third = api.more() // not done yet: ignored
+    await third
+    api.stop(); await again
+    expect(live).toBe(0) // stopped
+    const tg = target()
+    const four = api.start('rain', tg); await tick(); await tick()
+    const five = api.start('snow', tg); await tick(); await tick() // replaced mid-set
+    expect(live).toBe(1)
+    api.close(); await four; await five
+    expect(made).toBe(4)
+    expect(live).toBe(0)
   })
 
   it('Stop aborts the request, restores the target and clears partial takes', async () => {

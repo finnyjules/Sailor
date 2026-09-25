@@ -35,6 +35,9 @@ export interface TakeRenderer {
   judge(take: GenTake): { pass: boolean; flags: Flag[]; thumbnail: string }
   /** One image of the takes side by side, left to right, as a data URL. */
   sheet(takes: GenTake[]): string
+  /** Release the renderer's WebGL context (browsers cap live contexts and silently lose the
+   *  oldest). After it, compile/judge/sheet throw an AbortError. Safe to call twice. */
+  dispose?(): void
 }
 
 export interface EngineDeps {

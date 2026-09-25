@@ -86,9 +86,13 @@ export function createBrowserTakeRenderer(source: HTMLImageElement | HTMLCanvasE
   }
   let baseline: number | null = null
   const copy: ShaderPass[] = [{ id: '__shadergen_copy', source: COPY_FS, uniforms: {} }]
+  // A take still finishing after its set was dropped must not bring the context back.
+  let disposed = false
+  const live = () => { if (disposed) throw new DOMException('Stopped', 'AbortError') }
 
   return {
     compile(take) {
+      live()
       let err: string | null = null
       try {
         renderer.render(passesFor(defFor(take), 0), source, 64, 64)
@@ -99,6 +103,7 @@ export function createBrowserTakeRenderer(source: HTMLImageElement | HTMLCanvasE
       return err
     },
     judge: take => guarded(() => {
+      live()
       const def = defFor(take)
       renderer.render(passesFor(def, 2.0), source, THUMB, THUMB)
       const a = sample(renderer.outputCanvas!)
@@ -115,6 +120,7 @@ export function createBrowserTakeRenderer(source: HTMLImageElement | HTMLCanvasE
       return { ...judgeFrames({ ...frames, extraMs }), thumbnail }
     }),
     sheet: takes => guarded(() => {
+      live()
       const c = document.createElement('canvas')
       c.width = THUMB * takes.length
       c.height = THUMB
@@ -125,5 +131,10 @@ export function createBrowserTakeRenderer(source: HTMLImageElement | HTMLCanvasE
       })
       return c.toDataURL('image/jpeg', 0.85)
     }),
+    dispose() {
+      if (disposed) return
+      disposed = true
+      renderer.dispose() // loses the context through WEBGL_lose_context and drops the canvas
+    },
   }
 }
