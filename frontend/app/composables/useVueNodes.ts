@@ -72,17 +72,27 @@ export function getTypeColor(type: string): string {
 // Cache for /object_info widget specs
 const objectInfo = ref<Record<string, any>>({})
 let objectInfoFetched = false
+// The fetch in flight, if any. A non-forced caller that arrives while one runs
+// (e.g. the start modal's build racing the canvas's mount fetch) waits for it
+// instead of downloading the whole schema a second time.
+let objectInfoInFlight: Promise<Record<string, any>> | null = null
 
 export async function fetchObjectInfo(force = false) {
   if (objectInfoFetched && !force) return objectInfo.value
-  try {
-    const data = await $fetch<Record<string, any>>('/object_info')
-    objectInfo.value = data
-    objectInfoFetched = true
-  } catch (err) {
-    console.error('[useVueNodes] Failed to fetch object_info:', err)
-  }
-  return objectInfo.value
+  if (objectInfoInFlight && !force) return objectInfoInFlight
+  const run = (async () => {
+    try {
+      const data = await $fetch<Record<string, any>>('/object_info')
+      objectInfo.value = data
+      objectInfoFetched = true
+    } catch (err) {
+      console.error('[useVueNodes] Failed to fetch object_info:', err)
+    }
+    return objectInfo.value
+  })()
+  objectInfoInFlight = run
+  try { return await run }
+  finally { if (objectInfoInFlight === run) objectInfoInFlight = null }
 }
 
 // Widget types that appear as interactive controls (not connection ports)

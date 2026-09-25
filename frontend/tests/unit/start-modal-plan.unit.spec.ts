@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { planStart } from '../../app/lib/startModal/plan'
+import { planStart, startOrigin } from '../../app/lib/startModal/plan'
 
 const types = (p: ReturnType<typeof planStart>) => p.nodes.map(n => n.nodeType)
 const wires = (p: ReturnType<typeof planStart>) => p.edges.map(e => `${e.from}:${e.out}->${e.to}.${e.input}`)
@@ -50,5 +50,25 @@ describe('planStart', () => {
 
   it('3D starts with an object so it is never an empty scene', () => {
     expect(planStart('scene3d').nodes[0]!.starter).toBe('scene3dObject')
+  })
+})
+
+describe('startOrigin', () => {
+  it('an empty canvas builds at the origin', () => {
+    expect(startOrigin([])).toEqual({ x: 0, y: 0 })
+  })
+
+  it('lands clear to the right of whatever the user has placed since', () => {
+    const o = startOrigin([
+      { x: -100, y: 40, width: 240, height: 280 },
+      { x: 300, y: -60, width: 200, height: 120 },
+    ])
+    expect(o).toEqual({ x: 500 + 160, y: -60 })
+  })
+
+  it('never overlaps an existing node', () => {
+    const boxes = [{ x: 0, y: 0, width: 900, height: 900 }]
+    const o = startOrigin(boxes)
+    expect(o.x).toBeGreaterThan(boxes[0]!.x + boxes[0]!.width)
   })
 })

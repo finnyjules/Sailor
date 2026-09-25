@@ -4,7 +4,7 @@ import { VueFlow, useVueFlow, type NodeTypesObject, type EdgeTypesObject } from 
 import { MiniMap } from '@vue-flow/minimap'
 import { toast } from 'vue-sonner'
 import { describeQueueRefusal } from '~/lib/queueRefusal'
-import { planStart } from '~/lib/startModal/plan'
+import { planStart, startOrigin } from '~/lib/startModal/plan'
 import type { StartPickId } from '~/data/start-modal'
 import { serializeDoc } from '~/lib/scene3d/config'
 import { starterSceneDoc } from '~/lib/startModal/scene3dStill'
@@ -7976,6 +7976,16 @@ async function materializeStart(pick: StartPickId | null, opts: { isCurrent?: ()
   }
 
   // ── Synchronous from here to the edges: no await, so no tab switch or load can land mid-build.
+  // The build can arrive after the modal closed (the awaits above), so the user may
+  // already have placed nodes: then it lands clear of them, unselected, and leaves
+  // their view alone. On the empty canvas it is built for, it lands at the origin.
+  const occupied = (nodes.value as any[]).map((n: any) => ({
+    x: n.position?.x ?? 0,
+    y: n.position?.y ?? 0,
+    width: n.dimensions?.width || n.data?.size?.[0] || 240,
+    height: n.dimensions?.height || n.data?.size?.[1] || 280,
+  }))
+  const origin = startOrigin(occupied)
   clearFixes()
   const COL_W = 320
   const minted = new Map<string, any>()
@@ -7985,7 +7995,8 @@ async function materializeStart(pick: StartPickId | null, opts: { isCurrent?: ()
     if (pn.starter === 'scene3dObject') widgets.scene_state = starterSceneState()
     // Same starter effect the start tile renders, so the tile and the node agree.
     const properties = pn.starter === 'shaderEffect' ? { sailor_shaderStudio: starterShaderConfig() } : undefined
-    const node = createNodeData(pn.nodeType, { x: pn.col * COL_W, y: 0 }, Object.keys(widgets).length ? widgets : undefined, properties)
+    const node = createNodeData(pn.nodeType, { x: origin.x + pn.col * COL_W, y: origin.y }, Object.keys(widgets).length ? widgets : undefined, properties)
+    node.selected = false // the starter never takes the selection
     nodes.value.push(node) // push before minting the next id (mintNodeId dedupes against nodes.value)
     minted.set(pn.key, node)
   }
@@ -8011,7 +8022,7 @@ async function materializeStart(pick: StartPickId | null, opts: { isCurrent?: ()
   }
   // ── End of the synchronous build.
 
-  await fitStartNodes([...minted.values()].map(n => String(n.id)), stale)
+  if (!occupied.length) await fitStartNodes([...minted.values()].map(n => String(n.id)), stale)
   return true
 }
 

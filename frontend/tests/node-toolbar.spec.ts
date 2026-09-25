@@ -12,29 +12,6 @@ import { dropNode, openBlankWorkflow, waitForBackend } from './_helpers'
  * node (mousedown bubbles to vue-flow) AND opens a file chooser, swallowed by
  * the beforeEach handler.
  */
-/**
- * A truly bare canvas. Every exit from the start modal builds a starter Frame
- * through `materializeStart`, which first awaits `refreshSchema()`, so the
- * Frame can land seconds after the modal closes: after the shared helper has
- * stopped looking for it, and after this spec has dropped and selected its
- * node. A late Frame overlaps the dropped node and takes the selection; a
- * bare Frame has no toolbar actions, so the bar never shows. Wait for the
- * starter Frame (if it is still coming) and delete it before the test starts.
- */
-async function bareCanvas(page: Page) {
-  const heading = page.getByRole('heading', { name: 'What do you want to make?' })
-  if (await heading.isVisible().catch(() => false)) {
-    await page.keyboard.press('Escape')
-    await expect(heading).toHaveCount(0)
-  }
-  const frame = page.locator('.vue-flow__node-artifact-frame')
-  if (await frame.first().waitFor({ state: 'attached', timeout: 15_000 }).then(() => true, () => false)) {
-    await frame.first().click()
-    await page.keyboard.press('Delete')
-  }
-  await expect(page.locator('.vue-flow__node')).toHaveCount(0)
-}
-
 async function selectNode(page: Page, node: Locator) {
   const bb = (await node.boundingBox())!
   await page.mouse.click(bb.x + bb.width / 2, bb.y + bb.height / 2)
@@ -59,8 +36,9 @@ test.describe('Node toolbar', () => {
   test.beforeEach(async ({ page }) => {
     page.on('filechooser', async () => { /* swallow artifact upload dialogs */ })
     await waitForBackend(page)
+    // openBlankWorkflow waits out the starter Frame and deletes it: a bare canvas.
     await openBlankWorkflow(page)
-    await bareCanvas(page)
+    await expect(page.locator('.vue-flow__node')).toHaveCount(0)
   })
 
   test('audio node: Develop ▾ lists Transcribe and Speakers; Transcribe adds a node; deselect hides the bar', async ({ page }) => {

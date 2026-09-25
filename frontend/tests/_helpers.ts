@@ -20,21 +20,25 @@ export async function setStudioRow(page: Page, testid: string, value: number | s
  * a pick, "Start with an empty Frame", the close button or Esc — now leaves a
  * Frame (Compositor) node on the canvas; there is no more "skip to a bare
  * canvas" option. Tests written against a bare canvas after skipping still
- * need one, so this clicks the empty-Frame button and then removes the
- * starter Frame it leaves behind.
+ * need one, so this clicks the empty-Frame button, waits for the starter Frame
+ * it leaves behind, and removes it.
+ *
+ * The Frame is built from the cached /object_info, but on a cold page that
+ * schema may still be downloading (multi-MB, seconds under load), so wait for
+ * it generously rather than for a fixed few seconds: returning before it lands
+ * hands the spec a canvas the Frame will drop into later. Returns once the
+ * canvas is empty again.
  */
 export async function dismissStartModal(page: Page) {
   const emptyFrame = page.getByTestId('start-empty-frame')
-  if (await emptyFrame.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await emptyFrame.click()
-    await emptyFrame.waitFor({ state: 'hidden', timeout: 5_000 })
-    const frame = page.locator('.vue-flow__node').first()
-    if (await frame.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await frame.click()
-      await page.keyboard.press('Delete')
-      await page.locator('.vue-flow__node').first().waitFor({ state: 'detached', timeout: 5_000 }).catch(() => {})
-    }
-  }
+  if (!(await emptyFrame.isVisible({ timeout: 2_000 }).catch(() => false))) return
+  await emptyFrame.click()
+  await emptyFrame.waitFor({ state: 'hidden', timeout: 5_000 })
+  const frame = page.locator('.vue-flow__node-artifact-frame')
+  await frame.first().waitFor({ state: 'attached', timeout: 20_000 })
+  await frame.first().click()
+  await page.keyboard.press('Delete')
+  await expect(page.locator('.vue-flow__node')).toHaveCount(0)
 }
 
 /**

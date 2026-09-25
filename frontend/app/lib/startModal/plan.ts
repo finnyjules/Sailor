@@ -74,3 +74,19 @@ export function planStart(pick: StartPickId | null): StartPlan {
   }
   return { nodes: [{ key: 'frame', nodeType: 'Compositor', col: 0 }], edges: [] }
 }
+
+export interface StartBox { x: number; y: number; width: number; height: number }
+
+/**
+ * Where the plan's column 0 lands. The build can arrive after the modal has
+ * closed (it may wait on /object_info or a starter upload), and by then the user
+ * may have placed nodes of their own: an empty canvas builds at the origin as
+ * before; otherwise the build goes `gap` px clear to the right of everything
+ * already there, top-aligned with it, so it never lands on the user's work.
+ */
+export function startOrigin(occupied: StartBox[], gap = 160): { x: number; y: number } {
+  if (!occupied.length) return { x: 0, y: 0 }
+  const right = Math.max(...occupied.map(b => b.x + b.width))
+  const top = Math.min(...occupied.map(b => b.y))
+  return { x: right + gap, y: top }
+}

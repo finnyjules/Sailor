@@ -103,4 +103,59 @@ test.describe('Start modal — the blank-project rewrite', () => {
     await expect.poll(() => settledNodeCount(page), { timeout: 10_000 }).toBe(2)
     await expect(page.locator('.vue-flow__edge')).toHaveCount(0)
   })
+
+  test('a build that lands after the modal closed stays clear of the user\'s node and leaves its selection', async ({ page }) => {
+    // Shader waits on its starter-picture upload before it builds. Hold that
+    // upload so the build lands well after the modal has closed, the way a
+    // slow /object_info used to hold every pick.
+    let released = false
+    await page.route('**/upload/image', async (route) => {
+      await new Promise(r => setTimeout(r, 4_000))
+      released = true
+      await route.continue()
+    })
+    page.on('filechooser', async () => { /* the Audio card body is a file button */ })
+
+    await page.getByTestId('start-tile-shader').click()
+    await expect(page.getByText('What do you want to make?')).toHaveCount(0)
+
+    // Meanwhile the user places a node and selects it.
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('sailor:addNode', { detail: { nodeType: 'Audio' } })))
+    const mine = page.locator('.vue-flow__node-artifact-audio')
+    await expect(mine).toBeVisible()
+    const box = (await mine.boundingBox())!
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+    await expect(mine).toHaveClass(/\bselected\b/)
+    expect(released).toBe(false) // the build really is still pending
+
+    // The build lands: Image → Shader → Frame, wired as before.
+    const frame = page.locator('.vue-flow__node-artifact-frame')
+    await expect(frame).toHaveCount(1, { timeout: 20_000 })
+    await expect.poll(() => settledNodeCount(page), { timeout: 10_000 }).toBe(4)
+    await expect(page.locator('.vue-flow__edge')).toHaveCount(2)
+
+    // The user's node keeps the selection, and the view did not move off it.
+    await expect(mine).toHaveClass(/\bselected\b/)
+    await expect(page.locator('.vue-flow__node.selected')).toHaveCount(1)
+    const after = (await mine.boundingBox())!
+    expect(Math.round(after.x)).toBe(Math.round(box.x))
+    expect(Math.round(after.y)).toBe(Math.round(box.y))
+
+    // No starter node overlaps it (graph positions, not screen boxes, so it
+    // holds even for nodes scrolled out of view).
+    const overlaps = await page.evaluate(() => {
+      const rect = (el: Element) => {
+        const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec((el as HTMLElement).style.transform)!
+        const r = (el as HTMLElement).getBoundingClientRect()
+        const zoom = r.width / (el as HTMLElement).offsetWidth || 1
+        return { x: +m[1]!, y: +m[2]!, w: r.width / zoom, h: r.height / zoom }
+      }
+      const all = [...document.querySelectorAll('.vue-flow__node')]
+      const me = all.find(el => el.classList.contains('vue-flow__node-artifact-audio'))!
+      const a = rect(me)
+      return all.filter(el => el !== me).map(rect)
+        .filter(b => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h).length
+    })
+    expect(overlaps).toBe(0)
+  })
 })

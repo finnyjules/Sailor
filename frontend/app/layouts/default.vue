@@ -327,9 +327,13 @@ function onStartModalStart(pick: StartPickId | null) {
       })
       return
     }
-    await canvas.refreshSchema?.()
-    if (!isCurrent()) return
+    // Build first, straight from the cached schema: the Frame must land while the
+    // canvas is still the empty one the modal closed on. The session's one forced
+    // /object_info refresh (slow: seconds on a big install) runs after, and heals
+    // the new Frame against the fresh schema. Awaiting it first landed the Frame
+    // seconds late, on top of — and fitting the view away from — the user's work.
     await canvas.materializeStart(pick, { isCurrent })
+    void canvas.refreshSchema?.()
   })
 }
 
