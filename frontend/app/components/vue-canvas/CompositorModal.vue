@@ -2095,6 +2095,26 @@ function togglePen() {
   penGuideTargetId.value = guideFor
   openPenSession({ kind: 'new' })
 }
+/** A path layer the shared pen can reopen: it remembers its drawing (`sketch`)
+ *  and is not corner-pinned (the pen's view cannot follow a projective warp, so
+ *  a pinned path keeps the point editor). */
+function penReopenable(l: any): boolean {
+  return l?.kind === 'path' && !!l.sketch && !cornerPinActive(l.cornerPin)
+}
+/** Double-click on a drawn path: reopen the shared pen on the layer itself. */
+function reopenPenOnLayer(id: string) {
+  if (viewOnlyGuard()) return
+  if (smartActive.value) { if (smartActionBusy.value) return; exitSmartMode() }
+  cancelPenSession(); exitNodeEdit(); brush.setActive(false); distortTool.value = false
+  if (genActive.value) exitGenMode()
+  selectLocal(id)
+  openPenSession({ kind: 'layer', id })
+}
+/** A double-clicked path: the shared pen when it can reopen it, else the point editor. */
+function editPathLayer(l: any) {
+  if (penReopenable(l)) reopenPenOnLayer(l.id)
+  else void enterNodeEdit(l.id)
+}
 // Return to the default Select tool: leave pen/node-edit/generate modes.
 function selectTool() {
   cancelPenSession()
@@ -4043,7 +4063,7 @@ function onCanvasDblClickCapture(e: MouseEvent) {
     const id = hitTopStackKey(e.clientX, e.clientY)
     const res = id ? resolveStackKey(id) : null
     if (res?.type === 'local' && res.layer.kind === 'path') {
-      e.preventDefault(); e.stopPropagation(); enterNodeEdit(res.layer.id); return
+      e.preventDefault(); e.stopPropagation(); editPathLayer(res.layer); return
     }
     onCanvasDblClick(e, res?.type === 'local' ? res.layer.id : null)
     return
@@ -4070,7 +4090,8 @@ async function onViewDblClick(e: MouseEvent) {
     // enterNodeEdit sizes the node overlay from canvasDisplay, which re-fits to the design
     // shape in the pre-flush watcher on previewAspect: wait for it.
     await nextTick()
-    await enterNodeEdit(l.id)
+    const cur = localLayers.value.find(x => x.id === l.id)
+    if (cur) editPathLayer(cur)
   }
 }
 // Set in onCanvasPointerDownCapture: was the just-completed press on a layer?

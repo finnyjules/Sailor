@@ -13,9 +13,16 @@
  *     (`recentreSketch`) and becomes ONE new path layer that remembers its
  *     drawing (`sketch`, with `d === sketchToLocalD(sketch)`), planted where it
  *     was drawn (`placementAfterRecentre`). No outline → nothing written.
- *   - `{ kind: 'layer' }` / `{ kind: 'guide' }` — reopening a drawn path and
- *     drawing a text guide; they arrive in Tasks 8–9. Until then `open` ignores
- *     them.
+ *   - `{ kind: 'layer', id }` — reopening a drawn path layer (Task 8). The pen
+ *     edits a clone of the layer's `sketch` through the layer's own placement
+ *     (`layerView` of its LIVE x/y/rotation/skew and effective scale — see
+ *     `layerPlacementForView`), and every change is previewed ON the layer
+ *     itself with `commit` (no history), so its own fill, stroke and effects
+ *     render the drawing live. One undo step is recorded at open; commit
+ *     re-centres and writes `d`/`sketch`/`bbox`/`x`/`y`; cancel writes the
+ *     original layer back exactly.
+ *   - `{ kind: 'guide' }` — drawing a text guide; arrives in Task 9. Until then
+ *     `open` ignores it.
  *
  * Construction is side-effect free (no DOM, no lifecycle hooks) so vitest can
  * run it in `node`; the pen is disposed whenever a session closes and, when
@@ -23,11 +30,14 @@
  */
 import { ref, shallowRef, computed, getCurrentScope, onScopeDispose, type Ref, type ComputedRef } from 'vue'
 import type { SketchDoc } from '~/lib/sketch/model'
+import { cloneDoc } from '~/lib/sketch/clone'
+import { layoutScaleOf } from '~/lib/frame/responsive/layoutScale'
 import type { ViewMatrix } from '~/lib/sketch/view'
 import { usePen, type Pen, type PenTool } from '~/composables/pen/usePen'
 import { createPathLayer } from '~/composables/useCompositorLayers'
 import {
-  sketchToLocalD, localOutlineBounds, recentreSketch, newDrawingView, placementAfterRecentre,
+  sketchToLocalD, localOutlineBounds, recentreSketch, newDrawingView, placementAfterRecentre, layerView,
+  type LayerPlacement,
 } from '~/lib/compositor/penFrame'
 
 export type FramePenTarget = { kind: 'new' } | { kind: 'layer'; id: string } | { kind: 'guide'; textId: string }
@@ -64,19 +74,68 @@ export function isClosedDrawing(doc: SketchDoc): boolean {
     !e.construction && ((e.kind === 'path' && e.closed) || e.kind === 'circle'))
 }
 
+/**
+ * A path layer's placement as the PAINTER draws it (`applyXform` then
+ * `drawPath` in `useCompositorLayers.ts`): translate·rotate·shear, then
+ * `applyXform`'s extra uniform scale — the responsive layout scale
+ * `layoutScaleOf(layer)` (times the cloner copy's own `dscale`, which is 1 for
+ * copy 0) — then `drawPath`'s `scale·W`. So the effective scale for
+ * `layerView` / `placementAfterRecentre` is `layer.scale × layoutScaleOf(layer)`.
+ */
+export function layerPlacementForView(l: any): LayerPlacement {
+  return {
+    x: l.x, y: l.y,
+    rotation: l.rotation || 0,
+    skewX: l.skewX || 0, skewY: l.skewY || 0,
+    scale: (l.scale || 1) * layoutScaleOf(l),
+  }
+}
+
 export function useFramePenSession(host: FramePenHost) {
   const session = shallowRef<FramePenSession | null>(null)
   let seq = 0
+  // `{ kind: 'layer' }`: the layer exactly as it was when the session opened
+  let original: any = null
 
   function close() {
     const s = session.value
+    original = null
     if (!s) return
     session.value = null
     s.pen.dispose()
   }
 
+  /** Write `patch(layer)` over the target layer, no history. */
+  function writeLayer(id: string, patch: (l: any) => any) {
+    host.commit(host.layers().map(l => (l.id === id ? patch(l) : l)))
+  }
+
+  function openLayer(id: string): void {
+    const found = host.layers().find(l => l.id === id)
+    if (!found || found.kind !== 'path' || !found.sketch) return
+    close()
+    original = found
+    host.recordHistory()   // the session's ONE undo step
+    const doc = ref<SketchDoc>(cloneDoc(found.sketch))
+    // Read the placement from the LIVE layer (previews never touch x/y), so a
+    // layer moved before the session opened is where the pen draws.
+    const view = computed(() => {
+      const { W, H } = host.size()
+      const live = host.layers().find(l => l.id === id) ?? found
+      return layerView(layerPlacementForView(live), W, H)
+    })
+    const preview = () => {
+      const sk = cloneDoc(doc.value)
+      writeLayer(id, l => ({ ...l, d: sketchToLocalD(sk), sketch: sk }))
+    }
+    const pen = usePen({ doc, view, options: { tools: FRAME_PEN_TOOLS }, onChange: preview, onLiveChange: preview })
+    pen.selectTool('select')
+    session.value = { target: { kind: 'layer', id }, pen, doc, view, key: ++seq }
+  }
+
   function open(target: FramePenTarget): void {
-    if (target.kind !== 'new') return   // 'layer' (Task 8) / 'guide' (Task 9)
+    if (target.kind === 'layer') { openLayer(target.id); return }
+    if (target.kind !== 'new') return   // 'guide' (Task 9)
     close()
     const doc = ref<SketchDoc>({ entities: [], constraints: [] })
     const view = computed(() => { const { W, H } = host.size(); return newDrawingView(W, H) })
@@ -107,10 +166,30 @@ export function useFramePenSession(host: FramePenHost) {
         }
       }
     }
+    if (s.target.kind === 'layer') {
+      const id = s.target.id
+      const r = localOutlineBounds(sketchToLocalD(s.doc.value)) !== null ? recentreSketch(s.doc.value) : null
+      if (!r) { cancelSession(); return }   // nothing left to draw: treat as cancel
+      const { W, H } = host.size()
+      const live = host.layers().find(l => l.id === id) ?? original
+      const { x, y } = placementAfterRecentre(layerPlacementForView(live), r.shiftLocal, W, H)
+      close()
+      // the one undo step was recorded at open
+      writeLayer(id, l => ({ ...l, d: sketchToLocalD(r.sketch), sketch: r.sketch, bbox: r.bbox, x, y }))
+      return
+    }
     close()
   }
 
   function cancelSession(): void {
+    const s = session.value
+    if (s?.target.kind === 'layer' && original) {
+      const id = s.target.id, orig = original
+      close()
+      // exactly as it was; the history entry recorded at open undoes to this same state
+      writeLayer(id, () => orig)
+      return
+    }
     close()
   }
 

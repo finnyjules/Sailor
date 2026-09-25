@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import { addPoint, addPath, addCircle } from '~/lib/sketch/edit'
 import { applyView } from '~/lib/sketch/view'
-import { sketchToLocalD, localOutlineBounds, newDrawingView } from '~/lib/compositor/penFrame'
-import { useFramePenSession, isClosedDrawing, PEN_STYLE_OPEN } from '~/composables/frame/useFramePenSession'
+import { sketchToLocalD, localOutlineBounds, newDrawingView, layerView } from '~/lib/compositor/penFrame'
+import { useFramePenSession, isClosedDrawing, PEN_STYLE_OPEN, layerPlacementForView } from '~/composables/frame/useFramePenSession'
 
 const W = 680, H = 400
 
@@ -119,10 +119,128 @@ describe('useFramePenSession — new drawings', () => {
     expect(isClosedDrawing(d2)).toBe(false)
   })
 
-  it('layer and guide targets are not handled yet (Tasks 8–9)', () => {
+  it('a guide target is not handled yet (Task 9)', () => {
     const { host } = makeHost()
     const s = useFramePenSession(host)
-    s.open({ kind: 'layer', id: 'x' })
+    s.open({ kind: 'guide', textId: 'x' })
     expect(s.session.value).toBeNull()
+  })
+})
+
+describe('useFramePenSession — reopening a drawn path layer', () => {
+  /** A triangle drawn at (5,-10)(25,-12)(12,8), committed through a 'new' session. */
+  function drawnLayer(extra: Record<string, unknown> = {}) {
+    const { host, added } = makeHost()
+    const s = useFramePenSession(host)
+    s.open({ kind: 'new' })
+    const doc = s.session.value!.doc.value
+    const a = addPoint(doc, 5, -10), b = addPoint(doc, 25, -12), c = addPoint(doc, 12, 8)
+    addPath(doc, [a, b, c], [{ kind: 'line' }, { kind: 'line' }, { kind: 'line' }], true)
+    s.commitSession()
+    return { ...added[0], ...extra }
+  }
+  /** A host whose layer list is live: `commit` replaces it. */
+  function liveHost(initial: any[]) {
+    let list = initial
+    const host = {
+      layers: () => list,
+      size: () => ({ W, H }),
+      recordHistory: vi.fn(),
+      commit: vi.fn((next: any[]) => { list = next }),
+      addPathLayers: vi.fn(),
+      selectLocal: vi.fn(),
+    }
+    return { host, get: (id: string) => list.find(l => l.id === id) }
+  }
+  const pointsOf = (sk: any) => sk.entities.filter((e: any) => e.kind === 'point')
+
+  it('open records ONE history step, clones the drawing, and views it through the layer\'s placement × layout scale', () => {
+    const l = drawnLayer({ rotation: 30, skewX: 10, scale: 1.5, layoutScale: 0.8 })
+    const { host } = liveHost([l])
+    const s = useFramePenSession(host)
+    s.open({ kind: 'layer', id: l.id })
+    const sess = s.session.value!
+    expect(host.recordHistory).toHaveBeenCalledTimes(1)
+    expect(host.commit).not.toHaveBeenCalled()
+    expect(sess.doc.value).toEqual(l.sketch)
+    expect(sess.doc.value).not.toBe(l.sketch)
+    expect(sess.pen.tool.value).toBe('select')
+    expect(layerPlacementForView(l).scale).toBeCloseTo(1.2, 12)
+    expect(sess.view.value).toEqual(layerView({ x: l.x, y: l.y, rotation: 30, skewX: 10, skewY: 0, scale: 1.5 * 0.8 }, W, H))
+  })
+
+  it('a path without a drawing, a missing layer or a non-path is not opened', () => {
+    const plain = { ...drawnLayer(), id: 'plain', sketch: undefined }
+    const { host } = liveHost([plain, { id: 't', kind: 'text' }])
+    const s = useFramePenSession(host)
+    s.open({ kind: 'layer', id: 'plain' }); expect(s.session.value).toBeNull()
+    s.open({ kind: 'layer', id: 't' }); expect(s.session.value).toBeNull()
+    s.open({ kind: 'layer', id: 'nope' }); expect(s.session.value).toBeNull()
+    expect(host.recordHistory).not.toHaveBeenCalled()
+  })
+
+  it('an edit previews on the layer itself with no history; x/y/bbox untouched', () => {
+    const l = drawnLayer()
+    const { host, get } = liveHost([l])
+    const s = useFramePenSession(host)
+    s.open({ kind: 'layer', id: l.id })
+    const pen = s.session.value!.pen
+    const p0 = pointsOf(s.session.value!.doc.value)[0]
+    p0.x += 7
+    pen.finishSession()   // settles the change as a history step → onChange → preview
+    const cur = get(l.id)
+    expect(host.recordHistory).toHaveBeenCalledTimes(1)
+    expect(cur.d).not.toBe(l.d)
+    expect(cur.d).toBe(sketchToLocalD(cur.sketch))
+    expect(cur.x).toBe(l.x); expect(cur.y).toBe(l.y); expect(cur.bbox).toEqual(l.bbox)
+    expect(cur.fill).toBe(l.fill)
+  })
+
+  it('commit re-centres with the effective scale and keeps untouched corners planted on screen', () => {
+    const l = drawnLayer({ rotation: 35, scale: 1.4, layoutScale: 0.5 })
+    const { host, get } = liveHost([l])
+    const s = useFramePenSession(host)
+    s.open({ kind: 'layer', id: l.id })
+    const view0 = s.session.value!.view.value
+    const pts = pointsOf(s.session.value!.doc.value)
+    const before = pts.slice(1).map((p: any) => applyView(view0, p))
+    pts[0].x -= 30; pts[0].y += 20
+    const movedWant = applyView(view0, pts[0])
+    s.commitSession()
+    expect(s.session.value).toBeNull()
+    expect(host.recordHistory).toHaveBeenCalledTimes(1)
+    const cur = get(l.id)
+    expect(cur.d).toBe(sketchToLocalD(cur.sketch))
+    const bb = localOutlineBounds(cur.d)!
+    expect((bb.minX + bb.maxX) / 2).toBeCloseTo(0, 9)
+    expect((bb.minY + bb.maxY) / 2).toBeCloseTo(0, 9)
+    expect(cur.bbox).not.toEqual(l.bbox)
+    const view1 = layerView(layerPlacementForView(cur), W, H)
+    const after = pointsOf(cur.sketch)
+    const m = applyView(view1, after[0])
+    expect(m.x).toBeCloseTo(movedWant.x, 6); expect(m.y).toBeCloseTo(movedWant.y, 6)
+    after.slice(1).forEach((p: any, i: number) => {
+      const q = applyView(view1, p)
+      expect(q.x).toBeCloseTo(before[i].x, 6); expect(q.y).toBeCloseTo(before[i].y, 6)
+    })
+  })
+
+  it('cancel writes the original layer back exactly; an emptied drawing commits as a cancel', () => {
+    const l = drawnLayer()
+    const { host, get } = liveHost([l])
+    const s = useFramePenSession(host)
+    s.open({ kind: 'layer', id: l.id })
+    pointsOf(s.session.value!.doc.value)[1].x += 12
+    s.session.value!.pen.finishSession()
+    expect(get(l.id).d).not.toBe(l.d)
+    s.cancelSession()
+    expect(s.session.value).toBeNull()
+    expect(get(l.id)).toBe(l)
+
+    s.open({ kind: 'layer', id: l.id })
+    const doc = s.session.value!.doc.value
+    doc.entities = doc.entities.filter((e: any) => e.kind !== 'path')
+    s.commitSession()
+    expect(get(l.id)).toBe(l)
   })
 })
