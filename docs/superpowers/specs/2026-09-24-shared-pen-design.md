@@ -24,8 +24,10 @@ The goal: **one pen, shared by every tool that needs one.** Fix it once, and it 
 2. **Drawings keep their rules everywhere.** A path drawn with the pen can be reopened later, and
    dragging one point re-arranges the rest. Paths made another way (imported SVG, library shapes,
    old handle-drawn paths) stay plain paths.
-3. **The arc pen replaces the Frame's handles pen.** One way of drawing. Old saved handle paths keep
-   drawing and editing exactly as they do today.
+3. **The shared pen replaces the Frame's handles pen.** Arcs are the default way of drawing; a second
+   **Curve** tool draws Bézier curves with handles, for freeform shapes (tracing, organic outlines, wavy
+   guides). Both can go into the same path. Old saved handle paths keep drawing and editing exactly as
+   they do today.
 4. **Approach A:** one shared pen overlay that each tool hosts over its own canvas — you draw in place,
    over the real frame or preview.
 5. **The pen has its own dedicated toolbar** with its tools and rule actions (tangent and the rest).
@@ -104,7 +106,8 @@ there is one set of tools on screen at a time. Built from the studios' shared bu
 
 **Tool row — always shown**
 
-- Select · Pen (arcs) · Line · Circle · Point
+- Select · Pen (arcs, the default) · Curve (Bézier, tooltip "Bézier curve — drag to pull out handles")
+  · Line · Circle · Point
 - Guide (toggle: new geometry is construction geometry that shapes the drawing but is not drawn)
 - Labels (toggle: show / hide rule badges and size chips)
 - Undo · Redo
@@ -121,12 +124,39 @@ The same selection-sensitive list the test page's `availableConstraints()` compu
 
 "Copy SVG" stays on the test page only (it is a developer aid).
 
+Rules that need exact geometry — Tangent, Radius, Concentric, tangent joints — only apply to arcs,
+lines and circles. When a Curve segment is selected the rules row hides them rather than offering
+actions that do nothing.
+
 **Hint line.** While drawing, a one-line hint under the toolbar says what the next click does ("Click to
 add a point, drag to bend it into an arc, click the first point to close"). While Repeat / Mirror waits
 for a pick, it says what to pick, with Cancel.
 
 The exact layout (one bar or two, where it floats, grouping) is settled with a **clickable prototype
 first**, before the component is built.
+
+## 2b. The Curve tool (Bézier)
+
+The drawing model already has a cubic Bézier segment (`kind: 'cubic'`, two handle points) and
+`sketchPath` already draws it as `C`. The draw tool for it was retired on 2026-08-31 (`78788db4a`) when
+arcs became the single gesture; this brings it back as the second tool.
+
+- **Gesture:** click places a sharp point; click-and-drag places a smooth point and pulls out its handles
+  (the opposite handle mirrors, held by a `collinear` rule).
+- **Mixed paths:** Pen and Curve add to the same open path; each new segment is an arc/line or a curve
+  depending on the tool active when its end point is placed. Switching tools mid-path does not end it.
+- **Editing:** drag a handle; on a smooth point the opposite handle follows. Handles ride along when
+  their point is dragged. Deleting a handle turns the point into a sharp corner — never deletes the path.
+- **Rules:** point rules (Fix, Coincident, Horizontal, Vertical, Point on line / circle, Distance) work
+  on a curve's points. A joint between a curve and an arc is not made tangent automatically this round.
+
+Carried over from the 08-29 build notes, so they are not relearned:
+
+- after a sharp point, always clear the previous out-handle (`else lastHOut = null`), or the next
+  segment inherits a stale handle;
+- handle points are construction points and are excluded from snapping;
+- build plain (non-reactive) drawing copies before cloning — `structuredClone` throws on Vue-reactive
+  arrays.
 
 ## 3. The Frame
 
@@ -222,13 +252,17 @@ Each stage lands on its own and leaves the app working.
    the test page rehosted. Check: the existing sketch browser tests pass unchanged; drawing, snapping,
    tangent joints and undo behave as today, driven with **real mouse clicks** (simulated pointer events
    did not drive the pen last time).
-2. **Frame pen and path layers.** Pen tool, `sketch` on path layers, double-click to reopen, the
+2. **Curve tool (Bézier).** Drawing and handle editing in the shared pen, before the Frame switches
+   over so it never loses freeform curves. Check: unit tests for mixed arc / curve paths and handle
+   deletion; live with real clicks — draw an S-curve, drag handles, delete one, mix with arcs, undo
+   each step.
+3. **Frame pen and path layers.** Pen tool, `sketch` on path layers, double-click to reopen, the
    `writePathD` boundary helper, `useVectorPen` deleted. Check: unit tests for re-centring and for every
    `d` writer dropping `sketch`; live — draw, move, scale, rotate, reopen, points under the cursor on a
    rotated layer; existing frames render **pixel-identical** (no saved layer has a `sketch` yet).
-3. **Text "Drawn path".** Check: live — draw a guide, edit it, change Path size, edit again; the type
+4. **Text "Drawn path".** Check: live — draw a guide, edit it, change Path size, edit again; the type
    follows each time. Existing type-on-a-path tests stay green.
-4. **Shape Studio "Drawn" shape.** Check: live — draw a petal, radial ×12, fold, save, reload, same
+5. **Shape Studio "Drawn" shape.** Check: live — draw a petal, radial ×12, fold, save, reload, same
    picture; a damaged saved drawing loads as empty; the drift guard updated.
 
 ## Out of scope this round
@@ -237,4 +271,4 @@ Each stage lands on its own and leaves the app working.
   points — a different job; they can move onto the pen later).
 - Agent drawing verbs.
 - Turning imported / library / handle paths into drawings (fitting arcs and rules to arbitrary curves).
-- A handles mode in the pen.
+- Automatic tangent joints between a Curve segment and an arc (the handle lining up with the arc).
