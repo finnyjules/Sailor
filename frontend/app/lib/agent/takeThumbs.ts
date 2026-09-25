@@ -1,5 +1,5 @@
 /**
- * Four Takes (Task 3) — per-studio thumbnail adapters.
+ * Take thumbnails — per-studio thumbnail adapters.
  *
  * `PromptTakes.vue` (the one prompt's takes strip, spec §3.1) shows proposed
  * takes as small tiles; each tile needs a picture of what the take's config

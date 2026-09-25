@@ -4,7 +4,8 @@
  * setRegion so master vs format-class semantics live in one place; everything
  * else patches the element directly (v2 has no per-aspect style overrides).
  */
-import { ChevronLeft, ChevronRight, Layers, Trash2, Type as TypeIcon, Image as ImageIcon, Square, Sparkles, Loader2, Expand, ArrowUp } from 'lucide-vue-next'
+import AiMark from '~/components/prompt/AiMark.vue'
+import { ChevronLeft, ChevronRight, Layers, Trash2, Type as TypeIcon, Image as ImageIcon, Square, Loader2, Expand, ArrowUp } from 'lucide-vue-next'
 
 import StudioSection from '~/components/vue-canvas/StudioSection.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
@@ -663,7 +664,7 @@ const btnRowCls = 'flex-1 h-7 rounded text-[11px] transition-colors cursor-point
            punchier / translate). All still return a list of options to pick from. -->
       <div class="pastel-hairline rounded-lg p-2.5 flex flex-col gap-2.5" style="--pastel-hairline-bg: #15151a">
           <div class="flex items-center gap-1.5">
-            <Sparkles class="size-3.5 text-white/70" />
+            <AiMark kind="star" class="size-3.5 shrink-0" />
             <p class="text-[11px] font-medium text-white/85">Rewrite copy</p>
           </div>
 
@@ -696,7 +697,7 @@ const btnRowCls = 'flex-1 h-7 rounded text-[11px] transition-colors cursor-point
               :disabled="copyAssist.loading.value || !copySourceText.trim()"
               @click="runVariations()"
             >
-              <Sparkles class="size-3" /> 4 variations
+              <AiMark kind="star" class="size-3" /> 4 variations
             </button>
             <button
               class="h-6 px-2 rounded-full text-[10.5px] bg-white/[0.05] border border-white/[0.09] text-white/60 hover:bg-white/[0.1] hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default"

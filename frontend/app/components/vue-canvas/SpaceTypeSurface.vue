@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { h, ref, reactive, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
+import { Pause, Play } from 'lucide-vue-next'
+import { cutWords, quoteWords } from '~/lib/prompt/studioDispatch'
 import { LIVE_FIELD_CEILING } from '~/lib/shaderfill/descriptor'
 import { getEffect, rehomeLegacyShowcase } from '~/lib/spacetype/effects'
 import { ensureBoostFont } from '~/lib/spacetype/effects/boost'
@@ -151,22 +153,14 @@ const spaceTypeAgent = useStudioAgent({
   params,
   label: () => effect.value.label,
 })
-/** The prompt's chip and the inspector head: the words the effect renders,
- *  collapsed and cut to 24 characters; with no text, the effect's own name. */
-const promptLabel = computed(() => {
-  const t = String(params.text ?? '').replace(/\s+/g, ' ').trim()
-  if (!t) return effect.value.label
-  return t.length > 24 ? `${t.slice(0, 24).trimEnd()}…` : t
-})
+/** The inspector head: the words the effect renders (the shared chip cut);
+ *  with no text, the effect's own name — then the head has no second line,
+ *  so the name isn't said twice. The prompt's chip quotes the same words. */
+const headWords = computed(() => cutWords(String(params.text ?? '')))
+const headTitle = computed(() => headWords.value || effect.value.label)
+const headSubtitle = computed(() => (headWords.value ? effect.value.label : undefined))
+const promptLabel = computed(() => quoteWords(String(params.text ?? '')) || effect.value.label)
 const inspectorActions = computed(() => studioActions({ place: 'spacetype', canTakes: false }))
-// The transport's own play/pause glyphs, as icon components for the tool bar button.
-const PauseGlyph = () => h('svg', { viewBox: '0 0 24 24', width: 14, height: 14, fill: 'currentColor', 'aria-hidden': 'true' }, [
-  h('rect', { x: 6, y: 5, width: 4, height: 14, rx: 1 }), h('rect', { x: 14, y: 5, width: 4, height: 14, rx: 1 }),
-])
-const PlayGlyph = () => h('svg', { viewBox: '0 0 24 24', width: 14, height: 14, fill: 'currentColor', 'aria-hidden': 'true' }, [
-  h('path', { d: 'M8 5.5v13l11-6.5z' }),
-])
-
 const loopDuration = ref(6)
 const transparent = ref(false)
 const bgColor = ref('#0e0e10')
@@ -1792,7 +1786,7 @@ async function exportWebEmbed() {
     </template>
     <!-- Preview transport: play/pause, scrub and frame counter (every effect). -->
     <template #tools>
-      <StudioToolButton v-if="webglOk" :label="playing ? 'Pause' : 'Play'" :icon="playing ? PauseGlyph : PlayGlyph" :active="playing" @click="togglePlay" />
+      <StudioToolButton v-if="webglOk" :label="playing ? 'Pause' : 'Play'" :icon="playing ? Pause : Play" :active="playing" @click="togglePlay" />
       <input v-if="webglOk" type="range" min="0" :max="Math.max(1, previewTotalFrames - 1)" step="1" :value="scrubFrame"
              aria-label="Scrub preview"
              class="mx-2 h-1 w-48 cursor-pointer self-center accent-white"
@@ -1800,7 +1794,7 @@ async function exportWebEmbed() {
       <span v-if="webglOk" class="self-center pr-1 text-[10px] tabular-nums text-white/45">{{ scrubFrame + 1 }}/{{ previewTotalFrames }}</span>
     </template>
     <template #controls>
-      <StudioInspectorHead :title="promptLabel" :subtitle="effect.label">
+      <StudioInspectorHead :title="headTitle" :subtitle="headSubtitle">
         <StudioButton @click="showEffectGallery = true">Change effect</StudioButton>
       </StudioInspectorHead>
       <StudioActionRows :actions="inspectorActions" />

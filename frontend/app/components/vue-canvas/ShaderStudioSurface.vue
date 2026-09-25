@@ -39,6 +39,7 @@ import { cloneConfig, defaultConfig, defaultMask, hydrateConfig, LAYER_MAX, newL
 import { ensureSpaceTypeBake } from '~/lib/spacetype/bake'
 import { encodeFrames } from '~/lib/engine/encodeVideo'
 import { useStudioAgent } from '~/composables/useStudioAgent'
+import { settleTakesOnRender } from '~/lib/prompt/studioTakes'
 import { REMIX_ACTION, studioActions } from '~/lib/studio/studioActions'
 import { useStudioVarBindings } from '~/composables/useStudioVarBindings'
 import { useStudioVarMenu } from '~/composables/useStudioVarMenu'
@@ -622,6 +623,7 @@ async function generateImage() {
       // doesn't keep showing "Rendering…" after the fact. closeEditor() unmounts this
       // surface in normal use, but clear it anyway rather than depend on that timing.
       bakeMsg.value = ''
+      settleTakesOnRender(shaderAgent) // what was rendered is what stays (see the helper)
       closeEditor()
     } else {
       // uploadFrameBatch swallows a failed upload and returns [] — surface it instead
@@ -693,7 +695,7 @@ async function generateVideo() {
     window.dispatchEvent(new CustomEvent('sailor:shaderStudioOutput', { detail: { sourceNodeId: props.nodeId, nodeType: 'Video', widgetOverrides: { file: made.filename } } }))
     bakeMsg.value = made.notice ?? ''
     // A fallback notice must be seen: keep the studio open when there is one.
-    if (!made.notice) closeEditor()
+    if (!made.notice) { settleTakesOnRender(shaderAgent); closeEditor() }
   } catch (e) { showVideoError(e) }
   finally { baking.value = false; startPreview() }
 }

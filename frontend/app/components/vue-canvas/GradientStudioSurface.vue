@@ -31,6 +31,7 @@ import {
 import { DEFAULT_POST } from '~/lib/studio/post/settings'
 import type { ControlSpec } from '~/lib/spacetype/effect'
 import { useStudioAgent } from '~/composables/useStudioAgent'
+import { settleTakesOnRender } from '~/lib/prompt/studioTakes'
 import { studioActions } from '~/lib/studio/studioActions'
 import { useStudioVarBindings } from '~/composables/useStudioVarBindings'
 import { useStudioVarMenu } from '~/composables/useStudioVarMenu'
@@ -696,6 +697,7 @@ async function generateImage() {
       // doesn't keep showing "Rendering…" after the fact. closeEditor() unmounts this
       // surface in normal use, but clear it anyway rather than depend on that timing.
       bakeMsg.value = ''
+      settleTakesOnRender(gradientAgent) // what was rendered is what stays (see the helper)
       closeEditor()
     } else {
       // uploadFrameBatch swallows a failed upload and returns [] — surface it instead of
@@ -807,7 +809,7 @@ async function generateVideo() {
       detail: { sourceNodeId: props.nodeId, nodeType: 'Video', widgetOverrides: { file: made.filename } },
     }))
     bakeMsg.value = made.notice ?? ''
-    if (!made.notice) closeEditor()
+    if (!made.notice) { settleTakesOnRender(gradientAgent); closeEditor() }
   } catch (e) { showVideoError(e) }
   finally { baking.value = false; startPreview() }
 }

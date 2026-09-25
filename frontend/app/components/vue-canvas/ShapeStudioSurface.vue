@@ -42,6 +42,7 @@ import type { Paint } from '~/lib/compositor/paint'
 import type { PaletteFamily } from '~/lib/color/seedFamily'
 import type { GradientStop } from '~/lib/color/harmony'
 import { useStudioAgent } from '~/composables/useStudioAgent'
+import { settleTakesOnRender } from '~/lib/prompt/studioTakes'
 import { studioActions } from '~/lib/studio/studioActions'
 import { makeConfigParams } from '~/lib/agent/configParams'
 import { docAspect } from '~/lib/agent/takeThumbs'
@@ -471,6 +472,7 @@ async function exportPng() {
       window.dispatchEvent(new CustomEvent('sailor:shapeStudioOutput', {
         detail: { sourceNodeId: props.nodeId, nodeType: 'Image', widgetOverrides: { image: filename } },
       }))
+      settleTakesOnRender(shapeAgent) // what was rendered is what stays (see the helper)
       closeEditor()
     }
   } catch (e) {

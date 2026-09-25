@@ -325,12 +325,14 @@ function setRepeat(n: number) { repeat.value = n; renderPreview() }
 function toggleSeams() { seams.value = !seams.value; renderPreview() }
 
 /** The prompt's chip and the inspector head: the lattice, named the way its picker
- *  shows it, when the current content mode has one; otherwise just "Pattern". */
+ *  shows it (the control's optionLabels), when the current content mode has one;
+ *  otherwise — or for a lattice the picker doesn't list — just "Pattern". */
 const LATTICE_CONTROL = TEXTURE_CONTROLS.find(c => c.key === 'lattice')
 const promptLabel = computed(() => {
-  const l = String(params.lattice ?? '')
-  if (!l || (LATTICE_CONTROL?.when && !LATTICE_CONTROL.when(params as Params))) return 'Pattern'
-  return `${l.charAt(0).toUpperCase()}${l.slice(1)} lattice`
+  const c = LATTICE_CONTROL
+  if (!c || c.kind !== 'select' || (c.when && !c.when(params as Params))) return 'Pattern'
+  const name = c.optionLabels?.[c.options.indexOf(String(params.lattice ?? ''))]
+  return name ? `${name} lattice` : 'Pattern'
 })
 const inspectorActions = computed(() => studioActions({
   place: 'texture', canTakes: false,

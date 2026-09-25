@@ -25,6 +25,7 @@
  */
 import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef, toRaw, watch } from 'vue'
 import { Combine, Pause, Play } from 'lucide-vue-next'
+import { cutWords, quoteWords } from '~/lib/prompt/studioDispatch'
 import type { ControlSpec } from '~/lib/spacetype/effect'
 import { DEFAULT_FONT_ID, VARIABLE_FONTS } from '~/data/variable-fonts'
 import { loadGoogleCatalog, nearestWeight, type GoogleFont } from '~/data/google-fonts'
@@ -257,13 +258,10 @@ const pinnedFonts = VARIABLE_FONTS.map(f => ({ label: f.label, value: f.id, vari
 const fontPickerValue = computed(() => (fontRef.value.kind === 'catalog' ? fontRef.value.id : fontRef.value.family))
 const fontPickerDisplay = computed(() => (fontRef.value.kind === 'catalog' ? vtFontRefLabel(fontRef.value) : fontRef.value.family))
 
-/** The prompt's chip and the inspector head: the user's own words, collapsed and
- *  cut to 24 characters. The head's second line is the family the picker shows. */
-const promptLabel = computed(() => {
-  const t = (config.value.text ?? '').replace(/\s+/g, ' ').trim()
-  if (!t) return 'Vector type'
-  return t.length > 24 ? `${t.slice(0, 24).trimEnd()}…` : t
-})
+/** The inspector head: the user's own words (the shared chip cut). The head's
+ *  second line is the family the picker shows. The prompt's chip quotes them. */
+const headTitle = computed(() => cutWords(config.value.text) || 'Vector type')
+const promptLabel = computed(() => quoteWords(config.value.text) || 'Vector type')
 const inspectorActions = computed(() => studioActions({ place: 'vectortype', canTakes: true }))
 
 /**
@@ -1747,7 +1745,7 @@ const motionMoveCount = computed(() => config.value.motion.moves.length + derive
     </template>
 
     <template #controls>
-      <StudioInspectorHead :title="promptLabel" :subtitle="fontPickerDisplay" />
+      <StudioInspectorHead :title="headTitle" :subtitle="fontPickerDisplay" />
       <StudioActionRows :actions="inspectorActions" />
       <!-- Design | Motion — the same split Gradient, Space Type and 3D use. -->
       <div class="flex gap-1 rounded-lg border border-white/[0.07] bg-white/[0.03] p-1">

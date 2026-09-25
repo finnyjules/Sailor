@@ -10,6 +10,10 @@ import { DEALTGRID_PRESET_IDS, DEALTGRID_TEMPLATE_NONE } from '~/lib/texturefx/t
 // procedural mode). The predicate reads the live params object.
 export type TextureControl = ControlSpec & { when?: (p: Params) => boolean }
 
+/** What the lattice picker shows for each stored lattice id — and what Texture's
+ *  prompt chip and inspector head say (TextureStudioSurface), so they agree. */
+export const LATTICE_LABELS: Record<typeof LATTICES[number], string> = { square: 'Square', brick: 'Brick', diagonal: 'Diagonal' }
+
 // Positive checks — `mode` is always defined (textureDefaults sets it).
 const isProcedural = (p: Params) => String(p.mode) === 'procedural'
 const isTruchet = (p: Params) => String(p.mode) === 'truchet'
@@ -28,7 +32,7 @@ export const TEXTURE_CONTROLS: TextureControl[] = [
   // Lattice controls — hidden in raster mode (raster is whole-tile, no lattice),
   // in chips mode (chips scatter on their own grid, sized by 'Chips across'), and
   // in dealt-grid mode (it owns its own grid, sized by 'Cells across').
-  { key: 'lattice', label: 'Lattice', kind: 'select', options: [...LATTICES], default: 'square', group: 'Lattice', when: (p) => !isRaster(p) && !isChips(p) && !isDealtGrid(p) },
+  { key: 'lattice', label: 'Lattice', kind: 'select', options: [...LATTICES], optionLabels: LATTICES.map(l => LATTICE_LABELS[l]), default: 'square', group: 'Lattice', when: (p) => !isRaster(p) && !isChips(p) && !isDealtGrid(p) },
   { key: 'cells', label: 'Cells', kind: 'slider', min: 2, max: 40, step: 2, default: 8, group: 'Lattice', when: (p) => !isRaster(p) && !isChips(p) && !isDealtGrid(p) },
 
   { key: 'mode', label: 'Content', kind: 'select', options: [...MODES], default: 'procedural', group: 'Cell' },
