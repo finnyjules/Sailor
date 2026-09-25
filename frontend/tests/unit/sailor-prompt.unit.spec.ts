@@ -69,4 +69,11 @@ describe('SailorPrompt', () => {
     const w = mount(SailorPrompt, { slots: { above: '<p class="probe">Hello</p>' }, global: { stubs } })
     expect(w.get('[data-testid="prompt-card"] .probe').text()).toBe('Hello')
   })
+
+  it('exposes its text field via inputElement(), and null while working', async () => {
+    const w = mount(SailorPrompt, { global: { stubs } })
+    expect((w.vm as any).inputElement()).toBe(input(w).element)
+    await w.setProps({ working: true })
+    expect((w.vm as any).inputElement()).toBeNull()
+  })
 })

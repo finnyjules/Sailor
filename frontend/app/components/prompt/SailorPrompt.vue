@@ -42,7 +42,10 @@ function onKeydown(e: KeyboardEvent) {
 function onFocus() { focused.value = true; emit('focus') }
 function onBlur() { if (!focused.value) return; focused.value = false; emit('blur') } // Esc already emitted when it set focused=false
 function focus() { inputEl.value?.focus() }
-defineExpose({ focus })
+// The text field itself, for hosts that must know whether it can take focus
+// (null while working — the row shows the progress label instead).
+function inputElement(): HTMLInputElement | null { return inputEl.value }
+defineExpose({ focus, inputElement })
 </script>
 
 <template>

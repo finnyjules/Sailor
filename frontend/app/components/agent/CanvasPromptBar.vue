@@ -173,7 +173,19 @@ const workingLabel = computed(() => busy.value ? 'Planning the change…' : 'Loo
 // While planning, SailorPrompt's own row shows the progress label and Stop.
 const showCard = computed(() => !busy.value && (reviewing.value || hasProposal.value || !!answer.value || !!error.value))
 const promptRef = ref<InstanceType<typeof SailorPrompt> | null>(null)
-defineExpose({ focus: () => promptRef.value?.focus() })
+// `/` and ⌘K (default.vue) ask this before focusing: the field must exist (not
+// working), be enabled (AI set up), have a size, and be the top element at its
+// own centre — anything else there is an overlay (Frame, Timeline, Settings,
+// the start modal…) and the key belongs to it.
+function isFocusable(): boolean {
+  const input = promptRef.value?.inputElement?.() ?? null
+  if (!input || input.disabled) return false
+  const r = input.getBoundingClientRect()
+  if (!r.width || !r.height) return false
+  const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+  return !!hit && (hit === input || !!input.closest('.sailor-prompt')?.contains(hit))
+}
+defineExpose({ focus: () => promptRef.value?.focus(), isFocusable })
 
 // Misfire correction handler.
 // "…or sketch it?": hand the last submitted text straight to the sketch pad
@@ -202,12 +214,14 @@ function onPromptFocus() {
 </script>
 
 <template>
-  <!-- pointer-events: the ROOT is click-through and each interactive child
-       re-enables events. The bar overlays the canvas (bottom-centre stack in
-       default.vue), so any non-interactive chrome — the AI-setup notice, gaps —
-       must not swallow canvas gestures underneath (e.g. wiring from a node
-       handle that Fit View parked behind the bar). -->
   <div v-if="ready" class="pointer-events-none flex flex-col gap-2">
+    <!-- pointer-events: the ROOT is click-through and each interactive child
+         re-enables events. The bar overlays the canvas (bottom-centre stack in
+         default.vue), so any non-interactive chrome — the AI-setup notice, gaps —
+         must not swallow canvas gestures underneath (e.g. wiring from a node
+         handle that Fit View parked behind the bar). This comment lives INSIDE
+         the root on purpose: a leading template comment makes the component a
+         fragment in dev. -->
     <!-- (Teleports to body — unaffected by the root's pointer-events-none.) -->
     <ImageSearchPickerModal :open="searchOpen" :query="searchQuery" @close="searchOpen = false" @done="onSearchDone" />
     <SailorPrompt
