@@ -213,7 +213,7 @@ export function pyParseQs(qs: string): Map<string, string[]> | null {
 /** `unquote(s.replace('+', ' '))`: each run of %XX bytes decoded as UTF-8; a malformed %… kept as-is; invalid UTF-8 → null. */
 function pyUnquote(s: string): string | null {
   const t = s.replace(/\+/g, ' ')
-  const decoder = new TextDecoder('utf-8', { fatal: true })
+  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
   let out = ''
   let i = 0
   while (i < t.length) {

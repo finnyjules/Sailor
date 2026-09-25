@@ -203,10 +203,10 @@
  },
  {
   "src": "/view?filename=%C3%A9.mp3&type=input",
-  "python": "é.mp3",
+  "python": "\u00e9.mp3",
   "lists": {
    "filename": [
-    "é.mp3"
+    "\u00e9.mp3"
    ],
    "type": [
     "input"
@@ -216,10 +216,10 @@
  },
  {
   "src": "/view?filename=%C3.mp3&type=input",
-  "python": "�.mp3",
+  "python": "\ufffd.mp3",
   "lists": {
    "filename": [
-    "�.mp3"
+    "\ufffd.mp3"
    ],
    "type": [
     "input"
@@ -469,11 +469,11 @@
   }
  },
  {
-  "src": "/view?filename=é.mp3&type=input",
-  "python": "é.mp3",
+  "src": "/view?filename=\u00e9.mp3&type=input",
+  "python": "\u00e9.mp3",
   "lists": {
    "filename": [
-    "é.mp3"
+    "\u00e9.mp3"
    ],
    "type": [
     "input"
@@ -483,10 +483,10 @@
  },
  {
   "src": "/view?filename=%EF%BF%BD.mp3&type=input",
-  "python": "�.mp3",
+  "python": "\ufffd.mp3",
   "lists": {
    "filename": [
-    "�.mp3"
+    "\ufffd.mp3"
    ],
    "type": [
     "input"
@@ -558,6 +558,45 @@
   "lists": {
    "filename": [],
    "type": [],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=%EF%BB%BFa.mp3&type=input",
+  "python": "\ufeffa.mp3",
+  "lists": {
+   "filename": [
+    "\ufeffa.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=a%EF%BB%BF.mp3&type=input",
+  "python": "a\ufeff.mp3",
+  "lists": {
+   "filename": [
+    "a\ufeff.mp3"
+   ],
+   "type": [
+    "input"
+   ],
+   "subfolder": []
+  }
+ },
+ {
+  "src": "/view?filename=a.mp3&type=%EF%BB%BFinput",
+  "python": null,
+  "lists": {
+   "filename": [
+    "a.mp3"
+   ],
+   "type": [
+    "\ufeffinput"
+   ],
    "subfolder": []
   }
  }
