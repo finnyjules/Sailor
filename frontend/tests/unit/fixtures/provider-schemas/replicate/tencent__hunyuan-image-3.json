@@ -1,0 +1,119 @@
+{
+  "endpoint": "tencent/hunyuan-image-3",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/tencent/hunyuan-image-3"
+  },
+  "versionId": "080dbbefcd1504ca5aeebaa2815fd51467d5bb793d2b1fb4eb4eb32ac22a3377",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "seed": {
+            "type": "integer",
+            "title": "Seed",
+            "x-order": 3,
+            "nullable": true,
+            "description": "Random seed. Set for reproducible generation"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "x-order": 0,
+            "description": "Text prompt for image generation"
+          },
+          "go_fast": {
+            "type": "boolean",
+            "title": "Go Fast",
+            "default": true,
+            "x-order": 2,
+            "description": "Run faster predictions with additional optimizations."
+          },
+          "aspect_ratio": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/aspect_ratio"
+              }
+            ],
+            "default": "1:1",
+            "x-order": 1,
+            "description": "Aspect ratio for the generated image"
+          },
+          "output_format": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/output_format"
+              }
+            ],
+            "default": "webp",
+            "x-order": 4,
+            "description": "Format of the output images"
+          },
+          "output_quality": {
+            "type": "integer",
+            "title": "Output Quality",
+            "default": 95,
+            "maximum": 100,
+            "minimum": 0,
+            "x-order": 5,
+            "description": "Quality when saving the output images, from 0 to 100. 100 is best quality, 0 is lowest quality. Not relevant for .png outputs"
+          },
+          "disable_safety_checker": {
+            "type": "boolean",
+            "title": "Disable Safety Checker",
+            "default": false,
+            "x-order": 6,
+            "description": "Disable safety checker for generated images."
+          }
+        }
+      },
+      "aspect_ratio": {
+        "enum": [
+          "1:1",
+          "16:9",
+          "21:9",
+          "3:2",
+          "2:3",
+          "4:5",
+          "5:4",
+          "3:4",
+          "4:3",
+          "9:16",
+          "9:21"
+        ],
+        "type": "string",
+        "title": "aspect_ratio",
+        "description": "An enumeration."
+      },
+      "output_format": {
+        "enum": [
+          "webp",
+          "jpg",
+          "png"
+        ],
+        "type": "string",
+        "title": "output_format",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "uri"
+        },
+        "title": "Output"
+      }
+    }
+  }
+}

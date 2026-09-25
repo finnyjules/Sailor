@@ -1,0 +1,180 @@
+{
+  "endpoint": "black-forest-labs/flux-dev",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/black-forest-labs/flux-dev"
+  },
+  "versionId": "6e4a938f85952bdabcc15aa329178c4d681c52bf25a0342403287dc26944661d",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "seed": {
+            "type": "integer",
+            "title": "Seed",
+            "x-order": 7,
+            "description": "Random seed. Set for reproducible generation"
+          },
+          "image": {
+            "type": "string",
+            "title": "Image",
+            "format": "uri",
+            "x-order": 2,
+            "description": "Input image for image to image mode. The aspect ratio of your output will match this image"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "x-order": 0,
+            "description": "Prompt for generated image"
+          },
+          "go_fast": {
+            "type": "boolean",
+            "title": "Go Fast",
+            "default": true,
+            "x-order": 11,
+            "description": "Run faster predictions with model optimized for speed (currently fp8 quantized); disable to run in original bf16. Note that outputs will not be deterministic when this is enabled, even if you set a seed."
+          },
+          "guidance": {
+            "type": "number",
+            "title": "Guidance",
+            "default": 3,
+            "maximum": 10,
+            "minimum": 0,
+            "x-order": 6,
+            "description": "Guidance for generated image"
+          },
+          "megapixels": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/megapixels"
+              }
+            ],
+            "default": "1",
+            "x-order": 12,
+            "description": "Approximate number of megapixels for generated image"
+          },
+          "num_outputs": {
+            "type": "integer",
+            "title": "Num Outputs",
+            "default": 1,
+            "maximum": 4,
+            "minimum": 1,
+            "x-order": 4,
+            "description": "Number of outputs to generate"
+          },
+          "aspect_ratio": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/aspect_ratio"
+              }
+            ],
+            "default": "1:1",
+            "x-order": 1,
+            "description": "Aspect ratio for the generated image"
+          },
+          "output_format": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/output_format"
+              }
+            ],
+            "default": "webp",
+            "x-order": 8,
+            "description": "Format of the output images"
+          },
+          "output_quality": {
+            "type": "integer",
+            "title": "Output Quality",
+            "default": 80,
+            "maximum": 100,
+            "minimum": 0,
+            "x-order": 9,
+            "description": "Quality when saving the output images, from 0 to 100. 100 is best quality, 0 is lowest quality. Not relevant for .png outputs"
+          },
+          "prompt_strength": {
+            "type": "number",
+            "title": "Prompt Strength",
+            "default": 0.8,
+            "maximum": 1,
+            "minimum": 0,
+            "x-order": 3,
+            "description": "Prompt strength when using img2img. 1.0 corresponds to full destruction of information in image"
+          },
+          "num_inference_steps": {
+            "type": "integer",
+            "title": "Num Inference Steps",
+            "default": 28,
+            "maximum": 50,
+            "minimum": 1,
+            "x-order": 5,
+            "description": "Number of denoising steps. Recommended range is 28-50, and lower number of steps produce lower quality outputs, faster."
+          },
+          "disable_safety_checker": {
+            "type": "boolean",
+            "title": "Disable Safety Checker",
+            "default": false,
+            "x-order": 10,
+            "description": "Disable safety checker for generated images."
+          }
+        }
+      },
+      "megapixels": {
+        "enum": [
+          "1",
+          "0.25"
+        ],
+        "type": "string",
+        "title": "megapixels",
+        "description": "An enumeration."
+      },
+      "aspect_ratio": {
+        "enum": [
+          "1:1",
+          "16:9",
+          "21:9",
+          "3:2",
+          "2:3",
+          "4:5",
+          "5:4",
+          "3:4",
+          "4:3",
+          "9:16",
+          "9:21"
+        ],
+        "type": "string",
+        "title": "aspect_ratio",
+        "description": "An enumeration."
+      },
+      "output_format": {
+        "enum": [
+          "webp",
+          "jpg",
+          "png"
+        ],
+        "type": "string",
+        "title": "output_format",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "uri"
+        },
+        "title": "Output"
+      }
+    }
+  }
+}

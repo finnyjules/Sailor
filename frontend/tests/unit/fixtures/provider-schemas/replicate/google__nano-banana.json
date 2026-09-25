@@ -1,0 +1,96 @@
+{
+  "endpoint": "google/nano-banana",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/google/nano-banana"
+  },
+  "versionId": "5bdc2c7cd642ae33611d8c33f79615f98ff02509ab8db9d8ec1cc6c36d378fba",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "x-order": 0,
+            "description": "A text description of the image you want to generate"
+          },
+          "image_input": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "title": "Image Input",
+            "default": [],
+            "x-order": 1,
+            "description": "Input images to transform or use as reference (supports multiple images)"
+          },
+          "aspect_ratio": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/aspect_ratio"
+              }
+            ],
+            "default": "match_input_image",
+            "x-order": 2,
+            "description": "Aspect ratio of the generated image"
+          },
+          "output_format": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/output_format"
+              }
+            ],
+            "default": "jpg",
+            "x-order": 3,
+            "description": "Format of the output image"
+          }
+        }
+      },
+      "aspect_ratio": {
+        "enum": [
+          "match_input_image",
+          "1:1",
+          "2:3",
+          "3:2",
+          "3:4",
+          "4:3",
+          "4:5",
+          "5:4",
+          "9:16",
+          "16:9",
+          "21:9"
+        ],
+        "type": "string",
+        "title": "aspect_ratio",
+        "description": "An enumeration."
+      },
+      "output_format": {
+        "enum": [
+          "jpg",
+          "png"
+        ],
+        "type": "string",
+        "title": "output_format",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "string",
+        "title": "Output",
+        "format": "uri"
+      }
+    }
+  }
+}

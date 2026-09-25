@@ -1,0 +1,280 @@
+{
+  "endpoint": "fal-ai/flux-2-pro/edit",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/flux-2-pro/edit",
+    "pricing": "https://fal.ai/models/fal-ai/flux-2-pro/edit/llms.txt"
+  },
+  "input": {
+    "$ref": "#/components/schemas/Flux2ProEditInput"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Flux2ProEditOutput"
+  },
+  "components": {
+    "schemas": {
+      "Flux2ProEditInput": {
+        "properties": {
+          "image_size": {
+            "title": "Image Size",
+            "default": "auto",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageSize"
+              },
+              {
+                "enum": [
+                  "auto",
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ],
+                "type": "string"
+              }
+            ],
+            "description": "The size of the generated image. If `auto`, the size will be determined by the model."
+          },
+          "image_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "description": "List of URLs of input images for editing",
+            "examples": [
+              [
+                "https://storage.googleapis.com/falserverless/example_inputs/flux2_pro_edit_input.png"
+              ]
+            ],
+            "title": "Image URLs"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The prompt to generate an image from.",
+            "examples": [
+              "Place realistic flames emerging from the top of the coffee cup, dancing above the rim"
+            ],
+            "title": "Prompt"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "The seed to use for the generation."
+          },
+          "sync_mode": {
+            "default": false,
+            "type": "boolean",
+            "description": "If `True`, the media will be returned as a data URI and the output data won't be available in the request history.",
+            "title": "Sync Mode"
+          },
+          "output_format": {
+            "enum": [
+              "jpeg",
+              "png"
+            ],
+            "default": "jpeg",
+            "type": "string",
+            "description": "The format of the generated image.",
+            "title": "Output Format"
+          },
+          "enable_safety_checker": {
+            "default": true,
+            "type": "boolean",
+            "description": "Whether to enable the safety checker. Disabling it requires account authorization; unauthorized requests are always checked.",
+            "title": "Enable Safety Checker"
+          },
+          "safety_tolerance": {
+            "enum": [
+              "1",
+              "2",
+              "3",
+              "4",
+              "5"
+            ],
+            "default": "2",
+            "type": "string",
+            "description": "The safety tolerance level for the generated image. 1 being the most strict and 5 being the most permissive.",
+            "title": "Safety Tolerance"
+          }
+        },
+        "title": "Flux2ProImageEditInput",
+        "type": "object",
+        "x-fal-order-properties": [
+          "prompt",
+          "image_size",
+          "seed",
+          "safety_tolerance",
+          "enable_safety_checker",
+          "output_format",
+          "sync_mode",
+          "image_urls"
+        ],
+        "required": [
+          "prompt",
+          "image_urls"
+        ]
+      },
+      "ImageSize": {
+        "properties": {
+          "height": {
+            "title": "Height",
+            "maximum": 14142,
+            "type": "integer",
+            "description": "The height of the generated image.",
+            "exclusiveMinimum": 0,
+            "default": 512
+          },
+          "width": {
+            "title": "Width",
+            "maximum": 14142,
+            "type": "integer",
+            "description": "The width of the generated image.",
+            "exclusiveMinimum": 0,
+            "default": 512
+          }
+        },
+        "type": "object",
+        "x-fal-order-properties": [
+          "width",
+          "height"
+        ],
+        "title": "ImageSize"
+      },
+      "Flux2ProEditOutput": {
+        "properties": {
+          "seed": {
+            "type": "integer",
+            "description": "The seed used for the generation.",
+            "title": "Seed"
+          },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/ImageFile"
+            },
+            "type": "array",
+            "description": "The generated images.",
+            "examples": [
+              [
+                {
+                  "url": "https://storage.googleapis.com/falserverless/example_outputs/flux2_pro_edit_output.png"
+                }
+              ]
+            ],
+            "title": "Images"
+          }
+        },
+        "title": "Flux2ProEditOutput",
+        "type": "object",
+        "x-fal-order-properties": [
+          "images",
+          "seed"
+        ],
+        "required": [
+          "images",
+          "seed"
+        ]
+      },
+      "ImageFile": {
+        "properties": {
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height",
+            "description": "The height of the image"
+          },
+          "content_type": {
+            "title": "Content Type",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "image/png"
+            ],
+            "description": "The mime type of the file."
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width",
+            "description": "The width of the image"
+          },
+          "file_size": {
+            "title": "File Size",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              4404019
+            ],
+            "description": "The size of the file in bytes."
+          },
+          "file_name": {
+            "title": "File Name",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "z9RV14K95DvU.png"
+            ],
+            "description": "The name of the file. It will be auto-generated if not provided."
+          },
+          "url": {
+            "type": "string",
+            "description": "The URL where the file can be downloaded from.",
+            "title": "Url"
+          }
+        },
+        "title": "ImageFile",
+        "type": "object",
+        "x-fal-order-properties": [
+          "url",
+          "content_type",
+          "file_name",
+          "file_size",
+          "width",
+          "height"
+        ],
+        "required": [
+          "url"
+        ]
+      }
+    }
+  },
+  "pricingText": "Your request will cost **$0.03** for the first megapixel of output, plus **$0.015** per extra megapixel of input and output, rounded up to the nearest megapixel. For example, a **1024x1024** image will cost **$0.03**, and a **1920x1080** image will cost **$0.045** (**$0.03** for first megapixel + **$0.015** for the second megapixel). Similarly, a **512x512** output will cost **$0.03** (**$0.03** for**0.25** megapixels, rounded to **1** megapixel)\n\nFor more details, see [fal.ai pricing](https://fal.ai/pricing)."
+}

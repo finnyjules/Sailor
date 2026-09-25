@@ -1,0 +1,118 @@
+{
+  "endpoint": "stability-ai/stable-diffusion-3.5-large",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/stability-ai/stable-diffusion-3.5-large"
+  },
+  "versionId": "2fdf9488b53c1e0fd3aef7b477def1c00d1856a38466733711f9c769942598f5",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "cfg": {
+            "type": "number",
+            "title": "Cfg",
+            "default": 5,
+            "maximum": 10,
+            "minimum": 1,
+            "description": "The guidance scale tells the model how similar the output should be to the prompt."
+          },
+          "seed": {
+            "type": "integer",
+            "title": "Seed",
+            "nullable": true,
+            "description": "Set a seed for reproducibility. Random by default."
+          },
+          "image": {
+            "type": "string",
+            "title": "Image",
+            "format": "uri",
+            "nullable": true,
+            "description": "Input image for image to image mode. The aspect ratio of your output will match this image."
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "Text prompt for image generation"
+          },
+          "aspect_ratio": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/aspect_ratio"
+              }
+            ],
+            "default": "1:1",
+            "x-order": 2,
+            "description": "The aspect ratio of your output image. This value is ignored if you are using an input image."
+          },
+          "output_format": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/output_format"
+              }
+            ],
+            "default": "webp",
+            "x-order": 7,
+            "description": "Format of the output images"
+          },
+          "negative_prompt": {
+            "type": "string",
+            "title": "Negative Prompt",
+            "nullable": true,
+            "description": "What you do not want to see in the image"
+          },
+          "prompt_strength": {
+            "type": "number",
+            "title": "Prompt Strength",
+            "default": 0.85,
+            "maximum": 1,
+            "minimum": 0,
+            "description": "Prompt strength (or denoising strength) when using image to image. 1.0 corresponds to full destruction of information in image."
+          }
+        }
+      },
+      "aspect_ratio": {
+        "enum": [
+          "16:9",
+          "1:1",
+          "21:9",
+          "2:3",
+          "3:2",
+          "4:5",
+          "5:4",
+          "9:16",
+          "9:21"
+        ],
+        "type": "string",
+        "title": "aspect_ratio",
+        "description": "An enumeration."
+      },
+      "output_format": {
+        "enum": [
+          "webp",
+          "jpg",
+          "png"
+        ],
+        "type": "string",
+        "title": "output_format",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "string",
+        "title": "Output",
+        "format": "uri"
+      }
+    }
+  }
+}

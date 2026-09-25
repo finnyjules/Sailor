@@ -1,0 +1,118 @@
+{
+  "endpoint": "luma/ray-2-720p",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/luma/ray-2-720p"
+  },
+  "versionId": "3ca2bc3597e124149bcae1f9c239790a58ba0f1aa72e1c8747192d2b44284dc4",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "loop": {
+            "type": "boolean",
+            "title": "Loop",
+            "default": false,
+            "description": "Whether the video should loop, with the last frame matching the first frame for smooth, continuous playback."
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "Text prompt for video generation"
+          },
+          "concepts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Concepts",
+            "description": "List of camera concepts to apply to the video generation. Concepts include: truck_left, pan_right, pedestal_down, low_angle, pedestal_up, selfie, pan_left, roll_right, zoom_in, over_the_shoulder, orbit_right, orbit_left, static, tiny_planet, high_angle, bolt_cam, dolly_zoom, overhead, zoom_out, handheld, roll_left, pov, aerial_drone, push_in, crane_down, truck_right, tilt_down, elevator_doors, tilt_up, ground_level, pull_out, aerial, crane_up, eye_level"
+          },
+          "duration": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/duration"
+              }
+            ],
+            "default": 5,
+            "x-order": 3,
+            "description": "Duration of the video in seconds"
+          },
+          "end_image": {
+            "type": "string",
+            "title": "End Image",
+            "format": "uri",
+            "description": "An optional last frame of the video to use as the ending frame."
+          },
+          "start_image": {
+            "type": "string",
+            "title": "Start Image",
+            "format": "uri",
+            "description": "An optional first frame of the video to use as the starting frame."
+          },
+          "aspect_ratio": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/aspect_ratio"
+              }
+            ],
+            "default": "16:9",
+            "x-order": 4,
+            "description": "Aspect ratio of the generated video"
+          },
+          "end_image_url": {
+            "type": "string",
+            "title": "End Image Url",
+            "deprecated": true,
+            "description": "Deprecated: Use end_image instead"
+          },
+          "start_image_url": {
+            "type": "string",
+            "title": "Start Image Url",
+            "deprecated": true,
+            "description": "Deprecated: Use start_image instead"
+          }
+        }
+      },
+      "duration": {
+        "enum": [
+          5,
+          9
+        ],
+        "type": "integer",
+        "title": "duration",
+        "description": "An enumeration."
+      },
+      "aspect_ratio": {
+        "enum": [
+          "1:1",
+          "3:4",
+          "4:3",
+          "9:16",
+          "16:9",
+          "9:21",
+          "21:9"
+        ],
+        "type": "string",
+        "title": "aspect_ratio",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "string",
+        "title": "Output",
+        "format": "uri"
+      }
+    }
+  }
+}

@@ -1,0 +1,157 @@
+{
+  "endpoint": "black-forest-labs/flux-pro",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/black-forest-labs/flux-pro"
+  },
+  "versionId": "ce4035b99fc7bac18bc2f0384632858f126f6b4d96c88603a898a76b8e0c4ac2",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "seed": {
+            "type": "integer",
+            "title": "Seed",
+            "description": "Random seed. Set for reproducible generation"
+          },
+          "steps": {
+            "type": "integer",
+            "title": "Steps",
+            "default": 25,
+            "maximum": 50,
+            "minimum": 1,
+            "deprecated": true,
+            "description": "Deprecated"
+          },
+          "width": {
+            "type": "integer",
+            "title": "Width",
+            "maximum": 1440,
+            "minimum": 256,
+            "description": "Width of the generated image in text-to-image mode. Only used when aspect_ratio=custom. Must be a multiple of 32 (if it's not, it will be rounded to nearest multiple of 32). Note: Ignored in img2img and inpainting modes."
+          },
+          "height": {
+            "type": "integer",
+            "title": "Height",
+            "maximum": 1440,
+            "minimum": 256,
+            "description": "Height of the generated image in text-to-image mode. Only used when aspect_ratio=custom. Must be a multiple of 32 (if it's not, it will be rounded to nearest multiple of 32). Note: Ignored in img2img and inpainting modes."
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "Text prompt for image generation"
+          },
+          "guidance": {
+            "type": "number",
+            "title": "Guidance",
+            "default": 3,
+            "maximum": 5,
+            "minimum": 2,
+            "description": "Controls the balance between adherence to the text prompt and image quality/diversity. Higher values make the output more closely match the prompt but may reduce overall image quality. Lower values allow for more creative freedom but might produce results less relevant to the prompt."
+          },
+          "interval": {
+            "type": "number",
+            "title": "Interval",
+            "default": 2,
+            "maximum": 4,
+            "minimum": 1,
+            "deprecated": true,
+            "description": "Deprecated"
+          },
+          "aspect_ratio": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/aspect_ratio"
+              }
+            ],
+            "default": "1:1",
+            "x-order": 2,
+            "description": "Aspect ratio for the generated image"
+          },
+          "image_prompt": {
+            "type": "string",
+            "title": "Image Prompt",
+            "format": "uri",
+            "description": "Image to use with Flux Redux. This is used together with the text prompt to guide the generation towards the composition of the image_prompt. Must be jpeg, png, gif, or webp."
+          },
+          "output_format": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/output_format"
+              }
+            ],
+            "default": "webp",
+            "x-order": 8,
+            "description": "Format of the output images."
+          },
+          "output_quality": {
+            "type": "integer",
+            "title": "Output Quality",
+            "default": 80,
+            "maximum": 100,
+            "minimum": 0,
+            "description": "Quality when saving the output images, from 0 to 100. 100 is best quality, 0 is lowest quality. Not relevant for .png outputs"
+          },
+          "safety_tolerance": {
+            "type": "integer",
+            "title": "Safety Tolerance",
+            "default": 2,
+            "maximum": 6,
+            "minimum": 1,
+            "description": "Safety tolerance, 1 is most strict and 6 is most permissive"
+          },
+          "prompt_upsampling": {
+            "type": "boolean",
+            "title": "Prompt Upsampling",
+            "default": false,
+            "description": "Automatically modify the prompt for more creative generation"
+          }
+        }
+      },
+      "aspect_ratio": {
+        "enum": [
+          "custom",
+          "1:1",
+          "16:9",
+          "3:2",
+          "2:3",
+          "4:5",
+          "5:4",
+          "9:16",
+          "3:4",
+          "4:3"
+        ],
+        "type": "string",
+        "title": "aspect_ratio",
+        "description": "An enumeration."
+      },
+      "output_format": {
+        "enum": [
+          "webp",
+          "jpg",
+          "png"
+        ],
+        "type": "string",
+        "title": "output_format",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "string",
+        "title": "Output",
+        "format": "uri"
+      }
+    }
+  }
+}

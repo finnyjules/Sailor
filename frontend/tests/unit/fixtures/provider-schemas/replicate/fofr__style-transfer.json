@@ -1,0 +1,161 @@
+{
+  "endpoint": "fofr/style-transfer",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/fofr/style-transfer"
+  },
+  "versionId": "f1023890703bc0a5a3a2c21b5e498833be5f6ef6e70e9daf6b9b3a4fd8309cf0",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "style_image"
+        ],
+        "properties": {
+          "seed": {
+            "type": "integer",
+            "title": "Seed",
+            "x-order": 12,
+            "description": "Set a seed for reproducibility. Random by default."
+          },
+          "model": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/model"
+              }
+            ],
+            "default": "fast",
+            "x-order": 6,
+            "description": "Model to use for the generation"
+          },
+          "width": {
+            "type": "integer",
+            "title": "Width",
+            "default": 1024,
+            "x-order": 4,
+            "description": "Width of the output image (ignored if structure image given)"
+          },
+          "height": {
+            "type": "integer",
+            "title": "Height",
+            "default": 1024,
+            "x-order": 5,
+            "description": "Height of the output image (ignored if structure image given)"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "default": "An astronaut riding a unicorn",
+            "x-order": 2,
+            "description": "Prompt for the image"
+          },
+          "style_image": {
+            "type": "string",
+            "title": "Style Image",
+            "format": "uri",
+            "x-order": 0,
+            "description": "Copy the style from this image"
+          },
+          "output_format": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/output_format"
+              }
+            ],
+            "default": "webp",
+            "x-order": 10,
+            "description": "Format of the output images"
+          },
+          "output_quality": {
+            "type": "integer",
+            "title": "Output Quality",
+            "default": 80,
+            "maximum": 100,
+            "minimum": 0,
+            "x-order": 11,
+            "description": "Quality of the output images, from 0 to 100. 100 is best quality, 0 is lowest quality."
+          },
+          "negative_prompt": {
+            "type": "string",
+            "title": "Negative Prompt",
+            "default": "",
+            "x-order": 3,
+            "description": "Things you do not want to see in your image"
+          },
+          "structure_image": {
+            "type": "string",
+            "title": "Structure Image",
+            "format": "uri",
+            "x-order": 1,
+            "description": "An optional image to copy structure from. Output images will use the same aspect ratio."
+          },
+          "number_of_images": {
+            "type": "integer",
+            "title": "Number Of Images",
+            "default": 1,
+            "maximum": 10,
+            "minimum": 1,
+            "x-order": 7,
+            "description": "Number of images to generate"
+          },
+          "structure_depth_strength": {
+            "type": "number",
+            "title": "Structure Depth Strength",
+            "default": 1,
+            "maximum": 2,
+            "minimum": 0,
+            "x-order": 8,
+            "description": "Strength of the depth controlnet"
+          },
+          "structure_denoising_strength": {
+            "type": "number",
+            "title": "Structure Denoising Strength",
+            "default": 0.65,
+            "maximum": 1,
+            "minimum": 0,
+            "x-order": 9,
+            "description": "How much of the original image (and colors) to preserve (0 is all, 1 is none, 0.65 is a good balance)"
+          }
+        }
+      },
+      "model": {
+        "enum": [
+          "fast",
+          "high-quality",
+          "realistic",
+          "cinematic",
+          "animated"
+        ],
+        "type": "string",
+        "title": "model",
+        "description": "An enumeration."
+      },
+      "output_format": {
+        "enum": [
+          "webp",
+          "jpg",
+          "png"
+        ],
+        "type": "string",
+        "title": "output_format",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "uri"
+        },
+        "title": "Output"
+      }
+    }
+  }
+}

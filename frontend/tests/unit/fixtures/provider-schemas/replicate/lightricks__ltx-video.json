@@ -1,0 +1,184 @@
+{
+  "endpoint": "lightricks/ltx-video",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/lightricks/ltx-video"
+  },
+  "versionId": "8c47da666861d081eeb4d1261853087de23923a268a69b63febdf5dc1dee08e4",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "properties": {
+          "cfg": {
+            "type": "number",
+            "title": "Cfg",
+            "default": 3,
+            "maximum": 20,
+            "minimum": 1,
+            "x-order": 6,
+            "description": "How strongly the video follows the prompt"
+          },
+          "seed": {
+            "type": "integer",
+            "title": "Seed",
+            "x-order": 10,
+            "description": "Set a seed for reproducibility. Random by default."
+          },
+          "image": {
+            "type": "string",
+            "title": "Image",
+            "format": "uri",
+            "x-order": 2,
+            "description": "Optional input image to use as the starting frame"
+          },
+          "model": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/model"
+              }
+            ],
+            "default": "0.9.1",
+            "x-order": 9,
+            "description": "Model version to use"
+          },
+          "steps": {
+            "type": "integer",
+            "title": "Steps",
+            "default": 30,
+            "maximum": 50,
+            "minimum": 1,
+            "x-order": 7,
+            "description": "Number of steps"
+          },
+          "length": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/length"
+              }
+            ],
+            "default": 97,
+            "x-order": 8,
+            "description": "Length of the output video in frames"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "default": "best quality, 4k, HDR, a tracking shot of a beautiful scene",
+            "x-order": 0,
+            "description": "Text prompt for the video. This model needs long descriptive prompts, if the prompt is too short the quality won't be good."
+          },
+          "target_size": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/target_size"
+              }
+            ],
+            "default": 640,
+            "x-order": 4,
+            "description": "Target size for the output video"
+          },
+          "aspect_ratio": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/aspect_ratio"
+              }
+            ],
+            "default": "3:2",
+            "x-order": 5,
+            "description": "Aspect ratio of the output video. Ignored if an image is provided."
+          },
+          "negative_prompt": {
+            "type": "string",
+            "title": "Negative Prompt",
+            "default": "low quality, worst quality, deformed, distorted",
+            "x-order": 1,
+            "description": "Things you do not want to see in your video"
+          },
+          "image_noise_scale": {
+            "type": "number",
+            "title": "Image Noise Scale",
+            "default": 0.15,
+            "maximum": 1,
+            "minimum": 0,
+            "x-order": 3,
+            "description": "Lower numbers stick more closely to the input image"
+          }
+        }
+      },
+      "model": {
+        "enum": [
+          "0.9.1",
+          "0.9"
+        ],
+        "type": "string",
+        "title": "model",
+        "description": "An enumeration."
+      },
+      "length": {
+        "enum": [
+          97,
+          129,
+          161,
+          193,
+          225,
+          257
+        ],
+        "type": "integer",
+        "title": "length",
+        "description": "An enumeration."
+      },
+      "target_size": {
+        "enum": [
+          512,
+          576,
+          640,
+          704,
+          768,
+          832,
+          896,
+          960,
+          1024
+        ],
+        "type": "integer",
+        "title": "target_size",
+        "description": "An enumeration."
+      },
+      "aspect_ratio": {
+        "enum": [
+          "1:1",
+          "1:2",
+          "2:1",
+          "2:3",
+          "3:2",
+          "3:4",
+          "4:3",
+          "4:5",
+          "5:4",
+          "9:16",
+          "16:9",
+          "9:21",
+          "21:9"
+        ],
+        "type": "string",
+        "title": "aspect_ratio",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "uri"
+        },
+        "title": "Output"
+      }
+    }
+  }
+}

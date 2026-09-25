@@ -1,0 +1,76 @@
+{
+  "endpoint": "xai/grok-imagine-image",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/xai/grok-imagine-image"
+  },
+  "versionId": "3032db31147241f86351f0d7ab1ffd5150dcb482bcb873580f15d8cb8970a812",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "image": {
+            "type": "string",
+            "title": "Image",
+            "format": "uri",
+            "x-order": 1,
+            "description": "Input image for editing. When provided, the model edits this image based on the prompt. Supports jpg, jpeg, png, webp."
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "x-order": 0,
+            "description": "Text prompt for image generation or editing"
+          },
+          "aspect_ratio": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/aspect_ratio"
+              }
+            ],
+            "default": "1:1",
+            "x-order": 2,
+            "description": "Aspect ratio of the generated image. Ignored when editing an image."
+          }
+        }
+      },
+      "aspect_ratio": {
+        "enum": [
+          "1:1",
+          "16:9",
+          "9:16",
+          "4:3",
+          "3:4",
+          "3:2",
+          "2:3",
+          "2:1",
+          "1:2",
+          "19.5:9",
+          "9:19.5",
+          "20:9",
+          "9:20",
+          "auto"
+        ],
+        "type": "string",
+        "title": "aspect_ratio",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "string",
+        "title": "Output",
+        "format": "uri"
+      }
+    }
+  }
+}

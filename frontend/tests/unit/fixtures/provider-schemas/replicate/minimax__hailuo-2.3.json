@@ -1,0 +1,87 @@
+{
+  "endpoint": "minimax/hailuo-2.3",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/minimax/hailuo-2.3"
+  },
+  "versionId": "23a02633b5a44780345a59d4d43f8bd510efa239c56f08f29639ff24fa6615e1",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "Text prompt for generation"
+          },
+          "duration": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/duration"
+              }
+            ],
+            "default": 6,
+            "x-order": 2,
+            "description": "Duration of the video in seconds. 10 seconds is only available for 768p resolution."
+          },
+          "resolution": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/resolution"
+              }
+            ],
+            "default": "768p",
+            "x-order": 3,
+            "description": "Pick between 768p or 1080p resolution. 1080p supports only 6-second duration."
+          },
+          "prompt_optimizer": {
+            "type": "boolean",
+            "title": "Prompt Optimizer",
+            "default": true,
+            "description": "Use prompt optimizer"
+          },
+          "first_frame_image": {
+            "type": "string",
+            "title": "First Frame Image",
+            "format": "uri",
+            "description": "First frame image for video generation. The output video will have the same aspect ratio as this image."
+          }
+        }
+      },
+      "duration": {
+        "enum": [
+          6,
+          10
+        ],
+        "type": "integer",
+        "title": "duration",
+        "description": "An enumeration."
+      },
+      "resolution": {
+        "enum": [
+          "768p",
+          "1080p"
+        ],
+        "type": "string",
+        "title": "resolution",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "string",
+        "title": "Output",
+        "format": "uri"
+      }
+    }
+  }
+}

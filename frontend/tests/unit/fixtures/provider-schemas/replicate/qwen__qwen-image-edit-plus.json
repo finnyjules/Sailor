@@ -1,0 +1,125 @@
+{
+  "endpoint": "qwen/qwen-image-edit-plus",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/qwen/qwen-image-edit-plus"
+  },
+  "versionId": "7677b9cc9967f7725fcf5e814a5a3446bf1d4b6ab0f9c15534dbbc54c7a088f2",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "prompt",
+          "image"
+        ],
+        "properties": {
+          "seed": {
+            "type": "integer",
+            "title": "Seed",
+            "x-order": 4,
+            "nullable": true,
+            "description": "Random seed. Set for reproducible generation"
+          },
+          "image": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "title": "Image",
+            "x-order": 1,
+            "description": "Images to use as reference. Must be jpeg, png, gif, or webp."
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "x-order": 0,
+            "description": "Text instruction on how to edit the given image."
+          },
+          "go_fast": {
+            "type": "boolean",
+            "title": "Go Fast",
+            "default": true,
+            "x-order": 3,
+            "description": "Run faster predictions with additional optimizations."
+          },
+          "aspect_ratio": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/aspect_ratio"
+              }
+            ],
+            "default": "match_input_image",
+            "x-order": 2,
+            "description": "Aspect ratio for the generated image"
+          },
+          "output_format": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/output_format"
+              }
+            ],
+            "default": "webp",
+            "x-order": 5,
+            "description": "Format of the output images"
+          },
+          "output_quality": {
+            "type": "integer",
+            "title": "Output Quality",
+            "default": 95,
+            "maximum": 100,
+            "minimum": 0,
+            "x-order": 6,
+            "description": "Quality when saving the output images, from 0 to 100. 100 is best quality, 0 is lowest quality. Not relevant for .png outputs"
+          },
+          "disable_safety_checker": {
+            "type": "boolean",
+            "title": "Disable Safety Checker",
+            "default": false,
+            "x-order": 7,
+            "description": "Disable safety checker for generated images."
+          }
+        }
+      },
+      "aspect_ratio": {
+        "enum": [
+          "1:1",
+          "16:9",
+          "9:16",
+          "4:3",
+          "3:4",
+          "match_input_image"
+        ],
+        "type": "string",
+        "title": "aspect_ratio",
+        "description": "An enumeration."
+      },
+      "output_format": {
+        "enum": [
+          "webp",
+          "jpg",
+          "png"
+        ],
+        "type": "string",
+        "title": "output_format",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "uri"
+        },
+        "title": "Output"
+      }
+    }
+  }
+}

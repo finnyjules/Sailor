@@ -1,0 +1,104 @@
+{
+  "endpoint": "luma/photon",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/luma/photon"
+  },
+  "versionId": "fe142c037cf359764f2058c3a42ef0dc750d908311d02868cbc7769fe800b648",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "seed": {
+            "type": "integer",
+            "title": "Seed",
+            "x-order": 7,
+            "description": "Random seed. Set for reproducible generation"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "x-order": 0,
+            "description": "Text prompt for image generation"
+          },
+          "aspect_ratio": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/aspect_ratio"
+              }
+            ],
+            "default": "16:9",
+            "x-order": 1,
+            "description": "Aspect ratio of the generated image"
+          },
+          "image_reference_url": {
+            "type": "string",
+            "title": "Image Reference Url",
+            "x-order": 2,
+            "description": "URL of a reference image to guide generation"
+          },
+          "style_reference_url": {
+            "type": "string",
+            "title": "Style Reference Url",
+            "x-order": 4,
+            "description": "URL of a style reference image"
+          },
+          "image_reference_weight": {
+            "type": "number",
+            "title": "Image Reference Weight",
+            "default": 0.85,
+            "maximum": 1,
+            "minimum": 0,
+            "x-order": 3,
+            "description": "Weight of the reference image. Larger values will make the reference image have a stronger influence on the generated image."
+          },
+          "style_reference_weight": {
+            "type": "number",
+            "title": "Style Reference Weight",
+            "default": 0.85,
+            "maximum": 1,
+            "minimum": 0,
+            "x-order": 5,
+            "description": "Weight of the style reference image"
+          },
+          "character_reference_url": {
+            "type": "string",
+            "title": "Character Reference Url",
+            "x-order": 6,
+            "description": "URL of a character reference image"
+          }
+        }
+      },
+      "aspect_ratio": {
+        "enum": [
+          "1:1",
+          "3:4",
+          "4:3",
+          "9:16",
+          "16:9",
+          "9:21",
+          "21:9"
+        ],
+        "type": "string",
+        "title": "aspect_ratio",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "string",
+        "title": "Output",
+        "format": "uri"
+      }
+    }
+  }
+}

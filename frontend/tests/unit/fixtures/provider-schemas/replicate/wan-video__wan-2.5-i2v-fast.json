@@ -1,0 +1,107 @@
+{
+  "endpoint": "wan-video/wan-2.5-i2v-fast",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/wan-video/wan-2.5-i2v-fast"
+  },
+  "versionId": "66226b38d223f8ac7a81aa33b8519759e300c2f9818a215e32900827ad6d2db5",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "image",
+          "prompt"
+        ],
+        "properties": {
+          "seed": {
+            "type": "integer",
+            "title": "Seed",
+            "nullable": true,
+            "description": "Random seed for reproducible generation"
+          },
+          "audio": {
+            "type": "string",
+            "title": "Audio",
+            "format": "uri",
+            "nullable": true,
+            "description": "Audio file (wav/mp3, 3-30s, ≤15MB) for voice/music synchronization"
+          },
+          "image": {
+            "type": "string",
+            "title": "Image",
+            "format": "uri",
+            "description": "Input image for video generation"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "Text prompt for video generation"
+          },
+          "duration": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/duration"
+              }
+            ],
+            "default": 5,
+            "x-order": 5,
+            "description": "Duration of the generated video in seconds"
+          },
+          "resolution": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/resolution"
+              }
+            ],
+            "default": "720p",
+            "x-order": 4,
+            "description": "Video resolution"
+          },
+          "negative_prompt": {
+            "type": "string",
+            "title": "Negative Prompt",
+            "default": "",
+            "description": "Negative prompt to avoid certain elements"
+          },
+          "enable_prompt_expansion": {
+            "type": "boolean",
+            "title": "Enable Prompt Expansion",
+            "default": true,
+            "description": "If set to true, the prompt optimizer will be enabled"
+          }
+        }
+      },
+      "duration": {
+        "enum": [
+          5,
+          10
+        ],
+        "type": "integer",
+        "title": "duration",
+        "description": "An enumeration."
+      },
+      "resolution": {
+        "enum": [
+          "720p",
+          "1080p"
+        ],
+        "type": "string",
+        "title": "resolution",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "string",
+        "title": "Output",
+        "format": "uri"
+      }
+    }
+  }
+}

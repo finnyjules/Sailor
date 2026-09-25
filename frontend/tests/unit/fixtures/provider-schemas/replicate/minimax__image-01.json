@@ -1,0 +1,85 @@
+{
+  "endpoint": "minimax/image-01",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/minimax/image-01"
+  },
+  "versionId": "928f3bd6ac899108d0ab8cf7f91dfa39a03eda0175e94c9b4cd075776dececf0",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "Text prompt for generation"
+          },
+          "aspect_ratio": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/aspect_ratio"
+              }
+            ],
+            "default": "1:1",
+            "x-order": 1,
+            "description": "Image aspect ratio"
+          },
+          "number_of_images": {
+            "type": "integer",
+            "title": "Number Of Images",
+            "default": 1,
+            "maximum": 9,
+            "minimum": 1,
+            "description": "Number of images to generate"
+          },
+          "prompt_optimizer": {
+            "type": "boolean",
+            "title": "Prompt Optimizer",
+            "default": true,
+            "description": "Use prompt optimizer"
+          },
+          "subject_reference": {
+            "type": "string",
+            "title": "Subject Reference",
+            "format": "uri",
+            "description": "An optional character reference image (human face) to use as the subject in the generated image(s)."
+          }
+        }
+      },
+      "aspect_ratio": {
+        "enum": [
+          "1:1",
+          "16:9",
+          "4:3",
+          "3:2",
+          "2:3",
+          "3:4",
+          "9:16",
+          "21:9"
+        ],
+        "type": "string",
+        "title": "aspect_ratio",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "uri"
+        },
+        "title": "Output"
+      }
+    }
+  }
+}

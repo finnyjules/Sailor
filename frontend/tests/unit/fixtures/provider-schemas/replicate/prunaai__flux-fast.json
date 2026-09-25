@@ -1,0 +1,144 @@
+{
+  "endpoint": "prunaai/flux-fast",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/prunaai/flux-fast"
+  },
+  "versionId": "98972b6633f6749d2b5be1101ace85e44f42483e158ef3cce875b55d3de321a4",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "seed": {
+            "type": "integer",
+            "title": "Seed",
+            "x-order": 4,
+            "nullable": true,
+            "description": "Random seed for reproducible generation. Leave blank for random."
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "x-order": 0,
+            "description": "Prompt"
+          },
+          "guidance": {
+            "type": "number",
+            "title": "Guidance",
+            "default": 3.5,
+            "x-order": 3,
+            "description": "Guidance scale"
+          },
+          "image_size": {
+            "type": "integer",
+            "title": "Image Size",
+            "default": 1024,
+            "x-order": 6,
+            "description": "Base image size (longest side)"
+          },
+          "speed_mode": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/speed_mode"
+              }
+            ],
+            "default": "Extra Juiced 🔥 (more speed)",
+            "x-order": 1,
+            "description": "Speed optimization level"
+          },
+          "aspect_ratio": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/aspect_ratio"
+              }
+            ],
+            "default": "1:1",
+            "x-order": 5,
+            "description": "Aspect ratio of the output image"
+          },
+          "output_format": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/output_format"
+              }
+            ],
+            "default": "jpg",
+            "x-order": 7,
+            "description": "Output format"
+          },
+          "output_quality": {
+            "type": "integer",
+            "title": "Output Quality",
+            "default": 80,
+            "maximum": 100,
+            "minimum": 1,
+            "x-order": 8,
+            "description": "Output quality (for jpg and webp)"
+          },
+          "num_inference_steps": {
+            "type": "integer",
+            "title": "Num Inference Steps",
+            "default": 28,
+            "x-order": 2,
+            "description": "Number of inference steps"
+          }
+        }
+      },
+      "speed_mode": {
+        "enum": [
+          "Lightly Juiced 🍊 (more consistent)",
+          "Juiced 🔥 (default)",
+          "Extra Juiced 🔥 (more speed)",
+          "Blink of an eye 👁️"
+        ],
+        "type": "string",
+        "title": "speed_mode",
+        "description": "An enumeration."
+      },
+      "aspect_ratio": {
+        "enum": [
+          "1:1",
+          "16:9",
+          "21:9",
+          "3:2",
+          "2:3",
+          "4:5",
+          "5:4",
+          "3:4",
+          "4:3",
+          "9:16",
+          "9:21"
+        ],
+        "type": "string",
+        "title": "aspect_ratio",
+        "description": "An enumeration."
+      },
+      "output_format": {
+        "enum": [
+          "png",
+          "jpg",
+          "webp"
+        ],
+        "type": "string",
+        "title": "output_format",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "string",
+        "title": "Output",
+        "format": "uri"
+      }
+    }
+  }
+}

@@ -1,0 +1,138 @@
+{
+  "endpoint": "recraft-ai/recraft-v3",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/recraft-ai/recraft-v3"
+  },
+  "versionId": "9507e61ddace8b3a238371b17a61be203747c5081ea6070fecd3c40d27318922",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "size": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/size"
+              }
+            ],
+            "default": "1024x1024",
+            "x-order": 2,
+            "description": "Width and height of the generated image. Size is ignored if an aspect ratio is set."
+          },
+          "style": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/style"
+              }
+            ],
+            "default": "any",
+            "x-order": 3,
+            "description": "Style of the generated image."
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "Text prompt for image generation"
+          },
+          "aspect_ratio": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/aspect_ratio"
+              }
+            ],
+            "default": "Not set",
+            "x-order": 1,
+            "description": "Aspect ratio of the generated image"
+          }
+        }
+      },
+      "size": {
+        "enum": [
+          "1024x1024",
+          "1365x1024",
+          "1024x1365",
+          "1536x1024",
+          "1024x1536",
+          "1820x1024",
+          "1024x1820",
+          "1024x2048",
+          "2048x1024",
+          "1434x1024",
+          "1024x1434",
+          "1024x1280",
+          "1280x1024",
+          "1024x1707",
+          "1707x1024"
+        ],
+        "type": "string",
+        "title": "size",
+        "description": "An enumeration."
+      },
+      "style": {
+        "enum": [
+          "any",
+          "realistic_image",
+          "digital_illustration",
+          "digital_illustration/pixel_art",
+          "digital_illustration/hand_drawn",
+          "digital_illustration/grain",
+          "digital_illustration/infantile_sketch",
+          "digital_illustration/2d_art_poster",
+          "digital_illustration/handmade_3d",
+          "digital_illustration/hand_drawn_outline",
+          "digital_illustration/engraving_color",
+          "digital_illustration/2d_art_poster_2",
+          "realistic_image/b_and_w",
+          "realistic_image/hard_flash",
+          "realistic_image/hdr",
+          "realistic_image/natural_light",
+          "realistic_image/studio_portrait",
+          "realistic_image/enterprise",
+          "realistic_image/motion_blur"
+        ],
+        "type": "string",
+        "title": "style",
+        "description": "An enumeration."
+      },
+      "aspect_ratio": {
+        "enum": [
+          "Not set",
+          "1:1",
+          "4:3",
+          "3:4",
+          "3:2",
+          "2:3",
+          "16:9",
+          "9:16",
+          "1:2",
+          "2:1",
+          "7:5",
+          "5:7",
+          "4:5",
+          "5:4",
+          "3:5",
+          "5:3"
+        ],
+        "type": "string",
+        "title": "aspect_ratio",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "string",
+        "title": "Output",
+        "format": "uri"
+      }
+    }
+  }
+}

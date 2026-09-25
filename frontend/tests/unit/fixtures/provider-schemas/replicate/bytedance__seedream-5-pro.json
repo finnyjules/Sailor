@@ -1,0 +1,124 @@
+{
+  "endpoint": "bytedance/seedream-5-pro",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/bytedance/seedream-5-pro"
+  },
+  "versionId": "91daad99b90f0bcf3d59f1600b3850a7b60f882ea103d31936b24e3d957b2c79",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "properties": {
+          "size": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/size"
+              }
+            ],
+            "default": "2K",
+            "x-order": 3,
+            "description": "Image resolution. Standard mode supports 1K and 2K. Layer decomposition mode supports 1K, 1.5K, 2K, and auto; auto sizes the base image and layers from the input image."
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "default": "",
+            "x-order": 0,
+            "maxLength": 4000,
+            "description": "Text prompt. In standard mode, describes the image to generate. In layer decomposition mode it is optional: describe which elements to split out, or leave blank to auto-detect all major elements. Maximum 4000 characters."
+          },
+          "image_input": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "title": "Image Input",
+            "default": [],
+            "x-order": 1,
+            "description": "Input image(s). In standard mode, 1-10 reference images for image-to-image generation. In layer decomposition mode, exactly one image to decompose."
+          },
+          "aspect_ratio": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/aspect_ratio"
+              }
+            ],
+            "default": "match_input_image",
+            "x-order": 4,
+            "description": "Image aspect ratio (ignored in layer decomposition mode). Use 'match_input_image' to automatically match the input image's aspect ratio."
+          },
+          "output_format": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/output_format"
+              }
+            ],
+            "default": "png",
+            "x-order": 5,
+            "description": "Output image format. In layer decomposition mode this only controls the base image; layers are always returned as PNG."
+          },
+          "layer_decomposition": {
+            "type": "boolean",
+            "title": "Layer Decomposition",
+            "default": false,
+            "x-order": 2,
+            "description": "Split a single input image into a base image plus separate element layers (up to 16). Requires exactly one input image. Each returned layer includes its stacking order, bounding box, name, and description."
+          }
+        }
+      },
+      "size": {
+        "enum": [
+          "1K",
+          "1.5K",
+          "2K",
+          "auto"
+        ],
+        "type": "string",
+        "title": "size",
+        "description": "An enumeration."
+      },
+      "aspect_ratio": {
+        "enum": [
+          "match_input_image",
+          "1:1",
+          "4:3",
+          "3:4",
+          "16:9",
+          "9:16",
+          "3:2",
+          "2:3",
+          "21:9"
+        ],
+        "type": "string",
+        "title": "aspect_ratio",
+        "description": "An enumeration."
+      },
+      "output_format": {
+        "enum": [
+          "png",
+          "jpeg"
+        ],
+        "type": "string",
+        "title": "output_format",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "uri"
+        },
+        "title": "Output"
+      }
+    }
+  }
+}

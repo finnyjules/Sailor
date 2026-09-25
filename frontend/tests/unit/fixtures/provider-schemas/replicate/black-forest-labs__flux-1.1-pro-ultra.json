@@ -1,0 +1,123 @@
+{
+  "endpoint": "black-forest-labs/flux-1.1-pro-ultra",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/black-forest-labs/flux-1.1-pro-ultra"
+  },
+  "versionId": "551f15a1f56b90795ed34e94f11efb17196a5145bf2ae58fbf2d7e7d8bb42aaf",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "raw": {
+            "type": "boolean",
+            "title": "Raw",
+            "default": false,
+            "x-order": 6,
+            "description": "Generate less processed, more natural-looking images"
+          },
+          "seed": {
+            "type": "integer",
+            "title": "Seed",
+            "x-order": 5,
+            "description": "Random seed. Set for reproducible generation"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "x-order": 0,
+            "description": "Text prompt for image generation"
+          },
+          "aspect_ratio": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/aspect_ratio"
+              }
+            ],
+            "default": "1:1",
+            "x-order": 3,
+            "description": "Aspect ratio for the generated image"
+          },
+          "image_prompt": {
+            "type": "string",
+            "title": "Image Prompt",
+            "format": "uri",
+            "x-order": 1,
+            "description": "Image to use with Flux Redux. This is used together with the text prompt to guide the generation towards the composition of the image_prompt. Must be jpeg, png, gif, or webp."
+          },
+          "output_format": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/output_format"
+              }
+            ],
+            "default": "jpg",
+            "x-order": 7,
+            "description": "Format of the output images."
+          },
+          "safety_tolerance": {
+            "type": "integer",
+            "title": "Safety Tolerance",
+            "default": 2,
+            "maximum": 6,
+            "minimum": 1,
+            "x-order": 4,
+            "description": "Safety tolerance, 1 is most strict and 6 is most permissive"
+          },
+          "image_prompt_strength": {
+            "type": "number",
+            "title": "Image Prompt Strength",
+            "default": 0.1,
+            "maximum": 1,
+            "minimum": 0,
+            "x-order": 2,
+            "description": "Blend between the prompt and the image prompt."
+          }
+        }
+      },
+      "aspect_ratio": {
+        "enum": [
+          "21:9",
+          "16:9",
+          "3:2",
+          "4:3",
+          "5:4",
+          "1:1",
+          "4:5",
+          "3:4",
+          "2:3",
+          "9:16",
+          "9:21"
+        ],
+        "type": "string",
+        "title": "aspect_ratio",
+        "description": "An enumeration."
+      },
+      "output_format": {
+        "enum": [
+          "jpg",
+          "png"
+        ],
+        "type": "string",
+        "title": "output_format",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "string",
+        "title": "Output",
+        "format": "uri"
+      }
+    }
+  }
+}
