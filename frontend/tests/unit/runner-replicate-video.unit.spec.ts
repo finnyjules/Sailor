@@ -365,7 +365,8 @@ describe('replicate-video on the engine (hosted, fake fal and Replicate)', () =>
       return orig(url, opts)
     })
     const k = makeKit({ replicate, deps: { families: () => REPLICATE_VIDEO, now: () => clock } })
-    const { runId } = await start(k, [withCard(vid('sora-2'))])
+    // Any Replicate video model; Sora (discontinued in H2) is refused before it starts.
+    const { runId } = await start(k, [withCard(vid('kling-v3'))])
     await k.engine.settled(runId)
     const rec = (await k.store.get(runId))!.takes[0]!.nodes['1']!
     expect(rec).toMatchObject({ status: 'error', error: 'The video took longer than 30 minutes, so it was cancelled' })

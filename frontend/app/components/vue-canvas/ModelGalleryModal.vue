@@ -280,7 +280,7 @@ const focusedModel = computed<ImageModel | null>(() =>
   <CatalogModal
     :open="true"
     :title="`Pick a model for &quot;Generate an image&quot;`"
-    :subtitle="`${IMAGE_MODELS.length} models · Replicate`"
+    :subtitle="`${offeredModels.length} models · Replicate`"
     :items="visibleItems"
     :selected-id="currentModelId"
     :filters="filters"

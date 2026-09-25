@@ -255,7 +255,7 @@ const focusedModel = computed<VideoModel | null>(() =>
   <CatalogModal
     :open="true"
     :title="`Pick a model for &quot;Generate a video&quot;`"
-    :subtitle="`${VIDEO_MODELS.length} models · Replicate`"
+    :subtitle="`${offeredModels.length} models · Replicate`"
     :items="visibleItems"
     :selected-id="currentModelId"
     :filters="filters"

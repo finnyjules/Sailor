@@ -27,6 +27,7 @@ import {
 import { PROVIDER_TYPES, RUNNER_NODE_RULES, isRunnerEligible, runnerTakesNode, type RunnerNodeRule } from '#shared/runner/eligibility'
 import { NO_FAMILIES, RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import type { ApiPrompt } from '#shared/runner/graph'
+import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
 import type { OutputFile } from '~~/server/runner/types'
 import { createFakeFal, createFakeLedger, createFakeReplicate, makeKit, ofType } from './__runner__/kit'
 
@@ -43,6 +44,8 @@ const CASES = (JSON.parse(readFileSync(
 const RESTYLE: ReadonlySet<RunnerFamily> = new Set(['restyle'])
 const OTHERS: ReadonlySet<RunnerFamily> = new Set(RUNNER_FAMILIES.filter(f => f !== 'restyle'))
 const IP = 'Style Transfer · IP-Adapter'
+/** The models the restyle family takes. IP-Adapter left the runner in H2 (retired; its price is only an estimate). */
+const TAKEN = RESTYLE_MODELS.filter(m => m !== IP)
 const ENDPOINTS: Record<string, string> = {
   'Nano Banana 2': 'fal fal-ai/nano-banana-2/edit',
   'Nano Banana Pro': 'fal fal-ai/nano-banana-pro/edit',
@@ -287,11 +290,17 @@ describe('restyle eligibility', () => {
     const rows = Object.keys(RUNNER_NODE_RULES).filter(ct => nodeRuleFamilies(RUNNER_NODE_RULES[ct]!).includes('restyle'))
     expect(rows).toEqual(['RestyleFromImageNode'])
     expect(PROVIDER_TYPES.has('RestyleFromImageNode')).toBe(true)
-    expect(Object.keys(RUNNER_NODE_RULES.RestyleFromImageNode!.models!).sort()).toEqual([...RESTYLE_MODELS].sort())
+    expect(Object.keys(RUNNER_NODE_RULES.RestyleFromImageNode!.models!).sort()).toEqual([...TAKEN].sort())
+  })
+
+  it('IP-Adapter is retired from the runner (model line-up H2): not taken with every family on', () => {
+    const p = node({ model: IP, content_image: ['1', 0], style_image: ['1', 0] })
+    expect(isRunnerEligible(p, new Set(RUNNER_FAMILIES))).toBe(false)
+    expect(runnerTakesNode(p, '2', new Set(RUNNER_FAMILIES))).toBe(false)
   })
 
   const takes: [string, ApiPrompt][] = [
-    ...RESTYLE_MODELS.map(m => [`${m} with a style picture`, node({ model: m, content_image: ['1', 0], style_image: ['1', 0] })] as [string, ApiPrompt]),
+    ...TAKEN.map(m => [`${m} with a style picture`, node({ model: m, content_image: ['1', 0], style_image: ['1', 0] })] as [string, ApiPrompt]),
     ['with a moodboard', node({ model: 'Nano Banana 2', content_image: ['1', 0], style_refs: BOARD })],
     // No style source at all is still taken: the node fails with Python's words.
     ['with no style source', node({ model: 'Nano Banana Pro', content_image: ['1', 0] })],
@@ -314,7 +323,7 @@ describe('restyle eligibility', () => {
     ['a model the node does not offer', node({ model: 'Style Transfer', content_image: ['1', 0], style_image: ['1', 0] })],
     ['a wired prompt', node({ model: 'Nano Banana 2', content_image: ['1', 0], style_image: ['1', 0], prompt: ['1', 0] })],
     ['wired style_refs', node({ model: 'Nano Banana 2', content_image: ['1', 0], style_refs: ['1', 0] })],
-    ['a wired structure dial', node({ model: IP, content_image: ['1', 0], style_image: ['1', 0], structure_strength: ['1', 0] })],
+    ['a wired structure dial', node({ model: 'Nano Banana 2', content_image: ['1', 0], style_image: ['1', 0], structure_strength: ['1', 0] })],
     ['a picture from outside the prompt', { 2: { class_type: 'RestyleFromImageNode', inputs: { model: 'Nano Banana 2', content_image: ['9', 0], style_image: ['9', 0] } } }],
   ]
   it.each(refused)('%s: not taken', (_l, p) => {
@@ -458,20 +467,14 @@ describe('restyle on the engine (hosted, fake providers)', () => {
     }]])
   })
 
-  it('IP-Adapter goes to Replicate fofr/style-transfer with the first board picture and the seed', async () => {
-    const k = kit()
-    const { runId, promptIds } = await k.engine.startRun({
+  it('IP-Adapter (retired, model line-up H2): with every family on the runner declines it before any hand-off, call or hold', async () => {
+    const k = kit({ deps: { families: () => new Set(RUNNER_FAMILIES) } })
+    await expect(k.engine.startRun({
       userId: k.userId, takes: [restyleFlow({ model: IP, board: ['00_a.png', '01_b.jpg'], style: true, prompt: '  ink wash ', seed: 12 })], ...START,
-    })
-    await k.engine.settled(runId)
-    expect((await k.store.get(runId))!.status).toBe('done')
-    // One style picture: the second board picture is never handed off.
-    expect(uploadedNames(k)).toEqual(['content.png', '00_a.png'])
-    expect(k.replicate.submitted().map(r => [r.endpoint, r.payload])).toEqual([['fofr/style-transfer', {
-      prompt: 'ink wash', style_image: link('00_a.png'), structure_image: link('content.png'),
-      structure_denoising_strength: 0.8, output_format: 'jpg', number_of_images: 1, seed: 12,
-    }]])
-    expect(k.ledger.settle).toHaveBeenCalledWith(1, restylePrice(IP, '2K') + BASE_RENDER_CREDITS, `runner:${promptIds[0]}`)
+    })).rejects.toMatchObject({ statusCode: 400, data: { reason: RUNNER_NOT_ELIGIBLE } })
+    expect(k.upload).not.toHaveBeenCalled()
+    expect(k.replicate.submitted()).toEqual([])
+    expect(k.ledger.hold).not.toHaveBeenCalled()
   })
 
   it('no style source fails the node with Python’s words before anything is handed off, and the hold is released', async () => {

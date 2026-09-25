@@ -170,6 +170,7 @@ export const VIDEO_MODELS: VideoModel[] = [
   // ===== OpenAI ===========================================================
   {
     id: 'sora-2',
+    discontinued: '2026-09-24',
     label: 'Sora 2',
     brand: 'OpenAI',
     replicateSlug: 'openai/sora-2',
@@ -189,6 +190,7 @@ export const VIDEO_MODELS: VideoModel[] = [
   },
   {
     id: 'sora-2-pro',
+    discontinued: '2026-09-24',
     label: 'Sora 2 Pro',
     brand: 'OpenAI',
     replicateSlug: 'openai/sora-2-pro',
@@ -278,6 +280,7 @@ export const VIDEO_MODELS: VideoModel[] = [
   },
   {
     id: 'kling-v2.5-turbo-pro',
+    hidden: true,
     label: 'Kling v2.5 Turbo Pro',
     brand: 'Kling',
     replicateSlug: 'kwaivgi/kling-v2.5-turbo-pro',
@@ -344,6 +347,7 @@ export const VIDEO_MODELS: VideoModel[] = [
   // ===== MiniMax (Hailuo) =================================================
   {
     id: 'hailuo-2.3',
+    hidden: true,
     label: 'Hailuo 2.3',
     brand: 'MiniMax',
     replicateSlug: 'minimax/hailuo-2.3',
@@ -411,6 +415,7 @@ export const VIDEO_MODELS: VideoModel[] = [
   // ===== Wan (open-source) ================================================
   {
     id: 'wan-2.7-t2v',
+    hidden: true,
     label: 'Wan 2.7 T2V',
     brand: 'Wan',
     replicateSlug: 'wan-video/wan-2.7-t2v',
@@ -434,6 +439,7 @@ export const VIDEO_MODELS: VideoModel[] = [
   },
   {
     id: 'wan-2.5-i2v-fast',
+    hidden: true,
     label: 'Wan 2.5 I2V Fast',
     brand: 'Wan',
     replicateSlug: 'wan-video/wan-2.5-i2v-fast',
@@ -456,6 +462,7 @@ export const VIDEO_MODELS: VideoModel[] = [
   // ===== Luma =============================================================
   {
     id: 'luma-ray-2-720p',
+    hidden: true,
     label: 'Luma Ray 2 (720p)',
     brand: 'Luma',
     replicateSlug: 'luma/ray-2-720p',
@@ -477,6 +484,7 @@ export const VIDEO_MODELS: VideoModel[] = [
   // ===== Lightricks =======================================================
   {
     id: 'ltx-video',
+    hidden: true,
     label: 'LTX-Video',
     brand: 'Lightricks',
     replicateSlug: 'lightricks/ltx-video',
@@ -562,8 +570,9 @@ export const VIDEO_MODELS: VideoModel[] = [
  * runner doesn't take). Served as the model input's `default`
  * (shared/runner/modelMenus.ts).
  */
-export const VIDEO_MODEL_PREFERENCE: readonly string[] = ['veo-3.1']
-export const FILM_SHOT_MODEL_PREFERENCE: readonly string[] = ['kling-v2.5-turbo-pro']
+export const VIDEO_MODEL_PREFERENCE: readonly string[] = ['hailuo-h3-max', 'veo-3.1']
+// Kling 2.5 Turbo, Python's own Film a shot default, is hidden (model line-up H2).
+export const FILM_SHOT_MODEL_PREFERENCE: readonly string[] = ['hailuo-h3-max', 'kling-v3']
 
 export const VIDEO_MODELS_BY_ID: Record<string, VideoModel> = Object.fromEntries(
   VIDEO_MODELS.map(m => [m.id, m]),

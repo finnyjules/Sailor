@@ -20,7 +20,8 @@ import { RESTYLE_MODELS } from '~~/server/runner/generators/restyle'
 import { REFERENCE_MODEL_IDS } from '~~/server/runner/generators/refEdits'
 import { GRAPH_NODE_CREDITS, UnpricedGraphError, priceGraph } from '~~/server/utils/priceBook'
 import type { ApiPrompt } from '#shared/runner/graph'
-import { RUNNER_NODE_RULES } from '#shared/runner/eligibility'
+import { RUNNER_NODE_RULES, nodeRuleAllows } from '#shared/runner/eligibility'
+import { RUNNER_FAMILIES } from '#shared/runner/families'
 import { EDIT_RATES, editRate, editUsd, type EditCall } from '#shared/pricing/editRates'
 import {
   ENHANCE_ENGINE_SLUGS, LARGEST_INPUT_PIXELS, RESTYLE_LORA_NB_RETRIES, SETTING_PRICED_NODE_CLASSES, UPSCALE_ENGINE_SLUGS, editCalls,
@@ -133,21 +134,35 @@ describe('edit rate cards', () => {
     expect(est).toEqual(ESTIMATES)
   })
 
-  it('the only estimates a runner family can turn on are the two legacy engines being retired', () => {
-    // The only exceptions to "every model a family can turn on has a verified
-    // price". Controller ruling (P4 fix round 1, I3): Product shot's SDXL
-    // (ref-edits) and Restyle's IP-Adapter (restyle) are retired in H2
-    // (decision 7); the `ref-edits` and `restyle` families stay OFF until H2 lands.
+  it('no runner family can turn on an estimate-priced call: the two legacy engines are retired (H2)', () => {
+    // Every model a family switch can turn on has a verified price. Until H2
+    // the two exceptions were Product shot's SDXL (ref-edits) and Restyle's
+    // IP-Adapter (restyle) — P4 fix round 1, I3. H2 retired both from the
+    // runner: no family reaches them, so their saved nodes run on ComfyUI and
+    // still price there.
+    const ALL = new Set(RUNNER_FAMILIES)
     const reachable = new Set<string>()
     for (const ct of SETTING_PRICED_NODE_CLASSES) {
-      if (!(ct in RUNNER_NODE_RULES)) continue
+      const rule = RUNNER_NODE_RULES[ct]
+      if (!rule) continue
       for (const w of settingsGrid(ct)) {
+        // What the runner would take: the class's pictures linked, every family on.
+        if (!nodeRuleAllows(ct, rule, { ...RUNNER_BASE[ct], ...w }, ALL)) continue
         const c = editCalls(ct, w)
         if (!('refused' in c)) for (const one of c.calls) reachable.add(one.endpoint)
       }
     }
+    // Control: the loop reaches the families' calls (the verified ones).
+    expect(reachable.has('fal-ai/nano-banana-2/edit')).toBe(true)
+    expect(reachable.has('bytedance/seedream-5-pro')).toBe(true)
+    expect(reachable.has('google/nano-banana')).toBe(true)
     const est = [...reachable].filter(e => EDIT_RATES[e]!.confidence === 'estimate').sort()
-    expect(est).toEqual(['catacolabs/sdxl-ad-inpaint', 'fofr/style-transfer'])
+    expect(est).toEqual([])
+    expect(reachable.has('catacolabs/sdxl-ad-inpaint')).toBe(false)
+    expect(reachable.has('fofr/style-transfer')).toBe(false)
+    // Hidden is not deleted: both still price on the ComfyUI path.
+    expect(charge('ProductShotNode', {})).toBeGreaterThan(1)
+    expect(charge('RestyleFromImageNode', { model: 'Style Transfer · IP-Adapter' })).toBeGreaterThan(1)
   })
 
   it('every call any setting makes has a card, priced above 0', () => {

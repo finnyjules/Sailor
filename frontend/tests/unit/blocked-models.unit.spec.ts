@@ -4,8 +4,10 @@
  * the browser before any /prompt, the server before pricing and any hold,
  * the runner before any hold — plus: a saved graph using each flag still prices.
  *
- * No catalogue value carries a flag yet (Task H2 sets them), so each test
- * flags entries itself and puts them back afterwards.
+ * Each test flags the entries it needs itself and puts them back afterwards,
+ * on top of the catalogue's own flags (Task H2). The real line-up — Sora
+ * refused by all three checks, hidden models still running and pricing — is
+ * tested in model-lineup-h2.unit.spec.ts.
  */
 import fs from 'node:fs'
 import path from 'node:path'

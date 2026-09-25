@@ -228,29 +228,29 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   },
   SwapProductNode: { family: 'nano-actions', mustLink: ['scene_reference'], mustNotLink: ['instructions'] },
   PersonSwap: { family: 'nano-actions', mustLink: ['scene'], mustNotLink: ['keep_original_outfit', 'instructions'] },
-  // ── ref-edits (Task B7): references, camera and product shot ──
+  // ── ref-edits (Task B7): references and camera ──
   // Seedream on Replicate, Nano Banana 2 on fal (its Python primary), Qwen
-  // Image Edit Plus and the community sdxl-ad-inpaint on Replicate. The first
-  // picture must be linked: Python has no blank for these. Settings the
-  // runner reads must not be wired.
+  // Image Edit Plus on Replicate. The first picture must be linked: Python
+  // has no blank for these. Settings the runner reads must not be wired.
+  // Product shot is retired from the runner (model line-up H2): its SDXL
+  // engine (catacolabs/sdxl-ad-inpaint) has only an estimated price, so no
+  // family takes it; saved nodes run on ComfyUI as before. Bria product-shot
+  // (Task F12) brings it back under its own family.
   GenerateFromReferencesNode: {
     models: { 'seedream-5-pro': 'ref-edits', 'seedream-5-lite': 'ref-edits', 'nano-banana-2': 'ref-edits' },
     mustLink: ['image_1'],
     mustNotLink: ['prompt', 'aspect_ratio', 'size'],
   },
   RotateCameraNode: { family: 'ref-edits', mustLink: ['image'], mustNotLink: ['camera'] },
-  ProductShotNode: {
-    family: 'ref-edits',
-    mustLink: ['image'],
-    mustNotLink: ['scene_prompt', 'aspect', 'product_size', 'keep_product_exact'],
-  },
-  // ── restyle (Task B8): Nano Banana 2 / Pro on fal, Nano Banana and
-  // IP-Adapter Style Transfer on Replicate. The taste wire (style_in) comes
-  // from a Moodboard node, which the runner does not run, so a wired one
-  // goes to Python. Settings the runner reads must not be wired.
+  // ── restyle (Task B8): Nano Banana 2 / Pro on fal, Nano Banana on
+  // Replicate. The taste wire (style_in) comes from a Moodboard node, which
+  // the runner does not run, so a wired one goes to Python. Settings the
+  // runner reads must not be wired. "Style Transfer · IP-Adapter" is retired
+  // (model line-up H2): fofr/style-transfer has only an estimated price, so
+  // the runner no longer takes it; saved nodes run on ComfyUI as before.
   RestyleFromImageNode: {
     models: {
-      'Nano Banana 2': 'restyle', 'Nano Banana Pro': 'restyle', 'Nano Banana': 'restyle', 'Style Transfer · IP-Adapter': 'restyle',
+      'Nano Banana 2': 'restyle', 'Nano Banana Pro': 'restyle', 'Nano Banana': 'restyle',
     },
     mustLink: ['content_image'],
     mustNotLink: ['style_in', 'prompt', 'style_refs', 'structure_strength', 'resolution', 'output_format'],

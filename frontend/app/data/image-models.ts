@@ -145,6 +145,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   // ===== BFL ================================================================
   {
     id: 'flux-1.1-pro',
+    hidden: true,
     label: 'Flux 1.1 Pro',
     brand: 'BFL',
     replicateSlug: 'black-forest-labs/flux-1.1-pro',
@@ -164,6 +165,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'flux-1.1-pro-ultra',
+    hidden: true,
     label: 'Flux 1.1 Pro Ultra',
     brand: 'BFL',
     replicateSlug: 'black-forest-labs/flux-1.1-pro-ultra',
@@ -184,6 +186,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'flux-pro',
+    hidden: true,
     label: 'Flux Pro',
     brand: 'BFL',
     replicateSlug: 'black-forest-labs/flux-pro',
@@ -444,6 +447,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'imagen-3',
+    hidden: true,
     label: 'Imagen 3',
     brand: 'Google',
     replicateSlug: 'google/imagen-3',
@@ -459,6 +463,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'imagen-3-fast',
+    hidden: true,
     label: 'Imagen 3 Fast',
     brand: 'Google',
     replicateSlug: 'google/imagen-3-fast',
@@ -512,6 +517,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'ideogram-v2',
+    hidden: true,
     label: 'Ideogram V2',
     brand: 'Ideogram',
     replicateSlug: 'ideogram-ai/ideogram-v2',
@@ -528,6 +534,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'ideogram-v2a-turbo',
+    hidden: true,
     label: 'Ideogram V2A Turbo',
     brand: 'Ideogram',
     replicateSlug: 'ideogram-ai/ideogram-v2a-turbo',
@@ -594,6 +601,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'seedream-4',
+    hidden: true,
     label: 'Seedream 4',
     brand: 'ByteDance',
     replicateSlug: 'bytedance/seedream-4',
@@ -609,6 +617,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'seedream-3',
+    hidden: true,
     label: 'Seedream 3',
     brand: 'ByteDance',
     replicateSlug: 'bytedance/seedream-3',
@@ -673,6 +682,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'recraft-v3',
+    hidden: true,
     label: 'Recraft V3',
     brand: 'Recraft',
     replicateSlug: 'recraft-ai/recraft-v3',
@@ -696,6 +706,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'recraft-v3-svg',
+    hidden: true,
     label: 'Recraft V3 SVG',
     brand: 'Recraft',
     replicateSlug: 'recraft-ai/recraft-v3-svg',
@@ -713,6 +724,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   // ===== Stability AI =======================================================
   {
     id: 'stable-diffusion-3.5-large',
+    hidden: true,
     label: 'Stable Diffusion 3.5 Large',
     brand: 'Stability AI',
     replicateSlug: 'stability-ai/stable-diffusion-3.5-large',
@@ -729,6 +741,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'stable-diffusion-3.5-large-turbo',
+    hidden: true,
     label: 'Stable Diffusion 3.5 Large Turbo',
     brand: 'Stability AI',
     replicateSlug: 'stability-ai/stable-diffusion-3.5-large-turbo',
@@ -746,6 +759,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'stable-diffusion-3.5-medium',
+    hidden: true,
     label: 'Stable Diffusion 3.5 Medium',
     brand: 'Stability AI',
     replicateSlug: 'stability-ai/stable-diffusion-3.5-medium',
@@ -784,6 +798,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'gpt-image-1.5',
+    hidden: true,
     label: 'GPT Image 1.5',
     brand: 'OpenAI',
     replicateSlug: 'openai/gpt-image-1.5',
@@ -828,6 +843,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   // ===== Tencent ============================================================
   {
     id: 'hunyuan-image-3',
+    hidden: true,
     label: 'Hunyuan Image 3',
     brand: 'Tencent',
     replicateSlug: 'tencent/hunyuan-image-3',
@@ -892,6 +908,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'wan-2.2-image-pruna',
+    hidden: true,
     label: 'Wan 2.2 Image (Pruna)',
     brand: 'Pruna',
     replicateSlug: 'prunaai/wan-2.2-image',
@@ -944,6 +961,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   // ===== Luma ===============================================================
   {
     id: 'photon',
+    hidden: true,
     label: 'Photon',
     brand: 'Luma',
     replicateSlug: 'luma/photon',
@@ -956,6 +974,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   },
   {
     id: 'photon-flash',
+    hidden: true,
     label: 'Photon Flash',
     brand: 'Luma',
     replicateSlug: 'luma/photon-flash',
@@ -970,6 +989,7 @@ export const IMAGE_MODELS: ImageModel[] = [
   // ===== MiniMax ============================================================
   {
     id: 'minimax-image-01',
+    hidden: true,
     label: 'MiniMax Image 01',
     brand: 'MiniMax',
     replicateSlug: 'minimax/image-01',
@@ -1012,7 +1032,7 @@ export const IMAGE_MODELS: ImageModel[] = [
  * run now (not hidden or discontinued; a runner-only one only while its family
  * is on). Served as the model input's `default` (shared/runner/modelMenus.ts).
  */
-export const IMAGE_MODEL_PREFERENCE: readonly string[] = ['flux-2-pro']
+export const IMAGE_MODEL_PREFERENCE: readonly string[] = ['nano-banana-2', 'flux-2-pro']
 
 export const IMAGE_MODELS_BY_ID: Record<string, ImageModel> = Object.fromEntries(
   IMAGE_MODELS.map(m => [m.id, m]),

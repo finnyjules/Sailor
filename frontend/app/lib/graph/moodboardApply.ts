@@ -32,14 +32,19 @@
  * widgetDefs lookup) — the helper reports it via `writes.model`.
  */
 import { moodboardStyleBlock } from '~/lib/taste/styleBlock'
-import { IMAGE_MODELS_BY_ID } from '~/data/image-models'
+import { IMAGE_MODELS_BY_ID, IMAGE_MODEL_PREFERENCE } from '~/data/image-models'
 import type { MoodboardEntry } from '~~/shared/taste/moodboard'
 
-/** The model an apply switches to when the current one can't take refs —
+/** The model an apply switches to when the current one can't take refs: the
+ *  "Generate an image" class default (IMAGE_MODEL_PREFERENCE, model line-up
+ *  H2), taking the first on that list that takes reference pictures and
+ *  runs everywhere (not hidden, discontinued or runner-only). Today that is
  *  Nano Banana 2, verified live (2026-08-07) to carry full pattern-level
- *  board transfer at roughly half Nano Banana Pro's price. Pro stays a
- *  manual pick for renders that warrant it. */
-export const MOODBOARD_DEFAULT_MODEL = 'nano-banana-2'
+ *  board transfer at roughly half Nano Banana Pro's price. */
+export const MOODBOARD_DEFAULT_MODEL: string = IMAGE_MODEL_PREFERENCE.find((id) => {
+  const m = IMAGE_MODELS_BY_ID[id]
+  return !!m && !m.hidden && !m.discontinued && !m.runnerOnly && m.tags.includes('multi-image')
+}) ?? IMAGE_MODEL_PREFERENCE[0]!
 
 /** Refs cap — lives in shared/taste/moodboard.ts since Task B5 (the flatten
  *  route enforces the same cap); re-exported so existing importers keep their

@@ -21,9 +21,9 @@ import { nodeCredits, unpricedProviderNode } from '~~/server/runner/metering'
 import { BASE_RENDER_CREDITS } from '~~/server/utils/priceBook'
 import { priceNode } from '#shared/pricing/nodePrice'
 import {
-  PRODUCT_SHOT_DEFAULT_PROMPT, REFERENCE_MODEL_IDS, cameraToPhrase, parseCamera, pitchPhrase, rollPhrase, yawPhrase,
+  REFERENCE_MODEL_IDS, cameraToPhrase, parseCamera, pitchPhrase, rollPhrase, yawPhrase,
 } from '~~/server/runner/generators/refEdits'
-import { createReplicateClient } from '~~/server/runner/replicateQueue'
+import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
 import { PROVIDER_TYPES, RUNNER_NODE_RULES, isRunnerEligible, runnerTakesNode, type RunnerNodeRule } from '#shared/runner/eligibility'
 import { NO_FAMILIES, RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import type { ApiPrompt } from '#shared/runner/graph'
@@ -42,7 +42,8 @@ const CASES = (JSON.parse(readFileSync(
 
 const REF: ReadonlySet<RunnerFamily> = new Set(['ref-edits'])
 const OTHERS: ReadonlySet<RunnerFamily> = new Set(RUNNER_FAMILIES.filter(f => f !== 'ref-edits'))
-const CLASSES = ['GenerateFromReferencesNode', 'ProductShotNode', 'RotateCameraNode']
+/** The classes ref-edits takes. Product shot left the runner in H2 (its SDXL engine is retired; F12 brings Bria). */
+const CLASSES = ['GenerateFromReferencesNode', 'RotateCameraNode']
 const SLOTS = ['image_1', 'image_2', 'image_3', 'image_4', 'image_5', 'image_6']
 
 // ── Parity with the Python nodes ─────────────────────────────────────────
@@ -235,13 +236,21 @@ describe('ref-edits eligibility', () => {
     expect(rows.sort()).toEqual(CLASSES)
     for (const ct of rows) expect(PROVIDER_TYPES.has(ct)).toBe(true)
     expect(Object.keys(RUNNER_NODE_RULES.GenerateFromReferencesNode!.models!).sort()).toEqual([...REFERENCE_MODEL_IDS].sort())
+    // Product shot is retired from the runner (model line-up H2): no row, so no family reaches catacolabs/sdxl-ad-inpaint.
+    expect(RUNNER_NODE_RULES.ProductShotNode).toBeUndefined()
+    expect(PROVIDER_TYPES.has('ProductShotNode')).toBe(false)
+  })
+
+  it('product shot: not taken with every family on; saved nodes stay with ComfyUI', () => {
+    const p = node('ProductShotNode', { image: ['1', 0], scene_prompt: 'a beach' })
+    expect(isRunnerEligible(p, new Set(RUNNER_FAMILIES))).toBe(false)
+    expect(runnerTakesNode(p, '2', new Set(RUNNER_FAMILIES))).toBe(false)
   })
 
   const takes: [string, ApiPrompt][] = [
     ...REFERENCE_MODEL_IDS.map(m => [`references · ${m}`, node('GenerateFromReferencesNode', { model: m, image_1: ['1', 0], prompt: 'p' })] as [string, ApiPrompt]),
     ['references · six pictures', node('GenerateFromReferencesNode', { model: 'seedream-5-lite', ...Object.fromEntries(SLOTS.map(s => [s, ['1', 0]])) })],
     ['rotate camera', node('RotateCameraNode', { image: ['1', 0], camera: '{"yaw":90}', seed: 0 })],
-    ['product shot', node('ProductShotNode', { image: ['1', 0], scene_prompt: 'a beach' })],
   ]
   it.each(takes)('%s: taken only with ref-edits on', (_l, p) => {
     expect(isRunnerEligible(p, REF)).toBe(true)
@@ -274,13 +283,14 @@ describe('ref-edits price', () => {
     const nodes = [
       ...REFERENCE_MODEL_IDS.map(m => ({ class_type: 'GenerateFromReferencesNode', inputs: { model: m } })),
       { class_type: 'RotateCameraNode', inputs: {} },
-      { class_type: 'ProductShotNode', inputs: {} },
     ]
     for (const n of nodes) {
       expect(nodeCredits(n), n.class_type).toBeGreaterThan(0)
       expect(nodeCredits(n), n.class_type).toBe((priceNode(n.class_type, n.inputs) as { credits: number }).credits)
       expect(unpricedProviderNode(withNode(n))).toBeNull()
     }
+    // Product shot runs on ComfyUI only now, and is still priced there.
+    expect((priceNode('ProductShotNode', {}) as { credits: number }).credits).toBeGreaterThan(0)
   })
 })
 
@@ -397,62 +407,26 @@ describe('ref-edits on the engine (hosted, fake providers)', () => {
 
 // ── The community model: Replicate's latest-version route ────────────────
 
-describe('Product shot on a community model (the real Replicate client, a fetch that answers as Replicate)', () => {
+describe('Product shot is retired from the runner (model line-up H2)', () => {
   afterEach(() => { vi.unstubAllGlobals() })
 
-  it('the official route 404s, the latest version is looked up, and the prediction runs on it', async () => {
-    const API = 'https://api.replicate.com/v1'
-    const calls: string[] = []
-    let versionBody: Record<string, unknown> | null = null
-    let polls = 0
-    const reply = (body: unknown, status = 200) => ({
-      ok: status >= 200 && status < 300, status, statusText: '',
-      json: async () => body, text: async () => JSON.stringify(body),
-    })
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
-      const method = init?.method ?? 'GET'
-      calls.push(`${method} ${url}`)
-      if (method === 'POST' && url === `${API}/models/catacolabs/sdxl-ad-inpaint/predictions`) return reply({ detail: 'Not found' }, 404)
-      if (method === 'GET' && url === `${API}/models/catacolabs/sdxl-ad-inpaint`) return reply({ latest_version: { id: 'ver_ad_inpaint' } })
-      if (method === 'POST' && url === `${API}/predictions`) {
-        versionBody = JSON.parse(init!.body!) as Record<string, unknown>
-        return reply({ id: 'cp1', status: 'starting' }, 201)
-      }
-      if (method === 'GET' && url === `${API}/predictions/cp1`) {
-        polls++
-        return reply(polls === 1
-          ? { id: 'cp1', status: 'processing', logs: ' 40%|████      | 8/20' }
-          : { id: 'cp1', status: 'succeeded', output: ['https://replicate.delivery/cp1/out.png'] })
-      }
-      throw new Error(`unexpected fetch ${method} ${url}`)
-    }))
-    const replicate = createReplicateClient({ token: () => 'r8_fixture', sleep: async () => {} })
-    const k = kit({ deps: { providers: { fal: createFakeFal().client, replicate } } })
+  // The community model's Replicate route (404, then the latest version) is
+  // still covered by runner-replicate-queue.unit.spec.ts. Product shot itself
+  // no longer reaches it: with every family on, the runner declines the
+  // workflow before any call or hold, so the browser sends it to ComfyUI.
+  it('with every family on, the runner declines it before any call or hold', async () => {
+    const fetchSpy = vi.fn(async () => { throw new Error('no call expected') })
+    vi.stubGlobal('fetch', fetchSpy)
+    const k = kit({ deps: { families: () => new Set(RUNNER_FAMILIES) } })
     const prompt: ApiPrompt = {
       1: { class_type: 'Image', inputs: { image: 'ref1.png' } },
       2: { class_type: 'ProductShotNode', inputs: { image: ['1', 0], scene_prompt: '   ', aspect: 'Portrait', product_size: '60', keep_product_exact: false, seed: 11 } },
       3: { class_type: 'Image', inputs: { image: '', export: false, images: ['2', 0], batch_index: -1 } },
     }
-    const { runId, promptIds } = await k.engine.startRun({ userId: k.userId, takes: [prompt], ...START })
-    await k.engine.settled(runId)
-
-    expect((await k.store.get(runId))!.status).toBe('done')
-    expect(calls.slice(0, 3)).toEqual([
-      `POST ${API}/models/catacolabs/sdxl-ad-inpaint/predictions`,
-      `GET ${API}/models/catacolabs/sdxl-ad-inpaint`,
-      `POST ${API}/predictions`,
-    ])
-    expect(calls.slice(3).every(c => c === `GET ${API}/predictions/cp1`)).toBe(true)
-    expect(versionBody).toEqual({
-      version: 'ver_ad_inpaint',
-      input: {
-        image: 'https://fal.storage/ref1.png', prompt: PRODUCT_SHOT_DEFAULT_PROMPT, img_size: '832, 1216',
-        product_fill: '60', apply_img: false, seed: 11,
-      },
-    })
-    const flat = (priceNode('ProductShotNode', {}) as { credits: number }).credits
-    expect(k.ledger.settle).toHaveBeenCalledWith(1, flat + BASE_RENDER_CREDITS, `runner:${promptIds[0]}`)
-    const rec = (k.records.write.mock.calls[0] as unknown as [{ outputs: OutputFile[] }])[0]
-    expect(rec.outputs.map(f => f.filename)).toEqual(['product_shot_00001_.png'])
+    await expect(k.engine.startRun({ userId: k.userId, takes: [prompt], ...START }))
+      .rejects.toMatchObject({ statusCode: 400, data: { reason: RUNNER_NOT_ELIGIBLE } })
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    expect(k.replicate.submitted()).toEqual([])
   })
 })

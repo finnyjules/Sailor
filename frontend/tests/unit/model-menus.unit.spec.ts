@@ -3,8 +3,11 @@
  * every `/object_info` body Sailor serves (shared/runner/modelMenus.ts
  * `applyModelOverlay`), and the gallery filter.
  *
- * No catalogue value carries a flag yet (Task H2 sets them), so each test
- * flags entries itself and puts them back afterwards.
+ * These tests check the mechanism, not the line-up: before each one the
+ * catalogue's own flags (set by Task H2) are cleared and the preference lists
+ * put back to Python's defaults, then each test flags entries itself. All of
+ * it is put back afterwards. The real line-up is tested in
+ * model-lineup-h2.unit.spec.ts.
  *
  * `fetch` is stubbed in every source test, so nothing here reaches a real engine.
  */
@@ -64,6 +67,28 @@ function editOption(key: string, value: string): ModelFlags {
   if (!o) throw new Error(`no ${key} option ${value}`)
   return o
 }
+
+/** Clears one entry's flags (put back afterwards). */
+function unflag(target: ModelFlags) {
+  const keys = (['hidden', 'discontinued', 'runnerOnly', 'family'] as const).filter(k => k in target)
+  if (!keys.length) return
+  const before = { ...target }
+  for (const k of keys) delete target[k]
+  undo.push(() => Object.assign(target, before))
+}
+
+/** The catalogue as H1 left it: no flags, Python's defaults first. */
+function flagFreeCatalogue() {
+  for (const m of [...IMAGE_MODELS, ...VIDEO_MODELS]) unflag(m)
+  for (const menu of Object.values(EDIT_MODEL_MENUS)) for (const o of menu.options) unflag(o)
+  prefer(IMAGE_MODEL_PREFERENCE, ['flux-2-pro'])
+  prefer(VIDEO_MODEL_PREFERENCE, ['veo-3.1'])
+  prefer(FILM_SHOT_MODEL_PREFERENCE, ['kling-v2.5-turbo-pro'])
+  prefer(EDIT_MODEL_MENUS['BlendSceneNode.model']!.preference, ['Flux Kontext Pro'])
+  __resetModelMenusForTests()
+}
+
+beforeEach(() => flagFreeCatalogue())
 
 afterEach(() => {
   while (undo.length) undo.pop()!()
