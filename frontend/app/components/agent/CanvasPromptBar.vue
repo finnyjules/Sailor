@@ -40,7 +40,7 @@ const lastSubmitted = ref('')
 const fastPathFired = ref(false)
 
 const {
-  busy, error, reasoning, answer, changes, issues, review, reviewing, hasProposal, hovered,
+  busy, error, reasoning, answer, changes, issues, review, reviewing, reviewingManual, hasProposal, hovered,
   ask, stop, acceptChange, rejectChange, reroll, keep, keepAndRun, reviewLastRun, reviewNode, autoReviewNode, dismiss,
 } = useCanvasAgent({
   getSnapshot: (phrase?: string) => props.vueCanvas.agentSnapshot(phrase),
@@ -170,8 +170,12 @@ const chipLabel = computed(() => selectionLabel(selection.value))
 const suggestions = computed(() => canvasSuggestions(selection.value, (props.vueCanvas?.getNodes?.() ?? []).length === 0))
 const workingLabel = computed(() => busy.value ? 'Planning the change…' : 'Looking at the result…')
 // The result card rides above the prompt once there is something to show.
-// While planning, SailorPrompt's own row shows the progress label and Stop.
-const showCard = computed(() => !busy.value && (reviewing.value || hasProposal.value || !!answer.value || !!error.value))
+// While planning or reviewing, SailorPrompt's own row shows the progress label
+// and Stop — the card never repeats it.
+const showCard = computed(() => !busy.value && (hasProposal.value || !!answer.value || !!error.value))
+// Only work the user started takes over the prompt row. A background
+// auto-review (after a paid render) runs quietly and leaves the prompt usable.
+const promptWorking = computed(() => busy.value || reviewingManual.value)
 const promptRef = ref<InstanceType<typeof SailorPrompt> | null>(null)
 // `/` and ⌘K (default.vue) ask this before focusing: the field must exist (not
 // working), be enabled (AI set up), have a size, and be the top element at its
@@ -228,9 +232,9 @@ function onPromptFocus() {
       ref="promptRef"
       :selection-label="chipLabel"
       :suggestions="suggestions"
-      :working="busy || reviewing"
+      :working="promptWorking"
       :working-label="workingLabel"
-      :stoppable="busy"
+      :stoppable="promptWorking"
       :disabled="!aiAvailable"
       @submit="go"
       @stop="stop"
@@ -242,7 +246,7 @@ function onPromptFocus() {
         <!-- Dismiss the card for the answer / error states (no proposal → no
              keep/revert controls, so this is the only way to close it). -->
         <button
-          v-if="!busy && !reviewing && !hasProposal && (answer || error)"
+          v-if="!busy && !reviewingManual && !hasProposal && (answer || error)"
           class="absolute right-2 top-2 z-20 grid size-6 place-items-center rounded-md text-white/40 transition hover:bg-white/10 hover:text-white/80"
           title="Dismiss" @click="dismiss"
         ><X class="size-3.5" /></button>
@@ -250,10 +254,6 @@ function onPromptFocus() {
         <div v-else-if="answer" class="pr-6">
           <p v-if="reasoning" class="mb-1 text-[11px] leading-snug text-white/40">{{ reasoning }}</p>
           <p class="whitespace-pre-line text-[12.5px] leading-relaxed text-white/85">{{ answer }}</p>
-        </div>
-        <!-- Run→look→fix: looking at the result before any fixes are surfaced. -->
-        <div v-if="reviewing && !hasProposal" class="flex items-center gap-1.5 text-[11.5px] text-white/55">
-          <span class="text-white/75">✦</span> Analyzing the result for imperfections<span class="animate-pulse">…</span>
         </div>
         <AgentProposal
           v-if="hasProposal"

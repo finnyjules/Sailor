@@ -10,12 +10,15 @@ import { ref } from 'vue'
 ;(globalThis as any).useLocalSettings = () => ({ getLocalSetting: () => null })
 
 const aiAvailable = ref(true)
+const reviewing = ref(false)
+const reviewingManual = ref(false)
+const stop = vi.fn()
 vi.mock('~/composables/useAiStatus', () => ({ useAiStatus: () => ({ aiAvailable }) }))
 vi.mock('~/composables/useCanvasAgent', () => ({
   useCanvasAgent: () => ({
     busy: ref(false), error: ref(''), reasoning: ref(''), answer: ref(''), changes: ref([]), issues: ref([]),
-    review: ref(null), reviewing: ref(false), hasProposal: ref(false), hovered: ref(null),
-    ask: vi.fn(), stop: vi.fn(), acceptChange: vi.fn(), rejectChange: vi.fn(), reroll: vi.fn(), keep: vi.fn(),
+    review: ref(null), reviewing, reviewingManual, hasProposal: ref(false), hovered: ref(null),
+    ask: vi.fn(), stop, acceptChange: vi.fn(), rejectChange: vi.fn(), reroll: vi.fn(), keep: vi.fn(),
     keepAndRun: vi.fn(), reviewLastRun: vi.fn(), reviewNode: vi.fn(), autoReviewNode: vi.fn(), dismiss: vi.fn(),
   }),
 }))
@@ -35,7 +38,7 @@ function sizeInput(input: HTMLInputElement) {
 }
 
 describe('CanvasPromptBar', () => {
-  afterEach(() => { aiAvailable.value = true; vi.restoreAllMocks(); document.body.innerHTML = '' })
+  afterEach(() => { aiAvailable.value = true; reviewing.value = false; reviewingManual.value = false; stop.mockReset(); vi.restoreAllMocks(); document.body.innerHTML = '' })
 
   it('renders a single root element (not a fragment) and exposes focus + isFocusable', () => {
     const w = mountBar()
@@ -70,6 +73,22 @@ describe('CanvasPromptBar', () => {
     await w.vm.$nextTick()
     expect(input.disabled).toBe(true)
     expect((w.vm as any).isFocusable()).toBe(false) // disabled
+    w.unmount()
+  })
+
+  it('a background review leaves the prompt usable; a user-started one takes the row and can be stopped', async () => {
+    const w = mountBar()
+    reviewing.value = true // auto-review after a paid render
+    await w.vm.$nextTick()
+    expect(w.find('input[aria-label="Ask Sailor"]').exists()).toBe(true)
+    expect(w.find('[data-testid="prompt-card"]').exists()).toBe(false)
+    reviewingManual.value = true // the Fix action / a manual critique
+    await w.vm.$nextTick()
+    expect(w.find('input[aria-label="Ask Sailor"]').exists()).toBe(false)
+    expect(w.text()).toContain('Looking at the result…')
+    expect(w.text()).not.toContain('Analyzing the result') // progress shows once, in the row
+    await w.get('button[data-testid="prompt-stop"]').trigger('click')
+    expect(stop).toHaveBeenCalledTimes(1)
     w.unmount()
   })
 })

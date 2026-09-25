@@ -71,6 +71,10 @@ export function useCanvasAgent(opts: {
   /** Run→look→fix: a designer's-eye critique of the RUN's actual output. */
   const review = ref<VisualReview | null>(null)
   const reviewing = ref(false)
+  /** True while a USER-started review runs (a manual critique / the Fix action, or
+   *  the review a Keep & Run armed). Background auto-reviews leave it false, so
+   *  they never take over the prompt row. */
+  const reviewingManual = ref(false)
   // Auto-critique publishes its fixes as chips on the artifact's strip.
   const nextStepsStrip = useNextStepsStrip()
   /** Shared set of node ids under review — drives each node's scanning overlay. */
@@ -85,6 +89,9 @@ export function useCanvasAgent(opts: {
   // itself doesn't win the race (e.g. the fetch had already resolved).
   let controller: AbortController | null = null
   let runSeq = 0
+  // Same pattern for a user-started review, so Stop can cancel it too.
+  let reviewController: AbortController | null = null
+  let reviewSeq = 0
 
   async function callModel(prompt: string, commands: { op: string }[], signal?: AbortSignal) {
     const res = await $fetch<{ text: string }>('/api/agent-plan', {
@@ -225,6 +232,7 @@ export function useCanvasAgent(opts: {
    *  so a reply that lands after this — the abort didn't win the race, or the
    *  network already had the response in flight — changes nothing. */
   function stop() {
+    if (!busy.value && reviewingManual.value) { stopReview(); return }
     if (!busy.value) return
     runSeq++
     controller?.abort()
@@ -234,19 +242,34 @@ export function useCanvasAgent(opts: {
     busy.value = false
   }
 
+  /** Stop a user-started review: abort its call and drop whatever it would have
+   *  shown. The scanning overlay clears with it. */
+  function stopReview() {
+    reviewSeq++
+    reviewController?.abort()
+    reviewController = null
+    reviewing.value = false; reviewingManual.value = false
+    analyzingNodeIds.value = new Set()
+  }
+
   function acceptChange(i: number) { const c = changes.value[i]; if (c) { c.accepted = true; recompute() } }
   function rejectChange(i: number) { const c = changes.value[i]; if (c) { c.accepted = false; recompute() } }
 
   async function reroll(i: number) {
     const ch = changes.value[i]
     if (!ch || !ch.rerollable || !original || busy.value) return
+    // Same Stop lifecycle as ask(): a reply after stop() (or after a newer run
+    // started) changes nothing, and only this run may clear its own busy.
+    const seq = ++runSeq
+    const ctrl = controller = new AbortController()
     busy.value = true; error.value = ''
     try {
       const nonce = Math.random().toString(36).slice(2, 7)
       const intent = lastPhrase.value ? `The user's original request was: "${lastPhrase.value}". ` : ''
       const phrase = `${intent}Re-roll ONLY the "${ch.label}" change (currently "${ch.after}"). Propose a DIFFERENT value that still satisfies the request — not "${ch.after}". Same op "${ch.command.op}"${ch.command.target ? ` on "${ch.command.target}"` : ''}; change nothing else. (variation ${nonce})`
       const rdesc = describeCanvas(opts.getSnapshot(lastPhrase.value))
-      const { commands, changeRationales } = await callModel(buildAgentPrompt(rdesc, phrase), rdesc.commands)
+      const { commands, changeRationales } = await callModel(buildAgentPrompt(rdesc, phrase), rdesc.commands, ctrl.signal)
+      if (seq !== runSeq || !original) return
       const idx = commands.findIndex(c => c.op === ch.command.op && (c.target ?? '') === (ch.command.target ?? ''))
       const next = idx >= 0 ? commands[idx] : commands[0]
       if (next) {
@@ -255,9 +278,10 @@ export function useCanvasAgent(opts: {
       }
       recompute()
     } catch (e: any) {
+      if (seq !== runSeq) return // aborted by stop() — not an error to show
       error.value = e?.data?.message || e?.message || String(e)
     } finally {
-      busy.value = false
+      if (seq === runSeq) { busy.value = false; controller = null }
     }
   }
 
@@ -304,12 +328,16 @@ export function useCanvasAgent(opts: {
       opts.discard(); opts.tuneRevert?.(); changes.value = []; review.value = null; answer.value = ''; error.value = ''
     }
     reviewing.value = true
+    reviewingManual.value = !auto
+    const rseq = ++reviewSeq
+    const rctrl = reviewController = new AbortController()
     // Mark the OUTPUT node under review so the white "scanning" overlay lands on
     // the result (past a generator to its result card), not the generator itself.
     const resultNode = opts.resolveResultNode?.(targets)
     analyzingNodeIds.value = new Set(resultNode ? [resultNode] : targets.map(String))
     try {
       const image = await opts.runOutputImage(targets)
+      if (rseq !== reviewSeq) return
       if (!image) { if (manual) answer.value = 'No result on that node yet — run it first, then critique.'; return }
       // The output is definitely present now — re-resolve so the scan lands on a
       // freshly-produced downstream output (e.g. a re-run's new EditImage result)
@@ -330,7 +358,9 @@ export function useCanvasAgent(opts: {
         // prefix cache) so clustered reviews pay ~0.1× for it.
         body: { apiKey: opts.apiKey(), tier: opts.tier ?? 'plan', system: RESULT_REVIEW_SYSTEM, prompt: buildResultReviewPrompt(desc, intent), schema: buildReviewSchema(desc.commands), image },
         timeout: 60_000,
+        signal: rctrl.signal,
       })
+      if (rseq !== reviewSeq) return // stopped while the model was looking
       const parsed = parseReviewResponse(res.text)
       if (parsed.parseFailed) throw new Error('The model reply could not be read — please try again.')
       const { assessment, issues: found, fixes, fixRationales, fixLabels } = parsed
@@ -365,9 +395,12 @@ export function useCanvasAgent(opts: {
       if (built.length) { changes.value = built; recompute() }
       else if (!found.length) answer.value = '✓ Looks right — the result matches what you asked.'
     } catch (e: any) {
+      if (rseq !== reviewSeq) return // aborted by stop()
       if (manual) error.value = e?.data?.message || (e instanceof Error ? e.message : 'Couldn’t review the result.')
       else if (auto) console.warn('[AutoReview] failed silently:', e)
-    } finally { reviewing.value = false; analyzingNodeIds.value = new Set() }
+    } finally {
+      if (rseq === reviewSeq) { reviewing.value = false; reviewingManual.value = false; reviewController = null; analyzingNodeIds.value = new Set() }
+    }
   }
 
   /** Chip click: apply exactly ONE review fix through the normal preview→commit
@@ -405,5 +438,5 @@ export function useCanvasAgent(opts: {
   /** Dismiss: remove the ghost preview + undo any in-place studio-tune edits. */
   function dismiss() { opts.discard(); opts.tuneRevert?.(); changes.value = []; original = null; issues.value = []; answer.value = ''; error.value = ''; review.value = null; pendingReview = null }
 
-  return { busy, error, reasoning, answer, changes, issues, review, reviewing, hasProposal, hovered, lastPhrase, ask, stop, acceptChange, rejectChange, reroll, keep, keepAndRun, reviewLastRun, reviewNode, autoReviewNode, dismiss }
+  return { busy, error, reasoning, answer, changes, issues, review, reviewing, reviewingManual, hasProposal, hovered, lastPhrase, ask, stop, acceptChange, rejectChange, reroll, keep, keepAndRun, reviewLastRun, reviewNode, autoReviewNode, dismiss }
 }
