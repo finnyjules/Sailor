@@ -108,3 +108,75 @@ export function diffusedEdgeGrainField(w: number, h: number, sizePx: number): Fl
   if (fieldCache.size > FIELD_CACHE_MAX) fieldCache.delete(fieldCache.keys().next().value!)
   return a
 }
+
+// ── layer depth ──────────────────────────────────────────────────────────────────────────────
+
+/** Most cells the depth grid may hold; beyond this the layer is sampled coarser (a big shape
+ *  keeps its depth to within a percent or two, a thin one stays at full resolution). */
+const DEPTH_MAX_CELLS = 262144
+
+/** Squared Euclidean distance transform along one line (Felzenszwalb–Huttenlocher), in place. */
+function edt1d(f: Float64Array, n: number, v: Int32Array, z: Float64Array, out: Float64Array): void {
+  let k = 0
+  v[0] = 0; z[0] = -Infinity; z[1] = Infinity
+  for (let q = 1; q < n; q++) {
+    let s = ((f[q]! + q * q) - (f[v[k]!]! + v[k]! * v[k]!)) / (2 * q - 2 * v[k]!)
+    while (s <= z[k]!) { k--; s = ((f[q]! + q * q) - (f[v[k]!]! + v[k]! * v[k]!)) / (2 * q - 2 * v[k]!) }
+    k++; v[k] = q; z[k] = s; z[k + 1] = Infinity
+  }
+  k = 0
+  for (let q = 0; q < n; q++) {
+    while (z[k + 1]! < q) k++
+    out[q] = (q - v[k]!) ** 2 + f[v[k]!]!
+  }
+}
+
+/**
+ * How deep the layer's shape is: the distance from its outline to its deepest point (half the
+ * thickness of its thickest part), in the same pixels as `px`. 0 for an empty layer. The
+ * diffused edge scales its fade by this, so a thin shape and a fat one at the same Width get the
+ * same share of rim. Read from the alpha (≥ 128 = inside), within the shape's bounding box, on
+ * a grid capped at DEPTH_MAX_CELLS; an exact distance transform on that grid.
+ */
+export function layerDepthPx(px: Uint8ClampedArray, w: number, h: number): number {
+  let x0 = w, y0 = h, x1 = -1, y1 = -1
+  for (let y = 0; y < h; y++) {
+    const row = y * w
+    for (let x = 0; x < w; x++) {
+      if (px[(row + x) * 4 + 3]! >= 128) {
+        if (x < x0) x0 = x
+        if (x > x1) x1 = x
+        if (y < y0) y0 = y
+        y1 = y
+      }
+    }
+  }
+  if (x1 < 0) return 0
+  const bw = x1 - x0 + 1, bh = y1 - y0 + 1
+  const cell = Math.max(1, Math.sqrt((bw * bh) / DEPTH_MAX_CELLS))
+  // One cell of outside all round, so the bounding box's own edge counts as outline.
+  const gw = Math.ceil(bw / cell) + 2, gh = Math.ceil(bh / cell) + 2
+  const grid = new Float64Array(gw * gh)
+  for (let gy = 0; gy < gh; gy++) {
+    for (let gx = 0; gx < gw; gx++) {
+      const sx = Math.floor(x0 + (gx - 1 + 0.5) * cell), sy = Math.floor(y0 + (gy - 1 + 0.5) * cell)
+      const inside = gx > 0 && gy > 0 && gx < gw - 1 && gy < gh - 1 && sx <= x1 && sy <= y1
+        && px[(sy * w + sx) * 4 + 3]! >= 128
+      grid[gy * gw + gx] = inside ? 1e20 : 0
+    }
+  }
+  const n = Math.max(gw, gh)
+  const f = new Float64Array(n), out = new Float64Array(n), z = new Float64Array(n + 1), v = new Int32Array(n)
+  for (let gx = 0; gx < gw; gx++) {                       // columns
+    for (let gy = 0; gy < gh; gy++) f[gy] = grid[gy * gw + gx]!
+    edt1d(f, gh, v, z, out)
+    for (let gy = 0; gy < gh; gy++) grid[gy * gw + gx] = out[gy]!
+  }
+  let best = 0
+  for (let gy = 0; gy < gh; gy++) {                       // rows
+    for (let gx = 0; gx < gw; gx++) f[gx] = grid[gy * gw + gx]!
+    edt1d(f, gw, v, z, out)
+    for (let gx = 0; gx < gw; gx++) if (out[gx]! > best) best = out[gx]!
+  }
+  return Math.sqrt(best) * cell
+}

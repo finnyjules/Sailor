@@ -76,7 +76,7 @@ export const EFFECT_DIAL_SCHEMA: Record<EffectKind, DialSpec[]> = {
   // ── pixel — shadows / glows ──────────────────────────────────────────────────────
   inner_shadow: [num('x', 'Offset X', -0.1, 0.1), num('y', 'Offset Y', -0.1, 0.1), num('blur', 'Blur', 0, 0.2), col('color', 'Colour')],
   inner_glow: [num('radius', 'Radius', 0, 0.5), num('intensity', 'Intensity', 0, 2), col('color', 'Colour')],
-  diffused_edge: [num('width', 'Width', 0, 0.3), num('strength', 'Strength', 0, 1), num('grain', 'Grain', 0, 1), num('grainSize', 'Grain size', 1, 8), col('color', 'Fill colour')],
+  diffused_edge: [num('width', 'Width', 0, 1), num('strength', 'Strength', 0, 1), num('grain', 'Grain', 0, 1), num('grainSize', 'Grain size', 1, 8), col('color', 'Fill colour')],
   // ── pixel — tone / colour (F4) ───────────────────────────────────────────────────
   adjust: [num('brightness', 'Brightness', 0, 2), num('contrast', 'Contrast', 0, 2), num('saturation', 'Saturation', 0, 2), num('hue', 'Hue', -180, 180)],
   levels: [num('black', 'Black point', 0, 1), num('white', 'White point', 0, 1), num('gamma', 'Gamma', 0.1, 5)],

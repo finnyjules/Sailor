@@ -10659,7 +10659,7 @@ onUnmounted(() => {
 
           <!-- Diffused edge: the layer keeps its colour at the silhouette and fades to a fill colour
                toward the middle, optionally as crisp grain specks. Fill colour (plain hex), Width
-               (frame-width fraction, shown ×100), Strength and Grain (shown as %), Grain size (px) —
+               (share of the shape's own depth, shown as %), Strength and Grain (shown as %), Grain size (px) —
                all five read by passDiffusedEdge, no dead control. -->
           <div v-else-if="activeEffect!.type === 'diffused_edge'" class="space-y-1.5">
             <div class="flex items-center gap-1.5">
@@ -10672,10 +10672,10 @@ onUnmounted(() => {
             </div>
             <div class="grid grid-cols-2 gap-1.5">
               <div>
-                <div class="panel-sublabel mb-1">Width</div>
-                <input v-scrubnum type="number" min="0" max="30" step="0.5" :value="Math.round(((activeEffect as any).width ?? 0.05) * 1000) / 10"
+                <div class="panel-sublabel mb-1" title="How far the colour reaches toward the middle of the shape">Width %</div>
+                <input v-scrubnum type="number" min="0" max="100" step="1" :value="Math.round(((activeEffect as any).width ?? 0.35) * 100)"
                   class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
-                  @input="updateActiveEffect({ width: Math.min(0.3, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
+                  @input="updateActiveEffect({ width: Math.min(1, Math.max(0, (parseFloat(($event.target as HTMLInputElement).value) || 0) / 100)) })" />
               </div>
               <div>
                 <div class="panel-sublabel mb-1">Strength %</div>

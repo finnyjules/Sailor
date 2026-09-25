@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { diffusedEdgeInPlace, diffusedEdgeGrainField } from '~/lib/compositor/diffusedEdge'
+import { diffusedEdgeInPlace, diffusedEdgeGrainField, layerDepthPx } from '~/lib/compositor/diffusedEdge'
 import {
   isChainEffect, defaultPostEffect, POST_EFFECT_DEFAULTS, POST_FX_PARAM_CLAMP,
 } from '~/lib/compositor/postEffects'
@@ -110,12 +110,39 @@ describe('diffused_edge registration', () => {
     expect(isChainEffect({ type: 'diffused_edge' })).toBe(true)
     const d = defaultPostEffect('diffused_edge') as unknown as Record<string, unknown>
     expect(POST_EFFECT_DEFAULTS.diffused_edge.type).toBe('diffused_edge')
-    expect(d).toMatchObject({ width: 0.05, strength: 1, grain: 0.8, grainSize: 1.5, color: '#ffffff' })
+    expect(d).toMatchObject({ width: 0.35, strength: 1, grain: 0.8, grainSize: 1.5, color: '#ffffff' })
     for (const [k, [lo, hi]] of Object.entries(POST_FX_PARAM_CLAMP.diffused_edge!)) {
       expect(d[k] as number).toBeGreaterThanOrEqual(lo)
       expect(d[k] as number).toBeLessThanOrEqual(hi)
     }
     expect(EFFECT_ORDER).toContain('diffused_edge')
     expect(EFFECT_LABELS.diffused_edge).toBe('Diffused edge')
+  })
+})
+
+describe('layerDepthPx — how deep the shape is (outline to its deepest point)', () => {
+  /** RGBA with alpha 255 wherever `inside(x, y)`. */
+  const mask = (w: number, h: number, inside: (x: number, y: number) => boolean) => {
+    const d = new Uint8ClampedArray(w * h * 4)
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (inside(x, y)) d[(y * w + x) * 4 + 3] = 255
+    return d
+  }
+
+  it('is half the short side of a rectangle', () => {
+    const d = layerDepthPx(mask(200, 200, (x, y) => x >= 40 && x < 160 && y >= 80 && y < 120), 200, 200)
+    expect(d).toBeGreaterThan(18); expect(d).toBeLessThan(22)
+  })
+  it('is the radius of a disc', () => {
+    const d = layerDepthPx(mask(200, 200, (x, y) => (x - 100) ** 2 + (y - 100) ** 2 < 60 ** 2), 200, 200)
+    expect(d).toBeGreaterThan(57); expect(d).toBeLessThan(63)
+  })
+  it('scales with the shape, stays accurate on a big canvas, and follows the thickest piece', () => {
+    const big = layerDepthPx(mask(2400, 1800, (x, y) => x >= 400 && x < 2000 && y >= 700 && y < 740), 2400, 1800)
+    expect(big).toBeGreaterThan(17); expect(big).toBeLessThan(23)
+    const two = layerDepthPx(mask(300, 100, (x, y) => (x < 100 && y >= 45 && y < 55) || (x >= 150 && x < 250 && y >= 20 && y < 80)), 300, 100)
+    expect(two).toBeGreaterThan(27); expect(two).toBeLessThan(33)
+  })
+  it('is 0 for an empty layer', () => {
+    expect(layerDepthPx(new Uint8ClampedArray(40 * 40 * 4), 40, 40)).toBe(0)
   })
 })

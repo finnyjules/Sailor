@@ -12,7 +12,7 @@ import {
   ROUGH_EDGE_MAX_W, INK_BLEED_MAX_W,
 } from './edgeDistort'
 import { scrollStops } from '~/lib/color/gradientTween'
-import { diffusedEdgeInPlace, diffusedEdgeGrainField } from './diffusedEdge'
+import { diffusedEdgeInPlace, diffusedEdgeGrainField, layerDepthPx } from './diffusedEdge'
 
 // Re-exported so the offscreen-pad helper (useCompositorLayers.ts) and its tests read the SAME
 // outward-reach constants the passes below use, mirroring how MOTION_BLUR_SAMPLES is shared.
@@ -107,7 +107,8 @@ export interface InnerGlowEffect {
 export interface DiffusedEdgeEffect {
   type: 'diffused_edge'
   color: string       // hex — the fill the middle fades to
-  width: number       // how far the edge colour reaches inward, normalized to canvas width
+  width: number       // 0..1 — how far the edge colour reaches toward the middle, as a share of the
+                      // shape's own depth (layerDepthPx), so a thin shape and a fat one get the same rim
   strength: number    // 0..1 — how fully the middle turns to the fill
   grain: number       // 0 = smooth fade … 1 = pure speckle
   grainSize: number   // speck size in px (× scale)
@@ -293,7 +294,7 @@ export const POST_EFFECT_DEFAULTS: Record<PostEffect['type'], PostEffect> = {
   outer_glow: { type: 'outer_glow', color: '#ffd9a0', radius: 0.02, intensity: 0.8, visible: true },
   inner_glow: { type: 'inner_glow', color: '#ffd9a0', radius: 0.02, intensity: 0.8, visible: true },
   // The look picked in the prototype: white middle, crisp stipple grain.
-  diffused_edge: { type: 'diffused_edge', color: '#ffffff', width: 0.05, strength: 1, grain: 0.8, grainSize: 1.5, visible: true },
+  diffused_edge: { type: 'diffused_edge', color: '#ffffff', width: 0.35, strength: 1, grain: 0.8, grainSize: 1.5, visible: true },
   // A mid grey multiplied over the layer — visibly tints the moment it is added; the colour
   // card + blend + opacity tune it.
   color_overlay: { type: 'color_overlay', color: '#808080', blend: 'multiply', opacity: 1, visible: true },
@@ -342,7 +343,7 @@ export const POST_FX_PARAM_CLAMP: Record<string, Record<string, [number, number]
   // `color` is non-numeric, so it is not clamped (matches duotone's colours).
   outer_glow: { radius: [0, 0.5], intensity: [0, 2] },
   inner_glow: { radius: [0, 0.5], intensity: [0, 2] },
-  diffused_edge: { width: [0, 0.3], strength: [0, 1], grain: [0, 1], grainSize: [1, 8] },
+  diffused_edge: { width: [0, 1], strength: [0, 1], grain: [0, 1], grainSize: [1, 8] },
   // Colours (`color`/`from`/`to`) and `blend` are non-numeric, so only the numeric dials clamp.
   color_overlay: { opacity: [0, 1] },
   gradient_overlay: { opacity: [0, 1], angle: [0, 360] },
@@ -852,8 +853,9 @@ function passInnerGlow(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement, e:
   ctx.restore()
 }
 
-/** Diffused edge: build the OUTSIDE of the silhouette (opaque everywhere, the layer knocked out),
- *  blur it by `width` so it bleeds back across the edge, and let `diffusedEdgeInPlace` read its
+/** Diffused edge: measure how deep the layer's shape is (outline → deepest point), build the
+ *  OUTSIDE of the silhouette (opaque everywhere, the layer knocked out), blur it by `width` × that
+ *  depth so it bleeds back across the edge in proportion to the shape, and let `diffusedEdgeInPlace` read its
  *  alpha as "how close to an edge" to fade the layer's own pixels toward the fill. Grain specks are
  *  sized in device px (`grainSize × scale`) so they stay crisp at the output resolution. */
 /** The fill as RGB — hex (3/6/8, alpha ignored) or rgb()/rgba(), which the agent and a colour
@@ -870,6 +872,9 @@ function passDiffusedEdge(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement,
   if (!(e.strength > 0 && e.width > 0)) return
   const scale = opts.scale ?? 1
   const w = off.width, h = off.height
+  const img = ctx.getImageData(0, 0, w, h)
+  const depth = layerDepthPx(img.data, w, h)
+  if (!(depth > 0)) return
   const outside = mkCanvas(w, h)
   const octx = outside.getContext('2d')
   if (!octx) return
@@ -878,9 +883,8 @@ function passDiffusedEdge(ctx: CanvasRenderingContext2D, off: HTMLCanvasElement,
   octx.globalCompositeOperation = 'destination-out'
   octx.drawImage(off, 0, 0)
   octx.globalCompositeOperation = 'source-over'
-  applyBlurPass(outside, e.width * opts.W * scale)
+  applyBlurPass(outside, clamp01(e.width) * depth)
   const edge = octx.getImageData(0, 0, w, h).data
-  const img = ctx.getImageData(0, 0, w, h)
   const grain = clamp01(e.grain ?? 0)
   diffusedEdgeInPlace(img.data, edge, {
     strength: e.strength,

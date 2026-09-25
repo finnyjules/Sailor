@@ -1678,7 +1678,7 @@ test.describe('Frame layer styles — F4 pixel passes', () => {
     await openCompositor(page)
     await f4Seed(page, '#d0202c')
     const bare = await stackPixels(page)
-    const fx = { id: 'de', type: 'diffused_edge', color: '#ffffff', width: 0.05, strength: 1, grain: 0, grainSize: 1.5 }
+    const fx = { id: 'de', type: 'diffused_edge', color: '#ffffff', width: 0.35, strength: 1, grain: 0, grainSize: 1.5 }
 
     await expectHiddenIdentical(page, bare, [fx])
     await expectNeutralNoop(page, bare, [{ ...fx, strength: 0, visible: true }])
