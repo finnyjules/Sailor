@@ -23,7 +23,9 @@
  *     an edit leaves no undo step (and keeps the redo stack). Commit re-centres
  *     and writes `d`/`sketch`/`bbox`/`x`/`y` (not re-centred when the layer's
  *     cloner would make copies jump — `clonerBlocksRecentre`); cancel, and
- *     tearing the host down mid-session, write the original layer back exactly.
+ *     tearing the host down mid-session, put back only what the pen wrote
+ *     (`d`/`sketch` — previews never touch x/y/bbox), so an inspector edit made
+ *     meanwhile (fill, stroke) survives.
  *   - `{ kind: 'guide', textId }` — drawing (or re-editing) a text layer's
  *     "Drawn path" guide (Task 9). Open paths only (`openOnly`, Select/Pen/
  *     Curve). The view is FIXED at open: `guideView` of the guide when it
@@ -34,7 +36,9 @@
  *     midpoint and refits it to `size`, so each write keeps the refit factor at
  *     the opening `k` (`size = k × x-extent`) and moves the text's `x`/`y` by
  *     the midpoint's drift (`guideWrite`) — the type stays on the line being
- *     drawn. Cancel puts the text's `path`, `x` and `y` back exactly.
+ *     drawn. Cancel puts the text's `path`, `x` and `y` back exactly; so does
+ *     a preview whose drawing has become empty again (undo back to nothing),
+ *     without closing, so the type never sits on a line that is gone.
  *
  * Construction is side-effect free (no DOM, no lifecycle hooks) so vitest can
  * run it in `node`; the pen is disposed whenever a session closes and, when
@@ -176,6 +180,11 @@ export function withPendingPath(doc: SketchDoc, pp: Pen['pendingPath']['value'])
   return out
 }
 
+/** The text with its guide and position as they were at `orig` (other edits survive). */
+function restoreGuide(l: any, orig: any): any {
+  return { ...l, path: orig.path, x: orig.x, y: orig.y }
+}
+
 export function useFramePenSession(host: FramePenHost) {
   const session = shallowRef<FramePenSession | null>(null)
   let seq = 0
@@ -266,7 +275,16 @@ export function useFramePenSession(host: FramePenHost) {
       const json = JSON.stringify(shown)
       if (json === written) return
       const { W, H } = host.size()
-      if (!guideWrite(text, shown, a, W, H)) return   // no outline yet (a lone first point): keep what the type shows
+      if (!guideWrite(text, shown, a, W, H)) {
+        // no outline: before anything was written (a lone first point) keep what
+        // the type shows; after a write (undo back to empty) put the opening
+        // guide and position back, as cancel does, so the type matches the drawing
+        if (recorded) {
+          written = json
+          writeLayer(textId, l => restoreGuide(l, text))
+        }
+        return
+      }
       written = json
       ensureRecorded()
       writeLayer(textId, l => guideWrite(l, shown, a, W, H))
@@ -354,15 +372,16 @@ export function useFramePenSession(host: FramePenHost) {
       const id = s.target.textId, orig = original, wrote = recorded
       close()
       // the guide and the text's position exactly as they were (other edits survive)
-      if (wrote) writeLayer(id, l => ({ ...l, path: orig.path, x: orig.x, y: orig.y }))
+      if (wrote) writeLayer(id, l => restoreGuide(l, orig))
       return
     }
     if (s?.target.kind === 'layer' && original) {
       const id = s.target.id, orig = original, wrote = recorded
       close()
-      // exactly as it was (the recorded step, if any, undoes to this same state);
-      // nothing written → nothing to put back, and no undo step was left behind
-      if (wrote) writeLayer(id, () => orig)
+      // only what the pen wrote goes back (previews touch d/sketch alone), so an
+      // inspector edit made meanwhile (fill, stroke) survives; nothing written →
+      // nothing to put back, and no undo step was left behind
+      if (wrote) writeLayer(id, l => ({ ...l, d: orig.d, sketch: orig.sketch }))
       return
     }
     close()

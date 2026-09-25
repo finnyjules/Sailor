@@ -227,7 +227,7 @@ describe('useFramePenSession — reopening a drawn path layer', () => {
     })
   })
 
-  it('cancel writes the original layer back exactly; an emptied drawing commits as a cancel', () => {
+  it('cancel writes the original drawing back exactly; an emptied drawing commits as a cancel', () => {
     const l = drawnLayer()
     const { host, get } = liveHost([l])
     const s = useFramePenSession(host)
@@ -237,13 +237,14 @@ describe('useFramePenSession — reopening a drawn path layer', () => {
     expect(get(l.id).d).not.toBe(l.d)
     s.cancelSession()
     expect(s.session.value).toBeNull()
-    expect(get(l.id)).toBe(l)
+    expect(get(l.id)).toEqual(l)
+    expect(get(l.id).sketch).toBe(l.sketch)
 
     s.open({ kind: 'layer', id: l.id })
     const doc = s.session.value!.doc.value
     doc.entities = doc.entities.filter((e: any) => e.kind !== 'path')
     s.commitSession()
-    expect(get(l.id)).toBe(l)
+    expect(get(l.id)).toEqual(l)
   })
 
   it('open then leave with no edit (cancel, or commit) records nothing and writes nothing', () => {
@@ -288,7 +289,27 @@ describe('useFramePenSession — reopening a drawn path layer', () => {
     expect(get(l.id).d).not.toBe(l.d)
     scope.stop()
     expect(s.session.value).toBeNull()
-    expect(get(l.id)).toBe(l)
+    expect(get(l.id)).toEqual(l)
+  })
+
+  it('cancel puts back only what the pen wrote: a fill/stroke changed mid-session is kept', () => {
+    const l = drawnLayer()
+    const { host, get } = liveHost([l])
+    const s = useFramePenSession(host)
+    s.open({ kind: 'layer', id: l.id })
+    pointsOf(s.session.value!.doc.value)[1].x += 12
+    s.session.value!.pen.finishSession()
+    expect(get(l.id).d).not.toBe(l.d)
+    // an inspector edit while the pen is open
+    host.commit(host.layers().map((x: any) => (x.id === l.id ? { ...x, fill: '#ff0000', stroke: '#00ff00', strokeWidth: 0.01 } : x)))
+    s.cancelSession()
+    const back = get(l.id)
+    expect(back.fill).toBe('#ff0000')
+    expect(back.stroke).toBe('#00ff00')
+    expect(back.strokeWidth).toBe(0.01)
+    expect(back.d).toBe(l.d)
+    expect(back.sketch).toBe(l.sketch)
+    expect(back.x).toBe(l.x); expect(back.y).toBe(l.y); expect(back.bbox).toEqual(l.bbox)
   })
 
   it('clonerBlocksRecentre: only an enabled cloner whose copies turn or scale', () => {
@@ -493,6 +514,28 @@ describe('useFramePenSession — a text layer\'s drawn guide', () => {
     expect(h2.host.recordHistory).not.toHaveBeenCalled()
     expect(h2.host.commit).not.toHaveBeenCalled()
     expect(h2.get('t')).toBe(text)
+  })
+
+  it('undo back to an empty drawing puts the opening guide and position back without closing', () => {
+    const text = { id: 't', kind: 'text', x: 0.4, y: 0.6, rotation: 15, path: { follow: 'custom', size: 0.5 } }
+    const { host, get } = liveHost([text])
+    const s = useFramePenSession(host)
+    s.open({ kind: 'guide', textId: 't' })
+    const sess = s.session.value!
+    drawArc(sess.doc.value, [{ x: -12, y: 5 }, { x: 18, y: -9 }, { x: 40, y: 14 }])
+    sess.pen.finishSession()
+    expect(get('t').path.sketch).toBeTruthy()
+    expect(get('t').x).not.toBe(text.x)
+    sess.pen.undo()   // back to nothing drawn
+    expect(sess.doc.value.entities).toEqual([])
+    expect(s.session.value).toBe(sess)   // still open
+    const back = get('t')
+    expect(back.path).toBe(text.path)
+    expect(back.x).toBe(text.x); expect(back.y).toBe(text.y)
+    expect(host.recordHistory).toHaveBeenCalledTimes(1)
+    // drawing again writes again
+    sess.pen.redo()
+    expect(get('t').path.sketch).toBeTruthy()
   })
 
   it('a guide with a d but no drawing opens fresh; an emptied drawing commits as a cancel; teardown restores', () => {
