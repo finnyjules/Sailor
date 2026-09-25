@@ -1,13 +1,7 @@
 <script setup lang="ts">
 import { Handle, Position } from '@vue-flow/core'
-import { Upload, Loader2, Film, Play, RefreshCw, Download, Pencil, ArrowRight, MoreHorizontal } from 'lucide-vue-next'
-import { onClickOutside } from '@vueuse/core'
-import { getTypeColor, fetchObjectInfo } from '~/composables/useVueNodes'
-import { ACTION_CATALOG } from '~/data/action-catalog'
-import { getGeneratorIcon } from '~/data/generator-icons'
-import { parseBadgeUsd } from '~/lib/costEstimate'
-import { formatCostBadge } from '~/lib/pricing'
-import { hostedModeEnabled } from '~/lib/hostedMode'
+import { Upload, Loader2, Film, Play, RefreshCw, Download } from 'lucide-vue-next'
+import { getTypeColor } from '~/composables/useVueNodes'
 
 // Visual half of the unified `Video` artifact node. Same state machine as
 // the Image / Audio cards. Result lands in `data.images` (PreviewVideo's
@@ -184,85 +178,6 @@ async function downloadVideo() {
     console.error('[ArtifactVideo] download failed:', err)
   }
 }
-
-// ── Edit…/Develop… footer — same idiom as ArtifactImageNode: two hover-free
-// buttons below the media, each opening a teleported dropdown. Rows fire the
-// same sailor:applyEffect the old SelectionActionChips used, so branching
-// behavior is unchanged — only the presentation moved into a footer.
-const REFINE_ACTIONS = [
-  { nodeType: 'LipsyncNode', label: 'Sync lips' },
-  { nodeType: 'EnhanceVideoNode', label: 'Enhance' },
-] as const
-const NEXT_ACTIONS = [
-  { nodeType: 'DescribeVideoNode', label: 'Describe' },
-] as const
-
-// Truthful $ hints from the same price_badge the nodes themselves show —
-// fetched once on mount, same mechanism SelectionActionChips used.
-const priceHints = ref<Record<string, string>>({})
-const hostedPricing = hostedModeEnabled(useRuntimeConfig().public)
-onMounted(async () => {
-  const info = await fetchObjectInfo()
-  const out: Record<string, string> = {}
-  for (const action of [...REFINE_ACTIONS, ...NEXT_ACTIONS]) {
-    const cost = parseBadgeUsd(info?.[action.nodeType]?.price_badge?.expr)
-    if (cost) out[action.nodeType] = formatCostBadge(cost.usd, cost.approximate, hostedPricing)
-  }
-  priceHints.value = out
-})
-
-function fireAction(nodeType: string) {
-  window.dispatchEvent(new CustomEvent('sailor:applyEffect', {
-    detail: { nodeId: props.id, nodeType, output: 'VIDEO', branch: true, focus: true },
-  }))
-}
-function openAllActions() {
-  window.dispatchEvent(new CustomEvent('sailor:openActions', { detail: { domain: 'video' } }))
-}
-
-// Two hover-free menus, teleported to <body> in screen space so they aren't
-// clipped by the card's overflow — same mechanism as ArtifactImageNode.
-const editMenuOpen = ref(false)
-const editMenuRef = ref<HTMLElement | null>(null)
-const editMenuPanelRef = ref<HTMLElement | null>(null)
-const editMenuStyle = ref<Record<string, string>>({})
-const nextMenuOpen = ref(false)
-const nextMenuRef = ref<HTMLElement | null>(null)
-const nextMenuPanelRef = ref<HTMLElement | null>(null)
-const nextMenuStyle = ref<Record<string, string>>({})
-onClickOutside(editMenuRef, () => { editMenuOpen.value = false }, { ignore: [editMenuPanelRef] })
-onClickOutside(nextMenuRef, () => { nextMenuOpen.value = false }, { ignore: [nextMenuPanelRef] })
-
-// Beside the node's right edge, top-aligned with the button; flips to the
-// node's left when the viewport runs out. Vertical position clamps so the
-// panel always fits, scrolling internally as a last resort.
-function menuStyleFor(anchor: HTMLElement | null): Record<string, string> {
-  const nodeR = (anchor?.closest('.artifact-video') as HTMLElement | null)?.getBoundingClientRect()
-  const btnR = anchor?.getBoundingClientRect()
-  if (!nodeR || !btnR) return {}
-  const MENU_W = 210
-  const MENU_H = 380
-  const left = nodeR.right + 8 + MENU_W <= window.innerWidth
-    ? nodeR.right + 8
-    : Math.max(8, nodeR.left - 8 - MENU_W)
-  const top = Math.max(8, Math.min(btnR.top, window.innerHeight - MENU_H - 8))
-  return { left: `${left}px`, top: `${top}px`, maxHeight: `${window.innerHeight - top - 8}px` }
-}
-// Pan/zoom would leave the fixed panel floating at a stale spot — close instead.
-function closeMenusOnWheel() { editMenuOpen.value = false; nextMenuOpen.value = false }
-watch([editMenuOpen, nextMenuOpen], ([edit, next], [prevEdit, prevNext]) => {
-  if (edit && !prevEdit) { nextMenuOpen.value = false; editMenuStyle.value = menuStyleFor(editMenuRef.value) }
-  if (next && !prevNext) { editMenuOpen.value = false; nextMenuStyle.value = menuStyleFor(nextMenuRef.value) }
-  if (edit || next) window.addEventListener('wheel', closeMenusOnWheel, { passive: true })
-  else window.removeEventListener('wheel', closeMenusOnWheel)
-})
-onBeforeUnmount(() => window.removeEventListener('wheel', closeMenusOnWheel))
-
-function runAction(action: () => void) {
-  editMenuOpen.value = false
-  nextMenuOpen.value = false
-  action()
-}
 </script>
 
 <template>
@@ -390,78 +305,6 @@ function runAction(action: () => void) {
           </template>
         </div>
       </template>
-
-      <!-- Footer toolbar — Edit…/Develop… menus, same idiom as the image
-           card's footer, replacing the old selection chips. -->
-      <template v-if="videoUrl">
-        <div class="nopan nodrag flex items-center gap-1.5 px-2 py-2 border-t border-white/5">
-          <!-- EDIT — refine the current video -->
-          <div ref="editMenuRef" class="relative flex-1">
-            <button
-              class="w-full flex items-center justify-center gap-1.5 rounded bg-white/10 hover:bg-white/20 px-2.5 py-1.5 text-[11px] font-medium text-white/80 hover:text-white transition-colors cursor-pointer"
-              title="Edit — refine this video"
-              @click.stop="editMenuOpen = !editMenuOpen"
-            >
-              <Pencil class="size-3" /> Edit…
-            </button>
-            <Teleport to="body">
-            <div
-              v-if="editMenuOpen"
-              ref="editMenuPanelRef"
-              class="nopan nodrag fixed z-[9999] min-w-[190px] overflow-y-auto rounded-md border border-white/10 bg-[#1a1a1a] shadow-lg py-1"
-              :style="editMenuStyle"
-            >
-              <div class="px-2.5 pt-1 pb-0.5 text-[9px] uppercase tracking-wider text-white/30 select-none">Refine</div>
-              <button
-                v-for="action in REFINE_ACTIONS"
-                :key="action.nodeType"
-                class="edit-menu-item"
-                :title="ACTION_CATALOG[action.nodeType]?.useCase"
-                @click.stop="runAction(() => fireAction(action.nodeType))"
-              >
-                <component :is="getGeneratorIcon(action.nodeType)" class="size-3 shrink-0" /> {{ action.label }}
-                <span v-if="priceHints[action.nodeType]" class="edit-menu-hint">{{ priceHints[action.nodeType] }}</span>
-              </button>
-            </div>
-            </Teleport>
-          </div>
-
-          <!-- NEXT — turn this video into something new -->
-          <div ref="nextMenuRef" class="relative flex-1">
-            <button
-              class="w-full flex items-center justify-center gap-1.5 rounded bg-white/10 hover:bg-white/20 px-2.5 py-1.5 text-[11px] font-medium text-white/80 hover:text-white transition-colors cursor-pointer"
-              title="Develop — turn this into something new"
-              @click.stop="nextMenuOpen = !nextMenuOpen"
-            >
-              <ArrowRight class="size-3" /> Develop…
-            </button>
-            <Teleport to="body">
-            <div
-              v-if="nextMenuOpen"
-              ref="nextMenuPanelRef"
-              class="nopan nodrag fixed z-[9999] min-w-[190px] overflow-y-auto rounded-md border border-white/10 bg-[#1a1a1a] shadow-lg py-1"
-              :style="nextMenuStyle"
-            >
-              <div class="px-2.5 pt-1 pb-0.5 text-[9px] uppercase tracking-wider text-white/30 select-none">Next</div>
-              <button
-                v-for="action in NEXT_ACTIONS"
-                :key="action.nodeType"
-                class="edit-menu-item"
-                :title="ACTION_CATALOG[action.nodeType]?.useCase"
-                @click.stop="runAction(() => fireAction(action.nodeType))"
-              >
-                <component :is="getGeneratorIcon(action.nodeType)" class="size-3 shrink-0" /> {{ action.label }}
-                <span v-if="priceHints[action.nodeType]" class="edit-menu-hint">{{ priceHints[action.nodeType] }}</span>
-              </button>
-              <div class="mt-1 border-t border-white/[0.06]" />
-              <button class="edit-menu-item" @click.stop="runAction(openAllActions)">
-                <MoreHorizontal class="size-3 shrink-0" /> All actions…
-              </button>
-            </div>
-            </Teleport>
-          </div>
-        </div>
-      </template>
     </div>
   </div>
 </template>
@@ -480,30 +323,5 @@ function runAction(action: () => void) {
 .artifact-video--bypassed .artifact-frame {
   border-style: dashed;
   border-color: rgba(251, 191, 36, 0.35);
-}
-
-/* Edit…/Develop… dropdown rows — copied verbatim from ArtifactImageNode
-   (scoped styles don't cross components). */
-.edit-menu-item {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.375rem 0.625rem;
-  font-size: 11px;
-  color: rgb(255 255 255 / 0.75);
-  cursor: pointer;
-  transition: color 0.15s, background-color 0.15s;
-}
-.edit-menu-item:hover:not(:disabled) {
-  color: #fff;
-  background-color: rgb(255 255 255 / 0.08);
-}
-.edit-menu-hint {
-  margin-left: auto;
-  padding-left: 0.75rem;
-  font-size: 9px;
-  font-variant-numeric: tabular-nums;
-  color: rgb(255 255 255 / 0.35);
 }
 </style>

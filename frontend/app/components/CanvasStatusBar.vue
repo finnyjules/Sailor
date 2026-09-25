@@ -67,7 +67,7 @@ const elapsedSec = computed(() => elapsedSince(props.startedAt, now.value))
 // nodes — lastResult.usd is a raw-dollar figure computed the same way local's
 // is and does not reflect what a hosted user was actually charged, so hosted
 // must never render it (see runCostDisplay.ts). Read the same way sibling
-// components do (SelectionActionChips.vue, ComfyNode.vue, …) rather than
+// components do (ComfyNode.vue, …) rather than
 // prop-drilled from the parent.
 const hosted = hostedModeEnabled(useRuntimeConfig().public)
 const costDisplay = computed(() =>

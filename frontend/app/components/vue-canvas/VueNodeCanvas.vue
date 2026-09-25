@@ -132,6 +132,9 @@ import PinImageAnnotationView from '~/components/vue-canvas/PinImageAnnotation.v
 import PinResultAnnotationView from '~/components/vue-canvas/PinResultAnnotation.vue'
 import ArrowsLayer, { type ResolvedArrow } from '~/components/vue-canvas/ArrowsLayer.vue'
 import CanvasContextMenu, { type MenuItem } from '~/components/vue-canvas/CanvasContextMenu.vue'
+import NodeActionToolbar from './NodeActionToolbar.vue'
+import { toolbarAnchor, unionBox, type Box } from '~/lib/canvas/toolbarAnchor'
+import type { NodeActionCtx } from '~/lib/canvas/nodeActions'
 import { Play, EyeOff, Ban, Copy, Trash2, Group, SquareDashedMousePointer, Palette, Edit3, Frame, Maximize2, PlusSquare, Boxes, ChevronsUpDown, ChevronsDownUp, Lock, Unlock, Flag, StickyNote, ListChecks, Image as ImageIcon, ArrowRight, Check } from 'lucide-vue-next'
 import { useBlockLibrary } from '~/composables/useBlockLibrary'
 import { fetchPausedGates } from '~/lib/runner/client'
@@ -1045,7 +1048,7 @@ provide('runLeafNodeIds', runLeafNodeIds)
 const {
   onConnect, addEdges, fitView, fitBounds, zoomIn: vfZoomIn, zoomOut: vfZoomOut,
   project, removeNodes, removeEdges, viewport: vfViewport, onNodeDragStart, onNodeDragStop, onNodeDrag,
-  onConnectStart, onConnectEnd, onEdgesChange,
+  onConnectStart, onConnectEnd, onEdgesChange, findNode,
 } = useVueFlow()
 
 // Ports label themselves while a compatible wire is being dragged. Bound once,
@@ -1191,6 +1194,42 @@ const agentSelection = computed<PromptNode[]>(() => (nodes.value as any[])
     hasImages: Array.isArray(n.data?.images) && n.data.images.length > 0,
   })))
 function agentClearSelection() { for (const n of nodes.value as any[]) n.selected = false }
+
+// The floating node toolbar (spec §2.3): Edit ▾ / Develop ▾ above the selection.
+// Positioned in pane pixels from the node box + viewport, so it follows pans and
+// zooms without scaling; hidden while a node is being dragged.
+const draggingNode = ref(false)
+onNodeDragStart(() => { draggingNode.value = true })
+onNodeDragStop(() => { draggingNode.value = false })
+const toolbarRef = ref<InstanceType<typeof NodeActionToolbar> | null>(null)
+
+function graphBox(id: string): Box | null {
+  const gn: any = findNode(id)
+  if (!gn?.dimensions?.width) return null
+  const p = gn.computedPosition ?? gn.position
+  return { x: p.x, y: p.y, width: gn.dimensions.width, height: gn.dimensions.height }
+}
+const selectedIds = computed(() => agentSelection.value.map(s => s.id))
+const toolbarCtx = computed<NodeActionCtx | null>(() => {
+  if (selectedIds.value.length !== 1) return null
+  const s = agentSelection.value[0]!
+  const n: any = (nodes.value as any[]).find(x => String(x.id) === s.id)
+  return { nodeId: s.id, type: String(n?.type ?? s.type), hasImages: s.hasImages, hasUpstream: (edges.value as any[]).some(e => String(e.target) === s.id) }
+})
+const toolbarPos = computed(() => {
+  if (draggingNode.value || !selectedIds.value.length) return null
+  const box = unionBox(selectedIds.value.map(graphBox).filter(Boolean) as Box[])
+  return box ? toolbarAnchor(box, vfViewport.value) : null
+})
+// `sailor:openNodeEdit` { nodeId } — select that node and open its Edit ▾ (the
+// fixes badge uses this).
+async function handleOpenNodeEdit(e: Event) {
+  const nodeId = (e as CustomEvent<{ nodeId?: string }>).detail?.nodeId
+  if (!nodeId) return
+  selectNode(String(nodeId))
+  await nextTick()
+  toolbarRef.value?.openMenu('edit')
+}
 
 const nodeClipboard = useNodeClipboard()
 
@@ -5311,6 +5350,7 @@ onMounted(() => {
   window.addEventListener('sailor:studioRender', handleStudioRender)
   window.addEventListener('sailor:editAsFrame', handleEditAsFrame)
   window.addEventListener('sailor:openInpaint', handleOpenInpaint)
+  window.addEventListener('sailor:openNodeEdit', handleOpenNodeEdit)
   window.addEventListener('sailor:frameDropImage', handleFrameDropImage)
   window.addEventListener('sailor:openAsciiOptions', handleOpenAscii)
   window.addEventListener('sailor:openTimeline', handleOpenTimeline)
@@ -5380,6 +5420,7 @@ onUnmounted(() => {
   window.removeEventListener('sailor:studioRender', handleStudioRender)
   window.removeEventListener('sailor:editAsFrame', handleEditAsFrame)
   window.removeEventListener('sailor:openInpaint', handleOpenInpaint)
+  window.removeEventListener('sailor:openNodeEdit', handleOpenNodeEdit)
   window.removeEventListener('sailor:frameDropImage', handleFrameDropImage)
   window.removeEventListener('sailor:openAsciiOptions', handleOpenAscii)
   window.removeEventListener('sailor:openTimeline', handleOpenTimeline)
@@ -8163,6 +8204,15 @@ defineExpose({
     >
       <AgentSweep :active="glimmOn" :period="glimmPeriod" />
     </div>
+
+    <!-- Floating node toolbar: Edit ▾ / Develop ▾ above the selected node.
+         Screen-space (never scaled); follows pans/zooms via toolbarPos. -->
+    <NodeActionToolbar
+      v-if="toolbarPos && (toolbarCtx || selectedIds.length > 1)"
+      ref="toolbarRef"
+      :ctx="toolbarCtx" :multi-ids="[]" :can-combine="false"
+      :left="toolbarPos.left" :top="toolbarPos.top" :placement="toolbarPos.placement"
+    />
 
     <VueFlow
       v-model:nodes="nodes"

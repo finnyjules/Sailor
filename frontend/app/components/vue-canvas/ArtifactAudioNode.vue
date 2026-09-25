@@ -2,7 +2,6 @@
 import { Handle, Position } from '@vue-flow/core'
 import { Upload, Loader2, AudioWaveform, Play, RefreshCw, Download } from 'lucide-vue-next'
 import { getTypeColor } from '~/composables/useVueNodes'
-import SelectionActionChips from '~/components/vue-canvas/SelectionActionChips.vue'
 
 // Visual half of the unified `Audio` artifact node. Same state machine as
 // the Image card: no upstream + no file = upload affordance; upstream + no
@@ -307,8 +306,6 @@ async function downloadAudio() {
         </div>
       </template>
     </div>
-
-    <SelectionActionChips v-if="selected" :node-id="id" domain="audio" output="AUDIO" />
   </div>
 </template>
 

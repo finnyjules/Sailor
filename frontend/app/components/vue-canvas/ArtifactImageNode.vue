@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Handle, Position } from '@vue-flow/core'
-import { Upload, Loader2, Image as ImageIcon, ImagePlus, Play, Download, RefreshCw, Lock, LockOpen, Eraser, Brush, Sparkles, Pencil, Wand2, Drama, Gem, ZoomIn, Lamp, Aperture, Shuffle, Clapperboard, ArrowRight, Scissors, Palette, Paintbrush, Type } from 'lucide-vue-next'
+import { Upload, Loader2, Image as ImageIcon, ImagePlus, Play, Download, RefreshCw, Lock, LockOpen, Brush, Drama } from 'lucide-vue-next'
 import { onClickOutside } from '@vueuse/core'
 import { getTypeColor } from '~/composables/useVueNodes'
 import { useAgentActivity } from '~/composables/useAgentActivity'
@@ -8,11 +8,10 @@ import { useImgFx } from '~/composables/useImgFx'
 import TakesStrip from '~/components/vue-canvas/TakesStrip.vue'
 import LightTableModal from '~/components/vue-canvas/LightTableModal.vue'
 import RefNameDialog from '~/components/vue-canvas/RefNameDialog.vue'
-import { useNextStepsStrip, type FixChip } from '~/composables/useNextStepsStrip'
+import { useNextStepsStrip } from '~/composables/useNextStepsStrip'
 import { projectTake, discardOthers, type Take } from '~/composables/useTakes'
 import { uploadRefFile } from '~/lib/shotdirector/refUpload'
 import { useCharacters } from '~/composables/useCharacters'
-import { ACTION_HINTS } from '~/lib/artifact/nextSteps'
 import { setPendingPromote } from '~/lib/draft/runMeta'
 import { promoteOverridesFor } from '~/lib/draft/promote'
 import { annotatedImageValueFromViewUrl } from '~/lib/promoteTempImages'
@@ -373,32 +372,6 @@ function openInpaint() {
   window.dispatchEvent(new CustomEvent('sailor:openInpaint', { detail: { nodeId: props.id } }))
 }
 
-// One-click remove: open the inpaint editor pre-set to click-select, which
-// auto-runs a removal as soon as an object is picked.
-function openRemoveObject() {
-  window.dispatchEvent(new CustomEvent('sailor:openInpaint', { detail: { nodeId: props.id, intent: 'remove' } }))
-}
-
-// One-click recolor: open the inpaint editor pre-set to click-select; picking
-// an object reveals a swatch strip (brand colors first) that runs the recolor.
-function openRecolor() {
-  window.dispatchEvent(new CustomEvent('sailor:openInpaint', { detail: { nodeId: props.id, intent: 'recolor' } }))
-}
-
-// Knock out the background: splice a local BackgroundRemove node after this image
-// (default 'transparent' RGBA output) and re-point whatever the image fed. The
-// canvas owns the graph mutation, so we just announce intent.
-function removeBackground() {
-  window.dispatchEvent(new CustomEvent('sailor:applyEffect', {
-    detail: {
-      nodeId: props.id,
-      nodeType: 'BackgroundRemove',
-      output: 'IMAGE',
-      widgetOverrides: { output: 'transparent' },
-    },
-  }))
-}
-
 // OUTPUT_NODE nodes get a per-node Run affordance — the existing event the
 // canvas listens for. We surface it both as a fallback in the waiting state
 // and as a small re-render button in the populated footer.
@@ -423,60 +396,14 @@ function promoteTake(takeId: string) {
   )
 }
 
-// Critique: have the agent LOOK at this result and suggest fixes (run→look→fix).
-// Surfaced in the Edit menu as "Fix" (label only — the pipeline is unchanged).
-function critiqueResult() {
-  window.dispatchEvent(new CustomEvent('sailor:critiqueNode', { detail: { nodeId: props.id } }))
-}
-
-// Wire an "Edit an image" (Nano Banana) generator downstream of this image, so
-// the user can describe an edit in natural language. Same splice path Remove BG
-// uses; the model is forced to Nano Banana 2 (EditImageNode's strong editor).
-function editWithNanoBanana() {
-  window.dispatchEvent(new CustomEvent('sailor:applyEffect', {
-    detail: {
-      nodeId: props.id,
-      nodeType: 'EditImageNode',
-      output: 'IMAGE',
-      widgetOverrides: { model: 'Nano Banana 2' },
-    },
-  }))
-}
-
-// ── Escalator actions (ARPU levers 2+5) ─────────────────────────────────────
-// Enhance/Relight/Lens spawn their generator pre-wired and focused but UN-RUN
-// (the user aims first, then pays). Upscale is a true one-tap: spawn + run,
-// upstream artifact frozen so only the upscaler bills. All four BRANCH off the
-// image (unlike Retouch's true splices): they produce a new deliverable, so
-// they must never re-point the existing chain through a paid node.
+// Branch a generator off this image (the canvas owns the graph mutation; we
+// just announce intent). Only Edit text… uses it here now; the toolbar's
+// actions fire the same event from nodeActions.ts.
 function spliceEffect(nodeType: string, opts: { run?: boolean; focus?: boolean; branch?: boolean } = {}, widgetOverrides?: Record<string, unknown>) {
   window.dispatchEvent(new CustomEvent('sailor:applyEffect', {
     detail: { nodeId: props.id, nodeType, output: 'IMAGE', widgetOverrides, ...opts },
   }))
 }
-function spawnEnhanceDetail() { spliceEffect('EnhanceDetailNode', { focus: true, branch: true }) }
-function spawnUpscale() { spliceEffect('UpscaleImageNode', { run: true, branch: true }) }
-function spawnRelight() { spliceEffect('RelightNode', { focus: true, branch: true }) }
-function spawnLensReframe() { spliceEffect('LensReframe', { focus: true, branch: true }) }
-
-// Restyle in one of the user's OWN trained style LoRAs: branch a
-// RestyleWithLoRANode off this image, focused but UN-RUN so the user picks
-// their style from the LoRA gallery (the node's lora_picker widget) and pays
-// on their own trigger. Captions internally — no prompt widget to fill.
-function spawnRestyleWithLoRA() { spliceEffect('RestyleWithLoRANode', { focus: true, branch: true }) }
-
-// Variations ×4: sequential re-runs of the producing generator with fresh
-// seeds; results accumulate in the Takes strip. Needs something upstream to
-// re-run, hence the hasUpstream gate (mirrored as a disabled menu row).
-function runVariations() {
-  window.dispatchEvent(new CustomEvent('sailor:runVariations', { detail: { nodeId: props.id, count: 4 } }))
-}
-
-// Animate: spawn a Shot Director seeded with this image as reference.
-function animateArtifact() {
-  window.dispatchEvent(new CustomEvent('sailor:animateArtifact', { detail: { nodeId: props.id } }))
-}
-
 // Save the current image as a character in the registry (phase 1: image-only,
 // refs are stored in the input dir as /view URLs to avoid JSON bloat).
 const savingAsCharacter = ref(false)
@@ -548,25 +475,13 @@ async function onRefConfirm(name: string, text: string) {
   }
 }
 
-// Two hover-revealed side menus: EDIT refines THIS image (retouch / enhance +
-// any AI critique fixes), NEXT transforms it into something new (variations,
-// reframe, animate). Both panels are TELEPORTED to <body> in screen space —
-// inside the node they'd be clipped by the card's overflow and the node bounds
-// — and clamped to the viewport with their own scroll, so they stay readable at
-// low canvas zoom. Only one is open at a time; clicking outside dismisses it.
+// Hover reveals the chrome strip over the image.
 const hovered = ref(false)
-const editMenuOpen = ref(false)
-const editMenuRef = ref<HTMLElement | null>(null)
-const editMenuPanelRef = ref<HTMLElement | null>(null)
-const editMenuStyle = ref<Record<string, string>>({})
-const nextMenuOpen = ref(false)
-const nextMenuRef = ref<HTMLElement | null>(null)
-const nextMenuPanelRef = ref<HTMLElement | null>(null)
-const nextMenuStyle = ref<Record<string, string>>({})
-onClickOutside(editMenuRef, () => { editMenuOpen.value = false }, { ignore: [editMenuPanelRef] })
-onClickOutside(nextMenuRef, () => { nextMenuOpen.value = false }, { ignore: [nextMenuPanelRef] })
+const rootEl = ref<HTMLElement | null>(null)
 
 // ── Edit text popover — find/replace fields, spawns a TextEditNode ───────────
+// Opened from the node toolbar's Edit ▾ → "Edit text…" (nodeActions fires
+// `sailor:openTextEdit`); positioned beside this node's root.
 const textEditOpen = ref(false)
 const textEditPanelRef = ref<HTMLElement | null>(null)
 const textEditStyle = ref<Record<string, string>>({})
@@ -575,11 +490,16 @@ const textReplace = ref('')
 onClickOutside(textEditPanelRef, () => { textEditOpen.value = false })
 
 function openTextEdit() {
-  textEditStyle.value = menuStyleFor(editMenuRef.value)
+  textEditStyle.value = menuStyleFor(rootEl.value)
   textFind.value = ''
   textReplace.value = ''
   textEditOpen.value = true
 }
+function onOpenTextEdit(e: Event) {
+  if ((e as CustomEvent<{ nodeId?: string }>).detail?.nodeId === props.id) openTextEdit()
+}
+onMounted(() => window.addEventListener('sailor:openTextEdit', onOpenTextEdit))
+onBeforeUnmount(() => window.removeEventListener('sailor:openTextEdit', onOpenTextEdit))
 
 function runTextEdit() {
   if (!textFind.value.trim() || !textReplace.value.trim()) return
@@ -587,15 +507,15 @@ function runTextEdit() {
   textEditOpen.value = false
 }
 
-// Beside the node's right edge, top-aligned with the button; flips to the
+// Beside the node's right edge, top-aligned with the anchor; flips to the
 // node's left when the viewport runs out. Vertical position clamps so the panel
 // always fits, scrolling internally as a last resort on short viewports.
 function menuStyleFor(anchor: HTMLElement | null): Record<string, string> {
   const nodeR = (anchor?.closest('.artifact-image') as HTMLElement | null)?.getBoundingClientRect()
   const btnR = anchor?.getBoundingClientRect()
   if (!nodeR || !btnR) return {}
-  const MENU_W = 210
-  const MENU_H = 380
+  const MENU_W = 230
+  const MENU_H = 160
   const left = nodeR.right + 8 + MENU_W <= window.innerWidth
     ? nodeR.right + 8
     : Math.max(8, nodeR.left - 8 - MENU_W)
@@ -603,19 +523,12 @@ function menuStyleFor(anchor: HTMLElement | null): Record<string, string> {
   return { left: `${left}px`, top: `${top}px`, maxHeight: `${window.innerHeight - top - 8}px` }
 }
 // Pan/zoom would leave the fixed panel floating at a stale spot — close instead.
-function closeMenusOnWheel() { editMenuOpen.value = false; nextMenuOpen.value = false }
-watch([editMenuOpen, nextMenuOpen], ([edit, next], [prevEdit, prevNext]) => {
-  if (edit && !prevEdit) { nextMenuOpen.value = false; editMenuStyle.value = menuStyleFor(editMenuRef.value) }
-  if (next && !prevNext) { editMenuOpen.value = false; nextMenuStyle.value = menuStyleFor(nextMenuRef.value) }
-  if (edit || next) window.addEventListener('wheel', closeMenusOnWheel, { passive: true })
-  else window.removeEventListener('wheel', closeMenusOnWheel)
+function closeTextEditOnWheel() { textEditOpen.value = false }
+watch(textEditOpen, (open) => {
+  if (open) window.addEventListener('wheel', closeTextEditOnWheel, { passive: true })
+  else window.removeEventListener('wheel', closeTextEditOnWheel)
 })
-onBeforeUnmount(() => window.removeEventListener('wheel', closeMenusOnWheel))
-function runAction(action: () => void) {
-  editMenuOpen.value = false
-  nextMenuOpen.value = false
-  action()
-}
+onBeforeUnmount(() => window.removeEventListener('wheel', closeTextEditOnWheel))
 
 // Browser-side download — same blob trick SmartLayout's carousel uses, so the
 // saved filename is the real one instead of "view".
@@ -751,10 +664,10 @@ function branchFromTake(takeId: string) {
 // Light Table — full-screen compare grid, opened from the strip's expand button.
 const lightTableOpen = ref(false)
 
-// --- AI critique fixes (surfaced in the Edit menu) --------------------------
+// --- AI critique fixes (surfaced in the node toolbar's Edit ▾) --------------
 // A paid render triggers a quiet critique pass (gate lives in CanvasPromptBar);
-// any fixes it finds land on the `fixes` channel and show at the top of THIS
-// artifact's Edit menu. Baseline is taken at mount so restoring a saved canvas
+// any fixes it finds land on this node's `fixes` channel and lead the toolbar's
+// Edit ▾ menu (NodeActionToolbar). Baseline is taken at mount so restoring a saved canvas
 // never re-triggers reviews.
 const nextSteps = useNextStepsStrip()
 watch(() => props.data.takes?.length ?? 0, (now, before) => {
@@ -769,12 +682,6 @@ watch(() => props.data.takes?.length ?? 0, (now, before) => {
     }
   }
 })
-const fixChipsForMe = computed(() => nextSteps.fixesFor(props.id))
-function applyFix(chip: FixChip) {
-  editMenuOpen.value = false
-  chip.apply()
-  nextSteps.clearFixes(props.id)
-}
 
 // Promote button price hint — this node's own price badge (a promote reruns
 // the SAME generator at full quality, so its badge is the right estimate).
@@ -787,6 +694,7 @@ const promoteUsdLabel = computed(() => {
 
 <template>
   <div
+    ref="rootEl"
     class="artifact-image relative w-[240px] select-none"
     :class="{
       'artifact-image--muted': isMuted,
@@ -1011,153 +919,26 @@ const promoteUsdLabel = computed(() => {
         </div>
       </template>
       </div><!-- /media stage -->
-
-      <!-- Footer toolbar — OUTSIDE the media stage, so the churn/reveal effect
-           covers only the image and never these controls. -->
-      <template v-if="displayedUrl">
-        <!-- Primary actions, below the image. EDIT refines this image;
-             NEXT turns it into something new. Always visible and styled
-             like the Edit/Render footer on studio nodes — these are the
-             card's main affordances, not chrome to hide behind a hover. -->
-        <div class="nopan nodrag flex items-center gap-1.5 px-2 py-2 border-t border-white/5">
-          <!-- EDIT — fix / refine the current iteration -->
-          <div ref="editMenuRef" class="relative flex-1">
-            <button
-              class="w-full flex items-center justify-center gap-1.5 rounded bg-white/10 hover:bg-white/20 px-2.5 py-1.5 text-[11px] font-medium text-white/80 hover:text-white transition-colors cursor-pointer"
-              title="Edit — refine this image"
-              @click.stop="editMenuOpen = !editMenuOpen"
-            >
-              <Pencil class="size-3" /> Edit…
-              <Sparkles v-if="fixChipsForMe.length" class="size-2.5 -mr-0.5" />
-            </button>
-            <Teleport to="body">
-            <div
-              v-if="editMenuOpen"
-              ref="editMenuPanelRef"
-              class="nopan nodrag fixed z-[9999] min-w-[190px] overflow-y-auto rounded-md border border-white/10 bg-[#1a1a1a] shadow-lg py-1"
-              :style="editMenuStyle"
-            >
-              <!-- AI critique fixes lead the menu when the reviewer found any. -->
-              <template v-if="fixChipsForMe.length">
-                <div class="px-2.5 pt-1 pb-0.5 text-[9px] uppercase tracking-wider text-white/30 select-none">Suggested fixes</div>
-                <button
-                  v-for="chip in fixChipsForMe"
-                  :key="chip.id"
-                  class="edit-menu-item"
-                  :title="chip.hint ? `${chip.label} (${chip.hint})` : chip.label"
-                  @click.stop="applyFix(chip)"
-                >
-                  <Sparkles class="size-3 shrink-0" /> {{ chip.label }}
-                  <span v-if="chip.hint" class="edit-menu-hint">{{ chip.hint }}</span>
-                </button>
-                <div class="mt-1 border-t border-white/[0.06]" />
-              </template>
-              <div class="px-2.5 pt-1 pb-0.5 text-[9px] uppercase tracking-wider text-white/30 select-none">Retouch</div>
-              <button class="edit-menu-item" @click.stop="runAction(removeBackground)">
-                <Eraser class="size-3 shrink-0" /> Remove BG
-              </button>
-              <button class="edit-menu-item" @click.stop="runAction(openInpaint)">
-                <Brush class="size-3 shrink-0" /> Inpaint
-              </button>
-              <button class="edit-menu-item" @click.stop="runAction(openRemoveObject)">
-                <Scissors class="size-3 shrink-0" /> Remove object
-                <span class="edit-menu-hint">click it</span>
-              </button>
-              <button class="edit-menu-item" @click.stop="runAction(openRecolor)">
-                <Palette class="size-3 shrink-0" /> Recolor…
-                <span class="edit-menu-hint">click + pick</span>
-              </button>
-              <button class="edit-menu-item" @click.stop="runAction(openTextEdit)">
-                <Type class="size-3 shrink-0" /> Edit text…
-                <span class="edit-menu-hint">find / replace</span>
-              </button>
-              <button class="edit-menu-item" @click.stop="runAction(editWithNanoBanana)">
-                <Wand2 class="size-3 shrink-0" /> Edit (Nano Banana)
-                <span class="edit-menu-hint">{{ ACTION_HINTS['nano-banana'] }}</span>
-              </button>
-              <button class="edit-menu-item" @click.stop="runAction(spawnRestyleWithLoRA)">
-                <Paintbrush class="size-3 shrink-0" /> Restyle…
-                <span class="edit-menu-hint">your style LoRA</span>
-              </button>
-              <button v-if="data.images?.length" class="edit-menu-item" @click.stop="runAction(critiqueResult)">
-                <Sparkles class="size-3 shrink-0" /> Fix
-              </button>
-
-              <div class="mt-1 border-t border-white/[0.06] px-2.5 pt-1.5 pb-0.5 text-[9px] uppercase tracking-wider text-white/30 select-none">Enhance</div>
-              <button class="edit-menu-item" @click.stop="runAction(spawnEnhanceDetail)">
-                <Gem class="size-3 shrink-0" /> Enhance Detail
-                <span class="edit-menu-hint">{{ ACTION_HINTS.enhance }}</span>
-              </button>
-              <button class="edit-menu-item" @click.stop="runAction(spawnUpscale)">
-                <ZoomIn class="size-3 shrink-0" /> Upscale
-                <span class="edit-menu-hint">{{ ACTION_HINTS.upscale }}</span>
-              </button>
-              <button class="edit-menu-item" @click.stop="runAction(spawnRelight)">
-                <Lamp class="size-3 shrink-0" /> Relight
-                <span class="edit-menu-hint">{{ ACTION_HINTS.relight }}</span>
-              </button>
-            </div>
-            </Teleport>
-          </div>
-
-          <Teleport to="body">
-            <div v-if="textEditOpen" ref="textEditPanelRef"
-                 class="nopan nodrag fixed z-[9999] w-[230px] rounded-md border border-white/10 bg-[#1a1a1a] shadow-lg p-2.5 flex flex-col gap-2"
-                 :style="textEditStyle">
-              <div class="text-[9px] uppercase tracking-wider text-white/30 select-none">Edit text in image</div>
-              <input v-model="textFind" placeholder="Text currently in the image" spellcheck="false"
-                     class="h-7 px-2 rounded bg-white/[0.06] border border-white/10 text-[11px] text-white/85 outline-none focus:border-white/25"
-                     @keydown.enter.prevent="runTextEdit" />
-              <input v-model="textReplace" placeholder="Replace with…" spellcheck="false"
-                     class="h-7 px-2 rounded bg-white/[0.06] border border-white/10 text-[11px] text-white/85 outline-none focus:border-white/25"
-                     @keydown.enter.prevent="runTextEdit" />
-              <button class="gen-pastel h-7 rounded text-neutral-900 text-[11px] font-semibold cursor-pointer disabled:opacity-40"
-                      :disabled="!textFind.trim() || !textReplace.trim()" @click="runTextEdit">
-                Replace text · ~$0.05
-              </button>
-            </div>
-          </Teleport>
-
-          <!-- NEXT — transform into something new -->
-          <div ref="nextMenuRef" class="relative flex-1">
-            <button
-              class="w-full flex items-center justify-center gap-1.5 rounded bg-white/10 hover:bg-white/20 px-2.5 py-1.5 text-[11px] font-medium text-white/80 hover:text-white transition-colors cursor-pointer"
-              title="Develop — turn this into something new"
-              @click.stop="nextMenuOpen = !nextMenuOpen"
-            >
-              <ArrowRight class="size-3" /> Develop…
-            </button>
-            <Teleport to="body">
-            <div
-              v-if="nextMenuOpen"
-              ref="nextMenuPanelRef"
-              class="nopan nodrag fixed z-[9999] min-w-[190px] overflow-y-auto rounded-md border border-white/10 bg-[#1a1a1a] shadow-lg py-1"
-              :style="nextMenuStyle"
-            >
-              <div class="px-2.5 pt-1 pb-0.5 text-[9px] uppercase tracking-wider text-white/30 select-none">Create</div>
-              <button
-                class="edit-menu-item disabled:opacity-35 disabled:cursor-default"
-                :disabled="!hasUpstream"
-                :title="hasUpstream ? 'Re-run the generator 4× with fresh seeds' : 'Nothing upstream to re-run — this image was uploaded'"
-                @click.stop="runAction(runVariations)"
-              >
-                <Shuffle class="size-3 shrink-0" /> Variations ×4
-                <span class="edit-menu-hint">{{ ACTION_HINTS.variations }}</span>
-              </button>
-              <button class="edit-menu-item" @click.stop="runAction(spawnLensReframe)">
-                <Aperture class="size-3 shrink-0" /> Reframe · Format
-                <span class="edit-menu-hint">{{ ACTION_HINTS.lens }}</span>
-              </button>
-              <button class="edit-menu-item" @click.stop="runAction(animateArtifact)">
-                <Clapperboard class="size-3 shrink-0" /> Animate
-                <span class="edit-menu-hint">{{ ACTION_HINTS.animate }}</span>
-              </button>
-            </div>
-            </Teleport>
-          </div>
-        </div>
-      </template>
     </div>
+
+    <!-- Edit text… find/replace panel, opened from the node toolbar. -->
+    <Teleport to="body">
+      <div v-if="textEditOpen" ref="textEditPanelRef"
+           class="nopan nodrag fixed z-[9999] w-[230px] rounded-md border border-white/10 bg-[#1a1a1a] shadow-lg p-2.5 flex flex-col gap-2"
+           :style="textEditStyle">
+        <div class="text-[9px] uppercase tracking-wider text-white/30 select-none">Edit text in image</div>
+        <input v-model="textFind" placeholder="Text currently in the image" spellcheck="false"
+               class="h-7 px-2 rounded bg-white/[0.06] border border-white/10 text-[11px] text-white/85 outline-none focus:border-white/25"
+               @keydown.enter.prevent="runTextEdit" />
+        <input v-model="textReplace" placeholder="Replace with…" spellcheck="false"
+               class="h-7 px-2 rounded bg-white/[0.06] border border-white/10 text-[11px] text-white/85 outline-none focus:border-white/25"
+               @keydown.enter.prevent="runTextEdit" />
+        <button class="gen-pastel h-7 rounded text-neutral-900 text-[11px] font-semibold cursor-pointer disabled:opacity-40"
+                :disabled="!textFind.trim() || !textReplace.trim()" @click="runTextEdit">
+          Replace text · ~$0.05
+        </button>
+      </div>
+    </Teleport>
 
     <!-- Name-as-reference dialog (self-teleports to <body>). -->
     <RefNameDialog :open="refDialogOpen" @confirm="onRefConfirm" @cancel="refDialogOpen = false" />
@@ -1233,27 +1014,4 @@ const promoteUsdLabel = computed(() => {
   border-color: rgba(251, 191, 36, 0.25);
 }
 
-/* Edit… dropdown rows — shared by all three sections. */
-.edit-menu-item {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.375rem 0.625rem;
-  font-size: 11px;
-  color: rgb(255 255 255 / 0.75);
-  cursor: pointer;
-  transition: color 0.15s, background-color 0.15s;
-}
-.edit-menu-item:hover:not(:disabled) {
-  color: #fff;
-  background-color: rgb(255 255 255 / 0.08);
-}
-.edit-menu-hint {
-  margin-left: auto;
-  padding-left: 0.75rem;
-  font-size: 9px;
-  font-variant-numeric: tabular-nums;
-  color: rgb(255 255 255 / 0.35);
-}
 </style>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Frame, Layers, Loader2, Lock, LockOpen, Play, Sparkles, SkipBack, SkipForward, SlidersHorizontal, Upload, RefreshCw } from 'lucide-vue-next'
+import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Frame, Layers, Loader2, Lock, LockOpen, Play, SkipBack, SkipForward, SlidersHorizontal, Upload, RefreshCw } from 'lucide-vue-next'
 import { getTypeColor, getInputTooltip } from '~/composables/useVueNodes'
 import { useAgentActivity } from '~/composables/useAgentActivity'
 import { useDirectExecutionEnabled } from '~/composables/useDirectExecutionEnabled'
@@ -236,11 +236,6 @@ function rerollTakesParallel() { dispatchRun({ rerollScope: 'self', takes: 4 }) 
 function runFromStart() { dispatchRun({}) }
 // Variant: push this node's current result through everything downstream.
 function runDownstream() { dispatchRun({ direction: 'downstream' }) }
-// Ask the agent to LOOK at this result and suggest fixes (run→look→fix, on-demand).
-function critiqueResult() {
-  runMenuOpen.value = false
-  window.dispatchEvent(new CustomEvent('sailor:critiqueNode', { detail: { nodeId: props.id } }))
-}
 // The agent is reviewing THIS node → show the white scanning overlay.
 const { analyzingNodeIds } = useAgentActivity()
 const isAnalyzing = computed(() => analyzingNodeIds.value.has(props.id))
@@ -1773,16 +1768,6 @@ watch(previewImages, (urls) => {
         @click.stop="toggleSeedLock"
       >
         <component :is="seedLocked ? Lock : LockOpen" class="size-3.5" />
-      </button>
-      <!-- Critique: have the agent LOOK at this node's result and suggest fixes
-           (run→look→fix, on-demand). Only once there's an output to judge. -->
-      <button
-        v-if="data.images?.length"
-        class="nopan nodrag shrink-0 size-5 rounded-[6px] flex items-center justify-center text-white/40 hover:text-white/80 hover:bg-white/[0.08] transition-colors cursor-pointer"
-        title="Critique result — look at the output and suggest fixes"
-        @click.stop="critiqueResult"
-      >
-        <Sparkles class="size-3.5" />
       </button>
       <!-- Node settings: opens the right-hand inspector for this node's
            mechanical params (seed / aspect / advanced). Only when it has some. -->
