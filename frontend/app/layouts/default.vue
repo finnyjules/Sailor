@@ -3033,14 +3033,14 @@ function handleGlobalKeydown(e: KeyboardEvent) {
 // few surfaces carry role="dialog", but Frame, Timeline and most other full-screen
 // modals are plain `fixed inset-0` overlays. So besides the flags and the dialog
 // role, ask the page what sits on top of the prompt's input: if it isn't the
-// prompt, an overlay covers it. No prompt input (not ready, or working) → treat
-// as blocked so the key falls through untouched.
+// prompt, an overlay covers it. No prompt input (not ready, or working) or a
+// disabled one → treat as blocked so the key falls through untouched.
 function isStudioOrModalOpen(): boolean {
   if (settingsOpen.value || creditsModalOpen.value) return true
   if (document.querySelector('[role="dialog"], [aria-modal="true"]')) return true
   const root = (canvasPromptRef.value as any)?.$el as Element | undefined
-  const input = root?.querySelector?.('input[aria-label="Ask Sailor"]')
-  if (!root || !input) return true
+  const input = root?.querySelector?.<HTMLInputElement>('input[aria-label="Ask Sailor"]')
+  if (!root || !input || input.disabled) return true // disabled (AI not set up) can't take focus — don't eat the key
   const r = input.getBoundingClientRect()
   if (!r.width || !r.height) return true
   const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
