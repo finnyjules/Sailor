@@ -10,7 +10,12 @@
 
 export type GenKind = 'image' | 'video' | 'audio'
 
-export interface GenOutput { kind: GenKind; filename: string; subfolder: string; type: string }
+export interface GenOutput {
+  kind: GenKind; filename: string; subfolder: string; type: string
+  /** Content version (the file's etag) for files overwritten in place, e.g.
+   *  node snapshots — appended to the URL so a browser cache can't pin an old picture. */
+  v?: string
+}
 
 export interface GenerationRecord {
   id?: string

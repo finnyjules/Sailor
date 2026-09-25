@@ -5,9 +5,22 @@ export interface RecentProject {
   workflowId: string
   name: string
   promptIds: string[] // all prompt IDs for this project (most recent first)
-  images: { filename: string; subfolder: string; type: string }[] // last 3 images across all runs
+  images: { filename: string; subfolder: string; type: string; v?: string }[] // last 3 images across all runs
   lastTimestamp: number
   runCount: number
+  /** Generation thumbnails alone, kept so a new cover can be re-mixed in. */
+  rendered?: RecentProject['images']
+}
+
+/** Interleave renders with the canvas's own content (cover) so a project that
+ *  has both shows both, not just its generated pictures. */
+function mixPreview(rendered: RecentProject['images'], cover: RecentProject['images']): RecentProject['images'] {
+  const mixed: GenOutput[] = []
+  for (let i = 0; i < Math.max(rendered.length, cover.length); i++) {
+    if (rendered[i]) mixed.push(rendered[i] as GenOutput)
+    if (cover[i]) mixed.push(cover[i] as GenOutput)
+  }
+  return buildPreviewImages([mixed])
 }
 
 // `recentProjects` is the first 10 for the home row; `allProjects` is the full
@@ -42,9 +55,10 @@ function persistNames(names: Record<string, string>) {
 }
 
 export function useRecentProjects() {
-  function thumbnailUrl(img: { filename: string; subfolder: string; type: string }): string {
+  function thumbnailUrl(img: { filename: string; subfolder: string; type: string; v?: string }): string {
     const params = new URLSearchParams({ filename: img.filename, type: img.type })
     if (img.subfolder) params.set('subfolder', img.subfolder)
+    if (img.v) params.set('v', img.v)
     return `/view?${params}`
   }
 
@@ -77,10 +91,10 @@ export function useRecentProjects() {
       await Promise.all(durable.map(async (d) => {
         durableIds.add(d.uuid)
         const gens = await listGenerations(d.uuid)
-        // Paid renders (type 'output') headline the card; studio/Frame assets
-        // recorded as generations (type 'input' — recordAsset) fill behind
-        // them, and the doc-derived cover (stamped at save time) is the last
-        // resort so pure-studio projects aren't blank.
+        // Paid renders (type 'output') and studio/Frame assets recorded as
+        // generations (type 'input' — recordAsset), mixed below with the
+        // doc-derived cover (stamped at save time: node previews and canvas
+        // snapshots).
         const outputImages: GenOutput[] = []
         const inputAssets: GenOutput[] = []
         for (const g of gens) {
@@ -93,14 +107,15 @@ export function useRecentProjects() {
         }
         const cover: GenOutput[] = Array.isArray(d.cover)
           ? d.cover.filter((c): c is GenOutput => !!c && typeof c.filename === 'string' && (!c.kind || c.kind === 'image'))
-              .map((c) => ({ kind: c.kind || 'image', filename: c.filename, subfolder: c.subfolder || '', type: c.type || 'input' }))
+              .map((c) => ({ kind: c.kind || 'image', filename: c.filename, subfolder: c.subfolder || '', type: c.type || 'input', ...(c.v ? { v: c.v } : {}) }))
           : []
-        const images = buildPreviewImages([outputImages, inputAssets, cover])
+        const rendered = [...outputImages, ...inputAssets]
         projects.push({
           workflowId: d.uuid,
           name: d.name || savedNames[d.uuid] || 'Untitled project',
           promptIds: gens.map((g) => g.promptId).filter(Boolean),
-          images,
+          images: mixPreview(rendered, cover),
+          rendered,
           lastTimestamp: Math.max(d.updatedAt || 0, gens[0]?.ts || 0),
           runCount: gens.length,
         })
@@ -195,6 +210,15 @@ export function useRecentProjects() {
     }
   }
 
+  // Write-through for a freshly stamped cover (stampProjectCover): re-mix the
+  // card in both lists so an open grid shows the new snapshot without a refetch.
+  function applyProjectCover(workflowId: string, cover: RecentProject['images']) {
+    for (const list of [recentProjects.value, allProjects.value]) {
+      const project = list.find((p) => p.workflowId === workflowId)
+      if (project?.rendered) project.images = mixPreview(project.rendered, cover)
+    }
+  }
+
   return {
     recentProjects,
     allProjects,
@@ -205,5 +229,6 @@ export function useRecentProjects() {
     refresh,
     setProjectName,
     applyBackfilledImages,
+    applyProjectCover,
   }
 }

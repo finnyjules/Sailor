@@ -11,6 +11,7 @@
  * and the All Projects grid can fall back to them.
  */
 import { classifyOutput, type GenOutput } from '~/lib/generations'
+import { nodeSnapshotRefs } from '~/lib/nodeSnapshots'
 
 const COVER_CAP = 3
 
@@ -57,8 +58,10 @@ export function buildPreviewImages(sources: GenOutput[][], cap = COVER_CAP): Gen
 
 /** Scan a saved ProjectDoc for preview-able images. Priority: Frame
  *  composites (the deliverable) → Scene3D beauty bakes → any other node's
- *  persisted preview. Images only; max COVER_CAP. */
-export function extractCoverImages(doc: any): GenOutput[] {
+ *  persisted preview → (with a uuid) each remaining node's canvas snapshot
+ *  (~/lib/nodeSnapshots). Snapshot refs are only candidates — callers must
+ *  HEAD-verify, so they ask for a larger `cap` and trim after verifying. */
+export function extractCoverImages(doc: any, opts: { uuid?: string; cap?: number } = {}): GenOutput[] {
   const frames: GenOutput[] = []
   const scene3d: GenOutput[] = []
   const rest: GenOutput[] = []
@@ -85,5 +88,9 @@ export function extractCoverImages(doc: any): GenOutput[] {
       }
     }
   }
-  return buildPreviewImages([frames, scene3d, rest], COVER_CAP)
+  return buildPreviewImages([frames, scene3d, rest, nodeSnapshotRefs(doc, opts.uuid)], opts.cap ?? COVER_CAP)
 }
+
+/** Candidates to HEAD-verify before trimming to the card's COVER_CAP. */
+export const COVER_CANDIDATE_CAP = 12
+export { COVER_CAP }

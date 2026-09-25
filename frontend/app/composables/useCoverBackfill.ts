@@ -10,7 +10,7 @@
  * load needs no doc fetch.
  */
 import { isBackfillCandidate, createTaskQueue, filterToExistingImages } from '~/lib/coverBackfill'
-import { extractCoverImages } from '~/lib/projectCover'
+import { extractCoverImages, COVER_CANDIDATE_CAP, COVER_CAP } from '~/lib/projectCover'
 import type { RecentProject } from '~/composables/useRecentProjects'
 
 // Module scope on purpose: a uuid is attempted once per session no matter how
@@ -28,7 +28,9 @@ export function useCoverBackfill() {
     const { loadVersion, setProjectCover } = useProjects()
     const version = await loadVersion(project.workflowId, 'current')
     if (!version?.workflow) return
-    const cover = await filterToExistingImages(extractCoverImages(version.workflow))
+    const cover = (await filterToExistingImages(
+      extractCoverImages(version.workflow, { uuid: project.workflowId, cap: COVER_CANDIDATE_CAP }),
+    )).slice(0, COVER_CAP)
     if (!cover.length) return
     useRecentProjects().applyBackfilledImages(project.workflowId, cover)
     // Stamp server-side (fire-and-forget — setProjectCover swallows errors)

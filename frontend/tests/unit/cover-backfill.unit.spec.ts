@@ -77,6 +77,10 @@ describe('filterToExistingImages', () => {
     const out = await filterToExistingImages([img('a.png'), img('dead.png'), img('b.png')], fetchFn)
     expect(out.map((o: any) => o.filename)).toEqual(['a.png', 'b.png'])
   })
+  it('tags survivors with the file etag so overwritten files get a new URL', async () => {
+    const fetchFn = (async () => ({ ok: true, headers: new Headers({ etag: '"18d8ac-11f0"' }) })) as unknown as typeof fetch
+    expect((await filterToExistingImages([img('a.png')], fetchFn))[0]).toMatchObject({ filename: 'a.png', v: '18d8ac-11f0' })
+  })
   it('treats a thrown fetch as missing', async () => {
     const fetchFn = (async () => { throw new Error('network') }) as unknown as typeof fetch
     expect(await filterToExistingImages([img('a.png')], fetchFn)).toEqual([])

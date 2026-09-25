@@ -43,7 +43,8 @@ export function createTaskQueue(maxConcurrent: number) {
 
 /** Old docs can reference input files that were since pruned (live_preview_*
  *  temp uploads especially). Never paint or stamp a dead reference — a broken
- *  tile is worse than "No preview". fetchFn is injectable for tests. */
+ *  tile is worse than "No preview". Survivors carry the file's etag as `v`.
+ *  fetchFn is injectable for tests. */
 export async function filterToExistingImages(
   images: GenOutput[],
   fetchFn: typeof fetch = fetch,
@@ -53,7 +54,10 @@ export async function filterToExistingImages(
       const params = new URLSearchParams({ filename: img.filename, type: img.type })
       if (img.subfolder) params.set('subfolder', img.subfolder)
       const res = await fetchFn(`/view?${params}`, { method: 'HEAD' })
-      return res.ok ? img : null
+      if (!res.ok) return null
+      // Tag with the file's version so an overwritten file gets a new URL.
+      const etag = res.headers?.get?.('etag')?.replace(/[^\w-]+/g, '')
+      return etag ? { ...img, v: etag } : img
     } catch {
       return null
     }

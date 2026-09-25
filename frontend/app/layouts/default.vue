@@ -43,7 +43,8 @@ import { useTabHeadsUp } from '~/composables/useTabHeadsUp'
 import { isBetaGateError } from '~/lib/betaGate'
 import { promoteTempImageInputs } from '~/lib/promoteTempImages'
 import { extractOutputFiles, type GenOutput, type GenerationRecord } from '~/lib/generations'
-import { extractCoverImages } from '~/lib/projectCover'
+import { extractCoverImages, COVER_CANDIDATE_CAP, COVER_CAP } from '~/lib/projectCover'
+import { captureNodeSnapshots, snapshotUploadsSettled } from '~/lib/nodeSnapshots'
 import { filterToExistingImages } from '~/lib/coverBackfill'
 import {
   activeCanvasOf, docHasContent, isProjectDoc,
@@ -1617,11 +1618,18 @@ async function stampProjectCover(uuid: string, doc: any) {
   // checks were in flight, drop this (older) stamp instead of racing its PUT.
   const seq = (coverStampSeq.get(uuid) ?? 0) + 1
   coverStampSeq.set(uuid, seq)
-  const cover = await filterToExistingImages(extractCoverImages(doc))
+  // Photograph live-only nodes (shaders, gradients…) while this project's
+  // canvas is on screen; captureNodeSnapshots refuses any other canvas.
+  if (activeTab.value?.projectUuid === uuid) await captureNodeSnapshots(uuid, doc).catch(() => {})
+  else await snapshotUploadsSettled(uuid) // e.g. the tab-switch capture below
+  const cover = (await filterToExistingImages(
+    extractCoverImages(doc, { uuid, cap: COVER_CANDIDATE_CAP }),
+  )).slice(0, COVER_CAP)
   if (coverStampSeq.get(uuid) !== seq) return
   const key = JSON.stringify(cover)
   if (lastSentCoverByProject.get(uuid) === key) return
   lastSentCoverByProject.set(uuid, key)
+  useRecentProjects().applyProjectCover(uuid, cover)
   void useProjects().setProjectCover(uuid, cover)
 }
 
@@ -2444,6 +2452,9 @@ watch(activeTabId, async (newId, oldId) => {
   if (oldTab?.type === 'project') {
     snapshotActiveCanvasIntoDoc(oldTab.id)
     persistWorkflows()
+    // The old canvas is still mounted here (pre-flush watcher): photograph
+    // its nodes now, so the card reflects the state the user just left.
+    if (oldTab.projectUuid) void captureNodeSnapshots(oldTab.projectUuid, savedWorkflows[oldTab.id], { now: true }).catch(() => {})
     saveDurableVersion(oldTab, savedWorkflows[oldTab.id])
   }
 
