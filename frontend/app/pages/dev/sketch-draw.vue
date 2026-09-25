@@ -12,6 +12,7 @@ import { sketchPathData } from '~/lib/sketch/sketchPath'
 import { applyView, invertView, type ViewMatrix } from '~/lib/sketch/view'
 import { usePen, isTypingInField, type PenTool } from '~/composables/pen/usePen'
 import PenOverlay from '~/components/pen/PenOverlay.vue'
+import PenToolbar from '~/components/pen/PenToolbar.vue'
 
 type Tool = PenTool
 
@@ -101,15 +102,21 @@ const pen = usePen({
 })
 const {
   tool, guideMode, showLabels, status, selection, selectedSegments,
-  opHint, dimBuffer, nextSegment,
-  selectTool, setGuideMode, toggleGuideMode, setShowLabels, toggleShowLabels,
+  dimBuffer, nextSegment,
+  selectTool, setGuideMode, setShowLabels,
   pick, clearSel, pickSegment, clearSegSel, marqueeSelect, isPointId,
   place, pathDown, pathMove, pathUp, finishPath, cancelPath, removeLastAnchor,
-  runSolve, apply, applyWithValue, availableConstraints, del, nudge, fixSelected, makeConstruction, flip,
-  repeatPrompt, armRepeat, doMirror, cancelPendingOp, pendingOp,
+  runSolve, apply, availableConstraints, del, nudge, makeConstruction, flip,
+  armRepeat, doMirror, cancelPendingOp, pendingOp,
   setArcRadius, setConstraintValue, removeConstraintById,
   commitDimension, undo, redo, canUndo, canRedo, reset, commitHistory, sparkle, sparkleCount,
 } = pen
+
+// PenToolbar's Done/Cancel just log into `status` here — the dev page has no
+// "finished session" concept of its own (unlike the Frame editor, which will
+// actually commit/discard the drawing).
+function handleToolbarDone() { status.value = 'done' }
+function handleToolbarCancel() { status.value = 'cancelled' }
 
 // keyboard: the viewport keys (⌘0 fit, Space pan) are the page's. This
 // listener is registered on window in the CAPTURE phase, so it runs before
@@ -278,66 +285,18 @@ onUnmounted(() => {
   <div :data-ready="ready ? '' : undefined" style="font-family: ui-sans-serif, system-ui; padding: 12px; color: #e5e5e5; background: #0b0b0b; min-height: 100vh">
     <h1 style="font-size: 14px; margin: 0 0 8px">Sketch Draw</h1>
     <div style="display: flex; gap: 6px; margin-bottom: 8px; align-items: center">
-      <button v-for="t in (['select','point','line','circle','path'] as Tool[])" :key="t"
-              :data-tool="t" @click="() => selectTool(t)"
-              :style="{ padding: '4px 10px', borderRadius: '6px', border: '1px solid #333', cursor: 'pointer',
-                        background: tool === t ? '#2563eb' : '#1a1a1a', color: '#fff' }">{{ t }}</button>
-      <button data-act="guide" @click="toggleGuideMode" :title="'While on, Point/Line/Circle/Path place construction (guide) geometry'"
-              :style="{ padding: '4px 10px', borderRadius: '6px', cursor: 'pointer',
-                        border: guideMode ? '1px dashed #60a5fa' : '1px solid #333',
-                        background: guideMode ? '#152036' : '#1a1a1a',
-                        color: guideMode ? '#93c5fd' : '#9ca3af' }">Guide: {{ guideMode ? 'on' : 'off' }}</button>
-      <button data-act="labels" @click="toggleShowLabels" :title="'Toggle constraint badges + dimension chips (declutter a large drawing)'"
-              :style="{ padding: '4px 10px', borderRadius: '6px', cursor: 'pointer',
-                        border: showLabels ? '1px dashed #60a5fa' : '1px solid #333',
-                        background: showLabels ? '#152036' : '#1a1a1a',
-                        color: showLabels ? '#93c5fd' : '#9ca3af' }">Labels: {{ showLabels ? 'on' : 'off' }}</button>
-      <button data-act="reset" @click="reset" style="padding: 4px 10px; border-radius: 6px; border: 1px solid #333; background: #1a1a1a; color: #fff; cursor: pointer">reset</button>
-      <span data-status style="margin-left: 8px; font-size: 12px; color: #9ca3af">{{ status }}</span>
-    </div>
-    <div v-if="opHint" data-op-hint
-         style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px; padding: 6px 12px; border-radius: 8px; border: 1px solid #2563eb; background: #10203f; color: #bfdbfe; font-size: 13px">
-      <span>👉 {{ opHint }}</span>
-      <button data-act="op-cancel" @click="cancelPendingOp"
-              style="padding: 2px 8px; border-radius: 6px; border: 1px solid #334155; background: #0b1220; color: #93c5fd; cursor: pointer; font-size: 12px">cancel (Esc)</button>
-    </div>
-    <div v-if="tool === 'path'" style="display: flex; gap: 6px; margin-bottom: 8px; align-items: center">
-      <span style="font-size: 12px; color: #9ca3af">click to place a point — drag before releasing to curve the segment into an arc; click the first point to close</span>
-      <button data-act="close" @click="finishPath(true)"
-              style="padding: 3px 9px; border-radius: 6px; border: 1px solid #333; background: #1a1a1a; color: #fff; cursor: pointer; font-size: 12px">close</button>
-      <button data-act="finish" @click="finishPath(false)"
-              style="padding: 3px 9px; border-radius: 6px; border: 1px solid #333; background: #1a1a1a; color: #fff; cursor: pointer; font-size: 12px">finish</button>
-    </div>
-    <div style="display: flex; gap: 6px; margin: 8px 0; min-height: 28px; align-items: center; flex-wrap: wrap">
-      <span style="font-size: 12px; color: #9ca3af">sel: {{ selection.length }}{{ selectedSegments.length ? ' · seg: ' + selectedSegments.length : '' }}</span>
-      <span v-if="tool === 'select' && !selection.length && !selectedSegments.length" data-select-hint style="font-size: 12px; color: #6b7280">drag a point to move it · click a shape to select it · ⌥click an edge for one segment</span>
-      <button v-for="v in availableConstraints()" :key="v.kind" :data-verb="v.kind"
-              @click="() => applyWithValue(v)"
-              style="padding: 3px 9px; border-radius: 6px; border: 1px solid #333; background: #1a1a1a; color: #fff; cursor: pointer; font-size: 12px">{{ v.label }}</button>
-      <button v-if="selection.length" data-verb="fix" @click="fixSelected"
-              style="padding: 3px 9px; border-radius: 6px; border: 1px solid #333; background: #1a1a1a; color: #fff; cursor: pointer; font-size: 12px">Fix</button>
-      <button v-if="selection.length" data-verb="repeat" @click="repeatPrompt"
-              style="padding: 3px 9px; border-radius: 6px; border: 1px solid #333; background: #1a1a1a; color: #fff; cursor: pointer; font-size: 12px">Repeat…</button>
-      <button v-if="selection.length" data-verb="mirror" @click="doMirror"
-              style="padding: 3px 9px; border-radius: 6px; border: 1px solid #333; background: #1a1a1a; color: #fff; cursor: pointer; font-size: 12px">Mirror</button>
-      <button v-if="selection.length" data-verb="construction" @click="makeConstruction"
-              style="padding: 3px 9px; border-radius: 6px; border: 1px solid #333; background: #1a1a1a; color: #fff; cursor: pointer; font-size: 12px">Make construction</button>
-      <button v-if="selection.length" data-verb="flip-h" @click="flip('h')"
-              style="padding: 3px 9px; border-radius: 6px; border: 1px solid #333; background: #1a1a1a; color: #fff; cursor: pointer; font-size: 12px">Flip H</button>
-      <button v-if="selection.length" data-verb="flip-v" @click="flip('v')"
-              style="padding: 3px 9px; border-radius: 6px; border: 1px solid #333; background: #1a1a1a; color: #fff; cursor: pointer; font-size: 12px">Flip V</button>
       <button data-verb="copy-svg" @click="copySvg"
-              style="padding: 3px 9px; border-radius: 6px; border: 1px solid #333; background: #1a1a1a; color: #fff; cursor: pointer; font-size: 12px">Copy SVG</button>
-      <button v-if="selection.length" data-act="delete" @click="del"
-              style="padding: 3px 9px; border-radius: 6px; border: 1px solid #7f1d1d; background: #1a1a1a; color: #fca5a5; cursor: pointer; font-size: 12px">Delete</button>
+              style="padding: 4px 10px; border-radius: 6px; border: 1px solid #333; background: #1a1a1a; color: #fff; cursor: pointer">Copy SVG</button>
+      <button data-act="reset" @click="reset" style="padding: 4px 10px; border-radius: 6px; border: 1px solid #333; background: #1a1a1a; color: #fff; cursor: pointer">Reset</button>
+      <span data-status style="margin-left: 8px; font-size: 12px; color: #9ca3af">{{ status }}</span>
     </div>
     <div :style="{ position: 'relative', width: CANVAS_W + 'px', height: CANVAS_H + 'px', background: '#fafafa', borderRadius: '8px', overflow: 'hidden', touchAction: 'none' }"
          @pointerdown.capture="onCanvasPointerDown" @pointermove.capture="onCanvasPointerMove"
          @pointerup.capture="onCanvasPointerUp" @pointerleave="onCanvasPointerLeave" @wheel="onWheel">
       <PenOverlay :pen="pen" :view="view" :width="CANVAS_W" :height="CANVAS_H" :cursor="svgCursor" />
     </div>
-    <p style="font-size: 12px; color: #6b7280; margin-top: 8px">
-      Pick a tool. Point/Line/Circle click to place (snaps to nearby geometry). Path click to chain anchors, drag before releasing to bow a segment into an arc, click the first anchor to close. Select drags points; the drawing re-solves.
-    </p>
+    <!-- the dev page has no overlay dock, so it places the toolbar below the
+         canvas — a host with one (the Frame editor) puts it there instead. -->
+    <PenToolbar :pen="pen" style="margin-top: 12px" @done="handleToolbarDone" @cancel="handleToolbarCancel" />
   </div>
 </template>

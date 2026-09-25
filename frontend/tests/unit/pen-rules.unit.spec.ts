@@ -22,4 +22,15 @@ describe('availableConstraints', () => {
   it('nothing selected → nothing offered', () => {
     expect(availableConstraints(empty(), [], [])).toEqual([])
   })
+  it('point + line → pointOnLine, midpoint', () => {
+    const d = empty()
+    const p = addPoint(d, 1, 1)
+    const l = addLine(d, addPoint(d, 0, 0), addPoint(d, 2, 0))
+    expect(kinds(availableConstraints(d, [p, l], []))).toEqual(['pointOnLine', 'midpoint'])
+  })
+  it('one circle → radius', () => {
+    const d = empty()
+    const c = addCircle(d, addPoint(d, 0, 0), 1)
+    expect(kinds(availableConstraints(d, [c], []))).toEqual(['radius'])
+  })
 })
