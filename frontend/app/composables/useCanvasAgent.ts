@@ -29,7 +29,7 @@ export function useCanvasAgent(opts: {
   getSnapshot: (phrase?: string) => CanvasSnapshot
   /** Render the accepted commands on the canvas as semi-transparent ghosts.
    *  animate plays the ~1s blueprint draw-in (used on the first proposal). */
-  preview: (commands: Command[], animate?: boolean) => void
+  preview: (commands: Command[], animate?: boolean) => void | Promise<unknown>
   /** Promote the ghosts to real nodes/edges (+ glimm). Called on Keep. Returns the
    *  ids of the nodes it committed (so Keep & Run can run them). */
   commit: () => string[] | void
@@ -167,7 +167,8 @@ export function useCanvasAgent(opts: {
       // normal ghost → Keep/Reject flow below.
       if (isFastLanePlacement(commands) && graphBuilt.length === 1) {
         // Blueprint the ghost, then promote it exactly like keep() does.
-        opts.preview(graphBuilt.map(c => c.command), true)
+        await opts.preview(graphBuilt.map(c => c.command), true) // commit only once it's all on the canvas
+        if (seq !== runSeq) return
         const committed = opts.commit() || []
         changes.value = []; original = null; issues.value = []; review.value = null
         // Bring the placed node into view — it lands at a fixed graph position
@@ -406,10 +407,10 @@ export function useCanvasAgent(opts: {
   /** Chip click: apply exactly ONE review fix through the normal preview→commit
    *  seam. The spliced EditImageNode lands configured + selected, UN-RUN — the
    *  user aims (or just hits its Run) before anything bills. */
-  function applyReviewFix(change: ProposedChange, nodeId: string) {
+  async function applyReviewFix(change: ProposedChange, nodeId: string) {
     if (busy.value || reviewing.value) return
     try {
-      opts.preview([change.command], false)
+      await opts.preview([change.command], false) // commit only once it's all on the canvas
       opts.commit()
     } catch (e) {
       console.warn('[AutoReview] fix apply failed:', e)

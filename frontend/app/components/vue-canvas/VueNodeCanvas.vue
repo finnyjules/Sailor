@@ -16,7 +16,7 @@ import { planFrameFromSelection, MAX_FRAME_LAYERS } from '~/lib/canvas/combineFr
 import { frameCardSize, placeRightOf, sendFailedToast, sentFrameData, sentFrameEdges, sentFrameToast } from '~/lib/frame/layoutSetSend'
 import { computeRunLeafIds } from '~/lib/canvas/runLeaves'
 import { edgeTopologyKey } from '~/lib/canvas/edgeTopologyKey'
-import { edgesTouching, GhostRestores } from '~/lib/canvas/proposalPreview'
+import { edgesTouching, GhostRestores, freeInputSlot, clearRemovalMarks, removalEdgeIds, addClass, removeClass } from '~/lib/canvas/proposalPreview'
 import type { Command } from '~/lib/agent/commandSurface'
 import type { PromptNode } from '~/lib/prompt/canvasPromptContext'
 import { buildCatalog, type CatalogEntry } from '~/lib/portIntentCatalog'
@@ -507,8 +507,9 @@ function wireEdge(from: any, to: any, fromPort?: string, toPort?: string, ghost 
   }
   const pair = resolveLivePorts(from, to, fromPort, toPort)
   if (!pair) return null
-  // One link per input slot — drop any existing edge into it first.
-  const kept = (edges.value as any[]).filter(e => !(String(e.target) === String(to.id) && e.targetHandle === `input-${pair.ii}`))
+  // One link per input slot — drop any existing edge into it first. A proposed
+  // (ghost) wire only MARKS the real edge there, so Reject keeps it (spec §3.2).
+  const kept = freeInputSlot(edges.value as any[], String(to.id), `input-${pair.ii}`, ghost)
   if (kept.length !== edges.value.length) edges.value.splice(0, edges.value.length, ...kept)
   const id = `e-${from.id}-${pair.oi}-${to.id}-${pair.ii}${ghost ? '-ghost' : ''}`
   addEdges([{
@@ -654,7 +655,7 @@ async function applyCanvasOps(commands: Command[], ghost = false): Promise<{ nod
       // Preview only MARKS the removal (dashed red); Approve deletes, Reject clears.
       const n: any = (nodes.value as any[]).find(x => String(x.id) === id)
       if (n) {
-        n.class = 'agent-removal'
+        n.class = addClass(n.class, 'agent-removal')
         pendingRemovals.push(id)
         for (const eid of edgesTouching(edges.value as any[], [id])) {
           const e: any = (edges.value as any[]).find(x => String(x.id) === eid)
@@ -695,8 +696,9 @@ async function applyCanvasOps(commands: Command[], ghost = false): Promise<{ nod
         ghostRestores.push(() => {
           const n: any = (nodes.value as any[]).find(x => String(x.id) === id)
           if (!n) return
+          if (hadMode) { n.data = { ...n.data, mode: prevMode }; return }
           const { mode: _m, ...rest } = n.data ?? {}
-          n.data = hadMode ? { ...rest, mode: prevMode } : rest
+          n.data = rest
         })
       }
       setMode([realId(cmd.target)], AGENT_MODE[String(cmd.args?.mode ?? '').toLowerCase()] ?? 0)
@@ -791,9 +793,9 @@ function agentDiscard() {
   ghostRestores.restore()
   for (const id of pendingRemovals) {
     const n: any = (nodes.value as any[]).find(x => String(x.id) === id)
-    if (n && n.class === 'agent-removal') n.class = undefined
+    if (n) n.class = removeClass(n.class, 'agent-removal')
   }
-  for (const e of edges.value as any[]) if (e.data?.removal) e.data = { ...e.data, removal: false }
+  clearRemovalMarks(edges.value as any[]) // a marked rewire or removal keeps its edge
   pendingRemovals = []
   if (ghostDrawTimer) { clearTimeout(ghostDrawTimer); ghostDrawTimer = 0 }
   if (glimmTimer) { clearTimeout(glimmTimer); glimmTimer = 0 }
@@ -835,6 +837,8 @@ async function agentPreview(commands: Command[], animate = false) {
   }, BLUEPRINT_MS)
 }
 
+// Callers AWAIT agentPreview before committing: its deletes and rewires are
+// only marked after the new nodes mount, and a commit before that misses them.
 function agentCommit() {
   if (ghostDrawTimer) { clearTimeout(ghostDrawTimer); ghostDrawTimer = 0 }
   blueprintRects.value = []
@@ -846,7 +850,7 @@ function agentCommit() {
   ghostRestores.clear() // keep the in-place edits
   const removals = pendingRemovals
   pendingRemovals = []
-  for (const e of edges.value as any[]) if (e.data?.removal) e.data = { ...e.data, removal: false }
+  deleteEdges(removalEdgeIds(edges.value as any[])) // edges a rewire replaced, or a removed node's
   if (removals.length) deleteNodes(removals)
   glimmBurstOver(ghostNodeIds) // just the new node(s), not the connection
   return ghostNodeIds // the just-committed node ids (so the caller can run them)
