@@ -130,7 +130,13 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // 60 fps (shared/pricing/clipRates.ts), billed on the video the runner
 // measures (whole seconds rounded up, 60 s at most). No backup. With the
 // switch off the node keeps its flat 150 credits on ComfyUI. No other price moves.
-export const PRICE_BOOK_VERSION = 'lineup-f23'
+// lineup-final (final fix wave): covers the fix rounds priced under the
+// version before them — F9 fix 1 (Seedream 5 Pro edit at 4K moved from
+// priced to refused), F23 fixes 1 and 2 (Topaz banded by the output's longer
+// side, then the dearer of that band and the height's) — and the runner
+// pricing a size-priced picture by the file it sends (the first of a batch,
+// no longer the largest of up to eight). No rate moves.
+export const PRICE_BOOK_VERSION = 'lineup-final'
 
 export const BASE_RENDER_CREDITS = 1
 

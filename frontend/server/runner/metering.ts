@@ -43,10 +43,13 @@ export function nodeCredits(node: ApiNode, inputPixels?: number, families: Reado
 }
 
 /**
- * The size of the picture a size-priced node is about to be sent: the
- * largest file on its linked output slot, each measured from its header. Undefined when the node
- * isn't size-priced or the file can't be read (it is then priced at the cap).
- * The runner measures before it submits, so the charge reads the real size.
+ * The size of the picture a size-priced node is about to be sent: the first
+ * file on its linked output slot (the one every builder sends, as Python
+ * sends only the first frame of a batch), measured from its header.
+ * Undefined when the node isn't size-priced or the file can't be read (it is
+ * then priced at the cap). The runner measures before it submits, so the
+ * charge reads the real size, and a picture above the cap is refused
+ * (requestRules.ts measuredInputProblem) whatever the batch's length.
  */
 export async function measuredInputPixels(
   node: ApiNode,
@@ -58,20 +61,12 @@ export async function measuredInputPixels(
   const name = sizePricedInput(node.class_type, inputs, families)
   const link = name ? inputs[name] : undefined
   if (!isLink(link)) return undefined
-  // Every file on the linked output slot; the largest prices (a batch may differ in size).
-  const files = filesFrom(link as [string, number])
-  if (!files.length) return undefined
-  let largest = 0
-  for (const f of files.slice(0, 8)) {
-    let px: number | null = null
-    try { px = await picturePixels(await read(f)) }
-    catch { px = null }
-    // One unreadable file: price at the cap rather than guess.
-    if (px == null) return undefined
-    largest = Math.max(largest, px)
-  }
-  // More files than are measured: the cap.
-  return files.length > 8 ? undefined : largest
+  const sent = filesFrom(link as [string, number])[0]
+  if (!sent) return undefined
+  let px: number | null = null
+  try { px = await picturePixels(await read(sent)) }
+  catch { px = null }
+  return px ?? undefined
 }
 
 /**

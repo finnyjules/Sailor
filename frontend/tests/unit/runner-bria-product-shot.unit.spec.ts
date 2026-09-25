@@ -23,6 +23,7 @@
  *  - the engine, end to end: the family's own endpoint, the hold and charge.
  */
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ApiPrompt } from '#shared/runner/graph'
@@ -42,7 +43,7 @@ import { PRODUCT_SHOT_DEFAULT_PROMPT, PRODUCT_SHOT_SLUG } from '~~/server/runner
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
 import {
   PRODUCT_SHOT_MAX_BYTES, PRODUCT_SHOT_TOO_LARGE, PRODUCT_SHOT_WRONG_FORMAT,
-  checkedInputFile, inputFileProblem, linkedFileProblem, pictureFormat, requestProblems,
+  checkedInputFile, inputFileProblem, linkedFileCheck, pictureFormat, requestProblems,
 } from '~~/server/runner/requestRules'
 import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
 import sharp from 'sharp'
@@ -50,6 +51,7 @@ import { PRICE_BOOK_VERSION, priceGraph } from '~~/server/utils/priceBook'
 import { PRODUCT_SHOT_UPGRADING, blockedPromptRefusal, retiredEngineRefusal } from '~~/server/utils/blockedModels'
 import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 import type { OutputFile } from '~~/server/runner/types'
+import { createEngineResultStore } from '~~/server/runner/results'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
 import { makeKit, ofType } from './__runner__/kit'
 
@@ -367,12 +369,12 @@ describe('hosted ComfyUI path: the SDXL refusal stays while off; on, the node is
 // ── The price ──────────────────────────────────────────────────────────────
 
 describe('the price', () => {
-  it('the card: fal\'s $0.04 a picture, verified, non-zero; the book carries it (lineup-f12, now lineup-f23)', () => {
+  it('the card: fal\'s $0.04 a picture, verified, non-zero; the book carries it (lineup-f12, now lineup-final)', () => {
     expect(EDIT_RATES[BRIA_PRODUCT_SHOT_APP]).toEqual({
       unit: 'per_image', usd: USD, service: 'fal', confidence: 'verified', read: '2026-09-24',
       source: 'https://fal.ai/models/fal-ai/bria/product-shot/llms.txt',
     })
-    expect(PRICE_BOOK_VERSION).toBe('lineup-f23')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-final')
   })
 
   it('not size-priced: the shot is about 1 MP whatever the picture sent', () => {
@@ -453,17 +455,17 @@ describe('the picture Bria takes: up to 12 MB, JPEG, PNG or WebP, refused before
     expect(inputFileProblem('ProductShotNode', GIF, ALL_BUT)).toBeNull()
     const read = vi.fn(async () => new Uint8Array(GIF))
     const files = () => [{ filename: 'a.gif' }]
-    expect(await linkedFileProblem(shot(), files, read, ALL_BUT)).toBeNull()
-    expect(await linkedFileProblem({ class_type: 'RotateCameraNode', inputs: { image: LINK } }, files, read, ALL)).toBeNull()
-    expect(await linkedFileProblem({ class_type: 'EditImageNode', inputs: { input_image: LINK, image: LINK } }, files, read, ALL)).toBeNull()
+    expect((await linkedFileCheck(shot(), files, read, ALL_BUT)).problem).toBeNull()
+    expect((await linkedFileCheck({ class_type: 'RotateCameraNode', inputs: { image: LINK } }, files, read, ALL)).problem).toBeNull()
+    expect((await linkedFileCheck({ class_type: 'EditImageNode', inputs: { input_image: LINK, image: LINK } }, files, read, ALL)).problem).toBeNull()
     expect(read).not.toHaveBeenCalled()
     // On: exactly the one file the builder sends (the first on the link) is read.
-    expect(await linkedFileProblem(shot(), () => [{ filename: 'a.gif' }, { filename: 'b.png' }], read, ON)).toBe(PRODUCT_SHOT_WRONG_FORMAT)
+    expect((await linkedFileCheck(shot(), () => [{ filename: 'a.gif' }, { filename: 'b.png' }], read, ON)).problem).toBe(PRODUCT_SHOT_WRONG_FORMAT)
     expect(read.mock.calls).toEqual([[{ filename: 'a.gif' }]])
     // No picture linked, no file on the link, or an unreadable one: left to the hand-off.
-    expect(await linkedFileProblem(shot({ image: undefined }), files, read, ON)).toBeNull()
-    expect(await linkedFileProblem(shot(), () => [], read, ON)).toBeNull()
-    expect(await linkedFileProblem(shot(), files, async () => { throw new Error('gone') }, ON)).toBeNull()
+    expect((await linkedFileCheck(shot({ image: undefined }), files, read, ON)).problem).toBeNull()
+    expect((await linkedFileCheck(shot(), () => [], read, ON)).problem).toBeNull()
+    expect((await linkedFileCheck(shot(), files, async () => { throw new Error('gone') }, ON)).problem).toBeNull()
   })
 })
 
@@ -514,6 +516,36 @@ describe('the runner engine', () => {
       expect([...k.ledger.holds.values()].map(h => h.state)).toEqual(['released'])
     })
   }
+
+  // Final fix F9 (final review finding 9): the size on disk is read first, so a
+  // picture over the limit is refused without being read into memory.
+  it('a picture over 12 MB on disk is refused before it is read', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bria-stat-'))
+    for (const t of ['input', 'output', 'temp']) fs.mkdirSync(path.join(root, t), { recursive: true })
+    fs.writeFileSync(path.join(root, 'input', 'bottle.png'), pngOfSize(PRODUCT_SHOT_MAX_BYTES + 1))
+    const store = createEngineResultStore({ dirForType: t => path.join(root, t), hosted: () => true })
+    const read: string[] = []
+    const results = { ...store, read: async (f: OutputFile) => { read.push(f.filename); return store.read(f) } }
+    const k = makeKit({ hosted: true, root, deps: { families: () => ON, results } })
+    const { runId } = await start(k)
+    await k.engine.settled(runId)
+    expect(ofType(k.seen, 'execution_error').map(m => m.data.exception_message)).toEqual([PRODUCT_SHOT_TOO_LARGE])
+    expect(read).toEqual([])
+    expect(k.fal.reqs.size).toBe(0)
+    expect([...k.ledger.holds.values()].map(h => h.state)).toEqual(['released'])
+  })
+
+  it('linkedFileCheck: over the limit by its size, refused unread; at the limit, or no size known, read and checked', async () => {
+    const reads: string[] = []
+    const read = async (f: { filename: string }) => { reads.push(f.filename); return new Uint8Array(GIF) }
+    const files = () => [{ filename: 'a.png' }]
+    expect(await linkedFileCheck(shot(), files, read, ON, async () => PRODUCT_SHOT_MAX_BYTES + 1)).toEqual({ problem: PRODUCT_SHOT_TOO_LARGE, bytes: PRODUCT_SHOT_MAX_BYTES + 1 })
+    expect(reads).toEqual([])
+    expect((await linkedFileCheck(shot(), files, read, ON, async () => PRODUCT_SHOT_MAX_BYTES)).problem).toBe(PRODUCT_SHOT_WRONG_FORMAT)
+    expect((await linkedFileCheck(shot(), files, read, ON, async () => null)).problem).toBe(PRODUCT_SHOT_WRONG_FORMAT)
+    expect((await linkedFileCheck(shot(), files, read, ON, async () => { throw new Error('gone') })).problem).toBe(PRODUCT_SHOT_WRONG_FORMAT)
+    expect(reads).toEqual(['a.png', 'a.png', 'a.png'])
+  })
 
   it('off (every other family on): refused, nothing held or sent', async () => {
     const k = kit(ALL_BUT)

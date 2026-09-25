@@ -15,6 +15,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { isRunnerEligible } from '#shared/runner/eligibility'
 import { RUNNER_FAMILIES } from '#shared/runner/families'
 import { planNode } from '~~/server/runner/executors'
+import { H3_MAX_TURBO_NEEDS_PROMPT } from '~~/server/runner/generators/h3MaxTurbo'
+import { WAN_3_NEEDS_PROMPT } from '~~/server/runner/generators/wan3'
+import { GPT_IMAGE_25_NEEDS_PROMPT } from '~~/server/runner/generators/gptImage25'
 import {
   FIRST_FRAME_AND_REFERENCES, GEMINI_OMNI_FLASH_NEEDS_PROMPT, H3_SHORT_PROMPT, NANO_BANANA_SHORT_PROMPT, SEEDANCE_TOO_MUCH_SOUND, SEEDANCE_TOO_MUCH_VIDEO,
   SEEDANCE_UNMEASURED_REFERENCE, requestProblems,
@@ -88,6 +91,19 @@ describe('Nano Banana: a prompt under 3 characters, as sent', () => {
     expect(d.priceGraph).not.toHaveBeenCalled()
     expect(d.hold).not.toHaveBeenCalled()
     expect(d.forward).not.toHaveBeenCalled()
+  })
+})
+
+// Final fix F7 (final review finding 7): every runner-only model's empty-prompt
+// refusal is two sentences in its own name — what is missing, then what to write.
+describe('empty-prompt wording: the model\'s own name, and a helping second sentence', () => {
+  it('Hailuo H3 Max Turbo, Wan 3.0 and GPT Image 2.5', () => {
+    expect(H3_MAX_TURBO_NEEDS_PROMPT).toBe('Hailuo H3 Max Turbo needs a prompt. Describe the clip, or how the picture should move.')
+    expect(WAN_3_NEEDS_PROMPT).toBe('Wan 3.0 needs a prompt. Describe the clip, or link a picture to start from it.')
+    expect(GPT_IMAGE_25_NEEDS_PROMPT).toBe('GPT Image 2.5 needs a prompt. Describe the picture you want, or the change to make.')
+    for (const m of [H3_MAX_TURBO_NEEDS_PROMPT, WAN_3_NEEDS_PROMPT, GPT_IMAGE_25_NEEDS_PROMPT]) expect(m.split('. ')).toHaveLength(2)
+    // H3 Max Turbo no longer borrows Hailuo H3's words.
+    expect(H3_MAX_TURBO_NEEDS_PROMPT).not.toBe(H3_SHORT_PROMPT)
   })
 })
 

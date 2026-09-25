@@ -52,7 +52,8 @@ import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
 import {
   TOPAZ_VIDEO_CHANGED, TOPAZ_VIDEO_FILE_MISSING, TOPAZ_VIDEO_MAX_BYTES, TOPAZ_VIDEO_RULE, topazInputFiles, topazMediaCheck,
 } from '~~/server/runner/topazMedia'
-import { mediaNodeKind, mediaNodeSwitchedOff, nodeMediaChangedWords, nodeMediaFiles } from '~~/server/runner/nodeMedia'
+import { mediaNodeKind, nodeMediaChangedWords, nodeMediaFiles } from '~~/server/runner/nodeMedia'
+import { switchedSinceHold } from '~~/server/runner/switches'
 import { mediaFacts, measuredMediaChanged } from '~~/server/runner/mediaInputs'
 import { requestProblem, requestProblems } from '~~/server/runner/requestRules'
 import { createEngineResultStore } from '~~/server/runner/results'
@@ -382,14 +383,14 @@ describe('the price', () => {
   const at = (inputs: Record<string, unknown>, m: Record<string, number | null> = {}, families: ReadonlySet<RunnerFamily> = ON) =>
     priceNode('EnhanceVideoNode', inputs, { inputSeconds: m, families })
 
-  it('the card: per second by band and frame rate, from fal\'s page, verified, non-zero; the book carries it (lineup-f23)', () => {
+  it('the card: per second by band and frame rate, from fal\'s page, verified, non-zero; the book carries it (lineup-f23, now lineup-final)', () => {
     const rate = clipRate(TOPAZ_VIDEO_ENDPOINT)!
     expect(rate).toEqual({
       unit: 'per_second', service: 'fal', source: 'https://fal.ai/models/fal-ai/topaz/upscale/video/llms.txt', read: '2026-09-25', confidence: 'verified',
       byResolution: { '720p': 0.01, '1080p': 0.02, '4k': 0.08, '720p/60fps': 0.02, '1080p/60fps': 0.04, '4k/60fps': 0.16 },
     })
     expect(CLIP_RATES[TOPAZ_VIDEO_ENDPOINT]).toBe(rate)
-    expect(PRICE_BOOK_VERSION).toBe('lineup-f23')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-final')
     expect(FAMILY_PRICED_CLASSES).toEqual({ EnhanceVideoNode: 'topaz-video' })
   })
 
@@ -783,6 +784,37 @@ describe('fix round 1: the engine', () => {
     expect([...ledger.holds.values()].map(h => [h.credits, h.state, h.actual])).toEqual([[13, 'settled', 13]])
   })
 
+  // F23 re-review minor 1 (final fix F12): a resumed node whose plan can't be
+  // rebuilt at all (here its recorded measurement is gone) cancels the job it
+  // sent before the restart, then fails: no provider job is left billing.
+  it('resuming a node whose plan can\'t be rebuilt: its sent job is cancelled before it fails; the hold is released', async () => {
+    const root = await rootWith({ 'clip.mp4': await mp4(3, 1280, 720, 24) })
+    const fal = createFakeFal()
+    const ledger = createFakeLedger(5000)
+    const state = { crashed: false }
+    const k1 = makeKit({
+      hosted: true, fal, ledger, root, deps: {
+        families: () => ON,
+        sleep: () => (state.crashed ? new Promise<void>(() => {}) : new Promise<void>(r => setTimeout(r, 1))),
+      },
+    })
+    fal.holdNext(1)
+    const { runId } = await run(k1, { 1: enhance(), 2: videoCard() })
+    await until(() => (fal.submitted()[0]?.polls ?? 0) >= 2)
+    state.crashed = true
+    await new Promise(r => setTimeout(r, 20))
+    const saved = (await k1.store.get(runId))!
+    delete saved.takes[0]!.measured
+    await k1.store.save(saved)
+    const k2 = makeKit({ hosted: true, dir: k1.dir, root, fal, ledger, deps: { families: () => ON } })
+    expect(await k2.engine.reattach()).toBe(1)
+    await k2.engine.settled(runId)
+    expect(ofType(k2.seen, 'execution_error')).toHaveLength(1)
+    expect(fal.submitted()).toHaveLength(1)
+    expect(fal.submitted()[0]!.cancelled).toBe(true)
+    expect([...ledger.holds.values()].map(h => h.state)).toEqual(['released'])
+  })
+
   it('the switch turned off after Run: the node is refused before anything is read at its turn or sent; the hold is released', async () => {
     const root = await rootWith({ 'clip.mp4': await mp4(3, 1280, 720, 24) })
     const store = createEngineResultStore({ dirForType: t => join(root, t), hosted: () => true })
@@ -801,9 +833,12 @@ describe('fix round 1: the engine', () => {
     expect(k.fal.reqs.size).toBe(0)
     expect(k.upload.mock.calls.length).toBe(0)
     expect([...k.ledger.holds.values()].map(h => [h.credits, h.state])).toEqual([[13, 'released']])
-    expect(mediaNodeSwitchedOff(enhance(), ON)).toBeNull()
-    expect(mediaNodeSwitchedOff(enhance(), NO_FAMILIES)).toBe(TOPAZ_VIDEO_SWITCHED_OFF)
-    expect(mediaNodeSwitchedOff({ class_type: 'LipSyncNode', inputs: {} }, NO_FAMILIES)).toBeNull()
+    // The shared check (switches.ts, final fix F2): on at the hold, off now; and a leg written before the families were recorded.
+    expect(switchedSinceHold(enhance(), ON, ON)).toBeNull()
+    expect(switchedSinceHold(enhance(), NO_FAMILIES, ON)).toBe(TOPAZ_VIDEO_SWITCHED_OFF)
+    expect(switchedSinceHold(enhance(), ON)).toBeNull()
+    expect(switchedSinceHold(enhance(), NO_FAMILIES)).toBe(TOPAZ_VIDEO_SWITCHED_OFF)
+    expect(switchedSinceHold({ class_type: 'LipSyncNode', inputs: {} }, NO_FAMILIES)).toBeNull()
   })
 })
 

@@ -37,7 +37,7 @@
  * every setting these requests carry. Not sent: `enable_thinking`,
  * `enable_safety_checker`, `web_url`, `file_url` (the schemas' defaults apply).
  */
-import { arOr, maybeSetSeed, optBool, optEnum, optStr } from './opts'
+import { arOr, firstFrame, maybeSetSeed, optBool, optEnum, optStr } from './opts'
 import type { VideoBuildArgs } from './types'
 import { durOr } from './video'
 import type { ServiceCall } from './twins'
@@ -65,7 +65,7 @@ export const WAN_3_MAX_REFERENCE_PICTURES = 10
 /** `seed` maximum (each schema). */
 const WAN_3_SEED_MAX = 2147483647
 
-export const WAN_3_NEEDS_PROMPT = 'Wan 3.0 needs a prompt.'
+export const WAN_3_NEEDS_PROMPT = 'Wan 3.0 needs a prompt. Describe the clip, or link a picture to start from it.'
 export const WAN_3_TOO_MANY_REFERENCES = `Wan 3.0 takes at most ${WAN_3_MAX_REFERENCE_PICTURES} reference pictures.`
 export const WAN_3_PICTURES_ONLY = 'Wan 3.0 takes reference pictures only for now, not reference videos or sounds.'
 export const WAN_3_PRIME_NEEDS_FIRST_FRAME = 'Wan 3.0 Prime needs a first frame: link a picture.'
@@ -74,11 +74,6 @@ export const FIRST_FRAME_AND_REFERENCES = 'Pick either a first frame or referenc
 
 export type Wan3Id = 'wan-3.0' | 'wan-3.0-prime'
 export type Wan3Mode = 'text' | 'image' | 'reference'
-
-/** The first frame the request carries: the linked picture, else the options' `image_url`. */
-export function wan3FirstFrame(image: string | null, adv: Record<string, unknown>): string {
-  return image || optStr(adv, 'image_url', '')
-}
 
 /** The reference pictures in the options (Shot Director's `image_urls`), or null for none. */
 export function wan3ReferencePictures(adv: Record<string, unknown>): unknown[] | null {
@@ -142,7 +137,7 @@ export function wan30TextToVideo(a: VideoBuildArgs): Record<string, unknown> {
 
 /** image-to-video (standard and Prime share the schema): the first frame, and the last one if set. */
 function imageToVideo(a: VideoBuildArgs, missing: string): Record<string, unknown> {
-  const first = wan3FirstFrame(a.image, a.adv)
+  const first = firstFrame(a.image, a.adv)
   if (!first) throw new Error(missing)
   if (wan3HasAnyReferences(a.adv)) throw new Error(FIRST_FRAME_AND_REFERENCES)
   const inp: Record<string, unknown> = { ...common(a), start_image_url: first }
@@ -181,7 +176,7 @@ export function isWan3Model(id: string): id is Wan3Id {
 
 /** The request for one Wan 3.0 node: its endpoint (by mode) and payload. fal only; no backup. */
 export function wan3Call(id: Wan3Id, a: VideoBuildArgs): ServiceCall {
-  const mode = wan3Mode(id, !!wan3FirstFrame(a.image, a.adv), a.adv)
+  const mode = wan3Mode(id, !!firstFrame(a.image, a.adv), a.adv)
   if (id === 'wan-3.0-prime') return { provider: 'fal', endpoint: WAN_30_PRIME_IMAGE_TO_VIDEO, payload: wan30PrimeImageToVideo(a) }
   if (mode === 'image') return { provider: 'fal', endpoint: WAN_30_IMAGE_TO_VIDEO, payload: wan30ImageToVideo(a) }
   if (mode === 'reference') return { provider: 'fal', endpoint: WAN_30_REFERENCE_TO_VIDEO, payload: wan30ReferenceToVideo(a) }

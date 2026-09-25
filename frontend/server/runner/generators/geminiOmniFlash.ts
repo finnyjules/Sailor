@@ -30,7 +30,7 @@
  * different version. google/gemini-omni-flash on Replicate is a 404.
  */
 import { durOr } from './video'
-import { arOr, optStr } from './opts'
+import { arOr, firstFrame, hasMediaExtras } from './opts'
 import type { VideoBuildArgs, VideoModelDesc } from './types'
 
 export const GEMINI_OMNI_FLASH_ID = 'gemini-omni-flash'
@@ -51,27 +51,16 @@ const ASPECT_RATIOS = new Set(['16:9', '9:16'])
 export const GEMINI_OMNI_FLASH_ONE_PICTURE
   = 'Gemini Omni Flash starts from one picture at most. Remove the last frame and any reference pictures, videos or sounds, or pick another model.'
 
-/** The first frame: the linked picture, else `image_url` in the options, else ''. */
-export function geminiOmniFlashFirstFrame(image: string | null, adv: Record<string, unknown>): string {
-  return image || optStr(adv, 'image_url', '')
-}
-
-/** True when the options carry something the endpoints can't take: a last frame, or reference pictures, videos or sounds. */
-export function geminiOmniFlashHasExtras(adv: Record<string, unknown>): boolean {
-  if (optStr(adv, 'end_image_url', '')) return true
-  return ['image_urls', 'video_urls', 'audio_urls'].some(k => Array.isArray(adv[k]) && (adv[k] as unknown[]).length > 0)
-}
-
 /** The request for either endpoint; `image_url` (a first frame) sends it to image-to-video. */
 export function geminiOmniFlash(a: VideoBuildArgs): Record<string, unknown> {
   const { prompt, aspectRatio, duration, image, adv } = a
-  if (geminiOmniFlashHasExtras(adv)) throw new Error(GEMINI_OMNI_FLASH_ONE_PICTURE)
+  if (hasMediaExtras(adv, { lastFrame: true })) throw new Error(GEMINI_OMNI_FLASH_ONE_PICTURE)
   const inp: Record<string, unknown> = {
     prompt,
     aspect_ratio: arOr(ASPECT_RATIOS, aspectRatio, '16:9'),
     duration: durOr(GEMINI_OMNI_FLASH_SECONDS, duration, GEMINI_OMNI_FLASH_DEFAULT_SECONDS),
   }
-  const first = geminiOmniFlashFirstFrame(image, adv)
+  const first = firstFrame(image, adv)
   if (first) inp.image_url = first
   return inp
 }

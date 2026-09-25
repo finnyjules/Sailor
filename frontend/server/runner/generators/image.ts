@@ -15,7 +15,7 @@
  */
 import { RUNNER_IMAGE_MODEL_IDS, RUNNER_REPLICATE_IMAGE_MODEL_IDS } from '#shared/runner/eligibility'
 import { FLUX_2_RESOLUTIONS, FLUX_KLEIN_MEGAPIXELS, flux2DevSize } from '#shared/pricing/imageSettings'
-import { arOr, maybeSetSeed, optBool, optEnum, optFloat, optFloatIn, optInt, optIntIn, optStr, outputFormatIn } from './opts'
+import { arOr, asText, maybeSetSeed, optBool, optEnum, optFloat, optFloatIn, optInt, optIntIn, optStr, outputFormatIn } from './opts'
 import type { ImageBuildArgs, ImageModelDesc, ReplicateImageModelDesc } from './types'
 
 const NANO_BANANA_AR = new Set(['1:1', '1:4', '1:8', '2:3', '3:2', '3:4', '4:1', '4:3', '4:5', '5:4', '8:1', '9:16', '16:9', '21:9'])
@@ -566,4 +566,21 @@ export function composeImagePrompt(i: { prompt: string, promptIn?: string, style
   if (styleIn) prompt = `${styleIn} ${prompt}`.trim()
   if (i.hasRefs) prompt = `${prompt} ${STYLE_REFS_INSTRUCTION}`.trim()
   return prompt
+}
+
+/**
+ * A Generate-an-image node's prompt as sent, from its own inputs (its
+ * prompt, Idea wire, style block and typed-in taste, composeImagePrompt's
+ * order): the one copy the runner's builders (executors.ts) and the request
+ * checks (requestRules.ts) both read (final fix F5). `hasRefs`: moodboard
+ * pictures ride along.
+ */
+export function nodeImagePrompt(inputs: Record<string, unknown>, hasRefs = false): string {
+  return composeImagePrompt({
+    prompt: asText(inputs.prompt),
+    promptIn: asText(inputs.prompt_in),
+    styleBlock: asText(inputs.style_block),
+    styleIn: asText(inputs.style_in),
+    hasRefs,
+  })
 }

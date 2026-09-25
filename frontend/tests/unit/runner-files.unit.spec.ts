@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { createEngineResultStore, nextCounter, extFor, userSubfolder } from '~~/server/runner/results'
-import { createHandoff, sha256Hex, mimeFor } from '~~/server/runner/handoff'
+import { HANDOFF_MAX_REMEMBERED, HANDOFF_TTL_MS, createHandoff, sha256Hex, mimeFor } from '~~/server/runner/handoff'
 import {
   parseStyleRefs, moodboardFiles, parseInputFileRef, collectInputFiles, assertFilesOwned,
 } from '~~/server/runner/inputs'
@@ -54,14 +54,16 @@ describe('result doorway', () => {
 describe('handoff', () => {
   it('uploads a file once and remembers what it contained', async () => {
     const upload = vi.fn(async () => 'https://fal.media/abc.png')
-    const h = createHandoff({ read: async () => new Uint8Array([9, 9]), upload })
+    const h = createHandoff({ upload })
     const f = { filename: 'a.png', subfolder: '', type: 'output' as const }
-    expect(await h.toUrl(f)).toBe('https://fal.media/abc.png')
-    expect(await h.toUrl(f)).toBe('https://fal.media/abc.png')
+    expect(await h.toUrlBytes(f, new Uint8Array([9, 9]))).toBe('https://fal.media/abc.png')
+    expect(await h.toUrlBytes(f, new Uint8Array([9, 9]))).toBe('https://fal.media/abc.png')
     expect(upload).toHaveBeenCalledTimes(1)
     expect(upload).toHaveBeenCalledWith(new Uint8Array([9, 9]), 'a.png', 'image/png')
     expect(h.hashOf('https://fal.media/abc.png')).toBe(sha256Hex(new Uint8Array([9, 9])))
     expect(h.hashOf('https://elsewhere')).toBeUndefined()
+    // Only a hand-off of bytes the caller already read (final fix F6): none reads a file itself, so what is sent is what was measured.
+    expect(Object.keys(h).sort()).toEqual(['hashOf', 'toUrlBytes'])
     expect(mimeFor('clip.MP4')).toBe('video/mp4')
     expect(mimeFor('x.jpeg')).toBe('image/jpeg')
   })
@@ -69,15 +71,50 @@ describe('handoff', () => {
     let clock = 1_000_000
     let n = 0
     const upload = vi.fn(async () => `https://fal.media/up${++n}.png`)
-    const h = createHandoff({ read: async () => new Uint8Array([9]), upload, now: () => clock })
+    const h = createHandoff({ upload, now: () => clock })
     const f = { filename: 'a.png', subfolder: '', type: 'output' as const }
-    expect(await h.toUrl(f)).toBe('https://fal.media/up1.png')
+    const bytes = new Uint8Array([9])
+    expect(await h.toUrlBytes(f, bytes)).toBe('https://fal.media/up1.png')
     clock += 24 * 60 * 60 * 1000 - 1
-    expect(await h.toUrl(f)).toBe('https://fal.media/up1.png')
+    expect(await h.toUrlBytes(f, bytes)).toBe('https://fal.media/up1.png')
     clock += 2
-    expect(await h.toUrl(f)).toBe('https://fal.media/up2.png')
+    expect(await h.toUrlBytes(f, bytes)).toBe('https://fal.media/up2.png')
     expect(upload).toHaveBeenCalledTimes(2)
     expect(h.hashOf('https://fal.media/up2.png')).toBe(sha256Hex(new Uint8Array([9])))
+    // The day-old link is forgotten with what it contained.
+    expect(h.hashOf('https://fal.media/up1.png')).toBeUndefined()
+  })
+
+  // Final review finding 10 (final fix F10): what the hand-off remembers is bounded.
+  it('forgets expired links when it uploads something new, with what they contained', async () => {
+    let clock = 1_000_000
+    let n = 0
+    const upload = vi.fn(async () => `https://fal.media/up${++n}.png`)
+    const h = createHandoff({ upload, now: () => clock })
+    const f = { filename: 'a.png', subfolder: '', type: 'output' as const }
+    await h.toUrlBytes(f, new Uint8Array([1]))
+    await h.toUrlBytes(f, new Uint8Array([2]))
+    clock += HANDOFF_TTL_MS
+    await h.toUrlBytes(f, new Uint8Array([3]))
+    expect(h.hashOf('https://fal.media/up1.png')).toBeUndefined()
+    expect(h.hashOf('https://fal.media/up2.png')).toBeUndefined()
+    expect(h.hashOf('https://fal.media/up3.png')).toBe(sha256Hex(new Uint8Array([3])))
+  })
+
+  it('remembers at most HANDOFF_MAX_REMEMBERED uploads, forgetting the oldest first', async () => {
+    let n = 0
+    const upload = vi.fn(async () => `https://fal.media/up${++n}.png`)
+    const h = createHandoff({ upload })
+    const f = { filename: 'a.png', subfolder: '', type: 'output' as const }
+    const bytesOf = (i: number) => new Uint8Array([i & 0xFF, (i >> 8) & 0xFF, 7])
+    for (let i = 1; i <= HANDOFF_MAX_REMEMBERED + 1; i++) await h.toUrlBytes(f, bytesOf(i))
+    expect(upload).toHaveBeenCalledTimes(HANDOFF_MAX_REMEMBERED + 1)
+    // The first upload was forgotten to make room: its link has no contents any more, and its bytes upload again.
+    expect(h.hashOf('https://fal.media/up1.png')).toBeUndefined()
+    expect(h.hashOf('https://fal.media/up2.png')).toBe(sha256Hex(bytesOf(2)))
+    expect(await h.toUrlBytes(f, bytesOf(1))).toBe(`https://fal.media/up${HANDOFF_MAX_REMEMBERED + 2}.png`)
+    // The latest is still remembered: no new upload.
+    expect(await h.toUrlBytes(f, bytesOf(HANDOFF_MAX_REMEMBERED + 1))).toBe(`https://fal.media/up${HANDOFF_MAX_REMEMBERED + 1}.png`)
   })
 })
 

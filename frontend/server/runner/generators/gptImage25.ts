@@ -87,7 +87,7 @@ export const GPT_IMAGE_25_FAL_ENDPOINTS = [
 ] as const
 export const GPT_IMAGE_25_REPLICATE_SLUGS = [gptImage25ReplicateSlug('flare'), gptImage25ReplicateSlug('sunburst')] as const
 
-export const GPT_IMAGE_25_NEEDS_PROMPT = 'GPT Image 2.5 needs a prompt.'
+export const GPT_IMAGE_25_NEEDS_PROMPT = 'GPT Image 2.5 needs a prompt. Describe the picture you want, or the change to make.'
 export const GPT_IMAGE_25_TRANSPARENT_JPEG = 'GPT Image 2.5 can’t make a transparent JPEG. Pick PNG or WebP, or another background.'
 
 export function isGptImage25Model(model: unknown): boolean {

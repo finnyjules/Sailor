@@ -56,7 +56,7 @@ import {
 } from '~~/server/runner/generators/happyHorse11'
 import {
   PROMPT_MAX_LENGTH, PROMPT_MAX_LENGTH_RULINGS, PROMPT_MIN_LENGTH, PROMPT_MIN_LENGTH_RULINGS, backupInputProblem, checkedInputFile, inputFileProblem,
-  linkedFileCheck, linkedFileProblem, requestProblem, requestProblems,
+  linkedFileCheck, requestProblem, requestProblems,
 } from '~~/server/runner/requestRules'
 import { DEFAULT_BACKUP_STALL_MS } from '~~/server/runner/config'
 import { FalError } from '~~/server/runner/falQueue'
@@ -455,7 +455,7 @@ describe('the linked picture is measured before the hand-off (fix round 1)', () 
     const files = () => [{ filename: 'first.png' }]
     expect(await linkedFileCheck(node(), files, read(MB10 + 1), ON)).toEqual({ problem: null, bytes: MB10 + 1 })
     expect(await linkedFileCheck(node(), files, read(MB20 + 1), ON)).toEqual({ problem: HAPPYHORSE_11_PICTURE_TOO_LARGE, bytes: MB20 + 1 })
-    expect(await linkedFileProblem(node(), files, read(MB20 + 1), ON)).toBe(HAPPYHORSE_11_PICTURE_TOO_LARGE)
+    expect((await linkedFileCheck(node(), files, read(MB20 + 1), ON)).problem).toBe(HAPPYHORSE_11_PICTURE_TOO_LARGE)
     expect(reads).toEqual(['first.png', 'first.png', 'first.png'])
     reads.length = 0
     expect(await linkedFileCheck(vid(), files, read(MB20 + 1), ON)).toEqual({ problem: null })
@@ -464,6 +464,12 @@ describe('the linked picture is measured before the hand-off (fix round 1)', () 
     expect(reads).toEqual([])
     // A file that can't be read is left to the hand-off, which reads it too.
     expect(await linkedFileCheck(node(), files, async () => { throw new Error('gone') }, ON)).toEqual({ problem: null })
+    // Final fix F9: over 20 MB by its size on disk, refused before it is read.
+    reads.length = 0
+    expect(await linkedFileCheck(node(), files, read(MB20 + 1), ON, async () => MB20 + 1)).toEqual({ problem: HAPPYHORSE_11_PICTURE_TOO_LARGE, bytes: MB20 + 1 })
+    expect(reads).toEqual([])
+    expect(await linkedFileCheck(node(), files, read(MB10 + 1), ON, async () => MB10 + 1)).toEqual({ problem: null, bytes: MB10 + 1 })
+    expect(reads).toEqual(['first.png'])
   })
 
   it('over 10 MB the plan carries no backup (Replicate takes 10 MB); up to 10 MB, or unmeasured, it keeps it', async () => {

@@ -27,7 +27,8 @@ import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
 import { extraPromptText, hasOutputNode, measuredInputPixels, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
 import { ev, type RunEvents, type SwitchReason } from './events'
-import { mediaNodeKind, mediaNodeSwitchedOff, nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles } from './nodeMedia'
+import { mediaNodeKind, nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles } from './nodeMedia'
+import { switchedSinceHold } from './switches'
 import { measuredMediaChanged } from './mediaInputs'
 import type { InputSeconds } from '#shared/pricing/clipSettings'
 import type { Handoff } from './handoff'
@@ -453,6 +454,9 @@ export function createEngine(deps: EngineDeps) {
     const index = run.legs.length
     const legId = `${run.id}.${index}`
     const charges: StageCharge[] = []
+    // The switches this leg's hold is priced with, written down on the leg:
+    // a node whose model depends on one that changes before its turn is refused then (switches.ts).
+    const families = deps.families?.() ?? NO_FAMILIES
     try {
       for (const t of takeIdx) {
         const take = run.takes[t]!
@@ -462,7 +466,7 @@ export function createEngine(deps: EngineDeps) {
         const includesBase = !run.baseCharged && hasOutputNode(take.prompt)
         let estimate: number
         // Media nodes (sync-3, Topaz) hold the price of what the start of the run measured (TakeRecord.measured); none, the ceiling.
-        try { estimate = stageEstimate(take.prompt, nodes, includesBase, deps.families?.() ?? NO_FAMILIES, take.measured) }
+        try { estimate = stageEstimate(take.prompt, nodes, includesBase, families, take.measured) }
         catch (e) {
           if (e instanceof UnpricedGraphError) throw refuse('A model in this workflow has no price yet', 500)
           throw e
@@ -476,7 +480,7 @@ export function createEngine(deps: EngineDeps) {
       for (const c of charges) await deps.metering.finish(run.userId, c, 0).catch(() => {})
       throw e
     }
-    const leg: LegRecord = { index, id: legId, action, gateId, takes: takeIdx, status: 'running', startedAt: deps.now(), endedAt: null }
+    const leg: LegRecord = { index, id: legId, action, gateId, takes: takeIdx, status: 'running', startedAt: deps.now(), endedAt: null, families: [...families] }
     run.legs.push(leg)
     run.charges.push(...charges)
     run.status = 'running'
@@ -656,11 +660,15 @@ export function createEngine(deps: EngineDeps) {
       await persist(run)
       publish(run, ev.executing(stageKey, id))
 
-      // The size of the picture a size-priced node is sent, measured before
-      // anything is handed off: a picture its model must not be sent (Rotate
-      // camera on 2511 above the input cap, requestRules.ts) fails the node
-      // here, before the hand-off or the call; its hold is released.
       const families = deps.families?.() ?? NO_FAMILIES
+      // A node whose model depends on a switch that changed since this leg's
+      // hold (a class moved onto a newer model, a runner-only model) is never
+      // sent: it fails here, before anything is read or handed off, and its
+      // hold is released (switches.ts; F23 fix round 1 for Topaz, final fix F2
+      // for every such node). A resumed node's job is already sent and priced
+      // at submit, so it carries on.
+      const switched = resuming ? null : switchedSinceHold(take.prompt[id], families, leg.families ? new Set(leg.families) : undefined)
+      if (switched) throw new Error(switched)
       // One read of each file for this node's turn (F22 fix round 1): what is
       // measured and priced here is exactly what the hand-off uploads
       // (handoff.ts toUrlBytes, keyed by the bytes' sha256), so a file
@@ -676,27 +684,26 @@ export function createEngine(deps: EngineDeps) {
       // nothing is measured, checked or handed off again, and the credits
       // written down at submit stand. The job is running (and billing) at the
       // service; a file changed since can't refuse it now.
+      // The size of the picture a size-priced node is sent, measured before
+      // anything is handed off: a picture above the input cap (any
+      // size-priced node: FLUX.2 edit, Rotate camera on 2511;
+      // requestRules.ts) fails the node here, before the hand-off or the
+      // call; its hold is released.
       const inputPixels = resuming ? undefined : await measuredInputPixels(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], readOnce, families)
-      const tooLarge = measuredInputProblem(take.prompt[id]!.class_type, inputPixels, families)
+      const tooLarge = measuredInputProblem(take.prompt[id]!.class_type, inputPixels, families, take.prompt[id]!.inputs ?? {})
       if (tooLarge) throw new Error(tooLarge)
       // A file its model refuses (Product shot on Bria: over 12 MB, or not
       // JPEG, PNG or WebP; HappyHorse 1.1: over 20 MB; requestRules.ts),
-      // before the hand-off. Reads nothing for any other node. The size read
+      // before the hand-off; one too large by its size on disk is refused
+      // before it is read. Reads nothing for any other node. The size read
       // goes to planNode, which drops a backup that can't take it.
-      const fileCheck = resuming ? { problem: null } as Awaited<ReturnType<typeof linkedFileCheck>> : await linkedFileCheck(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], readOnce, families)
+      const fileCheck = resuming ? { problem: null } as Awaited<ReturnType<typeof linkedFileCheck>> : await linkedFileCheck(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], readOnce, families, f => deps.results.size?.(f) ?? Promise.resolve(null))
       if (fileCheck.problem) throw new Error(fileCheck.problem)
       // A media node (./nodeMedia.ts: sync-3 lip-sync, F22; Topaz video
       // upscale, F23): its files read and measured again now, before the
       // hand-off. A file that no longer fits fails the node here (its hold is
       // released); what is measured is what it is planned and charged on.
       let inputSeconds: InputSeconds | undefined
-      // A Topaz node whose switch was turned off since Run is never sent (it
-      // would be charged the ComfyUI path's flat price for a fal call): it
-      // fails here, before anything is read or handed off, and its hold is
-      // released (F23 fix round 1). A resumed node's job is already sent and
-      // priced at submit, so it carries on.
-      const switchedOff = resuming ? null : mediaNodeSwitchedOff(take.prompt[id], families)
-      if (switchedOff) throw new Error(switchedOff)
       const media = resuming ? null : await nodeMediaCheck(take.prompt, id, {
         read: readOnce, size: f => deps.results.size?.(f) ?? Promise.resolve(null), strict: deps.hosted(), filesFrom: ([from]) => take.nodes[from]?.outputs ?? [],
       })
@@ -741,7 +748,16 @@ export function createEngine(deps: EngineDeps) {
         try { plan = await planWith(handOff) }
         catch {
           resumedWithoutBackup = true
-          plan = await planWith(async () => '')
+          try { plan = await planWith(async () => '') }
+          catch (e) {
+            // The plan can't be rebuilt at all now (its rules changed since
+            // the request was sent, or what it was planned from is gone): the
+            // job sent before the restart is cancelled before the node fails,
+            // so no provider job is left running and billing (F23 re-review
+            // minor 1; final fix F12). The node's hold is released.
+            if (rec.request) await cancelRequest(rec.request).catch(() => {})
+            throw e
+          }
         }
       }
       // The files' bytes are not kept for the provider wait (up to 30 minutes).

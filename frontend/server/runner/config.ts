@@ -8,7 +8,7 @@
  *   NUXT_PUBLIC_RUNNER_ENABLED=true          browser routing on (runtimeConfig.public)
  *   NUXT_RUNNER_WEBHOOK_BASE_URL=https://…   public origin fal can reach; unset locally
  *   NUXT_RUNNER_FAMILIES=fal-edit,…          families the server takes (the authority)
- *   NUXT_RUNNER_BACKUP=off                   never switch a job to its backup service (live checks)
+ *   NUXT_RUNNER_BACKUP=on                    let a stalled or refused job move to its backup service (off by default)
  *   NUXT_RUNNER_BACKUP_STALL_MS=120000       how long a job may wait to start before it is switched; 0 = never for a slow start
  */
 import { NO_FAMILIES, parseFamilies, type RunnerFamily } from '#shared/runner/families'
@@ -49,12 +49,14 @@ export interface BackupSettings {
 }
 
 /**
- * The backup-service switch. On unless NUXT_RUNNER_BACKUP is off, so a broken
- * first service can't hide behind its backup during a live check.
+ * The backup-service switch. Off unless NUXT_RUNNER_BACKUP is on (1, true,
+ * yes or on): no backup request has had a live check yet, and a backup fal
+ * or Replicate only refuses at the result would turn a slow job into an
+ * error after the stall (final review finding 11; final fix F11). An
+ * explicit value turns it on once a backup's live call has passed.
  */
 export function runnerBackup(): BackupSettings {
-  const flag = process.env.NUXT_RUNNER_BACKUP?.trim().toLowerCase()
-  const enabled = !(flag === 'off' || flag === '0' || flag === 'false' || flag === 'no')
+  const enabled = truthy(process.env.NUXT_RUNNER_BACKUP)
   const raw = process.env.NUXT_RUNNER_BACKUP_STALL_MS?.trim()
   const n = raw ? Number(raw) : Number.NaN
   const stallMs = Number.isFinite(n) && n >= 0 ? Math.floor(n) : DEFAULT_BACKUP_STALL_MS

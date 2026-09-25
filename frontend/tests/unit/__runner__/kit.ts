@@ -181,7 +181,7 @@ export function makeKit(opts: { hosted?: boolean; available?: number; dir?: stri
   const seen: RunnerMessage[] = []
   events.subscribe(userId ?? 'local', m => seen.push(m))
   const upload = vi.fn(async (_b: Uint8Array, name: string) => `https://fal.storage/${name}`)
-  const handoff = createHandoff({ read: f => results.read(f), upload })
+  const handoff = createHandoff({ upload })
   const records = { write: vi.fn(async () => {}) }
   const deps: EngineDeps = {
     store, providers: { fal: fal.client, replicate: replicate.client }, results, handoff, metering, events, records,

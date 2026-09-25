@@ -462,8 +462,20 @@ describe('restart and Stop mid-switch', () => {
   })
 })
 
-describe('the switch can be turned off', () => {
-  it('settings: 120 s by default, NUXT_RUNNER_BACKUP_STALL_MS sets it, NUXT_RUNNER_BACKUP=off turns it off', () => {
+describe('the switch is off unless turned on', () => {
+  // Final fix F11: no backup request has had a live call yet, so switching is
+  // off by default; an explicit NUXT_RUNNER_BACKUP value turns it on.
+  it('settings: off by default, NUXT_RUNNER_BACKUP=on turns it on; 120 s by default, NUXT_RUNNER_BACKUP_STALL_MS sets it', () => {
+    expect(runnerBackup()).toEqual({ enabled: false, stallMs: 120_000 })
+    for (const on of ['on', 'true', '1', 'yes', ' ON ']) {
+      process.env.NUXT_RUNNER_BACKUP = on
+      expect(runnerBackup().enabled).toBe(true)
+    }
+    for (const off of ['off', 'false', '0', 'no', '', 'maybe']) {
+      process.env.NUXT_RUNNER_BACKUP = off
+      expect(runnerBackup().enabled).toBe(false)
+    }
+    process.env.NUXT_RUNNER_BACKUP = 'on'
     expect(runnerBackup()).toEqual({ enabled: true, stallMs: 120_000 })
     process.env.NUXT_RUNNER_BACKUP_STALL_MS = '45000'
     expect(runnerBackup()).toEqual({ enabled: true, stallMs: 45_000 })
@@ -471,8 +483,26 @@ describe('the switch can be turned off', () => {
     expect(runnerBackup().stallMs).toBe(0)
     process.env.NUXT_RUNNER_BACKUP_STALL_MS = 'soon'
     expect(runnerBackup().stallMs).toBe(120_000)
-    process.env.NUXT_RUNNER_BACKUP = 'off'
-    expect(runnerBackup().enabled).toBe(false)
+  })
+
+  it('unset (the default) never switches, for a slow start or a failed send', async () => {
+    const slow = setup({ backup: runnerBackup })
+    slow.repSvc.script.jobs.push({ startsAt: NEVER })
+    const a = await start(slow)
+    await slow.engine.settled(a.runId)
+    expect((await node(slow, a.runId)).status).toBe('error')
+    expect(slow.falSvc.client.submit).not.toHaveBeenCalled()
+    expect(switches(slow)).toEqual([])
+  })
+
+  it('NUXT_RUNNER_BACKUP=on switches a slow start to the backup', async () => {
+    process.env.NUXT_RUNNER_BACKUP = 'on'
+    const k = setup({ backup: runnerBackup })
+    k.repSvc.script.jobs.push({ startsAt: NEVER })
+    const { runId } = await start(k)
+    await k.engine.settled(runId)
+    expect(switches(k)).toHaveLength(1)
+    expect((await node(k, runId)).status).toBe('done')
   })
 
   it('NUXT_RUNNER_BACKUP=off never switches, for a slow start or a failed send', async () => {
@@ -494,6 +524,7 @@ describe('the switch can be turned off', () => {
   })
 
   it('a stall time of 0 never switches a slow start', async () => {
+    process.env.NUXT_RUNNER_BACKUP = 'on'
     process.env.NUXT_RUNNER_BACKUP_STALL_MS = '0'
     const k = setup({ backup: runnerBackup })
     k.repSvc.script.jobs.push({ startsAt: NEVER })

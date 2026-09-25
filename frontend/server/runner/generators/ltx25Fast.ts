@@ -40,7 +40,7 @@
  * (eligibility.ts).
  */
 import { durOr } from './video'
-import { optBool, optStr } from './opts'
+import { firstFrame, hasMediaExtras, optBool, optStr } from './opts'
 import type { VideoBuildArgs } from './types'
 
 export const LTX_25_FAST_ID = 'ltx-2.5-fast'
@@ -65,16 +65,6 @@ export const LTX_25_FAST_LAST_NEEDS_FIRST = 'LTX-2.5 Fast needs a first picture 
 export const LTX_25_FAST_TOO_LONG_AT_4K = 'LTX-2.5 Fast makes clips over 10 seconds only at 720p or 1080p. Pick a shorter clip or a lower resolution.'
 export const LTX_25_FAST_NEEDS_PROMPT = 'LTX-2.5 Fast needs a prompt. Describe the clip, or how the picture should move.'
 
-/** The first frame: the linked picture, else `image_url` in the options, else ''. */
-export function ltx25FastFirstFrame(image: string | null, adv: Record<string, unknown>): string {
-  return image || optStr(adv, 'image_url', '')
-}
-
-/** True when the options carry what the model doesn't take: reference pictures, videos or sounds. */
-export function ltx25FastHasExtras(adv: Record<string, unknown>): boolean {
-  return ['image_urls', 'video_urls', 'audio_urls'].some(k => Array.isArray(adv[k]) && (adv[k] as unknown[]).length > 0)
-}
-
 /** The clip length sent: the closest of Replicate's lengths to the node's. */
 export function ltx25FastSeconds(duration: number): number {
   return durOr([...LTX_25_FAST_SECONDS], duration, LTX_25_FAST_DEFAULT_SECONDS)
@@ -92,7 +82,7 @@ export function ltx25FastResolution(adv: Record<string, unknown>): string {
  * frame is linked or in the options.
  */
 export function ltx25FastProblem(adv: Record<string, unknown>, duration: number, firstFrame: boolean): string | null {
-  if (ltx25FastHasExtras(adv)) return LTX_25_FAST_EXTRAS
+  if (hasMediaExtras(adv, { lastFrame: false })) return LTX_25_FAST_EXTRAS
   if (optStr(adv, 'end_image_url', '') && !firstFrame) return LTX_25_FAST_LAST_NEEDS_FIRST
   if (ltx25FastSeconds(duration) > LTX_25_FAST_LONG_SECONDS && !LONG_OK.has(ltx25FastResolution(adv))) return LTX_25_FAST_TOO_LONG_AT_4K
   return null
@@ -101,7 +91,7 @@ export function ltx25FastProblem(adv: Record<string, unknown>, duration: number,
 /** The Replicate request. Throws the plain message for settings the model doesn't take. */
 export function ltx25Fast(a: VideoBuildArgs): Record<string, unknown> {
   const { prompt, aspectRatio, duration, image, adv } = a
-  const first = ltx25FastFirstFrame(image, adv)
+  const first = firstFrame(image, adv)
   const problem = ltx25FastProblem(adv, duration, !!first)
   if (problem) throw new Error(problem)
   const inp: Record<string, unknown> = { prompt }

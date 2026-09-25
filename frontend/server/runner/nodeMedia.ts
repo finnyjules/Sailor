@@ -11,9 +11,6 @@
  */
 import type { ApiNode, ApiPrompt } from '#shared/runner/graph'
 import { isSync3LipSync } from '#shared/runner/lipSync'
-import { classUpgradeOn } from '#shared/runner/eligibility'
-import type { RunnerFamily } from '#shared/runner/families'
-import { TOPAZ_VIDEO_SWITCHED_OFF } from '#shared/runner/topazVideo'
 import { SYNC_3_CHANGED, measuredOf, sync3InputFiles, sync3MediaCheck, type Sync3MediaReads } from './sync3Media'
 import { TOPAZ_VIDEO_CHANGED, topazInputFiles, topazMediaCheck } from './topazMedia'
 import type { MeasuredMedia, OutputFile } from './types'
@@ -56,15 +53,4 @@ export function nodeMediaFiles(prompt: ApiPrompt, nodeId: string): OutputFile[] 
 /** The refusal when a media node's files changed after Run was pressed. */
 export function nodeMediaChangedWords(node: ApiNode | undefined): string {
   return mediaNodeKind(node) === 'topaz-video' ? TOPAZ_VIDEO_CHANGED : SYNC_3_CHANGED
-}
-
-/**
- * Why a media node taken at the start of the run must not be sent now: its
- * switch was turned off since (F23 fix round 1). A Topaz node would otherwise
- * be sent to fal while its price (the family off) is the ComfyUI path's flat
- * one. Null when it may go. (sync-3 is left as F22 built it.)
- */
-export function mediaNodeSwitchedOff(node: ApiNode | undefined, families: ReadonlySet<RunnerFamily>): string | null {
-  if (mediaNodeKind(node) === 'topaz-video' && !classUpgradeOn('EnhanceVideoNode', families)) return TOPAZ_VIDEO_SWITCHED_OFF
-  return null
 }

@@ -37,9 +37,9 @@ import { planNode } from '~~/server/runner/executors'
 import { asInt, parseJsonObject } from '~~/server/runner/generators/opts'
 import { RUNNER_VIDEO_MODELS, falVideoFn } from '~~/server/runner/generators/video'
 import {
-  H3_MAX_TURBO, H3_MAX_TURBO_ENDPOINTS, H3_MAX_TURBO_IMAGE_TO_VIDEO, H3_MAX_TURBO_TEXT_TO_VIDEO, RUNNER_ONLY_FAL_VIDEO_MODELS,
+  H3_MAX_TURBO, H3_MAX_TURBO_ENDPOINTS, H3_MAX_TURBO_IMAGE_TO_VIDEO, H3_MAX_TURBO_NEEDS_PROMPT, H3_MAX_TURBO_TEXT_TO_VIDEO, RUNNER_ONLY_FAL_VIDEO_MODELS,
 } from '~~/server/runner/generators/h3MaxTurbo'
-import { H3_SHORT_PROMPT, PROMPT_MIN_LENGTH, requestProblems } from '~~/server/runner/requestRules'
+import { PROMPT_MIN_LENGTH, requestProblems } from '~~/server/runner/requestRules'
 import { priceGraph } from '~~/server/utils/priceBook'
 import type { OutputFile } from '~~/server/runner/types'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
@@ -123,7 +123,7 @@ describe('the saved schemas', () => {
   it('an empty prompt is refused on both endpoints, as the schema\'s minLength says', () => {
     for (const e of H3_MAX_TURBO_ENDPOINTS) {
       expect(inputOf(e).properties.prompt.minLength, e).toBe(1)
-      expect(PROMPT_MIN_LENGTH[`fal ${e}`], e).toEqual({ min: 1, message: H3_SHORT_PROMPT })
+      expect(PROMPT_MIN_LENGTH[`fal ${e}`], e).toEqual({ min: 1, message: H3_MAX_TURBO_NEEDS_PROMPT })
     }
   })
 })
@@ -215,8 +215,8 @@ describe('expected payloads', () => {
 describe('an empty prompt is refused in plain words, before and at planning', () => {
   for (const [name, node] of [['text', vid({ prompt: '' })], ['a picture linked', vid({ prompt: '', image: true })]] as const) {
     it(name, async () => {
-      expect(requestProblems({ n: node })).toEqual([{ nodeId: 'n', classType: 'GenerateVideoNode', input: 'prompt', message: H3_SHORT_PROMPT }])
-      await expect(plan(node)).rejects.toThrow(H3_SHORT_PROMPT)
+      expect(requestProblems({ n: node })).toEqual([{ nodeId: 'n', classType: 'GenerateVideoNode', input: 'prompt', message: H3_MAX_TURBO_NEEDS_PROMPT }])
+      await expect(plan(node)).rejects.toThrow(H3_MAX_TURBO_NEEDS_PROMPT)
     })
   }
 })

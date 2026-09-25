@@ -37,7 +37,7 @@ import {
 } from '#shared/runner/lipSync'
 import { runnerTakesWorkflow } from '#shared/runner/validate'
 import { CLIP_RATES, clipRate } from '#shared/pricing/clipRates'
-import { LIPSYNC_MAX_SECONDS, SYNC_3_ENDPOINT, VIEW_REF_REFUSED, remoteVideoCalls } from '#shared/pricing/clipSettings'
+import { LIPSYNC_MAX_SECONDS, SYNC_3_ENDPOINT, VIEW_REF_REFUSED, remoteVideoCalls, sync3PriceHint } from '#shared/pricing/clipSettings'
 import { creditsForUsd } from '#shared/pricing/markup'
 import { priceNode } from '#shared/pricing/nodePrice'
 import { nodeCreditEstimate } from '~/lib/nodeCreditEstimate'
@@ -381,14 +381,23 @@ describe('the menus hide sync-3 while its switch is off', () => {
 describe('the price', () => {
   const at = (inputs: Record<string, unknown>, measured: { audio?: number, video?: number } = {}) => priceNode('LipSyncNode', inputs, { inputSeconds: measured })
 
-  it('the card: $8 a minute of video made on fal, verified, non-zero; the book carries it (lineup-f22, now lineup-f23)', () => {
+  it('the card: $8 a minute of video made on fal, verified, non-zero; the book carries it (lineup-f22, now lineup-final)', () => {
     const rate = clipRate(SYNC_3_ENDPOINT)!
     expect(rate).toEqual({
       unit: 'per_second', service: 'fal', source: 'https://fal.ai/models/fal-ai/sync-lipsync/v3/llms.txt', read: '2026-09-25', confidence: 'verified',
       byResolution: { '*': 8 / 60 },
     })
     expect(CLIP_RATES[SYNC_3_ENDPOINT]).toBe(rate)
-    expect(PRICE_BOOK_VERSION).toBe('lineup-f23')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-final')
+  })
+
+  // Final fix F8: the Lip-Sync Studio's hint reads the card, in credits in hosted mode (what 30 s is charged).
+  it('the studio\'s price hint: from the card, dollars locally, the charge in credits in hosted mode', () => {
+    expect(sync3PriceHint()).toEqual({ text: '~$4 / 30s', title: 'sync-3 bills $8 per minute of video it makes' })
+    const per30 = (at(lip({ mode: 'loop' }).inputs, { audio: 30, video: 30 }) as { credits: number }).credits
+    const per60 = (at(lip({ mode: 'loop' }).inputs, { audio: 60, video: 60 }) as { credits: number }).credits
+    expect(sync3PriceHint({ hosted: true })).toEqual({ text: `~${per30} credits / 30s`, title: `sync-3 costs ${per60} credits per minute of video it makes` })
+    expect(per30).toBeGreaterThan(0)
   })
 
   it('the clip it makes, whole seconds rounded up: the sound (loop, bounce, remap), the shorter (cut off)', () => {
@@ -733,7 +742,7 @@ describe('fix round 1: what is measured is what is sent and charged', () => {
     }
     // The hand-off reads through the same store, so a read it makes itself is counted (and sees `later`).
     const upload = vi.fn(async (_b: Uint8Array, name: string) => `https://fal.storage/${name}`)
-    const handoff = createHandoff({ read: f => results.read(f), upload })
+    const handoff = createHandoff({ upload })
     return { k: makeKit({ hosted: true, available: 5000, root, deps: { families: () => o.families ?? ON, results, handoff } }), reads, root, upload }
   }
   /** The same length, other bytes. */
@@ -743,12 +752,12 @@ describe('fix round 1: what is measured is what is sent and charged', () => {
     let disk = new Uint8Array([1, 1])
     let n = 0
     const upload = vi.fn(async () => `https://fal.media/up${++n}`)
-    const h = createHandoff({ read: async () => disk, upload })
+    const h = createHandoff({ upload })
     const f: OutputFile = { filename: 'voice.wav', subfolder: '', type: 'input' }
-    expect(await h.toUrl(f)).toBe('https://fal.media/up1')
-    expect(await h.toUrl(f)).toBe('https://fal.media/up1')
+    expect(await h.toUrlBytes(f, disk)).toBe('https://fal.media/up1')
+    expect(await h.toUrlBytes(f, disk)).toBe('https://fal.media/up1')
     disk = new Uint8Array([2, 2, 2])
-    expect(await h.toUrl(f)).toBe('https://fal.media/up2')
+    expect(await h.toUrlBytes(f, disk)).toBe('https://fal.media/up2')
     expect(h.hashOf('https://fal.media/up2')).toBe(sha256Hex(new Uint8Array([2, 2, 2])))
     // Bytes the caller already read: those, whatever the file now holds.
     expect(await h.toUrlBytes(f, new Uint8Array([7]))).toBe('https://fal.media/up3')

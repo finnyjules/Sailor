@@ -82,18 +82,22 @@
  *    minor M5): Film a shot runs only on the ComfyUI path, whose Python
  *    builder would send the first frame and drop the references, so the
  *    /prompt gate refuses it with the same words as Generate a video;
- *  - Rotate camera on Qwen Image Edit 2511 (F10 fix round 1, controller
- *    ruling) with a picture above the input cap (LARGEST_INPUT_PIXELS, about
- *    19 MP): fal makes the picture at the input's size with no stated limit,
+ *  - Any size-priced node (Upscale, Enhance detail, FLUX.2 edit in Edit an
+ *    image and Blend scene, Rotate camera on Qwen Image Edit 2511; F10 fix
+ *    round 1 for Rotate camera, the final review's finding 1 for the rest)
+ *    with a picture above the input cap (LARGEST_INPUT_PIXELS, about 19 MP):
+ *    each is billed by the size of the picture sent, with no stated limit,
  *    and the price stops at the cap, so a larger one could cost more than it
- *    is charged. The size is only known once the runner has the file, so the
- *    engine checks it (`measuredInputProblem`) after measuring and before
- *    sending; the node fails and its hold is released. An input it can't
- *    measure is charged at the cap, as before.
+ *    is charged. The size is only known once the file is read, so the runner
+ *    checks it (`measuredInputProblem`) after measuring and before sending
+ *    (the node fails and its hold is released), and the hosted /prompt gate
+ *    before the hold (`measuredInputProblems`). An input that can't be
+ *    measured is charged at the cap, as before.
  *  - Product shot on Bria Product Shot (F12 fix round 1, controller ruling)
  *    with a picture over 12 MB, or not JPEG, PNG or WebP (read from its first
- *    bytes): the engine reads that one file (`linkedFileProblem`) before the
- *    hand-off; the node fails and its hold is released. HappyHorse 1.1's
+ *    bytes): the engine checks that one file (`linkedFileCheck`) before the
+ *    hand-off, its size from the disk before it is read (final fix F9); the
+ *    node fails and its hold is released. HappyHorse 1.1's
  *    linked first frame too, while its switch is on (F18 fix round 1): over
  *    fal's 20 MB the node fails the same way; over Replicate's 10 MB it runs
  *    on fal with no backup (`backupInputProblem`, read by planNode). No other
@@ -112,36 +116,35 @@
  */
 import { isLink, type ApiNode, type ApiPrompt } from '#shared/runner/graph'
 import { classUpgradeOn, resolveVideoModelId } from '#shared/runner/eligibility'
-import type { RunnerFamily } from '#shared/runner/families'
-import { LARGEST_INPUT_PIXELS } from '#shared/pricing/editSettings'
-import { composeImagePrompt } from './generators/image'
+import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
+import { LARGEST_INPUT_PIXELS, sizePricedInput } from '#shared/pricing/editSettings'
+import { nodeImagePrompt } from './generators/image'
 import { RUNNER_VIDEO_MODELS, VEO_31_ONE_PICTURE, veo31HasExtras } from './generators/video'
-import { H3_MAX_TURBO_APP, H3_MAX_TURBO_ENDPOINTS, H3_MAX_TURBO_ID } from './generators/h3MaxTurbo'
+import { H3_MAX_TURBO_APP, H3_MAX_TURBO_ENDPOINTS, H3_MAX_TURBO_ID, H3_MAX_TURBO_NEEDS_PROMPT } from './generators/h3MaxTurbo'
 import {
-  GEMINI_OMNI_FLASH_ID, GEMINI_OMNI_FLASH_ONE_PICTURE, GEMINI_OMNI_FLASH_TEXT_TO_VIDEO, geminiOmniFlashFirstFrame, geminiOmniFlashHasExtras,
+  GEMINI_OMNI_FLASH_ID, GEMINI_OMNI_FLASH_ONE_PICTURE, GEMINI_OMNI_FLASH_TEXT_TO_VIDEO,
 } from './generators/geminiOmniFlash'
 import {
   HAPPYHORSE_11_BACKUP_MAX_PICTURE_BYTES, HAPPYHORSE_11_ENDPOINTS, HAPPYHORSE_11_ID, HAPPYHORSE_11_IMAGE_TO_VIDEO, HAPPYHORSE_11_LONG_PROMPT,
   HAPPYHORSE_11_MAX_PICTURE_BYTES, HAPPYHORSE_11_NEEDS_PROMPT, HAPPYHORSE_11_ONE_PICTURE, HAPPYHORSE_11_PICTURE_TOO_LARGE, HAPPYHORSE_11_PROMPT_MAX,
-  HAPPYHORSE_11_REPLICATE_SLUG, HAPPYHORSE_11_TEXT_TO_VIDEO, happyHorse11FirstFrame, happyHorse11HasExtras,
+  HAPPYHORSE_11_REPLICATE_SLUG, HAPPYHORSE_11_TEXT_TO_VIDEO,
 } from './generators/happyHorse11'
 import {
   GROK_IMAGINE_VIDEO_15_ENDPOINTS, GROK_IMAGINE_VIDEO_15_ID, GROK_IMAGINE_VIDEO_15_IMAGE_TO_VIDEO, GROK_IMAGINE_VIDEO_15_LONG_PROMPT,
   GROK_IMAGINE_VIDEO_15_NEEDS_PROMPT, GROK_IMAGINE_VIDEO_15_ONE_PICTURE, GROK_IMAGINE_VIDEO_15_PROMPT_MAX, GROK_IMAGINE_VIDEO_15_TEXT_TO_VIDEO,
-  grokImagineVideo15FirstFrame, grokImagineVideo15HasExtras,
 } from './generators/grokImagineVideo15'
 import {
-  LTX_25_FAST_DEFAULT_SECONDS, LTX_25_FAST_ID, LTX_25_FAST_NEEDS_PROMPT, LTX_25_FAST_REPLICATE_SLUG, LTX_25_FAST_TOO_LONG_AT_4K, ltx25FastFirstFrame, ltx25FastProblem,
+  LTX_25_FAST_DEFAULT_SECONDS, LTX_25_FAST_ID, LTX_25_FAST_NEEDS_PROMPT, LTX_25_FAST_REPLICATE_SLUG, LTX_25_FAST_TOO_LONG_AT_4K, ltx25FastProblem,
 } from './generators/ltx25Fast'
 import {
   LUMA_RAY_32_DEFAULT_SECONDS, LUMA_RAY_32_FAL_IMAGE_TO_VIDEO, LUMA_RAY_32_FAL_PROMPT_MAX, LUMA_RAY_32_ID, LUMA_RAY_32_LONG_FROM_PICTURE,
-  LUMA_RAY_32_LONG_PROMPT, LUMA_RAY_32_LOOP_TOO_LONG, LUMA_RAY_32_NEEDS_PROMPT, LUMA_RAY_32_REPLICATE_SLUG, lumaRay32FirstFrame, lumaRay32Problem,
+  LUMA_RAY_32_LONG_PROMPT, LUMA_RAY_32_LOOP_TOO_LONG, LUMA_RAY_32_NEEDS_PROMPT, LUMA_RAY_32_REPLICATE_SLUG, lumaRay32Problem,
 } from './generators/lumaRay32'
-import { asInt, asText, parseJsonObject } from './generators/opts'
+import { asInt, asText, firstFrame, hasMediaExtras, parseJsonObject } from './generators/opts'
 import { moodboardFiles } from './inputs'
 import {
   WAN_30_REFERENCE_TO_VIDEO, WAN_30_TEXT_TO_VIDEO, WAN_3_MAX_REFERENCE_PICTURES, WAN_3_NEEDS_PROMPT, WAN_3_PICTURES_ONLY,
-  WAN_3_TOO_MANY_REFERENCES, FIRST_FRAME_AND_REFERENCES, isWan3Model, wan3FirstFrame, wan3HasAnyReferences, wan3HasMediaReferences,
+  WAN_3_TOO_MANY_REFERENCES, FIRST_FRAME_AND_REFERENCES, isWan3Model, wan3HasAnyReferences, wan3HasMediaReferences,
   wan3Mode, wan3ReferencePictures, type Wan3Id,
 } from './generators/wan3'
 import {
@@ -187,7 +190,7 @@ export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: 
   'fal minimax/h3-max/text-to-video': { min: 1, message: H3_SHORT_PROMPT },
   'fal minimax/h3-max/image-to-video': { min: 1, message: H3_SHORT_PROMPT },
   // Hailuo H3 Max Turbo (h3MaxTurbo.ts): H3 Max's schema, so the same rule.
-  ...Object.fromEntries(H3_MAX_TURBO_ENDPOINTS.map(e => [`fal ${e}`, { min: 1, message: H3_SHORT_PROMPT }])),
+  ...Object.fromEntries(H3_MAX_TURBO_ENDPOINTS.map(e => [`fal ${e}`, { min: 1, message: H3_MAX_TURBO_NEEDS_PROMPT }])),
   // Wan 3.0: only text-to-video requires a prompt (image- and reference-to-video take none).
   [`fal ${WAN_30_TEXT_TO_VIDEO}`]: { min: 1, message: WAN_3_NEEDS_PROMPT },
   // GPT Image 2.5 (gptImage25.ts): every fal endpoint requires a prompt; Replicate's (the backup) states no minimum.
@@ -357,7 +360,7 @@ export function requestProblem(provider: string, endpoint: string, payload: Reco
 export function wan3RequestProblem(id: Wan3Id, inputs: Record<string, unknown>): { input: string, message: string } | null {
   if (isLink(inputs.model_options)) return null
   const adv = parseJsonObject(inputs.model_options)
-  const first = isLink(inputs.image) || !!wan3FirstFrame(null, adv)
+  const first = isLink(inputs.image) || !!firstFrame(null, adv)
   if (first && wan3HasAnyReferences(adv)) return { input: 'model_options', message: FIRST_FRAME_AND_REFERENCES }
   const mode = wan3Mode(id, first, adv)
   if (mode === 'image') return null
@@ -371,16 +374,60 @@ export function wan3RequestProblem(id: Wan3Id, inputs: Record<string, unknown>):
 }
 
 export const ROTATE_CAMERA_TOO_LARGE = 'Rotate camera takes pictures up to about 19 megapixels. Make this one smaller first.'
+export const FLUX_2_EDIT_TOO_LARGE = 'Flux 2 Pro takes pictures up to about 19 megapixels. Make this one smaller first.'
+export const UPSCALE_TOO_LARGE = 'Upscale an image takes pictures up to about 19 megapixels. Make this one smaller first.'
+export const ENHANCE_DETAIL_TOO_LARGE = 'Enhance detail takes pictures up to about 19 megapixels. Make this one smaller first.'
+
+/** The refusal for a size-priced node's picture above the input cap, in the node's (or its model's) own words. */
+function inputTooLargeWords(classType: string): string {
+  switch (classType) {
+    case 'RotateCameraNode': return ROTATE_CAMERA_TOO_LARGE
+    case 'UpscaleImageNode': return UPSCALE_TOO_LARGE
+    case 'EnhanceDetailNode': return ENHANCE_DETAIL_TOO_LARGE
+    // Edit an image and Blend scene: only FLUX.2 edit is priced by the picture's size.
+    default: return FLUX_2_EDIT_TOO_LARGE
+  }
+}
 
 /**
  * A node's measured input picture that its model must not be sent (the
- * engine asks after measuring, before sending): Rotate camera on Qwen Image
- * Edit 2511, while that switch is on, above the input cap. Null otherwise,
- * and for a picture that couldn't be measured (priced at the cap).
+ * runner asks after measuring, before sending; the hosted /prompt gate
+ * before the hold): any size-priced node (sizePricedInput: Upscale, Enhance
+ * detail, FLUX.2 edit in Edit an image and Blend scene, and Rotate camera
+ * while its 2511 switch is on) whose picture is above the input cap. Each is
+ * billed by the size of the picture it is sent, and the price stops at the
+ * cap, so a larger picture could cost more than it is charged (final review
+ * finding 1). Null otherwise, and for a picture that couldn't be measured
+ * (priced at the cap). `inputs`: the node's own, which say whether an edit
+ * node is on FLUX.2 (a linked or missing model may be).
  */
-export function measuredInputProblem(classType: string, inputPixels: number | undefined, families: ReadonlySet<RunnerFamily>): string | null {
-  if (classType !== 'RotateCameraNode' || !classUpgradeOn(classType, families)) return null
-  return inputPixels !== undefined && inputPixels > LARGEST_INPUT_PIXELS ? ROTATE_CAMERA_TOO_LARGE : null
+export function measuredInputProblem(
+  classType: string,
+  inputPixels: number | undefined,
+  families: ReadonlySet<RunnerFamily>,
+  inputs: Record<string, unknown> = {},
+): string | null {
+  if (!sizePricedInput(classType, inputs, families)) return null
+  return inputPixels !== undefined && inputPixels > LARGEST_INPUT_PIXELS ? inputTooLargeWords(classType) : null
+}
+
+/**
+ * The hosted /prompt gate's copy of measuredInputProblem, over a whole
+ * prompt: every node whose measured picture (`inputPixels`, by node id, as
+ * graphInputPixels reads them) is above the cap. The ComfyUI path runs no
+ * runner family, so Rotate camera is never size-priced there.
+ */
+export function measuredInputProblems(prompt: ApiPrompt, inputPixels: Readonly<Record<string, number>>): RequestProblem[] {
+  const out: RequestProblem[] = []
+  for (const [nodeId, px] of Object.entries(inputPixels)) {
+    const node = prompt[nodeId]
+    if (!node || typeof node.class_type !== 'string') continue
+    const inputs = node.inputs ?? {}
+    const message = measuredInputProblem(node.class_type, px, NO_FAMILIES, inputs)
+    const input = sizePricedInput(node.class_type, inputs)
+    if (message && input) out.push({ nodeId, classType: node.class_type, input, message })
+  }
+  return out
 }
 
 export const PRODUCT_SHOT_MAX_BYTES = 12_000_000
@@ -424,43 +471,51 @@ function isHappyHorse11Picture(classType: string, families: ReadonlySet<RunnerFa
  */
 export function inputFileProblem(classType: string, bytes: Uint8Array, families: ReadonlySet<RunnerFamily>, model?: unknown): string | null {
   if (!checkedInputFile(classType, families, model)) return null
-  // HappyHorse 1.1 (fal image-to-video, "Max 20 MB"; its format is left to fal, which takes BMP too).
-  if (classType === 'GenerateVideoNode') return bytes.byteLength > HAPPYHORSE_11_MAX_PICTURE_BYTES ? HAPPYHORSE_11_PICTURE_TOO_LARGE : null
-  if (bytes.byteLength > PRODUCT_SHOT_MAX_BYTES) return PRODUCT_SHOT_TOO_LARGE
+  const tooLarge = inputFileSizeProblem(classType, bytes.byteLength)
+  if (tooLarge) return tooLarge
+  // HappyHorse 1.1's format is left to fal, which takes BMP too.
+  if (classType === 'GenerateVideoNode') return null
   return pictureFormat(bytes) ? null : PRODUCT_SHOT_WRONG_FORMAT
 }
 
 /**
- * The engine's check, before planning (and so before the hand-off): reads
- * the one file the builder sends (the first on the link) only when
- * checkedInputFile names an input. A file that can't be read is left to the
- * hand-off, which reads it too.
+ * A checked file over its model's limit, from its size alone: HappyHorse 1.1
+ * (fal image-to-video, "Max 20 MB"), else Bria Product Shot's 12 MB. Only
+ * for a class checkedInputFile names.
  */
-export async function linkedFileProblem<F>(
-  node: ApiNode,
-  filesFrom: (link: [string, number]) => F[],
-  read: (f: F) => Promise<Uint8Array>,
-  families: ReadonlySet<RunnerFamily>,
-): Promise<string | null> {
-  return (await linkedFileCheck(node, filesFrom, read, families)).problem
+function inputFileSizeProblem(classType: string, size: number): string | null {
+  if (classType === 'GenerateVideoNode') return size > HAPPYHORSE_11_MAX_PICTURE_BYTES ? HAPPYHORSE_11_PICTURE_TOO_LARGE : null
+  return size > PRODUCT_SHOT_MAX_BYTES ? PRODUCT_SHOT_TOO_LARGE : null
 }
 
 /**
- * linkedFileProblem, and the size of the file it read (undefined when it read
- * none): the engine hands the size to planNode (`inputBytes`), which drops a
- * backup that can't take it (backupInputProblem).
+ * The engine's check, before planning (and so before the hand-off), of the
+ * one file the builder sends (the first on the link), only when
+ * checkedInputFile names an input: what is wrong with it, and the size of the
+ * file it read (undefined when it read none), which the engine hands to
+ * planNode (`inputBytes`) to drop a backup that can't take it
+ * (backupInputProblem). A file over its model's limit by its size on disk
+ * (`size`, when the store can tell) is refused before it is read (final fix
+ * F9: stat before read, as the media checks do). A file that can't be read is
+ * left to the hand-off, which reads it too.
  */
 export async function linkedFileCheck<F>(
   node: ApiNode,
   filesFrom: (link: [string, number]) => F[],
   read: (f: F) => Promise<Uint8Array>,
   families: ReadonlySet<RunnerFamily>,
+  size?: (f: F) => Promise<number | null>,
 ): Promise<{ problem: string | null, bytes?: number }> {
   const name = checkedInputFile(node.class_type, families, node.inputs?.model)
   const link = name ? node.inputs?.[name] : undefined
   if (!isLink(link)) return { problem: null }
   const f = filesFrom(link as [string, number])[0]
   if (f === undefined) return { problem: null }
+  let onDisk: number | null = null
+  try { onDisk = size ? await size(f) : null }
+  catch { onDisk = null }
+  const tooLarge = onDisk !== null ? inputFileSizeProblem(node.class_type, onDisk) : null
+  if (tooLarge) return { problem: tooLarge, bytes: onDisk! }
   let bytes: Uint8Array
   try { bytes = await read(f) }
   catch { return { problem: null } }
@@ -540,13 +595,7 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
     if (nb) {
       if (['prompt', 'prompt_in', 'style_block', 'style_in'].some(k => isLink(inputs[k]))) continue
       const hasRefs = moodboardFiles(inputs.style_refs).length > 0
-      judge(hasRefs ? nb.refs : nb.text, composeImagePrompt({
-        prompt: asText(inputs.prompt),
-        promptIn: asText(inputs.prompt_in),
-        styleBlock: asText(inputs.style_block),
-        styleIn: asText(inputs.style_in),
-        hasRefs,
-      }))
+      judge(hasRefs ? nb.refs : nb.text, nodeImagePrompt(inputs, hasRefs))
     }
     else if (ct === 'EditImageNode' && inputs.model === 'Nano Banana 2') {
       if (!isLink(inputs.prompt)) judge('fal-ai/nano-banana-2/edit', asText(inputs.prompt))
@@ -556,25 +605,13 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
       const adv = isLink(inputs.model_options) ? null : parseJsonObject(inputs.model_options)
       if (adv && gptImage25TransparentJpeg(adv)) out.push({ nodeId, classType: ct, input: 'model_options', message: GPT_IMAGE_25_TRANSPARENT_JPEG })
       if (['prompt', 'prompt_in', 'style_block', 'style_in'].some(k => isLink(inputs[k]))) continue
-      judge(gptImage25FalTextToImage(gptImage25Variant(adv ?? {})), composeImagePrompt({
-        prompt: asText(inputs.prompt),
-        promptIn: asText(inputs.prompt_in),
-        styleBlock: asText(inputs.style_block),
-        styleIn: asText(inputs.style_in),
-        hasRefs: false,
-      }))
+      judge(gptImage25FalTextToImage(gptImage25Variant(adv ?? {})), nodeImagePrompt(inputs))
     }
     // Qwen Image 3, Grok Imagine 2 and Nano Banana 2 Lite (Replicate, text-to-image): the prompt as sent must not be empty.
     else if (ct === 'GenerateImageNode' && (isQwenImage3Model(inputs.model) || isGrokImagine2Model(inputs.model) || isNanoBanana2LiteModel(inputs.model))) {
       if (['prompt', 'prompt_in', 'style_block', 'style_in'].some(k => isLink(inputs[k]))) continue
       const slug = isQwenImage3Model(inputs.model) ? QWEN_IMAGE_3_SLUG : isGrokImagine2Model(inputs.model) ? GROK_IMAGINE_2_SLUG : NANO_BANANA_2_LITE_SLUG
-      judge(slug, composeImagePrompt({
-        prompt: asText(inputs.prompt),
-        promptIn: asText(inputs.prompt_in),
-        styleBlock: asText(inputs.style_block),
-        styleIn: asText(inputs.style_in),
-        hasRefs: false,
-      }), 'replicate')
+      judge(slug, nodeImagePrompt(inputs), 'replicate')
     }
     // Ideogram 4, Muse Image, Reve 2.1 and Recraft V4.1 (fal, text-to-image): the prompt as sent must
     // not be empty (and, for Reve 2.1 and Recraft V4.1, not over its schema's maxLength).
@@ -583,26 +620,14 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
       const app = isIdeogram4Model(inputs.model) ? IDEOGRAM_4_FAL_APP
         : isMuseImageModel(inputs.model) ? MUSE_IMAGE_FAL_APP
           : isReve21Model(inputs.model) ? REVE_21_FAL_APP : RECRAFT_V41_FAL_APP
-      judge(app, composeImagePrompt({
-        prompt: asText(inputs.prompt),
-        promptIn: asText(inputs.prompt_in),
-        styleBlock: asText(inputs.style_block),
-        styleIn: asText(inputs.style_in),
-        hasRefs: false,
-      }))
+      judge(app, nodeImagePrompt(inputs))
     }
     // Krea 2 Large and Medium (fal, text-to-image, F17), on a runner run only: the
     // prompt as sent must not be empty nor over its schema's 5,000 characters.
     else if (ct === 'GenerateImageNode' && isKrea2Model(inputs.model)) {
       if (!opts.runner) continue
       if (['prompt', 'prompt_in', 'style_block', 'style_in'].some(k => isLink(inputs[k]))) continue
-      judge(KREA_2_FAL_APPS[inputs.model], composeImagePrompt({
-        prompt: asText(inputs.prompt),
-        promptIn: asText(inputs.prompt_in),
-        styleBlock: asText(inputs.style_block),
-        styleIn: asText(inputs.style_in),
-        hasRefs: false,
-      }))
+      judge(KREA_2_FAL_APPS[inputs.model], nodeImagePrompt(inputs))
     }
     else if (ct === 'EditImageNode' && inputs.model === GPT_IMAGE_25_EDIT_OPTION) {
       if (!isLink(inputs.prompt)) judge(GPT_IMAGE_25_EDIT_APP, asText(inputs.prompt))
@@ -633,13 +658,13 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
         out.push({ nodeId, classType: ct, input: 'model_options', message: VEO_31_ONE_PICTURE })
       }
       // Gemini Omni Flash: one first frame at most (its builder refuses the same at planning).
-      if (id === GEMINI_OMNI_FLASH_ID && !isLink(inputs.model_options) && geminiOmniFlashHasExtras(parseJsonObject(inputs.model_options))) {
+      if (id === GEMINI_OMNI_FLASH_ID && !isLink(inputs.model_options) && hasMediaExtras(parseJsonObject(inputs.model_options), { lastFrame: true })) {
         out.push({ nodeId, classType: ct, input: 'model_options', message: GEMINI_OMNI_FLASH_ONE_PICTURE })
       }
       // Gemini Omni Flash text-to-video (no linked picture, no `image_url`): an empty prompt is refused.
       // With the options wired in, the first frame can't be read, so the node isn't judged here.
       if (id === GEMINI_OMNI_FLASH_ID && !isLink(inputs.prompt) && !isLink(inputs.image) && !isLink(inputs.model_options)
-        && !geminiOmniFlashFirstFrame(null, parseJsonObject(inputs.model_options))) {
+        && !firstFrame(null, parseJsonObject(inputs.model_options))) {
         judge(GEMINI_OMNI_FLASH_TEXT_TO_VIDEO, asText(inputs.prompt))
       }
       // HappyHorse 1.1: one first frame at most, no sound (its builder refuses the same at planning);
@@ -647,9 +672,9 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
       // 2,500 characters (a ruling). With the options wired the mode can't be read: only the maximum is judged.
       if (id === HAPPYHORSE_11_ID) {
         const adv = isLink(inputs.model_options) ? null : parseJsonObject(inputs.model_options)
-        if (adv && happyHorse11HasExtras(adv)) out.push({ nodeId, classType: ct, input: 'model_options', message: HAPPYHORSE_11_ONE_PICTURE })
+        if (adv && hasMediaExtras(adv, { lastFrame: true })) out.push({ nodeId, classType: ct, input: 'model_options', message: HAPPYHORSE_11_ONE_PICTURE })
         else if (!isLink(inputs.prompt)) {
-          const textToVideo = !!adv && !isLink(inputs.image) && !happyHorse11FirstFrame(null, adv)
+          const textToVideo = !!adv && !isLink(inputs.image) && !firstFrame(null, adv)
           judge(textToVideo ? HAPPYHORSE_11_TEXT_TO_VIDEO : HAPPYHORSE_11_IMAGE_TO_VIDEO, asText(inputs.prompt))
         }
       }
@@ -658,9 +683,9 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
       // with the options wired (the mode unreadable) the prompt is still judged.
       if (id === GROK_IMAGINE_VIDEO_15_ID) {
         const adv = isLink(inputs.model_options) ? null : parseJsonObject(inputs.model_options)
-        if (adv && grokImagineVideo15HasExtras(adv)) out.push({ nodeId, classType: ct, input: 'model_options', message: GROK_IMAGINE_VIDEO_15_ONE_PICTURE })
+        if (adv && hasMediaExtras(adv, { lastFrame: true })) out.push({ nodeId, classType: ct, input: 'model_options', message: GROK_IMAGINE_VIDEO_15_ONE_PICTURE })
         else if (!isLink(inputs.prompt)) {
-          const textToVideo = !!adv && !isLink(inputs.image) && !grokImagineVideo15FirstFrame(null, adv)
+          const textToVideo = !!adv && !isLink(inputs.image) && !firstFrame(null, adv)
           judge(textToVideo ? GROK_IMAGINE_VIDEO_15_TEXT_TO_VIDEO : GROK_IMAGINE_VIDEO_15_IMAGE_TO_VIDEO, asText(inputs.prompt))
         }
       }
@@ -670,7 +695,7 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
       if (id === LTX_25_FAST_ID) {
         const adv = isLink(inputs.model_options) ? null : parseJsonObject(inputs.model_options)
         const duration = isLink(inputs.duration) ? LTX_25_FAST_DEFAULT_SECONDS : asInt(inputs.duration, LTX_25_FAST_DEFAULT_SECONDS)
-        const p = adv && ltx25FastProblem(adv, duration, isLink(inputs.image) || !!ltx25FastFirstFrame(null, adv))
+        const p = adv && ltx25FastProblem(adv, duration, isLink(inputs.image) || !!firstFrame(null, adv))
         if (p) out.push({ nodeId, classType: ct, input: p === LTX_25_FAST_TOO_LONG_AT_4K ? 'duration' : 'model_options', message: p })
         else if (!isLink(inputs.prompt)) judge(LTX_25_FAST_REPLICATE_SLUG, asText(inputs.prompt), 'replicate')
       }
@@ -680,7 +705,7 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
       if (id === LUMA_RAY_32_ID) {
         const adv = isLink(inputs.model_options) ? null : parseJsonObject(inputs.model_options)
         const duration = isLink(inputs.duration) ? LUMA_RAY_32_DEFAULT_SECONDS : asInt(inputs.duration, LUMA_RAY_32_DEFAULT_SECONDS)
-        const p = adv && lumaRay32Problem(adv, duration, isLink(inputs.image) || !!lumaRay32FirstFrame(null, adv))
+        const p = adv && lumaRay32Problem(adv, duration, isLink(inputs.image) || !!firstFrame(null, adv))
         const onLength = p === LUMA_RAY_32_LONG_FROM_PICTURE || p === LUMA_RAY_32_LOOP_TOO_LONG
         if (p) out.push({ nodeId, classType: ct, input: onLength ? 'duration' : 'model_options', message: p })
         else if (!isLink(inputs.prompt)) judge(LUMA_RAY_32_REPLICATE_SLUG, asText(inputs.prompt), 'replicate')

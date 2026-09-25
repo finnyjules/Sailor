@@ -13,6 +13,8 @@ import { engineLabel, resolveEngine } from '~/lib/lipsync/compile'
 import { NO_FAMILIES, parseFamilies } from '#shared/runner/families'
 import { comboMenu, menuHiddenValues, modelMenu } from '#shared/runner/modelMenus'
 import { SYNC_3_ENGINE, SYNC_3_SYNC_MODES } from '#shared/runner/lipSync'
+import { sync3PriceHint } from '#shared/pricing/clipSettings'
+import { hostedModeEnabled } from '~/lib/hostedMode'
 import StudioSection from '~/components/vue-canvas/StudioSection.vue'
 
 const props = defineProps<{ nodeId: string; nodes: any[] }>()
@@ -161,9 +163,11 @@ const engineMenu = computed(() => {
 const syncModes = computed(() => resolvedEngine.value !== SYNC_3_ENGINE
   ? SYNC_MODES
   : [...SYNC_3_SYNC_MODES, ...(SYNC_3_SYNC_MODES.includes(sheet.value.syncMode) ? [] : [sheet.value.syncMode])])
-// What each engine bills: Fabric and Kling's lip-sync about $1 per 30 s; sync-3 $8 a minute (shared/pricing/clipRates.ts).
+// What each engine bills: Fabric and Kling's lip-sync about $1 per 30 s; sync-3
+// from its rate card (shared/pricing/clipRates.ts), in credits in hosted mode.
+const hostedPrices = hostedModeEnabled(useRuntimeConfig().public)
 const priceHint = computed(() => resolvedEngine.value === SYNC_3_ENGINE
-  ? { text: '~$4 / 30s', title: 'sync-3 bills $8 per minute of video it makes' }
+  ? sync3PriceHint({ hosted: hostedPrices })
   : { text: '~$1 / 30s', title: 'Both engines bill about $1 per 30 seconds of output' })
 
 function humanizeSyncMode(m: string): string {

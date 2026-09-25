@@ -22,6 +22,7 @@ import { RESTYLE_MODELS } from '~~/server/runner/generators/restyle'
 import { REFERENCE_MODEL_IDS } from '~~/server/runner/generators/refEdits'
 import type { OutputFile } from '~~/server/runner/types'
 import type { RunnerFamily } from '#shared/runner/families'
+import { RUNNER_NODE_RULES } from '#shared/runner/eligibility'
 import { IMAGE_MODELS_BY_ID } from '~~/app/data/image-models'
 import { VIDEO_MODELS_BY_ID } from '~~/app/data/video-models'
 import { creditsForUsd, usdChargedAtCost } from '#shared/pricing/markup'
@@ -97,9 +98,9 @@ function nodeFor(key: string): [string, Record<string, unknown>] {
   }
   if (key.startsWith('video:')) {
     const id = key.slice(6)
-    // A first frame for the image-to-video-only model, and for Grok Imagine Video 1.5 (F19) and Luma Ray 3.2 (F21),
-    // whose backups are image-to-video only.
-    const i2v = ['wan-2.5-i2v-fast', 'grok-imagine-video-1.5', 'luma-ray-3.2'].includes(id)
+    // A first frame for the image-to-video-only models (Wan 3.0 Prime among them), and for Grok Imagine Video 1.5 (F19)
+    // and Luma Ray 3.2 (F21), whose backups are image-to-video only.
+    const i2v = ['wan-2.5-i2v-fast', 'wan-3.0-prime', 'grok-imagine-video-1.5', 'luma-ray-3.2'].includes(id)
     return ['GenerateVideoNode', { model: id, prompt: 'a fox runs', aspect_ratio: '16:9', ...(i2v ? { image: LINK } : {}) }]
   }
   const [ct, model] = key.split(':') as [string, string | undefined]
@@ -166,13 +167,33 @@ describe('the first and backup services are the table\'s', () => {
     expect(keys.has('image:krea-2-large')).toBe(true)
     expect(keys.has('image:krea-2-medium')).toBe(true)
     expect(image).toBe(Object.keys(RUNNER_IMAGE_MODELS).length + Object.keys(RUNNER_REPLICATE_IMAGE_MODELS).length + 10)
-    // + HappyHorse 1.1 (Task F18), Grok Imagine Video 1.5 (Task F19), LTX-2.5 Fast (Task F20) and Luma Ray 3.2
+    // + Wan 3.0 and Wan 3.0 Prime (Task F1), Hailuo H3 Max Turbo (F3), Gemini Omni Flash (F4), Veo 3.1 Lite (F5),
+    // HappyHorse 1.1 (Task F18), Grok Imagine Video 1.5 (Task F19), LTX-2.5 Fast (Task F20) and Luma Ray 3.2
     // (Task F21), runner-only video models outside the two builder tables.
+    for (const id of ['wan-3.0', 'wan-3.0-prime', 'hailuo-h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite']) expect(keys.has(`video:${id}`), id).toBe(true)
     expect(keys.has('video:happyhorse-1.1')).toBe(true)
     expect(keys.has('video:grok-imagine-video-1.5')).toBe(true)
     expect(keys.has('video:ltx-2.5-fast')).toBe(true)
     expect(keys.has('video:luma-ray-3.2')).toBe(true)
-    expect(video).toBe(Object.keys(RUNNER_VIDEO_MODELS).length + Object.keys(RUNNER_REPLICATE_VIDEO_MODELS).length + 4)
+    expect(video).toBe(Object.keys(RUNNER_VIDEO_MODELS).length + Object.keys(RUNNER_REPLICATE_VIDEO_MODELS).length + 9)
+  })
+
+  // Final review finding 4 (final fix F4): the list comes from the catalogues
+  // and the rule rows, not by hand, so a family added later without a row fails here.
+  it('every catalogue model behind a family, and every rule row\'s model and upgrade, has a row', () => {
+    const keys = new Set(Object.keys(RUNNER_ROUTES))
+    const want: string[] = []
+    for (const m of Object.values(IMAGE_MODELS_BY_ID)) if (m.family) want.push(`image:${m.id}`)
+    for (const m of Object.values(VIDEO_MODELS_BY_ID)) if (m.family) want.push(`video:${m.id}`)
+    for (const [ct, rule] of Object.entries(RUNNER_NODE_RULES)) {
+      if (rule.local) continue
+      const surface = ct === 'GenerateImageNode' ? 'image:' : ct === 'GenerateVideoNode' ? 'video:' : `${ct}:`
+      for (const model of Object.keys(rule.models ?? {})) want.push(`${surface}${model}`)
+      if (rule.upgrade) want.push(`${ct}+${rule.upgrade.family}`)
+      if (!rule.models && rule.family) want.push(ct)
+    }
+    expect(want.length).toBeGreaterThan(100)
+    expect(want.filter(k => !keys.has(k))).toEqual([])
   })
 
   for (const [key, route] of Object.entries(RUNNER_ROUTES)) {

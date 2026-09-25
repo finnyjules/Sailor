@@ -83,6 +83,14 @@
  *                                                  names references [Image1] where the prompt says @Image1, so a
  *                                                  reference prompt can't be sent there unchanged
  * hailuo-h3 / -h3-max       fal        —           not on Replicate (h3 has no public version, h3-max no page)
+ * wan-3.0 / -prime          fal        —           runner-only (F1, family wan-3): Replicate's alibaba/wan-3 has no
+ *                                                  sound switch, no last frame and no reference pictures (wan3.ts)
+ * hailuo-h3-max-turbo       fal        —           runner-only (F3): not on Replicate (h3MaxTurbo.ts)
+ * gemini-omni-flash         fal        —           runner-only (F4): Replicate's nearest, google/gemini-omni-1.1, has
+ *                                                  no length setting and is another version (geminiOmniFlash.ts)
+ * veo-3.1-lite              fal        —           runner-only (F5): Replicate's google/veo-3.1-lite has no sound
+ *                                                  switch, no negative prompt and no prompt-fix switch, and makes
+ *                                                  1080p only at 8 s (veo31Lite.ts)
  * kling-v3                  fal        Replicate   MOVED to fal (line-up page): pro at $0.112 / $0.168 a second, half
  *                                                  of Replicate's $0.224 / $0.336. fal always gets `negative_prompt`
  *                                                  ('' when none): its default is "blur, distort, and low quality",
@@ -257,6 +265,11 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'video:seedance-2.0': r('fal', null, 'Replicate names references [Image1] where the prompt says @Image1'),
   'video:hailuo-h3': r('fal', null, 'not on Replicate'),
   'video:hailuo-h3-max': r('fal', null, 'not on Replicate'),
+  'video:wan-3.0': r('fal', null, 'Replicate\'s Wan 3 has no sound switch, no last frame and no reference pictures'),
+  'video:wan-3.0-prime': r('fal', null, 'Replicate\'s Wan 3 has no sound switch, no last frame and no reference pictures'),
+  'video:hailuo-h3-max-turbo': r('fal', null, 'not on Replicate'),
+  'video:gemini-omni-flash': r('fal', null, 'Replicate\'s nearest model has no length setting and is another version'),
+  'video:veo-3.1-lite': r('fal', null, 'Replicate\'s Veo 3.1 Lite has no sound switch, no negative prompt and no prompt-fix switch'),
   'video:kling-v3': r('fal', 'replicate'),
   'video:pixverse-v6': r('fal', 'replicate'),
   'video:seedance-2.0-fast': r('replicate', null, 'fal\'s has no seed and no 3 s clip'),

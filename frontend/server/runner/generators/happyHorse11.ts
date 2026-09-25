@@ -58,7 +58,7 @@
  * 10 MB it runs on fal with no backup for that run. Both limits are read as
  * the smaller number (20,000,000 and 10,000,000 bytes), as Product shot's.
  */
-import { arOr, maybeSetSeed, optEnum, optStr } from './opts'
+import { arOr, firstFrame, hasMediaExtras, maybeSetSeed, optEnum, optStr } from './opts'
 import { durOr } from './video'
 import type { VideoBuildArgs, VideoModelDesc } from './types'
 import type { ServiceCall } from './twins'
@@ -98,17 +98,6 @@ export const HAPPYHORSE_11_MAX_PICTURE_BYTES = 20_000_000
 export const HAPPYHORSE_11_BACKUP_MAX_PICTURE_BYTES = 10_000_000
 export const HAPPYHORSE_11_PICTURE_TOO_LARGE = 'HappyHorse 1.1 takes pictures up to 20 MB. Make this one smaller first.'
 
-/** The first frame: the linked picture, else `image_url` in the options, else ''. */
-export function happyHorse11FirstFrame(image: string | null, adv: Record<string, unknown>): string {
-  return image || optStr(adv, 'image_url', '')
-}
-
-/** True when the options carry what neither endpoint takes: a last frame, or reference pictures, videos or sounds. */
-export function happyHorse11HasExtras(adv: Record<string, unknown>): boolean {
-  if (optStr(adv, 'end_image_url', '')) return true
-  return ['image_urls', 'video_urls', 'audio_urls'].some(k => Array.isArray(adv[k]) && (adv[k] as unknown[]).length > 0)
-}
-
 /** The clip length sent: the whole second from 3 to 15 closest to the node's. */
 export function happyHorse11Seconds(duration: number): number {
   return durOr([...HAPPYHORSE_11_SECONDS], duration, HAPPYHORSE_11_DEFAULT_SECONDS)
@@ -117,8 +106,8 @@ export function happyHorse11Seconds(duration: number): number {
 /** The request for either fal endpoint; `image_url` (a first frame) sends it to image-to-video. */
 export function happyHorse11(a: VideoBuildArgs): Record<string, unknown> {
   const { prompt, aspectRatio, duration, seed, image, adv } = a
-  if (happyHorse11HasExtras(adv)) throw new Error(HAPPYHORSE_11_ONE_PICTURE)
-  const first = happyHorse11FirstFrame(image, adv)
+  if (hasMediaExtras(adv, { lastFrame: true })) throw new Error(HAPPYHORSE_11_ONE_PICTURE)
+  const first = firstFrame(image, adv)
   const inp: Record<string, unknown> = first ? { image_url: first, prompt } : { prompt, aspect_ratio: arOr(FAL_AR, aspectRatio, '16:9') }
   inp.resolution = optEnum(
     { resolution: optStr(adv, 'resolution', HAPPYHORSE_11_DEFAULT_RESOLUTION).toLowerCase() },

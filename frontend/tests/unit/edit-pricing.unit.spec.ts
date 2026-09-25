@@ -778,14 +778,22 @@ describe('the gate reads files sparingly', () => {
   })
 })
 
-describe('the runner measures the largest file on the linked slot', () => {
-  it('takes the largest; an unreadable one prices at the cap', async () => {
+describe('the runner measures the file it sends: the first on the linked slot', () => {
+  // Final review finding 1: every builder sends the first file of a batch (as
+  // Python does), so that is the one measured, priced and judged against the
+  // cap, whatever the batch's length.
+  it('takes the first; an unreadable first prices at the cap; the rest are never read', async () => {
     const node = { class_type: 'UpscaleImageNode', inputs: { model: 'Crystal', image: ['1', 0] } }
-    const files = ['s', 'l', 'm'].map(n => ({ filename: `${n}.png`, subfolder: '', type: 'output' as const }))
+    const files = ['l', 's', 'm'].map(n => ({ filename: `${n}.png`, subfolder: '', type: 'output' as const }))
     const bytes: Record<string, Uint8Array> = {
       's.png': new Uint8Array(await png(100, 100)), 'l.png': new Uint8Array(await png(1200, 900)), 'm.png': new Uint8Array(await png(400, 400)),
     }
-    expect(await measuredInputPixels(node, () => files, async f => bytes[f.filename]!)).toBe(1200 * 900)
-    expect(await measuredInputPixels(node, () => files, async f => { if (f.filename === 'm.png') throw new Error('gone'); return bytes[f.filename]! })).toBeUndefined()
+    const read: string[] = []
+    expect(await measuredInputPixels(node, () => files, async f => { read.push(f.filename); return bytes[f.filename]! })).toBe(1200 * 900)
+    expect(read).toEqual(['l.png'])
+    expect(await measuredInputPixels(node, () => files, async f => { if (f.filename === 'l.png') throw new Error('gone'); return bytes[f.filename]! })).toBeUndefined()
+    // A batch longer than the old 8-file limit is still measured by its first file.
+    const nine = Array.from({ length: 9 }, () => files[0]!)
+    expect(await measuredInputPixels(node, () => nine, async f => bytes[f.filename]!)).toBe(1200 * 900)
   })
 })

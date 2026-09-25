@@ -8,6 +8,7 @@
  *   stage — what one take is charged for in one leg — `${legId}.t${take}`
  */
 import type { ApiPrompt } from '#shared/runner/graph'
+import type { RunnerFamily } from '#shared/runner/families'
 
 export type RunStatus = 'running' | 'paused' | 'done' | 'error' | 'stopped'
 
@@ -116,6 +117,12 @@ export interface LegRecord {
   status: 'running' | 'done'
   startedAt: number
   endedAt: number | null
+  /**
+   * The runner families switched on when this leg's hold was taken: a node
+   * whose model depends on one that changed since is refused at its turn
+   * (switches.ts). Absent on legs written before it was recorded.
+   */
+  families?: RunnerFamily[]
 }
 
 export interface StageCharge {

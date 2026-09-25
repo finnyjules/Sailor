@@ -62,6 +62,24 @@ export function optStr(adv: Record<string, unknown>, key: string, def: string): 
   return String(v)
 }
 
+// ── A video request's pictures (final fix F5: one copy for every builder) ──
+
+/** The first frame a video request carries: the linked picture, else `image_url` in the options, else ''. */
+export function firstFrame(image: string | null, adv: Record<string, unknown>): string {
+  return image || optStr(adv, 'image_url', '')
+}
+
+/**
+ * True when the options carry reference pictures, videos or sounds (Shot
+ * Director's `image_urls`, `video_urls`, `audio_urls`), or, with
+ * `lastFrame`, a last frame (`end_image_url`): what a model that starts from
+ * one picture at most can't take.
+ */
+export function hasMediaExtras(adv: Record<string, unknown>, o: { lastFrame: boolean }): boolean {
+  if (o.lastFrame && optStr(adv, 'end_image_url', '')) return true
+  return ['image_urls', 'video_urls', 'audio_urls'].some(k => Array.isArray(adv[k]) && (adv[k] as unknown[]).length > 0)
+}
+
 // ── Schema-bound readers (Task S1b) ──────────────────────────────────────
 // The runner's builders follow each provider's published schema (the saved
 // copies in tests/unit/fixtures/provider-schemas/), not Python parity: a

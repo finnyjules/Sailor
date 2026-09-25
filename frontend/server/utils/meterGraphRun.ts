@@ -28,6 +28,7 @@ import { extractGraphPromptText } from './graphPromptText'
 import { moderatePrompt } from './moderation'
 import { assertSpendAllowed } from './systemControls'
 import { blockedPromptRefusal, nodeProblemsBody, retiredEngineRefusal } from './blockedModels'
+import { measuredInputProblems } from '../runner/requestRules'
 
 export function isPromptPath(path: string): boolean {
   return path === '/prompt' || path.startsWith('/prompt?')
@@ -410,6 +411,11 @@ export async function meterGraphSubmit(userId: string | null, body: any, deps: G
   // The size of the pictures a size-priced node is sent, where the gate can
   // read it; the rest price at the input cap (never below what runs).
   const inputPixels = deps.measureInputPixels ? await deps.measureInputPixels(body.prompt).catch(() => ({})) : undefined
+  // A measured picture above the input cap is refused before the hold: each
+  // size-priced model bills the picture's real size and the price stops at the
+  // cap (requestRules.ts measuredInputProblems; final review finding 1).
+  const tooLarge = inputPixels ? nodeProblemsBody(measuredInputProblems(body.prompt, inputPixels)) : null
+  if (tooLarge) return { status: 400, body: tooLarge }
   // The length of each lip-sync node's sound (and Kling's source video), where
   // it can read it; the rest price at the 60 s cap.
   const inputSeconds = deps.measureInputSeconds ? await deps.measureInputSeconds(body.prompt).catch(() => ({})) : undefined

@@ -10,7 +10,7 @@
  * in the builder below; the Python path is legacy and unchanged.
  */
 import { RUNNER_REPLICATE_VIDEO_MODEL_IDS, RUNNER_VIDEO_MODEL_IDS } from '#shared/runner/eligibility'
-import { arOr, maybeSetSeed, optBool, optEnum, optFloatIn, optIntIn, optStr, pyTruthy } from './opts'
+import { arOr, hasMediaExtras, maybeSetSeed, optBool, optEnum, optFloatIn, optIntIn, optStr, pyTruthy } from './opts'
 import type { ReplicateVideoModelDesc, VideoBuildArgs, VideoModelDesc } from './types'
 
 /** video_models._dur_or: the value if supported, else the closest (first on a tie). */
@@ -50,8 +50,7 @@ export const VEO_31_ONE_PICTURE
 
 /** True when the options carry what Veo 3.1's builder can't send: a last frame, or reference pictures, videos or sounds. */
 export function veo31HasExtras(adv: Record<string, unknown>): boolean {
-  if (optStr(adv, 'end_image_url', '')) return true
-  return ['image_urls', 'video_urls', 'audio_urls'].some(k => Array.isArray(adv[k]) && (adv[k] as unknown[]).length > 0)
+  return hasMediaExtras(adv, { lastFrame: true })
 }
 
 function veo31({ prompt, aspectRatio, duration, seed, image, adv }: VideoBuildArgs) {

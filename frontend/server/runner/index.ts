@@ -39,7 +39,7 @@ export function getEngine(): Engine {
     store: getRunStore(),
     providers: { fal: realFalClient, replicate: realReplicateClient },
     results,
-    handoff: createHandoff({ read: f => results.read(f), upload: uploadToFalStorage }),
+    handoff: createHandoff({ upload: uploadToFalStorage }),
     metering: createMetering({
       hosted: isHosted,
       ledger: () => getLiveLedger(),

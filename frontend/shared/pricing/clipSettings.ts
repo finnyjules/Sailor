@@ -433,6 +433,21 @@ function sentAsIs(v: unknown): string {
 export const SYNC_3_ENDPOINT = 'fal-ai/sync-lipsync/v3'
 
 /**
+ * The Lip-Sync Studio's price hint for sync-3 (final fix F8): 30 seconds of
+ * the video it makes, read from its rate card (clipRates.ts), in dollars, or
+ * in credits in hosted mode (what is charged), so it follows the card at the
+ * next rate change.
+ */
+export function sync3PriceHint(opts: { hosted?: boolean } = {}): { text: string, title: string } {
+  const usd = (seconds: number) => clipUsd(SYNC_3_ENDPOINT, { seconds, resolution: null, audio: false }) ?? 0
+  if (opts.hosted) {
+    return { text: `~${creditsForUsd(usd(30))} credits / 30s`, title: `sync-3 costs ${creditsForUsd(usd(60))} credits per minute of video it makes` }
+  }
+  const dollars = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(2)}`
+  return { text: `~${dollars(usd(30))} / 30s`, title: `sync-3 bills ${dollars(usd(60))} per minute of video it makes` }
+}
+
+/**
  * sync-3's call as the runner sends it: the clip it makes, from the measured
  * sound (and video, for cut off); unmeasured, the 60 s cap. A sync mode it
  * isn't run with is refused.

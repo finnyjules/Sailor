@@ -60,7 +60,7 @@
  * text-to-video.
  */
 import { durOr } from './video'
-import { arOr, optBool, optStr } from './opts'
+import { arOr, firstFrame, hasMediaExtras, optBool, optStr } from './opts'
 import type { VideoBuildArgs } from './types'
 import type { ServiceCall } from './twins'
 
@@ -90,16 +90,6 @@ export const LUMA_RAY_32_LOOP_WITH_LAST = 'Luma Ray 3.2 can\'t loop a clip that 
 export const LUMA_RAY_32_NEEDS_PROMPT = 'Luma Ray 3.2 needs a prompt. Describe the clip, or how the picture should move.'
 export const LUMA_RAY_32_LONG_PROMPT = 'Luma Ray 3.2 takes a prompt of at most 6,000 characters. Shorten it.'
 
-/** The first frame: the linked picture, else `image_url` in the options, else ''. */
-export function lumaRay32FirstFrame(image: string | null, adv: Record<string, unknown>): string {
-  return image || optStr(adv, 'image_url', '')
-}
-
-/** True when the options carry what the model doesn't take: reference pictures, videos or sounds. */
-export function lumaRay32HasExtras(adv: Record<string, unknown>): boolean {
-  return ['image_urls', 'video_urls', 'audio_urls'].some(k => Array.isArray(adv[k]) && (adv[k] as unknown[]).length > 0)
-}
-
 /** The clip length sent: 5 or 10, the closer to the node's. */
 export function lumaRay32Seconds(duration: number): number {
   return durOr([...LUMA_RAY_32_SECONDS], duration, LUMA_RAY_32_DEFAULT_SECONDS)
@@ -117,7 +107,7 @@ export function lumaRay32Resolution(adv: Record<string, unknown>): string {
  * last frame. `firstFrame`: a first frame is linked or in the options.
  */
 export function lumaRay32Problem(adv: Record<string, unknown>, duration: number, firstFrame: boolean): string | null {
-  if (lumaRay32HasExtras(adv)) return LUMA_RAY_32_EXTRAS
+  if (hasMediaExtras(adv, { lastFrame: false })) return LUMA_RAY_32_EXTRAS
   const last = !!optStr(adv, 'end_image_url', '')
   if (last && !firstFrame) return LUMA_RAY_32_LAST_NEEDS_FIRST
   const long = lumaRay32Seconds(duration) > LUMA_RAY_32_DEFAULT_SECONDS
@@ -132,7 +122,7 @@ export function lumaRay32Problem(adv: Record<string, unknown>, duration: number,
 /** The Replicate request (the first service). Throws the plain message for settings the model doesn't take. */
 export function lumaRay32(a: VideoBuildArgs): Record<string, unknown> {
   const { prompt, aspectRatio, duration, image, adv } = a
-  const first = lumaRay32FirstFrame(image, adv)
+  const first = firstFrame(image, adv)
   const problem = lumaRay32Problem(adv, duration, !!first)
   if (problem) throw new Error(problem)
   const inp: Record<string, unknown> = { prompt }

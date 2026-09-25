@@ -45,7 +45,7 @@
 import { GATE_CLASS, isLink, type ApiPrompt } from '#shared/runner/graph'
 import { classUpgradeOn, resolveVideoModelId } from '#shared/runner/eligibility'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
-import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS, composeImagePrompt, imageAppFor } from './generators/image'
+import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS, imageAppFor, nodeImagePrompt } from './generators/image'
 import { RUNNER_REPLICATE_VIDEO_MODELS, RUNNER_VIDEO_MODELS, falVideoFn } from './generators/video'
 import { asInt, asText, parseJsonObject, pyStrip, pyTruthy } from './generators/opts'
 import {
@@ -223,13 +223,7 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       // endpoint; Replicate the backup (gptImage25.ts). No moodboard pictures.
       if (isGptImage25Model(inputs.model)) {
         const call = gptImage25Generate({
-          prompt: composeImagePrompt({
-            prompt: asText(inputs.prompt),
-            promptIn: asText(inputs.prompt_in),
-            styleBlock: asText(inputs.style_block),
-            styleIn: asText(inputs.style_in),
-            hasRefs: false,
-          }),
+          prompt: nodeImagePrompt(inputs),
           aspectRatio: asText(inputs.aspect_ratio) || '1:1',
           adv: parseJsonObject(inputs.model_options),
         })
@@ -238,13 +232,7 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       // Qwen Image 3 (family qwen-image-3): Replicate, no backup (qwenImage3.ts). No moodboard pictures.
       if (isQwenImage3Model(inputs.model)) {
         return stillCall(qwenImage3Generate({
-          prompt: composeImagePrompt({
-            prompt: asText(inputs.prompt),
-            promptIn: asText(inputs.prompt_in),
-            styleBlock: asText(inputs.style_block),
-            styleIn: asText(inputs.style_in),
-            hasRefs: false,
-          }),
+          prompt: nodeImagePrompt(inputs),
           aspectRatio: asText(inputs.aspect_ratio) || '1:1',
           seed: asInt(inputs.seed, 0),
           adv: parseJsonObject(inputs.model_options),
@@ -253,13 +241,7 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       // Grok Imagine 2 (family grok-imagine-2): Replicate, no backup (grokImagine2.ts). No moodboard pictures, no seed.
       if (isGrokImagine2Model(inputs.model)) {
         return stillCall(grokImagine2Generate({
-          prompt: composeImagePrompt({
-            prompt: asText(inputs.prompt),
-            promptIn: asText(inputs.prompt_in),
-            styleBlock: asText(inputs.style_block),
-            styleIn: asText(inputs.style_in),
-            hasRefs: false,
-          }),
+          prompt: nodeImagePrompt(inputs),
           aspectRatio: asText(inputs.aspect_ratio) || '1:1',
           adv: parseJsonObject(inputs.model_options),
         }), 'generate_image')
@@ -268,13 +250,7 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       // 2K picture only (ideogram4.ts). No moodboard pictures.
       if (isIdeogram4Model(inputs.model)) {
         const call = ideogram4Generate({
-          prompt: composeImagePrompt({
-            prompt: asText(inputs.prompt),
-            promptIn: asText(inputs.prompt_in),
-            styleBlock: asText(inputs.style_block),
-            styleIn: asText(inputs.style_in),
-            hasRefs: false,
-          }),
+          prompt: nodeImagePrompt(inputs),
           aspectRatio: asText(inputs.aspect_ratio) || '1:1',
           seed: asInt(inputs.seed, 0),
           adv: parseJsonObject(inputs.model_options),
@@ -284,39 +260,21 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       // Muse Image (family muse-image): fal, no backup (museImage.ts). No moodboard pictures, no seed.
       if (isMuseImageModel(inputs.model)) {
         return stillCall(museImageGenerate({
-          prompt: composeImagePrompt({
-            prompt: asText(inputs.prompt),
-            promptIn: asText(inputs.prompt_in),
-            styleBlock: asText(inputs.style_block),
-            styleIn: asText(inputs.style_in),
-            hasRefs: false,
-          }),
+          prompt: nodeImagePrompt(inputs),
           aspectRatio: asText(inputs.aspect_ratio) || '1:1',
         }), 'generate_image')
       }
       // Nano Banana 2 Lite (family nano-banana-2-lite): Replicate, no backup (nanoBanana2Lite.ts). No moodboard pictures, no seed.
       if (isNanoBanana2LiteModel(inputs.model)) {
         return stillCall(nanoBanana2LiteGenerate({
-          prompt: composeImagePrompt({
-            prompt: asText(inputs.prompt),
-            promptIn: asText(inputs.prompt_in),
-            styleBlock: asText(inputs.style_block),
-            styleIn: asText(inputs.style_in),
-            hasRefs: false,
-          }),
+          prompt: nodeImagePrompt(inputs),
           aspectRatio: asText(inputs.aspect_ratio) || '1:1',
         }), 'generate_image')
       }
       // Reve 2.1 (family reve-2.1): fal, no backup (reve21.ts). No moodboard pictures, no seed.
       if (isReve21Model(inputs.model)) {
         return stillCall(reve21Generate({
-          prompt: composeImagePrompt({
-            prompt: asText(inputs.prompt),
-            promptIn: asText(inputs.prompt_in),
-            styleBlock: asText(inputs.style_block),
-            styleIn: asText(inputs.style_in),
-            hasRefs: false,
-          }),
+          prompt: nodeImagePrompt(inputs),
           aspectRatio: asText(inputs.aspect_ratio) || '1:1',
         }), 'generate_image')
       }
@@ -324,13 +282,7 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       // (recraftV41.ts). No moodboard pictures, no seed.
       if (isRecraftV41Model(inputs.model)) {
         const call = recraftV41Generate({
-          prompt: composeImagePrompt({
-            prompt: asText(inputs.prompt),
-            promptIn: asText(inputs.prompt_in),
-            styleBlock: asText(inputs.style_block),
-            styleIn: asText(inputs.style_in),
-            hasRefs: false,
-          }),
+          prompt: nodeImagePrompt(inputs),
           aspectRatio: asText(inputs.aspect_ratio) || '1:1',
         })
         return stillCall(call, 'generate_image', recraftV41OnReplicate(call))
@@ -341,13 +293,7 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       if (isKrea2Model(inputs.model)) {
         const call = krea2Generate({
           model: inputs.model,
-          prompt: composeImagePrompt({
-            prompt: asText(inputs.prompt),
-            promptIn: asText(inputs.prompt_in),
-            styleBlock: asText(inputs.style_block),
-            styleIn: asText(inputs.style_in),
-            hasRefs: false,
-          }),
+          prompt: nodeImagePrompt(inputs),
           aspectRatio: asText(inputs.aspect_ratio) || '1:1',
           seed: asInt(inputs.seed, 0),
           adv: parseJsonObject(inputs.model_options),
@@ -360,13 +306,7 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       const onReplicate = RUNNER_REPLICATE_IMAGE_MODELS[String(inputs.model)]
       if (!RUNNER_IMAGE_MODELS[String(inputs.model)] && onReplicate) {
         const payload = onReplicate.build({
-          prompt: composeImagePrompt({
-            prompt: asText(inputs.prompt),
-            promptIn: asText(inputs.prompt_in),
-            styleBlock: asText(inputs.style_block),
-            styleIn: asText(inputs.style_in),
-            hasRefs: false,
-          }),
+          prompt: nodeImagePrompt(inputs),
           aspectRatio: asText(inputs.aspect_ratio) || '1:1',
           seed: asInt(inputs.seed, 0),
           adv: parseJsonObject(inputs.model_options),
@@ -390,13 +330,7 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
         }
         refs = urls.length ? urls : null
       }
-      const prompt = composeImagePrompt({
-        prompt: asText(inputs.prompt),
-        promptIn: asText(inputs.prompt_in),
-        styleBlock: asText(inputs.style_block),
-        styleIn: asText(inputs.style_in),
-        hasRefs: !!refs,
-      })
+      const prompt = nodeImagePrompt(inputs, !!refs)
       const payload = desc.build({
         prompt,
         aspectRatio: asText(inputs.aspect_ratio) || '1:1',

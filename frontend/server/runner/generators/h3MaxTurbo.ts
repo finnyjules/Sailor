@@ -31,6 +31,9 @@ export const H3_MAX_TURBO_IMAGE_TO_VIDEO = `${H3_MAX_TURBO_APP}/image-to-video`
 /** Every endpoint the family calls. */
 export const H3_MAX_TURBO_ENDPOINTS = [H3_MAX_TURBO_TEXT_TO_VIDEO, H3_MAX_TURBO_IMAGE_TO_VIDEO] as const
 
+/** An empty prompt, on either endpoint (their schemas' minLength 1), in the model's own name (final fix F7). */
+export const H3_MAX_TURBO_NEEDS_PROMPT = 'Hailuo H3 Max Turbo needs a prompt. Describe the clip, or how the picture should move.'
+
 const H3_MAX = RUNNER_VIDEO_MODELS['hailuo-h3-max']!
 
 /** H3 Max's description (its builder, its modes, its default length) on Turbo's app. */

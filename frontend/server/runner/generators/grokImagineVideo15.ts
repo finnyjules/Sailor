@@ -51,7 +51,7 @@
  * `aspect_ratio` "auto" (the picture's shape, as fal's image-to-video makes
  * it). None for text-to-video or at 1080p.
  */
-import { arOr, optEnum, optStr } from './opts'
+import { arOr, firstFrame, hasMediaExtras, optEnum, optStr } from './opts'
 import { durOr } from './video'
 import type { VideoBuildArgs, VideoModelDesc } from './types'
 import type { ServiceCall } from './twins'
@@ -84,17 +84,6 @@ export const GROK_IMAGINE_VIDEO_15_ONE_PICTURE
 export const GROK_IMAGINE_VIDEO_15_NEEDS_PROMPT = 'Grok Imagine Video 1.5 needs a prompt. Describe the clip, or how the picture should move.'
 export const GROK_IMAGINE_VIDEO_15_LONG_PROMPT = 'Grok Imagine Video 1.5 takes a prompt of at most 4,096 characters. Shorten it.'
 
-/** The first frame: the linked picture, else `image_url` in the options, else ''. */
-export function grokImagineVideo15FirstFrame(image: string | null, adv: Record<string, unknown>): string {
-  return image || optStr(adv, 'image_url', '')
-}
-
-/** True when the options carry what neither endpoint takes: a last frame, or reference pictures, videos or sounds. */
-export function grokImagineVideo15HasExtras(adv: Record<string, unknown>): boolean {
-  if (optStr(adv, 'end_image_url', '')) return true
-  return ['image_urls', 'video_urls', 'audio_urls'].some(k => Array.isArray(adv[k]) && (adv[k] as unknown[]).length > 0)
-}
-
 /** The clip length sent: the whole second from 1 to 15 closest to the node's. */
 export function grokImagineVideo15Seconds(duration: number): number {
   return durOr([...GROK_IMAGINE_VIDEO_15_SECONDS], duration, GROK_IMAGINE_VIDEO_15_DEFAULT_SECONDS)
@@ -103,8 +92,8 @@ export function grokImagineVideo15Seconds(duration: number): number {
 /** The request for either fal endpoint; `image_url` (a first frame) sends it to image-to-video. */
 export function grokImagineVideo15(a: VideoBuildArgs): Record<string, unknown> {
   const { prompt, aspectRatio, duration, image, adv } = a
-  if (grokImagineVideo15HasExtras(adv)) throw new Error(GROK_IMAGINE_VIDEO_15_ONE_PICTURE)
-  const first = grokImagineVideo15FirstFrame(image, adv)
+  if (hasMediaExtras(adv, { lastFrame: true })) throw new Error(GROK_IMAGINE_VIDEO_15_ONE_PICTURE)
+  const first = firstFrame(image, adv)
   const inp: Record<string, unknown> = first ? { image_url: first, prompt } : { prompt, aspect_ratio: arOr(FAL_AR, aspectRatio, '16:9') }
   inp.resolution = optEnum(
     { resolution: optStr(adv, 'resolution', GROK_IMAGINE_VIDEO_15_DEFAULT_RESOLUTION).toLowerCase() },

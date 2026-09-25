@@ -29,7 +29,7 @@
 import type { ApiLink, ApiPrompt } from '#shared/runner/graph'
 import { LIPSYNC_MAX_SECONDS, type InputSeconds } from '#shared/pricing/clipSettings'
 import { lipSyncSyncMode, sync3OutputSeconds } from '#shared/runner/lipSync'
-import { measureMediaFile, measuredMediaChanged, type MediaReads, type MediaRule } from './mediaInputs'
+import { measureMediaFile, type MediaReads, type MediaRule } from './mediaInputs'
 import { sync3Sources, type Sync3Source } from './generators/sync3'
 import type { MeasuredMedia, OutputFile } from './types'
 
@@ -104,15 +104,6 @@ export async function sync3MediaCheck(prompt: ApiPrompt, nodeId: string, o: Sync
  */
 export function measuredOf(check: Extract<Sync3MediaCheck, { problem: null }>): MeasuredMedia {
   return { seconds: { ...check.seconds }, sha: { ...check.sha } }
-}
-
-/**
- * Whether the files at the node's turn are not the ones recorded at the
- * start: a length that differs (to the millionth; one that appeared or went
- * missing counts), or bytes that differ (sha256).
- */
-export function sync3MediaChanged(recorded: MeasuredMedia, now: Extract<Sync3MediaCheck, { problem: null }>): boolean {
-  return measuredMediaChanged(recorded, measuredOf(now))
 }
 
 /** The sound's file: what its link brought at the node's turn, else the Audio card's own file. */
