@@ -1,7 +1,7 @@
 /**
  * Files a workflow reads before it makes anything: moodboard reference
- * pictures (GenerateImageNode.style_refs, RestyleFromImageNode.style_refs), pictures/clips loaded into an
- * unwired Image or Video card, and a LoadImage's picture (the Frame's baked layers). In hosted, every one must be the user's own.
+ * pictures (GenerateImageNode.style_refs, RestyleFromImageNode.style_refs), pictures/clips/sounds loaded into an
+ * unwired Image, Video or Audio card, and a LoadImage's picture (the Frame's baked layers). In hosted, every one must be the user's own.
  */
 import { isLink, type ApiPrompt } from '#shared/runner/graph'
 import { MeterRefusalError } from '../utils/requestMeter'
@@ -65,6 +65,12 @@ export function collectInputFiles(prompt: ApiPrompt): OutputFile[] {
     }
     if (node.class_type === 'Video' && !isLink(inputs.source)) {
       const f = parseInputFileRef(inputs.file)
+      if (f) out.push(f)
+    }
+    // The Audio card a sync-3 lip-sync reads (model line-up F22). The lip-sync's
+    // own files (its studio's links) are checked by the engine (sync3Media.ts).
+    if (node.class_type === 'Audio' && !isLink(inputs.source)) {
+      const f = parseInputFileRef(inputs.audio)
       if (f) out.push(f)
     }
   }

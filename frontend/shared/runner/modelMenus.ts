@@ -22,6 +22,7 @@ import { IMAGE_MODELS, IMAGE_MODEL_PREFERENCE } from '../../app/data/image-model
 import { FILM_SHOT_MODEL_PREFERENCE, VIDEO_MODELS, VIDEO_MODEL_PREFERENCE } from '../../app/data/video-models'
 import { EDIT_MODEL_MENUS } from '../../app/data/edit-model-options'
 import { RUNNER_NODE_RULES, RUNNER_NODE_TYPES, resolveVideoModelId } from './eligibility'
+import { SYNC_3_ENGINE, lipSyncEngine, mentionsSync3 } from './lipSync'
 import type { ModelFlags, RunnerFamily } from './families'
 
 /** One value of a model menu: what the node stores, what the menu shows, and its flags. */
@@ -38,6 +39,18 @@ export interface ModelMenu {
   entries: readonly MenuEntry[]
   /** The default is the first of these that can run now. */
   preference: readonly string[]
+  /**
+   * The value the node runs, where it isn't simply the widget: Lip-sync a
+   * character reads `model_options.engine` over its `engine` widget, and any
+   * mention of sync-3 counts, so a run that could ask for it is judged as
+   * sync-3 (./lipSync.ts). Absent: the widget.
+   */
+  read?: (inputs: Record<string, unknown>) => unknown
+}
+
+/** Per-menu readers (ModelMenu.read), keyed `Class.input`. */
+const MENU_READERS: Readonly<Record<string, (inputs: Record<string, unknown>) => unknown>> = {
+  'LipSyncNode.engine': inputs => (mentionsSync3(inputs) ? SYNC_3_ENGINE : lipSyncEngine(inputs)),
 }
 
 function flagsOf(m: ModelFlags): ModelFlags {
@@ -71,6 +84,7 @@ export function modelMenus(): readonly ModelMenu[] {
       kind: 'dropdown',
       entries: menu.options.map(o => ({ ...o })),
       preference: menu.preference,
+      ...(MENU_READERS[key] ? { read: MENU_READERS[key] } : {}),
     })
   }
   menusMemo = menus

@@ -31,6 +31,8 @@ export interface BlockedModelUse {
   /** The value the node holds, as saved (a legacy label stays as it is). */
   value: string
   reason: 'runner-only' | 'discontinued'
+  /** The input the value is read from, when it isn't `model` (Lip-sync a character's `engine`). */
+  input?: string
   /** The node's whole class runs a newer model while its family is on (no menu value): `value` is that model's name. */
   upgrade?: true
 }
@@ -58,13 +60,15 @@ export function blockedModelUses(prompt: ApiPrompt | null | undefined, opts: Blo
     if (typeof classType !== 'string') continue
     for (const menu of menus) {
       if (menu.classType !== classType) continue
-      const value = node.inputs?.[menu.input]
+      const inputs = node.inputs ?? {}
+      const value = menu.read ? menu.read(inputs) : inputs[menu.input]
       const entry = modelEntryFor(classType, value, menu.input)
       if (!entry || typeof value !== 'string') continue
-      if (entry.discontinued) out.push({ nodeId, classType, value, reason: 'discontinued' })
+      const where = menu.input === 'model' ? {} : { input: menu.input }
+      if (entry.discontinued) out.push({ nodeId, classType, value, reason: 'discontinued', ...where })
       else if (entry.runnerOnly) {
         const runs = !!opts.runnerTakes && !!entry.family && families.has(entry.family) && runnerTakesClass(classType)
-        if (!runs) out.push({ nodeId, classType, value, reason: 'runner-only' })
+        if (!runs) out.push({ nodeId, classType, value, reason: 'runner-only', ...where })
       }
     }
     // A class on its newer model runs only in the runner (the runner takes
@@ -86,8 +90,8 @@ export function serviceDate(iso: string): string {
 }
 
 /** The model's own name for a blocked use (its catalogue label; the saved value when it has none). */
-export function blockedModelLabel(use: Pick<BlockedModelUse, 'classType' | 'value'>): string {
-  return modelEntryFor(use.classType, use.value)?.label ?? use.value
+export function blockedModelLabel(use: Pick<BlockedModelUse, 'classType' | 'value' | 'input'>): string {
+  return modelEntryFor(use.classType, use.value, use.input)?.label ?? use.value
 }
 
 /**
@@ -127,7 +131,7 @@ export function blockedModelRefusal(
   use: BlockedModelUse,
   opts: { title: string, families?: ReadonlySet<RunnerFamily>, engineReason?: string },
 ): { title: string, description: string } {
-  const entry = modelEntryFor(use.classType, use.value)
+  const entry = modelEntryFor(use.classType, use.value, use.input)
   const label = entry?.label ?? use.value
   const families = opts.families ?? NO_FAMILIES
   if (use.reason === 'discontinued') {
@@ -167,6 +171,7 @@ const CLASS_TITLES: Readonly<Record<string, string>> = {
   UpscaleImageNode: 'Upscale an image',
   RotateCameraNode: 'Rotate camera',
   ProductShotNode: 'Product shot',
+  LipSyncNode: 'Lip-sync a character',
 }
 
 /**
@@ -204,7 +209,7 @@ export function blockedModelsResponse(
     const t = text(use)
     const entry = (node_errors[use.nodeId] ??= { errors: [], dependent_outputs: [], class_type: use.classType }) as { errors: unknown[] }
     // An upgrade has no model widget to point at.
-    const extra_info = use.upgrade ? {} : { input_name: 'model', input_value: use.value }
+    const extra_info = use.upgrade ? {} : { input_name: use.input ?? 'model', input_value: use.value }
     entry.errors.push({ type: 'value_not_in_list', message: t.message, details: t.details, extra_info })
   }
   const first = uses[0] ? text(uses[0]) : { message: 'A model in this workflow can’t run here.', details: '' }

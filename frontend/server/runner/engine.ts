@@ -27,6 +27,9 @@ import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
 import { extraPromptText, hasOutputNode, measuredInputPixels, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
 import { ev, type RunEvents, type SwitchReason } from './events'
+import { sync3InputFiles, sync3MediaCheck } from './sync3Media'
+import { isSync3LipSync } from '#shared/runner/lipSync'
+import type { InputSeconds } from '#shared/pricing/clipSettings'
 import type { Handoff } from './handoff'
 import { extFor, type ResultStore } from './results'
 import { runIdOf, userKeyOf, type RunStore } from './store'
@@ -666,6 +669,17 @@ export function createEngine(deps: EngineDeps) {
       // goes to planNode, which drops a backup that can't take it.
       const fileCheck = await linkedFileCheck(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], f => deps.results.read(f), families)
       if (fileCheck.problem) throw new Error(fileCheck.problem)
+      // sync-3 lip-sync (F22): its face video and sound read and measured again
+      // now, before the hand-off. A file that no longer fits fails the node here
+      // (its hold is released); the lengths measured are what it is charged.
+      let inputSeconds: InputSeconds | undefined
+      if (take.prompt[id]!.class_type === 'LipSyncNode' && isSync3LipSync(take.prompt[id]!.inputs ?? {})) {
+        const media = await sync3MediaCheck(take.prompt, id, {
+          read: f => deps.results.read(f), strict: deps.hosted(), filesFrom: ([from]) => take.nodes[from]?.outputs ?? [],
+        })
+        if (media.problem !== null) throw new Error(media.problem)
+        inputSeconds = media.seconds
+      }
 
       const plan = await planNode({
         prompt: take.prompt,
@@ -715,8 +729,9 @@ export function createEngine(deps: EngineDeps) {
       const backupSettings = deps.backup?.() ?? { enabled: false, stallMs: 0 }
       const backup = backupSettings.enabled && plan.backup ? plan.backup : null
       // Priced on the measured picture where the price depends on its size
-      // (FLUX.2 edit; Rotate camera on 2511), measured before planning.
-      rec.credits = nodeCredits(take.prompt[id]!, inputPixels, families)
+      // (FLUX.2 edit; Rotate camera on 2511), and on the measured clip where it
+      // depends on its length (sync-3 lip-sync), measured before planning.
+      rec.credits = nodeCredits(take.prompt[id]!, inputPixels, families, inputSeconds)
       const fp = isReusable(plan.payload)
         ? requestFingerprint(fingerprintEndpoint(plan.provider, plan.endpoint), plan.payload, u => deps.handoff.hashOf(u))
         : null
@@ -1085,6 +1100,17 @@ export function createEngine(deps: EngineDeps) {
       assertOwned: fs => assertFilesOwned(fs, i.userId, deps.hosted(), deps.ownership),
     })
     if (tooLong) throw refuse(tooLong.message, 400, { nodeId: tooLong.nodeId, classType: tooLong.classType })
+    // sync-3 lip-sync (F22): its face video and sound must be the caller's own
+    // (hosted), and sync-3 must be able to take them: read and measured now,
+    // before anything is held (sync3Media.ts). The node's turn reads them again.
+    for (const p of prompts) {
+      for (const [nodeId, n] of Object.entries(p)) {
+        if (n.class_type !== 'LipSyncNode' || !isSync3LipSync(n.inputs ?? {})) continue
+        await assertFilesOwned(sync3InputFiles(p, nodeId), i.userId, deps.hosted(), deps.ownership)
+        const media = await sync3MediaCheck(p, nodeId, { read: f => deps.results.read(f), strict: deps.hosted() })
+        if (media.problem !== null) throw refuse(media.problem, 400, { nodeId, classType: n.class_type })
+      }
+    }
     // A Frame's baked layers and masks are files the browser uploaded just
     // before: one that is gone fails now, before anything runs or is charged.
     for (const f of loadImageFiles(prompts)) {

@@ -26,6 +26,13 @@
  * says "up to" when it shows that ceiling, so it is never below the charge.
  * sync.so's "silence" mode (and a linked sync mode) is refused.
  *
+ * sync-3 (Lip-sync a character's runner-only engine, model line-up F22) bills
+ * the clip it makes (sync.so's sync mode guide): the sound's length for loop,
+ * bounce and remap, the shorter of sound and video for cut off; "silence" is
+ * refused. The runner measures both files before the call and refuses a clip
+ * over 60 s, so the 60 s figure (the hold, and the badge's "up to") is never
+ * below the charge.
+ *
  * Fail-safe: a linked setting, or a value the service doesn't list, is priced
  * at its dearest; an unreadable length at the longest the service accepts.
  * Pure; relative imports only.
@@ -34,6 +41,7 @@ import { creditsForUsd } from './markup'
 import { clipRate, clipUsd } from './clipRates'
 import { readModelOptions } from './videoSettings'
 import { pyIntOf, pyTruthy } from '../runner/pyText'
+import { SYNC_3_ENGINE, lipSyncSyncMode, sync3ModeRefusal } from '../runner/lipSync'
 
 export interface ClipCall {
   endpoint: string
@@ -404,7 +412,24 @@ function sentAsIs(v: unknown): string {
   return typeof v === 'string' ? v : UNLISTED
 }
 
-function lipSyncCalls(inputs: Inputs, measured: InputSeconds): ClipCall[] {
+/** The fal endpoint LipSyncNode's sync-3 engine calls (server/runner/generators/sync3.ts). */
+export const SYNC_3_ENDPOINT = 'fal-ai/sync-lipsync/v3'
+
+/**
+ * sync-3's call as the runner sends it: the clip it makes, from the measured
+ * sound (and video, for cut off); unmeasured, the 60 s cap. A sync mode it
+ * isn't run with is refused.
+ */
+function sync3Calls(inputs: Inputs, measured: InputSeconds): ClipCall[] | { refused: string } {
+  const mode = lipSyncSyncMode(inputs)
+  const refused = sync3ModeRefusal(mode)
+  if (refused) return { refused }
+  const audio = billedSeconds(measured.audio)
+  const seconds = mode === 'cut_off' ? Math.min(audio, billedSeconds(measured.video)) : audio
+  return [{ endpoint: SYNC_3_ENDPOINT, seconds, resolution: null, audio: false }]
+}
+
+function lipSyncCalls(inputs: Inputs, measured: InputSeconds): ClipCall[] | { refused: string } {
   // Fabric bills the sound clip; Kling lip-sync bills the source video (its output).
   const fabric = (resolution: string): ClipCall => ({ endpoint: 'veed/fabric-1.0', seconds: billedSeconds(measured.audio), resolution, audio: false })
   const kling: ClipCall = { endpoint: 'kwaivgi/kling-lip-sync', seconds: billedSeconds(measured.video), resolution: null, audio: false }
@@ -417,6 +442,8 @@ function lipSyncCalls(inputs: Inputs, measured: InputSeconds): ClipCall[] {
   const resolution = hasOwn(opts, 'resolution') ? opts.resolution : inputs.resolution
   const fabricCall = fabric(linked(resolution) ? UNLISTED : sentAsIs(resolution))
   if (linked(engine)) return [fabricCall, kling]
+  // sync-3 runs only in the runner (the ComfyUI path refuses it, shared/runner/blockedModels.ts).
+  if (engine === SYNC_3_ENGINE) return sync3Calls(inputs, measured)
   // _lipsync_resolve_engine: "fabric"/"sync" win; else a video → sync, otherwise fabric.
   const eng = engine === 'fabric' || engine === 'sync' ? engine : (pyTruthy(opts.face_video) ? 'sync' : 'fabric')
   return [eng === 'sync' ? kling : fabricCall]

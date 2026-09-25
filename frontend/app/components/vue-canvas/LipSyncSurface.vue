@@ -9,7 +9,10 @@ import { useLipSync } from '~/composables/useLipSync'
 import { useCharacters } from '~/composables/useCharacters'
 import { uploadRefFile, viewRefUrl } from '~/lib/shotdirector/refUpload'
 import { VOICE_CATALOG, mergeClonedVoices, type VoiceMeta, type ClonedVoice } from '~/lib/voiceCatalog'
-import { resolveEngine } from '~/lib/lipsync/compile'
+import { engineLabel, resolveEngine } from '~/lib/lipsync/compile'
+import { NO_FAMILIES, parseFamilies } from '#shared/runner/families'
+import { comboMenu, menuHiddenValues, modelMenu } from '#shared/runner/modelMenus'
+import { SYNC_3_ENGINE, SYNC_3_SYNC_MODES } from '#shared/runner/lipSync'
 import StudioSection from '~/components/vue-canvas/StudioSection.vue'
 
 const props = defineProps<{ nodeId: string; nodes: any[] }>()
@@ -143,8 +146,29 @@ const resolvedEngine = computed(() => resolveEngine(sheet.value))
 const RESOLUTIONS = ['480p', '720p', '1080p']
 const SYNC_MODES = ['cut_off', 'loop', 'bounce', 'silence', 'remap']
 
+// The engines on offer (shared/runner/modelMenus.ts "LipSyncNode.engine"):
+// sync-3 runs only in Sailor's runner, so it shows while its switch is on,
+// and otherwise only when this studio already holds it (tagged "hidden").
+const runtimePublic = useRuntimeConfig().public as { runnerEnabled?: boolean, runnerFamilies?: unknown }
+const lipSyncFamilies = runtimePublic.runnerEnabled ? parseFamilies(runtimePublic.runnerFamilies) : NO_FAMILIES
+const engineMenu = computed(() => {
+  const menu = modelMenu('LipSyncNode', 'engine')
+  if (!menu) return { options: ['auto', 'fabric', 'sync'], labels: ['Auto', 'Fabric', 'Sync'] }
+  const m = comboMenu(menu.entries.map(e => e.value), menuHiddenValues(menu, lipSyncFamilies), sheet.value.engine, engineLabel)
+  return { options: m.options, labels: m.labels ?? m.options.map(engineLabel) }
+})
+// sync-3 can't use "silence" (its clip would be the whole video): it shows only while picked, to be changed.
+const syncModes = computed(() => resolvedEngine.value !== SYNC_3_ENGINE
+  ? SYNC_MODES
+  : [...SYNC_3_SYNC_MODES, ...(SYNC_3_SYNC_MODES.includes(sheet.value.syncMode) ? [] : [sheet.value.syncMode])])
+// What each engine bills: Fabric and Kling's lip-sync about $1 per 30 s; sync-3 $8 a minute (shared/pricing/clipRates.ts).
+const priceHint = computed(() => resolvedEngine.value === SYNC_3_ENGINE
+  ? { text: '~$4 / 30s', title: 'sync-3 bills $8 per minute of video it makes' }
+  : { text: '~$1 / 30s', title: 'Both engines bill about $1 per 30 seconds of output' })
+
 function humanizeSyncMode(m: string): string {
-  return m.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+  const words = m.replace(/_/g, ' ')
+  return words.charAt(0).toUpperCase() + words.slice(1)
 }
 </script>
 
@@ -159,7 +183,7 @@ function humanizeSyncMode(m: string): string {
       <!-- Header -->
       <div class="flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-4 pt-3 pb-2.5">
         <span class="text-[13px] font-medium tracking-[-0.01em] text-white/90">Lip-Sync Studio</span>
-        <span class="ml-1 rounded border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[10px] text-white/40">{{ resolvedEngine === 'sync' ? 'Sync' : 'Fabric' }}</span>
+        <span class="ml-1 rounded border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[10px] text-white/40">{{ engineLabel(resolvedEngine) }}</span>
         <span class="flex-1" />
         <span class="rounded border border-white/10 px-1.5 py-0.5 text-[11px] text-white/30">esc</span>
         <button type="button" aria-label="Close" class="ml-1 text-white/40 transition hover:text-white/80" @click="emit('close')">
@@ -359,9 +383,7 @@ function humanizeSyncMode(m: string): string {
                 class="w-full rounded border border-white/10 bg-[#0e0e10] px-2.5 py-1.5 text-[12px] text-white/80 outline-none focus:border-white/25"
                 @change="update(s => ({ ...s, engine: ($event.target as HTMLSelectElement).value as typeof s.engine }))"
               >
-                <option value="auto" class="bg-neutral-900">Auto</option>
-                <option value="fabric" class="bg-neutral-900">Fabric</option>
-                <option value="sync" class="bg-neutral-900">Sync</option>
+                <option v-for="(e, i) in engineMenu.options" :key="e" :value="e" class="bg-neutral-900">{{ engineMenu.labels[i] }}</option>
               </select>
             </div>
             <div v-if="resolvedEngine === 'fabric'">
@@ -374,20 +396,20 @@ function humanizeSyncMode(m: string): string {
                 <option v-for="r in RESOLUTIONS" :key="r" :value="r" class="bg-neutral-900">{{ r }}</option>
               </select>
             </div>
-            <div v-if="resolvedEngine === 'sync'">
+            <div v-if="resolvedEngine === 'sync' || resolvedEngine === SYNC_3_ENGINE">
               <label class="mb-1 block text-[11px] text-white/45">Sync mode</label>
               <select
                 :value="sheet.syncMode"
                 class="w-full rounded border border-white/10 bg-[#0e0e10] px-2.5 py-1.5 text-[12px] text-white/80 outline-none focus:border-white/25"
                 @change="update(s => ({ ...s, syncMode: ($event.target as HTMLSelectElement).value as typeof s.syncMode }))"
               >
-                <option v-for="m in SYNC_MODES" :key="m" :value="m" class="bg-neutral-900">{{ humanizeSyncMode(m) }}</option>
+                <option v-for="m in syncModes" :key="m" :value="m" class="bg-neutral-900">{{ humanizeSyncMode(m) }}</option>
               </select>
             </div>
           </div>
 
           <p class="text-[11px] text-white/35">
-            Resolved engine: <span class="text-white/60">{{ resolvedEngine === 'sync' ? 'Sync' : 'Fabric' }}</span>
+            Resolved engine: <span class="text-white/60">{{ engineLabel(resolvedEngine) }}</span>
             <span v-if="sheet.engine === 'auto'" class="text-white/25"> (auto — video faces use Sync, image/character faces use Fabric)</span>
           </p>
 
@@ -413,7 +435,7 @@ function humanizeSyncMode(m: string): string {
         {{ runtimeError }}
       </div>
       <div class="flex shrink-0 items-center justify-end gap-2 border-t border-white/[0.06] px-4 py-2.5">
-        <span class="mr-auto text-[11px] text-white/30" title="Both engines bill about $1 per 30 seconds of output">~$1 / 30s</span>
+        <span class="mr-auto text-[11px] text-white/30" :title="priceHint.title">{{ priceHint.text }}</span>
         <button
           type="button"
           class="rounded border border-white/10 px-3 py-1.5 text-[12px] text-white/70 transition enabled:hover:border-white/25 enabled:hover:text-white/90 disabled:cursor-not-allowed disabled:opacity-40"

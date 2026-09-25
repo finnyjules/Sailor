@@ -5,6 +5,7 @@
 import { isLink, linksOf, type ApiPrompt } from './graph'
 import { NO_FAMILIES, type RunnerFamily } from './families'
 import { pyFloatOf, pyIntOf, pyTruthy } from './pyText'
+import { SYNC_3_ENGINE, isSync3LipSync, lipSyncEngine } from './lipSync'
 
 export const RUNNER_NODE_TYPES: ReadonlySet<string> = new Set([
   'GenerateImageNode', 'GenerateVideoNode', 'ComfyGateNode', 'Image', 'Video',
@@ -413,6 +414,28 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     mustNotLink: ['image', 'upload'],
     feedsOnly: ['Compositor'],
   },
+  // ── sync-3 (model line-up F22): Lip-sync a character on sync-3 (sync.so) on fal, runner-only ──
+  // Only the sync-3 engine (`model_options.engine` over the widget, as
+  // LipSyncNode.execute reads it; ./lipSync.ts): Fabric and Kling stay on
+  // ComfyUI. The face video is the studio's `model_options.face_video`; the
+  // sound is its `model_options.audio`, or a linked Audio card (the one linked
+  // sound the runner takes). The engine, sync mode and options are read before
+  // the run, so they must not be wired; a linked picture is a face sync-3 isn't
+  // sent here (its video endpoint takes a video).
+  LipSyncNode: {
+    models: { [SYNC_3_ENGINE]: 'sync-3' },
+    mustNotLink: ['model_options', 'engine', 'sync_mode', 'image'],
+    linkSources: { audio: [['Audio', 0]] },
+  },
+  // The Audio card a sync-3 lip-sync reads its sound from: its own file,
+  // handed on (no call, no charge). Taken only when it feeds lip-sync nodes
+  // and plays its file (nothing wired into `source`).
+  Audio: {
+    family: 'sync-3',
+    local: 'source',
+    mustNotLink: ['audio', 'source'],
+    feedsOnly: ['LipSyncNode'],
+  },
 }
 
 /**
@@ -509,9 +532,18 @@ function asksForSeveralImages(inputs: Record<string, unknown>): boolean {
     && optionInt(opts, 'max_images') > 1
 }
 
-/** The model widget as a rule looks it up (a legacy video label → its current id). */
-function modelKey(classType: string, model: unknown): string {
-  return classType === 'GenerateVideoNode' ? resolveVideoModelId(model) : (typeof model === 'string' ? model : '')
+/**
+ * The value a rule's `models` looks up: the model widget (a legacy video label
+ * → its current id), or for Lip-sync a character the engine it runs
+ * (./lipSync.ts; options that can't be read give none).
+ */
+function modelKey(classType: string, inputs: Record<string, unknown>): string {
+  if (classType === 'GenerateVideoNode') return resolveVideoModelId(inputs.model)
+  if (classType === 'LipSyncNode') {
+    const engine = lipSyncEngine(inputs)
+    return isSync3LipSync(inputs) && typeof engine === 'string' ? engine : ''
+  }
+  return typeof inputs.model === 'string' ? inputs.model : ''
 }
 
 /** Whether a rule row lets this node through with these families switched on. */
@@ -525,7 +557,7 @@ export function nodeRuleAllows(
   const need: string[] = [...(rule.mustLink ?? [])]
   let family: RunnerFamily | undefined = rule.family
   if (rule.models) {
-    const key = modelKey(classType, inputs.model)
+    const key = modelKey(classType, inputs)
     const m = Object.prototype.hasOwnProperty.call(rule.models, key) ? rule.models[key] : undefined
     if (!m) return false
     if (typeof m === 'string') family = m

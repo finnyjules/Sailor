@@ -156,8 +156,9 @@ describe('lip-sync billed by the measured clip', () => {
     expect(py).toContain('IO.Int.Input("duration", default=8, min=1, max=30, step=1, tooltip="Seconds.")')
   })
 
-  it('the runner does not run lip-sync (nothing to measure there until F22)', () => {
-    for (const ct of ['LipSyncNode', 'LipsyncNode', 'LipsyncRemoteNode']) expect(Object.prototype.hasOwnProperty.call(RUNNER_NODE_RULES, ct), ct).toBe(false)
+  it('the runner runs lip-sync only as Lip-sync a character on sync-3 (F22, which measures its own files); the older nodes stay on the engine', () => {
+    for (const ct of ['LipsyncNode', 'LipsyncRemoteNode']) expect(Object.prototype.hasOwnProperty.call(RUNNER_NODE_RULES, ct), ct).toBe(false)
+    expect(Object.keys(RUNNER_NODE_RULES.LipSyncNode!.models ?? {})).toEqual(['sync-3'])
   })
 })
 
@@ -467,7 +468,7 @@ describe('review I2, M2, M3', () => {
   })
   it('M3: RESTYLE_LORA_CREDITS is gone', () => {
     expect('RESTYLE_LORA_CREDITS' in PriceBook).toBe(false)
-    expect(PriceBook.PRICE_BOOK_VERSION).toBe('lineup-f21')
+    expect(PriceBook.PRICE_BOOK_VERSION).toBe('lineup-f22')
   })
 })
 

@@ -75,19 +75,47 @@ export async function mediaSecondsOfBytes(
   bytes: Uint8Array, kind: MediaKind,
   opts: { maxBytes?: number, timeoutMs?: number } = {},
 ): Promise<number | null> {
+  return (await mediaInfoOfBytes(bytes, kind, opts))?.seconds ?? null
+}
+
+/** What a media file's primary audio (or video) track says about it. */
+export interface MediaTrackInfo {
+  seconds: number
+  /** The video track's display size (after rotation); null for a sound. */
+  width: number | null
+  height: number | null
+}
+
+/**
+ * The length (and, for a video, the display size) of the primary track of
+ * media already in memory, or null when it is over `maxBytes`, too slow, has
+ * no such track, or can't be read. The runner's media hand-off
+ * (server/runner/mediaInputs.ts) reads files this way.
+ */
+export async function mediaInfoOfBytes(
+  bytes: Uint8Array, kind: MediaKind,
+  opts: { maxBytes?: number, timeoutMs?: number } = {},
+): Promise<MediaTrackInfo | null> {
   if (bytes.byteLength > (opts.maxBytes ?? MAX_MEDIA_BYTES)) return null
   const copy = bytes.slice()
-  return trackSeconds(new Input({ source: new BufferSource(copy.buffer), formats: ALL_FORMATS }), kind, opts.timeoutMs)
+  return trackInfo(new Input({ source: new BufferSource(copy.buffer), formats: ALL_FORMATS }), kind, opts.timeoutMs)
 }
 
 async function trackSeconds(input: Input, kind: MediaKind, timeoutMs?: number): Promise<number | null> {
+  return (await trackInfo(input, kind, timeoutMs))?.seconds ?? null
+}
+
+async function trackInfo(input: Input, kind: MediaKind, timeoutMs?: number): Promise<MediaTrackInfo | null> {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    const work = (async () => {
+    const work = (async (): Promise<MediaTrackInfo | null> => {
       const track = kind === 'audio' ? await input.getPrimaryAudioTrack() : await input.getPrimaryVideoTrack()
       if (!track) return null
       const d = await track.computeDuration()
-      return Number.isFinite(d) && d > 0 ? d : null
+      if (!(Number.isFinite(d) && d > 0)) return null
+      if (!track.isVideoTrack()) return { seconds: d, width: null, height: null }
+      const [w, h] = await Promise.all([track.getDisplayWidth(), track.getDisplayHeight()])
+      return { seconds: d, width: Number.isFinite(w) && w > 0 ? w : null, height: Number.isFinite(h) && h > 0 ? h : null }
     })().catch(() => null)
     const late = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs ?? MEDIA_READ_TIMEOUT_MS) })
     return await Promise.race([work, late])

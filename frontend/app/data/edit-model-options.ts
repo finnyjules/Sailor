@@ -94,4 +94,18 @@ export const EDIT_MODEL_MENUS: Readonly<Record<string, EditModelMenu>> = {
     ],
     preference: ['Clarity'],
   },
+  // LipSyncNode `engine` (nodes_replicate.py:4960): "auto" picks Fabric for a
+  // picture and Kling's lip-sync for a video. The labels are the Lip-sync
+  // studio's own. sync-3 (sync.so) is runner-only (model line-up F22): no
+  // Python builder; offered while its switch is on. The node reads
+  // `model_options.engine` over this widget: shared/runner/lipSync.ts.
+  'LipSyncNode.engine': {
+    options: [
+      { value: 'auto', label: 'Auto' },
+      { value: 'fabric', label: 'Fabric' },
+      { value: 'sync', label: 'Sync' },
+      { value: 'sync-3', label: 'sync-3', runnerOnly: true, family: 'sync-3' },
+    ],
+    preference: ['auto'],
+  },
 }

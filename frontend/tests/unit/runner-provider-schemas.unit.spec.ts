@@ -35,6 +35,7 @@ import { HAPPYHORSE_11_ENDPOINTS, HAPPYHORSE_11_REPLICATE_SLUG } from '~~/server
 import { GROK_IMAGINE_VIDEO_15_ENDPOINTS, GROK_IMAGINE_VIDEO_15_REPLICATE_SLUG } from '~~/server/runner/generators/grokImagineVideo15'
 import { LTX_25_FAST_REPLICATE_SLUG } from '~~/server/runner/generators/ltx25Fast'
 import { LUMA_RAY_32_FAL_IMAGE_TO_VIDEO, LUMA_RAY_32_REPLICATE_SLUG } from '~~/server/runner/generators/lumaRay32'
+import { SYNC_3_APP } from '~~/server/runner/generators/sync3'
 import { GPT_IMAGE_25_FAL_ENDPOINTS, GPT_IMAGE_25_REPLICATE_SLUGS } from '~~/server/runner/generators/gptImage25'
 import { QWEN_IMAGE_3_SLUG } from '~~/server/runner/generators/qwenImage3'
 import { GROK_IMAGINE_2_SLUG } from '~~/server/runner/generators/grokImagine2'
@@ -273,6 +274,8 @@ function runnerEndpoints(): string[] {
   // runner-luma-ray-3-2.unit.spec.ts). fal's text-to-video is never called, so it isn't saved.
   out.add(`replicate ${LUMA_RAY_32_REPLICATE_SLUG}`)
   out.add(`fal ${LUMA_RAY_32_FAL_IMAGE_TO_VIDEO}`)
+  // Task F22: sync-3 lip-sync on fal, no backup (sync3.ts; its grid is runner-sync-3.unit.spec.ts).
+  out.add(`fal ${SYNC_3_APP}`)
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)

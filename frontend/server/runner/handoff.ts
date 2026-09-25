@@ -1,5 +1,5 @@
 /**
- * Hands one of our saved files to the next model: uploads it to fal storage
+ * Hands one of our saved files (a picture, a video or a sound) to the next model: uploads it to fal storage
  * once and reuses the link for a day. Never base64 in the request, and never fal's own
  * result link (it can expire while a Gate waits). Also remembers what each
  * link contained, so a request's fingerprint depends on the picture, not on
@@ -17,9 +17,15 @@ export function sha256Hex(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex')
 }
 
+/**
+ * The upload's type, by the file's name. Sounds and videos go the same way as
+ * pictures (model line-up F22: sync-3's face video and sound; F23 reuses it).
+ */
 const MIME: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif',
-  mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
+  mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
+  wav: 'audio/wav', mp3: 'audio/mpeg', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', flac: 'audio/flac',
+  m4a: 'audio/mp4', aac: 'audio/aac',
 }
 
 export function mimeFor(filename: string): string {

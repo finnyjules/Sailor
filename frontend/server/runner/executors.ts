@@ -35,7 +35,9 @@
  * qwen-2511-angles, which moves the whole node while it is on;
  * Nano Banana 2 in BlendSceneNode, family nano-banana-2-blend;
  * ProductShotNode on Bria Product Shot, family bria-product-shot, which
- * moves the whole node while it is on)
+ * moves the whole node while it is on;
+ * LipSyncNode on its sync-3 engine, family sync-3, fed by the studio's files
+ * or an Audio card, which hands its own file on)
  * closely enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiPrompt } from '#shared/runner/graph'
@@ -86,6 +88,8 @@ import { isKrea2Model, krea2Generate, krea2OnReplicate } from './generators/krea
 import { isSeedream5ProEdit, seedream5ProEdit } from './generators/seedream5ProEdit'
 import { qwen2511Angles } from './generators/qwen2511Angles'
 import { briaProductShot } from './generators/briaProductShot'
+import { sync3Lipsync, sync3NodeProblem, sync3Sources } from './generators/sync3'
+import { isSync3LipSync, lipSyncSyncMode } from '#shared/runner/lipSync'
 import { backupInputProblem, checkRequest, seedanceReferenceProblem } from './requestRules'
 import type { OutputFile, RunnerProvider } from './types'
 
@@ -744,6 +748,38 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
         seed: asInt(inputs.seed, 0),
       })
       return stillCall(call, 'restyle', call.backup)
+    }
+
+    // ── sync-3 (model line-up F22): Lip-sync a character's sync-3 engine on fal, no backup ──
+    // The face video and the sound go through the pictures' hand-off; the
+    // engine has already read and measured both (sync3Media.ts), so here they
+    // are only named, handed off and sent. Python's other engines never come
+    // here (eligibility.ts takes only sync-3).
+    case 'LipSyncNode': {
+      if (!isSync3LipSync(inputs)) throw new Error('The runner runs Lip-sync a character on sync-3 only')
+      const problem = sync3NodeProblem(ctx.prompt, ctx.nodeId)
+      if (problem) throw new Error(problem.message)
+      const sources = sync3Sources(ctx.prompt, ctx.nodeId)
+      if (!('file' in sources.video) || !('file' in sources.audio)) throw new Error('This lip-sync has no face video or sound')
+      // A linked Audio card hands its file on; the file the link brought is the one sent.
+      const audio = sources.audio.link ? (linkedFirstFile('audio') ?? sources.audio.file) : sources.audio.file
+      const call = sync3Lipsync({
+        videoUrl: await ctx.toUrl(sources.video.file),
+        audioUrl: await ctx.toUrl(audio),
+        syncMode: String(lipSyncSyncMode(inputs)),
+      })
+      return {
+        kind: 'provider', provider: call.provider, endpoint: call.endpoint, payload: call.payload, media: 'video', prefix: 'lip_sync',
+        // LipSyncNode shows nothing itself (its Python execute returns only the video); a Video card after it does.
+        uiFor: () => null,
+      }
+    }
+
+    // The Audio card a sync-3 lip-sync reads (family sync-3): its own file, handed on.
+    // The card plays its file itself; nothing to show.
+    case 'Audio': {
+      const f = parseInputFileRef(inputs.audio)
+      return { kind: 'pass', files: f ? [f] : [], ui: null }
     }
 
     // ── frame family (comfy_extras/nodes_compositor.py) ──

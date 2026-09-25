@@ -111,10 +111,10 @@ const fams = (...f: RunnerFamily[]) => new Set<RunnerFamily>(f)
 // ----------------------------------------------------------- the fixture
 
 /** The committed baseline's own node definitions for the classes the overlay covers: an engine body. */
-function engineFixture(): Record<string, any> {
+function engineFixture(extra: readonly string[] = []): Record<string, any> {
   const baseline = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(__dirname, '../../server/native/objectInfo.baseline.json.gz'))).toString('utf8'))
   const out: Record<string, any> = {}
-  for (const k of ['GenerateImageNode', 'GenerateVideoNode', 'FilmShotNode', 'EditImageNode', 'BlendSceneNode', 'RestyleFromImageNode', 'GenerateFromReferencesNode', 'UpscaleImageNode', 'KSampler']) {
+  for (const k of ['GenerateImageNode', 'GenerateVideoNode', 'FilmShotNode', 'EditImageNode', 'BlendSceneNode', 'RestyleFromImageNode', 'GenerateFromReferencesNode', 'UpscaleImageNode', 'KSampler', ...extra]) {
     if (baseline[k]) out[k] = baseline[k]
   }
   // One covered class in ComfyUI's legacy shape too: [[...options], {config}].
@@ -122,13 +122,13 @@ function engineFixture(): Record<string, any> {
   return out
 }
 
-const spec = (body: any, cls: string) => body[cls].input.required.model
-const cfg = (body: any, cls: string) => {
-  const s = spec(body, cls)
+const spec = (body: any, cls: string, input = 'model') => body[cls].input.required[input]
+const cfg = (body: any, cls: string, input = 'model') => {
+  const s = spec(body, cls, input)
   return Array.isArray(s[0]) ? s[1] : s[1]
 }
-const opts = (body: any, cls: string) => {
-  const s = spec(body, cls)
+const opts = (body: any, cls: string, input = 'model') => {
+  const s = spec(body, cls, input)
   return Array.isArray(s[0]) ? s[0] : s[1].options
 }
 
@@ -210,13 +210,15 @@ describe('applyModelOverlay', () => {
   })
 
   it('the dropdown lists match the Python lists exactly (plus the runner-only values, last), and a value only the engine lists is kept', () => {
-    const fixture = engineFixture()
+    // + Lip-sync a character's engine (Task F22): its sync-3 is runner-only.
+    const fixture = engineFixture(['LipSyncNode'])
     expect(RUNNER_ONLY_VALUES.EditImageNode).toEqual(['GPT Image 2.5', 'Seedream 5 Pro'])
     expect(RUNNER_ONLY_VALUES.BlendSceneNode).toEqual(['Nano Banana 2'])
+    expect(RUNNER_ONLY_VALUES.LipSyncNode).toEqual(['sync-3'])
     for (const [key, menu] of Object.entries(EDIT_MODEL_MENUS)) {
-      const cls = key.split('.')[0]!
-      expect(menu.options.map(o => o.value), key).toEqual([...opts(fixture, cls), ...runnerOnlyValues(cls)])
-      expect(menu.preference[0], key).toBe(cfg(fixture, cls).default)
+      const [cls, input] = key.split('.') as [string, string]
+      expect(menu.options.map(o => o.value), key).toEqual([...opts(fixture, cls, input), ...runnerOnlyValues(cls)])
+      expect(menu.preference[0], key).toBe(cfg(fixture, cls, input).default)
     }
     fixture.EditImageNode.input.required.model[1].options.push('Engine Only')
     expect(opts(applyModelOverlay(fixture, NO_FAMILIES), 'EditImageNode')).toEqual(['Nano Banana 2', 'Flux Kontext Pro', 'Flux 2 Pro', 'GPT Image 2.5', 'Seedream 5 Pro', 'Engine Only'])

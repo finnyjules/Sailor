@@ -110,6 +110,18 @@ export const CLIP_RATES: Record<string, ClipRate> = {
     unit: 'per_second', service: 'replicate', source: rep('sync/lipsync-2-pro'), read: READ, confidence: 'verified',
     byResolution: { '*': 0.08325 },
   },
+
+  // ── sync-3 (sync.so) on fal: Lip-sync a character's sync-3 engine, runner
+  // only (model line-up F22; server/runner/generators/sync3.ts) ─────────────
+  // "Price: $8 per minutes" (llms.txt and the saved schema's pricing text,
+  // read 2026-09-25), per minute of the video it makes: $8 / 60 per second.
+  // sync.so bills "per output frame" at "$0.107 – $0.133/sec" for sync-3
+  // (sync.so/docs/product/billing.md), so fal's rate is its top one. Billed
+  // seconds are rounded up to whole seconds (clipSettings.ts billedSeconds).
+  'fal-ai/sync-lipsync/v3': {
+    unit: 'per_second', service: 'fal', source: fal('fal-ai/sync-lipsync/v3'), read: '2026-09-25', confidence: 'verified',
+    byResolution: { '*': 8 / 60 },
+  },
 }
 
 /** The card for `endpoint`, or null. Own keys only: "constructor" is not an endpoint. */

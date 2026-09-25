@@ -61,11 +61,12 @@ function comboOptions(body: string, name: string): string[] {
 
 describe('clip rate cards', () => {
   it('every card is per second, verified, sourced and dated, with figures above zero', () => {
-    expect(Object.keys(CLIP_RATES).length).toBe(11)
+    // + sync-3 on fal (Task F22), read a day later.
+    expect(Object.keys(CLIP_RATES).length).toBe(12)
     for (const [endpoint, r] of Object.entries(CLIP_RATES)) {
       expect(r.unit, endpoint).toBe('per_second')
       expect(r.confidence, endpoint).toBe('verified')
-      expect(r.read, endpoint).toBe('2026-09-24')
+      expect(r.read, endpoint).toBe(endpoint === 'fal-ai/sync-lipsync/v3' ? '2026-09-25' : '2026-09-24')
       expect(r.source, endpoint).toMatch(r.service === 'fal' ? /^https:\/\/fal\.ai\/models\/.+\/llms\.txt$/ : /^https:\/\/replicate\.com\//)
       expect(r.source, endpoint).toContain(endpoint)
       for (const p of Object.values(r.byResolution)) {
@@ -77,10 +78,10 @@ describe('clip rate cards', () => {
     for (const e of REQUEST_PRICED_ENDPOINTS) expect(clipRate(e), e).not.toBeNull()
     const reached = new Set<string>()
     for (const ct of REMOTE_VIDEO_NODE_CLASSES) {
-      for (const inputs of [{}, { engine: 'sync' }, { engine: 'fabric' }]) for (const c of remoteVideoCalls(ct, inputs) as any[]) reached.add(c.endpoint)
+      for (const inputs of [{}, { engine: 'sync' }, { engine: 'fabric' }, { engine: 'sync-3' }]) for (const c of remoteVideoCalls(ct, inputs) as any[]) reached.add(c.endpoint)
     }
     for (const e of reached) expect(clipRate(e), e).not.toBeNull()
-    expect([...reached].sort()).toEqual(['bytedance/seedance-2.0', 'google/veo-3', 'kwaivgi/kling-lip-sync', 'kwaivgi/kling-v2.1', 'sync/lipsync-2-pro', 'veed/fabric-1.0'])
+    expect([...reached].sort()).toEqual(['bytedance/seedance-2.0', 'fal-ai/sync-lipsync/v3', 'google/veo-3', 'kwaivgi/kling-lip-sync', 'kwaivgi/kling-v2.1', 'sync/lipsync-2-pro', 'veed/fabric-1.0'])
   })
   it('prototype names are not endpoints', () => {
     for (const k of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {

@@ -57,6 +57,12 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   RotateCameraNode: { image: LINK },
   ProductShotNode: { image: LINK },
   RestyleFromImageNode: { content_image: LINK, style_image: LINK },
+  // sync-3 lip-sync (Task F22): the studio's face video and sound.
+  LipSyncNode: {
+    engine: 'sync-3',
+    sync_mode: 'cut_off',
+    model_options: JSON.stringify({ engine: 'sync-3', face_video: '/view?filename=face.mp4&type=input', audio: '/view?filename=voice.wav&type=input' }),
+  },
 }
 
 async function plan(classType: string, inputs: Record<string, unknown>, families?: ReadonlySet<RunnerFamily>): Promise<ProviderPlan> {
@@ -133,6 +139,8 @@ describe('the first and backup services are the table\'s', () => {
     expect(keys.has('RotateCameraNode+qwen-2511-angles')).toBe(true)
     // Product shot on Bria Product Shot (Task F12), the same way.
     expect(keys.has('ProductShotNode+bria-product-shot')).toBe(true)
+    // Lip-sync a character on sync-3 (Task F22), by its engine.
+    expect(keys.has('LipSyncNode:sync-3')).toBe(true)
     // And no row for something the runner doesn't run.
     const image = Object.keys(RUNNER_ROUTES).filter(k => k.startsWith('image:')).length
     const video = Object.keys(RUNNER_ROUTES).filter(k => k.startsWith('video:')).length

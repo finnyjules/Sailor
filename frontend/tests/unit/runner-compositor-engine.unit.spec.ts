@@ -443,7 +443,8 @@ describe('server health: caps, sources, Stop', () => {
   })
 
   it('every runner image class is a picture source (drift guard); the video ones are not', () => {
-    for (const c of PROVIDER_TYPES) expect(IMAGE_OUTPUT_CLASSES.has(c)).toBe(c !== 'GenerateVideoNode')
+    // Lip-sync a character on sync-3 (Task F22) makes a video.
+    for (const c of PROVIDER_TYPES) expect(IMAGE_OUTPUT_CLASSES.has(c), c).toBe(c !== 'GenerateVideoNode' && c !== 'LipSyncNode')
     expect(IMAGE_OUTPUT_CLASSES.has('Video')).toBe(false)
   })
 

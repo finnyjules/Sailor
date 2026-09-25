@@ -98,6 +98,11 @@
  *    fal's 20 MB the node fails the same way; over Replicate's 10 MB it runs
  *    on fal with no backup (`backupInputProblem`, read by planNode). No other
  *    node's file is read.
+ *  - Lip-sync a character on sync-3 (F22), on a runner run only: a sync mode
+ *    whose clip the price can't read ("silence", a linked or unknown one),
+ *    no face video or sound, or one that isn't a file uploaded to Sailor
+ *    (generators/sync3.ts). Its files are then read and measured before the
+ *    hold (sync3Media.ts, called by the engine).
  * References are never dropped, to make a request fit or otherwise.
  */
 import { isLink, type ApiNode, type ApiPrompt } from '#shared/runner/graph'
@@ -149,6 +154,8 @@ import {
 } from './generators/recraftV41'
 import { KREA_2_FAL_APPS, KREA_2_IDS, KREA_2_LONG_PROMPT, KREA_2_NEEDS_PROMPT, KREA_2_PROMPT_MAX, isKrea2Model } from './generators/krea2'
 import { isSeedream5ProEdit, seedream5ProEditProblems } from './generators/seedream5ProEdit'
+import { SYNC_3_APP, sync3NodeProblem } from './generators/sync3'
+import { isSync3LipSync, sync3ModeRefusal } from '#shared/runner/lipSync'
 
 export { FIRST_FRAME_AND_REFERENCES }
 
@@ -323,6 +330,8 @@ export function requestProblem(provider: string, endpoint: string, payload: Reco
     const v = payload.reference_image_urls
     if (Array.isArray(v) && v.length > WAN_3_MAX_REFERENCE_PICTURES) return WAN_3_TOO_MANY_REFERENCES
   }
+  // sync-3 (F22): only the sync modes whose clip the price reads ("silence" never goes out).
+  if (`${provider} ${endpoint}` === `fal ${SYNC_3_APP}`) return sync3ModeRefusal(payload.sync_mode)
   return null
 }
 
@@ -662,6 +671,14 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
         if (p) out.push({ nodeId, classType: ct, input: onLength ? 'duration' : 'model_options', message: p })
         else if (!isLink(inputs.prompt)) judge(LUMA_RAY_32_REPLICATE_SLUG, asText(inputs.prompt), 'replicate')
       }
+    }
+    // Lip-sync a character on sync-3 (F22), on a runner run (the ComfyUI path refuses the engine
+    // itself, shared/runner/blockedModels.ts): a sync mode it isn't run with, no face video or sound,
+    // or one that isn't a file uploaded to Sailor. The files themselves are read and measured
+    // next, before the hold (sync3Media.ts).
+    else if (ct === 'LipSyncNode' && opts.runner && isSync3LipSync(inputs)) {
+      const p = sync3NodeProblem(prompt, nodeId)
+      if (p) out.push({ nodeId, classType: ct, input: p.input, message: p.message })
     }
     // Film a shot on Seedance 2.0 (ComfyUI path only): a first frame beside references is refused,
     // never sent with the references dropped; the counts too (the same check as Generate a video's).

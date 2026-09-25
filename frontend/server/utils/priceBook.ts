@@ -119,7 +119,12 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // 540p / 720p / 1080p) first; fal's image-to-video the backup for a 5 s clip
 // from a picture, at the same price, covered at cost (it never raises the
 // price). Runner-only, family luma-ray-3.2. No other price moves.
-export const PRICE_BOOK_VERSION = 'lineup-f21'
+// lineup-f22 (Task F22): sync-3 lip-sync (Lip-sync a character's sync-3
+// engine), fal's $8 a minute of video made ($8 / 60 a second, whole seconds
+// rounded up), billed on the clip the runner measures (the sound's length,
+// or the shorter of sound and video for cut off; 60 s at most). No backup.
+// Runner-only, family sync-3. No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-f22'
 
 export const BASE_RENDER_CREDITS = 1
 

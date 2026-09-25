@@ -296,10 +296,15 @@ describe('grep guard: no node is created with a hard-coded model outside dev/', 
     if (e.isDirectory()) return e.name === 'node_modules' || e.name === 'dev' ? [] : walk(p)
     return /\.(ts|vue|js|mjs)$/.test(e.name) ? [p] : []
   })
-  /** Every value a model menu stores, plus the legacy video names. */
+  /**
+   * Every value a model menu stores, plus the legacy video names. The
+   * Lip-sync engine menu (F22, "LipSyncNode.engine") names engines, and its
+   * "auto", "fabric" and "sync" are everyday words: only its model, sync-3.
+   */
   const MODEL_VALUES = new Set<string>([
     ...IMAGE_MODELS.map(m => m.id), ...VIDEO_MODELS.map(m => m.id),
-    ...Object.values(EDIT_MODEL_MENUS).flatMap(m => m.options.map(o => o.value)),
+    ...Object.entries(EDIT_MODEL_MENUS).filter(([k]) => k.endsWith('.model')).flatMap(([, m]) => m.options.map(o => o.value)),
+    'sync-3',
     'Veo 3', 'Kling 2.1', 'Seedance 2.0',
   ])
   /**

@@ -21,17 +21,24 @@ import { sizePricedInput } from '#shared/pricing/editSettings'
 import { isLink } from '#shared/runner/graph'
 import { picturePixels } from '../utils/graphInputPixels'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
+import type { InputSeconds } from '#shared/pricing/clipSettings'
 
 /**
  * Credits for one provider node. `inputPixels`: the measured size of the
  * picture a size-priced node (FLUX.2 edit) is sent — without it, the input cap
  * (the stage hold is taken that way, an upper bound). `families`: the
  * server's switches, so a class moved onto a newer model (Rotate camera on
- * Qwen Image Edit 2511, Task F10) is priced as it is planned.
+ * Qwen Image Edit 2511, Task F10) is priced as it is planned. `inputSeconds`:
+ * the measured lengths of a lip-sync's sound and video (sync-3, Task F22:
+ * sync3Media.ts) — without them, the 60 s cap (the hold).
  */
-export function nodeCredits(node: ApiNode, inputPixels?: number, families: ReadonlySet<RunnerFamily> = NO_FAMILIES): number {
+export function nodeCredits(node: ApiNode, inputPixels?: number, families: ReadonlySet<RunnerFamily> = NO_FAMILIES, inputSeconds?: InputSeconds): number {
   if (!PROVIDER_TYPES.has(node.class_type)) return 0
-  const p = priceGraph({ n: { class_type: node.class_type, inputs: node.inputs } }, { ...(inputPixels ? { inputPixels: { n: inputPixels } } : {}), families })
+  const p = priceGraph({ n: { class_type: node.class_type, inputs: node.inputs } }, {
+    ...(inputPixels ? { inputPixels: { n: inputPixels } } : {}),
+    ...(inputSeconds ? { inputSeconds: { n: inputSeconds } } : {}),
+    families,
+  })
   return p.breakdown.filter(b => b.action !== 'base_render').reduce((s, b) => s + b.credits, 0)
 }
 

@@ -155,6 +155,11 @@
  *                                                  Replicate has no Bria Product Shot; bria/generate-background is
  *                                                  another model, with no placement or shot size (briaProductShot.ts)
  *
+ * ── Lip-sync ───────────────────────────────────────────────────────────────
+ * Lip-sync a character, sync-3
+ *                           fal        —           runner-only (F22, family sync-3): Replicate has no sync-3 (its
+ *                                                  sync.so models are lipsync-2, lipsync-2-pro and react-1) (sync3.ts)
+ *
  * `RUNNER_ROUTES` below is this table as data; the spec builds each node and
  * checks planNode sends it where the table says.
  */
@@ -291,6 +296,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'RestyleFromImageNode:Style Transfer · IP-Adapter': r('replicate', null, 'not on fal'),
   'ProductShotNode': r('replicate', null, 'not on fal'),
   'ProductShotNode+bria-product-shot': r('fal', null, 'Replicate has no Bria Product Shot; its background swap is another model'),
+  'LipSyncNode:sync-3': r('fal', null, 'Replicate has no sync-3 (its sync.so models are lipsync-2, lipsync-2-pro and react-1)'),
 }
 
 // ── Generate video: the two models moved to fal first ──────────────────────

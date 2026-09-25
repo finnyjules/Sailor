@@ -34,10 +34,11 @@ import { linksOf, type ApiPrompt } from './graph'
  * is_output_node), read from the real node classes (2026-09-24). The runner
  * classes not listed are not output nodes: GenerateImageNode,
  * GenerateVideoNode, ComfyGateNode, EditImageNode, DevelopImageNode,
- * GenerateFromReferencesNode, LoadImage.
+ * GenerateFromReferencesNode, LoadImage, LipSyncNode. The Audio card
+ * (nodes_audio.py `Audio`, is_output_node=True) joined with sync-3 (F22).
  */
 export const RUNNER_OUTPUT_CLASSES: ReadonlySet<string> = new Set([
-  'Image', 'Video', 'Compositor',
+  'Image', 'Video', 'Compositor', 'Audio',
   'RelightNode', 'BlendSceneNode', 'RemoveObjectNode', 'TextEditNode', 'RecolorObjectNode',
   'SwapBackgroundNode', 'SwapProductNode', 'PersonSwap', 'RotateCameraNode', 'ProductShotNode', 'RestyleFromImageNode',
 ])

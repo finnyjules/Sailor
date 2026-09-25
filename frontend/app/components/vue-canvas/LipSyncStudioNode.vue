@@ -6,7 +6,7 @@ import { computed } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
 import { AudioLines, Pencil } from 'lucide-vue-next'
 import { hydrateLipSyncSheet } from '~/lib/lipsync/hydrate'
-import { compileLipSync, resolveEngine } from '~/lib/lipsync/compile'
+import { compileLipSync, engineLabel as labelOf, resolveEngine } from '~/lib/lipsync/compile'
 
 const props = defineProps<{
   id: string
@@ -20,7 +20,7 @@ const props = defineProps<{
 
 const sheet = computed(() => hydrateLipSyncSheet(props.data?.properties?.sailor_lipSync))
 const compiled = computed(() => compileLipSync(sheet.value))
-const engineLabel = computed(() => resolveEngine(sheet.value) === 'sync' ? 'Sync' : 'Fabric')
+const engineLabel = computed(() => labelOf(resolveEngine(sheet.value)))
 
 const faceLabel = computed(() => {
   const f = sheet.value.face
