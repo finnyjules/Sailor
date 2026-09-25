@@ -31,6 +31,9 @@
  *    after F4: the schema requires a prompt but sets no minimum, so an empty
  *    one would fail only at the result). It is the one row of the prompt table
  *    that comes from a ruling, not a schema (PROMPT_MIN_LENGTH_RULINGS);
+ *  - Qwen Image 3 and Grok Imagine 2 with an empty prompt, as sent (controller
+ *    ruling after F6: their Replicate schemas require a prompt but set no
+ *    minimum). Two more ruled rows of the prompt table;
  *  - Film a shot on Seedance 2.0 with a first frame AND references (parked
  *    minor M5): Film a shot runs only on the ComfyUI path, whose Python
  *    builder would send the first frame and drop the references, so the
@@ -56,12 +59,16 @@ import {
   GPT_IMAGE_25_EDIT_APP, GPT_IMAGE_25_EDIT_OPTION, GPT_IMAGE_25_FAL_ENDPOINTS, GPT_IMAGE_25_NEEDS_PROMPT, GPT_IMAGE_25_TRANSPARENT_JPEG,
   gptImage25FalTextToImage, gptImage25TransparentJpeg, gptImage25Variant, isGptImage25Model,
 } from './generators/gptImage25'
+import { QWEN_IMAGE_3_SLUG, isQwenImage3Model } from './generators/qwenImage3'
+import { GROK_IMAGINE_2_SLUG, isGrokImagine2Model } from './generators/grokImagine2'
 
 export { FIRST_FRAME_AND_REFERENCES }
 
 export const NANO_BANANA_SHORT_PROMPT = 'Nano Banana needs a prompt of at least 3 characters.'
 export const H3_SHORT_PROMPT = 'Hailuo H3 needs a prompt.'
 export const GEMINI_OMNI_FLASH_NEEDS_PROMPT = 'Gemini Omni Flash needs a prompt. Describe the clip, or link a picture to start from it.'
+export const QWEN_IMAGE_3_NEEDS_PROMPT = 'Qwen Image 3 needs a prompt. Describe the picture you want.'
+export const GROK_IMAGINE_2_NEEDS_PROMPT = 'Grok Imagine 2 needs a prompt. Describe the picture you want.'
 
 /** `<provider> <endpoint>` → the prompt's minimum length in characters (the schema's `minLength`), and what to say. */
 export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: string }>> = {
@@ -85,13 +92,20 @@ export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: 
   ...Object.fromEntries(GPT_IMAGE_25_FAL_ENDPOINTS.map(e => [`fal ${e}`, { min: 1, message: GPT_IMAGE_25_NEEDS_PROMPT }])),
   // Gemini Omni Flash text-to-video (geminiOmniFlash.ts): a ruling, not the schema (see PROMPT_MIN_LENGTH_RULINGS).
   [`fal ${GEMINI_OMNI_FLASH_TEXT_TO_VIDEO}`]: { min: 1, message: GEMINI_OMNI_FLASH_NEEDS_PROMPT },
+  // Qwen Image 3 (qwenImage3.ts) and Grok Imagine 2 (grokImagine2.ts) on Replicate: rulings, not the schemas.
+  [`replicate ${QWEN_IMAGE_3_SLUG}`]: { min: 1, message: QWEN_IMAGE_3_NEEDS_PROMPT },
+  [`replicate ${GROK_IMAGINE_2_SLUG}`]: { min: 1, message: GROK_IMAGINE_2_NEEDS_PROMPT },
 }
 
 /**
  * The rows of PROMPT_MIN_LENGTH that come from a controller ruling rather
  * than the schema's `minLength` (a test holds every other row to the schemas).
  */
-export const PROMPT_MIN_LENGTH_RULINGS: readonly string[] = [`fal ${GEMINI_OMNI_FLASH_TEXT_TO_VIDEO}`]
+export const PROMPT_MIN_LENGTH_RULINGS: readonly string[] = [
+  `fal ${GEMINI_OMNI_FLASH_TEXT_TO_VIDEO}`,
+  `replicate ${QWEN_IMAGE_3_SLUG}`,
+  `replicate ${GROK_IMAGINE_2_SLUG}`,
+]
 
 /** JSON Schema counts characters as code points. */
 const chars = (s: string) => [...s].length
@@ -208,10 +222,10 @@ export function requestProblems(prompt: ApiPrompt): RequestProblem[] {
   for (const [nodeId, node] of Object.entries(prompt ?? {})) {
     const inputs = node?.inputs ?? {}
     const ct = node?.class_type
-    /** The prompt `text` against the rule of `fal <endpoint>`. */
-    const judge = (endpoint: string, text: string) => {
-      const rule = PROMPT_MIN_LENGTH[`fal ${endpoint}`]
-      if (!rule) throw new Error(`No prompt rule for fal ${endpoint}`)
+    /** The prompt `text` against the rule of `<provider> <endpoint>` (fal unless named). */
+    const judge = (endpoint: string, text: string, provider = 'fal') => {
+      const rule = PROMPT_MIN_LENGTH[`${provider} ${endpoint}`]
+      if (!rule) throw new Error(`No prompt rule for ${provider} ${endpoint}`)
       if (chars(text) < rule.min) out.push({ nodeId, classType: ct, input: 'prompt', message: rule.message })
     }
     const nb = ct === 'GenerateImageNode' && Object.prototype.hasOwnProperty.call(NANO_BANANA_IMAGE_APPS, String(inputs.model))
@@ -243,6 +257,17 @@ export function requestProblems(prompt: ApiPrompt): RequestProblem[] {
         styleIn: asText(inputs.style_in),
         hasRefs: false,
       }))
+    }
+    // Qwen Image 3 and Grok Imagine 2 (Replicate, text-to-image): the prompt as sent must not be empty.
+    else if (ct === 'GenerateImageNode' && (isQwenImage3Model(inputs.model) || isGrokImagine2Model(inputs.model))) {
+      if (['prompt', 'prompt_in', 'style_block', 'style_in'].some(k => isLink(inputs[k]))) continue
+      judge(isQwenImage3Model(inputs.model) ? QWEN_IMAGE_3_SLUG : GROK_IMAGINE_2_SLUG, composeImagePrompt({
+        prompt: asText(inputs.prompt),
+        promptIn: asText(inputs.prompt_in),
+        styleBlock: asText(inputs.style_block),
+        styleIn: asText(inputs.style_in),
+        hasRefs: false,
+      }), 'replicate')
     }
     else if (ct === 'EditImageNode' && inputs.model === GPT_IMAGE_25_EDIT_OPTION) {
       if (!isLink(inputs.prompt)) judge(GPT_IMAGE_25_EDIT_APP, asText(inputs.prompt))

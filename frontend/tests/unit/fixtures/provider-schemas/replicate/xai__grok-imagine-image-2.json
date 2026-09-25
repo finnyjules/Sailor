@@ -1,0 +1,116 @@
+{
+  "endpoint": "xai/grok-imagine-image-2",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/xai/grok-imagine-image-2"
+  },
+  "versionId": "1ef875bf1bfeb22f6cfb01d52105f8fa773030e57a4b274784c8f14134c7678b",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "image": {
+            "type": "string",
+            "title": "Image",
+            "format": "uri",
+            "default": null,
+            "x-order": 1,
+            "nullable": true,
+            "description": "Input image for editing. When provided, the model edits this image based on the prompt. Supports jpg, jpeg, png, webp."
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "x-order": 0,
+            "description": "Text prompt for image generation or editing"
+          },
+          "quality": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/quality"
+              }
+            ],
+            "default": "medium",
+            "x-order": 4,
+            "description": "Generation quality. 'medium' produces the best results, 'low' is faster and cheaper."
+          },
+          "resolution": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/resolution"
+              }
+            ],
+            "default": "2k",
+            "x-order": 3,
+            "description": "Resolution of the generated image."
+          },
+          "aspect_ratio": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/aspect_ratio"
+              }
+            ],
+            "default": "1:1",
+            "x-order": 2,
+            "description": "Aspect ratio of the generated image. Ignored when editing an image."
+          }
+        }
+      },
+      "quality": {
+        "enum": [
+          "low",
+          "medium"
+        ],
+        "type": "string",
+        "title": "quality",
+        "description": "An enumeration."
+      },
+      "resolution": {
+        "enum": [
+          "1k",
+          "2k"
+        ],
+        "type": "string",
+        "title": "resolution",
+        "description": "An enumeration."
+      },
+      "aspect_ratio": {
+        "enum": [
+          "1:1",
+          "16:9",
+          "9:16",
+          "4:3",
+          "3:4",
+          "3:2",
+          "2:3",
+          "2:1",
+          "1:2",
+          "19.5:9",
+          "9:19.5",
+          "20:9",
+          "9:20",
+          "auto"
+        ],
+        "type": "string",
+        "title": "aspect_ratio",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "string",
+        "title": "Output",
+        "format": "uri"
+      }
+    }
+  }
+}

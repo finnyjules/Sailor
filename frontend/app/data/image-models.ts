@@ -928,6 +928,30 @@ export const IMAGE_MODELS: ImageModel[] = [
     defaultAspectRatio: '1:1',
     advanced: [],
   },
+  {
+    // Runner-only (model line-up F7): Replicate, no backup
+    // (server/runner/generators/grokImagine2.ts). No Python builder.
+    id: 'grok-imagine-2',
+    runnerOnly: true,
+    family: 'grok-imagine-2',
+    label: 'Grok Imagine 2',
+    brand: 'xAI',
+    replicateSlug: 'xai/grok-imagine-image-2',
+    pitch: 'Detailed prompts, real places and brands, tall phone shapes.',
+    description: 'Follows long prompts about subject, light and style, and knows real brands, places and things by name. Makes pictures up to 2048 pixels on the long side.',
+    tags: ['cinematic'],
+    pricePerImage: 0.04,
+    aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '2:1', '1:2', '19.5:9', '9:19.5', '20:9', '9:20'],
+    defaultAspectRatio: '1:1',
+    advanced: [
+      { name: 'resolution', type: 'select', label: 'Size', default: '2k',
+        options: ['1k', '2k'], optionLabels: ['1K, faster', '2K'],
+        description: 'How big the picture is on its long side: about 1000 or 2000 pixels. Same price.' },
+      { name: 'quality', type: 'select', label: 'Quality', default: 'medium',
+        options: ['low', 'medium'], optionLabels: ['Draft, faster', 'Best'],
+        description: 'Draft is quicker for trying ideas. Same price.' },
+    ],
+  },
 
   // ===== Pruna ==============================================================
   {

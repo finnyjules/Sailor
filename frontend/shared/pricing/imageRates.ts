@@ -3,7 +3,8 @@
  * request builder sends it to today: fal for the RUNNER_IMAGE_MODELS ids and
  * the Python `primary="fal"` models (Krea 2), and the runner-only GPT Image
  * 2.5 (server/runner/generators/gptImage25.ts), Replicate for the rest,
- * the runner-only Qwen Image 3 among them (qwenImage3.ts)
+ * the runner-only Qwen Image 3 and Grok Imagine 2 among them (qwenImage3.ts,
+ * grokImagine2.ts)
  * (comfy_api_nodes/image_models.py `primary`, default "replicate").
  *
  * Units, following the service:
@@ -208,6 +209,11 @@ export const IMAGE_RATES: Record<string, ImageRate> = {
   'qwen-image-3': repImage('alibaba/qwen-image-3', 0.03),
   'hunyuan-image-3': repImage('tencent/hunyuan-image-3', 0.08),
   'grok-imagine': repImage('xai/grok-imagine-image', 0.02),
+  // Grok Imagine 2 (runner-only, Task F7), Replicate only: "$0.04 per output
+  // image" (billingConfig, image_output_count, one tier; the README says the
+  // same), whatever the ratio, size or quality. No backup (fal publishes no
+  // price for its Grok Imagine 2, grokImagine2.ts).
+  'grok-imagine-2': repImage('xai/grok-imagine-image-2', 0.04),
   // "$5 per thousand output images".
   'flux-fast': repImage('prunaai/flux-fast', 0.005),
   'p-image': repImage('prunaai/p-image', 0.005),

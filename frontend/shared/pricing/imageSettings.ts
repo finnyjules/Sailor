@@ -259,6 +259,8 @@ const RULES: Record<string, Rule> = {
   'qwen-image-3': flat,
   'hunyuan-image-3': flat,
   'grok-imagine': flat,
+  // grokImagine2Generate (runner-only, Replicate): one picture, one price for every ratio, size and quality.
+  'grok-imagine-2': flat,
   'flux-fast': flat,
   'p-image': flat,
   // rWan22Pruna sends megapixels 1/2; Replicate charges one price for both.

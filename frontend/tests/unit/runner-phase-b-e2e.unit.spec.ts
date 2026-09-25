@@ -250,6 +250,20 @@ const FLOWS: FamilyFlow[] = [
     endpoint: 'alibaba/qwen-image-3',
     body: { prompt: 'a poster that says HELLO', aspect_ratio: '1:1', enable_prompt_expansion: true },
   },
+  // Task F7: Grok Imagine 2, no Python builder; Replicate only, the body
+  // written from its saved schema (runner-grok-imagine-2.unit.spec.ts).
+  {
+    family: 'grok-imagine-2',
+    label: 'GenerateImageNode grok-imagine-2',
+    prompt: {
+      1: { class_type: 'GenerateImageNode', inputs: { model: 'grok-imagine-2', prompt: 'a poster that says HELLO', aspect_ratio: '1:1', seed: 0, model_options: '{}' } },
+      2: outImage('1'),
+    },
+    files: [],
+    provider: 'replicate',
+    endpoint: 'xai/grok-imagine-image-2',
+    body: { prompt: 'a poster that says HELLO', aspect_ratio: '1:1', resolution: '2k', quality: 'medium' },
+  },
 ]
 
 // ── The routes ───────────────────────────────────────────────────────────

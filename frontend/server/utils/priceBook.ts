@@ -68,7 +68,9 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // price moves.
 // lineup-f6 (Task F6): Qwen Image 3, Replicate's flat $0.03 an image
 // (runner-only, family qwen-image-3, no backup). No other price moves.
-export const PRICE_BOOK_VERSION = 'lineup-f6'
+// lineup-f7 (Task F7): Grok Imagine 2, Replicate's flat $0.04 an image
+// (runner-only, family grok-imagine-2, no backup). No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-f7'
 
 export const BASE_RENDER_CREDITS = 1
 

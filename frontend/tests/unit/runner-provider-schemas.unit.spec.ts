@@ -33,6 +33,7 @@ import { GEMINI_OMNI_FLASH_ENDPOINTS } from '~~/server/runner/generators/geminiO
 import { VEO_31_LITE_ENDPOINTS } from '~~/server/runner/generators/veo31Lite'
 import { GPT_IMAGE_25_FAL_ENDPOINTS, GPT_IMAGE_25_REPLICATE_SLUGS } from '~~/server/runner/generators/gptImage25'
 import { QWEN_IMAGE_3_SLUG } from '~~/server/runner/generators/qwenImage3'
+import { GROK_IMAGINE_2_SLUG } from '~~/server/runner/generators/grokImagine2'
 
 const readJson = (rel: string) => JSON.parse(readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8'))
 const BUILDERS = readJson('./fixtures/runner-builders.json')
@@ -227,6 +228,8 @@ function runnerEndpoints(): string[] {
   for (const e of VEO_31_LITE_ENDPOINTS) out.add(`fal ${e}`)
   // Task F6: Qwen Image 3 on Replicate, no backup (qwenImage3.ts; its payload grid is runner-qwen-image-3.unit.spec.ts).
   out.add(`replicate ${QWEN_IMAGE_3_SLUG}`)
+  // Task F7: Grok Imagine 2 on Replicate, no backup (grokImagine2.ts; its payload grid is runner-grok-imagine-2.unit.spec.ts).
+  out.add(`replicate ${GROK_IMAGINE_2_SLUG}`)
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)
@@ -284,8 +287,9 @@ describe('refusals', () => {
   })
 
   it('the prompt length rules are exactly the saved schemas\' prompt minLength, plus the controller\'s rulings', () => {
-    // Ruled rows: a saved schema without a minLength on that endpoint, the prompt required (controller ruling after F4).
-    expect(PROMPT_MIN_LENGTH_RULINGS).toEqual(['fal google/gemini-omni-flash'])
+    // Ruled rows: a saved schema without a minLength on that endpoint, the prompt required (controller rulings
+    // after F4: Gemini Omni Flash; after F6: Qwen Image 3, and Grok Imagine 2 in F7).
+    expect(PROMPT_MIN_LENGTH_RULINGS).toEqual(['fal google/gemini-omni-flash', 'replicate alibaba/qwen-image-3', 'replicate xai/grok-imagine-image-2'])
     const fromSchemas: Record<string, number> = {}
     for (const key of PROMPT_MIN_LENGTH_RULINGS) {
       const [provider, endpoint] = key.split(' ') as [Provider, string]

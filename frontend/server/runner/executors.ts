@@ -17,7 +17,8 @@
  * Gemini Omni Flash, family gemini-omni-flash;
  * Veo 3.1 Lite, family veo-3.1-lite;
  * GPT Image 2.5 in GenerateImageNode and EditImageNode, family gpt-image-2.5;
- * Qwen Image 3 in GenerateImageNode, family qwen-image-3)
+ * Qwen Image 3 in GenerateImageNode, family qwen-image-3;
+ * Grok Imagine 2 in GenerateImageNode, family grok-imagine-2)
  * closely enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiPrompt } from '#shared/runner/graph'
@@ -53,6 +54,7 @@ import { RUNNER_GEMINI_OMNI_FLASH_MODELS } from './generators/geminiOmniFlash'
 import { RUNNER_VEO_31_LITE_MODELS } from './generators/veo31Lite'
 import { GPT_IMAGE_25_EDIT_OPTION, gptImage25Edit, gptImage25Generate, gptImage25OnReplicate, isGptImage25Model } from './generators/gptImage25'
 import { isQwenImage3Model, qwenImage3Generate } from './generators/qwenImage3'
+import { grokImagine2Generate, isGrokImagine2Model } from './generators/grokImagine2'
 import { checkRequest, seedanceReferenceProblem } from './requestRules'
 import type { OutputFile, RunnerProvider } from './types'
 
@@ -184,6 +186,20 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
           }),
           aspectRatio: asText(inputs.aspect_ratio) || '1:1',
           seed: asInt(inputs.seed, 0),
+          adv: parseJsonObject(inputs.model_options),
+        }), 'generate_image')
+      }
+      // Grok Imagine 2 (family grok-imagine-2): Replicate, no backup (grokImagine2.ts). No moodboard pictures, no seed.
+      if (isGrokImagine2Model(inputs.model)) {
+        return stillCall(grokImagine2Generate({
+          prompt: composeImagePrompt({
+            prompt: asText(inputs.prompt),
+            promptIn: asText(inputs.prompt_in),
+            styleBlock: asText(inputs.style_block),
+            styleIn: asText(inputs.style_in),
+            hasRefs: false,
+          }),
+          aspectRatio: asText(inputs.aspect_ratio) || '1:1',
           adv: parseJsonObject(inputs.model_options),
         }), 'generate_image')
       }

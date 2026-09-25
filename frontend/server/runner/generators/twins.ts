@@ -50,6 +50,8 @@
  * qwen-image-3              Replicate  —           runner-only (F6): fal's alibaba/qwen-image-3 is Qwen Image 3 Pro, a
  *                                                  different model at a different price (qwenImage3.ts)
  * grok-imagine              Replicate  —           fal hosts it (xai/grok-imagine-image); its settings aren't checked yet
+ * grok-imagine-2            Replicate  —           runner-only (F7): fal's xai/grok-imagine-image/v2 publishes no price
+ *                                                  and no OpenAPI yet (grokImagine2.ts)
  * flux-fast, p-image        Replicate  —           Pruna models: not on fal (fal catalogue, 2026-09-24)
  * bria-fibo                 Replicate  —           fal's Fibo has no guidance setting
  * bria-image-3.2            Replicate  —           not on fal
@@ -151,6 +153,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'image:qwen-image': r('replicate', null, 'fal has no webp, no enhance-prompt switch and no 1-step run'),
   'image:qwen-image-3': r('replicate', null, 'fal\'s Qwen Image 3 is the Pro model, not the same one'),
   'image:grok-imagine': r('replicate', null, ON_FAL_UNCHECKED),
+  'image:grok-imagine-2': r('replicate', null, 'fal publishes no price for its Grok Imagine 2 yet'),
   'image:flux-fast': r('replicate', null, 'not on fal'),
   'image:p-image': r('replicate', null, 'not on fal'),
   'image:bria-fibo': r('replicate', null, 'fal\'s Fibo has no guidance setting'),
