@@ -154,8 +154,8 @@ describe('topazVideoPlan: the factor, the size made and the frame rate, from the
     expect(at('1080p', 'original', 1280, 720, 24)).toEqual({ factor: 1.5, width: 1920, height: 1080, targetFps: null, band: '1080p', highFps: false })
     expect(at('4k', 'original', 1920, 1080, 30)).toEqual({ factor: 2, width: 3840, height: 2160, targetFps: null, band: '4k', highFps: false })
     expect(at('720p', 'original', 640, 360, 24)).toEqual({ factor: 2, width: 1280, height: 720, targetFps: null, band: '720p', highFps: false })
-    // Portrait: the short side is the width.
-    expect(at('1080p', 'original', 720, 1280, 24)).toEqual({ factor: 1.5, width: 1080, height: 1920, targetFps: null, band: '1080p', highFps: false })
+    // Portrait: the short side is the width (banded by its height too, fix round 2: the dearer).
+    expect(at('1080p', 'original', 720, 1280, 24)).toEqual({ factor: 1.5, width: 1080, height: 1920, targetFps: null, band: '4k', highFps: false })
     // Already larger than asked: enhanced at its own size (Topaz can't make a video smaller).
     expect(at('720p', 'original', 1920, 1080, 24)).toEqual({ factor: 1, width: 1920, height: 1080, targetFps: null, band: '1080p', highFps: false })
     // An odd size: rounded down, so never a pixel above the target.
@@ -167,7 +167,7 @@ describe('topazVideoPlan: the factor, the size made and the frame rate, from the
 
   it('the size band: the 16:9 box of each; ultra-wide or square takes the next band up (the safe side)', () => {
     expect(topazVideoBand(1280, 720)).toBe('720p')
-    expect(topazVideoBand(720, 1280)).toBe('720p')
+    expect(topazVideoBand(720, 1280)).toBe('4k') // portrait: its height's band, the dearer (fix round 2)
     expect(topazVideoBand(1281, 720)).toBe('1080p')
     expect(topazVideoBand(1680, 720)).toBe('1080p')
     expect(topazVideoBand(1080, 1080)).toBe('1080p')
@@ -688,9 +688,9 @@ describe('fix round 1: the factor fits the target\'s box; the band from the long
     expect(priceNode('EnhanceVideoNode', enhance().inputs, { inputSeconds: measured(2, 854, 480, 24), families: ON })).toEqual({ usd: 0.04, credits: 8 })
   })
 
-  it('portrait: 720 × 1280 → 1080 × 1920 is 1080p by its longer side; 1080 × 1920 asking 720p stays 1080p (already larger)', () => {
-    expect(at('1080p', 720, 1280)).toMatchObject({ factor: 1.5, width: 1080, height: 1920, band: '1080p' })
-    expect(at('720p', 1080, 1920)).toMatchObject({ factor: 1, width: 1080, height: 1920, band: '1080p' })
+  it('portrait: fitted by its longer side (720 × 1280 → 1080 × 1920; 1080 × 1920 asking 720p stays as it is), banded by the dearer reading (fix round 2)', () => {
+    expect(at('1080p', 720, 1280)).toMatchObject({ factor: 1.5, width: 1080, height: 1920, band: '4k' })
+    expect(at('720p', 1080, 1920)).toMatchObject({ factor: 1, width: 1080, height: 1920, band: '4k' })
     expect(at('4k', 1080, 1920)).toMatchObject({ factor: 2, width: 2160, height: 3840, band: '4k' })
   })
 
@@ -716,7 +716,8 @@ describe('fix round 1: the factor fits the target\'s box; the band from the long
           if (p.factor > 1) {
             expect(Math.min(p.width, p.height), `${target} ${w}x${h}`).toBeLessThanOrEqual(TOPAZ_VIDEO_TARGETS[target]!)
             expect(Math.max(p.width, p.height), `${target} ${w}x${h}`).toBeLessThanOrEqual(TOPAZ_VIDEO_TARGET_LONG_SIDES[target]!)
-            expect(rank[p.band]).toBeLessThanOrEqual(rank[target as keyof typeof rank])
+            // Landscape (and square) only: a portrait is also banded by its height (fix round 2), which can pass the target's band.
+            if (p.height <= p.width) expect(rank[p.band]).toBeLessThanOrEqual(rank[target as keyof typeof rank])
           }
         }
       }
@@ -803,5 +804,33 @@ describe('fix round 1: the engine', () => {
     expect(mediaNodeSwitchedOff(enhance(), ON)).toBeNull()
     expect(mediaNodeSwitchedOff(enhance(), NO_FAMILIES)).toBe(TOPAZ_VIDEO_SWITCHED_OFF)
     expect(mediaNodeSwitchedOff({ class_type: 'LipSyncNode', inputs: {} }, NO_FAMILIES)).toBeNull()
+  })
+})
+
+// ── Fix round 2 (controller ruling: the dearer of the longer side and the height) ──
+
+describe('fix round 2: the band is the dearer of the longer side\'s and the height\'s', () => {
+  it('portrait 1080 × 1920: 1080p by its longer side, above 1080p by its height → "4k"', () => {
+    expect(topazVideoBand(1080, 1920)).toBe('4k')
+    expect(topazVideoBand(720, 1280)).toBe('4k')
+    expect(topazVideoBand(405, 720)).toBe('720p')
+    expect(topazVideoBand(608, 1080)).toBe('1080p')
+    // The portrait live check (360 × 640 → 720p): 720 × 1280, priced "4k" by its height: 2 s × $0.08 = 24 credits.
+    expect(priceNode('EnhanceVideoNode', enhance({ target_resolution: '720p' }).inputs, { inputSeconds: measured(2, 360, 640, 24), families: ON })).toEqual({ usd: 0.16, credits: 24 })
+  })
+
+  it('landscape unchanged: the two readings agree; the live check is still 4 + 1 credits', () => {
+    for (const [w, h, band] of [[1280, 720, '720p'], [1920, 1080, '1080p'], [3840, 2160, '4k'], [1680, 720, '1080p'], [2560, 1080, '4k']] as const) {
+      expect(topazVideoBand(w, h), `${w}x${h}`).toBe(band)
+    }
+    const p = priceNode('EnhanceVideoNode', enhance({ target_resolution: '720p' }).inputs, { inputSeconds: measured(2, 640, 360, 24), families: ON })
+    expect(p).toEqual({ usd: 0.02, credits: 4 })
+    expect(nodeCreditEstimate('EnhanceVideoNode', enhance({ target_resolution: '720p' }).inputs, { inputSeconds: measured(2, 640, 360, 24), families: ON })).toBe(5)
+  })
+
+  it('square: its height\'s band (720² → 720p, 1080² → 1080p, 2160² → 4k)', () => {
+    expect(topazVideoBand(720, 720)).toBe('720p')
+    expect(topazVideoBand(1080, 1080)).toBe('1080p')
+    expect(topazVideoBand(2160, 2160)).toBe('4k')
   })
 })
