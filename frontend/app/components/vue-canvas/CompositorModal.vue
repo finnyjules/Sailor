@@ -2086,12 +2086,20 @@ function drawGuideForSelectedText() {
   penGuideTargetId.value = l.id
   if (!penSession.value) togglePen()
 }
+/** The one way into the pen (a new drawing or a reopened one): the view-only
+ *  and smart-mode guards, then every other tool steps aside. false = not now. */
+function enterPenMode(): boolean {
+  if (viewOnlyGuard()) return false
+  if (smartActive.value) { if (smartActionBusy.value) return false; exitSmartMode() }
+  exitNodeEdit(); brush.setActive(false); distortTool.value = false
+  if (genActive.value) exitGenMode()
+  return true
+}
 function togglePen() {
-  if (viewOnlyGuard()) return
-  if (smartActive.value) { if (smartActionBusy.value) return; exitSmartMode() }
-  if (penSession.value) { cancelPenSession(); return }
   const guideFor = penGuideTargetId.value
-  selectLocal(null); exitNodeEdit(); brush.setActive(false)
+  if (!enterPenMode()) return
+  if (penSession.value) { cancelPenSession(); return }
+  selectLocal(null)
   penGuideTargetId.value = guideFor
   openPenSession({ kind: 'new' })
 }
@@ -2103,10 +2111,8 @@ function penReopenable(l: any): boolean {
 }
 /** Double-click on a drawn path: reopen the shared pen on the layer itself. */
 function reopenPenOnLayer(id: string) {
-  if (viewOnlyGuard()) return
-  if (smartActive.value) { if (smartActionBusy.value) return; exitSmartMode() }
-  cancelPenSession(); exitNodeEdit(); brush.setActive(false); distortTool.value = false
-  if (genActive.value) exitGenMode()
+  if (!enterPenMode()) return
+  cancelPenSession()
   selectLocal(id)
   openPenSession({ kind: 'layer', id })
 }

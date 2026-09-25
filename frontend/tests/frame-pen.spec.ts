@@ -293,6 +293,44 @@ test.describe('Frame pen — reopen a drawn path', () => {
     expect(JSON.stringify(back)).toBe(JSON.stringify(tri))
   })
 
+  test('opening a drawn path and leaving without an edit leaves no undo step', async ({ page }) => {
+    // ⌘Z presses until the layer is gone (undoing its own drawing)
+    const undosToRemove = async (id: string) => {
+      for (let n = 1; n <= 10; n++) {
+        await page.keyboard.press(`${META}+z`)
+        await page.waitForTimeout(50)
+        if (!(await layerById(page, id))) return n
+      }
+      return Infinity
+    }
+    // control: the same two presses on the layer, far enough apart not to be a double-click
+    const a = await drawTriangle(page)
+    const ca = sketchToScreen(a.tri, corners(a.tri).reduce((m, p) => ({ x: m.x + p.x / 3, y: m.y + p.y / 3 }), { x: 0, y: 0 }), a.box)
+    await page.mouse.click(ca.x, ca.y)
+    await page.waitForTimeout(700)
+    await page.mouse.click(ca.x, ca.y)
+    const control = await undosToRemove(a.tri.id)
+    expect(control).toBeLessThan(Infinity)
+
+    // double-click → Esc: the pen adds nothing to undo
+    const b = await drawTriangle(page)
+    await dblclickLayer(page, b.tri, b.box)
+    await expect(penToolbar(page)).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(penToolbar(page)).toBeHidden()
+    expect(JSON.stringify(await layerById(page, b.tri.id))).toBe(JSON.stringify(b.tri))
+    expect(await undosToRemove(b.tri.id)).toBe(control)
+
+    // double-click → Enter with no edit: nothing written, nothing recorded
+    const c = await drawTriangle(page)
+    await dblclickLayer(page, c.tri, c.box)
+    await expect(penToolbar(page)).toBeVisible()
+    await page.keyboard.press('Enter')
+    await expect(penToolbar(page)).toBeHidden()
+    expect(JSON.stringify(await layerById(page, c.tri.id))).toBe(JSON.stringify(c.tri))
+    expect(await undosToRemove(c.tri.id)).toBe(control)
+  })
+
   test('a path without a drawing opens the point editor, not the pen', async ({ page }) => {
     const { tri, box } = await drawTriangle(page)
     // the same outline as a plain (library-style) path: no sketch

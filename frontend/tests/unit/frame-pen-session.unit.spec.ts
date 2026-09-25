@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
+import { effectScope } from 'vue'
 import { addPoint, addPath, addCircle } from '~/lib/sketch/edit'
 import { applyView } from '~/lib/sketch/view'
 import { sketchToLocalD, localOutlineBounds, newDrawingView, layerView } from '~/lib/compositor/penFrame'
-import { useFramePenSession, isClosedDrawing, PEN_STYLE_OPEN, layerPlacementForView } from '~/composables/frame/useFramePenSession'
+import { useFramePenSession, isClosedDrawing, PEN_STYLE_OPEN, layerPlacementForView, clonerBlocksRecentre } from '~/composables/frame/useFramePenSession'
 
 const W = 680, H = 400
 
@@ -154,13 +155,13 @@ describe('useFramePenSession — reopening a drawn path layer', () => {
   }
   const pointsOf = (sk: any) => sk.entities.filter((e: any) => e.kind === 'point')
 
-  it('open records ONE history step, clones the drawing, and views it through the layer\'s placement × layout scale', () => {
+  it('open records nothing yet, clones the drawing, and views it through the layer\'s placement × layout scale', () => {
     const l = drawnLayer({ rotation: 30, skewX: 10, scale: 1.5, layoutScale: 0.8 })
     const { host } = liveHost([l])
     const s = useFramePenSession(host)
     s.open({ kind: 'layer', id: l.id })
     const sess = s.session.value!
-    expect(host.recordHistory).toHaveBeenCalledTimes(1)
+    expect(host.recordHistory).not.toHaveBeenCalled()
     expect(host.commit).not.toHaveBeenCalled()
     expect(sess.doc.value).toEqual(l.sketch)
     expect(sess.doc.value).not.toBe(l.sketch)
@@ -242,5 +243,82 @@ describe('useFramePenSession — reopening a drawn path layer', () => {
     doc.entities = doc.entities.filter((e: any) => e.kind !== 'path')
     s.commitSession()
     expect(get(l.id)).toBe(l)
+  })
+
+  it('open then leave with no edit (cancel, or commit) records nothing and writes nothing', () => {
+    const l = drawnLayer()
+    const { host, get } = liveHost([l])
+    const s = useFramePenSession(host)
+    s.open({ kind: 'layer', id: l.id })
+    s.cancelSession()
+    s.open({ kind: 'layer', id: l.id })
+    s.session.value!.pen.finishSession()
+    s.commitSession()
+    expect(s.session.value).toBeNull()
+    expect(host.recordHistory).not.toHaveBeenCalled()
+    expect(host.commit).not.toHaveBeenCalled()
+    expect(get(l.id)).toBe(l)
+  })
+
+  it('history is recorded once, just before the first changing write', () => {
+    const l = drawnLayer()
+    const { host } = liveHost([l])
+    const order: string[] = []
+    host.recordHistory.mockImplementation(() => { order.push('record') })
+    const commit0 = host.commit.getMockImplementation()!
+    host.commit.mockImplementation((next: any[]) => { order.push('commit'); commit0(next) })
+    const s = useFramePenSession(host)
+    s.open({ kind: 'layer', id: l.id })
+    const pts = pointsOf(s.session.value!.doc.value)
+    pts[0].x += 3; s.session.value!.pen.finishSession()
+    pts[1].x += 3; s.session.value!.pen.finishSession()
+    s.commitSession()
+    expect(order).toEqual(['record', 'commit', 'commit', 'commit'])
+  })
+
+  it('tearing the host scope down mid-session puts the layer back', () => {
+    const l = drawnLayer()
+    const { host, get } = liveHost([l])
+    const scope = effectScope()
+    const s = scope.run(() => useFramePenSession(host))!
+    s.open({ kind: 'layer', id: l.id })
+    pointsOf(s.session.value!.doc.value)[1].x += 12
+    s.session.value!.pen.finishSession()
+    expect(get(l.id).d).not.toBe(l.d)
+    scope.stop()
+    expect(s.session.value).toBeNull()
+    expect(get(l.id)).toBe(l)
+  })
+
+  it('clonerBlocksRecentre: only an enabled cloner whose copies turn or scale', () => {
+    const base = { enabled: true, mode: 'linear', stepRotation: 0, stepScale: 1, faceCenter: false }
+    expect(clonerBlocksRecentre({})).toBe(false)
+    expect(clonerBlocksRecentre({ cloner: { ...base } })).toBe(false)
+    expect(clonerBlocksRecentre({ cloner: { ...base, stepRotation: 15 } })).toBe(true)
+    expect(clonerBlocksRecentre({ cloner: { ...base, stepScale: 0.9 } })).toBe(true)
+    expect(clonerBlocksRecentre({ cloner: { ...base, faceCenter: true } })).toBe(false)   // linear ignores faceCenter
+    expect(clonerBlocksRecentre({ cloner: { ...base, mode: 'radial' } })).toBe(false)
+    expect(clonerBlocksRecentre({ cloner: { ...base, mode: 'radial', faceCenter: true } })).toBe(true)
+    expect(clonerBlocksRecentre({ cloner: { ...base, enabled: false, stepRotation: 15, stepScale: 2 } })).toBe(false)
+  })
+
+  it('a layer whose copies turn is committed without re-centring: x/y unchanged, the outline stored as drawn', () => {
+    const l = drawnLayer({ cloner: { enabled: true, mode: 'linear', stepRotation: 20, stepScale: 1, countX: 3, countY: 1 } })
+    const { host, get } = liveHost([l])
+    const s = useFramePenSession(host)
+    s.open({ kind: 'layer', id: l.id })
+    const doc = s.session.value!.doc.value
+    pointsOf(doc)[0].x -= 30
+    const drawn = JSON.parse(JSON.stringify(doc))
+    s.commitSession()
+    const cur = get(l.id)
+    expect(cur.x).toBe(l.x); expect(cur.y).toBe(l.y)
+    expect(cur.sketch).toEqual(drawn)
+    expect(cur.d).toBe(sketchToLocalD(drawn))
+    const b = localOutlineBounds(cur.d)!
+    expect(cur.bbox.w).toBeCloseTo(b.maxX - b.minX, 12)
+    expect(cur.bbox.h).toBeCloseTo(b.maxY - b.minY, 12)
+    expect((b.minX + b.maxX) / 2).not.toBeCloseTo(0, 3)   // really not re-centred
+    expect(host.recordHistory).toHaveBeenCalledTimes(1)
   })
 })

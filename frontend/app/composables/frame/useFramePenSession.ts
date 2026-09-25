@@ -18,9 +18,12 @@
  *     (`layerView` of its LIVE x/y/rotation/skew and effective scale — see
  *     `layerPlacementForView`), and every change is previewed ON the layer
  *     itself with `commit` (no history), so its own fill, stroke and effects
- *     render the drawing live. One undo step is recorded at open; commit
- *     re-centres and writes `d`/`sketch`/`bbox`/`x`/`y`; cancel writes the
- *     original layer back exactly.
+ *     render the drawing live. History is recorded LAZILY — once, just before
+ *     the first write that changes something — so opening and leaving without
+ *     an edit leaves no undo step (and keeps the redo stack). Commit re-centres
+ *     and writes `d`/`sketch`/`bbox`/`x`/`y` (not re-centred when the layer's
+ *     cloner would make copies jump — `clonerBlocksRecentre`); cancel, and
+ *     tearing the host down mid-session, write the original layer back exactly.
  *   - `{ kind: 'guide' }` — drawing a text guide; arrives in Task 9. Until then
  *     `open` ignores it.
  *
@@ -91,15 +94,40 @@ export function layerPlacementForView(l: any): LayerPlacement {
   }
 }
 
+/**
+ * True when re-centring a layer would make its cloner copies jump. Re-centring
+ * moves the layer's pivot and shifts `x`/`y` to compensate — exact for copy 0
+ * and for copies that only translate, but a copy drawn with its own extra
+ * rotation or scale (`expandClones` in `useCloner.ts`: `drot = k·stepRotation
+ * (+ the radial faceCenter angle)`, `dscale = stepScale^k`) turns/scales the
+ * compensating shift too, so it lands somewhere else. Such a layer is committed
+ * without re-centring.
+ */
+export function clonerBlocksRecentre(l: any): boolean {
+  const c = l?.cloner
+  if (!c || !c.enabled) return false
+  return (c.stepRotation || 0) !== 0
+    || (c.stepScale ?? 1) !== 1
+    || (c.mode === 'radial' && !!c.faceCenter)
+}
+
 export function useFramePenSession(host: FramePenHost) {
   const session = shallowRef<FramePenSession | null>(null)
   let seq = 0
-  // `{ kind: 'layer' }`: the layer exactly as it was when the session opened
+  // `{ kind: 'layer' }`: the layer exactly as it was when the session opened,
+  // and whether this session has recorded its one undo step yet
   let original: any = null
+  let recorded = false
+  function ensureRecorded() {
+    if (recorded) return
+    recorded = true
+    host.recordHistory()   // nothing written yet: the snapshot is the pre-edit state
+  }
 
   function close() {
     const s = session.value
     original = null
+    recorded = false
     if (!s) return
     session.value = null
     s.pen.dispose()
@@ -115,7 +143,7 @@ export function useFramePenSession(host: FramePenHost) {
     if (!found || found.kind !== 'path' || !found.sketch) return
     close()
     original = found
-    host.recordHistory()   // the session's ONE undo step
+    let written = JSON.stringify(found.sketch)   // the drawing the layer currently shows
     const doc = ref<SketchDoc>(cloneDoc(found.sketch))
     // Read the placement from the LIVE layer (previews never touch x/y), so a
     // layer moved before the session opened is where the pen draws.
@@ -125,6 +153,10 @@ export function useFramePenSession(host: FramePenHost) {
       return layerView(layerPlacementForView(live), W, H)
     })
     const preview = () => {
+      const json = JSON.stringify(doc.value)
+      if (json === written) return   // nothing changed (a click, a selection)
+      written = json
+      ensureRecorded()
       const sk = cloneDoc(doc.value)
       writeLayer(id, l => ({ ...l, d: sketchToLocalD(sk), sketch: sk }))
     }
@@ -168,13 +200,23 @@ export function useFramePenSession(host: FramePenHost) {
     }
     if (s.target.kind === 'layer') {
       const id = s.target.id
+      // never changed: write nothing, record nothing
+      if (!recorded && JSON.stringify(s.doc.value) === JSON.stringify(original?.sketch)) { close(); return }
       const r = localOutlineBounds(sketchToLocalD(s.doc.value)) !== null ? recentreSketch(s.doc.value) : null
       if (!r) { cancelSession(); return }   // nothing left to draw: treat as cancel
       const { W, H } = host.size()
       const live = host.layers().find(l => l.id === id) ?? original
-      const { x, y } = placementAfterRecentre(layerPlacementForView(live), r.shiftLocal, W, H)
+      ensureRecorded()   // normally already done by the first preview
       close()
-      // the one undo step was recorded at open
+      if (clonerBlocksRecentre(live)) {
+        // copies with their own rotation/scale would jump: keep the pivot, store the outline as drawn
+        const sk = cloneDoc(s.doc.value)
+        const b = localOutlineBounds(sketchToLocalD(sk))!
+        const bbox = { w: Math.max(b.maxX - b.minX, 0.001), h: Math.max(b.maxY - b.minY, 0.001) }
+        writeLayer(id, l => ({ ...l, d: sketchToLocalD(sk), sketch: sk, bbox }))
+        return
+      }
+      const { x, y } = placementAfterRecentre(layerPlacementForView(live), r.shiftLocal, W, H)
       writeLayer(id, l => ({ ...l, d: sketchToLocalD(r.sketch), sketch: r.sketch, bbox: r.bbox, x, y }))
       return
     }
@@ -184,16 +226,19 @@ export function useFramePenSession(host: FramePenHost) {
   function cancelSession(): void {
     const s = session.value
     if (s?.target.kind === 'layer' && original) {
-      const id = s.target.id, orig = original
+      const id = s.target.id, orig = original, wrote = recorded
       close()
-      // exactly as it was; the history entry recorded at open undoes to this same state
-      writeLayer(id, () => orig)
+      // exactly as it was (the recorded step, if any, undoes to this same state);
+      // nothing written → nothing to put back, and no undo step was left behind
+      if (wrote) writeLayer(id, () => orig)
       return
     }
     close()
   }
 
-  if (getCurrentScope()) onScopeDispose(close)
+  // Torn down mid-session (the modal closed): a layer session puts its layer back
+  // first, so no half-edited preview (with a stale bbox) outlives the pen.
+  if (getCurrentScope()) onScopeDispose(cancelSession)
 
   return { session, open, commitSession, cancelSession }
 }
