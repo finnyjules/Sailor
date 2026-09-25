@@ -20,7 +20,11 @@ export const METALS: Record<FoilMetal, readonly [string, string, string, string]
 }
 export const METAL_LABELS: Record<FoilMetal, string> = { gold: 'Gold', silver: 'Silver', rose: 'Rose gold', copper: 'Copper' }
 
-export interface FoilDials { metal: FoilMetal; brushed: number; pressed: number }
+// `grain` is optional so the retiring `GoldFoilEffect` (effectStack.ts, removed in Task 3) — which
+// never had a grain dial — keeps satisfying this interface without a matching field: an absent
+// `grain` clamps to 0 below, which is byte-identical to before this dial existed ("Absent means
+// unchanged"). The new foil PAINT (paint.ts's `FoilFill`) always sends one explicitly.
+export interface FoilDials { metal: FoilMetal; brushed: number; pressed: number; grain?: number }
 export interface SpotUvDials { gloss: number; raised: number; varnishOnly: boolean }
 
 const COMMON = `#version 300 es
@@ -58,6 +62,7 @@ uniform vec3 uM2;
 uniform vec3 uM3;
 uniform float uBrushed;
 uniform float uPressed;
+uniform float uGrain;
 vec3 ramp(float t) {
   t = clamp(t, 0.0, 1.0);
   if (t < 0.33) return mix(uM0, uM1, t / 0.33);
@@ -72,7 +77,7 @@ void main() {
   float st = vnoise(vec2(px.x * 0.004, px.y * 0.9)) - 0.5;
   float st2 = vnoise(vec2(px.x * 0.02, px.y * 2.3) + 3.0) - 0.5;
   // Pressed in: the surface slopes DOWN into the shape, so the normal leans along +g.
-  vec3 N = normalize(vec3(g * uPressed * 1.2 + vec2(0.0, (st * 0.10 + st2 * 0.05) * uBrushed), 1.0));
+  vec3 N = normalize(vec3(g * uPressed * 1.2 + vec2(0.0, (st * 0.10 + st2 * 0.05) * uBrushed) + (vec2(hash(floor(px*1.5)), hash(floor(px*1.5) + 7.0)) - 0.5) * uGrain * 0.5, 1.0));
   vec3 P = worldPos(vUv);
   vec3 V = normalize(CAMERA - P);
   vec3 L = normalize(uLight - P);
@@ -81,6 +86,7 @@ void main() {
   float df = max(dot(N, L), 0.0);
   float t = 0.10 + 0.25 * df * df + 0.55 * smoothstep(0.80, 0.99, rl) + 0.9 * pow(max(rl, 0.0), 140.0)
           + 0.14 * (R.y * 0.5 + 0.5) + (st + st2 * 0.5) * uBrushed * 0.2;
+  t += (hash(floor(px*1.5) + 3.0) - 0.5) * uGrain * 0.45;
   vec3 c = ramp(t) * (1.0 + max(t - 1.0, 0.0) * 1.5);
   float ero = vnoise(px * 0.45) - 0.5;                  // stamped foil never has a perfect edge
   fragColor = vec4(min(c, vec3(1.0)), smoothstep(0.3, 0.7, src.a + ero * 0.3));
@@ -134,7 +140,7 @@ export function foilUniforms(d: FoilDials, light: FrameLight, w: number, h: numb
   return {
     ...shared(light, w, h, scale),
     uM0: hexVec3(m[0]), uM1: hexVec3(m[1]), uM2: hexVec3(m[2]), uM3: hexVec3(m[3]),
-    uBrushed: clamp01(d.brushed), uPressed: clamp01(d.pressed),
+    uBrushed: clamp01(d.brushed), uPressed: clamp01(d.pressed), uGrain: clamp01(d.grain ?? 0),
   }
 }
 

@@ -19,6 +19,11 @@ describe('finish shaders', () => {
       for (const m of f.matchAll(/smoothstep\(\s*([0-9.]+)\s*,\s*([0-9.]+)/g)) expect(+m[1]!).toBeLessThan(+m[2]!)
     }
   })
+  it('FOIL_FRAG declares uGrain and perturbs both the normal and the ramp input with it', () => {
+    expect(FOIL_FRAG).toContain('uniform float uGrain;')
+    expect(FOIL_FRAG).toMatch(/uGrain \* 0\.5/)
+    expect(FOIL_FRAG).toMatch(/uGrain \* 0\.45/)
+  })
 })
 
 describe('foilUniforms', () => {
@@ -36,6 +41,18 @@ describe('foilUniforms', () => {
   it('clamps dials to 0..1', () => {
     const u = foilUniforms({ metal: 'silver', brushed: 5, pressed: -1 }, light, 100, 100, 1) as any
     expect(u.uBrushed).toBe(1); expect(u.uPressed).toBe(0)
+  })
+  it('sends grain clamped to 0..1', () => {
+    const u = foilUniforms({ metal: 'gold', brushed: 0.5, pressed: 0.5, grain: 2 }, light, 100, 100, 1) as any
+    expect(u.uGrain).toBe(1)
+    const u2 = foilUniforms({ metal: 'gold', brushed: 0.5, pressed: 0.5, grain: -3 }, light, 100, 100, 1) as any
+    expect(u2.uGrain).toBe(0)
+    const u3 = foilUniforms({ metal: 'gold', brushed: 0.5, pressed: 0.5, grain: 0.4 }, light, 100, 100, 1) as any
+    expect(u3.uGrain).toBe(0.4)
+  })
+  it('defaults grain to 0 when absent (the retiring GoldFoilEffect never had one — "absent means unchanged")', () => {
+    const u = foilUniforms({ metal: 'gold', brushed: 0.5, pressed: 0.5 } as any, light, 100, 100, 1) as any
+    expect(u.uGrain).toBe(0)
   })
 })
 

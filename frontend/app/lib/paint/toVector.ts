@@ -51,7 +51,7 @@ import {
   isVectorPattern,
   multiplyAffine,
 } from '~/lib/vector/svg'
-import { type Paint, isFill, isGradient, isImageFill, sortedClampedStops } from '~/lib/compositor/paint'
+import { type Paint, isFill, isGradient, isImageFill, isFoilFill, sortedClampedStops } from '~/lib/compositor/paint'
 import {
   type Fill,
   checkerCellIsB,
@@ -376,6 +376,16 @@ export function paintToVectorPaint(paint: Paint | undefined, opts: VectorPaintOp
   // unfilled and the caller degrades to its solid fallback — unchanged from
   // before this task.
   if (isImageFill(paint)) {
+    if (!opts.box || !(opts.box.width > 0) || !(opts.box.height > 0) || !opts.raster) return null
+    const inverse = opts.units === 'userSpaceOnUse' && opts.elementTransform
+      ? invertAffine(opts.elementTransform)
+      : null
+    return rasterTile(opts.box, inverse, opts.raster)
+  }
+  // A foil paint is a GPU pass (finishPass.ts), not geometry — no shape to describe, so it
+  // takes the same TIER 3 arm as a shader fill: a `<pattern><image>` when the caller hands
+  // over a raster to embed, else `null` (exportTier reads that as 'raster').
+  if (isFoilFill(paint)) {
     if (!opts.box || !(opts.box.width > 0) || !(opts.box.height > 0) || !opts.raster) return null
     const inverse = opts.units === 'userSpaceOnUse' && opts.elementTransform
       ? invertAffine(opts.elementTransform)

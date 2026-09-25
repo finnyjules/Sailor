@@ -4,7 +4,7 @@
  * the node environment; all rendering lives in ./field.ts.
  */
 import { effectiveTilePaint, type ShaderSpec } from '~/lib/spacetype/fillTile'
-import { isGradient, isImageFill, sortedClampedStops, type Paint } from '~/lib/compositor/paint'
+import { isGradient, isImageFill, isFoilFill, sortedClampedStops, type Paint } from '~/lib/compositor/paint'
 import type { EffectDef, GradientStop, ParamValue } from '~/lib/shaderfx/types'
 import { cleanStops, isParamHex } from '~/lib/shaderfx/params'
 
@@ -65,7 +65,12 @@ function encode(parts: unknown[]): string {
  *  the same gradient), so the key must too, or batching silently gets worse without
  *  ever producing a wrong pixel (the opposite failure, but still a correctness bug
  *  against the "identical descriptors key identically" contract `fieldKey` exists to
- *  uphold). */
+ *  uphold).
+ *
+ *  A foil paint (Task 1 of "Gold foil becomes a fill") is its own, fifth arm — it is
+ *  never actually plugged into a shader field as an INPUT (Frame's fill picker offers
+ *  foil and shader fills as alternatives, not one feeding the other), but `Paint` is a
+ *  closed union `inputKey` must stay exhaustive over so this stays a total function. */
 export function inputKey(p: Paint): string {
   const eff = effectiveTilePaint(p)
   if (typeof eff === 'string') return encode(['s', eff])
@@ -75,6 +80,7 @@ export function inputKey(p: Paint): string {
     return encode(['g', eff.type, angle, stops])
   }
   if (isImageFill(eff)) return encode(['i', eff.src, eff.fit, eff.scale ?? 1, eff.offset?.x ?? 0, eff.offset?.y ?? 0])
+  if (isFoilFill(eff)) return encode(['m', eff.metal, eff.brushed, eff.pressed, eff.grain])
   return encode(['f', eff.type, eff.a, eff.b, eff.angle, eff.density])
 }
 

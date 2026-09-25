@@ -269,7 +269,8 @@ export function coverSourceRect(srcW: number, srcH: number, boxW: number, boxH: 
 // here unchanged so this file's ~40 existing importers don't need to move.
 export {
   type GradientStop, type LinearGradient, type RadialGradient, type Gradient, type Paint, type ImageFill,
-  isGradient, isFill, isImageFill,
+  type FoilFill, DEFAULT_FOIL_FILL,
+  isGradient, isFill, isImageFill, isFoilFill,
 } from '~/lib/compositor/paint'
 import { type Paint, isFill, isImageFill, paintTileBox } from '~/lib/compositor/paint'
 import { buildDisplacementField, resampleBilinear, type DisplaceMapSpec } from '~/lib/compositor/displace'

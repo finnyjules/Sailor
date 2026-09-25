@@ -15,6 +15,9 @@
 import { type Fill, effectiveTileFill, fillTileBox } from '~/lib/spacetype/fillTile'
 import { gradientUnitAxis, orderGradientStops } from '~/lib/vector/svg'
 import { getFillBitmap } from '~/lib/paint/imageFillCache'
+// Type-only: `finishPass.ts` imports nothing from this module (or from anything that
+// does), so this is not a cycle — just the metal vocabulary the GPU pass itself owns.
+import { METALS, type FoilMetal } from '~/lib/compositor/finishPass'
 
 export interface GradientStop { offset: number; color: string } // offset 0..1
 export interface LinearGradient { type: 'linear'; angle: number; stops: GradientStop[] } // angle in degrees
@@ -27,7 +30,21 @@ export interface ImageFill {
   scale?: number                           // default 1
   offset?: { x: number; y: number }        // fraction of box, 0-centered; default {0,0}
 }
-export type Paint = string | Gradient | Fill | ImageFill
+/** A foil paint — metal, brushed, pressed in, grain. Rendered by `applyFinish(off, 'gold_foil', …)`
+ *  over the region's own offscreen (Task 2); `resolvePaint` below is its non-GPU fallback (the
+ *  metal's mid colour), used for thumbnails, previews and anywhere `drawLayerContent` doesn't reach.
+ *  Frame-only: `FillControl` offers it only behind `allowFoil` (Task 3), so Space Type, Shape Studio
+ *  and Vector Type never see this variant. */
+export interface FoilFill {
+  type: 'foil'
+  metal: FoilMetal
+  brushed: number
+  pressed: number
+  grain: number
+}
+export const DEFAULT_FOIL_FILL: FoilFill = { type: 'foil', metal: 'gold', brushed: 0.5, pressed: 0.5, grain: 0.4 }
+
+export type Paint = string | Gradient | Fill | ImageFill | FoilFill
 
 export function isGradient(p: Paint | undefined): p is Gradient {
   return !!p && typeof p === 'object' && ((p as Gradient).type === 'linear' || (p as Gradient).type === 'radial')
@@ -39,6 +56,10 @@ export function isFill(p: Paint | undefined): p is Fill {
 // An ImageFill is the only Paint whose discriminant `type` is 'image'.
 export function isImageFill(p: Paint | undefined): p is ImageFill {
   return !!p && typeof p === 'object' && (p as ImageFill).type === 'image' && 'src' in p
+}
+// A FoilFill is the only Paint whose discriminant `type` is 'foil'.
+export function isFoilFill(p: Paint | undefined): p is FoilFill {
+  return !!p && typeof p === 'object' && (p as FoilFill).type === 'foil'
 }
 
 /** Sort a gradient's stops by offset and clamp each to 0..1 (non-finite offsets sink to 0).
@@ -83,6 +104,11 @@ export function paintTileBox(paint: Paint, w: number, h: number): HTMLCanvasElem
       ctx.drawImage(img, dx, dy, dw, dh)
     }
     return c   // transparent when unloaded
+  }
+  if (isFoilFill(paint)) {
+    // Same non-GPU fallback as `resolvePaint` (resolve.ts): the metal's mid colour, flat.
+    ctx.fillStyle = METALS[paint.metal]?.[2] ?? METALS.gold[2]; ctx.fillRect(0, 0, W, H)
+    return c
   }
   if (!isGradient(paint)) {
     ctx.fillStyle = paint; ctx.fillRect(0, 0, W, H); return c

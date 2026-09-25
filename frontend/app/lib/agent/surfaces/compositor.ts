@@ -8,7 +8,8 @@
  * to `node.data.properties.sailor_localLayers` + the background, and runs the
  * media ops (generate/edit/remove-bg) which need async backend calls.
  */
-import { layerMaskRef, localLayerBox, type DealLayer, type LocalLayer, type LocalLayerKind, type Paint, type ScatterLayer, type TextLayer } from '~/composables/useCompositorLayers'
+import { layerMaskRef, localLayerBox, type DealLayer, type LocalLayer, type LocalLayerKind, type Paint, type ScatterLayer, type TextLayer, isFoilFill } from '~/composables/useCompositorLayers'
+import { METAL_LABELS } from '~/lib/compositor/finishPass'
 import type { Command, CommandResult, CommandSpec, SurfaceSnapshot } from '~/lib/agent/commandSurface'
 import { contrastRatio, parseColor, type LayoutIssue } from '~/lib/agent/verify'
 import { SWISS_LIMITS } from '~/lib/agent/designPrinciples'
@@ -96,6 +97,7 @@ function clone<T>(v: T): T {
 function paintLabel(p: Paint | undefined): string {
   if (p == null || p === '') return 'none'
   if (typeof p === 'string') return p
+  if (isFoilFill(p)) return `${METAL_LABELS[p.metal] ?? 'Gold'} foil`
   if (typeof p === 'object' && 'type' in p) {
     const gg = p as { type: string; shapeId?: string }
     if (gg.type === 'shapes') return `${gg.shapeId ?? 'sparkle'} pattern`
@@ -124,8 +126,21 @@ const clamp = (v: unknown, lo: number, hi: number, fallback: number): number => 
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : fallback
 }
 
-/** A Paint is a "#RRGGBB" string or a gradient/pattern object — same predicate setFill uses. */
-const isValidPaint = (v: unknown): boolean => v != null && (typeof v === 'string' || typeof v === 'object')
+/** A Paint is a "#RRGGBB" string or a gradient/pattern object — same predicate setFill uses.
+ *  A foil paint is excluded here too (see `foilRefusal` below, checked FIRST at every call
+ *  site so its message names the real reason instead of this one's generic "must be a colour"). */
+const isValidPaint = (v: unknown): boolean => v != null && (typeof v === 'string' || typeof v === 'object') && !isFoilFill(v as Paint)
+
+/** Foil is chosen from the fill picker (Task 3 of "Gold foil becomes a fill"), lit by eye
+ *  against the Frame's light — not a value the agent can author. Every command that sets a
+ *  layer fill, stroke or `color` checks this FIRST, so a foil paint is refused with a plain
+ *  reason instead of silently failing `isValidPaint`'s generic message or, worse, being
+ *  accepted and drawn as a flat fallback colour nobody asked for. */
+function foilRefusal(paint: unknown): CommandResult<CompositorState> | null {
+  return isFoilFill(paint as Paint)
+    ? { ok: false, reason: 'invalid', detail: 'foil is chosen from the fill picker, not set by the agent' }
+    : null
+}
 
 /** A Mosaic's internal `cellFill` — the style table in lib/compositor/mosaic maps the
  *  agent's plain style words (tiles | pane | …) onto it; `solid` is the `tiles` style. */
@@ -665,6 +680,7 @@ function strokePatch(
   const next: StrokeInstance = clone(cur)
 
   if ('paint' in p) {
+    if (isFoilFill(p.paint as Paint)) return { ok: false, detail: 'foil is chosen from the fill picker, not set by the agent' }
     if (!isValidPaint(p.paint)) return { ok: false, detail: 'paint must be a colour, a gradient object, or "none"' }
     next.paint = clone(p.paint) as Paint
   }
@@ -1017,6 +1033,7 @@ function applyCommand(input: CompositorState, cmd: Command): CommandResult<Compo
     }
     case 'setFill': {
       const paint = cmd.args?.paint as Paint | undefined
+      const foil = foilRefusal(paint); if (foil) return foil
       if (!isValidPaint(paint)) return { ok: false, reason: 'invalid', detail: 'missing args.paint' }
       const layer = findLayer(state, cmd.target)
       if (!layer) return { ok: false, reason: 'invalid', detail: `no layer '${String(cmd.target)}'` }
@@ -1028,6 +1045,7 @@ function applyCommand(input: CompositorState, cmd: Command): CommandResult<Compo
     case 'setStroke': {
       const paint = cmd.args?.paint as Paint | undefined
       if (paint == null) return { ok: false, reason: 'invalid', detail: 'missing args.paint' }
+      const foil = foilRefusal(paint); if (foil) return foil
       const layer = findLayer(state, cmd.target)
       if (!layer) return { ok: false, reason: 'invalid', detail: `no layer '${String(cmd.target)}'` }
       const home = strokeHome(layer.kind)
@@ -1127,6 +1145,7 @@ function applyCommand(input: CompositorState, cmd: Command): CommandResult<Compo
     }
     case 'addShape': {
       const a = (cmd.args ?? {}) as Record<string, unknown>
+      const foil = foilRefusal(a.fill); if (foil) return foil
       const shape = typeof a.shape === 'string' ? shapeById(a.shape) : undefined
       if (!shape) return { ok: false, reason: 'invalid', detail: `unknown shape id '${String(a.shape)}' — use one from document.shapeLibrary` }
       const id = typeof a.id === 'string' && a.id ? a.id : `l_${state.layers.length + 1}_shape`
@@ -1159,6 +1178,7 @@ function applyCommand(input: CompositorState, cmd: Command): CommandResult<Compo
     case 'setBackground': {
       const paint = cmd.args?.paint
       if (paint == null) return { ok: false, reason: 'invalid', detail: 'missing args.paint' }
+      const foil = foilRefusal(paint); if (foil) return foil
       const bg = (paint === 'none' || paint === '') ? undefined : clone(paint as Paint)
       return { ok: true, template: { ...state, background: bg }, inverse: snapshot() }
     }

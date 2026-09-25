@@ -20,7 +20,8 @@
  */
 import { type Fill, type ShaderSpec, fillTileBox, fillIsShader, fillTileKey } from '~/lib/spacetype/fillTile'
 import { resolveField } from '~/lib/shaderfill/field'
-import { type Paint, type ImageFill, isGradient, isFill, isImageFill, imageFillRect } from '~/lib/compositor/paint'
+import { type Paint, type ImageFill, isGradient, isFill, isImageFill, isFoilFill, imageFillRect } from '~/lib/compositor/paint'
+import { METALS } from '~/lib/compositor/finishPass'
 import { getFillBitmap } from '~/lib/paint/imageFillCache'
 // What the SVG export makes of a paint — the ORACLE for `spread: 'extend'` (see
 // `PaintSpread` and `fillSpreadKind` below). Import edge runs one way only:
@@ -91,6 +92,7 @@ export function fillSpreadKind(fill: Fill): 'pad' | 'repeat' {
 }
 
 export function hasPaint(paint: Paint | undefined): boolean {
+  if (isFoilFill(paint)) return true                     // a metal always paints, like a solid fill
   if (isImageFill(paint)) return !!paint.src
   if (isFill(paint)) return true                        // a fill always paints (solid → fill.a)
   if (isGradient(paint)) return paint.stops.length > 0
@@ -113,6 +115,10 @@ export function resolvePaint(
    *  only ever reachable through the `Fill` arm. */
   spread: PaintSpread = 'box',
 ): string | CanvasGradient | CanvasPattern {
+  // Non-GPU fallback for a foil paint: the metal's mid colour, flat. `drawLayerContent`
+  // (Task 2) bypasses this arm entirely when it CAN run `applyFinish` — this is what a
+  // thumbnail, a preview, or a context that never reaches the GPU pass sees instead.
+  if (isFoilFill(paint)) return METALS[paint.metal]?.[2] ?? METALS.gold[2]
   if (isImageFill(paint)) return resolveImageFill(ctx, paint, box)
   if (isFill(paint)) return resolveFill(ctx, paint, box, field, spread)
   if (!isGradient(paint)) return paint
