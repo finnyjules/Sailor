@@ -113,6 +113,19 @@ export const VIDEO_RATES: Record<string, VideoRate> = {
     byResolution: { '480p': 0.05, '768p': 0.08, '1080p': 0.16 },
     note: 'list price after the launch promotion (ends 2026-09-30)',
   },
+  // Wan 3.0 (family wan-3, runner-only; no backup). Text-, image- and
+  // reference-to-video share one card: "For every second of video you
+  // generate, you will be charged $0.05 480p, $0.10 720p, or $0.20 1080p."
+  // (the same text on all three endpoints). Sound doesn't change it.
+  'wan-3.0': {
+    unit: 'per_second', service: 'fal', source: fal('alibaba/wan-3.0/text-to-video'), read: READ, confidence: 'verified',
+    byResolution: { '480p': 0.05, '720p': 0.10, '1080p': 0.20 },
+  },
+  // "$0.068 at 480p, $0.14 at 720p, or $0.28 at 1080p" per second (image-to-video, its one endpoint).
+  'wan-3.0-prime': {
+    unit: 'per_second', service: 'fal', source: fal('alibaba/wan-3.0-prime/image-to-video'), read: READ, confidence: 'verified',
+    byResolution: { '480p': 0.068, '720p': 0.14, '1080p': 0.28 },
+  },
 
   // ── Replicate ───────────────────────────────────────────────────────────
   // Billing tiers on the model page (billingConfig), "per second of output video".
@@ -363,6 +376,9 @@ export function videoRateLabel(modelId: string, opts: { hosted?: boolean } = {})
   const s = effectiveVideoSettings(modelId, undefined, undefined, {})
   if (!rate || !s) return null
   // Dollars: the first service's rate. Credits: the charge, which covers the backup (videoPriceUsd).
+  // The dollar label follows the RUNNER's first service. The ComfyUI path
+  // still sends Kling 3.0 and PixVerse v6 to Replicate (their runner backup),
+  // so a local ComfyUI run of those costs Replicate's rate, not the label's.
   const usd = opts.hosted ? videoPriceUsd(modelId, s) : videoUsd(modelId, s)
   if (usd == null) return null
   const at = s.resolution ? ` at ${s.resolution}` : ''

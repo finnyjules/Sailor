@@ -203,8 +203,10 @@ export const IMAGE_RATES: Record<string, ImageRate> = {
 
 /**
  * What the BACKUP service charges, for each model that has one. The backup
- * renders the same picture (the same width × height), so it reads the same
- * ImageSettings.
+ * renders the same picture, so it reads the same ImageSettings (Flux 2 Pro
+ * and Max: the label's megapixels, capped at 2048 × 2048; the fal request is
+ * that size or, at a wide ratio past 2048 a side, smaller, so never billed
+ * more).
  */
 export const IMAGE_BACKUP_RATES: Record<string, ImageRate> = {
   // fal-ai/flux-2 (FLUX.2 [dev]): "$0.012 per megapixels". fal doesn't say how
@@ -213,6 +215,24 @@ export const IMAGE_BACKUP_RATES: Record<string, ImageRate> = {
     unit: 'per_megapixel', perMegapixel: 0.012, maxMegapixels: FLUX_2_DEV_MAX_MEGAPIXELS,
     service: 'fal', source: fal('fal-ai/flux-2'), read: READ, confidence: 'verified',
   },
+  // fal-ai/flux-2-pro (jpg or png requests only; twins.ts): "$0.03 for the
+  // first megapixel of output, plus $0.015 per extra megapixel of input and
+  // output, rounded up to the nearest megapixel" = $0.015 + $0.015 per MP, at
+  // least 1 MP. The backup sends no input picture. Same as Replicate's card.
+  'flux-2-pro': {
+    unit: 'per_megapixel', perImage: 0.015, perMegapixel: 0.015, minMegapixels: 1, maxMegapixels: BFL_MAX_MEGAPIXELS,
+    service: 'fal', source: fal('fal-ai/flux-2-pro'), read: READ, confidence: 'verified',
+  },
+  // fal-ai/flux-2-max: "The first processed megapixel will cost $0.07. Each
+  // additional megapixel will cost 0.03" = $0.04 + $0.03 per MP, at least
+  // 1 MP (rounded up, the ruling above). Same as Replicate's card.
+  'flux-2-max': {
+    unit: 'per_megapixel', perImage: 0.04, perMegapixel: 0.03, minMegapixels: 1, maxMegapixels: BFL_MAX_MEGAPIXELS,
+    service: 'fal', source: fal('fal-ai/flux-2-max'), read: READ, confidence: 'verified',
+  },
+  // "Price: $0.04 per images" / "$0.25 per images": Replicate's prices.
+  'recraft-v4': falImage('fal-ai/recraft/v4/text-to-image', 0.04),
+  'recraft-v4-pro': falImage('fal-ai/recraft/v4/pro/text-to-image', 0.25),
 }
 
 const own = <T>(o: Record<string, T>, k: string): T | undefined =>

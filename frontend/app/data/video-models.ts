@@ -119,6 +119,14 @@ const AUDIO_GENERATION: VideoModelAdvancedField = {
   description: 'Off = silent video, often faster / cheaper.',
 }
 
+/** Wan 3.0's two settings (its schema's `audio` and `enable_prompt_expansion`; wan3.ts). */
+const WAN_3_ADVANCED: VideoModelAdvancedField[] = [
+  { name: 'generate_audio', type: 'boolean', label: 'Generate audio', default: true,
+    description: 'Off makes a silent clip. The price is the same.' },
+  { name: 'enhance_prompt', type: 'boolean', label: 'Enhance prompt', default: true,
+    description: 'Lets Wan rewrite the prompt. Off is faster but usually looks worse.' },
+]
+
 // Common aspect-ratio sets.
 const WIDE_AR     = ['16:9', '9:16', '1:1']
 const STANDARD_AR = ['16:9', '9:16', '1:1', '4:3', '3:4']
@@ -421,6 +429,58 @@ export const VIDEO_MODELS: VideoModel[] = [
   },
 
   // ===== Wan (open-source) ================================================
+  // Wan 3.0 runs only in Sailor's runner (family wan-3), on fal
+  // (server/runner/generators/wan3.ts). Settings from its saved schemas
+  // (alibaba/wan-3.0/*, read 2026-09-24): 2–30 s, 480p/720p/1080p, sound on.
+  // The duration list is a pick of the schema's whole seconds.
+  {
+    id: 'wan-3.0',
+    runnerOnly: true,
+    family: 'wan-3',
+    label: 'Wan 3.0',
+    brand: 'Wan',
+    // The gallery's cover art only: the runner sends it to fal (Replicate's alibaba/wan-3 is no backup, wan3.ts).
+    replicateSlug: 'alibaba/wan-3',
+    pitch: 'Up to 30 s with native sound, from text, a first frame or reference pictures.',
+    description:
+      'Wan 3.0 makes clips of up to 30 seconds with sound, at 480p, 720p or 1080p. '
+      + 'Link a picture to start from it (and set a last frame), or give it up to 10 '
+      + 'reference pictures to keep a character or product the same.',
+    tags: ['flagship', 'audio', 'long', 'reference', '4k'],
+    modes: ['t2v', 'i2v'],
+    supportsSeed: true,
+    priceHint: null,
+    aspectRatios: STANDARD_AR,
+    defaultAspectRatio: '16:9',
+    durations: [3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30],
+    defaultDuration: 5,
+    resolutions: ['480p', '720p', '1080p'],
+    defaultResolution: '720p',
+    advanced: WAN_3_ADVANCED,
+  },
+  {
+    id: 'wan-3.0-prime',
+    runnerOnly: true,
+    family: 'wan-3',
+    label: 'Wan 3.0 Prime',
+    brand: 'Wan',
+    replicateSlug: 'alibaba/wan-3',
+    pitch: 'The faster Wan 3.0 tier for animating a picture, with sound.',
+    description:
+      'Wan 3.0 Prime turns a linked picture into a clip of up to 30 seconds with '
+      + 'sound, faster than Wan 3.0. It needs a picture linked to start from.',
+    tags: ['fast', 'audio', 'long', '4k'],
+    modes: ['i2v'],
+    supportsSeed: true,
+    priceHint: null,
+    aspectRatios: STANDARD_AR,
+    defaultAspectRatio: '16:9',
+    durations: [3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30],
+    defaultDuration: 5,
+    resolutions: ['480p', '720p', '1080p'],
+    defaultResolution: '720p',
+    advanced: WAN_3_ADVANCED,
+  },
   {
     id: 'wan-2.7-t2v',
     hidden: true,

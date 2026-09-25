@@ -11,7 +11,8 @@
  * SwapProductNode, PersonSwap, BlendSceneNode's Nano Banana mode, and the
  * ref-edits family: GenerateFromReferencesNode, RotateCameraNode,
  * ProductShotNode, the restyle family: RestyleFromImageNode, and the frame
- * family: Compositor, fed by the LoadImage nodes the Frame editor injects)
+ * family: Compositor, fed by the LoadImage nodes the Frame editor injects;
+ * and the runner-only models no Python node builds: Wan 3.0, family wan-3)
  * closely enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiPrompt } from '#shared/runner/graph'
@@ -41,6 +42,7 @@ import {
   FAL_FIRST_VIDEO, IMAGE_BACKUPS, NANO_BANANA_2_REPLICATE, VIDEO_BACKUPS,
   flux2ProEditOnReplicate, nanoBananaOnFal, nanoBananaOnReplicate, type ServiceCall,
 } from './generators/twins'
+import { RUNNER_WAN3_MODELS, isWan3Model, wan3Call } from './generators/wan3'
 import { checkRequest } from './requestRules'
 import type { OutputFile, RunnerProvider } from './types'
 
@@ -202,6 +204,22 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
 
     case 'GenerateVideoNode': {
       const id = resolveVideoModelId(inputs.model)
+      // Wan 3.0 (family wan-3): fal only, the endpoint by mode (wan3.ts); no backup.
+      if (isWan3Model(id)) {
+        const first = linkedFirstFile('image')
+        const call = wan3Call(id, {
+          prompt: asText(inputs.prompt),
+          aspectRatio: asText(inputs.aspect_ratio) || '16:9',
+          duration: asInt(inputs.duration, RUNNER_WAN3_MODELS[id].defaultDuration),
+          seed: asInt(inputs.seed, 0),
+          image: first ? await ctx.toUrl(first) : null,
+          adv: parseJsonObject(inputs.model_options),
+        })
+        return {
+          kind: 'provider', provider: call.provider, endpoint: call.endpoint, payload: call.payload, media: 'video', prefix: 'generate_video',
+          uiFor: () => null,
+        }
+      }
       // A model that isn't one of the fal ids goes to Replicate, its Python
       // provider (family replicate-video): _run_prediction on the slug, the
       // first output URL is the clip. The first frame goes in the model's own

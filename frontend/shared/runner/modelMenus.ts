@@ -8,7 +8,8 @@
  *     references, Upscale): app/data/edit-model-options.ts.
  *
  * `applyModelOverlay` adjusts every `/object_info` body Sailor serves
- * (server/native/objectInfo.ts, server/utils/engineGate.ts) from them. The
+ * (server/native/objectInfo.ts, server/utils/engineGate.ts) from them, and
+ * adds the runner-only video models' clip lengths to "Generate a video". The
  * galleries filter with `galleryEntries`; the combo widget with `comboMenu`.
  *
  * One rule decides what a menu offers and what a new node starts with
@@ -208,7 +209,48 @@ export function applyModelOverlay<T extends Catalog>(catalog: T, families: Reado
       break
     }
   }
-  return out as T
+  return withRunnerOnlyDurations(out) as T
+}
+
+/**
+ * The lengths a runner-only video model offers that the engine's
+ * GenerateVideoNode `duration` list lacks (Wan 3.0's 12, 25 and 30 s), as
+ * combo values ("30"). Python builds that list from its own models; the node's
+ * menu then narrows it to the picked model's lengths (app/lib/videoModelAdapt.ts).
+ */
+export function runnerOnlyVideoDurations(): string[] {
+  const out = new Set<string>()
+  for (const m of VIDEO_MODELS) if (m.runnerOnly) for (const d of m.durations) out.add(String(d))
+  return [...out]
+}
+
+/**
+ * GenerateVideoNode's `duration` combo with the runner-only lengths added, in
+ * numeric order (copy on write; nothing is removed). Only a runner run can use
+ * them: the menu shows each model only its own lengths, and a runner-only
+ * model never goes to ComfyUI (blockedModels.ts).
+ */
+function withRunnerOnlyDurations(catalog: Catalog): Catalog {
+  const node = plainObject(catalog.GenerateVideoNode)
+  const sections = plainObject(node?.input)
+  if (!node || !sections) return catalog
+  for (const [name, section] of Object.entries(sections)) {
+    const inputs = plainObject(section)
+    const spec = inputs?.duration
+    if (!inputs || !Array.isArray(spec)) continue
+    const legacy = Array.isArray(spec[0])
+    const config = { ...(plainObject(spec[1]) ?? {}) }
+    const existing: unknown[] | null = legacy ? spec[0] as unknown[] : spec[0] === 'COMBO' && Array.isArray(config.options) ? config.options as unknown[] : null
+    if (!existing) return catalog
+    const have = new Set(existing.map(String))
+    const extra = runnerOnlyVideoDurations().filter(d => !have.has(d))
+    if (!extra.length) return catalog
+    const numeric = existing.every(v => typeof v === 'string' && /^\d+$/.test(v))
+    const options = numeric ? [...existing as string[], ...extra].sort((a, b) => Number(a) - Number(b)) : [...existing, ...extra]
+    const patched = legacy ? [options, config, ...spec.slice(2)] : ['COMBO', { ...config, options }, ...spec.slice(2)]
+    return { ...catalog, GenerateVideoNode: { ...node, input: { ...sections, [name]: { ...inputs, duration: patched } } } }
+  }
+  return catalog
 }
 
 /**

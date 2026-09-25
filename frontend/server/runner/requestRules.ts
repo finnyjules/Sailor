@@ -9,6 +9,8 @@
  * The rules come from the providers' saved schemas
  * (tests/unit/fixtures/provider-schemas/; a test holds this table to them):
  *  - a prompt shorter than the schema's `minLength` (Nano Banana 3, Hailuo H3 1);
+ *  - Wan 3.0 reference pictures over its schema's 10, and reference videos or
+ *    sounds, which the runner doesn't send it yet (wan3.ts);
  *  - Seedance 2.0 references over the schema's counts (9 pictures, 3 videos,
  *    3 sounds). Their combined length (15 s of video, 15 s of sound) needs the
  *    files read, which only the gate can do (graphInputSeconds.ts
@@ -21,6 +23,10 @@ import { composeImagePrompt } from './generators/image'
 import { RUNNER_VIDEO_MODELS } from './generators/video'
 import { asText, parseJsonObject } from './generators/opts'
 import { moodboardFiles } from './inputs'
+import {
+  WAN_30_REFERENCE_TO_VIDEO, WAN_30_TEXT_TO_VIDEO, WAN_3_MAX_REFERENCE_PICTURES, WAN_3_NEEDS_PROMPT, WAN_3_PICTURES_ONLY,
+  WAN_3_TOO_MANY_REFERENCES, isWan3Model, wan3FirstFrame, wan3HasMediaReferences, wan3Mode, wan3ReferencePictures, type Wan3Id,
+} from './generators/wan3'
 
 export const NANO_BANANA_SHORT_PROMPT = 'Nano Banana needs a prompt of at least 3 characters.'
 export const H3_SHORT_PROMPT = 'Hailuo H3 needs a prompt.'
@@ -29,6 +35,9 @@ export const H3_SHORT_PROMPT = 'Hailuo H3 needs a prompt.'
 export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: string }>> = {
   'fal fal-ai/nano-banana-2': { min: 3, message: NANO_BANANA_SHORT_PROMPT },
   'fal fal-ai/nano-banana-2/edit': { min: 3, message: NANO_BANANA_SHORT_PROMPT },
+  // Recraft V4 on fal is only ever a backup (twins.ts): an empty prompt drops the backup, never the node.
+  'fal fal-ai/recraft/v4/text-to-image': { min: 1, message: 'Recraft V4 needs a prompt.' },
+  'fal fal-ai/recraft/v4/pro/text-to-image': { min: 1, message: 'Recraft V4 Pro needs a prompt.' },
   'fal fal-ai/nano-banana-pro': { min: 3, message: NANO_BANANA_SHORT_PROMPT },
   'fal fal-ai/nano-banana-pro/edit': { min: 3, message: NANO_BANANA_SHORT_PROMPT },
   'fal minimax/h3/text-to-video': { min: 1, message: H3_SHORT_PROMPT },
@@ -36,6 +45,8 @@ export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: 
   'fal minimax/h3/reference-to-video': { min: 1, message: H3_SHORT_PROMPT },
   'fal minimax/h3-max/text-to-video': { min: 1, message: H3_SHORT_PROMPT },
   'fal minimax/h3-max/image-to-video': { min: 1, message: H3_SHORT_PROMPT },
+  // Wan 3.0: only text-to-video requires a prompt (image- and reference-to-video take none).
+  [`fal ${WAN_30_TEXT_TO_VIDEO}`]: { min: 1, message: WAN_3_NEEDS_PROMPT },
 }
 
 /** JSON Schema counts characters as code points. */
@@ -77,6 +88,29 @@ export function requestProblem(provider: string, endpoint: string, payload: Reco
       if (Array.isArray(v) && v.length > l.max) return l.message
     }
   }
+  if (`${provider} ${endpoint}` === `fal ${WAN_30_REFERENCE_TO_VIDEO}`) {
+    const v = payload.reference_image_urls
+    if (Array.isArray(v) && v.length > WAN_3_MAX_REFERENCE_PICTURES) return WAN_3_TOO_MANY_REFERENCES
+  }
+  return null
+}
+
+/**
+ * What is wrong with a Wan 3.0 node's request before it is built, or null:
+ * the input it is about and the plain message. Judged the way wan3Call picks
+ * the endpoint (a linked `image` counts as a first frame).
+ */
+export function wan3RequestProblem(id: Wan3Id, inputs: Record<string, unknown>): { input: string, message: string } | null {
+  if (isLink(inputs.model_options)) return null
+  const adv = parseJsonObject(inputs.model_options)
+  const mode = wan3Mode(id, isLink(inputs.image) || !!wan3FirstFrame(null, adv), adv)
+  if (mode === 'image') return null
+  if (wan3HasMediaReferences(adv)) return { input: 'model_options', message: WAN_3_PICTURES_ONLY }
+  if (mode === 'reference') {
+    const refs = wan3ReferencePictures(adv)!
+    return refs.length > WAN_3_MAX_REFERENCE_PICTURES ? { input: 'model_options', message: WAN_3_TOO_MANY_REFERENCES } : null
+  }
+  if (!isLink(inputs.prompt) && chars(asText(inputs.prompt)) < 1) return { input: 'prompt', message: WAN_3_NEEDS_PROMPT }
   return null
 }
 
@@ -149,6 +183,10 @@ export function requestProblems(prompt: ApiPrompt): RequestProblem[] {
       if (id === 'seedance-2.0' && !isLink(inputs.model_options)) {
         const p = seedanceReferenceProblem(parseJsonObject(inputs.model_options), isLink(inputs.image))
         if (p) out.push({ nodeId, classType: ct, input: 'model_options', message: p.message })
+      }
+      if (isWan3Model(id)) {
+        const p = wan3RequestProblem(id, inputs)
+        if (p) out.push({ nodeId, classType: ct, input: p.input, message: p.message })
       }
     }
   }

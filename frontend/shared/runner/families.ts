@@ -15,9 +15,11 @@ export type RunnerFamily =
   | 'restyle'
   /** The Frame render (Compositor), computed by the runner itself: no provider, no charge. */
   | 'frame'
+  /** Wan 3.0 and Wan 3.0 Prime on fal (model line-up F1): runner-only video models. */
+  | 'wan-3'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
-  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame',
+  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3',
 ]
 
 const KNOWN: ReadonlySet<string> = new Set(RUNNER_FAMILIES)

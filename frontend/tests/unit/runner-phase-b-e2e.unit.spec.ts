@@ -162,6 +162,21 @@ const FLOWS: FamilyFlow[] = [
   videoFlow(pick(FIX.replicateVideo, 'runway-gen-4.5 with a frame', c => c.model === 'runway-gen-4.5' && !!c.args.image && !c.error)),
   nodeFlow('ref-edits', pick(FIX.refEdits, 'references ×3', c => c.class_type === 'GenerateFromReferencesNode' && c.links.length === 3 && hasCall(c))),
   nodeFlow('restyle', pick(FIX.restyle, 'restyle on Nano Banana Pro with a style picture', c => c.class_type === 'RestyleFromImageNode' && c.widgets.model === 'Nano Banana Pro' && hasCall(c) && c.links.includes('style_image'))),
+  // Task F1: Wan 3.0 has no Python builder, so no fixture case; the body is
+  // written from its saved schema (runner-wan3.unit.spec.ts), first frame from a card.
+  {
+    family: 'wan-3',
+    label: 'GenerateVideoNode wan-3.0',
+    prompt: {
+      11: imageCard('image.png'),
+      1: { class_type: 'GenerateVideoNode', inputs: { model: 'wan-3.0', prompt: 'a fox in the snow', aspect_ratio: '16:9', duration: '5', seed: 0, model_options: '{"resolution":"480p"}', image: ['11', 0] } },
+      2: outVideo('1'),
+    },
+    files: ['image.png'],
+    provider: 'fal',
+    endpoint: 'alibaba/wan-3.0/image-to-video',
+    body: { prompt: 'a fox in the snow', resolution: '480p', duration: 5, audio: true, enable_prompt_expansion: true, start_image_url: storageUrl('image') },
+  },
 ]
 
 // ── The routes ───────────────────────────────────────────────────────────
@@ -296,7 +311,7 @@ describe('B10 · one workflow per family, POST /api/runs to the last event', () 
       expect(events.msgs[0]).toMatchObject({ type: 'execution_start', data: { prompt_id: promptIds[0] } })
       expect(events.msgs.some(m => m.type === 'executing' && m.data.node === '1')).toBe(true)
       // A still shows itself on the node; a video node has no ui of its own (as today).
-      expect(events.msgs.some(m => m.type === 'executed' && m.data.node === '1')).toBe(f.family !== 'replicate-video')
+      expect(events.msgs.some(m => m.type === 'executed' && m.data.node === '1')).toBe(f.prompt['1']!.class_type !== 'GenerateVideoNode')
 
       const run = (await k.store.get(runId))!
       expect(run.status).toBe('done')

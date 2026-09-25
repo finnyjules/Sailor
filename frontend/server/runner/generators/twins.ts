@@ -30,16 +30,22 @@
  * ideogram-v3-* (3)         fal        —           Replicate's Ideogram V3 seed stops at 2³¹−1; the node's goes higher
  * seedream-5-lite           fal        —           fal sizes the picture by named sizes, Replicate only 2K or 3K
  * flux-dev                  Replicate  —           fal's Flux Dev has no webp, no guidance below 1 and no go-fast switch
- * flux-2-max/-pro/-flex     Replicate  —           fal's Flux 2 Max, Pro and Flex have no webp output (the node's default)
+ * flux-2-max / -pro         Replicate  fal         fal-ai/flux-2-max / -pro, for a jpg or png picture ONLY: fal makes no
+ *                                                  webp (the node's default), so a webp request has no backup (S3b)
+ * flux-2-flex               Replicate  —           fal's Flux 2 Flex has no prompt-upsampling switch (on by default here)
+ *                                                  and no 1-step run
  * flux-2-klein-4b           Replicate  —           fal's Klein 4B has no go-fast switch
  * flux-2-dev                Replicate  fal         fal-ai/flux-2 (FLUX.2 [dev]), same size, format and seed
  * imagen-4 / -fast / -ultra Replicate  —           fal's Imagen 4 endpoints are deprecated
- * seedream-4.5              Replicate  —           no twin (line-up page)
- * recraft-v4 / -v4-pro      Replicate  —           no twin (line-up page)
- * gpt-image-2               Replicate  —           no twin (line-up page)
+ * seedream-4.5              Replicate  —           fal hosts it, but Replicate makes 2K or 4K at a ratio without saying the
+ *                                                  pixels, and fal takes only width × height of at least 2560 × 1440
+ *                                                  worth (or 1920 a side): the same size can't be asked for (S3b)
+ * recraft-v4 / -v4-pro      Replicate  fal         fal-ai/recraft/v4[/pro]/text-to-image, the ratio as the size
+ *                                                  Replicate's schema lists for it (S3b)
+ * gpt-image-2               Replicate  —           fal hosts it (openai/gpt-image-2); its settings aren't checked yet
  * qwen-image                Replicate  —           fal's Qwen Image has no webp, no enhance-prompt switch and no 1-step run
- * grok-imagine              Replicate  —           no twin (line-up page)
- * flux-fast, p-image        Replicate  —           Pruna models: no twin (line-up page)
+ * grok-imagine              Replicate  —           fal hosts it (xai/grok-imagine-image); its settings aren't checked yet
+ * flux-fast, p-image        Replicate  —           Pruna models: not on fal (fal catalogue, 2026-09-24)
  * bria-fibo                 Replicate  —           fal's Fibo has no guidance setting
  * bria-image-3.2            Replicate  —           not on fal
  * hidden: flux-1.1-pro, seedream-4 (fal); flux-1.1-pro-ultra, flux-pro, imagen-3, imagen-3-fast, ideogram-v2,
@@ -54,11 +60,13 @@
  *                                                  reference prompt can't be sent there unchanged
  * hailuo-h3 / -h3-max       fal        —           not on Replicate (h3 has no public version, h3-max no page)
  * kling-v3                  fal        Replicate   MOVED to fal (line-up page): pro at $0.112 / $0.168 a second, half
- *                                                  of Replicate's $0.224 / $0.336
+ *                                                  of Replicate's $0.224 / $0.336. fal always gets `negative_prompt`
+ *                                                  ('' when none): its default is "blur, distort, and low quality",
+ *                                                  Replicate's is '', so both render the same (S3b)
  * pixverse-v6               fal        Replicate   MOVED to fal: half of Replicate's rate at every quality
  * seedance-2.0-fast         Replicate  —           fal's has no seed and no 3 s clip
  * runway-gen-4.5            Replicate  —           not on fal
- * sora-2 / -pro             Replicate  —           discontinued; no twin (line-up page)
+ * sora-2 / -pro             Replicate  —           discontinued; fal's Sora 2 endpoints are deprecated
  * hidden: kling-v2.5-turbo-pro, hailuo-2.3, wan-2.7-t2v, wan-2.5-i2v-fast, luma-ray-2-720p, ltx-video — no backup
  *
  * ── Image edits ────────────────────────────────────────────────────────────
@@ -83,12 +91,13 @@
  * Blend scene / Restyle, Nano Banana (the first one)
  *                           Replicate  —           the line-up retires it (Nano Banana 2 replaces it)
  * Product shot, Restyle IP-Adapter
- *                           Replicate  —           no twin (line-up page); both retired
+ *                           Replicate  —           not on fal (catacolabs/sdxl-ad-inpaint, fofr/style-transfer); both retired
  *
  * `RUNNER_ROUTES` below is this table as data; the spec builds each node and
  * checks planNode sends it where the table says.
  */
 import type { RunnerProvider } from '../types'
+import { FLUX_2_RESOLUTIONS } from '#shared/pricing/imageSettings'
 import { falNanoBananaEdit } from './edit'
 import { arOr, maybeSetSeed, optBool, optEnum, optStr } from './opts'
 import type { VideoBuildArgs } from './types'
@@ -100,7 +109,7 @@ export interface Route { first: RunnerProvider; backup: RunnerProvider | null; w
 
 const r = (first: RunnerProvider, backup: RunnerProvider | null, why?: string): Route => ({ first, backup, ...(why ? { why } : {}) })
 const HIDDEN = 'hidden: runs for saved projects only'
-const PAGE_NO_TWIN = 'no twin (line-up page)'
+const ON_FAL_UNCHECKED = 'fal hosts it, but its settings aren\'t checked yet'
 
 /**
  * Every runner surface, keyed `image:<id>`, `video:<id>`, `<NodeClass>` or
@@ -119,22 +128,22 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'image:seedream-4': r('fal', null, HIDDEN),
   // Generate image, Replicate
   'image:flux-dev': r('replicate', null, 'fal has no webp, no guidance below 1 and no go-fast switch'),
-  'image:flux-2-max': r('replicate', null, 'fal has no webp output'),
-  'image:flux-2-pro': r('replicate', null, 'fal has no webp output'),
-  'image:flux-2-flex': r('replicate', null, 'fal has no webp output'),
+  'image:flux-2-max': r('replicate', 'fal', 'jpg or png only: fal makes no webp, so a webp request has no backup'),
+  'image:flux-2-pro': r('replicate', 'fal', 'jpg or png only: fal makes no webp, so a webp request has no backup'),
+  'image:flux-2-flex': r('replicate', null, 'fal has no prompt-upsampling switch and no 1-step run'),
   'image:flux-2-klein-4b': r('replicate', null, 'fal\'s Klein 4B has no go-fast switch'),
   'image:flux-2-dev': r('replicate', 'fal'),
   'image:imagen-4-ultra': r('replicate', null, 'fal\'s Imagen 4 is deprecated'),
   'image:imagen-4': r('replicate', null, 'fal\'s Imagen 4 is deprecated'),
   'image:imagen-4-fast': r('replicate', null, 'fal\'s Imagen 4 is deprecated'),
-  'image:seedream-4.5': r('replicate', null, PAGE_NO_TWIN),
-  'image:recraft-v4-pro': r('replicate', null, PAGE_NO_TWIN),
-  'image:recraft-v4': r('replicate', null, PAGE_NO_TWIN),
-  'image:gpt-image-2': r('replicate', null, PAGE_NO_TWIN),
+  'image:seedream-4.5': r('replicate', null, 'Replicate makes 2K or 4K at a ratio without saying the pixels; fal takes only width x height'),
+  'image:recraft-v4-pro': r('replicate', 'fal'),
+  'image:recraft-v4': r('replicate', 'fal'),
+  'image:gpt-image-2': r('replicate', null, ON_FAL_UNCHECKED),
   'image:qwen-image': r('replicate', null, 'fal has no webp, no enhance-prompt switch and no 1-step run'),
-  'image:grok-imagine': r('replicate', null, PAGE_NO_TWIN),
-  'image:flux-fast': r('replicate', null, PAGE_NO_TWIN),
-  'image:p-image': r('replicate', null, PAGE_NO_TWIN),
+  'image:grok-imagine': r('replicate', null, ON_FAL_UNCHECKED),
+  'image:flux-fast': r('replicate', null, 'not on fal'),
+  'image:p-image': r('replicate', null, 'not on fal'),
   'image:bria-fibo': r('replicate', null, 'fal\'s Fibo has no guidance setting'),
   'image:bria-image-3.2': r('replicate', null, 'not on fal'),
   'image:flux-1.1-pro-ultra': r('replicate', null, HIDDEN),
@@ -165,8 +174,8 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'video:pixverse-v6': r('fal', 'replicate'),
   'video:seedance-2.0-fast': r('replicate', null, 'fal\'s has no seed and no 3 s clip'),
   'video:runway-gen-4.5': r('replicate', null, 'not on fal'),
-  'video:sora-2': r('replicate', null, PAGE_NO_TWIN),
-  'video:sora-2-pro': r('replicate', null, PAGE_NO_TWIN),
+  'video:sora-2': r('replicate', null, 'discontinued; fal\'s Sora 2 is deprecated'),
+  'video:sora-2-pro': r('replicate', null, 'discontinued; fal\'s Sora 2 is deprecated'),
   'video:kling-v2.5-turbo-pro': r('replicate', null, HIDDEN),
   'video:hailuo-2.3': r('replicate', null, HIDDEN),
   'video:wan-2.7-t2v': r('replicate', null, HIDDEN),
@@ -195,8 +204,8 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'BlendSceneNode:Flux Kontext Pro': r('fal', null, HIDDEN),
   'BlendSceneNode:Nano Banana': r('replicate', null, 'retired by the line-up (Nano Banana 2 replaces it)'),
   'RestyleFromImageNode:Nano Banana': r('replicate', null, 'retired by the line-up (Nano Banana 2 replaces it)'),
-  'RestyleFromImageNode:Style Transfer · IP-Adapter': r('replicate', null, PAGE_NO_TWIN),
-  'ProductShotNode': r('replicate', null, PAGE_NO_TWIN),
+  'RestyleFromImageNode:Style Transfer · IP-Adapter': r('replicate', null, 'not on fal'),
+  'ProductShotNode': r('replicate', null, 'not on fal'),
 }
 
 // ── Generate video: the two models moved to fal first ──────────────────────
@@ -216,7 +225,10 @@ function durOr(allowed: readonly number[], d: number): number {
  * Kling Video 3.0 on fal, the pro endpoints (Replicate's default `mode` is
  * "pro" too, 1080p). Same settings as the Replicate builder (video.ts
  * klingV3): 5, 10 or 15 s (fal's `duration` is text), the ratio (text-to-video
- * only: the first frame sets it), sound, and the negative prompt when set.
+ * only: the first frame sets it), sound, and the negative prompt. The
+ * negative prompt is ALWAYS sent, '' when the node has none: fal's default
+ * is "blur, distort, and low quality", Replicate's is '', so leaving it out
+ * would make the two services render differently (Task S3b).
  * No seed on either service; "Prompt adherence" (cfg_scale) is hidden and
  * sent to neither.
  */
@@ -226,9 +238,9 @@ export function klingV3Fal({ prompt, aspectRatio, duration, image, adv }: VideoB
     prompt,
     duration: String(durOr([5, 10, 15], duration)),
     generate_audio: optBool(adv, 'generate_audio', true),
+    // Always sent: fal's own default is not empty (see above).
+    negative_prompt: optStr(adv, 'negative_prompt', ''),
   }
-  const neg = optStr(adv, 'negative_prompt', '')
-  if (neg) inp.negative_prompt = neg
   if (image) inp.start_image_url = image
   else inp.aspect_ratio = arOr(KLING_AR, aspectRatio, '16:9')
   return { endpoint: `${KLING_V3_FAL_APP}/${image ? 'image-to-video' : 'text-to-video'}`, payload: inp }
@@ -313,9 +325,103 @@ export function flux2DevOnFal(repPayload: Record<string, unknown>): ServiceCall 
   return { provider: 'fal', endpoint: FLUX_2_DEV_FAL_APP, payload: inp }
 }
 
-/** GenerateImageNode Replicate models → their backup, built from the Replicate request. */
-export const IMAGE_BACKUPS: Readonly<Record<string, (repPayload: Record<string, unknown>) => ServiceCall>> = {
+/**
+ * A Flux 2 resolution label ("0.5 MP" … "4 MP") at a ratio, as width ×
+ * height: label × 1024² pixels (Black Forest Labs' megapixel, the reading
+ * imageSettings.ts bflMegapixels prices), scaled down so neither side passes
+ * 2048 (Replicate's largest side; its schema: "high-resolution images may not
+ * respect the resolution if aspect ratio is not 1:1"), each side a multiple of
+ * 16 (both schemas) and at least 256. Anything the builder can't send throws.
+ */
+const FLUX_2_MAX_SIDE = 2048
+export function flux2LabelSize(label: unknown, aspectRatio: unknown): { width: number, height: number } {
+  if (typeof label !== 'string' || !FLUX_2_RESOLUTIONS.includes(label)) throw new Error(`Flux 2 backup: no such resolution ${String(label)}`)
+  const m = typeof aspectRatio === 'string' ? /^(\d+):(\d+)$/.exec(aspectRatio) : null
+  if (!m) throw new Error(`Flux 2 backup: no such ratio ${String(aspectRatio)}`)
+  const [a, b] = [Number(m[1]), Number(m[2])]
+  const pixels = Number.parseFloat(label) * 1024 * 1024
+  let w = Math.sqrt(pixels * a / b)
+  let h = Math.sqrt(pixels * b / a)
+  const scale = Math.min(1, FLUX_2_MAX_SIDE / Math.max(w, h))
+  w *= scale
+  h *= scale
+  const snap = (x: number) => Math.max(256, Math.min(FLUX_2_MAX_SIDE, Math.round(x / 16) * 16))
+  return { width: snap(w), height: snap(h) }
+}
+
+/**
+ * FLUX.2 [pro] and [max] on fal (fal-ai/flux-2-pro, fal-ai/flux-2-max), from
+ * the Replicate request (image.ts rFlux2Basic), for a jpg or png picture
+ * only: fal makes no webp, the node's default, so a webp request has NO
+ * backup (null). Carried: the prompt; the ratio and resolution label as
+ * width × height (flux2LabelSize); the safety tolerance (fal spells 1–5 as
+ * text); the format (jpg is fal's jpeg); the seed. Replicate's fixed
+ * `output_quality` (90) has no fal field; it is not a node setting.
+ * Flux 2 Flex has no backup: fal's has no prompt-upsampling switch (the
+ * node's default is on) and no 1-step run.
+ */
+export const FLUX_2_PRO_FAL_APP = 'fal-ai/flux-2-pro'
+export const FLUX_2_MAX_FAL_APP = 'fal-ai/flux-2-max'
+function flux2OnFal(app: string) {
+  return (repPayload: Record<string, unknown>): ServiceCall | null => {
+    const format = repPayload.output_format
+    if (format !== 'jpg' && format !== 'png') return null
+    const tolerance = repPayload.safety_tolerance
+    if (typeof tolerance !== 'number' || !Number.isInteger(tolerance) || tolerance < 1 || tolerance > 5) {
+      throw new Error(`Flux 2 backup: no such safety tolerance ${String(tolerance)}`)
+    }
+    const inp: Record<string, unknown> = {
+      prompt: repPayload.prompt,
+      image_size: flux2LabelSize(repPayload.resolution, repPayload.aspect_ratio),
+      safety_tolerance: String(tolerance),
+      output_format: falFormat(format),
+    }
+    if (typeof repPayload.seed === 'number') inp.seed = repPayload.seed
+    return { provider: 'fal', endpoint: app, payload: inp }
+  }
+}
+export const flux2ProOnFal = flux2OnFal(FLUX_2_PRO_FAL_APP)
+export const flux2MaxOnFal = flux2OnFal(FLUX_2_MAX_FAL_APP)
+
+/**
+ * Recraft V4 and V4 Pro on fal, from the Replicate request (image.ts
+ * rRecraftV4: prompt and ratio). fal takes no ratio, only width × height, so
+ * the ratio goes as the picture size Replicate's own schema lists for it:
+ * its `size` enum has one size per ratio (the nearest by shape; the spec
+ * checks each is in the saved enum and is the nearest). V4 is about 1 MP,
+ * V4 Pro twice the side. Neither service has a seed or a format setting.
+ */
+export const RECRAFT_V4_FAL_APP = 'fal-ai/recraft/v4/text-to-image'
+export const RECRAFT_V4_PRO_FAL_APP = 'fal-ai/recraft/v4/pro/text-to-image'
+export const RECRAFT_V4_SIZES: Readonly<Record<string, readonly [number, number]>> = {
+  '1:1': [1024, 1024],
+  '4:3': [1216, 896], '3:4': [896, 1216],
+  '3:2': [1280, 832], '2:3': [832, 1280],
+  '16:9': [1344, 768], '9:16': [768, 1344],
+  '5:4': [1152, 896], '4:5': [896, 1152],
+  '2:1': [1536, 768], '1:2': [768, 1536],
+}
+function recraftOnFal(app: string, scale: number) {
+  return (repPayload: Record<string, unknown>): ServiceCall => {
+    const size = typeof repPayload.aspect_ratio === 'string' ? RECRAFT_V4_SIZES[repPayload.aspect_ratio] : undefined
+    if (!size) throw new Error(`Recraft V4 backup: no size for the ratio ${String(repPayload.aspect_ratio)}`)
+    if (typeof repPayload.prompt !== 'string') throw new Error('Recraft V4 backup: the prompt is not text')
+    return { provider: 'fal', endpoint: app, payload: { prompt: repPayload.prompt, image_size: { width: size[0] * scale, height: size[1] * scale } } }
+  }
+}
+export const recraftV4OnFal = recraftOnFal(RECRAFT_V4_FAL_APP, 1)
+export const recraftV4ProOnFal = recraftOnFal(RECRAFT_V4_PRO_FAL_APP, 2)
+
+/**
+ * GenerateImageNode Replicate models → their backup, built from the Replicate
+ * request; null when this request has none (a Flux 2 webp).
+ */
+export const IMAGE_BACKUPS: Readonly<Record<string, (repPayload: Record<string, unknown>) => ServiceCall | null>> = {
   'flux-2-dev': flux2DevOnFal,
+  'flux-2-pro': flux2ProOnFal,
+  'flux-2-max': flux2MaxOnFal,
+  'recraft-v4': recraftV4OnFal,
+  'recraft-v4-pro': recraftV4ProOnFal,
 }
 
 // ── Image edits ────────────────────────────────────────────────────────────
@@ -329,18 +435,22 @@ export const NANO_BANANA_PRO_REPLICATE = 'google/nano-banana-pro'
  * A Nano Banana 2 / Pro edit on fal, from the Replicate request `{prompt,
  * image_input, resolution, output_format}` (no seed: none of the requests
  * that have a twin sends one). The pictures in the same order.
+ *
+ * Every field must be there with its type: a missing or wrong-typed one
+ * throws rather than sending the backup a default the first request never
+ * asked for (an empty prompt, no pictures, another size).
  */
 export function nanoBananaOnFal(slug: typeof NANO_BANANA_2_REPLICATE | typeof NANO_BANANA_PRO_REPLICATE, repPayload: Record<string, unknown>): ServiceCall {
+  const { prompt, image_input: imageInput, resolution, output_format: outputFormat } = repPayload
+  const bad = (field: string) => new Error(`Nano Banana backup: the Replicate request's ${field} is not what fal can carry`)
+  if (typeof prompt !== 'string') throw bad('prompt')
+  if (!Array.isArray(imageInput) || !imageInput.every(u => typeof u === 'string')) throw bad('image_input')
+  if (typeof resolution !== 'string') throw bad('resolution')
+  if (typeof outputFormat !== 'string') throw bad('output_format')
   return {
     provider: 'fal',
     endpoint: slug === NANO_BANANA_2_REPLICATE ? NANO_BANANA_2_FAL_EDIT : NANO_BANANA_PRO_FAL_EDIT,
-    payload: falNanoBananaEdit({
-      imageUrls: Array.isArray(repPayload.image_input) ? repPayload.image_input as string[] : [],
-      prompt: typeof repPayload.prompt === 'string' ? repPayload.prompt : '',
-      resolution: typeof repPayload.resolution === 'string' ? repPayload.resolution : '1K',
-      outputFormat: typeof repPayload.output_format === 'string' ? repPayload.output_format : 'png',
-      seed: 0,
-    }),
+    payload: falNanoBananaEdit({ imageUrls: imageInput as string[], prompt, resolution, outputFormat, seed: 0 }),
   }
 }
 

@@ -51,7 +51,9 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // 2 at Replicate; a model with a backup is priced at the first service with
 // the markup, or the backup at cost, whichever is higher (so Kling 3.0 and
 // PixVerse v6 charge Replicate's cost, their ComfyUI path's service).
-export const PRICE_BOOK_VERSION = 'lineup-s3'
+// lineup-f1 (Task F1): Wan 3.0 and Wan 3.0 Prime, fal per second by
+// resolution (runner-only, family wan-3). No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-f1'
 
 export const BASE_RENDER_CREDITS = 1
 

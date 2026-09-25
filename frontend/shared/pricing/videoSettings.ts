@@ -5,7 +5,7 @@
  *
  * The price multiplies a rate by these, so it must never read a setting the
  * builder would send differently ("priced on what is sent"). The builders are
- * server/runner/generators/video.ts (fal and Replicate) and twins.ts (the
+ * server/runner/generators/video.ts (fal and Replicate), wan3.ts (Wan 3.0) and twins.ts (the
  * first-service builders of Kling 3.0 and PixVerse v6, and the backups) and, for the one model
  * the runner does not build (Fabric), comfy_api_nodes/video_models.py. The
  * settings-parity test (tests/unit/video-pricing.unit.spec.ts) runs every
@@ -141,6 +141,9 @@ function pixverseResolution(adv: Adv): string {
   const sent = resIn(PIXVERSE_TIERS, '720p')(adv)
   return PIXVERSE_TIERS.indexOf(sent) < PIXVERSE_TIERS.indexOf('540p') ? '540p' : sent
 }
+/** alibaba/wan-3.0 and -prime: any whole second from 2 to 30; 480p, 720p or 1080p (wan3.ts). */
+const WAN_3_SECONDS = Array.from({ length: 29 }, (_, i) => i + 2)
+const WAN_3_RESOLUTIONS = ['480p', '720p', '1080p']
 /** wan-video/wan-2.7-t2v: any whole second from 2 to 15 (video.ts WAN_27_SECONDS). */
 const WAN_27_SECONDS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 
@@ -170,6 +173,10 @@ const RULES: Record<string, Rule> = {
   // hailuoH3Core: the model's own resolution table of the lower-cased option, else 768P. H3 always renders sound.
   'hailuo-h3': { durations: [5, 6, 10], defaultDuration: 5, resolution: h3Res(H3_RES), audio: fixed(true) },
   'hailuo-h3-max': { durations: [5, 6, 10], defaultDuration: 5, resolution: h3Res(H3_MAX_RES), audio: fixed(true) },
+  // wan3.ts (every endpoint): `duration` the closest whole second from 2 to 30,
+  // `resolution` 480p/720p/1080p else 720p, `audio` from generate_audio (default on).
+  'wan-3.0': { durations: WAN_3_SECONDS, defaultDuration: 5, resolution: resIn(WAN_3_RESOLUTIONS, '720p'), audio: audioOpt(true) },
+  'wan-3.0-prime': { durations: WAN_3_SECONDS, defaultDuration: 5, resolution: resIn(WAN_3_RESOLUTIONS, '720p'), audio: audioOpt(true) },
 
   // ── Replicate (RUNNER_REPLICATE_VIDEO_MODELS) ──
   // sora2 / sora2Pro send `seconds` 4/8/12 (video.ts SORA_SECONDS) and no

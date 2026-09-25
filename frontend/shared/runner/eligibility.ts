@@ -267,10 +267,16 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // Only ADDS these models; the fal ones stay as they are. A legacy label is
   // looked up by its current id ('Kling 2.1' → kling-v2.5-turbo-pro).
   // wan-2.5-i2v-fast is image-to-video only: Python raises without a first frame.
+  // ── wan-3 (model line-up F1): Wan 3.0 on fal, runner-only ──
+  // Wan 3.0 Prime is image-to-video only: its first frame must be linked.
   GenerateVideoNode: {
-    models: Object.fromEntries(RUNNER_REPLICATE_VIDEO_MODEL_IDS.map(id => [id, id === 'wan-2.5-i2v-fast'
-      ? { family: 'replicate-video' as const, mustLink: ['image'] }
-      : 'replicate-video' as const])),
+    models: {
+      ...Object.fromEntries(RUNNER_REPLICATE_VIDEO_MODEL_IDS.map(id => [id, id === 'wan-2.5-i2v-fast'
+        ? { family: 'replicate-video' as const, mustLink: ['image'] }
+        : 'replicate-video' as const])),
+      'wan-3.0': 'wan-3',
+      'wan-3.0-prime': { family: 'wan-3', mustLink: ['image'] },
+    },
     mustNotLink: ['prompt', 'model_options'],
   },
   // ── frame: the Frame render, computed by the runner (server/runner/compositor/) ──

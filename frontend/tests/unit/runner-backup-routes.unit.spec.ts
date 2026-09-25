@@ -8,13 +8,16 @@
  *     every value the node's controls can set, and carry the same settings.
  *  3. The price reads the first service's rate, and covers the backup at cost:
  *     max(first with the markup, backup at cost). Badge = charge.
- *  4. The models the line-up page says have no twin have no backup.
+ *  4. The models with no twin, or a twin that can't carry every setting, have
+ *     no backup (Flux 2 Pro and Max: none for a webp picture; S3b).
  */
 import { describe, expect, it } from 'vitest'
 import { planNode, type NodePlan } from '~~/server/runner/executors'
 import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS } from '~~/server/runner/generators/image'
 import { RUNNER_REPLICATE_VIDEO_MODELS, RUNNER_VIDEO_MODELS } from '~~/server/runner/generators/video'
-import { RUNNER_ROUTES, flux2DevOnFal } from '~~/server/runner/generators/twins'
+import {
+  NANO_BANANA_2_REPLICATE, RECRAFT_V4_SIZES, RUNNER_ROUTES, flux2DevOnFal, flux2LabelSize, flux2MaxOnFal, flux2ProOnFal, nanoBananaOnFal,
+} from '~~/server/runner/generators/twins'
 import { RESTYLE_MODELS } from '~~/server/runner/generators/restyle'
 import { REFERENCE_MODEL_IDS } from '~~/server/runner/generators/refEdits'
 import type { OutputFile } from '~~/server/runner/types'
@@ -69,7 +72,12 @@ async function plan(classType: string, inputs: Record<string, unknown>): Promise
 
 /** The node a route key names, with everything it needs to make its call. */
 function nodeFor(key: string): [string, Record<string, unknown>] {
-  if (key.startsWith('image:')) return ['GenerateImageNode', { model: key.slice(6), prompt: 'a red fox', aspect_ratio: '1:1', seed: 7 }]
+  if (key.startsWith('image:')) {
+    const id = key.slice(6)
+    // Flux 2 Pro and Max have a backup for a jpg or png picture only (webp, their default, has none).
+    const adv = id === 'flux-2-pro' || id === 'flux-2-max' ? { model_options: JSON.stringify({ output_format: 'png' }) } : {}
+    return ['GenerateImageNode', { model: id, prompt: 'a red fox', aspect_ratio: '1:1', seed: 7, ...adv }]
+  }
   if (key.startsWith('video:')) {
     const id = key.slice(6)
     // A first frame for the image-to-video-only model.
@@ -133,16 +141,19 @@ describe('the first and backup services are the table\'s', () => {
 
 // ── 4. No twin, no backup ──────────────────────────────────────────────────
 
-describe('the models the line-up page says have no twin have no backup', () => {
+describe('the models with no twin (or one whose settings can\'t all be carried) have no backup', () => {
   const NO_TWIN: [string, Record<string, unknown>][] = [
     ...['sora-2', 'sora-2-pro'].map(id => nodeFor(`video:${id}`)),
-    ...['gpt-image-2', 'imagen-3', 'imagen-3-fast', 'seedream-4.5', 'recraft-v4', 'recraft-v4-pro', 'hunyuan-image-3', 'grok-imagine',
-      'flux-fast', 'p-image', 'wan-2.2-image-pruna'].map(id => nodeFor(`image:${id}`)),
+    ...['gpt-image-2', 'imagen-3', 'imagen-3-fast', 'seedream-4.5', 'hunyuan-image-3', 'grok-imagine',
+      'flux-fast', 'p-image', 'wan-2.2-image-pruna', 'flux-2-flex'].map(id => nodeFor(`image:${id}`)),
+    // Flux 2 Pro and Max making webp (their default): fal makes no webp.
+    ...['flux-2-pro', 'flux-2-max'].flatMap(model => [{}, { output_format: 'webp' }].map(adv =>
+      ['GenerateImageNode', { model, prompt: 'a red fox', aspect_ratio: '16:9', seed: 7, model_options: JSON.stringify(adv) }] as [string, Record<string, unknown>])),
     nodeFor('ProductShotNode'),
     nodeFor('RestyleFromImageNode:Style Transfer · IP-Adapter'),
   ]
   for (const [ct, inputs] of NO_TWIN) {
-    it(`${ct} ${String(inputs.model ?? '')}`, async () => {
+    it(`${ct} ${String(inputs.model ?? '')} ${String(inputs.model_options ?? '')}`, async () => {
       expect((await plan(ct, inputs)).backup).toBeUndefined()
     })
   }
@@ -190,7 +201,9 @@ describe('both requests of every pair fit their own schema over every setting', 
                 expect(frame(f), label).toBe(frame(b))
                 if (!image) expect(f.aspect_ratio, label).toBe(b.aspect_ratio)
                 expect(f.seed, label).toBe(b.seed)
-                expect(f.negative_prompt, label).toBe(b.negative_prompt)
+                // Left out means '' on Replicate (its default); fal's Kling is always sent one (S3b).
+                expect(f.negative_prompt ?? '', label).toBe(b.negative_prompt ?? '')
+                if (id === 'kling-v3') expect(typeof f.negative_prompt, label).toBe('string')
                 n++
               }
             }
@@ -226,6 +239,116 @@ describe('both requests of every pair fit their own schema over every setting', 
     // The builder reads the Replicate request, never the node: nothing else reaches fal.
     expect(Object.keys(flux2DevOnFal({ prompt: 'p', width: 1024, height: 1024, output_format: 'webp', output_quality: 90 }).payload).sort())
       .toEqual(['image_size', 'num_images', 'output_format', 'prompt'])
+  })
+
+  for (const id of ['flux-2-pro', 'flux-2-max'] as const) {
+    it(`Generate image, ${id}: fal for jpg and png, the same ratio, megapixels, safety tolerance and seed; no backup for webp`, async () => {
+      const cat = IMAGE_MODELS_BY_ID[id]!
+      let n = 0
+      for (const aspect_ratio of cat.aspectRatios) {
+        for (const adv of controlValues(cat.advanced)) {
+          for (const output_format of ['jpg', 'png', 'webp']) {
+            for (const seed of SEEDS) {
+              const p = await plan('GenerateImageNode', { model: id, prompt: 'a red fox', aspect_ratio, seed, model_options: JSON.stringify({ ...adv, output_format }) })
+              const label = `${aspect_ratio} ${JSON.stringify(adv)} ${output_format} ${seed}`
+              expect(fits('replicate', p.endpoint, p.payload), label).toEqual([])
+              if (output_format === 'webp') { expect(p.backup, label).toBeUndefined(); continue }
+              expectBothFit(p, label)
+              const [f, b] = [p.payload, p.backup!.payload]
+              expect(p.backup!.endpoint, label).toBe(`fal-ai/${id}`)
+              expect(b.prompt, label).toBe(f.prompt)
+              expect(b.output_format, label).toBe(output_format === 'jpg' ? 'jpeg' : 'png')
+              expect(b.safety_tolerance, label).toBe(String(f.safety_tolerance))
+              expect(b.seed, label).toBe(f.seed)
+              // The ratio and the label's megapixels, inside both services' limits.
+              const size = b.image_size as { width: number, height: number }
+              expect(size, label).toEqual(flux2LabelSize(f.resolution, f.aspect_ratio))
+              const [rw, rh] = String(f.aspect_ratio).split(':').map(Number) as [number, number]
+              expect(Math.abs(size.width / size.height - rw / rh) / (rw / rh), label).toBeLessThan(0.02)
+              for (const side of [size.width, size.height]) {
+                expect(side % 16, label).toBe(0)
+                expect(side, label).toBeGreaterThanOrEqual(256)
+                expect(side, label).toBeLessThanOrEqual(2048)
+              }
+              const labelPixels = Number.parseFloat(String(f.resolution)) * 1024 * 1024
+              expect(size.width * size.height, label).toBeLessThanOrEqual(Math.min(labelPixels, 2048 * 2048) * 1.02)
+              if (Math.max(size.width, size.height) < 2048) expect(size.width * size.height, label).toBeGreaterThanOrEqual(labelPixels * 0.98)
+              // Nothing but these reaches fal.
+              expect(Object.keys(b).sort(), label).toEqual(['image_size', 'output_format', 'prompt', 'safety_tolerance', ...(seed > 0 ? ['seed'] : [])].sort())
+              n++
+            }
+          }
+        }
+      }
+      expect(n).toBeGreaterThan(100)
+    })
+  }
+
+  it('Flux 2: 1 MP at 1:1 is 1024 × 1024; a request the builder can\'t make throws', () => {
+    expect(flux2LabelSize('1 MP', '1:1')).toEqual({ width: 1024, height: 1024 })
+    expect(flux2LabelSize('4 MP', '1:1')).toEqual({ width: 2048, height: 2048 })
+    expect(flux2LabelSize('4 MP', '16:9')).toEqual({ width: 2048, height: 1152 })
+    expect(() => flux2LabelSize('3 MP', '1:1')).toThrow()
+    expect(() => flux2LabelSize('1 MP', 'wide')).toThrow()
+    const base = { prompt: 'p', aspect_ratio: '1:1', resolution: '1 MP', output_format: 'png', output_quality: 90 }
+    for (const fn of [flux2ProOnFal, flux2MaxOnFal]) {
+      expect(fn({ ...base, safety_tolerance: 2 })).toBeTruthy()
+      expect(fn({ ...base, output_format: 'webp', safety_tolerance: 2 })).toBeNull()
+      expect(() => fn({ ...base, safety_tolerance: '2' })).toThrow()
+      expect(() => fn({ ...base, safety_tolerance: 6 })).toThrow()
+    }
+  })
+
+  for (const id of ['recraft-v4', 'recraft-v4-pro'] as const) {
+    it(`Generate image, ${id}: fal with the size Replicate's schema lists for the ratio`, async () => {
+      const cat = IMAGE_MODELS_BY_ID[id]!
+      const scale = id === 'recraft-v4-pro' ? 2 : 1
+      for (const aspect_ratio of cat.aspectRatios) {
+        const p = await plan('GenerateImageNode', { model: id, prompt: 'a red fox', aspect_ratio, seed: 7 })
+        expectBothFit(p, aspect_ratio)
+        expect(p.backup!.endpoint).toBe(id === 'recraft-v4' ? 'fal-ai/recraft/v4/text-to-image' : 'fal-ai/recraft/v4/pro/text-to-image')
+        const [w, h] = RECRAFT_V4_SIZES[String(p.payload.aspect_ratio)]!
+        expect(p.backup!.payload, aspect_ratio).toEqual({ prompt: p.payload.prompt, image_size: { width: w * scale, height: h * scale } })
+      }
+      // fal's prompt has a minLength of 1: an empty prompt drops the backup, not the node.
+      const empty = await plan('GenerateImageNode', { model: id, prompt: '', aspect_ratio: '1:1', seed: 7 })
+      expect(empty.provider).toBe('replicate')
+      expect(empty.backup).toBeUndefined()
+    })
+  }
+
+  it('Recraft V4: each ratio\'s size is in Replicate\'s saved size list, and the nearest in shape', () => {
+    for (const [slug, scale] of [['recraft-ai/recraft-v4', 1], ['recraft-ai/recraft-v4-pro', 2]] as const) {
+      // Replicate's schema: `size` is its own component, an enum of "WxH".
+      const schema = loadProviderSchema('replicate', slug) as unknown as { components: { schemas: Record<string, { enum?: string[] }> } }
+      const listed = schema.components.schemas.size!.enum!
+      const sizes = listed.map(x => x.split('x').map(Number) as [number, number])
+      for (const [ratio, [w, h]] of Object.entries(RECRAFT_V4_SIZES)) {
+        expect(listed, `${slug} ${ratio}`).toContain(`${w * scale}x${h * scale}`)
+        const [a, b] = ratio.split(':').map(Number) as [number, number]
+        const nearest = sizes.reduce((best, s) => Math.abs(s[0] / s[1] - a / b) < Math.abs(best[0] / best[1] - a / b) ? s : best)
+        expect(nearest, `${slug} ${ratio}`).toEqual([w * scale, h * scale])
+      }
+    }
+  })
+
+  it('Kling 3.0 on fal: the negative prompt is always sent, \'\' when the node has none', async () => {
+    for (const image of [undefined, LINK]) {
+      const none = await plan('GenerateVideoNode', { model: 'kling-v3', prompt: 'a fox runs', aspect_ratio: '16:9', ...(image ? { image } : {}) })
+      expect(none.payload.negative_prompt).toBe('')
+      expect(none.backup!.payload.negative_prompt).toBeUndefined()
+      const set = await plan('GenerateVideoNode', { model: 'kling-v3', prompt: 'a fox runs', aspect_ratio: '16:9', model_options: '{"negative_prompt":"rain"}', ...(image ? { image } : {}) })
+      expect(set.payload.negative_prompt).toBe('rain')
+      expect(set.backup!.payload.negative_prompt).toBe('rain')
+    }
+  })
+
+  it('the Nano Banana backup throws on a field of the wrong type instead of sending a default', () => {
+    const ok = { prompt: 'p', image_input: ['u'], resolution: '1K', output_format: 'png' }
+    expect(nanoBananaOnFal(NANO_BANANA_2_REPLICATE, ok).payload).toEqual({ prompt: 'p', image_urls: ['u'], resolution: '1K', output_format: 'png', num_images: 1 })
+    for (const bad of [{ prompt: 1 }, { prompt: undefined }, { image_input: 'u' }, { image_input: [1] }, { resolution: 2 }, { output_format: undefined }]) {
+      expect(() => nanoBananaOnFal(NANO_BANANA_2_REPLICATE, { ...ok, ...bad }), JSON.stringify(bad)).toThrow()
+    }
   })
 
   const INSTRUCTIONS = [{}, { instructions: 'keep the shadow' }]
@@ -373,6 +496,30 @@ describe('the price reads the first service\'s rate and covers the backup at cos
       expect(nodeCreditEstimate('GenerateImageNode', inputs), resolution).toBe(charge('GenerateImageNode', inputs))
     }
   })
+
+  // [id, settings, credits]: the backup costs what the first service costs, so the marked-up first price stands (S3b: no charge moves).
+  const SAME_PRICE: [string, Record<string, unknown>, number][] = [
+    // Replicate $0.015 + 2 MP × $0.015 = $0.045 → 9; fal $0.03 + $0.015 the same.
+    ['flux-2-pro', { resolution: '1 MP', output_format: 'png' }, 9],
+    ['flux-2-pro', { resolution: '4 MP', output_format: 'jpg' }, 18],
+    // Replicate $0.04 + 2 MP × $0.03 = $0.10 → 20; fal $0.07 + $0.03 the same.
+    ['flux-2-max', { resolution: '1 MP', output_format: 'png' }, 20],
+    ['flux-2-max', { resolution: '4 MP', output_format: 'webp' }, 29],
+    ['recraft-v4', {}, 8],
+    ['recraft-v4-pro', {}, 38],
+  ]
+  for (const [id, adv, credits] of SAME_PRICE) {
+    it(`${id} ${JSON.stringify(adv)}: the first service's price stands (${credits} credits); badge = charge`, () => {
+      const inputs = { model: id, aspect_ratio: '16:9', model_options: JSON.stringify(adv) }
+      const s = effectiveImageSettings(id, '16:9', inputs.model_options)!
+      const p = priceNode('GenerateImageNode', inputs)
+      if ('refused' in p) throw new Error(p.refused)
+      expect(imageBackupRate(id)!.service).toBe('fal')
+      expect(p.usd).toBeCloseTo(imageUsd(id, s)!, 9)
+      expect(p.credits).toBe(credits)
+      expect(nodeCreditEstimate('GenerateImageNode', inputs)).toBe(charge('GenerateImageNode', inputs))
+    })
+  }
 
   // [class, widgets, first endpoint, backup endpoint, credits]
   const EDITS: [string, NodeInputs, string, string, number][] = [

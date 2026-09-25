@@ -35,7 +35,7 @@ describe('parseFamilies', () => {
     expect([...parseFamilies(['fal-edit', 7, 'nope', 'ref-edits'])].sort()).toEqual(['fal-edit', 'ref-edits'])
   })
   it('knows the seven families', () => {
-    expect([...RUNNER_FAMILIES].sort()).toEqual(['fal-edit', 'frame', 'nano-actions', 'ref-edits', 'replicate-image', 'replicate-video', 'restyle'])
+    expect([...RUNNER_FAMILIES].sort()).toEqual(['fal-edit', 'frame', 'nano-actions', 'ref-edits', 'replicate-image', 'replicate-video', 'restyle', 'wan-3'])
   })
 })
 

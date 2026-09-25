@@ -268,7 +268,10 @@ const withFrame = (n: ApiPrompt[string]): ApiPrompt => ({
 
 describe('replicate-video eligibility', () => {
   it('the row adds only the Replicate models to GenerateVideoNode; Wan 2.5 I2V Fast needs its image linked', () => {
-    const models = RUNNER_NODE_RULES.GenerateVideoNode!.models!
+    // Besides the wan-3 family's two (Task F1, runner-wan3.unit.spec.ts).
+    const models = Object.fromEntries(Object.entries(RUNNER_NODE_RULES.GenerateVideoNode!.models!)
+      .filter(([, m]) => (typeof m === 'string' ? m : m.family) !== 'wan-3'))
+    expect(Object.keys(RUNNER_NODE_RULES.GenerateVideoNode!.models!).filter(id => !(id in models)).sort()).toEqual(['wan-3.0', 'wan-3.0-prime'])
     expect(Object.keys(models).sort()).toEqual([...RUNNER_REPLICATE_VIDEO_MODEL_IDS].sort())
     for (const [id, m] of Object.entries(models)) {
       if (id === 'wan-2.5-i2v-fast') expect(m).toEqual({ family: 'replicate-video', mustLink: ['image'] })

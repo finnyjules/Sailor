@@ -21,11 +21,13 @@ import { NANO_BANANA_2_SLUG, NANO_BANANA_SLUG } from '~~/server/runner/generator
 import { IMAGE_EDIT_MODELS, PRODUCT_SHOT_SLUG, imageEditCall } from '~~/server/runner/generators/refEdits'
 import { RESTYLE_NANO_BANANA_SLUGS, STYLE_TRANSFER_SLUG } from '~~/server/runner/generators/restyle'
 import {
-  FLUX_2_DEV_FAL_APP, FLUX_2_PRO_REPLICATE, FLUX_3_REPLICATE_SLUG, KLING_V3_FAL_APP, NANO_BANANA_PRO_REPLICATE, PIXVERSE_V6_FAL_APP,
+  FLUX_2_DEV_FAL_APP, FLUX_2_MAX_FAL_APP, FLUX_2_PRO_FAL_APP, FLUX_2_PRO_REPLICATE, FLUX_3_REPLICATE_SLUG, KLING_V3_FAL_APP,
+  NANO_BANANA_PRO_REPLICATE, PIXVERSE_V6_FAL_APP, RECRAFT_V4_FAL_APP, RECRAFT_V4_PRO_FAL_APP,
 } from '~~/server/runner/generators/twins'
 import type { OutputFile } from '~~/server/runner/types'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
 import { NANO_BANANA_SHORT_PROMPT, PROMPT_MIN_LENGTH, SEEDANCE_REFERENCE_LIMITS, requestProblem } from '~~/server/runner/requestRules'
+import { WAN_3_ENDPOINTS } from '~~/server/runner/generators/wan3'
 
 const readJson = (rel: string) => JSON.parse(readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8'))
 const BUILDERS = readJson('./fixtures/runner-builders.json')
@@ -207,6 +209,8 @@ function runnerEndpoints(): string[] {
   for (const d of Object.values(RUNNER_VIDEO_MODELS)) {
     for (const fn of Object.values(d.fnByMode)) if (fn !== undefined) out.add(`fal ${fn ? `${d.app}/${fn}` : d.app}`)
   }
+  // Task F1: Wan 3.0's four fal endpoints (wan3.ts; its payload grid is runner-wan3.unit.spec.ts).
+  for (const e of WAN_3_ENDPOINTS) out.add(`fal ${e}`)
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)
@@ -217,7 +221,7 @@ function runnerEndpoints(): string[] {
   }
   // Task S3: the first services that moved, and the backups (twins.ts).
   for (const app of [KLING_V3_FAL_APP, PIXVERSE_V6_FAL_APP]) for (const fn of ['text-to-video', 'image-to-video']) out.add(`fal ${app}/${fn}`)
-  out.add(`fal ${FLUX_2_DEV_FAL_APP}`)
+  for (const app of [FLUX_2_DEV_FAL_APP, FLUX_2_PRO_FAL_APP, FLUX_2_MAX_FAL_APP, RECRAFT_V4_FAL_APP, RECRAFT_V4_PRO_FAL_APP]) out.add(`fal ${app}`)
   for (const slug of [FLUX_3_REPLICATE_SLUG, NANO_BANANA_PRO_REPLICATE, FLUX_2_PRO_REPLICATE]) out.add(`replicate ${slug}`)
   return [...out].sort()
 }
