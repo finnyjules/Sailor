@@ -129,6 +129,11 @@ function getModelOptions(modelId: string): Record<string, any> {
   return seed
 }
 
+/** The advanced controls to show: a hidden one (no longer sent, Task S1b) keeps its value but isn't offered. */
+function shownAdvanced(model: VideoModel) {
+  return model.advanced.filter(f => !f.hidden)
+}
+
 function setModelOptions(modelId: string, opts: Record<string, any>) {
   const data = node.value?.data
   if (!data) return
@@ -479,13 +484,13 @@ const focusedModel = computed<VideoModel | null>(() =>
           </div>
 
           <!-- Advanced settings -->
-          <div v-if="(item as VideoModel).advanced.length" class="space-y-3 pt-3 border-t border-white/[0.06]">
+          <div v-if="shownAdvanced(item as VideoModel).length" class="space-y-3 pt-3 border-t border-white/[0.06]">
             <div class="text-[10px] uppercase tracking-[0.08em] text-white/40 font-semibold">
               Advanced settings
             </div>
             <div class="space-y-3">
               <div
-                v-for="field in (item as VideoModel).advanced"
+                v-for="field in shownAdvanced(item as VideoModel)"
                 :key="field.name"
                 class="space-y-1"
               >

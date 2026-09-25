@@ -35,6 +35,7 @@ import { NO_FAMILIES, RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { OutputFile } from '~~/server/runner/types'
 import { expectPythonParity } from './helpers/pythonParity'
+import { requestProblem } from '~~/server/runner/requestRules'
 import { createFakeFal, createFakeReplicate, makeKit, ofType } from './__runner__/kit'
 
 interface RefCase {
@@ -112,6 +113,13 @@ describe('ref-edits payloads match the Python nodes', () => {
         // Python's float() raises on the camera value: the runner fails the node too, and sends nothing.
         await expect(planCase(c, handedOff)).rejects.toThrow('The camera setting can’t be read')
         expect(handedOff).toEqual([])
+        return
+      }
+      // A request no provider takes (Nano Banana with a prompt under 3
+      // characters) is refused in plain words before anything is sent (S1b fix round 1).
+      const refusal = requestProblem(c.call!.provider, c.call!.endpoint, c.call!.payload)
+      if (refusal) {
+        await expect(planCase(c, handedOff)).rejects.toThrow(refusal)
         return
       }
       const plan = await planCase(c, handedOff)

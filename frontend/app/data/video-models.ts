@@ -61,6 +61,12 @@ export interface VideoModelAdvancedField {
   min?: number
   max?: number
   step?: number
+  /**
+   * Not shown: the runner no longer sends it, because the model's published
+   * schema has no such input (Task S1b). Kept so a saved node's value still
+   * loads (and the ComfyUI path still reads it).
+   */
+  hidden?: boolean
 }
 
 export interface VideoModel extends ModelFlags {
@@ -72,9 +78,9 @@ export interface VideoModel extends ModelFlags {
   description?: string             // longer body for the detail pane
   tags: VideoModelTag[]
   modes: VideoModelMode[]          // ['t2v'] | ['i2v'] | ['t2v', 'i2v']
-  // Whether the model's Replicate schema accepts a seed. Mirrors which Python
-  // builders call _maybe_set_seed in comfy_api_nodes/video_models.py — keep in
-  // sync when adding models. false ⇒ the node hides its seed widget.
+  // Whether the model's published schema accepts a seed (the saved copies in
+  // tests/unit/fixtures/provider-schemas/, Task S1b; before that it mirrored
+  // Python's _maybe_set_seed calls). false ⇒ the node hides its seed widget.
   supportsSeed: boolean
   // Old free-form price note. Not money: no price, badge or label reads it.
   // Prices come from the rate card, shared/pricing/videoRates.ts.
@@ -180,7 +186,7 @@ export const VIDEO_MODELS: VideoModel[] = [
       + 'Strong on dynamic camera work and naturalistic motion. T2V only on Replicate.',
     tags: ['flagship', 'audio', 'cinematic'],
     modes: ['t2v'],
-    supportsSeed: true,
+    supportsSeed: false,  // the model's schema has no seed (Task S1b)
     priceHint: '~$0.30 / 5s',
     aspectRatios: ['16:9', '9:16', '1:1'],
     defaultAspectRatio: '16:9',
@@ -197,7 +203,7 @@ export const VIDEO_MODELS: VideoModel[] = [
     pitch: 'Pro tier of Sora 2 — better motion, longer reach, premium price.',
     tags: ['flagship', 'audio', 'cinematic', '4k'],
     modes: ['t2v'],
-    supportsSeed: true,
+    supportsSeed: false,  // the model's schema has no seed (Task S1b)
     priceHint: '~$0.90 / 5s',
     aspectRatios: ['16:9', '9:16'],
     defaultAspectRatio: '16:9',
@@ -215,7 +221,7 @@ export const VIDEO_MODELS: VideoModel[] = [
     pitch: 'BFL\'s multimodal model — up to 20s video with native synchronized audio.',
     tags: ['flagship', 'audio'],
     modes: ['t2v', 'i2v'],
-    supportsSeed: true,
+    supportsSeed: false,  // the model's schema has no seed (Task S1b)
     priceHint: '~$0.20–0.40 / s',
     aspectRatios: ['16:9', '9:16', '1:1'],
     defaultAspectRatio: '16:9',
@@ -248,7 +254,7 @@ export const VIDEO_MODELS: VideoModel[] = [
     durations: [5, 10],
     defaultDuration: 5,
     advanced: [
-      { name: 'motion', type: 'integer', label: 'Motion intensity',
+      { name: 'motion', type: 'integer', label: 'Motion intensity', hidden: true,
         default: 5, min: 1, max: 10,
         description: '1 = static, 10 = chaotic.' },
     ],
@@ -266,7 +272,7 @@ export const VIDEO_MODELS: VideoModel[] = [
       + 'string up to 6 connected shots in a single prediction. Native audio.',
     tags: ['flagship', 'audio', 'long', 'multi-shot', 'cinematic'],
     modes: ['t2v', 'i2v'],
-    supportsSeed: true,
+    supportsSeed: false,  // the model's schema has no seed (Task S1b)
     priceHint: '~$0.60 / 10s',
     aspectRatios: ['16:9', '9:16', '1:1'],
     defaultAspectRatio: '16:9',
@@ -275,7 +281,7 @@ export const VIDEO_MODELS: VideoModel[] = [
     advanced: [
       AUDIO_GENERATION,
       NEG_PROMPT,
-      CFG_SCALE,
+      { ...CFG_SCALE, hidden: true },
     ],
   },
   {
@@ -293,9 +299,11 @@ export const VIDEO_MODELS: VideoModel[] = [
     defaultAspectRatio: '16:9',
     durations: [5, 10],
     defaultDuration: 5,
+    // kwaivgi/kling-v2.5-turbo-pro's guidance_scale is deprecated ("This
+    // parameter is not used"), so Prompt adherence has nothing to map to.
     advanced: [
       NEG_PROMPT,
-      CFG_SCALE,
+      { ...CFG_SCALE, hidden: true },
     ],
   },
 
@@ -340,7 +348,7 @@ export const VIDEO_MODELS: VideoModel[] = [
     resolutions: ['480p', '720p'],
     defaultResolution: '720p',
     advanced: [
-      CAMERA_FIXED,
+      { ...CAMERA_FIXED, hidden: true },
     ],
   },
 
@@ -354,7 +362,7 @@ export const VIDEO_MODELS: VideoModel[] = [
     pitch: 'Reliable mid-tier — good motion, predictable cost.',
     tags: ['cinematic'],
     modes: ['t2v', 'i2v'],
-    supportsSeed: true,
+    supportsSeed: false,  // the model's schema has no seed (Task S1b)
     priceHint: '~$0.35 / 6s',
     aspectRatios: ['16:9', '9:16', '1:1'],
     defaultAspectRatio: '16:9',
@@ -432,7 +440,7 @@ export const VIDEO_MODELS: VideoModel[] = [
     defaultResolution: '720p',
     advanced: [
       NEG_PROMPT,
-      { name: 'num_frames', type: 'integer', label: 'Frame count',
+      { name: 'num_frames', type: 'integer', label: 'Frame count', hidden: true,
         default: 81, min: 17, max: 121, step: 4,
         description: 'Total frames at 16 fps.' },
     ],
@@ -470,7 +478,7 @@ export const VIDEO_MODELS: VideoModel[] = [
     pitch: 'Luma\'s flagship at 720p — smooth motion, clean aesthetics.',
     tags: ['cinematic'],
     modes: ['t2v', 'i2v'],
-    supportsSeed: true,
+    supportsSeed: false,  // the model's schema has no seed (Task S1b)
     priceHint: '~$0.40 / 5s',
     aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
     defaultAspectRatio: '16:9',
@@ -526,7 +534,7 @@ export const VIDEO_MODELS: VideoModel[] = [
     defaultResolution: '720p',
     advanced: [
       AUDIO_GENERATION,
-      { name: 'style', type: 'select', label: 'Style preset',
+      { name: 'style', type: 'select', label: 'Style preset', hidden: true,
         default: 'none', options: ['none', 'anime', 'cinematic', '3d_animation', 'comic'] },
       NEG_PROMPT,
     ],

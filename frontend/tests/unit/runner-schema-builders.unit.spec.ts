@@ -238,6 +238,43 @@ describe('settings reach each model under its own schema\'s names', () => {
     }
   })
 
+  it('a video control is hidden exactly when the builder no longer sends it (fix round 1); its value is kept', () => {
+    const all = { ...RUNNER_VIDEO_MODELS, ...RUNNER_REPLICATE_VIDEO_MODELS }
+    const hiddenSeen: string[] = []
+    for (const [id, d] of Object.entries(all)) {
+      const cat = VIDEO_MODELS_BY_ID[id]!
+      for (const f of cat.advanced) {
+        const other = f.type === 'boolean' ? !f.default
+          : f.options ? f.options.find(o => o !== f.default)
+            : f.type === 'string' ? 'a different value'
+              : (f.max ?? 1) !== f.default ? f.max : f.min
+        const image = 'modes' in d && !d.modes.includes('t2v') ? 'https://fal.test/f.png' : null
+        const build = (adv: Adv) => JSON.stringify(d.build({ prompt: 'a wave', aspectRatio: '16:9', duration: d.defaultDuration, seed: 7, image, adv }))
+        const sent = build({ [f.name]: f.default }) !== build({ [f.name]: other })
+        expect(!!f.hidden, `${id} ${f.name}`).toBe(!sent)
+        if (f.hidden) hiddenSeen.push(`${id} ${f.name}`)
+      }
+    }
+    expect(hiddenSeen.sort()).toEqual([
+      'kling-v2.5-turbo-pro cfg_scale', 'kling-v3 cfg_scale', 'pixverse-v6 style',
+      'runway-gen-4.5 motion', 'seedance-2.0-fast camera_fixed', 'wan-2.7-t2v num_frames',
+    ])
+  })
+
+  it('a video model offers a seed exactly when its schema has one', () => {
+    for (const d of Object.values(RUNNER_VIDEO_MODELS)) {
+      const f = loadProviderSchema('fal', `${d.app}/${d.fnByMode.t2v}`.replace(/\/$/, ''))
+      let input = f.input as Record<string, any>
+      while (input.$ref) input = f.components.schemas[String(input.$ref).split('/').pop()!] as Record<string, any>
+      expect(VIDEO_MODELS_BY_ID[d.id]!.supportsSeed, d.id).toBe('seed' in input.properties)
+    }
+    for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) {
+      const f = loadProviderSchema('replicate', d.slug)
+      const input = f.components.schemas.Input as Record<string, any>
+      expect(VIDEO_MODELS_BY_ID[d.id]!.supportsSeed, d.id).toBe('seed' in input.properties)
+    }
+  })
+
   it('the Wan 2.5 menu opens at 720p, the default the builder sends', () => {
     expect(VIDEO_MODELS_BY_ID['wan-2.5-i2v-fast']!.defaultResolution).toBe('720p')
   })

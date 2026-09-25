@@ -45,13 +45,11 @@ describe('the video rate card', () => {
     for (const [id, r] of Object.entries(VIDEO_RATES)) {
       expect(r.source, id).toMatch(/^https:\/\/(fal\.ai|replicate\.com)\//)
       expect(r.read, id).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-      expect(['per_second', 'per_clip', 'gpu_time'], id).toContain(r.unit)
+      expect(['per_second', 'per_clip'], id).toContain(r.unit)
       expect(['verified', 'estimate'], id).toContain(r.confidence)
       expect(r.source.includes('fal.ai') ? 'fal' : 'replicate', id).toBe(r.service)
-      const figures = r.unit === 'gpu_time'
-        ? [r.usdPerGpuSecond, r.typicalSeconds, r.typicalSteps, r.maxSteps]
-        : Object.values(r.byResolution as Record<string, unknown>).flatMap(v =>
-          typeof v === 'number' ? [v] : Object.values(v as Record<string, number>))
+      const figures = Object.values(r.byResolution).flatMap(v =>
+        typeof v === 'number' ? [v] : Object.values(v as Record<string, number>))
       expect(figures.length, id).toBeGreaterThan(0)
       for (const f of figures) expect(f, id).toBeGreaterThan(0)
     }
@@ -111,7 +109,7 @@ function sentSettings(id: string, payload: Record<string, unknown>) {
   const def = SERVICE_DEFAULT[id] ?? {}
   // Sora's clip length is `seconds` (Task S1b); every other model's `duration`.
   const d = payload.duration ?? payload.seconds
-  const seconds = d === undefined ? def.seconds : (typeof d === 'number' ? d : Number.parseInt(String(d), 10))
+  let seconds = d === undefined ? def.seconds : (typeof d === 'number' ? d : Number.parseInt(String(d), 10))
   const r = payload.resolution
   let resolution = r === undefined ? def.resolution : String(r).toLowerCase()
   const a = payload.generate_audio
@@ -122,17 +120,17 @@ function sentSettings(id: string, payload: Record<string, unknown>) {
     expect(payload).not.toHaveProperty('resolution')
     const q = String(payload.quality ?? '540p').toLowerCase()
     expect(PIXVERSE_TIERS).toContain(q)
-    resolution = q
+    // The ComfyUI path still renders 540p (Python sends `resolution`): priced never below it (S1b fix round 1).
+    resolution = PIXVERSE_TIERS.indexOf(q) < PIXVERSE_TIERS.indexOf('540p') ? '540p' : q
     audio = payload.generate_audio_switch === undefined ? false : payload.generate_audio_switch
   }
+  // Wan 2.7: the ComfyUI path's clip is the 5 s default (Python sends num_frames): never priced below it.
+  if (id === 'wan-2.7-t2v') seconds = Math.max(seconds as number, 5)
   // A reference video sent (fal reference-to-video) is billed on its seconds
   // too: fal's maximum total input, 15 s, until the run can measure it.
   const refs = payload.video_urls
   const inputVideoSeconds = Array.isArray(refs) && refs.length ? 15 : 0
-  const out: Record<string, unknown> = { seconds, resolution, audio, inputVideoSeconds }
-  // LTX-Video's GPU time follows the `steps` it sends (schema default 30).
-  if (id === 'ltx-video') out.steps = payload.steps ?? 30
-  return out
+  return { seconds, resolution, audio, inputVideoSeconds }
 }
 
 describe('settings parity: the price reads what the builder sends', () => {
@@ -263,21 +261,16 @@ describe('worked examples', () => {
     expect(providerUsd('GenerateVideoNode', { ...base, duration: '7' })).toBeCloseTo(0.40 * 6)
   })
 
-  it('per-clip models: Hailuo 2.3 by resolution × length; LTX-Video by the steps it sends', () => {
+  it('per-clip models: Hailuo 2.3 by resolution × length, LTX-Video flat', () => {
     expect(providerUsd('GenerateVideoNode', { model: 'hailuo-2.3', duration: '6' })).toBeCloseTo(0.28)
     expect(providerUsd('GenerateVideoNode', { model: 'hailuo-2.3', duration: '10' })).toBeCloseTo(0.56)
     expect(providerUsd('GenerateVideoNode', { model: 'hailuo-2.3', duration: '6', model_options: '{"resolution":"1080p"}' })).toBeCloseTo(0.49)
     // 1080p at 10 s has no clip price: the card's dearest second × 10.
     expect(providerUsd('GenerateVideoNode', { model: 'hailuo-2.3', duration: '10', model_options: '{"resolution":"1080p"}' })).toBeCloseTo(0.49 / 6 * 10, 6)
-    // LTX-Video: L40S $0.000975/s × the typical 84 s at 30 steps, scaled by the steps sent (Task S1b).
-    expect(providerUsd('GenerateVideoNode', { model: 'ltx-video', duration: '5' })).toBeCloseTo(0.000975 * 84, 9)
-    expect(providerUsd('GenerateVideoNode', { model: 'ltx-video', model_options: '{"num_inference_steps":50}' })).toBeCloseTo(0.000975 * 140, 9)
-    expect(providerUsd('GenerateVideoNode', { model: 'ltx-video', model_options: '{"num_inference_steps":40}' })).toBeCloseTo(0.000975 * 84 * 40 / 30, 9)
-    // Fewer steps than the typical run is still the typical run (never under); more than 50 is sent as 50.
-    expect(providerUsd('GenerateVideoNode', { model: 'ltx-video', model_options: '{"num_inference_steps":10}' })).toBeCloseTo(0.000975 * 84, 9)
-    expect(providerUsd('GenerateVideoNode', { model: 'ltx-video', model_options: '{"num_inference_steps":99}' })).toBeCloseTo(0.000975 * 140, 9)
-    // Linked options: the most steps the builder can send.
-    expect(providerUsd('GenerateVideoNode', { model: 'ltx-video', model_options: ['9', 0] })).toBeCloseTo(0.000975 * 140, 9)
+    // LTX-Video: the GPU-time ceiling, L40S $0.000975/s × 140 s, whatever steps are sent (S1b fix round 1).
+    for (const opts of ['{}', '{"num_inference_steps":10}', '{"num_inference_steps":50}']) {
+      expect(providerUsd('GenerateVideoNode', { model: 'ltx-video', duration: '5', model_options: opts })).toBeCloseTo(0.000975 * 140, 9)
+    }
   })
 
   it('every resolution a builder sends is on its card; one that isn\'t would be priced at the card\'s highest rate', () => {
@@ -335,9 +328,10 @@ describe('Seedance 2.0 reference videos are priced on input + output seconds', (
 describe('PixVerse v6 is priced as the service renders it', () => {
   // Since Task S1b the builder sends `quality` and `generate_audio_switch`, so
   // the service renders the node's resolution and sound.
-  it('at the quality and sound sent (sound on by default)', () => {
+  it('at the quality and sound sent (sound on by default), never below the ComfyUI path\'s 540p', () => {
+    // Python still sends `resolution`, so that path renders 540p: 360p is priced at 540p (S1b fix round 1).
     expect(effectiveVideoSettings('pixverse-v6', '5', '16:9', '{"resolution":"360p","generate_audio":true}'))
-      .toEqual({ seconds: 5, resolution: '360p', audio: true, inputVideoSeconds: 0 })
+      .toEqual({ seconds: 5, resolution: '540p', audio: true, inputVideoSeconds: 0 })
     expect(providerUsd('GenerateVideoNode', { model: 'pixverse-v6', duration: '5', model_options: '{"resolution":"1080p"}' })).toBeCloseTo(0.23 * 5, 6)
     expect(providerUsd('GenerateVideoNode', { model: 'pixverse-v6', duration: '5', model_options: '{"resolution":"1080p","generate_audio":false}' })).toBeCloseTo(0.18 * 5, 6)
     expect(providerUsd('GenerateVideoNode', { model: 'pixverse-v6', duration: '8' })).toBeCloseTo(0.12 * 8, 6)
@@ -522,7 +516,7 @@ describe('the video gallery price label', () => {
   })
   it('per-clip models show the clip price', () => {
     expect(videoRateLabel('hailuo-2.3')).toBe('$0.28 for 6 s at 768p')
-    expect(videoRateLabel('ltx-video')).toBe('$0.0819 a clip')
+    expect(videoRateLabel('ltx-video')).toBe('$0.1365 a clip')
   })
   it('in hosted mode, credits per second of the default clip', () => {
     expect(videoRateLabel('hailuo-h3-max', { hosted: true })).toBe('12 credits/s at 768p')

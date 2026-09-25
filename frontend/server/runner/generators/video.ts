@@ -33,6 +33,8 @@ const H3_MAX_RES: Record<string, string> = { '480p': '480P', '768p': '768P', '10
 export const VEO_RESOLUTIONS = ['720p', '1080p', '4k']
 export const FLUX3_RESOLUTIONS = ['720p', '1080p']
 export const SEEDANCE_RESOLUTIONS = ['480p', '720p', '1080p', '4k']
+/** bytedance/seedance-2.0 `duration`: "4" … "15" (its schema; Python's list skips 14). */
+export const SEEDANCE_SECONDS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 const H3_PEM_BASE = new Set(['disabled', 'fast', 'balanced', 'quality'])
 const H3_PEM_MAX = new Set(['disabled', 'balanced', 'quality'])
 
@@ -69,7 +71,7 @@ function seedance20({ prompt, aspectRatio, duration, image, adv }: VideoBuildArg
   // No seed input on fal's Seedance 2.0.
   const inp: Record<string, unknown> = {
     prompt,
-    duration: String(durOr([4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15], duration, 5)),
+    duration: String(durOr(SEEDANCE_SECONDS, duration, 5)),
     resolution: lowerEnum(adv, 'resolution', SEEDANCE_RESOLUTIONS, '720p'),
   }
   if (Object.prototype.hasOwnProperty.call(adv, 'generate_audio')) inp.generate_audio = pyTruthy(adv.generate_audio)

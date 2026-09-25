@@ -42,7 +42,11 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // Wan 2.5/2.7 their duration and 720p/1080p, LTX-Video its steps, Flux 2 Dev
 // its width × height (≤ 1440²), H3 Max 1080p, Sora its 4/8/12 s; an option
 // outside a schema is priced as the default it is sent as.
-export const PRICE_BOOK_VERSION = 'lineup-s1b'
+// lineup-s1b-fix1 (S1b fix round 1): while the ComfyUI path is live, never
+// below what its request costs — PixVerse at least 540p, Wan 2.7 at least 5 s,
+// Flux 2 Dev at least 2 MP; LTX-Video back to its flat 50-step ceiling;
+// Seedance 2.0 takes (and prices) 14 s.
+export const PRICE_BOOK_VERSION = 'lineup-s1b-fix1'
 
 export const BASE_RENDER_CREDITS = 1
 

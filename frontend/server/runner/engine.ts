@@ -20,6 +20,7 @@ import { BASE_RENDER_CREDITS, UnpricedGraphError } from '../utils/priceBook'
 import { extractGraphPromptText } from '../utils/graphPromptText'
 import { isProviderNetworkError, percentFromLogs, type FalStatus, type ProviderClient } from './falQueue'
 import { planNode } from './executors'
+import { requestProblems } from './requestRules'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
 import { extraPromptText, hasOutputNode, measuredInputPixels, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
@@ -867,6 +868,13 @@ export function createEngine(deps: EngineDeps) {
       if (!uses.length) continue
       const body = blockedModelsResponse(p, uses, { families })
       throw refuse(body.error.message, 400, { node_errors: body.node_errors })
+    }
+    // A request no provider takes (a Nano Banana prompt under 3 characters,
+    // too many Seedance references) is refused before anything is held
+    // (requestRules.ts; planNode checks the built request again).
+    for (const p of prompts) {
+      const problem = requestProblems(p)[0]
+      if (problem) throw refuse(problem.message, 400, { nodeId: problem.nodeId, classType: problem.classType })
     }
     // Fail closed on price, before anything is held: a provider node that
     // prices at 0 (a class the price book misses by name) never runs free.

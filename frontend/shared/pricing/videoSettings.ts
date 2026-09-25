@@ -32,11 +32,6 @@ export interface VideoSettings {
    * input (SEEDANCE_MAX_INPUT_VIDEO_SECONDS).
    */
   inputVideoSeconds: number
-  /**
-   * Denoising steps, for the one model billed by GPU time whose run length
-   * follows them (LTX-Video's `steps`); absent for every other model.
-   */
-  steps?: number
 }
 
 /**
@@ -59,14 +54,6 @@ function optStr(adv: Adv, key: string, def: string): string {
   if (v === null || v === undefined) return def
   if (typeof v === 'boolean') return v ? 'True' : 'False'
   return String(v)
-}
-function optInt(adv: Adv, key: string, def: number): number {
-  if (!has(adv, key)) return def
-  const v = adv[key]
-  if (typeof v === 'boolean') return v ? 1 : 0
-  if (typeof v === 'number') return Number.isFinite(v) ? Math.trunc(v) : def
-  if (typeof v !== 'string') return def
-  return pyIntOf(v) ?? def
 }
 function optBool(adv: Adv, key: string, def: boolean): boolean {
   if (!has(adv, key)) return def
@@ -117,12 +104,16 @@ interface Rule {
   defaultDuration: number
   /** The length the service renders when no length is sent (its schema default). */
   fixedSeconds?: number
+  /**
+   * The ComfyUI (Python) path's clip length, where Python still sends a field
+   * the schema doesn't have and the service renders its default length. The
+   * price never goes below it while that path is live (S1b fix round 1).
+   */
+  pythonPathSeconds?: number
   resolution(adv: Adv): string | null
   audio(adv: Adv): boolean
   /** Billed seconds of reference video, given whether a first frame is sent. Absent = 0. */
   inputVideo?(adv: Adv, firstFrame: boolean): number
-  /** The denoising steps sent, for a model priced on them. Absent = not priced on steps. */
-  steps?(adv: Adv): number
 }
 
 const lower = (s: string) => s.toLowerCase()
@@ -138,10 +129,19 @@ const resIn = (allowed: readonly string[], def: string) => (adv: Adv) => {
   return allowed.includes(r) ? r : def
 }
 const WAN_RESOLUTIONS = ['720p', '1080p']
+/**
+ * PixVerse v6: the runner sends `quality`; Python sends `resolution`, which the
+ * schema doesn't have, so the ComfyUI path renders the schema's 540p, silent.
+ * While that path is live the price is the dearer of the two: the quality sent,
+ * but never below 540p (the sound sent stays: with sound is never cheaper).
+ */
+const PIXVERSE_TIERS = ['360p', '540p', '720p', '1080p']
+function pixverseResolution(adv: Adv): string {
+  const sent = resIn(PIXVERSE_TIERS, '720p')(adv)
+  return PIXVERSE_TIERS.indexOf(sent) < PIXVERSE_TIERS.indexOf('540p') ? '540p' : sent
+}
 /** wan-video/wan-2.7-t2v: any whole second from 2 to 15 (video.ts WAN_27_SECONDS). */
 const WAN_27_SECONDS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
-/** lightricks/ltx-video `steps`, 1–50, default 30 (video.ts LTX_STEPS). */
-const ltxSteps = (adv: Adv) => Math.max(1, Math.min(50, optInt(adv, 'num_inference_steps', 30)))
 
 /**
  * One rule per video model id, mirroring its builder (video.ts line refs are
@@ -156,7 +156,7 @@ const RULES: Record<string, Rule> = {
   'flux-3': { durations: [5, 10, 15, 20], defaultDuration: 10, resolution: resIn(['720p', '1080p'], '720p'), audio: audioOpt(true) },
   // seedance20: sends generate_audio only when set; fal's default is true.
   'seedance-2.0': {
-    durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15], defaultDuration: 5, resolution: resIn(['480p', '720p', '1080p', '4k'], '720p'),
+    durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], defaultDuration: 5, resolution: resIn(['480p', '720p', '1080p', '4k'], '720p'),
     audio: adv => (has(adv, 'generate_audio') ? pyTruthy(adv.generate_audio) : true),
     // seedance20: with no first frame (the linked image or image_url), a
     // non-empty video_urls goes to reference-to-video, billed on input seconds too.
@@ -185,15 +185,17 @@ const RULES: Record<string, Rule> = {
   // hailuo23: 768p or 1080p, anything else 768p.
   'hailuo-2.3': { durations: [6, 10], defaultDuration: 6, resolution: resIn(['768p', '1080p'], '768p'), audio: fixed(false) },
   // wan27T2v sends `duration` 2–15; wan25I2vFast `duration` 5 or 10. Both 720p or 1080p, anything else 720p.
-  'wan-2.7-t2v': { durations: WAN_27_SECONDS, defaultDuration: 5, resolution: resIn(WAN_RESOLUTIONS, '720p'), audio: fixed(false) },
+  // Python still sends `num_frames` (not in the schema): its clip is the 5 s default, so never priced below 5 s.
+  'wan-2.7-t2v': { durations: WAN_27_SECONDS, defaultDuration: 5, pythonPathSeconds: 5, resolution: resIn(WAN_RESOLUTIONS, '720p'), audio: fixed(false) },
   'wan-2.5-i2v-fast': { durations: [5, 10], defaultDuration: 5, resolution: resIn(WAN_RESOLUTIONS, '720p'), audio: fixed(false) },
   // lumaRay2720p: the model is 720p only.
   'luma-ray-2-720p': { durations: [5, 9], defaultDuration: 5, resolution: fixed('720p'), audio: fixed(false) },
-  // ltxVideo sends no length or resolution; priced per clip on the `steps` it sends.
-  'ltx-video': { durations: null, defaultDuration: 5, fixedSeconds: 5, resolution: fixed(null), audio: fixed(false), steps: ltxSteps },
+  // ltxVideo sends no length or resolution; priced per clip at the 50-step ceiling.
+  'ltx-video': { durations: null, defaultDuration: 5, fixedSeconds: 5, resolution: fixed(null), audio: fixed(false) },
   // pixverseV6 sends `quality` (the resolution option: 360p–1080p, anything
-  // else 720p) and `generate_audio_switch` (the sound option, default on).
-  'pixverse-v6': { durations: [5, 8], defaultDuration: 5, resolution: resIn(['360p', '540p', '720p', '1080p'], '720p'), audio: audioOpt(true) },
+  // else 720p) and `generate_audio_switch` (the sound option, default on);
+  // priced never below the ComfyUI path's 540p (pixverseResolution).
+  'pixverse-v6': { durations: [5, 8], defaultDuration: 5, resolution: pixverseResolution, audio: audioOpt(true) },
 
   // ── ComfyUI only ──
   // _b_fabric_1_0 (comfy_api_nodes/video_models.py:465-477) ignores the duration
@@ -234,9 +236,8 @@ export function effectiveVideoSettings(
   if (!hasVideoSettings(modelId)) return null
   const r = RULES[modelId]!
   const adv = readModelOptions(modelOptions)
-  const seconds = r.durations ? durOr(r.durations, durationInt(duration, r.defaultDuration)) : r.fixedSeconds!
+  const sent = r.durations ? durOr(r.durations, durationInt(duration, r.defaultDuration)) : r.fixedSeconds!
+  const seconds = Math.max(sent, r.pythonPathSeconds ?? 0)
   const inputVideoSeconds = r.inputVideo ? r.inputVideo(adv, pyTruthy(firstFrame)) : 0
-  const out: VideoSettings = { seconds, resolution: r.resolution(adv), audio: r.audio(adv), inputVideoSeconds }
-  if (r.steps) out.steps = r.steps(adv)
-  return out
+  return { seconds, resolution: r.resolution(adv), audio: r.audio(adv), inputVideoSeconds }
 }

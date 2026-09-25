@@ -13,7 +13,7 @@ import type { H3Event } from 'h3'
 import { readBody, setResponseStatus } from 'h3'
 import { priceGraph, UnpricedGraphError } from './priceBook'
 import { createGateReads, graphInputPixels } from './graphInputPixels'
-import { graphInputSeconds } from './graphInputSeconds'
+import { graphInputSeconds, seedanceReferenceSeconds } from './graphInputSeconds'
 import { MeterRefusalError } from './requestMeter'
 import { createGraphRun, resolveGraphRun, outputKey, ownedOutputKeys } from './graphRuns'
 import { settleOnCompletion } from './settleWatcher'
@@ -27,7 +27,7 @@ import { GRAPH_FILE_READERS, GRAPH_FOLDER_READERS, GRAPH_OUTPUT_WRITERS, extract
 import { extractGraphPromptText } from './graphPromptText'
 import { moderatePrompt } from './moderation'
 import { assertSpendAllowed } from './systemControls'
-import { blockedPromptRefusal, retiredEngineRefusal } from './blockedModels'
+import { blockedPromptRefusal, nodeProblemsBody, retiredEngineRefusal } from './blockedModels'
 
 export function isPromptPath(path: string): boolean {
   return path === '/prompt' || path.startsWith('/prompt?')
@@ -328,6 +328,13 @@ export interface GraphRunDeps {
    */
   measureInputSeconds?(prompt: any): Promise<Record<string, import('../../shared/pricing/clipSettings').InputSeconds>>
   /**
+   * Seedance 2.0 references longer than the model takes (15 s of video, 15 s
+   * of sound, in all) — seedanceReferenceSeconds. Runs after the
+   * file-ownership check, before pricing and any hold. Absent (the unit
+   * tests), the lengths aren't checked.
+   */
+  referenceSecondsProblems?(prompt: any): Promise<import('../runner/requestRules').RequestProblem[]>
+  /**
    * Operator safety valves (Stage 7 final review C1) — the global kill-switch,
    * the per-user disable set, and the daily spend ceiling. Runs FIRST, before
    * file-ref validation / moderation / pricing / hold, so a paused or
@@ -396,6 +403,9 @@ export async function meterGraphSubmit(userId: string | null, body: any, deps: G
   // Hosted, until F12: the two estimate-priced edit engines are refused too.
   const retired = retiredEngineRefusal(body.prompt)
   if (retired) return { status: 400, body: retired }
+  // Seedance references longer than the model takes, refused in plain words (S1b fix round 1).
+  const tooLong = deps.referenceSecondsProblems ? nodeProblemsBody(await deps.referenceSecondsProblems(body.prompt)) : null
+  if (tooLong) return { status: 400, body: tooLong }
 
   // The size of the pictures a size-priced node is sent, where the gate can
   // read it; the rest price at the input cap (never below what runs).
@@ -484,6 +494,7 @@ export async function handleMeteredPrompt(event: H3Event): Promise<any> {
     priceGraph,
     measureInputPixels: prompt => graphInputPixels(prompt, undefined, reads),
     measureInputSeconds: prompt => graphInputSeconds(prompt, undefined, reads),
+    referenceSecondsProblems: prompt => seedanceReferenceSeconds(prompt),
     // Stage 7 final review C1: the operator kill-switch + daily ceiling. Wired
     // the SAME way moderatePrompt (Task 3) is — the real implementation passed
     // in here, stubbed in the unit tests. Local mode is a no-op inside

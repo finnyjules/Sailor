@@ -173,7 +173,8 @@ function sentSettings(id: string, payload: Record<string, unknown>) {
         expect(side).toBeGreaterThanOrEqual(256)
         expect(side).toBeLessThanOrEqual(1440)
       }
-      megapixels = billed(payload.width * payload.height)
+      // Never below the ComfyUI path's default size, 2 MP (Python sends no width × height; S1b fix round 1).
+      megapixels = Math.max(billed(payload.width * payload.height), 2)
     }
     else megapixels = bflMp(payload.resolution, FLUX_2_RES)
   }
@@ -386,7 +387,8 @@ describe('worked examples', () => {
     // Klein takes 21:9 itself; the label still bills 2 MP.
     expect(effectiveImageSettings('flux-2-klein-4b', '21:9', '{"output_megapixels":"1"}')!.megapixels).toBe(2)
     expect(effectiveImageSettings('flux-2-klein-4b', '1:1', '{"output_megapixels":"0.25"}')!.megapixels).toBe(1)
-    expect(effectiveImageSettings('flux-2-dev', '1:1', '{"resolution":"0.5 MP"}')!.megapixels).toBe(1)
+    // Flux 2 Dev: never below the ComfyUI path's default size, 2 MP.
+    expect(effectiveImageSettings('flux-2-dev', '1:1', '{"resolution":"0.5 MP"}')!.megapixels).toBe(2)
     expect(effectiveImageSettings('flux-2-dev', '1:1', '{"resolution":"2 MP"}')!.megapixels).toBe(3)
     expect(effectiveImageSettings('flux-2-max', '1:1', '{"resolution":"4 MP"}')!.megapixels).toBe(5)
     expect(providerUsd('GenerateImageNode', { model: 'flux-schnell', aspect_ratio: '1:1' })).toBeCloseTo(0.006, 9)

@@ -34,6 +34,10 @@ import {
   type InputSeconds, type MediaFileRef, type MediaSource,
 } from '../../shared/pricing/clipSettings'
 import { createGateReads, type GateReads } from './graphInputPixels'
+import { readModelOptions } from '../../shared/pricing/videoSettings'
+import { readViewRef } from '../../shared/pricing/clipSettings'
+import { resolveVideoModelId } from '../../shared/runner/eligibility'
+import { SEEDANCE_REFERENCE_MAX_SECONDS, SEEDANCE_TOO_MUCH_SOUND, SEEDANCE_TOO_MUCH_VIDEO, type RequestProblem } from '../runner/requestRules'
 
 type Prompt = Record<string, { class_type?: unknown; inputs?: unknown } | undefined>
 export type MediaKind = 'audio' | 'video'
@@ -161,5 +165,43 @@ export async function graphInputSeconds(
     if (video != null && video > 0) secs.video = video
     if (secs.audio != null || secs.video != null) out[p.id] = secs
   }))
+  return out
+}
+
+/**
+ * Seedance 2.0 reference-to-video takes at most 15 s of reference video in
+ * all, and 15 s of reference sound (its schema; S1b fix round 1, ruling d).
+ * Each GenerateVideoNode on seedance-2.0 whose options send references (no
+ * first frame) has its `/view?…&type=input` references measured; a total over
+ * 15 s is refused in plain words. A reference this can't read (an external
+ * link, a file mediabunny can't read) isn't counted: the price already bills
+ * the 15 s maximum. Never drops a reference.
+ */
+export async function seedanceReferenceSeconds(
+  prompt: Prompt,
+  read: (file: MediaFile, kind: MediaKind) => Promise<number | null> = engineMediaSeconds,
+): Promise<RequestProblem[]> {
+  const out: RequestProblem[] = []
+  if (!prompt || typeof prompt !== 'object') return out
+  for (const [nodeId, node] of Object.entries(prompt)) {
+    if (node?.class_type !== 'GenerateVideoNode') continue
+    const inputs = inputsOf(node)
+    if (resolveVideoModelId(inputs.model) !== 'seedance-2.0' || Array.isArray(inputs.model_options) || Array.isArray(inputs.image)) continue
+    const opts = readModelOptions(inputs.model_options)
+    if (typeof opts.image_url === 'string' && opts.image_url) continue
+    for (const [key, kind, message] of [
+      ['video_urls', 'video', SEEDANCE_TOO_MUCH_VIDEO],
+      ['audio_urls', 'audio', SEEDANCE_TOO_MUCH_SOUND],
+    ] as const) {
+      const list = opts[key]
+      if (!Array.isArray(list)) continue
+      const lengths = await Promise.all(list.map((v) => {
+        const r = readViewRef(v)
+        return r?.name && !r.refused ? read({ value: r.name, literalInput: true }, kind) : Promise.resolve(null)
+      }))
+      const total = lengths.reduce<number>((n, s) => n + (s ?? 0), 0)
+      if (total > SEEDANCE_REFERENCE_MAX_SECONDS) out.push({ nodeId, classType: 'GenerateVideoNode', input: 'model_options', message })
+    }
+  }
   return out
 }

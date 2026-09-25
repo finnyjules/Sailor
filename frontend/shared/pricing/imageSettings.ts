@@ -149,6 +149,14 @@ export function flux2DevSize(label: string, aspectRatio: string): { width: numbe
   const snap = (x: number) => Math.max(256, Math.min(FLUX_2_DEV_MAX_SIDE, Math.round(x / 32) * 32))
   return { width: snap(w), height: snap(h) }
 }
+/**
+ * The ComfyUI (Python) path still sends Flux 2 Dev a `resolution` label, which
+ * the schema doesn't have, and no width × height, so the service makes its own
+ * default size. Neither the saved schema nor its page states that size, so
+ * (controller ruling, S1b fix round 1) it is taken as 2 billed MP, and the
+ * price never goes below it while that path is live.
+ */
+export const FLUX_2_DEV_PYTHON_PATH_MEGAPIXELS = 2
 /** Billed megapixels of the largest Flux 2 Dev picture (1440 × 1440): 3. */
 export const FLUX_2_DEV_MAX_MEGAPIXELS = billedMegapixels(FLUX_2_DEV_MAX_SIDE * FLUX_2_DEV_MAX_SIDE)
 
@@ -210,10 +218,11 @@ const RULES: Record<string, Rule> = {
   'flux-2-max': adv => ({ ...one(), megapixels: bflMegapixels(optStr(adv, 'resolution', '1 MP'), FLUX_2_RESOLUTIONS, '1 MP') }),
   'flux-2-pro': adv => ({ ...one(), megapixels: bflMegapixels(optStr(adv, 'resolution', '1 MP'), FLUX_2_RESOLUTIONS, '1 MP') }),
   'flux-2-flex': adv => ({ ...one(), megapixels: bflMegapixels(optStr(adv, 'resolution', '1 MP'), FLUX_2_RESOLUTIONS, '1 MP') }),
-  // rFlux2Dev: width × height from the label and the ratio (flux2DevSize).
+  // rFlux2Dev: width × height from the label and the ratio (flux2DevSize),
+  // never below the ComfyUI path's default size (FLUX_2_DEV_PYTHON_PATH_MEGAPIXELS).
   'flux-2-dev': (adv, ar) => {
     const { width, height } = flux2DevSize(optStr(adv, 'resolution', '1 MP'), ar)
-    return { ...one(), megapixels: billedMegapixels(width * height) }
+    return { ...one(), megapixels: Math.max(billedMegapixels(width * height), FLUX_2_DEV_PYTHON_PATH_MEGAPIXELS) }
   },
   // rFluxKlein: output_megapixels label, default (and anything unlisted) "1".
   'flux-2-klein-4b': adv => ({ ...one(), megapixels: bflMegapixels(optStr(adv, 'output_megapixels', '1'), FLUX_KLEIN_MEGAPIXELS, '1') }),

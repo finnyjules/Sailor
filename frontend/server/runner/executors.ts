@@ -37,6 +37,7 @@ import {
 } from './generators/restyle'
 import { moodboardFiles, parseInputFileRef } from './inputs'
 import { planCompositor } from './compositor/plan'
+import { checkRequest } from './requestRules'
 import type { OutputFile, RunnerProvider } from './types'
 
 export type NodePlan =
@@ -64,7 +65,18 @@ export interface PlanContext {
   hosted?: boolean
 }
 
+/**
+ * The node's plan. A provider request no provider takes (a prompt under the
+ * schema's minimum length, too many Seedance references) fails the node in
+ * plain words before anything is sent (requestRules.ts).
+ */
 export async function planNode(ctx: PlanContext): Promise<NodePlan> {
+  const plan = await planNodeRequest(ctx)
+  if (plan.kind === 'provider') checkRequest(plan.provider, plan.endpoint, plan.payload)
+  return plan
+}
+
+async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
   const node = ctx.prompt[ctx.nodeId]
   if (!node) throw new Error(`Node ${ctx.nodeId} is missing from the workflow`)
   const inputs = node.inputs ?? {}

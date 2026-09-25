@@ -4,11 +4,16 @@ import {
   modelSupportsSeed, allowedDurations, allowedAspectRatios, snapWidgetsToModel,
 } from '../../app/lib/videoModelAdapt'
 
-// Audit of comfy_api_nodes/video_models.py: every builder calls _maybe_set_seed
-// except _b_kling_v2_5_turbo_pro (Replicate 422s on seed), _b_fabric_1_0 (lip-sync,
-// no seed input), and _b_seedance_2_0 (moved to fal 2026-07-02 — fal Seedance has
-// no seed input; seedance-2.0-fast stays on Replicate and keeps its seed).
-const NO_SEED_IDS = ['kling-v2.5-turbo-pro', 'fabric-1.0', 'seedance-2.0']
+// Since Task S1b (fix round 1) the flag follows each model's published schema
+// (tests/unit/fixtures/provider-schemas/), no longer Python's _maybe_set_seed
+// calls. No seed input: Kling 2.5 Turbo and Kling 3, Fabric (lip-sync),
+// Seedance 2.0 on fal, FLUX 3, Hailuo 2.3, Luma Ray 2 and Sora 2 / 2 Pro.
+// Python still sends a seed to Kling 3, Hailuo 2.3, Luma, FLUX 3 and Sora; the
+// runner doesn't, and the node no longer offers one.
+const NO_SEED_IDS = [
+  'kling-v2.5-turbo-pro', 'fabric-1.0', 'seedance-2.0',
+  'kling-v3', 'hailuo-2.3', 'luma-ray-2-720p', 'flux-3', 'sora-2', 'sora-2-pro',
+]
 
 describe('video-models supportsSeed flag', () => {
   it('every model declares a boolean supportsSeed', () => {
@@ -17,7 +22,7 @@ describe('video-models supportsSeed flag', () => {
     }
   })
 
-  it('flags match the Python builder audit', () => {
+  it('flags match the models\' published schemas', () => {
     for (const m of VIDEO_MODELS) {
       const expected = !NO_SEED_IDS.includes(m.id)
       expect((m as any).supportsSeed, m.id).toBe(expected)

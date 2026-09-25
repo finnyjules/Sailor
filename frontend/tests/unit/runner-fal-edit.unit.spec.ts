@@ -23,6 +23,7 @@ import { NO_FAMILIES, RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { OutputFile } from '~~/server/runner/types'
 import { makeKit, ofType } from './__runner__/kit'
+import { requestProblem } from '~~/server/runner/requestRules'
 
 interface FalEditCase {
   class_type: string
@@ -67,6 +68,13 @@ describe('fal-edit payloads match the Python nodes', () => {
 
   it.each(CASES.map((c, i) => [`${i} ${c.class_type} ${JSON.stringify(c.widgets)} links=${c.links.join(',')}`, c] as const))(
     '%s', async (_label, c) => {
+      // A request no provider takes (Nano Banana with a prompt under 3
+      // characters) is refused in plain words before anything is sent (S1b fix round 1).
+      const refusal = requestProblem(c.call.provider, c.call.endpoint, c.call.payload)
+      if (refusal) {
+        await expect(planCase(c)).rejects.toThrow(refusal)
+        return
+      }
       const plan = await planCase(c)
       expect(plan.kind).toBe('provider')
       if (plan.kind !== 'provider') return

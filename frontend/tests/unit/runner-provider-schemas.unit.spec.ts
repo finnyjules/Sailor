@@ -19,6 +19,7 @@ import { IMAGE_EDIT_MODELS, PRODUCT_SHOT_SLUG, imageEditCall } from '~~/server/r
 import { RESTYLE_NANO_BANANA_SLUGS, STYLE_TRANSFER_SLUG } from '~~/server/runner/generators/restyle'
 import type { OutputFile } from '~~/server/runner/types'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
+import { NANO_BANANA_SHORT_PROMPT, PROMPT_MIN_LENGTH, SEEDANCE_REFERENCE_LIMITS, requestProblem } from '~~/server/runner/requestRules'
 
 const readJson = (rel: string) => JSON.parse(readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8'))
 const BUILDERS = readJson('./fixtures/runner-builders.json')
@@ -43,22 +44,14 @@ function schemaFor(provider: Provider, endpoint: string) {
 // Python where Python breaks the schema). What is left can't be fixed in a
 // builder:
 
-/** Hit by ordinary settings: the defaults, a seed, an empty prompt, a menu value. */
-const GAPS_ON_ORDINARY_SETTINGS: readonly string[] = [
-  // Nano Banana's prompt has minLength 3. The prompt is the person's own
-  // text (empty, or one or two characters, in the fixtures); the runner won't
-  // invent words to pad it. fal refuses the request and nothing is charged.
-  'fal fal-ai/nano-banana-2 | prompt | minLength',
-  'fal fal-ai/nano-banana-2/edit | prompt | minLength',
-  'fal fal-ai/nano-banana-pro | prompt | minLength',
-  'fal fal-ai/nano-banana-pro/edit | prompt | minLength',
-]
-
 /**
- * Hit only by the parity fixtures' out-of-range model options ("True", "",
- * "0.25", 99, -2…). Since S1b every builder clamps them to a valid option, so
- * none is left.
+ * Hit by ordinary settings. Empty since S1b fix round 1: the last four (a
+ * Nano Banana prompt under 3 characters) are now refused in plain words
+ * before they are sent (server/runner/requestRules.ts; "refusals" below).
  */
+const GAPS_ON_ORDINARY_SETTINGS: readonly string[] = []
+
+/** Hit only by the parity fixtures' out-of-range model options. Empty since S1b: every builder clamps them. */
 const GAPS_FROM_UNCHECKED_OPTIONS: readonly string[] = []
 
 const KNOWN_GAPS = new Set([...GAPS_ON_ORDINARY_SETTINGS, ...GAPS_FROM_UNCHECKED_OPTIONS])
@@ -77,7 +70,18 @@ function gapOf(provider: Provider, endpoint: string, message: string): string {
   return `${provider} ${endpoint} | ${field} | ${kind}`
 }
 
+/** `<provider> <endpoint> | <message>` for each request the runner refused instead of sending. */
+const seenRefusals = new Set<string>()
+
 function expectFits(provider: Provider, endpoint: string, payload: unknown) {
+  // A request no provider takes is refused, not sent (planNode's check): its
+  // only schema breaks are the ones the refusal names.
+  const refused = requestProblem(provider, endpoint, payload as Record<string, unknown>)
+  if (refused) {
+    seenRefusals.add(`${provider} ${endpoint} | ${refused}`)
+    for (const m of checkPayload(schemaFor(provider, endpoint), payload)) expect(m).toMatch(/^(prompt: shorter than|\w+_urls: more than)/)
+    return
+  }
   const unexpected: string[] = []
   for (const message of checkPayload(schemaFor(provider, endpoint), payload)) {
     const gap = gapOf(provider, endpoint, message)
@@ -165,7 +169,14 @@ for (const key of FAMILY_KEYS) {
     const cases = (FAMILIES[key] as NodeCase[]).filter(c => c.call?.endpoint)
     for (const [i, c] of cases.entries()) {
       it(`${i} ${c.class_type} ${JSON.stringify(c.widgets).slice(0, 160)}`, async () => {
-        const plan = await planCase(c)
+        const planned = await planCase(c).catch((e: unknown) => e as Error)
+        if (planned instanceof Error) {
+          // Refused before sending: Python's own request is one the provider refuses for the same reason.
+          expect(requestProblem(c.call!.provider, c.call!.endpoint, c.call!.payload)).toBe(planned.message)
+          seenRefusals.add(`${c.call!.provider} ${c.call!.endpoint} | ${planned.message}`)
+          return
+        }
+        const plan = planned
         if (plan.kind !== 'provider') throw new Error(`expected a provider call, got ${plan.kind}`)
         // The parity specs prove this is the Python call; here it meets the provider's own format.
         expect(`${plan.provider} ${plan.endpoint}`).toBe(`${c.call!.provider} ${c.call!.endpoint}`)
@@ -227,7 +238,38 @@ describe('saved provider schemas', () => {
   })
 })
 
-// Runs last (tests in a file run in order): every known gap must still be real.
+// Runs last (tests in a file run in order).
+describe('refusals', () => {
+  it('a Nano Banana prompt under 3 characters is refused on every Nano Banana endpoint the fixtures reach', () => {
+    expect([...seenRefusals].sort()).toEqual([
+      `fal fal-ai/nano-banana-2 | ${NANO_BANANA_SHORT_PROMPT}`,
+      `fal fal-ai/nano-banana-2/edit | ${NANO_BANANA_SHORT_PROMPT}`,
+      `fal fal-ai/nano-banana-pro | ${NANO_BANANA_SHORT_PROMPT}`,
+      `fal fal-ai/nano-banana-pro/edit | ${NANO_BANANA_SHORT_PROMPT}`,
+    ])
+  })
+
+  it('the prompt length rules are exactly the saved schemas\' prompt minLength', () => {
+    const fromSchemas: Record<string, number> = {}
+    for (const e of savedEndpoints()) {
+      const [provider, endpoint] = e.split(' ') as [Provider, string]
+      const f = schemaFor(provider, endpoint)
+      let input = f.input as Record<string, any>
+      while (input.$ref) input = f.components.schemas[String(input.$ref).split('/').pop()!] as Record<string, any>
+      const min = input.properties?.prompt?.minLength
+      if (typeof min === 'number') fromSchemas[e] = min
+    }
+    expect(Object.fromEntries(Object.entries(PROMPT_MIN_LENGTH).map(([k, v]) => [k, v.min]))).toEqual(fromSchemas)
+  })
+
+  it('Seedance 2.0 reference limits are the saved schema\'s maxItems', () => {
+    const f = schemaFor('fal', 'bytedance/seedance-2.0/reference-to-video')
+    let input = f.input as Record<string, any>
+    while (input.$ref) input = f.components.schemas[String(input.$ref).split('/').pop()!] as Record<string, any>
+    for (const l of SEEDANCE_REFERENCE_LIMITS) expect(input.properties[l.key].maxItems, l.key).toBe(l.max)
+  })
+})
+
 describe('known gaps', () => {
   it('are each still made by some builder (remove an entry once its builder is fixed)', () => {
     expect([...KNOWN_GAPS].filter(g => !seenGaps.has(g))).toEqual([])

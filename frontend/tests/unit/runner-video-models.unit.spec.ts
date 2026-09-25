@@ -19,7 +19,9 @@ describe('video request builders match Python (where Python keeps to fal\'s sche
       const d = RUNNER_VIDEO_MODELS[c.model]!
       const got = d.build({ prompt: c.args.prompt, aspectRatio: c.args.ar, duration: c.args.dur, seed: c.args.seed, image: c.args.image, adv: c.args.adv })
       const fn = falVideoFn(got, d.fnByMode)
-      expectPythonParity('fal', fn ? `${d.app}/${fn}` : d.app, got, c.payload)
+      // Seedance 2.0 takes 14 s (its schema's "4"…"15"); Python's list skips it (S1b fix round 1, M3).
+      const python = c.model === 'seedance-2.0' && c.args.dur === 14 ? { ...c.payload, duration: '14' } : c.payload
+      expectPythonParity('fal', fn ? `${d.app}/${fn}` : d.app, got, python)
     })
   }
 })

@@ -12,7 +12,8 @@ import { NITRO_API_PATHS, NITRO_API_PREFIXES } from '../lib/nitroApiPaths'
 import { nativeEngineRoute } from '../native/router'
 import { ENGINE_MAIN_PORT, engineHealth } from '../native/engineHealth'
 import { readRawBody, setResponseStatus } from 'h3'
-import { blockedPromptRefusal } from '../utils/blockedModels'
+import { blockedPromptRefusal, nodeProblemsBody } from '../utils/blockedModels'
+import { seedanceReferenceSeconds } from '../utils/graphInputSeconds'
 
 // Paths under PROXY_PREFIXES that should be handled by Nitro routes, not proxied
 // — the lists live in their own module so the reachability guard can import the
@@ -141,6 +142,7 @@ export default defineEventHandler(async (event) => {
     }
     catch { prompt = undefined }
     const blocked = blockedPromptRefusal(prompt)
+      ?? nodeProblemsBody(prompt && typeof prompt === 'object' ? await seedanceReferenceSeconds(prompt as Parameters<typeof seedanceReferenceSeconds>[0]) : [])
     if (blocked) {
       setResponseStatus(event, 400)
       return blocked

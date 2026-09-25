@@ -10,11 +10,41 @@ import { runnerFamilies } from '../runner/config'
 import { promptNodeTitle } from '../../shared/runner/blockedModels'
 import type { ApiPrompt } from '../../shared/runner/graph'
 import { menuDefault, modelMenu } from '../../shared/runner/modelMenus'
+import { requestProblems, type RequestProblem } from '../runner/requestRules'
 
-/** The 400 body for `prompt`, or null when every model in it can run on ComfyUI. */
+/**
+ * The 400 body for `prompt`, or null when every model in it can run on
+ * ComfyUI and every request is one its provider takes (requestRefusal).
+ */
 export function blockedPromptRefusal(prompt: unknown): ReturnType<typeof blockedPromptBody> {
   if (!prompt || typeof prompt !== 'object' || Array.isArray(prompt)) return null
   return blockedPromptBody(prompt as Parameters<typeof blockedPromptBody>[0], { families: runnerFamilies() })
+    ?? requestRefusal(prompt)
+}
+
+/** ComfyUI's 400 shape for problems found on nodes, the first one's words as the error. */
+export function nodeProblemsBody(problems: readonly RequestProblem[]): RefusalBody | null {
+  if (!problems.length) return null
+  const node_errors: Record<string, unknown> = {}
+  for (const p of problems) {
+    const entry = (node_errors[p.nodeId] ??= { errors: [], dependent_outputs: [], class_type: p.classType }) as { errors: unknown[] }
+    entry.errors.push({ type: 'value_not_valid', message: p.message, details: '', extra_info: { input_name: p.input } })
+  }
+  return {
+    error: { type: 'value_not_valid', message: problems[0]!.message, details: '', extra_info: {} },
+    node_errors,
+  } as RefusalBody
+}
+
+/**
+ * A request no provider takes, refused before ComfyUI sends it (S1b fix round
+ * 1, server/runner/requestRules.ts): a Nano Banana prompt under 3 characters
+ * or an empty Hailuo H3 prompt, as the node sends it after its style text;
+ * Seedance 2.0 references over the model's counts.
+ */
+export function requestRefusal(prompt: unknown): RefusalBody | null {
+  if (!prompt || typeof prompt !== 'object' || Array.isArray(prompt)) return null
+  return nodeProblemsBody(requestProblems(prompt as ApiPrompt))
 }
 
 /**
