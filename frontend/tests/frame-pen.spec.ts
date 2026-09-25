@@ -137,6 +137,85 @@ test.describe('Frame pen (shared pen)', () => {
     await expect(penToolbar(page)).toHaveCount(0)
     expect((await layers(page)).length).toBe(before.length)
   })
+
+  test('paste, right-click and a file drop do nothing while the pen is open; each works again once it closes', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    const all = await layers(page)
+    const pic = all.find((l: any) => l.kind === 'image')
+    const rect = all.find((l: any) => l.kind === 'rect')
+    expect(pic && rect).toBeTruthy()
+    // the image alone on the frame, so a right-click at its centre hits it
+    await page.evaluate((l) => (window as any).__compositorSetLayers([l]), pic)
+    await expect.poll(async () => (await layers(page)).length).toBe(1)
+    const before = await layers(page)
+    // Sailor layer JSON, the OS-clipboard format a copy writes (layerClipboard.ts)
+    const json = JSON.stringify({ __sailor: 'sailor.compositor.layers', version: 1, payload: { layers: [rect], groups: [] } })
+    await page.evaluate((t) => navigator.clipboard.writeText(t), json)
+    const dispatchPaste = () => page.evaluate((t) => {
+      const dt = new DataTransfer(); dt.setData('text/plain', t)
+      window.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+    }, json)
+    const dropSvg = async () => {
+      const dt = await page.evaluateHandle(() => {
+        const d = new DataTransfer()
+        d.items.add(new File(['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>'], 'drop.svg', { type: 'image/svg+xml' }))
+        return d
+      })
+      await page.dispatchEvent('[data-testid="compositor-stage"]', 'dragover', { dataTransfer: dt })
+      await page.dispatchEvent('[data-testid="compositor-stage"]', 'drop', { dataTransfer: dt })
+    }
+    const menu = page.getByText('Edit image…', { exact: true })
+
+    // ── the pen open, one point placed ──
+    const box = await openPen(page)
+    await page.mouse.move(box.x + 40, box.y + 40)
+    await page.mouse.down(); await page.mouse.up()
+    await expect(penPoints(page)).toHaveCount(1)
+    const firstId = await penPoints(page).first().getAttribute('data-point')
+    const picAt = { x: box.x + pic.x * box.width, y: box.y + pic.y * box.height }
+
+    // ⌘ combos the pen does not use are still the pen's: the browser's own action
+    // (⌘S save page, ⌘D bookmark, ⌘G find next) is default-prevented. A window
+    // capture listener added after the Frame's runs after it, so it sees the verdict.
+    await page.evaluate(() => {
+      (window as any).__penKeyLog = []
+      window.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key !== 'Meta' && e.key !== 'Control') (window as any).__penKeyLog.push([e.key, e.defaultPrevented]) }, true)
+    })
+    for (const k of ['s', 'd', 'g']) await page.keyboard.press(`${META}+${k}`)
+    expect(await page.evaluate(() => (window as any).__penKeyLog)).toEqual([['s', true], ['d', true], ['g', true]])
+    await expect(penToolbar(page)).toBeVisible()
+    await expect(penPoints(page)).toHaveCount(1)
+
+    // (a) paste: a real ⌘V with layer JSON on the clipboard, then a paste event itself
+    await page.keyboard.press(`${META}+v`)
+    await dispatchPaste()
+    // (b) right-click on the image layer
+    await page.mouse.click(picAt.x, picAt.y, { button: 'right' })
+    // (c) a dropped file
+    await dropSvg()
+    await page.waitForTimeout(300)   // let any async import (paste / drop) land
+
+    expect(await layers(page)).toEqual(before)
+    await expect(menu).toHaveCount(0)
+    await expect(penToolbar(page)).toBeVisible()
+    await expect(overlay(page).locator(`circle[data-point="${firstId}"]`)).toHaveCount(1)
+
+    // ── controls: with the pen closed, the same routes do act ──
+    await page.keyboard.press('Escape'); await page.keyboard.press('Escape')
+    await expect(penToolbar(page)).toBeHidden()
+    expect(await layers(page)).toEqual(before)
+    await page.mouse.click(picAt.x, picAt.y, { button: 'right' })
+    await expect(menu).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(menu).toHaveCount(0)
+    await page.mouse.click(box.x + 5, box.y + box.height - 5)   // focus the stage, nothing selected
+    await page.keyboard.press(`${META}+v`)
+    await expect.poll(async () => (await layers(page)).length).toBe(before.length + 1)
+    await dispatchPaste()
+    await expect.poll(async () => (await layers(page)).length).toBe(before.length + 2)
+    await dropSvg()
+    await expect.poll(async () => (await layers(page)).length).toBe(before.length + 3)
+  })
 })
 
 // ── Task 8: double-click a drawn path to reopen the pen on the layer itself ──

@@ -2080,6 +2080,9 @@ const penLocksSelected = computed(() => penLocksLayer(selectedLocal.value?.id))
 async function drawGuideForSelectedText() {
   const l = selectedLocal.value
   if (!l || l.kind !== 'text') return
+  // Corner-pinned type: the pen's view cannot follow the warp (penReopenable's
+  // rule for paths), so the drawing would not sit where the type is drawn.
+  if (cornerPinActive(l.cornerPin)) return
   const t = penSession.value?.target
   if (t?.kind === 'guide' && t.textId === l.id) return
   if (!atDesign.value) {
@@ -2267,6 +2270,8 @@ function isFileDrag(e: DragEvent) {
 }
 function onCanvasDragOver(e: DragEvent) {
   if (!isFileDrag(e)) return
+  // A pen session owns the stage: no drop cursor, no highlight (see onCanvasDrop).
+  if (penSession.value) return
   e.preventDefault()
   if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
   dropActive.value = true
@@ -2278,6 +2283,10 @@ function onCanvasDragLeave(e: DragEvent) {
 }
 async function onCanvasDrop(e: DragEvent) {
   dropActive.value = false
+  // A dropped file mid-session is ignored: importing it would add a layer under
+  // an open drawing. (The modal root's @drop.prevent keeps the browser from
+  // opening the file.)
+  if (penSession.value) { e.preventDefault(); return }
   const files = Array.from(e.dataTransfer?.files || [])
   if (!files.length) return
   e.preventDefault()
@@ -2336,6 +2345,10 @@ function onKeydown(e: KeyboardEvent) {
     if (isTypingInField()) return
     if (viewportKey(e)) { e.stopPropagation(); return }
     penOverlayRef.value?.onHostKeydown(e)
+    // Any other ⌘/Ctrl combo belongs to the pen too, so the browser's own
+    // action (⌘S save page, ⌘D bookmark, ⌘G find, ⌘V paste) must not fire.
+    // After the pen has seen it: ⌘Z / ⇧⌘Z are the pen's undo / redo.
+    if ((e.metaKey || e.ctrlKey) && e.key !== 'Meta' && e.key !== 'Control') e.preventDefault()
     e.stopPropagation()
     return
   }
@@ -3866,6 +3879,9 @@ function onCanvasPointerDownCapture(e: PointerEvent) {
 }
 const imageCtxMenu = ref<{ x: number; y: number; layerId: string; items: MenuItem[] } | null>(null)
 function onCanvasContextMenu(e: MouseEvent) {
+  // Mid-session a right-click must neither select an image nor open its menu
+  // ("Edit image…" would close the session and lose the drawing).
+  if (penSession.value) { e.preventDefault(); return }
   // At a viewing size, hit-test where the layers are DRAWN (the resolved boxes); hitTopStackKey
   // reads design positions and could pick a layer other than the one under the pointer.
   let hit: any = null
@@ -8188,6 +8204,9 @@ async function pastedNodeImageFile(): Promise<File | null> {
 }
 
 async function onModalPaste(e: ClipboardEvent) {
+  // A pen session owns the Frame: a paste must not add layers under the drawing.
+  // (A paste into a field — the pen's value box — is left to the field.)
+  if (penSession.value) return
   // Never hijack a real text paste (agent prompt bar, layer rename, text edit).
   if (isEditablePasteTarget(e.target) || isEditablePasteTarget(document.activeElement)) return
 
@@ -11253,7 +11272,9 @@ onUnmounted(() => {
                   <div v-if="textPath.follow === 'custom'" class="space-y-2">
                     <button
                       class="w-full flex items-center justify-center gap-1.5 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] rounded py-1.5 text-xs text-white/80 hover:text-white cursor-pointer transition-colors"
-                      :title="textPath.sketch ? 'Edit the path this type follows' : 'Draw the path this type will follow'"
+                      :disabled="cornerPinActive(selectedLocal?.cornerPin)"
+                      :class="cornerPinActive(selectedLocal?.cornerPin) ? 'opacity-40 !cursor-not-allowed' : ''"
+                      :title="cornerPinActive(selectedLocal?.cornerPin) ? 'Remove the corner pin to draw a path' : textPath.sketch ? 'Edit the path this type follows' : 'Draw the path this type will follow'"
                       @click="drawGuideForSelectedText"
                     >
                       <PenTool class="size-3.5" /> {{ textPath.sketch ? 'Edit the path' : 'Draw a path' }}
