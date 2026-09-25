@@ -1,8 +1,9 @@
 /**
  * The engine's TakeRenderer on Sailor's own WebGL2 renderer. Compiles by
  * rendering a tiny frame (ShaderFxRenderer throws "shaderfx compile (id): …"
- * with the info log), judges from two 24×24 samples (t = 2.0 and 3.37), four more
- * for the seamless-loop check (t = 0, LOOP, and one step either side of the wrap), plus a
+ * with the info log), judges from two 24×24 samples (t = 2.0 and 3.37), five full-size
+ * frames for the seamless-loop check (t = 0 twice, a tiny step after it, and one and two tiny
+ * steps before the wrap), plus a
  * cost measurement against a plain copy, exactly like the spike page — except
  * that cost is only measured for a take that already passes the other checks,
  * and a single timed frame that is already far too slow stands in for the
@@ -31,8 +32,11 @@ void main(){ fragColor0 = texture(u_image0, v_texCoord); }`
 
 /** The loop length takes are judged and previewed with (u_loop): LOOP()'s own default. */
 export const JUDGE_LOOP = 4
-/** One step either side of the wrap, for the seamless-loop check. */
-const LOOP_STEP = JUDGE_LOOP / 60
+/** The seamless-loop check's step either side of the wrap: tiny, so continuous motion barely
+ *  changes a frame across it while a jump stays a jump (renderChecks' loopsSeamlessly). */
+export const LOOP_STEP = JUDGE_LOOP / 5000
+/** Loop frames are compared at full thumbnail size: a 1–3 px beam vanishes in a 24 px sample. */
+const LOOP_SAMPLE = THUMB
 
 /** Takes are judged on a copy of the picture at most this big on its long edge. The renderer
  *  uploads its picture on every draw, the timed "heavy" frames included: a full-size photo made
@@ -85,6 +89,14 @@ export function createBrowserTakeRenderer(picture: HTMLImageElement | HTMLCanvas
     return sctx.getImageData(0, 0, SAMPLE, SAMPLE).data
   }
   const sourcePx = sample(source)
+  const big = document.createElement('canvas')
+  big.width = big.height = LOOP_SAMPLE
+  const bctx = big.getContext('2d', { willReadFrequently: true })!
+  const sampleFull = (src: CanvasImageSource) => {
+    bctx.clearRect(0, 0, LOOP_SAMPLE, LOOP_SAMPLE)
+    bctx.drawImage(src, 0, 0, LOOP_SAMPLE, LOOP_SAMPLE)
+    return bctx.getImageData(0, 0, LOOP_SAMPLE, LOOP_SAMPLE).data
+  }
 
   const assertContext = () => {
     if (renderer.outputCanvas?.getContext('webgl2')?.isContextLost()) {
@@ -142,9 +154,13 @@ export function createBrowserTakeRenderer(picture: HTMLImageElement | HTMLCanvas
       const thumbnail = renderer.outputCanvas!.toDataURL('image/png')
       renderer.render(passesFor(def, 3.37), source, THUMB, THUMB)
       const b = sample(renderer.outputCanvas!)
-      // Seamless loop: the same seed at t = 0, t = LOOP, and one step either side of the wrap.
-      const at = (t: number) => { renderer.render(passesFor(def, t), source, THUMB, THUMB); return sample(renderer.outputCanvas!) }
-      const loop = { start: at(0), end: at(JUDGE_LOOP), beforeEnd: at(JUDGE_LOOP - LOOP_STEP), step: at(LOOP_STEP) }
+      // Seamless loop: the same seed at t = 0 (twice: the noise floor), a tiny step after it, and one
+      // and two tiny steps before the wrap — compared at full size, so thin features count.
+      const at = (t: number) => { renderer.render(passesFor(def, t), source, LOOP_SAMPLE, LOOP_SAMPLE); return sampleFull(renderer.outputCanvas!) }
+      const loop = {
+        start: at(0), again: at(0), step: at(LOOP_STEP),
+        beforeEnd: at(JUDGE_LOOP - LOOP_STEP), beforeEnd2: at(JUDGE_LOOP - 2 * LOOP_STEP),
+      }
       assertContext()
       const frames = { a, b, source: sourcePx, generative: take.generative, animated: take.animated, loop }
       const looks = judgeFrames({ ...frames, extraMs: 0 })

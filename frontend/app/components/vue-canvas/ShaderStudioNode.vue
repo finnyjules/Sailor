@@ -6,7 +6,7 @@ import { fetchShaderFxCatalog, resolveEffectId, useShaderCatalog } from '~/lib/s
 import { shaderFx } from '~/lib/shaderfx/renderer'
 import type { EffectDef } from '~/lib/shaderfx/types'
 import { composePasses } from '~/lib/shaderstudio/passes'
-import { stackWantsClock } from '~/lib/shaderstudio/clock'
+import { livePreviewClock, stackWantsClock } from '~/lib/shaderstudio/clock'
 import { migrateShaderConfig } from '~/lib/shaderstudio/migrate'
 import { applyMotion } from '~/lib/shaderstudio/motion'
 import { makeImageSource, makeLiveSource, motionConfigFor, resolveSourceKind, type ResolvedSource } from '~/lib/shaderstudio/resolve'
@@ -101,7 +101,8 @@ const headerEffectName = computed(() => {
   return effectDef(id)?.name ?? spaced.charAt(0).toUpperCase() + spaced.slice(1)
 })
 
-async function renderFrame(t01: number) {
+/** `effectT`: the effects' own clock in the live card — continuous (clock.ts livePreviewClock). */
+async function renderFrame(t01: number, effectT?: number) {
   const el = canvasEl.value
   if (!el) return
   const src = resolved.value
@@ -129,7 +130,7 @@ async function renderFrame(t01: number) {
     // `(id) => EffectDef | null`, not a resolved def. Pass `effectDef` (the fn)
     // directly and never reference `cfg.effect.id`. This line is unchanged from
     // the current committed file — do not "fix" it back to the old shape.
-    const passes = composePasses(cfg, effectDef, t, undefined, dur)
+    const passes = composePasses(cfg, effectDef, t, undefined, dur, effectT)
     el.getContext('2d')!.drawImage(shaderFx.render(passes, base, w, h), 0, 0)
     glError.value = null
   } catch (e: any) { glError.value = String(e?.message ?? e) }
@@ -153,7 +154,8 @@ const preview = useCanvasCardPreviewLoop({
   rootEl,
   active: () => shouldLoop.value,
   fps: () => 30,
-  onFrame: ({ t }) => { const dur = clockDuration(); return renderFrame(((t % dur) / dur)) },
+  // The loop wraps at the clock's duration; the effects' own clock runs on (never resets).
+  onFrame: ({ t }) => { const c = livePreviewClock(t, clockDuration()); return renderFrame(c.t01, c.effectT) },
   onIdle: renderStill,
 })
 

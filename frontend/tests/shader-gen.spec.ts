@@ -53,6 +53,32 @@ void main(){
   fragColor0 = vec4(mix(c, c * tint * 1.6, u_amount * s), 1.0);
 }`,
 }
+/** "Prism drift" as Julien's takes came back (2026-09-25): thin coloured beams over the photo, a
+ *  fast whole-cycle wobble — and a slow drift that grows with loopPhase(), so every beam teleports
+ *  back ≈10 px at the wrap. The old image-mean loop check passed it. */
+const beamsTake = (drift: string) => ({
+  name: 'Prism beams', animated: true, generative: false,
+  params: [
+    { uniform: 'u_amount', label: 'Amount', type: 'float', min: 0, max: 1, step: 0.01, default: 0.9 },
+    { uniform: 'u_width', label: 'Beam width', type: 'float', min: 0.5, max: 4, step: 0.1, default: 1.5 },
+    { uniform: 'u_dim', label: 'Dim', type: 'float', min: 0, max: 1, step: 0.01, default: 0.2 },
+  ],
+  body: `uniform float u_amount; uniform float u_width; uniform float u_dim;
+void main(){
+  vec3 c = tex(v_texCoord);
+  float wob = 0.1 * sin(6.28318530718 * 3.0 * loopPhase());
+  float drift = ${drift};
+  vec3 beams = vec3(0.0);
+  for (int i = 0; i < 4; i++) {
+    float fi = float(i);
+    float d = abs(v_texCoord.x - (0.15 + 0.22 * fi + wob + drift)) * u_resolution.x;
+    beams += clamp(1.0 - d / u_width, 0.0, 1.0) * thinfilm(0.3 * fi);
+  }
+  fragColor0 = vec4(c * (1.0 - u_dim) + beams * u_amount, 1.0);
+}`,
+})
+const TELEPORT_BEAMS = beamsTake('0.04 * loopPhase()')
+const LOOPING_BEAMS = beamsTake('loopCircle(0.02).x')
 const PRICE = '~$0.24–0.42'
 /** One more picture on every call (a reference, ≤ 512 px: 350 input tokens). */
 const PRICE_WITH_REFERENCE = '~$0.24–0.43'
@@ -257,6 +283,84 @@ test.describe('shader generation (stage 5)', () => {
     const retries = gen.filter(b => String(b.prompt).includes('the render did not loop seamlessly'))
     expect(retries.length).toBeGreaterThanOrEqual(1)
     expect(await tileIn(page, 'ready').count()).toBeGreaterThanOrEqual(1)
+  })
+
+  test('thin beams that teleport at the wrap are caught by the take renderer; the same beams looping pass', async ({ page }) => {
+    await page.goto('/_nuxt/lib/shadergen/browserRenderer.ts')
+    const flags = await page.evaluate(async (takes) => {
+      const c = document.createElement('canvas'); c.width = 512; c.height = 384
+      const ctx = c.getContext('2d')!
+      const g = ctx.createLinearGradient(0, 0, 512, 384); g.addColorStop(0, '#20324a'); g.addColorStop(1, '#e0b080')
+      ctx.fillStyle = g; ctx.fillRect(0, 0, 512, 384)
+      const { createBrowserTakeRenderer } = await import('/_nuxt/lib/shadergen/browserRenderer.ts' as string)
+      const r = createBrowserTakeRenderer(c)
+      const out = takes.map((t) => { const take = { ...t }; const err = r.compile(take); return err ? [`compile: ${err}`] : r.judge(take).flags })
+      r.dispose?.()
+      return out
+    }, [TELEPORT_BEAMS, LOOPING_BEAMS])
+    expect(flags[0]).toContain('does not loop')
+    expect(flags[1]).not.toContain('does not loop')
+    expect(flags[1]!.filter(f => f !== 'heavy' && f !== 'does not move')).toEqual([])
+  })
+
+  test('a take whose thin beams teleport at the wrap is sent back, and its tile says "Didn’t loop cleanly"', async ({ page }) => {
+    const gen = await mockShaderGen(page, [100, 200, 300], [[TELEPORT_BEAMS, TELEPORT_BEAMS], [TELEPORT_BEAMS, TELEPORT_BEAMS], [TELEPORT_BEAMS, TELEPORT_BEAMS]])
+    await mockMyEffects(page); await mockRouter(page)
+    const warnings: string[] = []
+    page.on('console', (m) => { if (m.type() === 'warning' && m.text().includes('[shader-gen]')) warnings.push(m.text()) })
+    await openShaderStudio(page)
+    await page.getByTestId('studio-actions').getByTestId('studio-action-row').filter({ hasText: 'New layer from a description' }).click()
+    await prompt(page).fill('make it loop'); await prompt(page).press('Enter')
+    await expect(page.getByTestId('prompt-takes')).toBeVisible({ timeout: 20_000 })
+    await expect(tileIn(page, 'pending')).toHaveCount(0, { timeout: 60_000 })
+    expect(gen.filter(b => String(b.prompt).includes('the render did not loop seamlessly')).length).toBeGreaterThanOrEqual(1)
+    await expect(tileIn(page, 'ready')).toHaveCount(0)
+    await expect(tileIn(page, 'failed')).toHaveCount(3)
+    await expect(tileIn(page, 'failed')).toContainText(['Didn’t loop cleanly', 'Didn’t loop cleanly', 'Didn’t loop cleanly'])
+    await expect.poll(() => warnings.filter(w => w.includes('checks: does not loop')).length).toBe(3)
+  })
+
+  test('a My effect never visibly resets: the seam blend makes the loop’s end its start, and leaves the rest of the loop alone', async ({ page }) => {
+    await page.goto('/_nuxt/lib/shadergen/seamBlend.ts')
+    const r = await page.evaluate(async ({ take }) => {
+      const { withSeamBlend } = await import('/_nuxt/lib/shadergen/seamBlend.ts' as string)
+      const { toEffectDef } = await import('/_nuxt/lib/shadergen/effectDef.ts' as string)
+      const { ShaderFxRenderer } = await import('/_nuxt/lib/shaderfx/renderer.ts' as string)
+      const src = document.createElement('canvas'); src.width = 256; src.height = 256
+      const ctx = src.getContext('2d')!; ctx.fillStyle = '#556677'; ctx.fillRect(0, 0, 256, 256)
+      const raw = toEffectDef(take, 'mine_rawrawrawraw~v1')
+      const seamed = withSeamBlend({ ...raw, mine: true })
+      const renderer = new ShaderFxRenderer()
+      const read = (def: any, t: number, loop: number) => {
+        const out = renderer.render([{ id: def.id + (def === seamed ? '#s' : ''), source: def.source, uniforms: { u_amount: 0.9, u_width: 1.5, u_dim: 0.2, u_time: t, u_loop: loop, u_seed: 0 } }], src, 256, 256)
+        const c = document.createElement('canvas'); c.width = 256; c.height = 256
+        const x = c.getContext('2d')!; x.drawImage(out, 0, 0); return x.getImageData(0, 0, 256, 256).data
+      }
+      /** How much changed, in whole pixels' worth (each pixel's largest channel change). */
+      const diff = (a: Uint8ClampedArray, b: Uint8ClampedArray) => { let n = 0; for (let i = 0; i < a.length; i += 4) n += Math.max(Math.abs(a[i]! - b[i]!), Math.abs(a[i + 1]! - b[i + 1]!), Math.abs(a[i + 2]! - b[i + 2]!)) / 255; return n }
+      const L = 4, D = L / 5000
+      const res = {
+        wrapped: seamed.source !== raw.source,
+        // Across the wrap: the raw body jumps, the seamed one doesn't.
+        rawWrap: diff(read(raw, L - D, L), read(raw, 0, L)),
+        seamWrap: diff(read(seamed, L - D, L), read(seamed, 0, L)),
+        seamStep: diff(read(seamed, 0, L), read(seamed, D, L)),
+        // Outside the blend window (last 0.5 s of 4 s) it is the body as written, pixel for pixel.
+        outside: diff(read(seamed, 1.7, L), read(raw, 1.7, L)),
+        // Inside it, it is between the two.
+        inside: diff(read(seamed, 3.8, L), read(raw, 3.8, L)),
+        // A host with no loop (u_loop 0: LOOP() is 4 s) and a clock that keeps growing loops at 4 s too.
+        growing: diff(read(seamed, 8 + 1.7, 0), read(seamed, 1.7, 0)),
+      }
+      renderer.dispose()
+      return res
+    }, { take: TELEPORT_BEAMS })
+    expect(r.wrapped).toBe(true)
+    expect(r.rawWrap).toBeGreaterThan(10 * r.seamStep)
+    expect(r.seamWrap).toBeLessThan(3 * r.seamStep)
+    expect(r.outside).toBe(0)
+    expect(r.inside).toBeGreaterThan(0)
+    expect(r.growing).toBe(0)
   })
 
   test('a large source photo does not make takes fail: the take renderer judges and times them on a small copy', async ({ page }) => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { frameStats, HARD_FLAGS, judgeFrames, meanAbsDiff } from '~/lib/shadergen/renderChecks'
+import { changeMass, frameStats, HARD_FLAGS, judgeFrames, loopsSeamlessly, meanAbsDiff } from '~/lib/shadergen/renderChecks'
 
 const N = 24 * 24
 function solid(r: number, g: number, b: number): Uint8ClampedArray {
@@ -47,35 +47,68 @@ describe('render checks', () => {
     expect(judgeFrames({ ...base, animated: true, a: stripes(), b: stripes(), source: solid(90, 90, 90) })).toEqual({ pass: true, flags: ['does not move'] })
   })
 
-  describe('seamless loop (frames at the loop’s start, end, and one step either side of the wrap)', () => {
-    // A 24×24 sample of a shifting pattern: `phase` 0..1 slides a stripe across.
-    const at = (phase: number) => {
-      const px = new Uint8ClampedArray(N * 4)
-      for (let i = 0; i < N; i++) { const x = (i % 24) / 24; const v = Math.round(127 + 100 * Math.sin(6.28318 * (x + phase))); px.set([v, v, v, 255], i * 4) }
+  describe('seamless loop (full-size frames a tiny step either side of the wrap)', () => {
+    // 256×256 frames like the renderer's: a fixed "photo" with thin (≈3 px) bright beams over it.
+    const S = 256, L = 4, D = L / 5000
+    const photo = new Uint8ClampedArray(S * S * 4)
+    for (let i = 0; i < S * S; i++) { const v = 60 + ((i * 2654435761) >>> 24) % 90; photo.set([v, v * 0.9, v * 0.8, 255], i * 4) }
+    /** Beams at these x positions (px), each a 1.5 px half-width tent, rows 40..200 only (localized). */
+    const beams = (xs: number[], glow = 1) => {
+      const px = photo.slice()
+      for (let y = 40; y < 200; y++) for (let x = 0; x < S; x++) {
+        let k = 0
+        for (const bx of xs) k = Math.max(k, 1 - Math.abs(x + 0.5 - bx) / 1.5)
+        if (k <= 0) continue
+        const i = (y * S + x) * 4
+        for (let c = 0; c < 3; c++) px[i + c] = Math.min(255, px[i + c]! + k * glow * 180)
+      }
       return px
     }
-    const L = 4, STEP = L / 60
-    const src = solid(90, 90, 90)
-    const judge = (time: (t: number) => number) => judgeFrames({ ...base, animated: true, a: at(time(2)), b: at(time(3.37)), source: src,
-      loop: { start: at(time(0)), end: at(time(L)), beforeEnd: at(time(L - STEP)), step: at(time(STEP)) } })
-    it('passes motion driven by loopPhase (whole cycles over the loop)', () => {
-      expect(judge(t => (t / L) % 1).flags).not.toContain('does not loop')
-      expect(judge(t => (2 * t / L) % 1).pass).toBe(true)
+    const phase = (t: number) => ((t / L) % 1 + 1) % 1
+    const TAU = Math.PI * 2
+    type Body = (t: number) => Uint8ClampedArray
+    const frames = (body: Body) => ({ start: body(0), again: body(0), step: body(D), beforeEnd: body(L - D), beforeEnd2: body(L - 2 * D) })
+    const bases = [40, 90, 150, 210]
+    /** Loop-correct beams: a fast whole-cycle wobble (≈300 px/s at the wrap) plus a drift that goes round. */
+    const looping: Body = t => beams(bases.map(b => b + 25 * Math.sin(TAU * 3 * phase(t)) + 12 * Math.sin(TAU * phase(t))))
+    /** "Prism drift": the same fast wobble, and a slow drift that grows with loopPhase() — it teleports back at the wrap. */
+    const teleport: Body = t => beams(bases.map(b => b + 25 * Math.sin(TAU * 3 * phase(t)) + 10 * phase(t)))
+    const saw: Body = t => beams([256 * phase(t)])
+    const raw: Body = t => beams(bases.map(b => b + 7 * t))
+    const still: Body = () => beams(bases)
+
+    it('the old image-mean check could not see a thin beam teleport (why this check exists)', () => {
+      const f = frames(teleport)
+      const step = L / 60 // the old step
+      expect(meanAbsDiff(f.start, teleport(L))).toBe(0) // the frame AT the loop's end proves nothing
+      expect(meanAbsDiff(teleport(L - step), f.start)).toBeLessThanOrEqual(Math.max(0.01, 3 * meanAbsDiff(f.start, teleport(step))))
     })
-    it('fails motion on raw, growing u_time (the frame at the loop’s end is not the first)', () => {
-      const r = judge(t => t * 0.37)
-      expect(r.flags).toContain('does not loop')
-      expect(r.pass).toBe(false)
+    it('fails thin beams that teleport at the wrap', () => {
+      expect(loopsSeamlessly(frames(teleport))).toBe(false)
+      expect(changeMass(teleport(L - D), teleport(0))).toBeGreaterThan(10 * changeMass(teleport(0), teleport(D)))
     })
-    it('fails a sawtooth that only matches at the end points but jumps at the wrap', () => {
-      const saw = (t: number) => 0.6 * ((t % L) / L)
-      expect(judge(saw).flags).toContain('does not loop')
+    it('passes thin beams that loop in whole cycles, fast motion included', () => {
+      expect(loopsSeamlessly(frames(looping))).toBe(true)
+      // Not by a whisker: across the wrap it moves like any other step.
+      expect(changeMass(looping(L - D), looping(0))).toBeLessThan(1.5 * changeMass(looping(0), looping(D)))
     })
-    it('a still effect loops trivially; no loop frames means no loop check', () => {
-      expect(judgeFrames({ ...base, a: stripes(), b: stripes(), source: src, loop: { start: stripes(), end: stripes(), beforeEnd: stripes(), step: stripes() } }).flags).not.toContain('does not loop')
-      expect(judgeFrames({ ...base, animated: true, a: at(0.1), b: at(0.3), source: src }).flags).not.toContain('does not loop')
+    it('fails a sawtooth (fract of time) and raw growing time', () => {
+      expect(loopsSeamlessly(frames(saw))).toBe(false)
+      expect(loopsSeamlessly(frames(raw))).toBe(false)
     })
-    it('is a hard flag', () => {
+    it('a still effect loops trivially; render noise raises the floor', () => {
+      expect(loopsSeamlessly(frames(still))).toBe(true)
+      // A jitter the size of the wrap between two renders of the SAME t is noise, not a jump.
+      const f = frames(teleport)
+      expect(loopsSeamlessly({ ...f, again: f.beforeEnd })).toBe(true)
+    })
+    it('is part of judgeFrames and a hard flag; no loop frames means no loop check', () => {
+      const a = teleport(2), b = teleport(3.37)
+      const src = solid(90, 90, 90)
+      const s24 = (px: Uint8ClampedArray) => px.slice(0, 24 * 24 * 4)
+      expect(judgeFrames({ ...base, animated: true, a: s24(a), b: s24(b), source: src, loop: frames(teleport) }).flags).toContain('does not loop')
+      expect(judgeFrames({ ...base, animated: true, a: s24(a), b: s24(b), source: src, loop: frames(looping) }).flags).not.toContain('does not loop')
+      expect(judgeFrames({ ...base, animated: true, a: s24(a), b: s24(b), source: src }).flags).not.toContain('does not loop')
       expect(HARD_FLAGS).toContain('does not loop')
     })
   })

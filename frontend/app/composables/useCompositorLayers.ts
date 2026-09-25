@@ -1474,6 +1474,20 @@ export async function ensureLayerImages(layers: LocalLayer[], opts?: { keep?: bo
 // center translate).
 let _fieldCtx: ShaderFieldFrameCtx = { frameW: 1, frameH: 1, t: 0, fps: 30, base: null, bake: false, token: 0 }
 
+// The paint's own clock (`t`, on the Frame's loop) for what must stay in step with the loop — a
+// living image's frame. `_fieldCtx.t` is the SHADER clock: the same `t`, unless a live host has
+// set a continuous effect clock (setLiveEffectClock), so a Frame playing its loop never resets a
+// shader fill or effect at the wrap (Julien, 2026-09-25). Never for a bake: exports stay looped.
+let _paintClockT = 0
+let _liveEffectClock: number | null = null
+/** Set the live effect clock (continuous seconds; null: none) for the next paints; returns the
+ *  previous value, to put back in a `finally`. */
+export function setLiveEffectClock(seconds: number | null): number | null {
+  const prev = _liveEffectClock
+  _liveEffectClock = seconds != null && Number.isFinite(seconds) ? seconds : null
+  return prev
+}
+
 // The Frame's light for the paint in progress (Gold foil / Spot UV read it). Module-global for
 // the same reason as `_fieldCtx`: set once per paintLayerStack, read deep inside paintLayer.
 let _frameLight: FrameLight = DEFAULT_FRAME_LIGHT
@@ -4452,10 +4466,10 @@ function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, 
     if (dash) ctx.setLineDash([])
   } else if (layer.kind === 'image') {
     const w = layer.w * W, h = layer.h * W
-    // A living image draws the frame for the paint clock (`_fieldCtx.t`, set by
+    // A living image draws the frame for the paint clock (`_paintClockT`, set by
     // paintLayerStack) offset by the clone being painted; without a clip, or until
     // every frame is loaded, `clipFrameFor` is null and the still paints exactly as before.
-    const img = clipFrameFor(layer, _fieldCtx.t, _cloneSlot.k, _cloneSlot.n)
+    const img = clipFrameFor(layer, _paintClockT, _cloneSlot.k, _cloneSlot.n)
       ?? _imageCache.get(imageLayerCacheKey(layer.filename))
     if (img && img.complete && img.naturalWidth) {
       if (hasPaint(layer.tint)) drawTintedImage(ctx, img, layer, w, h)
@@ -6161,7 +6175,10 @@ export function paintLayerStack(
   light?: FrameLight,
 ): { frozenCount: number } {
   _frameLight = light ?? DEFAULT_FRAME_LIGHT
-  const fieldT = t ?? 0, fieldFps = motion?.fps ?? 30
+  _paintClockT = t ?? 0
+  // Shader fields, glass, backdrop and pixel effects run on the live effect clock when a live
+  // host set one (never for a bake); otherwise on `t`, exactly as before.
+  const fieldT = !bake && _liveEffectClock != null ? _liveEffectClock : (t ?? 0), fieldFps = motion?.fps ?? 30
   _fieldCtx = {
     frameW: W, frameH: H, t: fieldT, fps: fieldFps,
     base: typeof ctx.getTransform === 'function' ? ctx.getTransform() : null,

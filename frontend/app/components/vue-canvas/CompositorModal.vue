@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { clipClocks } from '~/composables/useCompositorLayers'
+import { clipClocks, setLiveEffectClock } from '~/composables/useCompositorLayers'
+import { liveEffectTime } from '~/lib/shaderstudio/clock'
 import { hasPaint } from '~/lib/paint/resolve'
 import {
   Image as ImageIcon, X, MousePointer2,
@@ -4971,10 +4972,16 @@ const playing = ref(false)
 let rafId = 0
 let playStartWall = 0
 let playStartT = 0
+/** While the Motion tab plays: the effects' own clock — the same time, NOT wrapped at the loop,
+ *  so a shader fill or effect never resets at the wrap (the layers' motion still loops on
+ *  `previewT`). Null when not playing: a paused or scrubbed playhead is the effects' time too. */
+let playEffectT: number | null = null
 
 function tickPlayback(now: number) {
   if (!playing.value) return
-  const t = (playStartT + (now - playStartWall) / 1000) % effectiveMotion.value.duration
+  const elapsed = playStartT + (now - playStartWall) / 1000
+  const t = elapsed % effectiveMotion.value.duration
+  playEffectT = liveEffectTime(elapsed, effectiveMotion.value.duration)
   previewT.value = t
   renderStack()
   rafId = requestAnimationFrame(tickPlayback)
@@ -4988,6 +4995,7 @@ function play() {
 }
 function pause() {
   playing.value = false
+  playEffectT = null
   cancelAnimationFrame(rafId)
 }
 function scrubTo(t: number) {
@@ -5807,11 +5815,15 @@ function renderStack(wallT?: number, live = false) {
     : motionArg
   // Scoped to THIS frame's slots — the wired resolver is a module global and the
   // Frame cards on the canvas number their own slots exactly the same way.
-  const { frozenCount } = withWiredContent(wiredContentForSlot, () =>
-    paintLayerStack(ctx, W, H, items, paintLayers(), l =>
-      l.id === editingId.value || (nodeEdit.active.value && l.id === nodeEdit.layerId.value),
-      clockT, paintMotion,
-      wiredTreatments.value, shownBackground.value, localGroups.value, postEffects.value, false, frameLight.value))
+  const prevEffectClock = setLiveEffectClock(playing.value ? playEffectT : null)
+  let frozenCount = 0
+  try {
+    ;({ frozenCount } = withWiredContent(wiredContentForSlot, () =>
+      paintLayerStack(ctx, W, H, items, paintLayers(), l =>
+        l.id === editingId.value || (nodeEdit.active.value && l.id === nodeEdit.layerId.value),
+        clockT, paintMotion,
+        wiredTreatments.value, shownBackground.value, localGroups.value, postEffects.value, false, frameLight.value)))
+  } finally { setLiveEffectClock(prevEffectClock) }
   shaderFieldsFrozen.value = frozenCount
 }
 

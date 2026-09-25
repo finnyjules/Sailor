@@ -5,6 +5,7 @@
  * (sent through the existing /api/agent-review route).
  */
 import { SHADERGEN_HELPERS, SHADERGEN_PREAMBLE, type GenParam, type GenTake } from '~~/shared/shadergen/contract'
+import { withoutSeamBlend } from './seamBlend'
 
 /** One angle per take, so four parallel calls don't return four near-copies. */
 export const TAKE_ANGLES = [
@@ -71,7 +72,7 @@ export function stripSuppliedLines(source: string): string {
  *  (a My effect's source is preamble + Sailor's helpers + its body), without the helpers — shown
  *  as part of "its source" they invite the model to copy them into the body, which can't compile. */
 export function baseCode(source: string): string {
-  return stripSuppliedLines(source.replace(SHADERGEN_HELPERS, ''))
+  return stripSuppliedLines(withoutSeamBlend(source).replace(SHADERGEN_HELPERS, ''))
 }
 
 /** Motion driven from u_time directly (the helpers, which read it, are gone by now). */

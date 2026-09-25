@@ -29,7 +29,7 @@ import { shaderFx } from '~/lib/shaderfx/renderer'
 import type { EffectDef, GradientStop, ParamValue } from '~/lib/shaderfx/types'
 import { matchesShowWhen } from '~/lib/shaderfx/showWhen'
 import { composePasses, type EffectTextureBundle } from '~/lib/shaderstudio/passes'
-import { stackWantsClock } from '~/lib/shaderstudio/clock'
+import { livePreviewClock, stackWantsClock } from '~/lib/shaderstudio/clock'
 import { migrateShaderConfig } from '~/lib/shaderstudio/migrate'
 import { ANIMATABLE, applyMotion } from '~/lib/shaderstudio/motion'
 import { ADJUST_PRESETS, applyAdjustPreset, EFFECT_LOOKS } from '~/lib/shaderstudio/presets'
@@ -245,7 +245,9 @@ function clockDuration(): number {
 // The picture the last preview frame was drawn over (null: generative, no source) —
 // what new effects are written against (shaderStudioEffectTarget's `image`).
 let lastSourceFrame: TexImageSource | null = null
-async function renderFrame(t01: number) {
+/** `effectT`: the effects' own clock in the live preview — continuous, never wrapped at the loop
+ *  (clock.ts livePreviewClock). Omitted: the looped time, as an export renders it. */
+async function renderFrame(t01: number, effectT?: number) {
   const el = canvas.value
   if (!el) return
   const src = resolved.value
@@ -268,7 +270,7 @@ async function renderFrame(t01: number) {
     // cfg.motion.duration, so passing upstream-derived seconds against our own
     // (different) duration would run every track at the wrong rate.
     const cfg = animated.value ? applyMotion(motionConfigFor(config.value, dur), t) : config.value
-    const passes = composePasses(cfg, defForId, t, (def, layer) => texBundle(def, layer), dur)
+    const passes = composePasses(cfg, defForId, t, (def, layer) => texBundle(def, layer), dur, effectT)
     el.getContext('2d')!.drawImage(shaderFx.render(passes, base, w, h), 0, 0)
     glError.value = null
   } catch (e: any) { glError.value = String(e?.message ?? e) }
@@ -282,8 +284,9 @@ function loop(ts: number) {
   // degrades to a lower frame rate instead of unbounded lag.
   if (!inFlight) {
     inFlight = true
-    const dur = clockDuration()
-    void renderFrame((((ts - start) / 1000) % dur) / dur).finally(() => { inFlight = false })
+    // The loop (motion tracks, a video source) wraps at `dur`; the effects' own clock runs on.
+    const { t01, effectT } = livePreviewClock((ts - start) / 1000, clockDuration())
+    void renderFrame(t01, effectT).finally(() => { inFlight = false })
   }
   raf = requestAnimationFrame(loop)
 }

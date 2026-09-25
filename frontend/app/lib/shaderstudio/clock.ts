@@ -56,3 +56,29 @@ export function stackWantsClock(
 ): boolean {
   return (effects ?? []).some(e => e.enabled && e.id && effectWantsClock(resolveDef(e.id), e.params))
 }
+
+/**
+ * Live views never reset an effect (Julien, 2026-09-25: "it's the reset that's jarring"). A live
+ * preview's loop — its motion tracks, a video source's frame — wraps at the loop length, but an
+ * effect's own clock (u_time) keeps running: `t01` is the looped position for everything that must
+ * stay in step with the loop, `effectT` the continuous seconds for the effects. u_loop stays the
+ * loop length, so a body built on loopPhase() still repeats every loop. Exports and bakes don't use
+ * this: they render the looped time, as before.
+ *
+ * `effectT` wraps only after about an hour, at a whole number of loops (so a loopPhase() body sees
+ * nothing at all), to keep single-precision time in the shader sharp.
+ */
+export const LIVE_EFFECT_PERIOD_S = 3600
+
+export function liveEffectTime(elapsedS: number, loopS: number): number {
+  const L = loopS > 0 ? loopS : 4
+  const period = L * Math.max(1, Math.round(LIVE_EFFECT_PERIOD_S / L))
+  const e = Number.isFinite(elapsedS) ? elapsedS : 0
+  return ((e % period) + period) % period
+}
+
+/** A live preview's clock at `elapsedS` real seconds, for a loop of `loopS` seconds. */
+export function livePreviewClock(elapsedS: number, loopS: number): { t01: number; effectT: number } {
+  const L = Math.max(1e-6, loopS)
+  return { t01: ((elapsedS % L) + L) % L / L, effectT: liveEffectTime(elapsedS, loopS) }
+}

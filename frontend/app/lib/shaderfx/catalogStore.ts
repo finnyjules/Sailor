@@ -1,4 +1,5 @@
 import type { EffectDef, ShaderFxCatalog } from './types'
+import { withSeamBlend } from '~/lib/shadergen/seamBlend'
 
 /**
  * Network-free half of the shader-effect catalog — the render-path counterpart
@@ -29,7 +30,7 @@ export function setShaderFxCatalog(cat: ShaderFxCatalog | null): void {
  *  loaded and must stay intact while the poster is baked). */
 export function addShaderFxEffects(defs: EffectDef[]): void {
   const byId = new Map((cached?.effects ?? []).map(e => [e.id, e]))
-  for (const d of defs) if (!byId.has(d.id)) byId.set(d.id, d)
+  for (const d of defs) if (!byId.has(d.id)) byId.set(d.id, withSeamBlend(d))
   cached = { version: cached?.version ?? 1, effects: [...byId.values()] }
 }
 
@@ -37,7 +38,9 @@ export function addShaderFxEffects(defs: EffectDef[]): void {
  *  change while the page is open: a My effect renamed or given a new version, a draft take. */
 export function putShaderFxEffects(defs: EffectDef[]): void {
   const byId = new Map((cached?.effects ?? []).map(e => [e.id, e]))
-  for (const d of defs) byId.set(d.id, d)
+  // A My effect or draft gets its loop's safety net here, the one door they all come in
+  // through (~/lib/shadergen/seamBlend). Built-ins and still effects pass through untouched.
+  for (const d of defs) byId.set(d.id, withSeamBlend(d))
   cached = { version: cached?.version ?? 1, effects: [...byId.values()] }
 }
 

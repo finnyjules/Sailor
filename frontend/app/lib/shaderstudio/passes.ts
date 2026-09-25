@@ -34,6 +34,9 @@ export interface EffectTextureBundle {
  * @param loop       the host's loop length in seconds (u_loop): `t` runs 0..loop and wraps,
  *                   and an effect built on loopPhase() repeats seamlessly over it. 0: none
  *                   (LOOP() then falls back to 4 s). Built-in effects don't read it.
+ * @param effectT    the effects' own clock (u_time), when it differs from `t`: a live preview runs
+ *                   it on continuously so an effect never resets at the loop (clock.ts
+ *                   livePreviewClock). Omitted (every export and bake): `t`, byte-identical.
  */
 export function composePasses(
   cfg: ShaderStudioConfig,
@@ -41,6 +44,7 @@ export function composePasses(
   t: number,
   texFor: (def: EffectDef | null, layer: StudioEffect) => EffectTextureBundle = () => ({ sources: {}, uniforms: {} }),
   loop = 0,
+  effectT?: number,
 ): ShaderPass[] {
   const out: ShaderPass[] = []
 
@@ -52,7 +56,7 @@ export function composePasses(
     const tex = texFor(def, layer)
     const uniforms: Uniforms = {
       ...resolveUniforms(def, layer.params),
-      u_time: t, u_loop: loop, u_seed: cfg.seed, u_hasInput: 1, ...tex.uniforms,
+      u_time: effectT ?? t, u_loop: loop, u_seed: cfg.seed, u_hasInput: 1, ...tex.uniforms,
     }
     const needsComposite = layer.blend !== 'normal' || layer.opacity < 0.999
     const masked = !!layer.mask?.enabled
