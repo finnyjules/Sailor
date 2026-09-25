@@ -123,8 +123,8 @@ export function useCanvasAgent(opts: {
 
   function buildChange(probe: CanvasSnapshot, cmd: Command, rationale: string): ProposedChange | null {
     if (!applyCanvasCommand(probe, cmd).ok) return null
-    const sum = summarizeCanvasChange(probe, cmd) ?? { label: cmd.op, before: '', after: '' }
-    return { command: cmd, label: sum.label, before: sum.before, after: sum.after, rationale, rerollable: REROLLABLE.has(cmd.op), accepted: true }
+    const sum = summarizeCanvasChange(probe, cmd) ?? { label: cmd.op, before: '', after: '', modelLabel: cmd.op }
+    return { command: cmd, label: sum.label, modelLabel: sum.modelLabel, before: sum.before, after: sum.after, rationale, rerollable: REROLLABLE.has(cmd.op), accepted: true }
   }
 
   async function ask(phrase: string) {
@@ -267,7 +267,7 @@ export function useCanvasAgent(opts: {
     try {
       const nonce = Math.random().toString(36).slice(2, 7)
       const intent = lastPhrase.value ? `The user's original request was: "${lastPhrase.value}". ` : ''
-      const phrase = `${intent}Re-roll ONLY the "${ch.label}" change (currently "${ch.after}"). Propose a DIFFERENT value that still satisfies the request — not "${ch.after}". Same op "${ch.command.op}"${ch.command.target ? ` on "${ch.command.target}"` : ''}; change nothing else. (variation ${nonce})`
+      const phrase = `${intent}Re-roll ONLY the "${ch.modelLabel ?? ch.label}" change (currently "${ch.after}"). Propose a DIFFERENT value that still satisfies the request — not "${ch.after}". Same op "${ch.command.op}"${ch.command.target ? ` on "${ch.command.target}"` : ''}; change nothing else. (variation ${nonce})`
       const rdesc = describeCanvas(opts.getSnapshot(lastPhrase.value))
       const { commands, changeRationales } = await callModel(buildAgentPrompt(rdesc, phrase), rdesc.commands, ctrl.signal)
       if (seq !== runSeq || !original) return

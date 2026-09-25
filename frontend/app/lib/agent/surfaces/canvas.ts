@@ -16,6 +16,8 @@ import type { Command, CommandResult, CommandSpec, SurfaceSnapshot } from '~/lib
 import type { LayoutIssue } from '~/lib/agent/verify'
 import { isTypeCompatible } from '~/lib/portIntent'
 import type { CatalogEntry } from '~/lib/portIntentCatalog'
+import { capabilityByType } from '~/lib/agent/capabilities'
+import { NODE_TITLE_OVERRIDES } from '~/lib/nodeTitleOverrides'
 
 export interface PortLite { name: string; type: string; optional?: boolean }
 export interface NodeLite {
@@ -55,9 +57,12 @@ function clone<T>(v: T): T { return v === undefined ? v : (JSON.parse(JSON.strin
 function nodeName(n: NodeLite): string {
   return n.title && n.title !== n.nodeType ? `${n.title} (${n.nodeType})` : n.nodeType
 }
-// For text the USER reads: the node's own title, never its internal type.
+// For text the USER reads: the node's own title, never its internal type —
+// with no title of its own, the name its card header shows.
 function displayNodeName(n: NodeLite): string {
-  return n.title || n.nodeType
+  const title = (n.title ?? '').trim()
+  if (title && title !== n.nodeType) return title
+  return NODE_TITLE_OVERRIDES[n.nodeType] ?? capabilityByType(n.nodeType)?.title ?? humanizeIdentifier(n.nodeType)
 }
 function findNode(s: CanvasSnapshot, id?: string): NodeLite | undefined {
   return s.nodes.find(n => n.id === id)
@@ -334,17 +339,47 @@ export function verifyCanvas(s: CanvasSnapshot): LayoutIssue[] {
   return issues
 }
 
-/** Human-readable summary of a command for the proposal UI. */
-export function summarizeCanvasChange(state: CanvasSnapshot, cmd: Command): { label: string; before: string; after: string } | null {
+/** A widget or type identifier in plain words: "sampler_name" → "Sampler name",
+ *  "GradientStudio" → "Gradient studio". */
+export function humanizeIdentifier(id: string): string {
+  const words = id
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w, i) => (i === 0 ? w : /^[A-Z0-9]+$/.test(w) ? w : w.toLowerCase()))
+  const out = words.join(' ')
+  return out ? out[0]!.toUpperCase() + out.slice(1) : id
+}
+/** "mute" / "bypass" / "normal" (as the agent writes it) in plain words. */
+function modeWords(mode: unknown): string {
+  const n = MODE_BY_NAME[String(mode ?? '').toLowerCase()]
+  return n != null ? (MODE_LABEL[n] ?? 'normal') : 'normal'
+}
+
+/** Human-readable summary of a command for the proposal UI (the user reads it:
+ *  nodes by their own title, widgets and modes in plain words, never an
+ *  identifier). `modelLabel` is the same row for text the model reads. */
+export function summarizeCanvasChange(state: CanvasSnapshot, cmd: Command): { label: string; before: string; after: string; modelLabel: string } | null {
   const node = findNode(state, cmd.target)
-  const name = node ? nodeName(node) : (cmd.target ?? '')
+  const name = node ? displayNodeName(node) : 'a node'
+  const modelName = node ? nodeName(node) : (cmd.target ?? '')
   const a = cmd.args ?? {}
+  const named = (id: unknown) => { const n = findNode(state, typeof id === 'string' ? id : undefined); return n ? displayNodeName(n) : 'a node' }
   switch (cmd.op) {
-    case 'setWidget': return { label: `${name} · ${String(a.name ?? '')}`, before: node ? String(node.widgets[String(a.name)] ?? '') : '', after: String(a.value ?? '') }
-    case 'setMode': return { label: name, before: node && node.mode ? (MODE_LABEL[node.mode] ?? 'normal') : 'normal', after: String(a.mode ?? '') }
-    case 'addNode': { const entry = (state.catalog ?? []).find(c => c.type === a.nodeType); return { label: 'Add node', before: '', after: entry?.name ?? String(a.nodeType ?? 'node') } }
-    case 'connect': { const f = findNode(state, typeof a.from === 'string' ? a.from : undefined); const t = findNode(state, typeof a.to === 'string' ? a.to : undefined); return { label: 'Connect', before: '', after: `${f ? nodeName(f) : String(a.from)} → ${t ? nodeName(t) : String(a.to)}` } }
-    case 'deleteNode': return { label: 'Delete', before: name, after: 'removed' }
-    default: return { label: cmd.op, before: '', after: a ? JSON.stringify(a) : '' }
+    case 'setWidget': {
+      const widget = String(a.name ?? '')
+      return { label: `${name} · ${humanizeIdentifier(widget)}`, before: node ? String(node.widgets[widget] ?? '') : '', after: String(a.value ?? ''), modelLabel: `${modelName} · ${widget}` }
+    }
+    case 'setMode': return { label: name, before: node && node.mode ? (MODE_LABEL[node.mode] ?? 'normal') : 'normal', after: modeWords(a.mode), modelLabel: modelName }
+    case 'addNode': {
+      const entry = (state.catalog ?? []).find(c => c.type === a.nodeType)
+      return { label: 'Add node', before: '', after: entry?.name ?? (a.nodeType ? humanizeIdentifier(String(a.nodeType)) : 'a node'), modelLabel: 'Add node' }
+    }
+    case 'connect': return { label: 'Connect', before: '', after: `${named(a.from)} → ${named(a.to)}`, modelLabel: 'Connect' }
+    case 'deleteNode': return { label: 'Delete', before: name, after: 'removed', modelLabel: 'Delete' }
+    default: return { label: 'Change', before: '', after: 'Another change to the graph', modelLabel: cmd.op }
   }
 }

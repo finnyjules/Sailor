@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { describeCanvas, applyCanvasCommand, verifyCanvas, summarizeCanvasChange, matchStylesInText, type CanvasSnapshot } from '~/lib/agent/surfaces/canvas'
+import { describeCanvas, applyCanvasCommand, verifyCanvas, summarizeCanvasChange, humanizeIdentifier, matchStylesInText, type CanvasSnapshot } from '~/lib/agent/surfaces/canvas'
 import type { CatalogEntry } from '~/lib/portIntentCatalog'
 
 const CATALOG: CatalogEntry[] = [
@@ -262,5 +262,47 @@ describe('summarizeCanvasChange', () => {
   it('summarizes setWidget with a before/after', () => {
     const s = summarizeCanvasChange(graph(), { op: 'setWidget', target: '2', args: { name: 'steps', value: 30 } })
     expect(s?.before).toBe('20'); expect(s?.after).toBe('30')
+  })
+
+  // What the user reads names nodes by their own title and says widgets and
+  // modes in plain words; the model-facing label keeps the identifiers.
+  const untitled = (): CanvasSnapshot => ({
+    nodes: [
+      { id: 'g', nodeType: 'GradientStudio', title: 'GradientStudio', widgets: {}, inputs: [], outputs: [{ name: 'image', type: 'IMAGE' }] },
+      { id: 'k', nodeType: 'KSampler', title: 'My sampler', widgets: { sampler_name: 'euler' }, inputs: [{ name: 'image', type: 'IMAGE' }], outputs: [] },
+      { id: 'x', nodeType: 'SomeCustomNode', title: '', widgets: {}, inputs: [], outputs: [] },
+    ],
+    edges: [],
+  })
+  const shown = (r: ReturnType<typeof summarizeCanvasChange>) => [r?.label, r?.before, r?.after].join(' | ')
+
+  it('a node with no title of its own shows its card name, never its type', () => {
+    expect(summarizeCanvasChange(untitled(), { op: 'deleteNode', target: 'g' })).toMatchObject({ label: 'Delete', before: 'Gradient Studio', after: 'removed' })
+    expect(summarizeCanvasChange(untitled(), { op: 'deleteNode', target: 'x' })?.before).toBe('Some custom node')
+    expect(summarizeCanvasChange(untitled(), { op: 'connect', args: { from: 'g', to: 'k' } })?.after).toBe('Gradient Studio → My sampler')
+  })
+
+  it('a widget reads in plain words; the model label keeps its name', () => {
+    const r = summarizeCanvasChange(untitled(), { op: 'setWidget', target: 'k', args: { name: 'sampler_name', value: 'dpmpp_2m' } })
+    expect(r).toMatchObject({ label: 'My sampler · Sampler name', before: 'euler', after: 'dpmpp_2m', modelLabel: 'My sampler (KSampler) · sampler_name' })
+  })
+
+  it('a mode change says muted / bypassed / normal', () => {
+    expect(summarizeCanvasChange(untitled(), { op: 'setMode', target: 'k', args: { mode: 'bypass' } })?.after).toBe('bypassed')
+    expect(summarizeCanvasChange(untitled(), { op: 'setMode', target: 'k', args: { mode: 'mute' } })?.after).toBe('muted')
+    expect(summarizeCanvasChange(untitled(), { op: 'setMode', target: 'k', args: { mode: 'normal' } })?.after).toBe('normal')
+  })
+
+  it('an added type with no catalog entry, and an unknown op, never show identifiers or JSON', () => {
+    expect(summarizeCanvasChange(untitled(), { op: 'addNode', args: { nodeType: 'TextureStudio', id: '$new1' } })?.after).toBe('Texture studio')
+    const other = summarizeCanvasChange(untitled(), { op: 'tuneNode', target: 'g', args: { request: 'bluer' } })
+    expect(shown(other)).not.toMatch(/[{}]|tuneNode/)
+    expect(other?.modelLabel).toBe('tuneNode')
+  })
+
+  it('humanizes identifiers', () => {
+    expect(humanizeIdentifier('sampler_name')).toBe('Sampler name')
+    expect(humanizeIdentifier('GradientStudio')).toBe('Gradient studio')
+    expect(humanizeIdentifier('denoiseStrength')).toBe('Denoise strength')
   })
 })

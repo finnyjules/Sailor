@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { routeRequest, ROUTE_TIMEOUT_MS } from '~/lib/prompt/routeRequest'
+import { resetRouteWarning, routeRequest, ROUTE_TIMEOUT_MS } from '~/lib/prompt/routeRequest'
 
 const input = { request: 'what does this do?', host: 'canvas' as const, selection: [{ kind: 'artifact-image', name: 'Rainy shop' }], mode: null }
 
@@ -33,5 +33,25 @@ describe('routeRequest', () => {
     const ctrl = new AbortController()
     const fetcher = vi.fn(async () => { ctrl.abort(); throw new Error('aborted') })
     await expect(routeRequest(input, { apiKey: '', signal: ctrl.signal, fetcher })).rejects.toThrow('aborted')
+  })
+
+  it('the fallback warns once in the console, so a missing route is visible; an abort never warns', async () => {
+    resetRouteWarning()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const ctrl = new AbortController()
+      await routeRequest(input, { apiKey: '', signal: ctrl.signal, fetcher: async () => { ctrl.abort(); throw new Error('aborted') } }).catch(() => {})
+      expect(warn).not.toHaveBeenCalled()
+      const missing = async () => { throw Object.assign(new Error('405'), { statusCode: 405 }) }
+      await routeRequest(input, { apiKey: '', fetcher: missing })
+      await routeRequest(input, { apiKey: '', fetcher: missing })
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(String(warn.mock.calls[0]![0])).toContain('prompt-route')
+      resetRouteWarning()
+      await routeRequest(input, { apiKey: '', fetcher: async () => ({ kind: 'dance' }) as any })
+      expect(warn).toHaveBeenCalledTimes(2)
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

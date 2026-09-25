@@ -24,6 +24,8 @@ const REROLLABLE_OPS = new Set(['setText', 'setTextColor', 'setElementStyle', 's
 export interface ProposedChange {
   command: Command
   label: string
+  /** The same row for text the model reads (may name internal types); the UI shows `label`. */
+  modelLabel?: string
   before: string
   after: string
   rationale: string
