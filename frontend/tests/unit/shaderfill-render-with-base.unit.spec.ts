@@ -56,3 +56,20 @@ describe('renderFieldWithBase', () => {
     expect(renderSpy).not.toHaveBeenCalled()
   })
 })
+
+describe('the painting host’s loop reaches a field as u_loop (generated effects loop over it)', () => {
+  it('is loop × |speed| while a host has set it, and 0 again once it is put back', async () => {
+    const { setFieldLoop } = await import('~/lib/shaderfill/field')
+    const base = document.createElement('canvas')
+    const spec = { effectId: 'liquify', params: {}, anchor: 'object', speed: 2, seed: 0, input: '#000000' } as any
+    const prev = setFieldLoop(6)
+    try { renderFieldWithBase(spec, base, 4, 4, undefined, 1) } finally { setFieldLoop(prev) }
+    renderFieldWithBase(spec, base, 4, 4, undefined, 1)
+    const loops = renderSpy.mock.calls.map(c => (c as any)[0][0].uniforms.u_loop)
+    expect(loops).toEqual([12, 0])
+  })
+  it('every other draw resets u_loop to 0 (a built-in pass default), so one host’s loop never leaks', async () => {
+    const { BUILTIN_PASS_DEFAULTS } = await import('~/lib/shaderfx/renderer')
+    expect(BUILTIN_PASS_DEFAULTS.u_loop).toBe(0)
+  })
+})

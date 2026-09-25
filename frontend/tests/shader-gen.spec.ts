@@ -20,7 +20,11 @@ import { SPIKE_TAKES } from '../app/lib/shadergen/__eval__/spikeTakes'
 
 test.setTimeout(180_000)
 
-const S = SPIKE_TAKES
+/** The spike takes predate the loop rule: their motion runs on raw u_time, which the seamless-loop
+ *  check rejects. The mock replies run the same bodies on a clock that swings smoothly out and
+ *  back once per LOOP() — seamless by construction — so they still pass every check. */
+const LOOPED_TIME = '(0.5 * LOOP() * (1.0 - cos(6.28318530718 * loopPhase())))'
+const S = Object.fromEntries(Object.entries(SPIKE_TAKES).map(([k, ts]) => [k, ts.map(t => ({ ...t, body: t.body.replace(/\bu_time\b/g, LOOPED_TIME) }))])) as typeof SPIKE_TAKES
 /** Per slot (take angle), the reply to its 1st, 2nd, … call. */
 const TAKES = [
   [S.rain![0]!, S.lava![0]!, S.popart![0]!],
@@ -221,6 +225,22 @@ test.describe('shader generation (stage 5)', () => {
       for (let i = 0; i < px.length; i += 4 * 97) if (px[i + 3]! > 0 && px[i]! + px[i + 1]! + px[i + 2]! > 30) lit++
       return lit
     }), { timeout: 15_000 }).toBeGreaterThan(50)
+  })
+
+  test('a take whose motion runs on raw u_time is sent back: it does not loop seamlessly', async ({ page }) => {
+    // Every slot's first reply is a spike take as written (raw u_time); its second is the same
+    // body on the looped clock. The real renderer's loop check rejects the first.
+    const raw = SPIKE_TAKES.lava!
+    const gen = await mockShaderGen(page, [100, 200, 300], [[raw[0]!, S.lava![0]!], [raw[1]!, S.lava![1]!], [raw[2]!, S.lava![2]!]])
+    await mockMyEffects(page); await mockRouter(page)
+    await openShaderStudio(page)
+    await page.getByTestId('studio-actions').getByTestId('studio-action-row').filter({ hasText: 'New layer from a description' }).click()
+    await prompt(page).fill('molten wax'); await prompt(page).press('Enter')
+    await expect(page.getByTestId('prompt-takes')).toBeVisible({ timeout: 20_000 })
+    await expect(tileIn(page, 'pending')).toHaveCount(0, { timeout: 60_000 })
+    const retries = gen.filter(b => String(b.prompt).includes('the render did not loop seamlessly'))
+    expect(retries.length).toBeGreaterThanOrEqual(1)
+    expect(await tileIn(page, 'ready').count()).toBeGreaterThanOrEqual(1)
   })
 
   test('Stop mid-run clears partial takes and puts the layer stack back', async ({ page }) => {

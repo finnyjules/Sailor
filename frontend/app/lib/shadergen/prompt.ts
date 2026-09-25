@@ -44,6 +44,9 @@ function picturesNote(n: 1 | 2): string {
     : `The one attached picture is the reference picture: the look to aim for. It is not the image the effect runs over. ${MATCH_THE_LOOK}`
 }
 
+/** The fixed examples are spike takes written before the loop rule; they are kept as they are. */
+const EXAMPLES_PREDATE_LOOP = 'Those two were written before the loop rule and drive their motion from raw u_time — do not copy that: your motion must repeat seamlessly over LOOP(), built from loopPhase() or loopCircle().'
+
 const NO_SOURCE_NOTE = 'There is no picture for the effect to run over: the input image is blank. Make a standalone effect that creates its whole picture itself — set "generative": true and do not read the input image (no u_image0, tex or blur9).'
 
 /** The lines Sailor supplies itself; a catalog source carries them, a body must not. */
@@ -53,6 +56,7 @@ const SUPPLIED_LINES = [
   /^[ \t]*uniform\s+sampler2D\s+u_image0\s*;[ \t]*$/,
   /^[ \t]*uniform\s+vec2\s+u_resolution\s*;[ \t]*$/,
   /^[ \t]*uniform\s+float\s+u_time\s*;[ \t]*$/,
+  /^[ \t]*uniform\s+float\s+u_loop\s*;[ \t]*$/,
   /^[ \t]*uniform\s+float\s+u_seed\s*;[ \t]*$/,
   /^[ \t]*in\s+vec2\s+v_texCoord\s*;[ \t]*$/,
   /^[ \t]*layout\s*\(\s*location\s*=\s*0\s*\)\s*out\s+vec4\s+fragColor0\s*;[ \t]*$/,
@@ -63,7 +67,7 @@ export function stripSuppliedLines(source: string): string {
   return source.split('\n').filter(line => !SUPPLIED_LINES.some(re => re.test(line))).join('\n').trim()
 }
 
-const HELPER_WARNING = 'Sailor already provides the preamble and the helpers h21, vnoise, fbm, tex, blur9, luma, ASP, hsv2rgb and thinfilm; if this source defines functions with those names, rename or drop them — redefining them will not compile.'
+const HELPER_WARNING = 'Sailor already provides the preamble and the helpers h21, vnoise, fbm, tex, blur9, luma, ASP, hsv2rgb, thinfilm, LOOP, loopPhase and loopCircle; if this source defines functions with those names, rename or drop them — redefining them will not compile.'
 
 export function buildGenPrompt(r: GenRequest): string {
   const parts: string[] = [`Request: "${r.request}"`]
@@ -77,7 +81,7 @@ export function buildGenPrompt(r: GenRequest): string {
   }
   if (r.examples?.length) {
     const lines = r.examples.map(ex => `"${ex.request}" (${ex.name}) — "${ex.take.name}":\nDials: ${JSON.stringify(ex.take.params)}\n\`\`\`glsl\n${ex.take.body}\n\`\`\``)
-    parts.push(`Two effects that met the quality bar for other requests — match this level of craft (considered defaults, restraint, readable subject), not their look:\n\n${lines.join('\n\n')}`)
+    parts.push(`Two effects that met the quality bar for other requests — match this level of craft (considered defaults, restraint, readable subject), not their look:\n\n${lines.join('\n\n')}\n\n${EXAMPLES_PREDATE_LOOP}`)
   }
   parts.push(TAKE_ANGLES[r.takeIndex % TAKE_ANGLES.length]!)
   if (r.avoid) parts.push(`A previous attempt failed: ${r.avoid}. Do not repeat that.`)

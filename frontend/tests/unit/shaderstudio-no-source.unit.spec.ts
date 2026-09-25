@@ -58,3 +58,11 @@ describe('Shader studio surface with no source', () => {
     expect(s).toMatch(/v-if="needsSource"[^>]*>Add a source image to begin/)
   })
 })
+
+describe('Shader studio loop length', () => {
+  const s = readFileSync(resolve(__dirname, '../../app/components/vue-canvas/ShaderStudioSurface.vue'), 'utf8')
+  it('the preview and every output pass the studio’s own loop (clockDuration) as u_loop', () => {
+    expect((s.match(/composePasses\(/g) ?? []).length).toBe(2)
+    expect((s.match(/composePasses\(cfg, defForId, t, \(def, layer\) => texBundle\(def, layer\), dur\)/g) ?? []).length).toBe(2)
+  })
+})

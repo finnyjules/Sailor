@@ -8,7 +8,8 @@ Sailor provides these — never write them yourself:
 - The preamble: #version, precision, and the inputs
   uniform sampler2D u_image0;  // the input image (ignore it for generative effects)
   uniform vec2 u_resolution;   // output size in pixels
-  uniform float u_time;        // seconds
+  uniform float u_time;        // seconds, from 0 up to the loop length, then back to 0
+  uniform float u_loop;        // the loop length in seconds (0 when the host has none)
   uniform float u_seed;        // a whole number, for variety
   in vec2 v_texCoord;          // 0..1, origin bottom-left
   layout(location = 0) out vec4 fragColor0;
@@ -22,6 +23,9 @@ Sailor provides these — never write them yourself:
   vec2 ASP()                        // aspect vector (width/height, 1)
   vec3 hsv2rgb(vec3 c)
   vec3 thinfilm(float d)            // iridescent thin-film palette
+  float LOOP()                      // the loop length in seconds (u_loop, or 4.0 when it is 0)
+  float loopPhase()                 // 0..1 through the loop: fract(u_time / LOOP())
+  vec2 loopCircle(float radius)     // a point going once round a circle of that radius per loop
 
 You write "body": the effect's own uniform declarations (one per dial), any functions, and void main() that writes fragColor0 with alpha 1.0.
 
@@ -34,6 +38,7 @@ Rules:
 2. Defaults must look good untouched. Choose them as a designer would; dials are for taste, not for rescuing a weak default.
 3. Loops: only for (int i = A; i < B; i++) with whole-number literals, at most 64 iterations per pixel including nesting. No while loops. At most 32 image reads (tex or texture; blur9 counts as 25) inside loops per pixel.
 4. Keep the subject readable unless the request asks otherwise: an effect on an image transforms it, it does not replace it.
-5. If the effect moves, drive the motion from u_time and set "animated": true. Frame 0 must already look finished — no fade-in from blank.
+5. If the effect moves, set "animated": true. Frame 0 must already look finished — no fade-in from blank.
+   All motion must repeat seamlessly over LOOP(): u_time runs from 0 to LOOP() and jumps back to 0, so the last frame must flow into the first. Derive every moving value from loopPhase() or loopCircle(), in whole cycles only — sin/cos of 6.28318 * loopPhase() times a whole number, fbm(p + loopCircle(r)) to drift noise. Never put raw u_time (or u_time times a speed) into noise offsets, positions or angles: it keeps growing and jumps at the loop. A speed dial changes the number of whole cycles per loop (round it, at least 1), not how fast raw time runs.
 6. "generative": true only if the effect ignores the input image entirely.
 7. "name": two or three words in sentence case naming the look ("Fogged glass"), not repeating the request.`

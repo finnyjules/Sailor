@@ -527,6 +527,23 @@ let _frameToken = 0
  *  caller-supplied token against this to detect the HOST-ISOLATION violation above. */
 let _liveKeysToken = 0
 
+// The painting host's loop length in seconds (a Frame's duration), for the generated effects'
+// `u_loop` (see ~~/shared/shadergen/contract). Set by the host around its paint with
+// `setFieldLoop` and put back after; 0 (the default) when the host has none. The field's
+// clock is `t * speed`, so the loop in u_time is `loop * |speed|`. A nonzero loop is folded
+// into the cache key: two hosts with the same fill but different loops never share a frame.
+let _fieldLoop = 0
+/** Set the painting host's loop length; returns the previous one, to put back in a `finally`. */
+export function setFieldLoop(seconds: number): number {
+  const prev = _fieldLoop
+  _fieldLoop = Number.isFinite(seconds) && seconds > 0 ? seconds : 0
+  return prev
+}
+function loopKey(spec: ShaderSpec, w: number, h: number, tq: number): string {
+  const k = fieldKey(spec, w, h, tq)
+  return _fieldLoop > 0 && spec.speed !== 0 ? `${k}|loop:${_fieldLoop}` : k
+}
+
 function openFieldFrame(requests: FieldRequest[]): { frozenCount: number; token: number } {
   if (_frameOpen && import.meta.dev) {
     console.error(
@@ -551,7 +568,7 @@ function openFieldFrame(requests: FieldRequest[]): { frozenCount: number; token:
   for (const r of requests) {
     const { w, h } = fieldSize(r)
     const { spec } = resolve(r.spec)
-    const key = fieldKey(spec, w, h, quantizeTime(r.t, r.fps))
+    const key = loopKey(spec, w, h, quantizeTime(r.t, r.fps))
     ;(r.bake ? bakeKeys : liveCandidates).push(key)
   }
   const { live, frozen } = planFields(liveCandidates)
@@ -691,7 +708,8 @@ function buildPasses(effect: EffectDef, spec: ShaderSpec, t: number): ShaderPass
   // material, a Space Type fill) would inherit the last Compositor render's u_hasShape=1
   // and paint the previous layer's silhouette. getUniformLocation returns null for effects
   // that don't declare it, so this is inert everywhere else — the u_hasInput precedent.
-  const uniforms: Uniforms = { u_time: t, u_seed: spec.seed, u_hasInput: 1, u_hasShape: 0 }
+  const sp = typeof spec.speed === 'number' ? Math.abs(spec.speed) : 1
+  const uniforms: Uniforms = { u_time: t, u_loop: _fieldLoop * sp, u_seed: spec.seed, u_hasInput: 1, u_hasShape: 0 }
   const byUniform: Record<string, ParamValue> = {}
   for (const [k, v] of Object.entries(spec.params)) byUniform[`u_${k}`] = v
   Object.assign(uniforms, toUniforms(effect, byUniform))
@@ -829,9 +847,9 @@ export function resolveField(req: FieldRequest, token?: number): HTMLCanvasEleme
   const { w, h } = fieldSize(req)
   const { effect, spec } = resolve(req.spec)
   const tq = quantizeTime(req.t, req.fps)
-  const liveKey = fieldKey(spec, w, h, tq)
+  const liveKey = loopKey(spec, w, h, tq)
   // Not live this frame -> fall back to the frozen (t=0) variant of the same descriptor.
-  const key = liveKeys.size === 0 || liveKeys.has(liveKey) ? liveKey : fieldKey(spec, w, h, 0)
+  const key = liveKeys.size === 0 || liveKeys.has(liveKey) ? liveKey : loopKey(spec, w, h, 0)
   const hit = cache.get(key)
   if (hit) {
     stats.hits++

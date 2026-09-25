@@ -7,7 +7,13 @@
  *
  * SHADERGEN_PREAMBLE + SHADERGEN_HELPERS must stay byte-identical to the spike's
  * PRE + LIB (tests/unit/shadergen-contract.unit.spec.ts guards this), so the 24
- * spike takes remain valid bodies.
+ * spike takes remain valid bodies. The spike prefix gained `u_loop` and the loop
+ * helpers (LOOP, loopPhase, loopCircle) on 2026-09-25 — additions only, so every
+ * spike body still compiles.
+ *
+ * `u_loop` is the host's loop length in seconds (the Shader studio's clock, a Frame's
+ * duration); 0 when the host has none, and LOOP() then falls back to 4 s. Motion built
+ * from loopPhase()/loopCircle() repeats seamlessly at the host's wrap.
  */
 
 export const SHADERGEN_PREAMBLE = `#version 300 es
@@ -15,6 +21,7 @@ precision highp float;
 uniform sampler2D u_image0;
 uniform vec2 u_resolution;
 uniform float u_time;
+uniform float u_loop;
 uniform float u_seed;
 in vec2 v_texCoord;
 layout(location = 0) out vec4 fragColor0;
@@ -31,9 +38,12 @@ float luma(vec3 c){ return dot(c, vec3(0.299,0.587,0.114)); }
 vec2 ASP(){ return vec2(u_resolution.x/u_resolution.y,1.0); }
 vec3 hsv2rgb(vec3 c){ vec3 p=abs(fract(c.xxx+vec3(0.0,2.0/3.0,1.0/3.0))*6.0-3.0); return c.z*mix(vec3(1.0),clamp(p-1.0,0.0,1.0),c.y); }
 vec3 thinfilm(float d){ return 0.5+0.5*cos(6.28318*(d*vec3(1.0,1.18,1.42)+vec3(0.0,0.1,0.2))); }
+float LOOP(){ return u_loop > 0.0 ? u_loop : 4.0; }
+float loopPhase(){ return fract(u_time / LOOP()); }
+vec2 loopCircle(float radius){ float a = 6.28318530718 * loopPhase(); return radius * vec2(cos(a), sin(a)); }
 `
 
-export const PREAMBLE_UNIFORMS = ['u_image0', 'u_resolution', 'u_time', 'u_seed'] as const
+export const PREAMBLE_UNIFORMS = ['u_image0', 'u_resolution', 'u_time', 'u_loop', 'u_seed'] as const
 
 export const LIMITS = {
   minParams: 3,

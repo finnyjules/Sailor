@@ -33,6 +33,13 @@ describe('composePasses', () => {
     expect(passes[0]!.uniforms.u_hasInput).toBe(1)
   })
 
+  it('hands every effect the host’s loop length as u_loop (0 when the host has none)', () => {
+    const c = defaultConfig()
+    c.effects = [{ layerId: 'L0', id: 'halftone', params: {}, enabled: true, blend: 'normal', opacity: 1 }]
+    expect(composePasses(c, () => fakeEffect, 0.5, undefined, 6)[0]!.uniforms.u_loop).toBe(6)
+    expect(composePasses(c, () => fakeEffect, 0.5)[0]!.uniforms.u_loop).toBe(0)
+  })
+
   it('appends duotone/adjust/blur/chromatic in order, splitting colors to _r/_g/_b', () => {
     const c = defaultConfig()
     c.duotone = { enabled: true, ink: '#000000', paper: '#ffffff' }

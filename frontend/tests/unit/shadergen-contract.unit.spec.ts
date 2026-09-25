@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   assembleSource,
   LIMITS,
+  PREAMBLE_UNIFORMS,
   SHADERGEN_HELPERS,
   SHADERGEN_PREAMBLE,
   SHADERGEN_TAKE_SCHEMA,
@@ -32,6 +33,26 @@ describe('shadergen contract', () => {
     expect(SHADERGEN_SYSTEM).toContain(`${LIMITS.minParams} to ${LIMITS.maxParams} dials`)
     expect(SHADERGEN_SYSTEM).toContain(`at most ${LIMITS.maxLoopIterations} iterations`)
     expect(SHADERGEN_SYSTEM).toContain(`At most ${LIMITS.maxLoopTextureReads} image reads`)
+  })
+
+  it('the preamble hands every effect its loop length, and helpers to loop over it seamlessly', () => {
+    expect(SHADERGEN_PREAMBLE).toContain('uniform float u_loop;')
+    expect(PREAMBLE_UNIFORMS).toContain('u_loop')
+    expect(SHADERGEN_HELPERS).toContain('float LOOP(){ return u_loop > 0.0 ? u_loop : 4.0; }')
+    expect(SHADERGEN_HELPERS).toContain('float loopPhase(){ return fract(u_time / LOOP()); }')
+    expect(SHADERGEN_HELPERS).toMatch(/vec2 loopCircle\(float radius\)\{[^}]*6\.28318[^}]*loopPhase\(\)[^}]*\}/)
+    // The spike's own helpers are all still there, unchanged.
+    for (const name of ['h21', 'vnoise', 'fbm', 'tex', 'blur9', 'luma', 'ASP', 'hsv2rgb', 'thinfilm']) expect(SHADERGEN_HELPERS).toMatch(new RegExp(`\\b${name}\\(`))
+  })
+
+  it('the system prompt asks for motion that repeats seamlessly over LOOP()', () => {
+    expect(SHADERGEN_SYSTEM).toContain('uniform float u_loop;')
+    expect(SHADERGEN_SYSTEM).toContain('float LOOP()')
+    expect(SHADERGEN_SYSTEM).toContain('float loopPhase()')
+    expect(SHADERGEN_SYSTEM).toContain('vec2 loopCircle(float radius)')
+    expect(SHADERGEN_SYSTEM).toMatch(/repeat seamlessly/)
+    expect(SHADERGEN_SYSTEM).toMatch(/whole cycles/)
+    expect(SHADERGEN_SYSTEM).toMatch(/never .*raw u_time/i)
   })
 
   it('the fixture holds 4 spike takes for each of the 6 requests', () => {

@@ -47,6 +47,7 @@ describe('staticCheck', () => {
   it('rejects preamble content in the body', () => {
     expect(reasonOf(staticCheck(take({ body: `#version 300 es\n${GOOD}` })))).toContain('must not include #version')
     expect(reasonOf(staticCheck(take({ body: `uniform float u_time;\n${GOOD}` })))).toContain('redeclares the built-in uniform u_time')
+    expect(reasonOf(staticCheck(take({ body: `uniform float u_loop;\n${GOOD}` })))).toContain('redeclares the built-in uniform u_loop')
     expect(reasonOf(staticCheck(take({ body: GOOD.replace('void main()', 'void mainly()') })))).toContain('no void main()')
   })
 })

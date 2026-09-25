@@ -89,6 +89,14 @@ const REVIEW_MISS = 'a reviewer judged the previous attempt a miss (muddy, off-b
 
 const isTake = (r: EngineTake | EngineFailure): r is EngineTake => 'take' in r
 
+/** Why the render checks threw a take away, in words the model can act on. */
+function avoidFor(flags: Flag[]): string {
+  const looks = flags.filter(f => f !== 'does not loop')
+  const parts = looks.length ? [`the render was ${looks.join(', ')}`] : []
+  if (flags.includes('does not loop')) parts.push('the render did not loop seamlessly: its last frame jumps back to the first. Build all motion from loopPhase() or loopCircle(), in whole cycles, never raw u_time')
+  return parts.join('; ')
+}
+
 export const isAbortError = (e: unknown): boolean => (e as { name?: string } | null)?.name === 'AbortError'
 const aborted = () => new DOMException('Stopped', 'AbortError')
 
@@ -148,7 +156,7 @@ async function runTake(input: EngineInput, index: number, deps: EngineDeps, usag
       log.push(`checks: ${judged.flags.join(', ')}`)
       if (regenerated) break
       regenerated = true
-      prompt = buildGenPrompt({ ...req, avoid: `the render was ${judged.flags.join(', ')}` })
+      prompt = buildGenPrompt({ ...req, avoid: avoidFor(judged.flags) })
       continue
     }
     if (input.revise) {

@@ -129,7 +129,7 @@ async function renderFrame(t01: number) {
     // `(id) => EffectDef | null`, not a resolved def. Pass `effectDef` (the fn)
     // directly and never reference `cfg.effect.id`. This line is unchanged from
     // the current committed file — do not "fix" it back to the old shape.
-    const passes = composePasses(cfg, effectDef, t)
+    const passes = composePasses(cfg, effectDef, t, undefined, dur)
     el.getContext('2d')!.drawImage(shaderFx.render(passes, base, w, h), 0, 0)
     glError.value = null
   } catch (e: any) { glError.value = String(e?.message ?? e) }
@@ -218,7 +218,7 @@ async function renderForFrame(t01: number, w: number, h: number): Promise<TexIma
   const dur = clockDuration()
   const t = t01 * dur
   const cfg = animated.value ? applyMotion(motionConfigFor(config.value, dur), t) : config.value
-  const passes = composePasses(cfg, effectDef, t)
+  const passes = composePasses(cfg, effectDef, t, undefined, dur)
   const live = shaderFx.render(passes, base, w, h)
   const snap = (frameSnaps[frameSnapIdx] ??= document.createElement('canvas'))
   frameSnapIdx = (frameSnapIdx + 1) % FRAME_SNAP_POOL

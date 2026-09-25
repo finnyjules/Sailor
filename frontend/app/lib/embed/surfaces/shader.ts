@@ -104,7 +104,7 @@ const shaderEmbedSurface: EmbedSurface = {
       // composePasses is the studio's own composer — layer blend, opacity,
       // captureSource sequencing and the post stack all live in it. Never
       // reimplement any of that here.
-      const passes = composePasses(cfg, resolveDef, t)
+      const passes = composePasses(cfg, resolveDef, t, undefined, embed.duration)
       const out = renderer.render(passes, base, w, h)
       if (out !== mounted) {
         if (mounted) mounted.remove()

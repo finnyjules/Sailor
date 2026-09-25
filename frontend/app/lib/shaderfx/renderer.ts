@@ -61,7 +61,9 @@ export interface ShaderPass {
  * Add an entry here for any future built-in switch that is set by one host and must
  * be off for the rest. Values are floats (`uniform1f`).
  */
-export const BUILTIN_PASS_DEFAULTS: Record<string, number> = { u_matte: 0 }
+// `u_loop` (a generated effect's loop length) is set by the hosts that loop their clock; every
+// other draw resets it to 0 so one host's loop never leaks into another's (LOOP() then uses 4 s).
+export const BUILTIN_PASS_DEFAULTS: Record<string, number> = { u_matte: 0, u_loop: 0 }
 
 /** Expand one effect into N ping-pong passes (u_pass / u_passCount set per pass). */
 export function expandPasses(

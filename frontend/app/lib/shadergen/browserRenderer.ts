@@ -1,7 +1,8 @@
 /**
  * The engine's TakeRenderer on Sailor's own WebGL2 renderer. Compiles by
  * rendering a tiny frame (ShaderFxRenderer throws "shaderfx compile (id): …"
- * with the info log), judges from two 24×24 samples (t = 2.0 and 3.37) plus a
+ * with the info log), judges from two 24×24 samples (t = 2.0 and 3.37), four more
+ * for the seamless-loop check (t = 0, LOOP, and one step either side of the wrap), plus a
  * cost measurement against a plain copy, exactly like the spike page — except
  * that cost is only measured for a take that already passes the other checks,
  * and a single timed frame that is already far too slow stands in for the
@@ -28,8 +29,13 @@ const COPY_FS = `#version 300 es
 precision highp float; uniform sampler2D u_image0; in vec2 v_texCoord; layout(location = 0) out vec4 fragColor0;
 void main(){ fragColor0 = texture(u_image0, v_texCoord); }`
 
+/** The loop length takes are judged and previewed with (u_loop): LOOP()'s own default. */
+export const JUDGE_LOOP = 4
+/** One step either side of the wrap, for the seamless-loop check. */
+const LOOP_STEP = JUDGE_LOOP / 60
+
 function passesFor(def: EffectDef, t: number): ShaderPass[] {
-  return expandPasses(def.id, def.source, { ...resolveUniforms(def, {}), u_time: t, u_seed: 0 }, undefined, 1)
+  return expandPasses(def.id, def.source, { ...resolveUniforms(def, {}), u_time: t, u_loop: JUDGE_LOOP, u_seed: 0 }, undefined, 1)
 }
 
 export function createBrowserTakeRenderer(source: HTMLImageElement | HTMLCanvasElement): TakeRenderer {
@@ -110,8 +116,11 @@ export function createBrowserTakeRenderer(source: HTMLImageElement | HTMLCanvasE
       const thumbnail = renderer.outputCanvas!.toDataURL('image/png')
       renderer.render(passesFor(def, 3.37), source, THUMB, THUMB)
       const b = sample(renderer.outputCanvas!)
+      // Seamless loop: the same seed at t = 0, t = LOOP, and one step either side of the wrap.
+      const at = (t: number) => { renderer.render(passesFor(def, t), source, THUMB, THUMB); return sample(renderer.outputCanvas!) }
+      const loop = { start: at(0), end: at(JUDGE_LOOP), beforeEnd: at(JUDGE_LOOP - LOOP_STEP), step: at(LOOP_STEP) }
       assertContext()
-      const frames = { a, b, source: sourcePx, generative: take.generative, animated: take.animated }
+      const frames = { a, b, source: sourcePx, generative: take.generative, animated: take.animated, loop }
       const looks = judgeFrames({ ...frames, extraMs: 0 })
       // Already rejected on looks: don't spend GPU time measuring its cost.
       if (looks.flags.some(f => HARD_FLAGS.includes(f))) return { ...looks, thumbnail }

@@ -49,7 +49,7 @@ import { fillIsShader, type ShaderSpec } from '~/lib/spacetype/fillTile'
 import { effectReadsInput, getEffectSync } from '~/lib/shaderfx/catalogStore'
 import { dealShaderFill } from '~/lib/compositor/mosaic'
 import { paintScatter, SCATTER_STYLES, DEFAULT_SCATTER_STYLE, DEFAULT_SCATTER_SEED, type ScatterStyle } from '~/lib/compositor/scatter'
-import { withFieldFrame, renderFieldWithBase, effectFollowsShape, type FieldRequest, type LensShape } from '~/lib/shaderfill/field'
+import { withFieldFrame, renderFieldWithBase, setFieldLoop, effectFollowsShape, type FieldRequest, type LensShape } from '~/lib/shaderfill/field'
 import {
   hasPaint, resolvePaint, OBJECT_SHADER_FIELD_PX, type ShaderFieldFrameCtx,
 } from '~/lib/paint/resolve'
@@ -6330,6 +6330,9 @@ export function paintLayerStack(
   // today — no geometry kind carries a `refLayerId` — so this changes no pixels.
   const siblingResolver = buildSiblingResolver(localLayers, W, H)
   _siblingResolveFor = (self: LocalLayer) => (key: string) => siblingResolver(key, self)
+  // The Frame's loop length reaches generated effects as u_loop, so their motion repeats
+  // seamlessly where the Frame's clock wraps. Put back in the finally.
+  const prevFieldLoop = setFieldLoop(motion?.duration ?? 0)
   try {
     // Frame Morph: swap morphing layers for their transient path clone — inside the try, so a
     // throw still clears `_siblingResolveFor`. The resolver keeps the PRE-swap list.
@@ -6543,6 +6546,7 @@ export function paintLayerStack(
   } finally {
     _fieldCtx.token = 0
     _siblingResolveFor = null // F3: unbind so a later out-of-paint render sees no stale resolver
+    setFieldLoop(prevFieldLoop)
   }
 }
 

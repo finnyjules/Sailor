@@ -25,10 +25,12 @@ function scripted(byTake: Record<number, string[]>) {
   }
 }
 
-/** Fake renderer: BROKEN doesn't compile, BLACK fails the checks. */
+/** Fake renderer: BROKEN doesn't compile, BLACK and JUMPS fail the checks. */
 const renderer: TakeRenderer = {
   compile: (t: GenTake) => (t.body.includes('BROKEN') ? "ERROR: 0:9: 'x' : undeclared identifier" : null),
-  judge: (t: GenTake) => (t.body.includes('BLACK') ? { pass: false, flags: ['black'], thumbnail: '' } : { pass: true, flags: [], thumbnail: `thumb:${t.name}` }),
+  judge: (t: GenTake) => (t.body.includes('BLACK') ? { pass: false, flags: ['black'], thumbnail: '' }
+    : t.body.includes('JUMPS') ? { pass: false, flags: ['does not loop'], thumbnail: '' }
+      : { pass: true, flags: [], thumbnail: `thumb:${t.name}` }),
   sheet: (takes: GenTake[]) => `sheet:${takes.length}`,
 }
 
@@ -160,6 +162,21 @@ describe('generateTakes', () => {
     const r = await generateTakes({ request: 'rain' }, { callModel: m.callModel, renderer })
     expect(m.prompts[3]![1]).toContain('A previous attempt failed: the render was black')
     expect(r.takes).toHaveLength(4)
+  })
+
+  it('a take that jumps at the loop is regenerated once, told how to loop', async () => {
+    const m = scripted({ 3: [reply('JUMPS'), reply('loops')] })
+    const r = await generateTakes({ request: 'rain' }, { callModel: m.callModel, renderer })
+    expect(m.prompts[3]![1]).toContain('A previous attempt failed: the render did not loop seamlessly')
+    expect(m.prompts[3]![1]).toContain('loopPhase()')
+    expect(r.takes).toHaveLength(4)
+  })
+
+  it('a take that still jumps after its regeneration is dropped', async () => {
+    const m = scripted({ 3: [reply('JUMPS')] })
+    const r = await generateTakes({ request: 'rain' }, { callModel: m.callModel, renderer })
+    expect(r.takes).toHaveLength(3)
+    expect(r.failures).toEqual([expect.objectContaining({ index: 3 })])
   })
 
   it('drops takes the visual review rejects and replaces them', async () => {

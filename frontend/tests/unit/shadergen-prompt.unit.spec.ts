@@ -35,16 +35,17 @@ describe('buildGenPrompt', () => {
   })
 
   it('sends a base or reference source without the lines Sailor supplies, and warns about the helpers', () => {
-    const src = `#version 300 es\nprecision highp float;\nuniform sampler2D  u_image0;\nuniform vec2 u_resolution;\nuniform float u_time;\nuniform float u_seed;\nin vec2 v_texCoord;\nlayout( location=0 ) out vec4 fragColor0;\nuniform float u_amount;\nvoid main(){ /*ripple*/ }`
+    const src = `#version 300 es\nprecision highp float;\nuniform sampler2D  u_image0;\nuniform vec2 u_resolution;\nuniform float u_time;\nuniform float u_loop;\nuniform float u_seed;\nin vec2 v_texCoord;\nlayout( location=0 ) out vec4 fragColor0;\nuniform float u_amount;\nvoid main(){ /*ripple*/ }`
     const p = buildGenPrompt({ request: 'rain', takeIndex: 0, base: { name: 'Water Ripple', source: src, params: [] }, references: [{ name: 'Fbm Warp', source: src.replace('ripple', 'warp'), params: [] }] })
     expect(p).not.toContain('#version 300 es')
     expect(p).not.toContain('uniform float u_time;')
+    expect(p).not.toContain('uniform float u_loop;')
     expect(p).not.toContain('precision highp float')
     expect(p).not.toContain('fragColor0;')
     expect(p).toContain('uniform float u_amount;')
     expect(p).toContain('/*ripple*/')
     expect(p).toContain('/*warp*/')
-    const warning = 'Sailor already provides the preamble and the helpers h21, vnoise, fbm, tex, blur9, luma, ASP, hsv2rgb and thinfilm; if this source defines functions with those names, rename or drop them — redefining them will not compile.'
+    const warning = 'Sailor already provides the preamble and the helpers h21, vnoise, fbm, tex, blur9, luma, ASP, hsv2rgb, thinfilm, LOOP, loopPhase and loopCircle; if this source defines functions with those names, rename or drop them — redefining them will not compile.'
     expect(p.split(warning).length - 1).toBe(2)
   })
 
@@ -98,6 +99,16 @@ describe('buildGenPrompt: a reference picture', () => {
   })
   it('no reference: nothing about pictures is added', () => {
     expect(buildGenPrompt({ request: 'x', takeIndex: 0 })).not.toMatch(/reference picture/i)
+  })
+})
+
+describe('buildGenPrompt: the quality examples predate the loop rule', () => {
+  it('says their raw-u_time motion is not to be copied: motion loops over LOOP()', async () => {
+    const { productExamples } = await import('~/lib/shadergen/productRequest')
+    const p = buildGenPrompt({ request: 'x', takeIndex: 0, examples: await productExamples() })
+    expect(p).toMatch(/drive their motion from raw u_time/)
+    expect(p).toContain('loopPhase()')
+    expect(buildGenPrompt({ request: 'x', takeIndex: 0 })).not.toContain('raw u_time')
   })
 })
 

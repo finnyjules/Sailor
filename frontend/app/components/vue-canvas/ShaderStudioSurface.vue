@@ -268,7 +268,7 @@ async function renderFrame(t01: number) {
     // cfg.motion.duration, so passing upstream-derived seconds against our own
     // (different) duration would run every track at the wrong rate.
     const cfg = animated.value ? applyMotion(motionConfigFor(config.value, dur), t) : config.value
-    const passes = composePasses(cfg, defForId, t, (def, layer) => texBundle(def, layer))
+    const passes = composePasses(cfg, defForId, t, (def, layer) => texBundle(def, layer), dur)
     el.getContext('2d')!.drawImage(shaderFx.render(passes, base, w, h), 0, 0)
     glError.value = null
   } catch (e: any) { glError.value = String(e?.message ?? e) }
@@ -570,7 +570,7 @@ async function renderShaderFrame(t01: number, into?: CanvasRenderingContext2D): 
   const t = t01 * dur
   const cfg = animated.value ? applyMotion(motionConfigFor(config.value, dur), t) : config.value
   const base = src ? await src.getFrame(t01, w, h) : noSourceBase(noSource.value, GENERATIVE_BASE)
-  shaderFx.render(composePasses(cfg, defForId, t, (def, layer) => texBundle(def, layer)), base, w, h)
+  shaderFx.render(composePasses(cfg, defForId, t, (def, layer) => texBundle(def, layer), dur), base, w, h)
   const c = shaderFx.outputCanvas!
   into?.drawImage(c, 0, 0, w, h)
   return c
