@@ -1049,7 +1049,7 @@ provide('runLeafNodeIds', runLeafNodeIds)
 const {
   onConnect, addEdges, fitView, fitBounds, zoomIn: vfZoomIn, zoomOut: vfZoomOut,
   project, removeNodes, removeEdges, viewport: vfViewport, onNodeDragStart, onNodeDragStop, onNodeDrag,
-  onConnectStart, onConnectEnd, onEdgesChange, findNode,
+  onConnectStart, onConnectEnd, onEdgesChange, findNode, dimensions: vfDimensions,
 } = useVueFlow()
 
 // Ports label themselves while a compatible wire is being dragged. Bound once,
@@ -1221,10 +1221,20 @@ const toolbarCtx = computed<NodeActionCtx | null>(() => {
   const n: any = (nodes.value as any[]).find(x => String(x.id) === s.id)
   return { nodeId: s.id, type: String(n?.type ?? s.type), hasImages: s.hasImages, hasUpstream: (edges.value as any[]).some(e => String(e.target) === s.id) }
 })
+// The layout's bottom stack (the prompt + toolbar, default.vue) floats over the
+// canvas and would swallow the node toolbar's clicks, so the anchor flips above
+// a node rather than land on it. In canvas-root pixels; read at compute time
+// (the anchor recomputes on every selection, pan and zoom).
+function bottomStackRect(): { left: number; right: number; top: number } | null {
+  const root = canvasRootRef.value?.getBoundingClientRect()
+  const stack = document.querySelector('[data-testid="canvas-bottom-bar-stack"]')?.getBoundingClientRect()
+  if (!root || !stack || !stack.width) return null
+  return { left: stack.left - root.left, right: stack.right - root.left, top: stack.top - root.top }
+}
 const toolbarPos = computed(() => {
   if (draggingNode.value || !selectedIds.value.length) return null
   const box = unionBox(selectedIds.value.map(graphBox).filter(Boolean) as Box[])
-  return box ? toolbarAnchor(box, vfViewport.value) : null
+  return box ? toolbarAnchor(box, vfViewport.value, vfDimensions.value.height || Infinity, 10, bottomStackRect()) : null
 })
 // Same expression `selectionMenuItems()` uses to build `sel` for
 // `planFrameFromSelection` (Task 9 multi-select bar's Combine into Frame gate).

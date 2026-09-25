@@ -49,23 +49,28 @@ const editBtnRef = ref<HTMLElement | null>(null)
 const developBtnRef = ref<HTMLElement | null>(null)
 const menuStyle = ref<Record<string, string>>({})
 
-const MENU_W = 220
+const MENU_W = 260
 const EDGE = 8
 
-// Fixed-position panel under the bar (above it when the bar sits under the
-// node), 220px wide, clamped to the viewport with its own scroll.
+// Fixed-position panel that opens AWAY from the node (under a bar that sits
+// below it, over a bar that sits above it), flipping when that side has too
+// little room. 260px wide, clamped to the viewport with its own scroll.
+const MENU_MIN_ROOM = 220
 function placeMenu(which: Which) {
   const btn = (which === 'edit' ? editBtnRef.value : developBtnRef.value) ?? barRef.value
   const bar = barRef.value?.getBoundingClientRect()
   const b = btn?.getBoundingClientRect()
   if (!bar || !b) { menuStyle.value = {}; return }
   const left = Math.max(EDGE, Math.min(b.left, window.innerWidth - MENU_W - EDGE))
-  if (props.placement === 'below') {
-    const bottom = window.innerHeight - bar.top + 6
-    menuStyle.value = { left: `${left}px`, bottom: `${bottom}px`, maxHeight: `${Math.max(120, bar.top - 6 - EDGE)}px` }
-  } else {
+  const roomBelow = window.innerHeight - bar.bottom - 6 - EDGE
+  const roomAbove = bar.top - 6 - EDGE
+  const openDown = props.placement === 'below' ? roomBelow >= MENU_MIN_ROOM || roomBelow >= roomAbove : roomAbove < MENU_MIN_ROOM && roomBelow > roomAbove
+  if (openDown) {
     const top = bar.bottom + 6
-    menuStyle.value = { left: `${left}px`, top: `${top}px`, maxHeight: `${Math.max(120, window.innerHeight - top - EDGE)}px` }
+    menuStyle.value = { left: `${left}px`, top: `${top}px`, maxHeight: `${Math.max(120, roomBelow)}px` }
+  } else {
+    const bottom = window.innerHeight - bar.top + 6
+    menuStyle.value = { left: `${left}px`, bottom: `${bottom}px`, maxHeight: `${Math.max(120, roomAbove)}px` }
   }
 }
 
@@ -138,7 +143,7 @@ defineExpose({ openMenu })
   <div
     v-if="multi"
     ref="barRef"
-    class="node-action-toolbar nopan nodrag pointer-events-auto absolute z-40 flex items-center gap-0.5 rounded-[10px] border border-[#2a2a2a] bg-[#1a1a1a] p-0.5 shadow-lg"
+    class="node-action-toolbar nopan nodrag pointer-events-auto absolute z-40 flex items-center gap-1 rounded-[12px] border border-[#2a2a2a] bg-[#1a1a1a] p-1 shadow-lg"
     :style="{
       left: left + 'px',
       top: top + 'px',
@@ -156,7 +161,7 @@ defineExpose({ openMenu })
       :aria-label="`Run ${multiIds.length} nodes`"
       @click.stop="emit('runSelection')"
     >
-      <Play class="size-3" aria-hidden="true" />
+      <Play class="size-4" aria-hidden="true" />
       Run {{ multiIds.length }}
     </button>
     <button
@@ -179,7 +184,7 @@ defineExpose({ openMenu })
   <div
     v-else-if="single && (showEdit || showDevelop)"
     ref="barRef"
-    class="node-action-toolbar nopan nodrag pointer-events-auto absolute z-40 flex items-center gap-0.5 rounded-[10px] border border-[#2a2a2a] bg-[#1a1a1a] p-0.5 shadow-lg"
+    class="node-action-toolbar nopan nodrag pointer-events-auto absolute z-40 flex items-center gap-1 rounded-[12px] border border-[#2a2a2a] bg-[#1a1a1a] p-1 shadow-lg"
     :style="{
       left: left + 'px',
       top: top + 'px',
@@ -203,7 +208,7 @@ defineExpose({ openMenu })
     >
       Edit
       <span v-if="fixes.length" class="fix-dot" aria-hidden="true" />
-      <ChevronDown class="size-3 opacity-60" aria-hidden="true" />
+      <ChevronDown class="size-4 opacity-60" aria-hidden="true" />
     </button>
     <button
       v-if="showDevelop"
@@ -216,14 +221,14 @@ defineExpose({ openMenu })
       @click.stop="toggle('develop')"
     >
       Develop
-      <ChevronDown class="size-3 opacity-60" aria-hidden="true" />
+      <ChevronDown class="size-4 opacity-60" aria-hidden="true" />
     </button>
 
     <Teleport to="body">
       <div
         v-if="open"
         ref="menuRef"
-        class="nopan nodrag fixed z-[9999] w-[220px] overflow-y-auto rounded-md border border-white/10 bg-[#1a1a1a] py-1 shadow-lg"
+        class="nopan nodrag fixed z-[9999] w-[260px] overflow-y-auto rounded-[10px] border border-white/10 bg-[#1a1a1a] py-1 shadow-lg"
         :style="menuStyle"
         role="menu"
         :aria-label="open === 'edit' ? 'Edit' : 'Develop'"
@@ -231,7 +236,7 @@ defineExpose({ openMenu })
       >
         <!-- Reviewer-found fixes lead Edit ▾ (per node, spec §2.3). -->
         <div v-if="open === 'edit' && fixes.length" class="fixes-section mb-1 pb-1">
-          <div class="px-2.5 pt-1 pb-0.5 text-[9px] uppercase tracking-wider text-white/40 select-none">Suggested fixes</div>
+          <div class="px-2.5 pt-1 pb-0.5 text-[10px] uppercase tracking-wider text-white/40 select-none">Suggested fixes</div>
           <button
             v-for="chip in fixes"
             :key="chip.id"
@@ -270,11 +275,11 @@ defineExpose({ openMenu })
 .toolbar-btn {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  height: 1.75rem;
-  padding: 0 0.625rem;
-  border-radius: 7px;
-  font-size: 11px;
+  gap: 0.375rem;
+  height: 2.25rem;
+  padding: 0 0.875rem;
+  border-radius: 9px;
+  font-size: 13px;
   font-weight: 500;
   color: rgb(255 255 255 / 0.8);
   cursor: pointer;
@@ -287,8 +292,8 @@ defineExpose({ openMenu })
 }
 /* Neutral count cue: fixes are waiting in Edit ▾. */
 .fix-dot {
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
   border-radius: 9999px;
   background: rgb(255 255 255 / 0.7);
 }
@@ -298,9 +303,9 @@ defineExpose({ openMenu })
   display: flex;
   width: 100%;
   align-items: center;
-  gap: 0.375rem;
-  padding: 0.375rem 0.625rem;
-  font-size: 11px;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 13px;
   text-align: left;
   color: rgb(255 255 255 / 0.75);
   cursor: pointer;
@@ -315,14 +320,14 @@ defineExpose({ openMenu })
   cursor: default;
 }
 .ai-mark {
-  font-size: 9px;
+  font-size: 11px;
   color: rgb(255 255 255 / 0.45);
 }
 .menu-hint {
   margin-left: auto;
   padding-left: 0.75rem;
   flex-shrink: 0;
-  font-size: 9px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: rgb(255 255 255 / 0.35);
 }

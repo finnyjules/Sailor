@@ -3,16 +3,30 @@ import { describe, it, expect } from 'vitest'
 import { toolbarAnchor, unionBox } from '~/lib/canvas/toolbarAnchor'
 
 describe('toolbarAnchor', () => {
-  it('centres above the node in screen space', () => {
-    expect(toolbarAnchor({ x: 100, y: 200, width: 240, height: 300 }, { x: 10, y: 20, zoom: 0.5 })).toEqual({ left: 10 + (100 + 120) * 0.5, top: 20 + 200 * 0.5 - 10, placement: 'above' })
+  it('centres below the node in screen space', () => {
+    expect(toolbarAnchor({ x: 100, y: 200, width: 240, height: 300 }, { x: 10, y: 20, zoom: 0.5 }, 1000))
+      .toEqual({ left: 10 + (100 + 120) * 0.5, top: 20 + (200 + 300) * 0.5 + 10, placement: 'below' })
   })
-  it('flips below when there is no room above', () => {
-    const r = toolbarAnchor({ x: 0, y: 0, width: 200, height: 100 }, { x: 0, y: 30, zoom: 1 })
+  it('stays below when the pane height is unknown', () => {
+    expect(toolbarAnchor({ x: 0, y: 0, width: 200, height: 100 }, { x: 0, y: 0, zoom: 1 }).placement).toBe('below')
+  })
+  it('flips above when there is no room under the node', () => {
+    const r = toolbarAnchor({ x: 0, y: 500, width: 200, height: 400 }, { x: 0, y: 0, zoom: 1 }, 920)
+    expect(r.placement).toBe('above')
+    expect(r.top).toBe(500 - 10)
+  })
+  it('flips above when the bar would land on the bottom prompt stack', () => {
+    // Node bottom at 560 → bar at 570..634; the stack starts at 600 and spans the middle.
+    const r = toolbarAnchor({ x: 400, y: 380, width: 320, height: 180 }, { x: 0, y: 0, zoom: 1 }, 720, 10, { left: 300, right: 1050, top: 600 })
+    expect(r.placement).toBe('above')
+    expect(r.top).toBe(380 - 10)
+  })
+  it('stays below when the stack is off to the side', () => {
+    const r = toolbarAnchor({ x: 1200, y: 380, width: 200, height: 180 }, { x: 0, y: 0, zoom: 1 }, 720, 10, { left: 300, right: 1050, top: 600 })
     expect(r.placement).toBe('below')
-    expect(r.top).toBe(30 + 100 + 10)
   })
   it('scales the anchor’s horizontal position with zoom', () => {
-    const a = toolbarAnchor({ x: 0, y: 400, width: 200, height: 100 }, { x: 0, y: 0, zoom: 2 })
+    const a = toolbarAnchor({ x: 0, y: 400, width: 200, height: 100 }, { x: 0, y: 0, zoom: 2 }, 5000)
     expect(a.left).toBe(200)
   })
 })

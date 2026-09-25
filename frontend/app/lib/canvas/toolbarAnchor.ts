@@ -2,13 +2,27 @@
 // Where the node toolbar sits, in pane pixels. The toolbar itself is never scaled
 // (spec §2.3: same size on screen at any zoom); only its anchor follows the node.
 export interface Box { x: number; y: number; width: number; height: number }
-const MIN_TOP = 56 // room for the toolbar above; below this, flip under the node
+// Room the bar needs under the node (its height + a margin). Without it, flip above.
+const ROOM_BELOW = 64
+// Half the widest bar (Edit ▾ + Develop ▾, or Run N · Group · Combine into Frame).
+const HALF_BAR = 170
 
-export function toolbarAnchor(box: Box, vp: { x: number; y: number; zoom: number }, gap = 10): { left: number; top: number; placement: 'above' | 'below' } {
+/** The bar sits centred UNDER the node (Julien 09-24: "at the bottom of the
+ *  image node"), flipping above when the pane has no room left below, or when
+ *  it would land on `avoid` — the bottom prompt stack, which sits over the
+ *  canvas and would swallow the bar's clicks. All in pane pixels. */
+export function toolbarAnchor(
+  box: Box,
+  vp: { x: number; y: number; zoom: number },
+  paneHeight = Infinity,
+  gap = 10,
+  avoid?: { left: number; right: number; top: number } | null,
+): { left: number; top: number; placement: 'above' | 'below' } {
   const left = vp.x + (box.x + box.width / 2) * vp.zoom
-  const above = vp.y + box.y * vp.zoom - gap
-  if (above >= MIN_TOP) return { left, top: above, placement: 'above' }
-  return { left, top: vp.y + (box.y + box.height) * vp.zoom + gap, placement: 'below' }
+  const below = vp.y + (box.y + box.height) * vp.zoom + gap
+  const overlapsAvoid = !!avoid && left + HALF_BAR > avoid.left && left - HALF_BAR < avoid.right && below + ROOM_BELOW > avoid.top
+  if (below + ROOM_BELOW <= paneHeight && !overlapsAvoid) return { left, top: below, placement: 'below' }
+  return { left, top: vp.y + box.y * vp.zoom - gap, placement: 'above' }
 }
 
 export function unionBox(boxes: Box[]): Box | null {
