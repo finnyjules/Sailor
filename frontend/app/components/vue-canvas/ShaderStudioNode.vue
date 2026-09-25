@@ -257,7 +257,11 @@ onMounted(async () => {
   catalogLoaded()
   renderStill()   // initial static preview; the gated loop animates only while hovered/visible
 })
-onBeforeUnmount(() => { unregisterStudioBaker(props.id); unregisterStudioFrameSource(props.id) })
+// WebGL context loss (AI in Sailor spec §7.5): the shared renderer drops every GL handle and
+// refuses to draw until restored; then the card redraws its still (a looping card's next tick
+// draws on its own), rather than stay frozen on what it showed before the loss.
+const offContextChange = shaderFx.onContextChange((s) => { if (s === 'restored') renderStill() })
+onBeforeUnmount(() => { unregisterStudioBaker(props.id); unregisterStudioFrameSource(props.id); offContextChange() })
 
 // A def this node's layers use arrived or changed after the first paint — the library's My
 // effects land after the built-ins, a project's copies on load, a new version on Keep: repaint.
@@ -314,7 +318,7 @@ const varsInputIndex = computed(() =>
   >
     <div class="flex items-center gap-2 border-b border-white/10 px-3 py-2">
       <Sparkles class="h-3.5 w-3.5 text-white/70" />
-      <span class="text-xs font-medium text-white/80">Shader Studio</span>
+      <span class="text-xs font-medium text-white/80">Shader studio</span>
       <span class="ml-auto truncate text-[10px] tracking-wide text-white/40">{{ headerEffectName }}</span>
     </div>
 

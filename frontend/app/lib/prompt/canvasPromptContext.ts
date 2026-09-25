@@ -15,6 +15,14 @@ export interface PromptNode {
   nodeType?: string
   /** The catalog display name the card header falls back to, if known. */
   defaultTitle?: string
+  /** A shader effect node's chosen effect, by its own name (the card header shows it). */
+  effectName?: string
+}
+
+// Nodes whose catalog name is Title Case: the chip says it in sentence case (UI-copy rule).
+const SENTENCE_NAMES: Record<string, string> = {
+  ShaderEffect: 'Shader effect', 'shader-effect': 'Shader effect',
+  ShaderStudio: 'Shader studio', 'shader-studio': 'Shader studio',
 }
 
 // Result cards have no catalog name worth showing — name them by what they hold.
@@ -30,8 +38,14 @@ export function promptNodeLabel(n: PromptNode): string {
   const idents = new Set([n.type, cls].filter(Boolean))
   const title = n.title.trim()
   const def = n.defaultTitle?.trim() || ''
-  if (title && !idents.has(title) && title !== def) return title // the user's own title
+  const sentence = SENTENCE_NAMES[cls] ?? SENTENCE_NAMES[n.type]
+  // A catalog or capability name (in either case) is the class's, not a title the user gave it.
+  const classNames = new Set([def, capabilityByType(cls)?.title, sentence].filter(Boolean).map(x => x!.toLowerCase()))
+  if (title && !idents.has(title) && !classNames.has(title.toLowerCase())) return title // the user's own title
+  const effect = n.effectName?.trim()
+  if (effect) return effect // a shader effect node is named by its effect, as its header is
   if (NODE_TITLE_OVERRIDES[cls]) return NODE_TITLE_OVERRIDES[cls]!
+  if (sentence) return sentence
   if (ARTIFACT_KIND[n.type]) return ARTIFACT_KIND[n.type]!
   if (def && !idents.has(def)) return def
   const cap = capabilityByType(cls)?.title

@@ -140,6 +140,8 @@ import CanvasContextMenu, { type MenuItem } from '~/components/vue-canvas/Canvas
 import NodeActionToolbar from './NodeActionToolbar.vue'
 import { toolbarAnchor, unionBox, type Box } from '~/lib/canvas/toolbarAnchor'
 import type { NodeActionCtx } from '~/lib/canvas/nodeActions'
+import { useShaderCatalog } from '~/lib/shaderfx/catalog'
+import { nodeEffectDef } from '~/lib/shaderfx/nodeEffect'
 import { Play, EyeOff, Ban, Copy, Trash2, Group, SquareDashedMousePointer, Palette, Edit3, Frame, Maximize2, PlusSquare, Boxes, ChevronsUpDown, ChevronsDownUp, Lock, Unlock, Flag, StickyNote, ListChecks, Image as ImageIcon, ArrowRight, Check } from 'lucide-vue-next'
 import { useBlockLibrary } from '~/composables/useBlockLibrary'
 import { fetchPausedGates } from '~/lib/runner/client'
@@ -1359,6 +1361,7 @@ function getSelectedEdgeIds(): string[] {
 // backend class is n.data.nodeType, not n.data.type (createNodeData never sets
 // data.type). Artifact/config nodes (Image, GradientStudio, …) keep their Vue
 // Flow type, e.g. 'artifact-image', since that IS their meaningful "kind" here.
+const shaderCatalog = useShaderCatalog()
 const agentSelection = computed<PromptNode[]>(() => (nodes.value as any[])
   .filter(n => n.selected)
   .map(n => ({
@@ -1369,6 +1372,8 @@ const agentSelection = computed<PromptNode[]>(() => (nodes.value as any[])
     // For the chip's name (never an identifier): the class and its catalog name.
     nodeType: n.data?.nodeType ? String(n.data.nodeType) : undefined,
     defaultTitle: (objectInfo.value as Record<string, any> | undefined)?.[n.data?.nodeType]?.display_name,
+    // A shader effect node is named by its chosen effect (the live catalog's name), as its header is.
+    effectName: n.type === 'shader-effect' ? nodeEffectDef(n.data, shaderCatalog.value?.effects)?.name : undefined,
   })))
 function agentClearSelection() { for (const n of nodes.value as any[]) n.selected = false }
 
@@ -1391,7 +1396,7 @@ const toolbarCtx = computed<NodeActionCtx | null>(() => {
   if (selectedIds.value.length !== 1) return null
   const s = agentSelection.value[0]!
   const n: any = (nodes.value as any[]).find(x => String(x.id) === s.id)
-  return { nodeId: s.id, type: String(n?.type ?? s.type), hasImages: s.hasImages, hasUpstream: (edges.value as any[]).some(e => String(e.target) === s.id) }
+  return { nodeId: s.id, type: String(n?.type ?? s.type), hasImages: s.hasImages, hasUpstream: (edges.value as any[]).some(e => String(e.target) === s.id), hasEffect: !!s.effectName }
 })
 // The layout's bottom stack (the prompt + toolbar, default.vue) floats over the
 // canvas and would swallow the node toolbar's clicks, so the anchor flips above

@@ -25,6 +25,19 @@ describe('selectionLabel', () => {
     expect(promptNodeLabel({ id: '1', title: 'Hero shot', type: 'FluxLoRARemoteNode', hasImages: false, defaultTitle: 'Flux Dev + LoRA (Replicate)' })).toBe('Hero shot')
     expect(promptNodeLabel({ id: '1', title: 'Rainy shop', type: 'artifact-image', hasImages: true, nodeType: 'SaveImage', defaultTitle: 'Save Image' })).toBe('Rainy shop')
   })
+  it('a shader effect node is named by its chosen effect, as its header is; else "Shader effect"', () => {
+    const shader = (o: Partial<PromptNode> = {}): PromptNode => ({ id: '1', title: 'Shader Effect', type: 'shader-effect', hasImages: false, nodeType: 'ShaderEffect', defaultTitle: 'Shader Effect', ...o })
+    expect(promptNodeLabel(shader({ effectName: 'Water ripple' }))).toBe('Water ripple')
+    expect(promptNodeLabel(shader({ effectName: 'Rain on glass' }))).toBe('Rain on glass')
+    expect(promptNodeLabel(shader())).toBe('Shader effect')
+    expect(promptNodeLabel(shader({ title: '' }))).toBe('Shader effect')
+    // A title the user gave the node still wins over the effect's name.
+    expect(promptNodeLabel(shader({ title: 'Hero glow', effectName: 'Water ripple' }))).toBe('Hero glow')
+  })
+  it('the Shader studio node reads in sentence case', () => {
+    expect(promptNodeLabel({ id: '1', title: '', type: 'shader-studio', hasImages: false, nodeType: 'ShaderStudio' })).toBe('Shader studio')
+    expect(promptNodeLabel({ id: '1', title: 'Shader Studio', type: 'shader-studio', hasImages: false, nodeType: 'ShaderStudio' })).toBe('Shader studio')
+  })
   it('counts several nodes', () => expect(selectionLabel([n('A'), n('B'), n('C')])).toBe('3 nodes'))
 })
 

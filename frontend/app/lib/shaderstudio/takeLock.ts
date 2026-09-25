@@ -14,3 +14,10 @@ export function takeLayerLocked(o: { setOpen: boolean; activeLayerId: string | n
 export function takeStackLocked(o: { setOpen: boolean }): boolean {
   return o.setOpen
 }
+
+/** The footer's exports and outputs (Download PNG/video, Export embed, As image/video) wait
+ *  while any set is open: they render what is on screen, and a previewed take is a draft that
+ *  must never be delivered or put on the canvas unkept. */
+export function takeOutputsLocked(o: { setOpen: boolean }): boolean {
+  return o.setOpen
+}

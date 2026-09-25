@@ -14,6 +14,10 @@ describe('shader effect node actions (spec §7.3)', () => {
     expect(SHADER_GEN_ACTION_HINT).toBe('~$0.24–0.42')
     for (const a of develop) expect(actionHint(a, actionPrice(a, null, false))).toBe('3 takes · ~$0.24–0.42')
   })
+  it('a node with no effect picked offers New effect… only (Remix… needs an effect to start from)', () => {
+    expect(actionsFor({ ...ctx, hasEffect: false }).develop.map(a => a.label)).toEqual(['New effect…'])
+    expect(actionsFor({ ...ctx, hasEffect: true }).develop.map(a => a.label)).toEqual(['Remix…', 'New effect…'])
+  })
   it('hosted, the menu shows the same credits text as the prompt note', () => {
     for (const a of actionsFor(ctx).develop) expect(actionPrice(a, null, true)).toBe(shaderGenEstimateText(true))
     expect(shaderGenEstimateText(true)).toMatch(/^~\d+–\d+ cr$/)

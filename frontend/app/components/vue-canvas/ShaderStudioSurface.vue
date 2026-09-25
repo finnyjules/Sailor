@@ -64,7 +64,7 @@ import type { EffectTarget } from '~/composables/useEffectTakes'
 import { makeLayerTarget, recordTuneVersion } from '~/lib/shadergen/studioTargets'
 import { useMyEffects } from '~/composables/useMyEffects'
 import { getEffectSync } from '~/lib/shaderfx/catalogStore'
-import { takeLayerLocked, takeStackLocked } from '~/lib/shaderstudio/takeLock'
+import { takeLayerLocked, takeOutputsLocked, takeStackLocked } from '~/lib/shaderstudio/takeLock'
 
 const props = defineProps<{ nodeId: string; nodes: any[]; edges?: any[]; wiredUrl?: string | null }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -535,7 +535,9 @@ function saveConfig(): boolean {
   const n = currentNode(); if (!n) return false; n.data ||= {}; n.data.properties ||= {}; n.data.properties.sailor_shaderStudio = cloneConfig(config.value)
   return true
 }
-function closeEditor() { try { saveConfig() } catch (e) { console.error('[shader-studio] saveConfig failed', e) } emit('close') }
+// An open take set ends first (as the shell's own close does), so the layer is put back and
+// every edit made meanwhile is saved rather than skipped as a preview.
+function closeEditor() { shellRef.value?.prompt.endEffects(); try { saveConfig() } catch (e) { console.error('[shader-studio] saveConfig failed', e) } emit('close') }
 
 // Sticky footer status (StudioActionsFooter): real Saving…/Saved ✓ driven by
 // useStudioAutosave, debounced off `config` — the studio's single source of
@@ -610,6 +612,7 @@ async function renderBlobWithOverrides(overrides: Record<string, string | number
 }
 
 async function generateImage() {
+  if (outputsLocked.value) return
   if (!resolved.value && !isGenerative.value) { bakeMsg.value = 'Add a source first'; return }
   baking.value = true; bakeMsg.value = 'Rendering…'; stopPreview()
   try {
@@ -688,6 +691,7 @@ async function bakeShaderVideo(publish: boolean): Promise<StudioVideoResult | nu
 }
 
 async function generateVideo() {
+  if (outputsLocked.value) return
   if (!resolved.value && !isGenerative.value) { bakeMsg.value = 'Add a source first'; return }
   baking.value = true; stopPreview()
   try {
@@ -708,6 +712,7 @@ async function generateVideo() {
  *  loop bails on baking.value mid-await specifically so it can't corrupt the
  *  shared shaderFx canvas this capture reads from (see renderFrame's comment). */
 async function downloadPng() {
+  if (outputsLocked.value) return
   if (!resolved.value && !isGenerative.value) { bakeMsg.value = 'Add a source first'; return }
   baking.value = true; bakeMsg.value = 'Rendering…'; stopPreview()
   try {
@@ -721,6 +726,7 @@ async function downloadPng() {
 /** Same video as generateVideo(), saved locally instead of dispatched. The
  *  modal stays open, so bakeMsg must end on the result, not "Rendering…". */
 async function downloadVideoFile() {
+  if (outputsLocked.value) return
   if (!resolved.value && !isGenerative.value) { bakeMsg.value = 'Add a source first'; return }
   baking.value = true; stopPreview()
   try {
@@ -733,6 +739,7 @@ async function downloadVideoFile() {
 }
 
 async function exportWebEmbed() {
+  if (outputsLocked.value) return
   if (embedding.value) return
   if (!resolved.value && !isGenerative.value) { embedErr.value = true; embedMsg.value = 'Add a source first'; return }
   embedding.value = true
@@ -887,6 +894,8 @@ const lockedLayer = (layerId: string | null | undefined) => takeLayerLocked({ se
 /** The active layer's dials, centre handle, on/off and effect picker are read-only while a set previews on it. */
 const layerReadOnly = computed(() => lockedLayer(activeEffectCfg.value?.layerId))
 const stackLocked = computed(() => takeStackLocked({ setOpen: effectSetOpen.value }))
+/** Exports and outputs wait while a set is open: a previewed take is a draft, never delivered. */
+const outputsLocked = computed(() => takeOutputsLocked({ setOpen: effectSetOpen.value }))
 // A set opening mid-gesture: drop the drag and close the picker, so nothing writes under it.
 watch(layerReadOnly, (ro) => { if (ro) { maskDrag = null; pickerOpen.value = false } })
 const layersFull = computed(() => config.value.effects.length >= LAYER_MAX)
@@ -897,8 +906,9 @@ function shaderStudioEffectTarget(o: { add: boolean; base: EffectDef | null; fre
     active: () => activeEffect.value,
     setActive: (i) => { activeEffect.value = i },
     add: o.add,
-    // The strip names what the takes land on: the layer's own effect, as the stack shows it.
-    label: o.add ? 'New layer' : (o.base?.name ?? effectLabel(layer)),
+    // The strip names what the takes land on: the layer's own effect, as the stack shows it
+    // (a gallery Remix of another effect still lands on this layer, so it names this layer).
+    label: o.add ? 'New layer' : effectLabel(layer),
     base: o.fresh ? null : (o.base ?? effectDef.value),
     newLayerId,
     previewing: (on) => { effectPreviewing.value = on },
@@ -1045,13 +1055,13 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
         },
         utilities: exportingVideo ? [{ label: 'Cancel', onClick: cancelVideoExport }] : [],
         downloads: [
-          { label: 'Download PNG', onClick: downloadPng, disabled: !resolved && !isGenerative },
-          { label: 'Download video', onClick: downloadVideoFile, busy: baking, disabled: !resolved && !isGenerative },
-          { label: 'Export embed', onClick: exportWebEmbed, busy: embedding },
+          { label: 'Download PNG', onClick: downloadPng, disabled: outputsLocked || (!resolved && !isGenerative) },
+          { label: 'Download video', onClick: downloadVideoFile, busy: baking, disabled: outputsLocked || (!resolved && !isGenerative) },
+          { label: 'Export embed', onClick: exportWebEmbed, busy: embedding, disabled: outputsLocked },
         ],
         canvas: [
-          { label: 'As image', onClick: generateImage, busy: baking, disabled: !resolved && !isGenerative },
-          { label: 'As video', onClick: generateVideo, busy: baking, disabled: !resolved && !isGenerative },
+          { label: 'As image', onClick: generateImage, busy: baking, disabled: outputsLocked || (!resolved && !isGenerative) },
+          { label: 'As video', onClick: generateVideo, busy: baking, disabled: outputsLocked || (!resolved && !isGenerative) },
         ],
       }" />
     </template>

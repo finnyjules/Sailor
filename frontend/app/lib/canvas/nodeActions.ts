@@ -15,7 +15,8 @@ import { shaderGenEstimateText } from '~/lib/shadergen/estimate'
 
 export type ActionGroup = 'edit' | 'develop'
 export type ActionLands = 'takes' | 'step' | null
-export interface NodeActionCtx { nodeId: string; type: string; hasImages: boolean; hasUpstream: boolean }
+/** `hasEffect`: a shader effect node has an effect picked (Remix… needs one to start from). */
+export interface NodeActionCtx { nodeId: string; type: string; hasImages: boolean; hasUpstream: boolean; hasEffect?: boolean }
 export interface NodeAction {
   id: string; label: string; group: ActionGroup; ai: boolean; lands: ActionLands
   /** Fixed price estimate for a paid action (wins over the badge). */
@@ -113,8 +114,11 @@ function listFor(type: string): NodeAction[] {
   return [FIX]
 }
 
-/** Actions for one node, split by group. Items whose `enabled` is false stay listed (shown disabled) except Fix on a node with no images, which is hidden. */
+/** Actions for one node, split by group. Items whose `enabled` is false stay listed (shown disabled) except Fix on a node with no images and Remix… on a shader node with no effect, which are hidden. */
 export function actionsFor(c: NodeActionCtx): { edit: NodeAction[]; develop: NodeAction[] } {
-  const list = listFor(c.type).filter(a => a !== FIX || c.hasImages || c.type === 'artifact-image')
+  const list = listFor(c.type)
+    .filter(a => a !== FIX || c.hasImages || c.type === 'artifact-image')
+    // Remix… needs an effect to start from: a node with none offers New effect… only.
+    .filter(a => a.id !== 'remix-effect' || c.hasEffect !== false)
   return { edit: list.filter(a => a.group === 'edit'), develop: list.filter(a => a.group === 'develop') }
 }
