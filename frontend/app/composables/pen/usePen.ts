@@ -16,7 +16,7 @@ import { solve, type DragTarget } from '~/lib/sketch/solve'
 import { dist, type Vec2 } from '~/lib/sketch/geom'
 import { constraintMarks, type ConstraintMark, type ArcDimensionMark } from '~/lib/sketch/annotate'
 import { cloneDoc } from '~/lib/sketch/clone'
-import type { ViewMatrix } from '~/lib/sketch/view'
+import { applyView, type ViewMatrix } from '~/lib/sketch/view'
 import { pxToUnits, SNAP_PX, BOW_PX, MIN_RADIUS_PX } from '~/lib/sketch/tolerance'
 import {
   availableConstraints as availableConstraintsFor,
@@ -84,6 +84,20 @@ export type PendingPath = { anchors: EntityId[]; segments: SegmentSpec[] } | nul
 // the path tool's live down→(bow)→up gesture — plain (non-reactive) state, as
 // it always was on the page; hosts read it through getPathDrag().
 export type PathDrag = { anchor: EntityId; prevAnchor: EntityId; startX: number; startY: number; bowed: boolean } | null
+
+// Arrow-key nudge, in screen pixels: 0.25 / 2.5 drawing units at the dev
+// page's default 34 px/unit, so the default view moves exactly as before.
+export const NUDGE_PX = 8.5
+export const NUDGE_PX_SHIFT = 85
+
+/** A screen-pixel delta as a drawing delta: solves M·d = s with the view's
+ *  linear part (Cramer's rule, no reciprocal, so the y-up 34 px/unit view
+ *  gives exactly 0.25 for 8.5 px). Null for a singular view. */
+export function screenDeltaToDrawing(m: ViewMatrix, sx: number, sy: number): { x: number; y: number } | null {
+  const det = m.a * m.d - m.b * m.c
+  if (!Number.isFinite(det) || Math.abs(det) < 1e-12) return null
+  return { x: (m.d * sx - m.c * sy) / det, y: (m.a * sy - m.b * sx) / det }
+}
 
 export function usePen(opts: {
   doc: Ref<SketchDoc>          // the host owns the ref; the pen mutates doc.value in place and replaces it on undo/redo/reset
@@ -296,10 +310,12 @@ export function usePen(opts: {
     if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight' || ev.key === 'ArrowUp' || ev.key === 'ArrowDown') {
       if (!selection.value.length) return false   // nothing selected: no-op, let the browser handle the key normally
       ev.preventDefault()
-      const step = ev.shiftKey ? 2.5 : 0.25
-      const dx = ev.key === 'ArrowLeft' ? -step : ev.key === 'ArrowRight' ? step : 0
-      const dy = ev.key === 'ArrowUp' ? step : ev.key === 'ArrowDown' ? -step : 0   // screen-up = larger world y (see sy())
-      nudge(dx, dy)
+      // the step is in SCREEN pixels, so ↑ is screen-up under any view
+      const step = ev.shiftKey ? NUDGE_PX_SHIFT : NUDGE_PX
+      const sx = ev.key === 'ArrowLeft' ? -step : ev.key === 'ArrowRight' ? step : 0
+      const sy = ev.key === 'ArrowUp' ? -step : ev.key === 'ArrowDown' ? step : 0   // screen y grows downward
+      const d = screenDeltaToDrawing(opts.view.value, sx, sy)
+      if (d) nudge(d.x, d.y)
       return true
     }
     return false
@@ -927,16 +943,33 @@ export function usePen(opts: {
   // inside. additive=true adds to the current selection (shift-marquee);
   // additive=false replaces it. Exposed directly as __sketchDraw.marqueeSelect
   // so E2E can drive the exact same path a real drag resolves to.
+  // box-select: an entity is hit when any point of its closure is inside.
+  // marqueeSelect takes a DRAWING-axis box (the test hook);
+  // marqueeSelectScreen takes a SCREEN-pixel box — what a real marquee drag
+  // is — and tests each point through the view, so it is right under any
+  // rotation or mirror.
   function marqueeSelect(x0: number, y0: number, x1: number, y1: number, additive = false) {
-    clearSegSel()
     const loX = Math.min(x0, x1), hiX = Math.max(x0, x1)
     const loY = Math.min(y0, y1), hiY = Math.max(y0, y1)
+    selectPointsWhere(p => p.x >= loX && p.x <= hiX && p.y >= loY && p.y <= hiY, additive)
+  }
+  function marqueeSelectScreen(x0: number, y0: number, x1: number, y1: number, additive = false) {
+    const loX = Math.min(x0, x1), hiX = Math.max(x0, x1)
+    const loY = Math.min(y0, y1), hiY = Math.max(y0, y1)
+    const view = opts.view.value
+    selectPointsWhere(p => {
+      const s = applyView(view, p)
+      return s.x >= loX && s.x <= hiX && s.y >= loY && s.y <= hiY
+    }, additive)
+  }
+  function selectPointsWhere(inside: (p: { x: number; y: number }) => boolean, additive: boolean) {
+    clearSegSel()
     const hits: EntityId[] = []
     for (const e of doc.value.entities) {
       const closure = pointClosure(doc.value, [e.id])
       const inRect = closure.some(pid => {
         const p = doc.value.entities.find(x => x.id === pid) as any
-        return p && p.kind === 'point' && p.x >= loX && p.x <= hiX && p.y >= loY && p.y <= hiY
+        return p && p.kind === 'point' && inside(p)
       })
       if (inRect) hits.push(e.id)
     }
@@ -1097,7 +1130,7 @@ export function usePen(opts: {
     // tools + view toggles
     selectTool, setGuideMode, toggleGuideMode, setShowLabels, toggleShowLabels,
     // selection
-    pick, clearSel, pickSegment, clearSegSel, marqueeSelect, isPointId,
+    pick, clearSel, pickSegment, clearSegSel, marqueeSelect, marqueeSelectScreen, isPointId,
     // drawing
     place, pathDown, pathMove, pathUp, finishPath, cancelPath, removeLastAnchor, getPathDrag, jointInfoForSegment,
     // verbs

@@ -41,7 +41,7 @@ const emit = defineEmits<{
 const {
   doc, tool, showLabels, status, selection, selectedSegments, pendingPath, pendingOp,
   cursor: penCursor, dimBuffer, sparkles, sparkleClock,
-  pick, clearSel, pickSegment, clearSegSel, marqueeSelect,
+  pick, clearSel, pickSegment, clearSegSel, marqueeSelectScreen,
   place, pathDown, pathMove, pathUp, getPathDrag, jointInfoForSegment,
   runSolve, applyRepeat, applyMirror, cancelPendingOp,
   onArcDimClick, onConstraintMarkClick, commitHistory,
@@ -273,7 +273,8 @@ let dragLast: { x: number; y: number } | null = null
 // (entity/point pointerdowns stopPropagation first) starts a marquee
 // candidate, resolved on pointerup: no movement past the threshold → a plain
 // click on empty space (clears the selection unless shift); past it → a
-// box-select via marqueeSelect(). Screen-pixel state; never touches `doc`.
+// box-select via marqueeSelectScreen() — the pixel rectangle itself, so it is
+// right under a rotated or mirrored view. Screen-pixel state; never touches `doc`.
 const marqueeRect = ref<{ x: number; y: number; w: number; h: number } | null>(null)
 let marqueeStart: { x: number; y: number } | null = null
 let marqueeMoved = false
@@ -313,9 +314,10 @@ function localXY(ev: PointerEvent) {
   const r = el.getBoundingClientRect()
   return { x: ev.clientX - r.left, y: ev.clientY - r.top }
 }
-function toDrawing(p: { x: number; y: number }) {
+// null for a singular view: the event is ignored rather than mapped anywhere
+function toDrawing(p: { x: number; y: number }): { x: number; y: number } | null {
   const inv = invertView(props.view)
-  return inv ? applyView(inv, p) : { x: 0, y: 0 }
+  return inv ? applyView(inv, p) : null
 }
 function drawingXY(ev: PointerEvent) {
   return toDrawing(localXY(ev))
@@ -367,6 +369,7 @@ function onPointerDownSvg(ev: PointerEvent) {
     // an empty click there just cancels the armed op.
     if (pendingOp.value?.kind === 'repeat') {
       const w = drawingXY(ev)
+      if (!w) return
       const center = addPoint(doc.value, w.x, w.y, { fixed: true })
       applyRepeat(pendingOp.value.units, center, pendingOp.value.count)
       return
@@ -380,8 +383,10 @@ function onPointerDownSvg(ev: PointerEvent) {
     marqueeRect.value = { x, y, w: 0, h: 0 }
     return
   }
-  const { x, y } = drawingXY(ev)
-  if (tool.value === 'path') { pathDown(x, y, ev.shiftKey); return }
+  const w = drawingXY(ev)
+  if (!w) return
+  if (tool.value === 'path') { pathDown(w.x, w.y, ev.shiftKey); return }
+  const { x, y } = w
   place(x, y)
 }
 function onPointerMove(ev: PointerEvent) {
@@ -398,12 +403,14 @@ function onPointerMove(ev: PointerEvent) {
   if (tool.value === 'path') {
     // always track — drives the rubber band even when not mid-drag, and the
     // live bow while a drag is active
-    const { x, y } = drawingXY(ev)
-    pathMove(x, y, ev.shiftKey)
+    const w = drawingXY(ev)
+    if (w) pathMove(w.x, w.y, ev.shiftKey)
     return
   }
   if (!dragId || ev.buttons === 0) return
-  const { x, y } = drawingXY(ev)
+  const w = drawingXY(ev)
+  if (!w) return
+  const { x, y } = w
   moved = true
   if (dragHandleIds.length && dragLast) {
     const dx = x - dragLast.x, dy = y - dragLast.y
@@ -417,8 +424,8 @@ function onPointerMove(ev: PointerEvent) {
 }
 function onPointerUp(ev: PointerEvent) {
   if (tool.value === 'path' && getPathDrag()) {
-    const { x, y } = drawingXY(ev)
-    pathUp(x, y)
+    const w = drawingXY(ev)
+    if (w) pathUp(w.x, w.y)
     return
   }
   if (marqueeStart) {
@@ -430,9 +437,8 @@ function onPointerUp(ev: PointerEvent) {
       if (!additive) { clearSel(); clearSegSel() }
       return
     }
-    const w0 = toDrawing(start)
-    const w1 = drawingXY(ev)
-    marqueeSelect(w0.x, w0.y, w1.x, w1.y, additive)
+    const end = localXY(ev)
+    marqueeSelectScreen(start.x, start.y, end.x, end.y, additive)
     return   // selection change only — no commitHistory (not a doc mutation)
   }
   // settle a select-tool point drag as ONE history entry — release can land
@@ -449,10 +455,22 @@ function onPointerLeave(ev: PointerEvent) {
 
 // ---------- keyboard ----------
 
+// a focused button / link / select owns Enter (it activates it) — the pen
+// must not also finish a path or commit. Escape still reaches the pen (a
+// focused toolbar button is the normal state right after picking a tool, and
+// Escape must still cancel a path), but is not handed to the host as 'cancel'.
+function focusedControl(ev: KeyboardEvent): boolean {
+  const CONTROLS = 'button, a[href], select, [role="button"], [role="link"]'
+  const t = ev.target as Element | null
+  const a = typeof document !== 'undefined' ? document.activeElement : null
+  return !!(t?.closest?.(CONTROLS) || a?.closest?.(CONTROLS))
+}
 function onKeydown(ev: KeyboardEvent) {
   if (isTypingInField()) return
+  const onControl = (ev.key === 'Enter' || ev.key === 'Escape') && focusedControl(ev)
+  if (onControl && ev.key === 'Enter') return
   const handled = props.pen.onKeydown(ev, { cancelGesture: cancelMarquee })
-  if (handled) return
+  if (handled || onControl) return
   if (ev.key === 'Escape') emit('cancel')
   else if (ev.key === 'Enter' && !(ev.metaKey || ev.ctrlKey)) emit('commit')
 }
