@@ -5,7 +5,7 @@ import { actionHint, actionPrice, actionsFor, landsHint, type NodeActionCtx } fr
 const ctx = (type: string, o: Partial<NodeActionCtx> = {}): NodeActionCtx => ({ nodeId: 'n1', type, hasImages: false, hasUpstream: true, ...o })
 function capture(run: () => void) {
   const seen: { name: string; detail: any }[] = []
-  const names = ['sailor:applyEffect', 'sailor:openInpaint', 'sailor:critiqueNode', 'sailor:runVariations', 'sailor:animateArtifact', 'sailor:openActions', 'sailor:openTextEdit']
+  const names = ['sailor:applyEffect', 'sailor:openInpaint', 'sailor:critiqueNode', 'sailor:runVariations', 'sailor:animateArtifact', 'sailor:openActions', 'sailor:openTextEdit', 'sailor:promptKind', 'sailor:promptMode']
   const fns = names.map(name => { const f = (e: Event) => seen.push({ name, detail: (e as CustomEvent).detail }); window.addEventListener(name, f); return [name, f] as const })
   run()
   fns.forEach(([n, f]) => window.removeEventListener(n, f))
@@ -36,7 +36,7 @@ describe('image node actions', () => {
     expect(capture(() => find(c, 'Remove object').run(c))).toEqual([{ name: 'sailor:openInpaint', detail: { nodeId: 'n1', intent: 'remove' } }])
   })
   it('Variations asks for three takes and needs something upstream', () => {
-    expect(capture(() => find(c, 'Variations').run(c))).toEqual([{ name: 'sailor:runVariations', detail: { nodeId: 'n1', count: 3 } }])
+    expect(capture(() => find(c, 'Variations').run(c))).toEqual([{ name: 'sailor:promptKind', detail: { kind: 'tweak', nodeId: 'n1', fromMenu: true } }])
     expect(find(c, 'Variations').lands).toBe('takes')
     expect(find(ctx('artifact-image', { hasUpstream: false }), 'Variations').enabled!(ctx('artifact-image', { hasUpstream: false }))).toBe(false)
   })
@@ -65,6 +65,27 @@ describe('video and audio', () => {
     const c = ctx('artifact-audio')
     expect(actionsFor(c).develop.map(a => a.label)).toEqual(['Transcribe', 'Speakers', 'All actions…'])
     expect(capture(() => find(c, 'Transcribe').run(c))).toEqual([{ name: 'sailor:applyEffect', detail: { nodeId: 'n1', nodeType: 'TranscribeAudioNode', output: 'AUDIO', branch: true, focus: true } }])
+  })
+})
+
+describe('Tune… on studio nodes (spec §1.2 mode chips)', () => {
+  it('studio nodes get Tune… in Edit, which puts a Tune chip in the prompt', () => {
+    for (const type of ['artifact-frame', 'gradient-studio', 'shader-studio', 'texture-studio', 'shape-studio', 'vector-type', 'scene3d-studio']) {
+      const c = ctx(type)
+      expect(actionsFor(c).edit.map(a => a.label)).toEqual(['Tune…'])
+      expect(capture(() => find(c, 'Tune…').run(c))).toEqual([{ name: 'sailor:promptMode', detail: { label: 'Tune', kind: 'tweak', nodeId: 'n1' } }])
+    }
+  })
+  it('a studio with a result also gets Fix first', () => {
+    expect(actionsFor(ctx('gradient-studio', { hasImages: true })).edit.map(a => a.label)).toEqual(['Fix', 'Tune…'])
+  })
+  it('Tune… is AI and names no landing hint (it changes the node in place)', () => {
+    const a = find(ctx('shader-studio'), 'Tune…')
+    expect(a.ai).toBe(true)
+    expect(actionHint(a, null)).toBeNull()
+  })
+  it('other nodes keep just Fix', () => {
+    expect(actionsFor(ctx('comfy', { hasImages: true })).edit.map(a => a.label)).toEqual(['Fix'])
   })
 })
 

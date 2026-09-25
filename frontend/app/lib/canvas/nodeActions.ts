@@ -1,8 +1,10 @@
 // The node toolbar's actions (spec §1.4, §2.3): one registry, grouped by intent.
-// Edit = the same thing, better. Develop = take it somewhere new. Each run()
-// fires exactly the window event the old per-node menus fired, so the canvas
-// handlers are unchanged. `lands` is the grey hint: '3 takes' on this node, or
-// 'adds a step' (a new node after it); null for actions that open an editor.
+// Edit = the same thing, better. Develop = take it somewhere new. Most actions
+// fire exactly the window event the old per-node menus fired, so the canvas
+// handlers are unchanged. Variations and Tune… go through the prompt instead,
+// so their results land above it (spec §3.1, §1.2). `lands` is the grey hint:
+// '3 takes' on this node, or 'adds a step' (a new node after it); null for
+// actions that open an editor.
 // Actions that spend money add their price to that hint ("adds a step · ~$0.14"):
 // `priceHint` is the fixed estimate the old image menu showed (ACTION_HINTS);
 // otherwise `priceNodeType`'s own price_badge, the figure the node itself shows.
@@ -59,7 +61,7 @@ const IMAGE: NodeAction[] = [
   { id: 'enhance-detail', label: 'Enhance detail', group: 'edit', ai: true, lands: 'step', priceHint: ACTION_HINTS.enhance, run: c => splice(c, 'EnhanceDetailNode', { focus: true, branch: true }) },
   { id: 'upscale', label: 'Upscale', group: 'edit', ai: true, lands: 'step', priceHint: ACTION_HINTS.upscale, run: c => splice(c, 'UpscaleImageNode', { run: true, branch: true }) },
   { id: 'relight', label: 'Relight', group: 'edit', ai: true, lands: 'step', priceHint: ACTION_HINTS.relight, run: c => splice(c, 'RelightNode', { focus: true, branch: true }) },
-  { id: 'variations', label: 'Variations', group: 'develop', ai: true, lands: 'takes', enabled: c => c.hasUpstream, run: c => fire('sailor:runVariations', { nodeId: c.nodeId, count: 3 }) },
+  { id: 'variations', label: 'Variations', group: 'develop', ai: true, lands: 'takes', enabled: c => c.hasUpstream, run: c => fire('sailor:promptKind', { kind: 'tweak', nodeId: c.nodeId, fromMenu: true }) },
   { id: 'restyle', label: 'Restyle…', group: 'develop', ai: true, lands: 'step', priceNodeType: 'RestyleWithLoRANode', run: c => splice(c, 'RestyleWithLoRANode', { focus: true, branch: true }) },
   { id: 'reframe', label: 'Reframe', group: 'develop', ai: true, lands: 'step', priceHint: ACTION_HINTS.lens, run: c => splice(c, 'LensReframe', { focus: true, branch: true }) },
   { id: 'animate', label: 'Animate', group: 'develop', ai: true, lands: 'step', priceHint: ACTION_HINTS.animate, run: c => fire('sailor:animateArtifact', { nodeId: c.nodeId }) },
@@ -78,10 +80,20 @@ const AUDIO: NodeAction[] = [
   { id: 'all-audio', label: 'All actions…', group: 'develop', ai: false, lands: null, run: () => fire('sailor:openActions', { domain: 'audio' }) },
 ]
 
+const TUNE: NodeAction = {
+  id: 'tune', label: 'Tune…', group: 'edit', ai: true, lands: null,
+  // Needs words: puts a "Tune" chip in the prompt and focuses it (spec §1.2).
+  run: c => fire('sailor:promptMode', { label: 'Tune', kind: 'tweak', nodeId: c.nodeId }),
+}
+
+/** Studio nodes the planner can change in place (tuneNode) — where Tune… has a worker. */
+export const TUNABLE_TYPES = new Set(['artifact-frame', 'gradient-studio', 'shader-studio', 'texture-studio', 'shape-studio', 'vector-type', 'scene3d-studio'])
+
 function listFor(type: string): NodeAction[] {
   if (type === 'artifact-image') return IMAGE
   if (type === 'artifact-video') return VIDEO
   if (type === 'artifact-audio') return AUDIO
+  if (TUNABLE_TYPES.has(type)) return [FIX, TUNE]
   return [FIX]
 }
 
