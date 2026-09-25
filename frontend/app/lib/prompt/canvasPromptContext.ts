@@ -53,9 +53,11 @@ export function canvasSuggestions(sel: PromptNode[], graphEmpty: boolean): strin
 }
 
 /** What the prompt row says while it works: the user's own request, quoted, or
- *  the name of the node a Fix is looking at — never a generic phase. */
-export function promptWorkingLabel(s: { request?: string | null; reviewing?: string | null }): string {
+ *  the name of the node being worked on — never a generic phase. Takes name
+ *  the node (or quote the request, when there is one). */
+export function promptWorkingLabel(s: { request?: string | null; reviewing?: string | null; takesOf?: string | null }): string {
   const request = s.request?.replace(/\s+/g, ' ').trim()
+  if (s.takesOf != null) return request ? `Making three takes for “${request}”` : `Making three takes of ${s.takesOf.trim() || 'this node'}`
   if (request) return `Working on “${request}”`
   const target = s.reviewing?.trim()
   return target ? `Looking at ${target}…` : 'Looking at the result…'

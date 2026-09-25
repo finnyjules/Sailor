@@ -65,4 +65,10 @@ describe('promptWorkingLabel', () => {
   it('prefers the request when both are set', () => {
     expect(promptWorkingLabel({ request: 'upscale it', reviewing: 'Rainy shop' })).toBe('Working on “upscale it”')
   })
+  it('names takes by the node, or quotes the request when there is one', () => {
+    expect(promptWorkingLabel({ takesOf: 'Rainy shop' })).toBe('Making three takes of Rainy shop')
+    expect(promptWorkingLabel({ takesOf: 'Rainy shop', request: 'warmer  light' })).toBe('Making three takes for “warmer light”')
+    expect(promptWorkingLabel({ takesOf: '  ' })).toBe('Making three takes of this node')
+    expect(promptWorkingLabel({ request: 'hi' })).toBe('Working on “hi”') // unchanged without takesOf
+  })
 })
