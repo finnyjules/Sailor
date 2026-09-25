@@ -94,6 +94,8 @@ interface FamilyFlow {
   body: Record<string, unknown>
   /** Families switched off with this one when it is off in turn (another family would take the workflow). */
   alsoOff?: RunnerFamily[]
+  /** Its cards must start as real PNGs: the runner reads the file's format before sending (Product shot on Bria, F12 fix round 1). */
+  png?: true
 }
 
 /**
@@ -350,6 +352,7 @@ const FLOWS: FamilyFlow[] = [
     files: ['image.png'],
     provider: 'fal',
     endpoint: 'fal-ai/bria/product-shot',
+    png: true,
     body: {
       image_url: storageUrl('image'), scene_description: 'on a rock by the sea', placement_type: 'manual_placement',
       manual_placement_selection: 'bottom_center', shot_size: [832, 1216], num_results: 1,
@@ -436,8 +439,9 @@ function kit(o: Parameters<typeof makeKit>[0] = {}) {
   __setEngineForTests(k.engine)
   return k
 }
-function writeCards(k: ReturnType<typeof makeKit>, files: string[]) {
-  files.forEach((f, i) => writeFileSync(join(k.root, 'input', f), new Uint8Array([i + 1, 7, 7])))
+const PNG_SIGNATURE = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+function writeCards(k: ReturnType<typeof makeKit>, files: string[], png = false) {
+  files.forEach((f, i) => writeFileSync(join(k.root, 'input', f), new Uint8Array([...(png ? PNG_SIGNATURE : []), i + 1, 7, 7])))
 }
 const holds = (ledger: ReturnType<typeof createFakeLedger>) => [...ledger.holds.values()].map(h => [h.state, h.actual])
 
@@ -473,7 +477,7 @@ describe('B10 · one workflow per family, POST /api/runs to the last event', () 
 
   it.each(FLOWS.map(f => [`${f.family}: ${f.label} → ${f.endpoint}`, f] as const))('%s', async (_l, f) => {
     const k = kit()
-    writeCards(k, f.files)
+    writeCards(k, f.files, f.png)
     const events = await openEvents()
     try {
       const { runId, promptIds } = await started([f.prompt])
@@ -738,7 +742,7 @@ describe('B10 · money', () => {
     expect(priceGraph(f.prompt).breakdown).toEqual([{ action: 'base_render', credits: BASE_RENDER_CREDITS }, { action: 'PersonSwap', credits: 14 }])
     const price = 14 + BASE_RENDER_CREDITS
     const k = kit()
-    writeCards(k, f.files)
+    writeCards(k, f.files, f.png)
     const events = await openEvents()
     try {
       const { runId, promptIds } = await started([f.prompt])
@@ -791,7 +795,7 @@ describe('B10 · each family switched off in turn', () => {
     expect(runnerFamilies().has(family)).toBe(false)
     expect(runnerFamilies().size).toBe(RUNNER_FAMILIES.length - off.length)
     const k = kit()
-    writeCards(k, f.files)
+    writeCards(k, f.files, f.png)
 
     const res = await startRun([f.prompt])
     expect(res.status).toBe(400)

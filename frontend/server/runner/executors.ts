@@ -575,13 +575,14 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     case 'ProductShotNode': {
       const scenePrompt = textSetting(inputs, 'scene_prompt', '', 'scene description')
       const image = await pictureUrl('image', 'There is no product picture')
+      const aspect = inputs.aspect === undefined ? 'Square' : inputs.aspect
       if (classUpgradeOn('ProductShotNode', ctx.families ?? NO_FAMILIES)) {
-        return stillCall(briaProductShot({ image, scenePrompt, aspect: inputs.aspect === undefined ? 'Square' : inputs.aspect }), 'product_shot')
+        return stillCall(briaProductShot({ image, scenePrompt, aspect }), 'product_shot')
       }
       return still(PRODUCT_SHOT_SLUG, productShotInput({
         image,
         scenePrompt,
-        aspect: inputs.aspect === undefined ? 'Square' : inputs.aspect,
+        aspect,
         productSize: inputs.product_size === undefined ? 'Original' : inputs.product_size,
         keepProductExact: flag('keep_product_exact', true),
         seed: asInt(inputs.seed, 0),

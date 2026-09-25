@@ -57,9 +57,14 @@
  *    engine checks it (`measuredInputProblem`) after measuring and before
  *    sending; the node fails and its hold is released. An input it can't
  *    measure is charged at the cap, as before.
+ *  - Product shot on Bria Product Shot (F12 fix round 1, controller ruling)
+ *    with a picture over 12 MB, or not JPEG, PNG or WebP (read from its first
+ *    bytes): the engine reads that one file (`linkedFileProblem`) before the
+ *    hand-off; the node fails and its hold is released. No other node's file
+ *    is read.
  * References are never dropped, to make a request fit or otherwise.
  */
-import { isLink, type ApiPrompt } from '#shared/runner/graph'
+import { isLink, type ApiNode, type ApiPrompt } from '#shared/runner/graph'
 import { classUpgradeOn, resolveVideoModelId } from '#shared/runner/eligibility'
 import type { RunnerFamily } from '#shared/runner/families'
 import { LARGEST_INPUT_PIXELS } from '#shared/pricing/editSettings'
@@ -233,6 +238,68 @@ export const ROTATE_CAMERA_TOO_LARGE = 'Rotate camera takes pictures up to about
 export function measuredInputProblem(classType: string, inputPixels: number | undefined, families: ReadonlySet<RunnerFamily>): string | null {
   if (classType !== 'RotateCameraNode' || !classUpgradeOn(classType, families)) return null
   return inputPixels !== undefined && inputPixels > LARGEST_INPUT_PIXELS ? ROTATE_CAMERA_TOO_LARGE : null
+}
+
+export const PRODUCT_SHOT_MAX_BYTES = 12_000_000
+export const PRODUCT_SHOT_TOO_LARGE = 'Product shot takes pictures up to 12 MB. Make this one smaller first.'
+export const PRODUCT_SHOT_WRONG_FORMAT = 'Product shot takes JPEG, PNG or WebP pictures.'
+
+/**
+ * A picture's format from its first bytes (never its name): JPEG (FF D8 FF),
+ * PNG (the 8-byte signature) or WebP (RIFF….WEBP); null for anything else.
+ */
+export function pictureFormat(bytes: Uint8Array): 'jpeg' | 'png' | 'webp' | null {
+  const at = (i: number, sig: readonly number[]) => sig.every((b, k) => bytes[i + k] === b)
+  if (at(0, [0xFF, 0xD8, 0xFF])) return 'jpeg'
+  if (at(0, [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])) return 'png'
+  if (at(0, [0x52, 0x49, 0x46, 0x46]) && at(8, [0x57, 0x45, 0x42, 0x50])) return 'webp'
+  return null
+}
+
+/**
+ * The input whose file must be checked before it is handed off, or null (no
+ * file is read): Product shot's `image` while Bria Product Shot's switch is
+ * on (F12 fix round 1). Every other node, and Product shot with the switch
+ * off, reads nothing.
+ */
+export function checkedInputFile(classType: string, families: ReadonlySet<RunnerFamily>): string | null {
+  return classType === 'ProductShotNode' && classUpgradeOn(classType, families) ? 'image' : null
+}
+
+/**
+ * What is wrong with the file a node would send, or null. Bria Product Shot
+ * (fal-ai/bria/product-shot, its schema: "Accepted formats are jpeg, jpg,
+ * png, webp. Maximum file size 12MB.") refuses a larger file or another
+ * format only after the call, so it is refused here. 12 MB is read as
+ * 12,000,000 bytes, the smaller reading. Null while the switch is off.
+ */
+export function inputFileProblem(classType: string, bytes: Uint8Array, families: ReadonlySet<RunnerFamily>): string | null {
+  if (!checkedInputFile(classType, families)) return null
+  if (bytes.byteLength > PRODUCT_SHOT_MAX_BYTES) return PRODUCT_SHOT_TOO_LARGE
+  return pictureFormat(bytes) ? null : PRODUCT_SHOT_WRONG_FORMAT
+}
+
+/**
+ * The engine's check, before planning (and so before the hand-off): reads
+ * the one file the builder sends (the first on the link) only when
+ * checkedInputFile names an input. A file that can't be read is left to the
+ * hand-off, which reads it too.
+ */
+export async function linkedFileProblem<F>(
+  node: ApiNode,
+  filesFrom: (link: [string, number]) => F[],
+  read: (f: F) => Promise<Uint8Array>,
+  families: ReadonlySet<RunnerFamily>,
+): Promise<string | null> {
+  const name = checkedInputFile(node.class_type, families)
+  const link = name ? node.inputs?.[name] : undefined
+  if (!isLink(link)) return null
+  const f = filesFrom(link as [string, number])[0]
+  if (f === undefined) return null
+  let bytes: Uint8Array
+  try { bytes = await read(f) }
+  catch { return null }
+  return inputFileProblem(node.class_type, bytes, families)
 }
 
 /** planNode's check: throws the plain message for a request no provider takes. */

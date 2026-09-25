@@ -40,13 +40,18 @@ import { planNode, type NodePlan } from '~~/server/runner/executors'
 import { BRIA_PRODUCT_SHOT_APP, BRIA_SHOT_SIZES, briaProductShot } from '~~/server/runner/generators/briaProductShot'
 import { PRODUCT_SHOT_DEFAULT_PROMPT, PRODUCT_SHOT_SLUG } from '~~/server/runner/generators/refEdits'
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
-import { requestProblems } from '~~/server/runner/requestRules'
+import {
+  PRODUCT_SHOT_MAX_BYTES, PRODUCT_SHOT_TOO_LARGE, PRODUCT_SHOT_WRONG_FORMAT,
+  checkedInputFile, inputFileProblem, linkedFileProblem, pictureFormat, requestProblems,
+} from '~~/server/runner/requestRules'
+import { RUNNER_NOT_ELIGIBLE } from '#shared/runner/messages'
+import sharp from 'sharp'
 import { PRICE_BOOK_VERSION, priceGraph } from '~~/server/utils/priceBook'
 import { PRODUCT_SHOT_UPGRADING, blockedPromptRefusal, retiredEngineRefusal } from '~~/server/utils/blockedModels'
 import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 import type { OutputFile } from '~~/server/runner/types'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
-import { makeKit } from './__runner__/kit'
+import { makeKit, ofType } from './__runner__/kit'
 
 const FAMILY: RunnerFamily = 'bria-product-shot'
 const ON: ReadonlySet<RunnerFamily> = new Set([FAMILY])
@@ -274,16 +279,7 @@ describe('the settings Bria can\'t honour are hidden while the family is on', ()
     expect(upgradeHidesWidget('RotateCameraNode', 'seed', ALL)).toBe(false)
     expect(upgradeHidesWidget('EditImageNode', 'seed', ALL)).toBe(false)
   })
-
-  it('the node body, its seed lock and its inspector all ask it, with the families the badge reads', () => {
-    const src = (f: string) => fs.readFileSync(path.resolve(__dirname, '../..', f), 'utf8')
-    const node = src('app/components/vue-canvas/ComfyNode.vue')
-    expect(node).toContain('if (upgradeHidesWidget(props.data.nodeType, widget.name, badgeFamilies)) return false')
-    expect(node).toContain('.filter(({ widget }) => isSeedWidgetDef(widget) && !upgradeHidesWidget(props.data.nodeType, widget.name, badgeFamilies)))')
-    const inspector = src('app/components/vue-canvas/NodeInspector.vue')
-    expect(inspector).toContain('const inspectorFamilies = inspectorPublic.runnerEnabled ? parseFamilies(inspectorPublic.runnerFamilies) : NO_FAMILIES')
-    expect(inspector).toContain('.filter(({ widget }) => !upgradeHidesWidget(String(props.node?.data?.nodeType || \'\'), widget.name, inspectorFamilies))')
-  })
+  // The mounted node body, seed lock and inspector: product-shot-hidden-settings.unit.spec.ts.
 })
 
 // ── blockedModelUses: runner-only while on (Ruling 10) ─────────────────────
@@ -417,6 +413,60 @@ describe('the price', () => {
 
 // ── The engine, end to end ─────────────────────────────────────────────────
 
+// A real 64 × 64 PNG (the builder's file check reads its first bytes).
+const PNG = await sharp({ create: { width: 64, height: 64, channels: 3, background: '#808080' } }).png().toBuffer()
+const JPEG = await sharp({ create: { width: 64, height: 64, channels: 3, background: '#808080' } }).jpeg().toBuffer()
+const WEBP = await sharp({ create: { width: 64, height: 64, channels: 3, background: '#808080' } }).webp().toBuffer()
+const GIF = Buffer.from('GIF89a\x01\x00\x01\x00\x00\x00\x00;', 'latin1')
+/** `size` bytes that start as a PNG (the signature, then zeros). */
+const pngOfSize = (size: number) => { const b = Buffer.alloc(size); PNG.copy(b, 0, 0, 8); return b }
+
+// ── The picture Bria takes (F12 fix round 1) ───────────────────────────────
+
+describe('the picture Bria takes: up to 12 MB, JPEG, PNG or WebP, refused before the hand-off', () => {
+  it('the messages are plain', () => {
+    expect(PRODUCT_SHOT_TOO_LARGE).toBe('Product shot takes pictures up to 12 MB. Make this one smaller first.')
+    expect(PRODUCT_SHOT_WRONG_FORMAT).toBe('Product shot takes JPEG, PNG or WebP pictures.')
+    // "Maximum file size 12MB", read as the smaller 12,000,000 bytes.
+    expect(PROPS.image_url!.description).toContain('Accepted formats are jpeg, jpg, png, webp. Maximum file size 12MB.')
+    expect(PRODUCT_SHOT_MAX_BYTES).toBe(12_000_000)
+  })
+
+  it('the format comes from the bytes, never the name', () => {
+    expect(pictureFormat(PNG)).toBe('png')
+    expect(pictureFormat(JPEG)).toBe('jpeg')
+    expect(pictureFormat(WEBP)).toBe('webp')
+    for (const b of [GIF, Buffer.from('png'), Buffer.alloc(0), Buffer.from('RIFF\0\0\0\0WAVE', 'latin1'), PNG.subarray(0, 7)]) expect(pictureFormat(b)).toBeNull()
+  })
+
+  it('on: at 12,000,000 bytes it goes; one more is too large; another format is refused', () => {
+    expect(inputFileProblem('ProductShotNode', pngOfSize(PRODUCT_SHOT_MAX_BYTES), ON)).toBeNull()
+    expect(inputFileProblem('ProductShotNode', pngOfSize(PRODUCT_SHOT_MAX_BYTES + 1), ALL)).toBe(PRODUCT_SHOT_TOO_LARGE)
+    for (const ok of [PNG, JPEG, WEBP]) expect(inputFileProblem('ProductShotNode', ok, ON)).toBeNull()
+    expect(inputFileProblem('ProductShotNode', GIF, ON)).toBe(PRODUCT_SHOT_WRONG_FORMAT)
+  })
+
+  it('off, or any other node: no check, and no file is read', async () => {
+    expect(checkedInputFile('ProductShotNode', ALL_BUT)).toBeNull()
+    expect(checkedInputFile('RotateCameraNode', ALL)).toBeNull()
+    expect(checkedInputFile('EditImageNode', ALL)).toBeNull()
+    expect(inputFileProblem('ProductShotNode', GIF, ALL_BUT)).toBeNull()
+    const read = vi.fn(async () => new Uint8Array(GIF))
+    const files = () => [{ filename: 'a.gif' }]
+    expect(await linkedFileProblem(shot(), files, read, ALL_BUT)).toBeNull()
+    expect(await linkedFileProblem({ class_type: 'RotateCameraNode', inputs: { image: LINK } }, files, read, ALL)).toBeNull()
+    expect(await linkedFileProblem({ class_type: 'EditImageNode', inputs: { input_image: LINK, image: LINK } }, files, read, ALL)).toBeNull()
+    expect(read).not.toHaveBeenCalled()
+    // On: exactly the one file the builder sends (the first on the link) is read.
+    expect(await linkedFileProblem(shot(), () => [{ filename: 'a.gif' }, { filename: 'b.png' }], read, ON)).toBe(PRODUCT_SHOT_WRONG_FORMAT)
+    expect(read.mock.calls).toEqual([[{ filename: 'a.gif' }]])
+    // No picture linked, no file on the link, or an unreadable one: left to the hand-off.
+    expect(await linkedFileProblem(shot({ image: undefined }), files, read, ON)).toBeNull()
+    expect(await linkedFileProblem(shot(), () => [], read, ON)).toBeNull()
+    expect(await linkedFileProblem(shot(), files, async () => { throw new Error('gone') }, ON)).toBeNull()
+  })
+})
+
 describe('the runner engine', () => {
   const take: ApiPrompt = {
     11: { class_type: 'Image', inputs: { image: 'bottle.png' } },
@@ -425,7 +475,7 @@ describe('the runner engine', () => {
   }
   const kit = (families: ReadonlySet<RunnerFamily>) => {
     const k = makeKit({ hosted: true, deps: { families: () => families } })
-    fs.writeFileSync(path.join(k.root, 'input', 'bottle.png'), Buffer.from('png'))
+    fs.writeFileSync(path.join(k.root, 'input', 'bottle.png'), PNG)
     return k
   }
   const start = (k: ReturnType<typeof makeKit>) => k.engine.startRun({ userId: k.userId, takes: [take], workflow: null, canvasId: null, projectUuid: null, projectName: null })
@@ -448,9 +498,26 @@ describe('the runner engine', () => {
     })
   }
 
+  for (const [name, bytes, message] of [
+    ['a picture over 12 MB', () => pngOfSize(PRODUCT_SHOT_MAX_BYTES + 1), PRODUCT_SHOT_TOO_LARGE],
+    ['a GIF named .png', () => GIF, PRODUCT_SHOT_WRONG_FORMAT],
+  ] as const) {
+    it(`${name}: the node fails in plain words before the hand-off; nothing sent, the hold released`, async () => {
+      const k = kit(ON)
+      fs.writeFileSync(path.join(k.root, 'input', 'bottle.png'), bytes())
+      const { runId } = await start(k)
+      await k.engine.settled(runId)
+      expect(k.upload).not.toHaveBeenCalled()
+      expect(k.fal.reqs.size).toBe(0)
+      expect(k.replicate.reqs.size).toBe(0)
+      expect(ofType(k.seen, 'execution_error').map(m => m.data.exception_message)).toEqual([message])
+      expect([...k.ledger.holds.values()].map(h => h.state)).toEqual(['released'])
+    })
+  }
+
   it('off (every other family on): refused, nothing held or sent', async () => {
     const k = kit(ALL_BUT)
-    await expect(start(k)).rejects.toThrow()
+    await expect(start(k)).rejects.toMatchObject({ statusCode: 400, data: { reason: RUNNER_NOT_ELIGIBLE } })
     expect(k.fal.reqs.size).toBe(0)
     expect(k.replicate.reqs.size).toBe(0)
     expect(k.ledger.holds.size).toBe(0)

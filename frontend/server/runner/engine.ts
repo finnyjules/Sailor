@@ -22,7 +22,7 @@ import { FalError, isProviderNetworkError, percentFromLogs, type FalStatus, type
 import { ReplicateError } from './replicateQueue'
 import { planNode, type ProviderBackup } from './executors'
 import type { BackupSettings } from './config'
-import { measuredInputProblem, requestProblems } from './requestRules'
+import { linkedFileProblem, measuredInputProblem, requestProblems } from './requestRules'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
 import { extraPromptText, hasOutputNode, measuredInputPixels, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
@@ -660,6 +660,11 @@ export function createEngine(deps: EngineDeps) {
       const inputPixels = await measuredInputPixels(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], f => deps.results.read(f), families)
       const tooLarge = measuredInputProblem(take.prompt[id]!.class_type, inputPixels, families)
       if (tooLarge) throw new Error(tooLarge)
+      // A file its model refuses (Product shot on Bria: over 12 MB, or not
+      // JPEG, PNG or WebP; requestRules.ts), before the hand-off. Reads
+      // nothing for any other node.
+      const badFile = await linkedFileProblem(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], f => deps.results.read(f), families)
+      if (badFile) throw new Error(badFile)
 
       const plan = await planNode({
         prompt: take.prompt,
