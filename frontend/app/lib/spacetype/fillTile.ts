@@ -398,6 +398,13 @@ export function gridLineWidth(cell: number): number {
   return Math.max(1, cell * 0.08)
 }
 
+/** The per-pixel hash ombre's grain is drawn from, in [0, 1). Shared with the Compositor's
+ *  follow-the-line stroke, which dithers a BENT fade with it so its grain matches a flat ombre's. */
+export function ombreHash(px: number, py: number): number {
+  const hsh = Math.sin(px * 12.9898 + py * 78.233) * 43758.5453
+  return hsh - Math.floor(hsh)
+}
+
 /** Ombre: a GRAINY / pointillist A→B fade at `angle` degrees — each pixel is colB with probability
  *  = its position along the gradient (else colA), so the two colours mix as scattered dots whose
  *  density shifts across the fade (solid A → grain → solid B). Deterministic hash for stable dots. */
@@ -407,8 +414,7 @@ export function ombrePicker(w: number, h: number, angle: number): (px: number, p
   const pmin = Math.min(...cor), range = (Math.max(...cor) - pmin) || 1
   return (px, py) => {
     const t = (px * dx + py * dy - pmin) / range            // 0→1 along the fade direction
-    const hsh = Math.sin(px * 12.9898 + py * 78.233) * 43758.5453
-    return (hsh - Math.floor(hsh)) < t                       // colB density grows with t
+    return ombreHash(px, py) < t                             // colB density grows with t
   }
 }
 
