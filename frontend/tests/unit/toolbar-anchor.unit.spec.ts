@@ -11,7 +11,7 @@ describe('toolbarAnchor', () => {
     expect(r.placement).toBe('below')
     expect(r.top).toBe(30 + 100 + 10)
   })
-  it('stays the same size at any zoom (only the position scales)', () => {
+  it('scales the anchor’s horizontal position with zoom', () => {
     const a = toolbarAnchor({ x: 0, y: 400, width: 200, height: 100 }, { x: 0, y: 0, zoom: 2 })
     expect(a.left).toBe(200)
   })

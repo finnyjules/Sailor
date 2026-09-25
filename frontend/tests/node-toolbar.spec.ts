@@ -12,12 +12,27 @@ import { dropNode, openBlankWorkflow, waitForBackend } from './_helpers'
  * node (mousedown bubbles to vue-flow) AND opens a file chooser, swallowed by
  * the beforeEach handler.
  */
-async function dismissStartModal(page: Page) {
+/**
+ * A truly bare canvas. Every exit from the start modal builds a starter Frame
+ * through `materializeStart`, which first awaits `refreshSchema()`, so the
+ * Frame can land seconds after the modal closes: after the shared helper has
+ * stopped looking for it, and after this spec has dropped and selected its
+ * node. A late Frame overlaps the dropped node and takes the selection; a
+ * bare Frame has no toolbar actions, so the bar never shows. Wait for the
+ * starter Frame (if it is still coming) and delete it before the test starts.
+ */
+async function bareCanvas(page: Page) {
   const heading = page.getByRole('heading', { name: 'What do you want to make?' })
   if (await heading.isVisible().catch(() => false)) {
     await page.keyboard.press('Escape')
     await expect(heading).toHaveCount(0)
   }
+  const frame = page.locator('.vue-flow__node-artifact-frame')
+  if (await frame.first().waitFor({ state: 'attached', timeout: 15_000 }).then(() => true, () => false)) {
+    await frame.first().click()
+    await page.keyboard.press('Delete')
+  }
+  await expect(page.locator('.vue-flow__node')).toHaveCount(0)
 }
 
 async function selectNode(page: Page, node: Locator) {
@@ -27,10 +42,15 @@ async function selectNode(page: Page, node: Locator) {
 
 async function deselectAll(page: Page, node: Locator) {
   // Click the pane just left of the node's bottom-left corner — outside the
-  // node, away from the top-left breadcrumb overlay; clamped inside the viewport.
+  // node, away from the top-left breadcrumb overlay; clamped inside the
+  // viewport. Prove the point really is empty pane first, so a stray node
+  // under it can't pass the "bar hides" check by stealing the selection.
   const bb = (await node.boundingBox())!
   const vp = page.viewportSize()!
-  await page.mouse.click(Math.max(bb.x - 30, 5), Math.min(bb.y + bb.height - 20, vp.height - 40))
+  const x = Math.max(bb.x - 30, 5), y = Math.min(bb.y + bb.height - 20, vp.height - 40)
+  expect(await page.evaluate(([px, py]) => !!document.elementFromPoint(px!, py!)?.closest('.vue-flow__pane')
+    && !document.elementFromPoint(px!, py!)?.closest('.vue-flow__node'), [x, y])).toBe(true)
+  await page.mouse.click(x, y)
 }
 
 const toolbar = (page: Page) => page.getByRole('toolbar', { name: 'Node actions' })
@@ -40,12 +60,12 @@ test.describe('Node toolbar', () => {
     page.on('filechooser', async () => { /* swallow artifact upload dialogs */ })
     await waitForBackend(page)
     await openBlankWorkflow(page)
-    await dismissStartModal(page)
+    await bareCanvas(page)
   })
 
   test('audio node: Develop ▾ lists Transcribe and Speakers; Transcribe adds a node; deselect hides the bar', async ({ page }) => {
     await dropNode(page, 'Audio')
-    const node = page.locator('.vue-flow__node').last()
+    const node = page.locator('.vue-flow__node-artifact-audio')
     await expect(node).toBeVisible()
     await selectNode(page, node)
 
@@ -65,16 +85,15 @@ test.describe('Node toolbar', () => {
     await expect(menu).toHaveCount(0)
 
     // Re-select the audio node, then click the empty pane: the bar goes away.
-    const audio = page.locator('.vue-flow__node').first()
-    await selectNode(page, audio)
+    await selectNode(page, node)
     await expect(toolbar(page)).toBeVisible()
-    await deselectAll(page, audio)
+    await deselectAll(page, node)
     await expect(toolbar(page)).toHaveCount(0)
   })
 
   test('video node: Edit ▾ lists Sync lips and Enhance', async ({ page }) => {
     await dropNode(page, 'Video')
-    const node = page.locator('.vue-flow__node').last()
+    const node = page.locator('.vue-flow__node-artifact-video')
     await expect(node).toBeVisible()
     await selectNode(page, node)
 
@@ -88,5 +107,6 @@ test.describe('Node toolbar', () => {
     // Esc closes the menu; the bar stays while the node is selected.
     await page.keyboard.press('Escape')
     await expect(menu).toHaveCount(0)
+    await expect(bar).toBeVisible()
   })
 })
