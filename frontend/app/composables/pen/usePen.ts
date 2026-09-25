@@ -41,12 +41,11 @@
 // sparkle loop starts lazily inside sparkle(); dispose() cancels it.
 import { ref, shallowRef, computed, toRaw, type Ref } from 'vue'
 import type { SketchDoc, SketchConstraint, EntityId, ConstraintKind, SegmentSpec } from '~/lib/sketch/model'
-import { addPoint, addLine, addCircle, addConstraint, removeConstraint, deleteEntity, addPath, repeatEntities, mirrorEntities, pointClosure, isPointReferenced, addSmoothHandles } from '~/lib/sketch/edit'
+import { addPoint, addLine, addCircle, addConstraint, removeConstraint, deleteEntity, addPath, pointClosure, isPointReferenced, addSmoothHandles } from '~/lib/sketch/edit'
 import { snapPoint, inferCircleTangents, tangentJointArc } from '~/lib/sketch/infer'
 import { solve, type DragTarget } from '~/lib/sketch/solve'
 import { dist, type Vec2 } from '~/lib/sketch/geom'
 import { constraintMarks, type ConstraintMark, type ArcDimensionMark } from '~/lib/sketch/annotate'
-import { cloneDoc } from '~/lib/sketch/clone'
 import { applyView, type ViewMatrix } from '~/lib/sketch/view'
 import { pxToUnits, SNAP_PX, BOW_PX, MIN_RADIUS_PX } from '~/lib/sketch/tolerance'
 import {
@@ -55,6 +54,14 @@ import {
   segmentConstraintRefs,
   type RuleOption,
 } from './penRules'
+import { createPenHistory } from './penHistory'
+import { handlePenKey, type PenKeyContext, NUDGE_PX, NUDGE_PX_SHIFT, screenDeltaToDrawing } from './penKeys'
+import { createPenCopies, type PendingOp } from './penCopies'
+
+// NUDGE_PX / NUDGE_PX_SHIFT / screenDeltaToDrawing now live in penKeys.ts
+// (they exist only for the arrow-key nudge in the key handler); re-exported
+// here so this module's exports are unchanged.
+export { NUDGE_PX, NUDGE_PX_SHIFT, screenDeltaToDrawing }
 
 // 'path' is the arc Pen; 'curve' is the Bézier Curve tool. Both add to the
 // same pending path (see selectTool / curveDown).
@@ -123,20 +130,6 @@ export type PathDrag = { anchor: EntityId; prevAnchor: EntityId; startX: number;
 // point being placed turns smooth and the pointer pulls out its handles.
 export type CurveDrag = { anchor: EntityId; startX: number; startY: number; smooth: boolean } | null
 const isDrawTool = (t: PenTool) => t === 'path' || t === 'curve'
-
-// Arrow-key nudge, in screen pixels: 0.25 / 2.5 drawing units at the dev
-// page's default 34 px/unit, so the default view moves exactly as before.
-export const NUDGE_PX = 8.5
-export const NUDGE_PX_SHIFT = 85
-
-/** A screen-pixel delta as a drawing delta: solves M·d = s with the view's
- *  linear part (Cramer's rule, no reciprocal, so the y-up 34 px/unit view
- *  gives exactly 0.25 for 8.5 px). Null for a singular view. */
-export function screenDeltaToDrawing(m: ViewMatrix, sx: number, sy: number): { x: number; y: number } | null {
-  const det = m.a * m.d - m.b * m.c
-  if (!Number.isFinite(det) || Math.abs(det) < 1e-12) return null
-  return { x: (m.d * sx - m.c * sy) / det, y: (m.a * sy - m.b * sx) / det }
-}
 
 export function usePen(opts: {
   doc: Ref<SketchDoc>          // a CLONE of the host's drawing (see HOST CONTRACT); the pen mutates doc.value in place and replaces it on undo/redo/reset/revert
@@ -221,11 +214,7 @@ export function usePen(opts: {
   // units + params; the next point-click (repeat) or line-click (mirror) — or an
   // empty-canvas click, which drops a fresh fixed center — supplies the missing
   // piece and applies. Escape / tool-switch cancels it. opHint drives the banner.
-  const pendingOp = ref<
-    | null
-    | { kind: 'repeat'; units: EntityId[]; count: number }
-    | { kind: 'mirror'; units: EntityId[] }
-  >(null)
+  const pendingOp = ref<PendingOp>(null)
   function cancelPendingOp() { pendingOp.value = null }
   const opHint = computed(() => {
     const op = pendingOp.value
@@ -237,34 +226,14 @@ export function usePen(opts: {
     return (doc.value.entities.find(e => e.id === id) as any)?.kind === 'point'
   }
 
-  // --- undo/redo history: plain snapshots of `doc`, taken after every
-  // mutating action settles. `histPtr` points at the entry matching the
-  // current `doc.value`; undo/redo just move it and restore that snapshot.
-  const history = ref<SketchDoc[]>([])
-  const histPtr = ref(-1)
-  // the drawing as the pen received it — revert()'s target. Separate from
-  // `history`, which is capped at 200 entries and so can lose its first one.
-  const opening = cloneDoc(doc.value)
-  function initHistory() { history.value = [cloneDoc(doc.value)]; histPtr.value = 0 }
-  function commitHistory() {
-    // no-op guard: a settle that left `doc` structurally identical to the
-    // current top-of-history entry (dragging a fixed point, Delete with an
-    // empty selection, re-pinning a chip to its existing value, …) must not
-    // push a duplicate snapshot — that would leave a dead undo step that
-    // visibly "does nothing" the first time the user hits ⌘Z.
-    const top = history.value[histPtr.value]
-    if (top && JSON.stringify(top) === JSON.stringify(doc.value)) return
-    // drop any redo tail, push a fresh snapshot
-    history.value = history.value.slice(0, histPtr.value + 1)
-    history.value.push(cloneDoc(doc.value))
-    histPtr.value = history.value.length - 1
-    if (history.value.length > 200) { history.value.shift(); histPtr.value-- }
-    opts.onChange?.()
-  }
+  // --- undo/redo history: see penHistory.ts. Its undo()/redo()/revert() do
+  // only the doc/pointer part; the wrappers below add the pen's own
+  // transient-state resets, in the same order the inline version had, before
+  // firing onChange.
+  const penHistory = createPenHistory({ doc, onChange: opts.onChange, onLiveChange: opts.onLiveChange })
+  const { commitHistory, initHistory, canUndo, canRedo } = penHistory
   function undo() {
-    if (histPtr.value <= 0) return
-    histPtr.value--
-    doc.value = cloneDoc(history.value[histPtr.value]!)
+    if (!penHistory.undo()) return
     clearSel()
     clearSegSel()
     pending.value = null
@@ -277,9 +246,7 @@ export function usePen(opts: {
     opts.onChange?.()
   }
   function redo() {
-    if (histPtr.value >= history.value.length - 1) return
-    histPtr.value++
-    doc.value = cloneDoc(history.value[histPtr.value]!)
+    if (!penHistory.redo()) return
     clearSel()
     clearSegSel()
     pending.value = null
@@ -291,8 +258,6 @@ export function usePen(opts: {
     status.value = 'redo'
     opts.onChange?.()
   }
-  function canUndo() { return histPtr.value > 0 }
-  function canRedo() { return histPtr.value < history.value.length - 1 }
 
   // Returns true when the key did something. PenOverlay reads that for
   // Escape / Enter: with nothing to cancel or finish, the key belongs to the
@@ -304,74 +269,18 @@ export function usePen(opts: {
   // `defaultPrevented` — e.g. a modal that closes on Escape or deletes its
   // selection on Delete — leaves it alone) and stopPropagation. A key it does
   // not act on is left untouched.
+  // Builds the context the moved-out key handler (penKeys.ts) needs, fresh on
+  // every call — cheap, and avoids keeping a second copy of these refs/funcs
+  // alive that could drift from the pen's own.
   function onKeydown(ev: KeyboardEvent, local?: { cancelGesture?: () => boolean }): boolean {
-    const handled = handleKey(ev, local)
+    const ctx: PenKeyContext = {
+      tool, pendingPath, dimBuffer, pendingOp, status, selection, view: opts.view,
+      cancelGesture: opts.cancelGesture,
+      cancelPendingOp, undo, redo, cancelPath, commitDimension, finishPath, removeLastAnchor, del, nudge,
+    }
+    const handled = handlePenKey(ev, ctx, local)
     if (handled) { ev.preventDefault(); ev.stopPropagation() }
     return handled
-  }
-  function handleKey(ev: KeyboardEvent, local?: { cancelGesture?: () => boolean }): boolean {
-    const meta = ev.metaKey || ev.ctrlKey
-    if (meta) {
-      const key = ev.key.toLowerCase()
-      if (key === 'z' && !ev.shiftKey) { undo(); return true }
-      if ((key === 'z' && ev.shiftKey) || key === 'y') { redo(); return true }
-      return false
-    }
-    // (viewport keys — ⌘0 fit, Space pan — are the host's; it handles them
-    // before delegating here)
-
-    // type-a-dimension: a draw gesture is "active" whenever pendingPath is set
-    // — that covers both a pending line placement (rubber band to the next
-    // anchor) and a live arc bow (pathDrag.bowed), see pathDown/pathMove/pathUp.
-    // Digits + one decimal point accumulate into dimBuffer instead of doing
-    // anything else; meta-combos already returned above, so this never steals
-    // a Cmd/Ctrl+digit shortcut.
-    const gestureActive = tool.value === 'path' && !!pendingPath.value
-    if (gestureActive && /^[0-9]$/.test(ev.key)) { dimBuffer.value += ev.key; return true }
-    if (gestureActive && ev.key === '.' && !dimBuffer.value.includes('.')) { dimBuffer.value += '.'; return true }
-
-    if (ev.key === 'Escape') {
-      if (pendingOp.value) { cancelPendingOp(); status.value = 'cancelled'; return true }
-      // clearing a live dimension buffer takes priority over everything else —
-      // a first Escape just clears the typed value, a second (now-empty-buffer)
-      // Escape falls through to the normal marquee/pan/path-cancel handling.
-      if (dimBuffer.value) { dimBuffer.value = ''; return true }
-      // a live marquee drag or pan takes priority over path-cancel — abort
-      // just that gesture (clear its state, no selection change, no doc
-      // mutation) rather than falling through to cancelPath's path cleanup.
-      if (local?.cancelGesture?.()) return true
-      if (opts.cancelGesture?.()) return true
-      if (!pendingPath.value) return false
-      cancelPath()
-      return true
-    }
-    if (ev.key === 'Enter') {
-      if (gestureActive && dimBuffer.value) { commitDimension(); return true }
-      if (pendingPath.value && pendingPath.value.anchors.length >= 2) { finishPath(false); return true }
-      return false
-    }
-    if (ev.key === 'Backspace' || ev.key === 'Delete') {
-      if (gestureActive && dimBuffer.value) {
-        dimBuffer.value = dimBuffer.value.slice(0, -1)
-        return true
-      }
-      // preventDefault only when the key acts (onKeydown does it): with
-      // nothing to delete, Delete/Backspace belong to the host
-      if (pendingPath.value) { removeLastAnchor(); return true }
-      if (selection.value.length) { del(); return true }
-      return false
-    }
-    if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight' || ev.key === 'ArrowUp' || ev.key === 'ArrowDown') {
-      if (!selection.value.length) return false   // nothing selected: no-op, let the browser handle the key normally
-      // the step is in SCREEN pixels, so ↑ is screen-up under any view
-      const step = ev.shiftKey ? NUDGE_PX_SHIFT : NUDGE_PX
-      const sx = ev.key === 'ArrowLeft' ? -step : ev.key === 'ArrowRight' ? step : 0
-      const sy = ev.key === 'ArrowUp' ? -step : ev.key === 'ArrowDown' ? step : 0   // screen y grows downward
-      const d = screenDeltaToDrawing(opts.view.value, sx, sy)
-      if (d) nudge(d.x, d.y)
-      return true
-    }
-    return false
   }
 
   // the pen holds no key-held state of its own today (Space-pan is the
@@ -1032,21 +941,10 @@ export function usePen(opts: {
   // the handles held between clicks (not yet in any segment) — for the overlay's arms
   function getHeldHandles(): { lastHOut: EntityId | null; firstHIn: EntityId | null } { return { lastHOut, firstHIn } }
 
-  // low-level applies — used by both the fast path (center/axis already in the
-  // selection) and the guided pick. clearSel first so the center-point click
-  // that armed nothing lingers selected.
-  function applyRepeat(units: EntityId[], center: EntityId, count: number) {
-    if (!units.length || !Number.isFinite(count) || count < 2) return
-    repeatEntities(doc.value, units, center, Math.round(count))
-    clearSel(); pendingOp.value = null; runSolve(); commitHistory()
-    status.value = `Repeated ×${Math.round(count)}`
-  }
-  function applyMirror(units: EntityId[], axisLine: EntityId) {
-    if (!units.length) return
-    mirrorEntities(doc.value, units, axisLine)
-    clearSel(); pendingOp.value = null; runSolve(); commitHistory()
-    status.value = 'Mirrored'
-  }
+  // --- Repeat / Mirror / Flip: see penCopies.ts. doRepeat and repeatPrompt
+  // (the window.prompt-driven entry points) stay here and call into it.
+  const penCopies = createPenCopies({ doc, selection, pendingOp, status, clearSel, runSolve, commitHistory })
+  const { applyRepeat, applyMirror, armRepeat, doMirror, flip } = penCopies
   // kept for the test hook / fast path: exact-selection repeat (1 point + units)
   function doRepeat(count: number) {
     const ptSel = selection.value.filter(id => isPointId(id))
@@ -1066,34 +964,6 @@ export function usePen(opts: {
     if (ptSel.length === 1) { applyRepeat(entSel, ptSel[0]!, count); return }
     // guided: arm the center pick
     armRepeat(entSel, count)
-  }
-  // arm the guided center-pick for the given units + count (no prompt). Used by
-  // repeatPrompt's guided branch and the __sketchDraw.armRepeat test hook.
-  function armRepeat(units: EntityId[], count: number) {
-    if (!units.length || !Number.isFinite(count) || count < 2) return
-    pendingOp.value = { kind: 'repeat', units: [...units], count }
-    status.value = `Now click the center of the ring (×${count})`
-  }
-  function doMirror() {
-    const lineSel = selection.value.filter(id => (doc.value.entities.find(e => e.id === id) as any)?.kind === 'line')
-    const entSel = selection.value.filter(id => !lineSel.includes(id))
-    if (entSel.length === 0) { status.value = 'Select a shape first, then Mirror'; return }
-    // fast path: an axis line is already part of the selection
-    if (lineSel.length === 1) { applyMirror(entSel, lineSel[0]!); return }
-    // guided: arm the axis pick
-    pendingOp.value = { kind: 'mirror', units: entSel }
-    status.value = 'Now click the mirror axis (a line)'
-  }
-  function flip(axis: 'h' | 'v') {
-    const ptIds = pointClosure(doc.value, selection.value)
-    const pts = ptIds.map(id => doc.value.entities.find(e => e.id === id)).filter((e: any) => e?.kind === 'point') as any[]
-    if (!pts.length) return
-    const minX = Math.min(...pts.map(p => p.x)), maxX = Math.max(...pts.map(p => p.x))
-    const minY = Math.min(...pts.map(p => p.y)), maxY = Math.max(...pts.map(p => p.y))
-    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
-    for (const p of pts) { if (axis === 'h') p.x = 2 * cx - p.x; else p.y = 2 * cy - p.y }
-    runSolve()
-    commitHistory()
   }
   function makeConstruction() {
     for (const id of selection.value) {
@@ -1345,10 +1215,9 @@ export function usePen(opts: {
   // called by the overlay or toolbar — a host calls it on `cancel` if its
   // cancel means "discard".
   function revert(): void {
-    doc.value = cloneDoc(opening)
+    penHistory.revert()   // doc.value = cloneDoc(opening); initHistory()
     clearTransient()
     status.value = 'ready'
-    initHistory()
     opts.onChange?.()
   }
 
