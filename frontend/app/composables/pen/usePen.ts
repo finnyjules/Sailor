@@ -8,7 +8,7 @@
 // Construction must stay side-effect free (vitest runs this in `node`): no
 // onMounted/onUnmounted, no window.*, no requestAnimationFrame here. The
 // sparkle loop starts lazily inside sparkle(); dispose() cancels it.
-import { ref, computed, toRaw, type Ref } from 'vue'
+import { ref, shallowRef, computed, toRaw, type Ref } from 'vue'
 import type { SketchDoc, SketchConstraint, EntityId, ConstraintKind, SegmentSpec } from '~/lib/sketch/model'
 import { addPoint, addLine, addCircle, addConstraint, removeConstraint, deleteEntity, addPath, repeatEntities, mirrorEntities, pointClosure, isPointReferenced, addSmoothHandles } from '~/lib/sketch/edit'
 import { snapPoint, inferCircleTangents, tangentJointArc } from '~/lib/sketch/infer'
@@ -866,8 +866,15 @@ export function usePen(opts: {
     const pp = pendingPath.value
     pendingPath.value = null
     dimBuffer.value = ''
-    curveDrag = null
-    if (!pp || pp.anchors.length < 2) { dropUnusedHandles(); return }
+    curveDrag.value = null
+    if (!pp || pp.anchors.length < 2) {
+      // a lone point finished: its handles mean nothing — drop them as their
+      // own history step, or undo/redo would bring them back as plain points
+      const before = doc.value.entities.length
+      dropUnusedHandles()
+      if (doc.value.entities.length !== before) commitHistory()
+      return
+    }
     if (close) {
       // closing segment of the current kind between last and first anchors
       if (tool.value !== 'curve' && nextSegment.value === 'arc') {
@@ -887,14 +894,16 @@ export function usePen(opts: {
   // a smooth point and pulls out its handles (the opposite one mirrors, held
   // by a collinear rule — addSmoothHandles). Each new segment's kind is the
   // tool active when its END point is placed, so Pen and Curve build one path.
-  let curveDrag: CurveDrag = null
+  // a shallowRef (replaced, never mutated) so the overlay's live preview and
+  // drag handles re-render the moment a drag turns smooth
+  const curveDrag = shallowRef<CurveDrag>(null)
   // the previous smooth point's out-handle — the next cubic's h1. Cleared on
   // every sharp point, or the next segment inherits a stale handle.
   let lastHOut: EntityId | null = null
   // the first point's in-handle, if it was drawn smooth — the closing cubic's h2
   let firstHIn: EntityId | null = null
 
-  function resetCurveState() { curveDrag = null; lastHOut = null; firstHIn = null }
+  function resetCurveState() { curveDrag.value = null; lastHOut = null; firstHIn = null }
 
   // a handle point nothing uses any more: delete it (its collinear rule goes
   // with it). Never touches a point a line/circle/path still references.
@@ -928,35 +937,34 @@ export function usePen(opts: {
       firstHIn = null
       // no commit yet: the first point (and its handles, if dragged) settle as
       // one history entry in curveUp
-      curveDrag = { anchor: id, startX: x, startY: y, smooth: false }
+      curveDrag.value = { anchor: id, startX: x, startY: y, smooth: false }
       return
     }
     const pp = pendingPath.value
-    if (id === pp.anchors[0] && pp.anchors.length >= 2) { finishPath(true); curveDrag = null; return }  // clicked first point → close (finishPath commits)
-    if (id === pp.anchors[pp.anchors.length - 1]) { curveDrag = null; return }                            // ignore double-click same point
+    if (id === pp.anchors[0] && pp.anchors.length >= 2) { finishPath(true); curveDrag.value = null; return }  // clicked first point → close (finishPath commits)
+    if (id === pp.anchors[pp.anchors.length - 1]) { curveDrag.value = null; return }                            // ignore double-click same point
     pp.segments.push({ kind: 'cubic', h1: lastHOut, h2: null })
     pp.anchors.push(id)
-    curveDrag = { anchor: id, startX: x, startY: y, smooth: false }
+    curveDrag.value = { anchor: id, startX: x, startY: y, smooth: false }
   }
 
   function curveMove(x: number, y: number) {
     // reactive — drives the overlay's live preview and drag handles
     cursor.value = { x, y, shift: false }
-    if (!curveDrag) return
-    if (dist({ x, y }, { x: curveDrag.startX, y: curveDrag.startY }) > pxToUnits(BOW_PX, opts.view.value)) curveDrag.smooth = true
+    if (!curveDrag.value) return
+    if (!curveDrag.value.smooth && dist({ x, y }, { x: curveDrag.value.startX, y: curveDrag.value.startY }) > pxToUnits(BOW_PX, opts.view.value)) curveDrag.value = { ...curveDrag.value, smooth: true }
   }
 
   function curveUp(x: number, y: number) {
-    if (!curveDrag) return
-    const { anchor, smooth } = curveDrag
-    curveDrag = null
+    if (!curveDrag.value) return
+    const { anchor, smooth } = curveDrag.value
+    curveDrag.value = null
     const pp = pendingPath.value
     if (smooth) {
       const { hOut, hIn } = addSmoothHandles(doc.value, anchor, x, y)
       if (pp && pp.segments.length > 0) {
         const segIn = pp.segments[pp.segments.length - 1]
         if (segIn && segIn.kind === 'cubic') segIn.h2 = hIn
-        else dropHandle(hIn)   // (unreachable today: the segment into a Curve point is always cubic)
       }
       if (pp && pp.anchors[0] === anchor) firstHIn = hIn   // this point IS the path's first point
       lastHOut = hOut
@@ -967,7 +975,7 @@ export function usePen(opts: {
     runSolve()
     commitHistory()   // one entry for the whole down→(drag)→up gesture
   }
-  function getCurveDrag(): CurveDrag { return curveDrag }
+  function getCurveDrag(): CurveDrag { return curveDrag.value }
   // the handles held between clicks (not yet in any segment) — for the overlay's arms
   function getHeldHandles(): { lastHOut: EntityId | null; firstHIn: EntityId | null } { return { lastHOut, firstHIn } }
 
@@ -1174,7 +1182,7 @@ export function usePen(opts: {
     if (lastSeg && lastSeg.kind === 'cubic' && lastSeg.h2) candidates.push(lastSeg.h2)
     if (lastHOut) candidates.push(lastHOut)
     lastHOut = lastSeg && lastSeg.kind === 'cubic' ? lastSeg.h1 : null
-    curveDrag = null
+    curveDrag.value = null
     for (const id of candidates) {
       const p = doc.value.entities.find(e => e.id === id) as any
       if (p && p.kind === 'point' && !p.fixed && !isPointReferenced(doc.value, id)) deleteEntity(doc.value, id)
@@ -1195,7 +1203,7 @@ export function usePen(opts: {
     if (pendingPath.value && isDrawTool(tool.value) && isDrawTool(t)) {
       tool.value = t
       pathDrag = null
-      curveDrag = null
+      curveDrag.value = null
       dimBuffer.value = ''
       return
     }

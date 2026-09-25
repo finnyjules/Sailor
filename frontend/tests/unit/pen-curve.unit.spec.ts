@@ -103,6 +103,20 @@ describe('curve tool', () => {
     expect(doc.value.entities.filter(e => e.kind === 'point')).toHaveLength(2)
     expect(doc.value.constraints.filter(c => c.kind === 'collinear')).toHaveLength(0)
   })
+  it('finishing a lone smooth point drops its handles as an undoable step — no ghosts on undo/redo', () => {
+    const { doc, pen } = mk()
+    pen.selectTool('curve')
+    pen.curveDown(0, 0); pen.curveMove(1, 1); pen.curveUp(1, 1)      // anchor + 2 handles
+    expect(doc.value.entities).toHaveLength(3)
+    pen.finishPath(false)                                            // fewer than 2 points
+    expect(doc.value.entities).toHaveLength(1)
+    expect(doc.value.constraints).toHaveLength(0)
+    pen.undo()                                                       // back to anchor + handles
+    expect(doc.value.entities).toHaveLength(3)
+    pen.redo()
+    expect(doc.value.entities).toHaveLength(1)                       // the drop itself redoes
+    expect(pen.canRedo()).toBe(false)
+  })
   it('switching to another tool still ends the pending path', () => {
     const { doc, pen } = mk()
     pen.selectTool('curve')

@@ -162,8 +162,19 @@ const marks = computed(() => constraintMarks(doc.value))
 // clicks to remove by hand. They are the bulk of badge clutter on a
 // many-petal Repeat/Mirror drawing; hiding them is display-only.
 const STRUCTURAL_MARK_KINDS: ConstraintKind[] = ['rotatedFrom', 'mirroredFrom', 'equalDist']
+// a smooth point's "S" badge (its collinear rule [hIn, anchor, hOut]) sits at
+// a handle; while that path's handles are hidden the badge would float in empty
+// space, so it hides with them. (An arc tangent joint's collinear rule holds no
+// handle and is unaffected.)
+function hiddenHandleRule(m: { id: EntityId; kind: ConstraintKind }): boolean {
+  if (m.kind !== 'collinear') return false
+  const c = doc.value.constraints.find(x => x.id === m.id)
+  if (!c) return false
+  const handles = allHandleIds.value, visible = visibleHandleIds.value
+  return c.refs.some(r => handles.has(r) && !visible.has(r))
+}
 const visibleMarks = computed(() => marks.value
-  .filter(m => !STRUCTURAL_MARK_KINDS.includes(m.kind))
+  .filter(m => !STRUCTURAL_MARK_KINDS.includes(m.kind) && !hiddenHandleRule(m))
   .map(m => ({ m, s: toScreen(m) })))
 // persistent "R n.n" radius chips on every finished arc segment — pure read
 // of the doc, never solves; distinct from pathBowChip's live during-drag chip
@@ -649,6 +660,7 @@ onUnmounted(() => {
             :fill="pointFill(p)" :stroke="pointStroke(p, handle)" stroke-width="1.5"
             :style="{ cursor: tool === 'select' ? 'grab' : 'crosshair' }"
             @pointerdown="(ev) => onPointerDownPoint(p.id, ev)" @pointerup="(ev) => onPointerUpPoint(p.id, ev)"
+:pointer-events="handle ? 'all' : null"
             :data-point="p.id" :data-construction="p.construction ? '' : null" :data-handle="handle ? '' : null" />
     <template v-if="showLabels">
       <g v-for="{ m, s } in visibleMarks" :key="m.id" class="constraint-badge" pointer-events="auto" style="cursor: pointer"

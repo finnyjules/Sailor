@@ -155,26 +155,35 @@ test('path: click-and-drag bows a segment into a circular arc', async ({ page })
 })
 
 // Restored from the retired Bézier pen (78788db4a^), renamed pen → curve.
+// Each gesture step is its own page.evaluate, so Vue renders between them as
+// it does under a real pointer — a preview that only updates when everything
+// lands in one tick would pass falsely otherwise.
 test('curve: smooth blob stays smooth under handle and anchor drags', async ({ page }) => {
   await page.goto('/dev/sketch-draw')
   await page.waitForSelector('[data-ready]')
   await page.waitForFunction(() => !!(window as any).__sketchDraw)
 
-  const out = await page.evaluate(async () => {
+  const previewD = () => page.evaluate(() => document.querySelector('[data-path-preview]')?.getAttribute('d') || '')
+  const dragHandles = () => page.evaluate(() => !!document.querySelector('[data-drag-handles]'))
+  await page.evaluate(() => {
     const D = (window as any).__sketchDraw
     D.reset()
     D.setTool('curve')
-    // sharp point, then two smooth points (down→move→up), then close
     D.curveDown(2, 2); D.curveUp(2, 2)                        // sharp
-    D.curveDown(8, 2); D.curveMove(9.5, 3)                    // smooth — bending mid-drag
-    // the live preview updates through the same reactive state curveMove
-    // always touches, so this checks the real preview path, not a stand-in
-    await new Promise(r => setTimeout(r, 0))                  // let Vue flush the DOM patch
-    const previewEl = document.querySelector('[data-path-preview]')
-    const previewExists = !!previewEl
-    const previewHasCubic = (previewEl?.getAttribute('d') || '').includes(' C ')
-    const dragHandlesShown = !!document.querySelector('[data-drag-handles]')
-    D.curveUp(9.5, 3)
+  })
+  await page.evaluate(() => (window as any).__sketchDraw.curveDown(8, 2))
+  expect(await dragHandles()).toBe(false)                     // not dragged yet
+  await page.evaluate(() => (window as any).__sketchDraw.curveMove(9.5, 3))   // past the threshold → smooth
+  const d1 = await previewD()
+  expect(d1).toContain(' C ')                                 // bending, not a straight stand-in
+  expect(await dragHandles()).toBe(true)                      // the handles being pulled out are drawn
+  await page.evaluate(() => (window as any).__sketchDraw.curveMove(10, 3.5))
+  const d2 = await previewD()
+  expect(d2).not.toBe(d1)                                     // the preview follows the pointer mid-drag
+
+  const out = await page.evaluate(() => {
+    const D = (window as any).__sketchDraw
+    D.curveUp(10, 3.5)
     D.curveDown(6, 7); D.curveMove(4.5, 7.5); D.curveUp(4.5, 7.5) // smooth
     D.curveDown(2, 2); D.curveUp(2, 2)                        // click first point → close
     const path = D.doc.entities.find((e: any) => e.kind === 'path')
@@ -193,12 +202,9 @@ test('curve: smooth blob stays smooth under handle and anchor drags', async ({ p
     D.drag(path.anchors[0], 1.5, 1.5)
     return { closed: path.closed, anchors: path.anchors.length, smoothRules: col.length,
              cubics: path.segments.filter((s: any) => s.kind === 'cubic').length,
-             maxCross, status: D.status(), d: D.pathData(), previewExists, previewHasCubic, dragHandlesShown }
+             maxCross, status: D.status(), d: D.pathData() }
   })
 
-  expect(out.previewExists).toBe(true)      // live curve preview rendered mid-drag
-  expect(out.previewHasCubic).toBe(true)    // ...and it was bending, not just a straight stand-in
-  expect(out.dragHandlesShown).toBe(true)   // the handles being pulled out are drawn
   expect(out.closed).toBe(true)
   expect(out.anchors).toBe(3)
   expect(out.smoothRules).toBe(2)
@@ -206,6 +212,66 @@ test('curve: smooth blob stays smooth under handle and anchor drags', async ({ p
   expect(out.maxCross).toBeLessThan(0.01)   // smooth after the handle drag
   expect(out.status).toMatch(/^solved/)
   expect(out.d).toContain(' C ')            // real bezier output
+})
+
+test('curve: a handle takes the mouse — drag moves it (opposite follows), click + Delete makes the point sharp', async ({ page }) => {
+  await page.goto('/dev/sketch-draw')
+  await page.waitForSelector('[data-ready]')
+  await page.waitForFunction(() => !!(window as any).__sketchDraw)
+
+  const ids = await page.evaluate(() => {
+    const D = (window as any).__sketchDraw
+    D.reset()
+    D.setTool('curve')
+    D.curveDown(3, 3); D.curveUp(3, 3)
+    D.curveDown(9, 5); D.curveMove(11, 7); D.curveUp(11, 7)   // smooth middle point
+    D.curveDown(15, 3); D.curveUp(15, 3)
+    D.finishPath(false)
+    const path = D.doc.entities.find((e: any) => e.kind === 'path')
+    D.setTool('select')
+    return { path: path.id, hIn: path.segments[0].h2, hOut: path.segments[1].h1 }
+  })
+  // not selected: handles and the smooth badge are hidden
+  expect(await page.locator(`[data-point="${ids.hOut}"]`).count()).toBe(0)
+  expect(await page.locator('[data-constraint-kind="collinear"]').count()).toBe(0)
+  await page.evaluate((id) => (window as any).__sketchDraw.pick(id), ids.path)
+  await expect(page.locator('[data-constraint-kind="collinear"]')).toHaveCount(1)
+
+  const handle = page.locator(`[data-point="${ids.hOut}"]`)
+  const box = (await handle.boundingBox())!
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2
+  // the handle itself is what the pointer hits at its centre
+  expect(await page.evaluate(([x, y]) => (document.elementFromPoint(x, y) as Element | null)?.getAttribute('data-point'), [cx, cy])).toBe(ids.hOut)
+
+  const before = await page.evaluate((i) => {
+    const P = (id: string) => (window as any).__sketchDraw.doc.entities.find((e: any) => e.id === id)
+    return { out: { ...P(i.hOut) }, inn: { ...P(i.hIn) } }
+  }, ids)
+  await page.mouse.move(cx, cy)
+  await page.mouse.down()
+  await page.mouse.move(cx + 20, cy + 30, { steps: 5 })
+  await page.mouse.up()
+  const after = await page.evaluate((i) => {
+    const D = (window as any).__sketchDraw
+    const P = (id: string) => D.doc.entities.find((e: any) => e.id === id)
+    const hi = P(i.hIn), ho = P(i.hOut), an = P(D.doc.entities.find((e: any) => e.kind === 'path').anchors[1])
+    return { out: { ...ho }, inn: { ...hi }, cross: Math.abs((an.x - hi.x) * (ho.y - hi.y) - (an.y - hi.y) * (ho.x - hi.x)) }
+  }, ids)
+  expect(Math.hypot(after.out.x - before.out.x, after.out.y - before.out.y)).toBeGreaterThan(0.5)   // the handle moved
+  expect(Math.hypot(after.inn.x - before.inn.x, after.inn.y - before.inn.y)).toBeGreaterThan(0.01)  // the opposite one followed
+  expect(after.cross).toBeLessThan(0.01)                                                           // still smooth
+
+  // click the handle to select it, then Delete: the point goes sharp, the path stays
+  const box2 = (await handle.boundingBox())!
+  await page.mouse.click(box2.x + box2.width / 2, box2.y + box2.height / 2)
+  expect(await page.evaluate(() => (window as any).__sketchDraw.selection)).toEqual([ids.hOut])
+  await page.keyboard.press('Delete')
+  const res = await page.evaluate(() => {
+    const path = (window as any).__sketchDraw.doc.entities.find((e: any) => e.kind === 'path')
+    return path ? { h1: path.segments[1].h1, h2: path.segments[0].h2 } : null
+  })
+  expect(res).not.toBeNull()
+  expect(res!.h1).toBeNull()
 })
 
 test('curve: Pen and Curve build one path — line segment then curve segment', async ({ page }) => {
