@@ -54,9 +54,12 @@ export function makeBackgroundTarget(o: {
   base: EffectDef | null
 }): EffectTarget {
   const original = o.read()
+  const image = once(o.snapshot)
   return {
     key: 'frame-background', label: 'Background', base: o.base,
-    image: once(o.snapshot),
+    image,
+    // The Frame as it is, background included: the same still the takes are written against.
+    current: image,
     preview: id => o.show(id ? { paint: backgroundShaderPaint(original, id, {}) } : null),
     apply: (id, values) => { o.show(null); o.commit(backgroundShaderPaint(original, id, values)) },
   }
@@ -79,6 +82,8 @@ export function makeLayerTarget(o: {
   previewing: (on: boolean) => void
   redraw: () => void
   snapshot: () => CanvasImageSource | null
+  /** The layer as it is now (the host's preview), for the strip's Current tile. */
+  current?: () => CanvasImageSource | null
 }): EffectTarget & { layerId: string } {
   const index = o.active()
   const original = { ...o.effects()[index]! }
@@ -97,6 +102,7 @@ export function makeLayerTarget(o: {
     layerId: o.add ? tempId : original.layerId,
     key: 'shader-studio', label: o.label, base: o.base,
     image: once(o.snapshot),
+    ...(o.current ? { current: o.current } : {}),
     preview: (id) => {
       if (id) return set(id, {})
       const fx = o.effects()

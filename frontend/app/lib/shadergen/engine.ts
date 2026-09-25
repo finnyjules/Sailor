@@ -13,7 +13,7 @@
  */
 import type { GenTake } from '~~/shared/shadergen/contract'
 import { staticCheck } from './staticCheck'
-import { buildGenPrompt, buildRepairPrompt, buildRevisePrompt, parseGenResponse, rewriteCompileLog, type GenBase, type GenRequest } from './prompt'
+import { buildGenPrompt, buildRepairPrompt, buildRevisePrompt, LOOP_CONVERSION, parseGenResponse, rewriteCompileLog, type GenBase, type GenRequest } from './prompt'
 import type { Flag } from './renderChecks'
 
 export interface Usage { input_tokens: number; output_tokens: number }
@@ -49,8 +49,8 @@ export interface EngineDeps {
   now?: () => number
   /** A take passed every check — in arrival order; `slot` is its take angle (0-based). */
   onTake?: (t: EngineTake, slot: number) => void
-  /** A slot gave up (no take is coming from it). */
-  onFailure?: (slot: number) => void
+  /** A slot gave up (no take is coming from it); `failure.log` says why. */
+  onFailure?: (slot: number, failure: EngineFailure) => void
 }
 
 export interface EngineInput {
@@ -93,7 +93,7 @@ const isTake = (r: EngineTake | EngineFailure): r is EngineTake => 'take' in r
 function avoidFor(flags: Flag[]): string {
   const looks = flags.filter(f => f !== 'does not loop')
   const parts = looks.length ? [`the render was ${looks.join(', ')}`] : []
-  if (flags.includes('does not loop')) parts.push('the render did not loop seamlessly: its last frame jumps back to the first. Build all motion from loopPhase() or loopCircle(), in whole cycles, never raw u_time')
+  if (flags.includes('does not loop')) parts.push(`the render did not loop seamlessly: its last frame jumps back to the first. Build all motion from loopPhase() or loopCircle(), in whole cycles, never raw u_time. ${LOOP_CONVERSION.replace(/\.$/, '')}`)
   return parts.join('; ')
 }
 
@@ -219,7 +219,7 @@ export async function generateTakes(input: EngineInput, deps: EngineDeps): Promi
   // slot is regenerated and reported again, so `onTake`/`onFailure` may fire twice for one slot.
   const report = (r: EngineTake | EngineFailure, slot: number) => {
     if (isTake(r)) deps.onTake?.(r, slot)
-    else deps.onFailure?.(slot)
+    else deps.onFailure?.(slot, r)
     return r
   }
 

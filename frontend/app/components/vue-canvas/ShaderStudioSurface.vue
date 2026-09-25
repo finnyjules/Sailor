@@ -922,6 +922,8 @@ function shaderStudioEffectTarget(o: { add: boolean; base: EffectDef | null; fre
     previewing: (on) => { effectPreviewing.value = on },
     redraw: () => { void renderFrame(0) },
     snapshot: () => snapshotSource(lastSourceFrame),
+    // The preview as it is when the set starts (read once, before any take is shown).
+    current: () => canvas.value,
   })
   takeLayerId.value = t.layerId
   return t

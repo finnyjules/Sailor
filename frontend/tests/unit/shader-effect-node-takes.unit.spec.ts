@@ -57,11 +57,13 @@ describe('ShaderEffectNode: effect takes', () => {
   it('answers with its saved effect and that effect’s name, even while a take is previewed', async () => {
     const { w } = node()
     await flush()
-    expect(ask()).toEqual({ image: null, effectId: 'water_ripple', title: 'Water ripple' })
+    expect(ask()).toMatchObject({ image: null, effectId: 'water_ripple', title: 'Water ripple' })
+    // …and its preview as it is, for the strip's Current tile.
+    expect((ask() as any).current).toBeInstanceOf(HTMLCanvasElement)
     fire('sailor:shaderEffectPreview', { nodeId: 's1', effectId: 'draft_1_0' })
     await nextTick()
     expect(w.text()).toContain('Take') // the header shows the take
-    expect(ask()).toEqual({ image: null, effectId: 'water_ripple', title: 'Water ripple' })
+    expect(ask()).toMatchObject({ image: null, effectId: 'water_ripple', title: 'Water ripple' })
     expect(ask('other')).toBeNull() // another node's question is not ours
   })
 

@@ -322,7 +322,7 @@ function onEffectTarget(e: Event) {
   // The saved effect (never a previewed take) and the name the header shows for it.
   const own = String(widgetVal('effect') ?? '')
   const def = catalog.value?.effects.find(x => x.id === resolveEffectId(own)) ?? null
-  d.reply({ image: baseImage.value ?? null, effectId: own, title: def?.name ?? '' })
+  d.reply({ image: baseImage.value ?? null, effectId: own, title: def?.name ?? '', current: previewCanvas.value })
 }
 function onEffectPreview(e: Event) {
   const d = (e as CustomEvent).detail

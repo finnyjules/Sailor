@@ -12,9 +12,22 @@ export const TAKES_PER_SET = 3
 export const CURRENT = '__current__'
 
 export type TileState = 'pending' | 'ready' | 'failed'
-/** `reason` (a failed tile only): 'credits' when it was refused for want of credits — the tile
- *  says so plainly (and the strip gives the credits sentence) instead of "Didn't come back". */
-export interface TakeTile { state: TileState; takeId: string | null; promptId: string | null; thumb: string | null; reason?: 'credits' }
+/** Why a failed tile failed, when there is something plainer to say than "Didn't come back":
+ *  'credits' — refused for want of credits (the strip gives the credits sentence too); the others
+ *  are effect takes the render checks threw away (takeFailureReason). */
+export type TileFailReason = 'credits' | 'loop' | 'slow' | 'unchanged' | 'looks'
+/** `reason`: a failed tile only. */
+export interface TakeTile { state: TileState; takeId: string | null; promptId: string | null; thumb: string | null; reason?: TileFailReason }
+
+const FAILED_TILE_TEXT: Record<TileFailReason, string> = {
+  credits: 'Not enough credits',
+  loop: 'Didn’t loop cleanly',
+  slow: 'Too slow to draw',
+  unchanged: 'Changed nothing',
+  looks: 'Looked broken',
+}
+/** What a failed tile says. */
+export const failedTileText = (reason: TileFailReason | undefined): string => (reason ? FAILED_TILE_TEXT[reason] : 'Didn’t come back')
 export interface TakesSession {
   nodeId: string
   nodeLabel: string

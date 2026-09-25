@@ -416,7 +416,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   // The node answers synchronously with its picture, its effect and its shown
   // name; previews and the kept effect go back to it by window event.
   function effectTargetFor(nodeId: string, baseEffectId: string | null): EffectTarget | null {
-    type Info = { image: CanvasImageSource | null; effectId: string; title: string }
+    type Info = { image: CanvasImageSource | null; effectId: string; title: string; current?: CanvasImageSource | null }
     let info: Info | null = null
     window.dispatchEvent(new CustomEvent('sailor:shaderEffectTarget', { detail: { nodeId, reply: (o: Info) => { info = o } } }))
     if (!info) return null
@@ -428,6 +428,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
       label: i.title || targetFor(nodeId)?.label || '',
       base: getEffectSync(baseEffectId ?? i.effectId),
       image: () => i.image,
+      current: () => i.current ?? null,
       preview: effectId => fire('sailor:shaderEffectPreview', { effectId }),
       apply: (effectId, values) => fire('sailor:shaderEffectApply', { effectId, values }),
     }

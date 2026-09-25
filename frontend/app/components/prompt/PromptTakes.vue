@@ -4,7 +4,7 @@
 // the session and previews on the work. Identical in every host (spec §2.1a).
 import { computed } from 'vue'
 import { X } from 'lucide-vue-next'
-import { CURRENT, isTakesWorking, takesStatus, type TakesSession } from '~/lib/prompt/takesSession'
+import { CURRENT, failedTileText, isTakesWorking, takesStatus, type TakesSession } from '~/lib/prompt/takesSession'
 
 // `saving`: a Keep is being saved (effect takes, stage 5) — Keep is off until it settles.
 // `error`: why the last Keep failed (or why takes were refused), shown on the strip while it stays open.
@@ -73,7 +73,7 @@ function onFocusOut(e: FocusEvent) {
           <span class="label text-white/35">Working…</span>
         </template>
         <template v-else>
-          <span class="thumb grid place-items-center bg-white/[0.03] px-1 text-center text-[11px] text-white/40">{{ t.reason === 'credits' ? 'Not enough credits' : 'Didn’t come back' }}</span>
+          <span class="thumb grid place-items-center bg-white/[0.03] px-1 text-center text-[11px] text-white/40">{{ failedTileText(t.reason) }}</span>
           <span class="label text-white/35">Take {{ i + 1 }}</span>
         </template>
       </div>

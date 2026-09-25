@@ -37,6 +37,22 @@ const READS_INPUT_TAKES = [
   [S.popart![1]!, S.oil![1]!, S.ink![1]!],
   [S.lava![3]!, S.oil![0]!, S.popart![3]!],
 ]
+/** A loop-correct take that costs next to nothing to draw: a slow hue swing over the picture. */
+const CHEAP_LOOPED_TAKE = {
+  name: 'Hue swing', animated: true, generative: false,
+  params: [
+    { uniform: 'u_amount', label: 'Amount', type: 'float', min: 0, max: 1, step: 0.01, default: 0.6 },
+    { uniform: 'u_warm', label: 'Warmth', type: 'float', min: 0, max: 1, step: 0.01, default: 0.5 },
+    { uniform: 'u_cycles', label: 'Cycles', type: 'float', min: 1, max: 4, step: 1, default: 1 },
+  ],
+  body: `uniform float u_amount; uniform float u_warm; uniform float u_cycles;
+void main(){
+  vec3 c = tex(v_texCoord);
+  float s = 0.5 + 0.5 * sin(6.28318530718 * loopPhase() * max(1.0, floor(u_cycles + 0.5)));
+  vec3 tint = mix(vec3(0.2, 0.5, 1.0), vec3(1.0, 0.55, 0.2), u_warm);
+  fragColor0 = vec4(mix(c, c * tint * 1.6, u_amount * s), 1.0);
+}`,
+}
 const PRICE = '~$0.24–0.42'
 /** One more picture on every call (a reference, ≤ 512 px: 350 input tokens). */
 const PRICE_WITH_REFERENCE = '~$0.24–0.43'
@@ -241,6 +257,29 @@ test.describe('shader generation (stage 5)', () => {
     const retries = gen.filter(b => String(b.prompt).includes('the render did not loop seamlessly'))
     expect(retries.length).toBeGreaterThanOrEqual(1)
     expect(await tileIn(page, 'ready').count()).toBeGreaterThanOrEqual(1)
+  })
+
+  test('a large source photo does not make takes fail: the take renderer judges and times them on a small copy', async ({ page }) => {
+    // Julien, 2026-09-25: a Remix over a loaded photo came back "Didn't come back" ×3. The take
+    // renderer uploaded the full-size photo on every render, the timed "heavy" frames included, so
+    // the cost check measured the photo's upload (≈1 s a frame at 4096², noise ≫ 8 ms), not the shader.
+    await page.goto('/_nuxt/lib/shadergen/browserRenderer.ts')
+    const flags = await page.evaluate(async (take) => {
+      const c = document.createElement('canvas'); c.width = 4096; c.height = 3072
+      const ctx = c.getContext('2d')!
+      const g = ctx.createLinearGradient(0, 0, 4096, 3072); g.addColorStop(0, '#20324a'); g.addColorStop(1, '#e0b080')
+      ctx.fillStyle = g; ctx.fillRect(0, 0, 4096, 3072)
+      for (let i = 0; i < 4000; i++) { ctx.fillStyle = `hsl(${i % 360} 60% ${30 + (i % 50)}%)`; ctx.fillRect((i * 7919) % 4096, (i * 104729) % 3072, 40, 40) }
+      const blob: Blob = await new Promise(res => c.toBlob(b => res(b!), 'image/jpeg', 0.9))
+      const img = new Image(); img.src = URL.createObjectURL(blob); await img.decode()
+      const { createBrowserTakeRenderer } = await import('/_nuxt/lib/shadergen/browserRenderer.ts' as string)
+      const r = createBrowserTakeRenderer(img)
+      const out: string[][] = []
+      for (let k = 0; k < 3; k++) { const t = { ...take }; if (r.compile(t)) return [['compile failed']]; out.push(r.judge(t).flags) }
+      r.dispose?.()
+      return out
+    }, CHEAP_LOOPED_TAKE)
+    expect(flags).toEqual([[], [], []])
   })
 
   test('Stop mid-run clears partial takes and puts the layer stack back', async ({ page }) => {

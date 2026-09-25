@@ -67,6 +67,20 @@ export function stripSuppliedLines(source: string): string {
   return source.split('\n').filter(line => !SUPPLIED_LINES.some(re => re.test(line))).join('\n').trim()
 }
 
+/** A base or reference effect's own code: without the preamble lines and, for a generated effect
+ *  (a My effect's source is preamble + Sailor's helpers + its body), without the helpers — shown
+ *  as part of "its source" they invite the model to copy them into the body, which can't compile. */
+export function baseCode(source: string): string {
+  return stripSuppliedLines(source.replace(SHADERGEN_HELPERS, ''))
+}
+
+/** Motion driven from u_time directly (the helpers, which read it, are gone by now). */
+const RAW_TIME = /\bu_time\b/
+/** How to rebuild a base's raw-u_time motion on the loop: the two conversions that look right
+ *  and still jump at the wrap (a probe of "Prism drift", 2026-09-25). */
+export const LOOP_CONVERSION = 'Every rate that multiplies loopPhase() must be a whole number — a per-element rate such as 3.0 + h * 2.0 is not; round it with floor(x + 0.5) — and a drift that moves a position or a noise offset must go round with loopCircle(), not grow with loopPhase(), which jumps back at the wrap.'
+const RAW_TIME_BASE_NOTE = `This effect's motion runs on raw u_time, so it jumps where the loop wraps: rebuild that motion on the loop. ${LOOP_CONVERSION}`
+
 const HELPER_WARNING = 'Sailor already provides the preamble and the helpers h21, vnoise, fbm, tex, blur9, luma, ASP, hsv2rgb, thinfilm, LOOP, loopPhase and loopCircle; if this source defines functions with those names, rename or drop them — redefining them will not compile.'
 
 export function buildGenPrompt(r: GenRequest): string {
@@ -74,10 +88,11 @@ export function buildGenPrompt(r: GenRequest): string {
   if (r.referencePicture) parts.push(picturesNote(r.referencePicture))
   if (r.noSourcePicture) parts.push(NO_SOURCE_NOTE)
   if (r.base) {
-    parts.push(`Start from this existing effect, "${r.base.name}". Keep what serves the request and change whatever you need to. Its source and dials:\n\`\`\`glsl\n${stripSuppliedLines(r.base.source)}\n\`\`\`\nDials: ${JSON.stringify(r.base.params)}\n${HELPER_WARNING}`)
+    const code = baseCode(r.base.source)
+    parts.push(`Start from this existing effect, "${r.base.name}". Keep what serves the request and change whatever you need to. Its source and dials:\n\`\`\`glsl\n${code}\n\`\`\`\nDials: ${JSON.stringify(r.base.params)}\n${HELPER_WARNING}${RAW_TIME.test(code) ? `\n${RAW_TIME_BASE_NOTE}` : ''}`)
   }
   for (const ref of r.references ?? []) {
-    parts.push(`For reference only, a related existing effect, "${ref.name}":\n\`\`\`glsl\n${stripSuppliedLines(ref.source)}\n\`\`\`\n${HELPER_WARNING}`)
+    parts.push(`For reference only, a related existing effect, "${ref.name}":\n\`\`\`glsl\n${baseCode(ref.source)}\n\`\`\`\n${HELPER_WARNING}`)
   }
   if (r.examples?.length) {
     const lines = r.examples.map(ex => `"${ex.request}" (${ex.name}) — "${ex.take.name}":\nDials: ${JSON.stringify(ex.take.params)}\n\`\`\`glsl\n${ex.take.body}\n\`\`\``)

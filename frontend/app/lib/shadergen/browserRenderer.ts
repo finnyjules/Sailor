@@ -34,11 +34,37 @@ export const JUDGE_LOOP = 4
 /** One step either side of the wrap, for the seamless-loop check. */
 const LOOP_STEP = JUDGE_LOOP / 60
 
+/** Takes are judged on a copy of the picture at most this big on its long edge. The renderer
+ *  uploads its picture on every draw, the timed "heavy" frames included: a full-size photo made
+ *  every take "heavy" (a 4096 px upload is ≈1 s a frame; its noise alone is far over 8 ms). */
+export const TAKE_SOURCE_EDGE = 512
+
+/** The size a picture is copied at for judging: long edge ≤ TAKE_SOURCE_EDGE, aspect kept. */
+export function takeSourceSize(w: number, h: number): { w: number; h: number } {
+  const k = Math.min(1, TAKE_SOURCE_EDGE / Math.max(w, h, 1))
+  return { w: Math.max(1, Math.round(w * k)), h: Math.max(1, Math.round(h * k)) }
+}
+
+/** A still copy of the picture at the judging size (also a fixed frame of a canvas that redraws). */
+function judgingCopy(src: HTMLImageElement | HTMLCanvasElement): HTMLImageElement | HTMLCanvasElement {
+  const w = (src as HTMLImageElement).naturalWidth || src.width
+  const h = (src as HTMLImageElement).naturalHeight || src.height
+  if (!w || !h) return src
+  const size = takeSourceSize(w, h)
+  const c = document.createElement('canvas')
+  c.width = size.w; c.height = size.h
+  const ctx = c.getContext('2d')
+  if (!ctx) return src
+  ctx.drawImage(src, 0, 0, size.w, size.h)
+  return c
+}
+
 function passesFor(def: EffectDef, t: number): ShaderPass[] {
   return expandPasses(def.id, def.source, { ...resolveUniforms(def, {}), u_time: t, u_loop: JUDGE_LOOP, u_seed: 0 }, undefined, 1)
 }
 
-export function createBrowserTakeRenderer(source: HTMLImageElement | HTMLCanvasElement): TakeRenderer {
+export function createBrowserTakeRenderer(picture: HTMLImageElement | HTMLCanvasElement): TakeRenderer {
+  const source = judgingCopy(picture)
   const renderer = new ShaderFxRenderer()
   const defs = new WeakMap<GenTake, EffectDef>()
   let seq = 0

@@ -221,7 +221,8 @@ describe('useEffectTakes', () => {
     const run = api.start('rain', target())
     for (let r = 0; r < 3; r++) for (let s = 0; s < 3; s++) release(s, r)
     await run
-    expect(api.session.value!.tiles.every(t => t.state === 'failed' && !t.reason)).toBe(true)
+    // Each tile says why in its own words (a check's reason), never that credits ran out.
+    expect(api.session.value!.tiles.every(t => t.state === 'failed' && t.reason === 'looks')).toBe(true)
     expect(api.error.value).toBe('')
   })
 

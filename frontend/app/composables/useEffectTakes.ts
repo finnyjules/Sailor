@@ -20,6 +20,7 @@ import { useMyEffects } from '~/composables/useMyEffects'
 import { MY_EFFECTS_ERRORS } from '~/lib/myEffects/client'
 import { REFERENCE_ONLY_REQUEST } from '~/lib/prompt/referencePicture'
 import { chooseTile, CURRENT, failPending, hoverTile, markCreditRefusals, openTakes, shownTakeId, type TakesSession } from '~/lib/prompt/takesSession'
+import { takeFailureReason } from '~/lib/shadergen/failureReason'
 import type { EffectDef, ParamValue } from '~/lib/shaderfx/types'
 
 export interface EffectTarget {
@@ -36,6 +37,9 @@ export interface EffectTarget {
   remix?: boolean
   /** The picture under the effect; null → a neutral placeholder (and no image to the model). */
   image: () => CanvasImageSource | null
+  /** The target as it is now (its effect drawn), for the strip's Current tile. Read once, when a
+   *  set starts, before any take is shown. Absent or null: the Current tile stays empty. */
+  current?: () => CanvasImageSource | null
   /** Show a take (a registered draft id) on the target; null restores what was there. */
   preview: (effectId: string | null) => void
   /** Keep: point the target at a saved effect with these dial values. */
@@ -67,6 +71,22 @@ export interface EffectTakesDeps {
   register?: typeof registerEffects
   unregister?: typeof unregisterEffects
   onContextChange?: (fn: (s: 'lost' | 'restored') => void) => () => void
+  /** A small data URL of a picture (the Current tile's thumbnail). */
+  thumbnail?: (src: CanvasImageSource) => string | null
+}
+
+const THUMB_EDGE = 256
+/** A small JPEG of a picture, long edge ≤ 256 px; null when it can't be drawn. */
+function thumbnailOf(src: CanvasImageSource): string | null {
+  const w = (src as any).naturalWidth || (src as any).videoWidth || (src as any).width
+  const h = (src as any).naturalHeight || (src as any).videoHeight || (src as any).height
+  if (!w || !h) return null
+  const k = Math.min(1, THUMB_EDGE / Math.max(w, h))
+  const c = document.createElement('canvas')
+  c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k))
+  const ctx = c.getContext('2d')
+  if (!ctx) return null
+  try { ctx.drawImage(src, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', 0.8) } catch { return null }
 }
 
 export interface EffectTakes {
@@ -133,6 +153,7 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
   const apiKey = () => useLocalSettings().getLocalSetting('Sailor.AI.AnthropicApiKey') ?? ''
   const callModel: EngineDeps['callModel'] = deps.callModel ?? ((p, i, s) => makeCallModel(apiKey(), 'shader')(p, i, s))
   const makeRenderer = deps.renderer ?? ((src: CanvasImageSource) => createBrowserTakeRenderer(src as HTMLImageElement | HTMLCanvasElement))
+  const thumbnail = deps.thumbnail ?? thumbnailOf
 
   const session = shallowRef<TakesSession | null>(null)
   const target = shallowRef<EffectTarget | null>(null)
@@ -168,7 +189,9 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
     reference.value = o.reference ?? null
     // A picture sent with no words asks to match its look.
     request.value = text.trim() || (reference.value ? REFERENCE_ONLY_REQUEST : '')
-    session.value = { ...openTakes({ nodeId: t.key, nodeLabel: t.label, request: request.value, takes: [] }), loopDone: false }
+    const now = t.current?.() ?? null
+    const currentThumb = now ? thumbnail(now) : null
+    session.value = { ...openTakes({ nodeId: t.key, nodeLabel: t.label, request: request.value, takes: [], images: currentThumb ? [currentThumb] : null }), loopDone: false }
     running.value = true
     let renderer: TakeRenderer | null = null
     try {
@@ -192,14 +215,17 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
           session.value = { ...s, tiles }
         },
         // A slot gave up: a tile shows failed at once rather than waiting for the set to end. The
-        // last pending one, so takes still arriving keep filling the strip from the left.
-        onFailure: () => {
+        // last pending one, so takes still arriving keep filling the strip from the left. Why is
+        // logged (every attempt), and said on the tile when there is a plain reason.
+        onFailure: (slot, failure) => {
+          console.warn(`[shader-gen] take ${slot + 1} didn’t come back after ${failure.modelCalls} model call(s):`, failure.log.join(' | '))
           const s = session.value
           if (run !== seq || !s) return
           const i = s.tiles.map(x => x.state).lastIndexOf('pending')
           if (i < 0) return
           const tiles = s.tiles.slice()
-          tiles[i] = { ...tiles[i]!, state: 'failed' }
+          const reason = takeFailureReason(failure.log)
+          tiles[i] = { ...tiles[i]!, state: 'failed', ...(reason ? { reason } : {}) }
           session.value = { ...s, tiles }
         },
       })
