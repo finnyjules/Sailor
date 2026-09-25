@@ -25,6 +25,7 @@ import { capabilityBoosts, capabilityKeywords, capabilityNodeTypes, studioNodeTy
 import { studioTunerFor } from '~/lib/agent/studioTune'
 import type { ProposedChange } from '~/composables/useLayoutAgent'
 import { useAgentActivity } from '~/composables/useAgentActivity'
+import { useNextStepsStrip } from '~/composables/useNextStepsStrip'
 import { registerWireDrag } from '~/composables/useWireDrag'
 import AgentSweep from '~/components/agent/AgentSweep.vue'
 import { useCanvasHistory } from '~/composables/useCanvasHistory'
@@ -1719,6 +1720,11 @@ const multiSelectionKeyCode = ['Shift', 'Meta', 'Control']
 
 // Subgraph navigation
 const { isInsideSubgraph, breadcrumbs, enterSubgraph, exitToLevel, saveCurrentSubgraph, reset: resetNav } = useSubgraphNavigation()
+// Reviewer-found fixes are keyed by node id, and ids are per-graph (small ints
+// reused across workflows) — so every time a different graph lands on this
+// canvas (tab / project / canvas switch, subgraph enter or exit, a fresh start)
+// they are dropped, or a badge would appear on another graph's node.
+const { clearFixes } = useNextStepsStrip()
 const rootWorkflow = ref<any>(null) // Full workflow with definitions
 
 // ── Node factory ─────────────────────────────────────────────────────────────
@@ -2276,6 +2282,7 @@ watch(
     lastWorkflowRef = wf
     rootWorkflow.value = wf
     resetNav()
+    clearFixes()
     applyingWorkflow.value = true
     try {
       await fetchObjectInfo()
@@ -2783,6 +2790,7 @@ function handleNodeDoubleClick({ node }: { node: any }) {
   if (!innerWorkflow) return
 
   // Render the inner subgraph workflow
+  clearFixes()
   convertFromLiteGraph(innerWorkflow, rootWorkflow.value.definitions)
   nextTick(() => fitView({ padding: 0.2 }))
 }
@@ -2799,6 +2807,7 @@ function handleBreadcrumbNavigate(index: number) {
     convertToLiteGraph,
   )
   if (!restored) return
+  clearFixes()
 
   if (index === -1) {
     // Going back to root: re-convert from the root workflow (with updated definitions)
@@ -7947,6 +7956,7 @@ async function materializeStart(pick: StartPickId | null, opts: { isCurrent?: ()
   }
 
   // ── Synchronous from here to the edges: no await, so no tab switch or load can land mid-build.
+  clearFixes()
   const COL_W = 320
   const minted = new Map<string, any>()
   for (const pn of plan.nodes) {
