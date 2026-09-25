@@ -26,6 +26,32 @@ g.createError = (opts: { statusCode: number, message?: string, statusMessage?: s
   return err
 }
 
+/**
+ * Fix round 2: readBoundedJsonBody (server/utils/myEffectsStore.ts) reads the
+ * REAL h3 getRequestHeader/readRawBody, so those two are mocked here — the
+ * same pattern tests/unit/engine-upload-ownership.unit.spec.ts uses for
+ * engineGate.ts's identical two-step size guard. Everything else from 'h3'
+ * (createError, etc.) passes through untouched.
+ *
+ * requestHeader reads event.node.req.headers, same shape `ev()` already
+ * builds for the round-1 Content-Length tests. rawBody defaults to
+ * JSON-stringifying `event.body` (so every existing test, which sets `body`
+ * and expects it to arrive parsed, is unaffected) unless the event carries
+ * `rawBytes`, in which case it returns an oversize buffer regardless of any
+ * declared Content-Length — simulating a chunked/headerless request whose
+ * ACTUAL bytes are over cap.
+ */
+const requestHeader = vi.fn((event: any, name: string) => event?.node?.req?.headers?.[name])
+const rawBody = vi.fn(async (event: any) => {
+  if (event?.rawBytes !== undefined) return Buffer.alloc(event.rawBytes, 0x61)
+  if (event?.body === undefined) return undefined
+  return Buffer.from(JSON.stringify(event.body))
+})
+vi.mock('h3', async (orig) => {
+  const actual = await (orig as () => Promise<any>)()
+  return { ...actual, getRequestHeader: (...a: any[]) => requestHeader(...a), readRawBody: (...a: any[]) => rawBody(...a) }
+})
+
 const CLERK_KEY = 'NUXT_CLERK_SECRET_KEY'
 const savedClerk = process.env[CLERK_KEY]
 const savedDataDir = process.env.SAILOR_DATA_DIR
@@ -97,9 +123,10 @@ afterEach(() => {
   else process.env[CLERK_KEY] = savedClerk
 })
 
-const ev = (o: { id?: string, body?: any, userId?: string | null, contentLength?: number } = {}) => ({
+const ev = (o: { id?: string, body?: any, userId?: string | null, contentLength?: number, rawBytes?: number } = {}) => ({
   params: o.id ? { id: o.id } : {},
   body: o.body,
+  rawBytes: o.rawBytes,
   context: { userId: o.userId ?? null },
   node: { req: { headers: o.contentLength === undefined ? {} : { 'content-length': String(o.contentLength) } } },
 })
@@ -168,6 +195,16 @@ describe('/api/my-effects (local)', () => {
     await put(ev({ id: A, body: rec(A) }))
     await expect(patch(ev({ id: A, body: { name: 123 } }))).rejects.toMatchObject({ statusCode: 400 })
     await expect(patch(ev({ id: A, body: { name: { x: 1 } } }))).rejects.toMatchObject({ statusCode: 400 })
+  })
+
+  it('refuses an oversize body with NO Content-Length header, from its actual bytes (fix round 2)', async () => {
+    // No contentLength set — the declared-length check no-ops. rawBytes makes
+    // readRawBody return an over-cap buffer regardless, simulating a chunked
+    // or headerless request. This must be caught BEFORE JSON.parse runs — a
+    // truly unparsed buffer of 'a's would throw a JSON syntax error, not a
+    // clean 413, if the size check ran after parsing instead of before it.
+    await expect(put(ev({ id: A, rawBytes: MY_EFFECT_MAX_BYTES + 1 }))).rejects.toMatchObject({ statusCode: 413 })
+    await expect(patch(ev({ id: A, rawBytes: MY_EFFECT_MAX_BYTES + 1 }))).rejects.toMatchObject({ statusCode: 413 })
   })
 
   it('keeps the stored createdAt on overwrite (review #8)', async () => {

@@ -7,7 +7,7 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
-import { createError } from 'h3'
+import { createError, getRequestHeader, readRawBody, type H3Event } from 'h3'
 import { cleanName, MY_EFFECT_ID_RE, MY_EFFECT_LIMITS, MY_EFFECT_MAX_BYTES, recordByteSize, validateMyEffect, type MyEffectRecord } from '../../shared/myEffects/record'
 import { deployMode } from './deployMode'
 import { storeDir } from './dataDir'
@@ -23,20 +23,28 @@ export function assertId(id: unknown): string {
 }
 
 /**
- * review #1: refuse an over-cap PUT/PATCH body from its declared Content-Length,
- * BEFORE readBody buffers it — the same pattern as engineGate.ts's upload gate.
- * Reads event.node.req.headers directly (the same place h3's own
- * getRequestHeader reads from) rather than importing h3's helper, which
- * requires a real H3Event shape this module's callers (and its unit tests)
- * don't always construct. A lying (or absent) Content-Length is still caught
- * by the byte-size re-check in writeMyEffect once the body is parsed.
+ * Fix round 2 (rereview #1): the round-1 guard only checked the DECLARED
+ * Content-Length and no-op'd when it was absent, so a chunked or headerless
+ * request was still fully buffered and JSON.parse'd before any size check —
+ * exactly the gap engineGate.ts's upload gate closes with a two-step check
+ * (`handleHostedUpload` at server/utils/engineGate.ts:384-398, the
+ * userscoped-body path at :1023-1031): the declared length first, THEN
+ * `readRawBody` and the ACTUAL byte length, both before the body is parsed.
+ * This reads the PUT/PATCH body the same way — as raw bytes, capped, THEN
+ * JSON.parse'd — so a missing or lying Content-Length can no longer buy a
+ * free pass past the cap.
  */
-export function refuseOversizedBody(event: { node?: { req?: { headers?: Record<string, unknown> } } }): void {
-  const raw = event?.node?.req?.headers?.['content-length']
-  const declared = Number(raw)
-  if (raw !== undefined && Number.isFinite(declared) && declared > MY_EFFECT_MAX_BYTES) {
+export async function readBoundedJsonBody(event: H3Event): Promise<unknown> {
+  const declared = Number(getRequestHeader(event, 'content-length'))
+  if (Number.isFinite(declared) && declared > MY_EFFECT_MAX_BYTES) {
     throw createError({ statusCode: 413, statusMessage: 'That effect is too large to save' })
   }
+  const raw = await readRawBody(event, false)
+  if (raw && raw.length > MY_EFFECT_MAX_BYTES) {
+    throw createError({ statusCode: 413, statusMessage: 'That effect is too large to save' })
+  }
+  if (!raw) return {}
+  try { return JSON.parse(raw.toString('utf8')) } catch { throw createError({ statusCode: 400, statusMessage: 'Invalid JSON body' }) }
 }
 
 async function readAll(): Promise<MyEffectRecord[]> {
