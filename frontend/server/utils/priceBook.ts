@@ -13,6 +13,7 @@ import { creditsForUsd } from '../../shared/pricing/markup'
 import { MODEL_PRICED_NODE_CLASSES, REMOTE_VIDEO_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, SHARED_PRICED_CLASS_SET, priceNode } from '../../shared/pricing/nodePrice'
 import { VIDEO_RATES } from '../../shared/pricing/videoRates'
 import type { InputSeconds } from '../../shared/pricing/clipSettings'
+import type { RunnerFamily } from '../../shared/runner/families'
 export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, REMOTE_VIDEO_NODE_CLASSES }
 // lineup-p2 (model line-up Task P2): video priced per second of the clip
 // actually sent (shared/pricing/videoRates.ts), replacing one flat figure per model.
@@ -77,7 +78,11 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // lineup-f9 (Task F9): Seedream 5 Pro in Edit an image, Replicate's $0.045 /
 // $0.09 an image at 1K / 2K, the card References already uses (runner-only,
 // family seedream-5-pro-edit, no backup). No other price moves.
-export const PRICE_BOOK_VERSION = 'lineup-f9'
+// lineup-f10 (Task F10): Rotate camera on Qwen Image Edit 2511 with the
+// multiple-angles LoRA, fal's $0.035 a megapixel of the picture made (the
+// input's size), while its switch is on (family qwen-2511-angles, no
+// backup). With the switch off it keeps its $0.03 2509 price. No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-f10'
 
 export const BASE_RENDER_CREDITS = 1
 
@@ -351,9 +356,9 @@ function isProviderClass(ct: string): boolean {
  * calculation (the same one the node badge and the run estimate read), given
  * the node's WHOLE input map.
  */
-function graphNodeModelCredits(ct: string, inputs: unknown, inputPixels: number | undefined, inputSeconds: InputSeconds | undefined): number {
+function graphNodeModelCredits(ct: string, inputs: unknown, inputPixels: number | undefined, inputSeconds: InputSeconds | undefined, families: ReadonlySet<RunnerFamily> | undefined): number {
   const map = inputs && typeof inputs === 'object' ? inputs as Record<string, unknown> : {}
-  const price = priceNode(ct, map, { inputPixels, inputSeconds })
+  const price = priceNode(ct, map, { inputPixels, inputSeconds, families })
   if ('refused' in price) throw new UnpricedGraphError(ct, price.refused)
   return price.credits
 }
@@ -373,8 +378,12 @@ export interface GraphPrice {
  * `opts.inputSeconds`: node id → the measured length of a lip-sync node's
  * sound clip (and Kling lip-sync's source video) — graphInputSeconds.ts on
  * the hosted gate. A node with no entry is priced at the 60 s cap.
+ *
+ * `opts.families`: the runner families switched on, when the graph runs in
+ * the runner (Rotate camera prices its 2511 call while that switch is on;
+ * the ComfyUI path never passes them: it refuses that node then).
  */
-export function priceGraph(prompt: Record<string, { class_type: string; inputs?: unknown }>, opts: { inputPixels?: Record<string, number>, inputSeconds?: Record<string, InputSeconds> } = {}): GraphPrice {
+export function priceGraph(prompt: Record<string, { class_type: string; inputs?: unknown }>, opts: { inputPixels?: Record<string, number>, inputSeconds?: Record<string, InputSeconds>, families?: ReadonlySet<RunnerFamily> } = {}): GraphPrice {
   const breakdown: { action: string; credits: number }[] = []
   let hasOutput = false
 
@@ -388,7 +397,7 @@ export function priceGraph(prompt: Record<string, { class_type: string; inputs?:
       const inputs = prompt[id]?.inputs
       const px = opts.inputPixels && Object.prototype.hasOwnProperty.call(opts.inputPixels, id) ? opts.inputPixels[id] : undefined
       const secs = opts.inputSeconds && Object.prototype.hasOwnProperty.call(opts.inputSeconds, id) ? opts.inputSeconds[id] : undefined
-      const credits = graphNodeModelCredits(ct, inputs, px, secs)
+      const credits = graphNodeModelCredits(ct, inputs, px, secs, opts.families)
       const model = (inputs as { model?: unknown } | undefined)?.model
       // A class with no model widget (Develop, Relight…) is named alone, as its flat row was.
       breakdown.push({ action: model === undefined ? ct : `${ct}:${String(model)}`, credits })

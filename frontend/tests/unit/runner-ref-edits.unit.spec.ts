@@ -49,7 +49,9 @@ const CASES = (JSON.parse(readFileSync(
   fileURLToPath(new URL('./fixtures/runner-families.json', import.meta.url)), 'utf8')) as { refEdits: RefCase[] }).refEdits
 
 const REF: ReadonlySet<RunnerFamily> = new Set(['ref-edits'])
-const OTHERS: ReadonlySet<RunnerFamily> = new Set(RUNNER_FAMILIES.filter(f => f !== 'ref-edits'))
+// Every other family but Rotate camera's upgrade (qwen-2511-angles, Task F10),
+// which takes Rotate camera on its newer model (runner-qwen-2511-angles.unit.spec.ts).
+const OTHERS: ReadonlySet<RunnerFamily> = new Set(RUNNER_FAMILIES.filter(f => f !== 'ref-edits' && f !== 'qwen-2511-angles'))
 /** The classes ref-edits takes. Product shot left the runner in H2 (its SDXL engine is retired; F12 brings Bria). */
 const CLASSES = ['GenerateFromReferencesNode', 'RotateCameraNode']
 const SLOTS = ['image_1', 'image_2', 'image_3', 'image_4', 'image_5', 'image_6']

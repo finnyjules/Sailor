@@ -32,6 +32,7 @@ import { hostedModeEnabled } from '~/lib/hostedMode'
 import { creditsForUsd } from '~/lib/pricing'
 import { MODEL_PRICED_BADGE_CLASSES, nodeCreditEstimate } from '~/lib/nodeCreditEstimate'
 import { linkedInputNames, upstreamInputPixels, upstreamInputSeconds, widgetValueMap } from '~/lib/costEstimate'
+import { NO_FAMILIES, parseFamilies } from '#shared/runner/families'
 import TakesStrip from '~/components/vue-canvas/TakesStrip.vue'
 import LightTableModal from '~/components/vue-canvas/LightTableModal.vue'
 import { projectTake, discardOthers, type Take } from '~/composables/useTakes'
@@ -134,6 +135,10 @@ const displayTitle = computed(
 // Cost badge. Local mode shows the operator's own provider spend in dollars;
 // hosted mode shows credits, because that is what a hosted user pays in.
 const hostedBadges = hostedModeEnabled(useRuntimeConfig().public)
+// The runner families on (none while the runner is off): Rotate camera prices
+// its Qwen Image Edit 2511 call while that switch is on (model line-up F10).
+const badgePublic = useRuntimeConfig().public as { runnerEnabled?: boolean, runnerFamilies?: unknown }
+const badgeFamilies = badgePublic.runnerEnabled ? parseFamilies(badgePublic.runnerFamilies) : NO_FAMILIES
 
 // A picker node's whole widget map (name → value), the input the shared price
 // calculation takes. Read reactively off widgetsValues so changing ANY widget
@@ -154,7 +159,7 @@ const priceLabel = computed(() => {
   // is set right now (the one shared calculation server/utils/priceBook uses).
   if (hostedBadges) {
     const secs = upstreamInputSeconds(props, injectedNodes?.value, injectedEdges?.value) // lip-sync: "up to" while a length is unknown
-    const est = nodeCreditEstimate(props.data.nodeType as string, pricedInputs.value, { inputPixels: upstreamInputPixels(props, injectedNodes?.value, injectedEdges?.value), inputSeconds: secs?.seconds })
+    const est = nodeCreditEstimate(props.data.nodeType as string, pricedInputs.value, { inputPixels: upstreamInputPixels(props, injectedNodes?.value, injectedEdges?.value, badgeFamilies), inputSeconds: secs?.seconds, families: badgeFamilies })
     if (est != null) return `${secs?.upTo ? 'up to ' : '~'}${est} cr`
     // Unknown/missing model → fall through to the static estimate below.
   }

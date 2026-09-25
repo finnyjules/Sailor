@@ -458,7 +458,7 @@ export function createEngine(deps: EngineDeps) {
         // which take actually pays it is only known once one makes something.
         const includesBase = !run.baseCharged && hasOutputNode(take.prompt)
         let estimate: number
-        try { estimate = stageEstimate(take.prompt, nodes, includesBase) }
+        try { estimate = stageEstimate(take.prompt, nodes, includesBase, deps.families?.() ?? NO_FAMILIES) }
         catch (e) {
           if (e instanceof UnpricedGraphError) throw refuse('A model in this workflow has no price yet', 500)
           throw e
@@ -660,6 +660,7 @@ export function createEngine(deps: EngineDeps) {
         gateOpen: take.openGates.includes(id),
         readFile: f => deps.results.read(f),
         hosted: deps.hosted(),
+        families: deps.families?.() ?? NO_FAMILIES,
       })
       // Rendered here (the Frame): no provider, no charge, not an asset.
       if (plan.kind === 'local') {
@@ -697,8 +698,10 @@ export function createEngine(deps: EngineDeps) {
       }
       const backupSettings = deps.backup?.() ?? { enabled: false, stallMs: 0 }
       const backup = backupSettings.enabled && plan.backup ? plan.backup : null
-      // Priced on the measured picture where the price depends on its size (FLUX.2 edit).
-      rec.credits = nodeCredits(take.prompt[id]!, await measuredInputPixels(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], f => deps.results.read(f)))
+      // Priced on the measured picture where the price depends on its size
+      // (FLUX.2 edit; Rotate camera on 2511), with the switches it was planned under.
+      const families = deps.families?.() ?? NO_FAMILIES
+      rec.credits = nodeCredits(take.prompt[id]!, await measuredInputPixels(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], f => deps.results.read(f), families), families)
       const fp = isReusable(plan.payload)
         ? requestFingerprint(fingerprintEndpoint(plan.provider, plan.endpoint), plan.payload, u => deps.handoff.hashOf(u))
         : null
@@ -1042,7 +1045,7 @@ export function createEngine(deps: EngineDeps) {
     if (deps.hosted()) {
       for (const p of prompts) {
         let unpriced: string | null
-        try { unpriced = unpricedProviderNode(p) }
+        try { unpriced = unpricedProviderNode(p, undefined, n => nodeCredits(n, undefined, families)) }
         catch (e) {
           if (e instanceof UnpricedGraphError) throw refuse('A model in this workflow has no price yet', 500)
           throw e

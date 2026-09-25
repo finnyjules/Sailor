@@ -63,6 +63,7 @@ import { LARGEST_RATIO, effectiveImageSettings } from './imageSettings'
 import { videoPriceMaxUsd, videoPriceUsd, videoRate } from './videoRates'
 import { REMOTE_VIDEO_NODE_CLASSES, remoteVideoNodeUsd, type InputSeconds } from './clipSettings'
 import { effectiveVideoSettings, maxVideoSeconds } from './videoSettings'
+import type { RunnerFamily } from '../runner/families'
 
 export type NodeInputs = Record<string, unknown>
 
@@ -149,7 +150,7 @@ function editNodeUsd(classType: string, inputs: NodeInputs, opts: PriceOptions):
   // A node that runs several calls (RestyleWithLoRANode): all of them.
   const steps = editSteps(classType, inputs)
   if (steps) return editStepsUsd(steps) ?? { refused: `${classType} has a call with no listed price` }
-  const c = editCalls(classType, inputs, { inputPixels: opts.inputPixels })
+  const c = editCalls(classType, inputs, { inputPixels: opts.inputPixels, families: opts.families })
   if ('refused' in c) return c
   let usd = 0
   for (const one of c.calls) {
@@ -170,6 +171,12 @@ export interface PriceOptions {
    * unmeasured, the 60 s cap.
    */
   inputSeconds?: InputSeconds | null
+  /**
+   * The runner families switched on, where the node may run in the runner.
+   * Only a class moved onto a newer model as a whole reads them (Rotate
+   * camera on Qwen Image Edit 2511, Task F10); none, it prices as before.
+   */
+  families?: ReadonlySet<RunnerFamily>
 }
 
 /**

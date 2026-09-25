@@ -22,7 +22,10 @@
  *    figure);
  *  - `per_run_megapixels`: Replicate's FLUX.2 — a price per run, plus one per
  *    megapixel of the picture sent in and one per megapixel of the picture
- *    that comes back (each rounded up, see below).
+ *    that comes back (each rounded up, see below);
+ *  - `per_megapixel`: a published price per megapixel of the picture that
+ *    comes back, at least one megapixel (Rotate camera on Qwen Image Edit
+ *    2511, Task F10).
  *
  * Megapixels: where the service does not say how it counts them, a picture is
  * its pixels / 1,000,000 ROUNDED UP (controller ruling, fail-safe).
@@ -52,6 +55,7 @@ export type EditRate =
   | (RateMeta & { unit: 'by_output_pixels', steps: readonly (readonly [maxPixels: number, usd: number])[], beyondPerPixel?: number })
   | (RateMeta & { unit: 'per_output_megapixel', perMegapixel: number, minUsd: number })
   | (RateMeta & { unit: 'per_run_megapixels', perRun: number, perInputMegapixel: number, perOutputMegapixel: number })
+  | (RateMeta & { unit: 'per_megapixel', perMegapixel: number })
 
 /** One priced provider call: the endpoint and the settings it is billed by. */
 export interface EditCall {
@@ -109,6 +113,16 @@ export const EDIT_RATES: Record<string, EditRate> = {
   'openai/gpt-image-2.5/flare/edit': {
     unit: 'by_quality', byTier: { low: 0.01113, medium: 0.02595, high: 0.10008 },
     ...verified('fal', 'https://fal.ai/models/openai/gpt-image-2.5/flare/edit'),
+  },
+  // Rotate camera on Qwen Image Edit 2511, multiple angles (Task F10): "$0.035
+  // per megapixels" (llms.txt, read 2026-09-24), unit: a megapixel of the
+  // picture made, rounded up (ruling). The builder sends no `image_size`, so
+  // the picture is made at the input's size (the schema: "If not provided,
+  // the size of the input image will be used"): editSettings.ts prices the
+  // input's measured size, or the input cap.
+  'fal-ai/qwen-image-edit-2511-multiple-angles': {
+    unit: 'per_megapixel', perMegapixel: 0.035,
+    ...verified('fal', fal('fal-ai/qwen-image-edit-2511-multiple-angles')),
   },
   // "Price: $0.04 per images".
   'fal-ai/flux-pro/kontext': { unit: 'per_image', usd: 0.04, ...verified('fal', fal('fal-ai/flux-pro/kontext')) },
@@ -250,6 +264,8 @@ export function editUsd(call: EditCall): number | null {
       return tidy(Math.max(rate.minUsd, rate.perMegapixel * megapixelsOf(call.outputPixels ?? 0)))
     case 'per_run_megapixels':
       return tidy(rate.perRun + rate.perInputMegapixel * megapixelsOf(call.inputPixels ?? 0) + rate.perOutputMegapixel * megapixelsOf(call.outputPixels ?? 0))
+    case 'per_megapixel':
+      return tidy(rate.perMegapixel * Math.max(1, megapixelsOf(call.outputPixels ?? 0)))
   }
 }
 

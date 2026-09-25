@@ -35,6 +35,7 @@ import { GPT_IMAGE_25_FAL_ENDPOINTS, GPT_IMAGE_25_REPLICATE_SLUGS } from '~~/ser
 import { QWEN_IMAGE_3_SLUG } from '~~/server/runner/generators/qwenImage3'
 import { GROK_IMAGINE_2_SLUG } from '~~/server/runner/generators/grokImagine2'
 import { IDEOGRAM_4_FAL_APP, IDEOGRAM_4_REPLICATE_SLUGS } from '~~/server/runner/generators/ideogram4'
+import { QWEN_2511_ANGLES_APP } from '~~/server/runner/generators/qwen2511Angles'
 
 const readJson = (rel: string) => JSON.parse(readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8'))
 const BUILDERS = readJson('./fixtures/runner-builders.json')
@@ -234,6 +235,8 @@ function runnerEndpoints(): string[] {
   // Task F8: Ideogram 4, fal first and Replicate (one model per speed) the backup at 2K (ideogram4.ts; its grid is runner-ideogram-4.unit.spec.ts).
   out.add(`fal ${IDEOGRAM_4_FAL_APP}`)
   for (const slug of Object.values(IDEOGRAM_4_REPLICATE_SLUGS)) out.add(`replicate ${slug}`)
+  // Task F10: Rotate camera on Qwen Image Edit 2511 multiple angles, fal, no backup (qwen2511Angles.ts; its grid is runner-qwen-2511-angles.unit.spec.ts).
+  out.add(`fal ${QWEN_2511_ANGLES_APP}`)
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)

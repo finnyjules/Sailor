@@ -20,11 +20,14 @@
  * Qwen Image 3 in GenerateImageNode, family qwen-image-3;
  * Grok Imagine 2 in GenerateImageNode, family grok-imagine-2;
  * Ideogram 4 in GenerateImageNode, family ideogram-4;
- * Seedream 5 Pro in EditImageNode, family seedream-5-pro-edit)
+ * Seedream 5 Pro in EditImageNode, family seedream-5-pro-edit;
+ * RotateCameraNode on Qwen Image Edit 2511 multiple angles, family
+ * qwen-2511-angles, which moves the whole node while it is on)
  * closely enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiPrompt } from '#shared/runner/graph'
-import { resolveVideoModelId } from '#shared/runner/eligibility'
+import { classUpgradeOn, resolveVideoModelId } from '#shared/runner/eligibility'
+import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { RUNNER_IMAGE_MODELS, RUNNER_REPLICATE_IMAGE_MODELS, composeImagePrompt, imageAppFor } from './generators/image'
 import { RUNNER_REPLICATE_VIDEO_MODELS, RUNNER_VIDEO_MODELS, falVideoFn } from './generators/video'
 import { asInt, asText, parseJsonObject, pyStrip, pyTruthy } from './generators/opts'
@@ -59,6 +62,7 @@ import { isQwenImage3Model, qwenImage3Generate } from './generators/qwenImage3'
 import { grokImagine2Generate, isGrokImagine2Model } from './generators/grokImagine2'
 import { ideogram4Generate, ideogram4OnReplicate, isIdeogram4Model } from './generators/ideogram4'
 import { isSeedream5ProEdit, seedream5ProEdit } from './generators/seedream5ProEdit'
+import { qwen2511Angles } from './generators/qwen2511Angles'
 import { checkRequest, seedanceReferenceProblem } from './requestRules'
 import type { OutputFile, RunnerProvider } from './types'
 
@@ -93,6 +97,12 @@ export interface PlanContext {
   readFile?(file: OutputFile): Promise<Uint8Array>
   /** Hosted (a shared server): local renders take the lower limits. */
   hosted?: boolean
+  /**
+   * The runner families switched on (the server's). Only a class moved onto
+   * a newer model as a whole reads them (Rotate camera on Qwen Image Edit
+   * 2511); absent, none.
+   */
+  families?: ReadonlySet<RunnerFamily>
 }
 
 /**
@@ -519,9 +529,14 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     }
 
     // RotateCameraNode: the gimbal's angles as a director's phrase, Qwen Image Edit Plus on Replicate.
+    // With qwen-2511-angles on (Task F10): the angles themselves, Qwen Image
+    // Edit 2511 multiple angles on fal, no backup (qwen2511Angles.ts).
     case 'RotateCameraNode': {
       const cam = parseCamera(inputs.camera)
       const image = await pictureUrl('image', 'There is no picture to turn')
+      if (classUpgradeOn('RotateCameraNode', ctx.families ?? NO_FAMILIES)) {
+        return stillCall(qwen2511Angles({ image, camera: cam, seed: asInt(inputs.seed, 0) }), 'rotate_camera')
+      }
       const input = IMAGE_EDIT_MODELS['qwen-image-edit-plus']!.build(
         cameraToPhrase(cam.yaw, cam.pitch, cam.roll), [image], asInt(inputs.seed, 0), {})
       const call = imageEditCall(QWEN_IMAGE_EDIT_PLUS_SLUG, input)

@@ -20,15 +20,18 @@ import type { OutputFile, StageCharge } from './types'
 import { sizePricedInput } from '#shared/pricing/editSettings'
 import { isLink } from '#shared/runner/graph'
 import { picturePixels } from '../utils/graphInputPixels'
+import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 
 /**
  * Credits for one provider node. `inputPixels`: the measured size of the
  * picture a size-priced node (FLUX.2 edit) is sent — without it, the input cap
- * (the stage hold is taken that way, an upper bound).
+ * (the stage hold is taken that way, an upper bound). `families`: the
+ * server's switches, so a class moved onto a newer model (Rotate camera on
+ * Qwen Image Edit 2511, Task F10) is priced as it is planned.
  */
-export function nodeCredits(node: ApiNode, inputPixels?: number): number {
+export function nodeCredits(node: ApiNode, inputPixels?: number, families: ReadonlySet<RunnerFamily> = NO_FAMILIES): number {
   if (!PROVIDER_TYPES.has(node.class_type)) return 0
-  const p = priceGraph({ n: { class_type: node.class_type, inputs: node.inputs } }, inputPixels ? { inputPixels: { n: inputPixels } } : {})
+  const p = priceGraph({ n: { class_type: node.class_type, inputs: node.inputs } }, { ...(inputPixels ? { inputPixels: { n: inputPixels } } : {}), families })
   return p.breakdown.filter(b => b.action !== 'base_render').reduce((s, b) => s + b.credits, 0)
 }
 
@@ -42,9 +45,10 @@ export async function measuredInputPixels(
   node: ApiNode,
   filesFrom: (link: [string, number]) => OutputFile[],
   read: (f: OutputFile) => Promise<Uint8Array>,
+  families: ReadonlySet<RunnerFamily> = NO_FAMILIES,
 ): Promise<number | undefined> {
   const inputs = node.inputs ?? {}
-  const name = sizePricedInput(node.class_type, inputs)
+  const name = sizePricedInput(node.class_type, inputs, families)
   const link = name ? inputs[name] : undefined
   if (!isLink(link)) return undefined
   // Every file on the linked output slot; the largest prices (a batch may differ in size).
@@ -124,14 +128,14 @@ export function hasOutputNode(prompt: ApiPrompt): boolean {
  * the render credit, as on the Python path), so a stage that can make
  * nothing holds nothing.
  */
-export function stageEstimate(prompt: ApiPrompt, nodeIds: Iterable<string>, includeBase: boolean): number {
+export function stageEstimate(prompt: ApiPrompt, nodeIds: Iterable<string>, includeBase: boolean, families: ReadonlySet<RunnerFamily> = NO_FAMILIES): number {
   let total = 0
   let renders = false
   for (const id of nodeIds) {
     const n = prompt[id]
     if (!n) continue
     if (LOCAL_RENDER_TYPES.has(n.class_type)) renders = true
-    else if (!actionPassThrough(n.class_type, n.inputs ?? {})) total += nodeCredits(n)
+    else if (!actionPassThrough(n.class_type, n.inputs ?? {})) total += nodeCredits(n, undefined, families)
   }
   return includeBase && (total > 0 || renders) ? total + BASE_RENDER_CREDITS : total
 }

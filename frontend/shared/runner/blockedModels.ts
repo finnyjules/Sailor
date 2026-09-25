@@ -11,10 +11,17 @@
  * another one. A runner-only model has no engine builder, so the ComfyUI
  * path refuses it; the runner takes it only while its family is on.
  *
+ * A node class with no model menu can be moved onto a newer model as a whole
+ * (eligibility.ts RunnerNodeRule.upgrade; Rotate camera on Qwen Image Edit
+ * 2511, Task F10): while that family is on, the class is runner-only too
+ * (line-up Ruling 10), because the engine would make the old model's
+ * different-looking result. Its use carries the new model's name as `value`.
+ *
  * Pure; relative imports only.
  */
 import type { ApiPrompt } from './graph'
 import { NO_FAMILIES, type RunnerFamily } from './families'
+import { classUpgradeOn } from './eligibility'
 import { menuDefault, modelEntryFor, modelMenu, modelMenus, runnerTakesClass } from './modelMenus'
 
 export interface BlockedModelUse {
@@ -23,6 +30,8 @@ export interface BlockedModelUse {
   /** The value the node holds, as saved (a legacy label stays as it is). */
   value: string
   reason: 'runner-only' | 'discontinued'
+  /** The node's whole class runs a newer model while its family is on (no menu value): `value` is that model's name. */
+  upgrade?: true
 }
 
 export interface BlockedModelOptions {
@@ -57,6 +66,10 @@ export function blockedModelUses(prompt: ApiPrompt | null | undefined, opts: Blo
         if (!runs) out.push({ nodeId, classType, value, reason: 'runner-only' })
       }
     }
+    // A class on its newer model runs only in the runner (the runner takes
+    // every class that has an upgrade while the family is on).
+    const upgrade = classUpgradeOn(classType, families)
+    if (upgrade && !opts.runnerTakes) out.push({ nodeId, classType, value: upgrade.label, reason: 'runner-only', upgrade: true })
   }
   return out
 }
@@ -93,6 +106,13 @@ export function classDefaultLabel(classType: string, families: ReadonlySet<Runne
 export const SWITCH_OFF_REASON = 'Its switch is off.'
 
 /**
+ * Why a node on its newer model (an upgrade, switched on) didn't go to the
+ * runner when no other node is to blame: the node itself is set up in a way
+ * the runner doesn't take (no picture linked, a wired setting).
+ */
+export const NOT_TAKEN_AS_SET_UP_REASON = 'Sailor can’t run it as it is set up here.'
+
+/**
  * The refusal for one blocked use, as a toast: a title and a description.
  *   discontinued  "Sora 2 was discontinued by its service on 24 Sep 2026" /
  *                 "Pick another model in “Title”, such as Hailuo H3 Max." (the class default, by name)
@@ -117,6 +137,13 @@ export function blockedModelRefusal(
         : `Pick another model in “${opts.title}”.`,
     }
   }
+  // An upgrade is only ever refused while its switch is on.
+  if (use.upgrade) {
+    return {
+      title: `“${opts.title}” uses ${label}, which only runs in Sailor`,
+      description: opts.engineReason ?? NOT_TAKEN_AS_SET_UP_REASON,
+    }
+  }
   const switchedOn = !!entry?.family && families.has(entry.family) && runnerTakesClass(use.classType)
   return {
     title: `“${opts.title}” uses ${label}, which only runs in Sailor`,
@@ -134,6 +161,7 @@ const CLASS_TITLES: Readonly<Record<string, string>> = {
   RestyleFromImageNode: 'Restyle from image',
   GenerateFromReferencesNode: 'Generate from references',
   UpscaleImageNode: 'Upscale an image',
+  RotateCameraNode: 'Rotate camera',
 }
 
 /**
@@ -170,7 +198,9 @@ export function blockedModelsResponse(
   for (const use of uses) {
     const t = text(use)
     const entry = (node_errors[use.nodeId] ??= { errors: [], dependent_outputs: [], class_type: use.classType }) as { errors: unknown[] }
-    entry.errors.push({ type: 'value_not_in_list', message: t.message, details: t.details, extra_info: { input_name: 'model', input_value: use.value } })
+    // An upgrade has no model widget to point at.
+    const extra_info = use.upgrade ? {} : { input_name: 'model', input_value: use.value }
+    entry.errors.push({ type: 'value_not_in_list', message: t.message, details: t.details, extra_info })
   }
   const first = uses[0] ? text(uses[0]) : { message: 'A model in this workflow can’t run here.', details: '' }
   return {

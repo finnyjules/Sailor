@@ -92,6 +92,8 @@ interface FamilyFlow {
   provider: 'fal' | 'replicate'
   endpoint: string
   body: Record<string, unknown>
+  /** Families switched off with this one when it is off in turn (another family would take the workflow). */
+  alsoOff?: RunnerFamily[]
 }
 
 /**
@@ -294,6 +296,25 @@ const FLOWS: FamilyFlow[] = [
     endpoint: 'bytedance/seedream-5-pro',
     body: { prompt: 'make the sky pink', image_input: [storageUrl('image')], size: '1K', aspect_ratio: 'match_input_image', output_format: 'png' },
   },
+  // Task F10: Rotate camera on Qwen Image Edit 2511 multiple angles, no Python
+  // builder; fal only, the body written from its saved schema
+  // (runner-qwen-2511-angles.unit.spec.ts). With every family on, the node
+  // runs its newer model (ref-edits' 2509 call is not made).
+  {
+    family: 'qwen-2511-angles',
+    label: 'RotateCameraNode on Qwen Image Edit 2511',
+    prompt: {
+      11: imageCard('image.png'),
+      1: { class_type: 'RotateCameraNode', inputs: { image: ['11', 0], camera: '{"yaw":-45,"pitch":-30,"roll":15}', seed: 3 } },
+      2: outImage('1'),
+    },
+    files: ['image.png'],
+    provider: 'fal',
+    endpoint: 'fal-ai/qwen-image-edit-2511-multiple-angles',
+    // With only this one off, ref-edits takes the node on its 2509 call.
+    alsoOff: ['ref-edits'],
+    body: { image_urls: [storageUrl('image')], horizontal_angle: 315, vertical_angle: -30, additional_prompt: 'with the camera tilted slightly clockwise', seed: 3, output_format: 'png', num_images: 1 },
+  },
 ]
 
 // ── The routes ───────────────────────────────────────────────────────────
@@ -414,9 +435,10 @@ describe('B10 · one workflow per family, POST /api/runs to the last event', () 
       // Each card was handed off once.
       expect((k.upload.mock.calls as unknown as [Uint8Array, string][]).map(c => c[1]).sort()).toEqual([...f.files].sort())
 
-      // The charge is priceGraph for the nodes that ran (all of them), held and settled once.
-      const price = priceGraph(f.prompt).credits
-      expect(price).toBe(nodeCredits(f.prompt['1']!) + BASE_RENDER_CREDITS)
+      // The charge is priceGraph for the nodes that ran (all of them), held and settled once,
+      // with the server's switches (Rotate camera prices its 2511 call while that one is on).
+      const price = priceGraph(f.prompt, { families: runnerFamilies() }).credits
+      expect(price).toBe(nodeCredits(f.prompt['1']!, undefined, runnerFamilies()) + BASE_RENDER_CREDITS)
       expect(k.ledger.hold).toHaveBeenCalledTimes(1)
       expect(k.ledger.settle).toHaveBeenCalledTimes(1)
       expect(holds(k.ledger)).toEqual([['settled', price]])
@@ -710,9 +732,10 @@ describe('B10 · money', () => {
 
 describe('B10 · each family switched off in turn', () => {
   it.each(FLOWS.map(f => [f.family, f] as const))('%s off: /api/runs refuses its workflow and nodesNeedingEngine names its node', async (family, f) => {
-    process.env.NUXT_RUNNER_FAMILIES = RUNNER_FAMILIES.filter(x => x !== family).join(',')
+    const off = [family, ...(f.alsoOff ?? [])]
+    process.env.NUXT_RUNNER_FAMILIES = RUNNER_FAMILIES.filter(x => !off.includes(x)).join(',')
     expect(runnerFamilies().has(family)).toBe(false)
-    expect(runnerFamilies().size).toBe(RUNNER_FAMILIES.length - 1)
+    expect(runnerFamilies().size).toBe(RUNNER_FAMILIES.length - off.length)
     const k = kit()
     writeCards(k, f.files)
 

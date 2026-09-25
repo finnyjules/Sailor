@@ -64,7 +64,7 @@ import { useRunnerEvents, ensureRunnerEvents } from '~/composables/useRunnerEven
 import { createRunnerEventBuffer, ownerTabForCanvas, runnerRunIdsForTab } from '~/lib/runner/routing'
 import { nodesNeedingEngine, workflowNodeTitles, needsEngineDescription, blockedRunRefusal } from '~/lib/runner/needsEngine'
 import { RUNNER_WORKER, isRunnerPromptId } from '#shared/runner/messages'
-import { parseFamilies } from '#shared/runner/families'
+import { NO_FAMILIES, parseFamilies } from '#shared/runner/families'
 import { useDirectExecution } from '~/composables/useDirectExecution'
 import { useDirectExecutionEnabled } from '~/composables/useDirectExecutionEnabled'
 import { useVueNodes } from '~/composables/useVueNodes'
@@ -88,6 +88,8 @@ const hostedShell = hostedModeEnabled(useRuntimeConfig().public)
 // Off unless NUXT_PUBLIC_RUNNER_ENABLED=true; then eligible workflows go to /api/runs.
 const runnerEnabled = !!(useRuntimeConfig().public as { runnerEnabled?: boolean }).runnerEnabled
 const runnerFamilies = parseFamilies((useRuntimeConfig().public as { runnerFamilies?: unknown }).runnerFamilies)
+// The families the run estimate prices with: none while the runner is off (Rotate camera on 2511, model line-up F10).
+const estimateFamilies = runnerEnabled ? runnerFamilies : NO_FAMILIES
 const runnerEvents = useRunnerEvents()
 const headsUp = useTabHeadsUp()
 
@@ -623,8 +625,9 @@ async function runVueWorkflow(
     const estInput = vueNodesToEstimateInput(
       (vnodes as any[]).filter((v: any) => !targetSet || targetSet.has(String(v.id))),
       vueCanvasRef.value!.getEdges?.() || [],
+      estimateFamilies,
     )
-    const single = estimateUsdForNodes(estInput, { hosted: hostedShell })
+    const single = estimateUsdForNodes(estInput, { hosted: hostedShell, families: estimateFamilies })
     if (single) {
       const iterations = Math.max(1, (opts.costConfirmIterations || 1) * takeCount)
       // Credits scale with iterations exactly as dollars do — each iteration is
@@ -2782,7 +2785,7 @@ function updateRunEstimate() {
     return
   }
   const nodes = vueCanvasRef.value?.getNodes?.() || []
-  runEstimate.value = estimateUsdForNodes(vueNodesToEstimateInput(nodes, vueCanvasRef.value?.getEdges?.() || []), { hosted: hostedShell })
+  runEstimate.value = estimateUsdForNodes(vueNodesToEstimateInput(nodes, vueCanvasRef.value?.getEdges?.() || [], estimateFamilies), { hosted: hostedShell, families: estimateFamilies })
 }
 
 /** Per-iteration line in the confirm dialog. Hosted divides the CREDITS figure

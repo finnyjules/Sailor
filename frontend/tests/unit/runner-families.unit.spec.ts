@@ -35,7 +35,7 @@ describe('parseFamilies', () => {
     expect([...parseFamilies(['fal-edit', 7, 'nope', 'ref-edits'])].sort()).toEqual(['fal-edit', 'ref-edits'])
   })
   it('knows the nine families', () => {
-    expect([...RUNNER_FAMILIES].sort()).toEqual(['fal-edit', 'frame', 'gemini-omni-flash', 'gpt-image-2.5', 'grok-imagine-2', 'h3-max-turbo', 'ideogram-4', 'nano-actions', 'qwen-image-3', 'ref-edits', 'replicate-image', 'replicate-video', 'restyle', 'seedream-5-pro-edit', 'veo-3.1-lite', 'wan-3'])
+    expect([...RUNNER_FAMILIES].sort()).toEqual(['fal-edit', 'frame', 'gemini-omni-flash', 'gpt-image-2.5', 'grok-imagine-2', 'h3-max-turbo', 'ideogram-4', 'nano-actions', 'qwen-2511-angles', 'qwen-image-3', 'ref-edits', 'replicate-image', 'replicate-video', 'restyle', 'seedream-5-pro-edit', 'veo-3.1-lite', 'wan-3'])
   })
 })
 

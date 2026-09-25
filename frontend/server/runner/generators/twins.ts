@@ -104,6 +104,10 @@
  * Generate from references, Seedream 5 Lite
  *                           Replicate  —           Replicate sizes 2K or 3K at a ratio, fal by pixels: no same size
  * Rotate camera             Replicate  —           fal's Qwen Image Edit Plus can't keep the input picture's shape
+ * Rotate camera, Qwen Image Edit 2511 multiple angles
+ *                           fal        —           runner-only (F10, family qwen-2511-angles, moves the whole node):
+ *                                                  Replicate's qwen/qwen-image-edit-2511 is the base model without
+ *                                                  the multiple-angles LoRA and takes no angles (qwen2511Angles.ts)
  * Edit image / Blend scene, Flux Kontext Pro
  *                           fal        —           hidden (line-up decision 6)
  * Blend scene / Restyle, Nano Banana (the first one)
@@ -130,8 +134,10 @@ const HIDDEN = 'hidden: runs for saved projects only'
 const ON_FAL_UNCHECKED = 'fal hosts it, but its settings aren\'t checked yet'
 
 /**
- * Every runner surface, keyed `image:<id>`, `video:<id>`, `<NodeClass>` or
- * `<NodeClass>:<model>`. The header table in words.
+ * Every runner surface, keyed `image:<id>`, `video:<id>`, `<NodeClass>`,
+ * `<NodeClass>:<model>`, or `<NodeClass>+<family>` for a class while the
+ * family that moves it onto a newer model is on (eligibility.ts
+ * RunnerNodeRule.upgrade). The header table in words.
  */
 export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   // Generate image, fal
@@ -224,6 +230,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'GenerateFromReferencesNode:seedream-5-pro': r('replicate', null, 'fal publishes only tentative pricing'),
   'GenerateFromReferencesNode:seedream-5-lite': r('replicate', null, 'Replicate sizes 2K or 3K at a ratio, fal by pixels'),
   'RotateCameraNode': r('replicate', null, 'fal\'s Qwen Image Edit Plus can\'t keep the picture\'s shape'),
+  'RotateCameraNode+qwen-2511-angles': r('fal', null, 'Replicate\'s Qwen Image Edit 2511 has no multiple-angles LoRA and takes no angles'),
   'EditImageNode:Flux Kontext Pro': r('fal', null, HIDDEN),
   'BlendSceneNode:Flux Kontext Pro': r('fal', null, HIDDEN),
   'BlendSceneNode:Nano Banana': r('replicate', null, 'retired by the line-up (Nano Banana 2 replaces it)'),

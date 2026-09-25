@@ -28,6 +28,7 @@ import { BASE_RENDER_CREDITS } from '~/lib/nodeCreditEstimate'
 import { creditsForUsd } from '~/lib/pricing'
 import { priceNode } from '#shared/pricing/nodePrice'
 import { sizePricedInput, sourceOutputPixels } from '#shared/pricing/editSettings'
+import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { allotMediaFiles, gateNodeOrder, mediaFileKey, secondsPricedMedia, sourceAudioSeconds, type InputSeconds, type MediaFileRef, type MediaSource } from '#shared/pricing/clipSettings'
 
 export interface BadgeCost { usd: number; approximate: boolean }
@@ -156,10 +157,14 @@ export function isApiCreditBilled(n: EstimateInputNode): boolean {
  *  one graph submit. (The per-node badge adds it per node; for a single-node
  *  run, the common case, both land on the same figure.) A run whose graph has
  *  no terminal output node would not be charged base_render at all, so this
- *  can over-quote by 1 credit — deliberate, an estimate should err high. */
+ *  can over-quote by 1 credit — deliberate, an estimate should err high.
+ *
+ *  `opts.families`: the runner families the browser has on (none while the
+ *  runner is off). Only Rotate camera reads them: on Qwen Image Edit 2511
+ *  while its switch is on, priced as the runner charges it (Task F10). */
 export function estimateUsdForNodes(
   nodes: EstimateInputNode[],
-  opts: { hosted?: boolean } = {},
+  opts: { hosted?: boolean, families?: ReadonlySet<RunnerFamily> } = {},
 ): CostEstimate | null {
   const hosted = opts.hosted === true
   let usd = 0
@@ -171,7 +176,7 @@ export function estimateUsdForNodes(
     // Hosted: a model-priced picker is charged by the server whatever its
     // billing class, so price it even if the badge/category filter misses it.
     // Priced from the WHOLE widget map, the same way the server charges it.
-    const shared = hosted ? priceNode(n.type, widgetValueMap(n.widgetDefs, n.widgetsValues, n.linkedInputs), { inputPixels: n.inputPixels, inputSeconds: n.inputSeconds }) : null
+    const shared = hosted ? priceNode(n.type, widgetValueMap(n.widgetDefs, n.widgetsValues, n.linkedInputs), { inputPixels: n.inputPixels, inputSeconds: n.inputSeconds, families: opts.families }) : null
     const modelPrice = shared && !('refused' in shared) ? shared : null
     if (modelPrice == null && !isReplicateBilled(n) && !creditBilled) continue
     // The selected model's real price beats the static badge when we have it.
@@ -198,8 +203,9 @@ export function estimateUsdForNodes(
  *  renderer type). Disabled nodes (mode 2) are excluded — they don't run.
  *  widgetDefs/widgetsValues ride along so the hosted estimate can price the
  *  node from its widgets; local mode ignores them. `edges` (the canvas's live
- *  Vue Flow edges) mark the linked inputs, as the node badge does. */
-export function vueNodesToEstimateInput(nodes: any[], edges?: any[] | null): EstimateInputNode[] {
+ *  Vue Flow edges) mark the linked inputs, as the node badge does.
+ *  `families`: as estimateUsdForNodes' (which pictures are size-priced). */
+export function vueNodesToEstimateInput(nodes: any[], edges?: any[] | null, families: ReadonlySet<RunnerFamily> = NO_FAMILIES): EstimateInputNode[] {
   return (nodes || [])
     .filter((n: any) => ((n?.data?.mode ?? 0) !== 2))
     .map((n: any) => ({
@@ -211,7 +217,7 @@ export function vueNodesToEstimateInput(nodes: any[], edges?: any[] | null): Est
       widgetDefs: n?.data?.widgetDefs ?? null,
       widgetsValues: n?.data?.widgetsValues ?? null,
       linkedInputs: linkedInputNames(String(n.id), n?.data?.inputs, edges),
-      inputPixels: upstreamInputPixels(n, nodes, edges),
+      inputPixels: upstreamInputPixels(n, nodes, edges, families),
       inputSeconds: upstreamInputSeconds(n, nodes, edges)?.seconds ?? null,
     }))
 }
@@ -222,12 +228,14 @@ export function vueNodesToEstimateInput(nodes: any[], edges?: any[] | null): Est
  * picture input comes from a GenerateImageNode whose settings say how large
  * its picture is (sourceOutputPixels — the hosted gate reads the same). Null
  * otherwise: the badge then shows the input-cap ceiling, never below the charge.
+ * `families`: the runner families on (Rotate camera is size-priced only while
+ * its Qwen Image Edit 2511 switch is on).
  */
-export function upstreamInputPixels(node: any, nodes?: readonly any[] | null, edges?: readonly any[] | null): number | null {
+export function upstreamInputPixels(node: any, nodes?: readonly any[] | null, edges?: readonly any[] | null, families: ReadonlySet<RunnerFamily> = NO_FAMILIES): number | null {
   const data = node?.data
   if (!data || !nodes || !edges) return null
   const own = widgetValueMap(data.widgetDefs, data.widgetsValues, linkedInputNames(String(node.id), data.inputs, edges))
-  const name = sizePricedInput(String(data.nodeType || ''), own)
+  const name = sizePricedInput(String(data.nodeType || ''), own, families)
   const port = name ? (data.inputs || []).findIndex((i: any) => i?.name === name) : -1
   if (port < 0) return null
   const edge = edges.find((e: any) => String(e?.target) === String(node.id) && e?.targetHandle === `input-${port}`)

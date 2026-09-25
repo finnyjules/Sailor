@@ -21,6 +21,7 @@ import {
 import { RESTYLE_MODELS } from '~~/server/runner/generators/restyle'
 import { REFERENCE_MODEL_IDS } from '~~/server/runner/generators/refEdits'
 import type { OutputFile } from '~~/server/runner/types'
+import type { RunnerFamily } from '#shared/runner/families'
 import { IMAGE_MODELS_BY_ID } from '~~/app/data/image-models'
 import { VIDEO_MODELS_BY_ID } from '~~/app/data/video-models'
 import { creditsForUsd, usdChargedAtCost } from '#shared/pricing/markup'
@@ -58,13 +59,14 @@ const EDIT_BASE: Record<string, Record<string, unknown>> = {
   RestyleFromImageNode: { content_image: LINK, style_image: LINK },
 }
 
-async function plan(classType: string, inputs: Record<string, unknown>): Promise<ProviderPlan> {
+async function plan(classType: string, inputs: Record<string, unknown>, families?: ReadonlySet<RunnerFamily>): Promise<ProviderPlan> {
   const p = await planNode({
     prompt: { n: { class_type: classType, inputs } },
     nodeId: 'n',
     gateOpen: false,
     filesFrom: () => [{ filename: 'a.png', subfolder: '', type: 'output' }],
     toUrl: async (f: OutputFile) => `https://pics.test/${f.filename}`,
+    ...(families ? { families } : {}),
   })
   if (p.kind !== 'provider') throw new Error(`${classType} made no call`)
   return p
@@ -88,6 +90,17 @@ function nodeFor(key: string): [string, Record<string, unknown>] {
   }
   const [ct, model] = key.split(':') as [string, string | undefined]
   return [ct, { ...EDIT_BASE[ct], ...(model ? { model } : {}) }]
+}
+
+/** `<NodeClass>+<family>`: the class while the family that moves it onto a newer model is on (Rotate camera, F10). */
+function routeOf(key: string): { ct: string, inputs: Record<string, unknown>, families?: ReadonlySet<RunnerFamily> } {
+  const plus = key.indexOf('+')
+  if (plus < 0) {
+    const [ct, inputs] = nodeFor(key)
+    return { ct, inputs }
+  }
+  const ct = key.slice(0, plus)
+  return { ct, inputs: { ...EDIT_BASE[ct] }, families: new Set([key.slice(plus + 1) as RunnerFamily]) }
 }
 
 const fits = (provider: Provider, endpoint: string, payload: unknown) =>
@@ -114,6 +127,8 @@ describe('the first and backup services are the table\'s', () => {
     for (const ct of ['DevelopImageNode', 'RelightNode', 'RemoveObjectNode', 'TextEditNode', 'RecolorObjectNode', 'SwapBackgroundNode', 'SwapProductNode', 'PersonSwap', 'RotateCameraNode', 'ProductShotNode']) {
       expect(keys.has(ct), ct).toBe(true)
     }
+    // Rotate camera on Qwen Image Edit 2511 (Task F10): the class while its upgrade family is on.
+    expect(keys.has('RotateCameraNode+qwen-2511-angles')).toBe(true)
     // And no row for something the runner doesn't run.
     const image = Object.keys(RUNNER_ROUTES).filter(k => k.startsWith('image:')).length
     const video = Object.keys(RUNNER_ROUTES).filter(k => k.startsWith('video:')).length
@@ -128,8 +143,8 @@ describe('the first and backup services are the table\'s', () => {
 
   for (const [key, route] of Object.entries(RUNNER_ROUTES)) {
     it(`${key}: ${route.first} first, ${route.backup ?? 'no'} backup`, async () => {
-      const [ct, inputs] = nodeFor(key)
-      const p = await plan(ct, inputs)
+      const { ct, inputs, families } = routeOf(key)
+      const p = await plan(ct, inputs, families)
       expect(p.provider).toBe(route.first)
       expect(p.backup?.provider ?? null).toBe(route.backup)
       // A backup is the other service, and a row without one says why.

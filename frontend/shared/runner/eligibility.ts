@@ -47,6 +47,15 @@ export interface RunnerNodeRule {
    * fails validation (required_input_missing) and ComfyUI drops its output.
    */
   required?: readonly string[]
+  /**
+   * A family that moves the whole class onto a newer model (model line-up
+   * Ruling 10; Rotate camera on Qwen Image Edit 2511, Task F10). While it is
+   * on, the runner takes the class even with `family` off, and the ComfyUI
+   * path refuses it (./blockedModels.ts): the engine only knows the old
+   * model, whose result looks different. `label` is the new model's own name,
+   * for that refusal. Off, the class is exactly as `family` makes it.
+   */
+  upgrade?: ClassUpgrade
   /** Output slots no node in the prompt may read (e.g. the Compositor's protect_mask and video). */
   outputsNotLinked?: readonly number[]
   /** Every node reading this one must be one of these classes. */
@@ -72,6 +81,12 @@ export interface RunnerNodeRule {
    * by the render itself, once the picture's size is known.)
    */
   frameLimits?: FrameLimits
+}
+
+/** A node class's newer model and the family that switches it on (RunnerNodeRule.upgrade). */
+export interface ClassUpgrade {
+  family: RunnerFamily
+  label: string
 }
 
 export interface FrameLimits {
@@ -245,7 +260,15 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     mustLink: ['image_1'],
     mustNotLink: ['prompt', 'aspect_ratio', 'size'],
   },
-  RotateCameraNode: { family: 'ref-edits', mustLink: ['image'], mustNotLink: ['camera'] },
+  // Rotate camera on Qwen Image Edit 2511 with the multiple-angles LoRA (fal,
+  // family qwen-2511-angles, Task F10): the same inputs; while that family is
+  // on, the node runs only in the runner, whether or not ref-edits is on.
+  RotateCameraNode: {
+    family: 'ref-edits',
+    upgrade: { family: 'qwen-2511-angles', label: 'Qwen Image Edit 2511' },
+    mustLink: ['image'],
+    mustNotLink: ['camera'],
+  },
   // ── restyle (Task B8): Nano Banana 2 / Pro on fal, Nano Banana on
   // Replicate. The taste wire (style_in) comes from a Moodboard node, which
   // the runner does not run, so a wired one goes to Python. Settings the
@@ -363,6 +386,15 @@ export const LOCAL_RENDER_TYPES: ReadonlySet<string> = new Set(
   Object.entries(RUNNER_NODE_RULES).filter(([, r]) => r.local === 'render').map(([k]) => k),
 )
 
+/**
+ * The newer model a node class runs while its upgrade family is on
+ * (RunnerNodeRule.upgrade), or null: the class has none, or it is off.
+ */
+export function classUpgradeOn(classType: string, families: ReadonlySet<RunnerFamily>): ClassUpgrade | null {
+  const rule = Object.prototype.hasOwnProperty.call(RUNNER_NODE_RULES, classType) ? RUNNER_NODE_RULES[classType] : undefined
+  return rule?.upgrade && families.has(rule.upgrade.family) ? rule.upgrade : null
+}
+
 /** The image models that default to fal AND have a price. seedream-5-pro is
  *  left out until it is priced. krea-2-large and krea-2-medium are priced
  *  (shared/pricing/imageRates.ts) and join with their own family. */
@@ -449,7 +481,8 @@ export function nodeRuleAllows(
       need.push(...(m.mustLink ?? []))
     }
   }
-  if (!family || !families.has(family)) return false
+  const upgraded = !!rule.upgrade && families.has(rule.upgrade.family)
+  if (!upgraded && (!family || !families.has(family))) return false
   if (need.some(name => !isLink(inputs[name]))) return false
   if ((rule.mustNotLink ?? []).some(name => isLink(inputs[name]))) return false
   for (const [name, spec] of Object.entries(rule.widgets ?? {})) {

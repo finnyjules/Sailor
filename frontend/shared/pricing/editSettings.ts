@@ -22,8 +22,14 @@
  * ruling, P4 fix round 1). A test reads the chain from the Python, so a new
  * step there fails it.
  *
- * Picture size: Upscale, Enhance detail and FLUX.2 edit are billed by the size
- * of the picture sent in. Where the caller has measured it (`inputPixels`:
+ * Rotate camera reads the runner's switches (`families`): while its upgrade
+ * family (qwen-2511-angles, Task F10) is on it runs Qwen Image Edit 2511
+ * with the multiple-angles LoRA on fal, billed per megapixel of the picture
+ * it makes, which is the size of the picture sent in; off, its 2509 call is
+ * priced as before. Every other class ignores the switches.
+ *
+ * Picture size: Upscale, Enhance detail, FLUX.2 edit and Rotate camera on
+ * 2511 are billed by the size of the picture sent in. Where the caller has measured it (`inputPixels`:
  * the hosted /prompt gate reads a loaded file's header or an upstream
  * generator's settings, the runner measures the file before it submits), the
  * price reads that size; otherwise the picture is priced at
@@ -37,6 +43,8 @@
  * Pure: no server imports. Relative imports only.
  */
 import { pyFloatOf } from '../runner/pyText'
+import { NO_FAMILIES, type RunnerFamily } from '../runner/families'
+import { classUpgradeOn } from '../runner/eligibility'
 import type { EditCall, EditStep } from './editRates'
 import { effectiveImageSettings } from './imageSettings'
 
@@ -170,6 +178,15 @@ export function seedream5ProEditSize(resolution: unknown): typeof SEEDREAM_5_PRO
 // A linked resolution (or a linked model's Seedream entry at a refused size) prices at the dearer size.
 const seedream5ProEdit = (inputs: NodeInputs) =>
   call(SEEDREAM_5_PRO_SLUG, isLinked(inputs.resolution) ? null : seedream5ProEditSize(inputs.resolution))
+
+/**
+ * Rotate camera on Qwen Image Edit 2511 with the multiple-angles LoRA (runner
+ * only, family qwen-2511-angles, Task F10): fal, no backup. The builder
+ * (server/runner/generators/qwen2511Angles.ts) sends no `image_size`, so the
+ * picture comes back at the input's size: billed on that many megapixels.
+ */
+export const QWEN_2511_ANGLES_APP = 'fal-ai/qwen-image-edit-2511-multiple-angles'
+const rotateCamera2511 = (px: number) => call(QWEN_2511_ANGLES_APP, null, { input: px, output: px })
 
 const EDIT_IMAGE_MODELS: ModelCalls = {
   'Nano Banana 2': i => nanoBananaEdit(REP_NB2, nb2Tier(i)),
@@ -305,7 +322,11 @@ export type EditCalls =
  * dearest). A model the node doesn't offer is refused: the node fails
  * before it calls anyone.
  */
-export function editCalls(classType: string, inputs: NodeInputs, opts: { inputPixels?: number | null } = {}): EditCalls {
+export function editCalls(classType: string, inputs: NodeInputs, opts: { inputPixels?: number | null, families?: ReadonlySet<RunnerFamily> } = {}): EditCalls {
+  // Rotate camera on its newer model while that switch is on (Task F10).
+  if (classType === 'RotateCameraNode' && classUpgradeOn(classType, opts.families ?? NO_FAMILIES)) {
+    return { calls: [rotateCamera2511(pricedInputPixels(opts.inputPixels))] }
+  }
   const fixed = hasOwn(FIXED, classType) ? FIXED[classType] : undefined
   if (fixed) return { calls: [fixed(inputs)] }
   const px = pricedInputPixels(opts.inputPixels)
@@ -333,11 +354,14 @@ export function editCalls(classType: string, inputs: NodeInputs, opts: { inputPi
 
 /**
  * The input whose picture size the price depends on, or null: Upscale and
- * Enhance detail's `image`, and FLUX.2 edit's picture (Edit image and Blend
- * scene with "Flux 2 Pro", or a linked or missing model, which may be it).
+ * Enhance detail's `image`, FLUX.2 edit's picture (Edit image and Blend
+ * scene with "Flux 2 Pro", or a linked or missing model, which may be it),
+ * and Rotate camera's `image` while its 2511 switch is on (`families`; off,
+ * its price doesn't read the size, so nothing is measured).
  */
-export function sizePricedInput(classType: string, inputs: NodeInputs): string | null {
+export function sizePricedInput(classType: string, inputs: NodeInputs, families: ReadonlySet<RunnerFamily> = NO_FAMILIES): string | null {
   if (classType === 'UpscaleImageNode' || classType === 'EnhanceDetailNode') return 'image'
+  if (classType === 'RotateCameraNode') return classUpgradeOn(classType, families) ? 'image' : null
   const flux2 = inputs.model === undefined || isLinked(inputs.model) || inputs.model === 'Flux 2 Pro'
   if (classType === 'EditImageNode') return flux2 ? 'input_image' : null
   if (classType === 'BlendSceneNode') return flux2 ? 'image' : null

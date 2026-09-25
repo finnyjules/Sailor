@@ -33,9 +33,15 @@ export type RunnerFamily =
   | 'ideogram-4'
   /** Seedream 5 Pro in Edit an image, on Replicate, no backup (model line-up F9): a runner-only edit model. */
   | 'seedream-5-pro-edit'
+  /**
+   * Rotate camera on Qwen Image Edit 2511 with the multiple-angles LoRA, on fal, no backup
+   * (model line-up F10). Switches the whole node class onto the new model: while it is on,
+   * Rotate camera runs only in the runner (Ruling 10); off, the ref-edits 2509 call is unchanged.
+   */
+  | 'qwen-2511-angles'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
-  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2', 'ideogram-4', 'seedream-5-pro-edit',
+  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash', 'veo-3.1-lite', 'qwen-image-3', 'grok-imagine-2', 'ideogram-4', 'seedream-5-pro-edit', 'qwen-2511-angles',
 ]
 
 const KNOWN: ReadonlySet<string> = new Set(RUNNER_FAMILIES)
