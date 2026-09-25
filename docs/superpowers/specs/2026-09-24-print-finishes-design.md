@@ -241,8 +241,8 @@ started, restarted or killed.
     Neither runs the shared painter, so anything they draw themselves (wired layers, their own
     effects) has no finishes; the local layers they receive are already-baked pixels.
   - **Preview-only sites on the default light** (not re-verified beyond the plan's own research —
-    no grep run against these for this task): agent preview, `LayoutTile`, layer thumbnails, dev
-    harness.
+    no grep run against these for this task): layer thumbnails, dev harness. (The agent preview and
+    `LayoutTile` take the Frame's light since the 2026-09-25 final review — see the note below.)
 - **Nothing surprising** turned up in the product code itself. The surprises were in the test file
   left by the previous agent: `getByText('Post-processing', { exact: true })` never matched — the
   section header is a `<summary>` whose DOM text is `"› Post-processing"` (a chevron `<span>` ahead
@@ -292,5 +292,44 @@ treats Gold foil as a per-layer effect.
 - **The `gold_foil` effect kind is removed.** It landed on 2026-09-24, so no saved Frame holds
   it; nothing is migrated. A stored effect of an unknown kind is dropped when the stack is read.
 - **The light handle** shows while a Spot UV effect is selected, or while the selected layer has
-  foil in any fill or outline. The foil picker carries the same light presets.
+  foil in any fill or outline. The foil picker carries the same light presets. Without WebGL 2
+  neither the handle nor the picker's light presets show (there is nothing for them to light); the
+  picker says why. When a layer's fill (or text colour) AND its outline are both foil, the presets
+  show once, in the fill picker.
+- **Where foil is lit, and where it is flat.** Foil fills, text colours and outline bands (straight
+  and wobbled) are lit on shapes, paths and text — on text on both routes: glyph outlines, and
+  `fillText` (on the edge and at a distance). **Marching-shape outlines stay flat mid-metal** (the
+  metal's mid colour — the no-WebGL stand-in), sanctioned. On the `fillText` route a foil outline
+  is drawn beneath every other outline of that text, whatever its row order (each foil outline is
+  lit alone, then the rest of the text draws over it). **Known gap:** the box-sized flows — depth of
+  field, corner-pin / raster warp, the layer thumbnail — light foil over the layer's own box, not
+  the Frame.
+- **Each foil region is lit only within its own bounds.** The GPU pass runs over the layer's
+  DEVICE box (its `localLayerBox` grown by the silhouette pad — strokes, geometry growth, glyph
+  overhang — plus an 8 px-per-device-scale margin for the bevel, clamped to the canvas), and is
+  told where that box sits in the Frame (`applyFinish`'s `frame`; the shader's `frameUv`), so the
+  light, the grain and the edge wear are laid out over the Frame exactly as a whole-canvas pass lays
+  them. Checked in the browser against a whole-canvas pass over the same shape: mean absolute
+  difference 0.0009 (foil) / 0.0006 (Spot UV) per channel, 12–15 channels of ~182k differing by
+  more than 2 (float rounding at grain-cell edges); without the frame mapping the same box differs
+  by 19.7 / 5.7. A layer wholly off the canvas runs no pass. Where the box cannot be trusted
+  (expressive text, moving letters, morph letter pieces) the region falls back to the whole
+  canvas. The Spot UV **effect** keeps its whole-canvas pass (it runs on the layer's full offscreen
+  in the effect chain; rect = whole canvas ⇒ the mapping is the identity).
+- **Cost, re-measured** after the bounding-box pass (same method as Findings: three foil text
+  layers, 1080×1350, 30 timed synchronous paints; three runs, dev server shared with other
+  sessions): **1×** median 4.5–4.8 ms, p95 4.9–5.1 ms (was 10.2–12.4 / 11.7–19.4); **2×** median
+  12.8–13.5 ms, **p95 17.1–20.0 ms — now inside the 33 ms budget** (was 34.4–37.0 / 50.5–51.6).
+  Cost now scales with the foil's area, not the canvas's, however many copies, clones or regions a
+  Frame carries.
+- **Off-stack draws name the light.** The agent's review render, `LayoutTile` (via
+  `LayoutVaryPanel` / `LayoutSetSheet`), copy-as-PNG (`compositeSelectionBlob`) and the click
+  hit-test (`layerHitAt`) all paint with the Frame's light (`withFrameLight`), so none leaves the
+  painter's module light on the default for the next draw. The hit-test only reads alpha, so it
+  draws foil flat (`withFlatFoil`) and never runs a GPU pass per click.
+- **The agent cannot author foil** through any command: `setFill` / `setStroke` / `setBackground` /
+  `addShape` refuse a foil paint, and `addLayer` / `placeTemplate` refuse a layer carrying foil in
+  its fill, colour, stroke, text outline colour or any outline row.
+- **Layer rows** show a foil paint as its metal's mid colour, and switching a foil paint to Solid
+  starts from that colour.
 
