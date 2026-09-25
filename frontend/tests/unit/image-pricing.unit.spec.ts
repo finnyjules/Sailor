@@ -66,9 +66,10 @@ describe('the image rate card', () => {
   it('the first service is the one the builder sends to (fal list, Python fal primaries, Replicate for the rest)', () => {
     const falPrimary = pythonFalPrimaries()
     expect(falPrimary).toEqual(expect.arrayContaining([...RUNNER_IMAGE_MODEL_IDS, 'krea-2-large', 'krea-2-medium']))
-    // Runner-only models have no Python entry: their builder's service (GPT Image 2.5: fal, gptImage25.ts).
-    const runnerOnlyFal = IMAGE_MODELS.filter(m => m.runnerOnly).map(m => m.id)
-    expect(runnerOnlyFal).toEqual(['gpt-image-2.5'])
+    // Runner-only models have no Python entry: their builder's service (GPT Image 2.5: fal, gptImage25.ts;
+    // Qwen Image 3: Replicate, qwenImage3.ts).
+    expect(IMAGE_MODELS.filter(m => m.runnerOnly).map(m => m.id)).toEqual(['gpt-image-2.5', 'qwen-image-3'])
+    const runnerOnlyFal = ['gpt-image-2.5']
     for (const [id, r] of Object.entries(IMAGE_RATES)) {
       expect(r.service, id).toBe(falPrimary.includes(id) || runnerOnlyFal.includes(id) ? 'fal' : 'replicate')
     }

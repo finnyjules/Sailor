@@ -61,8 +61,9 @@ describe('image catalog TS ↔ Python parity', () => {
   const withPython = IMAGE_MODELS.filter(m => !m.runnerOnly)
 
   it('both catalogs list the same model ids (the runner-only ones are not in Python)', () => {
-    expect(IMAGE_MODELS.filter(m => m.runnerOnly).map(m => m.id)).toEqual(['gpt-image-2.5'])
+    expect(IMAGE_MODELS.filter(m => m.runnerOnly).map(m => m.id)).toEqual(['gpt-image-2.5', 'qwen-image-3'])
     expect(pyTags['gpt-image-2.5']).toBeUndefined()
+    expect(pyTags['qwen-image-3']).toBeUndefined()
     const tsIds = withPython.map(m => m.id).sort()
     const pyIds = Object.keys(pyTags).sort()
     expect(pyIds).toEqual(tsIds)

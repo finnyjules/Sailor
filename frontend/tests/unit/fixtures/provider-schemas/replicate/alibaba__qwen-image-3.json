@@ -1,0 +1,102 @@
+{
+  "endpoint": "alibaba/qwen-image-3",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/alibaba/qwen-image-3"
+  },
+  "versionId": "8235a8d30fc32fd33a4e0e91d9cffaae6f2250fc56ff8e5736ca4a9c5b9f9fbc",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "seed": {
+            "type": "integer",
+            "title": "Seed",
+            "default": null,
+            "x-order": 6,
+            "nullable": true,
+            "description": "Random seed for reproducible generation. Range: 0-2147483647"
+          },
+          "image": {
+            "type": "string",
+            "title": "Image",
+            "format": "uri",
+            "default": null,
+            "x-order": 1,
+            "nullable": true,
+            "description": "Optional reference image for image editing, style transfer, or image-to-image generation"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "x-order": 0,
+            "description": "Text prompt for image generation or editing"
+          },
+          "aspect_ratio": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/aspect_ratio"
+              }
+            ],
+            "default": "1:1",
+            "x-order": 3,
+            "description": "Aspect ratio of the generated image"
+          },
+          "negative_prompt": {
+            "type": "string",
+            "title": "Negative Prompt",
+            "default": "",
+            "x-order": 5,
+            "description": "Negative prompt to specify elements to avoid in the generated image"
+          },
+          "match_input_image": {
+            "type": "boolean",
+            "title": "Match Input Image",
+            "default": false,
+            "x-order": 2,
+            "description": "When true and an image is provided, use the input image's aspect ratio and resolution instead of the aspect_ratio parameter"
+          },
+          "enable_prompt_expansion": {
+            "type": "boolean",
+            "title": "Enable Prompt Expansion",
+            "default": true,
+            "x-order": 4,
+            "description": "Automatically expand and optimize the prompt for better results"
+          }
+        }
+      },
+      "aspect_ratio": {
+        "enum": [
+          "1:1",
+          "16:9",
+          "9:16",
+          "4:3",
+          "3:4",
+          "3:2",
+          "2:3",
+          "2:1",
+          "1:2"
+        ],
+        "type": "string",
+        "title": "aspect_ratio",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "string",
+        "title": "Output",
+        "format": "uri"
+      }
+    }
+  }
+}

@@ -32,6 +32,7 @@ import { H3_MAX_TURBO_ENDPOINTS } from '~~/server/runner/generators/h3MaxTurbo'
 import { GEMINI_OMNI_FLASH_ENDPOINTS } from '~~/server/runner/generators/geminiOmniFlash'
 import { VEO_31_LITE_ENDPOINTS } from '~~/server/runner/generators/veo31Lite'
 import { GPT_IMAGE_25_FAL_ENDPOINTS, GPT_IMAGE_25_REPLICATE_SLUGS } from '~~/server/runner/generators/gptImage25'
+import { QWEN_IMAGE_3_SLUG } from '~~/server/runner/generators/qwenImage3'
 
 const readJson = (rel: string) => JSON.parse(readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8'))
 const BUILDERS = readJson('./fixtures/runner-builders.json')
@@ -224,6 +225,8 @@ function runnerEndpoints(): string[] {
   for (const e of GEMINI_OMNI_FLASH_ENDPOINTS) out.add(`fal ${e}`)
   // Task F5: Veo 3.1 Lite's two fal endpoints (veo31Lite.ts; its payload grid is runner-veo-31-lite.unit.spec.ts).
   for (const e of VEO_31_LITE_ENDPOINTS) out.add(`fal ${e}`)
+  // Task F6: Qwen Image 3 on Replicate, no backup (qwenImage3.ts; its payload grid is runner-qwen-image-3.unit.spec.ts).
+  out.add(`replicate ${QWEN_IMAGE_3_SLUG}`)
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)

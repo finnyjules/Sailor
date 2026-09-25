@@ -236,6 +236,20 @@ const FLOWS: FamilyFlow[] = [
     endpoint: 'openai/gpt-image-2.5/flare/text-to-image',
     body: { prompt: 'a poster that says HELLO', image_size: { width: 1024, height: 1024 }, quality: 'medium', background: 'auto', output_format: 'png', num_images: 1 },
   },
+  // Task F6: Qwen Image 3 has no Python builder either; Replicate only, the
+  // body written from its saved schema (runner-qwen-image-3.unit.spec.ts).
+  {
+    family: 'qwen-image-3',
+    label: 'GenerateImageNode qwen-image-3',
+    prompt: {
+      1: { class_type: 'GenerateImageNode', inputs: { model: 'qwen-image-3', prompt: 'a poster that says HELLO', aspect_ratio: '1:1', seed: 0, model_options: '{}' } },
+      2: outImage('1'),
+    },
+    files: [],
+    provider: 'replicate',
+    endpoint: 'alibaba/qwen-image-3',
+    body: { prompt: 'a poster that says HELLO', aspect_ratio: '1:1', enable_prompt_expansion: true },
+  },
 ]
 
 // ── The routes ───────────────────────────────────────────────────────────

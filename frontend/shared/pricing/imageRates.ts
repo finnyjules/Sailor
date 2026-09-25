@@ -2,7 +2,8 @@
  * What each image model's FIRST service charges us — the service Sailor's
  * request builder sends it to today: fal for the RUNNER_IMAGE_MODELS ids and
  * the Python `primary="fal"` models (Krea 2), and the runner-only GPT Image
- * 2.5 (server/runner/generators/gptImage25.ts), Replicate for the rest
+ * 2.5 (server/runner/generators/gptImage25.ts), Replicate for the rest,
+ * the runner-only Qwen Image 3 among them (qwenImage3.ts)
  * (comfy_api_nodes/image_models.py `primary`, default "replicate").
  *
  * Units, following the service:
@@ -201,6 +202,10 @@ export const IMAGE_RATES: Record<string, ImageRate> = {
     note: 'per-size table on the model page; the same on openai/gpt-image-2.5/sunburst/text-to-image',
   },
   'qwen-image': repImage('qwen/qwen-image', 0.025),
+  // Qwen Image 3 (runner-only, Task F6), Replicate only: "$0.03 per output
+  // image" (billingConfig, image_output_count; the README says the same),
+  // whatever the ratio. No backup (fal's is the Pro model, qwenImage3.ts).
+  'qwen-image-3': repImage('alibaba/qwen-image-3', 0.03),
   'hunyuan-image-3': repImage('tencent/hunyuan-image-3', 0.08),
   'grok-imagine': repImage('xai/grok-imagine-image', 0.02),
   // "$5 per thousand output images".

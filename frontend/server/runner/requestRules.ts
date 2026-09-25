@@ -23,6 +23,10 @@
  *  - Gemini Omni Flash with a last frame, or reference pictures, videos or
  *    sounds, in its options: its endpoints take one first frame at most, so
  *    the node is refused (geminiOmniFlash.ts GEMINI_OMNI_FLASH_ONE_PICTURE);
+ *  - Veo 3.1, Veo 3.1 Fast and Veo 3.1 Lite with a last frame, or reference
+ *    pictures, videos or sounds, in their options (F6 follow-up): their shared
+ *    builder takes one first frame at most, so the node is refused on
+ *    Generate a video and on Film a shot (video.ts VEO_31_ONE_PICTURE);
  *  - Gemini Omni Flash text-to-video with an empty prompt (controller ruling
  *    after F4: the schema requires a prompt but sets no minimum, so an empty
  *    one would fail only at the result). It is the one row of the prompt table
@@ -36,7 +40,7 @@
 import { isLink, type ApiPrompt } from '#shared/runner/graph'
 import { resolveVideoModelId } from '#shared/runner/eligibility'
 import { composeImagePrompt } from './generators/image'
-import { RUNNER_VIDEO_MODELS } from './generators/video'
+import { RUNNER_VIDEO_MODELS, VEO_31_ONE_PICTURE, veo31HasExtras } from './generators/video'
 import { H3_MAX_TURBO_APP, H3_MAX_TURBO_ENDPOINTS, H3_MAX_TURBO_ID } from './generators/h3MaxTurbo'
 import {
   GEMINI_OMNI_FLASH_ID, GEMINI_OMNI_FLASH_ONE_PICTURE, GEMINI_OMNI_FLASH_TEXT_TO_VIDEO, geminiOmniFlashFirstFrame, geminiOmniFlashHasExtras,
@@ -183,6 +187,9 @@ const NANO_BANANA_IMAGE_APPS: Readonly<Record<string, { text: string, refs: stri
   'nano-banana-2': { text: 'fal-ai/nano-banana-2', refs: 'fal-ai/nano-banana-2/edit' },
   'nano-banana-pro': { text: 'fal-ai/nano-banana-pro', refs: 'fal-ai/nano-banana-pro/edit' },
 }
+/** The models Veo 3.1's builder serves (video.ts veo31; Lite through veo31Lite.ts). */
+export const VEO_31_MODEL_IDS: readonly string[] = ['veo-3.1', 'veo-3.1-fast', 'veo-3.1-lite']
+
 /** GenerateVideoNode's Hailuo H3 models → their fal apps (from the video table, and H3 Max Turbo's). */
 const H3_VIDEO_APPS: Readonly<Record<string, string>> = Object.fromEntries([
   ...['hailuo-h3', 'hailuo-h3-max'].map(id => [id, RUNNER_VIDEO_MODELS[id]!.app]),
@@ -255,6 +262,10 @@ export function requestProblems(prompt: ApiPrompt): RequestProblem[] {
         const p = wan3RequestProblem(id, inputs)
         if (p) out.push({ nodeId, classType: ct, input: p.input, message: p.message })
       }
+      // Veo 3.1 (all three): one first frame at most (their builder refuses the same at planning).
+      if (VEO_31_MODEL_IDS.includes(id) && !isLink(inputs.model_options) && veo31HasExtras(parseJsonObject(inputs.model_options))) {
+        out.push({ nodeId, classType: ct, input: 'model_options', message: VEO_31_ONE_PICTURE })
+      }
       // Gemini Omni Flash: one first frame at most (its builder refuses the same at planning).
       if (id === GEMINI_OMNI_FLASH_ID && !isLink(inputs.model_options) && geminiOmniFlashHasExtras(parseJsonObject(inputs.model_options))) {
         out.push({ nodeId, classType: ct, input: 'model_options', message: GEMINI_OMNI_FLASH_ONE_PICTURE })
@@ -271,6 +282,12 @@ export function requestProblems(prompt: ApiPrompt): RequestProblem[] {
     else if (ct === 'FilmShotNode' && inputs.model === 'seedance-2.0' && !isLink(inputs.model_options)) {
       const p = seedanceReferenceProblem(parseJsonObject(inputs.model_options), isLink(inputs.image))
       if (p) out.push({ nodeId, classType: ct, input: 'model_options', message: p.message })
+    }
+    // Film a shot on Veo 3.1 (ComfyUI path only): Python's builder, like the runner's, sends no last frame
+    // and no references, so they are refused with the same words as Generate a video.
+    else if (ct === 'FilmShotNode' && VEO_31_MODEL_IDS.includes(resolveVideoModelId(inputs.model)) && !isLink(inputs.model_options)
+      && veo31HasExtras(parseJsonObject(inputs.model_options))) {
+      out.push({ nodeId, classType: ct, input: 'model_options', message: VEO_31_ONE_PICTURE })
     }
   }
   return out

@@ -47,6 +47,8 @@
  *                                                  size (as WIDTHxHEIGHT), quality, background, format and
  *                                                  compression; fal is cheaper (gptImage25.ts)
  * qwen-image                Replicate  —           fal's Qwen Image has no webp, no enhance-prompt switch and no 1-step run
+ * qwen-image-3              Replicate  —           runner-only (F6): fal's alibaba/qwen-image-3 is Qwen Image 3 Pro, a
+ *                                                  different model at a different price (qwenImage3.ts)
  * grok-imagine              Replicate  —           fal hosts it (xai/grok-imagine-image); its settings aren't checked yet
  * flux-fast, p-image        Replicate  —           Pruna models: not on fal (fal catalogue, 2026-09-24)
  * bria-fibo                 Replicate  —           fal's Fibo has no guidance setting
@@ -147,6 +149,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'image:gpt-image-2': r('replicate', null, ON_FAL_UNCHECKED),
   'image:gpt-image-2.5': r('fal', 'replicate'),
   'image:qwen-image': r('replicate', null, 'fal has no webp, no enhance-prompt switch and no 1-step run'),
+  'image:qwen-image-3': r('replicate', null, 'fal\'s Qwen Image 3 is the Pro model, not the same one'),
   'image:grok-imagine': r('replicate', null, ON_FAL_UNCHECKED),
   'image:flux-fast': r('replicate', null, 'not on fal'),
   'image:p-image': r('replicate', null, 'not on fal'),

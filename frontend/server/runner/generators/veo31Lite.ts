@@ -17,7 +17,8 @@
  *
  * fal also has first-last-frame-to-video and reference-to-video endpoints for
  * Lite; Veo 3.1 in Sailor uses neither, so neither is built here. As with Veo
- * 3.1, a last frame or references left in the node's options are not sent.
+ * 3.1, a last frame or references left in the node's options are refused in
+ * plain words, never dropped (video.ts VEO_31_ONE_PICTURE, F6 follow-up).
  *
  * No backup service: Replicate's google/veo-3.1-lite (version fe0ac882…, read
  * 2026-09-24, $0.05/s at 720p and $0.08/s at 1080p, the same as fal's with

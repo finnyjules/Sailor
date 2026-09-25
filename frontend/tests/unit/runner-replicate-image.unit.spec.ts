@@ -240,9 +240,10 @@ const one = (n: ApiPrompt[string]): ApiPrompt => ({ 1: n })
 const withCard = (n: ApiPrompt[string]): ApiPrompt => ({ 1: n, 2: { class_type: 'Image', inputs: { image: '', export: false, images: ['1', 0], batch_index: -1 } } })
 
 describe('replicate-image eligibility', () => {
-  it('the row adds only the Replicate models to GenerateImageNode (and GPT Image 2.5 under its own family, Task F2)', () => {
-    const { 'gpt-image-2.5': gpt25, ...models } = RUNNER_NODE_RULES.GenerateImageNode!.models!
+  it('the row adds only the Replicate models to GenerateImageNode (and GPT Image 2.5 and Qwen Image 3 under their own families, Tasks F2 and F6)', () => {
+    const { 'gpt-image-2.5': gpt25, 'qwen-image-3': qwen3, ...models } = RUNNER_NODE_RULES.GenerateImageNode!.models!
     expect(gpt25).toBe('gpt-image-2.5')
+    expect(qwen3).toBe('qwen-image-3')
     expect(Object.keys(models).sort()).toEqual([...RUNNER_REPLICATE_IMAGE_MODEL_IDS].sort())
     expect(new Set(Object.values(models))).toEqual(new Set(['replicate-image']))
     expect(PROVIDER_TYPES.has('GenerateImageNode')).toBe(true)

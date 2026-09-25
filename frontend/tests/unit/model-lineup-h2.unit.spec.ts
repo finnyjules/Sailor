@@ -46,7 +46,7 @@ const HIDDEN_DROPDOWN: Record<string, string[]> = {
   'UpscaleImageNode.model': ['Real-ESRGAN'],
 }
 /** Runner-only models the line-up's F-tasks added (no Python builder; left out while their switch is off). */
-const RUNNER_ONLY_IMAGES = ['gpt-image-2.5']
+const RUNNER_ONLY_IMAGES = ['gpt-image-2.5', 'qwen-image-3']
 const RUNNER_ONLY_DROPDOWN: Record<string, string[]> = { 'EditImageNode.model': ['GPT Image 2.5'] }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -89,7 +89,7 @@ describe('the hide lists', () => {
     expect(VIDEO_MODELS.filter(m => m.hidden).map(m => m.id).sort()).toEqual([...HIDDEN_VIDEOS].sort())
     expect(VIDEO_MODELS.filter(m => m.discontinued).map(m => [m.id, m.discontinued])).toEqual(DISCONTINUED_VIDEOS.map(id => [id, '2026-09-24']))
     expect(IMAGE_MODELS.filter(m => m.discontinued)).toEqual([])
-    expect(IMAGE_MODELS.filter(m => m.runnerOnly).map(m => [m.id, m.family])).toEqual(RUNNER_ONLY_IMAGES.map(id => [id, 'gpt-image-2.5']))
+    expect(IMAGE_MODELS.filter(m => m.runnerOnly).map(m => [m.id, m.family])).toEqual(RUNNER_ONLY_IMAGES.map(id => [id, id]))
   })
 
   it('exactly the retired dropdown values are hidden; every Python value is still an option', () => {

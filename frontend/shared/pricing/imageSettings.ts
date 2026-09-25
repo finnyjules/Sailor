@@ -255,6 +255,8 @@ const RULES: Record<string, Rule> = {
   // gptImage25Generate (runner-only, fal first): quality; one picture.
   'gpt-image-2.5': adv => one(gpt25Quality(adv)),
   'qwen-image': flat,
+  // qwenImage3Generate (runner-only, Replicate): one picture, one price for every ratio.
+  'qwen-image-3': flat,
   'hunyuan-image-3': flat,
   'grok-imagine': flat,
   'flux-fast': flat,

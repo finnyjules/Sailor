@@ -38,7 +38,24 @@ export const SEEDANCE_SECONDS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 const H3_PEM_BASE = new Set(['disabled', 'fast', 'balanced', 'quality'])
 const H3_PEM_MAX = new Set(['disabled', 'balanced', 'quality'])
 
+/**
+ * Veo 3.1, Veo 3.1 Fast and Veo 3.1 Lite (veo31Lite.ts) take one picture at
+ * most, the first frame: their builder sends no last frame and no references.
+ * So a last frame (`end_image_url`) or reference pictures, videos or sounds
+ * left in the node's options are refused in plain words, never dropped
+ * (requestRules.ts judges the same before the hold, on both paths).
+ */
+export const VEO_31_ONE_PICTURE
+  = 'Veo 3.1 starts from one picture at most. Remove the last frame and any reference pictures, videos or sounds, or pick another model.'
+
+/** True when the options carry what Veo 3.1's builder can't send: a last frame, or reference pictures, videos or sounds. */
+export function veo31HasExtras(adv: Record<string, unknown>): boolean {
+  if (optStr(adv, 'end_image_url', '')) return true
+  return ['image_urls', 'video_urls', 'audio_urls'].some(k => Array.isArray(adv[k]) && (adv[k] as unknown[]).length > 0)
+}
+
 function veo31({ prompt, aspectRatio, duration, seed, image, adv }: VideoBuildArgs) {
+  if (veo31HasExtras(adv)) throw new Error(VEO_31_ONE_PICTURE)
   const inp: Record<string, unknown> = {
     prompt,
     duration: `${durOr([4, 6, 8], duration, 8)}s`,

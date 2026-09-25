@@ -66,7 +66,9 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // lineup-f5 (Task F5): Veo 3.1 Lite, fal per second by resolution and sound
 // ($0.05/s at 720p with sound; runner-only, family veo-3.1-lite). No other
 // price moves.
-export const PRICE_BOOK_VERSION = 'lineup-f5'
+// lineup-f6 (Task F6): Qwen Image 3, Replicate's flat $0.03 an image
+// (runner-only, family qwen-image-3, no backup). No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-f6'
 
 export const BASE_RENDER_CREDITS = 1
 

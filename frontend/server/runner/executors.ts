@@ -16,7 +16,8 @@
  * Hailuo H3 Max Turbo, family h3-max-turbo;
  * Gemini Omni Flash, family gemini-omni-flash;
  * Veo 3.1 Lite, family veo-3.1-lite;
- * GPT Image 2.5 in GenerateImageNode and EditImageNode, family gpt-image-2.5)
+ * GPT Image 2.5 in GenerateImageNode and EditImageNode, family gpt-image-2.5;
+ * Qwen Image 3 in GenerateImageNode, family qwen-image-3)
  * closely enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiPrompt } from '#shared/runner/graph'
@@ -51,6 +52,7 @@ import { RUNNER_ONLY_FAL_VIDEO_MODELS } from './generators/h3MaxTurbo'
 import { RUNNER_GEMINI_OMNI_FLASH_MODELS } from './generators/geminiOmniFlash'
 import { RUNNER_VEO_31_LITE_MODELS } from './generators/veo31Lite'
 import { GPT_IMAGE_25_EDIT_OPTION, gptImage25Edit, gptImage25Generate, gptImage25OnReplicate, isGptImage25Model } from './generators/gptImage25'
+import { isQwenImage3Model, qwenImage3Generate } from './generators/qwenImage3'
 import { checkRequest, seedanceReferenceProblem } from './requestRules'
 import type { OutputFile, RunnerProvider } from './types'
 
@@ -169,6 +171,21 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
           adv: parseJsonObject(inputs.model_options),
         })
         return stillCall(call, 'generate_image', gptImage25OnReplicate(call))
+      }
+      // Qwen Image 3 (family qwen-image-3): Replicate, no backup (qwenImage3.ts). No moodboard pictures.
+      if (isQwenImage3Model(inputs.model)) {
+        return stillCall(qwenImage3Generate({
+          prompt: composeImagePrompt({
+            prompt: asText(inputs.prompt),
+            promptIn: asText(inputs.prompt_in),
+            styleBlock: asText(inputs.style_block),
+            styleIn: asText(inputs.style_in),
+            hasRefs: false,
+          }),
+          aspectRatio: asText(inputs.aspect_ratio) || '1:1',
+          seed: asInt(inputs.seed, 0),
+          adv: parseJsonObject(inputs.model_options),
+        }), 'generate_image')
       }
       // A model that isn't one of the fal ids goes to Replicate, its Python
       // primary (family replicate-image). None of these takes moodboard

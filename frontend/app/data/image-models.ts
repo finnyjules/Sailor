@@ -873,6 +873,28 @@ export const IMAGE_MODELS: ImageModel[] = [
         options: ['webp', 'jpg', 'png'] },
     ],
   },
+  {
+    // Runner-only (model line-up F6): Replicate, no backup
+    // (server/runner/generators/qwenImage3.ts). No Python builder.
+    id: 'qwen-image-3',
+    runnerOnly: true,
+    family: 'qwen-image-3',
+    label: 'Qwen Image 3',
+    brand: 'Alibaba',
+    replicateSlug: 'alibaba/qwen-image-3',
+    pitch: 'Sharp, readable text and busy layouts, at a low price.',
+    description: 'Good at posters, infographics and small lettering in many languages. It can rewrite your prompt to add detail before it draws.',
+    tags: ['typography', 'design'],
+    pricePerImage: 0.03,
+    aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '2:1', '1:2'],
+    defaultAspectRatio: '1:1',
+    advanced: [
+      { name: 'enable_prompt_expansion', type: 'boolean', label: 'Rewrite my prompt', default: true,
+        description: 'Adds detail to your prompt before drawing. Turn off to use your words as they are.' },
+      { name: 'negative_prompt', type: 'string', label: 'Leave out', default: '',
+        description: 'Things you don\'t want in the picture.' },
+    ],
+  },
 
   // ===== Tencent ============================================================
   {
