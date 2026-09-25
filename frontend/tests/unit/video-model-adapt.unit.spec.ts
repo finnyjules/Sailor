@@ -13,6 +13,8 @@ import {
 const NO_SEED_IDS = [
   'kling-v2.5-turbo-pro', 'fabric-1.0', 'seedance-2.0',
   'kling-v3', 'hailuo-2.3', 'luma-ray-2-720p', 'flux-3', 'sora-2', 'sora-2-pro',
+  // Task F4: google/gemini-omni-flash (both endpoints) has no seed field.
+  'gemini-omni-flash',
 ]
 
 describe('video-models supportsSeed flag', () => {

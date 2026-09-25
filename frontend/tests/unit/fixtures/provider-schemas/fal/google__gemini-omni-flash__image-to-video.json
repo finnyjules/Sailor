@@ -1,0 +1,151 @@
+{
+  "endpoint": "google/gemini-omni-flash/image-to-video",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=google/gemini-omni-flash/image-to-video",
+    "pricing": "https://fal.ai/models/google/gemini-omni-flash/image-to-video/llms.txt"
+  },
+  "input": {
+    "$ref": "#/components/schemas/GeminiOmniFlashImageToVideoInput"
+  },
+  "output": {
+    "$ref": "#/components/schemas/GeminiOmniFlashImageToVideoOutput"
+  },
+  "components": {
+    "schemas": {
+      "GeminiOmniFlashImageToVideoInput": {
+        "title": "OmniFlashImageToVideoInput",
+        "type": "object",
+        "properties": {
+          "image_url": {
+            "title": "Image URL",
+            "type": "string",
+            "examples": [
+              "https://storage.googleapis.com/falserverless/example_inputs/dog.png"
+            ],
+            "description": "URL of the input image to animate."
+          },
+          "aspect_ratio": {
+            "default": "16:9",
+            "enum": [
+              "16:9",
+              "9:16"
+            ],
+            "title": "Aspect Ratio",
+            "type": "string",
+            "description": "The aspect ratio of the generated video."
+          },
+          "prompt": {
+            "maxLength": 20000,
+            "title": "Prompt",
+            "type": "string",
+            "description": "The text prompt describing how the image should be animated.",
+            "examples": [
+              "The dog turns its head and wags its tail in warm sunlight."
+            ]
+          },
+          "duration": {
+            "maximum": 10,
+            "minimum": 3,
+            "default": 8,
+            "title": "Duration",
+            "type": "integer",
+            "description": "The duration of the generated video, in seconds."
+          }
+        },
+        "x-fal-order-properties": [
+          "prompt",
+          "image_url",
+          "aspect_ratio",
+          "duration"
+        ],
+        "required": [
+          "prompt",
+          "image_url"
+        ]
+      },
+      "GeminiOmniFlashImageToVideoOutput": {
+        "title": "OmniFlashImageToVideoOutput",
+        "type": "object",
+        "properties": {
+          "video": {
+            "$ref": "#/components/schemas/File",
+            "description": "The generated video."
+          }
+        },
+        "x-fal-order-properties": [
+          "video"
+        ],
+        "required": [
+          "video"
+        ]
+      },
+      "File": {
+        "title": "File",
+        "type": "object",
+        "properties": {
+          "file_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size",
+            "examples": [
+              4404019
+            ],
+            "description": "The size of the file in bytes."
+          },
+          "url": {
+            "title": "Url",
+            "type": "string",
+            "description": "The URL where the file can be downloaded from."
+          },
+          "file_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Name",
+            "examples": [
+              "z9RV14K95DvU.png"
+            ],
+            "description": "The name of the file. It will be auto-generated if not provided."
+          },
+          "content_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Type",
+            "examples": [
+              "image/png"
+            ],
+            "description": "The mime type of the file."
+          }
+        },
+        "x-fal-order-properties": [
+          "url",
+          "content_type",
+          "file_name",
+          "file_size"
+        ],
+        "required": [
+          "url"
+        ]
+      }
+    }
+  },
+  "pricingText": "Billing is based on **total token consumption**. Input tokens (text/audio/video) cost **$1.875 per 1 million tokens**. Output tokens cost **$21.875 per 1 million tokens**. For 720p video this costs **approximately $0.13 per second of video**. \n\nFor more details, see [fal.ai pricing](https://fal.ai/pricing)."
+}

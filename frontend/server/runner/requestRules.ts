@@ -19,7 +19,10 @@
  *  - a first frame (the linked picture, or `image_url` in the options) AND
  *    references, on Wan 3.0 or Seedance 2.0 (F1 fix round 1): the builders
  *    would send the first frame and drop the references without a word, so
- *    the node is refused instead (FIRST_FRAME_AND_REFERENCES).
+ *    the node is refused instead (FIRST_FRAME_AND_REFERENCES);
+ *  - Gemini Omni Flash with a last frame, or reference pictures, videos or
+ *    sounds, in its options: its endpoints take one first frame at most, so
+ *    the node is refused (geminiOmniFlash.ts GEMINI_OMNI_FLASH_ONE_PICTURE).
  * References are never dropped, to make a request fit or otherwise. (Film a
  * shot, which the runner doesn't take and this file doesn't judge, still
  * drops them on the ComfyUI path, as its Python builder does.)
@@ -29,6 +32,7 @@ import { resolveVideoModelId } from '#shared/runner/eligibility'
 import { composeImagePrompt } from './generators/image'
 import { RUNNER_VIDEO_MODELS } from './generators/video'
 import { H3_MAX_TURBO_APP, H3_MAX_TURBO_ENDPOINTS, H3_MAX_TURBO_ID } from './generators/h3MaxTurbo'
+import { GEMINI_OMNI_FLASH_ID, GEMINI_OMNI_FLASH_ONE_PICTURE, geminiOmniFlashHasExtras } from './generators/geminiOmniFlash'
 import { asText, parseJsonObject } from './generators/opts'
 import { moodboardFiles } from './inputs'
 import {
@@ -233,6 +237,10 @@ export function requestProblems(prompt: ApiPrompt): RequestProblem[] {
       if (isWan3Model(id)) {
         const p = wan3RequestProblem(id, inputs)
         if (p) out.push({ nodeId, classType: ct, input: p.input, message: p.message })
+      }
+      // Gemini Omni Flash: one first frame at most (its builder refuses the same at planning).
+      if (id === GEMINI_OMNI_FLASH_ID && !isLink(inputs.model_options) && geminiOmniFlashHasExtras(parseJsonObject(inputs.model_options))) {
+        out.push({ nodeId, classType: ct, input: 'model_options', message: GEMINI_OMNI_FLASH_ONE_PICTURE })
       }
     }
   }

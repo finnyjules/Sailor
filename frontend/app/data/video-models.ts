@@ -180,6 +180,37 @@ export const VIDEO_MODELS: VideoModel[] = [
       NEG_PROMPT,
     ],
   },
+  // Gemini Omni Flash runs only in Sailor's runner (family gemini-omni-flash),
+  // on fal (server/runner/generators/geminiOmniFlash.ts). Its schemas
+  // (google/gemini-omni-flash and /image-to-video, read 2026-09-24) take a
+  // prompt, 16:9 or 9:16, and 3–10 s; no resolution (720p), seed, negative
+  // prompt or sound switch (sound is always on). Its video-editing endpoint
+  // needs a video input on Generate a video: a later task.
+  {
+    id: 'gemini-omni-flash',
+    runnerOnly: true,
+    family: 'gemini-omni-flash',
+    label: 'Gemini Omni Flash',
+    brand: 'Google',
+    // The gallery's cover art only (Replicate has no Gemini Omni Flash; google/gemini-omni-1.1 is the nearest page).
+    replicateSlug: 'google/gemini-omni-1.1',
+    pitch: 'Quick clips with sound from Google, from a prompt or a starting picture.',
+    description:
+      'Gemini Omni Flash makes 4 to 10 second clips with sound, at 720p, in landscape ' +
+      'or portrait. Describe the clip, or link a picture to start from it. Say what ' +
+      'to leave out in the prompt itself, for example "no dialogue".',
+    tags: ['fast', 'audio'],
+    modes: ['t2v', 'i2v'],
+    supportsSeed: false,
+    priceHint: null,
+    aspectRatios: ['16:9', '9:16'],
+    defaultAspectRatio: '16:9',
+    durations: [4, 6, 8, 10],
+    defaultDuration: 8,
+    resolutions: ['720p'],
+    defaultResolution: '720p',
+    advanced: [],
+  },
 
   // ===== OpenAI ===========================================================
   {

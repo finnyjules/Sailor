@@ -123,6 +123,18 @@ export const VIDEO_RATES: Record<string, VideoRate> = {
     byResolution: { '480p': 0.025, '768p': 0.04, '1080p': 0.08 },
     note: 'list price after the launch promotion (ends 2026-09-30)',
   },
+  // Gemini Omni Flash (family gemini-omni-flash, runner-only; no backup). fal
+  // bills tokens ($21.875 per 1M output tokens; image-to-video also $1.875 per
+  // 1M input tokens) and gives the per-second figure itself: text-to-video
+  // "For 720p video this costs approximately $0.125 per second of video",
+  // image-to-video "approximately $0.13 per second of video". Both endpoints
+  // render 720p only, with sound. One card at the higher figure, so the input
+  // tokens (the prompt, the picture) are covered on either endpoint.
+  'gemini-omni-flash': {
+    unit: 'per_second', service: 'fal', source: fal('google/gemini-omni-flash/image-to-video'), read: READ, confidence: 'verified',
+    byResolution: { '720p': 0.13 },
+    note: 'fal bills tokens; its own per-second figure at 720p (text-to-video $0.125, image-to-video $0.13)',
+  },
   // Wan 3.0 (family wan-3, runner-only; no backup). Text-, image- and
   // reference-to-video share one card: "For every second of video you
   // generate, you will be charged $0.05 480p, $0.10 720p, or $0.20 1080p."

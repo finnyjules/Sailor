@@ -191,6 +191,21 @@ const FLOWS: FamilyFlow[] = [
     endpoint: 'minimax/h3-max-turbo/text-to-video',
     body: { prompt: 'a fox in the snow', duration: 5, resolution: '768P', prompt_expansion_mode: 'balanced', aspect_ratio: '16:9' },
   },
+  // Task F4: Gemini Omni Flash has no Python builder either; the body is
+  // written from its saved schema (runner-gemini-omni-flash.unit.spec.ts).
+  // Text-to-video is the bare app id.
+  {
+    family: 'gemini-omni-flash',
+    label: 'GenerateVideoNode gemini-omni-flash',
+    prompt: {
+      1: { class_type: 'GenerateVideoNode', inputs: { model: 'gemini-omni-flash', prompt: 'a fox in the snow', aspect_ratio: '9:16', duration: '4', seed: 0, model_options: '{}' } },
+      2: outVideo('1'),
+    },
+    files: [],
+    provider: 'fal',
+    endpoint: 'google/gemini-omni-flash',
+    body: { prompt: 'a fox in the snow', aspect_ratio: '9:16', duration: 4 },
+  },
   // Task F2: GPT Image 2.5 has no Python builder either; the body is written
   // from its saved schema (runner-gpt-image-25.unit.spec.ts). fal first, so
   // Replicate (the backup) is never called.

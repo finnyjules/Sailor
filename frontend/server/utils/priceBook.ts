@@ -60,7 +60,10 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // lineup-f3 (Task F3): Hailuo H3 Max Turbo, fal per second by resolution at
 // the list price after the launch promotion (runner-only, family
 // h3-max-turbo). No other price moves.
-export const PRICE_BOOK_VERSION = 'lineup-f3'
+// lineup-f4 (Task F4): Gemini Omni Flash, fal's own per-second figure at 720p
+// (it bills tokens), $0.13/s (runner-only, family gemini-omni-flash). No other
+// price moves.
+export const PRICE_BOOK_VERSION = 'lineup-f4'
 
 export const BASE_RENDER_CREDITS = 1
 

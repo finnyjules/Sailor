@@ -21,9 +21,11 @@ export type RunnerFamily =
   | 'gpt-image-2.5'
   /** Hailuo H3 Max Turbo on fal, no backup (model line-up F3): a runner-only video model. */
   | 'h3-max-turbo'
+  /** Gemini Omni Flash on fal, no backup (model line-up F4): a runner-only video model. */
+  | 'gemini-omni-flash'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
-  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo',
+  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5', 'h3-max-turbo', 'gemini-omni-flash',
 ]
 
 const KNOWN: ReadonlySet<string> = new Set(RUNNER_FAMILIES)
