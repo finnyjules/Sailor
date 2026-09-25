@@ -84,4 +84,19 @@ describe('prepareMotionFramePainter', () => {
     expect(args.slice(8, 12)).toEqual([undefined, undefined, undefined, undefined])
     expect(args[12]).toBe(true)
   })
+
+  it('hands the Frame\'s placed light to the painter, so video and motion bake light finishes like the editor', async () => {
+    const light = { x: 0.9, y: 0.2, height: 0.4 }
+    const paint = vi.fn()
+    const p = await prepareMotionFramePainter(() => [], [], 10, 10, motion, undefined, { paint, ensure: async () => {} }, { light })
+    await p.paint(0, fakeCtx(10, 10).ctx)
+    expect(paint.mock.calls[0]![13]).toEqual(light)
+  })
+
+  it('passes no light when the doc has none (the painter then uses the default)', async () => {
+    const paint = vi.fn()
+    const p = await prepareMotionFramePainter(() => [], [], 10, 10, motion, undefined, { paint, ensure: async () => {} })
+    await p.paint(0, fakeCtx(10, 10).ctx)
+    expect(paint.mock.calls[0]![13]).toBeUndefined()
+  })
 })

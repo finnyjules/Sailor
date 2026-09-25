@@ -32,6 +32,7 @@ import { useCanvasGroups, GROUP_COLORS, type CanvasGroup } from '~/composables/u
 import { useCanvasAnnotations, STICKY_COLORS, type Annotation, type ArrowEndpoint } from '~/composables/useCanvasAnnotations'
 import { applyArtifactLocks, applyVariantFanOut, backfillStandaloneArtifactImages, buildFilteredWorkflow, collectKeepSet, realignWidgetValues, setNamedWidget } from '~/composables/useFilteredPrompt'
 import { type LocalLayer, ensureLayerFonts, ensureLayerImages, bakeOverlay, createImageLayer, parseIdeogramLayers, parseSeedreamLayers, drawWiredImageLayer, drawLayerSilhouette } from '~/composables/useCompositorLayers'
+import { readFrameLight } from '~/lib/compositor/frameLight'
 import { framePresentKeys, legacyWiredFlagsActive } from '~/lib/compositor/frameStack'
 import { wiredClonerWidgetEntries } from '~/composables/useCloner'
 import { readWiredTreatments } from '~/composables/useWiredTreatments'
@@ -5731,7 +5732,7 @@ async function injectCompositorOverlays(workflow: any): Promise<void> {
     // runs so the backend can apply the mode per layer.
     const injectRun = async (run: LocalLayer[], z: number, blend = 'normal') => {
       if (!run.length || !(W > 0 && H > 0)) return
-      const blob = await bakeOverlay(run, W, H)
+      const blob = await bakeOverlay(run, W, H, readFrameLight(comp.properties)) // finishes lit as in the editor
       if (!blob) return
       let slot = -1
       for (let s = 0; s < 16; s++) { if (!usedSlots.has(s)) { slot = s; break } }

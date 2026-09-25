@@ -4924,6 +4924,7 @@ function frameDocPaint(): FrameDocPaint {
     background: background.value,
     groups: localGroups.value,
     post: postEffects.value,
+    light: frameLight.value,
   }
 }
 

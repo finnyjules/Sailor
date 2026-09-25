@@ -6381,9 +6381,11 @@ export function drawLocalLayers(
   W: number,
   H: number,
   bake = false,
+  /** The Frame's light, for Gold foil / Spot UV layers. Absent ⇒ DEFAULT_FRAME_LIGHT. */
+  light?: FrameLight,
 ) {
   paintLayerStack(ctx, W, H, layers.map(l => ({ type: 'local' as const, key: `l:${l.id}`, layer: l })), layers,
-    undefined, undefined, undefined, undefined, undefined, undefined, undefined, bake)
+    undefined, undefined, undefined, undefined, undefined, undefined, undefined, bake, light)
 }
 
 /** Blend-mode name → canvas composite op (shared by node + modal wired draws). */
@@ -6535,14 +6537,14 @@ export function drawWiredImageLayer(
  * Bake local layers into a transparent RGBA PNG blob at W×H. Returns null if
  * there are no layers. Fonts must already be loaded (call `ensureLayerFonts`).
  */
-export function bakeOverlay(layers: LocalLayer[], W: number, H: number): Promise<Blob | null> {
+export function bakeOverlay(layers: LocalLayer[], W: number, H: number, light?: FrameLight): Promise<Blob | null> {
   if (!layers.length) return Promise.resolve(null)
   const canvas = document.createElement('canvas')
   canvas.width = Math.max(1, Math.round(W))
   canvas.height = Math.max(1, Math.round(H))
   const ctx = canvas.getContext('2d')!
   ctx.clearRect(0, 0, canvas.width, canvas.height) // stay transparent
-  drawLocalLayers(ctx, layers, canvas.width, canvas.height, true) // export/bake: unclamped shader fields
+  drawLocalLayers(ctx, layers, canvas.width, canvas.height, true, light) // export/bake: unclamped shader fields; the Frame's light for finishes
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
 }
 

@@ -7,6 +7,7 @@
 import type { LocalLayer, TextLayer, StackItem, PostEffect } from '~/composables/useCompositorLayers'
 import type { Paint } from '~/lib/compositor/paint'
 import type { LayerGroup } from '~/lib/compositor/layerGroups'
+import type { FrameLight } from '~/lib/compositor/frameLight'
 import {
   paintLayerStack, ensureLayerFonts, ensureLayerImages,
 } from '~/composables/useCompositorLayers'
@@ -63,6 +64,8 @@ export interface FrameDocPaint {
   background?: Paint
   groups?: LayerGroup[]
   post?: PostEffect[]
+  /** The Frame's placed light (Gold foil / Spot UV). Absent ⇒ the painter's default light. */
+  light?: FrameLight
 }
 
 export async function prepareMotionFramePainter(
@@ -123,7 +126,7 @@ export async function prepareMotionFramePainter(
       // from the caller — the editor passes the same four its live view draws with, so a
       // Frame on a red ground records on a red ground, not a transparent (→ black) one.
       paint(ctx, pw, ph, items, frozenLayers, undefined, t, motion,
-        d.treatments, d.background, d.groups, d.post, true)
+        d.treatments, d.background, d.groups, d.post, true, d.light)
     },
   }
 }

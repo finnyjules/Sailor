@@ -797,6 +797,7 @@ watch(
     JSON.stringify(editor.background.value ?? null),
     JSON.stringify(editor.postEffects.value ?? []),
     JSON.stringify(editor.localGroups.value),
+    JSON.stringify(editor.frameLight.value), // Gold foil / Spot UV relight when the light moves
   ] as const,
   async () => {
     for (const l of editor.localLayers.value) if (l.kind === 'text') {
