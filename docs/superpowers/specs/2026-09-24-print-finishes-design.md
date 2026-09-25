@@ -175,3 +175,77 @@ Each stage lands and is verified on its own:
 - The looks are tuned against the prototype by eye, following the anchor rule: keep the last render
   you accepted as the base and change one thing at a time on a 2×2 contact sheet.
 - Constants that are picked once stay constants. Don't add a dial to chase a look.
+
+## Findings (Plan A, 2026-09-24)
+
+Task 8 (browser verification, cost measurement) run against the existing main-checkout dev server
+(`127.0.0.1:3002`, confirmed serving `/Users/julien/Documents/GitHub/Sailor/frontend`) and ComfyUI
+(`127.0.0.1:8188`, `/system_stats` 200 — not required for this task but healthy). No server was
+started, restarted or killed.
+
+- **WebGL2 in Playwright Chromium:** yes — `document.createElement('canvas').getContext('webgl2')`
+  returns a context, so the finish passes run for real in headless Chromium, not the fallback path.
+- **Look check** (seeded dark-green Frame, a large serif "GOLD" text with `gold_foil`, a filled
+  ellipse with `spot_uv`, a stroked ring ellipse with `spot_uv` + `varnishOnly`, Halation 0.7):
+  screenshots at all four light presets confirm the foil reads as brushed metal (not flat yellow
+  paint) and its highlight band visibly moves and re-angles between presets; "Top left"/"Top
+  right"/"Overhead" each show a small point-light glint near the corresponding corner, "Raking"
+  removes the glint dot and darkens/browns the letterforms on one side instead. The varnish-only
+  ring is invisible as fill and shows only a thin gloss arc that moves with the light — the filled
+  spot-UV ellipse shows the same gloss sweep, filled. Halation-on vs halation-off: the "on" shot
+  shows a warm red/orange glow fringing the bright foil letters that is absent in "off".
+- **Pixel-diff checks (in the spec, not just by eye):** pixel color under the foil glyph differs
+  between "Top left" and "Raking" (both a whole-canvas data-URL compare and a direct pixel probe at
+  the glyph). `frame-light-handle` is hidden with no selection, visible once a `gold_foil` or
+  `spot_uv` effect row is selected, and hidden again once a layer row (not an effect row) is
+  selected instead — selection-driven, not effect-type-driven beyond that gate. A real
+  `page.mouse` drag of the handle (mouse down/move-with-steps/up, not a synthetic event) moves the
+  handle more than 20px, changes the composite's pixels, and one `Control+z` restores both the
+  handle position and the pre-drag pixels exactly — the whole drag is one undo step, recorded at
+  pointer-down. Halation on/off changes the composite (`stackPixels` before/after differ).
+- **Absent means unchanged:** verified by reasoning, not an A/B pixel diff. Method: read
+  `git diff e860c652e..HEAD -- frontend/app` restricted to this plan's landed commits (ae2e31ca7,
+  34d1c60f8, d51409715, daaba3861, 563ffd311, 469d2b45c, 9ff62f93f, 429e15014). `gold_foil` and
+  `spot_uv` are new members of the effect-type union (`effectStack.ts`), so every new code path is
+  reached only via a layer whose `effects` array contains one of these — an absent-by-construction
+  branch, not a default-on one. `sailor_localLight` is read through
+  `sanitizeLight((props as Record<string, unknown> | undefined)?.sailor_localLight)` — an optional,
+  trailing, `undefined`-safe read with no independent default that would otherwise change a Frame.
+  No new required field or reordering was found in the diff.
+- **Cost** (1080×1350-equivalent Frame carrying three `gold_foil` text layers; canvas measured at
+  542×542 device px under Playwright's default viewport scale — see caveat below; 60 repaints via
+  `__compositorSetLayers` moving an unrelated layer, two `requestAnimationFrame`s awaited per
+  repaint as a proxy for one settled paint): **median 16.60 ms, p95 17.60 ms** — well under the
+  33 ms budget in the brief. No at-rest cache is needed; none was added.
+  Caveat: the measured canvas was 542×542 physical px, not literally 1080×1350 — the Frame's CSS
+  size was set to the 1080×1350 preset but the compositor's stack canvas renders at the page's
+  device pixel ratio times its on-screen size in the test viewport, not the export resolution. The
+  three-foil-layer *load* is real; the resolution is smaller than a true 1080×1350 export would be,
+  so treat 16.6/17.6 ms as an optimistic bound, not a guarantee at full export resolution.
+- **Export inventory** (which Frame export paths paint in the browser, and so carry finishes and
+  the placed light, vs. which don't):
+  - **Browser-painted (finishes + light apply):** the editor's live render (`CompositorModal.vue`'s
+    stack canvas), Render/PNG export, Harmonize render, motion bake, web export
+    (`app/lib/embed/surfaces/frame.ts` and its `frame/plan.ts` / `frame/gather.ts` / `frame/needs.ts`
+    — confirmed by grep: these reference the same `renderStack`/`effectStack` path), and canvas
+    Frame cards (`ArtifactFrameNode.vue`, same confirmation).
+  - **NOT painted in the browser (no finishes, and no other layer effects either):** queued runs of
+    a graph with a Compositor node — the ComfyUI Python node
+    `comfy_extras/nodes_compositor.py` and its Nitro port `frontend/server/runner/compositor/*`
+    (`plan.ts`, `render.ts`, …). Grepped both for `gold_foil` / `finishPass` / `renderStack` /
+    `effectStack`: zero hits in either, confirming neither path runs the shared browser painter.
+  - **Preview-only sites on the default light** (not re-verified beyond the plan's own research —
+    no grep run against these for this task): agent preview, `LayoutTile`, layer thumbnails, dev
+    harness.
+- **Nothing surprising** turned up in the product code itself. The surprises were in the test file
+  left by the previous agent: `getByText('Post-processing', { exact: true })` never matched — the
+  section header is a `<summary>` whose DOM text is `"› Post-processing"` (a chevron `<span>` ahead
+  of the title text node), so `exact: true` can never equal just `"Post-processing"`; and seeding
+  a scene through `__compositorSetLayers` leaves the last-seeded layer selected (same as `addRect`
+  in `compositor-post-effects.spec.ts`), so the Halation test needed an explicit deselect click on
+  an empty artboard corner before the frame-level Post-processing panel would show. Both were test
+  bugs, fixed in `frontend/tests/print-finishes.spec.ts` — no product code was touched. Separately,
+  two runs of the full suite hit transient `networkidle`/`page.goto` timeouts on the very first
+  navigation of a run; retrying the same test alone always passed immediately after, and
+  `curl -w "%{time_total}"` against `127.0.0.1:3002/` showed an 8s response once versus sub-250ms
+  moments later — consistent with load from other sessions sharing this dev server, not a bug.
