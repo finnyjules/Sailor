@@ -240,14 +240,15 @@ const one = (n: ApiPrompt[string]): ApiPrompt => ({ 1: n })
 const withCard = (n: ApiPrompt[string]): ApiPrompt => ({ 1: n, 2: { class_type: 'Image', inputs: { image: '', export: false, images: ['1', 0], batch_index: -1 } } })
 
 describe('replicate-image eligibility', () => {
-  it('the row adds only the Replicate models to GenerateImageNode (and GPT Image 2.5, Qwen Image 3, Grok Imagine 2, Ideogram 4, Muse Image and Nano Banana 2 Lite under their own families, Tasks F2, F6, F7, F8, F13 and F14)', () => {
-    const { 'gpt-image-2.5': gpt25, 'qwen-image-3': qwen3, 'grok-imagine-2': grok2, 'ideogram-4': ideogram4, 'muse-image': muse, 'nano-banana-2-lite': nb2Lite, ...models } = RUNNER_NODE_RULES.GenerateImageNode!.models!
+  it('the row adds only the Replicate models to GenerateImageNode (and GPT Image 2.5, Qwen Image 3, Grok Imagine 2, Ideogram 4, Muse Image, Nano Banana 2 Lite and Reve 2.1 under their own families, Tasks F2, F6, F7, F8, F13, F14 and F15)', () => {
+    const { 'gpt-image-2.5': gpt25, 'qwen-image-3': qwen3, 'grok-imagine-2': grok2, 'ideogram-4': ideogram4, 'muse-image': muse, 'nano-banana-2-lite': nb2Lite, 'reve-2.1': reve21, ...models } = RUNNER_NODE_RULES.GenerateImageNode!.models!
     expect(gpt25).toBe('gpt-image-2.5')
     expect(qwen3).toBe('qwen-image-3')
     expect(grok2).toBe('grok-imagine-2')
     expect(ideogram4).toBe('ideogram-4')
     expect(muse).toBe('muse-image')
     expect(nb2Lite).toBe('nano-banana-2-lite')
+    expect(reve21).toBe('reve-2.1')
     expect(Object.keys(models).sort()).toEqual([...RUNNER_REPLICATE_IMAGE_MODEL_IDS].sort())
     expect(new Set(Object.values(models))).toEqual(new Set(['replicate-image']))
     expect(PROVIDER_TYPES.has('GenerateImageNode')).toBe(true)

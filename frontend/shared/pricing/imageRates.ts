@@ -2,8 +2,8 @@
  * What each image model's FIRST service charges us — the service Sailor's
  * request builder sends it to today: fal for the RUNNER_IMAGE_MODELS ids and
  * the Python `primary="fal"` models (Krea 2), and the runner-only GPT Image
- * 2.5 (server/runner/generators/gptImage25.ts), Ideogram 4 (ideogram4.ts)
- * and Muse Image (museImage.ts), Replicate for the rest,
+ * 2.5 (server/runner/generators/gptImage25.ts), Ideogram 4 (ideogram4.ts),
+ * Muse Image (museImage.ts) and Reve 2.1 (reve21.ts), Replicate for the rest,
  * the runner-only Qwen Image 3, Grok Imagine 2 and Nano Banana 2 Lite among
  * them (qwenImage3.ts, grokImagine2.ts, nanoBanana2Lite.ts)
  * (comfy_api_nodes/image_models.py `primary`, default "replicate").
@@ -146,6 +146,12 @@ export const IMAGE_RATES: Record<string, ImageRate> = {
   // whatever the ratio. The schema has no web search or other paid extra.
   // No backup (Replicate has no Muse, museImage.ts).
   'muse-image': falImage('meta/muse-image/text-to-image', 0.01),
+  // Reve 2.1 (runner-only, Task F15), fal only: "Price: $0.25 per images"
+  // (llms.txt, read 2026-09-24; the page's billing: unit "images", price
+  // 0.25, one tier), whatever the ratio. The schema has no size setting (Reve
+  // makes its own large picture, fal's example 5376 × 3072) and no paid
+  // extra, so one price. No backup (Replicate has no Reve 2.1, reve21.ts).
+  'reve-2.1': falImage('reve/2.1/text-to-image', 0.25),
   // "Price: $0.035 per images" (text-to-image and /edit alike).
   'seedream-5-lite': falImage('fal-ai/bytedance/seedream/v5/lite/text-to-image', 0.035),
   // "Price: $0.03 per images" (text-to-image and /edit alike).

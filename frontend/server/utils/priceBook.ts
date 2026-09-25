@@ -94,7 +94,9 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // lineup-f14 (Task F14): Nano Banana 2 Lite (Google), Replicate's flat $0.034
 // an image, always 1K (runner-only, family nano-banana-2-lite, no backup).
 // No other price moves.
-export const PRICE_BOOK_VERSION = 'lineup-f14'
+// lineup-f15 (Task F15): Reve 2.1, fal's flat $0.25 an image (runner-only,
+// family reve-2.1, no backup). Reve Create stays unpriced. No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-f15'
 
 export const BASE_RENDER_CREDITS = 1
 

@@ -22,6 +22,7 @@
  * Ideogram 4 in GenerateImageNode, family ideogram-4;
  * Muse Image in GenerateImageNode, family muse-image;
  * Nano Banana 2 Lite in GenerateImageNode, family nano-banana-2-lite;
+ * Reve 2.1 in GenerateImageNode, family reve-2.1;
  * Seedream 5 Pro in EditImageNode, family seedream-5-pro-edit;
  * RotateCameraNode on Qwen Image Edit 2511 multiple angles, family
  * qwen-2511-angles, which moves the whole node while it is on;
@@ -68,6 +69,7 @@ import { grokImagine2Generate, isGrokImagine2Model } from './generators/grokImag
 import { ideogram4Generate, ideogram4OnReplicate, isIdeogram4Model } from './generators/ideogram4'
 import { isMuseImageModel, museImageGenerate } from './generators/museImage'
 import { isNanoBanana2LiteModel, nanoBanana2LiteGenerate } from './generators/nanoBanana2Lite'
+import { isReve21Model, reve21Generate } from './generators/reve21'
 import { isSeedream5ProEdit, seedream5ProEdit } from './generators/seedream5ProEdit'
 import { qwen2511Angles } from './generators/qwen2511Angles'
 import { briaProductShot } from './generators/briaProductShot'
@@ -259,6 +261,19 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       // Nano Banana 2 Lite (family nano-banana-2-lite): Replicate, no backup (nanoBanana2Lite.ts). No moodboard pictures, no seed.
       if (isNanoBanana2LiteModel(inputs.model)) {
         return stillCall(nanoBanana2LiteGenerate({
+          prompt: composeImagePrompt({
+            prompt: asText(inputs.prompt),
+            promptIn: asText(inputs.prompt_in),
+            styleBlock: asText(inputs.style_block),
+            styleIn: asText(inputs.style_in),
+            hasRefs: false,
+          }),
+          aspectRatio: asText(inputs.aspect_ratio) || '1:1',
+        }), 'generate_image')
+      }
+      // Reve 2.1 (family reve-2.1): fal, no backup (reve21.ts). No moodboard pictures, no seed.
+      if (isReve21Model(inputs.model)) {
+        return stillCall(reve21Generate({
           prompt: composeImagePrompt({
             prompt: asText(inputs.prompt),
             promptIn: asText(inputs.prompt_in),

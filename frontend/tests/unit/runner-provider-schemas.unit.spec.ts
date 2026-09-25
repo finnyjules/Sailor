@@ -37,6 +37,7 @@ import { GROK_IMAGINE_2_SLUG } from '~~/server/runner/generators/grokImagine2'
 import { IDEOGRAM_4_FAL_APP, IDEOGRAM_4_REPLICATE_SLUGS } from '~~/server/runner/generators/ideogram4'
 import { MUSE_IMAGE_FAL_APP } from '~~/server/runner/generators/museImage'
 import { NANO_BANANA_2_LITE_SLUG } from '~~/server/runner/generators/nanoBanana2Lite'
+import { REVE_21_FAL_APP } from '~~/server/runner/generators/reve21'
 import { QWEN_2511_ANGLES_APP } from '~~/server/runner/generators/qwen2511Angles'
 import { BRIA_PRODUCT_SHOT_APP } from '~~/server/runner/generators/briaProductShot'
 
@@ -245,6 +246,8 @@ function runnerEndpoints(): string[] {
   out.add(`fal ${MUSE_IMAGE_FAL_APP}`)
   // Task F14: Nano Banana 2 Lite on Replicate, no backup (nanoBanana2Lite.ts; its grid is runner-nano-banana-2-lite.unit.spec.ts).
   out.add(`replicate ${NANO_BANANA_2_LITE_SLUG}`)
+  // Task F15: Reve 2.1 on fal, no backup (reve21.ts; its grid is runner-reve-2-1.unit.spec.ts).
+  out.add(`fal ${REVE_21_FAL_APP}`)
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)

@@ -1,26 +1,29 @@
 /**
- * Task F13 (model line-up): Muse Image (Meta), runner-only, family
- * `muse-image` (server/runner/generators/museImage.ts): "Generate an image"
- * on fal's meta/muse-image/text-to-image, no backup (Replicate has no Muse).
+ * Task F15 (model line-up): Reve 2.1, runner-only, family `reve-2.1`
+ * (server/runner/generators/reve21.ts): "Generate an image" on fal's
+ * reve/2.1/text-to-image, no backup (Replicate has no Reve 2.1).
  *
  * The family contract:
  *  - every payload over the settings grid fits the saved schema; the price
- *    reads what is sent (one flat price per picture);
- *  - hand-written expected payloads: plain (fal's own "Full Example" but
- *    png), every setting there is, and a moodboard picture linked (not sent:
- *    this endpoint takes no picture);
+ *    reads what is sent (one flat price per picture: fal bills Reve 2.1 by
+ *    the image, and its schema has no size to choose);
+ *  - hand-written expected payloads: plain (fal's own "Full Example"),
+ *    every setting there is, and a moodboard picture linked (not sent: this
+ *    endpoint takes no picture);
  *  - eligibility with the family on and off;
  *  - blockedModelUses refuses the model when the family is off or the run
  *    goes to the engine;
  *  - the gallery hides the model while the family is off;
  *  - the price is verified and non-zero, and badge = charge;
- *  - an empty prompt is refused up front (the schema's own minLength 1);
- *  - the engine, end to end: the family's own endpoint, and the hold.
+ *  - an empty prompt (the schema's minLength 1) and one over the schema's
+ *    4,000 characters are refused up front;
+ *  - the engine, end to end: the family's own endpoint, and the hold;
+ *  - Reve Create is untouched.
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { NO_FAMILIES, RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
-import { RUNNER_NODE_RULES, isRunnerEligible } from '#shared/runner/eligibility'
+import { RUNNER_NODE_RULES, RUNNER_REPLICATE_IMAGE_MODEL_IDS, isRunnerEligible } from '#shared/runner/eligibility'
 import { blockedModelUses } from '#shared/runner/blockedModels'
 import { blockedRunRefusal } from '#shared/runner/needsEngine'
 import { __resetModelMenusForTests, galleryEntries, menuDefault, modelMenu } from '#shared/runner/modelMenus'
@@ -33,29 +36,31 @@ import { nodeCreditEstimate } from '~/lib/nodeCreditEstimate'
 import { estimateUsdForNodes } from '~/lib/costEstimate'
 import { planNode, type NodePlan } from '~~/server/runner/executors'
 import {
-  MUSE_IMAGE_FAL_APP, MUSE_IMAGE_FORMAT, MUSE_IMAGE_NEEDS_PROMPT, MUSE_IMAGE_RATIOS,
-} from '~~/server/runner/generators/museImage'
-import { PROMPT_MIN_LENGTH, PROMPT_MIN_LENGTH_RULINGS, requestProblems } from '~~/server/runner/requestRules'
+  REVE_21_FAL_APP, REVE_21_FORMAT, REVE_21_LONG_PROMPT, REVE_21_NEEDS_PROMPT, REVE_21_PROMPT_MAX, REVE_21_RATIOS,
+} from '~~/server/runner/generators/reve21'
+import {
+  PROMPT_MAX_LENGTH, PROMPT_MIN_LENGTH, PROMPT_MIN_LENGTH_RULINGS, requestProblem, requestProblems,
+} from '~~/server/runner/requestRules'
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
 import { PRICE_BOOK_VERSION, priceGraph } from '~~/server/utils/priceBook'
 import type { OutputFile } from '~~/server/runner/types'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
 import { makeKit } from './__runner__/kit'
 
-const ID = 'muse-image'
-const FAMILY: RunnerFamily = 'muse-image'
+const ID = 'reve-2.1'
+const FAMILY: RunnerFamily = 'reve-2.1'
 const ON: ReadonlySet<RunnerFamily> = new Set([FAMILY])
 const ALL: ReadonlySet<RunnerFamily> = new Set(RUNNER_FAMILIES)
 const ALL_BUT: ReadonlySet<RunnerFamily> = new Set(RUNNER_FAMILIES.filter(f => f !== FAMILY))
 const SINK = { class_type: 'SaveImage', inputs: {} }
 const LINK = ['9', 0]
-const PRICE = 0.01
+const PRICE = 0.25
 
 type ProviderPlan = Extract<NodePlan, { kind: 'provider' }>
 
 const schema = () => {
-  const f = loadProviderSchema('fal', MUSE_IMAGE_FAL_APP)
-  expect(f.endpoint).toBe(MUSE_IMAGE_FAL_APP)
+  const f = loadProviderSchema('fal', REVE_21_FAL_APP)
+  expect(f.endpoint).toBe(REVE_21_FAL_APP)
   return f
 }
 /** The saved schema's input object (its $ref followed). */
@@ -66,7 +71,7 @@ function inputSchema(): Record<string, any> {
   return input
 }
 
-/** A "Generate an image" node on Muse Image. */
+/** A "Generate an image" node on Reve 2.1. */
 function gen(o: { prompt?: string, ar?: unknown, seed?: unknown, opts?: Record<string, unknown> } = {}) {
   const inputs: Record<string, unknown> = {
     model: ID, prompt: o.prompt ?? 'a poster that says HELLO', seed: o.seed ?? 0, model_options: JSON.stringify(o.opts ?? {}),
@@ -93,34 +98,43 @@ async function providerPlan(node: { class_type: string, inputs: Record<string, u
 // ── The saved schema ───────────────────────────────────────────────────────
 
 describe('the saved schema', () => {
-  it('one endpoint, fal\'s meta/muse-image/text-to-image: prompt, ratio, count, format; no seed, no picture, no web search', () => {
+  it('one endpoint, fal\'s reve/2.1/text-to-image: prompt, ratio, count, format; no size, no seed, no picture', () => {
     const props = inputSchema().properties
     expect(inputSchema().required).toEqual(['prompt'])
     expect(Object.keys(props).sort()).toEqual(['aspect_ratio', 'num_images', 'output_format', 'prompt', 'sync_mode'])
-    expect(props.output_format.enum).toContain(MUSE_IMAGE_FORMAT)
-    // Any "width:height" between 1:16 and 16:1; the catalogue offers the schema's common presets.
-    const pattern = new RegExp(props.aspect_ratio.anyOf[0].pattern)
-    for (const r of MUSE_IMAGE_RATIOS) expect(pattern.test(r), r).toBe(true)
-    expect(props.aspect_ratio.description).toContain('"21:9", "16:9", "4:3", "3:2", "1:1", "2:3", "3:4", "9:16", "9:21"')
-    expect([...MUSE_IMAGE_RATIOS].sort()).toEqual(['16:9', '1:1', '21:9', '2:3', '3:2', '3:4', '4:3', '9:16', '9:21'])
-    expect(IMAGE_MODELS_BY_ID[ID]!.aspectRatios).toEqual([...MUSE_IMAGE_RATIOS])
-    // The price text: one flat price a picture.
-    expect(schema().pricingText).toContain('$0.01 per images')
+    expect(props.output_format.enum).toContain(REVE_21_FORMAT)
+    // The catalogue offers every ratio the schema lists except `auto` (the model would pick the shape).
+    expect([...REVE_21_RATIOS].sort()).toEqual(props.aspect_ratio.enum.filter((r: string) => r !== 'auto').sort())
+    expect(IMAGE_MODELS_BY_ID[ID]!.aspectRatios).toEqual([...REVE_21_RATIOS])
+    // The price text: one flat price a picture, no size tiers.
+    expect(schema().pricingText).toContain('$0.25 per images')
   })
 
-  it('the prompt rule is the schema\'s own minLength 1, not a ruling', () => {
+  it('the prompt rules are the schema\'s own: minLength 1 (not a ruling) and maxLength 4,000', () => {
     expect(inputSchema().properties.prompt.minLength).toBe(1)
-    expect(inputSchema().properties.prompt.maxLength).toBeUndefined()
-    expect(PROMPT_MIN_LENGTH[`fal ${MUSE_IMAGE_FAL_APP}`]).toEqual({ min: 1, message: MUSE_IMAGE_NEEDS_PROMPT })
-    expect(PROMPT_MIN_LENGTH_RULINGS).not.toContain(`fal ${MUSE_IMAGE_FAL_APP}`)
+    expect(inputSchema().properties.prompt.maxLength).toBe(REVE_21_PROMPT_MAX)
+    expect(REVE_21_PROMPT_MAX).toBe(4000)
+    expect(PROMPT_MIN_LENGTH[`fal ${REVE_21_FAL_APP}`]).toEqual({ min: 1, message: REVE_21_NEEDS_PROMPT })
+    expect(PROMPT_MIN_LENGTH_RULINGS).not.toContain(`fal ${REVE_21_FAL_APP}`)
+    expect(PROMPT_MAX_LENGTH[`fal ${REVE_21_FAL_APP}`]).toEqual({ max: 4000, message: REVE_21_LONG_PROMPT })
+  })
+
+  it('every prompt maximum is its saved schema\'s own maxLength', () => {
+    for (const [key, rule] of Object.entries(PROMPT_MAX_LENGTH)) {
+      const [provider, endpoint] = key.split(' ') as ['fal' | 'replicate', string]
+      const f = loadProviderSchema(provider, endpoint)
+      let input = f.input as Record<string, any>
+      while (input.$ref) input = f.components.schemas[String(input.$ref).split('/').pop()!] as Record<string, any>
+      expect(input.properties.prompt.maxLength, key).toBe(rule.max)
+    }
   })
 })
 
 // ── The settings grid ──────────────────────────────────────────────────────
 
 describe('settings grid: every request fits the schema, the price reads what is sent', () => {
-  const RATIOS: unknown[] = [...MUSE_IMAGE_RATIOS, '5:4', '1:16', 'auto', '', 7, null, undefined]
-  const FORMATS: unknown[] = ['png', 'jpeg', 'webp', '', null, undefined]
+  const RATIOS: unknown[] = [...REVE_21_RATIOS, '9:21', '1:16', 'auto', '', 7, null, undefined]
+  const FORMATS: unknown[] = ['png', 'jpeg', 'webp', 'jpg', '', null, undefined]
   const SEEDS: unknown[] = [0, 42, -1, 'x', undefined]
 
   it('ratio × a saved format option × seed', async () => {
@@ -133,12 +147,12 @@ describe('settings grid: every request fits the schema, the price reads what is 
       const label = JSON.stringify({ ar, seed, opts })
       const p = await providerPlan(node)
       expect(p.provider, label).toBe('fal')
-      expect(p.endpoint, label).toBe(MUSE_IMAGE_FAL_APP)
+      expect(p.endpoint, label).toBe(REVE_21_FAL_APP)
       expect(p.backup, label).toBeUndefined()
       expect(checkPayload(schema(), p.payload), label).toEqual([])
-      // Exactly these fields: never a picture, a seed, or anything that costs extra.
+      // Exactly these fields: never a picture, a seed, or `auto`.
       expect(Object.keys(p.payload).sort(), label).toEqual(['aspect_ratio', 'num_images', 'output_format', 'prompt'])
-      expect(p.payload.aspect_ratio, label).toBe(typeof ar === 'string' && (MUSE_IMAGE_RATIOS as readonly string[]).includes(ar) ? ar : '1:1')
+      expect(p.payload.aspect_ratio, label).toBe(typeof ar === 'string' && (REVE_21_RATIOS as readonly string[]).includes(ar) ? ar : '1:1')
       expect(p.payload.num_images, label).toBe(1)
       expect(p.payload.output_format, label).toBe('png')
       // Priced on what is sent: one picture, the same price whatever the settings.
@@ -162,29 +176,30 @@ describe('settings grid: every request fits the schema, the price reads what is 
 // ── Hand-written expected payloads ─────────────────────────────────────────
 
 describe('hand-written payloads', () => {
-  it('plain: fal\'s own "Full Example", with a png', async () => {
-    // https://fal.ai/models/meta/muse-image/text-to-image/llms.txt (read 2026-09-24), "Full Example":
-    // { prompt: "A cinematic editorial portrait in soft window light with crisp typography",
-    //   aspect_ratio: "16:9", num_images: 1, output_format: "webp" }
-    const prompt = 'A cinematic editorial portrait in soft window light with crisp typography'
+  it('plain: fal\'s own "Full Example"', async () => {
+    // https://fal.ai/models/reve/2.1/text-to-image/llms.txt (read 2026-09-24), "Full Example":
+    // { prompt: "A towering stack of golden fluffy pancakes …", aspect_ratio: "16:9", num_images: 1, output_format: "png" }
+    const prompt = 'A towering stack of golden fluffy pancakes drizzled with amber honey syrup, topped with fresh blackberries and sliced bananas, served on a white ceramic plate on a rustic wooden table with a soft blue-gray background.'
     const p = await providerPlan(gen({ prompt, ar: '16:9' }))
-    expect(p.endpoint).toBe('meta/muse-image/text-to-image')
+    expect(p.endpoint).toBe('reve/2.1/text-to-image')
     expect(p.payload).toEqual({ prompt, aspect_ratio: '16:9', num_images: 1, output_format: 'png' })
     expect(inputSchema().properties.prompt.examples).toEqual([prompt])
     expect(inputSchema().properties.aspect_ratio.examples).toEqual(['16:9'])
+    expect(inputSchema().properties.num_images.examples).toEqual([1])
+    expect(inputSchema().properties.output_format.examples).toEqual(['png'])
   })
 
-  it('every setting there is: a wide cinema ratio, a seed (not sent: the schema takes none)', async () => {
-    const p = await providerPlan(gen({ prompt: 'a festival poster', ar: '21:9', seed: 1234 }))
-    expect(p.payload).toEqual({ prompt: 'a festival poster', aspect_ratio: '21:9', num_images: 1, output_format: 'png' })
+  it('every setting there is: the widest ratio, a seed and a format (neither sent: always one png)', async () => {
+    const p = await providerPlan(gen({ prompt: 'a festival banner', ar: '4:1', seed: 1234, opts: { output_format: 'webp' } }))
+    expect(p.payload).toEqual({ prompt: 'a festival banner', aspect_ratio: '4:1', num_images: 1, output_format: 'png' })
     expect(checkPayload(schema(), p.payload)).toEqual([])
   })
 
-  it('a linked picture\'s place (a moodboard): Muse takes no picture here, so none is sent', async () => {
-    const node = gen({ prompt: 'a tall poster', ar: '9:21' })
+  it('a linked picture\'s place (a moodboard): this endpoint takes no picture, so none is sent', async () => {
+    const node = gen({ prompt: 'a tall poster', ar: '1:4' })
     node.inputs.style_refs = JSON.stringify({ folder: 'moodboard_1', files: ['a.png', 'b.png'] })
     const p = await providerPlan(node)
-    expect(p.payload).toEqual({ prompt: 'a tall poster', aspect_ratio: '9:21', num_images: 1, output_format: 'png' })
+    expect(p.payload).toEqual({ prompt: 'a tall poster', aspect_ratio: '1:4', num_images: 1, output_format: 'png' })
   })
 
   it('the routes table: fal, no backup, and why', () => {
@@ -194,25 +209,39 @@ describe('hand-written payloads', () => {
   })
 })
 
-// ── An empty prompt (the schema's minLength) ──────────────────────────────
+// ── The prompt: not empty (the schema's minLength), at most 4,000 characters ──
 
-describe('an empty prompt is refused up front, in plain words', () => {
-  const refusal = [{ nodeId: '1', classType: 'GenerateImageNode', input: 'prompt', message: MUSE_IMAGE_NEEDS_PROMPT }]
+describe('the prompt is refused up front, in plain words', () => {
+  const refusal = (message: string) => [{ nodeId: '1', classType: 'GenerateImageNode', input: 'prompt', message }]
 
-  it('the words name the model, ask for a prompt, and carry no ids', () => {
-    expect(MUSE_IMAGE_NEEDS_PROMPT).toBe('Muse Image needs a prompt. Describe the picture you want.')
-    expect(MUSE_IMAGE_NEEDS_PROMPT).not.toMatch(/_|muse-image|meta\//)
+  it('the words name the model, say what to do, and carry no ids', () => {
+    expect(REVE_21_NEEDS_PROMPT).toBe('Reve 2.1 needs a prompt. Describe the picture you want.')
+    expect(REVE_21_LONG_PROMPT).toBe('Reve 2.1 takes a prompt of at most 4,000 characters. Shorten it.')
+    for (const s of [REVE_21_NEEDS_PROMPT, REVE_21_LONG_PROMPT]) expect(s).not.toMatch(/_|reve-2|reve\//)
   })
 
   it('before the hold: an empty prompt, or one that is missing', () => {
-    expect(requestProblems({ 1: gen({ prompt: '' }) })).toEqual(refusal)
+    expect(requestProblems({ 1: gen({ prompt: '' }) })).toEqual(refusal(REVE_21_NEEDS_PROMPT))
     const missing = gen()
     delete missing.inputs.prompt
-    expect(requestProblems({ 1: missing })).toEqual(refusal)
+    expect(requestProblems({ 1: missing })).toEqual(refusal(REVE_21_NEEDS_PROMPT))
   })
 
-  it('at planning: the runner refuses it', async () => {
-    await expect(plan(gen({ prompt: '' }))).rejects.toThrow(MUSE_IMAGE_NEEDS_PROMPT)
+  it('before the hold: over 4,000 characters as sent (style text included), counted as code points', () => {
+    expect(requestProblems({ 1: gen({ prompt: 'a'.repeat(4000) }) })).toEqual([])
+    expect(requestProblems({ 1: gen({ prompt: 'a'.repeat(4001) }) })).toEqual(refusal(REVE_21_LONG_PROMPT))
+    // 4,000 emoji are 8,000 UTF-16 units but 4,000 characters.
+    expect(requestProblems({ 1: gen({ prompt: '🦊'.repeat(4000) }) })).toEqual([])
+    const styled = gen({ prompt: 'a'.repeat(3995) })
+    styled.inputs.style_block = 'ink wash'
+    expect(requestProblems({ 1: styled })).toEqual(refusal(REVE_21_LONG_PROMPT))
+  })
+
+  it('at planning: the runner refuses both', async () => {
+    await expect(plan(gen({ prompt: '' }))).rejects.toThrow(REVE_21_NEEDS_PROMPT)
+    await expect(plan(gen({ prompt: 'a'.repeat(4001) }))).rejects.toThrow(REVE_21_LONG_PROMPT)
+    expect(requestProblem('fal', REVE_21_FAL_APP, { prompt: 'a'.repeat(4000) })).toBeNull()
+    expect(requestProblem('fal', REVE_21_FAL_APP, { prompt: 'a'.repeat(4001) })).toBe(REVE_21_LONG_PROMPT)
   })
 
   it('style text alone is a prompt; a wired prompt part isn\'t judged before the run', () => {
@@ -220,9 +249,11 @@ describe('an empty prompt is refused up front, in plain words', () => {
     styled.inputs.style_block = 'ink wash'
     expect(requestProblems({ 1: styled })).toEqual([])
     for (const wired of ['prompt', 'prompt_in', 'style_block', 'style_in']) {
-      const node = gen({ prompt: '' })
-      node.inputs[wired] = LINK
-      expect(requestProblems({ 1: node }), wired).toEqual([])
+      for (const prompt of ['', 'a'.repeat(4001)]) {
+        const node = gen({ prompt })
+        node.inputs[wired] = LINK
+        expect(requestProblems({ 1: node }), wired).toEqual([])
+      }
     }
   })
 })
@@ -271,7 +302,7 @@ describe('blockedModelUses', () => {
     const titles: Record<string, string> = { 1: 'Poster', 2: 'Old sampler' }
     const r = blockedRunRefusal([{ prompt: p, titleOf: id => titles[id] ?? 'Unnamed node' }], { runnerOn: true, families: ON })
     expect(r).not.toBeNull()
-    expect(`${r!.title} ${r!.description}`).toContain('Muse Image')
+    expect(`${r!.title} ${r!.description}`).toContain('Reve 2.1')
     expect(r!.description).toContain('Old sampler')
     const off = blockedRunRefusal([{ prompt: { 1: gen() }, titleOf: () => 'Poster' }], { runnerOn: true, families: NO_FAMILIES })
     expect(off!.description).toContain('switch is off')
@@ -283,13 +314,13 @@ describe('blockedModelUses', () => {
 describe('the gallery', () => {
   afterEach(() => __resetModelMenusForTests())
 
-  it('runner-only in family muse-image, with its brand name and plain words, no settings', () => {
+  it('runner-only in family reve-2.1, with its brand name and plain words, no settings', () => {
     const m = IMAGE_MODELS_BY_ID[ID]!
-    expect(m).toMatchObject({ runnerOnly: true, family: FAMILY, label: 'Muse Image', brand: 'Meta', defaultAspectRatio: '1:1', pricePerImage: PRICE })
+    expect(m).toMatchObject({ runnerOnly: true, family: FAMILY, label: 'Reve 2.1', brand: 'Reve', defaultAspectRatio: '1:1', pricePerImage: PRICE })
     expect(m.hidden).toBeUndefined()
     expect(m.advanced).toEqual([])
     for (const s of [m.label, m.pitch, m.description ?? '']) {
-      expect(s).not.toMatch(/_|muse-image|meta\//)
+      expect(s).not.toMatch(/_|reve-2|reve\//)
     }
   })
 
@@ -308,26 +339,41 @@ describe('the gallery', () => {
   })
 })
 
+// ── Reve Create stays as it is ─────────────────────────────────────────────
+
+describe('Reve Create is untouched', () => {
+  it('still in the catalogue as before: not runner-only, unpriced, no card, not in the runner', () => {
+    const m = IMAGE_MODELS_BY_ID['reve-create']!
+    expect(m).toMatchObject({ label: 'Reve Create', brand: 'Reve', replicateSlug: 'reve/create', pricePerImage: null, defaultAspectRatio: '3:2' })
+    expect(m.runnerOnly).toBeUndefined()
+    expect(m.family).toBeUndefined()
+    expect(IMAGE_RATES['reve-create']).toBeUndefined()
+    expect(RUNNER_REPLICATE_IMAGE_MODEL_IDS).not.toContain('reve-create')
+    expect(RUNNER_NODE_RULES.GenerateImageNode!.models!['reve-create']).toBeUndefined()
+    expect(RUNNER_ROUTES['image:reve-create']).toBeUndefined()
+  })
+})
+
 // ── Price ──────────────────────────────────────────────────────────────────
 
 describe('the price', () => {
   const charge = (inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: 'GenerateImageNode', inputs }, 2: SINK }).credits
 
-  it('the card: fal\'s flat $0.01 an image, verified, non-zero; no backup card; the book carries it (lineup-f13, now lineup-f15)', () => {
+  it('the card: fal\'s flat $0.25 an image, verified, non-zero; no backup card; the book carries it (lineup-f15)', () => {
     expect(IMAGE_RATES[ID]).toEqual({
-      unit: 'per_image', usd: PRICE, service: 'fal', source: 'https://fal.ai/models/meta/muse-image/text-to-image/llms.txt', read: '2026-09-24', confidence: 'verified',
+      unit: 'per_image', usd: PRICE, service: 'fal', source: 'https://fal.ai/models/reve/2.1/text-to-image/llms.txt', read: '2026-09-24', confidence: 'verified',
     })
     expect(PRICE_BOOK_VERSION).toBe('lineup-f15')
   })
 
   const examples: { name: string, inputs: Record<string, unknown> }[] = [
     { name: 'at its defaults, 1:1 (the live check)', inputs: gen({ ar: '1:1' }).inputs },
-    { name: 'a wide cinema ratio', inputs: gen({ ar: '21:9' }).inputs },
+    { name: 'the widest ratio', inputs: gen({ ar: '4:1' }).inputs },
     { name: 'linked options', inputs: { ...gen().inputs, model_options: ['7', 0] } },
     { name: 'a linked ratio', inputs: { ...gen().inputs, aspect_ratio: ['7', 0] } },
   ]
   for (const ex of examples) {
-    it(`${ex.name}: $0.01; badge = charge = run estimate`, () => {
+    it(`${ex.name}: $0.25; badge = charge = run estimate`, () => {
       expect(providerUsd('GenerateImageNode', ex.inputs)).toBeCloseTo(PRICE, 9)
       const credits = creditsForUsd(PRICE)
       expect(credits).toBeGreaterThan(0)
@@ -356,12 +402,12 @@ describe('the runner engine', () => {
   const start = (k: ReturnType<typeof makeKit>, prompt?: string) =>
     k.engine.startRun({ userId: k.userId, takes: [take(prompt)], workflow: null, canvasId: null, projectUuid: null, projectName: null })
 
-  it('with the family on: fal\'s meta/muse-image/text-to-image, held at the node\'s price, a real output; Replicate untouched', async () => {
+  it('with the family on: fal\'s reve/2.1/text-to-image, held at the node\'s price, a real output; Replicate untouched', async () => {
     const k = makeKit({ hosted: true, deps: { families: () => ON } })
     const { runId } = await start(k)
     await k.engine.settled(runId)
     const submitted = [...k.fal.reqs.values()]
-    expect(submitted.map(r => r.endpoint)).toEqual([MUSE_IMAGE_FAL_APP])
+    expect(submitted.map(r => r.endpoint)).toEqual([REVE_21_FAL_APP])
     expect(submitted[0]!.payload).toEqual({ prompt: 'a poster that says HELLO', aspect_ratio: '1:1', num_images: 1, output_format: 'png' })
     expect(k.replicate.reqs.size).toBe(0)
     expect([...k.ledger.holds.values()].map(h => h.credits)).toEqual([creditsForUsd(PRICE) + 1])
@@ -376,10 +422,12 @@ describe('the runner engine', () => {
     expect(k.ledger.holds.size).toBe(0)
   })
 
-  it('an empty prompt with the family on: refused, nothing held or sent', async () => {
-    const k = makeKit({ hosted: true, deps: { families: () => ON } })
-    await expect(start(k, '')).rejects.toThrow()
-    expect(k.fal.reqs.size).toBe(0)
-    expect(k.ledger.holds.size).toBe(0)
+  it('an empty prompt, or one too long, with the family on: refused, nothing held or sent', async () => {
+    for (const prompt of ['', 'a'.repeat(4001)]) {
+      const k = makeKit({ hosted: true, deps: { families: () => ON } })
+      await expect(start(k, prompt), JSON.stringify(prompt.length)).rejects.toThrow()
+      expect(k.fal.reqs.size).toBe(0)
+      expect(k.ledger.holds.size).toBe(0)
+    }
   })
 })

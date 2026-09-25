@@ -326,12 +326,12 @@ describe('the price', () => {
   const charge = (inputPixels?: number, families: ReadonlySet<RunnerFamily> = ON) =>
     priceGraph({ 1: rotate(), 2: SINK }, { families, ...(inputPixels ? { inputPixels: { 1: inputPixels } } : {}) }).credits
 
-  it('the card: fal\'s $0.035 per megapixel of the picture made, verified, non-zero; the book carries it (lineup-f10, now lineup-f14)', () => {
+  it('the card: fal\'s $0.035 per megapixel of the picture made, verified, non-zero; the book carries it (lineup-f10, now lineup-f15)', () => {
     expect(EDIT_RATES[QWEN_2511_ANGLES_APP]).toMatchObject({
       unit: 'per_megapixel', perMegapixel: 0.035, service: 'fal', confidence: 'verified', read: '2026-09-24',
       source: 'https://fal.ai/models/fal-ai/qwen-image-edit-2511-multiple-angles/llms.txt',
     })
-    expect(PRICE_BOOK_VERSION).toBe('lineup-f14')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-f15')
     // At least one megapixel; rounded up (the ruling).
     const at = (px: number | null) => editUsd({ endpoint: QWEN_2511_ANGLES_APP, tier: null, inputPixels: px, outputPixels: px })
     expect(at(null)).toBe(0.035)

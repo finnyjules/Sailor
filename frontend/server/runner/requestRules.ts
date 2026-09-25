@@ -9,7 +9,9 @@
  * The rules come from the providers' saved schemas
  * (tests/unit/fixtures/provider-schemas/; a test holds this table to them):
  *  - a prompt shorter than the schema's `minLength` (Nano Banana 3, Hailuo H3 1,
- *    GPT Image 2.5 1, Muse Image 1), and a transparent JPEG from GPT Image 2.5;
+ *    GPT Image 2.5 1, Muse Image 1, Reve 2.1 1), and a transparent JPEG from GPT Image 2.5;
+ *  - a prompt longer than the schema's `maxLength` where the table
+ *    PROMPT_MAX_LENGTH names the endpoint (Reve 2.1 4,000, F15);
  *  - Wan 3.0 reference pictures over its schema's 10, and reference videos or
  *    sounds, which the runner doesn't send it yet (wan3.ts);
  *  - Seedance 2.0 references over the schema's counts (9 pictures, 3 videos,
@@ -90,6 +92,7 @@ import { GROK_IMAGINE_2_SLUG, isGrokImagine2Model } from './generators/grokImagi
 import { IDEOGRAM_4_FAL_APP, IDEOGRAM_4_NEEDS_PROMPT, isIdeogram4Model } from './generators/ideogram4'
 import { MUSE_IMAGE_FAL_APP, MUSE_IMAGE_NEEDS_PROMPT, isMuseImageModel } from './generators/museImage'
 import { NANO_BANANA_2_LITE_NEEDS_PROMPT, NANO_BANANA_2_LITE_SLUG, isNanoBanana2LiteModel } from './generators/nanoBanana2Lite'
+import { REVE_21_FAL_APP, REVE_21_LONG_PROMPT, REVE_21_NEEDS_PROMPT, REVE_21_PROMPT_MAX, isReve21Model } from './generators/reve21'
 import { isSeedream5ProEdit, seedream5ProEditProblems } from './generators/seedream5ProEdit'
 
 export { FIRST_FRAME_AND_REFERENCES }
@@ -132,6 +135,19 @@ export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: 
   // Nano Banana 2 Lite on Replicate (nanoBanana2Lite.ts): a ruling, not the schema
   // (Replicate's sets no minimum; fal's schema for the same model asks for 3 characters).
   [`replicate ${NANO_BANANA_2_LITE_SLUG}`]: { min: 1, message: NANO_BANANA_2_LITE_NEEDS_PROMPT },
+  // Reve 2.1 on fal (reve21.ts): the schema's own minLength 1.
+  [`fal ${REVE_21_FAL_APP}`]: { min: 1, message: REVE_21_NEEDS_PROMPT },
+}
+
+/**
+ * `<provider> <endpoint>` → the prompt's maximum length in characters (the
+ * schema's `maxLength`, counted as sent), and what to say. Only endpoints
+ * whose builder lets a longer prompt through are listed (a test holds each
+ * row to its saved schema).
+ */
+export const PROMPT_MAX_LENGTH: Readonly<Record<string, { max: number, message: string }>> = {
+  // Reve 2.1 on fal (reve21.ts, Task F15).
+  [`fal ${REVE_21_FAL_APP}`]: { max: REVE_21_PROMPT_MAX, message: REVE_21_LONG_PROMPT },
 }
 
 /**
@@ -194,6 +210,8 @@ export function requestProblem(provider: string, endpoint: string, payload: Reco
   const key = `${provider} ${endpoint}`
   const rule = PROMPT_MIN_LENGTH[key]
   if (rule && promptLength(key, typeof payload.prompt === 'string' ? payload.prompt : '') < rule.min) return rule.message
+  const max = PROMPT_MAX_LENGTH[key]
+  if (max && typeof payload.prompt === 'string' && chars(payload.prompt) > max.max) return max.message
   // GPT Image 2.5 makes no transparent JPEG (either service); the request is refused, never sent.
   if ((GPT_IMAGE_25_FAL_ENDPOINTS as readonly string[]).includes(endpoint) || endpoint.startsWith('openai/gpt-image-2.5-')) {
     if (payload.background === 'transparent' && payload.output_format === 'jpeg') return GPT_IMAGE_25_TRANSPARENT_JPEG
@@ -352,7 +370,9 @@ export function requestProblems(prompt: ApiPrompt): RequestProblem[] {
       const key = `${provider} ${endpoint}`
       const rule = PROMPT_MIN_LENGTH[key]
       if (!rule) throw new Error(`No prompt rule for ${key}`)
+      const max = PROMPT_MAX_LENGTH[key]
       if (promptLength(key, text) < rule.min) out.push({ nodeId, classType: ct, input: 'prompt', message: rule.message })
+      else if (max && chars(text) > max.max) out.push({ nodeId, classType: ct, input: 'prompt', message: max.message })
     }
     const nb = ct === 'GenerateImageNode' && Object.prototype.hasOwnProperty.call(NANO_BANANA_IMAGE_APPS, String(inputs.model))
       ? NANO_BANANA_IMAGE_APPS[String(inputs.model)]!
@@ -396,10 +416,12 @@ export function requestProblems(prompt: ApiPrompt): RequestProblem[] {
         hasRefs: false,
       }), 'replicate')
     }
-    // Ideogram 4 and Muse Image (fal, text-to-image): the prompt as sent must not be empty.
-    else if (ct === 'GenerateImageNode' && (isIdeogram4Model(inputs.model) || isMuseImageModel(inputs.model))) {
+    // Ideogram 4, Muse Image and Reve 2.1 (fal, text-to-image): the prompt as sent must not be empty
+    // (and, for Reve 2.1, not over its schema's 4,000 characters).
+    else if (ct === 'GenerateImageNode' && (isIdeogram4Model(inputs.model) || isMuseImageModel(inputs.model) || isReve21Model(inputs.model))) {
       if (['prompt', 'prompt_in', 'style_block', 'style_in'].some(k => isLink(inputs[k]))) continue
-      judge(isIdeogram4Model(inputs.model) ? IDEOGRAM_4_FAL_APP : MUSE_IMAGE_FAL_APP, composeImagePrompt({
+      const app = isIdeogram4Model(inputs.model) ? IDEOGRAM_4_FAL_APP : isMuseImageModel(inputs.model) ? MUSE_IMAGE_FAL_APP : REVE_21_FAL_APP
+      judge(app, composeImagePrompt({
         prompt: asText(inputs.prompt),
         promptIn: asText(inputs.prompt_in),
         styleBlock: asText(inputs.style_block),

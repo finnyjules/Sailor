@@ -386,6 +386,20 @@ const FLOWS: FamilyFlow[] = [
     endpoint: 'google/nano-banana-2-lite',
     body: { prompt: 'a poster that says HELLO', aspect_ratio: '1:1', output_format: 'png' },
   },
+  // Task F15: Reve 2.1, no Python builder; fal only, the body written from
+  // its saved schema (runner-reve-2-1.unit.spec.ts).
+  {
+    family: 'reve-2.1',
+    label: 'GenerateImageNode reve-2.1',
+    prompt: {
+      1: { class_type: 'GenerateImageNode', inputs: { model: 'reve-2.1', prompt: 'a poster that says HELLO', aspect_ratio: '1:1', seed: 0, model_options: '{}' } },
+      2: outImage('1'),
+    },
+    files: [],
+    provider: 'fal',
+    endpoint: 'reve/2.1/text-to-image',
+    body: { prompt: 'a poster that says HELLO', aspect_ratio: '1:1', num_images: 1, output_format: 'png' },
+  },
 ]
 
 // ── The routes ───────────────────────────────────────────────────────────

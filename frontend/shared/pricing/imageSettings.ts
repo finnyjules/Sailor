@@ -347,6 +347,8 @@ const RULES: Record<string, Rule> = {
   'muse-image': flat,
   // nanoBanana2LiteGenerate (runner-only, Replicate): one 1K picture, one price for every ratio.
   'nano-banana-2-lite': flat,
+  // reve21Generate (runner-only, fal): one picture at Reve's own size, one price for every ratio.
+  'reve-2.1': flat,
   // ideogram4Generate (runner-only, fal first): the speed is the tier, the
   // size's picture the megapixels; one picture. Only a 2K picture has the
   // Replicate backup (ideogram4OnReplicate), so a 1K one doesn't cover it.

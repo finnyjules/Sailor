@@ -1161,6 +1161,27 @@ export const IMAGE_MODELS: ImageModel[] = [
 
   // ===== Reve ===============================================================
   {
+    // Runner-only (model line-up F15): fal, no backup
+    // (server/runner/generators/reve21.ts). No Python builder. The ratios
+    // are that file's REVE_21_RATIOS; its fal schema has no size and no
+    // other setting worth a control, so there are none.
+    id: 'reve-2.1',
+    runnerOnly: true,
+    family: 'reve-2.1',
+    label: 'Reve 2.1',
+    brand: 'Reve',
+    // Cover art only, and Replicate has no Reve 2.1: the lookup answers "not
+    // found" and the card keeps its brand wordmark. The runner sends fal.
+    replicateSlug: 'reve/reve-2.1',
+    pitch: 'Large, detailed pictures that follow the prompt closely and spell text right.',
+    description: 'Reve\'s premium image model. Keeps to what the prompt asks, lays out a scene well and writes lettering accurately. Makes large, 4K-class pictures, one price whatever their shape.',
+    tags: ['4k', 'typography'],
+    pricePerImage: 0.25,
+    aspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9', '17:9', '2:1', '1:2', '3:1', '1:3', '4:1', '1:4'],
+    defaultAspectRatio: '1:1',
+    advanced: [],
+  },
+  {
     id: 'reve-create',
     label: 'Reve Create',
     brand: 'Reve',
