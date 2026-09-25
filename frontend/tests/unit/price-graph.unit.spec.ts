@@ -19,6 +19,7 @@ import {
   GRAPH_NODE_CREDITS,
   MODEL_PRICED_NODE_CLASSES,
   PROVIDER_NODE_CLASSES,
+  REMOTE_VIDEO_NODE_CLASSES,
   SETTING_PRICED_NODE_CLASSES,
   PROVIDER_NODE_EXEMPT,
   UnpricedGraphError,
@@ -74,10 +75,11 @@ function comfyExtrasProviderClasses(): string[] {
 const EXTRAS_CLASSES = comfyExtrasProviderClasses()
 const ALL_PROVIDER_CLASSES = [...REPLICATE_CLASSES, ...EXTRAS_CLASSES]
 
-function classify(c: string): 'flat' | 'model' | 'settings' | 'exempt' | 'UNCLASSIFIED' {
+function classify(c: string): 'flat' | 'model' | 'settings' | 'per-second' | 'exempt' | 'UNCLASSIFIED' {
   if (c in GRAPH_NODE_CREDITS) return 'flat'
   if (MODEL_PRICED_NODE_CLASSES.includes(c)) return 'model'
   if (SETTING_PRICED_NODE_CLASSES.includes(c)) return 'settings'
+  if (REMOTE_VIDEO_NODE_CLASSES.includes(c)) return 'per-second'
   if (c in PROVIDER_NODE_EXEMPT) return 'exempt'
   return 'UNCLASSIFIED'
 }
@@ -92,7 +94,7 @@ describe('graph price book coverage', () => {
     const unclassified = ALL_PROVIDER_CLASSES.filter(c => classify(c) === 'UNCLASSIFIED')
     expect(unclassified).toEqual([])
     // One price per class: no class sits in two tables.
-    const doubled = ALL_PROVIDER_CLASSES.filter(c => [c in GRAPH_NODE_CREDITS, MODEL_PRICED_NODE_CLASSES.includes(c), SETTING_PRICED_NODE_CLASSES.includes(c)].filter(Boolean).length > 1)
+    const doubled = ALL_PROVIDER_CLASSES.filter(c => [c in GRAPH_NODE_CREDITS, MODEL_PRICED_NODE_CLASSES.includes(c), SETTING_PRICED_NODE_CLASSES.includes(c), REMOTE_VIDEO_NODE_CLASSES.includes(c)].filter(Boolean).length > 1)
     expect(doubled).toEqual([])
   })
 
@@ -172,9 +174,11 @@ describe('graph price book coverage', () => {
   it('keeps the spike-v3 hand-set prices for the classes that stayed flat', () => {
     // EditImageNode (23 flat) is priced by its settings since Task P4 (edit-pricing.unit.spec.ts).
     expect(GRAPH_NODE_CREDITS.EditImageNode).toBeUndefined()
-    expect(GRAPH_NODE_CREDITS.LipSyncNode).toBe(150)
+    // LipSyncNode (150 flat) is priced per second since Task P5 (clip-pricing.unit.spec.ts).
+    expect(GRAPH_NODE_CREDITS.LipSyncNode).toBeUndefined()
     expect(GRAPH_NODE_CREDITS.LoraTrainingNode).toBe(600)
-    expect(GRAPH_NODE_CREDITS.RestyleWithLoRANode).toBe(18)
+    // RestyleWithLoRANode (18 flat) is priced by its calls since P4 fix round 2.
+    expect(GRAPH_NODE_CREDITS.RestyleWithLoRANode).toBeUndefined()
     expect(GRAPH_NODE_CREDITS.FluxLoRARemoteNode).toBe(8)
     expect(GRAPH_NODE_CREDITS.FluxMultiLoRARemoteNode).toBe(8)
   })
@@ -194,10 +198,10 @@ describe('graph price book coverage', () => {
   it('prices Clarity/Kling/Seedance2 off their multi-line price_badge USD', () => {
     expect(GRAPH_NODE_CREDITS.ClarityUpscaleRemoteNode).toBe(creditsForUsdServer(0.20))
     expect(GRAPH_NODE_CREDITS.ClarityUpscaleRemoteNode).toBe(30)
-    expect(GRAPH_NODE_CREDITS.KlingVideoRemoteNode).toBe(creditsForUsdServer(0.35))
-    expect(GRAPH_NODE_CREDITS.KlingVideoRemoteNode).toBe(53)
-    expect(GRAPH_NODE_CREDITS.Seedance2RemoteNode).toBe(creditsForUsdServer(0.60))
-    expect(GRAPH_NODE_CREDITS.Seedance2RemoteNode).toBe(90)
+    // Kling 2.1 and Seedance 2.0 are priced per second of what they send since
+    // Task P5 (clip-pricing.unit.spec.ts).
+    expect(GRAPH_NODE_CREDITS.KlingVideoRemoteNode).toBeUndefined()
+    expect(GRAPH_NODE_CREDITS.Seedance2RemoteNode).toBeUndefined()
   })
 })
 
@@ -357,7 +361,8 @@ describe('golden price table (no price changed by the shared pricing move)', () 
   it('covers every model-priced class and every flat class (the table is not empty)', () => {
     expect(Object.keys(golden.modelPriced).sort()).toEqual([...MODEL_PRICED_NODE_CLASSES].sort())
     // Task P4 moved the edit classes from the flat table to their settings.
-    expect(Object.keys(golden.flat).sort()).toEqual([...Object.keys(GRAPH_NODE_CREDITS), ...SETTING_PRICED_NODE_CLASSES].sort())
+    // Task P5 moved the older video and lip-sync nodes to a per-second price.
+    expect(Object.keys(golden.flat).sort()).toEqual([...Object.keys(GRAPH_NODE_CREDITS), ...SETTING_PRICED_NODE_CLASSES, ...REMOTE_VIDEO_NODE_CLASSES].sort())
     // Both outcomes are present, so a pricer that refused (or priced) everything would fail.
     const cells = Object.values(golden.modelPriced).flatMap(row => Object.values(row))
     expect(cells.filter(c => c === 'refused').length).toBeGreaterThan(50)
@@ -397,7 +402,8 @@ describe('golden price table (no price changed by the shared pricing move)', () 
     for (const [ct, want] of Object.entries(golden.flat)) {
       const got = priceOrRefused(ct, {})
       // A setting-priced edit class keeps only its shape: it still prices.
-      if (SETTING_PRICED_NODE_CLASSES.includes(ct)) { if (typeof got !== 'number') drift.push(`${ct}: recorded ${want}, now ${got}`) }
+      // So does a per-second class (Task P5).
+      if (SETTING_PRICED_NODE_CLASSES.includes(ct) || REMOTE_VIDEO_NODE_CLASSES.includes(ct)) { if (typeof got !== 'number') drift.push(`${ct}: recorded ${want}, now ${got}`) }
       else if (got !== want) drift.push(`${ct}: recorded ${want}, now ${got}`)
     }
     expect(drift).toEqual([])

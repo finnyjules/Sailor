@@ -10,9 +10,9 @@
  * GenerateImageNode was missing from the table.
  */
 import { creditsForUsd } from '../../shared/pricing/markup'
-import { MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, SHARED_PRICED_CLASS_SET, priceNode } from '../../shared/pricing/nodePrice'
+import { MODEL_PRICED_NODE_CLASSES, REMOTE_VIDEO_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, SHARED_PRICED_CLASS_SET, priceNode } from '../../shared/pricing/nodePrice'
 import { VIDEO_RATES } from '../../shared/pricing/videoRates'
-export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES }
+export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, REMOTE_VIDEO_NODE_CLASSES }
 // lineup-p2 (model line-up Task P2): video priced per second of the clip
 // actually sent (shared/pricing/videoRates.ts), replacing one flat figure per model.
 // lineup-p3 (Task P3, one bump for P2's fix round and P3): images priced by
@@ -25,7 +25,14 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES }
 // step of the ComfyUI path's fallback chain; Upscale, Enhance detail and
 // FLUX.2 edit read the measured input size where the gate or runner sees it,
 // else the 4096² cap.
-export const PRICE_BOOK_VERSION = 'lineup-p4b'
+// lineup-p4c (P4 fix round 2): RestyleWithLoRANode priced by its calls and
+// resolution (every Nano Banana re-roll included); an upstream Nano Banana
+// picture measured at its ratio's real size.
+// lineup-p5 (Task P5): Frame Animate held and charged per second of the
+// request it sends (a per-request price now wins over a flat MODEL_COSTS row);
+// the older Veo 3 / Kling 2.1 / Seedance 2.0 nodes priced per second of what
+// they send; lip-sync at the longest clip it can make (shared/pricing/clipRates.ts).
+export const PRICE_BOOK_VERSION = 'lineup-p5'
 
 export const BASE_RENDER_CREDITS = 1
 
@@ -50,7 +57,7 @@ export const BASE_RENDER_CREDITS = 1
 export const LORA_SLUG_OWNERS = ['finnyjules']
 
 export const LORA_RENDER_CREDITS = 8      // ~$0.04 observed median — 2× markup
-export const RESTYLE_LORA_CREDITS = 18    // ~$0.09 observed median — 2× markup
+export const RESTYLE_LORA_CREDITS = 18    // RETIRED from the graph table at lineup-p4c: RestyleWithLoRANode is priced by its calls now
 
 // Terminal output nodes that mean "the GPU produced a deliverable" → base
 // render. Exported (Stage 6 Task 7) so the hosted forward path injects a
@@ -144,9 +151,8 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   // — spike-v3 hand-set rows: kept verbatim —
   // (EditImageNode, 23 flat, is priced by its settings since lineup-p4 — see
   // SETTING_PRICED_NODE_CLASSES below.)
-  LipSyncNode: 150,        // observed $1.00/run — was 30 (a 70¢ LOSS per run); 150 ≈ 1.5× on a 6–10s clip
   LoraTrainingNode: 600,
-  RestyleWithLoRANode: RESTYLE_LORA_CREDITS,
+  // (RestyleWithLoRANode, 18 flat, is priced by its calls and resolution since lineup-p4c.)
   FluxLoRARemoteNode: LORA_RENDER_CREDITS,
   FluxMultiLoRARemoteNode: LORA_RENDER_CREDITS,
   // (GenerateVideoNode 60 and FilmShotNode 160 moved to MODEL_PRICED — their
@@ -185,19 +191,15 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   ClarityUpscaleRemoteNode: 30,
 
   // — video —
-  Veo3RemoteNode: 900,             // badge $6.00
-  KlingVideoRemoteNode: 53,        // badge $0.35 (nodes_replicate.py:1344) — point-priced so the badge stands as-is
-  // Seedance2 is RANGE-priced (video_models.py catalog tops out at
-  // $0.60/clip) and the same slug is priced at range-top 90cr via the
-  // GenerateVideoNode seedance-2.0 row — a badge-bottom price here would
-  // underprice the exact same call at its expensive setting. Review ruling
-  // (2026-08-17): keep the CONSERVATIVE range-top figure. badge $0.50 vs
-  // range-top $0.60 (nodes_replicate.py:1596) — badge divergence flagged for
-  // the pre-launch invoice sweep.
-  Seedance2RemoteNode: 90,
+  // (Veo3RemoteNode 900, KlingVideoRemoteNode 53 and Seedance2RemoteNode 90
+  // flat, and the lip-sync nodes LipSyncNode, LipsyncNode and LipsyncRemoteNode
+  // 150 flat, are priced per second since lineup-p5: see
+  // REMOTE_VIDEO_NODE_CLASSES, shared/pricing/clipSettings.ts.)
+  // EnhanceVideoNode stays flat (P5): topazlabs/video-upscale bills by the
+  // source video's length, a URL the gate can't measure, and neither the node
+  // nor the service caps it, so there is no "longest clip" to charge. Re-priced
+  // with Topaz video in the runner (plan Task F23).
   EnhanceVideoNode: 150,           // badge $1.00
-  LipsyncRemoteNode: 150,          // badge $1.00 / 30s
-  LipsyncNode: 150,                // badge $1.00 / 30s
 
   // — audio / speech —
   WhisperRemoteNode: 1,            // badge $0.001 / min
@@ -472,24 +474,19 @@ export const MODEL_COSTS: Record<string, ModelCost> = {
   'kwaivgi/kling-v2.1': { usd: 0.35, credits: 53, confidence: 'estimate', note: 'per ~5s clip — duration-aware pricing is a hardening rider' },
   'bytedance/seedance-2.0': { usd: 0.6, credits: 90, confidence: 'estimate', note: 'matches the GenerateVideoNode picker row range-top ($0.60); node price_badge quotes $0.50 — duration-aware pricing is a hardening rider' },
   'philz1337x/clarity-upscaler': { usd: 0.2, credits: 30, confidence: 'estimate', note: 'matches the UpscaleImageNode "Clarity" picker row range-top ($0.20); node price_badge quotes $0.10 — duration/scale-factor variance is a hardening rider' },
-  // — Frame Animate (/api/frame/animate) — exact slugs runFal/runReplicate
-  // dispatch with, priced flat per 5 s clip (the old per-clip video table,
-  // since retired for shared/pricing/videoRates.ts; Task P5 re-prices these
-  // rows per second from that rate card). Without these rows, preflightMeter's costForModel
-  // miss refuses every call ("unpriced model refused"). A duration-aware
-  // hold (credits scaled by the chosen clip length) was investigated via
-  // setMeterPriceHint but NOT wired — see the comment above the model
-  // dispatch in animate.post.ts: requestMeter's resolveCredits checks
-  // costForModel(model) FIRST and only falls back to priceHintCredits when
-  // the model is unpriced, so once a flat row exists here any hint set by
-  // the route is silently ignored. The hold is flat per model regardless of
-  // `seconds` until that precedence changes (a shared chokepoint — out of
-  // scope for this fix).
-  'bytedance/seedance-2.0/image-to-video': { usd: 0.6, credits: 90, confidence: 'estimate', note: 'Frame Animate — flat per 5 s clip regardless of length — duration-aware pricing NOT wired (resolveCredits prefers this row over any price hint); a hardening rider' },
-  'minimax/h3/image-to-video': { usd: 0.3, credits: 45, confidence: 'estimate', note: 'Frame Animate — flat per 5 s clip regardless of length — duration-aware pricing NOT wired (resolveCredits prefers this row over any price hint); a hardening rider' },
-  'minimax/h3-max/image-to-video': { usd: 0.4, credits: 60, confidence: 'estimate', note: 'Frame Animate — flat per 5 s clip regardless of length — duration-aware pricing NOT wired (resolveCredits prefers this row over any price hint); a hardening rider' },
-  'fal-ai/kling-video/v3/pro/image-to-video': { usd: 0.56, credits: 84, confidence: 'estimate', note: 'Frame Animate — flat per 5 s clip regardless of length — duration-aware pricing NOT wired (resolveCredits prefers this row over any price hint); a hardening rider' },
-  'blackforestlabs/flux-3/first-last-frame-to-video/draft': { usd: 0.3, credits: 45, confidence: 'estimate', note: 'Frame Animate — FLUX 3 DRAFT first-last-frame (720p, ~$0.06/s); flat per 5 s clip regardless of length (resolveCredits prefers this row over any price hint); a hardening rider' },
+  // — Frame Animate (/api/frame/animate) — the exact fal endpoints the route
+  // sends to. Since lineup-p5 these rows are NOT what an Animate call is held
+  // or charged: runFal prices every request to these endpoints per second
+  // from what it sends (shared/pricing/clipSettings.ts requestPrice, the
+  // CLIP_RATES cards), and requestMeter's resolveCredits puts that
+  // per-request price ahead of any row here. Each row is a fail-safe ceiling
+  // for a caller that doesn't hand the meter its request: the longest clip
+  // Animate offers, at the settings it sends (app/data/clip-models.ts).
+  'bytedance/seedance-2.0/image-to-video': { usd: 3.6408, credits: 547, confidence: 'verified', note: 'ceiling only: 12 s × $0.3034/s at 720p; Animate is priced per request' },
+  'minimax/h3/image-to-video': { usd: 0.6, credits: 90, confidence: 'verified', note: 'ceiling only: 10 s × $0.06/s at 768p; Animate is priced per request' },
+  'minimax/h3-max/image-to-video': { usd: 1.2, credits: 180, confidence: 'verified', note: 'ceiling only: 15 s × $0.08/s at 768p (list price after the promotion); Animate is priced per request' },
+  'fal-ai/kling-video/v3/pro/image-to-video': { usd: 1.12, credits: 168, confidence: 'verified', note: 'ceiling only: 10 s × $0.112/s, audio off; Animate is priced per request' },
+  'blackforestlabs/flux-3/first-last-frame-to-video/draft': { usd: 0.9, credits: 135, confidence: 'verified', note: 'ceiling only: 15 s × $0.06/s draft 720p; Animate is priced per request' },
   // — training (hardware-billed; matches LoraTrainingNode=600 in the graph table) —
   'ostris/flux-dev-lora-trainer': { usd: 2.5, credits: 600, confidence: 'estimate', note: 'H100 ~15–40min; 600cr keeps parity with graph table' },
   'ostris/sdxl-lora-trainer': { usd: 2, credits: 600, confidence: 'estimate' },

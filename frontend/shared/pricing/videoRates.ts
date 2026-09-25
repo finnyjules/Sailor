@@ -213,19 +213,26 @@ function topPerSecond(rate: VideoRate): number {
   return Math.max(...perSec)
 }
 
+/**
+ * Dollars for one clip on a per-second card: the rate at the resolution and
+ * sound sent × the seconds. A resolution the card doesn't list is priced at
+ * its highest rate. Shared with the cards keyed by endpoint (clipRates.ts).
+ */
+export function perSecondUsd(rate: VideoRate & { unit: 'per_second' }, s: VideoSettings): number {
+  const p = own(rate.byResolution, s.resolution ?? '*') ?? own(rate.byResolution, '*')
+  const perSec = p === undefined ? topPerSecond(rate) : perSecond(p, s.audio)
+  if (s.inputVideoSeconds > 0 && rate.inputVideoFactor) {
+    return tidy(perSec * rate.inputVideoFactor * (s.seconds + s.inputVideoSeconds))
+  }
+  return tidy(perSec * s.seconds)
+}
+
 /** Dollars the first service charges for one clip with these settings, or null for an unknown id. */
 export function videoUsd(modelId: string, s: VideoSettings): number | null {
   const rate = videoRate(modelId)
   if (!rate) return null
   const key = s.resolution ?? '*'
-  if (rate.unit === 'per_second') {
-    const p = own(rate.byResolution, key) ?? own(rate.byResolution, '*')
-    const perSec = p === undefined ? topPerSecond(rate) : perSecond(p, s.audio)
-    if (s.inputVideoSeconds > 0 && rate.inputVideoFactor) {
-      return tidy(perSec * rate.inputVideoFactor * (s.seconds + s.inputVideoSeconds))
-    }
-    return tidy(perSec * s.seconds)
-  }
+  if (rate.unit === 'per_second') return perSecondUsd(rate, s)
   const row = own(rate.byResolution, key) ?? own(rate.byResolution, '*')
   const clip = row && (own(row, String(s.seconds)) ?? own(row, '*'))
   if (clip !== undefined) return tidy(clip)

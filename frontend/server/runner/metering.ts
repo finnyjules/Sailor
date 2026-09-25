@@ -33,8 +33,8 @@ export function nodeCredits(node: ApiNode, inputPixels?: number): number {
 }
 
 /**
- * The size of the picture a size-priced node is about to be sent: the first
- * file of its picture link, measured from its header. Undefined when the node
+ * The size of the picture a size-priced node is about to be sent: the
+ * largest file on its linked output slot, each measured from its header. Undefined when the node
  * isn't size-priced or the file can't be read (it is then priced at the cap).
  * The runner measures before it submits, so the charge reads the real size.
  */
@@ -47,10 +47,20 @@ export async function measuredInputPixels(
   const name = sizePricedInput(node.class_type, inputs)
   const link = name ? inputs[name] : undefined
   if (!isLink(link)) return undefined
-  const f = filesFrom(link as [string, number])[0]
-  if (!f) return undefined
-  try { return (await picturePixels(await read(f))) ?? undefined }
-  catch { return undefined }
+  // Every file on the linked output slot; the largest prices (a batch may differ in size).
+  const files = filesFrom(link as [string, number])
+  if (!files.length) return undefined
+  let largest = 0
+  for (const f of files.slice(0, 8)) {
+    let px: number | null = null
+    try { px = await picturePixels(await read(f)) }
+    catch { px = null }
+    // One unreadable file: price at the cap rather than guess.
+    if (px == null) return undefined
+    largest = Math.max(largest, px)
+  }
+  // More files than are measured: the cap.
+  return files.length > 8 ? undefined : largest
 }
 
 /**

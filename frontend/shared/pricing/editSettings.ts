@@ -34,7 +34,7 @@
  * Pure: no server imports. Relative imports only.
  */
 import { pyFloatOf } from '../runner/pyText'
-import type { EditCall } from './editRates'
+import type { EditCall, EditStep } from './editRates'
 import { effectiveImageSettings } from './imageSettings'
 
 export type NodeInputs = Record<string, unknown>
@@ -64,7 +64,7 @@ export const SETTING_PRICED_NODE_CLASSES: readonly string[] = [
   'EditImageNode', 'DevelopImageNode', 'RelightNode', 'BlendSceneNode',
   'RemoveObjectNode', 'TextEditNode', 'RecolorObjectNode', 'SwapBackgroundNode', 'SwapProductNode', 'PersonSwap', 'LensReframe',
   'GenerateFromReferencesNode', 'RotateCameraNode', 'ProductShotNode',
-  'RestyleFromImageNode',
+  'RestyleFromImageNode', 'RestyleWithLoRANode',
 ]
 
 const isLinked = (v: unknown) => Array.isArray(v)
@@ -278,15 +278,54 @@ export function sizePricedInput(classType: string, inputs: NodeInputs): string |
   return null
 }
 
-/** Nano Banana resolution tiers → the side of the square picture (the largest a tier makes). */
-const TIER_SIDE: Record<string, number> = { '0.5K': 512, '1K': 1024, '2K': 2048, '4K': 4096 }
+/**
+ * Nano Banana's picture sizes, width × height by aspect ratio and resolution
+ * tier — Google's table for Gemini 3.1 Flash Image (Nano Banana 2), read
+ * 2026-09-24 from https://ai.google.dev/gemini-api/docs/image-generation.
+ * Nano Banana Pro's table is the same sizes for the ratios it takes, so this
+ * one table (a superset) covers both. A tier is NOT its square: 16:9 at 1K is
+ * 1376 × 768, larger than 1024².
+ */
+const NB_SIZES: Record<string, Record<string, readonly [number, number]>> = {
+  '1:1': { '0.5K': [512, 512], '1K': [1024, 1024], '2K': [2048, 2048], '4K': [4096, 4096] },
+  '1:4': { '0.5K': [256, 1024], '1K': [512, 2048], '2K': [1024, 4096], '4K': [2048, 8192] },
+  '1:8': { '0.5K': [192, 1536], '1K': [384, 3072], '2K': [768, 6144], '4K': [1536, 12288] },
+  '2:3': { '0.5K': [424, 632], '1K': [848, 1264], '2K': [1696, 2528], '4K': [3392, 5056] },
+  '3:2': { '0.5K': [632, 424], '1K': [1264, 848], '2K': [2528, 1696], '4K': [5056, 3392] },
+  '3:4': { '0.5K': [448, 600], '1K': [896, 1200], '2K': [1792, 2400], '4K': [3584, 4800] },
+  '4:1': { '0.5K': [1024, 256], '1K': [2048, 512], '2K': [4096, 1024], '4K': [8192, 2048] },
+  '4:3': { '0.5K': [600, 448], '1K': [1200, 896], '2K': [2400, 1792], '4K': [4800, 3584] },
+  '4:5': { '0.5K': [464, 576], '1K': [928, 1152], '2K': [1856, 2304], '4K': [3712, 4608] },
+  '5:4': { '0.5K': [576, 464], '1K': [1152, 928], '2K': [2304, 1856], '4K': [4608, 3712] },
+  '8:1': { '0.5K': [1536, 192], '1K': [3072, 384], '2K': [6144, 768], '4K': [12288, 1536] },
+  '9:16': { '0.5K': [384, 688], '1K': [768, 1376], '2K': [1536, 2752], '4K': [3072, 5504] },
+  '16:9': { '0.5K': [688, 384], '1K': [1376, 768], '2K': [2752, 1536], '4K': [5504, 3072] },
+  // The page lists 792 × 168 at 0.5K; 792 × 336 (half of 1K) is taken, the larger.
+  '21:9': { '0.5K': [792, 336], '1K': [1584, 672], '2K': [3168, 1344], '4K': [6336, 2688] },
+}
+
+/** Pixels of a Nano Banana picture: the ratio's size when the table has it, else the tier's largest across every ratio. */
+export function nanoBananaPixels(tier: string, ratio: unknown): number | null {
+  const sized = (r: string) => {
+    const wh = hasOwn(NB_SIZES, r) && hasOwn(NB_SIZES[r]!, tier) ? NB_SIZES[r]![tier]! : null
+    return wh ? wh[0] * wh[1] : null
+  }
+  if (typeof ratio === 'string') {
+    const px = sized(ratio)
+    if (px != null) return px
+  }
+  const all = Object.keys(NB_SIZES).map(sized).filter((n): n is number => n != null)
+  return all.length ? Math.max(...all) : null
+}
 
 /**
  * The largest picture an upstream node's settings make, in pixels, when the
  * settings say it; null when they don't (the caller prices the cap). Only
  * GenerateImageNode says: a per-megapixel model's billed megapixels
- * (rounded up, so never below the picture) or a resolution tier's square.
- * The hosted gate and the canvas badge both read this, so they agree.
+ * (rounded up, so never below the picture), or a Nano Banana tier's size at
+ * the node's ratio (the tier's largest across ratios when the ratio isn't in
+ * the table). The hosted gate and the canvas badge both read this, so they
+ * agree, and it is never below the picture the node makes.
  */
 export function sourceOutputPixels(classType: string, inputs: NodeInputs): number | null {
   if (classType !== 'GenerateImageNode') return null
@@ -295,6 +334,38 @@ export function sourceOutputPixels(classType: string, inputs: NodeInputs): numbe
   const s = effectiveImageSettings(model, ratio, options)
   if (!s) return null
   if (s.megapixels != null) return s.megapixels * 1_000_000
-  if (s.tier != null && hasOwn(TIER_SIDE, s.tier)) return TIER_SIDE[s.tier]! ** 2
+  if (s.tier != null) return nanoBananaPixels(s.tier, ratio)
   return null
+}
+
+// ── Restyle with a style LoRA (ComfyUI path, nodes_replicate.py) ──────────
+
+/**
+ * _RESTYLE_MAX_NB_RETRIES in nodes_replicate.py. RestyleWithLoRANode re-rolls
+ * Nano Banana 2 when an illustration target comes back looking like a photo:
+ * the re-roll follows a call that SUCCEEDED and was billed (the classifier
+ * judged its picture, not a failure). So every re-roll is priced, not one
+ * pass (controller ruling, P4 fix round 2). A test reads the constant and
+ * the loop from the Python.
+ */
+export const RESTYLE_LORA_NB_RETRIES = 2
+
+/**
+ * The calls RestyleWithLoRANode makes in one run (its execute(), in order):
+ * Moondream captions the picture; the LoRA restyles it (flux-dev-lora, or the
+ * user's trained model); Moondream classifies that reference; then up to
+ * 1 + RESTYLE_LORA_NB_RETRIES Nano Banana 2 passes (_run_nano_banana_edit,
+ * with its fallback chain, at the node's resolution), each classified by
+ * Moondream. The price is every call, the worst case.
+ */
+export function editSteps(classType: string, inputs: NodeInputs): EditStep[] | null {
+  if (classType !== 'RestyleWithLoRANode') return null
+  const passes = 1 + RESTYLE_LORA_NB_RETRIES
+  // resolution: a 1K/2K/4K combo, default 1K, sent as given; linked → the dearest.
+  const tier = isLinked(inputs.resolution) ? null : (inputs.resolution === undefined ? '1K' : typeof inputs.resolution === 'string' ? inputs.resolution : null)
+  return [
+    { call: call('lucataco/moondream2'), times: 1 + 1 + passes },
+    { call: call('black-forest-labs/flux-dev-lora'), times: 1 },
+    { call: nanoBananaEdit(REP_NB2, tier), times: passes },
+  ]
 }

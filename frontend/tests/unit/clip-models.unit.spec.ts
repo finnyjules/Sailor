@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { CLIP_MODELS, clipModel, clipModelLabel, clipPriceCredits, clipPriceUsd } from '~/data/clip-models'
+import { CLIP_MODELS, clipModel, clipModelLabel, clipPriceCredits, clipPriceUsd, clipRequest } from '~/data/clip-models'
 import { videoRate } from '#shared/pricing/videoRates'
+import { requestPrice } from '#shared/pricing/clipSettings'
 import { MODEL_COSTS } from '../../server/utils/priceBook'
 
 describe('clip models', () => {
-  it('offers four rows; the label carries the version, the resolution and the flat price', () => {
+  it('offers five rows; the label carries the version, the resolution and the price at the default length', () => {
     expect(CLIP_MODELS.map(m => m.id)).toEqual(['seedance-2.0', 'hailuo-h3', 'hailuo-h3-max', 'kling-v3-pro', 'flux-3-draft'])
-    expect(CLIP_MODELS.map(clipModelLabel)).toEqual([
-      'Seedance 2.0 (720p · 90 credits)', 'Hailuo H3 (768p · 45 credits)', 'Hailuo H3 Max (768p · 60 credits)', 'Kling 3.0 Pro (1080p · 84 credits)', 'FLUX 3 draft (720p · 45 credits)',
+    expect(CLIP_MODELS.map(m => clipModelLabel(m))).toEqual([
+      'Seedance 2.0 (720p · 228 credits)', 'Hailuo H3 (768p · 45 credits)', 'Hailuo H3 Max (768p · 60 credits)', 'Kling 3.0 Pro (1080p · 84 credits)', 'FLUX 3 draft (720p · 45 credits)',
     ])
   })
   it('lengths follow what each model accepts', () => {
@@ -18,37 +19,32 @@ describe('clip models', () => {
     expect(clipModel('flux-3-draft')!.durations).toEqual([5, 10, 15])
     expect(CLIP_MODELS.every(m => m.durations.includes(m.defaultDuration))).toBe(true)
   })
-  // The hold the ledger takes is the flat MODEL_COSTS row for the slug regardless of
-  // `seconds` (see the metering note in server/api/frame/animate.post.ts), so the quote
-  // on the button must be that same flat number — a length-scaled quote promised a price
-  // that was never charged.
-  it('price is the flat catalog row regardless of length', () => {
-    expect(clipPriceUsd('seedance-2.0')).toBeCloseTo(0.6)
-    expect(clipPriceUsd('hailuo-h3')).toBeCloseTo(0.3)
-    expect(clipPriceUsd('hailuo-h3-max')).toBeCloseTo(0.4)
-    expect(clipPriceUsd('kling-v3-pro')).toBeCloseTo(0.56)
-    expect(clipPriceUsd('nope')).toBeNull()
-  })
-  // The credits shown are the ledger's own numbers — the MODEL_COSTS row the animate route
-  // is metered against — so the quote on the button is exactly what is held.
-  it('credits equal the server price book row for each model', () => {
-    const slug: Record<string, string> = {
-      'seedance-2.0': 'bytedance/seedance-2.0/image-to-video',
-      'hailuo-h3': 'minimax/h3/image-to-video',
-      'hailuo-h3-max': 'minimax/h3-max/image-to-video',
-      'kling-v3-pro': 'fal-ai/kling-video/v3/pro/image-to-video',
-      'flux-3-draft': 'blackforestlabs/flux-3/first-last-frame-to-video/draft',
-    }
+  // Task P5: priced per second of the request the route sends (clipRequest), the
+  // figure runFal holds and charges (clip-pricing.unit.spec.ts pins the hold).
+  it('price scales with length: the shared price of the request sent', () => {
+    expect(clipPriceUsd('seedance-2.0', 5)).toBeCloseTo(1.517)
+    expect(clipPriceUsd('seedance-2.0', 10)).toBeCloseTo(3.034)
+    expect(clipPriceUsd('hailuo-h3', 10)).toBeCloseTo(0.6)
+    expect(clipPriceUsd('hailuo-h3-max', 5)).toBeCloseTo(0.4)
+    expect(clipPriceUsd('kling-v3-pro', 5)).toBeCloseTo(0.56)
+    expect(clipPriceUsd('nope', 5)).toBeNull()
     for (const m of CLIP_MODELS) {
-      expect(clipPriceCredits(m.id), m.id).toBe(MODEL_COSTS[slug[m.id]!]!.credits)
-      expect(MODEL_COSTS[slug[m.id]!]!.usd, m.id).toBeCloseTo(m.usd)
+      for (const s of m.durations) {
+        const req = clipRequest(m.id, s, '', '')
+        expect(clipPriceCredits(m.id, s), `${m.id} ${s}`).toBe(requestPrice(req.endpoint, req.input)!.credits)
+      }
     }
-    expect(clipPriceCredits('nope')).toBeNull()
+    expect(clipPriceCredits('nope', 5)).toBeNull()
   })
-  // The per-second rate card (shared/pricing/videoRates.ts) is where these rows'
-  // prices come from once Task P5 re-prices Animate per second; until then the
-  // rows stay flat (pinned to MODEL_COSTS above) and this pins that the shared
-  // ones have a verified card to be priced from.
+  // The flat MODEL_COSTS rows are now only a fail-safe ceiling: the longest clip.
+  it('each endpoint’s price book row is the longest clip’s price', () => {
+    for (const m of CLIP_MODELS) {
+      const slug = clipRequest(m.id, m.defaultDuration, '', '').endpoint
+      expect(MODEL_COSTS[slug]!.credits, m.id).toBe(Math.max(...m.durations.map(s => clipPriceCredits(m.id, s)!)))
+    }
+  })
+  // The Generate-a-video catalogue has a verified card for the same models (by id);
+  // Animate prices its own endpoints (shared/pricing/clipRates.ts) at the same figures.
   it('rows that also live in the shared video catalog have a verified rate card', () => {
     const shared = CLIP_MODELS.filter(m => videoRate(m.id))
     for (const m of shared) expect(videoRate(m.id)!.confidence, m.id).toBe('verified')

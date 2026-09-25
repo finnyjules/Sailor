@@ -15,7 +15,8 @@ describe('price book: graph pricer (unchanged spike behavior)', () => {
       1: { class_type: 'SaveImage' },
       2: { class_type: 'Veo3RemoteNode' },
     })
-    expect(p.credits).toBe(901)
+    // Task P5: Veo 3 is 8 s with sound at $0.40/s ($3.20 → 480), plus the render.
+    expect(p.credits).toBe(481)
     expect(p.version).toBe(PRICE_BOOK_VERSION)
   })
 
@@ -33,14 +34,17 @@ describe('price book: graph pricer (unchanged spike behavior)', () => {
       3: { class_type: 'FluxLoRARemoteNode' },
       4: { class_type: 'FluxMultiLoRARemoteNode' },
     })
-    expect(p.credits).toBe(1 + 18 + 8 + 8)
+    // RestyleWithLoRANode is priced by its calls since P4 fix round 2: at its
+    // default 1K, 50 (edit-pricing.unit.spec.ts pins the figures).
+    expect(p.credits).toBe(1 + 50 + 8 + 8)
   })
 
   // spike-v3: the two below-policy prices from the pricing analysis.
   // LipSync observed $1.00/run (was 30cr = 70¢ loss); EditImage's graph path
   // was 12cr against a 23cr direct-route price for the same action.
   it('LipSync and EditImage are priced above provider cost', () => {
-    expect(priceGraph({ 1: { class_type: 'SaveImage' }, 2: { class_type: 'LipSyncNode' } }).credits).toBe(151)
+    // Task P5: lip-sync at the longest clip it can make — Fabric 60 s at 720p ($9.00 → 1350), plus the render.
+    expect(priceGraph({ 1: { class_type: 'SaveImage' }, 2: { class_type: 'LipSyncNode' } }).credits).toBe(1351)
     // Task P4: EditImageNode is priced by its settings. With no model set, its
     // dearest model at 1K (FLUX.2 edit at the 4096² input cap, $0.315 → 48), plus the render.
     expect(priceGraph({ 1: { class_type: 'SaveImage' }, 2: { class_type: 'EditImageNode' } }).credits).toBe(49)

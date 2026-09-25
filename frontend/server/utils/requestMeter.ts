@@ -171,13 +171,22 @@ export class MeterRefusalError extends Error {
 }
 
 /**
- * MODEL_COSTS[model].credits, else hint, else LoRA category for personal
- * slugs (a slug whose owner segment is not a known public provider org),
- * else null. KNOWN_PUBLIC_ORGS is derived from Object.keys(MODEL_COSTS) at
- * call time — never hardcode a second list that can drift from the price
- * book.
+ * The price of THIS request, else MODEL_COSTS[model].credits, else hint, else
+ * LoRA category for personal slugs (a slug whose owner segment is not a known
+ * public provider org), else null. KNOWN_PUBLIC_ORGS is derived from
+ * Object.keys(MODEL_COSTS) at call time — never hardcode a second list that
+ * can drift from the price book.
+ *
+ * `requestCredits` (Task P5) is the price the shared calculation gave the
+ * request actually being sent — per second of the clip it asks for (runFal:
+ * shared/pricing/clipSettings.ts requestPrice). It wins over the model's flat
+ * row: a flat row priced for one length must never silently replace the price
+ * of the length asked for (a 12 s Animate clip used to be held at the 5 s row).
+ * Only a positive whole number of credits counts; anything else is ignored and
+ * the row (or a refusal) applies.
  */
-export function resolveCredits(model: string, hint?: number): number | null {
+export function resolveCredits(model: string, hint?: number, requestCredits?: number): number | null {
+  if (typeof requestCredits === 'number' && Number.isInteger(requestCredits) && requestCredits > 0) return requestCredits
   const priced = costForModel(model)
   if (priced) return priced.credits
 
@@ -378,7 +387,7 @@ export async function holdOrRefuse(
  * this replaces. The key exists only to make a retried hold call idempotent
  * within a single preflight, which is exactly one call.
  */
-async function preflightForUser(userId: string, model: string, priceHintCredits?: number): Promise<MeterTicket | null> {
+async function preflightForUser(userId: string, model: string, priceHintCredits?: number, requestCredits?: number): Promise<MeterTicket | null> {
   if (deployMode() === 'local') return null
 
   // Operator safety valves (Stage 7 Task 4) — BEFORE pricing/hold, so a
@@ -386,7 +395,7 @@ async function preflightForUser(userId: string, model: string, priceHintCredits?
   // closed on an unreadable control state.
   await (spendGuardOverride ?? assertSpendAllowed)(userId)
 
-  const credits = resolveCredits(model, priceHintCredits)
+  const credits = resolveCredits(model, priceHintCredits, requestCredits)
   if (credits === null) throw new MeterRefusalError(`unpriced model refused: ${model}`, 500)
 
   const ledger = getLedger()
@@ -415,14 +424,17 @@ async function preflightForUser(userId: string, model: string, priceHintCredits?
  * fails closed at every step: no bound context, no price, or insufficient
  * balance all refuse the request rather than letting spend through unpriced
  * or unmetered.
+ *
+ * `opts.credits`: the price of this request, where the caller priced what it
+ * sends (see resolveCredits). The hold is taken for it, and settle charges it.
  */
-export async function preflightMeter(model: string): Promise<MeterTicket | null> {
+export async function preflightMeter(model: string, opts: { credits?: number } = {}): Promise<MeterTicket | null> {
   if (deployMode() === 'local') return null
 
   const ctx = currentMeterContext()
   if (!ctx) throw new MeterRefusalError('unmetered spend refused', 500)
 
-  return preflightForUser(ctx.userId, model, ctx.priceHintCredits)
+  return preflightForUser(ctx.userId, model, ctx.priceHintCredits, opts.credits)
 }
 
 /**

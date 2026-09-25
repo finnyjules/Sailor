@@ -19,7 +19,7 @@ import { runFal, firstFalVideoUrl } from '../../utils/falRun'
 import { uploadToFalStorage } from '../../utils/falStorage'
 import { dataUrlBytes } from '../../utils/frameAnimate'
 import { engineDirForType } from '../../utils/inputUploads'
-import { clipModel } from '~~/app/data/clip-models'
+import { clipModel, clipRequest, clipSeconds } from '~~/app/data/clip-models'
 
 interface Body { image?: string; prompt?: string; model?: string; seconds?: number }
 
@@ -78,7 +78,7 @@ export default defineEventHandler(async (event) => {
 
   assertRateLimit(event, 'frame-animate', 6, 600_000)
 
-  const seconds = spec.durations.includes(Number(body.seconds)) ? Number(body.seconds) : spec.defaultDuration
+  const seconds = clipSeconds(spec, body.seconds)
   const prompt = (body.prompt ?? '').trim()
 
   const tmp = await mkdtemp(path.join(os.tmpdir(), 'sailor-clip-'))
@@ -94,68 +94,19 @@ export default defineEventHandler(async (event) => {
     const fullPrompt = (prompt || 'the subject moves gently') + PROMPT_SUFFIX(keyName)
 
     const flatBytes = await readFile(flatPath)
-    // fal needs a URL it can fetch, so the flattened still goes to fal storage once,
-    // memoised so no branch uploads twice.
-    let _falStill: Promise<string> | null = null
-    const falStillUrl = () => (_falStill ??= uploadToFalStorage(new Uint8Array(flatBytes), 'still.png', 'image/png'))
+    // fal needs a URL it can fetch, so the flattened still goes to fal storage.
+    const stillUrl = await uploadToFalStorage(new Uint8Array(flatBytes), 'still.png', 'image/png')
 
     // 2. the model
     //
-    // Metering (review fix, finding 1): server/utils/priceBook.ts's
-    // MODEL_COSTS now carries a flat row for each of the three exact slugs
-    // dispatched below, priced flat per 5 s clip (Task P5 re-prices them per
-    // second from the rate card, shared/pricing/videoRates.ts) —
-    // without those rows preflightMeter (inside runFal) refused
-    // every call with "unpriced model refused" before any request could ever
-    // resolve credits, let alone reach the model. A duration-aware hold
-    // (credits scaled by `seconds` via clipPriceUsd + setMeterPriceHint) was
-    // investigated but NOT wired: requestMeter's resolveCredits() checks
-    // costForModel(model) FIRST and only consults priceHintCredits when the
-    // model is UNPRICED, so once a flat MODEL_COSTS row exists for a slug any
-    // hint set here is silently ignored — flipping that precedence would
-    // change a shared chokepoint every metered route relies on, which is out
-    // of scope for this fix. The hold is therefore flat per model regardless
-    // of `seconds`: a 12s Seedance clip costs the same hold as a 4s one.
-    let videoUrl: string | null = null
-    if (spec.id === 'seedance-2.0') {
-      const stillUrl = await falStillUrl()
-      const out = await runFal('bytedance/seedance-2.0/image-to-video', {
-        prompt: fullPrompt, duration: String(seconds), resolution: '720p',
-        image_url: stillUrl, end_image_url: stillUrl,
-      }, { pollDeadlineMs: 900_000 })
-      videoUrl = firstFalVideoUrl(out)
-    } else if (spec.id === 'hailuo-h3' || spec.id === 'hailuo-h3-max') {
-      // Same payload on both H3 endpoints: INTEGER duration, uppercase-P resolution,
-      // prompt_expansion_mode required (Max's enum has no 'fast'; 'balanced' is on both).
-      const stillUrl = await falStillUrl()
-      const app = spec.id === 'hailuo-h3-max' ? 'minimax/h3-max/image-to-video' : 'minimax/h3/image-to-video'
-      const out = await runFal(app, {
-        prompt: fullPrompt, duration: seconds, resolution: '768P', prompt_expansion_mode: 'balanced',
-        image_url: stillUrl, end_image_url: stillUrl,
-      }, { pollDeadlineMs: 900_000 })
-      videoUrl = firstFalVideoUrl(out)
-    } else if (spec.id === 'kling-v3-pro') {
-      // Kling names its frames start_/end_image_url, takes duration as a STRING enum
-      // ("3".."15"), and generates audio by default — off, a loop has no use for it.
-      const stillUrl = await falStillUrl()
-      const out = await runFal('fal-ai/kling-video/v3/pro/image-to-video', {
-        prompt: fullPrompt, duration: String(seconds), generate_audio: false,
-        start_image_url: stillUrl, end_image_url: stillUrl,
-      }, { pollDeadlineMs: 900_000 })
-      videoUrl = firstFalVideoUrl(out)
-    } else if (spec.id === 'flux-3-draft') {
-      // FLUX 3 (BFL) on fal has a dedicated first-last-frame endpoint — the loop is native,
-      // not coaxed. DRAFT tier (720p). Frames are start_/end_image_url like Kling; duration is
-      // an INTEGER (5/10/15) and resolution a lowercase string, matching video_models.py's
-      // FLUX 3 builder. Audio has no field on this endpoint (and a keyed loop has no use for
-      // it), so it is omitted rather than guessed — sending an unknown field 422s at fal.
-      const stillUrl = await falStillUrl()
-      const out = await runFal('blackforestlabs/flux-3/first-last-frame-to-video/draft', {
-        prompt: fullPrompt, duration: seconds, resolution: '720p',
-        start_image_url: stillUrl, end_image_url: stillUrl,
-      }, { pollDeadlineMs: 900_000 })
-      videoUrl = firstFalVideoUrl(out)
-    }
+    // The request is clipRequest's (app/data/clip-models.ts): the same request the
+    // Animate button prices. runFal holds and charges it per second of what it asks for
+    // (shared/pricing/clipSettings.ts requestPrice), ahead of the endpoint's flat
+    // MODEL_COSTS row, so a 12 s clip is held for 12 s, and the hold equals the price
+    // the button showed.
+    const req = clipRequest(spec.id, seconds, fullPrompt, stillUrl)
+    const out = await runFal(req.endpoint, req.input, { pollDeadlineMs: 900_000 })
+    const videoUrl = firstFalVideoUrl(out)
     if (!videoUrl) throw createError({ statusCode: 502, message: 'The model returned no video' })
 
     // 3. key it back to transparency

@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import sharp from 'sharp'
 import { planNode } from '~~/server/runner/executors'
 import { measuredInputPixels, nodeCredits, stageEstimate } from '~~/server/runner/metering'
-import { graphInputPixels, picturePixels } from '~~/server/utils/graphInputPixels'
+import { MAX_MEASURED_FILES, graphInputPixels, isMeasurableRaster, picturePixels } from '~~/server/utils/graphInputPixels'
 import { meterGraphSubmit } from '~~/server/utils/meterGraphRun'
 import { RESTYLE_MODELS } from '~~/server/runner/generators/restyle'
 import { REFERENCE_MODEL_IDS } from '~~/server/runner/generators/refEdits'
@@ -23,8 +23,8 @@ import type { ApiPrompt } from '#shared/runner/graph'
 import { RUNNER_NODE_RULES } from '#shared/runner/eligibility'
 import { EDIT_RATES, editRate, editUsd, type EditCall } from '#shared/pricing/editRates'
 import {
-  ENHANCE_ENGINE_SLUGS, LARGEST_INPUT_PIXELS, SETTING_PRICED_NODE_CLASSES, UPSCALE_ENGINE_SLUGS, editCalls,
-  sizePricedInput, sourceOutputPixels,
+  ENHANCE_ENGINE_SLUGS, LARGEST_INPUT_PIXELS, RESTYLE_LORA_NB_RETRIES, SETTING_PRICED_NODE_CLASSES, UPSCALE_ENGINE_SLUGS, editCalls,
+  editSteps, nanoBananaPixels, sizePricedInput, sourceOutputPixels,
 } from '#shared/pricing/editSettings'
 import { priceNode } from '#shared/pricing/nodePrice'
 import { MODEL_PRICED_BADGE_CLASSES, nodeCreditEstimate } from '~/lib/nodeCreditEstimate'
@@ -119,7 +119,7 @@ const only = (ct: string, inputs: Record<string, unknown>): EditCall => {
 // ── Rate cards ───────────────────────────────────────────────────────────
 
 /** Billed by GPU time: no published per-unit figure. */
-const ESTIMATES = ['catacolabs/sdxl-ad-inpaint', 'fermatresearch/magic-image-refiner', 'fofr/style-transfer', 'philz1337x/clarity-upscaler']
+const ESTIMATES = ['black-forest-labs/flux-dev-lora', 'catacolabs/sdxl-ad-inpaint', 'fermatresearch/magic-image-refiner', 'fofr/style-transfer', 'lucataco/moondream2', 'philz1337x/clarity-upscaler']
 
 describe('edit rate cards', () => {
   it('every card carries a source, the date read and a confidence; only GPU-time models are estimates', () => {
@@ -156,9 +156,10 @@ describe('edit rate cards', () => {
         : ct === 'EnhanceDetailNode' ? ENHANCE_MODELS.map(model => ({ model }))
           : settingsGrid(ct)
       for (const w of grid) {
-        const c = editCalls(ct, w)
+        const steps = editSteps(ct, w)
+        const c = steps ? { calls: steps.map(st => st.call) } : editCalls(ct, w)
         if ('refused' in c) throw new Error(`${ct} ${JSON.stringify(w)} refused: ${c.refused}`)
-        for (const one of c.calls) {
+        for (const one of c.calls.flatMap(x => [x, ...(x.fallbacks ?? [])])) {
           expect(editRate(one.endpoint), `${ct} → ${one.endpoint}`).toBeTruthy()
           expect(editUsd(one), `${ct} → ${one.endpoint}`).toBeGreaterThan(0)
         }
@@ -313,6 +314,15 @@ const MP1 = 1000 * 1000
  * covering that fallback's cost without marking it up.
  */
 const EXAMPLES: [string, Record<string, unknown>, number, number, number?][] = [
+  // RestyleWithLoRANode: 5 Moondream calls ($0.002) + the LoRA render ($0.04) + 3 Nano Banana 2 passes.
+  // 1K: marked $0.29 (44 cr) < every pass on NB Pro at cost $0.50 (50 cr) → 50.
+  ['RestyleWithLoRANode', {}, 0.33333333, 50],
+  ['RestyleWithLoRANode', { resolution: '1K' }, 0.33333333, 50],
+  // 2K: marked $0.41 → 62 beats $0.50 at cost.
+  ['RestyleWithLoRANode', { resolution: '2K' }, 0.41, 62],
+  // 4K: marked $0.53 (80) < every pass on NB Pro 4K at cost $0.95 → 95.
+  ['RestyleWithLoRANode', { resolution: '4K' }, 0.63333333, 95],
+  ['RestyleWithLoRANode', { resolution: LINK }, 0.63333333, 95],
   // Nano Banana 2 1K/2K: the first call's usual-markup price already covers every fallback's cost.
   ['EditImageNode', { model: 'Nano Banana 2', resolution: '1K' }, 0.08, 16],
   ['EditImageNode', { model: 'Nano Banana 2', resolution: '2K' }, 0.12, 18],
@@ -612,3 +622,126 @@ describe('priced on the size of the picture sent in', () => {
 function charge2(model: string, px: number): number {
   return priceGraph({ 1: { class_type: 'UpscaleImageNode', inputs: { model } }, 2: SINK }, { inputPixels: { 1: px } }).credits
 }
+
+// ── P4 fix round 2 ───────────────────────────────────────────────────────
+
+describe('RestyleWithLoRANode: priced by its calls', () => {
+  it('reads the calls and the re-roll rule from the Python', () => {
+    const i = PY.indexOf('class RestyleWithLoRANode')
+    const body = PY.slice(i, PY.indexOf('\nclass ', i + 10))
+    expect(Number(/_RESTYLE_MAX_NB_RETRIES\s*=\s*(\d+)/.exec(PY)![1])).toBe(RESTYLE_LORA_NB_RETRIES)
+    expect(body).toMatch(/for attempt in range\(1 \+ _RESTYLE_MAX_NB_RETRIES\):/)
+    // A re-roll follows a call that SUCCEEDED (and was billed): the loop only
+    // breaks on a photo target or an output classified as an illustration.
+    expect(body).toMatch(/best_url = await _run_nano_banana_edit\(\s*\n\s*\[content_url, style_url\], instruction,\s*\n\s*resolution=resolution/)
+    expect(body).toMatch(/if await _classify_image_style\(best_url\) == "illustration":\s*\n\s*matched = True\s*\n\s*break/)
+    // Moondream: one caption, one classification of the reference, one per pass.
+    expect(body.match(/"lucataco\/moondream2"/g)).toHaveLength(1)
+    expect(body.match(/_classify_image_style\(/g)).toHaveLength(2)
+    expect(PY).toMatch(/async def _classify_image_style[\s\S]{0,400}"lucataco\/moondream2"/)
+    expect(body).toContain('flux_model = "black-forest-labs/flux-dev-lora"')
+    expect(body).toMatch(/IO\.Combo\.Input\("resolution", options=\["1K", "2K", "4K"\], default="1K"/)
+    const steps = editSteps('RestyleWithLoRANode', { resolution: '2K' })!
+    expect(steps.map(st => [st.call.endpoint, st.times])).toEqual([
+      ['lucataco/moondream2', 5], ['black-forest-labs/flux-dev-lora', 1], ['fal-ai/nano-banana-2/edit', 3],
+    ])
+    expect(steps[2]!.call.fallbacks!.map(f => f.endpoint)).toEqual(['fal-ai/nano-banana-pro/edit', 'google/nano-banana-2'])
+  })
+
+  it('left the flat table; the badge equals the charge', () => {
+    expect(GRAPH_NODE_CREDITS.RestyleWithLoRANode).toBeUndefined()
+    expect(MODEL_PRICED_BADGE_CLASSES.has('RestyleWithLoRANode')).toBe(true)
+    for (const resolution of ['1K', '2K', '4K', LINK, undefined]) {
+      const w = resolution === undefined ? {} : { resolution }
+      expect(nodeCreditEstimate('RestyleWithLoRANode', w)).toBe(charge('RestyleWithLoRANode', w))
+    }
+  })
+})
+
+describe('an upstream Nano Banana picture is sized by its real ratio', () => {
+  it('Google\'s table: 16:9 at 1K is 1376 × 768, larger than 1024²; an unknown ratio takes the tier\'s largest', () => {
+    expect(nanoBananaPixels('1K', '16:9')).toBe(1376 * 768)
+    expect(nanoBananaPixels('1K', '1:1')).toBe(1024 * 1024)
+    expect(nanoBananaPixels('4K', '21:9')).toBe(6336 * 2688)
+    expect(nanoBananaPixels('1K', 'auto')).toBe(3072 * 384) // 8:1, the largest 1K picture
+    expect(nanoBananaPixels('high', '1:1')).toBeNull()
+  })
+
+  // Every ratio × tier Nano Banana 2 makes, fed into FLUX.2 edit and Crystal:
+  // the badge (from the generator's settings) is never below the charge on the
+  // picture actually made (the runner measures it).
+  const SIZES: [string, string, number, number][] = [
+    ['16:9', '1K', 1376, 768], ['9:16', '2K', 1536, 2752], ['21:9', '1K', 1584, 672], ['21:9', '4K', 6336, 2688],
+    ['4:3', '2K', 2400, 1792], ['8:1', '4K', 12288, 1536], ['3:2', '0.5K', 632, 424], ['1:1', '1K', 1024, 1024],
+  ]
+  for (const [ratio, tier, w, h] of SIZES) {
+    it(`NB2 ${ratio} at ${tier} (${w}×${h}) into FLUX.2 edit and Crystal: badge ≥ charge`, () => {
+      const gen = { id: '1', data: { nodeType: 'GenerateImageNode', inputs: [], widgetDefs: [{ name: 'model' }, { name: 'aspect_ratio' }, { name: 'model_options' }], widgetsValues: ['nano-banana-2', ratio, JSON.stringify({ resolution: tier })] } }
+      for (const [ct, model, port] of [['EditImageNode', 'Flux 2 Pro', 'input_image'], ['UpscaleImageNode', 'Crystal', 'image']] as const) {
+        const node = { id: '2', data: { nodeType: ct, inputs: [{ name: port, link: 1 }], widgetDefs: [{ name: 'model' }], widgetsValues: [model] } }
+        const seen = upstreamInputPixels(node, [gen, node], [{ source: '1', target: '2', targetHandle: 'input-0' }])
+        expect(seen, `${ct} ${ratio} ${tier}`).toBeGreaterThanOrEqual(w * h)
+        const badge = nodeCreditEstimate(ct, { model }, { inputPixels: seen })!
+        const real = priceGraph({ 2: { class_type: ct, inputs: { model } }, 3: SINK }, { inputPixels: { 2: w * h } }).credits
+        expect(badge, `${ct} ${ratio} ${tier}`).toBeGreaterThanOrEqual(real)
+      }
+    })
+  }
+})
+
+describe('the gate reads files sparingly', () => {
+  it('sniffs PNG, JPEG and WebP; anything else prices at the cap', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'p4-sniff-'))
+    const make = (fmt: 'png' | 'jpeg' | 'webp' | 'gif' | 'tiff') =>
+      sharp({ create: { width: 40, height: 30, channels: 3, background: '#888' } }).toFormat(fmt).toBuffer()
+    for (const fmt of ['png', 'jpeg', 'webp'] as const) {
+      const bytes = await make(fmt)
+      expect(isMeasurableRaster(bytes), fmt).toBe(true)
+      writeFileSync(join(dir, `a.${fmt}`), bytes)
+      expect(await picturePixels(join(dir, `a.${fmt}`)), fmt).toBe(1200)
+      expect(await picturePixels(new Uint8Array(bytes)), fmt).toBe(1200)
+    }
+    for (const fmt of ['gif', 'tiff'] as const) {
+      const bytes = await make(fmt)
+      expect(isMeasurableRaster(bytes), fmt).toBe(false)
+      // A PNG name on a TIFF file: the bytes decide.
+      writeFileSync(join(dir, `lying.${fmt}.png`), bytes)
+      expect(await picturePixels(join(dir, `lying.${fmt}.png`)), fmt).toBeNull()
+    }
+    writeFileSync(join(dir, 'x.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="9000" height="9000"/>')
+    expect(await picturePixels(join(dir, 'x.svg'))).toBeNull()
+  })
+
+  it('reads each file value once, and at most MAX_MEASURED_FILES per prompt', async () => {
+    const reads: string[] = []
+    const readFile = async (v: string) => { reads.push(v); return 1000 }
+    const prompt: Record<string, { class_type: string, inputs: Record<string, unknown> }> = {}
+    // 12 distinct files, each feeding two upscalers.
+    for (let i = 0; i < 12; i++) {
+      prompt[`L${i}`] = { class_type: 'LoadImage', inputs: { image: `f${i}.png` } }
+      prompt[`U${i}a`] = { class_type: 'UpscaleImageNode', inputs: { model: 'Crystal', image: [`L${i}`, 0] } }
+      prompt[`U${i}b`] = { class_type: 'UpscaleImageNode', inputs: { model: 'Crystal', image: [`L${i}`, 0] } }
+    }
+    const px = await graphInputPixels(prompt, readFile)
+    expect(MAX_MEASURED_FILES).toBe(8)
+    expect(reads).toHaveLength(8)
+    expect(new Set(reads).size).toBe(8)
+    // The measured ones (both nodes on a read file) get the size; the rest, the cap.
+    expect(Object.keys(px)).toHaveLength(16)
+    const priced = priceGraph(prompt, { inputPixels: px })
+    const capped = priced.breakdown.filter(b => b.credits === 240)
+    expect(capped).toHaveLength(8)
+  })
+})
+
+describe('the runner measures the largest file on the linked slot', () => {
+  it('takes the largest; an unreadable one prices at the cap', async () => {
+    const node = { class_type: 'UpscaleImageNode', inputs: { model: 'Crystal', image: ['1', 0] } }
+    const files = ['s', 'l', 'm'].map(n => ({ filename: `${n}.png`, subfolder: '', type: 'output' as const }))
+    const bytes: Record<string, Uint8Array> = {
+      's.png': new Uint8Array(await png(100, 100)), 'l.png': new Uint8Array(await png(1200, 900)), 'm.png': new Uint8Array(await png(400, 400)),
+    }
+    expect(await measuredInputPixels(node, () => files, async f => bytes[f.filename]!)).toBe(1200 * 900)
+    expect(await measuredInputPixels(node, () => files, async f => { if (f.filename === 'm.png') throw new Error('gone'); return bytes[f.filename]! })).toBeUndefined()
+  })
+})

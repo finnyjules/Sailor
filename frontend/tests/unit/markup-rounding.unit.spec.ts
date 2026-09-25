@@ -95,6 +95,21 @@ describe('usdChargedAtCost', () => {
     }
   })
 
+  it('round trip, densely (P4 fix round 2): every $0.00001 up to $1, then every $0.0001 up to $5', () => {
+    // Integers of 1e-5 dollars, so the expected credits need no float: ceil(k / 1000).
+    const off: string[] = []
+    const check = (k: number) => {
+      const c = k / 1e5
+      const got = creditsForUsd(usdChargedAtCost(c))
+      if (got !== Math.ceil(k / 1000)) off.push(`$${c}: ${got}, want ${Math.ceil(k / 1000)}`)
+    }
+    let n = 0
+    for (let k = 1; k <= 100_000; k++, n++) check(k)
+    for (let k = 100_010; k <= 500_000; k += 10, n++) check(k)
+    expect(off.slice(0, 5)).toEqual([])
+    expect(n).toBe(140_000)
+  })
+
   it('zero for zero or negative input', () => {
     expect(usdChargedAtCost(0)).toBe(0)
     expect(usdChargedAtCost(-1)).toBe(0)

@@ -21,6 +21,10 @@
  * The badge marks linked widgets the same way (app/lib/costEstimate.ts), so
  * the badge and the charge agree.
  *
+ * The older one-model video nodes (Veo 3, Kling 2.1, Seedance 2.0) and the
+ * lip-sync nodes are their endpoint's per-second rate × the seconds they send
+ * (clipRates.ts × clipSettings.ts); lip-sync at the longest clip it can make.
+ *
  * Images (GenerateImageNode) are the first service's rate for the size,
  * quality and picture count the request carries (imageRates.ts ×
  * imageSettings.ts). A linked `model_options` is priced at the card's most
@@ -48,11 +52,12 @@
 import { IMAGE_MODELS } from '../../app/data/image-models'
 import { LEGACY_VIDEO_MODEL_IDS } from '../../app/data/video-prices'
 import { creditsForUsd } from './markup'
-import { editMaxUsd } from './editRates'
-import { SETTING_PRICED_NODE_CLASSES, editCalls } from './editSettings'
+import { editMaxUsd, editStepsUsd } from './editRates'
+import { SETTING_PRICED_NODE_CLASSES, editCalls, editSteps } from './editSettings'
 import { imageMaxUsd, imageRate, imageUsd } from './imageRates'
 import { LARGEST_RATIO, effectiveImageSettings } from './imageSettings'
 import { videoMaxUsd, videoRate, videoUsd } from './videoRates'
+import { REMOTE_VIDEO_NODE_CLASSES, remoteVideoNodeUsd } from './clipSettings'
 import { effectiveVideoSettings, maxVideoSeconds } from './videoSettings'
 
 export type NodeInputs = Record<string, unknown>
@@ -82,7 +87,11 @@ const SETTING_PRICED_CLASS_SET: ReadonlySet<string> = new Set(SETTING_PRICED_NOD
  * Every class this module prices — model-priced and setting-priced. The
  * charge (priceGraph) and the node badge both price these through priceNode.
  */
-export const SHARED_PRICED_CLASS_SET: ReadonlySet<string> = new Set([...MODEL_PRICED_NODE_CLASSES, ...SETTING_PRICED_NODE_CLASSES])
+export const SHARED_PRICED_CLASS_SET: ReadonlySet<string> = new Set([...MODEL_PRICED_NODE_CLASSES, ...SETTING_PRICED_NODE_CLASSES, ...REMOTE_VIDEO_NODE_CLASSES])
+
+/** The older one-model video nodes and the lip-sync nodes, priced per second (clipSettings.ts). */
+export { REMOTE_VIDEO_NODE_CLASSES }
+const REMOTE_VIDEO_CLASS_SET: ReadonlySet<string> = new Set(REMOTE_VIDEO_NODE_CLASSES)
 
 // Lazily-built lookup. Never derive this at module top level from another
 // module's const: a top-level read breaks on import reorder.
@@ -133,6 +142,9 @@ function imageNodeUsd(model: string, inputs: NodeInputs): number {
  * missing), or the refusal.
  */
 function editNodeUsd(classType: string, inputs: NodeInputs, opts: PriceOptions): number | { refused: string } {
+  // A node that runs several calls (RestyleWithLoRANode): all of them.
+  const steps = editSteps(classType, inputs)
+  if (steps) return editStepsUsd(steps) ?? { refused: `${classType} has a call with no listed price` }
   const c = editCalls(classType, inputs, { inputPixels: opts.inputPixels })
   if ('refused' in c) return c
   let usd = 0
@@ -150,7 +162,18 @@ export interface PriceOptions {
   inputPixels?: number | null
 }
 
-/** A priced node, or the reason it can't be priced (the server refuses it). */
+/**
+ * A priced node, or the reason it can't be priced (the server refuses it).
+ *
+ * `usd` is the PRICE BASIS in dollars — always `credits = creditsForUsd(usd)`.
+ * For one plain call it is what the first service charges. It is NOT the
+ * provider's cost when the node covers a fallback chain at cost or runs
+ * several calls (editRates.ts editMaxUsd / editStepsUsd): there it can sit
+ * above or below the first service's price. Never show it as "cost". Where
+ * it reaches a screen today: the hosted run-confirm dialog's rows
+ * (default.vue, `formatCostBadge(item.usd, …)`), which turn it back into
+ * credits, the same figure as the charge; nothing shows it as dollars.
+ */
 export type NodePrice =
   | { usd: number; credits: number }
   | { refused: string }
@@ -163,6 +186,10 @@ export function priceNode(classType: string, inputs: NodeInputs | null | undefin
   if (SETTING_PRICED_CLASS_SET.has(classType)) {
     const usd = editNodeUsd(classType, inputs ?? {}, opts)
     return typeof usd === 'number' ? { usd, credits: creditsForUsd(usd) } : usd
+  }
+  if (REMOTE_VIDEO_CLASS_SET.has(classType)) {
+    const usd = remoteVideoNodeUsd(classType, inputs ?? {})
+    return usd == null ? { refused: `${classType} has a call with no listed price` } : { usd, credits: creditsForUsd(usd) }
   }
   if (!MODEL_PRICED_CLASS_SET.has(classType)) return { refused: 'not a model-priced class' }
   const picked = inputs?.model
@@ -191,7 +218,10 @@ export function priceNode(classType: string, inputs: NodeInputs | null | undefin
   return { usd, credits: creditsForUsd(usd) }
 }
 
-/** What the service charges us in USD for this node as configured, or null. */
+/**
+ * The node's price basis in USD (see NodePrice): the service's charge for a
+ * plain call, not a cost figure for chained or multi-call nodes. Or null.
+ */
 export function providerUsd(classType: string, inputs: NodeInputs | null | undefined, opts: PriceOptions = {}): number | null {
   const p = priceNode(classType, inputs, opts)
   return 'refused' in p ? null : p.usd

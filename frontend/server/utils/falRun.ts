@@ -13,6 +13,7 @@ import { logSpend } from './spendLog'
 import { preflightMeter, currentMeterContext, MeterRefusalError } from './requestMeter'
 import { recordProviderUsage } from './providerUsage'
 import { costForModel } from './priceBook'
+import { requestPrice } from '../../shared/pricing/clipSettings'
 import { moderatePrompt } from './moderation'
 import { extractProviderPromptText } from './graphPromptText'
 import { falSubmit, falStatus, falResult } from '../runner/falQueue'
@@ -29,13 +30,19 @@ export interface FalRunOptions {
  * status, a failed result fetch, and the poll-deadline timeout — so the
  * single catch below is the complete release wiring. The hold is settled
  * only once the result body is actually in hand.
+ *
+ * Priced on what is sent (Task P5): an endpoint with a per-second card
+ * (Frame Animate's) is held and charged for the request's own length,
+ * resolution and sound (shared/pricing/clipSettings.ts requestPrice), ahead
+ * of the endpoint's flat MODEL_COSTS row. Every other endpoint: its row.
  */
 export async function runFal<T = unknown>(
   app: string,
   input: Record<string, unknown>,
   opts: FalRunOptions = {},
 ): Promise<T> {
-  const ticket = await preflightMeter(app)
+  const price = requestPrice(app, input)
+  const ticket = await preflightMeter(app, { credits: price?.credits })
   // Moderate AFTER the hold is placed (preflight) but BEFORE the submit — a
   // ToS-violating prompt releases the hold and refuses at zero spend.
   // moderatePrompt fails OPEN (no key / OpenAI outage → ok:true), so this can
@@ -46,7 +53,7 @@ export async function runFal<T = unknown>(
     throw new MeterRefusalError('This prompt was blocked by content moderation', 400, { categories: mod.categories })
   }
   try {
-    return await dispatch<T>(app, input, opts, ticket)
+    return await dispatch<T>(app, input, opts, ticket, price?.usd ?? null)
   } catch (e) {
     await ticket?.release()
     throw e
@@ -58,6 +65,7 @@ async function dispatch<T>(
   input: Record<string, unknown>,
   opts: FalRunOptions,
   ticket: Awaited<ReturnType<typeof preflightMeter>>,
+  requestUsd: number | null,
 ): Promise<T> {
   const submit = await falSubmit(app, input)
   const startedAt = Date.now()
@@ -86,7 +94,7 @@ async function dispatch<T>(
           userId: currentMeterContext()?.userId ?? null,
           provider: 'fal',
           model: app,
-          usd: costForModel(app)?.usd ?? null,
+          usd: requestUsd ?? costForModel(app)?.usd ?? null,
           jobId: 'settle:' + ticket.holdId,
         })
       }

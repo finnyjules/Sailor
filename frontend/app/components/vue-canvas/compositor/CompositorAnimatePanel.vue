@@ -37,8 +37,8 @@ watch(() => props.layer.id, () => {
   if (!spec.value.durations.includes(seconds.value)) seconds.value = spec.value.defaultDuration
 })
 
-// Flat per-clip price in credits — see clipPriceCredits: the hold does not scale with length.
-const price = computed(() => clipPriceLabel(model.value))
+// Priced per second: the credits the route holds and charges for this model at this length.
+const price = computed(() => clipPriceLabel(model.value, seconds.value))
 const hasClip = computed(() => !!props.layer.clip)
 // Every generation so far, oldest first. Shown once there is something to go back to:
 // a second take, or a removed clip whose take is still here.
@@ -60,7 +60,7 @@ const fieldCls = 'w-full bg-white/[0.04] border border-white/[0.06] rounded px-2
       <div>
         <div class="panel-label mb-1.5">Model</div>
         <select v-model="model" data-role="model" :class="fieldCls">
-          <option v-for="m in CLIP_MODELS" :key="m.id" :value="m.id">{{ clipModelLabel(m) }}</option>
+          <option v-for="m in CLIP_MODELS" :key="m.id" :value="m.id">{{ clipModelLabel(m, seconds) }}</option>
         </select>
       </div>
       <div>

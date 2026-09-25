@@ -157,6 +157,15 @@ export const EDIT_RATES: Record<string, EditRate> = {
     beyondPerPixel: 1.36 / 512e6,
     ...verified('replicate', rep('topazlabs/image-upscale')),
   },
+  // ── Restyle with a style LoRA (RestyleWithLoRANode, ComfyUI path) ───────
+  // Moondream 2, billed by GPU time (L40S, $0.000975/s): "costs approximately
+  // $0.0020 to run". The node captions once and classifies up to four times.
+  'lucataco/moondream2': { unit: 'per_image', usd: 0.002, ...estimate(rep('lucataco/moondream2')) },
+  // "$0.032 per output image" — but the node runs the user's own trained
+  // model instead when the LoRA has one (billed by GPU time; the LoRA
+  // category's observed median is ~$0.04, priceBook.ts LORA_RENDER_CREDITS),
+  // and the price can't see which. So the dearer $0.04.
+  'black-forest-labs/flux-dev-lora': { unit: 'per_image', usd: 0.04, ...estimate(rep('black-forest-labs/flux-dev-lora')) },
   // Billed by GPU time (L40S), "approximately $0.031 to run" for a typical
   // ~1 MP picture. Enhance detail runs it in place, so it is priced per output
   // megapixel, never below the $0.10 charged before.
@@ -208,6 +217,33 @@ export function editUsd(call: EditCall): number | null {
     case 'per_output_megapixel':
       return tidy(Math.max(rate.minUsd, rate.perMegapixel * megapixelsOf(call.outputPixels ?? 0)))
   }
+}
+
+/** A call a node makes `times` times in one run (a pipeline of several calls). */
+export interface EditStep { call: EditCall, times: number }
+
+/**
+ * The price of a node that makes several calls in one run, by the same rule
+ * as one call's chain: the calls as first sent, with the usual markup, or the
+ * run's worst case (every call on its dearest fallback) covered at cost —
+ * whichever is higher. Null when any call has no card.
+ */
+export function editStepsUsd(steps: readonly EditStep[]): number | null {
+  let marked = 0
+  let worst = 0
+  for (const { call, times } of steps) {
+    const first = editUsd(call)
+    if (first == null) return null
+    let dearest = first
+    for (const one of call.fallbacks ?? []) {
+      const p = editUsd(one)
+      if (p == null) return null
+      dearest = Math.max(dearest, p)
+    }
+    marked += first * times
+    worst += dearest * times
+  }
+  return Math.max(tidy(marked), usdChargedAtCost(tidy(worst)))
 }
 
 /**
