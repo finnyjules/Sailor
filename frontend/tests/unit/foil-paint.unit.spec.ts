@@ -120,4 +120,33 @@ describe('agent surface: the agent cannot author a foil paint', () => {
     expect(res.ok).toBe(false)
     if (!res.ok) expect(res.detail).toMatch(/fill picker/i)
   })
+  it('addLayer refuses a layer carrying foil anywhere — fill, text colour or an outline', () => {
+    const layers: Record<string, unknown>[] = [
+      { kind: 'rect', fill: DEFAULT_FOIL_FILL },
+      { kind: 'text', text: 'Hi', color: DEFAULT_FOIL_FILL },
+      { kind: 'text', text: 'Hi', strokeColor: DEFAULT_FOIL_FILL, strokeWidth: 0.01 },
+      { kind: 'ellipse', stroke: DEFAULT_FOIL_FILL, strokeWidth: 0.01 },
+      { kind: 'rect', fill: '#ff0000', strokes: [{ id: 's1', paint: DEFAULT_FOIL_FILL, width: 0.01 }] },
+    ]
+    for (const layer of layers) {
+      const res = applyCompositorCommand(state(), { op: 'addLayer', args: { layer } })
+      expect(res.ok, JSON.stringify(layer)).toBe(false)
+      if (!res.ok) expect(res.detail).toMatch(/fill picker/i)
+    }
+    // …and a plain layer still goes in.
+    expect(applyCompositorCommand(state(), { op: 'addLayer', args: { layer: { kind: 'rect', fill: '#00ff00' } } }).ok).toBe(true)
+  })
+  it('placeTemplate refuses a template whose layers carry foil', () => {
+    const template = {
+      id: 'tpl-foil', name: 'Foil card', version: 1, groups: [], slots: [], frameSize: { w: 1080, h: 1080 },
+      layers: [{ key: 'k1', layer: { id: 'a', kind: 'rect', x: 0.5, y: 0.5, rotation: 0, opacity: 1, w: 0.2, h: 0.2, fill: '#fff', stroke: '', strokeWidth: 0, radius: 0,
+        strokes: [{ id: 's1', paint: DEFAULT_FOIL_FILL, width: 0.01 }] } }],
+    }
+    const res = applyCompositorCommand(state(), { op: 'placeTemplate', args: { template } })
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.detail).toMatch(/fill picker/i)
+    const plain = structuredClone(template)
+    ;(plain.layers[0]!.layer as Record<string, unknown>).strokes = []
+    expect(applyCompositorCommand(state(), { op: 'placeTemplate', args: { template: plain } }).ok).toBe(true)
+  })
 })

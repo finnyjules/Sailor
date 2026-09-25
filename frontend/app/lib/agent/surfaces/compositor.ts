@@ -142,6 +142,17 @@ function foilRefusal(paint: unknown): CommandResult<CompositorState> | null {
     : null
 }
 
+/** True when a layer-shaped value carries foil ANYWHERE the painter reads a paint: `fill`,
+ *  `color`, `stroke`, `strokeColor`, or any `strokes[].paint`. For the commands that take a
+ *  whole layer (addLayer, placeTemplate), where `foilRefusal` on one named arg is not enough. */
+function containsFoil(v: unknown): boolean {
+  if (!v || typeof v !== 'object') return false
+  const o = v as Record<string, unknown>
+  if (['fill', 'color', 'stroke', 'strokeColor'].some(k => isFoilFill(o[k] as Paint))) return true
+  return Array.isArray(o.strokes) && o.strokes.some(st => !!st && typeof st === 'object' && isFoilFill((st as { paint?: unknown }).paint as Paint))
+}
+const FOIL_LAYER_REFUSAL: CommandResult<CompositorState> = { ok: false, reason: 'invalid', detail: 'foil is chosen from the fill picker, not set by the agent' }
+
 /** A Mosaic's internal `cellFill` — the style table in lib/compositor/mosaic maps the
  *  agent's plain style words (tiles | pane | …) onto it; `solid` is the `tiles` style. */
 type DealFill = MosaicCellFill
@@ -1140,6 +1151,7 @@ function applyCommand(input: CompositorState, cmd: Command): CommandResult<Compo
       if (kind === 'image' && (typeof raw.filename !== 'string' || !raw.filename)) return { ok: false, reason: 'invalid', detail: 'image layer needs a non-empty filename (use generateImage to create one)' }
       const id = typeof raw.id === 'string' ? raw.id : `l_${state.layers.length + 1}_${kind}`
       if (state.layers.some(l => l.id === id)) return { ok: false, reason: 'invalid', detail: `layer id '${id}' already exists` }
+      if (containsFoil(raw)) return { ...FOIL_LAYER_REFUSAL }
       const layer = { ...defaultLayer(kind, id), ...clone(raw), id, kind } as unknown as LocalLayer
       return { ok: true, template: { ...state, layers: [...state.layers, layer] }, inverse: snapshot() }
     }
@@ -1477,6 +1489,7 @@ function applyCommand(input: CompositorState, cmd: Command): CommandResult<Compo
       if (!t || typeof t !== 'object' || !Array.isArray(t.layers) || !Array.isArray(t.slots)) {
         return { ok: false, reason: 'invalid', detail: 'missing/invalid args.template (needs the full Template object)' }
       }
+      if (t.layers.some(tl => containsFoil((tl as { layer?: unknown } | null)?.layer))) return { ...FOIL_LAYER_REFUSAL }
       const slotValues = (cmd.args?.slotValues && typeof cmd.args.slotValues === 'object') ? cmd.args.slotValues as Record<string, string> : {}
       // Deterministic id minting (no external counters/state available to a pure
       // function): seeded from the current layer count, matching addLayer's
