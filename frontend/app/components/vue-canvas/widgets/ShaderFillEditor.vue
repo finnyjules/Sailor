@@ -37,6 +37,7 @@ import { type ShaderSpec, DEFAULT_SHADER_SPEC } from '~/lib/spacetype/fillTile'
 import { type Paint, isFill } from '~/composables/useCompositorLayers'
 import { fetchShaderFxCatalog, resolveEffectId, useShaderCatalog } from '~/lib/shaderfx/catalog'
 import { effectReadsInput } from '~/lib/shaderfx/catalogStore'
+import { effectKindLabel } from '~/lib/shaderfx/gallery'
 import type { EffectDef, GradientStop, ParamValue } from '~/lib/shaderfx/types'
 import { cleanStops } from '~/lib/shaderfx/params'
 import { buildShaderParamRows, type ShaderParamRow } from '~/lib/shaderfill/controls'
@@ -125,10 +126,6 @@ onMounted(loadCatalog)
 const effectDef = computed<EffectDef | null>(
   () => catalog.value?.effects.find((e) => e.id === resolveEffectId(props.modelValue.effectId)) ?? null,
 )
-
-function titleCase(s: string): string {
-  return s.replace(/(^|[_\s])(\w)/g, (_, sep, c) => (sep ? ' ' : '') + c.toUpperCase()).trim()
-}
 
 // ── Effect picker (ShaderEffectGallery over the live catalog — SHADER_FILL_
 // CONTROLS.effectId declares options:[] on purpose; this is the caller that
@@ -383,7 +380,7 @@ watch(eligible, (ok) => {
         <Sparkles class="size-3.5 shrink-0 text-white/60" :stroke-width="1.75" />
         <span class="min-w-0 flex-1">
           <span class="block truncate text-[11px] font-medium leading-tight text-white/90">{{ effectDef?.name ?? modelValue.effectId }}</span>
-          <span v-if="effectDef" class="block truncate text-[10px] leading-tight text-white/40">{{ titleCase(effectDef.category) }}</span>
+          <span v-if="effectDef" class="block truncate text-[10px] leading-tight text-white/40">{{ effectKindLabel(effectDef) }}</span>
         </span>
         <ChevronRight class="size-3.5 shrink-0 text-white/30" />
       </button>

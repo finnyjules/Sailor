@@ -192,7 +192,7 @@ test.describe('shader generation (stage 5)', () => {
     await expect(gallery).toBeVisible()
     await expect(gallery.getByText('My effects').first()).toBeVisible()
     await expect(gallery.locator('[data-effect-id="mine_aaaaaaaaaaaa"]')).toContainText('Rain on glass')
-    await expect(gallery.locator('[data-effect-id="mine_aaaaaaaaaaaa"]')).toContainText('Mine · from Water ripple')
+    await expect(gallery.locator('[data-effect-id="mine_aaaaaaaaaaaa"]')).toContainText('My effect · from “Water ripple”')
     await expect(gallery.getByTestId('effect-gallery-make')).toContainText(PRICE)
     await gallery.getByTestId('effect-gallery-make').click()
     await expect(gallery).toHaveCount(0)

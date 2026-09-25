@@ -6,7 +6,7 @@
 import { computed, ref, watch } from 'vue'
 import CatalogModal from '~/components/CatalogModal.vue'
 import AiMark from '~/components/prompt/AiMark.vue'
-import { SHADER_GALLERY_SECTIONS, sectionOfEffect, shaderGalleryFilters, shaderGalleryItems } from '~/lib/shaderfx/gallery'
+import { effectCardSubtitle, SHADER_GALLERY_SECTIONS, sectionOfEffect, shaderGalleryFilters, shaderGalleryItems } from '~/lib/shaderfx/gallery'
 import { baseEffectId } from '~/lib/myEffects/defs'
 import { shaderGenEstimateText } from '~/lib/shadergen/estimate'
 import { hostedModeEnabled } from '~/lib/hostedMode'
@@ -50,7 +50,6 @@ const baseSelectedId = computed(() => (props.selectedId ? baseEffectId(props.sel
 
 const hosted = (): boolean => { try { return hostedModeEnabled(useRuntimeConfig().public) } catch { return false } }
 const estimate = computed(() => shaderGenEstimateText(hosted()))
-const subtitleOf = (d: EffectDef) => (d.mine ? (d.from ? `Mine · from ${d.from}` : 'Mine') : d.category)
 const asDef = (item: unknown) => item as EffectDef
 </script>
 
@@ -82,14 +81,14 @@ const asDef = (item: unknown) => item as EffectDef
         </div>
         <div class="px-2 py-1.5">
           <div class="truncate text-[11px] text-white/85">{{ asDef(item).name }}</div>
-          <div class="truncate text-[10px] text-white/35" :class="{ capitalize: !asDef(item).mine }">{{ subtitleOf(asDef(item)) }}</div>
+          <div class="truncate text-[10px] text-white/35" :class="{ capitalize: !asDef(item).mine }">{{ effectCardSubtitle(asDef(item)) }}</div>
         </div>
       </div>
     </template>
     <template v-if="canMake" #card-overlay="{ item }">
       <button
         type="button" data-testid="effect-gallery-remix"
-        class="absolute right-1.5 top-1.5 flex cursor-pointer items-center gap-1 rounded-full border border-white/15 bg-[#1e1f23]/90 px-2 py-0.5 text-[11px] text-white/80 opacity-0 transition hover:text-white focus-visible:opacity-100 group-hover:opacity-100"
+        class="absolute right-1.5 top-1.5 flex cursor-pointer items-center gap-1 rounded-full border border-white/15 bg-[#1e1f23]/90 px-2 py-0.5 text-[11px] text-white/80 pointer-events-none opacity-0 transition hover:text-white focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100"
         @click.stop="emit('remix', asDef(item))"
       >
         Remix <AiMark kind="star" class="size-3" />

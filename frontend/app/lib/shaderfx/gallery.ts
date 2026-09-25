@@ -90,3 +90,17 @@ export function shaderGalleryItems(
     .filter(d => !q || d.name.toLowerCase().includes(q) || d.category.toLowerCase().includes(q) || (d.from ?? '').toLowerCase().includes(q))
     .sort((a, b) => rankOf(a) - rankOf(b))
 }
+
+/** The small line under an effect's name on a picker trigger or a stack row: "My effect" for the
+ *  user's own (a previewed take is a "Take"), the category otherwise. Never an id or "mine". */
+export function effectKindLabel(d: EffectDef): string {
+  if (d.draft) return 'Take'
+  if (d.mine || d.versionOf || d.category === MINE.id) return 'My effect'
+  return titleCase(d.category)
+}
+
+/** A gallery card's subtitle: a My effect says where it came from, quoting that effect's name. */
+export function effectCardSubtitle(d: EffectDef): string {
+  if (!d.mine) return d.category
+  return d.from ? `My effect · from “${d.from}”` : 'My effect'
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { SHADER_GALLERY_SECTIONS, sectionOfEffect, shaderGalleryFilters, shaderGalleryItems } from '~/lib/shaderfx/gallery'
+import { effectCardSubtitle, effectKindLabel, SHADER_GALLERY_SECTIONS, sectionOfEffect, shaderGalleryFilters, shaderGalleryItems } from '~/lib/shaderfx/gallery'
 import type { EffectDef } from '~/lib/shaderfx/types'
 import { myEffectRecords, myEffectsLoaded, setMyEffectRecord } from '~/lib/myEffects/library'
 
@@ -58,5 +58,20 @@ describe('the shared shader gallery helper (spec §7.3, §7.4)', () => {
     expect(shaderGalleryItems(copy, { filter: 'all', query: '' }).map(e => e.id)).toEqual(['water_ripple'])
     setMyEffectRecord({ id: 'mine_dddddddddddd' } as any) // saved to the library: listed
     expect(shaderGalleryItems(copy, { filter: 'all', query: '' }).map(e => e.id)).toEqual(['mine_dddddddddddd', 'water_ripple'])
+  })
+})
+
+describe('what a shader picker says under an effect’s name (UI copy: never "mine")', () => {
+  it('a My effect (any version) reads "My effect"; a previewed take reads "Take"; a built-in its category', () => {
+    expect(effectKindLabel(effects[2]!)).toBe('My effect')
+    expect(effectKindLabel(effects[3]!)).toBe('My effect')
+    expect(effectKindLabel(effects[4]!)).toBe('Take')
+    expect(effectKindLabel(effects[1]!)).toBe('Distortion')
+    expect(effectKindLabel(d('x', 'color_grade'))).toBe('Color Grade')
+  })
+  it('a gallery card quotes where a My effect came from', () => {
+    expect(effectCardSubtitle(effects[2]!)).toBe('My effect · from “Water ripple”')
+    expect(effectCardSubtitle(d('mine_bbbbbbbbbbbb', 'mine', { mine: true }))).toBe('My effect')
+    expect(effectCardSubtitle(effects[1]!)).toBe('distortion')
   })
 })

@@ -38,6 +38,10 @@ describe('ShaderEffectGallery (spec §7.3)', () => {
     w = mount(ShaderEffectGallery, { props: { open: true, effects, selectedId: null, thumbs: {}, canMake: true }, attachTo: document.body })
     const remix = body().querySelector('[data-testid="effect-gallery-remix"]')!
     expect(remix.className).toContain('group-hover:opacity-100')
+    // Hidden, it can't be tapped: it takes the pointer only while shown (hover or keyboard focus).
+    expect(remix.className).toContain('pointer-events-none')
+    expect(remix.className).toContain('group-hover:pointer-events-auto')
+    expect(remix.className).toContain('focus-visible:pointer-events-auto')
     expect(remix.parentElement!.classList.contains('group')).toBe(true)
   })
   it('a search hides Make one; the My effects chip keeps it', async () => {
@@ -61,7 +65,8 @@ describe('ShaderEffectGallery (spec §7.3)', () => {
     w = mount(ShaderEffectGallery, { props: { open: true, effects: [d('mine_aaaaaaaaaaaa', 'mine', { mine: true, name: 'Rain on glass', from: 'Water ripple' })], selectedId: null, thumbs: {} }, attachTo: document.body })
     const card = body().querySelector('[data-effect-id="mine_aaaaaaaaaaaa"]')!
     expect(card.textContent).toContain('Rain on glass')
-    expect(card.textContent).toContain('Mine · from Water ripple')
+    expect(card.textContent).toContain('My effect · from “Water ripple”')
+    expect(card.textContent).not.toMatch(/\bMine\b/i)
     expect(card.textContent).not.toMatch(/mine_/)
   })
   it('hides drafts, old versions, and My effects no longer in the library', () => {

@@ -4,6 +4,7 @@ import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ShaderEffectGallery from '~/components/vue-canvas/ShaderEffectGallery.vue'
 import { getTypeColor } from '~/composables/useVueNodes'
 import { assetUrl, fetchShaderFxCatalog, resolveEffectId, useShaderCatalog } from '~/lib/shaderfx/catalog'
+import { effectKindLabel } from '~/lib/shaderfx/gallery'
 import { walkShaderChain } from '~/lib/shaderfx/chain'
 import { parseParams, resolveUniforms, serializeParams } from '~/lib/shaderfx/params'
 import { expandPasses, shaderFx } from '~/lib/shaderfx/renderer'
@@ -75,6 +76,8 @@ const effectId = computed<string>(() => previewEffectId.value ?? String(widgetVa
 const effectDef = computed<EffectDef | null>(
   () => catalog.value?.effects.find(e => e.id === resolveEffectId(effectId.value)) ?? null,
 )
+// "My effect" (or a take) reads as words, not a shouted category tag.
+const ownKind = computed(() => !!effectDef.value && effectKindLabel(effectDef.value) !== titleCase(effectDef.value.category))
 const paramsJson = computed(() => (previewEffectId.value ? '{}' : String(widgetVal('params') ?? '{}')))
 const uniforms = computed<Record<string, number>>(() =>
   effectDef.value ? resolveUniforms(effectDef.value, parseParams(paramsJson.value)) : {},
@@ -400,7 +403,7 @@ onBeforeUnmount(() => {
       :style="{ background: `linear-gradient(135deg, ${imageColor}15 0%, transparent 60%)` }"
     >
       <Sparkles class="size-4 shrink-0 text-white/70" :stroke-width="1.75" />
-      <span class="text-xs font-semibold text-white/90 truncate flex-1">{{ effectDef?.name || 'Shader Effect' }}</span>
+      <span class="text-xs font-semibold text-white/90 truncate flex-1">{{ effectDef?.name || 'Shader effect' }}</span>
       <button
         class="nopan nodrag shrink-0 size-5 rounded flex items-center justify-center text-white/55 hover:text-white/85 hover:bg-white/[0.08] transition-colors cursor-pointer"
         :title="playing ? 'Pause preview' : 'Play preview'" @click.stop="playing = !playing"
@@ -446,7 +449,7 @@ onBeforeUnmount(() => {
           </span>
           <span class="flex flex-col min-w-0 flex-1">
             <span class="text-[11px] font-medium text-white/90 truncate leading-tight">{{ effectDef?.name ?? 'Pick an effect' }}</span>
-            <span class="text-[9px] text-white/40 truncate uppercase tracking-[0.06em] leading-tight">{{ effectDef ? titleCase(effectDef.category) : 'Shader effect' }}</span>
+            <span class="text-[9px] text-white/40 truncate leading-tight" :class="{ 'uppercase tracking-[0.06em]': !ownKind }">{{ effectDef ? effectKindLabel(effectDef) : 'Shader effect' }}</span>
           </span>
           <ChevronRight class="size-3.5 text-white/30 group-hover:text-white/55 shrink-0 transition-colors" />
         </button>

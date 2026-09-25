@@ -149,6 +149,7 @@ import { LIVE_FIELD_CEILING } from '~/lib/shaderfill/descriptor'
 import ShaderEffectGallery from '~/components/vue-canvas/ShaderEffectGallery.vue'
 import { fetchShaderFxCatalog, resolveEffectId, useShaderCatalog } from '~/lib/shaderfx/catalog'
 import { currentShaderEffects, effectReadsInput, getEffectSync } from '~/lib/shaderfx/catalogStore'
+import { effectKindLabel } from '~/lib/shaderfx/gallery'
 import type { EffectTarget } from '~/composables/useEffectTakes'
 import { makeBackgroundTarget } from '~/lib/shadergen/studioTargets'
 import type { EffectDef, ParamValue } from '~/lib/shaderfx/types'
@@ -2832,9 +2833,6 @@ const activeShaderEffectDef = computed<EffectDef | null>(() => {
   if (!activeShaderEffectId.value) return null
   return shaderFxCatalog.value?.effects.find((e) => e.id === resolveEffectId(activeShaderEffectId.value)) ?? null
 })
-function shaderFxTitleCase(s: string): string {
-  return s.replace(/(^|[_\s])(\w)/g, (_, sep, c) => (sep ? ' ' : '') + c.toUpperCase()).trim()
-}
 
 // Picker filtered to input-sampling effects only — a purely generative effect would overwrite
 // the layer's pixels rather than process them (the F5 plan's picker-eligibility gate, same rule
@@ -10496,7 +10494,7 @@ onUnmounted(() => {
                 <Sparkles class="size-3.5 shrink-0 text-white/60" :stroke-width="1.75" />
                 <span class="min-w-0 flex-1">
                   <span class="block truncate text-[11px] font-medium leading-tight text-white/90" data-testid="shader-fx-effect-name">{{ activeShaderEffectDef?.name ?? activeShaderEffectId }}</span>
-                  <span v-if="activeShaderEffectDef" class="block truncate text-[10px] leading-tight text-white/40">{{ shaderFxTitleCase(activeShaderEffectDef.category) }}</span>
+                  <span v-if="activeShaderEffectDef" class="block truncate text-[10px] leading-tight text-white/40">{{ effectKindLabel(activeShaderEffectDef) }}</span>
                 </span>
                 <ChevronRight class="size-3.5 shrink-0 text-white/30" />
               </button>
