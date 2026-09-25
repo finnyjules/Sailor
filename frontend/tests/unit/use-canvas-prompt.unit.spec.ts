@@ -1,6 +1,6 @@
 // frontend/tests/unit/use-canvas-prompt.unit.spec.ts
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { defineComponent, h, nextTick, reactive, ref } from 'vue'
 import { mount } from '@vue/test-utils'
 
@@ -13,7 +13,8 @@ const agent = {
   ask: vi.fn(), stop: vi.fn(), acceptChange: vi.fn(), rejectChange: vi.fn(), reroll: vi.fn(), keep: vi.fn(),
   keepAndRun: vi.fn(), reviewLastRun: vi.fn(), reviewNode: vi.fn(), autoReviewNode: vi.fn(), dismiss: vi.fn(),
 }
-vi.mock('~/composables/useCanvasAgent', () => ({ useCanvasAgent: () => agent }))
+let agentOpts: any = null
+vi.mock('~/composables/useCanvasAgent', () => ({ useCanvasAgent: (o: any) => { agentOpts = o; return agent } }))
 
 import { useCanvasPrompt } from '~/composables/useCanvasPrompt'
 import { DISPATCH_MESSAGES } from '~/lib/prompt/canvasDispatch'
@@ -39,8 +40,10 @@ function setup(route = routeTo('plan')) {
   const { c, nodes } = makeCanvas()
   let api!: ReturnType<typeof useCanvasPrompt>
   const w = mount(defineComponent({ setup() { api = useCanvasPrompt(() => c, { route }); return () => h('div') } }))
+  mounted.push(w)
   return { api, c, nodes, route, w }
 }
+const mounted: any[] = []
 function capture(name: string) {
   const seen: any[] = []
   const f = (e: Event) => seen.push((e as CustomEvent).detail)
@@ -55,8 +58,9 @@ const land = (nodes: any[], id: string) => {
 describe('useCanvasPrompt', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    agent.answer.value = ''; agent.error.value = ''; agent.busy.value = false; agent.hasProposal.value = false
+    agent.answer.value = ''; agent.error.value = ''; agent.busy.value = false; agent.hasProposal.value = false; agent.review.value = null
   })
+  afterEach(() => { while (mounted.length) mounted.pop().unmount() })
 
   it('routes a request with the selection by name, then the planner answers; router follow-ups ride on the answer', async () => {
     const { api, route } = setup(routeTo('answer', ['Make it warmer']))
@@ -182,6 +186,113 @@ describe('useCanvasPrompt', () => {
     await api.submit('vary it')
     expect(c.startSketch).not.toHaveBeenCalled()
     expect(route).toHaveBeenCalledTimes(1)
+  })
+
+  it('while takes are arriving nothing new starts: not a submit, a menu item or a mode', async () => {
+    const { api, route } = setup(routeTo('tweak'))
+    await api.submit('vary it')
+    const runs = capture('sailor:runVariations')
+    const stops = capture('sailor:stopVariations')
+    await api.submit('what does this do?')
+    window.dispatchEvent(new CustomEvent('sailor:promptKind', { detail: { kind: 'tweak', nodeId: 'img', fromMenu: true } }))
+    window.dispatchEvent(new CustomEvent('sailor:promptMode', { detail: { label: 'Tune', kind: 'tweak', nodeId: 'img' } }))
+    runs.off(); stops.off()
+    expect(route).toHaveBeenCalledTimes(1)
+    expect(runs.seen).toEqual([])
+    expect(stops.seen).toEqual([])
+    expect(api.mode.value).toBeNull()
+    expect(api.takes.value?.tiles.map(t => t.state)).toEqual(['pending', 'pending', 'pending'])
+  })
+
+  it('Three more waits until the run behind the set has reported done', async () => {
+    const { api, nodes } = setup(routeTo('tweak'))
+    await api.submit('vary it')
+    land(nodes, 't1'); await nextTick()
+    land(nodes, 't2'); await nextTick()
+    land(nodes, 't3'); await nextTick()
+    expect(api.working.value).toBe(false)
+    const runs = capture('sailor:runVariations')
+    api.moreTakes()
+    expect(runs.seen).toEqual([])
+    expect(api.takes.value?.loopDone).toBe(false)
+    window.dispatchEvent(new CustomEvent('sailor:variationsDone', { detail: { nodeId: 'img', queued: 3, cancelled: false } }))
+    expect(api.takes.value?.loopDone).toBe(true)
+    api.moreTakes()
+    runs.off()
+    expect(runs.seen).toEqual([{ nodeId: 'img', count: 3 }])
+    expect(api.takes.value?.tiles.map(t => t.state)).toEqual(['pending', 'pending', 'pending'])
+  })
+
+  it('a render error fails the set early, but Three more still waits for the run to finish', async () => {
+    const { api, nodes } = setup(routeTo('tweak'))
+    await api.submit('vary it')
+    nodes[0].data = { ...nodes[0].data, error: 'boom' }
+    await nextTick()
+    expect(api.takes.value?.tiles.map(t => t.state)).toEqual(['failed', 'failed', 'failed'])
+    const runs = capture('sailor:runVariations')
+    api.moreTakes()
+    expect(runs.seen).toEqual([])
+    window.dispatchEvent(new CustomEvent('sailor:variationsDone', { detail: { nodeId: 'img', queued: 1, cancelled: false } }))
+    api.moreTakes()
+    runs.off()
+    expect(runs.seen).toEqual([{ nodeId: 'img', count: 3 }])
+  })
+
+  it('a set opened while another Variations run is going waits for it, and that run’s done never settles the set', async () => {
+    const { api } = setup(routeTo('tweak'))
+    window.dispatchEvent(new CustomEvent('sailor:runVariations', { detail: { nodeId: 'img', count: 4 } })) // from the node's menu
+    const runs = capture('sailor:runVariations')
+    await api.submit('vary it')
+    expect(runs.seen).toEqual([])
+    expect(api.takes.value?.tiles.map(t => t.state)).toEqual(['pending', 'pending', 'pending'])
+    window.dispatchEvent(new CustomEvent('sailor:variationsDone', { detail: { nodeId: 'img', queued: 0, cancelled: false } }))
+    runs.off()
+    expect(runs.seen).toEqual([{ nodeId: 'img', count: 3 }])
+    expect(api.takes.value?.tiles.map(t => t.state)).toEqual(['pending', 'pending', 'pending'])
+    expect(api.working.value).toBe(true)
+  })
+
+  it('a new request keeps an armed Keep & Run review: nothing on screen means no dismiss', async () => {
+    const { api } = setup(routeTo('plan'))
+    agent.keepAndRun() // approve and run: the proposal is gone, a review is armed
+    await api.submit('add an upscale step')
+    expect(agent.dismiss).not.toHaveBeenCalled()
+    window.dispatchEvent(new CustomEvent('sailor:agentRunComplete'))
+    expect(agent.reviewLastRun).toHaveBeenCalled()
+    agent.answer.value = 'Done.'
+    await api.submit('and another')
+    expect(agent.dismiss).toHaveBeenCalledTimes(1)
+  })
+
+  it('a route that resolves after unmount starts nothing', async () => {
+    let resolve!: (v: any) => void
+    const route = vi.fn(() => new Promise(r => { resolve = r })) as any
+    const { api, w } = setup(route)
+    const p = api.submit('vary it')
+    w.unmount(); mounted.length = 0
+    const runs = capture('sailor:runVariations')
+    resolve({ kind: 'tweak', followUps: [], routed: true })
+    await p
+    runs.off()
+    expect(runs.seen).toEqual([])
+    expect(agent.ask).not.toHaveBeenCalled()
+  })
+
+  it('takes on a node that has gone say so instead of doing nothing', async () => {
+    const { api, c } = setup(routeTo('tweak'))
+    c.agentNodeTakes = () => null
+    await api.submit('vary it')
+    expect(api.takes.value).toBeNull()
+    expect(api.answerCard.value).toEqual({ kind: 'notice', text: 'That node isn’t on the canvas any more.', reasoning: '', followUps: [] })
+  })
+
+  it('a menu item clears the fast-path latch, so a later sketch from the planner still fires', async () => {
+    const { api, c } = setup()
+    await api.submit('a red fox in the snow') // fast path: latch set, the planner (mocked) never answers
+    c.startSketch.mockClear()
+    window.dispatchEvent(new CustomEvent('sailor:promptKind', { detail: { kind: 'plan', text: 'a cabin in the woods', fromMenu: true } }))
+    agentOpts.sketchIdea('a cabin in the woods')
+    expect(c.startSketch).toHaveBeenCalledWith('a cabin in the woods')
   })
 
   it('a proposal shows the changes card', async () => {

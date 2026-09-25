@@ -22,7 +22,7 @@ const currentChosen = computed(() => !props.session.chosen || props.session.chos
       <span class="min-w-0 truncate"><span class="text-white/85">{{ title }}</span> · {{ status }}</span>
       <span class="ml-auto flex shrink-0 items-center gap-1.5">
         <button
-          type="button" :disabled="working"
+          type="button" :disabled="working || session.loopDone === false"
           class="rounded-md border border-[#2a2a2a] bg-[#1e1f23] px-2.5 py-0.5 text-white/75 transition hover:text-white disabled:opacity-40"
           @click="emit('more')"
         >Three more</button>

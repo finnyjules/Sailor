@@ -20,6 +20,10 @@ export interface TakesSession {
   tiles: TakeTile[]
   hovered: string | null
   chosen: string | null
+  /** Set by the host: false while the Variations run behind this set is still
+   *  going (even once every tile has settled), true once it has reported done.
+   *  "Three more" waits for it — a new run can't start while one is going. */
+  loopDone?: boolean
 }
 
 const thumbOf = (t: Take): string | null => t.images?.[0] ?? t.videos?.[0] ?? null

@@ -207,18 +207,43 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   }
 
   // --- takes (spec §3.1) ------------------------------------------------------
+  // The layout runs one Variations loop at a time and silently drops a
+  // `sailor:runVariations` that arrives while one is going (from the node's
+  // menu, or a set we just stopped that hasn't wound down yet). So mirror its
+  // guard: `loop` is the run the layout is on, and `sid` says which of our sets
+  // started it (null: not ours). A new set whose loop can't start yet waits
+  // (`waitingSid`) and dispatches on that run's `variationsDone`; a
+  // `variationsDone` only ever settles the set whose own run produced it.
+  let sessionSid = 0
+  let dispatchingSid: number | null = null
+  let waitingSid: number | null = null
+  let loop: { nodeId: string; sid: number | null } | null = null
+  function onRunVariations(e: Event) {
+    const nodeId = (e as CustomEvent).detail?.nodeId
+    if (loop || !nodeId) return // the layout ignores it too
+    loop = { nodeId: String(nodeId), sid: dispatchingSid }
+  }
+  function dispatchRun(sid: number, nodeId: string) {
+    dispatchingSid = sid
+    window.dispatchEvent(new CustomEvent('sailor:runVariations', { detail: { nodeId, count: TAKES_PER_SET } }))
+    dispatchingSid = null
+  }
   function startTakes(t: DispatchTarget) {
     const c = canvas()
     const snap = c?.agentNodeTakes?.(t.nodeId)
-    if (!snap) return
-    takes.value = openTakes({ nodeId: t.nodeId, nodeLabel: t.label, request: '', takes: snap.takes, images: snap.images })
+    if (!snap) { notice.value = 'That node isn’t on the canvas any more.'; return }
+    const sid = ++sessionSid
+    takes.value = { ...openTakes({ nodeId: t.nodeId, nodeLabel: t.label, request: '', takes: snap.takes, images: snap.images }), loopDone: false }
     c.agentTakesBegin(t.nodeId)
-    window.dispatchEvent(new CustomEvent('sailor:runVariations', { detail: { nodeId: t.nodeId, count: TAKES_PER_SET } }))
+    if (loop) waitingSid = sid
+    else dispatchRun(sid, t.nodeId)
   }
   function endTakes(keepId: string | null) {
     const s = takes.value
     if (!s) return
-    if (isTakesWorking(s)) window.dispatchEvent(new CustomEvent('sailor:stopVariations', { detail: { nodeId: s.nodeId } }))
+    waitingSid = null
+    // Our run still going (tiles pending, or failed early while more are queued): stop it.
+    if (loop?.sid === sessionSid) window.dispatchEvent(new CustomEvent('sailor:stopVariations', { detail: { nodeId: s.nodeId } }))
     canvas()?.agentTakesEnd?.(s.nodeId, keepId)
     takes.value = null
   }
@@ -241,9 +266,18 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   )
   function onVariationsDone(e: Event) {
     const d = (e as CustomEvent).detail ?? {}
+    const ran = loop
+    loop = null
     const s = takes.value
-    if (!s || String(d.nodeId) !== s.nodeId || d.cancelled) return
-    takes.value = settleExpected(s, Number(d.queued) || 0)
+    if (!s) return
+    if (ran?.sid === sessionSid && String(d.nodeId) === s.nodeId) {
+      // Our own run ended. Cancelled from elsewhere (the top bar's Stop): nothing more is coming.
+      const settled = d.cancelled ? failPending(s) : settleExpected(s, Number(d.queued) || 0)
+      takes.value = { ...settled, loopDone: true }
+      return
+    }
+    // Someone else's run (or a set we stopped) finished: ours can start now.
+    if (waitingSid === sessionSid) { waitingSid = null; dispatchRun(sessionSid, s.nodeId) }
   }
   function previewTake(id: string | null) { const s = takes.value; if (!s) return; takes.value = hoverTile(s, id); show(takes.value) }
   function chooseTake(id: string) { const s = takes.value; if (!s) return; takes.value = chooseTile(s, id); show(takes.value) }
@@ -251,7 +285,8 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   function closeTakes() { endTakes(null) }
   function moreTakes() {
     const s = takes.value
-    if (!s || isTakesWorking(s)) return
+    // Only once this set's run has reported done: until then the layout would drop a new one.
+    if (!s || isTakesWorking(s) || !s.loopDone) return
     const t = targetFor(s.nodeId)
     endTakes(null)
     if (t) startTakes(t)
@@ -275,13 +310,20 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     if (takes.value) endTakes(null)
     notice.value = ''
     followUps.value = []
-    agent.dismiss()
+    fastPathFired.value = false
+    // Only when there is something on screen to dismiss: dismiss() also drops an
+    // armed Keep & Run review, and run→look→fix must survive a new request
+    // (Ruling 13). ask() clears the ghost and the tune preview on its own.
+    if (agent.hasProposal.value || agent.answer.value || agent.error.value || agent.review.value) agent.dismiss()
   }
   const busy = computed(() => routing.value || agent.busy.value)
+  const takesWorking = computed(() => !!takes.value && isTakesWorking(takes.value))
+  // One job at a time (Ruling 9): nothing new starts while takes are arriving.
+  const jobBusy = () => busy.value || takesWorking.value
 
   async function submit(text: string) {
     const p = text.trim()
-    if (!p || busy.value || agent.reviewingManual.value) return
+    if (!p || jobBusy() || agent.reviewingManual.value) return
     clearResults()
     lastSubmitted.value = p
     fastPathFired.value = false // clear the fast-path dedupe latch for this new submit
@@ -327,7 +369,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   // --- menu items (spec §1.2, §4) ----------------------------------------------
   function onPromptKind(e: Event) {
     const d = (e as CustomEvent).detail ?? {}
-    if (!d.kind || busy.value || !ready()) return
+    if (!d.kind || jobBusy() || !ready()) return
     clearResults()
     mode.value = null
     lastSubmitted.value = String(d.text ?? '')
@@ -335,7 +377,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   }
   function onPromptMode(e: Event) {
     const d = (e as CustomEvent).detail ?? {}
-    if (!d.label || !d.kind) return
+    if (!d.label || !d.kind || jobBusy()) return
     clearResults()
     mode.value = { label: String(d.label), kind: d.kind as RouterKind, nodeId: d.nodeId != null ? String(d.nodeId) : null }
     focusTick.value++
@@ -350,7 +392,6 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   // --- what the prompt shows ------------------------------------------------------
   // Only work the user started takes over the prompt row. A background
   // auto-review (after a paid render) runs quietly and leaves the prompt usable.
-  const takesWorking = computed(() => !!takes.value && isTakesWorking(takes.value))
   const working = computed(() => busy.value || agent.reviewingManual.value || takesWorking.value)
   const workingLabel = computed(() => {
     if (takesWorking.value) return promptWorkingLabel({ request: takes.value!.request, takesOf: takes.value!.nodeLabel })
@@ -380,6 +421,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     window.addEventListener('sailor:promptKind', onPromptKind)
     window.addEventListener('sailor:promptMode', onPromptMode)
     window.addEventListener('sailor:variationsDone', onVariationsDone)
+    window.addEventListener('sailor:runVariations', onRunVariations)
     window.addEventListener('sailor:agentRunComplete', onRunComplete)
     window.addEventListener('sailor:critiqueNode', onCritiqueNode)
     window.addEventListener('sailor:autoReview', onAutoReview)
@@ -388,12 +430,17 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     window.removeEventListener('sailor:promptKind', onPromptKind)
     window.removeEventListener('sailor:promptMode', onPromptMode)
     window.removeEventListener('sailor:variationsDone', onVariationsDone)
+    window.removeEventListener('sailor:runVariations', onRunVariations)
     window.removeEventListener('sailor:agentRunComplete', onRunComplete)
     window.removeEventListener('sailor:critiqueNode', onCritiqueNode)
     window.removeEventListener('sailor:autoReview', onAutoReview)
     for (const t of autoReviewTimers.values()) clearTimeout(t)
     if (warmFocusTimer) clearTimeout(warmFocusTimer)
     thinking.value = false
+    // A route still in flight must not start work after unmount.
+    routeSeq++
+    routeCtrl?.abort()
+    routeCtrl = null
     if (takes.value) endTakes(null)
   })
 
