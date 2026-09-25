@@ -90,6 +90,10 @@
  * pixverse-v6               fal        Replicate   MOVED to fal: half of Replicate's rate at every quality
  * seedance-2.0-fast         Replicate  —           fal's has no seed and no 3 s clip
  * runway-gen-4.5            Replicate  —           not on fal
+ * happyhorse-1.1            fal        Replicate   runner-only (F18): alibaba/happyhorse-1.1 (Alibaba's own), the same
+ *                                                  prompt, length, resolution, seed and first frame; the same price
+ *                                                  ($0.14 / $0.18 a second), fal first for the better fit. A 21:9
+ *                                                  request has no backup: Replicate has no 21:9 (happyHorse11.ts)
  * sora-2 / -pro             Replicate  —           discontinued; fal's Sora 2 endpoints are deprecated
  * hidden: kling-v2.5-turbo-pro, hailuo-2.3, wan-2.7-t2v, wan-2.5-i2v-fast, luma-ray-2-720p, ltx-video — no backup
  *
@@ -138,6 +142,7 @@
 import type { RunnerProvider } from '../types'
 import { FLUX_2_RESOLUTIONS } from '#shared/pricing/imageSettings'
 import { falNanoBananaEdit } from './edit'
+import { HAPPYHORSE_11_ID, happyHorse11OnReplicate } from './happyHorse11'
 import { arOr, maybeSetSeed, optBool, optEnum, optStr } from './opts'
 import type { VideoBuildArgs } from './types'
 
@@ -225,6 +230,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'video:pixverse-v6': r('fal', 'replicate'),
   'video:seedance-2.0-fast': r('replicate', null, 'fal\'s has no seed and no 3 s clip'),
   'video:runway-gen-4.5': r('replicate', null, 'not on fal'),
+  'video:happyhorse-1.1': r('fal', 'replicate'),
   'video:sora-2': r('replicate', null, 'discontinued; fal\'s Sora 2 is deprecated'),
   'video:sora-2-pro': r('replicate', null, 'discontinued; fal\'s Sora 2 is deprecated'),
   'video:kling-v2.5-turbo-pro': r('replicate', null, HIDDEN),
@@ -352,9 +358,13 @@ export function flux3OnReplicate(falPayload: Record<string, unknown>): ServiceCa
   return { provider: 'replicate', endpoint: FLUX_3_REPLICATE_SLUG, payload: inp }
 }
 
-/** GenerateVideoNode fal models → their backup, built from the fal request. */
-export const VIDEO_BACKUPS: Readonly<Record<string, (falPayload: Record<string, unknown>) => ServiceCall>> = {
+/**
+ * GenerateVideoNode fal models → their backup, built from the fal request;
+ * null for a request the backup can't carry (HappyHorse 1.1 at 21:9).
+ */
+export const VIDEO_BACKUPS: Readonly<Record<string, (falPayload: Record<string, unknown>) => ServiceCall | null>> = {
   'flux-3': flux3OnReplicate,
+  [HAPPYHORSE_11_ID]: happyHorse11OnReplicate,
 }
 
 // ── Generate image: backups for Replicate-first models ─────────────────────

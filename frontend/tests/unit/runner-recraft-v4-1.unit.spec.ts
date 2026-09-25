@@ -401,14 +401,14 @@ describe('the older Recraft models are untouched', () => {
 describe('the price', () => {
   const charge = (inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: 'GenerateImageNode', inputs }, 2: SINK }).credits
 
-  it('the cards: fal\'s flat $0.035 an image first, Replicate\'s $0.04 the backup, both verified; the book carries them (lineup-f16)', () => {
+  it('the cards: fal\'s flat $0.035 an image first, Replicate\'s $0.04 the backup, both verified; the book carries them (lineup-f16, now lineup-f18)', () => {
     expect(IMAGE_RATES[ID]).toEqual({
       unit: 'per_image', usd: PRICE, service: 'fal', source: 'https://fal.ai/models/fal-ai/recraft/v4.1/text-to-image/llms.txt', read: '2026-09-24', confidence: 'verified',
     })
     expect(IMAGE_BACKUP_RATES[ID]).toEqual({
       unit: 'per_image', usd: BACKUP_PRICE, service: 'replicate', source: 'https://replicate.com/recraft-ai/recraft-v4.1', read: '2026-09-24', confidence: 'verified',
     })
-    expect(PRICE_BOOK_VERSION).toBe('lineup-f16')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-f18')
   })
 
   it('the basis: fal\'s price, since the backup covered at cost is less ($0.02)', () => {

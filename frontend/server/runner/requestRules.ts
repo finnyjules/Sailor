@@ -9,8 +9,8 @@
  * The rules come from the providers' saved schemas
  * (tests/unit/fixtures/provider-schemas/; a test holds this table to them):
  *  - a prompt shorter than the schema's `minLength` (Nano Banana 3, Hailuo H3 1,
- *    GPT Image 2.5 1, Muse Image 1, Reve 2.1 1, Recraft V4.1 1), and a transparent JPEG
- *    from GPT Image 2.5;
+ *    GPT Image 2.5 1, Muse Image 1, Reve 2.1 1, Recraft V4.1 1, HappyHorse 1.1
+ *    text-to-video 1), and a transparent JPEG from GPT Image 2.5;
  *  - a prompt longer than the schema's `maxLength` where the table
  *    PROMPT_MAX_LENGTH names the endpoint (Reve 2.1 4,000, F15; Recraft V4.1
  *    10,000, F16; Krea 2 5,000, F17);
@@ -36,6 +36,11 @@
  *    pictures, videos or sounds, in their options (F6 follow-up): their shared
  *    builder takes one first frame at most, so the node is refused on
  *    Generate a video and on Film a shot (video.ts VEO_31_ONE_PICTURE);
+ *  - HappyHorse 1.1 (F18) with a last frame, or reference pictures, videos or
+ *    sounds, in its options: its endpoints take one first frame at most and no
+ *    sound (happyHorse11.ts HAPPYHORSE_11_ONE_PICTURE); and its text-to-video
+ *    (no linked picture, no `image_url`) with an empty prompt, the schema's
+ *    own minLength 1;
  *  - Gemini Omni Flash text-to-video with an empty prompt (controller ruling
  *    after F4: the schema requires a prompt but sets no minimum, so an empty
  *    one would fail only at the result). It is the one row of the prompt table
@@ -83,6 +88,9 @@ import { H3_MAX_TURBO_APP, H3_MAX_TURBO_ENDPOINTS, H3_MAX_TURBO_ID } from './gen
 import {
   GEMINI_OMNI_FLASH_ID, GEMINI_OMNI_FLASH_ONE_PICTURE, GEMINI_OMNI_FLASH_TEXT_TO_VIDEO, geminiOmniFlashFirstFrame, geminiOmniFlashHasExtras,
 } from './generators/geminiOmniFlash'
+import {
+  HAPPYHORSE_11_ID, HAPPYHORSE_11_NEEDS_PROMPT, HAPPYHORSE_11_ONE_PICTURE, HAPPYHORSE_11_TEXT_TO_VIDEO, happyHorse11FirstFrame, happyHorse11HasExtras,
+} from './generators/happyHorse11'
 import { asText, parseJsonObject } from './generators/opts'
 import { moodboardFiles } from './inputs'
 import {
@@ -154,6 +162,9 @@ export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: 
   // Krea 2 Large and Medium on fal (krea2.ts, F17): the schemas' own minLength 1.
   // Judged before the run only on a runner run (requestProblems' `runner`).
   ...Object.fromEntries(KREA_2_IDS.map(id => [`fal ${KREA_2_FAL_APPS[id]}`, { min: 1, message: KREA_2_NEEDS_PROMPT }])),
+  // HappyHorse 1.1 text-to-video on fal (happyHorse11.ts, F18): the schema's own minLength 1.
+  // Image-to-video's prompt is optional; the Replicate backup is built from a request that passed this.
+  [`fal ${HAPPYHORSE_11_TEXT_TO_VIDEO}`]: { min: 1, message: HAPPYHORSE_11_NEEDS_PROMPT },
 }
 
 /**
@@ -506,6 +517,13 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
       if (id === GEMINI_OMNI_FLASH_ID && !isLink(inputs.prompt) && !isLink(inputs.image) && !isLink(inputs.model_options)
         && !geminiOmniFlashFirstFrame(null, parseJsonObject(inputs.model_options))) {
         judge(GEMINI_OMNI_FLASH_TEXT_TO_VIDEO, asText(inputs.prompt))
+      }
+      // HappyHorse 1.1: one first frame at most, no sound (its builder refuses the same at planning); and
+      // text-to-video (no linked picture, no `image_url`) needs a prompt. With the options wired, not judged.
+      if (id === HAPPYHORSE_11_ID && !isLink(inputs.model_options)) {
+        const adv = parseJsonObject(inputs.model_options)
+        if (happyHorse11HasExtras(adv)) out.push({ nodeId, classType: ct, input: 'model_options', message: HAPPYHORSE_11_ONE_PICTURE })
+        else if (!isLink(inputs.prompt) && !isLink(inputs.image) && !happyHorse11FirstFrame(null, adv)) judge(HAPPYHORSE_11_TEXT_TO_VIDEO, asText(inputs.prompt))
       }
     }
     // Film a shot on Seedance 2.0 (ComfyUI path only): a first frame beside references is refused,

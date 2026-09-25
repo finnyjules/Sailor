@@ -157,6 +157,14 @@ export const VIDEO_RATES: Record<string, VideoRate> = {
     unit: 'per_second', service: 'fal', source: fal('alibaba/wan-3.0-prime/image-to-video'), read: READ, confidence: 'verified',
     byResolution: { '480p': 0.068, '720p': 0.14, '1080p': 0.28 },
   },
+  // HappyHorse 1.1 (family happyhorse-1.1, runner-only; Replicate the backup,
+  // VIDEO_BACKUP_RATES). The same text on text- and image-to-video: "For every
+  // second of 720p video you generated, you will be charged $0.14/second. For
+  // 1080p video you will be charged $0.18/second." The clip always has sound.
+  'happyhorse-1.1': {
+    unit: 'per_second', service: 'fal', source: fal('alibaba/happy-horse/v1.1/text-to-video'), read: '2026-09-25', confidence: 'verified',
+    byResolution: { '720p': 0.14, '1080p': 0.18 },
+  },
 
   // ── Replicate ───────────────────────────────────────────────────────────
   // Billing tiers on the model page (billingConfig), "per second of output video".
@@ -271,6 +279,12 @@ export const VIDEO_BACKUP_RATES: Record<string, VideoRate> = {
   'flux-3': {
     unit: 'per_second', service: 'replicate', source: rep('black-forest-labs/flux-3'), read: READ, confidence: 'verified',
     byResolution: { '720p': 0.17, '1080p': 0.29 },
+  },
+  // Billing tiers by "target resolution": 720p $0.14, 1080p $0.18 per second of
+  // output video (the same as fal, so fal's marked-up price stands).
+  'happyhorse-1.1': {
+    unit: 'per_second', service: 'replicate', source: rep('alibaba/happyhorse-1.1'), read: '2026-09-25', confidence: 'verified',
+    byResolution: { '720p': 0.14, '1080p': 0.18 },
   },
 }
 

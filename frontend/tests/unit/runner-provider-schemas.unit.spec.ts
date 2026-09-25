@@ -31,6 +31,7 @@ import { WAN_3_ENDPOINTS } from '~~/server/runner/generators/wan3'
 import { H3_MAX_TURBO_ENDPOINTS } from '~~/server/runner/generators/h3MaxTurbo'
 import { GEMINI_OMNI_FLASH_ENDPOINTS } from '~~/server/runner/generators/geminiOmniFlash'
 import { VEO_31_LITE_ENDPOINTS } from '~~/server/runner/generators/veo31Lite'
+import { HAPPYHORSE_11_ENDPOINTS, HAPPYHORSE_11_REPLICATE_SLUG } from '~~/server/runner/generators/happyHorse11'
 import { GPT_IMAGE_25_FAL_ENDPOINTS, GPT_IMAGE_25_REPLICATE_SLUGS } from '~~/server/runner/generators/gptImage25'
 import { QWEN_IMAGE_3_SLUG } from '~~/server/runner/generators/qwenImage3'
 import { GROK_IMAGINE_2_SLUG } from '~~/server/runner/generators/grokImagine2'
@@ -256,6 +257,9 @@ function runnerEndpoints(): string[] {
   // Task F17: Krea 2 Large and Medium on fal, Replicate the backup (krea2.ts; its grid is runner-krea-2.unit.spec.ts).
   for (const app of Object.values(KREA_2_FAL_APPS)) out.add(`fal ${app}`)
   for (const slug of Object.values(KREA_2_REPLICATE_SLUGS)) out.add(`replicate ${slug}`)
+  // Task F18: HappyHorse 1.1 on fal, Replicate the backup (happyHorse11.ts; its grid is runner-happyhorse-1-1.unit.spec.ts).
+  for (const e of HAPPYHORSE_11_ENDPOINTS) out.add(`fal ${e}`)
+  out.add(`replicate ${HAPPYHORSE_11_REPLICATE_SLUG}`)
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)

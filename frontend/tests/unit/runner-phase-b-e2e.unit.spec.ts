@@ -429,6 +429,21 @@ const FLOWS: FamilyFlow[] = [
     endpoint: 'krea/v2/medium/text-to-image',
     body: { prompt: 'a red fox in the snow', aspect_ratio: '1:1', creativity: 'medium' },
   },
+  // Task F18: HappyHorse 1.1 has no Python builder; the body is written from
+  // its saved schema (runner-happyhorse-1-1.unit.spec.ts). fal first, so
+  // Replicate (the backup) is never called.
+  {
+    family: 'happyhorse-1.1',
+    label: 'GenerateVideoNode happyhorse-1.1',
+    prompt: {
+      1: { class_type: 'GenerateVideoNode', inputs: { model: 'happyhorse-1.1', prompt: 'a fox says hello', aspect_ratio: '16:9', duration: '3', seed: 0, model_options: '{}' } },
+      2: outVideo('1'),
+    },
+    files: [],
+    provider: 'fal',
+    endpoint: 'alibaba/happy-horse/v1.1/text-to-video',
+    body: { prompt: 'a fox says hello', aspect_ratio: '16:9', resolution: '720p', duration: 3 },
+  },
 ]
 
 // ── The routes ───────────────────────────────────────────────────────────

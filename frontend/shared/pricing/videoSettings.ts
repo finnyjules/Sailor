@@ -5,7 +5,7 @@
  *
  * The price multiplies a rate by these, so it must never read a setting the
  * builder would send differently ("priced on what is sent"). The builders are
- * server/runner/generators/video.ts (fal and Replicate), wan3.ts (Wan 3.0), geminiOmniFlash.ts, veo31Lite.ts and twins.ts (the
+ * server/runner/generators/video.ts (fal and Replicate), wan3.ts (Wan 3.0), geminiOmniFlash.ts, veo31Lite.ts, happyHorse11.ts and twins.ts (the
  * first-service builders of Kling 3.0 and PixVerse v6, and the backups) and, for the one model
  * the runner does not build (Fabric), comfy_api_nodes/video_models.py. The
  * settings-parity test (tests/unit/video-pricing.unit.spec.ts) runs every
@@ -144,6 +144,8 @@ function pixverseResolution(adv: Adv): string {
 /** alibaba/wan-3.0 and -prime: any whole second from 2 to 30; 480p, 720p or 1080p (wan3.ts). */
 const WAN_3_SECONDS = Array.from({ length: 29 }, (_, i) => i + 2)
 const WAN_3_RESOLUTIONS = ['480p', '720p', '1080p']
+/** alibaba/happy-horse/v1.1 and alibaba/happyhorse-1.1: any whole second from 3 to 15 (happyHorse11.ts). */
+const HAPPYHORSE_11_SECONDS = Array.from({ length: 13 }, (_, i) => i + 3)
 /** wan-video/wan-2.7-t2v: any whole second from 2 to 15 (video.ts WAN_27_SECONDS). */
 const WAN_27_SECONDS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 
@@ -184,6 +186,9 @@ const RULES: Record<string, Rule> = {
   // `resolution` 480p/720p/1080p else 720p, `audio` from generate_audio (default on).
   'wan-3.0': { durations: WAN_3_SECONDS, defaultDuration: 5, resolution: resIn(WAN_3_RESOLUTIONS, '720p'), audio: audioOpt(true) },
   'wan-3.0-prime': { durations: WAN_3_SECONDS, defaultDuration: 5, resolution: resIn(WAN_3_RESOLUTIONS, '720p'), audio: audioOpt(true) },
+  // happyHorse11.ts (both endpoints, and the Replicate backup built from them): `duration` the
+  // closest whole second from 3 to 15 (default 5), `resolution` 720p/1080p else 720p; the clip always has sound.
+  'happyhorse-1.1': { durations: HAPPYHORSE_11_SECONDS, defaultDuration: 5, resolution: resIn(['720p', '1080p'], '720p'), audio: fixed(true) },
 
   // ── Replicate (RUNNER_REPLICATE_VIDEO_MODELS) ──
   // sora2 / sora2Pro send `seconds` 4/8/12 (video.ts SORA_SECONDS) and no

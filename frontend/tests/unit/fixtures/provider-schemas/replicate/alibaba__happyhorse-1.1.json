@@ -1,0 +1,126 @@
+{
+  "endpoint": "alibaba/happyhorse-1.1",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://api.replicate.com/v1/models/alibaba/happyhorse-1.1"
+  },
+  "versionId": "57e8eee02a055de60a4dee9ba0d36ac7c8ea4a5714575e8d58dcfae3c150f7b3",
+  "input": {
+    "$ref": "#/components/schemas/Input"
+  },
+  "output": {
+    "$ref": "#/components/schemas/Output"
+  },
+  "components": {
+    "schemas": {
+      "Input": {
+        "type": "object",
+        "title": "Input",
+        "properties": {
+          "seed": {
+            "type": "integer",
+            "title": "Seed",
+            "default": null,
+            "x-order": 5,
+            "nullable": true,
+            "description": "Random seed for reproducible generation. Range: 0-2147483647"
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "title": "Images",
+            "default": [],
+            "x-order": 1,
+            "description": "Input images. Provide no images for text-to-video, one image to animate it as the first frame (image-to-video), or multiple images (up to 9) for reference-to-video. Accepts jpg/png/bmp/webp, <=10MB each, aspect ratio between 1:2.5 and 2.5:1, each side >=300px."
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "default": "",
+            "x-order": 0,
+            "description": "Text prompt for video generation. Optional when a single image is provided (image-to-video). Required for text-to-video and reference-to-video. When providing multiple reference images, refer to them in the prompt as [Image 1], [Image 2], etc."
+          },
+          "duration": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/duration"
+              }
+            ],
+            "default": 5,
+            "x-order": 4,
+            "description": "Duration of the generated video in seconds"
+          },
+          "resolution": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/resolution"
+              }
+            ],
+            "default": "1080p",
+            "x-order": 2,
+            "description": "Output video resolution"
+          },
+          "aspect_ratio": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/aspect_ratio"
+              }
+            ],
+            "default": "16:9",
+            "x-order": 3,
+            "description": "Aspect ratio of the generated video. Only applies to text-to-video and reference-to-video. When a single image is provided (image-to-video), the image's aspect ratio is used."
+          }
+        }
+      },
+      "duration": {
+        "enum": [
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15
+        ],
+        "type": "integer",
+        "title": "duration",
+        "description": "An enumeration."
+      },
+      "resolution": {
+        "enum": [
+          "720p",
+          "1080p"
+        ],
+        "type": "string",
+        "title": "resolution",
+        "description": "An enumeration."
+      },
+      "aspect_ratio": {
+        "enum": [
+          "16:9",
+          "9:16",
+          "1:1",
+          "4:3",
+          "3:4"
+        ],
+        "type": "string",
+        "title": "aspect_ratio",
+        "description": "An enumeration."
+      },
+      "Output": {
+        "type": "string",
+        "title": "Output",
+        "format": "uri"
+      }
+    }
+  }
+}

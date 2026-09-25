@@ -35,7 +35,7 @@ describe('parseFamilies', () => {
     expect([...parseFamilies(['fal-edit', 7, 'nope', 'ref-edits'])].sort()).toEqual(['fal-edit', 'ref-edits'])
   })
   it('knows the nine families', () => {
-    expect([...RUNNER_FAMILIES].sort()).toEqual(['bria-product-shot', 'fal-edit', 'frame', 'gemini-omni-flash', 'gpt-image-2.5', 'grok-imagine-2', 'h3-max-turbo', 'ideogram-4', 'krea-2', 'muse-image', 'nano-actions', 'nano-banana-2-blend', 'nano-banana-2-lite', 'qwen-2511-angles', 'qwen-image-3', 'recraft-v4.1', 'ref-edits', 'replicate-image', 'replicate-video', 'restyle', 'reve-2.1', 'seedream-5-pro-edit', 'veo-3.1-lite', 'wan-3'])
+    expect([...RUNNER_FAMILIES].sort()).toEqual(['bria-product-shot', 'fal-edit', 'frame', 'gemini-omni-flash', 'gpt-image-2.5', 'grok-imagine-2', 'h3-max-turbo', 'happyhorse-1.1', 'ideogram-4', 'krea-2', 'muse-image', 'nano-actions', 'nano-banana-2-blend', 'nano-banana-2-lite', 'qwen-2511-angles', 'qwen-image-3', 'recraft-v4.1', 'ref-edits', 'replicate-image', 'replicate-video', 'restyle', 'reve-2.1', 'seedream-5-pro-edit', 'veo-3.1-lite', 'wan-3'])
   })
 })
 

@@ -367,12 +367,12 @@ describe('hosted ComfyUI path: the SDXL refusal stays while off; on, the node is
 // ── The price ──────────────────────────────────────────────────────────────
 
 describe('the price', () => {
-  it('the card: fal\'s $0.04 a picture, verified, non-zero; the book carries it (lineup-f12, now lineup-f16)', () => {
+  it('the card: fal\'s $0.04 a picture, verified, non-zero; the book carries it (lineup-f12, now lineup-f18)', () => {
     expect(EDIT_RATES[BRIA_PRODUCT_SHOT_APP]).toEqual({
       unit: 'per_image', usd: USD, service: 'fal', confidence: 'verified', read: '2026-09-24',
       source: 'https://fal.ai/models/fal-ai/bria/product-shot/llms.txt',
     })
-    expect(PRICE_BOOK_VERSION).toBe('lineup-f16')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-f18')
   })
 
   it('not size-priced: the shot is about 1 MP whatever the picture sent', () => {

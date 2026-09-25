@@ -148,7 +148,9 @@ describe('the first and backup services are the table\'s', () => {
     expect(keys.has('image:krea-2-large')).toBe(true)
     expect(keys.has('image:krea-2-medium')).toBe(true)
     expect(image).toBe(Object.keys(RUNNER_IMAGE_MODELS).length + Object.keys(RUNNER_REPLICATE_IMAGE_MODELS).length + 10)
-    expect(video).toBe(Object.keys(RUNNER_VIDEO_MODELS).length + Object.keys(RUNNER_REPLICATE_VIDEO_MODELS).length)
+    // + HappyHorse 1.1 (Task F18), a runner-only video model outside the two builder tables.
+    expect(keys.has('video:happyhorse-1.1')).toBe(true)
+    expect(video).toBe(Object.keys(RUNNER_VIDEO_MODELS).length + Object.keys(RUNNER_REPLICATE_VIDEO_MODELS).length + 1)
   })
 
   for (const [key, route] of Object.entries(RUNNER_ROUTES)) {

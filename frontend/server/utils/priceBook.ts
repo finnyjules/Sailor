@@ -99,7 +99,10 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // lineup-f16 (Task F16): Recraft V4.1, fal's flat $0.035 an image first,
 // Replicate's $0.04 the backup (runner-only, family recraft-v4.1). The
 // older Recraft models keep their prices. No other price moves.
-export const PRICE_BOOK_VERSION = 'lineup-f16'
+// lineup-f18 (Task F18): HappyHorse 1.1, fal per second by resolution ($0.14/s
+// at 720p, $0.18/s at 1080p) first, Replicate's same rates the backup
+// (runner-only, family happyhorse-1.1). No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-f18'
 
 export const BASE_RENDER_CREDITS = 1
 

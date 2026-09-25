@@ -344,6 +344,9 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // A prompt alone, or a linked first frame (no last frame or references).
   // ── veo-3.1-lite (model line-up F5): Veo 3.1 Lite on fal, runner-only ──
   // Veo 3.1's modes: a prompt alone, or a linked first frame.
+  // ── happyhorse-1.1 (model line-up F18): HappyHorse 1.1 on fal, runner-only ──
+  // A prompt alone, or a linked first frame. It makes its own sound: a linked
+  // sound is never taken (runnerTakesNode refuses a linked `audio`).
   GenerateVideoNode: {
     models: {
       ...Object.fromEntries(RUNNER_REPLICATE_VIDEO_MODEL_IDS.map(id => [id, id === 'wan-2.5-i2v-fast'
@@ -354,6 +357,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
       'hailuo-h3-max-turbo': 'h3-max-turbo',
       'gemini-omni-flash': 'gemini-omni-flash',
       'veo-3.1-lite': 'veo-3.1-lite',
+      'happyhorse-1.1': 'happyhorse-1.1',
     },
     mustNotLink: ['prompt', 'model_options'],
   },

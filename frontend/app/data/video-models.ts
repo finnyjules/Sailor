@@ -49,7 +49,7 @@ export const VIDEO_TAG_LABELS: Record<VideoModelTag, string> = {
 
 export type VideoModelBrand =
   | 'Google' | 'OpenAI' | 'Runway' | 'Kling' | 'ByteDance'
-  | 'MiniMax' | 'Wan' | 'Luma' | 'Lightricks' | 'PixVerse' | 'VEED' | 'BFL' | 'Other'
+  | 'MiniMax' | 'Wan' | 'Alibaba' | 'Luma' | 'Lightricks' | 'PixVerse' | 'VEED' | 'BFL' | 'Other'
 
 export interface VideoModelAdvancedField {
   name: string
@@ -621,6 +621,42 @@ export const VIDEO_MODELS: VideoModel[] = [
     advanced: [
       NEG_PROMPT,
     ],
+  },
+
+  // ===== Alibaba ==========================================================
+  // HappyHorse 1.1 runs only in Sailor's runner (family happyhorse-1.1), on fal
+  // with Replicate the backup (server/runner/generators/happyHorse11.ts). Its
+  // schemas (alibaba/happy-horse/v1.1/text-to-video and /image-to-video,
+  // alibaba/happyhorse-1.1, read 2026-09-25) take 3–15 s, 720p or 1080p, and a
+  // seed; the clip always has sound, speech lip-synced, made from the prompt.
+  // No sound switch, no negative prompt, no sound input. The duration list is
+  // a pick of the schema's whole seconds; fal's 9:21, 5:4 and 4:5 are left out
+  // because the node's ratio list lacks them.
+  {
+    id: 'happyhorse-1.1',
+    runnerOnly: true,
+    family: 'happyhorse-1.1',
+    label: 'HappyHorse 1.1',
+    brand: 'Alibaba',
+    // The gallery's cover art, and the backup service's model (twins.ts).
+    replicateSlug: 'alibaba/happyhorse-1.1',
+    pitch: 'Clips where people talk: dialogue and lip-sync from the prompt.',
+    description:
+      'HappyHorse 1.1 makes 3 to 15 second clips with sound, at 720p or 1080p. '
+      + 'Write what the characters say in the prompt and they speak it, lip-synced. '
+      + 'Describe the clip, or link a picture to start from it. It makes its own '
+      + 'sound, so it doesn\'t take a sound file.',
+    tags: ['audio', 'long', '4k'],
+    modes: ['t2v', 'i2v'],
+    supportsSeed: true,
+    priceHint: null,
+    aspectRatios: FULL_AR,
+    defaultAspectRatio: '16:9',
+    durations: [3, 4, 5, 6, 8, 10, 12, 15],
+    defaultDuration: 5,
+    resolutions: ['720p', '1080p'],
+    defaultResolution: '720p',
+    advanced: [],
   },
 
   // ===== Luma =============================================================
