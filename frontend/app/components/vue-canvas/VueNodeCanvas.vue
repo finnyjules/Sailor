@@ -1070,7 +1070,9 @@ function agentNodeTakes(id: string) {
 function agentTakesBegin(id: string) {
   const n = nodeById(id)
   if (!n) return
-  takesSnapshots.set(id, displaySnapshot(n.data ?? {}))
+  // Snapshot once per session: a second Begin while a take is previewed would
+  // otherwise snapshot the preview and lose the node's real display for good.
+  if (!takesSnapshots.has(id)) takesSnapshots.set(id, displaySnapshot(n.data ?? {}))
   const cls = String(n.class ?? '').split(' ').filter(Boolean)
   if (!cls.includes('agent-takes-target')) n.class = [...cls, 'agent-takes-target'].join(' ')
 }
@@ -1088,6 +1090,8 @@ function agentTakesEnd(id: string, keepTakeId: string | null) {
   const rest = String(n.class ?? '').split(' ').filter(c => c && c !== 'agent-takes-target')
   n.class = rest.length ? rest.join(' ') : undefined
 }
+// Unmounting mid-preview must not leave a previewed take as the node's display.
+onBeforeUnmount(() => { for (const id of [...takesSnapshots.keys()]) agentTakesEnd(id, null) })
 function agentRevealNode(id: string) {
   const box = graphBox(id)
   const w = vfDimensions.value.width, h = vfDimensions.value.height

@@ -1302,7 +1302,7 @@ async function handleRunVariations(e: Event) {
   }
   const detail = (e as CustomEvent).detail as { nodeId?: string; count?: number } | undefined
   const nodeId = detail?.nodeId
-  const count = Math.min(Math.max(1, detail?.count ?? 4), 8)
+  const count = Math.min(Math.max(1, detail?.count ?? 3), 8)
   if (!nodeId) return
   variationsRunning = true
   variationsCancelled = false
@@ -1316,6 +1316,9 @@ async function handleRunVariations(e: Event) {
         const queued = await runVueWorkflow(expanded, i === 0
           ? { rerollScope: 'variation', costConfirmIterations: count }
           : { rerollScope: 'variation', skipCostConfirm: true })
+        // runVueWorkflow awaits the schema refresh and the cost confirm before it
+        // queues, so a Stop in that window interrupted nothing: stop what just got queued.
+        if (queued !== false && variationsCancelled) await stopVueWorkflow()
         return queued !== false
       },
     })
@@ -1329,6 +1332,7 @@ async function handleRunVariations(e: Event) {
 // Stop from the takes strip (spec §3.4): no more re-runs, and interrupt what is
 // rendering — the same stop path as the top bar's Stop (plan ruling 9).
 function handleStopVariations() {
+  if (!variationsRunning) return // a stray Stop must not interrupt unrelated runs
   variationsCancelled = true
   stopVueWorkflow()
 }
