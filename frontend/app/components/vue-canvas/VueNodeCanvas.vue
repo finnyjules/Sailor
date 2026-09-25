@@ -16,6 +16,7 @@ import { planFrameFromSelection, MAX_FRAME_LAYERS } from '~/lib/canvas/combineFr
 import { frameCardSize, placeRightOf, sendFailedToast, sentFrameData, sentFrameEdges, sentFrameToast } from '~/lib/frame/layoutSetSend'
 import { computeRunLeafIds } from '~/lib/canvas/runLeaves'
 import { edgeTopologyKey } from '~/lib/canvas/edgeTopologyKey'
+import { edgesTouching, GhostRestores } from '~/lib/canvas/proposalPreview'
 import type { Command } from '~/lib/agent/commandSurface'
 import type { PromptNode } from '~/lib/prompt/canvasPromptContext'
 import { buildCatalog, type CatalogEntry } from '~/lib/portIntentCatalog'
@@ -647,7 +648,21 @@ async function applyCanvasOps(commands: Command[], ghost = false): Promise<{ nod
       }
       continue
     }
-    if (cmd.op === 'deleteNode' && cmd.target) { deleteNodes([realId(cmd.target)]); continue }
+    if (cmd.op === 'deleteNode' && cmd.target) {
+      const id = realId(cmd.target)
+      if (!ghost) { deleteNodes([id]); continue }
+      // Preview only MARKS the removal (dashed red); Approve deletes, Reject clears.
+      const n: any = (nodes.value as any[]).find(x => String(x.id) === id)
+      if (n) {
+        n.class = 'agent-removal'
+        pendingRemovals.push(id)
+        for (const eid of edgesTouching(edges.value as any[], [id])) {
+          const e: any = (edges.value as any[]).find(x => String(x.id) === eid)
+          if (e) e.data = { ...(e.data ?? {}), removal: true }
+        }
+      }
+      continue
+    }
     if (cmd.op === 'addNode') continue
     const node = findNode(cmd.target)
     if (!node) continue
@@ -660,10 +675,30 @@ async function applyCanvasOps(commands: Command[], ghost = false): Promise<{ nod
       const idx = defs.findIndex(w => w?.name === cmd.args!.name)
       if (idx >= 0) {
         if (!Array.isArray(node.data.widgetsValues)) node.data.widgetsValues = []
+        // An in-place edit to an EXISTING node keeps an undo for Reject (a ghost is discarded whole).
+        if (ghost && !node.data?.ghost) {
+          const prevLen = node.data.widgetsValues.length
+          const prev = node.data.widgetsValues[idx]
+          ghostRestores.push(() => {
+            const wv = node.data?.widgetsValues
+            if (!Array.isArray(wv)) return
+            wv[idx] = prev
+            if (wv.length > prevLen) wv.length = prevLen
+          })
+        }
         while (node.data.widgetsValues.length <= idx) node.data.widgetsValues.push(null)
         node.data.widgetsValues[idx] = cmd.args!.value
       }
     } else if (cmd.op === 'setMode') {
+      if (ghost && !node.data?.ghost) {
+        const id = String(node.id), hadMode = 'mode' in (node.data ?? {}), prevMode = node.data?.mode
+        ghostRestores.push(() => {
+          const n: any = (nodes.value as any[]).find(x => String(x.id) === id)
+          if (!n) return
+          const { mode: _m, ...rest } = n.data ?? {}
+          n.data = hadMode ? { ...rest, mode: prevMode } : rest
+        })
+      }
       setMode([realId(cmd.target)], AGENT_MODE[String(cmd.args?.mode ?? '').toLowerCase()] ?? 0)
     }
   }
@@ -705,6 +740,11 @@ const hoverRects = ref<OverlayRect[]>([])
 // Studio-tune (headless): undo closures for in-place changes the agent made to a
 // node's internals (e.g. a Frame's background). Run on Dismiss; cleared on Keep.
 let tuneRestores: (() => void)[] = []
+// Graph-proposal preview on EXISTING nodes: in-place edits keep an undo (run on
+// every discard, i.e. Reject or a re-preview); removals are only marked until
+// Approve (proposalPreview.ts).
+const ghostRestores = new GhostRestores()
+let pendingRemovals: string[] = []
 const glimmOn = ref(false) // gates the glimm opacity so it fades in/out
 const glimmPeriod = ref(0.55) // sweep speed: slow during the blueprint, fast on commit
 let ghostDrawTimer = 0
@@ -748,6 +788,13 @@ function cardRects(nodeIds: string[]): OverlayRect[] {
 }
 
 function agentDiscard() {
+  ghostRestores.restore()
+  for (const id of pendingRemovals) {
+    const n: any = (nodes.value as any[]).find(x => String(x.id) === id)
+    if (n && n.class === 'agent-removal') n.class = undefined
+  }
+  for (const e of edges.value as any[]) if (e.data?.removal) e.data = { ...e.data, removal: false }
+  pendingRemovals = []
   if (ghostDrawTimer) { clearTimeout(ghostDrawTimer); ghostDrawTimer = 0 }
   if (glimmTimer) { clearTimeout(glimmTimer); glimmTimer = 0 }
   blueprintRects.value = []
@@ -796,6 +843,11 @@ function agentCommit() {
   const ghostNodeIds = (nodes.value as any[]).filter(n => n.data?.ghost).map(n => String(n.id))
   for (const n of nodes.value as any[]) if (n.data?.ghost) { n.class = undefined; n.data.ghost = false }
   for (const e of edges.value as any[]) if (e.data?.ghost) { e.data.ghost = false; e.data.blueprint = false }
+  ghostRestores.clear() // keep the in-place edits
+  const removals = pendingRemovals
+  pendingRemovals = []
+  for (const e of edges.value as any[]) if (e.data?.removal) e.data = { ...e.data, removal: false }
+  if (removals.length) deleteNodes(removals)
   glimmBurstOver(ghostNodeIds) // just the new node(s), not the connection
   return ghostNodeIds // the just-committed node ids (so the caller can run them)
 }

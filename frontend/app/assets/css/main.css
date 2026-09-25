@@ -375,6 +375,37 @@ input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 4px rgba
   pointer-events: none;
   z-index: 5;
 }
+/* A proposed node says so (spec §3.2). The pill rides the node (it zooms with
+   it) and hides during the blueprint draw-in like the card itself. */
+.vue-flow__node.agent-ghost::before {
+  content: 'Proposed';
+  position: absolute;
+  left: 0;
+  top: -24px;
+  padding: 3px 9px;
+  border: 1px dashed rgba(255, 255, 255, 0.4);
+  border-radius: 999px;
+  background: #1a1a1a;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 6;
+}
+.vue-flow__node.agent-ghost.agent-ghost-hidden::before { opacity: 0; }
+/* A node the proposal would remove: dimmed with a dashed red outline until
+   Approve deletes it or Reject clears the mark. */
+.vue-flow__node.agent-removal { opacity: 0.5; }
+.vue-flow__node.agent-removal::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border: 2px dashed #f87171;
+  border-radius: 16px;
+  pointer-events: none;
+  z-index: 5;
+}
 /* ComfyEdge is a custom edge with no .vue-flow__edge-path, so the agent edge look
    is driven via `data` (stroke/dash set inline) and only the dash MOTION lives
    here, keyed off classes the path sets itself. */

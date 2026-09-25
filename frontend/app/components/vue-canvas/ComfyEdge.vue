@@ -11,7 +11,7 @@ const props = defineProps<{
   targetY: number
   sourcePosition: Position
   targetPosition: Position
-  data: { dataType: string; running?: boolean; ghost?: boolean; blueprint?: boolean; hi?: boolean }
+  data: { dataType: string; running?: boolean; ghost?: boolean; blueprint?: boolean; hi?: boolean; removal?: boolean }
   selected: boolean
 }>()
 
@@ -23,6 +23,8 @@ const color = computed(() => getTypeColor(props.data?.dataType))
 const isGhost = computed(() => props.data?.ghost)
 const isBlueprint = computed(() => props.data?.blueprint)
 const isHi = computed(() => props.data?.hi) // a proposal row is hovered → brighten this wire
+// A wire into/out of a node the proposal would remove: dashed red, never flowing.
+const isRemoval = computed(() => !!props.data?.removal)
 
 const bezier = computed(() => getBezierPath({
   sourceX: props.sourceX,
@@ -103,11 +105,11 @@ function onInsert() {
     <path
       :d="path"
       fill="none"
-      :class="{ 'cn-edge-blueprint': isBlueprint, 'cn-edge-ghost': isGhost && !isBlueprint }"
-      :stroke="isRunning ? `url(#${gradientId})` : (isHi || isBlueprint) ? '#ffffff' : isGhost ? '#cfe8ff' : color"
+      :class="{ 'cn-edge-blueprint': isBlueprint && !isRemoval, 'cn-edge-ghost': isGhost && !isBlueprint && !isRemoval }"
+      :stroke="isRemoval ? '#f87171' : isRunning ? `url(#${gradientId})` : (isHi || isBlueprint) ? '#ffffff' : isGhost ? '#cfe8ff' : color"
       :stroke-width="isHi ? 3.25 : isBlueprint ? 1.25 : isDropTarget ? 3.5 : selected ? 3 : 2"
-      :stroke-opacity="(isRunning || isBlueprint || isHi) ? 1 : isGhost ? 0.8 : (isDropTarget || selected) ? 1 : 0.6"
-      :stroke-dasharray="isBlueprint ? '18 26' : isGhost ? '7 5' : undefined"
+      :stroke-opacity="isRemoval ? 0.9 : (isRunning || isBlueprint || isHi) ? 1 : isGhost ? 0.8 : (isDropTarget || selected) ? 1 : 0.6"
+      :stroke-dasharray="isRemoval ? '6 4' : isBlueprint ? '18 26' : isGhost ? '7 5' : undefined"
       stroke-linecap="round"
     />
 
