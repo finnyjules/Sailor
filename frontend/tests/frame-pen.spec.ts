@@ -118,4 +118,23 @@ test.describe('Frame pen (shared pen)', () => {
     expect(await layers(page)).toEqual(framesBefore)
     await expect(penToolbar(page)).toBeVisible()   // still drawing; the modal did not react
   })
+
+  test('switching to the Motion tab closes the pen; Space is no longer the pen\'s', async ({ page }) => {
+    const before = await layers(page)
+    const box = await openPen(page)
+    await page.mouse.move(box.x + 70, box.y + 70)
+    await page.mouse.down(); await page.mouse.up()
+    await expect(penPoints(page)).toHaveCount(1)
+    await page.getByRole('button', { name: 'Motion', exact: true }).click()
+    await expect(penToolbar(page)).toHaveCount(0)
+    await expect(overlay(page)).toHaveCount(0)
+    await page.keyboard.press('Space')   // Motion's play/pause — no pen session left to swallow it
+    await page.keyboard.press('Space')
+    await expect(penToolbar(page)).toHaveCount(0)
+    expect((await layers(page)).length).toBe(before.length)
+    await page.getByRole('button', { name: 'Design', exact: true }).click()
+    await expect(penButton(page)).toBeVisible()
+    await expect(penToolbar(page)).toHaveCount(0)
+    expect((await layers(page)).length).toBe(before.length)
+  })
 })

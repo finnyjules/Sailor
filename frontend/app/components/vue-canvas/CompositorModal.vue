@@ -2273,6 +2273,19 @@ function isViewDragEditKey(e: KeyboardEvent): boolean {
   if (mapKeyToEdit(e, 1, 10) || e.key === 'Delete' || e.key === 'Backspace') return true
   return (e.metaKey || e.ctrlKey) && ['z', 'g', 'x', 'a'].includes(e.key.toLowerCase())
 }
+/** The viewport keys — Space (hold to pan) and ⌘/Ctrl = − 0 2 (zoom in, out,
+ *  fit, to selection). Acts and returns true when `e` is one of them; the
+ *  caller has already ruled out typing in a field. Space is stopped here (the
+ *  app layout's bubble handler would open the node search behind the modal). */
+function viewportKey(e: KeyboardEvent): boolean {
+  if (e.code === 'Space') { e.preventDefault(); e.stopPropagation(); spaceDown.value = true; return true }
+  if (!(e.metaKey || e.ctrlKey)) return false
+  if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomBy(1.2); return true }
+  if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomBy(1 / 1.2); return true }
+  if (e.key === '0') { e.preventDefault(); zoomFit(); return true }
+  if (e.key === '2') { e.preventDefault(); zoomToSelection(); return true }
+  return false
+}
 // Esc cancels an in-progress pen draft (before it bubbles to modal-close).
 function onKeydown(e: KeyboardEvent) {
   // Escape during a move drag at a viewing size settles the drop where the last frame drew it
@@ -2292,14 +2305,7 @@ function onKeydown(e: KeyboardEvent) {
   // bubble handleKeydown returns at once while a session is open.
   if (penSession.value) {
     if (isTypingInField()) return
-    const meta = e.metaKey || e.ctrlKey
-    if (e.code === 'Space' && !meta && !e.altKey) { e.preventDefault(); e.stopPropagation(); spaceDown.value = true; return }
-    if (meta && !e.altKey) {
-      if (e.key === '=' || e.key === '+') { e.preventDefault(); e.stopPropagation(); zoomBy(1.2); return }
-      if (e.key === '-' || e.key === '_') { e.preventDefault(); e.stopPropagation(); zoomBy(1 / 1.2); return }
-      if (e.key === '0') { e.preventDefault(); e.stopPropagation(); zoomFit(); return }
-      if (e.key === '2') { e.preventDefault(); e.stopPropagation(); zoomToSelection(); return }
-    }
+    if (viewportKey(e)) { e.stopPropagation(); return }
     penOverlayRef.value?.onHostKeydown(e)
     e.stopPropagation()
     return
@@ -2373,19 +2379,14 @@ function onKeydown(e: KeyboardEvent) {
   }
   // Space → hold-to-pan. Prevent the default page scroll while held, and stop the key
   // here (capture phase) so the app layout doesn't open the node search behind the modal.
-  if (e.code === 'Space' && !inField) { e.preventDefault(); e.stopPropagation(); spaceDown.value = true }
+  if (e.code === 'Space' && !inField) { viewportKey(e); return }
   // ⌘\ hides/shows both glass panels. Unlike the zoom combos it is allowed while
   // typing: backslash means nothing to a text field, and a user who has just
   // hidden the chrome and clicked into the prompt must still be able to bring it
   // back without reaching for the mouse.
   if ((e.metaKey || e.ctrlKey) && e.key === '\\') { e.preventDefault(); togglePanels(); return }
   // Zoom shortcuts: ⌘/Ctrl +, −, 0 (fit) and 2 (zoom to selection).
-  if ((e.metaKey || e.ctrlKey) && !inField) {
-    if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomBy(1.2); return }
-    if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomBy(1 / 1.2); return }
-    if (e.key === '0') { e.preventDefault(); zoomFit(); return }
-    if (e.key === '2') { e.preventDefault(); zoomToSelection(); return }
-  }
+  if ((e.metaKey || e.ctrlKey) && !inField && viewportKey(e)) return
   // Undo/redo — skip while editing text so the textarea handles it natively.
   const meta = e.metaKey || e.ctrlKey
   if (meta && (e.key === 'z' || e.key === 'Z') && !editingId.value) {
@@ -4916,6 +4917,9 @@ function exitMotionPreview() {
 const inspectorTab = ref<'design' | 'motion' | 'layout'>('design')
 watch(() => inspectorTab.value === 'layout' && panelsVisible.value, (on) => { layoutTabShowing.value = on }, { immediate: true })
 watch(inspectorTab, (tab) => {
+  // The Motion tab unmounts the bottom container (and the pen's toolbar in it):
+  // a pen session must not outlive its toolbar and keep capturing every key.
+  if (tab === 'motion') cancelPenSession()
   if (tab === 'motion') { if (previewT.value == null) scrubTo(0) }
   else exitMotionPreview()
 })
@@ -8975,7 +8979,7 @@ onUnmounted(() => {
             <line v-if="selectionGuides.centerY" x1="0" :y1="canvasDisplay.h / 2" :x2="canvasDisplay.w" :y2="canvasDisplay.h / 2" />
           </g>
         </svg>
-        <template v-if="localHandlePositions && selectedIds.size <= 1 && !editingId && !genActive && !brush.active.value && atDesign">
+        <template v-if="localHandlePositions && selectedIds.size <= 1 && !editingId && !genActive && !brush.active.value && !penSession && atDesign">
           <div
             v-for="corner in (['tl', 'tr', 'br', 'bl'] as const)"
             :key="'l-' + corner"
@@ -9014,7 +9018,7 @@ onUnmounted(() => {
             fill="none" stroke="#ffffff" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"
           />
         </svg>
-        <template v-if="selectionBox && !editingId && !genActive && atDesign">
+        <template v-if="selectionBox && !editingId && !genActive && !penSession && atDesign">
           <div
             v-for="corner in (['tl', 'tr', 'br', 'bl'] as const)"
             :key="'g-' + corner"
