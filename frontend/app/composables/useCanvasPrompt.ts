@@ -599,6 +599,8 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   const shownTakes = computed<TakesSession | null>(() => fx.session.value ?? takes.value)
   // An effect Keep is saving: the strip's Keep buttons are off until it settles.
   const takesSaving = computed(() => !!fx.session.value && !!fx.saving?.value)
+  // A failed Keep leaves the set open, and the card is the strip: the strip shows why.
+  const takesError = computed(() => (fx.session.value ? fx.error.value || null : null))
   // While a node's effect-take strip is open, the node's own controls are read-only, so
   // closing the strip can put back exactly what was there: tell it when the strip opens and closes.
   let lockedNode: string | null = null
@@ -669,7 +671,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
 
   return {
     agent, selection, chipLabel, suggestions, mode, focusTick, working, workingLabel, lastSubmitted,
-    card, answerCard, takes: shownTakes, takesSaving, modeNote, showSketchInstead, searchOpen, searchQuery, onSearchDone,
+    card, answerCard, takes: shownTakes, takesSaving, takesError, modeNote, showSketchInstead, searchOpen, searchQuery, onSearchDone,
     submit, stop, clearMode, clearSelection, onPromptFocus, previewTake, chooseTake, keepTake, closeTakes,
     moreTakes, dismissAnswer, runFollowUp, sketchInstead,
   }

@@ -36,11 +36,15 @@ const hint = (a: StudioAction) => [landsHint(a.lands), a.priceFor ? a.priceFor(h
       <h4 v-if="!bare" class="px-0.5 text-[11px] font-medium text-white/45">{{ s.label }}</h4>
       <button v-for="a in s.rows" :key="a.id" type="button"
               data-testid="studio-action-row" :data-action-id="a.id"
-              class="flex w-full items-center justify-between gap-2 rounded-[7px] bg-white/[0.05] px-[9px] py-1.5 text-left text-[12.5px] text-white/85 transition-colors hover:bg-white/[0.08]"
+              :disabled="a.disabled" :title="a.disabled ? a.disabledHint : undefined"
+              class="flex w-full items-center justify-between gap-2 rounded-[7px] bg-white/[0.05] px-[9px] py-1.5 text-left text-[12.5px] text-white/85 transition-colors hover:bg-white/[0.08] disabled:cursor-default disabled:hover:bg-white/[0.05]"
               @click="run(a)">
-        <span class="min-w-0 truncate">{{ a.label }}</span>
-        <span class="flex shrink-0 items-center gap-1.5">
-          <span v-if="hint(a)" class="text-[11px] text-white/45">{{ hint(a) }}</span>
+        <span class="flex min-w-0 flex-col" :class="{ 'opacity-50': a.disabled }">
+          <span class="min-w-0 truncate">{{ a.label }}</span>
+          <span v-if="a.disabled && a.disabledHint" data-testid="studio-action-disabled-hint" class="text-[11px] leading-snug text-white/45">{{ a.disabledHint }}</span>
+        </span>
+        <span class="flex shrink-0 items-center gap-1.5" :class="{ 'opacity-50': a.disabled }">
+          <span v-if="!a.disabled && hint(a)" class="text-[11px] text-white/45">{{ hint(a) }}</span>
           <AiMark v-if="a.ai" kind="star" class="size-3" />
         </span>
       </button>

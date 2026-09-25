@@ -35,6 +35,16 @@ describe('createAutosaveController', () => {
     expect(saved.value).toBe(true)
   })
 
+  it('a persist that saved nothing (returns false) ends saving without a "Saved" flash', () => {
+    const persist = vi.fn(() => false)
+    const { saving, saved, onEdit } = createAutosaveController(persist, { debounceMs: 400, flashMs: 1500 })
+    onEdit()
+    vi.advanceTimersByTime(400)
+    expect(persist).toHaveBeenCalledTimes(1)
+    expect(saving.value).toBe(false)
+    expect(saved.value).toBe(false)
+  })
+
   it('saved flash clears after flashMs', () => {
     const persist = vi.fn()
     const { saved, onEdit } = createAutosaveController(persist, { debounceMs: 400, flashMs: 1500 })

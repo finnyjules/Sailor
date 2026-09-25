@@ -86,6 +86,17 @@ async function openStudio(page: Page, nodeType: string, event: string) {
   await expect(prompt(page)).toBeVisible()
 }
 
+/** Every node's saved data, as the canvas (its undo history and autosave) sees it. Walks up from
+ *  `.vue-flow` to VueNodeCanvas's exposed surface (tests/character-sheet.spec.ts's recipe). */
+async function savedCanvas(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    let c: any = (document.querySelector('.vue-flow') as any)?.__vueParentComponent
+    while (c && !(c.exposed && typeof c.exposed.getNodes === 'function')) c = c.parent
+    if (!c) throw new Error('VueNodeCanvas exposed surface not reachable')
+    return JSON.stringify(c.exposed.getNodes().map((n: any) => n.data))
+  })
+}
+
 /** `upper` sits wholly above `lower` on screen. */
 async function expectAbove(upper: Locator, lower: Locator) {
   const a = (await upper.boundingBox())!
@@ -267,8 +278,20 @@ test.describe('the one prompt in studios', () => {
     expect(written.length).toBeGreaterThanOrEqual(3)
     // × would put back what was there, so nothing else may be edited meanwhile.
     await expect(page.getByTestId('frame-edit-surface')).toHaveAttribute('inert', /.*/)
+    // A previewed take is shown on the artboard only: no draft ever reaches the saved Frame node
+    // (so no canvas undo step or autosave can hold one), and × leaves the node as it was.
+    const savedBefore = await savedCanvas(page)
+    const ready = dock.locator('[data-testid="prompt-take-tile"][data-state="ready"]')
+    expect(await ready.count()).toBeGreaterThan(0)
+    await ready.first().getByRole('button', { name: /Preview take/ }).hover()
+    await ready.first().getByRole('button', { name: /Preview take/ }).click() // chosen: stays on screen
+    await page.waitForTimeout(600)
+    const during = await savedCanvas(page)
+    expect(during).not.toContain('draft_')
+    expect(during).toBe(savedBefore)
     await strip.getByRole('button', { name: 'Close takes' }).click()
     await expect(strip).toHaveCount(0)
+    expect(await savedCanvas(page)).toBe(savedBefore)
     await expect(page.getByTestId('frame-edit-surface')).not.toHaveAttribute('inert', /.*/)
   })
 

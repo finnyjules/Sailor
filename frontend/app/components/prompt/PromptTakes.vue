@@ -7,7 +7,8 @@ import { X } from 'lucide-vue-next'
 import { CURRENT, isTakesWorking, takesStatus, type TakesSession } from '~/lib/prompt/takesSession'
 
 // `saving`: a Keep is being saved (effect takes, stage 5) — Keep is off until it settles.
-const props = withDefaults(defineProps<{ session: TakesSession; saving?: boolean }>(), { saving: false })
+// `error`: why the last Keep failed, shown on the strip while it stays open.
+const props = withDefaults(defineProps<{ session: TakesSession; saving?: boolean; error?: string | null }>(), { saving: false, error: null })
 const emit = defineEmits<{ hover: [id: string | null]; choose: [id: string]; keep: [id: string]; more: []; close: [] }>()
 
 const working = computed(() => isTakesWorking(props.session))
@@ -39,6 +40,7 @@ function onFocusOut(e: FocusEvent) {
         ><X class="size-3.5" /></button>
       </span>
     </div>
+    <p v-if="error" data-testid="prompt-takes-error" role="alert" class="px-1 text-[12px] leading-snug text-red-400/90">{{ error }}</p>
 
     <div class="grid grid-cols-4 gap-2">
       <button

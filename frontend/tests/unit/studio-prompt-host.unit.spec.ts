@@ -8,7 +8,7 @@ function api(over: Record<string, unknown> = {}) {
   return {
     chipLabel: ref('Water ripple'), suggestions: ref(['Warmer']), mode: ref(null), modeNote: ref(null), working: ref(false),
     workingLabel: ref('Working on “x”'), disabled: ref(false), focusTick: ref(0),
-    card: ref(null), takes: ref(null), takesSaving: ref(false), answerCard: ref(null),
+    card: ref(null), takes: ref(null), takesSaving: ref(false), takesError: ref(null), answerCard: ref(null),
     worker: () => ({ changes: ref([]), busy: ref(false), issues: ref([]), review: ref(null), reviewing: ref(false), hovered: ref(null), acceptChange: vi.fn(), rejectChange: vi.fn(), reroll: vi.fn() }),
     submit: vi.fn(), runKind: vi.fn(), setMode: vi.fn(), clearMode: vi.fn(), stop: vi.fn(), requestFocus: vi.fn(),
     previewTake: vi.fn(), chooseTake: vi.fn(), keepTake: vi.fn(), moreTakes: vi.fn(), closeTakes: vi.fn(),
@@ -41,6 +41,8 @@ describe('StudioPromptHost', () => {
     expect(w.find('[data-testid="prompt-note"]').text()).toBe('~$0.24–0.42')
     const saving = mount(StudioPromptHost, { props: { prompt: api({ card: ref('takes'), takes: ref(takes), takesSaving: ref(true) }) } })
     expect(saving.findAll('button.keep').every(b => b.attributes('disabled') !== undefined)).toBe(true)
+    const failed = mount(StudioPromptHost, { props: { prompt: api({ card: ref('takes'), takes: ref(takes), takesError: ref('Couldn’t save to My effects. Try again in a moment.') }) } })
+    expect(failed.find('[data-testid="prompt-takes-error"]').text()).toContain('Couldn’t save')
   })
 
   it('sends on Enter and stops on Stop', async () => {

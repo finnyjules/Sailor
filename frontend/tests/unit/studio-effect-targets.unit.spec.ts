@@ -16,7 +16,10 @@ describe('studio effect targets', () => {
   it('the Shader studio makes the previewed layer read-only while a set is open, derived from the prompt’s session', () => {
     const s = src('components/vue-canvas/ShaderStudioSurface.vue')
     expect(s).toMatch(/shellRef\.value\?\.prompt\.effectsOpen\.value/)
-    expect(s).toMatch(/const layerReadOnly = computed\(\(\) => takeLayerLocked\(/)
+    expect(s).toMatch(/const lockedLayer = \([^)]*\) => takeLayerLocked\(/)
+    expect(s).toMatch(/const layerReadOnly = computed\(\(\) => lockedLayer\(/)
+    // the stack's on/off for the previewed layer is part of the lock
+    expect(s).toMatch(/function toggleEffect[^{]*\{[^}]*if \(lockedLayer\(e\.layerId\)\) return/)
     // dials (the whole layer section), the centre handle and the effect picker
     expect(s).toMatch(/data-testid="shader-studio-layer-controls"[\s\S]{0,200}:inert="layerReadOnly/)
     expect(s).toMatch(/v-if="showMaskHandles && !layerReadOnly"/)
@@ -31,8 +34,15 @@ describe('studio effect targets', () => {
     expect(s).toMatch(/function frameBackgroundTarget\(/)
     // Preflight C13: the option itself is wired to the background target, not just any `effectTarget:`.
     expect(s).toMatch(/effectTarget:\s*\(m\)\s*=>\s*frameBackgroundTarget\(/)
-    // Preflight C2: Keep writes My-effect values into ShaderSpec.params without the `u_` prefix.
-    expect(s).toMatch(/unprefixedKey\(/)
+    // Previews are a local overlay the artboard paints; the saved node is written only on Keep
+    // (behaviour, and the C2 key mapping, are unit-tested in studio-targets.unit.spec.ts).
+    expect(s).toMatch(/return makeBackgroundTarget\(\{/)
+    expect(s).toMatch(/show: \(p\) => \{ backgroundPreview\.value = p \}/)
+    expect(s).toMatch(/commit: p => setBackground\(p\)/)
+    expect(s).toMatch(/paintLayers\(\)[\s\S]{0,400}shownBackground\.value, localGroups\.value, postEffects\.value, false/)
+    expect(s).toMatch(/JSON\.stringify\(shownBackground\.value\)/)
+    const target = s.slice(s.indexOf('function frameBackgroundTarget('), s.indexOf('function snapshotCanvas('))
+    expect(target).not.toMatch(/writeBackground/)
   })
   it('Frame ends an open effect set before it closes (preflight C9)', () => {
     const s = src('components/vue-canvas/CompositorModal.vue')

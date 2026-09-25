@@ -91,6 +91,10 @@ describe('useCanvasPrompt: new effects on a shader node', () => {
     expect(api.takesSaving.value).toBe(false)
     effects.saving.value = true
     expect(api.takesSaving.value).toBe(true) // the strip's Keep is off while it saves
+    expect(api.takesError.value).toBeNull()
+    effects.error.value = 'Couldn’t save to My effects. Try again in a moment.'
+    expect(api.card.value).toBe('takes') // the set stays open…
+    expect(api.takesError.value).toBe('Couldn’t save to My effects. Try again in a moment.') // …and the strip says why
     api.stop(); expect(effects.stop).toHaveBeenCalled()
     expect(agent.stop).not.toHaveBeenCalled()
   })

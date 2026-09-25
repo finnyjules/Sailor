@@ -1,9 +1,10 @@
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 
 /** Pure state machine (no Vue lifecycle) so it can be unit-tested with fake timers.
- *  Call onEdit() on every edit: it debounces persist(), and drives saving/saved. */
+ *  Call onEdit() on every edit: it debounces persist(), and drives saving/saved.
+ *  A persist() that returns `false` saved nothing (e.g. a previewed draft): no "Saved" flash. */
 export function createAutosaveController(
-  persist: () => void,
+  persist: () => void | boolean,
   opts: { debounceMs?: number; flashMs?: number } = {},
 ) {
   const { debounceMs = 400, flashMs = 1500 } = opts
@@ -16,8 +17,9 @@ export function createAutosaveController(
     saved.value = false
     clearTimeout(saveTimer)
     saveTimer = setTimeout(() => {
-      persist()
+      const wrote = persist()
       saving.value = false
+      if (wrote === false) return
       saved.value = true
       clearTimeout(flashTimer)
       flashTimer = setTimeout(() => { saved.value = false }, flashMs)
@@ -39,7 +41,7 @@ export function createAutosaveController(
  *  later edits trigger it. */
 export function useStudioAutosave(
   source: () => unknown,
-  persist: () => void,
+  persist: () => void | boolean,
   opts?: { debounceMs?: number; flashMs?: number },
 ) {
   const c = createAutosaveController(persist, opts)

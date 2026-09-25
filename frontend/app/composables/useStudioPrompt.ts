@@ -64,9 +64,11 @@ const ROUTER_NAME_MAX = 120
 export function useStudioPrompt(
   o: {
     worker: () => StudioPromptWorker | null; place: StudioPromptPlace; host?: RouterHost; selectionKind: string; label: () => string | null; suggestions?: () => string[]
-    /** Where new effects show (stage 5); null or absent: this studio can't take them. */
-    effectTarget?: (m: StudioEffectTargetRequest) => EffectTarget | null
-    /** Called after a worker take is kept, with the request that made it. */
+    /** Where new effects show (stage 5); null or absent: this studio can't take them. A string
+     *  is a plain refusal to show instead (the Shader studio's full stack). */
+    effectTarget?: (m: StudioEffectTargetRequest) => EffectTarget | string | null
+    /** Called after a worker take is kept, with the request that made it — only for a request
+     *  with words (Tune, or a typed tweak), never for Vary's fixed directions. */
     afterKeep?: (request: string) => void
   },
   deps: { route?: typeof routeRequest; apiKey?: () => string; effects?: ReturnType<typeof useEffectTakes> } = {},
@@ -200,6 +202,7 @@ export function useStudioPrompt(
     const target = kind === 'new-effect'
       ? o.effectTarget?.(m ? { effectId: m.effectId ?? null, add: !!m.add, fresh: m.label === 'New effect' } : null) ?? null
       : null
+    if (typeof target === 'string') { answerRef.value = { kind: 'notice', text: target, reasoning: '', followUps: [] }; return }
     const d = studioDispatch(kind, text, { place: o.place, hasWorker: !!worker(), canTakes: canTakes(), fromMenu, hasEffectTarget: !!target })
     if (d.worker === 'message') { answerRef.value = { kind: 'notice', text: d.message, reasoning: '', followUps: [] }; return }
     if (d.worker === 'effect') {
@@ -316,7 +319,7 @@ export function useStudioPrompt(
     dropLateReply()
     w.selectTake?.(t)
     w.keepTake?.()
-    o.afterKeep?.(request.value)
+    if (request.value.trim()) o.afterKeep?.(request.value)
   }
   // The strip's own "more" button: the worker restarts the set, so only a run
   // in flight (not thumbnails still drawing) blocks it.
@@ -335,6 +338,12 @@ export function useStudioPrompt(
   function endEffects() { if (fx.session.value || fx.working.value) fx.close() }
   /** An effect-take set is open: the owner makes what it previews on read-only (derived, never stuck). */
   const effectsOpen = computed(() => !!fx.session.value)
+  /** A failed Keep while the set is still open: the strip shows it (the card is the strip). */
+  const takesError = computed(() => (fx.session.value ? fx.error.value || null : null))
+  /** The owner's own outcome sentence (a Tune version saved, or why not), as a card. */
+  function notify(kind: 'notice' | 'error', text: string) {
+    answerRef.value = { kind, text, reasoning: '', followUps: [] }
+  }
   /** An effect Keep is saving: the strip's Keep buttons are off until it settles. */
   const takesSaving = computed(() => !!fx.session.value && !!fx.saving?.value)
   /** The price of what a new-effect chip will do (spec §7.2), shown before anything runs. */
@@ -355,7 +364,7 @@ export function useStudioPrompt(
 
   return {
     chipLabel, suggestions, mode, modeNote, working, workingLabel, disabled, editLocked, lockedNote, focusTick,
-    card, takes, takesSaving, effectsOpen, answerCard, worker,
+    card, takes, takesSaving, takesError, effectsOpen, answerCard, worker, notify,
     submit, runKind, setMode, clearMode, stop, requestFocus,
     previewTake, chooseTake, keepTake, moreTakes, closeTakes, endEffects,
     approve, rejectAll, dismissAnswer, runFollowUp,

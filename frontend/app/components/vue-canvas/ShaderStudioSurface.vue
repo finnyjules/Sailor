@@ -41,7 +41,7 @@ import { ensureSpaceTypeBake } from '~/lib/spacetype/bake'
 import { encodeFrames } from '~/lib/engine/encodeVideo'
 import { useStudioAgent } from '~/composables/useStudioAgent'
 import { settleTakesOnRender } from '~/lib/prompt/studioTakes'
-import { REMIX_ACTION, studioActions } from '~/lib/studio/studioActions'
+import { LAYERS_FULL, REMIX_ACTION, studioActions } from '~/lib/studio/studioActions'
 import { useStudioVarBindings } from '~/composables/useStudioVarBindings'
 import { useStudioVarMenu } from '~/composables/useStudioVarMenu'
 import { makeConfigParams } from '~/lib/agent/configParams'
@@ -60,8 +60,8 @@ import { prefersServerVideoExport } from '~/lib/engine/videoExportSupport'
 import { isAbortError, throwIfAborted } from '~/lib/engine/videoRecorder'
 import { hostedModeEnabled } from '~/lib/hostedMode'
 import type { EffectTarget } from '~/composables/useEffectTakes'
+import { makeLayerTarget, recordTuneVersion } from '~/lib/shadergen/studioTargets'
 import { useMyEffects } from '~/composables/useMyEffects'
-import { myEffectIdOf } from '~/lib/myEffects/defs'
 import { getEffectSync } from '~/lib/shaderfx/catalogStore'
 import { takeLayerLocked, takeStackLocked } from '~/lib/shaderstudio/takeLock'
 
@@ -157,7 +157,7 @@ const shaderAgent = useStudioAgent({
 const promptLabel = computed(() => effectDef.value?.name ?? 'Shader')
 const effectCategory = computed(() => SHADER_SECTIONS.find(s => s.id === effectDef.value?.category)?.label ?? null)
 const inspectorActions = computed(() => studioActions({
-  place: 'shader', canTakes: true,
+  place: 'shader', canTakes: true, layersFull: config.value.effects.length >= LAYER_MAX,
   local: [{ id: 'new-variation', label: 'New variation', group: 'develop', ai: false, lands: null, run: { call: rerollSeed } }],
 }))
 
@@ -537,11 +537,14 @@ function loadConfig() {
   for (const e of hydrated.effects) e.id = resolveEffectId(e.id)
   config.value = hydrated
 }
-function saveConfig() {
+// A new-effect take on screen is a draft, not an edit: the studio never saves it (preflight C9).
+const effectPreviewing = ref(false)
+function saveConfig(): boolean {
   // A new-effect take on screen is a draft, not an edit: never save it (preflight C9).
   // The restore (×, Stop, close) or the Keep changes `config` again, and that saves.
-  if (effectPreviewing) return
-  const n = currentNode(); if (!n) return; n.data ||= {}; n.data.properties ||= {}; n.data.properties.sailor_shaderStudio = cloneConfig(config.value)
+  if (effectPreviewing.value) return false
+  const n = currentNode(); if (!n) return false; n.data ||= {}; n.data.properties ||= {}; n.data.properties.sailor_shaderStudio = cloneConfig(config.value)
+  return true
 }
 function closeEditor() { try { saveConfig() } catch (e) { console.error('[shader-studio] saveConfig failed', e) } emit('close') }
 
@@ -549,7 +552,10 @@ function closeEditor() { try { saveConfig() } catch (e) { console.error('[shader
 // useStudioAutosave, debounced off `config` — the studio's single source of
 // truth, which saveConfig() clones straight onto the node (never written back
 // into `config`, so there's no watch loop). Mirrors Gradient Studio (Task 6).
-const { saving: autoSaving, saved: autoSaved } = useStudioAutosave(() => config.value, saveConfig)
+// While a take is previewed the watch sees one steady value, so the footer never claims a save
+// that was skipped; saveConfig's false tells the footer nothing was saved either way.
+const PREVIEWING = Object.freeze({ previewing: true })
+const { saving: autoSaving, saved: autoSaved } = useStudioAutosave(() => (effectPreviewing.value ? PREVIEWING : config.value), saveConfig)
 
 // ── outputs (mirror Gradient Studio) ───────────────────────────────────────────
 /** Render frame `t01` into shaderFx's canvas and return that canvas. With
@@ -883,53 +889,35 @@ function stopsValue(uniform: string): GradientStop[] { const v = effectValues.va
 // stack (so motion tracks, which address effects by index, never shift). A full
 // stack has no room for a new layer: the takes go on the active layer instead, and
 // the strip names it.
-let effectPreviewing = false
 // The prompt (the shell's) and the layer an open set previews on. The lock is derived from
 // the prompt's session each time (takeLayerLocked), so this id going stale is harmless.
 const shellRef = ref<InstanceType<typeof StudioModalShell> | null>(null)
 const effectSetOpen = computed(() => !!shellRef.value?.prompt.effectsOpen.value)
 const takeLayerId = ref<string | null>(null)
-/** The active layer's dials, centre handle and effect picker are read-only while a set previews on it. */
-const layerReadOnly = computed(() => takeLayerLocked({ setOpen: effectSetOpen.value, activeLayerId: activeEffectCfg.value?.layerId, takeLayerId: takeLayerId.value }))
+const lockedLayer = (layerId: string | null | undefined) => takeLayerLocked({ setOpen: effectSetOpen.value, activeLayerId: layerId, takeLayerId: takeLayerId.value })
+/** The active layer's dials, centre handle, on/off and effect picker are read-only while a set previews on it. */
+const layerReadOnly = computed(() => lockedLayer(activeEffectCfg.value?.layerId))
 const stackLocked = computed(() => takeStackLocked({ setOpen: effectSetOpen.value }))
 // A set opening mid-gesture: drop the drag and close the picker, so nothing writes under it.
 watch(layerReadOnly, (ro) => { if (ro) { maskDrag = null; pickerOpen.value = false } })
+const layersFull = computed(() => config.value.effects.length >= LAYER_MAX)
 function shaderStudioEffectTarget(o: { add: boolean; base: EffectDef | null; fresh: boolean }): EffectTarget {
-  const index = activeEffect.value
-  const add = o.add && config.value.effects.length < LAYER_MAX
-  const original = { ...config.value.effects[index]! }
-  const tempLayerId = newLayerId()
-  takeLayerId.value = add ? tempLayerId : original.layerId
-  let tempIndex: number | null = null
-  const set = (id: string, params: Record<string, ParamValue>) => {
-    effectPreviewing = true
-    if (add) {
-      if (tempIndex == null) {
-        config.value.effects.push({ layerId: tempLayerId, id, params, enabled: true, blend: 'normal', opacity: 1 })
-        tempIndex = config.value.effects.length - 1
-      } else config.value.effects[tempIndex] = { ...config.value.effects[tempIndex]!, id, params }
-    } else config.value.effects[index] = { ...original, id, params, customChars: '' }
-    void renderFrame(0)
-  }
-  return {
-    key: 'shader-studio',
-    label: add ? 'New layer' : (o.base?.name ?? effectDef.value?.name ?? 'Shader'),
+  const layer = activeEffectCfg.value
+  const t = makeLayerTarget({
+    effects: () => config.value.effects,
+    active: () => activeEffect.value,
+    setActive: (i) => { activeEffect.value = i },
+    add: o.add,
+    // The strip names what the takes land on: the layer's own effect, as the stack shows it.
+    label: o.add ? 'New layer' : (o.base?.name ?? effectLabel(layer)),
     base: o.fresh ? null : (o.base ?? effectDef.value),
-    image: () => snapshotSource(lastSourceFrame),
-    preview: (id) => {
-      if (id) return set(id, {})
-      if (add) { if (tempIndex != null) { config.value.effects.splice(tempIndex, 1); tempIndex = null } }
-      else config.value.effects[index] = original
-      effectPreviewing = false
-      void renderFrame(0)
-    },
-    apply: (id, values) => {
-      set(id, { ...values })
-      if (add) activeEffect.value = tempIndex!
-      tempIndex = null
-      effectPreviewing = false // the kept effect is an edit: the autosave that follows saves it
-    },
-  }
+    newLayerId,
+    previewing: (on) => { effectPreviewing.value = on },
+    redraw: () => { void renderFrame(0) },
+    snapshot: () => snapshotSource(lastSourceFrame),
+  })
+  takeLayerId.value = t.layerId
+  return t
 }
 /** A still copy of a canvas source (a live upstream frame is redrawn in place). */
 function snapshotSource(src: TexImageSource | null): CanvasImageSource | null {
@@ -942,18 +930,20 @@ function snapshotSource(src: TexImageSource | null): CanvasImageSource | null {
   }
   return src as CanvasImageSource
 }
-function effectTargetFor(m: { effectId: string | null; add: boolean; fresh: boolean } | null): EffectTarget {
+function effectTargetFor(m: { effectId: string | null; add: boolean; fresh: boolean } | null): EffectTarget | string {
+  // A full stack has no room for a new layer: say so rather than retarget the takes.
+  if (m?.add && layersFull.value) return LAYERS_FULL
   return shaderStudioEffectTarget({ add: !!m?.add, fresh: !!m?.fresh, base: m?.effectId ? getEffectSync(m.effectId) : null })
 }
 
-// Ruling 8: a kept Tune take on a My effect becomes a dial version. An old version's
-// code (`…~vN`) is skipped: a dial version is always on the newest code (preflight C11).
+// Ruling 8: a kept Tune take on a My effect becomes a dial version (recordTuneVersion).
 const myEffects = useMyEffects()
 function onTuneKept(request: string) {
-  const cfgId = activeEffectCfg.value.id
-  const id = myEffectIdOf(cfgId)
-  if (!id || cfgId !== id) return
-  void myEffects.addValuesVersion(id, { ...activeEffectCfg.value.params }, request).catch(() => {})
+  void recordTuneVersion({
+    effectId: activeEffectCfg.value.id, params: activeEffectCfg.value.params, request,
+    add: (id, values, r) => myEffects.addValuesVersion(id, values, r),
+    notify: (kind, text) => shellRef.value?.prompt.notify(kind, text),
+  })
 }
 
 // ── effect stack (aside StudioLayerStack) ───────────────────────────────────
@@ -984,7 +974,7 @@ function reorderEffect(from: number, to: number) {
   remapEffectTracks('move', from, to)
   activeEffect.value = to
 }
-function toggleEffect(i: number) { const e = config.value.effects[i]!; e.enabled = !e.enabled }
+function toggleEffect(i: number) { const e = config.value.effects[i]!; if (lockedLayer(e.layerId)) return; e.enabled = !e.enabled }
 
 // Rewrites motion track `path`s of the form `effects.<idx>.params.<uniform>` to
 // follow an effect through add/remove/reorder. These three used to be inline

@@ -45,8 +45,8 @@ const props = defineProps<{
   /** Stack above another full-screen overlay (e.g. the Timeline editor at z-100)
    *  when this studio is opened OVER it — the clip-in-place editor. Default z-50. */
   elevated?: boolean
-  /** Where new effects show in this studio (stage 5: the Shader studio's layer). */
-  effectTarget?: (m: StudioEffectTargetRequest) => EffectTarget | null
+  /** Where new effects show in this studio (stage 5: the Shader studio's layer); a string refuses, plainly. */
+  effectTarget?: (m: StudioEffectTargetRequest) => EffectTarget | string | null
   /** Called after a worker take is kept, with its request (the Shader studio records a My-effect version). */
   afterTakeKeep?: (request: string) => void
 }>()

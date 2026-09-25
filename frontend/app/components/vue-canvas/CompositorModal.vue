@@ -149,9 +149,8 @@ import { LIVE_FIELD_CEILING } from '~/lib/shaderfill/descriptor'
 import CatalogModal from '~/components/CatalogModal.vue'
 import { fetchShaderFxCatalog, resolveEffectId, useShaderCatalog } from '~/lib/shaderfx/catalog'
 import { effectReadsInput, getEffectSync } from '~/lib/shaderfx/catalogStore'
-import { DEFAULT_FILL, DEFAULT_SHADER_SPEC } from '~/lib/spacetype/fillTile'
-import { unprefixedKey } from '~/lib/shaderfill/descriptor'
 import type { EffectTarget } from '~/composables/useEffectTakes'
+import { makeBackgroundTarget } from '~/lib/shadergen/studioTargets'
 import type { EffectDef, ParamValue } from '~/lib/shaderfx/types'
 import { cleanStops } from '~/lib/shaderfx/params'
 import { buildShaderParamRows, type ShaderParamRow } from '~/lib/shaderfill/controls'
@@ -247,7 +246,7 @@ import { shapeById, SHAPE_NONE, SHAPE_FAMILIES } from '~/lib/shapes/catalog'
 import { suggestTextFace } from '~/lib/frame/patterns/pairings'
 import { createShapeLayer, swapShapeLayer } from '~/lib/shapes/pathLayer'
 import { SHAPE_PICKER_WIDTH, anchorAbove } from '~/lib/shapes/pickerLayout'
-import { provide } from 'vue'
+import { provide, shallowRef } from 'vue'
 import type { Component, ComputedRef } from 'vue'
 import type { BrandKit } from '~~/shared/brand/types'
 import { brandSwatches } from '~~/shared/brand/resolve'
@@ -1868,35 +1867,28 @@ const selectedLayerHead = computed(() => (selectedLocal.value
   ? frameSelectionLabel([frameChipLayer(selectedLocal.value as any, { wiredName: wiredChipName })]) ?? ''
   : ''))
 // ── new effects on Frame's background (stage 5, Ruling 10) ──────────────────
-// The background is where new effects show in Frame. Takes preview on it without an
-// undo step; Keep records ONE (so a single undo puts the old background back). The
-// Frame is inert while a set is open (editLocked), since × restores what was there.
+// The background is where new effects show in Frame. A previewed take is a local overlay
+// the artboard paints (`shownBackground`): the saved Frame node is never written, so no
+// canvas undo step, autosave or reload ever sees a draft. Keep writes the node once
+// (`setBackground`: one undo step, holding the old background). The Frame is inert while a
+// set is open (editLocked).
 const backgroundIsShader = computed(() => isFill(background.value) && background.value.type === 'shader' && !!background.value.shader)
 const backgroundShaderDef = (): EffectDef | null => {
   const bg = background.value
   return isFill(bg) && bg.type === 'shader' && bg.shader ? getEffectSync(bg.shader.effectId) : null
 }
+const backgroundPreview = shallowRef<{ paint: Paint } | null>(null)
+/** What the artboard paints: a previewed take, else the saved background. */
+const shownBackground = computed<Paint | undefined>(() => backgroundPreview.value?.paint ?? background.value)
 function frameBackgroundTarget(base: EffectDef | null): EffectTarget {
-  const original = background.value
-  const shaderBg = isFill(original) && original.type === 'shader' && original.shader ? original : null
-  // A plain background (a colour, a gradient, a pattern fill) becomes the new shader's input,
-  // so the effect runs over what was there; anything else starts from the default input.
-  const plainInput = typeof original === 'string' ? (original && original !== 'none' ? original : null)
-    : isGradient(original) || (isFill(original) && original.type !== 'shader') ? structuredClone(original) : null
-  const asShader = (effectId: string, params: Record<string, ParamValue>): Paint => (shaderBg
-    ? { ...shaderBg, shader: { ...shaderBg.shader!, effectId, params } }
-    : { ...DEFAULT_FILL, type: 'shader', shader: { ...structuredClone(DEFAULT_SHADER_SPEC), effectId, params, input: plainInput ?? structuredClone(DEFAULT_SHADER_SPEC.input) } })
-  return {
-    key: 'frame-background', label: 'Background', base,
-    image: () => snapshotCanvas(overlayCanvas.value),
-    preview: id => editor.writeBackground(id ? asShader(id, {}) : original),
-    apply: (id, values) => {
-      // The undo step must hold the old background, not the draft on screen.
-      editor.writeBackground(original)
-      // My-effect values are `u_` keys; ShaderSpec.params drops the prefix (preflight C2).
-      setBackground(asShader(id, Object.fromEntries(Object.entries(values).map(([k, v]) => [unprefixedKey(k), v]))))
-    },
-  }
+  return makeBackgroundTarget({
+    read: () => background.value,
+    show: (p) => { backgroundPreview.value = p },
+    commit: p => setBackground(p),
+    // Taken once, as the Frame is when the set starts (before any take is shown).
+    snapshot: () => snapshotCanvas(overlayCanvas.value),
+    base,
+  })
 }
 /** A still copy of the artboard (the live canvas repaints under every preview). */
 function snapshotCanvas(cv: HTMLCanvasElement | null): HTMLCanvasElement | null {
@@ -4361,7 +4353,7 @@ const frameSchemaUnified = computed(() =>
 const hiddenWired = computed(() => (frameSchemaUnified.value ? new Set<number>() : new Set(readSlotArr('sailor_hiddenWired'))))
 const lockedWired = computed(() => (frameSchemaUnified.value ? new Set<number>() : new Set(readSlotArr('sailor_lockedWired'))))
 
-const hasAnimatedFill = computed(() => hasAnimatedShaderFill(buildStackItems(), background.value))
+const hasAnimatedFill = computed(() => hasAnimatedShaderFill(buildStackItems(), shownBackground.value))
 const needsWallClock = computed(() => hasAnimatedFill.value && previewT.value == null)
 const needsLiveLoop = computed(() => hasAnimatedSlot.value || needsWallClock.value)
 let liveRaf = 0, liveStart = 0, liveInFlight = false, liveCapWarned = false
@@ -5831,7 +5823,7 @@ function renderStack(wallT?: number, live = false) {
     paintLayerStack(ctx, W, H, items, paintLayers(), l =>
       l.id === editingId.value || (nodeEdit.active.value && l.id === nodeEdit.layerId.value),
       clockT, paintMotion,
-      wiredTreatments.value, background.value, localGroups.value, postEffects.value, false, frameLight.value))
+      wiredTreatments.value, shownBackground.value, localGroups.value, postEffects.value, false, frameLight.value))
   shaderFieldsFrozen.value = frozenCount
 }
 
@@ -5891,7 +5883,7 @@ watch(
     nodeEdit.active.value, nodeEdit.layerId.value,
     JSON.stringify(readSlotArr('sailor_hiddenWired')),
     JSON.stringify(wiredTreatments.value),
-    JSON.stringify(background.value),
+    JSON.stringify(shownBackground.value),
     JSON.stringify(postEffects.value),
     JSON.stringify(localGroups.value),
     JSON.stringify(frameLight.value),

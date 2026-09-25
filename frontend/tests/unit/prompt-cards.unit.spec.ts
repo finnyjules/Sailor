@@ -34,6 +34,12 @@ describe('PromptTakes', () => {
     expect(w.emitted('choose')).toEqual([['1']])
     expect(w.emitted('keep')).toEqual([['1']])
   })
+  it('a failed Keep shows its sentence on the strip, which stays open', () => {
+    const w = mount(PromptTakes, { props: { session: session(3), error: 'Couldn’t save to My effects. Try again in a moment.' } })
+    expect(w.find('[data-testid="prompt-takes-error"]').text()).toBe('Couldn’t save to My effects. Try again in a moment.')
+    expect(w.find('[data-testid="prompt-takes-error"]').attributes('role')).toBe('alert')
+    expect(mount(PromptTakes, { props: { session: session(3) } }).find('[data-testid="prompt-takes-error"]').exists()).toBe(false)
+  })
   it('while a Keep is saving, every Keep is off', async () => {
     const w = mount(PromptTakes, { props: { session: session(3), saving: true } })
     const keeps = w.findAll('button').filter(b => b.text() === 'Keep')

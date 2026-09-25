@@ -2,7 +2,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { REMIX_ACTION, runStudioAction, studioActions } from '~/lib/studio/studioActions'
+import { LAYERS_FULL, REMIX_ACTION, runStudioAction, studioActions } from '~/lib/studio/studioActions'
 import StudioActionRows from '~/components/vue-canvas/studio/StudioActionRows.vue'
 
 const ids = (a: { id: string }[]) => a.map(x => x.id)
@@ -18,6 +18,19 @@ describe('studioActions', () => {
   it('Frame adds Write copy, and a new background from a description (Remix only over a shader background)', () => {
     expect(ids(studioActions({ place: 'frame', canTakes: false }))).toEqual(['tune', 'write-copy', 'new-background'])
     expect(ids(studioActions({ place: 'frame', canTakes: false, backgroundIsShader: true }))).toEqual(['tune', 'write-copy', 'new-background', 'remix-background'])
+  })
+  it('a full Shader stack turns "New layer…" off, saying why; running it does nothing', () => {
+    const newLayer = studioActions({ place: 'shader', canTakes: true, layersFull: true }).find(a => a.id === 'new-layer')!
+    expect(newLayer).toMatchObject({ disabled: true, disabledHint: LAYERS_FULL })
+    expect(LAYERS_FULL).toBe('The studio holds six layers. Remove one to add another.')
+    const p = { setMode: vi.fn(), runKind: vi.fn() }
+    runStudioAction(newLayer, p)
+    expect(p.setMode).not.toHaveBeenCalled()
+    expect(studioActions({ place: 'shader', canTakes: true }).find(a => a.id === 'new-layer')!.disabled).toBeUndefined()
+    const w = mount(StudioActionRows, { props: { actions: [newLayer], bare: true, prompt: p as any } })
+    const row = w.find('[data-action-id="new-layer"]')
+    expect(row.attributes('disabled')).toBeDefined()
+    expect(row.find('[data-testid="studio-action-disabled-hint"]').text()).toBe(LAYERS_FULL)
   })
   it('effect rows carry the price and say where they land', () => {
     const rows = [...studioActions({ place: 'frame', canTakes: false, backgroundIsShader: true }), ...studioActions({ place: 'shader', canTakes: true }), REMIX_ACTION]

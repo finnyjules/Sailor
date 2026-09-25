@@ -530,6 +530,33 @@ describe('useStudioPrompt', () => {
     await api.submit('warmer') // a new request closes the set
     expect(api.effectsOpen.value).toBe(false)
   })
+  it('a failed Keep shows on the strip while the set stays open; notify shows the owner’s sentence', async () => {
+    const effects = fakeEffects()
+    const { api } = setup({ effectTarget: vi.fn(shaderTarget), effects })
+    api.setMode('Remix'); await api.submit('rain')
+    effects.error.value = 'Couldn’t save to My effects. Try again in a moment.'
+    expect(api.card.value).toBe('takes')
+    expect(api.takesError.value).toBe('Couldn’t save to My effects. Try again in a moment.')
+    api.closeTakes(); effects.error.value = ''
+    expect(api.takesError.value).toBeNull()
+    api.notify('notice', 'Saved as v2 of “Rain”. Earlier versions are kept.')
+    expect(api.answerCard.value).toMatchObject({ kind: 'notice', text: 'Saved as v2 of “Rain”. Earlier versions are kept.' })
+  })
+  it('a target that refuses with a sentence shows it, and starts nothing', async () => {
+    const effects = fakeEffects()
+    const { api } = setup({ effectTarget: vi.fn(() => 'The studio holds six layers. Remove one to add another.'), effects })
+    api.setMode('New effect', { add: true }); await api.submit('rain')
+    expect(effects.start).not.toHaveBeenCalled()
+    expect(api.answerCard.value).toMatchObject({ kind: 'notice', text: 'The studio holds six layers. Remove one to add another.' })
+  })
+  it('Vary (no words) never calls afterKeep; a typed request does', async () => {
+    const afterKeep = vi.fn()
+    const { api, worker } = setup({ afterKeep })
+    await api.runKind('tweak', { fromMenu: true })
+    ;(worker!.takes as any).value = [{ label: 'a' }]
+    api.keepTake('take-0')
+    expect(afterKeep).not.toHaveBeenCalled()
+  })
   it('unmounting closes an open effect set', async () => {
     const effects = fakeEffects()
     const { api, wrapper } = setup({ effectTarget: vi.fn(shaderTarget), effects })
