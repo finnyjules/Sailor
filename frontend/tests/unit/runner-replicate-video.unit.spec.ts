@@ -380,7 +380,7 @@ describe('replicate-video on the engine (hosted, fake fal and Replicate)', () =>
     const { runId } = await start(k, [withCard(vid('kling-v3'))])
     await k.engine.settled(runId)
     const rec = (await k.store.get(runId))!.takes[0]!.nodes['1']!
-    expect(rec).toMatchObject({ status: 'error', error: 'The video took longer than 30 minutes, so it was cancelled' })
+    expect(rec).toMatchObject({ status: 'error', error: 'The service took more than 30 minutes to make this video, so it was cancelled' })
     // Still asking well past 5 minutes: at 4 minutes a check, 8 checks is 32 minutes.
     expect(vi.mocked(replicate.client.status).mock.calls.length).toBeGreaterThanOrEqual(8)
     expect(replicate.client.cancel).toHaveBeenCalled()

@@ -60,29 +60,40 @@ interface JobScript {
   runsFor?: number
   /** Replicate: finishes with a platform hiccup (worth sending again). */
   hiccup?: boolean
+  /** The job starts at this poll (counting from 1), whatever the clock says. */
+  startOnPoll?: number
 }
 interface Job {
   id: string; endpoint: string; payload: Record<string, unknown>; submittedAt: number
-  startsAt: number; runsFor: number; hiccup: boolean; cancelled: boolean; finishedEarly: boolean; polls: number
+  startsAt: number; runsFor: number; hiccup: boolean; startOnPoll: number | null; cancelled: boolean; finishedEarly: boolean; polls: number
 }
 type CancelOutcome = 'cancelled' | 'already-done' | 'not-found' | 'throw' | 'throw-started'
 
 function fakeService(name: RunnerProvider, clock: { t: number }) {
   const jobs: Job[] = []
-  const script = { jobs: [] as JobScript[], cancel: 'cancelled' as CancelOutcome, submitErrors: [] as unknown[], hangSubmits: 0 }
+  const script = {
+    jobs: [] as JobScript[], cancel: 'cancelled' as CancelOutcome, submitErrors: [] as unknown[], hangSubmits: 0,
+    /** Outcomes for the next cancels, in order (then `cancel`). */
+    cancels: [] as CancelOutcome[],
+    /** The next send / cancel waits for this before answering (used once). */
+    submitGate: null as Promise<void> | null,
+    cancelGate: null as Promise<void> | null,
+  }
   const byUrl = (url: string) => jobs.find(j => url.startsWith(`${name}://${j.id}`))!
   const client: ProviderClient = {
     submit: vi.fn(async (endpoint: string, payload: Record<string, unknown>) => {
       if (script.submitErrors.length) throw script.submitErrors.shift()
       if (script.hangSubmits > 0) { script.hangSubmits--; return new Promise(() => {}) }
+      if (script.submitGate) { const g = script.submitGate; script.submitGate = null; await g }
       const s = script.jobs.shift() ?? {}
       const id = `${name}${jobs.length + 1}`
-      jobs.push({ id, endpoint, payload, submittedAt: clock.t, startsAt: s.startsAt ?? 0, runsFor: s.runsFor ?? 5_000, hiccup: !!s.hiccup, cancelled: false, finishedEarly: false, polls: 0 })
+      jobs.push({ id, endpoint, payload, submittedAt: clock.t, startsAt: s.startsAt ?? 0, runsFor: s.runsFor ?? 5_000, hiccup: !!s.hiccup, startOnPoll: s.startOnPoll ?? null, cancelled: false, finishedEarly: false, polls: 0 })
       return { requestId: id, statusUrl: `${name}://${id}/status`, responseUrl: `${name}://${id}`, cancelUrl: `${name}://${id}/cancel`, queuePosition: null }
     }) as any,
     status: vi.fn(async (url: string) => {
       const j = byUrl(url)
       j.polls++
+      if (j.polls === j.startOnPoll) j.startsAt = clock.t - j.submittedAt
       const base = { queuePosition: null, logs: [], error: null, transient: false, retryable: false, raw: null }
       if (j.cancelled) return { ...base, status: 'COMPLETED', error: 'The request was cancelled' }
       const el = clock.t - j.submittedAt
@@ -94,7 +105,8 @@ function fakeService(name: RunnerProvider, clock: { t: number }) {
     result: vi.fn(async (url: string) => ({ images: [{ url: `https://fal.media/${byUrl(url).id}.png` }] })) as any,
     cancel: vi.fn(async (url: string) => {
       const j = byUrl(url)
-      const o = script.cancel
+      if (script.cancelGate) { const g = script.cancelGate; script.cancelGate = null; await g }
+      const o = script.cancels.shift() ?? script.cancel
       if (o === 'throw') throw new Error('cancel failed')
       if (o === 'throw-started') { j.startsAt = 0; throw new Error('cancel failed') }
       if (o === 'already-done') { j.finishedEarly = true; return 'already-done' }
@@ -148,6 +160,11 @@ const holds = (ledger: ReturnType<typeof createFakeLedger>) => [...ledger.holds.
 const node = async (k: ReturnType<typeof setup>, runId: string) => (await k.store.get(runId))!.takes[0]!.nodes['1']!
 const switches = (k: ReturnType<typeof setup>) => ofType(k.seen, 'provider-switch')
 const NEVER = Number.POSITIVE_INFINITY
+function gate() {
+  let open!: () => void
+  const promise = new Promise<void>((r) => { open = r })
+  return { promise, open }
+}
 
 afterEach(() => {
   delete process.env.NUXT_RUNNER_BACKUP
@@ -290,7 +307,7 @@ describe('a job that has not started is moved to the backup', () => {
     await k.engine.settled(runId)
     const rec = await node(k, runId)
     expect(rec.status).toBe('error')
-    expect(rec.error).toBe('The image took longer than 5 minutes, so it was cancelled')
+    expect(rec.error).toBe('The service took more than 5 minutes to make this image, so it was cancelled')
     expect(k.repSvc.client.submit).toHaveBeenCalledTimes(1)
     expect(k.falSvc.client.submit).toHaveBeenCalledTimes(1)
     expect(k.falSvc.client.cancel).toHaveBeenCalledWith('fal://fal1/cancel')
@@ -464,7 +481,7 @@ describe('the switch can be turned off', () => {
     slow.repSvc.script.jobs.push({ startsAt: NEVER })
     const a = await start(slow)
     await slow.engine.settled(a.runId)
-    expect((await node(slow, a.runId)).error).toBe('The image took longer than 5 minutes, so it was cancelled')
+    expect((await node(slow, a.runId)).error).toBe('The service took more than 5 minutes to make this image, so it was cancelled')
     expect(slow.falSvc.client.submit).not.toHaveBeenCalled()
     expect(switches(slow)).toEqual([])
 
@@ -542,5 +559,117 @@ describe('what counts as a failed send', () => {
     expect(isSubmitOutage(new FalError('fal submit 422: invalid', 422))).toBe(false)
     expect(isSubmitOutage(new FalError('fal submit returned no request id', null))).toBe(false)
     expect(isSubmitOutage(new Error('Replicate is not set up (add NUXT_REPLICATE_TOKEN)'))).toBe(false)
+  })
+})
+
+describe('fix round 1: unconfirmed cancels, Stop mid-switch, a failing backup send', () => {
+  it('an unconfirmed cancel is kept on the node and tried again after the switch', async () => {
+    const k = setup()
+    k.repSvc.script.jobs.push({ startsAt: NEVER })
+    k.repSvc.script.cancels.push('throw', 'cancelled')
+    const { runId } = await start(k)
+    await k.engine.settled(runId)
+    const rec = await node(k, runId)
+    expect(rec.servedBy).toBe('fal')
+    expect((k.repSvc.client.cancel as any).mock.calls.map((c: unknown[]) => c[0])).toEqual(['replicate://replicate1/cancel', 'replicate://replicate1/cancel'])
+    // The retry answered: nothing is left to cancel.
+    expect(rec.switchedFrom).toEqual({ provider: 'replicate', requestId: 'replicate1' })
+    expect(holds(k.ledger)).toEqual([['settled', 3]])
+  })
+
+  it('Stop cancels a first job whose cancel was never confirmed, and the backup', async () => {
+    const clock = { t: START }
+    const fal = fakeService('fal', clock)
+    fal.script.jobs.push({ startsAt: 0, runsFor: NEVER })
+    const k = setup({ clock, fal, hangWhen: () => fal.jobs.length > 0 && fal.jobs[0]!.polls >= 2 })
+    k.repSvc.script.jobs.push({ startsAt: NEVER })
+    k.repSvc.script.cancel = 'throw' // the switch's cancel and its retry both fail
+    const { runId } = await start(k)
+    await until(() => fal.jobs.length > 0 && fal.jobs[0]!.polls >= 2)
+    const saved = await node(k, runId)
+    expect(saved.switchedFrom).toEqual({ provider: 'replicate', requestId: 'replicate1', cancelUrl: 'replicate://replicate1/cancel' })
+    k.repSvc.script.cancel = 'cancelled'
+    await k.engine.stop(k.userId)
+    await k.engine.settled(runId)
+    expect(fal.client.cancel).toHaveBeenCalledWith('fal://fal1/cancel')
+    expect(k.repSvc.client.cancel).toHaveBeenCalledTimes(3) // the switch, its retry, and Stop
+    expect(k.repSvc.jobs[0]!.cancelled).toBe(true)
+    expect((await k.store.get(runId))!.status).toBe('stopped')
+    expect(holds(k.ledger)).toEqual([['released', null]])
+  })
+
+  it('Stop during the first service’s cancel: no switch, no notice, nothing sent to the backup', async () => {
+    const k = setup()
+    k.repSvc.script.jobs.push({ startsAt: NEVER })
+    const g = gate()
+    k.repSvc.script.cancelGate = g.promise
+    const { runId } = await start(k)
+    await until(() => (k.repSvc.client.cancel as any).mock.calls.length === 1)
+    const stopping = k.engine.stop(k.userId)
+    await new Promise(r => setTimeout(r, 5))
+    g.open()
+    await stopping
+    await k.engine.settled(runId)
+    expect(k.falSvc.client.submit).not.toHaveBeenCalled()
+    expect(switches(k)).toEqual([])
+    const rec = await node(k, runId)
+    expect(rec.status).toBe('stopped')
+    expect(rec.switchedFrom).toBeUndefined()
+    expect(holds(k.ledger)).toEqual([['released', null]])
+  })
+
+  it('Stop during the backup’s send: the backup job is cancelled once it answers', async () => {
+    const k = setup()
+    k.repSvc.script.jobs.push({ startsAt: NEVER })
+    k.falSvc.script.jobs.push({ startsAt: NEVER })
+    const g = gate()
+    k.falSvc.script.submitGate = g.promise
+    const { runId } = await start(k)
+    await until(() => (k.falSvc.client.submit as any).mock.calls.length === 1)
+    const stopping = k.engine.stop(k.userId)
+    await new Promise(r => setTimeout(r, 5))
+    g.open()
+    await stopping
+    await k.engine.settled(runId)
+    expect(k.falSvc.client.cancel).toHaveBeenCalledWith('fal://fal1/cancel')
+    expect(k.falSvc.jobs[0]!.cancelled).toBe(true)
+    const rec = await node(k, runId)
+    expect(rec.status).toBe('stopped')
+    expect(rec.servedBy).toBeUndefined()
+    expect(holds(k.ledger)).toEqual([['released', null]])
+  })
+
+  it('a backup send that fails after the first job was cancelled fails the node plainly and charges nothing', async () => {
+    const k = setup()
+    k.repSvc.script.jobs.push({ startsAt: NEVER })
+    k.falSvc.script.submitErrors.push(new FalError('fal submit 503: unavailable', 503))
+    const { runId } = await start(k)
+    await k.engine.settled(runId)
+    const rec = await node(k, runId)
+    expect(rec.status).toBe('error')
+    expect(rec.error).toBe('fal submit 503: unavailable')
+    expect(rec.switchedFrom).toEqual({ provider: 'replicate', requestId: 'replicate1' })
+    expect(rec.request).toBeNull()
+    expect(k.repSvc.jobs[0]!.cancelled).toBe(true)
+    expect(k.repSvc.client.submit).toHaveBeenCalledTimes(1) // never back to the first service
+    expect(switches(k)).toHaveLength(1)
+    expect(holds(k.ledger)).toEqual([['released', null]])
+  })
+})
+
+describe('ruling: the status is looked at once more just before the cancel', () => {
+  it('a job that starts between the stall look and the cancel is kept: no cancel, no switch', async () => {
+    const k = setup()
+    // Looks at 0, 5 … 120 s are polls 1–25; poll 26 is the look just before the cancel.
+    k.repSvc.script.jobs.push({ startsAt: NEVER, startOnPoll: 26, runsFor: 5_000 })
+    const { runId } = await start(k)
+    await k.engine.settled(runId)
+    const rec = await node(k, runId)
+    expect(rec.status).toBe('done')
+    expect(rec.servedBy).toBe('replicate')
+    expect(k.repSvc.client.cancel).not.toHaveBeenCalled()
+    expect(k.falSvc.client.submit).not.toHaveBeenCalled()
+    expect(switches(k)).toEqual([])
+    expect(holds(k.ledger)).toEqual([['settled', 3]])
   })
 })

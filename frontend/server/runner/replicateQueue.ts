@@ -237,6 +237,10 @@ export function createReplicateClient(opts: ReplicateClientOptions = {}): Provid
       throw new ReplicateError(`Replicate cancel ${r.status}: ${t}`, r.status)
     }
     // Replicate answers with the prediction: one that had already finished keeps its end state.
+    // One that had just started (`started_at` set) is cancelled all the same:
+    // keeping it would only leave the user an error, so it counts as
+    // cancelled and the engine moves the job to its backup. Sailor absorbs
+    // the partial run; the user is still charged once.
     const body = await r.json().catch(() => null) as { status?: unknown } | null
     return body?.status === 'succeeded' || body?.status === 'failed' ? 'already-done' : 'cancelled'
   }

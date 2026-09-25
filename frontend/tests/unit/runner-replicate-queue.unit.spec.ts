@@ -311,4 +311,11 @@ describe('cancel', () => {
     fetchMock.mockResolvedValueOnce(res('boom', 500))
     await expect(client().cancel('C')).rejects.toBeInstanceOf(ReplicateError)
   })
+
+  it('a prediction that had just started (started_at set) is cancelled all the same: the job moves to its backup, Sailor absorbs the partial run', async () => {
+    fetchMock.mockResolvedValueOnce(res(pred({ status: 'canceled', started_at: '2026-09-24T10:00:00Z' })))
+    expect(await client().cancel('C')).toBe('cancelled')
+    fetchMock.mockResolvedValueOnce(res(pred({ status: 'canceled', started_at: null })))
+    expect(await client().cancel('C')).toBe('cancelled')
+  })
 })

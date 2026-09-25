@@ -65,6 +65,8 @@ const props = defineProps<{
     queuePosition?: number | null
     /** The runner's note on this run (a switch to the backup service), shown on the Run row while it runs. */
     runNote?: string | null
+    /** When the note arrived (ms). */
+    runNoteAt?: number | null
     images?: string[]
     audios?: string[]
     animated?: boolean
@@ -237,7 +239,8 @@ const runStatus = computed(() => runRowStatus({
   hasRun: hasRun.value,
   costLabel: priceLabel.value,
   lastRunAt: props.data.lastRunAt ?? null,
-  note: props.data.runNote ?? null,
+  // Only the run the note came from: a later run starts after it (runningSince).
+  note: (props.data.runNoteAt ?? 0) >= (props.data.runningSince ?? Number.POSITIVE_INFINITY) ? props.data.runNote ?? null : null,
   now: runRowNow.value,
 }))
 // Variant (direct-execution only): re-roll THIS node 4× in parallel across the

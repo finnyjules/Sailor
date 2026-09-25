@@ -159,6 +159,7 @@ export interface LegStarted {
 export type GateActionName = 'continue' | 'redo' | 'restart'
 export interface GateActionInput { userId: string | null; runId: string; gateId: string; action: GateActionName; takes?: number[] }
 export interface PausedGate { runId: string; promptId: string; nodeId: string; choices: GateChoice[]; picked: number[] }
+/** Which service made a result is not shown here (ruling 5): it is on the saved node (`servedBy`) and in the generation record. */
 export interface RunnerRecordView {
   runId: string
   promptId: string
@@ -197,6 +198,9 @@ export const REPLICATE_TRANSIENT_RETRIES = 2
  * A send that failed with no job created at the service: no answer at all,
  * or a 5xx or 429 on submit. Such a send goes straight to the backup. A 4xx
  * refusal (a bad request) is the request's fault and is not switched.
+ * "No job created" is an assumption: a timeout or a 502 can come after the
+ * service accepted the job, which then runs there too and bills Sailor
+ * (never the user, who is charged once at the node's price).
  */
 export function isSubmitOutage(e: unknown): boolean {
   if (isProviderNetworkError(e)) return true
@@ -377,12 +381,16 @@ export function createEngine(deps: EngineDeps) {
    * Move a node to its backup service, once. The switch is written down
    * before the backup is sent (request null, switchedFrom set), so a restart
    * in between sends the backup, never the first service again. The node's
-   * price and the stage's hold are untouched: it is charged once.
+   * price and the stage's hold are untouched: it is charged once. A crash
+   * while the backup's send is in flight can leave a stray job at the
+   * backup (sent again on restart); Sailor absorbs its cost.
    */
   async function sendToBackup(
-    run: RunRecord, rec: NodeRecord, backup: ProviderBackup, from: { provider: RunnerProvider; requestId: string | null },
+    run: RunRecord, rec: NodeRecord, backup: ProviderBackup, from: NonNullable<NodeRecord['switchedFrom']>,
     reason: SwitchReason, stageKey: string, nodeId: string, signal: AbortSignal,
   ): Promise<PendingRequest> {
+    // After Stop: no switch, and no switch notice.
+    if (signal.aborted) throw new RunStopped()
     rec.switchedFrom = from
     rec.endpoint = backup.endpoint
     rec.payload = backup.payload
@@ -719,7 +727,8 @@ export function createEngine(deps: EngineDeps) {
         if (signal.aborted) throw new RunStopped()
         if (!rec.request) {
           if (rec.switchedFrom && backup) {
-            // A restart landed between writing the switch down and sending the backup.
+            // A restart landed between writing the switch down and sending the
+            // backup. If that send had reached the backup, its job is a stray (Sailor absorbs it).
             await submitRequest(run, rec, backup.provider, signal)
           }
           else {
@@ -784,23 +793,45 @@ export function createEngine(deps: EngineDeps) {
   }
 
   /**
-   * The first service was asked to cancel a job that never started, before
-   * it is sent to the backup. True only when the job is known not to run
-   * there: the cancel went through, or (the cancel failed or the job was
-   * unknown) one more look still finds it waiting to start. A job the cancel
-   * finds already finished is kept.
+   * Ask the first service to cancel a job that never started, before it is
+   * sent to the backup. Its status is looked at once more just before the
+   * cancel, so a job that has just started is kept (this narrows the race;
+   * a job that starts between that look and the cancel is cancelled and
+   * switched all the same — Sailor absorbs the partial run).
+   *   'cancelled'   — the cancel went through: switch.
+   *   'keep'        — the job had already finished or started: keep it, no switch.
+   *   'unconfirmed' — the cancel failed or the job was unknown, and one more
+   *                   look still finds it waiting: switch anyway (ruling 2).
+   *                   The first job may still run and bill Sailor — never the
+   *                   user, who is charged once. Its cancel is tried again
+   *                   after the switch, and Stop cancels it too.
    */
-  async function cancelledForSwitch(client: ProviderClient, req: PendingRequest): Promise<boolean> {
+  async function cancelledForSwitch(client: ProviderClient, req: PendingRequest): Promise<'cancelled' | 'keep' | 'unconfirmed'> {
+    try {
+      const now = await client.status(req.statusUrl, { logs: false })
+      if (!now.transient && now.status !== 'IN_QUEUE') return 'keep'
+    }
+    catch { /* no answer: go on and cancel */ }
     let outcome: unknown
     try { outcome = await client.cancel(req.cancelUrl) }
     catch { outcome = null }
-    if (outcome === 'cancelled') return true
-    if (outcome === 'already-done') return false
+    if (outcome === 'cancelled') return 'cancelled'
+    if (outcome === 'already-done') return 'keep'
     try {
       const again = await client.status(req.statusUrl, { logs: false })
-      return !again.transient && again.status === 'IN_QUEUE'
+      return !again.transient && again.status === 'IN_QUEUE' ? 'unconfirmed' : 'keep'
     }
-    catch { return false }
+    catch { return 'keep' }
+  }
+
+  /** After a switch whose cancel was not confirmed: try that cancel once more. Any answer means nothing is left to cancel. */
+  async function retryFirstCancel(run: RunRecord, rec: NodeRecord): Promise<void> {
+    const from = rec.switchedFrom
+    if (!from?.cancelUrl) return
+    try { await clientFor(from.provider).cancel(from.cancelUrl) }
+    catch { return }
+    delete from.cancelUrl
+    await persist(run).catch(() => {})
   }
 
   async function waitForResult(
@@ -825,11 +856,14 @@ export function createEngine(deps: EngineDeps) {
       if (signal.aborted) throw new RunStopped()
       // Ask the provider at least once before giving up: after a restart the
       // request may already have finished while the server was down.
+      // The limit runs from the current request's send: after a switch to the
+      // backup it starts again, so a node's total wait can reach the stall
+      // time plus the limit. The message speaks of the service, so it stays true.
       if (asked && deps.now() > deadline) {
         await client.cancel(req.cancelUrl).catch(() => {})
         throw new Error(media === 'video'
-          ? 'The video took longer than 30 minutes, so it was cancelled'
-          : 'The image took longer than 5 minutes, so it was cancelled')
+          ? 'The service took more than 30 minutes to make this video, so it was cancelled'
+          : 'The service took more than 5 minutes to make this image, so it was cancelled')
       }
       // Outer limit that applies even when the provider never gave a real
       // answer (a status URL stuck returning 5xx, or a network error on every
@@ -862,8 +896,11 @@ export function createEngine(deps: EngineDeps) {
           // backup, once. A job that has started is never moved — it may
           // already be billed.
           if (backup && stallMs > 0 && !rec.switchedFrom && !started && !keepFirst && deps.now() - req.submittedAt >= stallMs) {
-            if (await cancelledForSwitch(client, req)) {
-              req = await sendToBackup(run, rec, backup, { provider, requestId: req.requestId }, 'slow-start', stageKey, nodeId, signal)
+            const cancel = await cancelledForSwitch(client, req)
+            if (cancel !== 'keep') {
+              const from = { provider, requestId: req.requestId, ...(cancel === 'unconfirmed' ? { cancelUrl: req.cancelUrl } : {}) }
+              req = await sendToBackup(run, rec, backup, from, 'slow-start', stageKey, nodeId, signal)
+              await retryFirstCancel(run, rec)
               provider = backup.provider
               client = clientFor(provider)
               deadline = req.submittedAt + limitMs
@@ -1115,6 +1152,9 @@ export function createEngine(deps: EngineDeps) {
       for (const t of e.run.takes) {
         for (const n of Object.values(t.nodes)) {
           if (n.status === 'running' && n.request) cancels.push(cancelRequest(n.request).catch(() => {}))
+          // A first job whose cancel was never confirmed after a switch is cancelled too.
+          const first = n.status === 'running' ? n.switchedFrom : undefined
+          if (first?.cancelUrl) cancels.push(clientFor(first.provider).cancel(first.cancelUrl).catch(() => {}))
         }
       }
       await Promise.all(cancels)

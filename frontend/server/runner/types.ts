@@ -60,7 +60,12 @@ export interface NodeRecord {
    * service it was first sent to, and that request's id (null when the send
    * itself failed, so no job existed there). `request` is then the backup's.
    */
-  switchedFrom?: { provider: RunnerProvider; requestId: string | null }
+  switchedFrom?: {
+    provider: RunnerProvider
+    requestId: string | null
+    /** Present while that first job's cancel is unconfirmed: it is tried again after the switch, and on Stop. */
+    cancelUrl?: string
+  }
   /** The service that made this node's result (absent: nothing made yet, or a reused result). */
   servedBy?: RunnerProvider
 }

@@ -3109,6 +3109,12 @@ function handleBridgeMessage(event: MessageEvent) {
     if (target) target.data = { ...target.data, queuePosition: pos > 0 ? pos : null }
   }
 
+  // Runner: the node's job moved to its backup service. The Run row shows the note for this run only (ComfyNode compares runNoteAt with runningSince).
+  if (evt === 'provider_switch') {
+    const target = (nodes.value as any[]).find((n: any) => n.id === String(nodeId))
+    if (target) target.data = { ...target.data, runNote: (event.data as any).message || null, runNoteAt: Date.now() }
+  }
+
   if (evt === 'executed') {
     // Store output images/videos/audio on the node (for PreviewImage, PreviewVideo, PreviewAudio, SaveImage etc.)
     if (nodeId && event.data.output) {

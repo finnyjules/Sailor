@@ -427,7 +427,7 @@ describe('restart recovery', () => {
     await k.engine.settled(runId)
     expect(k.fal.client.cancel).toHaveBeenCalledWith(`fal://${k.fal.submitted()[0]!.id}/cancel`)
     const run = (await k.store.get(runId))!
-    expect(run.takes[0]!.nodes['1']!).toMatchObject({ status: 'error', error: 'The image took longer than 5 minutes, so it was cancelled' })
+    expect(run.takes[0]!.nodes['1']!).toMatchObject({ status: 'error', error: 'The service took more than 5 minutes to make this image, so it was cancelled' })
     expect(run.status).toBe('error')
   })
 })
