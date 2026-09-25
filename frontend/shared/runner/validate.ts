@@ -23,7 +23,7 @@
  *     left to the eligibility rule, as before.
  */
 import {
-  RUNNER_NODE_RULES, RUNNER_NODE_TYPES, isRunnerEligible, nodeValidationErrors,
+  RUNNER_NODE_RULES, RUNNER_NODE_TYPES, SWITCHED_CLASSES, isRunnerEligible, nodeValidationErrors,
   type ComfyValidationError, type RunnerEligibilityOptions,
 } from './eligibility'
 import { NO_FAMILIES, type RunnerFamily } from './families'
@@ -61,13 +61,24 @@ export interface PrunedPrompt {
   failed: boolean
 }
 
-const knows = (classType: string) => RUNNER_NODE_TYPES.has(classType) || classType in RUNNER_NODE_RULES
+/**
+ * A class the port knows: a runner type, or a family row's class. A class
+ * that exists for one family only (SWITCHED_CLASSES: Lip-sync a character and
+ * the Audio card, sync-3, F22 fix round 1) is known only while that family is
+ * on, so with it off such a workflow is left whole, exactly as before.
+ */
+const knows = (classType: string, families: ReadonlySet<RunnerFamily>) => {
+  if (RUNNER_NODE_TYPES.has(classType)) return true
+  if (!Object.prototype.hasOwnProperty.call(RUNNER_NODE_RULES, classType)) return false
+  const only = Object.prototype.hasOwnProperty.call(SWITCHED_CLASSES, classType) ? SWITCHED_CLASSES[classType] : undefined
+  return !only || families.has(only)
+}
 
-/** The prompt as ComfyUI's validate_prompt leaves it to run. */
-export function pruneInvalidOutputs(prompt: ApiPrompt): PrunedPrompt {
+/** The prompt as ComfyUI's validate_prompt leaves it to run. `families`: the runner families on. */
+export function pruneInvalidOutputs(prompt: ApiPrompt, families: ReadonlySet<RunnerFamily> = NO_FAMILIES): PrunedPrompt {
   const whole: PrunedPrompt = { prompt, dropped: [], nodeErrors: {}, failed: false }
   const ids = Object.keys(prompt)
-  if (!ids.length || ids.some(id => !knows(prompt[id]!.class_type))) return whole
+  if (!ids.length || ids.some(id => !knows(prompt[id]!.class_type, families))) return whole
   const outputs = ids.filter(id => RUNNER_OUTPUT_CLASSES.has(prompt[id]!.class_type))
   if (!outputs.length) return whole
 
@@ -139,7 +150,7 @@ export function runnerTakesWorkflow(
   opts: RunnerEligibilityOptions = {},
 ): boolean {
   if (!prompt) return false
-  const r = pruneInvalidOutputs(prompt)
+  const r = pruneInvalidOutputs(prompt, families)
   if (r.failed) return true
   return isRunnerEligible(r.prompt, families, { ...opts, afterPruning: r.dropped.length > 0 })
 }

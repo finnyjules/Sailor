@@ -15,7 +15,11 @@
  *   - video: MP4, MOV or WebM (both sync.so's list and fal's upload list),
  *     up to 4096 × 2160 ("Videos above 4096×2160 are rejected"; either way
  *     round), up to 100 MB (a Sailor limit: a minute of 4K at 10 Mbps);
- *   - sound: WAV, MP3, Ogg, FLAC, M4A or AAC, up to 50 MB (a Sailor limit);
+ *   - sound: WAV, MP3, Ogg, FLAC, M4A, MP4 or AAC, up to 50 MB (a Sailor
+ *     limit). An MP4-container recording (Safari's, any ftyp brand) counts
+ *     when it has a sound track: sync.so lists "audio/mp4 .mp4 MP4 Audio"
+ *     and fal's upload list M4A (F22 fix round 1). WebM/Opus sound is on
+ *     neither list, so it is refused, naming the formats taken;
  *   - the clip made: 60 s at most (the node's own cap, LIPSYNC_MAX_SECONDS,
  *     which the hold and the badge's "up to" price), from the measured
  *     lengths and the sync mode.
@@ -25,9 +29,10 @@
 import type { ApiLink, ApiPrompt } from '#shared/runner/graph'
 import { LIPSYNC_MAX_SECONDS, type InputSeconds } from '#shared/pricing/clipSettings'
 import { lipSyncSyncMode, sync3OutputSeconds } from '#shared/runner/lipSync'
-import { mediaFacts, mediaRuleProblem, type MediaRule } from './mediaInputs'
+import { mediaFacts, mediaRuleProblem, mediaSizeProblem, type MediaRule } from './mediaInputs'
+import { sha256Hex } from './handoff'
 import { sync3Sources, type Sync3Source } from './generators/sync3'
-import type { OutputFile } from './types'
+import type { MeasuredMedia, OutputFile } from './types'
 
 export const SYNC_3_MAX_VIDEO_BYTES = 100_000_000
 export const SYNC_3_MAX_SOUND_BYTES = 50_000_000
@@ -48,25 +53,28 @@ export const SYNC_3_VIDEO_RULE: MediaRule = {
 
 export const SYNC_3_SOUND_RULE: MediaRule = {
   kind: 'audio',
-  formats: ['wav', 'mp3', 'ogg', 'flac', 'm4a', 'aac'],
+  formats: ['wav', 'mp3', 'ogg', 'flac', 'm4a', 'mp4', 'aac'],
   maxBytes: SYNC_3_MAX_SOUND_BYTES,
   words: {
     tooLarge: 'sync-3 takes sounds up to 50 MB. Make this one smaller first.',
-    wrongFormat: 'sync-3 takes WAV, MP3, Ogg, FLAC, M4A or AAC sounds.',
+    wrongFormat: 'sync-3 takes sounds as WAV, MP3, Ogg, FLAC, M4A, MP4 or AAC files. Save this one as one of those first.',
     unmeasured: 'Sailor can’t read how long this sound is, so it can’t price the lip-sync. Try a WAV or MP3 file.',
   },
 }
 
 export const SYNC_3_TOO_LONG = `sync-3 makes lip-syncs up to ${LIPSYNC_MAX_SECONDS} seconds. Use a shorter sound.`
 export const SYNC_3_FILE_MISSING = 'A file this lip-sync needs is missing. Upload it again.'
+export const SYNC_3_CHANGED = 'The sound or face video changed after you pressed Run. Run it again.'
 
 /** What the check found: a refusal, or the files to hand off and their measured lengths. */
 export type Sync3MediaCheck =
   | { problem: string }
-  | { problem: null, video: OutputFile, audio: OutputFile, seconds: InputSeconds }
+  | { problem: null, video: OutputFile, audio: OutputFile, seconds: InputSeconds, sha: MeasuredMedia['sha'] }
 
 export interface Sync3MediaReads {
   read(file: OutputFile): Promise<Uint8Array>
+  /** The file's size without reading it (a file over the limit is never loaded). Absent: judged after the read. */
+  size?(file: OutputFile): Promise<number | null>
   strict: boolean
   /** At the node's turn: the files a link brought (the Audio card's). Absent: the card's own file, from the prompt. */
   filesFrom?(link: ApiLink): OutputFile[]
@@ -83,11 +91,14 @@ export async function sync3MediaCheck(prompt: ApiPrompt, nodeId: string, o: Sync
   const video = sources.video.file
   const audio = fileOf(sources.audio, o)
   const measure = async (file: OutputFile, rule: MediaRule) => {
+    const size = o.size ? await o.size(file).catch(() => null) : null
+    const tooLarge = size != null ? mediaSizeProblem(size, rule) : null
+    if (tooLarge) return { problem: tooLarge, seconds: null, sha: '' }
     let bytes: Uint8Array
     try { bytes = await o.read(file) }
-    catch { return { problem: SYNC_3_FILE_MISSING, seconds: null } }
+    catch { return { problem: SYNC_3_FILE_MISSING, seconds: null, sha: '' } }
     const facts = await mediaFacts(bytes, rule)
-    return { problem: mediaRuleProblem(facts, rule, o.strict), seconds: facts.seconds }
+    return { problem: mediaRuleProblem(facts, rule, o.strict), seconds: facts.seconds, sha: sha256Hex(bytes) }
   }
   const [v, a] = await Promise.all([measure(video, SYNC_3_VIDEO_RULE), measure(audio, SYNC_3_SOUND_RULE)])
   if (v.problem) return { problem: v.problem }
@@ -98,7 +109,26 @@ export async function sync3MediaCheck(prompt: ApiPrompt, nodeId: string, o: Sync
   const seconds: InputSeconds = {}
   if (a.seconds != null) seconds.audio = a.seconds
   if (v.seconds != null) seconds.video = v.seconds
-  return { problem: null, video, audio, seconds }
+  return { problem: null, video, audio, seconds, sha: { video: v.sha, audio: a.sha } }
+}
+
+/**
+ * What the start of the run recorded, from a check's result (the tight hold,
+ * F22 fix round 1).
+ */
+export function measuredOf(check: Extract<Sync3MediaCheck, { problem: null }>): MeasuredMedia {
+  return { seconds: { ...check.seconds }, sha: { ...check.sha } }
+}
+
+/**
+ * Whether the files at the node's turn are not the ones recorded at the
+ * start: a length that differs (to the millionth; one that appeared or went
+ * missing counts), or bytes that differ (sha256).
+ */
+export function sync3MediaChanged(recorded: MeasuredMedia, now: Extract<Sync3MediaCheck, { problem: null }>): boolean {
+  const same = (a?: number | null, b?: number | null) => (a == null && b == null) || (a != null && b != null && tidy(a) === tidy(b))
+  return !same(recorded.seconds.audio, now.seconds.audio) || !same(recorded.seconds.video, now.seconds.video)
+    || recorded.sha.audio !== now.sha.audio || recorded.sha.video !== now.sha.video
 }
 
 /** The sound's file: what its link brought at the node's turn, else the Audio card's own file. */

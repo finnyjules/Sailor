@@ -94,6 +94,6 @@ export async function assertFilesOwned(
     const ok = f.type === 'output' ? await check.ownsOutput(userId, f)
       : f.type === 'input' ? await check.ownsInput(userId, f)
         : false
-    if (!ok) throw new MeterRefusalError('This workflow uses a picture that isn’t in your files', 403, { file: f.filename })
+    if (!ok) throw new MeterRefusalError('This workflow uses a file that isn’t one of yours', 403, { file: f.filename })
   }
 }

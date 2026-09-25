@@ -1,15 +1,26 @@
 /**
- * Hands one of our saved files (a picture, a video or a sound) to the next model: uploads it to fal storage
- * once and reuses the link for a day. Never base64 in the request, and never fal's own
- * result link (it can expire while a Gate waits). Also remembers what each
- * link contained, so a request's fingerprint depends on the picture, not on
- * which upload link it happened to get.
+ * Hands one of our saved files (a picture, a video or a sound) to the next
+ * model: uploads its bytes to fal storage and sends the link. Never base64 in
+ * the request, and never fal's own result link (it can expire while a Gate
+ * waits).
+ *
+ * A link is remembered by the sha256 of the BYTES uploaded (and their type),
+ * never by the file's name (F22 review, critical): a file overwritten under
+ * the same name is new bytes, so it is uploaded again. `toUrlBytes` uploads
+ * exactly the bytes the caller already read — the engine measures and prices
+ * a file from one read and hands off that same read, so what is charged and
+ * what is sent are one set of bytes. A link is reused for a day. Also
+ * remembers what each link contained, so a request's fingerprint depends on
+ * the picture, not on which upload link it happened to get.
  */
 import { createHash } from 'node:crypto'
 import type { OutputFile } from './types'
 
 export interface Handoff {
+  /** Reads the file now and hands off those bytes. */
   toUrl(file: OutputFile): Promise<string>
+  /** Hands off exactly `bytes` (the caller's own read of `file`, which names the upload and its type). */
+  toUrlBytes(file: OutputFile, bytes: Uint8Array): Promise<string>
   hashOf(url: string): string | undefined
 }
 
@@ -42,26 +53,31 @@ export function createHandoff(d: {
   now?: () => number
 }): Handoff {
   const now = d.now ?? Date.now
-  const byFile = new Map<string, { url: Promise<string>; at: number }>()
+  const byBytes = new Map<string, { url: Promise<string>; at: number }>()
   const hashByUrl = new Map<string, string>()
+  const toUrlBytes = (file: OutputFile, bytes: Uint8Array): Promise<string> => {
+    const sha = sha256Hex(bytes)
+    const mime = mimeFor(file.filename)
+    const key = `${sha}:${mime}`
+    const hit = byBytes.get(key)
+    if (hit && now() - hit.at < HANDOFF_TTL_MS) return hit.url
+    const entry = {
+      at: now(),
+      url: (async () => {
+        const url = await d.upload(bytes, file.filename, mime)
+        hashByUrl.set(url, sha)
+        return url
+      })(),
+    }
+    byBytes.set(key, entry)
+    entry.url.catch(() => { if (byBytes.get(key) === entry) byBytes.delete(key) })
+    return entry.url
+  }
   return {
-    toUrl(file) {
-      const key = `${file.type}:${file.subfolder}:${file.filename}`
-      const hit = byFile.get(key)
-      if (hit && now() - hit.at < HANDOFF_TTL_MS) return hit.url
-      const entry = {
-        at: now(),
-        url: (async () => {
-          const bytes = await d.read(file)
-          const url = await d.upload(bytes, file.filename, mimeFor(file.filename))
-          hashByUrl.set(url, sha256Hex(bytes))
-          return url
-        })(),
-      }
-      byFile.set(key, entry)
-      entry.url.catch(() => { if (byFile.get(key) === entry) byFile.delete(key) })
-      return entry.url
+    async toUrl(file) {
+      return toUrlBytes(file, await d.read(file))
     },
+    toUrlBytes,
     hashOf(url) {
       return hashByUrl.get(url)
     },

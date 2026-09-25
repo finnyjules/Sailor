@@ -61,6 +61,14 @@ export interface RunnerNodeRule {
   outputsNotLinked?: readonly number[]
   /** Every node reading this one must be one of these classes. */
   feedsOnly?: readonly string[]
+  /** At least one node of the prompt must read this one (a source with no reader is left to ComfyUI). */
+  needsReader?: true
+  /**
+   * Toggles that must be off (not wired, and falsy as Python reads them): the
+   * runner doesn't do what they switch on (the Audio card's `export`, which
+   * saves a copy to the output folder).
+   */
+  offWidgets?: readonly string[]
   /** A wired input must come from one of these (class, output slot) pairs. */
   linkSources?: Readonly<Record<string, readonly (readonly [string, number])[]>>
   /**
@@ -430,12 +438,27 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // The Audio card a sync-3 lip-sync reads its sound from: its own file,
   // handed on (no call, no charge). Taken only when it feeds lip-sync nodes
   // and plays its file (nothing wired into `source`).
+  // F22 fix round 1: only a card something reads (a lone card, even beside
+  // other runner work, stays with ComfyUI), and with `export` off (the runner
+  // saves no copy to the output folder).
   Audio: {
     family: 'sync-3',
     local: 'source',
     mustNotLink: ['audio', 'source'],
     feedsOnly: ['LipSyncNode'],
+    needsReader: true,
+    offWidgets: ['export'],
   },
+}
+
+/**
+ * Classes that exist in RUNNER_NODE_RULES for one family only: with it off,
+ * the runner knows nothing of them (validate.ts leaves a workflow with them
+ * whole, as before they had a row). F22 fix round 1.
+ */
+export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
+  LipSyncNode: 'sync-3',
+  Audio: 'sync-3',
 }
 
 /**
@@ -570,6 +593,7 @@ export function nodeRuleAllows(
   if (!upgraded && (!family || !families.has(family))) return false
   if (need.some(name => !isLink(inputs[name]))) return false
   if ((rule.mustNotLink ?? []).some(name => isLink(inputs[name]))) return false
+  if ((rule.offWidgets ?? []).some(name => isLink(inputs[name]) || pyTruthy(inputs[name]))) return false
   for (const [name, spec] of Object.entries(rule.widgets ?? {})) {
     if (!widgetValid(inputs, name, spec)) return false
   }
@@ -728,14 +752,17 @@ function hasJsonList(v: unknown, key: string): boolean {
 /** The checks a rule makes across the prompt: who reads this node, and where its wires come from. */
 function graphRuleAllows(prompt: ApiPrompt, id: string, rule: RunnerNodeRule): boolean {
   const notLinked = rule.outputsNotLinked ?? []
-  if (notLinked.length || rule.feedsOnly) {
+  if (notLinked.length || rule.feedsOnly || rule.needsReader) {
+    let readers = 0
     for (const node of Object.values(prompt)) {
       for (const l of linksOf(node)) {
         if (l.from !== id) continue
+        readers++
         if (notLinked.includes(l.slot)) return false
         if (rule.feedsOnly && !rule.feedsOnly.includes(node.class_type)) return false
       }
     }
+    if (rule.needsReader && !readers) return false
   }
   const inputs = prompt[id]?.inputs ?? {}
   for (const name of rule.imageInputs ?? []) {

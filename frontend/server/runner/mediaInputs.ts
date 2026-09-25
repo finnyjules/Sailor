@@ -97,12 +97,21 @@ export interface MediaRule {
 }
 
 /**
+ * A file over the rule's size, judged from its size alone before it is read
+ * (F22 fix round 1: a file too large is never loaded). Null when it fits.
+ */
+export function mediaSizeProblem(bytes: number, rule: MediaRule): string | null {
+  return bytes > rule.maxBytes ? rule.words.tooLarge : null
+}
+
+/**
  * Why `facts` can't be sent under `rule`, or null. `strict`: a file whose
  * length couldn't be measured is refused (its price or limit can't be
  * checked); otherwise it is left to the caller (priced at its cap).
  */
 export function mediaRuleProblem(facts: MediaFacts, rule: MediaRule, strict: boolean): string | null {
-  if (facts.bytes > rule.maxBytes) return rule.words.tooLarge
+  const tooLarge = mediaSizeProblem(facts.bytes, rule)
+  if (tooLarge) return tooLarge
   if (!facts.format || !rule.formats.includes(facts.format)) return rule.words.wrongFormat
   if (facts.seconds == null) return strict ? rule.words.unmeasured : null
   if (rule.kind === 'video' && facts.width != null && facts.height != null && rule.words.tooManyPixels) {

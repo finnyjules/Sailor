@@ -133,16 +133,24 @@ export function hasOutputNode(prompt: ApiPrompt): boolean {
  * credit is only ever charged on top of something made (a provider result,
  * or a finished Frame render: the Frame itself is free, but its stage pays
  * the render credit, as on the Python path), so a stage that can make
- * nothing holds nothing.
+ * nothing holds nothing. `measured`: the lengths the start of the run
+ * measured for sync-3 lip-syncs (TakeRecord.measured, F22 fix round 1), so the
+ * hold is their price; a node with none holds the 60 s cap.
  */
-export function stageEstimate(prompt: ApiPrompt, nodeIds: Iterable<string>, includeBase: boolean, families: ReadonlySet<RunnerFamily> = NO_FAMILIES): number {
+export function stageEstimate(
+  prompt: ApiPrompt, nodeIds: Iterable<string>, includeBase: boolean, families: ReadonlySet<RunnerFamily> = NO_FAMILIES,
+  measured?: Readonly<Record<string, { seconds: InputSeconds }>>,
+): number {
   let total = 0
   let renders = false
   for (const id of nodeIds) {
     const n = prompt[id]
     if (!n) continue
     if (LOCAL_RENDER_TYPES.has(n.class_type)) renders = true
-    else if (!actionPassThrough(n.class_type, n.inputs ?? {})) total += nodeCredits(n, undefined, families)
+    else if (!actionPassThrough(n.class_type, n.inputs ?? {})) {
+      const m = measured && Object.prototype.hasOwnProperty.call(measured, id) ? measured[id] : undefined
+      total += nodeCredits(n, undefined, families, m?.seconds)
+    }
   }
   return includeBase && (total > 0 || renders) ? total + BASE_RENDER_CREDITS : total
 }

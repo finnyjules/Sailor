@@ -23,7 +23,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BufferTarget, EncodedPacket, EncodedVideoPacketSource, Mp4OutputFormat, Output } from 'mediabunny'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { NO_FAMILIES, RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
@@ -55,7 +55,12 @@ import {
 import { mediaFacts, mediaFormat, mediaRuleProblem } from '~~/server/runner/mediaInputs'
 import { requestProblem, requestProblems } from '~~/server/runner/requestRules'
 import { collectInputFiles } from '~~/server/runner/inputs'
-import { mimeFor } from '~~/server/runner/handoff'
+import { createHandoff, mimeFor, sha256Hex } from '~~/server/runner/handoff'
+import { stageEstimate } from '~~/server/runner/metering'
+import { pruneInvalidOutputs } from '#shared/runner/validate'
+import { SYNC_3_CHANGED } from '~~/server/runner/sync3Media'
+import { QWEN_2511_ANGLES_APP } from '~~/server/runner/generators/qwen2511Angles'
+import sharp from 'sharp'
 import { createEngineResultStore } from '~~/server/runner/results'
 import { nodeCredits } from '~~/server/runner/metering'
 import { PRICE_BOOK_VERSION, priceGraph } from '~~/server/utils/priceBook'
@@ -519,7 +524,13 @@ describe('the media: what the file is, read from its bytes', () => {
     expect(mediaRuleProblem(a, SYNC_3_SOUND_RULE, true)).toBeNull()
     // A sound as the face video, a video as the sound: the wrong format.
     expect(mediaRuleProblem(await mediaFacts(wav(1), SYNC_3_VIDEO_RULE), SYNC_3_VIDEO_RULE, true)).toBe(SYNC_3_VIDEO_RULE.words.wrongFormat)
-    expect(mediaRuleProblem(await mediaFacts(await mp4(1), SYNC_3_SOUND_RULE), SYNC_3_SOUND_RULE, true)).toBe(SYNC_3_SOUND_RULE.words.wrongFormat)
+    // An MP4 is taken as a sound (fix round 1, finding 6) when it has a sound track; this one has none.
+    expect(mediaRuleProblem(await mediaFacts(await mp4(1), SYNC_3_SOUND_RULE), SYNC_3_SOUND_RULE, true)).toBe(SYNC_3_SOUND_RULE.words.unmeasured)
+    expect(SYNC_3_SOUND_RULE.formats).toContain('mp4')
+    // WebM/Opus sound is on neither sync.so's list nor fal's: refused, naming the formats taken.
+    const webm = Uint8Array.from([0x1A, 0x45, 0xDF, 0xA3, 0x42, 0x82, 0x84, ...Buffer.from('webm')])
+    expect(mediaRuleProblem(await mediaFacts(webm, SYNC_3_SOUND_RULE), SYNC_3_SOUND_RULE, true))
+      .toBe('sync-3 takes sounds as WAV, MP3, Ogg, FLAC, M4A, MP4 or AAC files. Save this one as one of those first.')
     // Over the size limit (judged on the count; never parsed).
     expect(mediaRuleProblem({ ...v, bytes: SYNC_3_MAX_VIDEO_BYTES + 1 }, SYNC_3_VIDEO_RULE, true)).toBe(SYNC_3_VIDEO_RULE.words.tooLarge)
     expect(mediaRuleProblem({ ...a, bytes: SYNC_3_MAX_SOUND_BYTES + 1 }, SYNC_3_SOUND_RULE, true)).toBe(SYNC_3_SOUND_RULE.words.tooLarge)
@@ -629,7 +640,7 @@ describe('the engine', () => {
     return makeKit({ hosted: true, available: 5000, root, deps: { families: () => o.families ?? ON, results } })
   }
 
-  it('sends the family\'s own endpoint with the handed-off files; holds the 60 s cap; charges the clip measured', async () => {
+  it('sends the family\'s own endpoint with the handed-off files; holds and charges the clip measured', async () => {
     const k = await kitWith({ 'face.mp4': await mp4(5), 'voice.wav': wav(3.4) })
     await start(k, { 1: lip({ mode: 'loop' }), 2: videoCard() })
     await until(() => ofType(k.seen, 'execution_success').length === 1 || ofType(k.seen, 'execution_error').length === 1)
@@ -640,9 +651,10 @@ describe('the engine', () => {
     expect(checkPayload(SCHEMA, sent[0]!.payload)).toEqual([])
     // The hand-off uploaded both with their types.
     expect(k.upload.mock.calls.map(c => [c[1], c[2]]).sort()).toEqual([['face.mp4', 'video/mp4'], ['voice.wav', 'audio/wav']])
-    // Hold: 60 s ($8, 1200) + the render credit; charge: the 3.4 s sound, billed 4 s ($0.533333, 80) + 1.
+    // The tight hold (fix round 1): the 3.4 s sound measured at the start, billed 4 s ($0.533333, 80) + the
+    // render credit, held and charged alike.
     const hold = [...k.ledger.holds.values()]
-    expect(hold.map(h => h.credits)).toEqual([1201])
+    expect(hold.map(h => h.credits)).toEqual([81])
     const price = priceNode('LipSyncNode', lip({ mode: 'loop' }).inputs, { inputSeconds: { audio: 3.4, video: 5 } })
     expect(price).toEqual({ usd: 0.533333, credits: 80 })
     expect(hold.map(h => h.actual)).toEqual([80 + 1])
@@ -689,8 +701,171 @@ describe('the engine', () => {
     const k = await kitWith({ 'face.mp4': await mp4(5), 'voice.wav': wav(3) })
     const owned: string[] = []
     k.deps.ownership.ownsInput = async (_u, f) => { owned.push(f.filename); return f.filename !== 'face.mp4' }
-    await expect(start(k, { 1: lip(), 2: videoCard() })).rejects.toThrow('isn’t in your files')
+    await expect(start(k, { 1: lip(), 2: videoCard() })).rejects.toThrow('This workflow uses a file that isn’t one of yours')
     expect(owned).toContain('face.mp4')
     expect(k.ledger.holds.size).toBe(0)
+  })
+})
+
+// ── Fix round 1 (review of 945c3ab42) ───────────────────────────────────────
+
+describe('fix round 1: what is measured is what is sent and charged', () => {
+  const start = (k: ReturnType<typeof makeKit>, take: ApiPrompt) =>
+    k.engine.startRun({ userId: k.userId, takes: [take], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+  const done = (k: ReturnType<typeof makeKit>, n = 1) =>
+    until(() => ofType(k.seen, 'execution_success').length + ofType(k.seen, 'execution_error').length >= n)
+
+  /** A kit on real files; `reads` counts reads per file; `later` gives a file's bytes from its second read on. */
+  const kitWith = (entries: Record<string, Buffer>, o: { families?: ReadonlySet<RunnerFamily>, later?: Record<string, Buffer> } = {}) => {
+    const root = mkdtempSync(join(tmpdir(), 'sync3-fix1-'))
+    for (const t of ['input', 'output', 'temp']) mkdirSync(join(root, t), { recursive: true })
+    for (const [name, bytes] of Object.entries(entries)) writeFileSync(join(root, 'input', name), bytes)
+    const store = createEngineResultStore({ dirForType: t => join(root, t), hosted: () => true })
+    const reads = new Map<string, number>()
+    const results = {
+      ...store,
+      read: async (f: OutputFile) => {
+        const n = (reads.get(f.filename) ?? 0) + 1
+        reads.set(f.filename, n)
+        if (n > 1 && o.later?.[f.filename]) return new Uint8Array(o.later[f.filename]!)
+        return store.read(f)
+      },
+    }
+    // The hand-off reads through the same store, so a read it makes itself is counted (and sees `later`).
+    const upload = vi.fn(async (_b: Uint8Array, name: string) => `https://fal.storage/${name}`)
+    const handoff = createHandoff({ read: f => results.read(f), upload })
+    return { k: makeKit({ hosted: true, available: 5000, root, deps: { families: () => o.families ?? ON, results, handoff } }), reads, root, upload }
+  }
+  /** The same length, other bytes. */
+  const otherWav = (seconds: number) => { const b = wav(seconds); b.fill(3, 44); return b }
+
+  it('the hand-off is keyed by the bytes, not the name: an overwritten file is uploaded again; toUrlBytes sends exactly the bytes given', async () => {
+    let disk = new Uint8Array([1, 1])
+    let n = 0
+    const upload = vi.fn(async () => `https://fal.media/up${++n}`)
+    const h = createHandoff({ read: async () => disk, upload })
+    const f: OutputFile = { filename: 'voice.wav', subfolder: '', type: 'input' }
+    expect(await h.toUrl(f)).toBe('https://fal.media/up1')
+    expect(await h.toUrl(f)).toBe('https://fal.media/up1')
+    disk = new Uint8Array([2, 2, 2])
+    expect(await h.toUrl(f)).toBe('https://fal.media/up2')
+    expect(h.hashOf('https://fal.media/up2')).toBe(sha256Hex(new Uint8Array([2, 2, 2])))
+    // Bytes the caller already read: those, whatever the file now holds.
+    expect(await h.toUrlBytes(f, new Uint8Array([7]))).toBe('https://fal.media/up3')
+    expect(upload.mock.calls.map(c => [...(c as unknown as [Uint8Array])[0]])).toEqual([[1, 1], [2, 2, 2], [7]])
+    expect(upload.mock.calls.map(c => (c as unknown as [Uint8Array, string, string])[2])).toEqual(['audio/wav', 'audio/wav', 'audio/wav'])
+  })
+
+  it('between runs: a sound overwritten under the same name is measured, held, sent and charged anew', async () => {
+    const { k, root, upload } = kitWith({ 'face.mp4': await mp4(5), 'voice.wav': wav(3.4) })
+    await start(k, { 1: lip({ mode: 'loop' }), 2: videoCard() })
+    await done(k, 1)
+    writeFileSync(join(root, 'input', 'voice.wav'), wav(5))
+    await start(k, { 1: lip({ mode: 'loop' }), 2: videoCard() })
+    await done(k, 2)
+    expect(ofType(k.seen, 'execution_error')).toEqual([])
+    const voices = upload.mock.calls.filter(c => (c as unknown as [Uint8Array, string])[1] === 'voice.wav').map(c => (c as unknown as [Uint8Array])[0].byteLength)
+    expect(voices).toEqual([wav(3.4).byteLength, wav(5).byteLength])
+    // 3.4 s → 4 s (80) and 5 s (101), each + the render credit, held and charged alike.
+    expect([...k.ledger.holds.values()].map(h => [h.credits, h.actual])).toEqual([[81, 81], [102, 102]])
+  })
+
+  it('mid-run: a longer sound after the start is refused at the node\'s turn; the hold is released, nothing sent', async () => {
+    const { k, upload } = kitWith({ 'face.mp4': await mp4(5), 'voice.wav': wav(3) }, { later: { 'voice.wav': wav(4.5) } })
+    await start(k, { 1: lip({ mode: 'loop' }), 2: videoCard() })
+    await done(k)
+    expect((ofType(k.seen, 'execution_error')[0] as any).data.exception_message).toBe(SYNC_3_CHANGED)
+    expect(k.fal.reqs.size).toBe(0)
+    expect(upload.mock.calls.length).toBe(0)
+    expect([...k.ledger.holds.values()].map(h => [h.credits, h.state])).toEqual([[61, 'released']])
+  })
+
+  it('mid-run: the same length with other bytes is refused too', async () => {
+    const { k } = kitWith({ 'face.mp4': await mp4(5), 'voice.wav': wav(3) }, { later: { 'voice.wav': otherWav(3) } })
+    await start(k, { 1: lip({ mode: 'loop' }), 2: videoCard() })
+    await done(k)
+    expect((ofType(k.seen, 'execution_error')[0] as any).data.exception_message).toBe(SYNC_3_CHANGED)
+    expect(k.fal.reqs.size).toBe(0)
+    expect([...k.ledger.holds.values()].map(h => h.state)).toEqual(['released'])
+  })
+
+  it('the node\'s turn reads each file once: the bytes measured are the bytes uploaded', async () => {
+    const { k, reads } = kitWith({ 'face.mp4': await mp4(5), 'voice.wav': wav(3) })
+    await start(k, { 1: lip({ mode: 'loop' }), 2: videoCard() })
+    await done(k)
+    expect(ofType(k.seen, 'execution_error')).toEqual([])
+    // One read at the start of the run, one at the node's turn (the check and the hand-off share it).
+    expect(Object.fromEntries(reads)).toEqual({ 'face.mp4': 2, 'voice.wav': 2 })
+  })
+
+  it('a size-priced picture (Rotate camera on 2511) overwritten during its turn: the picture measured is the one sent', async () => {
+    const small = await sharp({ create: { width: 1000, height: 1000, channels: 3, background: '#808080' } }).png().toBuffer()
+    const big = await sharp({ create: { width: 4000, height: 4000, channels: 3, background: '#808080' } }).png().toBuffer()
+    const qwen: ReadonlySet<RunnerFamily> = new Set(['qwen-2511-angles'])
+    const { k, reads, upload } = kitWith({ 'photo.png': small }, { families: qwen, later: { 'photo.png': big } })
+    await start(k, {
+      11: { class_type: 'Image', inputs: { image: 'photo.png' } },
+      1: { class_type: 'RotateCameraNode', inputs: { image: ['11', 0], camera: JSON.stringify({ yaw: 90, pitch: 30, roll: 0 }), seed: 0 } },
+      2: { class_type: 'Image', inputs: { image: '', export: false, images: ['1', 0], batch_index: -1 } },
+    })
+    await done(k)
+    expect(k.fal.submitted().map(r => r.endpoint)).toEqual([QWEN_2511_ANGLES_APP])
+    expect(reads.get('photo.png')).toBe(1)
+    expect((upload.mock.calls[0] as unknown as [Uint8Array])[0].byteLength).toBe(small.byteLength)
+    expect([...k.ledger.holds.values()].map(h => h.actual)).toEqual([creditsForUsd(0.035) + 1])
+  })
+
+  it('the hold: the measured price when the take has a record; the 60 s cap with none (older runs, a take never measured)', () => {
+    const take: ApiPrompt = { 1: lip({ mode: 'loop' }), 2: videoCard() }
+    const measured = { 1: { seconds: { audio: 3.4, video: 5 }, sha: { video: 'v', audio: 'a' } } }
+    expect(stageEstimate(take, ['1', '2'], true, ON, measured)).toBe(81)
+    expect(stageEstimate(take, ['1', '2'], true, ON)).toBe(1201)
+    // A record with no lengths (a local run that couldn't measure): the cap.
+    expect(stageEstimate(take, ['1', '2'], true, ON, { 1: { seconds: {}, sha: { video: 'v', audio: 'a' } } })).toBe(1201)
+  })
+
+  it('the record is kept on the take (with the bytes\' sha256), so every later leg of the run holds from it', async () => {
+    const { k } = kitWith({ 'face.mp4': await mp4(5), 'voice.wav': wav(3.4) })
+    const { runId } = await start(k, { 1: lip({ mode: 'loop' }), 2: videoCard() })
+    await done(k)
+    const run = (await k.store.get(runId))!
+    expect(run.takes[0]!.measured!['1']!.sha).toEqual({ video: sha256Hex(await mp4(5)), audio: sha256Hex(wav(3.4)) })
+    expect(run.takes[0]!.measured!['1']!.seconds.audio).toBeCloseTo(3.4, 3)
+  })
+})
+
+describe('fix round 1: the Audio card and the switch-off path', () => {
+  const image = { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a red fox', aspect_ratio: '1:1', seed: 0, model_options: '{}' } }
+  const imageCard = { class_type: 'Image', inputs: { image: '', export: false, images: ['1', 0], batch_index: -1 } }
+
+  it('an image workflow beside a lone Audio card stays on the engine, exporting or not, with sync-3 on', () => {
+    expect(isRunnerEligible({ 1: image, 2: imageCard }, ALL)).toBe(true)
+    expect(isRunnerEligible({ 1: image, 2: imageCard, 3: card('voice.wav', { export: true }) }, ALL)).toBe(false)
+    expect(isRunnerEligible({ 1: image, 2: imageCard, 3: card('voice.wav') }, ALL)).toBe(false)
+  })
+
+  it('a card feeding sync-3 is taken only with export off (a set or linked export stays on the engine)', () => {
+    const withCard = (c: object): ApiPrompt => ({ 1: lip({ inputs: { audio: ['3', 0] } }), 2: videoCard(), 3: c as any })
+    expect(isRunnerEligible(withCard(card()), ON)).toBe(true)
+    expect(isRunnerEligible(withCard(card('voice.wav', { export: true })), ALL)).toBe(false)
+    expect(isRunnerEligible(withCard(card('voice.wav', { export: ['7', 0] })), ALL)).toBe(false)
+  })
+
+  it('switch off: a workflow with Lip-sync or an Audio card is left whole by the validation port (as before F22); on, it is pruned', () => {
+    // Output 1 fails validation (a Frame with no layer 1); Lip-sync feeds a Video card.
+    const p: ApiPrompt = {
+      1: { class_type: 'Compositor', inputs: {} },
+      2: lip(),
+      3: videoCard('2'),
+      4: card(),
+    }
+    for (const families of [NO_FAMILIES, ALL_BUT]) {
+      const off = pruneInvalidOutputs(p, families)
+      expect(off.prompt).toBe(p)
+      expect(off.dropped).toEqual([])
+    }
+    const on = pruneInvalidOutputs(p, ALL)
+    expect(on.dropped).toEqual(['1'])
+    expect(Object.keys(on.prompt).sort()).toEqual(['2', '3', '4'])
   })
 })

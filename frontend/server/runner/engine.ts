@@ -27,7 +27,7 @@ import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
 import { extraPromptText, hasOutputNode, measuredInputPixels, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
 import { ev, type RunEvents, type SwitchReason } from './events'
-import { sync3InputFiles, sync3MediaCheck } from './sync3Media'
+import { SYNC_3_CHANGED, measuredOf, sync3InputFiles, sync3MediaChanged, sync3MediaCheck } from './sync3Media'
 import { isSync3LipSync } from '#shared/runner/lipSync'
 import type { InputSeconds } from '#shared/pricing/clipSettings'
 import type { Handoff } from './handoff'
@@ -36,7 +36,7 @@ import { runIdOf, userKeyOf, type RunStore } from './store'
 import {
   emptyNodeRecord, stageKeyOf,
   type LegAction, type LegRecord, type NodeRecord, type OutputFile, type PendingRequest, type RunRecord, type RunStatus,
-  type RunnerProvider, type StageCharge, type TakeRecord,
+  type RunnerProvider, type StageCharge, type TakeRecord, type MeasuredMedia,
 } from './types'
 
 export class RunStopped extends Error {
@@ -461,7 +461,8 @@ export function createEngine(deps: EngineDeps) {
         // which take actually pays it is only known once one makes something.
         const includesBase = !run.baseCharged && hasOutputNode(take.prompt)
         let estimate: number
-        try { estimate = stageEstimate(take.prompt, nodes, includesBase, deps.families?.() ?? NO_FAMILIES) }
+        // sync-3 lip-syncs hold the price of what the start of the run measured (TakeRecord.measured); none, the 60 s cap.
+        try { estimate = stageEstimate(take.prompt, nodes, includesBase, deps.families?.() ?? NO_FAMILIES, take.measured) }
         catch (e) {
           if (e instanceof UnpricedGraphError) throw refuse('A model in this workflow has no price yet', 500)
           throw e
@@ -660,14 +661,25 @@ export function createEngine(deps: EngineDeps) {
       // camera on 2511 above the input cap, requestRules.ts) fails the node
       // here, before the hand-off or the call; its hold is released.
       const families = deps.families?.() ?? NO_FAMILIES
-      const inputPixels = await measuredInputPixels(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], f => deps.results.read(f), families)
+      // One read of each file for this node's turn (F22 fix round 1): what is
+      // measured and priced here is exactly what the hand-off uploads
+      // (handoff.ts toUrlBytes, keyed by the bytes' sha256), so a file
+      // overwritten meanwhile can never be charged as one thing and sent as another.
+      const reads = new Map<string, Promise<Uint8Array>>()
+      const readOnce = (f: OutputFile): Promise<Uint8Array> => {
+        const key = `${f.type}:${f.subfolder}:${f.filename}`
+        let p = reads.get(key)
+        if (!p) { p = deps.results.read(f); reads.set(key, p) }
+        return p
+      }
+      const inputPixels = await measuredInputPixels(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], readOnce, families)
       const tooLarge = measuredInputProblem(take.prompt[id]!.class_type, inputPixels, families)
       if (tooLarge) throw new Error(tooLarge)
       // A file its model refuses (Product shot on Bria: over 12 MB, or not
       // JPEG, PNG or WebP; HappyHorse 1.1: over 20 MB; requestRules.ts),
       // before the hand-off. Reads nothing for any other node. The size read
       // goes to planNode, which drops a backup that can't take it.
-      const fileCheck = await linkedFileCheck(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], f => deps.results.read(f), families)
+      const fileCheck = await linkedFileCheck(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], readOnce, families)
       if (fileCheck.problem) throw new Error(fileCheck.problem)
       // sync-3 lip-sync (F22): its face video and sound read and measured again
       // now, before the hand-off. A file that no longer fits fails the node here
@@ -675,9 +687,16 @@ export function createEngine(deps: EngineDeps) {
       let inputSeconds: InputSeconds | undefined
       if (take.prompt[id]!.class_type === 'LipSyncNode' && isSync3LipSync(take.prompt[id]!.inputs ?? {})) {
         const media = await sync3MediaCheck(take.prompt, id, {
-          read: f => deps.results.read(f), strict: deps.hosted(), filesFrom: ([from]) => take.nodes[from]?.outputs ?? [],
+          read: readOnce, size: f => deps.results.size?.(f) ?? Promise.resolve(null), strict: deps.hosted(), filesFrom: ([from]) => take.nodes[from]?.outputs ?? [],
         })
         if (media.problem !== null) throw new Error(media.problem)
+        // The tight hold (F22 fix round 1): the files must be the ones the start
+        // of the run measured and held for, and cost no more.
+        const recorded = take.measured && Object.prototype.hasOwnProperty.call(take.measured, id) ? take.measured[id] : undefined
+        if (recorded && (sync3MediaChanged(recorded, media)
+          || nodeCredits(take.prompt[id]!, undefined, families, media.seconds) > nodeCredits(take.prompt[id]!, undefined, families, recorded.seconds))) {
+          throw new Error(SYNC_3_CHANGED)
+        }
         inputSeconds = media.seconds
       }
 
@@ -685,9 +704,9 @@ export function createEngine(deps: EngineDeps) {
         prompt: take.prompt,
         nodeId: id,
         filesFrom: ([from]) => take.nodes[from]?.outputs ?? [],
-        toUrl: f => deps.handoff.toUrl(f),
+        toUrl: async f => deps.handoff.toUrlBytes(f, await readOnce(f)),
         gateOpen: take.openGates.includes(id),
-        readFile: f => deps.results.read(f),
+        readFile: readOnce,
         hosted: deps.hosted(),
         families,
         ...(fileCheck.bytes !== undefined ? { inputBytes: fileCheck.bytes } : {}),
@@ -1045,7 +1064,7 @@ export function createEngine(deps: EngineDeps) {
     let nodeErrors: Record<string, ComfyNodeError> | undefined
     for (const p of takes) {
       if (!p || typeof p !== 'object') throw refuse('This workflow can’t run on the Sailor runner', 400, { reason: RUNNER_NOT_ELIGIBLE })
-      const pruned = pruneInvalidOutputs(p as ApiPrompt)
+      const pruned = pruneInvalidOutputs(p as ApiPrompt, families)
       // ComfyUI: "Prompt outputs failed validation". No marker: ComfyUI would refuse it too.
       if (pruned.failed) throw refuse(NO_VALID_OUTPUTS_MESSAGE, 400, { node_errors: pruned.nodeErrors })
       if (!isRunnerEligible(pruned.prompt, families, { hosted: deps.hosted(), afterPruning: pruned.dropped.length > 0 })) {
@@ -1103,12 +1122,17 @@ export function createEngine(deps: EngineDeps) {
     // sync-3 lip-sync (F22): its face video and sound must be the caller's own
     // (hosted), and sync-3 must be able to take them: read and measured now,
     // before anything is held (sync3Media.ts). The node's turn reads them again.
-    for (const p of prompts) {
+    // What was measured is recorded on the take (the tight hold, F22 fix round 1).
+    const measured: Record<string, MeasuredMedia>[] = prompts.map(() => ({}))
+    for (const [index, p] of prompts.entries()) {
       for (const [nodeId, n] of Object.entries(p)) {
         if (n.class_type !== 'LipSyncNode' || !isSync3LipSync(n.inputs ?? {})) continue
         await assertFilesOwned(sync3InputFiles(p, nodeId), i.userId, deps.hosted(), deps.ownership)
-        const media = await sync3MediaCheck(p, nodeId, { read: f => deps.results.read(f), strict: deps.hosted() })
+        const media = await sync3MediaCheck(p, nodeId, {
+          read: f => deps.results.read(f), size: f => deps.results.size?.(f) ?? Promise.resolve(null), strict: deps.hosted(),
+        })
         if (media.problem !== null) throw refuse(media.problem, 400, { nodeId, classType: n.class_type })
+        measured[index]![nodeId] = measuredOf(media)
       }
     }
     // A Frame's baked layers and masks are files the browser uploaded just
@@ -1135,6 +1159,7 @@ export function createEngine(deps: EngineDeps) {
         nodes: Object.fromEntries(Object.entries(prompt).map(([id, n]) => [id, emptyNodeRecord(n.class_type)])),
         openGates: [],
         droppedGates: [],
+        ...(Object.keys(measured[index]!).length ? { measured: measured[index] } : {}),
       })),
       legs: [],
       charges: [],

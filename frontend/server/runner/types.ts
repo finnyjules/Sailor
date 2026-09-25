@@ -79,6 +79,20 @@ export interface TakeRecord {
   openGates: string[]
   /** Gates where this take was not picked — nothing behind them runs. */
   droppedGates: string[]
+  /**
+   * What the start of the run measured of each sync-3 lip-sync's files (F22
+   * fix round 1, the tight hold): their lengths, which the hold is priced
+   * from, and the sha256 of the bytes measured. At the node's turn the files
+   * must still be exactly these, or the node is refused. Absent (older runs,
+   * nodes not measured): the hold is the 60 s cap.
+   */
+  measured?: Record<string, MeasuredMedia>
+}
+
+/** One sync-3 node's files as measured at the start of the run. */
+export interface MeasuredMedia {
+  seconds: { audio?: number | null; video?: number | null }
+  sha: { video: string; audio: string }
 }
 
 export type LegAction = 'run' | 'continue' | 'again' | 'redo' | 'restart'

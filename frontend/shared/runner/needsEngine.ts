@@ -35,7 +35,7 @@ export function nodesNeedingEngine(
   // What ComfyUI would run: outputs that fail validation are dropped first
   // (shared/runner/validate.ts). When every output fails, the runner itself
   // refuses the workflow with ComfyUI's message: nothing needs the engine.
-  const pruned = pruneInvalidOutputs(prompt)
+  const pruned = pruneInvalidOutputs(prompt, families)
   if (pruned.failed) return []
   const run = pruned.prompt
   const ids = Object.keys(run)

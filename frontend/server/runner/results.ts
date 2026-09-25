@@ -20,6 +20,8 @@ export interface ResultStore {
   saveLivePreview(bytes: Uint8Array, o: { nodeId: string; userId: string | null }): Promise<OutputFile>
   read(file: OutputFile): Promise<Uint8Array>
   exists(file: OutputFile): Promise<boolean>
+  /** The file's size in bytes without reading it, or null when it isn't there (F22 fix round 1). */
+  size?(file: OutputFile): Promise<number | null>
 }
 
 export function userSubfolder(userId: string | null, hosted: boolean): string {
@@ -132,6 +134,13 @@ export function createEngineResultStore(o: { dirForType(type: string): string | 
     },
     async exists(file) {
       try { return (await stat(pathOf(file))).isFile() } catch { return false }
+    },
+    async size(file) {
+      try {
+        const st = await stat(pathOf(file))
+        return st.isFile() ? st.size : null
+      }
+      catch { return null }
     },
   }
 }
