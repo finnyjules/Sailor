@@ -4078,6 +4078,30 @@ const FOLLOW_STRIP_MAX_AREA = 16_000_000
  *  after its end), so the triangles either side of the loop's seam sample real paint past it. */
 const FOLLOW_STRIP_WRAP = 4
 
+/** Even-odd point-in-polygon. */
+function pointInRing(x: number, y: number, ring: readonly { x: number; y: number }[]): boolean {
+  let inside = false
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i]!, b = ring[j]!
+    if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside
+  }
+  return inside
+}
+
+/** Is closed subpath `i` a HOLE of the shape — inside an odd number of the OTHER closed rings?
+ *  Its first vertex stands for it (rings of one outline do not cross). Open subpaths never are. */
+function ringIsHole(subs: readonly FlatSubpath[], i: number): boolean {
+  const sub = subs[i]!
+  const p = sub.pts[0]
+  if (!sub.closed || !p) return false
+  let n = 0
+  for (let k = 0; k < subs.length; k++) {
+    const other = subs[k]!
+    if (k !== i && other.closed && other.pts.length >= 3 && pointInRing(p.x, p.y, other.pts)) n++
+  }
+  return n % 2 === 1
+}
+
 /**
  * Steps 1–3 of `paintFollowedBand` for ONE subpath: its centreline, its own straight strip (its
  * own length, so its own tile count / mirror / fade), bent onto `bent`. Returns the line's
@@ -4090,12 +4114,14 @@ function bendFollowedLine(bent: CanvasRenderingContext2D, sub: FlatSubpath, o: {
   paintBox: { w: number; h: number }
   fade: 'across' | 'along'
   fadeRepeats: number
-}, centre: number, sx: number): FollowFrame | null {
+}, centre: number, sx: number, hole = false): FollowFrame | null {
   if (sub.pts.length < 2) return null
-  const line = offsetPolyline(sub.pts, sub.closed, centre, o.wobble ?? undefined)
+  // A HOLE ring's own winding says its outside is the shape's material; the band's sides are
+  // the SHAPE's, so both the offset and the normals are flipped for it (see `ringIsHole`).
+  const line = offsetPolyline(sub.pts, sub.closed, hole ? -centre : centre, o.wobble ?? undefined)
   const pts = resamplePolyline(line, sub.closed, Math.max(2 / sx, o.width / 24))
   const h = o.width / 2
-  const frame = followFrame(pts, sub.closed, h)
+  const frame = followFrame(pts, sub.closed, h, hole ? -1 : 1)
   if (!frame) return null
   const plan = followStripPlan(o.paint, o.paintBox, frame.length, sub.closed)
   if (!plan) return null
@@ -4244,8 +4270,13 @@ export function paintFollowedBand(ctx: CanvasRenderingContext2D, o: {
   const maskS = scratchLike(ctx)
   if (!bent || !maskS) return false
   const frames: FollowFrame[] = []
-  for (const sub of subs) {
-    const f = bendFollowedLine(bent, sub, o, centre, sx)
+  // Sides come from the SHAPE, not the ring: the mask (`strokeAligned`'s inside clip / outside
+  // knockout, `paintStrokeBand`'s radii) decides inside/outside against the whole shape, and
+  // for a hole ring "outside the shape" is INTO the hole. So on every ring strip y = 0 (the
+  // ombre's colour A) is the side inside the material.
+  for (let i = 0; i < subs.length; i++) {
+    const hole = o.subpaths !== 'longest' && ringIsHole(subs, i)
+    const f = bendFollowedLine(bent, subs[i]!, o, centre, sx, hole)
     if (f) frames.push(f)
   }
   if (!frames.length) return false

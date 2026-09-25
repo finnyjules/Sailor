@@ -155,40 +155,79 @@ test('a followed stroke on a RECT, a STAR and a WOBBLED band inks its whole band
   }
 })
 
-test('a COMPOUND path bends every ring: the inner ring of a square-with-a-hole keeps its band', async ({ page }) => {
-  // Two closed subpaths (outer square ±0.2, inner square ±0.1, evenodd). The band mask covers
-  // BOTH rings, so a followed fill bent along only the longest one would leave the inner band
-  // empty. Counted in the inner ring's own region: Chebyshev distance from the centre within
-  // 0.1 ± 0.03 of the canvas width.
+// Two closed subpaths (outer square ±0.2, inner square ±0.1, evenodd): a square with a square
+// HOLE. The shape's material lies between the rings, so the inner ring's "outside" is INTO the hole.
+const HOLED_D = 'M -0.2 -0.2 L 0.2 -0.2 L 0.2 0.2 L -0.2 0.2 Z M -0.1 -0.1 L 0.1 -0.1 L 0.1 0.1 L -0.1 0.1 Z'
+const holed = (stroke: Record<string, unknown>) => [{
+  id: 'p', kind: 'path', x: 0.5, y: 0.5, rotation: 0, opacity: 1, visible: true, scale: 1,
+  d: HOLED_D, bbox: { w: 0.4, h: 0.4 }, fill: 'none', fillRule: 'evenodd',
+  strokes: [{ id: 's1', width: 0.02, distance: 0, align: 'center', join: 'round', ...stroke }],
+}]
+/** Pixels matching `kind` counted by Chebyshev distance from the centre (a fraction of the
+ *  canvas width): within 0.03 of the hole ring (0.1) or of the outer ring (0.2). */
+async function byRing(page: Page, kind: 'red'): Promise<{ inner: number; outer: number }> {
+  return page.evaluate(() => {
+    const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+    const d = cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data
+    const cx = cv.width / 2, cy = cv.height / 2
+    let inner = 0, outer = 0
+    for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) {
+      const i = (y * cv.width + x) * 4
+      if (!(d[i]! > 150 && d[i + 1]! < 90 && d[i + 3]! > 200)) continue
+      const r = Math.max(Math.abs(x + 0.5 - cx), Math.abs(y + 0.5 - cy)) / cv.width
+      if (Math.abs(r - 0.1) < 0.03) inner++
+      else if (Math.abs(r - 0.2) < 0.03) outer++
+    }
+    return { inner, outer }
+  })
+}
+
+test('a COMPOUND path bends every ring, on the side the SHAPE says — centre, inside, outside, distance', async ({ page }) => {
+  // The band mask covers BOTH rings and decides inside/outside against the whole shape. A hole
+  // ring bent only along the longest ring — or offset by its OWN winding, which for a hole points
+  // the wrong way — leaves the hole ring's band (almost) empty.
+  test.setTimeout(150_000)   // four cases, two renders each
   const red = { type: 'stripes', a: '#ff0000', b: '#e00000', textColor: '#fff', angle: 0, density: 8 }
-  const layer = (s: Record<string, unknown>) => [{
-    id: 'p', kind: 'path', x: 0.5, y: 0.5, rotation: 0, opacity: 1, visible: true, scale: 1,
-    d: 'M -0.2 -0.2 L 0.2 -0.2 L 0.2 0.2 L -0.2 0.2 Z M -0.1 -0.1 L 0.1 -0.1 L 0.1 0.1 L -0.1 0.1 Z',
-    bbox: { w: 0.4, h: 0.4 }, fill: 'none', fillRule: 'evenodd',
-    strokes: [{ id: 's1', width: 0.02, distance: 0, align: 'center', join: 'round', paint: red, ...s }],
-  }]
-  const count = async (layers: unknown[]) => {
-    await render(page, layers)
-    return page.evaluate(() => {
-      const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
-      const d = cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data
-      const cx = cv.width / 2, cy = cv.height / 2
-      let inner = 0, outer = 0
-      for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) {
-        const i = (y * cv.width + x) * 4
-        if (!(d[i]! > 150 && d[i + 1]! < 90 && d[i + 3]! > 200)) continue
-        const r = Math.max(Math.abs(x + 0.5 - cx), Math.abs(y + 0.5 - cy)) / cv.width
-        if (Math.abs(r - 0.1) < 0.03) inner++
-        else if (Math.abs(r - 0.2) < 0.03) outer++
-      }
-      return { inner, outer }
-    })
+  const cases: [string, Record<string, unknown>][] = [
+    ['centre', { align: 'center' }],
+    ['inside', { align: 'inside' }],
+    ['outside', { align: 'outside' }],
+    ['distance 0.02', { align: 'center', distance: 0.02 }],
+  ]
+  for (const [name, s] of cases) {
+    await render(page, holed({ paint: red, ...s }))
+    const still = await byRing(page, 'red')
+    await render(page, holed({ paint: red, ...s, follow: true }))
+    const follow = await byRing(page, 'red')
+    expect(still.inner, `${name}: control inks the hole ring`).toBeGreaterThan(500)
+    expect(follow.inner / still.inner, `${name}: hole ring followed ${follow.inner} vs still ${still.inner}`).toBeGreaterThan(0.85)
+    expect(follow.outer / still.outer, `${name}: outer ring followed ${follow.outer} vs still ${still.outer}`).toBeGreaterThan(0.85)
   }
-  const still = await count(layer({}))
-  const follow = await count(layer({ follow: true }))
-  expect(still.inner, 'control inks the inner ring').toBeGreaterThan(500)
-  expect(follow.inner / still.inner, `inner ring: followed ${follow.inner} vs still ${still.inner}`).toBeGreaterThan(0.85)
-  expect(follow.outer / still.outer, `outer ring: followed ${follow.outer} vs still ${still.outer}`).toBeGreaterThan(0.85)
+})
+
+test('a followed ombre on a holed shape starts on the MATERIAL side of the hole ring too', async ({ page }) => {
+  // Across fade: colour A on the side inside the shape's material, B away from it. For the hole
+  // ring the material is OUTSIDE the ring (r > 0.1), the hole inside it.
+  await render(page, holed({ paint: OMBRE, follow: true, width: 0.04 }))
+  const shares = await page.evaluate(() => {
+    const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+    const d = cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data
+    const cx = cv.width / 2, cy = cv.height / 2
+    const side = { material: [0, 0], hole: [0, 0] }
+    for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) {
+      const i = (y * cv.width + x) * 4
+      if (d[i + 3]! < 200) continue
+      const r = Math.max(Math.abs(x + 0.5 - cx), Math.abs(y + 0.5 - cy)) / cv.width
+      const k = r > 0.112 && r < 0.118 ? 'material' : r > 0.082 && r < 0.088 ? 'hole' : null
+      if (!k) continue
+      side[k][1]++
+      if (d[i]! < 100) side[k][0]++
+    }
+    return { material: side.material[0] / Math.max(1, side.material[1]), hole: side.hole[0] / Math.max(1, side.hole[1]), n: side.material[1] + side.hole[1] }
+  })
+  expect(shares.n).toBeGreaterThan(500)
+  expect(shares.material, `material side dark (B) share ${shares.material}`).toBeLessThan(0.3)
+  expect(shares.hole, `hole side dark (B) share ${shares.hole}`).toBeGreaterThan(0.7)
 })
 
 test('followed ombre grain rides the layer: moved by whole pixels, the dots move with it', async ({ page }) => {

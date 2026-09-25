@@ -83,6 +83,17 @@ describe('followFrame', () => {
       expect(f.normals[i]!.y, `cw=${cw}`).toBeLessThan(-0.99)
     }
   })
+  it('outward −1 flips the side: a hole ring\'s normals point INTO the hole', () => {
+    for (const cw of [true, false]) {
+      const f = followFrame(rect(100, 50, cw), true, 10, -1)!
+      const i = f.pts.reduce((best, p, k) => (Math.abs(p.x) + Math.abs(p.y + 25) < Math.abs(f.pts[best]!.x) + Math.abs(f.pts[best]!.y + 25) ? k : best), 0)
+      expect(f.normals[i]!.y, `cw=${cw}`).toBeGreaterThan(0.99)   // top edge, pointing DOWN
+    }
+    // reach is measured against the flipped raw normal too, so a straight edge still needs none
+    const f = followFrame(rect(100, 50), true, 10, -1)!
+    const mid = f.pts.findIndex(p => Math.abs(p.y + 25) < 1e-6 && Math.abs(p.x) < 5)
+    expect(f.reach[mid]).toBeCloseTo(1, 6)
+  })
   it('normals are unit length and turn smoothly round a corner', () => {
     const f = followFrame(rect(100, 50), true, 10)!
     for (const n of f.normals) expect(Math.hypot(n.x, n.y)).toBeCloseTo(1, 6)

@@ -49,7 +49,11 @@ export interface FollowFrame {
  * angle between the smoothed and the raw, immediate-neighbour normal) so `bandTriangles` can
  * stretch the mesh out to cover it.
  */
-export function followFrame(pts: readonly FlatPoint[], closed: boolean, halfWidth: number): FollowFrame | null {
+export function followFrame(
+  pts: readonly FlatPoint[], closed: boolean, halfWidth: number,
+  /** −1 flips which side is outward — for a hole ring, whose outside is into the hole. */
+  outward: 1 | -1 = 1,
+): FollowFrame | null {
   const n = pts.length
   if (n < 2) return null
   const segs = closed ? n : n - 1
@@ -68,6 +72,7 @@ export function followFrame(pts: readonly FlatPoint[], closed: boolean, halfWidt
     for (let i = 0; i < n; i++) { const a = pts[i]!, b = pts[(i + 1) % n]!; area += a.x * b.y - b.x * a.y }
     sign = area > 0 ? 1 : -1
   }
+  sign *= outward   // both `normals` and `reach`'s raw normal are taken through `normalAt`, so both flip
   const at = (i: number) => (closed ? pts[((i % n) + n) % n]! : pts[Math.max(0, Math.min(n - 1, i))]!)
   const normalAt = (i: number, kk: number) => {
     const a = at(i - kk), b = at(i + kk)
