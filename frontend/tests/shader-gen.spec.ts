@@ -191,8 +191,9 @@ test.describe('shader generation (stage 5)', () => {
     const gallery = page.getByTestId('effect-gallery')
     await expect(gallery).toBeVisible()
     await expect(gallery.getByText('My effects').first()).toBeVisible()
-    await expect(gallery.locator('[data-effect-id="mine_aaaaaaaaaaaa"]')).toContainText('Rain on glass')
-    await expect(gallery.locator('[data-effect-id="mine_aaaaaaaaaaaa"]')).toContainText('My effect · from “Water ripple”')
+    // The card is the effect's newest version, under its own pinned id (Ruling #2).
+    await expect(gallery.locator('[data-effect-id="mine_aaaaaaaaaaaa~v1"]')).toContainText('Rain on glass')
+    await expect(gallery.locator('[data-effect-id="mine_aaaaaaaaaaaa~v1"]')).toContainText('My effect · from “Water ripple”')
     await expect(gallery.getByTestId('effect-gallery-make')).toContainText(PRICE)
     await gallery.getByTestId('effect-gallery-make').click()
     await expect(gallery).toHaveCount(0)
