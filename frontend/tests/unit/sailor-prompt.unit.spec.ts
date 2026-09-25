@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
+import { defineComponent, h, onMounted } from 'vue'
 import SailorPrompt from '~/components/prompt/SailorPrompt.vue'
 
 const stubs = { AgentSweep: true }
@@ -75,5 +76,20 @@ describe('SailorPrompt', () => {
     expect((w.vm as any).inputElement()).toBe(input(w).element)
     await w.setProps({ working: true })
     expect((w.vm as any).inputElement()).toBeNull()
+  })
+
+  it('the sweep is mounted before work starts, so it sees active flip false → true', async () => {
+    // AgentSweep's watcher runs immediately at setup, before its canvas exists;
+    // if it is first mounted already active, the glimm never starts.
+    const mountedWith: boolean[] = []
+    const SweepProbe = defineComponent({
+      props: { active: Boolean, period: Number, palette: String },
+      setup(p) { onMounted(() => mountedWith.push(p.active)); return () => h('canvas', { 'data-probe': String(p.active) }) },
+    })
+    const w = mount(SailorPrompt, { props: { working: false }, global: { stubs: { AgentSweep: SweepProbe } } })
+    await w.setProps({ working: true })
+    await flushPromises()
+    expect(mountedWith).toEqual([false])
+    expect(w.findComponent(SweepProbe).props('active')).toBe(true)
   })
 })

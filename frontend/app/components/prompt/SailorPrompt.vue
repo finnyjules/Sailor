@@ -67,7 +67,10 @@ defineExpose({ focus, inputElement })
       :class="{ 'is-active': focused || working }"
       @click="focus"
     >
-      <div v-if="working" class="pointer-events-none absolute inset-0"><AgentSweep :active="working" :period="3" palette="lagoon" /></div>
+      <!-- Always mounted: AgentSweep's watcher runs immediately at setup, before its
+           canvas exists, so mounting it already-active (v-if) never starts the glimm.
+           It hides its own canvas while inactive. -->
+      <div class="pointer-events-none absolute inset-0"><AgentSweep :active="working" :period="3" palette="lagoon" /></div>
       <Sparkles class="relative size-4 shrink-0 text-white/45" />
       <template v-if="working">
         <span class="relative min-w-0 flex-1 truncate text-[13px] text-white/75">{{ workingLabel }}</span>
