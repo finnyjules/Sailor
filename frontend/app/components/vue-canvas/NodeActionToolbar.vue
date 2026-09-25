@@ -99,12 +99,10 @@ const rows = computed<NodeAction[]>(() => (open.value ? groups.value[open.value]
 
 // Paid rows carry their price in the grey hint. Badge prices come from
 // /object_info (cached app-wide), read once the first time a menu opens.
-const objectInfo = shallowRef<Record<string, any> | null>(null)
+const objectInfo = shallowRef<Record<string, any>>({})
 const hosted = hostedModeEnabled(useRuntimeConfig().public)
 watch(open, async (v) => {
-  if (!v || objectInfo.value) return
-  const info: Record<string, any> = await fetchObjectInfo()
-  objectInfo.value = info
+  if (v) objectInfo.value = await fetchObjectInfo() // cached after the first call
 })
 function hintFor(a: NodeAction): string | null {
   return actionHint(a, actionPrice(a, objectInfo.value, hosted))
