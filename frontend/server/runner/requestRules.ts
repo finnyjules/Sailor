@@ -48,11 +48,21 @@
  *  - Film a shot on Seedance 2.0 with a first frame AND references (parked
  *    minor M5): Film a shot runs only on the ComfyUI path, whose Python
  *    builder would send the first frame and drop the references, so the
- *    /prompt gate refuses it with the same words as Generate a video.
+ *    /prompt gate refuses it with the same words as Generate a video;
+ *  - Rotate camera on Qwen Image Edit 2511 (F10 fix round 1, controller
+ *    ruling) with a picture above the input cap (LARGEST_INPUT_PIXELS, about
+ *    19 MP): fal makes the picture at the input's size with no stated limit,
+ *    and the price stops at the cap, so a larger one could cost more than it
+ *    is charged. The size is only known once the runner has the file, so the
+ *    engine checks it (`measuredInputProblem`) after measuring and before
+ *    sending; the node fails and its hold is released. An input it can't
+ *    measure is charged at the cap, as before.
  * References are never dropped, to make a request fit or otherwise.
  */
 import { isLink, type ApiPrompt } from '#shared/runner/graph'
-import { resolveVideoModelId } from '#shared/runner/eligibility'
+import { classUpgradeOn, resolveVideoModelId } from '#shared/runner/eligibility'
+import type { RunnerFamily } from '#shared/runner/families'
+import { LARGEST_INPUT_PIXELS } from '#shared/pricing/editSettings'
 import { composeImagePrompt } from './generators/image'
 import { RUNNER_VIDEO_MODELS, VEO_31_ONE_PICTURE, veo31HasExtras } from './generators/video'
 import { H3_MAX_TURBO_APP, H3_MAX_TURBO_ENDPOINTS, H3_MAX_TURBO_ID } from './generators/h3MaxTurbo'
@@ -207,6 +217,19 @@ export function wan3RequestProblem(id: Wan3Id, inputs: Record<string, unknown>):
   }
   if (!isLink(inputs.prompt) && chars(asText(inputs.prompt)) < 1) return { input: 'prompt', message: WAN_3_NEEDS_PROMPT }
   return null
+}
+
+export const ROTATE_CAMERA_TOO_LARGE = 'Rotate camera takes pictures up to about 19 megapixels. Make this one smaller first.'
+
+/**
+ * A node's measured input picture that its model must not be sent (the
+ * engine asks after measuring, before sending): Rotate camera on Qwen Image
+ * Edit 2511, while that switch is on, above the input cap. Null otherwise,
+ * and for a picture that couldn't be measured (priced at the cap).
+ */
+export function measuredInputProblem(classType: string, inputPixels: number | undefined, families: ReadonlySet<RunnerFamily>): string | null {
+  if (classType !== 'RotateCameraNode' || !classUpgradeOn(classType, families)) return null
+  return inputPixels !== undefined && inputPixels > LARGEST_INPUT_PIXELS ? ROTATE_CAMERA_TOO_LARGE : null
 }
 
 /** planNode's check: throws the plain message for a request no provider takes. */

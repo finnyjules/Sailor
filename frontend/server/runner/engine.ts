@@ -22,7 +22,7 @@ import { FalError, isProviderNetworkError, percentFromLogs, type FalStatus, type
 import { ReplicateError } from './replicateQueue'
 import { planNode, type ProviderBackup } from './executors'
 import type { BackupSettings } from './config'
-import { requestProblems } from './requestRules'
+import { measuredInputProblem, requestProblems } from './requestRules'
 import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
 import { extraPromptText, hasOutputNode, measuredInputPixels, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
@@ -652,6 +652,15 @@ export function createEngine(deps: EngineDeps) {
       await persist(run)
       publish(run, ev.executing(stageKey, id))
 
+      // The size of the picture a size-priced node is sent, measured before
+      // anything is handed off: a picture its model must not be sent (Rotate
+      // camera on 2511 above the input cap, requestRules.ts) fails the node
+      // here, before the hand-off or the call; its hold is released.
+      const families = deps.families?.() ?? NO_FAMILIES
+      const inputPixels = await measuredInputPixels(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], f => deps.results.read(f), families)
+      const tooLarge = measuredInputProblem(take.prompt[id]!.class_type, inputPixels, families)
+      if (tooLarge) throw new Error(tooLarge)
+
       const plan = await planNode({
         prompt: take.prompt,
         nodeId: id,
@@ -660,7 +669,7 @@ export function createEngine(deps: EngineDeps) {
         gateOpen: take.openGates.includes(id),
         readFile: f => deps.results.read(f),
         hosted: deps.hosted(),
-        families: deps.families?.() ?? NO_FAMILIES,
+        families,
       })
       // Rendered here (the Frame): no provider, no charge, not an asset.
       if (plan.kind === 'local') {
@@ -699,9 +708,8 @@ export function createEngine(deps: EngineDeps) {
       const backupSettings = deps.backup?.() ?? { enabled: false, stallMs: 0 }
       const backup = backupSettings.enabled && plan.backup ? plan.backup : null
       // Priced on the measured picture where the price depends on its size
-      // (FLUX.2 edit; Rotate camera on 2511), with the switches it was planned under.
-      const families = deps.families?.() ?? NO_FAMILIES
-      rec.credits = nodeCredits(take.prompt[id]!, await measuredInputPixels(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], f => deps.results.read(f), families), families)
+      // (FLUX.2 edit; Rotate camera on 2511), measured before planning.
+      rec.credits = nodeCredits(take.prompt[id]!, inputPixels, families)
       const fp = isReusable(plan.payload)
         ? requestFingerprint(fingerprintEndpoint(plan.provider, plan.endpoint), plan.payload, u => deps.handoff.hashOf(u))
         : null

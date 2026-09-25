@@ -41,11 +41,11 @@ import { QWEN_2511_MAX_VERTICAL, QWEN_2511_MIN_VERTICAL, horizontalAngle, qwen25
 import { QWEN_IMAGE_EDIT_PLUS_SLUG, parseCamera, rollPhrase } from '~~/server/runner/generators/refEdits'
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
 import { measuredInputPixels } from '~~/server/runner/metering'
-import { requestProblems } from '~~/server/runner/requestRules'
+import { ROTATE_CAMERA_TOO_LARGE, measuredInputProblem, requestProblems } from '~~/server/runner/requestRules'
 import { PRICE_BOOK_VERSION, priceGraph } from '~~/server/utils/priceBook'
 import type { OutputFile } from '~~/server/runner/types'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
-import { makeKit } from './__runner__/kit'
+import { makeKit, ofType } from './__runner__/kit'
 
 const FAMILY: RunnerFamily = 'qwen-2511-angles'
 const ON: ReadonlySet<RunnerFamily> = new Set([FAMILY])
@@ -222,6 +222,17 @@ describe('hand-written payloads', () => {
 
   it('no request rule refuses it (the endpoint takes no prompt)', () => {
     expect(requestProblems({ 1: rotate() })).toEqual([])
+  })
+
+  it('a measured picture above the input cap is refused while the family is on (F10 fix round 1)', () => {
+    expect(ROTATE_CAMERA_TOO_LARGE).toBe('Rotate camera takes pictures up to about 19 megapixels. Make this one smaller first.')
+    expect(measuredInputProblem('RotateCameraNode', LARGEST_INPUT_PIXELS + 1, ON)).toBe(ROTATE_CAMERA_TOO_LARGE)
+    expect(measuredInputProblem('RotateCameraNode', 48 * MP, ALL)).toBe(ROTATE_CAMERA_TOO_LARGE)
+    // At the cap, below it, or not measured (charged at the cap): sent.
+    for (const px of [LARGEST_INPUT_PIXELS, MP, 1, undefined]) expect(measuredInputProblem('RotateCameraNode', px, ON)).toBeNull()
+    // The 2509 call bills a flat price: no limit there, nor on any other class.
+    expect(measuredInputProblem('RotateCameraNode', 48 * MP, ALL_BUT)).toBeNull()
+    expect(measuredInputProblem('EditImageNode', 48 * MP, ALL)).toBeNull()
   })
 })
 
@@ -438,6 +449,21 @@ describe('the runner engine', () => {
       prompt: 'viewed from the right side, at a high angle', image: ['https://fal.storage/photo.png'], output_format: 'png', output_quality: 95,
     }]])
     expect([...k.ledger.holds.values()].map(h => [h.credits, h.actual])).toEqual([[creditsForUsd(0.03) + 1, creditsForUsd(0.03) + 1]])
+  })
+
+  // F10 fix round 1 (controller ruling): fal makes the picture at the input's
+  // size and the price stops at the cap, so a larger input is refused.
+  it('a picture above the input cap (5000 × 4000, 20 MP): the node fails in plain words, nothing sent, the hold released', async () => {
+    const k = makeKit({ hosted: true, deps: { families: () => ON } })
+    const big = await sharp({ create: { width: 5000, height: 4000, channels: 3, background: '#808080' } }).png().toBuffer()
+    writeFileSync(join(k.root, 'input', 'photo.png'), big)
+    const { runId } = await start(k)
+    await k.engine.settled(runId)
+    expect(k.fal.reqs.size).toBe(0)
+    expect(k.replicate.reqs.size).toBe(0)
+    expect(k.upload).not.toHaveBeenCalled()
+    expect(ofType(k.seen, 'execution_error').map(m => m.data.exception_message)).toEqual([ROTATE_CAMERA_TOO_LARGE])
+    expect([...k.ledger.holds.values()].map(h => h.state)).toEqual(['released'])
   })
 
   it('neither family: refused, nothing held or sent', async () => {

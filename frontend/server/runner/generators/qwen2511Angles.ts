@@ -24,12 +24,15 @@
  *   seed              the node's seed, when above 0 (0 = random, as today)
  *   output_format     png
  *   num_images        1
- * Not sent: `zoom` (the node has no zoom; the schema's default, 5, is a
- * medium shot, the distance the picture already has), `image_size` (the
- * picture comes back at the input's size, which the price reads:
- * shared/pricing/editSettings.ts), and the tuning settings (LoRA scale,
- * guidance, steps, acceleration, negative prompt), left at the schema's own
- * defaults.
+ * Not sent: `zoom` (the node has no zoom control). The schema's default, 5,
+ * means "medium shot", and the endpoint always writes that distance into its
+ * prompt ("<sks> [angle] [elevation] [distance]"), so a close-up picture may
+ * come back zoomed out to a medium shot (the 2509 phrase said nothing about
+ * distance). Also not sent: `image_size` (the picture comes back at the
+ * input's size, which the price reads: shared/pricing/editSettings.ts; a
+ * picture above the input cap is refused, requestRules.ts), and the tuning
+ * settings (LoRA scale, guidance, steps, acceleration, negative prompt),
+ * left at the schema's own defaults.
  *
  * No backup service. Replicate's qwen/qwen-image-edit-2511 (model GET,
  * version a0670a7f…, read 2026-09-24: prompt, image, aspect_ratio, go_fast,
