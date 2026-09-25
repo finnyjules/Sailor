@@ -89,9 +89,11 @@ export function usePen(opts: {
   doc: Ref<SketchDoc>          // the host owns the ref; the pen mutates doc.value in place and replaces it on undo/redo/reset
   view: Ref<ViewMatrix>        // for tolerances only (Task 3); rendering uses it in Task 4
   options?: PenOptions
-  onChange?: () => void        // after every committed history step
-  // the host's live pointer gesture (marquee, pan): Escape offers it the
-  // chance to abort first — return true if one was aborted (the key stops there)
+  onChange?: () => void        // after every committed history step, undo, redo and reset
+  // the host's own live pointer gesture (the dev page's pan): Escape offers
+  // it the chance to abort — return true if one was aborted (the key stops
+  // there). PenOverlay's marquee is offered first, through onKeydown's
+  // second argument.
   cancelGesture?: () => boolean
 }) {
   const doc = opts.doc
@@ -214,6 +216,7 @@ export function usePen(opts: {
     cursor.value = null
     dimBuffer.value = ''
     status.value = 'undo'
+    opts.onChange?.()
   }
   function redo() {
     if (histPtr.value >= history.value.length - 1) return
@@ -227,19 +230,24 @@ export function usePen(opts: {
     cursor.value = null
     dimBuffer.value = ''
     status.value = 'redo'
+    opts.onChange?.()
   }
   function canUndo() { return histPtr.value > 0 }
   function canRedo() { return histPtr.value < history.value.length - 1 }
 
-  function onKeydown(ev: KeyboardEvent) {
-    const el = document.activeElement
-    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return
+  // Returns true when the key did something. PenOverlay reads that for
+  // Escape / Enter: with nothing to cancel or finish, the key belongs to the
+  // host ('cancel' / 'commit'). The "typing in a field" guard is the
+  // caller's (PenOverlay's window listener runs isTypingInField once).
+  // `local.cancelGesture` is the caller's own live gesture (the overlay's
+  // marquee); it is offered Escape before the host's opts.cancelGesture.
+  function onKeydown(ev: KeyboardEvent, local?: { cancelGesture?: () => boolean }): boolean {
     const meta = ev.metaKey || ev.ctrlKey
     if (meta) {
       const key = ev.key.toLowerCase()
-      if (key === 'z' && !ev.shiftKey) { ev.preventDefault(); undo(); return }
-      if ((key === 'z' && ev.shiftKey) || key === 'y') { ev.preventDefault(); redo(); return }
-      return
+      if (key === 'z' && !ev.shiftKey) { ev.preventDefault(); undo(); return true }
+      if ((key === 'z' && ev.shiftKey) || key === 'y') { ev.preventDefault(); redo(); return true }
+      return false
     }
     // (viewport keys — ⌘0 fit, Space pan — are the host's; it handles them
     // before delegating here)
@@ -251,46 +259,50 @@ export function usePen(opts: {
     // anything else; meta-combos already returned above, so this never steals
     // a Cmd/Ctrl+digit shortcut.
     const gestureActive = tool.value === 'path' && !!pendingPath.value
-    if (gestureActive && /^[0-9]$/.test(ev.key)) { ev.preventDefault(); dimBuffer.value += ev.key; return }
-    if (gestureActive && ev.key === '.' && !dimBuffer.value.includes('.')) { ev.preventDefault(); dimBuffer.value += '.'; return }
+    if (gestureActive && /^[0-9]$/.test(ev.key)) { ev.preventDefault(); dimBuffer.value += ev.key; return true }
+    if (gestureActive && ev.key === '.' && !dimBuffer.value.includes('.')) { ev.preventDefault(); dimBuffer.value += '.'; return true }
 
     if (ev.key === 'Escape') {
-      if (pendingOp.value) { cancelPendingOp(); status.value = 'cancelled'; return }
+      if (pendingOp.value) { cancelPendingOp(); status.value = 'cancelled'; return true }
       // clearing a live dimension buffer takes priority over everything else —
       // a first Escape just clears the typed value, a second (now-empty-buffer)
       // Escape falls through to the normal marquee/pan/path-cancel handling.
-      if (dimBuffer.value) { dimBuffer.value = ''; return }
+      if (dimBuffer.value) { dimBuffer.value = ''; return true }
       // a live marquee drag or pan takes priority over path-cancel — abort
       // just that gesture (clear its state, no selection change, no doc
       // mutation) rather than falling through to cancelPath's path cleanup.
-      if (opts.cancelGesture?.()) return
+      if (local?.cancelGesture?.()) return true
+      if (opts.cancelGesture?.()) return true
+      if (!pendingPath.value) return false
       cancelPath()
-      return
+      return true
     }
     if (ev.key === 'Enter') {
-      if (gestureActive && dimBuffer.value) { ev.preventDefault(); commitDimension(); return }
-      if (pendingPath.value && pendingPath.value.anchors.length >= 2) { ev.preventDefault(); finishPath(false) }
-      return
+      if (gestureActive && dimBuffer.value) { ev.preventDefault(); commitDimension(); return true }
+      if (pendingPath.value && pendingPath.value.anchors.length >= 2) { ev.preventDefault(); finishPath(false); return true }
+      return false
     }
     if (ev.key === 'Backspace' || ev.key === 'Delete') {
       if (gestureActive && dimBuffer.value) {
         ev.preventDefault()
         dimBuffer.value = dimBuffer.value.slice(0, -1)
-        return
+        return true
       }
       ev.preventDefault()   // don't let the browser interpret Backspace as back-nav
-      if (pendingPath.value) removeLastAnchor()
-      else if (selection.value.length) del()
-      return
+      if (pendingPath.value) { removeLastAnchor(); return true }
+      if (selection.value.length) { del(); return true }
+      return false
     }
     if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight' || ev.key === 'ArrowUp' || ev.key === 'ArrowDown') {
-      if (!selection.value.length) return   // nothing selected: no-op, let the browser handle the key normally
+      if (!selection.value.length) return false   // nothing selected: no-op, let the browser handle the key normally
       ev.preventDefault()
       const step = ev.shiftKey ? 2.5 : 0.25
       const dx = ev.key === 'ArrowLeft' ? -step : ev.key === 'ArrowRight' ? step : 0
       const dy = ev.key === 'ArrowUp' ? step : ev.key === 'ArrowDown' ? -step : 0   // screen-up = larger world y (see sy())
       nudge(dx, dy)
+      return true
     }
+    return false
   }
 
   // the pen holds no key-held state of its own today (Space-pan is the
@@ -1055,6 +1067,7 @@ export function usePen(opts: {
     dimBuffer.value = ''
     status.value = 'ready'
     initHistory()
+    opts.onChange?.()
   }
 
   // which verbs apply to the current selection (order = display order) — the
@@ -1076,6 +1089,8 @@ export function usePen(opts: {
   initHistory()
 
   return {
+    // the host's doc ref, handed back so a renderer (PenOverlay) needs only the pen
+    doc,
     // state
     tool, guideMode, showLabels, status, selection, selectedSegments, pending, pendingPath,
     pendingOp, opHint, cursor, dimBuffer, nextSegment, sparkles, sparkleClock,
@@ -1100,3 +1115,11 @@ export function usePen(opts: {
 }
 
 export type Pen = ReturnType<typeof usePen>
+
+/** True while focus is in a text field — keys then belong to the field, not
+ *  the pen or the host's viewport. Reads `document` only when called. */
+export function isTypingInField(): boolean {
+  if (typeof document === 'undefined') return false
+  const el = document.activeElement
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || (el as HTMLElement).isContentEditable)
+}

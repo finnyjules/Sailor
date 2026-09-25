@@ -26,6 +26,41 @@ describe('usePen', () => {
     expect(doc.value.entities.map(e => e.kind)).toEqual(['point'])
     expect(pen.canRedo()).toBe(true)
   })
+  it('reports undo, redo and reset through onChange as well', () => {
+    const { pen, changes } = host()
+    pen.selectTool('line')
+    pen.place(1, 1)
+    pen.place(4, 1)
+    expect(changes()).toBe(2)
+    pen.undo()
+    expect(changes()).toBe(3)
+    pen.redo()
+    expect(changes()).toBe(4)
+    pen.undo(); pen.undo()
+    expect(changes()).toBe(6)
+    pen.undo()                     // nothing left to undo: no report
+    expect(changes()).toBe(6)
+    pen.redo(); pen.redo()
+    expect(changes()).toBe(8)
+    pen.redo()                     // nothing left to redo: no report
+    expect(changes()).toBe(8)
+    pen.reset()
+    expect(changes()).toBe(9)
+  })
+  it('Escape and Enter report whether they did anything, so a host can take them', () => {
+    const { pen } = host()
+    const key = (k: string) => ({ key: k, metaKey: false, ctrlKey: false, shiftKey: false, preventDefault() {} }) as unknown as KeyboardEvent
+    expect(pen.onKeydown(key('Escape'))).toBe(false)   // nothing pending → the host's cancel
+    expect(pen.onKeydown(key('Enter'))).toBe(false)    // nothing to finish → the host's commit
+    let aborted = 0
+    expect(pen.onKeydown(key('Escape'), { cancelGesture: () => { aborted++; return true } })).toBe(true)
+    expect(aborted).toBe(1)
+    pen.selectTool('path')
+    pen.pathDown(1, 1); pen.pathUp(1, 1)
+    pen.pathDown(4, 1); pen.pathUp(4, 1)
+    expect(pen.onKeydown(key('Enter'))).toBe(true)     // finishes the path
+    expect(pen.pendingPath.value).toBe(null)
+  })
   it('a sparkle without a frame loop is recorded and dispose is safe', () => {
     const { pen } = host()
     pen.sparkle(0, 0)
