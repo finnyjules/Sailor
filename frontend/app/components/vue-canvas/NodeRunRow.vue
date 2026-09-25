@@ -10,7 +10,7 @@ const props = withDefaults(defineProps<{
   canRun: boolean
   running: boolean
   runLabel?: string
-}>(), { runLabel: 'Run' })
+}>(), { runLabel: 'Run this node' })
 
 const emit = defineEmits<{ run: [] }>()
 

@@ -953,7 +953,7 @@ const promoteUsdLabel = computed(() => {
         :status="runStatus"
         :can-run="!isMuted && !isBypassed"
         :running="!!data.running"
-        run-label="Re-render"
+        run-label="Re-render this node"
         @run="runThisNode"
       />
     </div>

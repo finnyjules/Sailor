@@ -2297,7 +2297,7 @@ watch(previewImages, (urls) => {
       :status="runStatus"
       :can-run="showRunButton && !isMuted && !isBypassed"
       :running="!!data.running"
-      :run-label="hasRun ? 'Re-render' : 'Run'"
+      :run-label="hasRun ? 'Re-render this node' : 'Run this node'"
       @run="playThisNode"
     >
       <template v-if="showRunButton" #menu>
