@@ -102,7 +102,12 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // lineup-f18 (Task F18): HappyHorse 1.1, fal per second by resolution ($0.14/s
 // at 720p, $0.18/s at 1080p) first, Replicate's same rates the backup
 // (runner-only, family happyhorse-1.1). No other price moves.
-export const PRICE_BOOK_VERSION = 'lineup-f18'
+// lineup-f19 (Task F19): Grok Imagine Video 1.5, fal per second by resolution
+// ($0.08/s at 480p, $0.14/s at 720p, $0.25/s at 1080p, + $0.01 for an
+// image-to-video picture) first, Replicate's flat $0.08/s the backup for
+// image-to-video at 480p/720p (runner-only, family grok-imagine-video-1.5).
+// No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-f19'
 
 export const BASE_RENDER_CREDITS = 1
 

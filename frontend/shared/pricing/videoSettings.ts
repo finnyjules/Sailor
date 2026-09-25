@@ -5,7 +5,7 @@
  *
  * The price multiplies a rate by these, so it must never read a setting the
  * builder would send differently ("priced on what is sent"). The builders are
- * server/runner/generators/video.ts (fal and Replicate), wan3.ts (Wan 3.0), geminiOmniFlash.ts, veo31Lite.ts, happyHorse11.ts and twins.ts (the
+ * server/runner/generators/video.ts (fal and Replicate), wan3.ts (Wan 3.0), geminiOmniFlash.ts, veo31Lite.ts, happyHorse11.ts, grokImagineVideo15.ts and twins.ts (the
  * first-service builders of Kling 3.0 and PixVerse v6, and the backups) and, for the one model
  * the runner does not build (Fabric), comfy_api_nodes/video_models.py. The
  * settings-parity test (tests/unit/video-pricing.unit.spec.ts) runs every
@@ -33,6 +33,12 @@ export interface VideoSettings {
    * input (SEEDANCE_MAX_INPUT_VIDEO_SECONDS).
    */
   inputVideoSeconds: number
+  /**
+   * Pictures sent that the service bills one by one (Grok Imagine Video 1.5's
+   * first frame on fal: the rate card's `inputImageUsd`). Present only for a
+   * model whose rule counts them; absent = 0.
+   */
+  inputImages?: number
 }
 
 /**
@@ -115,6 +121,8 @@ interface Rule {
   audio(adv: Adv): boolean
   /** Billed seconds of reference video, given whether a first frame is sent. Absent = 0. */
   inputVideo?(adv: Adv, firstFrame: boolean): number
+  /** Billed input pictures, given whether a first frame is linked. Absent = the settings carry no count. */
+  inputImages?(adv: Adv, firstFrame: boolean): number
 }
 
 const lower = (s: string) => s.toLowerCase()
@@ -146,6 +154,8 @@ const WAN_3_SECONDS = Array.from({ length: 29 }, (_, i) => i + 2)
 const WAN_3_RESOLUTIONS = ['480p', '720p', '1080p']
 /** alibaba/happy-horse/v1.1 and alibaba/happyhorse-1.1: any whole second from 3 to 15 (happyHorse11.ts). */
 const HAPPYHORSE_11_SECONDS = Array.from({ length: 13 }, (_, i) => i + 3)
+/** xai/grok-imagine-video/v1.5 and xai/grok-imagine-video-1.5: any whole second from 1 to 15 (grokImagineVideo15.ts). */
+const GROK_IMAGINE_VIDEO_15_SECONDS = Array.from({ length: 15 }, (_, i) => i + 1)
 /** wan-video/wan-2.7-t2v: any whole second from 2 to 15 (video.ts WAN_27_SECONDS). */
 const WAN_27_SECONDS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 
@@ -189,6 +199,13 @@ const RULES: Record<string, Rule> = {
   // happyHorse11.ts (both endpoints, and the Replicate backup built from them): `duration` the
   // closest whole second from 3 to 15 (default 5), `resolution` 720p/1080p else 720p; the clip always has sound.
   'happyhorse-1.1': { durations: HAPPYHORSE_11_SECONDS, defaultDuration: 5, resolution: resIn(['720p', '1080p'], '720p'), audio: fixed(true) },
+  // grokImagineVideo15.ts (both fal endpoints, and the Replicate backup built from them): `duration`
+  // the closest whole second from 1 to 15 (default 6), `resolution` 480p/720p/1080p else 720p; the clip
+  // always has sound. One billed picture when a first frame is sent (the linked one, or `image_url`).
+  'grok-imagine-video-1.5': {
+    durations: GROK_IMAGINE_VIDEO_15_SECONDS, defaultDuration: 6, resolution: resIn(['480p', '720p', '1080p'], '720p'), audio: fixed(true),
+    inputImages: (adv, firstFrame) => (firstFrame || optStr(adv, 'image_url', '') ? 1 : 0),
+  },
 
   // ── Replicate (RUNNER_REPLICATE_VIDEO_MODELS) ──
   // sora2 / sora2Pro send `seconds` 4/8/12 (video.ts SORA_SECONDS) and no
@@ -244,7 +261,8 @@ export function maxVideoSeconds(modelId: string): number | null {
  * The seconds, resolution and sound the request for `modelId` carries, given
  * the node's raw `duration` widget and `model_options` (JSON text or object).
  * `firstFrame` is the node's `image` input (a link reference or a URL; empty =
- * none): it decides whether Seedance 2.0's reference videos are sent.
+ * none): it decides whether Seedance 2.0's reference videos are sent, and
+ * whether Grok Imagine Video 1.5 sends a picture.
  * `aspectRatio` is taken for the signature's sake: no builder's length,
  * resolution or sound depends on it. Null for an id with no rules.
  */
@@ -261,5 +279,7 @@ export function effectiveVideoSettings(
   const sent = r.durations ? durOr(r.durations, durationInt(duration, r.defaultDuration)) : r.fixedSeconds!
   const seconds = Math.max(sent, r.pythonPathSeconds ?? 0)
   const inputVideoSeconds = r.inputVideo ? r.inputVideo(adv, pyTruthy(firstFrame)) : 0
-  return { seconds, resolution: r.resolution(adv), audio: r.audio(adv), inputVideoSeconds }
+  const out: VideoSettings = { seconds, resolution: r.resolution(adv), audio: r.audio(adv), inputVideoSeconds }
+  if (r.inputImages) out.inputImages = r.inputImages(adv, pyTruthy(firstFrame))
+  return out
 }

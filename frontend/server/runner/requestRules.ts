@@ -13,7 +13,7 @@
  *    text-to-video 1), and a transparent JPEG from GPT Image 2.5;
  *  - a prompt longer than the schema's `maxLength` where the table
  *    PROMPT_MAX_LENGTH names the endpoint (Reve 2.1 4,000, F15; Recraft V4.1
- *    10,000, F16; Krea 2 5,000, F17), or than a limit the schema states only
+ *    10,000, F16; Krea 2 5,000, F17; Grok Imagine Video 1.5 4,096, F19), or than a limit the schema states only
  *    in its prompt's description (HappyHorse 1.1 2,500, F18 fix round 1:
  *    PROMPT_MAX_LENGTH_RULINGS);
  *  - Krea 2 Large and Medium (F17) with an empty prompt (the schema's
@@ -43,6 +43,11 @@
  *    sound (happyHorse11.ts HAPPYHORSE_11_ONE_PICTURE); and its text-to-video
  *    (no linked picture, no `image_url`) with an empty prompt, the schema's
  *    own minLength 1;
+ *  - Grok Imagine Video 1.5 (F19) with a last frame, or reference pictures,
+ *    videos or sounds, in its options (grokImagineVideo15.ts
+ *    GROK_IMAGINE_VIDEO_15_ONE_PICTURE); and, in either mode, an empty or
+ *    spaces-only prompt (both schemas require one but set no minimum: ruled,
+ *    as Grok Imagine 2's) or one over the schemas' 4,096 characters;
  *  - Gemini Omni Flash text-to-video with an empty prompt (controller ruling
  *    after F4: the schema requires a prompt but sets no minimum, so an empty
  *    one would fail only at the result). It is the one row of the prompt table
@@ -98,6 +103,11 @@ import {
   HAPPYHORSE_11_MAX_PICTURE_BYTES, HAPPYHORSE_11_NEEDS_PROMPT, HAPPYHORSE_11_ONE_PICTURE, HAPPYHORSE_11_PICTURE_TOO_LARGE, HAPPYHORSE_11_PROMPT_MAX,
   HAPPYHORSE_11_REPLICATE_SLUG, HAPPYHORSE_11_TEXT_TO_VIDEO, happyHorse11FirstFrame, happyHorse11HasExtras,
 } from './generators/happyHorse11'
+import {
+  GROK_IMAGINE_VIDEO_15_ENDPOINTS, GROK_IMAGINE_VIDEO_15_ID, GROK_IMAGINE_VIDEO_15_IMAGE_TO_VIDEO, GROK_IMAGINE_VIDEO_15_LONG_PROMPT,
+  GROK_IMAGINE_VIDEO_15_NEEDS_PROMPT, GROK_IMAGINE_VIDEO_15_ONE_PICTURE, GROK_IMAGINE_VIDEO_15_PROMPT_MAX, GROK_IMAGINE_VIDEO_15_TEXT_TO_VIDEO,
+  grokImagineVideo15FirstFrame, grokImagineVideo15HasExtras,
+} from './generators/grokImagineVideo15'
 import { asText, parseJsonObject } from './generators/opts'
 import { moodboardFiles } from './inputs'
 import {
@@ -172,6 +182,9 @@ export const PROMPT_MIN_LENGTH: Readonly<Record<string, { min: number, message: 
   // HappyHorse 1.1 text-to-video on fal (happyHorse11.ts, F18): the schema's own minLength 1.
   // Image-to-video's prompt is optional; the Replicate backup is built from a request that passed this.
   [`fal ${HAPPYHORSE_11_TEXT_TO_VIDEO}`]: { min: 1, message: HAPPYHORSE_11_NEEDS_PROMPT },
+  // Grok Imagine Video 1.5 on fal (grokImagineVideo15.ts, F19): rulings, not the schemas (both require a
+  // prompt and set no minimum). The Replicate backup is built from a request that passed this.
+  ...Object.fromEntries(GROK_IMAGINE_VIDEO_15_ENDPOINTS.map(e => [`fal ${e}`, { min: 1, message: GROK_IMAGINE_VIDEO_15_NEEDS_PROMPT }])),
 }
 
 /**
@@ -190,6 +203,9 @@ export const PROMPT_MAX_LENGTH: Readonly<Record<string, { max: number, message: 
   // HappyHorse 1.1 on fal (happyHorse11.ts, F18 fix round 1): a ruling (PROMPT_MAX_LENGTH_RULINGS). The
   // Replicate backup (no stated limit) is built from a request that passed this.
   ...Object.fromEntries(HAPPYHORSE_11_ENDPOINTS.map(e => [`fal ${e}`, { max: HAPPYHORSE_11_PROMPT_MAX, message: HAPPYHORSE_11_LONG_PROMPT }])),
+  // Grok Imagine Video 1.5 on fal (grokImagineVideo15.ts, F19): the schemas' own maxLength. The Replicate
+  // backup (no stated limit) is built from a request that passed this.
+  ...Object.fromEntries(GROK_IMAGINE_VIDEO_15_ENDPOINTS.map(e => [`fal ${e}`, { max: GROK_IMAGINE_VIDEO_15_PROMPT_MAX, message: GROK_IMAGINE_VIDEO_15_LONG_PROMPT }])),
 }
 
 /**
@@ -212,6 +228,7 @@ export const PROMPT_MIN_LENGTH_RULINGS: readonly string[] = [
   `replicate ${GROK_IMAGINE_2_SLUG}`,
   `fal ${IDEOGRAM_4_FAL_APP}`,
   `replicate ${NANO_BANANA_2_LITE_SLUG}`,
+  ...GROK_IMAGINE_VIDEO_15_ENDPOINTS.map(e => `fal ${e}`),
 ]
 
 /** JSON Schema counts characters as code points. */
@@ -581,6 +598,17 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
         else if (!isLink(inputs.prompt)) {
           const textToVideo = !!adv && !isLink(inputs.image) && !happyHorse11FirstFrame(null, adv)
           judge(textToVideo ? HAPPYHORSE_11_TEXT_TO_VIDEO : HAPPYHORSE_11_IMAGE_TO_VIDEO, asText(inputs.prompt))
+        }
+      }
+      // Grok Imagine Video 1.5: one first frame at most, no sound (its builder refuses the same at planning);
+      // either mode needs a prompt of 1 to 4,096 characters. Both endpoints have the same prompt rules, so
+      // with the options wired (the mode unreadable) the prompt is still judged.
+      if (id === GROK_IMAGINE_VIDEO_15_ID) {
+        const adv = isLink(inputs.model_options) ? null : parseJsonObject(inputs.model_options)
+        if (adv && grokImagineVideo15HasExtras(adv)) out.push({ nodeId, classType: ct, input: 'model_options', message: GROK_IMAGINE_VIDEO_15_ONE_PICTURE })
+        else if (!isLink(inputs.prompt)) {
+          const textToVideo = !!adv && !isLink(inputs.image) && !grokImagineVideo15FirstFrame(null, adv)
+          judge(textToVideo ? GROK_IMAGINE_VIDEO_15_TEXT_TO_VIDEO : GROK_IMAGINE_VIDEO_15_IMAGE_TO_VIDEO, asText(inputs.prompt))
         }
       }
     }

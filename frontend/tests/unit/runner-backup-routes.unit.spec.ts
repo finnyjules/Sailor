@@ -85,8 +85,8 @@ function nodeFor(key: string): [string, Record<string, unknown>] {
   }
   if (key.startsWith('video:')) {
     const id = key.slice(6)
-    // A first frame for the image-to-video-only model.
-    return ['GenerateVideoNode', { model: id, prompt: 'a fox runs', aspect_ratio: '16:9', ...(id === 'wan-2.5-i2v-fast' ? { image: LINK } : {}) }]
+    // A first frame for the image-to-video-only model, and for Grok Imagine Video 1.5, whose backup is image-to-video only (F19).
+    return ['GenerateVideoNode', { model: id, prompt: 'a fox runs', aspect_ratio: '16:9', ...(id === 'wan-2.5-i2v-fast' || id === 'grok-imagine-video-1.5' ? { image: LINK } : {}) }]
   }
   const [ct, model] = key.split(':') as [string, string | undefined]
   return [ct, { ...EDIT_BASE[ct], ...(model ? { model } : {}) }]
@@ -148,9 +148,10 @@ describe('the first and backup services are the table\'s', () => {
     expect(keys.has('image:krea-2-large')).toBe(true)
     expect(keys.has('image:krea-2-medium')).toBe(true)
     expect(image).toBe(Object.keys(RUNNER_IMAGE_MODELS).length + Object.keys(RUNNER_REPLICATE_IMAGE_MODELS).length + 10)
-    // + HappyHorse 1.1 (Task F18), a runner-only video model outside the two builder tables.
+    // + HappyHorse 1.1 (Task F18) and Grok Imagine Video 1.5 (Task F19), runner-only video models outside the two builder tables.
     expect(keys.has('video:happyhorse-1.1')).toBe(true)
-    expect(video).toBe(Object.keys(RUNNER_VIDEO_MODELS).length + Object.keys(RUNNER_REPLICATE_VIDEO_MODELS).length + 1)
+    expect(keys.has('video:grok-imagine-video-1.5')).toBe(true)
+    expect(video).toBe(Object.keys(RUNNER_VIDEO_MODELS).length + Object.keys(RUNNER_REPLICATE_VIDEO_MODELS).length + 2)
   })
 
   for (const [key, route] of Object.entries(RUNNER_ROUTES)) {

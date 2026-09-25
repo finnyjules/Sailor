@@ -313,11 +313,11 @@ describe('the gallery', () => {
 describe('the price', () => {
   const charge = (inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: 'GenerateImageNode', inputs }, 2: SINK }).credits
 
-  it('the card: fal\'s flat $0.01 an image, verified, non-zero; no backup card; the book carries it (lineup-f13, now lineup-f18)', () => {
+  it('the card: fal\'s flat $0.01 an image, verified, non-zero; no backup card; the book carries it (lineup-f13, now lineup-f19)', () => {
     expect(IMAGE_RATES[ID]).toEqual({
       unit: 'per_image', usd: PRICE, service: 'fal', source: 'https://fal.ai/models/meta/muse-image/text-to-image/llms.txt', read: '2026-09-24', confidence: 'verified',
     })
-    expect(PRICE_BOOK_VERSION).toBe('lineup-f18')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-f19')
   })
 
   const examples: { name: string, inputs: Record<string, unknown> }[] = [

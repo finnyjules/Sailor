@@ -51,6 +51,11 @@ interface RateMeta {
    * seconds together.
    */
   inputVideoFactor?: number
+  /**
+   * Dollars per input picture the service bills on top of the seconds (Grok
+   * Imagine Video 1.5 image-to-video on fal): × the settings' `inputImages`.
+   */
+  inputImageUsd?: number
 }
 
 export type VideoRate =
@@ -164,6 +169,20 @@ export const VIDEO_RATES: Record<string, VideoRate> = {
   'happyhorse-1.1': {
     unit: 'per_second', service: 'fal', source: fal('alibaba/happy-horse/v1.1/text-to-video'), read: '2026-09-25', confidence: 'verified',
     byResolution: { '720p': 0.14, '1080p': 0.18 },
+  },
+  // Grok Imagine Video 1.5 (family grok-imagine-video-1.5, runner-only; Replicate
+  // the backup for image-to-video at 480p/720p, VIDEO_BACKUP_RATES). Both
+  // endpoints: "Priced per second of output video, by resolution: 480p at
+  // $0.08/sec, 720p at $0.14/sec, 1080p at $0.25/sec." Image-to-video adds
+  // "Each reference image adds $0.01 (1–7 supported)"; its schema takes one
+  // picture and no references, and text-to-video says "No input images or
+  // references, so no per-image charges apply", so the one picture is priced
+  // at $0.01 (the fail-safe reading). The clip always has sound.
+  'grok-imagine-video-1.5': {
+    unit: 'per_second', service: 'fal', source: fal('xai/grok-imagine-video/v1.5/image-to-video'), read: '2026-09-25', confidence: 'verified',
+    byResolution: { '480p': 0.08, '720p': 0.14, '1080p': 0.25 },
+    inputImageUsd: 0.01,
+    note: 'image-to-video: $0.01 for its one picture ("Each reference image adds $0.01")',
   },
 
   // ── Replicate ───────────────────────────────────────────────────────────
@@ -286,6 +305,13 @@ export const VIDEO_BACKUP_RATES: Record<string, VideoRate> = {
     unit: 'per_second', service: 'replicate', source: rep('alibaba/happyhorse-1.1'), read: '2026-09-25', confidence: 'verified',
     byResolution: { '720p': 0.14, '1080p': 0.18 },
   },
+  // One billing tier, no criteria: "$0.08 per second of output video" (the
+  // model page's billingConfig) at 480p or 720p alike. Never dearer than fal,
+  // so fal's marked-up price stands.
+  'grok-imagine-video-1.5': {
+    unit: 'per_second', service: 'replicate', source: rep('xai/grok-imagine-video-1.5'), read: '2026-09-25', confidence: 'verified',
+    byResolution: { '*': 0.08 },
+  },
 }
 
 /** The rate card for `modelId`, or null. Own keys only: "constructor" is not a model. */
@@ -331,7 +357,7 @@ export function perSecondUsd(rate: VideoRate & { unit: 'per_second' }, s: VideoS
   if (s.inputVideoSeconds > 0 && rate.inputVideoFactor) {
     return tidy(perSec * rate.inputVideoFactor * (s.seconds + s.inputVideoSeconds))
   }
-  return tidy(perSec * s.seconds)
+  return tidy(perSec * s.seconds + (rate.inputImageUsd ?? 0) * (s.inputImages ?? 0))
 }
 
 /** Dollars the first service charges for one clip with these settings, or null for an unknown id. */
@@ -397,7 +423,8 @@ function clipMaxUsd(rate: VideoRate, seconds: number): number {
   const top = topPerSecond(rate)
   // Linked options may carry reference videos: the dearer of the two billings.
   const withRefs = rate.inputVideoFactor ? top * rate.inputVideoFactor * (seconds + SEEDANCE_MAX_INPUT_VIDEO_SECONDS) : 0
-  return tidy(Math.max(top * seconds, withRefs))
+  // Linked options may carry a first frame (`image_url`): the one billed picture.
+  return tidy(Math.max(top * seconds + (rate.inputImageUsd ?? 0), withRefs))
 }
 
 function dollars(usd: number): string {

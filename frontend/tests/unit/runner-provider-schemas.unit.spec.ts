@@ -32,6 +32,7 @@ import { H3_MAX_TURBO_ENDPOINTS } from '~~/server/runner/generators/h3MaxTurbo'
 import { GEMINI_OMNI_FLASH_ENDPOINTS } from '~~/server/runner/generators/geminiOmniFlash'
 import { VEO_31_LITE_ENDPOINTS } from '~~/server/runner/generators/veo31Lite'
 import { HAPPYHORSE_11_ENDPOINTS, HAPPYHORSE_11_REPLICATE_SLUG } from '~~/server/runner/generators/happyHorse11'
+import { GROK_IMAGINE_VIDEO_15_ENDPOINTS, GROK_IMAGINE_VIDEO_15_REPLICATE_SLUG } from '~~/server/runner/generators/grokImagineVideo15'
 import { GPT_IMAGE_25_FAL_ENDPOINTS, GPT_IMAGE_25_REPLICATE_SLUGS } from '~~/server/runner/generators/gptImage25'
 import { QWEN_IMAGE_3_SLUG } from '~~/server/runner/generators/qwenImage3'
 import { GROK_IMAGINE_2_SLUG } from '~~/server/runner/generators/grokImagine2'
@@ -260,6 +261,10 @@ function runnerEndpoints(): string[] {
   // Task F18: HappyHorse 1.1 on fal, Replicate the backup (happyHorse11.ts; its grid is runner-happyhorse-1-1.unit.spec.ts).
   for (const e of HAPPYHORSE_11_ENDPOINTS) out.add(`fal ${e}`)
   out.add(`replicate ${HAPPYHORSE_11_REPLICATE_SLUG}`)
+  // Task F19: Grok Imagine Video 1.5 on fal, Replicate the backup for image-to-video (grokImagineVideo15.ts;
+  // its grid is runner-grok-imagine-video-1-5.unit.spec.ts).
+  for (const e of GROK_IMAGINE_VIDEO_15_ENDPOINTS) out.add(`fal ${e}`)
+  out.add(`replicate ${GROK_IMAGINE_VIDEO_15_REPLICATE_SLUG}`)
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)
@@ -319,10 +324,10 @@ describe('refusals', () => {
   it('the prompt length rules are exactly the saved schemas\' prompt minLength, plus the controller\'s rulings', () => {
     // Ruled rows: a saved schema without a minLength on that endpoint, the prompt required (controller rulings
     // after F4: Gemini Omni Flash; after F6: Qwen Image 3, and Grok Imagine 2 in F7; Ideogram 4 on fal in F8;
-    // Nano Banana 2 Lite on Replicate in F14).
+    // Nano Banana 2 Lite on Replicate in F14; Grok Imagine Video 1.5's two fal endpoints in F19).
     expect(PROMPT_MIN_LENGTH_RULINGS).toEqual([
       'fal google/gemini-omni-flash', 'replicate alibaba/qwen-image-3', 'replicate xai/grok-imagine-image-2', 'fal ideogram/v4',
-      'replicate google/nano-banana-2-lite',
+      'replicate google/nano-banana-2-lite', 'fal xai/grok-imagine-video/v1.5/text-to-video', 'fal xai/grok-imagine-video/v1.5/image-to-video',
     ])
     const fromSchemas: Record<string, number> = {}
     for (const key of PROMPT_MIN_LENGTH_RULINGS) {

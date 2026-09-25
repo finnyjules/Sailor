@@ -94,6 +94,13 @@
  *                                                  prompt, length, resolution, seed and first frame; the same price
  *                                                  ($0.14 / $0.18 a second), fal first for the better fit. A 21:9
  *                                                  request has no backup: Replicate has no 21:9 (happyHorse11.ts)
+ * grok-imagine-video-1.5    fal        Replicate   runner-only (F19): xai/grok-imagine-video-1.5 (xAI's own) is
+ *                                                  image-to-video only at 480p or 720p, so it backs up just those
+ *                                                  requests: the same prompt, length, resolution and first frame
+ *                                                  (its ratio "auto", the picture's shape, as on fal). Text-to-video
+ *                                                  and 1080p have none. Replicate is cheaper there ($0.08 a second
+ *                                                  against fal's $0.08 / $0.14), but can't be first: it lacks
+ *                                                  text-to-video and 1080p (grokImagineVideo15.ts)
  * sora-2 / -pro             Replicate  —           discontinued; fal's Sora 2 endpoints are deprecated
  * hidden: kling-v2.5-turbo-pro, hailuo-2.3, wan-2.7-t2v, wan-2.5-i2v-fast, luma-ray-2-720p, ltx-video — no backup
  *
@@ -143,6 +150,7 @@ import type { RunnerProvider } from '../types'
 import { FLUX_2_RESOLUTIONS } from '#shared/pricing/imageSettings'
 import { falNanoBananaEdit } from './edit'
 import { HAPPYHORSE_11_ID, happyHorse11OnReplicate } from './happyHorse11'
+import { GROK_IMAGINE_VIDEO_15_ID, grokImagineVideo15OnReplicate } from './grokImagineVideo15'
 import { arOr, maybeSetSeed, optBool, optEnum, optStr } from './opts'
 import type { VideoBuildArgs } from './types'
 
@@ -231,6 +239,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'video:seedance-2.0-fast': r('replicate', null, 'fal\'s has no seed and no 3 s clip'),
   'video:runway-gen-4.5': r('replicate', null, 'not on fal'),
   'video:happyhorse-1.1': r('fal', 'replicate'),
+  'video:grok-imagine-video-1.5': r('fal', 'replicate', 'image-to-video at 480p or 720p only: Replicate\'s Grok Imagine Video 1.5 takes no text-to-video and no 1080p'),
   'video:sora-2': r('replicate', null, 'discontinued; fal\'s Sora 2 is deprecated'),
   'video:sora-2-pro': r('replicate', null, 'discontinued; fal\'s Sora 2 is deprecated'),
   'video:kling-v2.5-turbo-pro': r('replicate', null, HIDDEN),
@@ -360,11 +369,13 @@ export function flux3OnReplicate(falPayload: Record<string, unknown>): ServiceCa
 
 /**
  * GenerateVideoNode fal models → their backup, built from the fal request;
- * null for a request the backup can't carry (HappyHorse 1.1 at 21:9).
+ * null for a request the backup can't carry (HappyHorse 1.1 at 21:9; Grok
+ * Imagine Video 1.5 text-to-video or at 1080p).
  */
 export const VIDEO_BACKUPS: Readonly<Record<string, (falPayload: Record<string, unknown>) => ServiceCall | null>> = {
   'flux-3': flux3OnReplicate,
   [HAPPYHORSE_11_ID]: happyHorse11OnReplicate,
+  [GROK_IMAGINE_VIDEO_15_ID]: grokImagineVideo15OnReplicate,
 }
 
 // ── Generate image: backups for Replicate-first models ─────────────────────

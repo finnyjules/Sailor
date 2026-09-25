@@ -444,6 +444,21 @@ const FLOWS: FamilyFlow[] = [
     endpoint: 'alibaba/happy-horse/v1.1/text-to-video',
     body: { prompt: 'a fox says hello', aspect_ratio: '16:9', resolution: '720p', duration: 3 },
   },
+  // Task F19: Grok Imagine Video 1.5 has no Python builder; the body is written
+  // from its saved schema (runner-grok-imagine-video-1-5.unit.spec.ts). fal
+  // first; text-to-video has no backup (Replicate's is image-to-video only).
+  {
+    family: 'grok-imagine-video-1.5',
+    label: 'GenerateVideoNode grok-imagine-video-1.5',
+    prompt: {
+      1: { class_type: 'GenerateVideoNode', inputs: { model: 'grok-imagine-video-1.5', prompt: 'a fox runs through snow', aspect_ratio: '16:9', duration: '1', seed: 0, model_options: '{"resolution":"480p"}' } },
+      2: outVideo('1'),
+    },
+    files: [],
+    provider: 'fal',
+    endpoint: 'xai/grok-imagine-video/v1.5/text-to-video',
+    body: { prompt: 'a fox runs through snow', aspect_ratio: '16:9', resolution: '480p', duration: 1 },
+  },
 ]
 
 // ── The routes ───────────────────────────────────────────────────────────

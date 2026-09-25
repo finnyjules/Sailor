@@ -15,6 +15,8 @@ const NO_SEED_IDS = [
   'kling-v3', 'hailuo-2.3', 'luma-ray-2-720p', 'flux-3', 'sora-2', 'sora-2-pro',
   // Task F4: google/gemini-omni-flash (both endpoints) has no seed field.
   'gemini-omni-flash',
+  // Task F19: Grok Imagine Video 1.5 (fal's two endpoints and Replicate's) has no seed field.
+  'grok-imagine-video-1.5',
 ]
 
 describe('video-models supportsSeed flag', () => {

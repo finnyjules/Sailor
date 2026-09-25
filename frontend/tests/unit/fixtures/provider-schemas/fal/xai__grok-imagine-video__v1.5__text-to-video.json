@@ -1,0 +1,235 @@
+{
+  "endpoint": "xai/grok-imagine-video/v1.5/text-to-video",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=xai/grok-imagine-video/v1.5/text-to-video",
+    "pricing": "https://fal.ai/models/xai/grok-imagine-video/v1.5/text-to-video/llms.txt"
+  },
+  "input": {
+    "$ref": "#/components/schemas/GrokImagineVideoV15TextToVideoInput"
+  },
+  "output": {
+    "$ref": "#/components/schemas/GrokImagineVideoV15TextToVideoOutput"
+  },
+  "components": {
+    "schemas": {
+      "GrokImagineVideoV15TextToVideoInput": {
+        "properties": {
+          "duration": {
+            "default": 6,
+            "description": "Video duration in seconds.",
+            "minimum": 1,
+            "maximum": 15,
+            "type": "integer",
+            "title": "Duration"
+          },
+          "prompt": {
+            "maxLength": 4096,
+            "description": "Text description of the desired video.",
+            "type": "string",
+            "examples": [
+              "Anime schoolgirl bursting out of house door, cherry blossoms blowing, morning light, speed lines indicating rush, chibi-ready expressions, classic shojo aesthetic, vibrant colors"
+            ],
+            "title": "Prompt"
+          },
+          "aspect_ratio": {
+            "default": "16:9",
+            "type": "string",
+            "description": "Aspect ratio of the generated video.",
+            "enum": [
+              "16:9",
+              "4:3",
+              "3:2",
+              "1:1",
+              "2:3",
+              "3:4",
+              "9:16"
+            ],
+            "title": "Aspect Ratio"
+          },
+          "resolution": {
+            "default": "720p",
+            "type": "string",
+            "description": "Resolution of the output video.",
+            "enum": [
+              "480p",
+              "720p",
+              "1080p"
+            ],
+            "title": "Resolution"
+          }
+        },
+        "x-fal-order-properties": [
+          "prompt",
+          "duration",
+          "resolution",
+          "aspect_ratio"
+        ],
+        "required": [
+          "prompt"
+        ],
+        "type": "object",
+        "title": "XAITextToVideoV15Input"
+      },
+      "GrokImagineVideoV15TextToVideoOutput": {
+        "properties": {
+          "video": {
+            "$ref": "#/components/schemas/VideoFile",
+            "description": "The generated video.",
+            "examples": [
+              {
+                "fps": 24,
+                "num_frames": 145,
+                "file_name": "RUAbFYlssdqnbjNLmE8qP_IX7BNYGP.mp4",
+                "width": 1280,
+                "duration": 6.041667,
+                "content_type": "video/mp4",
+                "height": 720,
+                "url": "https://v3b.fal.media/files/b/0a8b90e4/RUAbFYlssdqnbjNLmE8qP_IX7BNYGP.mp4"
+              }
+            ]
+          }
+        },
+        "x-fal-order-properties": [
+          "video"
+        ],
+        "required": [
+          "video"
+        ],
+        "type": "object",
+        "title": "XAITextToVideoOutput"
+      },
+      "VideoFile": {
+        "properties": {
+          "fps": {
+            "description": "The FPS of the video",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fps"
+          },
+          "file_size": {
+            "description": "The size of the file in bytes.",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              4404019
+            ],
+            "title": "File Size"
+          },
+          "file_name": {
+            "description": "The name of the file. It will be auto-generated if not provided.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "z9RV14K95DvU.png"
+            ],
+            "title": "File Name"
+          },
+          "width": {
+            "description": "The width of the video",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          },
+          "num_frames": {
+            "description": "The number of frames in the video",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Num Frames"
+          },
+          "duration": {
+            "description": "The duration of the video",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration"
+          },
+          "content_type": {
+            "description": "The mime type of the file.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "image/png"
+            ],
+            "title": "Content Type"
+          },
+          "height": {
+            "description": "The height of the video",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "url": {
+            "description": "The URL where the file can be downloaded from.",
+            "type": "string",
+            "title": "Url"
+          }
+        },
+        "x-fal-order-properties": [
+          "url",
+          "content_type",
+          "file_name",
+          "file_size",
+          "width",
+          "height",
+          "fps",
+          "duration",
+          "num_frames"
+        ],
+        "required": [
+          "url"
+        ],
+        "type": "object",
+        "title": "VideoFile"
+      }
+    }
+  },
+  "pricingText": "Priced per second of output video, by resolution: **480p** at **$0.08**/sec, **720p** at **$0.14**/sec, **1080p** at **$0.25**/sec. A 5-second 480p clip costs **$0.40**; 720p costs **$0.70**. Cost scales linearly with duration. No input images or references, so no per-image charges apply.\n\nFor more details, see [fal.ai pricing](https://fal.ai/pricing)."
+}

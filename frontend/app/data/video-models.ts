@@ -49,7 +49,7 @@ export const VIDEO_TAG_LABELS: Record<VideoModelTag, string> = {
 
 export type VideoModelBrand =
   | 'Google' | 'OpenAI' | 'Runway' | 'Kling' | 'ByteDance'
-  | 'MiniMax' | 'Wan' | 'Alibaba' | 'Luma' | 'Lightricks' | 'PixVerse' | 'VEED' | 'BFL' | 'Other'
+  | 'MiniMax' | 'Wan' | 'Alibaba' | 'xAI' | 'Luma' | 'Lightricks' | 'PixVerse' | 'VEED' | 'BFL' | 'Other'
 
 export interface VideoModelAdvancedField {
   name: string
@@ -655,6 +655,42 @@ export const VIDEO_MODELS: VideoModel[] = [
     durations: [3, 4, 5, 6, 8, 10, 12, 15],
     defaultDuration: 5,
     resolutions: ['720p', '1080p'],
+    defaultResolution: '720p',
+    advanced: [],
+  },
+
+  // ===== xAI ==============================================================
+  // Grok Imagine Video 1.5 runs only in Sailor's runner (family
+  // grok-imagine-video-1.5), on fal, with Replicate the backup for
+  // image-to-video at 480p or 720p (server/runner/generators/grokImagineVideo15.ts).
+  // Its schemas (xai/grok-imagine-video/v1.5/text-to-video and /image-to-video,
+  // xai/grok-imagine-video-1.5, read 2026-09-25) take 1–15 s and 480p, 720p or
+  // 1080p; no seed. The clip always has sound, made from the prompt: no sound
+  // switch, no negative prompt, no sound input. The duration list is a pick of
+  // the schema's whole seconds; fal's 3:2 and 2:3 are left out because the
+  // node's ratio list lacks them, and fal has no 21:9.
+  {
+    id: 'grok-imagine-video-1.5',
+    runnerOnly: true,
+    family: 'grok-imagine-video-1.5',
+    label: 'Grok Imagine Video 1.5',
+    brand: 'xAI',
+    // The gallery's cover art, and the backup service's model (twins.ts).
+    replicateSlug: 'xai/grok-imagine-video-1.5',
+    pitch: 'Short clips with sound, from a prompt or a picture, down to one second.',
+    description:
+      'Grok Imagine Video 1.5 makes 1 to 15 second clips with sound, at 480p, 720p or 1080p. '
+      + 'Describe the clip, or link a picture and say how it should move. It makes its own '
+      + 'music, effects and speech from the prompt, so it doesn\'t take a sound file.',
+    tags: ['audio', 'long', '4k'],
+    modes: ['t2v', 'i2v'],
+    supportsSeed: false,
+    priceHint: null,
+    aspectRatios: STANDARD_AR,
+    defaultAspectRatio: '16:9',
+    durations: [1, 2, 3, 4, 5, 6, 8, 10, 12, 15],
+    defaultDuration: 6,
+    resolutions: ['480p', '720p', '1080p'],
     defaultResolution: '720p',
     advanced: [],
   },
