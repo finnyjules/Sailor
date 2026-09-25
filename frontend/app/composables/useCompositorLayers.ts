@@ -272,11 +272,11 @@ export {
   type FoilFill, DEFAULT_FOIL_FILL,
   isGradient, isFill, isImageFill, isFoilFill,
 } from '~/lib/compositor/paint'
-import { type Paint, isFill, isImageFill, paintTileBox } from '~/lib/compositor/paint'
+import { type Paint, type FoilFill, isFill, isImageFill, isFoilFill, paintTileBox } from '~/lib/compositor/paint'
 import { buildDisplacementField, resampleBilinear, type DisplaceMapSpec } from '~/lib/compositor/displace'
 import { effectStackOf, orderablePasses, pinnedEffect, rasterablePasses, splitTrailingBlurs, isGeometryKind, regionOf, writeStackToLayer } from '~/lib/compositor/effectStack'
 import { expandRecipe } from '~/lib/compositor/recipes'
-import { applyFinish } from '~/lib/compositor/finishPass'
+import { applyFinish, METALS } from '~/lib/compositor/finishPass'
 // Frame slice F2: the pure outline transform (trim / offset / round corners / roughen).
 // `applyGeometry(d, effects, {W})` is identity (same reference) when no geometry effect
 // is enabled, so the no-effect draw stays byte-identical below.
@@ -3235,7 +3235,6 @@ function paintLayer(
               // Print finishes: GPU passes lit by the Frame's light; the layer's alpha is the mask.
               // No WebGL2 ⇒ applyFinish returns false and off stays the plain layer (the inspector
               // says why). Needs its own case: applyPasses silently skips unknown kinds.
-              case 'gold_foil':
               case 'spot_uv':
                 applyFinish(off, e.type, e as unknown as GoldFoilEffect | SpotUvEffect, _frameLight, s); break
               default:
@@ -3340,6 +3339,66 @@ function stampScratch(ctx: CanvasRenderingContext2D, scratch: CanvasRenderingCon
   ctx.save()
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.drawImage(scratch.canvas, 0, 0)
+  ctx.restore()
+}
+
+/** One device-sized scratch shared by every foil region; cleared on each use. */
+let _foilScratch: HTMLCanvasElement | null = null
+
+/**
+ * Paint a FOIL region where a fill or an outline would have gone.
+ *
+ * `drawShape(c, ink)` lays the region down in `ink` — the same statements the site would
+ * have run on `ctx`, only with a flat colour. Here that happens on a device-sized scratch
+ * under `ctx`'s current transform, in opaque white; the finish pass then lights that white
+ * region with the Frame's light (its alpha is the mask), and the result is stamped 1:1 in
+ * device space. The stamp runs under `ctx`'s own alpha, blend, shadow and clip, so the foil
+ * composites exactly as the plain fill would have.
+ *
+ * Never blank: no WebGL2 / lost context / oversize ⇒ `applyFinish` returns false and the
+ * region is flooded with the metal's mid colour; no DOM at all ⇒ the shape is drawn in that
+ * colour straight onto `ctx`.
+ */
+function paintFoilRegion(
+  ctx: CanvasRenderingContext2D,
+  paint: FoilFill,
+  drawShape: (c: CanvasRenderingContext2D, ink: string) => void,
+): void {
+  const mid = (METALS[paint.metal] ?? METALS.gold)[2]
+  const w = Math.max(1, ctx.canvas?.width || 1), h = Math.max(1, ctx.canvas?.height || 1)
+  if (!_foilScratch && typeof document !== 'undefined') _foilScratch = document.createElement('canvas')
+  const s = _foilScratch
+  const c = s ? s.getContext('2d') : null
+  if (!s || !c) { drawShape(ctx, mid); return }
+  if (s.width !== w) s.width = w
+  if (s.height !== h) s.height = h
+  c.save()
+  c.setTransform(1, 0, 0, 1, 0, 0)
+  c.globalAlpha = 1
+  c.globalCompositeOperation = 'source-over'
+  c.clearRect(0, 0, w, h)   // shared scratch: never let a previous region's pixels through
+  c.setTransform(ctx.getTransform())
+  c.lineJoin = ctx.lineJoin
+  c.lineCap = ctx.lineCap
+  c.miterLimit = ctx.miterLimit
+  drawShape(c, '#ffffff')
+  c.restore()
+  const base = _fieldCtx.base
+  const scale = base ? Math.hypot(base.a, base.b) || 1 : 1
+  const ok = applyFinish(s, 'gold_foil', {
+    metal: paint.metal, brushed: paint.brushed, pressed: paint.pressed, grain: paint.grain,
+  }, _frameLight, scale)
+  if (!ok) {
+    c.save()
+    c.setTransform(1, 0, 0, 1, 0, 0)
+    c.globalCompositeOperation = 'source-atop'
+    c.fillStyle = mid
+    c.fillRect(0, 0, w, h)
+    c.restore()
+  }
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.drawImage(s, 0, 0)
   ctx.restore()
 }
 
@@ -4007,11 +4066,15 @@ function paintStrokeStack(
     // is put to `wobbleSpecOf` rather than re-derived from the four raw fields, and it is put
     // BEFORE `outlineData()` so an ordinary band still never pays to build the outline data
     // it does not read. `null` here ⇒ every statement below runs exactly as it always has.
+    // A FOIL band is laid down white on the foil scratch and lit there (see
+    // `paintFoilRegion`); every other paint takes exactly the statements it always did.
+    // Marching shapes above keep `resolvePaint`'s flat mid-metal fallback.
+    const foil = isFoilFill(st.paint) ? st.paint : null
     const wobble = wobbleSpecOf(st, o.widthScale)
     if (wobble) {
       const outline = outlineData()
       if (outline) {
-        paintWobbledBand(ctx, {
+        const band = (c: CanvasRenderingContext2D, ink?: string) => paintWobbledBand(c, {
           pathData: outline,
           width: st.width * o.widthScale,
           distance: (st.distance ?? 0) * o.widthScale,
@@ -4021,9 +4084,11 @@ function paintStrokeStack(
           dash: strokeDashSegments(st.dash, o.widthScale),
           // REACH — `'extend'`, for the reason the straight band below spells out in full: a
           // wobbled band is displaced off the paint box as well as offset from it.
-          style: (c) => resolvePaint(c, st.paint, paintBox, _fieldCtx, 'extend'),
+          style: (c) => ink ?? resolvePaint(c, st.paint, paintBox, _fieldCtx, 'extend'),
           tolerance: o.outlineTolerance ?? DEFAULT_FLATTEN_TOLERANCE * o.widthScale,
         })
+        if (foil) paintFoilRegion(ctx, foil, band)
+        else band(ctx)
         continue
       }
       // No outline to wobble (a kind that has none). Falling through paints the straight band
@@ -4039,7 +4104,7 @@ function paintStrokeStack(
     // on nothing here), so the safety is worth the redundant call.
     // A path layer hands its Path2D in instead and needs no rebuild.
     if (o.build && !o.path) o.build(ctx)
-    paintStrokeBand(ctx, {
+    const band = (c: CanvasRenderingContext2D, ink?: string) => paintStrokeBand(c, {
       width: st.width * o.widthScale,
       distance: (st.distance ?? 0) * o.widthScale,
       // REACH — `spread: 'extend'`. A band at a positive distance sits wholly outside the
@@ -4054,7 +4119,7 @@ function paintStrokeStack(
       // ramp arithmetic and the repeat arm the same tile under the same transform — so no
       // already-correct pixel changes; see `PaintSpread` in ~/lib/paint/resolve.ts. A layer FILL
       // stays on `'box'`: its ink IS its box, and reach there would only be cost.
-      style: (c) => resolvePaint(c, st.paint, paintBox, _fieldCtx, 'extend'),
+      style: (c) => ink ?? resolvePaint(c, st.paint, paintBox, _fieldCtx, 'extend'),
       align: st.align,
       join: st.join,
       dash: strokeDashSegments(st.dash, o.widthScale),
@@ -4062,6 +4127,10 @@ function paintStrokeStack(
       fillRule: o.fillRule,
       build: o.build,
     })
+    // The scratch starts with no path: `build` lays the shape's own path (or, for a path
+    // layer that hands its Path2D in, its joins/caps) on it first, as it does on ctx above.
+    if (foil) paintFoilRegion(ctx, foil, (c, ink) => { if (o.build) o.build(c); band(c, ink) })
+    else band(ctx)
   }
 }
 
@@ -4140,8 +4209,19 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
         ctx.stroke(path)
       }
       if (anyDash) ctx.setLineDash([])
-      ctx.fillStyle = resolvePaint(ctx, layer.color, oc.box, _fieldCtx)
-      ctx.fill(path)
+      if (isFoilFill(layer.color)) {
+        paintFoilRegion(ctx, layer.color, (c, ink) => { c.fillStyle = ink; c.fill(path) })
+      } else {
+        ctx.fillStyle = resolvePaint(ctx, layer.color, oc.box, _fieldCtx)
+        ctx.fill(path)
+      }
+    } else if (isFoilFill(layer.color)) {
+      // Foil text on the fillText route: the strokes go down as usual with the glyph ink made
+      // clear, then the glyphs themselves (and any underline) are drawn white on the foil
+      // scratch and stamped on top — strokes under, foil over, like the outline route above.
+      drawText(ctx, { ...layer, color: 'rgba(0,0,0,0)' } as TextLayer, W)
+      const bare = { ...layer, color: '#ffffff', strokes: [], strokeWidth: 0 } as unknown as TextLayer
+      paintFoilRegion(ctx, layer.color, (c, ink) => drawText(c, { ...bare, color: ink } as TextLayer, W))
     } else {
       drawText(ctx, layer, W)
     }
@@ -4152,7 +4232,8 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       // F2 geometry present: fill + stroke a SINGLE shared path (in pixels, unscaled ctx).
       maybePaintLongShadow(ctx, layer, gd, W) // F3: shadow body beneath the rect fill + stroke
       const path = new Path2D(gd)
-      if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill(path) }
+      if (isFoilFill(layer.fill)) paintFoilRegion(ctx, layer.fill, (c, ink) => { c.fillStyle = ink; c.fill(path) })
+      else if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill(path) }
       paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, path, outline: gd })
     } else {
       // One rounded path for every corner shape: a plain `radius` yields four
@@ -4161,7 +4242,8 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
       const radii = cornerRadii(layer.radius, w, h, W)
       const build = (c: CanvasRenderingContext2D) => { c.beginPath(); c.roundRect(-w / 2, -h / 2, w, h, radii) }
       build(ctx)
-      if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill() }
+      if (isFoilFill(layer.fill)) paintFoilRegion(ctx, layer.fill, (c, ink) => { build(c); c.fillStyle = ink; c.fill() })
+      else if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill() }
       paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, build, outline: () => outlinePathData(layer, W) })
     }
   } else if (layer.kind === 'ellipse') {
@@ -4170,12 +4252,14 @@ function drawLayerContent(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: n
     if (gd != null) {
       maybePaintLongShadow(ctx, layer, gd, W) // F3: shadow body beneath the ellipse fill + stroke
       const path = new Path2D(gd)
-      if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill(path) }
+      if (isFoilFill(layer.fill)) paintFoilRegion(ctx, layer.fill, (c, ink) => { c.fillStyle = ink; c.fill(path) })
+      else if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill(path) }
       paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, path, outline: gd })
     } else {
       const build = (c: CanvasRenderingContext2D) => { c.beginPath(); c.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2) }
       build(ctx)
-      if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill() }
+      if (isFoilFill(layer.fill)) paintFoilRegion(ctx, layer.fill, (c, ink) => { build(c); c.fillStyle = ink; c.fill() })
+      else if (hasPaint(layer.fill)) { ctx.fillStyle = resolvePaint(ctx, layer.fill, { w, h }, _fieldCtx); ctx.fill() }
       paintStrokeStack(ctx, layer, { w, h }, { widthScale: W, build, outline: () => outlinePathData(layer, W) })
     }
   } else if (layer.kind === 'path') {
@@ -5251,7 +5335,9 @@ function drawPath(ctx: CanvasRenderingContext2D, layer: PathLayer, W: number) {
   const s = (layer.scale || 1) * W
   ctx.save()
   ctx.scale(s, s)
-  if (hasPaint(layer.fill)) {
+  if (isFoilFill(layer.fill)) {
+    paintFoilRegion(ctx, layer.fill, (c, ink) => { c.fillStyle = ink; c.fill(p, layer.fillRule || 'nonzero') })
+  } else if (hasPaint(layer.fill)) {
     ctx.fillStyle = resolvePaint(ctx, layer.fill, layer.bbox, _fieldCtx)
     ctx.fill(p, layer.fillRule || 'nonzero')
   }
