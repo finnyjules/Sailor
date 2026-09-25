@@ -25,11 +25,17 @@
 //   CSS-transformed (e.g. scale()) ancestor.
 // - Pan and wheel zoom are the HOST's: it intercepts them in the capture phase
 //   on its own wrapper, before they reach this SVG.
-// - Keyboard: window keydown / keyup / blur while mounted (bubble phase). A
-//   host that owns viewport keys registers its listener in the capture phase,
-//   so it runs first, and stops propagation only for keys it consumed. Every
-//   key the overlay acts on — including an Escape/Enter it turns into
-//   `cancel`/`commit` — is preventDefault-ed and stopPropagation-ed.
+// - Keyboard, `keyboard="window"` (default): window keydown / keyup / blur
+//   while mounted (bubble phase). A host that owns viewport keys registers
+//   its listener in the capture phase, so it runs first, and stops
+//   propagation only for keys it consumed. Every key the overlay acts on —
+//   including an Escape/Enter it turns into `cancel`/`commit` — is
+//   preventDefault-ed and stopPropagation-ed.
+// - Keyboard, `keyboard="host"`: the overlay registers NO window listeners.
+//   The host owns the keyboard (its own capture-phase window listener) and
+//   feeds keys in via the exposed `onHostKeydown(e): boolean` / `onHostKeyup(e)`.
+//   `onHostKeydown` runs the same typing guard and focused-control rule
+//   before touching the pen, and returns whether it consumed the key.
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import type { SketchDoc, EntityId, ConstraintKind, SegmentSpec } from '~/lib/sketch/model'
 import { addPoint } from '~/lib/sketch/edit'
@@ -46,7 +52,12 @@ const props = withDefaults(defineProps<{
   cursor?: string
   // false: ignore every key and pointer event (still draws)
   active?: boolean
-}>(), { cursor: 'crosshair', active: true })
+  // 'window' (default): the overlay owns window keydown/keyup/blur itself.
+  // 'host': the overlay registers NO window key listeners; the host owns the
+  // keyboard and feeds keys in through the exposed onHostKeydown/onHostKeyup
+  // (see the block above the keyboard section below).
+  keyboard?: 'window' | 'host'
+}>(), { cursor: 'crosshair', active: true, keyboard: 'window' })
 const emit = defineEmits<{
   (e: 'commit'): void   // Enter with nothing left to finish — pen.finishSession() has run
   (e: 'cancel'): void   // Escape with nothing pending — the host decides (pen.revert() to discard)
@@ -629,33 +640,59 @@ function focusedControl(ev: KeyboardEvent): boolean {
 // stopPropagation-ed inside pen.onKeydown; an Escape/Enter the overlay turns
 // into `cancel`/`commit` is too, so a host that closes on Escape (unless
 // defaultPrevented) does not also close. Keys nobody acts on pass untouched.
-function onKeydown(ev: KeyboardEvent) {
-  if (!props.active || isTypingInField()) return
+//
+// The typing guard (isTypingInField) and the focused-control rule run FIRST,
+// before the key ever reaches the pen — this holds in both keyboard modes.
+// In `keyboard="host"` this function IS onHostKeydown, called from the
+// host's own CAPTURE-phase window listener, which runs before an input's own
+// handlers; a field's `stopPropagation` (e.g. PenValueRow's) cannot protect
+// it there, so the guard has to be the first thing this function does, not
+// something a caller is trusted to check beforehand.
+// Returns whether the key was consumed (by the pen, or by the overlay's own
+// commit/cancel) — a key ignored because the user is typing returns false.
+function handleKeydownEvent(ev: KeyboardEvent): boolean {
+  if (!props.active || isTypingInField()) return false
   const onControl = (ev.key === 'Enter' || ev.key === 'Escape') && focusedControl(ev)
-  if (onControl && ev.key === 'Enter') return
+  if (onControl && ev.key === 'Enter') return false
   const handled = props.pen.onKeydown(ev, { cancelGesture: cancelMarquee })
-  if (handled || onControl) return
+  if (handled) return true
+  if (onControl) return false
   if (ev.key === 'Escape') {
     ev.preventDefault(); ev.stopPropagation()
     emit('cancel')
+    return true
   } else if (ev.key === 'Enter' && !(ev.metaKey || ev.ctrlKey)) {
     ev.preventDefault(); ev.stopPropagation()
     finishSession()   // no orphan start point / lone anchor reaches the host
     emit('commit')
+    return true
   }
+  return false
 }
+function onKeydown(ev: KeyboardEvent) { handleKeydownEvent(ev) }
 function onKeyup(ev: KeyboardEvent) { if (props.active) props.pen.onKeyup(ev) }
 function onBlur() { props.pen.onBlur() }
 
 onMounted(() => {
+  if (props.keyboard === 'host') return
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('keyup', onKeyup)
   window.addEventListener('blur', onBlur)
 })
 onUnmounted(() => {
+  if (props.keyboard === 'host') return
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('keyup', onKeyup)
   window.removeEventListener('blur', onBlur)
+})
+
+// HOST CONTRACT (keyboard="host"): the host must call onHostKeydown from its
+// OWN capture-phase window keydown listener and stop propagation when it
+// returns true; onHostKeyup similarly for keyup. The overlay does not touch
+// window listeners itself in this mode (see onMounted above).
+defineExpose({
+  onHostKeydown: handleKeydownEvent,
+  onHostKeyup: onKeyup,
 })
 </script>
 
