@@ -103,6 +103,11 @@
  *    no face video or sound, or one that isn't a file uploaded to Sailor
  *    (generators/sync3.ts). Its files are then read and measured before the
  *    hold (sync3Media.ts, called by the engine).
+ *  - Enhance a video on fal's Topaz (F23), on a runner run only: a size or
+ *    frame rate the node doesn't offer, no video, or one that isn't a file
+ *    uploaded to Sailor (generators/topazVideo.ts); its built request's
+ *    factor and frame rate within the schema. Its video is then read and
+ *    measured before the hold (topazMedia.ts, called by the engine).
  * References are never dropped, to make a request fit or otherwise.
  */
 import { isLink, type ApiNode, type ApiPrompt } from '#shared/runner/graph'
@@ -155,6 +160,8 @@ import {
 import { KREA_2_FAL_APPS, KREA_2_IDS, KREA_2_LONG_PROMPT, KREA_2_NEEDS_PROMPT, KREA_2_PROMPT_MAX, isKrea2Model } from './generators/krea2'
 import { isSeedream5ProEdit, seedream5ProEditProblems } from './generators/seedream5ProEdit'
 import { SYNC_3_APP, sync3NodeProblem } from './generators/sync3'
+import { TOPAZ_VIDEO_APP, topazVideoNodeProblem } from './generators/topazVideo'
+import { TOPAZ_VIDEO_MAX_FACTOR, TOPAZ_VIDEO_MIN_FACTOR, TOPAZ_VIDEO_UNKNOWN_SETTING } from '#shared/runner/topazVideo'
 import { isSync3LipSync, sync3ModeRefusal } from '#shared/runner/lipSync'
 
 export { FIRST_FRAME_AND_REFERENCES }
@@ -332,6 +339,13 @@ export function requestProblem(provider: string, endpoint: string, payload: Reco
   }
   // sync-3 (F22): only the sync modes whose clip the price reads ("silence" never goes out).
   if (`${provider} ${endpoint}` === `fal ${SYNC_3_APP}`) return sync3ModeRefusal(payload.sync_mode)
+  // Topaz (F23): the factor and frame rate the price read, within the schema (a bad value fails only at the result).
+  if (`${provider} ${endpoint}` === `fal ${TOPAZ_VIDEO_APP}`) {
+    const f = payload.upscale_factor
+    const fps = payload.target_fps
+    if (typeof f !== 'number' || !(f >= TOPAZ_VIDEO_MIN_FACTOR && f <= TOPAZ_VIDEO_MAX_FACTOR)) return TOPAZ_VIDEO_UNKNOWN_SETTING
+    if (fps !== undefined && fps !== 30 && fps !== 60) return TOPAZ_VIDEO_UNKNOWN_SETTING
+  }
   return null
 }
 
@@ -678,6 +692,13 @@ export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = 
     // next, before the hold (sync3Media.ts).
     else if (ct === 'LipSyncNode' && opts.runner && isSync3LipSync(inputs)) {
       const p = sync3NodeProblem(prompt, nodeId)
+      if (p) out.push({ nodeId, classType: ct, input: p.input, message: p.message })
+    }
+    // Enhance a video on fal's Topaz (F23), on a runner run (with its switch on the ComfyUI path
+    // refuses the node itself): a size or frame rate it doesn't offer, no video, or one that isn't
+    // a file uploaded to Sailor. The video itself is read and measured next, before the hold (topazMedia.ts).
+    else if (ct === 'EnhanceVideoNode' && opts.runner) {
+      const p = topazVideoNodeProblem(prompt, nodeId)
       if (p) out.push({ nodeId, classType: ct, input: p.input, message: p.message })
     }
     // Film a shot on Seedance 2.0 (ComfyUI path only): a first frame beside references is refused,

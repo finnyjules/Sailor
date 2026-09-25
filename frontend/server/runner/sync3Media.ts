@@ -29,8 +29,7 @@
 import type { ApiLink, ApiPrompt } from '#shared/runner/graph'
 import { LIPSYNC_MAX_SECONDS, type InputSeconds } from '#shared/pricing/clipSettings'
 import { lipSyncSyncMode, sync3OutputSeconds } from '#shared/runner/lipSync'
-import { mediaFacts, mediaRuleProblem, mediaSizeProblem, type MediaRule } from './mediaInputs'
-import { sha256Hex } from './handoff'
+import { measureMediaFile, measuredMediaChanged, type MediaReads, type MediaRule } from './mediaInputs'
 import { sync3Sources, type Sync3Source } from './generators/sync3'
 import type { MeasuredMedia, OutputFile } from './types'
 
@@ -71,11 +70,7 @@ export type Sync3MediaCheck =
   | { problem: string }
   | { problem: null, video: OutputFile, audio: OutputFile, seconds: InputSeconds, sha: MeasuredMedia['sha'] }
 
-export interface Sync3MediaReads {
-  read(file: OutputFile): Promise<Uint8Array>
-  /** The file's size without reading it (a file over the limit is never loaded). Absent: judged after the read. */
-  size?(file: OutputFile): Promise<number | null>
-  strict: boolean
+export interface Sync3MediaReads extends MediaReads {
   /** At the node's turn: the files a link brought (the Audio card's). Absent: the card's own file, from the prompt. */
   filesFrom?(link: ApiLink): OutputFile[]
 }
@@ -90,25 +85,16 @@ export async function sync3MediaCheck(prompt: ApiPrompt, nodeId: string, o: Sync
   if ('problem' in sources.audio) return { problem: sources.audio.problem }
   const video = sources.video.file
   const audio = fileOf(sources.audio, o)
-  const measure = async (file: OutputFile, rule: MediaRule) => {
-    const size = o.size ? await o.size(file).catch(() => null) : null
-    const tooLarge = size != null ? mediaSizeProblem(size, rule) : null
-    if (tooLarge) return { problem: tooLarge, seconds: null, sha: '' }
-    let bytes: Uint8Array
-    try { bytes = await o.read(file) }
-    catch { return { problem: SYNC_3_FILE_MISSING, seconds: null, sha: '' } }
-    const facts = await mediaFacts(bytes, rule)
-    return { problem: mediaRuleProblem(facts, rule, o.strict), seconds: facts.seconds, sha: sha256Hex(bytes) }
-  }
+  const measure = (file: OutputFile, rule: MediaRule) => measureMediaFile(file, rule, o, SYNC_3_FILE_MISSING)
   const [v, a] = await Promise.all([measure(video, SYNC_3_VIDEO_RULE), measure(audio, SYNC_3_SOUND_RULE)])
-  if (v.problem) return { problem: v.problem }
-  if (a.problem) return { problem: a.problem }
+  if (v.problem !== null) return { problem: v.problem }
+  if (a.problem !== null) return { problem: a.problem }
   // The clip it makes, as far as it was measured (an unmeasured length can't shorten it).
-  const made = sync3OutputSeconds(lipSyncSyncMode(prompt[nodeId]?.inputs ?? {}), a.seconds ?? Infinity, v.seconds ?? Infinity)
+  const made = sync3OutputSeconds(lipSyncSyncMode(prompt[nodeId]?.inputs ?? {}), a.facts.seconds ?? Infinity, v.facts.seconds ?? Infinity)
   if (made != null && Number.isFinite(made) && tidy(made) > LIPSYNC_MAX_SECONDS) return { problem: SYNC_3_TOO_LONG }
   const seconds: InputSeconds = {}
-  if (a.seconds != null) seconds.audio = a.seconds
-  if (v.seconds != null) seconds.video = v.seconds
+  if (a.facts.seconds != null) seconds.audio = a.facts.seconds
+  if (v.facts.seconds != null) seconds.video = v.facts.seconds
   return { problem: null, video, audio, seconds, sha: { video: v.sha, audio: a.sha } }
 }
 
@@ -126,9 +112,7 @@ export function measuredOf(check: Extract<Sync3MediaCheck, { problem: null }>): 
  * missing counts), or bytes that differ (sha256).
  */
 export function sync3MediaChanged(recorded: MeasuredMedia, now: Extract<Sync3MediaCheck, { problem: null }>): boolean {
-  const same = (a?: number | null, b?: number | null) => (a == null && b == null) || (a != null && b != null && tidy(a) === tidy(b))
-  return !same(recorded.seconds.audio, now.seconds.audio) || !same(recorded.seconds.video, now.seconds.video)
-    || recorded.sha.audio !== now.sha.audio || recorded.sha.video !== now.sha.video
+  return measuredMediaChanged(recorded, measuredOf(now))
 }
 
 /** The sound's file: what its link brought at the node's turn, else the Audio card's own file. */

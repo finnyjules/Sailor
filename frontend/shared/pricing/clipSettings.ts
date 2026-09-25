@@ -33,6 +33,12 @@
  * over 60 s, so the 60 s figure (the hold, and the badge's "up to") is never
  * below the charge.
  *
+ * Topaz video upscale on fal (Enhance a video while topaz-video is on, model
+ * line-up F23; nodePrice.ts FAMILY_PRICED_CLASSES) bills every second of the
+ * video by the output's size band and frame rate: `topazVideoCalls`, from the
+ * video the runner measured (its length, size and frame rate). Unmeasured,
+ * the ceiling: 60 s, above 1080p, 60 fps.
+ *
  * Fail-safe: a linked setting, or a value the service doesn't list, is priced
  * at its dearest; an unreadable length at the longest the service accepts.
  * Pure; relative imports only.
@@ -42,6 +48,9 @@ import { clipRate, clipUsd } from './clipRates'
 import { readModelOptions } from './videoSettings'
 import { pyIntOf, pyTruthy } from '../runner/pyText'
 import { SYNC_3_ENGINE, lipSyncSyncMode, sync3ModeRefusal } from '../runner/lipSync'
+import {
+  TOPAZ_VIDEO_ENDPOINT, TOPAZ_VIDEO_MAX_SECONDS, TOPAZ_VIDEO_UNKNOWN_SETTING, topazVideoPlan, topazVideoRateKey, topazVideoTarget, topazVideoTargetFps,
+} from '../runner/topazVideo'
 
 export interface ClipCall {
   endpoint: string
@@ -161,15 +170,23 @@ export const LIPSYNC_MAX_SECONDS = 60
 export interface InputSeconds {
   audio?: number | null
   video?: number | null
+  /**
+   * The video's display size and frame rate, where the runner measured them
+   * (Topaz video upscale, model line-up F23: the price reads the output's size
+   * band and frame rate, shared/runner/topazVideo.ts). Absent or null = not measured.
+   */
+  videoWidth?: number | null
+  videoHeight?: number | null
+  videoFps?: number | null
 }
 
 /**
  * Seconds billed for a measured clip: whole seconds rounded up (the services
  * bill by the second), never above the 60 s cap. Not measured: the cap.
  */
-export function billedSeconds(measured: number | null | undefined): number {
-  if (typeof measured !== 'number' || !Number.isFinite(measured) || !(measured > 0)) return LIPSYNC_MAX_SECONDS
-  return Math.min(Math.ceil(Math.round(measured * 1e6) / 1e6), LIPSYNC_MAX_SECONDS)
+export function billedSeconds(measured: number | null | undefined, cap: number = LIPSYNC_MAX_SECONDS): number {
+  if (typeof measured !== 'number' || !Number.isFinite(measured) || !(measured > 0)) return cap
+  return Math.min(Math.ceil(Math.round(measured * 1e6) / 1e6), cap)
 }
 
 /**
@@ -503,4 +520,37 @@ export function remoteVideoNodeUsd(classType: string, inputs: Inputs, measured: 
     usd = Math.max(usd, one)
   }
   return usd
+}
+
+// ── Topaz video upscale (Enhance a video while topaz-video is on, F23) ────
+
+export { TOPAZ_VIDEO_ENDPOINT }
+
+/**
+ * Topaz's call as the runner sends it (server/runner/generators/topazVideo.ts):
+ * the measured video's seconds (whole seconds rounded up, 60 at most), at the
+ * output's size band and frame rate (shared/runner/topazVideo.ts). What
+ * wasn't measured prices at the top: 60 s, "4k", a high frame rate — the
+ * hold for a node with no record, and the badge's "up to" (the canvas can't
+ * read the video). A setting or video Topaz can't take is refused, with the
+ * words the runner refuses it with.
+ */
+export function topazVideoCalls(inputs: Inputs, measured: InputSeconds = {}): ClipCall[] | { refused: string } {
+  const seconds = billedSeconds(measured.video, TOPAZ_VIDEO_MAX_SECONDS)
+  const sized = typeof measured.videoWidth === 'number' && typeof measured.videoHeight === 'number'
+  if (!sized) {
+    // Unmeasured: the top band, doubled — unless the node's own settings can't be read.
+    if (topazVideoTarget(inputs) == null || topazVideoTargetFps(inputs) === undefined) return { refused: TOPAZ_VIDEO_UNKNOWN_SETTING }
+    return [{ endpoint: TOPAZ_VIDEO_ENDPOINT, seconds, resolution: topazVideoRateKey('4k', true), audio: false }]
+  }
+  const p = topazVideoPlan(inputs, { width: measured.videoWidth, height: measured.videoHeight, fps: measured.videoFps })
+  if ('refused' in p) return p
+  return [{ endpoint: TOPAZ_VIDEO_ENDPOINT, seconds, resolution: topazVideoRateKey(p.band, p.highFps), audio: false }]
+}
+
+/** Dollars for Topaz's call as configured and measured, or the refusal. */
+export function topazVideoUsd(inputs: Inputs, measured: InputSeconds = {}): number | { refused: string } {
+  const calls = topazVideoCalls(inputs, measured)
+  if ('refused' in calls) return calls
+  return clipUsd(calls[0]!.endpoint, calls[0]!)!
 }

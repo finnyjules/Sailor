@@ -381,14 +381,14 @@ describe('the menus hide sync-3 while its switch is off', () => {
 describe('the price', () => {
   const at = (inputs: Record<string, unknown>, measured: { audio?: number, video?: number } = {}) => priceNode('LipSyncNode', inputs, { inputSeconds: measured })
 
-  it('the card: $8 a minute of video made on fal, verified, non-zero; the book carries it (lineup-f22)', () => {
+  it('the card: $8 a minute of video made on fal, verified, non-zero; the book carries it (lineup-f22, now lineup-f23)', () => {
     const rate = clipRate(SYNC_3_ENDPOINT)!
     expect(rate).toEqual({
       unit: 'per_second', service: 'fal', source: 'https://fal.ai/models/fal-ai/sync-lipsync/v3/llms.txt', read: '2026-09-25', confidence: 'verified',
       byResolution: { '*': 8 / 60 },
     })
     expect(CLIP_RATES[SYNC_3_ENDPOINT]).toBe(rate)
-    expect(PRICE_BOOK_VERSION).toBe('lineup-f22')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-f23')
   })
 
   it('the clip it makes, whole seconds rounded up: the sound (loop, bounce, remap), the shorter (cut off)', () => {

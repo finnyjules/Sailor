@@ -160,6 +160,12 @@
  *                           fal        —           runner-only (F22, family sync-3): Replicate has no sync-3 (its
  *                                                  sync.so models are lipsync-2, lipsync-2-pro and react-1) (sync3.ts)
  *
+ * ── Video upscale ──────────────────────────────────────────────────────────
+ * Enhance a video, Topaz Video Upscale
+ *                           fal        —           runner-only while on (F23, family topaz-video, moves the whole
+ *                                                  node): Replicate's topazlabs/video-upscale bills an unspecified
+ *                                                  unit, so its price can't be verified (topazVideo.ts)
+ *
  * `RUNNER_ROUTES` below is this table as data; the spec builds each node and
  * checks planNode sends it where the table says.
  */
@@ -297,6 +303,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'ProductShotNode': r('replicate', null, 'not on fal'),
   'ProductShotNode+bria-product-shot': r('fal', null, 'Replicate has no Bria Product Shot; its background swap is another model'),
   'LipSyncNode:sync-3': r('fal', null, 'Replicate has no sync-3 (its sync.so models are lipsync-2, lipsync-2-pro and react-1)'),
+  'EnhanceVideoNode+topaz-video': r('fal', null, 'Replicate\'s Topaz video upscale bills an unspecified unit: its price can\'t be verified'),
 }
 
 // ── Generate video: the two models moved to fal first ──────────────────────

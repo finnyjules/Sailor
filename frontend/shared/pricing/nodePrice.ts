@@ -61,7 +61,7 @@ import { SETTING_PRICED_NODE_CLASSES, editCalls, editSteps } from './editSetting
 import { imagePriceMaxUsd, imagePriceUsd, imageRate } from './imageRates'
 import { LARGEST_RATIO, effectiveImageSettings } from './imageSettings'
 import { videoPriceMaxUsd, videoPriceUsd, videoRate } from './videoRates'
-import { REMOTE_VIDEO_NODE_CLASSES, remoteVideoNodeUsd, type InputSeconds } from './clipSettings'
+import { REMOTE_VIDEO_NODE_CLASSES, remoteVideoNodeUsd, topazVideoUsd, type InputSeconds } from './clipSettings'
 import { effectiveVideoSettings, maxVideoSeconds } from './videoSettings'
 import type { RunnerFamily } from '../runner/families'
 
@@ -93,6 +93,25 @@ const SETTING_PRICED_CLASS_SET: ReadonlySet<string> = new Set(SETTING_PRICED_NOD
  * charge (priceGraph) and the node badge both price these through priceNode.
  */
 export const SHARED_PRICED_CLASS_SET: ReadonlySet<string> = new Set([...MODEL_PRICED_NODE_CLASSES, ...SETTING_PRICED_NODE_CLASSES, ...REMOTE_VIDEO_NODE_CLASSES])
+
+/**
+ * Classes priced here only while a runner family moves them onto another
+ * service (Ruling 10), each with that family: "Enhance a video" on fal's
+ * Topaz while topaz-video is on (model line-up F23), per second of the video
+ * the runner measured (clipSettings.ts topazVideoCalls). With the family off
+ * the class keeps its flat price (server/utils/priceBook.ts
+ * GRAPH_NODE_CREDITS) and priceNode refuses it as "not a model-priced class",
+ * as before.
+ */
+export const FAMILY_PRICED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
+  EnhanceVideoNode: 'topaz-video',
+}
+
+/** Whether `classType` is priced here with these families on (FAMILY_PRICED_CLASSES). */
+export function familyPricedClass(classType: string, families: ReadonlySet<RunnerFamily> | undefined): boolean {
+  const family = hasOwn(FAMILY_PRICED_CLASSES, classType) ? FAMILY_PRICED_CLASSES[classType] : undefined
+  return !!family && !!families?.has(family)
+}
 
 /** The older one-model video nodes and the lip-sync nodes, priced per second (clipSettings.ts). */
 export { REMOTE_VIDEO_NODE_CLASSES }
@@ -174,7 +193,9 @@ export interface PriceOptions {
   /**
    * The runner families switched on, where the node may run in the runner.
    * Only a class moved onto a newer model as a whole reads them (Rotate
-   * camera on Qwen Image Edit 2511, Task F10); none, it prices as before.
+   * camera on Qwen Image Edit 2511, Task F10; Enhance a video on fal's Topaz,
+   * F23, which also reads `inputSeconds`' video size and frame rate); none,
+   * it prices as before.
    */
   families?: ReadonlySet<RunnerFamily>
 }
@@ -207,6 +228,11 @@ export function priceNode(classType: string, inputs: NodeInputs | null | undefin
   if (REMOTE_VIDEO_CLASS_SET.has(classType)) {
     const usd = remoteVideoNodeUsd(classType, inputs ?? {}, opts.inputSeconds ?? {})
     if (usd == null) return { refused: `${classType} has a call with no listed price` }
+    return typeof usd === 'number' ? { usd, credits: creditsForUsd(usd) } : usd
+  }
+  // Enhance a video on fal's Topaz, while topaz-video is on (F23): the measured video, else its ceiling.
+  if (familyPricedClass(classType, opts.families)) {
+    const usd = topazVideoUsd(inputs ?? {}, opts.inputSeconds ?? {})
     return typeof usd === 'number' ? { usd, credits: creditsForUsd(usd) } : usd
   }
   if (!MODEL_PRICED_CLASS_SET.has(classType)) return { refused: 'not a model-priced class' }

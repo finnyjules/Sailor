@@ -27,8 +27,8 @@ import { isReusable, requestFingerprint } from './fingerprint'
 import { assertFilesOwned, collectInputFiles, parseInputFileRef, type OwnershipCheck } from './inputs'
 import { extraPromptText, hasOutputNode, measuredInputPixels, nodeCredits, stageEstimate, unpricedProviderNode, type Metering } from './metering'
 import { ev, type RunEvents, type SwitchReason } from './events'
-import { SYNC_3_CHANGED, measuredOf, sync3InputFiles, sync3MediaChanged, sync3MediaCheck } from './sync3Media'
-import { isSync3LipSync } from '#shared/runner/lipSync'
+import { nodeMediaChangedWords, nodeMediaCheck, nodeMediaFiles, mediaNodeKind } from './nodeMedia'
+import { measuredMediaChanged } from './mediaInputs'
 import type { InputSeconds } from '#shared/pricing/clipSettings'
 import type { Handoff } from './handoff'
 import { extFor, type ResultStore } from './results'
@@ -461,7 +461,7 @@ export function createEngine(deps: EngineDeps) {
         // which take actually pays it is only known once one makes something.
         const includesBase = !run.baseCharged && hasOutputNode(take.prompt)
         let estimate: number
-        // sync-3 lip-syncs hold the price of what the start of the run measured (TakeRecord.measured); none, the 60 s cap.
+        // Media nodes (sync-3, Topaz) hold the price of what the start of the run measured (TakeRecord.measured); none, the ceiling.
         try { estimate = stageEstimate(take.prompt, nodes, includesBase, deps.families?.() ?? NO_FAMILIES, take.measured) }
         catch (e) {
           if (e instanceof UnpricedGraphError) throw refuse('A model in this workflow has no price yet', 500)
@@ -685,23 +685,24 @@ export function createEngine(deps: EngineDeps) {
       // goes to planNode, which drops a backup that can't take it.
       const fileCheck = resuming ? { problem: null } as Awaited<ReturnType<typeof linkedFileCheck>> : await linkedFileCheck(take.prompt[id]!, ([from]) => take.nodes[from]?.outputs ?? [], readOnce, families)
       if (fileCheck.problem) throw new Error(fileCheck.problem)
-      // sync-3 lip-sync (F22): its face video and sound read and measured again
-      // now, before the hand-off. A file that no longer fits fails the node here
-      // (its hold is released); the lengths measured are what it is charged.
+      // A media node (./nodeMedia.ts: sync-3 lip-sync, F22; Topaz video
+      // upscale, F23): its files read and measured again now, before the
+      // hand-off. A file that no longer fits fails the node here (its hold is
+      // released); what is measured is what it is planned and charged on.
       let inputSeconds: InputSeconds | undefined
-      if (!resuming && take.prompt[id]!.class_type === 'LipSyncNode' && isSync3LipSync(take.prompt[id]!.inputs ?? {})) {
-        const media = await sync3MediaCheck(take.prompt, id, {
-          read: readOnce, size: f => deps.results.size?.(f) ?? Promise.resolve(null), strict: deps.hosted(), filesFrom: ([from]) => take.nodes[from]?.outputs ?? [],
-        })
+      const media = resuming ? null : await nodeMediaCheck(take.prompt, id, {
+        read: readOnce, size: f => deps.results.size?.(f) ?? Promise.resolve(null), strict: deps.hosted(), filesFrom: ([from]) => take.nodes[from]?.outputs ?? [],
+      })
+      if (media) {
         if (media.problem !== null) throw new Error(media.problem)
         // The tight hold (F22 fix round 1): the files must be the ones the start
         // of the run measured and held for, and cost no more.
         const recorded = take.measured && Object.prototype.hasOwnProperty.call(take.measured, id) ? take.measured[id] : undefined
-        if (recorded && (sync3MediaChanged(recorded, media)
-          || nodeCredits(take.prompt[id]!, undefined, families, media.seconds) > nodeCredits(take.prompt[id]!, undefined, families, recorded.seconds))) {
-          throw new Error(SYNC_3_CHANGED)
+        if (recorded && (measuredMediaChanged(recorded, media.measured)
+          || nodeCredits(take.prompt[id]!, undefined, families, media.measured.seconds) > nodeCredits(take.prompt[id]!, undefined, families, recorded.seconds))) {
+          throw new Error(nodeMediaChangedWords(take.prompt[id]))
         }
-        inputSeconds = media.seconds
+        inputSeconds = media.measured.seconds
       }
 
       const planWith = (toUrl: (f: OutputFile) => Promise<string>) => planNode({
@@ -714,6 +715,7 @@ export function createEngine(deps: EngineDeps) {
         hosted: deps.hosted(),
         families,
         ...(fileCheck.bytes !== undefined ? { inputBytes: fileCheck.bytes } : {}),
+        ...(inputSeconds ? { measured: inputSeconds } : {}),
       })
       const handOff = async (f: OutputFile) => deps.handoff.toUrlBytes(f, await readOnce(f))
       // Resuming: the request written down is kept (and its price); the plan is
@@ -769,8 +771,9 @@ export function createEngine(deps: EngineDeps) {
       const backupSettings = deps.backup?.() ?? { enabled: false, stallMs: 0 }
       const backup = backupSettings.enabled && plan.backup && !resumedWithoutBackup ? plan.backup : null
       // Priced on the measured picture where the price depends on its size
-      // (FLUX.2 edit; Rotate camera on 2511), and on the measured clip where it
-      // depends on its length (sync-3 lip-sync), measured before planning.
+      // (FLUX.2 edit; Rotate camera on 2511), and on the measured media where
+      // it depends on them (sync-3 lip-sync; Topaz video upscale), measured
+      // before planning.
       if (!resuming) rec.credits = nodeCredits(take.prompt[id]!, inputPixels, families, inputSeconds)
       const fp = resuming
         ? rec.fingerprint
@@ -1142,20 +1145,22 @@ export function createEngine(deps: EngineDeps) {
       assertOwned: fs => assertFilesOwned(fs, i.userId, deps.hosted(), deps.ownership),
     })
     if (tooLong) throw refuse(tooLong.message, 400, { nodeId: tooLong.nodeId, classType: tooLong.classType })
-    // sync-3 lip-sync (F22): its face video and sound must be the caller's own
-    // (hosted), and sync-3 must be able to take them: read and measured now,
-    // before anything is held (sync3Media.ts). The node's turn reads them again.
-    // What was measured is recorded on the take (the tight hold, F22 fix round 1).
+    // Media nodes (./nodeMedia.ts: sync-3 lip-sync, F22; Topaz video upscale,
+    // F23): their files must be the caller's own (hosted), and the model must
+    // be able to take them: read and measured now, before anything is held.
+    // The node's turn reads them again. What was measured is recorded on the
+    // take (the tight hold, F22 fix round 1).
     const measured: Record<string, MeasuredMedia>[] = prompts.map(() => ({}))
     for (const [index, p] of prompts.entries()) {
       for (const [nodeId, n] of Object.entries(p)) {
-        if (n.class_type !== 'LipSyncNode' || !isSync3LipSync(n.inputs ?? {})) continue
-        await assertFilesOwned(sync3InputFiles(p, nodeId), i.userId, deps.hosted(), deps.ownership)
-        const media = await sync3MediaCheck(p, nodeId, {
+        if (!mediaNodeKind(n)) continue
+        await assertFilesOwned(nodeMediaFiles(p, nodeId), i.userId, deps.hosted(), deps.ownership)
+        const media = await nodeMediaCheck(p, nodeId, {
           read: f => deps.results.read(f), size: f => deps.results.size?.(f) ?? Promise.resolve(null), strict: deps.hosted(),
         })
+        if (!media) continue
         if (media.problem !== null) throw refuse(media.problem, 400, { nodeId, classType: n.class_type })
-        measured[index]![nodeId] = measuredOf(media)
+        measured[index]![nodeId] = media.measured
       }
     }
     // A Frame's baked layers and masks are files the browser uploaded just

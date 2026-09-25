@@ -80,19 +80,29 @@ export interface TakeRecord {
   /** Gates where this take was not picked — nothing behind them runs. */
   droppedGates: string[]
   /**
-   * What the start of the run measured of each sync-3 lip-sync's files (F22
-   * fix round 1, the tight hold): their lengths, which the hold is priced
-   * from, and the sha256 of the bytes measured. At the node's turn the files
-   * must still be exactly these, or the node is refused. Absent (older runs,
-   * nodes not measured): the hold is the 60 s cap.
+   * What the start of the run measured of each media node's files (F22 fix
+   * round 1, the tight hold; ./nodeMedia.ts: sync-3 lip-syncs, and Topaz
+   * video upscales, F23): their lengths (and a video's size and frame rate,
+   * where the price reads them), which the hold is priced from, and the
+   * sha256 of the bytes measured. At the node's turn the files must still be
+   * exactly these, or the node is refused. Absent (older runs, nodes not
+   * measured): the hold is the price's ceiling (the 60 s cap).
    */
   measured?: Record<string, MeasuredMedia>
 }
 
-/** One sync-3 node's files as measured at the start of the run. */
+/** One media node's files as measured at the start of the run. */
 export interface MeasuredMedia {
-  seconds: { audio?: number | null; video?: number | null }
-  sha: { video: string; audio: string }
+  /** shared/pricing/clipSettings.ts InputSeconds: the lengths, and a video's size and frame rate. */
+  seconds: {
+    audio?: number | null
+    video?: number | null
+    videoWidth?: number | null
+    videoHeight?: number | null
+    videoFps?: number | null
+  }
+  /** The sha256 of each file's bytes, by its part (a sync-3 node has both; a Topaz node only its video). */
+  sha: { video?: string; audio?: string }
 }
 
 export type LegAction = 'run' | 'continue' | 'again' | 'redo' | 'restart'

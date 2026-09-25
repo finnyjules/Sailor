@@ -10,7 +10,7 @@
  * GenerateImageNode was missing from the table.
  */
 import { creditsForUsd } from '../../shared/pricing/markup'
-import { MODEL_PRICED_NODE_CLASSES, REMOTE_VIDEO_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, SHARED_PRICED_CLASS_SET, priceNode } from '../../shared/pricing/nodePrice'
+import { MODEL_PRICED_NODE_CLASSES, REMOTE_VIDEO_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, SHARED_PRICED_CLASS_SET, familyPricedClass, priceNode } from '../../shared/pricing/nodePrice'
 import { VIDEO_RATES } from '../../shared/pricing/videoRates'
 import type { InputSeconds } from '../../shared/pricing/clipSettings'
 import type { RunnerFamily } from '../../shared/runner/families'
@@ -124,7 +124,13 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // rounded up), billed on the clip the runner measures (the sound's length,
 // or the shorter of sound and video for cut off; 60 s at most). No backup.
 // Runner-only, family sync-3. No other price moves.
-export const PRICE_BOOK_VERSION = 'lineup-f22'
+// lineup-f23 (Task F23): Topaz video upscale on fal for "Enhance a video"
+// while its switch (topaz-video) is on, runner only: $0.01 / $0.02 / $0.08 a
+// second of video for an output up to 720p / up to 1080p / above, doubled at
+// 60 fps (shared/pricing/clipRates.ts), billed on the video the runner
+// measures (whole seconds rounded up, 60 s at most). No backup. With the
+// switch off the node keeps its flat 150 credits on ComfyUI. No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-f23'
 
 export const BASE_RENDER_CREDITS = 1
 
@@ -287,10 +293,12 @@ export const GRAPH_NODE_CREDITS: Record<string, number> = {
   // flat, and the lip-sync nodes LipSyncNode, LipsyncNode and LipsyncRemoteNode
   // 150 flat, are priced per second since lineup-p5: see
   // REMOTE_VIDEO_NODE_CLASSES, shared/pricing/clipSettings.ts.)
-  // EnhanceVideoNode stays flat (P5): topazlabs/video-upscale bills by the
-  // source video's length, a URL the gate can't measure, and neither the node
-  // nor the service caps it, so there is no "longest clip" to charge. Re-priced
-  // with Topaz video in the runner (plan Task F23).
+  // EnhanceVideoNode stays flat (P5) on ComfyUI: topazlabs/video-upscale bills
+  // by the source video's length, a URL the gate can't measure, and neither
+  // the node nor the service caps it, so there is no "longest clip" to charge.
+  // While topaz-video is on (Task F23) the node runs only in the runner, on
+  // fal's Topaz, priced per second of the video it measures (priceGraph reads
+  // it through priceNode then: shared/pricing/nodePrice.ts FAMILY_PRICED_CLASSES).
   EnhanceVideoNode: 150,           // badge $1.00
 
   // — audio / speech —
@@ -422,7 +430,8 @@ export interface GraphPrice {
  * the hosted gate. A node with no entry is priced at the 60 s cap.
  *
  * `opts.families`: the runner families switched on, when the graph runs in
- * the runner (Rotate camera prices its 2511 call while that switch is on;
+ * the runner (Rotate camera prices its 2511 call while that switch is on,
+ * Enhance a video its Topaz call on fal, from `inputSeconds`' measured video;
  * the ComfyUI path never passes them: it refuses that node then).
  */
 export function priceGraph(prompt: Record<string, { class_type: string; inputs?: unknown }>, opts: { inputPixels?: Record<string, number>, inputSeconds?: Record<string, InputSeconds>, families?: ReadonlySet<RunnerFamily> } = {}): GraphPrice {
@@ -435,7 +444,8 @@ export function priceGraph(prompt: Record<string, { class_type: string; inputs?:
     if (!ct) continue
     if (OUTPUT_CLASS_TYPES.has(ct)) hasOutput = true
 
-    if (SHARED_PRICED_CLASS_SET.has(ct)) {
+    // A class a switched-on family moves to another service (Enhance a video on fal's Topaz, F23) is priced there.
+    if (SHARED_PRICED_CLASS_SET.has(ct) || familyPricedClass(ct, opts.families)) {
       const inputs = prompt[id]?.inputs
       const px = opts.inputPixels && Object.prototype.hasOwnProperty.call(opts.inputPixels, id) ? opts.inputPixels[id] : undefined
       const secs = opts.inputSeconds && Object.prototype.hasOwnProperty.call(opts.inputSeconds, id) ? opts.inputSeconds[id] : undefined

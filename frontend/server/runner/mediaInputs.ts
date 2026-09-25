@@ -12,6 +12,8 @@
  * against it. Nothing here reads a file: the caller hands the bytes in.
  */
 import { mediaInfoOfBytes, type MediaKind } from '../utils/graphInputSeconds'
+import { sha256Hex } from './handoff'
+import type { MeasuredMedia, OutputFile } from './types'
 
 export type { MediaKind }
 
@@ -59,6 +61,8 @@ export interface MediaFacts {
   /** A video's display size (after rotation); null for a sound, or when unmeasured. */
   width: number | null
   height: number | null
+  /** A video's frames a second, when its rule asks (`frameRate`); null otherwise, or when unmeasured. */
+  fps: number | null
 }
 
 /**
@@ -67,13 +71,14 @@ export interface MediaFacts {
  */
 export async function mediaFacts(bytes: Uint8Array, rule: MediaRule): Promise<MediaFacts> {
   const format = mediaFormat(bytes)
-  const facts: MediaFacts = { bytes: bytes.byteLength, format, seconds: null, width: null, height: null }
+  const facts: MediaFacts = { bytes: bytes.byteLength, format, seconds: null, width: null, height: null, fps: null }
   if (bytes.byteLength > rule.maxBytes || !format || !rule.formats.includes(format)) return facts
-  const info = await mediaInfoOfBytes(bytes, rule.kind, { maxBytes: rule.maxBytes })
+  const info = await mediaInfoOfBytes(bytes, rule.kind, { maxBytes: rule.maxBytes, ...(rule.frameRate ? { frameRate: true } : {}) })
   if (info) {
     facts.seconds = info.seconds
     facts.width = info.width
     facts.height = info.height
+    facts.fps = info.fps ?? null
   }
   return facts
 }
@@ -86,6 +91,8 @@ export interface MediaRule {
   /** A video's largest size, either way round (the long side, then the short side). */
   maxLongSide?: number
   maxShortSide?: number
+  /** Also read a video's frame rate (a price that depends on it: Topaz video upscale, F23). */
+  frameRate?: true
   words: {
     tooLarge: string
     wrongFormat: string
@@ -122,4 +129,51 @@ export function mediaRuleProblem(facts: MediaFacts, rule: MediaRule, strict: boo
     }
   }
   return null
+}
+
+/** How the caller reads a file for a check (the engine's result store). */
+export interface MediaReads {
+  read(file: OutputFile): Promise<Uint8Array>
+  /** The file's size without reading it (a file over the limit is never loaded). Absent: judged after the read. */
+  size?(file: OutputFile): Promise<number | null>
+  /** Hosted: a file whose length can't be measured is refused (`mediaRuleProblem`). */
+  strict: boolean
+}
+
+/** One file, judged against its rule: the first problem, or its facts and the sha256 of the bytes read. */
+export type MeasuredFile =
+  | { problem: string, facts: null, sha: '' }
+  | { problem: null, facts: MediaFacts, sha: string }
+
+/**
+ * Stat, read and judge one file (F22 fix round 1: the size before the read,
+ * so a file too large is never loaded). `missing`: the words when it can't be
+ * read. The sha256 is of the very bytes measured.
+ */
+export async function measureMediaFile(file: OutputFile, rule: MediaRule, reads: MediaReads, missing: string): Promise<MeasuredFile> {
+  const size = reads.size ? await reads.size(file).catch(() => null) : null
+  const tooLarge = size != null ? mediaSizeProblem(size, rule) : null
+  if (tooLarge) return { problem: tooLarge, facts: null, sha: '' }
+  let bytes: Uint8Array
+  try { bytes = await reads.read(file) }
+  catch { return { problem: missing, facts: null, sha: '' } }
+  const facts = await mediaFacts(bytes, rule)
+  const problem = mediaRuleProblem(facts, rule, reads.strict)
+  return problem ? { problem, facts: null, sha: '' } : { problem: null, facts, sha: sha256Hex(bytes) }
+}
+
+/** A measured figure to the millionth (float noise off the container's figures). */
+const tidy = (n: number) => Math.round(n * 1e6) / 1e6
+
+/**
+ * Whether a node's files at its turn are not the ones recorded at the start
+ * of the run (the tight hold, F22 fix round 1): a length, size or frame rate
+ * that differs (to the millionth; one that appeared or went missing counts),
+ * or bytes that differ (sha256).
+ */
+export function measuredMediaChanged(recorded: MeasuredMedia, now: MeasuredMedia): boolean {
+  const same = (a?: number | null, b?: number | null) => (a == null && b == null) || (a != null && b != null && tidy(a) === tidy(b))
+  const figures = ['audio', 'video', 'videoWidth', 'videoHeight', 'videoFps'] as const
+  return figures.some(k => !same(recorded.seconds[k], now.seconds[k]))
+    || recorded.sha.audio !== now.sha.audio || recorded.sha.video !== now.sha.video
 }

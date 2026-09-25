@@ -322,11 +322,11 @@ describe('the gallery', () => {
 describe('the price', () => {
   const charge = (inputs: Record<string, unknown>) => priceGraph({ 1: { class_type: 'GenerateImageNode', inputs }, 2: SINK }).credits
 
-  it('the card: Replicate\'s flat $0.034 an image, verified, non-zero; no backup card; the book carries it (lineup-f14, now lineup-f22)', () => {
+  it('the card: Replicate\'s flat $0.034 an image, verified, non-zero; no backup card; the book carries it (lineup-f14, now lineup-f23)', () => {
     expect(IMAGE_RATES[ID]).toEqual({
       unit: 'per_image', usd: PRICE, service: 'replicate', source: 'https://replicate.com/google/nano-banana-2-lite', read: '2026-09-24', confidence: 'verified',
     })
-    expect(PRICE_BOOK_VERSION).toBe('lineup-f22')
+    expect(PRICE_BOOK_VERSION).toBe('lineup-f23')
   })
 
   const examples: { name: string, inputs: Record<string, unknown> }[] = [

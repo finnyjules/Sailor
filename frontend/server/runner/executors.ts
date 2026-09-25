@@ -37,7 +37,9 @@
  * ProductShotNode on Bria Product Shot, family bria-product-shot, which
  * moves the whole node while it is on;
  * LipSyncNode on its sync-3 engine, family sync-3, fed by the studio's files
- * or an Audio card, which hands its own file on)
+ * or an Audio card, which hands its own file on;
+ * EnhanceVideoNode on fal's Topaz video upscale, family topaz-video, which
+ * moves the whole node while it is on)
  * closely enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiPrompt } from '#shared/runner/graph'
@@ -89,6 +91,9 @@ import { isSeedream5ProEdit, seedream5ProEdit } from './generators/seedream5ProE
 import { qwen2511Angles } from './generators/qwen2511Angles'
 import { briaProductShot } from './generators/briaProductShot'
 import { sync3Lipsync, sync3NodeProblem, sync3Sources } from './generators/sync3'
+import { topazVideoNodeProblem, topazVideoSource, topazVideoUpscale } from './generators/topazVideo'
+import { TOPAZ_VIDEO_UNMEASURED, topazVideoPlan } from '#shared/runner/topazVideo'
+import type { InputSeconds } from '#shared/pricing/clipSettings'
 import { isSync3LipSync, lipSyncSyncMode } from '#shared/runner/lipSync'
 import { backupInputProblem, checkRequest, seedanceReferenceProblem } from './requestRules'
 import type { OutputFile, RunnerProvider } from './types'
@@ -136,6 +141,12 @@ export interface PlanContext {
    * when it read none. A backup that can't take it is dropped.
    */
   inputBytes?: number
+  /**
+   * What the engine measured about the node's media just before planning
+   * (./nodeMedia.ts): Topaz video upscale's factor is set from its video's
+   * size (F23). Absent: nothing measured.
+   */
+  measured?: InputSeconds
 }
 
 /**
@@ -771,6 +782,26 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       return {
         kind: 'provider', provider: call.provider, endpoint: call.endpoint, payload: call.payload, media: 'video', prefix: 'lip_sync',
         // LipSyncNode shows nothing itself (its Python execute returns only the video); a Video card after it does.
+        uiFor: () => null,
+      }
+    }
+
+    // ── topaz-video (model line-up F23): Enhance a video on fal's Topaz, no backup ──
+    // The engine has already read and measured the video (topazMedia.ts); the
+    // factor comes from that measurement, the same one the price read.
+    case 'EnhanceVideoNode': {
+      const problem = topazVideoNodeProblem(ctx.prompt, ctx.nodeId)
+      if (problem) throw new Error(problem.message)
+      const source = topazVideoSource(ctx.prompt, ctx.nodeId)
+      if (!('file' in source)) throw new Error('This upscale has no video')
+      const m = ctx.measured
+      if (!m) throw new Error(TOPAZ_VIDEO_UNMEASURED)
+      const plan = topazVideoPlan(inputs, { width: m.videoWidth, height: m.videoHeight, fps: m.videoFps })
+      if ('refused' in plan) throw new Error(plan.refused)
+      const call = topazVideoUpscale({ videoUrl: await ctx.toUrl(source.file), plan })
+      return {
+        kind: 'provider', provider: call.provider, endpoint: call.endpoint, payload: call.payload, media: 'video', prefix: 'enhance_video',
+        // EnhanceVideoNode shows nothing itself (its Python execute returns only the video); a Video card after it does.
         uiFor: () => null,
       }
     }

@@ -26,7 +26,7 @@
  */
 import { BASE_RENDER_CREDITS } from '~/lib/nodeCreditEstimate'
 import { creditsForUsd } from '~/lib/pricing'
-import { priceNode } from '#shared/pricing/nodePrice'
+import { FAMILY_PRICED_CLASSES, priceNode } from '#shared/pricing/nodePrice'
 import { sizePricedInput, sourceOutputPixels } from '#shared/pricing/editSettings'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { allotMediaFiles, gateNodeOrder, mediaFileKey, secondsPricedMedia, sourceAudioSeconds, type InputSeconds, type MediaFileRef, type MediaSource } from '#shared/pricing/clipSettings'
@@ -267,6 +267,10 @@ export function upstreamInputSeconds(node: any, nodes?: readonly any[] | null, e
   const data = node?.data
   if (!data) return null
   const ct = String(data.nodeType || '')
+  // Enhance a video on fal's Topaz (F23): the canvas can't read the video, so
+  // its price is always the ceiling (60 s, above 1080p, 60 fps): "up to".
+  // (With its switch off the class isn't priced here and the badge is Python's.)
+  if (Object.prototype.hasOwnProperty.call(FAMILY_PRICED_CLASSES, ct)) return { seconds: {}, upTo: true }
   const own = widgetValueMap(data.widgetDefs, data.widgetsValues, linkedInputNames(String(node.id), data.inputs, edges ?? []))
   const media = secondsPricedMedia(ct, own)
   if (!media) return null

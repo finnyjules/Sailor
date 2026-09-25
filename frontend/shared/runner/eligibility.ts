@@ -6,6 +6,7 @@ import { isLink, linksOf, type ApiPrompt } from './graph'
 import { NO_FAMILIES, type RunnerFamily } from './families'
 import { pyFloatOf, pyIntOf, pyTruthy } from './pyText'
 import { SYNC_3_ENGINE, isSync3LipSync, lipSyncEngine } from './lipSync'
+import { TOPAZ_VIDEO_FPS, TOPAZ_VIDEO_TARGETS } from './topazVideo'
 
 export const RUNNER_NODE_TYPES: ReadonlySet<string> = new Set([
   'GenerateImageNode', 'GenerateVideoNode', 'ComfyGateNode', 'Image', 'Video',
@@ -449,6 +450,25 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     needsReader: true,
     offWidgets: ['export'],
   },
+  // ── topaz-video (model line-up F23): Enhance a video on fal's Topaz video upscale ──
+  // The node already runs Topaz on ComfyUI (Replicate's topazlabs/video-upscale,
+  // flat priced), so this family moves the whole class (Ruling 10), as F10 and
+  // F12 do: while it is on, the node runs only in the runner, which reads the
+  // video, measures it and prices it (./topazVideo.ts); off, ComfyUI as before.
+  // The video is `video_url`, a `/view?…&type=input` link to a file uploaded to
+  // Sailor (a web link is refused plainly before the hold: it can't be
+  // measured). Every widget is read before the run, so none may be wired, and
+  // each must pass ComfyUI's own validation.
+  EnhanceVideoNode: {
+    upgrade: { family: 'topaz-video', label: 'Topaz Video Upscale' },
+    mustNotLink: ['model', 'video_url', 'target_resolution', 'fps'],
+    widgets: {
+      model: { type: 'COMBO', required: true, options: ['Topaz Video Upscale'] },
+      video_url: { type: 'STRING', required: true },
+      target_resolution: { type: 'COMBO', required: true, options: Object.keys(TOPAZ_VIDEO_TARGETS) },
+      fps: { type: 'COMBO', required: true, options: TOPAZ_VIDEO_FPS },
+    },
+  },
 }
 
 /**
@@ -459,6 +479,7 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
 export const SWITCHED_CLASSES: Readonly<Record<string, RunnerFamily>> = {
   LipSyncNode: 'sync-3',
   Audio: 'sync-3',
+  EnhanceVideoNode: 'topaz-video',
 }
 
 /**

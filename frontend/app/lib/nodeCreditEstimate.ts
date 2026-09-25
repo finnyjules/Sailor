@@ -20,6 +20,7 @@
  * the caller drops back to the static regex estimate.
  */
 import {
+  FAMILY_PRICED_CLASSES,
   SHARED_PRICED_CLASS_SET,
   priceNode,
   providerUsd,
@@ -39,9 +40,12 @@ export const BASE_RENDER_CREDITS = 1
  * MODEL_PRICED_NODE_CLASSES (a `model` widget) and SETTING_PRICED_NODE_CLASSES
  * (the image edit tools: model, resolution, size), as a set (the badge only
  * asks "is this one?"). The badge prices these from the node's widgets, as
- * the charge does, rather than from the static Python price_badge.
+ * the charge does, rather than from the static Python price_badge. Plus the
+ * classes a switched-on family moves to another service (FAMILY_PRICED_CLASSES:
+ * Enhance a video on fal's Topaz, F23): with the family off they price as
+ * nothing here, and the badge keeps Python's static figure, as before.
  */
-export const MODEL_PRICED_BADGE_CLASSES: ReadonlySet<string> = SHARED_PRICED_CLASS_SET
+export const MODEL_PRICED_BADGE_CLASSES: ReadonlySet<string> = new Set([...SHARED_PRICED_CLASS_SET, ...Object.keys(FAMILY_PRICED_CLASSES)])
 
 /**
  * Provider USD for `nodeType` as configured by `inputs` (the whole widget

@@ -122,6 +122,24 @@ export const CLIP_RATES: Record<string, ClipRate> = {
     unit: 'per_second', service: 'fal', source: fal('fal-ai/sync-lipsync/v3'), read: '2026-09-25', confidence: 'verified',
     byResolution: { '*': 8 / 60 },
   },
+
+  // ── Topaz video upscale on fal: "Enhance a video" while the topaz-video
+  // switch is on, runner only (model line-up F23;
+  // server/runner/generators/topazVideo.ts) ─────────────────────────────────
+  // "For every second a video your request will cost $0.01 for up to 720p,
+  // $0.02 for 720p to 1080p, and $0.08 for above 1080p output. Price doubles
+  // for 60fps output. For Gaia 2 output costs half of the prices." (llms.txt
+  // and the saved schema's pricing text, read 2026-09-25). Per second of the
+  // video, by the output's size band and frame rate (shared/runner/topazVideo.ts
+  // reads both; Gaia 2 is never sent). "4k" is fal's "above 1080p"; an
+  // unlisted key prices at the top, "4k/60fps".
+  'fal-ai/topaz/upscale/video': {
+    unit: 'per_second', service: 'fal', source: fal('fal-ai/topaz/upscale/video'), read: '2026-09-25', confidence: 'verified',
+    byResolution: {
+      '720p': 0.01, '1080p': 0.02, '4k': 0.08,
+      '720p/60fps': 0.02, '1080p/60fps': 0.04, '4k/60fps': 0.16,
+    },
+  },
 }
 
 /** The card for `endpoint`, or null. Own keys only: "constructor" is not an endpoint. */

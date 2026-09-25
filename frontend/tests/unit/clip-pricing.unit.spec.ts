@@ -61,12 +61,12 @@ function comboOptions(body: string, name: string): string[] {
 
 describe('clip rate cards', () => {
   it('every card is per second, verified, sourced and dated, with figures above zero', () => {
-    // + sync-3 on fal (Task F22), read a day later.
-    expect(Object.keys(CLIP_RATES).length).toBe(12)
+    // + sync-3 on fal (Task F22) and Topaz video upscale on fal (Task F23), read a day later.
+    expect(Object.keys(CLIP_RATES).length).toBe(13)
     for (const [endpoint, r] of Object.entries(CLIP_RATES)) {
       expect(r.unit, endpoint).toBe('per_second')
       expect(r.confidence, endpoint).toBe('verified')
-      expect(r.read, endpoint).toBe(endpoint === 'fal-ai/sync-lipsync/v3' ? '2026-09-25' : '2026-09-24')
+      expect(r.read, endpoint).toBe(['fal-ai/sync-lipsync/v3', 'fal-ai/topaz/upscale/video'].includes(endpoint) ? '2026-09-25' : '2026-09-24')
       expect(r.source, endpoint).toMatch(r.service === 'fal' ? /^https:\/\/fal\.ai\/models\/.+\/llms\.txt$/ : /^https:\/\/replicate\.com\//)
       expect(r.source, endpoint).toContain(endpoint)
       for (const p of Object.values(r.byResolution)) {

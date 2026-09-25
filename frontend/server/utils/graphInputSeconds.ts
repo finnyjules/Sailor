@@ -84,6 +84,13 @@ export interface MediaTrackInfo {
   /** The video track's display size (after rotation); null for a sound. */
   width: number | null
   height: number | null
+  /**
+   * The video track's frames a second (its average packet rate over the first
+   * 120 frames, read from the container, never decoded), when asked for
+   * (`frameRate`: Topaz video upscale, F23); null for a sound, when not asked,
+   * or when it can't be read.
+   */
+  fps?: number | null
 }
 
 /**
@@ -94,18 +101,21 @@ export interface MediaTrackInfo {
  */
 export async function mediaInfoOfBytes(
   bytes: Uint8Array, kind: MediaKind,
-  opts: { maxBytes?: number, timeoutMs?: number } = {},
+  opts: { maxBytes?: number, timeoutMs?: number, frameRate?: boolean } = {},
 ): Promise<MediaTrackInfo | null> {
   if (bytes.byteLength > (opts.maxBytes ?? MAX_MEDIA_BYTES)) return null
   const copy = bytes.slice()
-  return trackInfo(new Input({ source: new BufferSource(copy.buffer), formats: ALL_FORMATS }), kind, opts.timeoutMs)
+  return trackInfo(new Input({ source: new BufferSource(copy.buffer), formats: ALL_FORMATS }), kind, opts.timeoutMs, opts.frameRate)
 }
+
+/** Frames looked at for a video's frame rate: enough for a steady average, without walking a long file. */
+const FRAME_RATE_SAMPLE = 120
 
 async function trackSeconds(input: Input, kind: MediaKind, timeoutMs?: number): Promise<number | null> {
   return (await trackInfo(input, kind, timeoutMs))?.seconds ?? null
 }
 
-async function trackInfo(input: Input, kind: MediaKind, timeoutMs?: number): Promise<MediaTrackInfo | null> {
+async function trackInfo(input: Input, kind: MediaKind, timeoutMs?: number, frameRate?: boolean): Promise<MediaTrackInfo | null> {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     const work = (async (): Promise<MediaTrackInfo | null> => {
@@ -115,7 +125,12 @@ async function trackInfo(input: Input, kind: MediaKind, timeoutMs?: number): Pro
       if (!(Number.isFinite(d) && d > 0)) return null
       if (!track.isVideoTrack()) return { seconds: d, width: null, height: null }
       const [w, h] = await Promise.all([track.getDisplayWidth(), track.getDisplayHeight()])
-      return { seconds: d, width: Number.isFinite(w) && w > 0 ? w : null, height: Number.isFinite(h) && h > 0 ? h : null }
+      const info: MediaTrackInfo = { seconds: d, width: Number.isFinite(w) && w > 0 ? w : null, height: Number.isFinite(h) && h > 0 ? h : null }
+      if (frameRate) {
+        const rate = await track.computePacketStats(FRAME_RATE_SAMPLE).then(p => p.averagePacketRate, () => null)
+        info.fps = typeof rate === 'number' && Number.isFinite(rate) && rate > 0 ? rate : null
+      }
+      return info
     })().catch(() => null)
     const late = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs ?? MEDIA_READ_TIMEOUT_MS) })
     return await Promise.race([work, late])
