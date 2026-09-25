@@ -5,10 +5,11 @@ import { mount } from '@vue/test-utils'
 import PromptTakes from '~/components/prompt/PromptTakes.vue'
 import PromptChangesCard from '~/components/prompt/PromptChangesCard.vue'
 import PromptAnswerCard from '~/components/prompt/PromptAnswerCard.vue'
-import { CURRENT, ingestTakes, openTakes } from '~/lib/prompt/takesSession'
+import { assignRun, CURRENT, ingestTakes, openTakes } from '~/lib/prompt/takesSession'
 
 const t = (id: string) => ({ id, createdAt: 0, promptId: `p${id}`, images: [`u-${id}`] })
-const session = (n: number) => ingestTakes(openTakes({ nodeId: 'n1', nodeLabel: 'Rainy shop', request: '', takes: [t('0')], images: ['u-0'] }), [t('0'), ...['1', '2', '3'].slice(0, n).map(t)])
+const opened = () => ['p1', 'p2', 'p3'].reduce(assignRun, openTakes({ nodeId: 'n1', nodeLabel: 'Rainy shop', request: '', takes: [t('0')], images: ['u-0'] }))
+const session = (n: number) => ingestTakes(opened(), [t('0'), ...['1', '2', '3'].slice(0, n).map(t)])
 
 describe('PromptTakes', () => {
   it('names the node, shows the current version then three tiles; pending ones pulse', () => {
@@ -42,6 +43,21 @@ describe('PromptTakes', () => {
     expect(done.emitted('more')).toHaveLength(1)
     expect(done.emitted('close')).toHaveLength(1)
     expect(done.text()).toContain('Three takes · hover to preview, Keep one')
+  })
+  it('tabbing out of the strip goes back to the version at open; moving within it does not', async () => {
+    const w = mount(PromptTakes, { props: { session: session(3) }, attachTo: document.body })
+    const root = w.get('[data-testid="prompt-takes"]')
+    const inside = w.get('[data-testid="prompt-take-current"]').element
+    await root.trigger('focusout', { relatedTarget: inside })
+    expect(w.emitted('hover')).toBeUndefined()
+    await root.trigger('focusout', { relatedTarget: document.body })
+    await root.trigger('focusout', { relatedTarget: null })
+    expect(w.emitted('hover')).toEqual([[null], [null]])
+    w.unmount()
+  })
+  it('quotes the words that asked for the takes; a menu run says Variations', () => {
+    expect(mount(PromptTakes, { props: { session: { ...session(0), request: 'moodier' } } }).text()).toContain('“moodier”')
+    expect(mount(PromptTakes, { props: { session: session(0) } }).text()).toContain('Variations')
   })
 })
 

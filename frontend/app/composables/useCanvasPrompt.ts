@@ -7,7 +7,8 @@
  * it. `canvas` returns VueNodeCanvas's exposed API (null until it mounts).
  * Formerly CanvasPromptBar.vue's script (stage 2), plus the router and results.
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { toast } from 'vue-sonner'
 import { useCanvasAgent } from '~/composables/useCanvasAgent'
 import { useAgentActivity } from '~/composables/useAgentActivity'
 import { paidProducerFor } from '~/lib/artifact/nextSteps'
@@ -16,14 +17,24 @@ import { canvasSuggestions, promptNodeLabel, promptWorkingLabel, selectionLabel,
 import { canvasDispatch, isPlainVaryRequest, type DispatchTarget } from '~/lib/prompt/canvasDispatch'
 import { routeRequest } from '~/lib/prompt/routeRequest'
 import {
-  chooseTile, failPending, hoverTile, ingestTakes, isTakesWorking, openTakes, readyCount, settleExpected,
-  shownTakeId, TAKES_PER_SET, type TakesSession,
+  assignRun, chooseTile, failRun, hoverTile, ingestTakes, isTakesWorking, openTakes, pendingRunIds, readyCount,
+  setRunIds, settleUnqueued, shownTakeId, TAKES_PER_SET, wantedActiveTakeId, type TakesSession,
 } from '~/lib/prompt/takesSession'
 import type { RouterKind } from '~~/shared/promptRouter/router'
 
 export interface PromptMode { label: string; kind: RouterKind; nodeId: string | null }
 export type PromptCard = 'takes' | 'changes' | 'answer' | null
 export interface AnswerCard { kind: 'answer' | 'notice' | 'error'; text: string; reasoning: string; followUps: string[] }
+
+/** A take whose run never reports back is marked "didn’t come back" after this. */
+export const TAKE_BACKSTOP_MS = 5 * 60_000
+/** A run that ended without its take landing is failed after this grace. */
+export const TAKE_SETTLE_GRACE_MS = 1_500
+/** The router sees at most this many selected nodes, names cut to this length
+ *  (the route itself refuses more than 20). */
+export const ROUTER_SELECTION_MAX = 8
+export const ROUTER_NAME_MAX = 120
+export const BUSY_NOTICE = 'Sailor is busy with another request — stop it or wait'
 
 export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeRequest } = {}) {
   const route = deps.route ?? routeRequest
@@ -104,6 +115,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   function onCritiqueNode(e: Event) {
     const id = (e as CustomEvent).detail?.nodeId
     if (!id || !ready()) return
+    if (menuBusy()) { toast.info(BUSY_NOTICE); return }
     const target = selection.value.find(n => n.id === String(id))
     reviewTargetLabel.value = target ? promptNodeLabel(target) : ''
     agent.reviewNode(String(id), canvas().agentNodeIntent?.(String(id)) ?? '')
@@ -212,12 +224,32 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   // menu, or a set we just stopped that hasn't wound down yet). So mirror its
   // guard: `loop` is the run the layout is on, and `sid` says which of our sets
   // started it (null: not ours). A new set whose loop can't start yet waits
-  // (`waitingSid`) and dispatches on that run's `variationsDone`; a
-  // `variationsDone` only ever settles the set whose own run produced it.
+  // (`waitingSid`) and dispatches on that run's `variationsDone`.
+  //
+  // The loop reports each run as it is QUEUED (`variationsQueued`, with its
+  // prompt id) and `variationsDone` right after the last one is queued — long
+  // before any take renders. So the set stays in flight until every tile has
+  // settled: its run's take landed, its run failed or ended with nothing
+  // (the run's own terminal event), or the backstop gave up on it.
   let sessionSid = 0
   let dispatchingSid: number | null = null
   let waitingSid: number | null = null
   let loop: { nodeId: string; sid: number | null } | null = null
+  const tileTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const settleTimers = new Set<ReturnType<typeof setTimeout>>()
+  function clearTakeTimers() {
+    for (const t of tileTimers.values()) clearTimeout(t)
+    tileTimers.clear()
+    for (const t of settleTimers) clearTimeout(t)
+    settleTimers.clear()
+  }
+  function failTile(promptId: string) {
+    const s = takes.value
+    if (!s) return
+    const t = tileTimers.get(promptId)
+    if (t) { clearTimeout(t); tileTimers.delete(promptId) }
+    takes.value = failRun(s, promptId)
+  }
   function onRunVariations(e: Event) {
     const nodeId = (e as CustomEvent).detail?.nodeId
     if (loop || !nodeId) return // the layout ignores it too
@@ -228,40 +260,94 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     window.dispatchEvent(new CustomEvent('sailor:runVariations', { detail: { nodeId, count: TAKES_PER_SET } }))
     dispatchingSid = null
   }
-  function startTakes(t: DispatchTarget) {
+  /** One run of the loop was queued: it belongs to the open set's next tile, or,
+   *  for a set already closed, it is held so its take can't take over the node. */
+  function recordRun(promptId: string) {
+    const s = takes.value
+    if (!loop || loop.sid == null) return
+    if (s && loop.sid === sessionSid && loop.nodeId === s.nodeId) {
+      const next = assignRun(s, promptId)
+      if (next === s) return
+      takes.value = next
+      if (!tileTimers.has(promptId)) tileTimers.set(promptId, setTimeout(() => { tileTimers.delete(promptId); failTile(promptId) }, TAKE_BACKSTOP_MS))
+      return
+    }
+    canvas()?.agentTakesHold?.(loop.nodeId, [promptId])
+  }
+  function onVariationsQueued(e: Event) {
+    const id = (e as CustomEvent).detail?.promptId
+    if (id) recordRun(String(id))
+  }
+  // A run's terminal event (the layout re-posts every run event on the
+  // `sailor-bridge` envelope). An error fails its tile at once; a run that ends
+  // without its take landing (interrupted, nothing produced) fails it after a
+  // short grace, since the take lands on its own path.
+  function onRunEvent(e: MessageEvent) {
+    const d = e.data
+    if (!d || d.type !== 'sailor-bridge' || !d.prompt_id) return
+    const s = takes.value
+    const id = String(d.prompt_id)
+    if (!s || !pendingRunIds(s).includes(id)) return
+    if (d.event === 'execution_error') failTile(id)
+    else if (d.event === 'execution_complete') {
+      const t = setTimeout(() => {
+        settleTimers.delete(t)
+        const cur = takes.value
+        if (cur && pendingRunIds(cur).includes(id)) failTile(id)
+      }, TAKE_SETTLE_GRACE_MS)
+      settleTimers.add(t)
+    }
+  }
+  function startTakes(t: DispatchTarget, request: string) {
     const c = canvas()
     const snap = c?.agentNodeTakes?.(t.nodeId)
     if (!snap) { notice.value = 'That node isn’t on the canvas any more.'; return }
     const sid = ++sessionSid
-    takes.value = { ...openTakes({ nodeId: t.nodeId, nodeLabel: t.label, request: '', takes: snap.takes, images: snap.images }), loopDone: false }
+    takes.value = { ...openTakes({ nodeId: t.nodeId, nodeLabel: t.label, request, takes: snap.takes, images: snap.images, activeTakeId: snap.activeTakeId }), loopDone: false }
     c.agentTakesBegin(t.nodeId)
     if (loop) waitingSid = sid
     else dispatchRun(sid, t.nodeId)
   }
-  function endTakes(keepId: string | null) {
+  /** Close the set. `detached`: the canvas already swapped graphs, so its node
+   *  ids now name another project's nodes — touch nothing there. */
+  function endTakes(keepId: string | null, o: { detached?: boolean } = {}) {
     const s = takes.value
     if (!s) return
     waitingSid = null
-    // Our run still going (tiles pending, or failed early while more are queued): stop it.
-    if (loop?.sid === sessionSid) window.dispatchEvent(new CustomEvent('sailor:stopVariations', { detail: { nodeId: s.nodeId } }))
-    canvas()?.agentTakesEnd?.(s.nodeId, keepId)
+    // Stop what this set still has going: the loop, if it is still queueing,
+    // and every run that hasn't come back — by prompt id, so nothing else stops.
+    const ours = loop?.sid === sessionSid
+    const inFlight = pendingRunIds(s)
+    if (ours || inFlight.length) {
+      window.dispatchEvent(new CustomEvent('sailor:stopVariations', { detail: { nodeId: s.nodeId, promptIds: inFlight, cancelLoop: ours } }))
+    }
+    clearTakeTimers()
+    // A late take of this set still lands in history but never becomes active;
+    // the kept run's own re-emission may.
+    const keptRun = keepId ? s.tiles.find(x => x.takeId === keepId)?.promptId ?? null : null
+    if (!o.detached) canvas()?.agentTakesEnd?.(s.nodeId, keepId, setRunIds(s).filter(p => p !== keptRun))
     takes.value = null
   }
   const show = (s: TakesSession) => canvas()?.agentShowTake?.(s.nodeId, shownTakeId(s))
   // A landing take is appended AND made active (appendTake); re-show whatever the
   // strip says (the version at open, or the hovered/chosen tile) so the node
-  // doesn't jump. The first arrival pans the node into view if it's off screen.
+  // doesn't jump — for this set's takes and for any other run's (an earlier
+  // set's late arrival). The first arrival pans the node into view.
   watch(
     () => { const s = takes.value; return s ? canvas()?.agentNodeTakes?.(s.nodeId) ?? null : null },
     (snap) => {
       const s = takes.value
       if (!s || !snap) return
-      let next = ingestTakes(s, snap.takes)
-      if (snap.error && isTakesWorking(next)) next = failPending(next)
-      if (next === s) return
-      if (!readyCount(s) && readyCount(next)) canvas()?.agentRevealNode?.(s.nodeId)
-      takes.value = next
-      show(next)
+      const next = ingestTakes(s, snap.takes)
+      if (next !== s) {
+        for (const tile of next.tiles) {
+          const t = tile.state === 'ready' && tile.promptId ? tileTimers.get(tile.promptId) : undefined
+          if (t) { clearTimeout(t); tileTimers.delete(tile.promptId!) }
+        }
+        if (!readyCount(s) && readyCount(next)) canvas()?.agentRevealNode?.(s.nodeId)
+        takes.value = next
+      }
+      if (next !== s || (snap.activeTakeId ?? null) !== wantedActiveTakeId(next, snap.takes)) show(next)
     },
   )
   function onVariationsDone(e: Event) {
@@ -271,9 +357,11 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     const s = takes.value
     if (!s) return
     if (ran?.sid === sessionSid && String(d.nodeId) === s.nodeId) {
-      // Our own run ended. Cancelled from elsewhere (the top bar's Stop): nothing more is coming.
-      const settled = d.cancelled ? failPending(s) : settleExpected(s, Number(d.queued) || 0)
-      takes.value = { ...settled, loopDone: true }
+      // Our loop finished QUEUEING (its renders may still be going). Tiles no run
+      // was queued for won't come back; the rest settle on their own runs.
+      let next: TakesSession = s
+      for (const id of Array.isArray(d.promptIds) ? d.promptIds : []) next = assignRun(next, String(id))
+      takes.value = { ...settleUnqueued(next), loopDone: true }
       return
     }
     // Someone else's run (or a set we stopped) finished: ours can start now.
@@ -288,8 +376,9 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     // Only once this set's run has reported done: until then the layout would drop a new one.
     if (!s || isTakesWorking(s) || !s.loopDone) return
     const t = targetFor(s.nodeId)
+    const request = s.request
     endTakes(null)
-    if (t) startTakes(t)
+    if (t) startTakes(t, request)
   }
 
   // --- dispatch (spec §4) -----------------------------------------------------
@@ -297,7 +386,7 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     const target = targetFor(o.nodeId)
     const d = canvasDispatch(kind, text, target, { fromMenu: o.fromMenu })
     if (d.worker === 'message') { notice.value = d.message; return }
-    if (d.worker === 'variations') { startTakes(target!); return }
+    if (d.worker === 'variations') { startTakes(target!, o.fromMenu ? '' : text); return }
     if (d.worker === 'fix') {
       reviewTargetLabel.value = target?.label ?? ''
       agent.reviewNode(d.nodeId, canvas()?.agentNodeIntent?.(d.nodeId) ?? '')
@@ -306,8 +395,8 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     followUps.value = kind === 'answer' ? (o.followUps ?? []) : []
     agent.ask(text)
   }
-  function clearResults() {
-    if (takes.value) endTakes(null)
+  function clearResults(o: { detached?: boolean } = {}) {
+    if (takes.value) endTakes(null, o)
     notice.value = ''
     followUps.value = []
     fastPathFired.value = false
@@ -320,6 +409,8 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   const takesWorking = computed(() => !!takes.value && isTakesWorking(takes.value))
   // One job at a time (Ruling 9): nothing new starts while takes are arriving.
   const jobBusy = () => busy.value || takesWorking.value
+  // A menu item (Variations, Critique…) arriving mid-job says why nothing happens.
+  const menuBusy = () => jobBusy() || agent.reviewingManual.value
 
   async function submit(text: string) {
     const p = text.trim()
@@ -346,7 +437,12 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     routing.value = true
     try {
       const r = await route(
-        { request: p, host: 'canvas', selection: selection.value.map(s => ({ kind: s.type, name: promptNodeLabel(s) })), mode: m?.label ?? null },
+        {
+          request: p,
+          host: 'canvas',
+          selection: selection.value.slice(0, ROUTER_SELECTION_MAX).map(s => ({ kind: s.type, name: promptNodeLabel(s).slice(0, ROUTER_NAME_MAX) })),
+          mode: m?.label ?? null,
+        },
         { apiKey: apiKey(), signal: ctrl.signal },
       )
       if (seq !== routeSeq) return
@@ -369,7 +465,8 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   // --- menu items (spec §1.2, §4) ----------------------------------------------
   function onPromptKind(e: Event) {
     const d = (e as CustomEvent).detail ?? {}
-    if (!d.kind || jobBusy() || !ready()) return
+    if (!d.kind || !ready()) return
+    if (menuBusy()) { toast.info(BUSY_NOTICE); return }
     clearResults()
     mode.value = null
     lastSubmitted.value = String(d.text ?? '')
@@ -402,6 +499,12 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     if (agent.error.value) return { kind: 'error', text: agent.error.value, reasoning: '', followUps: [] }
     if (notice.value) return { kind: 'notice', text: notice.value, reasoning: '', followUps: [] }
     if (agent.answer.value) return { kind: 'answer', text: agent.answer.value, reasoning: agent.reasoning.value, followUps: followUps.value }
+    // A review that found issues but proposed no fix: say what it found.
+    const r = agent.review.value as { assessment?: string; issues?: string[] } | null
+    if (r?.issues?.length && !agent.hasProposal.value) {
+      const text = [r.assessment?.trim(), r.issues.map(i => `• ${i}`).join('\n')].filter(Boolean).join('\n\n')
+      return { kind: 'answer', text, reasoning: '', followUps: [] }
+    }
     return null
   })
   // The result card rides above the prompt once there is something to show.
@@ -415,13 +518,37 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
   })
   const showSketchInstead = computed(() => agent.hasProposal.value && !!lastSubmitted.value)
   function dismissAnswer() { notice.value = ''; followUps.value = []; agent.dismiss() }
+
+  // The card above the prompt must not cover what it is about: once it has
+  // rendered (its height is known), pan just enough that the takes' node, or the
+  // proposed and marked nodes, sit clear of the whole prompt stack.
+  watch(card, async (c) => {
+    if (c !== 'takes' && c !== 'changes') return
+    await nextTick()
+    const cv = canvas()
+    if (c === 'takes' && takes.value) cv?.agentRevealNode?.(takes.value.nodeId)
+    else if (c === 'changes') cv?.agentRevealProposal?.()
+  })
+
+  // The canvas swapped graphs (project tab, canvas, subgraph). It already put
+  // back every previewed take and proposal; drop ours without touching the new
+  // graph, whose node ids can collide with the old one's.
+  function onCanvasSwapped() {
+    // Work still in flight would land its preview on the new graph: stop it.
+    if (routing.value) { routeSeq++; routeCtrl?.abort(); routeCtrl = null; routing.value = false }
+    if (agent.busy.value || agent.reviewing.value) agent.stop()
+    clearResults({ detached: true })
+  }
   function runFollowUp(text: string) { void submit(text) }
 
   onMounted(() => {
     window.addEventListener('sailor:promptKind', onPromptKind)
     window.addEventListener('sailor:promptMode', onPromptMode)
     window.addEventListener('sailor:variationsDone', onVariationsDone)
+    window.addEventListener('sailor:variationsQueued', onVariationsQueued)
     window.addEventListener('sailor:runVariations', onRunVariations)
+    window.addEventListener('sailor:canvasSwapped', onCanvasSwapped)
+    window.addEventListener('message', onRunEvent)
     window.addEventListener('sailor:agentRunComplete', onRunComplete)
     window.addEventListener('sailor:critiqueNode', onCritiqueNode)
     window.addEventListener('sailor:autoReview', onAutoReview)
@@ -430,7 +557,10 @@ export function useCanvasPrompt(canvas: () => any, deps: { route?: typeof routeR
     window.removeEventListener('sailor:promptKind', onPromptKind)
     window.removeEventListener('sailor:promptMode', onPromptMode)
     window.removeEventListener('sailor:variationsDone', onVariationsDone)
+    window.removeEventListener('sailor:variationsQueued', onVariationsQueued)
     window.removeEventListener('sailor:runVariations', onRunVariations)
+    window.removeEventListener('sailor:canvasSwapped', onCanvasSwapped)
+    window.removeEventListener('message', onRunEvent)
     window.removeEventListener('sailor:agentRunComplete', onRunComplete)
     window.removeEventListener('sailor:critiqueNode', onCritiqueNode)
     window.removeEventListener('sailor:autoReview', onAutoReview)

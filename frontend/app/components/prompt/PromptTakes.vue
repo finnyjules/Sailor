@@ -13,10 +13,15 @@ const working = computed(() => isTakesWorking(props.session))
 const status = computed(() => takesStatus(props.session))
 const title = computed(() => (props.session.request ? `“${props.session.request}”` : 'Variations'))
 const currentChosen = computed(() => !props.session.chosen || props.session.chosen === CURRENT)
+// Tabbing out of the strip ends the preview, as leaving it with the mouse does.
+function onFocusOut(e: FocusEvent) {
+  const to = e.relatedTarget as Node | null
+  if (!to || !(e.currentTarget as HTMLElement).contains(to)) emit('hover', null)
+}
 </script>
 
 <template>
-  <div data-testid="prompt-takes" class="grid grid-cols-1 gap-2" @mouseleave="emit('hover', null)">
+  <div data-testid="prompt-takes" class="grid grid-cols-1 gap-2" @mouseleave="emit('hover', null)" @focusout="onFocusOut">
     <div class="flex items-center gap-2 px-1 text-[12px] text-white/55">
       <span data-testid="prompt-takes-target" class="max-w-[40%] shrink-0 truncate rounded-full bg-white/[0.08] px-2.5 py-0.5 text-white/80">{{ session.nodeLabel }}</span>
       <span class="min-w-0 truncate"><span class="text-white/85">{{ title }}</span> · {{ status }}</span>

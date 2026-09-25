@@ -53,10 +53,46 @@ async function shot(page: Page, name: string) {
   if (dir) await page.screenshot({ path: `${dir}/stage3-e2e-${name}.png` })
 }
 
+/** A run of the Variations loop was queued, as the layout announces it. */
+const queued = (page: Page, nodeId: string | null, ids: string[]) => page.evaluate(({ nodeId, ids }) => {
+  for (const promptId of ids) window.dispatchEvent(new CustomEvent('sailor:variationsQueued', { detail: { nodeId, promptId } }))
+}, { nodeId, ids })
+/** The loop finished QUEUEING — the layout fires this right after the last run
+ *  is queued, before any take has rendered. */
+const loopDone = (page: Page, nodeId: string | null, ids: string[]) => page.evaluate(({ nodeId, ids }) =>
+  window.dispatchEvent(new CustomEvent('sailor:variationsDone', { detail: { nodeId, queued: ids.length, cancelled: false, promptIds: ids } })), { nodeId, ids })
+
+// Defense in depth for the real-run guard below (it rests on a function name):
+// any POST that would queue or start a run fails the test instead of running.
+// Stop's targeted interrupts are recorded, never sent.
+const RUN_POST = /\/(prompt|api\/runs?|api\/runner)(\/[^?]*)?(\?|$)/
+const STOP_POST = /\/(queue|interrupt)(\?|$)/
+async function guardRealRuns(page: Page) {
+  const leaked: string[] = []
+  const stopped: { url: string; body: any }[] = []
+  await page.route(url => RUN_POST.test(url.pathname) || STOP_POST.test(url.pathname), async (r) => {
+    const req = r.request()
+    if (req.method() !== 'POST') return r.fallback()
+    const path = new URL(req.url()).pathname
+    if (STOP_POST.test(path)) { stopped.push({ url: path, body: req.postDataJSON() }); return r.fulfill({ json: {} }) }
+    leaked.push(path)
+    return r.abort()
+  })
+  return { leaked, stopped }
+}
+
+/** The node's box ends above the prompt stack (its open card included). */
+async function clearOfPrompt(page: Page, node: Locator) {
+  const n = await node.boundingBox()
+  const stack = await page.getByTestId('canvas-bottom-bar-stack').boundingBox()
+  return !!n && !!stack && n.y + n.height <= stack.y
+}
+
 const ghostLabel = (page: Page) => page.locator('.vue-flow__node.agent-ghost').first()
   .evaluate(el => getComputedStyle(el, '::before').content)
 
 test.describe('Results on the work', () => {
+  let guard: Awaited<ReturnType<typeof guardRealRuns>>
   // The setup alone (two reloads, the /object_info catalog, a starter Frame) can
   // take most of the default minute on a loaded machine.
   test.describe.configure({ timeout: 120_000 })
@@ -79,9 +115,14 @@ test.describe('Results on the work', () => {
       add('sailor:runVariations', (e: Event) => { (window as any).__variations.push((e as CustomEvent).detail) })
       add('sailor:stopVariations', (e: Event) => { (window as any).__stops.push((e as CustomEvent).detail) })
     })
+    guard = await guardRealRuns(page)
     await waitForBackend(page)
     await openBlankWorkflow(page)
     await bareCanvas(page)
+  })
+
+  test.afterEach(() => {
+    expect(guard.leaked, 'a run was queued for real').toEqual([])
   })
 
   test('a question gets an answer card; a follow-up chip runs as a new request', async ({ page }) => {
@@ -148,7 +189,10 @@ test.describe('Results on the work', () => {
     await prompt(page).fill('remove the gradient')
     await prompt(page).press('Enter')
     await expect(page.getByTestId('prompt-changes')).toContainText('(removed)')
+    // The row names the node the way its card does, never its type.
+    await expect(page.getByTestId('prompt-changes')).not.toContainText('GradientStudio')
     await expect(node).toHaveClass(/agent-removal/)
+    await expect.poll(() => clearOfPrompt(page, node)).toBe(true)
     await shot(page, 'removal')
     await page.getByTestId('prompt-changes').getByRole('button', { name: 'Reject', exact: true }).click()
     await expect(node).toBeVisible()
@@ -205,6 +249,8 @@ test.describe('Results on the work', () => {
 
     // The same event Develop ▾ → Variations fires (the menu is trusted; ruling 17).
     await page.evaluate(id => window.dispatchEvent(new CustomEvent('sailor:promptKind', { detail: { kind: 'tweak', nodeId: id, fromMenu: true } })), nodeId)
+    // Out of the way: the view pans, and the strip must not slide under a resting pointer.
+    await page.mouse.move(5, 5)
     const strip = page.getByTestId('prompt-takes')
     await expect(strip).toBeVisible()
     await expect(strip.getByTestId('prompt-takes-target')).not.toBeEmpty()
@@ -212,6 +258,13 @@ test.describe('Results on the work', () => {
     await expect(node).toHaveClass(/agent-takes-target/)
     await expect(page.getByText('Making three takes of')).toBeVisible()
     expect(await page.evaluate(() => (window as any).__variations)).toEqual([{ nodeId, count: 3 }])
+
+    // The real order: all three runs are queued and the loop reports done
+    // before any take has rendered. The strip keeps working until they land.
+    await queued(page, nodeId, ['p1', 'p2', 'p3'])
+    await loopDone(page, nodeId, ['p1', 'p2', 'p3'])
+    await expect(page.getByText('Making three takes of')).toBeVisible()
+    await expect(strip.locator('[data-testid="prompt-take-tile"][data-state="pending"]')).toHaveCount(3)
 
     const fills = ['#a11', '#1a1', '#11a']
     const takes = [T0]
@@ -221,11 +274,12 @@ test.describe('Results on the work', () => {
       await page.evaluate(({ takes, t }) => window.dispatchEvent(new CustomEvent('sailor:test:setNodeData', {
         detail: { match: 'Image', patch: { takes, activeTakeId: t.id, images: t.images } },
       })), { takes: [...takes], t })
-      // The node stays on its version while takes land.
-      await expect(node.locator(`img[src*="${encodeURIComponent('#777')}"]`).first()).toBeVisible()
+      // The node stays on its version while takes land (its active take, not just a thumbnail).
+      await expect(node.locator('.ring-action img').first()).toHaveAttribute('src', /%23777/)
     }
-    await page.evaluate(id => window.dispatchEvent(new CustomEvent('sailor:variationsDone', { detail: { nodeId: id, queued: 3, cancelled: false } })), nodeId)
     await expect(strip).toContainText('Three takes · hover to preview, Keep one')
+    // The node sits clear of the whole prompt stack, strip included.
+    await expect.poll(() => clearOfPrompt(page, node)).toBe(true)
     await shot(page, 'takes')
     await expect(prompt(page)).toBeVisible() // no longer working
 
@@ -245,7 +299,7 @@ test.describe('Results on the work', () => {
     expect(await flowPos()).toBe(before)
   })
 
-  test('Stop while takes arrive cancels Variations, clears the strip and returns the node to its version', async ({ page }) => {
+  test('Stop after the loop reported done interrupts the set’s runs still rendering; a late take never becomes active', async ({ page }) => {
     const T0 = { id: 't0', createdAt: 1, promptId: 'p0', images: [svg('#777')] }
     await page.evaluate(d => window.dispatchEvent(new CustomEvent('sailor:addNode', { detail: d })),
       { nodeType: 'Image', dataOverrides: { images: T0.images, takes: [T0], activeTakeId: 't0' } })
@@ -253,6 +307,8 @@ test.describe('Results on the work', () => {
     await expect(node).toBeVisible()
     const nodeId = await node.getAttribute('data-id')
     await page.evaluate(id => window.dispatchEvent(new CustomEvent('sailor:promptKind', { detail: { kind: 'tweak', nodeId: id, fromMenu: true } })), nodeId)
+    await queued(page, nodeId, ['p1', 'p2', 'p3'])
+    await loopDone(page, nodeId, ['p1', 'p2', 'p3'])
     const t1 = { id: 't1', createdAt: 2, promptId: 'p1', images: [svg('#a11')] }
     await page.evaluate(({ takes, t }) => window.dispatchEvent(new CustomEvent('sailor:test:setNodeData', {
       detail: { match: 'Image', patch: { takes, activeTakeId: t.id, images: t.images } },
@@ -260,8 +316,25 @@ test.describe('Results on the work', () => {
     await expect(page.locator('[data-testid="prompt-take-tile"][data-state="ready"]')).toHaveCount(1)
     await page.getByTestId('prompt-stop').click()
     await expect(page.getByTestId('prompt-takes')).toHaveCount(0)
-    expect(await page.evaluate(() => (window as any).__stops)).toEqual([{ nodeId }])
+    expect(await page.evaluate(() => (window as any).__stops)).toEqual([{ nodeId, promptIds: ['p2', 'p3'], cancelLoop: false }])
+    // Only those two runs are stopped (when the engine is up to hear it).
+    for (const s of guard.stopped) {
+      if (s.url === '/interrupt') expect(['p2', 'p3']).toContain(s.body?.prompt_id)
+      else expect(s.body).toEqual({ delete: ['p2', 'p3'] })
+    }
     await expect(node.locator(`img[src*="${encodeURIComponent('#777')}"]`).first()).toBeVisible()
     await expect(node).not.toHaveClass(/agent-takes-target/)
+
+    // p2 finishes anyway: its take goes into the node's history, but the node stays on its version.
+    await page.evaluate(id => window.postMessage({
+      type: 'sailor-bridge', v: 2, direct: true, event: 'executed', node_id: id, prompt_id: 'p2',
+      output: { images: [{ filename: 'late-take.png', subfolder: '', type: 'output' }] },
+    }, window.location.origin), nodeId)
+    // It lands in the node's takes (its thumbnail shows in the node's take row)…
+    const lateThumb = node.locator('img[src*="late-take"]')
+    await expect(lateThumb).toHaveCount(1)
+    // …but the active take is still the one the strip closed on.
+    await expect(lateThumb.locator('xpath=..')).not.toHaveClass(/ring-action/)
+    await expect(node.locator('.ring-action img').first()).toHaveAttribute('src', /%23777/)
   })
 })

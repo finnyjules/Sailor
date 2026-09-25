@@ -522,7 +522,11 @@ function surfaceQueueError(nodeErrors: any, fallbackMessage?: string, opts?: { s
 
 async function runVueWorkflow(
   targetIds?: string[],
-  opts: { rerollScope?: 'self' | 'variation', direction?: 'downstream', live?: boolean, skipCostConfirm?: boolean, costConfirmIterations?: number, takes?: number } = {},
+  opts: {
+    rerollScope?: 'self' | 'variation', direction?: 'downstream', live?: boolean, skipCostConfirm?: boolean, costConfirmIterations?: number, takes?: number
+    /** Called with each prompt id this call actually queued (registered), as it is queued. */
+    onQueued?: (promptId: string) => void
+  } = {},
 ): Promise<boolean> {
   if (!vueCanvasRef.value?.getWorkflow) {
     console.warn('[Run] no getWorkflow on vueCanvasRef')
@@ -923,6 +927,7 @@ async function runVueWorkflow(
         // Explicit (non-live) runs get a per-run no-response watchdog. Live-preview
         // runs fire continuously and silently by design, so they're exempt.
         if (!opts.live) armDirectRunWatchdog(res.prompt_id, runTabId, isRunnerPromptId(res.prompt_id) ? RUNNER_STAGE_STALL_MS : DIRECT_RUN_STALL_MS)
+        opts.onQueued?.(res.prompt_id)
       }
       const runnerPrompts = [firstTake, ...extraTakes].map(tk => tk.directPrompt)
       let sentToRunner = false
@@ -1293,6 +1298,10 @@ async function handleRunTextIterator(e: Event) {
 // Variations ×N: re-run the artifact's producing generator N times with fresh
 // seeds; each result lands as a Take on the artifact. Sequential like the text
 // iterator — runVueWorkflow reads live canvas state (and rolls seeds) per call.
+// The loop only QUEUES: each run is announced with its prompt id as it is queued
+// (`sailor:variationsQueued`), and `sailor:variationsDone` fires once the last
+// one is queued — its renders are still to come. The takes strip
+// (useCanvasPrompt) follows each run to its own end by that id.
 let variationsRunning = false
 let variationsCancelled = false
 async function handleRunVariations(e: Event) {
@@ -1307,34 +1316,66 @@ async function handleRunVariations(e: Event) {
   variationsRunning = true
   variationsCancelled = false
   let result = { queued: 0, cancelled: false }
+  const promptIds: string[] = []
   try {
     result = await runVariationsLoop({
       count,
       cancelled: () => variationsCancelled,
       runOne: async (i) => {
+        const ids: string[] = []
         const expanded = vueCanvasRef.value?.materializeAutoImageSinks?.([nodeId]) ?? [nodeId]
-        const queued = await runVueWorkflow(expanded, i === 0
-          ? { rerollScope: 'variation', costConfirmIterations: count }
-          : { rerollScope: 'variation', skipCostConfirm: true })
+        const queued = await runVueWorkflow(expanded, {
+          ...(i === 0 ? { rerollScope: 'variation' as const, costConfirmIterations: count } : { rerollScope: 'variation' as const, skipCostConfirm: true }),
+          onQueued: (promptId: string) => {
+            ids.push(promptId)
+            promptIds.push(promptId)
+            window.dispatchEvent(new CustomEvent('sailor:variationsQueued', { detail: { nodeId, promptId } }))
+          },
+        })
         // runVueWorkflow awaits the schema refresh and the cost confirm before it
         // queues, so a Stop in that window interrupted nothing: stop what just got queued.
-        if (queued !== false && variationsCancelled) await stopVueWorkflow()
-        return queued !== false
+        if (ids.length && variationsCancelled) await stopPromptIds(ids)
+        // Declined at the cost gate, refused, or the queue failed: nothing is
+        // coming from this run, so stop here (the strip marks the rest failed).
+        return queued !== false && ids.length > 0
       },
     })
   } finally {
     variationsRunning = false
-    // The takes strip (useCanvasPrompt) marks tiles past `queued` as not coming back.
-    window.dispatchEvent(new CustomEvent('sailor:variationsDone', { detail: { nodeId, ...result } }))
+    window.dispatchEvent(new CustomEvent('sailor:variationsDone', { detail: { nodeId, ...result, promptIds } }))
   }
 }
 
-// Stop from the takes strip (spec §3.4): no more re-runs, and interrupt what is
-// rendering — the same stop path as the top bar's Stop (plan ruling 9).
-function handleStopVariations() {
-  if (!variationsRunning) return // a stray Stop must not interrupt unrelated runs
-  variationsCancelled = true
-  stopVueWorkflow()
+// Stop from the takes strip (spec §3.4): no more re-runs (`cancelLoop`, when the
+// loop still queueing is the strip's own), and interrupt exactly the strip's runs
+// still in flight — by prompt id, so unrelated runs keep going. Not gated on the
+// loop: its renders outlive it.
+function handleStopVariations(e: Event) {
+  const d = ((e as CustomEvent).detail ?? {}) as { promptIds?: unknown; cancelLoop?: boolean }
+  if (d.cancelLoop && variationsRunning) variationsCancelled = true
+  const ids = Array.isArray(d.promptIds) ? d.promptIds.map(String) : []
+  if (ids.length) void stopPromptIds(ids)
+}
+
+/** Stop these runs only: ComfyUI's pending ones leave the queue, a running one
+ *  is interrupted (ComfyUI ignores an id that isn't the one running), and the
+ *  runner's are cancelled at the provider. */
+async function stopPromptIds(promptIds: string[]) {
+  const comfyIds = promptIds.filter(id => !isRunnerPromptId(id))
+  const runnerRunIds = [...new Set(promptIds.map(runIdOfPrompt).filter((x): x is string => !!x))]
+  const json = { 'Content-Type': 'application/json' }
+  try {
+    await Promise.all([
+      ...(comfyIds.length && (engineUp.value || direct.isMainSocketOpen()) ? [
+        fetch('/queue', { method: 'POST', headers: json, body: JSON.stringify({ delete: comfyIds }) }),
+        ...comfyIds.map(id => fetch('/interrupt', { method: 'POST', headers: json, body: JSON.stringify({ prompt_id: id }) })),
+      ] : []),
+      ...(runnerRunIds.length ? [stopRunnerRuns(runnerRunIds)] : []),
+    ])
+  }
+  catch (err) {
+    console.error('[Variations] Failed to stop runs:', err)
+  }
 }
 
 // `@` promote button (ArtifactImageNode) → name the currently-displayed image

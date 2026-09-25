@@ -63,7 +63,7 @@ import { useNodeSearch } from '~/composables/useNodeSearch'
 import { useNodeClipboard } from '~/composables/useNodeClipboard'
 import { buildTake, appendTake, refreshTakeDisplay, takeHasContent, tagTakeFromRunMeta } from '~/composables/useTakes'
 import type { Take } from '~/composables/useTakes'
-import { displaySnapshot, showOnData, type DisplaySnapshot } from '~/lib/prompt/takesSession'
+import { displaySnapshot, holdOnLanding, showOnData, type DisplaySnapshot, type TakesHold } from '~/lib/prompt/takesSession'
 import { revealDelta } from '~/lib/canvas/revealPan'
 import { LIVE_PREVIEW_NODE_TYPES } from '~/lib/livePreviewNodes'
 import { draftMetaFor, consumePendingPromote } from '~/lib/draft/runMeta'
@@ -239,7 +239,9 @@ function applyPendingTakesForDisplayedCanvas() {
       }
       take.params = { ...(take.params ?? {}), ...nodeGenParams(target) } // provenance for breeding
       const tagged = tagTakeFromRunMeta(take, String(target.id), { draftMetaFor, consumePendingPromote })
+      const prevActive = target.data?.activeTakeId ?? null
       target.data = appendTake({ ...target.data }, tagged)
+      holdClosedTakes(target, tagged, prevActive)
     }
   }
 }
@@ -667,6 +669,7 @@ async function applyCanvasOps(commands: Command[], ghost = false): Promise<{ nod
     if (cmd.op === 'addNode') continue
     const node = findNode(cmd.target)
     if (!node) continue
+    if (ghost && !node.data?.ghost) proposalEditedIds.add(String(node.id))
     if (cmd.op === 'setWidget' && typeof cmd.args?.name === 'string') {
       // Don't let the agent flip an EditImageNode off Nano Banana — that node is
       // for surgical repair, which Nano Banana handles best (see addNode above).
@@ -747,6 +750,7 @@ let tuneRestores: (() => void)[] = []
 // Approve (proposalPreview.ts).
 const ghostRestores = new GhostRestores()
 let pendingRemovals: string[] = []
+const proposalEditedIds = new Set<string>() // existing nodes the preview edits in place (for the reveal)
 const glimmOn = ref(false) // gates the glimm opacity so it fades in/out
 const glimmPeriod = ref(0.55) // sweep speed: slow during the blueprint, fast on commit
 let ghostDrawTimer = 0
@@ -797,6 +801,7 @@ function agentDiscard() {
   }
   clearRemovalMarks(edges.value as any[]) // a marked rewire or removal keeps its edge
   pendingRemovals = []
+  proposalEditedIds.clear()
   if (ghostDrawTimer) { clearTimeout(ghostDrawTimer); ghostDrawTimer = 0 }
   if (glimmTimer) { clearTimeout(glimmTimer); glimmTimer = 0 }
   blueprintRects.value = []
@@ -850,6 +855,7 @@ function agentCommit() {
   ghostRestores.clear() // keep the in-place edits
   const removals = pendingRemovals
   pendingRemovals = []
+  proposalEditedIds.clear()
   deleteEdges(removalEdgeIds(edges.value as any[])) // edges a rewire replaced, or a removed node's
   if (removals.length) deleteNodes(removals)
   glimmBurstOver(ghostNodeIds) // just the new node(s), not the connection
@@ -1071,6 +1077,24 @@ function agentNodeTakes(id: string) {
     error: !!n.data?.error,
   }
 }
+// After the strip closes, a late take of that set lands in history without
+// becoming active (Stop / × / Keep): the node holds the display it closed on.
+const takesHolds = new Map<string, TakesHold>()
+function holdClosedTakes(target: any, take: any, prevActive: string | null) {
+  const id = String(target.id)
+  if (takesSnapshots.has(id)) return // an open strip re-shows its own pick
+  const hold = takesHolds.get(id)
+  if (!hold) return
+  const held = holdOnLanding(target.data, take, prevActive, hold)
+  if (held) { target.data = held; return }
+  // A held run landed but the user has picked another take since: let it be.
+  if (take?.promptId != null && hold.promptIds.includes(String(take.promptId))) takesHolds.delete(id)
+}
+/** More runs of a set that already closed (it was still queueing): hold them too. */
+function agentTakesHold(id: string, promptIds: string[]) {
+  const hold = takesHolds.get(id)
+  if (hold) hold.promptIds = [...new Set([...hold.promptIds, ...promptIds])]
+}
 function agentTakesBegin(id: string) {
   const n = nodeById(id)
   if (!n) return
@@ -1086,27 +1110,59 @@ function agentShowTake(id: string, takeId: string | null) {
   if (!n || !snap) return
   n.data = showOnData({ ...n.data }, takeId, snap)
 }
-function agentTakesEnd(id: string, keepTakeId: string | null) {
+function agentTakesEnd(id: string, keepTakeId: string | null, holdPromptIds: string[] = []) {
   agentShowTake(id, keepTakeId)
   takesSnapshots.delete(id)
   const n = nodeById(id)
   if (!n) return
+  if (holdPromptIds.length) {
+    const prev = takesHolds.get(id)?.promptIds ?? []
+    takesHolds.set(id, { snap: displaySnapshot(n.data ?? {}), promptIds: [...new Set([...prev, ...holdPromptIds])] })
+  }
   const rest = String(n.class ?? '').split(' ').filter(c => c && c !== 'agent-takes-target')
   n.class = rest.length ? rest.join(' ') : undefined
 }
 // Unmounting mid-preview must not leave a previewed take as the node's display.
 onBeforeUnmount(() => { for (const id of [...takesSnapshots.keys()]) agentTakesEnd(id, null) })
-function agentRevealNode(id: string) {
-  const box = graphBox(id)
-  const w = vfDimensions.value.width, h = vfDimensions.value.height
-  if (!box || !w || !h) return
-  const { x: vx, y: vy, zoom } = vfViewport.value
-  const node = { left: box.x * zoom + vx, top: box.y * zoom + vy, right: (box.x + box.width) * zoom + vx, bottom: (box.y + box.height) * zoom + vy }
-  // Keep it clear of the prompt stack floating over the canvas bottom.
-  // bottomStackRect() is in canvas-root pixels; the VueFlow pane fills the root, so they coincide.
-  const view = { left: 0, top: 0, right: w, bottom: Math.min(h, bottomStackRect()?.top ?? h) }
-  const { dx, dy } = revealDelta(node, view)
-  if (dx || dy) setViewport({ x: vx + dx, y: vy + dy, zoom }, { duration: 250 })
+/** Pan just enough that the node(s) sit clear of the prompt stack, card
+ *  included. Measured on the next frame, once a card that just opened (or
+ *  grew) has its height. */
+function revealNodes(ids: string[]) {
+  requestAnimationFrame(() => {
+    const boxes = ids.map(graphBox).filter(Boolean) as Box[]
+    const w = vfDimensions.value.width, h = vfDimensions.value.height
+    const box = boxes.length ? unionBox(boxes) : null
+    if (!box || !w || !h) return
+    const { x: vx, y: vy, zoom } = vfViewport.value
+    const node = { left: box.x * zoom + vx, top: box.y * zoom + vy, right: (box.x + box.width) * zoom + vx, bottom: (box.y + box.height) * zoom + vy }
+    // bottomStackRect() is in canvas-root pixels; the VueFlow pane fills the root, so they coincide.
+    const view = { left: 0, top: 0, right: w, bottom: Math.min(h, bottomStackRect()?.top ?? h) }
+    const { dx, dy } = revealDelta(node, view)
+    if (dx || dy) setViewport({ x: vx + dx, y: vy + dy, zoom }, { duration: 250 })
+  })
+}
+function agentRevealNode(id: string) { revealNodes([id]) }
+/** The proposal's own nodes: new (ghost) ones, ones marked for removal, and
+ *  existing ones it edits in place. */
+function agentRevealProposal() {
+  const ids = new Set<string>([
+    ...(nodes.value as any[]).filter(n => n.data?.ghost).map(n => String(n.id)),
+    ...pendingRemovals,
+    ...proposalEditedIds,
+  ])
+  if (ids.size) revealNodes([...ids])
+}
+
+// Leaving this graph (project tab, canvas, subgraph): put back every previewed
+// take and proposal first — the id-keyed state here would otherwise act on the
+// next graph's nodes, whose ids can collide — then tell the prompt to drop its
+// strip or card without touching the new graph.
+function releaseAgentState() {
+  for (const id of [...takesSnapshots.keys()]) agentTakesEnd(id, null)
+  takesHolds.clear()
+  agentDiscard()
+  tuneRestores = [] // their undo closures belong to the graph being left
+  window.dispatchEvent(new CustomEvent('sailor:canvasSwapped'))
 }
 
 const {
@@ -2410,6 +2466,7 @@ watch(
     // or if the workflow object hasn't actually changed
     if (isInsideSubgraph.value || wf === lastWorkflowRef) return
     lastWorkflowRef = wf
+    releaseAgentState()
     rootWorkflow.value = wf
     resetNav()
     clearFixes()
@@ -2909,6 +2966,7 @@ async function combineIntoFrame(ids: string[]) {
 function handleNodeDoubleClick({ node }: { node: any }) {
   if (!node.data?.isSubgraph || !node.data?.subgraphId) return
   if (!rootWorkflow.value?.definitions) return
+  releaseAgentState() // before the snapshot below, so it saves the real display
 
   const innerWorkflow = enterSubgraph(
     node.data.subgraphId,
@@ -2928,6 +2986,7 @@ function handleNodeDoubleClick({ node }: { node: any }) {
 // Subgraph navigation: breadcrumb click to exit
 function handleBreadcrumbNavigate(index: number) {
   if (!rootWorkflow.value?.definitions) return
+  releaseAgentState() // before the snapshot below, so it saves the real display
 
   const restored = exitToLevel(
     index,
@@ -3281,7 +3340,9 @@ function handleBridgeMessage(event: MessageEvent) {
           // a later "breed from this take" can perturb around it. (Direction Loop.)
           take.params = { ...(take.params ?? {}), ...nodeGenParams(target) }
           const tagged = tagTakeFromRunMeta(take, String(target.id), { draftMetaFor, consumePendingPromote })
+          const prevActive = target.data?.activeTakeId ?? null
           target.data = appendTake({ ...target.data }, tagged)
+          holdClosedTakes(target, tagged, prevActive)
           // Prompt-bar sketch pad: the transient hidden pad's batch lands in the
           // ONE pile node (replacing the optimistic skeleton pile), not 4 anchor
           // cards. Routed by the pad's properties.sketchPad marker (id-agnostic —
@@ -8314,7 +8375,9 @@ defineExpose({
   agentTakesBegin,
   agentShowTake,
   agentTakesEnd,
+  agentTakesHold,
   agentRevealNode,
+  agentRevealProposal,
   agentTune,
   agentTuneRevert,
   agentRunOutputImage,
