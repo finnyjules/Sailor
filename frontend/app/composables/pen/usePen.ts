@@ -420,7 +420,7 @@ export function usePen(opts: {
     const start = doc.value.entities.find(e => e.id === resolved.startAnchorId) as any
     if (!center || !start) return
     const current = dist({ x: center.x, y: center.y }, { x: start.x, y: start.y })
-    const n = await requestValue('Radius', current)
+    const n = await requestValue('Radius', Number(current.toFixed(2)))
     if (n == null) return                     // cancelled → no change (Bug 3 pattern)
     if (!Number.isFinite(n) || n <= 0) return  // invalid → no change
     setArcRadius(pathId, segIndex, n)
@@ -449,7 +449,7 @@ export function usePen(opts: {
     if (ev.shiftKey) { removeConstraintById(m.id); return }
     const c = doc.value.constraints.find(x => x.id === m.id)
     if (!c || c.value == null) return
-    const n = await requestValue(c.kind === 'radius' ? 'Radius' : 'Distance', c.value)
+    const n = await requestValue(c.kind === 'radius' ? 'Radius' : 'Distance', Number(c.value.toFixed(2)))
     if (n == null) return
     if (!Number.isFinite(n) || n <= 0) return
     setConstraintValue(m.id, n)
@@ -1160,6 +1160,7 @@ export function usePen(opts: {
     }
     cleanupPendingAndCommit()
     cancelPendingOp()   // a half-armed Repeat/Mirror never survives a tool switch
+    cancelValue()       // a pending value request (Distance/Radius/Copies) never survives a tool switch
     // switching to a draw tool must not carry a stale entity/segment
     // selection along with it — the verb bar, arrow-nudge, and Backspace-
     // delete all act on `selection`/`selectedSegments`, and a leftover pick
@@ -1182,6 +1183,7 @@ export function usePen(opts: {
   function reset() {
     cleanupPendingPath()
     doc.value = { entities: [], constraints: [] }
+    cancelValue()   // a pending value request never survives a reset
     clearSel()
     clearSegSel()
     pending.value = null
@@ -1203,6 +1205,7 @@ export function usePen(opts: {
     pending.value = null
     pendingPath.value = null
     pendingOp.value = null
+    cancelValue()   // a pending value request never survives finishSession/revert
     pathDrag = null
     resetCurveState()
     cursor.value = null
@@ -1261,6 +1264,7 @@ export function usePen(opts: {
 
   // stop the sparkle loop — the host calls this when it unmounts
   function dispose() {
+    cancelValue()   // a pending value request never outlives the pen
     if (sparkleRaf && typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(sparkleRaf)
     sparkleRaf = 0
   }
