@@ -3,12 +3,13 @@
  * GenerateVideoNode). Pure functions over the video-model registry: which
  * widgets make sense for the selected model, and what their option lists are.
  *
- * Unknown/empty model ids are always PERMISSIVE (everything visible, no
- * filtering) so stale workflows never lose widgets.
+ * Unknown/empty model ids are PERMISSIVE (everything visible) so stale
+ * workflows never lose widgets, except that their duration list leaves out
+ * the runner-only lengths (allowedDurations).
  *
  * Design: docs/plans/2026-06-10-video-model-adaptive-inputs-design.md
  */
-import { VIDEO_MODELS_BY_ID } from '../data/video-models'
+import { VIDEO_MODELS, VIDEO_MODELS_BY_ID } from '../data/video-models'
 
 /** False only when the registry explicitly says the model takes no seed. */
 export function modelSupportsSeed(modelId: string): boolean {
@@ -16,10 +17,25 @@ export function modelSupportsSeed(modelId: string): boolean {
   return m ? m.supportsSeed : true
 }
 
-/** The model's duration options as combo-value strings; null = don't filter. */
-export function allowedDurations(modelId: string): string[] | null {
+/**
+ * The model's duration options as combo-value strings. An id the catalogue
+ * doesn't know (empty, a legacy label, a stale value) keeps every length
+ * except those only a runner-only model offers (Wan 3.0's 12, 25 and 30 s,
+ * which Sailor's menu adds to the engine's list; shared/runner/modelMenus.ts).
+ */
+export function allowedDurations(modelId: string): string[] {
   const m = VIDEO_MODELS_BY_ID[modelId]
-  return m ? m.durations.map(String) : null
+  return m ? m.durations.map(String) : engineModelDurations()
+}
+
+let engineDurationsMemo: string[] | null = null
+/** Every length some non-runner-only catalogue model offers (built on first use). */
+function engineModelDurations(): string[] {
+  if (!engineDurationsMemo) {
+    engineDurationsMemo = [...new Set(VIDEO_MODELS.filter(m => !m.runnerOnly).flatMap(m => m.durations))]
+      .sort((a, b) => a - b).map(String)
+  }
+  return engineDurationsMemo
 }
 
 /** The model's aspect-ratio options; null = don't filter. */

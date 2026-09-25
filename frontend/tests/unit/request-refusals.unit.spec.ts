@@ -16,7 +16,7 @@ import { isRunnerEligible } from '#shared/runner/eligibility'
 import { RUNNER_FAMILIES } from '#shared/runner/families'
 import { planNode } from '~~/server/runner/executors'
 import {
-  H3_SHORT_PROMPT, NANO_BANANA_SHORT_PROMPT, SEEDANCE_TOO_MUCH_SOUND, SEEDANCE_TOO_MUCH_VIDEO, SEEDANCE_UNMEASURED_REFERENCE, requestProblems,
+  FIRST_FRAME_AND_REFERENCES, H3_SHORT_PROMPT, NANO_BANANA_SHORT_PROMPT, SEEDANCE_TOO_MUCH_SOUND, SEEDANCE_TOO_MUCH_VIDEO, SEEDANCE_UNMEASURED_REFERENCE, requestProblems,
 } from '~~/server/runner/requestRules'
 import { blockedPromptRefusal } from '~~/server/utils/blockedModels'
 import { seedanceReferenceSeconds } from '~~/server/utils/graphInputSeconds'
@@ -119,8 +119,8 @@ describe('Seedance 2.0 references: counts', () => {
     expect(messages(over)).toEqual([message])
     await expect(plan(over)).rejects.toThrow(message)
     expect(blockedPromptRefusal(over)!.error.message).toBe(message)
-    // With a first frame the references aren't sent, so nothing is refused.
-    expect(messages(vid({ model: 'seedance-2.0', model_options: refs(key, max + 1), image: ['9', 0] }))).toEqual([])
+    // With a first frame the references would be dropped: refused instead (F1 fix round 1).
+    expect(messages(vid({ model: 'seedance-2.0', model_options: refs(key, max + 1), image: ['9', 0] }))).toEqual([FIRST_FRAME_AND_REFERENCES])
   })
 })
 

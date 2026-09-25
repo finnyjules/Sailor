@@ -135,10 +135,21 @@ const nb2Tier = (inputs: NodeInputs) => (isLinked(inputs.resolution) ? null : te
 /** Per model, the call it makes (given the priced input size); the node's model widget picks one. */
 type ModelCalls = Record<string, (inputs: NodeInputs, inputPixels: number) => EditCall>
 
+/**
+ * GPT Image 2.5 (runner-only, Task F2): Flare's edit on fal at quality
+ * medium (the node has no quality control), Replicate's the backup at the same
+ * quality (server/runner/generators/gptImage25.ts).
+ */
+const FAL_GPT_25_EDIT = 'openai/gpt-image-2.5/flare/edit'
+const REP_GPT_25_FLARE = 'openai/gpt-image-2.5-flare'
+const GPT_25_EDIT_QUALITY = 'medium'
+const gptImage25Edit = () => call(FAL_GPT_25_EDIT, GPT_25_EDIT_QUALITY, {}, [call(REP_GPT_25_FLARE, GPT_25_EDIT_QUALITY)])
+
 const EDIT_IMAGE_MODELS: ModelCalls = {
   'Nano Banana 2': i => nanoBananaEdit(REP_NB2, nb2Tier(i)),
   'Flux Kontext Pro': () => call(FAL_KONTEXT),
   'Flux 2 Pro': flux2Edit,
+  'GPT Image 2.5': gptImage25Edit,
 }
 
 const BLEND_SCENE_MODELS: ModelCalls = {

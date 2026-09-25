@@ -199,8 +199,9 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // ── fal-edit (Task B2): fal only, at most two linked pictures ──
   // Text widgets the runner reads as plain text must not be wired: a linked
   // one would be read as blank.
+  // GPT Image 2.5 (model line-up F2): runner-only, its own family.
   EditImageNode: {
-    models: { 'Nano Banana 2': 'fal-edit', 'Flux Kontext Pro': 'fal-edit', 'Flux 2 Pro': 'fal-edit' },
+    models: { 'Nano Banana 2': 'fal-edit', 'Flux Kontext Pro': 'fal-edit', 'Flux 2 Pro': 'fal-edit', 'GPT Image 2.5': 'gpt-image-2.5' },
     mustLink: ['input_image'],
     mustNotLink: ['prompt'],
   },
@@ -259,8 +260,12 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // Only ADDS these models; the fal ones stay as they are. The Idea socket
   // (prompt_in) and the taste wire (style_in) come from nodes the runner does
   // not run, so a wired one goes to Python.
+  // ── gpt-image-2.5 (model line-up F2): GPT Image 2.5 on fal, runner-only ──
   GenerateImageNode: {
-    models: Object.fromEntries(RUNNER_REPLICATE_IMAGE_MODEL_IDS.map(id => [id, 'replicate-image' as const])),
+    models: {
+      ...Object.fromEntries(RUNNER_REPLICATE_IMAGE_MODEL_IDS.map(id => [id, 'replicate-image' as const])),
+      'gpt-image-2.5': 'gpt-image-2.5',
+    },
     mustNotLink: ['prompt', 'model_options', 'style_block', 'style_refs', 'prompt_in', 'style_in'],
   },
   // ── replicate-video (Task B6): the Replicate-provider video models ──

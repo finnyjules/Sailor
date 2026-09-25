@@ -21,11 +21,15 @@
  * The first frame is the linked picture, else `image_url` in the node's
  * options; the last frame is `end_image_url`, sent only beside a first frame.
  * Reference pictures are `image_urls` in the options, where Shot Director
- * writes Seedance 2.0's (video.ts seedance20): at most 10, and dropped when
- * there is a first frame, as Seedance's are. Reference videos and sounds,
- * video editing and document-to-video are a later task (line-up ruling 4):
- * options carrying reference videos or sounds are refused in plain words, not
- * sent without them.
+ * writes Seedance 2.0's (video.ts seedance20): at most 10. A first frame AND
+ * references (pictures, videos or sounds) is refused in plain words
+ * (FIRST_FRAME_AND_REFERENCES), never sent with the references dropped. No
+ * control sets references or a last frame yet (Shot Director drives only
+ * Seedance); the catalogue text doesn't offer them. Shot Director's prompt
+ * tags (`@Image1`) are rewritten to Wan's positional words ("Image 1").
+ * Reference videos and sounds, video editing and document-to-video are a
+ * later task (line-up ruling 4): options carrying reference videos or sounds
+ * are refused in plain words, not sent without them.
  *
  * No backup service (line-up Ruling 11): Replicate's alibaba/wan-3 (read
  * 2026-09-24) has no sound switch, no last frame and no reference pictures,
@@ -65,6 +69,8 @@ export const WAN_3_NEEDS_PROMPT = 'Wan 3.0 needs a prompt.'
 export const WAN_3_TOO_MANY_REFERENCES = `Wan 3.0 takes at most ${WAN_3_MAX_REFERENCE_PICTURES} reference pictures.`
 export const WAN_3_PICTURES_ONLY = 'Wan 3.0 takes reference pictures only for now, not reference videos or sounds.'
 export const WAN_3_PRIME_NEEDS_FIRST_FRAME = 'Wan 3.0 Prime needs a first frame: link a picture.'
+/** A first frame and references together (Wan 3.0 and Seedance 2.0): refused, never a silent drop. */
+export const FIRST_FRAME_AND_REFERENCES = 'Pick either a first frame or reference pictures, not both.'
 
 export type Wan3Id = 'wan-3.0' | 'wan-3.0-prime'
 export type Wan3Mode = 'text' | 'image' | 'reference'
@@ -78,6 +84,19 @@ export function wan3FirstFrame(image: string | null, adv: Record<string, unknown
 export function wan3ReferencePictures(adv: Record<string, unknown>): unknown[] | null {
   const v = adv.image_urls
   return Array.isArray(v) && v.length ? v : null
+}
+
+/** Whether the options carry any reference: pictures, videos or sounds. */
+export function wan3HasAnyReferences(adv: Record<string, unknown>): boolean {
+  return !!wan3ReferencePictures(adv) || wan3HasMediaReferences(adv)
+}
+
+/**
+ * Shot Director's reference tags (`@Image1`, `@Video2`, `@Audio1`) as the
+ * positional words Wan 3.0's schema reads ("the subject in Image 1").
+ */
+export function wan3PromptTags(prompt: string): string {
+  return prompt.replace(/@(Image|Video|Audio)(\d+)/g, '$1 $2')
 }
 
 /** Whether the options carry reference videos or sounds (a later task; refused). */
@@ -123,6 +142,7 @@ export function wan30TextToVideo(a: VideoBuildArgs): Record<string, unknown> {
 function imageToVideo(a: VideoBuildArgs, missing: string): Record<string, unknown> {
   const first = wan3FirstFrame(a.image, a.adv)
   if (!first) throw new Error(missing)
+  if (wan3HasAnyReferences(a.adv)) throw new Error(FIRST_FRAME_AND_REFERENCES)
   const inp: Record<string, unknown> = { ...common(a), start_image_url: first }
   const last = optStr(a.adv, 'end_image_url', '')
   if (last) inp.end_image_url = last
@@ -139,12 +159,12 @@ export function wan30PrimeImageToVideo(a: VideoBuildArgs): Record<string, unknow
   return imageToVideo(a, WAN_3_PRIME_NEEDS_FIRST_FRAME)
 }
 
-/** alibaba/wan-3.0/reference-to-video: the pictures in the order the options list them. */
+/** alibaba/wan-3.0/reference-to-video: the pictures in the order the options list them; `@Image1` tags as "Image 1". */
 export function wan30ReferenceToVideo(a: VideoBuildArgs): Record<string, unknown> {
   if (wan3HasMediaReferences(a.adv)) throw new Error(WAN_3_PICTURES_ONLY)
   const refs = wan3ReferencePictures(a.adv)
   if (!refs) throw new Error('Wan 3.0 reference-to-video needs a reference picture.')
-  return { ...common(a), aspect_ratio: arOr(WAN_3_AR, a.aspectRatio, '16:9'), reference_image_urls: [...refs] }
+  return { ...common({ ...a, prompt: wan3PromptTags(a.prompt) }), aspect_ratio: arOr(WAN_3_AR, a.aspectRatio, '16:9'), reference_image_urls: [...refs] }
 }
 
 /** The family's models, each with its label and clip default. */

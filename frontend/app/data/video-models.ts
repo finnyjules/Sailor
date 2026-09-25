@@ -441,12 +441,13 @@ export const VIDEO_MODELS: VideoModel[] = [
     brand: 'Wan',
     // The gallery's cover art only: the runner sends it to fal (Replicate's alibaba/wan-3 is no backup, wan3.ts).
     replicateSlug: 'alibaba/wan-3',
-    pitch: 'Up to 30 s with native sound, from text, a first frame or reference pictures.',
+    // The runner also takes a last frame and reference pictures (wan3.ts), but
+    // no control sets them yet, so the text doesn't offer them (F1 fix round 1).
+    pitch: 'Up to 30 s with native sound, from a prompt or a starting picture.',
     description:
       'Wan 3.0 makes clips of up to 30 seconds with sound, at 480p, 720p or 1080p. '
-      + 'Link a picture to start from it (and set a last frame), or give it up to 10 '
-      + 'reference pictures to keep a character or product the same.',
-    tags: ['flagship', 'audio', 'long', 'reference', '4k'],
+      + 'Describe the clip, or link a picture to start from it.',
+    tags: ['flagship', 'audio', 'long', '4k'],
     modes: ['t2v', 'i2v'],
     supportsSeed: true,
     priceHint: null,

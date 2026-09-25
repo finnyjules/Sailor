@@ -12,7 +12,8 @@
  * ref-edits family: GenerateFromReferencesNode, RotateCameraNode,
  * ProductShotNode, the restyle family: RestyleFromImageNode, and the frame
  * family: Compositor, fed by the LoadImage nodes the Frame editor injects;
- * and the runner-only models no Python node builds: Wan 3.0, family wan-3)
+ * and the runner-only models no Python node builds: Wan 3.0, family wan-3;
+ * GPT Image 2.5 in GenerateImageNode and EditImageNode, family gpt-image-2.5)
  * closely enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiPrompt } from '#shared/runner/graph'
@@ -43,7 +44,8 @@ import {
   flux2ProEditOnReplicate, nanoBananaOnFal, nanoBananaOnReplicate, type ServiceCall,
 } from './generators/twins'
 import { RUNNER_WAN3_MODELS, isWan3Model, wan3Call } from './generators/wan3'
-import { checkRequest } from './requestRules'
+import { GPT_IMAGE_25_EDIT_OPTION, gptImage25Edit, gptImage25Generate, gptImage25OnReplicate, isGptImage25Model } from './generators/gptImage25'
+import { checkRequest, seedanceReferenceProblem } from './requestRules'
 import type { OutputFile, RunnerProvider } from './types'
 
 /**
@@ -146,6 +148,22 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
 
   switch (node.class_type) {
     case 'GenerateImageNode': {
+      // GPT Image 2.5 (family gpt-image-2.5): fal first, the version's
+      // endpoint; Replicate the backup (gptImage25.ts). No moodboard pictures.
+      if (isGptImage25Model(inputs.model)) {
+        const call = gptImage25Generate({
+          prompt: composeImagePrompt({
+            prompt: asText(inputs.prompt),
+            promptIn: asText(inputs.prompt_in),
+            styleBlock: asText(inputs.style_block),
+            styleIn: asText(inputs.style_in),
+            hasRefs: false,
+          }),
+          aspectRatio: asText(inputs.aspect_ratio) || '1:1',
+          adv: parseJsonObject(inputs.model_options),
+        })
+        return stillCall(call, 'generate_image', gptImage25OnReplicate(call))
+      }
       // A model that isn't one of the fal ids goes to Replicate, its Python
       // primary (family replicate-image). None of these takes moodboard
       // pictures, so style_refs is ignored, as Python's _accepts_refs does.
@@ -255,6 +273,11 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       const desc = RUNNER_VIDEO_MODELS[id]
       if (!desc) throw new Error(`Unknown video model: ${String(inputs.model)}`)
       const first = linkedFirstFile('image')
+      // Seedance 2.0: a first frame beside references is refused, not sent with them dropped (requestRules.ts).
+      if (id === 'seedance-2.0') {
+        const refused = seedanceReferenceProblem(parseJsonObject(inputs.model_options), !!first)
+        if (refused) throw new Error(refused.message)
+      }
       const image = first ? await ctx.toUrl(first) : null
       const payload = desc.build({
         prompt: asText(inputs.prompt),
@@ -288,6 +311,11 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
       }
       if (model === 'Flux 2 Pro') {
         return flux2Edit(falFlux2Edit({ imageUrls: [image], prompt, outputFormat, seed }), 'edit_image')
+      }
+      // GPT Image 2.5 (family gpt-image-2.5): fal's Flare edit first, Replicate the backup; no seed on either.
+      if (model === GPT_IMAGE_25_EDIT_OPTION) {
+        const call = gptImage25Edit({ image, prompt, outputFormat })
+        return stillCall(call, 'edit_image', gptImage25OnReplicate(call))
       }
       if (model === 'Flux Kontext Pro') {
         return still(FLUX_KONTEXT_APP, falKontext({

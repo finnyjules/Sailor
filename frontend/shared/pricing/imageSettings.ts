@@ -168,6 +168,13 @@ const gptQuality = (adv: Adv) => {
   return GPT_QUALITIES.includes(q) ? q : 'auto'
 }
 
+/** GPT Image 2.5 (gptImage25.ts): low / medium / high, anything else "high". The version and size don't move fal's card. */
+const GPT_25_QUALITIES = ['low', 'medium', 'high']
+const gpt25Quality = (adv: Adv) => {
+  const q = optStr(adv, 'quality', 'high')
+  return GPT_25_QUALITIES.includes(q) ? q : 'high'
+}
+
 const one = (tier: string | null = null): ImageSettings => ({ images: 1, tier, megapixels: null, webSearch: false })
 const flat: Rule = () => one()
 
@@ -245,6 +252,8 @@ const RULES: Record<string, Rule> = {
   // rGptImage2 / rGptImage15: quality low/medium/high/auto, anything else "auto"; one picture.
   'gpt-image-2': adv => one(gptQuality(adv)),
   'gpt-image-1.5': adv => one(gptQuality(adv)),
+  // gptImage25Generate (runner-only, fal first): quality; one picture.
+  'gpt-image-2.5': adv => one(gpt25Quality(adv)),
   'qwen-image': flat,
   'hunyuan-image-3': flat,
   'grok-imagine': flat,

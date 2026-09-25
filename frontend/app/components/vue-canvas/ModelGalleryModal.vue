@@ -465,7 +465,7 @@ const focusedModel = computed<ImageModel | null>(() =>
                 class="w-full bg-white/[0.04] border border-white/10 rounded px-2 py-1.5 text-[11px] text-white/85 cursor-pointer outline-none focus:bg-white/[0.06] focus:border-white/20 transition-colors"
                 @change="draftOptions = { ...draftOptions, [field.name]: ($event.target as HTMLSelectElement).value }"
               >
-                <option v-for="opt in field.options" :key="opt" :value="opt" class="bg-[#1b1b1b]">{{ opt }}</option>
+                <option v-for="(opt, i) in field.options" :key="opt" :value="opt" class="bg-[#1b1b1b]">{{ field.optionLabels?.[i] ?? opt }}</option>
               </select>
               <!-- Integer / Float -->
               <input

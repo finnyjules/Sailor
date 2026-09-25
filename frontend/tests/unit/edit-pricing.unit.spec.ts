@@ -125,7 +125,10 @@ const ESTIMATES = ['black-forest-labs/flux-dev-lora', 'catacolabs/sdxl-ad-inpain
 describe('edit rate cards', () => {
   it('every card carries a source, the date read and a confidence; only GPU-time models are estimates', () => {
     for (const [endpoint, r] of Object.entries(EDIT_RATES)) {
-      expect(r.source, endpoint).toMatch(/^https:\/\/(fal\.ai\/models\/.+\/llms\.txt|replicate\.com\/.+)$/)
+      // fal: the llms.txt; a token-billed card (GPT Image 2.5, Task F2) its model page, where the per-size table is.
+      expect(r.source, endpoint).toMatch(r.unit === 'by_quality'
+        ? /^https:\/\/(fal\.ai\/models\/.+|replicate\.com\/.+)$/
+        : /^https:\/\/(fal\.ai\/models\/.+\/llms\.txt|replicate\.com\/.+)$/)
       expect(r.source, endpoint).toContain(endpoint)
       expect(r.read, endpoint).toBe('2026-09-24')
       expect(r.service, endpoint).toBe(r.source.includes('fal.ai') ? 'fal' : 'replicate')

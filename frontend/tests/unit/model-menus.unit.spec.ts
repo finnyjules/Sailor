@@ -40,6 +40,16 @@ import { IMAGE_MODELS, IMAGE_MODELS_BY_ID, IMAGE_MODEL_PREFERENCE } from '../../
 import { FILM_SHOT_MODEL_PREFERENCE, VIDEO_MODELS, VIDEO_MODELS_BY_ID, VIDEO_MODEL_PREFERENCE } from '../../app/data/video-models'
 import { EDIT_MODEL_MENUS } from '../../app/data/edit-model-options'
 
+/**
+ * The runner-only dropdown values (GPT Image 2.5 in Edit an image, Task F2):
+ * no Python list has them, so the overlay adds them after Python's values.
+ * Read at import, before the tests clear the flags.
+ */
+const RUNNER_ONLY_VALUES: Readonly<Record<string, string[]>> = Object.fromEntries(
+  Object.entries(EDIT_MODEL_MENUS).map(([key, menu]) => [key.split('.')[0]!, menu.options.filter(o => o.runnerOnly).map(o => o.value)]),
+)
+const runnerOnlyValues = (cls: string) => RUNNER_ONLY_VALUES[cls] ?? []
+
 // ------------------------------------------------------------- flag helpers
 
 const undo: (() => void)[] = []
@@ -139,7 +149,7 @@ function flagScenario() {
 function expectOverlaid(body: any, on: boolean) {
   const fixture = engineFixture()
   // Options kept, every one: hidden and runner-only values stay valid.
-  expect(opts(body, 'EditImageNode')).toEqual(['Nano Banana 2', 'Flux Kontext Pro', 'Flux 2 Pro'])
+  expect(opts(body, 'EditImageNode')).toEqual(['Nano Banana 2', 'Flux Kontext Pro', 'Flux 2 Pro', 'GPT Image 2.5'])
   expect(cfg(body, 'EditImageNode').hidden_options).toEqual(on ? ['Flux Kontext Pro'] : ['Flux Kontext Pro', 'Flux 2 Pro'])
   expect(cfg(body, 'EditImageNode').default).toBe(on ? 'Flux 2 Pro' : 'Nano Banana 2')
   // Legacy shape, same rules.
@@ -191,21 +201,23 @@ describe('applyModelOverlay', () => {
     const fixture = engineFixture()
     const out = applyModelOverlay(fixture, NO_FAMILIES)
     for (const cls of Object.keys(fixture).filter(k => k !== 'KSampler')) {
-      expect(opts(out, cls), cls).toEqual(opts(fixture, cls))
+      // Only the runner-only values Python doesn't list are added, after its own.
+      expect(opts(out, cls), cls).toEqual([...opts(fixture, cls), ...runnerOnlyValues(cls)])
       expect(cfg(out, cls).default, cls).toBe(cfg(fixture, cls).default)
       if (modelMenu(cls)?.kind === 'dropdown') expect(cfg(out, cls).hidden_options, cls).toEqual([])
     }
   })
 
-  it('the dropdown lists match the Python lists exactly, and a value only the engine lists is kept', () => {
+  it('the dropdown lists match the Python lists exactly (plus the runner-only values, last), and a value only the engine lists is kept', () => {
     const fixture = engineFixture()
+    expect(RUNNER_ONLY_VALUES.EditImageNode).toEqual(['GPT Image 2.5'])
     for (const [key, menu] of Object.entries(EDIT_MODEL_MENUS)) {
       const cls = key.split('.')[0]!
-      expect(menu.options.map(o => o.value), key).toEqual(opts(fixture, cls))
+      expect(menu.options.map(o => o.value), key).toEqual([...opts(fixture, cls), ...runnerOnlyValues(cls)])
       expect(menu.preference[0], key).toBe(cfg(fixture, cls).default)
     }
     fixture.EditImageNode.input.required.model[1].options.push('Engine Only')
-    expect(opts(applyModelOverlay(fixture, NO_FAMILIES), 'EditImageNode')).toEqual(['Nano Banana 2', 'Flux Kontext Pro', 'Flux 2 Pro', 'Engine Only'])
+    expect(opts(applyModelOverlay(fixture, NO_FAMILIES), 'EditImageNode')).toEqual(['Nano Banana 2', 'Flux Kontext Pro', 'Flux 2 Pro', 'GPT Image 2.5', 'Engine Only'])
   })
 
   it('the default falls back to the first runnable value when no preference can run', () => {

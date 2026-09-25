@@ -42,6 +42,8 @@ export const EDIT_MODEL_MENUS: Readonly<Record<string, EditModelMenu>> = {
       { value: 'Nano Banana 2', label: 'Nano Banana 2' },
       { value: 'Flux Kontext Pro', label: 'Flux Kontext Pro', hidden: true },
       { value: 'Flux 2 Pro', label: 'Flux 2 Pro' },
+      // Runner-only (model line-up F2): no Python builder; offered while its switch is on.
+      { value: 'GPT Image 2.5', label: 'GPT Image 2.5', runnerOnly: true, family: 'gpt-image-2.5' },
     ],
     preference: ['Nano Banana 2'],
   },

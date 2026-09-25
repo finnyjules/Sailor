@@ -17,9 +17,11 @@ export type RunnerFamily =
   | 'frame'
   /** Wan 3.0 and Wan 3.0 Prime on fal (model line-up F1): runner-only video models. */
   | 'wan-3'
+  /** GPT Image 2.5 on fal, Replicate the backup (model line-up F2): runner-only, in Generate an image and Edit an image. */
+  | 'gpt-image-2.5'
 
 export const RUNNER_FAMILIES: readonly RunnerFamily[] = [
-  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3',
+  'fal-edit', 'replicate-image', 'replicate-video', 'nano-actions', 'ref-edits', 'restyle', 'frame', 'wan-3', 'gpt-image-2.5',
 ]
 
 const KNOWN: ReadonlySet<string> = new Set(RUNNER_FAMILIES)

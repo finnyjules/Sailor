@@ -57,6 +57,7 @@ export interface ImageModelAdvancedField {
   default: any
   description?: string
   options?: string[]      // select only
+  optionLabels?: string[] // select only: what the menu shows for each option, by index
   min?: number            // integer/float
   max?: number
   step?: number
@@ -797,6 +798,36 @@ export const IMAGE_MODELS: ImageModel[] = [
         options: ['auto', 'transparent', 'opaque'] },
       { name: 'output_format', type: 'select', label: 'Output format', default: 'webp',
         options: ['png', 'jpeg', 'webp'] },
+    ],
+  },
+  {
+    // Runner-only (model line-up F2): fal first, Replicate the backup
+    // (server/runner/generators/gptImage25.ts). No Python builder.
+    id: 'gpt-image-2.5',
+    runnerOnly: true,
+    family: 'gpt-image-2.5',
+    label: 'GPT Image 2.5',
+    brand: 'OpenAI',
+    // Cover art only: the runner sends it to fal first.
+    replicateSlug: 'openai/gpt-image-2.5-flare',
+    pitch: 'OpenAI\'s best yet: clean text in pictures, and it does what you ask.',
+    description: 'Two versions at the same price: Flare is quick, Sunburst takes longer for finer detail. Makes transparent backgrounds too.',
+    tags: ['flagship', 'typography'],
+    pricePerImage: 0.05529,
+    aspectRatios: ['1:1', '3:2', '2:3', '4:3', '3:4', '16:9', '9:16'],
+    defaultAspectRatio: '1:1',
+    advanced: [
+      { name: 'variant', type: 'select', label: 'Version', default: 'flare',
+        options: ['flare', 'sunburst'], optionLabels: ['Flare', 'Sunburst'],
+        description: 'Flare is quick; Sunburst is slower, with finer detail. Same price.' },
+      { name: 'quality', type: 'select', label: 'Quality', default: 'high',
+        options: ['low', 'medium', 'high'], optionLabels: ['Low', 'Medium', 'High'],
+        description: 'Higher quality costs more.' },
+      { name: 'background', type: 'select', label: 'Background', default: 'auto',
+        options: ['auto', 'transparent', 'opaque'], optionLabels: ['Automatic', 'Transparent', 'Solid'],
+        description: 'Transparent needs PNG or WebP.' },
+      { name: 'output_format', type: 'select', label: 'Output format', default: 'png',
+        options: ['png', 'jpeg', 'webp'], optionLabels: ['PNG', 'JPEG', 'WebP'] },
     ],
   },
   {

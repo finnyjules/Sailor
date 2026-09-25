@@ -53,7 +53,11 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // PixVerse v6 charge Replicate's cost, their ComfyUI path's service).
 // lineup-f1 (Task F1): Wan 3.0 and Wan 3.0 Prime, fal per second by
 // resolution (runner-only, family wan-3). No other price moves.
-export const PRICE_BOOK_VERSION = 'lineup-f1'
+// lineup-f2 (Task F2): GPT Image 2.5 in Generate an image (by quality, fal's
+// dearest canonical size) and Edit an image (medium, fal's largest size),
+// Replicate the backup at cost (runner-only, family gpt-image-2.5). No other
+// price moves.
+export const PRICE_BOOK_VERSION = 'lineup-f2'
 
 export const BASE_RENDER_CREDITS = 1
 

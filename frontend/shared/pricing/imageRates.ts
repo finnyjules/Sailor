@@ -1,7 +1,8 @@
 /**
  * What each image model's FIRST service charges us — the service Sailor's
  * request builder sends it to today: fal for the RUNNER_IMAGE_MODELS ids and
- * the Python `primary="fal"` models (Krea 2), Replicate for the rest
+ * the Python `primary="fal"` models (Krea 2), and the runner-only GPT Image
+ * 2.5 (server/runner/generators/gptImage25.ts), Replicate for the rest
  * (comfy_api_nodes/image_models.py `primary`, default "replicate").
  *
  * Units, following the service:
@@ -186,6 +187,19 @@ export const IMAGE_RATES: Record<string, ImageRate> = {
     unit: 'by_quality', byTier: { low: 0.013, medium: 0.05, high: 0.136, auto: 0.136 },
     service: 'replicate', source: rep('openai/gpt-image-1.5'), read: READ, confidence: 'verified',
   },
+  // GPT Image 2.5 (runner-only, Task F2), fal first; both versions. fal bills
+  // tokens ("Image tokens (per 1M): $8.00 input … $30.00 output", llms.txt) and
+  // its model page prices the canonical sizes (read 2026-09-24, the same table
+  // on Flare and Sunburst): 1024×1024 low $0.00588, medium $0.01317, high
+  // $0.05268; 2560×1440 $0.00615, $0.01434, $0.05529 — the dearest row up to the
+  // largest picture the builder asks for (2048 × 1152). Priced at that row for
+  // every size, so no ratio is under-priced. Replicate's flat price (the backup,
+  // below, covered at cost) sits above it at every quality.
+  'gpt-image-2.5': {
+    unit: 'by_quality', byTier: { low: 0.00615, medium: 0.01434, high: 0.05529 },
+    service: 'fal', source: 'https://fal.ai/models/openai/gpt-image-2.5/flare/text-to-image', read: READ, confidence: 'verified',
+    note: 'per-size table on the model page; the same on openai/gpt-image-2.5/sunburst/text-to-image',
+  },
   'qwen-image': repImage('qwen/qwen-image', 0.025),
   'hunyuan-image-3': repImage('tencent/hunyuan-image-3', 0.08),
   'grok-imagine': repImage('xai/grok-imagine-image', 0.02),
@@ -233,6 +247,14 @@ export const IMAGE_BACKUP_RATES: Record<string, ImageRate> = {
   // "Price: $0.04 per images" / "$0.25 per images": Replicate's prices.
   'recraft-v4': falImage('fal-ai/recraft/v4/text-to-image', 0.04),
   'recraft-v4-pro': falImage('fal-ai/recraft/v4/pro/text-to-image', 0.25),
+  // openai/gpt-image-2.5-flare and -sunburst (billingConfig, the same tiers on
+  // both): "low $0.012, medium $0.047, high $0.128" per output image, whatever
+  // the size. Output pictures only.
+  'gpt-image-2.5': {
+    unit: 'by_quality', byTier: { low: 0.012, medium: 0.047, high: 0.128 },
+    service: 'replicate', source: rep('openai/gpt-image-2.5-flare'), read: READ, confidence: 'verified',
+    note: 'the same tiers on openai/gpt-image-2.5-sunburst',
+  },
 }
 
 const own = <T>(o: Record<string, T>, k: string): T | undefined =>

@@ -104,7 +104,7 @@ describe('the first and backup services are the table\'s', () => {
     const keys = new Set(Object.keys(RUNNER_ROUTES))
     for (const id of [...Object.keys(RUNNER_IMAGE_MODELS), ...Object.keys(RUNNER_REPLICATE_IMAGE_MODELS)]) expect(keys.has(`image:${id}`), id).toBe(true)
     for (const id of [...Object.keys(RUNNER_VIDEO_MODELS), ...Object.keys(RUNNER_REPLICATE_VIDEO_MODELS)]) expect(keys.has(`video:${id}`), id).toBe(true)
-    for (const m of ['Nano Banana 2', 'Flux 2 Pro', 'Flux Kontext Pro']) expect(keys.has(`EditImageNode:${m}`), m).toBe(true)
+    for (const m of ['Nano Banana 2', 'Flux 2 Pro', 'Flux Kontext Pro', 'GPT Image 2.5']) expect(keys.has(`EditImageNode:${m}`), m).toBe(true)
     for (const m of ['Flux 2 Pro', 'Flux Kontext Pro', 'Nano Banana']) expect(keys.has(`BlendSceneNode:${m}`), m).toBe(true)
     for (const m of RESTYLE_MODELS) expect(keys.has(`RestyleFromImageNode:${m}`), m).toBe(true)
     for (const m of REFERENCE_MODEL_IDS) expect(keys.has(`GenerateFromReferencesNode:${m}`), m).toBe(true)
@@ -114,7 +114,9 @@ describe('the first and backup services are the table\'s', () => {
     // And no row for something the runner doesn't run.
     const image = Object.keys(RUNNER_ROUTES).filter(k => k.startsWith('image:')).length
     const video = Object.keys(RUNNER_ROUTES).filter(k => k.startsWith('video:')).length
-    expect(image).toBe(Object.keys(RUNNER_IMAGE_MODELS).length + Object.keys(RUNNER_REPLICATE_IMAGE_MODELS).length)
+    // + GPT Image 2.5 (Task F2), a runner-only model outside the two builder tables (gptImage25.ts).
+    expect(keys.has('image:gpt-image-2.5')).toBe(true)
+    expect(image).toBe(Object.keys(RUNNER_IMAGE_MODELS).length + Object.keys(RUNNER_REPLICATE_IMAGE_MODELS).length + 1)
     expect(video).toBe(Object.keys(RUNNER_VIDEO_MODELS).length + Object.keys(RUNNER_REPLICATE_VIDEO_MODELS).length)
   })
 

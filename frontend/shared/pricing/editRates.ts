@@ -8,6 +8,7 @@
  *  - `per_image`: dollars per output picture;
  *  - `by_resolution`: dollars per picture by the resolution tier sent
  *    (1K / 2K / 4K); a tier the card does not list is priced at its top tier;
+ *  - `by_quality`: the same, by the quality tier sent (low / medium / high);
  *  - `flux2_megapixels`: fal FLUX.2 edit — a first output megapixel, then a
  *    price per extra megapixel of input AND output, each rounded up to a whole
  *    megapixel of 1024 × 1024 pixels (fal's page says so: 1024² is $0.03,
@@ -46,7 +47,7 @@ interface RateMeta {
 
 export type EditRate =
   | (RateMeta & { unit: 'per_image', usd: number })
-  | (RateMeta & { unit: 'by_resolution', byTier: Record<string, number> })
+  | (RateMeta & { unit: 'by_resolution' | 'by_quality', byTier: Record<string, number> })
   | (RateMeta & { unit: 'flux2_megapixels', firstMegapixel: number, extraMegapixel: number, megapixelPixels: number })
   | (RateMeta & { unit: 'by_output_pixels', steps: readonly (readonly [maxPixels: number, usd: number])[], beyondPerPixel?: number })
   | (RateMeta & { unit: 'per_output_megapixel', perMegapixel: number, minUsd: number })
@@ -56,7 +57,7 @@ export type EditRate =
 export interface EditCall {
   /** fal app id or Replicate slug — the key into EDIT_RATES. */
   endpoint: string
-  /** The resolution tier the request carries ('1K', '2K'…), or null. */
+  /** The resolution tier the request carries ('1K', '2K'…), or its quality ('medium') on a by-quality card, or null. */
   tier: string | null
   /** Pixels of the pictures sent in, where the service bills them (FLUX.2 edit). */
   inputPixels: number | null
@@ -100,6 +101,15 @@ export const EDIT_RATES: Record<string, EditRate> = {
     unit: 'flux2_megapixels', firstMegapixel: 0.03, extraMegapixel: 0.015, megapixelPixels: 1024 * 1024,
     ...verified('fal', fal('fal-ai/flux-2-pro/edit')),
   },
+  // GPT Image 2.5 Flare edit (Task F2): billed by tokens; the model page's
+  // per-size table "including one input image" (read 2026-09-24; the edit
+  // sends exactly one). The edit keeps the input's shape (`image_size` auto),
+  // so the size is unknown before it runs: priced at the table's largest row,
+  // 3840 × 2160 (the most the model makes, "max edge 3840px").
+  'openai/gpt-image-2.5/flare/edit': {
+    unit: 'by_quality', byTier: { low: 0.01113, medium: 0.02595, high: 0.10008 },
+    ...verified('fal', 'https://fal.ai/models/openai/gpt-image-2.5/flare/edit'),
+  },
   // "Price: $0.04 per images".
   'fal-ai/flux-pro/kontext': { unit: 'per_image', usd: 0.04, ...verified('fal', fal('fal-ai/flux-pro/kontext')) },
 
@@ -121,6 +131,12 @@ export const EDIT_RATES: Record<string, EditRate> = {
   'black-forest-labs/flux-2-pro': {
     unit: 'per_run_megapixels', perRun: 0.015, perInputMegapixel: 0.015, perOutputMegapixel: 0.015,
     ...verified('replicate', rep('black-forest-labs/flux-2-pro')),
+  },
+  // "low $0.012, medium $0.047, high $0.128" per output image, whatever the
+  // size or the pictures sent in — the runner's backup for the GPT Image 2.5 edit.
+  'openai/gpt-image-2.5-flare': {
+    unit: 'by_quality', byTier: { low: 0.012, medium: 0.047, high: 0.128 },
+    ...verified('replicate', rep('openai/gpt-image-2.5-flare')),
   },
   // "$0.039 per output image" (the original Nano Banana takes no resolution).
   'google/nano-banana': { unit: 'per_image', usd: 0.039, ...verified('replicate', rep('google/nano-banana')) },
@@ -213,7 +229,8 @@ export function editUsd(call: EditCall): number | null {
   if (!rate) return null
   switch (rate.unit) {
     case 'per_image': return rate.usd
-    case 'by_resolution': {
+    case 'by_resolution':
+    case 'by_quality': {
       const p = call.tier == null ? undefined : own(rate.byTier, call.tier)
       return p ?? Math.max(...Object.values(rate.byTier))
     }

@@ -42,12 +42,16 @@ describe('videoModelAdapt', () => {
     expect(modelSupportsSeed('')).toBe(true)
   })
 
-  it('allowedDurations returns the model durations as strings; unknown → null', () => {
+  it('allowedDurations returns the model durations as strings; unknown → every length but the runner-only ones', () => {
     expect(allowedDurations('veo-3.1'))
       .toEqual(VIDEO_MODELS_BY_ID['veo-3.1']!.durations.map(String))
     expect(allowedDurations('kling-v2.5-turbo-pro'))
       .toEqual(VIDEO_MODELS_BY_ID['kling-v2.5-turbo-pro']!.durations.map(String))
-    expect(allowedDurations('does-not-exist')).toBeNull()
+    // Unknown, empty or a legacy label: the engine's own lengths (Python's union), not Wan 3.0's 12, 25 and 30 s (F1 fix round 1).
+    for (const id of ['does-not-exist', '', 'Veo 3']) {
+      expect(allowedDurations(id), id).toEqual(['3', '4', '5', '6', '8', '9', '10', '15', '20', '60'])
+    }
+    expect(allowedDurations('wan-3.0')).toContain('30')
   })
 
   it('allowedAspectRatios returns the model ratios; unknown → null', () => {

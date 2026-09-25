@@ -28,6 +28,7 @@ import type { OutputFile } from '~~/server/runner/types'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
 import { NANO_BANANA_SHORT_PROMPT, PROMPT_MIN_LENGTH, SEEDANCE_REFERENCE_LIMITS, requestProblem } from '~~/server/runner/requestRules'
 import { WAN_3_ENDPOINTS } from '~~/server/runner/generators/wan3'
+import { GPT_IMAGE_25_FAL_ENDPOINTS, GPT_IMAGE_25_REPLICATE_SLUGS } from '~~/server/runner/generators/gptImage25'
 
 const readJson = (rel: string) => JSON.parse(readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8'))
 const BUILDERS = readJson('./fixtures/runner-builders.json')
@@ -211,6 +212,9 @@ function runnerEndpoints(): string[] {
   }
   // Task F1: Wan 3.0's four fal endpoints (wan3.ts; its payload grid is runner-wan3.unit.spec.ts).
   for (const e of WAN_3_ENDPOINTS) out.add(`fal ${e}`)
+  // Task F2: GPT Image 2.5, fal first and Replicate the backup (gptImage25.ts; its grid is runner-gpt-image-25.unit.spec.ts).
+  for (const e of GPT_IMAGE_25_FAL_ENDPOINTS) out.add(`fal ${e}`)
+  for (const slug of GPT_IMAGE_25_REPLICATE_SLUGS) out.add(`replicate ${slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_IMAGE_MODELS)) out.add(`replicate ${d.slug}`)
   for (const d of Object.values(RUNNER_REPLICATE_VIDEO_MODELS)) out.add(`replicate ${d.slug}`)
   for (const app of [FLUX_2_EDIT_APP, FLUX_KONTEXT_APP, NANO_BANANA_2_EDIT_APP, NANO_BANANA_PRO_EDIT_APP]) out.add(`fal ${app}`)

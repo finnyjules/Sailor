@@ -45,6 +45,9 @@ const HIDDEN_DROPDOWN: Record<string, string[]> = {
   'GenerateFromReferencesNode.model': [],
   'UpscaleImageNode.model': ['Real-ESRGAN'],
 }
+/** Runner-only models the line-up's F-tasks added (no Python builder; left out while their switch is off). */
+const RUNNER_ONLY_IMAGES = ['gpt-image-2.5']
+const RUNNER_ONLY_DROPDOWN: Record<string, string[]> = { 'EditImageNode.model': ['GPT Image 2.5'] }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -85,7 +88,8 @@ describe('the hide lists', () => {
     expect(IMAGE_MODELS.filter(m => m.hidden).map(m => m.id).sort()).toEqual([...HIDDEN_IMAGES].sort())
     expect(VIDEO_MODELS.filter(m => m.hidden).map(m => m.id).sort()).toEqual([...HIDDEN_VIDEOS].sort())
     expect(VIDEO_MODELS.filter(m => m.discontinued).map(m => [m.id, m.discontinued])).toEqual(DISCONTINUED_VIDEOS.map(id => [id, '2026-09-24']))
-    expect(IMAGE_MODELS.filter(m => m.discontinued || m.runnerOnly)).toEqual([])
+    expect(IMAGE_MODELS.filter(m => m.discontinued)).toEqual([])
+    expect(IMAGE_MODELS.filter(m => m.runnerOnly).map(m => [m.id, m.family])).toEqual(RUNNER_ONLY_IMAGES.map(id => [id, 'gpt-image-2.5']))
   })
 
   it('exactly the retired dropdown values are hidden; every Python value is still an option', () => {
@@ -93,8 +97,8 @@ describe('the hide lists', () => {
     for (const [key, hidden] of Object.entries(HIDDEN_DROPDOWN)) {
       const menu = EDIT_MODEL_MENUS[key]!
       expect(menu.options.filter(o => o.hidden).map(o => o.value).sort(), key).toEqual([...hidden].sort())
-      // Hidden, never removed: the list is still Python's, in its order.
-      expect(menu.options.map(o => o.value), key).toEqual(cfg(b, key.split('.')[0]!).options)
+      // Hidden, never removed: the list is still Python's, in its order (the runner-only values after it).
+      expect(menu.options.map(o => o.value), key).toEqual([...cfg(b, key.split('.')[0]!).options, ...(RUNNER_ONLY_DROPDOWN[key] ?? [])])
     }
   })
 
@@ -136,7 +140,8 @@ describe('the hide lists', () => {
     const images = galleryEntries(IMAGE_MODELS, { classType: 'GenerateImageNode', families: NO_FAMILIES, current: 'flux-1.1-pro' })
     for (const id of HIDDEN_IMAGES.filter(i => i !== 'flux-1.1-pro')) expect(images.map(e => e.model.id), id).not.toContain(id)
     expect(images.find(e => e.model.id === 'flux-1.1-pro')).toMatchObject({ hiddenTag: true })
-    expect(images.filter(e => !e.hiddenTag)).toHaveLength(IMAGE_MODELS.length - HIDDEN_IMAGES.length)
+    // Every family off: the runner-only models are left out too.
+    expect(images.filter(e => !e.hiddenTag)).toHaveLength(IMAGE_MODELS.length - HIDDEN_IMAGES.length - RUNNER_ONLY_IMAGES.length)
     for (const cls of ['GenerateVideoNode', 'FilmShotNode']) {
       const shown = galleryEntries(VIDEO_MODELS, { classType: cls, families: ALL, current: null }).map(e => e.model.id)
       for (const id of [...HIDDEN_VIDEOS, ...DISCONTINUED_VIDEOS]) expect(shown, `${cls} ${id}`).not.toContain(id)
@@ -206,7 +211,8 @@ describe('a new node gets the new default (the overlay on the committed baseline
         expect(blockedModelUses(one({ class_type: cls, inputs: { model: want } }))).toEqual([])
       }
       for (const [key, hidden] of Object.entries(HIDDEN_DROPDOWN)) {
-        expect(cfg(served, key.split('.')[0]!).hidden_options, key).toEqual(hidden)
+        // A runner-only value is left out while its switch is off.
+        expect(cfg(served, key.split('.')[0]!).hidden_options, key).toEqual([...hidden, ...(families === ALL ? [] : RUNNER_ONLY_DROPDOWN[key] ?? [])])
       }
     })
   }

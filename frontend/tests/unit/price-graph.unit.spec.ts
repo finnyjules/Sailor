@@ -31,6 +31,8 @@ import { creditsForUsd } from '~/lib/pricing'
 import { IMAGE_MODELS } from '~~/app/data/image-models'
 import { VIDEO_MODELS } from '~~/app/data/video-models'
 import { videoUsd } from '#shared/pricing/videoRates'
+import { imagePriceUsd } from '#shared/pricing/imageRates'
+import { effectiveImageSettings } from '#shared/pricing/imageSettings'
 import { effectiveVideoSettings } from '#shared/pricing/videoSettings'
 
 /** Credits for a video node that sets only its model: the builder's default clip. */
@@ -237,7 +239,10 @@ describe('model-aware pricing: images', () => {
     for (const m of IMAGE_MODELS) {
       if (m.pricePerImage == null) continue
       const p = priceGraph({ 1: { class_type: 'GenerateImageNode', inputs: { model: m.id } } })
-      expect(p.credits, m.id).toBe(creditsForUsdServer(m.pricePerImage))
+      // pricePerImage is the first service's; a backup's cost, covered at cost, can set the charge above it (Task S3).
+      const basis = imagePriceUsd(m.id, effectiveImageSettings(m.id, m.defaultAspectRatio, {})!)!
+      expect(basis, m.id).toBeGreaterThanOrEqual(m.pricePerImage)
+      expect(p.credits, m.id).toBe(creditsForUsdServer(basis))
     }
   })
 

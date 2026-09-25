@@ -15,7 +15,7 @@ import { UnpricedGraphError, priceGraph } from '~~/server/utils/priceBook'
 import { creditsForUsd } from '#shared/pricing/markup'
 import { nodeCredits, providerUsd } from '#shared/pricing/nodePrice'
 import {
-  IMAGE_RATES, imageDefaultUsd, imageMaxPictureUsd, imageMaxUsd, imageRate, imageRateLabel, imageUsd,
+  IMAGE_RATES, imageDefaultUsd, imageMaxPictureUsd, imageMaxUsd, imagePriceMaxUsd, imageRate, imageRateLabel, imageUsd,
 } from '#shared/pricing/imageRates'
 import { effectiveImageSettings, hasImageSettings, maxImageCount } from '#shared/pricing/imageSettings'
 import { nodeCreditEstimate } from '~/lib/nodeCreditEstimate'
@@ -66,8 +66,11 @@ describe('the image rate card', () => {
   it('the first service is the one the builder sends to (fal list, Python fal primaries, Replicate for the rest)', () => {
     const falPrimary = pythonFalPrimaries()
     expect(falPrimary).toEqual(expect.arrayContaining([...RUNNER_IMAGE_MODEL_IDS, 'krea-2-large', 'krea-2-medium']))
+    // Runner-only models have no Python entry: their builder's service (GPT Image 2.5: fal, gptImage25.ts).
+    const runnerOnlyFal = IMAGE_MODELS.filter(m => m.runnerOnly).map(m => m.id)
+    expect(runnerOnlyFal).toEqual(['gpt-image-2.5'])
     for (const [id, r] of Object.entries(IMAGE_RATES)) {
-      expect(r.service, id).toBe(falPrimary.includes(id) ? 'fal' : 'replicate')
+      expect(r.service, id).toBe(falPrimary.includes(id) || runnerOnlyFal.includes(id) ? 'fal' : 'replicate')
     }
     for (const id of RUNNER_IMAGE_MODEL_IDS) expect(IMAGE_RATES[id]!.service, id).toBe('fal')
     for (const id of RUNNER_REPLICATE_IMAGE_MODEL_IDS) expect(IMAGE_RATES[id]!.service, id).toBe('replicate')
@@ -501,7 +504,9 @@ describe('badge = charge = run estimate for every priced image model', () => {
     expect(providerUsd('GenerateImageNode', { model: 'flux-2-pro', aspect_ratio: ['9', 0], model_options: '{"resolution":"2 MP"}' }))
       .toBeCloseTo(0.015 + 0.015 * 3, 9)
     for (const id of Object.keys(IMAGE_RATES)) {
-      expect(imageMaxUsd(id)!, id).toBeGreaterThanOrEqual(providerUsd('GenerateImageNode', { model: id })!)
+      expect(imageMaxUsd(id)!, id).toBeGreaterThanOrEqual(imageUsd(id, effectiveImageSettings(id, '1:1', {})!)!)
+      // The price basis (a backup covered at cost, Task S3) too.
+      expect(imagePriceMaxUsd(id)!, id).toBeGreaterThanOrEqual(providerUsd('GenerateImageNode', { model: id })!)
     }
   })
 

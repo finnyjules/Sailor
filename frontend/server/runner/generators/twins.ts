@@ -43,6 +43,9 @@
  * recraft-v4 / -v4-pro      Replicate  fal         fal-ai/recraft/v4[/pro]/text-to-image, the ratio as the size
  *                                                  Replicate's schema lists for it (S3b)
  * gpt-image-2               Replicate  —           fal hosts it (openai/gpt-image-2); its settings aren't checked yet
+ * gpt-image-2.5             fal        Replicate   runner-only (F2): openai/gpt-image-2.5-flare / -sunburst, the same
+ *                                                  size (as WIDTHxHEIGHT), quality, background, format and
+ *                                                  compression; fal is cheaper (gptImage25.ts)
  * qwen-image                Replicate  —           fal's Qwen Image has no webp, no enhance-prompt switch and no 1-step run
  * grok-imagine              Replicate  —           fal hosts it (xai/grok-imagine-image); its settings aren't checked yet
  * flux-fast, p-image        Replicate  —           Pruna models: not on fal (fal catalogue, 2026-09-24)
@@ -78,6 +81,8 @@
  * Edit image / Blend scene, Flux 2 Pro
  *                           fal        Replicate   black-forest-labs/flux-2-pro with the picture, matching its size
  * Edit image, Nano Banana 2 fal        —           Replicate's takes no seed
+ * Edit image, GPT Image 2.5 fal        Replicate   runner-only (F2): Flare's edit; openai/gpt-image-2.5-flare with the
+ *                                                  picture, the size from the picture on both (gptImage25.ts)
  * Develop                   fal        —           Replicate's takes no seed
  * Generate from references, Nano Banana 2
  *                           fal        —           Replicate's takes no seed
@@ -128,8 +133,8 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'image:seedream-4': r('fal', null, HIDDEN),
   // Generate image, Replicate
   'image:flux-dev': r('replicate', null, 'fal has no webp, no guidance below 1 and no go-fast switch'),
-  'image:flux-2-max': r('replicate', 'fal', 'jpg or png only: fal makes no webp, so a webp request has no backup'),
-  'image:flux-2-pro': r('replicate', 'fal', 'jpg or png only: fal makes no webp, so a webp request has no backup'),
+  'image:flux-2-max': r('replicate', 'fal', 'jpg or png only: fal makes no webp, so a webp request has no backup; fal has no output-quality field (Replicate gets 90), so the backup saves at fal\'s own quality'),
+  'image:flux-2-pro': r('replicate', 'fal', 'jpg or png only: fal makes no webp, so a webp request has no backup; fal has no output-quality field (Replicate gets 90), so the backup saves at fal\'s own quality'),
   'image:flux-2-flex': r('replicate', null, 'fal has no prompt-upsampling switch and no 1-step run'),
   'image:flux-2-klein-4b': r('replicate', null, 'fal\'s Klein 4B has no go-fast switch'),
   'image:flux-2-dev': r('replicate', 'fal'),
@@ -140,6 +145,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'image:recraft-v4-pro': r('replicate', 'fal'),
   'image:recraft-v4': r('replicate', 'fal'),
   'image:gpt-image-2': r('replicate', null, ON_FAL_UNCHECKED),
+  'image:gpt-image-2.5': r('fal', 'replicate'),
   'image:qwen-image': r('replicate', null, 'fal has no webp, no enhance-prompt switch and no 1-step run'),
   'image:grok-imagine': r('replicate', null, ON_FAL_UNCHECKED),
   'image:flux-fast': r('replicate', null, 'not on fal'),
@@ -195,6 +201,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'EditImageNode:Flux 2 Pro': r('fal', 'replicate'),
   'BlendSceneNode:Flux 2 Pro': r('fal', 'replicate'),
   'EditImageNode:Nano Banana 2': r('fal', null, 'Replicate\'s Nano Banana 2 takes no seed'),
+  'EditImageNode:GPT Image 2.5': r('fal', 'replicate'),
   'DevelopImageNode': r('fal', null, 'Replicate\'s Nano Banana 2 takes no seed'),
   'GenerateFromReferencesNode:nano-banana-2': r('fal', null, 'Replicate\'s Nano Banana 2 takes no seed'),
   'GenerateFromReferencesNode:seedream-5-pro': r('replicate', null, 'fal publishes only tentative pricing'),

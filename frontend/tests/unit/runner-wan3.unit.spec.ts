@@ -34,7 +34,7 @@ import { planNode } from '~~/server/runner/executors'
 import { asInt, parseJsonObject } from '~~/server/runner/generators/opts'
 import {
   WAN_30_IMAGE_TO_VIDEO, WAN_30_PRIME_IMAGE_TO_VIDEO, WAN_30_REFERENCE_TO_VIDEO, WAN_30_TEXT_TO_VIDEO, WAN_3_ENDPOINTS,
-  WAN_3_NEEDS_PROMPT, WAN_3_PICTURES_ONLY, WAN_3_PRIME_NEEDS_FIRST_FRAME, WAN_3_SECONDS, WAN_3_TOO_MANY_REFERENCES,
+  FIRST_FRAME_AND_REFERENCES, WAN_3_NEEDS_PROMPT, WAN_3_PICTURES_ONLY, WAN_3_PRIME_NEEDS_FIRST_FRAME, WAN_3_SECONDS, WAN_3_TOO_MANY_REFERENCES,
   wan3Call, type Wan3Id,
 } from '~~/server/runner/generators/wan3'
 import { requestProblems } from '~~/server/runner/requestRules'
@@ -125,7 +125,7 @@ const MODES = [
   { id: 'wan-3.0' as const, name: 'first frame from the options', endpoint: WAN_30_IMAGE_TO_VIDEO, image: null, extra: { image_url: 'https://x/first.png' } },
   { id: 'wan-3.0' as const, name: 'reference pictures', endpoint: WAN_30_REFERENCE_TO_VIDEO, image: null, extra: { image_urls: Array.from({ length: 10 }, (_, i) => `https://x/ref${i}.png`) } },
   { id: 'wan-3.0-prime' as const, name: 'first frame', endpoint: WAN_30_PRIME_IMAGE_TO_VIDEO, image: 'https://x/first.png', extra: {} },
-  { id: 'wan-3.0-prime' as const, name: 'first and last frame', endpoint: WAN_30_PRIME_IMAGE_TO_VIDEO, image: 'https://x/first.png', extra: { end_image_url: 'https://x/last.png', image_urls: ['https://x/ignored.png'] } },
+  { id: 'wan-3.0-prime' as const, name: 'first and last frame', endpoint: WAN_30_PRIME_IMAGE_TO_VIDEO, image: 'https://x/first.png', extra: { end_image_url: 'https://x/last.png' } },
 ]
 
 describe('every payload over the settings grid fits its schema and carries what the price reads', () => {
@@ -232,10 +232,13 @@ describe('expected payloads', () => {
     expect(checkPayload(schema(p.endpoint), p.payload)).toEqual([])
   })
 
-  it('a first frame wins over reference pictures (as Seedance 2.0\'s does)', async () => {
-    const p = await providerPlan(vid('wan-3.0', { image: true, opts: { image_urls: ['https://x/a.png'] } }))
-    expect(p.endpoint).toBe('alibaba/wan-3.0/image-to-video')
-    expect(p.payload).not.toHaveProperty('reference_image_urls')
+  it('Shot Director\'s @Image1 / @Video2 / @Audio1 tags become Wan\'s positional words on reference-to-video', async () => {
+    const p = await providerPlan(vid('wan-3.0', { prompt: '@Image1 walks past @Image2, lit like @Image10 (@Video2, @Audio1; me@Imagery stays)', opts: { image_urls: ['https://x/a.png', 'https://x/b.png'] } }))
+    expect(p.endpoint).toBe('alibaba/wan-3.0/reference-to-video')
+    expect(p.payload.prompt).toBe('Image 1 walks past Image 2, lit like Image 10 (Video 2, Audio 1; me@Imagery stays)')
+    expect(checkPayload(schema(p.endpoint), p.payload)).toEqual([])
+    // Other endpoints send the prompt as written.
+    expect((await providerPlan(vid('wan-3.0', { prompt: 'see @Image1' }))).payload.prompt).toBe('see @Image1')
   })
 
   it('Prime: its own image-to-video endpoint, with the linked picture', async () => {
@@ -257,6 +260,11 @@ describe('requests Wan 3.0 would refuse are refused in plain words, before and a
     ['more than 10 reference pictures', vid('wan-3.0', { opts: { image_urls: Array.from({ length: 11 }, (_, i) => `https://x/${i}.png`) } }), 'model_options', WAN_3_TOO_MANY_REFERENCES],
     ['reference videos (a later task)', vid('wan-3.0', { opts: { video_urls: ['https://x/v.mp4'] } }), 'model_options', WAN_3_PICTURES_ONLY],
     ['reference sounds beside pictures', vid('wan-3.0', { opts: { image_urls: ['https://x/a.png'], audio_urls: ['https://x/a.mp3'] } }), 'model_options', WAN_3_PICTURES_ONLY],
+    // F1 fix round 1: never a silent drop of the references.
+    ['a linked first frame and reference pictures', vid('wan-3.0', { image: true, opts: { image_urls: ['https://x/a.png'] } }), 'model_options', FIRST_FRAME_AND_REFERENCES],
+    ['a first frame in the options and reference pictures', vid('wan-3.0', { opts: { image_url: 'https://x/f.png', image_urls: ['https://x/a.png'] } }), 'model_options', FIRST_FRAME_AND_REFERENCES],
+    ['a first frame and reference videos', vid('wan-3.0', { image: true, opts: { video_urls: ['https://x/v.mp4'] } }), 'model_options', FIRST_FRAME_AND_REFERENCES],
+    ['Prime with references', vid('wan-3.0-prime', { image: true, opts: { image_urls: ['https://x/a.png'] } }), 'model_options', FIRST_FRAME_AND_REFERENCES],
   ]
   for (const [name, node, input, message] of cases) {
     it(name, async () => {
@@ -265,11 +273,11 @@ describe('requests Wan 3.0 would refuse are refused in plain words, before and a
     })
   }
 
-  it('an empty prompt is fine with a first frame or references; so are reference videos beside a first frame (dropped, as Seedance\'s)', async () => {
+  it('an empty prompt is fine with a first frame or references; empty reference lists beside a first frame are no references', async () => {
     for (const node of [
       vid('wan-3.0', { prompt: '', image: true }),
       vid('wan-3.0', { prompt: '', opts: { image_urls: ['https://x/a.png'] } }),
-      vid('wan-3.0', { image: true, opts: { video_urls: ['https://x/v.mp4'] } }),
+      vid('wan-3.0', { image: true, opts: { image_urls: [], video_urls: [] } }),
       vid('wan-3.0-prime', { prompt: '', image: true }),
     ]) {
       expect(requestProblems({ n: node })).toEqual([])
@@ -500,5 +508,48 @@ describe('the runner engine', () => {
     await expect(start(k)).rejects.toThrow()
     expect(k.fal.reqs.size).toBe(0)
     expect(k.ledger.holds.size).toBe(0)
+  })
+})
+
+// ── F1 fix round 1 ─────────────────────────────────────────────────────────
+
+describe('Seedance 2.0 refuses a first frame beside references too (before, it dropped them without a word)', () => {
+  const seed = (opts: Record<string, unknown>, image = false) => {
+    const n = vid('seedance-2.0', { opts })
+    if (image) n.inputs.image = ['9', 0]
+    return n
+  }
+  for (const [name, node] of [
+    ['a linked first frame and reference pictures', seed({ image_urls: ['https://x/a.png'] }, true)],
+    ['image_url in the options and reference videos', seed({ image_url: 'https://x/f.png', video_urls: ['https://x/v.mp4'] })],
+    ['a linked first frame and reference sounds', seed({ audio_urls: ['https://x/s.mp3'] }, true)],
+  ] as const) {
+    it(name, async () => {
+      expect(requestProblems({ n: node })).toEqual([{ nodeId: 'n', classType: 'GenerateVideoNode', input: 'model_options', message: FIRST_FRAME_AND_REFERENCES }])
+      await expect(plan(node)).rejects.toThrow(FIRST_FRAME_AND_REFERENCES)
+    })
+  }
+
+  it('a first frame alone, references alone, and empty lists beside a frame still run as before', async () => {
+    for (const [node, endpoint] of [
+      [seed({}, true), 'bytedance/seedance-2.0/image-to-video'],
+      [seed({ image_url: 'https://x/f.png', end_image_url: 'https://x/l.png' }), 'bytedance/seedance-2.0/image-to-video'],
+      [seed({ image_urls: ['https://x/a.png'] }), 'bytedance/seedance-2.0/reference-to-video'],
+      [seed({ image_urls: [] }, true), 'bytedance/seedance-2.0/image-to-video'],
+    ] as const) {
+      expect(requestProblems({ n: node })).toEqual([])
+      expect((await providerPlan(node)).endpoint).toBe(endpoint)
+    }
+  })
+})
+
+describe('the catalogue text offers only what a control can reach', () => {
+  it('Wan 3.0 promises no last frame and no reference pictures, and has no reference tag', () => {
+    for (const id of IDS) {
+      const m = VIDEO_MODELS_BY_ID[id]!
+      const text = `${m.pitch} ${m.description ?? ''}`
+      expect(text, id).not.toMatch(/last frame|reference/i)
+      expect(m.tags, id).not.toContain('reference')
+    }
   })
 })

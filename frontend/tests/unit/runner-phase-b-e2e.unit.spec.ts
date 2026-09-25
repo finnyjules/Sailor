@@ -177,6 +177,21 @@ const FLOWS: FamilyFlow[] = [
     endpoint: 'alibaba/wan-3.0/image-to-video',
     body: { prompt: 'a fox in the snow', resolution: '480p', duration: 5, audio: true, enable_prompt_expansion: true, start_image_url: storageUrl('image') },
   },
+  // Task F2: GPT Image 2.5 has no Python builder either; the body is written
+  // from its saved schema (runner-gpt-image-25.unit.spec.ts). fal first, so
+  // Replicate (the backup) is never called.
+  {
+    family: 'gpt-image-2.5',
+    label: 'GenerateImageNode gpt-image-2.5',
+    prompt: {
+      1: { class_type: 'GenerateImageNode', inputs: { model: 'gpt-image-2.5', prompt: 'a poster that says HELLO', aspect_ratio: '1:1', seed: 0, model_options: '{"quality":"medium"}' } },
+      2: outImage('1'),
+    },
+    files: [],
+    provider: 'fal',
+    endpoint: 'openai/gpt-image-2.5/flare/text-to-image',
+    body: { prompt: 'a poster that says HELLO', image_size: { width: 1024, height: 1024 }, quality: 'medium', background: 'auto', output_format: 'png', num_images: 1 },
+  },
 ]
 
 // ── The routes ───────────────────────────────────────────────────────────

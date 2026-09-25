@@ -57,14 +57,19 @@ function pythonTagsById(): Record<string, string[]> {
 describe('image catalog TS ↔ Python parity', () => {
   const pyTags = pythonTagsById()
 
-  it('both catalogs list the same model ids', () => {
-    const tsIds = IMAGE_MODELS.map(m => m.id).sort()
+  // A runner-only model (GPT Image 2.5, model line-up F2) has no Python builder, so no Python entry.
+  const withPython = IMAGE_MODELS.filter(m => !m.runnerOnly)
+
+  it('both catalogs list the same model ids (the runner-only ones are not in Python)', () => {
+    expect(IMAGE_MODELS.filter(m => m.runnerOnly).map(m => m.id)).toEqual(['gpt-image-2.5'])
+    expect(pyTags['gpt-image-2.5']).toBeUndefined()
+    const tsIds = withPython.map(m => m.id).sort()
     const pyIds = Object.keys(pyTags).sort()
     expect(pyIds).toEqual(tsIds)
   })
 
   it('mirrors every model tag list into the Python catalog, same order', () => {
-    for (const m of IMAGE_MODELS) {
+    for (const m of withPython) {
       expect(pyTags[m.id], `${m.id}: Python tags`).toEqual([...m.tags])
     }
   })
