@@ -507,7 +507,7 @@ describe('the runner engine', () => {
       fs.writeFileSync(path.join(k.root, 'input', 'bottle.png'), bytes())
       const { runId } = await start(k)
       await k.engine.settled(runId)
-      expect(k.upload).not.toHaveBeenCalled()
+      expect(k.upload.mock.calls.length).toBe(0) // not toHaveBeenCalled: a failure would print the 12 MB buffer and run the worker out of memory
       expect(k.fal.reqs.size).toBe(0)
       expect(k.replicate.reqs.size).toBe(0)
       expect(ofType(k.seen, 'execution_error').map(m => m.data.exception_message)).toEqual([message])
