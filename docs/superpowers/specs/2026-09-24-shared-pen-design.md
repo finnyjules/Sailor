@@ -136,6 +136,13 @@ for a pick, it says what to pick, with Cancel.
 The exact layout (one bar or two, where it floats, grouping) is settled with a **clickable prototype
 first**, before the component is built.
 
+**Toolbar decision (2026-09-24, from the prototype https://claude.ai/artifact/VrpxMPqoCMzMULZmNmUymq):
+layout A — two rows.** The tool row sits centred along the bottom of the host canvas. When something is
+selected, the rules row appears directly above it: "N selected", then the rules that apply, a divider,
+Fix · Repeat… · Mirror · Flip horizontal · Flip vertical · Make guide, a divider, Delete (red). The hint
+line sits under the tool row. Rejected: B (a rules bar floating over the selection) and C (a right-click
+menu).
+
 ## 2b. The Curve tool (Bézier)
 
 The drawing model already has a cubic Bézier segment (`kind: 'cubic'`, two handle points) and
