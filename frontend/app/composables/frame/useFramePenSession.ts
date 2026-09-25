@@ -154,7 +154,9 @@ export function guideWrite(text: any, sk: SketchDoc, a: GuideAnchor, W: number, 
   if (!m0) return null
   let lo = Infinity, hi = -Infinity
   for (const p of m0.sub.pts) { if (p.x < lo) lo = p.x; if (p.x > hi) hi = p.x }
-  const size = a.k * (hi - lo)
+  // a zero-width outline (a perfectly vertical line) has no width to refit: keep
+  // the guide's own size rather than write 0, which would silently drop Path size
+  const size = hi - lo > 0 ? a.k * (hi - lo) : text.path?.size
   const m = customGuideMapping(d, W, guideSizeToTargetWidthPx(size, W)) ?? m0
   const { x, y } = placementAfterRecentre(
     { x: a.x, y: a.y, rotation: a.rotation, skewX: a.skewX, skewY: a.skewY, scale: a.k },

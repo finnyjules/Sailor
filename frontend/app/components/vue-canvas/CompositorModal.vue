@@ -2064,11 +2064,29 @@ function commitPenSessionAndSwallowClick() {
 function cancelPenSession() {
   if (penSession.value) cancelPenSessionRaw()
 }
+/** The layer an open pen session is editing (a reopened path, or the text whose
+ *  guide is being drawn): its placement belongs to the pen until it closes. */
+function penLocksLayer(id: string | null | undefined): boolean {
+  const t = penSession.value?.target
+  if (!t || !id) return false
+  return (t.kind === 'layer' && t.id === id) || (t.kind === 'guide' && t.textId === id)
+}
+const penLocksSelected = computed(() => penLocksLayer(selectedLocal.value?.id))
 /** "Draw a path" / "Edit the path" on a text layer: the shared pen draws the
- *  text's guide itself (open paths only), and the type re-lays as you draw. */
-function drawGuideForSelectedText() {
+ *  text's guide itself (open paths only), and the type re-lays as you draw.
+ *  Already drawing this text's guide: nothing (a re-click must not throw the
+ *  drawing away). At a viewing size it first returns to the design size, as the
+ *  double-click route does — the guide's view has no responsive layout scale. */
+async function drawGuideForSelectedText() {
   const l = selectedLocal.value
   if (!l || l.kind !== 'text') return
+  const t = penSession.value?.target
+  if (t?.kind === 'guide' && t.textId === l.id) return
+  if (!atDesign.value) {
+    backToDesignSize()
+    await nextTick()
+    if (selectedLocal.value?.id !== l.id) return
+  }
   if (!enterPenMode()) return
   cancelPenSession()
   openPenSession({ kind: 'guide', textId: l.id })
@@ -11166,7 +11184,8 @@ onUnmounted(() => {
               <div>
                 <div class="panel-label mb-1.5" title="Run the type along a curve instead of flat lines">Follow a path</div>
                 <select :value="textPath?.follow ?? 'off'"
-                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none cursor-pointer"
+                  :disabled="penLocksSelected" :title="penLocksSelected ? 'Finish the pen first' : undefined"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none cursor-pointer disabled:opacity-50 disabled:cursor-default"
                   @change="setTextFollow(selectedLocal, ($event.target as HTMLSelectElement).value as any)">
                   <option v-for="o in TEXT_FOLLOW_OPTIONS" :key="o.v" :value="o.v">{{ o.label }}</option>
                 </select>
@@ -11258,7 +11277,8 @@ onUnmounted(() => {
                   <div v-if="textPath.follow === 'shape' || textPath.follow === 'custom'">
                     <div class="panel-label mb-1" title="How big the path is — the type's own size is set above">Path size</div>
                     <input v-scrubnum type="number" min="1" :value="pxW(textPath.size ?? 0)"
-                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                      :disabled="penLocksSelected" :title="penLocksSelected ? 'Finish the pen first' : undefined"
+                      class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none disabled:opacity-50"
                       @input="setTextPath(selectedLocal, { size: Math.max(1, parseFloat(($event.target as HTMLInputElement).value) || 1) / outWidth })" />
                   </div>
 
@@ -12084,7 +12104,7 @@ onUnmounted(() => {
             </div>
 
             <!-- Common: align the layer to the frame (edges + centres) -->
-            <div>
+            <div :title="penLocksSelected ? 'Finish the pen first' : undefined"><fieldset :disabled="penLocksSelected" :inert="penLocksSelected" class="m-0 p-0 border-0 min-w-0" :class="penLocksSelected ? 'opacity-50' : ''">
               <div class="panel-label mb-1.5">Align to frame</div>
               <div class="flex items-center gap-1">
                 <button v-for="a in ALIGN_FRAME_BTNS" :key="a.mode" :title="a.title"
@@ -12093,14 +12113,15 @@ onUnmounted(() => {
                   <component :is="a.icon" class="size-3.5" />
                 </button>
               </div>
-            </div>
+            </fieldset></div>
 
             <!-- Common: rotation + opacity -->
             <div class="grid grid-cols-2 gap-3">
               <div>
                 <div class="panel-label mb-1.5">Rotation</div>
                 <input v-scrubnum type="number" step="1" :value="Math.round(selectedLocal.rotation)"
-                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none"
+                  :disabled="penLocksSelected" :title="penLocksSelected ? 'Finish the pen first' : undefined"
+                  class="w-full bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/90 outline-none disabled:opacity-50"
                   @input="setLocal(selectedLocal!.id, { rotation: parseFloat(($event.target as HTMLInputElement).value) || 0 })" />
               </div>
               <div v-if="!localDisplace(selectedLocal)">
@@ -12118,7 +12139,7 @@ onUnmounted(() => {
 
           <!-- Distort: slant (affine) + perspective + free corner-pin (Distort tool) -->
           <StudioSection title="Distort and blend">
-            <div>
+            <div :title="penLocksSelected ? 'Finish the pen first' : undefined"><fieldset :disabled="penLocksSelected" :inert="penLocksSelected" data-testid="distort-fields" class="m-0 p-0 border-0 min-w-0" :class="penLocksSelected ? 'opacity-50' : ''">
               <div class="panel-label mb-1.5">Distort</div>
               <div class="grid grid-cols-2 gap-3 mb-2">
                 <StudioSlider label="Slant X" :model-value="(selectedLocal as any).skewX || 0"
@@ -12136,7 +12157,7 @@ onUnmounted(() => {
                 <button class="flex-1 h-7 rounded text-[11px] cursor-pointer transition-colors" :class="distortTool ? 'bg-white text-neutral-900 font-medium' : 'bg-white/[0.05] text-white/70 hover:bg-white/10'" title="Drag the 4 corners on the canvas" @click="toggleDistort">Corner pin</button>
                 <button class="h-7 px-2.5 rounded text-[11px] bg-white/[0.05] text-white/60 hover:bg-white/10 cursor-pointer" title="Reset slant + perspective" @click="resetDistort(selectedLocal!.id)">Reset</button>
               </div>
-            </div>
+            </fieldset></div>
 
             <!-- Blend mode (vs layers below; same modes as wired layers) -->
             <div v-if="!localDisplace(selectedLocal)">

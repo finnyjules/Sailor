@@ -456,6 +456,21 @@ describe('useFramePenSession — a text layer\'s drawn guide', () => {
     expect(cur.x).not.toBe(text.x)
   })
 
+  it('a zero-width drawing (a perfectly vertical line) keeps the guide\'s Path size instead of writing 0', () => {
+    const text = resizedGuideText()
+    const { host, get } = liveHost([text])
+    const s = useFramePenSession(host)
+    s.open({ kind: 'guide', textId: 't' })
+    const pts = s.session.value!.doc.value.entities.filter((e: any) => e.kind === 'point') as any[]
+    for (const p of pts) p.x = 5
+    s.session.value!.pen.finishSession()
+    expect(get('t').path.d).not.toBe(text.path.d)
+    expect(get('t').path.size).toBe(text.path.size)
+    s.commitSession()
+    expect(get('t').path.size).toBe(text.path.size)
+    expect(get('t').path.size).toBeGreaterThan(0)
+  })
+
   it('cancel restores path, x and y exactly; no edit leaves no undo step; commit with no edit writes nothing', () => {
     const text = resizedGuideText()
     const { host, get } = liveHost([text])

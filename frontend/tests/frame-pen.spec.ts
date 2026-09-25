@@ -411,6 +411,26 @@ test.describe('Frame pen — a text layer\'s drawn path', () => {
     const p0 = { x: box.x + box.width * 0.3, y: box.y + box.height * 0.3 }
     const p1 = { x: box.x + box.width * 0.62, y: box.y + box.height * 0.34 }
     await page.mouse.move(p0.x, p0.y); await page.mouse.down(); await page.mouse.up()
+    await expect(penPoints(page)).toHaveCount(1)
+
+    // the pen owns the text while it is open: its placement fields, Follow a path and
+    // Path size are disabled (not hidden), titled "Finish the pen first"
+    const rotationInput = page.locator('div:has(> .panel-label:text-is("Rotation")) input').first()
+    const alignButton = page.locator('fieldset:has(> .panel-label:text-is("Align to frame")) button').first()
+    const sizeField = page.locator('div:has(> .panel-label:text-is("Path size")) input').first()
+    const distort = page.locator('[data-testid="distort-fields"]')
+    for (const f of [rotationInput, alignButton, follow, sizeField, distort.locator('button', { hasText: 'Reset' })]) {
+      await expect(f).toBeVisible()
+      await expect(f).toBeDisabled()
+    }
+    await expect(distort).toHaveAttribute('inert', '')   // the Slant sliders take no pointer or keys
+    await expect(rotationInput).toHaveAttribute('title', 'Finish the pen first')
+    await expect(follow).toHaveAttribute('title', 'Finish the pen first')
+    // re-clicking the panel button mid-session does nothing: the drawing survives
+    await guideButton(page).click()
+    await expect(penToolbar(page)).toBeVisible()
+    await expect(penPoints(page)).toHaveCount(1)
+
     await page.mouse.move(p1.x, p1.y); await page.mouse.down()
     for (let i = 1; i <= 8; i++) await page.mouse.move(p1.x + 5 * i, p1.y + 6 * i)
     const live = await textByName(page, 'Plain text')
@@ -429,6 +449,8 @@ test.describe('Frame pen — a text layer\'s drawn path', () => {
     }, t1.path.sketch)
     expect(t1.path.d).toBe(expectD)
     await expect(guideButton(page)).toHaveText(/Edit the path/)
+    await expect(rotationInput).toBeEnabled()
+    await expect(follow).toBeEnabled()
     // what you see is what you get: the type's guide starts where the first click landed
     expect(near(await guideStartOnScreen(page, t1, box), p0)).toBe(true)
 
