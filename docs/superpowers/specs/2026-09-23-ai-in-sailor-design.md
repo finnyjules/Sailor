@@ -355,7 +355,7 @@ Instructions can edit a content field (§1.5). The edit appears in the field, br
 ## 9. Build order
 
 1. **Engine run.** The spike's 6 requests through the real engine (§7.2) on Sonnet 5 and Haiku, shown next to the spike's takes on one page. It costs a few dollars, and needs **your OK before running**. It confirms the model tier and the checks.
-2. **Canvas layout.**
+2. **Canvas layout.** *(BUILT 2026-09-24, see `docs/STATE.md`; real-mouse pass owed.)*
    - The one prompt component (§2.1a), built once here and mounted on the canvas first.
    - The prompt row's new behaviour in place of `CanvasPromptBar` (selection chips, suggestions, progress with Stop), and Explain removed from the toolbar.
    - The node toolbar (Edit ▾ / Develop ▾, existing items regrouped by intent, landing hints).

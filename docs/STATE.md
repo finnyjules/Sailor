@@ -31,6 +31,15 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
 
+### AI in Sailor, stage 2 — one prompt on the canvas, and the node toolbar — BUILT 2026-09-24 (`9e8f9b39d`..`cacd0be87`, non-contiguous — 21 commits across 10 tasks + a final fix wave, subagent-driven, a review per task, a whole-stage review and its fix wave; spec `docs/superpowers/specs/2026-09-23-ai-in-sailor-design.md` §2, plan `docs/superpowers/plans/2026-09-24-ai-in-sailor-stage2-canvas.md`)
+
+- **One prompt component** (`components/prompt/SailorPrompt.vue`): the canvas prompt now runs on it. The selection shows as a chip with the node's own title, 2–3 suggestions appear while focused, `/` and ⌘K focus it (never from behind a studio, Frame or Settings), and Esc leaves. The look is Sailor's existing AI look: the pastel ring, plus the glimm while working. Stop aborts the request, and a reply that arrives late is ignored; the same holds for reroll.
+- **Explain is removed.** "What does this do?" in the prompt replaces it.
+- **The node toolbar:** one registry of actions (`lib/canvas/nodeActions.ts`), grouped Edit / Develop, firing the same events the old menus did. A floating toolbar sits above the selected node and stays the same size at any zoom. It replaces the image and video Edit…/Develop… footers and the audio chips. Each row shows a ✦ for AI, a grey landing hint ("3 takes" / "adds a step"), and the price on paid actions. Several selected nodes get Run N · Group · Combine into Frame.
+- **Run row and fixes badge:** a slim status row on each node ("Not run yet · $0.04", "Rendered 2 min ago", "Running…", "Live preview"); ComfyNode's scope menu is unchanged. Suggested fixes are kept per node, and cleared when a workflow, subgraph or start build loads. A pastel "N fixes" badge opens Edit ▾ with the fixes first.
+- **Behaviour changes:** Variations makes 3 takes, not 4. Background auto-reviews no longer take over the prompt.
+- **Owed:** the real-mouse browser pass (plan Task 11 step 3). `node-capsule.spec.ts` is red because its setup doesn't wait for the late starter Frame; that race predates this work.
+
 ### Print finishes — Gold foil, Spot UV, one Frame light, Halation — LANDED 2026-09-24 (Plan A; `ae2e31ca7`..`3fb6d5896`, 13 commits — spec `docs/superpowers/specs/2026-09-24-print-finishes-design.md`, plan `docs/superpowers/plans/2026-09-24-print-finishes-plan-a.md`)
 
 From a browser prototype Julien loved ("that is so cool", https://claude.ai/artifact/ARWNKLm4DiKuwEjij4bjhq). Three print/film finishes in the Frame editor, drawn on the GPU.
