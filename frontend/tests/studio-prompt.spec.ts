@@ -1,0 +1,234 @@
+import { expect, test, type Locator, type Page } from '@playwright/test'
+import { dropNode, openBlankWorkflow, openCompositor, waitForBackend } from './_helpers'
+
+/**
+ * AI in Sailor stage 4: the one prompt in the studios, Frame and the template
+ * editor. Every model route is mocked — nothing here reaches a model:
+ *   - /api/prompt-route (the router), /api/vibe (the studio tune, in takes or as
+ *     one patch), /api/agent-plan (Frame's and the template editor's planner);
+ *   - the fire-and-forget reviews (/api/vibe-review, /api/agent-review) and the
+ *     compose-and-pick pair (/api/vibe-recipes, /api/vibe-pick) answer 503, which
+ *     every caller degrades on;
+ *   - anything else that would reach a model or queue a run is aborted and fails
+ *     the test in afterEach (guardModelRoutes).
+ * Hover-to-preview feel and typing speed need the real-mouse pass (plan Task 13).
+ */
+
+test.setTimeout(180_000)
+
+const prompt = (scope: Page | Locator) => scope.getByTestId('studio-prompt').getByRole('textbox', { name: 'Ask Sailor' })
+
+/** Non-GET calls to a route that spends model money (or queues an engine run). */
+const MODEL_ROUTE = /^\/(prompt|api\/(prompt-route|vibe|vibe-review|vibe-recipes|vibe-pick|agent-plan|agent-review|shader-gen|pipeline-suggest|font-suggest|copy-assist|image-search|style-profile|frame\/animate|scene3d\/(gen-[a-z0-9-]+|restyle)|inpaint|krea|vector|depth|lipsync|cloud-train|voice-clone|runs)(\/.*)?)$/
+
+/** Registered FIRST so every specific mock below takes precedence (Playwright
+ *  runs the most recently registered matching handler first). */
+async function guardModelRoutes(page: Page) {
+  const leaked: string[] = []
+  await page.route(url => MODEL_ROUTE.test(url.pathname), async (r) => {
+    const req = r.request()
+    if (req.method() === 'GET') return r.fallback()
+    leaked.push(`${req.method()} ${new URL(req.url()).pathname}`)
+    return r.abort()
+  })
+  // The reviews and compose-and-pick: unavailable, which every caller degrades on.
+  for (const p of ['vibe-review', 'agent-review', 'vibe-recipes', 'vibe-pick']) {
+    await page.route(`**/api/${p}`, r => r.fulfill({ status: 503, json: { message: 'mocked: unavailable' } }))
+  }
+  return leaked
+}
+
+async function seedKey(page: Page) {
+  await page.addInitScript(() => { try { localStorage.setItem('sailor:Sailor.AI.AnthropicApiKey', 'sk-ant-test-studio') } catch {} })
+}
+
+async function mockRouter(page: Page, kind: string, followUps: string[] = []) {
+  const calls: any[] = []
+  await page.route('**/api/prompt-route', async (r) => { calls.push(r.request().postDataJSON()); await r.fulfill({ json: { kind, followUps, credits: null } }) })
+  return calls
+}
+
+type Described = { path: string; kind: string; min?: number; max?: number; current: unknown }
+/** /api/vibe: three takes when asked for `variants`, else one patch. Keys come
+ *  from the request's own described controls (`path`, sliders only), so the
+ *  answer is valid for whichever studio asked, and every value is away from
+ *  the slider's current value (a no-op change is dropped as nothing). */
+async function mockVibe(page: Page) {
+  const calls: any[] = []
+  await page.route('**/api/vibe', async (r) => {
+    const body = r.request().postDataJSON()
+    calls.push(body)
+    const sliders = ((body.controls ?? []) as Described[])
+      .filter(c => c.kind === 'slider' && typeof c.min === 'number' && typeof c.max === 'number' && c.max > c.min)
+      .slice(0, 2)
+    const at = (c: Described, f: number) => c.min! + (c.max! - c.min!) * f
+    const far = (c: Described) => (Number(c.current) - c.min! > c.max! - Number(c.current) ? c.min! : c.max!)
+    const take = (label: string, f: number) => ({ label, rationale: '', changes: sliders.map(c => ({ key: c.path, value: at(c, f) })) })
+    if (body.variants) await r.fulfill({ json: { takes: [take('Soft', 0.1), take('Mid', 0.5), take('Bold', 0.9)] } })
+    else await r.fulfill({ json: { changes: sliders.map(c => ({ key: c.path, value: far(c) })), rationale: 'Pushed it.' } })
+  })
+  return calls
+}
+
+const planReply = (message: string) => ({ json: { text: JSON.stringify({ reasoning: '', commands: [], message }) } })
+
+async function openStudio(page: Page, nodeType: string, event: string) {
+  await openBlankWorkflow(page)
+  await waitForBackend(page)
+  await dropNode(page, nodeType)
+  const node = page.locator('.vue-flow__node').last()
+  await node.waitFor({ state: 'attached', timeout: 15_000 })
+  const id = await node.getAttribute('data-id')
+  expect(id).toBeTruthy()
+  await page.evaluate(([ev, nodeId]) => window.dispatchEvent(new CustomEvent(ev!, { detail: { nodeId } })), [event, id])
+  await expect(page.getByTestId('studio-shell-dock')).toBeVisible({ timeout: 20_000 })
+  await expect(prompt(page)).toBeVisible()
+}
+
+/** `upper` sits wholly above `lower` on screen. */
+async function expectAbove(upper: Locator, lower: Locator) {
+  const a = (await upper.boundingBox())!
+  const b = (await lower.boundingBox())!
+  expect(a.y + a.height).toBeLessThanOrEqual(b.y + 1)
+}
+
+test.describe('the one prompt in studios', () => {
+  let leaked: string[] = []
+  test.beforeEach(async ({ page }) => {
+    leaked = await guardModelRoutes(page)
+    await seedKey(page)
+  })
+  test.afterEach(() => {
+    expect(leaked, 'a model route was called without a mock').toEqual([])
+  })
+
+  test('Shader: the chip is the effect, / focuses the studio prompt, Esc leaves it without closing', async ({ page }) => {
+    await mockRouter(page, 'tweak')
+    await openStudio(page, 'ShaderStudio', 'sailor:openShaderStudio')
+    const chip = page.getByTestId('studio-prompt').getByTestId('prompt-selection-chip')
+    await expect(chip).not.toHaveText('')
+    // The chip names the effect, exactly as the inspector head does.
+    const head = (await page.getByTestId('studio-inspector-head').innerText()).trim()
+    expect(head).toContain((await chip.innerText()).trim())
+    await page.keyboard.press('/')
+    await expect(prompt(page)).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(prompt(page)).not.toBeFocused()
+    await expect(page.getByTestId('studio-shell-dock')).toBeVisible() // the studio is still open
+  })
+
+  test('Shader: a request routes as a studio and three takes show above the prompt; Keep closes the strip', async ({ page }) => {
+    const routed = await mockRouter(page, 'tweak')
+    const vibe = await mockVibe(page)
+    await openStudio(page, 'ShaderStudio', 'sailor:openShaderStudio')
+    await prompt(page).fill('warmer')
+    await prompt(page).press('Enter')
+    await expect(page.getByTestId('prompt-takes')).toBeVisible({ timeout: 20_000 })
+    expect(routed[0]).toMatchObject({ request: 'warmer', host: 'studio' })
+    expect(vibe[0].variants).toBe(3)
+    const tiles = page.getByTestId('prompt-take-tile')
+    await expect(tiles).toHaveCount(3)
+    await expectAbove(page.getByTestId('prompt-takes'), prompt(page))
+    const first = tiles.first()
+    await expect(first).toHaveAttribute('data-state', 'ready', { timeout: 20_000 })
+    await first.hover()
+    await first.getByRole('button', { name: 'Keep', exact: true }).click()
+    await expect(page.getByTestId('prompt-takes')).toHaveCount(0)
+  })
+
+  test('Shader: Remix… sets a mode chip, and sending gives the plain "not yet" message', async ({ page }) => {
+    const routed = await mockRouter(page, 'tweak')
+    const vibe = await mockVibe(page)
+    await openStudio(page, 'ShaderStudio', 'sailor:openShaderStudio')
+    await page.getByTestId('studio-inspector-head').locator('[data-testid="studio-action-row"][data-action-id="remix"]').click()
+    await expect(page.getByTestId('prompt-mode-chip')).toContainText('Remix')
+    await expect(prompt(page)).toBeFocused()
+    await prompt(page).fill('ink on paper')
+    await prompt(page).press('Enter')
+    await expect(page.getByTestId('prompt-answer')).toContainText('isn’t available yet')
+    // A mode chip decides the kind itself: no router call, and the studio's tune never runs.
+    expect(routed).toHaveLength(0)
+    expect(vibe).toHaveLength(0)
+    await expect(page.getByTestId('prompt-mode-chip')).toHaveCount(0)
+  })
+
+  test('Shader: inspector reads the thing, then Edit and Develop rows', async ({ page }) => {
+    await openStudio(page, 'ShaderStudio', 'sailor:openShaderStudio')
+    // The head's bare Remix row is also a `studio-actions` list; pick the one with headings.
+    const actions = page.getByTestId('studio-actions').filter({ has: page.getByRole('heading', { name: 'Edit' }) })
+    await expect(actions.getByRole('heading', { name: 'Edit' })).toBeVisible()
+    await expect(actions.getByRole('heading', { name: 'Develop' })).toBeVisible()
+    await expect(actions.getByTestId('studio-action-row').filter({ hasText: 'Vary' })).toContainText('3 takes')
+    // The head (the thing itself) comes before the action rows.
+    await expectAbove(page.getByTestId('studio-inspector-head').getByRole('button', { name: 'Change effect' }), actions)
+  })
+
+  test('Space type: the transport is in the tool bar and a request comes back as a proposed change', async ({ page }) => {
+    const routed = await mockRouter(page, 'tweak')
+    const vibe = await mockVibe(page)
+    await openStudio(page, 'SpaceType', 'sailor:openSpaceType')
+    const toolBar = page.getByTestId('studio-tool-bar')
+    await expect(toolBar.getByRole('slider', { name: 'Scrub preview' })).toBeVisible({ timeout: 15_000 })
+    await expectAbove(prompt(page), toolBar)
+    await prompt(page).fill('slower')
+    await prompt(page).press('Enter')
+    await expect(page.getByTestId('prompt-changes')).toBeVisible({ timeout: 20_000 })
+    expect(routed[0]).toMatchObject({ request: 'slower', host: 'studio' })
+    expect(vibe[0].variants).toBeUndefined() // Space type has no takes: one proposal
+    await expect(page.getByTestId('prompt-change-row').first()).toBeVisible()
+    await expectAbove(page.getByTestId('prompt-changes'), prompt(page))
+    await page.getByTestId('prompt-changes').getByRole('button', { name: 'Reject', exact: true }).click()
+    await expect(page.getByTestId('prompt-changes')).toHaveCount(0)
+  })
+
+  test('Frame: a full row (no pill), still there in Motion, results above it', async ({ page }) => {
+    const routed = await mockRouter(page, 'plan')
+    const plans: any[] = []
+    await page.route('**/api/agent-plan', (r) => { plans.push(r.request().postDataJSON()); return r.fulfill(planReply('Nothing to change.')) })
+    await openCompositor(page)
+    const dock = page.getByTestId('compositor-prompt-dock')
+    const box = dock.getByRole('textbox', { name: 'Ask Sailor' })
+    await expect(box).toBeVisible()
+    await expect(page.getByTestId('compositor-prompt-pill')).toHaveCount(0)
+    await box.fill('tighten it')
+    await box.press('Enter')
+    await expect(dock.getByTestId('prompt-answer')).toContainText('Nothing to change', { timeout: 20_000 })
+    expect(routed[0]).toMatchObject({ request: 'tighten it', host: 'frame' })
+    expect(plans).toHaveLength(1)
+    await expectAbove(dock.getByTestId('prompt-answer'), box)
+    await page.getByRole('button', { name: 'Motion', exact: true }).first().click()
+    await expect(box).toBeVisible()
+  })
+
+  test('3D: the prompt sits above the add bar and answers plainly', async ({ page }) => {
+    const routed = await mockRouter(page, 'tweak')
+    await openStudio(page, 'Scene3DStudio', 'sailor:openScene3DStudio')
+    const addBar = page.locator('[data-prim-menu]').first()
+    await expect(addBar).toBeVisible({ timeout: 15_000 })
+    await expectAbove(page.getByTestId('studio-shell-dock'), addBar)
+    await prompt(page).fill('make it glass')
+    await prompt(page).press('Enter')
+    await expect(page.getByTestId('prompt-answer')).toContainText('3D can’t take instructions yet')
+    expect(routed[0]).toMatchObject({ request: 'make it glass', host: 'studio' })
+  })
+
+  test('Template editor: the one prompt routes, and its answer shows above it', async ({ page }) => {
+    const routed = await mockRouter(page, 'plan')
+    await page.route('**/api/agent-plan', r => r.fulfill(planReply('Nothing to change.')))
+    await page.goto('/dev/v3editor')
+    await page.waitForLoadState('networkidle')
+    // A click before hydration lands on dead SSR markup: retry until the picker goes.
+    const start = page.getByRole('button', { name: /Start designing/ })
+    const box = prompt(page)
+    await expect(async () => {
+      if (await start.isVisible()) await start.click({ timeout: 5_000 })
+      await expect(box).toBeVisible({ timeout: 3_000 })
+    }).toPass({ timeout: 45_000 })
+    await box.fill('tighten spacing')
+    await box.press('Enter')
+    const answer = page.getByTestId('studio-prompt').getByTestId('prompt-answer')
+    await expect(answer).toContainText('Nothing to change', { timeout: 20_000 })
+    expect(routed[0]).toMatchObject({ request: 'tighten spacing', host: 'studio' })
+    await expectAbove(answer, box)
+  })
+})
