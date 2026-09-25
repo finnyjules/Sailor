@@ -6,8 +6,12 @@
  * The family contract:
  *  - every payload over the settings grid fits the saved schema; the price
  *    reads the size the request carries (settings parity);
- *  - hand-written expected payloads: plain (the node's defaults), every
- *    option set, and a 4K node (Seedream's largest, 2K);
+ *  - hand-written expected payloads: plain (the node's defaults) and every
+ *    option set;
+ *  - the refusals (F9 fix round 1, controller rulings): a size Seedream
+ *    doesn't make (4K), an empty or spaces-only prompt, a prompt over 4,000
+ *    characters: each refused in plain words at planning, before the hold
+ *    (requestProblems) and by the price, with nothing held or sent;
  *  - eligibility with the family on and off;
  *  - blockedModelUses refuses the model when the family is off or the run
  *    goes to the engine;
@@ -27,18 +31,20 @@ import { __resetModelMenusForTests, applyModelOverlay, menuDefault, menuHiddenVa
 import { creditsForUsd } from '#shared/pricing/markup'
 import { nodeCredits, providerUsd } from '#shared/pricing/nodePrice'
 import { EDIT_RATES, editMaxUsd } from '#shared/pricing/editRates'
-import { SEEDREAM_5_PRO_EDIT_SIZES, editCalls, seedream5ProEditSize } from '#shared/pricing/editSettings'
+import { SEEDREAM_5_PRO_EDIT_SIZES, SEEDREAM_5_PRO_EDIT_SIZE_REFUSAL, editCalls, seedream5ProEditSize } from '#shared/pricing/editSettings'
 import { EDIT_MODEL_MENUS } from '~~/app/data/edit-model-options'
 import { nodeCreditEstimate } from '~/lib/nodeCreditEstimate'
 import { estimateUsdForNodes } from '~/lib/costEstimate'
 import { planNode, type NodePlan } from '~~/server/runner/executors'
 import { IMAGE_EDIT_MODELS } from '~~/server/runner/generators/refEdits'
 import {
-  SEEDREAM_5_PRO_EDIT_OPTION, SEEDREAM_5_PRO_FORMATS, SEEDREAM_5_PRO_SLUG, seedream5ProEdit,
+  SEEDREAM_5_PRO_EDIT_OPTION, SEEDREAM_5_PRO_FORMATS, SEEDREAM_5_PRO_LONG_PROMPT, SEEDREAM_5_PRO_NEEDS_PROMPT, SEEDREAM_5_PRO_PROMPT_MAX,
+  SEEDREAM_5_PRO_SLUG, seedream5ProEdit,
 } from '~~/server/runner/generators/seedream5ProEdit'
 import { PROMPT_MIN_LENGTH, requestProblems } from '~~/server/runner/requestRules'
 import { RUNNER_ROUTES } from '~~/server/runner/generators/twins'
-import { priceGraph } from '~~/server/utils/priceBook'
+import { UnpricedGraphError, priceGraph } from '~~/server/utils/priceBook'
+import { blockedPromptRefusal } from '~~/server/utils/blockedModels'
 import type { OutputFile } from '~~/server/runner/types'
 import { checkPayload, loadProviderSchema } from './helpers/providerSchema'
 import { makeKit } from './__runner__/kit'
@@ -119,11 +125,10 @@ describe('the saved schema', () => {
     expect(props.prompt.default).toBe('')
   })
 
-  it('no prompt rule: the schema sets no minimum and requires no prompt, so an empty one is sent as it is', async () => {
+  it('the prompt rules come from the schema\'s maxLength, and a ruling for the minimum; neither is an endpoint row', () => {
+    expect(inputSchema(SCHEMA).properties.prompt.maxLength).toBe(SEEDREAM_5_PRO_PROMPT_MAX)
+    // Generate from references sends an empty prompt to the same endpoint today, so there is no row for it.
     expect(PROMPT_MIN_LENGTH[`replicate ${SEEDREAM_5_PRO_SLUG}`]).toBeUndefined()
-    const node = edit({ prompt: '' })
-    expect(requestProblems({ 1: node })).toEqual([])
-    expect((await providerPlan(node)).payload.prompt).toBe('')
   })
 })
 
@@ -131,7 +136,8 @@ describe('the saved schema', () => {
 
 describe('settings grid: every request fits the schema, the price reads what is sent', () => {
   it('resolution × ratio × format × seed, odd values included', async () => {
-    const resolutions: unknown[] = ['1K', '2K', '4K', '3K', '0.5K', '', 'foo', 7, null, true, undefined]
+    // The sizes it makes, and the values read as the widget's 1K (empty, missing, not text); the rest are refused below.
+    const resolutions: unknown[] = ['1K', '2K', '', 7, null, true, undefined]
     const ratios: unknown[] = [...NODE_RATIOS, '21:9', '5:4', '', 7, undefined]
     const formats: unknown[] = ['png', 'jpg', 'jpeg', 'webp', '', 3, undefined]
     let n = 0
@@ -154,7 +160,7 @@ describe('settings grid: every request fits the schema, the price reads what is 
             if (typeof ar === 'string' && enumOf(SCHEMA, 'aspect_ratio').includes(ar)) keys.push('aspect_ratio')
             expect(Object.keys(p.payload).sort(), label).toEqual(keys.sort())
             expect(p.payload.image_input, label).toEqual(['IMG:first.png'])
-            expect(p.payload.size, label).toBe(resolution === '2K' || resolution === '4K' || resolution === '3K' || resolution === '0.5K' || resolution === 'foo' ? '2K' : '1K')
+            expect(p.payload.size, label).toBe(resolution === '2K' ? '2K' : '1K')
             expect(p.payload.size, label).toBe(seedream5ProEditSize(node.inputs.resolution))
             expect(p.payload.output_format, label).toBe(format === 'jpg' || format === 'jpeg' ? 'jpeg' : 'png')
             // The price reads the size sent, from the same card, with nothing behind it.
@@ -166,7 +172,7 @@ describe('settings grid: every request fits the schema, the price reads what is 
         }
       }
     }
-    expect(n).toBe(11 * 13 * 7 * 3)
+    expect(n).toBe(7 * 13 * 7 * 3)
   })
 
   it('the builder is References\' own, with the one picture and the format', () => {
@@ -198,15 +204,81 @@ describe('hand-written payloads', () => {
     expect(p.payload).toEqual({ prompt: 'put a hat on the dog', image_input: ['IMG:first.png'], size: '2K', aspect_ratio: '16:9', output_format: 'jpeg' })
   })
 
-  it('a 4K node: Seedream\'s largest, 2K, and priced as 2K', async () => {
-    const node = edit({ resolution: '4K', ar: '3:4' })
-    const p = await providerPlan(node)
-    expect(p.payload).toEqual({ prompt: 'make the sky pink', image_input: ['IMG:first.png'], size: '2K', aspect_ratio: '3:4', output_format: 'png' })
-    expect(providerUsd('EditImageNode', node.inputs)).toBe(0.09)
-  })
-
   it('the routes table: Replicate first, no backup', () => {
     expect(RUNNER_ROUTES['EditImageNode:Seedream 5 Pro']).toEqual({ first: 'replicate', backup: null, why: 'fal publishes only tentative pricing' })
+  })
+})
+
+// ── Refusals (F9 fix round 1) ──────────────────────────────────────────────
+
+describe('refused in plain words, never sent', () => {
+  /** Refused at planning and before the hold (requestProblems, the runner engine's gate). */
+  async function expectRefused(node: { class_type: string, inputs: Record<string, unknown> }, input: string, message: string) {
+    await expect(plan(node)).rejects.toThrow(message)
+    expect(requestProblems({ 1: node })).toEqual([{ nodeId: '1', classType: 'EditImageNode', input, message }])
+    // The ComfyUI path's gate refuses the node first because it is runner-only (blockedModelUses, above).
+    expect(blockedPromptRefusal({ 1: node })!.error.message).toContain('only runs in Sailor')
+  }
+
+  it('a size Seedream doesn\'t make (4K, or any other text): refused, and not priced', async () => {
+    expect(SEEDREAM_5_PRO_EDIT_SIZE_REFUSAL).toBe('Seedream 5 Pro makes edits at 1K or 2K. Pick one of those sizes.')
+    for (const resolution of ['4K', '3K', '0.5K', 'foo', '1k', ' 1K']) {
+      const node = edit({ resolution })
+      expect(seedream5ProEditSize(resolution), resolution).toBeNull()
+      await expectRefused(node, 'resolution', SEEDREAM_5_PRO_EDIT_SIZE_REFUSAL)
+      expect(editCalls('EditImageNode', node.inputs), resolution).toEqual({ refused: SEEDREAM_5_PRO_EDIT_SIZE_REFUSAL })
+      expect(providerUsd('EditImageNode', node.inputs), resolution).toBeNull()
+      expect(nodeCreditEstimate('EditImageNode', node.inputs), resolution).toBeNull()
+      expect(() => priceGraph({ 1: node, 2: SINK }), resolution).toThrow(UnpricedGraphError)
+    }
+    // A linked resolution can't be judged before the run: priced at the dearer size, sent as the widget's 1K.
+    const linked = { ...edit().inputs, resolution: LINK }
+    expect(requestProblems({ 1: { class_type: 'EditImageNode', inputs: linked } })).toEqual([])
+    expect((await providerPlan({ class_type: 'EditImageNode', inputs: linked })).payload.size).toBe('1K')
+    // A linked model still prices, at the dearest model the node offers, whatever the size.
+    expect(providerUsd('EditImageNode', { ...edit({ resolution: '4K' }).inputs, model: LINK })!).toBeGreaterThan(0.09)
+  })
+
+  it('an empty prompt, or one of only spaces: refused (a ruling; the schema\'s prompt is optional)', async () => {
+    expect(SEEDREAM_5_PRO_NEEDS_PROMPT).toBe('Seedream 5 Pro needs a prompt. Describe the edit you want.')
+    for (const prompt of ['', ' ', '   ', '\n\t ', '\u00a0\u3000']) {
+      await expectRefused(edit({ prompt }), 'prompt', SEEDREAM_5_PRO_NEEDS_PROMPT)
+    }
+    const missing = edit()
+    delete missing.inputs.prompt
+    await expectRefused(missing, 'prompt', SEEDREAM_5_PRO_NEEDS_PROMPT)
+    // Text with spaces around it is sent as it is.
+    expect((await providerPlan(edit({ prompt: '  a  ' }))).payload.prompt).toBe('  a  ')
+    expect(requestProblems({ 1: edit({ prompt: '  a  ' }) })).toEqual([])
+  })
+
+  it('a prompt over the schema\'s 4,000 characters: refused; 4,000 is sent (counted in code points, as the schema counts)', async () => {
+    expect(SEEDREAM_5_PRO_LONG_PROMPT).toBe('Seedream 5 Pro takes a prompt of at most 4,000 characters. Shorten it.')
+    for (const prompt of ['a'.repeat(4000), '😀'.repeat(4000)]) {
+      const p = await providerPlan(edit({ prompt }))
+      expect(p.payload.prompt).toBe(prompt)
+      expect(checkPayload(SCHEMA, p.payload)).toEqual([])
+      expect(requestProblems({ 1: edit({ prompt }) })).toEqual([])
+    }
+    for (const prompt of ['a'.repeat(4001), '😀'.repeat(4001)]) {
+      await expectRefused(edit({ prompt }), 'prompt', SEEDREAM_5_PRO_LONG_PROMPT)
+      // The schema agrees: 4,001 doesn't fit.
+      expect(checkPayload(SCHEMA, { prompt, image_input: ['u'], size: '1K' })).not.toEqual([])
+    }
+  })
+
+  it('both at once: each named; the planning refusal is the first', async () => {
+    const node = edit({ prompt: '', resolution: '4K' })
+    expect(requestProblems({ 1: node }).map(p => p.input)).toEqual(['resolution', 'prompt'])
+    await expect(plan(node)).rejects.toThrow(SEEDREAM_5_PRO_EDIT_SIZE_REFUSAL)
+  })
+
+  it('Generate from references is left as it is: an empty or long prompt still goes to the same endpoint', async () => {
+    for (const prompt of ['', 'a'.repeat(4001)]) {
+      const node = { class_type: 'GenerateFromReferencesNode', inputs: { model: 'seedream-5-pro', image_1: LINK, prompt, size: '2K', aspect_ratio: 'match_input_image' } }
+      expect(requestProblems({ 1: node })).toEqual([])
+      expect((await providerPlan(node)).endpoint).toBe(SEEDREAM_5_PRO_SLUG)
+    }
   })
 })
 
@@ -305,7 +377,6 @@ describe('the price', () => {
   const examples: { name: string, inputs: Record<string, unknown>, usd: number }[] = [
     { name: '1K (the default, the live check)', inputs: edit().inputs, usd: 0.045 },
     { name: '2K', inputs: edit({ resolution: '2K', ar: '16:9', format: 'jpg' }).inputs, usd: 0.09 },
-    { name: '4K, sent as 2K', inputs: edit({ resolution: '4K' }).inputs, usd: 0.09 },
     { name: 'a linked resolution, at the dearer size', inputs: { ...edit().inputs, resolution: LINK }, usd: 0.09 },
   ]
   for (const ex of examples) {
@@ -359,6 +430,22 @@ describe('the runner engine', () => {
     })
     expect([...k.ledger.holds.values()].map(h => h.credits)).toEqual([creditsForUsd(0.045) + 1])
     expect((await k.store.get(runId))!.status).toBe('done')
+  })
+
+  it('a 4K node, an empty prompt or a long one: refused with the plain message, nothing held or sent', async () => {
+    const cases: [Record<string, unknown>, string][] = [
+      [{ resolution: '4K' }, SEEDREAM_5_PRO_EDIT_SIZE_REFUSAL],
+      [{ prompt: '   ' }, SEEDREAM_5_PRO_NEEDS_PROMPT],
+      [{ prompt: 'a'.repeat(4001) }, SEEDREAM_5_PRO_LONG_PROMPT],
+    ]
+    for (const [change, message] of cases) {
+      const k = kit(ON)
+      const bad: ApiPrompt = { ...take, 1: { class_type: 'EditImageNode', inputs: { ...take[1]!.inputs, ...change } } }
+      await expect(k.engine.startRun({ userId: k.userId, takes: [bad], workflow: null, canvasId: null, projectUuid: null, projectName: null })).rejects.toThrow(message)
+      expect(k.fal.reqs.size).toBe(0)
+      expect(k.replicate.reqs.size).toBe(0)
+      expect(k.ledger.holds.size).toBe(0)
+    }
   })
 
   it('with the family off: refused, nothing held or sent', async () => {

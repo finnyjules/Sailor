@@ -40,6 +40,11 @@
  *    trimmed (controller ruling after F7), so a prompt of spaces is refused;
  *    the rows from a schema's `minLength` count exactly what is sent, as the
  *    provider does;
+ *  - Seedream 5 Pro in Edit an image (F9 fix round 1, controller rulings): a
+ *    resolution it doesn't make (4K), an empty or spaces-only prompt, or one
+ *    over its schema's 4,000 characters (seedream5ProEdit.ts
+ *    seedream5ProEditProblems; a node rule, since Generate from references
+ *    sends the same endpoint an empty prompt today);
  *  - Film a shot on Seedance 2.0 with a first frame AND references (parked
  *    minor M5): Film a shot runs only on the ComfyUI path, whose Python
  *    builder would send the first frame and drop the references, so the
@@ -68,6 +73,7 @@ import {
 import { QWEN_IMAGE_3_SLUG, isQwenImage3Model } from './generators/qwenImage3'
 import { GROK_IMAGINE_2_SLUG, isGrokImagine2Model } from './generators/grokImagine2'
 import { IDEOGRAM_4_FAL_APP, IDEOGRAM_4_NEEDS_PROMPT, isIdeogram4Model } from './generators/ideogram4'
+import { isSeedream5ProEdit, seedream5ProEditProblems } from './generators/seedream5ProEdit'
 
 export { FIRST_FRAME_AND_REFERENCES }
 
@@ -304,6 +310,12 @@ export function requestProblems(prompt: ApiPrompt): RequestProblem[] {
     }
     else if (ct === 'EditImageNode' && inputs.model === GPT_IMAGE_25_EDIT_OPTION) {
       if (!isLink(inputs.prompt)) judge(GPT_IMAGE_25_EDIT_APP, asText(inputs.prompt))
+    }
+    // Seedream 5 Pro (seedream5ProEdit.ts): a size it makes, and a prompt of 1 to 4,000 characters.
+    else if (ct === 'EditImageNode' && isSeedream5ProEdit(inputs.model)) {
+      for (const p of seedream5ProEditProblems({ prompt: inputs.prompt, resolution: inputs.resolution })) {
+        out.push({ nodeId, classType: ct, input: p.input, message: p.message })
+      }
     }
     else if (ct === 'GenerateFromReferencesNode' && inputs.model === 'nano-banana-2') {
       if (!isLink(inputs.prompt) && (inputs.prompt === undefined || typeof inputs.prompt === 'string')) judge('fal-ai/nano-banana-2/edit', asText(inputs.prompt))

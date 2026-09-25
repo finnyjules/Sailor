@@ -151,18 +151,23 @@ const gptImage25Edit = () => call(FAL_GPT_25_EDIT, GPT_25_EDIT_QUALITY, {}, [cal
  * ("Standard mode supports 1K and 2K"; 1.5K and auto are for layer
  * decomposition only), and Replicate bills by that size ($0.045 / $0.09).
  * The node's resolution widget (1K / 2K / 4K, default 1K) picks it: 1K and
- * 2K as they are, empty or missing is the widget's 1K, and anything else
- * (4K included) the largest Seedream makes, 2K. The builder
- * (server/runner/generators/seedream5ProEdit.ts) sends this, so the price
- * reads what is sent.
+ * 2K as they are, empty or missing (or not text) is the widget's 1K. Any other
+ * text, 4K included, is REFUSED in plain words (F9 fix round 1: never sent as
+ * another size): the runner's builder throws it, requestRules.ts refuses the
+ * node before any hold, and the price is refused here, as for a model the
+ * node doesn't offer. The builder (server/runner/generators/seedream5ProEdit.ts)
+ * sends this, so the price reads what is sent.
  */
 export const SEEDREAM_5_PRO_EDIT_OPTION = 'Seedream 5 Pro'
 export const SEEDREAM_5_PRO_SLUG = 'bytedance/seedream-5-pro'
 export const SEEDREAM_5_PRO_EDIT_SIZES = ['1K', '2K'] as const
-export function seedream5ProEditSize(resolution: unknown): typeof SEEDREAM_5_PRO_EDIT_SIZES[number] {
+export const SEEDREAM_5_PRO_EDIT_SIZE_REFUSAL = 'Seedream 5 Pro makes edits at 1K or 2K. Pick one of those sizes.'
+/** The size sent for the node's resolution, or null: a size Seedream doesn't make, refused. */
+export function seedream5ProEditSize(resolution: unknown): typeof SEEDREAM_5_PRO_EDIT_SIZES[number] | null {
   const r = typeof resolution === 'string' && resolution ? resolution : '1K'
-  return r === '1K' ? '1K' : '2K'
+  return r === '1K' || r === '2K' ? r : null
 }
+// A linked resolution (or a linked model's Seedream entry at a refused size) prices at the dearer size.
 const seedream5ProEdit = (inputs: NodeInputs) =>
   call(SEEDREAM_5_PRO_SLUG, isLinked(inputs.resolution) ? null : seedream5ProEditSize(inputs.resolution))
 
@@ -318,6 +323,9 @@ export function editCalls(classType: string, inputs: NodeInputs, opts: { inputPi
   if (model === undefined || isLinked(model)) return { calls: Object.values(models).map(m => m(inputs, px)) }
   const m = typeof model === 'string' && hasOwn(models, model) ? models[model]! : undefined
   if (!m) return { refused: `unknown model ${String(model)}` }
+  // Seedream 5 Pro at a size it doesn't make: the node is refused before it calls anyone.
+  if (classType === 'EditImageNode' && model === SEEDREAM_5_PRO_EDIT_OPTION && !isLinked(inputs.resolution)
+    && seedream5ProEditSize(inputs.resolution) === null) return { refused: SEEDREAM_5_PRO_EDIT_SIZE_REFUSAL }
   return { calls: [m(inputs, px)] }
 }
 
