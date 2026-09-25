@@ -142,23 +142,29 @@ describe('edit rate cards', () => {
     // the two exceptions were Product shot's SDXL (ref-edits) and Restyle's
     // IP-Adapter (restyle) — P4 fix round 1, I3. H2 retired both from the
     // runner: no family reaches them, so their saved nodes run on ComfyUI and
-    // still price there.
+    // still price there. A class moved onto a newer model by its own family
+    // (Rotate camera F10, Product shot F12) calls something else with that
+    // family on, so every family on, and each one off in turn, is tried.
     const ALL = new Set(RUNNER_FAMILIES)
+    const sets = [ALL, ...RUNNER_FAMILIES.map(off => new Set(RUNNER_FAMILIES.filter(f => f !== off)))]
     const reachable = new Set<string>()
     for (const ct of SETTING_PRICED_NODE_CLASSES) {
       const rule = RUNNER_NODE_RULES[ct]
       if (!rule) continue
       for (const w of settingsGrid(ct)) {
-        // What the runner would take: the class's pictures linked, every family on.
-        if (!nodeRuleAllows(ct, rule, { ...RUNNER_BASE[ct], ...w }, ALL)) continue
-        const c = editCalls(ct, w)
-        if (!('refused' in c)) for (const one of c.calls) reachable.add(one.endpoint)
+        for (const families of sets) {
+          // What the runner would take: the class's pictures linked, these families on.
+          if (!nodeRuleAllows(ct, rule, { ...RUNNER_BASE[ct], ...w }, families)) continue
+          const c = editCalls(ct, w, { families })
+          if (!('refused' in c)) for (const one of c.calls) reachable.add(one.endpoint)
+        }
       }
     }
     // Control: the loop reaches the families' calls (the verified ones).
     expect(reachable.has('fal-ai/nano-banana-2/edit')).toBe(true)
     expect(reachable.has('bytedance/seedream-5-pro')).toBe(true)
     expect(reachable.has('google/nano-banana')).toBe(true)
+    expect(reachable.has('fal-ai/bria/product-shot')).toBe(true)
     const est = [...reachable].filter(e => EDIT_RATES[e]!.confidence === 'estimate').sort()
     expect(est).toEqual([])
     expect(reachable.has('catacolabs/sdxl-ad-inpaint')).toBe(false)

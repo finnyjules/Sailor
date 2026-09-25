@@ -26,7 +26,9 @@
  * family (qwen-2511-angles, Task F10) is on it runs Qwen Image Edit 2511
  * with the multiple-angles LoRA on fal, billed per megapixel of the picture
  * it makes, which is the size of the picture sent in; off, its 2509 call is
- * priced as before. Every other class ignores the switches.
+ * priced as before. Product shot does the same with its own family
+ * (bria-product-shot, Task F12): Bria Product Shot on fal, one flat price a
+ * picture; off, its SDXL call. Every other class ignores the switches.
  *
  * Picture size: Upscale, Enhance detail, FLUX.2 edit and Rotate camera on
  * 2511 are billed by the size of the picture sent in. Where the caller has measured it (`inputPixels`:
@@ -188,6 +190,14 @@ const seedream5ProEdit = (inputs: NodeInputs) =>
 export const QWEN_2511_ANGLES_APP = 'fal-ai/qwen-image-edit-2511-multiple-angles'
 const rotateCamera2511 = (px: number) => call(QWEN_2511_ANGLES_APP, null, { input: px, output: px })
 
+/**
+ * Product shot on Bria Product Shot (runner only, family bria-product-shot,
+ * Task F12): fal, no backup, one picture at about 1 MP (the builder,
+ * server/runner/generators/briaProductShot.ts, sends the node's aspect as
+ * `shot_size`), billed per picture.
+ */
+export const BRIA_PRODUCT_SHOT_APP = 'fal-ai/bria/product-shot'
+
 const EDIT_IMAGE_MODELS: ModelCalls = {
   'Nano Banana 2': i => nanoBananaEdit(REP_NB2, nb2Tier(i)),
   'Flux Kontext Pro': () => call(FAL_KONTEXT),
@@ -328,6 +338,10 @@ export function editCalls(classType: string, inputs: NodeInputs, opts: { inputPi
   // Rotate camera on its newer model while that switch is on (Task F10).
   if (classType === 'RotateCameraNode' && classUpgradeOn(classType, opts.families ?? NO_FAMILIES)) {
     return { calls: [rotateCamera2511(pricedInputPixels(opts.inputPixels))] }
+  }
+  // Product shot on Bria Product Shot while that switch is on (Task F12).
+  if (classType === 'ProductShotNode' && classUpgradeOn(classType, opts.families ?? NO_FAMILIES)) {
+    return { calls: [call(BRIA_PRODUCT_SHOT_APP)] }
   }
   const fixed = hasOwn(FIXED, classType) ? FIXED[classType] : undefined
   if (fixed) return { calls: [fixed(inputs)] }

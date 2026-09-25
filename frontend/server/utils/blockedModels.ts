@@ -10,6 +10,7 @@ import { runnerFamilies } from '../runner/config'
 import { promptNodeTitle } from '../../shared/runner/blockedModels'
 import type { ApiPrompt } from '../../shared/runner/graph'
 import { menuDefault, modelMenu } from '../../shared/runner/modelMenus'
+import { classUpgradeOn } from '../../shared/runner/eligibility'
 import { requestProblems, type RequestProblem } from '../runner/requestRules'
 
 /**
@@ -48,11 +49,16 @@ export function requestRefusal(prompt: unknown): RefusalBody | null {
 }
 
 /**
- * Hosted only, until Bria product-shot (Task F12) lands: the two edit calls
- * whose price is only an estimate (shared/pricing/editRates.ts) are refused
- * on the metered ComfyUI path, before pricing and any hold (model line-up H2,
- * fix round 1). Local mode runs them as before.
- *   Product shot           catacolabs/sdxl-ad-inpaint
+ * Hosted only: the two edit calls whose price is only an estimate
+ * (shared/pricing/editRates.ts) are refused on the metered ComfyUI path,
+ * before pricing and any hold (model line-up H2, fix round 1). Local mode
+ * runs them as before.
+ *   Product shot           catacolabs/sdxl-ad-inpaint, while Bria Product
+ *                          Shot's switch (bria-product-shot, Task F12) is
+ *                          off. On, the node runs Bria, priced, in the runner
+ *                          only: the ComfyUI path refuses it as runner-only
+ *                          (blockedPromptRefusal, which runs first), so this
+ *                          one leaves it alone.
  *   Restyle, IP-Adapter    fofr/style-transfer
  */
 export const PRODUCT_SHOT_UPGRADING = 'Product shot is being upgraded — try Swap background for now.'
@@ -76,7 +82,7 @@ export function retiredEngineRefusal(prompt: unknown): RefusalBody | null {
     const node = raw as { class_type?: unknown, inputs?: Record<string, unknown> } | null
     const ct = node?.class_type
     let text: { message: string, details: string, input: string, value: unknown } | null = null
-    if (ct === 'ProductShotNode') {
+    if (ct === 'ProductShotNode' && !classUpgradeOn(ct, runnerFamilies())) {
       text = { message: PRODUCT_SHOT_UPGRADING, details: '', input: 'image', value: null }
     }
     else if (ct === 'RestyleFromImageNode' && node?.inputs?.model === 'Style Transfer · IP-Adapter') {

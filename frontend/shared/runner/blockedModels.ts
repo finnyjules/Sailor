@@ -13,7 +13,8 @@
  *
  * A node class with no model menu can be moved onto a newer model as a whole
  * (eligibility.ts RunnerNodeRule.upgrade; Rotate camera on Qwen Image Edit
- * 2511, Task F10): while that family is on, the class is runner-only too
+ * 2511, Task F10; Product shot on Bria Product Shot, Task F12): while that
+ * family is on, the class is runner-only too
  * (line-up Ruling 10), because the engine would make the old model's
  * different-looking result. Its use carries the new model's name as `value`.
  *
@@ -165,6 +166,7 @@ const CLASS_TITLES: Readonly<Record<string, string>> = {
   GenerateFromReferencesNode: 'Generate from references',
   UpscaleImageNode: 'Upscale an image',
   RotateCameraNode: 'Rotate camera',
+  ProductShotNode: 'Product shot',
 }
 
 /**

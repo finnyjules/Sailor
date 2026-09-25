@@ -129,6 +129,8 @@ describe('the first and backup services are the table\'s', () => {
     }
     // Rotate camera on Qwen Image Edit 2511 (Task F10): the class while its upgrade family is on.
     expect(keys.has('RotateCameraNode+qwen-2511-angles')).toBe(true)
+    // Product shot on Bria Product Shot (Task F12), the same way.
+    expect(keys.has('ProductShotNode+bria-product-shot')).toBe(true)
     // And no row for something the runner doesn't run.
     const image = Object.keys(RUNNER_ROUTES).filter(k => k.startsWith('image:')).length
     const video = Object.keys(RUNNER_ROUTES).filter(k => k.startsWith('video:')).length

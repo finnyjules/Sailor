@@ -336,6 +336,25 @@ const FLOWS: FamilyFlow[] = [
       image_input: [storageUrl('image')], resolution: '1K', output_format: 'jpg',
     },
   },
+  // Task F12: Product shot on Bria Product Shot, no Python builder; fal only,
+  // the body written from its saved schema (runner-bria-product-shot.unit.spec.ts).
+  // No other family takes the node (its SDXL call is retired from the runner).
+  {
+    family: 'bria-product-shot',
+    label: 'ProductShotNode on Bria Product Shot',
+    prompt: {
+      11: imageCard('image.png'),
+      1: { class_type: 'ProductShotNode', inputs: { image: ['11', 0], scene_prompt: 'on a rock by the sea', aspect: 'Portrait', product_size: '60', keep_product_exact: true, seed: 4 } },
+      2: outImage('1'),
+    },
+    files: ['image.png'],
+    provider: 'fal',
+    endpoint: 'fal-ai/bria/product-shot',
+    body: {
+      image_url: storageUrl('image'), scene_description: 'on a rock by the sea', placement_type: 'manual_placement',
+      manual_placement_selection: 'bottom_center', shot_size: [832, 1216], num_results: 1,
+    },
+  },
 ]
 
 // ── The routes ───────────────────────────────────────────────────────────

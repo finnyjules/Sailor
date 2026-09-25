@@ -33,6 +33,7 @@ import { creditsForUsd } from '~/lib/pricing'
 import { MODEL_PRICED_BADGE_CLASSES, nodeCreditEstimate } from '~/lib/nodeCreditEstimate'
 import { linkedInputNames, upstreamInputPixels, upstreamInputSeconds, widgetValueMap } from '~/lib/costEstimate'
 import { NO_FAMILIES, parseFamilies } from '#shared/runner/families'
+import { upgradeHidesWidget } from '#shared/runner/eligibility'
 import TakesStrip from '~/components/vue-canvas/TakesStrip.vue'
 import LightTableModal from '~/components/vue-canvas/LightTableModal.vue'
 import { projectTake, discardOthers, type Take } from '~/composables/useTakes'
@@ -689,6 +690,9 @@ function isVisibleForModel(nodeType: string, widgetName: string, values: any[], 
 }
 
 function isWidgetVisible(widget: any): boolean {
+  // A setting the node's newer model can't honour while its switch is on
+  // (Product shot on Bria Product Shot: size, exactness, seed; Task F12).
+  if (upgradeHidesWidget(props.data.nodeType, widget.name, badgeFamilies)) return false
   const rule = WIDGET_VISIBILITY[props.data.nodeType]
   if (!rule) return true
   return rule(widget.name, props.data.widgetsValues || [], props.data.widgetDefs || [])
@@ -927,7 +931,7 @@ function setSeedFixed(widget: any, i: number, fixed: boolean) {
 const seedWidgets = computed(() =>
   ((props.data.widgetDefs || []) as any[])
     .map((widget, index) => ({ widget, index }))
-    .filter(({ widget }) => isSeedWidgetDef(widget)))
+    .filter(({ widget }) => isSeedWidgetDef(widget) && !upgradeHidesWidget(props.data.nodeType, widget.name, badgeFamilies)))
 const hasSeed = computed(() => seedWidgets.value.length > 0)
 const seedLocked = computed(() =>
   hasSeed.value && seedWidgets.value.every(({ widget, index }) => isSeedFixed(widget, index)))

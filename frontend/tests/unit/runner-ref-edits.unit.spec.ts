@@ -253,15 +253,20 @@ describe('ref-edits eligibility', () => {
     expect(rows.sort()).toEqual(CLASSES)
     for (const ct of rows) expect(PROVIDER_TYPES.has(ct)).toBe(true)
     expect(Object.keys(RUNNER_NODE_RULES.GenerateFromReferencesNode!.models!).sort()).toEqual([...REFERENCE_MODEL_IDS].sort())
-    // Product shot is retired from the runner (model line-up H2): no row, so no family reaches catacolabs/sdxl-ad-inpaint.
-    expect(RUNNER_NODE_RULES.ProductShotNode).toBeUndefined()
-    expect(PROVIDER_TYPES.has('ProductShotNode')).toBe(false)
+    // Product shot's SDXL call is retired from the runner (model line-up H2):
+    // its row has no family, only Bria Product Shot's upgrade (Task F12,
+    // runner-bria-product-shot.unit.spec.ts), so no family reaches catacolabs/sdxl-ad-inpaint.
+    expect(RUNNER_NODE_RULES.ProductShotNode!.family).toBeUndefined()
+    expect(RUNNER_NODE_RULES.ProductShotNode!.models).toBeUndefined()
+    expect(RUNNER_NODE_RULES.ProductShotNode!.upgrade!.family).toBe('bria-product-shot')
+    expect(PROVIDER_TYPES.has('ProductShotNode')).toBe(true)
   })
 
-  it('product shot: not taken with every family on; saved nodes stay with ComfyUI', () => {
+  it('product shot: not taken with every family on but Bria Product Shot\'s; saved nodes stay with ComfyUI', () => {
     const p = node('ProductShotNode', { image: ['1', 0], scene_prompt: 'a beach' })
-    expect(isRunnerEligible(p, new Set(RUNNER_FAMILIES))).toBe(false)
-    expect(runnerTakesNode(p, '2', new Set(RUNNER_FAMILIES))).toBe(false)
+    const allButBria = new Set(RUNNER_FAMILIES.filter(f => f !== 'bria-product-shot'))
+    expect(isRunnerEligible(p, allButBria)).toBe(false)
+    expect(runnerTakesNode(p, '2', allButBria)).toBe(false)
   })
 
   const takes: [string, ApiPrompt][] = [
@@ -430,12 +435,13 @@ describe('Product shot is retired from the runner (model line-up H2)', () => {
 
   // The community model's Replicate route (404, then the latest version) is
   // still covered by runner-replicate-queue.unit.spec.ts. Product shot itself
-  // no longer reaches it: with every family on, the runner declines the
-  // workflow before any call or hold, so the browser sends it to ComfyUI.
-  it('with every family on, the runner declines it before any call or hold', async () => {
+  // no longer reaches it: with every family on but Bria Product Shot's (Task
+  // F12, which moves the node to Bria), the runner declines the workflow
+  // before any call or hold, so the browser sends it to ComfyUI.
+  it('with every family on but Bria Product Shot\'s, the runner declines it before any call or hold', async () => {
     const fetchSpy = vi.fn(async () => { throw new Error('no call expected') })
     vi.stubGlobal('fetch', fetchSpy)
-    const k = kit({ deps: { families: () => new Set(RUNNER_FAMILIES) } })
+    const k = kit({ deps: { families: () => new Set(RUNNER_FAMILIES.filter(f => f !== 'bria-product-shot')) } })
     const prompt: ApiPrompt = {
       1: { class_type: 'Image', inputs: { image: 'ref1.png' } },
       2: { class_type: 'ProductShotNode', inputs: { image: ['1', 0], scene_prompt: '   ', aspect: 'Portrait', product_size: '60', keep_product_exact: false, seed: 11 } },

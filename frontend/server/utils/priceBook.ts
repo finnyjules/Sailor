@@ -86,7 +86,10 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // and price (Replicate's $0.067 at 1K, fal's $0.08 backup covered at cost;
 // runner-only, family nano-banana-2-blend). The first Nano Banana is hidden,
 // its $0.039 unchanged. No other price moves.
-export const PRICE_BOOK_VERSION = 'lineup-f11'
+// lineup-f12 (Task F12): Product shot on Bria Product Shot, fal's $0.04 a
+// picture, while its switch is on (family bria-product-shot, no backup).
+// With the switch off it keeps its SDXL price. No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-f12'
 
 export const BASE_RENDER_CREDITS = 1
 

@@ -87,6 +87,12 @@ export interface RunnerNodeRule {
 export interface ClassUpgrade {
   family: RunnerFamily
   label: string
+  /**
+   * The node's settings the newer model can't honour: hidden from the node
+   * (and its inspector) while the family is on, and not sent (Product shot on
+   * Bria Product Shot, Task F12). Their saved values are kept.
+   */
+  hiddenWidgets?: readonly string[]
 }
 
 export interface FrameLimits {
@@ -252,10 +258,6 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
   // Seedream on Replicate, Nano Banana 2 on fal (its Python primary), Qwen
   // Image Edit Plus on Replicate. The first picture must be linked: Python
   // has no blank for these. Settings the runner reads must not be wired.
-  // Product shot is retired from the runner (model line-up H2): its SDXL
-  // engine (catacolabs/sdxl-ad-inpaint) has only an estimated price, so no
-  // family takes it; saved nodes run on ComfyUI as before. Bria product-shot
-  // (Task F12) brings it back under its own family.
   GenerateFromReferencesNode: {
     models: { 'seedream-5-pro': 'ref-edits', 'seedream-5-lite': 'ref-edits', 'nano-banana-2': 'ref-edits' },
     mustLink: ['image_1'],
@@ -269,6 +271,23 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     upgrade: { family: 'qwen-2511-angles', label: 'Qwen Image Edit 2511' },
     mustLink: ['image'],
     mustNotLink: ['camera'],
+  },
+  // Product shot on Bria Product Shot (fal, family bria-product-shot, Task
+  // F12). Its SDXL engine (catacolabs/sdxl-ad-inpaint) is retired from the
+  // runner (model line-up H2: only an estimated price), so no family takes
+  // the old call: with this family off, saved nodes run on ComfyUI as before.
+  // While it is on, every Product shot node runs Bria, in the runner only
+  // (Ruling 10). Bria has no product size, no "keep the product exact"
+  // switch (it always keeps the product) and no seed: those are hidden while
+  // it is on (server/runner/generators/briaProductShot.ts).
+  ProductShotNode: {
+    upgrade: {
+      family: 'bria-product-shot',
+      label: 'Bria Product Shot',
+      hiddenWidgets: ['product_size', 'keep_product_exact', 'seed'],
+    },
+    mustLink: ['image'],
+    mustNotLink: ['scene_prompt', 'aspect'],
   },
   // ── restyle (Task B8): Nano Banana 2 / Pro on fal, Nano Banana on
   // Replicate. The taste wire (style_in) comes from a Moodboard node, which
@@ -394,6 +413,14 @@ export const LOCAL_RENDER_TYPES: ReadonlySet<string> = new Set(
 export function classUpgradeOn(classType: string, families: ReadonlySet<RunnerFamily>): ClassUpgrade | null {
   const rule = Object.prototype.hasOwnProperty.call(RUNNER_NODE_RULES, classType) ? RUNNER_NODE_RULES[classType] : undefined
   return rule?.upgrade && families.has(rule.upgrade.family) ? rule.upgrade : null
+}
+
+/**
+ * Whether a node's setting is hidden because its class runs a newer model
+ * that can't honour it (ClassUpgrade.hiddenWidgets), with these families on.
+ */
+export function upgradeHidesWidget(classType: string, widgetName: string, families: ReadonlySet<RunnerFamily>): boolean {
+  return classUpgradeOn(classType, families)?.hiddenWidgets?.includes(widgetName) ?? false
 }
 
 /** The image models that default to fal AND have a price. seedream-5-pro is

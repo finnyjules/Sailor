@@ -124,6 +124,11 @@ export const EDIT_RATES: Record<string, EditRate> = {
     unit: 'per_megapixel', perMegapixel: 0.035,
     ...verified('fal', fal('fal-ai/qwen-image-edit-2511-multiple-angles')),
   },
+  // Product shot on Bria Product Shot (Task F12): "$0.04 per generations"
+  // (llms.txt, read 2026-09-24), unit: one picture made. The builder asks
+  // for one (num_results 1, one placement), at about 1 MP whatever the
+  // input's size (shot_size), so the price doesn't read the size.
+  'fal-ai/bria/product-shot': { unit: 'per_image', usd: 0.04, ...verified('fal', fal('fal-ai/bria/product-shot')) },
   // "Price: $0.04 per images".
   'fal-ai/flux-pro/kontext': { unit: 'per_image', usd: 0.04, ...verified('fal', fal('fal-ai/flux-pro/kontext')) },
 
@@ -165,7 +170,8 @@ export const EDIT_RATES: Record<string, EditRate> = {
   'qwen/qwen-image-edit-plus': { unit: 'per_image', usd: 0.03, ...verified('replicate', rep('qwen/qwen-image-edit-plus')) },
   // Community model billed by GPU time (L40S, $0.000975/s): "costs
   // approximately $0.16 to run". Priced at that measured figure, as the
-  // line-up page did. Product shot is being retired (decision 7).
+  // line-up page did. Product shot is being retired (decision 7): Bria
+  // Product Shot replaces it while its switch is on (Task F12).
   'catacolabs/sdxl-ad-inpaint': { unit: 'per_image', usd: 0.16, ...estimate(rep('catacolabs/sdxl-ad-inpaint')) },
   // Community model billed by GPU time (L40S): "costs approximately $0.0073
   // to run". Priced at $0.05, the figure charged before, about 7 times the

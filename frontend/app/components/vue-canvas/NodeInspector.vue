@@ -13,6 +13,8 @@
 import { computed } from 'vue'
 import { X } from 'lucide-vue-next'
 import { isLoraSlotWidgetVisible } from '~/lib/graph/loraSlotVisibility'
+import { NO_FAMILIES, parseFamilies } from '#shared/runner/families'
+import { upgradeHidesWidget } from '#shared/runner/eligibility'
 
 const props = defineProps<{ node: any | null }>()
 defineEmits<{ close: [] }>()
@@ -31,6 +33,12 @@ function isInspectorWidget(w: any): boolean {
   return false
 }
 
+// The runner families on (none while the runner is off), as the node's badge
+// reads them: a node moved onto a newer model hides the settings that model
+// can't honour, here as on the node (Product shot on Bria Product Shot, Task F12).
+const inspectorPublic = useRuntimeConfig().public as { runnerEnabled?: boolean, runnerFamilies?: unknown }
+const inspectorFamilies = inspectorPublic.runnerEnabled ? parseFamilies(inspectorPublic.runnerFamilies) : NO_FAMILIES
+
 // Mirror ComfyNode's index-aligned iteration: widgetDefs[i] ↔ widgetsValues[i].
 // Also respects the same progressive-disclosure rule ComfyNode applies on the
 // node body (WIDGET_VISIBILITY's FluxMultiLoRARemoteNode entry) — otherwise a
@@ -45,6 +53,7 @@ const inspectorWidgets = computed(() => {
     // Properties ride along: a moodboard-held slot's only trace is
     // properties.sailor_moodboard_<letter> (widgets stay '[None]'/blank).
     .filter(({ widget }) => isLoraSlotWidgetVisible(widget.name, values, defs, props.node?.data?.properties))
+    .filter(({ widget }) => !upgradeHidesWidget(String(props.node?.data?.nodeType || ''), widget.name, inspectorFamilies))
 })
 
 const nodeTitle = computed(() =>

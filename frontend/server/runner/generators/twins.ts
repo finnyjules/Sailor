@@ -116,6 +116,10 @@
  *                           Replicate  —           the line-up retires it (Nano Banana 2 replaces it)
  * Product shot, Restyle IP-Adapter
  *                           Replicate  —           not on fal (catacolabs/sdxl-ad-inpaint, fofr/style-transfer); both retired
+ * Product shot, Bria Product Shot
+ *                           fal        —           runner-only (F12, family bria-product-shot, moves the whole node):
+ *                                                  Replicate has no Bria Product Shot; bria/generate-background is
+ *                                                  another model, with no placement or shot size (briaProductShot.ts)
  *
  * `RUNNER_ROUTES` below is this table as data; the spec builds each node and
  * checks planNode sends it where the table says.
@@ -240,6 +244,7 @@ export const RUNNER_ROUTES: Readonly<Record<string, Route>> = {
   'RestyleFromImageNode:Nano Banana': r('replicate', null, 'retired by the line-up (Nano Banana 2 replaces it)'),
   'RestyleFromImageNode:Style Transfer · IP-Adapter': r('replicate', null, 'not on fal'),
   'ProductShotNode': r('replicate', null, 'not on fal'),
+  'ProductShotNode+bria-product-shot': r('fal', null, 'Replicate has no Bria Product Shot; its background swap is another model'),
 }
 
 // ── Generate video: the two models moved to fal first ──────────────────────

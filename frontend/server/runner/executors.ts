@@ -23,7 +23,9 @@
  * Seedream 5 Pro in EditImageNode, family seedream-5-pro-edit;
  * RotateCameraNode on Qwen Image Edit 2511 multiple angles, family
  * qwen-2511-angles, which moves the whole node while it is on;
- * Nano Banana 2 in BlendSceneNode, family nano-banana-2-blend)
+ * Nano Banana 2 in BlendSceneNode, family nano-banana-2-blend;
+ * ProductShotNode on Bria Product Shot, family bria-product-shot, which
+ * moves the whole node while it is on)
  * closely enough that the same workflow gives the same result.
  */
 import { GATE_CLASS, isLink, type ApiPrompt } from '#shared/runner/graph'
@@ -64,6 +66,7 @@ import { grokImagine2Generate, isGrokImagine2Model } from './generators/grokImag
 import { ideogram4Generate, ideogram4OnReplicate, isIdeogram4Model } from './generators/ideogram4'
 import { isSeedream5ProEdit, seedream5ProEdit } from './generators/seedream5ProEdit'
 import { qwen2511Angles } from './generators/qwen2511Angles'
+import { briaProductShot } from './generators/briaProductShot'
 import { checkRequest, seedanceReferenceProblem } from './requestRules'
 import type { OutputFile, RunnerProvider } from './types'
 
@@ -101,7 +104,7 @@ export interface PlanContext {
   /**
    * The runner families switched on (the server's). Only a class moved onto
    * a newer model as a whole reads them (Rotate camera on Qwen Image Edit
-   * 2511); absent, none.
+   * 2511; Product shot on Bria Product Shot); absent, none.
    */
   families?: ReadonlySet<RunnerFamily>
 }
@@ -552,9 +555,14 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     }
 
     // ProductShotNode: catacolabs/sdxl-ad-inpaint on Replicate (a community model).
+    // With bria-product-shot on (Task F12): Bria Product Shot on fal, no
+    // backup (briaProductShot.ts); the size, exactness and seed aren't sent.
     case 'ProductShotNode': {
       const scenePrompt = textSetting(inputs, 'scene_prompt', '', 'scene description')
       const image = await pictureUrl('image', 'There is no product picture')
+      if (classUpgradeOn('ProductShotNode', ctx.families ?? NO_FAMILIES)) {
+        return stillCall(briaProductShot({ image, scenePrompt, aspect: inputs.aspect === undefined ? 'Square' : inputs.aspect }), 'product_shot')
+      }
       return still(PRODUCT_SHOT_SLUG, productShotInput({
         image,
         scenePrompt,

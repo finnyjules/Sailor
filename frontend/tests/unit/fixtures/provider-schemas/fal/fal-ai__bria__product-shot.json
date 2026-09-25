@@ -1,0 +1,282 @@
+{
+  "endpoint": "fal-ai/bria/product-shot",
+  "fetchedAt": "2026-09-25",
+  "sources": {
+    "schema": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=fal-ai/bria/product-shot",
+    "pricing": "https://fal.ai/models/fal-ai/bria/product-shot/llms.txt"
+  },
+  "input": {
+    "$ref": "#/components/schemas/BriaProductShotInput"
+  },
+  "output": {
+    "$ref": "#/components/schemas/BriaProductShotOutput"
+  },
+  "components": {
+    "schemas": {
+      "BriaProductShotInput": {
+        "type": "object",
+        "title": "ProductShotInput",
+        "properties": {
+          "image_url": {
+            "examples": [
+              "https://storage.googleapis.com/falserverless/bria/bria_product_fg.jpg"
+            ],
+            "type": "string",
+            "title": "Image Url",
+            "description": "The URL of the product shot to be placed in a lifestyle shot. If both image_url and image_file are provided, image_url will be used. Accepted formats are jpeg, jpg, png, webp. Maximum file size 12MB."
+          },
+          "fast": {
+            "type": "boolean",
+            "title": "Fast",
+            "description": "Whether to use the fast model",
+            "default": true
+          },
+          "scene_description": {
+            "examples": [
+              "on a rock, next to the ocean, dark theme"
+            ],
+            "title": "Scene Description",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text description of the new scene or background for the provided product shot. Bria currently supports prompts in English only, excluding special characters."
+          },
+          "num_results": {
+            "type": "integer",
+            "title": "Num Results",
+            "maximum": 4,
+            "description": "The number of lifestyle product shots you would like to generate. You will get num_results x 10 results when placement_type=automatic and according to the number of required placements x num_results if placement_type=manual_placement.",
+            "minimum": 1,
+            "default": 1
+          },
+          "padding_values": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Padding Values",
+            "description": "The desired padding in pixels around the product, when using placement_type=manual_padding. The order of the values is [left, right, top, bottom]. For optimal results, the total number of pixels, including padding, should be around 1,000,000. It is recommended to first use the product cutout API, get the cutout and understand the size of the result, and then define the required padding and use the cutout as an input for this API."
+          },
+          "ref_image_url": {
+            "examples": [
+              "https://storage.googleapis.com/falserverless/bria/bria_product_bg.jpg"
+            ],
+            "type": "string",
+            "title": "Ref Image Url",
+            "description": "The URL of the reference image to be used for generating the new scene or background for the product shot. Use \"\" to leave empty.Either ref_image_url or scene_description has to be provided but not both. If both ref_image_url and ref_image_file are provided, ref_image_url will be used. Accepted formats are jpeg, jpg, png, webp.",
+            "default": ""
+          },
+          "placement_type": {
+            "type": "string",
+            "enum": [
+              "original",
+              "automatic",
+              "manual_placement",
+              "manual_padding"
+            ],
+            "title": "Placement Type",
+            "description": "This parameter allows you to control the positioning of the product in the image. Choosing 'original' will preserve the original position of the product in the image. Choosing 'automatic' will generate results with the 10 recommended positions for the product. Choosing 'manual_placement' will allow you to select predefined positions (using the parameter 'manual_placement_selection'). Selecting 'manual_padding' will allow you to control the position and size of the image by defining the desired padding in pixels around the product.",
+            "default": "manual_placement"
+          },
+          "manual_placement_selection": {
+            "type": "string",
+            "enum": [
+              "upper_left",
+              "upper_right",
+              "bottom_left",
+              "bottom_right",
+              "right_center",
+              "left_center",
+              "upper_center",
+              "bottom_center",
+              "center_vertical",
+              "center_horizontal"
+            ],
+            "title": "Manual Placement Selection",
+            "description": "If you've selected placement_type=manual_placement, you should use this parameter to specify which placements/positions you would like to use from the list. You can select more than one placement in one request.",
+            "default": "bottom_center"
+          },
+          "sync_mode": {
+            "type": "boolean",
+            "title": "Sync Mode",
+            "description": "If `True`, the media will be returned as a data URI and the output data won't be available in the request history.",
+            "default": false
+          },
+          "original_quality": {
+            "type": "boolean",
+            "title": "Original Quality",
+            "description": "This flag is only relevant when placement_type=original. If true, the output image retains the original input image's size; otherwise, the image is scaled to 1 megapixel (1MP) while preserving its aspect ratio.",
+            "default": false
+          },
+          "optimize_description": {
+            "type": "boolean",
+            "title": "Optimize Description",
+            "description": "Whether to optimize the scene description",
+            "default": true
+          },
+          "shot_size": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Shot Size",
+            "description": "The desired size of the final product shot. For optimal results, the total number of pixels should be around 1,000,000. This parameter is only relevant when placement_type=automatic or placement_type=manual_placement.",
+            "default": [
+              1000,
+              1000
+            ]
+          }
+        },
+        "required": [
+          "image_url"
+        ],
+        "x-fal-order-properties": [
+          "image_url",
+          "scene_description",
+          "ref_image_url",
+          "optimize_description",
+          "num_results",
+          "fast",
+          "placement_type",
+          "original_quality",
+          "shot_size",
+          "manual_placement_selection",
+          "padding_values",
+          "sync_mode"
+        ]
+      },
+      "BriaProductShotOutput": {
+        "type": "object",
+        "title": "ProductShotOutput",
+        "properties": {
+          "images": {
+            "examples": [
+              [
+                {
+                  "content_type": "image/png",
+                  "url": "https://storage.googleapis.com/falserverless/bria/bria_product_res.png"
+                }
+              ]
+            ],
+            "type": "array",
+            "title": "Images",
+            "items": {
+              "$ref": "#/components/schemas/Image"
+            },
+            "description": "The generated images"
+          }
+        },
+        "required": [
+          "images"
+        ],
+        "x-fal-order-properties": [
+          "images"
+        ]
+      },
+      "Image": {
+        "type": "object",
+        "title": "Image",
+        "properties": {
+          "content_type": {
+            "examples": [
+              "image/png"
+            ],
+            "title": "Content Type",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The mime type of the file."
+          },
+          "file_size": {
+            "examples": [
+              4404019
+            ],
+            "title": "File Size",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The size of the file in bytes."
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "The URL where the file can be downloaded from."
+          },
+          "file_name": {
+            "examples": [
+              "z9RV14K95DvU.png"
+            ],
+            "title": "File Name",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The name of the file. It will be auto-generated if not provided."
+          },
+          "width": {
+            "examples": [
+              1024
+            ],
+            "title": "Width",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The width of the image in pixels."
+          },
+          "height": {
+            "examples": [
+              1024
+            ],
+            "title": "Height",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The height of the image in pixels."
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "x-fal-order-properties": [
+          "url",
+          "content_type",
+          "file_name",
+          "file_size",
+          "width",
+          "height"
+        ],
+        "description": "Represents an image file."
+      }
+    }
+  },
+  "pricingText": "- **Price**: $0.04 per generations\n\nFor more details, see [fal.ai pricing](https://fal.ai/pricing)."
+}
