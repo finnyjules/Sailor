@@ -81,6 +81,8 @@ import StudioActionRows from '~/components/vue-canvas/studio/StudioActionRows.vu
 import { useStudioPrompt, STUDIO_PROMPT_KEY } from '~/composables/useStudioPrompt'
 import { frameSelectionLabel } from '~/lib/prompt/studioDispatch'
 import { studioActions } from '~/lib/studio/studioActions'
+import { frameChipLayer } from '~/lib/compositor/frameChipLayer'
+import { promptNodeLabel } from '~/lib/prompt/canvasPromptContext'
 import AgentSweep from '~/components/agent/AgentSweep.vue'
 import { useFramePenSession } from '~/composables/frame/useFramePenSession'
 import { cloneDoc } from '~/lib/sketch/clone'
@@ -1831,9 +1833,21 @@ async function onTemplateSlotImageFile(e: Event) {
 // Always a full row above the tool bar (and above the timeline in Motion); what
 // it brings back shows above it. The chip quotes the selected layer's own words
 // (spec §1.2; plan ruling 19).
+// A layer with no name of its own is named as the editor names it elsewhere (the
+// add menu's words; a wired layer by its source), never by its kind (frameChipLayer).
 const frameChip = computed(() => frameSelectionLabel(
-  (selectedLayers.value ?? []).map((l: any) => ({ kind: String(l.kind), text: l.text ?? null, name: l.name ?? null })),
+  (selectedLayers.value ?? []).map((l: any) => frameChipLayer(l, { wiredName: wiredChipName })),
 ))
+/** A wired slot (0-based) as the chip names it: the name the user gave the slot,
+ *  else the name the source node's card shows (promptNodeLabel, as on the canvas). */
+function wiredChipName(slot: number): string | null {
+  const own = wiredNames.value[slot + 1]?.trim()
+  if (own) return own
+  const e = (props.edges as any[]).find(x => String(x.target) === String(props.nodeId) && x.targetHandle === `input-${slot}`)
+  const n = e ? (props.nodes as any[]).find(x => String(x.id) === String(e.source)) : null
+  if (!n) return null
+  return promptNodeLabel({ id: String(n.id), title: String(n.data?.title ?? ''), type: String(n.type ?? ''), hasImages: false, nodeType: n.data?.nodeType })
+}
 // Frame has no background layer (the background is the frame's own fill), so a
 // lone layer gets suggestions only when it is text.
 const frameSuggestions = computed(() => {

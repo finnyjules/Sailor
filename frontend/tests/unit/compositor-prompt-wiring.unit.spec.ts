@@ -29,4 +29,7 @@ describe('Frame’s prompt', () => {
     expect(s).toContain('<StudioActionRows')
     expect(s).toContain("place: 'frame'")
   })
+  it('the chip never names a layer by its kind: every layer goes through frameChipLayer', () => {
+    expect(s).toMatch(/frameSelectionLabel\(\s*\(selectedLayers\.value \?\? \[\]\)\.map\(\(l: any\) => frameChipLayer\(/)
+  })
 })
