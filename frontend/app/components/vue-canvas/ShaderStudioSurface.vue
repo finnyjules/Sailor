@@ -1062,8 +1062,8 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
         <StudioActionRows bare :actions="[REMIX_ACTION]" />
       </StudioInspectorHead>
       <MyEffectRecipe
-        :effect-id="activeEffectCfg.id" :values="activeEffectCfg.params"
-        @pick-version="(v) => { config.effects[activeEffect] = { ...activeEffectCfg, id: v.effectId, params: { ...v.values }, customChars: '' }; renderFrame(0) }"
+        :effect-id="activeEffectCfg.id" :values="activeEffectCfg.params" :disabled="layerReadOnly"
+        @pick-version="(v) => { if (layerReadOnly) return; config.effects[activeEffect] = { ...activeEffectCfg, id: v.effectId, params: { ...v.values }, customChars: '' }; renderFrame(0) }"
       />
       <StudioActionRows :actions="inspectorActions" />
       <!-- Source -->

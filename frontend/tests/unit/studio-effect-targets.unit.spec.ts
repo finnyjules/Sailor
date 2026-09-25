@@ -26,6 +26,10 @@ describe('studio effect targets', () => {
     expect(s).toMatch(/<StudioButton :disabled="layerReadOnly" @click="openPicker">/)
     for (const fn of ['setParam', 'setMask', 'openPicker', 'pickEffect', 'pickEffectLook', 'onMaskDown'])
       expect(s).toMatch(new RegExp(`function ${fn}[^{]*\\{[\\s\\S]{0,80}if \\(layerReadOnly\\.value\\) return`))
+    // Fix round 1, #1 (task-11-review): the Recipe's version chips/rename/remove are a
+    // target mutator too — same lock as the picker button and every dial.
+    expect(s).toMatch(/<MyEffectRecipe[\s\S]{0,200}:disabled="layerReadOnly"/)
+    expect(s).toMatch(/@pick-version="\(v\) => \{ if \(layerReadOnly\) return;/)
     for (const fn of ['addEffect', 'removeEffect', 'duplicateEffect', 'reorderEffect'])
       expect(s).toMatch(new RegExp(`function ${fn}[^{]*\\{\\s*if \\(stackLocked\\.value`))
   })
