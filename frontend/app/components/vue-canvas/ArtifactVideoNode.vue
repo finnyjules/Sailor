@@ -2,6 +2,9 @@
 import { Handle, Position } from '@vue-flow/core'
 import { Upload, Loader2, Film, Play, RefreshCw, Download } from 'lucide-vue-next'
 import { getTypeColor } from '~/composables/useVueNodes'
+import NodeRunRow from '~/components/vue-canvas/NodeRunRow.vue'
+import { runRowStatus } from '~/lib/canvas/runRowStatus'
+import { useRunRowClock } from '~/composables/useRunRowClock'
 
 // Visual half of the unified `Video` artifact node. Same state machine as
 // the Image / Audio cards. Result lands in `data.images` (PreviewVideo's
@@ -20,6 +23,7 @@ const props = defineProps<{
     mode: number
     running?: boolean
     error?: boolean
+    lastRunAt?: number | null
     images?: string[]
     animated?: boolean
     outputNode?: boolean
@@ -159,6 +163,18 @@ function runThisNode() {
   )
 }
 
+// The Run row under the result (spec §2.3): the media is here, so it has
+// rendered — the row says when, or that the last run failed, or that it's
+// running again. Only shown with something upstream to re-run.
+const runRowNow = useRunRowClock()
+const runStatus = computed(() => runRowStatus({
+  running: !!props.data.running,
+  error: !!props.data.error,
+  hasRun: true,
+  lastRunAt: props.data.lastRunAt ?? null,
+  now: runRowNow.value,
+}))
+
 async function downloadVideo() {
   const url = videoUrl.value
   if (!url) return
@@ -269,6 +285,15 @@ async function downloadVideo() {
           preload="metadata"
           playsinline
           @loadedmetadata="onVideoMeta"
+        />
+        <!-- Run row — where the Edit…/Develop… footer was. -->
+        <NodeRunRow
+          v-if="videoUrl && hasUpstream"
+          :status="runStatus"
+          :can-run="!isMuted && !isBypassed"
+          :running="!!data.running"
+          run-label="Re-render"
+          @run="runThisNode"
         />
       </template>
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Frame, Layers, Loader2, Lock, LockOpen, Play, SkipBack, SkipForward, SlidersHorizontal, Upload, RefreshCw } from 'lucide-vue-next'
+import { Boxes, ChevronDown, ChevronLeft, ChevronRight, Download, Frame, Layers, Lock, LockOpen, SkipBack, SkipForward, SlidersHorizontal, Upload, RefreshCw } from 'lucide-vue-next'
 import { getTypeColor, getInputTooltip } from '~/composables/useVueNodes'
 import { useAgentActivity } from '~/composables/useAgentActivity'
 import { useDirectExecutionEnabled } from '~/composables/useDirectExecutionEnabled'
@@ -9,6 +9,10 @@ import { nodeTier } from '~/lib/canvas/nodeTier'
 import { minHeightForPorts } from '~/lib/canvas/portLayout'
 import { useNodePortSync } from '~/composables/useNodePortSync'
 import NodeCapsule from '~/components/vue-canvas/NodeCapsule.vue'
+import NodeRunRow from '~/components/vue-canvas/NodeRunRow.vue'
+import NodeFixesBadge from '~/components/vue-canvas/NodeFixesBadge.vue'
+import { runRowStatus } from '~/lib/canvas/runRowStatus'
+import { useRunRowClock } from '~/composables/useRunRowClock'
 import { resolveReadout } from '~/lib/canvas/capsuleReadout'
 import { resolveNodeIcon, type NodeIcon } from '~/lib/canvas/nodeIcon'
 import { readoutRuleFor, defaultCollapsed } from '~/lib/canvas/capsuleMeta'
@@ -53,6 +57,7 @@ const props = defineProps<{
     running?: boolean
     runningSince?: number | null
     hasRun?: boolean
+    lastRunAt?: number | null
     collapsed?: boolean
     error?: boolean
     progress?: number
@@ -198,8 +203,8 @@ const showRunButton = computed(() => {
   return (props.data.category || '').startsWith('api node/')
 })
 
-// --- Per-node run control (footer split button) ---------------------------
-// One primary action — run THIS node, upstream cached — that reads as "Play"
+// --- Per-node run control (the Run row's ▶ + caret) ------------------------
+// One primary action — run THIS node, upstream cached — that reads as "Run"
 // before the first run and "Re-render" after. A caret opens the two scope
 // variants. All three dispatch the same `sailor:runFiltered` event the old
 // two buttons did; only the `detail` differs.
@@ -226,6 +231,18 @@ function dispatchRun(detail: Record<string, any>) {
 // Primary: re-roll ONLY this node — upstream stays cached (ComfyUI cache-hits
 // it, no regen/re-billing), just this node + its preview recompute.
 function playThisNode() { dispatchRun({ rerollScope: 'self' }) }
+// The Run row's status line (runRowStatus): running / failed / live / rendered
+// N min ago / not run yet · cost. One shared 30 s clock keeps "N min ago" fresh.
+const runRowNow = useRunRowClock()
+const runStatus = computed(() => runRowStatus({
+  running: !!props.data.running,
+  error: !!props.data.error,
+  live: LIVE_PREVIEW_NODES.has(props.data.nodeType),
+  hasRun: hasRun.value,
+  costLabel: priceLabel.value,
+  lastRunAt: props.data.lastRunAt ?? null,
+  now: runRowNow.value,
+}))
 // Variant (direct-execution only): re-roll THIS node 4× in parallel across the
 // cloud pool — four fresh-seeded takes at once. Same 'self' scope + event; the
 // `takes` count flows through runVueWorkflow → queueParallel at the dispatch
@@ -1779,6 +1796,8 @@ watch(previewImages, (urls) => {
       >
         <SlidersHorizontal class="size-3.5" />
       </button>
+      <!-- "N fixes" — the reviewer's fixes for this node; opens Edit ▾. -->
+      <NodeFixesBadge :node-id="id" />
       <!-- Subgraph node count badge -->
       <span
         v-if="data.isSubgraph && data.innerNodeCount"
@@ -2260,85 +2279,66 @@ watch(previewImages, (urls) => {
       @close="lightTableOpen = false"
     />
 
-    <!-- Per-node run control (footer): one split button. The main face runs
-         THIS node with upstream cached (Play → Re-render after first run); the
-         caret opens the two scope variants. See playThisNode / runFromStart /
-         runDownstream. -->
-    <!-- The run bar's corners are 3px, not the 4px they started at, so they are CONCENTRIC
-         with the card: inner radius = outer radius - padding = 13 - 10. At 4px the arcs sat
-         1.4px apart and diagonal clearance at a corner fell to ~7.6px against 10px on the
-         flats. The bottom is the only edge with a card corner at each end, so that pinch
-         read as "the bottom margin is smaller" when all three margins measure 10px. -->
-    <div v-if="showRunButton" ref="runMenuRoot" class="relative px-2.5 pb-2.5">
-      <div class="flex items-stretch gap-px">
-        <button
-          class="nopan nodrag flex-1 h-9 rounded-l-[6px] flex items-center justify-center gap-2 text-[11px] font-medium transition-[transform,background-color,color] active:scale-[0.96] cursor-pointer"
-          :class="(isMuted || isBypassed)
-            ? 'bg-white/[0.04] text-white/25 cursor-not-allowed active:scale-100'
-            : data.running
-              ? 'bg-white/15 text-white active:scale-100'
-              : 'bg-white/90 text-neutral-900 hover:bg-white'"
-          :disabled="isMuted || isBypassed || data.running"
-          :title="isMuted ? 'Node is muted'
-            : isBypassed ? 'Node is bypassed'
-            : data.running ? 'Running…'
-            : hasRun ? 'Re-render this node — new seed, everything upstream stays cached'
-            : 'Run this node — upstream stays cached'"
-          @click.stop="playThisNode"
-        >
-          <Loader2 v-if="data.running" class="size-3 animate-spin" />
-          <RefreshCw v-else-if="hasRun" class="size-3" />
-          <Play v-else class="size-3" />
-          <span>{{ data.running ? 'Running…' : hasRun ? 'Re-render' : 'Play' }}</span>
-        </button>
-        <button
-          aria-label="Run scope options"
-          class="nopan nodrag w-9 h-9 rounded-r-[6px] flex items-center justify-center transition-colors cursor-pointer"
-          :class="(isMuted || isBypassed || data.running)
-            ? 'bg-white/[0.04] text-white/25 cursor-not-allowed'
-            : 'bg-white/90 text-neutral-900 hover:bg-white'"
-          :disabled="isMuted || isBypassed || data.running"
-          @click.stop="runMenuOpen = !runMenuOpen"
-        >
-          <ChevronDown class="size-3 transition-transform" :class="runMenuOpen ? 'rotate-180' : ''" />
-        </button>
-      </div>
+    <!-- Per-node Run row (spec §2.3): status on the left, ▶ runs THIS node with
+         upstream cached (playThisNode); the caret opens the scope variants
+         (runFromStart / runDownstream / ×4). Live-preview nodes show the row
+         for its status only — they auto-run, so there is nothing to press. -->
+    <NodeRunRow
+      v-if="showRunButton || LIVE_PREVIEW_NODES.has(data.nodeType)"
+      :status="runStatus"
+      :can-run="showRunButton && !isMuted && !isBypassed"
+      :running="!!data.running"
+      :run-label="hasRun ? 'Re-render' : 'Run'"
+      @run="playThisNode"
+    >
+      <template v-if="showRunButton" #menu>
+        <div ref="runMenuRoot" class="contents">
+          <button
+            aria-label="Run scope options"
+            class="nopan nodrag shrink-0 size-5 -mr-1 rounded-[5px] flex items-center justify-center text-white/60 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+            :disabled="isMuted || isBypassed || data.running"
+            @click.stop="runMenuOpen = !runMenuOpen"
+          >
+            <ChevronDown class="size-3 transition-transform" :class="runMenuOpen ? 'rotate-180' : ''" />
+          </button>
 
-      <!-- Scope menu — opens upward so it isn't clipped at the node's bottom. -->
-      <div
-        v-if="runMenuOpen"
-        class="absolute left-2.5 right-2.5 bottom-full mb-1 z-50 rounded-lg border border-white/10 bg-neutral-900/95 backdrop-blur-md p-1 shadow-xl"
-      >
-        <button class="nopan nodrag w-full text-left rounded-[6px] px-2 py-1.5 flex gap-2 items-start hover:bg-white/[0.06] cursor-pointer" @click.stop="playThisNode">
-          <RefreshCw class="size-3.5 mt-0.5 text-white/80 shrink-0" />
-          <span class="min-w-0">
-            <span class="block text-[11px] font-medium text-white/90">Run this node</span>
-            <span class="block text-[10px] text-white/45 leading-snug">Re-render this node, upstream stays cached</span>
-          </span>
-        </button>
-        <button v-if="directExecutionEnabled" class="nopan nodrag w-full text-left rounded-[6px] px-2 py-1.5 flex gap-2 items-start hover:bg-white/[0.06] cursor-pointer" @click.stop="rerollTakesParallel">
-          <Layers class="size-3.5 mt-0.5 text-white/80 shrink-0" />
-          <span class="min-w-0">
-            <span class="block text-[11px] font-medium text-white/90">Re-render ×4 (parallel)</span>
-            <span class="block text-[10px] text-white/45 leading-snug">Four fresh takes at once across the cloud pool</span>
-          </span>
-        </button>
-        <button class="nopan nodrag w-full text-left rounded-[6px] px-2 py-1.5 flex gap-2 items-start hover:bg-white/[0.06] cursor-pointer" @click.stop="runFromStart">
-          <SkipBack class="size-3.5 mt-0.5 text-white/60 shrink-0" />
-          <span class="min-w-0">
-            <span class="block text-[11px] font-medium text-white/90">Rebuild from start → here</span>
-            <span class="block text-[10px] text-white/45 leading-snug">Fresh run of everything before, new seeds</span>
-          </span>
-        </button>
-        <button class="nopan nodrag w-full text-left rounded-[6px] px-2 py-1.5 flex gap-2 items-start hover:bg-white/[0.06] cursor-pointer" @click.stop="runDownstream">
-          <SkipForward class="size-3.5 mt-0.5 text-white/60 shrink-0" />
-          <span class="min-w-0">
-            <span class="block text-[11px] font-medium text-white/90">Run here → end</span>
-            <span class="block text-[10px] text-white/45 leading-snug">Push this result through everything after</span>
-          </span>
-        </button>
-      </div>
-    </div>
+          <!-- Scope menu — opens upward so it isn't clipped at the node's bottom. -->
+          <div
+            v-if="runMenuOpen"
+            class="absolute left-2.5 right-2.5 bottom-full mb-1 z-50 rounded-lg border border-white/10 bg-neutral-900/95 backdrop-blur-md p-1 shadow-xl"
+          >
+            <button class="nopan nodrag w-full text-left rounded-[6px] px-2 py-1.5 flex gap-2 items-start hover:bg-white/[0.06] cursor-pointer" @click.stop="playThisNode">
+              <RefreshCw class="size-3.5 mt-0.5 text-white/80 shrink-0" />
+              <span class="min-w-0">
+                <span class="block text-[11px] font-medium text-white/90">Run this node</span>
+                <span class="block text-[10px] text-white/45 leading-snug">Re-render this node, upstream stays cached</span>
+              </span>
+            </button>
+            <button v-if="directExecutionEnabled" class="nopan nodrag w-full text-left rounded-[6px] px-2 py-1.5 flex gap-2 items-start hover:bg-white/[0.06] cursor-pointer" @click.stop="rerollTakesParallel">
+              <Layers class="size-3.5 mt-0.5 text-white/80 shrink-0" />
+              <span class="min-w-0">
+                <span class="block text-[11px] font-medium text-white/90">Re-render ×4 (parallel)</span>
+                <span class="block text-[10px] text-white/45 leading-snug">Four fresh takes at once across the cloud pool</span>
+              </span>
+            </button>
+            <button class="nopan nodrag w-full text-left rounded-[6px] px-2 py-1.5 flex gap-2 items-start hover:bg-white/[0.06] cursor-pointer" @click.stop="runFromStart">
+              <SkipBack class="size-3.5 mt-0.5 text-white/60 shrink-0" />
+              <span class="min-w-0">
+                <span class="block text-[11px] font-medium text-white/90">Rebuild from start → here</span>
+                <span class="block text-[10px] text-white/45 leading-snug">Fresh run of everything before, new seeds</span>
+              </span>
+            </button>
+            <button class="nopan nodrag w-full text-left rounded-[6px] px-2 py-1.5 flex gap-2 items-start hover:bg-white/[0.06] cursor-pointer" @click.stop="runDownstream">
+              <SkipForward class="size-3.5 mt-0.5 text-white/60 shrink-0" />
+              <span class="min-w-0">
+                <span class="block text-[11px] font-medium text-white/90">Run here → end</span>
+                <span class="block text-[10px] text-white/45 leading-snug">Push this result through everything after</span>
+              </span>
+            </button>
+          </div>
+        </div>
+      </template>
+    </NodeRunRow>
   </div>
   </Transition>
   </div>

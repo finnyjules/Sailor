@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { Handle, Position } from '@vue-flow/core'
-import { Upload, Loader2, AudioWaveform, Play, RefreshCw, Download } from 'lucide-vue-next'
+import { Upload, Loader2, AudioWaveform, Play, Download } from 'lucide-vue-next'
 import { getTypeColor } from '~/composables/useVueNodes'
+import NodeRunRow from '~/components/vue-canvas/NodeRunRow.vue'
+import { runRowStatus } from '~/lib/canvas/runRowStatus'
+import { useRunRowClock } from '~/composables/useRunRowClock'
 
 // Visual half of the unified `Audio` artifact node. Same state machine as
 // the Image card: no upstream + no file = upload affordance; upstream + no
@@ -19,6 +22,7 @@ const props = defineProps<{
     mode: number
     running?: boolean
     error?: boolean
+    lastRunAt?: number | null
     audios?: string[]
     outputNode?: boolean
   }
@@ -162,6 +166,18 @@ function runThisNode() {
   )
 }
 
+// The Run row under the result (spec §2.3): the media is here, so it has
+// rendered — the row says when, or that the last run failed, or that it's
+// running again. Only shown with something upstream to re-run.
+const runRowNow = useRunRowClock()
+const runStatus = computed(() => runRowStatus({
+  running: !!props.data.running,
+  error: !!props.data.error,
+  hasRun: true,
+  lastRunAt: props.data.lastRunAt ?? null,
+  now: runRowNow.value,
+}))
+
 async function downloadAudio() {
   const url = audioUrl.value
   if (!url) return
@@ -258,16 +274,16 @@ async function downloadAudio() {
           >
             <Download class="size-2.5" />
           </button>
-          <button
-            class="nopan nodrag shrink-0 size-5 rounded flex items-center justify-center text-white/45 hover:text-white/85 hover:bg-white/[0.08] transition-colors cursor-pointer disabled:opacity-50"
-            :disabled="data.running || isMuted || isBypassed"
-            :title="data.running ? 'Running…' : 'Re-render'"
-            @click.stop="runThisNode"
-          >
-            <Loader2 v-if="data.running" class="size-3 animate-spin" />
-            <RefreshCw v-else class="size-3" />
-          </button>
         </div>
+        <!-- Run row — re-render lives here now (it replaced the inline icon). -->
+        <NodeRunRow
+          v-if="audioUrl && hasUpstream"
+          :status="runStatus"
+          :can-run="!isMuted && !isBypassed"
+          :running="!!data.running"
+          run-label="Re-render"
+          @run="runThisNode"
+        />
       </template>
 
       <template v-else-if="showUpload">

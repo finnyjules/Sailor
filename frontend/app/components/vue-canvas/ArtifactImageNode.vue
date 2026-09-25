@@ -3,6 +3,10 @@ import { Handle, Position } from '@vue-flow/core'
 import { Upload, Loader2, Image as ImageIcon, ImagePlus, Play, Download, RefreshCw, Lock, LockOpen, Brush, Drama } from 'lucide-vue-next'
 import { onClickOutside } from '@vueuse/core'
 import { getTypeColor } from '~/composables/useVueNodes'
+import NodeRunRow from '~/components/vue-canvas/NodeRunRow.vue'
+import NodeFixesBadge from '~/components/vue-canvas/NodeFixesBadge.vue'
+import { runRowStatus } from '~/lib/canvas/runRowStatus'
+import { useRunRowClock } from '~/composables/useRunRowClock'
 import { useAgentActivity } from '~/composables/useAgentActivity'
 import { useImgFx } from '~/composables/useImgFx'
 import TakesStrip from '~/components/vue-canvas/TakesStrip.vue'
@@ -36,6 +40,7 @@ const props = defineProps<{
     mode: number
     running?: boolean
     error?: boolean
+    lastRunAt?: number | null
     images?: string[]
     outputNode?: boolean
     // Takes (non-destructive variation loop) — flag-gated, additive.
@@ -373,14 +378,26 @@ function openInpaint() {
 }
 
 // OUTPUT_NODE nodes get a per-node Run affordance — the existing event the
-// canvas listens for. We surface it both as a fallback in the waiting state
-// and as a small re-render button in the populated footer.
+// canvas listens for. We surface it as a fallback in the waiting state, in
+// the hover chrome, and as the Run row's ▶ under the result.
 function runThisNode() {
   if (isMuted.value || isBypassed.value || props.data.running) return
   window.dispatchEvent(
     new CustomEvent('sailor:runFiltered', { detail: { targetIds: [props.id], rerollScope: 'self' } }),
   )
 }
+
+// The Run row under the result (spec §2.3): the media is here, so it has
+// rendered — the row says when, or that the last run failed, or that it's
+// running again. Only shown with something upstream to re-run.
+const runRowNow = useRunRowClock()
+const runStatus = computed(() => runRowStatus({
+  running: !!props.data.running,
+  error: !!props.data.error,
+  hasRun: true,
+  lastRunAt: props.data.lastRunAt ?? null,
+  now: runRowNow.value,
+}))
 
 // Promote: re-run a draft take's exact snapshot at full quality (spec
 // §Promote). Registers the pending promote BEFORE firing the same self-scope
@@ -857,13 +874,21 @@ const promoteUsdLabel = computed(() => {
             <span v-else class="text-xs font-bold leading-none" style="color: var(--var-accent-text)">@</span>
           </button>
         </div>
-        <!-- Persistent lock badge: the toggle lives in the hover toolbar,
-             but a pinned card must read as pinned without hovering it. -->
+        <!-- Persistent badges, top-left: Locked (the toggle lives in the hover
+             toolbar, but a pinned card must read as pinned without hovering)
+             and "N fixes" (always visible; opens Edit ▾). They step down below
+             the hover toolbar while it shows. -->
         <div
-          v-if="isLocked"
-          class="pointer-events-none absolute top-1.5 left-1.5 z-20 flex items-center gap-1 rounded bg-amber-500/20 border border-amber-400/30 px-1.5 py-0.5 text-[9px] font-medium text-amber-200 backdrop-blur-sm"
+          class="pointer-events-none absolute left-1.5 z-40 flex items-center gap-1 transition-[top] duration-150"
+          :class="hovered ? 'top-8' : 'top-1.5'"
         >
-          <Lock class="size-2.5" /> Locked
+          <div
+            v-if="isLocked"
+            class="flex items-center gap-1 rounded bg-amber-500/20 border border-amber-400/30 px-1.5 py-0.5 text-[9px] font-medium text-amber-200 backdrop-blur-sm"
+          >
+            <Lock class="size-2.5" /> Locked
+          </div>
+          <NodeFixesBadge :node-id="id" class="pointer-events-auto" />
         </div>
         <!-- Main image -->
         <img
@@ -919,6 +944,18 @@ const promoteUsdLabel = computed(() => {
         </div>
       </template>
       </div><!-- /media stage -->
+
+      <!-- Run row — where the Edit…/Develop… footer was (Task 8 moved those
+           to the node toolbar). Outside the media stage, so the churn/reveal
+           never covers it. -->
+      <NodeRunRow
+        v-if="displayedUrl && hasUpstream"
+        :status="runStatus"
+        :can-run="!isMuted && !isBypassed"
+        :running="!!data.running"
+        run-label="Re-render"
+        @run="runThisNode"
+      />
     </div>
 
     <!-- Edit text… find/replace panel, opened from the node toolbar. -->

@@ -3227,7 +3227,7 @@ function handleBridgeMessage(event: MessageEvent) {
       runningNodeByPrompt.delete(promptId)
       const target = (nodes.value as any[]).find((n: any) => n.id === nid)
       if (target?.data && (target.data.running || target.data.progress)) {
-        target.data = { ...target.data, running: false, progress: undefined, runningSince: null, hasRun: true }
+        target.data = { ...target.data, running: false, progress: undefined, runningSince: null, hasRun: true, lastRunAt: Date.now() }
       }
       for (const e of edges.value) {
         if (e.source === nid && e.data?.running) e.data = { ...e.data, running: false }
@@ -3241,7 +3241,7 @@ function handleBridgeMessage(event: MessageEvent) {
           // e.g. a mid-run reload reconnecting the socket), and a node that
           // exits it without them keeps a forever-ticking elapsed counter and
           // never becomes eligible for the after-run collapse tier.
-          n.data = { ...n.data, running: false, progress: undefined, runningSince: null, hasRun: true }
+          n.data = { ...n.data, running: false, progress: undefined, runningSince: null, hasRun: true, lastRunAt: Date.now() }
         }
       }
       for (const e of edges.value) {
