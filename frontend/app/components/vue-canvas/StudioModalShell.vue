@@ -3,7 +3,7 @@
 // (title · breadcrumb · esc/close, separated from the body by spacing — no divider rule)
 // + big preview/actions on the left and a scrollable controls column on the right. No
 // vertical rail seam. Change the chrome here and all three editors update.
-import { ref, computed, onMounted, onBeforeUnmount, provide } from 'vue'
+import { Comment, Fragment, ref, computed, onMounted, onBeforeUnmount, provide, useSlots, type VNode } from 'vue'
 import StudioPromptHost from '~/components/prompt/StudioPromptHost.vue'
 import StudioToolBar from '~/components/vue-canvas/studio/StudioToolBar.vue'
 import AgentSweep from '~/components/agent/AgentSweep.vue'
@@ -70,6 +70,14 @@ const HIDE_RIGHT = 'translate-x-[130%] opacity-0 pointer-events-none'
 const SHOWN = 'translate-x-0 opacity-100'
 
 const hasPrompt = computed(() => !!props.agent || !!props.promptPlace)
+// #tools can be filled with v-if'd buttons (Vector type's Play shows only when the
+// type moves). A slot that renders only comments draws no empty bar. Called from
+// the render, so it re-checks whenever the slot's own conditions change.
+const slots = useSlots()
+function rendersSomething(nodes: VNode[] | undefined): boolean {
+  return !!nodes?.some(n => n.type !== Comment && (n.type !== Fragment || rendersSomething(n.children as VNode[])))
+}
+const hasTools = () => rendersSomething(slots.tools?.())
 const prompt = useStudioPrompt({
   worker: () => props.agent ?? null,
   place: props.promptHost === 'scene3d' ? 'scene3d' : 'studio',
@@ -159,18 +167,18 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                `fullBleedBottomOffset` so a surface's own bottom overlay stays clear;
                boxed stacks it as a flow sibling under the preview. Same capped width. -->
           <template v-if="fullBleed">
-            <div v-if="hasPrompt || $slots.tools" data-testid="studio-shell-bottom-cluster"
+            <div v-if="hasPrompt || hasTools()" data-testid="studio-shell-bottom-cluster"
                  class="pointer-events-none absolute left-1/2 z-20 w-full max-w-[640px] -translate-x-1/2 px-4"
                  :style="{ bottom: bottomOffset + 'px' }">
               <div data-testid="studio-shell-dock" class="pointer-events-auto flex flex-col gap-2">
                 <StudioPromptHost v-if="hasPrompt" :prompt="prompt" />
-                <StudioToolBar v-if="$slots.tools"><slot name="tools" /></StudioToolBar>
+                <StudioToolBar v-if="hasTools()"><slot name="tools" /></StudioToolBar>
               </div>
             </div>
           </template>
-          <div v-else-if="hasPrompt || $slots.tools" data-testid="studio-shell-dock" class="mt-3 mb-3 flex w-full max-w-[640px] shrink-0 flex-col gap-2 self-center">
+          <div v-else-if="hasPrompt || hasTools()" data-testid="studio-shell-dock" class="mt-3 mb-3 flex w-full max-w-[640px] shrink-0 flex-col gap-2 self-center">
             <StudioPromptHost v-if="hasPrompt" :prompt="prompt" />
-            <StudioToolBar v-if="$slots.tools"><slot name="tools" /></StudioToolBar>
+            <StudioToolBar v-if="hasTools()"><slot name="tools" /></StudioToolBar>
           </div>
         </div>
         <div :data-testid="fullBleed ? 'studio-shell-controls-panel' : undefined"

@@ -14,7 +14,6 @@
 // composite properties (Frame + — Phase 2 — Intersections). A one-layer doc renders
 // identically to the old single-mark studio (see studio.ts migration).
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { Dices } from 'lucide-vue-next'
 import type { ControlSpec } from '~/lib/spacetype/effect'
 import type { GeoShapeConfig } from '~/lib/geoshape/config'
 import {
@@ -31,6 +30,8 @@ import StudioModalShell from '~/components/vue-canvas/StudioModalShell.vue'
 import StudioSection from '~/components/vue-canvas/StudioSection.vue'
 import StudioLayerStack from '~/components/vue-canvas/StudioLayerStack.vue'
 import StudioActionsFooter from '~/components/vue-canvas/studio/StudioActionsFooter.vue'
+import StudioActionRows from '~/components/vue-canvas/studio/StudioActionRows.vue'
+import StudioInspectorHead from '~/components/vue-canvas/studio/StudioInspectorHead.vue'
 import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vue'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import StudioSelect from '~/components/vue-canvas/studio/StudioSelect.vue'
@@ -41,6 +42,7 @@ import type { Paint } from '~/lib/compositor/paint'
 import type { PaletteFamily } from '~/lib/color/seedFamily'
 import type { GradientStop } from '~/lib/color/harmony'
 import { useStudioAgent } from '~/composables/useStudioAgent'
+import { studioActions } from '~/lib/studio/studioActions'
 import { makeConfigParams } from '~/lib/agent/configParams'
 import { docAspect } from '~/lib/agent/takeThumbs'
 import { useStudioAutosave } from '~/lib/studio/autosave'
@@ -211,6 +213,13 @@ function layerLabel(i: number): string {
   return total > 1 ? `${titleCase(shape)} ${ord}` : titleCase(shape)
 }
 const railLayers = computed(() => doc.value.layers.map((l, i) => ({ label: layerLabel(i), enabled: l.enabled })))
+// The prompt's chip and the inspector head both name the selected layer, as the
+// rail labels it. Re-roll re-seeds that layer's mark, so it needs a selection.
+const promptLabel = computed(() => (isSelected.value ? layerLabel(activeLayer.value) : 'Shape'))
+const inspectorActions = computed(() => studioActions({
+  place: 'shape', canTakes: true,
+  local: isSelected.value ? [{ id: 'reroll', label: 'Re-roll', group: 'develop', ai: false, lands: null, run: { call: rerollConfig } }] : [],
+}))
 
 // Click a row to select it; click the ALREADY-active row again to deselect → the
 // right panel flips to the composite (Frame/Intersections) properties.
@@ -502,7 +511,8 @@ async function exportSvg() {
   <StudioModalShell
     title="Shape studio"
     :agent="shapeAgent"
-    agent-placeholder="Describe the mark — e.g. more clones, sharper overlap, warmer fill…"
+    prompt-place="shape-studio" :prompt-label="promptLabel"
+    :prompt-suggestions="['Warmer', 'Calmer', 'More contrast']"
     @close="closeEditor"
   >
     <!-- Left rail: the stack of shape layers (same component the other studios use). -->
@@ -541,21 +551,16 @@ async function exportSvg() {
       }" />
     </template>
     <template #controls>
+      <StudioInspectorHead :title="promptLabel" />
+      <StudioActionRows :actions="inspectorActions" />
       <!-- ══ A LAYER IS SELECTED → edit that layer's mark ══ -->
       <template v-if="isSelected">
-        <!-- Seed + Re-roll (of the selected layer's mark) -->
+        <!-- Seed of the selected layer's mark (Re-roll is an action row above). -->
         <div class="flex items-center justify-between rounded-lg border border-white/[0.07] bg-white/[0.03] px-3 py-2.5">
           <div class="flex flex-col">
             <span class="text-[10px] uppercase tracking-wide text-white/30">Seed · {{ layerLabel(activeLayer) }}</span>
             <span class="font-mono text-[11px] text-white/70">{{ activeMark.seed }}</span>
           </div>
-          <button
-            type="button"
-            class="flex items-center gap-1.5 rounded bg-action px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-action/85"
-            @click="rerollConfig"
-          >
-            <Dices class="h-3.5 w-3.5" /> Re-roll
-          </button>
         </div>
 
         <!-- Placement — where this whole mark sits in the shared frame. -->

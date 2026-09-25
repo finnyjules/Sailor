@@ -1,12 +1,14 @@
 <!-- frontend/app/components/vue-canvas/ShaderStudioSurface.vue -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRaw, watch } from 'vue'
-import { ChevronRight, Plus, Trash2 } from 'lucide-vue-next'
+import { Plus, Trash2 } from 'lucide-vue-next'
 import CatalogModal from '~/components/CatalogModal.vue'
 import StudioModalShell from '~/components/vue-canvas/StudioModalShell.vue'
 import StudioSection from '~/components/vue-canvas/StudioSection.vue'
 import StudioLayerStack from '~/components/vue-canvas/StudioLayerStack.vue'
 import StudioActionsFooter from '~/components/vue-canvas/studio/StudioActionsFooter.vue'
+import StudioActionRows from '~/components/vue-canvas/studio/StudioActionRows.vue'
+import StudioInspectorHead from '~/components/vue-canvas/studio/StudioInspectorHead.vue'
 import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 // Explicit paths: Nuxt auto-import silently no-ops these row adapters here (the known
@@ -37,6 +39,7 @@ import { cloneConfig, defaultConfig, defaultMask, hydrateConfig, LAYER_MAX, newL
 import { ensureSpaceTypeBake } from '~/lib/spacetype/bake'
 import { encodeFrames } from '~/lib/engine/encodeVideo'
 import { useStudioAgent } from '~/composables/useStudioAgent'
+import { REMIX_ACTION, studioActions } from '~/lib/studio/studioActions'
 import { useStudioVarBindings } from '~/composables/useStudioVarBindings'
 import { useStudioVarMenu } from '~/composables/useStudioVarMenu'
 import { makeConfigParams } from '~/lib/agent/configParams'
@@ -142,6 +145,13 @@ const shaderAgent = useStudioAgent({
   // Four Takes: the thumbnail adapter + a Params view over a COPY of this config.
   takes: { studio: 'shader', config: () => config.value, paramsOf: c => makeConfigParams(() => c, () => activeEffect.value) },
 })
+// The prompt's chip and the inspector head both name the active effect.
+const promptLabel = computed(() => effectDef.value?.name ?? 'Shader')
+const effectCategory = computed(() => SHADER_SECTIONS.find(s => s.id === effectDef.value?.category)?.label ?? null)
+const inspectorActions = computed(() => studioActions({
+  place: 'shader', canTakes: true,
+  local: [{ id: 'new-variation', label: 'New variation', group: 'develop', ai: false, lands: null, run: { call: rerollSeed } }],
+}))
 
 // Collections variable binding (Slice 2a, Task 7a) — same recipe as Gradient Studio
 // (Task 6): `studioControls` mirrors what the agent tuner offers (via
@@ -382,7 +392,6 @@ function pickEffect(id: string) {
   pickerOpen.value = false
   renderFrame(0)
 }
-const currentThumb = computed(() => (effectDef.value ? thumbs.value[effectDef.value.id] ?? '' : ''))
 
 // ── duotone / adjust presets ────────────────────────────────────────────────
 function applyDuotonePalette({ shadow, highlight }: { shadow: string; highlight: string }) {
@@ -903,7 +912,8 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
   <StudioModalShell
     title="Shader studio" :breadcrumb="effectDef?.name"
     :agent="shaderAgent"
-    agent-placeholder="Describe the look — e.g. punchier, warmer, more glow…"
+    prompt-place="shader-studio" :prompt-label="promptLabel"
+    :prompt-suggestions="['Warmer', 'Calmer', 'More contrast']"
     @close="closeEditor"
   >
     <template #aside>
@@ -970,28 +980,25 @@ function remapEffectTracks(kind: 'move' | 'insert' | 'remove', a: number, b?: nu
     </template>
 
     <template #controls>
+      <StudioInspectorHead :title="promptLabel" :subtitle="effectCategory">
+        <StudioButton @click="openPicker">Change effect</StudioButton>
+        <StudioActionRows bare :actions="[REMIX_ACTION]" />
+      </StudioInspectorHead>
+      <StudioActionRows :actions="inspectorActions" />
       <!-- Source -->
       <StudioSection title="Source">
         <p v-if="wiredUrl" class="mb-2 text-[11px] text-white/50">Using wired input</p>
         <label class="mb-1 block cursor-pointer rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-1.5 text-center text-[11px] text-white/80 hover:bg-white/20">
           Upload image<input type="file" accept="image/*" class="hidden" @change="onUpload" />
         </label>
-        <div class="mt-2 flex items-center gap-2">
-          <StudioButton variant="secondary" @click="rerollSeed">New variation</StudioButton>
-          <div class="min-w-0 flex-1">
-            <StudioSlider v-model="config.seed" label="Variation" :min="1" :max="9999" :step="1" :default="42" :bindable="false" />
-          </div>
+        <div class="mt-2">
+          <StudioSlider v-model="config.seed" label="Variation" :min="1" :max="9999" :step="1" :default="42" :bindable="false" />
         </div>
       </StudioSection>
 
       <!-- Stylized Effects -->
       <StudioSection title="Stylized Effects">
         <template #badge><StudioSwitch v-model="activeEffectCfg.enabled" /></template>
-        <button class="mb-2 flex w-full items-center gap-2 rounded border border-white/10 bg-white/[0.04] px-2 py-1.5 text-left hover:bg-white/[0.08]" @click="openPicker">
-          <span class="size-5 overflow-hidden rounded bg-white/[0.06]"><img v-if="currentThumb" :src="currentThumb" class="h-full w-full object-cover" /></span>
-          <span class="min-w-0 flex-1 truncate text-[11px] text-white/90">{{ effectDef?.name ?? 'Pick an effect' }}</span>
-          <ChevronRight class="size-3.5 shrink-0 text-white/30" />
-        </button>
         <div v-if="effectLooks.length" class="mb-1.5">
           <StudioSelect
             label="Look"

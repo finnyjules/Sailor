@@ -117,6 +117,13 @@ describe('StudioModalShell — closing with a take strip open', () => {
     w.unmount()
   })
 
+  it('draws no tool bar when #tools renders nothing (Vector type, not animated)', () => {
+    const calls: string[] = []
+    const w = mountShell(takeAgent(calls), calls, { tools: '<button v-if="false">Play</button>' })
+    expect(w.find('[data-testid="studio-tool-bar"]').exists()).toBe(false)
+    w.unmount()
+  })
+
   it('never replaces the controls column', () => {
     const calls: string[] = []
     const w = mountShell(takeAgent(calls, { busy: ref(true), hasProposal: ref(true) }), calls, { controls: '<div data-testid="ctl">controls</div>' })

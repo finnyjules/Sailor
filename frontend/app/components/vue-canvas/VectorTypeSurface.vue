@@ -24,7 +24,7 @@
  *    has already paid for more than once.
  */
 import { computed, markRaw, onBeforeUnmount, onMounted, ref, shallowRef, toRaw, watch } from 'vue'
-import { Combine } from 'lucide-vue-next'
+import { Combine, Pause, Play } from 'lucide-vue-next'
 import type { ControlSpec } from '~/lib/spacetype/effect'
 import { DEFAULT_FONT_ID, VARIABLE_FONTS } from '~/data/variable-fonts'
 import { loadGoogleCatalog, nearestWeight, type GoogleFont } from '~/data/google-fonts'
@@ -79,6 +79,9 @@ import { onFieldCatalogReady } from '~/lib/shaderfill/field'
 import ShaderFillEditor from '~/components/vue-canvas/widgets/ShaderFillEditor.vue'
 import StudioModalShell from '~/components/vue-canvas/StudioModalShell.vue'
 import StudioActionsFooter from '~/components/vue-canvas/studio/StudioActionsFooter.vue'
+import StudioActionRows from '~/components/vue-canvas/studio/StudioActionRows.vue'
+import StudioInspectorHead from '~/components/vue-canvas/studio/StudioInspectorHead.vue'
+import StudioToolButton from '~/components/vue-canvas/studio/StudioToolButton.vue'
 import StudioLayerStack from '~/components/vue-canvas/StudioLayerStack.vue'
 import StudioSection from '~/components/vue-canvas/StudioSection.vue'
 import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vue'
@@ -89,6 +92,7 @@ import FontPicker from '~/components/vue-canvas/FontPicker.vue'
 import CanvasContextMenu from '~/components/vue-canvas/CanvasContextMenu.vue'
 import SweepPopover from '~/components/vue-canvas/studio/SweepPopover.vue'
 import { useStudioAgent } from '~/composables/useStudioAgent'
+import { studioActions } from '~/lib/studio/studioActions'
 import { useStudioVarBindings } from '~/composables/useStudioVarBindings'
 import { useStudioVarMenu } from '~/composables/useStudioVarMenu'
 import { makeConfigParams } from '~/lib/agent/configParams'
@@ -252,6 +256,15 @@ const pinnedFonts = VARIABLE_FONTS.map(f => ({ label: f.label, value: f.id, vari
  */
 const fontPickerValue = computed(() => (fontRef.value.kind === 'catalog' ? fontRef.value.id : fontRef.value.family))
 const fontPickerDisplay = computed(() => (fontRef.value.kind === 'catalog' ? vtFontRefLabel(fontRef.value) : fontRef.value.family))
+
+/** The prompt's chip and the inspector head: the user's own words, collapsed and
+ *  cut to 24 characters. The head's second line is the family the picker shows. */
+const promptLabel = computed(() => {
+  const t = (config.value.text ?? '').replace(/\s+/g, ' ').trim()
+  if (!t) return 'Vector type'
+  return t.length > 24 ? `${t.slice(0, 24).trimEnd()}…` : t
+})
+const inspectorActions = computed(() => studioActions({ place: 'vectortype', canTakes: true }))
 
 /**
  * A pick from the shared picker, turned into a token. Each branch seeds a REAL
@@ -1580,7 +1593,8 @@ const motionMoveCount = computed(() => config.value.motion.moves.length + derive
   <StudioModalShell
     title="Vector Type"
     :agent="vtAgent"
-    agent-placeholder="Describe the type — e.g. heavier and wider, letters cascading in…"
+    prompt-place="vector-type-studio" :prompt-label="promptLabel"
+    :prompt-suggestions="['Warmer', 'Calmer', 'More contrast']"
     @close="closeEditor"
   >
     <!-- THE APPEARANCE STACK. Illustrator's Appearance panel: an ordered list of
@@ -1703,12 +1717,18 @@ const motionMoveCount = computed(() => config.value.motion.moves.length + derive
       </div>
     </template>
 
+    <template #tools>
+      <StudioToolButton v-if="animated" :label="playing ? 'Pause' : 'Play'" :icon="playing ? Pause : Play" :active="playing" @click="playing = !playing" />
+      <input v-if="animated" type="range" aria-label="Scrub preview" class="mx-2 h-1 w-40 self-center accent-white"
+             :min="0" :max="config.motion.duration" step="0.01" :value="previewTime"
+             @input="onSeek(($event.target as HTMLInputElement).valueAsNumber)">
+    </template>
+
     <template #actions>
       <input ref="importInput" type="file" accept="application/json" class="hidden" @change="onImportFile" />
       <StudioActionsFooter :spec="{
         status: { saving: autoSaving, saved: autoSaved, error: actionError || null },
         utilities: [
-          ...(animated ? [{ label: playing ? 'Pause' : 'Play', onClick: () => { playing = !playing } }] : []),
           { label: 'Import settings', onClick: triggerImport },
           { label: 'Export settings', onClick: exportSettings },
         ],
@@ -1727,6 +1747,8 @@ const motionMoveCount = computed(() => config.value.motion.moves.length + derive
     </template>
 
     <template #controls>
+      <StudioInspectorHead :title="promptLabel" :subtitle="fontPickerDisplay" />
+      <StudioActionRows :actions="inspectorActions" />
       <!-- Design | Motion — the same split Gradient, Space Type and 3D use. -->
       <div class="flex gap-1 rounded-lg border border-white/[0.07] bg-white/[0.03] p-1">
         <button type="button" class="flex-1 rounded px-2 py-1 text-[11px] transition"

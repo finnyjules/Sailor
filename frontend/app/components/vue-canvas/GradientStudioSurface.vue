@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, toRaw, watch } from 'vue'
-import { Dices, Lock, Minus, Plus, Trash2, Unlock } from 'lucide-vue-next'
+import { Dices, Lock, Minus, Plus, Scan, Trash2, Unlock } from 'lucide-vue-next'
 import { gradientFx } from '~/lib/gradientfx/renderer'
 import { LIQUID_PRESETS, buildConfig, defaultConfig, liquidConfig, liquidPresetConfig, meshConfig, reroll, rippleConfig, stackConfig, type RerollScope } from '~/lib/gradientfx/randomize'
 import { MESH_MAX_POINTS, buildMeshPoints, defaultMesh, recolorMeshPoints } from '~/lib/gradientfx/mesh'
@@ -16,6 +16,9 @@ import StudioSection from '~/components/vue-canvas/StudioSection.vue'
 import StudioLayerStack from '~/components/vue-canvas/StudioLayerStack.vue'
 import CurveHandleEditor from '~/components/vue-canvas/CurveHandleEditor.vue'
 import StudioActionsFooter from '~/components/vue-canvas/studio/StudioActionsFooter.vue'
+import StudioActionRows from '~/components/vue-canvas/studio/StudioActionRows.vue'
+import StudioInspectorHead from '~/components/vue-canvas/studio/StudioInspectorHead.vue'
+import StudioToolButton from '~/components/vue-canvas/studio/StudioToolButton.vue'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import BindableRow from '~/components/vue-canvas/studio/BindableRow.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
@@ -28,6 +31,7 @@ import {
 import { DEFAULT_POST } from '~/lib/studio/post/settings'
 import type { ControlSpec } from '~/lib/spacetype/effect'
 import { useStudioAgent } from '~/composables/useStudioAgent'
+import { studioActions } from '~/lib/studio/studioActions'
 import { useStudioVarBindings } from '~/composables/useStudioVarBindings'
 import { useStudioVarMenu } from '~/composables/useStudioVarMenu'
 import { makeConfigParams } from '~/lib/agent/configParams'
@@ -79,6 +83,13 @@ const isCurve = computed(() => activeLayout.value === 'curve')
 // Layers are named for what they are ("Wave", "Bands"), not their position, so a
 // reorder moves a recognisable name instead of renumbering the whole stack.
 const layerNames = computed(() => layerLabels(config.value))
+// The prompt's chip and the inspector head both name the selected layer, as the
+// layer stack labels it.
+const promptLabel = computed(() => layerNames.value[activeLayer.value] ?? 'Gradient')
+const inspectorActions = computed(() => studioActions({
+  place: 'gradient', canTakes: true,
+  local: [{ id: 'randomize', label: 'Randomize', group: 'develop', ai: false, lands: null, run: { call: () => randomize('all') } }],
+}))
 
 // Inspector tabs — Design (everything that shapes the still frame) vs Motion (tracks
 // + timing), matching Space Type and 3D Studio. Export stays on Design: it writes a
@@ -962,7 +973,8 @@ function onCurve(path: string, value: number | string) {
   <StudioModalShell
     title="Gradient studio"
     :agent="gradientAgent"
-    agent-placeholder="Describe the look — e.g. warmer, more liquid, calmer…"
+    prompt-place="gradient-studio" :prompt-label="promptLabel"
+    :prompt-suggestions="['Warmer', 'Calmer', 'More contrast']"
     @close="closeEditor"
   >
     <template #aside>
@@ -996,20 +1008,13 @@ function onCurve(path: string, value: number | string) {
              StringPathEditor/LoftSpineEditor) so it stays aligned through the
              preview's own pan/zoom CSS transform. -->
         <CurveHandleEditor v-if="isCurve" class="z-30" :model-value="layer.curve ?? CURVE_DEFAULTS" :canvas="canvas" @edit="onCurve" />
-        <!-- Zoom controls (default z: the pointer-events-none mesh-handle overlay
-             above lets clicks fall through here, and handles stay grabbable). -->
-        <div class="absolute left-1/2 top-3 flex -translate-x-1/2 items-center gap-0.5 rounded-lg border border-white/10 bg-neutral-900/80 p-0.5 shadow-lg backdrop-blur">
-          <button class="rounded p-1.5 text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title="Zoom out" :disabled="zoom <= 0.25" @click="zoomBy(1 / 1.25)">
-            <Minus class="h-3.5 w-3.5" />
-          </button>
-          <button class="min-w-[3.25rem] rounded px-1 py-1 text-center text-xs tabular-nums text-white/70 transition hover:bg-white/10 hover:text-white" title="Reset to 100%" @click="resetZoom">
-            {{ Math.round(zoom * 100) }}%
-          </button>
-          <button class="rounded p-1.5 text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-30" title="Zoom in" :disabled="zoom >= 4" @click="zoomBy(1.25)">
-            <Plus class="h-3.5 w-3.5" />
-          </button>
-        </div>
       </div>
+    </template>
+
+    <template #tools>
+      <StudioToolButton label="Zoom out" :icon="Minus" :disabled="zoom <= 0.25" @click="zoomBy(1 / 1.25)" />
+      <StudioToolButton :label="`${Math.round(zoom * 100)}%`" :icon="Scan" title="Reset to 100%" @click="resetZoom" />
+      <StudioToolButton label="Zoom in" :icon="Plus" :disabled="zoom >= 4" @click="zoomBy(1.25)" />
     </template>
 
     <template #actions>
@@ -1033,6 +1038,8 @@ function onCurve(path: string, value: number | string) {
     </template>
 
     <template #controls>
+      <StudioInspectorHead :title="promptLabel" />
+      <StudioActionRows :actions="inspectorActions" />
       <!-- Design | Motion — same split as Space Type and 3D Studio. -->
       <div class="flex shrink-0 gap-1 rounded-lg bg-white/[0.04] p-1 text-[11px]">
         <button type="button" class="flex-1 rounded px-2 py-1"
