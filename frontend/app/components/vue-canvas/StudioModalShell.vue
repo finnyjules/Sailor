@@ -49,6 +49,9 @@ const props = defineProps<{
   effectTarget?: (m: StudioEffectTargetRequest) => EffectTarget | string | null
   /** Called after a worker take is kept, with its request (the Shader studio records a My-effect version). */
   afterTakeKeep?: (request: string) => void
+  /** Hide the prompt for now (Shape studio's pen owns the dock while it is open). The prompt
+   *  stays mounted (v-show), so a draft survives; the #tools bar still shows. */
+  promptHidden?: boolean
 }>()
 const emit = defineEmits<{ close: [] }>()
 
@@ -182,13 +185,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                  class="pointer-events-none absolute left-1/2 z-20 w-full max-w-[640px] -translate-x-1/2 px-4"
                  :style="{ bottom: bottomOffset + 'px' }">
               <div data-testid="studio-shell-dock" class="pointer-events-auto flex flex-col gap-2">
-                <StudioPromptHost v-if="hasPrompt" :prompt="prompt" />
+                <StudioPromptHost v-if="hasPrompt" v-show="!promptHidden" :prompt="prompt" />
                 <StudioToolBar v-if="hasTools()"><slot name="tools" /></StudioToolBar>
               </div>
             </div>
           </template>
           <div v-else-if="hasPrompt || hasTools()" data-testid="studio-shell-dock" class="mt-3 mb-3 flex w-full max-w-[640px] shrink-0 flex-col gap-2 self-center">
-            <StudioPromptHost v-if="hasPrompt" :prompt="prompt" />
+            <StudioPromptHost v-if="hasPrompt" v-show="!promptHidden" :prompt="prompt" />
             <StudioToolBar v-if="hasTools()"><slot name="tools" /></StudioToolBar>
           </div>
         </div>

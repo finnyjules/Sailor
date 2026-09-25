@@ -18,7 +18,16 @@ import type { ControlSpec } from '~/lib/spacetype/effect'
 import type { GeoShapeConfig } from '~/lib/geoshape/config'
 import {
   renderStudio, studioToSvg, drawToCanvas, warmPaints, studioWarmPaints, hasAsyncPaint, studioFramePad,
+  contentBounds, fitScale,
 } from '~/lib/geoshape/render'
+import type { VectorShape } from '~/lib/vector/svg'
+import { isTypingInField } from '~/composables/pen/usePen'
+import { frozenPreviewFrame } from '~/lib/geoshape/penShape'
+import { useShapePenSession } from '~/composables/geoshape/useShapePenSession'
+import PenOverlay from '~/components/pen/PenOverlay.vue'
+import PenToolbar from '~/components/pen/PenToolbar.vue'
+import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
+import StudioRow from '~/components/vue-canvas/studio/StudioRow.vue'
 import {
   LAYER_MAX, mergeLayer, studioDocFromPersisted, normalizeBackground, type GeoStudioDoc, type GeoLayer,
 } from '~/lib/geoshape/studio'
@@ -101,6 +110,8 @@ function saveConfig() {
   }
 }
 function closeEditor() {
+  // A pen still open puts the mark back first, so no half-drawn shape is saved.
+  penCancel()
   try { saveConfig() } catch (e) { console.error('[shape-studio] saveConfig failed', e) }
   emit('close')
 }
@@ -145,6 +156,9 @@ function controlVisible(c: ControlSpec): boolean {
   return visibleControlSet.value.has(c as GeoControl)
 }
 function setGeoControl(key: string, value: string | number | boolean | Paint | Paint[]) {
+  // Choosing Drawn with nothing drawn yet opens the pen straight away; the session
+  // switches the shape itself, so Cancel puts the previous shape back.
+  if (key === 'shape' && value === 'drawn' && !activeMark.value.sketch) { openPen(); return }
   paramsProxy[key] = value as string | number
 }
 function paramValue(key: string): string | number | boolean {
@@ -219,7 +233,7 @@ const railLayers = computed(() => doc.value.layers.map((l, i) => ({ label: layer
 const promptLabel = computed(() => (isSelected.value ? layerLabel(activeLayer.value) : 'Shape'))
 const inspectorActions = computed(() => studioActions({
   place: 'shape', canTakes: true,
-  local: isSelected.value ? [{ id: 'reroll', label: 'Re-roll', group: 'develop', ai: false, lands: null, run: { call: rerollConfig } }] : [],
+  local: isSelected.value && !penSession.value ? [{ id: 'reroll', label: 'Re-roll', group: 'develop', ai: false, lands: null, run: { call: rerollConfig } }] : [],
 }))
 
 // Click a row to select it; click the ALREADY-active row again to deselect → the
@@ -382,6 +396,10 @@ function previewDims() {
 
 let lastW = 0, lastH = 0
 let renderToken = 0
+// What the preview last framed, outside a pen session: the shapes (doc units) and the
+// fit's CSS px per doc unit — the pen's frozen frame starts from exactly this framing.
+let lastShapes: VectorShape[] = []
+let lastCssScale = 0
 async function renderPreview() {
   const el = canvas.value
   if (!el) return
@@ -396,13 +414,22 @@ async function renderPreview() {
     const shapes = await renderStudio(doc.value)
     if (token !== renderToken) return // superseded by a later render
     const pad = studioFramePad(doc.value)
-    drawToCanvas(shapes, ctx, el.width, el.height, pad, doc.value.background)
+    // While the pen is open the framing is FROZEN (so the drawing never rescales under
+    // the pen) and the composite is faint; otherwise the historical call, unchanged.
+    const pf = penSession.value?.frame
+    const opts = pf ? { frame: { cx: pf.cx, cy: pf.cy, scale: pf.scale * (el.width / cssW) }, alpha: 0.3 } : undefined
+    if (!pf) {
+      lastShapes = shapes
+      lastCssScale = fitScale(contentBounds(shapes), el.width, el.height, pad) * (cssW / el.width)
+    }
+    drawToCanvas(shapes, ctx, el.width, el.height, pad, doc.value.background, opts)
+    updatePenBox()
     // Image/shader fills resolve to FALLBACK_FILL until warmed — warm-then-repaint.
     const paints = studioWarmPaints(shapes, doc.value.background)
     if (hasAsyncPaint(paints)) {
       await warmPaints(paints, { w: el.width, h: el.height })
       if (token !== renderToken) return
-      drawToCanvas(shapes, ctx, el.width, el.height, pad, doc.value.background)
+      drawToCanvas(shapes, ctx, el.width, el.height, pad, doc.value.background, opts)
     }
   } catch (e) {
     console.error('[shape-studio] preview render failed', e)
@@ -430,14 +457,76 @@ function scheduleRender() {
 watch(doc, scheduleRender, { deep: true })
 watch([canvasW, canvasH], scheduleRender)
 
+// ── the shared pen: a Drawn layer's unit is drawn over the preview ────────────────
+// The frame is frozen at open from the framing the preview last showed: the normal
+// padding (doc units) becomes CSS px through the live fit, so opening the pen does not
+// shift the view; the unit's square is `size × scale × √2` so a rotated unit still fits.
+const { session: penSession, open: penOpen, commitSession: penCommit, cancelSession: penCancel } = useShapePenSession({
+  doc: () => doc.value,
+  layerIndex: () => activeLayerIdx.value,
+  frameFor: (layer) => {
+    const { cssW, cssH } = previewDims()
+    const cb = lastShapes.length ? contentBounds(lastShapes) : null
+    const padCss = Math.max(0, studioFramePad(doc.value) * lastCssScale)
+    const size = layer.mark.size * layer.offset.scale * Math.SQRT2
+    return frozenPreviewFrame(cb, { x: layer.offset.x, y: layer.offset.y }, size, cssW, cssH, padCss)
+  },
+})
+const penOverlayRef = ref<InstanceType<typeof PenOverlay> | null>(null)
+// The overlay sits over the canvas's CSS box inside the preview div (offsetLeft/Top are
+// relative to that positioned div — no client rects, so nothing is counted twice).
+const penBox = reactive({ left: 0, top: 0, w: 1, h: 1 })
+function updatePenBox() {
+  const el = canvas.value
+  if (!el) return
+  penBox.left = el.offsetLeft; penBox.top = el.offsetTop
+  penBox.w = el.offsetWidth || 1; penBox.h = el.offsetHeight || 1
+}
+function openPen() {
+  if (!isSelected.value) return
+  updatePenBox()
+  penOpen()
+}
+watch(penSession, scheduleRender)
+/** Shape rows other than the Draw button are locked while the pen is open. */
+const shapeRowControls = computed(() => (penSession.value
+  ? panelGeoControls.filter(c => c.group === 'Shape' && controlVisible(c))
+  : []))
+const LOCKED_TITLE = 'Finish the pen first'
+
+// Keys: while the pen is open every key goes to it, in the CAPTURE phase, before the
+// shell's bubble-phase Escape (which would close the studio). A key typed into a field
+// is left to that field (stopping it here would stop it reaching the field at all).
+// Any other ⌘/Ctrl combo belongs to the pen too, so the browser's own action never fires.
+function onPenKeydown(e: KeyboardEvent) {
+  if (!penSession.value) return
+  if (isTypingInField()) return
+  penOverlayRef.value?.onHostKeydown(e)
+  if ((e.metaKey || e.ctrlKey) && e.key !== 'Meta' && e.key !== 'Control') e.preventDefault()
+  e.stopPropagation()
+}
+function onPenKeyup(e: KeyboardEvent) {
+  if (!penSession.value) return
+  penOverlayRef.value?.onHostKeyup(e)
+  e.stopPropagation()
+}
+function onPenBlur() { if (penSession.value) penOverlayRef.value?.onHostBlur() }
+
 function onWindowResize() { scheduleRender() }
 
 onMounted(() => {
   void renderPreview()
   window.addEventListener('resize', onWindowResize)
+  window.addEventListener('keydown', onPenKeydown, true)
+  window.addEventListener('keyup', onPenKeyup, true)
+  window.addEventListener('blur', onPenBlur)
 })
 onBeforeUnmount(() => {
+  penCancel()   // before the save: an open pen never leaves a half-drawn shape behind
   saveConfig()
+  window.removeEventListener('keydown', onPenKeydown, true)
+  window.removeEventListener('keyup', onPenKeyup, true)
+  window.removeEventListener('blur', onPenBlur)
   window.removeEventListener('resize', onWindowResize)
   if (rafId != null) cancelAnimationFrame(rafId)
   if (actionErrorTimer) clearTimeout(actionErrorTimer)
@@ -515,10 +604,13 @@ async function exportSvg() {
     :agent="shapeAgent"
     prompt-place="shape-studio" :prompt-label="promptLabel"
     :prompt-suggestions="['Warmer', 'Calmer', 'More contrast']"
+    :prompt-hidden="!!penSession"
     @close="closeEditor"
   >
     <!-- Left rail: the stack of shape layers (same component the other studios use). -->
     <template #aside>
+      <!-- Locked while the pen is open: the session belongs to one layer. -->
+      <div class="relative flex min-h-0 w-full" :class="penSession ? 'opacity-50' : ''">
       <StudioLayerStack
         :layers="railLayers"
         :active-index="activeLayer"
@@ -530,6 +622,8 @@ async function exportSvg() {
         @reorder="reorderLayer"
         @toggle="toggleLayer"
       />
+      <div v-if="penSession" class="absolute inset-0 z-10 cursor-not-allowed" :title="LOCKED_TITLE" data-testid="shape-rail-lock" />
+      </div>
     </template>
 
     <template #preview>
@@ -537,10 +631,30 @@ async function exportSvg() {
         <!-- Checkered backdrop (cosmetic only — the exported PNG/SVG stay transparent). -->
         <canvas
           ref="canvas"
+          data-testid="shape-preview"
           class="max-h-full max-w-full rounded-lg shadow-2xl"
           style="background-image:linear-gradient(45deg,#3a3a3f 25%,transparent 25%),linear-gradient(-45deg,#3a3a3f 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#3a3a3f 75%),linear-gradient(-45deg,transparent 75%,#3a3a3f 75%);background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0px;background-color:#242427"
         />
+        <!-- The shared pen over the canvas CSS box (keys fed by the capture listener). -->
+        <div v-if="penSession" class="absolute" data-testid="shape-pen-box"
+             :style="{ left: penBox.left + 'px', top: penBox.top + 'px', width: penBox.w + 'px', height: penBox.h + 'px' }">
+          <PenOverlay
+            :key="penSession.key"
+            ref="penOverlayRef"
+            data-testid="shape-pen-overlay"
+            :pen="penSession.pen"
+            :view="penSession.view.value"
+            :width="penBox.w"
+            :height="penBox.h"
+            keyboard="host"
+            @commit="penCommit"
+            @cancel="penCancel"
+          />
+        </div>
       </div>
+    </template>
+    <template #tools>
+      <PenToolbar v-if="penSession" :key="penSession.key" :pen="penSession.pen" @commit="penCommit" @cancel="penCancel" />
     </template>
     <template #actions>
       <StudioActionsFooter :spec="{
@@ -599,6 +713,20 @@ async function exportSvg() {
           :visible="controlVisible"
           @set="setGeoControl"
         >
+          <!-- The pen: draw or edit a Drawn layer's unit over the preview. -->
+          <template #section-Shape>
+            <StudioButton v-if="activeMark.shape === 'drawn' && !penSession" data-testid="shape-draw" class="w-full" @click="openPen">
+              {{ activeMark.sketch ? 'Edit the shape' : 'Draw the shape' }}
+            </StudioButton>
+          </template>
+          <!-- While the pen is open the Shape rows are shown but locked. -->
+          <template v-for="c in shapeRowControls" #[`control-${c.key}`]>
+            <div :title="LOCKED_TITLE" class="cursor-not-allowed" aria-disabled="true">
+              <div class="pointer-events-none opacity-40" inert>
+                <StudioRow :spec="c" :model-value="paramValue(c.key)" :bindable="false" />
+              </div>
+            </div>
+          </template>
           <template #control-fill>
             <FillControl allow-image :show-anchor="false" :model-value="activeMark.fill" @update:model-value="setGeoControl('fill', $event)" />
           </template>
