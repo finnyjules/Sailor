@@ -4,7 +4,8 @@
  * polylines (normalized artboard coords + a width-fraction radius), so the same
  * mask can be previewed on the editor canvas AND baked into the *source image's
  * native pixel space* for the model — no drift between what's painted and what's
- * sent. Mirrors the tool-mode contract of useVectorPen (active/down/move/up).
+ * sent. Tool-mode contract: active/down/move/up (the Frame's pen is now the
+ * shared pen session, useFramePenSession, which the overlay drives itself).
  *
  * Mask convention for FLUX Fill: WHITE = inpaint, BLACK = keep.
  */

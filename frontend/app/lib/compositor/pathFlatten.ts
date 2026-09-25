@@ -23,8 +23,9 @@
  *  - **The shape library** (`app/data/shape-library.manifest.json`, 100 shapes):
  *    `M L C Z` only, absolute. `transformShapePath` throws on anything else, so
  *    that is enforced rather than incidental.
- *  - **The pen** (`useVectorPen.ts` / `useVectorNodeEdit.ts`): emits `M C L Z`,
- *    absolute.
+ *  - **The shared pen** (`sketchToLocalD` in `penFrame.ts`, via
+ *    `sketchPathData`): emits `M L A C Z`, absolute — so `A` is live too.
+ *    **The node editor** (`useVectorNodeEdit.ts`): `M C L Z`, absolute.
  *  - **Polygon/star layers** (`polygonGeometry.ts`): `M L Q Z`, absolute. So `Q`
  *    is live today.
  *  - **SVG import and node-edit bake** go through paper.js's `getPathData`,

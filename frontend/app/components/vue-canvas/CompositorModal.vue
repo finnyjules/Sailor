@@ -80,7 +80,10 @@ import AgentBar from '~/components/agent/AgentBar.vue'
 import AgentProposal from '~/components/agent/AgentProposal.vue'
 import AgentProgress from '~/components/agent/AgentProgress.vue'
 import AgentSweep from '~/components/agent/AgentSweep.vue'
-import { useVectorPen, buildPathLayerFromAnchors } from '~/composables/useVectorPen'
+import { useFramePenSession } from '~/composables/frame/useFramePenSession'
+import { isTypingInField } from '~/composables/pen/usePen'
+import PenOverlay from '~/components/pen/PenOverlay.vue'
+import PenToolbar from '~/components/pen/PenToolbar.vue'
 import { useBrushPaint } from '~/composables/useBrushPaint'
 import { toWidthNorm, brushBoxFromStrokes, strokeRadiusPx, maskStrokeToLocal, type PaintStroke } from '~/lib/compositor/brushStamp'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
@@ -2013,9 +2016,7 @@ async function deleteNodeAnchor() {
 }
 
 // ── Pen tool + SVG import ────────────────────────────────────────────────────
-const pen = useVectorPen()
 const brush = useBrushPaint()
-const PEN_STYLE = { fill: '#3b82f6', stroke: '', strokeWidth: 0 }
 
 function clientToNorm(e: PointerEvent | MouseEvent) {
   const r = canvasRect(); if (!r) return null
@@ -2028,30 +2029,32 @@ function clientToView(e: { clientX: number; clientY: number }): { x: number; y: 
   const r = canvasRef.value?.getBoundingClientRect(); if (!r || !r.width || !r.height) return null
   return { x: (e.clientX - r.left) / r.width * viewSize.w, y: (e.clientY - r.top) / r.height * viewSize.h }
 }
-function onPenPointerDown(e: PointerEvent) {
-  const p = clientToNorm(e); if (!p) return
-  e.preventDefault(); e.stopPropagation()
-  if (pen.down(p.nx, p.ny) === 'closed') finishPen()
-}
-function onPenPointerMove(e: PointerEvent) {
-  const p = clientToNorm(e); if (!p) return
-  pen.move(p.nx, p.ny)
-}
-function onPenPointerUp() { pen.up() }
-function finishPen() {
-  const layer = buildPathLayerFromAnchors(
-    pen.anchors.value, pen.draftClosed.value,
-    { w: canvasDisplay.w, h: canvasDisplay.h }, PEN_STYLE,
-  )
-  const guideFor = penGuideTargetId.value
-  penGuideTargetId.value = null
-  pen.setActive(false)
-  penJustFinished = true
-  if (!layer) return
+/** One-shot: swallow the click that closed a pen path (see onCanvasClick). */
+let penJustFinished = false
+/** The text layer waiting for a drawn guide, if any. Cleared when the pen is
+ *  cancelled, so leaving the tool never silently rewires a layer later.
+ *  (Interim until the guide gets its own pen session: the new drawing's
+ *  outline becomes the text's guide instead of a layer — see penAddPathLayers.) */
+const penGuideTargetId = ref<string | null>(null)
+// The shared pen (Plan B): one drawing session at a time. A new drawing
+// becomes a path layer that remembers its drawing (see useFramePenSession).
+const { session: penSession, open: openPenSession, commitSession: commitPenSession, cancelSession: cancelPenSessionRaw } = useFramePenSession({
+  layers: () => localLayers.value,
+  size: () => ({ W: canvasDisplay.w, H: canvasDisplay.h }),
+  recordHistory: () => recordHistory(),
+  commit: (next) => commit(next as any),
+  addPathLayers: (ls) => penAddPathLayers(ls),
+  selectLocal: (id) => { if (!penGuideTargetId.value) selectLocal(id) },
+})
+/** The overlay (keyboard="host"): the Frame's capture key handler feeds it keys. */
+const penOverlayRef = ref<InstanceType<typeof PenOverlay> | null>(null)
+function penAddPathLayers(ls: any[]) {
+  const layer = ls[0]
+  const guideFor = penGuideTargetId.value   // cleared by commitPenSessionAndSwallowClick, AFTER the session's selectLocal
   // Drawing FOR a text layer: the path becomes that layer's guide and never
   // becomes a layer of its own. Same ownership rule as every other follow mode —
   // nothing extra in the layer list, and it dies with the text.
-  if (guideFor) {
+  if (guideFor && layer) {
     const target = localLayers.value.find(l => l.id === guideFor && l.kind === 'text')
     if (target) {
       setLocal(guideFor, {
@@ -2066,27 +2069,39 @@ function finishPen() {
       return
     }
   }
-  addPathLayers([layer])
+  addPathLayers(ls)
 }
-/** One-shot: swallow the click that closed a pen path (see onCanvasClick). */
-let penJustFinished = false
-/** The text layer waiting for a drawn guide, if any. Cleared when the pen is
- *  cancelled, so leaving the tool never silently rewires a layer later. */
-const penGuideTargetId = ref<string | null>(null)
+function commitPenSessionAndSwallowClick() {
+  commitPenSession()
+  penGuideTargetId.value = null
+  penJustFinished = true
+}
+function cancelPenSession() {
+  if (penSession.value) cancelPenSessionRaw()
+  penGuideTargetId.value = null
+}
 function drawGuideForSelectedText() {
   const l = selectedLocal.value
   if (!l || l.kind !== 'text') return
   penGuideTargetId.value = l.id
-  if (!pen.active.value) togglePen()
+  if (!penSession.value) togglePen()
 }
-function togglePen() { if (viewOnlyGuard()) return; if (smartActive.value) { if (smartActionBusy.value) return; exitSmartMode() }; pen.setActive(!pen.active.value); if (pen.active.value) { selectLocal(null); exitNodeEdit(); brush.setActive(false) } else { penGuideTargetId.value = null } }
+function togglePen() {
+  if (viewOnlyGuard()) return
+  if (smartActive.value) { if (smartActionBusy.value) return; exitSmartMode() }
+  if (penSession.value) { cancelPenSession(); return }
+  const guideFor = penGuideTargetId.value
+  selectLocal(null); exitNodeEdit(); brush.setActive(false)
+  penGuideTargetId.value = guideFor
+  openPenSession({ kind: 'new' })
+}
 // Return to the default Select tool: leave pen/node-edit/generate modes.
 function selectTool() {
-  if (pen.active.value) { pen.setActive(false); penGuideTargetId.value = null }
+  cancelPenSession()
   if (nodeEdit.active.value) exitNodeEdit()
   if (genActive.value) exitGenMode()
 }
-const isSelectTool = computed(() => !pen.active.value && !nodeEdit.active.value && !genActive.value && !brush.active.value)
+const isSelectTool = computed(() => !penSession.value && !nodeEdit.active.value && !genActive.value && !brush.active.value)
 
 /** True when an image layer has an active tint fill (shows blend + opacity). */
 function hasTint(l: any): boolean { const t = l?.tint; return !!t && t !== 'none' && t !== '' }
@@ -2097,7 +2112,7 @@ function toggleDistort() {
   if (viewOnlyGuard()) return // view-only at a viewing size: snap back to design first
   if (smartActive.value) { if (smartActionBusy.value) return; exitSmartMode() }
   distortTool.value = !distortTool.value
-  if (distortTool.value) { pen.setActive(false); exitNodeEdit(); if (genActive.value) exitGenMode(); brush.setActive(false) }
+  if (distortTool.value) { cancelPenSession(); exitNodeEdit(); if (genActive.value) exitGenMode(); brush.setActive(false) }
 }
 // ── Brush: freehand paint tool (mutually exclusive with pen/node/gen/distort) ─
 function toggleBrush() {
@@ -2105,7 +2120,7 @@ function toggleBrush() {
   if (smartActive.value) { if (smartActionBusy.value) return; exitSmartMode() }
   brush.setActive(!brush.active.value)
   if (brush.active.value) {
-    pen.setActive(false); exitNodeEdit(); if (genActive.value) exitGenMode(); distortTool.value = false
+    cancelPenSession(); exitNodeEdit(); if (genActive.value) exitGenMode(); distortTool.value = false
     // If a brush layer is already selected, keep it as the paint target so you can
     // KEEP EDITING it (add/erase more strokes). Otherwise start a fresh layer.
     // (You can also retarget while painting by clicking a brush layer in the panel.)
@@ -2267,6 +2282,28 @@ function onKeydown(e: KeyboardEvent) {
   // duplicate, paste, delete, group or undo in the middle of a gesture would write its own undo
   // step against a layer the drag is still holding pins on. The release settles the gesture.
   if (viewDrag.value && isViewDragEditKey(e)) { e.preventDefault(); e.stopPropagation(); return }
+  // A pen session owns the keyboard (Plan B decision 6). Only the viewport keys
+  // stay the Frame's — Space (hold to pan) and ⌘= ⌘− ⌘0 ⌘2 (zoom) — handled
+  // right here; every other key goes to the pen and stops, so no bubble
+  // listener (the modal's Escape close, the layer Delete, the canvas's ⌘Z)
+  // ever sees it, whether or not the pen acted on it. A key typed into a field
+  // (the pen's own value box, an inspector input) is left to that field: the
+  // field's own keydown (the value box's Enter/Escape) must still run, and the
+  // bubble handleKeydown returns at once while a session is open.
+  if (penSession.value) {
+    if (isTypingInField()) return
+    const meta = e.metaKey || e.ctrlKey
+    if (e.code === 'Space' && !meta && !e.altKey) { e.preventDefault(); e.stopPropagation(); spaceDown.value = true; return }
+    if (meta && !e.altKey) {
+      if (e.key === '=' || e.key === '+') { e.preventDefault(); e.stopPropagation(); zoomBy(1.2); return }
+      if (e.key === '-' || e.key === '_') { e.preventDefault(); e.stopPropagation(); zoomBy(1 / 1.2); return }
+      if (e.key === '0') { e.preventDefault(); e.stopPropagation(); zoomFit(); return }
+      if (e.key === '2') { e.preventDefault(); e.stopPropagation(); zoomToSelection(); return }
+    }
+    penOverlayRef.value?.onHostKeydown(e)
+    e.stopPropagation()
+    return
+  }
   // Keyboard nudge/duplicate on the current selection — deferred first so it
   // doesn't fire while typing in a field or text-editing a layer.
   const t = e.target as HTMLElement | null
@@ -2280,7 +2317,7 @@ function onKeydown(e: KeyboardEvent) {
   // must not also nudge the selected layer.
   const ownsKeys = !!t?.closest?.('[data-owns-keys]')
   // The Layout tab owns V and ←/→ (Vary) while it is showing — ahead of the nudge and the V tool.
-  if (!ownsKeys && !pen.active.value && layoutVaryKey(e, typing || t?.tagName === 'SELECT')) return
+  if (!ownsKeys && layoutVaryKey(e, typing || t?.tagName === 'SELECT')) return
   // At a viewing size the arrow keys move what is DRAWN by one screen px, settled at the design size.
   if (!typing && !editingId.value && !ownsKeys && viewEditing.value && viewNudge(e)) return
   if (!typing && !editingId.value && !ownsKeys && handleEditorKey(e)) return
@@ -2293,8 +2330,6 @@ function onKeydown(e: KeyboardEvent) {
     else disarmGenGesture()
     return
   }
-  if (e.key === 'Escape' && pen.active.value) { e.stopPropagation(); pen.setActive(false); return }
-  if (e.key === 'Enter' && pen.active.value && pen.anchors.value.length >= 2) { e.preventDefault(); finishPen(); return }
   // V → Select tool (when not typing in a field).
   if ((e.key === 'v' || e.key === 'V') && !e.metaKey && !e.ctrlKey && !editingId.value) {
     const tag = (e.target as HTMLElement)?.tagName
@@ -2363,6 +2398,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 function onKeyup(e: KeyboardEvent) {
   if (e.code === 'Space') spaceDown.value = false
+  if (penSession.value) { if (e.code !== 'Space') penOverlayRef.value?.onHostKeyup(e); return }
   if (e.key === 'Alt') {
     optDown.value = false
     // Keep-alive: releasing Option MID-GESTURE (a box is being/has been drawn, or a
@@ -2380,6 +2416,7 @@ function onKeyup(e: KeyboardEvent) {
 // rather than stranding optDown + the crosshair with the next click drawing a box.
 function clearPan() {
   spaceDown.value = false; panning.value = false; panFrom = null
+  penOverlayRef.value?.onHostBlur()
   optDown.value = false
   if (genSpring.value && !genDraw.value && !genHasMask.value && !genResult.value) disarmGenGesture()
   else genSpring.value = false
@@ -3753,6 +3790,9 @@ function viewNudge(e: KeyboardEvent): boolean {
 }
 
 function onCanvasPointerDownCapture(e: PointerEvent) {
+  // A pen session owns the artboard: let the event reach PenOverlay untouched
+  // (the stage's own capture pan handler has already run — the host owns pan).
+  if (penSession.value) return
   if (viewEditing.value) { onViewPointerDown(e); return } // a viewing size: the resolved-box path above
   if (viewOnlyGuard()) return // view-only at a viewing size: snap back to design first
   // The generated-object mini toolbar lives inside the canvas — let its buttons
@@ -3768,7 +3808,6 @@ function onCanvasPointerDownCapture(e: PointerEvent) {
   // shape can still be selected (then promoted via "Use shape").
   if (genActive.value && (genTool.value === 'brush' || genTool.value === 'box')) { onGenPointerDown(e); return }
   if (brush.active.value) { onBrushPointerDown(e); return } // brush mode owns the canvas
-  if (pen.active.value) { onPenPointerDown(e); return } // pen mode owns the canvas
   if (nodeEdit.active.value) { onNodePointerDown(e); return } // node edit owns the canvas
   if (drawSectionActive.value) {
     // Draw-section mode owns the canvas: ALWAYS starts a fresh marquee (never a
@@ -3970,6 +4009,7 @@ async function runRegionEdit() {
 }
 function selectObjectStart(id: string) { editImageCancel(); editRegionCancel(); selectLocal(id); toggleSmartMode() }
 function onCanvasPointerMoveCapture(e: PointerEvent) {
+  if (penSession.value) return // PenOverlay owns the pointer
   if (viewDrag.value) { onViewPointerMove(e); return } // only ever set at a viewing size
   if (smartActive.value) { onSmartPointerMove(e); return }
   if (regionSelectActive.value) { onRegionSelectPointerMove(e); return }
@@ -3979,26 +4019,26 @@ function onCanvasPointerMoveCapture(e: PointerEvent) {
     if (genTool.value === 'brush' || genTool.value === 'box') return
   }
   if (brush.active.value) { onBrushPointerMove(e); return }
-  if (pen.active.value) onPenPointerMove(e)
-  else if (nodeEdit.active.value) onNodePointerMove(e)
+  if (nodeEdit.active.value) onNodePointerMove(e)
   else if (drawSectionActive.value) { if (marquee.value) { const p = clientToNorm(e); if (p) moveMarquee(p.nx, p.ny) } }
   else if (marquee.value) { const p = clientToNorm(e); if (p) moveMarquee(p.nx, p.ny) }
 }
 function onCanvasPointerUpCapture(e: PointerEvent) {
+  if (penSession.value) return // PenOverlay owns the pointer
   if (viewDrag.value) { onViewPointerEnd(e); return } // only ever set at a viewing size; its own pointer settles
   if (smartActive.value) { void onSmartPointerUp(e); return }
   if (regionSelectActive.value) { onRegionSelectPointerUp(e); return }
   if (genActive.value && genDraw.value) { onGenPointerUp(e); return }
   if (brush.active.value) { void onBrushPointerUp(); return }
-  if (pen.active.value) onPenPointerUp()
-  else if (nodeEdit.active.value) onNodePointerUp()
+  if (nodeEdit.active.value) onNodePointerUp()
   else if (drawSectionActive.value) { if (marquee.value) finishDrawSection() }
   else if (marquee.value) endMarquee(e.shiftKey)
 }
 function onCanvasDblClickCapture(e: MouseEvent) {
+  if (penSession.value) return // the pen's own double-clicks
   if (viewEditing.value) { void onViewDblClick(e); return }
   // Double-click a path → enter node edit; otherwise fall back to text edit.
-  if (!pen.active.value && !nodeEdit.active.value) {
+  if (!nodeEdit.active.value) {
     const id = hitTopStackKey(e.clientX, e.clientY)
     const res = id ? resolveStackKey(id) : null
     if (res?.type === 'local' && res.layer.kind === 'path') {
@@ -4046,9 +4086,10 @@ function onCanvasClick(e: MouseEvent) {
   if (lastDownHitLayer) { lastDownHitLayer = false; return }
   // The click that CLOSED a pen path arrives here after the pen has already
   // switched itself off, so without this one-shot it would deselect the layer
-  // finishPen just selected — you would finish drawing a type guide and land on
+  // the pen session just selected — you would finish drawing a type guide and land on
   // nothing. Same idiom as `lastDownHitLayer` above.
   if (penJustFinished) { penJustFinished = false; return }
+  if (penSession.value) return // the pen's clicks are its own
   if (e.target === canvasRef.value) selectLocal(null)
 }
 // Click in the empty stage gutter (outside the artboard) → deselect. A pan that
@@ -7212,7 +7253,7 @@ const smartHasScribble = ref(false)
 // when picked (viewOnlyGuard); while one is on, the size controls hide so the view cannot change under it.
 // An open image edit counts too: its result toolbar and silhouette sit on the design-size image.
 // (Declared after smartActive, the last of the tool flags it reads.)
-const designOnlyToolActive = computed(() => !!(brush.active.value || pen.active.value || nodeEdit.active.value
+const designOnlyToolActive = computed(() => !!(brush.active.value || !!penSession.value || nodeEdit.active.value
   || genActive.value || smartActive.value || regionSelectActive.value || drawSectionActive.value || distortTool.value
   || editImage.value))
 
@@ -7835,7 +7876,7 @@ function exitOtherToolsFor(flow: 'region' | 'smart'): boolean {
     exitSmartMode()
   }
   selectTool(); exitNodeEdit()
-  if (pen.active.value) pen.setActive(false)
+  cancelPenSession()
   brush.setActive(false)
   if (flow !== 'region' && genActive.value) exitGenMode()
   return true
@@ -7894,6 +7935,9 @@ async function onBrushFillImageFile(e: Event) {
 }
 
 function handleKeydown(e: KeyboardEvent) {
+  // A pen session owns the keyboard (see onKeydown): never close the modal or
+  // delete a layer from under it — not even for a key typed into its value box.
+  if (penSession.value) return
   // A shape picker owns the keyboard while open (Delete/Backspace must not
   // reach the layer) — see onKeydown's matching guard for the full story on
   // why the picker, not this handler, is the source of truth for its own keys.
@@ -8462,7 +8506,7 @@ onUnmounted(() => {
         ref="canvasRef"
         class="absolute inset-0 bg-[#1a1a1a] rounded-md overflow-hidden ring-1 ring-white/5 transition-shadow"
         :class="[
-          (pen.active.value || nodeEdit.active.value || (genActive && genTool === 'box') || regionSelectActive) ? 'cursor-crosshair' : ((genActive && genTool === 'brush' && !regionSelectActive) || brush.active.value || smartActive) ? 'cursor-none' : '',
+          (penSession || nodeEdit.active.value || (genActive && genTool === 'box') || regionSelectActive) ? 'cursor-crosshair' : ((genActive && genTool === 'brush' && !regionSelectActive) || brush.active.value || smartActive) ? 'cursor-none' : '',
           dropActive ? '!ring-2 !ring-white/70' : '',
         ]"
         @click="onCanvasClick"
@@ -8727,20 +8771,22 @@ onUnmounted(() => {
             height: Math.abs(marquee.y1 - marquee.y0) * canvasDisplay.h + 'px',
           }" />
 
-        <!-- Pen-tool draft overlay: live path preview + anchor dots (0..100 vb) -->
-        <svg
-          v-if="pen.active.value"
-          class="absolute inset-0 pointer-events-none"
-          :style="{ width: canvasDisplay.w + 'px', height: canvasDisplay.h + 'px' }"
-          viewBox="0 0 100 100" preserveAspectRatio="none"
-        >
-          <path :d="pen.previewD.value" fill="none" stroke="#ffffff" stroke-width="0.4"
-            vector-effect="non-scaling-stroke" />
-          <g v-for="(a, i) in pen.anchors.value" :key="i">
-            <circle :cx="a.x * 100" :cy="a.y * 100" r="0.8" :fill="i === 0 ? '#fde047' : '#ffffff'"
-              vector-effect="non-scaling-stroke" stroke="#0a0a0a" stroke-width="0.3" />
-          </g>
-        </svg>
+        <!-- The shared pen (Plan B): its own overlay, drawn in artboard px
+             (canvasDisplay), keys fed by the Frame's capture handler. -->
+        <PenOverlay
+          v-if="penSession"
+          :key="penSession.key"
+          ref="penOverlayRef"
+          data-testid="frame-pen-overlay"
+          :pen="penSession.pen"
+          :view="penSession.view.value"
+          :width="canvasDisplay.w"
+          :height="canvasDisplay.h"
+          keyboard="host"
+          class="absolute inset-0"
+          @commit="commitPenSessionAndSwallowClick"
+          @cancel="cancelPenSession"
+        />
 
         <!-- Node-edit overlay: live path + bezier handles + anchor points -->
         <svg
@@ -9122,8 +9168,18 @@ onUnmounted(() => {
            Collapsed to a pill until it's wanted: the AgentBar is never unmounted,
            only clipped and faded, so focus lands in the real input and a draft
            phrase survives (and in fact keeps the bar open — see promptExpanded). -->
+      <!-- The pen's own toolbar takes the dock's and the tool row's place while a
+           session is open (both stay mounted — v-show — so a prompt draft survives). -->
+      <PenToolbar
+        v-if="penSession"
+        :key="penSession.key"
+        :pen="penSession.pen"
+        class="pointer-events-auto"
+        @commit="commitPenSessionAndSwallowClick"
+        @cancel="cancelPenSession"
+      />
       <div
-        v-show="editMode === 'none'"
+        v-show="editMode === 'none' && !penSession"
         ref="promptDockRef"
         data-testid="compositor-prompt-dock"
         :data-expanded="promptExpanded ? '1' : '0'"
@@ -9152,7 +9208,7 @@ onUnmounted(() => {
         </button>
       </div>
       <!-- Toolbar -->
-      <div class="pointer-events-auto flex items-center gap-1 bg-[#1a1a1a]/95 rounded-[12px] p-1.5 border border-[#2a2a2a] shadow-lg">
+      <div v-show="!penSession" class="pointer-events-auto flex items-center gap-1 bg-[#1a1a1a]/95 rounded-[12px] p-1.5 border border-[#2a2a2a] shadow-lg">
         <!-- Zoom cluster: −, the % (opens the menu), +. The menu carries the
              navigation shortcuts, which had no home when the pill floated. -->
         <!-- .stop: the toolbar lives INSIDE the full-bleed stage, whose click
@@ -9320,8 +9376,8 @@ onUnmounted(() => {
         </button>
         <button
           class="flex items-center justify-center size-8 rounded cursor-pointer"
-          :class="pen.active.value ? 'bg-white text-neutral-900' : 'hover:bg-white/10 text-white/80'"
-          title="Pen — click to add points, drag for curves, click the first point or Enter to finish, Esc to cancel"
+          :class="penSession ? 'bg-white text-neutral-900' : 'hover:bg-white/10 text-white/80'"
+          title="Pen — click to add points, drag to bend a curve, Enter to finish, Esc to cancel"
           @click="togglePen"
         >
           <PenTool class="size-4" />
