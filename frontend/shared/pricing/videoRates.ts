@@ -62,6 +62,15 @@ interface RateMeta {
    * the first service's alone.
    */
   maxSeconds?: number
+  /**
+   * A service that bills the frames it actually makes, where that clip is
+   * longer than the length sent (LTX-2.5 Fast on Replicate, Task C: a 2 s
+   * request came back 57 frames at 25 fps = 2.28 s, and Replicate billed
+   * `video_output_duration_seconds` 2.28). The model makes the length sent ×
+   * `fps` + 1 frames, rounded up to a multiple of `step` plus 1 (8k + 1 for
+   * LTX), and the price reads those seconds (billedVideoSeconds).
+   */
+  outputFrames?: { fps: number, step: number }
 }
 
 export type VideoRate =
@@ -260,9 +269,17 @@ export const VIDEO_RATES: Record<string, VideoRate> = {
   // $0.12, 4k $0.24 (the model page's billingConfig; the sound and frame rate
   // don't change it). The builder sends 720p, 1080p or 4k (2k is not offered,
   // and is sent as 1080p).
+  // Replicate bills the seconds the clip really runs, not the length sent
+  // (Task C live check 2026-09-25, prediction anwn72rv01rmw0d0va3ax3h62g: 2 s
+  // at 720p made 57 frames at 25 fps, `video_output_duration_seconds` 2.28).
+  // The builder sends no `fps`, so the schema default 25 applies; LTX makes
+  // 8k + 1 frames. So 2 s bills 2.28 s, 3 s 3.24, 4 s 4.2, 5 s 5.16, 6 s 6.12,
+  // 8 s 8.04, 10 s 10.28, 12 s 12.2, 14 s 14.12, 16 s 16.04, 18 s 18.28 and
+  // 20 s 20.2 (outputFrames).
   'ltx-2.5-fast': {
     unit: 'per_second', service: 'replicate', source: rep('lightricks/ltx-2.5-fast'), read: '2026-09-25', confidence: 'verified',
     byResolution: { '720p': 0.03, '1080p': 0.06, '4k': 0.24 },
+    outputFrames: { fps: 25, step: 8 },
   },
   // Luma Ray 3.2 (family luma-ray-3.2, runner-only; fal the backup for
   // image-to-video, VIDEO_BACKUP_RATES). Billing tiers "per output video" by
@@ -385,17 +402,32 @@ function topPerSecond(rate: VideoRate): number {
 }
 
 /**
+ * The seconds a clip of `seconds` sent is billed for on this card: the length
+ * sent, or, for a card with `outputFrames`, the length of the frames the
+ * model really makes (sent × fps + 1, up to the next multiple of `step` plus
+ * 1), rounded up to the hundredth of a second so it is never below the bill.
+ */
+export function billedVideoSeconds(rate: VideoRate, seconds: number): number {
+  const f = rate.outputFrames
+  if (!f || !(seconds > 0)) return seconds
+  const frames = f.step * Math.ceil(Math.round(seconds * f.fps * 1e6) / 1e6 / f.step) + 1
+  return Math.ceil(Math.round(frames / f.fps * 1e8) / 1e6) / 100
+}
+
+/**
  * Dollars for one clip on a per-second card: the rate at the resolution and
- * sound sent × the seconds. A resolution the card doesn't list is priced at
- * its highest rate. Shared with the cards keyed by endpoint (clipRates.ts).
+ * sound sent × the seconds billed (billedVideoSeconds). A resolution the card
+ * doesn't list is priced at its highest rate. Shared with the cards keyed by
+ * endpoint (clipRates.ts).
  */
 export function perSecondUsd(rate: VideoRate & { unit: 'per_second' }, s: VideoSettings): number {
   const p = own(rate.byResolution, s.resolution ?? '*') ?? own(rate.byResolution, '*')
   const perSec = p === undefined ? topPerSecond(rate) : perSecond(p, s.audio)
+  const seconds = billedVideoSeconds(rate, s.seconds)
   if (s.inputVideoSeconds > 0 && rate.inputVideoFactor) {
-    return tidy(perSec * rate.inputVideoFactor * (s.seconds + s.inputVideoSeconds))
+    return tidy(perSec * rate.inputVideoFactor * (seconds + s.inputVideoSeconds))
   }
-  return tidy(perSec * s.seconds + (rate.inputImageUsd ?? 0) * (s.inputImages ?? 0))
+  return tidy(perSec * seconds + (rate.inputImageUsd ?? 0) * (s.inputImages ?? 0))
 }
 
 /** Dollars the first service charges for one clip with these settings, or null for an unknown id. */
@@ -459,10 +491,11 @@ function clipMaxUsd(rate: VideoRate, seconds: number): number {
     if (clip !== undefined && Object.keys(rate.byResolution).length === 1) return tidy(clip)
   }
   const top = topPerSecond(rate)
+  const billed = billedVideoSeconds(rate, seconds)
   // Linked options may carry reference videos: the dearer of the two billings.
-  const withRefs = rate.inputVideoFactor ? top * rate.inputVideoFactor * (seconds + SEEDANCE_MAX_INPUT_VIDEO_SECONDS) : 0
+  const withRefs = rate.inputVideoFactor ? top * rate.inputVideoFactor * (billed + SEEDANCE_MAX_INPUT_VIDEO_SECONDS) : 0
   // Linked options may carry a first frame (`image_url`): the one billed picture.
-  return tidy(Math.max(top * seconds + (rate.inputImageUsd ?? 0), withRefs))
+  return tidy(Math.max(top * billed + (rate.inputImageUsd ?? 0), withRefs))
 }
 
 function dollars(usd: number): string {
@@ -497,6 +530,8 @@ export function videoRateLabel(modelId: string, opts: { hosted?: boolean } = {})
     const what = flat ? ' a clip' : ` for ${s.seconds} s`
     return opts.hosted ? `${creditsForUsd(usd)} credits${what}${at}` : `${dollars(usd)}${what}${at}`
   }
+  // Credits per second chosen (what the default clip charges); dollars per
+  // second billed (the card's rate, where the clip runs longer than sent).
   if (opts.hosted) return `${creditsText(creditsForUsd(usd) / s.seconds)} credits/s${at}`
-  return `${dollars(usd / s.seconds)}/s${at}`
+  return `${dollars(usd / billedVideoSeconds(rate, s.seconds))}/s${at}`
 }

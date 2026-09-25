@@ -136,7 +136,12 @@ export { VIDEO_RATES, MODEL_PRICED_NODE_CLASSES, SETTING_PRICED_NODE_CLASSES, RE
 // side, then the dearer of that band and the height's) — and the runner
 // pricing a size-priced picture by the file it sends (the first of a batch,
 // no longer the largest of up to eight). No rate moves.
-export const PRICE_BOOK_VERSION = 'lineup-final'
+// lineup-taskc (Task C live-check fixes, 2026-09-25): LTX-2.5 Fast priced on
+// the seconds Replicate bills — the clip it really makes, 8k + 1 frames at
+// 25 fps (2 s bills 2.28 s: 12 → 14 credits at 720p; 6 s at 1080p 54 → 56) —
+// and Topaz video banded by the output's longer side only (a 360 × 640 →
+// 720p portrait, 2 s: 24 → 4 credits, as fal billed it). No other price moves.
+export const PRICE_BOOK_VERSION = 'lineup-taskc'
 
 export const BASE_RENDER_CREDITS = 1
 

@@ -28,9 +28,10 @@
  * to 720p, $0.02 for 720p to 1080p, and $0.08 for above 1080p output. Price
  * doubles for 60fps output.") is read per second of the video, by the size
  * band of the output and whether it is a high frame rate:
- *   - the band: the DEARER of the band from the output's longer side and the
- *     band from its height (topazVideoBand; F23 fix round 2), so Sailor can
- *     only over-charge, however fal bands a portrait video;
+ *   - the band: from the output's longer side (topazVideoBand). The Task C
+ *     live check (2026-09-25) settled how fal bands a portrait video: 360 ×
+ *     640 → 720 × 1280 billed 2 units for 2 s, the same as 640 × 360 → 1280 ×
+ *     720, so fal reads the longer side, not the height;
  *   - the frame rate: doubled when 60 is asked for, or when the video's own
  *     rate is above 32 frames a second (50, 60), or couldn't be measured —
  *     the safe side again, since fal doesn't say what "60fps output" covers
@@ -138,30 +139,21 @@ const positive = (n: unknown): n is number => typeof n === 'number' && Number.is
 /** A size to the millionth, then rounded up (a factor's float noise never loses a pixel). */
 const outSide = (side: number, factor: number) => Math.ceil(Math.round(side * factor * 1e6) / 1e6)
 
-const BAND_RANK: Readonly<Record<TopazVideoBand, number>> = { '720p': 0, '1080p': 1, '4k': 2 }
-
 /**
  * fal's size band for an output of `width` × `height` (display size, after
- * rotation). fal's page doesn't say how it bands a portrait video, so this is
- * the DEARER of two readings (F23 fix round 2), and Sailor can only
- * over-charge, never under-charge:
- *   (a) the longer side (controller ruling): 720p when it is at most 1280,
- *       1080p at most 1920, else "4k" (above 1080p) — never below the
- *       shorter side's band (720 / 1080), so a square isn't banded under its
- *       own height;
- *   (b) the height, as the "p" names it: 720p up to 720, 1080p up to 1080,
- *       else "4k".
- * For a landscape video the two agree. THE PORTRAIT LIVE CHECK DECIDES WHICH
- * TO KEEP: fal's bill for a portrait output (360 × 640 → 720 × 1280, priced
- * here as "4k" by its height) shows whether fal reads the longer side or the
- * height; then drop the other reading.
+ * rotation), read from its longer side (controller ruling): 720p when it is
+ * at most 1280, 1080p at most 1920, else "4k" (above 1080p) — never below the
+ * shorter side's band (720 / 1080), so a square isn't banded under its own
+ * height. Either way round the same: the Task C live check (2026-09-25) billed
+ * a 720 × 1280 portrait output 2 units for 2 s, the same as 1280 × 720 (fal
+ * requests 01a0da8f-a0d5-7a20-a41e-b242ccd27ffe and
+ * 01a0da8f-9e8b-7751-a6d1-35656e3ad4ed), so the height reading F23 fix round 2
+ * kept beside it is dropped.
  */
 export function topazVideoBand(width: number, height: number): TopazVideoBand {
   const short = Math.min(width, height)
   const long = Math.max(width, height)
-  const byLongSide: TopazVideoBand = short <= 720 && long <= 1280 ? '720p' : short <= 1080 && long <= 1920 ? '1080p' : '4k'
-  const byHeight: TopazVideoBand = height <= 720 ? '720p' : height <= 1080 ? '1080p' : '4k'
-  return BAND_RANK[byHeight] > BAND_RANK[byLongSide] ? byHeight : byLongSide
+  return short <= 720 && long <= 1280 ? '720p' : short <= 1080 && long <= 1920 ? '1080p' : '4k'
 }
 
 /**

@@ -1,6 +1,6 @@
 /** The runner engine wired to the real world. One per server process. */
 import { randomUUID } from 'node:crypto'
-import { createEngine, type Engine } from './engine'
+import { RUNNER_TIMEOUTS, createEngine, type Engine } from './engine'
 import { getRunStore } from './store'
 import { downloadResult, realFalClient } from './falQueue'
 import { realReplicateClient } from './replicateQueue'
@@ -85,7 +85,8 @@ export function getEngine(): Engine {
     newId: () => randomUUID(),
     perUserLimit: RUNNER_PER_USER_LIMIT,
     maxTakes: 8,
-    timeouts: { imageMs: 5 * 60_000, videoMs: 30 * 60_000 },
+    // Pictures 5 minutes; videos 30 minutes once started, up to 2 hours waiting in the service's queue.
+    timeouts: RUNNER_TIMEOUTS,
     pollDelayMs,
     reportError: (e, ctx) => {
       console.error('[runner]', ctx, e)

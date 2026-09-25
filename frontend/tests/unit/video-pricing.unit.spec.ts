@@ -22,7 +22,7 @@ import { PACKS, PACK_VIDEO_CLIP, packClipCredits } from '~~/server/utils/packs'
 import { creditsForUsd, usdChargedAtCost } from '#shared/pricing/markup'
 import { FAL_FIRST_VIDEO } from '~~/server/runner/generators/twins'
 import { nodeCredits, priceNode, providerUsd } from '#shared/pricing/nodePrice'
-import { VIDEO_RATES, videoBackupUsd, videoRate, videoRateLabel, videoUsd } from '#shared/pricing/videoRates'
+import { VIDEO_BACKUP_RATES, VIDEO_RATES, videoBackupUsd, videoRate, videoRateLabel, videoUsd } from '#shared/pricing/videoRates'
 import { effectiveVideoSettings, hasVideoSettings, maxVideoSeconds } from '#shared/pricing/videoSettings'
 import { nodeCreditEstimate } from '~/lib/nodeCreditEstimate'
 import { estimateUsdForNodes, linkedInputNames, widgetValueMap } from '~/lib/costEstimate'
@@ -409,6 +409,30 @@ describe('the line-up page\'s loss table: no video row is below cost', () => {
       // (Task S3) sits below the backup's cost, and its credits cover it.
       expect(nodeCredits('GenerateVideoNode', r.inputs)! / 100).toBeGreaterThanOrEqual(r.costs - 1e-9)
       expect(charge('GenerateVideoNode', r.inputs) / 100).toBeGreaterThanOrEqual(r.costs)
+    })
+  }
+})
+
+// Task C (2026-09-25): LTX-2.5 Fast's clip ran longer than sent (2 s → 2.28 s)
+// and Replicate billed the longer clip. HappyHorse 1.1 (3 s → 3.16 s) and Grok
+// Imagine Video 1.5 (1 s → 1.04 s) also came back a little long from fal,
+// which billed the seconds sent. Their Replicate backups bill "per second of
+// output video": if that is the real length, the credits (fal's marked-up
+// price) must still cover it. Checked with 0.2 s over, above anything seen.
+describe('Replicate backups billed on a clip a little longer than sent are still covered', () => {
+  for (const id of ['happyhorse-1.1', 'grok-imagine-video-1.5']) {
+    it(`${id}: every length and resolution`, () => {
+      const backup = VIDEO_BACKUP_RATES[id]!
+      expect(backup.service).toBe('replicate')
+      const m = VIDEO_MODELS.find(v => v.id === id)!
+      for (const secs of m.durations) {
+        for (const res of m.resolutions ?? ['720p']) {
+          const inputs = { model: id, duration: String(secs), model_options: JSON.stringify({ resolution: res }) }
+          const s = effectiveVideoSettings(id, inputs.duration, '16:9', inputs.model_options)!
+          const longer = videoBackupUsd(id, { ...s, seconds: s.seconds + 0.2 })!
+          expect(nodeCredits('GenerateVideoNode', inputs)! / 100, `${secs} s ${res}`).toBeGreaterThanOrEqual(longer)
+        }
+      }
     })
   }
 })

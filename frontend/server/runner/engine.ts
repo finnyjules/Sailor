@@ -140,7 +140,14 @@ export interface EngineDeps {
   newId(): string
   perUserLimit: number
   maxTakes: number
-  timeouts: { imageMs: number; videoMs: number }
+  /**
+   * How long a provider job may take (RunnerTimeouts). `imageMs`/`videoMs`:
+   * from the send, or from the start once the service starts it. The queue
+   * allowance (`imageQueueMs`/`videoQueueMs`, absent = the same as the run
+   * limit): how long a job the service says is still waiting to start may
+   * wait before it is cancelled.
+   */
+  timeouts: RunnerTimeouts
   pollDelayMs(attempt: number): number
   reportError(e: unknown, ctx: Record<string, unknown>): void
 }
@@ -218,6 +225,36 @@ const fingerprintEndpoint = (provider: RunnerProvider, endpoint: string): string
 
 /** Larger than this, the workflow is not stored (Open workflow then falls back, with its toast). */
 export const MAX_STORED_WORKFLOW_CHARS = 2_000_000
+
+export interface RunnerTimeouts {
+  imageMs: number
+  videoMs: number
+  imageQueueMs?: number
+  videoQueueMs?: number
+}
+
+/**
+ * The runner's limits (index.ts). A video gets 30 minutes to make, and a
+ * video the service hasn't started yet may wait up to 2 hours in its queue
+ * (Task C, 2026-09-25: a Wan 3.0 job sat ~25 minutes in fal's queue at
+ * position 138 and finished at ~28 of the 30, so a busier moment would have
+ * cancelled a job fal was about to run). Once it starts, it gets the 30
+ * minutes from the start. So a video waits at most 2 h 30 min, well inside
+ * the runner hold's 24 hours (holdSweep.ts RUNNER_HOLD_TTL_MS). Pictures keep
+ * their 5 minutes, queued or not.
+ */
+export const RUNNER_TIMEOUTS: Readonly<Required<Pick<RunnerTimeouts, 'imageMs' | 'videoMs' | 'videoQueueMs'>>> = {
+  imageMs: 5 * 60_000,
+  videoMs: 30 * 60_000,
+  videoQueueMs: 2 * 60 * 60_000,
+}
+
+/** "30 minutes", "2 hours", "1 hour" — a limit in words for a node's message. */
+function limitWords(ms: number): string {
+  const minutes = Math.round(ms / 60_000)
+  if (minutes >= 60 && minutes % 60 === 0) return minutes === 60 ? '1 hour' : `${minutes / 60} hours`
+  return minutes === 1 ? '1 minute' : `${minutes} minutes`
+}
 /**
  * Extra time past the deadline before a node is cancelled even when the
  * provider (fal or Replicate) has never given a real (non-transient) answer.
@@ -1072,7 +1109,18 @@ export function createEngine(deps: EngineDeps) {
     // Set once the first service has been asked to give the job up and kept it: no second try.
     let keepFirst = false
     const limitMs = media === 'video' ? deps.timeouts.videoMs : deps.timeouts.imageMs
-    let deadline = req.submittedAt + limitMs
+    // A job the service says is still waiting to start may wait this long
+    // from its send (never less than the run limit); once it starts, it gets
+    // the run limit from the start (the time it was first seen started, taken
+    // no later than the queue allowance, so the whole wait is bounded by
+    // queue + run limit, even after a restart).
+    const queueMs = Math.max(limitMs, (media === 'video' ? deps.timeouts.videoQueueMs : deps.timeouts.imageQueueMs) ?? 0)
+    // The provider's last real answer said the job is waiting to start.
+    let queued = false
+    let startedAt: number | null = null
+    const deadline = () => startedAt != null
+      ? Math.min(startedAt, req.submittedAt + queueMs) + limitMs
+      : req.submittedAt + (queued ? queueMs : limitMs)
     let attempt = 0
     // Only a real answer from the provider counts as having asked: a blip says nothing.
     let asked = false
@@ -1084,10 +1132,13 @@ export function createEngine(deps: EngineDeps) {
       if (signal.aborted) throw new RunStopped()
       // Ask the provider at least once before giving up: after a restart the
       // request may already have finished while the server was down.
-      // The limit runs from the current request's send: after a switch to the
-      // backup it starts again, so a node's total wait can reach the stall
-      // time plus the limit. The message speaks of the service, so it stays true.
-      if (asked && deps.now() > deadline) {
+      // The limit runs from the current request's send (or its start, see
+      // `deadline`): after a switch to the backup it starts again, so a
+      // node's total wait can reach the stall time plus the limit. The
+      // message speaks of the service, so it stays true.
+      if (asked && deps.now() > deadline()) {
+        // Past a queue allowance longer than the run limit: say so. Otherwise the run limit's words.
+        const stillQueued = queued && startedAt == null && queueMs > limitMs
         const check = await confirmCancel(run, req)
         // It finished just as it was cancelled: the result is made and billed, so it is kept.
         if (check.confirmed && check.ended === 'finished' && check.status) {
@@ -1095,9 +1146,9 @@ export function createEngine(deps: EngineDeps) {
           try { return await client.result(req.responseUrl) }
           catch { /* not fetchable: fail as a time-out */ }
         }
-        const late = media === 'video'
-          ? 'The service took more than 30 minutes to make this video'
-          : 'The service took more than 5 minutes to make this image'
+        const late = stillQueued
+          ? `The service hadn’t started this ${media} after ${limitWords(queueMs)} in its queue`
+          : `The service took more than ${limitWords(limitMs)} to make this ${media}`
         throw new Error(check.confirmed ? `${late}, so it was cancelled` : `${late}. ${NOT_CONFIRMED}`)
       }
       // Outer limit that applies even when the provider never gave a real
@@ -1108,7 +1159,7 @@ export function createEngine(deps: EngineDeps) {
       // `asked` check above: after a restart the deadline is measured from
       // the original submit time, and a real answer waiting at the provider
       // must still be fetched.
-      if (attempt > 0 && deps.now() > deadline + GRACE_MS) {
+      if (attempt > 0 && deps.now() > deadline() + GRACE_MS) {
         const check = await confirmCancel(run, req)
         throw new Error(check.confirmed
           ? 'The provider did not answer, so the request was cancelled'
@@ -1122,6 +1173,7 @@ export function createEngine(deps: EngineDeps) {
       }
       if (!s.transient) {
         asked = true
+        queued = s.status === 'IN_QUEUE'
         if (s.status === 'IN_QUEUE') {
           if (s.queuePosition != null && s.queuePosition !== lastPos) {
             lastPos = s.queuePosition
@@ -1141,7 +1193,8 @@ export function createEngine(deps: EngineDeps) {
               if (cancel === 'unconfirmed') await watchCancel(run, { provider: from.provider, requestId: first.requestId, statusUrl: first.statusUrl, cancelUrl: first.cancelUrl }, { lastStatus: 'IN_QUEUE', lastError: null }, 1)
               provider = backup.provider
               client = clientFor(provider)
-              deadline = req.submittedAt + limitMs
+              queued = false
+              startedAt = null
               attempt = 0
               asked = false
               lastPos = req.queuePosition
@@ -1158,6 +1211,7 @@ export function createEngine(deps: EngineDeps) {
         else if (s.status === 'IN_PROGRESS') {
           if (!started) {
             started = true
+            startedAt ??= deps.now()
             req.queuePosition = null
             if (lastPos != null) publish(run, ev.queuePosition(stageKey, nodeId, 0)) // 0 = started
             lastPos = null
@@ -1187,7 +1241,8 @@ export function createEngine(deps: EngineDeps) {
             }
             rec.request = req
             await persist(run)
-            deadline = req.submittedAt + limitMs
+            queued = false
+            startedAt = null
             attempt = 0
             asked = false
             lastPos = req.queuePosition

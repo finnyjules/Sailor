@@ -33,7 +33,7 @@ import { blockedRunRefusal } from '#shared/runner/needsEngine'
 import { __resetModelMenusForTests, galleryEntries, menuDefault, modelMenu } from '#shared/runner/modelMenus'
 import { creditsForUsd } from '#shared/pricing/markup'
 import { nodeCredits, providerUsd } from '#shared/pricing/nodePrice'
-import { videoBackupRate, videoBackupUsd, videoPriceUsd, videoRate, videoRateLabel, videoUsd } from '#shared/pricing/videoRates'
+import { billedVideoSeconds, videoBackupRate, videoBackupUsd, videoPriceUsd, videoRate, videoRateLabel, videoUsd } from '#shared/pricing/videoRates'
 import { effectiveVideoSettings, maxVideoSeconds } from '#shared/pricing/videoSettings'
 import { FILM_SHOT_MODEL_PREFERENCE, VIDEO_MODELS, VIDEO_MODELS_BY_ID, VIDEO_MODEL_PREFERENCE } from '~~/app/data/video-models'
 import { allowedDurations } from '~/lib/videoModelAdapt'
@@ -503,18 +503,20 @@ describe('the price', () => {
     expect(videoRate('ltx-video')).toMatchObject({ unit: 'per_clip', byResolution: { '*': { '*': 0.1365 } } })
   })
 
-  // Replicate's card with the markup alone: credits = creditsForUsd(Replicate USD).
+  // Replicate's card with the markup alone, on the seconds Replicate bills
+  // (the clip's real length: 8k + 1 frames at 25 fps, Task C):
+  // credits = creditsForUsd(Replicate USD).
   const examples: { name: string, inputs: Record<string, unknown>, usd: number, credits: number }[] = [
-    { name: '2 s at 720p (the shortest, cheapest clip: the live check)', inputs: { model: ID, duration: '2', model_options: '{"resolution":"720p"}' }, usd: 0.06, credits: 12 },
-    { name: '5 s at 720p', inputs: { model: ID, duration: '5', model_options: '{"resolution":"720p"}' }, usd: 0.15, credits: 23 },
-    { name: '6 s at 720p', inputs: { model: ID, duration: '6', model_options: '{"resolution":"720p"}' }, usd: 0.18, credits: 27 },
-    { name: '6 s at 1080p (the node\'s defaults)', inputs: { model: ID, duration: '6', model_options: '{}' }, usd: 0.36, credits: 54 },
-    { name: '6 s at 1080p, a picture linked, silent (the same)', inputs: { model: ID, duration: '6', model_options: '{"generate_audio":false}', image: ['9', 0] }, usd: 0.36, credits: 54 },
-    { name: '10 s at 4k', inputs: { model: ID, duration: '10', model_options: '{"resolution":"4k"}' }, usd: 2.4, credits: 360 },
-    { name: '20 s at 1080p (the longest)', inputs: { model: ID, duration: '20', model_options: '{"resolution":"1080p"}' }, usd: 1.2, credits: 180 },
+    { name: '2 s at 720p (the shortest, cheapest clip: the live check, billed 2.28 s)', inputs: { model: ID, duration: '2', model_options: '{"resolution":"720p"}' }, usd: 0.0684, credits: 14 },
+    { name: '5 s at 720p (billed 5.16 s)', inputs: { model: ID, duration: '5', model_options: '{"resolution":"720p"}' }, usd: 0.1548, credits: 24 },
+    { name: '6 s at 720p (billed 6.12 s)', inputs: { model: ID, duration: '6', model_options: '{"resolution":"720p"}' }, usd: 0.1836, credits: 28 },
+    { name: '6 s at 1080p (the node\'s defaults)', inputs: { model: ID, duration: '6', model_options: '{}' }, usd: 0.3672, credits: 56 },
+    { name: '6 s at 1080p, a picture linked, silent (the same)', inputs: { model: ID, duration: '6', model_options: '{"generate_audio":false}', image: ['9', 0] }, usd: 0.3672, credits: 56 },
+    { name: '10 s at 4k (billed 10.28 s)', inputs: { model: ID, duration: '10', model_options: '{"resolution":"4k"}' }, usd: 2.4672, credits: 371 },
+    { name: '20 s at 1080p (the longest, billed 20.2 s)', inputs: { model: ID, duration: '20', model_options: '{"resolution":"1080p"}' }, usd: 1.212, credits: 182 },
   ]
   for (const ex of examples) {
-    it(`${ex.name}: $${ex.usd.toFixed(2)}, ${ex.credits} credits; badge = charge = run estimate`, () => {
+    it(`${ex.name}: $${ex.usd}, ${ex.credits} credits; badge = charge = run estimate`, () => {
       const s = effectiveVideoSettings(ID, ex.inputs.duration, ex.inputs.aspect_ratio ?? '16:9', ex.inputs.model_options, ex.inputs.image)!
       expect(videoUsd(ID, s)).toBeCloseTo(ex.usd, 9)
       expect(videoBackupUsd(ID, s)).toBeNull()
@@ -531,14 +533,41 @@ describe('the price', () => {
     })
   }
 
-  it('the live check holds 13 credits (12 + the base render)', () => {
-    expect(charge({ model: ID, duration: '2', model_options: '{"resolution":"720p"}' })).toBe(13)
+  it('the live check\'s clip now holds 15 credits (14 + the base render): 14 cr covers Replicate\'s $0.0684 bill', () => {
+    expect(charge({ model: ID, duration: '2', model_options: '{"resolution":"720p"}' })).toBe(15)
+    // The live check: 2 s at 720p came back 2.28 s, and Replicate billed 2.28 × $0.03.
+    expect(providerUsd('GenerateVideoNode', { model: ID, duration: '2', model_options: '{"resolution":"720p"}' })!).toBeGreaterThanOrEqual(2.28 * 0.03 - 1e-12)
+  })
+
+  it('Replicate bills the frames it makes (8k + 1 at 25 fps): the price is never below that bill, at every length and resolution', () => {
+    // Worked by hand from the live check's rule, not from the code: length × 25
+    // + 1 frames, up to the next 8k + 1, over 25 fps.
+    const billed: Record<number, number> = { 2: 2.28, 3: 3.24, 4: 4.2, 5: 5.16, 6: 6.12, 8: 8.04, 10: 10.28, 12: 12.2, 14: 14.12, 16: 16.04, 18: 18.28, 20: 20.2 }
+    expect(Object.keys(billed).map(Number)).toEqual([...LTX_25_FAST_SECONDS])
+    const rate = videoRate(ID)!
+    for (const secs of LTX_25_FAST_SECONDS) {
+      expect(billedVideoSeconds(rate, secs), `${secs} s`).toBeCloseTo(billed[secs]!, 9)
+      for (const res of ['720p', '1080p', '4k'] as const) {
+        if (secs > 10 && res === '4k') continue // refused
+        const inputs = { model: ID, duration: String(secs), model_options: JSON.stringify({ resolution: res }) }
+        const bill = billed[secs]! * (rate.byResolution[res] as number)
+        const usd = providerUsd('GenerateVideoNode', inputs)!
+        expect(usd, `${secs} s ${res}`).toBeGreaterThanOrEqual(bill - 1e-12)
+        expect(usd, `${secs} s ${res}`).toBeCloseTo(bill, 9)
+        // badge = estimate = hold = charge
+        const c = charge(inputs)
+        expect(nodeCredits('GenerateVideoNode', inputs)).toBe(creditsForUsd(bill))
+        expect(nodeCreditEstimate('GenerateVideoNode', inputs)).toBe(c)
+        expect(c).toBe(creditsForUsd(bill) + 1)
+      }
+    }
   })
 
   it('a linked length prices at the longest (20 s); linked options at the top rate (4k)', () => {
     expect(maxVideoSeconds(ID)).toBe(20)
-    expect(providerUsd('GenerateVideoNode', { model: ID, duration: ['7', 0], model_options: '{}' })).toBeCloseTo(0.06 * 20, 9)
-    expect(providerUsd('GenerateVideoNode', { model: ID, duration: '6', model_options: ['7', 0] })).toBeCloseTo(0.24 * 6, 9)
+    // On the seconds billed: 20 s makes 20.2 s, 6 s makes 6.12 s.
+    expect(providerUsd('GenerateVideoNode', { model: ID, duration: ['7', 0], model_options: '{}' })).toBeCloseTo(0.06 * 20.2, 9)
+    expect(providerUsd('GenerateVideoNode', { model: ID, duration: '6', model_options: ['7', 0] })).toBeCloseTo(0.24 * 6.12, 9)
     for (const inputs of [
       { model: ID, duration: ['7', 0], model_options: '{}' },
       { model: ID, duration: '6', model_options: ['7', 0] },
@@ -551,7 +580,7 @@ describe('the price', () => {
         const node = vid({ image, duration: dur, opts: { resolution: res } })
         const p = await providerPlan(node)
         const rate = videoRate(ID)!.byResolution[String(p.payload.resolution)] as number
-        expect(providerUsd('GenerateVideoNode', node.inputs), `${image} ${dur} ${res}`).toBeCloseTo(rate * Number(p.payload.duration), 9)
+        expect(providerUsd('GenerateVideoNode', node.inputs), `${image} ${dur} ${res}`).toBeCloseTo(rate * billedVideoSeconds(videoRate(ID)!, Number(p.payload.duration)), 9)
       }
     }
   })
@@ -567,7 +596,7 @@ describe('the runner engine', () => {
   const take: ApiPrompt = { 1: vid({ duration: '2', opts: { resolution: '720p' } }), 2: { class_type: 'Video', inputs: { source: ['1', 0] } } }
   const start = (k: ReturnType<typeof makeKit>, t: ApiPrompt = take) => k.engine.startRun({ userId: k.userId, takes: [t], workflow: null, canvasId: null, projectUuid: null, projectName: null })
 
-  it('with the family on: the family\'s own Replicate model, held at the node\'s price (13), a real output; fal not called', async () => {
+  it('with the family on: the family\'s own Replicate model, held at the node\'s price (15), a real output; fal not called', async () => {
     const k = makeKit({ hosted: true, deps: { families: () => ON } })
     const { runId } = await start(k)
     await k.engine.settled(runId)
@@ -575,7 +604,7 @@ describe('the runner engine', () => {
     expect(submitted.map(r => r.endpoint)).toEqual(['lightricks/ltx-2.5-fast'])
     expect(submitted[0]!.payload).toEqual({ prompt: 'a fox runs through snow', duration: 2, resolution: '720p', aspect_ratio: '16:9', generate_audio: true })
     expect(k.fal.reqs.size).toBe(0)
-    expect([...k.ledger.holds.values()].map(h => h.credits)).toEqual([creditsForUsd(0.06) + 1])
+    expect([...k.ledger.holds.values()].map(h => h.credits)).toEqual([creditsForUsd(2.28 * 0.03) + 1])
     expect((await k.store.get(runId))!.status).toBe('done')
   })
 
