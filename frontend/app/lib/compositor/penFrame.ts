@@ -51,7 +51,7 @@ import { cloneDoc } from '~/lib/sketch/clone'
 import { sketchPathData } from '~/lib/sketch/sketchPath'
 import { flattenPath } from '~/lib/compositor/pathFlatten'
 import { applyView, type ViewMatrix } from '~/lib/sketch/view'
-import { customGuideMapping } from '~/lib/compositor/textPath'
+import { customGuideMapping, guideSizeToTargetWidthPx } from '~/lib/compositor/textPath'
 
 const DEG = Math.PI / 180
 
@@ -218,8 +218,7 @@ export function guideView(
   W: number,
   H: number,
 ): ViewMatrix | null {
-  const targetWidthPx = (spec.size ?? 0) > 0 ? (spec.size as number) * W : 0
-  const m = customGuideMapping(spec.d, W, targetWidthPx)
+  const m = customGuideMapping(spec.d, W, guideSizeToTargetWidthPx(spec.size, W))
   if (!m) return null
   const rotation = text.rotation ?? 0
   const skewX = text.skewX ?? 0

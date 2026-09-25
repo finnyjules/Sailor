@@ -251,9 +251,8 @@ export function guideFromSpec(
     }
     case 'custom': {
       if (!spec.d) return null
-      const size = Math.abs(fin(spec.size, 0))
       // A drawn path carries its own scale; `size`, when set, refits it.
-      return guideFromPathD(spec.d, W, size > 0 ? size * W : 0)
+      return guideFromPathD(spec.d, W, guideSizeToTargetWidthPx(spec.size, W))
     }
     default:
       return null
@@ -333,15 +332,17 @@ export function guideFromTable(table: VtCurveTable, rotation = 0, closed = false
 }
 
 /**
- * The exact mapping `guideFromPathD` uses from a LOCAL-unit point on `d`'s
- * longest subpath to the guide's pixel space, factored out so a host (the
- * Frame pen, `app/lib/compositor/penFrame.ts`) can place a drawing point on the
- * SAME guide the text layer renders, without re-deriving the refit math.
+ * The exact refit `guideFromPathD` computes from a LOCAL-unit `d`'s longest
+ * subpath, factored out so a host (the Frame pen, `penFrame.ts`) can place a
+ * drawing point on the SAME guide the text layer renders, without
+ * re-deriving the refit math — and so `d` is parsed only once.
  *
- * `guide px = W·k·(p_local − mid)`. `k` is the refit factor (1 when
- * `targetWidthPx` is 0 or the outline has zero width) and `mid` is the bbox
- * midpoint of the refit outline, given back in LOCAL units so a caller can
- * apply it before its own `·W`.
+ * `k` is the refit factor applied AFTER the `×W` step (1 when `targetWidthPx`
+ * is 0 or the outline has zero width). `mid` is the bbox midpoint of the
+ * refit, ×W, ×k outline — i.e. of exactly the points `guideFromPathD` hands
+ * `guideFromPolyline` — given back in LOCAL units (`midPx / (W·k)`) so a
+ * caller can apply it before its own `·W`. `sub` is the parsed longest
+ * subpath, reused by `guideFromPathD` so this is the only parse.
  *
  * `null` exactly when `guideFromPathD` would return `null` for the same `d`.
  */
@@ -349,7 +350,7 @@ export function customGuideMapping(
   d: string,
   W: number,
   targetWidthPx = 0,
-): { k: number; mid: { x: number; y: number } } | null {
+): { k: number; mid: { x: number; y: number }; sub: { pts: FlatPoint[]; closed: boolean } } | null {
   const sub = longestSubpath(d)
   if (!sub || sub.pts.length < 2) return null
   const wSafe = Number.isFinite(W) && W > 0 ? W : 1
@@ -373,7 +374,19 @@ export function customGuideMapping(
   const midPxX = (minX + maxX) / 2
   const midPxY = (minY + maxY) / 2
   const denom = wSafe * k
-  return { k, mid: { x: midPxX / denom, y: midPxY / denom } }
+  return { k, mid: { x: midPxX / denom, y: midPxY / denom }, sub }
+}
+
+/**
+ * Refit width in px for a `size` dial (the `shape`/`custom` follow modes, and
+ * a Frame text guide's own `size`): a negative `size` is a magnitude and a
+ * non-finite one means "no refit" — matching `fin`/`Math.abs(...)` above.
+ * Shared by `guideFromSpec`'s `custom` branch and `penFrame.ts`'s `guideView`
+ * so a negative or unusual `size` refits identically in both places.
+ */
+export function guideSizeToTargetWidthPx(size: number | undefined, W: number): number {
+  const s = Math.abs(fin(size, 0))
+  return s > 0 ? s * W : 0
 }
 
 /**
@@ -387,21 +400,22 @@ export function customGuideMapping(
  *
  * `targetWidthPx > 0` refits the outline to that width, preserving aspect.
  *
- * Built on `customGuideMapping` — the single source of truth for the refit —
- * so this and a host's `guideView` agree pixel for pixel. `guideFromPolyline`'s
- * own re-centring is a no-op here since the points below are already centred.
+ * The refit factor `k` comes from `customGuideMapping` — the single source of
+ * truth a host (`penFrame.ts`'s `guideView`) also reads — but the arithmetic
+ * that builds the polyline handed to `guideFromPolyline` is kept EXACTLY as it
+ * was before that extraction (×W, then conditionally ×k, with no re-centring
+ * of its own): `guideFromPolyline`'s bbox-centring is what centres the guide,
+ * not `customGuideMapping`'s `mid` — reordering that arithmetic measurably
+ * shifts the guide (up to ~1e-12 px), which is one glyph's tangent moving
+ * between two renders of the same drawing.
  */
 export function guideFromPathD(d: string, W: number, targetWidthPx = 0): Guide | null {
   const m = customGuideMapping(d, W, targetWidthPx)
   if (!m) return null
-  const sub = longestSubpath(d)
-  if (!sub) return null
   const wSafe = Number.isFinite(W) && W > 0 ? W : 1
-  const pts = sub.pts.map(p => ({
-    x: wSafe * m.k * (p.x - m.mid.x),
-    y: wSafe * m.k * (p.y - m.mid.y),
-  }))
-  return guideFromPolyline(pts, sub.closed)
+  let pts = m.sub.pts.map(p => ({ x: p.x * wSafe, y: p.y * wSafe }))
+  if (m.k !== 1) pts = pts.map(p => ({ x: p.x * m.k, y: p.y * m.k }))
+  return guideFromPolyline(pts, m.sub.closed)
 }
 
 /**
