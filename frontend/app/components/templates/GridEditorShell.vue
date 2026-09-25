@@ -16,10 +16,9 @@ import { allElements } from '~~/shared/template-grid/sections'
 import { BRAND_COLOR_KEYS, isV3 } from '~~/shared/template-grid/types'
 import type { AnyGridTemplate, BrandKit, TemplateV2, TemplateV3 } from '~~/shared/template-grid/types'
 import { useLayoutAgent } from '~/composables/useLayoutAgent'
-import AgentBar from '~/components/agent/AgentBar.vue'
-import AgentProposal from '~/components/agent/AgentProposal.vue'
-import AgentProgress from '~/components/agent/AgentProgress.vue'
 import AgentSweep from '~/components/agent/AgentSweep.vue'
+import StudioPromptHost from '~/components/prompt/StudioPromptHost.vue'
+import { useStudioPrompt, STUDIO_PROMPT_KEY } from '~/composables/useStudioPrompt'
 
 const props = defineProps<{
   initial: AnyGridTemplate
@@ -54,25 +53,42 @@ const { template, dirty, selectedElement, selectedId, sampleProps, sampleBrand, 
 // In-product agent (last-mile of F1): drives the template through the command
 // surface. Gated to v3 templates in the UI below.
 const { getLocalSetting, setLocalSetting } = useLocalSettings()
-const {
-  busy: agentBusy, error: agentError, notice: agentNotice, issues: agentIssues, review: agentReview, reviewing: agentReviewing, changes: agentChanges, hasProposal: agentHasProposal, hovered: agentHovered,
-  ask: agentAsk, acceptChange, rejectChange, reroll: agentReroll,
-  keep: agentKeep, revert: agentRevert,
-} = useLayoutAgent({
+const layoutAgent = useLayoutAgent({
   template: template as unknown as Ref<TemplateV3>,
   apiKey: () => getLocalSetting('Sailor.AI.AnthropicApiKey') ?? '',
   sampleProps: () => sampleProps.value,
   sampleBrand: () => sampleBrand.value as BrandKit,
   effectiveBrand: () => ctx.effectiveBrand.value as Record<string, unknown>,
 })
-function onAgentHover(i: number | null) { agentHovered.value = i }
-// The agent's progress / proposal take over the right panel while it's active.
-const agentPanelActive = computed(() => agentBusy.value || agentReviewing.value || agentHasProposal.value)
-// The right panel is shown when the agent is working or an element/stack is selected.
 // The right panel is always present while designing: it hosts the element /
-// stack inspector, the agent, or — when nothing is selected — the canvas
-// (grid + background) properties.
+// stack inspector, or — when nothing is selected — the canvas (grid +
+// background) properties. The agent's progress/proposal/answers show above
+// the prompt (StudioPromptHost) in the bottom cluster, not here.
 const rightPanelOpen = computed(() => true)
+
+// The one prompt (spec §2.1a, §2.4): the template editor's agent, routed as a
+// template so copy/layout requests go straight to it (studioDispatch only
+// bounces copy/layout to Frame for place:'studio'). The chip quotes the
+// selected element's own text (headline copy, etc.), trimmed to 24 chars —
+// same rule as Frame's chip (frameSelectionLabel) — else its Layers-panel
+// name, else null. The grid editor has no multi-select today, so "N elements"
+// has no live path yet; kept out until multi-select exists (YAGNI).
+const TEMPLATE_LABEL_MAX = 24
+const templateChip = computed<string | null>(() => {
+  const el = selectedElement.value
+  if (!el) return null
+  const trimmed = el.type === 'text' ? el.content.replace(/\s+/g, ' ').trim() : ''
+  if (trimmed) return trimmed.length > TEMPLATE_LABEL_MAX ? `${trimmed.slice(0, TEMPLATE_LABEL_MAX - 1)}…` : trimmed
+  return el.name ?? null
+})
+const templatePrompt = useStudioPrompt({
+  worker: () => layoutAgent,
+  place: 'template',
+  selectionKind: 'template-element',
+  label: () => templateChip.value,
+  suggestions: () => ['Tighten spacing', 'Apply brand'],
+})
+provide(STUDIO_PROMPT_KEY, templatePrompt)
 
 // Opening step: a fresh, empty layout shows the format picker first (pick the
 // deliverables, then design on a blank canvas). An existing layout — any
@@ -424,7 +440,7 @@ function onPickImage(url: string) {
       <div class="absolute transition-all duration-150" :style="canvasArea">
         <TemplatesGridEditorCanvas />
         <!-- Glimm "citrus" sweep over the artboard while the agent is working. -->
-        <AgentSweep :active="agentBusy" />
+        <AgentSweep :active="templatePrompt.working.value" />
       </div>
       <TemplatesFormatPicker v-if="!started" @confirm="onFormatsChosen" />
       <TemplatesExportPanel v-if="exportOpen" @close="exportOpen = false" />
@@ -448,33 +464,14 @@ function onPickImage(url: string) {
         </div>
       </div>
 
-      <!-- Right panel: the agent's progress / proposal take it over while active
-           (Assistant), otherwise it hosts the element / stack inspector. The prompt
-           itself lives in the bottom cluster, above the toolbar. -->
+      <!-- Right panel: hosts the element / stack inspector. The prompt itself
+           (and what it brings back — changes, answers) lives in the bottom
+           cluster, above the toolbar; it no longer takes this panel over. -->
       <div
         v-if="started && rightPanelOpen"
         class="absolute top-4 right-4 bottom-4 z-30 flex w-80 flex-col overflow-hidden rounded-xl border border-white/10 bg-[#0e0e10]/80 shadow-2xl backdrop-blur-md"
       >
-        <template v-if="agentPanelActive">
-          <div class="shrink-0 border-b border-white/[0.06] px-4 py-3 flex items-center gap-2">
-            <span class="text-white/70">✦</span>
-            <span class="text-sm font-medium">Assistant</span>
-          </div>
-          <div class="min-h-0 flex-1 overflow-y-auto p-3">
-            <AgentProgress v-if="agentBusy" :active="agentBusy" />
-            <div v-else-if="agentReviewing && !agentHasProposal" class="flex items-center gap-1.5 text-[11.5px] text-white/55">
-              <span class="text-white/75">✦</span> Analyzing the result for imperfections<span class="animate-pulse">…</span>
-            </div>
-            <AgentProposal
-              v-else-if="agentHasProposal"
-              :changes="agentChanges" :busy="agentBusy" :issues="agentIssues"
-              :review="agentReview" :reviewing="agentReviewing"
-              @accept="acceptChange" @reject="rejectChange" @reroll="agentReroll"
-              @keep="agentKeep" @revert="agentRevert" @hover="onAgentHover"
-            />
-          </div>
-        </template>
-        <template v-else-if="selectedElement || selectedSection">
+        <template v-if="selectedElement || selectedSection">
           <div class="min-h-0 flex-1 overflow-y-auto pt-2">
             <TemplatesTierTypePanel v-if="ctx.editorMode.value === 'layout'" />
             <TemplatesGridPropertyPanel v-if="selectedElement" />
@@ -599,12 +596,12 @@ function onPickImage(url: string) {
         </template>
       </div>
 
-      <!-- Bottom cluster: the agent prompt (v3) sits above the tools + zoom toolbars.
-           The column shrink-wraps to the toolbar row, so the bare prompt matches its
-           width — the same layout the Compositor uses. -->
+      <!-- Bottom cluster: the one prompt (v3 only) sits above the tools + zoom
+           toolbars. The column shrink-wraps to the toolbar row, so the bare
+           prompt matches its width — the same layout the Compositor uses. -->
       <div v-if="started" class="absolute bottom-4 -translate-x-1/2 z-30 flex flex-col items-stretch gap-2" :style="bottomBarStyle">
-        <div v-if="isV3(template)">
-          <AgentBar :busy="agentBusy" :error="agentError" :notice="agentNotice" :chips="[]" @submit="agentAsk" @chip="agentAsk" />
+        <div v-if="isV3(template)" class="w-full">
+          <StudioPromptHost :prompt="templatePrompt" />
         </div>
         <div class="flex items-center gap-2">
         <div class="flex items-center gap-1 bg-[#1a1a1a]/95 rounded-[12px] p-1.5 border border-[#2a2a2a] shadow-lg">
