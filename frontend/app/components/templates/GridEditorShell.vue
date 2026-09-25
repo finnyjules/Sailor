@@ -359,6 +359,7 @@ function onPickImage(url: string) {
     <div class="shrink-0 h-14 pl-4 pr-12 border-b border-white/[0.06] flex items-center gap-3">
       <input
         :value="template.name"
+        :disabled="templatePrompt.editLocked.value"
         class="w-40 h-8 px-2 bg-transparent border border-transparent hover:border-white/[0.06] focus:border-white/30 rounded text-[13px] text-white font-medium focus:outline-none"
         @change="(e: any) => { template.name = e.target.value; dirty = true }"
       >
@@ -440,7 +441,9 @@ function onPickImage(url: string) {
     <div class="flex-1 relative min-h-0 overflow-hidden bg-[#121212]">
       <!-- While the prompt works (or a stopped reply is due) the template is
            inert: the reply restores the pre-request template, so edits made
-           meanwhile would be lost. -->
+           meanwhile would be lost. The lock also holds while the review is out
+           and while the proposal is open; the prompt cluster (Stop, and the
+           proposal card's toggles, re-roll, Approve, Reject) stays live. -->
       <div
         class="absolute transition-all duration-150" :style="canvasArea"
         data-testid="template-edit-surface"

@@ -1131,6 +1131,10 @@ function layoutVaryKey(e: KeyboardEvent, typing: boolean): boolean {
   if (act !== 'swallow') onLayoutVary(act === 'next' ? 1 : -1)
   return true
 }
+/** Would the Layout tab take this key (V, or ← / → with nothing selected)? No side effects. */
+function isLayoutVaryKey(e: KeyboardEvent): boolean {
+  return !!layoutKeyAction(e, { tabVisible: layoutTabShowing.value, inTextField: false, editingText: !!editingId.value, selectionEmpty: selectedIds.value.size === 0 })
+}
 const layoutPaletteHexes = computed(() => layoutVary.paletteMode.value)
 
 // Face pickers for the Layout tab: title face → the inferred title layer; text
@@ -2333,9 +2337,10 @@ function viewportKey(e: KeyboardEvent): boolean {
 }
 // Esc cancels an in-progress pen draft (before it bubbles to modal-close).
 function onKeydown(e: KeyboardEvent) {
-  // A request is out (or a stopped one's reply is due): the reply puts the
-  // pre-request Frame back, so the edit keys do nothing meanwhile (editLocked).
-  if (framePrompt.editLocked.value && isViewDragEditKey(e) && !isTypingInField()) { e.preventDefault(); e.stopPropagation(); return }
+  // A request is out, its review or proposal is open, or a stopped one's reply is
+  // due: all of them rebuild from the pre-request Frame, so the edit keys — and the
+  // Layout tab's V / ← → — do nothing meanwhile (editLocked).
+  if (framePrompt.editLocked.value && !isTypingInField() && (isViewDragEditKey(e) || isLayoutVaryKey(e))) { e.preventDefault(); e.stopPropagation(); return }
   // Escape during a move drag at a viewing size settles the drop where the last frame drew it
   // (so no held pin is left stored) and ends the drag. It must not also close the modal.
   if (e.key === 'Escape' && viewDrag.value) { e.preventDefault(); e.stopPropagation(); onViewPointerUp(); return }
@@ -8306,11 +8311,15 @@ onUnmounted(() => {
     <AgentSweep :active="framePrompt.working.value" />
     <!-- While the prompt works (or a stopped reply is due) the Frame is inert: the
          reply restores the pre-request Frame (useCompositorAgent), so edits made
-         meanwhile would be lost. The prompt itself (and its Stop) stays live. -->
+         meanwhile would be lost. The lock also holds while the review is out and
+         while the proposal is open. The prompt dock — its Stop, and the proposal
+         card with its toggles, re-roll, Approve and Reject — stays live. -->
+    <!-- Sits under the template-update banner when that shows (same spot). -->
     <p
       v-if="framePrompt.editLocked.value"
       data-testid="frame-locked-note" role="status"
-      class="glass-panel pointer-events-none absolute top-4 left-1/2 z-30 -translate-x-1/2 rounded-full border border-white/10 bg-[#0e0e10]/75 px-3 py-1 text-[12px] text-white/70 shadow-lg backdrop-blur-md"
+      :class="pendingTemplateUpdates.length ? 'top-16' : 'top-4'"
+      class="glass-panel pointer-events-none absolute left-1/2 z-30 -translate-x-1/2 rounded-full border border-white/10 bg-[#0e0e10]/75 px-3 py-1 text-[12px] text-white/70 shadow-lg backdrop-blur-md"
     >{{ framePrompt.lockedNote.value }}</p>
 
     <!-- Left sidebar: floating glass layer panel.
@@ -9640,6 +9649,8 @@ onUnmounted(() => {
     <div
       v-if="pendingTemplateUpdates.length"
       data-testid="template-update-banner"
+      :inert="framePrompt.editLocked.value" :aria-busy="framePrompt.editLocked.value"
+      :class="framePrompt.editLocked.value ? 'opacity-50' : ''"
       class="glass-panel absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2.5 rounded-lg border border-white/10 bg-[#0e0e10]/75 backdrop-blur-md shadow-lg pl-2.5 pr-2 py-1.5"
     >
       <LayoutTemplate class="size-3.5 text-white/60 shrink-0" />

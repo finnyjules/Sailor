@@ -39,6 +39,10 @@ describe('template editor prompt', () => {
       expect(s.slice(at, s.indexOf('>', at)), id).toContain(':inert="templatePrompt.editLocked.value"')
     }
     expect(s).toContain('templatePrompt.lockedNote.value')
+    // the name field is part of the template the snapshot restores
+    const name = s.indexOf(':value="template.name"')
+    expect(name).toBeGreaterThan(-1)
+    expect(s.slice(name, s.indexOf('>', name))).toContain(':disabled="templatePrompt.editLocked.value"')
     // keyboard edits are held too
     expect(s).toMatch(/if \(templatePrompt\.editLocked\.value\) return/)
     // the prompt itself stays live (it holds Stop), so it is not inside an inert box

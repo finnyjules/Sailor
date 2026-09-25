@@ -50,7 +50,15 @@ describe('Frame’s prompt', () => {
       expect(s.slice(open, s.indexOf('>', at)), id).toContain(L)
     }
     expect(s).toContain('framePrompt.lockedNote.value')
-    expect(s).toMatch(/if \(framePrompt\.editLocked\.value && isViewDragEditKey\(e\)/)
+    // edit keys and the Layout tab's V / ← → are held
+    expect(s).toMatch(/if \(framePrompt\.editLocked\.value && !isTypingInField\(\) && \(isViewDragEditKey\(e\) \|\| isLayoutVaryKey\(e\)\)\)/)
+    // the template-update banner ("Update all") is part of the Frame the snapshot restores
+    const banner = s.indexOf('data-testid="template-update-banner"')
+    expect(banner).toBeGreaterThan(-1)
+    expect(s.slice(banner, s.indexOf('>', banner))).toContain(':inert="framePrompt.editLocked.value"')
+    // the note moves below the banner instead of sitting under it
+    const note = s.indexOf('data-testid="frame-locked-note"')
+    expect(s.slice(note, s.indexOf('>', note))).toMatch(/pendingTemplateUpdates\.length \? 'top-16' : 'top-4'/)
     // the prompt dock (Stop lives there) is never inside an inert box
     const dock = s.indexOf('data-testid="compositor-prompt-dock"')
     const dockTag = s.slice(s.lastIndexOf('<div', dock), s.indexOf('>', dock))

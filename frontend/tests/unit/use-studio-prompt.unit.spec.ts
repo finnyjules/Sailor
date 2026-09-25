@@ -320,4 +320,30 @@ describe('useStudioPrompt', () => {
     finish(); await sent; await nextTick()
     expect(api.editLocked.value).toBe(false)
   })
+
+  it('the lock holds while the review is out and while the proposal is open, and ends on Approve or Reject', async () => {
+    const { api, worker } = setup({ worker: makeWorker(false) })
+    ;(worker!.ask as any).mockImplementation(async () => {
+      worker!.changes.value = [{ label: 'Tighter' } as any]
+      worker!.reviewing.value = true // the visual review fires without waiting
+    })
+    ;(worker!.keep as any).mockImplementation(() => { worker!.changes.value = [] })
+    ;(worker!.revert as any).mockImplementation(() => { worker!.changes.value = [] })
+    await api.submit('tighten')
+    expect(api.working.value).toBe(false)
+    expect(api.card.value).toBe('changes') // the card (its toggles, Approve, Reject) is shown
+    expect(api.editLocked.value).toBe(true) // the review rebuilds from the snapshot when it lands
+    expect(api.lockedNote.value).toBe('Sailor is looking at the result…')
+    worker!.reviewing.value = false
+    expect(api.editLocked.value).toBe(true) // a row toggle, re-roll or Reject rebuilds from it too
+    expect(api.lockedNote.value).toBe('Approve or reject the changes to keep editing')
+    api.approve()
+    expect(api.editLocked.value).toBe(false)
+    await api.submit('again')
+    expect(api.editLocked.value).toBe(true)
+    worker!.reviewing.value = false
+    api.rejectAll()
+    expect(api.editLocked.value).toBe(false)
+  })
 })
+

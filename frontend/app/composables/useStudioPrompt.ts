@@ -101,15 +101,23 @@ export function useStudioPrompt(
   })
 
   /** Frame and the template editor snapshot the whole document when a request
-   *  starts and push that snapshot back when the reply lands (or is thrown away
-   *  after Stop). Edits made meanwhile would be lost, so those hosts make their
-   *  editing surfaces inert while this is true: a run in flight, or a stopped
-   *  run whose reply hasn't landed yet. */
-  const editLocked = computed(() => working.value || disabled.value)
-  /** The neutral note shown over an inert editing surface; quotes the request. */
+   *  starts, and everything that follows rebuilds from that snapshot: the reply,
+   *  the visual review landing (up to a minute later), a row toggle or re-roll on
+   *  the proposal, Reject, and a stopped run's reply being thrown away. Edits made
+   *  meanwhile would be lost, so those hosts make their editing surfaces inert
+   *  while this is true — the old right-panel takeover's guarantee (busy,
+   *  reviewing, proposal open). The proposal card and the prompt (Stop, Esc) live
+   *  outside the locked region; Approve or Reject ends the lock. */
+  const editLocked = computed(() => working.value || disabled.value
+    || !!worker()?.reviewing.value || !!worker()?.hasProposal.value)
+  /** The neutral note shown over an inert editing surface. */
   const lockedNote = computed(() => {
-    const r = (takes.value && !busy.value ? takes.value.request : request.value).replace(/\s+/g, ' ').trim()
-    return r ? `Sailor is working on “${r}”…` : 'Sailor is working…'
+    if (working.value || disabled.value) {
+      const r = (takes.value && !busy.value ? takes.value.request : request.value).replace(/\s+/g, ' ').trim()
+      return r ? `Sailor is working on “${r}”…` : 'Sailor is working…'
+    }
+    if (worker()?.reviewing.value) return 'Sailor is looking at the result…'
+    return 'Approve or reject the changes to keep editing'
   })
 
   const card = computed<'takes' | 'changes' | 'answer' | null>(() => {
