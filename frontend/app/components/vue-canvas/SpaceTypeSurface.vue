@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
+import { h, ref, reactive, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
 import { LIVE_FIELD_CEILING } from '~/lib/shaderfill/descriptor'
 import { getEffect, rehomeLegacyShowcase } from '~/lib/spacetype/effects'
 import { ensureBoostFont } from '~/lib/spacetype/effects/boost'
@@ -45,9 +45,12 @@ import StudioSwitch from '~/components/vue-canvas/studio/StudioSwitch.vue'
 import StringPathEditor from '~/components/vue-canvas/StringPathEditor.vue'
 import LoftSpineEditor from '~/components/vue-canvas/LoftSpineEditor.vue'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
-import VibeControlBar from '~/components/vue-canvas/VibeControlBar.vue'
 import SpaceTypeEffectGalleryModal from '~/components/vue-canvas/SpaceTypeEffectGalleryModal.vue'
-import { useVibeControl } from '~/composables/useVibeControl'
+import StudioActionRows from '~/components/vue-canvas/studio/StudioActionRows.vue'
+import StudioInspectorHead from '~/components/vue-canvas/studio/StudioInspectorHead.vue'
+import StudioToolButton from '~/components/vue-canvas/studio/StudioToolButton.vue'
+import { useStudioAgent } from '~/composables/useStudioAgent'
+import { studioActions } from '~/lib/studio/studioActions'
 import { loadSpaceDefaults, spaceDefaultFor, saveSpaceDefault } from '~/composables/useSpaceDefaults'
 import { saveEffectThumbnail } from '~/composables/useEffectThumbnails'
 import { SCENE_CONTENT_KEYS, type Scene } from '~/lib/spacetype/scene'
@@ -140,61 +143,29 @@ const SHOW_THUMB_CAPTURE = true
 const showEffectGallery = ref(false)
 function onPickEffect(id: string) { effectId.value = id; showEffectGallery.value = false }
 
-const { requestPatch } = useVibeControl()
-const vibeBusy = ref(false)
-const vibeProposal = ref<{ rationale: string; chips: { label: string; before: string; after: string; path: string }[] } | null>(null)
-const vibeSnapshot = ref<Params | null>(null)
-const vibeMoved = computed(() => new Set((vibeProposal.value?.chips ?? []).map(c => c.path)))
-
-function fmt(v: unknown): string {
-  return typeof v === 'number' ? Number(v).toFixed(2) : String(v)
-}
-
-async function onVibe(phrase: string) {
-  vibeBusy.value = true
-  try {
-    const before: Params = { ...params }
-    const { patch, rationale } = await requestPatch(effect.value.controls, params, effect.value.label, phrase)
-    const keys = Object.keys(patch)
-    if (!keys.length) { vibeProposal.value = null; return }
-    vibeSnapshot.value = before
-    const labelFor = (k: string) => effect.value.controls.find(c => c.key === k)?.label ?? k
-    vibeProposal.value = {
-      rationale,
-      chips: keys.map(k => ({ path: k, label: labelFor(k), before: fmt(before[k]), after: fmt(patch[k]) })),
-    }
-    Object.assign(params, patch) // live preview updates via existing reactivity
-  }
-  catch (e: any) {
-    vibeProposal.value = null
-    console.error('[vibe]', e?.message || e)
-    alert(e?.message || 'Vibe control failed. See console.')
-  }
-  finally {
-    vibeBusy.value = false
-  }
-}
-
-function onVibeKeep() { vibeProposal.value = null; vibeSnapshot.value = null }
-
-function onVibeRevert() {
-  if (vibeSnapshot.value && vibeProposal.value) {
-    for (const chip of vibeProposal.value.chips) params[chip.path] = vibeSnapshot.value[chip.path]
-  }
-  vibeProposal.value = null
-  vibeSnapshot.value = null
-}
-
-function onVibeFocus(path: string) {
-  // Motion controls live on the Motion inspector tab (v-show'd away on Design) — flip
-  // to the right tab first or the scroll silently no-ops on a hidden section.
-  const group = effect.value.controls.find(c => c.key === path)?.group
-  inspectorTab.value = group === 'Motion' ? 'motion' : 'design'
-  nextTick(() => {
-    const el = document.querySelector(`[data-control-key="${path}"]`)
-    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  })
-}
+// The one prompt's worker (stage 4, plan ruling 15): the same /api/vibe tune the
+// old vibe bar sent, now through useStudioAgent so its proposal shows above
+// the prompt like every other studio's.
+const spaceTypeAgent = useStudioAgent({
+  controls: () => effect.value.controls,
+  params,
+  label: () => effect.value.label,
+})
+/** The prompt's chip and the inspector head: the words the effect renders,
+ *  collapsed and cut to 24 characters; with no text, the effect's own name. */
+const promptLabel = computed(() => {
+  const t = String(params.text ?? '').replace(/\s+/g, ' ').trim()
+  if (!t) return effect.value.label
+  return t.length > 24 ? `${t.slice(0, 24).trimEnd()}…` : t
+})
+const inspectorActions = computed(() => studioActions({ place: 'spacetype', canTakes: false }))
+// The transport's own play/pause glyphs, as icon components for the tool bar button.
+const PauseGlyph = () => h('svg', { viewBox: '0 0 24 24', width: 14, height: 14, fill: 'currentColor', 'aria-hidden': 'true' }, [
+  h('rect', { x: 6, y: 5, width: 4, height: 14, rx: 1 }), h('rect', { x: 14, y: 5, width: 4, height: 14, rx: 1 }),
+])
+const PlayGlyph = () => h('svg', { viewBox: '0 0 24 24', width: 14, height: 14, fill: 'currentColor', 'aria-hidden': 'true' }, [
+  h('path', { d: 'M8 5.5v13l11-6.5z' }),
+])
 
 const loopDuration = ref(6)
 const transparent = ref(false)
@@ -1782,24 +1753,16 @@ async function exportWebEmbed() {
 </script>
 
 <template>
-  <StudioModalShell title="Kinetic Studio" :breadcrumb="effect.label" :elevated="clipMode" @close="closeEditor">
+  <StudioModalShell
+    title="Kinetic Studio" :breadcrumb="effect.label" :elevated="clipMode"
+    :agent="spaceTypeAgent"
+    prompt-place="space-type-studio" :prompt-label="promptLabel"
+    :prompt-suggestions="['Slower', 'More spacing']"
+    @close="closeEditor"
+  >
     <template #preview>
       <div class="relative flex h-full w-full items-center justify-center">
         <canvas ref="canvas" class="max-h-full max-w-full rounded-lg" style="background:#0e0e10" />
-        <!-- Preview transport: play/pause + scrub (every effect). -->
-        <div v-if="webglOk" class="pointer-events-auto absolute inset-x-0 bottom-2 mx-auto flex w-[min(92%,520px)] items-center gap-2 rounded-full border border-white/10 bg-black/60 px-3 py-1.5 backdrop-blur">
-          <button type="button" :aria-label="playing ? 'Pause' : 'Play'"
-                  class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/10"
-                  @click="togglePlay">
-            <svg v-if="playing" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
-            <svg v-else viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" /></svg>
-          </button>
-          <input type="range" min="0" :max="Math.max(1, previewTotalFrames - 1)" step="1" :value="scrubFrame"
-                 aria-label="Scrub preview"
-                 class="h-1 flex-1 cursor-pointer accent-white"
-                 @input="onScrub(($event.target as HTMLInputElement).valueAsNumber)" />
-          <span class="shrink-0 text-[10px] tabular-nums text-white/45">{{ scrubFrame + 1 }}/{{ previewTotalFrames }}</span>
-        </div>
         <div v-if="renderError"
              class="pointer-events-none absolute inset-x-3 bottom-3 rounded-md border border-amber-400/30 bg-black/70 px-3 py-2 text-[11px] text-amber-200/90">
           Effect failed to render — adjust a parameter to recover.
@@ -1827,20 +1790,20 @@ async function exportWebEmbed() {
         />
       </div>
     </template>
-    <!-- The vibe AI input docks under the preview, centred, like every other studio's
-         agent bar — instead of floating at the top of the controls column. Its proposal
-         (chips / keep / revert) rides with it there. -->
-    <template #agentBar>
-      <VibeControlBar
-        :busy="vibeBusy"
-        :proposal="vibeProposal"
-        @submit="onVibe"
-        @keep="onVibeKeep"
-        @revert="onVibeRevert"
-        @focus-control="onVibeFocus"
-      />
+    <!-- Preview transport: play/pause, scrub and frame counter (every effect). -->
+    <template #tools>
+      <StudioToolButton v-if="webglOk" :label="playing ? 'Pause' : 'Play'" :icon="playing ? PauseGlyph : PlayGlyph" :active="playing" @click="togglePlay" />
+      <input v-if="webglOk" type="range" min="0" :max="Math.max(1, previewTotalFrames - 1)" step="1" :value="scrubFrame"
+             aria-label="Scrub preview"
+             class="mx-2 h-1 w-48 cursor-pointer self-center accent-white"
+             @input="onScrub(($event.target as HTMLInputElement).valueAsNumber)" />
+      <span v-if="webglOk" class="self-center pr-1 text-[10px] tabular-nums text-white/45">{{ scrubFrame + 1 }}/{{ previewTotalFrames }}</span>
     </template>
     <template #controls>
+      <StudioInspectorHead :title="promptLabel" :subtitle="effect.label">
+        <StudioButton @click="showEffectGallery = true">Change effect</StudioButton>
+      </StudioInspectorHead>
+      <StudioActionRows :actions="inspectorActions" />
       <div class="flex shrink-0 gap-1 rounded-lg bg-white/[0.04] p-1 text-[11px]">
         <button type="button" class="flex-1 rounded px-2 py-1"
                 :class="inspectorTab === 'design' ? 'bg-white/15 text-white' : 'text-white/55 hover:text-white/80'"
@@ -1853,18 +1816,6 @@ async function exportWebEmbed() {
         This effect has no motion parameters.
       </p>
       <div v-show="inspectorTab === 'design'" class="flex flex-col gap-2 rounded-lg border border-white/[0.07] bg-white/[0.03] px-3 py-2.5">
-          <!-- Effect: the hero picker of the pane — it chooses everything below it, so it
-               earns its prominence through SIZE alone (taller, larger headline type), NOT a
-               different fill or corner. Same 5% fill and 6px radius as every other control;
-               "Effect" is a quiet caption and the effect NAME is the headline. Launcher. -->
-          <button type="button" @click="showEffectGallery = true"
-                  class="group flex h-10 w-full items-center justify-between gap-2 rounded-[6px] bg-white/[0.05] px-2.5 text-left transition-colors hover:bg-white/[0.08]">
-            <span class="text-[11px] text-white/72">Effect</span>
-            <span class="flex min-w-0 items-center gap-2">
-              <span class="truncate text-[13px] font-medium text-white/95">{{ effect.label }}</span>
-              <span class="inline-block shrink-0 rotate-90 text-[13px] text-white/45 group-hover:text-white/70">›</span>
-            </span>
-          </button>
           <!-- One uniform button group, left-aligned and wrapping — not two rows split
                justify-between / justify-end. Filled, not bordered, to match the rows. -->
           <div class="flex flex-wrap gap-1.5">
@@ -1893,7 +1844,6 @@ async function exportWebEmbed() {
               v-for="c in section.controls" :key="c.key"
               v-show="!(c.key === 'typeWeight' && !fontIsVariable) && controlIsVisible(c)"
               :data-control-key="c.key"
-              :class="{ 'rounded-md ring-1 ring-amber-400/30 px-1 -mx-1': vibeMoved.has(c.key) }"
               data-control class="text-xs"
               @contextmenu.prevent="openVarMenu($event, c)">
               <!-- No external caption for slider / font / single text / colour: each self-labels
@@ -1909,7 +1859,6 @@ async function exportWebEmbed() {
                   @menu="(e: MouseEvent) => openVarMenu(e, c)"
                 />
               </label>
-              <span v-if="vibeMoved.has(c.key) && vibeSnapshot && c.kind !== 'slider'" class="ml-1 text-[10px] text-amber-400/80">was {{ fmt(vibeSnapshot[c.key]) }}</span>
               <StudioSlider v-if="c.kind === 'slider'" :label="c.label"
                             :min="Number(c.min ?? 0)" :max="Number(c.max ?? 1)" :step="Number(c.step ?? 1)"
                             :default="Number(c.default ?? 0)"

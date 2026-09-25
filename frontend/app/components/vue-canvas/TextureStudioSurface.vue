@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { Dices } from 'lucide-vue-next'
 import { useStudioAutosave } from '~/lib/studio/autosave'
 import { textureFx } from '~/lib/texturefx/renderer'
 import { preloadStylize, stylizeTile } from '~/lib/texturefx/stylize'
@@ -20,6 +19,10 @@ import StudioModalShell from '~/components/vue-canvas/StudioModalShell.vue'
 import StudioSection from '~/components/vue-canvas/StudioSection.vue'
 import StudioControlPanel from '~/components/vue-canvas/studio/StudioControlPanel.vue'
 import StudioActionsFooter from '~/components/vue-canvas/studio/StudioActionsFooter.vue'
+import StudioActionRows from '~/components/vue-canvas/studio/StudioActionRows.vue'
+import StudioInspectorHead from '~/components/vue-canvas/studio/StudioInspectorHead.vue'
+import StudioToolButton from '~/components/vue-canvas/studio/StudioToolButton.vue'
+import { studioActions } from '~/lib/studio/studioActions'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vue'
 import StudioSlider from '~/components/vue-canvas/studio/StudioSlider.vue'
@@ -320,6 +323,19 @@ watch(inspectorTab, () => renderPreview())
 function roll() { params.seed = Math.floor(Math.random() * 1e6); renderPreview() }
 function setRepeat(n: number) { repeat.value = n; renderPreview() }
 function toggleSeams() { seams.value = !seams.value; renderPreview() }
+
+/** The prompt's chip and the inspector head: the lattice, named the way its picker
+ *  shows it, when the current content mode has one; otherwise just "Pattern". */
+const LATTICE_CONTROL = TEXTURE_CONTROLS.find(c => c.key === 'lattice')
+const promptLabel = computed(() => {
+  const l = String(params.lattice ?? '')
+  if (!l || (LATTICE_CONTROL?.when && !LATTICE_CONTROL.when(params as Params))) return 'Pattern'
+  return `${l.charAt(0).toUpperCase()}${l.slice(1)} lattice`
+})
+const inspectorActions = computed(() => studioActions({
+  place: 'texture', canTakes: false,
+  local: [{ id: 'roll', label: 'Roll', group: 'develop', ai: false, lands: null, run: { call: roll } }],
+}))
 function onParam() {
   if (String(params.mode) === 'raster' && params.rasterSrc && !getRaster(String(params.rasterSrc))) {
     // Image not cached yet — let the deferred render fire once it loads; skip the
@@ -589,23 +605,13 @@ onBeforeUnmount(() => {
   <StudioModalShell
     title="Pattern Studio"
     :agent="textureAgent"
-    agent-placeholder="Describe it — e.g. red and cream, fade the ground, tighter cells…"
+    prompt-place="pattern-studio" :prompt-label="promptLabel"
+    :prompt-suggestions="['Tighter cells', 'Two colours only']"
     @close="closeEditor"
   >
     <template #preview>
       <div class="flex h-full flex-col items-center justify-center gap-3 p-4">
         <canvas ref="canvas" class="max-h-[60vh] max-w-full rounded-lg border border-white/10" />
-        <div v-if="onDesign" class="flex items-center gap-2 text-xs">
-          <button v-for="n in [1, 2, 3]" :key="n"
-                  type="button"
-                  class="rounded border px-2 py-1 transition-colors"
-                  :class="repeat === n ? 'border-white bg-white/10 text-white' : 'border-white/15 text-white/55 hover:bg-white/10'"
-                  @click="setRepeat(n)">{{ n }}×</button>
-          <button type="button"
-                  class="rounded border px-2 py-1 transition-colors"
-                  :class="seams ? 'border-white bg-white/10 text-white' : 'border-white/15 text-white/55 hover:bg-white/10'"
-                  @click="toggleSeams">Highlight seams</button>
-        </div>
         <div v-if="onDesign && params.mode === 'raster'" class="flex flex-col items-center gap-2">
           <div class="flex items-center gap-2 text-xs">
             <input ref="fileInput" type="file" accept="image/*" class="hidden" @change="onImportFile">
@@ -642,16 +648,25 @@ onBeforeUnmount(() => {
       </div>
     </template>
 
+    <template #tools>
+      <template v-if="inspectorTab === 'design'">
+        <StudioToolButton v-for="n in [1, 2, 3]" :key="n" :label="`${n}×`" :active="repeat === n" @click="setRepeat(n)" />
+        <span class="mx-1 w-px self-stretch bg-white/10" />
+        <StudioToolButton label="Seams" :active="seams" @click="toggleSeams" />
+      </template>
+    </template>
+
     <template #actions>
       <StudioActionsFooter :spec="{
         status: { saving: autoSaving, saved: autoSaved, notice: bakeMsg || null },
-        utilities: [{ label: `Roll · seed ${params.seed}`, onClick: roll, icon: Dices }],
         downloads: [{ label: 'Download PNG', onClick: downloadPng }],
         canvas: [{ label: 'As image', onClick: sendToCanvas, busy: baking }],
       }" />
     </template>
 
     <template #controls>
+      <StudioInspectorHead :title="promptLabel" :subtitle="`Seed ${params.seed}`" />
+      <StudioActionRows :actions="inspectorActions" />
       <div class="flex shrink-0 gap-1 rounded-lg bg-white/[0.04] p-1 text-[11px]">
         <button type="button" class="flex-1 rounded px-2 py-1"
                 :class="inspectorTab === 'design' ? 'bg-white/15 text-white' : 'text-white/55 hover:text-white/80'"

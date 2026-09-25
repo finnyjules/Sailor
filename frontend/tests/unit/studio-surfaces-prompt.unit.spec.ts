@@ -11,6 +11,8 @@ const SIMPLE: Record<string, string> = {
   'ShaderStudioSurface.vue': 'shader-studio',
   'ShapeStudioSurface.vue': 'shape-studio',
   'VectorTypeSurface.vue': 'vector-type-studio',
+  'TextureStudioSurface.vue': 'pattern-studio',
+  'SpaceTypeSurface.vue': 'space-type-studio',
 }
 
 describe('simple studios dock the one prompt', () => {
@@ -48,5 +50,32 @@ describe('simple studios dock the one prompt', () => {
     expect(tools).toMatch(/onSeek|previewTime/)
     const footer = s.slice(s.indexOf('<template #actions>'))
     expect(footer.slice(0, footer.indexOf('</template>'))).not.toMatch(/Pause|togglePlay/)
+  })
+})
+
+describe('Texture and Space type', () => {
+  it('Texture docks the prompt; repeat and seams are in the bar; the raster content prompt stays', () => {
+    const s = src('TextureStudioSurface.vue')
+    expect(s).toContain('prompt-place="pattern-studio"')
+    expect(s).not.toContain('agent-placeholder')
+    const tools = s.slice(s.indexOf('<template #tools>'), s.indexOf('</template>', s.indexOf('<template #tools>')))
+    expect(tools).toContain('setRepeat(')
+    expect(tools).toContain('toggleSeams')
+    expect(s).toContain('Describe a texture to generate') // content prompt, stage 6
+  })
+  it('Space type uses useStudioAgent through the shell, and VibeControlBar is gone', () => {
+    const s = src('SpaceTypeSurface.vue')
+    expect(s).toContain('useStudioAgent(')
+    expect(s).toContain(':agent="spaceTypeAgent"')
+    expect(s).toContain('prompt-place="space-type-studio"')
+    expect(s).not.toMatch(/VibeControlBar|onVibe\b|vibeProposal|#agentBar/)
+  })
+  it('Space type’s transport is in the bar, not floating on the preview', () => {
+    const s = src('SpaceTypeSurface.vue')
+    const tools = s.slice(s.indexOf('<template #tools>'), s.indexOf('</template>', s.indexOf('<template #tools>')))
+    expect(tools).toContain('togglePlay')
+    expect(tools).toContain('onScrub(')
+    const preview = s.slice(s.indexOf('<template #preview>'), s.indexOf('<template #tools>'))
+    expect(preview).not.toContain('onScrub(')
   })
 })
