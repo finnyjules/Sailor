@@ -54,14 +54,16 @@
  *
  * The repo's rule is to HIDE an inapplicable row, never to grey it.
  */
+import { isFill } from '~/lib/compositor/paint'
+import { paintCanFollow } from '~/lib/compositor/strokeFollow'
 import {
-  strokeSupportsShapes, STROKE_WOBBLES, wobbleSpecOf,
-  type ShapeStrokeSpec, type StrokeInstance, type StrokeJoin, type StrokeStyle, type StrokeWobble,
+  strokeSupportsShapes, strokeFadeOf, strokeFollowsOf, STROKE_WOBBLES, wobbleSpecOf,
+  type ShapeStrokeSpec, type StrokeFade, type StrokeInstance, type StrokeJoin, type StrokeStyle, type StrokeWobble,
 } from '~/lib/compositor/strokeStack'
 
 /** One row of the stroke inspector, in the order the panel draws them. */
 export const STROKE_ROW_ORDER = [
-  'paint', 'width', 'distance', 'wobble', 'wobbleAmount', 'wobbleLength', 'wobblePhase',
+  'paint', 'follow', 'fade', 'fadeRepeats', 'width', 'distance', 'wobble', 'wobbleAmount', 'wobbleLength', 'wobblePhase',
   'join', 'align', 'dash', 'style', 'shapes',
 ] as const
 export type StrokeRowId = typeof STROKE_ROW_ORDER[number]
@@ -110,6 +112,18 @@ export function strokeInspectorRows(kind: string, stroke: StrokeInstance): Strok
   // as a straight band, so every row that exists because of the wobbled route must go with it.
   const wobbleLive = shapeable && strokeWobbleIsLive(stroke)
   const rows: StrokeRowId[] = ['paint']
+  // Follows the line: the painter only takes that route for a BAND on a real outline with a
+  // paint that has something to bend (`paintFollowedBand` is reached from the band arms of
+  // `paintStrokeStack`, which text never enters).
+  const canFollow = band && shapeable && paintCanFollow(stroke.paint)
+  if (canFollow) {
+    rows.push('follow')
+    const ombre = isFill(stroke.paint) && stroke.paint.type === 'ombre'
+    if (strokeFollowsOf(stroke) && ombre) {
+      rows.push('fade')
+      if (strokeFadeOf(stroke) === 'along') rows.push('fadeRepeats')
+    }
+  }
   if (band) rows.push('width')
   rows.push('distance')
   if (shapeable) {
@@ -146,6 +160,22 @@ export const STROKE_WOBBLE_OPTIONS: { value: StrokeWobbleChoice; label: string }
   { value: 'wave', label: 'Wave' },
   { value: 'zigzag', label: 'Zigzag' },
 ]
+
+/** The Fill select's two values. `'still'` / `'follow'` are select values only — the stored
+ *  field is the boolean `follow`, written through `strokeFollowPatch`. */
+export const STROKE_FOLLOW_OPTIONS: { value: 'still' | 'follow'; label: string }[] = [
+  { value: 'still', label: 'Stays put' },
+  { value: 'follow', label: 'Follows the line' },
+]
+export const STROKE_FADE_OPTIONS: { value: StrokeFade; label: string }[] = [
+  { value: 'across', label: 'Inner to outer edge' },
+  { value: 'along', label: 'Along the line' },
+]
+/** Off REMOVES the field (`undefined` drops out of the saved JSON) so a stroke switched on and
+ *  off again is stored exactly as one never switched on. */
+export function strokeFollowPatch(on: boolean): Partial<StrokeInstance> {
+  return { follow: on ? true : undefined }
+}
 
 /** The seed a stroke's Amount/Every get the first time Wobble is switched on from Off — the
  *  same reasoning as `seedShapeSpec`: a first render that shows nothing sends the user

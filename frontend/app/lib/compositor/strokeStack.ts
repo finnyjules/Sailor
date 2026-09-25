@@ -31,6 +31,13 @@ export type StrokeStyle = typeof STROKE_STYLES[number]
 export const STROKE_WOBBLES = ['wave', 'zigzag'] as const
 export type StrokeWobble = typeof STROKE_WOBBLES[number]
 
+/** How an ombre band's grain fades when its fill FOLLOWS THE LINE: from the band's inner edge
+ *  to its outer edge, or thickening and thinning along the line. Ombre only — see
+ *  `strokeFollow.ts`. */
+export const STROKE_FADES = ['across', 'along'] as const
+export type StrokeFade = typeof STROKE_FADES[number]
+export const DEFAULT_FADE_REPEATS = 4
+
 export interface ShapeStrokeSpec {
   /** An id from lib/shapes/catalog. */
   shapeId: string
@@ -65,6 +72,13 @@ export interface StrokeInstance {
   wobbleLength?: number
   /** Degrees — where the cycle starts around the outline. */
   wobblePhase?: number
+  /** true ⇒ the paint is bent along the stroke instead of laid over the frame. Absent ⇒ the
+   *  paint stays put, exactly as before this existed. Read through `strokeFollowsOf`. */
+  follow?: boolean
+  /** Ombre only, and only while following. Absent ⇒ 'across'. Read through `strokeFadeOf`. */
+  fade?: StrokeFade
+  /** Ombre + 'along' only: out-and-back cycles round the line. Read through `strokeFadeRepeatsOf`. */
+  fadeRepeats?: number
 }
 
 /** The kinds whose stroke can become a list. A line has no interior to offset from, so it
@@ -301,6 +315,20 @@ export function wobbleSpecOf(stroke: StrokeInstance, unit: number): WobbleSpec |
   const w = resolveWobble(stroke.wobble, stroke.wobbleLength, stroke.wobbleAmount, stroke.wobblePhase)
   if (!w) return null
   return { shape: w.shape, amount: w.amount * unit, length: w.length * unit, phase: w.phase }
+}
+
+/** The ONE answer to "does this stroke's paint follow the line". A literal `true` only, so a
+ *  stored string or number cannot switch it on. Whether the PAINT can follow is a separate
+ *  question — `paintCanFollow` in strokeFollow.ts. */
+export function strokeFollowsOf(st: Pick<StrokeInstance, 'follow'>): boolean {
+  return st.follow === true
+}
+export function strokeFadeOf(st: Pick<StrokeInstance, 'fade'>): StrokeFade {
+  return st.fade === 'along' ? 'along' : 'across'
+}
+export function strokeFadeRepeatsOf(st: Pick<StrokeInstance, 'fadeRepeats'>): number {
+  const r = st.fadeRepeats
+  return typeof r === 'number' && Number.isFinite(r) ? Math.max(1, Math.min(50, Math.round(r))) : DEFAULT_FADE_REPEATS
 }
 
 /** An entry on its way INTO storage, with an id that addresses exactly it. Returns the same
