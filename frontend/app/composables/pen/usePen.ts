@@ -82,6 +82,27 @@ export function snapAngle(prev: Vec2, pt: Vec2): Vec2 {
   return { x: prev.x + d * Math.cos(snapped), y: prev.y + d * Math.sin(snapped) }
 }
 
+// Right-angle snap: 4° either side of square, the next path anchor lands
+// exactly perpendicular to the last line segment.
+export const PERP_SNAP_RAD = (4 * Math.PI) / 180
+
+// Right-angle snap (no Shift): when the rubber band prev→pt is within `tolRad`
+// of perpendicular to the segment prevPrev→prev, project `pt` onto the
+// perpendicular through `prev`, keeping its signed distance along it. Pure —
+// no doc reads/writes. Used by pathPlacementXY; `snapped` tells the caller to
+// capture the matching perpendicular constraint on placement.
+export function snapPerpendicular(prevPrev: Vec2, prev: Vec2, pt: Vec2, tolRad: number): { pt: Vec2; snapped: boolean } {
+  const dx = prev.x - prevPrev.x, dy = prev.y - prevPrev.y
+  const vx = pt.x - prev.x, vy = pt.y - prev.y
+  const dl = Math.hypot(dx, dy), vl = Math.hypot(vx, vy)
+  if (dl < 1e-9 || vl < 1e-9) return { pt, snapped: false }
+  // |cos| of the angle between the two directions = sin of how far off square
+  if (Math.abs(dx * vx + dy * vy) / (dl * vl) > Math.sin(tolRad)) return { pt, snapped: false }
+  const nx = -dy / dl, ny = dx / dl
+  const s = vx * nx + vy * ny
+  return { pt: { x: prev.x + nx * s, y: prev.y + ny * s }, snapped: true }
+}
+
 // Free (or tangent-joint-locked) arc through/near (J, end, pointer) in world
 // (doc) coordinates, via tangentJointArc (~/lib/sketch/infer). sweep/large
 // follow the doc-coords SVG convention (matches pathD in sketchPath.ts):
@@ -129,7 +150,9 @@ export type Pending =
 export type PendingPath = { anchors: EntityId[]; segments: SegmentSpec[]; ownAnchors: boolean[] } | null
 // the path tool's live down→(bow)→up gesture — plain (non-reactive) state, as
 // it always was on the page; hosts read it through getPathDrag().
-export type PathDrag = { anchor: EntityId; prevAnchor: EntityId; startX: number; startY: number; bowed: boolean } | null
+// `perp`: the right-angle rule this press captured on the new line segment
+// (see snapPerpendicular) — dropped again if the segment bows into an arc.
+export type PathDrag = { anchor: EntityId; prevAnchor: EntityId; startX: number; startY: number; bowed: boolean; perp?: EntityId | null } | null
 // the Curve tool's live down→(drag)→up gesture: past the bow threshold the
 // point being placed turns smooth and the pointer pulls out its handles.
 export type CurveDrag = { anchor: EntityId; startX: number; startY: number; smooth: boolean } | null
@@ -677,16 +700,66 @@ export function usePen(opts: {
     if (!already) { addConstraint(doc.value, kind, [prevId, newId]); sparkle(b.x, b.y) }
   }
 
-  function pathPlacementXY(x: number, y: number, shift: boolean): Vec2 {
+  // Without Shift, the right-angle snap (snapPerpendicular) takes its place:
+  // when the last pending segment is a line and the rubber band runs within
+  // PERP_SNAP_RAD of square to it, the placement lands exactly perpendicular.
+  // `perpendicular` reports that it fired, so pathDown/pathClick can capture
+  // the rule (capturePerpendicular) and the overlay can show its ⊥ chip.
+  function pathPlacement(x: number, y: number, shift: boolean): { x: number; y: number; perpendicular: boolean } {
     const pp = pendingPath.value
-    if (!shift || !pp || pp.anchors.length === 0) return { x, y }
+    if (!pp || pp.anchors.length === 0) return { x, y, perpendicular: false }
     const prev = doc.value.entities.find(e => e.id === pp.anchors[pp.anchors.length - 1]) as any
-    if (!prev || prev.kind !== 'point') return { x, y }
-    return snapAngle({ x: prev.x, y: prev.y }, { x, y })
+    if (!prev || prev.kind !== 'point') return { x, y, perpendicular: false }
+    if (shift) return { ...snapAngle({ x: prev.x, y: prev.y }, { x, y }), perpendicular: false }
+    const lastSeg = pp.segments[pp.segments.length - 1]
+    if (pp.anchors.length < 2 || !lastSeg || lastSeg.kind !== 'line') return { x, y, perpendicular: false }
+    const pprev = doc.value.entities.find(e => e.id === pp.anchors[pp.anchors.length - 2]) as any
+    if (!pprev || pprev.kind !== 'point') return { x, y, perpendicular: false }
+    const r = snapPerpendicular({ x: pprev.x, y: pprev.y }, { x: prev.x, y: prev.y }, { x, y }, PERP_SNAP_RAD)
+    return { x: r.pt.x, y: r.pt.y, perpendicular: r.snapped }
+  }
+  function pathPlacementXY(x: number, y: number, shift: boolean): Vec2 {
+    const p = pathPlacement(x, y, shift)
+    return { x: p.x, y: p.y }
+  }
+
+  // live read of where the next path anchor would land under the cursor
+  // (Shift 45° / right-angle snap applied) — the overlay's rubber band,
+  // dimension line and ⊥ chip all read this, so they agree with pathDown.
+  // Null unless the path tool is hovering with a pending path.
+  const placementPreview = computed(() => {
+    const c = cursor.value
+    const pp = pendingPath.value
+    if (tool.value !== 'path' || !c || !pp || pp.anchors.length === 0) return null
+    return pathPlacement(c.x, c.y, c.shift)
+  })
+
+  // The right-angle snap's counterpart to captureAxisConstraint: when the
+  // placement snapped square (`perpendicular`) and the anchor really landed
+  // there — a fresh point at exactly the snapped spot, not reused or pulled
+  // onto existing geometry (coincident wins) — capture perpendicular
+  // [prevPrev, prev, prev, new] so later drags keep the corner square.
+  // Returns the constraint id it added, or null.
+  function capturePerpendicular(p: { x: number; y: number; perpendicular: boolean }, id: EntityId, own: boolean): EntityId | null {
+    const pp = pendingPath.value
+    if (!p.perpendicular || !own || !pp || pp.anchors.length < 3) return null
+    const n = pp.anchors.length
+    const a = pp.anchors[n - 3]!, b = pp.anchors[n - 2]!
+    if (pp.anchors[n - 1] !== id) return null
+    const placed = doc.value.entities.find(e => e.id === id) as any
+    const corner = doc.value.entities.find(e => e.id === b) as any
+    if (!placed || placed.kind !== 'point' || !corner || corner.kind !== 'point') return null
+    if (Math.abs(placed.x - p.x) > 1e-9 || Math.abs(placed.y - p.y) > 1e-9) return null
+    const already = doc.value.constraints.some(c => c.kind === 'perpendicular' &&
+      c.refs[0] === a && c.refs[1] === b && c.refs[2] === b && c.refs[3] === id)
+    if (already) return null
+    const cid = addConstraint(doc.value, 'perpendicular', [a, b, b, id])
+    sparkle(corner.x, corner.y)
+    return cid
   }
 
   function pathClick(x: number, y: number, shift = false) {
-    const p = pathPlacementXY(x, y, shift)
+    const p = pathPlacement(x, y, shift)
     const { id, own } = placePointOwn(p.x, p.y, [], guideMode.value)
     if (!pendingPath.value) { pendingPath.value = { anchors: [id], segments: [], ownAnchors: [own] }; commitHistory(); return }
     const pp = pendingPath.value
@@ -709,6 +782,7 @@ export function usePen(opts: {
     }
     pp.anchors.push(id)
     pp.ownAnchors.push(own)
+    if (nextSegment.value === 'line') capturePerpendicular(p, id, own)
     commitHistory()
   }
 
@@ -747,7 +821,7 @@ export function usePen(opts: {
   let pathDrag: PathDrag = null
 
   function pathDown(x: number, y: number, shift = false) {
-    const p = pathPlacementXY(x, y, shift)
+    const p = pathPlacement(x, y, shift)
     const { id, own } = placePointOwn(p.x, p.y, [], guideMode.value)
     if (!pendingPath.value) {
       pendingPath.value = { anchors: [id], segments: [], ownAnchors: [own] }
@@ -767,10 +841,11 @@ export function usePen(opts: {
     pp.anchors.push(id)
     pp.ownAnchors.push(own)
     if (shift) captureAxisConstraint(prevAnchor, id)
-    // don't commit here — this anchor+segment (and any shift-captured axis
-    // constraint) settle as ONE history entry together with whatever pathUp
-    // does next (a plain click, or bowing the segment into an arc)
-    pathDrag = { anchor: id, prevAnchor, startX: x, startY: y, bowed: false }
+    const perp = capturePerpendicular(p, id, own)
+    // don't commit here — this anchor+segment (and any shift-captured axis or
+    // right-angle constraint) settle as ONE history entry together with
+    // whatever pathUp does next (a plain click, or bowing the segment into an arc)
+    pathDrag = { anchor: id, prevAnchor, startX: x, startY: y, bowed: false, perp }
     opts.onLiveChange?.()
   }
 
@@ -803,6 +878,9 @@ export function usePen(opts: {
     if (!arc) return null
     const c = addPoint(doc.value, arc.center.x, arc.center.y)
     pp.segments[segIndex] = { kind: 'arc', center: c, sweep: arc.sweep }
+    // the right-angle rule this press captured was for a straight segment — an
+    // arc's chord has no business staying square to the previous line
+    if (pathDrag.perp) removeConstraint(doc.value, pathDrag.perp)
     // tangent-continuous with the previous segment: wire the joint constraint
     // so the solver keeps the flow smooth after later drags (see brief §joint)
     if (arc.snappedTangent && joint) {
@@ -817,6 +895,9 @@ export function usePen(opts: {
     if (!pathDrag) return
     commitBowedSegment({ x, y })
     pathDrag = null
+    // the pointer is here now: re-seat the cursor so anything reading the
+    // (non-reactive) drag state — the overlay's cursor glow — settles too
+    if (cursor.value) cursor.value = { ...cursor.value, x, y }
     runSolve()
     commitHistory()   // one entry for the whole down→(bow)→up gesture
   }
@@ -1015,6 +1096,24 @@ export function usePen(opts: {
   function getCurveDrag(): CurveDrag { return curveDrag.value }
   // the handles held between clicks (not yet in any segment) — for the overlay's arms
   function getHeldHandles(): { lastHOut: EntityId | null; firstHIn: EntityId | null } { return { lastHOut, firstHIn } }
+
+  // Where a drawing tool's next point would snap onto existing geometry under
+  // the hovering cursor — the same snapPoint call placePoint makes (handles
+  // excluded; a Line's second click also excludes its start), on the path
+  // tool's placement point. Read-only: never touches the doc. Null when
+  // nothing is in reach, mid-gesture, or for a Circle's radius click (which
+  // places no point).
+  const hoverSnap = computed<{ x: number; y: number } | null>(() => {
+    const c = cursor.value
+    const t = tool.value
+    if (!c || t === 'select') return null
+    if (t === 'circle' && pending.value?.kind === 'circle') return null
+    const base = t === 'path' ? (placementPreview.value ?? c) : c
+    const ex = [...handleIds()]
+    if (t === 'line' && pending.value?.kind === 'line') ex.push(pending.value.p1)
+    const snapped = snapPoint(doc.value, base.x, base.y, { exclude: ex, tol: pxToUnits(SNAP_PX, opts.view.value) })
+    return snapped.snap ? { x: snapped.x, y: snapped.y } : null
+  })
 
   // --- Repeat / Mirror / Flip: see penCopies.ts. doRepeat and repeatPrompt
   // (the inline-value-request entry points — requestValue, above) stay here
@@ -1361,7 +1460,7 @@ export function usePen(opts: {
     options,
     // state
     tool, guideMode, showLabels, status, selection, selectedSegments, pending, pendingPath,
-    pendingOp, opHint, cursor, dimBuffer, nextSegment, sparkles, sparkleClock,
+    pendingOp, opHint, cursor, dimBuffer, nextSegment, sparkles, sparkleClock, placementPreview, hoverSnap,
     valueRequest, submitValue, cancelValue,
     // tools + view toggles
     selectTool, setGuideMode, toggleGuideMode, setShowLabels, toggleShowLabels,

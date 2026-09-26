@@ -48,7 +48,7 @@ import { addPoint } from '~/lib/sketch/edit'
 import { sketchPathData, entityPath } from '~/lib/sketch/sketchPath'
 import { constraintMarks, arcDimensionMarks } from '~/lib/sketch/annotate'
 import { applyView, invertView, viewToSvg, type ViewMatrix } from '~/lib/sketch/view'
-import { snapAngle, bowArc, SPARKLE_LIFETIME_MS, isTypingInField, type Pen } from '~/composables/pen/usePen'
+import { bowArc, SPARKLE_LIFETIME_MS, isTypingInField, type Pen } from '~/composables/pen/usePen'
 
 const props = withDefaults(defineProps<{
   pen: Pen
@@ -82,7 +82,7 @@ function isCtrlContextClick(ev: PointerEvent) { return ev.ctrlKey && isMacPlatfo
 // to swap it); its refs are unwrapped here so the template reads them bare
 const {
   doc, tool, showLabels, status, selection, selectedSegments, pendingPath, pendingOp,
-  cursor: penCursor, dimBuffer, sparkles, sparkleClock,
+  cursor: penCursor, dimBuffer, sparkles, sparkleClock, placementPreview, hoverSnap,
   pick, clearSel, pickSegment, clearSegSel, marqueeSelectScreen,
   place, pathDown, pathMove, pathUp, getPathDrag, jointInfoForSegment,
   curveDown, curveMove, curveUp, getCurveDrag, getHeldHandles, handleIds,
@@ -325,9 +325,9 @@ const previewD = computed(() => {
     return d
   }
   if (!bowing && penCursor.value && last) {
-    // Shift held → show the 45°-snapped cursor position, not the raw one,
+    // the snapped placement (Shift 45° / right-angle), not the raw cursor,
     // so the rubber band matches where pathDown will place the anchor.
-    const ptr = penCursor.value.shift ? snapAngle(last, penCursor.value) : penCursor.value
+    const ptr = placementPreview.value ?? penCursor.value
     d += ` M ${last.x} ${last.y} L ${ptr.x} ${ptr.y}`
   }
   return d
@@ -343,9 +343,11 @@ const previewDragHandles = computed(() => {
   return { anchor, ptr, mirror: { x: 2 * anchor.x - ptr.x, y: 2 * anchor.y - ptr.y } }
 })
 
-// live radius chip near the bowed arc's midpoint while the path tool drags a
-// segment into a curve. When the bow is joint-tangent-locked to the previous
-// segment (snappedTangent), it also carries J's screen position for a "T" chip.
+// live radius chip while the path tool drags a segment into a curve, sat on
+// the dashed radius leader from the arc's centre to its bow midpoint. It also
+// carries the ghost circle (the arc's full circle, drawing space) and the
+// leader's ends (screen space). When the bow is joint-tangent-locked to the
+// previous segment (snappedTangent), it carries J's screen position for a "T" chip.
 const pathBowChip = computed(() => {
   const pathDrag = getPathDrag()
   if (tool.value !== 'path' || !pathDrag || !pathDrag.bowed || !penCursor.value) return null
@@ -357,27 +359,67 @@ const pathBowChip = computed(() => {
   const arc = bowArc(p0, p1, penCursor.value, joint?.tangentDir ?? null)
   if (!arc) return null
   const mid = toScreen(arc.mid)
+  const c = toScreen(arc.center)
   const j = toScreen(p0)
   return {
-    x: mid.x, y: mid.y,
+    x: (c.x + mid.x) / 2, y: (c.y + mid.y) / 2,
+    center: arc.center, r: arc.r, cx: c.x, cy: c.y, midX: mid.x, midY: mid.y,
     // type-a-dimension: a typed value (with a caret) replaces the measured radius
     text: dimBuffer.value ? dimBuffer.value + '|' : `R ${arc.r.toFixed(1)}`,
     snappedTangent: arc.snappedTangent, jointX: j.x, jointY: j.y,
   }
 })
 
-// type-a-dimension: the line-length counterpart to pathBowChip — only
-// appears once dimBuffer has something in it.
-const lineDimChip = computed(() => {
-  if (tool.value !== 'path' || !dimBuffer.value) return null
+// length dimension line on the straight rubber band: parallel to last
+// anchor → placement point, DIM_OFFSET_PX to the side that reads as above
+// (left, for a vertical band), with extension ticks at both ends and the
+// length in drawing units on a chip. Type-a-dimension: a typed value (with a
+// caret) replaces the measured length, and stays up even on a short band.
+const DIM_OFFSET_PX = 14
+const DIM_MIN_PX = 24
+const lineDim = computed(() => {
+  if (tool.value !== 'path') return null
   const pathDrag = getPathDrag()
   if (pathDrag && pathDrag.bowed) return null   // the arc bow owns the chip via pathBowChip instead
   const pp = pendingPath.value
-  if (!pp || !penCursor.value) return null
-  const last = screenPt(pp.anchors[pp.anchors.length - 1]!)
-  if (!last) return null
-  const ptr = toScreen(penCursor.value)
-  return { x: (last.x + ptr.x) / 2, y: (last.y + ptr.y) / 2, text: dimBuffer.value + '|' }
+  const place = placementPreview.value
+  if (!pp || !place) return null
+  const lastW = worldPt(pp.anchors[pp.anchors.length - 1]!)
+  if (!lastW) return null
+  const a = toScreen(lastW), b = toScreen(place)
+  const len = Math.hypot(b.x - a.x, b.y - a.y)
+  if (len < DIM_MIN_PX && !dimBuffer.value) return null
+  const ux = len > 1e-9 ? (b.x - a.x) / len : 1, uy = len > 1e-9 ? (b.y - a.y) / len : 0
+  let nx = uy, ny = -ux
+  if (ny > 1e-9 || (Math.abs(ny) <= 1e-9 && nx > 0)) { nx = -nx; ny = -ny }
+  const off = (p: { x: number; y: number }, k: number) => ({ x: p.x + nx * k, y: p.y + ny * k })
+  const d0 = off(a, DIM_OFFSET_PX), d1 = off(b, DIM_OFFSET_PX)
+  const t0a = off(a, 3), t0b = off(a, DIM_OFFSET_PX + 3), t1a = off(b, 3), t1b = off(b, DIM_OFFSET_PX + 3)
+  const text = dimBuffer.value ? dimBuffer.value + '|' : Math.hypot(place.x - lastW.x, place.y - lastW.y).toFixed(1)
+  return {
+    x1: d0.x, y1: d0.y, x2: d1.x, y2: d1.y,
+    ticks: [{ x1: t0a.x, y1: t0a.y, x2: t0b.x, y2: t0b.y }, { x1: t1a.x, y1: t1a.y, x2: t1b.x, y2: t1b.y }],
+    x: (d0.x + d1.x) / 2, y: (d0.y + d1.y) / 2, text, w: text.length * 6 + 8,
+  }
+})
+
+// "⊥" chip at the corner while the next anchor is snapping square to the
+// last line segment (usePen's right-angle snap)
+const rightAngleChip = computed(() => {
+  if (tool.value !== 'path' || getPathDrag() || !placementPreview.value?.perpendicular) return null
+  const pp = pendingPath.value
+  return pp ? screenPt(pp.anchors[pp.anchors.length - 1]!) : null
+})
+
+// soft ring under the pointer: at the cursor while a path/curve press is
+// live, otherwise — hovering a drawing tool — where the point would snap
+// onto existing geometry (usePen's hoverSnap), so it shows where it lands
+const cursorGlow = computed(() => {
+  const c = penCursor.value
+  if (!c) return null
+  const pressing = (tool.value === 'path' && !!getPathDrag()) || (tool.value === 'curve' && !!getCurveDrag())
+  if (pressing) return toScreen(c)
+  return hoverSnap.value ? toScreen(hoverSnap.value) : null
 })
 
 // screen-space sparkles: a small burst of short rays radiating from the
@@ -566,6 +608,12 @@ function onPointerMove(ev: PointerEvent) {
     if (w) curveMove(w.x, w.y)
     return
   }
+  if (tool.value === 'point' || tool.value === 'line' || tool.value === 'circle') {
+    // hover only — feeds the pen's hoverSnap (the cursor glow)
+    const w = drawingXY(ev)
+    penCursor.value = w ? { x: w.x, y: w.y, shift: ev.shiftKey } : null
+    return
+  }
   if (!dragId || ev.buttons === 0) return
   const w = drawingXY(ev)
   if (!w) return
@@ -752,6 +800,19 @@ defineExpose({
       <path :d="previewD" fill="none" stroke="#6366f1" stroke-width="1.5" stroke-dasharray="5 3"
             vector-effect="non-scaling-stroke" data-path-preview />
     </g>
+    <!-- bowing: the arc's full circle, faint, in drawing space -->
+    <g v-if="pathBowChip" :transform="svgTransform" pointer-events="none" data-bow-ghost>
+      <circle :cx="pathBowChip.center.x" :cy="pathBowChip.center.y" :r="pathBowChip.r" fill="none"
+              stroke="#6366f1" stroke-width="1" stroke-dasharray="3 4" opacity="0.35" vector-effect="non-scaling-stroke" />
+    </g>
+    <g v-if="pathBowChip" pointer-events="none" data-bow-leader>
+      <line :x1="pathBowChip.cx" :y1="pathBowChip.cy" :x2="pathBowChip.midX" :y2="pathBowChip.midY"
+            stroke="#6366f1" stroke-width="1" stroke-dasharray="3 3" opacity="0.6" />
+      <circle :cx="pathBowChip.cx" :cy="pathBowChip.cy" r="2.5" fill="#6366f1" />
+    </g>
+    <g v-if="cursorGlow" pointer-events="none" data-cursor-glow>
+      <circle :cx="cursorGlow.x" :cy="cursorGlow.y" r="10" fill="#6366f1" fill-opacity="0.18" />
+    </g>
     <g v-if="previewDragHandles" pointer-events="none" data-drag-handles>
       <line :x1="previewDragHandles.anchor.x" :y1="previewDragHandles.anchor.y" :x2="previewDragHandles.ptr.x" :y2="previewDragHandles.ptr.y"
             :stroke="HANDLE_COLOR" stroke-width="1" />
@@ -780,17 +841,24 @@ defineExpose({
         <text :x="s.x + 9" :y="s.y - 5" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">{{ m.text }}</text>
       </g>
     </template>
-    <g v-if="pathBowChip" pointer-events="none">
-      <rect :x="pathBowChip.x - 18" :y="pathBowChip.y - 20" width="40" height="14" rx="3" fill="#111827" opacity="0.85" />
-      <text :x="pathBowChip.x - 15" :y="pathBowChip.y - 9" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">{{ pathBowChip.text }}</text>
+    <g v-if="pathBowChip" pointer-events="none" data-bow-chip>
+      <rect :x="pathBowChip.x - 20" :y="pathBowChip.y - 7" width="40" height="14" rx="3" fill="#111827" opacity="0.85" />
+      <text :x="pathBowChip.x - 17" :y="pathBowChip.y + 4" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">{{ pathBowChip.text }}</text>
     </g>
     <g v-if="pathBowChip && pathBowChip.snappedTangent" pointer-events="none">
       <rect :x="pathBowChip.jointX + 6" :y="pathBowChip.jointY - 16" width="16" height="14" rx="3" fill="#111827" opacity="0.85" />
       <text :x="pathBowChip.jointX + 9" :y="pathBowChip.jointY - 5" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">T</text>
     </g>
-    <g v-if="lineDimChip" pointer-events="none">
-      <rect :x="lineDimChip.x - 18" :y="lineDimChip.y - 20" width="40" height="14" rx="3" fill="#111827" opacity="0.85" />
-      <text :x="lineDimChip.x - 15" :y="lineDimChip.y - 9" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">{{ lineDimChip.text }}</text>
+    <g v-if="rightAngleChip" pointer-events="none" data-right-angle>
+      <rect :x="rightAngleChip.x + 6" :y="rightAngleChip.y - 16" width="16" height="14" rx="3" fill="#111827" opacity="0.85" />
+      <text :x="rightAngleChip.x + 9" :y="rightAngleChip.y - 5" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">⊥</text>
+    </g>
+    <g v-if="lineDim" pointer-events="none" data-line-dim>
+      <line :x1="lineDim.x1" :y1="lineDim.y1" :x2="lineDim.x2" :y2="lineDim.y2" stroke="#6366f1" stroke-width="1" opacity="0.7" />
+      <line v-for="(t, i) in lineDim.ticks" :key="'dimtick-' + i" :x1="t.x1" :y1="t.y1" :x2="t.x2" :y2="t.y2"
+            stroke="#6366f1" stroke-width="1" opacity="0.7" />
+      <rect :x="lineDim.x - lineDim.w / 2" :y="lineDim.y - 7" :width="lineDim.w" height="14" rx="3" fill="#111827" opacity="0.85" />
+      <text :x="lineDim.x" :y="lineDim.y + 4" text-anchor="middle" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">{{ lineDim.text }}</text>
     </g>
     <rect v-if="marqueeRect" :x="marqueeRect.x" :y="marqueeRect.y" :width="marqueeRect.w" :height="marqueeRect.h"
           fill="rgba(37,99,235,0.08)" stroke="#2563eb" stroke-width="1" stroke-dasharray="4 3" pointer-events="none" data-marquee />
