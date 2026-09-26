@@ -6,7 +6,9 @@
  * (2) ComfyUI's response body passes through VERBATIM (clients parse
  *     prompt_id / node_errors from the real shape);
  * (3) settlement is watcher-driven: settle the hold + record output filenames
- *     on success, release the hold on error/timeout. Refusals cost nothing.
+ *     on success; on an error charge the paid nodes that finished and release
+ *     the rest (Task G2, watchGraphRun); release the hold on a timeout.
+ *     Refusals cost nothing.
  */
 import { createHash, randomUUID } from 'node:crypto'
 import type { H3Event } from 'h3'
@@ -19,7 +21,8 @@ import { storedNodeCatalog } from '../native/objectInfo'
 import { graphInputSeconds, mediaSeconds, seedanceReferenceSeconds, type MediaFile, type MediaKind } from './graphInputSeconds'
 import { MeterRefusalError } from './requestMeter'
 import { createGraphRun, resolveGraphRun, outputKey, ownedOutputKeys } from './graphRuns'
-import { settleOnCompletion } from './settleWatcher'
+import { partialCharge, settleOnCompletion, type HistoryEntry, type RunChargePlan } from './settleWatcher'
+import { LOCAL_RENDER_TYPES } from '#shared/runner/eligibility'
 import { stripForeignComfyOrgCreds } from './spikeAuth'
 import { resolveWorkerTarget } from './workerRoute'
 import { getLiveLedger } from './ledgerLive'
@@ -410,7 +413,8 @@ export interface GraphRunDeps {
   getAvailable(userId: string): Promise<number>
   forward(body: any): Promise<{ status: number; body: any }>
   registerRun(r: { promptId: string; userId: string; credits: number; holdId: number | null }): Promise<void>
-  startSettle(r: { promptId: string; holdId: number | null; credits: number }): void
+  /** `plan` (Task G2): what the hold was the sum of, so a failed run can be charged for the paid nodes that finished. */
+  startSettle(r: { promptId: string; holdId: number | null; credits: number; plan?: RunChargePlan }): void
   releaseHold(holdId: number): Promise<void>
 }
 
@@ -590,7 +594,9 @@ async function submitMetered(userId: string | null, body: any, deps: GraphRunDep
     console.error('[graphMeter] registerRun failed — run will settle but ownership row is missing', { promptId, userId, holdId, error: e })
   }
   run.handedOff = true
-  deps.startSettle({ promptId, holdId, credits: price.credits })
+  // Task G2: the per-node figures the hold is the sum of, kept for an error settle.
+  const plan = price.nodes ? chargePlanOf(body.prompt, price.nodes, price.base ?? 0) : undefined
+  deps.startSettle({ promptId, holdId, credits: price.credits, ...(plan ? { plan } : {}) })
   return fwd
 }
 
@@ -675,25 +681,20 @@ export async function handleMeteredPrompt(event: H3Event): Promise<any> {
     // race-window harvest always polled :8188, so a run dispatched to a pool
     // worker (?comfyWorker=N) could never be settled from the harvest path.
     registerRun: r => createGraphRun({ ...r, target }),
-    startSettle: ({ promptId, holdId, credits }) => {
+    startSettle: (r) => {
       // The run's copies go when its watcher ends (success, error or timeout).
-      void settleOnCompletion({
-        promptId,
-        intervalMs: SETTLE_INTERVAL_MS,
-        maxPolls: SETTLE_MAX_POLLS,
+      void watchGraphRun(r, {
         pollHistory: async (id) => {
-          const r = await fetch(`${target}/history/${encodeURIComponent(id)}`)
-          if (!r.ok) return null
-          const hist = await r.json() as Record<string, any>
+          const res = await fetch(`${target}/history/${encodeURIComponent(id)}`)
+          if (!res.ok) return null
+          const hist = await res.json() as Record<string, any>
           return hist[id] ?? null
         },
-        onSuccess: (id) => { void settleGraphSuccess(target, id, holdId, credits) },
-        onError: (id) => {
-          void (async () => {
-            if (holdId !== null) await ledger.release(holdId).catch(e => console.error('[graphMeter] release failed', { id, holdId, e }))
-            await resolveGraphRun(id, 'voided').catch(() => {})
-          })()
-        },
+        settleSuccess: id => settleGraphSuccess(target, id, r.holdId, r.credits),
+        ledger,
+        resolve: resolveGraphRun,
+        intervalMs: SETTLE_INTERVAL_MS,
+        maxPolls: SETTLE_MAX_POLLS,
       }).catch(() => {}).finally(() => { void snaps.release() })
     },
     releaseHold: id => ledger.release(id),
@@ -703,22 +704,119 @@ export async function handleMeteredPrompt(event: H3Event): Promise<any> {
   return result.body
 }
 
+/**
+ * Task G2: the charge plan for a graph — priceGraph's per-node credits and
+ * render credit (the figures the hold is the sum of), plus the nodes that are
+ * local renders (the Frame), which earn the render credit when they finish.
+ */
+export function chargePlanOf(prompt: Record<string, any>, nodes: Record<string, number>, base: number): RunChargePlan {
+  const renderNodes = Object.keys(prompt).filter(id => LOCAL_RENDER_TYPES.has(prompt[id]?.class_type)).sort()
+  return { nodes: { ...nodes }, base, renderNodes }
+}
+
+export interface WatchGraphRunIO {
+  pollHistory(promptId: string): Promise<HistoryEntry | null>
+  settleSuccess(promptId: string): Promise<void>
+  ledger: {
+    settle(holdId: number, actual: number, reason: string): Promise<{ settled: boolean }>
+    release(holdId: number): Promise<void>
+  }
+  resolve(promptId: string, state: 'settled' | 'voided', outputs?: string[]): Promise<void>
+  sleep?: (ms: number) => Promise<void>
+  intervalMs?: number
+  maxPolls?: number
+}
+
+/**
+ * Watch one queued graph run to its end and settle its hold:
+ * - success: settleSuccess (the whole hold, unchanged);
+ * - error (Task G2, user decision 09-25): charge the paid nodes that
+ *   finished — partialCharge reads which from the history entry — never
+ *   more than the hold; the ledger's settle releases the rest. The render
+ *   credit rides on something made, as in the runner. Nothing finished, no
+ *   plan, or a history entry that doesn't say what ran: release, as before G2;
+ * - timeout: release (we can't confirm anything ran).
+ * Resolves once the ledger work is done.
+ */
+export async function watchGraphRun(
+  r: { promptId: string; holdId: number | null; credits: number; plan?: RunChargePlan },
+  io: WatchGraphRunIO,
+): Promise<'success' | 'error' | 'timeout'> {
+  let settling: Promise<void> = Promise.resolve()
+  const outcome = await settleOnCompletion({
+    promptId: r.promptId,
+    pollHistory: io.pollHistory,
+    sleep: io.sleep,
+    intervalMs: io.intervalMs,
+    maxPolls: io.maxPolls,
+    onSuccess: (id) => { settling = io.settleSuccess(id).catch(e => console.error('[graphMeter] settle failed', { id, e })) },
+    onError: (id, entry) => { settling = settleGraphFailure(r, entry, io) },
+  })
+  await settling
+  return outcome
+}
+
+async function settleGraphFailure(
+  r: { promptId: string; holdId: number | null; credits: number; plan?: RunChargePlan },
+  entry: HistoryEntry | undefined,
+  io: WatchGraphRunIO,
+): Promise<void> {
+  const id = r.promptId
+  const voidRun = async () => {
+    if (r.holdId !== null) await io.ledger.release(r.holdId).catch(e => console.error('[graphMeter] release failed', { id, holdId: r.holdId, e }))
+    await io.resolve(id, 'voided').catch(() => {})
+  }
+  // A timeout (no entry), or no hold to charge from: release, as before G2.
+  if (!entry || r.holdId === null) return voidRun()
+  if (!r.plan) {
+    console.error('[graphMeter] failed run released uncharged — no charge plan recorded', { id, holdId: r.holdId })
+    return voidRun()
+  }
+  const owed = partialCharge(entry, r.plan, r.credits)
+  if ('unknown' in owed) {
+    console.error('[graphMeter] failed run released uncharged — cannot tell which nodes ran', { id, holdId: r.holdId, why: owed.unknown })
+    return voidRun()
+  }
+  if (owed.credits <= 0) return voidRun()
+
+  const reason = `graph:${id} partial: ${owed.credits} of ${r.credits} held credits for finished nodes ${owed.nodeIds.join(', ') || '(none)'}`
+    + `${owed.base ? ` + ${owed.base} render` : ''}; ${owed.interrupted ? 'stopped' : 'failed'}${owed.failedNode ? ` at node ${owed.failedNode}` : ''}`
+  try {
+    const s = await io.ledger.settle(r.holdId, owed.credits, reason)
+    if (!s.settled) {
+      console.error('[graphMeter] PARTIAL SETTLE ON RELEASED HOLD — finished nodes uncharged', { id, holdId: r.holdId, credits: owed.credits })
+      captureError(new Error('graphMeter: partial settle on released hold'), { site: 'meterGraphRun.partial', promptId: id, holdId: r.holdId, credits: owed.credits })
+    }
+  } catch (e) {
+    console.error('[graphMeter] PARTIAL SETTLE FAILED — releasing', { id, holdId: r.holdId, credits: owed.credits, e })
+    return voidRun()
+  }
+  await io.resolve(id, 'settled', historyOutputKeys(entry)).catch(e => console.error('[graphMeter] resolve failed', { id, e }))
+}
+
+/** The output files a history entry lists (the saved pictures, clips and sounds), as graph_runs keys. */
+function historyOutputKeys(entry: { outputs?: unknown } | null | undefined): string[] {
+  const outputs: string[] = []
+  const nodeOutputs = entry?.outputs && typeof entry.outputs === 'object' ? entry.outputs as Record<string, any> : {}
+  for (const node of Object.values(nodeOutputs)) {
+    for (const arr of [node?.images, node?.gifs, node?.videos, node?.audio]) {
+      if (!Array.isArray(arr)) continue
+      for (const f of arr) if (f?.filename) outputs.push(outputKey(f))
+    }
+  }
+  return outputs
+}
+
 // Exported (Stage 5 Task 5): engineGate.ts's harvestPendingOutputs calls this
 // SAME function for the /view race-window fallback, so there is exactly one
 // settlement implementation rather than a second copy drifting from this one.
 export async function settleGraphSuccess(target: string, promptId: string, holdId: number | null, credits: number): Promise<void> {
-  const outputs: string[] = []
+  let outputs: string[] = []
   try {
     const r = await fetch(`${target}/history/${encodeURIComponent(promptId)}`)
     if (r.ok) {
       const hist = await r.json() as Record<string, any>
-      const nodeOutputs = hist[promptId]?.outputs ?? {}
-      for (const node of Object.values(nodeOutputs) as any[]) {
-        for (const arr of [node?.images, node?.gifs, node?.videos, node?.audio]) {
-          if (!Array.isArray(arr)) continue
-          for (const f of arr) if (f?.filename) outputs.push(outputKey(f))
-        }
-      }
+      outputs = historyOutputKeys(hist[promptId])
     }
   } catch (e) { console.error('[graphMeter] output harvest failed', { promptId, e }) }
 

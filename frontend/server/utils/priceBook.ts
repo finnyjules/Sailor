@@ -435,6 +435,15 @@ export interface GraphPrice {
   credits: number
   version: string
   breakdown: { action: string; credits: number }[]
+  /**
+   * Task G2: node id → the credits that node adds to `credits` (the same
+   * figure its breakdown row carries), so a run that fails partway can be
+   * charged for the paid nodes that finished. Optional only so hand-made
+   * test prices stay valid; priceGraph always sets it.
+   */
+  nodes?: Record<string, number>
+  /** Task G2: the render credit inside `credits` (BASE_RENDER_CREDITS when the graph has an output node, else 0). */
+  base?: number
 }
 
 /**
@@ -454,6 +463,7 @@ export interface GraphPrice {
  */
 export function priceGraph(prompt: Record<string, { class_type: string; inputs?: unknown }>, opts: { inputPixels?: Record<string, number>, inputSeconds?: Record<string, InputSeconds>, families?: ReadonlySet<RunnerFamily> } = {}): GraphPrice {
   const breakdown: { action: string; credits: number }[] = []
+  const nodes: Record<string, number> = {}
   let hasOutput = false
 
   // Sort node ids for order-independent, deterministic breakdown.
@@ -471,11 +481,12 @@ export function priceGraph(prompt: Record<string, { class_type: string; inputs?:
       const model = (inputs as { model?: unknown } | undefined)?.model
       // A class with no model widget (Develop, Relight…) is named alone, as its flat row was.
       breakdown.push({ action: model === undefined ? ct : `${ct}:${String(model)}`, credits })
+      nodes[id] = credits
       continue
     }
 
     const flat = GRAPH_NODE_CREDITS[ct]
-    if (flat !== undefined) { breakdown.push({ action: ct, credits: flat }); continue }
+    if (flat !== undefined) { breakdown.push({ action: ct, credits: flat }); nodes[id] = flat; continue }
 
     // Fail closed: a provider node this table cannot price refuses the graph.
     if (isProviderClass(ct) && !(ct in PROVIDER_NODE_EXEMPT)) throw new UnpricedGraphError(ct)
@@ -489,6 +500,8 @@ export function priceGraph(prompt: Record<string, { class_type: string; inputs?:
     credits: out.reduce((s, b) => s + b.credits, 0),
     version: PRICE_BOOK_VERSION,
     breakdown: out,
+    nodes,
+    base: hasOutput ? BASE_RENDER_CREDITS : 0,
   }
 }
 

@@ -17,14 +17,16 @@ describe('settleOnCompletion', () => {
     expect(onError).not.toHaveBeenCalled()
   })
 
-  it('voids on an error status', async () => {
+  it('calls onError with the failed run\'s history entry on an error status', async () => {
     const onSuccess = vi.fn(); const onError = vi.fn()
+    const entry = { status: { status_str: 'error' as const, completed: false } } // real engine shape: errors keep completed:false
     const r = await settleOnCompletion({
-      promptId: 'p1', pollHistory: async () => ({ status: { status_str: 'error', completed: false } }), // real engine shape: errors keep completed:false
+      promptId: 'p1', pollHistory: async () => entry,
       onSuccess, onError, sleep: noSleep, intervalMs: 0,
     })
     expect(r).toBe('error')
-    expect(onError).toHaveBeenCalledWith('p1')
+    // Task G2: the entry lets the caller charge the paid nodes that finished.
+    expect(onError).toHaveBeenCalledWith('p1', entry)
     expect(onSuccess).not.toHaveBeenCalled()
   })
 
