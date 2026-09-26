@@ -20,7 +20,11 @@ TypeScript helpers (frontend/server/runner/pictures/) to be measured against
   bilinear    — (R1.4) torch.nn.functional.interpolate(t, size=(dh, dw),
                 mode='bilinear', align_corners=False) on seeded random float32
                 (1, C, H, W) tensors, 1 and 4 channels; input and output stored
-                as float32 little-endian, channels last (H, W, C)
+                as float32 little-endian, channels last (H, W, C). Then (fix
+                round 1) sizes either side of torch's kernel switch at output
+                w + h = 129 and large sizes, 1, 3 and 4 channels, contiguous and
+                channels-last: the input rebuilt from `seed` (hashed_src), the
+                output as its sha256
 
     cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python scripts/runner_values_fixtures.py
 
@@ -29,6 +33,7 @@ and DNS lookup raises and the provider keys are removed before any node module
 is imported. Nothing here needs the network.
 """
 import base64
+import hashlib
 import io
 import json
 import os
@@ -304,7 +309,32 @@ def bilinear_cases() -> list[dict]:
             hwc = lambda x: b64(x[0].permute(1, 2, 0).contiguous().numpy().astype("<f4").tobytes())  # noqa: E731
             out.append({"name": f"{sw}x{sh} to {dw}x{dh}, {c} channel{'s' if c > 1 else ''}",
                         "sw": sw, "sh": sh, "dw": dw, "dh": dh, "channels": c, "src": hwc(t), "out": hwc(r)})
+    # (R1.4 fix round 1) torch changes its sum at output width + height 129:
+    # sizes either side of it and large ones, contiguous and channels-last (a
+    # ComfyUI picture movedim'd). The input is `hashed_src` (no stored floats)
+    # and the output its sha256, to keep the file small.
+    big = [((50, 40), (60, 68)), ((50, 40), (61, 68)), ((20, 20), (64, 64)), ((20, 20), (64, 65)),
+           ((300, 200), (517, 333)), ((300, 90), (1080, 1920)), ((1920, 1080), (1000, 700))]
+    seed = 0
+    for (sw, sh), (dw, dh) in big:
+        for c, memory in ((1, "contiguous"), (3, "contiguous"), (3, "channels-last"), (4, "contiguous"), (4, "channels-last")):
+            if dw * dh > 1_000_000 and c > 1:
+                continue
+            seed += 1
+            hwc_src = torch.from_numpy(hashed_src(sh * sw * c, seed).reshape(1, sh, sw, c))
+            t = hwc_src.movedim(-1, 1) if memory == "channels-last" else hwc_src.permute(0, 3, 1, 2).contiguous()
+            r = torch.nn.functional.interpolate(t, size=(dh, dw), mode="bilinear", align_corners=False)
+            digest = hashlib.sha256(r[0].permute(1, 2, 0).contiguous().numpy().astype("<f4").tobytes()).hexdigest()
+            out.append({"name": f"{sw}x{sh} to {dw}x{dh}, {c} channel{'s' if c > 1 else ''}, {memory} (w + h = {dw + dh})",
+                        "sw": sw, "sh": sh, "dw": dw, "dh": dh, "channels": c, "memory": memory, "seed": seed, "out_sha256": digest})
     return out
+
+
+def hashed_src(n: int, seed: int) -> np.ndarray:
+    """n float32 values k / 2^24 from a multiplicative hash of the (H, W, C) index; runner-bilinear rebuilds the same."""
+    i = np.arange(n, dtype=np.uint64)
+    k = ((i * np.uint64(2654435761) + np.uint64(seed * 40503)) & np.uint64(0xFFFFFFFF)) >> np.uint64(8)
+    return (k.astype(np.float64) / 16777216.0).astype(np.float32)
 
 
 def main() -> None:

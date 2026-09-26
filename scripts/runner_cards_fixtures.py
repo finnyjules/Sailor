@@ -38,7 +38,8 @@ adds its key and regenerates the file (the other keys must come out unchanged).
   text_mask_source — (R1.4) TextMaskNode.execute(params, source): a 40×20
               render on 64×48 RGB and RGBA sources, a same-size render, a
               two-picture batch and a blank render; each image frame as the 8-bit
-              RGB or RGBA a provider is sent, the mask 16-bit
+              RGB or RGBA a provider is sent, the mask 16-bit; and (fix round 1)
+              a 300×90 render on a 1080×1920 source, its outputs as sha256
 
     cd /Users/julien/Documents/GitHub/Sailor && .venv/bin/python scripts/runner_cards_fixtures.py
 
@@ -506,7 +507,35 @@ def text_mask_source_cases() -> list[dict]:
         row["images"] = _frames8(image)
         row["mask"] = _mask16(mask)
         out.append(row)
+    # (fix round 1) At a real size, where torch's resize takes its separable
+    # sum (output w + h ≥ 129): a 300×90 render on a 1080×1920 source. The
+    # outputs are stored as the sha256 of their 8-bit pixels and 16-bit mask.
+    import hashlib
+    import numpy as np
+    from PIL import Image as PILImage
+    y, x = np.mgrid[0:1920, 0:1080].astype(np.float64)
+    tall = np.stack([x / 1079, y / 1919, (x + y) / 2998], axis=-1)
+    tall_png = rv._save(PILImage.fromarray(np.floor(tall * 255 + 0.5).astype(np.uint8), "RGB"), "PNG")
+    wide = _put("tms_wide.png", _grey(90, 300, 59))
+    for name, files, via in [("a 300×90 render on a 1080×1920 RGB source (LoadImage)", [("tms_tall.png", tall_png)], "load")]:
+        t = torch.cat([_loaded(n, d, via) for n, d in files], dim=0)
+        image, mask = TextMaskNode.execute(p(wide), t).args
+        frames = _frames8(image)
+        with open(os.path.join(rv.WORK, "input", wide), "rb") as f:
+            render = rv.b64(f.read())
+        m16 = base64_bytes(_mask16(mask)["mask16"])
+        out.append({
+            "name": name, "params": p(wide), "via": via, "files": {n: rv.b64(d) for n, d in files}, "names": [n for n, _ in files],
+            "render": render,
+            "images": [{"w": fr["w"], "h": fr["h"], "channels": fr["channels"], "px8_sha256": hashlib.sha256(base64_bytes(fr["px8"])).hexdigest()} for fr in frames],
+            "mask": {"w": int(mask.shape[-1]), "h": int(mask.shape[-2]), "mask16_sha256": hashlib.sha256(m16).hexdigest()},
+        })
     return out
+
+
+def base64_bytes(s: str) -> bytes:
+    import base64
+    return base64.b64decode(s)
 
 
 def main() -> None:

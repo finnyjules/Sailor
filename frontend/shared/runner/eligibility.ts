@@ -125,12 +125,16 @@ export const INPUT_CHECKS = {
   // A bake card's `params` (Text on path, Text mask) reads the same in JSON.parse
   // as in Python's json.loads: text only Python reads (NaN, Infinity) is left to the engine.
   'bake-params': (inputs: Record<string, unknown>): boolean => bakeParamsReadable(inputs.params),
-  // Empty image within the runner's caps (R1.4): 8192 × 8192 and a batch of 64.
-  // Checked after the widgets, so each value already converts as int() does.
-  'empty-image-caps': (inputs: Record<string, unknown>): boolean =>
-    (pyIntValue(inputs.width) ?? Infinity) <= EMPTY_IMAGE_MAX_SIDE
-    && (pyIntValue(inputs.height) ?? Infinity) <= EMPTY_IMAGE_MAX_SIDE
-    && (pyIntValue(inputs.batch_size) ?? Infinity) <= EMPTY_IMAGE_MAX_BATCH,
+  // Empty image within the runner's caps (R1.4): 8192 × 8192, a batch of 64,
+  // and at most CARD_MAX_PIXELS in all (width × height × batch: what a
+  // utility reading it would work through). Checked after the widgets, so
+  // each value already converts as int() does.
+  'empty-image-caps': (inputs: Record<string, unknown>): boolean => {
+    const w = pyIntValue(inputs.width) ?? Infinity
+    const h = pyIntValue(inputs.height) ?? Infinity
+    const batch = pyIntValue(inputs.batch_size) ?? Infinity
+    return w <= EMPTY_IMAGE_MAX_SIDE && h <= EMPTY_IMAGE_MAX_SIDE && batch <= EMPTY_IMAGE_MAX_BATCH && w * h * batch <= CARD_MAX_PIXELS
+  },
 } as const
 
 /** nodes.py MAX_RESOLUTION: the most ComfyUI allows for a width or height widget. */
@@ -138,6 +142,12 @@ export const COMFY_MAX_RESOLUTION = 16384
 /** The largest Empty image side and batch the runner makes (R1.4); more goes to the engine. */
 export const EMPTY_IMAGE_MAX_SIDE = 8192
 export const EMPTY_IMAGE_MAX_BATCH = 64
+/**
+ * The most pixels one picture card works through in a turn (R1.4 fix round 1),
+ * all its pictures together: four 8192 × 8192 pictures. More is left to the
+ * engine when known up front (Empty image), else refused at the card's turn.
+ */
+export const CARD_MAX_PIXELS = 4 * 8192 * 8192
 
 /** Whether JSON.parse reads `params` as json.loads does (both read it, or both fail on it). */
 function bakeParamsReadable(v: unknown): boolean {

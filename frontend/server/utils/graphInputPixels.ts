@@ -654,6 +654,12 @@ export function pictureRule(classType: string, inputs: NodeInputs): PictureRule 
       const h = literalSize(inputs.height)
       return w && h ? { crop: inputs.image, width: w, height: h, x: inputs.x, y: inputs.y } : UNSIZED
     }
+    // nodes.py EmptyImage: width × height, every frame (R1.4 fix round 1).
+    case 'EmptyImage': {
+      const w = literalSize(inputs.width)
+      const h = literalSize(inputs.height)
+      return w && h ? { exact: w * h, width: w, height: h } : UNSIZED
+    }
     // nodes_replicate.py RemoveBackgroundNode: a cut-out of the same picture.
     case 'RemoveBackgroundNode':
       return { same: inputs.image }

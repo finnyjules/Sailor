@@ -285,16 +285,19 @@ export function textMaskRender(params: unknown): OutputFile | null {
   return renderedFile(params, TEXT_MASK_UNLOADABLE)
 }
 
-/** `_load_mask`: the render's convert("L") as the mask 1 − L/255 (float32, as torch). */
-export async function loadTextMask(io: DeriveIO, file: OutputFile): Promise<Mask> {
+/** `_load_mask`'s picture: the render's convert("L"), 8-bit. */
+export async function loadTextMaskLuma(io: DeriveIO, file: OutputFile): Promise<{ w: number; h: number; l: Uint8Array }> {
   const bytes = await readRendered(io, file, TEXT_MASK_UNLOADABLE)
-  let grey: Awaited<ReturnType<typeof pilL>>
-  try { grey = await pilL(bytes) }
+  try { return await pilL(bytes) }
   catch (e) {
     if (isRefusal(e)) throw new Error(bakeRefusalWords('TextMask', e.message))
     throw new Error(TEXT_MASK_UNLOADABLE)
   }
-  const { w, h, l } = grey
+}
+
+/** `_load_mask`: the render's convert("L") as the mask 1 − L/255 (float32, as torch). */
+export async function loadTextMask(io: DeriveIO, file: OutputFile): Promise<Mask> {
+  const { w, h, l } = await loadTextMaskLuma(io, file)
   const f = Math.fround
   const data = new Float32Array(w * h)
   for (let i = 0; i < data.length; i++) data[i] = f(1 - f(l[i]! / 255))

@@ -26,6 +26,7 @@
 import { Worker } from 'node:worker_threads'
 import { compositorCore, type Picture, type RawPicture } from './plane'
 import { composeFrame, type FrameBackend, type FrameLoaders } from './render'
+import { pixelsCore } from '../pixels/core'
 
 /**
  * The worker's script around a core function's source text. `__name` is
@@ -34,13 +35,16 @@ import { composeFrame, type FrameBackend, type FrameLoaders } from './render'
  * (target es2019); the esbuild guard in the engine spec checks both minified
  * and not.
  */
-export function workerScript(coreFn: () => unknown = compositorCore): string {
+export function workerScript(coreFn: () => unknown = compositorCore, pixelsFn: () => unknown = pixelsCore): string {
   return `
 const { parentPort, workerData } = require('node:worker_threads')
 const __name = (f) => f
 const core = (${coreFn.toString()})()
+const px = (${pixelsFn.toString()})()
 const stop = new Int32Array(workerData.stop)
+const stopped = () => { if (Atomics.load(stop, 0) === 1) throw new Error('Stopped') }
 let cv = null
+let clipAlpha = null
 parentPort.on('message', (m) => {
   try {
     let value = null
@@ -64,12 +68,32 @@ parentPort.on('message', (m) => {
       value = core.keepSubject(m.base, m.edited, mask, m.feather, () => Atomics.load(stop, 0) === 1)
       transfer = [value.px.buffer]
     }
-    else if (m.op === 'drop') cv = null
+    // The picture utilities (R1.4, ../pixels/core.ts).
+    else if (m.op === 'px.channel') {
+      stopped()
+      value = px.channelMask16(m.picture, m.index)
+      transfer = [value.scanlines.buffer]
+    }
+    else if (m.op === 'px.clipBegin') {
+      stopped()
+      const r = px.clipBegin(m.l, m.mw, m.mh, m.w, m.h)
+      clipAlpha = r.alpha
+      value = { scanlines: r.scanlines }
+      transfer = [r.scanlines.buffer]
+    }
+    else if (m.op === 'px.clip') {
+      stopped()
+      if (!clipAlpha) throw new Error('The mask to clip with was not made')
+      value = px.clip(m.picture, clipAlpha)
+      transfer = [value.px.buffer]
+    }
+    else if (m.op === 'drop') { cv = null; clipAlpha = null }
     parentPort.postMessage({ id: m.id, value }, transfer)
   }
   catch (e) {
-    // A failed or stopped composite lets its canvas go at once.
+    // A failed or stopped composite lets its canvas (and a clip its mask) go at once.
     cv = null
+    clipAlpha = null
     parentPort.postMessage({ id: m.id, error: String((e && e.message) || e) })
   }
 })
@@ -238,6 +262,53 @@ export function keepSubjectInWorker(job: KeepJob, opts: { signal?: AbortSignal }
     return await call(t, {
       op: 'keep', base: base.picture, edited: edited.picture, mask, mw: job.mw, mh: job.mh, feather: job.feather,
     }, [...base.buffers, ...edited.buffers, mask.buffer as ArrayBuffer]) as Preview8
+  })
+}
+
+/** The longest one picture utility may take on the worker (the Frame's limit). */
+export const PIXELS_TIMEOUT_MESSAGE = 'This card took longer than 2 minutes to work on its pictures, so it was stopped'
+
+/** 16-bit mask scanlines (keep.ts maskPngFromScanlines encodes them), w × h. */
+export interface MaskScanlines { w: number; h: number; scanlines: Uint8Array }
+/** 8-bit pixels as `_image_tensor_to_data_url` sends them, interleaved RGB or RGBA. */
+export interface HandOff8 { w: number; h: number; channels: 3 | 4; px: Uint8Array }
+
+/**
+ * What a picture utility may ask of the worker (R1.4). Each picture is handed
+ * over (transferred) and is gone from the caller afterwards.
+ */
+export interface PixelsWorker {
+  /** ImageToMask: channel `index` of the picture's tensor as a mask. */
+  channelMask(picture: RawPicture, index: number): Promise<MaskScanlines>
+  /** Text mask with a source: the render's luma as the mask, resized to w × h; kept on the worker for `clip`. */
+  clipBegin(l: Uint8Array, mw: number, mh: number, w: number, h: number): Promise<Uint8Array>
+  /** Text mask with a source: one source picture × (1 − mask). */
+  clip(picture: RawPicture): Promise<HandOff8>
+}
+
+/**
+ * A picture utility's pixel work on the Frame's worker, in the same queue,
+ * under the same watchdog and Stop: `job` decodes and encodes on this thread
+ * and hands each picture's pixels to the worker, one at a time.
+ */
+export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: PixelsWorker) => Promise<T>): Promise<T> {
+  return onWorker(signal, PIXELS_TIMEOUT_MESSAGE, async (t) => {
+    const w: PixelsWorker = {
+      async channelMask(picture, index) {
+        const p = handOver(picture)
+        return await call(t, { op: 'px.channel', picture: p.picture, index }, p.buffers) as MaskScanlines
+      },
+      async clipBegin(l, mw, mh, width, height) {
+        const own = l.byteOffset === 0 && l.byteLength === l.buffer.byteLength ? l : l.slice()
+        return (await call(t, { op: 'px.clipBegin', l: own, mw, mh, w: width, h: height }, [own.buffer as ArrayBuffer]) as { scanlines: Uint8Array }).scanlines
+      },
+      async clip(picture) {
+        const p = handOver(picture)
+        return await call(t, { op: 'px.clip', picture: p.picture }, p.buffers) as HandOff8
+      },
+    }
+    try { return await job(w) }
+    finally { if (!t.dead) void call(t, { op: 'drop' }, []).catch(() => {}) }
   })
 }
 

@@ -5,9 +5,11 @@
  * `empty_image`, `get_image_size`, `image_to_mask`, `text_mask_source`), and
  * run by the engine behind `cards`.
  */
+import { createHash } from 'node:crypto'
+import { Worker } from 'node:worker_threads'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
 import { makeKit } from './__runner__/kit'
 import type { ApiPrompt } from '#shared/runner/graph'
@@ -16,15 +18,28 @@ import { isRunnerEligible, runnerTakesNode } from '#shared/runner/eligibility'
 import { runnerTakesWorkflow } from '#shared/runner/validate'
 import { nodesNeedingEngine } from '#shared/runner/needsEngine'
 import { planNode, type DeriveIO, type Derived, type NodePlan } from '~~/server/runner/executors'
-import { IMAGE_NO_ALPHA, tensorChannels } from '~~/server/runner/cards/utilities'
+import { IMAGE_NO_ALPHA, PICTURES_TOO_LARGE, tensorChannels } from '~~/server/runner/cards/utilities'
+import { CARD_MAX_PIXELS } from '#shared/runner/eligibility'
+import { decodeRaw } from '~~/server/runner/compositor/decode'
+import { core } from '~~/server/runner/compositor/plane'
+import { pixels } from '~~/server/runner/pixels/core'
+import { PIXELS_TIMEOUT_MESSAGE, __setFrameTimeoutForTests } from '~~/server/runner/compositor/worker'
+import { graphInputSizes, pictureRule } from '~~/server/utils/graphInputPixels'
 import { decodeMask } from '~~/server/runner/pictures/mask'
 import { pictureSourceOf } from '~~/server/runner/compositor/plan'
 import type { OutputFile, RunnerValue } from '~~/server/runner/types'
 
+/** Counts every picture decode (fix round 1: Get image size decodes none, a repeated file is decoded once). */
+const decodes = vi.hoisted(() => ({ n: 0 }))
+vi.mock('~~/server/runner/compositor/decode', async (importOriginal) => {
+  const m = await importOriginal<typeof import('~~/server/runner/compositor/decode')>()
+  return { ...m, decodeRaw: (...a: Parameters<typeof m.decodeRaw>) => { decodes.n++; return m.decodeRaw(...a) } }
+})
+
 type Via = 'provider' | 'card' | 'load'
 interface Image8 { w: number; h: number; rgb8?: string; fill?: [number, number, number] }
-interface Frame8 { w: number; h: number; channels: 3 | 4; px8: string }
-interface Mask16 { w: number; h: number; mask16: string }
+interface Frame8 { w: number; h: number; channels: 3 | 4; px8?: string; px8_sha256?: string }
+interface Mask16 { w: number; h: number; mask16?: string; mask16_sha256?: string }
 interface EmptyCase { name: string; width: number; height: number; batch_size: number; color: number; shape: number[]; image: Image8 }
 interface Sourced { name: string; via: Via; files: Record<string, string>; names: string[] }
 interface SizeCase extends Sourced { values: [number, number, number]; progress_text: string[] }
@@ -41,6 +56,7 @@ const EDIT_CARDS: ReadonlySet<RunnerFamily> = new Set(['fal-edit', 'cards'])
 const REFS_CARDS: ReadonlySet<RunnerFamily> = new Set(['ref-edits', 'cards'])
 const START = { workflow: null, canvasId: null, projectUuid: null, projectName: null }
 
+const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex')
 const b64 = (s: string) => new Uint8Array(Buffer.from(s, 'base64'))
 const u16 = (s: string) => { const b = Buffer.from(s, 'base64'); return [...new Uint16Array(b.buffer, b.byteOffset, b.byteLength / 2)] }
 const keyOf = (f: OutputFile) => `${f.type}:${f.subfolder ? `${f.subfolder}/` : ''}${f.filename}`
@@ -65,7 +81,7 @@ function frameWidgets(over: Record<string, unknown> = {}): Record<string, unknow
 const sourceNode = (via: Via, name: string) => via === 'provider' ? generate() : via === 'card' ? card(name) : loadImage(name)
 
 /** Runs a node's derive plan; `src` is the node at the end of its picture wire, whose files are `srcFiles`. */
-async function derived(prompt: ApiPrompt, nodeId: string, files: Record<string, Uint8Array>, srcFiles: string[] = []) {
+async function derived(prompt: ApiPrompt, nodeId: string, files: Record<string, Uint8Array>, srcFiles: string[] = [], signal: AbortSignal = new AbortController().signal) {
   const store = new Map<string, Uint8Array>(Object.entries(files).map(([name, b]) => [`input:${name}`, b]))
   let seq = 0
   const plan: NodePlan = await planNode({
@@ -86,26 +102,29 @@ async function derived(prompt: ApiPrompt, nodeId: string, files: Record<string, 
     },
     saveAsset: async () => { throw new Error('no assets') },
     savePreview: async () => { throw new Error('no previews') },
-    hosted: false, signal: new AbortController().signal, nodeId, runWorkflow: null,
+    hosted: false, signal, nodeId, runWorkflow: null,
   }
   const made: Derived = await (plan as Extract<NodePlan, { kind: 'derive' }>).derive(io)
   const filesOfValue = (v: RunnerValue | undefined): OutputFile[] => {
     if (!v || (v.kind !== 'files' && v.kind !== 'mask')) throw new Error(`not a file value: ${JSON.stringify(v)}`)
     return v.files
   }
-  return { made, filesOfValue, bytes: (f: OutputFile) => store.get(keyOf(f))! }
+  return { made, filesOfValue, bytes: (f: OutputFile) => store.get(keyOf(f))!, kept: () => seq }
 }
 
 async function expectFrame(bytes: Uint8Array, want: Frame8, label: string): Promise<void> {
   const { data, info } = await sharp(bytes).raw().toBuffer({ resolveWithObject: true })
   expect([info.width, info.height, info.channels], label).toEqual([want.w, want.h, want.channels])
-  expect(Buffer.compare(data, Buffer.from(want.px8, 'base64')), label).toBe(0)
+  if (want.px8_sha256) expect(sha256(data), label).toBe(want.px8_sha256)
+  else expect(Buffer.compare(data, Buffer.from(want.px8!, 'base64')), label).toBe(0)
 }
 
 async function expectMask(bytes: Uint8Array, want: Mask16, label: string): Promise<void> {
   const m = await decodeMask(bytes)
   expect([m.w, m.h], label).toEqual([want.w, want.h])
-  expect([...m.data].map(v => Math.round(v * 65535)), label).toEqual(u16(want.mask16))
+  const levels = [...m.data].map(v => Math.round(v * 65535))
+  if (want.mask16_sha256) expect(sha256(Buffer.from(new Uint16Array(levels).buffer)), label).toBe(want.mask16_sha256)
+  else expect(levels, label).toEqual(u16(want.mask16!))
 }
 
 describe('Empty image (nodes.py EmptyImage)', () => {
@@ -258,7 +277,11 @@ describe('eligibility', () => {
 
   it('Empty image: settings over the runner\'s caps (ComfyUI allows them) or wired leave it to the engine', () => {
     const take = (over: Record<string, unknown>) => runnerTakesNode({ u: emptyImage(over), 2: edit(['u', 0]) }, 'u', EDIT_CARDS)
-    expect(take({ width: 8192, height: 8192, batch_size: 64, color: 0xFFFFFF })).toBe(true)
+    expect(take({ width: 8192, height: 8192, batch_size: 4, color: 0xFFFFFF })).toBe(true)
+    expect(take({ width: 1024, height: 1024, batch_size: 64 })).toBe(true)
+    // Fix round 1: at most CARD_MAX_PIXELS (four 8192² pictures) in all.
+    expect(take({ width: 8192, height: 8192, batch_size: 5 })).toBe(false)
+    expect(take({ width: 8192, height: 4096, batch_size: 9 })).toBe(false)
     expect(take({ width: 8193 })).toBe(false)
     expect(take({ height: 16384 })).toBe(false)
     expect(take({ batch_size: 65 })).toBe(false)
@@ -380,5 +403,139 @@ describe('the engine (cards on)', () => {
     await k.engine.settled(runId)
     const run = (await k.store.get(runId))!
     expect(run.takes[0]!.nodes.u!.error).toBe(IMAGE_NO_ALPHA)
+  })
+})
+
+// ── Fix round 1 ──────────────────────────────────────────────────────────────
+
+describe('fix round 1: the pixel work, its limits and Stop', () => {
+  const VALUES = JSON.parse(readFileSync(resolve(__dirname, 'fixtures/runner-values.json'), 'utf8')) as {
+    rgb_turned: { name: string; file: string }[]; load_mask: { name: string; file: string }[]
+  }
+  const toMask = (channel = 'red') => ({ class_type: 'ImageToMask', inputs: { image: ['src', 0], channel } })
+  const sizeOf = () => ({ class_type: 'GetImageSize', inputs: { image: ['src', 0] } })
+  const clipped = () => ({ class_type: 'TextMask', inputs: { params: JSON.stringify({ rendered: 'r.png' }), source: ['src', 0] } })
+
+  it('Get image size reads only the header: its size is the decoded tensor\'s (EXIF turn included), with no decode', async () => {
+    for (const c of [...VALUES.rgb_turned, ...VALUES.load_mask]) {
+      for (const via of ['card', 'load', 'provider'] as const) {
+        const before = decodes.n
+        const { made } = await derived({ src: sourceNode(via, 'f.png'), u: sizeOf() }, 'u', { 'f.png': b64(c.file) }, ['f.png'])
+        expect(decodes.n, 'no decode').toBe(before)
+        const raw = await decodeRaw(b64(c.file), via)
+        expect([(made.values[0] as { value: number }).value, (made.values[1] as { value: number }).value], `${c.name} via ${via}`).toEqual([raw.w, raw.h])
+      }
+    }
+  })
+
+  it('Image to mask takes one channel straight from the bytes, equal to the tensor\'s for every byte and source', () => {
+    const data = new Uint8Array(256 * 4)
+    for (let i = 0; i < 256; i++) data.set([i, 255 - i, (i * 7) & 255, i], i * 4)
+    for (const source of ['provider', 'card', 'load', 'rgb'] as const) {
+      const raw = { raw: true as const, source, w: 256, h: 1, data }
+      const t = core.toTensor(raw)
+      for (let k = 0; k < t.c; k++) {
+        // The float of every byte, bit for bit (an Image card's alpha goes through 1 − (1 − a)).
+        const table = pixels.channelTable(source, k)
+        for (let i = 0; i < 256; i++) expect(Object.is(table[data[i * 4 + k]!], t.data[k * 256 + i]), `${source} channel ${k} byte ${i}`).toBe(true)
+        const want = core.mask16Scanlines({ c: 1, h: 1, w: 256, data: core.channel(t, k) })
+        expect(Buffer.compare(pixels.channelMask16(raw, k).scanlines, want), `${source} channel ${k}`).toBe(0)
+      }
+      if (t.c === 3) expect(() => pixels.channelMask16(raw, 3)).toThrow(IMAGE_NO_ALPHA)
+    }
+  })
+
+  it('the clip is the tensor path: source × alpha on every channel, rounded half to even', () => {
+    const n = 64
+    const data = new Uint8Array(n * 4).map((_, i) => (i * 37 + 11) & 255)
+    const alpha = new Float32Array(n).map((_, i) => Math.fround(i / 63))
+    for (const source of ['provider', 'card', 'load'] as const) {
+      const raw = { raw: true as const, source, w: 8, h: 8, data }
+      const t = core.toTensor(raw)
+      const got = pixels.clip(raw, alpha)
+      expect(got.channels).toBe(t.c)
+      for (let k = 0; k < t.c; k++) {
+        for (let i = 0; i < n; i++) {
+          const v = Math.fround(t.data[k * n + i]! * alpha[i]!)
+          expect(got.px[i * t.c + k], `${source} ${k} ${i}`).toBe(pixels.roundHalfEven(Math.fround(Math.min(1, Math.max(0, v)) * 255)))
+        }
+      }
+    }
+    expect(pixels.roundHalfEven(2.5)).toBe(2)
+    expect(pixels.roundHalfEven(3.5)).toBe(4)
+  })
+
+  it('a file listed several times (Empty image\'s batch) is worked on once; the results keep the batch\'s order', async () => {
+    const c = FX.image_to_mask.find(x => x.via === 'provider' && x.channel === 'red')!
+    const [a] = c.names
+    const bytes = b64(c.files[a!]!)
+    const before = decodes.n
+    const { made, filesOfValue, kept } = await derived({ src: generate(), u: toMask() }, 'u', { 'a.png': bytes, 'b.png': bytes }, ['a.png', 'a.png', 'b.png', 'a.png'])
+    expect(decodes.n - before).toBe(2)
+    const files = filesOfValue(made.values[0]).map(f => f.filename)
+    expect(kept()).toBe(2)
+    expect(files[0]).toBe(files[1])
+    expect(files[0]).toBe(files[3])
+    expect(files[2]).not.toBe(files[0])
+  })
+
+  it('more than CARD_MAX_PIXELS in all is refused from the headers, before any picture is decoded', async () => {
+    expect(CARD_MAX_PIXELS).toBe(4 * 8192 * 8192)
+    const big = new Uint8Array(await sharp({ create: { width: 8192, height: 8192, channels: 3, background: '#000' } }).png().toBuffer())
+    const names = ['1.png', '2.png', '3.png', '4.png', '5.png']
+    const files = Object.fromEntries(names.map(n => [n, big]))
+    const before = decodes.n
+    await expect(derived({ src: generate(), u: toMask() }, 'u', files, names)).rejects.toThrow(PICTURES_TOO_LARGE)
+    files['r.png'] = b64(FX.text_mask_source[0]!.render!)
+    await expect(derived({ src: generate(), u: clipped() }, 'u', files, names)).rejects.toThrow(PICTURES_TOO_LARGE)
+    expect(decodes.n).toBe(before)
+    // The same file five times is one picture's work.
+    const { made } = await derived({ src: generate(), u: sizeOf() }, 'u', files, names)
+    expect((made.values[2] as { value: number }).value).toBe(5)
+  }, 60_000)
+
+  it('Stop ends the work between pictures', async () => {
+    const c = FX.text_mask_source[0]!
+    const stop = new AbortController()
+    stop.abort()
+    const files = { ...filesOf(c), 'r.png': b64(c.render!) }
+    for (const node of [toMask(), sizeOf(), clipped()]) {
+      await expect(derived(fed(c, node), 'u', files, c.names, stop.signal), node.class_type).rejects.toThrow('Stopped')
+    }
+  })
+
+  it('the pixel work runs on the Frame\'s worker: each picture is posted to it', async () => {
+    const posted = vi.spyOn(Worker.prototype, 'postMessage')
+    try {
+      const ops = () => posted.mock.calls.map(([m]) => (m as { op?: string }).op)
+      const m = FX.image_to_mask.find(x => x.via === 'provider' && x.channel === 'red')!
+      await derived(fed(m, toMask()), 'u', filesOf(m), m.names)
+      expect(ops().filter(o => o === 'px.channel')).toHaveLength(1)
+      const c = FX.text_mask_source.find(x => x.names.length === 2)!
+      await derived(fed(c, { class_type: 'TextMask', inputs: { params: c.params, source: ['src', 0] } }), 'u', { ...filesOf(c), [(JSON.parse(c.params) as { rendered: string }).rendered]: b64(c.render!) }, c.names)
+      expect(ops().filter(o => o === 'px.clipBegin')).toHaveLength(1)
+      expect(ops().filter(o => o === 'px.clip')).toHaveLength(2)
+    }
+    finally { posted.mockRestore() }
+  })
+
+  it('under the Frame\'s watchdog: a card that takes too long is stopped in plain words', async () => {
+    const c = FX.text_mask_source.find(x => x.images[0]!.px8_sha256)!
+    __setFrameTimeoutForTests(1)
+    try {
+      await expect(derived(fed(c, { class_type: 'TextMask', inputs: { params: c.params, source: ['src', 0] } }), 'u', { ...filesOf(c), [(JSON.parse(c.params) as { rendered: string }).rendered]: b64(c.render!) }, c.names))
+        .rejects.toThrow(PIXELS_TIMEOUT_MESSAGE)
+    }
+    finally { __setFrameTimeoutForTests(null) }
+  })
+
+  it('the hosted gate sizes a picture from Empty image (w × h), so a size-priced node fed by one is priced, not refused', async () => {
+    const p = {
+      e: { class_type: 'EmptyImage', inputs: { width: 1024, height: 768, batch_size: 2, color: 0 } },
+      x: { class_type: 'EditImageNode', inputs: { model: 'Flux 2 Pro', input_image: ['e', 0], prompt: 'warmer' } },
+    }
+    const s = await graphInputSizes(p, async () => null)
+    expect(s).toEqual({ pixels: { x: 1024 * 768 }, problems: [] })
+    expect(pictureRule('EmptyImage', { width: '1024', height: 768 })).toEqual({ unsized: true })
   })
 })
