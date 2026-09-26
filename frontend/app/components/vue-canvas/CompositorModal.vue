@@ -90,7 +90,8 @@ import { cloneDoc } from '~/lib/sketch/clone'
 import { isTypingInField } from '~/composables/pen/usePen'
 import PenOverlay from '~/components/pen/PenOverlay.vue'
 import PenToolbar from '~/components/pen/PenToolbar.vue'
-import { useBrushPaint, paintMatchesLayer } from '~/composables/useBrushPaint'
+import { useBrushPaint, paintTargetMatches, effectLayerMatches } from '~/composables/useBrushPaint'
+import { paintGalleryInclude, effectGalleryInclude, brushEffectLabel } from '~/lib/brushTips/effects'
 import { MATERIAL_IDS, MATERIALS, type MaterialId } from '~/lib/brushTips/materials'
 import { toWidthNorm, brushBoxFromStrokes, strokeRadiusPx, maskStrokeToLocal, type PaintStroke } from '~/lib/compositor/brushStamp'
 import BrushToolbar from '~/components/vue-canvas/compositor/BrushToolbar.vue'
@@ -234,7 +235,7 @@ import {
   type Affine, type BBox, type Pt, type SamPoint,
 } from '~/lib/compositor/smartSelect'
 import { toast } from 'vue-sonner'
-import { paintPrimaryColor } from '~/lib/spacetype/fillTile'
+import { paintPrimaryColor, fillIsShader, DEFAULT_FILL, DEFAULT_SHADER_SPEC, type Fill } from '~/lib/spacetype/fillTile'
 import FontPicker from '~/components/vue-canvas/widgets/FontPicker.vue'
 import { VARIABLE_FONTS } from '~/data/variable-fonts'
 import type { GoogleFont } from '~/data/google-fonts'
@@ -2220,9 +2221,9 @@ function toggleDistort() {
   distortTool.value = !distortTool.value
   if (distortTool.value) { cancelPenSession(); exitNodeEdit(); if (genActive.value) exitGenMode(); brush.setActive(false) }
 }
-// Cursor ring diameter in display px: the current tip's size (Frame units) in Paint mode,
-// the legacy display-px size in Mask mode.
-const brushRingPx = computed(() => brush.mode.value === 'paint'
+// Cursor ring diameter in display px: the current tip's size (Frame units) in Paint and
+// Effect mode, the legacy display-px size in Mask mode.
+const brushRingPx = computed(() => brush.mode.value !== 'mask'
   ? brush.tipSize[brush.tip.value] / BRUSH_REF_W * canvasDisplay.w
   : brush.sizePx.value)
 // ── Brush: freehand paint tool (mutually exclusive with pen/node/gen/distort) ─
@@ -2629,7 +2630,7 @@ watch(selectedLocalId, () => { wiredBrushMask = null })
 // Leaving Brush entirely, or flipping to Paint mode, also drops the live mask
 // canvas so re-entering Mask mode re-seeds it from the persisted maskUrl.
 watch(brush.active, (on) => { if (!on) wiredBrushMask = null })
-watch(brush.mode, (m) => { if (m === 'paint') wiredBrushMask = null })
+watch(brush.mode, (m) => { if (m !== 'mask') wiredBrushMask = null })
 
 // ── Unified z-order stack (mirrors ArtifactFrameNode's model) ───────────────
 // Keys: `w:<slot>` for a wired image, `l:<id>` for a local layer. Persisted on
@@ -2875,6 +2876,47 @@ function pickShaderFxEffect(id: string) {
   // defaults show through until the user tunes a dial.
   updateActiveEffect({ effectId: id, params: {} })
   shaderFxPickerOpen.value = false
+  retryFieldCatalog()
+}
+
+// ── Brush galleries: the toolbar's More… (paint with a library shader / paint an effect) and
+// a painted-effect layer's Change effect…. One gallery, three purposes.
+type BrushGalleryPurpose = 'paint' | 'effect' | 'change'
+const brushGallery = ref<BrushGalleryPurpose | null>(null)
+function openBrushGallery(purpose: BrushGalleryPurpose) {
+  loadShaderFxCatalog() // the catalogue fills in as it lands, like the effect picker above
+  brushGallery.value = purpose
+}
+/** The one backdrop_shader a painted-effect layer carries. */
+function paintedEffectOf(layer: LocalLayer | null | undefined): (EffectInstance & { effectId?: string }) | undefined {
+  return layer ? effectStackOf(layer).find(e => e.type === 'backdrop_shader') as (EffectInstance & { effectId?: string }) | undefined : undefined
+}
+/** The header label: the curated name, else the catalogue def's name. Reads the live catalogue
+ *  so a non-curated name fills in when the catalogue lands. */
+function paintedEffectLabel(layer: LocalLayer | null | undefined): string {
+  void shaderFxCatalog.value
+  return brushEffectLabel(paintedEffectOf(layer)?.effectId ?? '')
+}
+const brushGallerySelectedId = computed<string | null>(() => {
+  const p = brushGallery.value
+  if (p === 'paint') return brush.shaderPaint.value
+  if (p === 'effect') return brush.effect.value
+  if (p === 'change') { const id = paintedEffectOf(selectedLocal.value)?.effectId; return id ? resolveEffectId(id) : null }
+  return null
+})
+function confirmBrushGallery(id: string) {
+  const p = brushGallery.value
+  brushGallery.value = null
+  if (p === 'paint') brush.chooseShaderPaint(id)
+  else if (p === 'effect') brush.effect.value = id
+  else if (p === 'change') {
+    const l = selectedLocal.value
+    const fx = paintedEffectOf(l)
+    if (!l || !fx || fx.effectId === id) return
+    if (tipLive && !tipLive.down) commitTipStroke() // a dripping stroke is its own step first
+    // One history step (setLocal). Params are per-effect, so they reset, as pickShaderFxEffect does.
+    setLayerStack(l.id, layerStack(l).map(e => (e.id === fx.id ? { ...e, effectId: id, params: {} } as EffectInstance : e)))
+  }
   retryFieldCatalog()
 }
 
@@ -3551,6 +3593,11 @@ function layerHitAt(res: { type: 'local'; layer: any }, px: number, py: number, 
   const ctx = c.getContext('2d', { willReadFrequently: true })
   if (!ctx) return true
   ctx.clearRect(0, 0, W, H)
+  // A painted-effect layer hides its paint, but it is clicked where it was painted: test its
+  // paint's alpha as if it were shown.
+  const hitLayer: LocalLayer = res.layer?.kind === 'brush' && (res.layer as BrushLayer).showPaint === false
+    ? { ...(res.layer as BrushLayer), showPaint: true }
+    : res.layer as LocalLayer
   try {
     // Only LOCAL items reach here — `hitTopStackKey` skips legacy `w:` rows, which
     // have no selection state any more. A migrated wired layer arrives as a local
@@ -3559,7 +3606,7 @@ function layerHitAt(res: { type: 'local'; layer: any }, px: number, py: number, 
     // Only alpha is read back, so foil draws flat (no GPU pass per click), under the Frame's own
     // light so the module light is never left pointing at another paint's.
     withFrameLight(frameLight.value, () => withFlatFoil(() =>
-      withWiredContent(wiredContentForSlot, () => drawLocalLayer(ctx, res.layer as LocalLayer, W, H))))
+      withWiredContent(wiredContentForSlot, () => drawLocalLayer(ctx, hitLayer, W, H))))
   } catch { return true }
   try {
     const R = 2
@@ -7005,6 +7052,28 @@ function tipHoldLoop() {
   if (now - L.lastMoveT > TIP_HOLD_AFTER_MS) { brush.holdTipStroke(now); renderStack() }
   L.raf = requestAnimationFrame(tipHoldLoop)
 }
+/** The layer a tip stroke starts when nothing selected matches (appended on top on commit,
+ *  via addLocal, like every new brush layer). Paint mode: the toolbar colour, plus the material
+ *  or, instead, a library shader fill. Effect mode: the paint is hidden and drives one
+ *  backdrop_shader running the chosen effect (still at speed 0); the fill is the toolbar colour,
+ *  never drawn but valid. */
+function newTipLayer(effectMode: boolean): BrushLayer {
+  if (effectMode) {
+    const stack = addEffect([], 'backdrop_shader')
+      .map(fx => (fx.type === 'backdrop_shader' ? { ...fx, effectId: brush.effect.value, speed: 0 } : fx)) as EffectInstance[]
+    return createBrushLayer({ fill: brush.color.value, showPaint: false, ...writeStackToLayer(stack) } as Partial<BrushLayer>)
+  }
+  const sp = brush.shaderPaint.value
+  if (sp) {
+    // The exact shape FillControl emits for a shader fill (a Fill with a cloned default spec).
+    const fill: Fill = { ...DEFAULT_FILL, type: 'shader', shader: { ...structuredClone(DEFAULT_SHADER_SPEC), effectId: sp, anchor: 'frame' } }
+    return createBrushLayer({ fill })
+  }
+  // A new layer keeps the toolbar colour as its fill, so switching the material off later
+  // shows a sensible colour.
+  const mat = brush.material.value
+  return createBrushLayer({ fill: brush.color.value, ...(mat ? { material: { id: mat, moving: true } } : {}) })
+}
 function onTipPointerDown(e: PointerEvent, p: { nx: number; ny: number }) {
   // A spray stroke still dripping from the last release: commit it first, so this stroke
   // targets the same layer (it becomes brushLayerId) and history keeps one step per stroke.
@@ -7014,20 +7083,23 @@ function onTipPointerDown(e: PointerEvent, p: { nx: number; ny: number }) {
   const selected = activeBrushLayer()
   // An eraser stroke with no brush layer to carve does nothing (no empty layer is created).
   if (!selected && brush.eraser.value) return
-  // Target rule: paint only lands in a layer painted with the same thing (Colour, or the
-  // same material). Otherwise the stroke starts a new layer, exactly like no selection.
-  // The eraser carves the selected layer whatever its material.
-  const existing = selected && (brush.eraser.value || paintMatchesLayer(selected.material, brush.material.value)) ? selected : null
+  // Target rule: paint only lands in a layer painted with the same thing (Colour, the same
+  // material or the same library shader); in Effect mode, in a painted-effect layer with the
+  // same effect. Otherwise the stroke starts a new layer, exactly like no selection.
+  // The eraser carves the selected layer whatever it holds.
+  const effectMode = brush.mode.value === 'effect'
+  const matches = (l: BrushLayer) => effectMode
+    ? effectLayerMatches(l, brush.effect.value)
+    : paintTargetMatches(l, { material: brush.material.value, shaderPaint: brush.shaderPaint.value })
+  const existing = selected && (brush.eraser.value || matches(selected)) ? selected : null
   const wn = toWidthNorm(p.nx, p.ny, canvasDisplay.w, canvasDisplay.h)
   brush.beginTipStroke(wn.x, wn.y, e.timeStamp)
   const s = brush.liveTipStroke(); if (!s) return
-  // A new layer keeps the toolbar colour as its fill, so switching the material off later
-  // shows a sensible colour.
-  const mat = brush.material.value
-  const pending = existing ? null : createBrushLayer({ fill: brush.color.value, ...(mat ? { material: { id: mat, moving: true } } : {}) })
+  const pending = existing ? null : newTipLayer(effectMode)
   const layerId = existing ? existing.id : pending!.id
   tipLive = { layerId, pending, s, down: true, raf: 0, lastMoveT: e.timeStamp }
-  tipLivePendingMoving.value = !!pending?.material?.moving
+  // A moving material or a library shader animates the pending layer mid-stroke.
+  tipLivePendingMoving.value = !!pending?.material?.moving || (isFill(pending?.fill) && fillIsShader(pending.fill) && pending.fill.shader.speed > 0)
   setLiveTipStroke(layerId, s)
   tipLive.raf = requestAnimationFrame(tipHoldLoop)
 }
@@ -7100,13 +7172,14 @@ function undoFrame() { if (tipLive) { if (tipLive.down) return; commitTipStroke(
 function redoFrame() { if (tipLive) { if (tipLive.down) return; commitTipStroke() } redo() }
 // The tool closing (B, Done, Escape, another tool) or flipping to Mask mid-stroke or
 // mid-drip commits what is there immediately.
-watch([brush.active, brush.mode], ([on, m]) => { if (!on || m !== 'paint') commitTipStroke() })
+watch([brush.active, brush.mode], ([on, m]) => { if (!on || m === 'mask') commitTipStroke() })
 onUnmounted(() => commitTipStroke())
 
 function onBrushPointerDown(e: PointerEvent) {
   const p = clientToNorm(e); if (!p) return
   e.preventDefault(); e.stopPropagation()
-  if (brush.mode.value === 'paint') {
+  // Paint and Effect both paint tip strokes; only Mask keeps the legacy stroke.
+  if (brush.mode.value !== 'mask') {
     canvasRef.value?.setPointerCapture?.(e.pointerId)
     brush.cursor.value = { x: p.nx, y: p.ny }
     onTipPointerDown(e, p)
@@ -9513,7 +9586,20 @@ onUnmounted(() => {
       />
       <!-- The brush's own toolbar (tip, size, colour, eraser, paint/mask, done) takes the
            same place while the brush is active, like the pen's. -->
-      <BrushToolbar v-if="brush.active.value && !penSession" :brush="brush" class="pointer-events-auto" @done="toggleBrush" />
+      <BrushToolbar v-if="brush.active.value && !penSession" :brush="brush" class="pointer-events-auto" @done="toggleBrush"
+        @more-paint="openBrushGallery('paint')" @more-effect="openBrushGallery('effect')" />
+      <!-- The brush galleries (teleported): More… in Paint / Effect mode and a painted-effect
+           layer's Change effect…. -->
+      <ShaderEffectGallery
+        :open="brushGallery !== null"
+        :effects="shaderFxCatalog?.effects ?? []"
+        :include="brushGallery === 'paint' ? paintGalleryInclude : effectGalleryInclude"
+        :title="brushGallery === 'paint' ? 'Paint with a shader' : 'Paint an effect'"
+        :selected-id="brushGallerySelectedId"
+        :thumbs="{}"
+        @close="brushGallery = null"
+        @confirm="confirmBrushGallery"
+      />
       <!-- Toolbar -->
       <div v-show="!penSession && !brush.active.value" :inert="framePrompt.editLocked.value" :aria-busy="framePrompt.editLocked.value" class="pointer-events-auto flex items-center gap-1 bg-[#1a1a1a]/95 rounded-[12px] p-1.5 border border-[#2a2a2a] shadow-lg">
         <!-- Zoom cluster: −, the % (opens the menu), +. The menu carries the
@@ -10199,13 +10285,13 @@ onUnmounted(() => {
       <template v-else-if="brush.active.value">
         <div class="px-4 py-3 border-b border-white/10 flex items-center gap-2">
           <Brush class="size-3.5 text-white/70" />
-          <!-- Paint mode's title is BrushTipSettings' own "Brush · <tip>" header below. -->
-          <span v-if="brush.mode.value !== 'paint'" class="text-sm font-medium">Brush</span>
+          <!-- Paint and Effect mode's title is BrushTipSettings' own "Brush · <tip>" header below. -->
+          <span v-if="brush.mode.value === 'mask'" class="text-sm font-medium">Brush</span>
           <button class="ml-auto text-white/40 hover:text-white/80 p-1" title="Done (B)" @click="toggleBrush"><X class="size-3.5" /></button>
         </div>
-        <!-- Paint mode: the current tip's settings (tip, size, colour and eraser are in the
+        <!-- Paint and Effect mode: the current tip's settings (tip, size, colour and eraser are in the
              bottom brush toolbar). Mask mode keeps today's controls. -->
-        <div v-if="brush.mode.value === 'paint'" class="p-5 flex flex-col flex-1 min-h-0 overflow-y-auto">
+        <div v-if="brush.mode.value !== 'mask'" class="p-5 flex flex-col flex-1 min-h-0 overflow-y-auto">
           <BrushTipSettings :brush="brush" />
         </div>
         <div v-else class="p-5 flex flex-col flex-1 min-h-0 overflow-y-auto">
@@ -11914,8 +12000,23 @@ onUnmounted(() => {
             </StudioSection>
           </template>
 
+          <!-- A painted-effect brush layer: its paint is hidden and only drives its effect, so
+               Material, Fill and Fill with image have nothing to act on. -->
+          <template v-if="selectedLocal.kind === 'brush' && (selectedLocal as BrushLayer).showPaint === false">
+            <!-- Styled as a StudioSection card; the note is the header's tooltip, not visible copy. -->
+            <div class="relative shrink-0 rounded-lg border border-white/[0.10] bg-white/[0.04] px-3 pb-3 pt-2.5" data-testid="brush-layer-painted-effect">
+              <div class="mb-2 truncate text-[11px] font-medium text-white/50 cursor-help"
+                title="The paint is hidden; it sets where the effect applies and how strongly."
+              >Painted effect · {{ paintedEffectLabel(selectedLocal) }}</div>
+              <button
+                type="button" data-testid="brush-layer-change-effect"
+                class="w-full flex items-center justify-center gap-1.5 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] rounded px-2 py-1.5 text-xs text-white/70 hover:text-white/90 cursor-pointer transition-colors"
+                @click="openBrushGallery('change')"
+              >Change effect…</button>
+            </div>
+          </template>
           <!-- Brush (freehand paint) controls: the stroke region takes any Paint fill -->
-          <template v-if="selectedLocal.kind === 'brush'">
+          <template v-else-if="selectedLocal.kind === 'brush'">
             <StudioSection title="Fill and outline">
               <div>
                 <div class="panel-label mb-1.5">Material</div>
