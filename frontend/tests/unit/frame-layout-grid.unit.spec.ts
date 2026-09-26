@@ -72,6 +72,27 @@ describe('resolveLayoutGrid — rows on the baseline grid', () => {
     const last = r.rows[r.rows.length - 1]!
     expect(last.a + last.w).toBeLessThanOrEqual(1920 - 0.35 * 1920 + 1e-9)
   })
+  it('a band too small for even one row gives no rows, never one that overshoots', () => {
+    // 200×100, margin 60: top/bottom margins alone consume more than the whole height.
+    const r = resolveLayoutGrid(own({ cols: { count: 3, fit: 'stretch', margin: 60, gutter: 20, width: 0 } }), 200, 100)
+    expect(r.rows).toEqual([])
+  })
+  it('Count mode never places a row past the bottom, even when the requested count cannot fit', () => {
+    // 728×90 leaderboard, line 16 (unit 8): 24 requested rows cannot possibly fit a 90 px frame.
+    const r = resolveLayoutGrid(own({ line: 16, rows: { mode: 'count', count: 24 } }), 728, 90)
+    for (const row of r.rows) {
+      expect(row.a).toBeGreaterThanOrEqual(r.top)
+      expect(row.a + row.w).toBeLessThanOrEqual(r.bottom + 1e-9)
+    }
+  })
+  it('Count mode keeps the row-to-row gap exactly at the grid gap, never shrinking it to fit', () => {
+    const r = resolveLayoutGrid(own({ cols: { count: 12, fit: 'stretch', margin: 60, gutter: 60, width: 0 }, rows: { mode: 'count', count: 24 } }), 1080, 1350)
+    expect(r.rows.length).toBeGreaterThan(1)
+    const gap = Math.max(r.unit, Math.round(60 / r.unit) * r.unit)
+    for (let i = 1; i < r.rows.length; i++) {
+      expect(r.rows[i]!.a - (r.rows[i - 1]!.a + r.rows[i - 1]!.w)).toBe(gap)
+    }
+  })
 })
 
 describe('suggestedLayoutGrid', () => {
@@ -100,9 +121,17 @@ describe('readLayoutGrid', () => {
     const stored = { ...suggestedLayoutGrid(1080, 1080, null), show: false, rows: { mode: 'off' as const, count: 3 } }
     const g = readLayoutGrid(layoutGridProperty(stored), 1920, 1080, null)
     expect(g.auto).toBe(true)
-    expect(g.cols.count).toBe(16)                            // the landscape suggestion
+    expect(g.cols.count).toBe(12)                            // column count is fixed (12, or the format's own) — not derived from shape
+    expect(g.cols.margin).not.toBe(stored.cols.margin)       // still re-derived: the margin follows the new shape
     expect(g.show).toBe(false)
     expect(g.rows).toEqual({ mode: 'off', count: 3 })
+  })
+  it('a stored auto grid takes the new format\'s column override on re-derivation', () => {
+    const stored = suggestedLayoutGrid(1080, 1350, null)
+    const lb = FRAME_FORMATS.find(f => f.id === 'ad-728x90')!
+    const g = readLayoutGrid(layoutGridProperty(stored), 728, 90, lb)
+    expect(g.auto).toBe(true)
+    expect(g.cols.count).toBe(24)
   })
   it('no grid on a Frame with layers → auto, hidden (old Frames look the same)', () => {
     const g = readLayoutGrid({ sailor_localLayers: [{ id: 'a' }] }, 1080, 1350, null)

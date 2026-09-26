@@ -57,7 +57,9 @@ export function suggestedLayoutGrid(W: number, H: number, fmt: FrameFormat | nul
   const margin = Math.max(unit, Math.round((k.margin * px) / unit) * unit)
   return {
     v: 2, auto: true, show: keep?.show ?? true, line,
-    cols: { count: k.nc, fit: 'stretch', margin, gutter: unit, width: 0 },
+    // Column count: the format's own override, or 12 — never derived from the Frame's shape
+    // (controller ruling; `kitBasics().nc` varies the suggestion with aspect ratio, which is not wanted here).
+    cols: { count: fmt?.nc ?? 12, fit: 'stretch', margin, gutter: unit, width: 0 },
     rows: keep?.rows ?? { ...DEFAULT_ROWS },
   }
 }
@@ -70,7 +72,7 @@ function hasLayers(props: Record<string, unknown> | undefined): boolean {
 export function readLayoutGrid(props: Record<string, unknown> | undefined, W: number, H: number, fmt: FrameFormat | null): LayoutGrid {
   const raw = props?.sailor_layoutGrid as Partial<LayoutGrid> | undefined
   if (raw && raw.v === 2) {
-    if (raw.auto !== false) return suggestedLayoutGrid(W, H, fmt, { show: raw.show ?? true, rows: raw.rows ?? { ...DEFAULT_ROWS } })
+    if (raw.auto !== false) return suggestedLayoutGrid(W, H, fmt, { show: raw.show ?? true, rows: { ...DEFAULT_ROWS, ...(raw.rows ?? {}) } })
     const s = suggestedLayoutGrid(W, H, fmt)
     return {
       v: 2, auto: false, show: raw.show ?? true, line: raw.line ?? s.line,
@@ -108,15 +110,26 @@ export function resolveLayoutGrid(g: LayoutGrid, W: number, H: number, fmt: Fram
   const gap = Math.max(unit, toUnit(gut))
   const avail = bottom - top
   let rows: Track[] = []
-  if (g.rows.mode === 'square') {
-    const mh = Math.max(unit, Math.round(cw / unit) * unit)
-    const k = Math.max(1, Math.floor((avail + gap) / (mh + gap)))
-    rows = Array.from({ length: k }, (_, i) => ({ a: top + i * (mh + gap), w: mh }))
-  } else if (g.rows.mode === 'count') {
-    const k = Math.max(1, Math.round(g.rows.count))
-    const pitch = Math.max(2 * unit, Math.floor((avail + gap) / k / unit) * unit)
-    const mh = Math.max(unit, pitch - gap)
-    rows = Array.from({ length: k }, (_, i) => ({ a: top + i * pitch, w: mh }))
+  // No row — not even one at the minimum height — fits in the uncovered band.
+  if (avail >= unit) {
+    if (g.rows.mode === 'square') {
+      const mh = Math.max(unit, Math.round(cw / unit) * unit)
+      const k = Math.max(0, Math.floor((avail + gap) / (mh + gap)))
+      rows = Array.from({ length: k }, (_, i) => ({ a: top + i * (mh + gap), w: mh }))
+    } else if (g.rows.mode === 'count') {
+      const wanted = Math.max(1, Math.round(g.rows.count))
+      // Cap the count so every row's pitch keeps at least the minimum row height (`unit`) and
+      // the last row still ends at or before `bottom` — never force more rows than the band holds.
+      const maxK = Math.max(0, Math.floor((avail + gap) / (unit + gap)))
+      const k = Math.min(wanted, maxK)
+      if (k >= 1) {
+        // Pitch always keeps the row-to-row gap at `gap` (never eaten by clamping); floor to the
+        // unit grid, but never below unit + gap.
+        const pitch = Math.max(unit + gap, Math.floor((avail + gap) / k / unit) * unit)
+        const mh = pitch - gap
+        rows = Array.from({ length: k }, (_, i) => ({ a: top + i * pitch, w: mh }))
+      }
+    }
   }
   const xs = uniq([0, W / 2, W, ...cols.flatMap(c => [c.a, c.a + c.w])])
   const ys = uniq([0, H / 2, H, top, bottom, ...rows.flatMap(r => [r.a, r.a + r.w])])
