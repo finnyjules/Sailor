@@ -26,6 +26,37 @@ describe('BrushToolbar', () => {
     expect(w.find('[data-testid="brush-tip-round"]').exists()).toBe(false)
     expect(w.text()).toContain('Paint to hide part of the selected layer')
   })
+  it('switching to Effect shows the chips, hides the colour, and shows the effect hint', async () => {
+    const brush = useBrushPaint()
+    const w = mount(BrushToolbar, { props: { brush }, global: { stubs } })
+    await w.get('[data-testid="brush-mode-effect"]').trigger('click')
+    expect(brush.mode.value).toBe('effect')
+    expect(w.find('[data-testid="brush-material-colour"]').exists()).toBe(false)
+    expect(w.find('[data-testid="brush-effect-water_ripple"]').exists()).toBe(true)
+    expect(w.find('[data-testid="brush-effect-pixelate"]').exists()).toBe(true)
+    expect(w.text()).toContain('Paint where the effect should happen. Go over it again to make it stronger.')
+    // Tips row and size stay.
+    expect(w.find('[data-testid="brush-tip-round"]').exists()).toBe(true)
+    expect(w.find('[data-testid="brush-eraser"]').exists()).toBe(true)
+  })
+  it('clicking an effect chip sets brush.effect', async () => {
+    const brush = useBrushPaint()
+    brush.mode.value = 'effect'
+    const w = mount(BrushToolbar, { props: { brush }, global: { stubs } })
+    await w.get('[data-testid="brush-effect-pixelate"]').trigger('click')
+    expect(brush.effect.value).toBe('pixelate')
+    expect(w.get('[data-testid="brush-effect-pixelate"]').attributes('aria-pressed')).toBe('true')
+  })
+  it('emits more-paint and more-effect from the More… buttons', async () => {
+    const brush = useBrushPaint()
+    const w = mount(BrushToolbar, { props: { brush }, global: { stubs } })
+    await w.get('[data-testid="brush-paint-more"]').trigger('click')
+    expect(w.emitted('more-paint')).toHaveLength(1)
+    brush.mode.value = 'effect'
+    await w.vm.$nextTick()
+    await w.get('[data-testid="brush-effect-more"]').trigger('click')
+    expect(w.emitted('more-effect')).toHaveLength(1)
+  })
 })
 
 describe('BrushTipSettings', () => {

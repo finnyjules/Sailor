@@ -7,10 +7,16 @@ import { computed } from 'vue'
 import type { useBrushPaint } from '~/composables/useBrushPaint'
 import { TIPS, TIP_IDS, SIZE_MIN, SIZE_MAX, MASK_HINT } from '~/lib/brushTips/tips'
 import { MATERIAL_IDS, MATERIALS } from '~/lib/brushTips/materials'
+import { BRUSH_EFFECTS, brushEffectLabel } from '~/lib/brushTips/effects'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 
 const props = defineProps<{ brush: ReturnType<typeof useBrushPaint> }>()
-const emit = defineEmits<{ done: [] }>()
+const emit = defineEmits<{ done: []; 'more-paint': []; 'more-effect': [] }>()
+
+const EFFECT_HINT = 'Paint where the effect should happen. Go over it again to make it stronger.'
+/** A neutral, no-single-hue swatch for the "library shader" paint choice — it stands in for
+ *  whichever shader is picked, so it deliberately doesn't borrow that shader's own colours. */
+const SHADER_PAINT_SWATCH = 'conic-gradient(from 0deg, #6b6b6b, #cfcfcf, #6b6b6b)'
 
 // `brush`'s refs are destructured out of a prop, so writing `x.value = …`
 // directly in the template would go through Vue's setup-proxy auto-unwrap
@@ -18,8 +24,18 @@ const emit = defineEmits<{ done: [] }>()
 // below routes through `props.brush.x.value` instead — `props` itself is
 // not a ref, so no auto-unwrap kicks in on that chain.
 const isMask = computed(() => props.brush.mode.value === 'mask')
-const hint = computed(() => (isMask.value ? MASK_HINT : TIPS[props.brush.tip.value].hint))
+const isEffect = computed(() => props.brush.mode.value === 'effect')
+const hint = computed(() => {
+  if (isMask.value) return MASK_HINT
+  if (isEffect.value) return EFFECT_HINT
+  return TIPS[props.brush.tip.value].hint
+})
 const currentTipSize = computed(() => props.brush.tipSize[props.brush.tip.value])
+/** The current effect when it isn't one of the 7 curated chips — shown as an extra pressed chip. */
+const extraEffect = computed(() => {
+  const id = props.brush.effect.value
+  return BRUSH_EFFECTS.some(e => e.id === id) ? null : id
+})
 
 function selectTip(id: (typeof TIP_IDS)[number]) { props.brush.tip.value = id }
 function setTipSize(v: number) { props.brush.tipSize[props.brush.tip.value] = v }
@@ -27,9 +43,12 @@ function setSizePx(v: number) { props.brush.sizePx.value = v }
 function setColor(v: string) { props.brush.color.value = v; props.brush.chooseMaterial(null) }
 function selectColour() { props.brush.chooseMaterial(null) }
 function selectMaterial(id: (typeof MATERIAL_IDS)[number]) { props.brush.chooseMaterial(id) }
+function selectEffect(id: string) { props.brush.effect.value = id }
 function toggleEraser() { props.brush.eraser.value = !props.brush.eraser.value }
-function setMode(m: 'paint' | 'mask') { props.brush.mode.value = m }
+function setMode(m: 'paint' | 'effect' | 'mask') { props.brush.mode.value = m }
 function done() { emit('done') }
+function morePaint() { emit('more-paint') }
+function moreEffect() { emit('more-effect') }
 </script>
 
 <template>
@@ -51,6 +70,11 @@ function done() { emit('done') }
           @click="setMode('paint')"
         >Paint</button>
         <button
+          class="tbtn" data-testid="brush-mode-effect"
+          :aria-pressed="brush.mode.value === 'effect'" title="Effect"
+          @click="setMode('effect')"
+        >Effect</button>
+        <button
           class="tbtn" data-testid="brush-mode-mask"
           :aria-pressed="brush.mode.value === 'mask'" title="Mask"
           @click="setMode('mask')"
@@ -67,8 +91,10 @@ function done() { emit('done') }
             @input="setTipSize(Number(($event.target as HTMLInputElement).value))"
           />
           <span class="val tabular-nums">{{ currentTipSize }}</span>
-          <span class="sep" />
-          <StudioColor :model-value="brush.color.value" @update:model-value="setColor" />
+          <template v-if="!isEffect">
+            <span class="sep" />
+            <StudioColor :model-value="brush.color.value" @update:model-value="setColor" />
+          </template>
         </template>
         <template v-else>
           <span class="lbl">Size</span>
@@ -90,7 +116,7 @@ function done() { emit('done') }
         <button class="tbtn primary" data-testid="brush-done" @click="done()">Done</button>
       </div>
 
-      <div v-if="!isMask" class="row">
+      <div v-if="brush.mode.value === 'paint'" class="row">
         <span class="lbl">Paint</span>
         <button
           class="swatch colour" data-testid="brush-material-colour"
@@ -106,6 +132,37 @@ function done() { emit('done') }
           :style="{ background: MATERIALS[id].swatch }"
           @click="selectMaterial(id)"
         />
+        <button
+          class="swatch" data-testid="brush-shader-paint"
+          :aria-pressed="brush.shaderPaint.value !== null"
+          :aria-label="brush.shaderPaint.value ? brushEffectLabel(brush.shaderPaint.value) : 'Shader'"
+          :title="brush.shaderPaint.value ? brushEffectLabel(brush.shaderPaint.value) : 'Shader'"
+          :style="{ background: SHADER_PAINT_SWATCH }"
+          @click="morePaint()"
+        />
+        <span class="sep" />
+        <button class="tbtn" data-testid="brush-paint-more" title="More…" @click="morePaint()">More…</button>
+      </div>
+
+      <div v-if="brush.mode.value === 'effect'" class="row">
+        <span class="lbl">Effect</span>
+        <button
+          v-for="e in BRUSH_EFFECTS" :key="e.id"
+          class="swatch" :data-testid="`brush-effect-${e.id}`"
+          :aria-pressed="brush.effect.value === e.id"
+          :aria-label="e.label" :title="e.label"
+          :style="{ background: e.swatch }"
+          @click="selectEffect(e.id)"
+        />
+        <button
+          v-if="extraEffect"
+          class="swatch" :data-testid="`brush-effect-${extraEffect}`"
+          aria-pressed="true"
+          :aria-label="brushEffectLabel(extraEffect)" :title="brushEffectLabel(extraEffect)"
+          @click="selectEffect(extraEffect)"
+        />
+        <span class="sep" />
+        <button class="tbtn" data-testid="brush-effect-more" title="More…" @click="moreEffect()">More…</button>
       </div>
     </div>
 
