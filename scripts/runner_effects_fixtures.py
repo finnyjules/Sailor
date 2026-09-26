@@ -20,6 +20,14 @@ Groups:
               `hashed_values` (no stored floats); an exact kernel's output is
               stored as float32 (or its sha256 when large), a library one's
               always (zlib), with its band list at each ε candidate.
+  rng       — (R2.3) torch's CPU random numbers on their own: raw mt19937
+              draws (random_ over the full int64 range: one random64 each),
+              rand, randn (the scalar path below 16 values, normal_fill from
+              16), randperm, and calls in a row on one generator (Glitch's
+              rand(1) × 50, Voronoi's sites then colours, the double-normal
+              cache carried across calls). Each output records its sha256 and
+              its first 64 values; randn's are also stored whole, so the spec
+              can count draws off by an ulp.
 
 Every picture reaches a node as it does in a real run, through the real
 Python loader of its source (as scripts/compositor_fixtures.py):
@@ -59,6 +67,7 @@ import base64
 import hashlib
 import io
 import json
+import math
 import os
 import platform
 import socket
@@ -743,7 +752,138 @@ def kernels() -> dict:
     return {"cases": g.cases, "topk": topk, "eps_candidates": KERNEL_EPS, "store_max": KERNEL_STORE_MAX}
 
 
-GROUPS = {"machinery": machinery, "kernels": kernels}
+# ── rng: torch's CPU generator (R2.3) ────────────────────────────────────────
+
+RNG_SEEDS = [0, 1, 42, 123456789, 2 ** 31 - 1]
+RNG_HEAD = 64
+
+
+def rng_call(g: torch.Generator, call: dict) -> dict:
+    """One call on generator `g`, recorded as the spec replays it."""
+    op = call["op"]
+    if op == "raw":
+        # random_(int64 min, None): random_full_64_bits_range_kernel, one random64 per element
+        # (two mt19937 draws, the first in the high word).
+        t = torch.empty(call["n"], dtype=torch.int64).random_(-2 ** 63, None, generator=g)
+        data = t.numpy().view("<u8")
+        return {"dtype": "u64", "n": int(data.size), "sha256": sha(data.tobytes()),
+                "head": [str(int(v)) for v in data[:RNG_HEAD]]}
+    if op == "rand":
+        t = torch.rand(*call["shape"], generator=g, dtype=torch.float32)
+    elif op == "randn":
+        state = g.get_state()
+        t = torch.randn(*call["shape"], generator=g, dtype=torch.float32)
+    elif op == "randperm":
+        t = torch.randperm(call["n"], generator=g)
+        data = t.numpy().astype("<i8")
+        return {"dtype": "i64", "n": int(data.size), "sha256": sha(data.tobytes()),
+                "head": [int(v) for v in data[:RNG_HEAD]]}
+    else:
+        raise ValueError(op)
+    data = t.contiguous().numpy().astype("<f4").ravel()
+    out = {"dtype": "f32", "n": int(data.size), "sha256": sha(data.tobytes()),
+           "head": [float(v) for v in data[:RNG_HEAD]]}
+    if op == "randn":
+        out["f32"] = b64(data.tobytes())
+        if data.size >= 16:
+            out["libm"] = normal_fill_libm(state, data)
+    return out
+
+
+def _libm():
+    """This Mac's libm, as torch's normal_fill_16 calls it: logf, and sinf / cosf of one
+    angle fused by the compiler into __sincosf_stret (libtorch_cpu imports both)."""
+    import ctypes
+
+    class SinCos(ctypes.Structure):
+        _fields_ = [("s", ctypes.c_float), ("c", ctypes.c_float)]
+    lib = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+    lib.logf.restype, lib.logf.argtypes = ctypes.c_float, [ctypes.c_float]
+    sincos = getattr(lib, "__sincosf_stret")
+    sincos.restype, sincos.argtypes = SinCos, [ctypes.c_float]
+    return lib.logf, sincos
+
+
+def normal_fill_libm(state: torch.Tensor, want: np.ndarray) -> dict:
+    """Where this Mac's float logf / sincosf are not the correctly rounded value (the
+    double function rounded to float) on an argument normal_fill used: those arguments
+    and libm's results, as float32 bits. normal_fill is replayed here from the same
+    uniforms with libm's own functions and must give torch's bytes, so the record is
+    exactly what torch computed with."""
+    logf, sincos = _libm()
+    f32 = np.float32
+    n = want.size
+    g2 = torch.Generator(device="cpu")
+    g2.set_state(state)
+    u = torch.rand(n + (16 if n % 16 else 0), generator=g2, dtype=torch.float32).numpy()
+    d = u[:n].copy()
+    bits = lambda x: int(np.array(x, dtype="<f4").view("<u4"))  # noqa: E731
+    logs: dict[int, int] = {}
+    trig: dict[int, list[int]] = {}
+
+    def fill16(o: int) -> None:
+        for j in range(8):
+            u1 = f32(1) - d[o + j]
+            lg = f32(logf(float(u1)))
+            if lg != f32(math.log(float(u1))):
+                logs[bits(u1)] = bits(lg)
+            radius = f32(math.sqrt(float(f32(-2) * lg)))
+            theta = f32(2 * math.pi * float(d[o + j + 8]))
+            sc = sincos(float(theta))
+            c, s = f32(sc.c), f32(sc.s)
+            if c != f32(math.cos(float(theta))) or s != f32(math.sin(float(theta))):
+                trig[bits(theta)] = [bits(c), bits(s)]
+            d[o + j] = f32(radius * c) + f32(0)
+            d[o + j + 8] = f32(radius * s) + f32(0)
+    for i in range(0, n - 15, 16):
+        fill16(i)
+    if n % 16:
+        d[n - 16:] = u[n:]
+        fill16(n - 16)
+    assert d.view("<u4").tolist() == want.view("<u4").tolist(), "normal_fill replayed with libm must give torch's bytes"
+    return {"log": [[k, v] for k, v in sorted(logs.items())], "sincos": [[k, *v] for k, v in sorted(trig.items())]}
+
+
+def rng() -> dict:
+    cases = []
+
+    def case(name: str, seed: int, calls: list, global_seed: bool = False) -> None:
+        # torch.manual_seed (Add noise) seeds the default generator; the others make their own.
+        g = torch.manual_seed(seed) if global_seed else torch.Generator(device="cpu").manual_seed(seed)
+        cases.append({"name": name, "seed": str(seed), "global": global_seed, "calls": calls,
+                      "outputs": [rng_call(g, c) for c in calls]})
+
+    for seed in RNG_SEEDS:
+        case(f"raw 10000 draws, seed {seed}", seed, [{"op": "raw", "n": 5000}])
+        for n in (1, 7, 15, 16, 17, 100, 10000):
+            case(f"rand({n}), seed {seed}", seed, [{"op": "rand", "shape": [n]}])
+        for n in (1, 2, 15, 16, 17, 31, 33, 10000):
+            case(f"randn({n}), seed {seed}", seed, [{"op": "randn", "shape": [n]}])
+        for n in (2, 10, 9216):
+            case(f"randperm({n}), seed {seed}", seed, [{"op": "randperm", "n": n}])
+        # Glitch (nodes_glsl_distortion.py): one rand(1).item() per slice, up to 60.
+        case(f"rand(1) × 50, seed {seed}", seed, [{"op": "rand", "shape": [1]}] * 50)
+        # Voronoi (nodes_glsl_generative.py): sites, then colours, from one generator.
+        for points in (4, 40, 400):
+            case(f"Voronoi rand({points}, 2) then rand({points}, 3), seed {seed}", seed,
+                 [{"op": "rand", "shape": [points, 2]}, {"op": "rand", "shape": [points, 3]}])
+        # State and the cached double normal carried across calls: randn(15) leaves one
+        # normal cached, randn(16) and rand don't touch it, randn(1) takes it.
+        case(f"rand → randn(15) → randn(16) → rand → randn(1) → randn(2), seed {seed}", seed,
+             [{"op": "rand", "shape": [3]}, {"op": "randn", "shape": [15]}, {"op": "randn", "shape": [16]},
+              {"op": "rand", "shape": [5]}, {"op": "randn", "shape": [1]}, {"op": "randn", "shape": [2]}])
+
+    # FilmGrain (nodes_glsl_atmosphere.py): randn(1, 1, gh, gw), gh, gw = max(2, int(side / size)).
+    for gh, gw in ((2, 2), (3, 5), (4, 4), (5, 9), (19, 23), (23, 37), (200, 320)):
+        case(f"FilmGrain randn(1, 1, {gh}, {gw}), seed 1", 1, [{"op": "randn", "shape": [1, 1, gh, gw]}])
+    # Only the seed's low 32 bits reach mt19937; torch.manual_seed (Add noise) is the same engine.
+    case("rand(16), seed 2^40 + 42 (low bits 42)", 2 ** 40 + 42, [{"op": "rand", "shape": [16]}])
+    case("randn(20) on torch.manual_seed(42)", 42, [{"op": "randn", "shape": [20]}], global_seed=True)
+    case("randn(5) on torch.manual_seed(2^32 + 1)", 2 ** 32 + 1, [{"op": "randn", "shape": [5]}], global_seed=True)
+    return {"cases": cases, "seeds": RNG_SEEDS, "head": RNG_HEAD}
+
+
+GROUPS = {"machinery": machinery, "kernels": kernels, "rng": rng}
 
 
 def main() -> None:
