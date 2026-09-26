@@ -2100,6 +2100,10 @@ const brush = useBrushPaint()
 // The in-progress Paint-mode tip stroke (see onTipPointerDown). Declared here, before
 // renderStack, so a render during setup never reads it in its temporal dead zone.
 let tipLive: { layerId: string; pending: BrushLayer | null; s: TipStroke; down: boolean; raf: number; lastMoveT: number } | null = null
+// True while `tipLive.pending` (a new layer not yet in the document) carries a MOVING material.
+// `tipLive` is a plain let, so the live loop's predicate can't see the pending layer; this
+// reactive flag lets it start the wall clock mid-stroke instead of on release.
+const tipLivePendingMoving = shallowRef(false)
 
 function clientToNorm(e: PointerEvent | MouseEvent) {
   const r = canvasRect(); if (!r) return null
@@ -4359,7 +4363,7 @@ const hiddenWired = computed(() => (frameSchemaUnified.value ? new Set<number>()
 const lockedWired = computed(() => (frameSchemaUnified.value ? new Set<number>() : new Set(readSlotArr('sailor_lockedWired'))))
 
 const hasAnimatedFill = computed(() => hasAnimatedShaderFill(buildStackItems(), shownBackground.value))
-const needsWallClock = computed(() => hasAnimatedFill.value && previewT.value == null)
+const needsWallClock = computed(() => (hasAnimatedFill.value || tipLivePendingMoving.value) && previewT.value == null)
 const needsLiveLoop = computed(() => hasAnimatedSlot.value || needsWallClock.value)
 let liveRaf = 0, liveStart = 0, liveInFlight = false, liveCapWarned = false
 // Live-preview cost controls, ported from the Frame card (ArtifactFrameNode). The modal
@@ -4376,8 +4380,13 @@ let liveRaf = 0, liveStart = 0, liveInFlight = false, liveCapWarned = false
 // still trades preview frame rate roughly linearly with pixel count.
 const LIVE_PREVIEW_MAXPX = 1_000_000, SHADER_PREVIEW_FPS = 30
 let lastLiveFrame = -1
+// The last wall time (seconds) the live loop painted. Interactive repaints (brush strokes,
+// drips, edits) call renderStack() without a wallT; while the wall clock is running they
+// reuse this, so a moving fill doesn't flick back to t=0 between loop frames. A (re)started
+// loop continues from it rather than from 0, so starting mid-stroke never jumps.
+let lastLiveWallT = 0
 function liveFrameTick(ts: number) {
-  if (!liveStart) liveStart = ts
+  if (!liveStart) liveStart = ts - lastLiveWallT * 1000
   // Pause the heavy per-frame composite while the user pans/zooms, so the gesture gets
   // the full frame budget. `liveStart` was captured once and `wallT` is derived from
   // real elapsed time, so animation resumes at the right point when the gesture ends —
@@ -4385,6 +4394,7 @@ function liveFrameTick(ts: number) {
   if (viewMoving.value) { liveRaf = requestAnimationFrame(liveFrameTick); return }
   const mc = liveMasterClock.value
   const wallT = (ts - liveStart) / 1000
+  lastLiveWallT = wallT
   // Render at CONTENT fps, not display refresh rate (ported from the Frame card): rAF
   // fires up to 120 Hz, but the content has only `fps` distinct frames and each paint is
   // an expensive pull + composite. Skip any tick mapping to the already-rendered frame
@@ -5768,13 +5778,15 @@ const shaderFieldsFrozen = ref(0)
 // `wallT` is the idle-fallback clock from `liveFrameTick` (real elapsed seconds since
 // that loop started) — see the "Live animation loop" section above for why it's the
 // ONLY source of time when `previewT` is null. Every other call site (many — brush
-// strokes, layer edits, wiring changes) omits it, which is correct: whenever the
-// playhead is set it wins outright, and whenever it's null AND nothing is animating,
-// t=0 is indistinguishable from "no clock needed" (`hasAnimatedFill` is false, so the
-// wall-clock loop isn't running to call this with a real `wallT` anyway).
+// strokes, layer edits, wiring changes) omits it. Whenever the playhead is set it wins
+// outright. When it's null and the wall clock is running (`needsWallClock`), an omitted
+// wallT falls back to `lastLiveWallT`, the loop's latest time — otherwise those repaints
+// would draw a moving fill at t=0 between the loop's frames and it would strobe. When
+// nothing is animating, t stays undefined (= 0, "no clock needed").
 function renderStack(wallT?: number, live = false) {
   const cv = overlayCanvas.value
   if (!cv) return
+  if (wallT === undefined && needsWallClock.value) wallT = lastLiveWallT
   const W = canvasDisplay.w, H = canvasDisplay.h
   const deviceDpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1
   // Cap the backing store while the animation loop drives this (`live`): compositing the
@@ -6951,10 +6963,25 @@ let brushLayerId: string | null = null
 // (one history step); picking a material on a layer starts it Moving.
 const BRUSH_MATERIAL_OPTIONS = ['none', ...MATERIAL_IDS]
 const BRUSH_MATERIAL_LABELS = ['None (use fill)', ...MATERIAL_IDS.map(id => MATERIALS[id].label)]
+// A spray still dripping is committed first (as undoFrame does), so its stroke is its own
+// history step before the material edit.
 function setBrushLayerMaterial(layer: BrushLayer, v: string) {
+  if (tipLive && !tipLive.down) commitTipStroke()
   const id = v === 'none' ? null : v as MaterialId
-  if ((layer.material?.id ?? null) === id) return
-  setLocal(layer.id, { material: id ? { id, moving: layer.material?.moving ?? true } : undefined })
+  const cur = localLayers.value.find(l => l.id === layer.id) as BrushLayer | undefined
+  if (!cur || (cur.material?.id ?? null) === id) return
+  if (id) { setLocal(cur.id, { material: { id, moving: cur.material?.moving ?? true } }); return }
+  // "None (use fill)" removes the key, so the layer is exactly a Colour layer again
+  // (setLocal merges, it can't delete a key).
+  const { material: _m, ...rest } = cur
+  recordHistory()
+  commit(localLayers.value.map(l => (l.id === cur.id ? rest as LocalLayer : l)))
+}
+function setBrushLayerMoving(layer: BrushLayer, moving: boolean) {
+  if (tipLive && !tipLive.down) commitTipStroke()
+  const cur = localLayers.value.find(l => l.id === layer.id) as BrushLayer | undefined
+  if (!cur?.material) return
+  setLocal(cur.id, { material: { ...cur.material, moving } })
 }
 function activeBrushLayer(): BrushLayer | null {
   const sel = selectedLocal.value
@@ -7000,6 +7027,7 @@ function onTipPointerDown(e: PointerEvent, p: { nx: number; ny: number }) {
   const pending = existing ? null : createBrushLayer({ fill: brush.color.value, ...(mat ? { material: { id: mat, moving: true } } : {}) })
   const layerId = existing ? existing.id : pending!.id
   tipLive = { layerId, pending, s, down: true, raf: 0, lastMoveT: e.timeStamp }
+  tipLivePendingMoving.value = !!pending?.material?.moving
   setLiveTipStroke(layerId, s)
   tipLive.raf = requestAnimationFrame(tipHoldLoop)
 }
@@ -7019,7 +7047,7 @@ function onTipPointerUp() {
   L.down = false
   cancelAnimationFrame(L.raf); L.raf = 0
   const s = brush.endTipStroke()
-  if (!s) { setLiveTipStroke(L.layerId, null); tipLive = null; renderStack(); return }
+  if (!s) { setLiveTipStroke(L.layerId, null); tipLive = null; tipLivePendingMoving.value = false; renderStack(); return }
   L.s = s
   setLiveTipStroke(L.layerId, s)
   if (s.tip !== 'spray') { commitTipStroke(); return }
@@ -7043,6 +7071,7 @@ function onTipPointerUp() {
 function commitTipStroke() {
   const L = tipLive; if (!L) return
   tipLive = null
+  tipLivePendingMoving.value = false
   if (L.raf) cancelAnimationFrame(L.raf)
   const s = L.down ? brush.endTipStroke() : L.s
   setLiveTipStroke(L.layerId, null)
@@ -11896,7 +11925,7 @@ onUnmounted(() => {
                 <template v-if="(selectedLocal as BrushLayer).material">
                   <StudioSwitch class="mt-2" data-testid="brush-layer-moving" label="Moving"
                     :model-value="(selectedLocal as BrushLayer).material!.moving"
-                    @update:model-value="(v: boolean) => setLocal(selectedLocal!.id, { material: { ...(selectedLocal as BrushLayer).material!, moving: v } })" />
+                    @update:model-value="(v: boolean) => setBrushLayerMoving(selectedLocal as BrushLayer, v)" />
                   <p class="mt-1.5 text-[11px] text-white/50">The material replaces the fill for brush strokes.</p>
                 </template>
               </div>
