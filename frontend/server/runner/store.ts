@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { storeDir } from '../utils/dataDir'
 import { connectLedgerDb } from '../utils/ledgerDb'
 import { isHosted } from '../utils/deployMode'
-import type { OutputFile, RunRecord, RunStatus } from './types'
+import type { OutputFile, RunRecord, RunStatus, RunnerValue } from './types'
 
 type DbLike = { query(sql: string, params?: unknown[]): Promise<{ rows: any[] }> }
 
@@ -28,6 +28,18 @@ export function userKeyOf(userId: string | null): string {
   return userId ?? 'local'
 }
 
+/** A reusable result: its files, and its values when it made any (R0.6). */
+export interface ResultEntry { files: OutputFile[]; values?: Record<number, RunnerValue> }
+
+/** A stored result as an entry: arrays were written before R0.6. */
+function entryOf(v: unknown): ResultEntry | null {
+  if (Array.isArray(v)) return { files: v as OutputFile[] }
+  if (v && typeof v === 'object' && Array.isArray((v as ResultEntry).files)) return v as ResultEntry
+  return null
+}
+/** An entry as stored: without values, the plain array (byte-identical to before R0.6). */
+const storedOf = (e: ResultEntry): unknown => e.values ? { files: e.files, values: e.values } : e.files
+
 export interface RunStore {
   save(run: RunRecord): Promise<void>
   get(runId: string): Promise<RunRecord | null>
@@ -35,8 +47,8 @@ export interface RunStore {
   /** Runs holding a cancel still waiting for the provider's confirmation (checked again at server start). */
   listUnconfirmedCancels(): Promise<RunRecord[]>
   listForUser(userId: string | null, opts?: { canvasId?: string | null; statuses?: RunStatus[] }): Promise<RunRecord[]>
-  getResult(userKey: string, fingerprint: string): Promise<OutputFile[] | null>
-  putResult(userKey: string, fingerprint: string, files: OutputFile[]): Promise<void>
+  getResult(userKey: string, fingerprint: string): Promise<ResultEntry | null>
+  putResult(userKey: string, fingerprint: string, entry: ResultEntry): Promise<void>
 }
 
 const ACTIVE: RunStatus[] = ['running', 'paused']
@@ -104,13 +116,13 @@ export function createFileRunStore(dir: string): RunStore {
     },
     async getResult(userKey, fp) {
       if (!fpOk(fp)) return null
-      try { return JSON.parse(await readFile(join(resultDir(userKey), `${fp}.json`), 'utf8')) } catch { return null }
+      try { return entryOf(JSON.parse(await readFile(join(resultDir(userKey), `${fp}.json`), 'utf8'))) } catch { return null }
     },
-    async putResult(userKey, fp, files) {
+    async putResult(userKey, fp, entry) {
       if (!fpOk(fp)) return
       const d = resultDir(userKey)
       await mkdir(d, { recursive: true })
-      await writeAtomic(join(d, `${fp}.json`), JSON.stringify(files))
+      await writeAtomic(join(d, `${fp}.json`), JSON.stringify(storedOf(entry)))
     },
   }
 }
@@ -161,13 +173,13 @@ export function createPgRunStore(db: DbLike): RunStore {
     async getResult(userKey, fp) {
       const { rows } = await db.query(
         `SELECT files FROM runner_results WHERE user_id = $1 AND fingerprint = $2`, [userKey, fp])
-      return rows[0] ? parse(rows[0].files) : null
+      return rows[0] ? entryOf(parse(rows[0].files)) : null
     },
-    async putResult(userKey, fp, files) {
+    async putResult(userKey, fp, entry) {
       await db.query(
         `INSERT INTO runner_results (user_id, fingerprint, files) VALUES ($1, $2, $3::jsonb)
          ON CONFLICT (user_id, fingerprint) DO UPDATE SET files = EXCLUDED.files`,
-        [userKey, fp, JSON.stringify(files)])
+        [userKey, fp, JSON.stringify(storedOf(entry))])
     },
   }
 }

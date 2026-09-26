@@ -27,8 +27,8 @@ async function contract(store: RunStore) {
   expect((await store.listForUser('u1', { statuses: ['paused'] })).map(r => r.id)).toEqual([RUN_A])
   expect(await store.listForUser('u2')).toEqual([])
   expect(await store.getResult('u1', 'fp')).toBeNull()
-  await store.putResult('u1', 'fp', [{ filename: 'a.png', subfolder: '', type: 'output' }])
-  expect(await store.getResult('u1', 'fp')).toEqual([{ filename: 'a.png', subfolder: '', type: 'output' }])
+  await store.putResult('u1', 'fp', { files: [{ filename: 'a.png', subfolder: '', type: 'output' }] })
+  expect(await store.getResult('u1', 'fp')).toEqual({ files: [{ filename: 'a.png', subfolder: '', type: 'output' }] })
   expect(await store.getResult('u2', 'fp')).toBeNull()
 }
 

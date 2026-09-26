@@ -348,8 +348,8 @@ describe('a job that has not started is moved to the backup', () => {
     const firstFp = requestFingerprint(`replicate:${PLANS.fluxPro.first.endpoint}`, PLANS.fluxPro.first.payload, none)
     const backupFp = requestFingerprint(PLANS.fluxPro.backup.endpoint, PLANS.fluxPro.backup.payload, none)
     expect(made.fingerprint).toBe(firstFp)
-    expect(await k.store.getResult(userKeyOf(null), firstFp)).toEqual(made.outputs)
-    expect(await k.store.getResult(userKeyOf(null), backupFp)).toEqual(made.outputs)
+    expect(await k.store.getResult(userKeyOf(null), firstFp)).toEqual({ files: made.outputs })
+    expect(await k.store.getResult(userKeyOf(null), backupFp)).toEqual({ files: made.outputs })
 
     const again = await start(k, 'fluxPro')
     await k.engine.settled(again.runId)

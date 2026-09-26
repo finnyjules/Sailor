@@ -136,8 +136,12 @@ export interface Derived { values: Record<number, RunnerValue>; ui: Record<strin
 
 export type NodePlan =
   | {
-    kind: 'provider'; provider: RunnerProvider; endpoint: string; payload: Record<string, unknown>; media: 'image' | 'video'; prefix: string
+    kind: 'provider'; provider: RunnerProvider; endpoint: string; payload: Record<string, unknown>
+    /** 'value': the answer itself is the result (text, JSON…), read by `valuesOf`; nothing is downloaded. */
+    media: 'image' | 'video' | 'value'; prefix: string
     uiFor(files: OutputFile[]): Record<string, unknown> | null
+    /** For media 'value': the node's values, read out of the provider's answer. */
+    valuesOf?(result: unknown): Record<number, RunnerValue>
     backup?: ProviderBackup
     /**
      * Blend scene with keep_subject wired (Task F11b): the answer is laid

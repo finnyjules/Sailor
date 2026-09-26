@@ -1056,14 +1056,16 @@ export function createEngine(deps: EngineDeps) {
 
       if (fp && !rec.request) {
         const prior = await deps.store.getResult(userKey, fp)
-        if (prior?.length && (await Promise.all(prior.map(f => files.exists(f)))).every(Boolean)) {
-          for (const f of prior) await deps.metering.addOutput(run.userId, stageKey, f)
-          rec.outputs = prior
+        const priorFiles = prior?.files ?? []
+        if (prior && (priorFiles.length || prior.values) && (await Promise.all(priorFiles.map(f => files.exists(f)))).every(Boolean)) {
+          for (const f of priorFiles) await deps.metering.addOutput(run.userId, stageKey, f)
+          rec.outputs = priorFiles
+          if (prior.values) rec.values = prior.values
           rec.reused = true
           rec.status = 'done'
           rec.endedAt = deps.now()
           await persist(run)
-          const ui = plan.uiFor(prior)
+          const ui = plan.uiFor(priorFiles)
           if (ui) publish(run, ev.executed(stageKey, id, ui))
           return
         }
@@ -1095,12 +1097,27 @@ export function createEngine(deps: EngineDeps) {
             }
           }
         }
-        result = await waitForResult(run, rec, stageKey, id, plan.media, signal, backup, backupSettings.stallMs)
+        result = await waitForResult(run, rec, stageKey, id, plan.media === 'video' ? 'video' : 'image', signal, backup, backupSettings.stallMs)
       }
       finally {
         limiter.release(userKey)
       }
 
+      if (plan.media === 'value') {
+        if (!plan.valuesOf) throw new Error('This step has no way to read its answer')
+        const values = plan.valuesOf(result)
+        for (const v of Object.values(values)) checkValue(v)
+        rec.values = values
+        rec.outputs = filesOfValues(values)
+        rec.status = 'done'
+        rec.servedBy = providerOf(rec.request!)
+        rec.endedAt = deps.now()
+        if (fp) await deps.store.putResult(userKey, fp, { files: rec.outputs, values }).catch(e => deps.reportError(e, { site: 'runner.putResult' }))
+        await persist(run).catch(e => deps.reportError(e, { site: 'runner.node.save', stageKey, node: id }))
+        const ui = plan.uiFor(rec.outputs)
+        if (ui) publish(run, ev.executed(stageKey, id, ui))
+        return
+      }
       const urls = clientFor(providerOf(rec.request!)).outputUrls(result, plan.media)
       if (!urls.length) throw new Error(plan.media === 'image' ? 'The provider returned no image' : 'The provider returned no video')
       const saved: OutputFile[] = []
@@ -1128,11 +1145,11 @@ export function createEngine(deps: EngineDeps) {
       rec.status = 'done'
       rec.servedBy = providerOf(rec.request!)
       rec.endedAt = deps.now()
-      if (fp) await deps.store.putResult(userKey, fp, saved).catch(e => deps.reportError(e, { site: 'runner.putResult' }))
+      if (fp) await deps.store.putResult(userKey, fp, { files: saved }).catch(e => deps.reportError(e, { site: 'runner.putResult' }))
       // Made on the backup: also filed under the backup's own request, so the same settings reuse it either way.
       if (rec.switchedFrom && rec.payload && isReusable(rec.payload)) {
         const backupFp = requestFingerprint(fingerprintEndpoint(rec.servedBy, rec.endpoint!), withKeep(rec.payload, plan.keep), u => deps.handoff.hashOf(u))
-        if (backupFp !== fp) await deps.store.putResult(userKey, backupFp, saved).catch(e => deps.reportError(e, { site: 'runner.putResult' }))
+        if (backupFp !== fp) await deps.store.putResult(userKey, backupFp, { files: saved }).catch(e => deps.reportError(e, { site: 'runner.putResult' }))
       }
       // The result is made, kept and billed: a failed save here must not turn
       // the node into an error. The stage's closing save writes it down again.
