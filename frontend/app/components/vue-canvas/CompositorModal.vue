@@ -92,6 +92,12 @@ import PenOverlay from '~/components/pen/PenOverlay.vue'
 import PenToolbar from '~/components/pen/PenToolbar.vue'
 import { useBrushPaint } from '~/composables/useBrushPaint'
 import { toWidthNorm, brushBoxFromStrokes, strokeRadiusPx, maskStrokeToLocal, type PaintStroke } from '~/lib/compositor/brushStamp'
+import BrushToolbar from '~/components/vue-canvas/compositor/BrushToolbar.vue'
+import BrushTipSettings from '~/components/vue-canvas/compositor/BrushTipSettings.vue'
+import { setLiveTipStroke } from '~/composables/useCompositorLayers'
+import { simulateSpray } from '~/lib/brushTips/spray'
+import { REF_W as BRUSH_REF_W } from '~/lib/brushTips/tips'
+import type { TipStroke } from '~/lib/brushTips/record'
 import StudioColor from '~/components/vue-canvas/studio/StudioColor.vue'
 import StudioColorField from '~/components/vue-canvas/studio/StudioColorField.vue'
 import StudioButton from '~/components/vue-canvas/studio/StudioButton.vue'
@@ -2090,6 +2096,9 @@ async function deleteNodeAnchor() {
 
 // ── Pen tool + SVG import ────────────────────────────────────────────────────
 const brush = useBrushPaint()
+// The in-progress Paint-mode tip stroke (see onTipPointerDown). Declared here, before
+// renderStack, so a render during setup never reads it in its temporal dead zone.
+let tipLive: { layerId: string; pending: BrushLayer | null; s: TipStroke; down: boolean; raf: number } | null = null
 
 function clientToNorm(e: PointerEvent | MouseEvent) {
   const r = canvasRect(); if (!r) return null
@@ -2206,6 +2215,11 @@ function toggleDistort() {
   distortTool.value = !distortTool.value
   if (distortTool.value) { cancelPenSession(); exitNodeEdit(); if (genActive.value) exitGenMode(); brush.setActive(false) }
 }
+// Cursor ring diameter in display px: the current tip's size (Frame units) in Paint mode,
+// the legacy display-px size in Mask mode.
+const brushRingPx = computed(() => brush.mode.value === 'paint'
+  ? brush.tipSize[brush.tip.value] / BRUSH_REF_W * canvasDisplay.w
+  : brush.sizePx.value)
 // ── Brush: freehand paint tool (mutually exclusive with pen/node/gen/distort) ─
 function toggleBrush() {
   if (viewOnlyGuard()) return // view-only at a viewing size: snap back to design first
@@ -3730,6 +3744,9 @@ function onViewPointerUp() {
 /** A pointer-up / cancel / lost capture: settles only when it is the drag's OWN pointer, so a
  *  second finger or pen lifting (or being cancelled) never ends someone else's gesture. */
 function onViewPointerEnd(e: PointerEvent) {
+  // A cancelled / lost pointer ends a Paint-mode tip stroke like a release would
+  // (no-op after a normal pointerup: the stroke is no longer down).
+  if (tipLive?.down) onTipPointerUp()
   const d = viewDrag.value
   if (d && e.pointerId === d.pointerId) onViewPointerUp()
 }
@@ -5800,6 +5817,26 @@ function renderStack(wallT?: number, live = false) {
       items.push({ type: 'local', key: `l:${tmp.id}`, layer: tmp })
     }
   }
+  // Live TIP stroke (Paint mode: spray / round / bristle). The stroke itself is folded in by
+  // the renderer (setLiveTipStroke, keyed by layer id); here we only keep the target layer's
+  // BOX fitted to [...strokes, live] on every live frame — pointer move, hold tick and each
+  // drip-tail frame — because the renderer's keep-proportions scale reads the box (see the
+  // CONTRACT on setLiveTipStroke). A brand-new layer is the pending layer (strokes: []),
+  // added to the render list only; it is committed on release / when the drips settle.
+  if (tipLive) {
+    const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
+    if (tipLive.pending) {
+      const tmp = { ...tipLive.pending, strokes: [], ...brushBoxFromStrokes([tipLive.s], aspect) } as BrushLayer
+      items.push({ type: 'local', key: `l:${tmp.id}`, layer: tmp })
+    } else {
+      const idx = items.findIndex(it => it.type === 'local' && it.layer.id === tipLive!.layerId)
+      if (idx >= 0) {
+        const it = items[idx] as Extract<StackItem, { type: 'local' }>
+        const box = brushBoxFromStrokes([...(it.layer as BrushLayer).strokes, tipLive.s], aspect)
+        items[idx] = { ...it, layer: { ...it.layer, ...box } as LocalLayer }
+      }
+    }
+  }
   // Playhead wins outright when set (Motion tab — scrubbing or playing); otherwise fall
   // back to the idle wall clock so a shader fill still animates in the Design tab. Never
   // both: `motionArg` (which activates the Kinetic Slate motion path) only follows
@@ -6915,9 +6952,108 @@ function activeBrushLayer(): BrushLayer | null {
   if (brushLayerId) { const l = localLayers.value.find(x => x.id === brushLayerId); if (l && l.kind === 'brush') return l as BrushLayer }
   return null
 }
+// ── Tip strokes (Paint mode: spray can / round / bristle) ─────────────────────
+// `tipLive` (declared next to `brush`) is the in-progress tip stroke and where it lands.
+// `pending` is a brand-new brush layer that is NOT in the document yet (no history until
+// commit); `layerId` is its id or the existing target's. After release a spray stroke stays
+// there while its drips run (`raf` = the hold / tail loop).
+const DRIP_TAIL_CAP_MS = 2000
+function tipHoldLoop() {
+  const L = tipLive; if (!L || !L.down) return
+  brush.holdTipStroke(performance.now()) // performance.now() and e.timeStamp share one timebase
+  renderStack()
+  L.raf = requestAnimationFrame(tipHoldLoop)
+}
+function onTipPointerDown(e: PointerEvent, p: { nx: number; ny: number }) {
+  // A spray stroke still dripping from the last release: commit it first, so this stroke
+  // targets the same layer (it becomes brushLayerId) and history keeps one step per stroke.
+  if (tipLive) { if (tipLive.down) return; commitTipStroke() }
+  const existing = activeBrushLayer()
+  // An eraser stroke with no brush layer to carve does nothing (no empty layer is created).
+  if (!existing && brush.eraser.value) return
+  const wn = toWidthNorm(p.nx, p.ny, canvasDisplay.w, canvasDisplay.h)
+  brush.beginTipStroke(wn.x, wn.y, e.timeStamp)
+  const s = brush.liveTipStroke(); if (!s) return
+  const pending = existing ? null : createBrushLayer({ fill: brush.color.value })
+  const layerId = existing ? existing.id : pending!.id
+  tipLive = { layerId, pending, s, down: true, raf: 0 }
+  setLiveTipStroke(layerId, s)
+  tipLive.raf = requestAnimationFrame(tipHoldLoop)
+}
+function onTipPointerMove(e: PointerEvent) {
+  const L = tipLive; if (!L || !L.down) return
+  const evs = (e.getCoalescedEvents?.() ?? []) as PointerEvent[]
+  for (const ev of evs.length ? evs : [e]) {
+    const q = clientToNorm(ev); if (!q) continue
+    const wn = toWidthNorm(q.nx, q.ny, canvasDisplay.w, canvasDisplay.h)
+    brush.extendTipStroke(wn.x, wn.y, ev.timeStamp)
+  }
+  renderStack()
+}
+function onTipPointerUp() {
+  const L = tipLive; if (!L || !L.down) return
+  L.down = false
+  cancelAnimationFrame(L.raf); L.raf = 0
+  const s = brush.endTipStroke()
+  if (!s) { setLiveTipStroke(L.layerId, null); tipLive = null; renderStack(); return }
+  L.s = s
+  setLiveTipStroke(L.layerId, s)
+  if (s.tip !== 'spray') { commitTipStroke(); return }
+  // Spray: let the drips run before committing. The committed stroke replays with the drips
+  // fully settled, identical to the last live frame.
+  const releaseT = performance.now()
+  const tail = () => {
+    if (tipLive !== L) return
+    const tailMs = Math.min(DRIP_TAIL_CAP_MS, performance.now() - releaseT)
+    if (tailMs >= DRIP_TAIL_CAP_MS || simulateSpray(s, tailMs).settled) { commitTipStroke(); return }
+    setLiveTipStroke(L.layerId, s, tailMs)
+    renderStack()
+    L.raf = requestAnimationFrame(tail)
+  }
+  L.raf = requestAnimationFrame(tail)
+}
+/** Commit the current tip stroke NOW: clear the live stroke, append it to its layer, re-fit
+ *  the box and record ONE history step. Also the path for the tool closing mid-stroke or
+ *  mid-drip (B, Done, Escape, switching to Mask). */
+function commitTipStroke() {
+  const L = tipLive; if (!L) return
+  tipLive = null
+  if (L.raf) cancelAnimationFrame(L.raf)
+  const s = L.down ? brush.endTipStroke() : L.s
+  setLiveTipStroke(L.layerId, null)
+  if (!s) { renderStack(); return }
+  const aspect = canvasDisplay.h / Math.max(1, canvasDisplay.w)
+  if (L.pending) {
+    const strokes = [s]
+    const layer: BrushLayer = { ...L.pending, strokes, ...brushBoxFromStrokes(strokes, aspect) }
+    addLocal(layer)            // records history + selects
+    brushLayerId = layer.id
+  } else {
+    const target = localLayers.value.find(x => x.id === L.layerId)
+    if (target && target.kind === 'brush') {
+      const strokes = [...(target as BrushLayer).strokes, s]
+      // Re-fit the layer box to the painted bounds so selection/handles hug the marks.
+      setLocal(target.id, { strokes, ...brushBoxFromStrokes(strokes, aspect) })
+      brushLayerId = target.id
+    }
+  }
+  renderStack()
+}
+// The tool closing (B, Done, Escape, another tool) or flipping to Mask mid-stroke or
+// mid-drip commits what is there immediately.
+watch([brush.active, brush.mode], ([on, m]) => { if (!on || m !== 'paint') commitTipStroke() })
+onUnmounted(() => commitTipStroke())
+
 function onBrushPointerDown(e: PointerEvent) {
   const p = clientToNorm(e); if (!p) return
   e.preventDefault(); e.stopPropagation()
+  if (brush.mode.value === 'paint') {
+    canvasRef.value?.setPointerCapture?.(e.pointerId)
+    brush.cursor.value = { x: p.nx, y: p.ny }
+    onTipPointerDown(e, p)
+    renderStack()
+    return
+  }
   canvasRef.value?.setPointerCapture?.(e.pointerId)
   // clientToNorm returns ny as a fraction of HEIGHT; strokes are stored
   // width-normalized, so rescale Y by the aspect before handing to the engine.
@@ -6930,12 +7066,14 @@ function onBrushPointerDown(e: PointerEvent) {
 function onBrushPointerMove(e: PointerEvent) {
   const p = clientToNorm(e); if (!p) return
   brush.cursor.value = { x: p.nx, y: p.ny }
+  if (tipLive) { onTipPointerMove(e); return }
   if (!brush.hasLiveStroke.value) return
   const wn = toWidthNorm(p.nx, p.ny, canvasDisplay.w, canvasDisplay.h)
   brush.extendStroke(wn.x, wn.y)
   renderStack()
 }
 async function onBrushPointerUp() {
+  if (tipLive) { onTipPointerUp(); return }
   const s = brush.endStroke(); if (!s) { return }
   // Mask mode: paint the freehand stroke as visibility onto the selected layer
   // (destination-in at render time for local layers; via maskUrl for wired
@@ -8767,7 +8905,7 @@ onUnmounted(() => {
         <div
           v-if="brush.active.value && brush.cursor.value"
           class="absolute pointer-events-none rounded-full border border-white/90 bg-white/10"
-          :style="{ left: (brush.cursor.value.x * canvasDisplay.w - brush.sizePx.value / 2) + 'px', top: (brush.cursor.value.y * canvasDisplay.h - brush.sizePx.value / 2) + 'px', width: brush.sizePx.value + 'px', height: brush.sizePx.value + 'px', zIndex: 30 }"
+          :style="{ left: (brush.cursor.value.x * canvasDisplay.w - brushRingPx / 2) + 'px', top: (brush.cursor.value.y * canvasDisplay.h - brushRingPx / 2) + 'px', width: brushRingPx + 'px', height: brushRingPx + 'px', zIndex: 30 }"
         />
 
         <!-- Drag-to-generate on-box bar: prompt + style + Generate. Shown after a
@@ -9302,7 +9440,7 @@ onUnmounted(() => {
       <!-- The one prompt (StudioPromptHost): always here, Motion included. What it
            brings back (changes, answers) shows above it, never in the inspector.
            Hidden while the edit-image prompt or the pen's own bar takes its place. -->
-      <div v-show="editMode === 'none' && !penSession" data-testid="compositor-prompt-dock" class="pointer-events-auto w-full" :class="inspectorTab === 'motion' ? 'mx-auto max-w-[720px]' : ''"><StudioPromptHost :prompt="framePrompt" /></div>
+      <div v-show="editMode === 'none' && !penSession && !brush.active.value" data-testid="compositor-prompt-dock" class="pointer-events-auto w-full" :class="inspectorTab === 'motion' ? 'mx-auto max-w-[720px]' : ''"><StudioPromptHost :prompt="framePrompt" /></div>
       <div v-if="inspectorTab !== 'motion'" data-testid="compositor-toolbar" class="flex flex-col items-stretch gap-2">
       <!-- The pen's own toolbar takes the prompt's and the tool row's place while a
            session is open (both stay mounted — v-show — so a prompt draft survives). -->
@@ -9314,8 +9452,11 @@ onUnmounted(() => {
         @commit="commitPenSessionAndSwallowClick"
         @cancel="cancelPenSession"
       />
+      <!-- The brush's own toolbar (tip, size, colour, eraser, paint/mask, done) takes the
+           same place while the brush is active, like the pen's. -->
+      <BrushToolbar v-if="brush.active.value && !penSession" :brush="brush" class="pointer-events-auto" @done="toggleBrush" />
       <!-- Toolbar -->
-      <div v-show="!penSession" :inert="framePrompt.editLocked.value" :aria-busy="framePrompt.editLocked.value" class="pointer-events-auto flex items-center gap-1 bg-[#1a1a1a]/95 rounded-[12px] p-1.5 border border-[#2a2a2a] shadow-lg">
+      <div v-show="!penSession && !brush.active.value" :inert="framePrompt.editLocked.value" :aria-busy="framePrompt.editLocked.value" class="pointer-events-auto flex items-center gap-1 bg-[#1a1a1a]/95 rounded-[12px] p-1.5 border border-[#2a2a2a] shadow-lg">
         <!-- Zoom cluster: −, the % (opens the menu), +. The menu carries the
              navigation shortcuts, which had no home when the pill floated. -->
         <!-- .stop: the toolbar lives INSIDE the full-bleed stage, whose click
@@ -10002,12 +10143,12 @@ onUnmounted(() => {
           <span class="text-sm font-medium">Brush</span>
           <button class="ml-auto text-white/40 hover:text-white/80 p-1" title="Done (B)" @click="toggleBrush"><X class="size-3.5" /></button>
         </div>
-        <div class="p-5 flex flex-col flex-1 min-h-0 overflow-y-auto">
-          <div class="flex items-center gap-1 p-0.5 rounded-md bg-white/[0.05] mb-2">
-            <button v-for="m in ['paint','mask']" :key="m" class="flex-1 h-7 rounded text-[11px] capitalize cursor-pointer"
-              :class="brush.mode.value === m ? 'bg-white text-neutral-900 font-medium' : 'text-white/70 hover:bg-white/10'"
-              @click="brush.mode.value = (m as any)">{{ m }}</button>
-          </div>
+        <!-- Paint mode: the current tip's settings (tip, size, colour and eraser are in the
+             bottom brush toolbar). Mask mode keeps today's controls. -->
+        <div v-if="brush.mode.value === 'paint'" class="p-5 flex flex-col flex-1 min-h-0 overflow-y-auto">
+          <BrushTipSettings :brush="brush" />
+        </div>
+        <div v-else class="p-5 flex flex-col flex-1 min-h-0 overflow-y-auto">
           <p v-if="brush.mode.value === 'mask' && !((selectedLocal && selectedLocal.kind !== 'brush') || selectedWiredImage())"
             class="text-[10px] text-white/40 mb-2 leading-snug">Select a layer to mask</p>
           <button
@@ -10016,10 +10157,6 @@ onUnmounted(() => {
             data-testid="wired-clear-mask"
             title="Remove this slot's wired visibility mask" @click="clearWiredMask(selectedWiredImage()!.slot)"
           >Clear mask</button>
-          <div v-if="brush.mode.value === 'paint'" class="flex items-center gap-2 mb-2">
-            <span class="text-[10px] text-white/40 w-12 shrink-0">Color</span>
-            <StudioColor :model-value="brush.color.value" @update:model-value="(v: string) => brush.color.value = v" />
-          </div>
           <StudioSlider class="mb-2" v-model="brush.sizePx.value" label="Size" :min="2" :max="240" :step="1" :bindable="false" />
           <StudioSlider class="mb-2" v-model="brush.opacity.value" label="Flow" :min="0.05" :max="1" :step="0.05" :bindable="false" />
           <div class="flex items-center gap-2 mb-2">
@@ -10028,9 +10165,6 @@ onUnmounted(() => {
               @input="brush.hardness.value = 1 - Number(($event.target as HTMLInputElement).value)" class="flex-1 accent-white cursor-pointer" />
             <span class="text-[10px] text-white/50 w-8 text-right tabular-nums">{{ Math.round((1 - brush.hardness.value) * 100) }}</span>
           </div>
-          <button class="w-full h-7 rounded text-[11px] cursor-pointer"
-            :class="brush.eraser.value ? 'bg-white text-neutral-900' : 'bg-white/[0.05] text-white/70 hover:bg-white/10'"
-            @click="brush.eraser.value = !brush.eraser.value">{{ brush.eraser.value ? 'Eraser on' : 'Eraser' }}</button>
         </div>
       </template>
 
