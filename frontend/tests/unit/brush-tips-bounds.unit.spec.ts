@@ -5,7 +5,7 @@ import type { TipStroke } from '~/lib/brushTips/record'
 
 describe('tip-aware strokeBounds', () => {
   it('pads a spray stroke by spread and drips', () => {
-    const s: TipStroke = { tip: 'spray', v: 1, size: 0.1, settings: defaultSettings('spray'), seed: 1, pts: [0.5, 0.5, 0, 0.6, 0.5, 100] }
+    const s: TipStroke = { tip: 'spray', v: 1, size: 0.1, settings: { ...defaultSettings('spray'), drips: 1.75 }, seed: 1, pts: [0.5, 0.5, 0, 0.6, 0.5, 100] }
     const b = strokeBounds([s])
     expect(b.minX).toBeLessThan(0.5 - 0.02)
     expect(b.maxX).toBeGreaterThan(0.6 + 0.02)

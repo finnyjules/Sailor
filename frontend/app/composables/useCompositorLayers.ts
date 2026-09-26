@@ -1483,7 +1483,14 @@ let _fieldCtx: ShaderFieldFrameCtx = { frameW: 1, frameH: 1, t: 0, fps: 30, base
 
 const _liveTip = new Map<string, { s: TipStroke; tailMs: number }>()
 /** The Frame editor's in-progress tip stroke for a brush layer, folded into its render (live preview).
- *  `tailMs` = drip time since release (0 while the pointer is down). */
+ *  `tailMs` = drip time since release (0 while the pointer is down).
+ *  CONTRACT: this render only folds the live stroke into the painted BOUNDS (`b` in the brush
+ *  branch below) — it does NOT touch the layer's stored `w`/`x`/`y`/`h`. The caller must keep
+ *  those fitted to `brushBoxFromStrokes([...layer.strokes, live], aspect)` for every frame the
+ *  live stroke is set (same as the legacy live fold at CompositorModal.vue ~L5805), or the
+ *  keep-proportions scale in the brush branch mis-sizes the preview: a brand-new layer (w=1)
+ *  would render its first live stroke blown up, and painting more onto an existing layer would
+ *  shrink its already-committed marks while the pointer is still down. */
 export function setLiveTipStroke(layerId: string, s: TipStroke | null, tailMs = 0) { if (s) _liveTip.set(layerId, { s, tailMs }); else _liveTip.delete(layerId) }
 
 // The paint's own clock (`t`, on the Frame's loop) for what must stay in step with the loop — a
@@ -4843,6 +4850,10 @@ function drawLayerContentBody(ctx: CanvasRenderingContext2D, layer: LocalLayer, 
     const octx = off.getContext('2d'); if (!octx) return
     octx.save()
     octx.translate(-b.minX * W * dpr * scale, -b.minY * W * dpr * scale) // bounds' top-left → offscreen origin
+    // Legacy stamps draw first, then tip coverage on top — on a layer that mixes both stroke
+    // kinds this does NOT preserve paint order between them, and an eraser only cuts its own
+    // engine's paint (a legacy erase stroke never touches tip coverage and vice versa). Known
+    // Part 1 limitation.
     const legacy = layer.strokes.filter(s => !isTipStroke(s)) as PaintStroke[]
     if (legacy.length) stampStrokes(octx, legacy, W * dpr * scale)   // base = artboard-width scale × keep-proportions scale
     octx.restore()
