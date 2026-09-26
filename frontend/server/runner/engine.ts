@@ -24,6 +24,7 @@ import { ReplicateError } from './replicateQueue'
 import { cancelAndConfirm, type CancelCheck } from './cancelCheck'
 import { planNode, type ProviderBackup } from './executors'
 import type { KeepStep } from './compositor/keep'
+import { createMemoryHeldBytes, type HeldBytes } from './heldBytes'
 import type { BackupSettings } from './config'
 import { linkedFileCheck, measuredInputProblem, requestProblems } from './requestRules'
 import { isReusable, requestFingerprint } from './fingerprint'
@@ -152,6 +153,12 @@ export interface EngineDeps {
   timeouts: RunnerTimeouts
   pollDelayMs(attempt: number): number
   reportError(e: unknown, ctx: Record<string, unknown>): void
+  /**
+   * Bytes a node keeps between its send and its result, outside ComfyUI's
+   * temp folder (Blend scene's kept subject, Task F11b fix round 1). Absent:
+   * kept in memory (tests).
+   */
+  held?: HeldBytes
 }
 
 export interface StartRunInput {
@@ -395,6 +402,7 @@ export function applyGateAction(
 }
 
 export function createEngine(deps: EngineDeps) {
+  const held = deps.held ?? createMemoryHeldBytes()
   const live = new Map<string, LiveRun>()
   const locks = new Map<string, Promise<unknown>>()
   const wakers = new Map<string, () => void>()
@@ -811,6 +819,13 @@ export function createEngine(deps: EngineDeps) {
     const rec: NodeRecord = take.nodes[id]!
     const stageKey = stageKeyOf(leg.id, take.index)
     const userKey = userKeyOf(run.userId)
+    // This node turn's own held bytes (heldBytes.ts), let go when it finishes.
+    const holder = `t${take.index}_${id.replace(/[^A-Za-z0-9_-]/g, '_')}`
+    let heldUsed = false
+    const hold = {
+      put: (b: Uint8Array) => { heldUsed = true; return held.put(run.id, holder, b) },
+      get: (sha: string) => held.get(run.id, holder, sha),
+    }
     try {
       if (signal.aborted) throw new RunStopped()
       const resuming = rec.status === 'running' && !!rec.request
@@ -896,6 +911,8 @@ export function createEngine(deps: EngineDeps) {
         families,
         ...(fileCheck.bytes !== undefined ? { inputBytes: fileCheck.bytes } : {}),
         ...(planMeasured ? { measured: planMeasured } : {}),
+        hold,
+        ...(resuming && rec.keepHeld ? { keepHeld: rec.keepHeld } : {}),
       })
       const handOff = async (f: OutputFile) => deps.handoff.toUrlBytes(f, await readOnce(f))
       // Resuming: the request written down is kept (and its price); the plan is
@@ -930,9 +947,8 @@ export function createEngine(deps: EngineDeps) {
         rec.outputs = [file]
         // The Frame's protect_mask, when a node reads it (Blend scene's
         // keep_subject, Task F11b): its second output, saved beside it.
-        rec.slotOutputs = made.protectMask
-          ? { 1: [await deps.results.saveLivePreview(made.protectMask, { nodeId: `${id}_protect_mask`, userId: run.userId })] }
-          : {}
+        if (made.protectMask) rec.slotOutputs = { 1: [await deps.results.saveLivePreview(made.protectMask, { nodeId: `${id}_protect_mask`, userId: run.userId })] }
+        else delete rec.slotOutputs
         rec.status = 'done'
         rec.endedAt = deps.now()
         await persist(run)
@@ -962,6 +978,8 @@ export function createEngine(deps: EngineDeps) {
         rec.endpoint = plan.endpoint
         rec.payload = plan.payload
       }
+      // Written down with the request, so a resumed node composites from the same kept bytes.
+      if (plan.keep && !resuming) rec.keepHeld = plan.keep.held
       const backupSettings = deps.backup?.() ?? { enabled: false, stallMs: 0 }
       const backup = backupSettings.enabled && plan.backup && !resumedWithoutBackup ? plan.backup : null
       // Priced on the measured picture where the price depends on its size
@@ -1073,6 +1091,13 @@ export function createEngine(deps: EngineDeps) {
       else { rec.status = 'error'; rec.error = plainError(e) }
       rec.endedAt = deps.now()
       await persist(run).catch(() => {})
+    }
+    finally {
+      // A finished node lets its held bytes go; one still waiting (a restart
+      // mid-wait never gets here) keeps them for its resume.
+      if ((heldUsed || rec.keepHeld) && (rec.status === 'done' || rec.status === 'error' || rec.status === 'stopped')) {
+        await held.drop(run.id, holder).catch(e => deps.reportError(e, { site: 'runner.held.drop', node: id }))
+      }
     }
   }
 
@@ -1517,7 +1542,10 @@ export function createEngine(deps: EngineDeps) {
     }
     catch (e) { deps.reportError(e, { site: 'runner.cancel.reattach' }) }
     let n = 0
-    for (const run of await deps.store.listActive()) {
+    const active = await deps.store.listActive()
+    // Held bytes of runs no longer in progress are let go (heldBytes.ts).
+    await held.keepOnly(new Set(active.map(r => r.id))).catch(e => deps.reportError(e, { site: 'runner.held.sweep' }))
+    for (const run of active) {
       if (live.has(run.id)) continue
       const leg = run.legs.find(l => l.status === 'running')
       if (!leg) continue

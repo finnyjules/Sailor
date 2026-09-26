@@ -258,6 +258,11 @@ export const RUNNER_NODE_RULES: Readonly<Record<string, RunnerNodeRule>> = {
     mustLink: ['image'],
     mustNotLink: ['prompt', 'keep_feather'],
     linkSources: { keep_subject: [['Compositor', 1]] },
+    // For EVERY Blend, with or without keep_subject: a wired keep_feather, or
+    // one outside 0..30, sends the node to ComfyUI (and the ComfyUI-parity
+    // pruning drops an out-of-range one), as ComfyUI's own validation refuses
+    // it. Before F11b a Blend with a wired keep_feather but no keep_subject
+    // ran in the runner.
     widgets: { keep_feather: { type: 'FLOAT', min: 0, max: 30 } },
   },
   // ── nano-actions (Task B5): google/nano-banana-2 on Replicate ──

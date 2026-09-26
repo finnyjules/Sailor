@@ -44,7 +44,10 @@ import {
 import { __frameWorkerForTests, keepSubjectInWorker } from '~~/server/runner/compositor/worker'
 import { nodeCredits } from '~~/server/runner/metering'
 import type { OutputFile } from '~~/server/runner/types'
-import { makeKit } from './__runner__/kit'
+import { createFakeLedger, makeKit, until } from './__runner__/kit'
+import { createFileHeldBytes, sha256Hex, type HeldBytes } from '~~/server/runner/heldBytes'
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 
 interface FrameFix { links: Record<string, string>; inputs: Record<string, unknown>; width: number; height: number; image8: string; protect: string }
 interface Case {
@@ -138,6 +141,8 @@ describe('the fixtures', () => {
     const feathers = new Set(FIX.cases.map(c => c.feather))
     for (const f of [0, 0.5, 1.5, 2, 7.3, 30, 10.5]) expect(feathers.has(f)).toBe(true)
     expect(OK.some(c => c.image[0] === 'card')).toBe(true)
+    // An Image card with transparency hands Blend an RGBA picture; Python keeps its colour only.
+    expect(OK.some(c => c.image[0] === 'card' && c.image[1] === 'disc.png')).toBe(true)
     expect(OK.some(c => c.mask !== c.image[1])).toBe(true)
     expect(REFUSED).toHaveLength(2)
     for (const c of REFUSED) expect(c.error).toMatch(/Padding size should be less than the corresponding input dimension/)
@@ -426,12 +431,32 @@ function promptOf(c: Case, model = c.model, over: Record<string, unknown> = {}):
   return { prompt: p, frameIds, files: [...files] }
 }
 
-function kitFor(c: Case, o: { hosted?: boolean } = {}) {
+function kitFor(c: Case, o: { hosted?: boolean; held?: HeldBytes; root?: string; dir?: string; fal?: ReturnType<typeof makeKit>['fal']; ledger?: ReturnType<typeof createFakeLedger>; hangAfterSubmit?: boolean } = {}) {
   const answer = asset(c.edited)
+  let fal: ReturnType<typeof makeKit>['fal'] | undefined = o.fal
   const k = makeKit({
     hosted: !!o.hosted,
-    deps: { families: () => ALL, download: async () => ({ bytes: answer, contentType: c.edited.endsWith('.jpg') ? 'image/jpeg' : 'image/png' }) },
+    ...(o.root ? { root: o.root } : {}),
+    ...(o.dir ? { dir: o.dir } : {}),
+    ...(o.fal ? { fal: o.fal } : {}),
+    ...(o.ledger ? { ledger: o.ledger } : {}),
+    deps: {
+      families: () => ALL,
+      download: async () => ({ bytes: answer, contentType: c.edited.endsWith('.jpg') ? 'image/jpeg' : 'image/png' }),
+      ...(o.held ? { held: o.held } : {}),
+      // A server that "dies" once its request is sent: its waits never return.
+      ...(o.hangAfterSubmit
+        ? {
+            sleep: (_ms: number, signal: AbortSignal) => new Promise<void>((resolve) => {
+              if (fal && fal.submitted().length) return
+              const t = setTimeout(resolve, 1)
+              signal.addEventListener('abort', () => { clearTimeout(t); resolve() }, { once: true })
+            }),
+          }
+        : {}),
+    },
   })
+  fal = k.fal
   return k
 }
 async function pixels(root: string, f: OutputFile): Promise<Buffer> {
@@ -466,7 +491,7 @@ describe('the engine: Frame → Blend scene with the kept region (every model)',
         for (let i = 0; i < theirs.length; i++) worst = Math.max(worst, Math.abs(Math.round(ours.data[i]! * 65535) - theirs[i]!))
         expect(worst).toBeLessThanOrEqual(1)
       }
-      else expect(rec.slotOutputs).toEqual({})
+      else expect(rec.slotOutputs).toBeUndefined()
     }
 
     // Blend: one PNG in the output folder, as the runner saves Blend results; Python's pixels within 1/255.
@@ -593,9 +618,93 @@ describe('the engine: Frame → Blend scene with the kept region (every model)',
     await k.engine.settled(runId)
     const run = (await k.store.get(runId))!
     expect(run.status).toBe('done')
-    expect(run.takes[0]!.nodes[frameIds.A!]!.slotOutputs).toEqual({})
+    // Its record is as before: no per-slot files at all.
+    expect(run.takes[0]!.nodes[frameIds.A!]!.slotOutputs).toBeUndefined()
+    expect('slotOutputs' in run.takes[0]!.nodes[frameIds.A!]!).toBe(false)
     // Without keep_subject the answer is saved as downloaded.
     const out = run.takes[0]!.nodes['90']!.outputs[0]!
     expect(new Uint8Array(readFileSync(join(k.root, 'output', out.subfolder, out.filename)))).toEqual(asset(c.edited))
+  })
+
+  // ── Fix round 1: the kept bytes live outside ComfyUI's temp folder ──
+
+  it('bytes composited are the bytes sent: the picture’s sha is the hand-off’s, the mask’s is the Frame file’s', async () => {
+    const c = OK[0]!
+    const heldDir = mkdtempSync(join(tmpdir(), 'runner-held-'))
+    const store = createFileHeldBytes(heldDir)
+    const puts: { sha: string; bytes: Uint8Array }[] = []
+    const spy: HeldBytes = { ...store, put: async (r, h, b) => { const sha = await store.put(r, h, b); puts.push({ sha, bytes: b }); return sha } }
+    const k = kitFor(c, { held: spy })
+    const { prompt, frameIds, files } = promptOf(c)
+    for (const f of files) writeFileSync(join(k.root, 'input', f), asset(f))
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [prompt], ...START })
+    await k.engine.settled(runId)
+    const run = (await k.store.get(runId))!
+    const rec = run.takes[0]!.nodes['90']!
+    expect(rec.status).toBe('done')
+    const sentUrl = (k.fal.submitted()[0]!.payload as { image_url: string }).image_url
+    expect(rec.keepHeld!.base).toBe(k.deps.handoff.hashOf(sentUrl))
+    const maskFile = run.takes[0]!.nodes[frameIds[c.mask]!]!.slotOutputs![1]![0]!
+    expect(rec.keepHeld!.mask).toBe(sha256Hex(new Uint8Array(readFileSync(join(k.root, 'temp', maskFile.subfolder, maskFile.filename)))))
+    expect(puts.map(p => p.sha).sort()).toEqual([rec.keepHeld!.base, rec.keepHeld!.mask].sort())
+    for (const p of puts) expect(sha256Hex(p.bytes)).toBe(p.sha)
+    // Let go once the node finished.
+    expect(readdirSync(heldDir)).toEqual([])
+  })
+
+  it('ComfyUI empties its temp folder during the provider wait: the result is still composited from the kept bytes', async () => {
+    const c = OK[0]!
+    const k = kitFor(c)
+    const { prompt, files } = promptOf(c)
+    for (const f of files) writeFileSync(join(k.root, 'input', f), asset(f))
+    k.fal.holdNext(1)
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [prompt], ...START })
+    await until(() => k.fal.submitted().length === 1)
+    // main.py cleanup_temp(): the Frame's composite and its mask are gone.
+    rmSync(join(k.root, 'temp'), { recursive: true, force: true })
+    k.fal.release()
+    await k.engine.settled(runId)
+    const rec = (await k.store.get(runId))!.takes[0]!.nodes['90']!
+    expect(rec.error ?? null).toBeNull()
+    expect(rec.status).toBe('done')
+    const d = diff(await pixels(k.root, rec.outputs[0]!), unpack(c.out8!))
+    expect(d.max).toBeLessThanOrEqual(1)
+  })
+
+  it('a restart mid-wait (temp emptied too): the resumed Blend keeps its one job and composites correctly', async () => {
+    const c = OK[0]!
+    const heldDir = mkdtempSync(join(tmpdir(), 'runner-held-'))
+    const k1 = kitFor(c, { held: createFileHeldBytes(heldDir), hangAfterSubmit: true })
+    const { prompt, files } = promptOf(c)
+    for (const f of files) writeFileSync(join(k1.root, 'input', f), asset(f))
+    k1.fal.holdNext(1)
+    const { runId } = await k1.engine.startRun({ userId: k1.userId, takes: [prompt], ...START })
+    await until(() => k1.fal.submitted().length === 1)
+    await new Promise(r => setTimeout(r, 20))
+    expect(readdirSync(heldDir)).toEqual([runId])
+    // The server and ComfyUI restart: temp is emptied; the job finishes meanwhile.
+    rmSync(join(k1.root, 'temp'), { recursive: true, force: true })
+    k1.fal.release()
+    const k2 = kitFor(c, { held: createFileHeldBytes(heldDir), root: k1.root, dir: k1.dir, fal: k1.fal, ledger: k1.ledger })
+    expect(await k2.engine.reattach()).toBe(1)
+    await k2.engine.settled(runId)
+    const rec = (await k2.store.get(runId))!.takes[0]!.nodes['90']!
+    expect(rec.error ?? null).toBeNull()
+    expect(rec.status).toBe('done')
+    expect(k1.fal.submitted()).toHaveLength(1)
+    expect(k1.fal.submitted()[0]!.cancelled).toBe(false)
+    const d = diff(await pixels(k1.root, rec.outputs[0]!), unpack(c.out8!))
+    expect(d.max).toBeLessThanOrEqual(1)
+    expect(readdirSync(heldDir)).toEqual([])
+  })
+
+  it('at server start, held bytes of runs no longer in progress are let go', async () => {
+    const heldDir = mkdtempSync(join(tmpdir(), 'runner-held-'))
+    const store = createFileHeldBytes(heldDir)
+    const sha = await store.put('run_00000000-0000-4000-8000-000000000999', 't0_5', new Uint8Array([1, 2, 3]))
+    expect(await store.get('run_00000000-0000-4000-8000-000000000999', 't0_5', sha)).toEqual(new Uint8Array([1, 2, 3]))
+    const k = kitFor(OK[0]!, { held: store })
+    await k.engine.reattach()
+    expect(readdirSync(heldDir)).toEqual([])
   })
 })

@@ -66,7 +66,7 @@ import {
 } from './generators/restyle'
 import { moodboardFiles, parseInputFileRef } from './inputs'
 import { pictureSourceOf, planCompositor } from './compositor/plan'
-import { planKeepSubject, type KeepStep } from './compositor/keep'
+import { planKeepSubject, type KeepHeld, type KeepHold, type KeepStep } from './compositor/keep'
 import {
   FAL_FIRST_VIDEO, IMAGE_BACKUPS, NANO_BANANA_2_REPLICATE, VIDEO_BACKUPS,
   flux2ProEditOnReplicate, nanoBananaOnFal, nanoBananaOnReplicate, type ServiceCall,
@@ -161,6 +161,14 @@ export interface PlanContext {
    * size (F23). Absent: nothing measured.
    */
   measured?: InputSeconds
+  /**
+   * The node's own place for bytes kept between its send and its result
+   * (server/runner/heldBytes.ts): Blend scene's kept subject keeps the picture
+   * it sends and the Frame's mask there (Task F11b fix round 1).
+   */
+  hold?: KeepHold
+  /** A resumed Blend scene: the kept bytes recorded at its send (NodeRecord.keepHeld). */
+  keepHeld?: KeepHeld
 }
 
 /**
@@ -585,7 +593,7 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
         let source
         try { source = pictureSourceOf(ctx.prompt, link) }
         catch { throw new Error('The runner cannot keep the subject of this picture') }
-        keep = await planKeepSubject(ctx, inputs, { link, source })
+        keep = await planKeepSubject(ctx, inputs, { link, source }, ctx.keepHeld)
       }
       const plan = await planBlendScene()
       if (keep && plan.kind === 'provider') plan.keep = keep

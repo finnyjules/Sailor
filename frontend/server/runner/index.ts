@@ -6,6 +6,7 @@ import { downloadResult, realFalClient } from './falQueue'
 import { realReplicateClient } from './replicateQueue'
 import { createEngineResultStore } from './results'
 import { createHandoff } from './handoff'
+import { createFileHeldBytes } from './heldBytes'
 import { createMetering } from './metering'
 import { createRunEvents } from './events'
 import { createGenerationRecords } from './records'
@@ -20,6 +21,8 @@ import { ownerOf, recordOwner } from '../utils/resourceOwners'
 import { isHosted } from '../utils/deployMode'
 import { captureError } from '../utils/observe'
 import { nativeGenerationPost } from '../native/router'
+import { storeDir } from '../utils/dataDir'
+import { join } from 'node:path'
 
 /** comfy_api_nodes/fal_refs.py's ramp: min(2s, 0.35s × 1.5^attempt). */
 export function pollDelayMs(attempt: number): number {
@@ -92,6 +95,8 @@ export function getEngine(): Engine {
       console.error('[runner]', ctx, e)
       captureError(e, ctx)
     },
+    // Beside the run store (.data locally, the volume hosted): never ComfyUI's temp folder.
+    held: createFileHeldBytes(join(storeDir('data'), 'runner-held')),
   })
   g.__sailorRunnerEngine = engine
   return engine

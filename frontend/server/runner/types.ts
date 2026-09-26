@@ -84,6 +84,12 @@ export interface NodeRecord {
    * every slot reads `outputs`.
    */
   slotOutputs?: Record<number, OutputFile[]>
+  /**
+   * Blend scene's kept subject (Task F11b fix round 1): the sha256 of the
+   * picture sent and of the Frame's mask, kept in the runner's held store
+   * from the send until the node finishes (a resumed node composites from them).
+   */
+  keepHeld?: { base: string | null; mask: string }
   /** True when an earlier identical result was handed back (charged nothing). */
   reused: boolean
   /** This node's price in credits (0 for result cards and Gates). */

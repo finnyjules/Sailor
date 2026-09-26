@@ -12,7 +12,6 @@
  * on the Frame's worker (worker.ts); this thread only reads files, (de)compresses
  * (zlib, off the event loop) and encodes the result PNG (sharp).
  */
-import { createHash } from 'node:crypto'
 import { promisify } from 'node:util'
 import { crc32, deflate, inflate } from 'node:zlib'
 import sharp from 'sharp'
@@ -119,9 +118,25 @@ export async function readMaskPng(bytes: Uint8Array): Promise<{ w: number; h: nu
 export interface KeepStep {
   /** Folded into the request's fingerprint: an earlier result is reused only for the same kept region and edge. */
   fingerprint: { mask: string; feather: number }
+  /**
+   * The sha256 of the picture sent (null: an empty Image card's blank) and of
+   * the mask, as kept in the runner's held store: recorded on the node, so a
+   * resumed node composites from the same bytes.
+   */
+  held: KeepHeld
   /** The provider's answer (the downloaded file) → the PNG the node saves. */
   apply(answer: Uint8Array, signal?: AbortSignal): Promise<Uint8Array>
 }
+
+export interface KeepHeld { base: string | null; mask: string }
+
+/** The node's own place for bytes kept between its send and its result (server/runner/heldBytes.ts). */
+export interface KeepHold {
+  put(bytes: Uint8Array): Promise<string>
+  get(sha: string): Promise<Uint8Array | null>
+}
+
+export const KEEP_HELD_MISSING = 'The pictures kept for this blend are gone, so its kept subject can’t be laid back. Run it again.'
 
 /** A picture's size as its source decodes it (an Image card turns by EXIF; a provider download does not). */
 async function pictureSize(bytes: Uint8Array, source: PictureSource): Promise<{ w: number; h: number }> {
@@ -145,37 +160,65 @@ function tooLargeWords(max: number): string {
  * the step can't finish is refused before anything is sent or charged: the
  * mask file is there, the picture fits the size limit, and the blur's edge
  * padding fits the picture (Python makes the call first and then fails).
+ *
+ * The picture and the mask are read once here, through the node's one read
+ * of each file (the very bytes the hand-off uploads), and kept in the
+ * runner's held store (fix round 1): ComfyUI empties its temp folder on every
+ * start and exit, so after the provider wait the composite is made from the
+ * kept bytes, never from temp. A resumed node (`held` recorded at the send)
+ * plans from the kept bytes too.
  */
 export async function planKeepSubject(
   ctx: PlanContext,
   inputs: Record<string, unknown>,
   image: { link: ApiLink; source: PictureSource },
+  held?: KeepHeld,
 ): Promise<KeepStep> {
-  const read = ctx.readFile
-  if (!read) throw new Error('The runner cannot read pictures here')
+  const hold = ctx.hold
+  if (!hold) throw new Error('The runner cannot keep pictures here')
   const keepLink = inputs.keep_subject
   if (!isLink(keepLink)) throw new Error(KEEP_MASK_MISSING)
-  const maskFile = ctx.filesFrom(keepLink)[0]
-  if (!maskFile) throw new Error(KEEP_MASK_MISSING)
-  const baseFile = image.source === 'blank' ? null : ctx.filesFrom(image.link)[0] ?? null
-  if (!baseFile && image.source !== 'blank') throw new Error('There is no picture to blend')
   const feather = keepFeatherOf(inputs)
 
-  const maskBytes = await read(maskFile).catch(() => { throw new Error(KEEP_MASK_MISSING) })
-  await readMaskPng(maskBytes)
-  const size = await pictureSize(baseFile ? await read(baseFile) : new Uint8Array(0), image.source)
+  let maskBytes: Uint8Array
+  let baseBytes: Uint8Array | null
+  let kept: KeepHeld | null = null
+  if (held) {
+    // Resuming: the bytes kept at the send.
+    const m = await hold.get(held.mask)
+    const b = held.base ? await hold.get(held.base) : null
+    if (!m || (held.base && !b)) throw new Error(KEEP_HELD_MISSING)
+    maskBytes = m
+    baseBytes = b
+    kept = held
+  }
+  else {
+    const read = ctx.readFile
+    if (!read) throw new Error('The runner cannot read pictures here')
+    const maskFile = ctx.filesFrom(keepLink)[0]
+    if (!maskFile) throw new Error(KEEP_MASK_MISSING)
+    const baseFile = image.source === 'blank' ? null : ctx.filesFrom(image.link)[0] ?? null
+    if (!baseFile && image.source !== 'blank') throw new Error('There is no picture to blend')
+    maskBytes = await read(maskFile).catch(() => { throw new Error(KEEP_MASK_MISSING) })
+    baseBytes = baseFile ? await read(baseFile) : null
+    await readMaskPng(maskBytes)
+  }
+
+  const size = await pictureSize(baseBytes ?? new Uint8Array(0), image.source)
   const max = ctx.hosted ? HOSTED_MAX_FRAME_ARTBOARD_PIXELS : MAX_CANVAS_PIXELS
   if (size.w * size.h > max) throw new Error(tooLargeWords(max))
   if (!keepEdgeFits(feather, size.w, size.h)) throw new Error(KEEP_EDGE_TOO_WIDE)
+  kept ??= { mask: await hold.put(maskBytes), base: baseBytes ? await hold.put(baseBytes) : null }
+  const k = kept
 
   return {
-    fingerprint: { mask: createHash('sha256').update(maskBytes).digest('hex'), feather },
+    fingerprint: { mask: k.mask, feather },
+    held: k,
     async apply(answer, signal) {
-      // Read again now: the plan's reads are let go during the provider wait.
-      const [maskNow, baseNow] = await Promise.all([
-        read(maskFile).catch(() => { throw new Error(KEEP_MASK_MISSING) }),
-        baseFile ? read(baseFile) : Promise.resolve(null),
-      ])
+      // The kept bytes (never ComfyUI's temp folder, which a restart empties).
+      const maskNow = await hold.get(k.mask)
+      const baseNow = k.base ? await hold.get(k.base) : null
+      if (!maskNow || (k.base && !baseNow)) throw new Error(KEEP_HELD_MISSING)
       const mask = await readMaskPng(maskNow)
       const pic = async (bytes: Uint8Array | null, source: PictureSource): Promise<RawPicture> => {
         try { return await decodeRaw(bytes, source) }
@@ -186,7 +229,9 @@ export async function planKeepSubject(
       }
       const base = await pic(baseNow, image.source)
       const edited = await pic(answer, 'provider')
-      if (base.w * base.h > max || edited.w * edited.h > MAX_CANVAS_PIXELS) throw new Error(tooLargeWords(max))
+      // The same cap for the answer as for the picture (hosted 4096²): no Blend
+      // model answers larger, and this bounds the worker's memory.
+      if (base.w * base.h > max || edited.w * edited.h > max) throw new Error(tooLargeWords(max))
       let out
       try {
         out = await keepSubjectInWorker({ base, edited, mask: mask.scanlines, mw: mask.w, mh: mask.h, feather }, { signal })
