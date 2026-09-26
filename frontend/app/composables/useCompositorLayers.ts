@@ -5970,6 +5970,7 @@ function withBackdrop(
   W: number,
   H: number,
   treat: (snapshot: HTMLCanvasElement, W: number, H: number, scale: number) => HTMLCanvasElement | void,
+  opacityMul = 1,
 ) {
   const t = ctx.getTransform()
   const dev = ctx.canvas
@@ -6003,6 +6004,9 @@ function withBackdrop(
   octx.drawImage(sil, 0, 0)
   ctx.save()
   ctx.setTransform(1, 0, 0, 1, 0, 0)
+  // A hidden-paint brush (a painted effect) has no own paint for Opacity to fade, so its
+  // Opacity (× group cascade) fades the effect instead. Every other layer: untouched.
+  if (!brushPaintVisible(layer)) ctx.globalAlpha *= (layer.opacity ?? 1) * opacityMul
   ctx.drawImage(out, 0, 0)
   ctx.restore()
 }
@@ -6019,6 +6023,7 @@ function applyBackdropBlur(
   W: number,
   H: number,
   radius: number,
+  opacityMul = 1,
 ) {
   if (!(radius > 0)) return
   withBackdrop(ctx, layer, localLayers, W, H, (snapshot, w, _h, scale) => {
@@ -6029,7 +6034,7 @@ function applyBackdropBlur(
     octx.filter = `blur(${Math.max(0, radius * w * scale)}px)`
     octx.drawImage(snapshot, 0, 0)
     return out
-  })
+  }, opacityMul)
 }
 
 // F6 Task 2: run any input-sampling Shader Studio catalog effect over the layers BEHIND
@@ -6050,6 +6055,7 @@ function applyBackdropShader(
   W: number,
   H: number,
   t: number,
+  opacityMul = 1,
 ) {
   withBackdrop(ctx, layer, localLayers, W, H, (snapshot) => {
     try {
@@ -6070,7 +6076,7 @@ function applyBackdropShader(
       // falls back to `snap` when `treat` returns nothing).
       return undefined
     }
-  })
+  }, opacityMul)
 }
 
 // F6 Task 3: mask the layer's OWN content by the backdrop's luminance. Reads the backdrop as
@@ -6917,11 +6923,11 @@ export function paintLayerStack(
           const bgBlur = layer.effects?.find(
             (e): e is BackgroundBlurEffect => e.type === 'background_blur' && e.visible,
           )
-          if (bgBlur) applyBackdropBlur(ctx, layer, localLayers, W, H, bgBlur.radius)
+          if (bgBlur) applyBackdropBlur(ctx, layer, localLayers, W, H, bgBlur.radius, opacityMul)
           const bdShader = layer.effects?.find(
             (e): e is BackdropShaderEffect => e.type === 'backdrop_shader' && e.visible,
           )
-          if (bdShader) applyBackdropShader(ctx, layer, bdShader, localLayers, W, H, _fieldCtx.t)
+          if (bdShader) applyBackdropShader(ctx, layer, bdShader, localLayers, W, H, _fieldCtx.t, opacityMul)
           // Group-cascade limitation (Task 3, mirrors the mask limitation above): the
           // motion path composes its own effective layer in lib/motion/paint.ts and
           // doesn't thread an opacityMul through, so an animated layer's group cascade
@@ -6945,11 +6951,11 @@ export function paintLayerStack(
       const bgBlur = layer.effects?.find(
         (e): e is BackgroundBlurEffect => e.type === 'background_blur' && e.visible,
       )
-      if (bgBlur) applyBackdropBlur(ctx, layer, localLayers, W, H, bgBlur.radius)
+      if (bgBlur) applyBackdropBlur(ctx, layer, localLayers, W, H, bgBlur.radius, opacityMul)
       const bdShader = layer.effects?.find(
         (e): e is BackdropShaderEffect => e.type === 'backdrop_shader' && e.visible,
       )
-      if (bdShader) applyBackdropShader(ctx, layer, bdShader, localLayers, W, H, _fieldCtx.t)
+      if (bdShader) applyBackdropShader(ctx, layer, bdShader, localLayers, W, H, _fieldCtx.t, opacityMul)
 
       // Glass lens ("Layers behind"): the layer's fill is a backdrop-reading shader.
       // Refract everything painted below, clipped to this pane, then paint the stroke

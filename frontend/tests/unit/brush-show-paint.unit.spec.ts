@@ -6,6 +6,7 @@ import {
 
 // Recording canvas + document.createElement stub, modeled on brush-layer-render.unit.spec.ts.
 const ops: { ctx: string; op: string }[] = []
+const mainAlphas: number[] = [] // globalAlpha at each drawImage onto the main canvas
 function recordingCtx(name: string) {
   let composite = 'source-over'
   const g = { addColorStop() {} }
@@ -20,12 +21,12 @@ function recordingCtx(name: string) {
     stroke() { ops.push({ ctx: name, op: 'stroke' }) },
     fillRect() { ops.push({ ctx: name, op: 'fillRect' }) },
     createRadialGradient() { return g }, createLinearGradient() { return g }, createPattern() { return g },
-    drawImage() { ops.push({ ctx: name, op: 'drawImage' }) },
+    drawImage() { ops.push({ ctx: name, op: 'drawImage' }); if (name === 'main') mainAlphas.push((this as any).globalAlpha) },
   } as unknown as CanvasRenderingContext2D
 }
 let seq = 0
 beforeEach(() => {
-  ops.length = 0; seq = 0
+  ops.length = 0; seq = 0; mainAlphas.length = 0
   vi.stubGlobal('document', { createElement: () => { const n = `off-${++seq}`; const c: any = { width: 0, height: 0 }; c.getContext = () => recordingCtx(n); return c } })
 })
 afterEach(() => vi.unstubAllGlobals())
@@ -70,6 +71,20 @@ describe('hidden brush paint', () => {
     expect(ops.some(o => o.ctx === 'off-1' && o.op === 'drawImage')).toBe(true)
     // The main canvas gets exactly one stamp — the clipped effect — and no own-content draw.
     expect(ops.filter(o => o.ctx === 'main')).toEqual([{ ctx: 'main', op: 'drawImage' }])
+  })
+  it('Opacity fades a hidden-paint layer\'s effect stamp (× group cascade)', () => {
+    const blur = [{ type: 'background_blur', radius: 4, visible: true }]
+    const l = brush({ showPaint: false, opacity: 0.5, effects: blur })
+    paintLayerStack(recordingCtx('main'), 200, 200, [{ type: 'local', key: `l:${l.id}`, layer: l }], [l])
+    expect(mainAlphas).toEqual([0.5])
+  })
+  it('a visible layer at Opacity 0.5 keeps today\'s full-alpha effect stamp', () => {
+    const blur = [{ type: 'background_blur', radius: 4, visible: true }]
+    const l = brush({ opacity: 0.5, effects: blur })
+    paintLayerStack(recordingCtx('main'), 200, 200, [{ type: 'local', key: `l:${l.id}`, layer: l }], [l])
+    // First main drawImage is the backdrop stamp — untouched at 1; the own paint follows.
+    expect(mainAlphas[0]).toBe(1)
+    expect(mainAlphas.length).toBeGreaterThan(1)
   })
   it('the silhouette (mask source) still carries the real paint alpha', () => {
     const l = brush({ showPaint: false })
