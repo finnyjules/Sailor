@@ -126,7 +126,8 @@ parentPort.on('message', (m) => {
           : v && v.tensorFile ? tk.fromTensorFile(v.tensorFile)
             : tk.fromPicture(v, isStopped)
       }
-      const r = fx.op(inputs, fx.params, isStopped, fx.state, m.index)
+      // The batch's size too (R2.4): how torch split a long sum, and where its clamp kept a −0, depend on it.
+      const r = fx.op(inputs, fx.params, isStopped, fx.state, m.index, fx.count)
       stopped()
       const outputs = []
       r.outputs.forEach((t, i) => {

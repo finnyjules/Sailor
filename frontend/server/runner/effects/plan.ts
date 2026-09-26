@@ -141,7 +141,7 @@ export function planEffect(ctx: PlanContext): NodePlan {
         const tensors: OutputFile[][] = schema.outputs.map(() => [])
         let preview: OutputFile | null = null
         try {
-          await worker.effectBegin({ cls, fn: spec.op, params, count: jobs.order.length })
+          await worker.effectBegin({ cls, fn: spec.op, params: spec.prepare ? spec.prepare(params) : params, count: jobs.order.length })
           const done = new Map<string, { files: OutputFile[]; tensors: (OutputFile | null)[] }>()
           for (let index = 0; index < jobs.order.length; index++) {
             const key = jobs.order[index]!

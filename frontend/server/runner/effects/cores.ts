@@ -26,8 +26,9 @@ export interface EffectCoreEntry {
 
 export const EFFECT_CORES: readonly EffectCoreEntry[] = [
   { name: 'tk', fn: tensorCore as EffectCoreEntry['fn'], args: ['px'] },
-  { name: 'tone', fn: toneCore as EffectCoreEntry['fn'], args: ['tk'] },
   { name: 'kn', fn: kernelsCore as EffectCoreEntry['fn'], args: ['tk', 'px'] },
+  // R2.4: the tone effects use the kernels (torchvision's colour ops, linspace, pow, clamp).
+  { name: 'tone', fn: toneCore as EffectCoreEntry['fn'], args: ['tk', 'kn'] },
   { name: 'rng', fn: rngCore as EffectCoreEntry['fn'], args: [] },
 ]
 
@@ -37,5 +38,6 @@ export const EFFECT_OP_CORES: readonly string[] = ['tone']
 /** The cores in this thread (tests), built as the worker builds them. */
 export const effectCores = (() => {
   const tk = tensorCore(pixels)
-  return { px: pixels, tk, tone: toneCore(tk), kn: kernelsCore(tk, pixels), rng: rngCore() }
+  const kn = kernelsCore(tk, pixels)
+  return { px: pixels, tk, kn, tone: toneCore(tk, kn), rng: rngCore() }
 })()

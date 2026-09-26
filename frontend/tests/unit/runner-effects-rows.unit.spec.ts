@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { EFFECT_SCHEMAS } from '#shared/runner/effectSchemas.generated'
 import {
   EFFECT_CLASSES_PORTED, EFFECT_FAMILIES, EFFECT_FAMILY_OF, EFFECT_HOSTED_MAX_PICTURE_PIXELS, EFFECT_MAX_PICTURE_PIXELS,
-  EFFECT_OUTPUT_KINDS, EFFECT_OUTPUT_NODES, EFFECT_PICTURE_OUTPUTS, effectRows,
+  EFFECT_OUTPUT_KINDS, EFFECT_OUTPUT_NODES, EFFECT_PICTURE_OUTPUTS, EFFECT_TEXT_WIDGETS, effectRows,
 } from '#shared/runner/effects'
 import {
   FRAME_RENDER_TYPES, HOSTED_MAX_FRAME_ARTBOARD_PIXELS, LOCAL_RENDER_TYPES, PICTURE_OUTPUTS, PROVIDER_TYPES,
@@ -16,6 +16,15 @@ import { RUNNER_OUTPUT_CLASSES } from '#shared/runner/validate'
 import { FAMILY_REQUIRES, RUNNER_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { EFFECTS } from '~~/server/runner/effects/table'
 import { effectCores } from '~~/server/runner/effects/cores'
+
+/** The classes ported so far: the pilots (R2.1) and the rest of effects-tone (R2.4). */
+const PORTED = [
+  'AdjustExposure', 'AdjustInvert', 'AdjustThreshold',
+  'AdjustBrightnessContrast', 'AdjustColor', 'AdjustCurves', 'AdjustLevels',
+  'AdjustTemperature', 'AdjustVibrance', 'AdjustColorBalance', 'AdjustBlackWhite', 'AdjustPhotoFilter', 'AdjustGradientMap', 'AdjustChannelMixer', 'AdjustPosterize',
+  'AdjustVignette', 'AdjustShadowsHighlights', 'Duotone', 'SplitToning',
+  'GradientMap', 'Posterize', 'Hologram', 'TwoDLight', 'LightLeak', 'LensFlare', 'Caustics', 'Blinds', 'CrossHatch', 'Dither',
+]
 
 /** The inventory's 78 still-picture effects (plan R2.4–R2.9 and the pilots), and Painter. */
 const INVENTORY: Record<string, string[]> = {
@@ -64,7 +73,7 @@ describe('the generated schemas', () => {
 
 describe('the rows', () => {
   it('only the ported classes have rows; the server\'s effect table is exactly them, each op in its core', () => {
-    expect([...EFFECT_CLASSES_PORTED].sort()).toEqual(['AdjustExposure', 'AdjustInvert', 'AdjustThreshold'])
+    expect([...EFFECT_CLASSES_PORTED].sort()).toEqual([...PORTED].sort())
     expect(Object.keys(EFFECTS).sort()).toEqual([...EFFECT_CLASSES_PORTED].sort())
     expect(Object.keys(effectRows()).sort()).toEqual([...EFFECT_CLASSES_PORTED].sort())
     for (const cls of Object.keys(EFFECT_SCHEMAS)) {
@@ -93,7 +102,10 @@ describe('the rows', () => {
       expect(row.imageInputs).toEqual(s.images.map(i => i.name))
       expect(row.mustLink).toEqual(s.images.filter(i => i.required).map(i => i.name))
       expect(row.required).toEqual(row.mustLink)
-      expect(row.inputCheck).toEqual(['effect-preview-name', 'effect-output-size'])
+      // R2.4: a class with colour text also checks the runner reads it as Python does.
+      expect(row.inputCheck).toEqual(Object.prototype.hasOwnProperty.call(EFFECT_TEXT_WIDGETS, cls)
+        ? ['effect-preview-name', 'effect-output-size', 'effect-text']
+        : ['effect-preview-name', 'effect-output-size'])
     }
   })
 
@@ -108,8 +120,8 @@ describe('the rows', () => {
     }
     expect([...FRAME_RENDER_TYPES]).toEqual(['Compositor'])
     expect(EFFECT_OUTPUT_NODES).toEqual(EFFECT_CLASSES_PORTED)
-    expect(EFFECT_PICTURE_OUTPUTS).toEqual({ AdjustExposure: [0], AdjustInvert: [0], AdjustThreshold: [0] })
-    // None of the pilots makes a mask: the output kinds are the cards' whatever the families.
+    expect(EFFECT_PICTURE_OUTPUTS).toEqual(Object.fromEntries(PORTED.map(cls => [cls, [0]])))
+    // None of the ported classes makes a mask: the output kinds are the cards' whatever the families.
     expect(EFFECT_OUTPUT_KINDS).toEqual({})
     const all = new Set<RunnerFamily>(RUNNER_FAMILIES)
     expect(outputKindsFor(all)).toBe(outputKindsFor(new Set<RunnerFamily>(['cards'])))

@@ -9,10 +9,12 @@
  * the server's effect table matches): with its family on, a class not yet
  * ported is still left to the engine.
  *
- * Imports nothing at run time but the generated schemas: ./eligibility.ts
- * builds its rule table from effectRows() when it loads.
+ * Imports nothing at run time but the generated schemas and the colour text
+ * readers (./gradientStops.ts, pure): ./eligibility.ts builds its rule table
+ * from effectRows() when it loads.
  */
 import { EFFECT_SCHEMAS, type EffectSchema, type EffectSchemaFamily } from './effectSchemas.generated'
+import { duotoneTextIsPortable, hexTextIsPortable, stopsTextIsPortable } from './gradientStops'
 import type { RunnerFamily } from './families'
 import type { RunnerNodeRule, RunnerWidgetSpec } from './eligibility'
 import type { ValueKind } from './values'
@@ -22,8 +24,14 @@ export type EffectFamily = EffectSchemaFamily
 /** Every effect family. */
 export const EFFECT_FAMILIES: readonly EffectFamily[] = ['effects-tone', 'effects-blur', 'effects-cells', 'effects-warp', 'effects-mask', 'effects-noise']
 
-/** The effects ported so far (R2.1: the three pilots). Each task adds its classes. */
-export const EFFECT_CLASSES_PORTED: readonly string[] = ['AdjustExposure', 'AdjustInvert', 'AdjustThreshold']
+/** The effects ported so far (R2.1: the three pilots; R2.4: the rest of effects-tone). Each task adds its classes. */
+export const EFFECT_CLASSES_PORTED: readonly string[] = [
+  'AdjustExposure', 'AdjustInvert', 'AdjustThreshold',
+  'AdjustBrightnessContrast', 'AdjustColor', 'AdjustCurves', 'AdjustLevels',
+  'AdjustTemperature', 'AdjustVibrance', 'AdjustColorBalance', 'AdjustBlackWhite', 'AdjustPhotoFilter', 'AdjustGradientMap', 'AdjustChannelMixer', 'AdjustPosterize',
+  'AdjustVignette', 'AdjustShadowsHighlights', 'Duotone', 'SplitToning',
+  'GradientMap', 'Posterize', 'Hologram', 'TwoDLight', 'LightLeak', 'LensFlare', 'Caustics', 'Blinds', 'CrossHatch', 'Dither',
+]
 
 /** Each effect class's family (every generated class, ported or not). */
 export const EFFECT_FAMILY_OF: Readonly<Record<string, EffectFamily>> = Object.fromEntries(
@@ -98,6 +106,28 @@ export function effectOutputSizeFits(classType: string, inputs: Record<string, u
   return size.w * size.h <= (hosted ? EFFECT_HOSTED_MAX_PICTURE_PIXELS : EFFECT_MAX_PICTURE_PIXELS)
 }
 
+// ── Colour text (R2.4) ───────────────────────────────────────────────────────
+
+/**
+ * The text widgets an effect reads as colours, and how: a hex colour
+ * (_hex_to_rgb), gradient stops (parse_stops) or a duotone pair
+ * (parse_duotone). The runner takes the node only while it reads that text
+ * exactly as Python does (./gradientStops.ts `*TextIsPortable`).
+ */
+export const EFFECT_TEXT_WIDGETS: Readonly<Record<string, Readonly<Record<string, 'hex' | 'stops' | 'duotone'>>>> = {
+  AdjustGradientMap: { stops: 'stops' },
+  Duotone: { duotone: 'duotone' },
+  GradientMap: { dark_color: 'hex', light_color: 'hex' },
+  TwoDLight: { color: 'hex' },
+}
+
+/** Whether the runner reads an effect's colour text as Python does (nothing to read: yes). */
+export function effectTextIsPortable(classType: string, inputs: Record<string, unknown>): boolean {
+  const widgets = Object.prototype.hasOwnProperty.call(EFFECT_TEXT_WIDGETS, classType) ? EFFECT_TEXT_WIDGETS[classType]! : {}
+  return Object.entries(widgets).every(([name, kind]) =>
+    kind === 'hex' ? hexTextIsPortable(inputs[name]) : kind === 'stops' ? stopsTextIsPortable(inputs[name]) : duotoneTextIsPortable(inputs[name]))
+}
+
 // ── Rows (rule 1) ────────────────────────────────────────────────────────────
 
 /** A generated widget as ComfyUI's validation reads it (a COLOR is validated as nothing more than a value). */
@@ -117,7 +147,8 @@ function widgetSpec(w: EffectSchema['widgets'][string]): RunnerWidgetSpec {
  * live preview, so it counts as work, controller ruling (a)); its widgets as
  * ComfyUI validates them; its required pictures and masks linked; each IMAGE
  * input a picture and each MASK input a mask value; the node id fit for the
- * preview's name and an output size from the widgets within the caps.
+ * preview's name, an output size from the widgets within the caps, and any
+ * colour text read as Python reads it (EFFECT_TEXT_WIDGETS).
  */
 export function effectRows(): Record<string, RunnerNodeRule> {
   const rows: Record<string, RunnerNodeRule> = {}
@@ -131,7 +162,9 @@ export function effectRows(): Record<string, RunnerNodeRule> {
       ...(s.images.length ? { imageInputs: s.images.map(i => i.name) } : {}),
       ...(s.masks.length ? { valueInputs: Object.fromEntries(s.masks.map(m => [m.name, ['mask'] as const])) } : {}),
       widgets: Object.fromEntries(Object.entries(s.widgets).map(([k, w]) => [k, widgetSpec(w)])),
-      inputCheck: ['effect-preview-name', 'effect-output-size'],
+      inputCheck: Object.prototype.hasOwnProperty.call(EFFECT_TEXT_WIDGETS, cls)
+        ? ['effect-preview-name', 'effect-output-size', 'effect-text']
+        : ['effect-preview-name', 'effect-output-size'],
     }
   }
   return rows

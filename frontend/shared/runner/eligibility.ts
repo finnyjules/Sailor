@@ -12,7 +12,7 @@ import { moodboardReadingIsPlain } from '../taste/moodboardStyle'
 import { IMAGE_LAYERS, TEXT_LAYERS, smartLayoutPixels } from './smartLayout'
 import {
   EFFECT_FAMILY_OF, EFFECT_OUTPUT_KINDS, EFFECT_PICTURE_OUTPUTS,
-  effectFamilyOn, effectOutputSizeFits, effectPreviewName, effectRows, effectSwitchedClasses,
+  effectFamilyOn, effectOutputSizeFits, effectPreviewName, effectRows, effectSwitchedClasses, effectTextIsPortable,
 } from './effects'
 
 export const RUNNER_NODE_TYPES: ReadonlySet<string> = new Set([
@@ -162,10 +162,13 @@ export const INPUT_CHECKS: Readonly<Record<string, (inputs: Record<string, unkno
   'effect-preview-name': (_inputs, ctx) => ctx.nodeId === undefined || effectPreviewName(ctx.nodeId) !== null,
   // An effect's output size known from its widgets alone within the caps (R2 rule 7).
   'effect-output-size': (inputs, ctx) => effectOutputSizeFits(ctx.classType, inputs, !!ctx.hosted),
+  // An effect's colour text (R2.4: hex colours, gradient stops, a duotone
+  // pair) the runner reads exactly as Python does (./gradientStops.ts).
+  'effect-text': (inputs, ctx) => effectTextIsPortable(ctx.classType, inputs),
 }
 
 /** The name of an input check (INPUT_CHECKS). */
-export type InputCheckName = 'moodboard-reading' | 'bake-params' | 'empty-image-caps' | 'smart-layout' | 'effect-preview-name' | 'effect-output-size'
+export type InputCheckName = 'moodboard-reading' | 'bake-params' | 'empty-image-caps' | 'smart-layout' | 'effect-preview-name' | 'effect-output-size' | 'effect-text'
 
 /** nodes.py MAX_RESOLUTION: the most ComfyUI allows for a width or height widget. */
 export const COMFY_MAX_RESOLUTION = 16384

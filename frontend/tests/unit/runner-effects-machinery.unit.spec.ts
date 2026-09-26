@@ -60,6 +60,8 @@ interface MachineryFx extends FxFile {
 const FX = withAssets(loadFixtures<MachineryFx>('machinery'))
 
 const TONE: ReadonlySet<RunnerFamily> = new Set(['cards', 'effects-tone'])
+/** The three pilots this file covers (R2.4 and later tasks add classes to EFFECTS; each has its own spec). */
+const PILOTS = ['AdjustExposure', 'AdjustInvert', 'AdjustThreshold']
 const TONE_EDIT: ReadonlySet<RunnerFamily> = new Set(['cards', 'effects-tone', 'fal-edit'])
 const TONE_FRAME: ReadonlySet<RunnerFamily> = new Set(['cards', 'effects-tone', 'frame'])
 const START = { workflow: null, canvasId: null, projectUuid: null, projectName: null }
@@ -518,7 +520,7 @@ describe('families', () => {
   })
 
   it('node by node: each pilot, its source card and its reader, with cards on and off', () => {
-    for (const cls of Object.keys(EFFECTS)) {
+    for (const cls of PILOTS) {
       const w = cls === 'AdjustExposure' ? { exposure: 1 } : cls === 'AdjustInvert' ? { amount: 1 } : { threshold: 0.5 }
       const q: ApiPrompt = { 0: card('a.png'), fx: effect(cls, ['0', 0], w), e: editNode(['fx', 0]), o: outCard('e') }
       const take = (fam: RunnerFamily[]) => Object.fromEntries(Object.keys(q).map(id => [id, runnerTakesNode(q, id, new Set(fam))]))
@@ -597,7 +599,7 @@ function sameAsBefore(p: ApiPrompt, label: string) {
 
 describe('with every effects family off, the needs-the-engine lists are as before R2.1', () => {
   it('over synthetic graphs with each pilot in each place', () => {
-    for (const cls of Object.keys(EFFECTS)) {
+    for (const cls of PILOTS) {
       const w = cls === 'AdjustExposure' ? { exposure: 1 } : cls === 'AdjustInvert' ? { amount: 1 } : { threshold: 0.5 }
       sameAsBefore({ 0: card('a.png'), fx: effect(cls, ['0', 0], w) }, `${cls} alone`)
       sameAsBefore({ 0: card('a.png'), fx: effect(cls, ['0', 0], w), e: editNode(['fx', 0]), o: outCard('e') }, `${cls} → edit`)
@@ -632,7 +634,7 @@ describe('with every effects family off, the needs-the-engine lists are as befor
         catch { continue }
         sameAsBefore(p, uuid)
         graphs++
-        for (const cls of Object.keys(EFFECTS)) {
+        for (const cls of PILOTS) {
           const s = spliceAfterPictures(p, cls)
           if (!s.count) continue
           sameAsBefore(s.prompt, `${uuid} with ${cls}`)

@@ -30,6 +30,15 @@ Groups:
               can count draws off by an ulp. It records this Mac's libm
               (logf, __sincosf_stret) too, so the rng fixtures regenerate
               only on macOS.
+  tone      — (R2.4) the other 26 tone, colour and light effects over the
+              standard case set, plus: every numeric widget "between" at
+              once; contrast's mean on one 320×200 picture and on a batch of
+              two (torch splits the long sum differently); the colour text
+              (parse_stops, parse_duotone, both hex readers) on their own
+              and through their nodes; Dither's −0 on black pictures; one
+              exact effect into a Frame. An exact class's outputs are
+              sha256s; a library class (TONE_LIBRARY_EPS) also keeps its
+              small floats (zlib) and its hashed bands at its own ε.
 
 Every picture reaches a node as it does in a real run, through the real
 Python loader of its source (as scripts/compositor_fixtures.py):
@@ -967,7 +976,228 @@ def rng() -> dict:
     return {"cases": cases, "seeds": RNG_SEEDS, "head": RNG_HEAD}
 
 
-GROUPS = {"machinery": machinery, "kernels": kernels, "rng": rng}
+# ── Group `tone` (R2.4): the tone, colour and light effects ─────────────────
+
+# (module, node_id) of the 26 classes R2.4 ports (the three pilots are the machinery group's).
+TONE_CLASSES = [
+    ("nodes_adjust_brightness_contrast", "AdjustBrightnessContrast"), ("nodes_adjust_color", "AdjustColor"),
+    ("nodes_adjust_curves", "AdjustCurves"), ("nodes_adjust_levels", "AdjustLevels"),
+    ("nodes_color_filters", "AdjustTemperature"), ("nodes_color_filters", "AdjustVibrance"),
+    ("nodes_color_filters", "AdjustColorBalance"), ("nodes_color_filters", "AdjustBlackWhite"),
+    ("nodes_color_filters", "AdjustPhotoFilter"), ("nodes_color_filters", "AdjustGradientMap"),
+    ("nodes_color_filters", "AdjustChannelMixer"), ("nodes_color_filters", "AdjustPosterize"),
+    ("nodes_tone_extras", "AdjustVignette"), ("nodes_tone_extras", "AdjustShadowsHighlights"),
+    ("nodes_glsl_grading", "Duotone"), ("nodes_glsl_grading", "SplitToning"),
+    ("nodes_glsl_unicorn", "GradientMap"), ("nodes_glsl_unicorn", "Posterize"),
+    ("nodes_glsl_unicorn", "Hologram"), ("nodes_glsl_unicorn", "TwoDLight"),
+    ("nodes_glsl_atmosphere", "LightLeak"), ("nodes_glsl_atmosphere", "LensFlare"),
+    ("nodes_glsl_lab", "Caustics"), ("nodes_glsl_lab", "Blinds"),
+    ("nodes_glsl_stylize", "CrossHatch"), ("nodes_glsl_stylize", "Dither"),
+]
+
+# The library classes' ε (255-scale; R2 rule 10: at most 2⁻⁸), each at least twice the worst
+# |Δ| measured against the TypeScript port over this group (R2.4 report). A hashed case's band
+# is recorded at its class's ε; tests/unit/runner-effects-tone.unit.spec.ts holds the same table.
+TONE_LIBRARY_EPS = {
+    "AdjustBrightnessContrast": 2.0 ** -12, "AdjustCurves": 2.0 ** -12, "AdjustLevels": 2.0 ** -12,
+    "SplitToning": 2.0 ** -12, "Posterize": 2.0 ** -12, "Hologram": 2.0 ** -12, "TwoDLight": 2.0 ** -12,
+    "LightLeak": 2.0 ** -12, "LensFlare": 2.0 ** -12, "Caustics": 2.0 ** -12,
+}
+
+
+def node_class(module: str, node_id: str):
+    """The real node class whose schema is `node_id` (two modules both have a GradientMapNode)."""
+    import importlib
+    mod = importlib.import_module(f"comfy_extras.{module}")
+    for v in vars(mod).values():
+        if isinstance(v, type) and hasattr(v, "define_schema") and v.__module__ == mod.__name__:
+            try:
+                if v.define_schema().node_id == node_id:
+                    return v
+            except Exception:  # noqa: BLE001 — helpers and bases without a schema
+                continue
+    raise LookupError(node_id)
+
+
+def record_tone_output(t: torch.Tensor, hashed: bool, eps: float | None) -> dict:
+    """One output tensor, frame by frame (H × W × C): the sha256 of its float32 and of Python's
+    round8 and trunc8. A library class (eps set) also keeps a small frame's float32, zlib'd
+    (`f32z`: the spec derives the 8-bit forms from it, checks them against the hashes, and
+    measures its ε), and a hashed frame's band at the class's ε. An exact class's float is
+    checked by its hash alone (bit for bit), which keeps the file small."""
+    items = []
+    for i in range(t.shape[0]):
+        x = t[i].contiguous()
+        f32 = x.cpu().numpy().astype("<f4").tobytes()
+        item = {"w": int(x.shape[1]), "h": int(x.shape[0]), "c": int(x.shape[2]), "f32_sha256": sha(f32),
+                "round8_sha256": sha(round8(x).tobytes()), "trunc8_sha256": sha(trunc8(x).tobytes())}
+        if eps is not None and hashed:
+            item["band"] = band_list(x, eps)
+        elif eps is not None:
+            item["f32z"] = b64(zlib.compress(f32, 9))
+        items.append(item)
+    return {"kind": "image", "items": items}
+
+
+class ToneGroup(Group):
+    """The tone group's cases: outputs as record_tone_output keeps them, the preview as a sha256."""
+
+    def case(self, name: str, cls, class_type: str, widgets: dict, inputs: dict, hashed: bool = False) -> None:
+        self.seq += 1
+        node_id = f"fx{self.seq}"
+        tensors = {}
+        for key, (source, files) in inputs.items():
+            tensors[key] = load("blank", None, None) if source == "blank" else torch.cat([load(source, f, self.assets[f]) for f in files], dim=0)
+        row: dict = {"name": name, "class_type": class_type, "node_id": node_id, "widgets": widgets,
+                     "inputs": {k: {"source": s, "files": list(f)} for k, (s, f) in inputs.items()}}
+        if hashed:
+            row["hashed"] = True
+        try:
+            outs, ui = run_node(cls, node_id, **tensors, **widgets)
+        except Exception as e:  # Python raises: the runner's plain message is checked against it
+            row["error"] = {"type": type(e).__name__, "message": str(e)}
+            self.cases.append(row)
+            return
+        row["outputs"] = [record_tone_output(t, hashed, TONE_LIBRARY_EPS.get(class_type)) for t in outs]
+        row["ui"] = {"images": ui["images"], "animated": list(ui["animated"])}
+        row["preview"] = read_preview(ui, True)
+        self.cases.append(row)
+
+    def solid(self, name: str, w: int, h: int, rgb: tuple) -> str:
+        """A one-colour RGB picture (an asset of its own name)."""
+        px = np.zeros((h, w, 3), dtype=np.uint8)
+        px[:, :] = rgb
+        buf = io.BytesIO()
+        PILImage.fromarray(px, "RGB").save(buf, format="PNG")
+        self.assets.setdefault(name, buf.getvalue())
+        return name
+
+
+# Colour text for parse_stops, parse_duotone and the two hex readers (R2.4 brief: malformed
+# JSON, an empty list, one stop, unsorted stops, out-of-range positions, bad colours; a
+# non-dict duotone; "#abc", " #a1b2c3 ", "zz0000", ""), each also run through its node.
+TONE_STOPS = [
+    '[{"pos":0,"color":"#06283d"},{"pos":0.5,"color":"#256d85"},{"pos":1,"color":"#47b5ff"}]',
+    '[{"pos":0,"color":"#06283d"},{"pos":0.5,"color":',
+    'not json', '', '[]', '{}', '"#ff0000"', '42', 'null',
+    '[{"pos":0.4,"color":"#ff8800"}]',
+    '[{"pos":0.9,"color":"#ffffff"},{"pos":0.1,"color":"#000000"},{"pos":0.5,"color":"#ff0000"}]',
+    '[{"pos":-0.5,"color":"#00ff00"},{"pos":1.7,"color":"#0000ff"}]',
+    '[{"pos":0.2,"color":"#12345"},{"pos":0.3,"color":"zzzzzz"},{"pos":0.6,"color":"#abc"},{"pos":0.8,"color":" #A1B2C3 "}]',
+    '[{"pos":0.1,"color":"+f-f0f"},{"pos":0.7,"color":"#1_2_3_"},{"pos":0.75,"color":"# abc"},{"pos":0.9,"color":"##c0ffee"}]',
+    '[{"pos":"0.25","color":"#102030"},{"pos":" 0.5 ","color":"#405060"},{"pos":"x","color":"#708090"},{"pos":true,"color":"#a0b0c0"}]',
+    '[{"pos":null,"color":"#111111"},{"color":"#222222"},{"pos":0.5},["pos",0.5],"#333333",7,{"pos":0.6,"color":null},{"pos":0.65,"color":true},{"pos":0.7,"color":["#444444"]}]',
+    '[{"pos":"nan","color":"#551100"},{"pos":"inf","color":"#005511"},{"pos":"-inf","color":"#110055"}]',
+    '[{"pos":0.5,"color":"#aa0000"},{"pos":0.5,"color":"#00aa00"},{"pos":0.5,"color":"#0000aa"}]',
+    '[{"pos":0.3,"color":"#303030"},{"pos":0.3,"color":"#909090"}]',
+    ' [ {"pos": 1, "color": "\\t#FfF\\n"} , {"pos": 0, "color": "000"} ] ',
+    '[{"pos":0,"color":"#000000"},{"pos":1e-9,"color":"#ffffff"}]',
+]
+TONE_DUOTONE = [
+    '{"shadow":"#1a1a2e","highlight":"#f5f5f5"}', '{"shadow":"#223344"}', '{"highlight":"#aabbcc"}', '{}',
+    '["#000000","#ffffff"]', '"#ff0000"', '12', 'null', 'not json', '',
+    '{"shadow":"zz","highlight":"#abc"}', '{"shadow":null,"highlight":true}', '{"shadow":["#000000"],"highlight":{"a":1}}',
+    '{"shadow":" #102030 ","highlight":"-1+2+3"}',
+]
+TONE_HEX = ["#abc", " #a1b2c3 ", "zz0000", "", "#ffe8c4", "ABC", "#12345", "#1234567", "##abcdef", "# abcdef", "+1-2+3",
+            "0x0x0x", "1_2_3_", "\t#0f0f0f\n", "\x1c#abcdef", "#ab c12", "a b c"]
+
+
+def tone_frame_chain(g: Group, cls, class_type: str, widgets: dict, file: str) -> dict:
+    """A tone effect on a see-through card picture (4 channels) into a Frame's layer 1, as
+    machinery's frame_chain: the Frame gets the effect's float tensor; its 8-bit result as
+    save_live_preview writes it."""
+    from unittest import mock
+    from comfy_api.latest._io import HiddenHolder
+    import comfy_extras.nodes_compositor as nc
+    x = load("card", file, g.assets[file])
+    g.seq += 1
+    node_id = f"fx{g.seq}"
+    outs, _ui = run_node(cls, node_id, image=x, **widgets)
+    frame = {"layer1_x": 0.0, "layer1_y": 0.0, "layer1_rotation": 10.0, "layer1_scale": 0.8, "layer1_opacity": 1.0,
+             "layer1_blend": "normal", "layer1_z": 1.0, "layer1_protect": False, "layer1_cloner": "",
+             "width": 0, "height": 0, "motion_params": ""}
+    previews = []
+    with mock.patch.object(nc.CompositorNode, "hidden", HiddenHolder.from_dict({"UNIQUE_ID": "frame"})), \
+            mock.patch.object(nc, "save_live_preview", lambda t, *_a, **_k: previews.append(t) or {}):
+        res = nc.CompositorNode.execute(layer1=outs[0], **frame)
+    image = res.result[0]
+    assert previews and previews[0] is image
+    return {"name": f"{class_type} → Frame, card", "inputs": {"image": {"source": "card", "files": [file]}},
+            "effect": {"class_type": class_type, "node_id": node_id, "widgets": widgets},
+            "frame": {"widgets": frame, "w": int(image.shape[2]), "h": int(image.shape[1]), "image8": b64(trunc8(image[0]).tobytes())}}
+
+
+def tone() -> dict:
+    from comfy_extras import _gradient_map as gm
+    from comfy_extras.nodes_glsl_unicorn import _hex_to_rgb
+    g = ToneGroup()
+    classes = {node_id: node_class(module, node_id) for module, node_id in TONE_CLASSES}
+    for node_id, cls in classes.items():
+        standard_cases(g, cls, node_id)
+    rgb = g.picture(37, 23, 3, 1)
+    # Every numeric widget away from its default at once (the standard set moves one at a time,
+    # which leaves a sum of several settings' terms untried).
+    for node_id, cls in classes.items():
+        defaults, settings = widget_settings(cls)
+        mixed = dict(defaults)
+        for label, over in settings:
+            if " between (" in label:
+                mixed.update(over)
+        for pname, source, file in (("rgb 37×23", "rgb", rgb), ("card 23×19 see-through", "card", g.picture(23, 19, 4, 3))):
+            g.case(f"{node_id}: every setting between, {pname}", cls, node_id, mixed, {"image": (source, [file])})
+    big, big2 = g.picture(320, 200, 3, 6), g.picture(320, 200, 3, 9)
+    # Contrast's mean: a long sum torch splits between threads for one picture, and sums on one
+    # thread per picture in a batch of two (kernels.ts TorchLayout).
+    bc = classes["AdjustBrightnessContrast"]
+    g.case("AdjustBrightnessContrast: contrast 1.5, brightness 0.8, rgb 320×200", bc, "AdjustBrightnessContrast",
+           {"brightness": 0.8, "contrast": 1.5}, {"image": ("rgb", [big])}, hashed=True)
+    g.case("AdjustBrightnessContrast: contrast 1.5, a batch of two rgb 320×200", bc, "AdjustBrightnessContrast",
+           {"brightness": 1.0, "contrast": 1.5}, {"image": ("rgb", [big, big2])}, hashed=True)
+    g.case("AdjustBrightnessContrast: contrast 0.4, a batch of two files and a repeat", bc, "AdjustBrightnessContrast",
+           {"brightness": 1.0, "contrast": 0.4}, {"image": ("rgb", [rgb, g.picture(37, 23, 3, 5), rgb])})
+    # The colour text, through the nodes.
+    stops_default = classes["AdjustGradientMap"]
+    for i, s in enumerate(TONE_STOPS):
+        g.case(f"AdjustGradientMap: stops {i}, rgb 37×23", stops_default, "AdjustGradientMap", {"stops": s, "mix": 0.8}, {"image": ("rgb", [rgb])})
+    for i, s in enumerate(TONE_DUOTONE):
+        g.case(f"Duotone: duotone {i}, rgb 37×23", classes["Duotone"], "Duotone", {"duotone": s}, {"image": ("rgb", [rgb])})
+    gmap = classes["GradientMap"]
+    gdef = {"dark_color": "#1a0a2e", "light_color": "#f5dbd1", "midpoint": 0.5, "contrast": 1.0, "mix": 1.0}
+    light = classes["TwoDLight"]
+    ldef = {"x": 0.3, "y": 0.3, "radius": 0.7, "falloff": 2.0, "color": "#ffe8c4", "intensity": 1.0, "blend": "screen"}
+    for i, h in enumerate(TONE_HEX):
+        g.case(f"GradientMap: dark colour {i}, rgb 37×23", gmap, "GradientMap", {**gdef, "dark_color": h}, {"image": ("rgb", [rgb])})
+        g.case(f"GradientMap: light colour {i}, rgb 37×23", gmap, "GradientMap", {**gdef, "light_color": h}, {"image": ("rgb", [rgb])})
+        g.case(f"TwoDLight: colour {i}, rgb 37×23", light, "TwoDLight", {**ldef, "color": h}, {"image": ("rgb", [rgb])})
+    # Dither rounds below zero to −0, which torch's clamp keeps only in its scalar tails.
+    black = g.solid("black_67x5.png", 67, 5, (0, 0, 0))
+    g.case("Dither: black 67×5", classes["Dither"], "Dither", {"levels": 2}, {"image": ("rgb", [black])})
+    dark = g.solid("dark_67x5.png", 67, 5, (3, 3, 3))
+    g.case("Dither: levels 3, a batch of black and dark 67×5", classes["Dither"], "Dither", {"levels": 3}, {"image": ("rgb", [black, dark])})
+    # A pow with torch's special exponents (exact) and a light over the whole range.
+    g.case("AdjustCurves: midtones 0.5 (pow 2), rgb 37×23", classes["AdjustCurves"], "AdjustCurves", {"blacks": 0.1, "midtones": 0.5, "whites": 1.2}, {"image": ("rgb", [rgb])})
+    g.case("TwoDLight: falloff 3, overlay, rgb 37×23", light, "TwoDLight", {**ldef, "falloff": 3.0, "blend": "overlay"}, {"image": ("rgb", [rgb])})
+    # The readers on their own.
+    stops = [{"raw": s, "parsed": [[p, list(c)] for p, c in gm.parse_stops(s)]} for s in TONE_STOPS]
+    duo = []
+    for s in TONE_DUOTONE:
+        sh, hi = gm.parse_duotone(s)
+        duo.append({"raw": s, "pair": [sh, hi], "rgb": [list(gm.hex_to_rgb(sh, (0.1, 0.1, 0.3))), list(gm.hex_to_rgb(hi, (1.0, 0.8, 0.4)))]})
+    hexes = []
+    for h in TONE_HEX:
+        a = gm.hex_to_rgb(h, None)
+        b = _hex_to_rgb(h, None)
+        hexes.append({"text": h, "gradient_map": list(a) if a is not None else None, "unicorn": list(b) if b is not None else None})
+    # An exact effect on a see-through picture into a Frame (it reads the effect's float).
+    balance = {"shadows_cr": 0.26, "shadows_mg": -0.4, "shadows_yb": 0.1, "midtones_cr": 0.0, "midtones_mg": 0.3,
+               "midtones_yb": -0.2, "highlights_cr": -0.5, "highlights_mg": 0.0, "highlights_yb": 0.7}
+    frame = tone_frame_chain(g, classes["AdjustColorBalance"], "AdjustColorBalance", balance, g.picture(23, 19, 4, 3))
+    return {"cases": g.cases, "assets": {k: b64(v) for k, v in sorted(g.assets.items())},
+            "library_eps": TONE_LIBRARY_EPS, "stops": stops, "duotone": duo, "hex": hexes, "frame": frame}
+
+
+GROUPS = {"machinery": machinery, "kernels": kernels, "rng": rng, "tone": tone}
 
 
 def main() -> None:
