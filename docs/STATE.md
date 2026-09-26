@@ -31,6 +31,14 @@ Legend: **bake** = render/export path · **motion** = animatable · **inspector*
 | Inpaint / Region | ✅ backend | — | toolbar | ✅ ops | — |
 | Collection (sweeps) | — | — | ✅ | ✅ | backbone |
 
+### Stroke fill follows the line — BUILT 2026-09-25 (spec `docs/superpowers/specs/2026-09-25-stroke-fill-follows-line.md`)
+
+A Compositor stroke's patterned or gradient fill can now bend along the outline it paints instead of sitting still across it. Three new `StrokeInstance` fields carry it: `follow` (bool, on/off), `fade` ("across" | "along", an ombre paint's fade direction while following), and `fadeRepeats` (1..50, out-and-back fade cycles round the line when `fade` is "along"). Wired through the painter, the stroke inspector row, and the agent's `setStrokeProps`/`addStroke` patch (`STROKE_PROPS`, validated the same way as every other stroke key).
+
+**Known limits.** Outer corners always render round while following. Acute star tips can show a small stripe jog. The per-frame cost of a following fill isn't measured or cached yet.
+
+**Next.** A Motion-tab motion that runs the fill along the edge over time.
+
 ### Shared pen — Plan C (Shape Studio) — LANDED 2026-09-25 (spec `docs/superpowers/specs/2026-09-24-shared-pen-design.md`, plan `docs/superpowers/plans/2026-09-25-shared-pen-c-shape-studio.md`)
 
 Shape Studio's Shape picker gains **Drawn**. Picking it opens the shared pen over the preview (its toolbar replaces the prompt dock while open); you draw one unit — arcs, curves, lines, circles, rules — and Enter makes it the layer's shape; "Edit the shape" reopens it. Everything Shape Studio does applies to the drawn unit: copies and arrangements (radial, grid, linear), overlaps, folds, fills, colour order, layers, background. The Size row scales it (it fits like a library shape: larger side = Size). An open drawing switches the layer to outline if it was filled. While the pen is open: the preview framing holds still, the other copies show faintly and update when you finish a gesture (the fold runs then, never mid-drag), Escape belongs to the pen (the studio doesn't close), the layer rail and the AI actions (Tune, Vary, Re-roll) are locked, and a right-click never places a point (that last fix is in the shared pen, so the Frame and the test page have it too).

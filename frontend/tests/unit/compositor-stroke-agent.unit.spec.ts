@@ -147,6 +147,31 @@ describe('setStrokeProps', () => {
     expect(r.ok).toBe(false)
     expect((r as { detail?: string }).detail).toMatch(/text/i)
   })
+
+  it('accepts follow: true and stores it', () => {
+    expect(patched({ follow: true }).follow).toBe(true)
+  })
+
+  it('follow: false removes the field rather than storing a literal false', () => {
+    const s = patched({ follow: false }, { follow: true })
+    expect(s.follow).toBeUndefined()
+  })
+
+  it('accepts fade: "along"', () => {
+    expect(patched({ fade: 'along' }).fade).toBe('along')
+  })
+
+  it('refuses an invalid fade value, the same way other invalid values are rejected', () => {
+    expect(run(st(stacked({})), 'setStrokeProps', 'r1', { strokeId: 'a', patch: { fade: 'sideways' } }).ok).toBe(false)
+  })
+
+  it('stores a fadeRepeats value as given', () => {
+    expect(patched({ fadeRepeats: 7 }).fadeRepeats).toBe(7)
+  })
+
+  it('clamps an out-of-range fadeRepeats to 50', () => {
+    expect(patched({ fadeRepeats: 500 }).fadeRepeats).toBe(50)
+  })
 })
 
 describe('setStroke, now that a layer can have several', () => {

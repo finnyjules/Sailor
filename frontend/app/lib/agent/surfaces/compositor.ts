@@ -27,7 +27,7 @@ import { maskBreakFromEdge, type MaskBreak, type MaskBreakEdge } from '~/lib/com
 import {
   strokeStackOf, layerStoresStrokeStack, writeStrokeStackToLayer,
   addStroke as appendStroke, removeStroke as dropStroke,
-  strokeSupportsStack, strokeSupportsShapes, STROKE_JOINS, STROKE_STYLES,
+  strokeSupportsStack, strokeSupportsShapes, STROKE_JOINS, STROKE_STYLES, STROKE_FADES, strokeFadeRepeatsOf,
   type StrokeInstance, type StrokeAlign,
 } from '~/lib/compositor/strokeStack'
 import type { LayerGroup } from '~/lib/compositor/layerGroups'
@@ -670,7 +670,7 @@ const legacyStrokeField = (kind: LocalLayerKind): string => (kind === 'text' ? '
 const storesStrokeStack = (layer: LocalLayer): boolean => layerStoresStrokeStack(layer as never)
 
 /** Every key `setStrokeProps` (and `addStroke`'s optional patch) accepts. */
-const STROKE_PROPS = new Set(['paint', 'width', 'distance', 'align', 'dash', 'join', 'style', 'shapes', 'visible'])
+const STROKE_PROPS = new Set(['paint', 'width', 'distance', 'align', 'dash', 'join', 'style', 'shapes', 'visible', 'follow', 'fade', 'fadeRepeats'])
 
 /**
  * One stroke with a model's patch applied, or the reason to refuse the whole command.
@@ -721,6 +721,19 @@ function strokePatch(
   if ('style' in p) {
     if (!STROKE_STYLES.includes(p.style as never)) return { ok: false, detail: `style must be ${STROKE_STYLES.map(x => `"${x}"`).join(' or ')}` }
     next.style = p.style as StrokeInstance['style']
+  }
+  if ('follow' in p) {
+    if (typeof p.follow !== 'boolean') return { ok: false, detail: 'follow must be a boolean' }
+    if (p.follow) next.follow = true
+    else delete next.follow
+  }
+  if ('fade' in p) {
+    if (!STROKE_FADES.includes(p.fade as never)) return { ok: false, detail: `fade must be ${STROKE_FADES.map(f => `"${f}"`).join(' or ')}` }
+    next.fade = p.fade as StrokeInstance['fade']
+  }
+  if ('fadeRepeats' in p) {
+    if (!Number.isFinite(p.fadeRepeats)) return { ok: false, detail: 'fadeRepeats must be a number' }
+    next.fadeRepeats = strokeFadeRepeatsOf({ fadeRepeats: p.fadeRepeats as number })
   }
   if ('shapes' in p) {
     const raws = p.shapes as Record<string, unknown> | null | undefined
@@ -845,7 +858,7 @@ const COMPOSITOR_COMMANDS: CommandSpec[] = [
   { op: 'setStroke', hint: 'Set a layer\'s main OUTLINE. target = layer id; args: { paint, width? }. paint as in setFill (or "none"); width is 0..1 of canvas width. Changes the topmost outline only; addStroke/setStrokeProps reach the rest of its strokes list.' },
   { op: 'addStroke', hint: 'Give a layer ANOTHER outline — "a second thin outline", "a dotted ring outside it". target = layer id (rect/ellipse/polygon/star/path/text; a line keeps one). args: { patch? }, the setStrokeProps keys. It lands UNDER the existing ones.' },
   { op: 'removeStroke', hint: 'Delete one of a layer\'s outlines. target = layer id; args: { strokeId } — an id from that layer\'s strokes list.' },
-  { op: 'setStrokeProps', hint: 'Change ONE outline — "thicker outer ring", "push it further out", "dot the edge with sparkles". target = layer id; args: { strokeId (from its strokes list), patch }. patch keys: paint (as setFill; "none" keeps the row and paints nothing), width (0..1 of canvas width), distance (0..1 OUT from the edge, negative = in, 0 = on it), align ("center"|"inside"|"outside"; on text it bites only at a distance), dash ({dash,gap} same units, null = solid), join ("sharp" keeps a star\'s spikes | "round" holds every point exactly `distance` away), style ("band" = continuous | "shapes" = library shapes marching the edge; text is band-only), shapes ({ shapeId from document.shapeLibrary, size, spacing (centre-to-centre), both 0..1 of canvas width; follow (default true: marks turn to the edge) }), visible (bool). Omitted keys keep their value.' },
+  { op: 'setStrokeProps', hint: 'Change ONE outline — "thicker outer ring", "push it further out", "dot the edge with sparkles". target = layer id; args: { strokeId (from its strokes list), patch }. patch keys: paint (as setFill; "none" keeps the row and paints nothing), width (0..1 of canvas width), distance (0..1 OUT from the edge, negative = in, 0 = on it), align ("center"|"inside"|"outside"; on text it bites only at a distance), dash ({dash,gap} same units, null = solid), join ("sharp" keeps a star\'s spikes | "round" holds every point exactly `distance` away), style ("band" = continuous | "shapes" = library shapes marching the edge; text is band-only), shapes ({ shapeId from document.shapeLibrary, size, spacing (centre-to-centre), both 0..1 of canvas width; follow (default true: marks turn to the edge) }), follow (bool, a patterned/gradient paint runs along the line instead of sitting still across it), fade ("across"|"along", an ombre paint\'s fade direction while following), fadeRepeats (1..50, "along" fade cycles round the line), visible (bool). Omitted keys keep their value.' },
   { op: 'setSize', hint: 'Resize a SHAPE/image/line layer. target = layer id; args: { w?, h?, scale? } (0..1 of canvas width; line uses w as length; path uses scale). TEXT size is NOT here — use setTextStyle fontSize.' },
   { op: 'addLayer', hint: 'Add a NEW layer. args: { layer }. layer needs: kind ("text"|"rect"|"ellipse"|"line"), x, y (0..1, center). text also: text + you may set fontFamily/fontWeight/fontSize/color inline (a HUGE headline = fontSize 0.25–0.45, fontWeight 800; Impact-style font = "Anton"). Give the layer an id you choose so you can target it next. New layers land ON TOP by default — to put one BEHIND the image/other layers, follow with setLayerDepth …"back". (For images use generateImage.)' },
   { op: 'addShape', hint: 'Add a SHAPE from the shape library (sparkle, sun-rays, leaf, heart, plus, stairs, hexagon, swirl…) as a vector layer. args: { shape (an id from document.shapeLibrary), x?, y? (0..1, centre; default 0.5,0.5), w? (ink width as a fraction of the canvas width, 0.02..2 — 1 = the full width; default 0.3), fill? ("#RRGGBB" or a gradient object), id? (choose one so you can target it next) }. This is what "add a sparkle", "put a sun top-right", "drop in a heart" mean. Recolour later with setFill, resize with setSize scale, rotate with setLayerProps.' },
