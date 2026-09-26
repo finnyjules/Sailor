@@ -54,31 +54,33 @@ function moreEffect() { emit('more-effect') }
 <template>
   <div class="brush-toolbar" data-testid="brush-toolbar">
     <div class="tb" role="toolbar" aria-label="Brush">
-      <div class="row">
-        <template v-if="!isMask">
+      <div class="row row-nowrap">
+        <div v-if="!isMask" class="seg">
           <button
             v-for="id in TIP_IDS" :key="id"
             class="tbtn" :data-testid="`brush-tip-${id}`"
             :aria-pressed="brush.tip.value === id" :title="TIPS[id].label"
             @click="selectTip(id)"
           >{{ TIPS[id].label }}</button>
-          <span class="sep" />
-        </template>
-        <button
-          class="tbtn" data-testid="brush-mode-paint"
-          :aria-pressed="brush.mode.value === 'paint'" title="Paint"
-          @click="setMode('paint')"
-        >Paint</button>
-        <button
-          class="tbtn" data-testid="brush-mode-effect"
-          :aria-pressed="brush.mode.value === 'effect'" title="Effect"
-          @click="setMode('effect')"
-        >Effect</button>
-        <button
-          class="tbtn" data-testid="brush-mode-mask"
-          :aria-pressed="brush.mode.value === 'mask'" title="Mask"
-          @click="setMode('mask')"
-        >Mask</button>
+        </div>
+        <span v-if="!isMask" class="sep" />
+        <div class="seg">
+          <button
+            class="tbtn" data-testid="brush-mode-paint"
+            :aria-pressed="brush.mode.value === 'paint'" title="Paint"
+            @click="setMode('paint')"
+          >Paint</button>
+          <button
+            class="tbtn" data-testid="brush-mode-effect"
+            :aria-pressed="brush.mode.value === 'effect'" title="Effect"
+            @click="setMode('effect')"
+          >Effect</button>
+          <button
+            class="tbtn" data-testid="brush-mode-mask"
+            :aria-pressed="brush.mode.value === 'mask'" title="Mask"
+            @click="setMode('mask')"
+          >Mask</button>
+        </div>
       </div>
 
       <div class="row">
@@ -195,7 +197,7 @@ function moreEffect() { emit('more-effect') }
   border: 1px solid #2a2a2a;
   border-radius: 12px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-  max-width: 380px;
+  max-width: 460px;
   width: max-content;
 }
 .tb .row {
@@ -204,6 +206,19 @@ function moreEffect() { emit('more-effect') }
   min-width: 0;
   align-items: center;
   justify-content: center;
+  gap: 4px;
+}
+/* Row 1 (tips + modes): the two segments never wrap internally, and the row
+   itself never wraps either — the bar widens (up to max-width) to fit them
+   on one line instead. */
+.row-nowrap {
+  flex-wrap: nowrap;
+}
+.seg {
+  display: flex;
+  flex-wrap: nowrap;
+  flex: none;
+  align-items: center;
   gap: 4px;
 }
 .tb .sep {
