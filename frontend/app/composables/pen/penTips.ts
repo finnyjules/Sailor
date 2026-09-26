@@ -55,9 +55,12 @@ export const PEN_TIPS: Record<string, PenTip> = {
   cancel: { name: 'Cancel', key: 'Esc',
     caption: 'Puts the pen away without keeping this session’s changes.' },
 
-  // ── rules (keyed by the rule kind availableConstraints offers) ──
+  // ── rules (keyed by the rule kind availableConstraints offers, or its
+  //    `tip` where the kind alone would name another card) ──
   coincident: { name: 'Coincident',
-    caption: 'Joins two points into one, or pins a point onto a curve.' },
+    caption: 'Joins two points into one. The first one you picked stays where it is.' },
+  onCurve: { name: 'On curve',
+    caption: 'Keeps a point on the chosen line or arc piece; it can still slide along it.' },
   distance: { name: 'Distance',
     caption: 'Holds two points a set distance apart. Type the distance.' },
   concentric: { name: 'Concentric',
@@ -71,7 +74,7 @@ export const PEN_TIPS: Record<string, PenTip> = {
   pointOnLine: { name: 'Point on line',
     caption: 'Keeps a point on a line; it can still slide along it.' },
   midpoint: { name: 'Midpoint',
-    caption: 'Pins a point to the middle of a line.' },
+    caption: 'Pins a point to the middle of a line or straight piece.' },
   pointOnCircle: { name: 'Point on circle',
     caption: 'Keeps a point on a circle’s edge; it can still slide around it.' },
   horizontal: { name: 'Horizontal',

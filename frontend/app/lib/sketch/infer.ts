@@ -52,10 +52,14 @@ export function snapPoint(
   doc: SketchDoc,
   x: number,
   y: number,
-  opts: { tol?: number; exclude?: EntityId[] } = {},
+  opts: { tol?: number; exclude?: EntityId[]; skipCurvesUsing?: EntityId[] } = {},
 ): { x: number; y: number; snap: PointSnap | null } {
   const tol = opts.tol ?? 0.6
   const exclude = new Set(opts.exclude ?? [])
+  // `skipCurvesUsing`: pieces built on any of these points (a line or path
+  // segment ending at one, a circle or arc centred on one) are not targets —
+  // a point being dragged can't join its own line or arc
+  const using = new Set(opts.skipCurvesUsing ?? [])
   const p = { x, y }
   let best: PointSnap | null = null
   // point > midpoint > curve; among equals, nearer wins
@@ -84,9 +88,11 @@ export function snapPoint(
       const d = dist(p, { x: e.x, y: e.y })
       consider({ kind: 'coincident', targetId: e.id, x: e.x, y: e.y, dist: d })
     } else if (e.kind === 'line') {
+      if (using.has(e.p1) || using.has(e.p2)) continue
       const ep = lineEndpoints(doc, e); if (!ep) continue
       straight(ep.a, ep.b, at => ({ kind: 'pointOnLine', targetId: e.id, ...at }), e.p1, e.p2)
     } else if (e.kind === 'circle') {
+      if (using.has(e.center)) continue
       const cen = circleCenter(doc, e); if (!cen) continue
       const toC = sub(p, cen)
       const l = len(toC)
@@ -101,6 +107,7 @@ export function snapPoint(
         const g = curveGeom(doc, { kind: 'seg', pathId: e.id, segIndex: i })
         if (!g) continue
         const ia = e.anchors[i]!, ib = e.anchors[(i + 1) % e.anchors.length]!
+        if (using.has(ia) || using.has(ib) || (seg.kind === 'arc' && using.has(seg.center))) continue
         if (seg.kind === 'line') {
           straight(g.a!, g.b!, at => ({ kind: 'onSegment', pathId: e.id, segIndex: i, seg: 'line', a: ia, b: ib, ...at }), ia, ib)
         } else {
@@ -112,7 +119,9 @@ export function snapPoint(
       }
     }
   }
-  if (best) { const b: PointSnap = best; return { x: b.x, y: b.y, snap: b } }
+  // `best` is only assigned inside consider(), so TS narrows it to null here
+  const found = best as PointSnap | null
+  if (found) return { x: found.x, y: found.y, snap: found }
   return { x, y, snap: null }
 }
 

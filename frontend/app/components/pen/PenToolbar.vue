@@ -80,7 +80,7 @@ const TOOL_HINTS: Record<PenTool, string> = {
 const hasEntitySelection = computed(() => selection.value.length > 0)
 const hasAnySelection = computed(() => selection.value.length > 0 || selectedSegments.value.length > 0)
 const rules = computed(() => availableConstraints())
-const selectedCount = computed(() => selection.value.length || selectedSegments.value.length)
+const selectedCount = computed(() => selection.value.length + selectedSegments.value.length)
 const isSelectIdle = computed(() => tool.value === 'select' && !hasAnySelection.value)
 </script>
 
@@ -94,8 +94,8 @@ const isSelectIdle = computed(() => tool.value === 'select' && !hasAnySelection.
     <PenValueRow :pen="pen" />
     <div v-if="hasAnySelection" class="tb" role="toolbar" aria-label="Rules">
       <span class="count">{{ selectedCount }} selected</span>
-      <PenTipCard v-for="v in rules" :id="v.kind" :key="v.kind" :name="v.label">
-        <button class="tbtn" :data-verb="v.kind" :aria-label="v.label" @click="applyWithValue(v)">{{ v.label }}</button>
+      <PenTipCard v-for="v in rules" :id="v.tip ?? v.kind" :key="v.tip ?? v.kind" :name="v.label">
+        <button class="tbtn" :data-verb="v.tip ?? v.kind" :aria-label="v.label" @click="applyWithValue(v)">{{ v.label }}</button>
       </PenTipCard>
       <span v-if="rules.length && hasEntitySelection" class="sep" />
       <template v-if="hasEntitySelection">

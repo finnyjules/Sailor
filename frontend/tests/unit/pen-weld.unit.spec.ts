@@ -1,0 +1,283 @@
+// tests/unit/pen-weld.unit.spec.ts
+// Joining by dragging in the Select tool: a single point dropped onto another
+// point merges into it, dropped onto a curve it is pinned there with the
+// curve's rule; ⌘/Ctrl moves without joining; the whole drag is one undo
+// step. Plus the rules row: Coincident merges two points, and one point with
+// one Option-clicked segment offers "On curve" (+ "Midpoint" on a line).
+import { describe, it, expect } from 'vitest'
+import { ref } from 'vue'
+import type { SketchDoc, EntityId } from '~/lib/sketch/model'
+import { addPoint, addLine, addPath } from '~/lib/sketch/edit'
+import { curveGeom, pointAt } from '~/lib/sketch/crossings'
+import { usePen } from '~/composables/pen/usePen'
+
+const DEV = { a: 34, b: 0, c: 0, d: -34, e: 40, f: 400 }   // snap radius 0.6 units
+function mk(build: (d: SketchDoc) => void) {
+  const doc = ref<SketchDoc>({ entities: [], constraints: [] })
+  build(doc.value)
+  const pen = usePen({ doc, view: ref(DEV) })
+  return { doc, pen }
+}
+const P = (d: SketchDoc, id: EntityId) => d.entities.find(e => e.id === id) as any
+const paths = (d: SketchDoc) => d.entities.filter(e => e.kind === 'path') as any[]
+const distPts = (a: any, b: any) => Math.hypot(a.x - b.x, a.y - b.y)
+
+// drag `id` through a few spots to (x, y), then release
+function dragTo(pen: ReturnType<typeof usePen>, d: SketchDoc, id: EntityId, x: number, y: number, noJoin = false) {
+  const p = P(d, id)
+  const x0 = p.x, y0 = p.y
+  for (const t of [0.25, 0.5, 0.75, 1]) pen.dragPoint(id, x0 + (x - x0) * t, y0 + (y - y0) * t, noJoin)
+}
+
+describe('Select drag: drop a point onto a point', () => {
+  it('an open path end dropped onto its start closes the path into one', () => {
+    let a = '', b = '', c = '', e = ''
+    const { doc, pen } = mk(d => {
+      a = addPoint(d, 0, 0); b = addPoint(d, 6, 0); c = addPoint(d, 6, 6); e = addPoint(d, 1, 5)
+      addPath(d, [a, b, c, e], [{ kind: 'line' }, { kind: 'line' }, { kind: 'line' }])
+    })
+    dragTo(pen, doc.value, e, 0.2, 0.3)
+    expect(pen.hoverSnap.value?.kind).toBe('point')
+    pen.dropPoint(e)
+    expect(paths(doc.value)).toHaveLength(1)
+    const path = paths(doc.value)[0]
+    expect(path.closed).toBe(true)
+    expect(path.anchors).toEqual([a, b, c])
+    expect(P(doc.value, e)).toBeUndefined()
+    expect(P(doc.value, a)).toMatchObject({ x: 0, y: 0 })   // the target stays put
+    expect(pen.hoverSnap.value).toBeNull()
+    expect(pen.sparkleCount()).toBeGreaterThan(0)
+  })
+
+  it('the whole drag and its join are one undo step', () => {
+    let a = '', e = ''
+    const { doc, pen } = mk(d => {
+      a = addPoint(d, 0, 0); const b = addPoint(d, 6, 0); const c = addPoint(d, 6, 6); e = addPoint(d, 1, 5)
+      addPath(d, [a, b, c, e], [{ kind: 'line' }, { kind: 'line' }, { kind: 'line' }])
+    })
+    dragTo(pen, doc.value, e, 0.1, 0.1)
+    pen.dropPoint(e)
+    expect(paths(doc.value)[0].closed).toBe(true)
+    pen.undo()
+    expect(paths(doc.value)[0].closed).toBe(false)
+    expect(P(doc.value, e)).toMatchObject({ x: 1, y: 5 })
+    expect(pen.canUndo()).toBe(false)
+  })
+
+  it('with ⌘/Ctrl held there is no preview and no join', () => {
+    let e = ''
+    const { doc, pen } = mk(d => {
+      const a = addPoint(d, 0, 0); const b = addPoint(d, 6, 0); const c = addPoint(d, 6, 6); e = addPoint(d, 1, 5)
+      addPath(d, [a, b, c, e], [{ kind: 'line' }, { kind: 'line' }, { kind: 'line' }])
+    })
+    dragTo(pen, doc.value, e, 0.2, 0.3, true)
+    expect(pen.hoverSnap.value).toBeNull()
+    pen.dropPoint(e, true)
+    expect(paths(doc.value)[0].closed).toBe(false)
+    expect(P(doc.value, e).x).toBeCloseTo(0.2, 3)
+    expect(P(doc.value, e).y).toBeCloseTo(0.3, 3)
+  })
+
+  it('⌘/Ctrl pressed only at release still stops the join', () => {
+    let e = ''
+    const { doc, pen } = mk(d => {
+      const a = addPoint(d, 0, 0); const b = addPoint(d, 6, 0); e = addPoint(d, 6, 6)
+      const f = addPoint(d, 1, 5)
+      addPath(d, [a, b, e], [{ kind: 'line' }, { kind: 'line' }]); void f
+    })
+    dragTo(pen, doc.value, e, 1.1, 5.1)
+    expect(pen.hoverSnap.value?.kind).toBe('point')
+    pen.dropPoint(e, true)
+    expect(P(doc.value, e)).toBeTruthy()
+    expect(doc.value.entities.filter(x => x.kind === 'point')).toHaveLength(4)
+  })
+
+  it('a dragged fixed point dropped onto a fixed point joins it (they meet at the target)', () => {
+    let e = '', f = ''
+    const { doc, pen } = mk(d => {
+      f = addPoint(d, 0, 0, { fixed: true }); e = addPoint(d, 3, 2, { fixed: true })
+    })
+    dragTo(pen, doc.value, e, 0.1, 0.1)
+    pen.dropPoint(e)
+    expect(P(doc.value, e)).toBeUndefined()
+    expect(P(doc.value, f)).toMatchObject({ x: 0, y: 0, fixed: true })
+  })
+
+  it('never offers the dragged point, its own curves, or the other end of its own piece', () => {
+    let a = '', b = ''
+    const { doc, pen } = mk(d => { a = addPoint(d, 0, 0); b = addPoint(d, 0.4, 0); addLine(d, a, b) })
+    // near its own line's other end and along its own line: nothing
+    pen.dragPoint(b, 0.1, 0.05)
+    expect(pen.hoverSnap.value).toBeNull()
+    pen.dropPoint(b)
+    expect(doc.value.entities.filter(x => x.kind === 'line')).toHaveLength(1)
+  })
+
+  it('another point sitting where the dragged point started is still a target', () => {
+    let a = '', q = ''
+    const { doc, pen } = mk(d => {
+      a = addPoint(d, 0, 0); const b = addPoint(d, 5, 0); addLine(d, a, b)
+      q = addPoint(d, 0, 0)   // a separate point at the same spot
+    })
+    pen.dragPoint(a, 2, 2)
+    pen.dragPoint(a, 0.05, 0.05)
+    expect(pen.hoverSnap.value?.kind).toBe('point')
+    pen.dropPoint(a)
+    expect(P(doc.value, a)).toBeUndefined()
+    expect((doc.value.entities.find(x => x.kind === 'line') as any).p1).toBe(q)
+  })
+
+  it('a curve through the spot that is not one of its own is still a target', () => {
+    let a = ''
+    const { doc, pen } = mk(d => {
+      a = addPoint(d, 0, 0); const b = addPoint(d, 0, 5); addLine(d, a, b)
+      const c = addPoint(d, -3, 0), e = addPoint(d, 3, 0); addLine(d, c, e)   // passes through (0,0)
+    })
+    pen.dragPoint(a, 1, 1)
+    pen.dragPoint(a, 1.2, 0.1)
+    expect(pen.hoverSnap.value?.kind).toBe('curve')
+    pen.dropPoint(a)
+    expect(doc.value.constraints.some(c => c.kind === 'pointOnLine' && c.refs[0] === a)).toBe(true)
+  })
+})
+
+describe('Select drag: drop a point onto a curve', () => {
+  it('an end dropped onto a path arc is pinned with equalDist and slides with the arc', () => {
+    let A = '', C = '', Q0 = '', arcPath = ''
+    const { doc, pen } = mk(d => {
+      A = addPoint(d, 0, 0); const B = addPoint(d, 10, 0); C = addPoint(d, 5, 0)
+      arcPath = addPath(d, [A, B], [{ kind: 'arc', center: C, sweep: 1 }])
+      Q0 = addPoint(d, 5, 9); const Q1 = addPoint(d, 20, 9)
+      addPath(d, [Q0, Q1], [{ kind: 'line' }])
+    })
+    const g = curveGeom(doc.value, { kind: 'seg', pathId: arcPath, segIndex: 0 })!
+    const mid = pointAt(g, 0.5)
+    const c0 = P(doc.value, C)
+    dragTo(pen, doc.value, Q0, c0.x + (mid.x - c0.x) * 1.04, c0.y + (mid.y - c0.y) * 1.04)
+    expect(pen.hoverSnap.value?.kind).toBe('curve')
+    pen.dropPoint(Q0)
+    const rule = doc.value.constraints.find(c => c.kind === 'equalDist' && c.refs[1] === Q0)
+    expect(rule?.refs).toEqual([C, Q0, C, A])
+    expect(distPts(P(doc.value, Q0), P(doc.value, C))).toBeCloseTo(5, 4)
+    // slide: move the centre; the pinned end stays on the arc
+    pen.dragPoint(C, 5, 1, true)
+    pen.dropPoint(C, true)
+    expect(distPts(P(doc.value, Q0), P(doc.value, C))).toBeCloseTo(distPts(P(doc.value, A), P(doc.value, C)), 3)
+  })
+
+  it('an end dropped onto a path line segment gets collinear [A,B,p]', () => {
+    let A = '', B = '', q = ''
+    const { doc, pen } = mk(d => {
+      A = addPoint(d, 0, 0); B = addPoint(d, 10, 0); addPath(d, [A, B], [{ kind: 'line' }])
+      q = addPoint(d, 3, 5); const r = addPoint(d, 3, 9); addLine(d, q, r)
+    })
+    dragTo(pen, doc.value, q, 3, 0.2)
+    pen.dropPoint(q)
+    expect(doc.value.constraints.find(c => c.kind === 'collinear')?.refs).toEqual([A, B, q])
+    expect(P(doc.value, q).y).toBeCloseTo(0, 5)
+  })
+})
+
+describe('rules row: Coincident merges, point + segment rules', () => {
+  it('Coincident on two points merges the second into the first; references are rewired', () => {
+    let a = '', b = '', c = '', e = ''
+    const { doc, pen } = mk(d => {
+      a = addPoint(d, 0, 0); b = addPoint(d, 5, 0); addLine(d, a, b)
+      c = addPoint(d, 1, 1); e = addPoint(d, 5, 5); addLine(d, c, e)
+    })
+    pen.pick(a); pen.pick(c, true)
+    expect(pen.availableConstraints().map(r => r.label)).toEqual(['Coincident', 'Distance…'])
+    pen.apply('coincident')
+    expect(P(doc.value, c)).toBeUndefined()
+    expect(P(doc.value, a)).toMatchObject({ x: 0, y: 0 })
+    const lines = doc.value.entities.filter(x => x.kind === 'line') as any[]
+    expect(lines.map(l => [l.p1, l.p2])).toEqual([[a, b], [a, e]])
+    expect(doc.value.constraints.some(k => k.kind === 'coincident')).toBe(false)
+    expect(pen.selection.value).toEqual([])
+    pen.undo()
+    expect(P(doc.value, c)).toBeTruthy()
+  })
+
+  it('Coincident on two fixed points in different places changes nothing and says why', () => {
+    let a = '', c = ''
+    const { doc, pen } = mk(d => { a = addPoint(d, 0, 0, { fixed: true }); c = addPoint(d, 4, 4, { fixed: true }) })
+    pen.pick(a); pen.pick(c, true)
+    pen.apply('coincident')
+    expect(P(doc.value, a)).toBeTruthy()
+    expect(P(doc.value, c)).toBeTruthy()
+    expect(pen.status.value).toBe('Those two points are both fixed in different places')
+    expect(pen.canUndo()).toBe(false)
+  })
+
+  it('a point then an Option-clicked arc segment keep each other and offer On curve', () => {
+    let A = '', C = '', p = '', arcPath = ''
+    const { doc, pen } = mk(d => {
+      A = addPoint(d, 0, 0); const B = addPoint(d, 10, 0); C = addPoint(d, 5, 0)
+      arcPath = addPath(d, [A, B], [{ kind: 'arc', center: C, sweep: 1 }])
+      p = addPoint(d, 5, 8)
+    })
+    pen.pick(p)
+    pen.pickSegment(arcPath, 0)
+    expect(pen.selection.value).toEqual([p])
+    expect(pen.selectedSegments.value).toEqual([{ pathId: arcPath, segIndex: 0 }])
+    const opts = pen.availableConstraints()
+    expect(opts.map(r => r.label)).toEqual(['On curve'])
+    pen.applyWithValue(opts[0]!)
+    expect(doc.value.constraints.find(c => c.kind === 'equalDist' && c.refs[1] === p)?.refs).toEqual([C, p, C, A])
+    expect(distPts(P(doc.value, p), P(doc.value, C))).toBeCloseTo(distPts(P(doc.value, A), P(doc.value, C)), 3)
+    expect(pen.selection.value).toEqual([])
+    expect(pen.selectedSegments.value).toEqual([])
+  })
+
+  it('an Option-clicked line segment then a point offer On curve and Midpoint', () => {
+    let A = '', B = '', p = '', path = ''
+    const { doc, pen } = mk(d => {
+      A = addPoint(d, 0, 0); B = addPoint(d, 10, 0); const C = addPoint(d, 10, 10)
+      path = addPath(d, [A, B, C], [{ kind: 'line' }, { kind: 'line' }])
+      p = addPoint(d, 3, 4)
+    })
+    pen.pickSegment(path, 0)
+    pen.pick(p)
+    expect(pen.selectedSegments.value).toHaveLength(1)
+    const opts = pen.availableConstraints()
+    expect(opts.map(r => r.label)).toEqual(['On curve', 'Midpoint'])
+    pen.applyWithValue(opts.find(o => o.label === 'Midpoint')!)
+    expect(doc.value.constraints.find(c => c.kind === 'midpoint')?.refs).toEqual([p, A, B])
+    const [pa, pb, pp] = [P(doc.value, A), P(doc.value, B), P(doc.value, p)]
+    expect(pp.x).toBeCloseTo((pa.x + pb.x) / 2, 3)
+    expect(pp.y).toBeCloseTo((pa.y + pb.y) / 2, 3)
+  })
+
+  it('On curve on a line segment adds collinear [A,B,p]', () => {
+    let A = '', B = '', p = '', path = ''
+    const { doc, pen } = mk(d => {
+      A = addPoint(d, 0, 0); B = addPoint(d, 10, 0); path = addPath(d, [A, B], [{ kind: 'line' }])
+      p = addPoint(d, 3, 4)
+    })
+    pen.pick(p); pen.pickSegment(path, 0)
+    pen.applyWithValue(pen.availableConstraints()[0]!)
+    expect(doc.value.constraints.find(c => c.kind === 'collinear')?.refs).toEqual([A, B, p])
+  })
+
+  it('other combinations still clear each other', () => {
+    let a = '', b = '', path = ''
+    const { pen } = mk(d => {
+      a = addPoint(d, 0, 0); b = addPoint(d, 1, 1)
+      const A = addPoint(d, 0, 5), B = addPoint(d, 10, 5), C = addPoint(d, 10, 9)
+      path = addPath(d, [A, B, C], [{ kind: 'line' }, { kind: 'line' }])
+    })
+    pen.pick(a); pen.pick(b, true)
+    pen.pickSegment(path, 0)          // two points + a segment: points go
+    expect(pen.selection.value).toEqual([])
+    pen.pickSegment(path, 1, true)    // two segments + a point: segments go
+    pen.pick(a)
+    expect(pen.selectedSegments.value).toEqual([])
+    pen.pick(path)                    // a whole path with a segment selected: the segment goes
+    pen.pickSegment(path, 0)
+    expect(pen.selection.value).toEqual([])
+    pen.pick(a)
+    pen.pick(b, true)                 // point + segment, then a second point: segment goes
+    expect(pen.selectedSegments.value).toEqual([])
+    expect(pen.selection.value).toEqual([a, b])
+  })
+})

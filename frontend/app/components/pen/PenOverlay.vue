@@ -83,10 +83,10 @@ function isCtrlContextClick(ev: PointerEvent) { return ev.ctrlKey && isMacPlatfo
 const {
   doc, tool, showLabels, status, selection, selectedSegments, pendingPath, pendingOp,
   cursor: penCursor, dimBuffer, sparkles, sparkleClock, placementPreview, hoverSnap,
-  pick, clearSel, pickSegment, clearSegSel, marqueeSelectScreen,
+  pick, clearSel, pickSegment, clearSegSel, marqueeSelectScreen, dragPoint, dropPoint,
   place, pathDown, pathMove, pathUp, getPathDrag, jointInfoForSegment,
   curveDown, curveMove, curveUp, getCurveDrag, getHeldHandles, handleIds,
-  runSolve, applyRepeat, applyMirror, cancelPendingOp,
+  applyRepeat, applyMirror, cancelPendingOp,
   onArcDimClick, onConstraintMarkClick, commitHistory, finishSession, endGesture,
   trimHover, trimHoverEnds, trimGhosts, cutHover, dissolveHover,
   trimDown, trimMove, trimUp, cutMove, cutClick, dissolveMove, dissolveClick, clearToolHover,
@@ -566,7 +566,8 @@ function onPointerUpPoint(id: EntityId, ev: PointerEvent) {
   // a click without a drag replaces the selection (or shift-toggles this
   // point); the selection only changes here, once we know it was a click.
   if (tool.value === 'select' && dragId === id && !moved) { pick(id, ev.shiftKey); ev.stopPropagation() }
-  dragId = null; dragHandleIds = []; dragLast = null
+  // a real drag bubbles on to onPointerUp, which settles it (and the join)
+  if (!moved) { dragId = null; dragHandleIds = []; dragLast = null }
 }
 function onSegmentPointerDown(pathId: EntityId, segIndex: number, ev: PointerEvent) {
   if (!props.active || ev.button !== 0 || isCtrlContextClick(ev) || tool.value !== 'select') return
@@ -653,16 +654,23 @@ function onPointerMove(ev: PointerEvent) {
   if (!w) return
   const { x, y } = w
   moved = true
+  // the pen moves the point — onto the spot it would join, while one is in
+  // reach (⌘ / Ctrl: a plain move) — then its handles follow by the same step
+  dragPoint(dragId, x, y, noJoinKey(ev))
   if (dragHandleIds.length && dragLast) {
-    const dx = x - dragLast.x, dy = y - dragLast.y
-    for (const hid of dragHandleIds) {
-      const h = doc.value.entities.find(e => e.id === hid) as any
-      if (h && h.kind === 'point') { h.x += dx; h.y += dy }
+    const p = doc.value.entities.find(e => e.id === dragId) as any
+    if (p && p.kind === 'point') {
+      const dx = p.x - dragLast.x, dy = p.y - dragLast.y
+      for (const hid of dragHandleIds) {
+        const h = doc.value.entities.find(e => e.id === hid) as any
+        if (h && h.kind === 'point') { h.x += dx; h.y += dy }
+      }
+      dragLast = { x: p.x, y: p.y }
     }
-    dragLast = { x, y }
   }
-  runSolve({ point: dragId, x, y })
 }
+// ⌘ (Mac) / Ctrl held: move a point without joining it to anything
+function noJoinKey(ev: PointerEvent) { return ev.metaKey || ev.ctrlKey }
 function onPointerUp(ev: PointerEvent) {
   if (!props.active) return
   if (tool.value === 'trim') {
@@ -694,10 +702,12 @@ function onPointerUp(ev: PointerEvent) {
     marqueeSelectScreen(start.x, start.y, end.x, end.y, additive)
     return   // selection change only — no commitHistory (not a doc mutation)
   }
-  // settle a select-tool point drag as ONE history entry — release can land
-  // off the point circle (onPointerUpPoint never fires then), so this is the
-  // single reliable place to commit
-  if (tool.value === 'select' && moved) commitHistory()
+  // settle a select-tool point drag as ONE history entry, joining the point
+  // onto what it was dropped on — release can land off the point circle
+  // (onPointerUpPoint never fires then), so this is the single reliable place
+  // to settle. Leaving the canvas mid-drag settles as a plain move.
+  if (tool.value === 'select' && moved && dragId) dropPoint(dragId, noJoinKey(ev) || ev.type === 'pointerleave')
+  else if (tool.value === 'select' && moved) commitHistory()
   dragId = null; dragHandleIds = []; dragLast = null
   moved = false
 }
@@ -723,7 +733,7 @@ function onDimClick(m: Parameters<typeof onArcDimClick>[0]) {
 watch(() => props.active, (on) => {
   if (on) return
   cancelMarquee()
-  if (moved && tool.value === 'select') commitHistory()
+  if (moved && tool.value === 'select') { if (dragId) dropPoint(dragId, true); else commitHistory() }
   dragId = null; dragHandleIds = []; dragLast = null; moved = false
   endGesture()
 })

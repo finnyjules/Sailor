@@ -42,7 +42,7 @@
 import { ref, shallowRef, computed, toRaw, type Ref } from 'vue'
 import type { SketchDoc, SketchConstraint, EntityId, ConstraintKind, SegmentSpec } from '~/lib/sketch/model'
 import { addPoint, addLine, addCircle, addConstraint, removeConstraint, deleteEntity, addPath, pointClosure, isPointReferenced, addSmoothHandles } from '~/lib/sketch/edit'
-import { snapPoint, snapRule, snapPreviewKind, inferCircleTangents, tangentJointArc, type SnapPreviewKind } from '~/lib/sketch/infer'
+import { snapPoint, snapRule, snapPreviewKind, inferCircleTangents, tangentJointArc, type SnapPreviewKind, type PointSnap } from '~/lib/sketch/infer'
 import { solve, type DragTarget } from '~/lib/sketch/solve'
 import { dist, type Vec2 } from '~/lib/sketch/geom'
 import { constraintMarks, type ConstraintMark, type ArcDimensionMark } from '~/lib/sketch/annotate'
@@ -52,13 +52,14 @@ import {
   availableConstraints as availableConstraintsFor,
   orderRefs as orderRefsFor,
   segmentConstraintRefs,
+  pointSegmentRefs,
   type RuleOption,
 } from './penRules'
 import { createPenHistory } from './penHistory'
 import { handlePenKey, type PenKeyContext, NUDGE_PX, NUDGE_PX_SHIFT, screenDeltaToDrawing } from './penKeys'
 import { createPenCopies, type PendingOp } from './penCopies'
 import { nearestCurve, spanAt, curveGeom, type Span, type CurveGeom } from '~/lib/sketch/crossings'
-import { removeSpan, removeSegment, cutAt, canDissolve, dissolveAt } from '~/lib/sketch/trim'
+import { removeSpan, removeSegment, cutAt, canDissolve, dissolveAt, mergePoints } from '~/lib/sketch/trim'
 
 // NUDGE_PX / NUDGE_PX_SHIFT / screenDeltaToDrawing now live in penKeys.ts
 // (they exist only for the arrow-key nudge in the key handler); re-exported
@@ -73,6 +74,9 @@ export type PenTool = 'select' | 'point' | 'line' | 'circle' | 'path' | 'curve' 
 export interface PenOptions { openOnly?: boolean; tools?: PenTool[] }
 
 export const SPARKLE_LIFETIME_MS = 380
+
+// status when a join would need two fixed points to meet
+const BOTH_FIXED = 'Those two points are both fixed in different places'
 
 // Shift-constrain (Illustrator/Figma-style): rotate `pt` about `prev` to the
 // nearest 45° increment, preserving the distance between them. Pure — no doc
@@ -270,29 +274,40 @@ export function usePen(opts: {
   // additive=false (plain click): selection becomes exactly [id]. additive=true
   // (shift-click / shift-marquee): toggle `id` within the current selection,
   // same as the old always-toggle behavior. Entity selection and segment
-  // selection (below) are mutually exclusive — picking an entity always clears
-  // any live segment selection first.
+  // selection (below) are mutually exclusive, with ONE exception: one point
+  // plus one Option-clicked segment stay selected together (the "On curve" /
+  // "Midpoint" pairing, penRules availableConstraints). Any other mix clears
+  // the segment selection.
   function pick(id: EntityId, additive = false) {
-    clearSegSel()
-    if (!additive) { selection.value = [id]; return }
-    const i = selection.value.indexOf(id)
-    if (i >= 0) selection.value.splice(i, 1)
-    else selection.value.push(id)
+    if (!additive) selection.value = [id]
+    else {
+      const i = selection.value.indexOf(id)
+      if (i >= 0) selection.value.splice(i, 1)
+      else selection.value.push(id)
+    }
+    const sel = selection.value
+    const pairs = selectedSegments.value.length === 1 && (sel.length === 0 || (sel.length === 1 && isPointId(sel[0]!)))
+    if (!pairs) clearSegSel()
   }
   function clearSel() { selection.value = [] }
 
   // --- segment selection: individual { pathId, segIndex } picks, distinct from
   // (and mutually exclusive with) whole-entity `selection` above. additive=false
   // replaces; additive=true toggles the segment within the current set, mirroring
-  // pick()'s own contract. Selecting a segment always clears any live entity
-  // selection first — see pick()'s own clearSegSel() call for the reverse.
+  // pick()'s own contract. Selecting a segment clears any live entity
+  // selection, except a single point while this leaves at most one segment
+  // (the point + segment pairing — see pick()).
   const selectedSegments = ref<{ pathId: EntityId; segIndex: number }[]>([])
   function pickSegment(pathId: EntityId, segIndex: number, additive = false) {
-    clearSel()
-    if (!additive) { selectedSegments.value = [{ pathId, segIndex }]; return }
-    const i = selectedSegments.value.findIndex(s => s.pathId === pathId && s.segIndex === segIndex)
-    if (i >= 0) selectedSegments.value.splice(i, 1)
-    else selectedSegments.value.push({ pathId, segIndex })
+    if (!additive) selectedSegments.value = [{ pathId, segIndex }]
+    else {
+      const i = selectedSegments.value.findIndex(s => s.pathId === pathId && s.segIndex === segIndex)
+      if (i >= 0) selectedSegments.value.splice(i, 1)
+      else selectedSegments.value.push({ pathId, segIndex })
+    }
+    const sel = selection.value
+    const pairs = selectedSegments.value.length <= 1 && sel.length === 1 && isPointId(sel[0]!)
+    if (!pairs) clearSel()
   }
   function clearSegSel() { selectedSegments.value = [] }
 
@@ -417,6 +432,32 @@ export function usePen(opts: {
   function onBlur() {}
 
   function apply(kind: ConstraintKind, value?: number) {
+    // one point + one segment: On curve / Midpoint (pointSegmentRefs)
+    if (selectedSegments.value.length && selection.value.length) {
+      const p = selection.value[0]!
+      const refs = selection.value.length === 1 && selectedSegments.value.length === 1
+        ? pointSegmentRefs(doc.value, kind, p, selectedSegments.value[0]!)
+        : null
+      if (refs) { const id = addConstraint(doc.value, kind, refs, value); sparkleAtConstraint(id) }
+      clearSel()
+      clearSegSel()
+      runSolve()
+      commitHistory()
+      return
+    }
+    // two points: Coincident makes them ONE point — the second picked merges
+    // into the first, which stays where it is (a `coincident` rule is only
+    // ever read back from older drawings)
+    if (kind === 'coincident' && selection.value.length === 2 && selection.value.every(isPointId)) {
+      const [keep, gone] = selection.value as [EntityId, EntityId]
+      clearSel()
+      if (!mergePoints(doc.value, gone, keep)) { status.value = BOTH_FIXED; return }
+      runSolve()
+      const k = doc.value.entities.find(e => e.id === keep)
+      if (k?.kind === 'point') sparkle(k.x, k.y)
+      commitHistory()
+      return
+    }
     if (selectedSegments.value.length) {
       const refs = segmentConstraintRefs(doc.value, kind, selectedSegments.value)
       if (refs) { const id = addConstraint(doc.value, kind, refs, value); sparkleAtConstraint(id) }
@@ -1200,8 +1241,10 @@ export function usePen(opts: {
   const hoverSnap = computed<{ x: number; y: number; kind: SnapPreviewKind } | null>(() => {
     const c = cursor.value
     const t = tool.value
-    // only the tools that place points (never Select, Trim, Cut or Dissolve)
-    if (!c || t === 'select' || t === 'trim' || t === 'cut' || t === 'dissolve') return null
+    // Select: the join a point drag would make on release (dropSnap below)
+    if (t === 'select') { const d = dropSnap.value; return d ? { x: d.x, y: d.y, kind: snapPreviewKind(d) } : null }
+    // otherwise only the tools that place points (never Trim, Cut or Dissolve)
+    if (!c || t === 'trim' || t === 'cut' || t === 'dissolve') return null
     if (t === 'circle' && pending.value?.kind === 'circle') return null
     const base = t === 'path' ? (placementPreview.value ?? c) : c
     const ex = [...handleIds()]
@@ -1209,6 +1252,71 @@ export function usePen(opts: {
     const snapped = snapPoint(doc.value, base.x, base.y, { exclude: ex, tol: pxToUnits(SNAP_PX, opts.view.value) })
     return snapped.snap ? { x: snapped.x, y: snapped.y, kind: snapPreviewKind(snapped.snap) } : null
   })
+
+  // --- Select: drag a point onto something to join it ---
+  // While ONE point is dragged (the overlay's point drag), dragPoint moves it
+  // and looks for what it would join under the pointer: another point (they
+  // merge on release) or a line, circle, path segment or middle (it is pinned
+  // there with that curve's rule). The join shows as hoverSnap's chip and the
+  // point sits on the snapped spot while it is in reach. dropPoint settles
+  // the whole drag — the join included — as ONE history entry. `noJoin`
+  // (⌘ / Ctrl held) moves without snapping or joining.
+  // Never a target: the dragged point, any Bézier handle, the other end of a
+  // piece it belongs to (joining those would collapse that piece), and the
+  // pieces built on it (skipCurvesUsing).
+  const dropSnap = shallowRef<PointSnap | null>(null)
+  function weldExclusions(id: EntityId): EntityId[] {
+    const out = new Set<EntityId>([id, ...handleIds()])
+    for (const e of doc.value.entities) {
+      if (e.kind === 'line') {
+        if (e.p1 === id) out.add(e.p2)
+        if (e.p2 === id) out.add(e.p1)
+      } else if (e.kind === 'path') {
+        const n = e.anchors.length
+        e.segments.forEach((seg, i) => {
+          if (seg.kind === 'cubic') { if (seg.h1) out.add(seg.h1); if (seg.h2) out.add(seg.h2) }
+          const a = e.anchors[i], b = e.anchors[(i + 1) % n]
+          if (!a || !b) return
+          if (a === id) out.add(b)
+          if (b === id) out.add(a)
+          if (seg.kind === 'arc') {
+            if (a === id || b === id) out.add(seg.center)
+            if (seg.center === id) { out.add(a); out.add(b) }
+          }
+        })
+      }
+    }
+    return [...out]
+  }
+  function dragPoint(id: EntityId, x: number, y: number, noJoin = false): void {
+    const snap = noJoin ? null : snapPoint(doc.value, x, y, {
+      exclude: weldExclusions(id), skipCurvesUsing: [id], tol: pxToUnits(SNAP_PX, opts.view.value),
+    }).snap
+    dropSnap.value = snap
+    runSolve({ point: id, x: snap ? snap.x : x, y: snap ? snap.y : y })
+  }
+  function dropPoint(id: EntityId, noJoin = false): void {
+    const snap = noJoin ? null : dropSnap.value
+    dropSnap.value = null
+    if (snap?.kind === 'coincident') {
+      if (mergePoints(doc.value, id, snap.targetId)) {
+        runSolve()
+        const t = doc.value.entities.find(e => e.id === snap.targetId)
+        if (t?.kind === 'point') sparkle(t.x, t.y)
+      } else status.value = BOTH_FIXED
+    } else if (snap) {
+      const p = doc.value.entities.find(e => e.id === id)
+      const rule = snapRule(snap, id)
+      if (p?.kind === 'point' && rule) {
+        p.x = snap.x; p.y = snap.y
+        addConstraint(doc.value, rule.kind, rule.refs)
+        runSolve()
+        sparkle(p.x, p.y)
+      }
+    }
+    commitHistory()
+  }
+  function cancelPointDrop(): void { dropSnap.value = null }
 
   // --- Trim / Cut / Dissolve (lib/sketch/crossings.ts + trim.ts) ---
   // Trim: hovering tints the piece of a curve between crossings under the
@@ -1415,6 +1523,7 @@ export function usePen(opts: {
   // land as their own history step.
   function resetEditTools() {
     if (trimPress) trimUp()
+    cancelPointDrop()
     clearToolHover()
     trimGhosts.value = []
   }
@@ -1752,6 +1861,7 @@ export function usePen(opts: {
   // doesn't resume mid-air once the overlay reactivates. Mirrors what the
   // overlay's own watcher already does for its point-drag/marquee state.
   function endGesture(): void {
+    cancelPointDrop()
     setPathDrag(null)
     curveDrag.value = null
     if (trimPress) trimUp()   // the pieces already removed settle as their step
@@ -1780,6 +1890,8 @@ export function usePen(opts: {
     selectTool, setGuideMode, toggleGuideMode, setShowLabels, toggleShowLabels,
     // selection
     pick, clearSel, pickSegment, clearSegSel, marqueeSelect, marqueeSelectScreen, isPointId,
+    // select-tool point drag, joining onto what it is dropped on
+    dragPoint, dropPoint, cancelPointDrop,
     // drawing
     place, pathDown, pathMove, pathUp, finishPath, cancelPath, removeLastAnchor, getPathDrag, jointInfoForSegment,
     curveDown, curveMove, curveUp, getCurveDrag, getHeldHandles, handleIds, endGesture,

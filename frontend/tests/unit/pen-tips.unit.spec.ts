@@ -32,11 +32,16 @@ function everyRuleKind(): string[] {
   const lone = addPoint(doc, 30, 30)
   const ids: EntityId[] = [p1, lone, b, l1, l2, c1, c2, path]
   const kinds = new Set<string>()
-  const add = (sel: EntityId[], segs: SegRef[] = []) => { for (const r of availableConstraints(doc, sel, segs)) kinds.add(r.kind) }
+  const add = (sel: EntityId[], segs: SegRef[] = []) => { for (const r of availableConstraints(doc, sel, segs)) kinds.add(r.tip ?? r.kind) }
   for (const x of ids) add([x])
   for (const x of ids) for (const y of ids) if (x !== y) add([x, y])
   add([], [{ pathId: path, segIndex: 0 }])
   add([], [{ pathId: path, segIndex: 0 }, { pathId: path, segIndex: 1 }])
+  // one point + one segment (line and arc)
+  const d = addPoint(doc, 40, 0), e = addPoint(doc, 50, 0), f = addPoint(doc, 45, 0)
+  const arc = addPath(doc, [d, e], [{ kind: 'arc', center: f, sweep: 1 }], false)
+  add([lone], [{ pathId: path, segIndex: 0 }])
+  add([lone], [{ pathId: arc, segIndex: 0 }])
   return [...kinds]
 }
 
@@ -45,7 +50,7 @@ describe('pen tips table', () => {
   const ids = [...ALL_TOOLS, ...FIXED_IDS, ...ruleKinds]
 
   it('the rule sweep finds the rules row vocabulary', () => {
-    for (const k of ['coincident', 'distance', 'tangentLineCircle', 'perpendicular', 'radius', 'midpoint']) expect(ruleKinds).toContain(k)
+    for (const k of ['coincident', 'distance', 'tangentLineCircle', 'perpendicular', 'radius', 'midpoint', 'onCurve']) expect(ruleKinds).toContain(k)
   })
 
   it.each(ids)('%s has a tip with a name and a sentence-case caption', (id) => {

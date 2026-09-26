@@ -5,7 +5,10 @@
 // where they read the page's refs directly.
 import type { SketchDoc, EntityId, ConstraintKind } from '~/lib/sketch/model'
 
-export interface RuleOption { kind: ConstraintKind; label: string; value?: boolean }
+// `tip`: the button's id in the rules row (its hover card, penTips.ts) when the
+// rule kind alone would name the wrong card — "On curve" is written as a
+// collinear or equalDist rule, which the row otherwise shows as other verbs
+export interface RuleOption { kind: ConstraintKind; label: string; value?: boolean; tip?: string }
 export interface SegRef { pathId: EntityId; segIndex: number }
 
 function selKinds(doc: SketchDoc, selection: EntityId[]): string[] {
@@ -42,6 +45,18 @@ export function availableConstraints(doc: SketchDoc, selection: EntityId[], segm
   const kinds = selKinds(doc, selection)
   const out: RuleOption[] = []
   const count = (k: string) => kinds.filter(x => x === k).length
+  // one point + one Option-clicked segment (the only pairing where the two
+  // selections are kept together — see usePen pick/pickSegment): pin the
+  // point onto that piece, or to the middle of a straight one
+  if (ids.length && segments.length) {
+    if (ids.length !== 1 || kinds[0] !== 'point' || segments.length !== 1) return out
+    const s = segments[0]!
+    const path = doc.entities.find(e => e.id === s.pathId) as any
+    const seg = path?.kind === 'path' ? path.segments[s.segIndex] : null
+    if (seg?.kind === 'line') out.push({ kind: 'collinear', label: 'On curve', tip: 'onCurve' }, { kind: 'midpoint', label: 'Midpoint' })
+    else if (seg?.kind === 'arc') out.push({ kind: 'equalDist', label: 'On curve', tip: 'onCurve' })
+    return out
+  }
   if (ids.length === 2 && count('point') === 2) {
     out.push({ kind: 'coincident', label: 'Coincident' }, { kind: 'distance', label: 'Distance…', value: true })
   }
@@ -143,6 +158,22 @@ export function segmentConstraintRefs(doc: SketchDoc, kind: ConstraintKind, segs
     if (!p1 || !p2) return null
     return [p1[0], p1[1], p2[0], p2[1]]
   }
+  return null
+}
+
+// one point `p` + one path segment: the rule's refs — On curve is
+// collinear [A, B, p] on a line segment or equalDist [C, p, C, A] on an arc
+// (centre C, start A); Midpoint is midpoint [p, A, B] on a line segment.
+// null for any other kind/segment pairing, or a segment that no longer resolves.
+export function pointSegmentRefs(doc: SketchDoc, kind: ConstraintKind, p: EntityId, seg: SegRef): EntityId[] | null {
+  const path = doc.entities.find(e => e.id === seg.pathId) as any
+  const s = path?.kind === 'path' ? path.segments[seg.segIndex] : null
+  const ends = segmentAnchorPair(doc, seg.pathId, seg.segIndex)
+  if (!s || !ends) return null
+  const [a, b] = ends
+  if (s.kind === 'line' && kind === 'collinear') return [a, b, p]
+  if (s.kind === 'line' && kind === 'midpoint') return [p, a, b]
+  if (s.kind === 'arc' && kind === 'equalDist') return [s.center, p, s.center, a]
   return null
 }
 
