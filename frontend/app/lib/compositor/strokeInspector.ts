@@ -134,7 +134,9 @@ export function strokeInspectorRows(kind: string, stroke: StrokeInstance): Strok
   }
   // Widened for wobble: a wobbled band strokes a real path and DOES honour `lineJoin`, unlike
   // `strokeAligned`'s distance-0 dilation-diff band — see the header comment.
-  if (band && (d !== 0 || wobbleLive)) rows.push('join')
+  // Narrowed for follow: `paintFollowedBand` always paints the band mask with `join: 'round'`,
+  // so Corners does nothing while the fill follows the line — see `paintFollowedBand`.
+  if (band && (d !== 0 || wobbleLive) && !(canFollow && strokeFollowsOf(stroke))) rows.push('join')
   // Text at distance 0 is `strokeText`, which is always centred.
   if (band && (kind !== 'text' || d !== 0)) rows.push('align')
   // Widened for wobble as well: `paintWobbledBand` has a real path to run a dash along, so

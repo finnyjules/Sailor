@@ -91,4 +91,11 @@ describe('inspector rows', () => {
     expect(strokeFollowPatch(true)).toEqual({ follow: true })
     expect(strokeFollowPatch(false)).toEqual({ follow: undefined })
   })
+  it('Corners: hidden while a band follows the line — paintFollowedBand always rounds it', () => {
+    expect(strokeInspectorRows('rect', stroke({ distance: 0.02 }))).toContain('join')
+    expect(strokeInspectorRows('rect', stroke({ distance: 0.02, follow: true }))).not.toContain('join')
+  })
+  it('Corners: still live at a distance for a flat colour, which never follows', () => {
+    expect(strokeInspectorRows('rect', stroke({ paint: '#f00', distance: 0.02, follow: true }))).toContain('join')
+  })
 })

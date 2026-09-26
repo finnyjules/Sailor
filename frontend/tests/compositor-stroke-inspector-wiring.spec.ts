@@ -202,6 +202,48 @@ test.describe('stroke inspector — the rows that actually reach the screen', ()
     expect(stored.length).toBeGreaterThan(0)
   })
 
+  test('Fill follow: shows on a band with a followable paint, writes on pick, and the ombre fade rows appear', async ({ page }) => {
+    const grid = { type: 'grid', a: '#ffffff', b: '#000000', textColor: '#ffffff', angle: 0, density: 8 }
+    await pickFirstStroke(page, L({
+      id: 'e0', kind: 'ellipse', x: 0.5, y: 0.5, w: 0.3, h: 0.3, fill: '#3b82f6',
+      strokes: [{ id: 's1', paint: grid, width: 0.02, distance: 0, align: 'center', join: 'sharp', style: 'band' }],
+    }))
+    await expect(page.locator('[data-stroke-follow]')).toBeVisible()
+    await expect(page.locator('[data-stroke-fade]')).toHaveCount(0)
+
+    await page.locator('[data-stroke-follow]').selectOption('follow')
+    await expect.poll(async () => {
+      const l = await page.evaluate(() => (window as any).__compositorLayers?.().find((x: any) => x.id === 'e0'))
+      return l?.strokes?.[0]?.follow
+    }).toBe(true)
+
+    // Switch the paint to an ombre that follows — the fade row appears, defaulted to across.
+    const ombre = { ...grid, type: 'ombre' }
+    await page.evaluate(({ id, paint }) => {
+      const layers = (window as any).__compositorLayers()
+      const l = layers.find((x: any) => x.id === id)
+      l.strokes[0].paint = paint
+      l.strokes[0].follow = true
+      ;(window as any).__compositorSetLayers(layers)
+    }, { id: 'e0', paint: ombre })
+    await expect(page.locator('[data-stroke-fade]')).toBeVisible()
+    await expect(page.locator('[data-stroke-fade]')).toHaveValue('across')
+    await expect(page.locator('[data-stroke-fade] option:checked')).toHaveText('Inner to outer edge')
+    await expect(page.locator('[data-stroke-fade-repeats]')).toHaveCount(0)
+
+    await page.locator('[data-stroke-fade]').selectOption('along')
+    await expect(page.locator('[data-stroke-fade-repeats]')).toBeVisible()
+  })
+
+  test('a TEXT stroke never shows Fill follow — text never enters the band-follow route', async ({ page }) => {
+    await pickFirstStroke(page, L({
+      id: 't2', kind: 'text', x: 0.5, y: 0.5, text: 'Edge', fontFamily: 'Inter', fontWeight: 700,
+      fontSize: 0.12, color: '#ffffff', align: 'center', lineHeight: 1.1,
+      strokes: [{ id: 's1', paint: { type: 'grid', a: '#fff', b: '#000', textColor: '#fff', angle: 0, density: 8 }, width: 0.006, distance: 0, style: 'band' }],
+    }))
+    await expect(page.locator('[data-stroke-follow]')).toHaveCount(0)
+  })
+
   test('the plus menu offers Add outline on a rect and never on a line', async ({ page }) => {
     // One layer at a time: the tree renders TOP-FIRST (reverse array order), so an
     // nth-index into the plus buttons of a two-layer tree silently picks the wrong row —

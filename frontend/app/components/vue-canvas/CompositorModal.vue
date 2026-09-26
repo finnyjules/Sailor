@@ -186,6 +186,7 @@ import CompositorTornEdgePanel from '~/components/vue-canvas/compositor/Composit
 import CompositorFeatherPanel from '~/components/vue-canvas/compositor/CompositorFeatherPanel.vue'
 import FillControl from '~/components/vue-canvas/compositor/FillControl.vue'
 import StrokeStyleRow from '~/components/vue-canvas/compositor/StrokeStyleRow.vue'
+import StrokeFollowRow from '~/components/vue-canvas/compositor/StrokeFollowRow.vue'
 import FillSwatch from '~/components/vue-canvas/compositor/FillSwatch.vue'
 import PalettePicker from '~/components/vue-canvas/studio/PalettePicker.vue'
 import type { PaletteFamily } from '~/lib/color/seedFamily'
@@ -211,12 +212,12 @@ import { OVERLAY_BLENDS, STROKE_ALPHA_ALIGNS } from '~/lib/compositor/postEffect
 import {
   strokeStackOf, writeStrokeStackToLayer, addStroke, removeStroke, duplicateStroke,
   reorderStroke, canReorderStroke, strokeSupportsStack, strokeSupportsShapes, strokeRowLabel,
-  layerStoresStrokeStack, LEGACY_STROKE_ID,
-  type StrokeInstance,
+  layerStoresStrokeStack, LEGACY_STROKE_ID, strokeFollowsOf, strokeFadeOf, strokeFadeRepeatsOf,
+  type StrokeInstance, type StrokeFade,
 } from '~/lib/compositor/strokeStack'
 import {
   strokeInspectorRows, strokeStylePatch, strokeWobblePatch, strokeDistanceOf, strokeStyleOf,
-  showsTextDistantNote, TEXT_DISTANT_STROKE_NOTE,
+  showsTextDistantNote, TEXT_DISTANT_STROKE_NOTE, strokeFollowPatch,
   type StrokeWobbleChoice,
 } from '~/lib/compositor/strokeInspector'
 import { encodeFrames } from '~/lib/engine/encodeVideo'
@@ -11104,6 +11105,15 @@ onUnmounted(() => {
             <div class="panel-label mb-1.5">Colour</div>
             <FillControl allow-none allow-foil :light="frameLight" @update:light="(l: FrameLight) => setFrameLight(l)" :model-value="activeStroke!.paint"
               @update:model-value="(v: any) => updateActiveStroke({ paint: v })" />
+            <StrokeFollowRow class="mt-1.5"
+              :follow="strokeFollowsOf(activeStroke!)" :fade="strokeFadeOf(activeStroke!)"
+              :fade-repeats="strokeFadeRepeatsOf(activeStroke!)"
+              :show-follow="hasStrokeRow('follow')"
+              :show-fade="hasStrokeRow('fade')"
+              :show-fade-repeats="hasStrokeRow('fadeRepeats')"
+              @update:follow="(v: boolean) => updateActiveStroke(strokeFollowPatch(v))"
+              @update:fade="(v: StrokeFade) => updateActiveStroke({ fade: v })"
+              @update:fadeRepeats="(v: number) => updateActiveStroke({ fadeRepeats: v })" />
             <div v-if="hasStrokeRow('width')" class="mt-1.5">
               <div class="panel-label mb-1">Width</div>
               <input v-scrubnum type="number" min="0" step="1" :value="strokePxW(activeStroke!.width)" data-stroke-width
