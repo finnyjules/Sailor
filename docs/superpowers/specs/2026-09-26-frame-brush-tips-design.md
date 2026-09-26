@@ -122,7 +122,9 @@ Every render path (modal, harmonize, static render/export, node card, layout til
 
 ### Units
 
-Engine units are **Frame pixels** (px per unit = artboard width `W` × the keep-proportions `scale`), rendered at `dpr`. The grain cell and speck sizes are fixed in Frame pixels, so a 4K export looks like the preview, only sharper. The prototype's px constants were tuned on a ~1,230 px-wide canvas and carry over 1:1 as Frame px, since Frames are ~1,080–1,350 px wide.
+The replay runs in **Frame units: 1,080 per artboard width** (`REF_W = 1080`). It must be a fixed reference: `drawLocalLayer`'s `W` is the *render* width, which varies between the preview, exports and the node card, and the replay has to produce identical specks at every size. The prototype's px constants were tuned on a ~1,230 px-wide canvas and carry over 1:1 as Frame units.
+
+The renderer maps Frame units to device px by `W·scale·dpr / REF_W`. The grain pattern is also defined in Frame units (2 grain cells per unit, the prototype's device-px grain at dpr 2). So a 4K export shows the same grain as the preview, only rendered sharper.
 
 ### Replay (pure, deterministic, unit-testable)
 
