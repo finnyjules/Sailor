@@ -4,7 +4,8 @@ import { addPoint, addPath, addCircle } from '~/lib/sketch/edit'
 import { applyView } from '~/lib/sketch/view'
 import { sketchToLocalD, localOutlineBounds, newDrawingView, layerView, guideView, SKETCH_UNITS } from '~/lib/compositor/penFrame'
 import { guideFromSpec, customGuideMapping, guideSizeToTargetWidthPx } from '~/lib/compositor/textPath'
-import { useFramePenSession, isClosedDrawing, PEN_STYLE_OPEN, layerPlacementForView, clonerBlocksRecentre } from '~/composables/frame/useFramePenSession'
+import { removeSegment } from '~/lib/sketch/trim'
+import { useFramePenSession, isClosedDrawing, PEN_STYLE_OPEN, PEN_STYLE_CLOSED, layerPlacementForView, clonerBlocksRecentre } from '~/composables/frame/useFramePenSession'
 
 const W = 680, H = 400
 
@@ -310,6 +311,56 @@ describe('useFramePenSession — reopening a drawn path layer', () => {
     expect(back.d).toBe(l.d)
     expect(back.sketch).toBe(l.sketch)
     expect(back.x).toBe(l.x); expect(back.y).toBe(l.y); expect(back.bbox).toEqual(l.bbox)
+  })
+
+  // final review: a closed filled drawing trimmed open must not stay a fill with no stroke
+  function trimOpen(s: ReturnType<typeof useFramePenSession>) {
+    const doc = s.session.value!.doc.value
+    const path = doc.entities.find((e: any) => e.kind === 'path')!
+    expect(removeSegment(doc, path.id, 0).ok).toBe(true)
+    s.session.value!.pen.commitHistory()
+    s.commitSession()
+  }
+
+  it('a closed layer trimmed open with the pen\'s own fill switches to the pen\'s open stroke', () => {
+    const l = drawnLayer()
+    expect(l).toMatchObject(PEN_STYLE_CLOSED)
+    const { host, get } = liveHost([l])
+    const s = useFramePenSession(host)
+    s.open({ kind: 'layer', id: l.id })
+    trimOpen(s)
+    expect(isClosedDrawing(get(l.id).sketch)).toBe(false)
+    expect(get(l.id)).toMatchObject(PEN_STYLE_OPEN)
+  })
+
+  it('a closed layer with a fill of the user\'s own, trimmed open, keeps that fill and gains a visible stroke', () => {
+    const l = drawnLayer({ fill: '#ff0000' })
+    const { host, get } = liveHost([l])
+    const s = useFramePenSession(host)
+    s.open({ kind: 'layer', id: l.id })
+    trimOpen(s)
+    const cur = get(l.id)
+    expect(cur.fill).toBe('#ff0000')
+    expect(cur.stroke).toBe(PEN_STYLE_OPEN.stroke)
+    expect(cur.strokeWidth).toBe(PEN_STYLE_OPEN.strokeWidth)
+  })
+
+  it('a closed layer that already has a stroke keeps its style when trimmed open', () => {
+    const l = drawnLayer({ fill: '#ff0000', stroke: '#00ff00', strokeWidth: 0.02 })
+    const { host, get } = liveHost([l])
+    const s = useFramePenSession(host)
+    s.open({ kind: 'layer', id: l.id })
+    trimOpen(s)
+    expect(get(l.id)).toMatchObject({ fill: '#ff0000', stroke: '#00ff00', strokeWidth: 0.02 })
+  })
+
+  it('a closed layer whose copies turn, trimmed open, also switches to the open stroke', () => {
+    const l = drawnLayer({ cloner: { enabled: true, stepRotation: 15 } })
+    const { host, get } = liveHost([l])
+    const s = useFramePenSession(host)
+    s.open({ kind: 'layer', id: l.id })
+    trimOpen(s)
+    expect(get(l.id)).toMatchObject(PEN_STYLE_OPEN)
   })
 
   it('clonerBlocksRecentre: only an enabled cloner whose copies turn or scale', () => {

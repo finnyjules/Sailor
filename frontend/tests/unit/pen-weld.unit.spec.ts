@@ -493,3 +493,53 @@ describe('fix round 1', () => {
     expect(P(doc.value, e).y).toBeCloseTo(0.2, 3)
   })
 })
+
+describe('final review — welding rejoins trimmed pieces', () => {
+  it('a text guide split in two rejoins into one open path when an end is dropped on the other piece’s end', () => {
+    let a = '', b = '', x1 = '', x2 = '', e = ''
+    const { doc, pen } = mk(d => {
+      a = addPoint(d, 0, 0); b = addPoint(d, 3, 0); x1 = addPoint(d, 6, 0)
+      x2 = addPoint(d, 7, 0); e = addPoint(d, 10, 0)
+      addPath(d, [a, b, x1], [{ kind: 'line' }, { kind: 'line' }])
+      addPath(d, [x2, e], [{ kind: 'line' }])
+    }, true)
+    dragTo(pen, doc.value, x2, 6.1, 0.1)
+    expect(pen.hoverSnap.value?.kind).toBe('point')
+    pen.dropPoint(x2)
+    expect(paths(doc.value)).toHaveLength(1)
+    expect(paths(doc.value)[0]).toMatchObject({ closed: false, anchors: [a, b, x1, e] })
+  })
+
+  it('a text guide’s two ends on different pieces never close it (drag or Coincident)', () => {
+    let a = '', x1 = '', x2 = ''
+    const { doc, pen } = mk(d => {
+      a = addPoint(d, 0, 0); const b = addPoint(d, 6, 0); x1 = addPoint(d, 6, 6)
+      x2 = addPoint(d, 5, 6.5); const c = addPoint(d, 0, 6)
+      addPath(d, [a, b, x1], [{ kind: 'line' }, { kind: 'line' }])
+      addPath(d, [x2, c, a], [{ kind: 'line' }, { kind: 'line' }])
+    }, true)
+    dragTo(pen, doc.value, x2, 6.1, 6.1)
+    expect(pen.hoverSnap.value?.kind).not.toBe('point')
+    pen.dropPoint(x2)
+    expect(paths(doc.value).every(p => !p.closed)).toBe(true)
+    expect(P(doc.value, x2)).toBeTruthy()
+    pen.pick(x1); pen.pick(x2, true)
+    pen.apply('coincident')
+    expect(paths(doc.value).every(p => !p.closed)).toBe(true)
+    expect(pen.status.value).toBe('A text guide stays open')
+  })
+
+  it('outside a guide, a loop of two pieces welded at its last gap closes into one path', () => {
+    let a = '', x1 = '', x2 = ''
+    const { doc, pen } = mk(d => {
+      a = addPoint(d, 0, 0); const b = addPoint(d, 6, 0); x1 = addPoint(d, 6, 6)
+      x2 = addPoint(d, 5, 6.5); const c = addPoint(d, 0, 6)
+      addPath(d, [a, b, x1], [{ kind: 'line' }, { kind: 'line' }])
+      addPath(d, [x2, c, a], [{ kind: 'line' }, { kind: 'line' }])
+    })
+    dragTo(pen, doc.value, x2, 6.1, 6.1)
+    pen.dropPoint(x2)
+    expect(paths(doc.value)).toHaveLength(1)
+    expect(paths(doc.value)[0].closed).toBe(true)
+  })
+})

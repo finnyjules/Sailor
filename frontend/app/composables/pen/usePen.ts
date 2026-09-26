@@ -40,7 +40,7 @@
 // onMounted/onUnmounted, no window.*, no requestAnimationFrame here. The
 // sparkle loop starts lazily inside sparkle(); dispose() cancels it.
 import { ref, shallowRef, computed, toRaw, type Ref } from 'vue'
-import type { SketchDoc, SketchConstraint, EntityId, ConstraintKind, SegmentSpec } from '~/lib/sketch/model'
+import type { SketchDoc, SketchConstraint, EntityId, ConstraintKind, SegmentSpec, PathEntity } from '~/lib/sketch/model'
 import { addPoint, addLine, addCircle, addConstraint, removeConstraint, deleteEntity, addPath, pointClosure, isPointReferenced, addSmoothHandles } from '~/lib/sketch/edit'
 import { snapPoint, snapRule, snapPreviewKind, inferCircleTangents, tangentJointArc, type SnapPreviewKind, type PointSnap } from '~/lib/sketch/infer'
 import { solve, type DragTarget } from '~/lib/sketch/solve'
@@ -77,6 +77,9 @@ export const SPARKLE_LIFETIME_MS = 380
 
 // status when a join would need two fixed points to meet
 const BOTH_FIXED = 'Those two points are both fixed in different places'
+// a text guide split in two by Trim or Delete: which piece the text follows
+const DISSOLVE_REFUSED = 'These two sides don’t line up, so they can’t merge'
+export const GUIDE_SPLIT_STATUS = 'The text follows the longer piece'
 
 // Shift-constrain (Illustrator/Figma-style): rotate `pt` about `prev` to the
 // nearest 45° increment, preserving the distance between them. Pure — no doc
@@ -509,7 +512,7 @@ export function usePen(opts: {
     runSolve()
     // a text guide split in two: say which piece the text follows
     const pathsAfter = doc.value.entities.filter(e => e.kind === 'path').length
-    if (openOnly && segs.length && pathsAfter > Math.max(1, pathsBefore)) status.value = 'The text follows the longer piece'
+    if (openOnly && segs.length && pathsAfter > Math.max(1, pathsBefore)) status.value = GUIDE_SPLIT_STATUS
     commitHistory()
   }
   function findSegment(from: EntityId, to: EntityId): { pathId: EntityId; segIndex: number } | null {
@@ -1304,6 +1307,29 @@ export function usePen(opts: {
         }
       }
     }
+    if (openOnly) for (const q of closingEnds(id)) out.add(q)
+    return out
+  }
+  // In a text guide: the ends of OTHER open paths that `id` would close the
+  // guide with. `id` is an end of open path P whose other end O is also an end
+  // of open path Q; joining `id` to Q's far end would weld P and Q into a loop
+  // (mergePoints joins two open paths meeting end to end).
+  function closingEnds(id: EntityId): EntityId[] {
+    const out: EntityId[] = []
+    const open = doc.value.entities.filter((e): e is PathEntity => e.kind === 'path' && !e.closed && e.anchors.length >= 2)
+    const farEnd = (e: PathEntity, x: EntityId) => {
+      const n = e.anchors.length
+      return e.anchors[0] === x ? e.anchors[n - 1]! : e.anchors[n - 1] === x ? e.anchors[0]! : null
+    }
+    for (const p of open) {
+      const o = farEnd(p, id)
+      if (!o || o === id) continue
+      for (const q of open) {
+        if (q === p) continue
+        const f = farEnd(q, o)
+        if (f && f !== o) out.push(f)
+      }
+    }
     return out
   }
   // why `gone` can't be merged into `keep` (null when it can) — shared by the
@@ -1318,6 +1344,7 @@ export function usePen(opts: {
   function isGuideEnds(a: EntityId, b: EntityId): boolean {
     return doc.value.entities.some(e => e.kind === 'path' && !e.closed && e.anchors.length >= 2
       && ((e.anchors[0] === a && e.anchors[e.anchors.length - 1] === b) || (e.anchors[0] === b && e.anchors[e.anchors.length - 1] === a)))
+      || closingEnds(a).includes(b)
   }
   // drop selection entries a merge left pointing at nothing (a path that
   // became a circle, a segment index past a shortened path's end)
@@ -1398,7 +1425,6 @@ export function usePen(opts: {
   // split in two says which piece the text follows).
   let trimPress: { removed: number; dropped: number; ends: Vec2[]; carrier: CurveGeom | null; last: Vec2; paths: number } | null = null
   const pathCount = () => doc.value.entities.filter(e => e.kind === 'path').length
-  const GUIDE_SPLIT_STATUS = 'The text follows the longer piece'
 
   // the distinct points where a crossing cuts the hovered piece — one ring
   // each (a circle crossed once starts and ends at the same crossing)
@@ -1512,7 +1538,7 @@ export function usePen(opts: {
     const { hit, ok } = cutTarget(x, y)
     if (!hit || !ok) {
       // a circle, or no line or arc in reach (Bézier curves aren't cut in v1)
-      if (!hit || hit.ref.kind === 'circle') status.value = "Cut works on a path's lines and arcs"
+      if (!hit || hit.ref.kind === 'circle') status.value = 'Cut works on lines and arcs'
       return
     }
     const id = cutAt(doc.value, hit.ref, hit.t)
@@ -1553,9 +1579,9 @@ export function usePen(opts: {
     if (tool.value !== 'dissolve') return
     const t = dissolveTarget(x, y)
     if (!t) return
-    if (!t.ok) { status.value = "These two sides don't line up, so they can't merge"; return }
+    if (!t.ok) { status.value = DISSOLVE_REFUSED; return }
     const res = dissolveAt(doc.value, t.pathId, t.anchorIndex, pxToUnits(DISSOLVE_PX, opts.view.value), DISSOLVE_DEG)
-    if (!res.ok) { status.value = "These two sides don't line up, so they can't merge"; return }
+    if (!res.ok) { status.value = DISSOLVE_REFUSED; return }
     runSolve()
     commitHistory()
     sparkle(t.x, t.y)

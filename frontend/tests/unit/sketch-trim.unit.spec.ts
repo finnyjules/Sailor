@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { SketchDoc, EntityId, PathEntity, LineEntity, ConstraintKind } from '~/lib/sketch/model'
 import { getEntity, getPoint } from '~/lib/sketch/model'
 import { addPoint, addLine, addCircle, addPath, addConstraint } from '~/lib/sketch/edit'
-import { spanAt } from '~/lib/sketch/crossings'
+import { spanAt, curveGeom, pointAt } from '~/lib/sketch/crossings'
 import { solve } from '~/lib/sketch/solve'
 import {
   pinToCurve, removeSpan, removeSegment, cutAt, canDissolve, dissolveAt, mergePoints,
@@ -948,5 +948,131 @@ describe('round 3 — user rules lost with a removed piece are counted', () => {
     const L = addLine(d, s, addPoint(d, 0, 15))
     addConstraint(d, 'pointOnCircle', [s, circ])
     expect(removeSpan(d, spanAt(d, { kind: 'line', id: L }, 0.5)!)).toEqual({ ok: true, droppedRules: 1 })
+  })
+})
+
+// ── final review ─────────────────────────────────────────────────────────────
+
+describe('final review — a circle made by closing a one-arc path trims cleanly', () => {
+  // an open path of one arc round C = (0,0), radius 10, from X = (10,0) the
+  // anticlockwise way to B = (10·cos 300°, 10·sin 300°); merging B into X
+  // closes it into a circle with X pinned on it (pointOnCircle)
+  function closedArcCircle(d: SketchDoc) {
+    const C = addPoint(d, 0, 0)
+    const X = addPoint(d, 10, 0)
+    const t = 300 * Math.PI / 180
+    const B = addPoint(d, 10 * Math.cos(t), 10 * Math.sin(t))
+    addPath(d, [X, B], [{ kind: 'arc', center: C, sweep: 1 }])
+    expect(mergePoints(d, B, X)).toBe(true)
+    const circ = d.entities.find(e => e.kind === 'circle')!.id
+    return { C, X, circ }
+  }
+
+  it('trimming the whole circle removes its joined point too, and counts no rule', () => {
+    const d = emptyDoc()
+    const { C, X, circ } = closedArcCircle(d)
+    const res = removeSpan(d, spanAt(d, { kind: 'circle', id: circ }, 1)!)
+    expect(res).toEqual({ ok: true, droppedRules: 0 })
+    expect(getEntity(d, circ)).toBeUndefined()
+    expect(getPoint(d, X)).toBeUndefined()
+    expect(getPoint(d, C)).toBeUndefined()
+    expect(d.entities).toHaveLength(0)
+    expect(d.constraints).toHaveLength(0)
+  })
+
+  it('trimming the piece that holds the joined point removes it, and counts no rule', () => {
+    const d = emptyDoc()
+    const { X, circ } = closedArcCircle(d)
+    addLine(d, addPoint(d, 0, -20), addPoint(d, 0, 20))   // crosses at (0, ±10)
+    const res = removeSpan(d, spanAt(d, { kind: 'circle', id: circ }, 0)!)   // the right half, holding X
+    expect(res).toEqual({ ok: true, droppedRules: 0 })
+    expect(getPoint(d, X)).toBeUndefined()
+    expect(d.entities.some(e => e.kind === 'point' && Math.hypot(e.x - 10, e.y) < 1e-6)).toBe(false)
+    expect(paths(d)).toHaveLength(1)
+    expectSolveKeepsGeometry(d)
+  })
+
+  it('trimming the other piece keeps the joined point on the arc that is left', () => {
+    const d = emptyDoc()
+    const { C, X, circ } = closedArcCircle(d)
+    addLine(d, addPoint(d, 0, -20), addPoint(d, 0, 20))
+    const res = removeSpan(d, spanAt(d, { kind: 'circle', id: circ }, Math.PI)!)   // the left half
+    expect(res.ok).toBe(true)
+    expect(getPoint(d, X)).toBeDefined()
+    const x1 = paths(d)[0]!.anchors[0]!
+    expect(hasRule(d, 'equalDist', [C, X, C, x1])).toBe(true)
+  })
+
+  it('a joined point something else uses stays when its piece goes', () => {
+    const d = emptyDoc()
+    const { X, circ } = closedArcCircle(d)
+    addConstraint(d, 'distance', [X, addPoint(d, 30, 30)], 30)   // a rule of the user's on X
+    addLine(d, addPoint(d, 0, -20), addPoint(d, 0, 20))
+    removeSpan(d, spanAt(d, { kind: 'circle', id: circ }, 0)!)   // the right half, holding X
+    expect(getPoint(d, X)).toBeDefined()
+  })
+})
+
+describe('final review — welding rejoins pieces', () => {
+  it('two open pieces whose ends merge become one open path', () => {
+    const d = emptyDoc()
+    const A = addPoint(d, 0, 0), B = addPoint(d, 5, 0), X1 = addPoint(d, 10, 0)
+    const X2 = addPoint(d, 10, 0.1), D = addPoint(d, 15, 0), E = addPoint(d, 20, 5)
+    const P1 = addPath(d, [A, B, X1], [{ kind: 'line' }, { kind: 'line' }])
+    const P2 = addPath(d, [X2, D, E], [{ kind: 'line' }, { kind: 'line' }])
+    expect(mergePoints(d, X2, X1)).toBe(true)
+    expect(paths(d)).toHaveLength(1)
+    const p = pathOf(d, P1)
+    expect(getEntity(d, P2)).toBeUndefined()
+    expect(p.closed).toBe(false)
+    expect(p.anchors).toEqual([A, B, X1, D, E])
+    expect(p.segments).toHaveLength(4)
+  })
+
+  it('a piece that runs the other way is reversed; its arc keeps its shape', () => {
+    const d = emptyDoc()
+    const A = addPoint(d, -10, 0), X1 = addPoint(d, 0, 0)
+    // P2 runs E → X2: a quarter arc round C = (10,0), anticlockwise (sweep 1)
+    // from E = (10,10) through (2.93, 7.07) to X2 = (0,0); reversed it is clockwise
+    const C = addPoint(d, 10, 0), E = addPoint(d, 10, 10), X2 = addPoint(d, 0, 0)
+    const P1 = addPath(d, [A, X1], [{ kind: 'line' }])
+    const P2 = addPath(d, [E, X2], [{ kind: 'arc', center: C, sweep: 1 }])
+    const before = curveGeom(d, { kind: 'seg', pathId: P2, segIndex: 0 })!
+    const mid = pointAt(before, 0.5)
+    expect(mergePoints(d, X2, X1)).toBe(true)
+    expect(paths(d)).toHaveLength(1)
+    const p = pathOf(d, P1)
+    expect(p.anchors).toEqual([A, X1, E])
+    expect(p.segments).toEqual([{ kind: 'line' }, { kind: 'arc', center: C, sweep: 0 }])
+    const after = curveGeom(d, { kind: 'seg', pathId: P1, segIndex: 1 })!
+    expect(Math.abs(after.sweepAngle!)).toBeCloseTo(Math.abs(before.sweepAngle!), 9)
+    const m2 = pointAt(after, 0.5)
+    expect(m2.x).toBeCloseTo(mid.x, 9); expect(m2.y).toBeCloseTo(mid.y, 9)
+    expect(ruleCount(d, 'equalDist')).toBe(1)   // the arc's own invariant, still there
+    expectSolveKeepsGeometry(d)
+  })
+
+  it('a loop of two pieces merged at its last gap becomes one closed path', () => {
+    const d = emptyDoc()
+    const A = addPoint(d, 0, 0), B = addPoint(d, 10, 0), X1 = addPoint(d, 10, 10)
+    const X2 = addPoint(d, 10, 10.1), D = addPoint(d, 0, 10)
+    const P1 = addPath(d, [A, B, X1], [{ kind: 'line' }, { kind: 'line' }])
+    addPath(d, [X2, D, A], [{ kind: 'line' }, { kind: 'line' }])
+    expect(mergePoints(d, X2, X1)).toBe(true)
+    expect(paths(d)).toHaveLength(1)
+    const p = pathOf(d, P1)
+    expect(p.closed).toBe(true)
+    expect(p.anchors).toEqual([A, B, X1, D])
+    expect(p.segments).toHaveLength(4)
+  })
+
+  it('a point a third thing also uses is shared, not joined', () => {
+    const d = emptyDoc()
+    const A = addPoint(d, 0, 0), X1 = addPoint(d, 10, 0), X2 = addPoint(d, 10, 0), E = addPoint(d, 20, 0)
+    addPath(d, [A, X1], [{ kind: 'line' }])
+    addPath(d, [X2, E], [{ kind: 'line' }])
+    addLine(d, X1, addPoint(d, 10, 10))
+    mergePoints(d, X2, X1)
+    expect(paths(d)).toHaveLength(2)
   })
 })

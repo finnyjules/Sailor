@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest'
 import { ref } from 'vue'
 import type { SketchDoc } from '~/lib/sketch/model'
 import type { ViewMatrix } from '~/lib/sketch/view'
-import { usePen, type PenTool } from '~/composables/pen/usePen'
+import { usePen, GUIDE_SPLIT_STATUS, type PenTool } from '~/composables/pen/usePen'
 
 const DEV: ViewMatrix = { a: 34, b: 0, c: 0, d: -34, e: 40, f: 400 }
 const mk = (tools?: PenTool[]) => {
@@ -168,7 +168,7 @@ describe('pen trim — review fixes', () => {
     path(pen, [[7, -4], [7, 4]])
     pen.selectTool('trim')
     pen.trimDown(5, 0); pen.trimUp(5, 0)
-    expect(pen.status.value).toBe('The text follows the longer piece')
+    expect(pen.status.value).toBe(GUIDE_SPLIT_STATUS)
   })
 
   it('a text guide split by a segment Delete says which piece the text follows', () => {
@@ -180,7 +180,7 @@ describe('pen trim — review fixes', () => {
     pen.pickSegment(p.id, 1)
     pen.del()
     expect(paths(doc.value).length).toBe(2)
-    expect(pen.status.value).toBe('The text follows the longer piece')
+    expect(pen.status.value).toBe(GUIDE_SPLIT_STATUS)
   })
 
   it('switching tools finishes a pending path instead of throwing it away', () => {
@@ -241,7 +241,7 @@ describe('pen cut and dissolve tools', () => {
     pen.selectTool('cut')
     pen.cutClick(0, 3)
     expect(doc.value.entities.length).toBe(n)
-    expect(pen.status.value).toBe("Cut works on a path's lines and arcs")
+    expect(pen.status.value).toBe('Cut works on lines and arcs')
   })
 
   it('dissolve refuses a corner with a plain hint', () => {
@@ -252,7 +252,7 @@ describe('pen cut and dissolve tools', () => {
     expect(pen.dissolveHover.value?.ok).toBe(false)
     pen.dissolveClick(5, 0)
     expect(paths(doc.value)[0].anchors.length).toBe(3)
-    expect(pen.status.value).toBe("These two sides don't line up, so they can't merge")
+    expect(pen.status.value).toBe('These two sides don’t line up, so they can’t merge')
   })
 })
 

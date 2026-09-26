@@ -40,9 +40,13 @@ describe('clampChipOrigin', () => {
     expect(r.y).toBe(16)
   })
 
-  it('pulls a chip below the bottom back inside', () => {
+  it('pulls a chip below the bottom back inside, its whole height on screen', () => {
     const r = clampChipOrigin(100, height + 50, chipWidth, width, height)
-    expect(r.y).toBe(height - 4)
+    expect(r.y).toBe(height - 14 - 4)
+  })
+
+  it('keeps a 14 px chip off the bottom edge: height 100, raw y 95 → 82', () => {
+    expect(clampChipOrigin(100, 95, chipWidth, width, 100, 14).y).toBe(82)
   })
 
   it('never produces NaN when the overlay is smaller than the chip', () => {

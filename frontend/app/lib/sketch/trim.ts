@@ -468,9 +468,26 @@ function removeCircleSpan(doc: SketchDoc, span: Span & { ref: { kind: 'circle' }
   const cons = !!circ.construction
   const fewerThanTwo = !span.start.cutter || !span.end.cutter || span.end.t - span.start.t >= TAU - 1e-9
   if (fewerThanTwo) {
+    // points held only by their pin to this circle go with it (the joined point
+    // a closed one-arc path leaves); their pins are not lost user rules
+    const held = pinnedOnlyTo(doc, circ.id)
+    for (const c of doc.constraints) if (c.kind === 'pointOnCircle' && c.refs[1] === circ.id && held.has(c.refs[0]!)) tr.excuse(c.id)
     deleteEntity(doc, circ.id)
-    cleanOrphans(doc, [C])
+    cleanOrphans(doc, [C, ...held])
     return { ok: true, droppedRules: tr.count() }
+  }
+  // points held only by their pin to this circle that lie on the removed piece
+  // go with it (strictly inside: an end of the piece is a crossing, not theirs)
+  const cc = getPoint(doc, C)
+  const inPiece = new Set<EntityId>()
+  if (cc) {
+    const width = span.end.t - span.start.t
+    for (const q of pinnedOnlyTo(doc, circ.id)) {
+      const pq = getPoint(doc, q)
+      if (!pq) continue
+      const a = ((Math.atan2(pq.y - cc.y, pq.x - cc.x) - span.start.t) % TAU + TAU) % TAU
+      if (a > 1e-9 && a < width - 1e-9) inPiece.add(q)
+    }
   }
   const x0 = endPoint(doc, tr, span.start, span.ref, cons)   // a reused end's pointOnCircle goes here
   const x1 = endPoint(doc, tr, span.end, span.ref, cons)
@@ -485,6 +502,7 @@ function removeCircleSpan(doc: SketchDoc, span: Span & { ref: { kind: 'circle' }
     if (c.kind === 'pointOnCircle' && c.refs[1] === circ.id) {
       const q = c.refs[0]!
       if (q === x0 || q === x1) { tr.excuse(c.id); continue }   // already an end of the arc
+      if (inPiece.has(q)) { tr.excuse(c.id); continue }          // goes with the removed piece
       kept.push({ id: c.id, kind: 'equalDist', refs: [C, q, C, x1] })
     } else if (c.kind === 'concentric') {
       const target = concentricCentre(doc, c, circ.id, C, shareWith)
@@ -494,8 +512,24 @@ function removeCircleSpan(doc: SketchDoc, span: Span & { ref: { kind: 'circle' }
   }
   doc.constraints = kept
   doc.entities = doc.entities.filter(e => e.id !== circ.id)
+  cleanOrphans(doc, inPiece)
   if (shareWith && shareWith !== C) mergePoints(doc, C, shareWith)   // the arc takes that circle's centre
   return { ok: true, droppedRules: tr.count() }
+}
+
+// points whose only tie to the drawing is a pointOnCircle onto circle `circId`:
+// no entity uses them and no other rule names them (fixed points never count)
+function pinnedOnlyTo(doc: SketchDoc, circId: EntityId): Set<EntityId> {
+  const out = new Set<EntityId>()
+  for (const c of doc.constraints) {
+    if (c.kind !== 'pointOnCircle' || c.refs[1] !== circId) continue
+    const q = c.refs[0]!
+    const p = getPoint(doc, q)
+    if (!p || p.fixed || isPointReferenced(doc, q)) continue
+    const others = doc.constraints.some(k => k.refs.includes(q) && !(k.kind === 'pointOnCircle' && k.refs[1] === circId))
+    if (!others) out.add(q)
+  }
+  return out
 }
 
 // the centre point a concentric rule can be kept through, or null when it must be dropped
@@ -716,6 +750,8 @@ export function mergePoints(doc: SketchDoc, from: EntityId, into: EntityId): boo
   }
   const sw = (id: EntityId) => (id === from ? into : id)
   const touched = new Set<EntityId>()   // entity/rule ids whose refs changed
+  // the paths that used `into` before the merge (a join keeps one of their ids)
+  const hadInto = new Set(doc.entities.filter(e => e.kind === 'path' && e.anchors.includes(into)).map(e => e.id))
   for (const e of doc.entities) {
     if (e.kind === 'line') {
       if (e.p1 === from || e.p2 === from) { e.p1 = sw(e.p1); e.p2 = sw(e.p2); touched.add(e.id) }
@@ -753,6 +789,9 @@ export function mergePoints(doc: SketchDoc, from: EntityId, into: EntityId): boo
     return true
   })
 
+  const joinedId = joinOpenEnds(doc, into, hadInto)
+  if (joinedId) touched.add(joinedId)
+
   const loose: EntityId[] = []
   for (const e of [...doc.entities]) {
     if (!touched.has(e.id)) continue
@@ -761,6 +800,60 @@ export function mergePoints(doc: SketchDoc, from: EntityId, into: EntityId): boo
   }
   cleanOrphans(doc, loose, into)
   return true
+}
+
+/** The same path drawn the other way round: anchors and segments reversed, each
+ *  arc's sweep flipped (the arc invariant equalDist [C,a,C,b] reads either way),
+ *  each cubic's handles swapped. The drawing does not change. */
+export function reversePath(path: PathEntity): void {
+  if (path.closed) return
+  path.anchors = [...path.anchors].reverse()
+  path.segments = [...path.segments].reverse().map(s => {
+    if (s.kind === 'arc') return { ...s, sweep: s.sweep === 1 ? 0 : 1 }
+    if (s.kind === 'cubic') return { ...s, h1: s.h2, h2: s.h1 }
+    return s
+  })
+}
+
+/** The two open paths point `x` would join if it is an END of exactly two
+ *  different open paths (of the same construction kind) and nothing else uses
+ *  it — as [first, second], or null. */
+export function openEndPair(doc: SketchDoc, x: EntityId): [PathEntity, PathEntity] | null {
+  const ends: PathEntity[] = []
+  for (const e of doc.entities) {
+    if (e.kind === 'line') { if (e.p1 === x || e.p2 === x) return null; continue }
+    if (e.kind === 'circle') { if (e.center === x) return null; continue }
+    if (e.kind !== 'path') continue
+    const n = e.anchors.length
+    const uses = e.anchors.filter(a => a === x).length
+    const other = e.segments.some(s => (s.kind === 'arc' && s.center === x) || (s.kind === 'cubic' && (s.h1 === x || s.h2 === x)))
+    if (other) return null
+    if (!uses) continue
+    if (e.closed || uses !== 1 || (e.anchors[0] !== x && e.anchors[n - 1] !== x)) return null
+    ends.push(e)
+  }
+  if (ends.length !== 2) return null
+  const [p, q] = ends as [PathEntity, PathEntity]
+  if (!!p.construction !== !!q.construction) return null
+  return [p, q]
+}
+
+// Two open paths meeting end to end at `x` (openEndPair) become one: the one
+// that used `x` before the merge keeps its id (`keepIds`), the other is folded
+// in (reversed as needed) and removed. Rules naming the removed path go with it.
+// If the joined path starts and ends on one point it closes (collapsePath).
+// Returns the kept path's id, or null when nothing was joined.
+function joinOpenEnds(doc: SketchDoc, x: EntityId, keepIds: Set<EntityId>): EntityId | null {
+  const pair = openEndPair(doc, x)
+  if (!pair) return null
+  let [p, q] = pair
+  if (!keepIds.has(p.id) && keepIds.has(q.id)) [p, q] = [q, p]
+  if (p.anchors[p.anchors.length - 1] !== x) reversePath(p)   // p ends at x
+  if (q.anchors[0] !== x) reversePath(q)                        // q starts at x
+  p.anchors = [...p.anchors, ...q.anchors.slice(1)]
+  p.segments = [...p.segments, ...q.segments]
+  dropPathEntity(doc, q)
+  return p.id
 }
 
 // drop segments whose two anchors are now the same point; an open path whose ends met closes

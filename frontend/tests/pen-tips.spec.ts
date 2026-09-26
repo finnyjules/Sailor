@@ -50,7 +50,10 @@ test('hovering Pen shows its card with key, caption and a live demo; the next ca
   // warm-up: moving along the toolbar shows the next card without the delay
   await hover(page, '[data-tool="trim"]')
   const trim = page.locator('[data-pen-tip-id="trim"]')
-  await expect(trim).toBeVisible({ timeout: 250 })   // well under the 350 ms first-card delay
+  // a loaded machine can take a few hundred ms to paint it, so the time alone
+  // proves little; the tooltip itself says it skipped the delay (warm-up)
+  await expect(trim).toBeVisible({ timeout: 600 })
+  await expect(trim).toHaveAttribute('data-state', 'instant-open')
   await expect(trim.locator('kbd')).toHaveText('T')
   await expect(trim).toContainText('Removes a piece between crossings')
   await page.waitForTimeout(1800)   // after the click: the piece gone, its ghost left

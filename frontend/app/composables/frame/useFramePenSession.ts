@@ -85,6 +85,18 @@ export const FRAME_PEN_TOOLS: PenTool[] = ['select', 'path', 'curve', 'line', 'c
 export const PEN_STYLE_CLOSED = { fill: '#3b82f6', stroke: '', strokeWidth: 0 } as const
 export const PEN_STYLE_OPEN = { fill: 'none', stroke: '#3b82f6', strokeWidth: 0.004 } as const
 
+/** The style a path layer takes when its closed drawing is made open (Trim,
+ *  Cut, Delete): the pen's own closed style (untouched) becomes the pen's open
+ *  style; a style of the user's own keeps its fill and gains the pen's stroke
+ *  only if it has no visible stroke; otherwise nothing changes. Mirrors Shape
+ *  Studio, which paints an outline once the drawing is no longer closed. */
+export function openedStyle(l: { fill?: string; stroke?: string; strokeWidth?: number }): Partial<typeof PEN_STYLE_OPEN> {
+  const visibleStroke = !!l.stroke && (l.strokeWidth ?? 0) > 0
+  if (l.fill === PEN_STYLE_CLOSED.fill && !visibleStroke) return { ...PEN_STYLE_OPEN }
+  if (!visibleStroke) return { stroke: PEN_STYLE_OPEN.stroke, strokeWidth: PEN_STYLE_OPEN.strokeWidth }
+  return {}
+}
+
 /** True when the drawing's visible outline is closed: any non-construction
  *  path that is closed, or any non-construction circle. */
 export function isClosedDrawing(doc: SketchDoc): boolean {
@@ -349,6 +361,8 @@ export function useFramePenSession(host: FramePenHost) {
       if (!r) { cancelSession(); return }   // nothing left to draw: treat as cancel
       const { W, H } = host.size()
       const live = host.layers().find(l => l.id === id) ?? original
+      // a closed drawing trimmed (or cut) open must not stay a fill with no stroke
+      const opened = !!original?.sketch && isClosedDrawing(original.sketch) && !isClosedDrawing(s.doc.value)
       ensureRecorded()   // normally already done by the first preview
       close()
       if (clonerBlocksRecentre(live)) {
@@ -356,11 +370,11 @@ export function useFramePenSession(host: FramePenHost) {
         const sk = cloneDoc(s.doc.value)
         const b = localOutlineBounds(sketchToLocalD(sk))!
         const bbox = { w: Math.max(b.maxX - b.minX, 0.001), h: Math.max(b.maxY - b.minY, 0.001) }
-        writeLayer(id, l => ({ ...l, d: sketchToLocalD(sk), sketch: sk, bbox }))
+        writeLayer(id, l => ({ ...l, d: sketchToLocalD(sk), sketch: sk, bbox, ...(opened ? openedStyle(l) : {}) }))
         return
       }
       const { x, y } = placementAfterRecentre(layerPlacementForView(live), r.shiftLocal, W, H)
-      writeLayer(id, l => ({ ...l, d: sketchToLocalD(r.sketch), sketch: r.sketch, bbox: r.bbox, x, y }))
+      writeLayer(id, l => ({ ...l, d: sketchToLocalD(r.sketch), sketch: r.sketch, bbox: r.bbox, x, y, ...(opened ? openedStyle(l) : {}) }))
       return
     }
     close()

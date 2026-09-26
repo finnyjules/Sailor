@@ -51,6 +51,7 @@ import { applyView, invertView, viewToSvg, type ViewMatrix } from '~/lib/sketch/
 import { bowArc, spanPathD, SPARKLE_LIFETIME_MS, isTypingInField, type Pen } from '~/composables/pen/usePen'
 import { pointRolesForDoc, type PointRole } from '~/lib/sketch/pointRoles'
 import { clampChipOrigin } from '~/lib/sketch/chipClamp'
+import { TOOL_KEYS } from '~/composables/pen/penKeys'
 
 const props = withDefaults(defineProps<{
   pen: Pen
@@ -223,7 +224,7 @@ function hiddenHandleRule(m: { id: EntityId; kind: ConstraintKind }): boolean {
 // cut off. Clamping only moves the rect/text origin; the click target (`m`)
 // is unchanged, so click-to-edit still works wherever the chip actually sits.
 function chipOrigin(s: { x: number; y: number }, chipWidth: number) {
-  return clampChipOrigin(s.x + 6, s.y - 16, chipWidth, props.width, props.height)
+  return clampChipOrigin(s.x + 6, s.y - 16, chipWidth, props.width, props.height, 14)
 }
 const visibleMarks = computed(() => marks.value
   .filter(m => !STRUCTURAL_MARK_KINDS.includes(m.kind) && !hiddenHandleRule(m))
@@ -770,11 +771,23 @@ function onDimClick(m: Parameters<typeof onArcDimClick>[0]) {
 // hanging without a pointerup would otherwise resume mid-air on reactivation)
 watch(() => props.active, (on) => {
   if (on) return
+  settleOverlayGesture()
+  endGesture()
+})
+// the overlay's own live gesture, settled: a marquee is dropped (no selection
+// change); a moved point drag commits as its own step with no join
+function settleOverlayGesture(): void {
   cancelMarquee()
   if (moved && tool.value === 'select') { if (dragId) dropPoint(dragId, true); else commitHistory() }
   dragId = null; dragHandleIds = []; dragLast = null; moved = false
-  endGesture()
-})
+}
+// a single-letter tool key the pen will act on (penKeys.ts: no modifier, a
+// tool this host offers)
+function isToolKey(ev: KeyboardEvent): boolean {
+  if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || ev.key.length !== 1) return false
+  const t = TOOL_KEYS[ev.key.toLowerCase()]
+  return !!t && props.pen.options.tools.includes(t)
+}
 
 // ---------- keyboard ----------
 
@@ -806,6 +819,10 @@ function handleKeydownEvent(ev: KeyboardEvent): boolean {
   if (!props.active || isTypingInField()) return false
   const onControl = (ev.key === 'Enter' || ev.key === 'Escape') && focusedControl(ev)
   if (onControl && ev.key === 'Enter') return false
+  // switching tools mid marquee or mid point drag: settle it first, or the
+  // marquee stays live (swallowing later moves) and the dragged point is left
+  // mid-solve, folded into whatever step comes next
+  if (isToolKey(ev)) settleOverlayGesture()
   const handled = props.pen.onKeydown(ev, { cancelGesture: cancelMarquee })
   if (handled) return true
   if (onControl) return false
