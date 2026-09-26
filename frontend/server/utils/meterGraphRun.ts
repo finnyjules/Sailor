@@ -31,6 +31,8 @@ import { annotatedFilepath, collectUploadFlaggedInputs } from './engineGate'
 import { canonicalUploadKey, uploadOwner } from './inputUploads'
 import { GRAPH_FILE_READERS, GRAPH_FOLDER_READERS, GRAPH_OUTPUT_WRITERS, extractFileRefs, graphFolderOwnedBy, type FileRefSemantics } from './engineFileSurface'
 import { extractGraphPromptText } from './graphPromptText'
+import { staticWiredTexts } from '#shared/runner/staticValues'
+import type { ApiPrompt } from '#shared/runner/graph'
 import { moderatePrompt } from './moderation'
 import { assertSpendAllowed } from './systemControls'
 import { blockedPromptRefusal, nodeProblemsBody, retiredEngineRefusal } from './blockedModels'
@@ -467,8 +469,14 @@ async function submitMetered(userId: string | null, body: any, deps: GraphRunDep
   // Prompt-side moderation, AFTER file-ref validation and BEFORE pricing/hold:
   // a ToS-violating prompt is refused (400) at zero cost — no hold is taken and
   // the engine is never touched. moderatePrompt fails OPEN, so an OpenAI outage
-  // can never take generation down.
-  const mod = await deps.moderatePrompt(extractGraphPromptText(body.prompt))
+  // can never take generation down. A card's text wired into a node (a
+  // Primitive's value, through Gates too) is part of what runs, so it is read
+  // with the typed prompts (R0.5); with nothing wired the text is unchanged.
+  // Malformed nodes are left to ComfyUI's own validation.
+  const wellFormed = Object.fromEntries(Object.entries(body.prompt).filter(([, n]: [string, any]) =>
+    n && typeof n === 'object' && !Array.isArray(n) && typeof n.class_type === 'string'
+    && (n.inputs === undefined || (n.inputs && typeof n.inputs === 'object' && !Array.isArray(n.inputs)))))
+  const mod = await deps.moderatePrompt([...new Set([extractGraphPromptText(body.prompt), ...staticWiredTexts(wellFormed as ApiPrompt)].filter(Boolean))].join(' '))
   if (!mod.ok) {
     throw new MeterRefusalError('This prompt was blocked by content moderation', 400, { categories: mod.categories })
   }

@@ -120,6 +120,36 @@ describe('meterGraphSubmit', () => {
     expect(d.startSettle).not.toHaveBeenCalled()
   })
 
+  // R0.5 (engine-free step 3): a card's text wired into a node is part of
+  // what ComfyUI runs, so it is moderated with the typed prompts — read from
+  // the prompt as forwarded (after normalisation), through a Gate too.
+  it('moderates text a Primitive sends by wire, as forwarded, and refuses it before any hold', async () => {
+    const wired = { prompt: {
+      p: { class_type: 'PrimitiveString', inputs: { value: { __value__: 'wired words' } } },
+      g: { class_type: 'ComfyGateNode', inputs: { data_in: ['p', 0], bypass: false } },
+      '1': { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a fox', prompt_in: ['g', 0] } },
+    } }
+    const moderatePrompt = vi.fn(async (t: string) => t.includes('wired words') ? { ok: false as const, categories: ['test'] } : { ok: true as const })
+    const unwrap = (prompt: any) => ({ prompt: { ...prompt, p: { ...prompt.p, inputs: { value: prompt.p.inputs.value.__value__ } } } })
+    const d = deps({ moderatePrompt, normalizePrompt: unwrap })
+    await expect(meterGraphSubmit('u1', wired, d)).rejects.toMatchObject({ statusCode: 400 })
+    expect(moderatePrompt).toHaveBeenCalledWith('a fox wired words')
+    expect(d.hold).not.toHaveBeenCalled()
+    expect(d.forward).not.toHaveBeenCalled()
+  })
+
+  it('moderates exactly the typed prompt text when nothing is wired', async () => {
+    const d = deps()
+    await meterGraphSubmit('u1', { prompt: { '1': { class_type: 'GenerateImageNode', inputs: { prompt: 'a fox', negative: 'blur' } } } }, d)
+    expect(d.moderatePrompt).toHaveBeenCalledWith('a fox blur')
+  })
+
+  it('a malformed node beside a wired card is left to ComfyUI, not a crash', async () => {
+    const d = deps()
+    await meterGraphSubmit('u1', { prompt: { x: null, y: { class_type: 'Z', inputs: 'no' }, p: { class_type: 'PrimitiveString', inputs: { value: 'soft' } }, '1': { class_type: 'GenerateImageNode', inputs: { prompt_in: ['p', 0] } } } }, d)
+    expect(d.moderatePrompt).toHaveBeenCalledWith('soft')
+  })
+
   it('moderates AFTER file-ref validation and BEFORE pricing/hold (order matters)', async () => {
     const d = deps()
     await meterGraphSubmit('u1', BODY, d)

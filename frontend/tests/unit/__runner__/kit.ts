@@ -164,7 +164,7 @@ export function createFakeLedger(available = 1000) {
 let uuidSeq = 0
 export const testUuid = () => `00000000-0000-4000-8000-${String(++uuidSeq).padStart(12, '0')}`
 
-export function makeKit(opts: { hosted?: boolean; available?: number; dir?: string; root?: string; fal?: ReturnType<typeof createFakeFal>; replicate?: ReturnType<typeof createFakeReplicate>; ledger?: ReturnType<typeof createFakeLedger>; deps?: Partial<EngineDeps> } = {}) {
+export function makeKit(opts: { hosted?: boolean; available?: number; dir?: string; root?: string; fal?: ReturnType<typeof createFakeFal>; replicate?: ReturnType<typeof createFakeReplicate>; ledger?: ReturnType<typeof createFakeLedger>; moderate?: (text: string) => Promise<{ ok: true } | { ok: false; categories: string[] }>; deps?: Partial<EngineDeps> } = {}) {
   const hosted = !!opts.hosted
   const userId = hosted ? 'user_1' : null
   const root = opts.root ?? mkdtempSync(join(tmpdir(), 'runner-engine-root-'))
@@ -176,7 +176,7 @@ export function makeKit(opts: { hosted?: boolean; available?: number; dir?: stri
   const replicate = opts.replicate ?? createFakeReplicate()
   const ledger = opts.ledger ?? createFakeLedger(opts.available ?? 1000)
   const graphRuns = { create: vi.fn(async () => {}), appendOutput: vi.fn(async () => {}), resolve: vi.fn(async () => {}) }
-  const metering = createMetering({ hosted: () => hosted, ledger: () => ledger, graphRuns, spendGuard: async () => {}, moderate: async () => ({ ok: true as const }) })
+  const metering = createMetering({ hosted: () => hosted, ledger: () => ledger, graphRuns, spendGuard: async () => {}, moderate: opts.moderate ?? (async () => ({ ok: true as const })) })
   const events = createRunEvents()
   const seen: RunnerMessage[] = []
   events.subscribe(userId ?? 'local', m => seen.push(m))

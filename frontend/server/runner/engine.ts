@@ -8,6 +8,7 @@
  */
 import { LOCAL_RENDER_TYPES, PROVIDER_TYPES, isRunnerEligible } from '#shared/runner/eligibility'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
+import { staticWiredTexts } from '#shared/runner/staticValues'
 import { NO_VALID_OUTPUTS_MESSAGE, pruneInvalidOutputs, type ComfyNodeError } from '#shared/runner/validate'
 import { blockedModelUses, blockedModelsResponse } from '#shared/runner/blockedModels'
 import {
@@ -911,6 +912,18 @@ export function createEngine(deps: EngineDeps) {
       const planMeasured = inputSeconds
         ?? (resuming && take.measured && Object.prototype.hasOwnProperty.call(take.measured, id) ? take.measured[id]!.seconds : undefined)
 
+      // Text a wire brought that the start of the run could not know (a value
+      // made in the run) is moderated now, before the request exists (R0.5).
+      // Texts the start already checked are skipped. A resumed node's request
+      // was sent (and checked) before the restart.
+      if (!resuming && PROVIDER_TYPES.has(take.prompt[id]!.class_type)) {
+        const wired = withWiredValues(take.prompt, id, valueAt(take))
+        if (wired.injected.length) {
+          const known = new Set(staticWiredTexts(take.prompt))
+          for (const { text } of wired.injected) if (!known.has(text)) await deps.metering.moderateText(text)
+        }
+      }
+
       // The node's inputs as its builder reads them (R0): every wire that
       // carries a value replaced by that value. The take keeps the workflow
       // as sent: price, hold and charge read the wires (a wired input is
@@ -1482,7 +1495,7 @@ export function createEngine(deps: EngineDeps) {
     for (const f of loadImageFiles(prompts)) {
       if (!(await files.exists(f))) throw refuse('A picture this Frame needs is missing. Run it again.', 400, { file: f.filename })
     }
-    await deps.metering.moderate(prompts)
+    await deps.metering.moderate(prompts, prompts.flatMap(p => staticWiredTexts(p)))
 
     const now = deps.now()
     const run: RunRecord = {
@@ -1543,7 +1556,8 @@ export function createEngine(deps: EngineDeps) {
       const draft = JSON.parse(JSON.stringify(run)) as RunRecord
       const { legAction, legTakes } = applyGateAction(draft, i.gateId, i.action, i.takes)
       await deps.metering.spendGuard(i.userId)
-      await deps.metering.moderate(legTakes.map(t => draft.takes[t]!.prompt))
+      const legPrompts = legTakes.map(t => draft.takes[t]!.prompt)
+      await deps.metering.moderate(legPrompts, legPrompts.flatMap(p => staticWiredTexts(p)))
       const leg = await openLeg(draft, legAction, i.gateId, legTakes)
       entry.run = draft
       await persist(draft)

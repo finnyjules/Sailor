@@ -181,7 +181,10 @@ export interface GraphRunsPort {
 
 export interface Metering {
   spendGuard(userId: string | null): Promise<void>
-  moderate(prompts: ApiPrompt[]): Promise<void>
+  /** Hosted: the typed prompts, plus `extra` (texts wired from cards, known at the start). */
+  moderate(prompts: ApiPrompt[], extra?: readonly string[]): Promise<void>
+  /** Hosted: one text a wire brought into a node at its turn (R0.5). */
+  moderateText(text: string): Promise<void>
   /** Returns the hold id, or null when nothing was held. Throws 402 when credits run short. */
   hold(userId: string | null, stageKey: string, credits: number): Promise<number | null>
   addOutput(userId: string | null, stageKey: string, file: OutputFile): Promise<void>
@@ -202,10 +205,15 @@ export function createMetering(d: {
       if (!userId) throw new MeterRefusalError('Sign in to run workflows', 401)
       await d.spendGuard(userId)
     },
-    async moderate(prompts) {
+    async moderate(prompts, extra = []) {
       if (!d.hosted()) return
-      const text = [...new Set(prompts.flatMap(p => [extractGraphPromptText(p), extraPromptText(p)]).filter(Boolean))].join(' ')
+      const text = [...new Set([...prompts.flatMap(p => [extractGraphPromptText(p), extraPromptText(p)]), ...extra].filter(Boolean))].join(' ')
       if (!text) return
+      const mod = await d.moderate(text)
+      if (!mod.ok) throw new MeterRefusalError('This prompt was blocked by content moderation', 400, { categories: mod.categories })
+    },
+    async moderateText(text) {
+      if (!d.hosted() || !text.trim()) return
       const mod = await d.moderate(text)
       if (!mod.ok) throw new MeterRefusalError('This prompt was blocked by content moderation', 400, { categories: mod.categories })
     },
