@@ -108,6 +108,8 @@ export function renderTipCoverage(
   const groups = groupTipStrokes(all)
   if (!groups.length) return null
   const path = tipRenderPath()
+  // Render at the BUCKETED time, so a cached image is a pure function of its key.
+  if (paint && paint.t !== 0) paint = { material: paint.material, t: Math.round(paint.t * 30) / 30 }
   const sig = `${view.originX.toFixed(3)}|${view.originY.toFixed(3)}|${view.unitPx.toFixed(5)}|${view.w}x${view.h}|${base ? 'base' : ''}|${paintKey(paint)}`
   const v = capView(view)
 

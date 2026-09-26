@@ -236,7 +236,7 @@ void main(){
   bool has = uFollow == 1 && P.a > .5;
   float sU = has ? P.r : surf.x, sV = has ? P.g : 0., sSeed = has ? P.b : uSeed;
   if(uMat == 5){ // neon: sprayed light, glowing up to uHalo Frame units past the paint
-    float g = 0.; float j = hash(gl_FragCoord.xy)*6.2831;
+    float g = 0.; float j = hash(surf)*6.2831;   // dither in Frame units: same at every size
     for(int i=0;i<12;i++){ float fi = float(i); float r = sqrt((fi+.5)/12.)*uHalo; float an = fi*2.39996 + j;
       g += D(uv + vec2(cos(an), sin(an))*r*uUnitPx/uView); }
     g /= 12.;
@@ -246,6 +246,10 @@ void main(){
     float gn = mix(hash(floor(gc)), noise(gc*.5 + uSeed*50.), .35);
     float core = smoothstep(gn - .06, gn + .06, d*1.05)*smoothstep(.1, .5, d);
     o = vec4(c*g*2.8*(1. + pulse) + mix(c, vec3(1), .6)*core, clamp(g*.8 + core*.8, 0., 1.));
+    // Valid premultiplied colour (rgb <= a): light raises its own alpha rather than relying on
+    // a GPU canvas compositing rgb > a additively, which CPU canvases and exports clamp.
+    o.a = min(1., max(o.a, max(o.r, max(o.g, o.b))));
+    o.rgb = min(o.rgb, vec3(o.a));
     return;
   }
   if(d < .004) discard;
@@ -256,6 +260,7 @@ void main(){
     a *= 1. - uTooth*.16*smoothstep(.55, .85, noise(gc*.4 + uSeed*9.));
   }
   o = shadeMaterial(uMat, a, d, surf, has, sU, sV, sSeed, uTime, vec3(0., 0., 1.));
+  o.rgb = min(o.rgb, vec3(o.a));   // valid premultiplied everywhere (lava, foil exceed 1)
 }`
 
 // ---------------------------------------------------------------- GL state
@@ -423,6 +428,8 @@ function bindParam(g: Gpu, m: MatGpu, w: number, h: number): boolean {
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, m.paramTex, 0)
     if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+      gl.deleteFramebuffer(m.paramFb); gl.deleteTexture(m.paramTex)
+      m.paramFb = null; m.paramTex = null; m.paramW = 0; m.paramH = 0
       g.floatOk = false
       return false
     }
