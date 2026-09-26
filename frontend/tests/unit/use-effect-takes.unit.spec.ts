@@ -491,3 +491,20 @@ describe('useEffectTakes', () => {
     })
   })
 })
+
+describe('useEffectTakes: what the takes are for (the brief, 2026-09-26)', () => {
+  it('tells the request where the takes will live and the shape of the picture they run over', async () => {
+    const input = vi.fn(async (o: any) => ({ request: o.request, count: 3, signal: o.signal }))
+    const { api, release } = setup({ input })
+    const run = api.start('rain', target({ key: 'frame-background', image: () => ({ width: 1080, height: 1350 }) as any }))
+    release(0); release(1); release(2); await run
+    expect(input.mock.calls.at(-1)![0].target).toEqual({ place: 'frame-background', aspect: 0.8 })
+  })
+  it('a canvas node with no picture: its place, no aspect', async () => {
+    const input = vi.fn(async (o: any) => ({ request: o.request, count: 3, signal: o.signal }))
+    const { api, release } = setup({ input })
+    const run = api.start('rain', target())
+    release(0); release(1); release(2); await run
+    expect(input.mock.calls.at(-1)![0].target).toEqual({ place: 'canvas-node' })
+  })
+})

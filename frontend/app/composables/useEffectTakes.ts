@@ -12,7 +12,7 @@ import { ContextLostError, generateTakes, isAbortError, type EngineDeps, type En
 import { createBrowserTakeRenderer } from '~/lib/shadergen/browserRenderer'
 import { makeCallModel } from '~/lib/shadergen/client'
 import { toEffectDef } from '~/lib/shadergen/effectDef'
-import { imageForModel, placeholderSource, productEngineInput } from '~/lib/shadergen/productRequest'
+import { imageForModel, placeholderSource, productEngineInput, targetContext } from '~/lib/shadergen/productRequest'
 import { effectIdForVersion, myEffectIdOf, storedEffectId, valuesForVersion } from '~/lib/myEffects/defs'
 import { registerEffects, unregisterEffects } from '~/lib/shaderfx/catalog'
 import { shaderFx } from '~/lib/shaderfx/renderer'
@@ -203,7 +203,7 @@ export function useEffectTakes(deps: EffectTakesDeps = {}): EffectTakes {
     let renderer: TakeRenderer | null = null
     try {
       const src = t.image()
-      const input = await buildInput({ request: request.value, base: t.base, image: imageForModel(src), ...(reference.value ? { reference: reference.value } : {}), signal: c.signal })
+      const input = await buildInput({ request: request.value, base: t.base, image: imageForModel(src), ...(reference.value ? { reference: reference.value } : {}), target: targetContext(t.key, src), signal: c.signal })
       if (run !== seq) return
       renderer = liveRenderer = makeRenderer(src ?? placeholderSource())
       const result = await generate(input, {

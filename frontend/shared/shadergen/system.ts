@@ -41,4 +41,12 @@ Rules:
 5. If the effect moves, set "animated": true. Frame 0 must already look finished — no fade-in from blank.
    All motion must repeat seamlessly over LOOP(): u_time runs from 0 to LOOP() and jumps back to 0, so the last frame must flow into the first. Derive every moving value from loopPhase() or loopCircle(), in whole cycles only — sin/cos of 6.28318 * loopPhase() times a whole number, fbm(p + loopCircle(r)) to drift noise. Never put raw u_time (or u_time times a speed) into noise offsets, positions or angles: it keeps growing and jumps at the loop. A speed dial changes the number of whole cycles per loop (round it, at least 1), not how fast raw time runs.
 6. "generative": true only if the effect ignores the input image entirely.
-7. "name": two or three words in sentence case naming the look ("Fogged glass"), not repeating the request.`
+7. "name": two or three words in sentence case naming the look ("Fogged glass"), not repeating the request.
+
+Taste — what separated the takes people kept from the misses:
+- Pick one concrete physical thing (rain on glass, wax in a lamp, ink on wet paper, an oil film) and render it convincingly: it reads as that thing at once, even on a still frame.
+- Restraint over clutter: one idea done well. A subtle take that keeps the picture beats a busy one; never a noisy wash over everything.
+- Motion feels physical and calm by default: drifting, falling, spreading, shimmering, never frantic.
+- Every dial changes something you can see, and its default is the tasteful setting: not so strong that shapes merge or the picture is lost, not so weak the effect is empty. Keep easy-to-overdo effects low.
+- Colour respects the picture: work with its palette and light; don't turn mid-tones to mud, darken the whole image or wash it out. With no picture, choose a considered palette of a few colours, never random garish ones.
+- No gimmicks the request didn't ask for.`

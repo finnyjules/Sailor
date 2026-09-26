@@ -68,9 +68,9 @@ describe('buildGenPrompt', () => {
         { name: 'lava', request: 'Make it a slow lava lamp', take: example2 },
       ],
     })
-    expect(p).toContain('Two effects that met the quality bar for other requests — match this level of craft (considered defaults, restraint, readable subject), not their look:')
+    expect(p).toContain('Effects that met the quality bar for other requests — match this level of craft (one physical idea, considered defaults, restraint, readable subject, motion that loops in whole cycles), not their look:')
     expect(p).toContain('Ink bleeding into wet paper')
-    expect(p).toContain('(ink)')
+    expect(p).toContain('(ink, standalone)')
     expect(p).toContain('Suminagashi')
     expect(p).toContain('EXAMPLE_ONE_BODY')
     expect(p).toContain(JSON.stringify(example1.params))
@@ -102,13 +102,16 @@ describe('buildGenPrompt: a reference picture', () => {
   })
 })
 
-describe('buildGenPrompt: the quality examples predate the loop rule', () => {
-  it('says their raw-u_time motion is not to be copied: motion loops over LOOP()', async () => {
+describe('buildGenPrompt: the quality examples follow the loop rule (2026-09-26)', () => {
+  it('no longer says they predate it, and names which reads the picture and which stands alone', async () => {
     const { productExamples } = await import('~/lib/shadergen/productRequest')
     const p = buildGenPrompt({ request: 'x', takeIndex: 0, examples: await productExamples() })
-    expect(p).toMatch(/drive their motion from raw u_time/)
+    expect(p).not.toMatch(/predate|written before the loop rule|drive their motion from raw u_time/)
+    expect(p).toContain('(rain, over the picture) — "Fogged glass"')
+    expect(p).toContain('(ink, standalone) — "Suminagashi"')
+    // Their motion is built on the loop helpers, never raw u_time.
     expect(p).toContain('loopPhase()')
-    expect(buildGenPrompt({ request: 'x', takeIndex: 0 })).not.toContain('raw u_time')
+    expect(p).not.toMatch(/\bu_time\b/)
   })
 })
 

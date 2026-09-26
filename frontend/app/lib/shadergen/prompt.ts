@@ -15,7 +15,20 @@ export const TAKE_ANGLES = [
   'Take 4: an unexpected interpretation that still clearly answers the request.',
 ] as const
 
-export interface GenBase { name: string; source: string; params: GenParam[] }
+export interface GenBase {
+  name: string
+  source: string
+  params: GenParam[]
+  /** The request that first made it (a My effect's v1 note, the quoted request its Recipe shows). */
+  request?: string
+  /** The effect it was itself made from (a My effect's `from`). */
+  from?: string | null
+}
+
+/** Where a take will live: the Shader studio's layer, Frame's background, or a shader node on the
+ *  canvas (anything else). `aspect` is the picture the takes are written against (width / height). */
+export type GenPlace = 'shader-studio' | 'frame-background' | 'canvas-node'
+export interface GenTarget { place: GenPlace; aspect?: number | null }
 
 export interface GenRequest {
   request: string
@@ -35,6 +48,8 @@ export interface GenRequest {
   /** The target has no picture of its own: ask for a standalone (generative) effect. A reference
    *  picture, when there is one, is still only the look to aim for. */
   noSourcePicture?: boolean
+  /** Where the take will live, and the shape of its picture. */
+  target?: GenTarget | null
 }
 
 const MATCH_THE_LOOK = 'Match its look — colour, light, texture, pattern, movement and mood — and let the request’s words steer; do not copy its subject or content into the effect.'
@@ -45,8 +60,33 @@ function picturesNote(n: 1 | 2): string {
     : `The one attached picture is the reference picture: the look to aim for. It is not the image the effect runs over. ${MATCH_THE_LOOK}`
 }
 
-/** The fixed examples are spike takes written before the loop rule; they are kept as they are. */
-const EXAMPLES_PREDATE_LOOP = 'Those two were written before the loop rule and drive their motion from raw u_time — do not copy that: your motion must repeat seamlessly over LOOP(), built from loopPhase() or loopCircle().'
+/** Where it lives, and what the picture it runs over is there. */
+const PLACE: Record<GenPlace, [where: string, picture: string]> = {
+  'shader-studio': ['a layer in Sailor’s Shader studio', 'the user’s own picture'],
+  'frame-background': ['the background of a Frame, a designed layout whose text and pictures sit on top of it', 'the Frame as it looks now'],
+  'canvas-node': ['a shader effect node on Sailor’s canvas', 'the user’s own picture'],
+}
+const RATIOS: [number, number][] = [[1, 1], [4, 5], [5, 4], [3, 4], [4, 3], [2, 3], [3, 2], [9, 16], [16, 9], [21, 9]]
+/** "16:9 landscape", "4:5 portrait", "square"; a ratio no common one is within 2% of, to two places. */
+export function aspectWords(aspect: number): string {
+  if (Math.abs(aspect - 1) < 0.02) return 'square'
+  const shape = aspect > 1 ? 'landscape' : 'portrait'
+  const near = RATIOS.find(([w, h]) => Math.abs(w / h - aspect) / aspect < 0.02)
+  return `${near ? `${near[0]}:${near[1]}` : `${aspect.toFixed(2)}:1`} ${shape}`
+}
+
+/** What the take is for: where it lives, and whether it runs over the user's picture (attached,
+ *  so the model can look at it) or stands alone. */
+export function targetNote(r: Pick<GenRequest, 'target' | 'noSourcePicture' | 'referencePicture'>): string | null {
+  const t = r.target
+  if (!t) return null
+  const shape = t.aspect && Number.isFinite(t.aspect) && t.aspect > 0 ? aspectWords(t.aspect) : null
+  const [place, picture] = PLACE[t.place] ?? PLACE['canvas-node']
+  const where = `It is for ${place}`
+  if (r.noSourcePicture) return `${where}${shape ? `, ${shape}` : ''}; it stands alone, with no picture under it.`
+  const which = r.referencePicture === 2 ? 'picture 1' : 'the attached picture'
+  return `${where}, running over ${picture}: ${which}${shape ? `, ${shape}` : ''}. Look at it — its subject, palette and light — and choose defaults that suit it.`
+}
 
 const NO_SOURCE_NOTE = 'There is no picture for the effect to run over: the input image is blank. Make a standalone effect that creates its whole picture itself — set "generative": true and do not read the input image (no u_image0, tex or blur9).'
 
@@ -82,22 +122,32 @@ const RAW_TIME = /\bu_time\b/
 export const LOOP_CONVERSION = 'Every rate that multiplies loopPhase() must be a whole number — a per-element rate such as 3.0 + h * 2.0 is not; round it with floor(x + 0.5) — and a drift that moves a position or a noise offset must go round with loopCircle(), not grow with loopPhase(), which jumps back at the wrap.'
 const RAW_TIME_BASE_NOTE = `This effect's motion runs on raw u_time, so it jumps where the loop wraps: rebuild that motion on the loop. ${LOOP_CONVERSION}`
 
+/** Where a base came from, so the model knows what to keep: the request that made it, and the
+ *  effect it was made from. */
+function baseOrigin(b: GenBase): string {
+  const made = b.request?.trim() ? `, first made for the request "${b.request.trim()}"` : ''
+  const from = b.from?.trim() ? `${made ? ' from' : ', made from'} "${b.from.trim()}"` : ''
+  return `${made}${from}`
+}
+
 const HELPER_WARNING = 'Sailor already provides the preamble and the helpers h21, vnoise, fbm, tex, blur9, luma, ASP, hsv2rgb, thinfilm, LOOP, loopPhase and loopCircle; if this source defines functions with those names, rename or drop them — redefining them will not compile.'
 
 export function buildGenPrompt(r: GenRequest): string {
   const parts: string[] = [`Request: "${r.request}"`]
   if (r.referencePicture) parts.push(picturesNote(r.referencePicture))
   if (r.noSourcePicture) parts.push(NO_SOURCE_NOTE)
+  const target = targetNote(r)
+  if (target) parts.push(target)
   if (r.base) {
     const code = baseCode(r.base.source)
-    parts.push(`Start from this existing effect, "${r.base.name}". Keep what serves the request and change whatever you need to. Its source and dials:\n\`\`\`glsl\n${code}\n\`\`\`\nDials: ${JSON.stringify(r.base.params)}\n${HELPER_WARNING}${RAW_TIME.test(code) ? `\n${RAW_TIME_BASE_NOTE}` : ''}`)
+    parts.push(`Start from this existing effect, "${r.base.name}"${baseOrigin(r.base)}. Keep what serves the request — its idea, its dials’ names and tasteful defaults — and change whatever you need to. Its source and dials:\n\`\`\`glsl\n${code}\n\`\`\`\nDials: ${JSON.stringify(r.base.params)}\n${HELPER_WARNING}${RAW_TIME.test(code) ? `\n${RAW_TIME_BASE_NOTE}` : ''}`)
   }
   for (const ref of r.references ?? []) {
     parts.push(`For reference only, a related existing effect, "${ref.name}":\n\`\`\`glsl\n${baseCode(ref.source)}\n\`\`\`\n${HELPER_WARNING}`)
   }
   if (r.examples?.length) {
-    const lines = r.examples.map(ex => `"${ex.request}" (${ex.name}) — "${ex.take.name}":\nDials: ${JSON.stringify(ex.take.params)}\n\`\`\`glsl\n${ex.take.body}\n\`\`\``)
-    parts.push(`Two effects that met the quality bar for other requests — match this level of craft (considered defaults, restraint, readable subject), not their look:\n\n${lines.join('\n\n')}\n\n${EXAMPLES_PREDATE_LOOP}`)
+    const lines = r.examples.map(ex => `"${ex.request}" (${ex.name}, ${ex.take.generative ? 'standalone' : 'over the picture'}) — "${ex.take.name}":\nDials: ${JSON.stringify(ex.take.params)}\n\`\`\`glsl\n${ex.take.body}\n\`\`\``)
+    parts.push(`Effects that met the quality bar for other requests — match this level of craft (one physical idea, considered defaults, restraint, readable subject, motion that loops in whole cycles), not their look:\n\n${lines.join('\n\n')}`)
   }
   parts.push(TAKE_ANGLES[r.takeIndex % TAKE_ANGLES.length]!)
   if (r.avoid) parts.push(`A previous attempt failed: ${r.avoid}. Do not repeat that.`)

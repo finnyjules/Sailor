@@ -66,6 +66,8 @@ export interface EngineInput {
   referencePicture?: 1 | 2
   /** The target has no picture of its own; the prompt asks for a standalone (generative) effect. */
   noSourcePicture?: boolean
+  /** Where the takes will live (the prompt says so); absent on the evaluation page. */
+  target?: GenRequest['target']
   /** Other requests' takes shown as the quality bar; the product's own input
    *  as well as the dev-only shader-gen evaluation's (variant C). */
   examples?: GenRequest['examples']
@@ -101,7 +103,7 @@ export const isAbortError = (e: unknown): boolean => (e as { name?: string } | n
 const aborted = () => new DOMException('Stopped', 'AbortError')
 
 async function runTake(input: EngineInput, index: number, deps: EngineDeps, usage: Usage, avoid?: string): Promise<EngineTake | EngineFailure> {
-  const req: GenRequest = { request: input.request, base: input.base ?? null, references: input.references, takeIndex: index, avoid, examples: input.examples, referencePicture: input.referencePicture ?? null, noSourcePicture: input.noSourcePicture }
+  const req: GenRequest = { request: input.request, base: input.base ?? null, references: input.references, takeIndex: index, avoid, examples: input.examples, referencePicture: input.referencePicture ?? null, noSourcePicture: input.noSourcePicture, target: input.target ?? null }
   const log: string[] = []
   let prompt = buildGenPrompt(req)
   let compileRepairs = 0

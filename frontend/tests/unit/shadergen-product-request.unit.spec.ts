@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { baseFromEffect, imageForModel, placeholderSource, PRODUCT_IMAGE_EDGE, productEngineInput, productExamples } from '~/lib/shadergen/productRequest'
+import { baseFromEffect, imageForModel, placeholderSource, PRODUCT_IMAGE_EDGE, productEngineInput, productExamples, targetContext } from '~/lib/shadergen/productRequest'
+import { FOGGED_GLASS, SUMINAGASHI } from '~/lib/shadergen/productExamples'
 import { SPIKE_TAKES } from '~/lib/shadergen/__eval__/spikeTakes'
 import type { EffectDef } from '~/lib/shaderfx/types'
 
@@ -43,9 +44,44 @@ describe('product request (spec §7.2 decision)', () => {
     expect((await productEngineInput({ request: 'rain', base: null, image: 'data:image/jpeg;base64,SRC' })).noSourcePicture).toBeUndefined()
     expect((await productEngineInput({ request: 'rain', base: null, image: 'data:image/jpeg;base64,SRC', reference: 'data:image/jpeg;base64,REF' })).noSourcePicture).toBeUndefined()
   })
-  it('examples are rain take 3 and ink take 4', async () => {
+  it('examples are rain take 3 and ink take 4, rewritten to loop: same names and dials, motion on the loop helpers', async () => {
     const ex = await productExamples()
-    expect(ex.map(e => e.take)).toEqual([SPIKE_TAKES.rain![2], SPIKE_TAKES.ink![3]])
+    expect(ex.map(e => e.take)).toEqual([FOGGED_GLASS, SUMINAGASHI])
+    expect(ex.map(e => e.request)).toEqual(['Turn this into rain on a window', 'Ink bleeding into wet paper'])
+    const spike = [SPIKE_TAKES.rain![2]!, SPIKE_TAKES.ink![3]!]
+    ex.forEach((e, i) => {
+      expect(e.take.name).toBe(spike[i]!.name)
+      expect(e.take.generative).toBe(spike[i]!.generative)
+      expect(e.take.params.map(p => [p.uniform, p.label, p.type])).toEqual(spike[i]!.params.map(p => [p.uniform, p.label, p.type]))
+    })
+    // One reads the picture, one stands alone: both kinds are shown.
+    expect(ex.map(e => e.take.generative)).toEqual([false, true])
+  })
+  it('the spike fixture is left as it was (raw u_time)', () => {
+    expect(SPIKE_TAKES.rain![2]!.body).toMatch(/\bu_time\b/)
+  })
+  it('a My effect base brings the request that first made it and the effect it was made from', () => {
+    const b = baseFromEffect(def({ id: 'mine_abcdefabcdef~v2', name: 'Prism drift', mine: true, from: 'Prism', versions: [
+      { label: 'v1', note: '  thin prism light beams  ', effectId: 'mine_abcdefabcdef~v1', values: {} },
+      { label: 'v2', note: 'slower', effectId: 'mine_abcdefabcdef~v2', values: {} },
+    ] }))!
+    expect(b.request).toBe('thin prism light beams')
+    expect(b.from).toBe('Prism')
+    // A built-in effect has neither.
+    const builtIn = baseFromEffect(def())!
+    expect(builtIn.request).toBeUndefined()
+    expect(builtIn.from).toBeUndefined()
+  })
+  it('the target: where the takes will live and the picture’s aspect go to the engine', async () => {
+    const input = await productEngineInput({ request: 'rain', base: null, image: 'data:image/jpeg;base64,AAA', target: { place: 'frame-background', aspect: 0.8 } })
+    expect(input.target).toEqual({ place: 'frame-background', aspect: 0.8 })
+    expect((await productEngineInput({ request: 'rain', base: null, image: null })).target).toBeUndefined()
+  })
+  it('targetContext: a studio or Frame key names its place, anything else is a canvas node; the aspect comes from the picture', () => {
+    expect(targetContext('shader-studio', { width: 1600, height: 900 } as any)).toEqual({ place: 'shader-studio', aspect: 1600 / 900 })
+    expect(targetContext('frame-background', { naturalWidth: 1080, naturalHeight: 1350, width: 10, height: 10 } as any)).toEqual({ place: 'frame-background', aspect: 0.8 })
+    expect(targetContext('node_42', null)).toEqual({ place: 'canvas-node' })
+    expect(targetContext('node_42', { width: 0, height: 0 } as any)).toEqual({ place: 'canvas-node' })
   })
   it('a remix base keeps only the dial types the contract knows', () => {
     const b = baseFromEffect(def())!
