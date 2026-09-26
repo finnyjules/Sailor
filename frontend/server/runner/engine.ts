@@ -41,8 +41,9 @@ import { runIdOf, userKeyOf, type RunStore } from './store'
 import {
   emptyNodeRecord, stageKeyOf,
   type LegAction, type LegRecord, type NodeRecord, type OutputFile, type PendingRequest, type RunRecord, type RunStatus,
-  type RunnerProvider, type StageCharge, type TakeRecord, type MeasuredMedia, type UnconfirmedCancel,
+  type RunnerProvider, type RunnerValue, type StageCharge, type TakeRecord, type MeasuredMedia, type UnconfirmedCancel,
 } from './types'
+import { filesOf, slotValue } from './values'
 
 export class RunStopped extends Error {
   constructor() { super('Stopped'); this.name = 'RunStopped' }
@@ -273,19 +274,19 @@ function storableWorkflow(workflow: unknown): unknown {
   return text != null && text.length <= MAX_STORED_WORKFLOW_CHARS ? workflow : null
 }
 
+/** What a link reads: the source node's value on that slot (values.ts slotValue; pre-R0 records read as before). */
+function valueAt(take: TakeRecord): (link: [string, number]) => RunnerValue | undefined {
+  return ([from, slot]) => slotValue(take.nodes[from], slot)
+}
+
 /**
  * The files a link reads: the node's outputs, or for a later output slot of a
  * node that keeps one (the Frame's protect_mask, `slotOutputs`) that slot's
- * files. A node with no per-slot files hands every slot its outputs (a
- * LoadImage's MASK is read from its one file).
+ * files; for a node with values, the files its value on that slot names.
  */
 function filesAt(take: TakeRecord): (link: [string, number]) => OutputFile[] {
-  return ([from, slot]) => {
-    const n = take.nodes[from]
-    if (!n) return []
-    if (slot > 0 && n.slotOutputs) return n.slotOutputs[slot] ?? []
-    return n.outputs
-  }
+  const at = valueAt(take)
+  return link => filesOf(at(link))
 }
 
 /** A request's fingerprint body: with a kept subject, its mask and edge too (the saved result depends on them). */

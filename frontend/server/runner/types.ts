@@ -15,8 +15,33 @@ export type RunStatus = 'running' | 'paused' | 'done' | 'error' | 'stopped'
 export interface OutputFile {
   filename: string
   subfolder: string
-  type: 'output' | 'input' | 'temp'
+  /**
+   * 'kept': bytes the runner made itself and keeps for the run by their
+   * sha256 (./keptBytes.ts; subfolder = the run id). Never an asset, never
+   * served by /view, never a file a workflow names.
+   */
+  type: 'output' | 'input' | 'temp' | 'kept'
 }
+
+/**
+ * What one output slot of a runner node hands on (R0, step 3 spec):
+ *   files    pictures, videos or sounds, as today; `list` marks a ComfyUI
+ *            output list (is_output_list): the next node runs once per item
+ *   mask     ComfyUI MASK values, one 16-bit greyscale PNG per frame (./pictures/mask.ts)
+ *   text     a STRING (and a Moodboard's taste)
+ *   number   an INT (`int`) or a FLOAT
+ *   boolean  a BOOLEAN
+ *   json     a STRING holding JSON, exactly as the Python node prints it
+ *   glb      a 3D model address, and Sailor's saved copy when there is one
+ */
+export type RunnerValue =
+  | { kind: 'files'; files: OutputFile[]; list?: true }
+  | { kind: 'mask'; files: OutputFile[] }
+  | { kind: 'text'; text: string }
+  | { kind: 'number'; value: number; int: boolean }
+  | { kind: 'boolean'; value: boolean }
+  | { kind: 'json'; text: string }
+  | { kind: 'glb'; url: string; file: OutputFile | null }
 
 /** Who a request went to. */
 export type RunnerProvider = 'fal' | 'replicate'
@@ -84,6 +109,13 @@ export interface NodeRecord {
    * every slot reads `outputs`.
    */
   slotOutputs?: Record<number, OutputFile[]>
+  /**
+   * What each output slot hands on (R0). Absent on records written before
+   * step 3, and on nodes that only make files the old way: every slot then
+   * reads `outputs` (or `slotOutputs`). When present, `outputs` lists every
+   * file the values name (records, Gate choices and Assets read it).
+   */
+  values?: Record<number, RunnerValue>
   /**
    * Blend scene's kept subject (Task F11b fix round 1): the sha256 of the
    * picture sent and of the Frame's mask, kept in the runner's held store
