@@ -259,3 +259,68 @@ test('followed ombre grain rides the layer: moved by whole pixels, the dots move
   expect(n).toBeGreaterThan(2000)
   expect(same / n, `dots that moved with the layer: ${same}/${n}`).toBeGreaterThan(0.97)
 })
+
+test('at a DISTANCE (3× width) every outer corner of a rect and a star is fully inked', async ({ page }) => {
+  // The band's corner at a distance is an ARC round the shape's own corner (the mask is a
+  // round-join dilation). A centreline MITRED out past that arc leaves the corner with no bent
+  // paint under it — at 4× width a hole straight through the band. Measured CORNER-LOCALLY: a
+  // whole-canvas ratio hides a corner behind four long straight runs.
+  test.setTimeout(120_000)
+  const red = { type: 'stripes', a: '#ff0000', b: '#e00000', textColor: '#fff', angle: 0, density: 8 }
+  const base = { rotation: 0, opacity: 1, visible: true, fill: 'none' }
+  const W = 0.02, D = 3 * W
+  const stroke = (s: Record<string, unknown>) => [{ id: 's1', width: W, distance: D, align: 'center', join: 'round', ...s }]
+  // Each corner is named by the direction it points: the band's outermost red pixel along that
+  // direction is the tip of the corner's outer arc; the window sits half a width back inside it,
+  // on the band's centreline.
+  const star = Array.from({ length: 5 }, (_, k) => { const t = -Math.PI / 2 + (k * 2 * Math.PI) / 5; return [Math.cos(t), Math.sin(t)] as [number, number] })
+  const cases: [string, (s: Record<string, unknown>) => unknown[], [number, number][]][] = [
+    ['rect', (s) => [{ id: 'r', kind: 'rect', x: 0.5, y: 0.5, w: 0.4, h: 0.3, radius: 0, ...base, strokes: stroke(s) }],
+      [[1, 1], [1, -1], [-1, 1], [-1, -1]].map(([x, y]) => [x! / Math.SQRT2, y! / Math.SQRT2] as [number, number])],
+    ['star', (s) => [{ id: 't', kind: 'star', x: 0.5, y: 0.5, w: 0.3, h: 0.3, points: 5, innerRatio: 0.5, cornerRadius: 0, ...base, strokes: stroke(s) }], star],
+  ]
+  const corners = (dirs: [number, number][], at: { cx: number; cy: number; half: number }[] | null) =>
+    page.evaluate(({ dirs, at, W }) => {
+      const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+      const d = cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data
+      const isRed = (x: number, y: number) => { const i = (y * cv.width + x) * 4; return d[i]! > 150 && d[i + 1]! < 90 && d[i + 3]! > 200 }
+      const wins = at ?? dirs.map(([ux, uy]) => {
+        let best = -Infinity, bx = 0, by = 0
+        for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) {
+          if (!isRed(x, y)) continue
+          const p = (x - cv.width / 2) * ux + (y - cv.height / 2) * uy
+          if (p > best) { best = p; bx = x; by = y }
+        }
+        const back = (W / 2) * cv.width
+        return { cx: bx - ux * back, cy: by - uy * back, half: Math.max(2, Math.floor(0.3 * W * cv.width)) }
+      })
+      const counts = wins.map(w => {
+        let n = 0
+        for (let y = Math.round(w.cy - w.half); y <= Math.round(w.cy + w.half); y++)
+          for (let x = Math.round(w.cx - w.half); x <= Math.round(w.cx + w.half); x++) if (isRed(x, y)) n++
+        return n
+      })
+      return { wins, counts }
+    }, { dirs, at, W })
+  const short: string[] = []
+  for (const [name, make, dirs] of cases) {
+    await render(page, make({ paint: red }))
+    const still = await corners(dirs, null)
+    await render(page, make({ paint: red, follow: true }))
+    const follow = await corners(dirs, still.wins)
+    still.counts.forEach((n, k) => {
+      expect(n, `${name} corner ${k}: control inks its window`).toBeGreaterThan(20)
+      if (follow.counts[k]! / n < 0.9) short.push(`${name} corner ${k}: followed ${follow.counts[k]} vs still ${n}`)
+    })
+  }
+  expect(short, 'corners the followed band leaves short of ink').toEqual([])
+  // For the eye: the same two at 3× width, in stripes that show which way the paint runs.
+  const look = { type: 'stripes', a: '#ff3b30', b: '#1d3bff', textColor: '#fff', angle: 0, density: 8 }
+  await render(page, [
+    { ...cases[0]![1]({ paint: look, follow: true })[0] as object, x: 0.28, w: 0.22, h: 0.16 },
+    { ...cases[1]![1]({ paint: look, follow: true })[0] as object, x: 0.72, w: 0.24, h: 0.24 },
+  ])
+  await page.locator('[data-testid="compositor-stack-canvas"]').screenshot({
+    path: '/private/tmp/claude-501/-Users-julien-Documents-GitHub-Sailor/32b5e250-c307-4162-b15a-4e4f8547b0f7/scratchpad/follow-distance-corners.png',
+  })
+})

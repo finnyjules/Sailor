@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  followFrame, triangleAffine, bandTriangles, followStripPlan, fadeStops,
+  followFrame, triangleAffine, bandTriangles, followStripPlan, fadeStops, roundOffsetPolyline, ringIsHole,
 } from '~/lib/compositor/strokeFollow'
 import { ombreHash, ombrePicker } from '~/lib/spacetype/fillTile'
 import { resamplePolyline } from '~/lib/compositor/strokeShapes'
@@ -51,7 +51,7 @@ const distToTriangle = (p: P, tri: readonly [P, P, P]): number => {
 }
 /** Every point closer than 0.97·halfWidth to the outline must land inside (or within 0.3 units
  *  of the edge of) at least one kept triangle's dst — the coverage the crescent-gap bug broke. */
-function assertBandCoverage(outline: readonly P[], halfWidth: number, gridStep = 2): void {
+function assertBandCoverage(outline: readonly P[], halfWidth: number, gridStep = 2, tolerance = 0.3): void {
   const f = followFrame(outline, true, halfWidth)!
   const tris = bandTriangles(f, halfWidth)
   const xs = outline.map(p => p.x), ys = outline.map(p => p.y)
@@ -62,11 +62,43 @@ function assertBandCoverage(outline: readonly P[], halfWidth: number, gridStep =
     for (let y = y0; y <= y1; y += gridStep) {
       const p = { x, y }
       if (polylineDistance(p, outline, true) >= 0.97 * halfWidth) continue
+      if (!tris.some(t => distToTriangle(p, t.dst) <= tolerance)) misses.push(p)
+    }
+  }
+  expect(misses.length, `${misses.length} uncovered points; examples: ${JSON.stringify(misses.slice(0, 5))}`).toBe(0)
+}
+
+/** Signed distance to a closed polygon: negative inside. The band a round-join dilation /
+ *  erosion paints at centre offset `c` is exactly { p : c − h ≤ sd(p) ≤ c + h }. */
+const signedDistance = (p: P, poly: readonly P[]): number => {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i]!, b = poly[j]!
+    if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside
+  }
+  const d = polylineDistance(p, poly, true)
+  return inside ? -d : d
+}
+/** The painter's route for a straight band at centre offset `centre`: the round-offset
+ *  centreline, resampled, framed and meshed — and every point of the TRUE band (the mask's
+ *  round-join dilation) must fall under a kept triangle. */
+function assertOffsetBandCoverage(shape: readonly P[], halfWidth: number, centre: number, gridStep = 2): void {
+  const src = resamplePolyline(shape, true, 1)
+  const line = roundOffsetPolyline(src, true, centre)
+  const f = followFrame(resamplePolyline(line, true, Math.max(0.5, halfWidth / 12)), true, halfWidth)!
+  const tris = bandTriangles(f, halfWidth)
+  const xs = shape.map(p => p.x), ys = shape.map(p => p.y), pad = Math.abs(centre) + halfWidth + 2
+  const misses: P[] = []
+  for (let x = Math.min(...xs) - pad; x <= Math.max(...xs) + pad; x += gridStep) {
+    for (let y = Math.min(...ys) - pad; y <= Math.max(...ys) + pad; y += gridStep) {
+      const p = { x, y }, s = signedDistance(p, shape)
+      if (s < centre - 0.97 * halfWidth || s > centre + 0.97 * halfWidth) continue
       if (!tris.some(t => distToTriangle(p, t.dst) <= 0.3)) misses.push(p)
     }
   }
   expect(misses.length, `${misses.length} uncovered points; examples: ${JSON.stringify(misses.slice(0, 5))}`).toBe(0)
 }
+const rectCorners = (w: number, h: number): P[] => [{ x: -w / 2, y: -h / 2 }, { x: w / 2, y: -h / 2 }, { x: w / 2, y: h / 2 }, { x: -w / 2, y: h / 2 }]
 
 describe('followFrame', () => {
   it('measures the loop, closing chord included', () => {
@@ -158,8 +190,8 @@ describe('bandTriangles', () => {
     assertBandCoverage(outline, 15)
   })
   it('covers the band fully round a rect corner, half-width 10', () => {
-    assertBandCoverage(rect(300, 200), 10)
-  })
+    assertBandCoverage(rect(300, 200), 10, 0.5, 0)
+  }, 120_000)
   it('covers the band fully round a rect corner, half-width 40', () => {
     assertBandCoverage(rect(300, 200), 40)
   })
@@ -167,8 +199,8 @@ describe('bandTriangles', () => {
     assertBandCoverage(resamplePolyline(star5(150, 60), true, 1), 15)
   })
   it('covers the band fully round a concave L-shape corner', () => {
-    assertBandCoverage(resamplePolyline(lShape, true, 1), 10)
-  })
+    assertBandCoverage(resamplePolyline(lShape, true, 1), 10, 0.5, 0)
+  }, 120_000)
 })
 
 describe('followStripPlan', () => {
@@ -220,5 +252,92 @@ describe('ombreHash', () => {
       expect(pick(x, y)).toBe(ombreHash(x, y) < t)
       expect(ombreHash(x, y)).toBeGreaterThanOrEqual(0); expect(ombreHash(x, y)).toBeLessThan(1)
     }
+  })
+})
+
+describe('roundOffsetPolyline', () => {
+  const sq = rectCorners(100, 100)   // corners at (±50, ±50)
+  const near = (pts: readonly P[], c: P) => pts.filter(p => Math.abs(p.x) > 50 && Math.abs(p.y) > 50 && Math.sign(p.x) === Math.sign(c.x) && Math.sign(p.y) === Math.sign(c.y))
+  it('distance 0 returns the points unchanged', () => {
+    expect(roundOffsetPolyline(sq, true, 0)).toEqual(sq)
+  })
+  it('+d: every square corner becomes a quarter ARC exactly d from the corner vertex', () => {
+    for (const cw of [true, false]) {
+      const pts = roundOffsetPolyline(cw ? sq : sq.slice().reverse(), true, 20)
+      for (const c of sq) {
+        const arc = near(pts, c)
+        expect(arc.length, `cw=${cw} corner ${JSON.stringify(c)}`).toBeGreaterThan(4)
+        for (const p of arc) expect(Math.hypot(p.x - c.x, p.y - c.y)).toBeCloseTo(20, 9)
+      }
+      // the straight runs sit exactly d out: nothing is closer than d to the square, nothing further
+      for (const p of pts) expect(polylineDistance(p, sq, true)).toBeCloseTo(20, 9)
+    }
+  })
+  it('−d: a sharp (mitred) inner corner, no arc', () => {
+    const pts = roundOffsetPolyline(sq, true, -20)
+    expect(pts.length).toBe(4)
+    for (const p of pts) { expect(Math.abs(p.x)).toBeCloseTo(30, 9); expect(Math.abs(p.y)).toBeCloseTo(30, 9) }
+  })
+  it('outward −1 flips the side (a hole ring)', () => {
+    expect(roundOffsetPolyline(sq, true, 20, -1)).toEqual(roundOffsetPolyline(sq, true, -20))
+  })
+  it('open line: ends offset square to their segment, the turn arcs on its outer side only', () => {
+    // an L: right along y = 0, then down. Left normal (y-down) of +x travel is −y.
+    const open = [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 50, y: 50 }]
+    const left = roundOffsetPolyline(open, false, 10)
+    expect(left[0]).toEqual({ x: 0, y: -10 })
+    expect(left[left.length - 1]).toEqual({ x: 60, y: 50 })
+    const arc = left.slice(1, -1)
+    expect(arc.length).toBeGreaterThan(3)
+    for (const p of arc) expect(Math.hypot(p.x - 50, p.y)).toBeCloseTo(10, 9)
+    const right = roundOffsetPolyline(open, false, -10)
+    const want = [{ x: 0, y: 10 }, { x: 40, y: 10 }, { x: 40, y: 50 }]
+    expect(right.length).toBe(3)
+    right.forEach((p, i) => { expect(p.x).toBeCloseTo(want[i]!.x, 9); expect(p.y).toBeCloseTo(want[i]!.y, 9) })
+  })
+  it('a star: arcs at the points, mitres in the notches, when pushed out', () => {
+    const star = star5(150, 60)
+    const pts = roundOffsetPolyline(star, true, 30)
+    for (const [k, v] of star.entries()) {
+      const close = pts.filter(p => Math.abs(Math.hypot(p.x - v.x, p.y - v.y) - 30) < 1e-9)
+      if (k % 2 === 0) expect(close.length, `point ${k}`).toBeGreaterThan(4)   // tip: an arc round it
+    }
+    // nothing lies closer than 30 to the star (mitred notch points lie further, arcs exactly 30)
+    for (const p of pts) expect(polylineDistance(p, star, true)).toBeGreaterThan(30 - 1e-9)
+  })
+})
+
+describe('the band mesh covers the round-join band at a distance', () => {
+  // The painter's straight band: centre offset `c`, half-width h. At c = 4h the old mitred
+  // centreline left 1,024 of 11,096 rect points (h 15, c 90) and 3,008 of 11,380 star points
+  // uncovered — a hole through the band at every corner.
+  for (const [name, shape] of [['rect', rectCorners(300, 200)], ['star', star5(150, 60)], ['L-shape', lShape]] as const) {
+    for (const c of [30, 60, 90]) {
+      it(`${name}, h 15, centre ${c}`, () => assertOffsetBandCoverage(shape, 15, c))
+    }
+  }
+})
+
+describe('ringIsHole', () => {
+  const sq = (s: number, cw = true): P[] => { const c = rectCorners(s, s); return cw ? c : c.slice().reverse() }
+  const ring = (pts: P[]) => ({ pts, closed: true })
+  it('an inner ring wound the OTHER way is a hole under either rule', () => {
+    const rings = [ring(sq(200)), ring(sq(100, false))]
+    for (const rule of ['nonzero', 'evenodd'] as const) {
+      expect(ringIsHole(rings, 0, rule)).toBe(false)
+      expect(ringIsHole(rings, 1, rule)).toBe(true)
+    }
+  })
+  it('an inner ring wound the SAME way is a hole only under evenodd (nonzero fills it)', () => {
+    const rings = [ring(sq(200)), ring(sq(100))]
+    expect(ringIsHole(rings, 1, 'nonzero')).toBe(false)
+    expect(ringIsHole(rings, 1, 'evenodd')).toBe(true)
+    expect(ringIsHole(rings, 0, 'nonzero')).toBe(false)
+  })
+  it('an island inside a hole is not a hole; open subpaths never are', () => {
+    const rings = [ring(sq(300)), ring(sq(200, false)), ring(sq(100))]
+    expect(ringIsHole(rings, 2, 'nonzero')).toBe(false)
+    expect(ringIsHole(rings, 2, 'evenodd')).toBe(false)
+    expect(ringIsHole([{ pts: sq(100), closed: false }, ring(sq(300))], 0, 'evenodd')).toBe(false)
   })
 })

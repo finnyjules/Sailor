@@ -198,3 +198,129 @@ export function fadeStops(fade: 'across' | 'along', repeats: number): { axis: 'a
   stops.push({ offset: 1, t: 0 })
   return { axis: 'along', stops }
 }
+
+const shoelaceSum = (pts: readonly FlatPoint[]) => {
+  let a = 0
+  for (let i = 0; i < pts.length; i++) { const p = pts[i]!, q = pts[(i + 1) % pts.length]!; a += p.x * q.y - q.x * p.y }
+  return a
+}
+
+/**
+ * Offset a polyline by `distance` the way the band MASK offsets its shape: a dilation (or, for a
+ * negative distance, an erosion) with ROUND joins. `offsetPolyline` mitres every corner, which
+ * is right for the wobbled band it draws but wrong for the straight band's mask
+ * (`paintStrokeBand`, join 'round'): there a corner the offset turns AWAY from becomes an ARC of
+ * radius |distance| centred on the shape's own corner, and a mitred centreline pushed out past
+ * that arc leaves the mask's corner with no bent paint under it.
+ *
+ * Each segment is moved `distance` along its outward normal (outward = the ring's own winding,
+ * the same convention as `offsetPolyline`, times `outward`). At a vertex:
+ * - the offset edges SEPARATE (the line turns away from the offset side) → an arc round the
+ *   source vertex at radius |distance|, sampled so its sagitta stays ≲ 0.1 units;
+ * - the offset edges CROSS (the line turns towards the offset side) → their mitred
+ *   intersection, which is genuinely sharp in the dilation / erosion (capped at 10×, as
+ *   `offsetPolyline` caps its mitre, so a hairpin cannot shoot off).
+ * `distance` 0 returns the points unchanged.
+ */
+export function roundOffsetPolyline(
+  pts: readonly FlatPoint[], closed: boolean, distance: number, outward: 1 | -1 = 1,
+): FlatPoint[] {
+  if (!distance || !Number.isFinite(distance)) return pts.slice()
+  // Consecutive duplicates (and a closing duplicate) have no direction to offset along.
+  const src: FlatPoint[] = []
+  for (const p of pts) { const q = src[src.length - 1]; if (!q || Math.hypot(p.x - q.x, p.y - q.y) > 1e-9) src.push(p) }
+  if (closed && src.length > 1) { const a = src[0]!, b = src[src.length - 1]!; if (Math.hypot(a.x - b.x, a.y - b.y) <= 1e-9) src.pop() }
+  const n = src.length
+  if (n < 2) return src.map(p => ({ x: p.x, y: p.y }))
+  const sign = (closed && shoelaceSum(src) < 0 ? -1 : 1) * outward
+  const D = distance * sign
+  const segs = closed ? n : n - 1
+  // Per segment: unit direction and left normal (y-down: left of (dx, dy) is (dy, −dx)).
+  const dir: FlatPoint[] = [], nrm: FlatPoint[] = []
+  for (let i = 0; i < segs; i++) {
+    const a = src[i]!, b = src[(i + 1) % n]!
+    const l = Math.hypot(b.x - a.x, b.y - a.y) || 1
+    const u = { x: (b.x - a.x) / l, y: (b.y - a.y) / l }
+    dir.push(u); nrm.push({ x: u.y, y: -u.x })
+  }
+  const r = Math.abs(D)
+  const maxStep = Math.min(0.2, Math.sqrt(0.8 / r))   // sagitta r·θ²/8 ≤ 0.1
+  const out: FlatPoint[] = []
+  const corner = (b: FlatPoint, i1: number, i2: number) => {
+    const n1 = nrm[i1]!, n2 = nrm[i2]!, v = dir[i2]!
+    const turn = (v.x * n1.x + v.y * n1.y) * D   // > 0: turning towards the offset side
+    const dot = Math.max(-1, Math.min(1, n1.x * n2.x + n1.y * n2.y))
+    if (turn < 0) {
+      // The offset edges separate: the dilation's round join, centred on the source vertex.
+      const ang = Math.atan2(n1.x * n2.y - n1.y * n2.x, dot)
+      const steps = Math.max(1, Math.ceil(Math.abs(ang) / maxStep))
+      for (let k = 0; k <= steps; k++) {
+        const t = (ang * k) / steps, c = Math.cos(t), s = Math.sin(t)
+        out.push({ x: b.x + (n1.x * c - n1.y * s) * D, y: b.y + (n1.x * s + n1.y * c) * D })
+      }
+    } else {
+      // The offset edges cross (or run on, collinear): their intersection.
+      const scale = Math.min(10, 1 / Math.max(0.1, Math.sqrt((1 + dot) / 2)))
+      let mx = n1.x + n2.x, my = n1.y + n2.y
+      const ml = Math.hypot(mx, my)
+      if (ml < 1e-9) { mx = n1.x; my = n1.y } else { mx /= ml; my /= ml }
+      out.push({ x: b.x + mx * D * scale, y: b.y + my * D * scale })
+    }
+  }
+  if (closed) {
+    for (let i = 0; i < n; i++) corner(src[i]!, (i - 1 + segs) % segs, i)
+  } else {
+    const a = src[0]!, z = src[n - 1]!
+    out.push({ x: a.x + nrm[0]!.x * D, y: a.y + nrm[0]!.y * D })
+    for (let i = 1; i < n - 1; i++) corner(src[i]!, i - 1, i)
+    out.push({ x: z.x + nrm[segs - 1]!.x * D, y: z.y + nrm[segs - 1]!.y * D })
+  }
+  return out
+}
+
+/** Winding number of `ring` round (x, y). */
+function windingOf(x: number, y: number, ring: readonly FlatPoint[]): number {
+  let w = 0
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i]!, b = ring[(i + 1) % ring.length]!
+    const side = (b.x - a.x) * (y - a.y) - (x - a.x) * (b.y - a.y)
+    if (a.y <= y) { if (b.y > y && side > 0) w++ }
+    else if (b.y <= y && side < 0) w--
+  }
+  return w
+}
+
+/**
+ * Is closed ring `i` a HOLE of the shape — the boundary where material gives way to empty on
+ * its OWN inside? Decided the way the fill itself decides, under `fillRule`, over every closed
+ * ring: a point a hair OUTSIDE the ring (along its own outward normal) is filled and a point a
+ * hair INSIDE is not. So under 'nonzero' an inner ring wound the SAME way as the outer one is
+ * not a hole (both sides are filled), while under 'evenodd' it is. Open subpaths never are.
+ */
+export function ringIsHole(
+  rings: readonly { pts: readonly FlatPoint[]; closed: boolean }[], i: number, fillRule: CanvasFillRule = 'nonzero',
+): boolean {
+  const ring = rings[i]
+  if (!ring || !ring.closed || ring.pts.length < 3) return false
+  const pts = ring.pts
+  // Test at the midpoint of the ring's longest edge: least likely to sit on another ring.
+  let best = -1, bl = 0
+  for (let k = 0; k < pts.length; k++) {
+    const a = pts[k]!, b = pts[(k + 1) % pts.length]!, l = Math.hypot(b.x - a.x, b.y - a.y)
+    if (l > bl) { bl = l; best = k }
+  }
+  if (best < 0) return false
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const p of pts) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y) }
+  const eps = Math.max(1e-6, Math.min(bl * 0.25, Math.hypot(maxX - minX, maxY - minY) * 1e-4))
+  const a = pts[best]!, b = pts[(best + 1) % pts.length]!
+  const sign = shoelaceSum(pts) < 0 ? -1 : 1
+  const nx = ((b.y - a.y) / bl) * sign, ny = (-(b.x - a.x) / bl) * sign   // own outward normal
+  const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2
+  const filled = (x: number, y: number) => {
+    let w = 0
+    for (const r of rings) if (r.closed && r.pts.length >= 3) w += fillRule === 'evenodd' ? Math.abs(windingOf(x, y, r.pts)) % 2 : windingOf(x, y, r.pts)
+    return fillRule === 'evenodd' ? w % 2 === 1 : w !== 0
+  }
+  return filled(mx + nx * eps, my + ny * eps) && !filled(mx - nx * eps, my - ny * eps)
+}

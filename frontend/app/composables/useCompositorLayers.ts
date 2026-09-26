@@ -78,7 +78,7 @@ import { commandsToPathData, type VectorCommand } from '~/lib/vector/svg'
 import { shapeStrokeMarkMatrices, pathOutlineFlattenTolerance, offsetPolyline, resamplePolyline, type WobbleSpec } from '~/lib/compositor/strokeShapes'
 import {
   followFrame, bandTriangles, triangleAffine, followStripPlan, fadeStops, paintCanFollow, FOLLOW_MAX_REACH,
-  type FollowFrame,
+  roundOffsetPolyline, ringIsHole, type FollowFrame,
 } from '~/lib/compositor/strokeFollow'
 import { DEFAULT_FLATTEN_TOLERANCE, flattenPath, longestSubpath, type FlatSubpath } from '~/lib/compositor/pathFlatten'
 import { shapeById } from '~/lib/shapes/catalog'
@@ -4078,30 +4078,6 @@ const FOLLOW_STRIP_MAX_AREA = 16_000_000
  *  after its end), so the triangles either side of the loop's seam sample real paint past it. */
 const FOLLOW_STRIP_WRAP = 4
 
-/** Even-odd point-in-polygon. */
-function pointInRing(x: number, y: number, ring: readonly { x: number; y: number }[]): boolean {
-  let inside = false
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const a = ring[i]!, b = ring[j]!
-    if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside
-  }
-  return inside
-}
-
-/** Is closed subpath `i` a HOLE of the shape — inside an odd number of the OTHER closed rings?
- *  Its first vertex stands for it (rings of one outline do not cross). Open subpaths never are. */
-function ringIsHole(subs: readonly FlatSubpath[], i: number): boolean {
-  const sub = subs[i]!
-  const p = sub.pts[0]
-  if (!sub.closed || !p) return false
-  let n = 0
-  for (let k = 0; k < subs.length; k++) {
-    const other = subs[k]!
-    if (k !== i && other.closed && other.pts.length >= 3 && pointInRing(p.x, p.y, other.pts)) n++
-  }
-  return n % 2 === 1
-}
-
 /**
  * Steps 1–3 of `paintFollowedBand` for ONE subpath: its centreline, its own straight strip (its
  * own length, so its own tile count / mirror / fade), bent onto `bent`. Returns the line's
@@ -4118,7 +4094,15 @@ function bendFollowedLine(bent: CanvasRenderingContext2D, sub: FlatSubpath, o: {
   if (sub.pts.length < 2) return null
   // A HOLE ring's own winding says its outside is the shape's material; the band's sides are
   // the SHAPE's, so both the offset and the normals are flipped for it (see `ringIsHole`).
-  const line = offsetPolyline(sub.pts, sub.closed, hole ? -centre : centre, o.wobble ?? undefined)
+  // The centreline is offset the way its MASK offsets the shape. A wobbled band's mask is
+  // `paintWobbledBand`, which strokes `offsetPolyline`'s mitred line, so the wobble route uses
+  // that same line. The straight band's mask is `paintStrokeBand` with round joins — a
+  // dilation whose corner is an ARC round the shape's own corner — so its centreline takes the
+  // same arc (`roundOffsetPolyline`); a mitred one would run out past the arc and leave the
+  // mask's corner with no bent paint under it (a hole through the band at distance 4× width).
+  const line = o.wobble
+    ? offsetPolyline(sub.pts, sub.closed, hole ? -centre : centre, o.wobble)
+    : roundOffsetPolyline(sub.pts, sub.closed, centre, hole ? -1 : 1)
   const pts = resamplePolyline(line, sub.closed, Math.max(2 / sx, o.width / 24))
   const h = o.width / 2
   const frame = followFrame(pts, sub.closed, h, hole ? -1 : 1)
@@ -4220,7 +4204,8 @@ function bendFollowedLine(bent: CanvasRenderingContext2D, sub: FlatSubpath, o: {
  *    subpath (`bendFollowedLine`, each with its own strip), or the longest alone when asked.
  * 2. The paint is drawn into a straight strip, `length × width` in this ctx's units, rastered
  *    at device resolution (`followStripPlan` says how).
- * 3. The strip is bent onto a scratch, two triangles per centreline segment, each clipped
+ * 3. The strip is bent onto a scratch, four triangles per centreline segment (`bandTriangles`:
+ *    an inner and an outer half, two each), each clipped
  *    (grown 0.6 device px so neighbours overlap instead of leaving hairline seams) and drawn
  *    under the affine map from strip to band.
  * 4. The band itself — painted by `mask`, i.e. the ordinary band painter in solid ink — is
@@ -4249,6 +4234,8 @@ export function paintFollowedBand(ctx: CanvasRenderingContext2D, o: {
   /** Which rings to bend. 'all' (default): every subpath, as the straight band's mask covers
    *  them all. 'longest': the one ring a wobbled band draws. */
   subpaths?: 'all' | 'longest'
+  /** The layer's fill rule — what decides which rings are holes (`ringIsHole`). */
+  fillRule?: CanvasFillRule
 }): boolean {
   if (!(o.width > 0) || !paintCanFollow(o.paint)) return false
   const d = typeof o.distance === 'number' && Number.isFinite(o.distance) ? o.distance : 0
@@ -4275,7 +4262,7 @@ export function paintFollowedBand(ctx: CanvasRenderingContext2D, o: {
   // for a hole ring "outside the shape" is INTO the hole. So on every ring strip y = 0 (the
   // ombre's colour A) is the side inside the material.
   for (let i = 0; i < subs.length; i++) {
-    const hole = o.subpaths !== 'longest' && ringIsHole(subs, i)
+    const hole = o.subpaths !== 'longest' && ringIsHole(subs, i, o.fillRule || 'nonzero')
     const f = bendFollowedLine(bent, subs[i]!, o, centre, sx, hole)
     if (f) frames.push(f)
   }
@@ -4503,8 +4490,11 @@ function paintStrokeStack(
     })
     // FOLLOWS THE LINE. Needs the outline to bend along; without one (or with a paint that has
     // nothing to bend) it paints the ordinary band below. The mask is this very band in ink,
-    // with round corners — at distance 0 `strokeAligned` strokes with the scratch's own
-    // `lineJoin`, so it is set here as well as passed.
+    // with ROUND corners, the corners `roundOffsetPolyline` bends the paint round. `join` only
+    // reaches the non-zero-distance dilation; at distance 0 `strokeAligned` strokes with
+    // whatever `lineJoin` its target context has — the mask scratch `c` for centre and inside,
+    // but a FRESH scratch of its own for 'outside', which only `build` touches. So the round
+    // join is set on `c` AND laid by the `build` handed down.
     if (strokeFollowsOf(st) && !foil) {
       const outline = outlineData()
       if (outline && paintFollowedBand(ctx, {
@@ -4517,13 +4507,14 @@ function paintStrokeStack(
         paintBox,
         fade: strokeFadeOf(st),
         fadeRepeats: strokeFadeRepeatsOf(st),
+        fillRule: o.fillRule,
         mask: (c) => {
-          if (o.build && !o.path) o.build(c)
-          c.lineJoin = 'round'
+          const build = (b: CanvasRenderingContext2D) => { if (o.build) o.build(b); b.lineJoin = 'round' }
+          if (!o.path) build(c); else c.lineJoin = 'round'
           paintStrokeBand(c, {
             width: st.width * o.widthScale, distance: (st.distance ?? 0) * o.widthScale,
             style: () => '#000', align: st.align, join: 'round',
-            dash: strokeDashSegments(st.dash, o.widthScale), path: o.path, fillRule: o.fillRule, build: o.build,
+            dash: strokeDashSegments(st.dash, o.widthScale), path: o.path, fillRule: o.fillRule, build,
           })
         },
       })) continue
