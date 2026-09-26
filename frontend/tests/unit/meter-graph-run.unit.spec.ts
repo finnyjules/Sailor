@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { gunzipSync } from 'node:zlib'
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { meterGraphSubmit, isPromptPath, holdWithRefusal, validateGraphFileRefs } from '../../server/utils/meterGraphRun'
 import { MeterRefusalError } from '../../server/utils/requestMeter'
 import { UnpricedGraphError } from '../../server/utils/priceBook'
 import { normalizeHostedPrompt } from '../../server/utils/hostedPrompt'
+import { moderatePrompt, __setModerationFetchForTests, __setModerationTimingForTests, MODERATION_UNAVAILABLE_MESSAGE, MODERATION_TOO_LONG_MESSAGE } from '../../server/utils/moderation'
 
 /** The committed node catalog (what the hosted gate falls back to), for the real normalisation. */
 const CATALOG = JSON.parse(gunzipSync(readFileSync(join(process.cwd(), 'server/native/objectInfo.baseline.json.gz'))).toString('utf8')) as Record<string, any>
@@ -26,6 +27,8 @@ function deps(overrides: Partial<any> = {}) {
   }
 }
 const BODY = { prompt: { '1': { class_type: 'SaveImage', inputs: {} } }, client_id: 'c1' }
+/** A graph with text to check (BODY has none, so it makes no moderation call — G3). */
+const TEXT_BODY = { prompt: { '1': { class_type: 'GenerateImageNode', inputs: { prompt: 'a fox' } } }, client_id: 'c1' }
 
 describe('meterGraphSubmit', () => {
   it('refuses without a user (401), no side effects at all', async () => {
@@ -100,7 +103,7 @@ describe('meterGraphSubmit', () => {
 
   it('runs the spend guard BEFORE file-ref validation, moderation, pricing and the hold (order matters)', async () => {
     const d = deps()
-    await meterGraphSubmit('u1', BODY, d)
+    await meterGraphSubmit('u1', TEXT_BODY, d)
     expect(d.spendGuard.mock.invocationCallOrder[0]).toBeLessThan(d.validateFileRefs.mock.invocationCallOrder[0])
     expect(d.spendGuard.mock.invocationCallOrder[0]).toBeLessThan(d.moderatePrompt.mock.invocationCallOrder[0])
     expect(d.spendGuard.mock.invocationCallOrder[0]).toBeLessThan(d.priceGraph.mock.invocationCallOrder[0])
@@ -118,7 +121,7 @@ describe('meterGraphSubmit', () => {
   // cost — no price, no hold, no forward, engine never touched.
   it('refuses a moderation-flagged prompt (400) with NO hold, NO forward, engine untouched', async () => {
     const d = deps({ moderatePrompt: vi.fn(async () => ({ ok: false as const, categories: ['violence'] })) })
-    await expect(meterGraphSubmit('u1', BODY, d)).rejects.toMatchObject({ statusCode: 400, data: { categories: ['violence'] } })
+    await expect(meterGraphSubmit('u1', TEXT_BODY, d)).rejects.toMatchObject({ statusCode: 400, data: { categories: ['violence'] } })
     expect(d.moderatePrompt).toHaveBeenCalled()
     expect(d.priceGraph).not.toHaveBeenCalled()
     expect(d.hold).not.toHaveBeenCalled()
@@ -202,7 +205,7 @@ describe('meterGraphSubmit', () => {
 
   it('moderates AFTER file-ref validation and BEFORE pricing/hold (order matters)', async () => {
     const d = deps()
-    await meterGraphSubmit('u1', BODY, d)
+    await meterGraphSubmit('u1', TEXT_BODY, d)
     expect(d.validateFileRefs.mock.invocationCallOrder[0]).toBeLessThan(d.moderatePrompt.mock.invocationCallOrder[0])
     expect(d.moderatePrompt.mock.invocationCallOrder[0]).toBeLessThan(d.priceGraph.mock.invocationCallOrder[0])
     expect(d.moderatePrompt.mock.invocationCallOrder[0]).toBeLessThan(d.hold.mock.invocationCallOrder[0])
@@ -344,5 +347,87 @@ describe('isPromptPath', () => {
     expect(isPromptPath('/prompt')).toBe(true)
     expect(isPromptPath('/prompt?comfyWorker=2')).toBe(true)
     expect(isPromptPath('/prompted')).toBe(false)
+  })
+})
+
+// G3 (user decision 09-26): in hosted, moderation fails CLOSED on the ComfyUI
+// path. The real moderatePrompt, with the moderation service faked.
+describe('meterGraphSubmit — moderation fails closed (hosted)', () => {
+  const saved = { key: process.env.OPENAI_API_KEY }
+  beforeEach(() => {
+    process.env.OPENAI_API_KEY = 'sk-test'
+    __setModerationTimingForTests({ timeoutMs: 30, retryDelayMs: 1 })
+  })
+  afterEach(() => {
+    if (saved.key === undefined) delete process.env.OPENAI_API_KEY
+    else process.env.OPENAI_API_KEY = saved.key
+    __setModerationFetchForTests(null)
+    __setModerationTimingForTests(null)
+  })
+  const realModeration = () => deps({ moderatePrompt: vi.fn((t: string) => moderatePrompt(t, { hosted: true })) })
+  const clean = () => ({ ok: true, status: 200, json: async () => ({ results: [{ flagged: false, categories: {} }] }) })
+  const fail500 = () => ({ ok: false, status: 500, json: async () => ({}) })
+  const expectNothingHeld = (d: ReturnType<typeof deps>) => {
+    expect(d.priceGraph).not.toHaveBeenCalled()
+    expect(d.hold).not.toHaveBeenCalled()
+    expect(d.forward).not.toHaveBeenCalled()
+    expect(d.registerRun).not.toHaveBeenCalled()
+    expect(d.startSettle).not.toHaveBeenCalled()
+  }
+
+  it('no key: refused with the plain message, nothing held', async () => {
+    delete process.env.OPENAI_API_KEY
+    const fetchSpy = vi.fn(); __setModerationFetchForTests(fetchSpy as any)
+    const d = realModeration()
+    await expect(meterGraphSubmit('u1', TEXT_BODY, d)).rejects.toMatchObject({ statusCode: 503, message: MODERATION_UNAVAILABLE_MESSAGE })
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expectNothingHeld(d)
+  })
+
+  it('a timeout, twice: refused, nothing held', async () => {
+    const hang = vi.fn((_u: string, init: any) => new Promise((_r, reject) => init.signal.addEventListener('abort', () => reject(new Error('aborted')))))
+    __setModerationFetchForTests(hang as any)
+    const d = realModeration()
+    await expect(meterGraphSubmit('u1', TEXT_BODY, d)).rejects.toMatchObject({ statusCode: 503, message: MODERATION_UNAVAILABLE_MESSAGE })
+    expect(hang).toHaveBeenCalledTimes(2)
+    expectNothingHeld(d)
+  })
+
+  it('a 500 then success: the retry passes and the run goes ahead', async () => {
+    const f = vi.fn().mockResolvedValueOnce(fail500()).mockResolvedValueOnce(clean())
+    __setModerationFetchForTests(f as any)
+    const d = realModeration()
+    const res = await meterGraphSubmit('u1', TEXT_BODY, d)
+    expect(res.status).toBe(200)
+    expect(f).toHaveBeenCalledTimes(2)
+    expect(d.hold).toHaveBeenCalledWith('u1', 5)
+  })
+
+  it('a 500 twice: refused, nothing held or charged', async () => {
+    const f = vi.fn().mockResolvedValue(fail500())
+    __setModerationFetchForTests(f as any)
+    const d = realModeration()
+    await expect(meterGraphSubmit('u1', TEXT_BODY, d)).rejects.toMatchObject({ statusCode: 503, message: MODERATION_UNAVAILABLE_MESSAGE })
+    expect(f).toHaveBeenCalledTimes(2)
+    expectNothingHeld(d)
+  })
+
+  it('text over the service limit: refused as too long before it is sent, nothing held', async () => {
+    const f = vi.fn(); __setModerationFetchForTests(f as any)
+    const d = realModeration()
+    const padded = { prompt: { '1': { class_type: 'GenerateImageNode', inputs: { prompt: 'a fox '.repeat(6000) } } } }
+    await expect(meterGraphSubmit('u1', padded, d)).rejects.toMatchObject({ statusCode: 400, message: MODERATION_TOO_LONG_MESSAGE })
+    expect(f).not.toHaveBeenCalled()
+    expectNothingHeld(d)
+  })
+
+  it('a graph with no text makes no moderation call and is never refused for it', async () => {
+    delete process.env.OPENAI_API_KEY // would refuse any text
+    const f = vi.fn(); __setModerationFetchForTests(f as any)
+    const d = realModeration()
+    const res = await meterGraphSubmit('u1', BODY, d)
+    expect(res.status).toBe(200)
+    expect(d.moderatePrompt).not.toHaveBeenCalled()
+    expect(f).not.toHaveBeenCalled()
   })
 })

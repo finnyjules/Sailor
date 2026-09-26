@@ -34,7 +34,7 @@ import { extractGraphPromptText } from './graphPromptText'
 import { staticWiredTexts } from '#shared/runner/staticValues'
 import { extraPromptText } from '../runner/metering'
 import type { ApiPrompt } from '#shared/runner/graph'
-import { moderatePrompt } from './moderation'
+import { moderatePrompt, moderationRefusal, type ModerationResult } from './moderation'
 import { assertSpendAllowed } from './systemControls'
 import { blockedPromptRefusal, nodeProblemsBody, retiredEngineRefusal } from './blockedModels'
 import { measuredInputProblems } from '../runner/requestRules'
@@ -407,11 +407,12 @@ export interface GraphRunDeps {
   /**
    * Prompt-side content moderation. Runs AFTER file-ref validation and BEFORE
    * pricing/hold, so a ToS-violating prompt is refused (400) at zero cost —
-   * the hold is never taken and the engine is never touched. Fails OPEN (see
-   * moderation.ts): an OpenAI outage yields { ok: true } and lets the run
-   * through — a moderation blip must not take generation down.
+   * the hold is never taken and the engine is never touched. Fails CLOSED in
+   * hosted (G3, see moderation.ts): an outage or an over-long text comes back
+   * not-ok with a `reason`, refused with its own message. Never called with
+   * empty text.
    */
-  moderatePrompt(text: string): Promise<{ ok: true } | { ok: false; categories: string[] }>
+  moderatePrompt(text: string): Promise<ModerationResult>
   hold(userId: string, credits: number): Promise<{ ok: true; holdId: number } | { ok: false; reason: 'insufficient' }>
   getAvailable(userId: string): Promise<number>
   forward(body: any): Promise<{ status: number; body: any }>
@@ -469,8 +470,8 @@ async function submitMetered(userId: string | null, body: any, deps: GraphRunDep
 
   // Prompt-side moderation, AFTER file-ref validation and BEFORE pricing/hold:
   // a ToS-violating prompt is refused (400) at zero cost — no hold is taken and
-  // the engine is never touched. moderatePrompt fails OPEN, so an OpenAI outage
-  // can never take generation down. A card's text wired into a node (a
+  // the engine is never touched. In hosted, moderatePrompt fails CLOSED (G3):
+  // an outage refuses after one retry, and over-long text is refused. A card's text wired into a node (a
   // Primitive's value, through Gates too) is part of what runs, so it is read
   // with the typed prompts (R0.5), and the typed extras the runner also checks
   // (style_in, instructions, target, find, replace, scene_prompt — R0.5
@@ -486,15 +487,13 @@ async function submitMetered(userId: string | null, body: any, deps: GraphRunDep
     extraPromptText(wellFormed as ApiPrompt),
     ...staticWiredTexts(wellFormed as ApiPrompt),
   ].filter(Boolean))]
-  // A graph with nothing to check still calls moderation once, with '' (as
-  // before this split): moderatePrompt itself no-ops on blank text, and this
-  // keeps moderation an unconditional step of the chokepoint (order-of-calls
-  // callers rely on that).
-  for (const text of moderationTexts.length ? moderationTexts : ['']) {
+  // A graph with no text makes no moderation call at all: moderation fails
+  // CLOSED in hosted (G3), so a call with nothing to check must never be able
+  // to refuse a run. An unavailable service or an over-long text refuses here,
+  // before pricing and any hold, with its own plain message.
+  for (const text of moderationTexts) {
     const mod = await deps.moderatePrompt(text)
-    if (!mod.ok) {
-      throw new MeterRefusalError('This prompt was blocked by content moderation', 400, { categories: mod.categories })
-    }
+    if (!mod.ok) throw moderationRefusal(mod)
   }
 
   // A discontinued or runner-only model can't run on ComfyUI: refused in

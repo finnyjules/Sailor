@@ -23,7 +23,7 @@ import {
   __setSpendGuardForTests,
   bindMeterContext,
 } from '../../server/utils/requestMeter'
-import { __setModerationFetchForTests } from '../../server/utils/moderation'
+import { __setModerationFetchForTests, __setModerationTimingForTests, MODERATION_UNAVAILABLE_MESSAGE, MODERATION_TOO_LONG_MESSAGE } from '../../server/utils/moderation'
 
 const g = globalThis as any
 g.createError = (opts: { statusCode: number, message?: string, statusMessage?: string }) => {
@@ -145,12 +145,12 @@ beforeEach(() => {
   // hits db() and fail-closes to 503 on a missing DATABASE_URL.
   __setSpendGuardForTests(async () => {})
   process.env.FAL_KEY = 'test-fal-key'
-  // Byte-identity for the existing cases: no OPENAI_API_KEY → moderatePrompt is
-  // a no-op that never touches fetch (a real key on the dev box must not make
-  // these assertions hit the OpenAI endpoint). Cases that exercise moderation
-  // set the key + inject a moderation fetch explicitly.
-  delete process.env.OPENAI_API_KEY
-  __setModerationFetchForTests(null)
+  // Moderation fails CLOSED in hosted (G3): a missing key refuses. So every
+  // case runs with a test key and a faked moderation service that passes the
+  // prompt (never the real OpenAI endpoint, and never the stubbed global
+  // fetch). Cases that exercise moderation inject their own moderation fetch.
+  process.env.OPENAI_API_KEY = 'sk-test'
+  __setModerationFetchForTests(vi.fn(async () => jsonResponse({ results: [{ flagged: false, categories: {} }] })) as any)
 })
 
 afterEach(() => {
@@ -404,6 +404,52 @@ describe('runFal + meter', () => {
     expect(fakeLedger.hold).toHaveBeenCalledWith('u1', 5, expect.stringMatching(/^meter:/))
     expect(fakeLedger.releaseHold).toHaveBeenCalledWith(1)
     expect(fakeLedger.settleHold).not.toHaveBeenCalled()
+  })
+
+  // G3: moderation fails CLOSED in hosted. The service down twice → refused
+  // with the plain message; the hold already taken is released, fal never called.
+  it('hosted, moderation service down twice: RELEASES the hold, submit never runs (503)', async () => {
+    setHosted()
+    bindMeterContext({ userId: 'u1' })
+    fakeLedger.setAvailable(100)
+    __setModerationTimingForTests({ retryDelayMs: 1 })
+    const modFetch = vi.fn(async () => jsonResponse({}, false, 500))
+    __setModerationFetchForTests(modFetch as any)
+    const fetchMock = makeFalFetchMock('COMPLETED')
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      await expect(runFal(FAL_APP, { prompt: 'a fox' }, { pollIntervalMs: 1 }))
+        .rejects.toMatchObject({ statusCode: 503, message: MODERATION_UNAVAILABLE_MESSAGE })
+    } finally { __setModerationTimingForTests(null) }
+    expect(modFetch).toHaveBeenCalledTimes(2)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(fakeLedger.releaseHold).toHaveBeenCalledWith(1)
+    expect(fakeLedger.settleHold).not.toHaveBeenCalled()
+  })
+
+  it('hosted, no moderation key: RELEASES the hold, submit never runs', async () => {
+    setHosted()
+    bindMeterContext({ userId: 'u1' })
+    fakeLedger.setAvailable(100)
+    delete process.env.OPENAI_API_KEY
+    const fetchMock = makeFalFetchMock('COMPLETED')
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(runFal(FAL_APP, { prompt: 'a fox' }, { pollIntervalMs: 1 }))
+      .rejects.toMatchObject({ statusCode: 503, message: MODERATION_UNAVAILABLE_MESSAGE })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(fakeLedger.releaseHold).toHaveBeenCalledWith(1)
+  })
+
+  it('hosted, prompt over the moderation limit: RELEASES the hold, refused as too long', async () => {
+    setHosted()
+    bindMeterContext({ userId: 'u1' })
+    fakeLedger.setAvailable(100)
+    const fetchMock = makeFalFetchMock('COMPLETED')
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(runFal(FAL_APP, { prompt: 'a fox '.repeat(6000) }, { pollIntervalMs: 1 }))
+      .rejects.toMatchObject({ statusCode: 400, message: MODERATION_TOO_LONG_MESSAGE })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(fakeLedger.releaseHold).toHaveBeenCalledWith(1)
   })
 })
 

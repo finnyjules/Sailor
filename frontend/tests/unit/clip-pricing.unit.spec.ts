@@ -223,14 +223,16 @@ describe('the meter holds and charges the request’s own price', () => {
     __setSpendGuardForTests(async () => {})
     process.env[CLERK] = 'sk_test_hosted'
     process.env.FAL_KEY = 'test-fal-key'
-    delete process.env.OPENAI_API_KEY
-    __setModerationFetchForTests(null)
+    // Moderation fails CLOSED in hosted (G3): a test key and a faked service that passes.
+    process.env.OPENAI_API_KEY = 'sk-test'
+    __setModerationFetchForTests((async () => new Response(JSON.stringify({ results: [{ flagged: false, categories: {} }] }), { status: 200 })) as any)
   })
   afterEach(() => {
     for (const [k, v] of [[CLERK, saved.clerk], ['FAL_KEY', saved.fal], ['OPENAI_API_KEY', saved.openai]] as const) {
       if (v === undefined) delete process.env[k]
       else process.env[k] = v
     }
+    __setModerationFetchForTests(null)
     __setLedgerForTests(null)
     __setSpendGuardForTests(null)
     __resetMeterContextForTests()

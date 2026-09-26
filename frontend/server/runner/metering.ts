@@ -14,6 +14,7 @@ import { LOCAL_RENDER_TYPES, PROVIDER_TYPES } from '#shared/runner/eligibility'
 import { BASE_RENDER_CREDITS, OUTPUT_CLASS_TYPES, priceGraph } from '../utils/priceBook'
 import { extractGraphPromptText } from '../utils/graphPromptText'
 import { MeterRefusalError } from '../utils/requestMeter'
+import { moderationRefusal, type ModerationResult } from '../utils/moderation'
 import { outputKey } from '../utils/graphRuns'
 import { actionPassThrough } from './generators/actions'
 import type { OutputFile, StageCharge } from './types'
@@ -197,7 +198,8 @@ export function createMetering(d: {
   ledger(): LedgerPort
   graphRuns: GraphRunsPort
   spendGuard(userId: string): Promise<void>
-  moderate(text: string): Promise<{ ok: true } | { ok: false; categories: string[] }>
+  /** Hosted, fail-closed: a not-ok result may be blocked, unavailable or too long (G3). */
+  moderate(text: string): Promise<ModerationResult>
 }): Metering {
   return {
     async spendGuard(userId) {
@@ -213,13 +215,13 @@ export function createMetering(d: {
       const texts = [...new Set([...prompts.flatMap(p => [extractGraphPromptText(p), extraPromptText(p)]), ...extra].filter(Boolean))]
       for (const text of texts) {
         const mod = await d.moderate(text)
-        if (!mod.ok) throw new MeterRefusalError('This prompt was blocked by content moderation', 400, { categories: mod.categories })
+        if (!mod.ok) throw moderationRefusal(mod)
       }
     },
     async moderateText(text) {
       if (!d.hosted() || !text.trim()) return
       const mod = await d.moderate(text)
-      if (!mod.ok) throw new MeterRefusalError('This prompt was blocked by content moderation', 400, { categories: mod.categories })
+      if (!mod.ok) throw moderationRefusal(mod)
     },
     async hold(userId, stageKey, credits) {
       if (!d.hosted() || !userId) return null

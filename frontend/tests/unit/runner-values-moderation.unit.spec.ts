@@ -3,8 +3,10 @@
  * the run when the card's settings decide it (refused before any hold), and
  * at the node's turn otherwise (the node fails, its hold is let go).
  */
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { makeKit } from './__runner__/kit'
+import { createMetering } from '../../server/runner/metering'
+import { moderatePrompt, __setModerationFetchForTests, __setModerationTimingForTests, MODERATION_UNAVAILABLE_MESSAGE, MODERATION_TOO_LONG_MESSAGE } from '../../server/utils/moderation'
 import type { ApiPrompt } from '#shared/runner/graph'
 import type { RunnerFamily } from '#shared/runner/families'
 
@@ -131,5 +133,128 @@ describe('Gate leg moderation', () => {
     await k.engine.settled(runId)
     expect((await k.store.get(runId))!.status).toBe('done')
     expect(k.fal.client.submit).toHaveBeenCalledTimes(1)
+  })
+})
+
+// G3 (user decision 09-26): in hosted, moderation fails CLOSED on the runner
+// path — at the start of the run (before any hold) and at a node's turn (the
+// node fails, its hold is let go). The real moderatePrompt, service faked.
+describe('runner moderation fails closed (hosted)', () => {
+  const saved = process.env.OPENAI_API_KEY
+  beforeEach(() => {
+    process.env.OPENAI_API_KEY = 'sk-test'
+    __setModerationTimingForTests({ timeoutMs: 30, retryDelayMs: 1 })
+  })
+  afterEach(() => {
+    if (saved === undefined) delete process.env.OPENAI_API_KEY
+    else process.env.OPENAI_API_KEY = saved
+    __setModerationFetchForTests(null)
+    __setModerationTimingForTests(null)
+  })
+  const hostedModeration = (t: string) => moderatePrompt(t, { hosted: true })
+  const clean = () => ({ ok: true, status: 200, json: async () => ({ results: [{ flagged: false, categories: {} }] }) })
+  const fail500 = () => ({ ok: false, status: 500, json: async () => ({}) })
+  const inputOf = (init: any) => JSON.parse(init.body).input as string
+  const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+  it('no key: the start refuses with the plain message, before any hold', async () => {
+    state.startKnows = true
+    delete process.env.OPENAI_API_KEY
+    const k = makeKit({ hosted: true, moderate: hostedModeration, deps: { families: () => CARDS } })
+    await expect(k.engine.startRun({ userId: k.userId, takes: [flow('soft light')], ...START })).rejects.toThrow(new RegExp(escape(MODERATION_UNAVAILABLE_MESSAGE)))
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    expect(k.fal.client.submit).not.toHaveBeenCalled()
+  })
+
+  it('a timeout, twice: the start refuses, before any hold', async () => {
+    state.startKnows = true
+    const f = vi.fn((_u: string, init: any) => new Promise((_r, reject) => init.signal.addEventListener('abort', () => reject(new Error('aborted')))))
+    __setModerationFetchForTests(f as any)
+    const k = makeKit({ hosted: true, moderate: hostedModeration, deps: { families: () => CARDS } })
+    await expect(k.engine.startRun({ userId: k.userId, takes: [flow('soft light')], ...START })).rejects.toThrow(new RegExp(escape(MODERATION_UNAVAILABLE_MESSAGE)))
+    expect(f).toHaveBeenCalledTimes(2)
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+  })
+
+  it('a 500 twice: the start refuses, nothing held or charged', async () => {
+    state.startKnows = true
+    const f = vi.fn().mockResolvedValue(fail500())
+    __setModerationFetchForTests(f as any)
+    const k = makeKit({ hosted: true, moderate: hostedModeration, deps: { families: () => CARDS } })
+    await expect(k.engine.startRun({ userId: k.userId, takes: [flow('soft light')], ...START })).rejects.toThrow(new RegExp(escape(MODERATION_UNAVAILABLE_MESSAGE)))
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    expect(k.ledger.settle).not.toHaveBeenCalled()
+    expect(k.fal.client.submit).not.toHaveBeenCalled()
+  })
+
+  it('a 500 then success: the retry passes and the run completes', async () => {
+    state.startKnows = true
+    let first = true
+    const f = vi.fn(async () => { if (first) { first = false; return fail500() } return clean() })
+    __setModerationFetchForTests(f as any)
+    const k = makeKit({ hosted: true, moderate: hostedModeration, deps: { families: () => CARDS } })
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [flow('soft light')], ...START })
+    await k.engine.settled(runId)
+    expect((await k.store.get(runId))!.status).toBe('done')
+    expect(k.fal.client.submit).toHaveBeenCalledTimes(1)
+  })
+
+  it('text over the limit: the start refuses as too long, before any hold, without sending it', async () => {
+    state.startKnows = true
+    const f = vi.fn().mockResolvedValue(clean())
+    __setModerationFetchForTests(f as any)
+    const k = makeKit({ hosted: true, moderate: hostedModeration, deps: { families: () => CARDS } })
+    const padded = 'soft light '.repeat(4000)
+    await expect(k.engine.startRun({ userId: k.userId, takes: [flow(padded)], ...START })).rejects.toThrow(new RegExp(escape(MODERATION_TOO_LONG_MESSAGE)))
+    expect(f.mock.calls.every(c => inputOf(c[1]) !== padded)).toBe(true)
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+  })
+
+  it('service down at the node’s turn: only that node fails, with the plain message; its hold is let go', async () => {
+    state.startKnows = false
+    const f = vi.fn(async (_u: string, init: any) => inputOf(init) === 'soft light' ? fail500() : clean())
+    __setModerationFetchForTests(f as any)
+    const k = makeKit({ hosted: true, moderate: hostedModeration, deps: { families: () => CARDS } })
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [flow('soft light')], ...START })
+    await k.engine.settled(runId)
+    const node = (await k.store.get(runId))!.takes[0]!.nodes['1']!
+    expect(node.status).toBe('error')
+    expect(node.error).toBe(MODERATION_UNAVAILABLE_MESSAGE)
+    expect(f.mock.calls.filter(c => inputOf(c[1]) === 'soft light')).toHaveLength(2)
+    expect(k.fal.client.submit).not.toHaveBeenCalled()
+    expect([...k.ledger.holds.values()].every(h => h.state === 'released' || h.actual === 0)).toBe(true)
+  })
+
+  it('too long at the node’s turn: only that node fails, with the too-long message', async () => {
+    state.startKnows = false
+    __setModerationFetchForTests(vi.fn().mockResolvedValue(clean()) as any)
+    const k = makeKit({ hosted: true, moderate: hostedModeration, deps: { families: () => CARDS } })
+    const { runId } = await k.engine.startRun({ userId: k.userId, takes: [flow('soft light '.repeat(4000))], ...START })
+    await k.engine.settled(runId)
+    const node = (await k.store.get(runId))!.takes[0]!.nodes['1']!
+    expect(node.status).toBe('error')
+    expect(node.error).toBe(MODERATION_TOO_LONG_MESSAGE)
+    expect(k.fal.client.submit).not.toHaveBeenCalled()
+  })
+
+  it('local: no key and a failing service change nothing — the run completes', async () => {
+    state.startKnows = true
+    delete process.env.OPENAI_API_KEY
+    const f = vi.fn().mockResolvedValue(fail500())
+    __setModerationFetchForTests(f as any)
+    const k = makeKit({ hosted: false, moderate: t => moderatePrompt(t, { hosted: false }), deps: { families: () => CARDS } })
+    const { runId } = await k.engine.startRun({ userId: null, takes: [flow('soft light')], ...START })
+    await k.engine.settled(runId)
+    expect((await k.store.get(runId))!.status).toBe('done')
+    expect(f).not.toHaveBeenCalled()
+  })
+
+  it('empty text is never checked and never refused, even with no key', async () => {
+    delete process.env.OPENAI_API_KEY
+    const f = vi.fn(); __setModerationFetchForTests(f as any)
+    const m = createMetering({ hosted: () => true, ledger: () => { throw new Error('unused') }, graphRuns: {} as any, spendGuard: async () => {}, moderate: hostedModeration })
+    await expect(m.moderate([{ '1': { class_type: 'GenerateImageNode', inputs: { prompt: '' } } }], ['', '   '])).resolves.toBeUndefined()
+    await expect(m.moderateText('   ')).resolves.toBeUndefined()
+    expect(f).not.toHaveBeenCalled()
   })
 })
