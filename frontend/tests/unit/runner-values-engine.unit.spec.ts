@@ -6,11 +6,12 @@
  * nothing changes.
  */
 import { describe, expect, it } from 'vitest'
-import { makeKit } from './__runner__/kit'
+import { createFakeFal, makeKit, until } from './__runner__/kit'
 import type { ApiPrompt } from '#shared/runner/graph'
 import { isRunnerEligible, runnerTakesNode } from '#shared/runner/eligibility'
 import { withWiredValues, WIRED_VALUE_MISSING } from '~~/server/runner/values'
 import type { RunnerFamily } from '#shared/runner/families'
+import { REVE_21_LONG_PROMPT } from '~~/server/runner/generators/reve21'
 
 const CARDS: ReadonlySet<RunnerFamily> = new Set(['cards'])
 const START = { workflow: null, canvasId: null, projectUuid: null, projectName: null }
@@ -112,3 +113,71 @@ describe('the engine', () => {
     await expect(k.engine.startRun({ userId: null, takes: [idea('direct')], ...START })).rejects.toThrow()
   })
 })
+
+describe('fix round 1', () => {
+  it('a closed Gate keeps the value, and Continue hands it on', async () => {
+    const k = makeKit({ hosted: false, deps: { families: () => CARDS } })
+    const p = idea('gate')
+    p.g!.inputs.bypass = false
+    const { runId } = await k.engine.startRun({ userId: null, takes: [p], ...START })
+    await k.engine.settled(runId)
+    let run = (await k.store.get(runId))!
+    expect(run.status).toBe('paused')
+    expect(run.takes[0]!.nodes.g!.values).toEqual({ 0: { kind: 'text', text: 'a watercolour' } })
+    expect(k.fal.submitted()).toHaveLength(0)
+    await k.engine.gateAction({ userId: null, runId, gateId: 'g', action: 'continue' })
+    await k.engine.settled(runId)
+    run = (await k.store.get(runId))!
+    expect(run.status).toBe('done')
+    expect(k.fal.submitted()[0]!.payload.prompt).toBe('a watercolour a red fox')
+  })
+
+  it('a wired idea too long for its model is refused at the start, before the hold', async () => {
+    const k = makeKit({ hosted: false, deps: { families: () => new Set<RunnerFamily>(['cards', 'reve-2.1']) } })
+    const p = idea('direct', 'x'.repeat(4001))
+    p['1']!.inputs.model = 'reve-2.1'
+    await expect(k.engine.startRun({ userId: null, takes: [p], ...START })).rejects.toThrow(REVE_21_LONG_PROMPT)
+    expect(k.ledger.hold).not.toHaveBeenCalled()
+    expect(k.fal.submitted()).toHaveLength(0)
+  })
+
+  // k1 "crashes" mid-request of the node reading the wired value; k2 resumes it.
+  const crashed = async (tamper?: (run: Awaited<ReturnType<ReturnType<typeof makeKit>['store']['get']>>) => void) => {
+    const fal = createFakeFal()
+    let down = false
+    const k1 = makeKit({
+      fal, deps: { families: () => CARDS, sleep: () => (down ? new Promise<void>(() => {}) : new Promise<void>(r => setTimeout(r, 1))) },
+    })
+    fal.holdNext(1)
+    const { runId } = await k1.engine.startRun({ userId: null, takes: [idea('direct')], ...START })
+    await until(() => (fal.submitted()[0]?.polls ?? 0) >= 2)
+    down = true
+    await new Promise(r => setTimeout(r, 20))
+    if (tamper) {
+      const run = (await k1.store.get(runId))!
+      tamper(run)
+      await k1.store.save(run)
+    }
+    const k2 = makeKit({ dir: k1.dir, root: k1.root, fal, deps: { families: () => CARDS } })
+    expect(await k2.engine.reattach()).toBe(1)
+    fal.release()
+    await k2.engine.settled(runId)
+    return { fal, run: (await k2.store.get(runId))! }
+  }
+
+  it('a restarted server resumes a node that reads a wired value, and sends once', async () => {
+    const { fal, run } = await crashed()
+    expect(fal.submitted()).toHaveLength(1)
+    expect(fal.submitted()[0]!.payload.prompt).toBe('a watercolour a red fox')
+    expect(run.status).toBe('done')
+    expect(run.takes[0]!.nodes['1']!.status).toBe('done')
+  })
+
+  it('resuming with the wired value gone cancels the sent job before the node fails', async () => {
+    const { fal, run } = await crashed(r => { delete r!.takes[0]!.nodes.p!.values })
+    expect(fal.client.cancel).toHaveBeenCalled()
+    expect(run.takes[0]!.nodes['1']!.status).toBe('error')
+    expect(run.takes[0]!.nodes['1']!.error).toBe(WIRED_VALUE_MISSING)
+  })
+})
+

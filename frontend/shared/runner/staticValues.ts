@@ -11,7 +11,8 @@
  * and `at`, which evaluates a linked card. A value some other node makes is
  * unknown (undefined).
  */
-import { isLink, type ApiLink, type ApiPrompt } from './graph'
+import { GATE_CLASS, isLink, type ApiLink, type ApiPrompt } from './graph'
+import { outputKind } from './values'
 import { pyFloatOf, pyIntOf, pyTruthy } from './pyText'
 
 export type StaticValue =
@@ -65,4 +66,45 @@ export function staticWiredTexts(prompt: ApiPrompt, table: Readonly<Record<strin
     }
   }
   return [...out]
+}
+
+/**
+ * The workflow with every value wire whose value is known before the run
+ * (a card's own setting, through any Gates) replaced by that value, as
+ * the runner's engine will substitute it at the node's turn
+ * (server/runner/values.ts withWiredValues). Read at the start of a runner
+ * run so a request no provider takes is refused before the hold
+ * (server/runner/requestRules.ts). A value only known by running stays a
+ * wire; Gates keep theirs. Returns the same prompt when nothing is known.
+ */
+export function withStaticWiredValues(prompt: ApiPrompt, table: Readonly<Record<string, StaticEvaluator>> = STATIC_VALUES): ApiPrompt {
+  const through = (link: ApiLink): ApiLink => {
+    let l = link
+    for (let i = 0; i < 64; i++) {
+      const n = prompt[l[0]]
+      const d = n?.class_type === GATE_CLASS ? n.inputs?.data_in : undefined
+      if (!isLink(d)) return l
+      l = d
+    }
+    return l
+  }
+  let out: ApiPrompt | null = null
+  for (const [id, node] of Object.entries(prompt)) {
+    if (node.class_type === GATE_CLASS) continue
+    let inputs: Record<string, unknown> | null = null
+    for (const [name, v] of Object.entries(node.inputs ?? {})) {
+      if (!isLink(v)) continue
+      const kind = outputKind(prompt, v)
+      if (kind === 'files' || kind === 'mask') continue
+      const known = staticValueOf(prompt, through(v), table)
+      if (!known) continue
+      inputs ??= { ...node.inputs }
+      inputs[name] = known.kind === 'text' ? known.text : known.value
+    }
+    if (inputs) {
+      out ??= { ...prompt }
+      out[id] = { ...node, inputs }
+    }
+  }
+  return out ?? prompt
 }

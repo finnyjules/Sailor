@@ -914,10 +914,11 @@ export function createEngine(deps: EngineDeps) {
       // The node's inputs as its builder reads them (R0): every wire that
       // carries a value replaced by that value. The take keeps the workflow
       // as sent: price, hold and charge read the wires (a wired input is
-      // priced at its most expensive, as the badge shows it).
-      const wired = withWiredValues(take.prompt, id, valueAt(take))
-      const planWith = (toUrl: (f: OutputFile) => Promise<string>) => planNode({
-        prompt: wired.prompt,
+      // priced at its most expensive, as the badge shows it). Worked out
+      // inside planWith, so a value missing while resuming takes the
+      // cancel-the-sent-job-first path below.
+      const planWith = async (toUrl: (f: OutputFile) => Promise<string>) => planNode({
+        prompt: withWiredValues(take.prompt, id, valueAt(take)).prompt,
         nodeId: id,
         filesFrom: filesAt(take),
         valueFrom: valueAt(take),
@@ -1009,6 +1010,9 @@ export function createEngine(deps: EngineDeps) {
       }
       if (plan.kind === 'pause') {
         rec.outputs = plan.files
+        // A value held at a closed Gate (R0.4): Continue marks the Gate done, and this is what it hands on.
+        if (plan.values) rec.values = plan.values
+        else delete rec.values
         rec.status = 'paused'
         rec.endedAt = deps.now()
         await persist(run)

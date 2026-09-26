@@ -115,6 +115,7 @@
  * References are never dropped, to make a request fit or otherwise.
  */
 import { isLink, type ApiNode, type ApiPrompt } from '#shared/runner/graph'
+import { withStaticWiredValues } from '#shared/runner/staticValues'
 import { classUpgradeOn, resolveVideoModelId } from '#shared/runner/eligibility'
 import { NO_FAMILIES, type RunnerFamily } from '#shared/runner/families'
 import { LARGEST_INPUT_PIXELS, sizePricedInput } from '#shared/pricing/editSettings'
@@ -616,10 +617,14 @@ const H3_VIDEO_APPS: Readonly<Record<string, string>> = Object.fromEntries([
  * `runner`: the prompt runs on the Sailor runner (the engine's check). A
  * model that runs on both paths but whose rules are the runner's alone
  * (Krea 2, F17) is judged only then; the ComfyUI path's gate leaves it out.
+ * On the runner, a wired value known before the run (a Primitive card's,
+ * R0.4) is read as sent, so its node is judged here, before the hold; the
+ * node's turn checks the built request again.
  */
 export function requestProblems(prompt: ApiPrompt, opts: { runner?: boolean } = {}): RequestProblem[] {
   const out: RequestProblem[] = []
-  for (const [nodeId, node] of Object.entries(prompt ?? {})) {
+  const view = opts.runner && prompt ? withStaticWiredValues(prompt) : prompt
+  for (const [nodeId, node] of Object.entries(view ?? {})) {
     const inputs = node?.inputs ?? {}
     const ct = node?.class_type
     /** The prompt `text` against the rules of `<provider> <endpoint>` (fal unless named): its minimum, its maximum, or both. */

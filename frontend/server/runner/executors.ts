@@ -147,7 +147,8 @@ export type NodePlan =
     keep?: KeepStep
   }
   | { kind: 'pass'; files: OutputFile[]; ui: Record<string, unknown> | null }
-  | { kind: 'pause'; files: OutputFile[] }
+  /** A closed Gate: `values` is the value that reached it (R0.4), kept on its record so Continue hands it on. */
+  | { kind: 'pause'; files: OutputFile[]; values?: Record<number, RunnerValue> }
   /** Computed on this server: `render` makes the PNG, saved as a temp live preview (as Python's save_live_preview). */
   | { kind: 'local'; render(signal?: AbortSignal): Promise<LocalRender>; uiFor(files: OutputFile[]): Record<string, unknown> | null }
   /** Computed on this server from the node's inputs (the cards, R0/R1): no provider, no charge. */
@@ -858,14 +859,14 @@ async function planNodeRequest(ctx: PlanContext): Promise<NodePlan> {
     case GATE_CLASS: {
       // A value (not files) reaching a Gate is handed on when it is open or
       // on pass-through (spec ruling 2); a closed Gate on a value pauses with
-      // no pictures to pick from.
+      // no pictures to pick from, keeping the value for Continue.
       const link = inputs.data_in
       const v = isLink(link) ? ctx.valueFrom?.(link) : undefined
       const files = v ? filesOf(v) : linked('data_in')
       const open = inputs.bypass === true || ctx.gateOpen
       if (open && v && v.kind !== 'files') return { kind: 'derive', derive: async () => ({ values: { 0: v }, ui: null }) }
       if (open) return { kind: 'pass', files, ui: null }
-      return { kind: 'pause', files }
+      return v && v.kind !== 'files' ? { kind: 'pause', files, values: { 0: v } } : { kind: 'pause', files }
     }
 
     case 'Image': {
