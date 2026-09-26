@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Worker } from 'node:worker_threads'
-import { afterAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { b64, loadFixtures, sha256, type FxFile } from './__runner__/effectsParity'
 import { rngCore, type TorchGenerator } from '~~/server/runner/effects/core/rng'
 import { effectCores } from '~~/server/runner/effects/cores'
@@ -84,7 +84,7 @@ describe('the rng fixture', () => {
   })
 
   it('covers every case the brief names', () => {
-    expect(CASES.length).toBe(130)
+    expect(CASES.length).toBe(133)
     const names = CASES.map(c => c.name)
     for (const s of FX.seeds) {
       expect(names).toContain(`raw 10000 draws, seed ${s}`)
@@ -96,6 +96,9 @@ describe('the rng fixture', () => {
       expect(names).toContain(`rand → randn(15) → randn(16) → rand → randn(1) → randn(2), seed ${s}`)
     }
     expect(names.filter(n => n.startsWith('FilmGrain'))).toHaveLength(7)
+    expect(names).toContain('randn(256), seed 1719 (a logf miss)')
+    expect(names).toContain('rand(16), seed 2^64 − 1')
+    expect(names).toContain('rand(16), seed −2^63')
   })
 })
 
@@ -137,8 +140,35 @@ describe('mt19937, rand and randperm: torch’s bytes exactly', () => {
     expect([...a.rand(700)]).toEqual([...b.rand(700)])
   })
 
-  it('refuses a randperm past the small-n path', () => {
-    expect(() => rng.generator().randperm(2 ** 32 / 20)).toThrow()
+  it('refuses a randperm at randperm_cpu’s small-n bound, uint32 max / 20 = 214 748 364, before allocating', () => {
+    expect(Math.floor(0xFFFFFFFF / 20)).toBe(214748364)
+    const g = rng.generator()
+    expect(() => g.randperm(214748364)).toThrow('randperm is only ported for n below 2³² / 20')
+    expect(() => g.randperm(2 ** 40)).toThrow('randperm is only ported for n below 2³² / 20')
+    expect(() => g.randperm(2.5)).toThrow('randperm needs a whole number of at least 0')
+    // The refusal drew nothing: the generator is where a fresh one is.
+    const fresh = rng.generator()
+    expect([...g.rand(5)]).toEqual([...fresh.rand(5)])
+  })
+
+  it('seed takes what torch.Generator.manual_seed takes, [−2⁶³, 2⁶⁴ − 1], and refuses the rest plainly', () => {
+    const g = rng.generator()
+    // The edges are fixture cases (torch's own streams); here, one past each edge.
+    expect(() => g.seed(2n ** 64n)).toThrow('A random seed must lie between −2⁶³ and 2⁶⁴ − 1, as torch accepts')
+    expect(() => g.seed(-(2n ** 63n) - 1n)).toThrow('A random seed must lie between −2⁶³ and 2⁶⁴ − 1, as torch accepts')
+    expect(() => g.seed(2n ** 64n - 1n)).not.toThrow()
+    expect(() => g.seed(-(2n ** 63n))).not.toThrow()
+    // A JS number past 2⁵³ has lost its low bits already (2⁶⁴ − 1 as a double is 2⁶⁴).
+    expect(() => g.seed(Number.MAX_SAFE_INTEGER + 1)).toThrow('A random seed must be a whole number no larger than 2⁵³; pass a bigint for larger seeds')
+    expect(() => g.seed(2 ** 64 - 1)).toThrow('A random seed must be a whole number no larger than 2⁵³; pass a bigint for larger seeds')
+    expect(() => g.seed(1.5)).toThrow('A random seed must be a whole number no larger than 2⁵³; pass a bigint for larger seeds')
+    expect(() => g.seed(Number.NaN)).toThrow('A random seed must be a whole number no larger than 2⁵³; pass a bigint for larger seeds')
+    expect(() => g.seed(Number.MAX_SAFE_INTEGER)).not.toThrow()
+    expect(() => g.seed(-Number.MAX_SAFE_INTEGER)).not.toThrow()
+    // A negative number seeds as its two's complement, as torch's −1 is 2⁶⁴ − 1.
+    const a = rng.generator(); a.seed(-1)
+    const b = rng.generator(); b.seed(2n ** 64n - 1n)
+    expect([...a.rand(50)]).toEqual([...b.rand(50)])
   })
 })
 
@@ -191,76 +221,85 @@ function normalFillWith(u: Float32Array, n: number, libm: NonNullable<Out['libm'
   return { d, hit }
 }
 
-const report: string[] = []
-let draws = 0
-let off = 0
-let offBy2 = 0
-let libmArgs = 0
+interface Tally { draws: number; off: number; offBy2: number; libmLog: number; libmSincos: number; report: string[] }
+
+/** One randn case replayed and checked draw by draw; its tally (self-contained, so any test can sum them). */
+function checkRandnCase(c: RngCase): Tally {
+  const t: Tally = { draws: 0, off: 0, offBy2: 0, libmLog: 0, libmSincos: 0, report: [] }
+  const g = seeded(c)
+  c.calls.forEach((call, i) => {
+    const want = c.outputs[i]!
+    const got = replay(g, call)
+    if (call.op !== 'randn') {
+      expect(sha256(got.bytes), `call ${i}`).toBe(want.sha256)
+      return
+    }
+    const py = new Float32Array(b64(want.f32!).slice().buffer)
+    const n = py.length
+    expect(got.f32!.length).toBe(n)
+    let hit = new Set<number>()
+    if (n >= 16) {
+      // The uniforms normal_fill drew: the same generator, the calls before, then rand.
+      const g2 = seeded(c)
+      for (const k of c.calls.slice(0, i)) replay(g2, k)
+      const u = g2.rand(n + (n % 16 ? 16 : 0))
+      const libm = want.libm!
+      t.libmLog += libm.log.length
+      t.libmSincos += libm.sincos.length
+      for (const [a, r] of libm.log) expect(Math.abs(ordered(f32bits.from(r)) - ordered(Math.fround(Math.log(f32bits.from(a))))), `libm logf(${f32bits.from(a)})`).toBe(1)
+      for (const [a, cb, sb] of libm.sincos) {
+        const th = f32bits.from(a)
+        const dc = Math.abs(ordered(f32bits.from(cb)) - ordered(Math.fround(Math.cos(th))))
+        const ds = Math.abs(ordered(f32bits.from(sb)) - ordered(Math.fround(Math.sin(th))))
+        expect(Math.max(dc, ds), `libm sincosf(${th})`).toBe(1)
+      }
+      const r = normalFillWith(u, n, libm)
+      expect(sha256(bytesOf(r.d)), `call ${i}: normal_fill with libm's values is torch`).toBe(want.sha256)
+      hit = r.hit
+    }
+    for (let j = 0; j < n; j++) {
+      t.draws++
+      const d = Math.abs(ordered(got.f32![j]!) - ordered(py[j]!))
+      if (d === 0) continue
+      t.off++
+      if (d === 2) t.offBy2++
+      t.report.push(`${c.name} call ${i} [${j}]: torch ${py[j]} port ${got.f32![j]} (${d} ulp)`)
+      expect(hit.has(j), `${c.name} call ${i} [${j}] differs where libm is correctly rounded`).toBe(true)
+      expect(d, `${c.name} call ${i} [${j}]`).toBeLessThanOrEqual(2)
+    }
+  })
+  return t
+}
+
+const RANDN_CASES = CASES.filter(c => c.calls.some(k => k.op === 'randn'))
 
 describe('randn: torch’s float32 bit for bit, but where libm is one ulp off', () => {
-  for (const c of CASES) {
-    if (!c.calls.some(k => k.op === 'randn')) continue
-    it(c.name, () => {
-      const g = seeded(c)
-      c.calls.forEach((call, i) => {
-        const want = c.outputs[i]!
-        const got = replay(g, call)
-        if (call.op !== 'randn') {
-          expect(sha256(got.bytes), `call ${i}`).toBe(want.sha256)
-          return
-        }
-        const py = new Float32Array(b64(want.f32!).slice().buffer)
-        const n = py.length
-        expect(got.f32!.length).toBe(n)
-        let hit = new Set<number>()
-        if (n >= 16) {
-          // The uniforms normal_fill drew: the same generator, the calls before, then rand.
-          const g2 = seeded(c)
-          for (const k of c.calls.slice(0, i)) replay(g2, k)
-          const u = g2.rand(n + (n % 16 ? 16 : 0))
-          const libm = want.libm!
-          libmArgs += libm.log.length + libm.sincos.length
-          for (const [a, r] of libm.log) expect(Math.abs(ordered(f32bits.from(r)) - ordered(Math.fround(Math.log(f32bits.from(a)))))).toBe(1)
-          for (const [a, cb, sb] of libm.sincos) {
-            const t = f32bits.from(a)
-            const dc = Math.abs(ordered(f32bits.from(cb)) - ordered(Math.fround(Math.cos(t))))
-            const ds = Math.abs(ordered(f32bits.from(sb)) - ordered(Math.fround(Math.sin(t))))
-            expect(Math.max(dc, ds), `libm sincosf(${t})`).toBe(1)
-          }
-          const r = normalFillWith(u, n, libm)
-          expect(sha256(bytesOf(r.d)), `call ${i}: normal_fill with libm's values is torch`).toBe(want.sha256)
-          hit = r.hit
-        }
-        for (let j = 0; j < n; j++) {
-          draws++
-          const d = Math.abs(ordered(got.f32![j]!) - ordered(py[j]!))
-          if (d === 0) continue
-          off++
-          if (d === 2) offBy2++
-          report.push(`${c.name} call ${i} [${j}]: torch ${py[j]} port ${got.f32![j]} (${d} ulp)`)
-          expect(hit.has(j), `${c.name} call ${i} [${j}] differs where libm is correctly rounded`).toBe(true)
-          expect(d, `${c.name} call ${i} [${j}]`).toBeLessThanOrEqual(2)
-        }
-      })
-    })
-  }
+  for (const c of RANDN_CASES) it(c.name, () => { checkRandnCase(c) })
 
-  it('is bit-exact on at least 99.9% of the draws', () => {
-    expect(draws).toBeGreaterThan(100_000)
-    expect(off / draws).toBeLessThan(0.001)
-    // Measured on this Mac (torch 2.10, arm64): pinned so a change shows.
-    expect({ off, offBy2, libmArgs }).toEqual(RANDN_MEASURED)
-  })
-
-  afterAll(() => {
-    if (process.env.RNG_REPORT) {
-      writeFileSync(process.env.RNG_REPORT, `${off} of ${draws} randn draws differ (${offBy2} by two ulps); libm off on ${libmArgs} arguments\n${report.join('\n')}\n`)
+  it('is bit-exact on at least 99.9% of the draws, over every randn case', () => {
+    // Summed here, from every case, so the totals don't depend on which tests ran (-t, .only).
+    const sum: Tally = { draws: 0, off: 0, offBy2: 0, libmLog: 0, libmSincos: 0, report: [] }
+    for (const c of RANDN_CASES) {
+      const t = checkRandnCase(c)
+      sum.draws += t.draws; sum.off += t.off; sum.offBy2 += t.offBy2
+      sum.libmLog += t.libmLog; sum.libmSincos += t.libmSincos
+      sum.report.push(...t.report)
     }
+    if (process.env.RNG_REPORT) {
+      writeFileSync(process.env.RNG_REPORT, `${sum.off} of ${sum.draws} randn draws differ (${sum.offBy2} by two ulps); libm off on ${sum.libmLog} logf and ${sum.libmSincos} sincosf arguments\n${sum.report.join('\n')}\n`)
+    }
+    expect(sum.draws).toBeGreaterThan(100_000)
+    expect(sum.off / sum.draws).toBeLessThan(0.001)
+    // Both halves of the libm proof run on real data: at least one logf miss and one sincosf miss.
+    expect(sum.libmLog).toBeGreaterThan(0)
+    expect(sum.libmSincos).toBeGreaterThan(0)
+    // Measured on this Mac (torch 2.10, arm64): pinned so a change shows.
+    expect({ off: sum.off, offBy2: sum.offBy2, libmLog: sum.libmLog, libmSincos: sum.libmSincos }).toEqual(RANDN_MEASURED)
   })
 })
 
-/** randn draws that differ from torch (and by two ulps), and the libm arguments recorded, on this fixture (see RNG_REPORT). */
-const RANDN_MEASURED = { off: 29, offBy2: 1, libmArgs: 35 }
+/** randn draws that differ from torch (and by two ulps), and the libm arguments recorded per call, on this fixture (see RNG_REPORT). */
+const RANDN_MEASURED = { off: 29, offBy2: 1, libmLog: 1, libmSincos: 35 }
 
 // ── The esbuild guard: the core built as Nitro builds server code ────────────
 

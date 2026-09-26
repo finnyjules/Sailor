@@ -27,7 +27,9 @@ Groups:
               rand(1) × 50, Voronoi's sites then colours, the double-normal
               cache carried across calls). Each output records its sha256 and
               its first 64 values; randn's are also stored whole, so the spec
-              can count draws off by an ulp.
+              can count draws off by an ulp. It records this Mac's libm
+              (logf, __sincosf_stret) too, so the rng fixtures regenerate
+              only on macOS.
 
 Every picture reaches a node as it does in a real run, through the real
 Python loader of its source (as scripts/compositor_fixtures.py):
@@ -845,6 +847,8 @@ def normal_fill_libm(state: torch.Tensor, want: np.ndarray) -> dict:
 
 
 def rng() -> dict:
+    if platform.system() != "Darwin":
+        sys.exit("The rng fixtures record this Mac's libm (logf, __sincosf_stret): regenerate them on macOS.")
     cases = []
 
     def case(name: str, seed: int, calls: list, global_seed: bool = False) -> None:
@@ -880,6 +884,18 @@ def rng() -> dict:
     case("rand(16), seed 2^40 + 42 (low bits 42)", 2 ** 40 + 42, [{"op": "rand", "shape": [16]}])
     case("randn(20) on torch.manual_seed(42)", 42, [{"op": "randn", "shape": [20]}], global_seed=True)
     case("randn(5) on torch.manual_seed(2^32 + 1)", 2 ** 32 + 1, [{"op": "randn", "shape": [5]}], global_seed=True)
+    # A seed whose normal_fill meets one of libm's rare logf misses (about 5 in 1M draws), so the
+    # spec's logf half of the libm proof runs on real data.
+    case("randn(256), seed 1719 (a logf miss)", 1719, [{"op": "randn", "shape": [256]}])
+    # The edges of what manual_seed accepts: [−2^63, 2^64 − 1]; past them torch raises.
+    case("rand(16), seed 2^64 − 1", 2 ** 64 - 1, [{"op": "rand", "shape": [16]}])
+    case("rand(16), seed −2^63", -2 ** 63, [{"op": "rand", "shape": [16]}])
+    for bad in (2 ** 64, -2 ** 63 - 1):
+        try:
+            torch.Generator(device="cpu").manual_seed(bad)
+        except (ValueError, RuntimeError):
+            continue
+        raise AssertionError(f"torch accepted seed {bad}: the port's bounds are wrong")
     return {"cases": cases, "seeds": RNG_SEEDS, "head": RNG_HEAD}
 
 

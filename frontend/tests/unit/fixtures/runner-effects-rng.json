@@ -11639,6 +11639,178 @@
     }
    ],
    "seed": "4294967297"
+  },
+  {
+   "calls": [
+    {
+     "op": "randn",
+     "shape": [
+      256
+     ]
+    }
+   ],
+   "global": false,
+   "name": "randn(256), seed 1719 (a logf miss)",
+   "outputs": [
+    {
+     "dtype": "f32",
+     "f32": "X2pxPxf+sb7Nk5s/8XnwvlJMYj8Yelw/9yvuvqTZvj/m5Tm/+AsVvx+tk79jWCe/bRuPv2uKxT94rmK/qH6DP4trPj+11Io/M6BZvzkVKb/pKh09cQOSP0Bwpb9zLJ0/9E3KvETHnz9zqjQ/XJA5PrXHn75BhwS/ek/SPotYQr9aR/08/OO5v/+3u7+4xZu+7ffwP2HdDj9lFEW/69bkvpidgD8Q4wfAwNiCP4U+qT/c3lc7eguNvKsdqz79v4a+uWlYv/m9xz6zPgDANNQfvoJmnj2UbqU+rL+3PaKA4j4IzhO95C38P8FrGj8v8dg+xyoAv6icTL83/ie/grMevpWF874sf0k/Kaxkv3a8Ar8Fl44/pp1Vviz45D5221++cUNwv/ynw74q1/08npbevRGbYb/guFE+wGxqvm0wtr/HFnu/870lvtNJ5r7ILBm/DImtPzEPgb+nRgbAeHIav1LMp7+HMBu/bxAIP9DVxD5mG3U/RF1LP0jeu7/Ytb8/A73mvg6hxL9Kse69rj1IP02MFz+JKA68dBf/PtcuCL/j1w2/vpTQPn5Lgb9cxxi/bBgyv6uFib8W1Bo/uRl/v3Y9876hIsa+4LIOP9ATiL9FcSNASuEbvsj1AcBa8Iq+ObhrvvyEqr4PFY6/vYGhv20yAMAq/z8/Bj6IPkS3YD7qc7A+U7auPTlkK79Z4za/kwUevoQmcb5VmRs+f/XhPiJaCz9mSia+vXGFvjvMAz/ZAZ4/RkmEvtN3eT2WjLm+/7aOv1DQZb0Pwqu/Apb1P4z++r+5VUTAa/v3vhKGbb83h+W+zU4/vb9pnb+uWaY+vjymP7HT4r/+blW/HzkRP3I1+L/t+Ew+g8OyPsm1ej4XC0hA/JsJvmDBurwU9Ga+ldVpPrsfKz9w8Lg/rHrRv7HBSD7BR9I7adQkP2fvo75xPvk++l+AP3Y1QL+eSAC/ey67P+cjSD/MQhc+0NsBPwffZT+qqQm/sAVpP5UoCr77vJs/qGOevznHCL9uwIW9EyyKP5kueb9qAA6/oSsCQOgLrD8srtY+iLRivwCp977Y0DW+Nwg/P+1RsLwSsDM/g0ScvpPD1z5xGcI+TWDNPlL9cD+lsd4/+WXIv0fuuT+ztSo/zCLlPsGqir/V3zW/PwDUPwAdSz5Uy20/091IPwuKLb3r8vA+OdCQvmwEIj9O64A/WMMHv5ZqzL65rGc+LUwDvighBEAf0ki/dP7JvmYyc77Qk84/ebpXvyCz6L0y0v8+LfMIv6QtJr+OVZi/DhOrv00dqL3T5ZA/bh/sPkUm6L9NPYW8uxIsPopfhT9IttI//ijfvjQ2Eb4cCog+CxWwPw0nSD+VTLQ+K83dvw==",
+     "head": [
+      0.9430293440818787,
+      -0.3476416766643524,
+      1.215448021888733,
+      -0.4696803390979767,
+      0.8839770555496216,
+      0.8612380027770996,
+      -0.4651791751384735,
+      1.4910168647766113,
+      -0.7261642217636108,
+      -0.5822138786315918,
+      -1.153720736503601,
+      -0.6536924242973328,
+      -1.118024468421936,
+      1.543286681175232,
+      -0.885474681854248,
+      1.0273027420043945,
+      0.7438284754753113,
+      1.0846163034439087,
+      -0.8501006960868835,
+      -0.6604800820350647,
+      0.038371000438928604,
+      1.1407300233840942,
+      -1.2924880981445312,
+      1.2279189825057983,
+      -0.024695374071598053,
+      1.2482686042785645,
+      0.7057258486747742,
+      0.18121474981307983,
+      -0.3120705187320709,
+      -0.5176888108253479,
+      0.41076260805130005,
+      -0.7591635584831238,
+      0.030917812138795853,
+      -1.4522700309753418,
+      -1.4665526151657104,
+      -0.3042428493499756,
+      1.8825660943984985,
+      0.5580654740333557,
+      -0.7698424458503723,
+      -0.4469521939754486,
+      1.0048093795776367,
+      -2.1232337951660156,
+      1.0222396850585938,
+      1.3222204446792603,
+      0.0032939231023192406,
+      -0.01721738651394844,
+      0.33421072363853455,
+      -0.26318350434303284,
+      -0.845363199710846,
+      0.3901212513446808,
+      -2.003826856613159,
+      -0.15608292818069458,
+      0.07734395563602448,
+      0.3231092691421509,
+      0.08972105383872986,
+      0.4423876404762268,
+      -0.036085158586502075,
+      1.9701504707336426,
+      0.6032066941261292,
+      0.42371508479118347,
+      -0.5006527304649353,
+      -0.7992653846740723,
+      -0.6562227606773376,
+      -0.15498164296150208
+     ],
+     "libm": {
+      "log": [
+       [
+        1061996586,
+        3194263277
+       ]
+      ],
+      "sincos": []
+     },
+     "n": 256,
+     "sha256": "0e7cf47fbaa30b2cc4279ce8184bdf5eb80f5b7ddcd0cbe7c09d19be09bd8e9f"
+    }
+   ],
+   "seed": "1719"
+  },
+  {
+   "calls": [
+    {
+     "op": "rand",
+     "shape": [
+      16
+     ]
+    }
+   ],
+   "global": false,
+   "name": "rand(16), seed 2^64 − 1",
+   "outputs": [
+    {
+     "dtype": "f32",
+     "head": [
+      0.9937993884086609,
+      0.5713063478469849,
+      0.5700080394744873,
+      0.04950374364852905,
+      0.9930374622344971,
+      0.7382545471191406,
+      0.6809209585189819,
+      0.27737390995025635,
+      0.5925574898719788,
+      0.5917835235595703,
+      0.19351953268051147,
+      0.12284058332443237,
+      0.8528891801834106,
+      0.04773586988449097,
+      0.40599125623703003,
+      0.02796614170074463
+     ],
+     "n": 16,
+     "sha256": "631d924445f934acd49c83d47bfd273bb6e3fec1a0be77e8c3798b7ca017ebc3"
+    }
+   ],
+   "seed": "18446744073709551615"
+  },
+  {
+   "calls": [
+    {
+     "op": "rand",
+     "shape": [
+      16
+     ]
+    }
+   ],
+   "global": false,
+   "name": "rand(16), seed −2^63",
+   "outputs": [
+    {
+     "dtype": "f32",
+     "head": [
+      0.49625658988952637,
+      0.7682217955589294,
+      0.08847743272781372,
+      0.13203048706054688,
+      0.30742281675338745,
+      0.6340786814689636,
+      0.4900934100151062,
+      0.8964447379112244,
+      0.455627977848053,
+      0.6323062777519226,
+      0.3488934636116028,
+      0.40171730518341064,
+      0.022325754165649414,
+      0.16885894536972046,
+      0.2938884496688843,
+      0.518521785736084
+     ],
+     "n": 16,
+     "sha256": "1f989f2ae8aa13f74946025f314786062e658858705ebf3c1c6a8c95f656f010"
+    }
+   ],
+   "seed": "-9223372036854775808"
   }
  ],
  "head": 64,

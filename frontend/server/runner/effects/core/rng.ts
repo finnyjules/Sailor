@@ -48,10 +48,14 @@
  * float log / sin / cos are this Mac's libm in torch (logf, and sinf / cosf
  * of one angle fused by the compiler into __sincosf_stret) and the correctly
  * rounded float here (V8's double function rounded). Bit-exact wherever libm
- * rounds correctly; where it doesn't (about 1 angle in 1,500 for sincosf; logf
- * never, on the fixture) one ulp of sin / cos, which the product with the
- * radius can make two ulps of the draw. The spec proves each differing draw
- * against the fixture's libm record. The looks built on randn are LIBRARY.
+ * rounds correctly; where it doesn't (measured: sincosf about 1 angle in
+ * 1,500; logf about 5 misses per 1M draws) one ulp of sin / cos / log, which
+ * the product with the radius can make two ulps of the draw. The spec proves
+ * each differing draw against the fixture's libm record (one fixture case
+ * holds a logf miss). The looks built on randn are LIBRARY.
+ * randn below 16 values is bit-exact only because V8's fdlibm and Apple's libm
+ * agree on log1p / sin / cos in double precision closely enough that the
+ * float rounds the same: measured on every fixture draw, not proven.
  */
 
 export interface TorchGenerator {
@@ -76,6 +80,9 @@ export function rngCore() {
   const TWO_POW_M53 = 1 / 9007199254740992
   // randperm_cpu's small-n bound: std::numeric_limits<uint32_t>::max() / 20.
   const RANDPERM_SMALL_N = Math.floor(0xFFFFFFFF / 20)
+  // torch's seed range (manual_seed: int64 or uint64). No BigInt literals: Nitro builds for es2019.
+  const SEED_MIN = -(BigInt(1) << BigInt(63))
+  const SEED_MAX = (BigInt(1) << BigInt(64)) - BigInt(1)
 
   function generator(): TorchGenerator {
     const mt = new Uint32Array(N)
@@ -96,7 +103,12 @@ export function rngCore() {
     }
 
     function seed(s: bigint | number): void {
-      const low = Number(BigInt.asUintN(32, BigInt(s)))
+      // What torch.Generator.manual_seed accepts: an int64 or a uint64, [−2⁶³, 2⁶⁴ − 1]. A JS
+      // number past 2⁵³ has already lost the low bits mt19937 keeps, so it is refused too.
+      if (typeof s === 'number' && !Number.isSafeInteger(s)) throw new Error('A random seed must be a whole number no larger than 2⁵³; pass a bigint for larger seeds')
+      const big = BigInt(s)
+      if (big < SEED_MIN || big > SEED_MAX) throw new Error('A random seed must lie between −2⁶³ and 2⁶⁴ − 1, as torch accepts')
+      const low = Number(BigInt.asUintN(32, big))
       mt[0] = low
       for (let j = 1; j < N; j++) {
         const p = mt[j - 1]!
