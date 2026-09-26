@@ -280,7 +280,8 @@ export function resolveFormat(
       // sibling's declared position (undetected by validateGenerated, which
       // only checks the STATIC compose()-time region, not this runtime
       // grow).
-      while (!fullFits() && region.row + region.rowSpan - 1 < m.rows
+      // Bounded when the grid has no finite row count (R1.6 fix round 1).
+      while (!fullFits() && Number.isFinite(m.rows) && region.row + region.rowSpan - 1 < m.rows
         && (el.growLimit == null || region.rowSpan < el.growLimit)) {
         region = { ...region, rowSpan: region.rowSpan + 1 }
         rect = toRect(region)

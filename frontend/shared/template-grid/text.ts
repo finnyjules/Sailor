@@ -143,9 +143,10 @@ export function fitText(opts: {
     return { fontSize: startFs, content, lines: wrapLines(content, startFs, opts.w), clipped: true }
   }
 
-  // Auto (level-derived) size: shrink toward the floor until it fits.
+  // Auto (level-derived) size: shrink toward the floor until it fits. A size
+  // that isn't a finite number never reaches the floor: bounded (R1.6 fix 1).
   let fs = startFs
-  for (;;) {
+  for (let step = 0; step < 512 && Number.isFinite(fs); step++) {
     const lines = tryFit(fs)
     if (lines) return { fontSize: fs, content, lines, clipped: false }
     if (fs === FONT_FLOOR) break

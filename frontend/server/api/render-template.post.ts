@@ -5,11 +5,14 @@
  * Returns: image/png bytes.
  *
  * The render itself (satori → resvg) is ../templates/renderPng.ts, shared
- * with the runner's Smart Layout card.
+ * with the runner's Smart Layout card: satori and resvg on a worker thread,
+ * images fetched under the safe policy (../templates/safeFetch.ts), a
+ * format under 1 × 1 pixel refused (400).
  */
 
 import type { RenderRequest } from '~~/server/templates/schema'
 import { TemplateImageError, renderTemplatePng } from '~~/server/templates/renderPng'
+import { TemplateSizeError } from '~~/server/templates/translate'
 
 export default defineEventHandler(async (event) => {
   const body = await readBody<RenderRequest>(event)
@@ -22,6 +25,7 @@ export default defineEventHandler(async (event) => {
     png = await renderTemplatePng(body)
   } catch (e) {
     if (e instanceof TemplateImageError) throw createError({ statusCode: 502, statusMessage: e.message })
+    if (e instanceof TemplateSizeError) throw createError({ statusCode: 400, statusMessage: e.message })
     throw e
   }
 

@@ -187,23 +187,28 @@ function workerBackend(t: Thread, protect: boolean): FrameBackend<Preview8> {
 /**
  * One job on the worker, waiting its turn behind any other (one at a time),
  * with Stop (the shared flag) and the watchdog, whose message is `timeout`.
+ * `live` (R1.6 fix round 1) is aborted by Stop, by the watchdog and once the
+ * job's turn is over: a job whose turn ended (it failed or was stopped while
+ * its own main-thread work went on) sees it and writes nothing more.
  */
-function onWorker<T>(signal: AbortSignal | undefined, timeout: string, job: (t: Thread) => Promise<T>): Promise<T> {
+function onWorker<T>(signal: AbortSignal | undefined, timeout: string, job: (t: Thread, live: AbortSignal) => Promise<T>): Promise<T> {
   const run = async (): Promise<T> => {
     if (signal?.aborted) throw new Error('Stopped')
     const t = thread()
     Atomics.store(t.stop, 0, 0)
-    const onAbort = () => Atomics.store(t.stop, 0, 1)
+    const live = new AbortController()
+    const onAbort = () => { Atomics.store(t.stop, 0, 1); live.abort() }
     signal?.addEventListener('abort', onAbort, { once: true })
     let timer: ReturnType<typeof setTimeout> | undefined
     const watchdog = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
+        live.abort()
         t.dead = timeout
         void t.worker.terminate()
         reject(new Error(timeout))
       }, g.__sailorFrameTimeoutMs ?? FRAME_RENDER_TIMEOUT_MS)
     })
-    const work = job(t)
+    const work = job(t, live.signal)
     work.catch(() => {})
     try {
       return await Promise.race([work, watchdog])
@@ -216,6 +221,7 @@ function onWorker<T>(signal: AbortSignal | undefined, timeout: string, job: (t: 
     finally {
       clearTimeout(timer)
       signal?.removeEventListener('abort', onAbort)
+      live.abort()
     }
   }
   const prev = g.__sailorFrameQueue ?? Promise.resolve()
@@ -291,6 +297,8 @@ export interface PixelsWorker {
   clip(picture: RawPicture, trunc?: boolean): Promise<HandOff8>
   /** Save image (R1.5): the pixels save_images encodes, w × h (Lanczos when that differs), flattened onto white for JPEG. */
   savePixels(picture: RawPicture, w: number, h: number, flatten: boolean): Promise<HandOff8>
+  /** Aborted once this job's turn is over (Stop, the watchdog, or done): check before writing anything (R1.6 fix round 1). */
+  live: AbortSignal
 }
 
 /**
@@ -299,8 +307,9 @@ export interface PixelsWorker {
  * and hands each picture's pixels to the worker, one at a time.
  */
 export function pixelsInWorker<T>(signal: AbortSignal | undefined, job: (w: PixelsWorker) => Promise<T>): Promise<T> {
-  return onWorker(signal, PIXELS_TIMEOUT_MESSAGE, async (t) => {
+  return onWorker(signal, PIXELS_TIMEOUT_MESSAGE, async (t, live) => {
     const w: PixelsWorker = {
+      live,
       async channelMask(picture, index) {
         const p = handOver(picture)
         return await call(t, { op: 'px.channel', picture: p.picture, index }, p.buffers) as MaskScanlines

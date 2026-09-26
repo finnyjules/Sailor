@@ -23,7 +23,7 @@ import { brandOf, livePreviewName, smartLayoutPixels } from '#shared/runner/smar
 import { planNode, type DeriveIO, type Derived, type NodePlan } from '~~/server/runner/executors'
 import { createEngineResultStore } from '~~/server/runner/results'
 import {
-  LAYOUT_TOO_LARGE, autopopulateForTemplate, outputLabels, parseLayout, parseTextLayers, resolveOutputs,
+  LAYER_ORIGIN, LAYOUT_TOO_LARGE, OUTPUT_TOO_LARGE, TOO_MANY_ELEMENTS, autopopulateForTemplate, outputLabels, parseLayout, parseTextLayers, resolveOutputs,
   smartLayoutRenderer, smartLayoutRequests,
 } from '~~/server/runner/cards/smartLayout'
 import { renderTemplatePng } from '~~/server/templates/renderPng'
@@ -246,8 +246,13 @@ describe('execute (SmartLayoutNode.execute, the renderer answering a 2×2 RGBA P
 
     it(`the node matches Python: ${c.name}`, async () => {
       const sent: RenderRequest[] = []
-      vi.spyOn(smartLayoutRenderer, 'render').mockImplementation(async (req) => {
+      const layerBytes = new Map<string, Uint8Array>()
+      vi.spyOn(smartLayoutRenderer, 'render').mockImplementation(async (req, opts) => {
         sent.push(JSON.parse(JSON.stringify(req)) as RenderRequest)
+        // Each image layer as the renderer fetches it: the card's own fetcher answers its address.
+        for (const [k, url] of Object.entries(req.props ?? {})) {
+          if (k.startsWith('image_layer_')) layerBytes.set(`${k} ${String(url)}`, new Uint8Array((await opts!.fetcher!(String(url))).data))
+        }
         return b64(FX.render)
       })
       if (c.error) {
@@ -261,8 +266,8 @@ describe('execute (SmartLayoutNode.execute, the renderer answering a 2×2 RGBA P
       for (const body of sent) {
         for (const [k, url] of Object.entries(body.props ?? {})) {
           if (!k.startsWith('image_layer_')) continue
-          expect(String(url).startsWith('data:image/png;base64,'), k).toBe(true)
-          const got = await decode(b64(String(url).split(',')[1]!))
+          expect(String(url), k).toBe(`${LAYER_ORIGIN}${k}`)
+          const got = await decode(layerBytes.get(`${k} ${String(url)}`)!)
           const want = c.frames[k]!
           expect([got.w, got.h, got.channels], k).toEqual([want.w, want.h, want.mode.length])
           expect(Buffer.compare(got.px, b64(want.px)), `${k} pixels`).toBe(0)
@@ -360,9 +365,14 @@ describe('eligibility', () => {
 
   it('a layout only Python reads (NaN), or outputs past the pixel cap, are left to the engine', () => {
     expect(isRunnerEligible({ l: smartLayout({ layout: '{"formats": {"a": {"w": NaN, "h": 1}}}', aspects: 'a' }) }, CARDS)).toBe(false)
-    const huge = JSON.stringify({ version: 2, formats: { big: { w: 20000, h: 20000 } }, elements: [] })
-    expect(smartLayoutPixels({ layout: huge, aspects: 'big' })).toBeGreaterThan(CARD_MAX_PIXELS)
+    // One output over 8192² (fix round 1), and outputs within it that are over CARD_MAX_PIXELS together.
+    const huge = JSON.stringify({ version: 2, formats: { big: { w: 8193, h: 8192 } }, elements: [] })
+    expect(smartLayoutPixels({ layout: huge, aspects: 'big' })).toBeNull()
     expect(isRunnerEligible({ l: smartLayout({ layout: huge, aspects: 'big' }) }, CARDS)).toBe(false)
+    const many = JSON.stringify({ version: 2, formats: { big: { w: 8192, h: 8192 } }, elements: [] })
+    expect(smartLayoutPixels({ layout: many, aspects: 'big,big,big,big' })).toBe(CARD_MAX_PIXELS)
+    expect(isRunnerEligible({ l: smartLayout({ layout: many, aspects: 'big,big,big,big' }) }, CARDS)).toBe(true)
+    expect(isRunnerEligible({ l: smartLayout({ layout: many, aspects: 'big,big,big,big,big' }) }, CARDS)).toBe(false)
     const odd = JSON.stringify({ version: 2, formats: { a: { w: '1080', h: 1080 } }, elements: [] })
     expect(isRunnerEligible({ l: smartLayout({ layout: odd, aspects: 'a' }) }, CARDS)).toBe(false)
     // A first format hidden by JS's key order (integer keys first), with no aspects to name one.
@@ -428,11 +438,15 @@ describe('the engine (cards on)', () => {
 
   it('outputs past the pixel cap fail the node before any render (the backstop to eligibility)', async () => {
     const render = vi.spyOn(smartLayoutRenderer, 'render')
-    const huge = JSON.stringify({ version: 2, formats: { big: { w: 20000, h: 20000 } }, elements: [] })
-    await expect(planNode({
-      prompt: { l: smartLayout({ layout: huge, aspects: 'big' }) }, nodeId: 'l', families: CARDS, gateOpen: false,
+    const plan = (layout: string, aspects: string) => planNode({
+      prompt: { l: smartLayout({ layout, aspects }) }, nodeId: 'l', families: CARDS, gateOpen: false,
       filesFrom: () => [], toUrl: async () => '',
-    })).rejects.toThrow(LAYOUT_TOO_LARGE)
+    })
+    await expect(plan(JSON.stringify({ version: 2, formats: { big: { w: 8192, h: 8192 } }, elements: [] }), 'big,big,big,big,big')).rejects.toThrow(LAYOUT_TOO_LARGE)
+    await expect(plan(JSON.stringify({ version: 2, formats: { big: { w: 8193, h: 8192 } }, elements: [] }), 'big')).rejects.toThrow(OUTPUT_TOO_LARGE)
+    const crowded = JSON.stringify({ version: 2, formats: { a: { w: 64, h: 64 } }, elements: Array.from({ length: 257 }, (_, i) => ({ id: `e${i}`, type: 'text', content: 'x' })) })
+    await expect(plan(crowded, 'a')).rejects.toThrow(TOO_MANY_ELEMENTS)
+    expect(isRunnerEligible({ l: smartLayout({ layout: crowded, aspects: 'a' }) }, CARDS)).toBe(false)
     expect(render).not.toHaveBeenCalled()
   })
 

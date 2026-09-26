@@ -6,10 +6,13 @@
  * (np.clip(255·x, 0, 255).astype(uint8), RGB or RGBA as the tensor), and
  * POSTs one render request per output to the app's /api/render-template,
  * which fetches the frame back over /view. The runner builds the same
- * request bodies (the pure parts are #shared/runner/smartLayout.ts), hands
- * each image layer as a `data:image/png` URL of those same pixels (it has no
- * HTTP origin; inlineTreeImages passes data URLs through) and calls the
- * route's own render function directly (server/templates/renderPng.ts).
+ * request bodies (the pure parts are #shared/runner/smartLayout.ts) and
+ * calls the route's own render function directly
+ * (server/templates/renderPng.ts). Each image layer is handed as an http
+ * address under LAYER_ORIGIN that the card's own fetcher answers from memory
+ * with those same pixels, so the renderer's http path (where duotone and
+ * grain are baked) runs as it does for Python's /view address; anything else
+ * the layout names is fetched under the safe policy (safeFetch.ts).
  * Each render is decoded to RGB as PIL's convert("RGB") does (the alpha
  * dropped as it is) and kept as an 8-bit PNG: the value, a list
  * (is_output_list), one picture per output, which only Save image and
@@ -18,22 +21,29 @@
  * `live_preview_<node>_<safe label>.png`, overwritten each run (the
  * runner's own temp subfolder locally, the user's hosted).
  *
- * The image layers' pixel work runs on the Frame's worker (queue, watchdog,
- * Stop), one layer at a time, after every layer's header is read and the
- * total checked against CARD_MAX_PIXELS; the outputs' pixels are capped the
- * same way (eligibility, when the layout is known; here again). The render
- * itself is satori and resvg, as the route runs it for the ComfyUI path:
- * one output at a time, in the worker's queue.
+ * Before any picture is read (fix round 1): each output at least 1 × 1 and
+ * at most 8192² pixels, all within CARD_MAX_PIXELS, at most 256 elements,
+ * and every preview name one the store takes. The image layers' pixel work
+ * runs on the Frame's worker (queue, watchdog, Stop), one layer at a time,
+ * after every layer's header is read and the total checked; satori and resvg
+ * run on the render worker (templates/renderWorker.ts), one output at a
+ * time, terminated when the job's turn ends. Nothing is kept or written once
+ * the turn is over (the worker job's `live` signal).
  */
 import sharp from 'sharp'
 import type { DeriveIO, NodePlan, PlanContext } from '../executors'
 import type { OutputFile } from '../types'
 import type { RenderRequest } from '../../templates/schema'
-import { TemplateImageError, renderTemplatePng } from '../../templates/renderPng'
+import { TemplateImageError, renderTemplatePng, type RenderOptions } from '../../templates/renderPng'
+import { TEMPLATE_SIZE_REFUSED as TEMPLATE_SIZE_WORDS, TemplateSizeError } from '../../templates/translate'
+import { safeImageFetcher } from '../../templates/safeFetch'
+import type { ImageFetcher } from '../../templates/inlineImages'
+import { PREVIEW_NAME_RE } from '../results'
 import { isLink, type ApiLink } from '#shared/runner/graph'
 import { CARD_MAX_PIXELS } from '#shared/runner/eligibility'
 import {
-  IMAGE_LAYERS, TEXT_LAYERS, autopopulateForTemplate, brandOf, formatSize, livePreviewName,
+  IMAGE_LAYERS, SMART_LAYOUT_MAX_ELEMENTS, SMART_LAYOUT_MAX_OUTPUT_PIXELS, TEXT_LAYERS,
+  autopopulateForTemplate, brandOf, formatSize, layoutElementCount, livePreviewName,
   outputLabels, parseLayout, parseTextLayers, pySplitlines, resolveOutputs,
   type SmartLayoutOutput,
 } from '#shared/runner/smartLayout'
@@ -52,14 +62,53 @@ export {
 export const LAYOUT_TOO_LARGE = `This layout’s outputs are too large to render here (more than ${Math.floor(CARD_MAX_PIXELS / 1_000_000)} million pixels in all). Render fewer or smaller formats.`
 export const LAYERS_TOO_LARGE = `This layout’s pictures are too large to work on together (more than ${Math.floor(CARD_MAX_PIXELS / 1_000_000)} million pixels). Use fewer or smaller pictures.`
 export const LAYOUT_IMAGE_FAILED = 'A picture in this layout could not be loaded'
+export const OUTPUT_TOO_LARGE = `An output of this layout is too large to render here (more than ${Math.floor(SMART_LAYOUT_MAX_OUTPUT_PIXELS / 1_000_000)} million pixels). Use a smaller format.`
+export const TOO_MANY_ELEMENTS = `This layout has too many elements to render here (more than ${SMART_LAYOUT_MAX_ELEMENTS}).`
+export const FORMAT_ODD = 'A format of this layout has a size that isn’t a number of pixels'
+export const PREVIEW_NAME_BAD = 'An output’s label is too long to name its preview file. Use a shorter label.'
 
 /** The renderer the card calls: the route's own function (a seam for tests). */
-export const smartLayoutRenderer = { render: (req: RenderRequest): Promise<Uint8Array> => renderTemplatePng(req) }
+export const smartLayoutRenderer = { render: (req: RenderRequest, opts: RenderOptions = {}): Promise<Uint8Array> => renderTemplatePng(req, opts) }
 
-/** str() of a value a layer socket brings (text, or a typed literal). */
-function layerText(v: unknown): string {
+/**
+ * Where the render finds each image layer: an address no network knows
+ * (`.invalid`), answered from memory by the card's own fetcher, so the
+ * renderer's http path runs (its photo treatments are baked there) exactly
+ * as for Python's /view address.
+ */
+export const LAYER_ORIGIN = 'http://sailor-runner.invalid/layer/'
+
+/** Python's repr() of a float (str() is the same): shortest digits, exponent past 1e16 or under 1e-4. */
+export function pyFloatStr(v: number): string {
+  if (Number.isNaN(v)) return 'nan'
+  if (!Number.isFinite(v)) return v > 0 ? 'inf' : '-inf'
+  const [mant, expText] = v.toExponential().split('e') as [string, string]
+  const exp = Number(expText)
+  const neg = mant.startsWith('-')
+  const digits = mant.replace('-', '').replace('.', '')
+  let out: string
+  if (exp >= 16 || exp < -4) {
+    const m = digits.length > 1 ? `${digits[0]}.${digits.slice(1)}` : digits
+    out = `${m}e${exp < 0 ? '-' : '+'}${String(Math.abs(exp)).padStart(2, '0')}`
+  }
+  else if (exp < 0) out = `0.${'0'.repeat(-exp - 1)}${digits}`
+  else {
+    const int = digits.slice(0, exp + 1).padEnd(exp + 1, '0')
+    const frac = digits.slice(exp + 1)
+    out = `${int}.${frac || '0'}`
+  }
+  return neg ? `-${out}` : out
+}
+
+/**
+ * str() of a value a layer socket brings (text, or a typed literal). The
+ * prompt is JSON: a whole number there reads as a Python int, anything else
+ * as a float (1.5, 1e-05, 1e+21).
+ */
+export function layerText(v: unknown): string {
   if (typeof v === 'string') return v
   if (typeof v === 'boolean') return v ? 'True' : 'False'
+  if (typeof v === 'number') return Number.isInteger(v) && Math.abs(v) < 1e21 ? String(v) : pyFloatStr(v)
   return String(v)
 }
 
@@ -102,15 +151,29 @@ export function smartLayoutRequests(inputs: Record<string, unknown>, imageUrls: 
   return smartLayoutJob(inputs, imageUrls).requests
 }
 
-/** The pixels all the outputs render, from their formats' sizes (a format the template lacks fails the render). */
-function outputPixels(job: Job): number {
+/**
+ * The checks made before any picture is read or render run: each output's
+ * size (a number, at least one pixel, at most SMART_LAYOUT_MAX_OUTPUT_PIXELS),
+ * all of them within CARD_MAX_PIXELS, the elements within
+ * SMART_LAYOUT_MAX_ELEMENTS, and each preview's file name one the store takes.
+ */
+function checkJob(job: Job, nodeId: string): void {
   let total = 0
+  const template = job.requests[0]?.template as unknown as Record<string, unknown> | undefined
+  if (template && layoutElementCount(template) > SMART_LAYOUT_MAX_ELEMENTS) throw new Error(TOO_MANY_ELEMENTS)
   for (const r of job.requests) {
     const s = formatSize(r.template as unknown as Record<string, unknown>, r.aspect)
-    if (s === 'odd') throw new Error('This layout’s format size is not a number of pixels')
-    if (s) total += s.w * s.h
+    if (s === 'odd') throw new Error(FORMAT_ODD)
+    if (s === 'tiny') throw new Error(TEMPLATE_SIZE_WORDS)
+    if (!s) continue
+    if (s.w * s.h > SMART_LAYOUT_MAX_OUTPUT_PIXELS) throw new Error(OUTPUT_TOO_LARGE)
+    total += s.w * s.h
   }
-  return total
+  if (total > CARD_MAX_PIXELS) throw new Error(LAYOUT_TOO_LARGE)
+  job.labels.forEach((label, i) => {
+    const name = livePreviewName(nodeId, label, i)
+    if (!PREVIEW_NAME_RE.test(name)) throw new Error(PREVIEW_NAME_BAD)
+  })
 }
 
 /** A wired image layer: how its picture decodes (its source), and the file of its first frame (none for the blank). */
@@ -147,14 +210,30 @@ export async function renderedRgbPng(bytes: Uint8Array): Promise<Uint8Array> {
   return png(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), info.width, info.height, 3)
 }
 
-const stopped = (io: DeriveIO) => { if (io.signal.aborted) throw new Error('Stopped') }
+/** Throws once the job's turn is over (Stop, the watchdog): nothing is written after it. */
+const stopped = (live: AbortSignal) => { if (live.aborted) throw new Error('Stopped') }
 
 /** One render, its failure in plain words. */
-async function renderOne(req: RenderRequest): Promise<Uint8Array> {
-  try { return await smartLayoutRenderer.render(req) }
+async function renderOne(req: RenderRequest, opts: RenderOptions): Promise<Uint8Array> {
+  try { return await smartLayoutRenderer.render(req, opts) }
   catch (e) {
-    if (e instanceof TemplateImageError) throw new Error(LAYOUT_IMAGE_FAILED)
+    if (opts.signal?.aborted) throw new Error('Stopped')
+    if (e instanceof TemplateImageError) throw new Error(/private network|larger than 30 MB|longer than 20 seconds/.test(e.message) ? e.message : LAYOUT_IMAGE_FAILED)
+    if (e instanceof TemplateSizeError) throw new Error(e.message)
     throw new Error(`The layout could not be rendered (${String((e as Error)?.message ?? e).slice(0, 200)})`)
+  }
+}
+
+/** The card's fetcher: its own layers from memory, anything else the layout names under the safe policy. */
+function layerFetcher(layers: ReadonlyMap<string, Uint8Array>, hosted: boolean): ImageFetcher {
+  const safe = safeImageFetcher({ hosted })
+  return async (url) => {
+    if (url.startsWith(LAYER_ORIGIN)) {
+      const bytes = layers.get(url.slice(LAYER_ORIGIN.length))
+      if (!bytes) throw new Error('A picture in this layout was not made')
+      return { data: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, contentType: 'image/png' }
+    }
+    return safe(url)
   }
 }
 
@@ -163,8 +242,9 @@ export function planSmartLayout(ctx: PlanContext): NodePlan {
   const layers = layersOf(ctx)
   // Checked before any picture is read: Python refuses a bad layout, an
   // unknown format or a label that isn't text whatever the pictures are.
-  const planned = smartLayoutJob(inputs, Object.fromEntries(layers.map(l => [l.key, `layer:${l.key}`])))
-  if (outputPixels(planned) > CARD_MAX_PIXELS) throw new Error(LAYOUT_TOO_LARGE)
+  const urls = Object.fromEntries(layers.map(l => [l.key, `${LAYER_ORIGIN}${l.key}`]))
+  const job = smartLayoutJob(inputs, urls)
+  checkJob(job, ctx.nodeId)
   return {
     kind: 'derive',
     async derive(io) {
@@ -176,21 +256,23 @@ export function planSmartLayout(ctx: PlanContext): NodePlan {
         if (total > CARD_MAX_PIXELS) throw new Error(LAYERS_TOO_LARGE)
       }
       const { images, kept } = await pixelsInWorker(io.signal, async (worker) => {
-        const urls: Record<string, string> = {}
+        const live = worker.live
+        const bytes = new Map<string, Uint8Array>()
         for (const l of layers) {
-          stopped(io)
+          stopped(live)
           const raw = await decoded(io, l.source, l.file)
           const p = await worker.savePixels(raw, raw.w, raw.h, false)
-          urls[l.key] = `data:image/png;base64,${Buffer.from(await png(p.px, p.w, p.h, p.channels)).toString('base64')}`
+          bytes.set(l.key, await png(p.px, p.w, p.h, p.channels))
         }
-        const job = smartLayoutJob(inputs, urls)
+        const opts: RenderOptions = { fetcher: layerFetcher(bytes, io.hosted), signal: live }
         const kept: OutputFile[] = []
         const images: OutputFile[] = []
         for (let i = 0; i < job.requests.length; i++) {
-          stopped(io)
-          const rgb = await renderedRgbPng(await renderOne(job.requests[i]!))
-          stopped(io)
+          stopped(live)
+          const rgb = await renderedRgbPng(await renderOne(job.requests[i]!, opts))
+          stopped(live)
           kept.push(await io.keep(rgb, 'png'))
+          stopped(live)
           images.push(await io.savePreviewAs(rgb, { filename: livePreviewName(io.nodeId, job.labels[i]!, i) }))
         }
         return { images, kept }

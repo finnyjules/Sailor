@@ -474,33 +474,49 @@ export function livePreviewName(nodeId: string, label: string, index: number): s
   return `live_preview_${nodeId}_${safe}.png`
 }
 
+/** The largest one Smart Layout output the runner renders (R1.6 fix round 1). */
+export const SMART_LAYOUT_MAX_OUTPUT_PIXELS = 8192 * 8192
+/** The most elements (top-level and section children) a layout the runner renders may have. */
+export const SMART_LAYOUT_MAX_ELEMENTS = 256
+
 /**
  * The render size of an output's format as the renderer reads it
  * (server/templates/translate.ts: v2/v3 `formats[key]`, else `aspects[key]`):
  * null when the template has no such format (the render fails), 'odd' when
- * its size is not a plain number of pixels.
+ * its size is not a plain number of pixels, 'tiny' when it is under one
+ * pixel either way (the renderer refuses it: its text fit would never end).
  */
-export function formatSize(template: Record<string, unknown>, format: unknown): { w: number; h: number } | null | 'odd' {
+export function formatSize(template: Record<string, unknown>, format: unknown): { w: number; h: number } | null | 'odd' | 'tiny' {
   const v = template.version
   const table = v === 2 || v === 3 ? template.formats : template.aspects
   if (!isDict(table) || (typeof format !== 'string' && typeof format !== 'number')) return null
   const f = get(table, String(format))
   if (!isDict(f)) return null
   const ok = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0
-  return ok(f.w) && ok(f.h) ? { w: Math.ceil(f.w), h: Math.ceil(f.h) } : 'odd'
+  if (!ok(f.w) || !ok(f.h)) return 'odd'
+  return f.w < 1 || f.h < 1 ? 'tiny' : { w: Math.ceil(f.w), h: Math.ceil(f.h) }
+}
+
+/** How many elements a layout has, top-level and in sections (0 when Python would fail on its shape). */
+export function layoutElementCount(template: Record<string, unknown>): number {
+  try { return templateElements(template).length }
+  catch { return 0 }
 }
 
 /**
- * The pixels a Smart Layout's settings render in all, before anything runs:
- * null when that can't be known (a layout JSON.parse can't read as
- * json.loads does, a first format hidden by key order, a size that isn't a
- * number). A layout Python refuses counts 0: the node fails the same way
- * wherever it runs.
+ * What a Smart Layout's settings would render, before anything runs: the
+ * pixels in all and the largest one output, or null when the runner leaves
+ * it to the engine: a layout JSON.parse can't read as json.loads does, a
+ * first format hidden by key order, a size that isn't a number, an output
+ * over SMART_LAYOUT_MAX_OUTPUT_PIXELS or more than SMART_LAYOUT_MAX_ELEMENTS
+ * elements. A layout Python refuses, or a format under one pixel (which the
+ * renderer refuses too), counts 0: the node fails plainly wherever it runs.
  */
 export function smartLayoutPixels(inputs: Record<string, unknown>): number | null {
   let template: Dict
   try { template = parseLayout(inputs.layout) }
   catch { return /NaN|Infinity/.test(widgetText(inputs.layout)) ? null : 0 }
+  if (layoutElementCount(template) > SMART_LAYOUT_MAX_ELEMENTS) return null
   let outputs: SmartLayoutOutput[]
   try { outputs = resolveOutputs(template, widgetText(inputs.aspects)) }
   catch (e) { return e instanceof LayoutOrderUnknown ? null : 0 }
@@ -508,7 +524,11 @@ export function smartLayoutPixels(inputs: Record<string, unknown>): number | nul
   for (const o of outputs) {
     const s = formatSize(template, o.format)
     if (s === 'odd') return null
-    if (s) total += s.w * s.h
+    if (s === 'tiny') return 0
+    if (s) {
+      if (s.w * s.h > SMART_LAYOUT_MAX_OUTPUT_PIXELS) return null
+      total += s.w * s.h
+    }
   }
   return total
 }

@@ -11,13 +11,13 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { Resvg } from '@resvg/resvg-js'
-import satori from 'satori'
-
 import type { RenderRequest } from './schema'
 import { readManifest, USER_FONTS_DIR } from './fonts-store'
-import { inlineTreeImages } from './inlineImages'
+import { inlineTreeImages, type ImageFetcher } from './inlineImages'
 import { templateToSatori } from './translate'
+import { safeImageFetcher } from './safeFetch'
+import { svgToPngInWorker } from './renderWorker'
+import { isHosted } from '../utils/deployMode'
 import { TEMPLATE_FONTS } from '../../shared/template-fonts'
 import { resolveTokens } from '../../shared/template-grid/tokens'
 import { resolveLibraryFaceByFamily } from '../utils/libraryFontManifest'
@@ -178,8 +178,19 @@ async function loadFonts(template: unknown, brand: Record<string, unknown>): Pro
 /** An image in the layout could not be fetched: the route answers 502. */
 export class TemplateImageError extends Error {}
 
-/** The PNG for one render request (the route's body before R1.6, unchanged). */
-export async function renderTemplatePng(body: RenderRequest): Promise<Uint8Array> {
+export interface RenderOptions {
+  /** How http(s) images are fetched: the safe fetcher (./safeFetch.ts) by default. */
+  fetcher?: ImageFetcher
+  /** Stops the render (its worker is terminated). */
+  signal?: AbortSignal
+}
+
+/**
+ * The PNG for one render request: the route's body before R1.6, with the
+ * satori and resvg steps on the render worker (./renderWorker.ts) and images
+ * fetched under the safe policy (fix round 1). Same code, same fonts, same bytes.
+ */
+export async function renderTemplatePng(body: RenderRequest, opts: RenderOptions = {}): Promise<Uint8Array> {
   const fonts = await loadFonts(body.template, (body.brand ?? {}) as Record<string, unknown>)
 
   const { tree, width, height } = templateToSatori(
@@ -195,20 +206,15 @@ export async function renderTemplatePng(body: RenderRequest): Promise<Uint8Array
   // loading fails silently (a 404 just skips the image → plausible-but-wrong
   // output). A dead URL now rejects the render with a clear error instead.
   try {
-    await inlineTreeImages(tree)
+    await inlineTreeImages(tree, opts.fetcher ?? safeImageFetcher({ hosted: isHosted() }))
   } catch (e) {
     throw new TemplateImageError(String((e as Error).message ?? e).slice(0, 200))
   }
 
-  // Satori's first arg is "any" because it accepts ReactNode-shaped objects.
-  // Our `tree` matches that shape (type/props/children) without pulling React.
-  const svg = await satori(tree as any, {
-    width,
-    height,
+  // satori → SVG, resvg → PNG (fitTo: original honours the size satori sized
+  // to), on the worker: the tree is plain objects, the fonts their bytes.
+  return svgToPngInWorker({
+    tree, width, height,
     fonts: fonts.map((f) => ({ name: f.name, data: f.data, weight: f.weight, style: f.style })),
-  })
-
-  // SVG → PNG via resvg. fitTo:original honours the size satori already sized to.
-  const resvg = new Resvg(svg, { fitTo: { mode: 'original' } })
-  return resvg.render().asPng()
+  }, opts.signal)
 }

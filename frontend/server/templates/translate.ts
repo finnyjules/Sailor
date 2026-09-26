@@ -273,6 +273,15 @@ export function templateToSatori(
   return templateV1ToSatori(template as Template, aspectKey, props, brand, explicitSize)
 }
 
+/** A render size under one pixel (or not a number) sends the text fit into endless work: refused. */
+export const TEMPLATE_SIZE_REFUSED = 'A format of this layout is smaller than 1 × 1 pixel, so it can’t be rendered'
+export class TemplateSizeError extends Error {}
+
+function checkRenderSize(w: unknown, h: unknown): void {
+  const ok = (n: unknown) => Number(n) >= 1
+  if (!ok(w) || !ok(h)) throw new TemplateSizeError(TEMPLATE_SIZE_REFUSED)
+}
+
 function templateV1ToSatori(
   template: Template, aspectKey: string | undefined,
   props: RenderProps = {}, brand: RenderBrand = {},
@@ -286,6 +295,7 @@ function templateV1ToSatori(
   const effectiveAspect: AspectSpec = explicitSize
     ? { w: explicitSize.width, h: explicitSize.height, label: 'custom' }
     : aspect
+  checkRenderSize(effectiveAspect.w, effectiveAspect.h)
 
   const children: SatoriNode[] = []
   const bg = backgroundNode(template.background, effectiveAspect, props, brand)
@@ -490,6 +500,7 @@ function templateV2ToSatori(
   } else if (!template.formats[key]) {
     throw new Error(`Unknown format '${key}' on template '${template.id}'.`)
   }
+  checkRenderSize(tpl.formats[key]!.w, tpl.formats[key]!.h)
 
   // Template-default brand under any wired socket brand — so a template's own
   // {{ brand.* }} tokens resolve, while a wired kit can re-skin it.
