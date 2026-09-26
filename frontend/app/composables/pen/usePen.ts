@@ -42,7 +42,7 @@
 import { ref, shallowRef, computed, toRaw, type Ref } from 'vue'
 import type { SketchDoc, SketchConstraint, EntityId, ConstraintKind, SegmentSpec } from '~/lib/sketch/model'
 import { addPoint, addLine, addCircle, addConstraint, removeConstraint, deleteEntity, addPath, pointClosure, isPointReferenced, addSmoothHandles } from '~/lib/sketch/edit'
-import { snapPoint, inferCircleTangents, tangentJointArc } from '~/lib/sketch/infer'
+import { snapPoint, snapRule, snapPreviewKind, inferCircleTangents, tangentJointArc, type SnapPreviewKind } from '~/lib/sketch/infer'
 import { solve, type DragTarget } from '~/lib/sketch/solve'
 import { dist, type Vec2 } from '~/lib/sketch/geom'
 import { constraintMarks, type ConstraintMark, type ArcDimensionMark } from '~/lib/sketch/annotate'
@@ -665,11 +665,12 @@ export function usePen(opts: {
   }
 
   // place a point, honoring a snap: reuse the snapped point (coincident) or create
-  // a new point and the on-line/on-circle constraint the snap implies.
+  // a new point and the rule the snap implies (snapRule: on a line, circle,
+  // path segment or arc, or at a middle).
   // `construction` (guide mode) only affects a freshly-created point — a
   // coincident snap always reuses whatever the existing target point already is.
   // Every snap kind that actually captures a constraint (coincident reuse, or a
-  // fresh pointOnLine/pointOnCircle) sparkles at the snapped location — see
+  // fresh point with its rule) sparkles at the snapped location — see
   // sparkle() above.
   // placePoint, plus whether it created a fresh point (vs. snapping onto one
   // that already existed) — the same before/after entity-count check
@@ -689,8 +690,9 @@ export function usePen(opts: {
     const snapped = snapPoint(doc.value, x, y, { exclude: ex, tol: pxToUnits(SNAP_PX, opts.view.value) })
     if (snapped.snap?.kind === 'coincident') { sparkle(snapped.x, snapped.y); return snapped.snap.targetId }
     const id = addPoint(doc.value, snapped.x, snapped.y, { construction })
-    if (snapped.snap?.kind === 'pointOnLine') { addConstraint(doc.value, 'pointOnLine', [id, snapped.snap.targetId]); sparkle(snapped.x, snapped.y) }
-    else if (snapped.snap?.kind === 'pointOnCircle') { addConstraint(doc.value, 'pointOnCircle', [id, snapped.snap.targetId]); sparkle(snapped.x, snapped.y) }
+    // on a line/circle/segment/arc or at a middle: the rule that keeps it there
+    const rule = snapped.snap ? snapRule(snapped.snap, id) : null
+    if (rule) { addConstraint(doc.value, rule.kind, rule.refs); sparkle(snapped.x, snapped.y) }
     return id
   }
 
@@ -1194,16 +1196,18 @@ export function usePen(opts: {
   // tool's placement point. Read-only: never touches the doc. Null when
   // nothing is in reach, mid-gesture, or for a Circle's radius click (which
   // places no point).
-  const hoverSnap = computed<{ x: number; y: number } | null>(() => {
+  // `kind` is what the overlay's preview chip shows (point / midpoint / curve).
+  const hoverSnap = computed<{ x: number; y: number; kind: SnapPreviewKind } | null>(() => {
     const c = cursor.value
     const t = tool.value
-    if (!c || t === 'select') return null
+    // only the tools that place points (never Select, Trim, Cut or Dissolve)
+    if (!c || t === 'select' || t === 'trim' || t === 'cut' || t === 'dissolve') return null
     if (t === 'circle' && pending.value?.kind === 'circle') return null
     const base = t === 'path' ? (placementPreview.value ?? c) : c
     const ex = [...handleIds()]
     if (t === 'line' && pending.value?.kind === 'line') ex.push(pending.value.p1)
     const snapped = snapPoint(doc.value, base.x, base.y, { exclude: ex, tol: pxToUnits(SNAP_PX, opts.view.value) })
-    return snapped.snap ? { x: snapped.x, y: snapped.y } : null
+    return snapped.snap ? { x: snapped.x, y: snapped.y, kind: snapPreviewKind(snapped.snap) } : null
   })
 
   // --- Trim / Cut / Dissolve (lib/sketch/crossings.ts + trim.ts) ---

@@ -152,7 +152,7 @@ describe('path tool right-angle snap', () => {
     pen.selectTool('line')
     const n = doc.value.entities.length
     pen.cursor.value = { x: 2.2, y: 2.1, shift: false }
-    expect(pen.hoverSnap.value).toEqual({ x: 2, y: 2 })
+    expect(pen.hoverSnap.value).toEqual({ x: 2, y: 2, kind: 'point' })
     pen.cursor.value = { x: 6, y: 6, shift: false }
     expect(pen.hoverSnap.value).toBeNull()
     expect(doc.value.entities.length).toBe(n)

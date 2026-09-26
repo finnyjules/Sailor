@@ -1,23 +1,52 @@
-import type { SketchDoc, EntityId, PointEntity, LineEntity, CircleEntity } from './model'
+import type { SketchDoc, EntityId, ConstraintKind } from './model'
 import { lineEndpoints, circleCenter } from './model'
-import { dist, distPointToLine, sub, add, scale, len, dot, type Vec2 } from './geom'
+import { dist, distPointToLine, sub, add, scale, len, type Vec2 } from './geom'
+import { curveGeom, paramOf, pointAt, type CurveGeom } from './crossings'
 
-export interface PointSnap {
-  kind: 'coincident' | 'pointOnLine' | 'pointOnCircle'
-  targetId: EntityId
-  x: number
-  y: number
-  dist: number
+interface SnapAt { x: number; y: number; dist: number }
+
+/** Where a new point would land on existing geometry, and what it joins:
+ *  - `coincident` — the new point IS the existing point `targetId`;
+ *  - `midpoint` — the exact middle of the line (entity or path line segment)
+ *    from point `a` to point `b`;
+ *  - `pointOnLine` / `pointOnCircle` — on a line or circle entity `targetId`;
+ *  - `onSegment` — on a path's line or arc segment (`pathId`, `segIndex`),
+ *    with the point ids its rule needs (`a`→`b` for a line; `center` and the
+ *    segment's start `a` for an arc).
+ *  Lines and segments only snap between their ends; arcs only on the drawn arc. */
+export type PointSnap =
+  | (SnapAt & { kind: 'coincident'; targetId: EntityId })
+  | (SnapAt & { kind: 'pointOnLine'; targetId: EntityId })
+  | (SnapAt & { kind: 'pointOnCircle'; targetId: EntityId })
+  | (SnapAt & { kind: 'midpoint'; a: EntityId; b: EntityId })
+  | (SnapAt & { kind: 'onSegment'; pathId: EntityId; segIndex: number; seg: 'line'; a: EntityId; b: EntityId })
+  | (SnapAt & { kind: 'onSegment'; pathId: EntityId; segIndex: number; seg: 'arc'; center: EntityId; a: EntityId })
+
+/** What the overlay's snap preview chip shows. */
+export type SnapPreviewKind = 'point' | 'midpoint' | 'curve'
+
+export function snapPreviewKind(s: PointSnap): SnapPreviewKind {
+  return s.kind === 'coincident' ? 'point' : s.kind === 'midpoint' ? 'midpoint' : 'curve'
 }
 
-// closest point on the infinite line through a→b to p
-function projectOnLine(p: Vec2, a: Vec2, b: Vec2): Vec2 {
-  const ab = sub(b, a)
-  const L2 = dot(ab, ab)
-  if (L2 < 1e-12) return { x: a.x, y: a.y }
-  const t = dot(sub(p, a), ab) / L2
-  return add(a, scale(ab, t))
+/** The rule that pins a freshly placed point `p` where `s` put it — null for a
+ *  coincident snap (the new point is the existing one, no rule). */
+export function snapRule(s: PointSnap, p: EntityId): { kind: ConstraintKind; refs: EntityId[] } | null {
+  switch (s.kind) {
+    case 'coincident': return null
+    case 'pointOnLine': return { kind: 'pointOnLine', refs: [p, s.targetId] }
+    case 'pointOnCircle': return { kind: 'pointOnCircle', refs: [p, s.targetId] }
+    case 'midpoint': return { kind: 'midpoint', refs: [p, s.a, s.b] }
+    case 'onSegment':
+      return s.seg === 'line'
+        ? { kind: 'collinear', refs: [s.a, s.b, p] }
+        : { kind: 'equalDist', refs: [s.center, p, s.center, s.a] }
+  }
 }
+
+const RANK: Record<PointSnap['kind'], number> = { coincident: 0, midpoint: 1, pointOnLine: 2, pointOnCircle: 2, onSegment: 2 }
+// a curve snap landing on (or clamped to) an end is left to that end's point
+const T_EPS = 1e-9
 
 export function snapPoint(
   doc: SketchDoc,
@@ -29,12 +58,21 @@ export function snapPoint(
   const exclude = new Set(opts.exclude ?? [])
   const p = { x, y }
   let best: PointSnap | null = null
+  // point > midpoint > curve; among equals, nearer wins
   const consider = (s: PointSnap) => {
     if (s.dist > tol) return
-    // points beat curves; otherwise nearer wins
-    if (!best) { best = s; return }
-    const rank = (k: PointSnap['kind']) => (k === 'coincident' ? 0 : 1)
-    if (rank(s.kind) < rank(best.kind) || (rank(s.kind) === rank(best.kind) && s.dist < best.dist)) best = s
+    if (!best || RANK[s.kind] < RANK[best.kind] || (RANK[s.kind] === RANK[best.kind] && s.dist < best.dist)) best = s
+  }
+  // a straight piece a→b (line entity or path line segment): its middle, and
+  // the nearest spot strictly between its ends
+  const straight = (ga: Vec2, gb: Vec2, onIt: (at: SnapAt) => PointSnap, ia: EntityId, ib: EntityId) => {
+    const m = { x: (ga.x + gb.x) / 2, y: (ga.y + gb.y) / 2 }
+    if (dist(ga, gb) > 1e-9) consider({ kind: 'midpoint', a: ia, b: ib, x: m.x, y: m.y, dist: dist(p, m) })
+    const g: CurveGeom = { ref: { kind: 'line', id: '' }, kind: 'line', a: ga, b: gb }
+    const t = paramOf(g, p)
+    if (t <= T_EPS || t >= 1 - T_EPS) return
+    const on = pointAt(g, t)
+    consider(onIt({ x: on.x, y: on.y, dist: dist(p, on) }))
   }
   for (const e of doc.entities) {
     if (exclude.has(e.id)) continue
@@ -47,8 +85,7 @@ export function snapPoint(
       consider({ kind: 'coincident', targetId: e.id, x: e.x, y: e.y, dist: d })
     } else if (e.kind === 'line') {
       const ep = lineEndpoints(doc, e); if (!ep) continue
-      const proj = projectOnLine(p, ep.a, ep.b)
-      consider({ kind: 'pointOnLine', targetId: e.id, x: proj.x, y: proj.y, dist: dist(p, proj) })
+      straight(ep.a, ep.b, at => ({ kind: 'pointOnLine', targetId: e.id, ...at }), e.p1, e.p2)
     } else if (e.kind === 'circle') {
       const cen = circleCenter(doc, e); if (!cen) continue
       const toC = sub(p, cen)
@@ -56,6 +93,23 @@ export function snapPoint(
       if (l < 1e-9) continue // center itself — no meaningful circumference direction
       const on = add(cen, scale(toC, e.r / l))
       consider({ kind: 'pointOnCircle', targetId: e.id, x: on.x, y: on.y, dist: Math.abs(l - e.r) })
+    } else if (e.kind === 'path') {
+      const segCount = e.closed ? e.anchors.length : e.anchors.length - 1
+      for (let i = 0; i < segCount; i++) {
+        const seg = e.segments[i]
+        if (!seg || seg.kind === 'cubic') continue   // Bézier segments are not snap targets
+        const g = curveGeom(doc, { kind: 'seg', pathId: e.id, segIndex: i })
+        if (!g) continue
+        const ia = e.anchors[i]!, ib = e.anchors[(i + 1) % e.anchors.length]!
+        if (seg.kind === 'line') {
+          straight(g.a!, g.b!, at => ({ kind: 'onSegment', pathId: e.id, segIndex: i, seg: 'line', a: ia, b: ib, ...at }), ia, ib)
+        } else {
+          const t = paramOf(g, p)
+          if (t <= T_EPS || t >= 1 - T_EPS) continue   // off the drawn arc
+          const on = pointAt(g, t)
+          consider({ kind: 'onSegment', pathId: e.id, segIndex: i, seg: 'arc', center: seg.center, a: ia, x: on.x, y: on.y, dist: dist(p, on) })
+        }
+      }
     }
   }
   if (best) { const b: PointSnap = best; return { x: b.x, y: b.y, snap: b } }

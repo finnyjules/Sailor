@@ -413,15 +413,24 @@ const rightAngleChip = computed(() => {
   return pp ? screenPt(pp.anchors[pp.anchors.length - 1]!) : null
 })
 
-// soft ring under the pointer: at the cursor while a path/curve press is
-// live, otherwise — hovering a drawing tool — where the point would snap
-// onto existing geometry (usePen's hoverSnap), so it shows where it lands
+const drawPressing = () => (tool.value === 'path' && !!getPathDrag()) || (tool.value === 'curve' && !!getCurveDrag())
+
+// soft ring under the pointer while a path/curve press is live
 const cursorGlow = computed(() => {
   const c = penCursor.value
-  if (!c) return null
-  const pressing = (tool.value === 'path' && !!getPathDrag()) || (tool.value === 'curve' && !!getCurveDrag())
-  if (pressing) return toScreen(c)
-  return hoverSnap.value ? toScreen(hoverSnap.value) : null
+  if (!c || !drawPressing()) return null
+  return toScreen(c)
+})
+
+// hovering a drawing tool where the next point would join existing geometry
+// (usePen's hoverSnap): a chip at the snapped spot saying what will happen —
+// ⊙ onto a point, a bar with a centre tick onto a middle, a dot on an arc
+// onto a curve. It stands in for the glow ring there, and sits up-left of
+// the spot so it never covers the R / rule chips that sit up-right.
+const snapPreview = computed(() => {
+  const h = hoverSnap.value
+  if (!h || drawPressing()) return null
+  return { ...toScreen(h), kind: h.kind }
 })
 
 // Trim: the piece under the pointer, in drawing space (drawn thick and tinted
@@ -897,6 +906,20 @@ defineExpose({
     <g v-if="pathBowChip && pathBowChip.snappedTangent" pointer-events="none">
       <rect :x="pathBowChip.jointX + 6" :y="pathBowChip.jointY - 16" width="16" height="14" rx="3" fill="#111827" opacity="0.85" />
       <text :x="pathBowChip.jointX + 9" :y="pathBowChip.jointY - 5" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">T</text>
+    </g>
+    <g v-if="snapPreview" pointer-events="none" data-snap-preview :data-snap-kind="snapPreview.kind">
+      <circle :cx="snapPreview.x" :cy="snapPreview.y" r="3" fill="none" stroke="#6366f1" stroke-width="1.5" />
+      <rect :x="snapPreview.x - 22" :y="snapPreview.y - 16" width="16" height="14" rx="3" fill="#111827" opacity="0.85" />
+      <text v-if="snapPreview.kind === 'point'" :x="snapPreview.x - 19" :y="snapPreview.y - 5" fill="#e5e7eb" font-size="10" font-family="ui-monospace, monospace">⊙</text>
+      <g v-else-if="snapPreview.kind === 'midpoint'" stroke="#e5e7eb" stroke-width="1.2" stroke-linecap="round">
+        <line :x1="snapPreview.x - 19" :y1="snapPreview.y - 9" :x2="snapPreview.x - 9" :y2="snapPreview.y - 9" />
+        <line :x1="snapPreview.x - 14" :y1="snapPreview.y - 12" :x2="snapPreview.x - 14" :y2="snapPreview.y - 6" />
+      </g>
+      <g v-else>
+        <path :d="`M ${snapPreview.x - 19.5} ${snapPreview.y - 6} Q ${snapPreview.x - 14} ${snapPreview.y - 14} ${snapPreview.x - 8.5} ${snapPreview.y - 6}`"
+              fill="none" stroke="#e5e7eb" stroke-width="1.2" stroke-linecap="round" />
+        <circle :cx="snapPreview.x - 14" :cy="snapPreview.y - 10" r="1.8" fill="#e5e7eb" />
+      </g>
     </g>
     <g v-if="rightAngleChip" pointer-events="none" data-right-angle>
       <rect :x="rightAngleChip.x + 6" :y="rightAngleChip.y - 16" width="16" height="14" rx="3" fill="#111827" opacity="0.85" />

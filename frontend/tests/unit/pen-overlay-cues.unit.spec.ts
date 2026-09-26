@@ -113,22 +113,51 @@ describe('PenOverlay drawing cues', () => {
     expect(wrapper.find('[data-path-preview]').attributes('d')).toMatch(/L 4 3$/)
   })
 
-  it('draws the cursor glow during a path drag, and at the snap target while hovering', async () => {
+  it('draws the cursor glow during a path drag; hovering onto a point shows the ⊙ preview there instead', async () => {
     const { wrapper, pen } = setup()
-    pen.pathDown(0, 0); pen.pathMove(0.1, 0.1)
+    pen.pathDown(0, 0); pen.pathUp(0, 0)
+    pen.pathDown(4, 0); pen.pathMove(2, 1)   // a live press (bowing the second segment)
     await nextTick()
     const glow = wrapper.find('[data-cursor-glow]')
     expect(glow.exists()).toBe(true)
     expect(glow.attributes('pointer-events')).toBe('none')
-    pen.pathUp(0.1, 0.1)
+    expect(wrapper.find('[data-snap-preview]').exists()).toBe(false)
+    pen.pathUp(2, 1)
     pen.pathMove(3, 3)   // nothing in reach
     await nextTick()
     expect(wrapper.find('[data-cursor-glow]').exists()).toBe(false)
+    expect(wrapper.find('[data-snap-preview]').exists()).toBe(false)
     pen.pathMove(0.2, 0.1)   // within snap reach of the first anchor
     await nextTick()
-    const g = wrapper.find('[data-cursor-glow] circle')
-    expect(Number(g.attributes('cx'))).toBeCloseTo(40, 6)    // anchor (0,0) → screen (40, 400)
-    expect(Number(g.attributes('cy'))).toBeCloseTo(400, 6)
+    // the preview replaces the glow ring at a snap
+    expect(wrapper.find('[data-cursor-glow]').exists()).toBe(false)
+    const chip = wrapper.find('[data-snap-preview]')
+    expect(chip.exists()).toBe(true)
+    expect(chip.attributes('data-snap-kind')).toBe('point')
+    expect(chip.attributes('pointer-events')).toBe('none')
+    expect(chip.text()).toBe('⊙')
+    // anchor (0,0) → screen (40, 400); the chip sits up-left (-22, -16), clear of the chips that sit up-right
+    expect(Number(chip.find('rect').attributes('x'))).toBeCloseTo(18, 6)
+    expect(Number(chip.find('rect').attributes('y'))).toBeCloseTo(384, 6)
+  })
+
+  it('the snap preview says midpoint or curve, with a drawn glyph (no text)', async () => {
+    const { wrapper, pen, doc } = setup()
+    const { addPoint, addLine } = await import('~/lib/sketch/edit')
+    const a = addPoint(doc.value, 0, 0); const b = addPoint(doc.value, 10, 0); addLine(doc.value, a, b)
+    pen.selectTool('point')
+    pen.cursor.value = { x: 5.1, y: 0.2, shift: false }
+    await nextTick()
+    let chip = wrapper.find('[data-snap-preview]')
+    expect(chip.attributes('data-snap-kind')).toBe('midpoint')
+    expect(chip.text()).toBe('')
+    expect(chip.findAll('line').length).toBeGreaterThanOrEqual(2)   // the bar and its centre tick
+    pen.cursor.value = { x: 2, y: 0.2, shift: false }
+    await nextTick()
+    chip = wrapper.find('[data-snap-preview]')
+    expect(chip.attributes('data-snap-kind')).toBe('curve')
+    expect(chip.find('path').exists()).toBe(true)                    // the short arc
+    expect(chip.findAll('circle')).toHaveLength(2)                    // the ring at the spot + the dot on the arc
   })
 
   it('draws the cursor glow during a curve drag', async () => {
