@@ -13,9 +13,17 @@
 import type { PaintStroke } from '~/lib/compositor/brushStamp'
 import { LruCache } from '~/lib/compositor/silhouetteCache'
 import { isTipStroke, type TipStroke } from './record'
-import { rasterGroup, capView, tipRenderPath, type TipGroup, type CoverageView } from './engine'
+import { rasterGroup, capView, tipRenderPath, type TipGroup, type CoverageView, type GroupPaint } from './engine'
 
-export type { TipGroup, CoverageView } from './engine'
+export type { TipGroup, CoverageView, GroupPaint } from './engine'
+
+/** The material part of the cache signature: '' without paint, `${id}@0` when still, else the
+ *  time bucketed to 1/30 s — so a moving material re-renders once per bucket, a still one never. */
+export function paintKey(paint: GroupPaint | undefined): string {
+  if (!paint) return ''
+  if (paint.t === 0) return `${paint.material}@0`
+  return `${paint.material}@t${(Math.round(paint.t * 30) / 30).toFixed(3)}`
+}
 
 /** Whether two strokes of one tip agree on every setting the renderer applies per GROUP (the
  *  grain / shade pass): relief for every tip, grain for round. Only such strokes may share a
@@ -57,7 +65,7 @@ function blank(v: CoverageView): Canvas { const c = document.createElement('canv
 
 /** Composite `groups` in order over `from` (copied, never mutated) or over `base`. The shade
  *  comes back UNMASKED (the caller masks it by the final coverage). */
-function compose(v: CoverageView, groups: TipGroup[], from: Composite | null, base: CanvasImageSource | null | undefined, live: TipStroke | null, liveTailMs: number): Composite {
+function compose(v: CoverageView, groups: TipGroup[], from: Composite | null, base: CanvasImageSource | null | undefined, live: TipStroke | null, liveTailMs: number, paint?: GroupPaint): Composite {
   const coverage = blank(v)
   const cctx = coverage.getContext('2d')!
   let shade: Canvas | null = null
@@ -66,7 +74,7 @@ function compose(v: CoverageView, groups: TipGroup[], from: Composite | null, ba
   else if (base) cctx.drawImage(base, 0, 0, v.w, v.h)
   if (from?.shade) { shade = blank(v); shade.getContext('2d')!.drawImage(from.shade, 0, 0) }
   for (const g of groups) {
-    const r = rasterGroup(g, v, live, liveTailMs)
+    const r = g.erase ? rasterGroup(g, v, live, liveTailMs) : rasterGroup(g, v, live, liveTailMs, paint)
     if (!r.gpu) gpu = false
     cctx.globalCompositeOperation = g.erase ? 'destination-out' : 'source-over'
     // Explicit size: the GPU may have capped lower still (its own texture limit); stretch back.
@@ -94,20 +102,20 @@ const usable = (e: Entry | undefined, sig: string, strokes: readonly unknown[], 
 
 export function renderTipCoverage(
   key: string, strokes: (PaintStroke | TipStroke)[], view: CoverageView,
-  live?: TipStroke | null, liveTailMs = 0, base?: CanvasImageSource | null,
+  live?: TipStroke | null, liveTailMs = 0, base?: CanvasImageSource | null, paint?: GroupPaint,
 ): { coverage: HTMLCanvasElement; shade: HTMLCanvasElement | null } | null {
   const all = live ? [...strokes, live] : strokes
   const groups = groupTipStrokes(all)
   if (!groups.length) return null
   const path = tipRenderPath()
-  const sig = `${view.originX.toFixed(3)}|${view.originY.toFixed(3)}|${view.unitPx.toFixed(5)}|${view.w}x${view.h}|${base ? 'base' : ''}`
+  const sig = `${view.originX.toFixed(3)}|${view.originY.toFixed(3)}|${view.unitPx.toFixed(5)}|${view.w}x${view.h}|${base ? 'base' : ''}|${paintKey(paint)}`
   const v = capView(view)
 
   if (!live) {
     prefixes.delete(key)
     const hit = cache.get(key)
     if (usable(hit, sig, all, path)) return hit!
-    const c = finish(compose(v, groups, null, base, null, 0))
+    const c = finish(compose(v, groups, null, base, null, 0, paint))
     const entry: Entry = { ...c, sig, strokes: all.slice() }
     cache.set(key, entry)
     return entry
@@ -120,9 +128,9 @@ export function renderTipCoverage(
   const psig = `${sig}|${liveGroup.strokes.length - 1}`
   let prefix = prefixes.get(key)
   if (!usable(prefix, psig, strokes, path)) {
-    const c = compose(v, groups.slice(0, -1), null, base, null, 0)
+    const c = compose(v, groups.slice(0, -1), null, base, null, 0, paint)
     prefix = { ...c, sig: psig, strokes: strokes.slice() }
     prefixes.set(key, prefix)
   }
-  return finish(compose(v, [liveGroup], prefix!, null, live, liveTailMs))
+  return finish(compose(v, [liveGroup], prefix!, null, live, liveTailMs, paint))
 }
