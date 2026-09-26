@@ -60,26 +60,36 @@ function arcCentres(doc: SketchDoc): Set<EntityId> {
   return out
 }
 
-// the point a pin rule holds onto a curve, if the rule is a pin
-function pinnedPoint(c: SketchConstraint): EntityId | null {
-  if (c.kind === 'pointOnLine' || c.kind === 'pointOnCircle') return c.refs[0] ?? null
-  if (c.kind === 'collinear') return c.refs[2] ?? null
-  if (c.kind === 'equalDist' && c.refs[0] === c.refs[2]) return c.refs[1] ?? null
-  return null
+// Pins Trim itself put on the new end points it created, per doc object:
+// rule id → { rule content, the pinned point }. Used only so that removing such an
+// end later (e.g. trimming the rest of a line in one sweep) doesn't report Trim's
+// own pin as a lost user rule. A cloned doc starts empty, so at worst a pin is counted.
+const trimPins = new WeakMap<SketchDoc, Map<EntityId, { key: string; point: EntityId }>>()
+
+function recordTrimPin(doc: SketchDoc, ruleId: EntityId, point: EntityId): void {
+  const c = doc.constraints.find(k => k.id === ruleId)
+  if (!c) return
+  let m = trimPins.get(doc)
+  if (!m) { m = new Map(); trimPins.set(doc, m) }
+  m.set(ruleId, { key: sameKey(c), point })
 }
 
 // Counts rules removed as a side effect of an edit. Not counted: arc invariants,
-// rules an edit removes knowingly because they became redundant (excuse), and pins
-// whose own point was deleted with the removed piece (they went with it).
+// rules an edit removes knowingly because they became redundant (excuse), and
+// pins Trim created on its own end points when that end point is deleted too.
 interface Tracker { count(): number; excuse(id: EntityId): void }
 function ruleTracker(doc: SketchDoc): Tracker {
-  const before = doc.constraints.map(c => ({ id: c.id, pinned: pinnedPoint(c) }))
+  const own = trimPins.get(doc)
+  const before = doc.constraints.map(c => {
+    const rec = own?.get(c.id)
+    return { id: c.id, trimPoint: rec && rec.key === sameKey(c) ? rec.point : null }
+  })
   const skip = arcInvariantIds(doc)
   return {
     count: () => {
       const now = new Set(doc.constraints.map(c => c.id))
-      return before.filter(({ id, pinned }) =>
-        !now.has(id) && !skip.has(id) && !(pinned && !getPoint(doc, pinned))).length
+      return before.filter(({ id, trimPoint }) =>
+        !now.has(id) && !skip.has(id) && !(trimPoint && !getPoint(doc, trimPoint))).length
     },
     excuse: id => { skip.add(id) },
   }
@@ -235,16 +245,17 @@ function anchorAt(doc: SketchDoc, ref: CurveRef, at: Vec2): EntityId | null {
   return null
 }
 
-function addPinRule(doc: SketchDoc, p: EntityId, cutter: CurveRef): void {
-  if (cutter.kind === 'line') { addConstraint(doc, 'pointOnLine', [p, cutter.id]); return }
-  if (cutter.kind === 'circle') { addConstraint(doc, 'pointOnCircle', [p, cutter.id]); return }
+function addPinRule(doc: SketchDoc, p: EntityId, cutter: CurveRef): EntityId | null {
+  if (cutter.kind === 'line') return addConstraint(doc, 'pointOnLine', [p, cutter.id])
+  if (cutter.kind === 'circle') return addConstraint(doc, 'pointOnCircle', [p, cutter.id])
   const path = getEntity(doc, cutter.pathId)
-  if (!path || path.kind !== 'path') return
+  if (!path || path.kind !== 'path') return null
   const seg = path.segments[cutter.segIndex]
-  if (!seg) return
+  if (!seg) return null
   const [a, b] = segEnds(path, cutter.segIndex)
-  if (seg.kind === 'line') addConstraint(doc, 'collinear', [a, b, p])
-  else if (seg.kind === 'arc') addConstraint(doc, 'equalDist', [seg.center, p, seg.center, a])
+  if (seg.kind === 'line') return addConstraint(doc, 'collinear', [a, b, p])
+  if (seg.kind === 'arc') return addConstraint(doc, 'equalDist', [seg.center, p, seg.center, a])
+  return null
 }
 
 /** Pin p to a cutter curve. When `at` lands on one of the cutter's own anchors,
@@ -292,7 +303,8 @@ function endPoint(doc: SketchDoc, tr: Tracker, end: SpanEnd, self: CurveRef, con
     return reuse
   }
   const id = addPoint(doc, end.point.x, end.point.y, construction ? { construction: true } : {})
-  addPinRule(doc, id, cutter)
+  const rule = addPinRule(doc, id, cutter)
+  if (rule) recordTrimPin(doc, rule, id)
   return id
 }
 

@@ -927,3 +927,22 @@ describe('round 2', () => {
     expect(ruleCount(d, 'coincident')).toBe(1)
   })
 })
+
+describe('round 3 — user rules lost with a removed piece are counted', () => {
+  it('Equal between two lines sharing a corner', () => {
+    const d = emptyDoc()
+    const a = addPoint(d, 0, 0), b = addPoint(d, 10, 0), c = addPoint(d, 0, 10)
+    const AB = addLine(d, a, b); addLine(d, a, c)
+    addConstraint(d, 'equalDist', [a, b, a, c])
+    expect(removeSpan(d, spanAt(d, { kind: 'line', id: AB }, 0.5)!)).toEqual({ ok: true, droppedRules: 1 })
+  })
+
+  it('a user pointOnCircle on the removed line’s end', () => {
+    const d = emptyDoc()
+    const circ = addCircle(d, addPoint(d, 0, 0), 5)
+    const s = addPoint(d, 0, 5)
+    const L = addLine(d, s, addPoint(d, 0, 15))
+    addConstraint(d, 'pointOnCircle', [s, circ])
+    expect(removeSpan(d, spanAt(d, { kind: 'line', id: L }, 0.5)!)).toEqual({ ok: true, droppedRules: 1 })
+  })
+})
