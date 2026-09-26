@@ -131,7 +131,15 @@ export async function waitForBackend(page: Page) {
 export async function stackPixels(page: Page): Promise<string> {
   const read = () => page.evaluate(() => {
     const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
-    return cv ? cv.toDataURL() : ''
+    if (!cv) return ''
+    // Read a COPY, never the stack canvas itself: after a few getImageData / toDataURL reads
+    // Chromium moves a canvas off the GPU, and the software rasteriser anti-aliases edges a
+    // hair differently. Reading the stack directly makes later snapshots of the SAME layers
+    // differ from earlier ones by ~1 level on every text and shape edge.
+    const c = document.createElement('canvas')
+    c.width = cv.width; c.height = cv.height
+    c.getContext('2d')!.drawImage(cv, 0, 0)
+    return c.toDataURL()
   })
   let prev = await read()
   for (let i = 0; i < 24; i++) {
@@ -141,6 +149,19 @@ export async function stackPixels(page: Page): Promise<string> {
     prev = cur
   }
   return prev
+}
+
+/** The stack canvas's RGBA pixels, read through a copy for the reason in `stackPixels`: call
+ *  getImageData on the stack canvas itself and later reads of the same layers drift. */
+export function stackImageData(page: Page): Promise<{ w: number; h: number; d: number[] }> {
+  return page.evaluate(() => {
+    const cv = document.querySelector('[data-testid="compositor-stack-canvas"]') as HTMLCanvasElement
+    const c = document.createElement('canvas')
+    c.width = cv.width; c.height = cv.height
+    const g = c.getContext('2d', { willReadFrequently: true })!
+    g.drawImage(cv, 0, 0)
+    return { w: c.width, h: c.height, d: Array.from(g.getImageData(0, 0, c.width, c.height).data) }
+  })
 }
 
 /** Open a blank project, drop a Compositor node and open its modal, then wait until the
