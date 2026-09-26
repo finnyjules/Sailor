@@ -62,6 +62,12 @@ import { showBurstEffect } from './showBurst'
 import { showTossEffect } from './showToss'
 import { showDanceEffect } from './showDance'
 import { showMedleyEffect } from './showMedley'
+import { showCubeEffect } from './showCube'
+import { showConveyorEffect } from './showConveyor'
+import { showTurnstileEffect } from './showTurnstile'
+import { showDoorsEffect } from './showDoors'
+import { showDominoEffect } from './showDomino'
+import { showAssembleEffect } from './showAssemble'
 import { withSeparatorControls } from '../separator'
 import { showcaseEffectId } from '../layouts/index'
 
@@ -118,12 +124,14 @@ export const SPACE_TYPE_EFFECTS: SpaceTypeEffect[] = /* @__PURE__ */ [
   showDomeEffect,
   showSpiralEffect,
   showBloomEffect,
+  showCubeEffect,
   showCoverflowEffect,
   showFocusEffect,
   showFilmstripEffect,
   showTotemEffect,
   showFeedEffect,
   showCascadeEffect,
+  showConveyorEffect,
   showGridEffect,
   showMarqueeEffect,
   showIsoEffect,
@@ -133,6 +141,7 @@ export const SPACE_TYPE_EFFECTS: SpaceTypeEffect[] = /* @__PURE__ */ [
   showHaloEffect,
   showWheelEffect,
   showVortexEffect,
+  showTurnstileEffect,
   showStackEffect,
   showTunnelEffect,
   showDeckEffect,
@@ -140,10 +149,13 @@ export const SPACE_TYPE_EFFECTS: SpaceTypeEffect[] = /* @__PURE__ */ [
   showFanEffect,
   showStageEffect,
   showFocusshiftEffect,
+  showDoorsEffect,
+  showDominoEffect,
   showTrailEffect,
   showBurstEffect,
   showTossEffect,
   showDanceEffect,
+  showAssembleEffect,
   showMedleyEffect,
 ].map(withSeparatorControls)
 

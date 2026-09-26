@@ -70,7 +70,8 @@ const DEFAULT_CONTENT = JSON.stringify(DEFAULT_CARD_FILLS.map(([type, a, b, angl
 // A layout's dials that shape the arrangement go to Layout; the ones that animate it go to
 // Motion (animation is only ever authored on the Motion tab).
 function showcaseControls(layout: ShowcaseLayout): ControlSpec[] {
-  return [
+  const own = layout.hostDefaults
+  const list: ControlSpec[] = [
   // ── Layout ──
   ...layout.controls.filter(c => c.group !== 'Motion'),
 
@@ -139,6 +140,7 @@ function showcaseControls(layout: ShowcaseLayout): ControlSpec[] {
   { key: 'pulse', label: 'Pulse', kind: 'slider', min: 0, max: 1, step: 0.01, default: 0, group: 'Motion' },
   ...layout.controls.filter(c => c.group === 'Motion'),
   ]
+  return own ? list.map(c => (c.key in own && !layout.controls.includes(c) ? { ...c, default: own[c.key] } as ControlSpec : c)) : list
 }
 
 // Ratio-string → aspect (w/h) for `cardRatio`. `native` is handled separately (falls

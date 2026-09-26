@@ -35,6 +35,12 @@ import { burstLayout } from './burst'
 import { tossLayout } from './toss'
 import { danceLayout } from './dance'
 import { medleyLayout } from './medley'
+import { cubeLayout } from './cube'
+import { conveyorLayout } from './conveyor'
+import { turnstileLayout } from './turnstile'
+import { doorsLayout } from './doors'
+import { dominoLayout } from './domino'
+import { assembleLayout } from './assemble'
 
 export type LayoutFamily = typeof LAYOUT_FAMILIES[number]
 /** Picker headings, in display order. */
@@ -64,16 +70,19 @@ export interface ShowcaseLayout {
   /** Half-depth of the arrangement, for the back fade. Absent → the host measures the
    *  cards' actual depth range each frame. */
   depth?(p: Params): number
+  /** Starting values for shared dials this layout wants different from the host's — the
+   *  cube's trip is many turns long, so it starts slower. Only the default moves. */
+  hostDefaults?: Params
 }
 // Picker order: grouped by family (LAYOUT_FAMILIES order), `ring` first — it is also the
 // fallback for an unknown id.
 export const SHOWCASE_LAYOUTS: ShowcaseLayout[] = [
-  ringLayout, coverringLayout, sphereLayout, globeLayout, cloudLayout, domeLayout, spiralLayout, bloomLayout,
-  coverflowLayout, focusLayout, filmstripLayout, totemLayout, feedLayout, cascadeLayout,
+  ringLayout, coverringLayout, sphereLayout, globeLayout, cloudLayout, domeLayout, spiralLayout, bloomLayout, cubeLayout,
+  coverflowLayout, focusLayout, filmstripLayout, totemLayout, feedLayout, cascadeLayout, conveyorLayout,
   gridLayout, marqueeLayout, isoLayout, turntableLayout, parallaxLayout,
-  orbitLayout, haloLayout, wheelLayout, vortexLayout,
-  stackLayout, tunnelLayout, deckLayout, slideLayout, fanLayout, stageLayout, focusshiftLayout,
-  trailLayout, burstLayout, tossLayout, danceLayout,
+  orbitLayout, haloLayout, wheelLayout, vortexLayout, turnstileLayout,
+  stackLayout, tunnelLayout, deckLayout, slideLayout, fanLayout, stageLayout, focusshiftLayout, doorsLayout, dominoLayout,
+  trailLayout, burstLayout, tossLayout, danceLayout, assembleLayout,
   medleyLayout,
 ]
 /** The effect id of a layout's gallery entry. `ring` keeps the id saved scenes already use;
