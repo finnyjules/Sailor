@@ -253,19 +253,24 @@ function intersect(g1: CurveGeom, g2: CurveGeom): IntersectionPoint[] {
   return circleCircleLike(g1, g2)
 }
 
-// point shared between ref and other, when both are segments of the same path
-// and that shared anchor is one of the two points the intersection could land on
-function sharedAnchorPoint(doc: SketchDoc, ref: CurveRef, other: CurveRef): Vec2 | null {
-  if (ref.kind !== 'seg' || other.kind !== 'seg' || ref.pathId !== other.pathId) return null
+// every anchor point ref shares with other, when both are segments of the same path.
+// A path can share BOTH its anchors with another segment (e.g. a two-arc "lens" or
+// digon, and the closed-path wrap pair segIndex n-1 vs 0), so this returns every
+// coincidence, not just the first.
+function sharedAnchorPoints(doc: SketchDoc, ref: CurveRef, other: CurveRef): Vec2[] {
+  if (ref.kind !== 'seg' || other.kind !== 'seg' || ref.pathId !== other.pathId) return []
   const path = getEntity(doc, ref.pathId)
-  if (!path || path.kind !== 'path') return null
+  if (!path || path.kind !== 'path') return []
   const n = path.anchors.length
   const aIds = [path.anchors[ref.segIndex]!, path.anchors[(ref.segIndex + 1) % n]!]
   const bIds = [path.anchors[other.segIndex]!, path.anchors[(other.segIndex + 1) % n]!]
-  const shared = bIds.find(id => aIds.includes(id))
-  if (!shared) return null
-  const pt = getPoint(doc, shared)
-  return pt ? { x: pt.x, y: pt.y } : null
+  const sharedIds = bIds.filter(id => aIds.includes(id))
+  const out: Vec2[] = []
+  for (const id of sharedIds) {
+    const pt = getPoint(doc, id)
+    if (pt) out.push({ x: pt.x, y: pt.y })
+  }
+  return out
 }
 
 export function crossingsOn(doc: SketchDoc, ref: CurveRef): Crossing[] {
@@ -276,9 +281,9 @@ export function crossingsOn(doc: SketchDoc, ref: CurveRef): Crossing[] {
     if (refEquals(ref, other)) continue
     const g2 = curveGeom(doc, other)
     if (!g2) continue
-    const shared = sharedAnchorPoint(doc, ref, other)
+    const shared = sharedAnchorPoints(doc, ref, other)
     for (const ip of intersect(g, g2)) {
-      if (shared && dist(ip.p, shared) < EPS_LEN) continue
+      if (shared.some(s => dist(ip.p, s) < EPS_LEN)) continue
       out.push({ t: ip.tSelf, point: ip.p, cutter: other, cutterT: ip.tOther })
     }
   }
@@ -295,6 +300,18 @@ function findBracket(ext: Crossing[], tn: number): { start: Crossing; end: Cross
     if (tn >= cur.t - 1e-9 && tn <= next.t + 1e-9) return { start: cur, end: next }
   }
   return null
+}
+
+// same bracket search as findBracket, but over SpanEnd boundaries (line/arc: the
+// curve's own t=0/t=1 ends, cutter null, plus every crossing in between) — explicit,
+// so it can't silently invert into "last assignment wins" if someone edits it later.
+function findLinearBracket(ends: SpanEnd[], tc: number): { start: SpanEnd; end: SpanEnd } {
+  for (let i = 0; i < ends.length - 1; i++) {
+    const cur = ends[i]!, next = ends[i + 1]!
+    if (tc >= cur.t - 1e-9 && tc <= next.t + 1e-9) return { start: cur, end: next }
+  }
+  // ends[0].t === 0 and ends[last].t === 1 always bracket [0,1]; unreachable in practice
+  return { start: ends[0]!, end: ends[ends.length - 1]! }
 }
 
 export function spanAt(doc: SketchDoc, ref: CurveRef, t: number): Span | null {
@@ -324,14 +341,11 @@ export function spanAt(doc: SketchDoc, ref: CurveRef, t: number): Span | null {
 
   // line or arc segment: t in [0,1]
   const tc = Math.min(1, Math.max(0, t))
-  let start: SpanEnd = { t: 0, point: pointAt(g, 0), cutter: null }
-  let end: SpanEnd = { t: 1, point: pointAt(g, 1), cutter: null }
-  for (const cr of crossings) {
-    if (cr.t <= tc + 1e-9) start = { t: cr.t, point: cr.point, cutter: cr.cutter, cutterT: cr.cutterT }
-  }
-  for (let i = crossings.length - 1; i >= 0; i--) {
-    const cr = crossings[i]!
-    if (cr.t >= tc - 1e-9) end = { t: cr.t, point: cr.point, cutter: cr.cutter, cutterT: cr.cutterT }
-  }
+  const ends: SpanEnd[] = [
+    { t: 0, point: pointAt(g, 0), cutter: null },
+    ...crossings.map(cr => ({ t: cr.t, point: cr.point, cutter: cr.cutter, cutterT: cr.cutterT })),
+    { t: 1, point: pointAt(g, 1), cutter: null },
+  ]
+  const { start, end } = findLinearBracket(ends, tc)
   return { ref, start, end }
 }

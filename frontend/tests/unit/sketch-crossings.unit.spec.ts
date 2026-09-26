@@ -257,6 +257,47 @@ describe("crossingsOn: a path's own neighbouring segments", () => {
   function dist2(a: { x: number; y: number }, b: { x: number; y: number }): number {
     return Math.hypot(a.x - b.x, a.y - b.y)
   }
+
+  it('a two-arc digon shares BOTH anchors between its two segments — neither is a spurious crossing', () => {
+    const d = emptyDoc()
+    // p0(-5,0) and p1(5,0); arc0 bulges via c1(0,-12) r=13, arc1 bulges back via c2(0,12) r=13.
+    // The two full circles meet only at p0 and p1 — i.e. exactly the two anchors this
+    // closed 2-segment path shares between its only two segments.
+    const p0 = addPoint(d, -5, 0)
+    const p1 = addPoint(d, 5, 0)
+    const c1 = addPoint(d, 0, -12)
+    const c2 = addPoint(d, 0, 12)
+    const P = addPath(d, [p0, p1], [
+      { kind: 'arc', center: c1, sweep: 1 },
+      { kind: 'arc', center: c2, sweep: 1 },
+    ], true)
+    expect(crossingsOn(d, { kind: 'seg', pathId: P, segIndex: 0 })).toEqual([])
+    expect(crossingsOn(d, { kind: 'seg', pathId: P, segIndex: 1 })).toEqual([])
+  })
+
+  it('the closed-path wrap pair (segIndex n-1 vs 0) shares its anchor and is not a spurious crossing', () => {
+    const d = emptyDoc()
+    const p0 = addPoint(d, 0, 0)
+    const p1 = addPoint(d, 10, 0)
+    const p2 = addPoint(d, 10, 10)
+    const p3 = addPoint(d, 0, 10)
+    const P = addPath(d, [p0, p1, p2, p3], [
+      { kind: 'line' }, { kind: 'line' }, { kind: 'line' }, { kind: 'line' },
+    ], true)
+    // segment 3 (p3->p0) and segment 0 (p0->p1) are the wrap pair, sharing anchor p0
+    const csLast = crossingsOn(d, { kind: 'seg', pathId: P, segIndex: 3 })
+    for (const c of csLast) {
+      if (c.cutter.kind === 'seg' && c.cutter.pathId === P && c.cutter.segIndex === 0) {
+        expect(dist2(c.point, { x: 0, y: 0 })).toBeGreaterThan(1e-6)
+      }
+    }
+    const csFirst = crossingsOn(d, { kind: 'seg', pathId: P, segIndex: 0 })
+    for (const c of csFirst) {
+      if (c.cutter.kind === 'seg' && c.cutter.pathId === P && c.cutter.segIndex === 3) {
+        expect(dist2(c.point, { x: 0, y: 0 })).toBeGreaterThan(1e-6)
+      }
+    }
+  })
 })
 
 describe('spanAt: line crossed twice', () => {
