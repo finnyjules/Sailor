@@ -35,8 +35,10 @@ async function sectorCoverage(page: Page, sectors: number): Promise<number[]> {
   }, sectors)
 }
 
+// Points only: the overlay also draws circles that are not points (the hover
+// ring, role glyphs), and the hover ring is there whenever a drawing tool is armed.
 async function overlayPointCount(page: Page): Promise<number> {
-  return page.locator('[data-testid="shape-pen-overlay"] circle').count()
+  return page.locator('[data-testid="shape-pen-overlay"] circle[data-point]').count()
 }
 
 /** |buffer aspect - rendered aspect|: 0 when the canvas draws at its own intrinsic

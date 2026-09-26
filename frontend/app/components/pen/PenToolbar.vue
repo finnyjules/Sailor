@@ -21,6 +21,9 @@ import {
   CircleDashed, Tag, Undo2, Redo2, Scissors, Slice, Bandage,
 } from 'lucide-vue-next'
 
+// The root is the renderless TooltipProvider, so the host's class (the Frame
+// passes pointer-events-auto) must be bound to the real bar by hand.
+defineOptions({ inheritAttrs: false })
 const props = defineProps<{ pen: Pen }>()
 // Same event vocabulary as PenOverlay (see the HOST CONTRACT in usePen.ts).
 const emit = defineEmits<{
@@ -90,7 +93,7 @@ const isSelectIdle = computed(() => tool.value === 'select' && !hasAnySelection.
        The cards are look-only (pointer-events: none), so no hoverable-content
        grace area — it would hold the old card open and block the next one. -->
   <TooltipProvider :delay-duration="350" :skip-delay-duration="600" disable-hoverable-content>
-  <div class="pen-toolbar">
+  <div class="pen-toolbar" v-bind="$attrs">
     <PenValueRow :pen="pen" />
     <div v-if="hasAnySelection" class="tb" role="toolbar" aria-label="Rules">
       <span class="count">{{ selectedCount }} selected</span>

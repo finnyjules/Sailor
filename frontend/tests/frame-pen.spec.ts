@@ -119,6 +119,17 @@ test.describe('Frame pen (shared pen)', () => {
     await expect(penToolbar(page)).toBeVisible()   // still drawing; the modal did not react
   })
 
+  test('the pen toolbar takes real clicks (its bar sits in a click-through column)', async ({ page }) => {
+    await openPen(page)
+    for (const tool of ['line', 'circle', 'trim', 'select']) {
+      const btn = page.locator(`[data-tool="${tool}"]`)
+      const b = await btn.boundingBox()
+      if (!b) throw new Error(`no ${tool} button`)
+      await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2)
+      await expect(btn).toHaveAttribute('aria-pressed', 'true')
+    }
+  })
+
   test('switching to the Motion tab closes the pen; Space is no longer the pen\'s', async ({ page }) => {
     const before = await layers(page)
     const box = await openPen(page)
