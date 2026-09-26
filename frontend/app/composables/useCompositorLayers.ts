@@ -751,6 +751,24 @@ export interface BrushLayer extends LayerCommon {
    *  lib/brushTips/materials.ts). Absent means today's plain-fill behaviour,
    *  byte-identical. `moving` selects the Frame clock (`_fieldCtx.t`) vs a frozen 0. */
   material?: { id: MaterialId; moving: boolean }
+  /** `false` hides the layer's own paint: it is never drawn, but its alpha still shapes the
+   *  layer's backdrop effects (a painted effect) and still clips when used as a mask.
+   *  Absent or true = today's behaviour, byte-identical. Read through `brushPaintVisible`. */
+  showPaint?: boolean
+}
+
+/** False only for a brush layer whose paint is hidden (`showPaint: false`). Every draw of a
+ *  layer's own content goes through `drawLocalLayerSelf`, which honours this; callers that
+ *  need the paint's ALPHA (backdrop silhouettes, mask sources, map sources) use `paintShown`. */
+export function brushPaintVisible(layer: LocalLayer): boolean {
+  return !(layer.kind === 'brush' && (layer as BrushLayer).showPaint === false)
+}
+
+/** The layer with its paint shown, for alpha-only uses (silhouettes, masks, maps). Returns the
+ *  SAME object for every layer that is not a hidden-paint brush, so cache keys and output are
+ *  untouched for them. */
+function paintShown<T extends LocalLayer>(layer: T): T {
+  return brushPaintVisible(layer) ? layer : { ...layer, showPaint: true }
 }
 
 /** How far (Frame-unit width fraction) a brush layer's tip bounds must grow on every
@@ -2447,7 +2465,7 @@ export function drawLocalLayer(
       const mctx = maskOff.getContext('2d')
       if (mctx) {
         mctx.setTransform(t)
-        drawLocalLayerSelf(mctx, maskLayer, W, H)
+        drawLocalLayerSelf(mctx, paintShown(maskLayer), W, H)
         paintMaskRelease(mctx, layer.maskBreak, W, H)
         octx.setTransform(1, 0, 0, 1, 0, 0) // composite in device space
         octx.globalCompositeOperation = 'destination-in'
@@ -2482,7 +2500,7 @@ export function drawLayerSilhouette(ctx: CanvasRenderingContext2D, item: StackIt
     ctx.restore()
     return
   }
-  const ghost = { ...item.layer, opacity: 1, effects: undefined, blend: undefined } as LocalLayer
+  const ghost = paintShown({ ...item.layer, opacity: 1, effects: undefined, blend: undefined } as LocalLayer)
   drawLocalLayerSelf(ctx, ghost, W, H)
 }
 
@@ -2571,6 +2589,9 @@ function applyStrokeMask(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: nu
 // A layer's own paint including its crop AND its freehand stroke mask — but NOT
 // any layer-mask, which drawLocalLayer applies around this.
 function drawLocalLayerSelf(ctx: CanvasRenderingContext2D, layer: LocalLayer, W: number, H: number, opacityMul = 1) {
+  // Hidden brush paint never reaches a canvas through here (stack, motion, masked content,
+  // glass sources, thumbnails, copies). Alpha-only callers pass `paintShown(layer)`.
+  if (!brushPaintVisible(layer)) return
   if (!hasStrokeMask(layer)) {
     paintLayerCropped(ctx, layer, W, H, opacityMul)
     return
@@ -5962,7 +5983,8 @@ function withBackdrop(
   const silctx = sil.getContext('2d')
   if (!silctx) return
   silctx.setTransform(t)
-  const ghost = { ...layer, opacity: 1, effects: undefined, blend: undefined } as LocalLayer
+  // A hidden-paint brush (a painted effect) still shapes its effect by the paint's alpha.
+  const ghost = paintShown({ ...layer, opacity: 1, effects: undefined, blend: undefined } as LocalLayer)
   const maskRef = layerMaskRef(layer)
   const maskLayer = maskRef?.startsWith('l:')
     ? localLayers.find(l => l.id === maskRef.slice(2)) ?? null
@@ -6307,7 +6329,7 @@ function applyGlassFromLayer(
   const silctx = sil.getContext('2d')
   if (!silctx) return false
   silctx.setTransform(transform)
-  const ghost = { ...layer, fill: '#ffffff', opacity: 1, effects: undefined, blend: undefined } as LocalLayer
+  const ghost = paintShown({ ...layer, fill: '#ffffff', opacity: 1, effects: undefined, blend: undefined } as LocalLayer)
   const maskRef = layerMaskRef(layer)
   const maskLayer = maskRef?.startsWith('l:')
     ? localLayers.find(l => l.id === maskRef.slice(2)) ?? null
@@ -6400,7 +6422,7 @@ function applyDisplaceFromLayer(
   const octx = off.getContext('2d')
   if (!octx) return
   octx.setTransform(t)
-  const mapGhost = { ...layer, opacity: 1, effects: undefined, blend: undefined, displaceMap: undefined } as LocalLayer
+  const mapGhost = paintShown({ ...layer, opacity: 1, effects: undefined, blend: undefined, displaceMap: undefined } as LocalLayer)
   drawLocalLayerSelf(octx, mapGhost, W, H)
   const mapData = octx.getImageData(0, 0, w, h)
 
@@ -6912,6 +6934,9 @@ export function paintLayerStack(
           )
           const drawOwn = (target: CanvasRenderingContext2D) =>
             drawLayerWithMotion(target, layer, W, H, maskLocal, st, maskState)
+          // Hidden brush paint: the backdrop effects above ran; there is no own content to
+          // draw, and nothing for a luminance mask to modulate.
+          if (!brushPaintVisible(layer)) continue
           if (bdLum) applyBackdropLuminanceMask(ctx, layer, bdLum, localLayers, W, H, drawOwn)
           else drawOwn(ctx)
           continue
@@ -6967,6 +6992,7 @@ export function paintLayerStack(
           drawLocalLayer(target, layer, W, H, maskItem?.type === 'local' ? maskItem.layer : null, opacityMul)
         }
       }
+      if (!brushPaintVisible(layer)) continue // hidden brush paint: backdrop effects only
       if (bdLum) applyBackdropLuminanceMask(ctx, layer, bdLum, localLayers, W, H, drawOwn)
       else drawOwn(ctx)
     }
@@ -7029,7 +7055,7 @@ function drawItemMasked(
   const maskOff = mk()
   const mctx = maskOff.getContext('2d'); if (!mctx) return
   mctx.setTransform(t)
-  drawItemContent(mctx, mask, W, H)
+  drawItemContent(mctx, mask.type === 'local' ? { ...mask, layer: paintShown(mask.layer) } : mask, W, H)
   paintMaskRelease(mctx, content.type === 'local' ? content.layer.maskBreak : null, W, H)
   octx.setTransform(1, 0, 0, 1, 0, 0) // composite in device space
   octx.globalCompositeOperation = 'destination-in'
