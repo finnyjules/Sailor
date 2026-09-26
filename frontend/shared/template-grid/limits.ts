@@ -39,6 +39,8 @@ export const LAYOUT_IMAGES_TOO_LARGE = `The pictures in this layout are too larg
 export const LAYOUT_TOO_MANY_TREATED = `This layout has more than ${LAYOUT_MAX_TREATED} different pictures with a photo treatment (duotone or grain).`
 export const LAYOUT_TREATED_TOO_LARGE = 'A picture with a photo treatment (duotone or grain) is too large: at most 4096 × 4096 pixels. Use a smaller picture or no treatment.'
 export const LAYOUT_TOO_MANY_FONTS = `This layout uses more than ${LAYOUT_MAX_REMOTE_FONTS} fonts that have to be downloaded. Use fewer fonts.`
+export const LAYOUT_BAD_IMAGE_ADDRESS = 'A picture in this layout has an address that can’t be used. Use an http:// or https:// address (with nothing before it), or an embedded picture.'
+export const LAYOUT_STYLE_URL = 'A fill or background in this layout points at a picture by address (url(…)). Use an image element for pictures.'
 export const LAYOUT_BAD_SHAPE = 'This layout is not in a shape the renderer can read'
 export const LAYOUT_TREATMENT_FAILED = 'A photo treatment (duotone or grain) could not be applied to a picture in this layout'
 
@@ -118,7 +120,7 @@ const isObjectList = (v: unknown): v is Record<string, unknown>[] => Array.isArr
 /** The first way an element is not what the translation reads, or null. */
 function elementShapeProblem(e: Record<string, unknown>, grid: boolean): string | null {
   for (const k of ['style', 'overrides', 'regionByClass'] as const) {
-    if (e[k] !== undefined && e[k] !== null && !isObject(e[k])) return `an element's ${k === 'regionByClass' ? 'class regions' : k} are not a set of values`
+    if (e[k] !== undefined && e[k] !== null && !isObject(e[k])) return k === 'regionByClass' ? 'an element\'s class regions are not a set of values' : `an element's ${k} ${k === 'overrides' ? 'are' : 'is'} not a set of values`
   }
   if (isObject(e.overrides) && !Object.values(e.overrides).every(o => o === null || o === undefined || isObject(o))) return 'an element\'s overrides are not sets of values'
   if (grid && e.region !== undefined && !isObject(e.region)) return 'an element\'s region is not a set of values'

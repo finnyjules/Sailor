@@ -13,7 +13,7 @@ import { join } from 'node:path'
 
 import type { RenderRequest } from './schema'
 import { readManifest, USER_FONTS_DIR } from './fonts-store'
-import { ImageLimitError, tableTreeImages, type ImageFetcher } from './inlineImages'
+import { ImageAddressError, ImageLimitError, tableTreeImages, type ImageFetcher } from './inlineImages'
 import { TemplateSizeError, templateToSatori } from './translate'
 import { LAYOUT_BAD_SHAPE, LAYOUT_MAX_REMOTE_FONTS, LAYOUT_TOO_MANY_FONTS } from '../../shared/template-grid/limits'
 import { safeImageFetcher } from './safeFetch'
@@ -300,7 +300,7 @@ export async function renderTemplatePng(body: RenderRequest, opts: RenderOptions
     images = await tableTreeImages(tree, opts.fetcher ?? safeImageFetcher({ hosted: isHosted() }), { signal })
   } catch (e) {
     if (signal.aborted) throw stopped()
-    if (e instanceof ImageLimitError) throw new TemplateSizeError(e.message)
+    if (e instanceof ImageLimitError || e instanceof ImageAddressError) throw new TemplateSizeError(e.message)
     throw new TemplateImageError(String((e as Error).message ?? e).slice(0, 200))
   }
 

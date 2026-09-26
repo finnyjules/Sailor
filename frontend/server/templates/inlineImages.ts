@@ -24,7 +24,7 @@ import { bakeInProcess } from './renderProcess'
 import type { TreatmentBakeTag } from '../../shared/template-grid/treatment'
 import {
   LAYOUT_IMAGES_TOO_LARGE, LAYOUT_MAX_IMAGE_BYTES, LAYOUT_MAX_TREATED, LAYOUT_MAX_TREATED_AREA,
-  LAYOUT_TOO_MANY_TREATED, LAYOUT_TREATED_TOO_LARGE, LAYOUT_TREATMENT_FAILED,
+  LAYOUT_BAD_IMAGE_ADDRESS, LAYOUT_STYLE_URL, LAYOUT_TOO_MANY_TREATED, LAYOUT_TREATED_TOO_LARGE, LAYOUT_TREATMENT_FAILED,
 } from '../../shared/template-grid/limits'
 
 interface TreeNode {
@@ -41,6 +41,57 @@ function collectImgNodes(node: unknown, out: TreeNode[] = []): TreeNode[] {
   else if (kids && typeof kids === 'object') collectImgNodes(kids, out)
   return out
 }
+
+/** An http(s) address the safe fetcher takes as it is (fix round 5): no surrounding space, quotes or backslashes. */
+const FETCHABLE = /^https?:\/\/[^\s"'\\]/
+/** A picture the layout carries itself. */
+const isDataUri = (s: string) => s.startsWith('data:')
+
+/**
+ * The refusal for a picture address the renderer would otherwise reach by
+ * itself (fix round 5), or null. satori, in the render process, loads any img
+ * src starting with "http" (quotes stripped, `http:host` and backslash forms
+ * included) and any CSS `url(...)`, with no address checks. So:
+ *   - every img src must be a plain http(s) address (it goes through the safe
+ *     fetcher into the picture table) or a data: URI; anything else — another
+ *     case, surrounding space or quotes, `http:host`, backslashes, a relative
+ *     path, no src at all — is refused;
+ *   - a style value may only hold `url(data:…)`; any other url(...) is
+ *     refused (the translation puts pictures in img nodes, never in fills).
+ * Tokens are already filled in, so wired values are checked too. The render
+ * process also has no network and refuses any picture outside the table.
+ */
+export function treeAddressProblem(tree: unknown): string | null {
+  const stack: unknown[] = [tree]
+  while (stack.length) {
+    const n = stack.pop() as { type?: unknown; props?: Record<string, unknown> } | null
+    if (!n || typeof n !== 'object') continue
+    const p = n.props
+    if (!p || typeof p !== 'object') continue
+    if (n.type === 'img') {
+      const src = p.src
+      if (typeof src !== 'string' || !(isDataUri(src) || FETCHABLE.test(src)) || (!isDataUri(src) && src.includes('\\'))) return LAYOUT_BAD_IMAGE_ADDRESS
+    }
+    const style = p.style
+    if (style && typeof style === 'object') {
+      for (const v of Object.values(style as Record<string, unknown>)) {
+        if (typeof v !== 'string') continue
+        const re = /url\s*\(\s*(['"]?)\s*/gi
+        let m: RegExpExecArray | null
+        while ((m = re.exec(v))) {
+          if (!v.startsWith('data:', m.index + m[0].length)) return LAYOUT_STYLE_URL
+        }
+      }
+    }
+    const kids = p.children
+    if (Array.isArray(kids)) for (const k of kids) stack.push(k)
+    else if (kids && typeof kids === 'object') stack.push(kids)
+  }
+  return null
+}
+
+/** A picture address the renderer can't be allowed to use: the route answers 400. */
+export class ImageAddressError extends Error {}
 
 /** The bytes the render may still fetch (fix round 3): a fetcher that streams takes from it as bytes arrive. */
 export interface ByteBudget { left: number }
@@ -167,9 +218,12 @@ export function substituteImagesCore(tree: any, images: any): void {
     if (!n || typeof n !== 'object') continue
     const p = n.props
     if (!p || typeof p !== 'object') continue
-    if (n.type === 'img' && typeof p.src === 'string' && Object.prototype.hasOwnProperty.call(images, p.src)) {
-      const u = uriOf(p.src)
+    if (n.type === 'img') {
+      // Every picture is the table's or the layout's own data: URI: nothing is
+      // left for the renderer to load by address (fix round 5).
+      const u = typeof p.src === 'string' && Object.prototype.hasOwnProperty.call(images, p.src) ? uriOf(p.src) : undefined
       if (u !== undefined) p.src = u
+      else if (typeof p.src !== 'string' || !p.src.startsWith('data:')) throw new Error('A picture in this layout is not one the renderer was given')
     }
     const kids = p.children
     if (Array.isArray(kids)) for (const k of kids) stack.push(k)
@@ -204,6 +258,12 @@ export async function inlineTreeImages(tree: unknown, fetcher: ImageFetcher = de
  *  final bytes (baked ones included) times the elements showing it, at most
  *  `maxBytes` in all. */
 export async function tableTreeImages(tree: unknown, fetcher: ImageFetcher = defaultImageFetcher, opts: InlineOptions = {}): Promise<ImageTable> {
+  // Every address checked before anything is fetched (fix round 5).
+  const badAddress = treeAddressProblem(tree)
+  if (badAddress) {
+    for (const n of collectImgNodes(tree)) if (n.props && '__treatment' in n.props) delete n.props.__treatment
+    throw new ImageAddressError(badAddress)
+  }
   const imgs = collectImgNodes(tree)
   const maxBytes = opts.maxBytes ?? LAYOUT_MAX_IMAGE_BYTES
   const nonce = randomUUID()
@@ -238,7 +298,7 @@ export async function tableTreeImages(tree: unknown, fetcher: ImageFetcher = def
     let e = entries.get(k)
     if (e) return e
     e = (async (): Promise<Entry> => {
-      if (/^data:/i.test(src)) {
+      if (isDataUri(src)) {
         // A picture the layout carries itself: one copy, its decoded size counted.
         return { key: `sailor-image:${nonce}:${createHash('sha256').update(src).digest('hex')}`, size: Math.floor(src.length * 3 / 4), value: { uri: src } }
       }
@@ -274,7 +334,6 @@ export async function tableTreeImages(tree: unknown, fetcher: ImageFetcher = def
     const treatment = n.props?.__treatment
     if (n.props && '__treatment' in n.props) delete n.props.__treatment
     const src = n.props!.src!
-    if (!/^https?:\/\//.test(src) && !/^data:/i.test(src)) continue
     shown.push({ n, entry: entryFor(src, treatment) })
   }
   const got = await Promise.all(shown.map(s => s.entry))

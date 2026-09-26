@@ -41,6 +41,7 @@ import { TEMPLATE_SIZE_REFUSED, TemplateSizeError, templateToSatori } from '~~/s
 import { FETCH_REFUSED, FETCH_TIMEOUT, FETCH_TOO_LARGE, addressAllowed, localViewPorts, safeImageFetcher } from '~~/server/templates/safeFetch'
 import { CHILD_EXIT_WAIT_MS, RENDER_CRASHED, RENDER_TIMEOUT, __renderChildPidForTests, __renderJobsForTests, __setRenderSpawnForTests, __setRenderTimeoutForTests, childEnv, svgToPngInProcess } from '~~/server/templates/renderProcess'
 import { inlineTreeImages, tableTreeImages } from '~~/server/templates/inlineImages'
+import { LAYOUT_BAD_IMAGE_ADDRESS, LAYOUT_STYLE_URL } from '#shared/template-grid/limits'
 import { LAYOUT_BAD_SHAPE, LAYOUT_MAX_REMOTE_FONTS, LAYOUT_TOO_MANY_FONTS, layoutShapeProblem } from '#shared/template-grid/limits'
 import { LAYOUT_IMAGES_TOO_LARGE, LAYOUT_MAX_TEXT, LAYOUT_TOO_BIG, LAYOUT_TOO_MANY_ELEMENTS, LAYOUT_TOO_MANY_READERS, LAYOUT_TOO_MANY_TREATED, LAYOUT_TOO_MUCH_TEXT, LAYOUT_TREATED_TOO_LARGE, LAYOUT_TREATMENT_FAILED, layoutTextProblem } from '#shared/template-grid/limits'
 import type { RenderRequest } from '~~/server/templates/schema'
@@ -904,6 +905,99 @@ process.exit(0)
       v6.closeAllConnections(); v6.close()
     }
   })
+})
+
+// ── Round 5 ──────────────────────────────────────────────────────────────────
+
+describe('round 5: no picture reaches the renderer by address', () => {
+  const at = (path: string) => `${base}${path}`
+  const hostPort = () => new URL(base).host
+  const v2 = (o: Record<string, unknown> = {}) => ({
+    version: 2, id: 'a5', master: 'a', formats: { a: { w: 64, h: 64 } }, ...GRID, grid: { columns: 6, rows: 6, gutter: 4, margin: 8, baseline: 4 }, elements: [], ...o,
+  })
+  const image = (content: string) => ({ id: 'i', type: 'image', priority: 4, region: { col: 1, colSpan: 6, row: 1, rowSpan: 6 }, bleed: true, style: { fit: 'cover' }, content })
+  const shape = (fill: string) => ({ id: 's', type: 'shape', shape: 'rect', priority: 4, region: { col: 1, colSpan: 6, row: 1, rowSpan: 6 }, style: { fill } })
+  const refusedBy = async (req: RenderRequest, words: string) => {
+    const e = await renderTemplatePng(req).catch((x: unknown) => x)
+    expect(e, JSON.stringify(req).slice(0, 300)).toBeInstanceOf(TemplateSizeError)
+    expect((e as Error).message).toBe(words)
+  }
+  const routeWith = async (body: unknown) => {
+    vi.stubGlobal('defineEventHandler', (h: unknown) => h)
+    vi.stubGlobal('setHeader', () => {})
+    vi.stubGlobal('createError', (e: { statusCode: number; statusMessage: string }) => Object.assign(new Error(e.statusMessage), e))
+    vi.stubGlobal('readBody', async () => body)
+    try {
+      const route = (await import('~~/server/api/render-template.post')).default as unknown as (e: unknown) => Promise<Uint8Array>
+      return await route({ node: { req: { socket: {}, headers: {} }, res: new EventEmitter() } })
+    }
+    finally { vi.unstubAllGlobals() }
+  }
+
+  it('the render process has no network: satori can’t fetch an img src or a CSS url() itself', async () => {
+    // Straight to the render process, past the parent's checks.
+    const img = { type: 'div', props: { style: { width: 16, height: 16, display: 'flex' }, children: [{ type: 'img', props: { src: at('/view?child-img'), width: 16, height: 16 } }] } }
+    await expect(svgToPngInProcess({ tree: img, width: 16, height: 16, fonts: [], images: {} })).rejects.toThrow('A picture in this layout is not one the renderer was given')
+    const bg = { type: 'div', props: { style: { width: 16, height: 16, display: 'flex', backgroundImage: `url(${at('/view?child-bg')})` } } }
+    await svgToPngInProcess({ tree: bg, width: 16, height: 16, fonts: [], images: {} }).catch(() => {})
+    await new Promise(r => setTimeout(r, 200))
+    expect(hits).toEqual([])
+  }, 60_000)
+
+  it('every odd picture address is refused plainly (400) before any request, for img sources and fills', async () => {
+    vi.stubEnv('SAILOR_COMFY_ORIGIN', base)   // even an allowed /view port: the odd forms never reach it
+    const hp = hostPort()
+    const srcs = [
+      `http:${hp}/view?c`, `"http://${hp}/view?d"`, `'http://${hp}/view?e'`, `http:\\\\${hp}/view?f`,
+      `HTTP://${hp}/view?b`, ` http://${hp}/view?g`, `https:${hp}/view?h`, `//${hp}/view?i`, '/view?filename=x.png', `http://${hp}\\view?j`, 'DATA:image/png;base64,AAAA',
+    ]
+    for (const src of srcs) {
+      await refusedBy({ template: v2({ elements: [image(src)] }) as never, aspect: 'a' }, LAYOUT_BAD_IMAGE_ADDRESS)
+      await refusedBy({ template: v2({ background: { image: src } }) as never, aspect: 'a' }, LAYOUT_BAD_IMAGE_ADDRESS)
+      // Wired: the address comes from a prop.
+      await refusedBy({ template: v2({ elements: [image('{{ props.pic }}')] }) as never, aspect: 'a', props: { pic: src } }, LAYOUT_BAD_IMAGE_ADDRESS)
+    }
+    // v1 image element.
+    await refusedBy({ template: { id: 'v1', aspects: { a: { w: 64, h: 64, label: 'A' } }, elements: [{ id: 'i', type: 'image', anchor: 'top-left', offset: { x: 0, y: 0 }, size: { w: 64, h: 64 }, content: `http:${hp}/view?v1` }] } as never, aspect: 'a' }, LAYOUT_BAD_IMAGE_ADDRESS)
+    const fills = [`url(http://${hp}/view?bg)`, `URL( 'http://${hp}/view?bg2' )`, `#000 url("https:${hp}/x")`, `url(/etc/passwd)`, `url(file:///etc/hosts)`]
+    for (const fill of fills) {
+      await refusedBy({ template: v2({ background: { fill } }) as never, aspect: 'a' }, LAYOUT_STYLE_URL)
+      await refusedBy({ template: v2({ elements: [shape(fill)] }) as never, aspect: 'a' }, LAYOUT_STYLE_URL)
+      await refusedBy({ template: v2({ background: { fill: '{{ brand.primary }}' } }) as never, aspect: 'a', brand: { primary: fill } }, LAYOUT_STYLE_URL)
+      await refusedBy({ template: v2({ background: { fill: '{{ props.bg }}' } }) as never, aspect: 'a', props: { bg: fill } }, LAYOUT_STYLE_URL)
+    }
+    await refusedBy({ template: { id: 'v1', aspects: { a: { w: 64, h: 64, label: 'A' } }, elements: [{ id: 's', type: 'shape', shape: 'rect', anchor: 'top-left', offset: { x: 0, y: 0 }, size: { w: 64, h: 64 }, style: { fill: `url(http://${hp}/view?v1bg)` } }] } as never, aspect: 'a' }, LAYOUT_STYLE_URL)
+    // The route answers 400, never 500.
+    await expect(routeWith({ template: v2({ elements: [image(`HTTP://${hp}/view?r`)] }), aspect: 'a' })).rejects.toMatchObject({ statusCode: 400, statusMessage: LAYOUT_BAD_IMAGE_ADDRESS })
+    await expect(routeWith({ template: v2({ background: { fill: `url(http://${hp}/view?r2)` } }), aspect: 'a' })).rejects.toMatchObject({ statusCode: 400, statusMessage: LAYOUT_STYLE_URL })
+    expect(hits).toEqual([])
+    // Still fine: a plain address through the safe fetcher, and embedded pictures in a fill.
+    const png = await renderTemplatePng({ template: v2({ elements: [image(at('/view?plain'))] }) as never, aspect: 'a' })
+    expect(png.length).toBeGreaterThan(0)
+    expect(hits).toEqual(['/view?plain'])
+    const dot = (await sharp({ create: { width: 2, height: 2, channels: 3, background: '#00f' } }).png().toBuffer()).toString('base64')
+    const ok = await renderTemplatePng({ template: v2({ background: { fill: `url(data:image/png;base64,${dot})` }, elements: [shape(`url("data:image/png;base64,${dot}")`)] }) as never, aspect: 'a' })
+    expect(ok.length).toBeGreaterThan(0)
+  }, 60_000)
+
+  it('a v3 layout saved without a type scale renders with the default one (the saved layout_test)', async () => {
+    const layoutTest = { version: 3, id: 'layout_test', name: 'New Layout', master: '1x1', formats: { '1x1': { w: 1080, h: 1080, label: 'Square' } }, grid: { gutter: 0, margin: 72, baseline: 12, columns: 16, rows: 16 }, background: { fill: '#0a0a0a' }, elements: [{ id: 'text_wgxt2t', type: 'text', priority: 1, level: 'body', content: 'A new kind of skincare', region: { col: 2, colSpan: 14, row: 2, rowSpan: 14 }, style: { color: '#fff' } }], outputs: [{ id: '1x1', format: '1x1', label: 'Square' }], sections: [] }
+    const png = await renderTemplatePng({ template: layoutTest as never, aspect: '1x1' })
+    const withDefault = await renderTemplatePng({ template: { ...layoutTest, typeScale: { base: 28, ratio: 1.414 } } as never, aspect: '1x1' })
+    expect(Buffer.compare(Buffer.from(png), Buffer.from(withDefault))).toBe(0)
+    expect((await sharp(png).metadata()).width).toBe(1080)
+  }, 60_000)
+
+  it('plain words: an element’s style “is”, and a format or aspect name the layout doesn’t have', async () => {
+    const el = (o: Record<string, unknown>) => ({ ...v2(), elements: [{ id: 'e', type: 'shape', region: { col: 1, colSpan: 1, row: 1, rowSpan: 1 }, ...o }] })
+    expect(layoutShapeProblem(el({ style: 'red' }))).toBe(`${LAYOUT_BAD_SHAPE}: an element's style is not a set of values.`)
+    expect(layoutShapeProblem(el({ overrides: 'x' }))).toBe(`${LAYOUT_BAD_SHAPE}: an element's overrides are not a set of values.`)
+    expect(layoutShapeProblem(el({ regionByClass: 3 }))).toBe(`${LAYOUT_BAD_SHAPE}: an element's class regions are not a set of values.`)
+    for (const name of ['__proto__', 'constructor', 'toString', 'hasOwnProperty']) {
+      await expect(routeWith({ template: v2(), aspect: name })).rejects.toMatchObject({ statusCode: 400, statusMessage: `This layout has no format named “${name}”.` })
+      await expect(routeWith({ template: { id: 'v1', aspects: { a: { w: 10, h: 10 } }, elements: [] }, aspect: name })).rejects.toMatchObject({ statusCode: 400, statusMessage: `This layout has no aspect named “${name}”.` })
+    }
+  }, 60_000)
 })
 
 describe('preview names and literals', () => {

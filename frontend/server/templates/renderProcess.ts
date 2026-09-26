@@ -33,6 +33,14 @@ export interface SvgJob { tree: unknown; width: number; height: number; fonts: R
 function script(): string {
   return `
 const __name = (f) => f
+// No network in the render process (fix round 5), set before satori loads:
+// satori would otherwise fetch any "http…" img src or CSS url(...) itself,
+// past the safe fetcher. Every picture arrives in the job's table.
+const noNetwork = async () => { throw new Error('The layout renderer has no network access') }
+for (const k of ['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource']) {
+  try { Object.defineProperty(globalThis, k, { value: k === 'fetch' ? noNetwork : undefined, writable: false, configurable: false }) }
+  catch { globalThis[k] = k === 'fetch' ? noNetwork : undefined }
+}
 const bake = (${bakeTreatmentCore.toString()})
 const substitute = (${substituteImagesCore.toString()})
 const urls = JSON.parse(process.argv[1])
@@ -57,6 +65,9 @@ process.on('message', async (m) => {
     if (m.op === 'render') {
       if (m.images) substitute(m.tree, m.images)
       const svg = await satori(m.tree, { width: m.width, height: m.height, fonts: m.fonts })
+      // resvg reads an image href that is a file path from disk: only data:
+      // pictures and in-document references may reach it (fix round 5).
+      if (/\\bhref\\s*=\\s*["'](?!data:|#)/i.test(svg)) throw new Error('A picture in this layout is not one the renderer was given')
       out = new Uint8Array(new Resvg(svg, { fitTo: { mode: 'original' } }).render().asPng())
     }
     else if (m.op === 'bake') out = new Uint8Array(await bake(sharp, m.data, m.treatment))

@@ -289,6 +289,8 @@ export function templateToSatori(
  * (shared/template-grid/limits.ts).
  */
 export const TEMPLATE_SIZE_REFUSED = LAYOUT_TOO_SMALL
+/** The starter layout's type scale (shared/template-grid/starter.ts), for a layout saved without one. */
+const DEFAULT_TYPE_SCALE = { base: 28, ratio: 1.414 } as const
 /** A layout refused plainly (the route answers 400): its size, limits or shape (round 4: also an unknown aspect or format). */
 export class TemplateSizeError extends Error {}
 
@@ -303,7 +305,8 @@ function templateV1ToSatori(
   explicitSize?: { width: number; height: number },
 ): TranslatedLayout {
   const key = aspectKey ?? template.defaultAspect ?? Object.keys(template.aspects)[0]
-  const aspect = template.aspects[key]
+  // Only the layout's own aspects (fix round 5): never '__proto__' or 'constructor'.
+  const aspect = key !== undefined && Object.prototype.hasOwnProperty.call(template.aspects, key) ? template.aspects[key] : undefined
   if (!aspect && !explicitSize) {
     throw new TemplateSizeError(`This layout has no aspect named “${String(key).slice(0, 80)}”.`)
   }
@@ -502,17 +505,21 @@ function templateV2ToSatori(
   explicitSize?: { width: number; height: number },
   outputId?: string,
 ): TranslatedLayout {
-  let tpl = template
+  // A layout saved without a type scale uses the default one (fix round 5),
+  // the starter layout's: shared/template-grid/starter.ts.
+  let tpl: AnyGridTemplate = template.typeScale && typeof template.typeScale === 'object'
+    ? template
+    : { ...template, typeScale: { ...DEFAULT_TYPE_SCALE } }
   let key = formatKey ?? template.master ?? Object.keys(template.formats)[0]
   if (explicitSize) {
     // Explicit w/h renders through a transient format so all grid math
     // (classification, scaling, culling) still applies.
     tpl = {
-      ...template,
+      ...tpl,
       formats: { ...template.formats, __explicit__: { w: explicitSize.width, h: explicitSize.height } },
     }
     key = '__explicit__'
-  } else if (!template.formats[key]) {
+  } else if (key === undefined || !Object.prototype.hasOwnProperty.call(template.formats, key)) {
     throw new TemplateSizeError(`This layout has no format named “${String(key).slice(0, 80)}”.`)
   }
   checkRenderSize(tpl.formats[key]!.w, tpl.formats[key]!.h)
