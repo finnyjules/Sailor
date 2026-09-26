@@ -158,3 +158,26 @@ describe('path tool right-angle snap', () => {
     expect(doc.value.entities.length).toBe(n)
   })
 })
+
+// The overlay's cue computeds read the drag through getPathDrag(); a plain
+// variable there left them stuck on whatever they saw first (the ghost circle,
+// R chip and ⊥ chip never appeared under a real mouse). Press, bow and release
+// must each re-run a computed that reads it.
+describe('path drag is reactive to its readers', () => {
+  it('re-runs a computed on press, bow and release', async () => {
+    const { computed } = await import('vue')
+    const { pen } = mk()
+    const state = computed(() => {
+      const d = pen.getPathDrag()
+      return d ? (d.bowed ? 'bowed' : 'pressed') : 'idle'
+    })
+    pen.pathDown(0, 0); pen.pathUp(0, 0)
+    expect(state.value).toBe('idle')
+    pen.pathDown(4, 0)
+    expect(state.value).toBe('pressed')
+    pen.pathMove(3, 2)
+    expect(state.value).toBe('bowed')
+    pen.pathUp(3, 2)
+    expect(state.value).toBe('idle')
+  })
+})

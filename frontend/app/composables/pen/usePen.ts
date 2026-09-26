@@ -315,7 +315,7 @@ export function usePen(opts: {
     clearSegSel()
     pending.value = null
     pendingPath.value = null
-    pathDrag = null
+    setPathDrag(null)
     resetCurveState()
     cursor.value = null
     dimBuffer.value = ''
@@ -328,7 +328,7 @@ export function usePen(opts: {
     clearSegSel()
     pending.value = null
     pendingPath.value = null
-    pathDrag = null
+    setPathDrag(null)
     resetCurveState()
     cursor.value = null
     dimBuffer.value = ''
@@ -819,22 +819,28 @@ export function usePen(opts: {
   // threshold before pointerup, that segment bows into a circular arc through
   // the live pointer (see bowArc).
   let pathDrag: PathDrag = null
+  // pathDrag is a plain variable (hot path), so overlay computeds that read it
+  // through getPathDrag() would never re-run on press/bow/release; every
+  // write goes through setPathDrag (or bumps pathDragTick) and getPathDrag
+  // reads the tick, making the drag state reactive to its readers.
+  const pathDragTick = ref(0)
+  function setPathDrag(v: PathDrag) { pathDrag = v; pathDragTick.value++ }
 
   function pathDown(x: number, y: number, shift = false) {
     const p = pathPlacement(x, y, shift)
     const { id, own } = placePointOwn(p.x, p.y, [], guideMode.value)
     if (!pendingPath.value) {
       pendingPath.value = { anchors: [id], segments: [], ownAnchors: [own] }
-      pathDrag = null
+      setPathDrag(null)
       commitHistory()   // first anchor of a fresh path — a complete, standalone placement
       return
     }
     const pp = pendingPath.value
     if (id === pp.anchors[0] && pp.anchors.length >= 2) {
-      if (openOnly) { pathDrag = null; return }   // open-only: clicking the first anchor is a click on an existing anchor, not a close
-      finishPath(true); pathDrag = null; return   // clicked first anchor → close (finishPath commits)
+      if (openOnly) { setPathDrag(null); return }   // open-only: clicking the first anchor is a click on an existing anchor, not a close
+      finishPath(true); setPathDrag(null); return   // clicked first anchor → close (finishPath commits)
     }
-    if (id === pp.anchors[pp.anchors.length - 1]) { pathDrag = null; return }                            // ignore double-click same point
+    if (id === pp.anchors[pp.anchors.length - 1]) { setPathDrag(null); return }                            // ignore double-click same point
     const prevAnchor = pp.anchors[pp.anchors.length - 1]!
     dropLastHOut()   // a line/arc segment has no use for a Curve point's out-handle
     pp.segments.push({ kind: 'line' })
@@ -845,7 +851,7 @@ export function usePen(opts: {
     // don't commit here — this anchor+segment (and any shift-captured axis or
     // right-angle constraint) settle as ONE history entry together with
     // whatever pathUp does next (a plain click, or bowing the segment into an arc)
-    pathDrag = { anchor: id, prevAnchor, startX: x, startY: y, bowed: false, perp }
+    setPathDrag({ anchor: id, prevAnchor, startX: x, startY: y, bowed: false, perp })
     opts.onLiveChange?.()
   }
 
@@ -854,7 +860,7 @@ export function usePen(opts: {
     // real pointermove or a direct __sketchDraw.pathMove() call (tests)
     cursor.value = { x, y, shift }
     if (!pathDrag) return
-    if (dist({ x, y }, { x: pathDrag.startX, y: pathDrag.startY }) > pxToUnits(BOW_PX, opts.view.value)) pathDrag.bowed = true
+    if (dist({ x, y }, { x: pathDrag.startX, y: pathDrag.startY }) > pxToUnits(BOW_PX, opts.view.value) && !pathDrag.bowed) { pathDrag.bowed = true; pathDragTick.value++ }
   }
 
   // Commits the currently-bowing segment (pathDrag.bowed) into an arc through
@@ -894,7 +900,7 @@ export function usePen(opts: {
   function pathUp(x: number, y: number) {
     if (!pathDrag) return
     commitBowedSegment({ x, y })
-    pathDrag = null
+    setPathDrag(null)
     // the pointer is here now: re-seat the cursor so anything reading the
     // (non-reactive) drag state — the overlay's cursor glow — settles too
     if (cursor.value) cursor.value = { ...cursor.value, x, y }
@@ -916,7 +922,7 @@ export function usePen(opts: {
     if (!pathDrag || !pathDrag.bowed || !cursor.value) return
     const prevAnchor = pathDrag.prevAnchor
     const c = commitBowedSegment(cursor.value)
-    pathDrag = null
+    setPathDrag(null)
     if (!c) return   // bowArc couldn't fit — segment stayed a line, nothing to pin
     const existing = findRadiusPin(c, prevAnchor)
     if (existing) existing.value = value
@@ -934,7 +940,10 @@ export function usePen(opts: {
     const prevId = pp.anchors[pp.anchors.length - 1]!
     const prev = doc.value.entities.find(e => e.id === prevId) as any
     if (!prev || prev.kind !== 'point') return
-    const dx = cursor.value.x - prev.x, dy = cursor.value.y - prev.y
+    // aim along where the point would land (Shift 45° / right-angle snap), so
+    // the typed length follows the same direction the dimension line shows
+    const aim = pathPlacementXY(cursor.value.x, cursor.value.y, cursor.value.shift)
+    const dx = aim.x - prev.x, dy = aim.y - prev.y
     const d = Math.hypot(dx, dy)
     const dir = d > 1e-9 ? { x: dx / d, y: dy / d } : { x: 1, y: 0 }   // cursor sitting on the anchor: fall back to +x
     const { id, own } = placePointOwn(prev.x + dir.x * value, prev.y + dir.y * value, [prevId], guideMode.value)
@@ -1251,7 +1260,7 @@ export function usePen(opts: {
     if (!pendingPath.value) return
     cleanupPendingAndCommit()
     pendingPath.value = null
-    pathDrag = null
+    setPathDrag(null)
     resetCurveState()
     cursor.value = null
     dimBuffer.value = ''
@@ -1291,7 +1300,7 @@ export function usePen(opts: {
     if (pp.anchors.length === 0) {
       cleanupPendingPath()
       pendingPath.value = null
-      pathDrag = null
+      setPathDrag(null)
       resetCurveState()
       cursor.value = null
     }
@@ -1322,7 +1331,7 @@ export function usePen(opts: {
     // follows whichever of the two is active when its end point is placed
     if (pendingPath.value && isDrawTool(tool.value) && isDrawTool(t)) {
       tool.value = t
-      pathDrag = null
+      setPathDrag(null)
       curveDrag.value = null
       dimBuffer.value = ''
       return
@@ -1351,7 +1360,7 @@ export function usePen(opts: {
     tool.value = t
     pending.value = null
     pendingPath.value = null
-    pathDrag = null
+    setPathDrag(null)
     resetCurveState()
     cursor.value = null
     dimBuffer.value = ''
@@ -1365,7 +1374,7 @@ export function usePen(opts: {
     clearSegSel()
     pending.value = null
     pendingPath.value = null
-    pathDrag = null
+    setPathDrag(null)
     resetCurveState()
     cursor.value = null
     dimBuffer.value = ''
@@ -1383,7 +1392,7 @@ export function usePen(opts: {
     pendingPath.value = null
     pendingOp.value = null
     cancelValue()   // a pending value request never survives finishSession/revert
-    pathDrag = null
+    setPathDrag(null)
     resetCurveState()
     cursor.value = null
     dimBuffer.value = ''
@@ -1432,7 +1441,7 @@ export function usePen(opts: {
   function orderRefs(kind: ConstraintKind, ids: EntityId[]): EntityId[] {
     return orderRefsFor(doc.value, kind, ids)
   }
-  function getPathDrag(): PathDrag { return pathDrag }
+  function getPathDrag(): PathDrag { void pathDragTick.value; return pathDrag }
 
   // Fix (b): end the pen's own live down→drag→up gesture without touching the
   // pending path itself — the host calls this when it parks the pen (e.g.
@@ -1440,7 +1449,7 @@ export function usePen(opts: {
   // doesn't resume mid-air once the overlay reactivates. Mirrors what the
   // overlay's own watcher already does for its point-drag/marquee state.
   function endGesture(): void {
-    pathDrag = null
+    setPathDrag(null)
     curveDrag.value = null
   }
 
