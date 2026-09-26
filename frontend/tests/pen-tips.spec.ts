@@ -57,8 +57,17 @@ test('hovering Pen shows its card with key, caption and a live demo; the next ca
   await shoot(page, 'trim', 'cards-trim.png')
 
   // a non-tool button: a card without a demo
-  await hover(page, '[data-act="undo"]:not([disabled]), [data-act="guide"]')
-  await expect(page.locator('[data-pen-tip-id="guide"], [data-pen-tip-id="undo"]').first()).toBeVisible()
+  await hover(page, '[data-act="guide"]')
+  await expect(page.locator('[data-pen-tip-id="guide"]')).toBeVisible()
+  await expect(page.locator('[data-pen-tip-id="guide"] [data-pen-tip-demo]')).toHaveCount(0)
+
+  // Undo with an empty history: greyed out, and its card still opens
+  await expect(page.locator('[data-act="undo"]')).toBeDisabled()
+  await hover(page, '[data-act="undo"]')
+  const undo = page.locator('[data-pen-tip-id="undo"]')
+  await expect(undo).toBeVisible()
+  await expect(undo).toContainText('Takes back the last step.')
+  await expect(page.locator('[data-act="undo"]')).toHaveAttribute('aria-label', 'Undo')
 
   // leaving the toolbar closes the card
   await page.mouse.move(5, 5)

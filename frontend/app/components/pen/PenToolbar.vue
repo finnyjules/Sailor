@@ -138,14 +138,18 @@ const isSelectIdle = computed(() => tool.value === 'select' && !hasAnySelection.
       </PenTipCard>
       <span class="sep" />
       <PenTipCard id="undo">
-        <button class="tbtn icon" data-act="undo" :disabled="!canUndo()" aria-label="Undo" @click="undo()">
-          <Undo2 :size="16" />
-        </button>
+        <span class="tip-wrap" data-tip-wrap="undo">
+          <button class="tbtn icon" data-act="undo" :disabled="!canUndo()" aria-label="Undo" @click="undo()">
+            <Undo2 :size="16" />
+          </button>
+        </span>
       </PenTipCard>
       <PenTipCard id="redo">
-        <button class="tbtn icon" data-act="redo" :disabled="!canRedo()" aria-label="Redo" @click="redo()">
-          <Redo2 :size="16" />
-        </button>
+        <span class="tip-wrap" data-tip-wrap="redo">
+          <button class="tbtn icon" data-act="redo" :disabled="!canRedo()" aria-label="Redo" @click="redo()">
+            <Redo2 :size="16" />
+          </button>
+        </span>
       </PenTipCard>
       <template v-if="tool === 'path' || tool === 'curve'">
         <span class="sep" />
@@ -248,6 +252,11 @@ const isSelectIdle = computed(() => tool.value === 'select' && !hasAnySelection.
 .tbtn.toggle[aria-pressed='true'] { background: rgba(47, 107, 255, 0.18); color: #b9ccff; }
 .tbtn:disabled { color: rgba(255, 255, 255, 0.32); cursor: default; background: transparent; }
 .tbtn.danger { color: #ff9b9b; }
+/* Undo/Redo: the card's trigger is this wrapper, not the button — a disabled
+   button gets no pointer events, so while greyed out it lets them through to
+   the wrapper and its card still opens on hover. */
+.tip-wrap { display: inline-flex; flex: none; }
+.tip-wrap > .tbtn:disabled { pointer-events: none; }
 .hint-wrap { display: flex; max-width: 100%; }
 .hint {
   display: flex;
