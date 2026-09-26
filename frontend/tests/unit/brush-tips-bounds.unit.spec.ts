@@ -20,4 +20,11 @@ describe('tip-aware strokeBounds', () => {
     expect(b.maxY).toBeCloseTo(0.31)
     expect(brushBoxFromStrokes([legacy], 1).w).toBeCloseTo(0.22)
   })
+  it('a growing live stroke measures the same as a fresh one (memo extends, never goes stale)', () => {
+    const live: TipStroke = { tip: 'round', v: 1, size: 0.03, settings: defaultSettings('round'), seed: 1, pts: [] }
+    for (let i = 0; i < 50; i++) {
+      live.pts.push(0.3 + i * 0.005, 0.5 + Math.sin(i) * 0.1, i * 16)
+      expect(strokeBounds([live])).toEqual(strokeBounds([{ ...live, pts: live.pts.slice() }]))
+    }
+  })
 })

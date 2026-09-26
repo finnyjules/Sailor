@@ -9,6 +9,10 @@ export const TIP_IDS: readonly TipId[] = ['spray', 'round', 'bristle']
 export const REF_W = 1080
 export const SIZE_MIN = 4
 export const SIZE_MAX = 320
+/** Spray's fixed simulation step (1/120 s) and its per-step drip speed decay, exp(−0.9·step).
+ *  Here (not in spray.ts) so record.ts can bound the drips without an import cycle. */
+export const SPRAY_DT = 1 / 120
+export const DRIP_DECAY = Math.exp(-0.9 * SPRAY_DT)
 
 export interface TipSetting { key: string; label: string; default: number; max: number }
 export interface TipDef { id: TipId; label: string; hint: string; defaultSize: number; settings: TipSetting[] }

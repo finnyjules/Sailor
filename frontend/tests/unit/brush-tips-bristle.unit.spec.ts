@@ -35,4 +35,19 @@ describe('bristleRibbon', () => {
       expect(d[i + 1]!).toBeLessThanOrEqual((0.4 + pad.down) * REF_W)
     }
   })
+  it('stays inside the padded bounds on every side at 200% speed thinning', () => {
+    for (const speed of [0.2, 1, 4]) {
+      const pts: { x: number; y: number; t: number }[] = []
+      for (let i = 0; i <= 80; i++) pts.push({ x: 0.2 + i * 0.004 * speed, y: 0.4 + Math.sin(i / 6) * 0.05, t: i * 16 })
+      const st: TipStroke = { tip: 'bristle', v: 1, size: 120 / REF_W, settings: { ...defaultSettings('bristle'), thin: 2 }, seed: 5, pts: encodePts(pts) }
+      const pad = tipStrokePad(st), d = bristleRibbon(st, true)!
+      const xs = pts.map(p => p.x), ys = pts.map(p => p.y)
+      for (let i = 0; i < d.length; i += RIBBON_STRIDE) {
+        expect(d[i]!).toBeGreaterThanOrEqual((Math.min(...xs) - pad.side) * REF_W)
+        expect(d[i]!).toBeLessThanOrEqual((Math.max(...xs) + pad.side) * REF_W)
+        expect(d[i + 1]!).toBeGreaterThanOrEqual((Math.min(...ys) - pad.up) * REF_W)
+        expect(d[i + 1]!).toBeLessThanOrEqual((Math.max(...ys) + pad.down) * REF_W)
+      }
+    }
+  })
 })

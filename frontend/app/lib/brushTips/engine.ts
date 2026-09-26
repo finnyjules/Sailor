@@ -22,7 +22,11 @@ import { RIBBON_STRIDE } from './bristle'
 
 export interface TipGroup { tip: TipId; erase: boolean; strokes: TipStroke[] }
 export interface CoverageView { originX: number; originY: number; unitPx: number; w: number; h: number }
-export interface GroupRaster { coverage: HTMLCanvasElement | OffscreenCanvas; shade: HTMLCanvasElement | null }
+export interface GroupRaster {
+  coverage: HTMLCanvasElement | OffscreenCanvas; shade: HTMLCanvasElement | null
+  /** true when the GPU drew it; false for the 2D fallback (no shade, not pixel-identical). */
+  gpu: boolean
+}
 
 /** Hard cap on either side of the offscreen. A larger view is rendered with unitPx scaled down
  *  so its largest side is this, and the canvases come back at that reduced size — the caller's
@@ -37,6 +41,10 @@ export function capView(view: CoverageView, max = MAX_SIDE): CoverageView {
 }
 
 const seedUniform = (seed: number) => (seed % 1000) / 100
+/** The grain pass's noise offset. A fixed constant, NOT a stroke's seed: the pass runs once
+ *  per group, so seeding it from a stroke would let adding, undoing or erasing another stroke
+ *  re-roll the grain of paint already on the layer ("paint moves only on the next stroke"). */
+const GRAIN_SEED = 0
 
 // ---------------------------------------------------------------- shaders
 
@@ -57,9 +65,12 @@ out vec2 vL; out float vS; out float vH;
 const vec2 C[6] = vec2[6](vec2(-1,-1), vec2(1,-1), vec2(1,1), vec2(-1,-1), vec2(1,1), vec2(-1,1));
 void main(){
   vec2 c = C[gl_VertexID];
-  float r = max(.5, aDab.z*uUnitPx);
+  // A dab under 1 device px is drawn 1 px wide with its strength cut by the area it lost, so
+  // the paint it deposits stays the same at every render size (a small render — a card, a
+  // thumbnail — must not turn each fine speck into a heavy whole-pixel dot).
+  float rp = aDab.z*uUnitPx, r = max(1., rp);
   vec2 pos = (aDab.xy - uOrigin)*uUnitPx + c*r;
-  vL = c; vS = aSH.x; vH = aSH.y;
+  vL = c; vS = aSH.x*min(1., rp*rp/(r*r)); vH = aSH.y;
   gl_Position = vec4(pos.x/uView.x*2.-1., 1.-pos.y/uView.y*2., 0, 1);
 }`
 const DAB_FS = `#version 300 es
@@ -117,7 +128,7 @@ void main(){ vU=aU; vV=aV; vW=aW; vT=aT; vSp=aSp;
 const RIB_FS = `#version 300 es
 precision highp float;
 in float vU, vV, vW, vT, vSp;
-uniform float uSeed, uLoad, uDry, uBristle, uRelief;
+uniform float uSeed, uLoad, uDry, uBristle, uRelief, uUnitPx;
 uniform int uMode;
 out vec4 o;
 ${NOISE}
@@ -135,12 +146,17 @@ void main(){
   float a = aE*aB;
   if(uMode == 0){ o = vec4(a); return; }
   float h = sqrt(max(0., 1.-av*av))*.7 + (bristle-.5)*.55*uBristle;
-  vec3 N = normalize(vec3(-dFdx(h)*3.5*uRelief, -dFdy(h)*3.5*uRelief, 1.));
+  // dFdx/dFdy are per DEVICE px; × uUnitPx makes the slope per Frame unit, so relief looks the
+  // same at every render size. × .5 keeps the prototype's tuning (it rendered at unitPx ≈ 2).
+  float sl = 3.5*uRelief*uUnitPx*.5;
+  vec3 N = normalize(vec3(-dFdx(h)*sl, -dFdy(h)*sl, 1.));
   vec3 L = normalize(vec3(-.45, .55, .7)), H = normalize(L + vec3(0,0,1));
   float diff = clamp(dot(N,L), 0., 1.)*.55 + .6;
   float spec = pow(clamp(dot(N,H), 0., 1.), 36.);
   float k = min(1., uRelief);
-  float lum = (diff - 1.)*k + spec*.32*k + .25*(bristle - .5)*uBristle;
+  // A stroke with no thickness of its own is flat: no bristle shading either, even when a
+  // neighbour in its group has relief and so the group draws a shade pass.
+  float lum = (diff - 1.)*k + spec*.32*k + .25*(bristle - .5)*uBristle*step(1e-4, uRelief);
   o = vec4(vec3(.5 + lum*.5)*a, a);
 }`
 
@@ -275,7 +291,7 @@ function rasterGpu(g: Gpu, group: TipGroup, v: CoverageView, live: TipStroke | n
     gl.useProgram(g.rib.p)
     gl.uniform2f(g.rib.u.uView!, w, h)
     gl.uniform2f(g.rib.u.uOrigin!, v.originX, v.originY)
-    gl.uniform1f(g.rib.u.uUnitPx!, v.unitPx)
+    gl.uniform1f(g.rib.u.uUnitPx!, v.unitPx)   // shared by RIB_VS (position) and RIB_FS (relief slope)
     gl.bindVertexArray(g.ribVao)
     gl.bindBuffer(gl.ARRAY_BUFFER, g.ribBuf)
     const drawAll = (mode: number) => {
@@ -302,7 +318,7 @@ function rasterGpu(g: Gpu, group: TipGroup, v: CoverageView, live: TipStroke | n
       shade = copyOut(g, w, h)
     }
     gl.bindVertexArray(null)
-    return { coverage, shade }
+    return { coverage, shade, gpu: true }
   }
 
   // Dab tips: accumulate density, then the grain pass turns it into coverage / shade.
@@ -326,6 +342,8 @@ function rasterGpu(g: Gpu, group: TipGroup, v: CoverageView, live: TipStroke | n
   gl.bindFramebuffer(gl.FRAMEBUFFER, null)
   gl.viewport(0, 0, w, h)
 
+  // Grain and relief act on the whole group; groupTipStrokes only merges strokes on which
+  // they are equal, so the first stroke's values are every stroke's values.
   const first = group.strokes[0]!
   const grainSetting = group.tip === 'round' ? (first.settings.grain ?? 0) : 1
   const relief = maxRelief(group.strokes)
@@ -336,7 +354,7 @@ function rasterGpu(g: Gpu, group: TipGroup, v: CoverageView, live: TipStroke | n
   gl.uniform2f(g.grain.u.uView!, w, h)
   gl.uniform2f(g.grain.u.uOrigin!, v.originX, v.originY)
   gl.uniform1f(g.grain.u.uUnitPx!, v.unitPx)
-  gl.uniform1f(g.grain.u.uSeed!, seedUniform(first.seed))
+  gl.uniform1f(g.grain.u.uSeed!, GRAIN_SEED)
   gl.uniform1f(g.grain.u.uGrain!, group.tip === 'spray' ? 1 : Math.min(1, grainSetting))
   gl.uniform1f(g.grain.u.uTooth!, group.tip === 'spray' ? 0 : grainSetting)
   gl.uniform1f(g.grain.u.uRelief!, relief)
@@ -352,7 +370,7 @@ function rasterGpu(g: Gpu, group: TipGroup, v: CoverageView, live: TipStroke | n
     shade = copyOut(g, w, h)
   }
   gl.bindVertexArray(null)
-  return { coverage, shade }
+  return { coverage, shade, gpu: true }
 }
 
 // ---------------------------------------------------------------- Canvas2D fallback
@@ -384,7 +402,7 @@ function rasterFallback(group: TipGroup, v: CoverageView, live: TipStroke | null
       }
       ctx.fill('nonzero')
     }
-    return { coverage: c, shade: null }
+    return { coverage: c, shade: null, gpu: false }
   }
   // Dabs: additive white arcs build density in alpha …
   ctx.globalCompositeOperation = 'lighter'
@@ -393,7 +411,9 @@ function rasterFallback(group: TipGroup, v: CoverageView, live: TipStroke | null
     if (r.kind !== 'dabs') continue
     const d = r.dabs
     for (let i = 0; i + 4 < d.length; i += 5) {
-      const x = (d[i]! - ox) * U, y = (d[i + 1]! - oy) * U, rad = Math.max(0.5, d[i + 2]! * U), st = d[i + 3]!, hd = d[i + 4]!
+      // Sub-pixel dabs: 1 px wide, strength cut by the lost area (same as DAB_VS).
+      const rp = d[i + 2]! * U, rad = Math.max(1, rp)
+      const x = (d[i]! - ox) * U, y = (d[i + 1]! - oy) * U, st = d[i + 3]! * Math.min(1, (rp * rp) / (rad * rad)), hd = d[i + 4]!
       if (x + rad < 0 || y + rad < 0 || x - rad > v.w || y - rad > v.h || st <= 0) continue
       if (hd < 0.5) {
         const gr = ctx.createRadialGradient(x, y, 0, x, y, rad)
@@ -417,10 +437,14 @@ function rasterFallback(group: TipGroup, v: CoverageView, live: TipStroke | null
     }
   }
   ctx.putImageData(img, 0, 0)
-  return { coverage: c, shade: null }
+  return { coverage: c, shade: null, gpu: false }
 }
 
 // ---------------------------------------------------------------- entry
+
+/** Which path rasterGroup would take right now. Part of coverage.ts's cache signature, so a
+ *  fallback raster made while the context was lost is redrawn once the GPU is back. */
+export function tipRenderPath(): 'gpu' | '2d' { return initGpu() ? 'gpu' : '2d' }
 
 /** One group → a coverage canvas and (GPU only, relief > 0) a shade canvas, view-sized — or
  *  smaller when the view is over the cap (capView / the GPU's limits); the caller stretches.

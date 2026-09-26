@@ -3,7 +3,7 @@
 // target canvas (its width when a stroke spans the full artboard). The renderer
 // then source-in-fills this alpha with any Paint. See the paintbrush design spec.
 
-import { type TipStroke, isTipStroke, tipStrokePad, decodePts } from '~/lib/brushTips/record'
+import { type TipStroke, isTipStroke, tipStrokePad } from '~/lib/brushTips/record'
 
 export interface PaintStroke {
   points: { x: number; y: number }[] // width-normalized (both axes ÷ artboard width)
@@ -89,17 +89,37 @@ export type BrushStroke = PaintStroke | TipStroke
 
 /** Tight bounds of all strokes in WIDTH-normalized artboard coords, expanded by each
  *  stroke's radius so the painted marks sit fully inside. Empty → a zero box at origin. */
+interface Box { minX: number; minY: number; maxX: number; maxY: number }
+// A tip stroke's padded box, memoised per stroke object and keyed on how many pts it has
+// been measured over. A committed stroke is immutable, so it is measured once; the live
+// stroke only ever appends samples, so each call extends its box by the new ones.
+const tipBoxes = new WeakMap<TipStroke, { n: number; box: Box }>()
+function tipStrokeBox(s: TipStroke): Box {
+  const pts = s.pts, n = pts.length - (pts.length % 3)
+  let m = tipBoxes.get(s)
+  if (m && m.n === n) return m.box
+  if (!m || m.n > n) { m = { n: 0, box: { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity } }; tipBoxes.set(s, m) }
+  const pad = tipStrokePad(s), b = m.box
+  for (let i = m.n; i < n; i += 3) {
+    const x = pts[i]!, y = pts[i + 1]!
+    if (x - pad.side < b.minX) b.minX = x - pad.side
+    if (y - pad.up < b.minY) b.minY = y - pad.up
+    if (x + pad.side > b.maxX) b.maxX = x + pad.side
+    if (y + pad.down > b.maxY) b.maxY = y + pad.down
+  }
+  m.n = n
+  return b
+}
+
 export function strokeBounds(strokes: BrushStroke[]): { minX: number; minY: number; maxX: number; maxY: number } {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
   for (const s of strokes) {
     if (isTipStroke(s)) {
-      const pad = tipStrokePad(s)
-      for (const p of decodePts(s.pts)) {
-        if (p.x - pad.side < minX) minX = p.x - pad.side
-        if (p.y - pad.up < minY) minY = p.y - pad.up
-        if (p.x + pad.side > maxX) maxX = p.x + pad.side
-        if (p.y + pad.down > maxY) maxY = p.y + pad.down
-      }
+      const b = tipStrokeBox(s)
+      if (b.minX < minX) minX = b.minX
+      if (b.minY < minY) minY = b.minY
+      if (b.maxX > maxX) maxX = b.maxX
+      if (b.maxY > maxY) maxY = b.maxY
       continue
     }
     const r = Math.max(0, s.radius)

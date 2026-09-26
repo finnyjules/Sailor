@@ -1,6 +1,6 @@
 // Bristle tip replay: pointer samples → smoothed points with speed → a tapered ribbon
 // (TRIANGLE_STRIP). Ported from the prototype's buildRibbon; Frame units throughout.
-import { REF_W } from './tips'
+import { REF_W, SIZE_MIN } from './tips'
 import { decodePts, type Sample, type TipStroke } from './record'
 
 export const RIBBON_STRIDE = 7
@@ -81,7 +81,7 @@ function roundCorners(P: P[], k: number): P[] {
 }
 
 export function bristleRibbon(stroke: TipStroke, done: boolean): Float32Array | null {
-  const S = stroke.settings, size = stroke.size * REF_W, thin = S.thin ?? 1
+  const S = stroke.settings, size = Math.max(SIZE_MIN, stroke.size * REF_W), thin = S.thin ?? 1
   const raw = bristlePoints(decodePts(stroke.pts), size, S)
   let wv = widthFor(size, 0, thin)
   const pts = raw.map(q => { wv += (widthFor(size, q.sp, thin) - wv) * 0.14; return { ...q, w: wv } })

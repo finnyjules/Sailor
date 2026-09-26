@@ -2,7 +2,7 @@
 // each with a few overspray specks just outside the edge. Ported from the prototype.
 import { makeRng, type Rng2 } from './random'
 import { DabBuffer } from './dabs'
-import { REF_W } from './tips'
+import { REF_W, SIZE_MIN } from './tips'
 import { decodePts, type Sample, type TipStroke } from './record'
 
 export class RoundSim {
@@ -12,7 +12,7 @@ export class RoundSim {
   private last: { x: number; y: number } | null = null
   private size: number; private S: Record<string, number>
   constructor(opts: { size: number; settings: Record<string, number>; seed: number }) {
-    this.size = opts.size; this.S = opts.settings; this.rng = makeRng(opts.seed)
+    this.size = Math.max(SIZE_MIN, opts.size); this.S = opts.settings; this.rng = makeRng(opts.seed)
   }
   addSample(s: Sample) {
     // Quantise to the same 5 dp as `encodePts`, so a live-drawn stroke sims identically

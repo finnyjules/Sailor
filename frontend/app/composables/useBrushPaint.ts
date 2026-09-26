@@ -1,6 +1,6 @@
 import { ref, reactive, watch } from 'vue'
 import type { PaintStroke } from '~/lib/compositor/brushStamp'
-import { TIPS, TIP_IDS, defaultSettings, REF_W, type TipId } from '~/lib/brushTips/tips'
+import { TIPS, TIP_IDS, defaultSettings, REF_W, SIZE_MIN, SIZE_MAX, type TipId } from '~/lib/brushTips/tips'
 import { encodePts, type Sample, type TipStroke } from '~/lib/brushTips/record'
 
 export type BrushMode = 'paint' | 'mask'
@@ -16,7 +16,7 @@ function loadTips() {
       if (TIP_IDS.includes(raw.tip)) tip = raw.tip
       for (const t of TIP_IDS) {
         for (const k of Object.keys(settings[t])) { const v = raw.settings?.[t]?.[k]; if (typeof v === 'number' && Number.isFinite(v)) settings[t][k] = v }
-        const sz = raw.size?.[t]; if (typeof sz === 'number' && Number.isFinite(sz)) size[t] = sz
+        const sz = raw.size?.[t]; if (typeof sz === 'number' && Number.isFinite(sz)) size[t] = Math.min(SIZE_MAX, Math.max(SIZE_MIN, sz))
       }
     }
   } catch { /* bad or blocked storage: defaults */ }
@@ -87,7 +87,9 @@ export function useBrushPaint() {
     const last = tipSamples[tipSamples.length - 1]!
     if (last.x === x && last.y === y && last.t === t) return
     tipSamples.push({ x, y, t })
-    liveTip.pts = encodePts(tipSamples)
+    // Append just this sample (same rounding as encodePts) — re-encoding the whole stroke per
+    // sample made a long stroke quadratic. The array is the live record replay reads.
+    liveTip.pts.push(...encodePts([{ x, y, t }]))
   }
   const extendTipStroke = (x: number, y: number, tMs: number) => pushTipSample(x, y, tMs)
   function holdTipStroke(tMs: number) { const l = tipSamples[tipSamples.length - 1]; if (l) pushTipSample(l.x, l.y, tMs) }

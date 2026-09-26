@@ -1,5 +1,5 @@
 // What a tip stroke saves: the movement, not the pixels. Replay rebuilds the paint.
-import { REF_W, type TipId } from './tips'
+import { REF_W, SIZE_MIN, SPRAY_DT, DRIP_DECAY, type TipId } from './tips'
 import type { PaintStroke } from '~/lib/compositor/brushStamp'
 
 export interface TipStroke {
@@ -31,19 +31,35 @@ export function decodePts(pts: number[]): Sample[] {
 
 /** How far (width-normalised) a stroke's paint can reach past its path, per side. */
 export function tipStrokePad(s: TipStroke): { side: number; up: number; down: number } {
-  const size = s.size * REF_W, st = s.settings
+  const size = Math.max(SIZE_MIN, s.size * REF_W), st = s.settings
   let side: number, down: number
   if (s.tip === 'spray') {
-    const sig = size * 0.26, O = st.overspray ?? 0.2
-    side = Math.max(sig * 1.9, sig * (1 + 1.1 * O) * 3.2)   // mist radius vs 3.2σ of overspray
+    // Mist radius vs a 4σ reach of the overspray specks (like round), plus the largest speck.
+    const sig = size * 0.26, O = st.overspray ?? 0.2, rs = Math.max(1, size / 140)
+    side = Math.max(sig * 1.9, sig * (1 + 1.1 * O) * 4) + 0.83 * rs
+    down = side
     const D = st.drips ?? 0
-    down = side + size * 0.2 + (25 + size * 1.5) * D + size * 0.1 // drip start + longest run + end blob
+    if (D > 0.01) {
+      // Drips, from the physics in spray.ts spawnDrip / updateDrips: a drip starts up to
+      // size·0.2 below the nozzle and moves 1 unit per unit of accumulated speed. Its speed
+      // decays by DRIP_DECAY per step from vy0 ≤ (45+60)·(0.6+0.4·min(2,D)), so its whole run
+      // is ≤ vy0·DT/(1−DRIP_DECAY) (≈ vy0/0.9), and never more than its `left` budget
+      // (25 + size·1.5)·D plus the ≤2 units one step can overshoot. The end blob reaches
+      // r·(0.6 + 1.55) past the last position, r ≤ max(1.3, size·0.02)·1.3.
+      const vy0 = (45 + 60) * (0.6 + 0.4 * Math.min(2, D))
+      const run = Math.min((25 + size * 1.5) * D + 2, vy0 * SPRAY_DT / (1 - DRIP_DECAY))
+      const rMax = Math.max(1.3, size * 0.02) * 1.3
+      down = Math.max(side, size * 0.2 + run + rMax * 2.15 + 0.5)
+      side = Math.max(side, 4 * size * 0.14 + rMax * 1.55 + 0.15)   // a drip's 4σ sideways start
+    }
   } else if (s.tip === 'round') {
     const r = size / 2
     side = r * (0.85 + 0.3 * Math.max(0.3, st.overspray ?? 0) * 4) + 1
     down = side
   } else {
-    side = size * 1.25 / 2 + 2  // widest bristle width (1.2× size) plus ragged edge
+    // Widest ribbon: widthFor peaks at size·(1 + 0.2·thin) when slow (thin ≥ 0), plus a margin
+    // for the ragged edge and the spline's overshoot at corners.
+    side = size * (1 + 0.2 * Math.max(0, st.thin ?? 1)) / 2 + 3
     down = side
   }
   return { side: side / REF_W, up: side / REF_W, down: down / REF_W }

@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useBrushPaint } from '~/composables/useBrushPaint'
 import { defaultSettings, REF_W } from '~/lib/brushTips/tips'
-import { decodePts } from '~/lib/brushTips/record'
+import { decodePts, encodePts } from '~/lib/brushTips/record'
 
 beforeEach(() => localStorage.clear())
 
@@ -38,5 +38,18 @@ describe('useBrushPaint tips', () => {
     expect(decodePts(s.pts)).toEqual([{ x: 0.1, y: 0.2, t: 0 }, { x: 0.15, y: 0.2, t: 16 }, { x: 0.15, y: 0.2, t: 50 }])
     expect(Number.isInteger(s.seed)).toBe(true)
     expect('erase' in s).toBe(false)
+  })
+  it('clamps a saved size into the slider range', () => {
+    localStorage.setItem('sailor.brushTips.v1', JSON.stringify({ size: { spray: 0, round: 9999, bristle: -5 } }))
+    const b = useBrushPaint()
+    expect([b.tipSize.spray, b.tipSize.round, b.tipSize.bristle]).toEqual([4, 320, 4])
+  })
+  it('appends samples to the live record in place, rounded exactly like encodePts', () => {
+    const b = useBrushPaint()
+    b.beginTipStroke(0.123456789, 0.2, 1000)
+    const live = b.liveTipStroke()!, arr = live.pts
+    b.extendTipStroke(0.2000049, 0.51234567, 1016.6)
+    expect(live.pts).toBe(arr)
+    expect(live.pts).toEqual(encodePts([{ x: 0.123456789, y: 0.2, t: 0 }, { x: 0.2000049, y: 0.51234567, t: 16.6 }]))
   })
 })

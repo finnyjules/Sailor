@@ -3,10 +3,10 @@
 // record gives the same dabs however often advanceTo() is called. Frame units throughout.
 import { makeRng, type Rng2 } from './random'
 import { DabBuffer } from './dabs'
-import { REF_W } from './tips'
+import { REF_W, SIZE_MIN, SPRAY_DT, DRIP_DECAY } from './tips'
 import { decodePts, type Sample, type TipStroke } from './record'
 
-const DT = 1 / 120
+const DT = SPRAY_DT
 const DT_MS = 1000 / 120
 interface Drip { x: number; y: number; vy: number; r: number; left: number; acc: number }
 
@@ -15,6 +15,7 @@ export class SpraySim {
   private rng: Rng2
   private samples: Sample[] = []
   private stepIdx = 0        // integer step counter — simT = stepIdx * DT_MS, never accumulated as a float
+  private cursor = 0         // nozzleAt's sample index: simT only grows, so the scan resumes here
   private prev: { x: number; y: number } | null = null
   private wet = 0; private dripT = 0; private carry = 0
   private drips: Drip[] = []
@@ -22,7 +23,7 @@ export class SpraySim {
   private size: number; private S: Record<string, number>
 
   constructor(opts: { size: number; settings: Record<string, number>; seed: number }) {
-    this.size = opts.size; this.S = opts.settings; this.rng = makeRng(opts.seed)
+    this.size = Math.max(SIZE_MIN, opts.size); this.S = opts.settings; this.rng = makeRng(opts.seed)
   }
   get settled() { return this.released && this.drips.length === 0 }
 
@@ -32,9 +33,12 @@ export class SpraySim {
   release() { this.released = true }
 
   private nozzleAt(tMs: number): { x: number; y: number } {
+    // Resumes from the last index instead of scanning from 0 (t never decreases, and samples
+    // only ever append), so a long stroke stays linear. Same index as a scan from 0.
     const P = this.samples
-    let i = 0
+    let i = this.cursor
     while (i + 1 < P.length && P[i + 1]!.t <= tMs) i++
+    this.cursor = i
     const a = P[i]!, b = P[Math.min(i + 1, P.length - 1)]!
     const f = b.t > a.t ? Math.min(1, Math.max(0, (tMs - a.t) / (b.t - a.t))) : 0
     return { x: (a.x + (b.x - a.x) * f) * REF_W, y: (a.y + (b.y - a.y) * f) * REF_W }
@@ -99,7 +103,7 @@ export class SpraySim {
     const dt = DT
     for (let i = this.drips.length - 1; i >= 0; i--) {
       const d = this.drips[i]!
-      d.acc += d.vy * dt; d.vy *= Math.exp(-0.9 * dt)
+      d.acc += d.vy * dt; d.vy *= DRIP_DECAY
       while (d.acc >= 1) { d.acc -= 1; d.y += 1; d.left -= 1; d.r *= 0.997; this.dabs.push(d.x + (this.rng.next() - 0.5) * 0.3, d.y, d.r, 0.85, 1) }
       if (d.left <= 0 || d.vy < 7) { this.dabs.push(d.x, d.y + d.r * 0.6, d.r * 1.55, 1, 1); this.drips.splice(i, 1) }
     }
@@ -119,4 +123,38 @@ export function simulateSpray(stroke: TipStroke, tailMs = Infinity): { dabs: Dab
   if (tailMs === Infinity) sim.settle()
   else sim.advanceTo(end + Math.min(2000, Math.max(0, tailMs)))
   return { dabs: sim.dabs, settled: sim.settled }
+}
+
+/** The live spray stroke's ONE incremental simulation (see replay.ts): each render feeds only
+ *  the samples appended since the last call and advances the same sim, instead of replaying
+ *  the whole stroke per frame. `sync(tailMs)` reproduces `simulateSpray(stroke, tailMs)`:
+ *   - tailMs = 0 (pointer down): advance to just BEFORE the newest sample's time. A step landing
+ *     exactly on that time is held back, because a later sample with the same (rounded) t would
+ *     move the nozzle for that step; it runs on the next sync, once a later t or the release
+ *     settles it. So every step taken is the one a one-shot replay takes.
+ *   - tailMs > 0 (released): finish to the last sample, release, then run the drips for tailMs
+ *     (capped at 2 s, like simulateSpray). Once released, no more samples are read. */
+export class LiveSpray {
+  readonly sim: SpraySim
+  private fed = 0
+  private endT = 0
+  private released = false
+  constructor(readonly stroke: TipStroke) {
+    this.sim = new SpraySim({ size: stroke.size * REF_W, settings: stroke.settings, seed: stroke.seed })
+  }
+  sync(tailMs: number): void {
+    if (!this.released) {
+      const pts = this.stroke.pts
+      for (; this.fed * 3 + 2 < pts.length; this.fed++) {
+        const o = this.fed * 3
+        this.sim.addSample({ x: pts[o]!, y: pts[o + 1]!, t: pts[o + 2]! })
+        this.endT = Math.round(pts[o + 2]!)
+      }
+      if (!(tailMs > 0)) { if (this.fed) this.sim.advanceTo(this.endT - 1e-3); return }
+      this.sim.advanceTo(this.endT)
+      this.sim.release()
+      this.released = true
+    }
+    this.sim.advanceTo(this.endT + Math.min(2000, Math.max(0, tailMs)))
+  }
 }
