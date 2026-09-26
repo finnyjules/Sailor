@@ -44,10 +44,15 @@ vi.mock('~~/server/runner/executors', async (importOriginal) => {
       const key = ctx.prompt[ctx.nodeId]!.inputs.test_plan
       if (plan.kind !== 'provider' || typeof key !== 'string') return plan
       const p = PLANS[key as keyof typeof PLANS]
-      return {
+      const planned = {
         ...plan, provider: p.first.provider, endpoint: p.first.endpoint, payload: { ...p.first.payload },
         backup: { provider: p.backup.provider, endpoint: p.backup.endpoint, payload: { ...p.backup.payload } },
       }
+      // A node answering with a value (R0.6 review c): the answer's first picture address, as text.
+      if (ctx.prompt[ctx.nodeId]!.inputs.test_value === true) {
+        return { ...planned, media: 'value' as const, uiFor: () => null, valuesOf: (r: any) => ({ 0: { kind: 'text' as const, text: String(r.images?.[0]?.url ?? r.output?.[0]) } }) }
+      }
+      return planned
     },
   }
 })
@@ -152,12 +157,12 @@ function setup(o: {
   return { ...k, clock, falSvc: fal, repSvc: replicate }
 }
 
-const flow = (plan: keyof typeof PLANS): ApiPrompt => ({
-  '1': { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a red fox', aspect_ratio: '1:1', seed: 0, model_options: '{}', test_plan: plan } },
+const flow = (plan: keyof typeof PLANS, value = false): ApiPrompt => ({
+  '1': { class_type: 'GenerateImageNode', inputs: { model: 'flux-schnell', prompt: 'a red fox', aspect_ratio: '1:1', seed: 0, model_options: '{}', test_plan: plan, ...(value ? { test_value: true } : {}) } },
   '2': { class_type: 'Image', inputs: { image: '', export: false, images: ['1', 0], batch_index: -1 } },
 })
-const start = (k: ReturnType<typeof setup>, plan: keyof typeof PLANS = 'nb2') =>
-  k.engine.startRun({ userId: k.userId, takes: [flow(plan)], workflow: null, canvasId: null, projectUuid: null, projectName: null })
+const start = (k: ReturnType<typeof setup>, plan: keyof typeof PLANS = 'nb2', value = false) =>
+  k.engine.startRun({ userId: k.userId, takes: [flow(plan, value)], workflow: null, canvasId: null, projectUuid: null, projectName: null })
 const holds = (ledger: ReturnType<typeof createFakeLedger>) => [...ledger.holds.values()].map(h => [h.state, h.actual])
 const node = async (k: ReturnType<typeof setup>, runId: string) => (await k.store.get(runId))!.takes[0]!.nodes['1']!
 const switches = (k: ReturnType<typeof setup>) => ofType(k.seen, 'provider-switch')
@@ -358,6 +363,21 @@ describe('a job that has not started is moved to the backup', () => {
     expect(rec.outputs).toEqual(made.outputs)
     expect(k.repSvc.client.submit).toHaveBeenCalledTimes(1)
     expect(k.falSvc.client.submit).toHaveBeenCalledTimes(1)
+  })
+
+  it('files a value answered by the backup under both services’ requests too', async () => {
+    const k = setup({ hosted: false })
+    k.repSvc.script.jobs.push({ startsAt: NEVER })
+    const first = await start(k, 'fluxPro', true)
+    await k.engine.settled(first.runId)
+    const made = await node(k, first.runId)
+    expect(made.servedBy).toBe('fal')
+    expect(made.values).toEqual({ 0: { kind: 'text', text: 'https://fal.media/fal1.png' } })
+    const none = () => undefined
+    const firstFp = requestFingerprint(`replicate:${PLANS.fluxPro.first.endpoint}`, PLANS.fluxPro.first.payload, none)
+    const backupFp = requestFingerprint(PLANS.fluxPro.backup.endpoint, PLANS.fluxPro.backup.payload, none)
+    expect(await k.store.getResult(userKeyOf(null), firstFp)).toEqual({ files: [], values: made.values })
+    expect(await k.store.getResult(userKeyOf(null), backupFp)).toEqual({ files: [], values: made.values })
   })
 })
 

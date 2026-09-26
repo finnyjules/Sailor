@@ -1057,10 +1057,11 @@ export function createEngine(deps: EngineDeps) {
       if (fp && !rec.request) {
         const prior = await deps.store.getResult(userKey, fp)
         const priorFiles = prior?.files ?? []
-        if (prior && (priorFiles.length || prior.values) && (await Promise.all(priorFiles.map(f => files.exists(f)))).every(Boolean)) {
+        const priorHasValues = !!prior?.values && Object.keys(prior.values).length > 0
+        if (prior && (priorFiles.length || priorHasValues) && (await Promise.all(priorFiles.map(f => files.exists(f)))).every(Boolean)) {
           for (const f of priorFiles) await deps.metering.addOutput(run.userId, stageKey, f)
           rec.outputs = priorFiles
-          if (prior.values) rec.values = prior.values
+          if (priorHasValues) rec.values = prior.values
           rec.reused = true
           rec.status = 'done'
           rec.endedAt = deps.now()
@@ -1103,16 +1104,27 @@ export function createEngine(deps: EngineDeps) {
         limiter.release(userKey)
       }
 
+      /** Files the result for reuse; made on the backup, also under the backup's own request, so the same settings reuse it either way. */
+      const fileResult = async (entry: { files: OutputFile[]; values?: Record<number, RunnerValue> }) => {
+        if (fp) await deps.store.putResult(userKey, fp, entry).catch(e => deps.reportError(e, { site: 'runner.putResult' }))
+        const servedBy = rec.servedBy
+        if (servedBy && rec.switchedFrom && rec.payload && isReusable(rec.payload)) {
+          const backupFp = requestFingerprint(fingerprintEndpoint(servedBy, rec.endpoint!), withKeep(rec.payload, plan.keep), u => deps.handoff.hashOf(u))
+          if (backupFp !== fp) await deps.store.putResult(userKey, backupFp, entry).catch(e => deps.reportError(e, { site: 'runner.putResult' }))
+        }
+      }
       if (plan.media === 'value') {
         if (!plan.valuesOf) throw new Error('This step has no way to read its answer')
         const values = plan.valuesOf(result)
         for (const v of Object.values(values)) checkValue(v)
         rec.values = values
         rec.outputs = filesOfValues(values)
+        // Files a value names (masks, pictures, a 3D file) are the run's outputs, as the derive branch's assets are.
+        for (const f of rec.outputs) await deps.metering.addOutput(run.userId, stageKey, f)
         rec.status = 'done'
         rec.servedBy = providerOf(rec.request!)
         rec.endedAt = deps.now()
-        if (fp) await deps.store.putResult(userKey, fp, { files: rec.outputs, values }).catch(e => deps.reportError(e, { site: 'runner.putResult' }))
+        await fileResult({ files: rec.outputs, values })
         await persist(run).catch(e => deps.reportError(e, { site: 'runner.node.save', stageKey, node: id }))
         const ui = plan.uiFor(rec.outputs)
         if (ui) publish(run, ev.executed(stageKey, id, ui))
@@ -1145,12 +1157,7 @@ export function createEngine(deps: EngineDeps) {
       rec.status = 'done'
       rec.servedBy = providerOf(rec.request!)
       rec.endedAt = deps.now()
-      if (fp) await deps.store.putResult(userKey, fp, { files: saved }).catch(e => deps.reportError(e, { site: 'runner.putResult' }))
-      // Made on the backup: also filed under the backup's own request, so the same settings reuse it either way.
-      if (rec.switchedFrom && rec.payload && isReusable(rec.payload)) {
-        const backupFp = requestFingerprint(fingerprintEndpoint(rec.servedBy, rec.endpoint!), withKeep(rec.payload, plan.keep), u => deps.handoff.hashOf(u))
-        if (backupFp !== fp) await deps.store.putResult(userKey, backupFp, { files: saved }).catch(e => deps.reportError(e, { site: 'runner.putResult' }))
-      }
+      await fileResult({ files: saved })
       // The result is made, kept and billed: a failed save here must not turn
       // the node into an error. The stage's closing save writes it down again.
       await persist(run).catch(e => deps.reportError(e, { site: 'runner.node.save', stageKey, node: id }))
